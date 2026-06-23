@@ -368,18 +368,62 @@ static void id4_pipeline_region_string_release(
   }
 }
 
+static iree_status_t id4_pipeline_region_free_range_end(
+    id4_pipeline_region_free_range_t range, iree_device_size_t* out_end) {
+  if (!iree_device_size_checked_add(range.offset, range.length, out_end)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "free range length overflow");
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t id4_pipeline_region_append_free_range(
     id4_pipeline_region_builder_t* builder, iree_device_size_t offset,
     iree_device_size_t length) {
   if (length == 0) return iree_ok_status();
+  iree_device_size_t range_offset = offset;
+  iree_device_size_t range_end = 0;
+  IREE_RETURN_IF_ERROR(id4_pipeline_region_free_range_end(
+      (id4_pipeline_region_free_range_t){
+          // Byte offset into the local slab.
+          .offset = range_offset,
+          // Byte length of the reusable range.
+          .length = length,
+      },
+      &range_end));
+
+  for (iree_host_size_t i = 0; i < builder->free_range_count;) {
+    const id4_pipeline_region_free_range_t existing_range =
+        builder->free_ranges[i];
+    iree_device_size_t existing_end = 0;
+    IREE_RETURN_IF_ERROR(
+        id4_pipeline_region_free_range_end(existing_range, &existing_end));
+    if (range_end < existing_range.offset || existing_end < range_offset) {
+      ++i;
+      continue;
+    }
+    if (range_end != existing_range.offset && existing_end != range_offset) {
+      return iree_make_status(
+          IREE_STATUS_INTERNAL,
+          "free range [%" PRIu64 ", %" PRIu64
+          ") overlaps existing range [%" PRIu64 ", %" PRIu64 ")",
+          (uint64_t)range_offset, (uint64_t)range_end,
+          (uint64_t)existing_range.offset, (uint64_t)existing_end);
+    }
+    range_offset = iree_min(range_offset, existing_range.offset);
+    range_end = iree_max(range_end, existing_end);
+    id4_pipeline_region_remove_free_range(builder, i);
+  }
+
   IREE_RETURN_IF_ERROR(id4_pipeline_region_reserve_free_ranges(
       builder, builder->free_range_count + 1));
+  const iree_device_size_t coalesced_length = range_end - range_offset;
   builder->free_ranges[builder->free_range_count++] =
       (id4_pipeline_region_free_range_t){
           // Byte offset into the local slab.
-          .offset = offset,
+          .offset = range_offset,
           // Byte length of the reusable range.
-          .length = length,
+          .length = coalesced_length,
       };
   return iree_ok_status();
 }
@@ -430,10 +474,7 @@ static iree_status_t id4_pipeline_region_try_acquire_free_range(
                               "free range alignment overflow");
     }
     iree_device_size_t range_end = 0;
-    if (!iree_device_size_checked_add(range.offset, range.length, &range_end)) {
-      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "free range length overflow");
-    }
+    IREE_RETURN_IF_ERROR(id4_pipeline_region_free_range_end(range, &range_end));
     iree_device_size_t allocation_end = 0;
     if (!iree_device_size_checked_add(aligned_offset, byte_length,
                                       &allocation_end)) {

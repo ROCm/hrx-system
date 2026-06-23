@@ -209,8 +209,6 @@ static id4_pipeline_program_stage_plan_options_t MakeProgramStagePlanOptions(
   options.device_group = device_group;
   options.parameter_scope = iree_string_view_empty();
   options.alignment = 16;
-  options.parameter_slab_binding_slot = 0;
-  options.boundary_binding_slot_base = 0;
   return options;
 }
 
@@ -241,7 +239,7 @@ TEST(ProgramStage, PlansParameterFreeProgramStage) {
   iree_hal_device_group_release(device_group);
 }
 
-TEST(ProgramStage, RejectsSparseParameterFreeBindingLayout) {
+TEST(ProgramStage, PacksParameterFreeBindingsDensely) {
   iree_hal_device_group_t* device_group = CreateLocalSyncDeviceGroup();
   id4_pipeline_program_t* program = CreateSamplerProgram();
 
@@ -252,14 +250,25 @@ TEST(ProgramStage, RejectsSparseParameterFreeBindingLayout) {
       MakeStagePlanOptions(&diagnostics_sink);
   id4_pipeline_program_stage_plan_options_t options =
       MakeProgramStagePlanOptions(&stage_options, program, device_group);
-  options.boundary_binding_slot_base = 1;
 
   id4_pipeline_plan_t* plan = nullptr;
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
-                        id4_pipeline_program_stage_create_plan(
-                            &options, iree_allocator_system(), &plan));
-  EXPECT_EQ(plan, nullptr);
+  IREE_ASSERT_OK(id4_pipeline_program_stage_create_plan(
+      &options, iree_allocator_system(), &plan));
 
+  const id4_pipeline_region_plan_t* region =
+      id4_pipeline_plan_region_at(plan, 0);
+  ASSERT_NE(region, nullptr);
+  EXPECT_EQ(region->binding_capacity,
+            id4_pipeline_plan_boundary_tensor_count(plan) + 1);
+  for (iree_host_size_t i = 0;
+       i < id4_pipeline_plan_boundary_tensor_count(plan); ++i) {
+    const id4_pipeline_boundary_tensor_plan_t* boundary =
+        id4_pipeline_plan_boundary_tensor_at(plan, i);
+    ASSERT_NE(boundary, nullptr);
+    EXPECT_EQ(boundary->binding_slot, i);
+  }
+
+  id4_pipeline_plan_release(plan);
   id4_pipeline_program_release(program);
   iree_hal_device_group_release(device_group);
 }

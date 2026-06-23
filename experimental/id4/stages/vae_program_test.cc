@@ -169,7 +169,7 @@ static bool ProgramExportsTensorWithShape(
 TEST(VaeProgram, ResolvesStableDiffusionStyleFlux2Tiling) {
   const id4_vae_model_config_t* model = id4_vae_program_flux2_model_config();
   id4_vae_decode_request_config_t request = MakeExplicitRequest(
-      id4_pipeline_program_make_shape_rank4(1, 64, 64, 32), 32, 32, 0.5f);
+      id4_pipeline_program_make_shape_rank4(64, 64, 128, 1), 32, 32, 0.5f);
 
   id4_vae_decode_tiling_plan_t tiling_plan;
   IREE_ASSERT_OK(
@@ -188,7 +188,7 @@ TEST(VaeProgram, ResolvesStableDiffusionStyleFlux2Tiling) {
 TEST(VaeProgram, ResolvesMemoryBudgetTiling) {
   id4_vae_model_config_t model = MakeSmallModelConfig();
   id4_vae_decode_request_config_t request = {};
-  request.latent_shape = id4_pipeline_program_make_shape_rank4(1, 8, 8, 1);
+  request.latent_shape = id4_pipeline_program_make_shape_rank4(8, 8, 1, 1);
   request.tiling.mode = ID4_VAE_TILING_MODE_MEMORY_BUDGET;
   request.tiling.overlap = 0.0f;
   request.tiling.memory_budget = 4 * 4 * sizeof(float);
@@ -205,13 +205,13 @@ TEST(VaeProgram, ResolvesMemoryBudgetTiling) {
 TEST(VaeProgram, AuthorsDecodeBoundaryContract) {
   id4_vae_model_config_t model = MakeSmallModelConfig();
   id4_vae_decode_request_config_t request = MakeExplicitRequest(
-      id4_pipeline_program_make_shape_rank4(1, 2, 2, 1), 2, 2, 0.0f);
+      id4_pipeline_program_make_shape_rank4(2, 2, 1, 1), 2, 2, 0.0f);
   id4_vae_program_options_t options = MakeProgramOptions(model, request);
   id4_pipeline_program_t* program = CreateVaeProgram(&options);
 
   EXPECT_TRUE(ProgramExportsTensorWithShape(
       program, ID4_PIPELINE_PROGRAM_DTYPE_F32,
-      id4_pipeline_program_make_shape_rank4(1, 4, 4, 1)));
+      id4_pipeline_program_make_shape_rank4(4, 4, 1, 1)));
 
   id4_pipeline_program_release(program);
 }
@@ -220,7 +220,7 @@ TEST(VaeProgram, RejectsLatentShapeWithWrongChannelCount) {
   ProgramBuilderScope builder_scope;
   id4_vae_model_config_t model = MakeSmallModelConfig();
   id4_vae_decode_request_config_t request = MakeExplicitRequest(
-      id4_pipeline_program_make_shape_rank4(1, 2, 2, 2), 2, 2, 0.0f);
+      id4_pipeline_program_make_shape_rank4(2, 2, 2, 1), 2, 2, 0.0f);
   id4_vae_program_options_t options = MakeProgramOptions(model, request);
 
   IREE_EXPECT_STATUS_IS(
@@ -232,7 +232,7 @@ TEST(VaeProgram, RejectsTileSizeOutsideLatentShape) {
   ProgramBuilderScope builder_scope;
   id4_vae_model_config_t model = MakeSmallModelConfig();
   id4_vae_decode_request_config_t request = MakeExplicitRequest(
-      id4_pipeline_program_make_shape_rank4(1, 2, 2, 1), 3, 2, 0.0f);
+      id4_pipeline_program_make_shape_rank4(2, 2, 1, 1), 3, 2, 0.0f);
   id4_vae_program_options_t options = MakeProgramOptions(model, request);
 
   IREE_EXPECT_STATUS_IS(

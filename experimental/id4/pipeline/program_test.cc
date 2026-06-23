@@ -238,6 +238,51 @@ TEST(PipelineProgram, AuthorsProgramAndSealsImmutableCopies) {
   id4_pipeline_program_release(program);
 }
 
+TEST(PipelineProgram, AuthorsConstantTensorWithOwnedData) {
+  ProgramBuilderScope builder_scope;
+  id4_pipeline_program_builder_t* builder = builder_scope.builder();
+
+  float values[] = {1.0f, 2.0f};
+  id4_pipeline_program_tensor_t constant =
+      id4_pipeline_program_tensor_invalid();
+  id4_pipeline_program_constant_options_t constant_options = {
+      /*.structure_size=*/sizeof(constant_options),
+      /*.next=*/nullptr,
+      /*.name=*/IREE_SV("test.constant"),
+      /*.dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_F32,
+      /*.shape=*/id4_pipeline_program_make_shape_rank1(2),
+      /*.data=*/iree_make_const_byte_span(values, sizeof(values)),
+  };
+  IREE_ASSERT_OK(
+      id4_pipeline_program_constant(builder, &constant_options, &constant));
+  values[0] = 9.0f;
+
+  id4_pipeline_program_t* program = nullptr;
+  IREE_ASSERT_OK(id4_pipeline_program_builder_seal(
+      builder, iree_allocator_system(), &program));
+  builder_scope.DestroyBuilder();
+
+  ASSERT_EQ(id4_pipeline_program_tensor_count(program), 1u);
+  const id4_pipeline_program_tensor_record_t* record =
+      id4_pipeline_program_tensor_at(program, constant.ordinal);
+  ASSERT_NE(record, nullptr);
+  ExpectStringViewEqual(record->name, IREE_SV("test.constant"));
+  EXPECT_EQ(record->byte_length, sizeof(values));
+
+  ASSERT_EQ(id4_pipeline_program_operation_count(program), 1u);
+  const id4_pipeline_program_op_t* op =
+      id4_pipeline_program_operation_at(program, 0);
+  ASSERT_NE(op, nullptr);
+  ASSERT_EQ(op->kind, ID4_PIPELINE_PROGRAM_OP_KIND_CONSTANT);
+  ASSERT_EQ(op->payload.constant.data_length, sizeof(values));
+  const float* copied_values =
+      reinterpret_cast<const float*>(op->payload.constant.data);
+  EXPECT_EQ(copied_values[0], 1.0f);
+  EXPECT_EQ(copied_values[1], 2.0f);
+
+  id4_pipeline_program_release(program);
+}
+
 TEST(PipelineProgram, RejectsUninitializedReadsAndCaptures) {
   ProgramBuilderScope builder_scope;
   id4_pipeline_program_builder_t* builder = builder_scope.builder();

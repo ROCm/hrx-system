@@ -175,9 +175,7 @@ def _read_npy_tensor(path: Path) -> TensorPayload:
             f"NPY payload byte length mismatch for {path}: expected "
             f"{expected_byte_count}, found {len(data)}"
         )
-    values = tuple(
-        value[0] for value in struct.iter_unpack(str(info["struct_format"]), data)
-    )
+    values = trace_reduce.unpack_numeric_payload(dtype, data)
     return TensorPayload(dtype=dtype, shape=shape, values=values)
 
 

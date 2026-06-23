@@ -48,6 +48,14 @@ typedef enum id4_vae_tiling_mode_e {
   ID4_VAE_TILING_MODE_MEMORY_BUDGET = 4,
 } id4_vae_tiling_mode_t;
 
+// VAE implementation selected by the model configuration.
+typedef enum id4_vae_implementation_e {
+  // Direct test implementation with no model-specific latent prelude.
+  ID4_VAE_IMPLEMENTATION_DIRECT = 0,
+  // Flux2 AutoEncoderKL implementation used by Ideogram 4.
+  ID4_VAE_IMPLEMENTATION_FLUX2 = 1,
+} id4_vae_implementation_t;
+
 // Static VAE model and implementation capabilities.
 typedef struct id4_vae_model_config_t {
   // Latent-to-image scale factor along the width axis.
@@ -72,6 +80,8 @@ typedef struct id4_vae_model_config_t {
   float max_overlap;
   // Capability bits supported by this VAE implementation.
   id4_vae_capability_flags_t capabilities;
+  // Concrete VAE implementation selected by this model.
+  id4_vae_implementation_t implementation;
 } id4_vae_model_config_t;
 
 // User or model policy for resolving VAE tiling.
@@ -94,7 +104,7 @@ typedef struct id4_vae_tiling_config_t {
 
 // Dynamic VAE decode request dimensions and tiling policy.
 typedef struct id4_vae_decode_request_config_t {
-  // Latent tensor shape in row-major NHWC order.
+  // Latent tensor shape in row-major WHCB order.
   id4_pipeline_program_shape_t latent_shape;
   // Tiling policy for this decode request.
   id4_vae_tiling_config_t tiling;
@@ -161,6 +171,13 @@ iree_status_t id4_vae_program_resolve_decode_tiling(
 iree_status_t id4_vae_program_author_decode(
     const id4_vae_program_options_t* options,
     id4_pipeline_program_builder_t* builder);
+
+// Authors VAE decode from an initialized in-program latent tensor.
+iree_status_t id4_vae_program_author_decode_from_tensor(
+    const id4_vae_program_options_t* options,
+    id4_pipeline_program_tensor_t latent, iree_string_view_t decoded_image_name,
+    id4_pipeline_program_builder_t* builder,
+    id4_pipeline_program_tensor_t* out_decoded_image);
 
 // Returns the Flux2-format VAE configuration used by Ideogram 4.
 const id4_vae_model_config_t* id4_vae_program_flux2_model_config(void);

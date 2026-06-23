@@ -1,0 +1,87 @@
+config.decl @id4.vae.conv1x1_bias.width : %value: index where [range(%value, 1, 65536)]
+config.decl @id4.vae.conv1x1_bias.height : %value: index where [range(%value, 1, 65536)]
+config.decl @id4.vae.conv1x1_bias.input_channel_count : %value: index where [range(%value, 1, 4096)]
+config.decl @id4.vae.conv1x1_bias.output_channel_count : %value: index where [range(%value, 1, 4096)]
+config.decl @id4.vae.conv1x1_bias.batch_count : %value: index where [range(%value, 1, 1024)]
+config.decl @id4.vae.conv1x1_bias.output_element_count : %value: index where [range(%value, 1, 268435456)]
+
+kernel.def export("id4_vae_conv1x1_bias_f32") @id4_vae_conv1x1_bias_f32() {
+  %unit = index.constant 1 : index
+  %workgroup_size_x = index.constant 256 : index
+  %element_count = config.get @id4.vae.conv1x1_bias.output_element_count : index
+  %rounding = index.sub %workgroup_size_x, %unit : index
+  %rounded = index.add %element_count, %rounding : index
+  %workgroups_x = index.div %rounded, %workgroup_size_x : index
+  kernel.launch.config workgroups(%workgroups_x, %unit, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
+} launch(%input: buffer, %weight: buffer, %bias: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %unit = index.constant 1 : index
+  %workgroup = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %workgroup_size_x = index.constant 256 : index
+  %width = config.get @id4.vae.conv1x1_bias.width : index
+  %height = config.get @id4.vae.conv1x1_bias.height : index
+  %input_channel_count = config.get @id4.vae.conv1x1_bias.input_channel_count : index
+  %output_channel_count = config.get @id4.vae.conv1x1_bias.output_channel_count : index
+  %batch_count = config.get @id4.vae.conv1x1_bias.batch_count : index
+  %output_element_count = config.get @id4.vae.conv1x1_bias.output_element_count : index
+  %element_index = index.madd %workgroup, %workgroup_size_x, %lane : index
+  %in_bounds = index.cmp ult, %element_index, %output_element_count : index
+  %zero_f32 = scalar.constant 0.0 : f32
+
+  %input_noalias, %weight_noalias, %bias_noalias, %output_noalias = buffer.assume.noalias %input, %weight, %bias, %output : buffer, buffer, buffer, buffer
+  %input_global = buffer.assume.memory_space<global> %input_noalias : buffer
+  %weight_global = buffer.assume.memory_space<global> %weight_noalias : buffer
+  %bias_global = buffer.assume.memory_space<global> %bias_noalias : buffer
+  %output_global = buffer.assume.memory_space<global> %output_noalias : buffer
+  %input_view = buffer.view %input_global[%base] : buffer -> view<[%width]x[%height]x[%input_channel_count]x[%batch_count]xf32, #dense>
+  %weight_view = buffer.view %weight_global[%base] : buffer -> view<[%output_channel_count]x[%input_channel_count]xf32, #dense>
+  %bias_view = buffer.view %bias_global[%base] : buffer -> view<[%output_channel_count]xf32, #dense>
+  %output_view = buffer.view %output_global[%base] : buffer -> view<[%width]x[%height]x[%output_channel_count]x[%batch_count]xf32, #dense>
+
+  scf.if %in_bounds {
+    %x = index.rem %element_index, %width : index
+    %row = index.div %element_index, %width : index
+    %y = index.rem %row, %height : index
+    %plane = index.div %row, %height : index
+    %output_channel = index.rem %plane, %output_channel_count : index
+    %batch = index.div %plane, %output_channel_count : index
+    %dot = scf.for %input_channel = [%zero to %input_channel_count step %unit](%acc = %zero_f32 : f32) -> (f32) {
+      %input_value = view.load %input_view[%x, %y, %input_channel, %batch] : view<[%width]x[%height]x[%input_channel_count]x[%batch_count]xf32, #dense> -> f32
+      %weight_value = view.load %weight_view[%output_channel, %input_channel] : view<[%output_channel_count]x[%input_channel_count]xf32, #dense> -> f32
+      %product = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %input_value, %weight_value : f32
+      %next = scalar.addf<reassoc|nnan|ninf|nsz> %acc, %product : f32
+      scf.yield %next : f32
+    }
+    %bias_value = view.load %bias_view[%output_channel] : view<[%output_channel_count]xf32, #dense> -> f32
+    %value = scalar.addf<reassoc|nnan|ninf|nsz> %dot, %bias_value : f32
+    view.store %value, %output_view[%x, %y, %output_channel, %batch] : f32, view<[%width]x[%height]x[%output_channel_count]x[%batch_count]xf32, #dense>
+  }
+  kernel.return
+}
+
+check.case public @id4_vae_conv1x1_bias_f32_small_case {
+  %input = check.generate.fill value(1.0) : tensor<2x1x2x1xf32>
+  %weight = check.generate.fill value(1.0) : tensor<2x2xf32>
+  %bias = check.generate.fill value(1.0) : tensor<2xf32>
+  %output = check.generate.fill value(0.0) : tensor<2x1x2x1xf32>
+  %expected = check.generate.fill value(3.0) : tensor<2x1x2x1xf32>
+  func.call @id4_vae_conv1x1_bias_f32(%input, %weight, %bias, %output) : (tensor<2x1x2x1xf32>, tensor<2x2xf32>, tensor<2xf32>, tensor<2x1x2x1xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2x1x2x1xf32>
+  check.return
+}
+
+check.case public @id4_vae_conv1x1_bias_f32_flux2_post_quant_shape_case {
+  %input = check.generate.fill value(1.0) : tensor<128x128x32x1xf32>
+  %weight = check.generate.fill value(0.0) : tensor<32x32xf32>
+  %bias = check.generate.fill value(0.0) : tensor<32xf32>
+  %output = check.generate.fill value(1.0) : tensor<128x128x32x1xf32>
+  %expected = check.generate.fill value(0.0) : tensor<128x128x32x1xf32>
+  func.call @id4_vae_conv1x1_bias_f32(%input, %weight, %bias, %output) : (tensor<128x128x32x1xf32>, tensor<32x32xf32>, tensor<32xf32>, tensor<128x128x32x1xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<128x128x32x1xf32>
+  check.return
+}
+
+check.benchmark<@id4_vae_conv1x1_bias_f32_small_case> @id4_vae_conv1x1_bias_f32_small
+check.benchmark<@id4_vae_conv1x1_bias_f32_flux2_post_quant_shape_case> @id4_vae_conv1x1_bias_f32_flux2_post_quant_shape

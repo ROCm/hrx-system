@@ -500,6 +500,30 @@ static iree_status_t id4_pipeline_program_region_lower_parameter(
                                                   region_tensor);
 }
 
+static iree_status_t id4_pipeline_program_region_lower_constant(
+    id4_pipeline_program_region_context_t* context,
+    const id4_pipeline_program_constant_op_t* constant_op,
+    iree_host_size_t constant_ordinal) {
+  if (!context->options->resolve_constant) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "program region constant resolver is required");
+  }
+  const id4_pipeline_program_tensor_record_t* tensor = NULL;
+  IREE_RETURN_IF_ERROR(id4_pipeline_program_region_tensor_at(
+      context->options->program, constant_op->tensor, &tensor));
+  id4_pipeline_tensor_import_t import;
+  memset(&import, 0, sizeof(import));
+  IREE_RETURN_IF_ERROR(context->options->resolve_constant(
+      context->options->user_data, constant_op, tensor, constant_ordinal,
+      &import));
+  id4_pipeline_tensor_t region_tensor =
+      id4_pipeline_program_region_invalid_tensor();
+  IREE_RETURN_IF_ERROR(id4_pipeline_region_import_tensor(
+      context->options->builder, &import, &region_tensor));
+  return id4_pipeline_program_region_store_tensor(context, constant_op->tensor,
+                                                  region_tensor);
+}
+
 static iree_status_t id4_pipeline_program_region_lower_acquire(
     id4_pipeline_program_region_context_t* context,
     const id4_pipeline_program_acquire_op_t* acquire_op) {
@@ -740,6 +764,7 @@ iree_status_t id4_pipeline_program_region_lower(
 
   iree_host_size_t import_ordinal = 0;
   iree_host_size_t parameter_ordinal = 0;
+  iree_host_size_t constant_ordinal = 0;
   iree_host_size_t dispatch_ordinal = 0;
   iree_host_size_t tap_ordinal = 0;
   const iree_host_size_t operation_count =
@@ -757,6 +782,10 @@ iree_status_t id4_pipeline_program_region_lower(
       case ID4_PIPELINE_PROGRAM_OP_KIND_PARAMETER:
         status = id4_pipeline_program_region_lower_parameter(
             &context, &op->payload.parameter, parameter_ordinal++);
+        break;
+      case ID4_PIPELINE_PROGRAM_OP_KIND_CONSTANT:
+        status = id4_pipeline_program_region_lower_constant(
+            &context, &op->payload.constant, constant_ordinal++);
         break;
       case ID4_PIPELINE_PROGRAM_OP_KIND_ACQUIRE:
         status = id4_pipeline_program_region_lower_acquire(

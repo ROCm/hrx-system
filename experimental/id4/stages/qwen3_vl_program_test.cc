@@ -149,6 +149,16 @@ static id4_pipeline_program_plan_options_t MakePlanOptions(
       /*.parameter_slab_alignment=*/16,
       // Per-request alignment for packed parameters.
       /*.parameter_request_alignment=*/16,
+      // Placement for the packed constant slab.
+      /*.constant_slab_placement_id=*/0,
+      // Binding table slot for the packed constant slab.
+      /*.constant_slab_binding_slot=*/2,
+      // HAL buffer parameters for the constant slab.
+      /*.constant_slab_target_params=*/parameter_params,
+      // Base alignment for the packed constant slab.
+      /*.constant_slab_alignment=*/16,
+      // Per-request alignment for packed constants.
+      /*.constant_request_alignment=*/16,
       // Placement for kernels.
       /*.kernel_placement_id=*/0,
       // Placement for the executable region.

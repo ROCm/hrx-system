@@ -173,6 +173,7 @@ static iree_status_t PrepareQwenBundle(QwenBenchmarkContext* context,
   prepare_options.kernel_library = context->kernel_library.get();
   prepare_options.wait_semaphore_list = iree_hal_semaphore_list_empty();
   prepare_options.signal_semaphore_list = signal.list();
+  prepare_options.command_buffer_mode = context->live.command_buffer_mode;
   prepare_options.diagnostics_sink = &context->diagnostics_sink;
   return id4_pipeline_stage_prepare(context->stage.get(), plan,
                                     &prepare_options, out_bundle);

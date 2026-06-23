@@ -1,0 +1,193 @@
+config.decl @id4.ideogram4.qkv_norm_rotary.token_count : %value: index where [range(%value, 1, 131072)]
+config.decl @id4.ideogram4.qkv_norm_rotary.attention_head_count : %value: index where [range(%value, 1, 1024)]
+config.decl @id4.ideogram4.qkv_norm_rotary.head_size : %value: index where [range(%value, 2, 1024)]
+
+kernel.def export("id4_ideogram4_qkv_norm_rotary_f32") @id4_ideogram4_qkv_norm_rotary_f32() {
+  %unit = index.constant 1 : index
+  %workgroup_size_x = index.constant 256 : index
+  %token_count = config.get @id4.ideogram4.qkv_norm_rotary.token_count : index
+  %attention_head_count = config.get @id4.ideogram4.qkv_norm_rotary.attention_head_count : index
+  kernel.launch.config workgroups(%token_count, %attention_head_count, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
+} launch(%qkv: buffer, %norm_q_weight: buffer, %norm_k_weight: buffer, %position_embedding: buffer, %rotated_query: buffer, %rotated_key: buffer, %value: buffer) {
+  %base = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %two = index.constant 2 : index
+  %three = index.constant 3 : index
+  %workgroup_size_x = index.constant 256 : index
+  %token = kernel.workgroup.id<x> : index
+  %head = kernel.workgroup.id<y> : index
+  %lane = kernel.workitem.id<x> : index
+  %token_count = config.get @id4.ideogram4.qkv_norm_rotary.token_count : index
+  %attention_head_count = config.get @id4.ideogram4.qkv_norm_rotary.attention_head_count : index
+  %head_size = config.get @id4.ideogram4.qkv_norm_rotary.head_size : index
+  %half_size = index.div %head_size, %two : index
+  %hidden_size = index.mul %attention_head_count, %head_size : index
+  %qkv_size = index.mul %hidden_size, %three : index
+  %head_base = index.mul %head, %head_size : index
+  %upper_base = index.add %head_base, %half_size : index
+  %key_base = index.add %hidden_size, %head_base : index
+  %value_base = index.mul %hidden_size, %two : index
+  %head_size_i32 = index.cast %head_size : index to i32
+  %head_size_f32 = scalar.sitofp %head_size_i32 : i32 to f32
+  %zero_f32 = scalar.constant 0.0 : f32
+  %epsilon = scalar.constant 0.00001 : f32
+  %kv_scale = scalar.constant 0.0078125 : f32
+  %kv_inverse_scale = scalar.constant 128.0 : f32
+
+  %qkv_noalias, %norm_q_weight_noalias, %norm_k_weight_noalias, %position_embedding_noalias, %rotated_query_noalias, %rotated_key_noalias, %value_noalias = buffer.assume.noalias %qkv, %norm_q_weight, %norm_k_weight, %position_embedding, %rotated_query, %rotated_key, %value : buffer, buffer, buffer, buffer, buffer, buffer, buffer
+  %qkv_global = buffer.assume.memory_space<global> %qkv_noalias : buffer
+  %norm_q_weight_global = buffer.assume.memory_space<global> %norm_q_weight_noalias : buffer
+  %norm_k_weight_global = buffer.assume.memory_space<global> %norm_k_weight_noalias : buffer
+  %position_embedding_global = buffer.assume.memory_space<global> %position_embedding_noalias : buffer
+  %rotated_query_global = buffer.assume.memory_space<global> %rotated_query_noalias : buffer
+  %rotated_key_global = buffer.assume.memory_space<global> %rotated_key_noalias : buffer
+  %value_global = buffer.assume.memory_space<global> %value_noalias : buffer
+  %qkv_view = buffer.view %qkv_global[%base] : buffer -> view<[%qkv_size]x[%token_count]xf32, #dense>
+  %norm_q_weight_view = buffer.view %norm_q_weight_global[%base] : buffer -> view<[%head_size]xbf16, #dense>
+  %norm_k_weight_view = buffer.view %norm_k_weight_global[%base] : buffer -> view<[%head_size]xbf16, #dense>
+  %position_embedding_view = buffer.view %position_embedding_global[%base] : buffer -> view<2x2x[%half_size]x[%token_count]xf32, #dense>
+  %rotated_query_view = buffer.view %rotated_query_global[%base] : buffer -> view<[%token_count]x[%hidden_size]xf32, #dense>
+  %rotated_key_view = buffer.view %rotated_key_global[%base] : buffer -> view<[%token_count]x[%hidden_size]xf16, #dense>
+  %value_view = buffer.view %value_global[%base] : buffer -> view<[%token_count]x[%hidden_size]xf16, #dense>
+
+  %query_lane_square_sum = scf.for %head_channel = [%lane to %head_size step %workgroup_size_x](%acc = %zero_f32 : f32) -> (f32) {
+    %channel = index.add %head_base, %head_channel : index
+    %query_value = view.load %qkv_view[%channel, %token] : view<[%qkv_size]x[%token_count]xf32, #dense> -> f32
+    %query_square = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %query_value, %query_value : f32
+    %next = scalar.addf<reassoc|nnan|ninf|nsz> %acc, %query_square : f32
+    scf.yield %next : f32
+  }
+  %key_lane_square_sum = scf.for %head_channel = [%lane to %head_size step %workgroup_size_x](%acc = %zero_f32 : f32) -> (f32) {
+    %key_row = index.add %key_base, %head_channel : index
+    %key_value = view.load %qkv_view[%key_row, %token] : view<[%qkv_size]x[%token_count]xf32, #dense> -> f32
+    %key_square = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %key_value, %key_value : f32
+    %next = scalar.addf<reassoc|nnan|ninf|nsz> %acc, %key_square : f32
+    scf.yield %next : f32
+  }
+  %query_square_sum = kernel.workgroup.reduce<addf> %query_lane_square_sum : f32
+  %key_square_sum = kernel.workgroup.reduce<addf> %key_lane_square_sum : f32
+  %query_mean_square = scalar.divf<nnan|ninf|nsz|arcp> %query_square_sum, %head_size_f32 : f32
+  %key_mean_square = scalar.divf<nnan|ninf|nsz|arcp> %key_square_sum, %head_size_f32 : f32
+  %query_mean_square_epsilon = scalar.addf<nnan|ninf|nsz> %query_mean_square, %epsilon : f32
+  %key_mean_square_epsilon = scalar.addf<nnan|ninf|nsz> %key_mean_square, %epsilon : f32
+  %query_row_scale = scalar.rsqrtf<nnan|ninf|nsz|afn> %query_mean_square_epsilon : f32
+  %key_row_scale = scalar.rsqrtf<nnan|ninf|nsz|afn> %key_mean_square_epsilon : f32
+
+  scf.for %half_channel = [%lane to %half_size step %workgroup_size_x] {
+    %upper_head_channel = index.add %half_channel, %half_size : index
+    %lower_channel = index.add %head_base, %half_channel : index
+    %upper_channel = index.add %upper_base, %half_channel : index
+    %key_lower_row = index.add %key_base, %half_channel : index
+    %key_upper_row = index.add %key_base, %upper_head_channel : index
+    %value_lower_row = index.add %value_base, %lower_channel : index
+    %value_upper_row = index.add %value_base, %upper_channel : index
+    %cos0 = view.load %position_embedding_view[%zero, %zero, %half_channel, %token] : view<2x2x[%half_size]x[%token_count]xf32, #dense> -> f32
+    %negative_sin = view.load %position_embedding_view[%one, %zero, %half_channel, %token] : view<2x2x[%half_size]x[%token_count]xf32, #dense> -> f32
+    %sin = view.load %position_embedding_view[%zero, %one, %half_channel, %token] : view<2x2x[%half_size]x[%token_count]xf32, #dense> -> f32
+    %cos1 = view.load %position_embedding_view[%one, %one, %half_channel, %token] : view<2x2x[%half_size]x[%token_count]xf32, #dense> -> f32
+
+    %query_lower_raw = view.load %qkv_view[%lower_channel, %token] : view<[%qkv_size]x[%token_count]xf32, #dense> -> f32
+    %query_upper_raw = view.load %qkv_view[%upper_channel, %token] : view<[%qkv_size]x[%token_count]xf32, #dense> -> f32
+    %query_lower_weight_bf16 = view.load %norm_q_weight_view[%half_channel] : view<[%head_size]xbf16, #dense> -> bf16
+    %query_upper_weight_bf16 = view.load %norm_q_weight_view[%upper_head_channel] : view<[%head_size]xbf16, #dense> -> bf16
+    %query_lower_weight = scalar.extf %query_lower_weight_bf16 : bf16 to f32
+    %query_upper_weight = scalar.extf %query_upper_weight_bf16 : bf16 to f32
+    %query_lower_scaled = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %query_lower_raw, %query_row_scale : f32
+    %query_upper_scaled = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %query_upper_raw, %query_row_scale : f32
+    %query_lower = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %query_lower_scaled, %query_lower_weight : f32
+    %query_upper = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %query_upper_scaled, %query_upper_weight : f32
+    %query_lower_cos = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %query_lower, %cos0 : f32
+    %query_upper_neg_sin = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %query_upper, %negative_sin : f32
+    %rotated_query_lower = scalar.addf<reassoc|nnan|ninf|nsz> %query_lower_cos, %query_upper_neg_sin : f32
+    %query_lower_sin = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %query_lower, %sin : f32
+    %query_upper_cos = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %query_upper, %cos1 : f32
+    %rotated_query_upper = scalar.addf<reassoc|nnan|ninf|nsz> %query_lower_sin, %query_upper_cos : f32
+    view.store %rotated_query_lower, %rotated_query_view[%token, %lower_channel] : f32, view<[%token_count]x[%hidden_size]xf32, #dense>
+    view.store %rotated_query_upper, %rotated_query_view[%token, %upper_channel] : f32, view<[%token_count]x[%hidden_size]xf32, #dense>
+
+    %key_lower_raw = view.load %qkv_view[%key_lower_row, %token] : view<[%qkv_size]x[%token_count]xf32, #dense> -> f32
+    %key_upper_raw = view.load %qkv_view[%key_upper_row, %token] : view<[%qkv_size]x[%token_count]xf32, #dense> -> f32
+    %key_lower_weight_bf16 = view.load %norm_k_weight_view[%half_channel] : view<[%head_size]xbf16, #dense> -> bf16
+    %key_upper_weight_bf16 = view.load %norm_k_weight_view[%upper_head_channel] : view<[%head_size]xbf16, #dense> -> bf16
+    %key_lower_weight = scalar.extf %key_lower_weight_bf16 : bf16 to f32
+    %key_upper_weight = scalar.extf %key_upper_weight_bf16 : bf16 to f32
+    %key_lower_scaled = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %key_lower_raw, %key_row_scale : f32
+    %key_upper_scaled = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %key_upper_raw, %key_row_scale : f32
+    %key_lower = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %key_lower_scaled, %key_lower_weight : f32
+    %key_upper = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %key_upper_scaled, %key_upper_weight : f32
+    %key_lower_cos = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %key_lower, %cos0 : f32
+    %key_upper_neg_sin = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %key_upper, %negative_sin : f32
+    %rotated_key_lower = scalar.addf<reassoc|nnan|ninf|nsz> %key_lower_cos, %key_upper_neg_sin : f32
+    %key_lower_sin = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %key_lower, %sin : f32
+    %key_upper_cos = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %key_upper, %cos1 : f32
+    %rotated_key_upper = scalar.addf<reassoc|nnan|ninf|nsz> %key_lower_sin, %key_upper_cos : f32
+    %scaled_rotated_key_lower = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %rotated_key_lower, %kv_scale : f32
+    %scaled_rotated_key_lower_f16 = scalar.fptrunc %scaled_rotated_key_lower : f32 to f16
+    %scaled_rotated_key_lower_f32 = scalar.extf %scaled_rotated_key_lower_f16 : f16 to f32
+    %rounded_rotated_key_lower = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %scaled_rotated_key_lower_f32, %kv_inverse_scale : f32
+    %rounded_rotated_key_lower_f16 = scalar.fptrunc %rounded_rotated_key_lower : f32 to f16
+    %scaled_rotated_key_upper = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %rotated_key_upper, %kv_scale : f32
+    %scaled_rotated_key_upper_f16 = scalar.fptrunc %scaled_rotated_key_upper : f32 to f16
+    %scaled_rotated_key_upper_f32 = scalar.extf %scaled_rotated_key_upper_f16 : f16 to f32
+    %rounded_rotated_key_upper = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %scaled_rotated_key_upper_f32, %kv_inverse_scale : f32
+    %rounded_rotated_key_upper_f16 = scalar.fptrunc %rounded_rotated_key_upper : f32 to f16
+    view.store %rounded_rotated_key_lower_f16, %rotated_key_view[%token, %lower_channel] : f16, view<[%token_count]x[%hidden_size]xf16, #dense>
+    view.store %rounded_rotated_key_upper_f16, %rotated_key_view[%token, %upper_channel] : f16, view<[%token_count]x[%hidden_size]xf16, #dense>
+
+    %value_lower = view.load %qkv_view[%value_lower_row, %token] : view<[%qkv_size]x[%token_count]xf32, #dense> -> f32
+    %value_upper = view.load %qkv_view[%value_upper_row, %token] : view<[%qkv_size]x[%token_count]xf32, #dense> -> f32
+    %scaled_value_lower = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %value_lower, %kv_scale : f32
+    %scaled_value_lower_f16 = scalar.fptrunc %scaled_value_lower : f32 to f16
+    %scaled_value_lower_f32 = scalar.extf %scaled_value_lower_f16 : f16 to f32
+    %rounded_value_lower = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %scaled_value_lower_f32, %kv_inverse_scale : f32
+    %rounded_value_lower_f16 = scalar.fptrunc %rounded_value_lower : f32 to f16
+    %scaled_value_upper = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %value_upper, %kv_scale : f32
+    %scaled_value_upper_f16 = scalar.fptrunc %scaled_value_upper : f32 to f16
+    %scaled_value_upper_f32 = scalar.extf %scaled_value_upper_f16 : f16 to f32
+    %rounded_value_upper = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %scaled_value_upper_f32, %kv_inverse_scale : f32
+    %rounded_value_upper_f16 = scalar.fptrunc %rounded_value_upper : f32 to f16
+    view.store %rounded_value_lower_f16, %value_view[%token, %lower_channel] : f16, view<[%token_count]x[%hidden_size]xf16, #dense>
+    view.store %rounded_value_upper_f16, %value_view[%token, %upper_channel] : f16, view<[%token_count]x[%hidden_size]xf16, #dense>
+  }
+  kernel.return
+}
+
+check.case public @id4_ideogram4_qkv_norm_rotary_f32_small_case {
+  %qkv = check.generate.iota offset(1.0) step(1.0) : tensor<6x1xf32>
+  %norm_q_weight = check.generate.fill value(1.0) : tensor<2xbf16>
+  %norm_k_weight = check.generate.fill value(1.0) : tensor<2xbf16>
+  %position_embedding = check.generate.fill value(1.0) : tensor<2x2x1x1xf32>
+  %rotated_query = check.generate.fill value(0.0) : tensor<1x2xf32>
+  %rotated_key = check.generate.fill value(0.0) : tensor<1x2xf16>
+  %value = check.generate.fill value(0.0) : tensor<1x2xf16>
+  %expected_query = check.generate.fill value(1.89736) : tensor<1x2xf32>
+  %expected_key = check.generate.fill value(1.97949) : tensor<1x2xf16>
+  %expected_value = check.generate.iota offset(5.0) step(1.0) : tensor<1x2xf16>
+  func.call @id4_ideogram4_qkv_norm_rotary_f32(%qkv, %norm_q_weight, %norm_k_weight, %position_embedding, %rotated_query, %rotated_key, %value) : (tensor<6x1xf32>, tensor<2xbf16>, tensor<2xbf16>, tensor<2x2x1x1xf32>, tensor<1x2xf32>, tensor<1x2xf16>, tensor<1x2xf16>)
+  check.expect.close actual(%rotated_query) expected(%expected_query) atol(0.0001) rtol(0.0001) nan(same) : tensor<1x2xf32>
+  check.expect.close actual(%rotated_key) expected(%expected_key) atol(0.0001) rtol(0.0001) nan(same) : tensor<1x2xf16>
+  check.expect.close actual(%value) expected(%expected_value) atol(0.0) rtol(0.0) nan(same) : tensor<1x2xf16>
+  check.return
+}
+
+check.case public @id4_ideogram4_qkv_norm_rotary_f32_ideogram_shape_case {
+  %qkv = check.generate.fill value(2.0) : tensor<13824x2xf32>
+  %norm_q_weight = check.generate.fill value(1.0) : tensor<256xbf16>
+  %norm_k_weight = check.generate.fill value(1.0) : tensor<256xbf16>
+  %position_embedding = check.generate.fill value(1.0) : tensor<2x2x128x2xf32>
+  %rotated_query = check.generate.fill value(0.0) : tensor<2x4608xf32>
+  %rotated_key = check.generate.fill value(0.0) : tensor<2x4608xf16>
+  %value = check.generate.fill value(0.0) : tensor<2x4608xf16>
+  %expected_rotated = check.generate.fill value(2.0) : tensor<2x4608xf32>
+  %expected_key = check.generate.fill value(2.0) : tensor<2x4608xf16>
+  %expected_value = check.generate.fill value(2.0) : tensor<2x4608xf16>
+  func.call @id4_ideogram4_qkv_norm_rotary_f32(%qkv, %norm_q_weight, %norm_k_weight, %position_embedding, %rotated_query, %rotated_key, %value) : (tensor<13824x2xf32>, tensor<256xbf16>, tensor<256xbf16>, tensor<2x2x128x2xf32>, tensor<2x4608xf32>, tensor<2x4608xf16>, tensor<2x4608xf16>)
+  check.expect.close actual(%rotated_query) expected(%expected_rotated) atol(0.00005) rtol(0.00005) nan(same) : tensor<2x4608xf32>
+  check.expect.close actual(%rotated_key) expected(%expected_key) atol(0.00005) rtol(0.00005) nan(same) : tensor<2x4608xf16>
+  check.expect.close actual(%value) expected(%expected_value) atol(0.0) rtol(0.0) nan(same) : tensor<2x4608xf16>
+  check.return
+}
+
+check.benchmark<@id4_ideogram4_qkv_norm_rotary_f32_small_case> @id4_ideogram4_qkv_norm_rotary_f32_small
+check.benchmark<@id4_ideogram4_qkv_norm_rotary_f32_ideogram_shape_case> @id4_ideogram4_qkv_norm_rotary_f32_ideogram_shape

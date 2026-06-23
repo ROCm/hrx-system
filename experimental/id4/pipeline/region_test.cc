@@ -203,6 +203,68 @@ TEST_F(RegionBuilderTest, AcquireReleaseReusesOnlyAfterEpochAdvance) {
   id4_pipeline_region_builder_destroy(builder);
 }
 
+TEST_F(RegionBuilderTest, ReleasedAdjacentRangesCoalesce) {
+  id4_pipeline_region_builder_t* builder = CreateDryBuilder();
+  id4_pipeline_tensor_layout_t wide_layout =
+      MakeTensorLayout(IREE_SV("wide"), 192);
+  id4_pipeline_tensor_layout_t split_a_layout =
+      MakeTensorLayout(IREE_SV("split_a"), 64);
+  id4_pipeline_tensor_layout_t split_b_layout =
+      MakeTensorLayout(IREE_SV("split_b"), 64);
+  id4_pipeline_tensor_layout_t split_c_layout =
+      MakeTensorLayout(IREE_SV("split_c"), 64);
+
+  id4_pipeline_tensor_t wide_tensor;
+  IREE_ASSERT_OK(
+      id4_pipeline_region_acquire_tensor(builder, &wide_layout, &wide_tensor));
+  EXPECT_EQ(wide_tensor.offset, 0u);
+  IREE_ASSERT_OK(id4_pipeline_region_release_tensor(builder, wide_tensor));
+  IREE_ASSERT_OK(id4_pipeline_region_barrier(
+      builder, IREE_HAL_EXECUTION_STAGE_DISPATCH,
+      IREE_HAL_EXECUTION_STAGE_DISPATCH, IREE_HAL_EXECUTION_BARRIER_FLAG_NONE,
+      /*memory_barrier_count=*/0, /*memory_barriers=*/nullptr,
+      /*buffer_barrier_count=*/0, /*buffer_barriers=*/nullptr));
+
+  id4_pipeline_tensor_t split_a_tensor;
+  IREE_ASSERT_OK(id4_pipeline_region_acquire_tensor(builder, &split_a_layout,
+                                                    &split_a_tensor));
+  EXPECT_EQ(split_a_tensor.offset, 0u);
+
+  id4_pipeline_tensor_t split_b_tensor;
+  IREE_ASSERT_OK(id4_pipeline_region_acquire_tensor(builder, &split_b_layout,
+                                                    &split_b_tensor));
+  EXPECT_EQ(split_b_tensor.offset, 64u);
+
+  id4_pipeline_tensor_t split_c_tensor;
+  IREE_ASSERT_OK(id4_pipeline_region_acquire_tensor(builder, &split_c_layout,
+                                                    &split_c_tensor));
+  EXPECT_EQ(split_c_tensor.offset, 128u);
+
+  IREE_ASSERT_OK(id4_pipeline_region_release_tensor(builder, split_a_tensor));
+  IREE_ASSERT_OK(id4_pipeline_region_release_tensor(builder, split_b_tensor));
+  IREE_ASSERT_OK(id4_pipeline_region_release_tensor(builder, split_c_tensor));
+  IREE_ASSERT_OK(id4_pipeline_region_barrier(
+      builder, IREE_HAL_EXECUTION_STAGE_DISPATCH,
+      IREE_HAL_EXECUTION_STAGE_DISPATCH, IREE_HAL_EXECUTION_BARRIER_FLAG_NONE,
+      /*memory_barrier_count=*/0, /*memory_barriers=*/nullptr,
+      /*buffer_barrier_count=*/0, /*buffer_barriers=*/nullptr));
+
+  id4_pipeline_tensor_t wide_reused_tensor;
+  IREE_ASSERT_OK(id4_pipeline_region_acquire_tensor(builder, &wide_layout,
+                                                    &wide_reused_tensor));
+  EXPECT_EQ(wide_reused_tensor.offset, 0u);
+
+  id4_pipeline_region_statistics_t statistics;
+  id4_pipeline_region_builder_statistics(builder, &statistics);
+  EXPECT_EQ(statistics.local_acquire_count, 5u);
+  EXPECT_EQ(statistics.local_release_count, 4u);
+  EXPECT_EQ(statistics.local_reuse_count, 4u);
+  EXPECT_EQ(statistics.local_slab_byte_length, 192u);
+  EXPECT_EQ(statistics.local_slab_high_water_mark, 192u);
+
+  id4_pipeline_region_builder_destroy(builder);
+}
+
 TEST_F(RegionBuilderTest, DisableReuseKeepsBumpAllocatingAfterBarrier) {
   id4_pipeline_region_builder_t* builder =
       CreateDryBuilder(ID4_PIPELINE_REGION_BUILDER_FLAG_DISABLE_LOCAL_REUSE);

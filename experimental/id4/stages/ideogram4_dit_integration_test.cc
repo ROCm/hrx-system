@@ -76,6 +76,39 @@ static iree_string_view_t FixtureTensorRole(
   return iree_make_string_view(tensor.role.data(), tensor.role.size());
 }
 
+static bool ExpectedTapMatchesRequestExtent(
+    const id4::test::FixtureTensor& tensor,
+    const id4_ideogram4_dit_request_config_t& request) {
+  const iree_string_view_t tensor_name = FixtureTensorName(tensor);
+  if (!iree_string_view_ends_with(tensor_name, IREE_SV(".output.velocity"))) {
+    return true;
+  }
+  const id4_pipeline_program_shape_t latent_shape = request.latent_shape;
+  return tensor.source_shape.rank == 3 && latent_shape.rank == 4 &&
+         tensor.source_shape.dims[0] == latent_shape.dims[0] &&
+         tensor.source_shape.dims[1] == latent_shape.dims[1] &&
+         tensor.source_shape.dims[2] == latent_shape.dims[2];
+}
+
+static iree_status_t FindDiagnosticTapPlan(
+    const id4_pipeline_plan_t* plan, iree_string_view_t name,
+    const id4_pipeline_diagnostic_tap_plan_t** out_diagnostic_tap) {
+  *out_diagnostic_tap = nullptr;
+  const iree_host_size_t diagnostic_tap_count =
+      id4_pipeline_plan_diagnostic_tap_count(plan);
+  for (iree_host_size_t i = 0; i < diagnostic_tap_count; ++i) {
+    const id4_pipeline_diagnostic_tap_plan_t* diagnostic_tap =
+        id4_pipeline_plan_diagnostic_tap_at(plan, i);
+    if (diagnostic_tap && iree_string_view_equal(diagnostic_tap->name, name)) {
+      *out_diagnostic_tap = diagnostic_tap;
+      return iree_ok_status();
+    }
+  }
+  return iree_make_status(IREE_STATUS_NOT_FOUND,
+                          "diagnostic tap `%.*s` not found",
+                          static_cast<int>(name.size), name.data);
+}
+
 static iree_status_t MakeProgramShape(
     id4_pipeline_tensor_shape_t tensor_shape,
     id4_pipeline_program_shape_t* out_program_shape) {
@@ -146,6 +179,7 @@ static iree_status_t CompareExpectedDiagnosticTaps(
     const id4_pipeline_plan_t* plan,
     const id4::test::BufferBindingSet& diagnostic_tap_bindings,
     const id4::test::FixtureTensorSet& fixture_tensors,
+    const id4_ideogram4_dit_request_config_t& request,
     iree_hal_semaphore_list_t wait_list) {
   iree_host_size_t expected_count = 0;
   for (const id4::test::FixtureTensor& tensor : fixture_tensors.tensors) {
@@ -153,12 +187,17 @@ static iree_status_t CompareExpectedDiagnosticTaps(
                                 IREE_SV("expected"))) {
       continue;
     }
+    if (!ExpectedTapMatchesRequestExtent(tensor, request)) continue;
     ++expected_count;
     iree_hal_buffer_binding_t binding = {};
+    const id4_pipeline_diagnostic_tap_plan_t* diagnostic_tap = nullptr;
+    IREE_RETURN_IF_ERROR(FindDiagnosticTapPlan(plan, FixtureTensorName(tensor),
+                                               &diagnostic_tap));
     IREE_RETURN_IF_ERROR(id4::test::FindDiagnosticTapBinding(
         plan, diagnostic_tap_bindings, FixtureTensorName(tensor), &binding));
-    IREE_RETURN_IF_ERROR(id4::test::CompareF32BindingWithFixtureTensor(
-        device, queue_affinity, &binding, wait_list, tensor));
+    IREE_RETURN_IF_ERROR(id4::test::CompareBindingWithFixtureTensor(
+        device, queue_affinity, &binding, wait_list, &diagnostic_tap->layout,
+        tensor));
   }
   if (expected_count == 0) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
@@ -254,7 +293,8 @@ TEST(Ideogram4DitStageIntegration, PrepareAndIssueForwardPreludeFixture) {
   std::vector<iree_string_view_t> diagnostic_tap_names;
   for (const id4::test::FixtureTensor& tensor : fixture_tensors.tensors) {
     if (iree_string_view_equal(FixtureTensorRole(tensor),
-                               IREE_SV("expected"))) {
+                               IREE_SV("expected")) &&
+        ExpectedTapMatchesRequestExtent(tensor, request)) {
       diagnostic_tap_names.push_back(FixtureTensorName(tensor));
     }
   }
@@ -387,7 +427,7 @@ TEST(Ideogram4DitStageIntegration, PrepareAndIssueForwardPreludeFixture) {
   }
   IREE_ASSERT_OK(CompareExpectedDiagnosticTaps(
       context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, plan.get(),
-      diagnostic_tap_bindings, fixture_tensors, read_wait.list()));
+      diagnostic_tap_bindings, fixture_tensors, request, read_wait.list()));
   IREE_ASSERT_OK(VerifyExportedBoundariesWereWritten(
       context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, plan.get(),
       boundary_bindings, read_wait.list()));

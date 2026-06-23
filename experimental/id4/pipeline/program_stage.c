@@ -19,11 +19,19 @@ typedef struct id4_pipeline_program_stage_counts_t {
   iree_host_size_t import_count;
   // Number of parameter operations in the program.
   iree_host_size_t parameter_count;
+  // Number of program-owned constant operations in the program.
+  iree_host_size_t constant_count;
   // Number of diagnostic tap operations in the program.
   iree_host_size_t tap_count;
 } id4_pipeline_program_stage_counts_t;
 
 typedef struct id4_pipeline_program_stage_binding_layout_t {
+  // Binding-table slot reserved for the packed parameter slab when present.
+  uint32_t parameter_slab_binding_slot;
+  // Binding-table slot reserved for the packed constant slab when present.
+  uint32_t constant_slab_binding_slot;
+  // First binding-table slot assigned to external boundary tensors.
+  uint32_t boundary_binding_slot_base;
   // First binding-table slot assigned to diagnostic tap tensors.
   uint32_t diagnostic_tap_binding_slot_base;
   // Binding-table slot reserved for the executable region local slab.
@@ -158,6 +166,9 @@ static id4_pipeline_program_stage_counts_t id4_pipeline_program_stage_count_ops(
       case ID4_PIPELINE_PROGRAM_OP_KIND_PARAMETER:
         ++counts.parameter_count;
         break;
+      case ID4_PIPELINE_PROGRAM_OP_KIND_CONSTANT:
+        ++counts.constant_count;
+        break;
       case ID4_PIPELINE_PROGRAM_OP_KIND_TAP:
         ++counts.tap_count;
         break;
@@ -181,19 +192,21 @@ static iree_status_t id4_pipeline_program_stage_make_binding_layout(
           ? options->stage_options->diagnostic_tap_names.count
           : 0;
 
-  if (counts.parameter_count == 0 && options->boundary_binding_slot_base != 0) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "parameter-free program stages must start boundary bindings at slot 0");
+  uint32_t next_binding_slot = 0;
+  if (counts.parameter_count != 0) {
+    out_layout->parameter_slab_binding_slot = next_binding_slot++;
   }
+  if (counts.constant_count != 0) {
+    out_layout->constant_slab_binding_slot = next_binding_slot++;
+  }
+  out_layout->boundary_binding_slot_base = next_binding_slot;
   if (counts.import_count > UINT32_MAX ||
-      options->boundary_binding_slot_base >
-          UINT32_MAX - (uint32_t)counts.import_count) {
+      next_binding_slot > UINT32_MAX - (uint32_t)counts.import_count) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "program stage boundary binding slot overflow");
   }
   const uint32_t diagnostic_tap_binding_slot_base =
-      options->boundary_binding_slot_base + (uint32_t)counts.import_count;
+      next_binding_slot + (uint32_t)counts.import_count;
   if (diagnostic_tap_count > UINT32_MAX ||
       diagnostic_tap_binding_slot_base >
           UINT32_MAX - (uint32_t)diagnostic_tap_count) {
@@ -203,20 +216,8 @@ static iree_status_t id4_pipeline_program_stage_make_binding_layout(
   }
   const uint32_t local_binding_slot =
       diagnostic_tap_binding_slot_base + (uint32_t)diagnostic_tap_count;
-  if (counts.parameter_count != 0 &&
-      local_binding_slot == options->parameter_slab_binding_slot) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "program stage local binding slot collides with "
-                            "the parameter slab binding slot");
-  }
-
-  uint32_t max_binding_slot = local_binding_slot;
-  if (counts.parameter_count != 0 &&
-      options->parameter_slab_binding_slot > max_binding_slot) {
-    max_binding_slot = options->parameter_slab_binding_slot;
-  }
   iree_host_size_t binding_capacity = 0;
-  if (!iree_host_size_checked_add(max_binding_slot, 1, &binding_capacity)) {
+  if (!iree_host_size_checked_add(local_binding_slot, 1, &binding_capacity)) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "program stage binding capacity overflow");
   }
@@ -309,10 +310,16 @@ iree_status_t id4_pipeline_program_stage_create_plan(
   plan_options.parameter_scope = options->parameter_scope;
   plan_options.parameter_slab_placement_id = 0;
   plan_options.parameter_slab_binding_slot =
-      options->parameter_slab_binding_slot;
+      binding_layout.parameter_slab_binding_slot;
   plan_options.parameter_slab_target_params = parameter_params;
   plan_options.parameter_slab_alignment = options->alignment;
   plan_options.parameter_request_alignment = options->alignment;
+  plan_options.constant_slab_placement_id = 0;
+  plan_options.constant_slab_binding_slot =
+      binding_layout.constant_slab_binding_slot;
+  plan_options.constant_slab_target_params = parameter_params;
+  plan_options.constant_slab_alignment = options->alignment;
+  plan_options.constant_request_alignment = options->alignment;
   plan_options.kernel_placement_id = 0;
   plan_options.region_placement_id = 0;
   plan_options.region_local_slab_params = local_params;
@@ -321,7 +328,7 @@ iree_status_t id4_pipeline_program_stage_create_plan(
   plan_options.region_binding_capacity = binding_layout.binding_capacity;
   plan_options.region_local_binding_slot = binding_layout.local_binding_slot;
   plan_options.region_boundary_binding_slot_base =
-      options->boundary_binding_slot_base;
+      binding_layout.boundary_binding_slot_base;
   plan_options.diagnostic_tap_names =
       options->stage_options->diagnostic_tap_names;
   plan_options.diagnostic_tap_binding_slot_base =
@@ -428,6 +435,8 @@ iree_status_t id4_pipeline_program_stage_prepare(
     prepare_options.executable_cache = options->executable_cache;
     prepare_options.executable_caching_mode =
         IREE_HAL_EXECUTABLE_CACHING_MODE_NONE;
+    prepare_options.command_buffer_mode =
+        options->stage_options->command_buffer_mode;
     prepare_options.diagnostic_artifact_flags =
         ID4_PIPELINE_KERNEL_DIAGNOSTIC_ARTIFACT_FLAG_MODULE_TEXT |
         ID4_PIPELINE_KERNEL_DIAGNOSTIC_ARTIFACT_FLAG_COMPILE_REPORT_JSON |

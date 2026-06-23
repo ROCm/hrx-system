@@ -16,8 +16,6 @@
 #include "iree/base/internal/arena.h"
 
 #define ID4_SAMPLER_DENOISE_STAGE_ALIGNMENT 16
-#define ID4_SAMPLER_DENOISE_STAGE_PARAMETER_BINDING_SLOT 0
-#define ID4_SAMPLER_DENOISE_STAGE_BOUNDARY_BINDING_SLOT_BASE 0
 #define ID4_SAMPLER_DENOISE_STAGE_PROGRAM_BLOCK_SIZE (16 * 1024)
 
 typedef struct id4_sampler_denoise_stage_t {
@@ -174,10 +172,6 @@ static iree_status_t id4_sampler_denoise_stage_create_program_plan(
   plan_options.program = program;
   plan_options.device_group = stage->base.services.device_group;
   plan_options.parameter_scope = iree_string_view_empty();
-  plan_options.parameter_slab_binding_slot =
-      ID4_SAMPLER_DENOISE_STAGE_PARAMETER_BINDING_SLOT;
-  plan_options.boundary_binding_slot_base =
-      ID4_SAMPLER_DENOISE_STAGE_BOUNDARY_BINDING_SLOT_BASE;
   plan_options.alignment = ID4_SAMPLER_DENOISE_STAGE_ALIGNMENT;
   return id4_pipeline_program_stage_create_plan(
       &plan_options, stage->host_allocator, out_plan);

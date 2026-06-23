@@ -50,8 +50,9 @@ Important model facts for the first port:
 - Timestep conditioning flows through AdaLN modulation with an AdaLN dimension
   of 512.
 - Attention uses QK-RMSNorm and multimodal RoPE.
-- Image latents are represented as 2x2 patches over 32-channel VAE latents,
-  yielding 128 channels per image token.
+- Public diffusion image latents are 128-channel tensors. For the Flux2-format
+  VAE used by Ideogram 4, those channels represent 2x2 patches over the
+  decoder's 32-channel internal latent representation.
 - The denoising loop uses Euler flow matching with asymmetric classifier-free
   guidance.
 - Prompting is strongest with structured JSON captions. Plain text prompt
@@ -60,9 +61,25 @@ Important model facts for the first port:
 
 ## Precision And Weight Strategy
 
-Dense BF16 is the first correctness lane. The first Loom kernels and C/HAL
-sub-pipelines should match a high-quality BF16 reference run, giving the
-project one stable model-quality oracle and tensor-golden source.
+The Python Ideogram 4 implementation is the correctness oracle for numeric
+behavior. `stable-diffusion.cpp` remains useful for model discovery,
+dispatch-shape comparison, and shader inspection, but any difference from the
+Python implementation should be treated as an implementation choice or accident
+until proven otherwise.
+
+Dense BF16 is the first correctness lane. The Python model loads the DiT with a
+BF16 compute dtype, casts the latent input, timestep embedding path, and LLM
+conditioning into that dtype before the transformer body, and casts only the
+final public velocity output back to F32. The first Loom kernels and C/HAL
+sub-pipelines should therefore match BF16 activation behavior rather than an
+F32-activation scalar implementation detail.
+
+Ideogram's FP8 checkpoint is weight-only e4m3 storage. Its Python `Fp8Linear`
+widens each FP8 weight row to the current activation dtype, applies the stored
+per-output-channel scale in that dtype, and then runs the same linear math.
+FP8 support in this prototype must preserve that semantic contract: compact
+FP8 weights and row scales feed BF16-activation matmuls, not a separate FP8
+activation pipeline.
 
 The logical kernel contracts should be written around operation semantics, not
 one storage format. For a linear layer, the durable contract is the input,
@@ -73,8 +90,8 @@ loaders and inner loops.
 
 The planned precision sequence is:
 
-- BF16 weights and BF16-oriented kernels first, using dense weights as the
-  quality and tensor-golden reference.
+- BF16 weights and BF16-activation kernels first, using the Python BF16
+  execution path as the tensor-golden reference.
 - FP8-weight kernels on RDNA3/gfx1100 next, where FP8 values and their scale
   metadata are loaded from compact weight slabs and converted to BF16 in
   software inside the kernel before BF16 or FP16 matrix math.
@@ -88,7 +105,9 @@ FP8 emulation on gfx1100 is an important bandwidth and capacity experiment: a
 good schedule can overlap weight loads, scale application, and BF16 conversion
 with the surrounding matrix work while preserving numerics close to the
 BF16-expanded model. Native FP8 on gfx942 then becomes a second implementation
-of the same semantic kernel family.
+of the same semantic kernel family. Compiler reports and benchmark artifacts
+should make the chosen inner loop visible, including whether the generated code
+uses WMMA/MFMA instructions for the relevant target.
 
 ## Product Goal
 
@@ -407,7 +426,8 @@ The intended dataflow is:
    - run CFG and any guidance math on the device;
    - update latents with the Euler step on the device;
    - stream progress or preview data when requested.
-8. Unpatch and denormalize latents.
+8. Transform diffusion latents into the VAE decode representation inside the
+   VAE component.
 9. Run VAE decode.
 10. Clamp/convert pixels and deliver output through the sink.
 

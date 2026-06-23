@@ -1,0 +1,180 @@
+config.decl @id4.ideogram4.mlp_gate_up_silu.token_count : %value: index where [range(%value, 1, 131072)]
+config.decl @id4.ideogram4.mlp_gate_up_silu.input_size : %value: index where [range(%value, 1, 131072)]
+config.decl @id4.ideogram4.mlp_gate_up_silu.intermediate_size : %value: index where [range(%value, 1, 65536)]
+
+kernel.def export("id4_ideogram4_mlp_gate_up_silu_f32") @id4_ideogram4_mlp_gate_up_silu_f32() {
+  %unit = index.constant 1 : index
+  %fifteen = index.constant 15 : index
+  %workgroup_size_x = index.constant 256 : index
+  %token_block = index.constant 16 : index
+  %row_block = index.constant 16 : index
+  %token_count = config.get @id4.ideogram4.mlp_gate_up_silu.token_count : index
+  %intermediate_size = config.get @id4.ideogram4.mlp_gate_up_silu.intermediate_size : index
+  %rounded_token_count = index.add %token_count, %fifteen : index
+  %token_tile_count = index.div %rounded_token_count, %token_block : index
+  %rounded_intermediate_size = index.add %intermediate_size, %fifteen : index
+  %row_tile_count = index.div %rounded_intermediate_size, %row_block : index
+  kernel.launch.config workgroups(%token_tile_count, %row_tile_count, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
+} launch(%input: buffer, %gate_weight: buffer, %up_weight: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %scratch_bytes = index.constant 4096 : offset
+  %workgroup_size_x = index.constant 256 : index
+  %token_block = index.constant 16 : index
+  %row_block = index.constant 16 : index
+  %k_block = index.constant 64 : index
+  %scratch_tile_elements = index.constant 1024 : index
+  %token_tile = kernel.workgroup.id<x> : index
+  %row_tile = kernel.workgroup.id<y> : index
+  %lane = kernel.workitem.id<x> : index
+  %token_count = config.get @id4.ideogram4.mlp_gate_up_silu.token_count : index
+  %input_size = config.get @id4.ideogram4.mlp_gate_up_silu.input_size : index
+  %intermediate_size = config.get @id4.ideogram4.mlp_gate_up_silu.intermediate_size : index
+  %base_token = index.mul %token_tile, %token_block : index
+  %base_row = index.mul %row_tile, %row_block : index
+  %local_row = index.div %lane, %token_block : index
+  %local_token = index.rem %lane, %token_block : index
+  %output_row = index.add %base_row, %local_row : index
+  %token = index.add %base_token, %local_token : index
+  %zero_f32 = scalar.constant 0.0 : f32
+
+  %input_noalias, %gate_weight_noalias, %up_weight_noalias, %output_noalias = buffer.assume.noalias %input, %gate_weight, %up_weight, %output : buffer, buffer, buffer, buffer
+  %input_global = buffer.assume.memory_space<global> %input_noalias : buffer
+  %gate_weight_global = buffer.assume.memory_space<global> %gate_weight_noalias : buffer
+  %up_weight_global = buffer.assume.memory_space<global> %up_weight_noalias : buffer
+  %output_global = buffer.assume.memory_space<global> %output_noalias : buffer
+  %input_view = buffer.view %input_global[%base] : buffer -> view<[%input_size]x[%token_count]xf32, #dense>
+  %gate_weight_view = buffer.view %gate_weight_global[%base] : buffer -> view<[%intermediate_size]x[%input_size]xbf16, #dense>
+  %up_weight_view = buffer.view %up_weight_global[%base] : buffer -> view<[%intermediate_size]x[%input_size]xbf16, #dense>
+  %output_view = buffer.view %output_global[%base] : buffer -> view<[%intermediate_size]x[%token_count]xf32, #dense>
+
+  %scratch_input = buffer.alloca %scratch_bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch_gate_weight = buffer.alloca %scratch_bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch_up_weight = buffer.alloca %scratch_bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch_input_view = buffer.view %scratch_input[%base] : buffer -> view<1024xf32, #dense>
+  %scratch_gate_weight_view = buffer.view %scratch_gate_weight[%base] : buffer -> view<1024xf32, #dense>
+  %scratch_up_weight_view = buffer.view %scratch_up_weight[%base] : buffer -> view<1024xf32, #dense>
+
+  %gate_dot, %up_dot = scf.for %k_base = [%zero to %input_size step %k_block](%gate_acc = %zero_f32 : f32, %up_acc = %zero_f32 : f32) -> (f32, f32) {
+    scf.for %linear = [%lane to %scratch_tile_elements step %workgroup_size_x] {
+      %weight_k_offset = index.rem %linear, %k_block : index
+      %weight_row_offset = index.div %linear, %k_block : index
+      %weight_row = index.add %base_row, %weight_row_offset : index
+      %weight_k = index.add %k_base, %weight_k_offset : index
+      %weight_row_valid = index.cmp ult, %weight_row, %intermediate_size : index
+      %weight_k_valid = index.cmp ult, %weight_k, %input_size : index
+      %weight_valid = scalar.andi %weight_row_valid, %weight_k_valid : i1
+      %gate_weight_value = scf.if %weight_valid -> (f32) {
+        %gate_weight_bf16 = view.load %gate_weight_view[%weight_row, %weight_k] : view<[%intermediate_size]x[%input_size]xbf16, #dense> -> bf16
+        %gate_weight_f32 = scalar.extf %gate_weight_bf16 : bf16 to f32
+        scf.yield %gate_weight_f32 : f32
+      } else {
+        scf.yield %zero_f32 : f32
+      }
+      %up_weight_value = scf.if %weight_valid -> (f32) {
+        %up_weight_bf16 = view.load %up_weight_view[%weight_row, %weight_k] : view<[%intermediate_size]x[%input_size]xbf16, #dense> -> bf16
+        %up_weight_f32 = scalar.extf %up_weight_bf16 : bf16 to f32
+        scf.yield %up_weight_f32 : f32
+      } else {
+        scf.yield %zero_f32 : f32
+      }
+      view.store %gate_weight_value, %scratch_gate_weight_view[%linear] : f32, view<1024xf32, #dense>
+      view.store %up_weight_value, %scratch_up_weight_view[%linear] : f32, view<1024xf32, #dense>
+
+      %input_token_offset = index.rem %linear, %token_block : index
+      %input_k_offset = index.div %linear, %token_block : index
+      %input_token = index.add %base_token, %input_token_offset : index
+      %input_k = index.add %k_base, %input_k_offset : index
+      %input_token_valid = index.cmp ult, %input_token, %token_count : index
+      %input_k_valid = index.cmp ult, %input_k, %input_size : index
+      %input_valid = scalar.andi %input_token_valid, %input_k_valid : i1
+      %input_value = scf.if %input_valid -> (f32) {
+        %loaded = view.load %input_view[%input_k, %input_token] : view<[%input_size]x[%token_count]xf32, #dense> -> f32
+        scf.yield %loaded : f32
+      } else {
+        scf.yield %zero_f32 : f32
+      }
+      view.store %input_value, %scratch_input_view[%linear] : f32, view<1024xf32, #dense>
+    }
+
+    kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+
+    %next_gate_dot, %next_up_dot = scf.for %k_offset = [%zero to %k_block step %one](%block_gate_acc = %gate_acc : f32, %block_up_acc = %up_acc : f32) -> (f32, f32) {
+      %weight_scratch_row_base = index.mul %local_row, %k_block : index
+      %weight_scratch_index = index.add %weight_scratch_row_base, %k_offset : index
+      %input_scratch_k_base = index.mul %k_offset, %token_block : index
+      %input_scratch_index = index.add %input_scratch_k_base, %local_token : index
+      %input_value = view.load %scratch_input_view[%input_scratch_index] : view<1024xf32, #dense> -> f32
+      %gate_weight_value = view.load %scratch_gate_weight_view[%weight_scratch_index] : view<1024xf32, #dense> -> f32
+      %up_weight_value = view.load %scratch_up_weight_view[%weight_scratch_index] : view<1024xf32, #dense> -> f32
+      %gate_product = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %input_value, %gate_weight_value : f32
+      %up_product = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %input_value, %up_weight_value : f32
+      %next_gate = scalar.addf<reassoc|nnan|ninf|nsz> %block_gate_acc, %gate_product : f32
+      %next_up = scalar.addf<reassoc|nnan|ninf|nsz> %block_up_acc, %up_product : f32
+      scf.yield %next_gate, %next_up : f32, f32
+    }
+
+    kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+    scf.yield %next_gate_dot, %next_up_dot : f32, f32
+  }
+
+  %token_valid = index.cmp ult, %token, %token_count : index
+  %row_valid = index.cmp ult, %output_row, %intermediate_size : index
+  %valid_output = scalar.andi %token_valid, %row_valid : i1
+  scf.if %valid_output {
+    %gate_silu = scalar.siluf %gate_dot : f32
+    %value = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %gate_silu, %up_dot : f32
+    view.store %value, %output_view[%output_row, %token] : f32, view<[%intermediate_size]x[%token_count]xf32, #dense>
+  }
+  kernel.return
+}
+
+check.case public @id4_ideogram4_mlp_gate_up_silu_f32_small_case {
+  %input = check.generate.fill value(1.0) : tensor<1x2xf32>
+  %gate_weight = check.generate.fill value(1.0) : tensor<3x1xbf16>
+  %up_weight = check.generate.fill value(2.0) : tensor<3x1xbf16>
+  %output = check.generate.fill value(0.0) : tensor<3x2xf32>
+  %expected = check.generate.fill value(1.4621171572600098) : tensor<3x2xf32>
+  func.call @id4_ideogram4_mlp_gate_up_silu_f32(%input, %gate_weight, %up_weight, %output) : (tensor<1x2xf32>, tensor<3x1xbf16>, tensor<3x1xbf16>, tensor<3x2xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.00001) rtol(0.00001) nan(same) : tensor<3x2xf32>
+  check.return
+}
+
+check.case public @id4_ideogram4_mlp_gate_up_silu_f32_ideogram_slice_case {
+  %input = check.generate.fill value(0.0) : tensor<16x2xf32>
+  %gate_weight = check.generate.fill value(1.0) : tensor<24x16xbf16>
+  %up_weight = check.generate.fill value(1.0) : tensor<24x16xbf16>
+  %output = check.generate.fill value(1.0) : tensor<24x2xf32>
+  %expected = check.generate.fill value(0.0) : tensor<24x2xf32>
+  func.call @id4_ideogram4_mlp_gate_up_silu_f32(%input, %gate_weight, %up_weight, %output) : (tensor<16x2xf32>, tensor<24x16xbf16>, tensor<24x16xbf16>, tensor<24x2xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<24x2xf32>
+  check.return
+}
+
+check.case public @id4_ideogram4_mlp_gate_up_silu_f32_uncond_1024_shape_case {
+  %input = check.generate.fill value(1.0) : tensor<4608x4096xf32>
+  %gate_weight = check.generate.fill value(0.0) : tensor<12288x4608xbf16>
+  %up_weight = check.generate.fill value(0.0) : tensor<12288x4608xbf16>
+  %output = check.generate.fill value(1.0) : tensor<12288x4096xf32>
+  %expected = check.generate.fill value(0.0) : tensor<12288x4096xf32>
+  func.call @id4_ideogram4_mlp_gate_up_silu_f32(%input, %gate_weight, %up_weight, %output) : (tensor<4608x4096xf32>, tensor<12288x4608xbf16>, tensor<12288x4608xbf16>, tensor<12288x4096xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<12288x4096xf32>
+  check.return
+}
+
+check.case public @id4_ideogram4_mlp_gate_up_silu_f32_cond_1024_shape_case {
+  %input = check.generate.fill value(1.0) : tensor<4608x4547xf32>
+  %gate_weight = check.generate.fill value(0.0) : tensor<12288x4608xbf16>
+  %up_weight = check.generate.fill value(0.0) : tensor<12288x4608xbf16>
+  %output = check.generate.fill value(1.0) : tensor<12288x4547xf32>
+  %expected = check.generate.fill value(0.0) : tensor<12288x4547xf32>
+  func.call @id4_ideogram4_mlp_gate_up_silu_f32(%input, %gate_weight, %up_weight, %output) : (tensor<4608x4547xf32>, tensor<12288x4608xbf16>, tensor<12288x4608xbf16>, tensor<12288x4547xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<12288x4547xf32>
+  check.return
+}
+
+check.benchmark<@id4_ideogram4_mlp_gate_up_silu_f32_small_case> @id4_ideogram4_mlp_gate_up_silu_f32_small
+check.benchmark<@id4_ideogram4_mlp_gate_up_silu_f32_ideogram_slice_case> @id4_ideogram4_mlp_gate_up_silu_f32_ideogram_slice
+check.benchmark<@id4_ideogram4_mlp_gate_up_silu_f32_uncond_1024_shape_case> @id4_ideogram4_mlp_gate_up_silu_f32_uncond_1024_shape
+check.benchmark<@id4_ideogram4_mlp_gate_up_silu_f32_cond_1024_shape_case> @id4_ideogram4_mlp_gate_up_silu_f32_cond_1024_shape

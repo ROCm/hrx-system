@@ -20,10 +20,37 @@ iree_cc_test(
     iree::experimental::id4::pipeline::plan
     iree::experimental::id4::pipeline::stage
     iree::experimental::id4::stages::hal_integration_util
+    iree::experimental::id4::stages::ideogram4_decode
     iree::experimental::id4::stages::ideogram4_dit
     iree::experimental::id4::stages::qwen3_vl
     iree::experimental::id4::stages::sampler
     iree::hal
+    iree::io::parameter_provider
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "manual"
+    "requires-gpu"
+)
+
+iree_cc_test(
+  NAME
+    one_step_trace_integration_test
+  SRCS
+    "one_step_trace_integration_test.cc"
+  DEPS
+    iree::base
+    iree::base::tooling::flags
+    iree::experimental::id4::pipeline::plan
+    iree::experimental::id4::pipeline::stage
+    iree::experimental::id4::stages::hal_integration_util
+    iree::experimental::id4::stages::ideogram4_decode
+    iree::experimental::id4::stages::ideogram4_dit
+    iree::experimental::id4::stages::sampler
+    iree::experimental::id4::tooling::capture
+    iree::experimental::id4::tooling::image
+    iree::hal
+    iree::io::file_handle
     iree::io::parameter_provider
     iree::testing::gtest
     iree::testing::gtest_main

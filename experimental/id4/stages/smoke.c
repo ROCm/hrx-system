@@ -568,6 +568,7 @@ static iree_status_t id4_smoke_stage_record_region(
     id4_smoke_stage_t* stage, iree_hal_device_group_t* device_group,
     iree_host_size_t device_index, iree_hal_queue_affinity_t queue_affinity,
     id4_smoke_stage_region_flags_t region_flags,
+    iree_hal_command_buffer_mode_t command_buffer_mode,
     id4_pipeline_kernel_executable_t* executable,
     id4_pipeline_prepared_region_t** out_prepared_region) {
   iree_hal_device_t* device =
@@ -597,8 +598,8 @@ static iree_status_t id4_smoke_stage_record_region(
     command_categories = IREE_HAL_COMMAND_CATEGORY_ANY;
   }
   iree_status_t status = iree_hal_command_buffer_create(
-      device, IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT, command_categories,
-      queue_affinity, ID4_SMOKE_STAGE_BINDING_COUNT, &command_buffer);
+      device, command_buffer_mode, command_categories, queue_affinity,
+      ID4_SMOKE_STAGE_BINDING_COUNT, &command_buffer);
   if (iree_status_is_ok(status)) {
     status = iree_hal_command_buffer_begin(command_buffer);
   }
@@ -780,7 +781,8 @@ static iree_status_t id4_smoke_stage_prepare(
   if (iree_status_is_ok(status)) {
     status = id4_smoke_stage_record_region(
         stage, device_group, placement->device_index, placement->queue_affinity,
-        region_flags, executable, &prepared_region);
+        region_flags, options->command_buffer_mode, executable,
+        &prepared_region);
   }
   if (iree_status_is_ok(status)) {
     id4_pipeline_bundle_create_options_t create_options;

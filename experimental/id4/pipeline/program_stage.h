@@ -37,10 +37,6 @@ typedef struct id4_pipeline_program_stage_plan_options_t {
   iree_string_view_t parameter_scope;
   // Device-local buffer alignment used for slabs and tensor suballocations.
   iree_device_size_t alignment;
-  // Binding-table slot reserved for the packed parameter slab.
-  uint32_t parameter_slab_binding_slot;
-  // First binding-table slot assigned to external boundary tensors.
-  uint32_t boundary_binding_slot_base;
 } id4_pipeline_program_stage_plan_options_t;
 
 // Options for preparing one reusable bundle from an authored program and plan.

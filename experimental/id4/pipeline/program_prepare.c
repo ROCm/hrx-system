@@ -11,6 +11,7 @@
 
 #include "experimental/id4/pipeline/program_region.h"
 #include "iree/base/internal/arena.h"
+#include "iree/hal/buffer_transfer.h"
 
 typedef struct id4_pipeline_program_prepared_kernel_t {
   // Prepared kernel executable retained by the prepared program.
@@ -32,6 +33,10 @@ struct id4_pipeline_program_prepared_t {
   iree_host_size_t kernel_count;
   // Prepared kernel entries in plan kernel order.
   id4_pipeline_program_prepared_kernel_t* kernels;
+  // Number of materialized constant slab buffers.
+  iree_host_size_t constant_slab_count;
+  // Device buffers containing program-owned constants in plan slab order.
+  iree_hal_buffer_t** constant_slab_buffers;
 };
 
 typedef struct id4_pipeline_program_prepare_context_t {
@@ -109,6 +114,8 @@ static iree_status_t id4_pipeline_program_prepared_create_empty(
 
   const iree_host_size_t kernel_count =
       id4_pipeline_plan_kernel_count(options->plan);
+  const iree_host_size_t constant_slab_count =
+      id4_pipeline_plan_constant_slab_count(options->plan);
   id4_pipeline_program_prepared_t* prepared = NULL;
   iree_status_t status = iree_allocator_malloc(
       host_allocator, sizeof(*prepared), (void**)&prepared);
@@ -119,6 +126,7 @@ static iree_status_t id4_pipeline_program_prepared_create_empty(
     prepared->plan = (id4_pipeline_plan_t*)options->plan;
     id4_pipeline_plan_retain(prepared->plan);
     prepared->kernel_count = kernel_count;
+    prepared->constant_slab_count = constant_slab_count;
   }
   if (iree_status_is_ok(status) && kernel_count != 0) {
     status = iree_allocator_malloc_array(host_allocator, kernel_count,
@@ -130,6 +138,16 @@ static iree_status_t id4_pipeline_program_prepared_create_empty(
     for (iree_host_size_t i = 0; i < kernel_count; ++i) {
       prepared->kernels[i].function = iree_hal_executable_function_invalid();
     }
+  }
+  if (iree_status_is_ok(status) && constant_slab_count != 0) {
+    status =
+        iree_allocator_malloc_array(host_allocator, constant_slab_count,
+                                    sizeof(prepared->constant_slab_buffers[0]),
+                                    (void**)&prepared->constant_slab_buffers);
+  }
+  if (iree_status_is_ok(status) && constant_slab_count != 0) {
+    memset(prepared->constant_slab_buffers, 0,
+           constant_slab_count * sizeof(prepared->constant_slab_buffers[0]));
   }
   if (iree_status_is_ok(status)) {
     *out_prepared = prepared;
@@ -201,6 +219,155 @@ static iree_status_t id4_pipeline_program_prepare_kernels(
   for (iree_host_size_t i = 0; i < prepared->kernel_count; ++i) {
     IREE_RETURN_IF_ERROR(
         id4_pipeline_program_prepare_kernel(prepared, options, i));
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t id4_pipeline_program_prepare_find_constant_operation(
+    const id4_pipeline_program_t* program, iree_host_size_t constant_ordinal,
+    const id4_pipeline_program_op_t** out_op,
+    const id4_pipeline_program_tensor_record_t** out_tensor) {
+  *out_op = NULL;
+  *out_tensor = NULL;
+  iree_host_size_t current_ordinal = 0;
+  const iree_host_size_t operation_count =
+      id4_pipeline_program_operation_count(program);
+  for (iree_host_size_t i = 0; i < operation_count; ++i) {
+    const id4_pipeline_program_op_t* op =
+        id4_pipeline_program_operation_at(program, i);
+    if (!op || op->kind != ID4_PIPELINE_PROGRAM_OP_KIND_CONSTANT) continue;
+    if (current_ordinal++ != constant_ordinal) continue;
+    const id4_pipeline_program_tensor_record_t* tensor =
+        id4_pipeline_program_tensor_at(program,
+                                       op->payload.constant.tensor.ordinal);
+    if (!tensor) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "program constant tensor %u is missing",
+                              op->payload.constant.tensor.ordinal);
+    }
+    *out_op = op;
+    *out_tensor = tensor;
+    return iree_ok_status();
+  }
+  return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                          "program constant %" PRIhsz " is missing",
+                          constant_ordinal);
+}
+
+static iree_status_t id4_pipeline_program_prepare_constant_slab_buffer(
+    id4_pipeline_program_prepared_t* prepared,
+    const id4_pipeline_program_prepare_options_t* options,
+    iree_host_size_t slab_index, iree_host_size_t first_constant_ordinal,
+    iree_hal_buffer_t** out_buffer) {
+  *out_buffer = NULL;
+  const id4_pipeline_constant_slab_plan_t* slab =
+      id4_pipeline_plan_constant_slab_at(options->plan, slab_index);
+  if (!slab) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "program constant slab %" PRIhsz " is missing",
+                            slab_index);
+  }
+  if (slab->byte_length > IREE_HOST_SIZE_MAX) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "program constant slab %.*s byte length %" PRIu64
+                            " exceeds host allocation capacity",
+                            (int)slab->name.size, slab->name.data,
+                            (uint64_t)slab->byte_length);
+  }
+  const id4_pipeline_device_placement_t* placement =
+      id4_pipeline_plan_placement_at(options->plan, slab->placement_id);
+  if (!placement) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "program constant slab %.*s references missing "
+                            "placement %u",
+                            (int)slab->name.size, slab->name.data,
+                            slab->placement_id);
+  }
+  iree_hal_device_group_t* device_group =
+      id4_pipeline_plan_device_group(options->plan);
+  iree_hal_device_t* device =
+      iree_hal_device_group_device_at(device_group, placement->device_index);
+  if (!device) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "program constant slab %.*s device is required",
+                            (int)slab->name.size, slab->name.data);
+  }
+
+  uint8_t* host_bytes = NULL;
+  iree_status_t status = iree_allocator_malloc_array(
+      prepared->host_allocator, (iree_host_size_t)slab->byte_length,
+      sizeof(host_bytes[0]), (void**)&host_bytes);
+  if (iree_status_is_ok(status)) {
+    memset(host_bytes, 0, (iree_host_size_t)slab->byte_length);
+  }
+  for (iree_host_size_t i = 0;
+       i < slab->request_count && iree_status_is_ok(status); ++i) {
+    const id4_pipeline_constant_request_t* request = &slab->requests[i];
+    const id4_pipeline_program_op_t* constant_op = NULL;
+    const id4_pipeline_program_tensor_record_t* tensor = NULL;
+    status = id4_pipeline_program_prepare_find_constant_operation(
+        options->program, first_constant_ordinal + i, &constant_op, &tensor);
+    if (!iree_status_is_ok(status)) break;
+    if (!iree_string_view_equal(request->name, tensor->name)) {
+      status = iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "program constant slab %.*s request %.*s does not match constant "
+          "tensor %.*s",
+          (int)slab->name.size, slab->name.data, (int)request->name.size,
+          request->name.data, (int)tensor->name.size, tensor->name.data);
+      break;
+    }
+    if (constant_op->payload.constant.data_length != request->span.length) {
+      status =
+          iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                           "program constant %.*s byte length %" PRIhsz
+                           " does not match planned request length %" PRIu64,
+                           (int)tensor->name.size, tensor->name.data,
+                           constant_op->payload.constant.data_length,
+                           (uint64_t)request->span.length);
+      break;
+    }
+    memcpy(host_bytes + request->span.buffer_offset,
+           constant_op->payload.constant.data,
+           constant_op->payload.constant.data_length);
+  }
+
+  iree_hal_buffer_t* buffer = NULL;
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_allocator_allocate_buffer(
+        iree_hal_device_allocator(device), slab->target_params,
+        slab->byte_length, &buffer);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_device_transfer_h2d(
+        device, host_bytes, buffer, 0, slab->byte_length,
+        IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT, iree_infinite_timeout());
+  }
+  iree_allocator_free(prepared->host_allocator, host_bytes);
+  if (iree_status_is_ok(status)) {
+    *out_buffer = buffer;
+  } else {
+    iree_hal_buffer_release(buffer);
+  }
+  return status;
+}
+
+static iree_status_t id4_pipeline_program_prepare_constant_slabs(
+    id4_pipeline_program_prepared_t* prepared,
+    const id4_pipeline_program_prepare_options_t* options) {
+  iree_host_size_t first_constant_ordinal = 0;
+  for (iree_host_size_t i = 0; i < prepared->constant_slab_count; ++i) {
+    const id4_pipeline_constant_slab_plan_t* slab =
+        id4_pipeline_plan_constant_slab_at(options->plan, i);
+    if (!slab) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "program constant slab %" PRIhsz " is missing",
+                              i);
+    }
+    IREE_RETURN_IF_ERROR(id4_pipeline_program_prepare_constant_slab_buffer(
+        prepared, options, i, first_constant_ordinal,
+        &prepared->constant_slab_buffers[i]));
+    first_constant_ordinal += slab->request_count;
   }
   return iree_ok_status();
 }
@@ -297,6 +464,51 @@ static iree_status_t id4_pipeline_program_prepare_resolve_parameter(
   return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                           "program parameter tensor %" PRIhsz " is missing",
                           parameter_ordinal);
+}
+
+static iree_status_t id4_pipeline_program_prepare_resolve_constant(
+    void* user_data, const id4_pipeline_program_constant_op_t* constant_op,
+    const id4_pipeline_program_tensor_record_t* tensor,
+    iree_host_size_t constant_ordinal,
+    id4_pipeline_tensor_import_t* out_import) {
+  (void)constant_op;
+  id4_pipeline_program_prepare_context_t* context =
+      (id4_pipeline_program_prepare_context_t*)user_data;
+  iree_host_size_t remaining_ordinal = constant_ordinal;
+  for (iree_host_size_t slab_index = 0;
+       slab_index <
+       id4_pipeline_plan_constant_slab_count(context->options->plan);
+       ++slab_index) {
+    const id4_pipeline_constant_slab_plan_t* slab =
+        id4_pipeline_plan_constant_slab_at(context->options->plan, slab_index);
+    if (!slab) continue;
+    if (remaining_ordinal >= slab->request_count) {
+      remaining_ordinal -= slab->request_count;
+      continue;
+    }
+    const id4_pipeline_constant_request_t* request =
+        &slab->requests[remaining_ordinal];
+    out_import->layout = (id4_pipeline_tensor_layout_t){
+        // Constant tensor diagnostic name.
+        .name = tensor->name,
+        // Constant tensor element type.
+        .dtype = id4_pipeline_program_region_convert_dtype(tensor->dtype),
+        // Constant tensor shape.
+        .shape = id4_pipeline_program_prepare_convert_shape(tensor->shape),
+        // Dense constant tensor byte length.
+        .byte_length = tensor->byte_length,
+        // Constant subrange alignment is already represented by the plan
+        // span offset.
+        .alignment = 0,
+    };
+    out_import->binding_slot = slab->binding_slot;
+    out_import->offset = request->span.buffer_offset;
+    out_import->flags = ID4_PIPELINE_TENSOR_IMPORT_FLAG_INITIALIZED;
+    return iree_ok_status();
+  }
+  return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                          "program constant tensor %" PRIhsz " is missing",
+                          constant_ordinal);
 }
 
 static iree_status_t id4_pipeline_program_prepare_resolve_kernel(
@@ -440,9 +652,8 @@ static iree_status_t id4_pipeline_program_prepare_record_region(
 
   if (iree_status_is_ok(status)) {
     status = iree_hal_command_buffer_create(
-        device, IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
-        IREE_HAL_COMMAND_CATEGORY_ANY, placement->queue_affinity,
-        region->binding_capacity, &command_buffer);
+        device, options->command_buffer_mode, IREE_HAL_COMMAND_CATEGORY_ANY,
+        placement->queue_affinity, region->binding_capacity, &command_buffer);
   }
   if (iree_status_is_ok(status)) {
     status = iree_hal_command_buffer_begin(command_buffer);
@@ -486,6 +697,8 @@ static iree_status_t id4_pipeline_program_prepare_record_region(
     lower_options.resolve_import = id4_pipeline_program_prepare_resolve_import;
     lower_options.resolve_parameter =
         id4_pipeline_program_prepare_resolve_parameter;
+    lower_options.resolve_constant =
+        id4_pipeline_program_prepare_resolve_constant;
     lower_options.resolve_kernel = id4_pipeline_program_prepare_resolve_kernel;
     lower_options.resolve_tap = id4_pipeline_program_prepare_resolve_tap;
     status = id4_pipeline_program_region_lower(&lower_options,
@@ -533,6 +746,9 @@ iree_status_t id4_pipeline_program_prepare(
     status = id4_pipeline_program_prepare_kernels(prepared, options);
   }
   if (iree_status_is_ok(status)) {
+    status = id4_pipeline_program_prepare_constant_slabs(prepared, options);
+  }
+  if (iree_status_is_ok(status)) {
     status = id4_pipeline_program_prepare_record_region(prepared, options);
   }
   if (iree_status_is_ok(status)) {
@@ -557,6 +773,10 @@ static void id4_pipeline_program_prepared_destroy(
     id4_pipeline_kernel_executable_release(prepared->kernels[i].executable);
   }
   iree_allocator_free(host_allocator, prepared->kernels);
+  for (iree_host_size_t i = 0; i < prepared->constant_slab_count; ++i) {
+    iree_hal_buffer_release(prepared->constant_slab_buffers[i]);
+  }
+  iree_allocator_free(host_allocator, prepared->constant_slab_buffers);
   id4_pipeline_plan_release(prepared->plan);
   iree_allocator_free(host_allocator, prepared);
 }
@@ -604,7 +824,7 @@ static iree_status_t id4_pipeline_program_prepared_make_wait_list(
 }
 
 static iree_status_t id4_pipeline_program_prepared_make_binding_table(
-    id4_pipeline_bundle_t* bundle,
+    id4_pipeline_program_prepared_t* prepared, id4_pipeline_bundle_t* bundle,
     const id4_pipeline_stage_issue_options_t* options,
     iree_hal_buffer_binding_t* bindings,
     iree_hal_buffer_binding_table_t* out_binding_table) {
@@ -647,6 +867,31 @@ static iree_status_t id4_pipeline_program_prepared_make_binding_table(
         // Parameter slabs are bound from byte zero.
         .offset = 0,
         // Full parameter slab byte length.
+        .length = slab->byte_length,
+    };
+  }
+
+  const iree_host_size_t constant_slab_count =
+      id4_pipeline_plan_constant_slab_count(plan);
+  if (constant_slab_count != prepared->constant_slab_count) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "program issue constant slab count mismatch");
+  }
+  for (iree_host_size_t i = 0; i < constant_slab_count; ++i) {
+    const id4_pipeline_constant_slab_plan_t* slab =
+        id4_pipeline_plan_constant_slab_at(plan, i);
+    iree_hal_buffer_t* buffer = prepared->constant_slab_buffers[i];
+    if (!slab || !buffer) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "program issue constant slab %" PRIhsz " is missing", i);
+    }
+    bindings[slab->binding_slot] = (iree_hal_buffer_binding_t){
+        // Prepared constant slab buffer owned by the prepared program.
+        .buffer = buffer,
+        // Constant slabs are bound from byte zero.
+        .offset = 0,
+        // Full constant slab byte length.
         .length = slab->byte_length,
     };
   }
@@ -736,7 +981,7 @@ iree_status_t id4_pipeline_program_prepared_issue(
   iree_hal_buffer_binding_table_t binding_table =
       iree_hal_buffer_binding_table_empty();
   IREE_RETURN_IF_ERROR(id4_pipeline_program_prepared_make_binding_table(
-      bundle, options, bindings, &binding_table));
+      prepared, bundle, options, bindings, &binding_table));
 
   id4_pipeline_prepared_region_issue_options_t issue_options;
   memset(&issue_options, 0, sizeof(issue_options));

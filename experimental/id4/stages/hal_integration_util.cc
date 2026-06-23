@@ -16,6 +16,7 @@
 
 #include "experimental/id4/kernels/embedded_loom_sources.h"
 #include "iree/base/internal/json.h"
+#include "iree/base/internal/math.h"
 #include "iree/io/file_handle.h"
 #include "iree/io/parameter_index.h"
 #include "iree/io/parameter_index_provider.h"
@@ -24,6 +25,8 @@
 #include "iree/tooling/parameter_util.h"
 
 namespace id4::test {
+
+static constexpr iree_host_size_t kQueueUpdateChunkLength = 4 * 1024 * 1024;
 
 iree_hal_semaphore_list_t SemaphoreListStorage::list() {
   return iree_hal_semaphore_list_t{
@@ -63,6 +66,18 @@ iree_hal_semaphore_list_t FixedSemaphoreListStorage::list() {
   };
 }
 
+static iree_status_t CommandBufferModeFromFlags(
+    iree_hal_command_buffer_mode_t* out_mode) {
+  bool retain_profile_metadata = false;
+  IREE_RETURN_IF_ERROR(
+      iree_hal_profiling_from_flags_requires_retained_command_buffer_metadata(
+          &retain_profile_metadata));
+  *out_mode = retain_profile_metadata
+                  ? IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_PROFILE_METADATA
+                  : IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT;
+  return iree_ok_status();
+}
+
 BufferBindingSet::~BufferBindingSet() { reset(); }
 
 void BufferBindingSet::reset() {
@@ -96,6 +111,25 @@ const FixtureTensor* FixtureTensorSet::FindTensor(
     if (iree_string_view_equal(
             iree_make_string_view(tensor.role.data(), tensor.role.size()),
             role) &&
+        iree_string_view_equal(
+            iree_make_string_view(tensor.name.data(), tensor.name.size()),
+            name)) {
+      return &tensor;
+    }
+  }
+  return nullptr;
+}
+
+const FixtureTensor* FixtureTensorSet::FindTensor(
+    iree_string_view_t role, iree_string_view_t stage,
+    iree_string_view_t name) const {
+  for (const FixtureTensor& tensor : tensors) {
+    if (iree_string_view_equal(
+            iree_make_string_view(tensor.role.data(), tensor.role.size()),
+            role) &&
+        iree_string_view_equal(
+            iree_make_string_view(tensor.stage.data(), tensor.stage.size()),
+            stage) &&
         iree_string_view_equal(
             iree_make_string_view(tensor.name.data(), tensor.name.size()),
             name)) {
@@ -162,8 +196,20 @@ static iree_status_t ParseFixtureDtype(iree_string_view_t dtype,
     *out_dtype = ID4_PIPELINE_TENSOR_DTYPE_F32;
     return iree_ok_status();
   }
+  if (iree_string_view_equal(dtype, IREE_SV("f16"))) {
+    *out_dtype = ID4_PIPELINE_TENSOR_DTYPE_F16;
+    return iree_ok_status();
+  }
+  if (iree_string_view_equal(dtype, IREE_SV("bf16"))) {
+    *out_dtype = ID4_PIPELINE_TENSOR_DTYPE_BF16;
+    return iree_ok_status();
+  }
   if (iree_string_view_equal(dtype, IREE_SV("i32"))) {
     *out_dtype = ID4_PIPELINE_TENSOR_DTYPE_I32;
+    return iree_ok_status();
+  }
+  if (iree_string_view_equal(dtype, IREE_SV("u32"))) {
+    *out_dtype = ID4_PIPELINE_TENSOR_DTYPE_U32;
     return iree_ok_status();
   }
   return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -326,15 +372,18 @@ static iree_status_t ParseNpyShapeToken(iree_string_view_t token,
 static iree_status_t ParseNpyShape(const std::string& header,
                                    id4_pipeline_tensor_shape_t* out_shape) {
   *out_shape = id4_pipeline_tensor_shape_t{};
-  const std::string key = "'shape': (";
-  size_t shape_begin = header.find(key);
-  if (shape_begin == std::string::npos) {
+  iree_string_view_t header_view =
+      iree_make_string_view(header.data(), header.size());
+  const iree_string_view_t key = IREE_SV("'shape': (");
+  iree_host_size_t shape_begin = iree_string_view_find(header_view, key, 0);
+  if (shape_begin == IREE_STRING_VIEW_NPOS) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "NPY header is missing shape tuple");
   }
-  shape_begin += key.size();
-  const size_t shape_end = header.find(')', shape_begin);
-  if (shape_end == std::string::npos) {
+  shape_begin += key.size;
+  const iree_host_size_t shape_end =
+      iree_string_view_find(header_view, IREE_SV(")"), shape_begin);
+  if (shape_end == IREE_STRING_VIEW_NPOS) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "NPY header shape tuple is unterminated");
   }
@@ -368,15 +417,18 @@ static iree_status_t ParseNpyShape(const std::string& header,
 
 static iree_status_t ParseNpyDtype(const std::string& header,
                                    id4_pipeline_tensor_dtype_t* out_dtype) {
-  const std::string key = "'descr': '";
-  size_t dtype_begin = header.find(key);
-  if (dtype_begin == std::string::npos) {
+  iree_string_view_t header_view =
+      iree_make_string_view(header.data(), header.size());
+  const iree_string_view_t key = IREE_SV("'descr': '");
+  iree_host_size_t dtype_begin = iree_string_view_find(header_view, key, 0);
+  if (dtype_begin == IREE_STRING_VIEW_NPOS) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "NPY header is missing dtype descriptor");
   }
-  dtype_begin += key.size();
-  const size_t dtype_end = header.find('\'', dtype_begin);
-  if (dtype_end == std::string::npos) {
+  dtype_begin += key.size;
+  const iree_host_size_t dtype_end =
+      iree_string_view_find(header_view, IREE_SV("'"), dtype_begin);
+  if (dtype_end == IREE_STRING_VIEW_NPOS) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "NPY dtype descriptor is unterminated");
   }
@@ -387,9 +439,24 @@ static iree_status_t ParseNpyDtype(const std::string& header,
     *out_dtype = ID4_PIPELINE_TENSOR_DTYPE_F32;
     return iree_ok_status();
   }
+  if (iree_string_view_equal(dtype, IREE_SV("<f2")) ||
+      iree_string_view_equal(dtype, IREE_SV("|f2"))) {
+    *out_dtype = ID4_PIPELINE_TENSOR_DTYPE_F16;
+    return iree_ok_status();
+  }
+  if (iree_string_view_equal(dtype, IREE_SV("<u2")) ||
+      iree_string_view_equal(dtype, IREE_SV("|u2"))) {
+    *out_dtype = ID4_PIPELINE_TENSOR_DTYPE_BF16;
+    return iree_ok_status();
+  }
   if (iree_string_view_equal(dtype, IREE_SV("<i4")) ||
       iree_string_view_equal(dtype, IREE_SV("|i4"))) {
     *out_dtype = ID4_PIPELINE_TENSOR_DTYPE_I32;
+    return iree_ok_status();
+  }
+  if (iree_string_view_equal(dtype, IREE_SV("<u4")) ||
+      iree_string_view_equal(dtype, IREE_SV("|u4"))) {
+    *out_dtype = ID4_PIPELINE_TENSOR_DTYPE_U32;
     return iree_ok_status();
   }
   return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -457,6 +524,8 @@ static iree_status_t LoadFixtureTensorRecord(
   FixtureTensor tensor;
   IREE_RETURN_IF_ERROR(
       JsonLookupSimpleString(record, IREE_SV("role"), &tensor.role));
+  IREE_RETURN_IF_ERROR(
+      JsonLookupSimpleString(record, IREE_SV("stage"), &tensor.stage));
   IREE_RETURN_IF_ERROR(
       JsonLookupSimpleString(record, IREE_SV("name"), &tensor.name));
   IREE_RETURN_IF_ERROR(
@@ -673,6 +742,9 @@ iree_status_t CreateLiveStageContextFromFlags(LiveStageContext* out_context) {
   if (iree_status_is_ok(status)) {
     out_context->kernel_cache.reset(kernel_cache);
   }
+  if (iree_status_is_ok(status)) {
+    status = CommandBufferModeFromFlags(&out_context->command_buffer_mode);
+  }
   return status;
 }
 
@@ -830,6 +902,57 @@ iree_status_t QueueUpdateBinding(iree_hal_device_t* device,
         "source length %" PRIhsz " does not match binding length %" PRIu64,
         source_length, static_cast<uint64_t>(binding->length));
   }
+  iree_host_size_t source_offset = 0;
+  while (source_offset < source_length) {
+    const iree_host_size_t remaining_length = source_length - source_offset;
+    const iree_host_size_t chunk_length =
+        remaining_length > kQueueUpdateChunkLength ? kQueueUpdateChunkLength
+                                                   : remaining_length;
+    iree_hal_semaphore_list_t wait_list = iree_hal_semaphore_list_empty();
+    SemaphoreListStorage wait_storage;
+    wait_storage.semaphore = semaphore;
+    wait_storage.payload_value = *inout_payload_value;
+    if (wait_storage.payload_value != 0) {
+      wait_list = wait_storage.list();
+    }
+    SemaphoreListStorage signal_storage;
+    signal_storage.semaphore = semaphore;
+    signal_storage.payload_value = wait_storage.payload_value + 1;
+    IREE_RETURN_IF_ERROR(iree_hal_device_queue_update(
+        device, queue_affinity, wait_list, signal_storage.list(), source_data,
+        source_offset, binding->buffer, binding->offset + source_offset,
+        chunk_length, IREE_HAL_UPDATE_FLAG_NONE));
+    *inout_payload_value = signal_storage.payload_value;
+    source_offset += chunk_length;
+  }
+  return iree_ok_status();
+}
+
+iree_status_t QueueReadBindingFromHostAllocation(
+    iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_buffer_binding_t* binding, const void* source_data,
+    iree_host_size_t source_length, iree_hal_semaphore_t* semaphore,
+    uint64_t* inout_payload_value) {
+  if (source_length != binding->length) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "source length %" PRIhsz " does not match binding length %" PRIu64,
+        source_length, static_cast<uint64_t>(binding->length));
+  }
+
+  iree_io_file_handle_t* handle = nullptr;
+  IREE_RETURN_IF_ERROR(iree_io_file_handle_wrap_host_allocation(
+      IREE_IO_FILE_ACCESS_READ,
+      iree_make_byte_span(const_cast<void*>(source_data), source_length),
+      iree_io_file_handle_release_callback_null(), iree_allocator_system(),
+      &handle));
+
+  iree_hal_file_t* file = nullptr;
+  iree_status_t status =
+      iree_hal_file_import(device, queue_affinity, IREE_HAL_MEMORY_ACCESS_READ,
+                           handle, IREE_HAL_EXTERNAL_FILE_FLAG_NONE, &file);
+  iree_io_file_handle_release(handle);
+
   iree_hal_semaphore_list_t wait_list = iree_hal_semaphore_list_empty();
   SemaphoreListStorage wait_storage;
   wait_storage.semaphore = semaphore;
@@ -840,12 +963,17 @@ iree_status_t QueueUpdateBinding(iree_hal_device_t* device,
   SemaphoreListStorage signal_storage;
   signal_storage.semaphore = semaphore;
   signal_storage.payload_value = wait_storage.payload_value + 1;
-  IREE_RETURN_IF_ERROR(iree_hal_device_queue_update(
-      device, queue_affinity, wait_list, signal_storage.list(), source_data,
-      /*source_offset=*/0, binding->buffer, binding->offset, binding->length,
-      IREE_HAL_UPDATE_FLAG_NONE));
-  *inout_payload_value = signal_storage.payload_value;
-  return iree_ok_status();
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_device_queue_read(
+        device, queue_affinity, wait_list, signal_storage.list(), file,
+        /*source_offset=*/0, binding->buffer, binding->offset, binding->length,
+        IREE_HAL_READ_FLAG_NONE);
+  }
+  iree_hal_file_release(file);
+  if (iree_status_is_ok(status)) {
+    *inout_payload_value = signal_storage.payload_value;
+  }
+  return status;
 }
 
 iree_status_t QueueFillBinding(iree_hal_device_t* device,
@@ -970,6 +1098,54 @@ static float LoadF32(const uint8_t* bytes) {
   return value;
 }
 
+static uint16_t LoadU16(const uint8_t* bytes) {
+  uint16_t value = 0;
+  std::memcpy(&value, bytes, sizeof(value));
+  return value;
+}
+
+static iree_status_t LoadTensorElementAsF32(id4_pipeline_tensor_dtype_t dtype,
+                                            const std::vector<uint8_t>& bytes,
+                                            iree_host_size_t index,
+                                            float* out_value) {
+  const iree_device_size_t dtype_byte_length =
+      id4_pipeline_tensor_dtype_byte_length(dtype);
+  if (dtype_byte_length == 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "actual tensor dtype is invalid");
+  }
+  if (index >
+      std::numeric_limits<iree_host_size_t>::max() / dtype_byte_length) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "actual tensor byte offset overflow");
+  }
+  const iree_host_size_t byte_offset =
+      index * static_cast<iree_host_size_t>(dtype_byte_length);
+  if (byte_offset > bytes.size() ||
+      bytes.size() - byte_offset < dtype_byte_length) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "actual tensor element index is out of range");
+  }
+  switch (dtype) {
+    case ID4_PIPELINE_TENSOR_DTYPE_F32:
+      *out_value = LoadF32(&bytes[byte_offset]);
+      return iree_ok_status();
+    case ID4_PIPELINE_TENSOR_DTYPE_F16:
+      *out_value = iree_math_f16_to_f32(LoadU16(&bytes[byte_offset]));
+      return iree_ok_status();
+    case ID4_PIPELINE_TENSOR_DTYPE_BF16:
+      *out_value = iree_math_bf16_to_f32(LoadU16(&bytes[byte_offset]));
+      return iree_ok_status();
+    default: {
+      iree_string_view_t dtype_name = id4_pipeline_tensor_dtype_format(dtype);
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "actual tensor dtype `%.*s` cannot be compared as F32",
+          static_cast<int>(dtype_name.size), dtype_name.data);
+    }
+  }
+}
+
 static iree_status_t ShapeElementCount(id4_pipeline_tensor_shape_t shape,
                                        iree_host_size_t* out_element_count) {
   IREE_ASSERT_ARGUMENT(out_element_count);
@@ -1019,10 +1195,13 @@ static iree_status_t ShapeRowMajorStrides(
 }
 
 static iree_status_t CompareF32Element(const FixtureTensor& expected_tensor,
+                                       id4_pipeline_tensor_dtype_t actual_dtype,
                                        iree_host_size_t expected_index,
                                        iree_host_size_t actual_index,
                                        const std::vector<uint8_t>& actual) {
-  const float actual_value = LoadF32(&actual[actual_index * sizeof(float)]);
+  float actual_value = 0.0f;
+  IREE_RETURN_IF_ERROR(LoadTensorElementAsF32(actual_dtype, actual,
+                                              actual_index, &actual_value));
   const float expected_value =
       LoadF32(&expected_tensor.payload[expected_index * sizeof(float)]);
   const double tolerance =
@@ -1040,18 +1219,23 @@ static iree_status_t CompareF32Element(const FixtureTensor& expected_tensor,
 }
 
 static iree_status_t CompareF32DensePayload(
-    const FixtureTensor& expected_tensor, const std::vector<uint8_t>& actual) {
+    const FixtureTensor& expected_tensor,
+    const id4_pipeline_tensor_layout_t* actual_layout,
+    const std::vector<uint8_t>& actual) {
   iree_host_size_t element_count = 0;
   IREE_RETURN_IF_ERROR(
       ShapeElementCount(expected_tensor.shape, &element_count));
   for (iree_host_size_t i = 0; i < element_count; ++i) {
-    IREE_RETURN_IF_ERROR(CompareF32Element(expected_tensor, i, i, actual));
+    IREE_RETURN_IF_ERROR(
+        CompareF32Element(expected_tensor, actual_layout->dtype, i, i, actual));
   }
   return iree_ok_status();
 }
 
-static iree_status_t CompareF32SourceSlice(const FixtureTensor& expected_tensor,
-                                           const std::vector<uint8_t>& actual) {
+static iree_status_t CompareF32SourceSlice(
+    const FixtureTensor& expected_tensor,
+    const id4_pipeline_tensor_layout_t* actual_layout,
+    const std::vector<uint8_t>& actual) {
   iree_host_size_t expected_strides[ID4_PIPELINE_TENSOR_MAX_RANK] = {};
   IREE_RETURN_IF_ERROR(
       ShapeRowMajorStrides(expected_tensor.shape, expected_strides));
@@ -1074,16 +1258,23 @@ static iree_status_t CompareF32SourceSlice(const FixtureTensor& expected_tensor,
                        coordinate) *
                       actual_strides[dim];
     }
-    IREE_RETURN_IF_ERROR(CompareF32Element(expected_tensor, expected_index,
+    IREE_RETURN_IF_ERROR(CompareF32Element(expected_tensor,
+                                           actual_layout->dtype, expected_index,
                                            actual_index, actual));
   }
   return iree_ok_status();
 }
 
-iree_status_t CompareF32BindingWithFixtureTensor(
+iree_status_t CompareBindingWithFixtureTensor(
     iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
     const iree_hal_buffer_binding_t* binding,
-    iree_hal_semaphore_list_t wait_list, const FixtureTensor& expected_tensor) {
+    iree_hal_semaphore_list_t wait_list,
+    const id4_pipeline_tensor_layout_t* actual_layout,
+    const FixtureTensor& expected_tensor) {
+  if (!actual_layout) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "actual tensor layout is required");
+  }
   if (expected_tensor.dtype != ID4_PIPELINE_TENSOR_DTYPE_F32) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
@@ -1099,12 +1290,6 @@ iree_status_t CompareF32BindingWithFixtureTensor(
   std::vector<uint8_t> actual_bytes;
   IREE_RETURN_IF_ERROR(ReadBindingToHost(device, queue_affinity, binding,
                                          wait_list, &actual_bytes));
-  if ((expected_tensor.payload.size() % sizeof(float)) != 0) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "expected tensor `%s` byte length is not f32 element-aligned",
-        expected_tensor.name.c_str());
-  }
   iree_host_size_t expected_element_count = 0;
   IREE_RETURN_IF_ERROR(
       ShapeElementCount(expected_tensor.shape, &expected_element_count));
@@ -1124,35 +1309,60 @@ iree_status_t CompareF32BindingWithFixtureTensor(
         expected_tensor.name.c_str(), expected_tensor.payload.size(),
         expected_byte_count);
   }
-  if ((actual_bytes.size() % sizeof(float)) != 0) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "actual tensor `%s` byte length is not f32 element-aligned",
-        expected_tensor.name.c_str());
+  const iree_device_size_t actual_dtype_byte_length =
+      id4_pipeline_tensor_dtype_byte_length(actual_layout->dtype);
+  if (actual_dtype_byte_length == 0) {
+    iree_string_view_t dtype_name =
+        id4_pipeline_tensor_dtype_format(actual_layout->dtype);
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "actual tensor `%s` dtype `%.*s` is invalid",
+                            expected_tensor.name.c_str(),
+                            static_cast<int>(dtype_name.size), dtype_name.data);
   }
-  if (actual_bytes.size() == expected_tensor.payload.size()) {
-    return CompareF32DensePayload(expected_tensor, actual_bytes);
-  }
-  iree_host_size_t source_element_count = 0;
+  iree_host_size_t actual_element_count = 0;
   IREE_RETURN_IF_ERROR(
-      ShapeElementCount(expected_tensor.source_shape, &source_element_count));
-  if (source_element_count >
-      std::numeric_limits<iree_host_size_t>::max() / sizeof(float)) {
+      ShapeElementCount(actual_layout->shape, &actual_element_count));
+  if (actual_element_count >
+      std::numeric_limits<iree_host_size_t>::max() / actual_dtype_byte_length) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "source tensor `%s` byte length overflow",
+                            "actual tensor `%s` byte length overflow",
                             expected_tensor.name.c_str());
   }
-  const iree_host_size_t source_byte_count =
-      source_element_count * sizeof(float);
-  if (actual_bytes.size() == source_byte_count) {
-    return CompareF32SourceSlice(expected_tensor, actual_bytes);
+  const iree_host_size_t actual_byte_count =
+      actual_element_count *
+      static_cast<iree_host_size_t>(actual_dtype_byte_length);
+  if (actual_bytes.size() != actual_byte_count) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "actual tensor `%s` byte length %zu does not match planned byte length "
+        "%" PRIhsz,
+        expected_tensor.name.c_str(), actual_bytes.size(), actual_byte_count);
   }
-  return iree_make_status(
-      IREE_STATUS_INVALID_ARGUMENT,
-      "actual tensor `%s` byte length %zu matches neither expected length %zu "
-      "nor source length %" PRIhsz,
-      expected_tensor.name.c_str(), actual_bytes.size(),
-      expected_tensor.payload.size(), source_byte_count);
+  if (ShapeEquals(expected_tensor.shape, actual_layout->shape)) {
+    return CompareF32DensePayload(expected_tensor, actual_layout, actual_bytes);
+  }
+  if (ShapeEquals(expected_tensor.source_shape, actual_layout->shape)) {
+    return CompareF32SourceSlice(expected_tensor, actual_layout, actual_bytes);
+  }
+  return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                          "actual tensor `%s` shape matches neither expected "
+                          "shape nor source shape",
+                          expected_tensor.name.c_str());
+}
+
+iree_status_t CompareF32BindingWithFixtureTensor(
+    iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_buffer_binding_t* binding,
+    iree_hal_semaphore_list_t wait_list, const FixtureTensor& expected_tensor) {
+  id4_pipeline_tensor_layout_t actual_layout = {};
+  actual_layout.name = iree_make_string_view(expected_tensor.name.data(),
+                                             expected_tensor.name.size());
+  actual_layout.dtype = ID4_PIPELINE_TENSOR_DTYPE_F32;
+  actual_layout.shape = expected_tensor.source_shape;
+  actual_layout.byte_length = binding->length;
+  return CompareBindingWithFixtureTensor(device, queue_affinity, binding,
+                                         wait_list, &actual_layout,
+                                         expected_tensor);
 }
 
 iree_status_t LoadFixtureTensors(iree_string_view_t fixture_directory,

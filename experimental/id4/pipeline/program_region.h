@@ -47,6 +47,14 @@ typedef iree_status_t(
     iree_host_size_t parameter_ordinal,
     id4_pipeline_tensor_import_t* out_import);
 
+// Resolves a semantic constant operation into a packed constant slab import.
+typedef iree_status_t(
+    IREE_API_PTR* id4_pipeline_program_region_resolve_constant_fn_t)(
+    void* user_data, const id4_pipeline_program_constant_op_t* constant_op,
+    const id4_pipeline_program_tensor_record_t* tensor,
+    iree_host_size_t constant_ordinal,
+    id4_pipeline_tensor_import_t* out_import);
+
 // Resolves a semantic Loom dispatch into prepared HAL executable state.
 typedef iree_status_t(
     IREE_API_PTR* id4_pipeline_program_region_resolve_kernel_fn_t)(
@@ -83,6 +91,8 @@ typedef struct id4_pipeline_program_region_lower_options_t {
   id4_pipeline_program_region_resolve_import_fn_t resolve_import;
   // Parameter resolver required when the program contains parameter operations.
   id4_pipeline_program_region_resolve_parameter_fn_t resolve_parameter;
+  // Constant resolver required when the program contains constant operations.
+  id4_pipeline_program_region_resolve_constant_fn_t resolve_constant;
   // Kernel resolver required when the region builder is in RECORD mode.
   id4_pipeline_program_region_resolve_kernel_fn_t resolve_kernel;
   // Tap resolver required when tap_mode is CAPTURE.

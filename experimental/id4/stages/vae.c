@@ -16,8 +16,6 @@
 #include "iree/base/internal/arena.h"
 
 #define ID4_VAE_STAGE_ALIGNMENT 16
-#define ID4_VAE_STAGE_PARAMETER_BINDING_SLOT 0
-#define ID4_VAE_STAGE_BOUNDARY_BINDING_SLOT_BASE 0
 #define ID4_VAE_STAGE_PROGRAM_BLOCK_SIZE (16 * 1024)
 
 typedef struct id4_vae_stage_t {
@@ -55,8 +53,8 @@ static iree_status_t id4_vae_stage_validate_model_config(
   id4_vae_decode_request_config_t request;
   memset(&request, 0, sizeof(request));
   request.latent_shape = id4_pipeline_program_make_shape_rank4(
-      1, model.min_tile_size_y, model.min_tile_size_x,
-      model.latent_channel_count);
+      model.min_tile_size_x, model.min_tile_size_y, model.latent_channel_count,
+      1);
   request.tiling.mode = ID4_VAE_TILING_MODE_DISABLED;
   id4_vae_decode_tiling_plan_t tiling_plan;
   return id4_vae_program_resolve_decode_tiling(model, request, &tiling_plan);
@@ -185,10 +183,6 @@ static iree_status_t id4_vae_stage_create_program_plan(
   plan_options.program = program;
   plan_options.device_group = stage->base.services.device_group;
   plan_options.parameter_scope = stage->parameter_scope;
-  plan_options.parameter_slab_binding_slot =
-      ID4_VAE_STAGE_PARAMETER_BINDING_SLOT;
-  plan_options.boundary_binding_slot_base =
-      ID4_VAE_STAGE_BOUNDARY_BINDING_SLOT_BASE;
   plan_options.alignment = ID4_VAE_STAGE_ALIGNMENT;
   return id4_pipeline_program_stage_create_plan(
       &plan_options, stage->host_allocator, out_plan);

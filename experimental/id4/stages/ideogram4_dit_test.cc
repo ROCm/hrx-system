@@ -21,9 +21,9 @@ static id4_ideogram4_dit_model_config_t MakeModelConfig() {
       // Channel count of each VAE latent image token.
       /*.input_channel_count=*/4,
       // Transformer hidden-state channel count.
-      /*.hidden_size=*/8,
+      /*.hidden_size=*/16,
       // Feed-forward intermediate channel count.
-      /*.intermediate_size=*/12,
+      /*.intermediate_size=*/32,
       // Transformer attention head count.
       /*.attention_head_count=*/2,
       // AdaLN conditioning vector channel count.
@@ -129,6 +129,7 @@ TEST(Ideogram4DitStage, PlansPreludeSliceFromRequestConfig) {
   EXPECT_EQ(id4_pipeline_plan_diagnostic_tap_count(plan), 2u);
   ASSERT_EQ(id4_pipeline_plan_region_count(plan), 1u);
 
+  const uint32_t head_size = model.hidden_size / model.attention_head_count;
   bool found_timestep_boundary = false;
   bool found_image_indicator_boundary = false;
   bool found_position_embedding_boundary = false;
@@ -149,8 +150,9 @@ TEST(Ideogram4DitStage, PlansPreludeSliceFromRequestConfig) {
       found_image_indicator_boundary = true;
     }
     if (boundary->layout.dtype == ID4_PIPELINE_TENSOR_DTYPE_F32 &&
-        ShapeEquals(boundary->layout.shape,
-                    id4_pipeline_program_make_shape_rank4(2, 2, 2, 2))) {
+        ShapeEquals(
+            boundary->layout.shape,
+            id4_pipeline_program_make_shape_rank4(2, 2, head_size / 2, 2))) {
       found_position_embedding_boundary = true;
     }
     if (boundary->layout.dtype == ID4_PIPELINE_TENSOR_DTYPE_F32 &&
@@ -236,6 +238,7 @@ TEST(Ideogram4DitStage, PlansConditionedPreludeSliceFromRequestConfig) {
   id4_pipeline_plan_t* plan = nullptr;
   IREE_ASSERT_OK(id4_pipeline_stage_plan(stage, &plan_options, &plan));
 
+  const uint32_t head_size = model.hidden_size / model.attention_head_count;
   bool found_condition_boundary = false;
   bool found_image_indicator_boundary = false;
   bool found_position_embedding_boundary = false;
@@ -258,8 +261,9 @@ TEST(Ideogram4DitStage, PlansConditionedPreludeSliceFromRequestConfig) {
       found_image_indicator_boundary = true;
     }
     if (boundary->layout.dtype == ID4_PIPELINE_TENSOR_DTYPE_F32 &&
-        ShapeEquals(boundary->layout.shape,
-                    id4_pipeline_program_make_shape_rank4(2, 2, 2, 5))) {
+        ShapeEquals(
+            boundary->layout.shape,
+            id4_pipeline_program_make_shape_rank4(2, 2, head_size / 2, 5))) {
       found_position_embedding_boundary = true;
     }
     if (boundary->layout.dtype == ID4_PIPELINE_TENSOR_DTYPE_F32 &&

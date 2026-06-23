@@ -135,10 +135,12 @@ iree_status_t id4_ideogram4_dit_program_dispatch_rmsnorm_gated_residual(
     id4_pipeline_program_tensor_t gate, id4_pipeline_program_tensor_t residual,
     id4_pipeline_program_tensor_t output);
 
-iree_status_t id4_ideogram4_dit_program_dispatch_silu_product(
+iree_status_t id4_ideogram4_dit_program_dispatch_mlp_gate_up_silu(
     id4_pipeline_program_builder_t* builder, iree_string_view_t name,
-    uint32_t token_count, uint32_t intermediate_size,
-    id4_pipeline_program_tensor_t gate, id4_pipeline_program_tensor_t up,
+    uint32_t token_count, uint32_t input_size, uint32_t intermediate_size,
+    id4_pipeline_program_tensor_t input,
+    id4_pipeline_program_tensor_t gate_weight,
+    id4_pipeline_program_tensor_t up_weight,
     id4_pipeline_program_tensor_t output);
 
 iree_status_t id4_ideogram4_dit_program_dispatch_linear_bf16_f32(
@@ -152,6 +154,17 @@ iree_status_t id4_ideogram4_dit_program_dispatch_qkv_split(
     uint32_t token_count, uint32_t hidden_size,
     id4_pipeline_program_tensor_t qkv, id4_pipeline_program_tensor_t query,
     id4_pipeline_program_tensor_t key, id4_pipeline_program_tensor_t value);
+
+iree_status_t id4_ideogram4_dit_program_dispatch_qkv_norm_rotary(
+    id4_pipeline_program_builder_t* builder, iree_string_view_t name,
+    uint32_t token_count, uint32_t attention_head_count, uint32_t head_size,
+    id4_pipeline_program_tensor_t qkv,
+    id4_pipeline_program_tensor_t norm_q_weight,
+    id4_pipeline_program_tensor_t norm_k_weight,
+    id4_pipeline_program_tensor_t position_embedding,
+    id4_pipeline_program_tensor_t rotated_query,
+    id4_pipeline_program_tensor_t rotated_key,
+    id4_pipeline_program_tensor_t value);
 
 iree_status_t id4_ideogram4_dit_program_dispatch_head_rmsnorm(
     id4_pipeline_program_builder_t* builder, iree_string_view_t name,

@@ -16,8 +16,13 @@
 
 enum {
   ID4_IDEOGRAM4_DIT_WORKGROUP_SIZE_X = 256,
+  ID4_IDEOGRAM4_DIT_WMMA_WORKGROUP_SIZE_X = 32,
+  ID4_IDEOGRAM4_DIT_LINEAR_TOKEN_BLOCK = 16,
+  ID4_IDEOGRAM4_DIT_LINEAR_OUTPUT_ROW_BLOCK = 16,
+  ID4_IDEOGRAM4_DIT_LINEAR_INPUT_PACK_MAX_ELEMENT_COUNT = 268435456,
+  ID4_IDEOGRAM4_DIT_ATTENTION_QUERY_BLOCK_SIZE = 8,
   ID4_IDEOGRAM4_DIT_CONFIG_VALUE_BUFFER_CAPACITY = 16,
-  ID4_IDEOGRAM4_DIT_MAX_KERNEL_CONFIG_BINDING_COUNT = 5,
+  ID4_IDEOGRAM4_DIT_MAX_KERNEL_CONFIG_BINDING_COUNT = 7,
   ID4_IDEOGRAM4_DIT_LLM_HIDDEN_STATE_LAYER_COUNT = 13,
 };
 
@@ -97,6 +102,15 @@ bool id4_ideogram4_dit_program_checked_mul_u64(uint64_t lhs, uint64_t rhs,
   if (lhs != 0 && rhs > UINT64_MAX / lhs) return false;
   *out_result = lhs * rhs;
   return true;
+}
+
+static iree_status_t id4_ideogram4_dit_program_format_child_name(
+    iree_string_view_t parent_name, iree_string_view_t child_suffix,
+    char* buffer, iree_host_size_t buffer_capacity,
+    iree_string_view_t* out_string) {
+  return id4_ideogram4_dit_program_format(
+      buffer, buffer_capacity, out_string, "%.*s.%.*s", (int)parent_name.size,
+      parent_name.data, (int)child_suffix.size, child_suffix.data);
 }
 
 static bool id4_ideogram4_dit_program_checked_add_u64(uint64_t lhs,
@@ -295,16 +309,25 @@ static iree_status_t id4_ideogram4_dit_program_validate_options(
                                                 out_total_token_count);
 }
 
-iree_hal_dispatch_config_t id4_ideogram4_dit_program_make_dispatch_config(
+static iree_hal_dispatch_config_t
+id4_ideogram4_dit_program_make_dispatch_config_with_workgroup_size(
     uint32_t workgroup_count_x, uint32_t workgroup_count_y,
-    uint32_t workgroup_count_z) {
+    uint32_t workgroup_count_z, uint32_t workgroup_size_x) {
   iree_hal_dispatch_config_t dispatch_config =
       iree_hal_make_static_dispatch_config(workgroup_count_x, workgroup_count_y,
                                            workgroup_count_z);
-  dispatch_config.workgroup_size[0] = ID4_IDEOGRAM4_DIT_WORKGROUP_SIZE_X;
+  dispatch_config.workgroup_size[0] = workgroup_size_x;
   dispatch_config.workgroup_size[1] = 1;
   dispatch_config.workgroup_size[2] = 1;
   return dispatch_config;
+}
+
+iree_hal_dispatch_config_t id4_ideogram4_dit_program_make_dispatch_config(
+    uint32_t workgroup_count_x, uint32_t workgroup_count_y,
+    uint32_t workgroup_count_z) {
+  return id4_ideogram4_dit_program_make_dispatch_config_with_workgroup_size(
+      workgroup_count_x, workgroup_count_y, workgroup_count_z,
+      ID4_IDEOGRAM4_DIT_WORKGROUP_SIZE_X);
 }
 
 iree_status_t id4_ideogram4_dit_program_make_element_dispatch_config(
@@ -468,8 +491,8 @@ static iree_status_t id4_ideogram4_dit_program_export(
 static iree_status_t id4_ideogram4_dit_program_dispatch_prelude_image(
     id4_pipeline_program_builder_t* builder, uint32_t image_token_count,
     uint32_t total_token_count, uint32_t output_token_offset,
-    uint32_t input_channel_count, uint32_t hidden_size,
-    id4_pipeline_program_tensor_t image_tokens,
+    uint32_t image_width, uint32_t image_height, uint32_t input_channel_count,
+    uint32_t hidden_size, id4_pipeline_program_tensor_t image_tokens,
     id4_pipeline_program_tensor_t input_proj_weight,
     id4_pipeline_program_tensor_t input_proj_bias,
     id4_pipeline_program_tensor_t image_indicator,
@@ -481,6 +504,8 @@ static iree_status_t id4_ideogram4_dit_program_dispatch_prelude_image(
        total_token_count},
       {IREE_SV("id4.ideogram4.prelude_image.output_token_offset"),
        output_token_offset},
+      {IREE_SV("id4.ideogram4.prelude_image.image_width"), image_width},
+      {IREE_SV("id4.ideogram4.prelude_image.image_height"), image_height},
       {IREE_SV("id4.ideogram4.prelude_image.input_channel_count"),
        input_channel_count},
       {IREE_SV("id4.ideogram4.prelude_image.hidden_size"), hidden_size},
@@ -580,8 +605,12 @@ static iree_status_t id4_ideogram4_dit_program_dispatch_condition_project(
       builder, IREE_SV("ideogram4.cond.prelude.llm_cond_proj"),
       IREE_SV("ideogram4/condition_project_bf16_f32"),
       IREE_SV("id4_ideogram4_condition_project_bf16_f32"),
-      id4_ideogram4_dit_program_make_dispatch_config(text_token_count,
-                                                     hidden_size, 1),
+      id4_ideogram4_dit_program_make_dispatch_config(
+          id4_ideogram4_dit_program_ceil_div_u32(
+              text_token_count, ID4_IDEOGRAM4_DIT_LINEAR_TOKEN_BLOCK),
+          id4_ideogram4_dit_program_ceil_div_u32(
+              hidden_size, ID4_IDEOGRAM4_DIT_LINEAR_OUTPUT_ROW_BLOCK),
+          1),
       IREE_ARRAYSIZE(config_values), config_bindings, IREE_ARRAYSIZE(bindings),
       bindings);
 }
@@ -682,14 +711,17 @@ iree_status_t id4_ideogram4_dit_program_dispatch_rmsnorm_gated_residual(
       bindings);
 }
 
-iree_status_t id4_ideogram4_dit_program_dispatch_silu_product(
+iree_status_t id4_ideogram4_dit_program_dispatch_mlp_gate_up_silu(
     id4_pipeline_program_builder_t* builder, iree_string_view_t name,
-    uint32_t token_count, uint32_t intermediate_size,
-    id4_pipeline_program_tensor_t gate, id4_pipeline_program_tensor_t up,
+    uint32_t token_count, uint32_t input_size, uint32_t intermediate_size,
+    id4_pipeline_program_tensor_t input,
+    id4_pipeline_program_tensor_t gate_weight,
+    id4_pipeline_program_tensor_t up_weight,
     id4_pipeline_program_tensor_t output) {
   const id4_ideogram4_dit_program_config_value_t config_values[] = {
-      {IREE_SV("id4.ideogram4.silu_product.token_count"), token_count},
-      {IREE_SV("id4.ideogram4.silu_product.intermediate_size"),
+      {IREE_SV("id4.ideogram4.mlp_gate_up_silu.token_count"), token_count},
+      {IREE_SV("id4.ideogram4.mlp_gate_up_silu.input_size"), input_size},
+      {IREE_SV("id4.ideogram4.mlp_gate_up_silu.intermediate_size"),
        intermediate_size},
   };
   char value_buffers[ID4_IDEOGRAM4_DIT_MAX_KERNEL_CONFIG_BINDING_COUNT]
@@ -700,23 +732,21 @@ iree_status_t id4_ideogram4_dit_program_dispatch_silu_product(
       IREE_ARRAYSIZE(config_values), config_values, value_buffers,
       config_bindings));
   id4_pipeline_program_dispatch_binding_t bindings[] = {
-      id4_pipeline_program_read(gate),
-      id4_pipeline_program_read(up),
+      id4_pipeline_program_read(input),
+      id4_pipeline_program_read(gate_weight),
+      id4_pipeline_program_read(up_weight),
       id4_pipeline_program_write(output),
   };
-  iree_hal_dispatch_config_t dispatch_config;
-  uint64_t element_count64 = 0;
-  if (!id4_ideogram4_dit_program_checked_mul_u64(token_count, intermediate_size,
-                                                 &element_count64) ||
-      element_count64 > UINT32_MAX) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "Ideogram4 DiT SiLU product size overflow");
-  }
-  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_make_element_dispatch_config(
-      (uint32_t)element_count64, &dispatch_config));
+  const uint32_t token_tile_count = id4_ideogram4_dit_program_ceil_div_u32(
+      token_count, ID4_IDEOGRAM4_DIT_LINEAR_TOKEN_BLOCK);
+  const uint32_t intermediate_tile_count =
+      id4_ideogram4_dit_program_ceil_div_u32(
+          intermediate_size, ID4_IDEOGRAM4_DIT_LINEAR_OUTPUT_ROW_BLOCK);
   return id4_ideogram4_dit_program_dispatch_loom(
-      builder, name, IREE_SV("ideogram4/silu_product_f32"),
-      IREE_SV("id4_ideogram4_silu_product_f32"), dispatch_config,
+      builder, name, IREE_SV("ideogram4/mlp_gate_up_silu_f32"),
+      IREE_SV("id4_ideogram4_mlp_gate_up_silu_f32"),
+      id4_ideogram4_dit_program_make_dispatch_config(
+          token_tile_count, intermediate_tile_count, 1),
       IREE_ARRAYSIZE(config_values), config_bindings, IREE_ARRAYSIZE(bindings),
       bindings);
 }
@@ -726,30 +756,182 @@ iree_status_t id4_ideogram4_dit_program_dispatch_linear_bf16_f32(
     uint32_t token_count, uint32_t input_size, uint32_t output_size,
     id4_pipeline_program_tensor_t input, id4_pipeline_program_tensor_t weight,
     id4_pipeline_program_tensor_t output) {
-  const id4_ideogram4_dit_program_config_value_t config_values[] = {
-      {IREE_SV("id4.ideogram4.linear.token_count"), token_count},
-      {IREE_SV("id4.ideogram4.linear.input_size"), input_size},
-      {IREE_SV("id4.ideogram4.linear.output_size"), output_size},
+  if (token_count == 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "Ideogram4 linear token count must be nonzero");
+  }
+  if ((input_size % ID4_IDEOGRAM4_DIT_LINEAR_TOKEN_BLOCK) != 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "Ideogram4 linear input size %" PRIu32
+                            " must be a multiple of %u",
+                            input_size, ID4_IDEOGRAM4_DIT_LINEAR_TOKEN_BLOCK);
+  }
+  if ((output_size % ID4_IDEOGRAM4_DIT_LINEAR_OUTPUT_ROW_BLOCK) != 0) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "Ideogram4 linear output size %" PRIu32 " must be a multiple of %u",
+        output_size, ID4_IDEOGRAM4_DIT_LINEAR_OUTPUT_ROW_BLOCK);
+  }
+  uint64_t input_element_count_u64 = 0;
+  if (!id4_ideogram4_dit_program_checked_mul_u64(token_count, input_size,
+                                                 &input_element_count_u64)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "Ideogram4 linear input element count overflow");
+  }
+  if (input_element_count_u64 >
+      ID4_IDEOGRAM4_DIT_LINEAR_INPUT_PACK_MAX_ELEMENT_COUNT) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "Ideogram4 linear input element count %" PRIu64 " exceeds max %u",
+        input_element_count_u64,
+        ID4_IDEOGRAM4_DIT_LINEAR_INPUT_PACK_MAX_ELEMENT_COUNT);
+  }
+  const uint32_t input_element_count = (uint32_t)input_element_count_u64;
+  const uint32_t body_token_count =
+      token_count - (token_count % ID4_IDEOGRAM4_DIT_LINEAR_TOKEN_BLOCK);
+  const uint32_t tail_token_count = token_count - body_token_count;
+
+  char packed_input_name_buffer[ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
+  char pack_dispatch_name_buffer[ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
+  char after_pack_name_buffer[ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
+  iree_string_view_t packed_input_name = iree_string_view_empty();
+  iree_string_view_t pack_dispatch_name = iree_string_view_empty();
+  iree_string_view_t after_pack_name = iree_string_view_empty();
+  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_format_child_name(
+      name, IREE_SV("input_bf16"), packed_input_name_buffer,
+      IREE_ARRAYSIZE(packed_input_name_buffer), &packed_input_name));
+  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_format_child_name(
+      name, IREE_SV("input_pack"), pack_dispatch_name_buffer,
+      IREE_ARRAYSIZE(pack_dispatch_name_buffer), &pack_dispatch_name));
+  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_format_child_name(
+      name, IREE_SV("after_input_pack"), after_pack_name_buffer,
+      IREE_ARRAYSIZE(after_pack_name_buffer), &after_pack_name));
+
+  id4_pipeline_program_tensor_t packed_input =
+      id4_pipeline_program_tensor_invalid();
+  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_acquire_tensor(
+      builder, packed_input_name, ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+      id4_pipeline_program_make_shape_rank2(token_count, input_size),
+      &packed_input));
+
+  const id4_ideogram4_dit_program_config_value_t pack_config_values[] = {
+      {IREE_SV("id4.ideogram4.linear_input_pack.token_count"), token_count},
+      {IREE_SV("id4.ideogram4.linear_input_pack.input_size"), input_size},
+      {IREE_SV("id4.ideogram4.linear_input_pack.element_count"),
+       input_element_count},
   };
-  char value_buffers[ID4_IDEOGRAM4_DIT_MAX_KERNEL_CONFIG_BINDING_COUNT]
-                    [ID4_IDEOGRAM4_DIT_CONFIG_VALUE_BUFFER_CAPACITY];
+  char pack_value_buffers[ID4_IDEOGRAM4_DIT_MAX_KERNEL_CONFIG_BINDING_COUNT]
+                         [ID4_IDEOGRAM4_DIT_CONFIG_VALUE_BUFFER_CAPACITY];
   id4_pipeline_kernel_config_binding_t
-      config_bindings[ID4_IDEOGRAM4_DIT_MAX_KERNEL_CONFIG_BINDING_COUNT];
+      pack_config_bindings[ID4_IDEOGRAM4_DIT_MAX_KERNEL_CONFIG_BINDING_COUNT];
   IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_make_config_bindings(
-      IREE_ARRAYSIZE(config_values), config_values, value_buffers,
-      config_bindings));
-  id4_pipeline_program_dispatch_binding_t bindings[] = {
+      IREE_ARRAYSIZE(pack_config_values), pack_config_values,
+      pack_value_buffers, pack_config_bindings));
+  id4_pipeline_program_dispatch_binding_t pack_bindings[] = {
       id4_pipeline_program_read(input),
-      id4_pipeline_program_read(weight),
-      id4_pipeline_program_write(output),
+      id4_pipeline_program_write(packed_input),
   };
-  return id4_ideogram4_dit_program_dispatch_loom(
-      builder, name, IREE_SV("ideogram4/linear_bf16_f32"),
-      IREE_SV("id4_ideogram4_linear_bf16_f32"),
-      id4_ideogram4_dit_program_make_dispatch_config(token_count, output_size,
-                                                     1),
-      IREE_ARRAYSIZE(config_values), config_bindings, IREE_ARRAYSIZE(bindings),
-      bindings);
+  iree_hal_dispatch_config_t pack_dispatch_config;
+  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_make_element_dispatch_config(
+      input_element_count, &pack_dispatch_config));
+  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_dispatch_loom(
+      builder, pack_dispatch_name,
+      IREE_SV("ideogram4/linear_input_pack_f32_bf16"),
+      IREE_SV("id4_ideogram4_linear_input_pack_f32_bf16"), pack_dispatch_config,
+      IREE_ARRAYSIZE(pack_config_values), pack_config_bindings,
+      IREE_ARRAYSIZE(pack_bindings), pack_bindings));
+  IREE_RETURN_IF_ERROR(
+      id4_ideogram4_dit_program_barrier(builder, after_pack_name));
+
+  if (body_token_count != 0) {
+    char body_dispatch_name_buffer[ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
+    iree_string_view_t body_dispatch_name = iree_string_view_empty();
+    IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_format_child_name(
+        name, IREE_SV("wmma"), body_dispatch_name_buffer,
+        IREE_ARRAYSIZE(body_dispatch_name_buffer), &body_dispatch_name));
+    const id4_ideogram4_dit_program_config_value_t body_config_values[] = {
+        {IREE_SV("id4.ideogram4.linear_wmma.token_count"), token_count},
+        {IREE_SV("id4.ideogram4.linear_wmma.dispatch_token_count"),
+         body_token_count},
+        {IREE_SV("id4.ideogram4.linear_wmma.input_size"), input_size},
+        {IREE_SV("id4.ideogram4.linear_wmma.output_size"), output_size},
+    };
+    char body_value_buffers[ID4_IDEOGRAM4_DIT_MAX_KERNEL_CONFIG_BINDING_COUNT]
+                           [ID4_IDEOGRAM4_DIT_CONFIG_VALUE_BUFFER_CAPACITY];
+    id4_pipeline_kernel_config_binding_t
+        body_config_bindings[ID4_IDEOGRAM4_DIT_MAX_KERNEL_CONFIG_BINDING_COUNT];
+    IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_make_config_bindings(
+        IREE_ARRAYSIZE(body_config_values), body_config_values,
+        body_value_buffers, body_config_bindings));
+    id4_pipeline_program_dispatch_binding_t body_bindings[] = {
+        id4_pipeline_program_read(packed_input),
+        id4_pipeline_program_read(weight),
+        id4_pipeline_program_write(output),
+    };
+    const uint32_t token_tile_count =
+        body_token_count / ID4_IDEOGRAM4_DIT_LINEAR_TOKEN_BLOCK;
+    const uint32_t output_row_tile_count =
+        output_size / ID4_IDEOGRAM4_DIT_LINEAR_OUTPUT_ROW_BLOCK;
+    IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_dispatch_loom(
+        builder, body_dispatch_name, IREE_SV("ideogram4/linear_bf16_f32_wmma"),
+        IREE_SV("id4_ideogram4_linear_bf16_f32_wmma"),
+        id4_ideogram4_dit_program_make_dispatch_config_with_workgroup_size(
+            token_tile_count, output_row_tile_count, 1,
+            ID4_IDEOGRAM4_DIT_WMMA_WORKGROUP_SIZE_X),
+        IREE_ARRAYSIZE(body_config_values), body_config_bindings,
+        IREE_ARRAYSIZE(body_bindings), body_bindings));
+  }
+
+  if (tail_token_count != 0) {
+    if (body_token_count != 0) {
+      char after_body_name_buffer[ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
+      iree_string_view_t after_body_name = iree_string_view_empty();
+      IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_format_child_name(
+          name, IREE_SV("after_wmma"), after_body_name_buffer,
+          IREE_ARRAYSIZE(after_body_name_buffer), &after_body_name));
+      IREE_RETURN_IF_ERROR(
+          id4_ideogram4_dit_program_barrier(builder, after_body_name));
+    }
+    char tail_dispatch_name_buffer[ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
+    iree_string_view_t tail_dispatch_name = iree_string_view_empty();
+    IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_format_child_name(
+        name, IREE_SV("tail"), tail_dispatch_name_buffer,
+        IREE_ARRAYSIZE(tail_dispatch_name_buffer), &tail_dispatch_name));
+    const id4_ideogram4_dit_program_config_value_t tail_config_values[] = {
+        {IREE_SV("id4.ideogram4.linear_tail.token_count"), token_count},
+        {IREE_SV("id4.ideogram4.linear_tail.token_offset"), body_token_count},
+        {IREE_SV("id4.ideogram4.linear_tail.dispatch_token_count"),
+         tail_token_count},
+        {IREE_SV("id4.ideogram4.linear_tail.input_size"), input_size},
+        {IREE_SV("id4.ideogram4.linear_tail.output_size"), output_size},
+    };
+    char tail_value_buffers[ID4_IDEOGRAM4_DIT_MAX_KERNEL_CONFIG_BINDING_COUNT]
+                           [ID4_IDEOGRAM4_DIT_CONFIG_VALUE_BUFFER_CAPACITY];
+    id4_pipeline_kernel_config_binding_t
+        tail_config_bindings[ID4_IDEOGRAM4_DIT_MAX_KERNEL_CONFIG_BINDING_COUNT];
+    IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_make_config_bindings(
+        IREE_ARRAYSIZE(tail_config_values), tail_config_values,
+        tail_value_buffers, tail_config_bindings));
+    id4_pipeline_program_dispatch_binding_t tail_bindings[] = {
+        id4_pipeline_program_read(packed_input),
+        id4_pipeline_program_read(weight),
+        id4_pipeline_program_write(output),
+    };
+    const uint32_t tail_token_tile_count =
+        id4_ideogram4_dit_program_ceil_div_u32(
+            tail_token_count, ID4_IDEOGRAM4_DIT_LINEAR_TOKEN_BLOCK);
+    const uint32_t output_row_tile_count =
+        id4_ideogram4_dit_program_ceil_div_u32(
+            output_size, ID4_IDEOGRAM4_DIT_LINEAR_OUTPUT_ROW_BLOCK);
+    IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_dispatch_loom(
+        builder, tail_dispatch_name, IREE_SV("ideogram4/linear_bf16_f32_tail"),
+        IREE_SV("id4_ideogram4_linear_bf16_f32_tail"),
+        id4_ideogram4_dit_program_make_dispatch_config(
+            tail_token_tile_count, output_row_tile_count, 1),
+        IREE_ARRAYSIZE(tail_config_values), tail_config_bindings,
+        IREE_ARRAYSIZE(tail_bindings), tail_bindings));
+  }
+  return iree_ok_status();
 }
 
 static iree_status_t id4_ideogram4_dit_program_dispatch_silu(
@@ -811,11 +993,21 @@ static iree_status_t id4_ideogram4_dit_program_dispatch_modulated_layernorm(
 
 static iree_status_t id4_ideogram4_dit_program_dispatch_linear_bias_bf16_f32(
     id4_pipeline_program_builder_t* builder, iree_string_view_t name,
-    uint32_t token_count, uint32_t input_size, uint32_t output_size,
+    uint32_t token_count, uint32_t token_offset, uint32_t dispatch_token_count,
+    uint32_t input_size, uint32_t output_size,
     id4_pipeline_program_tensor_t input, id4_pipeline_program_tensor_t weight,
     id4_pipeline_program_tensor_t bias, id4_pipeline_program_tensor_t output) {
+  if (token_offset > token_count ||
+      dispatch_token_count > token_count - token_offset) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "Ideogram4 DiT linear-bias dispatch token range overflow");
+  }
   const id4_ideogram4_dit_program_config_value_t config_values[] = {
       {IREE_SV("id4.ideogram4.linear_bias.token_count"), token_count},
+      {IREE_SV("id4.ideogram4.linear_bias.token_offset"), token_offset},
+      {IREE_SV("id4.ideogram4.linear_bias.dispatch_token_count"),
+       dispatch_token_count},
       {IREE_SV("id4.ideogram4.linear_bias.input_size"), input_size},
       {IREE_SV("id4.ideogram4.linear_bias.output_size"), output_size},
   };
@@ -835,8 +1027,8 @@ static iree_status_t id4_ideogram4_dit_program_dispatch_linear_bias_bf16_f32(
   return id4_ideogram4_dit_program_dispatch_loom(
       builder, name, IREE_SV("ideogram4/linear_bias_bf16_f32"),
       IREE_SV("id4_ideogram4_linear_bias_bf16_f32"),
-      id4_ideogram4_dit_program_make_dispatch_config(token_count, output_size,
-                                                     1),
+      id4_ideogram4_dit_program_make_dispatch_config(dispatch_token_count,
+                                                     output_size, 1),
       IREE_ARRAYSIZE(config_values), config_bindings, IREE_ARRAYSIZE(bindings),
       bindings);
 }
@@ -927,6 +1119,47 @@ iree_status_t id4_ideogram4_dit_program_dispatch_qkv_split(
       bindings);
 }
 
+iree_status_t id4_ideogram4_dit_program_dispatch_qkv_norm_rotary(
+    id4_pipeline_program_builder_t* builder, iree_string_view_t name,
+    uint32_t token_count, uint32_t attention_head_count, uint32_t head_size,
+    id4_pipeline_program_tensor_t qkv,
+    id4_pipeline_program_tensor_t norm_q_weight,
+    id4_pipeline_program_tensor_t norm_k_weight,
+    id4_pipeline_program_tensor_t position_embedding,
+    id4_pipeline_program_tensor_t rotated_query,
+    id4_pipeline_program_tensor_t rotated_key,
+    id4_pipeline_program_tensor_t value) {
+  const id4_ideogram4_dit_program_config_value_t config_values[] = {
+      {IREE_SV("id4.ideogram4.qkv_norm_rotary.token_count"), token_count},
+      {IREE_SV("id4.ideogram4.qkv_norm_rotary.attention_head_count"),
+       attention_head_count},
+      {IREE_SV("id4.ideogram4.qkv_norm_rotary.head_size"), head_size},
+  };
+  char value_buffers[ID4_IDEOGRAM4_DIT_MAX_KERNEL_CONFIG_BINDING_COUNT]
+                    [ID4_IDEOGRAM4_DIT_CONFIG_VALUE_BUFFER_CAPACITY];
+  id4_pipeline_kernel_config_binding_t
+      config_bindings[ID4_IDEOGRAM4_DIT_MAX_KERNEL_CONFIG_BINDING_COUNT];
+  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_make_config_bindings(
+      IREE_ARRAYSIZE(config_values), config_values, value_buffers,
+      config_bindings));
+  id4_pipeline_program_dispatch_binding_t bindings[] = {
+      id4_pipeline_program_read(qkv),
+      id4_pipeline_program_read(norm_q_weight),
+      id4_pipeline_program_read(norm_k_weight),
+      id4_pipeline_program_read(position_embedding),
+      id4_pipeline_program_write(rotated_query),
+      id4_pipeline_program_write(rotated_key),
+      id4_pipeline_program_write(value),
+  };
+  return id4_ideogram4_dit_program_dispatch_loom(
+      builder, name, IREE_SV("ideogram4/qkv_norm_rotary_f32"),
+      IREE_SV("id4_ideogram4_qkv_norm_rotary_f32"),
+      id4_ideogram4_dit_program_make_dispatch_config(token_count,
+                                                     attention_head_count, 1),
+      IREE_ARRAYSIZE(config_values), config_bindings, IREE_ARRAYSIZE(bindings),
+      bindings);
+}
+
 iree_status_t id4_ideogram4_dit_program_dispatch_head_rmsnorm(
     id4_pipeline_program_builder_t* builder, iree_string_view_t name,
     uint32_t token_count, uint32_t attention_head_count, uint32_t head_size,
@@ -1000,11 +1233,21 @@ iree_status_t id4_ideogram4_dit_program_dispatch_attention(
     uint32_t token_count, uint32_t attention_head_count, uint32_t head_size,
     id4_pipeline_program_tensor_t query, id4_pipeline_program_tensor_t key,
     id4_pipeline_program_tensor_t value, id4_pipeline_program_tensor_t output) {
+  if (head_size > ID4_IDEOGRAM4_DIT_WORKGROUP_SIZE_X) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "Ideogram4 DiT attention head size %u exceeds workgroup size %u",
+        head_size, ID4_IDEOGRAM4_DIT_WORKGROUP_SIZE_X);
+  }
+
   const id4_ideogram4_dit_program_config_value_t config_values[] = {
-      {IREE_SV("id4.ideogram4.attention.token_count"), token_count},
-      {IREE_SV("id4.ideogram4.attention.attention_head_count"),
+      {IREE_SV("id4.ideogram4.attention_query_block8_rounded.token_count"),
+       token_count},
+      {IREE_SV(
+           "id4.ideogram4.attention_query_block8_rounded.attention_head_count"),
        attention_head_count},
-      {IREE_SV("id4.ideogram4.attention.head_size"), head_size},
+      {IREE_SV("id4.ideogram4.attention_query_block8_rounded.head_size"),
+       head_size},
   };
   char value_buffers[ID4_IDEOGRAM4_DIT_MAX_KERNEL_CONFIG_BINDING_COUNT]
                     [ID4_IDEOGRAM4_DIT_CONFIG_VALUE_BUFFER_CAPACITY];
@@ -1019,20 +1262,14 @@ iree_status_t id4_ideogram4_dit_program_dispatch_attention(
       id4_pipeline_program_read(value),
       id4_pipeline_program_write(output),
   };
-  iree_hal_dispatch_config_t dispatch_config;
-  const uint32_t hidden_size = attention_head_count * head_size;
-  uint64_t element_count64 = 0;
-  if (!id4_ideogram4_dit_program_checked_mul_u64(token_count, hidden_size,
-                                                 &element_count64) ||
-      element_count64 > UINT32_MAX) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "Ideogram4 DiT attention output size overflow");
-  }
-  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_make_element_dispatch_config(
-      (uint32_t)element_count64, &dispatch_config));
+  const uint32_t query_tile_count =
+      (token_count + ID4_IDEOGRAM4_DIT_ATTENTION_QUERY_BLOCK_SIZE - 1) /
+      ID4_IDEOGRAM4_DIT_ATTENTION_QUERY_BLOCK_SIZE;
   return id4_ideogram4_dit_program_dispatch_loom(
-      builder, name, IREE_SV("ideogram4/attention_f32"),
-      IREE_SV("id4_ideogram4_attention_f32"), dispatch_config,
+      builder, name, IREE_SV("ideogram4/attention_query_block8_rounded_f32"),
+      IREE_SV("id4_ideogram4_attention_query_block8_rounded_f32"),
+      id4_ideogram4_dit_program_make_dispatch_config(query_tile_count,
+                                                     attention_head_count, 1),
       IREE_ARRAYSIZE(config_values), config_bindings, IREE_ARRAYSIZE(bindings),
       bindings);
 }
@@ -1152,6 +1389,14 @@ static iree_status_t id4_ideogram4_dit_program_author_final_output(
   const uint32_t text_token_count = options->request.text_token_count;
   const uint32_t width = (uint32_t)options->request.latent_shape.dims[0];
   const uint32_t height = (uint32_t)options->request.latent_shape.dims[1];
+  uint64_t image_token_count64 = 0;
+  if (!id4_ideogram4_dit_program_checked_mul_u64(width, height,
+                                                 &image_token_count64) ||
+      image_token_count64 > UINT32_MAX) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "Ideogram4 DiT final image token count overflow");
+  }
+  const uint32_t image_token_count = (uint32_t)image_token_count64;
 
   char final_silu_name_buffer[ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
   char after_final_silu_name_buffer[ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
@@ -1205,6 +1450,8 @@ static iree_status_t id4_ideogram4_dit_program_author_final_output(
       builder, &final_scale_options, &final_scale));
   IREE_RETURN_IF_ERROR(
       id4_ideogram4_dit_program_barrier(builder, after_final_scale_name));
+  IREE_RETURN_IF_ERROR(
+      id4_ideogram4_dit_program_tap(builder, final_scale_name, final_scale));
 
   char final_norm_name_buffer[ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
   char
@@ -1238,6 +1485,8 @@ static iree_status_t id4_ideogram4_dit_program_author_final_output(
       final_scale, final_norm));
   IREE_RETURN_IF_ERROR(
       id4_ideogram4_dit_program_barrier(builder, after_final_norm_name));
+  IREE_RETURN_IF_ERROR(
+      id4_ideogram4_dit_program_tap(builder, final_norm_name, final_norm));
 
   id4_pipeline_program_tensor_t final_linear_weight =
       id4_pipeline_program_tensor_invalid();
@@ -1278,14 +1527,16 @@ static iree_status_t id4_ideogram4_dit_program_author_final_output(
   IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_acquire_tensor(
       builder, projected_name, ID4_PIPELINE_PROGRAM_DTYPE_F32,
       id4_pipeline_program_make_shape_rank2(input_channel_count,
-                                            total_token_count),
+                                            image_token_count),
       &projected));
   IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_dispatch_linear_bias_bf16_f32(
-      builder, projected_dispatch_name, total_token_count, hidden_size,
-      input_channel_count, final_norm, final_linear_weight, final_linear_bias,
-      projected));
+      builder, projected_dispatch_name, total_token_count, text_token_count,
+      image_token_count, hidden_size, input_channel_count, final_norm,
+      final_linear_weight, final_linear_bias, projected));
   IREE_RETURN_IF_ERROR(
       id4_ideogram4_dit_program_barrier(builder, after_projected_name));
+  IREE_RETURN_IF_ERROR(
+      id4_ideogram4_dit_program_tap(builder, projected_name, projected));
 
   id4_pipeline_program_tensor_t velocity =
       id4_pipeline_program_tensor_invalid();
@@ -1314,7 +1565,7 @@ static iree_status_t id4_ideogram4_dit_program_author_final_output(
 
   IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_dispatch_unpatchify_scale(
       builder, velocity_dispatch_name, width, height, input_channel_count,
-      total_token_count, text_token_count, projected, velocity));
+      image_token_count, 0, projected, velocity));
   IREE_RETURN_IF_ERROR(
       id4_ideogram4_dit_program_barrier(builder, after_velocity_name));
   IREE_RETURN_IF_ERROR(
@@ -1481,17 +1732,25 @@ iree_status_t id4_ideogram4_dit_program_author_forward(
         llm_cond_norm_weight, condition_norm));
     IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_barrier(
         builder, IREE_SV("ideogram4.cond.prelude.after_llm_cond_norm")));
+    IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_tap(
+        builder, IREE_SV("ideogram4.cond.prelude.llm_cond_norm"),
+        condition_norm));
     IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_dispatch_condition_project(
         builder, text_token_count, total_token_count, llm_feature_count,
         hidden_size, condition_norm, llm_cond_proj_weight, llm_cond_proj_bias,
         image_indicator, image_indicator_embedding, prelude_hidden));
     IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_barrier(
         builder, IREE_SV("ideogram4.cond.prelude.after_llm_cond_proj")));
+    IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_tap(
+        builder, IREE_SV("ideogram4.cond.prelude.llm_cond_proj"),
+        prelude_hidden));
   }
   IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_dispatch_prelude_image(
       builder, image_token_count, total_token_count, text_token_count,
-      input_channel_count, hidden_size, x, input_proj_weight, input_proj_bias,
-      image_indicator, image_indicator_embedding, prelude_hidden));
+      (uint32_t)options->request.latent_shape.dims[0],
+      (uint32_t)options->request.latent_shape.dims[1], input_channel_count,
+      hidden_size, x, input_proj_weight, input_proj_bias, image_indicator,
+      image_indicator_embedding, prelude_hidden));
   IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_dispatch_timestep_embedding(
       builder, timestep_embedding_name, hidden_size, timestep,
       timestep_embedding));

@@ -1,6 +1,8 @@
 config.decl @id4.ideogram4.prelude_image.token_count : %value: index where [range(%value, 1, 65536)]
 config.decl @id4.ideogram4.prelude_image.output_token_count : %value: index where [range(%value, 1, 131072)]
 config.decl @id4.ideogram4.prelude_image.output_token_offset : %value: index where [range(%value, 0, 65536)]
+config.decl @id4.ideogram4.prelude_image.image_width : %value: index where [range(%value, 1, 4096)]
+config.decl @id4.ideogram4.prelude_image.image_height : %value: index where [range(%value, 1, 4096)]
 config.decl @id4.ideogram4.prelude_image.input_channel_count : %value: index where [range(%value, 4, 1024)]
 config.decl @id4.ideogram4.prelude_image.hidden_size : %value: index where [range(%value, 1, 65536)]
 
@@ -47,6 +49,8 @@ kernel.def export("id4_ideogram4_prelude_image_bf16_f32") @id4_ideogram4_prelude
   %token_count = config.get @id4.ideogram4.prelude_image.token_count : index
   %output_token_count = config.get @id4.ideogram4.prelude_image.output_token_count : index
   %output_token_offset = config.get @id4.ideogram4.prelude_image.output_token_offset : index
+  %image_width = config.get @id4.ideogram4.prelude_image.image_width : index
+  %image_height = config.get @id4.ideogram4.prelude_image.image_height : index
   %input_channel_count_unaligned = config.get @id4.ideogram4.prelude_image.input_channel_count : index
   %input_channel_count = index.assume %input_channel_count_unaligned [mul(%input_channel_count_unaligned, 4)] : index
   %hidden_size = config.get @id4.ideogram4.prelude_image.hidden_size : index
@@ -55,6 +59,10 @@ kernel.def export("id4_ideogram4_prelude_image_bf16_f32") @id4_ideogram4_prelude
   %vector_step = index.assume %vector_step0 [mul(%vector_step0, 4)] : index
   %input_base0 = index.mul %lane, %vector_width : index
   %input_base = index.assume %input_base0 [mul(%input_base0, 4)] : index
+  %source_token_w = index.rem %token, %image_width : index
+  %source_token_h = index.div %token, %image_width : index
+  %source_token_w_offset = index.mul %source_token_w, %image_height : index
+  %source_token = index.add %source_token_w_offset, %source_token_h : index
   %zero_f32 = scalar.constant 0.0 : f32
 
   %image_tokens_noalias, %weight_noalias, %bias_noalias, %image_indicator_noalias, %indicator_embedding_noalias, %output_noalias = buffer.assume.noalias %image_tokens, %weight, %bias, %image_indicator, %indicator_embedding, %output : buffer, buffer, buffer, buffer, buffer, buffer
@@ -79,15 +87,23 @@ kernel.def export("id4_ideogram4_prelude_image_bf16_f32") @id4_ideogram4_prelude
     %source_channel1 = func.call @id4_ideogram4_prelude_image_bf16_f32_source_channel(%input_channel1, %ae_channel_count) : (index, index) -> (index)
     %source_channel2 = func.call @id4_ideogram4_prelude_image_bf16_f32_source_channel(%input_channel2, %ae_channel_count) : (index, index) -> (index)
     %source_channel3 = func.call @id4_ideogram4_prelude_image_bf16_f32_source_channel(%input_channel3, %ae_channel_count) : (index, index) -> (index)
-    %input_value0 = view.load %image_tokens_view[%token, %source_channel0] : view<[%token_count]x[%input_channel_count]xf32, #dense> -> f32
-    %input_value1 = view.load %image_tokens_view[%token, %source_channel1] : view<[%token_count]x[%input_channel_count]xf32, #dense> -> f32
-    %input_value2 = view.load %image_tokens_view[%token, %source_channel2] : view<[%token_count]x[%input_channel_count]xf32, #dense> -> f32
-    %input_value3 = view.load %image_tokens_view[%token, %source_channel3] : view<[%token_count]x[%input_channel_count]xf32, #dense> -> f32
+    %input_value0 = view.load %image_tokens_view[%source_token, %source_channel0] : view<[%token_count]x[%input_channel_count]xf32, #dense> -> f32
+    %input_value1 = view.load %image_tokens_view[%source_token, %source_channel1] : view<[%token_count]x[%input_channel_count]xf32, #dense> -> f32
+    %input_value2 = view.load %image_tokens_view[%source_token, %source_channel2] : view<[%token_count]x[%input_channel_count]xf32, #dense> -> f32
+    %input_value3 = view.load %image_tokens_view[%source_token, %source_channel3] : view<[%token_count]x[%input_channel_count]xf32, #dense> -> f32
+    %input_bf16_0 = scalar.fptrunc %input_value0 : f32 to bf16
+    %input_bf16_1 = scalar.fptrunc %input_value1 : f32 to bf16
+    %input_bf16_2 = scalar.fptrunc %input_value2 : f32 to bf16
+    %input_bf16_3 = scalar.fptrunc %input_value3 : f32 to bf16
+    %rounded_input0 = scalar.extf %input_bf16_0 : bf16 to f32
+    %rounded_input1 = scalar.extf %input_bf16_1 : bf16 to f32
+    %rounded_input2 = scalar.extf %input_bf16_2 : bf16 to f32
+    %rounded_input3 = scalar.extf %input_bf16_3 : bf16 to f32
     %input_zero_vector = vector.splat %zero_f32 : vector<4xf32>
-    %input_values01 = vector.insert %input_value0 into %input_zero_vector[0] : f32, vector<4xf32>
-    %input_values02 = vector.insert %input_value1 into %input_values01[1] : f32, vector<4xf32>
-    %input_values03 = vector.insert %input_value2 into %input_values02[2] : f32, vector<4xf32>
-    %input_values = vector.insert %input_value3 into %input_values03[3] : f32, vector<4xf32>
+    %input_values01 = vector.insert %rounded_input0 into %input_zero_vector[0] : f32, vector<4xf32>
+    %input_values02 = vector.insert %rounded_input1 into %input_values01[1] : f32, vector<4xf32>
+    %input_values03 = vector.insert %rounded_input2 into %input_values02[2] : f32, vector<4xf32>
+    %input_values = vector.insert %rounded_input3 into %input_values03[3] : f32, vector<4xf32>
     %weight_values = vector.load %weight_view[%hidden, %input_channel] : view<[%hidden_size]x[%input_channel_count]xbf16, #dense> -> vector<4xbf16>
     %partial = func.call @id4_ideogram4_prelude_image_bf16_f32_dot4(%input_values, %weight_values) : (vector<4xf32>, vector<4xbf16>) -> (f32)
     %next = scalar.addf<reassoc|nnan|ninf|nsz> %acc, %partial : f32
@@ -111,13 +127,13 @@ kernel.def export("id4_ideogram4_prelude_image_bf16_f32") @id4_ideogram4_prelude
 }
 
 check.case public @id4_ideogram4_prelude_image_bf16_f32_small_case {
-  %image_tokens = check.generate.fill value(1.0) : tensor<2x4xf32>
+  %image_tokens = check.generate.fill value(1.01) : tensor<2x4xf32>
   %weight = check.generate.fill value(1.0) : tensor<2x4xbf16>
   %bias = check.generate.fill value(2.0) : tensor<2xbf16>
   %image_indicator = check.generate.fill value(1) : tensor<2xi32>
   %indicator_embedding = check.generate.fill value(3.0) : tensor<2x2xbf16>
   %output = check.generate.fill value(0.0) : tensor<2x2xf32>
-  %expected = check.generate.fill value(9.0) : tensor<2x2xf32>
+  %expected = check.generate.fill value(9.03125) : tensor<2x2xf32>
   func.call @id4_ideogram4_prelude_image_bf16_f32(%image_tokens, %weight, %bias, %image_indicator, %indicator_embedding, %output) : (tensor<2x4xf32>, tensor<2x4xbf16>, tensor<2xbf16>, tensor<2xi32>, tensor<2x2xbf16>, tensor<2x2xf32>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2x2xf32>
   check.return

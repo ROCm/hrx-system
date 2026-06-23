@@ -12,15 +12,58 @@
 #include "experimental/id4/stages/vae.h"
 #include "iree/base/api.h"
 #include "iree/hal/api.h"
+#include "iree/io/parameter_provider.h"
 #include "iree/testing/benchmark.h"
+#include "iree/tooling/device_util.h"
 
 namespace {
+
+static constexpr uint32_t kFlux2LatentWidth = 64;
+static constexpr uint32_t kFlux2LatentHeight = 64;
+static constexpr uint32_t kFlux2LatentChannelCount = 128;
+static constexpr uint32_t kFlux2LatentBatchCount = 1;
+static constexpr uint64_t kFlux2DecodedElementCount = 1024ull * 1024ull * 3ull;
+static constexpr uint32_t kFlux2TileLatentWidth = 32;
+static constexpr uint32_t kFlux2TileLatentHeight = 32;
+static constexpr uint64_t kFlux2TileDecodedElementCount =
+    512ull * 512ull * 3ull;
+
+struct VaeBenchmarkShape {
+  // Latent tensor width used to plan the decode stage.
+  uint32_t latent_width;
+  // Latent tensor height used to plan the decode stage.
+  uint32_t latent_height;
+  // Decoded image element count used for throughput reporting.
+  uint64_t decoded_element_count;
+};
+
+static constexpr VaeBenchmarkShape kFlux2FullImageShape = {
+    // Full 1024x1024 image latent width.
+    /*.latent_width=*/kFlux2LatentWidth,
+    // Full 1024x1024 image latent height.
+    /*.latent_height=*/kFlux2LatentHeight,
+    // Full 1024x1024 RGB output element count.
+    /*.decoded_element_count=*/kFlux2DecodedElementCount,
+};
+
+static constexpr VaeBenchmarkShape kFlux2TileLocalShape = {
+    // Stable-style tile latent width.
+    /*.latent_width=*/kFlux2TileLatentWidth,
+    // Stable-style tile latent height.
+    /*.latent_height=*/kFlux2TileLatentHeight,
+    // Tile-local 512x512 RGB output element count.
+    /*.decoded_element_count=*/kFlux2TileDecodedElementCount,
+};
 
 struct VaeBenchmarkContext {
   // Live HAL, executable cache, and kernel-cache context selected by flags.
   id4::test::LiveStageContext live;
   // Embedded Loom source library used during stage preparation.
   id4::test::KernelLibraryRef kernel_library;
+  // Parameter provider created from standard --parameters= flags.
+  id4::test::OwningRef<iree_io_parameter_provider_t,
+                       iree_io_parameter_provider_release>
+      parameter_provider;
   // Loaded VAE stage under benchmark.
   id4::test::OwningRef<id4_pipeline_stage_t, id4_pipeline_stage_release> stage;
   // Diagnostic event counters collected by lifecycle calls.
@@ -70,11 +113,14 @@ static iree_status_t CreateLoadedVaeStageContext(
 static iree_status_t CreateLoadedVaeBenchmarkContext(
     VaeBenchmarkContext* out_context) {
   IREE_RETURN_IF_ERROR(CreateLoadedVaeStageContext(out_context));
-  return id4::test::CreateEmbeddedKernelLibrary(
-      out_context->kernel_library.out());
+  IREE_RETURN_IF_ERROR(id4::test::CreateEmbeddedKernelLibrary(
+      out_context->kernel_library.out()));
+  return id4::test::CreateParameterProviderFromFlags(
+      iree_string_view_empty(), out_context->parameter_provider.out());
 }
 
 static iree_status_t CreateVaePlan(VaeBenchmarkContext* context,
+                                   VaeBenchmarkShape shape,
                                    id4_pipeline_plan_t** out_plan) {
   IREE_ASSERT_ARGUMENT(context);
   IREE_ASSERT_ARGUMENT(out_plan);
@@ -83,12 +129,10 @@ static iree_status_t CreateVaePlan(VaeBenchmarkContext* context,
   id4_vae_stage_plan_options_t vae_options;
   std::memset(&vae_options, 0, sizeof(vae_options));
   vae_options.structure_size = sizeof(vae_options);
-  vae_options.request.latent_shape =
-      id4_pipeline_program_make_shape_rank4(1, 64, 64, 32);
-  vae_options.request.tiling.mode = ID4_VAE_TILING_MODE_EXPLICIT_TILE_SIZE;
-  vae_options.request.tiling.tile_size_x = 32;
-  vae_options.request.tiling.tile_size_y = 32;
-  vae_options.request.tiling.overlap = 0.5f;
+  vae_options.request.latent_shape = id4_pipeline_program_make_shape_rank4(
+      shape.latent_width, shape.latent_height, kFlux2LatentChannelCount,
+      kFlux2LatentBatchCount);
+  vae_options.request.tiling.mode = ID4_VAE_TILING_MODE_DISABLED;
 
   id4_pipeline_stage_plan_options_t plan_options;
   std::memset(&plan_options, 0, sizeof(plan_options));
@@ -102,18 +146,26 @@ static iree_status_t CreateVaePlan(VaeBenchmarkContext* context,
 
 static iree_status_t PrepareVaeBundle(VaeBenchmarkContext* context,
                                       const id4_pipeline_plan_t* plan,
+                                      iree_hal_semaphore_t* prepare_semaphore,
+                                      uint64_t signal_value,
                                       id4_pipeline_bundle_t** out_bundle) {
   IREE_ASSERT_ARGUMENT(context);
   IREE_ASSERT_ARGUMENT(plan);
   IREE_ASSERT_ARGUMENT(out_bundle);
   *out_bundle = nullptr;
 
+  id4::test::SemaphoreListStorage signal;
+  signal.semaphore = prepare_semaphore;
+  signal.payload_value = signal_value;
+
   id4_pipeline_stage_prepare_options_t prepare_options;
   std::memset(&prepare_options, 0, sizeof(prepare_options));
   prepare_options.structure_size = sizeof(prepare_options);
+  prepare_options.parameter_provider = context->parameter_provider.get();
   prepare_options.kernel_library = context->kernel_library.get();
   prepare_options.wait_semaphore_list = iree_hal_semaphore_list_empty();
-  prepare_options.signal_semaphore_list = iree_hal_semaphore_list_empty();
+  prepare_options.signal_semaphore_list = signal.list();
+  prepare_options.command_buffer_mode = context->live.command_buffer_mode;
   prepare_options.diagnostics_sink = &context->diagnostics_sink;
   return id4_pipeline_stage_prepare(context->stage.get(), plan,
                                     &prepare_options, out_bundle);
@@ -145,6 +197,13 @@ static iree_status_t IssueVaeBundle(
   return id4_pipeline_stage_issue(context->stage.get(), bundle, &issue_options);
 }
 
+static iree_status_t WaitForSemaphore(iree_hal_semaphore_t* semaphore,
+                                      uint64_t payload_value) {
+  return iree_hal_semaphore_wait(semaphore, payload_value,
+                                 iree_infinite_timeout(),
+                                 IREE_ASYNC_WAIT_FLAG_NONE);
+}
+
 static const iree_benchmark_def_t* RegisterVaeBenchmark(
     iree_string_view_t name, iree_benchmark_fn_t run,
     iree_benchmark_unit_t time_unit) {
@@ -167,7 +226,7 @@ IREE_BENCHMARK_FN(BM_VaeStagePlanFlux2Decode) {
   uint64_t iteration_count = 0;
   while (iree_benchmark_keep_running(benchmark_state, 1)) {
     id4_pipeline_plan_t* plan = nullptr;
-    IREE_RETURN_IF_ERROR(CreateVaePlan(&context, &plan));
+    IREE_RETURN_IF_ERROR(CreateVaePlan(&context, kFlux2FullImageShape, &plan));
     iree_optimization_barrier(plan);
     id4_pipeline_plan_release(plan);
     ++iteration_count;
@@ -183,14 +242,36 @@ IREE_BENCHMARK_FN(BM_VaeStagePrepareCachedKernels) {
   IREE_RETURN_IF_ERROR(CreateLoadedVaeBenchmarkContext(&context));
 
   id4::test::OwningRef<id4_pipeline_plan_t, id4_pipeline_plan_release> plan;
-  IREE_RETURN_IF_ERROR(CreateVaePlan(&context, plan.out()));
+  IREE_RETURN_IF_ERROR(
+      CreateVaePlan(&context, kFlux2FullImageShape, plan.out()));
+
+  id4::test::OwningRef<iree_hal_semaphore_t, iree_hal_semaphore_release>
+      prepare_semaphore;
+  IREE_RETURN_IF_ERROR(iree_hal_semaphore_create(
+      context.live.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, 0,
+      IREE_HAL_SEMAPHORE_FLAG_DEFAULT, prepare_semaphore.out()));
+
+  uint64_t prepare_value = 1;
+  id4::test::OwningRef<id4_pipeline_bundle_t, id4_pipeline_bundle_release>
+      warm_bundle;
+  IREE_RETURN_IF_ERROR(PrepareVaeBundle(&context, plan.get(),
+                                        prepare_semaphore.get(), prepare_value,
+                                        warm_bundle.out()));
+  IREE_RETURN_IF_ERROR(
+      WaitForSemaphore(prepare_semaphore.get(), prepare_value));
+  warm_bundle.reset();
 
   uint64_t iteration_count = 0;
   while (iree_benchmark_keep_running(benchmark_state, 1)) {
-    id4_pipeline_bundle_t* bundle = nullptr;
-    IREE_RETURN_IF_ERROR(PrepareVaeBundle(&context, plan.get(), &bundle));
-    iree_optimization_barrier(bundle);
-    id4_pipeline_bundle_release(bundle);
+    ++prepare_value;
+    id4::test::OwningRef<id4_pipeline_bundle_t, id4_pipeline_bundle_release>
+        bundle;
+    IREE_RETURN_IF_ERROR(PrepareVaeBundle(&context, plan.get(),
+                                          prepare_semaphore.get(),
+                                          prepare_value, bundle.out()));
+    IREE_RETURN_IF_ERROR(
+        WaitForSemaphore(prepare_semaphore.get(), prepare_value));
+    iree_optimization_barrier(bundle.get());
     ++iteration_count;
   }
   iree_benchmark_set_items_processed(benchmark_state,
@@ -199,15 +280,25 @@ IREE_BENCHMARK_FN(BM_VaeStagePrepareCachedKernels) {
 }
 ID4_VAE_BENCHMARK_REGISTER(BM_VaeStagePrepareCachedKernels, MICROSECOND);
 
-IREE_BENCHMARK_FN(BM_VaeStageIssueEndToEnd) {
+static iree_status_t RunVaeStageIssueEndToEnd(
+    iree_benchmark_state_t* benchmark_state, VaeBenchmarkShape shape) {
   VaeBenchmarkContext context;
   IREE_RETURN_IF_ERROR(CreateLoadedVaeBenchmarkContext(&context));
 
   id4::test::OwningRef<id4_pipeline_plan_t, id4_pipeline_plan_release> plan;
-  IREE_RETURN_IF_ERROR(CreateVaePlan(&context, plan.out()));
+  IREE_RETURN_IF_ERROR(CreateVaePlan(&context, shape, plan.out()));
+
+  id4::test::OwningRef<iree_hal_semaphore_t, iree_hal_semaphore_release>
+      prepare_semaphore;
+  IREE_RETURN_IF_ERROR(iree_hal_semaphore_create(
+      context.live.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, 0,
+      IREE_HAL_SEMAPHORE_FLAG_DEFAULT, prepare_semaphore.out()));
+
   id4::test::OwningRef<id4_pipeline_bundle_t, id4_pipeline_bundle_release>
       bundle;
-  IREE_RETURN_IF_ERROR(PrepareVaeBundle(&context, plan.get(), bundle.out()));
+  IREE_RETURN_IF_ERROR(PrepareVaeBundle(
+      &context, plan.get(), prepare_semaphore.get(), 1, bundle.out()));
+  IREE_RETURN_IF_ERROR(WaitForSemaphore(prepare_semaphore.get(), 1));
 
   id4::test::BufferBindingSet boundary_bindings;
   IREE_RETURN_IF_ERROR(id4::test::AllocateBoundaryBindings(
@@ -226,27 +317,43 @@ IREE_BENCHMARK_FN(BM_VaeStageIssueEndToEnd) {
       context.live.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, plan.get(),
       boundary_bindings, ID4_PIPELINE_BOUNDARY_TENSOR_FLAG_INITIALIZED,
       &latent_value, sizeof(latent_value), semaphore.get(), &payload_value));
-  IREE_RETURN_IF_ERROR(iree_hal_semaphore_wait(semaphore.get(), payload_value,
-                                               iree_infinite_timeout(),
-                                               IREE_ASYNC_WAIT_FLAG_NONE));
+  IREE_RETURN_IF_ERROR(WaitForSemaphore(semaphore.get(), payload_value));
 
   uint64_t iteration_count = 0;
-  while (iree_benchmark_keep_running(benchmark_state, 1)) {
+  iree_hal_profiling_from_flags_t* profiling = nullptr;
+  iree_status_t status = iree_hal_begin_device_group_profiling_from_flags(
+      context.live.device_group.get(), iree_allocator_system(), &profiling);
+  while (iree_status_is_ok(status) &&
+         iree_benchmark_keep_running(benchmark_state, 1)) {
     const uint64_t wait_value = payload_value;
     const uint64_t signal_value = payload_value + 1;
-    IREE_RETURN_IF_ERROR(IssueVaeBundle(&context, bundle.get(),
-                                        boundary_bindings, semaphore.get(),
-                                        wait_value, signal_value));
-    IREE_RETURN_IF_ERROR(iree_hal_semaphore_wait(semaphore.get(), signal_value,
-                                                 iree_infinite_timeout(),
-                                                 IREE_ASYNC_WAIT_FLAG_NONE));
-    payload_value = signal_value;
-    ++iteration_count;
+    status = IssueVaeBundle(&context, bundle.get(), boundary_bindings,
+                            semaphore.get(), wait_value, signal_value);
+    if (iree_status_is_ok(status)) {
+      status = WaitForSemaphore(semaphore.get(), signal_value);
+    }
+    if (iree_status_is_ok(status)) {
+      payload_value = signal_value;
+      ++iteration_count;
+    }
   }
+  status =
+      iree_status_join(status, iree_hal_end_profiling_from_flags(profiling));
+  IREE_RETURN_IF_ERROR(status);
   iree_benchmark_set_items_processed(
-      benchmark_state, static_cast<int64_t>(iteration_count * 1024 * 1024));
+      benchmark_state,
+      static_cast<int64_t>(iteration_count * shape.decoded_element_count));
   return iree_ok_status();
 }
+
+IREE_BENCHMARK_FN(BM_VaeStageIssueEndToEnd) {
+  return RunVaeStageIssueEndToEnd(benchmark_state, kFlux2FullImageShape);
+}
 ID4_VAE_BENCHMARK_REGISTER(BM_VaeStageIssueEndToEnd, MILLISECOND);
+
+IREE_BENCHMARK_FN(BM_VaeStageIssueTileLocalEndToEnd) {
+  return RunVaeStageIssueEndToEnd(benchmark_state, kFlux2TileLocalShape);
+}
+ID4_VAE_BENCHMARK_REGISTER(BM_VaeStageIssueTileLocalEndToEnd, MILLISECOND);
 
 }  // namespace

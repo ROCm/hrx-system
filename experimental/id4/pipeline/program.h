@@ -54,16 +54,18 @@ typedef enum id4_pipeline_program_op_kind_e {
   ID4_PIPELINE_PROGRAM_OP_KIND_IMPORT = 1,
   // Initialized tensor loaded from the model parameter provider.
   ID4_PIPELINE_PROGRAM_OP_KIND_PARAMETER = 2,
+  // Initialized tensor whose contents are embedded in the program.
+  ID4_PIPELINE_PROGRAM_OP_KIND_CONSTANT = 3,
   // Uninitialized transient tensor acquired by the program.
-  ID4_PIPELINE_PROGRAM_OP_KIND_ACQUIRE = 3,
+  ID4_PIPELINE_PROGRAM_OP_KIND_ACQUIRE = 4,
   // Loom kernel dispatch over explicit tensor bindings.
-  ID4_PIPELINE_PROGRAM_OP_KIND_DISPATCH_LOOM = 4,
+  ID4_PIPELINE_PROGRAM_OP_KIND_DISPATCH_LOOM = 5,
   // Execution epoch boundary for planning and lifetime analysis.
-  ID4_PIPELINE_PROGRAM_OP_KIND_BARRIER = 5,
+  ID4_PIPELINE_PROGRAM_OP_KIND_BARRIER = 6,
   // Diagnostic capture point for a tensor value.
-  ID4_PIPELINE_PROGRAM_OP_KIND_TAP = 6,
+  ID4_PIPELINE_PROGRAM_OP_KIND_TAP = 7,
   // External initialized tensor exported by the stage after producer writes.
-  ID4_PIPELINE_PROGRAM_OP_KIND_EXPORT = 7,
+  ID4_PIPELINE_PROGRAM_OP_KIND_EXPORT = 8,
 } id4_pipeline_program_op_kind_t;
 
 // Tensor access flags observed by a semantic dispatch.
@@ -136,6 +138,16 @@ typedef struct id4_pipeline_program_parameter_op_t {
   id4_pipeline_program_tensor_t tensor;
 } id4_pipeline_program_parameter_op_t;
 
+// Constant tensor operation payload.
+typedef struct id4_pipeline_program_constant_op_t {
+  // Initialized tensor whose record name is the constant diagnostic name.
+  id4_pipeline_program_tensor_t tensor;
+  // Constant data byte length.
+  iree_host_size_t data_length;
+  // Constant data bytes owned by the containing program operation.
+  const uint8_t* data;
+} id4_pipeline_program_constant_op_t;
+
 // Transient tensor acquire operation payload.
 typedef struct id4_pipeline_program_acquire_op_t {
   // Acquired uninitialized transient tensor.
@@ -194,6 +206,8 @@ typedef struct id4_pipeline_program_op_t {
     id4_pipeline_program_import_op_t import_value;
     // Parameter operation payload.
     id4_pipeline_program_parameter_op_t parameter;
+    // Constant operation payload.
+    id4_pipeline_program_constant_op_t constant;
     // Acquire operation payload.
     id4_pipeline_program_acquire_op_t acquire;
     // Loom dispatch operation payload.
@@ -248,6 +262,22 @@ typedef struct id4_pipeline_program_parameter_options_t {
   // Tensor shape.
   id4_pipeline_program_shape_t shape;
 } id4_pipeline_program_parameter_options_t;
+
+// Options for adding a program-owned constant tensor.
+typedef struct id4_pipeline_program_constant_options_t {
+  // Size of this structure for versioning.
+  iree_host_size_t structure_size;
+  // Extension structure chain; must be NULL for now.
+  const void* next;
+  // Stable tensor name used for diagnostics.
+  iree_string_view_t name;
+  // Scalar element type.
+  id4_pipeline_program_dtype_t dtype;
+  // Tensor shape.
+  id4_pipeline_program_shape_t shape;
+  // Constant data bytes copied by the builder.
+  iree_const_byte_span_t data;
+} id4_pipeline_program_constant_options_t;
 
 // Options for acquiring an uninitialized transient tensor.
 typedef struct id4_pipeline_program_acquire_tensor_options_t {
@@ -467,6 +497,12 @@ iree_status_t id4_pipeline_program_import_tensor(
 iree_status_t id4_pipeline_program_parameter(
     id4_pipeline_program_builder_t* builder,
     const id4_pipeline_program_parameter_options_t* options,
+    id4_pipeline_program_tensor_t* out_tensor);
+
+// Adds an initialized constant tensor owned by the program.
+iree_status_t id4_pipeline_program_constant(
+    id4_pipeline_program_builder_t* builder,
+    const id4_pipeline_program_constant_options_t* options,
     id4_pipeline_program_tensor_t* out_tensor);
 
 // Acquires an uninitialized transient tensor.

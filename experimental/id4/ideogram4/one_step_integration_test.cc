@@ -10,6 +10,7 @@
 #include "experimental/id4/pipeline/plan.h"
 #include "experimental/id4/pipeline/stage.h"
 #include "experimental/id4/stages/hal_integration_util.h"
+#include "experimental/id4/stages/ideogram4_decode.h"
 #include "experimental/id4/stages/ideogram4_dit.h"
 #include "experimental/id4/stages/qwen3_vl.h"
 #include "experimental/id4/stages/sampler.h"
@@ -162,6 +163,26 @@ static iree_status_t CreateSamplerStage(
                                           out_stage);
 }
 
+static iree_status_t CreateDecodeStage(
+    const id4::test::LiveStageContext& context,
+    iree_string_view_t parameter_scope, id4_pipeline_stage_t** out_stage) {
+  id4_pipeline_stage_services_t services;
+  std::memset(&services, 0, sizeof(services));
+  services.device_group = context.device_group.get();
+  services.executable_cache = context.executable_cache.get();
+  services.host_allocator = iree_allocator_system();
+
+  id4_ideogram4_decode_stage_create_options_t options;
+  std::memset(&options, 0, sizeof(options));
+  options.structure_size = sizeof(options);
+  options.services = services;
+  options.kernel_cache = context.kernel_cache.get();
+  options.parameter_scope = parameter_scope;
+  options.model = *id4_ideogram4_decode_program_ideogram4_model_config();
+  return id4_ideogram4_decode_stage_create(&options, iree_allocator_system(),
+                                           out_stage);
+}
+
 static iree_status_t PlanQwenStage(
     id4_pipeline_stage_t* stage, uint32_t token_count,
     id4_pipeline_diagnostics_sink_t* diagnostics_sink,
@@ -252,6 +273,46 @@ static iree_status_t PlanSamplerStage(
   std::memset(&plan_options, 0, sizeof(plan_options));
   plan_options.structure_size = sizeof(plan_options);
   plan_options.next = &sampler_options;
+  plan_options.flags = ID4_PIPELINE_STAGE_PLAN_FLAG_CAPTURE_DIAGNOSTIC_TAPS;
+  plan_options.diagnostic_tap_names = (iree_string_view_list_t){
+      IREE_ARRAYSIZE(diagnostic_tap_names),
+      diagnostic_tap_names,
+  };
+  plan_options.device_index = 0;
+  plan_options.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
+  plan_options.diagnostics_sink = diagnostics_sink;
+  return id4_pipeline_stage_plan(stage, &plan_options, out_plan);
+}
+
+static iree_status_t PlanDecodeStage(
+    id4_pipeline_stage_t* stage,
+    id4_pipeline_program_shape_t diffusion_latent_shape,
+    id4_pipeline_diagnostics_sink_t* diagnostics_sink,
+    id4_pipeline_plan_t** out_plan) {
+  const id4_ideogram4_decode_model_config_t* model =
+      id4_ideogram4_decode_program_ideogram4_model_config();
+  id4_ideogram4_decode_stage_plan_options_t decode_options;
+  std::memset(&decode_options, 0, sizeof(decode_options));
+  decode_options.structure_size = sizeof(decode_options);
+  decode_options.request.diffusion_latent_shape = diffusion_latent_shape;
+  if (diffusion_latent_shape.dims[0] < model->vae.min_tile_size_x ||
+      diffusion_latent_shape.dims[1] < model->vae.min_tile_size_y) {
+    decode_options.request.vae_tiling.mode = ID4_VAE_TILING_MODE_DISABLED;
+  } else {
+    decode_options.request.vae_tiling.mode =
+        ID4_VAE_TILING_MODE_EXPLICIT_TILE_SIZE;
+    decode_options.request.vae_tiling.tile_size_x = 32;
+    decode_options.request.vae_tiling.tile_size_y = 32;
+    decode_options.request.vae_tiling.overlap = 0.5f;
+  }
+
+  const iree_string_view_t diagnostic_tap_names[] = {
+      IREE_SV("vae.flux2.internal_latent"),
+  };
+  id4_pipeline_stage_plan_options_t plan_options;
+  std::memset(&plan_options, 0, sizeof(plan_options));
+  plan_options.structure_size = sizeof(plan_options);
+  plan_options.next = &decode_options;
   plan_options.flags = ID4_PIPELINE_STAGE_PLAN_FLAG_CAPTURE_DIAGNOSTIC_TAPS;
   plan_options.diagnostic_tap_names = (iree_string_view_list_t){
       IREE_ARRAYSIZE(diagnostic_tap_names),
@@ -470,6 +531,11 @@ TEST(Ideogram4OneStepIntegration,
       dit_uncond_provider;
   IREE_ASSERT_OK(id4::test::CreateParameterProviderFromFlags(
       IREE_SV("dit_uncond"), dit_uncond_provider.out()));
+  id4::test::OwningRef<iree_io_parameter_provider_t,
+                       iree_io_parameter_provider_release>
+      vae_provider;
+  IREE_ASSERT_OK(id4::test::CreateParameterProviderFromFlags(
+      IREE_SV("vae"), vae_provider.out()));
 
   id4::test::OwningRef<id4_pipeline_stage_t, id4_pipeline_stage_release>
       qwen_stage;
@@ -485,6 +551,10 @@ TEST(Ideogram4OneStepIntegration,
   id4::test::OwningRef<id4_pipeline_stage_t, id4_pipeline_stage_release>
       sampler_stage;
   IREE_ASSERT_OK(CreateSamplerStage(context, sampler_stage.out()));
+  id4::test::OwningRef<id4_pipeline_stage_t, id4_pipeline_stage_release>
+      decode_stage;
+  IREE_ASSERT_OK(
+      CreateDecodeStage(context, IREE_SV("vae"), decode_stage.out()));
 
   id4::test::StageDiagnostics diagnostics = {};
   id4_pipeline_diagnostics_sink_t diagnostics_sink =
@@ -498,6 +568,7 @@ TEST(Ideogram4OneStepIntegration,
   IREE_ASSERT_OK(
       id4_pipeline_stage_load(dit_uncond_stage.get(), &load_options));
   IREE_ASSERT_OK(id4_pipeline_stage_load(sampler_stage.get(), &load_options));
+  IREE_ASSERT_OK(id4_pipeline_stage_load(decode_stage.get(), &load_options));
 
   id4::test::OwningRef<id4_pipeline_plan_t, id4_pipeline_plan_release>
       qwen_plan;
@@ -519,6 +590,11 @@ TEST(Ideogram4OneStepIntegration,
   IREE_ASSERT_OK(PlanSamplerStage(sampler_stage.get(),
                                   dit_cond_request.latent_shape,
                                   &diagnostics_sink, sampler_plan.out()));
+  id4::test::OwningRef<id4_pipeline_plan_t, id4_pipeline_plan_release>
+      decode_plan;
+  IREE_ASSERT_OK(PlanDecodeStage(decode_stage.get(),
+                                 dit_cond_request.latent_shape,
+                                 &diagnostics_sink, decode_plan.out()));
 
   id4::test::BufferBindingSet qwen_boundaries;
   IREE_ASSERT_OK(id4::test::AllocateBoundaryBindings(
@@ -552,6 +628,14 @@ TEST(Ideogram4OneStepIntegration,
   IREE_ASSERT_OK(id4::test::AllocateDiagnosticTapBindings(
       context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, sampler_plan.get(),
       &sampler_taps));
+  id4::test::BufferBindingSet decode_boundaries;
+  IREE_ASSERT_OK(id4::test::AllocateBoundaryBindings(
+      context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, decode_plan.get(),
+      &decode_boundaries));
+  id4::test::BufferBindingSet decode_taps;
+  IREE_ASSERT_OK(id4::test::AllocateDiagnosticTapBindings(
+      context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, decode_plan.get(),
+      &decode_taps));
 
   id4::test::OwningRef<iree_hal_semaphore_t, iree_hal_semaphore_release>
       update_semaphore;
@@ -602,6 +686,11 @@ TEST(Ideogram4OneStepIntegration,
       sampler_boundaries, ID4_PIPELINE_BOUNDARY_TENSOR_FLAG_EXPORTED,
       &kOutputSentinel, sizeof(kOutputSentinel), update_semaphore.get(),
       &update_value));
+  IREE_ASSERT_OK(id4::test::QueueFillBoundaryTensors(
+      context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, decode_plan.get(),
+      decode_boundaries, ID4_PIPELINE_BOUNDARY_TENSOR_FLAG_EXPORTED,
+      &kOutputSentinel, sizeof(kOutputSentinel), update_semaphore.get(),
+      &update_value));
   IREE_ASSERT_OK(id4::test::QueueFillDiagnosticTapTensors(
       context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, dit_cond_taps,
       &kOutputSentinel, sizeof(kOutputSentinel), update_semaphore.get(),
@@ -612,6 +701,10 @@ TEST(Ideogram4OneStepIntegration,
       &update_value));
   IREE_ASSERT_OK(id4::test::QueueFillDiagnosticTapTensors(
       context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, sampler_taps,
+      &kOutputSentinel, sizeof(kOutputSentinel), update_semaphore.get(),
+      &update_value));
+  IREE_ASSERT_OK(id4::test::QueueFillDiagnosticTapTensors(
+      context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, decode_taps,
       &kOutputSentinel, sizeof(kOutputSentinel), update_semaphore.get(),
       &update_value));
 
@@ -672,6 +765,16 @@ TEST(Ideogram4OneStepIntegration,
   IREE_ASSERT_OK(iree_hal_semaphore_create(
       context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, 0,
       IREE_HAL_SEMAPHORE_FLAG_DEFAULT, sampler_done.out()));
+  id4::test::OwningRef<iree_hal_semaphore_t, iree_hal_semaphore_release>
+      decode_done;
+  IREE_ASSERT_OK(iree_hal_semaphore_create(
+      context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, 0,
+      IREE_HAL_SEMAPHORE_FLAG_DEFAULT, decode_done.out()));
+  id4::test::OwningRef<iree_hal_semaphore_t, iree_hal_semaphore_release>
+      decode_prepare_done;
+  IREE_ASSERT_OK(iree_hal_semaphore_create(
+      context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, 0,
+      IREE_HAL_SEMAPHORE_FLAG_DEFAULT, decode_prepare_done.out()));
 
   id4::test::SemaphoreListStorage qwen_prepare_signal;
   qwen_prepare_signal.semaphore = qwen_prepare_done.get();
@@ -791,11 +894,45 @@ TEST(Ideogram4OneStepIntegration,
   iree_hal_buffer_binding_t denoised = {};
   IREE_ASSERT_OK(id4::test::FindBoundaryBinding(
       sampler_plan.get(), sampler_boundaries, IREE_SV("denoised"), &denoised));
+  IREE_ASSERT_OK(ReplaceBoundaryBinding(decode_plan.get(), &decode_boundaries,
+                                        IREE_SV("media.latent.diffusion"),
+                                        denoised));
   id4::test::SemaphoreListStorage sampler_read_wait;
   sampler_read_wait.semaphore = sampler_done.get();
   sampler_read_wait.payload_value = 1;
   IREE_ASSERT_OK(VerifyBindingWasWritten(context.device.get(), &denoised,
                                          sampler_read_wait.list(),
+                                         kOutputSentinel));
+
+  id4::test::SemaphoreListStorage decode_prepare_signal;
+  decode_prepare_signal.semaphore = decode_prepare_done.get();
+  decode_prepare_signal.payload_value = 1;
+  id4::test::FixedSemaphoreListStorage decode_wait;
+  IREE_ASSERT_OK(decode_wait.push(update_semaphore.get(), update_value));
+  IREE_ASSERT_OK(decode_wait.push(sampler_done.get(), 1));
+  IREE_ASSERT_OK(decode_wait.push(decode_prepare_done.get(), 1));
+  id4::test::SemaphoreListStorage decode_signal;
+  decode_signal.semaphore = decode_done.get();
+  decode_signal.payload_value = 1;
+  id4::test::OwningRef<id4_pipeline_bundle_t, id4_pipeline_bundle_release>
+      decode_bundle;
+  IREE_ASSERT_OK(PrepareStage(
+      decode_stage.get(), decode_plan.get(), vae_provider.get(),
+      kernel_library.get(), iree_hal_semaphore_list_empty(),
+      decode_prepare_signal.list(), &diagnostics_sink, decode_bundle.out()));
+  IREE_ASSERT_OK(IssueStage(decode_stage.get(), decode_bundle.get(),
+                            decode_boundaries, decode_taps, decode_wait.list(),
+                            decode_signal.list(), &diagnostics_sink));
+
+  iree_hal_buffer_binding_t decoded = {};
+  IREE_ASSERT_OK(
+      id4::test::FindBoundaryBinding(decode_plan.get(), decode_boundaries,
+                                     IREE_SV("media.image.decoded"), &decoded));
+  id4::test::SemaphoreListStorage decode_read_wait;
+  decode_read_wait.semaphore = decode_done.get();
+  decode_read_wait.payload_value = 1;
+  IREE_ASSERT_OK(VerifyBindingWasWritten(context.device.get(), &decoded,
+                                         decode_read_wait.list(),
                                          kOutputSentinel));
 }
 

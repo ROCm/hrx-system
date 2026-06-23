@@ -103,7 +103,7 @@ TEST(VaeStage, PlansDecodeFromRequestConfig) {
   memset(&vae_options, 0, sizeof(vae_options));
   vae_options.structure_size = sizeof(vae_options);
   vae_options.request.latent_shape =
-      id4_pipeline_program_make_shape_rank4(1, 2, 2, 1);
+      id4_pipeline_program_make_shape_rank4(2, 2, 1, 1);
   vae_options.request.tiling.mode = ID4_VAE_TILING_MODE_EXPLICIT_TILE_SIZE;
   vae_options.request.tiling.tile_size_x = 2;
   vae_options.request.tiling.tile_size_y = 2;
@@ -149,7 +149,7 @@ TEST(VaeStage, PlansDecodeFromRequestConfig) {
         iree_all_bits_set(boundary->flags,
                           ID4_PIPELINE_BOUNDARY_TENSOR_FLAG_EXPORTED) &&
         ShapeEquals(boundary->layout.shape,
-                    id4_pipeline_program_make_shape_rank4(1, 4, 4, 1))) {
+                    id4_pipeline_program_make_shape_rank4(4, 4, 1, 1))) {
       exported_boundary = boundary;
       break;
     }

@@ -109,6 +109,8 @@ class BufferBindingSet {
 typedef struct FixtureTensor {
   // Stable tensor name from the fixture manifest.
   std::string name;
+  // Stable stage name from the fixture manifest.
+  std::string stage;
   // Fixture tensor role such as input or expected.
   std::string role;
   // Relative NPY payload path from the fixture manifest.
@@ -142,6 +144,11 @@ typedef struct FixtureTensorSet {
   // Returns the loaded tensor with |role| and |name| or NULL when absent.
   const FixtureTensor* FindTensor(iree_string_view_t role,
                                   iree_string_view_t name) const;
+  // Returns the loaded tensor with |role|, |stage|, and |name| or NULL when
+  // absent.
+  const FixtureTensor* FindTensor(iree_string_view_t role,
+                                  iree_string_view_t stage,
+                                  iree_string_view_t name) const;
 } FixtureTensorSet;
 
 typedef struct LiveStageContext {
@@ -157,6 +164,9 @@ typedef struct LiveStageContext {
   HalExecutableCacheRef executable_cache;
   // Loom kernel cache configured for the selected live device.
   KernelCacheRef kernel_cache;
+  // Command-buffer mode selected from standard device/profiling flags.
+  iree_hal_command_buffer_mode_t command_buffer_mode =
+      IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT;
 } LiveStageContext;
 
 typedef struct StageDiagnostics {
@@ -212,6 +222,13 @@ iree_status_t QueueUpdateBinding(iree_hal_device_t* device,
                                  iree_hal_semaphore_t* semaphore,
                                  uint64_t* inout_payload_value);
 
+// Queues a file read from host allocation bytes into |binding|.
+iree_status_t QueueReadBindingFromHostAllocation(
+    iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_buffer_binding_t* binding, const void* source_data,
+    iree_host_size_t source_length, iree_hal_semaphore_t* semaphore,
+    uint64_t* inout_payload_value);
+
 // Queues a fill of |binding| and advances |inout_payload_value|.
 iree_status_t QueueFillBinding(iree_hal_device_t* device,
                                iree_hal_queue_affinity_t queue_affinity,
@@ -248,6 +265,17 @@ iree_status_t CompareF32BindingWithFixtureTensor(
     iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
     const iree_hal_buffer_binding_t* binding,
     iree_hal_semaphore_list_t wait_list, const FixtureTensor& expected_tensor);
+
+// Reads |binding| and verifies it matches an expected F32 fixture tensor.
+//
+// |actual_layout| describes the binding's planned dtype and shape. F32, F16,
+// and BF16 actual storage are decoded to F32 before comparison.
+iree_status_t CompareBindingWithFixtureTensor(
+    iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_buffer_binding_t* binding,
+    iree_hal_semaphore_list_t wait_list,
+    const id4_pipeline_tensor_layout_t* actual_layout,
+    const FixtureTensor& expected_tensor);
 
 // Loads fixture tensors from a fixture manifest directory.
 iree_status_t LoadFixtureTensors(iree_string_view_t fixture_directory,

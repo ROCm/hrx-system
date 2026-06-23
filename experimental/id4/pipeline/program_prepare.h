@@ -38,6 +38,8 @@ typedef struct id4_pipeline_program_prepare_options_t {
   iree_hal_executable_cache_t* executable_cache;
   // HAL executable caching mode for all prepared kernels.
   iree_hal_executable_caching_mode_t executable_caching_mode;
+  // HAL command-buffer mode used for the reusable recorded region.
+  iree_hal_command_buffer_mode_t command_buffer_mode;
   // Diagnostic artifact classes requested from the Loom JIT path.
   id4_pipeline_kernel_diagnostic_artifact_flags_t diagnostic_artifact_flags;
   // HAL queue-alloca flags used for local transient slabs.

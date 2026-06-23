@@ -203,8 +203,11 @@ iree_status_t id4_ideogram4_dit_program_author_transformer_block(
   const uint32_t qkv_size = (uint32_t)qkv_size64;
   char qkv_name_buffer[ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
   char qkv_dispatch_name_buffer[ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
+  char qkv_projection_output_name_buffer
+      [ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
   iree_string_view_t qkv_name = iree_string_view_empty();
   iree_string_view_t qkv_dispatch_name = iree_string_view_empty();
+  iree_string_view_t qkv_projection_output_name = iree_string_view_empty();
   IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_format_branch_layer_name(
       branch_name, layer_ordinal, IREE_SV("attention.qkv"), qkv_name_buffer,
       IREE_ARRAYSIZE(qkv_name_buffer), &qkv_name));
@@ -212,6 +215,11 @@ iree_status_t id4_ideogram4_dit_program_author_transformer_block(
       branch_name, layer_ordinal, IREE_SV("attention.qkv_projection"),
       qkv_dispatch_name_buffer, IREE_ARRAYSIZE(qkv_dispatch_name_buffer),
       &qkv_dispatch_name));
+  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_format_branch_layer_name(
+      branch_name, layer_ordinal, IREE_SV("attention.qkv_projection.output"),
+      qkv_projection_output_name_buffer,
+      IREE_ARRAYSIZE(qkv_projection_output_name_buffer),
+      &qkv_projection_output_name));
 
   id4_pipeline_program_tensor_t qkv_weight =
       id4_pipeline_program_tensor_invalid();
@@ -237,82 +245,34 @@ iree_status_t id4_ideogram4_dit_program_author_transformer_block(
       &after_qkv_name));
   IREE_RETURN_IF_ERROR(
       id4_ideogram4_dit_program_barrier(builder, after_qkv_name));
+  IREE_RETURN_IF_ERROR(
+      id4_ideogram4_dit_program_tap(builder, qkv_projection_output_name, qkv));
 
-  char query_name_buffer[ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
-  char key_name_buffer[ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
   char value_name_buffer[ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
-  char qkv_split_name_buffer[ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
-  iree_string_view_t query_name = iree_string_view_empty();
-  iree_string_view_t key_name = iree_string_view_empty();
+  char rotated_query_name_buffer[ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
+  char rotated_key_name_buffer[ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
+  char qkv_norm_rotary_dispatch_name_buffer
+      [ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
   iree_string_view_t value_name = iree_string_view_empty();
-  iree_string_view_t qkv_split_name = iree_string_view_empty();
-  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_format_branch_layer_name(
-      branch_name, layer_ordinal, IREE_SV("attention.query"), query_name_buffer,
-      IREE_ARRAYSIZE(query_name_buffer), &query_name));
-  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_format_branch_layer_name(
-      branch_name, layer_ordinal, IREE_SV("attention.key"), key_name_buffer,
-      IREE_ARRAYSIZE(key_name_buffer), &key_name));
+  iree_string_view_t rotated_query_name = iree_string_view_empty();
+  iree_string_view_t rotated_key_name = iree_string_view_empty();
+  iree_string_view_t qkv_norm_rotary_dispatch_name = iree_string_view_empty();
   IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_format_branch_layer_name(
       branch_name, layer_ordinal, IREE_SV("attention.value"), value_name_buffer,
       IREE_ARRAYSIZE(value_name_buffer), &value_name));
   IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_format_branch_layer_name(
-      branch_name, layer_ordinal, IREE_SV("attention.qkv_split"),
-      qkv_split_name_buffer, IREE_ARRAYSIZE(qkv_split_name_buffer),
-      &qkv_split_name));
-
-  id4_pipeline_program_tensor_t query = id4_pipeline_program_tensor_invalid();
-  id4_pipeline_program_tensor_t key = id4_pipeline_program_tensor_invalid();
-  id4_pipeline_program_tensor_t value = id4_pipeline_program_tensor_invalid();
-  const id4_pipeline_program_shape_t attention_stream_shape =
-      id4_pipeline_program_make_shape_rank2(total_token_count, hidden_size);
-  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_acquire_tensor(
-      builder, query_name, ID4_PIPELINE_PROGRAM_DTYPE_F32,
-      attention_stream_shape, &query));
-  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_acquire_tensor(
-      builder, key_name, ID4_PIPELINE_PROGRAM_DTYPE_F32, attention_stream_shape,
-      &key));
-  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_acquire_tensor(
-      builder, value_name, ID4_PIPELINE_PROGRAM_DTYPE_F32,
-      attention_stream_shape, &value));
-  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_dispatch_qkv_split(
-      builder, qkv_split_name, total_token_count, hidden_size, qkv, query, key,
-      value));
-
-  char after_qkv_split_name_buffer[ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
-  iree_string_view_t after_qkv_split_name = iree_string_view_empty();
+      branch_name, layer_ordinal, IREE_SV("attention.query_rotary"),
+      rotated_query_name_buffer, IREE_ARRAYSIZE(rotated_query_name_buffer),
+      &rotated_query_name));
   IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_format_branch_layer_name(
-      branch_name, layer_ordinal, IREE_SV("after_attention_qkv_split"),
-      after_qkv_split_name_buffer, IREE_ARRAYSIZE(after_qkv_split_name_buffer),
-      &after_qkv_split_name));
-  IREE_RETURN_IF_ERROR(
-      id4_ideogram4_dit_program_barrier(builder, after_qkv_split_name));
-
-  char norm_query_name_buffer[ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
-  char norm_key_name_buffer[ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
-  char
-      norm_query_dispatch_name_buffer[ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
-  char norm_key_dispatch_name_buffer[ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
-  iree_string_view_t norm_query_name = iree_string_view_empty();
-  iree_string_view_t norm_key_name = iree_string_view_empty();
-  iree_string_view_t norm_query_dispatch_name = iree_string_view_empty();
-  iree_string_view_t norm_key_dispatch_name = iree_string_view_empty();
+      branch_name, layer_ordinal, IREE_SV("attention.key_rotary"),
+      rotated_key_name_buffer, IREE_ARRAYSIZE(rotated_key_name_buffer),
+      &rotated_key_name));
   IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_format_branch_layer_name(
-      branch_name, layer_ordinal, IREE_SV("attention.query_norm"),
-      norm_query_name_buffer, IREE_ARRAYSIZE(norm_query_name_buffer),
-      &norm_query_name));
-  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_format_branch_layer_name(
-      branch_name, layer_ordinal, IREE_SV("attention.key_norm"),
-      norm_key_name_buffer, IREE_ARRAYSIZE(norm_key_name_buffer),
-      &norm_key_name));
-  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_format_branch_layer_name(
-      branch_name, layer_ordinal, IREE_SV("attention.norm_q"),
-      norm_query_dispatch_name_buffer,
-      IREE_ARRAYSIZE(norm_query_dispatch_name_buffer),
-      &norm_query_dispatch_name));
-  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_format_branch_layer_name(
-      branch_name, layer_ordinal, IREE_SV("attention.norm_k"),
-      norm_key_dispatch_name_buffer,
-      IREE_ARRAYSIZE(norm_key_dispatch_name_buffer), &norm_key_dispatch_name));
+      branch_name, layer_ordinal, IREE_SV("attention.qkv_norm_rotary"),
+      qkv_norm_rotary_dispatch_name_buffer,
+      IREE_ARRAYSIZE(qkv_norm_rotary_dispatch_name_buffer),
+      &qkv_norm_rotary_dispatch_name));
 
   id4_pipeline_program_tensor_t norm_q_weight =
       id4_pipeline_program_tensor_invalid();
@@ -327,78 +287,38 @@ iree_status_t id4_ideogram4_dit_program_author_transformer_block(
       ID4_PIPELINE_PROGRAM_DTYPE_BF16,
       id4_pipeline_program_make_shape_rank1(head_size), &norm_k_weight));
 
-  id4_pipeline_program_tensor_t norm_query =
-      id4_pipeline_program_tensor_invalid();
-  id4_pipeline_program_tensor_t norm_key =
-      id4_pipeline_program_tensor_invalid();
-  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_acquire_tensor(
-      builder, norm_query_name, ID4_PIPELINE_PROGRAM_DTYPE_F32,
-      attention_stream_shape, &norm_query));
-  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_acquire_tensor(
-      builder, norm_key_name, ID4_PIPELINE_PROGRAM_DTYPE_F32,
-      attention_stream_shape, &norm_key));
-  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_dispatch_head_rmsnorm(
-      builder, norm_query_dispatch_name, total_token_count,
-      attention_head_count, head_size, query, norm_q_weight, norm_query));
-  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_dispatch_head_rmsnorm(
-      builder, norm_key_dispatch_name, total_token_count, attention_head_count,
-      head_size, key, norm_k_weight, norm_key));
-
-  char after_attention_norm_name_buffer
-      [ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
-  iree_string_view_t after_attention_norm_name = iree_string_view_empty();
-  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_format_branch_layer_name(
-      branch_name, layer_ordinal, IREE_SV("after_attention_qk_norm"),
-      after_attention_norm_name_buffer,
-      IREE_ARRAYSIZE(after_attention_norm_name_buffer),
-      &after_attention_norm_name));
-  IREE_RETURN_IF_ERROR(
-      id4_ideogram4_dit_program_barrier(builder, after_attention_norm_name));
-
-  char rotated_query_name_buffer[ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
-  char rotated_key_name_buffer[ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
-  char rotary_dispatch_name_buffer[ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
-  iree_string_view_t rotated_query_name = iree_string_view_empty();
-  iree_string_view_t rotated_key_name = iree_string_view_empty();
-  iree_string_view_t rotary_dispatch_name = iree_string_view_empty();
-  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_format_branch_layer_name(
-      branch_name, layer_ordinal, IREE_SV("attention.query_rotary"),
-      rotated_query_name_buffer, IREE_ARRAYSIZE(rotated_query_name_buffer),
-      &rotated_query_name));
-  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_format_branch_layer_name(
-      branch_name, layer_ordinal, IREE_SV("attention.key_rotary"),
-      rotated_key_name_buffer, IREE_ARRAYSIZE(rotated_key_name_buffer),
-      &rotated_key_name));
-  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_format_branch_layer_name(
-      branch_name, layer_ordinal, IREE_SV("attention.rotary_apply"),
-      rotary_dispatch_name_buffer, IREE_ARRAYSIZE(rotary_dispatch_name_buffer),
-      &rotary_dispatch_name));
-
+  id4_pipeline_program_tensor_t value = id4_pipeline_program_tensor_invalid();
   id4_pipeline_program_tensor_t rotated_query =
       id4_pipeline_program_tensor_invalid();
   id4_pipeline_program_tensor_t rotated_key =
       id4_pipeline_program_tensor_invalid();
+  const id4_pipeline_program_shape_t attention_stream_shape =
+      id4_pipeline_program_make_shape_rank2(total_token_count, hidden_size);
+  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_acquire_tensor(
+      builder, value_name, ID4_PIPELINE_PROGRAM_DTYPE_F16,
+      attention_stream_shape, &value));
   IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_acquire_tensor(
       builder, rotated_query_name, ID4_PIPELINE_PROGRAM_DTYPE_F32,
       attention_stream_shape, &rotated_query));
   IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_acquire_tensor(
-      builder, rotated_key_name, ID4_PIPELINE_PROGRAM_DTYPE_F32,
+      builder, rotated_key_name, ID4_PIPELINE_PROGRAM_DTYPE_F16,
       attention_stream_shape, &rotated_key));
-  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_dispatch_rotary_apply(
-      builder, rotary_dispatch_name, total_token_count, attention_head_count,
-      head_size, norm_query, norm_key, position_embedding, rotated_query,
-      rotated_key));
+  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_dispatch_qkv_norm_rotary(
+      builder, qkv_norm_rotary_dispatch_name, total_token_count,
+      attention_head_count, head_size, qkv, norm_q_weight, norm_k_weight,
+      position_embedding, rotated_query, rotated_key, value));
 
-  char after_attention_rotary_name_buffer
+  char after_attention_qkv_norm_rotary_name_buffer
       [ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
-  iree_string_view_t after_attention_rotary_name = iree_string_view_empty();
+  iree_string_view_t after_attention_qkv_norm_rotary_name =
+      iree_string_view_empty();
   IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_format_branch_layer_name(
-      branch_name, layer_ordinal, IREE_SV("after_attention_rotary"),
-      after_attention_rotary_name_buffer,
-      IREE_ARRAYSIZE(after_attention_rotary_name_buffer),
-      &after_attention_rotary_name));
-  IREE_RETURN_IF_ERROR(
-      id4_ideogram4_dit_program_barrier(builder, after_attention_rotary_name));
+      branch_name, layer_ordinal, IREE_SV("after_attention_qkv_norm_rotary"),
+      after_attention_qkv_norm_rotary_name_buffer,
+      IREE_ARRAYSIZE(after_attention_qkv_norm_rotary_name_buffer),
+      &after_attention_qkv_norm_rotary_name));
+  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_barrier(
+      builder, after_attention_qkv_norm_rotary_name));
   IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_tap(builder, qkv_name, qkv));
   IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_tap(
       builder, rotated_query_name, rotated_query));
@@ -437,6 +357,8 @@ iree_status_t id4_ideogram4_dit_program_author_transformer_block(
       &after_attention_name));
   IREE_RETURN_IF_ERROR(
       id4_ideogram4_dit_program_barrier(builder, after_attention_name));
+  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_tap(
+      builder, attention_context_name, attention_context));
 
   char attention_output_name_buffer[ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
   char attention_output_dispatch_name_buffer
@@ -571,6 +493,8 @@ iree_status_t id4_ideogram4_dit_program_author_transformer_block(
       &after_ffn_input_name));
   IREE_RETURN_IF_ERROR(
       id4_ideogram4_dit_program_barrier(builder, after_ffn_input_name));
+  IREE_RETURN_IF_ERROR(
+      id4_ideogram4_dit_program_tap(builder, ffn_input_name, ffn_input));
 
   const id4_pipeline_program_shape_t intermediate_stream_shape =
       id4_pipeline_program_make_shape_rank2(intermediate_size,
@@ -597,56 +521,6 @@ iree_status_t id4_ideogram4_dit_program_author_transformer_block(
       id4_pipeline_program_make_shape_rank2(hidden_size, intermediate_size),
       &feed_forward_w2_weight));
 
-  char mlp_gate_name_buffer[ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
-  char mlp_up_name_buffer[ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
-  char mlp_gate_dispatch_name_buffer[ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
-  char mlp_up_dispatch_name_buffer[ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
-  iree_string_view_t mlp_gate_name = iree_string_view_empty();
-  iree_string_view_t mlp_up_name = iree_string_view_empty();
-  iree_string_view_t mlp_gate_dispatch_name = iree_string_view_empty();
-  iree_string_view_t mlp_up_dispatch_name = iree_string_view_empty();
-  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_format_branch_layer_name(
-      branch_name, layer_ordinal, IREE_SV("ffn.gate"), mlp_gate_name_buffer,
-      IREE_ARRAYSIZE(mlp_gate_name_buffer), &mlp_gate_name));
-  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_format_branch_layer_name(
-      branch_name, layer_ordinal, IREE_SV("ffn.up"), mlp_up_name_buffer,
-      IREE_ARRAYSIZE(mlp_up_name_buffer), &mlp_up_name));
-  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_format_branch_layer_name(
-      branch_name, layer_ordinal, IREE_SV("ffn.w1_projection"),
-      mlp_gate_dispatch_name_buffer,
-      IREE_ARRAYSIZE(mlp_gate_dispatch_name_buffer), &mlp_gate_dispatch_name));
-  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_format_branch_layer_name(
-      branch_name, layer_ordinal, IREE_SV("ffn.w3_projection"),
-      mlp_up_dispatch_name_buffer, IREE_ARRAYSIZE(mlp_up_dispatch_name_buffer),
-      &mlp_up_dispatch_name));
-
-  id4_pipeline_program_tensor_t mlp_gate =
-      id4_pipeline_program_tensor_invalid();
-  id4_pipeline_program_tensor_t mlp_up = id4_pipeline_program_tensor_invalid();
-  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_acquire_tensor(
-      builder, mlp_gate_name, ID4_PIPELINE_PROGRAM_DTYPE_F32,
-      intermediate_stream_shape, &mlp_gate));
-  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_acquire_tensor(
-      builder, mlp_up_name, ID4_PIPELINE_PROGRAM_DTYPE_F32,
-      intermediate_stream_shape, &mlp_up));
-  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_dispatch_linear_bf16_f32(
-      builder, mlp_gate_dispatch_name, total_token_count, hidden_size,
-      intermediate_size, ffn_input, feed_forward_w1_weight, mlp_gate));
-  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_dispatch_linear_bf16_f32(
-      builder, mlp_up_dispatch_name, total_token_count, hidden_size,
-      intermediate_size, ffn_input, feed_forward_w3_weight, mlp_up));
-
-  char after_mlp_projection_name_buffer
-      [ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
-  iree_string_view_t after_mlp_projection_name = iree_string_view_empty();
-  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_format_branch_layer_name(
-      branch_name, layer_ordinal, IREE_SV("after_ffn_projections"),
-      after_mlp_projection_name_buffer,
-      IREE_ARRAYSIZE(after_mlp_projection_name_buffer),
-      &after_mlp_projection_name));
-  IREE_RETURN_IF_ERROR(
-      id4_ideogram4_dit_program_barrier(builder, after_mlp_projection_name));
-
   char mlp_hidden_name_buffer[ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
   char
       mlp_hidden_dispatch_name_buffer[ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
@@ -656,7 +530,7 @@ iree_status_t id4_ideogram4_dit_program_author_transformer_block(
       branch_name, layer_ordinal, IREE_SV("ffn.hidden"), mlp_hidden_name_buffer,
       IREE_ARRAYSIZE(mlp_hidden_name_buffer), &mlp_hidden_name));
   IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_format_branch_layer_name(
-      branch_name, layer_ordinal, IREE_SV("ffn.silu_product"),
+      branch_name, layer_ordinal, IREE_SV("ffn.w1_w3_silu_product"),
       mlp_hidden_dispatch_name_buffer,
       IREE_ARRAYSIZE(mlp_hidden_dispatch_name_buffer),
       &mlp_hidden_dispatch_name));
@@ -666,9 +540,10 @@ iree_status_t id4_ideogram4_dit_program_author_transformer_block(
   IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_acquire_tensor(
       builder, mlp_hidden_name, ID4_PIPELINE_PROGRAM_DTYPE_F32,
       intermediate_stream_shape, &mlp_hidden));
-  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_dispatch_silu_product(
-      builder, mlp_hidden_dispatch_name, total_token_count, intermediate_size,
-      mlp_gate, mlp_up, mlp_hidden));
+  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_dispatch_mlp_gate_up_silu(
+      builder, mlp_hidden_dispatch_name, total_token_count, hidden_size,
+      intermediate_size, ffn_input, feed_forward_w1_weight,
+      feed_forward_w3_weight, mlp_hidden));
 
   char after_mlp_hidden_name_buffer[ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
   iree_string_view_t after_mlp_hidden_name = iree_string_view_empty();
@@ -678,6 +553,8 @@ iree_status_t id4_ideogram4_dit_program_author_transformer_block(
       IREE_ARRAYSIZE(after_mlp_hidden_name_buffer), &after_mlp_hidden_name));
   IREE_RETURN_IF_ERROR(
       id4_ideogram4_dit_program_barrier(builder, after_mlp_hidden_name));
+  IREE_RETURN_IF_ERROR(
+      id4_ideogram4_dit_program_tap(builder, mlp_hidden_name, mlp_hidden));
 
   char mlp_output_name_buffer[ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
   char
@@ -711,6 +588,8 @@ iree_status_t id4_ideogram4_dit_program_author_transformer_block(
       IREE_ARRAYSIZE(after_mlp_output_name_buffer), &after_mlp_output_name));
   IREE_RETURN_IF_ERROR(
       id4_ideogram4_dit_program_barrier(builder, after_mlp_output_name));
+  IREE_RETURN_IF_ERROR(
+      id4_ideogram4_dit_program_tap(builder, mlp_output_name, mlp_output));
 
   char layer_output_name_buffer[ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
   char mlp_residual_dispatch_name_buffer

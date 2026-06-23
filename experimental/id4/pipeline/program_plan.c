@@ -16,6 +16,8 @@ typedef struct id4_pipeline_program_plan_counts_t {
   iree_host_size_t import_count;
   // Number of parameter operations in the program.
   iree_host_size_t parameter_count;
+  // Number of program-owned constant operations in the program.
+  iree_host_size_t constant_count;
   // Number of Loom dispatch operations in the program.
   iree_host_size_t dispatch_count;
   // Number of barrier operations in the program.
@@ -31,6 +33,8 @@ typedef struct id4_pipeline_program_plan_lowering_context_t {
   const id4_pipeline_program_plan_options_t* options;
   // Parameter requests in program parameter-operation order.
   const id4_pipeline_parameter_request_t* parameter_requests;
+  // Constant requests in program constant-operation order.
+  const id4_pipeline_constant_request_t* constant_requests;
   // Boundary tensor plans in program import-operation order.
   const id4_pipeline_boundary_tensor_plan_t* boundary_tensors;
   // Diagnostic tap plans in program tap-operation order.
@@ -138,6 +142,18 @@ static iree_status_t id4_pipeline_program_plan_validate_options(
         IREE_STATUS_INVALID_ARGUMENT,
         "program plan parameter request alignment must be a power of two");
   }
+  if (options->constant_slab_alignment != 0 &&
+      !iree_device_size_is_power_of_two(options->constant_slab_alignment)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "program plan constant slab alignment must be a power of two");
+  }
+  if (options->constant_request_alignment != 0 &&
+      !iree_device_size_is_power_of_two(options->constant_request_alignment)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "program plan constant request alignment must be a power of two");
+  }
   if (options->region_local_slab_alignment != 0 &&
       !iree_device_size_is_power_of_two(options->region_local_slab_alignment)) {
     return iree_make_status(
@@ -190,6 +206,9 @@ static id4_pipeline_program_plan_counts_t id4_pipeline_program_plan_count_ops(
         break;
       case ID4_PIPELINE_PROGRAM_OP_KIND_PARAMETER:
         ++counts.parameter_count;
+        break;
+      case ID4_PIPELINE_PROGRAM_OP_KIND_CONSTANT:
+        ++counts.constant_count;
         break;
       case ID4_PIPELINE_PROGRAM_OP_KIND_DISPATCH_LOOM:
         ++counts.dispatch_count;
@@ -291,6 +310,44 @@ static iree_status_t id4_pipeline_program_plan_build_parameter_requests(
         out_parameter_slab_byte_length, &span));
     requests[request_index] =
         id4_pipeline_parameter_request(tensor->name, span);
+    ++request_index;
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t id4_pipeline_program_plan_build_constant_requests(
+    const id4_pipeline_program_plan_options_t* options,
+    id4_pipeline_program_plan_counts_t counts,
+    id4_pipeline_constant_request_t* requests,
+    iree_device_size_t* out_constant_slab_byte_length) {
+  *out_constant_slab_byte_length = 0;
+  if (counts.constant_count == 0) return iree_ok_status();
+
+  iree_host_size_t request_index = 0;
+  const iree_host_size_t operation_count =
+      id4_pipeline_program_operation_count(options->program);
+  for (iree_host_size_t i = 0; i < operation_count; ++i) {
+    const id4_pipeline_program_op_t* op =
+        id4_pipeline_program_operation_at(options->program, i);
+    if (!op || op->kind != ID4_PIPELINE_PROGRAM_OP_KIND_CONSTANT) continue;
+    const id4_pipeline_program_tensor_record_t* tensor =
+        id4_pipeline_program_tensor_at(options->program,
+                                       op->payload.constant.tensor.ordinal);
+    if (!tensor) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "program constant tensor %u is missing",
+                              op->payload.constant.tensor.ordinal);
+    }
+    iree_io_parameter_span_t span;
+    IREE_RETURN_IF_ERROR(id4_pipeline_parameter_slab_pack_span(
+        tensor->byte_length, options->constant_request_alignment,
+        out_constant_slab_byte_length, &span));
+    requests[request_index] = (id4_pipeline_constant_request_t){
+        // Constant tensor diagnostic name.
+        .name = tensor->name,
+        // Packed target span inside the constant slab.
+        .span = span,
+    };
     ++request_index;
   }
   return iree_ok_status();
@@ -409,6 +466,12 @@ static iree_status_t id4_pipeline_program_plan_validate_boundary_slots(
                               "program boundary binding slot must not match "
                               "the parameter slab binding slot");
     }
+    if (counts.constant_count != 0 &&
+        binding_slot == options->constant_slab_binding_slot) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "program boundary binding slot must not match "
+                              "the constant slab binding slot");
+    }
   }
   return iree_ok_status();
 }
@@ -444,6 +507,12 @@ static iree_status_t id4_pipeline_program_plan_validate_diagnostic_tap_slots(
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "program diagnostic tap binding slot must not "
                               "match the parameter slab binding slot");
+    }
+    if (counts.constant_count != 0 &&
+        binding_slot == options->constant_slab_binding_slot) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "program diagnostic tap binding slot must not "
+                              "match the constant slab binding slot");
     }
     for (iree_host_size_t boundary_index = 0;
          boundary_index < counts.import_count; ++boundary_index) {
@@ -681,6 +750,34 @@ static iree_status_t id4_pipeline_program_plan_resolve_parameter(
   return iree_ok_status();
 }
 
+static iree_status_t id4_pipeline_program_plan_resolve_constant(
+    void* user_data, const id4_pipeline_program_constant_op_t* constant_op,
+    const id4_pipeline_program_tensor_record_t* tensor,
+    iree_host_size_t constant_ordinal,
+    id4_pipeline_tensor_import_t* out_import) {
+  (void)constant_op;
+  id4_pipeline_program_plan_lowering_context_t* context =
+      (id4_pipeline_program_plan_lowering_context_t*)user_data;
+  const id4_pipeline_constant_request_t* request =
+      &context->constant_requests[constant_ordinal];
+  out_import->layout = (id4_pipeline_tensor_layout_t){
+      // Constant tensor diagnostic name.
+      .name = tensor->name,
+      // Constant tensor element type.
+      .dtype = id4_pipeline_program_region_convert_dtype(tensor->dtype),
+      // Constant tensor shape.
+      .shape = id4_pipeline_program_plan_convert_shape(tensor->shape),
+      // Dense constant tensor byte length.
+      .byte_length = tensor->byte_length,
+      // Required subrange alignment in the packed slab.
+      .alignment = context->options->constant_request_alignment,
+  };
+  out_import->binding_slot = context->options->constant_slab_binding_slot;
+  out_import->offset = request->span.buffer_offset;
+  out_import->flags = ID4_PIPELINE_TENSOR_IMPORT_FLAG_INITIALIZED;
+  return iree_ok_status();
+}
+
 static iree_status_t id4_pipeline_program_plan_resolve_tap(
     void* user_data, const id4_pipeline_program_tap_op_t* tap_op,
     const id4_pipeline_program_tensor_record_t* tensor,
@@ -702,6 +799,7 @@ static iree_status_t id4_pipeline_program_plan_dry_run_region(
     const id4_pipeline_program_plan_options_t* options,
     id4_pipeline_program_plan_counts_t counts,
     const id4_pipeline_parameter_request_t* parameter_requests,
+    const id4_pipeline_constant_request_t* constant_requests,
     const id4_pipeline_boundary_tensor_plan_t* boundary_tensors,
     const id4_pipeline_diagnostic_tap_plan_t* diagnostic_taps,
     iree_allocator_t host_allocator,
@@ -740,6 +838,8 @@ static iree_status_t id4_pipeline_program_plan_dry_run_region(
       .options = options,
       // Parameter request table.
       .parameter_requests = parameter_requests,
+      // Constant request table.
+      .constant_requests = constant_requests,
       // Boundary tensor table.
       .boundary_tensors = boundary_tensors,
       // Diagnostic tap tensor table.
@@ -767,6 +867,8 @@ static iree_status_t id4_pipeline_program_plan_dry_run_region(
         .resolve_import = id4_pipeline_program_plan_resolve_import,
         // Resolves parameter tensor imports.
         .resolve_parameter = id4_pipeline_program_plan_resolve_parameter,
+        // Resolves constant tensor imports.
+        .resolve_constant = id4_pipeline_program_plan_resolve_constant,
         // Resolves diagnostic tap imports.
         .resolve_tap = id4_pipeline_program_plan_resolve_tap,
     };
@@ -795,6 +897,26 @@ static iree_status_t id4_pipeline_program_plan_make_local_slab_name(
       iree_string_builder_append_string(&builder, region_name);
   if (iree_status_is_ok(status)) {
     status = iree_string_builder_append_cstring(&builder, ".local");
+  }
+  if (iree_status_is_ok(status)) {
+    const iree_host_size_t name_size = iree_string_builder_size(&builder);
+    char* storage = iree_string_builder_take_storage(&builder);
+    *out_name = iree_make_string_view(storage, name_size);
+  }
+  iree_string_builder_deinitialize(&builder);
+  return status;
+}
+
+static iree_status_t id4_pipeline_program_plan_make_constant_slab_name(
+    iree_string_view_t program_name, iree_allocator_t host_allocator,
+    iree_string_view_t* out_name) {
+  *out_name = iree_string_view_empty();
+  iree_string_builder_t builder;
+  iree_string_builder_initialize(host_allocator, &builder);
+  iree_status_t status =
+      iree_string_builder_append_string(&builder, program_name);
+  if (iree_status_is_ok(status)) {
+    status = iree_string_builder_append_cstring(&builder, ".constants");
   }
   if (iree_status_is_ok(status)) {
     const iree_host_size_t name_size = iree_string_builder_size(&builder);
@@ -834,12 +956,36 @@ iree_status_t id4_pipeline_program_create_plan(
                               "match the local slab binding slot");
     }
   }
+  if (counts.constant_count != 0) {
+    if (options->constant_slab_binding_slot >=
+        options->region_binding_capacity) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "program constant slab binding slot %u exceeds "
+                              "region binding capacity %" PRIhsz,
+                              options->constant_slab_binding_slot,
+                              options->region_binding_capacity);
+    }
+    if (options->constant_slab_binding_slot ==
+        options->region_local_binding_slot) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "program constant slab binding slot must not "
+                              "match the local slab binding slot");
+    }
+    if (counts.parameter_count != 0 &&
+        options->constant_slab_binding_slot ==
+            options->parameter_slab_binding_slot) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "program constant slab binding slot must not "
+                              "match the parameter slab binding slot");
+    }
+  }
   IREE_RETURN_IF_ERROR(
       id4_pipeline_program_plan_validate_boundary_slots(options, counts));
   IREE_RETURN_IF_ERROR(
       id4_pipeline_program_plan_validate_diagnostic_tap_slots(options, counts));
 
   id4_pipeline_parameter_request_t* parameter_requests = NULL;
+  id4_pipeline_constant_request_t* constant_requests = NULL;
   id4_pipeline_boundary_tensor_plan_t* boundary_tensors = NULL;
   id4_pipeline_kernel_plan_t* kernels = NULL;
   id4_pipeline_diagnostic_tap_plan_t* taps = NULL;
@@ -852,6 +998,11 @@ iree_status_t id4_pipeline_program_create_plan(
     status = iree_allocator_malloc_array(host_allocator, counts.parameter_count,
                                          sizeof(parameter_requests[0]),
                                          (void**)&parameter_requests);
+  }
+  if (iree_status_is_ok(status) && counts.constant_count != 0) {
+    status = iree_allocator_malloc_array(host_allocator, counts.constant_count,
+                                         sizeof(constant_requests[0]),
+                                         (void**)&constant_requests);
   }
   if (iree_status_is_ok(status) && counts.dispatch_count != 0) {
     status = iree_allocator_malloc_array(host_allocator, counts.dispatch_count,
@@ -871,6 +1022,12 @@ iree_status_t id4_pipeline_program_create_plan(
   if (iree_status_is_ok(status)) {
     status = id4_pipeline_program_plan_build_parameter_requests(
         options, counts, parameter_requests, &parameter_slab_byte_length);
+  }
+
+  iree_device_size_t constant_slab_byte_length = 0;
+  if (iree_status_is_ok(status)) {
+    status = id4_pipeline_program_plan_build_constant_requests(
+        options, counts, constant_requests, &constant_slab_byte_length);
   }
 
   iree_host_size_t kernel_count = 0;
@@ -895,9 +1052,9 @@ iree_status_t id4_pipeline_program_create_plan(
   const bool has_region = counts.region_operation_count != 0;
   if (iree_status_is_ok(status) && has_region) {
     status = id4_pipeline_program_plan_dry_run_region(
-        options, counts, parameter_requests, boundary_tensors, taps,
-        host_allocator, &region_statistics, &local_lifetime_count,
-        &local_lifetimes);
+        options, counts, parameter_requests, constant_requests,
+        boundary_tensors, taps, host_allocator, &region_statistics,
+        &local_lifetime_count, &local_lifetimes);
   } else if (iree_status_is_ok(status) && planned_tap_count != 0) {
     status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                               "program has diagnostic taps but no executable "
@@ -913,6 +1070,35 @@ iree_status_t id4_pipeline_program_create_plan(
         options->parameter_slab_target_params, parameter_slab_byte_length,
         options->parameter_slab_alignment, counts.parameter_count,
         parameter_requests);
+  }
+
+  iree_string_view_t constant_slab_name = iree_string_view_empty();
+  id4_pipeline_constant_slab_plan_t constant_slab;
+  memset(&constant_slab, 0, sizeof(constant_slab));
+  if (iree_status_is_ok(status) && counts.constant_count != 0) {
+    status = id4_pipeline_program_plan_make_constant_slab_name(
+        id4_pipeline_program_name(options->program), host_allocator,
+        &constant_slab_name);
+  }
+  if (iree_status_is_ok(status) && counts.constant_count != 0) {
+    constant_slab = (id4_pipeline_constant_slab_plan_t){
+        // Human-readable constant slab name.
+        .name = constant_slab_name,
+        // Constant slab placement selected by the stage.
+        .placement_id = options->constant_slab_placement_id,
+        // Binding-table slot reserved for embedded constants.
+        .binding_slot = options->constant_slab_binding_slot,
+        // HAL buffer parameters used for constant slab allocation.
+        .target_params = options->constant_slab_target_params,
+        // Planned packed constant slab byte length.
+        .byte_length = constant_slab_byte_length,
+        // Required constant slab base alignment.
+        .alignment = options->constant_slab_alignment,
+        // Number of embedded constant tensor requests.
+        .request_count = counts.constant_count,
+        // Constant requests in program operation order.
+        .requests = constant_requests,
+    };
   }
 
   iree_string_view_t local_slab_name = iree_string_view_empty();
@@ -968,6 +1154,9 @@ iree_status_t id4_pipeline_program_create_plan(
     create_options.parameter_slab_count = counts.parameter_count == 0 ? 0 : 1;
     create_options.parameter_slabs =
         counts.parameter_count == 0 ? NULL : &parameter_slab;
+    create_options.constant_slab_count = counts.constant_count == 0 ? 0 : 1;
+    create_options.constant_slabs =
+        counts.constant_count == 0 ? NULL : &constant_slab;
     create_options.memory_slab_count = has_local_slab ? 1 : 0;
     create_options.memory_slabs = has_local_slab ? &local_slab : NULL;
     create_options.boundary_tensor_count = counts.import_count;
@@ -984,6 +1173,7 @@ iree_status_t id4_pipeline_program_create_plan(
         id4_pipeline_plan_create(&create_options, host_allocator, out_plan);
   }
 
+  iree_allocator_free(host_allocator, (void*)constant_slab_name.data);
   iree_allocator_free(host_allocator, (void*)local_slab_name.data);
   id4_pipeline_region_local_lifetime_list_release(
       local_lifetime_count, local_lifetimes, host_allocator);
@@ -992,6 +1182,7 @@ iree_status_t id4_pipeline_program_create_plan(
   iree_allocator_free(host_allocator, taps);
   iree_allocator_free(host_allocator, kernels);
   iree_allocator_free(host_allocator, boundary_tensors);
+  iree_allocator_free(host_allocator, constant_requests);
   iree_allocator_free(host_allocator, parameter_requests);
   return status;
 }

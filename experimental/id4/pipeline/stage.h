@@ -90,6 +90,8 @@ typedef struct id4_pipeline_stage_prepare_options_t {
   iree_hal_semaphore_list_t wait_semaphore_list;
   // Semaphores signaled when parameter loading and preparation complete.
   iree_hal_semaphore_list_t signal_semaphore_list;
+  // HAL command-buffer mode used when preparation records reusable regions.
+  iree_hal_command_buffer_mode_t command_buffer_mode;
   // Diagnostics sink for prepare events.
   id4_pipeline_diagnostics_sink_t* diagnostics_sink;
 } id4_pipeline_stage_prepare_options_t;

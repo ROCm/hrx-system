@@ -25,6 +25,16 @@ iree_runtime_cc_library(
     ],
 )
 
+iree_runtime_cc_library(
+    name = "image",
+    srcs = ["image.c"],
+    hdrs = ["image.h"],
+    deps = [
+        "//experimental/id4/pipeline:plan",
+        "//runtime/src/iree/base",
+    ],
+)
+
 iree_runtime_cc_test(
     name = "capture_test",
     srcs = ["capture_test.cc"],
@@ -35,6 +45,18 @@ iree_runtime_cc_test(
         "//experimental/id4/stages:test_util",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/testing:temp_file",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "image_test",
+    srcs = ["image_test.cc"],
+    deps = [
+        ":image",
+        "//runtime/src/iree/base",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
         "//runtime/src/iree/testing:temp_file",

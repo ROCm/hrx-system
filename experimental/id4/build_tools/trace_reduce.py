@@ -30,10 +30,28 @@ DTYPE_TABLE = {
         "struct_format": "<f",
         "floating": True,
     },
+    "f16": {
+        "byte_count": 2,
+        "npy_descr": "<f2",
+        "struct_format": "<e",
+        "floating": True,
+    },
+    "bf16": {
+        "byte_count": 2,
+        "npy_descr": "<u2",
+        "struct_format": "<H",
+        "floating": True,
+    },
     "i32": {
         "byte_count": 4,
         "npy_descr": "<i4",
         "struct_format": "<i",
+        "floating": False,
+    },
+    "u32": {
+        "byte_count": 4,
+        "npy_descr": "<u4",
+        "struct_format": "<I",
         "floating": False,
     },
 }
@@ -52,6 +70,24 @@ class TraceRecord:
     name: str
     ordinal: int
     payload: dict[str, Any]
+
+
+def _bf16_bits_to_f32(bits: int) -> float:
+    return struct.unpack("<f", struct.pack("<I", bits << 16))[0]
+
+
+def unpack_numeric_payload(dtype: str, payload: bytes) -> tuple[Any, ...]:
+    dtype_info = DTYPE_TABLE[dtype]
+    element_byte_count = int(dtype_info["byte_count"])
+    if len(payload) % element_byte_count != 0:
+        raise TraceReduceError(f"{dtype} payload length is not element-aligned")
+    values = tuple(
+        value[0]
+        for value in struct.iter_unpack(str(dtype_info["struct_format"]), payload)
+    )
+    if dtype == "bf16":
+        return tuple(_bf16_bits_to_f32(value) for value in values)
+    return values
 
 
 def _require_string(value: Any, field_name: str) -> str:
@@ -258,17 +294,13 @@ def write_npy(path: Path, dtype: str, shape: list[int], payload: bytes) -> None:
 
 def _summarize_numeric_payload(dtype: str, payload: bytes) -> dict[str, Any]:
     dtype_info = DTYPE_TABLE[dtype]
-    struct_format = str(dtype_info["struct_format"])
-    element_byte_count = int(dtype_info["byte_count"])
-    if len(payload) % element_byte_count != 0:
-        raise TraceReduceError(f"{dtype} payload length is not element-aligned")
     finite_count = 0
     nan_count = 0
     inf_count = 0
     minimum = None
     maximum = None
     total = 0.0
-    for (value,) in struct.iter_unpack(struct_format, payload):
+    for value in unpack_numeric_payload(dtype, payload):
         if dtype_info["floating"] and math.isnan(value):
             nan_count += 1
             continue

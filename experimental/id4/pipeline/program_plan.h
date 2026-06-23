@@ -57,6 +57,16 @@ typedef struct id4_pipeline_program_plan_options_t {
   iree_device_size_t parameter_slab_alignment;
   // Alignment used when packing each parameter request into the slab.
   iree_device_size_t parameter_request_alignment;
+  // Placement id used for the packed constant slab.
+  id4_pipeline_device_placement_id_t constant_slab_placement_id;
+  // Binding-table slot used for the packed constant slab.
+  uint32_t constant_slab_binding_slot;
+  // HAL buffer parameters used for the packed constant slab.
+  iree_hal_buffer_params_t constant_slab_target_params;
+  // Required packed constant slab base alignment.
+  iree_device_size_t constant_slab_alignment;
+  // Alignment used when packing each constant into the slab.
+  iree_device_size_t constant_request_alignment;
   // Placement id used for all planned Loom kernel specializations.
   id4_pipeline_device_placement_id_t kernel_placement_id;
   // Placement id used for the derived executable region.

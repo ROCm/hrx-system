@@ -68,6 +68,34 @@ typedef struct id4_pipeline_memory_slab_plan_t {
   iree_device_size_t high_water_mark;
 } id4_pipeline_memory_slab_plan_t;
 
+// Planned constant tensor embedded into a constant slab.
+typedef struct id4_pipeline_constant_request_t {
+  // Constant tensor diagnostic name.
+  iree_string_view_t name;
+  // Target byte range inside the constant slab.
+  iree_io_parameter_span_t span;
+} id4_pipeline_constant_request_t;
+
+// Planned constant slab populated during prepare from program-owned data.
+typedef struct id4_pipeline_constant_slab_plan_t {
+  // Human-readable slab name for diagnostics.
+  iree_string_view_t name;
+  // Plan-local placement identifier.
+  uint32_t placement_id;
+  // Issue-time binding-table slot used for this slab.
+  uint32_t binding_slot;
+  // HAL buffer parameters used for slab allocation.
+  iree_hal_buffer_params_t target_params;
+  // Total slab byte length.
+  iree_device_size_t byte_length;
+  // Required slab base alignment in bytes.
+  iree_device_size_t alignment;
+  // Number of constant requests.
+  iree_host_size_t request_count;
+  // Constant requests in program constant-operation order.
+  const id4_pipeline_constant_request_t* requests;
+} id4_pipeline_constant_slab_plan_t;
+
 // Planned external tensor bound at a stage boundary.
 typedef struct id4_pipeline_boundary_tensor_plan_t {
   // Tensor layout and stable diagnostic name.
@@ -156,6 +184,10 @@ typedef struct id4_pipeline_plan_create_options_t {
   iree_host_size_t parameter_slab_count;
   // Parameter slabs to copy into the plan.
   const id4_pipeline_parameter_slab_plan_t* parameter_slabs;
+  // Number of planned constant slabs.
+  iree_host_size_t constant_slab_count;
+  // Constant slabs to copy into the plan.
+  const id4_pipeline_constant_slab_plan_t* constant_slabs;
   // Number of planned non-parameter memory slabs.
   iree_host_size_t memory_slab_count;
   // Planned non-parameter memory slabs to copy into the plan.
@@ -217,6 +249,14 @@ iree_host_size_t id4_pipeline_plan_parameter_slab_count(
 
 // Returns parameter slab |index| or NULL when out of range.
 const id4_pipeline_parameter_slab_plan_t* id4_pipeline_plan_parameter_slab_at(
+    const id4_pipeline_plan_t* plan, iree_host_size_t index);
+
+// Returns the number of constant slabs in |plan|.
+iree_host_size_t id4_pipeline_plan_constant_slab_count(
+    const id4_pipeline_plan_t* plan);
+
+// Returns constant slab |index| or NULL when out of range.
+const id4_pipeline_constant_slab_plan_t* id4_pipeline_plan_constant_slab_at(
     const id4_pipeline_plan_t* plan, iree_host_size_t index);
 
 // Returns the number of memory slabs in |plan|.

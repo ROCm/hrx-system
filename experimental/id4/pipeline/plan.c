@@ -30,6 +30,10 @@ struct id4_pipeline_plan_t {
   iree_host_size_t parameter_slab_count;
   // Planned parameter slabs owned by this plan.
   id4_pipeline_parameter_slab_plan_t* parameter_slabs;
+  // Number of planned constant slabs.
+  iree_host_size_t constant_slab_count;
+  // Planned constant slabs owned by this plan.
+  id4_pipeline_constant_slab_plan_t* constant_slabs;
   // Number of planned non-parameter memory slabs.
   iree_host_size_t memory_slab_count;
   // Planned non-parameter memory slabs owned by this plan.
@@ -135,6 +139,17 @@ static void id4_pipeline_plan_destroy(id4_pipeline_plan_t* plan) {
     id4_pipeline_string_release(plan->memory_slabs[i].name, host_allocator);
   }
   iree_allocator_free(host_allocator, plan->memory_slabs);
+  for (iree_host_size_t i = 0; i < plan->constant_slab_count; ++i) {
+    id4_pipeline_constant_slab_plan_t* slab = &plan->constant_slabs[i];
+    id4_pipeline_constant_request_t* requests =
+        (id4_pipeline_constant_request_t*)slab->requests;
+    for (iree_host_size_t j = 0; j < slab->request_count; ++j) {
+      id4_pipeline_string_release(requests[j].name, host_allocator);
+    }
+    iree_allocator_free(host_allocator, requests);
+    id4_pipeline_string_release(slab->name, host_allocator);
+  }
+  iree_allocator_free(host_allocator, plan->constant_slabs);
   for (iree_host_size_t i = 0; i < plan->parameter_slab_count; ++i) {
     id4_pipeline_parameter_slab_plan_t* slab = &plan->parameter_slabs[i];
     id4_pipeline_parameter_request_t* requests =
@@ -247,6 +262,94 @@ static iree_status_t id4_pipeline_plan_validate_placement_id(
       "%.*s placement id %u exceeds placement count %" PRIhsz,
       (int)descriptor_name.size, descriptor_name.data, placement_id,
       plan->placement_count);
+}
+
+static iree_status_t id4_pipeline_plan_copy_constant_slabs(
+    id4_pipeline_plan_t* plan,
+    const id4_pipeline_plan_create_options_t* options) {
+  plan->constant_slab_count = options->constant_slab_count;
+  if (plan->constant_slab_count == 0) return iree_ok_status();
+  if (!options->constant_slabs) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "constant slab array is required");
+  }
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
+      plan->host_allocator, plan->constant_slab_count,
+      sizeof(plan->constant_slabs[0]), (void**)&plan->constant_slabs));
+  memset(plan->constant_slabs, 0,
+         plan->constant_slab_count * sizeof(plan->constant_slabs[0]));
+  for (iree_host_size_t i = 0; i < plan->constant_slab_count; ++i) {
+    const id4_pipeline_constant_slab_plan_t* source =
+        &options->constant_slabs[i];
+    if (iree_string_view_is_empty(source->name)) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "constant slab %" PRIhsz " name is required", i);
+    }
+    IREE_RETURN_IF_ERROR(id4_pipeline_plan_validate_placement_id(
+        plan, source->placement_id, IREE_SV("constant slab")));
+    if (source->byte_length == 0) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "constant slab %.*s byte length is zero",
+                              (int)source->name.size, source->name.data);
+    }
+    if (source->alignment != 0 &&
+        !iree_device_size_is_power_of_two(source->alignment)) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "constant slab %.*s alignment must be a power of two",
+          (int)source->name.size, source->name.data);
+    }
+    if (source->request_count != 0 && !source->requests) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "constant slab %.*s request array is required",
+                              (int)source->name.size, source->name.data);
+    }
+    id4_pipeline_constant_slab_plan_t* target = &plan->constant_slabs[i];
+    target->placement_id = source->placement_id;
+    target->binding_slot = source->binding_slot;
+    target->target_params = source->target_params;
+    target->byte_length = source->byte_length;
+    target->alignment = source->alignment;
+    target->request_count = source->request_count;
+    IREE_RETURN_IF_ERROR(id4_pipeline_string_clone(
+        source->name, plan->host_allocator, &target->name));
+    if (target->request_count == 0) continue;
+    id4_pipeline_constant_request_t* requests = NULL;
+    IREE_RETURN_IF_ERROR(
+        iree_allocator_malloc_array(plan->host_allocator, target->request_count,
+                                    sizeof(requests[0]), (void**)&requests));
+    memset(requests, 0, target->request_count * sizeof(requests[0]));
+    target->requests = requests;
+    for (iree_host_size_t j = 0; j < target->request_count; ++j) {
+      const id4_pipeline_constant_request_t* request = &source->requests[j];
+      if (iree_string_view_is_empty(request->name)) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "constant slab %.*s request %" PRIhsz
+                                " name is required",
+                                (int)source->name.size, source->name.data, j);
+      }
+      if (request->span.length == 0) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "constant slab %.*s request %.*s has zero byte length",
+            (int)source->name.size, source->name.data, (int)request->name.size,
+            request->name.data);
+      }
+      if (request->span.buffer_offset > target->byte_length ||
+          request->span.length >
+              target->byte_length - request->span.buffer_offset) {
+        return iree_make_status(
+            IREE_STATUS_OUT_OF_RANGE,
+            "constant slab %.*s request %.*s exceeds slab byte length",
+            (int)source->name.size, source->name.data, (int)request->name.size,
+            request->name.data);
+      }
+      requests[j].span = request->span;
+      IREE_RETURN_IF_ERROR(id4_pipeline_string_clone(
+          request->name, plan->host_allocator, &requests[j].name));
+    }
+  }
+  return iree_ok_status();
 }
 
 static iree_status_t id4_pipeline_plan_copy_memory_slabs(
@@ -548,6 +651,34 @@ static iree_status_t id4_pipeline_plan_validate_storage_binding_slots(
           plan, region_id, plan->parameter_slabs[i].binding_slot,
           IREE_SV("parameter slab")));
     }
+    for (iree_host_size_t i = 0; i < plan->constant_slab_count; ++i) {
+      IREE_RETURN_IF_ERROR(id4_pipeline_plan_validate_region_binding_slot(
+          plan, region_id, plan->constant_slabs[i].binding_slot,
+          IREE_SV("constant slab")));
+      for (iree_host_size_t j = i + 1; j < plan->constant_slab_count; ++j) {
+        if (plan->constant_slabs[i].binding_slot ==
+            plan->constant_slabs[j].binding_slot) {
+          return iree_make_status(
+              IREE_STATUS_ALREADY_EXISTS,
+              "constant slab %.*s binding slot %u is already planned",
+              (int)plan->constant_slabs[i].name.size,
+              plan->constant_slabs[i].name.data,
+              plan->constant_slabs[i].binding_slot);
+        }
+      }
+      for (iree_host_size_t j = 0; j < plan->parameter_slab_count; ++j) {
+        if (plan->constant_slabs[i].binding_slot ==
+            plan->parameter_slabs[j].binding_slot) {
+          return iree_make_status(
+              IREE_STATUS_ALREADY_EXISTS,
+              "constant slab %.*s binding slot %u conflicts with parameter "
+              "slab",
+              (int)plan->constant_slabs[i].name.size,
+              plan->constant_slabs[i].name.data,
+              plan->constant_slabs[i].binding_slot);
+        }
+      }
+    }
     for (iree_host_size_t i = 0; i < plan->memory_slab_count; ++i) {
       const id4_pipeline_memory_slab_plan_t* slab = &plan->memory_slabs[i];
       if (slab->binding_slot >= plan->regions[region_index].binding_capacity) {
@@ -571,6 +702,14 @@ static iree_status_t id4_pipeline_plan_validate_storage_binding_slots(
           return iree_make_status(
               IREE_STATUS_ALREADY_EXISTS,
               "memory slab %.*s binding slot %u conflicts with parameter slab",
+              (int)slab->name.size, slab->name.data, slab->binding_slot);
+        }
+      }
+      for (iree_host_size_t j = 0; j < plan->constant_slab_count; ++j) {
+        if (slab->binding_slot == plan->constant_slabs[j].binding_slot) {
+          return iree_make_status(
+              IREE_STATUS_ALREADY_EXISTS,
+              "memory slab %.*s binding slot %u conflicts with constant slab",
               (int)slab->name.size, slab->name.data, slab->binding_slot);
         }
       }
@@ -677,6 +816,9 @@ static bool id4_pipeline_plan_boundary_binding_conflicts(
     uint32_t binding_slot) {
   for (iree_host_size_t i = 0; i < plan->parameter_slab_count; ++i) {
     if (plan->parameter_slabs[i].binding_slot == binding_slot) return true;
+  }
+  for (iree_host_size_t i = 0; i < plan->constant_slab_count; ++i) {
+    if (plan->constant_slabs[i].binding_slot == binding_slot) return true;
   }
   for (iree_host_size_t i = 0; i < plan->memory_slab_count; ++i) {
     if (plan->memory_slabs[i].binding_slot == binding_slot) return true;
@@ -939,6 +1081,9 @@ iree_status_t id4_pipeline_plan_create(
     status = id4_pipeline_plan_copy_parameter_slabs(plan, options);
   }
   if (iree_status_is_ok(status)) {
+    status = id4_pipeline_plan_copy_constant_slabs(plan, options);
+  }
+  if (iree_status_is_ok(status)) {
     status = id4_pipeline_plan_copy_memory_slabs(plan, options);
   }
   if (iree_status_is_ok(status)) {
@@ -1027,6 +1172,17 @@ const id4_pipeline_parameter_slab_plan_t* id4_pipeline_plan_parameter_slab_at(
     const id4_pipeline_plan_t* plan, iree_host_size_t index) {
   if (!plan || index >= plan->parameter_slab_count) return NULL;
   return &plan->parameter_slabs[index];
+}
+
+iree_host_size_t id4_pipeline_plan_constant_slab_count(
+    const id4_pipeline_plan_t* plan) {
+  return plan ? plan->constant_slab_count : 0;
+}
+
+const id4_pipeline_constant_slab_plan_t* id4_pipeline_plan_constant_slab_at(
+    const id4_pipeline_plan_t* plan, iree_host_size_t index) {
+  if (!plan || index >= plan->constant_slab_count) return NULL;
+  return &plan->constant_slabs[index];
 }
 
 iree_host_size_t id4_pipeline_plan_memory_slab_count(
@@ -1273,6 +1429,44 @@ iree_status_t id4_pipeline_plan_format_json(const id4_pipeline_plan_t* plan,
           ",\"parameter_offset\":%" PRIu64 ",\"buffer_offset\":%" PRIu64
           ",\"length\":%" PRIu64 "}",
           (uint64_t)request->span.parameter_offset,
+          (uint64_t)request->span.buffer_offset,
+          (uint64_t)request->span.length));
+    }
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "]}"));
+  }
+  IREE_RETURN_IF_ERROR(
+      iree_string_builder_append_cstring(builder, "],\"constant_slabs\":["));
+  for (iree_host_size_t i = 0; i < plan->constant_slab_count; ++i) {
+    const id4_pipeline_constant_slab_plan_t* slab = &plan->constant_slabs[i];
+    if (i != 0) {
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, ","));
+    }
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+        builder, "{\"id\":%" PRIhsz ",\"name\":", i));
+    IREE_RETURN_IF_ERROR(
+        id4_pipeline_plan_append_json_string(builder, slab->name));
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+        builder, ",\"placement_id\":%u,\"binding_slot\":%u,\"target_params\":",
+        slab->placement_id, slab->binding_slot));
+    IREE_RETURN_IF_ERROR(id4_pipeline_plan_append_buffer_params_json(
+        builder, slab->target_params));
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+        builder,
+        ",\"byte_length\":%" PRIu64 ",\"alignment\":%" PRIu64
+        ",\"request_count\":%" PRIhsz ",\"requests\":[",
+        (uint64_t)slab->byte_length, (uint64_t)slab->alignment,
+        slab->request_count));
+    for (iree_host_size_t j = 0; j < slab->request_count; ++j) {
+      const id4_pipeline_constant_request_t* request = &slab->requests[j];
+      if (j != 0) {
+        IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, ","));
+      }
+      IREE_RETURN_IF_ERROR(
+          iree_string_builder_append_cstring(builder, "{\"name\":"));
+      IREE_RETURN_IF_ERROR(
+          id4_pipeline_plan_append_json_string(builder, request->name));
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+          builder, ",\"buffer_offset\":%" PRIu64 ",\"length\":%" PRIu64 "}",
           (uint64_t)request->span.buffer_offset,
           (uint64_t)request->span.length));
     }

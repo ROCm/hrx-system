@@ -15,6 +15,23 @@ package(
 )
 
 iree_runtime_cc_library(
+    name = "ideogram4_decode",
+    srcs = ["ideogram4_decode.c"],
+    hdrs = ["ideogram4_decode.h"],
+    deps = [
+        ":ideogram4_decode_program",
+        "//experimental/id4/pipeline:diagnostics",
+        "//experimental/id4/pipeline:kernel_cache",
+        "//experimental/id4/pipeline:program",
+        "//experimental/id4/pipeline:program_stage",
+        "//experimental/id4/pipeline:stage",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "ideogram4_dit",
     srcs = ["ideogram4_dit.c"],
     hdrs = ["ideogram4_dit.h"],
@@ -78,6 +95,19 @@ iree_runtime_cc_library(
         "//experimental/id4/pipeline:stage",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "ideogram4_decode_program",
+    srcs = ["ideogram4_decode_program.c"],
+    hdrs = ["ideogram4_decode_program.h"],
+    deps = [
+        ":vae_program",
+        "//experimental/id4/pipeline:kernel_library",
+        "//experimental/id4/pipeline:program",
+        "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
     ],
 )
@@ -179,6 +209,7 @@ iree_runtime_cc_library(
         "//runtime/src/iree/async",
         "//runtime/src/iree/async/util:proactor_pool",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/internal:json",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/io:file_handle",
@@ -199,8 +230,24 @@ iree_runtime_cc_test(
         "//runtime/src/iree/async",
         "//runtime/src/iree/async/util:proactor_pool",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/drivers/local_sync:sync_driver",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "ideogram4_decode_test",
+    srcs = ["ideogram4_decode_test.cc"],
+    deps = [
+        ":ideogram4_decode",
+        ":test_util",
+        "//experimental/id4/pipeline:plan",
+        "//experimental/id4/pipeline:stage",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],
@@ -267,6 +314,19 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_test(
+    name = "ideogram4_decode_program_test",
+    srcs = ["ideogram4_decode_program_test.cc"],
+    deps = [
+        ":ideogram4_decode_program",
+        "//experimental/id4/pipeline:program",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
     name = "ideogram4_dit_program_test",
     srcs = ["ideogram4_dit_program_test.cc"],
     deps = [
@@ -297,6 +357,47 @@ iree_runtime_cc_test(
         "//runtime/src/iree/hal",
         "//runtime/src/iree/io:file_handle",
         "//runtime/src/iree/io:parameter_provider",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "ideogram4_decode_integration_test",
+    srcs = ["ideogram4_decode_integration_test.cc"],
+    tags = [
+        "manual",
+        "requires-gpu",
+    ],
+    deps = [
+        ":hal_integration_util",
+        ":ideogram4_decode",
+        "//experimental/id4/pipeline:plan",
+        "//experimental/id4/pipeline:stage",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/tooling:flags",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "ideogram4_decode_fixture_integration_test",
+    srcs = ["ideogram4_decode_fixture_integration_test.cc"],
+    tags = [
+        "manual",
+        "requires-gpu",
+    ],
+    deps = [
+        ":hal_integration_util",
+        ":ideogram4_decode",
+        "//experimental/id4/pipeline:plan",
+        "//experimental/id4/pipeline:stage",
+        "//experimental/id4/tooling:image",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/tooling:flags",
+        "//runtime/src/iree/hal",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],
@@ -422,6 +523,29 @@ iree_runtime_cc_benchmark(
 )
 
 iree_runtime_cc_benchmark(
+    name = "ideogram4_dit_benchmark",
+    srcs = ["ideogram4_dit_benchmark.cc"],
+    tags = [
+        "benchmark",
+        "manual",
+        "requires-gpu",
+    ],
+    deps = [
+        ":hal_integration_util",
+        ":ideogram4_dit",
+        "//experimental/id4/pipeline:plan",
+        "//experimental/id4/pipeline:stage",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/tooling:flags",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/io:parameter_provider",
+        "//runtime/src/iree/testing:benchmark",
+        "//runtime/src/iree/testing:benchmark_main",
+        "//runtime/src/iree/tooling:device_util",
+    ],
+)
+
+iree_runtime_cc_benchmark(
     name = "qwen3_vl_benchmark",
     srcs = ["qwen3_vl_benchmark.cc"],
     tags = [
@@ -439,6 +563,7 @@ iree_runtime_cc_benchmark(
         "//runtime/src/iree/io:parameter_provider",
         "//runtime/src/iree/testing:benchmark",
         "//runtime/src/iree/testing:benchmark_main",
+        "//runtime/src/iree/tooling:device_util",
     ],
 )
 
@@ -457,7 +582,9 @@ iree_runtime_cc_benchmark(
         "//experimental/id4/pipeline:stage",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
+        "//runtime/src/iree/io:parameter_provider",
         "//runtime/src/iree/testing:benchmark",
         "//runtime/src/iree/testing:benchmark_main",
+        "//runtime/src/iree/tooling:device_util",
     ],
 )

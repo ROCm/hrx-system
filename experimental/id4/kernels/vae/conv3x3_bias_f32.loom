@@ -1,0 +1,528 @@
+config.decl @id4.vae.conv3x3_bias.width : %value: index where [range(%value, 1, 65536)]
+config.decl @id4.vae.conv3x3_bias.height : %value: index where [range(%value, 1, 65536)]
+config.decl @id4.vae.conv3x3_bias.input_channel_count : %value: index where [range(%value, 1, 4096)]
+config.decl @id4.vae.conv3x3_bias.output_channel_count : %value: index where [range(%value, 1, 4096)]
+config.decl @id4.vae.conv3x3_bias.batch_count : %value: index where [range(%value, 1, 1024)]
+config.decl @id4.vae.conv3x3_bias.output_element_count : %value: index where [range(%value, 1, 268435456)]
+
+kernel.def export("id4_vae_conv3x3_bias_f32") @id4_vae_conv3x3_bias_f32() {
+  %unit = index.constant 1 : index
+  %workgroup_size_x = index.constant 256 : index
+  %element_count = config.get @id4.vae.conv3x3_bias.output_element_count : index
+  %rounding = index.sub %workgroup_size_x, %unit : index
+  %rounded = index.add %element_count, %rounding : index
+  %workgroups_x = index.div %rounded, %workgroup_size_x : index
+  kernel.launch.config workgroups(%workgroups_x, %unit, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
+} launch(%input: buffer, %weight: buffer, %bias: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %unit = index.constant 1 : index
+  %two = index.constant 2 : index
+  %three = index.constant 3 : index
+  %kernel_center = index.constant 1 : index
+  %workgroup = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %workgroup_size_x = index.constant 256 : index
+  %width = config.get @id4.vae.conv3x3_bias.width : index
+  %height = config.get @id4.vae.conv3x3_bias.height : index
+  %input_channel_count = config.get @id4.vae.conv3x3_bias.input_channel_count : index
+  %output_channel_count = config.get @id4.vae.conv3x3_bias.output_channel_count : index
+  %batch_count = config.get @id4.vae.conv3x3_bias.batch_count : index
+  %output_element_count = config.get @id4.vae.conv3x3_bias.output_element_count : index
+  %element_index = index.madd %workgroup, %workgroup_size_x, %lane : index
+  %in_bounds = index.cmp ult, %element_index, %output_element_count : index
+  %zero_f32 = scalar.constant 0.0 : f32
+
+  %input_noalias, %weight_noalias, %bias_noalias, %output_noalias = buffer.assume.noalias %input, %weight, %bias, %output : buffer, buffer, buffer, buffer
+  %input_global = buffer.assume.memory_space<global> %input_noalias : buffer
+  %weight_global = buffer.assume.memory_space<global> %weight_noalias : buffer
+  %bias_global = buffer.assume.memory_space<global> %bias_noalias : buffer
+  %output_global = buffer.assume.memory_space<global> %output_noalias : buffer
+  %input_view = buffer.view %input_global[%base] : buffer -> view<[%width]x[%height]x[%input_channel_count]x[%batch_count]xf32, #dense>
+  %weight_view = buffer.view %weight_global[%base] : buffer -> view<[%output_channel_count]x[%input_channel_count]x3x3xf32, #dense>
+  %bias_view = buffer.view %bias_global[%base] : buffer -> view<[%output_channel_count]xf32, #dense>
+  %output_view = buffer.view %output_global[%base] : buffer -> view<[%width]x[%height]x[%output_channel_count]x[%batch_count]xf32, #dense>
+
+  scf.if %in_bounds {
+    %x = index.rem %element_index, %width : index
+    %row = index.div %element_index, %width : index
+    %y = index.rem %row, %height : index
+    %plane = index.div %row, %height : index
+    %output_channel = index.rem %plane, %output_channel_count : index
+    %batch = index.div %plane, %output_channel_count : index
+    %last_x = index.sub %width, %unit : index
+    %last_y = index.sub %height, %unit : index
+    %is_left_edge = index.cmp eq, %x, %zero : index
+    %kernel_x_begin = scf.if %is_left_edge -> (index) {
+      scf.yield %unit : index
+    } else {
+      scf.yield %zero : index
+    }
+    %is_right_edge = index.cmp eq, %x, %last_x : index
+    %kernel_x_end = scf.if %is_right_edge -> (index) {
+      scf.yield %two : index
+    } else {
+      scf.yield %three : index
+    }
+    %is_top_edge = index.cmp eq, %y, %zero : index
+    %kernel_y_begin = scf.if %is_top_edge -> (index) {
+      scf.yield %unit : index
+    } else {
+      scf.yield %zero : index
+    }
+    %is_bottom_edge = index.cmp eq, %y, %last_y : index
+    %kernel_y_end = scf.if %is_bottom_edge -> (index) {
+      scf.yield %two : index
+    } else {
+      scf.yield %three : index
+    }
+    %dot_y = scf.for %kernel_y = [%kernel_y_begin to %kernel_y_end step %unit](%acc_y = %zero_f32 : f32) -> (f32) {
+      %input_y_with_kernel = index.add %y, %kernel_y : index
+      %input_y = index.sub %input_y_with_kernel, %kernel_center : index
+      %dot_x = scf.for %kernel_x = [%kernel_x_begin to %kernel_x_end step %unit](%acc_x = %acc_y : f32) -> (f32) {
+        %input_x_with_kernel = index.add %x, %kernel_x : index
+        %input_x = index.sub %input_x_with_kernel, %kernel_center : index
+        %dot_channel = scf.for %input_channel = [%zero to %input_channel_count step %unit](%acc_channel = %acc_x : f32) -> (f32) {
+          %input_value = view.load %input_view[%input_x, %input_y, %input_channel, %batch] : view<[%width]x[%height]x[%input_channel_count]x[%batch_count]xf32, #dense> -> f32
+          %weight_value = view.load %weight_view[%output_channel, %input_channel, %kernel_y, %kernel_x] : view<[%output_channel_count]x[%input_channel_count]x3x3xf32, #dense> -> f32
+          %product = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %input_value, %weight_value : f32
+          %next = scalar.addf<reassoc|nnan|ninf|nsz> %acc_channel, %product : f32
+          scf.yield %next : f32
+        }
+        scf.yield %dot_channel : f32
+      }
+      scf.yield %dot_x : f32
+    }
+    %bias_value = view.load %bias_view[%output_channel] : view<[%output_channel_count]xf32, #dense> -> f32
+    %value = scalar.addf<reassoc|nnan|ninf|nsz> %dot_y, %bias_value : f32
+    view.store %value, %output_view[%x, %y, %output_channel, %batch] : f32, view<[%width]x[%height]x[%output_channel_count]x[%batch_count]xf32, #dense>
+  }
+  kernel.return
+}
+
+kernel.def export("id4_vae_conv3x3_bias_ic4_f32") @id4_vae_conv3x3_bias_ic4_f32() {
+  %unit = index.constant 1 : index
+  %workgroup_size_x = index.constant 256 : index
+  %element_count = config.get @id4.vae.conv3x3_bias.output_element_count : index
+  %rounding = index.sub %workgroup_size_x, %unit : index
+  %rounded = index.add %element_count, %rounding : index
+  %workgroups_x = index.div %rounded, %workgroup_size_x : index
+  kernel.launch.config workgroups(%workgroups_x, %unit, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
+} launch(%input: buffer, %weight: buffer, %bias: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %unit = index.constant 1 : index
+  %two = index.constant 2 : index
+  %three = index.constant 3 : index
+  %four = index.constant 4 : index
+  %kernel_center = index.constant 1 : index
+  %workgroup = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %workgroup_size_x = index.constant 256 : index
+  %width = config.get @id4.vae.conv3x3_bias.width : index
+  %height = config.get @id4.vae.conv3x3_bias.height : index
+  %input_channel_count = config.get @id4.vae.conv3x3_bias.input_channel_count : index
+  %output_channel_count = config.get @id4.vae.conv3x3_bias.output_channel_count : index
+  %batch_count0 = config.get @id4.vae.conv3x3_bias.batch_count : index
+  %batch_count = index.assume %batch_count0 [range(%batch_count0, 1, 1)] : index
+  %output_element_count = config.get @id4.vae.conv3x3_bias.output_element_count : index
+  %element_index = index.madd %workgroup, %workgroup_size_x, %lane : index
+  %in_bounds = index.cmp ult, %element_index, %output_element_count : index
+  %zero_f32 = scalar.constant 0.0 : f32
+
+  %input_noalias, %weight_noalias, %bias_noalias, %output_noalias = buffer.assume.noalias %input, %weight, %bias, %output : buffer, buffer, buffer, buffer
+  %input_global = buffer.assume.memory_space<global> %input_noalias : buffer
+  %weight_global = buffer.assume.memory_space<global> %weight_noalias : buffer
+  %bias_global = buffer.assume.memory_space<global> %bias_noalias : buffer
+  %output_global = buffer.assume.memory_space<global> %output_noalias : buffer
+  %input_pixel_count = index.mul %width, %height : index
+  %input_pixel_element_count = index.mul %input_pixel_count, %input_channel_count : index
+  %input_element_count = index.mul %input_pixel_element_count, %batch_count : index
+  %input_flat_view = buffer.view %input_global[%base] : buffer -> view<[%input_element_count]xf32, #dense>
+  %weight_view = buffer.view %weight_global[%base] : buffer -> view<[%output_channel_count]x[%input_channel_count]x3x3xf32, #dense>
+  %bias_view = buffer.view %bias_global[%base] : buffer -> view<[%output_channel_count]xf32, #dense>
+  %output_view = buffer.view %output_global[%base] : buffer -> view<[%width]x[%height]x[%output_channel_count]x[%batch_count]xf32, #dense>
+
+  scf.if %in_bounds {
+    %x = index.rem %element_index, %width : index
+    %row = index.div %element_index, %width : index
+    %y = index.rem %row, %height : index
+    %plane = index.div %row, %height : index
+    %output_channel = index.rem %plane, %output_channel_count : index
+    %batch = index.div %plane, %output_channel_count : index
+    %last_x = index.sub %width, %unit : index
+    %last_y = index.sub %height, %unit : index
+    %is_left_edge = index.cmp eq, %x, %zero : index
+    %kernel_x_begin = scf.if %is_left_edge -> (index) {
+      scf.yield %unit : index
+    } else {
+      scf.yield %zero : index
+    }
+    %is_right_edge = index.cmp eq, %x, %last_x : index
+    %kernel_x_end = scf.if %is_right_edge -> (index) {
+      scf.yield %two : index
+    } else {
+      scf.yield %three : index
+    }
+    %is_top_edge = index.cmp eq, %y, %zero : index
+    %kernel_y_begin = scf.if %is_top_edge -> (index) {
+      scf.yield %unit : index
+    } else {
+      scf.yield %zero : index
+    }
+    %is_bottom_edge = index.cmp eq, %y, %last_y : index
+    %kernel_y_end = scf.if %is_bottom_edge -> (index) {
+      scf.yield %two : index
+    } else {
+      scf.yield %three : index
+    }
+    %vector_channel_tile_count = index.div %input_channel_count, %four : index
+    %vector_channel_count = index.mul %vector_channel_tile_count, %four : index
+    %dot_y = scf.for %kernel_y = [%kernel_y_begin to %kernel_y_end step %unit](%acc_y = %zero_f32 : f32) -> (f32) {
+      %input_y_with_kernel = index.add %y, %kernel_y : index
+      %input_y = index.sub %input_y_with_kernel, %kernel_center : index
+      %dot_x = scf.for %kernel_x = [%kernel_x_begin to %kernel_x_end step %unit](%acc_x = %acc_y : f32) -> (f32) {
+        %input_x_with_kernel = index.add %x, %kernel_x : index
+        %input_x = index.sub %input_x_with_kernel, %kernel_center : index
+        %dot_channel_vectors = scf.for %input_channel_base = [%zero to %vector_channel_count step %four](%acc_channel_vectors = %acc_x : f32) -> (f32) {
+          %input_channel1 = index.add %input_channel_base, %unit : index
+          %input_channel2 = index.add %input_channel_base, %two : index
+          %input_channel3 = index.add %input_channel_base, %three : index
+          %input_x_row_base = index.mul %input_x, %height : index
+          %input_pixel_base = index.add %input_x_row_base, %input_y : index
+          %input_pixel_element_base = index.mul %input_pixel_base, %input_channel_count : index
+          %input_channel_element_base = index.add %input_pixel_element_base, %input_channel_base : index
+          %input_batch_element_base = index.mul %input_channel_element_base, %batch_count : index
+          %input_element0 = index.add %input_batch_element_base, %batch : index
+          %last_valid_input_element = index.sub %input_element_count, %three : index
+          %input_element = index.assume %input_element0 [ge(%input_element0, 0), lt(%input_element0, %last_valid_input_element)] : index
+          %input_values = vector.load %input_flat_view[%input_element] : view<[%input_element_count]xf32, #dense> -> vector<4xf32>
+          %weight_value0 = view.load %weight_view[%output_channel, %input_channel_base, %kernel_y, %kernel_x] : view<[%output_channel_count]x[%input_channel_count]x3x3xf32, #dense> -> f32
+          %weight_value1 = view.load %weight_view[%output_channel, %input_channel1, %kernel_y, %kernel_x] : view<[%output_channel_count]x[%input_channel_count]x3x3xf32, #dense> -> f32
+          %weight_value2 = view.load %weight_view[%output_channel, %input_channel2, %kernel_y, %kernel_x] : view<[%output_channel_count]x[%input_channel_count]x3x3xf32, #dense> -> f32
+          %weight_value3 = view.load %weight_view[%output_channel, %input_channel3, %kernel_y, %kernel_x] : view<[%output_channel_count]x[%input_channel_count]x3x3xf32, #dense> -> f32
+          %weight_values = vector.from_elements %weight_value0, %weight_value1, %weight_value2, %weight_value3 : vector<4xf32>
+          %products = vector.mulf<reassoc|nnan|ninf|nsz|contract> %input_values, %weight_values : vector<4xf32>
+          %partial = vector.reduce<addf, reassoc|nnan|ninf|nsz> %products, %zero_f32 : vector<4xf32>, f32
+          %next = scalar.addf<reassoc|nnan|ninf|nsz> %acc_channel_vectors, %partial : f32
+          scf.yield %next : f32
+        }
+        scf.yield %dot_channel_vectors : f32
+      }
+      scf.yield %dot_x : f32
+    }
+    %bias_value = view.load %bias_view[%output_channel] : view<[%output_channel_count]xf32, #dense> -> f32
+    %value = scalar.addf<reassoc|nnan|ninf|nsz> %dot_y, %bias_value : f32
+    view.store %value, %output_view[%x, %y, %output_channel, %batch] : f32, view<[%width]x[%height]x[%output_channel_count]x[%batch_count]xf32, #dense>
+  }
+  kernel.return
+}
+
+kernel.def export("id4_vae_conv3x3_bias_add_ic4_f32") @id4_vae_conv3x3_bias_add_ic4_f32() {
+  %unit = index.constant 1 : index
+  %workgroup_size_x = index.constant 256 : index
+  %element_count = config.get @id4.vae.conv3x3_bias.output_element_count : index
+  %rounding = index.sub %workgroup_size_x, %unit : index
+  %rounded = index.add %element_count, %rounding : index
+  %workgroups_x = index.div %rounded, %workgroup_size_x : index
+  kernel.launch.config workgroups(%workgroups_x, %unit, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
+} launch(%input: buffer, %weight: buffer, %bias: buffer, %shortcut: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %unit = index.constant 1 : index
+  %two = index.constant 2 : index
+  %three = index.constant 3 : index
+  %four = index.constant 4 : index
+  %kernel_center = index.constant 1 : index
+  %workgroup = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %workgroup_size_x = index.constant 256 : index
+  %width = config.get @id4.vae.conv3x3_bias.width : index
+  %height = config.get @id4.vae.conv3x3_bias.height : index
+  %input_channel_count = config.get @id4.vae.conv3x3_bias.input_channel_count : index
+  %output_channel_count = config.get @id4.vae.conv3x3_bias.output_channel_count : index
+  %batch_count0 = config.get @id4.vae.conv3x3_bias.batch_count : index
+  %batch_count = index.assume %batch_count0 [range(%batch_count0, 1, 1)] : index
+  %output_element_count = config.get @id4.vae.conv3x3_bias.output_element_count : index
+  %element_index = index.madd %workgroup, %workgroup_size_x, %lane : index
+  %in_bounds = index.cmp ult, %element_index, %output_element_count : index
+  %zero_f32 = scalar.constant 0.0 : f32
+
+  %input_noalias, %weight_noalias, %bias_noalias, %shortcut_noalias, %output_noalias = buffer.assume.noalias %input, %weight, %bias, %shortcut, %output : buffer, buffer, buffer, buffer, buffer
+  %input_global = buffer.assume.memory_space<global> %input_noalias : buffer
+  %weight_global = buffer.assume.memory_space<global> %weight_noalias : buffer
+  %bias_global = buffer.assume.memory_space<global> %bias_noalias : buffer
+  %shortcut_global = buffer.assume.memory_space<global> %shortcut_noalias : buffer
+  %output_global = buffer.assume.memory_space<global> %output_noalias : buffer
+  %input_pixel_count = index.mul %width, %height : index
+  %input_pixel_element_count = index.mul %input_pixel_count, %input_channel_count : index
+  %input_element_count = index.mul %input_pixel_element_count, %batch_count : index
+  %input_flat_view = buffer.view %input_global[%base] : buffer -> view<[%input_element_count]xf32, #dense>
+  %weight_view = buffer.view %weight_global[%base] : buffer -> view<[%output_channel_count]x[%input_channel_count]x3x3xf32, #dense>
+  %bias_view = buffer.view %bias_global[%base] : buffer -> view<[%output_channel_count]xf32, #dense>
+  %shortcut_view = buffer.view %shortcut_global[%base] : buffer -> view<[%width]x[%height]x[%output_channel_count]x[%batch_count]xf32, #dense>
+  %output_view = buffer.view %output_global[%base] : buffer -> view<[%width]x[%height]x[%output_channel_count]x[%batch_count]xf32, #dense>
+
+  scf.if %in_bounds {
+    %x = index.rem %element_index, %width : index
+    %row = index.div %element_index, %width : index
+    %y = index.rem %row, %height : index
+    %plane = index.div %row, %height : index
+    %output_channel = index.rem %plane, %output_channel_count : index
+    %batch = index.div %plane, %output_channel_count : index
+    %last_x = index.sub %width, %unit : index
+    %last_y = index.sub %height, %unit : index
+    %is_left_edge = index.cmp eq, %x, %zero : index
+    %kernel_x_begin = scf.if %is_left_edge -> (index) {
+      scf.yield %unit : index
+    } else {
+      scf.yield %zero : index
+    }
+    %is_right_edge = index.cmp eq, %x, %last_x : index
+    %kernel_x_end = scf.if %is_right_edge -> (index) {
+      scf.yield %two : index
+    } else {
+      scf.yield %three : index
+    }
+    %is_top_edge = index.cmp eq, %y, %zero : index
+    %kernel_y_begin = scf.if %is_top_edge -> (index) {
+      scf.yield %unit : index
+    } else {
+      scf.yield %zero : index
+    }
+    %is_bottom_edge = index.cmp eq, %y, %last_y : index
+    %kernel_y_end = scf.if %is_bottom_edge -> (index) {
+      scf.yield %two : index
+    } else {
+      scf.yield %three : index
+    }
+    %vector_channel_tile_count = index.div %input_channel_count, %four : index
+    %vector_channel_count = index.mul %vector_channel_tile_count, %four : index
+    %dot_y = scf.for %kernel_y = [%kernel_y_begin to %kernel_y_end step %unit](%acc_y = %zero_f32 : f32) -> (f32) {
+      %input_y_with_kernel = index.add %y, %kernel_y : index
+      %input_y = index.sub %input_y_with_kernel, %kernel_center : index
+      %dot_x = scf.for %kernel_x = [%kernel_x_begin to %kernel_x_end step %unit](%acc_x = %acc_y : f32) -> (f32) {
+        %input_x_with_kernel = index.add %x, %kernel_x : index
+        %input_x = index.sub %input_x_with_kernel, %kernel_center : index
+        %dot_channel_vectors = scf.for %input_channel_base = [%zero to %vector_channel_count step %four](%acc_channel_vectors = %acc_x : f32) -> (f32) {
+          %input_channel1 = index.add %input_channel_base, %unit : index
+          %input_channel2 = index.add %input_channel_base, %two : index
+          %input_channel3 = index.add %input_channel_base, %three : index
+          %input_x_row_base = index.mul %input_x, %height : index
+          %input_pixel_base = index.add %input_x_row_base, %input_y : index
+          %input_pixel_element_base = index.mul %input_pixel_base, %input_channel_count : index
+          %input_channel_element_base = index.add %input_pixel_element_base, %input_channel_base : index
+          %input_batch_element_base = index.mul %input_channel_element_base, %batch_count : index
+          %input_element0 = index.add %input_batch_element_base, %batch : index
+          %last_valid_input_element = index.sub %input_element_count, %three : index
+          %input_element = index.assume %input_element0 [ge(%input_element0, 0), lt(%input_element0, %last_valid_input_element)] : index
+          %input_values = vector.load %input_flat_view[%input_element] : view<[%input_element_count]xf32, #dense> -> vector<4xf32>
+          %weight_value0 = view.load %weight_view[%output_channel, %input_channel_base, %kernel_y, %kernel_x] : view<[%output_channel_count]x[%input_channel_count]x3x3xf32, #dense> -> f32
+          %weight_value1 = view.load %weight_view[%output_channel, %input_channel1, %kernel_y, %kernel_x] : view<[%output_channel_count]x[%input_channel_count]x3x3xf32, #dense> -> f32
+          %weight_value2 = view.load %weight_view[%output_channel, %input_channel2, %kernel_y, %kernel_x] : view<[%output_channel_count]x[%input_channel_count]x3x3xf32, #dense> -> f32
+          %weight_value3 = view.load %weight_view[%output_channel, %input_channel3, %kernel_y, %kernel_x] : view<[%output_channel_count]x[%input_channel_count]x3x3xf32, #dense> -> f32
+          %weight_values = vector.from_elements %weight_value0, %weight_value1, %weight_value2, %weight_value3 : vector<4xf32>
+          %products = vector.mulf<reassoc|nnan|ninf|nsz|contract> %input_values, %weight_values : vector<4xf32>
+          %partial = vector.reduce<addf, reassoc|nnan|ninf|nsz> %products, %zero_f32 : vector<4xf32>, f32
+          %next = scalar.addf<reassoc|nnan|ninf|nsz> %acc_channel_vectors, %partial : f32
+          scf.yield %next : f32
+        }
+        scf.yield %dot_channel_vectors : f32
+      }
+      scf.yield %dot_x : f32
+    }
+    %bias_value = view.load %bias_view[%output_channel] : view<[%output_channel_count]xf32, #dense> -> f32
+    %biased = scalar.addf<reassoc|nnan|ninf|nsz> %dot_y, %bias_value : f32
+    %shortcut_value = view.load %shortcut_view[%x, %y, %output_channel, %batch] : view<[%width]x[%height]x[%output_channel_count]x[%batch_count]xf32, #dense> -> f32
+    %value = scalar.addf<reassoc|nnan|ninf|nsz> %biased, %shortcut_value : f32
+    view.store %value, %output_view[%x, %y, %output_channel, %batch] : f32, view<[%width]x[%height]x[%output_channel_count]x[%batch_count]xf32, #dense>
+  }
+  kernel.return
+}
+
+kernel.def export("id4_vae_conv3x3_bias_wg_reduce_f32") @id4_vae_conv3x3_bias_wg_reduce_f32() {
+  %unit = index.constant 1 : index
+  %workgroup_size_x = index.constant 256 : index
+  %element_count = config.get @id4.vae.conv3x3_bias.output_element_count : index
+  kernel.launch.config workgroups(%element_count, %unit, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
+} launch(%input: buffer, %weight: buffer, %bias: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %unit = index.constant 1 : index
+  %two = index.constant 2 : index
+  %three = index.constant 3 : index
+  %nine = index.constant 9 : index
+  %kernel_center = index.constant 1 : index
+  %element_index = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %workgroup_size_x = index.constant 256 : index
+  %width = config.get @id4.vae.conv3x3_bias.width : index
+  %height = config.get @id4.vae.conv3x3_bias.height : index
+  %input_channel_count = config.get @id4.vae.conv3x3_bias.input_channel_count : index
+  %output_channel_count = config.get @id4.vae.conv3x3_bias.output_channel_count : index
+  %batch_count = config.get @id4.vae.conv3x3_bias.batch_count : index
+  %zero_f32 = scalar.constant 0.0 : f32
+
+  %input_noalias, %weight_noalias, %bias_noalias, %output_noalias = buffer.assume.noalias %input, %weight, %bias, %output : buffer, buffer, buffer, buffer
+  %input_global = buffer.assume.memory_space<global> %input_noalias : buffer
+  %weight_global = buffer.assume.memory_space<global> %weight_noalias : buffer
+  %bias_global = buffer.assume.memory_space<global> %bias_noalias : buffer
+  %output_global = buffer.assume.memory_space<global> %output_noalias : buffer
+  %input_view = buffer.view %input_global[%base] : buffer -> view<[%width]x[%height]x[%input_channel_count]x[%batch_count]xf32, #dense>
+  %weight_view = buffer.view %weight_global[%base] : buffer -> view<[%output_channel_count]x[%input_channel_count]x3x3xf32, #dense>
+  %bias_view = buffer.view %bias_global[%base] : buffer -> view<[%output_channel_count]xf32, #dense>
+  %output_view = buffer.view %output_global[%base] : buffer -> view<[%width]x[%height]x[%output_channel_count]x[%batch_count]xf32, #dense>
+
+  %x = index.rem %element_index, %width : index
+  %row = index.div %element_index, %width : index
+  %y = index.rem %row, %height : index
+  %plane = index.div %row, %height : index
+  %output_channel = index.rem %plane, %output_channel_count : index
+  %batch = index.div %plane, %output_channel_count : index
+  %last_x = index.sub %width, %unit : index
+  %last_y = index.sub %height, %unit : index
+  %x_is_left = index.cmp eq, %x, %zero : index
+  %x_is_right = index.cmp eq, %x, %last_x : index
+  %y_is_top = index.cmp eq, %y, %zero : index
+  %y_is_bottom = index.cmp eq, %y, %last_y : index
+  %reduction_count = index.mul %input_channel_count, %nine : index
+
+  %lane_dot = scf.for %reduction_index = [%lane to %reduction_count step %workgroup_size_x](%acc = %zero_f32 : f32) -> (f32) {
+    %input_channel = index.div %reduction_index, %nine : index
+    %tap_index = index.rem %reduction_index, %nine : index
+    %kernel_y = index.div %tap_index, %three : index
+    %kernel_x = index.rem %tap_index, %three : index
+    %kernel_x_is_zero = index.cmp eq, %kernel_x, %zero : index
+    %kernel_x_is_two = index.cmp eq, %kernel_x, %two : index
+    %kernel_y_is_zero = index.cmp eq, %kernel_y, %zero : index
+    %kernel_y_is_two = index.cmp eq, %kernel_y, %two : index
+    %invalid_left = scalar.andi %x_is_left, %kernel_x_is_zero : i1
+    %invalid_right = scalar.andi %x_is_right, %kernel_x_is_two : i1
+    %invalid_top = scalar.andi %y_is_top, %kernel_y_is_zero : i1
+    %invalid_bottom = scalar.andi %y_is_bottom, %kernel_y_is_two : i1
+    %invalid_x = scalar.ori %invalid_left, %invalid_right : i1
+    %invalid_y = scalar.ori %invalid_top, %invalid_bottom : i1
+    %invalid_tap = scalar.ori %invalid_x, %invalid_y : i1
+    %partial = scf.if %invalid_tap -> (f32) {
+      scf.yield %zero_f32 : f32
+    } else {
+      %input_y_with_kernel = index.add %y, %kernel_y : index
+      %input_y = index.sub %input_y_with_kernel, %kernel_center : index
+      %input_x_with_kernel = index.add %x, %kernel_x : index
+      %input_x = index.sub %input_x_with_kernel, %kernel_center : index
+      %input_value = view.load %input_view[%input_x, %input_y, %input_channel, %batch] : view<[%width]x[%height]x[%input_channel_count]x[%batch_count]xf32, #dense> -> f32
+      %weight_value = view.load %weight_view[%output_channel, %input_channel, %kernel_y, %kernel_x] : view<[%output_channel_count]x[%input_channel_count]x3x3xf32, #dense> -> f32
+      %product = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %input_value, %weight_value : f32
+      scf.yield %product : f32
+    }
+    %next = scalar.addf<reassoc|nnan|ninf|nsz> %acc, %partial : f32
+    scf.yield %next : f32
+  }
+  %dot = kernel.workgroup.reduce<addf> %lane_dot : f32
+  %is_leader = index.cmp eq, %lane, %zero : index
+  scf.if %is_leader {
+    %bias_value = view.load %bias_view[%output_channel] : view<[%output_channel_count]xf32, #dense> -> f32
+    %value = scalar.addf<reassoc|nnan|ninf|nsz> %dot, %bias_value : f32
+    view.store %value, %output_view[%x, %y, %output_channel, %batch] : f32, view<[%width]x[%height]x[%output_channel_count]x[%batch_count]xf32, #dense>
+  }
+  kernel.return
+}
+
+check.case public @id4_vae_conv3x3_bias_f32_small_same_padding_case {
+  %input = check.generate.fill value(1.0) : tensor<2x2x1x1xf32>
+  %weight = check.generate.fill value(1.0) : tensor<1x1x3x3xf32>
+  %bias = check.generate.fill value(1.0) : tensor<1xf32>
+  %output = check.generate.fill value(0.0) : tensor<2x2x1x1xf32>
+  %expected = check.generate.fill value(5.0) : tensor<2x2x1x1xf32>
+  func.call @id4_vae_conv3x3_bias_f32(%input, %weight, %bias, %output) : (tensor<2x2x1x1xf32>, tensor<1x1x3x3xf32>, tensor<1xf32>, tensor<2x2x1x1xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2x2x1x1xf32>
+  check.return
+}
+
+check.case public @id4_vae_conv3x3_bias_f32_flux2_conv_in_shape_case {
+  %input = check.generate.fill value(1.0) : tensor<128x128x32x1xf32>
+  %weight = check.generate.fill value(0.0) : tensor<512x32x3x3xf32>
+  %bias = check.generate.fill value(0.0) : tensor<512xf32>
+  %output = check.generate.fill value(1.0) : tensor<128x128x512x1xf32>
+  %expected = check.generate.fill value(0.0) : tensor<128x128x512x1xf32>
+  func.call @id4_vae_conv3x3_bias_f32(%input, %weight, %bias, %output) : (tensor<128x128x32x1xf32>, tensor<512x32x3x3xf32>, tensor<512xf32>, tensor<128x128x512x1xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<128x128x512x1xf32>
+  check.return
+}
+
+check.case public @id4_vae_conv3x3_bias_ic4_f32_small_same_padding_case {
+  %input = check.generate.fill value(1.0) : tensor<2x2x4x1xf32>
+  %weight = check.generate.fill value(1.0) : tensor<1x4x3x3xf32>
+  %bias = check.generate.fill value(1.0) : tensor<1xf32>
+  %output = check.generate.fill value(0.0) : tensor<2x2x1x1xf32>
+  %expected = check.generate.fill value(17.0) : tensor<2x2x1x1xf32>
+  func.call @id4_vae_conv3x3_bias_ic4_f32(%input, %weight, %bias, %output) : (tensor<2x2x4x1xf32>, tensor<1x4x3x3xf32>, tensor<1xf32>, tensor<2x2x1x1xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2x2x1x1xf32>
+  check.return
+}
+
+check.case public @id4_vae_conv3x3_bias_ic4_f32_flux2_tile_mid_shape_case {
+  %input = check.generate.fill value(1.0) : tensor<64x64x512x1xf32>
+  %weight = check.generate.fill value(0.0) : tensor<512x512x3x3xf32>
+  %bias = check.generate.fill value(0.0) : tensor<512xf32>
+  %output = check.generate.fill value(1.0) : tensor<64x64x512x1xf32>
+  %expected = check.generate.fill value(0.0) : tensor<64x64x512x1xf32>
+  func.call @id4_vae_conv3x3_bias_ic4_f32(%input, %weight, %bias, %output) : (tensor<64x64x512x1xf32>, tensor<512x512x3x3xf32>, tensor<512xf32>, tensor<64x64x512x1xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<64x64x512x1xf32>
+  check.return
+}
+
+check.case public @id4_vae_conv3x3_bias_wg_reduce_f32_small_same_padding_case {
+  %input = check.generate.fill value(1.0) : tensor<2x2x4x1xf32>
+  %weight = check.generate.fill value(1.0) : tensor<1x4x3x3xf32>
+  %bias = check.generate.fill value(1.0) : tensor<1xf32>
+  %output = check.generate.fill value(0.0) : tensor<2x2x1x1xf32>
+  %expected = check.generate.fill value(17.0) : tensor<2x2x1x1xf32>
+  func.call @id4_vae_conv3x3_bias_wg_reduce_f32(%input, %weight, %bias, %output) : (tensor<2x2x4x1xf32>, tensor<1x4x3x3xf32>, tensor<1xf32>, tensor<2x2x1x1xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2x2x1x1xf32>
+  check.return
+}
+
+check.case public @id4_vae_conv3x3_bias_wg_reduce_f32_iota_center_case {
+  %input = check.generate.iota offset(1.0) step(1.0) : tensor<1x1x4x1xf32>
+  %weight = check.generate.iota offset(1.0) step(1.0) : tensor<1x4x3x3xf32>
+  %bias = check.generate.fill value(0.0) : tensor<1xf32>
+  %output = check.generate.fill value(0.0) : tensor<1x1x1x1xf32>
+  %expected = check.generate.fill value(230.0) : tensor<1x1x1x1xf32>
+  func.call @id4_vae_conv3x3_bias_wg_reduce_f32(%input, %weight, %bias, %output) : (tensor<1x1x4x1xf32>, tensor<1x4x3x3xf32>, tensor<1xf32>, tensor<1x1x1x1xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<1x1x1x1xf32>
+  check.return
+}
+
+check.case public @id4_vae_conv3x3_bias_add_ic4_f32_small_same_padding_case {
+  %input = check.generate.fill value(1.0) : tensor<2x2x4x1xf32>
+  %weight = check.generate.fill value(1.0) : tensor<4x4x3x3xf32>
+  %bias = check.generate.fill value(1.0) : tensor<4xf32>
+  %shortcut = check.generate.fill value(3.0) : tensor<2x2x4x1xf32>
+  %output = check.generate.fill value(0.0) : tensor<2x2x4x1xf32>
+  %expected = check.generate.fill value(20.0) : tensor<2x2x4x1xf32>
+  func.call @id4_vae_conv3x3_bias_add_ic4_f32(%input, %weight, %bias, %shortcut, %output) : (tensor<2x2x4x1xf32>, tensor<4x4x3x3xf32>, tensor<4xf32>, tensor<2x2x4x1xf32>, tensor<2x2x4x1xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2x2x4x1xf32>
+  check.return
+}
+
+check.case public @id4_vae_conv3x3_bias_add_ic4_f32_flux2_tile_residual_shape_case {
+  %input = check.generate.fill value(1.0) : tensor<256x256x128x1xf32>
+  %weight = check.generate.fill value(0.0) : tensor<128x128x3x3xf32>
+  %bias = check.generate.fill value(0.0) : tensor<128xf32>
+  %shortcut = check.generate.fill value(3.0) : tensor<256x256x128x1xf32>
+  %output = check.generate.fill value(0.0) : tensor<256x256x128x1xf32>
+  %expected = check.generate.fill value(3.0) : tensor<256x256x128x1xf32>
+  func.call @id4_vae_conv3x3_bias_add_ic4_f32(%input, %weight, %bias, %shortcut, %output) : (tensor<256x256x128x1xf32>, tensor<128x128x3x3xf32>, tensor<128xf32>, tensor<256x256x128x1xf32>, tensor<256x256x128x1xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<256x256x128x1xf32>
+  check.return
+}
+
+check.benchmark<@id4_vae_conv3x3_bias_f32_small_same_padding_case> @id4_vae_conv3x3_bias_f32_small_same_padding
+check.benchmark<@id4_vae_conv3x3_bias_f32_flux2_conv_in_shape_case> @id4_vae_conv3x3_bias_f32_flux2_conv_in_shape
+check.benchmark<@id4_vae_conv3x3_bias_ic4_f32_small_same_padding_case> @id4_vae_conv3x3_bias_ic4_f32_small_same_padding
+check.benchmark<@id4_vae_conv3x3_bias_ic4_f32_flux2_tile_mid_shape_case> @id4_vae_conv3x3_bias_ic4_f32_flux2_tile_mid_shape
+check.benchmark<@id4_vae_conv3x3_bias_add_ic4_f32_small_same_padding_case> @id4_vae_conv3x3_bias_add_ic4_f32_small_same_padding
+check.benchmark<@id4_vae_conv3x3_bias_add_ic4_f32_flux2_tile_residual_shape_case> @id4_vae_conv3x3_bias_add_ic4_f32_flux2_tile_residual_shape
+check.benchmark<@id4_vae_conv3x3_bias_wg_reduce_f32_small_same_padding_case> @id4_vae_conv3x3_bias_wg_reduce_f32_small_same_padding
+check.benchmark<@id4_vae_conv3x3_bias_wg_reduce_f32_iota_center_case> @id4_vae_conv3x3_bias_wg_reduce_f32_iota_center

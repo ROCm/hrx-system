@@ -297,13 +297,24 @@ static iree_status_t id4_tooling_capture_npy_descriptor(
     case ID4_PIPELINE_TENSOR_DTYPE_F32:
       *out_descriptor = IREE_SV("<f4");
       return iree_ok_status();
+    case ID4_PIPELINE_TENSOR_DTYPE_F16:
+      *out_descriptor = IREE_SV("<f2");
+      return iree_ok_status();
+    case ID4_PIPELINE_TENSOR_DTYPE_BF16:
+      // NumPy has no portable bfloat16 descriptor. The manifest carries the
+      // logical dtype while the NPY payload stores the raw 16-bit lanes.
+      *out_descriptor = IREE_SV("<u2");
+      return iree_ok_status();
     case ID4_PIPELINE_TENSOR_DTYPE_I32:
       *out_descriptor = IREE_SV("<i4");
+      return iree_ok_status();
+    case ID4_PIPELINE_TENSOR_DTYPE_U32:
+      *out_descriptor = IREE_SV("<u4");
       return iree_ok_status();
     default:
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
-          "capture only supports f32 and i32 tensor payloads today");
+          "capture only supports f32, f16, bf16, i32, and u32 tensor payloads");
   }
 }
 

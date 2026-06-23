@@ -11,6 +11,26 @@ iree_add_all_subdirs()
 
 iree_cc_library(
   NAME
+    ideogram4_decode
+  HDRS
+    "ideogram4_decode.h"
+  SRCS
+    "ideogram4_decode.c"
+  DEPS
+    ::ideogram4_decode_program
+    iree::base
+    iree::base::internal::arena
+    iree::experimental::id4::pipeline::diagnostics
+    iree::experimental::id4::pipeline::kernel_cache
+    iree::experimental::id4::pipeline::program
+    iree::experimental::id4::pipeline::program_stage
+    iree::experimental::id4::pipeline::stage
+    iree::hal
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
     ideogram4_dit
   HDRS
     "ideogram4_dit.h"
@@ -85,6 +105,22 @@ iree_cc_library(
     iree::experimental::id4::pipeline::program
     iree::experimental::id4::pipeline::program_stage
     iree::experimental::id4::pipeline::stage
+    iree::hal
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
+    ideogram4_decode_program
+  HDRS
+    "ideogram4_decode_program.h"
+  SRCS
+    "ideogram4_decode_program.c"
+  DEPS
+    ::vae_program
+    iree::base
+    iree::experimental::id4::pipeline::kernel_library
+    iree::experimental::id4::pipeline::program
     iree::hal
   PUBLIC
 )
@@ -199,6 +235,7 @@ iree_cc_library(
     iree::async
     iree::async::util::proactor_pool
     iree::base
+    iree::base::internal
     iree::base::internal::json
     iree::experimental::id4::kernels::embedded_loom_sources
     iree::experimental::id4::pipeline::diagnostics
@@ -227,8 +264,25 @@ iree_cc_test(
     iree::async
     iree::async::util::proactor_pool
     iree::base
+    iree::base::internal
     iree::hal
     iree::hal::drivers::local_sync::sync_driver
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_test(
+  NAME
+    ideogram4_decode_test
+  SRCS
+    "ideogram4_decode_test.cc"
+  DEPS
+    ::ideogram4_decode
+    ::test_util
+    iree::base
+    iree::experimental::id4::pipeline::plan
+    iree::experimental::id4::pipeline::stage
+    iree::hal
     iree::testing::gtest
     iree::testing::gtest_main
 )
@@ -299,6 +353,20 @@ iree_cc_test(
 
 iree_cc_test(
   NAME
+    ideogram4_decode_program_test
+  SRCS
+    "ideogram4_decode_program_test.cc"
+  DEPS
+    ::ideogram4_decode_program
+    iree::base
+    iree::base::internal::arena
+    iree::experimental::id4::pipeline::program
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_test(
+  NAME
     ideogram4_dit_program_test
   SRCS
     "ideogram4_dit_program_test.cc"
@@ -327,6 +395,47 @@ iree_cc_test(
     iree::hal
     iree::io::file_handle
     iree::io::parameter_provider
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "manual"
+    "requires-gpu"
+)
+
+iree_cc_test(
+  NAME
+    ideogram4_decode_integration_test
+  SRCS
+    "ideogram4_decode_integration_test.cc"
+  DEPS
+    ::hal_integration_util
+    ::ideogram4_decode
+    iree::base
+    iree::base::tooling::flags
+    iree::experimental::id4::pipeline::plan
+    iree::experimental::id4::pipeline::stage
+    iree::hal
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "manual"
+    "requires-gpu"
+)
+
+iree_cc_test(
+  NAME
+    ideogram4_decode_fixture_integration_test
+  SRCS
+    "ideogram4_decode_fixture_integration_test.cc"
+  DEPS
+    ::hal_integration_util
+    ::ideogram4_decode
+    iree::base
+    iree::base::tooling::flags
+    iree::experimental::id4::pipeline::plan
+    iree::experimental::id4::pipeline::stage
+    iree::experimental::id4::tooling::image
+    iree::hal
     iree::testing::gtest
     iree::testing::gtest_main
   LABELS
@@ -461,6 +570,31 @@ iree_cc_binary_benchmark(
 
 iree_cc_binary_benchmark(
   NAME
+    ideogram4_dit_benchmark
+  SRCS
+    "ideogram4_dit_benchmark.cc"
+  DEPS
+    ::hal_integration_util
+    ::ideogram4_dit
+    iree::base
+    iree::base::tooling::flags
+    iree::experimental::id4::pipeline::plan
+    iree::experimental::id4::pipeline::stage
+    iree::hal
+    iree::io::parameter_provider
+    iree::testing::benchmark
+    iree::testing::benchmark_main
+    iree::third_party::google_benchmark
+    iree::tooling::device_util
+  TESTONLY
+  LABELS
+    "benchmark"
+    "manual"
+    "requires-gpu"
+)
+
+iree_cc_binary_benchmark(
+  NAME
     qwen3_vl_benchmark
   SRCS
     "qwen3_vl_benchmark.cc"
@@ -475,6 +609,7 @@ iree_cc_binary_benchmark(
     iree::testing::benchmark
     iree::testing::benchmark_main
     iree::third_party::google_benchmark
+    iree::tooling::device_util
   TESTONLY
   LABELS
     "benchmark"
@@ -494,9 +629,11 @@ iree_cc_binary_benchmark(
     iree::experimental::id4::pipeline::plan
     iree::experimental::id4::pipeline::stage
     iree::hal
+    iree::io::parameter_provider
     iree::testing::benchmark
     iree::testing::benchmark_main
     iree::third_party::google_benchmark
+    iree::tooling::device_util
   TESTONLY
   LABELS
     "benchmark"

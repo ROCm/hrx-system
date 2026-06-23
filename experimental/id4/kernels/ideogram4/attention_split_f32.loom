@@ -1,0 +1,211 @@
+config.decl @id4.ideogram4.attention_split.token_count : %value: index where [range(%value, 1, 131072)]
+config.decl @id4.ideogram4.attention_split.attention_head_count : %value: index where [range(%value, 1, 1024)]
+config.decl @id4.ideogram4.attention_split.head_size : %value: index where [range(%value, 1, 256)]
+config.decl @id4.ideogram4.attention_split.key_block_size : %value: index where [range(%value, 1, 4096)]
+
+kernel.def export("id4_ideogram4_attention_split_tile_f32") @id4_ideogram4_attention_split_tile_f32() {
+  %unit = index.constant 1 : index
+  %workgroup_size_x = index.constant 256 : index
+  %token_count = config.get @id4.ideogram4.attention_split.token_count : index
+  %attention_head_count = config.get @id4.ideogram4.attention_split.attention_head_count : index
+  %key_block_size = config.get @id4.ideogram4.attention_split.key_block_size : index
+  %key_block_bias = index.sub %key_block_size, %unit : index
+  %biased_token_count = index.add %token_count, %key_block_bias : index
+  %key_block_count = index.div %biased_token_count, %key_block_size : index
+  kernel.launch.config workgroups(%token_count, %attention_head_count, %key_block_count) workgroup_size(%workgroup_size_x, %unit, %unit) : index
+} launch(%query: buffer, %key: buffer, %value: buffer, %partial_state: buffer, %partial_acc: buffer) {
+  %base = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %query_token = kernel.workgroup.id<x> : index
+  %query_head = kernel.workgroup.id<y> : index
+  %key_block = kernel.workgroup.id<z> : index
+  %lane = kernel.workitem.id<x> : index
+  %zero_f32 = scalar.constant 0.0 : f32
+  %negative_large = scalar.constant -1000000000.0 : f32
+  %kv_scale = scalar.constant 0.0078125 : f32
+  %kv_inverse_scale = scalar.constant 128.0 : f32
+  %token_count = config.get @id4.ideogram4.attention_split.token_count : index
+  %attention_head_count = config.get @id4.ideogram4.attention_split.attention_head_count : index
+  %head_size = config.get @id4.ideogram4.attention_split.head_size : index
+  %key_block_size = config.get @id4.ideogram4.attention_split.key_block_size : index
+  %key_block_bias = index.sub %key_block_size, %one : index
+  %biased_token_count = index.add %token_count, %key_block_bias : index
+  %key_block_count = index.div %biased_token_count, %key_block_size : index
+  %hidden_size = index.mul %attention_head_count, %head_size : index
+  %lane_has_channel = index.cmp ult, %lane, %head_size : index
+  %is_lane_zero = index.cmp eq, %lane, %zero : index
+  %head_size_i32 = index.cast %head_size : index to i32
+  %head_size_f32 = scalar.sitofp %head_size_i32 : i32 to f32
+  %attention_scale = scalar.rsqrtf<nnan|ninf|nsz|afn> %head_size_f32 : f32
+  %head_base = index.mul %query_head, %head_size : index
+  %attention_channel = index.add %head_base, %lane : index
+  %key_start = index.mul %key_block, %key_block_size : index
+  %raw_key_end = index.add %key_start, %key_block_size : index
+  %end_exceeds_tokens = index.cmp ult, %token_count, %raw_key_end : index
+  %key_end = scf.if %end_exceeds_tokens -> (index) {
+    scf.yield %token_count : index
+  } else {
+    scf.yield %raw_key_end : index
+  }
+
+  %query_noalias, %key_noalias, %value_noalias, %partial_state_noalias, %partial_acc_noalias = buffer.assume.noalias %query, %key, %value, %partial_state, %partial_acc : buffer, buffer, buffer, buffer, buffer
+  %query_global = buffer.assume.memory_space<global> %query_noalias : buffer
+  %key_global = buffer.assume.memory_space<global> %key_noalias : buffer
+  %value_global = buffer.assume.memory_space<global> %value_noalias : buffer
+  %partial_state_global = buffer.assume.memory_space<global> %partial_state_noalias : buffer
+  %partial_acc_global = buffer.assume.memory_space<global> %partial_acc_noalias : buffer
+  %query_view = buffer.view %query_global[%base] : buffer -> view<[%token_count]x[%hidden_size]xf32, #dense>
+  %key_view = buffer.view %key_global[%base] : buffer -> view<[%token_count]x[%hidden_size]xf32, #dense>
+  %value_view = buffer.view %value_global[%base] : buffer -> view<[%token_count]x[%hidden_size]xf32, #dense>
+  %partial_state_view = buffer.view %partial_state_global[%base] : buffer -> view<[%key_block_count]x[%attention_head_count]x[%token_count]x2xf32, #dense>
+  %partial_acc_view = buffer.view %partial_acc_global[%base] : buffer -> view<[%key_block_count]x[%attention_head_count]x[%token_count]x[%head_size]xf32, #dense>
+
+  %query_value = scf.if %lane_has_channel -> (f32) {
+    %loaded = view.load %query_view[%query_token, %attention_channel] : view<[%token_count]x[%hidden_size]xf32, #dense> -> f32
+    scf.yield %loaded : f32
+  } else {
+    scf.yield %zero_f32 : f32
+  }
+  %softmax_max, %softmax_sum, %weighted_acc = scf.for %key_token = [%key_start to %key_end step %one](%current_max = %negative_large : f32, %current_sum = %zero_f32 : f32, %value_acc = %zero_f32 : f32) -> (f32, f32, f32) {
+    %lane_product = scf.if %lane_has_channel -> (f32) {
+      %key_value = view.load %key_view[%key_token, %attention_channel] : view<[%token_count]x[%hidden_size]xf32, #dense> -> f32
+      %scaled_key = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %key_value, %kv_scale : f32
+      %scaled_key_f16 = scalar.fptrunc %scaled_key : f32 to f16
+      %scaled_key_f32 = scalar.extf %scaled_key_f16 : f16 to f32
+      %rounded_key = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %scaled_key_f32, %kv_inverse_scale : f32
+      %product = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %query_value, %rounded_key : f32
+      scf.yield %product : f32
+    } else {
+      scf.yield %zero_f32 : f32
+    }
+    %dot = kernel.workgroup.reduce<addf> %lane_product : f32
+    %score = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %dot, %attention_scale : f32
+    %next_max = scalar.maxnumf %current_max, %score : f32
+    %old_delta = scalar.subf<reassoc|nnan|ninf|nsz> %current_max, %next_max : f32
+    %old_scale = scalar.expf<afn> %old_delta : f32
+    %score_delta = scalar.subf<reassoc|nnan|ninf|nsz> %score, %next_max : f32
+    %weight = scalar.expf<afn> %score_delta : f32
+    %scaled_sum = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %current_sum, %old_scale : f32
+    %next_sum = scalar.addf<reassoc|nnan|ninf|nsz> %scaled_sum, %weight : f32
+    %scaled_acc = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %value_acc, %old_scale : f32
+    %next_value = scf.if %lane_has_channel -> (f32) {
+      %value_component = view.load %value_view[%key_token, %attention_channel] : view<[%token_count]x[%hidden_size]xf32, #dense> -> f32
+      %scaled_value = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %value_component, %kv_scale : f32
+      %scaled_value_f16 = scalar.fptrunc %scaled_value : f32 to f16
+      %scaled_value_f32 = scalar.extf %scaled_value_f16 : f16 to f32
+      %rounded_value = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %scaled_value_f32, %kv_inverse_scale : f32
+      %weighted_component = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %weight, %rounded_value : f32
+      %next_channel_value = scalar.addf<reassoc|nnan|ninf|nsz> %scaled_acc, %weighted_component : f32
+      scf.yield %next_channel_value : f32
+    } else {
+      scf.yield %scaled_acc : f32
+    }
+    scf.yield %next_max, %next_sum, %next_value : f32, f32, f32
+  }
+
+  scf.if %is_lane_zero {
+    view.store %softmax_max, %partial_state_view[%key_block, %query_head, %query_token, %zero] : f32, view<[%key_block_count]x[%attention_head_count]x[%token_count]x2xf32, #dense>
+    view.store %softmax_sum, %partial_state_view[%key_block, %query_head, %query_token, %one] : f32, view<[%key_block_count]x[%attention_head_count]x[%token_count]x2xf32, #dense>
+  }
+  scf.if %lane_has_channel {
+    view.store %weighted_acc, %partial_acc_view[%key_block, %query_head, %query_token, %lane] : f32, view<[%key_block_count]x[%attention_head_count]x[%token_count]x[%head_size]xf32, #dense>
+  }
+  kernel.return
+}
+
+kernel.def export("id4_ideogram4_attention_split_combine_f32") @id4_ideogram4_attention_split_combine_f32() {
+  %unit = index.constant 1 : index
+  %workgroup_size_x = index.constant 256 : index
+  %token_count = config.get @id4.ideogram4.attention_split.token_count : index
+  %attention_head_count = config.get @id4.ideogram4.attention_split.attention_head_count : index
+  kernel.launch.config workgroups(%token_count, %attention_head_count, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
+} launch(%partial_state: buffer, %partial_acc: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %query_token = kernel.workgroup.id<x> : index
+  %query_head = kernel.workgroup.id<y> : index
+  %lane = kernel.workitem.id<x> : index
+  %zero_f32 = scalar.constant 0.0 : f32
+  %negative_large = scalar.constant -1000000000.0 : f32
+  %token_count = config.get @id4.ideogram4.attention_split.token_count : index
+  %attention_head_count = config.get @id4.ideogram4.attention_split.attention_head_count : index
+  %head_size = config.get @id4.ideogram4.attention_split.head_size : index
+  %key_block_size = config.get @id4.ideogram4.attention_split.key_block_size : index
+  %key_block_bias = index.sub %key_block_size, %one : index
+  %biased_token_count = index.add %token_count, %key_block_bias : index
+  %key_block_count = index.div %biased_token_count, %key_block_size : index
+  %hidden_size = index.mul %attention_head_count, %head_size : index
+  %lane_has_channel = index.cmp ult, %lane, %head_size : index
+  %head_base = index.mul %query_head, %head_size : index
+  %attention_channel = index.add %head_base, %lane : index
+
+  %partial_state_noalias, %partial_acc_noalias, %output_noalias = buffer.assume.noalias %partial_state, %partial_acc, %output : buffer, buffer, buffer
+  %partial_state_global = buffer.assume.memory_space<global> %partial_state_noalias : buffer
+  %partial_acc_global = buffer.assume.memory_space<global> %partial_acc_noalias : buffer
+  %output_global = buffer.assume.memory_space<global> %output_noalias : buffer
+  %partial_state_view = buffer.view %partial_state_global[%base] : buffer -> view<[%key_block_count]x[%attention_head_count]x[%token_count]x2xf32, #dense>
+  %partial_acc_view = buffer.view %partial_acc_global[%base] : buffer -> view<[%key_block_count]x[%attention_head_count]x[%token_count]x[%head_size]xf32, #dense>
+  %output_view = buffer.view %output_global[%base] : buffer -> view<[%hidden_size]x[%token_count]xf32, #dense>
+
+  %softmax_max, %softmax_sum, %weighted_acc = scf.for %key_block = [%zero to %key_block_count step %one](%current_max = %negative_large : f32, %current_sum = %zero_f32 : f32, %current_acc = %zero_f32 : f32) -> (f32, f32, f32) {
+    %block_max = view.load %partial_state_view[%key_block, %query_head, %query_token, %zero] : view<[%key_block_count]x[%attention_head_count]x[%token_count]x2xf32, #dense> -> f32
+    %block_sum = view.load %partial_state_view[%key_block, %query_head, %query_token, %one] : view<[%key_block_count]x[%attention_head_count]x[%token_count]x2xf32, #dense> -> f32
+    %block_acc = scf.if %lane_has_channel -> (f32) {
+      %loaded_acc = view.load %partial_acc_view[%key_block, %query_head, %query_token, %lane] : view<[%key_block_count]x[%attention_head_count]x[%token_count]x[%head_size]xf32, #dense> -> f32
+      scf.yield %loaded_acc : f32
+    } else {
+      scf.yield %zero_f32 : f32
+    }
+    %next_max = scalar.maxnumf %current_max, %block_max : f32
+    %current_delta = scalar.subf<reassoc|nnan|ninf|nsz> %current_max, %next_max : f32
+    %current_scale = scalar.expf<afn> %current_delta : f32
+    %block_delta = scalar.subf<reassoc|nnan|ninf|nsz> %block_max, %next_max : f32
+    %block_scale = scalar.expf<afn> %block_delta : f32
+    %scaled_current_sum = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %current_sum, %current_scale : f32
+    %scaled_block_sum = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %block_sum, %block_scale : f32
+    %next_sum = scalar.addf<reassoc|nnan|ninf|nsz> %scaled_current_sum, %scaled_block_sum : f32
+    %scaled_current_acc = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %current_acc, %current_scale : f32
+    %scaled_block_acc = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %block_acc, %block_scale : f32
+    %next_acc = scalar.addf<reassoc|nnan|ninf|nsz> %scaled_current_acc, %scaled_block_acc : f32
+    scf.yield %next_max, %next_sum, %next_acc : f32, f32, f32
+  }
+
+  scf.if %lane_has_channel {
+    %result = scalar.divf<nnan|ninf|nsz|arcp> %weighted_acc, %softmax_sum : f32
+    view.store %result, %output_view[%attention_channel, %query_token] : f32, view<[%hidden_size]x[%token_count]xf32, #dense>
+  }
+  kernel.return
+}
+
+check.case public @id4_ideogram4_attention_split_f32_uniform_softmax_case {
+  %query = check.generate.fill value(0.0) : tensor<2x1xf32>
+  %key = check.generate.fill value(0.0) : tensor<2x1xf32>
+  %value = check.generate.iota offset(1.0) step(2.0) : tensor<2x1xf32>
+  %partial_state = check.generate.fill value(-1.0) : tensor<2x1x2x2xf32>
+  %partial_acc = check.generate.fill value(-1.0) : tensor<2x1x2x1xf32>
+  %output = check.generate.fill value(0.0) : tensor<1x2xf32>
+  %expected = check.generate.fill value(2.0) : tensor<1x2xf32>
+  func.call @id4_ideogram4_attention_split_tile_f32(%query, %key, %value, %partial_state, %partial_acc) : (tensor<2x1xf32>, tensor<2x1xf32>, tensor<2x1xf32>, tensor<2x1x2x2xf32>, tensor<2x1x2x1xf32>)
+  func.call @id4_ideogram4_attention_split_combine_f32(%partial_state, %partial_acc, %output) : (tensor<2x1x2x2xf32>, tensor<2x1x2x1xf32>, tensor<1x2xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0001) rtol(0.0001) nan(same) : tensor<1x2xf32>
+  check.return
+}
+
+check.case public @id4_ideogram4_attention_split_f32_ideogram_shape_case {
+  %query = check.generate.fill value(0.0) : tensor<2x4608xf32>
+  %key = check.generate.fill value(0.0) : tensor<2x4608xf32>
+  %value = check.generate.fill value(7.0) : tensor<2x4608xf32>
+  %partial_state = check.generate.fill value(-1.0) : tensor<2x18x2x2xf32>
+  %partial_acc = check.generate.fill value(-1.0) : tensor<2x18x2x256xf32>
+  %output = check.generate.fill value(0.0) : tensor<4608x2xf32>
+  %expected = check.generate.fill value(7.0) : tensor<4608x2xf32>
+  func.call @id4_ideogram4_attention_split_tile_f32(%query, %key, %value, %partial_state, %partial_acc) : (tensor<2x4608xf32>, tensor<2x4608xf32>, tensor<2x4608xf32>, tensor<2x18x2x2xf32>, tensor<2x18x2x256xf32>)
+  func.call @id4_ideogram4_attention_split_combine_f32(%partial_state, %partial_acc, %output) : (tensor<2x18x2x2xf32>, tensor<2x18x2x256xf32>, tensor<4608x2xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0001) rtol(0.0001) nan(same) : tensor<4608x2xf32>
+  check.return
+}
+
+check.benchmark<@id4_ideogram4_attention_split_f32_uniform_softmax_case> @id4_ideogram4_attention_split_f32_uniform_softmax
+check.benchmark<@id4_ideogram4_attention_split_f32_ideogram_shape_case> @id4_ideogram4_attention_split_f32_ideogram_shape

@@ -282,6 +282,24 @@ static void id4_pipeline_program_free_dispatch_bindings(
   iree_allocator_free(host_allocator, (void*)bindings);
 }
 
+static void id4_pipeline_program_free_constant_data(
+    const uint8_t* data, iree_allocator_t host_allocator) {
+  iree_allocator_free(host_allocator, (void*)data);
+}
+
+static iree_status_t id4_pipeline_program_copy_constant_data(
+    iree_const_byte_span_t source, iree_allocator_t host_allocator,
+    const uint8_t** out_data) {
+  *out_data = NULL;
+  if (source.data_length == 0) return iree_ok_status();
+  uint8_t* target = NULL;
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
+      host_allocator, source.data_length, sizeof(target[0]), (void**)&target));
+  memcpy(target, source.data, source.data_length);
+  *out_data = target;
+  return iree_ok_status();
+}
+
 static iree_status_t id4_pipeline_program_copy_dispatch_bindings(
     iree_host_size_t source_count,
     const id4_pipeline_program_dispatch_binding_t* source_values,
@@ -337,6 +355,10 @@ static void id4_pipeline_program_free_op(id4_pipeline_program_op_t* op,
       id4_pipeline_program_free_string(&op->payload.dispatch_loom.name,
                                        host_allocator);
       break;
+    case ID4_PIPELINE_PROGRAM_OP_KIND_CONSTANT:
+      id4_pipeline_program_free_constant_data(op->payload.constant.data,
+                                              host_allocator);
+      break;
     case ID4_PIPELINE_PROGRAM_OP_KIND_BARRIER:
       id4_pipeline_program_free_string(&op->payload.barrier.name,
                                        host_allocator);
@@ -367,6 +389,15 @@ static iree_status_t id4_pipeline_program_copy_op(
       break;
     case ID4_PIPELINE_PROGRAM_OP_KIND_PARAMETER:
       target->payload.parameter = source->payload.parameter;
+      break;
+    case ID4_PIPELINE_PROGRAM_OP_KIND_CONSTANT:
+      target->payload.constant.tensor = source->payload.constant.tensor;
+      target->payload.constant.data_length =
+          source->payload.constant.data_length;
+      status = id4_pipeline_program_copy_constant_data(
+          iree_make_const_byte_span(source->payload.constant.data,
+                                    source->payload.constant.data_length),
+          host_allocator, &target->payload.constant.data);
       break;
     case ID4_PIPELINE_PROGRAM_OP_KIND_ACQUIRE:
       target->payload.acquire = source->payload.acquire;
@@ -767,6 +798,67 @@ iree_status_t id4_pipeline_program_parameter(
       .kind = ID4_PIPELINE_PROGRAM_OP_KIND_PARAMETER,
       .ordinal = operation_ordinal,
       .payload.parameter.tensor = tensor,
+  };
+  iree_status_t status = id4_pipeline_program_builder_append_op(builder, &op);
+  if (iree_status_is_ok(status)) {
+    *out_tensor = tensor;
+  } else {
+    id4_pipeline_program_builder_remove_last_tensor(builder);
+  }
+  return status;
+}
+
+iree_status_t id4_pipeline_program_constant(
+    id4_pipeline_program_builder_t* builder,
+    const id4_pipeline_program_constant_options_t* options,
+    id4_pipeline_program_tensor_t* out_tensor) {
+  IREE_ASSERT_ARGUMENT(out_tensor);
+  *out_tensor = id4_pipeline_program_tensor_invalid();
+  if (!builder) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "program builder is required");
+  }
+  if (!options) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "program constant options are required");
+  }
+  IREE_RETURN_IF_ERROR(id4_pipeline_program_validate_options_size(
+      options->structure_size, sizeof(*options), IREE_SV("program constant")));
+  if (options->next) {
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "program constant extension structures are not supported");
+  }
+  iree_device_size_t byte_length = 0;
+  IREE_RETURN_IF_ERROR(id4_pipeline_program_validate_tensor_metadata(
+      options->name, options->dtype, options->shape, &byte_length));
+  if (options->data.data_length != byte_length) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "program constant %.*s data length %" PRIhsz
+                            " does not match tensor byte length %" PRIu64,
+                            (int)options->name.size, options->name.data,
+                            options->data.data_length, (uint64_t)byte_length);
+  }
+  if (byte_length != 0 && !options->data.data) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "program constant %.*s data is required",
+                            (int)options->name.size, options->name.data);
+  }
+
+  iree_host_size_t operation_ordinal = builder->operation_count;
+  id4_pipeline_program_tensor_t tensor = id4_pipeline_program_tensor_invalid();
+  IREE_RETURN_IF_ERROR(id4_pipeline_program_builder_add_tensor(
+      builder, options->name, options->dtype, options->shape, operation_ordinal,
+      /*initialized=*/true, &tensor));
+  id4_pipeline_program_op_t op = {
+      .kind = ID4_PIPELINE_PROGRAM_OP_KIND_CONSTANT,
+      .ordinal = operation_ordinal,
+      .payload.constant =
+          {
+              .tensor = tensor,
+              .data_length = options->data.data_length,
+              .data = options->data.data,
+          },
   };
   iree_status_t status = id4_pipeline_program_builder_append_op(builder, &op);
   if (iree_status_is_ok(status)) {

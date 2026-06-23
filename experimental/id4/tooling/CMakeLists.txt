@@ -24,6 +24,19 @@ iree_cc_library(
   PUBLIC
 )
 
+iree_cc_library(
+  NAME
+    image
+  HDRS
+    "image.h"
+  SRCS
+    "image.c"
+  DEPS
+    iree::base
+    iree::experimental::id4::pipeline::plan
+  PUBLIC
+)
+
 iree_cc_test(
   NAME
     capture_test
@@ -36,6 +49,19 @@ iree_cc_test(
     iree::experimental::id4::pipeline::plan
     iree::experimental::id4::stages::test_util
     iree::hal
+    iree::testing::gtest
+    iree::testing::gtest_main
+    iree::testing::temp_file
+)
+
+iree_cc_test(
+  NAME
+    image_test
+  SRCS
+    "image_test.cc"
+  DEPS
+    ::image
+    iree::base
     iree::testing::gtest
     iree::testing::gtest_main
     iree::testing::temp_file

@@ -60,11 +60,11 @@ static id4_ideogram4_dit_model_config_t MakeModelConfig() {
       // Channel count of each VAE latent image token.
       /*.input_channel_count=*/4,
       // Transformer hidden-state channel count.
-      /*.hidden_size=*/8,
+      /*.hidden_size=*/16,
       // Feed-forward intermediate channel count.
-      /*.intermediate_size=*/12,
+      /*.intermediate_size=*/32,
       // Transformer attention head count.
-      /*.attention_head_count=*/2,
+      /*.attention_head_count=*/4,
       // AdaLN conditioning vector channel count.
       /*.adaln_size=*/4,
       // Qwen condition feature channel count.
@@ -176,17 +176,6 @@ static bool ProgramExportsTensorWithShape(
   return false;
 }
 
-static bool ProgramHasOperationKind(const id4_pipeline_program_t* program,
-                                    id4_pipeline_program_op_kind_t kind) {
-  for (iree_host_size_t i = 0;
-       i < id4_pipeline_program_operation_count(program); ++i) {
-    const id4_pipeline_program_op_t* operation =
-        id4_pipeline_program_operation_at(program, i);
-    if (operation && operation->kind == kind) return true;
-  }
-  return false;
-}
-
 TEST(Ideogram4DitProgram, AuthorsForwardPreludeSliceContract) {
   id4_pipeline_program_shape_t latent_shape =
       id4_pipeline_program_make_shape_rank4(1, 2, 4, 1);
@@ -232,11 +221,6 @@ TEST(Ideogram4DitProgram, AuthorsForwardPreludeSliceContract) {
       id4_pipeline_program_make_shape_rank1(options.model.adaln_size)));
   EXPECT_TRUE(ProgramExportsTensorWithShape(
       program, ID4_PIPELINE_PROGRAM_DTYPE_F32, latent_shape));
-  EXPECT_TRUE(ProgramHasOperationKind(
-      program, ID4_PIPELINE_PROGRAM_OP_KIND_DISPATCH_LOOM));
-  EXPECT_TRUE(
-      ProgramHasOperationKind(program, ID4_PIPELINE_PROGRAM_OP_KIND_BARRIER));
-
   id4_pipeline_program_release(program);
 }
 

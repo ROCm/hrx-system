@@ -1,0 +1,249 @@
+config.decl @id4.ideogram4.attention_query4_rounded.token_count : %value: index where [range(%value, 1, 131072)]
+config.decl @id4.ideogram4.attention_query4_rounded.attention_head_count : %value: index where [range(%value, 1, 1024)]
+config.decl @id4.ideogram4.attention_query4_rounded.head_size : %value: index where [range(%value, 1, 256)]
+
+kernel.def export("id4_ideogram4_attention_query4_rounded_f32") @id4_ideogram4_attention_query4_rounded_f32() {
+  %unit = index.constant 1 : index
+  %three = index.constant 3 : index
+  %four = index.constant 4 : index
+  %workgroup_size_x = index.constant 256 : index
+  %token_count = config.get @id4.ideogram4.attention_query4_rounded.token_count : index
+  %attention_head_count = config.get @id4.ideogram4.attention_query4_rounded.attention_head_count : index
+  %rounded_token_count = index.add %token_count, %three : index
+  %query_tile_count = index.div %rounded_token_count, %four : index
+  kernel.launch.config workgroups(%query_tile_count, %attention_head_count, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
+} launch(%query: buffer, %key: buffer, %value: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %two = index.constant 2 : index
+  %three = index.constant 3 : index
+  %four = index.constant 4 : index
+  %query_tile = kernel.workgroup.id<x> : index
+  %query_head = kernel.workgroup.id<y> : index
+  %lane = kernel.workitem.id<x> : index
+  %zero_f32 = scalar.constant 0.0 : f32
+  %negative_large = scalar.constant -1000000000.0 : f32
+  %kv_scale = scalar.constant 0.0078125 : f32
+  %kv_inverse_scale = scalar.constant 128.0 : f32
+  %token_count = config.get @id4.ideogram4.attention_query4_rounded.token_count : index
+  %attention_head_count = config.get @id4.ideogram4.attention_query4_rounded.attention_head_count : index
+  %head_size = config.get @id4.ideogram4.attention_query4_rounded.head_size : index
+  %hidden_size = index.mul %attention_head_count, %head_size : index
+  %lane_has_channel = index.cmp ult, %lane, %head_size : index
+  %head_size_i32 = index.cast %head_size : index to i32
+  %head_size_f32 = scalar.sitofp %head_size_i32 : i32 to f32
+  %attention_scale = scalar.rsqrtf<nnan|ninf|nsz|afn> %head_size_f32 : f32
+  %head_base = index.mul %query_head, %head_size : index
+  %attention_channel = index.add %head_base, %lane : index
+  %query_base = index.mul %query_tile, %four : index
+  %query_token0 = index.add %query_base, %zero : index
+  %query_token1 = index.add %query_base, %one : index
+  %query_token2 = index.add %query_base, %two : index
+  %query_token3 = index.add %query_base, %three : index
+  %query_valid0 = index.cmp ult, %query_token0, %token_count : index
+  %query_valid1 = index.cmp ult, %query_token1, %token_count : index
+  %query_valid2 = index.cmp ult, %query_token2, %token_count : index
+  %query_valid3 = index.cmp ult, %query_token3, %token_count : index
+  %query_channel_valid0 = scalar.andi %query_valid0, %lane_has_channel : i1
+  %query_channel_valid1 = scalar.andi %query_valid1, %lane_has_channel : i1
+  %query_channel_valid2 = scalar.andi %query_valid2, %lane_has_channel : i1
+  %query_channel_valid3 = scalar.andi %query_valid3, %lane_has_channel : i1
+
+  %query_noalias, %key_noalias, %value_noalias, %output_noalias = buffer.assume.noalias %query, %key, %value, %output : buffer, buffer, buffer, buffer
+  %query_global = buffer.assume.memory_space<global> %query_noalias : buffer
+  %key_global = buffer.assume.memory_space<global> %key_noalias : buffer
+  %value_global = buffer.assume.memory_space<global> %value_noalias : buffer
+  %output_global = buffer.assume.memory_space<global> %output_noalias : buffer
+  %query_view = buffer.view %query_global[%base] : buffer -> view<[%token_count]x[%hidden_size]xf32, #dense>
+  %key_view = buffer.view %key_global[%base] : buffer -> view<[%token_count]x[%hidden_size]xf32, #dense>
+  %value_view = buffer.view %value_global[%base] : buffer -> view<[%token_count]x[%hidden_size]xf32, #dense>
+  %output_view = buffer.view %output_global[%base] : buffer -> view<[%hidden_size]x[%token_count]xf32, #dense>
+
+  %query_value0 = scf.if %query_channel_valid0 -> (f32) {
+    %loaded = view.load %query_view[%query_token0, %attention_channel] : view<[%token_count]x[%hidden_size]xf32, #dense> -> f32
+    scf.yield %loaded : f32
+  } else {
+    scf.yield %zero_f32 : f32
+  }
+  %query_value1 = scf.if %query_channel_valid1 -> (f32) {
+    %loaded = view.load %query_view[%query_token1, %attention_channel] : view<[%token_count]x[%hidden_size]xf32, #dense> -> f32
+    scf.yield %loaded : f32
+  } else {
+    scf.yield %zero_f32 : f32
+  }
+  %query_value2 = scf.if %query_channel_valid2 -> (f32) {
+    %loaded = view.load %query_view[%query_token2, %attention_channel] : view<[%token_count]x[%hidden_size]xf32, #dense> -> f32
+    scf.yield %loaded : f32
+  } else {
+    scf.yield %zero_f32 : f32
+  }
+  %query_value3 = scf.if %query_channel_valid3 -> (f32) {
+    %loaded = view.load %query_view[%query_token3, %attention_channel] : view<[%token_count]x[%hidden_size]xf32, #dense> -> f32
+    scf.yield %loaded : f32
+  } else {
+    scf.yield %zero_f32 : f32
+  }
+
+  %softmax_max0, %softmax_sum0, %weighted_acc0, %softmax_max1, %softmax_sum1, %weighted_acc1, %softmax_max2, %softmax_sum2, %weighted_acc2, %softmax_max3, %softmax_sum3, %weighted_acc3 = scf.for %key_token = [%zero to %token_count step %one](%current_max0 = %negative_large : f32, %current_sum0 = %zero_f32 : f32, %value_acc0 = %zero_f32 : f32, %current_max1 = %negative_large : f32, %current_sum1 = %zero_f32 : f32, %value_acc1 = %zero_f32 : f32, %current_max2 = %negative_large : f32, %current_sum2 = %zero_f32 : f32, %value_acc2 = %zero_f32 : f32, %current_max3 = %negative_large : f32, %current_sum3 = %zero_f32 : f32, %value_acc3 = %zero_f32 : f32) -> (f32, f32, f32, f32, f32, f32, f32, f32, f32, f32, f32, f32) {
+    %rounded_key = scf.if %lane_has_channel -> (f32) {
+      %key_value = view.load %key_view[%key_token, %attention_channel] : view<[%token_count]x[%hidden_size]xf32, #dense> -> f32
+      %scaled_key = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %key_value, %kv_scale : f32
+      %scaled_key_f16 = scalar.fptrunc %scaled_key : f32 to f16
+      %scaled_key_f32 = scalar.extf %scaled_key_f16 : f16 to f32
+      %rounded = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %scaled_key_f32, %kv_inverse_scale : f32
+      scf.yield %rounded : f32
+    } else {
+      scf.yield %zero_f32 : f32
+    }
+
+    %lane_product0 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %query_value0, %rounded_key : f32
+    %lane_product1 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %query_value1, %rounded_key : f32
+    %lane_product2 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %query_value2, %rounded_key : f32
+    %lane_product3 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %query_value3, %rounded_key : f32
+    %dot0 = kernel.workgroup.reduce<addf> %lane_product0 : f32
+    %dot1 = kernel.workgroup.reduce<addf> %lane_product1 : f32
+    %dot2 = kernel.workgroup.reduce<addf> %lane_product2 : f32
+    %dot3 = kernel.workgroup.reduce<addf> %lane_product3 : f32
+
+    %rounded_value = scf.if %lane_has_channel -> (f32) {
+      %value_component = view.load %value_view[%key_token, %attention_channel] : view<[%token_count]x[%hidden_size]xf32, #dense> -> f32
+      %scaled_value = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %value_component, %kv_scale : f32
+      %scaled_value_f16 = scalar.fptrunc %scaled_value : f32 to f16
+      %scaled_value_f32 = scalar.extf %scaled_value_f16 : f16 to f32
+      %rounded = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %scaled_value_f32, %kv_inverse_scale : f32
+      scf.yield %rounded : f32
+    } else {
+      scf.yield %zero_f32 : f32
+    }
+
+    %score0 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %dot0, %attention_scale : f32
+    %next_max0 = scalar.maxnumf %current_max0, %score0 : f32
+    %old_delta0 = scalar.subf<reassoc|nnan|ninf|nsz> %current_max0, %next_max0 : f32
+    %old_scale0 = scalar.expf<afn> %old_delta0 : f32
+    %score_delta0 = scalar.subf<reassoc|nnan|ninf|nsz> %score0, %next_max0 : f32
+    %weight0 = scalar.expf<afn> %score_delta0 : f32
+    %scaled_sum0 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %current_sum0, %old_scale0 : f32
+    %next_sum0 = scalar.addf<reassoc|nnan|ninf|nsz> %scaled_sum0, %weight0 : f32
+    %scaled_acc0 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %value_acc0, %old_scale0 : f32
+    %weighted_component0 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %weight0, %rounded_value : f32
+    %next_value0 = scalar.addf<reassoc|nnan|ninf|nsz> %scaled_acc0, %weighted_component0 : f32
+
+    %score1 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %dot1, %attention_scale : f32
+    %next_max1 = scalar.maxnumf %current_max1, %score1 : f32
+    %old_delta1 = scalar.subf<reassoc|nnan|ninf|nsz> %current_max1, %next_max1 : f32
+    %old_scale1 = scalar.expf<afn> %old_delta1 : f32
+    %score_delta1 = scalar.subf<reassoc|nnan|ninf|nsz> %score1, %next_max1 : f32
+    %weight1 = scalar.expf<afn> %score_delta1 : f32
+    %scaled_sum1 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %current_sum1, %old_scale1 : f32
+    %next_sum1 = scalar.addf<reassoc|nnan|ninf|nsz> %scaled_sum1, %weight1 : f32
+    %scaled_acc1 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %value_acc1, %old_scale1 : f32
+    %weighted_component1 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %weight1, %rounded_value : f32
+    %next_value1 = scalar.addf<reassoc|nnan|ninf|nsz> %scaled_acc1, %weighted_component1 : f32
+
+    %score2 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %dot2, %attention_scale : f32
+    %next_max2 = scalar.maxnumf %current_max2, %score2 : f32
+    %old_delta2 = scalar.subf<reassoc|nnan|ninf|nsz> %current_max2, %next_max2 : f32
+    %old_scale2 = scalar.expf<afn> %old_delta2 : f32
+    %score_delta2 = scalar.subf<reassoc|nnan|ninf|nsz> %score2, %next_max2 : f32
+    %weight2 = scalar.expf<afn> %score_delta2 : f32
+    %scaled_sum2 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %current_sum2, %old_scale2 : f32
+    %next_sum2 = scalar.addf<reassoc|nnan|ninf|nsz> %scaled_sum2, %weight2 : f32
+    %scaled_acc2 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %value_acc2, %old_scale2 : f32
+    %weighted_component2 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %weight2, %rounded_value : f32
+    %next_value2 = scalar.addf<reassoc|nnan|ninf|nsz> %scaled_acc2, %weighted_component2 : f32
+
+    %score3 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %dot3, %attention_scale : f32
+    %next_max3 = scalar.maxnumf %current_max3, %score3 : f32
+    %old_delta3 = scalar.subf<reassoc|nnan|ninf|nsz> %current_max3, %next_max3 : f32
+    %old_scale3 = scalar.expf<afn> %old_delta3 : f32
+    %score_delta3 = scalar.subf<reassoc|nnan|ninf|nsz> %score3, %next_max3 : f32
+    %weight3 = scalar.expf<afn> %score_delta3 : f32
+    %scaled_sum3 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %current_sum3, %old_scale3 : f32
+    %next_sum3 = scalar.addf<reassoc|nnan|ninf|nsz> %scaled_sum3, %weight3 : f32
+    %scaled_acc3 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %value_acc3, %old_scale3 : f32
+    %weighted_component3 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %weight3, %rounded_value : f32
+    %next_value3 = scalar.addf<reassoc|nnan|ninf|nsz> %scaled_acc3, %weighted_component3 : f32
+
+    scf.yield %next_max0, %next_sum0, %next_value0, %next_max1, %next_sum1, %next_value1, %next_max2, %next_sum2, %next_value2, %next_max3, %next_sum3, %next_value3 : f32, f32, f32, f32, f32, f32, f32, f32, f32, f32, f32, f32
+  }
+
+  scf.if %query_channel_valid0 {
+    %result = scalar.divf<nnan|ninf|nsz|arcp> %weighted_acc0, %softmax_sum0 : f32
+    view.store %result, %output_view[%attention_channel, %query_token0] : f32, view<[%hidden_size]x[%token_count]xf32, #dense>
+  }
+  scf.if %query_channel_valid1 {
+    %result = scalar.divf<nnan|ninf|nsz|arcp> %weighted_acc1, %softmax_sum1 : f32
+    view.store %result, %output_view[%attention_channel, %query_token1] : f32, view<[%hidden_size]x[%token_count]xf32, #dense>
+  }
+  scf.if %query_channel_valid2 {
+    %result = scalar.divf<nnan|ninf|nsz|arcp> %weighted_acc2, %softmax_sum2 : f32
+    view.store %result, %output_view[%attention_channel, %query_token2] : f32, view<[%hidden_size]x[%token_count]xf32, #dense>
+  }
+  scf.if %query_channel_valid3 {
+    %result = scalar.divf<nnan|ninf|nsz|arcp> %weighted_acc3, %softmax_sum3 : f32
+    view.store %result, %output_view[%attention_channel, %query_token3] : f32, view<[%hidden_size]x[%token_count]xf32, #dense>
+  }
+  kernel.return
+}
+
+check.case public @id4_ideogram4_attention_query4_rounded_f32_single_token_case {
+  %query = check.generate.fill value(0.0) : tensor<1x2xf32>
+  %key = check.generate.fill value(0.0) : tensor<1x2xf32>
+  %value = check.generate.iota offset(1.01) step(2.02) : tensor<1x2xf32>
+  %output = check.generate.fill value(0.0) : tensor<2x1xf32>
+  %expected = check.generate.iota offset(1.009765625) step(2.01953125) : tensor<2x1xf32>
+  func.call @id4_ideogram4_attention_query4_rounded_f32(%query, %key, %value, %output) : (tensor<1x2xf32>, tensor<1x2xf32>, tensor<1x2xf32>, tensor<2x1xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2x1xf32>
+  check.return
+}
+
+check.case public @id4_ideogram4_attention_query4_rounded_f32_uniform_softmax_tail_case {
+  %query = check.generate.fill value(0.0) : tensor<3x1xf32>
+  %key = check.generate.fill value(0.0) : tensor<3x1xf32>
+  %value = check.generate.iota offset(1.01) step(2.02) : tensor<3x1xf32>
+  %output = check.generate.fill value(0.0) : tensor<1x3xf32>
+  %expected = check.generate.fill value(3.0299479166666665) : tensor<1x3xf32>
+  func.call @id4_ideogram4_attention_query4_rounded_f32(%query, %key, %value, %output) : (tensor<3x1xf32>, tensor<3x1xf32>, tensor<3x1xf32>, tensor<1x3xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0001) rtol(0.0001) nan(same) : tensor<1x3xf32>
+  check.return
+}
+
+check.case public @id4_ideogram4_attention_query4_rounded_f32_ideogram_shape_case {
+  %query = check.generate.fill value(0.0) : tensor<5x4608xf32>
+  %key = check.generate.fill value(0.0) : tensor<5x4608xf32>
+  %value = check.generate.fill value(7.07) : tensor<5x4608xf32>
+  %output = check.generate.fill value(0.0) : tensor<4608x5xf32>
+  %expected = check.generate.fill value(7.0703125) : tensor<4608x5xf32>
+  func.call @id4_ideogram4_attention_query4_rounded_f32(%query, %key, %value, %output) : (tensor<5x4608xf32>, tensor<5x4608xf32>, tensor<5x4608xf32>, tensor<4608x5xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0001) rtol(0.0001) nan(same) : tensor<4608x5xf32>
+  check.return
+}
+
+check.case public @id4_ideogram4_attention_query4_rounded_f32_uncond_1024_shape_case {
+  %query = check.generate.fill value(0.0) : tensor<4096x4608xf32>
+  %key = check.generate.fill value(0.0) : tensor<4096x4608xf32>
+  %value = check.generate.fill value(0.0) : tensor<4096x4608xf32>
+  %output = check.generate.fill value(1.0) : tensor<4608x4096xf32>
+  %expected = check.generate.fill value(0.0) : tensor<4608x4096xf32>
+  func.call @id4_ideogram4_attention_query4_rounded_f32(%query, %key, %value, %output) : (tensor<4096x4608xf32>, tensor<4096x4608xf32>, tensor<4096x4608xf32>, tensor<4608x4096xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<4608x4096xf32>
+  check.return
+}
+
+check.case public @id4_ideogram4_attention_query4_rounded_f32_cond_1024_shape_case {
+  %query = check.generate.fill value(0.0) : tensor<4547x4608xf32>
+  %key = check.generate.fill value(0.0) : tensor<4547x4608xf32>
+  %value = check.generate.fill value(0.0) : tensor<4547x4608xf32>
+  %output = check.generate.fill value(1.0) : tensor<4608x4547xf32>
+  %expected = check.generate.fill value(0.0) : tensor<4608x4547xf32>
+  func.call @id4_ideogram4_attention_query4_rounded_f32(%query, %key, %value, %output) : (tensor<4547x4608xf32>, tensor<4547x4608xf32>, tensor<4547x4608xf32>, tensor<4608x4547xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<4608x4547xf32>
+  check.return
+}
+
+check.benchmark<@id4_ideogram4_attention_query4_rounded_f32_single_token_case> @id4_ideogram4_attention_query4_rounded_f32_single_token
+check.benchmark<@id4_ideogram4_attention_query4_rounded_f32_uniform_softmax_tail_case> @id4_ideogram4_attention_query4_rounded_f32_uniform_softmax_tail
+check.benchmark<@id4_ideogram4_attention_query4_rounded_f32_ideogram_shape_case> @id4_ideogram4_attention_query4_rounded_f32_ideogram_shape
+check.benchmark<@id4_ideogram4_attention_query4_rounded_f32_uncond_1024_shape_case> @id4_ideogram4_attention_query4_rounded_f32_uncond_1024_shape
+check.benchmark<@id4_ideogram4_attention_query4_rounded_f32_cond_1024_shape_case> @id4_ideogram4_attention_query4_rounded_f32_cond_1024_shape

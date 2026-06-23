@@ -17,8 +17,6 @@
 
 namespace {
 
-using ::testing::HasSubstr;
-
 template <typename T, void (*Release)(T*)>
 class Ref {
  public:
@@ -58,7 +56,9 @@ static std::vector<uint8_t> ReadBinaryFile(const std::string& path) {
 }
 
 static iree_status_t CreateSingleBoundaryPlan(
-    iree_hal_device_group_t* device_group, id4_pipeline_plan_t** out_plan) {
+    iree_hal_device_group_t* device_group, id4_pipeline_tensor_dtype_t dtype,
+    uint64_t element_count, iree_device_size_t byte_length,
+    iree_device_size_t alignment, id4_pipeline_plan_t** out_plan) {
   id4_pipeline_device_placement_t placement;
   memset(&placement, 0, sizeof(placement));
   placement.role = IREE_SV("test");
@@ -76,11 +76,11 @@ static iree_status_t CreateSingleBoundaryPlan(
   id4_pipeline_boundary_tensor_plan_t boundary;
   memset(&boundary, 0, sizeof(boundary));
   boundary.layout.name = IREE_SV("capture.output");
-  boundary.layout.dtype = ID4_PIPELINE_TENSOR_DTYPE_F32;
+  boundary.layout.dtype = dtype;
   boundary.layout.shape.rank = 1;
-  boundary.layout.shape.dims[0] = 2;
-  boundary.layout.byte_length = 8;
-  boundary.layout.alignment = 4;
+  boundary.layout.shape.dims[0] = element_count;
+  boundary.layout.byte_length = byte_length;
+  boundary.layout.alignment = alignment;
   boundary.flags = ID4_PIPELINE_BOUNDARY_TENSOR_FLAG_IMPORTED |
                    ID4_PIPELINE_BOUNDARY_TENSOR_FLAG_EXPORTED;
   boundary.region_id = 0;
@@ -105,14 +105,25 @@ static iree_status_t CreateSingleBoundaryPlan(
   return id4_pipeline_plan_create(&options, iree_allocator_system(), out_plan);
 }
 
-TEST(FixtureCaptureTest, CapturesExportedBoundaryTensorAfterWait) {
+static void ExpectFinds(iree_string_view_t value, iree_string_view_t needle) {
+  EXPECT_NE(iree_string_view_find(value, needle, 0), IREE_STRING_VIEW_NPOS)
+      << "expected to find: " << std::string(needle.data, needle.size);
+}
+
+static void CaptureExportedBoundaryTensorAfterWait(
+    id4_pipeline_tensor_dtype_t dtype, uint64_t element_count,
+    const std::vector<uint8_t>& payload, iree_device_size_t alignment,
+    iree_string_view_t expected_dtype_json,
+    iree_string_view_t expected_npy_descriptor) {
   Ref<iree_hal_device_group_t, iree_hal_device_group_release> device_group;
   device_group.reset(id4::test::CreateLocalSyncDeviceGroup());
   iree_hal_device_t* device =
       iree_hal_device_group_device_at(device_group.get(), 0);
 
   Ref<id4_pipeline_plan_t, id4_pipeline_plan_release> plan;
-  IREE_ASSERT_OK(CreateSingleBoundaryPlan(device_group.get(), plan.out()));
+  IREE_ASSERT_OK(CreateSingleBoundaryPlan(
+      device_group.get(), dtype, element_count,
+      static_cast<iree_device_size_t>(payload.size()), alignment, plan.out()));
 
   iree_hal_buffer_params_t buffer_params;
   memset(&buffer_params, 0, sizeof(buffer_params));
@@ -126,8 +137,8 @@ TEST(FixtureCaptureTest, CapturesExportedBoundaryTensorAfterWait) {
 
   Ref<iree_hal_buffer_t, iree_hal_buffer_release> boundary_buffer;
   IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
-      iree_hal_device_allocator(device), buffer_params, /*allocation_size=*/8,
-      boundary_buffer.out()));
+      iree_hal_device_allocator(device), buffer_params,
+      static_cast<iree_device_size_t>(payload.size()), boundary_buffer.out()));
 
   Ref<iree_hal_semaphore_t, iree_hal_semaphore_release> fill_semaphore;
   IREE_ASSERT_OK(iree_hal_semaphore_create(device, IREE_HAL_QUEUE_AFFINITY_ANY,
@@ -140,11 +151,11 @@ TEST(FixtureCaptureTest, CapturesExportedBoundaryTensorAfterWait) {
       signal_semaphores,
       signal_values,
   };
-  const uint32_t one = 0x3F800000u;
-  IREE_ASSERT_OK(iree_hal_device_queue_fill(
+  IREE_ASSERT_OK(iree_hal_device_queue_update(
       device, IREE_HAL_QUEUE_AFFINITY_ANY, iree_hal_semaphore_list_empty(),
-      signal_list, boundary_buffer.get(), /*target_offset=*/0,
-      /*length=*/8, &one, sizeof(one), IREE_HAL_FILL_FLAG_NONE));
+      signal_list, payload.data(), /*source_offset=*/0, boundary_buffer.get(),
+      /*target_offset=*/0, static_cast<iree_device_size_t>(payload.size()),
+      IREE_HAL_UPDATE_FLAG_NONE));
 
   iree_hal_buffer_binding_t boundary_binding = {
       // Captured boundary buffer.
@@ -152,7 +163,7 @@ TEST(FixtureCaptureTest, CapturesExportedBoundaryTensorAfterWait) {
       // Captured boundary base offset.
       /*.offset=*/0,
       // Captured boundary byte length.
-      /*.length=*/8,
+      /*.length=*/static_cast<iree_device_size_t>(payload.size()),
   };
 
   iree::testing::TempFilePath capture_root("id4_fixture_capture");
@@ -172,29 +183,52 @@ TEST(FixtureCaptureTest, CapturesExportedBoundaryTensorAfterWait) {
 
   const std::string manifest =
       ReadTextFile(capture_root.path() + "/manifest.json");
-  EXPECT_THAT(manifest, HasSubstr("\"run_id\": \"unit_run\""));
-  EXPECT_THAT(manifest, HasSubstr("\"stage\":\"capture.stage\""));
-  EXPECT_THAT(manifest, HasSubstr("\"name\":\"capture.output\""));
-  EXPECT_THAT(manifest, HasSubstr("\"dtype\":\"f32\""));
-  EXPECT_THAT(manifest, HasSubstr("\"shape\":[2]"));
+  const iree_string_view_t manifest_view =
+      iree_make_string_view(manifest.data(), manifest.size());
+  ExpectFinds(manifest_view, IREE_SV("\"run_id\": \"unit_run\""));
+  ExpectFinds(manifest_view, IREE_SV("\"stage\":\"capture.stage\""));
+  ExpectFinds(manifest_view, IREE_SV("\"name\":\"capture.output\""));
+  ExpectFinds(manifest_view, expected_dtype_json);
+  ExpectFinds(manifest_view, IREE_SV("\"shape\":[2]"));
 
   const std::vector<uint8_t> npy =
       ReadBinaryFile(capture_root.path() + "/boundary_0000.npy");
   ASSERT_GE(npy.size(), 18u);
+  const iree_string_view_t npy_view = iree_make_string_view(
+      reinterpret_cast<const char*>(npy.data()), npy.size());
   EXPECT_EQ(npy[0], 0x93);
   EXPECT_EQ(npy[1], 'N');
   EXPECT_EQ(npy[2], 'U');
   EXPECT_EQ(npy[3], 'M');
   EXPECT_EQ(npy[4], 'P');
   EXPECT_EQ(npy[5], 'Y');
-  EXPECT_EQ(npy[npy.size() - 8], 0x00);
-  EXPECT_EQ(npy[npy.size() - 7], 0x00);
-  EXPECT_EQ(npy[npy.size() - 6], 0x80);
-  EXPECT_EQ(npy[npy.size() - 5], 0x3F);
-  EXPECT_EQ(npy[npy.size() - 4], 0x00);
-  EXPECT_EQ(npy[npy.size() - 3], 0x00);
-  EXPECT_EQ(npy[npy.size() - 2], 0x80);
-  EXPECT_EQ(npy[npy.size() - 1], 0x3F);
+  ExpectFinds(npy_view, expected_npy_descriptor);
+  ASSERT_GE(npy.size(), payload.size());
+  for (iree_host_size_t i = 0; i < payload.size(); ++i) {
+    EXPECT_EQ(npy[npy.size() - payload.size() + i], payload[i]) << i;
+  }
+}
+
+TEST(FixtureCaptureTest, CapturesExportedBoundaryTensorAfterWait) {
+  CaptureExportedBoundaryTensorAfterWait(
+      ID4_PIPELINE_TENSOR_DTYPE_F32, /*element_count=*/2,
+      {0x00, 0x00, 0x80, 0x3F, 0x00, 0x00, 0x80, 0x3F},
+      /*alignment=*/4, IREE_SV("\"dtype\":\"f32\""), IREE_SV("'descr': '<f4'"));
+}
+
+TEST(FixtureCaptureTest, CapturesExistingNonF32TensorDtypes) {
+  CaptureExportedBoundaryTensorAfterWait(
+      ID4_PIPELINE_TENSOR_DTYPE_F16, /*element_count=*/2,
+      {0x00, 0x3C, 0x00, 0x40}, /*alignment=*/2, IREE_SV("\"dtype\":\"f16\""),
+      IREE_SV("'descr': '<f2'"));
+  CaptureExportedBoundaryTensorAfterWait(
+      ID4_PIPELINE_TENSOR_DTYPE_BF16, /*element_count=*/2,
+      {0x80, 0x3F, 0x00, 0x40}, /*alignment=*/2, IREE_SV("\"dtype\":\"bf16\""),
+      IREE_SV("'descr': '<u2'"));
+  CaptureExportedBoundaryTensorAfterWait(
+      ID4_PIPELINE_TENSOR_DTYPE_U32, /*element_count=*/2,
+      {0x01, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00}, /*alignment=*/4,
+      IREE_SV("\"dtype\":\"u32\""), IREE_SV("'descr': '<u4'"));
 }
 
 }  // namespace
