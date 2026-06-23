@@ -452,5 +452,39 @@ TEST(DeviceExternalCaptureTest, BeginWithoutBackendHookIsUnimplemented) {
   iree_hal_device_release(device);
 }
 
+TEST(DeviceTimestampTest, CaptureTimestampWithoutBackendHookIsUnimplemented) {
+  iree_hal_mock_device_options_t mock_options;
+  iree_hal_mock_device_options_initialize(&mock_options);
+
+  iree_hal_device_t* device = NULL;
+  IREE_ASSERT_OK(iree_hal_mock_device_create(&mock_options,
+                                             iree_allocator_system(), &device));
+
+  // The wrapper asserts a non-null target buffer, but the UNIMPLEMENTED check
+  // fires before the buffer is dereferenced. The mock allocator cannot allocate
+  // device memory so wrap a small host allocation as the target.
+  // iree_hal_heap_buffer_wrap requires the wrapped data to be 64-byte aligned.
+  alignas(64) uint64_t target_storage = 0;
+  iree_hal_buffer_t* target_buffer = NULL;
+  IREE_ASSERT_OK(iree_hal_heap_buffer_wrap(
+      iree_hal_buffer_placement_undefined(),
+      IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_HOST_VISIBLE,
+      IREE_HAL_MEMORY_ACCESS_ALL, IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET,
+      sizeof(target_storage),
+      iree_make_byte_span(&target_storage, sizeof(target_storage)),
+      iree_hal_buffer_release_callback_null(), iree_allocator_system(),
+      &target_buffer));
+
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_UNIMPLEMENTED,
+      iree_hal_device_queue_capture_timestamp(
+          device, IREE_HAL_QUEUE_AFFINITY_ANY, iree_hal_semaphore_list_empty(),
+          iree_hal_semaphore_list_empty(), target_buffer, /*target_offset=*/0,
+          IREE_HAL_CAPTURE_TIMESTAMP_FLAG_NONE));
+
+  iree_hal_buffer_release(target_buffer);
+  iree_hal_device_release(device);
+}
+
 }  // namespace
 }  // namespace iree::hal

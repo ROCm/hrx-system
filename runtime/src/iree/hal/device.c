@@ -545,6 +545,12 @@ IREE_API_EXPORT iree_status_t iree_hal_device_queue_capture_timestamp(
     iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
     iree_hal_capture_timestamp_flags_t flags) {
   IREE_ASSERT_ARGUMENT(device);
+  IREE_ASSERT_ARGUMENT(
+      !wait_semaphore_list.count ||
+      (wait_semaphore_list.semaphores && wait_semaphore_list.payload_values));
+  IREE_ASSERT_ARGUMENT(!signal_semaphore_list.count ||
+                       (signal_semaphore_list.semaphores &&
+                        signal_semaphore_list.payload_values));
   IREE_ASSERT_ARGUMENT(target_buffer);
   // Optional capability: when the driver leaves the vtable slot unset we report
   // UNIMPLEMENTED so callers can fall back to a host-observed timestamp.

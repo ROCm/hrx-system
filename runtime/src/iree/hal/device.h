@@ -949,8 +949,9 @@ enum iree_hal_capture_timestamp_flag_bits_t {
 // timeline reached after |wait_semaphore_list| is satisfied, signaling
 // |signal_semaphore_list| when that point is reached. A single 64-bit device
 // timestamp tick is written by the device into |target_buffer| at
-// |target_offset|. The target must be 8-byte aligned and have at least 8 bytes
-// of host-visible storage usable as a transfer target.
+// |target_offset|. The target must be 8-byte aligned and be a transfer target
+// the device can write 8 bytes into; to read the tick back on the host the
+// buffer must additionally be host-visible (e.g. mappable).
 //
 // The captured value is in the device timestamp domain. Convert a delta between
 // two captures to nanoseconds by dividing by the tick frequency reported in
@@ -961,6 +962,11 @@ enum iree_hal_capture_timestamp_flag_bits_t {
 //
 // Returns IREE_STATUS_UNIMPLEMENTED if the device does not support device-side
 // timestamp capture; callers should fall back to a host-observed timestamp.
+// The IREE_HAL_DEVICE_TIMING_SPEC_FLAG_DEVICE_TIMESTAMPS device-spec flag is
+// only a hint (a necessary-but-not-sufficient signal): a specific queue may
+// still return IREE_STATUS_UNIMPLEMENTED, which is the authoritative per-queue
+// answer, so callers must handle UNIMPLEMENTED by falling back to a
+// host-observed timestamp even when the flag is set.
 IREE_API_EXPORT iree_status_t iree_hal_device_queue_capture_timestamp(
     iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
     const iree_hal_semaphore_list_t wait_semaphore_list,
