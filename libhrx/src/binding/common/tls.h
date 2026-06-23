@@ -25,8 +25,7 @@ extern "C" {
 #define IREE_HAL_STREAMING_TLS_KEY_CAPACITY 128
 
 // Invalid key value used for uninitialized key storage.
-#define IREE_HAL_STREAMING_TLS_KEY_INVALID \
-  ((iree_hal_streaming_tls_key_t)-1)
+#define IREE_HAL_STREAMING_TLS_KEY_INVALID ((iree_hal_streaming_tls_key_t)-1)
 
 // Process-global TLS key. Keys are small indexes into an internal fixed table.
 typedef iree_host_size_t iree_hal_streaming_tls_key_t;
