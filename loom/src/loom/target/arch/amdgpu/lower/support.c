@@ -728,7 +728,9 @@ static bool loom_amdgpu_distribution_transfer_result_prefers_vgpr(
   loom_value_facts_t distribution_facts = loom_value_facts_unknown();
   if (loom_amdgpu_source_value_known_distribution_facts(
           module, fact_table, source_value_id, &distribution_facts)) {
-    return loom_value_facts_is_lane_varying(distribution_facts);
+    if (loom_value_facts_is_lane_varying(distribution_facts)) {
+      return true;
+    }
   }
 
   const loom_value_id_t* operands = loom_op_const_operands(defining_op);
@@ -987,6 +989,14 @@ static bool loom_amdgpu_source_value_directly_prefers_vgpr(
         return loom_amdgpu_type_is_vector_32bit_register_range(
             loom_module_value_type(module,
                                    loom_vector_reduce_input(defining_op)));
+      case LOOM_OP_SCF_SELECT:
+        return loom_value_def_index(value) == 0 &&
+               (loom_amdgpu_source_value_directly_prefers_vgpr(
+                    module, loom_scf_select_true_value(defining_op),
+                    excluded_value_id) ||
+                loom_amdgpu_source_value_directly_prefers_vgpr(
+                    module, loom_scf_select_false_value(defining_op),
+                    excluded_value_id));
       default: {
         loom_value_id_t lhs = LOOM_VALUE_ID_INVALID;
         loom_value_id_t rhs = LOOM_VALUE_ID_INVALID;

@@ -1502,6 +1502,116 @@ low.kernel.def target(@target) workgroup_size(1, 1, 1) @scalar_bitcast_direct_i3
 // ====
 
 amdgpu.target<gfx1100> @target
+kernel.def target(@target) @scalar_bitcast_lane_byte_decode_select_tree_store() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %lane = kernel.workitem.id<x> : index
+  %input_view = buffer.view %input[%base] : buffer -> view<64xi8, #dense>
+  %output_view = buffer.view %output[%base] : buffer -> view<64xf32, #dense>
+  %byte = view.load %input_view[%lane] : view<64xi8, #dense> -> i8
+  %wide = scalar.extui %byte : i8 to i32
+  %sign_mask = scalar.constant 128 : i32
+  %sign = scalar.andi %wide, %sign_mask : i32
+  %sign_shift = scalar.constant 24 : i32
+  %sign_bits = scalar.shli %sign, %sign_shift : i32
+  %exp_mask = scalar.constant 120 : i32
+  %exp_bits = scalar.andi %wide, %exp_mask : i32
+  %exp_shift = scalar.constant 3 : i32
+  %exp = scalar.shrui %exp_bits, %exp_shift : i32
+  %mantissa_mask = scalar.constant 7 : i32
+  %mantissa = scalar.andi %wide, %mantissa_mask : i32
+  %zero = scalar.constant 0 : i32
+  %mantissa_bit1_mask = scalar.constant 2 : i32
+  %mantissa_bit1 = scalar.andi %mantissa, %mantissa_bit1_mask : i32
+  %has_mantissa_bit1 = scalar.cmpi ne, %mantissa_bit1, %zero : i32
+  %one = scalar.constant 1 : i32
+  %shift0 = scf.select %has_mantissa_bit1, %one, %zero : i32
+  %mantissa_bit2_mask = scalar.constant 4 : i32
+  %mantissa_bit2 = scalar.andi %mantissa, %mantissa_bit2_mask : i32
+  %has_mantissa_bit2 = scalar.cmpi ne, %mantissa_bit2, %zero : i32
+  %two = scalar.constant 2 : i32
+  %selected_shift = scf.select %has_mantissa_bit2, %two, %shift0 : i32
+  %bias = scalar.constant 118 : i32
+  %biased_exp = scalar.addi %selected_shift, %bias : i32
+  %f32_exp_shift = scalar.constant 23 : i32
+  %f32_exp = scalar.shli %biased_exp, %f32_exp_shift : i32
+  %remaining_shift = scalar.subi %f32_exp_shift, %selected_shift : i32
+  %shifted_mantissa = scalar.shli %mantissa, %remaining_shift : i32
+  %f32_mantissa_mask = scalar.constant 8388607 : i32
+  %f32_mantissa = scalar.andi %shifted_mantissa, %f32_mantissa_mask : i32
+  %normal_head = scalar.ori %sign_bits, %f32_exp : i32
+  %normal_bits = scalar.ori %normal_head, %f32_mantissa : i32
+  %subnormal = scf.select %has_mantissa_bit2, %normal_bits, %sign_bits : i32
+  %is_zero_exp = scalar.cmpi eq, %exp, %zero : i32
+  %regular_exp_bias = scalar.constant 120 : i32
+  %regular_exp = scalar.addi %exp, %regular_exp_bias : i32
+  %regular_exp_bits = scalar.shli %regular_exp, %f32_exp_shift : i32
+  %regular_head = scalar.ori %sign_bits, %regular_exp_bits : i32
+  %regular_bits = scalar.ori %regular_head, %f32_mantissa : i32
+  %finite_bits = scf.select %is_zero_exp, %subnormal, %regular_bits : i32
+  %all_ones_exp = scalar.constant 15 : i32
+  %is_special_exp = scalar.cmpi eq, %exp, %all_ones_exp : i32
+  %all_ones_mantissa = scalar.constant 7 : i32
+  %is_nan_payload = scalar.cmpi eq, %mantissa, %all_ones_mantissa : i32
+  %false = scalar.constant false : i1
+  %use_nan = scf.select %is_special_exp, %is_nan_payload, %false : i1
+  %nan_bits = scalar.constant 2143289344 : i32
+  %bits = scf.select %use_nan, %nan_bits, %finite_bits : i32
+  %value = scalar.bitcast %bits : i32 to f32
+  view.store %value, %output_view[%lane] : f32, view<64xf32, #dense>
+  kernel.return
+}
+
+// ----
+low.kernel.def target(@target) workgroup_size(64, 1, 1) @scalar_bitcast_lane_byte_decode_select_tree_store() asm<amdgpu.rdna3.core> {
+  %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 64} : reg<amdgpu.sgpr x2>
+  %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
+  %byte = global_load_i8_saddr %lane, %input_view
+  %wide = v_and_b32_lit %byte, 255
+  %sign = v_and_b32_lit %wide, 128
+  %sign_bits = v_lshlrev_b32_lit %sign, 24
+  %exp_bits = v_and_b32_lit %wide, 120
+  %exp = v_lshrrev_b32_lit %exp_bits, 3
+  %mantissa = v_and_b32_lit %wide, 7
+  %mantissa_bit1 = v_and_b32_lit %mantissa, 2
+  %has_mantissa_bit1 = v_cmp_ne_i32_src1_inline %mantissa_bit1 {rhs = 0}
+  %shift0 = v_cndmask_b32_src0_lit_src1_inline %has_mantissa_bit1 {imm32 = 0, true_value = 1}
+  %mantissa_bit2 = v_and_b32_lit %mantissa, 4
+  %has_mantissa_bit2 = v_cmp_ne_i32_src1_inline %mantissa_bit2 {rhs = 0}
+  %selected_shift = v_cndmask_b32_src1_inline %shift0, %has_mantissa_bit2 {true_value = 2}
+  %79 = v_mov_b32 118
+  %biased_exp = v_add_u32 %selected_shift, %79
+  %f32_exp = v_lshlrev_b32_lit %biased_exp, 23
+  %83 = v_mov_b32 23
+  %remaining_shift = v_sub_nc_u32 %83, %selected_shift
+  %shifted_mantissa = v_lshlrev_b32 %remaining_shift, %mantissa
+  %f32_mantissa = v_and_b32_lit %shifted_mantissa, 8388607
+  %normal_head = v_or_b32 %sign_bits, %f32_exp
+  %normal_bits = v_or_b32 %normal_head, %f32_mantissa
+  %subnormal = v_cndmask_b32 %sign_bits, %normal_bits, %has_mantissa_bit2
+  %is_zero_exp = v_cmp_eq_i32_src1_inline %exp {rhs = 0}
+  %91 = v_mov_b32 120
+  %regular_exp = v_add_u32 %exp, %91
+  %regular_exp_bits = v_lshlrev_b32_lit %regular_exp, 23
+  %regular_head = v_or_b32 %sign_bits, %regular_exp_bits
+  %regular_bits = v_or_b32 %regular_head, %f32_mantissa
+  %finite_bits = v_cndmask_b32 %regular_bits, %subnormal, %is_zero_exp
+  %is_special_exp = v_cmp_eq_i32_src1_inline %exp {rhs = 15}
+  %is_nan_payload = v_cmp_eq_i32_src1_inline %mantissa {rhs = 7}
+  %use_nan = s_and_b64 %is_special_exp, %is_nan_payload
+  %value = v_cndmask_b32_src1_lit %finite_bits, %use_nan, 2143289344
+  %104 = v_lshlrev_b32_src0_inline %lane, 2
+  global_store_b32_saddr %104, %value, %output_view
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
 func.def target(@target) @vector_uitofp_i32x2(%input: vector<2xi32>) -> (vector<2xf32>) {
   %converted = vector.uitofp %input : vector<2xi32> to vector<2xf32>
   func.return %converted : vector<2xf32>
