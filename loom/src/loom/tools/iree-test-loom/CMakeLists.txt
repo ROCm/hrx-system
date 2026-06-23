@@ -104,6 +104,7 @@ iree_execution_test_suite(
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/sanitizer/amdgpu_asan_actual.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/sanitizer/amdgpu_tsan_actual.loom"
     "testdata/amdgpu_hal_actual.loom"
+    "testdata/generated_tensor_cases.loom"
   LABELS
     "iree-run-requirement=runtime.resource.amd_gpu"
     "requires-gpu-amd"

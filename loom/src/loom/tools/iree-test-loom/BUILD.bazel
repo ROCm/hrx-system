@@ -142,6 +142,7 @@ iree_execution_test_suite(
     name = "amdgpu_execution_test",
     data = [
         "testdata/amdgpu_hal_actual.loom",
+        "testdata/generated_tensor_cases.loom",
         "//loom/src/loom/test/corpus/sanitizer:amdgpu_asan_actual.loom",
         "//loom/src/loom/test/corpus/sanitizer:amdgpu_tsan_actual.loom",
     ],

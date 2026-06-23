@@ -1,0 +1,48 @@
+kernel.def @decode_f8e4m3_one() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %element = kernel.workgroup.id<x> : index
+
+  %input_global = buffer.assume.memory_space<global> %input : buffer
+  %output_global = buffer.assume.memory_space<global> %output : buffer
+  %input_view = buffer.view %input_global[%base] : buffer -> view<1xf8E4M3, #dense>
+  %output_view = buffer.view %output_global[%base] : buffer -> view<1xf32, #dense>
+
+  %fp8 = view.load %input_view[%element] : view<1xf8E4M3, #dense> -> f8E4M3
+  %decoded = scalar.extf %fp8 : f8E4M3 to f32
+  view.store %decoded, %output_view[%element] : f32, view<1xf32, #dense>
+  kernel.return
+}
+
+kernel.def @decode_f8e5m2_one() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %element = kernel.workgroup.id<x> : index
+
+  %input_global = buffer.assume.memory_space<global> %input : buffer
+  %output_global = buffer.assume.memory_space<global> %output : buffer
+  %input_view = buffer.view %input_global[%base] : buffer -> view<1xf8E5M2, #dense>
+  %output_view = buffer.view %output_global[%base] : buffer -> view<1xf32, #dense>
+
+  %fp8 = view.load %input_view[%element] : view<1xf8E5M2, #dense> -> f8E5M2
+  %decoded = scalar.extf %fp8 : f8E5M2 to f32
+  view.store %decoded, %output_view[%element] : f32, view<1xf32, #dense>
+  kernel.return
+}
+
+check.case @fp8_generated_fill {
+  %input_e4m3 = check.generate.fill value(1.0) : tensor<1xf8E4M3>
+  %output_e4m3 = check.generate.fill value(0.0) : tensor<1xf32>
+  func.call @decode_f8e4m3_one(%input_e4m3, %output_e4m3) : (tensor<1xf8E4M3>, tensor<1xf32>)
+  %input_e5m2 = check.generate.fill value(1.0) : tensor<1xf8E5M2>
+  %output_e5m2 = check.generate.fill value(0.0) : tensor<1xf32>
+  func.call @decode_f8e5m2_one(%input_e5m2, %output_e5m2) : (tensor<1xf8E5M2>, tensor<1xf32>)
+  %expected = check.generate.fill value(1.0) : tensor<1xf32>
+  check.expect.close actual(%output_e4m3) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<1xf32>
+  check.expect.close actual(%output_e5m2) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<1xf32>
+  check.return
+}

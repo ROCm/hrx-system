@@ -24,6 +24,28 @@
       }
     },
     {
+      "name": "runs generated fp8 tensor case",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/testdata/generated_tensor_cases.loom",
+          "--case=@fp8_generated_fill",
+          "--device=amdgpu"
+        ]
+      },
+      "stdout": {
+        "contains": {
+          "unordered": [
+            "\"format\":\"loom.test.v0\"",
+            {
+              "regex": "\"case\":\"fp8_generated_fill\"[^}]*\"passed\":true"
+            },
+            "\"failed_sample_count\":0"
+          ]
+        }
+      }
+    },
+    {
       "name": "keeps valid loom-authored amdgpu asan access silent",
       "run": {
         "tool": "iree-test-loom",

@@ -756,6 +756,17 @@ static bool loom_testbench_iota_i64_value(int64_t offset, int64_t step,
     return iree_ok_status();                                            \
   } while (0)
 
+#define LOOM_TESTBENCH_FILL_FLOAT8_TYPED(mapping, convert, expression) \
+  do {                                                                 \
+    uint8_t* values = (uint8_t*)(mapping)->contents.data;              \
+    iree_host_size_t count =                                           \
+        (mapping)->contents.data_length / sizeof(*values);             \
+    for (iree_host_size_t index = 0; index < count; ++index) {         \
+      values[index] = convert((float)(expression));                    \
+    }                                                                  \
+    return iree_ok_status();                                           \
+  } while (0)
+
 static iree_status_t loom_testbench_generate_integer_buffer(
     iree_hal_buffer_mapping_t* mapping, loom_testbench_generator_state_t* state,
     int64_t min_value, int64_t max_value) {
@@ -869,6 +880,14 @@ static iree_status_t loom_testbench_generate_float_buffer(
   switch (state->kind) {
     case LOOM_TESTBENCH_GENERATOR_IOTA:
       switch (state->scalar_type) {
+        case LOOM_SCALAR_TYPE_F8E4M3:
+          LOOM_TESTBENCH_FILL_FLOAT8_TYPED(
+              mapping, iree_math_f32_to_f8e4m3fn,
+              first_value + (double)index * second_value);
+        case LOOM_SCALAR_TYPE_F8E5M2:
+          LOOM_TESTBENCH_FILL_FLOAT8_TYPED(
+              mapping, iree_math_f32_to_f8e5m2,
+              first_value + (double)index * second_value);
         case LOOM_SCALAR_TYPE_F16:
           LOOM_TESTBENCH_FILL_FLOAT16_TYPED(
               mapping, iree_math_f32_to_f16,
@@ -889,6 +908,12 @@ static iree_status_t loom_testbench_generate_float_buffer(
       break;
     case LOOM_TESTBENCH_GENERATOR_FILL:
       switch (state->scalar_type) {
+        case LOOM_SCALAR_TYPE_F8E4M3:
+          LOOM_TESTBENCH_FILL_FLOAT8_TYPED(mapping, iree_math_f32_to_f8e4m3fn,
+                                           first_value);
+        case LOOM_SCALAR_TYPE_F8E5M2:
+          LOOM_TESTBENCH_FILL_FLOAT8_TYPED(mapping, iree_math_f32_to_f8e5m2,
+                                           first_value);
         case LOOM_SCALAR_TYPE_F16:
           LOOM_TESTBENCH_FILL_FLOAT16_TYPED(mapping, iree_math_f32_to_f16,
                                             first_value);
@@ -910,6 +935,16 @@ static iree_status_t loom_testbench_generate_float_buffer(
                                 "lower");
       }
       switch (state->scalar_type) {
+        case LOOM_SCALAR_TYPE_F8E4M3:
+          LOOM_TESTBENCH_FILL_FLOAT8_TYPED(
+              mapping, iree_math_f32_to_f8e4m3fn,
+              first_value + loom_testbench_random_unit_f64(&state->prng_state) *
+                                (second_value - first_value));
+        case LOOM_SCALAR_TYPE_F8E5M2:
+          LOOM_TESTBENCH_FILL_FLOAT8_TYPED(
+              mapping, iree_math_f32_to_f8e5m2,
+              first_value + loom_testbench_random_unit_f64(&state->prng_state) *
+                                (second_value - first_value));
         case LOOM_SCALAR_TYPE_F16:
           LOOM_TESTBENCH_FILL_FLOAT16_TYPED(
               mapping, iree_math_f32_to_f16,
@@ -961,6 +996,8 @@ static iree_status_t loom_testbench_generate_buffer(
     case LOOM_SCALAR_TYPE_OFFSET:
       return loom_testbench_generate_integer_buffer(mapping, state, 0,
                                                     INT64_MAX);
+    case LOOM_SCALAR_TYPE_F8E4M3:
+    case LOOM_SCALAR_TYPE_F8E5M2:
     case LOOM_SCALAR_TYPE_F16:
     case LOOM_SCALAR_TYPE_BF16:
     case LOOM_SCALAR_TYPE_F32:
@@ -975,6 +1012,7 @@ static iree_status_t loom_testbench_generate_buffer(
 
 #undef LOOM_TESTBENCH_FILL_FLOAT_TYPED
 #undef LOOM_TESTBENCH_FILL_FLOAT16_TYPED
+#undef LOOM_TESTBENCH_FILL_FLOAT8_TYPED
 #undef LOOM_TESTBENCH_FILL_INT_TYPED
 #undef LOOM_TESTBENCH_FILL_IOTA_TYPED
 
