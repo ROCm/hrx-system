@@ -1350,7 +1350,6 @@ iree_status_t loom_target_compile_report_record_low_lowering(
         .address_form = source_row->address_form,
         .dynamic_term_kind = source_row->dynamic_term_kind,
         .fallback_reason = source_row->fallback_reason,
-        .descriptor_id = source_row->descriptor_id,
         .static_offset_bytes = source_row->static_offset_bytes,
         .element_byte_count = source_row->element_byte_count,
         .vector_lane_count = source_row->vector_lane_count,

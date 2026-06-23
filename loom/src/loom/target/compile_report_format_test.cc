@@ -355,7 +355,6 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
               /*.address_form=*/IREE_SVL("ds_2addr"),
               /*.dynamic_term_kind=*/IREE_SVL("vaddr"),
               /*.fallback_reason=*/IREE_SVL("cross_wave_workgroup"),
-              /*.descriptor_id=*/11,
               /*.static_offset_bytes=*/0,
               /*.element_byte_count=*/4,
               /*.vector_lane_count=*/2,
@@ -863,7 +862,7 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
                         "source_op=vector.load memory_space=workgroup "
                         "operation=load packet=amdgpu.ds_read2_b32 "
                         "address_form=ds_2addr dynamic_term_kind=vaddr "
-                        "fallback_reason=cross_wave_workgroup descriptor=11 "
+                        "fallback_reason=cross_wave_workgroup "
                         "static_offset_bytes=0 element_bytes=4 vector_lanes=2 "
                         "dynamic_stride_bytes=32 "
                         "vector_lane_stride_bytes=8 bank_stride_words=8 "
@@ -1245,7 +1244,7 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
                         "\"address_form\":\"ds_2addr\","
                         "\"dynamic_term_kind\":\"vaddr\","
                         "\"fallback_reason\":\"cross_wave_workgroup\","
-                        "\"descriptor_id\":11,\"static_offset_bytes\":0,"
+                        "\"static_offset_bytes\":0,"
                         "\"element_bytes\":4,\"vector_lanes\":2,"
                         "\"dynamic_stride_bytes\":32,"
                         "\"vector_lane_stride_bytes\":8,"

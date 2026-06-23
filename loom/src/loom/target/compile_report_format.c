@@ -1519,8 +1519,7 @@ static iree_status_t loom_target_compile_report_format_source_low_memory_rows(
           "COMPILE-REPORT: source_low_memory[%" PRIhsz
           "] function=%.*s source_op=%.*s memory_space=%.*s operation=%.*s "
           "packet=%.*s address_form=%.*s dynamic_term_kind=%.*s "
-          "fallback_reason=%.*s descriptor=%" PRIu64
-          " static_offset_bytes=%" PRId64
+          "fallback_reason=%.*s static_offset_bytes=%" PRId64
           " element_bytes=%u "
           "vector_lanes=%u dynamic_stride_bytes=%u "
           "vector_lane_stride_bytes=%u bank_stride_words=%u "
@@ -1531,7 +1530,7 @@ static iree_status_t loom_target_compile_report_format_source_low_memory_rows(
           (int)packet_key.size, packet_key.data, (int)address_form.size,
           address_form.data, (int)dynamic_term_kind.size,
           dynamic_term_kind.data, (int)fallback_reason.size,
-          fallback_reason.data, row->descriptor_id, row->static_offset_bytes,
+          fallback_reason.data, row->static_offset_bytes,
           row->element_byte_count, row->vector_lane_count,
           row->dynamic_stride_bytes, row->vector_lane_stride_bytes,
           row->bank_stride_words, row->bank_conflict_degree,
@@ -3111,8 +3110,6 @@ loom_target_compile_report_format_source_low_memory_row_json(
   IREE_RETURN_IF_ERROR(
       loom_target_compile_report_json_write_optional_string_field(
           stream, &first_field, "fallback_reason", row->fallback_reason));
-  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_optional_u64_field(
-      stream, &first_field, "descriptor_id", row->descriptor_id));
   IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_i64_field(
       stream, &first_field, "static_offset_bytes", row->static_offset_bytes));
   IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u32_field(

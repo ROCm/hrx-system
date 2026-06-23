@@ -233,7 +233,6 @@ static iree_status_t loom_amdgpu_record_memory_packet_report(
       .dynamic_term_kind =
           loom_amdgpu_memory_access_dynamic_term_kind_name(&packet->access),
       .fallback_reason = fallback_reason,
-      .descriptor_id = packet->access.descriptor->stable_id,
       .static_offset_bytes = source->static_byte_offset,
       .element_byte_count = source->element_byte_count,
       .vector_lane_count = source->vector_lane_count,

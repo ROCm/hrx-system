@@ -847,8 +847,6 @@ typedef struct loom_target_compile_report_source_low_memory_row_t {
   iree_string_view_t dynamic_term_kind;
   // Stable target-owned reason key for address-form selection or fallback.
   iree_string_view_t fallback_reason;
-  // Stable descriptor id for the emitted packet, or none when unavailable.
-  uint64_t descriptor_id;
   // Static source byte offset before target packet splitting.
   int64_t static_offset_bytes;
   // Byte count of one addressed source element.
