@@ -691,23 +691,23 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) @sanitizer_fragment_resu
   low.cond_br %1453, ^_bb2, ^_bb1 : reg<amdgpu.scc>
 ^_bb1:
   %1456 = v_and_b32_src0_inline %16, 31
-  %1459 = slice %result[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
-  %1460 = v_lshlrev_b32_src0_inline %1456, 2
-  global_store_b32_saddr %1460, %1459, %output_view
+  %1459 = v_lshlrev_b32_src0_inline %1456, 2
+  %1460 = slice %result[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  global_store_b32_saddr %1459, %1460, %output_view
   %1461 = slice %result[1] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
-  global_store_b32_saddr %1460, %1461, %output_view {offset = 128}
-  %1463 = slice %result[2] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
-  global_store_b32_saddr %1460, %1463, %output_view {offset = 256}
-  %1465 = slice %result[3] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
-  global_store_b32_saddr %1460, %1465, %output_view {offset = 384}
-  %1467 = slice %result[4] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
-  global_store_b32_saddr %1460, %1467, %output_view {offset = 512}
-  %1469 = slice %result[5] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
-  global_store_b32_saddr %1460, %1469, %output_view {offset = 640}
-  %1471 = slice %result[6] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
-  global_store_b32_saddr %1460, %1471, %output_view {offset = 768}
-  %1473 = slice %result[7] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
-  global_store_b32_saddr %1460, %1473, %output_view {offset = 896}
+  global_store_b32_saddr %1459, %1461, %output_view {offset = 128}
+  %1462 = slice %result[2] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  global_store_b32_saddr %1459, %1462, %output_view {offset = 256}
+  %1463 = slice %result[3] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  global_store_b32_saddr %1459, %1463, %output_view {offset = 384}
+  %1464 = slice %result[4] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  global_store_b32_saddr %1459, %1464, %output_view {offset = 512}
+  %1465 = slice %result[5] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  global_store_b32_saddr %1459, %1465, %output_view {offset = 640}
+  %1466 = slice %result[6] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  global_store_b32_saddr %1459, %1466, %output_view {offset = 768}
+  %1467 = slice %result[7] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  global_store_b32_saddr %1459, %1467, %output_view {offset = 896}
   return
 ^_bb2:
   %1454, %1455 = s_and_saveexec_b64 %1443
