@@ -334,8 +334,16 @@ void loom_value_facts_apply_predicate(loom_value_facts_t* facts,
 
     case LOOM_PREDICATE_NE:
       // A not-equal predicate excludes one value. This lattice has intervals
-      // rather than disjoint ranges, so there is no generally-sound tightening
-      // unless another predicate has already excluded the value by range.
+      // rather than disjoint ranges, so the only generally-sound tightening is
+      // when the excluded value sits on an interval edge.
+      if (constant == facts->range_lo && facts->range_lo < facts->range_hi &&
+          constant < INT64_MAX) {
+        facts->range_lo = constant + 1;
+      } else if (constant == facts->range_hi &&
+                 facts->range_lo < facts->range_hi && constant > INT64_MIN) {
+        facts->range_hi = constant - 1;
+      }
+      loom_value_facts_recompute_flags(facts);
       if (constant == 0) {
         facts->flags |= LOOM_VALUE_FACT_NON_ZERO;
       }

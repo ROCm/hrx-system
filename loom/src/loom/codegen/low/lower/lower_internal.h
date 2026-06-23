@@ -11,6 +11,7 @@
 
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
+#include "loom/analysis/symbolic_expr.h"
 #include "loom/analysis/view_regions.h"
 #include "loom/codegen/low/builder.h"
 #include "loom/codegen/low/lower/lower.h"
@@ -119,6 +120,12 @@ typedef struct loom_low_lowering_frame_t {
   loom_local_value_domain_t value_domain;
   // Borrowed source value facts computed before planning.
   loom_value_fact_table_t* fact_table;
+  // Function-local symbolic proof context initialized on first rule query.
+  loom_symbolic_expr_context_t expression_context;
+  // Fact table used to initialize expression_context.
+  const loom_value_fact_table_t* expression_context_fact_table;
+  // True once expression_context owns arena-backed memo/scratch storage.
+  bool expression_context_initialized;
   // Per-source-value storage demand flags indexed by source value ordinal.
   loom_low_lower_value_storage_flags_t* value_storage_flags;
   // Source local value ordinal to emitted low value ID map.

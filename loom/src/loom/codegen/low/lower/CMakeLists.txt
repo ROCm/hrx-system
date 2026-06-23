@@ -28,6 +28,7 @@ loom_cc_library(
     iree::base::internal::arena
     loom::analysis::contract_vector
     loom::analysis::kernel_async_legality
+    loom::analysis::symbolic_expr
     loom::analysis::vector_memory_footprint
     loom::analysis::view_regions
     loom::codegen::low::builder

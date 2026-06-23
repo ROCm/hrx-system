@@ -27,6 +27,7 @@ extern "C" {
 
 typedef struct loom_low_lower_rule_match_context_t
     loom_low_lower_rule_match_context_t;
+typedef struct loom_symbolic_expr_context_t loom_symbolic_expr_context_t;
 
 typedef uint16_t loom_low_lower_descriptor_ref_t;
 
@@ -180,6 +181,9 @@ struct loom_low_lower_rule_match_context_t {
   loom_low_lower_rule_match_descriptor_ref_callback_t descriptor_ref;
   // Optional dense source value facts used by fact-backed guard rows.
   const loom_value_fact_table_t* fact_table;
+  // Optional symbolic proof context used as a cold fallback for fact-backed
+  // guard rows whose scalar intervals are inconclusive.
+  loom_symbolic_expr_context_t* symbolic_expr_context;
   // Match behavior flags.
   loom_low_lower_rule_match_flags_t flags;
 };

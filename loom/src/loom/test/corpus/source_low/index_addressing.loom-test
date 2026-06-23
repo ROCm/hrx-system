@@ -176,6 +176,36 @@ kernel.def @index_shli_previous_row_global_b128() {
 
 // ====
 
+kernel.def @index_edge_loop_dynamic_lower_bound_global_b32() {
+  %unit = index.constant 1 : index
+  %lane_count = index.constant 1024 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%lane_count, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %base_offset = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %two = index.constant 2 : index
+  %three = index.constant 3 : index
+  %last_lane = index.constant 1023 : index
+  %is_left_edge = index.cmp eq, %lane, %zero : index
+  %begin = scf.select %is_left_edge, %one, %zero : index
+  %is_right_edge = index.cmp eq, %lane, %last_lane : index
+  %end = scf.select %is_right_edge, %two, %three : index
+  %input_view = buffer.view %input[%base_offset] : buffer -> view<512xi32, #dense>
+  %output_view = buffer.view %output[%base_offset] : buffer -> view<1024xi32, #dense>
+  scf.for %tap = [%begin to %end step %one] {
+    %shifted = index.add %lane, %tap : index
+    %source_lane = index.sub %shifted, %one : index
+    %input_lane = index.div %source_lane, %two : index
+    %loaded = vector.load %input_view[%input_lane] : view<512xi32, #dense> -> vector<1xi32>
+    vector.store %loaded, %output_view[%lane] : vector<1xi32>, view<1024xi32, #dense>
+  }
+  kernel.return
+}
+
+// ====
+
 kernel.def @index_div_rem_power_of_two_global_b32() {
   %unit = index.constant 1 : index
   %lane_count = index.constant 32 : index

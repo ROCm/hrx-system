@@ -435,6 +435,28 @@ TEST(FactsApplyPredicate, NeIsRepresentedButDoesNotTightenInterval) {
   EXPECT_TRUE(loom_value_facts_is_unknown(f));
 }
 
+TEST(FactsApplyPredicate, NeTightensExcludedIntervalEdge) {
+  loom_predicate_t ne_pred = make_predicate_1(LOOM_PREDICATE_NE, 0);
+
+  loom_value_facts_t lower_edge = loom_value_facts_make(0, 1024, 1);
+  loom_value_facts_apply_predicate(&lower_edge, &ne_pred);
+  EXPECT_EQ(lower_edge.range_lo, 1);
+  EXPECT_EQ(lower_edge.range_hi, 1024);
+  EXPECT_TRUE(loom_value_facts_is_positive(lower_edge));
+
+  ne_pred.args[1] = 1024;
+  loom_value_facts_t upper_edge = loom_value_facts_make(0, 1024, 1);
+  loom_value_facts_apply_predicate(&upper_edge, &ne_pred);
+  EXPECT_EQ(upper_edge.range_lo, 0);
+  EXPECT_EQ(upper_edge.range_hi, 1023);
+
+  ne_pred.args[1] = 512;
+  loom_value_facts_t interior = loom_value_facts_make(0, 1024, 1);
+  loom_value_facts_apply_predicate(&interior, &ne_pred);
+  EXPECT_EQ(interior.range_lo, 0);
+  EXPECT_EQ(interior.range_hi, 1024);
+}
+
 TEST(FactsApplyPredicate, NeZeroSetsNonzeroWithoutTighteningInterval) {
   loom_value_facts_t f = loom_value_facts_unknown();
   loom_predicate_t ne_pred = make_predicate_1(LOOM_PREDICATE_NE, 0);

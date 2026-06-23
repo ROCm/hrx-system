@@ -348,7 +348,6 @@ static bool loom_condition_facts_query_impl(
     loom_value_id_t condition_value, bool assumed_truth,
     loom_condition_fact_set_t* out_facts, uint8_t recursion_depth) {
   if (recursion_depth > 16) return false;
-  loom_condition_fact_set_reset(out_facts);
   if (!module || condition_value >= module->values.count) {
     return true;
   }
@@ -419,8 +418,19 @@ bool loom_condition_facts_query(const loom_module_t* module,
                                 loom_value_id_t condition_value,
                                 bool assumed_truth,
                                 loom_condition_fact_set_t* out_facts) {
+  loom_condition_fact_set_reset(out_facts);
   return loom_condition_facts_query_impl(module, fact_table, condition_value,
                                          assumed_truth, out_facts,
+                                         /*recursion_depth=*/0);
+}
+
+bool loom_condition_facts_query_into(const loom_module_t* module,
+                                     const loom_value_fact_table_t* fact_table,
+                                     loom_value_id_t condition_value,
+                                     bool assumed_truth,
+                                     loom_condition_fact_set_t* inout_facts) {
+  return loom_condition_facts_query_impl(module, fact_table, condition_value,
+                                         assumed_truth, inout_facts,
                                          /*recursion_depth=*/0);
 }
 

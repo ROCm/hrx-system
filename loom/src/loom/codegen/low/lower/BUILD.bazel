@@ -44,6 +44,7 @@ loom_cc_library(
     deps = [
         "//loom/src/loom/analysis:contract_vector",
         "//loom/src/loom/analysis:kernel_async_legality",
+        "//loom/src/loom/analysis:symbolic_expr",
         "//loom/src/loom/analysis:vector_memory_footprint",
         "//loom/src/loom/analysis:view_regions",
         "//loom/src/loom/codegen/low:builder",

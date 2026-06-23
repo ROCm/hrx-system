@@ -6,7 +6,6 @@
 
 #include "loom/codegen/low/lower/lower_rules.h"
 
-#include <inttypes.h>
 #include <stdint.h>
 #include <string.h>
 
@@ -995,22 +994,86 @@ static int64_t loom_low_lower_rule_attr_copy_literal_minus_i64_attrs(
   return projected_value;
 }
 
-static bool loom_low_lower_rule_value_facts_fit_bit_count(
+static iree_status_t loom_low_lower_rule_value_symbolically_fits_bit_count(
     const loom_low_lower_rule_match_context_t* match_context,
     const loom_low_lower_rule_set_t* rule_set, const loom_op_t* source_op,
-    uint16_t value_ref_index, uint64_t bit_count, bool is_signed_domain) {
+    uint16_t value_ref_index, uint8_t bit_count, bool is_signed_domain,
+    bool* out_matches) {
+  *out_matches = false;
+  if (bit_count == 0 || bit_count > 64) return iree_ok_status();
+  loom_symbolic_expr_context_t* expression_context =
+      match_context->symbolic_expr_context;
+  if (expression_context == NULL) return iree_ok_status();
+
+  const loom_value_id_t value_id =
+      loom_low_lower_rule_source_value(rule_set, source_op, value_ref_index);
+  loom_symbolic_expr_t value_expression = {0};
+  IREE_RETURN_IF_ERROR(loom_symbolic_expr_from_value(
+      expression_context, value_id, &value_expression));
+
+  loom_symbolic_expr_t minimum_expression = {0};
+  loom_symbolic_expr_constant(0, &minimum_expression);
+  loom_symbolic_proof_result_t minimum_proof = LOOM_SYMBOLIC_PROOF_UNKNOWN;
+  if (is_signed_domain) {
+    int64_t minimum_value =
+        bit_count >= 64 ? INT64_MIN : -(INT64_C(1) << (bit_count - 1));
+    loom_symbolic_expr_constant(minimum_value, &minimum_expression);
+  }
+  IREE_RETURN_IF_ERROR(
+      loom_symbolic_expr_prove_le(expression_context, &minimum_expression,
+                                  &value_expression, &minimum_proof));
+  if (minimum_proof != LOOM_SYMBOLIC_PROOF_TRUE) {
+    return iree_ok_status();
+  }
+
+  if (!is_signed_domain && bit_count >= 63) {
+    *out_matches = true;
+    return iree_ok_status();
+  }
+  if (is_signed_domain && bit_count >= 64) {
+    *out_matches = true;
+    return iree_ok_status();
+  }
+
+  uint64_t unsigned_maximum =
+      bit_count == 64 ? UINT64_MAX : (UINT64_C(1) << bit_count) - 1;
+  int64_t maximum_value = is_signed_domain ? (INT64_C(1) << (bit_count - 1)) - 1
+                                           : (int64_t)unsigned_maximum;
+  loom_symbolic_expr_t maximum_expression = {0};
+  loom_symbolic_expr_constant(maximum_value, &maximum_expression);
+  loom_symbolic_proof_result_t maximum_proof = LOOM_SYMBOLIC_PROOF_UNKNOWN;
+  IREE_RETURN_IF_ERROR(
+      loom_symbolic_expr_prove_le(expression_context, &value_expression,
+                                  &maximum_expression, &maximum_proof));
+  *out_matches = maximum_proof == LOOM_SYMBOLIC_PROOF_TRUE;
+  return iree_ok_status();
+}
+
+static iree_status_t loom_low_lower_rule_value_facts_fit_bit_count(
+    const loom_low_lower_rule_match_context_t* match_context,
+    const loom_low_lower_rule_set_t* rule_set, const loom_op_t* source_op,
+    uint16_t value_ref_index, uint64_t bit_count, bool is_signed_domain,
+    bool* out_matches) {
+  *out_matches = false;
   if (bit_count > UINT8_MAX) {
-    return false;
+    return iree_ok_status();
   }
   loom_value_facts_t facts = loom_value_facts_unknown();
   if (!loom_low_lower_rule_value_integer_element_range_facts(
           match_context, rule_set, source_op, value_ref_index, &facts)) {
-    return false;
+    return iree_ok_status();
   }
   if (is_signed_domain) {
-    return loom_value_facts_fit_signed_bit_count(facts, (uint8_t)bit_count);
+    *out_matches =
+        loom_value_facts_fit_signed_bit_count(facts, (uint8_t)bit_count);
+  } else {
+    *out_matches =
+        loom_value_facts_fit_unsigned_bit_count(facts, (uint8_t)bit_count);
   }
-  return loom_value_facts_fit_unsigned_bit_count(facts, (uint8_t)bit_count);
+  if (*out_matches) return iree_ok_status();
+  return loom_low_lower_rule_value_symbolically_fits_bit_count(
+      match_context, rule_set, source_op, value_ref_index, (uint8_t)bit_count,
+      is_signed_domain, out_matches);
 }
 
 static bool loom_low_lower_rule_value_facts_exact_i64(
@@ -1612,15 +1675,13 @@ static iree_status_t loom_low_lower_rule_guard_matches(
       return iree_ok_status();
     }
     case LOOM_LOW_LOWER_GUARD_VALUE_SIGNED_BIT_COUNT:
-      *out_matches = loom_low_lower_rule_value_facts_fit_bit_count(
+      return loom_low_lower_rule_value_facts_fit_bit_count(
           match_context, rule_set, source_op, guard->value_ref_index,
-          guard->u64, /*is_signed_domain=*/true);
-      return iree_ok_status();
+          guard->u64, /*is_signed_domain=*/true, out_matches);
     case LOOM_LOW_LOWER_GUARD_VALUE_UNSIGNED_BIT_COUNT:
-      *out_matches = loom_low_lower_rule_value_facts_fit_bit_count(
+      return loom_low_lower_rule_value_facts_fit_bit_count(
           match_context, rule_set, source_op, guard->value_ref_index,
-          guard->u64, /*is_signed_domain=*/false);
-      return iree_ok_status();
+          guard->u64, /*is_signed_domain=*/false, out_matches);
     case LOOM_LOW_LOWER_GUARD_VALUE_EXACT_I64:
       *out_matches = loom_low_lower_rule_value_facts_exact_i64(
           match_context, rule_set, source_op, guard->value_ref_index);
@@ -1923,6 +1984,25 @@ iree_status_t loom_low_lower_rule_match_descriptor_ref_from_lowering(
   return iree_ok_status();
 }
 
+static loom_symbolic_expr_context_t*
+loom_low_lower_rule_symbolic_expr_context_from_lowering(
+    loom_low_lower_context_t* context) {
+  const loom_value_fact_table_t* fact_table =
+      loom_low_lower_context_fact_table(context);
+  if (fact_table == NULL) return NULL;
+
+  loom_low_lowering_frame_t* lowering = &context->lowering;
+  if (!lowering->expression_context_initialized ||
+      lowering->expression_context_fact_table != fact_table) {
+    loom_symbolic_expr_context_initialize(
+        loom_low_lower_context_module(context), fact_table, &context->arena,
+        &lowering->expression_context);
+    lowering->expression_context_fact_table = fact_table;
+    lowering->expression_context_initialized = true;
+  }
+  return &lowering->expression_context;
+}
+
 static loom_low_lower_rule_match_context_t
 loom_low_lower_rule_match_context_from_lowering(
     loom_low_lower_context_t* context) {
@@ -1949,6 +2029,8 @@ loom_low_lower_rule_match_context_from_lowering(
               .user_data = context,
           },
       .fact_table = loom_low_lower_context_fact_table(context),
+      .symbolic_expr_context =
+          loom_low_lower_rule_symbolic_expr_context_from_lowering(context),
   };
 }
 

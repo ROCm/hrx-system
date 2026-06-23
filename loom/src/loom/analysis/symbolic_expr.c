@@ -6,10 +6,11 @@
 
 #include "loom/analysis/symbolic_expr.h"
 
-#include <stdlib.h>
 #include <string.h>
 
+#include "loom/analysis/condition_facts.h"
 #include "loom/ir/attribute.h"
+#include "loom/ir/context.h"
 #include "loom/ops/index/ops.h"
 #include "loom/ops/kernel/launch_config.h"
 #include "loom/ops/kernel/ops.h"
@@ -27,6 +28,12 @@ enum loom_symbolic_expr_memo_state_e {
   LOOM_SYMBOLIC_EXPR_MEMO_READY = 2,
 };
 
+#define LOOM_SYMBOLIC_EXPR_CONDITION_FACT_INFER_DEPTH_LIMIT 16
+#define LOOM_SYMBOLIC_EXPR_IDENTITY_CHAIN_LIMIT 64
+#define LOOM_SYMBOLIC_EXPR_SELECT_CASE_CONDITION_LIMIT 8
+#define LOOM_SYMBOLIC_EXPR_SELECT_CASE_DEPTH_LIMIT 2
+#define LOOM_SYMBOLIC_EXPR_SELECT_DEPENDENCY_SEARCH_LIMIT 64
+
 struct loom_symbolic_expr_memo_entry_t {
   // Current memo state for this value ID.
   uint8_t state;
@@ -34,6 +41,18 @@ struct loom_symbolic_expr_memo_entry_t {
   // Cached expression when state is LOOM_SYMBOLIC_EXPR_MEMO_READY.
   loom_symbolic_expr_t expression;
 };
+
+static loom_value_facts_t loom_symbolic_expr_intersect_integer_facts(
+    loom_value_facts_t lhs, loom_value_facts_t rhs);
+static const loom_op_t* loom_symbolic_expr_value_defining_op(
+    const loom_symbolic_expr_context_t* context, loom_value_id_t value_id);
+static iree_status_t
+loom_symbolic_expr_apply_identity_chain_predicates_to_value_facts(
+    loom_symbolic_expr_context_t* context, loom_value_id_t start_value,
+    loom_value_facts_t* inout_facts);
+static iree_status_t loom_symbolic_expr_values_match(
+    loom_symbolic_expr_context_t* context, loom_value_id_t left_value,
+    loom_value_id_t right_value, bool* out_match);
 
 void loom_symbolic_expr_context_initialize(
     const loom_module_t* module, const loom_value_fact_table_t* fact_table,
@@ -80,14 +99,127 @@ static iree_status_t loom_symbolic_expr_ensure_scratch_terms(
   return iree_ok_status();
 }
 
+static iree_status_t loom_symbolic_expr_stabilize_scratch_terms(
+    loom_symbolic_expr_context_t* context, iree_host_size_t term_count,
+    loom_symbolic_term_t* stack_terms, iree_host_size_t stack_term_capacity,
+    const loom_symbolic_term_t** out_terms) {
+  if (term_count == 0) {
+    *out_terms = NULL;
+    return iree_ok_status();
+  }
+  loom_symbolic_term_t* stable_terms = stack_terms;
+  if (term_count > stack_term_capacity) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(context->arena, term_count,
+                                                   sizeof(*stable_terms),
+                                                   (void**)&stable_terms));
+  }
+  memcpy(stable_terms, context->scratch_terms,
+         term_count * sizeof(*stable_terms));
+  *out_terms = stable_terms;
+  return iree_ok_status();
+}
+
 //===----------------------------------------------------------------------===//
 // Constructors and normalization
 //===----------------------------------------------------------------------===//
 
 static loom_value_facts_t loom_symbolic_expr_lookup_facts(
     const loom_symbolic_expr_context_t* context, loom_value_id_t value_id) {
-  if (!context->fact_table) return loom_value_facts_unknown();
-  return loom_value_fact_table_lookup(context->fact_table, value_id);
+  loom_value_facts_t facts =
+      context->fact_table
+          ? loom_value_fact_table_lookup(context->fact_table, value_id)
+          : loom_value_facts_unknown();
+  if (context->condition_facts && context->fact_table) {
+    loom_condition_fact_set_apply_to_value_facts(
+        context->condition_facts, context->fact_table, value_id, &facts);
+    if (context->module && value_id < context->module->values.count) {
+      const loom_op_t* defining_op =
+          loom_symbolic_expr_value_defining_op(context, value_id);
+      bool condition = false;
+      if (defining_op && loom_scf_select_isa(defining_op) &&
+          loom_condition_fact_set_proves_condition(
+              context->module, context->fact_table, context->condition_facts,
+              loom_scf_select_condition(defining_op), &condition)) {
+        loom_value_id_t selected_value =
+            condition ? loom_scf_select_true_value(defining_op)
+                      : loom_scf_select_false_value(defining_op);
+        facts = loom_symbolic_expr_intersect_integer_facts(
+            facts, loom_symbolic_expr_lookup_facts(context, selected_value));
+      }
+    }
+  }
+  return facts;
+}
+
+static iree_status_t loom_symbolic_expr_lookup_condition_refined_facts(
+    loom_symbolic_expr_context_t* context, loom_value_id_t value_id,
+    uint8_t remaining_depth, loom_value_facts_t* out_facts) {
+  loom_value_facts_t facts = loom_symbolic_expr_lookup_facts(context, value_id);
+  if (!context->condition_facts || !context->module || !context->fact_table ||
+      remaining_depth == 0 || value_id >= context->module->values.count) {
+    *out_facts = facts;
+    return iree_ok_status();
+  }
+
+  IREE_RETURN_IF_ERROR(
+      loom_symbolic_expr_apply_identity_chain_predicates_to_value_facts(
+          context, value_id, &facts));
+
+  const loom_value_t* value = loom_module_value(context->module, value_id);
+  if (loom_value_is_block_arg(value)) {
+    *out_facts = facts;
+    return iree_ok_status();
+  }
+  const loom_op_t* defining_op = loom_value_def_op(value);
+  const loom_op_vtable_t* vtable =
+      defining_op ? loom_op_vtable(context->module, defining_op) : NULL;
+  if (!vtable || !vtable->infer_facts) {
+    *out_facts = facts;
+    return iree_ok_status();
+  }
+
+  const uint16_t result_index = loom_value_def_index(value);
+  if (result_index >= defining_op->result_count ||
+      !loom_type_is_scalar(loom_module_value_type(context->module, value_id))) {
+    *out_facts = facts;
+    return iree_ok_status();
+  }
+
+  loom_value_facts_t* operand_facts = NULL;
+  if (defining_op->operand_count != 0) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate(
+        context->arena, defining_op->operand_count * sizeof(*operand_facts),
+        (void**)&operand_facts));
+  }
+  const loom_value_id_t* operands = loom_op_const_operands(defining_op);
+  for (uint16_t i = 0; i < defining_op->operand_count; ++i) {
+    IREE_RETURN_IF_ERROR(loom_symbolic_expr_lookup_condition_refined_facts(
+        context, operands[i], (uint8_t)(remaining_depth - 1),
+        &operand_facts[i]));
+  }
+
+  loom_value_facts_t* result_facts = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate(
+      context->arena, defining_op->result_count * sizeof(*result_facts),
+      (void**)&result_facts));
+  for (uint16_t i = 0; i < defining_op->result_count; ++i) {
+    result_facts[i] = loom_value_facts_unknown();
+  }
+
+  loom_fact_context_t fact_context = context->fact_table->context;
+  IREE_RETURN_IF_ERROR(vtable->infer_facts(&fact_context, context->module,
+                                           defining_op, operand_facts,
+                                           result_facts));
+
+  loom_value_facts_t inferred_facts = result_facts[result_index];
+  loom_condition_fact_set_apply_to_value_facts(
+      context->condition_facts, context->fact_table, value_id, &inferred_facts);
+  IREE_RETURN_IF_ERROR(
+      loom_symbolic_expr_apply_identity_chain_predicates_to_value_facts(
+          context, value_id, &inferred_facts));
+  *out_facts =
+      loom_symbolic_expr_intersect_integer_facts(facts, inferred_facts);
+  return iree_ok_status();
 }
 
 static bool loom_symbolic_expr_exact_integer_facts(loom_value_facts_t facts,
@@ -179,13 +311,34 @@ void loom_symbolic_expr_constant(int64_t value,
   };
 }
 
-static int loom_symbolic_expr_compare_terms(const void* left,
-                                            const void* right) {
-  const loom_symbolic_term_t* left_term = (const loom_symbolic_term_t*)left;
-  const loom_symbolic_term_t* right_term = (const loom_symbolic_term_t*)right;
-  if (left_term->value_id < right_term->value_id) return -1;
-  if (left_term->value_id > right_term->value_id) return 1;
-  return 0;
+static void loom_symbolic_expr_sort_terms(loom_symbolic_term_t* terms,
+                                          iree_host_size_t term_count) {
+  if (term_count <= 16) {
+    for (iree_host_size_t i = 1; i < term_count; ++i) {
+      const loom_symbolic_term_t term = terms[i];
+      iree_host_size_t insertion_index = i;
+      while (insertion_index > 0 &&
+             terms[insertion_index - 1].value_id > term.value_id) {
+        terms[insertion_index] = terms[insertion_index - 1];
+        --insertion_index;
+      }
+      terms[insertion_index] = term;
+    }
+    return;
+  }
+
+  for (iree_host_size_t gap = term_count / 2; gap > 0; gap /= 2) {
+    for (iree_host_size_t i = gap; i < term_count; ++i) {
+      const loom_symbolic_term_t term = terms[i];
+      iree_host_size_t insertion_index = i;
+      while (insertion_index >= gap &&
+             terms[insertion_index - gap].value_id > term.value_id) {
+        terms[insertion_index] = terms[insertion_index - gap];
+        insertion_index -= gap;
+      }
+      terms[insertion_index] = term;
+    }
+  }
 }
 
 static iree_status_t loom_symbolic_expr_make_linear(
@@ -197,7 +350,7 @@ static iree_status_t loom_symbolic_expr_make_linear(
     return iree_ok_status();
   }
   if (term_count > 1) {
-    qsort(terms, term_count, sizeof(*terms), loom_symbolic_expr_compare_terms);
+    loom_symbolic_expr_sort_terms(terms, term_count);
   }
 
   iree_host_size_t write_index = 0;
@@ -735,18 +888,28 @@ static loom_value_facts_t loom_symbolic_expr_intersect_integer_facts(
   return loom_value_facts_make(lower_bound, upper_bound, 1);
 }
 
-static loom_value_facts_t loom_symbolic_expr_term_facts(
-    const loom_symbolic_expr_context_t* context,
-    const loom_symbolic_term_t term) {
-  loom_value_facts_t facts =
-      loom_symbolic_expr_lookup_facts(context, term.value_id);
+static iree_status_t loom_symbolic_expr_term_facts(
+    loom_symbolic_expr_context_t* context, const loom_symbolic_term_t term,
+    loom_value_facts_t* out_facts) {
+  loom_value_facts_t facts = {0};
+  IREE_RETURN_IF_ERROR(loom_symbolic_expr_lookup_condition_refined_facts(
+      context, term.value_id,
+      LOOM_SYMBOLIC_EXPR_CONDITION_FACT_INFER_DEPTH_LIMIT, &facts));
   if (term.relation_value_id == LOOM_VALUE_ID_INVALID ||
       term.relation_value_id == term.value_id) {
-    return facts;
+    *out_facts = facts;
+    return iree_ok_status();
   }
-  loom_value_facts_t relation_facts =
-      loom_symbolic_expr_lookup_facts(context, term.relation_value_id);
-  return loom_symbolic_expr_intersect_integer_facts(facts, relation_facts);
+  loom_value_facts_t relation_facts = {0};
+  IREE_RETURN_IF_ERROR(loom_symbolic_expr_lookup_condition_refined_facts(
+      context, term.relation_value_id,
+      LOOM_SYMBOLIC_EXPR_CONDITION_FACT_INFER_DEPTH_LIMIT, &relation_facts));
+  facts = loom_symbolic_expr_intersect_integer_facts(facts, relation_facts);
+  IREE_RETURN_IF_ERROR(
+      loom_symbolic_expr_apply_identity_chain_predicates_to_value_facts(
+          context, term.relation_value_id, &facts));
+  *out_facts = facts;
+  return iree_ok_status();
 }
 
 static void loom_symbolic_expr_mul_interval_bound(int64_t lhs, int64_t rhs,
@@ -757,12 +920,14 @@ static void loom_symbolic_expr_mul_interval_bound(int64_t lhs, int64_t rhs,
   *out_product = (lhs < 0) != (rhs < 0) ? INT64_MIN : INT64_MAX;
 }
 
-static bool loom_symbolic_expr_term_interval(
-    const loom_symbolic_expr_context_t* context,
-    const loom_symbolic_term_t term, int64_t* out_min, int64_t* out_max) {
-  loom_value_facts_t facts = loom_symbolic_expr_term_facts(context, term);
+static iree_status_t loom_symbolic_expr_term_interval(
+    loom_symbolic_expr_context_t* context, const loom_symbolic_term_t term,
+    int64_t* out_min, int64_t* out_max, bool* out_known) {
+  *out_known = false;
+  loom_value_facts_t facts = {0};
+  IREE_RETURN_IF_ERROR(loom_symbolic_expr_term_facts(context, term, &facts));
   if (loom_value_facts_is_unknown(facts) || loom_value_facts_is_float(facts)) {
-    return false;
+    return iree_ok_status();
   }
   int64_t lower_product = 0;
   int64_t upper_product = 0;
@@ -779,7 +944,8 @@ static bool loom_symbolic_expr_term_interval(
   }
   *out_min = lower_product;
   *out_max = upper_product;
-  return true;
+  *out_known = true;
+  return iree_ok_status();
 }
 
 static iree_status_t loom_symbolic_expr_normalize_difference_into_scratch(
@@ -827,8 +993,7 @@ static iree_status_t loom_symbolic_expr_normalize_difference_into_scratch(
     };
   }
   if (term_ordinal > 1) {
-    qsort(context->scratch_terms, term_ordinal, sizeof(*context->scratch_terms),
-          loom_symbolic_expr_compare_terms);
+    loom_symbolic_expr_sort_terms(context->scratch_terms, term_ordinal);
   }
 
   iree_host_size_t write_index = 0;
@@ -893,13 +1058,20 @@ static iree_status_t loom_symbolic_expr_prove_le_linear(
     return iree_ok_status();
   }
 
+  loom_symbolic_term_t stack_terms[LOOM_SYMBOLIC_EXPR_DEFAULT_TERM_LIMIT];
+  const loom_symbolic_term_t* terms = NULL;
+  IREE_RETURN_IF_ERROR(loom_symbolic_expr_stabilize_scratch_terms(
+      context, term_count, stack_terms, IREE_ARRAYSIZE(stack_terms), &terms));
+
   int64_t minimum = constant;
   int64_t maximum = constant;
   for (iree_host_size_t i = 0; i < term_count; ++i) {
     int64_t term_minimum = 0;
     int64_t term_maximum = 0;
-    if (!loom_symbolic_expr_term_interval(context, context->scratch_terms[i],
-                                          &term_minimum, &term_maximum) ||
+    bool term_interval_known = false;
+    IREE_RETURN_IF_ERROR(loom_symbolic_expr_term_interval(
+        context, terms[i], &term_minimum, &term_maximum, &term_interval_known));
+    if (!term_interval_known ||
         !loom_symbolic_expr_accumulate_checked(term_minimum, term_maximum,
                                                &minimum, &maximum)) {
       *out_result = LOOM_SYMBOLIC_PROOF_UNKNOWN;
@@ -984,6 +1156,161 @@ static bool loom_symbolic_expr_predicate_relation(
     default:
       return false;
   }
+}
+
+static bool loom_symbolic_expr_relation_predicate_kind(
+    loom_symbolic_integer_relation_t relation, uint8_t* out_kind) {
+  switch (relation) {
+    case LOOM_SYMBOLIC_INTEGER_RELATION_EQ:
+      *out_kind = LOOM_PREDICATE_EQ;
+      return true;
+    case LOOM_SYMBOLIC_INTEGER_RELATION_NE:
+      *out_kind = LOOM_PREDICATE_NE;
+      return true;
+    case LOOM_SYMBOLIC_INTEGER_RELATION_LT:
+      *out_kind = LOOM_PREDICATE_LT;
+      return true;
+    case LOOM_SYMBOLIC_INTEGER_RELATION_LE:
+      *out_kind = LOOM_PREDICATE_LE;
+      return true;
+    case LOOM_SYMBOLIC_INTEGER_RELATION_GT:
+      *out_kind = LOOM_PREDICATE_GT;
+      return true;
+    case LOOM_SYMBOLIC_INTEGER_RELATION_GE:
+      *out_kind = LOOM_PREDICATE_GE;
+      return true;
+    default:
+      return false;
+  }
+}
+
+static iree_status_t loom_symbolic_expr_predicate_arg_exact_integer(
+    loom_symbolic_expr_context_t* context, loom_predicate_arg_tag_t arg_tag,
+    int64_t arg, int64_t* out_value, bool* out_known) {
+  *out_value = 0;
+  *out_known = false;
+  switch (arg_tag) {
+    case LOOM_PRED_ARG_CONST:
+      *out_value = arg;
+      *out_known = true;
+      return iree_ok_status();
+    case LOOM_PRED_ARG_VALUE: {
+      if (arg < 0) return iree_ok_status();
+      loom_symbolic_expr_t expression = {0};
+      IREE_RETURN_IF_ERROR(loom_symbolic_expr_from_value(
+          context, (loom_value_id_t)arg, &expression));
+      *out_known = loom_symbolic_expr_constant_value(&expression, out_value);
+      return iree_ok_status();
+    }
+    default:
+      return iree_ok_status();
+  }
+}
+
+static iree_status_t loom_symbolic_expr_predicate_apply_to_value_facts(
+    loom_symbolic_expr_context_t* context, const loom_predicate_t* predicate,
+    loom_value_id_t value_id, loom_value_facts_t* inout_facts) {
+  if (predicate->arg_count != 2) return iree_ok_status();
+
+  loom_symbolic_integer_relation_t relation = LOOM_SYMBOLIC_INTEGER_RELATION_EQ;
+  if (!loom_symbolic_expr_predicate_relation(predicate, &relation)) {
+    return iree_ok_status();
+  }
+
+  bool value_is_left = false;
+  if (predicate->arg_tags[0] == LOOM_PRED_ARG_VALUE &&
+      predicate->args[0] >= 0) {
+    IREE_RETURN_IF_ERROR(loom_symbolic_expr_values_match(
+        context, (loom_value_id_t)predicate->args[0], value_id,
+        &value_is_left));
+  }
+  bool value_is_right = false;
+  if (predicate->arg_tags[1] == LOOM_PRED_ARG_VALUE &&
+      predicate->args[1] >= 0) {
+    IREE_RETURN_IF_ERROR(loom_symbolic_expr_values_match(
+        context, (loom_value_id_t)predicate->args[1], value_id,
+        &value_is_right));
+  }
+  if (!value_is_left && !value_is_right) return iree_ok_status();
+
+  uint8_t other_arg_index = value_is_left ? 1 : 0;
+  int64_t other_value = 0;
+  bool other_known = false;
+  IREE_RETURN_IF_ERROR(loom_symbolic_expr_predicate_arg_exact_integer(
+      context, (loom_predicate_arg_tag_t)predicate->arg_tags[other_arg_index],
+      predicate->args[other_arg_index], &other_value, &other_known));
+  if (!other_known) return iree_ok_status();
+
+  if (value_is_right) {
+    relation = loom_symbolic_integer_relation_swap(relation);
+  }
+  uint8_t predicate_kind = 0;
+  if (!loom_symbolic_expr_relation_predicate_kind(relation, &predicate_kind)) {
+    return iree_ok_status();
+  }
+
+  loom_predicate_t normalized = {
+      .kind = predicate_kind,
+      .arg_count = 2,
+      .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_CONST,
+                   LOOM_PRED_ARG_NONE},
+      .args = {value_id, other_value, 0},
+  };
+  loom_value_facts_apply_predicate(inout_facts, &normalized);
+  return iree_ok_status();
+}
+
+static iree_status_t
+loom_symbolic_expr_apply_identity_chain_predicates_to_value_facts(
+    loom_symbolic_expr_context_t* context, loom_value_id_t start_value,
+    loom_value_facts_t* inout_facts) {
+  if (!context->module || start_value == LOOM_VALUE_ID_INVALID) {
+    return iree_ok_status();
+  }
+
+  loom_value_id_t current_value = start_value;
+  uint8_t remaining_steps = LOOM_SYMBOLIC_EXPR_IDENTITY_CHAIN_LIMIT;
+  while (remaining_steps-- > 0) {
+    if (current_value >= context->module->values.count) {
+      return iree_ok_status();
+    }
+    const loom_value_t* value =
+        loom_module_value(context->module, current_value);
+    if (loom_value_is_block_arg(value)) return iree_ok_status();
+    const loom_op_t* defining_op = loom_value_def_op(value);
+    if (!defining_op) return iree_ok_status();
+
+    if (loom_index_cast_isa(defining_op)) {
+      current_value = loom_index_cast_input(defining_op);
+      continue;
+    }
+
+    loom_value_slice_t values = {.values = NULL, .count = 0};
+    if (loom_index_assume_isa(defining_op)) {
+      values = loom_index_assume_values(defining_op);
+    } else if (loom_scalar_assume_isa(defining_op)) {
+      values = loom_scalar_assume_values(defining_op);
+    } else {
+      return iree_ok_status();
+    }
+
+    uint16_t result_index = loom_value_def_index(value);
+    if (result_index >= values.count) return iree_ok_status();
+    if (defining_op->attribute_count > 0) {
+      loom_attribute_t predicates_attr = loom_op_attrs(defining_op)[0];
+      if (predicates_attr.kind == LOOM_ATTR_PREDICATE_LIST &&
+          (predicates_attr.count == 0 || predicates_attr.predicate_list)) {
+        for (uint16_t i = 0; i < predicates_attr.count; ++i) {
+          IREE_RETURN_IF_ERROR(
+              loom_symbolic_expr_predicate_apply_to_value_facts(
+                  context, &predicates_attr.predicate_list[i], current_value,
+                  inout_facts));
+        }
+      }
+    }
+    current_value = values.values[result_index];
+  }
+  return iree_ok_status();
 }
 
 static bool loom_symbolic_expr_value_is_integer_domain(
@@ -1206,7 +1533,7 @@ static bool loom_symbolic_expr_unsigned_remainder_def(
 static loom_value_id_t loom_symbolic_expr_assumption_source_value(
     const loom_symbolic_expr_context_t* context, loom_value_id_t value_id) {
   if (!context->module) return value_id;
-  iree_host_size_t remaining_steps = context->module->values.count;
+  uint8_t remaining_steps = LOOM_SYMBOLIC_EXPR_IDENTITY_CHAIN_LIMIT;
   while (remaining_steps-- > 0) {
     if (value_id >= context->module->values.count) return value_id;
     const loom_op_t* defining_op =
@@ -1635,7 +1962,7 @@ static iree_status_t loom_symbolic_expr_prove_identity_chain_predicates(
   *out_matched = false;
   if (!context->module) return iree_ok_status();
   loom_value_id_t current_value = start_value;
-  iree_host_size_t remaining_steps = context->module->values.count;
+  uint8_t remaining_steps = LOOM_SYMBOLIC_EXPR_IDENTITY_CHAIN_LIMIT;
   while (remaining_steps-- > 0) {
     if (current_value >= context->module->values.count) {
       return iree_ok_status();
@@ -1829,26 +2156,30 @@ static bool loom_symbolic_expr_scaled_pair_from_indices(
       out_negative_relation_value);
 }
 
-static bool loom_symbolic_expr_residual_interval_excluding_pair(
-    const loom_symbolic_expr_context_t* context,
-    const loom_symbolic_term_t* terms, iree_host_size_t term_count,
-    iree_host_size_t first_index, iree_host_size_t second_index,
-    int64_t constant, int64_t* out_maximum) {
+static iree_status_t loom_symbolic_expr_residual_interval_excluding_pair(
+    loom_symbolic_expr_context_t* context, const loom_symbolic_term_t* terms,
+    iree_host_size_t term_count, iree_host_size_t first_index,
+    iree_host_size_t second_index, int64_t constant, int64_t* out_maximum,
+    bool* out_known) {
+  *out_known = false;
   int64_t minimum = constant;
   int64_t maximum = constant;
   for (iree_host_size_t i = 0; i < term_count; ++i) {
     if (i == first_index || i == second_index) continue;
     int64_t term_minimum = 0;
     int64_t term_maximum = 0;
-    if (!loom_symbolic_expr_term_interval(context, terms[i], &term_minimum,
-                                          &term_maximum) ||
+    bool term_interval_known = false;
+    IREE_RETURN_IF_ERROR(loom_symbolic_expr_term_interval(
+        context, terms[i], &term_minimum, &term_maximum, &term_interval_known));
+    if (!term_interval_known ||
         !loom_symbolic_expr_accumulate_checked(term_minimum, term_maximum,
                                                &minimum, &maximum)) {
-      return false;
+      return iree_ok_status();
     }
   }
   *out_maximum = maximum;
-  return true;
+  *out_known = true;
+  return iree_ok_status();
 }
 
 static iree_status_t
@@ -1876,8 +2207,11 @@ loom_symbolic_expr_prove_le_by_scaled_relation_with_residual(
       }
 
       int64_t residual_maximum = 0;
-      if (!loom_symbolic_expr_residual_interval_excluding_pair(
-              context, terms, term_count, i, j, constant, &residual_maximum)) {
+      bool residual_interval_known = false;
+      IREE_RETURN_IF_ERROR(loom_symbolic_expr_residual_interval_excluding_pair(
+          context, terms, term_count, i, j, constant, &residual_maximum,
+          &residual_interval_known));
+      if (!residual_interval_known) {
         continue;
       }
 
@@ -1921,12 +2255,10 @@ static iree_status_t loom_symbolic_expr_prove_le_by_scaled_relation(
       &linear));
   if (!linear) return iree_ok_status();
 
-  const loom_symbolic_term_t* terms = context->scratch_terms;
   loom_symbolic_term_t stable_terms[LOOM_SYMBOLIC_EXPR_DEFAULT_TERM_LIMIT];
-  if (term_count <= LOOM_SYMBOLIC_EXPR_DEFAULT_TERM_LIMIT) {
-    memcpy(stable_terms, context->scratch_terms, term_count * sizeof(*terms));
-    terms = stable_terms;
-  }
+  const loom_symbolic_term_t* terms = NULL;
+  IREE_RETURN_IF_ERROR(loom_symbolic_expr_stabilize_scratch_terms(
+      context, term_count, stable_terms, IREE_ARRAYSIZE(stable_terms), &terms));
 
   if (term_count == 1 && terms[0].coefficient > 0) {
     loom_value_id_t positive_relation_value = terms[0].relation_value_id;
@@ -2011,6 +2343,329 @@ static iree_status_t loom_symbolic_expr_prove_le_by_scaled_relation(
   return iree_ok_status();
 }
 
+static bool loom_symbolic_expr_select_condition_from_value(
+    const loom_symbolic_expr_context_t* context, loom_value_id_t value_id,
+    loom_value_id_t* out_condition) {
+  loom_value_id_t source_value =
+      loom_symbolic_expr_assumption_source_value(context, value_id);
+  const loom_op_t* defining_op =
+      loom_symbolic_expr_value_defining_op(context, source_value);
+  if (!defining_op || !loom_scf_select_isa(defining_op)) return false;
+  *out_condition = loom_scf_select_condition(defining_op);
+  return true;
+}
+
+static bool loom_symbolic_expr_predicate_arg_select_condition(
+    const loom_symbolic_expr_context_t* context, loom_predicate_arg_tag_t tag,
+    int64_t arg, loom_value_id_t* out_condition) {
+  if (tag != LOOM_PRED_ARG_VALUE || arg < 0) return false;
+  return loom_symbolic_expr_select_condition_from_value(
+      context, (loom_value_id_t)arg, out_condition);
+}
+
+static bool loom_symbolic_expr_predicate_select_condition(
+    const loom_symbolic_expr_context_t* context,
+    const loom_predicate_t* predicate, loom_value_id_t* out_condition) {
+  for (uint8_t i = 0; i < predicate->arg_count; ++i) {
+    if (loom_symbolic_expr_predicate_arg_select_condition(
+            context, (loom_predicate_arg_tag_t)predicate->arg_tags[i],
+            predicate->args[i], out_condition)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static void loom_symbolic_expr_append_select_condition(
+    loom_value_id_t condition, loom_value_id_t* conditions,
+    uint8_t* inout_condition_count) {
+  if (condition == LOOM_VALUE_ID_INVALID ||
+      *inout_condition_count >=
+          LOOM_SYMBOLIC_EXPR_SELECT_CASE_CONDITION_LIMIT) {
+    return;
+  }
+  for (uint8_t i = 0; i < *inout_condition_count; ++i) {
+    if (conditions[i] == condition) return;
+  }
+  conditions[(*inout_condition_count)++] = condition;
+}
+
+static void loom_symbolic_expr_collect_predicate_select_conditions(
+    const loom_symbolic_expr_context_t* context,
+    const loom_predicate_t* predicate, loom_value_id_t* conditions,
+    uint8_t* inout_condition_count) {
+  for (uint8_t i = 0; i < predicate->arg_count; ++i) {
+    loom_value_id_t condition = LOOM_VALUE_ID_INVALID;
+    if (loom_symbolic_expr_predicate_arg_select_condition(
+            context, (loom_predicate_arg_tag_t)predicate->arg_tags[i],
+            predicate->args[i], &condition)) {
+      loom_symbolic_expr_append_select_condition(condition, conditions,
+                                                 inout_condition_count);
+    }
+  }
+}
+
+static bool loom_symbolic_expr_identity_chain_select_condition(
+    const loom_symbolic_expr_context_t* context, loom_value_id_t start_value,
+    loom_value_id_t* out_condition) {
+  if (!context->module || start_value == LOOM_VALUE_ID_INVALID) return false;
+
+  loom_value_id_t current_value = start_value;
+  uint8_t remaining_steps = LOOM_SYMBOLIC_EXPR_IDENTITY_CHAIN_LIMIT;
+  while (remaining_steps-- > 0) {
+    if (current_value >= context->module->values.count) return false;
+    const loom_value_t* value =
+        loom_module_value(context->module, current_value);
+    if (loom_value_is_block_arg(value)) return false;
+    const loom_op_t* defining_op = loom_value_def_op(value);
+    if (!defining_op) return false;
+
+    if (loom_index_cast_isa(defining_op)) {
+      current_value = loom_index_cast_input(defining_op);
+      continue;
+    }
+
+    loom_value_slice_t values = {.values = NULL, .count = 0};
+    if (loom_index_assume_isa(defining_op)) {
+      values = loom_index_assume_values(defining_op);
+    } else if (loom_scalar_assume_isa(defining_op)) {
+      values = loom_scalar_assume_values(defining_op);
+    } else {
+      return false;
+    }
+
+    uint16_t result_index = loom_value_def_index(value);
+    if (result_index >= values.count) return false;
+    if (defining_op->attribute_count > 0) {
+      loom_attribute_t predicates_attr = loom_op_attrs(defining_op)[0];
+      if (predicates_attr.kind == LOOM_ATTR_PREDICATE_LIST &&
+          (predicates_attr.count == 0 || predicates_attr.predicate_list)) {
+        for (uint16_t i = 0; i < predicates_attr.count; ++i) {
+          if (loom_symbolic_expr_predicate_select_condition(
+                  context, &predicates_attr.predicate_list[i], out_condition)) {
+            return true;
+          }
+        }
+      }
+    }
+    current_value = values.values[result_index];
+  }
+  return false;
+}
+
+static void loom_symbolic_expr_collect_identity_chain_select_conditions(
+    const loom_symbolic_expr_context_t* context, loom_value_id_t start_value,
+    loom_value_id_t* conditions, uint8_t* inout_condition_count) {
+  if (!context->module || start_value == LOOM_VALUE_ID_INVALID) return;
+
+  loom_value_id_t current_value = start_value;
+  uint8_t remaining_steps = LOOM_SYMBOLIC_EXPR_IDENTITY_CHAIN_LIMIT;
+  while (remaining_steps-- > 0 &&
+         *inout_condition_count <
+             LOOM_SYMBOLIC_EXPR_SELECT_CASE_CONDITION_LIMIT) {
+    if (current_value >= context->module->values.count) return;
+    const loom_value_t* value =
+        loom_module_value(context->module, current_value);
+    if (loom_value_is_block_arg(value)) return;
+    const loom_op_t* defining_op = loom_value_def_op(value);
+    if (!defining_op) return;
+
+    if (loom_index_cast_isa(defining_op)) {
+      current_value = loom_index_cast_input(defining_op);
+      continue;
+    }
+
+    loom_value_slice_t values = {.values = NULL, .count = 0};
+    if (loom_index_assume_isa(defining_op)) {
+      values = loom_index_assume_values(defining_op);
+    } else if (loom_scalar_assume_isa(defining_op)) {
+      values = loom_scalar_assume_values(defining_op);
+    } else {
+      return;
+    }
+
+    uint16_t result_index = loom_value_def_index(value);
+    if (result_index >= values.count) return;
+    if (defining_op->attribute_count > 0) {
+      loom_attribute_t predicates_attr = loom_op_attrs(defining_op)[0];
+      if (predicates_attr.kind == LOOM_ATTR_PREDICATE_LIST &&
+          (predicates_attr.count == 0 || predicates_attr.predicate_list)) {
+        for (uint16_t i = 0; i < predicates_attr.count; ++i) {
+          loom_symbolic_expr_collect_predicate_select_conditions(
+              context, &predicates_attr.predicate_list[i], conditions,
+              inout_condition_count);
+        }
+      }
+    }
+    current_value = values.values[result_index];
+  }
+}
+
+static void loom_symbolic_expr_collect_dependency_select_conditions(
+    const loom_symbolic_expr_context_t* context, loom_value_id_t value_id,
+    iree_host_size_t* remaining_values, loom_value_id_t* conditions,
+    uint8_t* inout_condition_count) {
+  if (!context->module || value_id == LOOM_VALUE_ID_INVALID ||
+      value_id >= context->module->values.count || *remaining_values == 0) {
+    return;
+  }
+  --*remaining_values;
+
+  loom_value_id_t condition = LOOM_VALUE_ID_INVALID;
+  if (loom_symbolic_expr_select_condition_from_value(context, value_id,
+                                                     &condition)) {
+    loom_symbolic_expr_append_select_condition(condition, conditions,
+                                               inout_condition_count);
+  }
+  loom_symbolic_expr_collect_identity_chain_select_conditions(
+      context, value_id, conditions, inout_condition_count);
+
+  const loom_value_t* value = loom_module_value(context->module, value_id);
+  if (loom_value_is_block_arg(value)) return;
+  const loom_op_t* defining_op = loom_value_def_op(value);
+  if (!defining_op) return;
+
+  const loom_value_id_t* operands = loom_op_const_operands(defining_op);
+  for (uint16_t i = 0;
+       i < defining_op->operand_count &&
+       *inout_condition_count < LOOM_SYMBOLIC_EXPR_SELECT_CASE_CONDITION_LIMIT;
+       ++i) {
+    loom_symbolic_expr_collect_dependency_select_conditions(
+        context, operands[i], remaining_values, conditions,
+        inout_condition_count);
+  }
+}
+
+static iree_status_t loom_symbolic_expr_collect_select_conditions_for_le(
+    loom_symbolic_expr_context_t* context,
+    const loom_symbolic_expr_t* left_expression,
+    const loom_symbolic_expr_t* right_expression, loom_value_id_t* conditions,
+    uint8_t* out_condition_count) {
+  *out_condition_count = 0;
+
+  int64_t constant = 0;
+  iree_host_size_t term_count = 0;
+  bool linear = false;
+  IREE_RETURN_IF_ERROR(loom_symbolic_expr_normalize_difference_into_scratch(
+      context, left_expression, right_expression, &constant, &term_count,
+      &linear));
+  (void)constant;
+  if (!linear) return iree_ok_status();
+
+  for (iree_host_size_t i = 0; i < term_count; ++i) {
+    const loom_symbolic_term_t term = context->scratch_terms[i];
+    loom_value_id_t condition = LOOM_VALUE_ID_INVALID;
+    if (loom_symbolic_expr_select_condition_from_value(context, term.value_id,
+                                                       &condition)) {
+      loom_symbolic_expr_append_select_condition(condition, conditions,
+                                                 out_condition_count);
+    }
+    loom_symbolic_expr_collect_identity_chain_select_conditions(
+        context, term.relation_value_id, conditions, out_condition_count);
+  }
+
+  iree_host_size_t remaining_values =
+      LOOM_SYMBOLIC_EXPR_SELECT_DEPENDENCY_SEARCH_LIMIT;
+  for (iree_host_size_t i = 0; i < term_count && remaining_values > 0; ++i) {
+    const loom_symbolic_term_t term = context->scratch_terms[i];
+    loom_symbolic_expr_collect_dependency_select_conditions(
+        context, term.value_id, &remaining_values, conditions,
+        out_condition_count);
+    loom_symbolic_expr_collect_dependency_select_conditions(
+        context, term.relation_value_id, &remaining_values, conditions,
+        out_condition_count);
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_symbolic_expr_prove_le_with_condition_facts(
+    loom_symbolic_expr_context_t* context,
+    const loom_symbolic_expr_t* left_expression,
+    const loom_symbolic_expr_t* right_expression, loom_value_id_t condition,
+    bool assumed_truth, loom_symbolic_proof_result_t* out_result) {
+  loom_condition_integer_relation_t relation_storage[32];
+  loom_condition_fact_set_t condition_facts;
+  loom_condition_fact_set_initialize(
+      relation_storage, IREE_ARRAYSIZE(relation_storage), &condition_facts);
+  const loom_condition_fact_set_t* previous_condition_facts =
+      context->condition_facts;
+  if (previous_condition_facts) {
+    for (iree_host_size_t i = 0;
+         i < previous_condition_facts->integer_relation_count &&
+         condition_facts.integer_relation_count <
+             condition_facts.integer_relation_capacity;
+         ++i) {
+      condition_facts
+          .integer_relations[condition_facts.integer_relation_count++] =
+          previous_condition_facts->integer_relations[i];
+    }
+  }
+  (void)loom_condition_facts_query_into(context->module, context->fact_table,
+                                        condition, assumed_truth,
+                                        &condition_facts);
+
+  uint8_t previous_condition_proof_depth = context->condition_proof_depth;
+  context->condition_facts = &condition_facts;
+  context->condition_proof_depth =
+      (uint8_t)(previous_condition_proof_depth + 1);
+  loom_symbolic_expr_context_reset(context);
+  iree_status_t status = loom_symbolic_expr_prove_le(
+      context, left_expression, right_expression, out_result);
+  context->condition_facts = previous_condition_facts;
+  context->condition_proof_depth = previous_condition_proof_depth;
+  loom_symbolic_expr_context_reset(context);
+  return status;
+}
+
+static iree_status_t loom_symbolic_expr_prove_le_by_select_cases(
+    loom_symbolic_expr_context_t* context,
+    const loom_symbolic_expr_t* left_expression,
+    const loom_symbolic_expr_t* right_expression,
+    loom_symbolic_proof_result_t* out_result) {
+  *out_result = LOOM_SYMBOLIC_PROOF_UNKNOWN;
+  if (context->condition_proof_depth >=
+      LOOM_SYMBOLIC_EXPR_SELECT_CASE_DEPTH_LIMIT) {
+    return iree_ok_status();
+  }
+
+  loom_value_id_t conditions[LOOM_SYMBOLIC_EXPR_SELECT_CASE_CONDITION_LIMIT] = {
+      LOOM_VALUE_ID_INVALID};
+  uint8_t condition_count = 0;
+  IREE_RETURN_IF_ERROR(loom_symbolic_expr_collect_select_conditions_for_le(
+      context, left_expression, right_expression, conditions,
+      &condition_count));
+  for (uint8_t i = 0; i < condition_count; ++i) {
+    bool proven_condition = false;
+    if (context->condition_facts &&
+        loom_condition_fact_set_proves_condition(
+            context->module, context->fact_table, context->condition_facts,
+            conditions[i], &proven_condition)) {
+      IREE_RETURN_IF_ERROR(loom_symbolic_expr_prove_le_with_condition_facts(
+          context, left_expression, right_expression, conditions[i],
+          proven_condition, out_result));
+      if (*out_result == LOOM_SYMBOLIC_PROOF_TRUE) {
+        return iree_ok_status();
+      }
+      continue;
+    }
+
+    loom_symbolic_proof_result_t true_result = LOOM_SYMBOLIC_PROOF_UNKNOWN;
+    IREE_RETURN_IF_ERROR(loom_symbolic_expr_prove_le_with_condition_facts(
+        context, left_expression, right_expression, conditions[i],
+        /*assumed_truth=*/true, &true_result));
+    loom_symbolic_proof_result_t false_result = LOOM_SYMBOLIC_PROOF_UNKNOWN;
+    IREE_RETURN_IF_ERROR(loom_symbolic_expr_prove_le_with_condition_facts(
+        context, left_expression, right_expression, conditions[i],
+        /*assumed_truth=*/false, &false_result));
+    if (true_result == LOOM_SYMBOLIC_PROOF_TRUE &&
+        false_result == LOOM_SYMBOLIC_PROOF_TRUE) {
+      *out_result = LOOM_SYMBOLIC_PROOF_TRUE;
+      return iree_ok_status();
+    }
+  }
+  return iree_ok_status();
+}
+
 iree_status_t loom_symbolic_expr_prove_le(
     loom_symbolic_expr_context_t* context,
     const loom_symbolic_expr_t* left_expression,
@@ -2023,6 +2678,9 @@ iree_status_t loom_symbolic_expr_prove_le(
         context, left_expression, right_expression, out_result));
     if (*out_result != LOOM_SYMBOLIC_PROOF_UNKNOWN) return iree_ok_status();
     IREE_RETURN_IF_ERROR(loom_symbolic_expr_prove_le_by_scaled_relation(
+        context, left_expression, right_expression, out_result));
+    if (*out_result != LOOM_SYMBOLIC_PROOF_UNKNOWN) return iree_ok_status();
+    IREE_RETURN_IF_ERROR(loom_symbolic_expr_prove_le_by_select_cases(
         context, left_expression, right_expression, out_result));
     if (*out_result != LOOM_SYMBOLIC_PROOF_UNKNOWN) return iree_ok_status();
   }

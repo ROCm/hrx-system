@@ -691,6 +691,7 @@ loom_cc_library(
   SRCS
     "symbolic_expr.c"
   DEPS
+    ::condition_facts
     ::integer_relation
     iree::base
     iree::base::internal::arena
@@ -784,6 +785,7 @@ loom_cc_test(
   SRCS
     "symbolic_expr_test.cc"
   DEPS
+    ::condition_facts
     ::symbolic_expr
     iree::base::internal::arena
     iree::testing::gtest

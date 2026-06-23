@@ -11,6 +11,7 @@
 #include "iree/base/internal/arena.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/analysis/condition_facts.h"
 #include "loom/ir/attribute.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
@@ -738,6 +739,232 @@ TEST_F(SymbolicExprTest, SelectUsesConstantConditionExpression) {
 
   ASSERT_EQ(expression.term_count, 1);
   EXPECT_EQ(expression.terms[0].value_id, false_value);
+}
+
+TEST_F(SymbolicExprTest, SelectConditionProvesDynamicLoopLowerBound) {
+  loom_type_t index_type = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);
+  loom_value_id_t output = DefineIndexValue();
+  DefineFacts(output, loom_value_facts_make(0, 1023, 1));
+  loom_value_id_t raw_induction = DefineIndexValue();
+  DefineFacts(raw_induction, loom_value_facts_make(0, 2, 1));
+  loom_value_id_t zero_value =
+      loom_index_constant_result(BuildIndexConstant(0));
+  loom_value_id_t one_value = loom_index_constant_result(BuildIndexConstant(1));
+  DefineFacts(zero_value, loom_value_facts_exact_i64(0));
+  DefineFacts(one_value, loom_value_facts_exact_i64(1));
+
+  loom_op_t* edge_cmp_op = nullptr;
+  IREE_ASSERT_OK(loom_index_cmp_build(&builder_, LOOM_INDEX_CMP_PREDICATE_EQ,
+                                      output, zero_value, index_type,
+                                      loom_type_scalar(LOOM_SCALAR_TYPE_I1),
+                                      LOOM_LOCATION_UNKNOWN, &edge_cmp_op));
+  loom_op_t* lower_bound_op = nullptr;
+  IREE_ASSERT_OK(loom_scf_select_build(
+      &builder_, loom_index_cmp_result(edge_cmp_op), one_value, zero_value,
+      index_type, LOOM_LOCATION_UNKNOWN, &lower_bound_op));
+  loom_value_id_t lower_bound = loom_scf_select_result(lower_bound_op);
+
+  loom_predicate_t lower_bound_predicate = {
+      /*.kind=*/LOOM_PREDICATE_GE,
+      /*.arg_count=*/2,
+      /*.arg_tags=*/{LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_VALUE},
+      /*.reserved=*/{},
+      /*.args=*/{raw_induction, lower_bound},
+  };
+  loom_op_t* assume_op = nullptr;
+  IREE_ASSERT_OK(loom_index_assume_build(&builder_, &raw_induction, 1,
+                                         &lower_bound_predicate, 1, &index_type,
+                                         1, LOOM_LOCATION_UNKNOWN, &assume_op));
+  loom_value_id_t induction = loom_index_assume_results(assume_op).values[0];
+
+  loom_op_t* sum_op = nullptr;
+  IREE_ASSERT_OK(loom_index_add_build(&builder_, output, induction, index_type,
+                                      LOOM_LOCATION_UNKNOWN, &sum_op));
+  loom_op_t* shifted_op = nullptr;
+  IREE_ASSERT_OK(loom_index_sub_build(&builder_, loom_index_add_result(sum_op),
+                                      one_value, index_type,
+                                      LOOM_LOCATION_UNKNOWN, &shifted_op));
+
+  loom_symbolic_expr_t shifted_expression = {0};
+  IREE_ASSERT_OK(loom_symbolic_expr_from_value(
+      &expression_context_, loom_index_sub_result(shifted_op),
+      &shifted_expression));
+  loom_symbolic_expr_t zero_expression = {0};
+  loom_symbolic_expr_constant(0, &zero_expression);
+  loom_symbolic_proof_result_t proof = LOOM_SYMBOLIC_PROOF_UNKNOWN;
+  IREE_ASSERT_OK(loom_symbolic_expr_prove_le(
+      &expression_context_, &zero_expression, &shifted_expression, &proof));
+  EXPECT_EQ(proof, LOOM_SYMBOLIC_PROOF_TRUE);
+}
+
+TEST_F(SymbolicExprTest, SelectConditionProvesDynamicLoopDivBounds) {
+  loom_type_t index_type = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);
+  loom_value_id_t linear = DefineIndexValue();
+  DefineFacts(linear, loom_value_facts_make(0, 268435455, 1));
+  loom_value_id_t raw_tap = DefineIndexValue();
+  DefineFacts(raw_tap, loom_value_facts_make(0, 2, 1));
+
+  loom_value_id_t zero_value =
+      loom_index_constant_result(BuildIndexConstant(0));
+  loom_value_id_t one_value = loom_index_constant_result(BuildIndexConstant(1));
+  loom_value_id_t two_value = loom_index_constant_result(BuildIndexConstant(2));
+  loom_value_id_t three_value =
+      loom_index_constant_result(BuildIndexConstant(3));
+  loom_value_id_t last_lane_value =
+      loom_index_constant_result(BuildIndexConstant(1023));
+  DefineFacts(zero_value, loom_value_facts_exact_i64(0));
+  DefineFacts(one_value, loom_value_facts_exact_i64(1));
+  DefineFacts(two_value, loom_value_facts_exact_i64(2));
+  DefineFacts(three_value, loom_value_facts_exact_i64(3));
+  DefineFacts(last_lane_value, loom_value_facts_exact_i64(1023));
+
+  loom_op_t* lane_op = nullptr;
+  IREE_ASSERT_OK(loom_index_andi_build(&builder_, linear, last_lane_value,
+                                       index_type, LOOM_LOCATION_UNKNOWN,
+                                       &lane_op));
+  loom_value_id_t lane = loom_index_andi_result(lane_op);
+  DefineFacts(lane, loom_value_facts_make(0, 1023, 1));
+
+  loom_op_t* left_edge_cmp_op = nullptr;
+  IREE_ASSERT_OK(loom_index_cmp_build(
+      &builder_, LOOM_INDEX_CMP_PREDICATE_EQ, lane, zero_value, index_type,
+      loom_type_scalar(LOOM_SCALAR_TYPE_I1), LOOM_LOCATION_UNKNOWN,
+      &left_edge_cmp_op));
+  loom_op_t* lower_bound_op = nullptr;
+  IREE_ASSERT_OK(loom_scf_select_build(
+      &builder_, loom_index_cmp_result(left_edge_cmp_op), one_value, zero_value,
+      index_type, LOOM_LOCATION_UNKNOWN, &lower_bound_op));
+
+  loom_op_t* right_edge_cmp_op = nullptr;
+  IREE_ASSERT_OK(loom_index_cmp_build(
+      &builder_, LOOM_INDEX_CMP_PREDICATE_EQ, lane, last_lane_value, index_type,
+      loom_type_scalar(LOOM_SCALAR_TYPE_I1), LOOM_LOCATION_UNKNOWN,
+      &right_edge_cmp_op));
+  loom_op_t* upper_bound_op = nullptr;
+  IREE_ASSERT_OK(loom_scf_select_build(
+      &builder_, loom_index_cmp_result(right_edge_cmp_op), two_value,
+      three_value, index_type, LOOM_LOCATION_UNKNOWN, &upper_bound_op));
+
+  loom_predicate_t tap_predicates[] = {
+      {
+          /*.kind=*/LOOM_PREDICATE_GE,
+          /*.arg_count=*/2,
+          /*.arg_tags=*/{LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_VALUE},
+          /*.reserved=*/{},
+          /*.args=*/{raw_tap, loom_scf_select_result(lower_bound_op)},
+      },
+      {
+          /*.kind=*/LOOM_PREDICATE_LT,
+          /*.arg_count=*/2,
+          /*.arg_tags=*/{LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_VALUE},
+          /*.reserved=*/{},
+          /*.args=*/{raw_tap, loom_scf_select_result(upper_bound_op)},
+      },
+  };
+  loom_op_t* assume_op = nullptr;
+  IREE_ASSERT_OK(loom_index_assume_build(
+      &builder_, &raw_tap, 1, tap_predicates, IREE_ARRAYSIZE(tap_predicates),
+      &index_type, 1, LOOM_LOCATION_UNKNOWN, &assume_op));
+  loom_value_id_t tap = loom_index_assume_results(assume_op).values[0];
+
+  loom_op_t* sum_op = nullptr;
+  IREE_ASSERT_OK(loom_index_add_build(&builder_, lane, tap, index_type,
+                                      LOOM_LOCATION_UNKNOWN, &sum_op));
+  loom_op_t* source_lane_op = nullptr;
+  IREE_ASSERT_OK(loom_index_sub_build(&builder_, loom_index_add_result(sum_op),
+                                      one_value, index_type,
+                                      LOOM_LOCATION_UNKNOWN, &source_lane_op));
+  loom_op_t* input_lane_op = nullptr;
+  IREE_ASSERT_OK(loom_index_div_build(
+      &builder_, loom_index_sub_result(source_lane_op), two_value, index_type,
+      LOOM_LOCATION_UNKNOWN, &input_lane_op));
+
+  loom_symbolic_expr_t source_lane = {0};
+  IREE_ASSERT_OK(loom_symbolic_expr_from_value(
+      &expression_context_, loom_index_sub_result(source_lane_op),
+      &source_lane));
+  ASSERT_EQ(source_lane.term_count, 2);
+  EXPECT_EQ(source_lane.constant, -1);
+  EXPECT_EQ(source_lane.terms[0].value_id, raw_tap);
+  EXPECT_EQ(source_lane.terms[0].relation_value_id, tap);
+  EXPECT_EQ(source_lane.terms[0].coefficient, 1);
+  EXPECT_EQ(source_lane.terms[1].value_id, lane);
+  EXPECT_EQ(source_lane.terms[1].coefficient, 1);
+
+  loom_condition_integer_relation_t left_false_storage[16];
+  loom_condition_fact_set_t left_false_facts;
+  loom_condition_fact_set_initialize(left_false_storage,
+                                     IREE_ARRAYSIZE(left_false_storage),
+                                     &left_false_facts);
+  ASSERT_TRUE(loom_condition_facts_query(
+      module_, &fact_table_, loom_index_cmp_result(left_edge_cmp_op),
+      /*assumed_truth=*/false, &left_false_facts));
+  expression_context_.condition_facts = &left_false_facts;
+  expression_context_.condition_proof_depth = 1;
+  loom_symbolic_expr_context_reset(&expression_context_);
+  loom_symbolic_expr_t left_false_source_lane = {0};
+  IREE_ASSERT_OK(loom_symbolic_expr_from_value(
+      &expression_context_, loom_index_sub_result(source_lane_op),
+      &left_false_source_lane));
+  ASSERT_EQ(left_false_source_lane.term_count, 2);
+  EXPECT_EQ(left_false_source_lane.constant, -1);
+  EXPECT_EQ(left_false_source_lane.terms[0].value_id, raw_tap);
+  EXPECT_EQ(left_false_source_lane.terms[0].relation_value_id, tap);
+  EXPECT_EQ(left_false_source_lane.terms[0].coefficient, 1);
+  EXPECT_EQ(left_false_source_lane.terms[1].value_id, lane);
+  EXPECT_EQ(left_false_source_lane.terms[1].coefficient, 1);
+  loom_symbolic_expr_t zero = {0};
+  loom_symbolic_expr_constant(0, &zero);
+  loom_symbolic_proof_result_t left_false_proof = LOOM_SYMBOLIC_PROOF_UNKNOWN;
+  IREE_ASSERT_OK(loom_symbolic_expr_prove_le(
+      &expression_context_, &zero, &left_false_source_lane, &left_false_proof));
+  EXPECT_EQ(left_false_proof, LOOM_SYMBOLIC_PROOF_TRUE);
+  expression_context_.condition_facts = nullptr;
+  expression_context_.condition_proof_depth = 0;
+  loom_symbolic_expr_context_reset(&expression_context_);
+
+  loom_symbolic_proof_result_t source_lower_proof = LOOM_SYMBOLIC_PROOF_UNKNOWN;
+  IREE_ASSERT_OK(loom_symbolic_expr_prove_le(
+      &expression_context_, &zero, &source_lane, &source_lower_proof));
+  EXPECT_EQ(source_lower_proof, LOOM_SYMBOLIC_PROOF_TRUE);
+
+  loom_condition_integer_relation_t relation_storage[16];
+  loom_condition_fact_set_t false_edge_facts;
+  loom_condition_fact_set_initialize(
+      relation_storage, IREE_ARRAYSIZE(relation_storage), &false_edge_facts);
+  ASSERT_TRUE(loom_condition_facts_query(
+      module_, &fact_table_, loom_index_cmp_result(left_edge_cmp_op),
+      /*assumed_truth=*/false, &false_edge_facts));
+  ASSERT_TRUE(loom_condition_facts_query_into(
+      module_, &fact_table_, loom_index_cmp_result(right_edge_cmp_op),
+      /*assumed_truth=*/false, &false_edge_facts));
+  loom_value_facts_t lane_false_edge_facts =
+      loom_value_fact_table_lookup(&fact_table_, lane);
+  EXPECT_TRUE(loom_condition_fact_set_apply_to_value_facts(
+      &false_edge_facts, &fact_table_, lane, &lane_false_edge_facts));
+  EXPECT_EQ(lane_false_edge_facts.range_lo, 1);
+  EXPECT_EQ(lane_false_edge_facts.range_hi, 1022);
+
+  loom_symbolic_expr_t input_lane = {0};
+  IREE_ASSERT_OK(loom_symbolic_expr_from_value(
+      &expression_context_, loom_index_div_result(input_lane_op), &input_lane));
+
+  loom_symbolic_proof_result_t lower_proof = LOOM_SYMBOLIC_PROOF_UNKNOWN;
+  IREE_ASSERT_OK(loom_symbolic_expr_prove_le(&expression_context_, &zero,
+                                             &input_lane, &lower_proof));
+  EXPECT_EQ(lower_proof, LOOM_SYMBOLIC_PROOF_TRUE);
+
+  loom_symbolic_expr_t one = {0};
+  loom_symbolic_expr_constant(1, &one);
+  loom_symbolic_expr_t exclusive_end = {0};
+  IREE_ASSERT_OK(loom_symbolic_expr_add(&expression_context_, &input_lane, &one,
+                                        &exclusive_end));
+  loom_symbolic_expr_t view_bound = {0};
+  loom_symbolic_expr_constant(512, &view_bound);
+  loom_symbolic_proof_result_t upper_proof = LOOM_SYMBOLIC_PROOF_UNKNOWN;
+  IREE_ASSERT_OK(loom_symbolic_expr_prove_le(
+      &expression_context_, &exclusive_end, &view_bound, &upper_proof));
+  EXPECT_EQ(upper_proof, LOOM_SYMBOLIC_PROOF_TRUE);
 }
 
 }  // namespace

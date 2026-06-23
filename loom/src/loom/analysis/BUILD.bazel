@@ -592,6 +592,7 @@ loom_cc_library(
     srcs = ["symbolic_expr.c"],
     hdrs = ["symbolic_expr.h"],
     deps = [
+        ":condition_facts",
         ":integer_relation",
         "//loom/src/loom/ir",
         "//loom/src/loom/ir:facts",
@@ -675,6 +676,7 @@ loom_cc_test(
     name = "symbolic_expr_test",
     srcs = ["symbolic_expr_test.cc"],
     deps = [
+        ":condition_facts",
         ":symbolic_expr",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",

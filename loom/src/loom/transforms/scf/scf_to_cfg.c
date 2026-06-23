@@ -448,7 +448,7 @@ static iree_status_t loom_scf_to_cfg_lower_if(loom_scf_to_cfg_state_t* state,
 // the structured source, but printing them after CFG lowering would obscure the
 // control flow without helping target address legality.
 #define LOOM_SCF_TO_CFG_MATERIALIZED_IV_RANGE_MAX UINT32_MAX
-#define LOOM_SCF_TO_CFG_FOR_IV_PREDICATE_CAPACITY 2
+#define LOOM_SCF_TO_CFG_FOR_IV_PREDICATE_CAPACITY 4
 
 static uint16_t loom_scf_to_cfg_for_iv_predicates_from_facts(
     loom_value_id_t value, loom_value_facts_t facts,
@@ -499,6 +499,73 @@ static bool loom_scf_to_cfg_for_iv_facts_are_materializable(
                                                       predicates) > 0;
 }
 
+static bool loom_scf_to_cfg_value_has_exact_integer_facts(
+    loom_value_fact_table_t* fact_table, loom_value_id_t value) {
+  if (!fact_table || value == LOOM_VALUE_ID_INVALID) return false;
+  int64_t exact_value = 0;
+  return loom_value_facts_as_exact_i64(
+      loom_value_fact_table_lookup(fact_table, value), &exact_value);
+}
+
+static bool loom_scf_to_cfg_for_iv_bound_predicate_is_needed(
+    loom_value_fact_table_t* fact_table, loom_value_id_t bound) {
+  return bound != LOOM_VALUE_ID_INVALID &&
+         !loom_scf_to_cfg_value_has_exact_integer_facts(fact_table, bound);
+}
+
+static uint16_t loom_scf_to_cfg_for_iv_bound_predicate_count(
+    loom_value_fact_table_t* fact_table, loom_value_id_t lower_bound,
+    loom_value_id_t upper_bound) {
+  uint16_t count = 0;
+  if (loom_scf_to_cfg_for_iv_bound_predicate_is_needed(fact_table,
+                                                       lower_bound)) {
+    ++count;
+  }
+  if (loom_scf_to_cfg_for_iv_bound_predicate_is_needed(fact_table,
+                                                       upper_bound)) {
+    ++count;
+  }
+  return count;
+}
+
+static uint16_t loom_scf_to_cfg_for_iv_bound_predicates(
+    loom_value_fact_table_t* fact_table, loom_value_id_t value,
+    loom_value_id_t lower_bound, loom_value_id_t upper_bound,
+    loom_predicate_t* predicates) {
+  if (value == LOOM_VALUE_ID_INVALID) return 0;
+  uint16_t count = 0;
+  if (loom_scf_to_cfg_for_iv_bound_predicate_is_needed(fact_table,
+                                                       lower_bound)) {
+    predicates[count++] = (loom_predicate_t){
+        .kind = LOOM_PREDICATE_GE,
+        .arg_count = 2,
+        .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_VALUE,
+                     LOOM_PRED_ARG_NONE},
+        .args = {value, lower_bound, 0},
+    };
+  }
+  if (loom_scf_to_cfg_for_iv_bound_predicate_is_needed(fact_table,
+                                                       upper_bound)) {
+    predicates[count++] = (loom_predicate_t){
+        .kind = LOOM_PREDICATE_LT,
+        .arg_count = 2,
+        .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_VALUE,
+                     LOOM_PRED_ARG_NONE},
+        .args = {value, upper_bound, 0},
+    };
+  }
+  return count;
+}
+
+static bool loom_scf_to_cfg_for_iv_assume_is_materializable(
+    loom_value_fact_table_t* fact_table, loom_op_t* op,
+    loom_value_facts_t facts) {
+  if (loom_scf_to_cfg_for_iv_facts_are_materializable(facts)) return true;
+  return loom_scf_to_cfg_for_iv_bound_predicate_count(
+             fact_table, loom_scf_for_lower_bound(op),
+             loom_scf_for_upper_bound(op)) > 0;
+}
+
 static iree_status_t loom_scf_to_cfg_define_for_header_args(
     loom_scf_to_cfg_state_t* state, loom_op_t* op, loom_block_t* header_block,
     loom_block_t* body_source_block, bool reserve_iv_name_for_assume,
@@ -534,6 +601,9 @@ static iree_status_t loom_scf_to_cfg_build_for_iv_assume(
   loom_predicate_t predicate_storage[LOOM_SCF_TO_CFG_FOR_IV_PREDICATE_CAPACITY];
   uint16_t predicate_count = loom_scf_to_cfg_for_iv_predicates_from_facts(
       header_iv, original_iv_facts, predicate_storage);
+  predicate_count += loom_scf_to_cfg_for_iv_bound_predicates(
+      state->fact_table, header_iv, loom_scf_for_lower_bound(op),
+      loom_scf_for_upper_bound(op), predicate_storage + predicate_count);
   if (predicate_count == 0) {
     return iree_ok_status();
   }
@@ -594,7 +664,8 @@ static iree_status_t loom_scf_to_cfg_lower_for(loom_scf_to_cfg_state_t* state,
           : loom_value_facts_unknown();
   bool reserve_iv_name_for_assume =
       original_iv_name_id != LOOM_STRING_ID_INVALID &&
-      loom_scf_to_cfg_for_iv_facts_are_materializable(original_iv_facts);
+      loom_scf_to_cfg_for_iv_assume_is_materializable(state->fact_table, op,
+                                                      original_iv_facts);
 
   loom_block_t* source_block = op->parent_block;
   loom_scf_to_cfg_block_insertion_t insertion =

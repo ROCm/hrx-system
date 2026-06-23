@@ -119,38 +119,41 @@ func.def target(@test_target) @scalarizes_dynamic_rank2_mma_store(%m: index, %n:
   %95 = index.constant 1 : index
   cfg.br ^_bb1(%94: index)
 ^_bb1(%170: index):
-  %171 = index.cmp slt, %170, %m : index
-  cfg.cond_br %171, ^_bb2, ^_bb10
+  %172 = index.cmp slt, %170, %m : index
+  cfg.cond_br %172, ^_bb2, ^_bb10
 ^_bb2:
+  %171 = index.assume %170 [lt(%170, %m)] : index
   %97 = index.constant 0 : index
   %98 = index.constant 1 : index
   cfg.br ^_bb3(%97: index)
-^_bb3(%173: index):
-  %174 = index.cmp slt, %173, %n : index
-  cfg.cond_br %174, ^_bb4, ^_bb9
+^_bb3(%174: index):
+  %176 = index.cmp slt, %174, %n : index
+  cfg.cond_br %176, ^_bb4, ^_bb9
 ^_bb4:
-  %100 = view.load %init_view[%170, %173] : view<[%m]x[%n]xf32, %layout> -> f32
+  %175 = index.assume %174 [lt(%174, %n)] : index
+  %100 = view.load %init_view[%171, %175] : view<[%m]x[%n]xf32, %layout> -> f32
   %101 = index.constant 0 : index
   %102 = index.constant 1 : index
   cfg.br ^_bb5(%101: index, %100: f32)
-^_bb5(%177: index, %178: f32):
-  %179 = index.cmp slt, %177, %k : index
-  cfg.cond_br %179, ^_bb6, ^_bb7
+^_bb5(%179: index, %180: f32):
+  %182 = index.cmp slt, %179, %k : index
+  cfg.cond_br %182, ^_bb6, ^_bb7
 ^_bb6:
-  %106 = view.load %lhs_view[%170, %177] : view<[%m]x[%k]xf32, %layout> -> f32
-  %107 = view.load %rhs_view[%177, %173] : view<[%k]x[%n]xf32, %layout> -> f32
-  %108 = scalar.fmaf %106, %107, %178 : f32
-  %180 = index.add %177, %102 : index
-  cfg.br ^_bb5(%180: index, %108: f32)
+  %181 = index.assume %179 [lt(%179, %k)] : index
+  %106 = view.load %lhs_view[%171, %181] : view<[%m]x[%k]xf32, %layout> -> f32
+  %107 = view.load %rhs_view[%181, %175] : view<[%k]x[%n]xf32, %layout> -> f32
+  %108 = scalar.fmaf %106, %107, %180 : f32
+  %183 = index.add %181, %102 : index
+  cfg.br ^_bb5(%183: index, %108: f32)
 ^_bb7:
-  cfg.br ^_bb8(%178: f32)
-^_bb8(%176: f32):
-  view.store %176, %out_view[%170, %173] : f32, view<[%m]x[%n]xf32, %layout>
-  %175 = index.add %173, %98 : index
-  cfg.br ^_bb3(%175: index)
+  cfg.br ^_bb8(%180: f32)
+^_bb8(%178: f32):
+  view.store %178, %out_view[%171, %175] : f32, view<[%m]x[%n]xf32, %layout>
+  %177 = index.add %175, %98 : index
+  cfg.br ^_bb3(%177: index)
 ^_bb9:
-  %172 = index.add %170, %95 : index
-  cfg.br ^_bb1(%172: index)
+  %173 = index.add %171, %95 : index
+  cfg.br ^_bb1(%173: index)
 ^_bb10:
   func.return
 }
@@ -163,26 +166,28 @@ func.def target(@test_target) @scalarizes_dynamic_flat_mma_store(%m: index, %n: 
   %109 = index.constant 0 : index
   %110 = index.constant 1 : index
   cfg.br ^_bb1(%109: index)
-^_bb1(%181: index):
-  %182 = index.cmp slt, %181, %mn : index
-  cfg.cond_br %182, ^_bb2, ^_bb7
+^_bb1(%184: index):
+  %186 = index.cmp slt, %184, %mn : index
+  cfg.cond_br %186, ^_bb2, ^_bb7
 ^_bb2:
+  %185 = index.assume %184 [lt(%184, %mn)] : index
   %116 = index.constant 0 : index
   %117 = index.constant 1 : index
   cfg.br ^_bb3(%116: index, %init0: f32)
-^_bb3(%185: index, %186: f32):
-  %187 = index.cmp slt, %185, %k : index
-  cfg.cond_br %187, ^_bb4, ^_bb5
+^_bb3(%189: index, %190: f32):
+  %192 = index.cmp slt, %189, %k : index
+  cfg.cond_br %192, ^_bb4, ^_bb5
 ^_bb4:
-  %125 = scalar.fmaf %lhs0, %rhs0, %186 : f32
-  %188 = index.add %185, %117 : index
-  cfg.br ^_bb3(%188: index, %125: f32)
+  %191 = index.assume %189 [lt(%189, %k)] : index
+  %125 = scalar.fmaf %lhs0, %rhs0, %190 : f32
+  %193 = index.add %191, %117 : index
+  cfg.br ^_bb3(%193: index, %125: f32)
 ^_bb5:
-  cfg.br ^_bb6(%186: f32)
-^_bb6(%184: f32):
-  view.store %184, %out_view[%181] : f32, view<[%mn]xf32, %layout>
-  %183 = index.add %181, %110 : index
-  cfg.br ^_bb1(%183: index)
+  cfg.br ^_bb6(%190: f32)
+^_bb6(%188: f32):
+  view.store %188, %out_view[%185] : f32, view<[%mn]xf32, %layout>
+  %187 = index.add %185, %110 : index
+  cfg.br ^_bb1(%187: index)
 ^_bb7:
   func.return
 }
@@ -195,41 +200,41 @@ func.def target(@test_target) @scalarizes_dense_flat_mma_fragment_store(%lhs0: f
   %127 = index.constant 2 : index
   %128 = index.constant 1 : index
   cfg.br ^_bb1(%126: index)
-^_bb1(%189: index):
-  %191 = index.cmp slt, %189, %127 : index
-  cfg.cond_br %191, ^_bb2, ^_bb10
+^_bb1(%194: index):
+  %196 = index.cmp slt, %194, %127 : index
+  cfg.cond_br %196, ^_bb2, ^_bb10
 ^_bb2:
-  %190 = index.assume %189 [range(%189, 0, 1)] : index
+  %195 = index.assume %194 [range(%194, 0, 1)] : index
   %130 = index.constant 0 : index
   %131 = index.constant 2 : index
   %132 = index.constant 1 : index
   cfg.br ^_bb3(%130: index)
-^_bb3(%193: index):
-  %195 = index.cmp slt, %193, %131 : index
-  cfg.cond_br %195, ^_bb4, ^_bb9
+^_bb3(%198: index):
+  %200 = index.cmp slt, %198, %131 : index
+  cfg.cond_br %200, ^_bb4, ^_bb9
 ^_bb4:
-  %194 = index.assume %193 [range(%193, 0, 1)] : index
+  %199 = index.assume %198 [range(%198, 0, 1)] : index
   %137 = index.constant 0 : index
   %138 = index.constant 2 : index
   %139 = index.constant 1 : index
   cfg.br ^_bb5(%137: index, %init0: f32)
-^_bb5(%198: index, %199: f32):
-  %201 = index.cmp slt, %198, %138 : index
-  cfg.cond_br %201, ^_bb6, ^_bb7
+^_bb5(%203: index, %204: f32):
+  %206 = index.cmp slt, %203, %138 : index
+  cfg.cond_br %206, ^_bb6, ^_bb7
 ^_bb6:
-  %200 = index.assume %198 [range(%198, 0, 1)] : index
-  %149 = scalar.fmaf %lhs0, %rhs0, %199 : f32
-  %202 = index.add %200, %139 : index
-  cfg.br ^_bb5(%202: index, %149: f32)
+  %205 = index.assume %203 [range(%203, 0, 1)] : index
+  %149 = scalar.fmaf %lhs0, %rhs0, %204 : f32
+  %207 = index.add %205, %139 : index
+  cfg.br ^_bb5(%207: index, %149: f32)
 ^_bb7:
-  cfg.br ^_bb8(%199: f32)
-^_bb8(%197: f32):
-  view.store %197, %out_view[%190, %194] : f32, view<2x2xf32, %layout>
-  %196 = index.add %194, %132 : index
-  cfg.br ^_bb3(%196: index)
+  cfg.br ^_bb8(%204: f32)
+^_bb8(%202: f32):
+  view.store %202, %out_view[%195, %199] : f32, view<2x2xf32, %layout>
+  %201 = index.add %199, %132 : index
+  cfg.br ^_bb3(%201: index)
 ^_bb9:
-  %192 = index.add %190, %128 : index
-  cfg.br ^_bb1(%192: index)
+  %197 = index.add %195, %128 : index
+  cfg.br ^_bb1(%197: index)
 ^_bb10:
   func.return
 }
@@ -245,46 +250,46 @@ func.def target(@test_target) @scalarizes_target_shaped_fragment_mma_store(%lhs_
   %151 = index.constant 16 : index
   %152 = index.constant 1 : index
   cfg.br ^_bb1(%150: index)
-^_bb1(%203: index):
-  %205 = index.cmp slt, %203, %151 : index
-  cfg.cond_br %205, ^_bb2, ^_bb10
+^_bb1(%208: index):
+  %210 = index.cmp slt, %208, %151 : index
+  cfg.cond_br %210, ^_bb2, ^_bb10
 ^_bb2:
-  %204 = index.assume %203 [range(%203, 0, 15)] : index
+  %209 = index.assume %208 [range(%208, 0, 15)] : index
   %154 = index.constant 0 : index
   %155 = index.constant 16 : index
   %156 = index.constant 1 : index
   cfg.br ^_bb3(%154: index)
-^_bb3(%207: index):
-  %209 = index.cmp slt, %207, %155 : index
-  cfg.cond_br %209, ^_bb4, ^_bb9
+^_bb3(%212: index):
+  %214 = index.cmp slt, %212, %155 : index
+  cfg.cond_br %214, ^_bb4, ^_bb9
 ^_bb4:
-  %208 = index.assume %207 [range(%207, 0, 15)] : index
-  %158 = view.load %init_view[%204, %208] : view<16x16xf32, %layout> -> f32
+  %213 = index.assume %212 [range(%212, 0, 15)] : index
+  %158 = view.load %init_view[%209, %213] : view<16x16xf32, %layout> -> f32
   %159 = index.constant 0 : index
   %160 = index.constant 16 : index
   %161 = index.constant 1 : index
   cfg.br ^_bb5(%159: index, %158: f32)
-^_bb5(%212: index, %213: f32):
-  %215 = index.cmp slt, %212, %160 : index
-  cfg.cond_br %215, ^_bb6, ^_bb7
+^_bb5(%217: index, %218: f32):
+  %220 = index.cmp slt, %217, %160 : index
+  cfg.cond_br %220, ^_bb6, ^_bb7
 ^_bb6:
-  %214 = index.assume %212 [range(%212, 0, 15)] : index
-  %165 = view.load %lhs_view[%204, %214] : view<16x16xf16, %layout> -> f16
-  %166 = view.load %rhs_view[%214, %208] : view<16x16xf16, %layout> -> f16
+  %219 = index.assume %217 [range(%217, 0, 15)] : index
+  %165 = view.load %lhs_view[%209, %219] : view<16x16xf16, %layout> -> f16
+  %166 = view.load %rhs_view[%219, %213] : view<16x16xf16, %layout> -> f16
   %167 = scalar.extf %165 : f16 to f32
   %168 = scalar.extf %166 : f16 to f32
-  %169 = scalar.fmaf %167, %168, %213 : f32
-  %216 = index.add %214, %161 : index
-  cfg.br ^_bb5(%216: index, %169: f32)
+  %169 = scalar.fmaf %167, %168, %218 : f32
+  %221 = index.add %219, %161 : index
+  cfg.br ^_bb5(%221: index, %169: f32)
 ^_bb7:
-  cfg.br ^_bb8(%213: f32)
-^_bb8(%211: f32):
-  view.store %211, %out_view[%204, %208] : f32, view<16x16xf32, %layout>
-  %210 = index.add %208, %156 : index
-  cfg.br ^_bb3(%210: index)
+  cfg.br ^_bb8(%218: f32)
+^_bb8(%216: f32):
+  view.store %216, %out_view[%209, %213] : f32, view<16x16xf32, %layout>
+  %215 = index.add %213, %156 : index
+  cfg.br ^_bb3(%215: index)
 ^_bb9:
-  %206 = index.add %204, %152 : index
-  cfg.br ^_bb1(%206: index)
+  %211 = index.add %209, %152 : index
+  cfg.br ^_bb1(%211: index)
 ^_bb10:
   func.return
 }

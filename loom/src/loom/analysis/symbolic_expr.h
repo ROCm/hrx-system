@@ -40,6 +40,7 @@ extern "C" {
 #define LOOM_SYMBOLIC_EXPR_DEFAULT_TERM_LIMIT 64
 
 typedef struct loom_symbolic_expr_memo_entry_t loom_symbolic_expr_memo_entry_t;
+typedef struct loom_condition_fact_set_t loom_condition_fact_set_t;
 
 // A single coefficient times an SSA value.
 typedef struct loom_symbolic_term_t {
@@ -86,6 +87,9 @@ typedef struct loom_symbolic_expr_context_t {
   // Dense facts used to seed ranges, exact constants, and divisibility.
   const loom_value_fact_table_t* fact_table;
 
+  // Optional edge-local facts applied during branch-sensitive proofs.
+  const loom_condition_fact_set_t* condition_facts;
+
   // Arena used for memo entries, retained term arrays, and scratch growth.
   iree_arena_allocator_t* arena;
 
@@ -103,6 +107,9 @@ typedef struct loom_symbolic_expr_context_t {
 
   // Allocated scratch term count.
   iree_host_size_t scratch_term_capacity;
+
+  // Recursive select-case proof depth, capped to keep proof work bounded.
+  uint8_t condition_proof_depth;
 } loom_symbolic_expr_context_t;
 
 // Tri-state proof result for symbolic comparisons.

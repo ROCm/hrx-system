@@ -303,6 +303,71 @@ low.kernel.def target(@target) workgroup_size(31, 1, 1) @index_shli_previous_row
 // ====
 
 amdgpu.target<gfx1100> @target
+kernel.def target(@target) @index_edge_loop_dynamic_lower_bound_global_b32() {
+  %unit = index.constant 1 : index
+  %lane_count = index.constant 1024 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%lane_count, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %base_offset = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %two = index.constant 2 : index
+  %three = index.constant 3 : index
+  %last_lane = index.constant 1023 : index
+  %is_left_edge = index.cmp eq, %lane, %zero : index
+  %begin = scf.select %is_left_edge, %one, %zero : index
+  %is_right_edge = index.cmp eq, %lane, %last_lane : index
+  %end = scf.select %is_right_edge, %two, %three : index
+  %input_view = buffer.view %input[%base_offset] : buffer -> view<512xi32, #dense>
+  %output_view = buffer.view %output[%base_offset] : buffer -> view<1024xi32, #dense>
+  scf.for %tap = [%begin to %end step %one] {
+    %shifted = index.add %lane, %tap : index
+    %source_lane = index.sub %shifted, %one : index
+    %input_lane = index.div %source_lane, %two : index
+    %loaded = vector.load %input_view[%input_lane] : view<512xi32, #dense> -> vector<1xi32>
+    vector.store %loaded, %output_view[%lane] : vector<1xi32>, view<1024xi32, #dense>
+  }
+  kernel.return
+}
+
+// ----
+low.kernel.def target(@target) workgroup_size(1024, 1, 1) @index_edge_loop_dynamic_lower_bound_global_b32() asm<amdgpu.rdna3.core> {
+  %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 2048} : reg<amdgpu.sgpr x2>
+  %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 4096} : reg<amdgpu.sgpr x2>
+  %is_left_edge = v_cmp_eq_i32_src1_inline %lane {rhs = 0}
+  %begin = v_cndmask_b32_src0_lit_src1_inline %is_left_edge {imm32 = 0, true_value = 1}
+  %38 = v_mov_b32 1023
+  %is_right_edge = v_cmp_eq_i32 %lane, %38
+  %end = v_cndmask_b32_src0_lit_src1_inline %is_right_edge {imm32 = 3, true_value = 2}
+  low.br ^_bb3
+^_bb1(%tap: reg<amdgpu.vgpr>):
+  %41 = v_cmp_lt_i32 %tap, %end
+  %43, %44 = s_and_saveexec_b64 %41
+  low.cond_br %44, ^_bb2, ^_bb4 : reg<amdgpu.scc>
+^_bb2:
+  %shifted = v_add_u32 %lane, %tap
+  %46 = v_mov_b32 1
+  %source_lane = v_sub_nc_u32 %shifted, %46
+  %input_lane = v_lshrrev_b32_lit %source_lane, 1
+  %49 = v_lshlrev_b32_src0_inline %input_lane, 2
+  %loaded = global_load_b32_saddr %49, %input_view
+  %51 = v_lshlrev_b32_src0_inline %lane, 2
+  global_store_b32_saddr %51, %loaded, %output_view
+  %53 = v_add_u32 %tap, %46
+  low.br ^_bb1(%53: reg<amdgpu.vgpr>)
+^_bb3:
+  %42 = s_mov_b64_exec_read
+  low.br ^_bb1(%begin: reg<amdgpu.vgpr>)
+^_bb4:
+  s_mov_b64_exec %42
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
 kernel.def target(@target) @index_div_rem_power_of_two_global_b32() {
   %unit = index.constant 1 : index
   %lane_count = index.constant 32 : index

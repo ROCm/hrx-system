@@ -7,6 +7,7 @@
 #include "loom/codegen/low/lower/contract_query.h"
 
 #include "iree/base/internal/arena.h"
+#include "loom/analysis/symbolic_expr.h"
 #include "loom/error/error_catalog.h"
 #include "loom/ir/context.h"
 #include "loom/ops/vector/ops.h"
@@ -351,6 +352,15 @@ iree_status_t loom_low_lower_query_target_contract(
     return iree_ok_status();
   }
 
+  loom_symbolic_expr_context_t expression_context;
+  loom_symbolic_expr_context_t* expression_context_ptr = NULL;
+  if (environment->arena && environment->fact_table) {
+    loom_symbolic_expr_context_initialize(
+        environment->module, environment->fact_table, environment->arena,
+        &expression_context);
+    expression_context_ptr = &expression_context;
+  }
+
   const loom_low_lower_rule_match_context_t match_context = {
       .module = environment->module,
       .function = environment->function,
@@ -361,6 +371,7 @@ iree_status_t loom_low_lower_query_target_contract(
       .can_materialize = options->can_materialize,
       .descriptor_ref = options->descriptor_ref,
       .fact_table = environment->fact_table,
+      .symbolic_expr_context = expression_context_ptr,
       .flags = LOOM_LOW_LOWER_RULE_MATCH_FLAG_CONTRACT_ONLY,
   };
 
