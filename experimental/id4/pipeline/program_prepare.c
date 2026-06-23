@@ -190,6 +190,7 @@ static iree_status_t id4_pipeline_program_prepare_kernel(
   prepare_options.source_identifier = module->source_identifier;
   prepare_options.source_contents = module->source_contents;
   prepare_options.module_path = kernel_plan->module_path;
+  prepare_options.function_name = kernel_plan->function_name;
   prepare_options.config_binding_count = kernel_plan->config_binding_count;
   prepare_options.config_bindings = kernel_plan->config_bindings;
   prepare_options.diagnostic_artifact_flags =

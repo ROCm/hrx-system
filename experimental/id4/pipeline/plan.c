@@ -1364,6 +1364,235 @@ static iree_status_t id4_pipeline_plan_append_shape_json(
   return iree_string_builder_append_cstring(builder, "]");
 }
 
+static iree_status_t id4_pipeline_plan_append_program_shape_json(
+    iree_string_builder_t* builder, id4_pipeline_program_shape_t shape) {
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "["));
+  for (uint32_t i = 0; i < shape.rank; ++i) {
+    if (i != 0) {
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, ","));
+    }
+    IREE_RETURN_IF_ERROR(
+        iree_string_builder_append_format(builder, "%" PRIu64, shape.dims[i]));
+  }
+  return iree_string_builder_append_cstring(builder, "]");
+}
+
+static iree_status_t id4_pipeline_plan_append_u32_array3_json(
+    iree_string_builder_t* builder, const uint32_t values[3]) {
+  return iree_string_builder_append_format(builder, "[%u,%u,%u]", values[0],
+                                           values[1], values[2]);
+}
+
+static iree_string_view_t id4_pipeline_plan_program_dtype_format(
+    id4_pipeline_program_dtype_t dtype) {
+  switch (dtype) {
+    case ID4_PIPELINE_PROGRAM_DTYPE_F32:
+      return IREE_SV("f32");
+    case ID4_PIPELINE_PROGRAM_DTYPE_F16:
+      return IREE_SV("f16");
+    case ID4_PIPELINE_PROGRAM_DTYPE_BF16:
+      return IREE_SV("bf16");
+    case ID4_PIPELINE_PROGRAM_DTYPE_I32:
+      return IREE_SV("i32");
+    case ID4_PIPELINE_PROGRAM_DTYPE_U32:
+      return IREE_SV("u32");
+    default:
+      return IREE_SV("invalid");
+  }
+}
+
+static iree_string_view_t id4_pipeline_plan_program_tensor_access_format(
+    id4_pipeline_program_tensor_access_flags_t access) {
+  const id4_pipeline_program_tensor_access_flags_t read_write =
+      ID4_PIPELINE_PROGRAM_TENSOR_ACCESS_READ |
+      ID4_PIPELINE_PROGRAM_TENSOR_ACCESS_WRITE;
+  if (iree_all_bits_set(access, read_write)) return IREE_SV("read_write");
+  if (iree_all_bits_set(access, ID4_PIPELINE_PROGRAM_TENSOR_ACCESS_READ)) {
+    return IREE_SV("read");
+  }
+  if (iree_all_bits_set(access, ID4_PIPELINE_PROGRAM_TENSOR_ACCESS_WRITE)) {
+    return IREE_SV("write");
+  }
+  return IREE_SV("invalid");
+}
+
+static iree_status_t id4_pipeline_plan_append_config_bindings_json(
+    iree_string_builder_t* builder, iree_host_size_t binding_count,
+    const id4_pipeline_plan_config_binding_t* bindings) {
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "["));
+  for (iree_host_size_t i = 0; i < binding_count; ++i) {
+    if (i != 0) {
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, ","));
+    }
+    const id4_pipeline_plan_config_binding_t* binding = &bindings[i];
+    IREE_RETURN_IF_ERROR(
+        iree_string_builder_append_cstring(builder, "{\"key\":"));
+    IREE_RETURN_IF_ERROR(
+        id4_pipeline_plan_append_json_string(builder, binding->key));
+    IREE_RETURN_IF_ERROR(
+        iree_string_builder_append_cstring(builder, ",\"value\":"));
+    IREE_RETURN_IF_ERROR(
+        id4_pipeline_plan_append_json_string(builder, binding->value));
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "}"));
+  }
+  return iree_string_builder_append_cstring(builder, "]");
+}
+
+static bool id4_pipeline_plan_has_captured_tap(const id4_pipeline_plan_t* plan,
+                                               iree_string_view_t tap_name) {
+  for (iree_host_size_t i = 0; i < plan->diagnostic_tap_count; ++i) {
+    if (iree_string_view_equal(plan->diagnostic_taps[i].name, tap_name)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static iree_host_size_t id4_pipeline_plan_source_program_dispatch_count(
+    const id4_pipeline_program_t* program) {
+  iree_host_size_t dispatch_count = 0;
+  const iree_host_size_t operation_count =
+      id4_pipeline_program_operation_count(program);
+  for (iree_host_size_t i = 0; i < operation_count; ++i) {
+    const id4_pipeline_program_op_t* op =
+        id4_pipeline_program_operation_at(program, i);
+    if (op && op->kind == ID4_PIPELINE_PROGRAM_OP_KIND_DISPATCH_LOOM) {
+      ++dispatch_count;
+    }
+  }
+  return dispatch_count;
+}
+
+static iree_status_t id4_pipeline_plan_append_program_binding_json(
+    const id4_pipeline_program_t* program, iree_string_builder_t* builder,
+    iree_host_size_t binding_index,
+    const id4_pipeline_program_dispatch_binding_t* binding) {
+  const id4_pipeline_program_tensor_record_t* tensor =
+      id4_pipeline_program_tensor_at(program, binding->tensor.ordinal);
+  if (!tensor) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "program dispatch binding tensor %u is missing",
+                            binding->tensor.ordinal);
+  }
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+      builder, "{\"index\":%" PRIhsz ",\"tensor_ordinal\":%u,\"name\":",
+      binding_index, binding->tensor.ordinal));
+  IREE_RETURN_IF_ERROR(
+      id4_pipeline_plan_append_json_string(builder, tensor->name));
+  IREE_RETURN_IF_ERROR(
+      iree_string_builder_append_cstring(builder, ",\"access\":"));
+  IREE_RETURN_IF_ERROR(id4_pipeline_plan_append_json_string(
+      builder,
+      id4_pipeline_plan_program_tensor_access_format(binding->access)));
+  IREE_RETURN_IF_ERROR(
+      iree_string_builder_append_cstring(builder, ",\"dtype\":"));
+  IREE_RETURN_IF_ERROR(id4_pipeline_plan_append_json_string(
+      builder, id4_pipeline_plan_program_dtype_format(tensor->dtype)));
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+      builder, ",\"byte_length\":%" PRIu64 ",\"shape\":",
+      (uint64_t)tensor->byte_length));
+  IREE_RETURN_IF_ERROR(
+      id4_pipeline_plan_append_program_shape_json(builder, tensor->shape));
+  return iree_string_builder_append_cstring(builder, "}");
+}
+
+static iree_status_t id4_pipeline_plan_append_program_dispatch_json(
+    const id4_pipeline_program_t* program, iree_string_builder_t* builder,
+    const id4_pipeline_program_op_t* op, iree_host_size_t dispatch_ordinal,
+    iree_host_size_t region_operation_ordinal) {
+  const id4_pipeline_program_dispatch_loom_op_t* dispatch =
+      &op->payload.dispatch_loom;
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+      builder,
+      "{\"dispatch_ordinal\":%" PRIhsz ",\"operation_ordinal\":%" PRIhsz
+      ",\"region_id\":0,\"region_operation_ordinal\":%" PRIhsz ",\"name\":",
+      dispatch_ordinal, op->ordinal, region_operation_ordinal));
+  IREE_RETURN_IF_ERROR(
+      id4_pipeline_plan_append_json_string(builder, dispatch->name));
+  IREE_RETURN_IF_ERROR(
+      iree_string_builder_append_cstring(builder, ",\"module_path\":"));
+  IREE_RETURN_IF_ERROR(id4_pipeline_plan_append_json_string(
+      builder, dispatch->kernel.module_path));
+  IREE_RETURN_IF_ERROR(
+      iree_string_builder_append_cstring(builder, ",\"function_name\":"));
+  IREE_RETURN_IF_ERROR(id4_pipeline_plan_append_json_string(
+      builder, dispatch->kernel.function_name));
+  IREE_RETURN_IF_ERROR(
+      iree_string_builder_append_cstring(builder, ",\"workgroup_count\":"));
+  IREE_RETURN_IF_ERROR(id4_pipeline_plan_append_u32_array3_json(
+      builder, dispatch->dispatch_config.workgroup_count));
+  IREE_RETURN_IF_ERROR(
+      iree_string_builder_append_cstring(builder, ",\"workgroup_size\":"));
+  IREE_RETURN_IF_ERROR(id4_pipeline_plan_append_u32_array3_json(
+      builder, dispatch->dispatch_config.workgroup_size));
+  IREE_RETURN_IF_ERROR(
+      iree_string_builder_append_cstring(builder, ",\"config_bindings\":"));
+  IREE_RETURN_IF_ERROR(id4_pipeline_plan_append_config_bindings_json(
+      builder, dispatch->config_binding_count, dispatch->config_bindings));
+  IREE_RETURN_IF_ERROR(
+      iree_string_builder_append_cstring(builder, ",\"bindings\":["));
+  for (iree_host_size_t i = 0; i < dispatch->binding_count; ++i) {
+    if (i != 0) {
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, ","));
+    }
+    IREE_RETURN_IF_ERROR(id4_pipeline_plan_append_program_binding_json(
+        program, builder, i, &dispatch->bindings[i]));
+  }
+  return iree_string_builder_append_cstring(builder, "]}");
+}
+
+static iree_status_t id4_pipeline_plan_append_program_json(
+    const id4_pipeline_plan_t* plan, iree_string_builder_t* builder) {
+  const id4_pipeline_program_t* program = plan->source_program;
+  if (!program) return iree_string_builder_append_cstring(builder, "null");
+
+  const iree_host_size_t operation_count =
+      id4_pipeline_program_operation_count(program);
+  IREE_RETURN_IF_ERROR(
+      iree_string_builder_append_cstring(builder, "{\"name\":"));
+  IREE_RETURN_IF_ERROR(id4_pipeline_plan_append_json_string(
+      builder, id4_pipeline_program_name(program)));
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+      builder,
+      ",\"operation_count\":%" PRIhsz ",\"dispatch_count\":%" PRIhsz
+      ",\"dispatches\":[",
+      operation_count,
+      id4_pipeline_plan_source_program_dispatch_count(program)));
+
+  iree_host_size_t dispatch_ordinal = 0;
+  iree_host_size_t region_operation_ordinal = 0;
+  bool emitted_dispatch = false;
+  for (iree_host_size_t i = 0; i < operation_count; ++i) {
+    const id4_pipeline_program_op_t* op =
+        id4_pipeline_program_operation_at(program, i);
+    if (!op) continue;
+    switch (op->kind) {
+      case ID4_PIPELINE_PROGRAM_OP_KIND_DISPATCH_LOOM:
+        if (emitted_dispatch) {
+          IREE_RETURN_IF_ERROR(
+              iree_string_builder_append_cstring(builder, ","));
+        }
+        IREE_RETURN_IF_ERROR(id4_pipeline_plan_append_program_dispatch_json(
+            program, builder, op, dispatch_ordinal, region_operation_ordinal));
+        emitted_dispatch = true;
+        ++dispatch_ordinal;
+        ++region_operation_ordinal;
+        break;
+      case ID4_PIPELINE_PROGRAM_OP_KIND_BARRIER:
+        ++region_operation_ordinal;
+        break;
+      case ID4_PIPELINE_PROGRAM_OP_KIND_TAP:
+        if (id4_pipeline_plan_has_captured_tap(plan, op->payload.tap.name)) {
+          region_operation_ordinal += 3;
+        }
+        break;
+      default:
+        break;
+    }
+  }
+  return iree_string_builder_append_cstring(builder, "]}");
+}
+
 iree_status_t id4_pipeline_plan_format_json(const id4_pipeline_plan_t* plan,
                                             iree_string_builder_t* builder) {
   IREE_ASSERT_ARGUMENT(plan);
@@ -1543,25 +1772,11 @@ iree_status_t id4_pipeline_plan_format_json(const id4_pipeline_plan_t* plan,
     IREE_RETURN_IF_ERROR(
         id4_pipeline_plan_append_json_string(builder, kernel->function_name));
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-        builder, ",\"placement_id\":%u,\"config_bindings\":[",
-        kernel->placement_id));
-    for (iree_host_size_t j = 0; j < kernel->config_binding_count; ++j) {
-      const id4_pipeline_plan_config_binding_t* binding =
-          &kernel->config_bindings[j];
-      if (j != 0) {
-        IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, ","));
-      }
-      IREE_RETURN_IF_ERROR(
-          iree_string_builder_append_cstring(builder, "{\"key\":"));
-      IREE_RETURN_IF_ERROR(
-          id4_pipeline_plan_append_json_string(builder, binding->key));
-      IREE_RETURN_IF_ERROR(
-          iree_string_builder_append_cstring(builder, ",\"value\":"));
-      IREE_RETURN_IF_ERROR(
-          id4_pipeline_plan_append_json_string(builder, binding->value));
-      IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "}"));
-    }
-    IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "]}"));
+        builder,
+        ",\"placement_id\":%u,\"config_bindings\":", kernel->placement_id));
+    IREE_RETURN_IF_ERROR(id4_pipeline_plan_append_config_bindings_json(
+        builder, kernel->config_binding_count, kernel->config_bindings));
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "}"));
   }
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_cstring(builder, "],\"regions\":["));
@@ -1631,7 +1846,10 @@ iree_status_t id4_pipeline_plan_format_json(const id4_pipeline_plan_t* plan,
     IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "}"));
   }
   IREE_RETURN_IF_ERROR(
-      iree_string_builder_append_cstring(builder, "],\"diagnostic_taps\":["));
+      iree_string_builder_append_cstring(builder, "],\"program\":"));
+  IREE_RETURN_IF_ERROR(id4_pipeline_plan_append_program_json(plan, builder));
+  IREE_RETURN_IF_ERROR(
+      iree_string_builder_append_cstring(builder, ",\"diagnostic_taps\":["));
   for (iree_host_size_t i = 0; i < plan->diagnostic_tap_count; ++i) {
     const id4_pipeline_diagnostic_tap_plan_t* tap = &plan->diagnostic_taps[i];
     if (i != 0) {

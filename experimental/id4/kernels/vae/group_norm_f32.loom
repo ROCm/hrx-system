@@ -6,6 +6,8 @@ config.decl @id4.vae.group_norm.channels_per_group : %value: index where [range(
 config.decl @id4.vae.group_norm.batch_count : %value: index where [range(%value, 1, 1024)]
 config.decl @id4.vae.group_norm.group_element_count : %value: index where [range(%value, 1, 268435456)]
 config.decl @id4.vae.group_norm.output_element_count : %value: index where [range(%value, 1, 268435456)]
+config.decl @id4.vae.group_norm.output_channel_tile_count : %value: index where [range(%value, 1, 1024)]
+config.decl @id4.vae.group_norm.output_tile_element_count : %value: index where [range(%value, 1, 67108864)]
 
 kernel.def export("id4_vae_group_norm_stats_f32") @id4_vae_group_norm_stats_f32() {
   %unit = index.constant 1 : index
@@ -197,6 +199,84 @@ kernel.def export("id4_vae_group_norm_silu_f32") @id4_vae_group_norm_silu_f32() 
   kernel.return
 }
 
+kernel.def export("id4_vae_group_norm_silu_ic4_oc4_f32") @id4_vae_group_norm_silu_ic4_oc4_f32() {
+  %unit = index.constant 1 : index
+  %workgroup_size_x = index.constant 256 : index
+  %tile_element_count = config.get @id4.vae.group_norm.output_tile_element_count : index
+  %rounding = index.sub %workgroup_size_x, %unit : index
+  %rounded = index.add %tile_element_count, %rounding : index
+  %workgroups_x = index.div %rounded, %workgroup_size_x : index
+  kernel.launch.config workgroups(%workgroups_x, %unit, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
+} launch(%input: buffer, %weight: buffer, %bias: buffer, %stats: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %unit = index.constant 1 : index
+  %three = index.constant 3 : index
+  %four = index.constant 4 : index
+  %workgroup = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %workgroup_size_x = index.constant 256 : index
+  %width = config.get @id4.vae.group_norm.width : index
+  %height = config.get @id4.vae.group_norm.height : index
+  %channel_count = config.get @id4.vae.group_norm.channel_count : index
+  %group_count = config.get @id4.vae.group_norm.group_count : index
+  %channels_per_group = config.get @id4.vae.group_norm.channels_per_group : index
+  %batch_count0 = config.get @id4.vae.group_norm.batch_count : index
+  %batch_count = index.assume %batch_count0 [range(%batch_count0, 1, 1)] : index
+  %output_element_count = config.get @id4.vae.group_norm.output_element_count : index
+  %tile_element_count = config.get @id4.vae.group_norm.output_tile_element_count : index
+  %output_channel_tile_count = config.get @id4.vae.group_norm.output_channel_tile_count : index
+  %element_index = index.madd %workgroup, %workgroup_size_x, %lane : index
+  %in_bounds = index.cmp ult, %element_index, %tile_element_count : index
+
+  %input_noalias, %weight_noalias, %bias_noalias, %stats_noalias, %output_noalias = buffer.assume.noalias %input, %weight, %bias, %stats, %output : buffer, buffer, buffer, buffer, buffer
+  %input_global = buffer.assume.memory_space<global> %input_noalias : buffer
+  %weight_global = buffer.assume.memory_space<global> %weight_noalias : buffer
+  %bias_global = buffer.assume.memory_space<global> %bias_noalias : buffer
+  %stats_global = buffer.assume.memory_space<global> %stats_noalias : buffer
+  %output_global = buffer.assume.memory_space<global> %output_noalias : buffer
+  %input_flat_view = buffer.view %input_global[%base] : buffer -> view<[%output_element_count]xf32, #dense>
+  %weight_view = buffer.view %weight_global[%base] : buffer -> view<[%channel_count]xf32, #dense>
+  %bias_view = buffer.view %bias_global[%base] : buffer -> view<[%channel_count]xf32, #dense>
+  %stats_view = buffer.view %stats_global[%base] : buffer -> view<[%batch_count]x[%group_count]x2xf32, #dense>
+  %output_flat_view = buffer.view %output_global[%base] : buffer -> view<[%output_element_count]xf32, #dense>
+
+  scf.if %in_bounds {
+    %x = index.rem %element_index, %width : index
+    %row = index.div %element_index, %width : index
+    %y = index.rem %row, %height : index
+    %plane = index.div %row, %height : index
+    %channel_tile = index.rem %plane, %output_channel_tile_count : index
+    %batch = index.div %plane, %output_channel_tile_count : index
+    %channel = index.mul %channel_tile, %four : index
+    %last_valid_channel = index.sub %channel_count, %three : index
+    %channel_base = index.assume %channel [ge(%channel, 0), lt(%channel, %last_valid_channel)] : index
+    %group = index.div %channel_base, %channels_per_group : index
+    %input_x_row_base = index.mul %x, %height : index
+    %input_pixel_base = index.add %input_x_row_base, %y : index
+    %input_pixel_element_base = index.mul %input_pixel_base, %channel_count : index
+    %input_channel_element_base = index.add %input_pixel_element_base, %channel_base : index
+    %input_batch_element_base = index.mul %input_channel_element_base, %batch_count : index
+    %input_element0 = index.add %input_batch_element_base, %batch : index
+    %last_valid_input_element = index.sub %output_element_count, %three : index
+    %input_element = index.assume %input_element0 [ge(%input_element0, 0), lt(%input_element0, %last_valid_input_element)] : index
+    %input_values = vector.load %input_flat_view[%input_element] : view<[%output_element_count]xf32, #dense> -> vector<4xf32>
+    %weight_values = vector.load %weight_view[%channel_base] : view<[%channel_count]xf32, #dense> -> vector<4xf32>
+    %bias_values = vector.load %bias_view[%channel_base] : view<[%channel_count]xf32, #dense> -> vector<4xf32>
+    %mean = view.load %stats_view[%batch, %group, %zero] : view<[%batch_count]x[%group_count]x2xf32, #dense> -> f32
+    %rstd = view.load %stats_view[%batch, %group, %unit] : view<[%batch_count]x[%group_count]x2xf32, #dense> -> f32
+    %mean_values = vector.splat %mean : vector<4xf32>
+    %rstd_values = vector.splat %rstd : vector<4xf32>
+    %delta = vector.subf<reassoc|nnan|ninf|nsz> %input_values, %mean_values : vector<4xf32>
+    %normalized = vector.mulf<reassoc|nnan|ninf|nsz|contract> %delta, %rstd_values : vector<4xf32>
+    %weighted = vector.mulf<reassoc|nnan|ninf|nsz|contract> %normalized, %weight_values : vector<4xf32>
+    %biased = vector.addf<reassoc|nnan|ninf|nsz> %weighted, %bias_values : vector<4xf32>
+    %output_value = vector.siluf %biased : vector<4xf32>
+    vector.store %output_value, %output_flat_view[%input_element] : vector<4xf32>, view<[%output_element_count]xf32, #dense>
+  }
+  kernel.return
+}
+
 check.case public @id4_vae_group_norm_f32_small_case {
   %input = check.generate.iota offset(1.0) step(1.0) : tensor<2x1x2x1xf32>
   %weight = check.generate.fill value(1.0) : tensor<2xf32>
@@ -220,6 +300,19 @@ check.case public @id4_vae_group_norm_silu_f32_small_case {
   func.call @id4_vae_group_norm_stats_f32(%input, %stats) : (tensor<2x1x2x1xf32>, tensor<1x1x2xf32>)
   func.call @id4_vae_group_norm_silu_f32(%input, %weight, %bias, %stats, %output) : (tensor<2x1x2x1xf32>, tensor<2xf32>, tensor<2xf32>, tensor<1x1x2xf32>, tensor<2x1x2x1xf32>)
   check.expect.close actual(%output) expected(%expected) atol(0.00001) rtol(0.00001) nan(same) : tensor<2x1x2x1xf32>
+  check.return
+}
+
+check.case public @id4_vae_group_norm_silu_ic4_oc4_f32_small_case {
+  %input = check.generate.fill value(0.0) : tensor<1x1x4x1xf32>
+  %weight = check.generate.fill value(1.0) : tensor<4xf32>
+  %bias = check.generate.fill value(1.0) : tensor<4xf32>
+  %stats = check.generate.fill value(0.0) : tensor<1x1x2xf32>
+  %output = check.generate.fill value(0.0) : tensor<1x1x4x1xf32>
+  %expected = check.generate.fill value(0.7310585786300049) : tensor<1x1x4x1xf32>
+  func.call @id4_vae_group_norm_stats_f32(%input, %stats) : (tensor<1x1x4x1xf32>, tensor<1x1x2xf32>)
+  func.call @id4_vae_group_norm_silu_ic4_oc4_f32(%input, %weight, %bias, %stats, %output) : (tensor<1x1x4x1xf32>, tensor<4xf32>, tensor<4xf32>, tensor<1x1x2xf32>, tensor<1x1x4x1xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.00001) rtol(0.00001) nan(same) : tensor<1x1x4x1xf32>
   check.return
 }
 
@@ -251,5 +344,6 @@ check.case public @id4_vae_group_norm_silu_f32_flux2_mid_block_shape_case {
 
 check.benchmark<@id4_vae_group_norm_f32_small_case> @id4_vae_group_norm_f32_small
 check.benchmark<@id4_vae_group_norm_silu_f32_small_case> @id4_vae_group_norm_silu_f32_small
+check.benchmark<@id4_vae_group_norm_silu_ic4_oc4_f32_small_case> @id4_vae_group_norm_silu_ic4_oc4_f32_small
 check.benchmark<@id4_vae_group_norm_f32_flux2_mid_block_shape_case> @id4_vae_group_norm_f32_flux2_mid_block_shape
 check.benchmark<@id4_vae_group_norm_silu_f32_flux2_mid_block_shape_case> @id4_vae_group_norm_silu_f32_flux2_mid_block_shape

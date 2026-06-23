@@ -66,6 +66,19 @@ static iree_status_t FindFixtureTensor(
                           static_cast<int>(role.size), role.data);
 }
 
+static iree_status_t FindFixtureTensor(
+    const id4::test::FixtureTensorSet& fixture_tensors, iree_string_view_t role,
+    iree_string_view_t stage, iree_string_view_t name,
+    const id4::test::FixtureTensor** out_tensor) {
+  *out_tensor = fixture_tensors.FindTensor(role, stage, name);
+  if (*out_tensor) return iree_ok_status();
+  return iree_make_status(
+      IREE_STATUS_NOT_FOUND,
+      "fixture tensor `%.*s` with role `%.*s` and stage `%.*s` not found",
+      static_cast<int>(name.size), name.data, static_cast<int>(role.size),
+      role.data, static_cast<int>(stage.size), stage.data);
+}
+
 static iree_string_view_t FixtureTensorName(
     const id4::test::FixtureTensor& tensor) {
   return iree_make_string_view(tensor.name.data(), tensor.name.size());
@@ -74,6 +87,28 @@ static iree_string_view_t FixtureTensorName(
 static iree_string_view_t FixtureTensorRole(
     const id4::test::FixtureTensor& tensor) {
   return iree_make_string_view(tensor.role.data(), tensor.role.size());
+}
+
+static iree_string_view_t FixtureTensorStage(
+    const id4::test::FixtureTensor& tensor) {
+  return iree_make_string_view(tensor.stage.data(), tensor.stage.size());
+}
+
+static bool TensorShapeEquals(id4_pipeline_tensor_shape_t lhs,
+                              id4_pipeline_tensor_shape_t rhs) {
+  if (lhs.rank != rhs.rank) return false;
+  for (uint32_t i = 0; i < lhs.rank; ++i) {
+    if (lhs.dims[i] != rhs.dims[i]) return false;
+  }
+  return true;
+}
+
+static iree_string_view_t FixtureNameForBoundary(
+    const id4_pipeline_boundary_tensor_plan_t* boundary) {
+  if (iree_string_view_equal(boundary->layout.name, IREE_SV("condition"))) {
+    return IREE_SV("context");
+  }
+  return boundary->layout.name;
 }
 
 static bool ExpectedTapMatchesRequestExtent(
@@ -109,6 +144,25 @@ static iree_status_t FindDiagnosticTapPlan(
                           static_cast<int>(name.size), name.data);
 }
 
+static iree_status_t FindBoundaryPlan(
+    const id4_pipeline_plan_t* plan, iree_string_view_t name,
+    const id4_pipeline_boundary_tensor_plan_t** out_boundary) {
+  *out_boundary = nullptr;
+  const iree_host_size_t boundary_count =
+      id4_pipeline_plan_boundary_tensor_count(plan);
+  for (iree_host_size_t i = 0; i < boundary_count; ++i) {
+    const id4_pipeline_boundary_tensor_plan_t* boundary =
+        id4_pipeline_plan_boundary_tensor_at(plan, i);
+    if (boundary && iree_string_view_equal(boundary->layout.name, name)) {
+      *out_boundary = boundary;
+      return iree_ok_status();
+    }
+  }
+  return iree_make_status(IREE_STATUS_NOT_FOUND,
+                          "boundary tensor `%.*s` not found",
+                          static_cast<int>(name.size), name.data);
+}
+
 static iree_status_t MakeProgramShape(
     id4_pipeline_tensor_shape_t tensor_shape,
     id4_pipeline_program_shape_t* out_program_shape) {
@@ -127,33 +181,33 @@ static iree_status_t MakeProgramShape(
 
 static iree_status_t ConfigureRequestFromFixture(
     const id4::test::FixtureTensorSet& fixture_tensors,
+    iree_string_view_t input_stage,
     id4_ideogram4_dit_request_config_t* out_request) {
   std::memset(out_request, 0, sizeof(*out_request));
 
   const id4::test::FixtureTensor* latent = nullptr;
   IREE_RETURN_IF_ERROR(FindFixtureTensor(fixture_tensors, IREE_SV("input"),
-                                         IREE_SV("x"), &latent));
+                                         input_stage, IREE_SV("x"), &latent));
   IREE_RETURN_IF_ERROR(
       MakeProgramShape(latent->shape, &out_request->latent_shape));
 
-  const id4::test::FixtureTensor* condition =
-      fixture_tensors.FindTensor(IREE_SV("input"), IREE_SV("condition"));
-  if (!condition) {
+  const id4::test::FixtureTensor* context = fixture_tensors.FindTensor(
+      IREE_SV("input"), input_stage, IREE_SV("context"));
+  if (!context) {
     out_request->conditioning_mode =
         ID4_IDEOGRAM4_DIT_CONDITIONING_MODE_UNCONDITIONED;
     return iree_ok_status();
   }
-  if (condition->shape.rank != 2 ||
-      condition->shape.dims[1] >
+  if (context->shape.rank != 2 ||
+      context->shape.dims[1] >
           static_cast<uint64_t>(std::numeric_limits<uint32_t>::max())) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
-        "condition fixture tensor must be rank-2 with uint32 token count");
+        "context fixture tensor must be rank-2 with uint32 token count");
   }
   out_request->conditioning_mode =
       ID4_IDEOGRAM4_DIT_CONDITIONING_MODE_CONDITIONED;
-  out_request->text_token_count =
-      static_cast<uint32_t>(condition->shape.dims[1]);
+  out_request->text_token_count = static_cast<uint32_t>(context->shape.dims[1]);
   return iree_ok_status();
 }
 
@@ -174,17 +228,33 @@ static iree_status_t WritePlanJsonIfRequested(const id4_pipeline_plan_t* plan) {
   return status;
 }
 
+static id4_pipeline_tensor_layout_t FixtureComparisonLayout(
+    const id4_pipeline_tensor_layout_t* actual_layout,
+    const id4::test::FixtureTensor& expected_tensor) {
+  id4_pipeline_tensor_layout_t layout = *actual_layout;
+  if (layout.shape.rank == expected_tensor.source_shape.rank + 1 &&
+      layout.shape.dims[expected_tensor.source_shape.rank] == 1) {
+    layout.shape = expected_tensor.source_shape;
+  }
+  return layout;
+}
+
 static iree_status_t CompareExpectedDiagnosticTaps(
     iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
     const id4_pipeline_plan_t* plan,
     const id4::test::BufferBindingSet& diagnostic_tap_bindings,
     const id4::test::FixtureTensorSet& fixture_tensors,
     const id4_ideogram4_dit_request_config_t& request,
+    iree_string_view_t expected_tap_prefix,
     iree_hal_semaphore_list_t wait_list) {
   iree_host_size_t expected_count = 0;
   for (const id4::test::FixtureTensor& tensor : fixture_tensors.tensors) {
     if (!iree_string_view_equal(FixtureTensorRole(tensor),
                                 IREE_SV("expected"))) {
+      continue;
+    }
+    if (!iree_string_view_starts_with(FixtureTensorName(tensor),
+                                      expected_tap_prefix)) {
       continue;
     }
     if (!ExpectedTapMatchesRequestExtent(tensor, request)) continue;
@@ -195,8 +265,10 @@ static iree_status_t CompareExpectedDiagnosticTaps(
                                                &diagnostic_tap));
     IREE_RETURN_IF_ERROR(id4::test::FindDiagnosticTapBinding(
         plan, diagnostic_tap_bindings, FixtureTensorName(tensor), &binding));
+    const id4_pipeline_tensor_layout_t comparison_layout =
+        FixtureComparisonLayout(&diagnostic_tap->layout, tensor);
     IREE_RETURN_IF_ERROR(id4::test::CompareBindingWithFixtureTensor(
-        device, queue_affinity, &binding, wait_list, &diagnostic_tap->layout,
+        device, queue_affinity, &binding, wait_list, &comparison_layout,
         tensor));
   }
   if (expected_count == 0) {
@@ -204,6 +276,85 @@ static iree_status_t CompareExpectedDiagnosticTaps(
                             "DiT fixture contains no expected tensors");
   }
   return iree_ok_status();
+}
+
+static iree_status_t QueueUpdateInitializedBoundariesFromFixture(
+    iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
+    const id4_pipeline_plan_t* plan,
+    const id4::test::BufferBindingSet& boundary_bindings,
+    const id4::test::FixtureTensorSet& fixture_tensors,
+    iree_string_view_t input_stage, iree_hal_semaphore_t* update_semaphore,
+    uint64_t* inout_update_value) {
+  for (iree_host_size_t i = 0; i < boundary_bindings.count; ++i) {
+    const id4_pipeline_boundary_tensor_plan_t* boundary =
+        id4_pipeline_plan_boundary_tensor_at(plan, i);
+    if (!boundary ||
+        !iree_all_bits_set(boundary->flags,
+                           ID4_PIPELINE_BOUNDARY_TENSOR_FLAG_INITIALIZED)) {
+      continue;
+    }
+    const id4::test::FixtureTensor* fixture_tensor = nullptr;
+    IREE_RETURN_IF_ERROR(
+        FindFixtureTensor(fixture_tensors, IREE_SV("input"), input_stage,
+                          FixtureNameForBoundary(boundary), &fixture_tensor));
+    if (fixture_tensor->dtype != boundary->layout.dtype) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "fixture tensor `%.*s/%.*s` dtype does not match boundary `%.*s`",
+          static_cast<int>(FixtureTensorStage(*fixture_tensor).size),
+          FixtureTensorStage(*fixture_tensor).data,
+          static_cast<int>(FixtureTensorName(*fixture_tensor).size),
+          FixtureTensorName(*fixture_tensor).data,
+          static_cast<int>(boundary->layout.name.size),
+          boundary->layout.name.data);
+    }
+    if (!TensorShapeEquals(fixture_tensor->shape, boundary->layout.shape)) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "fixture tensor `%.*s/%.*s` shape does not match boundary `%.*s`",
+          static_cast<int>(FixtureTensorStage(*fixture_tensor).size),
+          FixtureTensorStage(*fixture_tensor).data,
+          static_cast<int>(FixtureTensorName(*fixture_tensor).size),
+          FixtureTensorName(*fixture_tensor).data,
+          static_cast<int>(boundary->layout.name.size),
+          boundary->layout.name.data);
+    }
+    IREE_RETURN_IF_ERROR(id4::test::QueueReadBindingFromHostAllocation(
+        device, queue_affinity, &boundary_bindings.bindings[i],
+        fixture_tensor->payload.data(), fixture_tensor->payload.size(),
+        update_semaphore, inout_update_value));
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t CompareExpectedOutputBoundary(
+    iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
+    const id4_pipeline_plan_t* plan,
+    const id4::test::BufferBindingSet& boundary_bindings,
+    const id4::test::FixtureTensorSet& fixture_tensors,
+    iree_string_view_t expected_output_name,
+    iree_hal_semaphore_list_t wait_list) {
+  const id4::test::FixtureTensor* expected_output = nullptr;
+  IREE_RETURN_IF_ERROR(FindFixtureTensor(fixture_tensors, IREE_SV("expected"),
+                                         expected_output_name,
+                                         &expected_output));
+
+  const id4_pipeline_boundary_tensor_plan_t* boundary = nullptr;
+  IREE_RETURN_IF_ERROR(FindBoundaryPlan(plan, IREE_SV("velocity"), &boundary));
+  if (!iree_all_bits_set(boundary->flags,
+                         ID4_PIPELINE_BOUNDARY_TENSOR_FLAG_EXPORTED)) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "velocity boundary is not exported");
+  }
+
+  iree_hal_buffer_binding_t binding = {};
+  IREE_RETURN_IF_ERROR(id4::test::FindBoundaryBinding(
+      plan, boundary_bindings, IREE_SV("velocity"), &binding));
+  const id4_pipeline_tensor_layout_t comparison_layout =
+      FixtureComparisonLayout(&boundary->layout, *expected_output);
+  return id4::test::CompareBindingWithFixtureTensor(
+      device, queue_affinity, &binding, wait_list, &comparison_layout,
+      *expected_output);
 }
 
 static iree_status_t VerifyExportedBoundariesWereWritten(
@@ -247,7 +398,30 @@ static iree_status_t VerifyExportedBoundariesWereWritten(
   return iree_ok_status();
 }
 
-TEST(Ideogram4DitStageIntegration, PrepareAndIssueForwardPreludeFixture) {
+typedef uint32_t DitFixtureRunFlags;
+
+typedef enum DitFixtureRunFlagBits {
+  ID4_DIT_FIXTURE_RUN_FLAG_CAPTURE_EXPECTED_TAPS = 1u << 0,
+  ID4_DIT_FIXTURE_RUN_FLAG_COMPARE_EXPECTED_TAPS = 1u << 1,
+  ID4_DIT_FIXTURE_RUN_FLAG_COMPARE_OUTPUT_BOUNDARY = 1u << 2,
+} DitFixtureRunFlagBits;
+
+typedef struct DitFixtureRunOptions {
+  // Activation format requested from the DiT stage planner.
+  id4_ideogram4_dit_activation_format_t activation_format;
+  // Fixture input stage used to initialize imported boundary tensors.
+  iree_string_view_t input_stage;
+  // Expected diagnostic tap name prefix selected from the fixture.
+  iree_string_view_t expected_tap_prefix;
+  // Expected fixture tensor compared against the exported velocity boundary.
+  iree_string_view_t expected_output_name;
+  // Integration-run capture identifier used when --id4_capture_dir is set.
+  iree_string_view_t capture_run_id;
+  // Fixture run behavior selected by DitFixtureRunFlagBits.
+  DitFixtureRunFlags flags;
+} DitFixtureRunOptions;
+
+static void RunDitFixture(const DitFixtureRunOptions& options) {
   iree_string_view_t fixture_directory =
       iree_make_cstring_view(FLAG_id4_fixture_dir);
   ASSERT_FALSE(iree_string_view_is_empty(fixture_directory))
@@ -258,7 +432,8 @@ TEST(Ideogram4DitStageIntegration, PrepareAndIssueForwardPreludeFixture) {
       id4::test::LoadFixtureTensors(fixture_directory, &fixture_tensors));
 
   id4_ideogram4_dit_request_config_t request;
-  IREE_ASSERT_OK(ConfigureRequestFromFixture(fixture_tensors, &request));
+  IREE_ASSERT_OK(ConfigureRequestFromFixture(fixture_tensors,
+                                             options.input_stage, &request));
 
   id4::test::LiveStageContext context;
   IREE_ASSERT_OK(id4::test::CreateLiveStageContextFromFlags(&context));
@@ -289,23 +464,32 @@ TEST(Ideogram4DitStageIntegration, PrepareAndIssueForwardPreludeFixture) {
   std::memset(&dit_options, 0, sizeof(dit_options));
   dit_options.structure_size = sizeof(dit_options);
   dit_options.request = request;
+  dit_options.activation_format = options.activation_format;
 
   std::vector<iree_string_view_t> diagnostic_tap_names;
-  for (const id4::test::FixtureTensor& tensor : fixture_tensors.tensors) {
-    if (iree_string_view_equal(FixtureTensorRole(tensor),
-                               IREE_SV("expected")) &&
-        ExpectedTapMatchesRequestExtent(tensor, request)) {
-      diagnostic_tap_names.push_back(FixtureTensorName(tensor));
+  if (iree_all_bits_set(options.flags,
+                        ID4_DIT_FIXTURE_RUN_FLAG_CAPTURE_EXPECTED_TAPS)) {
+    for (const id4::test::FixtureTensor& tensor : fixture_tensors.tensors) {
+      if (iree_string_view_equal(FixtureTensorRole(tensor),
+                                 IREE_SV("expected")) &&
+          iree_string_view_starts_with(FixtureTensorName(tensor),
+                                       options.expected_tap_prefix) &&
+          ExpectedTapMatchesRequestExtent(tensor, request)) {
+        diagnostic_tap_names.push_back(FixtureTensorName(tensor));
+      }
     }
+    ASSERT_FALSE(diagnostic_tap_names.empty())
+        << "DiT fixture contains no expected tensors";
   }
-  ASSERT_FALSE(diagnostic_tap_names.empty())
-      << "DiT fixture contains no expected tensors";
 
   id4_pipeline_stage_plan_options_t plan_options;
   std::memset(&plan_options, 0, sizeof(plan_options));
   plan_options.structure_size = sizeof(plan_options);
   plan_options.next = &dit_options;
-  plan_options.flags = ID4_PIPELINE_STAGE_PLAN_FLAG_CAPTURE_DIAGNOSTIC_TAPS;
+  if (iree_all_bits_set(options.flags,
+                        ID4_DIT_FIXTURE_RUN_FLAG_CAPTURE_EXPECTED_TAPS)) {
+    plan_options.flags = ID4_PIPELINE_STAGE_PLAN_FLAG_CAPTURE_DIAGNOSTIC_TAPS;
+  }
   plan_options.diagnostic_tap_names = (iree_string_view_list_t){
       diagnostic_tap_names.size(),
       diagnostic_tap_names.data(),
@@ -357,10 +541,10 @@ TEST(Ideogram4DitStageIntegration, PrepareAndIssueForwardPreludeFixture) {
       context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, 0,
       IREE_HAL_SEMAPHORE_FLAG_DEFAULT, update_semaphore.out()));
   uint64_t update_value = 0;
-  IREE_ASSERT_OK(id4::test::QueueUpdateInitializedBoundaryTensorsFromFixture(
+  IREE_ASSERT_OK(QueueUpdateInitializedBoundariesFromFixture(
       context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, plan.get(),
-      boundary_bindings, fixture_tensors, update_semaphore.get(),
-      &update_value));
+      boundary_bindings, fixture_tensors, options.input_stage,
+      update_semaphore.get(), &update_value));
   IREE_ASSERT_OK(id4::test::QueueFillBoundaryTensors(
       context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, plan.get(),
       boundary_bindings, ID4_PIPELINE_BOUNDARY_TENSOR_FLAG_EXPORTED,
@@ -407,7 +591,7 @@ TEST(Ideogram4DitStageIntegration, PrepareAndIssueForwardPreludeFixture) {
     id4_tooling_capture_execution_options_t capture_options;
     std::memset(&capture_options, 0, sizeof(capture_options));
     capture_options.structure_size = sizeof(capture_options);
-    capture_options.run_id = IREE_SV("ideogram4_dit_forward_integration");
+    capture_options.run_id = options.capture_run_id;
     capture_options.output_directory = capture_directory;
     capture_options.plan = plan.get();
     capture_options.device = context.device.get();
@@ -422,15 +606,54 @@ TEST(Ideogram4DitStageIntegration, PrepareAndIssueForwardPreludeFixture) {
     IREE_ASSERT_OK(id4_tooling_capture_execution(&capture_options));
     IREE_ASSERT_OK(id4::test::VerifyCapturedExportedBoundaryTensorsWereWritten(
         plan.get(), capture_directory, kOutputSentinel));
-    IREE_ASSERT_OK(id4::test::VerifyCapturedDiagnosticTapTensorsWereWritten(
-        plan.get(), capture_directory, kOutputSentinel));
+    if (iree_all_bits_set(options.flags,
+                          ID4_DIT_FIXTURE_RUN_FLAG_CAPTURE_EXPECTED_TAPS)) {
+      IREE_ASSERT_OK(id4::test::VerifyCapturedDiagnosticTapTensorsWereWritten(
+          plan.get(), capture_directory, kOutputSentinel));
+    }
   }
-  IREE_ASSERT_OK(CompareExpectedDiagnosticTaps(
-      context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, plan.get(),
-      diagnostic_tap_bindings, fixture_tensors, request, read_wait.list()));
+  if (iree_all_bits_set(options.flags,
+                        ID4_DIT_FIXTURE_RUN_FLAG_COMPARE_EXPECTED_TAPS)) {
+    IREE_ASSERT_OK(CompareExpectedDiagnosticTaps(
+        context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, plan.get(),
+        diagnostic_tap_bindings, fixture_tensors, request,
+        options.expected_tap_prefix, read_wait.list()));
+  }
+  if (iree_all_bits_set(options.flags,
+                        ID4_DIT_FIXTURE_RUN_FLAG_COMPARE_OUTPUT_BOUNDARY)) {
+    IREE_ASSERT_OK(CompareExpectedOutputBoundary(
+        context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, plan.get(),
+        boundary_bindings, fixture_tensors, options.expected_output_name,
+        read_wait.list()));
+  }
   IREE_ASSERT_OK(VerifyExportedBoundariesWereWritten(
       context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, plan.get(),
       boundary_bindings, read_wait.list()));
+}
+
+TEST(Ideogram4DitStageIntegration, PrepareAndIssueForwardPreludeFixture) {
+  RunDitFixture(DitFixtureRunOptions{
+      .activation_format = ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_F32_CANONICAL,
+      .input_stage = IREE_SV("ideogram4.cond.input"),
+      .expected_tap_prefix = IREE_SV("ideogram4.cond."),
+      .expected_output_name = IREE_SV("ideogram4.cond.output.velocity"),
+      .capture_run_id = IREE_SV("ideogram4_dit_forward_integration"),
+      .flags = ID4_DIT_FIXTURE_RUN_FLAG_CAPTURE_EXPECTED_TAPS |
+               ID4_DIT_FIXTURE_RUN_FLAG_COMPARE_EXPECTED_TAPS |
+               ID4_DIT_FIXTURE_RUN_FLAG_COMPARE_OUTPUT_BOUNDARY,
+  });
+}
+
+TEST(Ideogram4DitStageIntegration, PrepareAndIssueBf16LinearInputFixture) {
+  RunDitFixture(DitFixtureRunOptions{
+      .activation_format =
+          ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT,
+      .input_stage = IREE_SV("ideogram4.cond.input"),
+      .expected_tap_prefix = IREE_SV("ideogram4.cond."),
+      .expected_output_name = IREE_SV("ideogram4.cond.output.velocity"),
+      .capture_run_id = IREE_SV("ideogram4_dit_bf16_linear_input_integration"),
+      .flags = ID4_DIT_FIXTURE_RUN_FLAG_COMPARE_OUTPUT_BOUNDARY,
+  });
 }
 
 }  // namespace

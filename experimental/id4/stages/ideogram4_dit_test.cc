@@ -21,15 +21,15 @@ static id4_ideogram4_dit_model_config_t MakeModelConfig() {
       // Channel count of each VAE latent image token.
       /*.input_channel_count=*/4,
       // Transformer hidden-state channel count.
-      /*.hidden_size=*/16,
+      /*.hidden_size=*/32,
       // Feed-forward intermediate channel count.
-      /*.intermediate_size=*/32,
+      /*.intermediate_size=*/64,
       // Transformer attention head count.
       /*.attention_head_count=*/2,
       // AdaLN conditioning vector channel count.
       /*.adaln_size=*/4,
       // Qwen condition feature channel count.
-      /*.llm_feature_count=*/52,
+      /*.llm_feature_count=*/208,
       // Number of image-indicator embedding rows.
       /*.image_indicator_count=*/2,
   };
@@ -101,6 +101,8 @@ TEST(Ideogram4DitStage, PlansPreludeSliceFromRequestConfig) {
   dit_options.request.latent_shape = latent_shape;
   dit_options.request.conditioning_mode =
       ID4_IDEOGRAM4_DIT_CONDITIONING_MODE_UNCONDITIONED;
+  dit_options.activation_format =
+      ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_F32_CANONICAL;
 
   id4_pipeline_stage_plan_options_t plan_options;
   memset(&plan_options, 0, sizeof(plan_options));
@@ -218,6 +220,8 @@ TEST(Ideogram4DitStage, PlansConditionedPreludeSliceFromRequestConfig) {
   dit_options.request.conditioning_mode =
       ID4_IDEOGRAM4_DIT_CONDITIONING_MODE_CONDITIONED;
   dit_options.request.text_token_count = 3;
+  dit_options.activation_format =
+      ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_F32_CANONICAL;
 
   id4_pipeline_stage_plan_options_t plan_options;
   memset(&plan_options, 0, sizeof(plan_options));
@@ -344,6 +348,8 @@ TEST(Ideogram4DitStage, RejectsInvalidRequestShape) {
       id4_pipeline_program_make_shape_rank4(1, 2, 8, 1);
   dit_options.request.conditioning_mode =
       ID4_IDEOGRAM4_DIT_CONDITIONING_MODE_UNCONDITIONED;
+  dit_options.activation_format =
+      ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT;
 
   id4_pipeline_stage_plan_options_t plan_options;
   memset(&plan_options, 0, sizeof(plan_options));

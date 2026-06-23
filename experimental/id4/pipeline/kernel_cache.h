@@ -92,6 +92,8 @@ typedef struct id4_pipeline_kernel_cache_prepare_options_t {
   iree_const_byte_span_t source_contents;
   // Runtime module path passed to the Loom compile invocation.
   iree_string_view_t module_path;
+  // Exported Loom function selected as the link root for this executable.
+  iree_string_view_t function_name;
   // Number of Loom config bindings.
   iree_host_size_t config_binding_count;
   // Loom config bindings borrowed for the prepare call.

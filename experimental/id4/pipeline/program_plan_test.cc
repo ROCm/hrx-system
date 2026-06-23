@@ -23,6 +23,11 @@ static void ExpectStringViewEqual(iree_string_view_t actual,
       << ", expected: " << std::string(expected.data, expected.size);
 }
 
+static void ExpectFinds(iree_string_view_t value, iree_string_view_t needle) {
+  EXPECT_NE(iree_string_view_find(value, needle, 0), IREE_STRING_VIEW_NPOS)
+      << "expected to find: " << std::string(needle.data, needle.size);
+}
+
 class ProgramBuilderScope {
  public:
   ProgramBuilderScope() {
@@ -494,6 +499,24 @@ TEST(PipelineProgramPlan, DerivesParameterKernelRegionAndTapPlans) {
   ExpectStringViewEqual(tap->layout.name, IREE_SV("block0.linear.output"));
   EXPECT_EQ(tap->layout.dtype, ID4_PIPELINE_TENSOR_DTYPE_F32);
   EXPECT_EQ(tap->layout.byte_length, 16u);
+
+  iree_string_builder_t json_builder;
+  iree_string_builder_initialize(iree_allocator_system(), &json_builder);
+  IREE_ASSERT_OK(id4_pipeline_plan_format_json(plan, &json_builder));
+  iree_string_view_t json = iree_string_builder_view(&json_builder);
+  ExpectFinds(json, IREE_SV("\"program\":{\"name\":\"test.forward\""));
+  ExpectFinds(json, IREE_SV("\"dispatch_count\":2"));
+  ExpectFinds(json, IREE_SV("\"dispatch_ordinal\":0"));
+  ExpectFinds(json, IREE_SV("\"region_operation_ordinal\":0"));
+  ExpectFinds(json, IREE_SV("\"dispatch_ordinal\":1"));
+  ExpectFinds(json, IREE_SV("\"region_operation_ordinal\":2"));
+  ExpectFinds(json, IREE_SV("\"module_path\":\"test/linear\""));
+  ExpectFinds(json, IREE_SV("\"function_name\":\"linear\""));
+  ExpectFinds(json, IREE_SV("\"config_bindings\":[{\"key\":\"@batch\""));
+  ExpectFinds(json, IREE_SV("\"bindings\":[{\"index\":0"));
+  ExpectFinds(json, IREE_SV("\"name\":\"hidden_states.input\""));
+  ExpectFinds(json, IREE_SV("\"access\":\"read\""));
+  iree_string_builder_deinitialize(&json_builder);
 
   id4_pipeline_plan_release(plan);
   iree_hal_device_group_release(device_group);

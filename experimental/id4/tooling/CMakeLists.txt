@@ -17,10 +17,23 @@ iree_cc_library(
   SRCS
     "capture.c"
   DEPS
+    ::filesystem
     iree::base
     iree::experimental::id4::pipeline::plan
     iree::experimental::id4::pipeline::region
     iree::hal
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
+    filesystem
+  HDRS
+    "filesystem.h"
+  SRCS
+    "filesystem.c"
+  DEPS
+    iree::base
   PUBLIC
 )
 
@@ -49,6 +62,19 @@ iree_cc_test(
     iree::experimental::id4::pipeline::plan
     iree::experimental::id4::stages::test_util
     iree::hal
+    iree::testing::gtest
+    iree::testing::gtest_main
+    iree::testing::temp_file
+)
+
+iree_cc_test(
+  NAME
+    filesystem_test
+  SRCS
+    "filesystem_test.cc"
+  DEPS
+    ::filesystem
+    iree::base
     iree::testing::gtest
     iree::testing::gtest_main
     iree::testing::temp_file

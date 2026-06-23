@@ -15,12 +15,16 @@
 #include "loomc/context.h"
 #include "loomc/emit.h"
 #include "loomc/iree.h"
+#include "loomc/link.h"
+#include "loomc/link_index.h"
 #include "loomc/module.h"
 #include "loomc/result.h"
 #include "loomc/source.h"
 #include "loomc/target.h"
 #include "loomc/target/amdgpu.h"
 #include "loomc/workspace.h"
+
+#define ID4_PIPELINE_KERNEL_CACHE_ROOT_SYMBOL_CAPACITY 256
 
 struct id4_pipeline_kernel_cache_t {
   // Reference count for shared kernel cache ownership.
@@ -37,6 +41,8 @@ struct id4_pipeline_kernel_cache_t {
   loomc_target_profile_t* target_profile;
   // Invocation-ready target selection derived from the profile.
   loomc_target_selection_t* target_selection;
+  // Immutable linker used to select per-dispatch roots from kernel modules.
+  loomc_linker_t* linker;
   // Immutable prepared compiler handle.
   loomc_compiler_t* compiler;
   // Prepared source-to-target-low pass program shared by invocations.
@@ -173,6 +179,10 @@ static iree_status_t id4_pipeline_kernel_cache_validate_prepare_options(
   if (iree_string_view_is_empty(options->module_path)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "module path is required");
+  }
+  if (iree_string_view_is_empty(options->function_name)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "function name is required");
   }
   if (options->config_binding_count != 0 && !options->config_bindings) {
     return iree_make_status(
@@ -465,11 +475,33 @@ static iree_status_t id4_pipeline_kernel_executable_create(
   return status;
 }
 
+static iree_status_t id4_pipeline_kernel_cache_root_symbol(
+    iree_string_view_t function_name, char* buffer,
+    iree_host_size_t buffer_capacity, loomc_string_view_t* out_root_symbol) {
+  IREE_ASSERT_ARGUMENT(buffer);
+  IREE_ASSERT_ARGUMENT(out_root_symbol);
+  if (iree_string_view_starts_with(function_name, IREE_SV("@"))) {
+    *out_root_symbol = loomc_string_view_from_iree(function_name);
+    return iree_ok_status();
+  }
+  if (function_name.size + 1 >= buffer_capacity) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "kernel function name is too long for root symbol storage");
+  }
+  buffer[0] = '@';
+  memcpy(buffer + 1, function_name.data, function_name.size);
+  buffer[function_name.size + 1] = 0;
+  *out_root_symbol = loomc_make_string_view(buffer, function_name.size + 1);
+  return iree_ok_status();
+}
+
 static void id4_pipeline_kernel_cache_destroy(
     id4_pipeline_kernel_cache_t* kernel_cache) {
   iree_allocator_t host_allocator = kernel_cache->host_allocator;
   loomc_pass_program_release(kernel_cache->pass_program);
   loomc_compiler_release(kernel_cache->compiler);
+  loomc_linker_release(kernel_cache->linker);
   loomc_target_selection_release(kernel_cache->target_selection);
   loomc_target_profile_release(kernel_cache->target_profile);
   loomc_context_release(kernel_cache->context);
@@ -552,6 +584,11 @@ iree_status_t id4_pipeline_kernel_cache_create(
     status = iree_status_from_loomc(loomc_target_selection_create_from_profile(
         kernel_cache->target_profile, loomc_allocator_from_iree(host_allocator),
         &kernel_cache->target_selection));
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_status_from_loomc(loomc_linker_create(
+        kernel_cache->context, NULL, loomc_allocator_from_iree(host_allocator),
+        &kernel_cache->linker));
   }
   if (iree_status_is_ok(status)) {
     status = iree_status_from_loomc(loomc_compiler_create(
@@ -643,8 +680,11 @@ iree_status_t id4_pipeline_kernel_cache_prepare_executable(
   loomc_config_binding_t* config_bindings = NULL;
   loomc_workspace_t* workspace = NULL;
   loomc_source_t* source = NULL;
+  loomc_link_index_builder_t* link_index_builder = NULL;
+  loomc_link_index_t* link_index = NULL;
   loomc_module_t* module = NULL;
-  loomc_result_t* deserialize_result = NULL;
+  loomc_result_t* link_index_result = NULL;
+  loomc_result_t* link_result = NULL;
   loomc_result_t* compile_result = NULL;
   loomc_result_t* emit_result = NULL;
   iree_hal_executable_t* hal_executable = NULL;
@@ -692,14 +732,85 @@ iree_status_t id4_pipeline_kernel_cache_prepare_executable(
         loomc_allocator_from_iree(kernel_cache->host_allocator), &source));
   }
   if (iree_status_is_ok(status)) {
-    status = iree_status_from_loomc(loomc_module_deserialize_from_source(
-        kernel_cache->context, workspace, source, NULL,
-        loomc_allocator_from_iree(kernel_cache->host_allocator), &module,
-        &deserialize_result));
+    status = iree_status_from_loomc(loomc_link_index_builder_create(
+        kernel_cache->context, NULL,
+        loomc_allocator_from_iree(kernel_cache->host_allocator),
+        &link_index_builder));
+  }
+  if (iree_status_is_ok(status)) {
+    loomc_link_index_source_options_t source_options = {
+        // Provider label used by linker diagnostics.
+        .provider_name =
+            loomc_string_view_from_iree(options->source_identifier),
+        // ID4 prepares one primary source module per JIT invocation.
+        .role = LOOMC_LINK_PROVIDER_ROLE_INPUT,
+    };
+    status = iree_status_from_loomc(loomc_link_index_builder_add_source(
+        link_index_builder, source, &source_options, NULL));
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_status_from_loomc(loomc_link_index_builder_finish(
+        link_index_builder, &link_index, &link_index_result));
   }
   if (iree_status_is_ok(status)) {
     status = id4_pipeline_kernel_cache_require_loom_result(
-        kernel_cache, options, IREE_SV("deserialize"), deserialize_result);
+        kernel_cache, options, IREE_SV("link_index"), link_index_result);
+  }
+  char root_symbol_storage[ID4_PIPELINE_KERNEL_CACHE_ROOT_SYMBOL_CAPACITY];
+  loomc_string_view_t root_symbol = loomc_string_view_empty();
+  if (iree_status_is_ok(status)) {
+    status = id4_pipeline_kernel_cache_root_symbol(
+        options->function_name, root_symbol_storage,
+        IREE_ARRAYSIZE(root_symbol_storage), &root_symbol);
+  }
+  if (iree_status_is_ok(status)) {
+    loomc_target_selection_options_t target_options = {
+        // Target selection descriptor type.
+        .type = LOOMC_STRUCTURE_TYPE_TARGET_SELECTION_OPTIONS,
+        // Size of this descriptor.
+        .structure_size = sizeof(target_options),
+        // No additional target-selection extensions are used.
+        .next = NULL,
+        // Concrete target selection borrowed by the link invocation.
+        .target_selection = kernel_cache->target_selection,
+    };
+    loomc_link_options_t link_options = {
+        // Link invocation descriptor type.
+        .type = LOOMC_STRUCTURE_TYPE_LINK_OPTIONS,
+        // Size of this descriptor.
+        .structure_size = sizeof(link_options),
+        // Target-selection extension.
+        .next = &target_options,
+        // Frozen index containing the source module for this invocation.
+        .link_index = link_index,
+        // Runtime module path for diagnostics and emitted objects.
+        .module_name = loomc_string_view_from_iree(options->module_path),
+        // Selected exported function root for this executable.
+        .root_symbols = &root_symbol,
+        // Exactly one dispatch-site function is materialized.
+        .root_symbol_count = 1,
+        // Strip check dialect testbench symbols from runtime modules.
+        .flags = LOOMC_LINK_FLAG_STRIP_CHECK_SYMBOLS,
+        // Strict config resolution for runtime JIT invocations.
+        .config =
+            {
+                // Config binding table borrowed for this call.
+                .bindings = config_bindings,
+                // Number of config bindings.
+                .binding_count = options->config_binding_count,
+                // ID4 runtime scheduling does not use JSON config payloads.
+                .json_object = loomc_string_view_empty(),
+                // Unknown and unresolved config is a link failure.
+                .flags = LOOMC_CONFIG_POLICY_FLAG_REJECT_UNKNOWN |
+                         LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED,
+            },
+    };
+    status = iree_status_from_loomc(loomc_link_module(
+        kernel_cache->linker, workspace, &link_options, &module, &link_result));
+  }
+  if (iree_status_is_ok(status)) {
+    status = id4_pipeline_kernel_cache_require_loom_result(
+        kernel_cache, options, IREE_SV("link"), link_result);
   }
   if (iree_status_is_ok(status)) {
     loomc_target_selection_options_t target_options = {
@@ -727,15 +838,14 @@ iree_status_t id4_pipeline_kernel_cache_prepare_executable(
         // Strict config resolution for runtime JIT invocations.
         .config =
             {
-                // Config binding table borrowed for this call.
-                .bindings = config_bindings,
-                // Number of config bindings.
-                .binding_count = options->config_binding_count,
+                // Configs were materialized by the selective link invocation.
+                .bindings = NULL,
+                // Linked runtime modules should not retain config declarations.
+                .binding_count = 0,
                 // ID4 runtime scheduling does not use JSON config payloads.
                 .json_object = loomc_string_view_empty(),
-                // Unknown and unresolved config is a compile failure.
-                .flags = LOOMC_CONFIG_POLICY_FLAG_REJECT_UNKNOWN |
-                         LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED,
+                // No config work remains after linking selected roots.
+                .flags = 0,
             },
     };
     status = iree_status_from_loomc(loomc_compile_module(
@@ -943,8 +1053,11 @@ iree_status_t id4_pipeline_kernel_cache_prepare_executable(
   iree_hal_executable_release(hal_executable);
   loomc_result_release(emit_result);
   loomc_result_release(compile_result);
-  loomc_result_release(deserialize_result);
+  loomc_result_release(link_result);
+  loomc_result_release(link_index_result);
   loomc_module_release(module);
+  loomc_link_index_release(link_index);
+  loomc_link_index_builder_release(link_index_builder);
   loomc_source_release(source);
   loomc_workspace_release(workspace);
   iree_allocator_free(kernel_cache->host_allocator, config_bindings);

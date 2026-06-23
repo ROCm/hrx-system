@@ -1,0 +1,87 @@
+amdgpu.target<gfx1100> @id4_gfx1100
+
+config.decl @id4.ideogram4.attention_qk_scores_wmma.token_count : %value: index where [range(%value, 16, 131072), mul(%value, 16)]
+config.decl @id4.ideogram4.attention_qk_scores_wmma.attention_head_count : %value: index where [range(%value, 1, 1024)]
+config.decl @id4.ideogram4.attention_qk_scores_wmma.head_size : %value: index where [range(%value, 16, 1024), mul(%value, 16)]
+config.decl @id4.ideogram4.attention_qk_scores_wmma.head_ordinal : %value: index where [range(%value, 0, 1023)]
+
+kernel.def target(@id4_gfx1100) export("id4_ideogram4_attention_qk_scores_bf16_f32_wmma") @id4_ideogram4_attention_qk_scores_bf16_f32_wmma() {
+  %unit = index.constant 1 : index
+  %sixteen = index.constant 16 : index
+  %workgroup_size_x = index.constant 32 : index
+  %token_count = config.get @id4.ideogram4.attention_qk_scores_wmma.token_count : index
+  %tile_count = index.div %token_count, %sixteen : index
+  kernel.launch.config workgroups(%tile_count, %tile_count, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
+} launch(%query: buffer, %key: buffer, %scores: buffer) {
+  %base = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %sixteen = index.constant 16 : index
+  %query_tile = kernel.workgroup.id<x> : index
+  %key_tile = kernel.workgroup.id<y> : index
+  %token_count = config.get @id4.ideogram4.attention_qk_scores_wmma.token_count : index
+  %attention_head_count = config.get @id4.ideogram4.attention_qk_scores_wmma.attention_head_count : index
+  %head_size = config.get @id4.ideogram4.attention_qk_scores_wmma.head_size : index
+  %head_ordinal = config.get @id4.ideogram4.attention_qk_scores_wmma.head_ordinal : index
+  %hidden_size = index.mul %attention_head_count, %head_size : index
+  %head_base = index.mul %head_ordinal, %head_size : index
+  %head_tile_count = index.div %head_size, %sixteen : index
+  %query_origin = index.mul %query_tile, %sixteen : index
+  %key_origin = index.mul %key_tile, %sixteen : index
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 16 : index
+  %zero_acc = vector.constant 0.0 : vector<8xf32>
+  %head_size_i32 = index.cast %head_size : index to i32
+  %head_size_f32 = scalar.sitofp %head_size_i32 : i32 to f32
+  %attention_scale = scalar.rsqrtf<nnan|ninf|nsz|afn> %head_size_f32 : f32
+  %attention_scale_vector = vector.splat %attention_scale : vector<8xf32>
+  %key_transposed_layout = encoding.layout.strided [1, %hidden_size] : encoding<layout>
+
+  %query_noalias, %key_noalias, %scores_noalias = buffer.assume.noalias %query, %key, %scores : buffer, buffer, buffer
+  %query_global = buffer.assume.memory_space<global> %query_noalias : buffer
+  %key_global = buffer.assume.memory_space<global> %key_noalias : buffer
+  %scores_global = buffer.assume.memory_space<global> %scores_noalias : buffer
+  %query_aligned = buffer.assume.alignment %query_global {minimum_alignment = 16} : buffer
+  %key_aligned = buffer.assume.alignment %key_global {minimum_alignment = 16} : buffer
+  %scores_aligned = buffer.assume.alignment %scores_global {minimum_alignment = 16} : buffer
+  %query_view = buffer.view %query_aligned[%base] : buffer -> view<[%token_count]x[%hidden_size]xbf16, #dense>
+  %key_transposed_view = buffer.view %key_aligned[%base] : buffer -> view<[%hidden_size]x[%token_count]xbf16, %key_transposed_layout>
+  %scores_view = buffer.view %scores_aligned[%base] : buffer -> view<[%token_count]x[%token_count]xf32, #dense>
+
+  %init = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
+  %raw_scores = scf.for %head_tile = [%zero to %head_tile_count step %one](%acc = %init : vector<8xf32>) -> (vector<8xf32>) {
+    %head_tile_offset = index.mul %head_tile, %sixteen : index
+    %channel_origin = index.add %head_base, %head_tile_offset : index
+    %lhs = vector.fragment.load<lhs> %query_view[%query_origin, %channel_origin] shape [%m, %k] : view<[%token_count]x[%hidden_size]xbf16, #dense> -> vector<16xbf16>
+    %rhs = vector.fragment.load<rhs> %key_transposed_view[%channel_origin, %key_origin] shape [%k, %n] : view<[%hidden_size]x[%token_count]xbf16, %key_transposed_layout> -> vector<16xbf16>
+    %next = vector.mma %lhs, %rhs, %acc : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    scf.yield %next : vector<8xf32>
+  }
+  %scaled_scores = vector.mulf<reassoc|nnan|ninf|nsz|contract> %raw_scores, %attention_scale_vector : vector<8xf32>
+  vector.fragment.store<result> %scaled_scores, %scores_view[%query_origin, %key_origin] shape [%m, %n] : vector<8xf32>, view<[%token_count]x[%token_count]xf32, #dense>
+  kernel.return
+}
+
+check.case public @id4_ideogram4_attention_qk_scores_bf16_f32_wmma_small_case {
+  %query = check.generate.fill value(1.0) : tensor<16x16xbf16>
+  %key = check.generate.fill value(1.0) : tensor<16x16xbf16>
+  %scores = check.generate.fill value(0.0) : tensor<16x16xf32>
+  %expected = check.generate.fill value(4.0) : tensor<16x16xf32>
+  func.call @id4_ideogram4_attention_qk_scores_bf16_f32_wmma(%query, %key, %scores) : (tensor<16x16xbf16>, tensor<16x16xbf16>, tensor<16x16xf32>)
+  check.expect.close actual(%scores) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<16x16xf32>
+  check.return
+}
+
+check.case public @id4_ideogram4_attention_qk_scores_bf16_f32_wmma_zero_1024_shape_case {
+  %query = check.generate.fill value(0.0) : tensor<4096x4608xbf16>
+  %key = check.generate.fill value(0.0) : tensor<4096x4608xbf16>
+  %scores = check.generate.fill value(1.0) : tensor<4096x4096xf32>
+  %expected = check.generate.fill value(0.0) : tensor<4096x4096xf32>
+  func.call @id4_ideogram4_attention_qk_scores_bf16_f32_wmma(%query, %key, %scores) : (tensor<4096x4608xbf16>, tensor<4096x4608xbf16>, tensor<4096x4096xf32>)
+  check.expect.close actual(%scores) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<4096x4096xf32>
+  check.return
+}
+
+check.benchmark<@id4_ideogram4_attention_qk_scores_bf16_f32_wmma_small_case> @id4_ideogram4_attention_qk_scores_bf16_f32_wmma_small
+check.benchmark<@id4_ideogram4_attention_qk_scores_bf16_f32_wmma_zero_1024_shape_case> @id4_ideogram4_attention_qk_scores_bf16_f32_wmma_zero_1024_shape

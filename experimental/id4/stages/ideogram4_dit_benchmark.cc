@@ -11,8 +11,10 @@
 #include "experimental/id4/pipeline/stage.h"
 #include "experimental/id4/stages/hal_integration_util.h"
 #include "experimental/id4/stages/ideogram4_dit.h"
+#include "experimental/id4/tooling/filesystem.h"
 #include "iree/base/tooling/flags.h"
 #include "iree/hal/api.h"
+#include "iree/io/file_contents.h"
 #include "iree/io/parameter_provider.h"
 #include "iree/testing/benchmark.h"
 #include "iree/tooling/device_util.h"
@@ -20,6 +22,8 @@
 IREE_FLAG(
     string, id4_fixture_dir, "",
     "Directory containing a full or DiT-only Ideogram4 fixture manifest.");
+IREE_FLAG(string, id4_plan_output_dir, "",
+          "Optional directory receiving benchmark DiT stage plan JSON files.");
 
 namespace {
 
@@ -91,6 +95,43 @@ static DitBenchmarkBranchConfig BranchConfig(DitBenchmarkBranch branch) {
       };
   }
   return DitBenchmarkBranchConfig{};
+}
+
+static iree_string_view_t BranchPlanFileName(DitBenchmarkBranch branch) {
+  switch (branch) {
+    case DitBenchmarkBranch::kConditioned:
+      return IREE_SV("cond.json");
+    case DitBenchmarkBranch::kUnconditioned:
+      return IREE_SV("uncond.json");
+  }
+  return iree_string_view_empty();
+}
+
+static iree_status_t WritePlanJsonIfRequested(DitBenchmarkBranch branch,
+                                              const id4_pipeline_plan_t* plan) {
+  iree_string_view_t output_dir =
+      iree_make_cstring_view(FLAG_id4_plan_output_dir);
+  if (iree_string_view_is_empty(output_dir)) return iree_ok_status();
+  IREE_RETURN_IF_ERROR(
+      id4_tooling_ensure_directory(output_dir, iree_allocator_system()));
+
+  iree_string_builder_t builder;
+  iree_string_builder_initialize(iree_allocator_system(), &builder);
+  iree_status_t status = id4_pipeline_plan_format_json(plan, &builder);
+  iree_string_view_t path = iree_string_view_empty();
+  if (iree_status_is_ok(status)) {
+    status = id4_tooling_format_child_path(
+        output_dir, BranchPlanFileName(branch), iree_allocator_system(), &path);
+  }
+  if (iree_status_is_ok(status)) {
+    iree_string_view_t json = iree_string_builder_view(&builder);
+    status = iree_io_file_contents_write(
+        path, iree_make_const_byte_span(json.data, json.size),
+        iree_allocator_system());
+  }
+  id4_tooling_free_path(&path, iree_allocator_system());
+  iree_string_builder_deinitialize(&builder);
+  return status;
 }
 
 static iree_status_t FindFixtureTensor(
@@ -247,6 +288,8 @@ static iree_status_t CreateDitPlan(DitBenchmarkContext* context,
   std::memset(&dit_options, 0, sizeof(dit_options));
   dit_options.structure_size = sizeof(dit_options);
   dit_options.request = context->request;
+  dit_options.activation_format =
+      ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT;
 
   id4_pipeline_stage_plan_options_t plan_options;
   std::memset(&plan_options, 0, sizeof(plan_options));
@@ -473,6 +516,7 @@ static iree_status_t RunPrepareBenchmark(
 
   id4::test::OwningRef<id4_pipeline_plan_t, id4_pipeline_plan_release> plan;
   IREE_RETURN_IF_ERROR(CreateDitPlan(&context, plan.out()));
+  IREE_RETURN_IF_ERROR(WritePlanJsonIfRequested(branch, plan.get()));
 
   id4::test::OwningRef<iree_hal_semaphore_t, iree_hal_semaphore_release>
       prepare_semaphore;
@@ -532,6 +576,7 @@ static iree_status_t RunIssueBenchmark(iree_benchmark_state_t* benchmark_state,
 
   id4::test::OwningRef<id4_pipeline_plan_t, id4_pipeline_plan_release> plan;
   IREE_RETURN_IF_ERROR(CreateDitPlan(&context, plan.out()));
+  IREE_RETURN_IF_ERROR(WritePlanJsonIfRequested(branch, plan.get()));
 
   id4::test::OwningRef<iree_hal_semaphore_t, iree_hal_semaphore_release>
       prepare_semaphore;

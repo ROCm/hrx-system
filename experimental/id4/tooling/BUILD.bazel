@@ -18,11 +18,19 @@ iree_runtime_cc_library(
     srcs = ["capture.c"],
     hdrs = ["capture.h"],
     deps = [
+        ":filesystem",
         "//experimental/id4/pipeline:plan",
         "//experimental/id4/pipeline:region",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
     ],
+)
+
+iree_runtime_cc_library(
+    name = "filesystem",
+    srcs = ["filesystem.c"],
+    hdrs = ["filesystem.h"],
+    deps = ["//runtime/src/iree/base"],
 )
 
 iree_runtime_cc_library(
@@ -52,6 +60,18 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_test(
+    name = "filesystem_test",
+    srcs = ["filesystem_test.cc"],
+    deps = [
+        ":filesystem",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/testing:temp_file",
+    ],
+)
+
+iree_runtime_cc_test(
     name = "image_test",
     srcs = ["image_test.cc"],
     deps = [
@@ -61,6 +81,24 @@ iree_runtime_cc_test(
         "//runtime/src/iree/testing:gtest_main",
         "//runtime/src/iree/testing:temp_file",
     ],
+)
+
+py_library(
+    name = "dispatch_profile_join_lib",
+    srcs = ["dispatch_profile_join.py"],
+    imports = ["."],
+)
+
+py_binary(
+    name = "dispatch_profile_join",
+    srcs = ["dispatch_profile_join.py"],
+    deps = [":dispatch_profile_join_lib"],
+)
+
+py_test(
+    name = "dispatch_profile_join_test",
+    srcs = ["dispatch_profile_join_test.py"],
+    deps = [":dispatch_profile_join_lib"],
 )
 
 py_library(

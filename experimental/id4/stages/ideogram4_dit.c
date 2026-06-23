@@ -168,6 +168,20 @@ static iree_status_t id4_ideogram4_dit_stage_validate_request(
   return iree_ok_status();
 }
 
+static iree_status_t id4_ideogram4_dit_stage_validate_activation_format(
+    id4_ideogram4_dit_activation_format_t activation_format) {
+  switch (activation_format) {
+    case ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_F32_CANONICAL:
+    case ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT:
+      return iree_ok_status();
+    default:
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "Ideogram4 DiT activation format %" PRIu32
+                              " is invalid",
+                              (uint32_t)activation_format);
+  }
+}
+
 static iree_status_t id4_ideogram4_dit_stage_validate_create_options(
     const id4_ideogram4_dit_stage_create_options_t* options) {
   if (!options) {
@@ -226,8 +240,9 @@ static iree_status_t id4_ideogram4_dit_stage_emit_lifecycle(
 
 static iree_status_t id4_ideogram4_dit_stage_author_program(
     const id4_ideogram4_dit_stage_t* stage,
-    id4_ideogram4_dit_request_config_t request, iree_allocator_t host_allocator,
-    id4_pipeline_program_t** out_program) {
+    const id4_pipeline_stage_plan_options_t* stage_options,
+    const id4_ideogram4_dit_stage_plan_options_t* dit_options,
+    iree_allocator_t host_allocator, id4_pipeline_program_t** out_program) {
   IREE_ASSERT_ARGUMENT(out_program);
   *out_program = NULL;
 
@@ -248,7 +263,14 @@ static iree_status_t id4_ideogram4_dit_stage_author_program(
     memset(&program_options, 0, sizeof(program_options));
     program_options.structure_size = sizeof(program_options);
     program_options.model = stage->model;
-    program_options.request = request;
+    program_options.request = dit_options->request;
+    program_options.activation_format = dit_options->activation_format;
+    if (iree_all_bits_set(
+            stage_options->flags,
+            ID4_PIPELINE_STAGE_PLAN_FLAG_CAPTURE_DIAGNOSTIC_TAPS)) {
+      program_options.diagnostic_tap_names =
+          stage_options->diagnostic_tap_names;
+    }
     status =
         id4_ideogram4_dit_program_author_forward(&program_options, builder);
   }
@@ -282,6 +304,8 @@ static iree_status_t id4_ideogram4_dit_stage_parse_plan_extension(
   }
   IREE_RETURN_IF_ERROR(id4_ideogram4_dit_stage_validate_request(
       &stage->model, dit_options->request));
+  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_stage_validate_activation_format(
+      dit_options->activation_format));
   *out_dit_options = dit_options;
   return iree_ok_status();
 }
@@ -329,7 +353,7 @@ static iree_status_t id4_ideogram4_dit_stage_plan(
 
   id4_pipeline_program_t* program = NULL;
   iree_status_t status = id4_ideogram4_dit_stage_author_program(
-      stage, dit_options->request, stage->host_allocator, &program);
+      stage, options, dit_options, stage->host_allocator, &program);
   if (iree_status_is_ok(status)) {
     status = id4_ideogram4_dit_stage_create_program_plan(stage, options,
                                                          program, out_plan);

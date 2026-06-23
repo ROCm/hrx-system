@@ -1,0 +1,69 @@
+config.decl @id4.ideogram4.condition_project_bias.text_token_count : %value: index where [range(%value, 1, 65536)]
+config.decl @id4.ideogram4.condition_project_bias.padded_token_count : %value: index where [range(%value, 16, 65536), mul(%value, 16)]
+config.decl @id4.ideogram4.condition_project_bias.total_token_count : %value: index where [range(%value, 1, 131072)]
+config.decl @id4.ideogram4.condition_project_bias.hidden_size : %value: index where [range(%value, 1, 65536)]
+config.decl @id4.ideogram4.condition_project_bias.element_count : %value: index where [range(%value, 1, 268435456)]
+
+kernel.def export("id4_ideogram4_condition_project_bias_indicator_f32") @id4_ideogram4_condition_project_bias_indicator_f32() {
+  %unit = index.constant 1 : index
+  %workgroup_size_x = index.constant 256 : index
+  %element_count = config.get @id4.ideogram4.condition_project_bias.element_count : index
+  %rounding = index.constant 255 : index
+  %rounded = index.add %element_count, %rounding : index
+  %workgroups_x = index.div %rounded, %workgroup_size_x : index
+  kernel.launch.config workgroups(%workgroups_x, %unit, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
+} launch(%projected: buffer, %bias: buffer, %image_indicator: buffer, %indicator_embedding: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %workgroup = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %workgroup_size_x = index.constant 256 : index
+  %text_token_count = config.get @id4.ideogram4.condition_project_bias.text_token_count : index
+  %padded_token_count = config.get @id4.ideogram4.condition_project_bias.padded_token_count : index
+  %total_token_count = config.get @id4.ideogram4.condition_project_bias.total_token_count : index
+  %hidden_size = config.get @id4.ideogram4.condition_project_bias.hidden_size : index
+  %element_count = config.get @id4.ideogram4.condition_project_bias.element_count : index
+  %element_index = index.madd %workgroup, %workgroup_size_x, %lane : index
+  %in_bounds = index.cmp ult, %element_index, %element_count : index
+
+  %projected_noalias, %bias_noalias, %image_indicator_noalias, %indicator_embedding_noalias, %output_noalias = buffer.assume.noalias %projected, %bias, %image_indicator, %indicator_embedding, %output : buffer, buffer, buffer, buffer, buffer
+  %projected_global = buffer.assume.memory_space<global> %projected_noalias : buffer
+  %bias_global = buffer.assume.memory_space<global> %bias_noalias : buffer
+  %image_indicator_global = buffer.assume.memory_space<global> %image_indicator_noalias : buffer
+  %indicator_embedding_global = buffer.assume.memory_space<global> %indicator_embedding_noalias : buffer
+  %output_global = buffer.assume.memory_space<global> %output_noalias : buffer
+  %projected_view = buffer.view %projected_global[%base] : buffer -> view<[%hidden_size]x[%padded_token_count]xf32, #dense>
+  %bias_view = buffer.view %bias_global[%base] : buffer -> view<[%hidden_size]xbf16, #dense>
+  %image_indicator_view = buffer.view %image_indicator_global[%base] : buffer -> view<[%total_token_count]xi32, #dense>
+  %indicator_embedding_view = buffer.view %indicator_embedding_global[%base] : buffer -> view<2x[%hidden_size]xbf16, #dense>
+  %output_view = buffer.view %output_global[%base] : buffer -> view<[%hidden_size]x[%total_token_count]xf32, #dense>
+
+  scf.if %in_bounds {
+    %hidden = index.div %element_index, %text_token_count : index
+    %token = index.rem %element_index, %text_token_count : index
+    %projected_value = view.load %projected_view[%hidden, %token] : view<[%hidden_size]x[%padded_token_count]xf32, #dense> -> f32
+    %bias_bf16 = view.load %bias_view[%hidden] : view<[%hidden_size]xbf16, #dense> -> bf16
+    %bias_f32 = scalar.extf %bias_bf16 : bf16 to f32
+    %indicator = view.load %image_indicator_view[%token] : view<[%total_token_count]xi32, #dense> -> i32
+    %indicator_index = index.cast %indicator : i32 to index
+    %indicator_embedding_bf16 = view.load %indicator_embedding_view[%indicator_index, %hidden] : view<2x[%hidden_size]xbf16, #dense> -> bf16
+    %indicator_embedding_f32 = scalar.extf %indicator_embedding_bf16 : bf16 to f32
+    %with_bias = scalar.addf<reassoc|nnan|ninf|nsz> %projected_value, %bias_f32 : f32
+    %value = scalar.addf<reassoc|nnan|ninf|nsz> %with_bias, %indicator_embedding_f32 : f32
+    view.store %value, %output_view[%hidden, %token] : f32, view<[%hidden_size]x[%total_token_count]xf32, #dense>
+  }
+  kernel.return
+}
+
+check.case public @id4_ideogram4_condition_project_bias_indicator_f32_small_case {
+  %projected = check.generate.fill value(10.0) : tensor<2x16xf32>
+  %bias = check.generate.fill value(2.0) : tensor<2xbf16>
+  %image_indicator = check.generate.fill value(0) : tensor<3xi32>
+  %indicator_embedding = check.generate.fill value(3.0) : tensor<2x2xbf16>
+  %output = check.generate.fill value(0.0) : tensor<2x3xf32>
+  %expected = check.generate.fill value(15.0) : tensor<2x3xf32>
+  func.call @id4_ideogram4_condition_project_bias_indicator_f32(%projected, %bias, %image_indicator, %indicator_embedding, %output) : (tensor<2x16xf32>, tensor<2xbf16>, tensor<3xi32>, tensor<2x2xbf16>, tensor<2x3xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2x3xf32>
+  check.return
+}
+
+check.benchmark<@id4_ideogram4_condition_project_bias_indicator_f32_small_case> @id4_ideogram4_condition_project_bias_indicator_f32_small

@@ -44,6 +44,8 @@ typedef struct id4_ideogram4_dit_stage_plan_options_t {
   const void* next;
   // Dynamic request dimensions for this plan.
   id4_ideogram4_dit_request_config_t request;
+  // Activation storage format for internal linear-input producers.
+  id4_ideogram4_dit_activation_format_t activation_format;
 } id4_ideogram4_dit_stage_plan_options_t;
 
 // Creates an Ideogram4 DiT forward stage.

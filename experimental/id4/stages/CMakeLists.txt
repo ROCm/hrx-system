@@ -580,7 +580,9 @@ iree_cc_binary_benchmark(
     iree::base::tooling::flags
     iree::experimental::id4::pipeline::plan
     iree::experimental::id4::pipeline::stage
+    iree::experimental::id4::tooling::filesystem
     iree::hal
+    iree::io::file_handle
     iree::io::parameter_provider
     iree::testing::benchmark
     iree::testing::benchmark_main

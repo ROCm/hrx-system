@@ -1,0 +1,61 @@
+config.decl @id4.ideogram4.attention_qkv_tail_zero.token_offset : %value: index where [range(%value, 0, 131072)]
+config.decl @id4.ideogram4.attention_qkv_tail_zero.padded_token_count : %value: index where [range(%value, 16, 131072), mul(%value, 16)]
+config.decl @id4.ideogram4.attention_qkv_tail_zero.hidden_size : %value: index where [range(%value, 1, 131072)]
+config.decl @id4.ideogram4.attention_qkv_tail_zero.element_count : %value: index where [range(%value, 1, 134217728)]
+
+kernel.def export("id4_ideogram4_attention_qkv_tail_zero_bf16") @id4_ideogram4_attention_qkv_tail_zero_bf16() {
+  %unit = index.constant 1 : index
+  %workgroup_size_x = index.constant 256 : index
+  %element_count = config.get @id4.ideogram4.attention_qkv_tail_zero.element_count : index
+  %rounded = index.add %element_count, %workgroup_size_x : index
+  %adjusted = index.sub %rounded, %unit : index
+  %workgroups_x = index.div %adjusted, %workgroup_size_x : index
+  kernel.launch.config workgroups(%workgroups_x, %unit, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
+} launch(%query: buffer, %key: buffer, %value: buffer) {
+  %base = index.constant 0 : offset
+  %zero_f32 = scalar.constant 0.0 : f32
+  %zero_bf16 = scalar.fptrunc %zero_f32 : f32 to bf16
+  %workgroup_size_x = index.constant 256 : index
+  %workgroup = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %token_offset = config.get @id4.ideogram4.attention_qkv_tail_zero.token_offset : index
+  %padded_token_count = config.get @id4.ideogram4.attention_qkv_tail_zero.padded_token_count : index
+  %hidden_size = config.get @id4.ideogram4.attention_qkv_tail_zero.hidden_size : index
+  %element_count = config.get @id4.ideogram4.attention_qkv_tail_zero.element_count : index
+  %workgroup_base = index.mul %workgroup, %workgroup_size_x : index
+  %element = index.add %workgroup_base, %lane : index
+  %valid = index.cmp ult, %element, %element_count : index
+
+  %query_noalias, %key_noalias, %value_noalias = buffer.assume.noalias %query, %key, %value : buffer, buffer, buffer
+  %query_global = buffer.assume.memory_space<global> %query_noalias : buffer
+  %key_global = buffer.assume.memory_space<global> %key_noalias : buffer
+  %value_global = buffer.assume.memory_space<global> %value_noalias : buffer
+  %value_layout = encoding.layout.strided [1, %padded_token_count] : encoding<layout>
+  %query_view = buffer.view %query_global[%base] : buffer -> view<[%padded_token_count]x[%hidden_size]xbf16, #dense>
+  %key_view = buffer.view %key_global[%base] : buffer -> view<[%padded_token_count]x[%hidden_size]xbf16, #dense>
+  %value_view = buffer.view %value_global[%base] : buffer -> view<[%padded_token_count]x[%hidden_size]xbf16, %value_layout>
+
+  scf.if %valid {
+    %relative_token = index.div %element, %hidden_size : index
+    %channel = index.rem %element, %hidden_size : index
+    %token = index.add %token_offset, %relative_token : index
+    view.store %zero_bf16, %query_view[%token, %channel] : bf16, view<[%padded_token_count]x[%hidden_size]xbf16, #dense>
+    view.store %zero_bf16, %key_view[%token, %channel] : bf16, view<[%padded_token_count]x[%hidden_size]xbf16, #dense>
+    view.store %zero_bf16, %value_view[%token, %channel] : bf16, view<[%padded_token_count]x[%hidden_size]xbf16, %value_layout>
+  }
+  kernel.return
+}
+
+check.case public @id4_ideogram4_attention_qkv_tail_zero_bf16_small_case {
+  %query = check.generate.fill value(1.0) : tensor<16x16xbf16>
+  %key = check.generate.fill value(1.0) : tensor<16x16xbf16>
+  %value = check.generate.fill value(1.0) : tensor<16x16xbf16>
+  %expected = check.generate.fill value(0.0) : tensor<16x16xbf16>
+  func.call @id4_ideogram4_attention_qkv_tail_zero_bf16(%query, %key, %value) : (tensor<16x16xbf16>, tensor<16x16xbf16>, tensor<16x16xbf16>)
+  check.expect.close actual(%query) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<16x16xbf16>
+  check.expect.close actual(%key) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<16x16xbf16>
+  check.expect.close actual(%value) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<16x16xbf16>
+  check.return
+}
+
+check.benchmark<@id4_ideogram4_attention_qkv_tail_zero_bf16_small_case> @id4_ideogram4_attention_qkv_tail_zero_bf16_small

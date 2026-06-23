@@ -1,0 +1,89 @@
+config.decl @id4.ideogram4.mlp_up_silu_product_tail.token_count : %value: index where [range(%value, 1, 131072)]
+config.decl @id4.ideogram4.mlp_up_silu_product_tail.token_offset : %value: index where [range(%value, 0, 131071)]
+config.decl @id4.ideogram4.mlp_up_silu_product_tail.dispatch_token_count : %value: index where [range(%value, 1, 16)]
+config.decl @id4.ideogram4.mlp_up_silu_product_tail.input_size : %value: index where [range(%value, 1, 131072)]
+config.decl @id4.ideogram4.mlp_up_silu_product_tail.intermediate_size : %value: index where [range(%value, 1, 65536)]
+
+kernel.def export("id4_ideogram4_mlp_up_silu_product_bf16_tail") @id4_ideogram4_mlp_up_silu_product_bf16_tail() {
+  %unit = index.constant 1 : index
+  %fifteen = index.constant 15 : index
+  %workgroup_size_x = index.constant 256 : index
+  %token_block = index.constant 16 : index
+  %row_block = index.constant 16 : index
+  %dispatch_token_count = config.get @id4.ideogram4.mlp_up_silu_product_tail.dispatch_token_count : index
+  %intermediate_size = config.get @id4.ideogram4.mlp_up_silu_product_tail.intermediate_size : index
+  %rounded_token_count = index.add %dispatch_token_count, %fifteen : index
+  %token_tile_count = index.div %rounded_token_count, %token_block : index
+  %rounded_intermediate_size = index.add %intermediate_size, %fifteen : index
+  %row_tile_count = index.div %rounded_intermediate_size, %row_block : index
+  kernel.launch.config workgroups(%token_tile_count, %row_tile_count, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
+} launch(%input_bf16: buffer, %up_weight: buffer, %gate: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %token_block = index.constant 16 : index
+  %row_block = index.constant 16 : index
+  %token_tile = kernel.workgroup.id<x> : index
+  %row_tile = kernel.workgroup.id<y> : index
+  %lane = kernel.workitem.id<x> : index
+  %token_count = config.get @id4.ideogram4.mlp_up_silu_product_tail.token_count : index
+  %token_base_offset = config.get @id4.ideogram4.mlp_up_silu_product_tail.token_offset : index
+  %dispatch_token_count = config.get @id4.ideogram4.mlp_up_silu_product_tail.dispatch_token_count : index
+  %input_size = config.get @id4.ideogram4.mlp_up_silu_product_tail.input_size : index
+  %intermediate_size = config.get @id4.ideogram4.mlp_up_silu_product_tail.intermediate_size : index
+  %base_dispatch_token = index.mul %token_tile, %token_block : index
+  %base_row = index.mul %row_tile, %row_block : index
+  %local_row = index.div %lane, %token_block : index
+  %local_token = index.rem %lane, %token_block : index
+  %row = index.add %base_row, %local_row : index
+  %dispatch_token = index.add %base_dispatch_token, %local_token : index
+  %token = index.add %token_base_offset, %dispatch_token : index
+  %zero_f32 = scalar.constant 0.0 : f32
+
+  %input_noalias, %up_weight_noalias, %gate_noalias, %output_noalias = buffer.assume.noalias %input_bf16, %up_weight, %gate, %output : buffer, buffer, buffer, buffer
+  %input_global = buffer.assume.memory_space<global> %input_noalias : buffer
+  %up_weight_global = buffer.assume.memory_space<global> %up_weight_noalias : buffer
+  %gate_global = buffer.assume.memory_space<global> %gate_noalias : buffer
+  %output_global = buffer.assume.memory_space<global> %output_noalias : buffer
+  %input_view = buffer.view %input_global[%base] : buffer -> view<[%token_count]x[%input_size]xbf16, #dense>
+  %up_weight_view = buffer.view %up_weight_global[%base] : buffer -> view<[%intermediate_size]x[%input_size]xbf16, #dense>
+  %gate_view = buffer.view %gate_global[%base] : buffer -> view<[%token_count]x[%intermediate_size]xbf16, #dense>
+  %output_view = buffer.view %output_global[%base] : buffer -> view<[%token_count]x[%intermediate_size]xbf16, #dense>
+
+  %dispatch_token_valid = index.cmp ult, %dispatch_token, %dispatch_token_count : index
+  %token_valid = index.cmp ult, %token, %token_count : index
+  %row_valid = index.cmp ult, %row, %intermediate_size : index
+  %valid_token = scalar.andi %dispatch_token_valid, %token_valid : i1
+  %valid_output = scalar.andi %valid_token, %row_valid : i1
+  scf.if %valid_output {
+    %up = scf.for %input_index = [%zero to %input_size step %one](%acc = %zero_f32 : f32) -> (f32) {
+      %input_bf16_value = view.load %input_view[%token, %input_index] : view<[%token_count]x[%input_size]xbf16, #dense> -> bf16
+      %up_weight_bf16_value = view.load %up_weight_view[%row, %input_index] : view<[%intermediate_size]x[%input_size]xbf16, #dense> -> bf16
+      %input_value = scalar.extf %input_bf16_value : bf16 to f32
+      %up_weight_value = scalar.extf %up_weight_bf16_value : bf16 to f32
+      %product = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %input_value, %up_weight_value : f32
+      %next = scalar.addf<reassoc|nnan|ninf|nsz> %acc, %product : f32
+      scf.yield %next : f32
+    }
+    %gate_bf16_value = view.load %gate_view[%token, %row] : view<[%token_count]x[%intermediate_size]xbf16, #dense> -> bf16
+    %gate_value = scalar.extf %gate_bf16_value : bf16 to f32
+    %gate_silu = scalar.siluf %gate_value : f32
+    %value = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %gate_silu, %up : f32
+    %rounded = scalar.fptrunc %value : f32 to bf16
+    view.store %rounded, %output_view[%token, %row] : bf16, view<[%token_count]x[%intermediate_size]xbf16, #dense>
+  }
+  kernel.return
+}
+
+check.case public @id4_ideogram4_mlp_up_silu_product_bf16_tail_small_case {
+  %input = check.generate.fill value(1.0) : tensor<3x1xbf16>
+  %up_weight = check.generate.fill value(2.0) : tensor<3x1xbf16>
+  %gate = check.generate.fill value(1.0) : tensor<3x3xbf16>
+  %output = check.generate.fill value(0.0) : tensor<3x3xbf16>
+  %expected = check.generate.fill value(1.4621171572600098) : tensor<3x3xbf16>
+  func.call @id4_ideogram4_mlp_up_silu_product_bf16_tail(%input, %up_weight, %gate, %output) : (tensor<3x1xbf16>, tensor<3x1xbf16>, tensor<3x3xbf16>, tensor<3x3xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.01) rtol(0.01) nan(same) : tensor<3x3xbf16>
+  check.return
+}
+
+check.benchmark<@id4_ideogram4_mlp_up_silu_product_bf16_tail_small_case> @id4_ideogram4_mlp_up_silu_product_bf16_tail_small

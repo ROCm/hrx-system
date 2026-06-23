@@ -424,6 +424,8 @@ static iree_status_t PlanDitStage(
   std::memset(&dit_options, 0, sizeof(dit_options));
   dit_options.structure_size = sizeof(dit_options);
   dit_options.request = request;
+  dit_options.activation_format =
+      ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_F32_CANONICAL;
 
   id4_pipeline_stage_plan_options_t plan_options;
   std::memset(&plan_options, 0, sizeof(plan_options));

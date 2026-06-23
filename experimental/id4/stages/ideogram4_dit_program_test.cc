@@ -60,15 +60,15 @@ static id4_ideogram4_dit_model_config_t MakeModelConfig() {
       // Channel count of each VAE latent image token.
       /*.input_channel_count=*/4,
       // Transformer hidden-state channel count.
-      /*.hidden_size=*/16,
+      /*.hidden_size=*/32,
       // Feed-forward intermediate channel count.
-      /*.intermediate_size=*/32,
+      /*.intermediate_size=*/64,
       // Transformer attention head count.
-      /*.attention_head_count=*/4,
+      /*.attention_head_count=*/2,
       // AdaLN conditioning vector channel count.
       /*.adaln_size=*/4,
       // Qwen condition feature channel count.
-      /*.llm_feature_count=*/52,
+      /*.llm_feature_count=*/208,
       // Number of image-indicator embedding rows.
       /*.image_indicator_count=*/2,
   };
@@ -94,6 +94,11 @@ static id4_ideogram4_dit_program_options_t MakeProgramOptions(
           // Number of imported Qwen condition token positions.
           /*.text_token_count=*/0,
       },
+      // Activation storage format.
+      /*.activation_format=*/
+      ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_F32_CANONICAL,
+      // Diagnostic tap names requested by the stage plan.
+      /*.diagnostic_tap_names=*/iree_string_view_list_empty(),
   };
   return options;
 }
@@ -182,6 +187,8 @@ TEST(Ideogram4DitProgram, AuthorsForwardPreludeSliceContract) {
   id4_ideogram4_dit_program_options_t options =
       MakeProgramOptions(latent_shape);
   id4_pipeline_program_t* program = CreateForwardProgram(&options);
+  const uint32_t head_size =
+      options.model.hidden_size / options.model.attention_head_count;
 
   EXPECT_TRUE(ProgramHasTensorWithShape(program, ID4_PIPELINE_PROGRAM_DTYPE_F32,
                                         latent_shape));
@@ -193,7 +200,7 @@ TEST(Ideogram4DitProgram, AuthorsForwardPreludeSliceContract) {
                                 id4_pipeline_program_make_shape_rank2(2, 1)));
   EXPECT_TRUE(ProgramHasTensorWithShape(
       program, ID4_PIPELINE_PROGRAM_DTYPE_F32,
-      id4_pipeline_program_make_shape_rank4(2, 2, 2, 2)));
+      id4_pipeline_program_make_shape_rank4(2, 2, head_size / 2, 2)));
   EXPECT_TRUE(ProgramHasTensorWithShape(
       program, ID4_PIPELINE_PROGRAM_DTYPE_BF16,
       id4_pipeline_program_make_shape_rank2(
@@ -233,6 +240,8 @@ TEST(Ideogram4DitProgram, AuthorsConditionedPreludeSliceContract) {
       ID4_IDEOGRAM4_DIT_CONDITIONING_MODE_CONDITIONED;
   options.request.text_token_count = 3;
   id4_pipeline_program_t* program = CreateForwardProgram(&options);
+  const uint32_t head_size =
+      options.model.hidden_size / options.model.attention_head_count;
 
   EXPECT_TRUE(ProgramHasTensorWithShape(
       program, ID4_PIPELINE_PROGRAM_DTYPE_F32,
@@ -243,7 +252,7 @@ TEST(Ideogram4DitProgram, AuthorsConditionedPreludeSliceContract) {
                                 id4_pipeline_program_make_shape_rank2(5, 1)));
   EXPECT_TRUE(ProgramHasTensorWithShape(
       program, ID4_PIPELINE_PROGRAM_DTYPE_F32,
-      id4_pipeline_program_make_shape_rank4(2, 2, 2, 5)));
+      id4_pipeline_program_make_shape_rank4(2, 2, head_size / 2, 5)));
   EXPECT_TRUE(ProgramHasTensorWithShape(
       program, ID4_PIPELINE_PROGRAM_DTYPE_BF16,
       id4_pipeline_program_make_shape_rank1(options.model.llm_feature_count)));
@@ -267,6 +276,16 @@ TEST(Ideogram4DitProgram, RejectsInvalidLatentRank) {
   ProgramBuilderScope builder_scope;
   id4_ideogram4_dit_program_options_t options =
       MakeProgramOptions(id4_pipeline_program_make_shape_rank1(2));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        id4_ideogram4_dit_program_author_forward(
+                            &options, builder_scope.builder()));
+}
+
+TEST(Ideogram4DitProgram, RejectsInvalidActivationFormat) {
+  ProgramBuilderScope builder_scope;
+  id4_ideogram4_dit_program_options_t options =
+      MakeProgramOptions(id4_pipeline_program_make_shape_rank4(1, 2, 4, 1));
+  options.activation_format = ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_INVALID;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         id4_ideogram4_dit_program_author_forward(
                             &options, builder_scope.builder()));

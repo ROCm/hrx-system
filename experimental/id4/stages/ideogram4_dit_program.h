@@ -32,6 +32,16 @@ typedef enum id4_ideogram4_dit_conditioning_mode_e {
   ID4_IDEOGRAM4_DIT_CONDITIONING_MODE_CONDITIONED = 2,
 } id4_ideogram4_dit_conditioning_mode_t;
 
+// Activation storage format selected while authoring DiT intermediates.
+typedef enum id4_ideogram4_dit_activation_format_e {
+  // Invalid activation storage format.
+  ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_INVALID = 0,
+  // Reference format matching tensor taps: F32 channel-major tensors.
+  ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_F32_CANONICAL = 1,
+  // Production format for linear inputs: BF16 token-major tensors.
+  ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT = 2,
+} id4_ideogram4_dit_activation_format_t;
+
 // Ideogram4 DiT model dimensions used when authoring the forward program.
 typedef struct id4_ideogram4_dit_model_config_t {
   // Number of transformer blocks in the DiT.
@@ -72,6 +82,10 @@ typedef struct id4_ideogram4_dit_program_options_t {
   id4_ideogram4_dit_model_config_t model;
   // Dynamic request dimensions.
   id4_ideogram4_dit_request_config_t request;
+  // Activation storage format for internal linear-input producers.
+  id4_ideogram4_dit_activation_format_t activation_format;
+  // Diagnostic tap names requested by the stage plan.
+  iree_string_view_list_t diagnostic_tap_names;
 } id4_ideogram4_dit_program_options_t;
 
 // Authors the Ideogram4 DiT forward program into |builder|.

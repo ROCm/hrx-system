@@ -11,6 +11,7 @@
 #include <stdint.h>
 
 #include "experimental/id4/pipeline/program.h"
+#include "experimental/id4/stages/ideogram4_dit_program.h"
 #include "iree/base/api.h"
 #include "iree/hal/command_buffer.h"
 
@@ -65,6 +66,10 @@ typedef struct id4_ideogram4_dit_program_block_options_t {
   id4_pipeline_program_tensor_t adaln_input;
   // Initialized rotary position embedding tensor.
   id4_pipeline_program_tensor_t position_embedding;
+  // Activation storage format for internal linear-input producers.
+  id4_ideogram4_dit_activation_format_t activation_format;
+  // Diagnostic tap names requested by the stage plan.
+  iree_string_view_list_t diagnostic_tap_names;
 } id4_ideogram4_dit_program_block_options_t;
 
 iree_status_t id4_ideogram4_dit_program_format(char* buffer,
@@ -83,6 +88,9 @@ iree_status_t id4_ideogram4_dit_program_format_branch_layer_name(
 
 bool id4_ideogram4_dit_program_checked_mul_u64(uint64_t lhs, uint64_t rhs,
                                                uint64_t* out_result);
+
+bool id4_ideogram4_dit_program_has_diagnostic_tap(
+    iree_string_view_list_t diagnostic_tap_names, iree_string_view_t name);
 
 iree_hal_dispatch_config_t id4_ideogram4_dit_program_make_dispatch_config(
     uint32_t workgroup_count_x, uint32_t workgroup_count_y,
@@ -128,7 +136,22 @@ iree_status_t id4_ideogram4_dit_program_dispatch_modulated_rmsnorm(
     id4_pipeline_program_tensor_t input, id4_pipeline_program_tensor_t weight,
     id4_pipeline_program_tensor_t scale, id4_pipeline_program_tensor_t output);
 
+iree_status_t
+id4_ideogram4_dit_program_dispatch_modulated_rmsnorm_linear_input_bf16(
+    id4_pipeline_program_builder_t* builder, iree_string_view_t name,
+    uint32_t token_count, uint32_t hidden_size,
+    id4_pipeline_program_tensor_t input, id4_pipeline_program_tensor_t weight,
+    id4_pipeline_program_tensor_t scale, id4_pipeline_program_tensor_t output);
+
 iree_status_t id4_ideogram4_dit_program_dispatch_rmsnorm_gated_residual(
+    id4_pipeline_program_builder_t* builder, iree_string_view_t name,
+    uint32_t token_count, uint32_t hidden_size,
+    id4_pipeline_program_tensor_t input, id4_pipeline_program_tensor_t weight,
+    id4_pipeline_program_tensor_t gate, id4_pipeline_program_tensor_t residual,
+    id4_pipeline_program_tensor_t output);
+
+iree_status_t
+id4_ideogram4_dit_program_dispatch_rmsnorm_gated_residual_input_bf16(
     id4_pipeline_program_builder_t* builder, iree_string_view_t name,
     uint32_t token_count, uint32_t hidden_size,
     id4_pipeline_program_tensor_t input, id4_pipeline_program_tensor_t weight,
@@ -143,7 +166,42 @@ iree_status_t id4_ideogram4_dit_program_dispatch_mlp_gate_up_silu(
     id4_pipeline_program_tensor_t up_weight,
     id4_pipeline_program_tensor_t output);
 
+iree_status_t
+id4_ideogram4_dit_program_dispatch_mlp_gate_up_silu_linear_input_bf16(
+    id4_pipeline_program_builder_t* builder, iree_string_view_t name,
+    uint32_t token_count, uint32_t input_size, uint32_t intermediate_size,
+    id4_pipeline_program_tensor_t input,
+    id4_pipeline_program_tensor_t gate_weight,
+    id4_pipeline_program_tensor_t up_weight,
+    id4_pipeline_program_tensor_t output);
+
+iree_status_t
+id4_ideogram4_dit_program_dispatch_mlp_up_silu_product_packed_bf16(
+    id4_pipeline_program_builder_t* builder, iree_string_view_t name,
+    uint32_t token_count, uint32_t token_capacity, uint32_t input_size,
+    uint32_t intermediate_size, id4_pipeline_program_tensor_t input,
+    id4_pipeline_program_tensor_t up_weight, id4_pipeline_program_tensor_t gate,
+    id4_pipeline_program_tensor_t output);
+
+iree_status_t id4_ideogram4_dit_program_dispatch_linear_packed_bf16_f32(
+    id4_pipeline_program_builder_t* builder, iree_string_view_t name,
+    uint32_t token_count, uint32_t token_capacity, uint32_t input_size,
+    uint32_t output_size, id4_pipeline_program_tensor_t input,
+    id4_pipeline_program_tensor_t weight, id4_pipeline_program_tensor_t output);
+
+iree_status_t id4_ideogram4_dit_program_dispatch_linear_packed_bf16_bf16(
+    id4_pipeline_program_builder_t* builder, iree_string_view_t name,
+    uint32_t token_count, uint32_t token_capacity, uint32_t input_size,
+    uint32_t output_size, id4_pipeline_program_tensor_t input,
+    id4_pipeline_program_tensor_t weight, id4_pipeline_program_tensor_t output);
+
 iree_status_t id4_ideogram4_dit_program_dispatch_linear_bf16_f32(
+    id4_pipeline_program_builder_t* builder, iree_string_view_t name,
+    uint32_t token_count, uint32_t input_size, uint32_t output_size,
+    id4_pipeline_program_tensor_t input, id4_pipeline_program_tensor_t weight,
+    id4_pipeline_program_tensor_t output);
+
+iree_status_t id4_ideogram4_dit_program_dispatch_linear_bf16_bf16(
     id4_pipeline_program_builder_t* builder, iree_string_view_t name,
     uint32_t token_count, uint32_t input_size, uint32_t output_size,
     id4_pipeline_program_tensor_t input, id4_pipeline_program_tensor_t weight,
@@ -158,12 +216,31 @@ iree_status_t id4_ideogram4_dit_program_dispatch_qkv_split(
 iree_status_t id4_ideogram4_dit_program_dispatch_qkv_norm_rotary(
     id4_pipeline_program_builder_t* builder, iree_string_view_t name,
     uint32_t token_count, uint32_t attention_head_count, uint32_t head_size,
+    id4_ideogram4_dit_activation_format_t activation_format,
     id4_pipeline_program_tensor_t qkv,
     id4_pipeline_program_tensor_t norm_q_weight,
     id4_pipeline_program_tensor_t norm_k_weight,
     id4_pipeline_program_tensor_t position_embedding,
     id4_pipeline_program_tensor_t rotated_query,
     id4_pipeline_program_tensor_t rotated_key,
+    id4_pipeline_program_tensor_t value);
+
+iree_status_t
+id4_ideogram4_dit_program_dispatch_qkv_norm_rotary_bf16_packed_value(
+    id4_pipeline_program_builder_t* builder, iree_string_view_t name,
+    uint32_t token_count, uint32_t attention_head_count, uint32_t head_size,
+    uint32_t value_token_stride, id4_pipeline_program_tensor_t qkv,
+    id4_pipeline_program_tensor_t norm_q_weight,
+    id4_pipeline_program_tensor_t norm_k_weight,
+    id4_pipeline_program_tensor_t position_embedding,
+    id4_pipeline_program_tensor_t rotated_query,
+    id4_pipeline_program_tensor_t rotated_key,
+    id4_pipeline_program_tensor_t value);
+
+iree_status_t id4_ideogram4_dit_program_dispatch_attention_qkv_tail_zero_bf16(
+    id4_pipeline_program_builder_t* builder, iree_string_view_t name,
+    uint32_t token_offset, uint32_t padded_token_count, uint32_t hidden_size,
+    id4_pipeline_program_tensor_t query, id4_pipeline_program_tensor_t key,
     id4_pipeline_program_tensor_t value);
 
 iree_status_t id4_ideogram4_dit_program_dispatch_head_rmsnorm(
@@ -181,6 +258,24 @@ iree_status_t id4_ideogram4_dit_program_dispatch_rotary_apply(
     id4_pipeline_program_tensor_t rotated_key);
 
 iree_status_t id4_ideogram4_dit_program_dispatch_attention(
+    id4_pipeline_program_builder_t* builder, iree_string_view_t name,
+    uint32_t token_count, uint32_t attention_head_count, uint32_t head_size,
+    id4_pipeline_program_tensor_t query, id4_pipeline_program_tensor_t key,
+    id4_pipeline_program_tensor_t value, id4_pipeline_program_tensor_t output);
+
+iree_status_t id4_ideogram4_dit_program_dispatch_attention_linear_input_bf16(
+    id4_pipeline_program_builder_t* builder, iree_string_view_t name,
+    uint32_t token_count, uint32_t attention_head_count, uint32_t head_size,
+    id4_pipeline_program_tensor_t query, id4_pipeline_program_tensor_t key,
+    id4_pipeline_program_tensor_t value, id4_pipeline_program_tensor_t output);
+
+iree_status_t id4_ideogram4_dit_program_dispatch_attention_bf16(
+    id4_pipeline_program_builder_t* builder, iree_string_view_t name,
+    uint32_t token_count, uint32_t attention_head_count, uint32_t head_size,
+    id4_pipeline_program_tensor_t query, id4_pipeline_program_tensor_t key,
+    id4_pipeline_program_tensor_t value, id4_pipeline_program_tensor_t output);
+
+iree_status_t id4_ideogram4_dit_program_dispatch_attention_bf16_linear_input(
     id4_pipeline_program_builder_t* builder, iree_string_view_t name,
     uint32_t token_count, uint32_t attention_head_count, uint32_t head_size,
     id4_pipeline_program_tensor_t query, id4_pipeline_program_tensor_t key,

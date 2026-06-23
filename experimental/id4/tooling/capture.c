@@ -10,11 +10,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#if defined(IREE_PLATFORM_WINDOWS)
-#include <direct.h>
-#else
-#include <sys/stat.h>
-#endif  // IREE_PLATFORM_WINDOWS
+#include "experimental/id4/tooling/filesystem.h"
 
 #define ID4_TOOLING_CAPTURE_NPY_PREFIX_LENGTH 10
 
@@ -142,54 +138,6 @@ static iree_status_t id4_tooling_capture_validate_options(
   }
   return id4_tooling_capture_validate_semaphore_list(
       options->wait_semaphore_list, IREE_SV("capture wait"));
-}
-
-static iree_status_t id4_tooling_capture_make_directory(
-    iree_string_view_t directory, iree_allocator_t host_allocator) {
-  char* directory_path = NULL;
-  IREE_RETURN_IF_ERROR(id4_tooling_capture_dup_cstring(
-      directory, host_allocator, &directory_path));
-#if defined(IREE_PLATFORM_WINDOWS)
-  const int result = _mkdir(directory_path);
-#else
-  const int result = mkdir(directory_path, 0777);
-#endif  // IREE_PLATFORM_WINDOWS
-  const int saved_errno = errno;
-  iree_allocator_free(host_allocator, directory_path);
-  if (result == 0 || saved_errno == EEXIST) return iree_ok_status();
-  return iree_make_status(iree_status_code_from_errno(saved_errno),
-                          "failed to create capture output directory (%d)",
-                          saved_errno);
-}
-
-static iree_status_t id4_tooling_capture_format_path(
-    iree_string_view_t directory, iree_string_view_t file_name,
-    iree_allocator_t host_allocator, iree_string_view_t* out_path) {
-  *out_path = iree_string_view_empty();
-  iree_string_builder_t builder;
-  iree_string_builder_initialize(host_allocator, &builder);
-  iree_status_t status = iree_string_builder_append_string(&builder, directory);
-  if (iree_status_is_ok(status) && directory.size != 0 &&
-      directory.data[directory.size - 1] != '/') {
-    status = iree_string_builder_append_cstring(&builder, "/");
-  }
-  if (iree_status_is_ok(status)) {
-    status = iree_string_builder_append_string(&builder, file_name);
-  }
-  if (iree_status_is_ok(status)) {
-    const iree_host_size_t path_size = iree_string_builder_size(&builder);
-    char* storage = iree_string_builder_take_storage(&builder);
-    *out_path = iree_make_string_view(storage, path_size);
-  }
-  iree_string_builder_deinitialize(&builder);
-  return status;
-}
-
-static void id4_tooling_capture_free_path(iree_string_view_t* path,
-                                          iree_allocator_t host_allocator) {
-  if (!path) return;
-  iree_allocator_free(host_allocator, (void*)path->data);
-  *path = iree_string_view_empty();
 }
 
 static iree_status_t id4_tooling_capture_write_file(
@@ -533,8 +481,8 @@ static iree_status_t id4_tooling_capture_capture_tensor(
   iree_string_view_t file_name = iree_make_cstring_view(file_name_storage);
   iree_string_view_t file_path = iree_string_view_empty();
   iree_status_t status =
-      id4_tooling_capture_format_path(options->output_directory, file_name,
-                                      options->host_allocator, &file_path);
+      id4_tooling_format_child_path(options->output_directory, file_name,
+                                    options->host_allocator, &file_path);
   id4_tooling_capture_host_bytes_t bytes;
   memset(&bytes, 0, sizeof(bytes));
   if (iree_status_is_ok(status)) {
@@ -551,7 +499,7 @@ static iree_status_t id4_tooling_capture_capture_tensor(
         manifest_builder, stage_name, layout, file_name, *record_count);
   }
   id4_tooling_capture_host_bytes_deinitialize(&bytes, options->host_allocator);
-  id4_tooling_capture_free_path(&file_path, options->host_allocator);
+  id4_tooling_free_path(&file_path, options->host_allocator);
   if (iree_status_is_ok(status)) ++*record_count;
   return status;
 }
@@ -559,8 +507,8 @@ static iree_status_t id4_tooling_capture_capture_tensor(
 iree_status_t id4_tooling_capture_execution(
     const id4_tooling_capture_execution_options_t* options) {
   IREE_RETURN_IF_ERROR(id4_tooling_capture_validate_options(options));
-  IREE_RETURN_IF_ERROR(id4_tooling_capture_make_directory(
-      options->output_directory, options->host_allocator));
+  IREE_RETURN_IF_ERROR(id4_tooling_ensure_directory(options->output_directory,
+                                                    options->host_allocator));
 
   iree_string_builder_t manifest_builder;
   iree_string_builder_initialize(options->host_allocator, &manifest_builder);
@@ -616,7 +564,7 @@ iree_status_t id4_tooling_capture_execution(
   }
   if (iree_status_is_ok(status)) {
     iree_string_view_t manifest_path = iree_string_view_empty();
-    status = id4_tooling_capture_format_path(
+    status = id4_tooling_format_child_path(
         options->output_directory, IREE_SV("manifest.json"),
         options->host_allocator, &manifest_path);
     if (iree_status_is_ok(status)) {
@@ -627,7 +575,7 @@ iree_status_t id4_tooling_capture_execution(
               iree_string_builder_size(&manifest_builder)),
           options->host_allocator);
     }
-    id4_tooling_capture_free_path(&manifest_path, options->host_allocator);
+    id4_tooling_free_path(&manifest_path, options->host_allocator);
   }
   iree_string_builder_deinitialize(&manifest_builder);
   return status;

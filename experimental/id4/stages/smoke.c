@@ -526,6 +526,7 @@ static iree_status_t id4_smoke_stage_prepare_kernel_executable(
   prepare_options.source_identifier = module->source_identifier;
   prepare_options.source_contents = module->source_contents;
   prepare_options.module_path = module->module_path;
+  prepare_options.function_name = stage->function_name;
   prepare_options.config_binding_count = IREE_ARRAYSIZE(config_bindings);
   prepare_options.config_bindings = config_bindings;
   prepare_options.diagnostic_artifact_flags =
