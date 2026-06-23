@@ -1380,9 +1380,9 @@ static iree_status_t iree_hal_amdgpu_host_queue_capture_timestamp(
   iree_hal_amdgpu_host_queue_t* queue =
       (iree_hal_amdgpu_host_queue_t*)base_queue;
 
-  // Device-side timestamps require a PM4 GPU-clock copy. If the queue cannot
-  // emit one there is no device path; report UNIMPLEMENTED before deferring so
-  // callers can fall back to a host-observed timestamp.
+  // Fast-fail before deferral so callers get UNIMPLEMENTED synchronously and can
+  // fall back to a host-observed timestamp. See
+  // iree_hal_amdgpu_host_queue_submit_capture_timestamp for the canonical check.
   if (!queue->pm4_ib_slots ||
       iree_hal_amdgpu_pm4_copy_timestamp_control(
           queue->pm4_timestamp_strategy) == 0) {

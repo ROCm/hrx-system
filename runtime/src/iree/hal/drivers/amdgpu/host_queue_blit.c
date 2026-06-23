@@ -365,6 +365,10 @@ iree_status_t iree_hal_amdgpu_host_queue_submit_capture_timestamp(
   // When the queue cannot emit PM4 IBs or the agent has no supported timestamp
   // strategy there is no device path; report UNIMPLEMENTED so the caller can
   // fall back to a host-observed timestamp.
+  // pm4_ib_slots and pm4_timestamp_strategy are immutable after queue init, so
+  // this re-check never actually fires on the reachable immediate/deferred-issue
+  // paths (they only reach here once the entry point has already confirmed
+  // capability); it guards direct public callers of this function.
   if (!queue->pm4_ib_slots ||
       iree_hal_amdgpu_pm4_copy_timestamp_control(
           queue->pm4_timestamp_strategy) == 0) {
