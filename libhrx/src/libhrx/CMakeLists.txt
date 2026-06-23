@@ -109,6 +109,8 @@ set_target_properties(libhrx_src_libhrx_hrx PROPERTIES
 )
 if(NOT WIN32)
   set_target_properties(libhrx_src_libhrx_hrx PROPERTIES
+    BUILD_RPATH "$ORIGIN"
+    INSTALL_RPATH "$ORIGIN"
     C_VISIBILITY_PRESET hidden
     LINK_FLAGS "-Wl,--version-script=${LIBHRX_SOURCE_DIR}/cmake/hrx_exports.lds"
   )
