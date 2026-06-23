@@ -284,10 +284,61 @@ static iree_thread_local struct {
 } iree_hip_thread_error = {hipSuccess, false};
 
 static pthread_mutex_t iree_hip_global_init_mutex = PTHREAD_MUTEX_INITIALIZER;
-static iree_thread_local iree_hal_streaming_context_t*
-    iree_hip_per_thread_stream_context = NULL;
-static iree_thread_local iree_hal_streaming_stream_t*
-    iree_hip_per_thread_stream = NULL;
+
+typedef struct iree_hip_per_thread_stream_state_t {
+  iree_hal_streaming_context_t* context;
+  iree_hal_streaming_stream_t* stream;
+} iree_hip_per_thread_stream_state_t;
+
+static pthread_once_t iree_hip_per_thread_stream_key_once = PTHREAD_ONCE_INIT;
+static pthread_key_t iree_hip_per_thread_stream_key;
+static int iree_hip_per_thread_stream_key_status = 0;
+
+static void iree_hip_per_thread_stream_state_destroy(void* value) {
+  iree_hip_per_thread_stream_state_t* state =
+      (iree_hip_per_thread_stream_state_t*)value;
+  if (!state) return;
+  iree_hal_streaming_stream_release(state->stream);
+  iree_allocator_free(iree_allocator_system(), state);
+}
+
+static void iree_hip_create_per_thread_stream_key(void) {
+  iree_hip_per_thread_stream_key_status =
+      pthread_key_create(&iree_hip_per_thread_stream_key,
+                         iree_hip_per_thread_stream_state_destroy);
+}
+
+static hipError_t iree_hip_get_per_thread_stream_state(
+    bool create, iree_hip_per_thread_stream_state_t** out_state) {
+  pthread_once(&iree_hip_per_thread_stream_key_once,
+               iree_hip_create_per_thread_stream_key);
+  if (iree_hip_per_thread_stream_key_status != 0) {
+    *out_state = NULL;
+    return hipErrorOutOfMemory;
+  }
+
+  iree_hip_per_thread_stream_state_t* state =
+      (iree_hip_per_thread_stream_state_t*)pthread_getspecific(
+          iree_hip_per_thread_stream_key);
+  if (!state && create) {
+    iree_status_t status = iree_allocator_malloc(
+        iree_allocator_system(), sizeof(*state), (void**)&state);
+    if (!iree_status_is_ok(status)) {
+      iree_status_free(status);
+      *out_state = NULL;
+      return hipErrorOutOfMemory;
+    }
+    memset(state, 0, sizeof(*state));
+    if (pthread_setspecific(iree_hip_per_thread_stream_key, state) != 0) {
+      iree_allocator_free(iree_allocator_system(), state);
+      *out_state = NULL;
+      return hipErrorOutOfMemory;
+    }
+  }
+
+  *out_state = state;
+  return hipSuccess;
+}
 
 static void iree_hip_thread_error_set(hipError_t error, bool sticky) {
   iree_hip_thread_error.last_error = error;
@@ -543,6 +594,7 @@ static bool iree_hip_status_to_capture_invalidation_failure(
 
 static bool iree_hip_context_invalidate_visible_captures(
     iree_hal_streaming_context_t* context) {
+  if (!iree_hal_streaming_context_has_capture_streams(context)) return false;
   const uintptr_t thread_id = (uintptr_t)pthread_self();
   iree_hal_streaming_stream_t** streams = NULL;
   iree_host_size_t stream_count = 0;
@@ -557,7 +609,8 @@ static bool iree_hip_context_invalidate_visible_captures(
     iree_hal_streaming_stream_t* stream = streams[i];
     iree_slim_mutex_lock(&stream->mutex);
     if (iree_hip_capture_is_visible_to_thread(stream, thread_id)) {
-      stream->capture_status = IREE_HAL_STREAMING_CAPTURE_STATUS_INVALIDATED;
+      iree_hal_streaming_stream_set_capture_status(
+          stream, IREE_HAL_STREAMING_CAPTURE_STATUS_INVALIDATED);
       invalidated = true;
     }
     iree_slim_mutex_unlock(&stream->mutex);
@@ -568,6 +621,7 @@ static bool iree_hip_context_invalidate_visible_captures(
 
 static bool iree_hip_context_invalidate_all_active_captures(
     iree_hal_streaming_context_t* context) {
+  if (!iree_hal_streaming_context_has_capture_streams(context)) return false;
   iree_hal_streaming_stream_t** streams = NULL;
   iree_host_size_t stream_count = 0;
   iree_status_t status =
@@ -581,7 +635,8 @@ static bool iree_hip_context_invalidate_all_active_captures(
     iree_hal_streaming_stream_t* stream = streams[i];
     iree_slim_mutex_lock(&stream->mutex);
     if (stream->capture_status == IREE_HAL_STREAMING_CAPTURE_STATUS_ACTIVE) {
-      stream->capture_status = IREE_HAL_STREAMING_CAPTURE_STATUS_INVALIDATED;
+      iree_hal_streaming_stream_set_capture_status(
+          stream, IREE_HAL_STREAMING_CAPTURE_STATUS_INVALIDATED);
       invalidated = true;
     }
     iree_slim_mutex_unlock(&stream->mutex);
@@ -593,6 +648,7 @@ static bool iree_hip_context_invalidate_all_active_captures(
 static bool iree_hip_context_invalidate_stream_blocking_capture(
     iree_hal_streaming_context_t* context,
     iree_hal_streaming_stream_t* target_stream) {
+  if (!iree_hal_streaming_context_has_capture_streams(context)) return false;
   const uintptr_t thread_id = (uintptr_t)pthread_self();
   iree_hal_streaming_stream_t** streams = NULL;
   iree_host_size_t stream_count = 0;
@@ -613,7 +669,8 @@ static bool iree_hip_context_invalidate_stream_blocking_capture(
          (stream->capture_mode ==
               IREE_HAL_STREAMING_CAPTURE_MODE_THREAD_LOCAL &&
           stream->capture_owner_thread_id == thread_id))) {
-      stream->capture_status = IREE_HAL_STREAMING_CAPTURE_STATUS_INVALIDATED;
+      iree_hal_streaming_stream_set_capture_status(
+          stream, IREE_HAL_STREAMING_CAPTURE_STATUS_INVALIDATED);
       invalidated = true;
     }
     iree_slim_mutex_unlock(&stream->mutex);
@@ -625,6 +682,7 @@ static bool iree_hip_context_invalidate_stream_blocking_capture(
 static bool iree_hip_context_invalidate_capture_graph(
     iree_hal_streaming_context_t* context, iree_hal_streaming_graph_t* graph) {
   if (!graph) return false;
+  if (!iree_hal_streaming_context_has_capture_streams(context)) return false;
   iree_hal_streaming_stream_t** streams = NULL;
   iree_host_size_t stream_count = 0;
   iree_status_t status =
@@ -639,7 +697,8 @@ static bool iree_hip_context_invalidate_capture_graph(
     iree_slim_mutex_lock(&stream->mutex);
     if (stream->capture_status == IREE_HAL_STREAMING_CAPTURE_STATUS_ACTIVE &&
         stream->capture_graph == graph) {
-      stream->capture_status = IREE_HAL_STREAMING_CAPTURE_STATUS_INVALIDATED;
+      iree_hal_streaming_stream_set_capture_status(
+          stream, IREE_HAL_STREAMING_CAPTURE_STATUS_INVALIDATED);
       invalidated = true;
     }
     iree_slim_mutex_unlock(&stream->mutex);
@@ -736,11 +795,16 @@ static hipError_t iree_hip_ensure_context(
 
 static void iree_hip_clear_per_thread_stream(
     iree_hal_streaming_context_t* context) {
-  if (iree_hip_per_thread_stream &&
-      (!context || iree_hip_per_thread_stream_context == context)) {
-    iree_hal_streaming_stream_release(iree_hip_per_thread_stream);
-    iree_hip_per_thread_stream = NULL;
-    iree_hip_per_thread_stream_context = NULL;
+  iree_hip_per_thread_stream_state_t* state = NULL;
+  if (iree_hip_get_per_thread_stream_state(/*create=*/false, &state) !=
+          hipSuccess ||
+      !state || !state->stream) {
+    return;
+  }
+  if (!context || state->context == context) {
+    iree_hal_streaming_stream_release(state->stream);
+    state->stream = NULL;
+    state->context = NULL;
   }
 }
 
@@ -749,9 +813,16 @@ static hipError_t iree_hip_resolve_per_thread_stream(
     iree_hal_streaming_stream_t** out_stream) {
   IREE_ASSERT_ARGUMENT(context);
   IREE_ASSERT_ARGUMENT(out_stream);
-  if (iree_hip_per_thread_stream &&
-      iree_hip_per_thread_stream_context == context) {
-    *out_stream = iree_hip_per_thread_stream;
+  iree_hip_per_thread_stream_state_t* state = NULL;
+  hipError_t state_result =
+      iree_hip_get_per_thread_stream_state(/*create=*/true, &state);
+  if (state_result != hipSuccess) {
+    *out_stream = NULL;
+    return state_result;
+  }
+
+  if (state->stream && state->context == context) {
+    *out_stream = state->stream;
     return hipSuccess;
   }
 
@@ -767,8 +838,8 @@ static hipError_t iree_hip_resolve_per_thread_stream(
     return hipErrorOutOfMemory;
   }
 
-  iree_hip_per_thread_stream_context = context;
-  iree_hip_per_thread_stream = stream;
+  state->context = context;
+  state->stream = stream;
   *out_stream = stream;
   return hipSuccess;
 }
@@ -4590,7 +4661,7 @@ HIPAPI hipError_t hipMemcpyAsync(void* dst, const void* src, size_t sizeBytes,
   }
 
   iree_status_t status = iree_ok_status();
-  if (!stream || stream == hipStreamLegacy || stream == hipStreamPerThread) {
+  if (!stream || stream == hipStreamLegacy) {
     status = iree_hal_streaming_context_synchronize(context);
   }
   switch (kind) {
@@ -11188,7 +11259,6 @@ HIPAPI hipError_t hipGraphGetNodes(hipGraph_t graph, hipGraphNode_t* pNodes,
 }
 
 // Adds an event record node to a graph.
-// Not fully implemented - returns error.
 HIPAPI hipError_t
 hipGraphAddEventRecordNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
                            const hipGraphNode_t* pDependencies,
@@ -11206,19 +11276,18 @@ hipGraphAddEventRecordNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
   iree_hal_streaming_graph_node_t* node = NULL;
   HIP_RETURN_STATUS_AND_END_ZONE_IF_ERROR(
       z0,
-      iree_hal_streaming_graph_add_empty_node(
+      iree_hal_streaming_graph_add_event_node(
           (iree_hal_streaming_graph_t*)graph,
           (iree_hal_streaming_graph_node_t**)pDependencies, numDependencies,
-          &node),
+          IREE_HAL_STREAMING_GRAPH_NODE_TYPE_EVENT_RECORD,
+          (iree_hal_streaming_event_t*)event, &node),
       hipErrorInvalidValue);
-  node->type = IREE_HAL_STREAMING_GRAPH_NODE_TYPE_EVENT_RECORD;
   *pGraphNode = (hipGraphNode_t)node;
   IREE_TRACE_ZONE_END(z0);
   return hipSuccess;
 }
 
 // Adds an event wait node to a graph.
-// Not fully implemented - returns error.
 HIPAPI hipError_t hipGraphAddEventWaitNode(hipGraphNode_t* pGraphNode,
                                            hipGraph_t graph,
                                            const hipGraphNode_t* pDependencies,
@@ -11237,12 +11306,12 @@ HIPAPI hipError_t hipGraphAddEventWaitNode(hipGraphNode_t* pGraphNode,
   iree_hal_streaming_graph_node_t* node = NULL;
   HIP_RETURN_STATUS_AND_END_ZONE_IF_ERROR(
       z0,
-      iree_hal_streaming_graph_add_empty_node(
+      iree_hal_streaming_graph_add_event_node(
           (iree_hal_streaming_graph_t*)graph,
           (iree_hal_streaming_graph_node_t**)pDependencies, numDependencies,
-          &node),
+          IREE_HAL_STREAMING_GRAPH_NODE_TYPE_EVENT_WAIT,
+          (iree_hal_streaming_event_t*)event, &node),
       hipErrorInvalidValue);
-  node->type = IREE_HAL_STREAMING_GRAPH_NODE_TYPE_EVENT_WAIT;
   *pGraphNode = (hipGraphNode_t)node;
   IREE_TRACE_ZONE_END(z0);
   return hipSuccess;
@@ -11720,14 +11789,11 @@ HIPAPI hipError_t hipGraphAddChildGraphNode(hipGraphNode_t* pGraphNode,
   iree_hal_streaming_graph_node_t* node = NULL;
   HIP_RETURN_STATUS_AND_END_ZONE_IF_ERROR(
       z0,
-      iree_hal_streaming_graph_add_empty_node(
+      iree_hal_streaming_graph_add_child_graph_node(
           (iree_hal_streaming_graph_t*)graph,
           (iree_hal_streaming_graph_node_t**)pDependencies, numDependencies,
-          &node),
+          (iree_hal_streaming_graph_t*)childGraph, &node),
       hipErrorInvalidValue);
-  node->type = IREE_HAL_STREAMING_GRAPH_NODE_TYPE_GRAPH;
-  node->attrs.child_graph.graph = (iree_hal_streaming_graph_t*)childGraph;
-  iree_hal_streaming_graph_retain(node->attrs.child_graph.graph);
   *pGraphNode = (hipGraphNode_t)node;
   IREE_TRACE_ZONE_END(z0);
   return hipSuccess;
@@ -11869,30 +11935,74 @@ HIPAPI hipError_t hipGraphChildGraphNodeGetGraph(hipGraphNode_t node,
 
 HIPAPI hipError_t hipGraphEventRecordNodeGetEvent(hipGraphNode_t node,
                                                   hipEvent_t* event_out) {
-  (void)node;
-  if (event_out) *event_out = NULL;
-  HIP_RETURN_ERROR(hipErrorNotSupported);
+  if (!node || !event_out) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+  iree_hal_streaming_graph_node_t* stream_node =
+      (iree_hal_streaming_graph_node_t*)node;
+  if (!stream_node->graph ||
+      stream_node->type != IREE_HAL_STREAMING_GRAPH_NODE_TYPE_EVENT_RECORD ||
+      !stream_node->attrs.event.event) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+  *event_out = (hipEvent_t)stream_node->attrs.event.event;
+  return hipSuccess;
 }
 
 HIPAPI hipError_t hipGraphEventRecordNodeSetEvent(hipGraphNode_t node,
                                                   hipEvent_t event) {
-  (void)node;
-  (void)event;
-  HIP_RETURN_ERROR(hipErrorNotSupported);
+  if (!node || !event) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+  iree_hal_streaming_graph_node_t* stream_node =
+      (iree_hal_streaming_graph_node_t*)node;
+  iree_hal_streaming_event_t* streaming_event =
+      (iree_hal_streaming_event_t*)event;
+  if (!stream_node->graph ||
+      stream_node->type != IREE_HAL_STREAMING_GRAPH_NODE_TYPE_EVENT_RECORD ||
+      streaming_event->context != stream_node->graph->context) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+  iree_hal_streaming_event_retain(streaming_event);
+  iree_hal_streaming_event_release(stream_node->attrs.event.event);
+  stream_node->attrs.event.event = streaming_event;
+  return hipSuccess;
 }
 
 HIPAPI hipError_t hipGraphEventWaitNodeGetEvent(hipGraphNode_t node,
                                                 hipEvent_t* event_out) {
-  (void)node;
-  if (event_out) *event_out = NULL;
-  HIP_RETURN_ERROR(hipErrorNotSupported);
+  if (!node || !event_out) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+  iree_hal_streaming_graph_node_t* stream_node =
+      (iree_hal_streaming_graph_node_t*)node;
+  if (!stream_node->graph ||
+      stream_node->type != IREE_HAL_STREAMING_GRAPH_NODE_TYPE_EVENT_WAIT ||
+      !stream_node->attrs.event.event) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+  *event_out = (hipEvent_t)stream_node->attrs.event.event;
+  return hipSuccess;
 }
 
 HIPAPI hipError_t hipGraphEventWaitNodeSetEvent(hipGraphNode_t node,
                                                 hipEvent_t event) {
-  (void)node;
-  (void)event;
-  HIP_RETURN_ERROR(hipErrorNotSupported);
+  if (!node || !event) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+  iree_hal_streaming_graph_node_t* stream_node =
+      (iree_hal_streaming_graph_node_t*)node;
+  iree_hal_streaming_event_t* streaming_event =
+      (iree_hal_streaming_event_t*)event;
+  if (!stream_node->graph ||
+      stream_node->type != IREE_HAL_STREAMING_GRAPH_NODE_TYPE_EVENT_WAIT ||
+      streaming_event->context != stream_node->graph->context) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+  iree_hal_streaming_event_retain(streaming_event);
+  iree_hal_streaming_event_release(stream_node->attrs.event.event);
+  stream_node->attrs.event.event = streaming_event;
+  return hipSuccess;
 }
 
 HIPAPI hipError_t hipGraphExecBatchMemOpNodeSetParams(hipGraphExec_t graphExec,

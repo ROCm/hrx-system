@@ -68,6 +68,8 @@ iree_status_t iree_hal_streaming_context_create(
   memset(&context->buffer_table, 0, sizeof(context->buffer_table));
   context->pageable_h2d_staging_buffer = NULL;
   context->pageable_h2d_staging_size = 0;
+  iree_atomic_store(&context->capture_stream_count, 0,
+                    iree_memory_order_relaxed);
   context->host_allocator = host_allocator;
   iree_slim_mutex_initialize(&context->mutex);
 

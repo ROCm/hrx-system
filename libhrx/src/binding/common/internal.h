@@ -226,6 +226,9 @@ struct iree_hal_streaming_context_t {
   iree_hal_streaming_buffer_t* pageable_h2d_staging_buffer;
   iree_device_size_t pageable_h2d_staging_size;
 
+  // Number of streams in this context with capture state other than NONE.
+  iree_atomic_int32_t capture_stream_count;
+
   // Context resource limits.
   iree_hal_streaming_limits_t limits;
 
@@ -259,6 +262,24 @@ struct iree_hal_streaming_context_t {
   // the driver API with explicit module management this is bypassed.
   iree_hal_streaming_context_symbol_map_t symbol_map;
 };
+
+static inline bool iree_hal_streaming_context_has_capture_streams(
+    const iree_hal_streaming_context_t* context) {
+  return iree_atomic_load(&context->capture_stream_count,
+                          iree_memory_order_acquire) > 0;
+}
+
+static inline void iree_hal_streaming_context_enter_capture(
+    iree_hal_streaming_context_t* context) {
+  iree_atomic_fetch_add(&context->capture_stream_count, 1,
+                        iree_memory_order_acq_rel);
+}
+
+static inline void iree_hal_streaming_context_leave_capture(
+    iree_hal_streaming_context_t* context) {
+  iree_atomic_fetch_sub(&context->capture_stream_count, 1,
+                        iree_memory_order_acq_rel);
+}
 
 //===----------------------------------------------------------------------===//
 // Device types
@@ -461,6 +482,24 @@ typedef struct iree_hal_streaming_stream_t {
   // Host allocator.
   iree_allocator_t host_allocator;
 } iree_hal_streaming_stream_t;
+
+// Updates capture status while keeping the owning context's capture-stream
+// count in sync. Callers serialize access to the stream capture fields.
+static inline void iree_hal_streaming_stream_set_capture_status(
+    iree_hal_streaming_stream_t* stream,
+    iree_hal_streaming_capture_status_t new_status) {
+  const iree_hal_streaming_capture_status_t old_status = stream->capture_status;
+  if (old_status == new_status) return;
+  if (old_status == IREE_HAL_STREAMING_CAPTURE_STATUS_NONE &&
+      new_status != IREE_HAL_STREAMING_CAPTURE_STATUS_NONE) {
+    iree_hal_streaming_context_enter_capture(stream->context);
+  }
+  stream->capture_status = new_status;
+  if (old_status != IREE_HAL_STREAMING_CAPTURE_STATUS_NONE &&
+      new_status == IREE_HAL_STREAMING_CAPTURE_STATUS_NONE) {
+    iree_hal_streaming_context_leave_capture(stream->context);
+  }
+}
 
 //===----------------------------------------------------------------------===//
 // Module types
@@ -844,6 +883,11 @@ typedef struct iree_hal_streaming_graph_child_graph_node_attrs_t {
   iree_hal_streaming_graph_t* graph;
 } iree_hal_streaming_graph_child_graph_node_attrs_t;
 
+typedef struct iree_hal_streaming_graph_event_node_attrs_t {
+  // Event retained by an event record or wait graph node.
+  iree_hal_streaming_event_t* event;
+} iree_hal_streaming_graph_event_node_attrs_t;
+
 // Graph node structure.
 // Memory layout:
 // [iree_hal_streaming_graph_node_t]
@@ -871,6 +915,7 @@ typedef struct iree_hal_streaming_graph_node_t {
     iree_hal_streaming_graph_memset_node_attrs_t memset;
     iree_hal_streaming_graph_host_call_node_attrs_t host;
     iree_hal_streaming_graph_child_graph_node_attrs_t child_graph;
+    iree_hal_streaming_graph_event_node_attrs_t event;
   } attrs;
 
   // Variable-length array of dependencies follows the struct.
@@ -1552,6 +1597,20 @@ iree_status_t iree_hal_streaming_graph_add_host_call_node(
     iree_hal_streaming_graph_t* graph,
     iree_hal_streaming_graph_node_t** dependencies,
     iree_host_size_t dependency_count, void (*fn)(void*), void* user_data,
+    iree_hal_streaming_graph_node_t** out_node);
+
+iree_status_t iree_hal_streaming_graph_add_event_node(
+    iree_hal_streaming_graph_t* graph,
+    iree_hal_streaming_graph_node_t** dependencies,
+    iree_host_size_t dependency_count,
+    iree_hal_streaming_graph_node_type_t type,
+    iree_hal_streaming_event_t* event,
+    iree_hal_streaming_graph_node_t** out_node);
+
+iree_status_t iree_hal_streaming_graph_add_child_graph_node(
+    iree_hal_streaming_graph_t* graph,
+    iree_hal_streaming_graph_node_t** dependencies,
+    iree_host_size_t dependency_count, iree_hal_streaming_graph_t* child_graph,
     iree_hal_streaming_graph_node_t** out_node);
 
 iree_status_t iree_hal_streaming_graph_destroy_node(
