@@ -58,6 +58,8 @@ class SourceMemoryProjectKind(Enum):
     """Projection from a selected source-memory access to descriptor immediates."""
 
     STATIC_BYTE_OFFSET = "static_byte_offset"
+    STATIC_BYTE_OFFSET_QUOTIENT = "static_byte_offset_quotient"
+    STATIC_BYTE_OFFSET_REMAINDER = "static_byte_offset_remainder"
     DYNAMIC_BYTE_STRIDE = "dynamic_byte_stride"
 
 
@@ -593,10 +595,25 @@ class SourceMemoryProject:
 
     kind: SourceMemoryProjectKind
     dynamic_term_index: int = 0
+    divisor: int = 1
 
     @classmethod
     def static_byte_offset(cls) -> Self:
         return cls(kind=SourceMemoryProjectKind.STATIC_BYTE_OFFSET)
+
+    @classmethod
+    def static_byte_offset_quotient(cls, divisor: int) -> Self:
+        return cls(
+            kind=SourceMemoryProjectKind.STATIC_BYTE_OFFSET_QUOTIENT,
+            divisor=divisor,
+        )
+
+    @classmethod
+    def static_byte_offset_remainder(cls, divisor: int) -> Self:
+        return cls(
+            kind=SourceMemoryProjectKind.STATIC_BYTE_OFFSET_REMAINDER,
+            divisor=divisor,
+        )
 
     @classmethod
     def dynamic_byte_stride(cls, *, term: int = 0) -> Self:
@@ -611,10 +628,26 @@ class SourceMemoryProject:
                 f"{self.kind.value} dynamic term index must be non-negative"
             )
         if (
-            self.kind == SourceMemoryProjectKind.STATIC_BYTE_OFFSET
+            self.kind
+            in (
+                SourceMemoryProjectKind.STATIC_BYTE_OFFSET,
+                SourceMemoryProjectKind.STATIC_BYTE_OFFSET_QUOTIENT,
+                SourceMemoryProjectKind.STATIC_BYTE_OFFSET_REMAINDER,
+            )
             and self.dynamic_term_index != 0
         ):
-            raise ValueError("static byte offset projection must not name a term")
+            raise ValueError("static byte offset projections must not name a term")
+        if self.divisor <= 0:
+            raise ValueError(f"{self.kind.value} divisor must be positive")
+        if (
+            self.kind
+            not in (
+                SourceMemoryProjectKind.STATIC_BYTE_OFFSET_QUOTIENT,
+                SourceMemoryProjectKind.STATIC_BYTE_OFFSET_REMAINDER,
+            )
+            and self.divisor != 1
+        ):
+            raise ValueError(f"{self.kind.value} projection must not set divisor")
 
     def validate(
         self,

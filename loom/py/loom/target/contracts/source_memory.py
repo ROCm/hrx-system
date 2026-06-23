@@ -72,7 +72,8 @@ class SourceMemoryByteOffsetMaterializer:
     const_i64: Descriptor
     add_i64: Descriptor
     mul_i64: Descriptor
-    shl_i64: Descriptor
+    shl_i64: Descriptor | None
+    const_i64_immediate: str = "value"
 
 
 @dataclass(frozen=True, slots=True)

@@ -338,12 +338,12 @@ static iree_status_t loom_low_lower_rule_emit_i64_const(
       context, rule_set, source_memory->byte_offset_const_i64_descriptor_ref,
       IREE_SV("const.i64"), &descriptor));
 
-  loom_string_id_t value_name_id = LOOM_STRING_ID_INVALID;
-  IREE_RETURN_IF_ERROR(
-      loom_module_intern_string(loom_low_lower_context_module(context),
-                                IREE_SV("value"), &value_name_id));
+  loom_string_id_t immediate_name_id = LOOM_STRING_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_module_intern_string(
+      loom_low_lower_context_module(context),
+      source_memory->byte_offset_const_i64_immediate, &immediate_name_id));
   const loom_named_attr_t attr = {
-      .name_id = value_name_id,
+      .name_id = immediate_name_id,
       .value = loom_attr_i64(value),
   };
 
@@ -352,6 +352,145 @@ static iree_status_t loom_low_lower_rule_emit_i64_const(
       context, &descriptor, loom_make_named_attr_slice(&attr, 1), result_type,
       location, &const_op));
   *out_value_id = loom_low_const_result(const_op);
+  return iree_ok_status();
+}
+
+static bool loom_low_lower_rule_descriptor_operand_is_result(
+    loom_low_operand_role_t role) {
+  return role == LOOM_LOW_OPERAND_ROLE_RESULT ||
+         role == LOOM_LOW_OPERAND_ROLE_OPERAND_RESULT;
+}
+
+static uint16_t loom_low_lower_rule_materializer_result_index(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_low_descriptor_t* descriptor,
+    uint16_t descriptor_operand_index) {
+  IREE_ASSERT_LT(descriptor_operand_index, descriptor->operand_count);
+  IREE_ASSERT((uint64_t)descriptor->operand_start +
+                  (uint64_t)descriptor->operand_count <=
+              descriptor_set->operand_count);
+  uint16_t result_index = 0;
+  for (uint16_t i = 0; i < descriptor->operand_count; ++i) {
+    const loom_low_operand_t* operand =
+        &descriptor_set->operands[descriptor->operand_start + i];
+    if (!loom_low_lower_rule_descriptor_operand_is_result(operand->role)) {
+      continue;
+    }
+    if (i == descriptor_operand_index) return result_index;
+    ++result_index;
+  }
+  IREE_ASSERT_UNREACHABLE("descriptor result operand index is invalid");
+  return 0;
+}
+
+static uint16_t loom_low_lower_rule_materializer_packet_operand_index(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_low_descriptor_t* descriptor,
+    uint16_t descriptor_operand_index) {
+  IREE_ASSERT_LT(descriptor_operand_index, descriptor->operand_count);
+  IREE_ASSERT((uint64_t)descriptor->operand_start +
+                  (uint64_t)descriptor->operand_count <=
+              descriptor_set->operand_count);
+  uint16_t packet_operand_index = 0;
+  for (uint16_t i = descriptor->result_count; i < descriptor->operand_count;
+       ++i) {
+    const loom_low_operand_t* operand =
+        &descriptor_set->operands[descriptor->operand_start + i];
+    if (!loom_low_operand_role_is_packet_operand(operand->role)) continue;
+    if (i == descriptor_operand_index) return packet_operand_index;
+    ++packet_operand_index;
+  }
+  IREE_ASSERT_UNREACHABLE("descriptor packet operand index is invalid");
+  return 0;
+}
+
+static iree_status_t loom_low_lower_rule_materializer_copy_operands(
+    loom_low_lower_context_t* context, loom_location_id_t location,
+    uint16_t copy_operand_mask, uint16_t operand_count,
+    loom_value_id_t* operands) {
+  if (copy_operand_mask == 0) return iree_ok_status();
+  IREE_ASSERT_LE(operand_count, 16);
+  for (uint16_t i = 0; i < operand_count; ++i) {
+    const uint16_t operand_bit = (uint16_t)((uint16_t)1u << i);
+    if (!iree_any_bit_set(copy_operand_mask, operand_bit)) continue;
+    const loom_type_t copy_type = loom_module_value_type(
+        loom_low_lower_context_module(context), operands[i]);
+    IREE_ASSERT(loom_low_type_is_register(copy_type));
+    loom_op_t* copy_op = NULL;
+    IREE_RETURN_IF_ERROR(
+        loom_low_copy_build(loom_low_lower_context_builder(context),
+                            operands[i], copy_type, location, &copy_op));
+    operands[i] = loom_low_copy_result(copy_op);
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_low_lower_rule_materializer_tied_results(
+    loom_low_lower_context_t* context,
+    const loom_low_lower_resolved_descriptor_t* descriptor,
+    uint16_t operand_count, loom_value_id_t* operands,
+    loom_location_id_t location, const loom_tied_result_t** out_tied_results,
+    iree_host_size_t* out_tied_result_count) {
+  *out_tied_results = NULL;
+  *out_tied_result_count = 0;
+  const loom_low_descriptor_set_t* descriptor_set =
+      loom_low_lower_context_descriptor_set(context);
+  const loom_low_descriptor_t* descriptor_row = descriptor->descriptor;
+  uint16_t copy_operand_mask = 0;
+  uint16_t tied_result_count = 0;
+  IREE_ASSERT((uint64_t)descriptor_row->constraint_start +
+                  (uint64_t)descriptor_row->constraint_count <=
+              descriptor_set->constraint_count);
+  for (uint16_t i = 0; i < descriptor_row->constraint_count; ++i) {
+    const loom_low_constraint_t* constraint =
+        &descriptor_set
+             ->constraints[descriptor_row->constraint_start + (uint32_t)i];
+    switch (constraint->kind) {
+      case LOOM_LOW_CONSTRAINT_KIND_TIED:
+        ++tied_result_count;
+        break;
+      case LOOM_LOW_CONSTRAINT_KIND_DESTRUCTIVE: {
+        IREE_ASSERT_NE(constraint->rhs_operand_index, LOOM_LOW_ID_NONE);
+        const uint16_t packet_operand_index =
+            loom_low_lower_rule_materializer_packet_operand_index(
+                descriptor_set, descriptor_row, constraint->rhs_operand_index);
+        IREE_ASSERT_LT(packet_operand_index, operand_count);
+        copy_operand_mask |= (uint16_t)((uint16_t)1u << packet_operand_index);
+        break;
+      }
+      default:
+        break;
+    }
+  }
+  IREE_RETURN_IF_ERROR(loom_low_lower_rule_materializer_copy_operands(
+      context, location, copy_operand_mask, operand_count, operands));
+  if (tied_result_count == 0) return iree_ok_status();
+
+  loom_tied_result_t* tied_results = NULL;
+  IREE_RETURN_IF_ERROR(loom_low_lower_allocate_scratch_array(
+      context, tied_result_count, sizeof(*tied_results),
+      (void**)&tied_results));
+  uint16_t tied_result_index = 0;
+  for (uint16_t i = 0; i < descriptor_row->constraint_count; ++i) {
+    const loom_low_constraint_t* constraint =
+        &descriptor_set
+             ->constraints[descriptor_row->constraint_start + (uint32_t)i];
+    if (constraint->kind != LOOM_LOW_CONSTRAINT_KIND_TIED) continue;
+    IREE_ASSERT_NE(constraint->rhs_operand_index, LOOM_LOW_ID_NONE);
+    const uint16_t result_index = loom_low_lower_rule_materializer_result_index(
+        descriptor_set, descriptor_row, constraint->lhs_operand_index);
+    const uint16_t packet_operand_index =
+        loom_low_lower_rule_materializer_packet_operand_index(
+            descriptor_set, descriptor_row, constraint->rhs_operand_index);
+    IREE_ASSERT_LT(packet_operand_index, operand_count);
+    tied_results[tied_result_index++] = (loom_tied_result_t){
+        .result_index = result_index,
+        .operand_index = packet_operand_index,
+        .has_type_change = false,
+    };
+  }
+  *out_tied_results = tied_results;
+  *out_tied_result_count = tied_result_count;
   return iree_ok_status();
 }
 
@@ -370,11 +509,17 @@ static iree_status_t loom_low_lower_rule_emit_i64_binary_op(
   const loom_value_id_t operands[2] = {lhs, rhs};
   const loom_type_t result_type =
       loom_module_value_type(loom_low_lower_context_module(context), lhs);
+  const loom_tied_result_t* tied_results = NULL;
+  iree_host_size_t tied_result_count = 0;
+  loom_value_id_t materializer_operands[2] = {operands[0], operands[1]};
+  IREE_RETURN_IF_ERROR(loom_low_lower_rule_materializer_tied_results(
+      context, &descriptor, IREE_ARRAYSIZE(materializer_operands),
+      materializer_operands, location, &tied_results, &tied_result_count));
   loom_op_t* low_op = NULL;
   IREE_RETURN_IF_ERROR(loom_low_lower_emit_resolved_descriptor_op(
-      context, &descriptor, operands, IREE_ARRAYSIZE(operands),
-      loom_named_attr_slice_empty(), &result_type, 1, NULL, 0, location,
-      &low_op));
+      context, &descriptor, materializer_operands,
+      IREE_ARRAYSIZE(materializer_operands), loom_named_attr_slice_empty(),
+      &result_type, 1, tied_results, tied_result_count, location, &low_op));
   const loom_value_slice_t results = loom_low_op_results(low_op);
   IREE_ASSERT_EQ(results.count, 1u);
   *out_value_id = results.values[0];
@@ -410,7 +555,9 @@ static iree_status_t loom_low_lower_rule_materialize_source_memory_term(
 
   const loom_type_t index_type = loom_module_value_type(
       loom_low_lower_context_module(context), accumulator);
-  if (term->byte_shift != LOOM_LOW_SOURCE_MEMORY_ACCESS_BYTE_SHIFT_NONE) {
+  if (term->byte_shift != LOOM_LOW_SOURCE_MEMORY_ACCESS_BYTE_SHIFT_NONE &&
+      source_memory->byte_offset_shl_i64_descriptor_ref !=
+          LOOM_LOW_LOWER_DESCRIPTOR_REF_NONE) {
     loom_value_id_t shift = LOOM_VALUE_ID_INVALID;
     IREE_RETURN_IF_ERROR(loom_low_lower_rule_emit_i64_const(
         context, rule_set, source_memory, term->byte_shift, index_type,
@@ -2631,6 +2778,16 @@ static iree_status_t loom_low_lower_rule_build_attrs(
       case LOOM_LOW_LOWER_ATTR_COPY_SOURCE_MEMORY_STATIC_BYTE_OFFSET:
         attrs[i].value =
             loom_attr_i64(source_memory_access->static_byte_offset);
+        break;
+      case LOOM_LOW_LOWER_ATTR_COPY_SOURCE_MEMORY_STATIC_BYTE_OFFSET_QUOTIENT:
+        IREE_ASSERT_GT(attr_copy->literal_i64, 0);
+        attrs[i].value = loom_attr_i64(
+            source_memory_access->static_byte_offset / attr_copy->literal_i64);
+        break;
+      case LOOM_LOW_LOWER_ATTR_COPY_SOURCE_MEMORY_STATIC_BYTE_OFFSET_REMAINDER:
+        IREE_ASSERT_GT(attr_copy->literal_i64, 0);
+        attrs[i].value = loom_attr_i64(
+            source_memory_access->static_byte_offset % attr_copy->literal_i64);
         break;
       case LOOM_LOW_LOWER_ATTR_COPY_SOURCE_MEMORY_DYNAMIC_BYTE_STRIDE:
         attrs[i].value = loom_attr_i64(

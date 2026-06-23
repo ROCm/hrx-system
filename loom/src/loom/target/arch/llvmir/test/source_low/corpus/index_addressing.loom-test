@@ -149,8 +149,8 @@ low.kernel.def target(@target) workgroup_size(8, 4, 1) @index_madd_u24_literal_a
   %column = const.i64 1
   %20 = mul.i64 %y, %x
   %linear = add.i64 %20, %column
-  %loaded = load.indexed.i32 %input_view, %linear, 0, 4
-  store.indexed.i32 %loaded, %output_view, %linear, 0, 4
+  %loaded = load.indexed.i32 %input_view, %linear, 4, 4
+  store.indexed.i32 %loaded, %output_view, %linear, 4, 4
   return
 }
 

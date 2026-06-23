@@ -104,6 +104,12 @@ class LowerAttrCopyKind(Enum):
     VALUE_F64_AS_F64_BITS = "value_f64_as_f64_bits"
     I64_ARRAY_LANE_BYTE = "i64_array_lane_byte"
     SOURCE_MEMORY_STATIC_BYTE_OFFSET = "source_memory_static_byte_offset"
+    SOURCE_MEMORY_STATIC_BYTE_OFFSET_QUOTIENT = (
+        "source_memory_static_byte_offset_quotient"
+    )
+    SOURCE_MEMORY_STATIC_BYTE_OFFSET_REMAINDER = (
+        "source_memory_static_byte_offset_remainder"
+    )
     SOURCE_MEMORY_DYNAMIC_BYTE_STRIDE = "source_memory_dynamic_byte_stride"
     SOURCE_OP_INSTANCE_FLAGS = "source_op_instance_flags"
     I64_LOW_BIT_MASK = "i64_low_bit_mask"
@@ -1689,6 +1695,10 @@ class _LowerRuleSetCompiler:
     ) -> LowerAttrCopy:
         if project.kind == SourceMemoryProjectKind.STATIC_BYTE_OFFSET:
             kind = LowerAttrCopyKind.SOURCE_MEMORY_STATIC_BYTE_OFFSET
+        elif project.kind == SourceMemoryProjectKind.STATIC_BYTE_OFFSET_QUOTIENT:
+            kind = LowerAttrCopyKind.SOURCE_MEMORY_STATIC_BYTE_OFFSET_QUOTIENT
+        elif project.kind == SourceMemoryProjectKind.STATIC_BYTE_OFFSET_REMAINDER:
+            kind = LowerAttrCopyKind.SOURCE_MEMORY_STATIC_BYTE_OFFSET_REMAINDER
         elif project.kind == SourceMemoryProjectKind.DYNAMIC_BYTE_STRIDE:
             kind = LowerAttrCopyKind.SOURCE_MEMORY_DYNAMIC_BYTE_STRIDE
         else:
@@ -1701,6 +1711,7 @@ class _LowerRuleSetCompiler:
             kind=kind,
             target_name=target_name,
             dynamic_term_index=project.dynamic_term_index,
+            literal_i64=project.divisor,
         )
 
     def _lower_source_op_project(

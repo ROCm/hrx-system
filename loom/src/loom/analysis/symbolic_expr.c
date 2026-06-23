@@ -231,6 +231,453 @@ static bool loom_symbolic_expr_exact_integer_facts(loom_value_facts_t facts,
   return true;
 }
 
+//===----------------------------------------------------------------------===//
+// Bounded expression summary
+//===----------------------------------------------------------------------===//
+
+#define LOOM_SYMBOLIC_EXPR_BOUNDED_DEPTH_LIMIT 16
+#define LOOM_SYMBOLIC_EXPR_BOUNDED_SCRATCH_TERM_CAPACITY 16
+
+static loom_value_facts_t loom_symbolic_expr_bounded_lookup_facts(
+    const loom_value_fact_table_t* fact_table, loom_value_id_t value_id) {
+  return fact_table ? loom_value_fact_table_lookup(fact_table, value_id)
+                    : loom_value_facts_unknown();
+}
+
+static const loom_op_t* loom_symbolic_expr_bounded_defining_op(
+    const loom_module_t* module, loom_value_id_t value_id) {
+  if (!module || value_id >= module->values.count) return NULL;
+  const loom_value_t* value = loom_module_value(module, value_id);
+  return loom_value_is_block_arg(value) ? NULL : loom_value_def_op(value);
+}
+
+static bool loom_symbolic_expr_bounded_constant_attr(const loom_op_t* op,
+                                                     int64_t* out_value) {
+  if (op == NULL) return false;
+  loom_attribute_t value_attr = {0};
+  switch (op->kind) {
+    case LOOM_OP_INDEX_CONSTANT:
+      value_attr = loom_index_constant_value(op);
+      break;
+    case LOOM_OP_SCALAR_CONSTANT:
+      value_attr = loom_scalar_constant_value(op);
+      break;
+    default:
+      return false;
+  }
+  if (value_attr.kind != LOOM_ATTR_I64) return false;
+  *out_value = loom_attr_as_i64(value_attr);
+  return true;
+}
+
+static bool loom_symbolic_expr_bounded_exact_i64(
+    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
+    loom_value_id_t value_id, int64_t* out_value) {
+  if (loom_symbolic_expr_exact_integer_facts(
+          loom_symbolic_expr_bounded_lookup_facts(fact_table, value_id),
+          out_value)) {
+    return true;
+  }
+  return loom_symbolic_expr_bounded_constant_attr(
+      loom_symbolic_expr_bounded_defining_op(module, value_id), out_value);
+}
+
+static bool loom_symbolic_expr_bounded_add_constant(int64_t scaled_value,
+                                                    int64_t* inout_constant) {
+  int64_t new_constant = 0;
+  if (!loom_checked_add_i64(*inout_constant, scaled_value, &new_constant)) {
+    return false;
+  }
+  *inout_constant = new_constant;
+  return true;
+}
+
+static bool loom_symbolic_expr_bounded_accumulate_constant(
+    int64_t value, int64_t coefficient, int64_t* inout_constant) {
+  int64_t scaled_value = 0;
+  return loom_checked_mul_i64(value, coefficient, &scaled_value) &&
+         loom_symbolic_expr_bounded_add_constant(scaled_value, inout_constant);
+}
+
+static bool loom_symbolic_expr_bounded_append_term(
+    loom_symbolic_term_t* terms, iree_host_size_t term_capacity,
+    iree_host_size_t* inout_term_count, loom_value_id_t value_id,
+    loom_value_id_t relation_value_id, int64_t coefficient) {
+  if (coefficient == 0) return true;
+  iree_host_size_t insert_index = 0;
+  while (insert_index < *inout_term_count &&
+         terms[insert_index].value_id < value_id) {
+    ++insert_index;
+  }
+  if (insert_index < *inout_term_count &&
+      terms[insert_index].value_id == value_id) {
+    int64_t combined_coefficient = 0;
+    if (!loom_checked_add_i64(terms[insert_index].coefficient, coefficient,
+                              &combined_coefficient)) {
+      return false;
+    }
+    if (combined_coefficient == 0) {
+      memmove(&terms[insert_index], &terms[insert_index + 1],
+              (*inout_term_count - insert_index - 1) * sizeof(*terms));
+      *inout_term_count -= 1;
+      return true;
+    }
+    terms[insert_index].coefficient = combined_coefficient;
+    if (terms[insert_index].relation_value_id != relation_value_id) {
+      terms[insert_index].relation_value_id = value_id;
+    }
+    return true;
+  }
+  if (*inout_term_count >= term_capacity) return false;
+  memmove(&terms[insert_index + 1], &terms[insert_index],
+          (*inout_term_count - insert_index) * sizeof(*terms));
+  terms[insert_index] = (loom_symbolic_term_t){
+      .coefficient = coefficient,
+      .value_id = value_id,
+      .relation_value_id = relation_value_id,
+  };
+  *inout_term_count += 1;
+  return true;
+}
+
+static bool loom_symbolic_expr_bounded_accumulate_value(
+    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
+    loom_value_id_t value_id, int64_t coefficient, uint8_t remaining_depth,
+    loom_symbolic_term_t* terms, iree_host_size_t term_capacity,
+    iree_host_size_t* inout_term_count, int64_t* inout_constant);
+
+static bool loom_symbolic_expr_bounded_accumulate_expression(
+    const loom_symbolic_expr_t* expression, int64_t coefficient,
+    loom_symbolic_term_t* terms, iree_host_size_t term_capacity,
+    iree_host_size_t* inout_term_count, int64_t* inout_constant) {
+  if (!loom_symbolic_expr_is_linear(expression)) return false;
+  if (!loom_symbolic_expr_bounded_accumulate_constant(
+          expression->constant, coefficient, inout_constant)) {
+    return false;
+  }
+  for (iree_host_size_t i = 0; i < expression->term_count; ++i) {
+    int64_t scaled_coefficient = 0;
+    if (!loom_checked_mul_i64(expression->terms[i].coefficient, coefficient,
+                              &scaled_coefficient)) {
+      return false;
+    }
+    if (!loom_symbolic_expr_bounded_append_term(
+            terms, term_capacity, inout_term_count,
+            expression->terms[i].value_id,
+            expression->terms[i].relation_value_id, scaled_coefficient)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+static bool loom_symbolic_expr_bounded_accumulate_mul(
+    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
+    loom_value_id_t result_value, loom_value_id_t left_value,
+    loom_value_id_t right_value, int64_t coefficient, uint8_t remaining_depth,
+    loom_symbolic_term_t* terms, iree_host_size_t term_capacity,
+    iree_host_size_t* inout_term_count, int64_t* inout_constant) {
+  int64_t left_constant = 0;
+  if (loom_symbolic_expr_bounded_exact_i64(module, fact_table, left_value,
+                                           &left_constant)) {
+    int64_t scaled_coefficient = 0;
+    if (!loom_checked_mul_i64(coefficient, left_constant,
+                              &scaled_coefficient)) {
+      return false;
+    }
+    return loom_symbolic_expr_bounded_accumulate_value(
+        module, fact_table, right_value, scaled_coefficient, remaining_depth,
+        terms, term_capacity, inout_term_count, inout_constant);
+  }
+  int64_t right_constant = 0;
+  if (loom_symbolic_expr_bounded_exact_i64(module, fact_table, right_value,
+                                           &right_constant)) {
+    int64_t scaled_coefficient = 0;
+    if (!loom_checked_mul_i64(coefficient, right_constant,
+                              &scaled_coefficient)) {
+      return false;
+    }
+    return loom_symbolic_expr_bounded_accumulate_value(
+        module, fact_table, left_value, scaled_coefficient, remaining_depth,
+        terms, term_capacity, inout_term_count, inout_constant);
+  }
+  return loom_symbolic_expr_bounded_append_term(terms, term_capacity,
+                                                inout_term_count, result_value,
+                                                result_value, coefficient);
+}
+
+static bool loom_symbolic_expr_bounded_accumulate_shli(
+    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
+    loom_value_id_t result_value, loom_value_id_t left_value,
+    loom_value_id_t right_value, int64_t coefficient, uint8_t remaining_depth,
+    loom_symbolic_term_t* terms, iree_host_size_t term_capacity,
+    iree_host_size_t* inout_term_count, int64_t* inout_constant) {
+  int64_t shift_amount = 0;
+  if (!loom_symbolic_expr_bounded_exact_i64(module, fact_table, right_value,
+                                            &shift_amount) ||
+      shift_amount < 0 || shift_amount > 62) {
+    return loom_symbolic_expr_bounded_append_term(
+        terms, term_capacity, inout_term_count, result_value, result_value,
+        coefficient);
+  }
+  int64_t scaled_coefficient = 0;
+  if (!loom_checked_mul_i64(coefficient, INT64_C(1) << shift_amount,
+                            &scaled_coefficient)) {
+    return false;
+  }
+  return loom_symbolic_expr_bounded_accumulate_value(
+      module, fact_table, left_value, scaled_coefficient, remaining_depth,
+      terms, term_capacity, inout_term_count, inout_constant);
+}
+
+static bool loom_symbolic_expr_bounded_accumulate_assume(
+    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
+    const loom_value_slice_t values, loom_value_id_t result_value,
+    uint16_t result_index, int64_t coefficient, uint8_t remaining_depth,
+    loom_symbolic_term_t* terms, iree_host_size_t term_capacity,
+    iree_host_size_t* inout_term_count, int64_t* inout_constant) {
+  if (result_index >= values.count) {
+    return loom_symbolic_expr_bounded_append_term(
+        terms, term_capacity, inout_term_count, result_value, result_value,
+        coefficient);
+  }
+  const loom_value_id_t source_value = values.values[result_index];
+  loom_symbolic_term_t
+      source_terms[LOOM_SYMBOLIC_EXPR_BOUNDED_SCRATCH_TERM_CAPACITY] = {0};
+  iree_host_size_t source_term_count = 0;
+  int64_t source_constant = 0;
+  if (!loom_symbolic_expr_bounded_accumulate_value(
+          module, fact_table, source_value, 1, remaining_depth, source_terms,
+          IREE_ARRAYSIZE(source_terms), &source_term_count, &source_constant)) {
+    return loom_symbolic_expr_bounded_append_term(
+        terms, term_capacity, inout_term_count, result_value, result_value,
+        coefficient);
+  }
+  loom_symbolic_expr_t source_expression = {0};
+  source_expression = (loom_symbolic_expr_t){
+      .constant = source_constant,
+      .terms = source_term_count == 0 ? NULL : source_terms,
+      .term_count = source_term_count,
+      .facts =
+          loom_symbolic_expr_bounded_lookup_facts(fact_table, source_value),
+      .flags = LOOM_SYMBOLIC_EXPR_FLAG_LINEAR,
+  };
+  const bool is_opaque_identity = source_expression.constant == 0 &&
+                                  source_expression.term_count == 1 &&
+                                  source_expression.terms[0].coefficient == 1;
+  if (is_opaque_identity) {
+    return loom_symbolic_expr_bounded_append_term(
+        terms, term_capacity, inout_term_count, result_value, result_value,
+        coefficient);
+  }
+  return loom_symbolic_expr_bounded_accumulate_expression(
+      &source_expression, coefficient, terms, term_capacity, inout_term_count,
+      inout_constant);
+}
+
+static bool loom_symbolic_expr_bounded_accumulate_value(
+    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
+    loom_value_id_t value_id, int64_t coefficient, uint8_t remaining_depth,
+    loom_symbolic_term_t* terms, iree_host_size_t term_capacity,
+    iree_host_size_t* inout_term_count, int64_t* inout_constant) {
+  if (coefficient == 0) return true;
+  int64_t exact_value = 0;
+  if (loom_symbolic_expr_bounded_exact_i64(module, fact_table, value_id,
+                                           &exact_value)) {
+    return loom_symbolic_expr_bounded_accumulate_constant(
+        exact_value, coefficient, inout_constant);
+  }
+  if (remaining_depth == 0 || !module || value_id >= module->values.count) {
+    return loom_symbolic_expr_bounded_append_term(terms, term_capacity,
+                                                  inout_term_count, value_id,
+                                                  value_id, coefficient);
+  }
+  const loom_value_t* value = loom_module_value(module, value_id);
+  if (loom_value_is_block_arg(value)) {
+    return loom_symbolic_expr_bounded_append_term(terms, term_capacity,
+                                                  inout_term_count, value_id,
+                                                  value_id, coefficient);
+  }
+  const loom_op_t* op = loom_value_def_op(value);
+  if (op == NULL) {
+    return loom_symbolic_expr_bounded_append_term(terms, term_capacity,
+                                                  inout_term_count, value_id,
+                                                  value_id, coefficient);
+  }
+  const uint8_t next_depth = (uint8_t)(remaining_depth - 1);
+  switch (op->kind) {
+    case LOOM_OP_INDEX_CONSTANT:
+    case LOOM_OP_SCALAR_CONSTANT: {
+      int64_t constant = 0;
+      if (!loom_symbolic_expr_bounded_constant_attr(op, &constant)) {
+        break;
+      }
+      return loom_symbolic_expr_bounded_accumulate_constant(
+          constant, coefficient, inout_constant);
+    }
+    case LOOM_OP_INDEX_CAST:
+      return loom_symbolic_expr_bounded_accumulate_value(
+          module, fact_table, loom_index_cast_input(op), coefficient,
+          next_depth, terms, term_capacity, inout_term_count, inout_constant);
+    case LOOM_OP_INDEX_ASSUME:
+      return loom_symbolic_expr_bounded_accumulate_assume(
+          module, fact_table, loom_index_assume_values(op), value_id,
+          loom_value_def_index(value), coefficient, next_depth, terms,
+          term_capacity, inout_term_count, inout_constant);
+    case LOOM_OP_INDEX_ADD:
+      return loom_symbolic_expr_bounded_accumulate_value(
+                 module, fact_table, loom_index_add_lhs(op), coefficient,
+                 next_depth, terms, term_capacity, inout_term_count,
+                 inout_constant) &&
+             loom_symbolic_expr_bounded_accumulate_value(
+                 module, fact_table, loom_index_add_rhs(op), coefficient,
+                 next_depth, terms, term_capacity, inout_term_count,
+                 inout_constant);
+    case LOOM_OP_INDEX_SUB: {
+      int64_t rhs_coefficient = 0;
+      if (!loom_checked_sub_i64(0, coefficient, &rhs_coefficient)) {
+        return false;
+      }
+      return loom_symbolic_expr_bounded_accumulate_value(
+                 module, fact_table, loom_index_sub_lhs(op), coefficient,
+                 next_depth, terms, term_capacity, inout_term_count,
+                 inout_constant) &&
+             loom_symbolic_expr_bounded_accumulate_value(
+                 module, fact_table, loom_index_sub_rhs(op), rhs_coefficient,
+                 next_depth, terms, term_capacity, inout_term_count,
+                 inout_constant);
+    }
+    case LOOM_OP_INDEX_MUL:
+      return loom_symbolic_expr_bounded_accumulate_mul(
+          module, fact_table, value_id, loom_index_mul_lhs(op),
+          loom_index_mul_rhs(op), coefficient, next_depth, terms, term_capacity,
+          inout_term_count, inout_constant);
+    case LOOM_OP_INDEX_SCALE:
+      return loom_symbolic_expr_bounded_accumulate_mul(
+          module, fact_table, value_id, loom_index_scale_index(op),
+          loom_index_scale_stride(op), coefficient, next_depth, terms,
+          term_capacity, inout_term_count, inout_constant);
+    case LOOM_OP_INDEX_MADD:
+      return loom_symbolic_expr_bounded_accumulate_mul(
+                 module, fact_table, value_id, loom_index_madd_a(op),
+                 loom_index_madd_b(op), coefficient, next_depth, terms,
+                 term_capacity, inout_term_count, inout_constant) &&
+             loom_symbolic_expr_bounded_accumulate_value(
+                 module, fact_table, loom_index_madd_c(op), coefficient,
+                 next_depth, terms, term_capacity, inout_term_count,
+                 inout_constant);
+    case LOOM_OP_INDEX_SHLI:
+      return loom_symbolic_expr_bounded_accumulate_shli(
+          module, fact_table, value_id, loom_index_shli_lhs(op),
+          loom_index_shli_rhs(op), coefficient, next_depth, terms,
+          term_capacity, inout_term_count, inout_constant);
+    case LOOM_OP_SCALAR_ADDI:
+      return loom_symbolic_expr_bounded_accumulate_value(
+                 module, fact_table, loom_scalar_addi_lhs(op), coefficient,
+                 next_depth, terms, term_capacity, inout_term_count,
+                 inout_constant) &&
+             loom_symbolic_expr_bounded_accumulate_value(
+                 module, fact_table, loom_scalar_addi_rhs(op), coefficient,
+                 next_depth, terms, term_capacity, inout_term_count,
+                 inout_constant);
+    case LOOM_OP_SCALAR_SUBI: {
+      int64_t rhs_coefficient = 0;
+      if (!loom_checked_sub_i64(0, coefficient, &rhs_coefficient)) {
+        return false;
+      }
+      return loom_symbolic_expr_bounded_accumulate_value(
+                 module, fact_table, loom_scalar_subi_lhs(op), coefficient,
+                 next_depth, terms, term_capacity, inout_term_count,
+                 inout_constant) &&
+             loom_symbolic_expr_bounded_accumulate_value(
+                 module, fact_table, loom_scalar_subi_rhs(op), rhs_coefficient,
+                 next_depth, terms, term_capacity, inout_term_count,
+                 inout_constant);
+    }
+    case LOOM_OP_SCALAR_MULI:
+      return loom_symbolic_expr_bounded_accumulate_mul(
+          module, fact_table, value_id, loom_scalar_muli_lhs(op),
+          loom_scalar_muli_rhs(op), coefficient, next_depth, terms,
+          term_capacity, inout_term_count, inout_constant);
+    case LOOM_OP_SCALAR_NEGI: {
+      int64_t negated_coefficient = 0;
+      if (!loom_checked_sub_i64(0, coefficient, &negated_coefficient)) {
+        return false;
+      }
+      return loom_symbolic_expr_bounded_accumulate_value(
+          module, fact_table, loom_scalar_negi_input(op), negated_coefficient,
+          next_depth, terms, term_capacity, inout_term_count, inout_constant);
+    }
+    case LOOM_OP_SCALAR_FMAI:
+      return loom_symbolic_expr_bounded_accumulate_mul(
+                 module, fact_table, value_id, loom_scalar_fmai_a(op),
+                 loom_scalar_fmai_b(op), coefficient, next_depth, terms,
+                 term_capacity, inout_term_count, inout_constant) &&
+             loom_symbolic_expr_bounded_accumulate_value(
+                 module, fact_table, loom_scalar_fmai_c(op), coefficient,
+                 next_depth, terms, term_capacity, inout_term_count,
+                 inout_constant);
+    case LOOM_OP_SCALAR_ASSUME:
+      return loom_symbolic_expr_bounded_accumulate_assume(
+          module, fact_table, loom_scalar_assume_values(op), value_id,
+          loom_value_def_index(value), coefficient, next_depth, terms,
+          term_capacity, inout_term_count, inout_constant);
+    case LOOM_OP_SCF_SELECT: {
+      int64_t condition = 0;
+      if (!loom_symbolic_expr_bounded_exact_i64(
+              module, fact_table, loom_scf_select_condition(op), &condition)) {
+        break;
+      }
+      return loom_symbolic_expr_bounded_accumulate_value(
+          module, fact_table,
+          condition ? loom_scf_select_true_value(op)
+                    : loom_scf_select_false_value(op),
+          coefficient, next_depth, terms, term_capacity, inout_term_count,
+          inout_constant);
+    }
+    default:
+      break;
+  }
+  return loom_symbolic_expr_bounded_append_term(
+      terms, term_capacity, inout_term_count, value_id, value_id, coefficient);
+}
+
+void loom_symbolic_expr_from_value_bounded(
+    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
+    loom_value_id_t value_id, loom_symbolic_term_t* terms,
+    iree_host_size_t term_capacity, loom_symbolic_expr_t* out_expression) {
+  int64_t constant = 0;
+  iree_host_size_t term_count = 0;
+  const bool expanded = terms != NULL && term_capacity > 0 &&
+                        loom_symbolic_expr_bounded_accumulate_value(
+                            module, fact_table, value_id, 1,
+                            LOOM_SYMBOLIC_EXPR_BOUNDED_DEPTH_LIMIT, terms,
+                            term_capacity, &term_count, &constant);
+  if (!expanded) {
+    if (terms != NULL && term_capacity > 0) {
+      terms[0] = (loom_symbolic_term_t){
+          .coefficient = 1,
+          .value_id = value_id,
+          .relation_value_id = value_id,
+      };
+      term_count = 1;
+    } else {
+      loom_symbolic_expr_unknown(
+          loom_symbolic_expr_bounded_lookup_facts(fact_table, value_id),
+          out_expression);
+      return;
+    }
+    constant = 0;
+  }
+  *out_expression = (loom_symbolic_expr_t){
+      .constant = constant,
+      .terms = term_count == 0 ? NULL : terms,
+      .term_count = term_count,
+      .facts = loom_symbolic_expr_bounded_lookup_facts(fact_table, value_id),
+      .flags = LOOM_SYMBOLIC_EXPR_FLAG_LINEAR,
+  };
+}
+
 static bool loom_symbolic_expr_projected_func_arg_representative(
     const loom_symbolic_expr_context_t* context, loom_value_id_t value_id,
     loom_value_id_t* out_representative) {
@@ -628,6 +1075,25 @@ static iree_status_t loom_symbolic_expr_from_madd_value(
                                 out_expression);
 }
 
+static iree_status_t loom_symbolic_expr_from_shli_value(
+    loom_symbolic_expr_context_t* context, loom_value_id_t result_value,
+    loom_value_id_t left_value, loom_value_id_t right_value,
+    loom_symbolic_expr_t* out_expression) {
+  loom_symbolic_expr_t right_expression = {0};
+  IREE_RETURN_IF_ERROR(
+      loom_symbolic_expr_from_value(context, right_value, &right_expression));
+  int64_t shift_amount = 0;
+  if (!loom_symbolic_expr_constant_value(&right_expression, &shift_amount) ||
+      shift_amount < 0 || shift_amount > 62) {
+    return loom_symbolic_expr_value(context, result_value, out_expression);
+  }
+  loom_symbolic_expr_t left_expression = {0};
+  IREE_RETURN_IF_ERROR(
+      loom_symbolic_expr_from_value(context, left_value, &left_expression));
+  return loom_symbolic_expr_mul_i64(context, &left_expression,
+                                    INT64_C(1) << shift_amount, out_expression);
+}
+
 static iree_status_t loom_symbolic_expr_from_select_value(
     loom_symbolic_expr_context_t* context, loom_value_id_t result_value,
     loom_value_id_t condition_value, loom_value_id_t true_value,
@@ -732,11 +1198,21 @@ static iree_status_t loom_symbolic_expr_from_value_uncached(
           context, value_id, loom_index_mul_lhs(defining_op),
           loom_index_mul_rhs(defining_op), out_expression);
       break;
+    case LOOM_OP_INDEX_SCALE:
+      status = loom_symbolic_expr_from_mul_value(
+          context, value_id, loom_index_scale_index(defining_op),
+          loom_index_scale_stride(defining_op), out_expression);
+      break;
     case LOOM_OP_INDEX_MADD:
       status = loom_symbolic_expr_from_madd_value(
           context, value_id, loom_index_madd_a(defining_op),
           loom_index_madd_b(defining_op), loom_index_madd_c(defining_op),
           out_expression);
+      break;
+    case LOOM_OP_INDEX_SHLI:
+      status = loom_symbolic_expr_from_shli_value(
+          context, value_id, loom_index_shli_lhs(defining_op),
+          loom_index_shli_rhs(defining_op), out_expression);
       break;
     case LOOM_OP_SCALAR_CONSTANT: {
       loom_attribute_t value_attr = loom_scalar_constant_value(defining_op);

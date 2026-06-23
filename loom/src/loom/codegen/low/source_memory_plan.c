@@ -9,11 +9,11 @@
 #include <stdint.h>
 
 #include "iree/base/api.h"
+#include "loom/analysis/symbolic_expr.h"
 #include "loom/codegen/low/memory_access.h"
 #include "loom/ir/facts.h"
 #include "loom/ir/module.h"
 #include "loom/ops/buffer/ops.h"
-#include "loom/ops/index/ops.h"
 #include "loom/ops/kernel/ops.h"
 #include "loom/ops/vector/ops.h"
 #include "loom/ops/view/ops.h"
@@ -527,6 +527,32 @@ static void loom_low_source_memory_dynamic_term_compute_scaled_byte_facts(
       stride_values, stride_value_count, out_facts);
 }
 
+static void loom_low_source_memory_dynamic_term_compute_expression_byte_facts(
+    const loom_value_fact_table_t* fact_table,
+    const loom_vector_memory_access_t* vector_access,
+    loom_value_facts_t expression_facts, uint8_t dynamic_axis,
+    int64_t index_offset, int64_t byte_stride,
+    const loom_value_id_t* stride_values, uint8_t stride_value_count,
+    loom_value_facts_t* out_facts) {
+  loom_value_facts_t index_facts = expression_facts;
+  loom_value_facts_t domain_facts = loom_value_facts_unknown();
+  if (vector_access != NULL &&
+      dynamic_axis != LOOM_LOW_SOURCE_MEMORY_DYNAMIC_TERM_AXIS_NONE &&
+      loom_low_source_memory_access_origin_domain_facts(
+          fact_table, vector_access, dynamic_axis, &domain_facts)) {
+    index_facts = loom_low_source_memory_access_intersect_index_facts(
+        index_facts, domain_facts);
+  }
+  if (index_offset != 0) {
+    const loom_value_facts_t offset_facts =
+        loom_value_facts_exact_i64(index_offset);
+    loom_value_facts_subi(&index_facts, &offset_facts, &index_facts);
+  }
+  loom_low_source_memory_dynamic_term_compute_index_byte_facts(
+      fact_table, index_facts, byte_stride, stride_values, stride_value_count,
+      out_facts);
+}
+
 static void loom_low_source_memory_dynamic_term_compute_byte_facts(
     const loom_value_fact_table_t* fact_table,
     const loom_vector_memory_access_t* vector_access, loom_value_id_t index,
@@ -577,6 +603,8 @@ static bool loom_low_source_memory_access_exact_positive_i64(
 typedef struct loom_low_source_memory_scaled_index_t {
   // Base SSA value used as the dynamic address term.
   loom_value_id_t index;
+  // Facts for the original source expression before extracting static offset.
+  loom_value_facts_t expression_facts;
   // Positive multiplier applied to |index| in the original source expression.
   int64_t multiplier;
   // Constant offset added after the scaled index in the original expression.
@@ -612,193 +640,32 @@ static bool loom_low_source_memory_access_append_affine_index_term(
   return true;
 }
 
-static bool loom_low_source_memory_access_value_has_affine_index_op(
-    const loom_module_t* module, loom_value_id_t value_id) {
-  if (value_id >= module->values.count) {
-    return false;
-  }
-  const loom_value_t* value = loom_module_value(module, value_id);
-  if (loom_value_is_block_arg(value)) {
-    return false;
-  }
-  const loom_op_t* defining_op = loom_value_def_op(value);
-  if (!defining_op) {
-    return false;
-  }
-  return loom_index_add_isa(defining_op) || loom_index_mul_isa(defining_op) ||
-         loom_index_scale_isa(defining_op) ||
-         loom_index_madd_isa(defining_op) || loom_index_shli_isa(defining_op);
-}
-
 static bool loom_low_source_memory_access_affine_index_terms_from_value(
     const loom_module_t* module, const loom_value_fact_table_t* fact_table,
-    loom_value_id_t value_id, int64_t multiplier, uint32_t recursion_depth,
-    loom_low_source_memory_affine_index_term_t* terms, uint8_t* inout_count,
-    int64_t* inout_offset) {
-  if (recursion_depth > 8 || value_id >= module->values.count ||
-      multiplier <= 0) {
+    loom_value_id_t value_id, loom_low_source_memory_affine_index_term_t* terms,
+    uint8_t* inout_count, int64_t* inout_offset) {
+  loom_symbolic_term_t
+      symbolic_terms[LOOM_LOW_SOURCE_MEMORY_DYNAMIC_TERM_CAPACITY] = {0};
+  loom_symbolic_expr_t expression = {0};
+  loom_symbolic_expr_from_value_bounded(
+      module, fact_table, value_id, symbolic_terms,
+      IREE_ARRAYSIZE(symbolic_terms), &expression);
+  if (!loom_symbolic_expr_is_linear(&expression)) {
     return false;
   }
-
-  int64_t constant = 0;
-  if (loom_low_source_memory_access_exact_i64(
-          loom_value_fact_table_lookup(fact_table, value_id), &constant)) {
-    int64_t offset_delta = 0;
-    int64_t new_offset = 0;
-    if (!loom_checked_mul_i64(constant, multiplier, &offset_delta) ||
-        !loom_checked_add_i64(*inout_offset, offset_delta, &new_offset)) {
+  int64_t offset = 0;
+  if (!loom_checked_add_i64(*inout_offset, expression.constant, &offset)) {
+    return false;
+  }
+  *inout_offset = offset;
+  for (iree_host_size_t i = 0; i < expression.term_count; ++i) {
+    const loom_symbolic_term_t term = expression.terms[i];
+    if (!loom_low_source_memory_access_append_affine_index_term(
+            term.value_id, term.coefficient, terms, inout_count)) {
       return false;
     }
-    *inout_offset = new_offset;
-    return true;
   }
-
-  const loom_value_t* value = loom_module_value(module, value_id);
-  if (loom_value_is_block_arg(value)) {
-    return loom_low_source_memory_access_append_affine_index_term(
-        value_id, multiplier, terms, inout_count);
-  }
-  const loom_op_t* defining_op = loom_value_def_op(value);
-  if (!defining_op) {
-    return loom_low_source_memory_access_append_affine_index_term(
-        value_id, multiplier, terms, inout_count);
-  }
-
-  if (loom_index_assume_isa(defining_op)) {
-    const uint16_t result_index = loom_value_def_index(value);
-    if (result_index >= defining_op->operand_count) {
-      return loom_low_source_memory_access_append_affine_index_term(
-          value_id, multiplier, terms, inout_count);
-    }
-    const loom_value_id_t source_value_id =
-        loom_op_const_operands(defining_op)[result_index];
-    if (source_value_id != value_id &&
-        loom_low_source_memory_access_value_has_affine_index_op(
-            module, source_value_id)) {
-      return loom_low_source_memory_access_affine_index_terms_from_value(
-          module, fact_table, source_value_id, multiplier, recursion_depth + 1,
-          terms, inout_count, inout_offset);
-    }
-    return loom_low_source_memory_access_append_affine_index_term(
-        value_id, multiplier, terms, inout_count);
-  }
-
-  if (loom_index_cast_isa(defining_op)) {
-    const loom_type_t input_type =
-        loom_module_value_type(module, loom_index_cast_input(defining_op));
-    const loom_type_t result_type = loom_module_value_type(module, value_id);
-    if (loom_type_is_scalar(input_type) && loom_type_is_scalar(result_type) &&
-        loom_type_element_type(input_type) == LOOM_SCALAR_TYPE_INDEX &&
-        loom_type_element_type(result_type) == LOOM_SCALAR_TYPE_OFFSET) {
-      return loom_low_source_memory_access_affine_index_terms_from_value(
-          module, fact_table, loom_index_cast_input(defining_op), multiplier,
-          recursion_depth + 1, terms, inout_count, inout_offset);
-    }
-  }
-
-  if (loom_index_add_isa(defining_op)) {
-    return loom_low_source_memory_access_affine_index_terms_from_value(
-               module, fact_table, loom_index_add_lhs(defining_op), multiplier,
-               recursion_depth + 1, terms, inout_count, inout_offset) &&
-           loom_low_source_memory_access_affine_index_terms_from_value(
-               module, fact_table, loom_index_add_rhs(defining_op), multiplier,
-               recursion_depth + 1, terms, inout_count, inout_offset);
-  }
-
-  if (loom_index_mul_isa(defining_op)) {
-    loom_value_id_t lhs = loom_index_mul_lhs(defining_op);
-    loom_value_id_t rhs = loom_index_mul_rhs(defining_op);
-    int64_t static_multiplier = 0;
-    loom_value_id_t scaled_value = LOOM_VALUE_ID_INVALID;
-    if (loom_low_source_memory_access_exact_positive_i64(fact_table, lhs,
-                                                         &static_multiplier)) {
-      scaled_value = rhs;
-    } else if (loom_low_source_memory_access_exact_positive_i64(
-                   fact_table, rhs, &static_multiplier)) {
-      scaled_value = lhs;
-    } else {
-      return loom_low_source_memory_access_append_affine_index_term(
-          value_id, multiplier, terms, inout_count);
-    }
-    int64_t combined_multiplier = 0;
-    if (!loom_checked_mul_i64(multiplier, static_multiplier,
-                              &combined_multiplier)) {
-      return false;
-    }
-    return loom_low_source_memory_access_affine_index_terms_from_value(
-        module, fact_table, scaled_value, combined_multiplier,
-        recursion_depth + 1, terms, inout_count, inout_offset);
-  }
-
-  if (loom_index_scale_isa(defining_op)) {
-    int64_t byte_stride = 0;
-    if (!loom_low_source_memory_access_exact_positive_i64(
-            fact_table, loom_index_scale_stride(defining_op), &byte_stride)) {
-      return loom_low_source_memory_access_append_affine_index_term(
-          value_id, multiplier, terms, inout_count);
-    }
-    int64_t combined_multiplier = 0;
-    if (!loom_checked_mul_i64(multiplier, byte_stride, &combined_multiplier)) {
-      return false;
-    }
-    return loom_low_source_memory_access_affine_index_terms_from_value(
-        module, fact_table, loom_index_scale_index(defining_op),
-        combined_multiplier, recursion_depth + 1, terms, inout_count,
-        inout_offset);
-  }
-
-  if (loom_index_madd_isa(defining_op)) {
-    loom_value_id_t a = loom_index_madd_a(defining_op);
-    loom_value_id_t b = loom_index_madd_b(defining_op);
-    loom_value_id_t c = loom_index_madd_c(defining_op);
-    int64_t static_multiplier = 0;
-    loom_value_id_t scaled_value = LOOM_VALUE_ID_INVALID;
-    if (loom_low_source_memory_access_exact_positive_i64(fact_table, a,
-                                                         &static_multiplier)) {
-      scaled_value = b;
-    } else if (loom_low_source_memory_access_exact_positive_i64(
-                   fact_table, b, &static_multiplier)) {
-      scaled_value = a;
-    } else {
-      return loom_low_source_memory_access_append_affine_index_term(
-          value_id, multiplier, terms, inout_count);
-    }
-    int64_t combined_multiplier = 0;
-    if (!loom_checked_mul_i64(multiplier, static_multiplier,
-                              &combined_multiplier)) {
-      return false;
-    }
-    return loom_low_source_memory_access_affine_index_terms_from_value(
-               module, fact_table, scaled_value, combined_multiplier,
-               recursion_depth + 1, terms, inout_count, inout_offset) &&
-           loom_low_source_memory_access_affine_index_terms_from_value(
-               module, fact_table, c, multiplier, recursion_depth + 1, terms,
-               inout_count, inout_offset);
-  }
-
-  if (loom_index_shli_isa(defining_op)) {
-    int64_t shift_amount = 0;
-    if (!loom_low_source_memory_access_exact_i64(
-            loom_value_fact_table_lookup(fact_table,
-                                         loom_index_shli_rhs(defining_op)),
-            &shift_amount) ||
-        shift_amount < 0 || shift_amount > 62) {
-      return loom_low_source_memory_access_append_affine_index_term(
-          value_id, multiplier, terms, inout_count);
-    }
-    int64_t combined_multiplier = 0;
-    if (!loom_checked_mul_i64(multiplier, ((int64_t)1) << shift_amount,
-                              &combined_multiplier)) {
-      return false;
-    }
-    return loom_low_source_memory_access_affine_index_terms_from_value(
-        module, fact_table, loom_index_shli_lhs(defining_op),
-        combined_multiplier, recursion_depth + 1, terms, inout_count,
-        inout_offset);
-  }
-
-  return loom_low_source_memory_access_append_affine_index_term(
-      value_id, multiplier, terms, inout_count);
+  return true;
 }
 
 static bool
@@ -824,235 +691,36 @@ loom_low_source_memory_access_affine_terms_have_mixed_coordinate_sources(
 
 static bool loom_low_source_memory_access_scaled_index_from_value(
     const loom_module_t* module, const loom_value_fact_table_t* fact_table,
-    loom_value_id_t value_id, uint32_t recursion_depth,
+    loom_value_id_t value_id,
     loom_low_source_memory_scaled_index_t* out_scaled_index) {
   *out_scaled_index = (loom_low_source_memory_scaled_index_t){
       .index = value_id,
+      .expression_facts = loom_value_fact_table_lookup(fact_table, value_id),
       .multiplier = 1,
       .offset = 0,
   };
-  if (recursion_depth > 8 || value_id >= module->values.count) {
+  if (value_id >= module->values.count) {
     return false;
   }
-  const loom_value_t* value = loom_module_value(module, value_id);
-  if (loom_value_is_block_arg(value)) {
+  loom_symbolic_term_t terms[1] = {0};
+  loom_symbolic_expr_t expression = {0};
+  loom_symbolic_expr_from_value_bounded(module, fact_table, value_id, terms,
+                                        IREE_ARRAYSIZE(terms), &expression);
+  if (!loom_symbolic_expr_is_linear(&expression) ||
+      expression.term_count != 1 || expression.terms[0].coefficient <= 0 ||
+      !loom_low_source_memory_access_can_extract_static_index_offset(
+          expression.constant)) {
     return true;
   }
-  const loom_op_t* defining_op = loom_value_def_op(value);
-  if (!defining_op) {
+  if (expression.constant == 0 && expression.terms[0].coefficient == 1) {
     return true;
   }
-
-  if (loom_index_cast_isa(defining_op)) {
-    const loom_type_t input_type =
-        loom_module_value_type(module, loom_index_cast_input(defining_op));
-    const loom_type_t result_type = loom_module_value_type(module, value_id);
-    if (loom_type_is_scalar(input_type) && loom_type_is_scalar(result_type) &&
-        loom_type_element_type(input_type) == LOOM_SCALAR_TYPE_INDEX &&
-        loom_type_element_type(result_type) == LOOM_SCALAR_TYPE_OFFSET) {
-      return loom_low_source_memory_access_scaled_index_from_value(
-          module, fact_table, loom_index_cast_input(defining_op),
-          recursion_depth + 1, out_scaled_index);
-    }
-  }
-
-  if (loom_index_mul_isa(defining_op)) {
-    loom_value_id_t lhs = loom_index_mul_lhs(defining_op);
-    loom_value_id_t rhs = loom_index_mul_rhs(defining_op);
-    int64_t multiplier = 0;
-    loom_value_id_t scaled_value = LOOM_VALUE_ID_INVALID;
-    if (loom_low_source_memory_access_exact_positive_i64(fact_table, lhs,
-                                                         &multiplier)) {
-      scaled_value = rhs;
-    } else if (loom_low_source_memory_access_exact_positive_i64(fact_table, rhs,
-                                                                &multiplier)) {
-      scaled_value = lhs;
-    } else {
-      return true;
-    }
-
-    loom_low_source_memory_scaled_index_t inner_scaled_index = {0};
-    if (!loom_low_source_memory_access_scaled_index_from_value(
-            module, fact_table, scaled_value, recursion_depth + 1,
-            &inner_scaled_index)) {
-      return false;
-    }
-    int64_t scaled_multiplier = 0;
-    int64_t scaled_offset = 0;
-    if (!loom_checked_mul_i64(inner_scaled_index.multiplier, multiplier,
-                              &scaled_multiplier) ||
-        !loom_checked_mul_i64(inner_scaled_index.offset, multiplier,
-                              &scaled_offset)) {
-      return false;
-    }
-    *out_scaled_index = (loom_low_source_memory_scaled_index_t){
-        .index = inner_scaled_index.index,
-        .multiplier = scaled_multiplier,
-        .offset = scaled_offset,
-    };
-    return true;
-  }
-
-  if (loom_index_scale_isa(defining_op)) {
-    loom_value_id_t index = loom_index_scale_index(defining_op);
-    loom_value_id_t stride = loom_index_scale_stride(defining_op);
-    int64_t multiplier = 0;
-    if (!loom_low_source_memory_access_exact_positive_i64(fact_table, stride,
-                                                          &multiplier)) {
-      return true;
-    }
-
-    loom_low_source_memory_scaled_index_t inner_scaled_index = {0};
-    if (!loom_low_source_memory_access_scaled_index_from_value(
-            module, fact_table, index, recursion_depth + 1,
-            &inner_scaled_index)) {
-      return false;
-    }
-    int64_t scaled_multiplier = 0;
-    int64_t scaled_offset = 0;
-    if (!loom_checked_mul_i64(inner_scaled_index.multiplier, multiplier,
-                              &scaled_multiplier) ||
-        !loom_checked_mul_i64(inner_scaled_index.offset, multiplier,
-                              &scaled_offset)) {
-      return false;
-    }
-    *out_scaled_index = (loom_low_source_memory_scaled_index_t){
-        .index = inner_scaled_index.index,
-        .multiplier = scaled_multiplier,
-        .offset = scaled_offset,
-    };
-    return true;
-  }
-
-  if (loom_index_shli_isa(defining_op)) {
-    loom_value_id_t lhs = loom_index_shli_lhs(defining_op);
-    loom_value_id_t rhs = loom_index_shli_rhs(defining_op);
-    int64_t shift_amount = 0;
-    if (!loom_low_source_memory_access_exact_i64(
-            loom_value_fact_table_lookup(fact_table, rhs), &shift_amount) ||
-        shift_amount < 0 || shift_amount > 62) {
-      return true;
-    }
-
-    loom_low_source_memory_scaled_index_t inner_scaled_index = {0};
-    if (!loom_low_source_memory_access_scaled_index_from_value(
-            module, fact_table, lhs, recursion_depth + 1,
-            &inner_scaled_index)) {
-      return false;
-    }
-    const int64_t multiplier = ((int64_t)1) << shift_amount;
-    int64_t scaled_multiplier = 0;
-    int64_t scaled_offset = 0;
-    if (!loom_checked_mul_i64(inner_scaled_index.multiplier, multiplier,
-                              &scaled_multiplier) ||
-        !loom_checked_mul_i64(inner_scaled_index.offset, multiplier,
-                              &scaled_offset)) {
-      return false;
-    }
-    *out_scaled_index = (loom_low_source_memory_scaled_index_t){
-        .index = inner_scaled_index.index,
-        .multiplier = scaled_multiplier,
-        .offset = scaled_offset,
-    };
-    return true;
-  }
-
-  if (loom_index_madd_isa(defining_op)) {
-    loom_value_id_t a = loom_index_madd_a(defining_op);
-    loom_value_id_t b = loom_index_madd_b(defining_op);
-    loom_value_id_t c = loom_index_madd_c(defining_op);
-    int64_t multiplier = 0;
-    loom_value_id_t scaled_value = LOOM_VALUE_ID_INVALID;
-    if (loom_low_source_memory_access_exact_positive_i64(fact_table, a,
-                                                         &multiplier)) {
-      scaled_value = b;
-    } else if (loom_low_source_memory_access_exact_positive_i64(fact_table, b,
-                                                                &multiplier)) {
-      scaled_value = a;
-    } else {
-      return true;
-    }
-
-    int64_t constant = 0;
-    if (!loom_low_source_memory_access_exact_i64(
-            loom_value_fact_table_lookup(fact_table, c), &constant)) {
-      return true;
-    }
-    if (!loom_low_source_memory_access_can_extract_static_index_offset(
-            constant)) {
-      return true;
-    }
-
-    loom_low_source_memory_scaled_index_t inner_scaled_index = {0};
-    if (!loom_low_source_memory_access_scaled_index_from_value(
-            module, fact_table, scaled_value, recursion_depth + 1,
-            &inner_scaled_index)) {
-      return false;
-    }
-    int64_t scaled_multiplier = 0;
-    int64_t scaled_offset = 0;
-    int64_t offset = 0;
-    if (!loom_checked_mul_i64(inner_scaled_index.multiplier, multiplier,
-                              &scaled_multiplier) ||
-        !loom_checked_mul_i64(inner_scaled_index.offset, multiplier,
-                              &scaled_offset) ||
-        !loom_checked_add_i64(scaled_offset, constant, &offset)) {
-      return false;
-    }
-    *out_scaled_index = (loom_low_source_memory_scaled_index_t){
-        .index = inner_scaled_index.index,
-        .multiplier = scaled_multiplier,
-        .offset = offset,
-    };
-    return true;
-  }
-
-  if (loom_index_add_isa(defining_op) || loom_index_sub_isa(defining_op)) {
-    loom_value_id_t lhs = loom_index_add_isa(defining_op)
-                              ? loom_index_add_lhs(defining_op)
-                              : loom_index_sub_lhs(defining_op);
-    loom_value_id_t rhs = loom_index_add_isa(defining_op)
-                              ? loom_index_add_rhs(defining_op)
-                              : loom_index_sub_rhs(defining_op);
-    int64_t constant = 0;
-    loom_value_id_t scaled_value = LOOM_VALUE_ID_INVALID;
-    if (loom_low_source_memory_access_exact_i64(
-            loom_value_fact_table_lookup(fact_table, rhs), &constant)) {
-      scaled_value = lhs;
-      if (loom_index_sub_isa(defining_op) &&
-          !loom_checked_sub_i64(0, constant, &constant)) {
-        return false;
-      }
-    } else if (loom_index_add_isa(defining_op) &&
-               loom_low_source_memory_access_exact_i64(
-                   loom_value_fact_table_lookup(fact_table, lhs), &constant)) {
-      scaled_value = rhs;
-    } else {
-      return true;
-    }
-    if (!loom_low_source_memory_access_can_extract_static_index_offset(
-            constant)) {
-      return true;
-    }
-
-    loom_low_source_memory_scaled_index_t inner_scaled_index = {0};
-    if (!loom_low_source_memory_access_scaled_index_from_value(
-            module, fact_table, scaled_value, recursion_depth + 1,
-            &inner_scaled_index)) {
-      return false;
-    }
-    int64_t offset = 0;
-    if (!loom_checked_add_i64(inner_scaled_index.offset, constant, &offset)) {
-      return false;
-    }
-    *out_scaled_index = (loom_low_source_memory_scaled_index_t){
-        .index = inner_scaled_index.index,
-        .multiplier = inner_scaled_index.multiplier,
-        .offset = offset,
-    };
-    return true;
-  }
-
+  *out_scaled_index = (loom_low_source_memory_scaled_index_t){
+      .index = expression.terms[0].value_id,
+      .expression_facts = expression.facts,
+      .multiplier = expression.terms[0].coefficient,
+      .offset = expression.constant,
+  };
   return true;
 }
 
@@ -1061,16 +729,19 @@ static bool loom_low_source_memory_access_scaled_dynamic_index(
     loom_value_id_t dynamic_index, int64_t byte_stride,
     int64_t static_byte_offset, loom_value_id_t* out_scaled_index,
     int64_t* out_index_multiplier, int64_t* out_index_offset,
-    int64_t* out_byte_stride, int64_t* out_static_byte_offset) {
+    int64_t* out_byte_stride, int64_t* out_static_byte_offset,
+    loom_value_facts_t* out_expression_facts) {
   *out_scaled_index = dynamic_index;
   *out_index_multiplier = 1;
   *out_index_offset = 0;
   *out_byte_stride = byte_stride;
   *out_static_byte_offset = static_byte_offset;
+  *out_expression_facts =
+      loom_value_fact_table_lookup(fact_table, dynamic_index);
 
   loom_low_source_memory_scaled_index_t scaled_index = {0};
   if (!loom_low_source_memory_access_scaled_index_from_value(
-          module, fact_table, dynamic_index, 0, &scaled_index) ||
+          module, fact_table, dynamic_index, &scaled_index) ||
       (scaled_index.index == dynamic_index && scaled_index.multiplier == 1 &&
        scaled_index.offset == 0)) {
     return false;
@@ -1097,6 +768,7 @@ static bool loom_low_source_memory_access_scaled_dynamic_index(
   *out_index_offset = scaled_index.offset;
   *out_byte_stride = scaled_byte_stride;
   *out_static_byte_offset = new_static_byte_offset;
+  *out_expression_facts = scaled_index.expression_facts;
   return true;
 }
 
@@ -1143,12 +815,14 @@ static bool loom_low_source_memory_access_add_dynamic_view_base_byte_offset(
   int64_t index_multiplier = 1;
   int64_t index_offset = 0;
   int64_t byte_stride = 1;
+  const int64_t expression_byte_stride = byte_stride;
+  loom_value_facts_t expression_facts = loom_value_facts_unknown();
   const int64_t original_static_byte_offset = *inout_static_byte_offset;
   int64_t static_byte_offset = original_static_byte_offset;
   (void)loom_low_source_memory_access_scaled_dynamic_index(
       module, fact_table, byte_offset, byte_stride, static_byte_offset,
       &dynamic_index, &index_multiplier, &index_offset, &byte_stride,
-      &static_byte_offset);
+      &static_byte_offset, &expression_facts);
   int64_t static_view_base_byte_offset = 0;
   if (!loom_checked_sub_i64(static_byte_offset, original_static_byte_offset,
                             &static_view_base_byte_offset)) {
@@ -1168,8 +842,16 @@ static bool loom_low_source_memory_access_add_dynamic_view_base_byte_offset(
       fact_table, dynamic_index, &term.source, &term.dimension);
   (void)loom_low_source_memory_access_power_of_two_shift(byte_stride,
                                                          &term.byte_shift);
+  loom_value_facts_t base_byte_facts = loom_value_facts_unknown();
   loom_low_source_memory_dynamic_term_compute_scaled_byte_facts(
-      fact_table, dynamic_index, byte_stride, NULL, 0, &term.byte_facts);
+      fact_table, dynamic_index, byte_stride, NULL, 0, &base_byte_facts);
+  loom_value_facts_t expression_byte_facts = loom_value_facts_unknown();
+  loom_low_source_memory_dynamic_term_compute_expression_byte_facts(
+      fact_table, NULL, expression_facts,
+      LOOM_LOW_SOURCE_MEMORY_DYNAMIC_TERM_AXIS_NONE, index_offset,
+      expression_byte_stride, NULL, 0, &expression_byte_facts);
+  term.byte_facts = loom_low_source_memory_access_intersect_index_facts(
+      base_byte_facts, expression_byte_facts);
   IREE_ASSERT_EQ(plan->dynamic_term_count, 0u);
   if (!loom_low_source_memory_access_append_dynamic_term(plan, &term,
                                                          diagnostic)) {
@@ -1520,8 +1202,7 @@ static bool loom_low_source_memory_access_plan_from_components(
     int64_t affine_index_offset = 0;
     bool affine_expanded =
         loom_low_source_memory_access_affine_index_terms_from_value(
-            module, fact_table, dynamic_index, /*multiplier=*/1,
-            /*recursion_depth=*/0, affine_terms, &affine_term_count,
+            module, fact_table, dynamic_index, affine_terms, &affine_term_count,
             &affine_index_offset) &&
         affine_term_count > 1 &&
         loom_low_source_memory_access_affine_terms_have_mixed_coordinate_sources(
@@ -1583,6 +1264,8 @@ static bool loom_low_source_memory_access_plan_from_components(
 
     int64_t dynamic_index_multiplier = 1;
     int64_t dynamic_index_offset = 0;
+    const int64_t expression_byte_stride = byte_stride;
+    loom_value_facts_t expression_facts = loom_value_facts_unknown();
     // Keep the exact source coordinate in the access plan when a dynamic index
     // is a simple affine expression of another value. Targets then see the
     // combined byte stride/static offset and do not need to materialize the
@@ -1590,15 +1273,23 @@ static bool loom_low_source_memory_access_plan_from_components(
     (void)loom_low_source_memory_access_scaled_dynamic_index(
         module, fact_table, dynamic_index, byte_stride, static_byte_offset,
         &dynamic_index, &dynamic_index_multiplier, &dynamic_index_offset,
-        &byte_stride, &static_byte_offset);
+        &byte_stride, &static_byte_offset, &expression_facts);
     uint32_t byte_shift = LOOM_LOW_SOURCE_MEMORY_ACCESS_BYTE_SHIFT_NONE;
     (void)loom_low_source_memory_access_power_of_two_shift(byte_stride,
                                                            &byte_shift);
-    loom_value_facts_t byte_facts = loom_value_facts_unknown();
+    loom_value_facts_t base_byte_facts = loom_value_facts_unknown();
     loom_low_source_memory_dynamic_term_compute_byte_facts(
         fact_table, &vector_access, dynamic_index, dynamic_axis,
         dynamic_index_multiplier, dynamic_index_offset, byte_stride,
-        stride_values, stride_value_count, &byte_facts);
+        stride_values, stride_value_count, &base_byte_facts);
+    loom_value_facts_t expression_byte_facts = loom_value_facts_unknown();
+    loom_low_source_memory_dynamic_term_compute_expression_byte_facts(
+        fact_table, &vector_access, expression_facts, dynamic_axis,
+        dynamic_index_offset, expression_byte_stride, stride_values,
+        stride_value_count, &expression_byte_facts);
+    loom_value_facts_t byte_facts =
+        loom_low_source_memory_access_intersect_index_facts(
+            base_byte_facts, expression_byte_facts);
     loom_low_source_memory_dynamic_term_t term = {
         .index = dynamic_index,
         .axis = dynamic_axis,

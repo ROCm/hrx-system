@@ -539,8 +539,8 @@ low.kernel.def target(@target) workgroup_size(1, 1, 1) @f32x4_readonly_uniform_s
   %source_base = shl.i64 %workgroup, %24
   %output_prefix = const.i64 6
   %output_base = add.i64 %source_base, %output_prefix
-  %loaded = load.indexed.v4f32 %input_view, %source_base, 0, 4
-  store.indexed.v4f32 %loaded, %output_view, %output_base, 0, 4
+  %loaded = load.indexed.v4f32 %input_view, %source_base, 0, 16
+  store.indexed.v4f32 %loaded, %output_view, %output_base, 24, 16
   return
 }
 
@@ -581,8 +581,8 @@ low.kernel.def target(@target) workgroup_size(1, 1, 1) @f32x8_readonly_uniform_s
   %source_base = shl.i64 %workgroup, %24
   %output_prefix = const.i64 8
   %output_base = add.i64 %source_base, %output_prefix
-  %loaded = load.indexed.v8f32 %input_view, %source_base, 0, 4
-  store.indexed.v8f32 %loaded, %output_view, %output_base, 0, 4
+  %loaded = load.indexed.v8f32 %input_view, %source_base, 0, 32
+  store.indexed.v8f32 %loaded, %output_view, %output_base, 32, 32
   return
 }
 
@@ -1328,10 +1328,11 @@ low.kernel.def target(@target) workgroup_size(256, 1, 1) @f32x4_dynamic_view_bas
   %lane = kernel.workitem_id.x
   %31 = const.i64 2
   %channel_base = shl.i64 %lane, %31
-  %34 = shl.i64 %channel_base, %31
+  %33 = const.i64 4
+  %34 = shl.i64 %lane, %33
   %35 = add.i64 %input_base, %34
   %loaded = load.indexed.v4f32 %input_view, %35, 24576, 1
-  store.indexed.v4f32 %loaded, %output_view, %channel_base, 0, 4
+  store.indexed.v4f32 %loaded, %output_view, %channel_base, 0, 16
   return
 }
 
@@ -1746,7 +1747,7 @@ low.kernel.def target(@target) workgroup_size(1, 1, 1) @loaded_i32_row_shift_sto
   %row_i32 = load.i32 %idx_view, 0
   %row = sext.i32.i64 %row_i32
   %element = shl.i64 %row, %shift
-  store.indexed.f32 %value, %output_view, %element, 0, 4
+  store.indexed.f32 %value, %output_view, %element, 0, 16
   return
 }
 
@@ -1787,7 +1788,7 @@ low.kernel.def target(@target) workgroup_size(1, 1, 1) @loaded_i32_row_shift_loa
   %row_i32 = load.i32 %idx_view, 0
   %row = sext.i32.i64 %row_i32
   %element = shl.i64 %row, %shift
-  %loaded = load.indexed.f32 %input_view, %element, 0, 4
+  %loaded = load.indexed.f32 %input_view, %element, 0, 16
   store.f32 %loaded, %output_view, 0
   return
 }
@@ -1991,34 +1992,34 @@ low.kernel.def target(@target) workgroup_size(16, 1, 1) @rank2_vector_tile_trans
   %block = kernel.workitem_id.x
   %56 = const.i64 2
   %tile_base = shl.i64 %block, %56
-  %58 = load.indexed.v4f32 %input_view, %tile_base, 0, 4
+  %58 = load.indexed.v4f32 %input_view, %tile_base, 0, 16
   %59 = const.i64 64
   %60 = add.i64 %tile_base, %59
-  %61 = load.indexed.v4f32 %input_view, %60, 256, 4
+  %61 = load.indexed.v4f32 %input_view, %60, 256, 16
   %62 = const.i64 128
   %63 = add.i64 %tile_base, %62
-  %64 = load.indexed.v4f32 %input_view, %63, 512, 4
+  %64 = load.indexed.v4f32 %input_view, %63, 512, 16
   %65 = const.i64 192
   %66 = add.i64 %tile_base, %65
-  %67 = load.indexed.v4f32 %input_view, %66, 768, 4
+  %67 = load.indexed.v4f32 %input_view, %66, 768, 16
   %nct_tile = concat.v4f32.v16f32 %58, %61, %64, %67
   %ntc_tile = shuffle.v16f32 %nct_tile, 0, 4, 8, 12, 1, 5, 9, 13, 2, 6, 10, 14, 3, 7, 11, 15
   %70 = slice.v16f32.v4f32 %ntc_tile, 0
   %71 = shl.i64 %tile_base, %56
-  store.indexed.v4f32 %70, %output_view, %71, 0, 16
+  store.indexed.v4f32 %70, %output_view, %71, 0, 64
   %72 = slice.v16f32.v4f32 %ntc_tile, 4
   %73 = const.i64 4
   %74 = mul.i64 %tile_base, %73
   %75 = add.i64 %74, %73
-  store.indexed.v4f32 %72, %output_view, %75, 16, 16
+  store.indexed.v4f32 %72, %output_view, %75, 16, 64
   %76 = slice.v16f32.v4f32 %ntc_tile, 8
   %77 = const.i64 8
   %79 = add.i64 %74, %77
-  store.indexed.v4f32 %76, %output_view, %79, 32, 16
+  store.indexed.v4f32 %76, %output_view, %79, 32, 64
   %80 = slice.v16f32.v4f32 %ntc_tile, 12
   %81 = const.i64 12
   %83 = add.i64 %74, %81
-  store.indexed.v4f32 %80, %output_view, %83, 48, 16
+  store.indexed.v4f32 %80, %output_view, %83, 48, 64
   return
 }
 

@@ -297,8 +297,7 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) @f32_configured_width_sq
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
-  %linear = v_lshlrev_b32_lit %lane, 2
-  %28 = v_lshlrev_b32_src0_inline %linear, 2
+  %28 = v_lshlrev_b32_src0_inline %lane, 4
   %loaded = global_load_b128_saddr %28, %input_view
   %31 = v_mov_b32 0
   %32 = slice %loaded[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>

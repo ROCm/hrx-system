@@ -300,7 +300,8 @@ class EmitDescriptorOp:
                 materializer.mul_i64,
                 materializer.shl_i64,
             ):
-                _require_descriptor(descriptor_set, descriptor)
+                if descriptor is not None:
+                    _require_descriptor(descriptor_set, descriptor)
         for descriptor_field, value_ref in operand_bindings.items():
             if value_ref.kind != SourceValueKind.SOURCE_MEMORY_DYNAMIC_TERM:
                 continue

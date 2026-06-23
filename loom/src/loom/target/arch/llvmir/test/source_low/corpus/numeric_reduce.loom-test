@@ -133,18 +133,18 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) @f32_configured_width_sq
   %lane = kernel.workitem_id.x
   %52 = const.i64 2
   %linear = shl.i64 %lane, %52
-  %54 = load.indexed.f32 %input_view, %linear, 0, 4
+  %54 = load.indexed.f32 %input_view, %linear, 0, 16
   %55 = mul.f32 %54, %54 {fast_math_flags = 47}
   %56 = const.i64 1
   %57 = add.i64 %linear, %56
-  %58 = load.indexed.f32 %input_view, %57, 4, 4
+  %58 = load.indexed.f32 %input_view, %57, 4, 16
   %59 = fma.f32 %58, %58, %55
   %60 = add.i64 %linear, %52
-  %61 = load.indexed.f32 %input_view, %60, 8, 4
+  %61 = load.indexed.f32 %input_view, %60, 8, 16
   %62 = fma.f32 %61, %61, %59
   %63 = const.i64 3
   %64 = add.i64 %linear, %63
-  %65 = load.indexed.f32 %input_view, %64, 12, 4
+  %65 = load.indexed.f32 %input_view, %64, 12, 16
   %stored = fma.f32 %65, %65, %62
   store.f32 %stored, %output_view, 0
   return

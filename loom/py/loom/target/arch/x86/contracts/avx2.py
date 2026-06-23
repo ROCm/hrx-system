@@ -19,7 +19,12 @@ from loom.dialect.vector import ALL_VECTOR_OPS
 from loom.dialect.vector import defs as vector
 from loom.dialect.view import ALL_VIEW_OPS
 from loom.dsl import Op
-from loom.target.arch.x86.contracts.scalar import x86_scalar_core_cases
+from loom.target.arch.x86.contracts.scalar import (
+    x86_factored_index_emit,
+    x86_factored_memory_immediates,
+    x86_scalar_core_cases,
+    x86_source_memory_byte_offset_materializer,
+)
 from loom.target.arch.x86.descriptors import X86_AVX2_DESCRIPTOR_SET
 from loom.target.contracts import (
     AttrProject,
@@ -31,6 +36,7 @@ from loom.target.contracts import (
     Guard,
     GuardDiagnostic,
     Scalar,
+    SourceMemoryByteOffsetMaterializer,
     SourceMemoryConstraint,
     SourceMemoryDynamicIndexSource,
     SourceMemoryOperation,
@@ -76,6 +82,9 @@ def _op_emit(
     result_types: dict[str, TypePattern] | None = None,
     immediates: Mapping[str, AttrProject | SourceMemoryProject | int] | None = None,
     source_memory: SourceMemoryConstraint | None = None,
+    source_memory_byte_offset_materializer: (
+        SourceMemoryByteOffsetMaterializer | None
+    ) = None,
 ) -> EmitDescriptorOp:
     return EmitDescriptorOp(
         descriptor=descriptor,
@@ -85,6 +94,7 @@ def _op_emit(
         immediates={} if immediates is None else immediates,
         form=DescriptorEmitForm.OP,
         source_memory=source_memory,
+        source_memory_byte_offset_materializer=source_memory_byte_offset_materializer,
     )
 
 
@@ -284,6 +294,8 @@ def _source_memory_constraint(
     *,
     lanes: int,
     dynamic: bool,
+    dynamic_byte_stride_factor: int = 1,
+    materialize_byte_offset: bool = False,
 ) -> SourceMemoryConstraint:
     return SourceMemoryConstraint(
         operation=operation,
@@ -300,19 +312,29 @@ def _source_memory_constraint(
             if dynamic
             else SourceMemoryDynamicIndexSource.NONE
         ),
-        dynamic_byte_stride=4 if dynamic else 0,
+        dynamic_byte_stride=(
+            None
+            if dynamic and materialize_byte_offset
+            else 4 * dynamic_byte_stride_factor
+        )
+        if dynamic
+        else 0,
         diagnostic=_SOURCE_MEMORY_DIAGNOSTIC,
     )
 
 
 def _memory_immediates(
     dynamic: bool,
+    *,
+    materialize_byte_offset: bool = False,
 ) -> dict[str, SourceMemoryProject | int]:
     immediates: dict[str, SourceMemoryProject | int] = {
         "disp32": SourceMemoryProject.static_byte_offset()
     }
     if dynamic:
-        immediates["scale"] = SourceMemoryProject.dynamic_byte_stride()
+        immediates["scale"] = (
+            1 if materialize_byte_offset else SourceMemoryProject.dynamic_byte_stride()
+        )
     return immediates
 
 
@@ -323,11 +345,56 @@ def _vector_load_rule(
     dynamic: bool,
     descriptor_key: str,
     descriptor_lookup: _DescriptorLookup,
+    dynamic_byte_stride_factor: int = 1,
+    materialize_byte_offset: bool = False,
 ) -> DescriptorRule:
     descriptor = descriptor_lookup(descriptor_key)
     operands = {"base": ValueRef.operand("view")}
     if dynamic:
-        operands["index"] = ValueRef.operand("indices")
+        if materialize_byte_offset:
+            operands["index"] = ValueRef.source_memory_dynamic_byte_offset()
+        elif dynamic_byte_stride_factor != 1:
+            operands["index"] = ValueRef.temporary("factored_index")
+        else:
+            operands["index"] = ValueRef.operand("indices")
+    source_memory = _source_memory_constraint(
+        SourceMemoryOperation.LOAD,
+        lanes=lanes,
+        dynamic=dynamic,
+        dynamic_byte_stride_factor=dynamic_byte_stride_factor,
+        materialize_byte_offset=materialize_byte_offset,
+    )
+    memory_emit = _op_emit(
+        descriptor=descriptor,
+        operands=operands,
+        results={"dst": ValueRef.result("result")},
+        immediates=(
+            x86_factored_memory_immediates(element_byte_count=4)
+            if dynamic and dynamic_byte_stride_factor != 1
+            else _memory_immediates(
+                dynamic,
+                materialize_byte_offset=materialize_byte_offset,
+            )
+        ),
+        source_memory=source_memory,
+        source_memory_byte_offset_materializer=(
+            x86_source_memory_byte_offset_materializer(descriptor_lookup)
+            if materialize_byte_offset
+            else None
+        ),
+    )
+    if dynamic and dynamic_byte_stride_factor != 1:
+        emit = (
+            x86_factored_index_emit(
+                descriptor_lookup=descriptor_lookup,
+                element_byte_count=4,
+                dynamic_byte_stride_factor=dynamic_byte_stride_factor,
+                source_memory=source_memory,
+            ),
+            memory_emit,
+        )
+    else:
+        emit = (memory_emit,)
     return DescriptorRule(
         source_op=vector.vector_load,
         descriptor=descriptor,
@@ -335,19 +402,7 @@ def _vector_load_rule(
             Guard.operand_segment_count("indices", 1 if dynamic else 0),
             Guard.value_type("result", result_type),
         ),
-        emit=(
-            _op_emit(
-                descriptor=descriptor,
-                operands=operands,
-                results={"dst": ValueRef.result("result")},
-                immediates=_memory_immediates(dynamic),
-                source_memory=_source_memory_constraint(
-                    SourceMemoryOperation.LOAD,
-                    lanes=lanes,
-                    dynamic=dynamic,
-                ),
-            ),
-        ),
+        emit=emit,
     )
 
 
@@ -358,6 +413,8 @@ def _vector_store_rule(
     dynamic: bool,
     descriptor_key: str,
     descriptor_lookup: _DescriptorLookup,
+    dynamic_byte_stride_factor: int = 1,
+    materialize_byte_offset: bool = False,
 ) -> DescriptorRule:
     descriptor = descriptor_lookup(descriptor_key)
     operands = {
@@ -365,7 +422,49 @@ def _vector_store_rule(
         "base": ValueRef.operand("view"),
     }
     if dynamic:
-        operands["index"] = ValueRef.operand("indices")
+        if materialize_byte_offset:
+            operands["index"] = ValueRef.source_memory_dynamic_byte_offset()
+        elif dynamic_byte_stride_factor != 1:
+            operands["index"] = ValueRef.temporary("factored_index")
+        else:
+            operands["index"] = ValueRef.operand("indices")
+    source_memory = _source_memory_constraint(
+        SourceMemoryOperation.STORE,
+        lanes=lanes,
+        dynamic=dynamic,
+        dynamic_byte_stride_factor=dynamic_byte_stride_factor,
+        materialize_byte_offset=materialize_byte_offset,
+    )
+    memory_emit = _op_emit(
+        descriptor=descriptor,
+        operands=operands,
+        immediates=(
+            x86_factored_memory_immediates(element_byte_count=4)
+            if dynamic and dynamic_byte_stride_factor != 1
+            else _memory_immediates(
+                dynamic,
+                materialize_byte_offset=materialize_byte_offset,
+            )
+        ),
+        source_memory=source_memory,
+        source_memory_byte_offset_materializer=(
+            x86_source_memory_byte_offset_materializer(descriptor_lookup)
+            if materialize_byte_offset
+            else None
+        ),
+    )
+    if dynamic and dynamic_byte_stride_factor != 1:
+        emit = (
+            x86_factored_index_emit(
+                descriptor_lookup=descriptor_lookup,
+                element_byte_count=4,
+                dynamic_byte_stride_factor=dynamic_byte_stride_factor,
+                source_memory=source_memory,
+            ),
+            memory_emit,
+        )
+    else:
+        emit = (memory_emit,)
     return DescriptorRule(
         source_op=vector.vector_store,
         descriptor=descriptor,
@@ -373,18 +472,7 @@ def _vector_store_rule(
             Guard.operand_segment_count("indices", 1 if dynamic else 0),
             Guard.value_type("value", value_type),
         ),
-        emit=(
-            _op_emit(
-                descriptor=descriptor,
-                operands=operands,
-                immediates=_memory_immediates(dynamic),
-                source_memory=_source_memory_constraint(
-                    SourceMemoryOperation.STORE,
-                    lanes=lanes,
-                    dynamic=dynamic,
-                ),
-            ),
-        ),
+        emit=emit,
     )
 
 
@@ -406,30 +494,76 @@ def _memory_rules(
         (_V4F32, 4),
     ):
         for dynamic in (False, True):
+            descriptor_key = _memory_descriptor_key(
+                "load",
+                dynamic=dynamic,
+            )
             rules.append(
                 _vector_load_rule(
                     value_type,
                     lanes=lanes,
                     dynamic=dynamic,
-                    descriptor_key=_memory_descriptor_key(
-                        "load",
-                        dynamic=dynamic,
-                    ),
+                    descriptor_key=descriptor_key,
                     descriptor_lookup=descriptor_lookup,
                 )
+            )
+            if dynamic:
+                rules.extend(
+                    _vector_load_rule(
+                        value_type,
+                        lanes=lanes,
+                        dynamic=True,
+                        descriptor_key=descriptor_key,
+                        descriptor_lookup=descriptor_lookup,
+                        dynamic_byte_stride_factor=dynamic_byte_stride_factor,
+                    )
+                    for dynamic_byte_stride_factor in (2, 4, 8)
+                )
+                rules.append(
+                    _vector_load_rule(
+                        value_type,
+                        lanes=lanes,
+                        dynamic=True,
+                        descriptor_key=descriptor_key,
+                        descriptor_lookup=descriptor_lookup,
+                        materialize_byte_offset=True,
+                    )
+                )
+            descriptor_key = _memory_descriptor_key(
+                "store",
+                dynamic=dynamic,
             )
             rules.append(
                 _vector_store_rule(
                     value_type,
                     lanes=lanes,
                     dynamic=dynamic,
-                    descriptor_key=_memory_descriptor_key(
-                        "store",
-                        dynamic=dynamic,
-                    ),
+                    descriptor_key=descriptor_key,
                     descriptor_lookup=descriptor_lookup,
                 )
             )
+            if dynamic:
+                rules.extend(
+                    _vector_store_rule(
+                        value_type,
+                        lanes=lanes,
+                        dynamic=True,
+                        descriptor_key=descriptor_key,
+                        descriptor_lookup=descriptor_lookup,
+                        dynamic_byte_stride_factor=dynamic_byte_stride_factor,
+                    )
+                    for dynamic_byte_stride_factor in (2, 4, 8)
+                )
+                rules.append(
+                    _vector_store_rule(
+                        value_type,
+                        lanes=lanes,
+                        dynamic=True,
+                        descriptor_key=descriptor_key,
+                        descriptor_lookup=descriptor_lookup,
+                        materialize_byte_offset=True,
+                    )
+                )
     return tuple(rules)
 
 

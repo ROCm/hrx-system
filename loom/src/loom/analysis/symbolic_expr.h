@@ -230,6 +230,16 @@ iree_status_t loom_symbolic_expr_prove_value_relation(
     loom_symbolic_integer_relation_t relation, loom_value_id_t left_value,
     loom_value_id_t right_value, loom_symbolic_proof_result_t* out_result);
 
+// Builds a bounded linear expression for |value_id| using caller-owned term
+// storage. This is a hot-path, allocation-free summary for consumers that only
+// need small affine shapes and cannot plumb arena-backed expression status.
+// Unsupported or too-large producer graphs conservatively summarize as the
+// original SSA value instead of failing.
+void loom_symbolic_expr_from_value_bounded(
+    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
+    loom_value_id_t value_id, loom_symbolic_term_t* terms,
+    iree_host_size_t term_capacity, loom_symbolic_expr_t* out_expression);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif

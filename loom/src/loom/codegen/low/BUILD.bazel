@@ -513,10 +513,10 @@ loom_cc_library(
     hdrs = ["source_memory_plan.h"],
     deps = [
         ":memory_access",
+        "//loom/src/loom/analysis:symbolic_expr",
         "//loom/src/loom/ir",
         "//loom/src/loom/ir:facts",
         "//loom/src/loom/ops/buffer",
-        "//loom/src/loom/ops/index",
         "//loom/src/loom/ops/kernel",
         "//loom/src/loom/ops/vector",
         "//loom/src/loom/ops/view",

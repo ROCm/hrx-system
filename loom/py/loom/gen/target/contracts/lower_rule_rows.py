@@ -252,6 +252,12 @@ def source_memory_row(
         )
         _append_field(
             fields,
+            "byte_offset_const_i64_immediate",
+            f'IREE_SVL("{_c_string_literal(materializer.const_i64_immediate)}")',
+            always=True,
+        )
+        _append_field(
+            fields,
             "byte_offset_add_i64_descriptor_ref",
             _descriptor_ref_index(descriptor_refs, materializer.add_i64),
             always=True,
@@ -282,12 +288,14 @@ def descriptor_ref_keys(table: CompiledLowerRuleSet, source_contract: ContractFr
             continue
         materializer = row.byte_offset_materializer
         used_keys.update(
-            (
-                materializer.const_i64.key,
-                materializer.add_i64.key,
-                materializer.mul_i64.key,
-                materializer.shl_i64.key,
+            descriptor.key
+            for descriptor in (
+                materializer.const_i64,
+                materializer.add_i64,
+                materializer.mul_i64,
+                materializer.shl_i64,
             )
+            if descriptor is not None
         )
     return tuple(descriptor.key for descriptor in source_contract.descriptor_set.descriptors if descriptor.key in used_keys)
 
@@ -478,6 +486,8 @@ def attr_copy_row(row: LowerAttrCopy) -> list[str]:
         LowerAttrCopyKind.I64_ARRAY_LANE_BYTE,
         LowerAttrCopyKind.I64_LITERAL_MINUS_ATTR,
         LowerAttrCopyKind.I64_LITERAL_MINUS_ATTRS,
+        LowerAttrCopyKind.SOURCE_MEMORY_STATIC_BYTE_OFFSET_QUOTIENT,
+        LowerAttrCopyKind.SOURCE_MEMORY_STATIC_BYTE_OFFSET_REMAINDER,
     ):
         _append_field(fields, "literal_i64", row.literal_i64, always=True)
     if row.kind == LowerAttrCopyKind.SOURCE_MEMORY_DYNAMIC_BYTE_STRIDE:

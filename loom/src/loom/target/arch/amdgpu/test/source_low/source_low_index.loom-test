@@ -137,8 +137,8 @@ low.kernel.def target(@target) workgroup_size(8, 4, 1) @index_madd_u24_literal_a
   %row = v_and_b32_lit %17, 1023
   %linear = v_mad_u32_u24_src2_lit %row, %column, 1
   %20 = v_lshlrev_b32_src0_inline %linear, 2
-  %loaded = global_load_b32_saddr %20, %input_view
-  global_store_b32_saddr %20, %loaded, %output_view
+  %loaded = global_load_b32_saddr %20, %input_view {offset = 4}
+  global_store_b32_saddr %20, %loaded, %output_view {offset = 4}
   return
 }
 

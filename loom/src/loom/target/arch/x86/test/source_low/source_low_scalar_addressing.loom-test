@@ -143,9 +143,65 @@ func.def target(@target) @f32x16_index_madd_scaled_bias_memory(%input: buffer, %
 
 // ----
 low.func.def target(@target) abi(object_function) @f32x16_index_madd_scaled_bias_memory(%input_view: reg<x86.gpr64>, %output_view: reg<x86.gpr64>, %row: reg<x86.gpr64>) asm<x86.avx512.core> {
-  %bounded_linear = lea.scale %row {disp32 = 1, scale = 4}
-  %loaded = vmovdqu32.load.indexed %input_view, %bounded_linear {disp32 = 0, scale = 4}
-  vmovdqu32.store.indexed %loaded, %output_view, %bounded_linear {disp32 = 0, scale = 4}
+  %15 = lea.scale %row {disp32 = 1, scale = 4}
+  %loaded = vmovdqu32.load.indexed %input_view, %15 {disp32 = 0, scale = 4}
+  vmovdqu32.store.indexed %loaded, %output_view, %15 {disp32 = 0, scale = 4}
+  return
+}
+
+// ====
+
+x86.target<scalar> @target
+
+func.def target(@target) @i32_index_madd_scaled_bias_memory(%input: buffer, %output: buffer, %row: index) {
+  %zero = index.constant 0 : offset
+  %stride = index.constant 4 : index
+  %bias = index.constant 1 : index
+  %linear = index.madd %row, %stride, %bias : index
+  %bounded_linear = index.assume %linear [range(%linear, 0, 16)] : index
+  %input_view = buffer.view %input[%zero] : buffer -> view<32xi32, #dense>
+  %output_view = buffer.view %output[%zero] : buffer -> view<32xi32, #dense>
+  %loaded = view.load %input_view[%bounded_linear] : view<32xi32, #dense> -> i32
+  %incremented = scalar.addi %loaded, %loaded : i32
+  view.store %incremented, %output_view[%bounded_linear] : i32, view<32xi32, #dense>
+  func.return
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @i32_index_madd_scaled_bias_memory(%input_view: reg<x86.gpr64>, %output_view: reg<x86.gpr64>, %row: reg<x86.gpr64>) asm<x86.scalar.core> {
+  %16 = lea.scale %row {disp32 = 1, scale = 4}
+  %loaded = mov.load.indexed.gpr32 %input_view, %16 {disp32 = 0, scale = 4}
+  %18 = copy %loaded : reg<x86.gpr32> -> reg<x86.gpr32>
+  %incremented = add.gpr32 %18, %loaded
+  mov.store.indexed.gpr32 %incremented, %output_view, %16 {disp32 = 0, scale = 4}
+  return
+}
+
+// ====
+
+x86.target<scalar> @target
+
+func.def target(@target) @i64_index_madd_scaled_bias_memory(%input: buffer, %output: buffer, %row: index) {
+  %zero = index.constant 0 : offset
+  %stride = index.constant 4 : index
+  %bias = index.constant 1 : index
+  %linear = index.madd %row, %stride, %bias : index
+  %bounded_linear = index.assume %linear [range(%linear, 0, 16)] : index
+  %input_view = buffer.view %input[%zero] : buffer -> view<32xi64, #dense>
+  %output_view = buffer.view %output[%zero] : buffer -> view<32xi64, #dense>
+  %loaded = view.load %input_view[%bounded_linear] : view<32xi64, #dense> -> i64
+  %incremented = scalar.addi %loaded, %loaded : i64
+  view.store %incremented, %output_view[%bounded_linear] : i64, view<32xi64, #dense>
+  func.return
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @i64_index_madd_scaled_bias_memory(%input_view: reg<x86.gpr64>, %output_view: reg<x86.gpr64>, %row: reg<x86.gpr64>) asm<x86.scalar.core> {
+  %16 = lea.scale %row {disp32 = 1, scale = 4}
+  %loaded = mov.load.indexed.gpr64 %input_view, %16 {disp32 = 0, scale = 8}
+  %18 = copy %loaded : reg<x86.gpr64> -> reg<x86.gpr64>
+  %incremented = add.gpr64 %18, %loaded
+  mov.store.indexed.gpr64 %incremented, %output_view, %16 {disp32 = 0, scale = 8}
   return
 }
 

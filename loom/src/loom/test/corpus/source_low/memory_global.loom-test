@@ -1040,6 +1040,32 @@ kernel.def @loaded_i32_row_shift_load() {
 
 // ====
 
+kernel.def @selected_i32_row_shift_store() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%idx: buffer, %output: buffer, %value: f32, %element_count_i32: i32, %condition_i32: i32) {
+  %base = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %shift = index.constant 2 : index
+  %element_count0 = index.cast %element_count_i32 : i32 to index
+  %element_count = index.assume %element_count0 [range(%element_count0, 1, 2147483647)] : index
+  %idx_view = buffer.view %idx[%base] : buffer -> view<1xi32, #dense>
+  %output_view = buffer.view %output[%base] : buffer -> view<[%element_count]xf32, #dense>
+  %row_i32 = view.load %idx_view[0] : view<1xi32, #dense> -> i32
+  %row0 = index.cast %row_i32 : i32 to index
+  %row = index.assume %row0 [range(%row0, 0, 1073741823)] : index
+  %raw = index.shli %row, %shift : index
+  %condition0 = index.cast %condition_i32 : i32 to index
+  %condition = index.assume %condition0 [range(%condition0, 1, 1)] : index
+  %selected_condition = index.cmp ne, %condition, %zero : index
+  %selected = scf.select %selected_condition, %raw, %zero : index
+  %element = index.assume %selected [range(%selected, 0, 1073741823), lt(%selected, %element_count)] : index
+  view.store %value, %output_view[%element] : f32, view<[%element_count]xf32, #dense>
+  kernel.return
+}
+
+// ====
+
 kernel.def @loaded_i32_row_stride_f32_to_f16_store() {
   %unit = index.constant 1 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index

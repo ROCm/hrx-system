@@ -559,10 +559,10 @@ loom_cc_library(
   DEPS
     ::memory_access
     iree::base
+    loom::analysis::symbolic_expr
     loom::ir
     loom::ir::facts
     loom::ops::buffer
-    loom::ops::index
     loom::ops::kernel
     loom::ops::vector
     loom::ops::view

@@ -104,3 +104,28 @@ low.func.def target(@target) abi(object_function) @i32x4_memory_indexed(%input_v
   vmovdqu32.store.indexed.xmm %loaded, %output_view, %bounded_i {disp32 = 0, scale = 4}
   return
 }
+
+// ====
+
+x86.target<avx2> @target
+
+func.def target(@target) @i32x4_index_madd_scaled_bias_memory(%input: buffer, %output: buffer, %row: index) {
+  %zero = index.constant 0 : offset
+  %stride = index.constant 4 : index
+  %bias = index.constant 1 : index
+  %linear = index.madd %row, %stride, %bias : index
+  %bounded_linear = index.assume %linear [range(%linear, 0, 16)] : index
+  %input_view = buffer.view %input[%zero] : buffer -> view<32xi32, #dense>
+  %output_view = buffer.view %output[%zero] : buffer -> view<32xi32, #dense>
+  %loaded = vector.load %input_view[%bounded_linear] : view<32xi32, #dense> -> vector<4xi32>
+  vector.store %loaded, %output_view[%bounded_linear] : vector<4xi32>, view<32xi32, #dense>
+  func.return
+}
+
+// ----
+low.func.def target(@target) abi(object_function) @i32x4_index_madd_scaled_bias_memory(%input_view: reg<x86.gpr64>, %output_view: reg<x86.gpr64>, %row: reg<x86.gpr64>) asm<x86.avx2.core> {
+  %15 = lea.scale %row {disp32 = 1, scale = 4}
+  %loaded = vmovdqu32.load.indexed.xmm %input_view, %15 {disp32 = 0, scale = 4}
+  vmovdqu32.store.indexed.xmm %loaded, %output_view, %15 {disp32 = 0, scale = 4}
+  return
+}

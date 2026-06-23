@@ -35,6 +35,7 @@ from loom.target.contracts import (
     SourceMemoryConstraint,
     SourceMemoryDynamicIndexSource,
     SourceMemoryOperation,
+    SourceMemoryProject,
     SourceMemoryRootKind,
     SourceOpProject,
     SourceValueKind,
@@ -512,6 +513,77 @@ def test_compile_lower_rule_set_compiles_source_memory_dynamic_term_operand() ->
     assert tuple(value_ref.index for value_ref in value_refs) == (0, 0)
     source_memory = compiled.source_memories[emit.source_memory_ordinal - 1]
     assert source_memory.constraint is table.cases[0].emit[0].source_memory
+
+
+def test_compile_lower_rule_set_compiles_source_memory_static_offset_projects() -> None:
+    descriptor = replace(
+        TEST_LOW_LOAD_INDEX_V4I32_DESCRIPTOR,
+        key="test.load.index.v4i32.offsets",
+        immediates=(
+            Immediate("offset_quotient", ImmediateKind.SIGNED, bit_width=32),
+            Immediate("offset_remainder", ImmediateKind.SIGNED, bit_width=32),
+        ),
+    )
+    descriptor_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        descriptors=(*TEST_LOW_CORE_DESCRIPTOR_SET.descriptors, descriptor),
+    )
+    table = ContractFragment(
+        name="test.source-memory-offset-projects",
+        descriptor_set=descriptor_set,
+        cases=[
+            DescriptorRule(
+                source_op=vector.vector_load,
+                descriptor=descriptor,
+                guards=(
+                    Guard.operand_segment_count("indices", 0),
+                    Guard.value_type("result", Vector("i32", lanes=4)),
+                ),
+                emit=(
+                    EmitDescriptorOp(
+                        descriptor=descriptor,
+                        operands={
+                            "address": ValueRef.operand("view"),
+                            "index": ValueRef.source_memory_dynamic_term(),
+                        },
+                        results={"dst": ValueRef.result("result")},
+                        immediates={
+                            "offset_quotient": (
+                                SourceMemoryProject.static_byte_offset_quotient(4)
+                            ),
+                            "offset_remainder": (
+                                SourceMemoryProject.static_byte_offset_remainder(4)
+                            ),
+                        },
+                        source_memory=SourceMemoryConstraint(
+                            operation=SourceMemoryOperation.LOAD,
+                            root_kind=SourceMemoryRootKind.ANY,
+                            memory_spaces=("unknown", "global"),
+                            element_byte_count=4,
+                            vector_lane_count=4,
+                            vector_lane_byte_stride=4,
+                            static_byte_offset_minimum=-(2**31),
+                            static_byte_offset_maximum=(2**31) - 1,
+                            dynamic_term_count=1,
+                            dynamic_index_source=SourceMemoryDynamicIndexSource.VALUE,
+                            dynamic_byte_stride=16,
+                        ),
+                    ),
+                ),
+            )
+        ],
+    )
+
+    compiled = compile_lower_rule_set(table, dialect_ops={"vector": ALL_VECTOR_OPS})
+
+    assert tuple(attr_copy.kind for attr_copy in compiled.attr_copies) == (
+        LowerAttrCopyKind.SOURCE_MEMORY_STATIC_BYTE_OFFSET_QUOTIENT,
+        LowerAttrCopyKind.SOURCE_MEMORY_STATIC_BYTE_OFFSET_REMAINDER,
+    )
+    assert tuple(attr_copy.literal_i64 for attr_copy in compiled.attr_copies) == (
+        4,
+        4,
+    )
 
 
 def test_compile_lower_rule_set_rejects_descriptor_rule_without_emit() -> None:
