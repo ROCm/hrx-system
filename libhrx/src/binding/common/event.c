@@ -125,11 +125,10 @@ iree_status_t iree_hal_streaming_event_record(
     }
     if (event->capture_dependency_capacity < stream->capture_dependency_count) {
       IREE_RETURN_AND_END_ZONE_IF_ERROR(
-          z0, iree_allocator_realloc(
-                  event->host_allocator,
-                  stream->capture_dependency_count *
-                      sizeof(*event->capture_dependencies),
-                  (void**)&event->capture_dependencies));
+          z0, iree_allocator_realloc(event->host_allocator,
+                                     stream->capture_dependency_count *
+                                         sizeof(*event->capture_dependencies),
+                                     (void**)&event->capture_dependencies));
       event->capture_dependency_capacity = stream->capture_dependency_count;
     }
     if (stream->capture_dependency_count > 0) {

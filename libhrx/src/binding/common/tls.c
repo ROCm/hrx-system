@@ -91,8 +91,8 @@ IREE_API_EXPORT void* iree_hal_streaming_tls_get(
              : NULL;
 }
 
-IREE_API_EXPORT iree_status_t iree_hal_streaming_tls_set(
-    iree_hal_streaming_tls_key_t key, void* value) {
+IREE_API_EXPORT iree_status_t
+iree_hal_streaming_tls_set(iree_hal_streaming_tls_key_t key, void* value) {
   if (IREE_UNLIKELY(!iree_hal_streaming_tls_slot_is_allocated(key))) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "invalid binding TLS key");
@@ -103,8 +103,8 @@ IREE_API_EXPORT iree_status_t iree_hal_streaming_tls_set(
 
 #elif defined(IREE_PLATFORM_WINDOWS)
 
-static __declspec(thread) void*
-    iree_hal_streaming_tls_values[IREE_HAL_STREAMING_TLS_KEY_CAPACITY] = {0};
+static __declspec(thread) void* iree_hal_streaming_tls_values
+    [IREE_HAL_STREAMING_TLS_KEY_CAPACITY] = {0};
 
 static void iree_hal_streaming_tls_cleanup_current_thread(void) {
   for (int iteration = 0; iteration < 4; ++iteration) {
@@ -191,8 +191,8 @@ IREE_API_EXPORT void* iree_hal_streaming_tls_get(
              : NULL;
 }
 
-IREE_API_EXPORT iree_status_t iree_hal_streaming_tls_set(
-    iree_hal_streaming_tls_key_t key, void* value) {
+IREE_API_EXPORT iree_status_t
+iree_hal_streaming_tls_set(iree_hal_streaming_tls_key_t key, void* value) {
   if (IREE_UNLIKELY(!iree_hal_streaming_tls_slot_is_allocated(key))) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "invalid binding TLS key");
@@ -217,9 +217,9 @@ IREE_API_EXPORT iree_status_t iree_hal_streaming_tls_key_create(
             iree_memory_order_acq_rel, iree_memory_order_acquire)) {
       continue;
     }
-    int result = pthread_key_create(
-        &iree_hal_streaming_tls_slots[key].pthread_key,
-        (void (*)(void*))destructor);
+    int result =
+        pthread_key_create(&iree_hal_streaming_tls_slots[key].pthread_key,
+                           (void (*)(void*))destructor);
     if (result != 0) {
       iree_atomic_store(&iree_hal_streaming_tls_slots[key].state,
                         IREE_HAL_STREAMING_TLS_SLOT_STATE_EMPTY,
@@ -263,8 +263,8 @@ IREE_API_EXPORT void* iree_hal_streaming_tls_get(
              : NULL;
 }
 
-IREE_API_EXPORT iree_status_t iree_hal_streaming_tls_set(
-    iree_hal_streaming_tls_key_t key, void* value) {
+IREE_API_EXPORT iree_status_t
+iree_hal_streaming_tls_set(iree_hal_streaming_tls_key_t key, void* value) {
   if (IREE_UNLIKELY(!iree_hal_streaming_tls_slot_is_allocated(key))) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "invalid binding TLS key");

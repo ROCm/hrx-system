@@ -164,8 +164,8 @@ static iree_status_t iree_hal_streaming_buffer_wrap_hrx_buffer(
   } else if (!have_device_ptr) {
     static atomic_uintptr_t g_next_synthetic = 0xDEAD000000000000ULL;
     iree_device_size_t aligned_size = 0;
-    if (IREE_UNLIKELY(!iree_device_size_checked_mul_add(
-            wrapper->size, 1, 255, &aligned_size))) {
+    if (IREE_UNLIKELY(!iree_device_size_checked_mul_add(wrapper->size, 1, 255,
+                                                        &aligned_size))) {
       status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                                 "buffer size overflows synthetic alignment");
     } else {
@@ -452,8 +452,8 @@ iree_status_t iree_hal_streaming_memory_allocate_device_pitched(
   // This is typical for both CUDA and HIP.
   const iree_device_size_t alignment = 128;
   iree_device_size_t pitch = 0;
-  if (IREE_UNLIKELY(!iree_device_size_checked_mul_add(
-          width_bytes, 1, alignment - 1, &pitch))) {
+  if (IREE_UNLIKELY(!iree_device_size_checked_mul_add(width_bytes, 1,
+                                                      alignment - 1, &pitch))) {
     IREE_TRACE_ZONE_END(z0);
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "pitched allocation width overflows");
@@ -465,8 +465,8 @@ iree_status_t iree_hal_streaming_memory_allocate_device_pitched(
 
   // Calculate total size.
   iree_device_size_t total_size = 0;
-  if (IREE_UNLIKELY(!iree_device_size_checked_mul(pitch, height,
-                                                  &total_size))) {
+  if (IREE_UNLIKELY(
+          !iree_device_size_checked_mul(pitch, height, &total_size))) {
     IREE_TRACE_ZONE_END(z0);
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "pitched allocation size overflows");
@@ -837,8 +837,7 @@ iree_status_t iree_hal_streaming_memory_memset(
         IREE_HAL_FILL_FLAG_NONE);
   }
   if (iree_status_is_ok(status)) {
-    status =
-        iree_hal_streaming_command_buffer_barrier(stream->command_buffer);
+    status = iree_hal_streaming_command_buffer_barrier(stream->command_buffer);
   }
   iree_slim_mutex_unlock(&stream->mutex);
   IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, status);
@@ -888,13 +887,12 @@ iree_status_t iree_hal_streaming_memory_memcpy(
   iree_hal_buffer_ref_t dst_buffer_ref =
       iree_hal_streaming_convert_range_buffer_ref(dst_ref, size);
   if (iree_status_is_ok(status)) {
-    status = iree_hal_command_buffer_copy_buffer(
-        stream->command_buffer, src_buffer_ref, dst_buffer_ref,
-        IREE_HAL_COPY_FLAG_NONE);
+    status = iree_hal_command_buffer_copy_buffer(stream->command_buffer,
+                                                 src_buffer_ref, dst_buffer_ref,
+                                                 IREE_HAL_COPY_FLAG_NONE);
   }
   if (iree_status_is_ok(status)) {
-    status =
-        iree_hal_streaming_command_buffer_barrier(stream->command_buffer);
+    status = iree_hal_streaming_command_buffer_barrier(stream->command_buffer);
   }
   iree_slim_mutex_unlock(&stream->mutex);
   IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, status);
@@ -946,13 +944,12 @@ iree_status_t iree_hal_streaming_memcpy_peer(
   iree_hal_buffer_ref_t dst_buffer_ref =
       iree_hal_streaming_convert_range_buffer_ref(dst_ref, size);
   if (iree_status_is_ok(status)) {
-    status = iree_hal_command_buffer_copy_buffer(
-        stream->command_buffer, src_buffer_ref, dst_buffer_ref,
-        IREE_HAL_COPY_FLAG_NONE);
+    status = iree_hal_command_buffer_copy_buffer(stream->command_buffer,
+                                                 src_buffer_ref, dst_buffer_ref,
+                                                 IREE_HAL_COPY_FLAG_NONE);
   }
   if (iree_status_is_ok(status)) {
-    status =
-        iree_hal_streaming_command_buffer_barrier(stream->command_buffer);
+    status = iree_hal_streaming_command_buffer_barrier(stream->command_buffer);
   }
   iree_slim_mutex_unlock(&stream->mutex);
   IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, status);
@@ -983,9 +980,9 @@ iree_status_t iree_hal_streaming_memcpy_host_to_device(
 
     iree_hal_streaming_host_memcpy_callback_data_t* callback_data = NULL;
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, iree_arena_allocate(&stream->capture_graph->arena,
-                                sizeof(*callback_data),
-                                (void**)&callback_data));
+        z0,
+        iree_arena_allocate(&stream->capture_graph->arena,
+                            sizeof(*callback_data), (void**)&callback_data));
     callback_data->dst = staging->host_ptr;
     callback_data->src = src;
     callback_data->count = size;
@@ -1121,9 +1118,9 @@ iree_status_t iree_hal_streaming_memcpy_device_to_host(
 
     iree_hal_streaming_host_memcpy_callback_data_t* callback_data = NULL;
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, iree_arena_allocate(&stream->capture_graph->arena,
-                                sizeof(*callback_data),
-                                (void**)&callback_data));
+        z0,
+        iree_arena_allocate(&stream->capture_graph->arena,
+                            sizeof(*callback_data), (void**)&callback_data));
     callback_data->dst = dst;
     callback_data->src = staging->host_ptr;
     callback_data->count = size;

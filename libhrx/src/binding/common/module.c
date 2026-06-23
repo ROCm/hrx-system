@@ -210,8 +210,7 @@ static iree_status_t iree_hal_streaming_module_extract_metadata(
       const iree_hal_executable_export_parameter_t* parameter =
           &parameters[parameter_base + j];
       const bool is_binding_parameter =
-          parameter->type ==
-          IREE_HAL_EXECUTABLE_EXPORT_PARAMETER_TYPE_BINDING;
+          parameter->type == IREE_HAL_EXECUTABLE_EXPORT_PARAMETER_TYPE_BINDING;
       const bool is_buffer_binding_parameter =
           parameter->type ==
               IREE_HAL_EXECUTABLE_EXPORT_PARAMETER_TYPE_BUFFER_PTR &&
@@ -301,8 +300,7 @@ static iree_status_t iree_hal_streaming_module_extract_metadata(
       const iree_hal_executable_export_parameter_t* parameter =
           &parameters[parameter_base + j];
       const bool is_binding_parameter =
-          parameter->type ==
-          IREE_HAL_EXECUTABLE_EXPORT_PARAMETER_TYPE_BINDING;
+          parameter->type == IREE_HAL_EXECUTABLE_EXPORT_PARAMETER_TYPE_BINDING;
       const bool is_buffer_binding_parameter =
           parameter->type ==
               IREE_HAL_EXECUTABLE_EXPORT_PARAMETER_TYPE_BUFFER_PTR &&

@@ -25,8 +25,7 @@ extern "C" {
 #define IREE_HAL_STREAMING_TLS_KEY_CAPACITY 128
 
 // Invalid key value used for uninitialized key storage.
-#define IREE_HAL_STREAMING_TLS_KEY_INVALID \
-  ((iree_hal_streaming_tls_key_t)-1)
+#define IREE_HAL_STREAMING_TLS_KEY_INVALID ((iree_hal_streaming_tls_key_t)-1)
 
 // Process-global TLS key. Keys are small indexes into an internal fixed table.
 typedef iree_host_size_t iree_hal_streaming_tls_key_t;
@@ -36,12 +35,13 @@ typedef void(IREE_API_PTR* iree_hal_streaming_tls_destructor_t)(void* value);
 
 // Creates a process-global TLS key with an optional thread-exit |destructor|.
 //
-// Keys are usually created once and kept for process lifetime. Deleting a key is
-// only safe after all threads that could read, write, or destruct values for the
-// key are gone or externally synchronized. Deletion does not invoke destructors.
+// Keys are usually created once and kept for process lifetime. Deleting a key
+// is only safe after all threads that could read, write, or destruct values for
+// the key are gone or externally synchronized. Deletion does not invoke
+// destructors.
 //
-// Windows destructors run from DllMain thread-detach/process-detach handling and
-// must obey the loader-lock restrictions that implies.
+// Windows destructors run from DllMain thread-detach/process-detach handling
+// and must obey the loader-lock restrictions that implies.
 IREE_API_EXPORT IREE_MUST_USE_RESULT iree_status_t
 iree_hal_streaming_tls_key_create(
     iree_hal_streaming_tls_key_t* out_key,

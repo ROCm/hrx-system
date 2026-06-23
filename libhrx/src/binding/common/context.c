@@ -124,9 +124,9 @@ iree_status_t iree_hal_streaming_context_create(
   // Allocate stream tracking array.
   if (iree_status_is_ok(status)) {
     iree_host_size_t stream_array_size = 0;
-    if (IREE_UNLIKELY(!iree_host_size_checked_mul(
-            context->stream_capacity, sizeof(context->streams[0]),
-            &stream_array_size))) {
+    if (IREE_UNLIKELY(!iree_host_size_checked_mul(context->stream_capacity,
+                                                  sizeof(context->streams[0]),
+                                                  &stream_array_size))) {
       status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                                 "stream list capacity overflow");
     } else {
@@ -594,11 +594,11 @@ iree_status_t iree_hal_streaming_context_register_stream(
   if (context->stream_count >= context->stream_capacity) {
     iree_host_size_t new_capacity = 0;
     iree_host_size_t allocation_size = 0;
-    if (IREE_UNLIKELY(!iree_host_size_checked_mul(
-                          context->stream_capacity, 2, &new_capacity) ||
-                      !iree_host_size_checked_mul(
-                          new_capacity, sizeof(context->streams[0]),
-                          &allocation_size))) {
+    if (IREE_UNLIKELY(!iree_host_size_checked_mul(context->stream_capacity, 2,
+                                                  &new_capacity) ||
+                      !iree_host_size_checked_mul(new_capacity,
+                                                  sizeof(context->streams[0]),
+                                                  &allocation_size))) {
       status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                                 "stream list capacity overflow");
     } else {
@@ -611,8 +611,7 @@ iree_status_t iree_hal_streaming_context_register_stream(
   }
 
   if (iree_status_is_ok(status)) {
-    if (context->next_stream_id == 0 ||
-        context->next_stream_id > UINT32_MAX) {
+    if (context->next_stream_id == 0 || context->next_stream_id > UINT32_MAX) {
       status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                                 "stream identifier space exhausted");
     } else {
@@ -669,8 +668,7 @@ void iree_hal_streaming_context_unregister_stream(
 // synchronize without holding the list mutex across potentially blocking work.
 static iree_status_t iree_hal_streaming_context_snapshot_streams(
     iree_hal_streaming_context_t* context,
-    iree_hal_streaming_stream_t*** out_streams,
-    iree_host_size_t* out_count) {
+    iree_hal_streaming_stream_t*** out_streams, iree_host_size_t* out_count) {
   IREE_ASSERT_ARGUMENT(context);
   IREE_ASSERT_ARGUMENT(out_streams);
   IREE_ASSERT_ARGUMENT(out_count);
@@ -683,8 +681,8 @@ static iree_status_t iree_hal_streaming_context_snapshot_streams(
   iree_status_t status = iree_ok_status();
   if (count > 0) {
     iree_host_size_t streams_size = 0;
-    if (IREE_UNLIKELY(!iree_host_size_checked_mul(
-            count, sizeof(streams[0]), &streams_size))) {
+    if (IREE_UNLIKELY(!iree_host_size_checked_mul(count, sizeof(streams[0]),
+                                                  &streams_size))) {
       status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                                 "stream snapshot size overflow");
     } else {
@@ -713,9 +711,7 @@ static void iree_hal_streaming_context_release_stream_snapshot(
     iree_hal_streaming_context_t* context,
     iree_hal_streaming_stream_t** streams, iree_host_size_t count) {
   for (iree_host_size_t i = 0; i < count; ++i) {
-    if (streams[i]) {
-      iree_hal_streaming_stream_release(streams[i]);
-    }
+    iree_hal_streaming_stream_release(streams[i]);
   }
   if (streams) {
     iree_allocator_free(context->host_allocator, streams);
@@ -749,8 +745,7 @@ iree_status_t iree_hal_streaming_context_wait_idle(
 }
 
 static iree_status_t iree_hal_streaming_context_synchronize_streams(
-    iree_hal_streaming_context_t* context,
-    bool include_non_blocking_streams) {
+    iree_hal_streaming_context_t* context, bool include_non_blocking_streams) {
   IREE_ASSERT_ARGUMENT(context);
   IREE_TRACE_ZONE_BEGIN(z0);
 

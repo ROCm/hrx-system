@@ -1113,10 +1113,9 @@ iree_status_t iree_hal_streaming_launch_kernel(
     if (iree_status_is_ok(status)) {
       ++stream->pending_launch_count;
       const int flush_interval = hrx_flush_interval();
-      should_flush =
-          hrx_flush_each_launch_enabled() ||
-          (flush_interval > 0 &&
-           stream->pending_launch_count >= (uint32_t)flush_interval);
+      should_flush = hrx_flush_each_launch_enabled() ||
+                     (flush_interval > 0 &&
+                      stream->pending_launch_count >= (uint32_t)flush_interval);
     }
   }
   iree_slim_mutex_unlock(&stream->mutex);

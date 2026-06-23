@@ -63,10 +63,8 @@ TEST(StreamingTlsTest, CapacityExhausted) {
     IREE_ASSERT_OK(iree_hal_streaming_tls_key_create(&keys[i], nullptr));
   }
 
-  iree_hal_streaming_tls_key_t extra_key =
-      IREE_HAL_STREAMING_TLS_KEY_INVALID;
-  iree_status_t status =
-      iree_hal_streaming_tls_key_create(&extra_key, nullptr);
+  iree_hal_streaming_tls_key_t extra_key = IREE_HAL_STREAMING_TLS_KEY_INVALID;
+  iree_status_t status = iree_hal_streaming_tls_key_create(&extra_key, nullptr);
   EXPECT_EQ(IREE_STATUS_RESOURCE_EXHAUSTED, iree_status_code(status));
   iree_status_ignore(status);
   EXPECT_EQ(IREE_HAL_STREAMING_TLS_KEY_INVALID, extra_key);

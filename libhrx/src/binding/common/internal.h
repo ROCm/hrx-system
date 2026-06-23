@@ -775,9 +775,8 @@ typedef struct iree_hal_streaming_buffer_ref_t {
 
 static inline iree_hal_buffer_ref_t iree_hal_streaming_convert_buffer_ref(
     iree_hal_streaming_buffer_ref_t ref) {
-  const iree_device_size_t length = ref.offset < ref.buffer->size
-                                        ? ref.buffer->size - ref.offset
-                                        : 0;
+  const iree_device_size_t length =
+      ref.offset < ref.buffer->size ? ref.buffer->size - ref.offset : 0;
   return iree_hal_make_buffer_ref(ref.buffer->buffer, ref.offset, length);
 }
 
@@ -1657,8 +1656,7 @@ iree_status_t iree_hal_streaming_begin_capture(
 iree_status_t iree_hal_streaming_begin_capture_to_graph(
     iree_hal_streaming_stream_t* stream, iree_hal_streaming_graph_t* graph,
     iree_hal_streaming_graph_node_t** dependencies,
-    iree_host_size_t dependency_count,
-    iree_hal_streaming_capture_mode_t mode);
+    iree_host_size_t dependency_count, iree_hal_streaming_capture_mode_t mode);
 
 // Synchronization: none (ends capture mode, creates graph).
 iree_status_t iree_hal_streaming_end_capture(
@@ -1683,8 +1681,7 @@ iree_status_t iree_hal_streaming_update_capture_dependencies(
     iree_hal_streaming_capture_dependencies_mode_t mode);
 
 iree_status_t iree_hal_streaming_capture_set_last_node(
-    iree_hal_streaming_stream_t* stream,
-    iree_hal_streaming_graph_node_t* node);
+    iree_hal_streaming_stream_t* stream, iree_hal_streaming_graph_node_t* node);
 
 //===----------------------------------------------------------------------===//
 // Symbol registry

@@ -641,10 +641,10 @@ static iree_status_t iree_hal_streaming_graph_create_child_graph_block(
 
   iree_hal_streaming_graph_exec_t* child_exec = NULL;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0,
-      iree_hal_streaming_graph_instantiate(
-          child_graph, (iree_hal_streaming_graph_instantiate_flags_t)exec->flags,
-          &child_exec));
+      z0, iree_hal_streaming_graph_instantiate(
+              child_graph,
+              (iree_hal_streaming_graph_instantiate_flags_t)exec->flags,
+              &child_exec));
 
   iree_hal_streaming_graph_block_t* block = NULL;
   iree_status_t status = iree_hal_streaming_graph_block_allocate(
@@ -707,8 +707,8 @@ static bool iree_hal_streaming_graph_node_has_recorded_dependency_hazard(
   for (uint32_t j = 0; j < node->dependency_count; ++j) {
     const uint32_t dependency_sort_index =
         node_index_map[node->dependencies[j]->node_index];
-    if (iree_hal_streaming_node_index_set_test_hazard(
-            barrier_index_set, dependency_sort_index)) {
+    if (iree_hal_streaming_node_index_set_test_hazard(barrier_index_set,
+                                                      dependency_sort_index)) {
       return true;
     }
   }
@@ -718,8 +718,8 @@ static bool iree_hal_streaming_graph_node_has_recorded_dependency_hazard(
     if (edge->to != node) continue;
     const uint32_t dependency_sort_index =
         node_index_map[edge->from->node_index];
-    if (iree_hal_streaming_node_index_set_test_hazard(
-            barrier_index_set, dependency_sort_index)) {
+    if (iree_hal_streaming_node_index_set_test_hazard(barrier_index_set,
+                                                      dependency_sort_index)) {
       return true;
     }
   }
@@ -868,8 +868,8 @@ static iree_status_t iree_hal_streaming_graph_record_partition(
         break;
       }
     }
-    iree_hal_streaming_node_index_set_insert(
-        &barrier_index_set, node_index_map[node->node_index]);
+    iree_hal_streaming_node_index_set_insert(&barrier_index_set,
+                                             node_index_map[node->node_index]);
   }
 
   if (iree_status_is_ok(status)) {
@@ -1136,8 +1136,7 @@ iree_status_t iree_hal_streaming_graph_exec_instantiate_from_template(
 }
 
 static iree_status_t iree_hal_streaming_graph_exec_submit_blocks_locked(
-    iree_hal_streaming_graph_exec_t* exec,
-    iree_hal_streaming_stream_t* stream,
+    iree_hal_streaming_graph_exec_t* exec, iree_hal_streaming_stream_t* stream,
     iree_hal_semaphore_list_t external_wait_semaphores,
     iree_hal_semaphore_list_t external_signal_semaphores);
 
@@ -1232,8 +1231,7 @@ static iree_status_t iree_hal_streaming_graph_submit_block(
 }
 
 static iree_status_t iree_hal_streaming_graph_exec_submit_blocks_locked(
-    iree_hal_streaming_graph_exec_t* exec,
-    iree_hal_streaming_stream_t* stream,
+    iree_hal_streaming_graph_exec_t* exec, iree_hal_streaming_stream_t* stream,
     iree_hal_semaphore_list_t external_wait_semaphores,
     iree_hal_semaphore_list_t external_signal_semaphores) {
   enum {
@@ -1267,8 +1265,7 @@ static iree_status_t iree_hal_streaming_graph_exec_submit_blocks_locked(
   if (exec->semaphore_count > 0) {
     iree_host_size_t base_values_size = 0;
     if (IREE_UNLIKELY(!iree_host_size_checked_mul(
-                          exec->semaphore_count, sizeof(uint64_t),
-                          &base_values_size))) {
+            exec->semaphore_count, sizeof(uint64_t), &base_values_size))) {
       return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                               "graph semaphore base value size overflow");
     }
@@ -1320,28 +1317,26 @@ static iree_status_t iree_hal_streaming_graph_exec_submit_blocks_locked(
     bool free_semaphore_array = false;
     bool free_value_array = false;
     if (total_semaphores > 0) {
-      if (total_semaphores <=
-          IREE_HAL_STREAMING_GRAPH_STACK_SEMAPHORE_COUNT) {
+      if (total_semaphores <= IREE_HAL_STREAMING_GRAPH_STACK_SEMAPHORE_COUNT) {
         semaphore_array = stack_semaphore_array;
         value_array = stack_value_array;
       } else {
         iree_host_size_t semaphore_array_size = 0;
         iree_host_size_t value_array_size = 0;
-        if (IREE_UNLIKELY(!iree_host_size_checked_mul(
-                              total_semaphores,
-                              sizeof(iree_hal_semaphore_t*),
-                              &semaphore_array_size) ||
-                          !iree_host_size_checked_mul(
-                              total_semaphores, sizeof(uint64_t),
-                              &value_array_size))) {
+        if (IREE_UNLIKELY(
+                !iree_host_size_checked_mul(total_semaphores,
+                                            sizeof(iree_hal_semaphore_t*),
+                                            &semaphore_array_size) ||
+                !iree_host_size_checked_mul(total_semaphores, sizeof(uint64_t),
+                                            &value_array_size))) {
           status = iree_make_status(
               IREE_STATUS_RESOURCE_EXHAUSTED,
               "graph launch semaphore list allocation size overflow");
           break;
         }
-        status = iree_allocator_malloc(exec->host_allocator,
-                                       semaphore_array_size,
-                                       (void**)&semaphore_array);
+        status =
+            iree_allocator_malloc(exec->host_allocator, semaphore_array_size,
+                                  (void**)&semaphore_array);
         if (iree_status_is_ok(status)) {
           free_semaphore_array = true;
           status = iree_allocator_malloc(exec->host_allocator, value_array_size,
@@ -1397,7 +1392,8 @@ static iree_status_t iree_hal_streaming_graph_exec_submit_blocks_locked(
     if (block_index == exec->block_count - 1) {
       for (iree_host_size_t i = 0; i < external_signal_semaphores.count; ++i) {
         signal_sems[signal_count] = external_signal_semaphores.semaphores[i];
-        signal_vals[signal_count] = external_signal_semaphores.payload_values[i];
+        signal_vals[signal_count] =
+            external_signal_semaphores.payload_values[i];
         ++signal_count;
       }
     }
