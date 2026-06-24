@@ -26,6 +26,19 @@ static void iree_hal_streaming_graph_node_deinitialize_attrs(
       iree_hal_streaming_event_release(node->attrs.event.event);
       node->attrs.event.event = NULL;
       break;
+    case IREE_HAL_STREAMING_GRAPH_NODE_TYPE_MEM_ALLOC:
+      if (node->attrs.mem_alloc.owns_device_allocation &&
+          node->attrs.mem_alloc.dptr) {
+        iree_status_ignore(iree_hal_streaming_memory_free_device(
+            node->graph->context,
+            (iree_hal_streaming_deviceptr_t)node->attrs.mem_alloc.dptr));
+      }
+      node->attrs.mem_alloc.params = NULL;
+      node->attrs.mem_alloc.params_size = 0;
+      node->attrs.mem_alloc.dptr = NULL;
+      node->attrs.mem_alloc.bytesize = 0;
+      node->attrs.mem_alloc.owns_device_allocation = false;
+      break;
     default:
       break;
   }
@@ -671,6 +684,13 @@ iree_status_t iree_hal_streaming_graph_clone(
   *out_graph = NULL;
   IREE_TRACE_ZONE_BEGIN(z0);
 
+  if (source_graph->has_graph_memory_nodes) {
+    IREE_TRACE_ZONE_END(z0);
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "cloning graphs with memory allocation nodes is not supported");
+  }
+
   iree_hal_streaming_graph_t* clone_graph = NULL;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, iree_hal_streaming_graph_create(source_graph->context,
@@ -929,10 +949,13 @@ iree_status_t iree_hal_streaming_graph_clone(
     clone_ref->count = source_ref->count;
     clone_ref->retain = source_ref->retain;
     clone_ref->release = source_ref->release;
-    clone_ref->next = clone_graph->user_object_refs;
-    clone_graph->user_object_refs = clone_ref;
+    clone_ref->next = NULL;
     if (clone_ref->count > 0) {
-      clone_ref->retain(clone_ref->object, clone_ref->count);
+      status = clone_ref->retain(clone_ref->object, clone_ref->count);
+    }
+    if (iree_status_is_ok(status)) {
+      clone_ref->next = clone_graph->user_object_refs;
+      clone_graph->user_object_refs = clone_ref;
     }
   }
 
@@ -2349,7 +2372,6 @@ static iree_status_t iree_hal_streaming_has_unjoined_capture_participants(
     iree_slim_mutex_lock(&stream->mutex);
     if (stream->capture_status == IREE_HAL_STREAMING_CAPTURE_STATUS_ACTIVE &&
         stream->capture_graph == graph &&
-        !stream->capture_joined_to_origin &&
         !iree_hal_streaming_capture_frontier_is_joined(graph, reachable_nodes,
                                                        stream)) {
       *out_has_unjoined_participant = true;

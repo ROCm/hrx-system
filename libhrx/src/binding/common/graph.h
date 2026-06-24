@@ -47,7 +47,7 @@ typedef struct iree_hal_streaming_graph_owned_host_allocation_t {
   iree_device_size_t size;
 } iree_hal_streaming_graph_owned_host_allocation_t;
 
-typedef void (*iree_hal_streaming_graph_user_object_retain_fn_t)(
+typedef iree_status_t (*iree_hal_streaming_graph_user_object_retain_fn_t)(
     void* object, uint64_t count);
 typedef void (*iree_hal_streaming_graph_user_object_release_fn_t)(
     void* object, uint64_t count);

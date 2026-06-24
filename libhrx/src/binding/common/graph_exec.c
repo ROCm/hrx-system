@@ -332,7 +332,7 @@ static void iree_hal_streaming_graph_exec_destroy(
     iree_hal_streaming_graph_exec_t* exec);
 static void iree_hal_streaming_graph_exec_release_child_blocks(
     iree_hal_streaming_graph_exec_t* exec);
-static void iree_hal_streaming_graph_exec_reset_compiled_state(
+static void iree_hal_streaming_graph_exec_deinitialize_compiled_state(
     iree_hal_streaming_graph_exec_t* exec);
 static iree_status_t
 iree_hal_streaming_graph_exec_rebuild_from_template_locked(
@@ -667,19 +667,7 @@ static void iree_hal_streaming_graph_exec_destroy(
     iree_hal_streaming_graph_exec_t* exec) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  iree_hal_streaming_graph_exec_release_child_blocks(exec);
-
-  // Release all resources via resource set.
-  // This handles command buffers, semaphores, buffers, executables, etc.
-  if (exec->resource_set) {
-    iree_hal_resource_set_free(exec->resource_set);
-  }
-
-  // NOTE: the arena contains all blocks and semaphores so we don't need to free
-  // those.
-  if (exec->graph_memory_contribution_count > 0) {
-    iree_hal_streaming_graph_memory_release_exec(exec);
-  }
+  iree_hal_streaming_graph_exec_deinitialize_compiled_state(exec);
 
   if (exec->uses_graph_memory_nodes) {
     IREE_ASSERT(exec->graph->active_graph_memory_exec_count > 0);
@@ -687,7 +675,6 @@ static void iree_hal_streaming_graph_exec_destroy(
   }
 
   iree_allocator_free(exec->host_allocator, exec->node_disabled_states);
-  iree_arena_deinitialize(&exec->arena_allocator);
 
   iree_hal_streaming_graph_release(exec->graph);
   iree_hal_streaming_context_release(exec->context);
@@ -722,7 +709,24 @@ static void iree_hal_streaming_graph_exec_release_child_blocks(
   }
 }
 
-static void iree_hal_streaming_graph_exec_reset_compiled_state(
+static void iree_hal_streaming_graph_exec_initialize_compiled_state(
+    iree_hal_streaming_graph_exec_t* exec) {
+  iree_arena_initialize(&exec->context->device_entry->block_pool,
+                        &exec->arena_allocator);
+  exec->blocks = NULL;
+  exec->block_count = 0;
+  exec->instantiated_node_count = 0;
+  exec->instantiated_visible_node_count = 0;
+  exec->semaphores = NULL;
+  exec->semaphore_count = 0;
+  exec->semaphore_base_values = NULL;
+  exec->resource_set = NULL;
+  exec->graph_memory_contributions = NULL;
+  exec->graph_memory_contribution_count = 0;
+  exec->has_unfreed_graph_alloc_nodes = false;
+}
+
+static void iree_hal_streaming_graph_exec_deinitialize_compiled_state(
     iree_hal_streaming_graph_exec_t* exec) {
   iree_hal_streaming_graph_exec_release_child_blocks(exec);
   if (exec->resource_set) {
@@ -733,8 +737,6 @@ static void iree_hal_streaming_graph_exec_reset_compiled_state(
     iree_hal_streaming_graph_memory_release_exec(exec);
   }
   iree_arena_deinitialize(&exec->arena_allocator);
-  iree_arena_initialize(&exec->context->device_entry->block_pool,
-                        &exec->arena_allocator);
   exec->blocks = NULL;
   exec->block_count = 0;
   exec->instantiated_node_count = 0;
@@ -745,6 +747,38 @@ static void iree_hal_streaming_graph_exec_reset_compiled_state(
   exec->graph_memory_contributions = NULL;
   exec->graph_memory_contribution_count = 0;
   exec->has_unfreed_graph_alloc_nodes = false;
+}
+
+static void iree_hal_streaming_graph_exec_move_compiled_state(
+    iree_hal_streaming_graph_exec_t* target,
+    iree_hal_streaming_graph_exec_t* source) {
+  target->arena_allocator = source->arena_allocator;
+  target->blocks = source->blocks;
+  target->block_count = source->block_count;
+  target->instantiated_node_count = source->instantiated_node_count;
+  target->instantiated_visible_node_count =
+      source->instantiated_visible_node_count;
+  target->semaphores = source->semaphores;
+  target->semaphore_count = source->semaphore_count;
+  target->semaphore_base_values = source->semaphore_base_values;
+  target->resource_set = source->resource_set;
+  target->graph_memory_contributions = source->graph_memory_contributions;
+  target->graph_memory_contribution_count =
+      source->graph_memory_contribution_count;
+  target->has_unfreed_graph_alloc_nodes =
+      source->has_unfreed_graph_alloc_nodes;
+
+  source->blocks = NULL;
+  source->block_count = 0;
+  source->instantiated_node_count = 0;
+  source->instantiated_visible_node_count = 0;
+  source->semaphores = NULL;
+  source->semaphore_count = 0;
+  source->semaphore_base_values = NULL;
+  source->resource_set = NULL;
+  source->graph_memory_contributions = NULL;
+  source->graph_memory_contribution_count = 0;
+  source->has_unfreed_graph_alloc_nodes = false;
 }
 
 void iree_hal_streaming_graph_exec_retain(
@@ -777,49 +811,21 @@ iree_status_t iree_hal_streaming_graph_exec_destroy_handle(
     iree_slim_mutex_unlock(&exec->mutex);
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT);
   }
-
-  // Submitted host-call packets can still reference block attributes in this
-  // exec's arena after the public handle is destroyed. Tombstone the handle but
-  // keep submitted storage alive until process teardown.
-  const bool has_submitted_work = exec->launch_count > 0;
-  if (!has_submitted_work) {
-    iree_hal_streaming_graph_exec_release_child_blocks(exec);
-  }
-  if (exec->resource_set && !has_submitted_work) {
-    iree_hal_resource_set_free(exec->resource_set);
-    exec->resource_set = NULL;
-  }
-  if (exec->graph_memory_contribution_count > 0) {
-    iree_hal_streaming_graph_memory_release_exec(exec);
-  }
-  if (exec->uses_graph_memory_nodes) {
-    IREE_ASSERT(exec->graph->active_graph_memory_exec_count > 0);
-    --exec->graph->active_graph_memory_exec_count;
-    exec->uses_graph_memory_nodes = false;
-  }
-  if (!has_submitted_work) {
-    iree_arena_deinitialize(&exec->arena_allocator);
-    exec->blocks = NULL;
-    exec->block_count = 0;
-    exec->instantiated_node_count = 0;
-    exec->instantiated_visible_node_count = 0;
-    exec->semaphores = NULL;
-    exec->semaphore_count = 0;
-    exec->semaphore_base_values = NULL;
-  }
-  iree_allocator_free(exec->host_allocator, exec->node_disabled_states);
-  exec->node_disabled_states = NULL;
-  exec->node_disabled_state_count = 0;
-  exec->graph_memory_contributions = NULL;
-  exec->graph_memory_contribution_count = 0;
-  exec->has_unfreed_graph_alloc_nodes = false;
-
-  iree_hal_streaming_graph_release(exec->graph);
-  exec->graph = NULL;
-  iree_hal_streaming_context_release(exec->context);
-  exec->context = NULL;
   exec->is_destroyed = true;
+  iree_hal_streaming_context_t* context = exec->context;
+  iree_hal_streaming_context_retain(context);
   iree_slim_mutex_unlock(&exec->mutex);
+
+  iree_status_t status = iree_hal_streaming_context_synchronize_all();
+  iree_hal_streaming_context_release(context);
+  if (!iree_status_is_ok(status)) {
+    iree_slim_mutex_lock(&exec->mutex);
+    exec->is_destroyed = false;
+    iree_slim_mutex_unlock(&exec->mutex);
+    return status;
+  }
+
+  iree_hal_streaming_graph_exec_release(exec);
   return iree_ok_status();
 }
 
@@ -849,18 +855,25 @@ bool iree_hal_streaming_graph_exec_node_is_enabled(
 iree_status_t iree_hal_streaming_graph_exec_set_node_enabled(
     iree_hal_streaming_graph_exec_t* exec,
     iree_hal_streaming_graph_node_t* node, bool enabled) {
-  if (!iree_hal_streaming_graph_exec_owns_node(exec, node) ||
+  if (!exec || !node) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT);
+  }
+  iree_slim_mutex_lock(&exec->mutex);
+  if (exec->is_destroyed ||
+      !iree_hal_streaming_graph_exec_owns_node(exec, node) ||
       node->node_index >= exec->node_disabled_state_count) {
+    iree_slim_mutex_unlock(&exec->mutex);
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT);
   }
   const uint8_t old_disabled_state =
       exec->node_disabled_states[node->node_index];
   exec->node_disabled_states[node->node_index] = enabled ? 0 : 1;
   iree_status_t status =
-      iree_hal_streaming_graph_exec_rebuild_from_template(exec);
+      iree_hal_streaming_graph_exec_rebuild_from_template_locked(exec);
   if (!iree_status_is_ok(status)) {
     exec->node_disabled_states[node->node_index] = old_disabled_state;
   }
+  iree_slim_mutex_unlock(&exec->mutex);
   return status;
 }
 
@@ -881,22 +894,37 @@ iree_status_t iree_hal_streaming_graph_exec_rebuild_from_template(
 static iree_status_t
 iree_hal_streaming_graph_exec_rebuild_from_template_locked(
     iree_hal_streaming_graph_exec_t* exec) {
-  iree_hal_streaming_graph_exec_reset_compiled_state(exec);
+  if (exec->is_destroyed) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT);
+  }
+
+  iree_hal_streaming_graph_exec_t candidate;
+  memset(&candidate, 0, sizeof(candidate));
+  candidate.host_allocator = exec->host_allocator;
+  candidate.context = exec->context;
+  candidate.graph = exec->graph;
+  candidate.node_disabled_states = exec->node_disabled_states;
+  candidate.node_disabled_state_count = exec->node_disabled_state_count;
+  candidate.flags = exec->flags;
+  iree_hal_streaming_graph_exec_initialize_compiled_state(&candidate);
 
   iree_status_t status = iree_hal_resource_set_allocate(
-      &exec->context->device_entry->block_pool, &exec->resource_set);
+      &candidate.context->device_entry->block_pool, &candidate.resource_set);
   if (iree_status_is_ok(status)) {
-    status = iree_hal_streaming_graph_memory_build_contributions(exec);
+    status = iree_hal_streaming_graph_memory_build_contributions(&candidate);
   }
   if (iree_status_is_ok(status)) {
-    status = iree_hal_streaming_graph_memory_retain_exec(exec);
+    status = iree_hal_streaming_graph_memory_retain_exec(&candidate);
   }
   if (iree_status_is_ok(status)) {
     status = iree_hal_streaming_graph_exec_instantiate_from_template(
-        exec, exec->graph->node_blocks, exec->graph->node_count);
+        &candidate, exec->graph->node_blocks, exec->graph->node_count);
   }
-  if (!iree_status_is_ok(status)) {
-    iree_hal_streaming_graph_exec_reset_compiled_state(exec);
+  if (iree_status_is_ok(status)) {
+    iree_hal_streaming_graph_exec_deinitialize_compiled_state(exec);
+    iree_hal_streaming_graph_exec_move_compiled_state(exec, &candidate);
+  } else {
+    iree_hal_streaming_graph_exec_deinitialize_compiled_state(&candidate);
   }
   return status;
 }
@@ -919,18 +947,28 @@ iree_status_t iree_hal_streaming_graph_exec_set_event_node_event(
           ? IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_EVENT_RECORD
           : IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_EVENT_WAIT;
   bool found = false;
+  iree_hal_streaming_event_retain(event);
+  iree_hal_streaming_event_t* old_event = NULL;
   iree_slim_mutex_lock(&exec->mutex);
-  for (uint32_t i = 0; i < exec->block_count; ++i) {
-    iree_hal_streaming_graph_block_t* block = exec->blocks[i];
-    if (!block || block->type != block_type) continue;
-    iree_hal_streaming_graph_block_ptrs_t ptrs;
-    iree_hal_streaming_graph_block_get_ptrs(block, &ptrs);
-    if (ptrs.attrs->event.source_node != node) continue;
-    ptrs.attrs->event.event = event;
-    found = true;
-    break;
+  if (!exec->is_destroyed) {
+    for (uint32_t i = 0; i < exec->block_count; ++i) {
+      iree_hal_streaming_graph_block_t* block = exec->blocks[i];
+      if (!block || block->type != block_type) continue;
+      iree_hal_streaming_graph_block_ptrs_t ptrs;
+      iree_hal_streaming_graph_block_get_ptrs(block, &ptrs);
+      if (ptrs.attrs->event.source_node != node) continue;
+      old_event = ptrs.attrs->event.event;
+      ptrs.attrs->event.event = event;
+      found = true;
+      break;
+    }
   }
   iree_slim_mutex_unlock(&exec->mutex);
+  if (found) {
+    iree_hal_streaming_event_release(old_event);
+  } else {
+    iree_hal_streaming_event_release(event);
+  }
 
   IREE_TRACE_ZONE_END(z0);
   return found ? iree_ok_status()
@@ -2118,12 +2156,6 @@ iree_status_t iree_hal_streaming_graph_exec_launch(
   IREE_ASSERT_ARGUMENT(stream);
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  // Handle empty graph - nothing to do.
-  if (exec->block_count == 0) {
-    IREE_TRACE_ZONE_END(z0);
-    return iree_ok_status();
-  }
-
   // Flush stream to ensure all prior operations are submitted.
   IREE_RETURN_AND_END_ZONE_IF_ERROR(z0,
                                     iree_hal_streaming_stream_flush(stream));
@@ -2132,6 +2164,17 @@ iree_status_t iree_hal_streaming_graph_exec_launch(
   // It also protects the executable semaphore base values below, which
   // are reused and advanced across launches of the same executable graph.
   iree_slim_mutex_lock(&exec->mutex);
+  if (exec->is_destroyed) {
+    iree_slim_mutex_unlock(&exec->mutex);
+    IREE_TRACE_ZONE_END(z0);
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT);
+  }
+  // Handle empty graph - nothing to do.
+  if (exec->block_count == 0) {
+    iree_slim_mutex_unlock(&exec->mutex);
+    IREE_TRACE_ZONE_END(z0);
+    return iree_ok_status();
+  }
   if (exec->has_unfreed_graph_alloc_nodes && exec->launch_count > 0 &&
       !iree_all_bits_set(
           exec->flags,
@@ -2483,6 +2526,11 @@ iree_status_t iree_hal_streaming_graph_exec_update(
   *out_result = IREE_HAL_STREAMING_GRAPH_EXEC_UPDATE_ERROR;
 
   iree_slim_mutex_lock(&exec->mutex);
+  if (exec->is_destroyed) {
+    iree_slim_mutex_unlock(&exec->mutex);
+    IREE_TRACE_ZONE_END(z0);
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT);
+  }
   if (!iree_hal_streaming_graph_update_is_compatible(
           exec->graph, exec->instantiated_visible_node_count, graph,
           out_error_node, out_result)) {
@@ -2506,15 +2554,8 @@ iree_status_t iree_hal_streaming_graph_exec_update(
       iree_hal_streaming_graph_release(old_graph);
     }
   } else if (graph != old_graph) {
-    iree_status_t rebuild_status = status;
     iree_hal_streaming_graph_exec_set_graph_locked(exec, old_graph);
-    status = iree_hal_streaming_graph_exec_rebuild_from_template_locked(exec);
     iree_hal_streaming_graph_release(graph);
-    if (iree_status_is_ok(status)) {
-      status = rebuild_status;
-    } else {
-      status = iree_status_join(status, rebuild_status);
-    }
   }
 
   iree_slim_mutex_unlock(&exec->mutex);

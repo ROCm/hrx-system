@@ -1145,10 +1145,15 @@ typedef struct iree_hal_streaming_graph_event_node_attrs_t {
 typedef struct iree_hal_streaming_graph_mem_alloc_node_attrs_t {
   // HIP memory allocation node parameters captured at graph construction time.
   void* params;
+  // Number of parameter bytes stored at |params|.
+  iree_host_size_t params_size;
   // Device pointer allocated for this graph memory node.
   void* dptr;
   // Allocation size in bytes.
   iree_device_size_t bytesize;
+  // True when |dptr| is owned by this graph template and must be released with
+  // the node.
+  bool owns_device_allocation;
 } iree_hal_streaming_graph_mem_alloc_node_attrs_t;
 
 typedef struct iree_hal_streaming_graph_mem_free_node_attrs_t {

@@ -613,11 +613,6 @@ iree_status_t iree_hal_streaming_stream_wait_event(
                 stream, event->capture_dependencies,
                 event->capture_dependency_count,
                 IREE_HAL_STREAMING_CAPTURE_DEPENDENCIES_ADD));
-    if (event->recording_stream && stream->capture_origin &&
-        event->recording_stream != stream &&
-        event->recording_stream->capture_graph == stream->capture_graph) {
-      event->recording_stream->capture_joined_to_origin = true;
-    }
     IREE_TRACE_ZONE_END(z0);
     return iree_ok_status();
   }
