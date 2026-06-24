@@ -353,6 +353,41 @@
       ]
     },
     {
+      "name": "reports dynamic lower full unroll",
+      "run": {
+        "tool": "loom-opt",
+        "args": [
+          "--pass=unroll-scf-for",
+          "--pass-report=json",
+          "--output={tmp}/dynamic-lower-full-unroll.loom"
+        ],
+        "stdin": {
+          "text": "func.def @dynamic_lower_full_unroll(%slot0: index) {\n  %slot = index.assume %slot0 [range(%slot0, 0, 7)] : index\n  %end = index.constant 16 : index\n  %step = index.constant 8 : index\n  scf.for %i = [%slot to %end step %step] unroll {\n    test.use %i : index\n  }\n  func.return\n}\n"
+        }
+      },
+      "stderr": {
+        "contains": [
+          "\"pass\":\"unroll-scf-for\"",
+          "\"category\":\"scf-unroll\"",
+          "\"outcome\":\"unrolled\"",
+          "\"op\":\"scf.for\"",
+          "\"policy\":\"bare\"",
+          "\"schedule\":\"linear\"",
+          "\"trip_count\":2",
+          "\"step\":8",
+          "\"lower_bound_kind\":\"dynamic\"",
+          "\"lower_range_min\":0",
+          "\"lower_range_max\":7"
+        ]
+      },
+      "files": [
+        {
+          "path": "{tmp}/dynamic-lower-full-unroll.loom",
+          "not_contains": ["scf.for"]
+        }
+      ]
+    },
+    {
       "name": "reports no-op unroll factor policy clearing",
       "run": {
         "tool": "loom-opt",
