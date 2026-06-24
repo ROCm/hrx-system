@@ -10,11 +10,17 @@
 #include "experimental/id4/pipeline/stage.h"
 #include "experimental/id4/stages/hal_integration_util.h"
 #include "experimental/id4/stages/vae.h"
+#include "experimental/id4/tooling/filesystem.h"
 #include "iree/base/api.h"
+#include "iree/base/tooling/flags.h"
 #include "iree/hal/api.h"
+#include "iree/io/file_contents.h"
 #include "iree/io/parameter_provider.h"
 #include "iree/testing/benchmark.h"
 #include "iree/tooling/device_util.h"
+
+IREE_FLAG(string, id4_plan_output_dir, "",
+          "Optional directory receiving benchmark VAE stage plan JSON files.");
 
 namespace {
 
@@ -35,7 +41,50 @@ struct VaeBenchmarkShape {
   uint32_t latent_height;
   // Decoded image element count used for throughput reporting.
   uint64_t decoded_element_count;
+  // VAE tiling policy used to plan the decode stage.
+  id4_vae_tiling_config_t tiling;
+  // File name used when --id4_plan_output_dir requests a plan dump.
+  const char* plan_file_name;
 };
+
+static constexpr id4_vae_tiling_config_t DisabledTiling() {
+  return {
+      // Tiling policy selected for this request.
+      ID4_VAE_TILING_MODE_DISABLED,
+      // Requested latent tile width for explicit-size policy.
+      0,
+      // Requested latent tile height for explicit-size policy.
+      0,
+      // Relative latent width factor or tile-count hint.
+      0.0f,
+      // Relative latent height factor or tile-count hint.
+      0.0f,
+      // Requested fractional tile overlap.
+      0.0f,
+      // Maximum transient bytes for memory-budget policy.
+      0,
+  };
+}
+
+static constexpr id4_vae_tiling_config_t ExplicitTileSizeTiling(
+    uint32_t tile_size_x, uint32_t tile_size_y, float overlap) {
+  return {
+      // Tiling policy selected for this request.
+      ID4_VAE_TILING_MODE_EXPLICIT_TILE_SIZE,
+      // Requested latent tile width for explicit-size policy.
+      tile_size_x,
+      // Requested latent tile height for explicit-size policy.
+      tile_size_y,
+      // Relative latent width factor or tile-count hint.
+      0.0f,
+      // Relative latent height factor or tile-count hint.
+      0.0f,
+      // Requested fractional tile overlap.
+      overlap,
+      // Maximum transient bytes for memory-budget policy.
+      0,
+  };
+}
 
 static constexpr VaeBenchmarkShape kFlux2FullImageShape = {
     // Full 1024x1024 image latent width.
@@ -44,6 +93,24 @@ static constexpr VaeBenchmarkShape kFlux2FullImageShape = {
     /*.latent_height=*/kFlux2LatentHeight,
     // Full 1024x1024 RGB output element count.
     /*.decoded_element_count=*/kFlux2DecodedElementCount,
+    // Full-frame VAE decode with no spatial tiling.
+    /*.tiling=*/DisabledTiling(),
+    // Plan dump file name.
+    /*.plan_file_name=*/"decode_full_frame.json",
+};
+
+static constexpr VaeBenchmarkShape kFlux2TiledFullImageShape = {
+    // Full 1024x1024 image latent width.
+    /*.latent_width=*/kFlux2LatentWidth,
+    // Full 1024x1024 image latent height.
+    /*.latent_height=*/kFlux2LatentHeight,
+    // Full 1024x1024 RGB output element count.
+    /*.decoded_element_count=*/kFlux2DecodedElementCount,
+    // Stable-style 32x32 latent tiles with 50% overlap.
+    /*.tiling=*/
+    ExplicitTileSizeTiling(kFlux2TileLatentWidth, kFlux2TileLatentHeight, 0.5f),
+    // Plan dump file name.
+    /*.plan_file_name=*/"decode_tiled.json",
 };
 
 static constexpr VaeBenchmarkShape kFlux2TileLocalShape = {
@@ -53,6 +120,10 @@ static constexpr VaeBenchmarkShape kFlux2TileLocalShape = {
     /*.latent_height=*/kFlux2TileLatentHeight,
     // Tile-local 512x512 RGB output element count.
     /*.decoded_element_count=*/kFlux2TileDecodedElementCount,
+    // Single-tile local VAE decode with no spatial tiling.
+    /*.tiling=*/DisabledTiling(),
+    // Plan dump file name.
+    /*.plan_file_name=*/"decode_tile_local.json",
 };
 
 struct VaeBenchmarkContext {
@@ -132,7 +203,7 @@ static iree_status_t CreateVaePlan(VaeBenchmarkContext* context,
   vae_options.request.latent_shape = id4_pipeline_program_make_shape_rank4(
       shape.latent_width, shape.latent_height, kFlux2LatentChannelCount,
       kFlux2LatentBatchCount);
-  vae_options.request.tiling.mode = ID4_VAE_TILING_MODE_DISABLED;
+  vae_options.request.tiling = shape.tiling;
 
   id4_pipeline_stage_plan_options_t plan_options;
   std::memset(&plan_options, 0, sizeof(plan_options));
@@ -142,6 +213,41 @@ static iree_status_t CreateVaePlan(VaeBenchmarkContext* context,
   plan_options.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
   plan_options.diagnostics_sink = &context->diagnostics_sink;
   return id4_pipeline_stage_plan(context->stage.get(), &plan_options, out_plan);
+}
+
+static iree_status_t WritePlanJsonIfRequested(VaeBenchmarkShape shape,
+                                              const id4_pipeline_plan_t* plan) {
+  iree_string_view_t output_dir =
+      iree_make_cstring_view(FLAG_id4_plan_output_dir);
+  if (iree_string_view_is_empty(output_dir)) return iree_ok_status();
+  IREE_RETURN_IF_ERROR(
+      id4_tooling_ensure_directory(output_dir, iree_allocator_system()));
+
+  iree_string_builder_t builder;
+  iree_string_builder_initialize(iree_allocator_system(), &builder);
+  iree_status_t status = id4_pipeline_plan_format_json(plan, &builder);
+  iree_string_view_t path = iree_string_view_empty();
+  if (iree_status_is_ok(status)) {
+    status = id4_tooling_format_child_path(
+        output_dir, iree_make_cstring_view(shape.plan_file_name),
+        iree_allocator_system(), &path);
+  }
+  if (iree_status_is_ok(status)) {
+    iree_string_view_t json = iree_string_builder_view(&builder);
+    status = iree_io_file_contents_write(
+        path, iree_make_const_byte_span(json.data, json.size),
+        iree_allocator_system());
+  }
+  id4_tooling_free_path(&path, iree_allocator_system());
+  iree_string_builder_deinitialize(&builder);
+  return status;
+}
+
+static iree_status_t WritePlanJsonIfRequested(VaeBenchmarkContext* context,
+                                              VaeBenchmarkShape shape) {
+  id4::test::OwningRef<id4_pipeline_plan_t, id4_pipeline_plan_release> plan;
+  IREE_RETURN_IF_ERROR(CreateVaePlan(context, shape, plan.out()));
+  return WritePlanJsonIfRequested(shape, plan.get());
 }
 
 static iree_status_t PrepareVaeBundle(VaeBenchmarkContext* context,
@@ -222,6 +328,8 @@ static const iree_benchmark_def_t* RegisterVaeBenchmark(
 IREE_BENCHMARK_FN(BM_VaeStagePlanFlux2Decode) {
   VaeBenchmarkContext context;
   IREE_RETURN_IF_ERROR(CreateLoadedVaeStageContext(&context));
+  IREE_RETURN_IF_ERROR(
+      WritePlanJsonIfRequested(&context, kFlux2FullImageShape));
 
   uint64_t iteration_count = 0;
   while (iree_benchmark_keep_running(benchmark_state, 1)) {
@@ -237,6 +345,27 @@ IREE_BENCHMARK_FN(BM_VaeStagePlanFlux2Decode) {
 }
 ID4_VAE_BENCHMARK_REGISTER(BM_VaeStagePlanFlux2Decode, MICROSECOND);
 
+IREE_BENCHMARK_FN(BM_VaeStagePlanFlux2TiledDecode) {
+  VaeBenchmarkContext context;
+  IREE_RETURN_IF_ERROR(CreateLoadedVaeStageContext(&context));
+  IREE_RETURN_IF_ERROR(
+      WritePlanJsonIfRequested(&context, kFlux2TiledFullImageShape));
+
+  uint64_t iteration_count = 0;
+  while (iree_benchmark_keep_running(benchmark_state, 1)) {
+    id4_pipeline_plan_t* plan = nullptr;
+    IREE_RETURN_IF_ERROR(
+        CreateVaePlan(&context, kFlux2TiledFullImageShape, &plan));
+    iree_optimization_barrier(plan);
+    id4_pipeline_plan_release(plan);
+    ++iteration_count;
+  }
+  iree_benchmark_set_items_processed(benchmark_state,
+                                     static_cast<int64_t>(iteration_count));
+  return iree_ok_status();
+}
+ID4_VAE_BENCHMARK_REGISTER(BM_VaeStagePlanFlux2TiledDecode, MICROSECOND);
+
 IREE_BENCHMARK_FN(BM_VaeStagePrepareCachedKernels) {
   VaeBenchmarkContext context;
   IREE_RETURN_IF_ERROR(CreateLoadedVaeBenchmarkContext(&context));
@@ -244,6 +373,8 @@ IREE_BENCHMARK_FN(BM_VaeStagePrepareCachedKernels) {
   id4::test::OwningRef<id4_pipeline_plan_t, id4_pipeline_plan_release> plan;
   IREE_RETURN_IF_ERROR(
       CreateVaePlan(&context, kFlux2FullImageShape, plan.out()));
+  IREE_RETURN_IF_ERROR(
+      WritePlanJsonIfRequested(kFlux2FullImageShape, plan.get()));
 
   id4::test::OwningRef<iree_hal_semaphore_t, iree_hal_semaphore_release>
       prepare_semaphore;
@@ -287,6 +418,7 @@ static iree_status_t RunVaeStageIssueEndToEnd(
 
   id4::test::OwningRef<id4_pipeline_plan_t, id4_pipeline_plan_release> plan;
   IREE_RETURN_IF_ERROR(CreateVaePlan(&context, shape, plan.out()));
+  IREE_RETURN_IF_ERROR(WritePlanJsonIfRequested(shape, plan.get()));
 
   id4::test::OwningRef<iree_hal_semaphore_t, iree_hal_semaphore_release>
       prepare_semaphore;
@@ -350,6 +482,11 @@ IREE_BENCHMARK_FN(BM_VaeStageIssueEndToEnd) {
   return RunVaeStageIssueEndToEnd(benchmark_state, kFlux2FullImageShape);
 }
 ID4_VAE_BENCHMARK_REGISTER(BM_VaeStageIssueEndToEnd, MILLISECOND);
+
+IREE_BENCHMARK_FN(BM_VaeStageIssueTiledEndToEnd) {
+  return RunVaeStageIssueEndToEnd(benchmark_state, kFlux2TiledFullImageShape);
+}
+ID4_VAE_BENCHMARK_REGISTER(BM_VaeStageIssueTiledEndToEnd, MILLISECOND);
 
 IREE_BENCHMARK_FN(BM_VaeStageIssueTileLocalEndToEnd) {
   return RunVaeStageIssueEndToEnd(benchmark_state, kFlux2TileLocalShape);
