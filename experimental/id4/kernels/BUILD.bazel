@@ -754,6 +754,20 @@ _KERNEL_CASES = [
         "target_name": "vae_conv3x3_bias_ic4_oc16_packed_2d_f32_small_same_padding",
     },
     {
+        "actual_case": "@id4_vae_conv3x3_bias_ic4_oc64_packed_block_f32_small_same_padding_case",
+        "benchmark": "@id4_vae_conv3x3_bias_ic4_oc64_packed_block_f32_small_same_padding",
+        "configs": [
+            "--config=id4.vae.conv3x3_bias.width=2",
+            "--config=id4.vae.conv3x3_bias.height=2",
+            "--config=id4.vae.conv3x3_bias.input_channel_count=4",
+            "--config=id4.vae.conv3x3_bias.output_channel_count=64",
+            "--config=id4.vae.conv3x3_bias.batch_count=1",
+            "--config=id4.vae.conv3x3_bias.output_element_count=256",
+        ],
+        "source": "vae/conv3x3_bias_packed_block_f32.loom",
+        "target_name": "vae_conv3x3_bias_ic4_oc64_packed_block_f32_small_same_padding",
+    },
+    {
         "actual_case": "@id4_vae_conv3x3_bias_ic4_oc8_f32_flux2_tile_mid_shape_case",
         "benchmark": "@id4_vae_conv3x3_bias_ic4_oc8_f32_flux2_tile_mid_shape",
         "configs": [
@@ -816,6 +830,20 @@ _KERNEL_CASES = [
         ],
         "source": "vae/conv3x3_bias_packed_f32.loom",
         "target_name": "vae_conv3x3_bias_ic4_oc16_packed_2d_f32_flux2_tile_mid_shape",
+    },
+    {
+        "actual_case": "@id4_vae_conv3x3_bias_ic4_oc64_packed_block_f32_flux2_tile_mid_shape_case",
+        "benchmark": "@id4_vae_conv3x3_bias_ic4_oc64_packed_block_f32_flux2_tile_mid_shape",
+        "configs": [
+            "--config=id4.vae.conv3x3_bias.width=64",
+            "--config=id4.vae.conv3x3_bias.height=64",
+            "--config=id4.vae.conv3x3_bias.input_channel_count=512",
+            "--config=id4.vae.conv3x3_bias.output_channel_count=512",
+            "--config=id4.vae.conv3x3_bias.batch_count=1",
+            "--config=id4.vae.conv3x3_bias.output_element_count=2097152",
+        ],
+        "source": "vae/conv3x3_bias_packed_block_f32.loom",
+        "target_name": "vae_conv3x3_bias_ic4_oc64_packed_block_f32_flux2_tile_mid_shape",
     },
     {
         "actual_case": "@id4_vae_conv3x3_bias_ic4_f32_flux2_tile_mid_shape_case",
@@ -2818,6 +2846,7 @@ _KERNEL_SOURCES = [
     "smoke_configured.loom",
     "vae/conv1x1_bias_f32.loom",
     "vae/conv3x3_bias_f32.loom",
+    "vae/conv3x3_bias_packed_block_f32.loom",
     "vae/conv3x3_bias_packed_f32.loom",
     "vae/decode_nearest_f32.loom",
     "vae/flux2_affine_pixel_shuffle_f32.loom",
