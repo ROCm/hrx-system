@@ -820,6 +820,39 @@ check.case public @id4_vae_upsample_conv3x3_bias_bf16_wmma_oc64_flux2_tile_mid_s
   check.return
 }
 
+check.case public @id4_vae_upsample_conv3x3_bias_bf16_wmma_oc64_flux2_level3_shape_case {
+  %input = check.generate.fill value(1.0) : tensor<128x128x512x1xbf16>
+  %weight = check.generate.fill value(0.0) : tensor<512x3x3x512xbf16>
+  %bias = check.generate.fill value(0.0) : tensor<512xbf16>
+  %output = check.generate.fill value(1.0) : tensor<256x256x512x1xbf16>
+  %expected = check.generate.fill value(0.0) : tensor<256x256x512x1xbf16>
+  func.call @id4_vae_upsample_conv3x3_bias_bf16_wmma_oc64(%input, %weight, %bias, %output) : (tensor<128x128x512x1xbf16>, tensor<512x3x3x512xbf16>, tensor<512xbf16>, tensor<256x256x512x1xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<256x256x512x1xbf16>
+  check.return
+}
+
+check.case public @id4_vae_upsample_conv3x3_bias_bf16_wmma_oc64_flux2_level2_shape_case {
+  %input = check.generate.fill value(1.0) : tensor<256x256x512x1xbf16>
+  %weight = check.generate.fill value(0.0) : tensor<512x3x3x512xbf16>
+  %bias = check.generate.fill value(0.0) : tensor<512xbf16>
+  %output = check.generate.fill value(1.0) : tensor<512x512x512x1xbf16>
+  %expected = check.generate.fill value(0.0) : tensor<512x512x512x1xbf16>
+  func.call @id4_vae_upsample_conv3x3_bias_bf16_wmma_oc64(%input, %weight, %bias, %output) : (tensor<256x256x512x1xbf16>, tensor<512x3x3x512xbf16>, tensor<512xbf16>, tensor<512x512x512x1xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<512x512x512x1xbf16>
+  check.return
+}
+
+check.case public @id4_vae_upsample_conv3x3_bias_bf16_wmma_oc64_flux2_level1_shape_case {
+  %input = check.generate.fill value(1.0) : tensor<512x512x256x1xbf16>
+  %weight = check.generate.fill value(0.0) : tensor<256x3x3x256xbf16>
+  %bias = check.generate.fill value(0.0) : tensor<256xbf16>
+  %output = check.generate.fill value(1.0) : tensor<1024x1024x256x1xbf16>
+  %expected = check.generate.fill value(0.0) : tensor<1024x1024x256x1xbf16>
+  func.call @id4_vae_upsample_conv3x3_bias_bf16_wmma_oc64(%input, %weight, %bias, %output) : (tensor<512x512x256x1xbf16>, tensor<256x3x3x256xbf16>, tensor<256xbf16>, tensor<1024x1024x256x1xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<1024x1024x256x1xbf16>
+  check.return
+}
+
 check.benchmark<@id4_vae_upsample_conv3x3_bias_ic4_oc16_packed_2d_bf16_small_case> @id4_vae_upsample_conv3x3_bias_ic4_oc16_packed_2d_bf16_small
 
 check.benchmark<@id4_vae_upsample_conv3x3_bias_ic4_oc16_packed_2d_bf16_flux2_tile_mid_shape_case> @id4_vae_upsample_conv3x3_bias_ic4_oc16_packed_2d_bf16_flux2_tile_mid_shape
@@ -831,3 +864,9 @@ check.benchmark<@id4_vae_upsample_conv3x3_bias_bf16_wmma_oc64_matches_scalar_med
 check.benchmark<@id4_vae_upsample_conv3x3_bias_bf16_wmma_flux2_tile_mid_shape_case> @id4_vae_upsample_conv3x3_bias_bf16_wmma_flux2_tile_mid_shape
 
 check.benchmark<@id4_vae_upsample_conv3x3_bias_bf16_wmma_oc64_flux2_tile_mid_shape_case> @id4_vae_upsample_conv3x3_bias_bf16_wmma_oc64_flux2_tile_mid_shape
+
+check.benchmark<@id4_vae_upsample_conv3x3_bias_bf16_wmma_oc64_flux2_level3_shape_case> @id4_vae_upsample_conv3x3_bias_bf16_wmma_oc64_flux2_level3_shape
+
+check.benchmark<@id4_vae_upsample_conv3x3_bias_bf16_wmma_oc64_flux2_level2_shape_case> @id4_vae_upsample_conv3x3_bias_bf16_wmma_oc64_flux2_level2_shape
+
+check.benchmark<@id4_vae_upsample_conv3x3_bias_bf16_wmma_oc64_flux2_level1_shape_case> @id4_vae_upsample_conv3x3_bias_bf16_wmma_oc64_flux2_level1_shape
