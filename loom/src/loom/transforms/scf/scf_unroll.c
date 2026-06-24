@@ -1035,6 +1035,14 @@ typedef struct loom_scf_unroll_body_op_list_t {
   uint32_t count;
 } loom_scf_unroll_body_op_list_t;
 
+typedef uint8_t loom_scf_unroll_effect_flags_t;
+
+enum loom_scf_unroll_effect_flag_bits_e {
+  LOOM_SCF_UNROLL_EFFECT_READ = 1u << 0,
+  LOOM_SCF_UNROLL_EFFECT_WRITE = 1u << 1,
+  LOOM_SCF_UNROLL_EFFECT_ORDERED = 1u << 2,
+};
+
 typedef struct loom_scf_unroll_payload_readiness_t {
   const loom_scf_unroll_context_t* context;
   const loom_block_t* body_block;
@@ -1221,6 +1229,120 @@ static iree_status_t loom_scf_unroll_collect_interleavable_body_ops(
   return iree_ok_status();
 }
 
+static loom_scf_unroll_effect_flags_t loom_scf_unroll_op_effect_flags(
+    const loom_scf_unroll_context_t* context, const loom_op_t* op) {
+  loom_trait_flags_t traits = loom_op_effective_traits(context->module, op);
+  loom_scf_unroll_effect_flags_t flags = 0;
+  if (loom_traits_may_read(traits)) {
+    flags |= LOOM_SCF_UNROLL_EFFECT_READ;
+  }
+  if (loom_traits_may_write(traits)) {
+    flags |= LOOM_SCF_UNROLL_EFFECT_WRITE;
+  }
+  if (iree_any_bit_set(
+          traits, LOOM_TRAIT_NON_DETERMINISTIC | LOOM_TRAIT_UNKNOWN_EFFECTS |
+                      LOOM_TRAIT_HINT | LOOM_TRAIT_POISON_BOUNDARY |
+                      LOOM_TRAIT_CONVERGENT)) {
+    flags |= LOOM_SCF_UNROLL_EFFECT_ORDERED;
+  }
+  return flags;
+}
+
+static bool loom_scf_unroll_effects_conflict(
+    loom_scf_unroll_effect_flags_t prior_flags,
+    loom_scf_unroll_effect_flags_t candidate_flags) {
+  if ((prior_flags | candidate_flags) == 0) return false;
+  if (iree_any_bit_set(prior_flags | candidate_flags,
+                       LOOM_SCF_UNROLL_EFFECT_ORDERED)) {
+    return true;
+  }
+  if (!iree_any_bit_set(prior_flags | candidate_flags,
+                        LOOM_SCF_UNROLL_EFFECT_WRITE)) {
+    return false;
+  }
+  return iree_any_bit_set(prior_flags, LOOM_SCF_UNROLL_EFFECT_READ |
+                                           LOOM_SCF_UNROLL_EFFECT_WRITE) &&
+         iree_any_bit_set(candidate_flags, LOOM_SCF_UNROLL_EFFECT_READ |
+                                               LOOM_SCF_UNROLL_EFFECT_WRITE);
+}
+
+static iree_status_t loom_scf_unroll_collect_effect_flags(
+    const loom_scf_unroll_context_t* context,
+    const loom_scf_unroll_body_op_list_t* body_ops,
+    loom_scf_unroll_effect_flags_t** out_effect_flags) {
+  *out_effect_flags = NULL;
+  if (body_ops->count == 0) return iree_ok_status();
+  loom_scf_unroll_effect_flags_t* effect_flags = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate_array(context->pass->arena, body_ops->count,
+                                sizeof(*effect_flags), (void**)&effect_flags));
+  for (uint32_t i = 0; i < body_ops->count; ++i) {
+    effect_flags[i] =
+        loom_scf_unroll_op_effect_flags(context, body_ops->ops[i]);
+  }
+  *out_effect_flags = effect_flags;
+  return iree_ok_status();
+}
+
+static iree_status_t loom_scf_unroll_initialize_effect_dependencies(
+    const loom_scf_unroll_context_t* context,
+    const loom_scf_unroll_body_op_list_t* body_ops,
+    const loom_scf_unroll_effect_flags_t* effect_flags, uint32_t unroll_count,
+    iree_host_size_t clone_slot_count, iree_host_size_t** out_pending_counts) {
+  *out_pending_counts = NULL;
+  if (clone_slot_count == 0) return iree_ok_status();
+  bool has_effects = false;
+  for (uint32_t i = 0; i < body_ops->count; ++i) {
+    has_effects = has_effects || effect_flags[i] != 0;
+  }
+  if (!has_effects) return iree_ok_status();
+
+  iree_host_size_t* pending_counts = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      context->pass->arena, clone_slot_count, sizeof(*pending_counts),
+      (void**)&pending_counts));
+  memset(pending_counts, 0, clone_slot_count * sizeof(*pending_counts));
+
+  for (uint32_t ordinal = 0; ordinal < unroll_count; ++ordinal) {
+    for (uint32_t op_index = 0; op_index < body_ops->count; ++op_index) {
+      const iree_host_size_t slot =
+          (iree_host_size_t)ordinal * body_ops->count + op_index;
+      const loom_scf_unroll_effect_flags_t candidate_flags =
+          effect_flags[op_index];
+      for (iree_host_size_t prior_slot = 0; prior_slot < slot; ++prior_slot) {
+        const uint32_t prior_op_index =
+            (uint32_t)(prior_slot % body_ops->count);
+        if (loom_scf_unroll_effects_conflict(effect_flags[prior_op_index],
+                                             candidate_flags)) {
+          ++pending_counts[slot];
+        }
+      }
+    }
+  }
+
+  *out_pending_counts = pending_counts;
+  return iree_ok_status();
+}
+
+static void loom_scf_unroll_release_effect_dependencies(
+    const loom_scf_unroll_body_op_list_t* body_ops,
+    const loom_scf_unroll_effect_flags_t* effect_flags,
+    iree_host_size_t clone_slot_count, iree_host_size_t cloned_slot,
+    iree_host_size_t* pending_counts) {
+  if (!pending_counts || body_ops->count == 0) return;
+  const uint32_t cloned_op_index = (uint32_t)(cloned_slot % body_ops->count);
+  const loom_scf_unroll_effect_flags_t cloned_flags =
+      effect_flags[cloned_op_index];
+  for (iree_host_size_t slot = cloned_slot + 1; slot < clone_slot_count;
+       ++slot) {
+    const uint32_t op_index = (uint32_t)(slot % body_ops->count);
+    if (pending_counts[slot] > 0 && loom_scf_unroll_effects_conflict(
+                                        cloned_flags, effect_flags[op_index])) {
+      --pending_counts[slot];
+    }
+  }
+}
+
 static iree_status_t loom_scf_unroll_body_op_payload_is_ready(
     const loom_scf_unroll_context_t* context, const loom_block_t* body_block,
     const loom_op_t* source_op, const loom_ir_remap_t* remap, bool* out_ready) {
@@ -1332,6 +1454,9 @@ static iree_status_t loom_scf_unroll_full_unroll_interleaved(
   loom_value_slice_t iter_args = loom_scf_for_iter_args(op);
   const uint32_t unroll_count = trip_count->count;
   const uint16_t carried_count = op->result_count;
+  loom_scf_unroll_effect_flags_t* effect_flags = NULL;
+  IREE_RETURN_IF_ERROR(
+      loom_scf_unroll_collect_effect_flags(context, &body_ops, &effect_flags));
   if (unroll_count == 0) {
     if (carried_count > 0) {
       IREE_RETURN_IF_ERROR(loom_rewriter_preserve_result_names_on_new_values(
@@ -1378,6 +1503,10 @@ static iree_status_t loom_scf_unroll_full_unroll_interleaved(
                                   sizeof(*cloned), (void**)&cloned));
     memset(cloned, 0, clone_slot_count * sizeof(*cloned));
   }
+  iree_host_size_t* pending_effect_dependency_counts = NULL;
+  IREE_RETURN_IF_ERROR(loom_scf_unroll_initialize_effect_dependencies(
+      context, &body_ops, effect_flags, unroll_count, clone_slot_count,
+      &pending_effect_dependency_counts));
 
   loom_value_id_t induction_variable = body_block->arg_ids[0];
   for (uint32_t ordinal = 0; ordinal < unroll_count; ++ordinal) {
@@ -1427,9 +1556,14 @@ static iree_status_t loom_scf_unroll_full_unroll_interleaved(
     for (uint32_t op_index = 0; op_index < body_ops.count; ++op_index) {
       const loom_op_t* source_op = body_ops.ops[op_index];
       for (uint32_t ordinal = 0; ordinal < unroll_count; ++ordinal) {
-        bool* cloned_slot =
-            &cloned[(iree_host_size_t)ordinal * body_ops.count + op_index];
+        const iree_host_size_t slot =
+            (iree_host_size_t)ordinal * body_ops.count + op_index;
+        bool* cloned_slot = &cloned[slot];
         if (*cloned_slot) continue;
+        if (pending_effect_dependency_counts &&
+            pending_effect_dependency_counts[slot] != 0) {
+          continue;
+        }
         bool payload_ready = false;
         IREE_RETURN_IF_ERROR(loom_scf_unroll_body_op_payload_is_ready(
             context, body_block, source_op, &remaps[ordinal], &payload_ready));
@@ -1443,6 +1577,9 @@ static iree_status_t loom_scf_unroll_full_unroll_interleaved(
         IREE_RETURN_IF_ERROR(loom_scf_unroll_rename_cloned_op_results(
             context, source_op, cloned_op, ordinal));
         *cloned_slot = true;
+        loom_scf_unroll_release_effect_dependencies(
+            &body_ops, effect_flags, clone_slot_count, slot,
+            pending_effect_dependency_counts);
         ++cloned_counts[ordinal];
         --remaining;
         made_progress = true;

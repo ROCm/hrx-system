@@ -81,10 +81,8 @@ func.def @interleaved_unroll_resultless_loop(%input: i32) {
   %end = index.constant 3 : index
   %step = index.constant 1 : index
   scf.for %i = [%start to %end step %step] unroll schedule(interleaved) {
-    test.use %i : index
     %first = test.addi %input, %input : i32
     %second = test.addi %first, %input : i32
-    test.use %second : i32
   }
   func.return
 }
@@ -97,18 +95,12 @@ func.def @interleaved_unroll_resultless_loop(%input: i32) {
   %i_0 = index.constant 0 : index
   %i_1 = index.constant 1 : index
   %i_2 = index.constant 2 : index
-  test.use %i_0 : index
-  test.use %i_1 : index
-  test.use %i_2 : index
   %first = test.addi %input, %input : i32
   %first_1 = test.addi %input, %input : i32
   %first_2 = test.addi %input, %input : i32
   %second = test.addi %first, %input : i32
   %second_1 = test.addi %first_1, %input : i32
   %second_2 = test.addi %first_2, %input : i32
-  test.use %second : i32
-  test.use %second_1 : i32
-  test.use %second_2 : i32
   func.return
 }
 
@@ -170,14 +162,70 @@ func.def @interleaved_unroll_preserves_type_ref_order(%buffer: buffer, %offset: 
   %i_1 = index.constant 1 : index
   %i_2 = index.constant 2 : index
   %layout = encoding.layout.dense : encoding<layout>
-  %layout_1 = encoding.layout.dense : encoding<layout>
-  %layout_2 = encoding.layout.dense : encoding<layout>
   %view = buffer.view %buffer[%offset] : buffer -> view<4xf32, %layout>
-  %view_1 = buffer.view %buffer[%offset] : buffer -> view<4xf32, %layout_1>
-  %view_2 = buffer.view %buffer[%offset] : buffer -> view<4xf32, %layout_2>
   test.use %view : view<4xf32, %layout>
+  %layout_1 = encoding.layout.dense : encoding<layout>
+  %view_1 = buffer.view %buffer[%offset] : buffer -> view<4xf32, %layout_1>
   test.use %view_1 : view<4xf32, %layout_1>
+  %layout_2 = encoding.layout.dense : encoding<layout>
+  %view_2 = buffer.view %buffer[%offset] : buffer -> view<4xf32, %layout_2>
   test.use %view_2 : view<4xf32, %layout_2>
+  func.return
+}
+
+// ====
+
+func.def @interleaved_read_effects_commute(%pool: pool<16>) {
+  %start = index.constant 0 : index
+  %end = index.constant 3 : index
+  %step = index.constant 1 : index
+  scf.for %i = [%start to %end step %step] unroll schedule(interleaved) {
+    %value = test.read_resource %pool : pool<16> -> i32
+  }
+  func.return
+}
+
+// ----
+func.def @interleaved_read_effects_commute(%pool: pool<16>) {
+  %start = index.constant 0 : index
+  %end = index.constant 3 : index
+  %step = index.constant 1 : index
+  %i_0 = index.constant 0 : index
+  %i_1 = index.constant 1 : index
+  %i_2 = index.constant 2 : index
+  %value = test.read_resource %pool : pool<16> -> i32
+  %value_1 = test.read_resource %pool : pool<16> -> i32
+  %value_2 = test.read_resource %pool : pool<16> -> i32
+  func.return
+}
+
+// ====
+
+func.def @interleaved_write_read_hazard_preserves_order(%pool: pool<16>, %input: i32) {
+  %start = index.constant 0 : index
+  %end = index.constant 2 : index
+  %step = index.constant 1 : index
+  scf.for %i = [%start to %end step %step] unroll schedule(interleaved) {
+    test.write_resource %pool, %input : pool<16>, i32
+    %value = test.read_resource %pool : pool<16> -> i32
+    test.use %value : i32
+  }
+  func.return
+}
+
+// ----
+func.def @interleaved_write_read_hazard_preserves_order(%pool: pool<16>, %input: i32) {
+  %start = index.constant 0 : index
+  %end = index.constant 2 : index
+  %step = index.constant 1 : index
+  %i_0 = index.constant 0 : index
+  %i_1 = index.constant 1 : index
+  test.write_resource %pool, %input : pool<16>, i32
+  %value = test.read_resource %pool : pool<16> -> i32
+  test.use %value : i32
+  test.write_resource %pool, %input : pool<16>, i32
+  %value_1 = test.read_resource %pool : pool<16> -> i32
+  test.use %value_1 : i32
   func.return
 }
 
