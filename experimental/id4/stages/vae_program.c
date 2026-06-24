@@ -1631,8 +1631,11 @@ static iree_status_t id4_vae_program_author_conv3x3_bias_add_bf16(
   IREE_RETURN_IF_ERROR(id4_vae_program_build_conv3x3_bias_configs(
       width, height, channel_count, channel_count, batch_count,
       output_element_count, &config_list));
-  IREE_RETURN_IF_ERROR(id4_vae_program_add_conv3x3_bias_output_tile_configs(
-      channel_count, 16, output_element_count, &config_list));
+  const bool use_wmma_oc64 = channel_count >= 64 && channel_count % 64 == 0;
+  if (!use_wmma_oc64) {
+    IREE_RETURN_IF_ERROR(id4_vae_program_add_conv3x3_bias_output_tile_configs(
+        channel_count, 16, output_element_count, &config_list));
+  }
 
   iree_string_view_t packed_weight_key = iree_string_view_empty();
   id4_pipeline_program_shape_t weight_shape;
@@ -1673,14 +1676,25 @@ static iree_status_t id4_vae_program_author_conv3x3_bias_add_bf16(
   memset(&dispatch_options, 0, sizeof(dispatch_options));
   dispatch_options.structure_size = sizeof(dispatch_options);
   dispatch_options.name = dispatch_name;
-  dispatch_options.kernel = id4_pipeline_make_kernel_ref(
-      IREE_SV("vae/conv3x3_bias_packed_bf16"),
-      IREE_SV("id4_vae_conv3x3_bias_add_ic4_oc16_packed_bf16"));
-  dispatch_options.dispatch_config =
-      id4_vae_program_make_static_dispatch_config(
-          id4_vae_program_ceil_div_u32(pixel_element_count,
-                                       ID4_VAE_DECODE_WORKGROUP_SIZE_X),
-          channel_count / 16, 1);
+  if (use_wmma_oc64) {
+    dispatch_options.kernel =
+        id4_pipeline_make_kernel_ref(IREE_SV("vae/conv3x3_bias_packed_bf16"),
+                                     IREE_SV("id4_vae_conv3x3_bias_add_bf16_"
+                                             "wmma_oc64"));
+    dispatch_options.dispatch_config =
+        id4_vae_program_make_static_dispatch_config_with_workgroup_size_x(
+            id4_vae_program_ceil_div_u32(pixel_element_count, 32),
+            channel_count / 64, 1, 32);
+  } else {
+    dispatch_options.kernel = id4_pipeline_make_kernel_ref(
+        IREE_SV("vae/conv3x3_bias_packed_bf16"),
+        IREE_SV("id4_vae_conv3x3_bias_add_ic4_oc16_packed_bf16"));
+    dispatch_options.dispatch_config =
+        id4_vae_program_make_static_dispatch_config(
+            id4_vae_program_ceil_div_u32(pixel_element_count,
+                                         ID4_VAE_DECODE_WORKGROUP_SIZE_X),
+            channel_count / 16, 1);
+  }
   dispatch_options.config_binding_count = config_list.count;
   dispatch_options.config_bindings = config_list.bindings;
   dispatch_options.binding_count = IREE_ARRAYSIZE(bindings);
@@ -2598,8 +2612,7 @@ static iree_status_t id4_vae_program_author_resnet_block(
       flags, ID4_VAE_PROGRAM_RESNET_BLOCK_FLAG_PRESERVE_CONV2_TAP);
   if (input_channel_count == output_channel_count && batch_count == 1 &&
       output_channel_count >= 4 && output_channel_count % 4 == 0) {
-    if (preserve_conv2_tap ||
-        activation_dtype == ID4_PIPELINE_PROGRAM_DTYPE_BF16) {
+    if (preserve_conv2_tap) {
       id4_pipeline_program_tensor_t conv2 =
           id4_pipeline_program_tensor_invalid();
       if (activation_dtype == ID4_PIPELINE_PROGRAM_DTYPE_BF16) {
