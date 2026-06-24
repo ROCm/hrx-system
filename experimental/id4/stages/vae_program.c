@@ -742,16 +742,25 @@ static iree_status_t id4_vae_program_barrier(
   return id4_pipeline_program_barrier(builder, &options);
 }
 
-static iree_hal_dispatch_config_t id4_vae_program_make_static_dispatch_config(
+static iree_hal_dispatch_config_t
+id4_vae_program_make_static_dispatch_config_with_workgroup_size_x(
     uint32_t workgroup_count_x, uint32_t workgroup_count_y,
-    uint32_t workgroup_count_z) {
+    uint32_t workgroup_count_z, uint32_t workgroup_size_x) {
   iree_hal_dispatch_config_t dispatch_config =
       iree_hal_make_static_dispatch_config(workgroup_count_x, workgroup_count_y,
                                            workgroup_count_z);
-  dispatch_config.workgroup_size[0] = ID4_VAE_DECODE_WORKGROUP_SIZE_X;
+  dispatch_config.workgroup_size[0] = workgroup_size_x;
   dispatch_config.workgroup_size[1] = 1;
   dispatch_config.workgroup_size[2] = 1;
   return dispatch_config;
+}
+
+static iree_hal_dispatch_config_t id4_vae_program_make_static_dispatch_config(
+    uint32_t workgroup_count_x, uint32_t workgroup_count_y,
+    uint32_t workgroup_count_z) {
+  return id4_vae_program_make_static_dispatch_config_with_workgroup_size_x(
+      workgroup_count_x, workgroup_count_y, workgroup_count_z,
+      ID4_VAE_DECODE_WORKGROUP_SIZE_X);
 }
 
 static iree_hal_dispatch_config_t id4_vae_program_make_dispatch_config(
@@ -1470,8 +1479,12 @@ static iree_status_t id4_vae_program_author_conv3x3_bias_bf16(
   IREE_RETURN_IF_ERROR(id4_vae_program_build_conv3x3_bias_configs(
       width, height, input_channel_count, output_channel_count, batch_count,
       output_element_count, &config_list));
-  IREE_RETURN_IF_ERROR(id4_vae_program_add_conv3x3_bias_output_tile_configs(
-      output_channel_count, 16, output_element_count, &config_list));
+  const bool use_wmma =
+      output_channel_count >= 32 && output_channel_count % 32 == 0;
+  if (!use_wmma) {
+    IREE_RETURN_IF_ERROR(id4_vae_program_add_conv3x3_bias_output_tile_configs(
+        output_channel_count, 16, output_element_count, &config_list));
+  }
 
   iree_string_view_t packed_weight_key = iree_string_view_empty();
   id4_pipeline_program_shape_t weight_shape;
@@ -1513,15 +1526,25 @@ static iree_status_t id4_vae_program_author_conv3x3_bias_bf16(
   memset(&dispatch_options, 0, sizeof(dispatch_options));
   dispatch_options.structure_size = sizeof(dispatch_options);
   dispatch_options.name = dispatch_name;
-  dispatch_options.kernel =
-      id4_pipeline_make_kernel_ref(IREE_SV("vae/conv3x3_bias_packed_bf16"),
-                                   IREE_SV("id4_vae_conv3x3_bias_ic4_oc16_"
-                                           "packed_bf16"));
-  dispatch_options.dispatch_config =
-      id4_vae_program_make_static_dispatch_config(
-          id4_vae_program_ceil_div_u32(pixel_element_count,
-                                       ID4_VAE_DECODE_WORKGROUP_SIZE_X),
-          output_channel_count / 16, 1);
+  if (use_wmma) {
+    dispatch_options.kernel =
+        id4_pipeline_make_kernel_ref(IREE_SV("vae/conv3x3_bias_packed_bf16"),
+                                     IREE_SV("id4_vae_conv3x3_bias_bf16_wmma"));
+    dispatch_options.dispatch_config =
+        id4_vae_program_make_static_dispatch_config_with_workgroup_size_x(
+            id4_vae_program_ceil_div_u32(pixel_element_count, 32),
+            output_channel_count / 32, 1, 32);
+  } else {
+    dispatch_options.kernel =
+        id4_pipeline_make_kernel_ref(IREE_SV("vae/conv3x3_bias_packed_bf16"),
+                                     IREE_SV("id4_vae_conv3x3_bias_ic4_oc16_"
+                                             "packed_bf16"));
+    dispatch_options.dispatch_config =
+        id4_vae_program_make_static_dispatch_config(
+            id4_vae_program_ceil_div_u32(pixel_element_count,
+                                         ID4_VAE_DECODE_WORKGROUP_SIZE_X),
+            output_channel_count / 16, 1);
+  }
   dispatch_options.config_binding_count = config_list.count;
   dispatch_options.config_bindings = config_list.bindings;
   dispatch_options.binding_count = IREE_ARRAYSIZE(bindings);
