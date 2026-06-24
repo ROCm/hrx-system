@@ -2144,7 +2144,8 @@ static iree_status_t id4_vae_program_author_group_norm_bf16(
   stats_dispatch_options.structure_size = sizeof(stats_dispatch_options);
   stats_dispatch_options.name = dispatch_name;
   stats_dispatch_options.kernel = id4_pipeline_make_kernel_ref(
-      IREE_SV("vae/group_norm_bf16"), IREE_SV("id4_vae_group_norm_stats_bf16"));
+      IREE_SV("vae/group_norm_bf16"),
+      IREE_SV("id4_vae_group_norm_stats_onepass_bf16"));
   stats_dispatch_options.dispatch_config =
       id4_vae_program_make_static_dispatch_config(group_count, batch_count, 1);
   stats_dispatch_options.config_binding_count = stats_config_list.count;

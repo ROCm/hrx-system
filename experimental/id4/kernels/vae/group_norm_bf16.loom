@@ -81,12 +81,96 @@ kernel.def export("id4_vae_group_norm_stats_bf16") @id4_vae_group_norm_stats_bf1
   kernel.return
 }
 
+kernel.def export("id4_vae_group_norm_stats_onepass_bf16") @id4_vae_group_norm_stats_onepass_bf16() {
+  %unit = index.constant 1 : index
+  %workgroup_size_x = index.constant 256 : index
+  %group_count = config.get @id4.vae.group_norm.group_count : index
+  %batch_count = config.get @id4.vae.group_norm.batch_count : index
+  kernel.launch.config workgroups(%group_count, %batch_count, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
+} launch(%input: buffer, %stats: buffer) {
+  %base = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %unit = index.constant 1 : index
+  %workgroup_size_x = index.constant 256 : index
+  %group = kernel.workgroup.id<x> : index
+  %batch = kernel.workgroup.id<y> : index
+  %lane = kernel.workitem.id<x> : index
+  %width = config.get @id4.vae.group_norm.width : index
+  %height = config.get @id4.vae.group_norm.height : index
+  %channel_count = config.get @id4.vae.group_norm.channel_count : index
+  %group_count = config.get @id4.vae.group_norm.group_count : index
+  %channels_per_group = config.get @id4.vae.group_norm.channels_per_group : index
+  %batch_count = config.get @id4.vae.group_norm.batch_count : index
+  %group_element_count = config.get @id4.vae.group_norm.group_element_count : index
+  %zero_f32 = scalar.constant 0.0 : f32
+  %epsilon = scalar.constant 9.9999999999999995e-07 : f32
+  %group_element_count_i32 = index.cast %group_element_count : index to i32
+  %group_element_count_f32 = scalar.sitofp %group_element_count_i32 : i32 to f32
+  %channel_base = index.mul %group, %channels_per_group : index
+  %input_noalias, %stats_noalias = buffer.assume.noalias %input, %stats : buffer, buffer
+  %input_global = buffer.assume.memory_space<global> %input_noalias : buffer
+  %stats_global = buffer.assume.memory_space<global> %stats_noalias : buffer
+  %input_view = buffer.view %input_global[%base] : buffer -> view<[%width]x[%height]x[%channel_count]x[%batch_count]xbf16, #dense>
+  %stats_view = buffer.view %stats_global[%base] : buffer -> view<[%batch_count]x[%group_count]x2xf32, #dense>
+  %center_bf16 = view.load %input_view[%zero, %zero, %channel_base, %batch] : view<[%width]x[%height]x[%channel_count]x[%batch_count]xbf16, #dense> -> bf16
+  %center = scalar.extf %center_bf16 : bf16 to f32
+  %lane_delta_sum, %lane_delta_square_sum = scf.for %element_index = [%lane to %group_element_count step %workgroup_size_x](%acc_delta_sum = %zero_f32 : f32, %acc_delta_square_sum = %zero_f32 : f32) -> (f32, f32) {
+    %channel_in_group = index.rem %element_index, %channels_per_group : index
+    %spatial_index = index.div %element_index, %channels_per_group : index
+    %y = index.rem %spatial_index, %height : index
+    %x = index.div %spatial_index, %height : index
+    %channel = index.add %channel_base, %channel_in_group : index
+    %value_bf16 = view.load %input_view[%x, %y, %channel, %batch] : view<[%width]x[%height]x[%channel_count]x[%batch_count]xbf16, #dense> -> bf16
+    %value = scalar.extf %value_bf16 : bf16 to f32
+    %delta = scalar.subf<reassoc|nnan|ninf|nsz> %value, %center : f32
+    %delta_square = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %delta, %delta : f32
+    %next_delta_sum = scalar.addf<reassoc|nnan|ninf|nsz> %acc_delta_sum, %delta : f32
+    %next_delta_square_sum = scalar.addf<reassoc|nnan|ninf|nsz> %acc_delta_square_sum, %delta_square : f32
+    scf.yield %next_delta_sum, %next_delta_square_sum : f32, f32
+  }
+  %delta_sum = kernel.workgroup.reduce<addf> %lane_delta_sum : f32
+  %delta_square_sum = kernel.workgroup.reduce<addf> %lane_delta_square_sum : f32
+  %mean_delta = scalar.divf<nnan|ninf|nsz|arcp> %delta_sum, %group_element_count_f32 : f32
+  %mean = scalar.addf<nnan|ninf|nsz> %center, %mean_delta : f32
+  %delta_square_mean = scalar.divf<nnan|ninf|nsz|arcp> %delta_square_sum, %group_element_count_f32 : f32
+  %mean_delta_square = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %mean_delta, %mean_delta : f32
+  %variance0 = scalar.subf<reassoc|nnan|ninf|nsz> %delta_square_mean, %mean_delta_square : f32
+  %variance = scalar.maxnumf %variance0, %zero_f32 : f32
+  %variance_epsilon = scalar.addf<nnan|ninf|nsz> %variance, %epsilon : f32
+  %rstd = scalar.rsqrtf<nnan|ninf|nsz|afn> %variance_epsilon : f32
+  %is_lane0 = index.cmp eq, %lane, %zero : index
+  scf.if %is_lane0 {
+    view.store %mean, %stats_view[%batch, %group, %zero] : f32, view<[%batch_count]x[%group_count]x2xf32, #dense>
+    view.store %rstd, %stats_view[%batch, %group, %unit] : f32, view<[%batch_count]x[%group_count]x2xf32, #dense>
+  }
+  kernel.return
+}
+
 check.case public @id4_vae_group_norm_stats_bf16_small_case {
   %input = check.generate.fill value(1000.0) : tensor<1x1x4x1xbf16>
   %stats = check.generate.fill value(0.0) : tensor<1x1x2xf32>
   %expected = check.generate.fill value(1000.0) : tensor<1x1x2xf32>
   func.call @id4_vae_group_norm_stats_bf16(%input, %stats) : (tensor<1x1x4x1xbf16>, tensor<1x1x2xf32>)
   check.expect.close actual(%stats) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<1x1x2xf32>
+  check.return
+}
+
+check.case public @id4_vae_group_norm_stats_onepass_bf16_small_case {
+  %input = check.generate.fill value(1000.0) : tensor<1x1x4x1xbf16>
+  %stats = check.generate.fill value(0.0) : tensor<1x1x2xf32>
+  %expected = check.generate.fill value(1000.0) : tensor<1x1x2xf32>
+  func.call @id4_vae_group_norm_stats_onepass_bf16(%input, %stats) : (tensor<1x1x4x1xbf16>, tensor<1x1x2xf32>)
+  check.expect.close actual(%stats) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<1x1x2xf32>
+  check.return
+}
+
+check.case public @id4_vae_group_norm_stats_onepass_bf16_nonuniform_equivalence_case {
+  %input = check.generate.iota offset(-1.0) step(0.03125) : tensor<4x4x8x1xbf16>
+  %reference_stats = check.generate.fill value(0.0) : tensor<1x2x2xf32>
+  %onepass_stats = check.generate.fill value(0.0) : tensor<1x2x2xf32>
+  func.call @id4_vae_group_norm_stats_bf16(%input, %reference_stats) : (tensor<4x4x8x1xbf16>, tensor<1x2x2xf32>)
+  func.call @id4_vae_group_norm_stats_onepass_bf16(%input, %onepass_stats) : (tensor<4x4x8x1xbf16>, tensor<1x2x2xf32>)
+  check.expect.close actual(%onepass_stats) expected(%reference_stats) atol(0.001) rtol(0.001) nan(same) : tensor<1x2x2xf32>
   check.return
 }
 
@@ -162,7 +246,29 @@ check.case public @id4_vae_group_norm_stats_bf16_flux2_1024x1024x128_shape_case 
   check.return
 }
 
+check.case public @id4_vae_group_norm_stats_onepass_bf16_flux2_512x512x512_shape_case {
+  %input = check.generate.fill value(1000.0) : tensor<512x512x512x1xbf16>
+  %stats = check.generate.fill value(0.0) : tensor<1x32x2xf32>
+  %expected = check.generate.fill value(1000.0) : tensor<1x32x2xf32>
+  func.call @id4_vae_group_norm_stats_onepass_bf16(%input, %stats) : (tensor<512x512x512x1xbf16>, tensor<1x32x2xf32>)
+  check.expect.close actual(%stats) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<1x32x2xf32>
+  check.return
+}
+
+check.case public @id4_vae_group_norm_stats_onepass_bf16_flux2_1024x1024x128_shape_case {
+  %input = check.generate.fill value(1000.0) : tensor<1024x1024x128x1xbf16>
+  %stats = check.generate.fill value(0.0) : tensor<1x32x2xf32>
+  %expected = check.generate.fill value(1000.0) : tensor<1x32x2xf32>
+  func.call @id4_vae_group_norm_stats_onepass_bf16(%input, %stats) : (tensor<1024x1024x128x1xbf16>, tensor<1x32x2xf32>)
+  check.expect.close actual(%stats) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<1x32x2xf32>
+  check.return
+}
+
 check.benchmark<@id4_vae_group_norm_stats_bf16_small_case> @id4_vae_group_norm_stats_bf16_small
+
+check.benchmark<@id4_vae_group_norm_stats_onepass_bf16_small_case> @id4_vae_group_norm_stats_onepass_bf16_small
+
+check.benchmark<@id4_vae_group_norm_stats_onepass_bf16_nonuniform_equivalence_case> @id4_vae_group_norm_stats_onepass_bf16_nonuniform_equivalence
 
 check.benchmark<@id4_vae_group_norm_stats_bf16_flux2_tail_shape_case> @id4_vae_group_norm_stats_bf16_flux2_tail_shape
 
@@ -174,8 +280,12 @@ check.benchmark<@id4_vae_group_norm_stats_bf16_flux2_256x256x512_shape_case> @id
 
 check.benchmark<@id4_vae_group_norm_stats_bf16_flux2_512x512x512_shape_case> @id4_vae_group_norm_stats_bf16_flux2_512x512x512_shape
 
+check.benchmark<@id4_vae_group_norm_stats_onepass_bf16_flux2_512x512x512_shape_case> @id4_vae_group_norm_stats_onepass_bf16_flux2_512x512x512_shape
+
 check.benchmark<@id4_vae_group_norm_stats_bf16_flux2_512x512x256_shape_case> @id4_vae_group_norm_stats_bf16_flux2_512x512x256_shape
 
 check.benchmark<@id4_vae_group_norm_stats_bf16_flux2_1024x1024x256_shape_case> @id4_vae_group_norm_stats_bf16_flux2_1024x1024x256_shape
 
 check.benchmark<@id4_vae_group_norm_stats_bf16_flux2_1024x1024x128_shape_case> @id4_vae_group_norm_stats_bf16_flux2_1024x1024x128_shape
+
+check.benchmark<@id4_vae_group_norm_stats_onepass_bf16_flux2_1024x1024x128_shape_case> @id4_vae_group_norm_stats_onepass_bf16_flux2_1024x1024x128_shape
