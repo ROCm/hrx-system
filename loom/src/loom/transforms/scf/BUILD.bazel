@@ -37,6 +37,7 @@ loom_cc_library(
     srcs = ["scf_unroll.c"],
     hdrs = ["scf_unroll.h"],
     deps = [
+        "//loom/src/loom/analysis:movement",
         "//loom/src/loom/error:emitter",
         "//loom/src/loom/error:error_defs",
         "//loom/src/loom/ir",

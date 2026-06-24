@@ -41,6 +41,7 @@ loom_cc_library(
     "scf_unroll.c"
   DEPS
     iree::base
+    loom::analysis::movement
     loom::error::emitter
     loom::error::error_defs
     loom::ir
