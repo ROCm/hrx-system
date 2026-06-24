@@ -2392,7 +2392,7 @@ static iree_status_t id4_vae_program_author_spatial_attention(
           "512");
     }
     module_path = IREE_SV("vae/spatial_attention_vec8_bf16");
-    function_name = IREE_SV("id4_vae_spatial_attention_vec8_bf16");
+    function_name = IREE_SV("id4_vae_spatial_attention_query2_vec8_bf16");
     workgroup_size_x = 64;
   } else {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -2422,9 +2422,13 @@ static iree_status_t id4_vae_program_author_spatial_attention(
   dispatch_options.name = dispatch_name;
   dispatch_options.kernel =
       id4_pipeline_make_kernel_ref(module_path, function_name);
+  uint32_t workgroup_count_x = (uint32_t)token_count;
+  if (activation_dtype == ID4_PIPELINE_PROGRAM_DTYPE_BF16) {
+    workgroup_count_x = id4_vae_program_ceil_div_u32(workgroup_count_x, 2);
+  }
   dispatch_options.dispatch_config =
       id4_vae_program_make_static_dispatch_config_with_workgroup_size_x(
-          (uint32_t)token_count, batch_count, 1, workgroup_size_x);
+          workgroup_count_x, batch_count, 1, workgroup_size_x);
   dispatch_options.config_binding_count = config_list.count;
   dispatch_options.config_bindings = config_list.bindings;
   dispatch_options.binding_count = IREE_ARRAYSIZE(bindings);

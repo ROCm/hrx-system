@@ -49,8 +49,8 @@ kernel.def export("id4_vae_spatial_attention_vec8_bf16") @id4_vae_spatial_attent
   %key_flat_view = buffer.view %key_global[%base] : buffer -> view<[%element_count]xbf16, #dense>
   %value_flat_view = buffer.view %value_global[%base] : buffer -> view<[%element_count]xbf16, #dense>
   %output_flat_view = buffer.view %output_global[%base] : buffer -> view<[%element_count]xbf16, #dense>
-  %query_x = index.rem %query_token, %width : index
-  %query_y = index.div %query_token, %width : index
+  %query_y = index.rem %query_token, %height : index
+  %query_x = index.div %query_token, %height : index
   %query_x_row_base = index.mul %query_x, %height : index
   %query_pixel_base = index.add %query_x_row_base, %query_y : index
   %query_pixel_element_base = index.mul %query_pixel_base, %channel_count : index
@@ -67,8 +67,8 @@ kernel.def export("id4_vae_spatial_attention_vec8_bf16") @id4_vae_spatial_attent
     scf.yield %zero_vector : vector<8xf32>
   }
   %softmax_max, %softmax_sum, %acc = scf.for %key_token = [%zero to %token_count step %unit](%current_max = %negative_large : f32, %current_sum = %zero_f32 : f32, %current_acc = %zero_vector : vector<8xf32>) -> (f32, f32, vector<8xf32>) {
-    %key_x = index.rem %key_token, %width : index
-    %key_y = index.div %key_token, %width : index
+    %key_y = index.rem %key_token, %height : index
+    %key_x = index.div %key_token, %height : index
     %key_x_row_base = index.mul %key_x, %height : index
     %key_pixel_base = index.add %key_x_row_base, %key_y : index
     %key_pixel_element_base = index.mul %key_pixel_base, %channel_count : index
@@ -122,6 +122,174 @@ kernel.def export("id4_vae_spatial_attention_vec8_bf16") @id4_vae_spatial_attent
   kernel.return
 }
 
+kernel.def export("id4_vae_spatial_attention_query2_vec8_bf16") @id4_vae_spatial_attention_query2_vec8_bf16() {
+  %unit = index.constant 1 : index
+  %two = index.constant 2 : index
+  %workgroup_size_x = index.constant 64 : index
+  %token_count = config.get @id4.vae.spatial_attention.token_count : index
+  %batch_count = config.get @id4.vae.spatial_attention.batch_count : index
+  %token_count_plus_one = index.add %token_count, %unit : index
+  %query_pair_count = index.div %token_count_plus_one, %two : index
+  kernel.launch.config workgroups(%query_pair_count, %batch_count, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
+} launch(%query: buffer, %key: buffer, %value: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %unit = index.constant 1 : index
+  %two = index.constant 2 : index
+  %seven = index.constant 7 : index
+  %eight = index.constant 8 : index
+  %query_pair = kernel.workgroup.id<x> : index
+  %batch = kernel.workgroup.id<y> : index
+  %lane = kernel.workitem.id<x> : index
+  %zero_f32 = scalar.constant 0.0 : f32
+  %negative_large = scalar.constant -1000000000.0 : f32
+  %zero_vector = vector.splat %zero_f32 : vector<8xf32>
+  %width = config.get @id4.vae.spatial_attention.width : index
+  %height = config.get @id4.vae.spatial_attention.height : index
+  %channel_count = config.get @id4.vae.spatial_attention.channel_count : index
+  %batch_count0 = config.get @id4.vae.spatial_attention.batch_count : index
+  %batch_count = index.assume %batch_count0 [range(%batch_count0, 1, 1)] : index
+  %token_count = config.get @id4.vae.spatial_attention.token_count : index
+  %channel_count_i32 = index.cast %channel_count : index to i32
+  %channel_count_f32 = scalar.sitofp %channel_count_i32 : i32 to f32
+  %attention_scale = scalar.rsqrtf<nnan|ninf|nsz|afn> %channel_count_f32 : f32
+  %channel_base0 = index.mul %lane, %eight : index
+  %channel_valid = index.cmp ult, %channel_base0, %channel_count : index
+  %query_token0 = index.mul %query_pair, %two : index
+  %query_token1 = index.add %query_token0, %unit : index
+  %query1_valid = index.cmp ult, %query_token1, %token_count : index
+  %query1_channel_valid = scalar.andi %channel_valid, %query1_valid : i1
+  %query_noalias, %key_noalias, %value_noalias, %output_noalias = buffer.assume.noalias %query, %key, %value, %output : buffer, buffer, buffer, buffer
+  %query_global = buffer.assume.memory_space<global> %query_noalias : buffer
+  %key_global = buffer.assume.memory_space<global> %key_noalias : buffer
+  %value_global = buffer.assume.memory_space<global> %value_noalias : buffer
+  %output_global = buffer.assume.memory_space<global> %output_noalias : buffer
+  %pixel_count = index.mul %width, %height : index
+  %pixel_element_count = index.mul %pixel_count, %channel_count : index
+  %element_count = index.mul %pixel_element_count, %batch_count : index
+  %query_flat_view = buffer.view %query_global[%base] : buffer -> view<[%element_count]xbf16, #dense>
+  %key_flat_view = buffer.view %key_global[%base] : buffer -> view<[%element_count]xbf16, #dense>
+  %value_flat_view = buffer.view %value_global[%base] : buffer -> view<[%element_count]xbf16, #dense>
+  %output_flat_view = buffer.view %output_global[%base] : buffer -> view<[%element_count]xbf16, #dense>
+
+  %query_y0 = index.rem %query_token0, %height : index
+  %query_x0 = index.div %query_token0, %height : index
+  %query_x0_row_base = index.mul %query_x0, %height : index
+  %query_pixel_base0 = index.add %query_x0_row_base, %query_y0 : index
+  %query_pixel_element_base0 = index.mul %query_pixel_base0, %channel_count : index
+  %query_channel_element_base0 = index.add %query_pixel_element_base0, %channel_base0 : index
+  %query_batch_element_base0 = index.mul %query_channel_element_base0, %batch_count : index
+  %query_element0 = index.add %query_batch_element_base0, %batch : index
+  %query_values0 = scf.if %channel_valid -> (vector<8xf32>) {
+    %last_valid_element = index.sub %element_count, %seven : index
+    %query_element = index.assume %query_element0 [ge(%query_element0, 0), lt(%query_element0, %last_valid_element)] : index
+    %loaded_bf16 = vector.load %query_flat_view[%query_element] : view<[%element_count]xbf16, #dense> -> vector<8xbf16>
+    %loaded = vector.extf %loaded_bf16 : vector<8xbf16> to vector<8xf32>
+    scf.yield %loaded : vector<8xf32>
+  } else {
+    scf.yield %zero_vector : vector<8xf32>
+  }
+
+  %query_y1 = index.rem %query_token1, %height : index
+  %query_x1 = index.div %query_token1, %height : index
+  %query_x1_row_base = index.mul %query_x1, %height : index
+  %query_pixel_base1 = index.add %query_x1_row_base, %query_y1 : index
+  %query_pixel_element_base1 = index.mul %query_pixel_base1, %channel_count : index
+  %query_channel_element_base1 = index.add %query_pixel_element_base1, %channel_base0 : index
+  %query_batch_element_base1 = index.mul %query_channel_element_base1, %batch_count : index
+  %query_element1 = index.add %query_batch_element_base1, %batch : index
+  %query_values1 = scf.if %query1_channel_valid -> (vector<8xf32>) {
+    %last_valid_element = index.sub %element_count, %seven : index
+    %query_element = index.assume %query_element1 [ge(%query_element1, 0), lt(%query_element1, %last_valid_element)] : index
+    %loaded_bf16 = vector.load %query_flat_view[%query_element] : view<[%element_count]xbf16, #dense> -> vector<8xbf16>
+    %loaded = vector.extf %loaded_bf16 : vector<8xbf16> to vector<8xf32>
+    scf.yield %loaded : vector<8xf32>
+  } else {
+    scf.yield %zero_vector : vector<8xf32>
+  }
+
+  %softmax_max0, %softmax_sum0, %acc0, %softmax_max1, %softmax_sum1, %acc1 = scf.for %key_token = [%zero to %token_count step %unit](%current_max0 = %negative_large : f32, %current_sum0 = %zero_f32 : f32, %current_acc0 = %zero_vector : vector<8xf32>, %current_max1 = %negative_large : f32, %current_sum1 = %zero_f32 : f32, %current_acc1 = %zero_vector : vector<8xf32>) -> (f32, f32, vector<8xf32>, f32, f32, vector<8xf32>) {
+    %key_y = index.rem %key_token, %height : index
+    %key_x = index.div %key_token, %height : index
+    %key_x_row_base = index.mul %key_x, %height : index
+    %key_pixel_base = index.add %key_x_row_base, %key_y : index
+    %key_pixel_element_base = index.mul %key_pixel_base, %channel_count : index
+    %key_channel_element_base = index.add %key_pixel_element_base, %channel_base0 : index
+    %key_batch_element_base = index.mul %key_channel_element_base, %batch_count : index
+    %key_element0 = index.add %key_batch_element_base, %batch : index
+    %key_values = scf.if %channel_valid -> (vector<8xf32>) {
+      %last_valid_element = index.sub %element_count, %seven : index
+      %key_element = index.assume %key_element0 [ge(%key_element0, 0), lt(%key_element0, %last_valid_element)] : index
+      %loaded_bf16 = vector.load %key_flat_view[%key_element] : view<[%element_count]xbf16, #dense> -> vector<8xbf16>
+      %loaded = vector.extf %loaded_bf16 : vector<8xbf16> to vector<8xf32>
+      scf.yield %loaded : vector<8xf32>
+    } else {
+      scf.yield %zero_vector : vector<8xf32>
+    }
+    %products0 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %query_values0, %key_values : vector<8xf32>
+    %lane_dot0 = vector.reduce<addf, reassoc|nnan|ninf|nsz> %products0, %zero_f32 : vector<8xf32>, f32
+    %dot0 = kernel.workgroup.reduce<addf> %lane_dot0 : f32
+    %score0 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %dot0, %attention_scale : f32
+    %next_max0 = scalar.maxnumf %current_max0, %score0 : f32
+    %old_delta0 = scalar.subf<reassoc|nnan|ninf|nsz> %current_max0, %next_max0 : f32
+    %old_scale0 = scalar.expf<afn> %old_delta0 : f32
+    %score_delta0 = scalar.subf<reassoc|nnan|ninf|nsz> %score0, %next_max0 : f32
+    %weight0 = scalar.expf<afn> %score_delta0 : f32
+    %scaled_sum0 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %current_sum0, %old_scale0 : f32
+    %next_sum0 = scalar.addf<reassoc|nnan|ninf|nsz> %scaled_sum0, %weight0 : f32
+
+    %products1 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %query_values1, %key_values : vector<8xf32>
+    %lane_dot1 = vector.reduce<addf, reassoc|nnan|ninf|nsz> %products1, %zero_f32 : vector<8xf32>, f32
+    %dot1 = kernel.workgroup.reduce<addf> %lane_dot1 : f32
+    %score1 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %dot1, %attention_scale : f32
+    %next_max1 = scalar.maxnumf %current_max1, %score1 : f32
+    %old_delta1 = scalar.subf<reassoc|nnan|ninf|nsz> %current_max1, %next_max1 : f32
+    %old_scale1 = scalar.expf<afn> %old_delta1 : f32
+    %score_delta1 = scalar.subf<reassoc|nnan|ninf|nsz> %score1, %next_max1 : f32
+    %weight1 = scalar.expf<afn> %score_delta1 : f32
+    %scaled_sum1 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %current_sum1, %old_scale1 : f32
+    %next_sum1 = scalar.addf<reassoc|nnan|ninf|nsz> %scaled_sum1, %weight1 : f32
+
+    %old_scale_values0 = vector.splat %old_scale0 : vector<8xf32>
+    %scaled_acc0 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %current_acc0, %old_scale_values0 : vector<8xf32>
+    %old_scale_values1 = vector.splat %old_scale1 : vector<8xf32>
+    %scaled_acc1 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %current_acc1, %old_scale_values1 : vector<8xf32>
+    %next_acc0, %next_acc1 = scf.if %channel_valid -> (vector<8xf32>, vector<8xf32>) {
+      %last_valid_element = index.sub %element_count, %seven : index
+      %value_element = index.assume %key_element0 [ge(%key_element0, 0), lt(%key_element0, %last_valid_element)] : index
+      %value_values_bf16 = vector.load %value_flat_view[%value_element] : view<[%element_count]xbf16, #dense> -> vector<8xbf16>
+      %value_values = vector.extf %value_values_bf16 : vector<8xbf16> to vector<8xf32>
+      %weight_values0 = vector.splat %weight0 : vector<8xf32>
+      %weighted_values0 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %weight_values0, %value_values : vector<8xf32>
+      %accumulated0 = vector.addf<reassoc|nnan|ninf|nsz> %scaled_acc0, %weighted_values0 : vector<8xf32>
+      %weight_values1 = vector.splat %weight1 : vector<8xf32>
+      %weighted_values1 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %weight_values1, %value_values : vector<8xf32>
+      %accumulated1 = vector.addf<reassoc|nnan|ninf|nsz> %scaled_acc1, %weighted_values1 : vector<8xf32>
+      scf.yield %accumulated0, %accumulated1 : vector<8xf32>, vector<8xf32>
+    } else {
+      scf.yield %scaled_acc0, %scaled_acc1 : vector<8xf32>, vector<8xf32>
+    }
+    scf.yield %next_max0, %next_sum0, %next_acc0, %next_max1, %next_sum1, %next_acc1 : f32, f32, vector<8xf32>, f32, f32, vector<8xf32>
+  }
+  scf.if %channel_valid {
+    %sum_values = vector.splat %softmax_sum0 : vector<8xf32>
+    %output_values = vector.divf<nnan|ninf|nsz|arcp> %acc0, %sum_values : vector<8xf32>
+    %output_values_bf16 = vector.fptrunc %output_values : vector<8xf32> to vector<8xbf16>
+    %last_valid_element = index.sub %element_count, %seven : index
+    %output_element = index.assume %query_element0 [ge(%query_element0, 0), lt(%query_element0, %last_valid_element)] : index
+    vector.store %output_values_bf16, %output_flat_view[%output_element] : vector<8xbf16>, view<[%element_count]xbf16, #dense>
+  }
+  scf.if %query1_channel_valid {
+    %sum_values = vector.splat %softmax_sum1 : vector<8xf32>
+    %output_values = vector.divf<nnan|ninf|nsz|arcp> %acc1, %sum_values : vector<8xf32>
+    %output_values_bf16 = vector.fptrunc %output_values : vector<8xf32> to vector<8xbf16>
+    %last_valid_element = index.sub %element_count, %seven : index
+    %output_element = index.assume %query_element1 [ge(%query_element1, 0), lt(%query_element1, %last_valid_element)] : index
+    vector.store %output_values_bf16, %output_flat_view[%output_element] : vector<8xbf16>, view<[%element_count]xbf16, #dense>
+  }
+  kernel.return
+}
+
 check.case public @id4_vae_spatial_attention_vec8_bf16_single_token_case {
   %query = check.generate.fill value(0.0) : tensor<1x1x8x1xbf16>
   %key = check.generate.fill value(0.0) : tensor<1x1x8x1xbf16>
@@ -154,8 +322,60 @@ check.case public @id4_vae_spatial_attention_vec8_bf16_flux2_mid_block_shape_cas
   check.return
 }
 
+check.case public @id4_vae_spatial_attention_query2_vec8_bf16_single_token_case {
+  %query = check.generate.fill value(0.0) : tensor<1x1x8x1xbf16>
+  %key = check.generate.fill value(0.0) : tensor<1x1x8x1xbf16>
+  %value = check.generate.iota offset(3.0) step(2.0) : tensor<1x1x8x1xbf16>
+  %output = check.generate.fill value(0.0) : tensor<1x1x8x1xbf16>
+  func.call @id4_vae_spatial_attention_query2_vec8_bf16(%query, %key, %value, %output) : (tensor<1x1x8x1xbf16>, tensor<1x1x8x1xbf16>, tensor<1x1x8x1xbf16>, tensor<1x1x8x1xbf16>)
+  check.expect.close actual(%output) expected(%value) atol(0.0) rtol(0.0) nan(same) : tensor<1x1x8x1xbf16>
+  check.return
+}
+
+check.case public @id4_vae_spatial_attention_query2_vec8_bf16_uniform_softmax_case {
+  %query = check.generate.fill value(0.0) : tensor<2x1x8x1xbf16>
+  %key = check.generate.fill value(0.0) : tensor<2x1x8x1xbf16>
+  %value = check.generate.fill value(7.0) : tensor<2x1x8x1xbf16>
+  %output = check.generate.fill value(0.0) : tensor<2x1x8x1xbf16>
+  %expected = check.generate.fill value(7.0) : tensor<2x1x8x1xbf16>
+  func.call @id4_vae_spatial_attention_query2_vec8_bf16(%query, %key, %value, %output) : (tensor<2x1x8x1xbf16>, tensor<2x1x8x1xbf16>, tensor<2x1x8x1xbf16>, tensor<2x1x8x1xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2x1x8x1xbf16>
+  check.return
+}
+
+check.case public @id4_vae_spatial_attention_query2_vec8_bf16_nonuniform_equivalence_case {
+  %query = check.generate.iota offset(0.0) step(0.001) : tensor<4x4x8x1xbf16>
+  %key = check.generate.iota offset(0.25) step(0.001) : tensor<4x4x8x1xbf16>
+  %value = check.generate.iota offset(1.0) step(0.01) : tensor<4x4x8x1xbf16>
+  %reference_output = check.generate.fill value(0.0) : tensor<4x4x8x1xbf16>
+  %query2_output = check.generate.fill value(0.0) : tensor<4x4x8x1xbf16>
+  func.call @id4_vae_spatial_attention_vec8_bf16(%query, %key, %value, %reference_output) : (tensor<4x4x8x1xbf16>, tensor<4x4x8x1xbf16>, tensor<4x4x8x1xbf16>, tensor<4x4x8x1xbf16>)
+  func.call @id4_vae_spatial_attention_query2_vec8_bf16(%query, %key, %value, %query2_output) : (tensor<4x4x8x1xbf16>, tensor<4x4x8x1xbf16>, tensor<4x4x8x1xbf16>, tensor<4x4x8x1xbf16>)
+  check.expect.close actual(%query2_output) expected(%reference_output) atol(0.0) rtol(0.0) nan(same) : tensor<4x4x8x1xbf16>
+  check.return
+}
+
+check.case public @id4_vae_spatial_attention_query2_vec8_bf16_flux2_mid_block_shape_case {
+  %query = check.generate.fill value(0.0) : tensor<128x128x512x1xbf16>
+  %key = check.generate.fill value(0.0) : tensor<128x128x512x1xbf16>
+  %value = check.generate.fill value(7.0) : tensor<128x128x512x1xbf16>
+  %output = check.generate.fill value(0.0) : tensor<128x128x512x1xbf16>
+  %expected = check.generate.fill value(7.0) : tensor<128x128x512x1xbf16>
+  func.call @id4_vae_spatial_attention_query2_vec8_bf16(%query, %key, %value, %output) : (tensor<128x128x512x1xbf16>, tensor<128x128x512x1xbf16>, tensor<128x128x512x1xbf16>, tensor<128x128x512x1xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<128x128x512x1xbf16>
+  check.return
+}
+
 check.benchmark<@id4_vae_spatial_attention_vec8_bf16_single_token_case> @id4_vae_spatial_attention_vec8_bf16_single_token
 
 check.benchmark<@id4_vae_spatial_attention_vec8_bf16_uniform_softmax_case> @id4_vae_spatial_attention_vec8_bf16_uniform_softmax
 
 check.benchmark<@id4_vae_spatial_attention_vec8_bf16_flux2_mid_block_shape_case> @id4_vae_spatial_attention_vec8_bf16_flux2_mid_block_shape
+
+check.benchmark<@id4_vae_spatial_attention_query2_vec8_bf16_single_token_case> @id4_vae_spatial_attention_query2_vec8_bf16_single_token
+
+check.benchmark<@id4_vae_spatial_attention_query2_vec8_bf16_uniform_softmax_case> @id4_vae_spatial_attention_query2_vec8_bf16_uniform_softmax
+
+check.benchmark<@id4_vae_spatial_attention_query2_vec8_bf16_nonuniform_equivalence_case> @id4_vae_spatial_attention_query2_vec8_bf16_nonuniform_equivalence
+
+check.benchmark<@id4_vae_spatial_attention_query2_vec8_bf16_flux2_mid_block_shape_case> @id4_vae_spatial_attention_query2_vec8_bf16_flux2_mid_block_shape
