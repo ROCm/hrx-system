@@ -1202,8 +1202,16 @@ static iree_status_t id4_vae_program_dispatch_conv3x3_bias(
   id4_vae_program_conv3x3_weight_layout_t weight_layout =
       ID4_VAE_PROGRAM_CONV3X3_WEIGHT_LAYOUT_SOURCE;
   if (batch_count == 1 && input_channel_count >= 4 &&
-      input_channel_count % 4 == 0 && output_channel_count >= 8 &&
-      output_channel_count % 8 == 0) {
+      input_channel_count % 4 == 0 && output_channel_count >= 16 &&
+      output_channel_count % 16 == 0) {
+    function_name = IREE_SV("id4_vae_conv3x3_bias_ic4_oc16_packed_f32");
+    output_channel_tile_width = 16;
+    weight_layout = ID4_VAE_PROGRAM_CONV3X3_WEIGHT_LAYOUT_PACKED_IC_KY_KX_OC;
+    dispatch_element_count =
+        (uint32_t)(output_element_count / output_channel_tile_width);
+  } else if (batch_count == 1 && input_channel_count >= 4 &&
+             input_channel_count % 4 == 0 && output_channel_count >= 8 &&
+             output_channel_count % 8 == 0) {
     function_name = IREE_SV("id4_vae_conv3x3_bias_ic4_oc8_packed_f32");
     output_channel_tile_width = 8;
     weight_layout = ID4_VAE_PROGRAM_CONV3X3_WEIGHT_LAYOUT_PACKED_IC_KY_KX_OC;
@@ -1315,7 +1323,11 @@ static iree_status_t id4_vae_program_author_conv3x3_bias_add(
   uint32_t output_channel_tile_width = 4;
   id4_vae_program_conv3x3_weight_layout_t weight_layout =
       ID4_VAE_PROGRAM_CONV3X3_WEIGHT_LAYOUT_SOURCE;
-  if (channel_count >= 8 && channel_count % 8 == 0) {
+  if (channel_count >= 16 && channel_count % 16 == 0) {
+    function_name = IREE_SV("id4_vae_conv3x3_bias_add_ic4_oc16_packed_f32");
+    output_channel_tile_width = 16;
+    weight_layout = ID4_VAE_PROGRAM_CONV3X3_WEIGHT_LAYOUT_PACKED_IC_KY_KX_OC;
+  } else if (channel_count >= 8 && channel_count % 8 == 0) {
     function_name = IREE_SV("id4_vae_conv3x3_bias_add_ic4_oc8_packed_f32");
     output_channel_tile_width = 8;
     weight_layout = ID4_VAE_PROGRAM_CONV3X3_WEIGHT_LAYOUT_PACKED_IC_KY_KX_OC;
@@ -1859,7 +1871,18 @@ static iree_status_t id4_vae_program_author_upsample_conv3x3_bias(
   uint32_t dispatch_element_count = (uint32_t)output_element_count;
   id4_vae_program_conv3x3_weight_layout_t weight_layout =
       ID4_VAE_PROGRAM_CONV3X3_WEIGHT_LAYOUT_SOURCE;
-  if (batch_count == 1 && channel_count >= 8 && channel_count % 8 == 0) {
+  if (batch_count == 1 && channel_count >= 16 && channel_count % 16 == 0) {
+    function_name =
+        IREE_SV("id4_vae_upsample_conv3x3_bias_ic4_oc16_packed_f32");
+    output_channel_tile_width = 16;
+    weight_layout = ID4_VAE_PROGRAM_CONV3X3_WEIGHT_LAYOUT_PACKED_IC_KY_KX_OC;
+    dispatch_element_count =
+        (uint32_t)(output_element_count / output_channel_tile_width);
+    IREE_RETURN_IF_ERROR(
+        id4_vae_program_add_upsample_conv3x3_bias_output_tile_configs(
+            channel_count, output_channel_tile_width, output_element_count,
+            &config_list));
+  } else if (batch_count == 1 && channel_count >= 8 && channel_count % 8 == 0) {
     function_name = IREE_SV("id4_vae_upsample_conv3x3_bias_ic4_oc8_packed_f32");
     output_channel_tile_width = 8;
     weight_layout = ID4_VAE_PROGRAM_CONV3X3_WEIGHT_LAYOUT_PACKED_IC_KY_KX_OC;
