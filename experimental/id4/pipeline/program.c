@@ -466,14 +466,43 @@ static iree_status_t id4_pipeline_program_copy_op(
   return status;
 }
 
-static bool id4_pipeline_program_builder_has_tensor_name(
-    const id4_pipeline_program_builder_t* builder, iree_string_view_t name) {
+static bool id4_pipeline_program_shape_equal(id4_pipeline_program_shape_t lhs,
+                                             id4_pipeline_program_shape_t rhs) {
+  if (lhs.rank != rhs.rank) return false;
+  for (uint32_t i = 0; i < lhs.rank; ++i) {
+    if (lhs.dims[i] != rhs.dims[i]) return false;
+  }
+  return true;
+}
+
+static bool id4_pipeline_program_builder_find_tensor_by_name(
+    const id4_pipeline_program_builder_t* builder, iree_string_view_t name,
+    id4_pipeline_program_tensor_t* out_tensor,
+    id4_pipeline_program_tensor_state_t** out_state) {
   for (iree_host_size_t i = 0; i < builder->tensor_count; ++i) {
     if (iree_string_view_equal(builder->tensor_states[i].record.name, name)) {
+      if (out_tensor) {
+        out_tensor->ordinal = (uint32_t)i;
+      }
+      if (out_state) {
+        *out_state = &builder->tensor_states[i];
+      }
       return true;
     }
   }
+  if (out_tensor) {
+    *out_tensor = id4_pipeline_program_tensor_invalid();
+  }
+  if (out_state) {
+    *out_state = NULL;
+  }
   return false;
+}
+
+static bool id4_pipeline_program_builder_has_tensor_name(
+    const id4_pipeline_program_builder_t* builder, iree_string_view_t name) {
+  return id4_pipeline_program_builder_find_tensor_by_name(
+      builder, name, /*out_tensor=*/NULL, /*out_state=*/NULL);
 }
 
 static bool id4_pipeline_program_builder_has_named_op(
@@ -787,6 +816,43 @@ iree_status_t id4_pipeline_program_parameter(
     return iree_make_status(
         IREE_STATUS_UNIMPLEMENTED,
         "program parameter extension structures are not supported");
+  }
+  iree_device_size_t byte_length = 0;
+  IREE_RETURN_IF_ERROR(id4_pipeline_program_validate_tensor_metadata(
+      options->key, options->dtype, options->shape, &byte_length));
+
+  id4_pipeline_program_tensor_t existing_tensor =
+      id4_pipeline_program_tensor_invalid();
+  id4_pipeline_program_tensor_state_t* existing_state = NULL;
+  if (id4_pipeline_program_builder_find_tensor_by_name(
+          builder, options->key, &existing_tensor, &existing_state)) {
+    if (existing_state->record.producer_operation_ordinal >=
+        builder->operation_count) {
+      return iree_make_status(
+          IREE_STATUS_INTERNAL,
+          "program tensor %.*s has invalid producer operation %" PRIhsz,
+          (int)options->key.size, options->key.data,
+          existing_state->record.producer_operation_ordinal);
+    }
+    const id4_pipeline_program_op_t* producer =
+        &builder->operations[existing_state->record.producer_operation_ordinal];
+    if (producer->kind != ID4_PIPELINE_PROGRAM_OP_KIND_PARAMETER) {
+      return iree_make_status(
+          IREE_STATUS_ALREADY_EXISTS,
+          "program tensor %.*s already exists and is not a parameter",
+          (int)options->key.size, options->key.data);
+    }
+    if (existing_state->record.dtype != options->dtype ||
+        !id4_pipeline_program_shape_equal(existing_state->record.shape,
+                                          options->shape) ||
+        existing_state->record.byte_length != byte_length) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "program parameter %.*s was requested with incompatible metadata",
+          (int)options->key.size, options->key.data);
+    }
+    *out_tensor = existing_tensor;
+    return iree_ok_status();
   }
 
   iree_host_size_t operation_ordinal = builder->operation_count;

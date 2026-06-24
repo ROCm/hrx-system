@@ -238,6 +238,54 @@ TEST(PipelineProgram, AuthorsProgramAndSealsImmutableCopies) {
   id4_pipeline_program_release(program);
 }
 
+TEST(PipelineProgram, InternsRepeatedParameterDeclarations) {
+  ProgramBuilderScope builder_scope;
+  id4_pipeline_program_builder_t* builder = builder_scope.builder();
+
+  id4_pipeline_program_parameter_options_t weight_options = {
+      /*.structure_size=*/sizeof(weight_options),
+      /*.next=*/nullptr,
+      /*.key=*/IREE_SV("model.layers.0.linear.weight"),
+      /*.dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+      /*.shape=*/id4_pipeline_program_make_shape_rank2(4, 4),
+  };
+  id4_pipeline_program_tensor_t first_weight =
+      id4_pipeline_program_tensor_invalid();
+  IREE_ASSERT_OK(
+      id4_pipeline_program_parameter(builder, &weight_options, &first_weight));
+
+  id4_pipeline_program_tensor_t second_weight =
+      id4_pipeline_program_tensor_invalid();
+  IREE_ASSERT_OK(
+      id4_pipeline_program_parameter(builder, &weight_options, &second_weight));
+  EXPECT_EQ(second_weight.ordinal, first_weight.ordinal);
+
+  id4_pipeline_program_parameter_options_t incompatible_weight_options =
+      weight_options;
+  incompatible_weight_options.shape =
+      id4_pipeline_program_make_shape_rank2(8, 4);
+  id4_pipeline_program_tensor_t incompatible_weight =
+      id4_pipeline_program_tensor_invalid();
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      id4_pipeline_program_parameter(builder, &incompatible_weight_options,
+                                     &incompatible_weight));
+
+  id4_pipeline_program_t* program = nullptr;
+  IREE_ASSERT_OK(id4_pipeline_program_builder_seal(
+      builder, iree_allocator_system(), &program));
+  builder_scope.DestroyBuilder();
+
+  EXPECT_EQ(id4_pipeline_program_tensor_count(program), 1u);
+  EXPECT_EQ(id4_pipeline_program_operation_count(program), 1u);
+  const id4_pipeline_program_op_t* op =
+      id4_pipeline_program_operation_at(program, 0);
+  ASSERT_NE(op, nullptr);
+  EXPECT_EQ(op->kind, ID4_PIPELINE_PROGRAM_OP_KIND_PARAMETER);
+
+  id4_pipeline_program_release(program);
+}
+
 TEST(PipelineProgram, AuthorsConstantTensorWithOwnedData) {
   ProgramBuilderScope builder_scope;
   id4_pipeline_program_builder_t* builder = builder_scope.builder();
