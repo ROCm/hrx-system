@@ -18,7 +18,8 @@
 enum {
   ID4_QWEN3_VL_WORKGROUP_SIZE_X = 256,
   ID4_QWEN3_VL_WMMA_WORKGROUP_SIZE_X = 32,
-  ID4_QWEN3_VL_LINEAR_WMMA_TOKEN_BLOCK = 16,
+  ID4_QWEN3_VL_WMMA_TILE_SIZE = 16,
+  ID4_QWEN3_VL_LINEAR_WMMA_TOKEN_BLOCK = 32,
   ID4_QWEN3_VL_LINEAR_WMMA_OUTPUT_ROW_BLOCK = 32,
   ID4_QWEN3_VL_CONFIG_VALUE_BUFFER_CAPACITY = 16,
   ID4_QWEN3_VL_MAX_KERNEL_CONFIG_BINDING_COUNT = 8,
@@ -609,6 +610,8 @@ typedef struct id4_qwen3_vl_program_packed_linear_input_t {
   id4_pipeline_program_tensor_t tensor;
   // Number of 16-token WMMA tiles in the rounded activation tensor.
   uint32_t token_tile_count;
+  // Number of 32-token linear groups in the rounded activation tensor.
+  uint32_t token_group_count;
   // Token row count materialized for the rounded activation tensor.
   uint32_t dispatch_token_count;
 } id4_qwen3_vl_program_packed_linear_input_t;
@@ -853,7 +856,7 @@ static const id4_pipeline_kernel_ref_t
              IREE_SVL("id4_qwen3_vl_linear_input_pack_f32_bf16")},
         [ID4_QWEN3_VL_KERNEL_LINEAR_BF16_F32_WMMA] =
             {IREE_SVL("qwen3_vl/linear_bf16_f32_wmma"),
-             IREE_SVL("id4_qwen3_vl_linear_bf16_f32_wmma")},
+             IREE_SVL("id4_qwen3_vl_linear_bf16_f32_wmma_m32n32")},
         [ID4_QWEN3_VL_KERNEL_ROTARY] =
             {IREE_SVL("qwen3_vl/rotary_embedding"),
              IREE_SVL("id4_qwen3_vl_rotary_embedding_f32")},
@@ -1569,15 +1572,17 @@ static iree_status_t id4_qwen3_vl_program_author_rmsnorm(
 static iree_status_t id4_qwen3_vl_program_make_linear_tile_counts(
     uint32_t token_count,
     id4_qwen3_vl_program_packed_linear_input_t* out_packed_input) {
-  out_packed_input->token_tile_count = id4_qwen3_vl_program_ceil_div_u32(
+  out_packed_input->token_group_count = id4_qwen3_vl_program_ceil_div_u32(
       token_count, ID4_QWEN3_VL_LINEAR_WMMA_TOKEN_BLOCK);
   if (!id4_qwen3_vl_program_checked_mul_u32(
-          out_packed_input->token_tile_count,
+          out_packed_input->token_group_count,
           ID4_QWEN3_VL_LINEAR_WMMA_TOKEN_BLOCK,
           &out_packed_input->dispatch_token_count)) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "Qwen3-VL linear dispatch token count overflow");
   }
+  out_packed_input->token_tile_count =
+      out_packed_input->dispatch_token_count / ID4_QWEN3_VL_WMMA_TILE_SIZE;
   return iree_ok_status();
 }
 
@@ -1588,11 +1593,11 @@ id4_qwen3_vl_program_author_linear_input_pack_dispatch_named(
     id4_pipeline_program_tensor_t input, uint32_t input_size,
     id4_qwen3_vl_program_packed_linear_input_t* out_packed_input) {
   const uint32_t token_count = options->request.token_count;
-  if ((input_size % ID4_QWEN3_VL_LINEAR_WMMA_TOKEN_BLOCK) != 0) {
+  if ((input_size % ID4_QWEN3_VL_WMMA_TILE_SIZE) != 0) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "Qwen3-VL linear input size %" PRIu32
                             " must be a multiple of %u",
-                            input_size, ID4_QWEN3_VL_LINEAR_WMMA_TOKEN_BLOCK);
+                            input_size, ID4_QWEN3_VL_WMMA_TILE_SIZE);
   }
   uint32_t input_element_count = 0;
   if (!id4_qwen3_vl_program_checked_mul_u32(token_count, input_size,
@@ -1749,7 +1754,7 @@ static iree_status_t id4_qwen3_vl_program_author_linear_from_packed(
   return id4_qwen3_vl_program_dispatch_named(
       builder, body_dispatch_name, ID4_QWEN3_VL_KERNEL_LINEAR_BF16_F32_WMMA,
       id4_qwen3_vl_program_make_dispatch_config_with_workgroup_size(
-          packed_input->token_tile_count, output_row_tile_count, 1,
+          packed_input->token_group_count, output_row_tile_count, 1,
           ID4_QWEN3_VL_WMMA_WORKGROUP_SIZE_X),
       IREE_ARRAYSIZE(body_config_values), body_config_bindings,
       IREE_ARRAYSIZE(body_bindings), body_bindings);
