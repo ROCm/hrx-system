@@ -1,0 +1,283 @@
+config.decl @id4.vae.tile.clear_element_count : %value: index where [range(%value, 1, 268435456)]
+
+config.decl @id4.vae.tile.source_width : %value: index where [range(%value, 1, 65536)]
+config.decl @id4.vae.tile.source_height : %value: index where [range(%value, 1, 65536)]
+config.decl @id4.vae.tile.source_channel_count : %value: index where [range(%value, 1, 4096)]
+config.decl @id4.vae.tile.batch_count : %value: index where [range(%value, 1, 1024)]
+config.decl @id4.vae.tile.tile_width : %value: index where [range(%value, 1, 65536)]
+config.decl @id4.vae.tile.tile_height : %value: index where [range(%value, 1, 65536)]
+config.decl @id4.vae.tile.tile_origin_x : %value: index where [range(%value, 0, 65535)]
+config.decl @id4.vae.tile.tile_origin_y : %value: index where [range(%value, 0, 65535)]
+config.decl @id4.vae.tile.tile_element_count : %value: index where [range(%value, 1, 268435456)]
+
+config.decl @id4.vae.tile.image_width : %value: index where [range(%value, 1, 1048576)]
+config.decl @id4.vae.tile.image_height : %value: index where [range(%value, 1, 1048576)]
+config.decl @id4.vae.tile.image_channel_count : %value: index where [range(%value, 1, 4096)]
+config.decl @id4.vae.tile.tile_skip_x : %value: index where [range(%value, 0, 65535)]
+config.decl @id4.vae.tile.tile_skip_y : %value: index where [range(%value, 0, 65535)]
+config.decl @id4.vae.tile.overlap_x : %value: index where [range(%value, 0, 65535)]
+config.decl @id4.vae.tile.overlap_y : %value: index where [range(%value, 0, 65535)]
+
+kernel.def export("id4_vae_tile_clear_f32") @id4_vae_tile_clear_f32() {
+  %unit = index.constant 1 : index
+  %workgroup_size_x = index.constant 256 : index
+  %element_count = config.get @id4.vae.tile.clear_element_count : index
+  %rounding = index.sub %workgroup_size_x, %unit : index
+  %rounded = index.add %element_count, %rounding : index
+  %workgroups_x = index.div %rounded, %workgroup_size_x : index
+  kernel.launch.config workgroups(%workgroups_x, %unit, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
+} launch(%target: buffer) {
+  %base = index.constant 0 : offset
+  %zero_f32 = scalar.constant 0.0 : f32
+  %workgroup_size_x = index.constant 256 : index
+  %workgroup = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %element_count = config.get @id4.vae.tile.clear_element_count : index
+  %element_index = index.madd %workgroup, %workgroup_size_x, %lane : index
+  %in_bounds = index.cmp ult, %element_index, %element_count : index
+
+  %target_global = buffer.assume.memory_space<global> %target : buffer
+  %target_view = buffer.view %target_global[%base] : buffer -> view<[%element_count]xf32, #dense>
+
+  scf.if %in_bounds {
+    view.store %zero_f32, %target_view[%element_index] : f32, view<[%element_count]xf32, #dense>
+  }
+  kernel.return
+}
+
+kernel.def export("id4_vae_tile_extract_f32") @id4_vae_tile_extract_f32() {
+  %unit = index.constant 1 : index
+  %workgroup_size_x = index.constant 256 : index
+  %element_count = config.get @id4.vae.tile.tile_element_count : index
+  %rounding = index.sub %workgroup_size_x, %unit : index
+  %rounded = index.add %element_count, %rounding : index
+  %workgroups_x = index.div %rounded, %workgroup_size_x : index
+  kernel.launch.config workgroups(%workgroups_x, %unit, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
+} launch(%source: buffer, %tile: buffer) {
+  %base = index.constant 0 : offset
+  %workgroup_size_x = index.constant 256 : index
+  %workgroup = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %source_width = config.get @id4.vae.tile.source_width : index
+  %source_height = config.get @id4.vae.tile.source_height : index
+  %source_channel_count = config.get @id4.vae.tile.source_channel_count : index
+  %batch_count = config.get @id4.vae.tile.batch_count : index
+  %tile_width = config.get @id4.vae.tile.tile_width : index
+  %tile_height = config.get @id4.vae.tile.tile_height : index
+  %tile_origin_x = config.get @id4.vae.tile.tile_origin_x : index
+  %tile_origin_y = config.get @id4.vae.tile.tile_origin_y : index
+  %element_count = config.get @id4.vae.tile.tile_element_count : index
+  %element_index = index.madd %workgroup, %workgroup_size_x, %lane : index
+  %in_bounds = index.cmp ult, %element_index, %element_count : index
+
+  %source_noalias, %tile_noalias = buffer.assume.noalias %source, %tile : buffer, buffer
+  %source_global = buffer.assume.memory_space<global> %source_noalias : buffer
+  %tile_global = buffer.assume.memory_space<global> %tile_noalias : buffer
+  %source_view = buffer.view %source_global[%base] : buffer -> view<[%source_width]x[%source_height]x[%source_channel_count]x[%batch_count]xf32, #dense>
+  %tile_view = buffer.view %tile_global[%base] : buffer -> view<[%tile_width]x[%tile_height]x[%source_channel_count]x[%batch_count]xf32, #dense>
+
+  scf.if %in_bounds {
+    %tile_x = index.rem %element_index, %tile_width : index
+    %tile_row = index.div %element_index, %tile_width : index
+    %tile_y = index.rem %tile_row, %tile_height : index
+    %tile_plane = index.div %tile_row, %tile_height : index
+    %channel = index.rem %tile_plane, %source_channel_count : index
+    %batch = index.div %tile_plane, %source_channel_count : index
+    %source_x = index.add %tile_origin_x, %tile_x : index
+    %source_y = index.add %tile_origin_y, %tile_y : index
+    %value = view.load %source_view[%source_x, %source_y, %channel, %batch] : view<[%source_width]x[%source_height]x[%source_channel_count]x[%batch_count]xf32, #dense> -> f32
+    view.store %value, %tile_view[%tile_x, %tile_y, %channel, %batch] : f32, view<[%tile_width]x[%tile_height]x[%source_channel_count]x[%batch_count]xf32, #dense>
+  }
+  kernel.return
+}
+
+kernel.def export("id4_vae_tile_merge_f32") @id4_vae_tile_merge_f32() {
+  %unit = index.constant 1 : index
+  %workgroup_size_x = index.constant 256 : index
+  %element_count = config.get @id4.vae.tile.tile_element_count : index
+  %rounding = index.sub %workgroup_size_x, %unit : index
+  %rounded = index.add %element_count, %rounding : index
+  %workgroups_x = index.div %rounded, %workgroup_size_x : index
+  kernel.launch.config workgroups(%workgroups_x, %unit, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
+} launch(%tile: buffer, %image: buffer) {
+  %base = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %zero_f32 = scalar.constant 0.0 : f32
+  %one_f32 = scalar.constant 1.0 : f32
+  %six_f32 = scalar.constant 6.0 : f32
+  %ten_f32 = scalar.constant 10.0 : f32
+  %fifteen_f32 = scalar.constant 15.0 : f32
+  %workgroup_size_x = index.constant 256 : index
+  %workgroup = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %image_width = config.get @id4.vae.tile.image_width : index
+  %image_height = config.get @id4.vae.tile.image_height : index
+  %image_channel_count = config.get @id4.vae.tile.image_channel_count : index
+  %batch_count = config.get @id4.vae.tile.batch_count : index
+  %tile_width = config.get @id4.vae.tile.tile_width : index
+  %tile_height = config.get @id4.vae.tile.tile_height : index
+  %tile_origin_x = config.get @id4.vae.tile.tile_origin_x : index
+  %tile_origin_y = config.get @id4.vae.tile.tile_origin_y : index
+  %tile_skip_x = config.get @id4.vae.tile.tile_skip_x : index
+  %tile_skip_y = config.get @id4.vae.tile.tile_skip_y : index
+  %overlap_x = config.get @id4.vae.tile.overlap_x : index
+  %overlap_y = config.get @id4.vae.tile.overlap_y : index
+  %element_count = config.get @id4.vae.tile.tile_element_count : index
+  %element_index = index.madd %workgroup, %workgroup_size_x, %lane : index
+  %in_bounds = index.cmp ult, %element_index, %element_count : index
+
+  %tile_noalias, %image_noalias = buffer.assume.noalias %tile, %image : buffer, buffer
+  %tile_global = buffer.assume.memory_space<global> %tile_noalias : buffer
+  %image_global = buffer.assume.memory_space<global> %image_noalias : buffer
+  %tile_view = buffer.view %tile_global[%base] : buffer -> view<[%tile_width]x[%tile_height]x[%image_channel_count]x[%batch_count]xf32, #dense>
+  %image_view = buffer.view %image_global[%base] : buffer -> view<[%image_width]x[%image_height]x[%image_channel_count]x[%batch_count]xf32, #dense>
+
+  scf.if %in_bounds {
+    %tile_x = index.rem %element_index, %tile_width : index
+    %tile_row = index.div %element_index, %tile_width : index
+    %tile_y = index.rem %tile_row, %tile_height : index
+    %tile_plane = index.div %tile_row, %tile_height : index
+    %channel = index.rem %tile_plane, %image_channel_count : index
+    %batch = index.div %tile_plane, %image_channel_count : index
+    %valid_x = index.cmp uge, %tile_x, %tile_skip_x : index
+    %valid_y = index.cmp uge, %tile_y, %tile_skip_y : index
+
+    scf.if %valid_x {
+      scf.if %valid_y {
+      %image_x = index.add %tile_origin_x, %tile_x : index
+      %image_y = index.add %tile_origin_y, %tile_y : index
+      %tile_value = view.load %tile_view[%tile_x, %tile_y, %channel, %batch] : view<[%tile_width]x[%tile_height]x[%image_channel_count]x[%batch_count]xf32, #dense> -> f32
+      %old_value = view.load %image_view[%image_x, %image_y, %channel, %batch] : view<[%image_width]x[%image_height]x[%image_channel_count]x[%batch_count]xf32, #dense> -> f32
+
+      %has_left_overlap = index.cmp ugt, %tile_origin_x, %zero : index
+      %image_right_edge = index.sub %image_width, %tile_width : index
+      %has_right_overlap = index.cmp ult, %tile_origin_x, %image_right_edge : index
+      %has_top_overlap = index.cmp ugt, %tile_origin_y, %zero : index
+      %image_bottom_edge = index.sub %image_height, %tile_height : index
+      %has_bottom_overlap = index.cmp ult, %tile_origin_y, %image_bottom_edge : index
+
+      %left_weight = scf.if %has_left_overlap -> (f32) {
+        %overlap_i32 = index.cast %overlap_x : index to i32
+        %overlap_f32 = scalar.sitofp %overlap_i32 : i32 to f32
+        %tile_x_from_skip = index.sub %tile_x, %tile_skip_x : index
+        %tile_x_i32 = index.cast %tile_x_from_skip : index to i32
+        %tile_x_f32 = scalar.sitofp %tile_x_i32 : i32 to f32
+        %weight = scalar.divf<nnan|ninf|nsz|arcp> %tile_x_f32, %overlap_f32 : f32
+        scf.yield %weight : f32
+      } else {
+        scf.yield %one_f32 : f32
+      }
+      %right_weight = scf.if %has_right_overlap -> (f32) {
+        %overlap_i32 = index.cast %overlap_x : index to i32
+        %overlap_f32 = scalar.sitofp %overlap_i32 : i32 to f32
+        %right_distance = index.sub %tile_width, %tile_x : index
+        %right_i32 = index.cast %right_distance : index to i32
+        %right_f32 = scalar.sitofp %right_i32 : i32 to f32
+        %weight = scalar.divf<nnan|ninf|nsz|arcp> %right_f32, %overlap_f32 : f32
+        scf.yield %weight : f32
+      } else {
+        scf.yield %one_f32 : f32
+      }
+      %x_edge_weight = scalar.minnumf %left_weight, %right_weight : f32
+      %x_weight = scalar.minnumf %x_edge_weight, %one_f32 : f32
+
+      %top_weight = scf.if %has_top_overlap -> (f32) {
+        %overlap_i32 = index.cast %overlap_y : index to i32
+        %overlap_f32 = scalar.sitofp %overlap_i32 : i32 to f32
+        %tile_y_from_skip = index.sub %tile_y, %tile_skip_y : index
+        %tile_y_i32 = index.cast %tile_y_from_skip : index to i32
+        %tile_y_f32 = scalar.sitofp %tile_y_i32 : i32 to f32
+        %weight = scalar.divf<nnan|ninf|nsz|arcp> %tile_y_f32, %overlap_f32 : f32
+        scf.yield %weight : f32
+      } else {
+        scf.yield %one_f32 : f32
+      }
+      %bottom_weight = scf.if %has_bottom_overlap -> (f32) {
+        %overlap_i32 = index.cast %overlap_y : index to i32
+        %overlap_f32 = scalar.sitofp %overlap_i32 : i32 to f32
+        %bottom_distance = index.sub %tile_height, %tile_y : index
+        %bottom_i32 = index.cast %bottom_distance : index to i32
+        %bottom_f32 = scalar.sitofp %bottom_i32 : i32 to f32
+        %weight = scalar.divf<nnan|ninf|nsz|arcp> %bottom_f32, %overlap_f32 : f32
+        scf.yield %weight : f32
+      } else {
+        scf.yield %one_f32 : f32
+      }
+      %y_edge_weight = scalar.minnumf %top_weight, %bottom_weight : f32
+      %y_weight = scalar.minnumf %y_edge_weight, %one_f32 : f32
+
+      %x_weight2 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %x_weight, %x_weight : f32
+      %x_weight3 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %x_weight2, %x_weight : f32
+      %x_six = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %six_f32, %x_weight : f32
+      %x_minus = scalar.subf<reassoc|nnan|ninf|nsz> %x_six, %fifteen_f32 : f32
+      %x_inner_product = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %x_weight, %x_minus : f32
+      %x_inner = scalar.addf<reassoc|nnan|ninf|nsz> %x_inner_product, %ten_f32 : f32
+      %x_blend = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %x_weight3, %x_inner : f32
+
+      %y_weight2 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %y_weight, %y_weight : f32
+      %y_weight3 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %y_weight2, %y_weight : f32
+      %y_six = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %six_f32, %y_weight : f32
+      %y_minus = scalar.subf<reassoc|nnan|ninf|nsz> %y_six, %fifteen_f32 : f32
+      %y_inner_product = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %y_weight, %y_minus : f32
+      %y_inner = scalar.addf<reassoc|nnan|ninf|nsz> %y_inner_product, %ten_f32 : f32
+      %y_blend = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %y_weight3, %y_inner : f32
+
+      %blend_weight = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %x_blend, %y_blend : f32
+      %weighted_tile = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %tile_value, %blend_weight : f32
+      %merged = scalar.addf<reassoc|nnan|ninf|nsz> %old_value, %weighted_tile : f32
+      view.store %merged, %image_view[%image_x, %image_y, %channel, %batch] : f32, view<[%image_width]x[%image_height]x[%image_channel_count]x[%batch_count]xf32, #dense>
+      }
+    }
+  }
+  kernel.return
+}
+
+check.case public @id4_vae_tile_clear_f32_small_case {
+  %target = check.generate.fill value(7.0) : tensor<4xf32>
+  %expected = check.generate.fill value(0.0) : tensor<4xf32>
+  func.call @id4_vae_tile_clear_f32(%target) : (tensor<4xf32>)
+  check.expect.close actual(%target) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<4xf32>
+  check.return
+}
+
+check.case public @id4_vae_tile_extract_f32_x_case {
+  %source = check.generate.iota offset(0.0) step(1.0) : tensor<4x1x1x1xf32>
+  %tile = check.generate.fill value(0.0) : tensor<2x1x1x1xf32>
+  %expected = check.generate.iota offset(1.0) step(1.0) : tensor<2x1x1x1xf32>
+  func.call @id4_vae_tile_extract_f32(%source, %tile) : (tensor<4x1x1x1xf32>, tensor<2x1x1x1xf32>)
+  check.expect.close actual(%tile) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2x1x1x1xf32>
+  check.return
+}
+
+check.case public @id4_vae_tile_extract_f32_y_case {
+  %source = check.generate.iota offset(0.0) step(1.0) : tensor<1x3x1x1xf32>
+  %tile = check.generate.fill value(0.0) : tensor<1x2x1x1xf32>
+  %expected = check.generate.iota offset(1.0) step(1.0) : tensor<1x2x1x1xf32>
+  func.call @id4_vae_tile_extract_f32(%source, %tile) : (tensor<1x3x1x1xf32>, tensor<1x2x1x1xf32>)
+  check.expect.close actual(%tile) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<1x2x1x1xf32>
+  check.return
+}
+
+check.case public @id4_vae_tile_merge_f32_origin_case {
+  %tile = check.generate.iota offset(1.0) step(1.0) : tensor<2x1x1x1xf32>
+  %image = check.generate.fill value(0.0) : tensor<4x1x1x1xf32>
+  %expected = check.file.read.npy path("testdata/vae_tile_merge_f32_origin_expected.npy") : tensor<4x1x1x1xf32>
+  func.call @id4_vae_tile_merge_f32(%tile, %image) : (tensor<2x1x1x1xf32>, tensor<4x1x1x1xf32>)
+  check.expect.close actual(%image) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<4x1x1x1xf32>
+  check.return
+}
+
+check.case public @id4_vae_tile_merge_f32_left_overlap_case {
+  %tile = check.generate.fill value(2.0) : tensor<3x1x1x1xf32>
+  %image = check.generate.fill value(0.0) : tensor<4x1x1x1xf32>
+  %expected = check.file.read.npy path("testdata/vae_tile_merge_f32_left_overlap_expected.npy") : tensor<4x1x1x1xf32>
+  func.call @id4_vae_tile_merge_f32(%tile, %image) : (tensor<3x1x1x1xf32>, tensor<4x1x1x1xf32>)
+  check.expect.close actual(%image) expected(%expected) atol(0.000001) rtol(0.000001) nan(same) : tensor<4x1x1x1xf32>
+  check.return
+}
+
+check.benchmark<@id4_vae_tile_clear_f32_small_case> @id4_vae_tile_clear_f32_small
+check.benchmark<@id4_vae_tile_extract_f32_x_case> @id4_vae_tile_extract_f32_x
+check.benchmark<@id4_vae_tile_extract_f32_y_case> @id4_vae_tile_extract_f32_y
+check.benchmark<@id4_vae_tile_merge_f32_origin_case> @id4_vae_tile_merge_f32_origin
+check.benchmark<@id4_vae_tile_merge_f32_left_overlap_case> @id4_vae_tile_merge_f32_left_overlap

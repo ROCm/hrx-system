@@ -75,6 +75,7 @@ add_custom_command(OUTPUT loom_sources.stamp
     "vae/group_norm_f32.loom"
     "vae/pack_conv3x3_weight_f32.loom"
     "vae/spatial_attention_f32.loom"
+    "vae/tile_io_f32.loom"
     "vae/upsample_conv3x3_bias_f32.loom"
 )
 
@@ -149,6 +150,7 @@ iree_c_embed_data(
     "vae/group_norm_f32.loom"
     "vae/pack_conv3x3_weight_f32.loom"
     "vae/spatial_attention_f32.loom"
+    "vae/tile_io_f32.loom"
     "vae/upsample_conv3x3_bias_f32.loom"
   C_FILE_OUTPUT
     "embedded_loom_sources.c"
@@ -1825,6 +1827,161 @@ iree_native_test(
     "--config=id4.vae.decode.tile_count_x=1"
     "--config=id4.vae.decode.tile_count_y=1"
     "--config=id4.vae.decode.overlap_milli=0"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
+    "vae_tile_clear_f32_small_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/tile_io_f32.loom}}"
+    "--benchmark=@id4_vae_tile_clear_f32_small"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.vae.tile.clear_element_count=4"
+    "--config=id4.vae.tile.source_width=1"
+    "--config=id4.vae.tile.source_height=1"
+    "--config=id4.vae.tile.source_channel_count=1"
+    "--config=id4.vae.tile.batch_count=1"
+    "--config=id4.vae.tile.tile_width=1"
+    "--config=id4.vae.tile.tile_height=1"
+    "--config=id4.vae.tile.tile_origin_x=0"
+    "--config=id4.vae.tile.tile_origin_y=0"
+    "--config=id4.vae.tile.tile_element_count=1"
+    "--config=id4.vae.tile.image_width=1"
+    "--config=id4.vae.tile.image_height=1"
+    "--config=id4.vae.tile.image_channel_count=1"
+    "--config=id4.vae.tile.tile_skip_x=0"
+    "--config=id4.vae.tile.tile_skip_y=0"
+    "--config=id4.vae.tile.overlap_x=0"
+    "--config=id4.vae.tile.overlap_y=0"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
+    "vae_tile_extract_f32_x_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/tile_io_f32.loom}}"
+    "--benchmark=@id4_vae_tile_extract_f32_x"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.vae.tile.clear_element_count=2"
+    "--config=id4.vae.tile.source_width=4"
+    "--config=id4.vae.tile.source_height=1"
+    "--config=id4.vae.tile.source_channel_count=1"
+    "--config=id4.vae.tile.batch_count=1"
+    "--config=id4.vae.tile.tile_width=2"
+    "--config=id4.vae.tile.tile_height=1"
+    "--config=id4.vae.tile.tile_origin_x=1"
+    "--config=id4.vae.tile.tile_origin_y=0"
+    "--config=id4.vae.tile.tile_element_count=2"
+    "--config=id4.vae.tile.image_width=2"
+    "--config=id4.vae.tile.image_height=1"
+    "--config=id4.vae.tile.image_channel_count=1"
+    "--config=id4.vae.tile.tile_skip_x=0"
+    "--config=id4.vae.tile.tile_skip_y=0"
+    "--config=id4.vae.tile.overlap_x=0"
+    "--config=id4.vae.tile.overlap_y=0"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
+    "vae_tile_extract_f32_y_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/tile_io_f32.loom}}"
+    "--benchmark=@id4_vae_tile_extract_f32_y"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.vae.tile.clear_element_count=2"
+    "--config=id4.vae.tile.source_width=1"
+    "--config=id4.vae.tile.source_height=3"
+    "--config=id4.vae.tile.source_channel_count=1"
+    "--config=id4.vae.tile.batch_count=1"
+    "--config=id4.vae.tile.tile_width=1"
+    "--config=id4.vae.tile.tile_height=2"
+    "--config=id4.vae.tile.tile_origin_x=0"
+    "--config=id4.vae.tile.tile_origin_y=1"
+    "--config=id4.vae.tile.tile_element_count=2"
+    "--config=id4.vae.tile.image_width=1"
+    "--config=id4.vae.tile.image_height=2"
+    "--config=id4.vae.tile.image_channel_count=1"
+    "--config=id4.vae.tile.tile_skip_x=0"
+    "--config=id4.vae.tile.tile_skip_y=0"
+    "--config=id4.vae.tile.overlap_x=0"
+    "--config=id4.vae.tile.overlap_y=0"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
+    "vae_tile_merge_f32_origin_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/tile_io_f32.loom}}"
+    "--benchmark=@id4_vae_tile_merge_f32_origin"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.vae.tile.clear_element_count=4"
+    "--config=id4.vae.tile.source_width=2"
+    "--config=id4.vae.tile.source_height=1"
+    "--config=id4.vae.tile.source_channel_count=1"
+    "--config=id4.vae.tile.batch_count=1"
+    "--config=id4.vae.tile.tile_width=2"
+    "--config=id4.vae.tile.tile_height=1"
+    "--config=id4.vae.tile.tile_origin_x=1"
+    "--config=id4.vae.tile.tile_origin_y=0"
+    "--config=id4.vae.tile.tile_element_count=2"
+    "--config=id4.vae.tile.image_width=4"
+    "--config=id4.vae.tile.image_height=1"
+    "--config=id4.vae.tile.image_channel_count=1"
+    "--config=id4.vae.tile.tile_skip_x=0"
+    "--config=id4.vae.tile.tile_skip_y=0"
+    "--config=id4.vae.tile.overlap_x=0"
+    "--config=id4.vae.tile.overlap_y=0"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
+    "vae_tile_merge_f32_left_overlap_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/tile_io_f32.loom}}"
+    "--benchmark=@id4_vae_tile_merge_f32_left_overlap"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.vae.tile.clear_element_count=4"
+    "--config=id4.vae.tile.source_width=3"
+    "--config=id4.vae.tile.source_height=1"
+    "--config=id4.vae.tile.source_channel_count=1"
+    "--config=id4.vae.tile.batch_count=1"
+    "--config=id4.vae.tile.tile_width=3"
+    "--config=id4.vae.tile.tile_height=1"
+    "--config=id4.vae.tile.tile_origin_x=1"
+    "--config=id4.vae.tile.tile_origin_y=0"
+    "--config=id4.vae.tile.tile_element_count=3"
+    "--config=id4.vae.tile.image_width=4"
+    "--config=id4.vae.tile.image_height=1"
+    "--config=id4.vae.tile.image_channel_count=1"
+    "--config=id4.vae.tile.tile_skip_x=0"
+    "--config=id4.vae.tile.tile_skip_y=0"
+    "--config=id4.vae.tile.overlap_x=2"
+    "--config=id4.vae.tile.overlap_y=0"
   SRC
     loom::tools::iree-benchmark-loom
   LABELS
@@ -5626,6 +5783,181 @@ iree_native_test(
     "--config=id4.vae.decode.tile_count_x=1"
     "--config=id4.vae.decode.tile_count_y=1"
     "--config=id4.vae.decode.overlap_milli=0"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
+    "vae_tile_clear_f32_small_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/tile_io_f32.loom}}"
+    "--case=@id4_vae_tile_clear_f32_small_case"
+    "--device=amdgpu://0"
+    "--config=id4.vae.tile.clear_element_count=4"
+    "--config=id4.vae.tile.source_width=1"
+    "--config=id4.vae.tile.source_height=1"
+    "--config=id4.vae.tile.source_channel_count=1"
+    "--config=id4.vae.tile.batch_count=1"
+    "--config=id4.vae.tile.tile_width=1"
+    "--config=id4.vae.tile.tile_height=1"
+    "--config=id4.vae.tile.tile_origin_x=0"
+    "--config=id4.vae.tile.tile_origin_y=0"
+    "--config=id4.vae.tile.tile_element_count=1"
+    "--config=id4.vae.tile.image_width=1"
+    "--config=id4.vae.tile.image_height=1"
+    "--config=id4.vae.tile.image_channel_count=1"
+    "--config=id4.vae.tile.tile_skip_x=0"
+    "--config=id4.vae.tile.tile_skip_y=0"
+    "--config=id4.vae.tile.overlap_x=0"
+    "--config=id4.vae.tile.overlap_y=0"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
+    "vae_tile_extract_f32_x_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/tile_io_f32.loom}}"
+    "--case=@id4_vae_tile_extract_f32_x_case"
+    "--device=amdgpu://0"
+    "--config=id4.vae.tile.clear_element_count=2"
+    "--config=id4.vae.tile.source_width=4"
+    "--config=id4.vae.tile.source_height=1"
+    "--config=id4.vae.tile.source_channel_count=1"
+    "--config=id4.vae.tile.batch_count=1"
+    "--config=id4.vae.tile.tile_width=2"
+    "--config=id4.vae.tile.tile_height=1"
+    "--config=id4.vae.tile.tile_origin_x=1"
+    "--config=id4.vae.tile.tile_origin_y=0"
+    "--config=id4.vae.tile.tile_element_count=2"
+    "--config=id4.vae.tile.image_width=2"
+    "--config=id4.vae.tile.image_height=1"
+    "--config=id4.vae.tile.image_channel_count=1"
+    "--config=id4.vae.tile.tile_skip_x=0"
+    "--config=id4.vae.tile.tile_skip_y=0"
+    "--config=id4.vae.tile.overlap_x=0"
+    "--config=id4.vae.tile.overlap_y=0"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
+    "vae_tile_extract_f32_y_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/tile_io_f32.loom}}"
+    "--case=@id4_vae_tile_extract_f32_y_case"
+    "--device=amdgpu://0"
+    "--config=id4.vae.tile.clear_element_count=2"
+    "--config=id4.vae.tile.source_width=1"
+    "--config=id4.vae.tile.source_height=3"
+    "--config=id4.vae.tile.source_channel_count=1"
+    "--config=id4.vae.tile.batch_count=1"
+    "--config=id4.vae.tile.tile_width=1"
+    "--config=id4.vae.tile.tile_height=2"
+    "--config=id4.vae.tile.tile_origin_x=0"
+    "--config=id4.vae.tile.tile_origin_y=1"
+    "--config=id4.vae.tile.tile_element_count=2"
+    "--config=id4.vae.tile.image_width=1"
+    "--config=id4.vae.tile.image_height=2"
+    "--config=id4.vae.tile.image_channel_count=1"
+    "--config=id4.vae.tile.tile_skip_x=0"
+    "--config=id4.vae.tile.tile_skip_y=0"
+    "--config=id4.vae.tile.overlap_x=0"
+    "--config=id4.vae.tile.overlap_y=0"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
+    "vae_tile_merge_f32_origin_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/tile_io_f32.loom}}"
+    "--case=@id4_vae_tile_merge_f32_origin_case"
+    "--device=amdgpu://0"
+    "--config=id4.vae.tile.clear_element_count=4"
+    "--config=id4.vae.tile.source_width=2"
+    "--config=id4.vae.tile.source_height=1"
+    "--config=id4.vae.tile.source_channel_count=1"
+    "--config=id4.vae.tile.batch_count=1"
+    "--config=id4.vae.tile.tile_width=2"
+    "--config=id4.vae.tile.tile_height=1"
+    "--config=id4.vae.tile.tile_origin_x=1"
+    "--config=id4.vae.tile.tile_origin_y=0"
+    "--config=id4.vae.tile.tile_element_count=2"
+    "--config=id4.vae.tile.image_width=4"
+    "--config=id4.vae.tile.image_height=1"
+    "--config=id4.vae.tile.image_channel_count=1"
+    "--config=id4.vae.tile.tile_skip_x=0"
+    "--config=id4.vae.tile.tile_skip_y=0"
+    "--config=id4.vae.tile.overlap_x=0"
+    "--config=id4.vae.tile.overlap_y=0"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
+    "vae_tile_merge_f32_left_overlap_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/tile_io_f32.loom}}"
+    "--case=@id4_vae_tile_merge_f32_left_overlap_case"
+    "--device=amdgpu://0"
+    "--config=id4.vae.tile.clear_element_count=4"
+    "--config=id4.vae.tile.source_width=3"
+    "--config=id4.vae.tile.source_height=1"
+    "--config=id4.vae.tile.source_channel_count=1"
+    "--config=id4.vae.tile.batch_count=1"
+    "--config=id4.vae.tile.tile_width=3"
+    "--config=id4.vae.tile.tile_height=1"
+    "--config=id4.vae.tile.tile_origin_x=1"
+    "--config=id4.vae.tile.tile_origin_y=0"
+    "--config=id4.vae.tile.tile_element_count=3"
+    "--config=id4.vae.tile.image_width=4"
+    "--config=id4.vae.tile.image_height=1"
+    "--config=id4.vae.tile.image_channel_count=1"
+    "--config=id4.vae.tile.tile_skip_x=0"
+    "--config=id4.vae.tile.tile_skip_y=0"
+    "--config=id4.vae.tile.overlap_x=2"
+    "--config=id4.vae.tile.overlap_y=0"
   SRC
     loom::tools::iree-test-loom
   LABELS
