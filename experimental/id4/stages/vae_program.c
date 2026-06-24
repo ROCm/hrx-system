@@ -2156,28 +2156,30 @@ static iree_status_t id4_vae_program_author_group_norm_bf16(
   iree_string_view_t apply_module_path = IREE_SV("vae/group_norm_oc4_bf16");
   iree_string_view_t apply_function_name =
       iree_any_bit_set(flags, ID4_VAE_PROGRAM_GROUP_NORM_FLAG_APPLY_SILU)
-          ? IREE_SV("id4_vae_group_norm_silu_ic4_oc4_2d_bf16")
-          : IREE_SV("id4_vae_group_norm_ic4_oc4_2d_bf16");
+          ? IREE_SV("id4_vae_group_norm_silu_ic4_oc4_flat_bf16")
+          : IREE_SV("id4_vae_group_norm_ic4_oc4_flat_bf16");
   if (channels_per_group >= 16 && channels_per_group % 16 == 0 &&
       channel_count % 16 == 0) {
     output_channel_tile_width = 16;
     apply_module_path = IREE_SV("vae/group_norm_oc16_bf16");
     apply_function_name =
         iree_any_bit_set(flags, ID4_VAE_PROGRAM_GROUP_NORM_FLAG_APPLY_SILU)
-            ? IREE_SV("id4_vae_group_norm_silu_ic4_oc16_2d_bf16")
-            : IREE_SV("id4_vae_group_norm_ic4_oc16_2d_bf16");
+            ? IREE_SV("id4_vae_group_norm_silu_ic4_oc16_flat_bf16")
+            : IREE_SV("id4_vae_group_norm_ic4_oc16_flat_bf16");
   } else if (channels_per_group >= 8 && channels_per_group % 8 == 0 &&
              channel_count % 8 == 0) {
     output_channel_tile_width = 8;
     apply_module_path = IREE_SV("vae/group_norm_oc8_bf16");
     apply_function_name =
         iree_any_bit_set(flags, ID4_VAE_PROGRAM_GROUP_NORM_FLAG_APPLY_SILU)
-            ? IREE_SV("id4_vae_group_norm_silu_ic4_oc8_2d_bf16")
-            : IREE_SV("id4_vae_group_norm_ic4_oc8_2d_bf16");
+            ? IREE_SV("id4_vae_group_norm_silu_ic4_oc8_flat_bf16")
+            : IREE_SV("id4_vae_group_norm_ic4_oc8_flat_bf16");
   }
   IREE_RETURN_IF_ERROR(id4_vae_program_add_group_norm_apply_tile_configs(
       channel_count, output_element_count, output_channel_tile_width,
       &apply_config_list));
+  const uint64_t output_tile_element_count = id4_vae_program_ceil_div_u64(
+      output_element_count, output_channel_tile_width);
 
   id4_pipeline_program_dispatch_binding_t apply_bindings[] = {
       id4_pipeline_program_read(input),   id4_pipeline_program_read(weight),
@@ -2192,10 +2194,9 @@ static iree_status_t id4_vae_program_author_group_norm_bf16(
       id4_pipeline_make_kernel_ref(apply_module_path, apply_function_name);
   apply_dispatch_options.dispatch_config =
       id4_vae_program_make_static_dispatch_config(
-          id4_vae_program_ceil_div_u32(
-              (uint32_t)(output_element_count / channel_count),
-              ID4_VAE_DECODE_WORKGROUP_SIZE_X),
-          channel_count / output_channel_tile_width, 1);
+          id4_vae_program_ceil_div_u32((uint32_t)output_tile_element_count,
+                                       ID4_VAE_DECODE_WORKGROUP_SIZE_X),
+          1, 1);
   apply_dispatch_options.config_binding_count = apply_config_list.count;
   apply_dispatch_options.config_bindings = apply_config_list.bindings;
   apply_dispatch_options.binding_count = IREE_ARRAYSIZE(apply_bindings);

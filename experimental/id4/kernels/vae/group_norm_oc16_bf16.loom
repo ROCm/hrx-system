@@ -16,31 +16,21 @@ config.decl @id4.vae.group_norm.output_channel_tile_count : %value: index where 
 
 config.decl @id4.vae.group_norm.output_tile_element_count : %value: index where [range(%value, 1, 67108864)]
 
-kernel.def export("id4_vae_group_norm_silu_ic4_oc16_2d_bf16") @id4_vae_group_norm_silu_ic4_oc16_2d_bf16() {
+kernel.def export("id4_vae_group_norm_silu_ic4_oc16_flat_bf16") @id4_vae_group_norm_silu_ic4_oc16_flat_bf16() {
   %unit = index.constant 1 : index
   %workgroup_size_x = index.constant 256 : index
-  %width = config.get @id4.vae.group_norm.width : index
-  %height = config.get @id4.vae.group_norm.height : index
-  %batch_count = config.get @id4.vae.group_norm.batch_count : index
   %tile_element_count = config.get @id4.vae.group_norm.output_tile_element_count : index
-  %output_channel_tile_count = config.get @id4.vae.group_norm.output_channel_tile_count : index
-  %pixel_count = index.mul %width, %height : index
-  %expected_pixel_element_count = index.mul %pixel_count, %batch_count : index
-  %pixel_element_count0 = index.div %tile_element_count, %output_channel_tile_count : index
-  %pixel_element_count = index.assume %pixel_element_count0 [ge(%pixel_element_count0, 1), le(%pixel_element_count0, %expected_pixel_element_count)] : index
   %rounding = index.sub %workgroup_size_x, %unit : index
-  %rounded = index.add %pixel_element_count, %rounding : index
+  %rounded = index.add %tile_element_count, %rounding : index
   %workgroups_x = index.div %rounded, %workgroup_size_x : index
-  %workgroups_y = index.assume %output_channel_tile_count [range(%output_channel_tile_count, 1, 1024)] : index
-  kernel.launch.config workgroups(%workgroups_x, %workgroups_y, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
+  kernel.launch.config workgroups(%workgroups_x, %unit, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
 } launch(%input: buffer, %weight: buffer, %bias: buffer, %stats: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %zero = index.constant 0 : index
   %unit = index.constant 1 : index
   %fifteen = index.constant 15 : index
   %sixteen = index.constant 16 : index
-  %pixel_workgroup = kernel.workgroup.id<x> : index
-  %channel_tile = kernel.workgroup.id<y> : index
+  %tile_workgroup = kernel.workgroup.id<x> : index
   %lane = kernel.workitem.id<x> : index
   %workgroup_size_x = index.constant 256 : index
   %width = config.get @id4.vae.group_norm.width : index
@@ -51,10 +41,10 @@ kernel.def export("id4_vae_group_norm_silu_ic4_oc16_2d_bf16") @id4_vae_group_nor
   %batch_count0 = config.get @id4.vae.group_norm.batch_count : index
   %batch_count = index.assume %batch_count0 [range(%batch_count0, 1, 1)] : index
   %output_element_count = config.get @id4.vae.group_norm.output_element_count : index
-  %pixel_count = index.mul %width, %height : index
-  %pixel_element_count = index.mul %pixel_count, %batch_count : index
-  %pixel_element_index = index.madd %pixel_workgroup, %workgroup_size_x, %lane : index
-  %in_bounds = index.cmp ult, %pixel_element_index, %pixel_element_count : index
+  %output_channel_tile_count = config.get @id4.vae.group_norm.output_channel_tile_count : index
+  %tile_element_count = config.get @id4.vae.group_norm.output_tile_element_count : index
+  %tile_element_index = index.madd %tile_workgroup, %workgroup_size_x, %lane : index
+  %in_bounds = index.cmp ult, %tile_element_index, %tile_element_count : index
   %input_noalias, %weight_noalias, %bias_noalias, %stats_noalias, %output_noalias = buffer.assume.noalias %input, %weight, %bias, %stats, %output : buffer, buffer, buffer, buffer, buffer
   %input_global = buffer.assume.memory_space<global> %input_noalias : buffer
   %weight_global = buffer.assume.memory_space<global> %weight_noalias : buffer
@@ -67,10 +57,12 @@ kernel.def export("id4_vae_group_norm_silu_ic4_oc16_2d_bf16") @id4_vae_group_nor
   %stats_view = buffer.view %stats_global[%base] : buffer -> view<[%batch_count]x[%group_count]x2xf32, #dense>
   %output_flat_view = buffer.view %output_global[%base] : buffer -> view<[%output_element_count]xbf16, #dense>
   scf.if %in_bounds {
-    %x = index.rem %pixel_element_index, %width : index
-    %row = index.div %pixel_element_index, %width : index
-    %y = index.rem %row, %height : index
-    %batch = index.div %row, %height : index
+    %channel_tile = index.rem %tile_element_index, %output_channel_tile_count : index
+    %pixel_element_index = index.div %tile_element_index, %output_channel_tile_count : index
+    %y = index.rem %pixel_element_index, %height : index
+    %row = index.div %pixel_element_index, %height : index
+    %x = index.rem %row, %width : index
+    %batch = index.div %row, %width : index
     %channel = index.mul %channel_tile, %sixteen : index
     %last_valid_channel = index.sub %channel_count, %fifteen : index
     %channel_base = index.assume %channel [ge(%channel, 0), lt(%channel, %last_valid_channel)] : index
@@ -104,31 +96,21 @@ kernel.def export("id4_vae_group_norm_silu_ic4_oc16_2d_bf16") @id4_vae_group_nor
   kernel.return
 }
 
-kernel.def export("id4_vae_group_norm_ic4_oc16_2d_bf16") @id4_vae_group_norm_ic4_oc16_2d_bf16() {
+kernel.def export("id4_vae_group_norm_ic4_oc16_flat_bf16") @id4_vae_group_norm_ic4_oc16_flat_bf16() {
   %unit = index.constant 1 : index
   %workgroup_size_x = index.constant 256 : index
-  %width = config.get @id4.vae.group_norm.width : index
-  %height = config.get @id4.vae.group_norm.height : index
-  %batch_count = config.get @id4.vae.group_norm.batch_count : index
   %tile_element_count = config.get @id4.vae.group_norm.output_tile_element_count : index
-  %output_channel_tile_count = config.get @id4.vae.group_norm.output_channel_tile_count : index
-  %pixel_count = index.mul %width, %height : index
-  %expected_pixel_element_count = index.mul %pixel_count, %batch_count : index
-  %pixel_element_count0 = index.div %tile_element_count, %output_channel_tile_count : index
-  %pixel_element_count = index.assume %pixel_element_count0 [ge(%pixel_element_count0, 1), le(%pixel_element_count0, %expected_pixel_element_count)] : index
   %rounding = index.sub %workgroup_size_x, %unit : index
-  %rounded = index.add %pixel_element_count, %rounding : index
+  %rounded = index.add %tile_element_count, %rounding : index
   %workgroups_x = index.div %rounded, %workgroup_size_x : index
-  %workgroups_y = index.assume %output_channel_tile_count [range(%output_channel_tile_count, 1, 1024)] : index
-  kernel.launch.config workgroups(%workgroups_x, %workgroups_y, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
+  kernel.launch.config workgroups(%workgroups_x, %unit, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
 } launch(%input: buffer, %weight: buffer, %bias: buffer, %stats: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %zero = index.constant 0 : index
   %unit = index.constant 1 : index
   %fifteen = index.constant 15 : index
   %sixteen = index.constant 16 : index
-  %pixel_workgroup = kernel.workgroup.id<x> : index
-  %channel_tile = kernel.workgroup.id<y> : index
+  %tile_workgroup = kernel.workgroup.id<x> : index
   %lane = kernel.workitem.id<x> : index
   %workgroup_size_x = index.constant 256 : index
   %width = config.get @id4.vae.group_norm.width : index
@@ -139,10 +121,10 @@ kernel.def export("id4_vae_group_norm_ic4_oc16_2d_bf16") @id4_vae_group_norm_ic4
   %batch_count0 = config.get @id4.vae.group_norm.batch_count : index
   %batch_count = index.assume %batch_count0 [range(%batch_count0, 1, 1)] : index
   %output_element_count = config.get @id4.vae.group_norm.output_element_count : index
-  %pixel_count = index.mul %width, %height : index
-  %pixel_element_count = index.mul %pixel_count, %batch_count : index
-  %pixel_element_index = index.madd %pixel_workgroup, %workgroup_size_x, %lane : index
-  %in_bounds = index.cmp ult, %pixel_element_index, %pixel_element_count : index
+  %output_channel_tile_count = config.get @id4.vae.group_norm.output_channel_tile_count : index
+  %tile_element_count = config.get @id4.vae.group_norm.output_tile_element_count : index
+  %tile_element_index = index.madd %tile_workgroup, %workgroup_size_x, %lane : index
+  %in_bounds = index.cmp ult, %tile_element_index, %tile_element_count : index
   %input_noalias, %weight_noalias, %bias_noalias, %stats_noalias, %output_noalias = buffer.assume.noalias %input, %weight, %bias, %stats, %output : buffer, buffer, buffer, buffer, buffer
   %input_global = buffer.assume.memory_space<global> %input_noalias : buffer
   %weight_global = buffer.assume.memory_space<global> %weight_noalias : buffer
@@ -155,10 +137,12 @@ kernel.def export("id4_vae_group_norm_ic4_oc16_2d_bf16") @id4_vae_group_norm_ic4
   %stats_view = buffer.view %stats_global[%base] : buffer -> view<[%batch_count]x[%group_count]x2xf32, #dense>
   %output_flat_view = buffer.view %output_global[%base] : buffer -> view<[%output_element_count]xbf16, #dense>
   scf.if %in_bounds {
-    %x = index.rem %pixel_element_index, %width : index
-    %row = index.div %pixel_element_index, %width : index
-    %y = index.rem %row, %height : index
-    %batch = index.div %row, %height : index
+    %channel_tile = index.rem %tile_element_index, %output_channel_tile_count : index
+    %pixel_element_index = index.div %tile_element_index, %output_channel_tile_count : index
+    %y = index.rem %pixel_element_index, %height : index
+    %row = index.div %pixel_element_index, %height : index
+    %x = index.rem %row, %width : index
+    %batch = index.div %row, %width : index
     %channel = index.mul %channel_tile, %sixteen : index
     %last_valid_channel = index.sub %channel_count, %fifteen : index
     %channel_base = index.assume %channel [ge(%channel, 0), lt(%channel, %last_valid_channel)] : index
@@ -191,58 +175,58 @@ kernel.def export("id4_vae_group_norm_ic4_oc16_2d_bf16") @id4_vae_group_norm_ic4
   kernel.return
 }
 
-check.case public @id4_vae_group_norm_silu_ic4_oc16_2d_bf16_small_case {
+check.case public @id4_vae_group_norm_silu_ic4_oc16_flat_bf16_small_case {
   %input = check.generate.fill value(0.0) : tensor<1x1x16x1xbf16>
   %weight = check.generate.fill value(1.0) : tensor<16xbf16>
   %bias = check.generate.fill value(1.0) : tensor<16xbf16>
   %stats = check.generate.fill value(0.0) : tensor<1x1x2xf32>
   %output = check.generate.fill value(0.0) : tensor<1x1x16x1xbf16>
   %expected = check.generate.fill value(0.73105857863000497) : tensor<1x1x16x1xbf16>
-  func.call @id4_vae_group_norm_silu_ic4_oc16_2d_bf16(%input, %weight, %bias, %stats, %output) : (tensor<1x1x16x1xbf16>, tensor<16xbf16>, tensor<16xbf16>, tensor<1x1x2xf32>, tensor<1x1x16x1xbf16>)
+  func.call @id4_vae_group_norm_silu_ic4_oc16_flat_bf16(%input, %weight, %bias, %stats, %output) : (tensor<1x1x16x1xbf16>, tensor<16xbf16>, tensor<16xbf16>, tensor<1x1x2xf32>, tensor<1x1x16x1xbf16>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<1x1x16x1xbf16>
   check.return
 }
 
-check.case public @id4_vae_group_norm_ic4_oc16_2d_bf16_small_case {
+check.case public @id4_vae_group_norm_ic4_oc16_flat_bf16_small_case {
   %input = check.generate.fill value(0.0) : tensor<1x1x16x1xbf16>
   %weight = check.generate.fill value(2.0) : tensor<16xbf16>
   %bias = check.generate.fill value(1.0) : tensor<16xbf16>
   %stats = check.generate.fill value(0.0) : tensor<1x1x2xf32>
   %output = check.generate.fill value(0.0) : tensor<1x1x16x1xbf16>
   %expected = check.generate.fill value(1.0) : tensor<1x1x16x1xbf16>
-  func.call @id4_vae_group_norm_ic4_oc16_2d_bf16(%input, %weight, %bias, %stats, %output) : (tensor<1x1x16x1xbf16>, tensor<16xbf16>, tensor<16xbf16>, tensor<1x1x2xf32>, tensor<1x1x16x1xbf16>)
+  func.call @id4_vae_group_norm_ic4_oc16_flat_bf16(%input, %weight, %bias, %stats, %output) : (tensor<1x1x16x1xbf16>, tensor<16xbf16>, tensor<16xbf16>, tensor<1x1x2xf32>, tensor<1x1x16x1xbf16>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<1x1x16x1xbf16>
   check.return
 }
 
-check.case public @id4_vae_group_norm_silu_ic4_oc16_2d_bf16_flux2_mid_block_shape_case {
+check.case public @id4_vae_group_norm_silu_ic4_oc16_flat_bf16_flux2_mid_block_shape_case {
   %input = check.generate.fill value(0.0) : tensor<128x128x512x1xbf16>
   %weight = check.generate.fill value(1.0) : tensor<512xbf16>
   %bias = check.generate.fill value(1.0) : tensor<512xbf16>
   %stats = check.generate.fill value(0.0) : tensor<1x32x2xf32>
   %output = check.generate.fill value(0.0) : tensor<128x128x512x1xbf16>
   %expected = check.generate.fill value(0.73105857863000497) : tensor<128x128x512x1xbf16>
-  func.call @id4_vae_group_norm_silu_ic4_oc16_2d_bf16(%input, %weight, %bias, %stats, %output) : (tensor<128x128x512x1xbf16>, tensor<512xbf16>, tensor<512xbf16>, tensor<1x32x2xf32>, tensor<128x128x512x1xbf16>)
+  func.call @id4_vae_group_norm_silu_ic4_oc16_flat_bf16(%input, %weight, %bias, %stats, %output) : (tensor<128x128x512x1xbf16>, tensor<512xbf16>, tensor<512xbf16>, tensor<1x32x2xf32>, tensor<128x128x512x1xbf16>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<128x128x512x1xbf16>
   check.return
 }
 
-check.case public @id4_vae_group_norm_ic4_oc16_2d_bf16_flux2_mid_block_shape_case {
+check.case public @id4_vae_group_norm_ic4_oc16_flat_bf16_flux2_mid_block_shape_case {
   %input = check.generate.fill value(0.0) : tensor<128x128x512x1xbf16>
   %weight = check.generate.fill value(2.0) : tensor<512xbf16>
   %bias = check.generate.fill value(1.0) : tensor<512xbf16>
   %stats = check.generate.fill value(0.0) : tensor<1x32x2xf32>
   %output = check.generate.fill value(0.0) : tensor<128x128x512x1xbf16>
   %expected = check.generate.fill value(1.0) : tensor<128x128x512x1xbf16>
-  func.call @id4_vae_group_norm_ic4_oc16_2d_bf16(%input, %weight, %bias, %stats, %output) : (tensor<128x128x512x1xbf16>, tensor<512xbf16>, tensor<512xbf16>, tensor<1x32x2xf32>, tensor<128x128x512x1xbf16>)
+  func.call @id4_vae_group_norm_ic4_oc16_flat_bf16(%input, %weight, %bias, %stats, %output) : (tensor<128x128x512x1xbf16>, tensor<512xbf16>, tensor<512xbf16>, tensor<1x32x2xf32>, tensor<128x128x512x1xbf16>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<128x128x512x1xbf16>
   check.return
 }
 
-check.benchmark<@id4_vae_group_norm_silu_ic4_oc16_2d_bf16_small_case> @id4_vae_group_norm_silu_ic4_oc16_2d_bf16_small
+check.benchmark<@id4_vae_group_norm_silu_ic4_oc16_flat_bf16_small_case> @id4_vae_group_norm_silu_ic4_oc16_flat_bf16_small
 
-check.benchmark<@id4_vae_group_norm_silu_ic4_oc16_2d_bf16_flux2_mid_block_shape_case> @id4_vae_group_norm_silu_ic4_oc16_2d_bf16_flux2_mid_block_shape
+check.benchmark<@id4_vae_group_norm_silu_ic4_oc16_flat_bf16_flux2_mid_block_shape_case> @id4_vae_group_norm_silu_ic4_oc16_flat_bf16_flux2_mid_block_shape
 
-check.benchmark<@id4_vae_group_norm_ic4_oc16_2d_bf16_small_case> @id4_vae_group_norm_ic4_oc16_2d_bf16_small
+check.benchmark<@id4_vae_group_norm_ic4_oc16_flat_bf16_small_case> @id4_vae_group_norm_ic4_oc16_flat_bf16_small
 
-check.benchmark<@id4_vae_group_norm_ic4_oc16_2d_bf16_flux2_mid_block_shape_case> @id4_vae_group_norm_ic4_oc16_2d_bf16_flux2_mid_block_shape
+check.benchmark<@id4_vae_group_norm_ic4_oc16_flat_bf16_flux2_mid_block_shape_case> @id4_vae_group_norm_ic4_oc16_flat_bf16_flux2_mid_block_shape
