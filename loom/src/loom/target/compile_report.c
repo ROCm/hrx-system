@@ -553,6 +553,25 @@ static void loom_target_compile_report_accumulate_instruction_mix(
   target->local_memory_count += source->local_memory_count;
   target->scalar_memory_count += source->scalar_memory_count;
   target->generic_memory_count += source->generic_memory_count;
+  target->memory_read_unknown_width_count +=
+      source->memory_read_unknown_width_count;
+  target->memory_write_unknown_width_count +=
+      source->memory_write_unknown_width_count;
+  target->memory_read_byte_count += source->memory_read_byte_count;
+  target->memory_write_byte_count += source->memory_write_byte_count;
+  target->global_load_byte_count += source->global_load_byte_count;
+  target->global_store_byte_count += source->global_store_byte_count;
+  target->buffer_load_byte_count += source->buffer_load_byte_count;
+  target->buffer_store_byte_count += source->buffer_store_byte_count;
+  target->flat_read_byte_count += source->flat_read_byte_count;
+  target->flat_write_byte_count += source->flat_write_byte_count;
+  target->local_read_byte_count += source->local_read_byte_count;
+  target->local_write_byte_count += source->local_write_byte_count;
+  target->scalar_read_byte_count += source->scalar_read_byte_count;
+  target->scalar_write_byte_count += source->scalar_write_byte_count;
+  target->unclassified_read_byte_count += source->unclassified_read_byte_count;
+  target->unclassified_write_byte_count +=
+      source->unclassified_write_byte_count;
   target->atomic_count += source->atomic_count;
   target->branch_count += source->branch_count;
   target->barrier_count += source->barrier_count;

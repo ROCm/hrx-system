@@ -281,7 +281,8 @@ typedef struct loom_target_compile_report_move_cause_counts_t {
 // tags, schedule classes, schedule resources, and structural low terminators.
 // They are intentionally separate from measured HAL profiling counters and may
 // overlap: for example an AMDGPU global atomic packet is both global memory and
-// atomic.
+// atomic. Byte counts are static descriptor-effect widths for one issue of the
+// emitted low stream, not evaluated dynamic workload traffic.
 typedef struct loom_target_compile_report_static_instruction_mix_t {
   // Descriptor-backed schedule nodes inspected for feature classification.
   uint64_t descriptor_count;
@@ -317,6 +318,38 @@ typedef struct loom_target_compile_report_static_instruction_mix_t {
   uint64_t scalar_memory_count;
   // Descriptor-backed nodes identified as generic memory operations.
   uint64_t generic_memory_count;
+  // Descriptor memory-effect reads with zero or non-byte-aligned widths.
+  uint64_t memory_read_unknown_width_count;
+  // Descriptor memory-effect writes with zero or non-byte-aligned widths.
+  uint64_t memory_write_unknown_width_count;
+  // Static bytes read by descriptor memory effects across all memory spaces.
+  uint64_t memory_read_byte_count;
+  // Static bytes written by descriptor memory effects across all memory spaces.
+  uint64_t memory_write_byte_count;
+  // Static bytes read by global_load-family descriptor effects.
+  uint64_t global_load_byte_count;
+  // Static bytes written by global_store-family descriptor effects.
+  uint64_t global_store_byte_count;
+  // Static bytes read by buffer_load-family descriptor effects.
+  uint64_t buffer_load_byte_count;
+  // Static bytes written by buffer_store-family descriptor effects.
+  uint64_t buffer_store_byte_count;
+  // Static bytes read by flat-memory descriptor effects.
+  uint64_t flat_read_byte_count;
+  // Static bytes written by flat-memory descriptor effects.
+  uint64_t flat_write_byte_count;
+  // Static bytes read by local/shared/workgroup descriptor effects.
+  uint64_t local_read_byte_count;
+  // Static bytes written by local/shared/workgroup descriptor effects.
+  uint64_t local_write_byte_count;
+  // Static bytes read by scalar-memory descriptor effects.
+  uint64_t scalar_read_byte_count;
+  // Static bytes written by scalar-memory descriptor effects.
+  uint64_t scalar_write_byte_count;
+  // Static bytes read by memory effects without a specific packet family.
+  uint64_t unclassified_read_byte_count;
+  // Static bytes written by memory effects without a specific packet family.
+  uint64_t unclassified_write_byte_count;
   // Descriptor-backed nodes identified as atomic memory operations.
   uint64_t atomic_count;
   // Low packets identified as branch, return, or call control flow.
@@ -456,7 +489,7 @@ typedef struct loom_target_compile_report_entry_t {
   // loom_target_compile_report_move_cause_t.
   loom_target_compile_report_move_cause_counts_t
       move_causes[LOOM_TARGET_COMPILE_REPORT_MOVE_CAUSE_COUNT];
-  // Static descriptor-backed instruction-mix feature counters.
+  // Static descriptor-backed instruction and effect feature counters.
   loom_target_compile_report_static_instruction_mix_t static_instruction_mix;
   // Final target resource and occupancy summary.
   loom_target_compile_report_target_resources_t target_resources;
@@ -554,7 +587,8 @@ typedef struct loom_target_compile_report_schedule_band_row_t {
   iree_string_view_t semantic_tag;
   // Representative SSA result value produced in this band, if any.
   iree_string_view_t sample_value_name;
-  // Static descriptor-backed instruction-mix feature counters for this band.
+  // Static descriptor-backed instruction and effect feature counters for this
+  // band.
   loom_target_compile_report_static_instruction_mix_t static_instruction_mix;
   // Number of result values produced by nodes in this band.
   uint64_t result_value_count;
@@ -586,7 +620,8 @@ typedef struct loom_target_compile_report_schedule_band_summary_row_t {
   iree_string_view_t semantic_tag;
   // Representative SSA result value produced by these bands, if any.
   iree_string_view_t sample_value_name;
-  // Static descriptor-backed instruction-mix feature counters for these bands.
+  // Static descriptor-backed instruction and effect feature counters for these
+  // bands.
   loom_target_compile_report_static_instruction_mix_t static_instruction_mix;
   // Number of result values produced by these bands.
   uint64_t result_value_count;
@@ -1107,7 +1142,7 @@ typedef struct loom_target_compile_report_t {
   // loom_target_compile_report_move_cause_t.
   loom_target_compile_report_move_cause_counts_t
       move_causes[LOOM_TARGET_COMPILE_REPORT_MOVE_CAUSE_COUNT];
-  // Static descriptor-backed instruction-mix feature counters.
+  // Static descriptor-backed instruction and effect feature counters.
   loom_target_compile_report_static_instruction_mix_t static_instruction_mix;
   // Final target resource and occupancy summary.
   loom_target_compile_report_target_resources_t target_resources;

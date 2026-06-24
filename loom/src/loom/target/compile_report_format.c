@@ -461,18 +461,34 @@ static iree_status_t loom_target_compile_report_format_summary(
         " global_store=%" PRIu64 " buffer_load=%" PRIu64
         " buffer_store=%" PRIu64 " flat_memory=%" PRIu64
         " local_memory=%" PRIu64 " scalar_memory=%" PRIu64
-        " generic_memory=%" PRIu64 " atomic=%" PRIu64 " branch=%" PRIu64
-        " barrier=%" PRIu64 " control=%" PRIu64 " conversion=%" PRIu64
-        " cache=%" PRIu64 " register_move=%" PRIu64 "\n",
+        " generic_memory=%" PRIu64 " memory_read_unknown_width=%" PRIu64
+        " memory_write_unknown_width=%" PRIu64 " memory_read_bytes=%" PRIu64
+        " memory_write_bytes=%" PRIu64 " global_load_bytes=%" PRIu64
+        " global_store_bytes=%" PRIu64 " buffer_load_bytes=%" PRIu64
+        " buffer_store_bytes=%" PRIu64 " flat_read_bytes=%" PRIu64
+        " flat_write_bytes=%" PRIu64 " local_read_bytes=%" PRIu64
+        " local_write_bytes=%" PRIu64 " scalar_read_bytes=%" PRIu64
+        " scalar_write_bytes=%" PRIu64 " unclassified_read_bytes=%" PRIu64
+        " unclassified_write_bytes=%" PRIu64 " atomic=%" PRIu64
+        " branch=%" PRIu64 " barrier=%" PRIu64 " control=%" PRIu64
+        " conversion=%" PRIu64 " cache=%" PRIu64 " register_move=%" PRIu64 "\n",
         mix->descriptor_count, mix->unknown_count, mix->scalar_alu_count,
         mix->vector_alu_count, mix->matrix_count, mix->mfma_count,
         mix->wmma_count, mix->dot_count, mix->global_memory_count,
         mix->global_load_count, mix->global_store_count, mix->buffer_load_count,
         mix->buffer_store_count, mix->flat_memory_count,
         mix->local_memory_count, mix->scalar_memory_count,
-        mix->generic_memory_count, mix->atomic_count, mix->branch_count,
-        mix->barrier_count, mix->control_count, mix->conversion_count,
-        mix->cache_count, mix->register_move_count));
+        mix->generic_memory_count, mix->memory_read_unknown_width_count,
+        mix->memory_write_unknown_width_count, mix->memory_read_byte_count,
+        mix->memory_write_byte_count, mix->global_load_byte_count,
+        mix->global_store_byte_count, mix->buffer_load_byte_count,
+        mix->buffer_store_byte_count, mix->flat_read_byte_count,
+        mix->flat_write_byte_count, mix->local_read_byte_count,
+        mix->local_write_byte_count, mix->scalar_read_byte_count,
+        mix->scalar_write_byte_count, mix->unclassified_read_byte_count,
+        mix->unclassified_write_byte_count, mix->atomic_count,
+        mix->branch_count, mix->barrier_count, mix->control_count,
+        mix->conversion_count, mix->cache_count, mix->register_move_count));
   }
 
   if (iree_any_bit_set(report->detail_flags,
@@ -1838,6 +1854,53 @@ static iree_status_t loom_target_compile_report_format_instruction_mix_json(
       stream, &first_field, "scalar_memory_count", mix->scalar_memory_count));
   IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
       stream, &first_field, "generic_memory_count", mix->generic_memory_count));
+  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
+      stream, &first_field, "memory_read_unknown_width_count",
+      mix->memory_read_unknown_width_count));
+  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
+      stream, &first_field, "memory_write_unknown_width_count",
+      mix->memory_write_unknown_width_count));
+  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
+      stream, &first_field, "memory_read_byte_count",
+      mix->memory_read_byte_count));
+  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
+      stream, &first_field, "memory_write_byte_count",
+      mix->memory_write_byte_count));
+  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
+      stream, &first_field, "global_load_byte_count",
+      mix->global_load_byte_count));
+  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
+      stream, &first_field, "global_store_byte_count",
+      mix->global_store_byte_count));
+  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
+      stream, &first_field, "buffer_load_byte_count",
+      mix->buffer_load_byte_count));
+  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
+      stream, &first_field, "buffer_store_byte_count",
+      mix->buffer_store_byte_count));
+  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
+      stream, &first_field, "flat_read_byte_count", mix->flat_read_byte_count));
+  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
+      stream, &first_field, "flat_write_byte_count",
+      mix->flat_write_byte_count));
+  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
+      stream, &first_field, "local_read_byte_count",
+      mix->local_read_byte_count));
+  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
+      stream, &first_field, "local_write_byte_count",
+      mix->local_write_byte_count));
+  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
+      stream, &first_field, "scalar_read_byte_count",
+      mix->scalar_read_byte_count));
+  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
+      stream, &first_field, "scalar_write_byte_count",
+      mix->scalar_write_byte_count));
+  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
+      stream, &first_field, "unclassified_read_byte_count",
+      mix->unclassified_read_byte_count));
+  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
+      stream, &first_field, "unclassified_write_byte_count",
+      mix->unclassified_write_byte_count));
   IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
       stream, &first_field, "atomic_count", mix->atomic_count));
   IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(

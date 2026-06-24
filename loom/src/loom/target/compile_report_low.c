@@ -328,6 +328,88 @@ static bool loom_target_compile_report_low_node_features_are_known(
          features->cache || features->register_move;
 }
 
+static uint64_t loom_target_compile_report_low_effect_byte_count(
+    const loom_low_effect_t* effect, bool* out_known) {
+  *out_known = effect->width_bits != 0 && (effect->width_bits % 8u) == 0;
+  return *out_known ? effect->width_bits / 8u : 0;
+}
+
+static void loom_target_compile_report_accumulate_low_memory_effect(
+    const loom_low_effect_t* effect,
+    const loom_target_compile_report_low_node_features_t* features,
+    loom_target_compile_report_static_instruction_mix_t* mix) {
+  if (effect->kind != LOOM_LOW_EFFECT_KIND_READ &&
+      effect->kind != LOOM_LOW_EFFECT_KIND_WRITE) {
+    return;
+  }
+
+  bool known_byte_width = false;
+  const uint64_t byte_count = loom_target_compile_report_low_effect_byte_count(
+      effect, &known_byte_width);
+  uint64_t* total_byte_count = NULL;
+  uint64_t* family_byte_count = NULL;
+  if (effect->kind == LOOM_LOW_EFFECT_KIND_READ) {
+    if (!known_byte_width) {
+      ++mix->memory_read_unknown_width_count;
+      return;
+    }
+    total_byte_count = &mix->memory_read_byte_count;
+    if (features->global_load) {
+      family_byte_count = &mix->global_load_byte_count;
+    } else if (features->buffer_load) {
+      family_byte_count = &mix->buffer_load_byte_count;
+    } else if (features->flat_memory) {
+      family_byte_count = &mix->flat_read_byte_count;
+    } else if (features->local_memory) {
+      family_byte_count = &mix->local_read_byte_count;
+    } else if (features->scalar_memory) {
+      family_byte_count = &mix->scalar_read_byte_count;
+    } else if (features->generic_memory || features->global_memory ||
+               features->atomic) {
+      family_byte_count = &mix->unclassified_read_byte_count;
+    }
+  } else {
+    if (!known_byte_width) {
+      ++mix->memory_write_unknown_width_count;
+      return;
+    }
+    total_byte_count = &mix->memory_write_byte_count;
+    if (features->global_store) {
+      family_byte_count = &mix->global_store_byte_count;
+    } else if (features->buffer_store) {
+      family_byte_count = &mix->buffer_store_byte_count;
+    } else if (features->flat_memory) {
+      family_byte_count = &mix->flat_write_byte_count;
+    } else if (features->local_memory) {
+      family_byte_count = &mix->local_write_byte_count;
+    } else if (features->scalar_memory) {
+      family_byte_count = &mix->scalar_write_byte_count;
+    } else if (features->generic_memory || features->global_memory ||
+               features->atomic) {
+      family_byte_count = &mix->unclassified_write_byte_count;
+    }
+  }
+  *total_byte_count += byte_count;
+  if (family_byte_count != NULL) {
+    *family_byte_count += byte_count;
+  }
+}
+
+static void loom_target_compile_report_accumulate_low_memory_effects(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_low_descriptor_t* descriptor,
+    const loom_target_compile_report_low_node_features_t* features,
+    loom_target_compile_report_static_instruction_mix_t* mix) {
+  IREE_ASSERT_LE((uint64_t)descriptor->effect_start + descriptor->effect_count,
+                 descriptor_set->effect_count);
+  const loom_low_effect_t* effects =
+      &descriptor_set->effects[descriptor->effect_start];
+  for (uint16_t i = 0; i < descriptor->effect_count; ++i) {
+    loom_target_compile_report_accumulate_low_memory_effect(&effects[i],
+                                                            features, mix);
+  }
+}
+
 static void loom_target_compile_report_accumulate_low_node_static_mix(
     const loom_low_schedule_table_t* schedule,
     const loom_low_descriptor_set_t* descriptor_set,
@@ -349,6 +431,8 @@ static void loom_target_compile_report_accumulate_low_node_static_mix(
   const loom_target_compile_report_low_node_features_t features =
       loom_target_compile_report_classify_low_node_features(descriptor_set,
                                                             node);
+  loom_target_compile_report_accumulate_low_memory_effects(
+      descriptor_set, node->descriptor, &features, mix);
   mix->scalar_alu_count += features.scalar_alu ? 1 : 0;
   mix->vector_alu_count += features.vector_alu ? 1 : 0;
   mix->matrix_count += features.matrix ? 1 : 0;
@@ -395,6 +479,25 @@ static void loom_target_compile_report_accumulate_static_mix(
   target->local_memory_count += source->local_memory_count;
   target->scalar_memory_count += source->scalar_memory_count;
   target->generic_memory_count += source->generic_memory_count;
+  target->memory_read_unknown_width_count +=
+      source->memory_read_unknown_width_count;
+  target->memory_write_unknown_width_count +=
+      source->memory_write_unknown_width_count;
+  target->memory_read_byte_count += source->memory_read_byte_count;
+  target->memory_write_byte_count += source->memory_write_byte_count;
+  target->global_load_byte_count += source->global_load_byte_count;
+  target->global_store_byte_count += source->global_store_byte_count;
+  target->buffer_load_byte_count += source->buffer_load_byte_count;
+  target->buffer_store_byte_count += source->buffer_store_byte_count;
+  target->flat_read_byte_count += source->flat_read_byte_count;
+  target->flat_write_byte_count += source->flat_write_byte_count;
+  target->local_read_byte_count += source->local_read_byte_count;
+  target->local_write_byte_count += source->local_write_byte_count;
+  target->scalar_read_byte_count += source->scalar_read_byte_count;
+  target->scalar_write_byte_count += source->scalar_write_byte_count;
+  target->unclassified_read_byte_count += source->unclassified_read_byte_count;
+  target->unclassified_write_byte_count +=
+      source->unclassified_write_byte_count;
   target->atomic_count += source->atomic_count;
   target->branch_count += source->branch_count;
   target->barrier_count += source->barrier_count;
