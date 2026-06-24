@@ -965,6 +965,8 @@ iree_cc_test(
     iree::base
     iree::hal
     iree::hal::cts::util::test_base
+    iree::hal::drivers::amdgpu::util::libhsa
+    iree::hal::drivers::amdgpu::util::topology
     iree::testing::gtest
     iree::testing::gtest_main
   LABELS
