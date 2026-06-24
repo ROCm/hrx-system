@@ -1838,16 +1838,6 @@ static iree_status_t id4_vae_program_author_upsample_conv3x3_bias(
         output_element_count, ID4_VAE_DECODE_MAX_ELEMENT_COUNT);
   }
 
-  id4_pipeline_program_tensor_t weight = id4_pipeline_program_tensor_invalid();
-  IREE_RETURN_IF_ERROR(id4_vae_program_parameter_tensor(
-      builder, weight_key,
-      id4_pipeline_program_make_shape_rank4(channel_count, channel_count, 3, 3),
-      &weight));
-  id4_pipeline_program_tensor_t bias = id4_pipeline_program_tensor_invalid();
-  IREE_RETURN_IF_ERROR(id4_vae_program_parameter_tensor(
-      builder, bias_key, id4_pipeline_program_make_shape_rank1(channel_count),
-      &bias));
-
   id4_pipeline_program_tensor_t output = id4_pipeline_program_tensor_invalid();
   IREE_RETURN_IF_ERROR(id4_vae_program_acquire_tensor(
       builder, output_name,
@@ -1859,12 +1849,6 @@ static iree_status_t id4_vae_program_author_upsample_conv3x3_bias(
   IREE_RETURN_IF_ERROR(id4_vae_program_build_upsample_conv3x3_bias_configs(
       input_width, input_height, channel_count, batch_count, output_width,
       output_height, output_element_count, &config_list));
-  id4_pipeline_program_dispatch_binding_t bindings[] = {
-      id4_pipeline_program_read(input),
-      id4_pipeline_program_read(weight),
-      id4_pipeline_program_read(bias),
-      id4_pipeline_program_write(output),
-  };
   id4_pipeline_program_dispatch_loom_options_t dispatch_options;
   memset(&dispatch_options, 0, sizeof(dispatch_options));
   dispatch_options.structure_size = sizeof(dispatch_options);
@@ -1873,9 +1857,12 @@ static iree_status_t id4_vae_program_author_upsample_conv3x3_bias(
       IREE_SV("id4_vae_upsample_conv3x3_bias_f32");
   uint32_t output_channel_tile_width = 1;
   uint32_t dispatch_element_count = (uint32_t)output_element_count;
+  id4_vae_program_conv3x3_weight_layout_t weight_layout =
+      ID4_VAE_PROGRAM_CONV3X3_WEIGHT_LAYOUT_SOURCE;
   if (batch_count == 1 && channel_count >= 8 && channel_count % 8 == 0) {
-    function_name = IREE_SV("id4_vae_upsample_conv3x3_bias_ic4_oc8_f32");
+    function_name = IREE_SV("id4_vae_upsample_conv3x3_bias_ic4_oc8_packed_f32");
     output_channel_tile_width = 8;
+    weight_layout = ID4_VAE_PROGRAM_CONV3X3_WEIGHT_LAYOUT_PACKED_IC_KY_KX_OC;
     dispatch_element_count =
         (uint32_t)(output_element_count / output_channel_tile_width);
     IREE_RETURN_IF_ERROR(
@@ -1892,6 +1879,28 @@ static iree_status_t id4_vae_program_author_upsample_conv3x3_bias(
             channel_count, output_channel_tile_width, output_element_count,
             &config_list));
   }
+
+  iree_string_view_t resolved_weight_key = iree_string_view_empty();
+  id4_pipeline_program_shape_t weight_shape;
+  char packed_weight_key_storage[ID4_VAE_PROGRAM_NAME_BUFFER_CAPACITY];
+  IREE_RETURN_IF_ERROR(id4_vae_program_resolve_conv3x3_weight(
+      weight_key, channel_count, channel_count, weight_layout,
+      packed_weight_key_storage, sizeof(packed_weight_key_storage),
+      &resolved_weight_key, &weight_shape));
+  id4_pipeline_program_tensor_t weight = id4_pipeline_program_tensor_invalid();
+  IREE_RETURN_IF_ERROR(id4_vae_program_parameter_tensor(
+      builder, resolved_weight_key, weight_shape, &weight));
+  id4_pipeline_program_tensor_t bias = id4_pipeline_program_tensor_invalid();
+  IREE_RETURN_IF_ERROR(id4_vae_program_parameter_tensor(
+      builder, bias_key, id4_pipeline_program_make_shape_rank1(channel_count),
+      &bias));
+
+  id4_pipeline_program_dispatch_binding_t bindings[] = {
+      id4_pipeline_program_read(input),
+      id4_pipeline_program_read(weight),
+      id4_pipeline_program_read(bias),
+      id4_pipeline_program_write(output),
+  };
   dispatch_options.kernel = id4_pipeline_make_kernel_ref(
       IREE_SV("vae/upsample_conv3x3_bias_f32"), function_name);
   dispatch_options.dispatch_config =

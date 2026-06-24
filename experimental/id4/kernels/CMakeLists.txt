@@ -1756,6 +1756,29 @@ iree_native_test(
 
 iree_native_test(
   NAME
+    "vae_upsample_conv3x3_bias_ic4_oc8_packed_f32_small_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/upsample_conv3x3_bias_f32.loom}}"
+    "--benchmark=@id4_vae_upsample_conv3x3_bias_ic4_oc8_packed_f32_small"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.vae.upsample_conv3x3_bias.input_width=1"
+    "--config=id4.vae.upsample_conv3x3_bias.input_height=1"
+    "--config=id4.vae.upsample_conv3x3_bias.channel_count=8"
+    "--config=id4.vae.upsample_conv3x3_bias.batch_count=1"
+    "--config=id4.vae.upsample_conv3x3_bias.output_width=2"
+    "--config=id4.vae.upsample_conv3x3_bias.output_height=2"
+    "--config=id4.vae.upsample_conv3x3_bias.output_element_count=32"
+    "--config=id4.vae.upsample_conv3x3_bias.output_channel_tile_count=1"
+    "--config=id4.vae.upsample_conv3x3_bias.output_tile_element_count=4"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
     "vae_upsample_conv3x3_bias_ic4_f32_flux2_tile_mid_shape_plan_test"
   ARGS
     "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/upsample_conv3x3_bias_f32.loom}}"
@@ -1769,6 +1792,52 @@ iree_native_test(
     "--config=id4.vae.upsample_conv3x3_bias.output_width=256"
     "--config=id4.vae.upsample_conv3x3_bias.output_height=256"
     "--config=id4.vae.upsample_conv3x3_bias.output_element_count=16777216"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
+    "vae_upsample_conv3x3_bias_ic4_oc8_f32_flux2_tile_mid_shape_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/upsample_conv3x3_bias_f32.loom}}"
+    "--benchmark=@id4_vae_upsample_conv3x3_bias_ic4_oc8_f32_flux2_tile_mid_shape"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.vae.upsample_conv3x3_bias.input_width=128"
+    "--config=id4.vae.upsample_conv3x3_bias.input_height=128"
+    "--config=id4.vae.upsample_conv3x3_bias.channel_count=256"
+    "--config=id4.vae.upsample_conv3x3_bias.batch_count=1"
+    "--config=id4.vae.upsample_conv3x3_bias.output_width=256"
+    "--config=id4.vae.upsample_conv3x3_bias.output_height=256"
+    "--config=id4.vae.upsample_conv3x3_bias.output_element_count=16777216"
+    "--config=id4.vae.upsample_conv3x3_bias.output_channel_tile_count=32"
+    "--config=id4.vae.upsample_conv3x3_bias.output_tile_element_count=2097152"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
+    "vae_upsample_conv3x3_bias_ic4_oc8_packed_f32_flux2_tile_mid_shape_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/upsample_conv3x3_bias_f32.loom}}"
+    "--benchmark=@id4_vae_upsample_conv3x3_bias_ic4_oc8_packed_f32_flux2_tile_mid_shape"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.vae.upsample_conv3x3_bias.input_width=128"
+    "--config=id4.vae.upsample_conv3x3_bias.input_height=128"
+    "--config=id4.vae.upsample_conv3x3_bias.channel_count=256"
+    "--config=id4.vae.upsample_conv3x3_bias.batch_count=1"
+    "--config=id4.vae.upsample_conv3x3_bias.output_width=256"
+    "--config=id4.vae.upsample_conv3x3_bias.output_height=256"
+    "--config=id4.vae.upsample_conv3x3_bias.output_element_count=16777216"
+    "--config=id4.vae.upsample_conv3x3_bias.output_channel_tile_count=32"
+    "--config=id4.vae.upsample_conv3x3_bias.output_tile_element_count=2097152"
   SRC
     loom::tools::iree-benchmark-loom
   LABELS
@@ -5705,6 +5774,33 @@ endif()
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
 iree_native_test(
   NAME
+    "vae_upsample_conv3x3_bias_ic4_oc8_packed_f32_small_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/upsample_conv3x3_bias_f32.loom}}"
+    "--case=@id4_vae_upsample_conv3x3_bias_ic4_oc8_packed_f32_small_case"
+    "--device=amdgpu://0"
+    "--config=id4.vae.upsample_conv3x3_bias.input_width=1"
+    "--config=id4.vae.upsample_conv3x3_bias.input_height=1"
+    "--config=id4.vae.upsample_conv3x3_bias.channel_count=8"
+    "--config=id4.vae.upsample_conv3x3_bias.batch_count=1"
+    "--config=id4.vae.upsample_conv3x3_bias.output_width=2"
+    "--config=id4.vae.upsample_conv3x3_bias.output_height=2"
+    "--config=id4.vae.upsample_conv3x3_bias.output_element_count=32"
+    "--config=id4.vae.upsample_conv3x3_bias.output_channel_tile_count=1"
+    "--config=id4.vae.upsample_conv3x3_bias.output_tile_element_count=4"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
     "vae_upsample_conv3x3_bias_ic4_f32_flux2_tile_mid_shape_hal_test"
   ARGS
     "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/upsample_conv3x3_bias_f32.loom}}"
@@ -5717,6 +5813,60 @@ iree_native_test(
     "--config=id4.vae.upsample_conv3x3_bias.output_width=256"
     "--config=id4.vae.upsample_conv3x3_bias.output_height=256"
     "--config=id4.vae.upsample_conv3x3_bias.output_element_count=16777216"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
+    "vae_upsample_conv3x3_bias_ic4_oc8_f32_flux2_tile_mid_shape_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/upsample_conv3x3_bias_f32.loom}}"
+    "--case=@id4_vae_upsample_conv3x3_bias_ic4_oc8_f32_flux2_tile_mid_shape_case"
+    "--device=amdgpu://0"
+    "--config=id4.vae.upsample_conv3x3_bias.input_width=128"
+    "--config=id4.vae.upsample_conv3x3_bias.input_height=128"
+    "--config=id4.vae.upsample_conv3x3_bias.channel_count=256"
+    "--config=id4.vae.upsample_conv3x3_bias.batch_count=1"
+    "--config=id4.vae.upsample_conv3x3_bias.output_width=256"
+    "--config=id4.vae.upsample_conv3x3_bias.output_height=256"
+    "--config=id4.vae.upsample_conv3x3_bias.output_element_count=16777216"
+    "--config=id4.vae.upsample_conv3x3_bias.output_channel_tile_count=32"
+    "--config=id4.vae.upsample_conv3x3_bias.output_tile_element_count=2097152"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
+    "vae_upsample_conv3x3_bias_ic4_oc8_packed_f32_flux2_tile_mid_shape_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/upsample_conv3x3_bias_f32.loom}}"
+    "--case=@id4_vae_upsample_conv3x3_bias_ic4_oc8_packed_f32_flux2_tile_mid_shape_case"
+    "--device=amdgpu://0"
+    "--config=id4.vae.upsample_conv3x3_bias.input_width=128"
+    "--config=id4.vae.upsample_conv3x3_bias.input_height=128"
+    "--config=id4.vae.upsample_conv3x3_bias.channel_count=256"
+    "--config=id4.vae.upsample_conv3x3_bias.batch_count=1"
+    "--config=id4.vae.upsample_conv3x3_bias.output_width=256"
+    "--config=id4.vae.upsample_conv3x3_bias.output_height=256"
+    "--config=id4.vae.upsample_conv3x3_bias.output_element_count=16777216"
+    "--config=id4.vae.upsample_conv3x3_bias.output_channel_tile_count=32"
+    "--config=id4.vae.upsample_conv3x3_bias.output_tile_element_count=2097152"
   SRC
     loom::tools::iree-test-loom
   LABELS

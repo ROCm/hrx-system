@@ -20,6 +20,7 @@ iree_runtime_cc_library(
     hdrs = ["ideogram4_decode.h"],
     deps = [
         ":ideogram4_decode_program",
+        ":vae_parameters",
         "//experimental/id4/pipeline:diagnostics",
         "//experimental/id4/pipeline:kernel_cache",
         "//experimental/id4/pipeline:program",

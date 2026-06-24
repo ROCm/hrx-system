@@ -18,6 +18,7 @@ iree_cc_library(
     "ideogram4_decode.c"
   DEPS
     ::ideogram4_decode_program
+    ::vae_parameters
     iree::base
     iree::base::internal::arena
     iree::experimental::id4::pipeline::diagnostics
