@@ -8,6 +8,8 @@
 
 #include <string.h>
 
+#include "iree/hal/drivers/amdgpu/physical_device_capabilities.h"
+
 static iree_status_t iree_hal_amdgpu_device_spec_verify_params(
     const iree_hal_amdgpu_device_spec_params_t* params) {
   IREE_ASSERT_ARGUMENT(params);
@@ -396,15 +398,38 @@ static iree_status_t iree_hal_amdgpu_device_spec_populate_dispatch(
 static iree_status_t iree_hal_amdgpu_device_spec_populate_timing(
     const iree_hal_amdgpu_device_spec_params_t* params,
     iree_hal_device_spec_builder_t* builder) {
+  // Device-side timestamps require queue-local PM4 timestamp packet support,
+  // which is a function of each physical device's gfx arch. A logical device is
+  // homogeneous today, but gate conservatively (AND across every physical
+  // device) so DEVICE_TIMESTAMPS is advertised only when all of them qualify;
+  // this keeps the capability query authoritative and never over-promising.
+  bool device_timestamps_supported = true;
+  for (iree_host_size_t i = 0; i < params->physical_device_count; ++i) {
+    if (iree_hal_amdgpu_select_pm4_timestamp_strategy(
+            params->physical_devices[i].target_id.version) ==
+        IREE_HAL_AMDGPU_PM4_TIMESTAMP_STRATEGY_NONE) {
+      device_timestamps_supported = false;
+      break;
+    }
+  }
+
+  iree_hal_device_timing_spec_flags_t flags =
+      IREE_HAL_DEVICE_TIMING_SPEC_FLAG_HOST_CORRELATION |
+      IREE_HAL_DEVICE_TIMING_SPEC_FLAG_DISPATCH_EVENTS |
+      IREE_HAL_DEVICE_TIMING_SPEC_FLAG_HARDWARE_COUNTERS |
+      IREE_HAL_DEVICE_TIMING_SPEC_FLAG_TRACE_CAPTURE |
+      IREE_HAL_DEVICE_TIMING_SPEC_FLAG_PROFILING_PERTURBS_EXECUTION;
+  if (device_timestamps_supported) {
+    flags |= IREE_HAL_DEVICE_TIMING_SPEC_FLAG_DEVICE_TIMESTAMPS;
+  }
+
   iree_hal_device_timing_spec_t timing = {
       .timestamp_valid_bits = 64,
-      .timestamp_frequency_hz = params->timestamp_frequency_hz,
-      .flags = IREE_HAL_DEVICE_TIMING_SPEC_FLAG_DEVICE_TIMESTAMPS |
-               IREE_HAL_DEVICE_TIMING_SPEC_FLAG_HOST_CORRELATION |
-               IREE_HAL_DEVICE_TIMING_SPEC_FLAG_DISPATCH_EVENTS |
-               IREE_HAL_DEVICE_TIMING_SPEC_FLAG_HARDWARE_COUNTERS |
-               IREE_HAL_DEVICE_TIMING_SPEC_FLAG_TRACE_CAPTURE |
-               IREE_HAL_DEVICE_TIMING_SPEC_FLAG_PROFILING_PERTURBS_EXECUTION,
+      // Only advertise a tick frequency when device-side timestamps are
+      // supported; otherwise a nonzero frequency would imply support.
+      .timestamp_frequency_hz =
+          device_timestamps_supported ? params->timestamp_frequency_hz : 0,
+      .flags = flags,
   };
   return iree_hal_device_spec_builder_set_timing(builder, &timing);
 }

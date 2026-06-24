@@ -22,10 +22,25 @@ iree_amdgpu_target_selectors_flag(
 )
 
 iree_runtime_cc_library(
+    name = "physical_device_capabilities",
+    srcs = ["physical_device_capabilities.c"],
+    hdrs = ["physical_device_capabilities.h"],
+    deps = [
+        ":headers",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/drivers/amdgpu/util:libhsa",
+        "//runtime/src/iree/hal/drivers/amdgpu/util:target_id",
+        "//runtime/src/iree/hal/drivers/amdgpu/util:topology",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "device_spec_builder",
     srcs = ["device_spec_builder.c"],
     hdrs = ["device_spec_builder.h"],
     deps = [
+        ":physical_device_capabilities",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/drivers/amdgpu/util:target_id",
@@ -203,7 +218,6 @@ iree_runtime_cc_library(
         "logical_device.h",
         "physical_device.c",
         "physical_device.h",
-        "physical_device_capabilities.c",
         "physical_device_capabilities.h",
         "pm4_command_buffer.c",
         "pm4_command_buffer.h",
@@ -242,6 +256,7 @@ iree_runtime_cc_library(
         ":executable_metadata",
         ":executable_metadata_hsaco",
         ":kernarg_layout",
+        ":physical_device_capabilities",
         ":profile_events",
         ":queue_affinity",
         ":source_context",
@@ -383,6 +398,20 @@ iree_runtime_cc_test(
         ":device_spec_builder",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/utils:device_spec_builder",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "device_spec_builder_test",
+    srcs = ["device_spec_builder_test.cc"],
+    deps = [
+        ":device_spec_builder",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/drivers/amdgpu/util:target_id",
         "//runtime/src/iree/hal/utils:device_spec_builder",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
@@ -707,8 +736,8 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_test(
-    name = "host_queue_timestamp_capture_test",
-    srcs = ["host_queue_timestamp_capture_test.cc"],
+    name = "host_queue_timestamp_test",
+    srcs = ["host_queue_timestamp_test.cc"],
     deps = [
         ":amdgpu",
         ":headers",

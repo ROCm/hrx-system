@@ -31,7 +31,7 @@ typedef enum iree_hal_amdgpu_pending_op_type_e {
   IREE_HAL_AMDGPU_PENDING_OP_DEALLOCA,
   IREE_HAL_AMDGPU_PENDING_OP_HOST_CALL,
   IREE_HAL_AMDGPU_PENDING_OP_HOST_ACTION,
-  IREE_HAL_AMDGPU_PENDING_OP_CAPTURE_TIMESTAMP,
+  IREE_HAL_AMDGPU_PENDING_OP_TIMESTAMP,
 } iree_hal_amdgpu_pending_op_type_t;
 
 // Completion ownership for a deferred operation.
@@ -215,15 +215,15 @@ struct iree_hal_amdgpu_pending_op_t {
       iree_hal_amdgpu_reclaim_action_t action;
     } host_action;
 
-    // Captured queue_capture_timestamp payload.
+    // Captured queue_timestamp payload.
     struct {
       // Target buffer retained until the deferred capture operation issues.
       iree_hal_buffer_t* target_buffer;
-      // Target byte offset captured from queue_capture_timestamp.
+      // Target byte offset captured from queue_timestamp.
       iree_device_size_t target_offset;
-      // HAL capture-timestamp flags captured from queue_capture_timestamp.
-      iree_hal_capture_timestamp_flags_t flags;
-    } capture_timestamp;
+      // HAL timestamp flags captured from queue_timestamp.
+      iree_hal_timestamp_flags_t flags;
+    } timestamp;
   };
 };
 

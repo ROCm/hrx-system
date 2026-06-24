@@ -524,6 +524,28 @@ IREE_API_EXPORT iree_status_t iree_hal_device_queue_execute(
   return status;
 }
 
+IREE_API_EXPORT iree_status_t iree_hal_device_queue_timestamp(
+    iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_hal_timestamp_flags_t flags) {
+  IREE_ASSERT_ARGUMENT(device);
+  IREE_ASSERT_ARGUMENT(
+      !wait_semaphore_list.count ||
+      (wait_semaphore_list.semaphores && wait_semaphore_list.payload_values));
+  IREE_ASSERT_ARGUMENT(!signal_semaphore_list.count ||
+                       (signal_semaphore_list.semaphores &&
+                        signal_semaphore_list.payload_values));
+  IREE_ASSERT_ARGUMENT(target_buffer);
+  IREE_TRACE_ZONE_BEGIN(z0);
+  iree_status_t status = _VTABLE_DISPATCH(device, queue_timestamp)(
+      device, queue_affinity, wait_semaphore_list, signal_semaphore_list,
+      target_buffer, target_offset, flags);
+  IREE_TRACE_ZONE_END(z0);
+  return status;
+}
+
 IREE_API_EXPORT iree_status_t iree_hal_device_queue_barrier(
     iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
     const iree_hal_semaphore_list_t wait_semaphore_list,
@@ -534,38 +556,6 @@ IREE_API_EXPORT iree_status_t iree_hal_device_queue_barrier(
   iree_status_t status = iree_hal_device_queue_execute(
       device, queue_affinity, wait_semaphore_list, signal_semaphore_list, NULL,
       iree_hal_buffer_binding_table_empty(), flags);
-  IREE_TRACE_ZONE_END(z0);
-  return status;
-}
-
-IREE_API_EXPORT iree_status_t iree_hal_device_queue_capture_timestamp(
-    iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
-    const iree_hal_semaphore_list_t wait_semaphore_list,
-    const iree_hal_semaphore_list_t signal_semaphore_list,
-    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
-    iree_hal_capture_timestamp_flags_t flags) {
-  IREE_ASSERT_ARGUMENT(device);
-  IREE_ASSERT_ARGUMENT(
-      !wait_semaphore_list.count ||
-      (wait_semaphore_list.semaphores && wait_semaphore_list.payload_values));
-  IREE_ASSERT_ARGUMENT(!signal_semaphore_list.count ||
-                       (signal_semaphore_list.semaphores &&
-                        signal_semaphore_list.payload_values));
-  IREE_ASSERT_ARGUMENT(target_buffer);
-  // Optional capability: when the driver leaves the vtable slot unset we report
-  // UNIMPLEMENTED so callers can fall back to a host-observed timestamp.
-  const iree_hal_device_vtable_t* vtable =
-      (const iree_hal_device_vtable_t*)((const iree_hal_resource_t*)device)
-          ->vtable;
-  if (!vtable->queue_capture_timestamp) {
-    return iree_make_status(
-        IREE_STATUS_UNIMPLEMENTED,
-        "device does not support device-side timestamp capture");
-  }
-  IREE_TRACE_ZONE_BEGIN(z0);
-  iree_status_t status = vtable->queue_capture_timestamp(
-      device, queue_affinity, wait_semaphore_list, signal_semaphore_list,
-      target_buffer, target_offset, flags);
   IREE_TRACE_ZONE_END(z0);
   return status;
 }

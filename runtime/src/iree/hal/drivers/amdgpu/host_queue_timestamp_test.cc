@@ -4,12 +4,12 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// End-to-end tests for iree_hal_device_queue_capture_timestamp on the amdgpu
+// End-to-end tests for iree_hal_device_queue_timestamp on the amdgpu
 // driver: the device must write a real, monotonically non-decreasing GPU clock
 // tick into the caller buffer at the queue timeline point, and the tick delta
 // must convert to a sane positive duration around real device work. The tests
-// also cover the target-validation rejection paths, non-zero target offsets, and
-// the deferred (wait-before-signal) submission path. GPU required.
+// also cover the target-validation rejection paths, non-zero target offsets,
+// and the deferred (wait-before-signal) submission path. GPU required.
 
 #include <cstdint>
 
@@ -25,7 +25,7 @@
 namespace iree::hal::amdgpu {
 namespace {
 
-class HostQueueTimestampCaptureTest : public ::testing::Test {
+class HostQueueTimestampTest : public ::testing::Test {
  protected:
   static void SetUpTestSuite() {
     host_allocator_ = iree_allocator_system();
@@ -54,9 +54,9 @@ class HostQueueTimestampCaptureTest : public ::testing::Test {
   static iree_hal_amdgpu_topology_t topology_;
 };
 
-iree_allocator_t HostQueueTimestampCaptureTest::host_allocator_;
-iree_hal_amdgpu_libhsa_t HostQueueTimestampCaptureTest::libhsa_;
-iree_hal_amdgpu_topology_t HostQueueTimestampCaptureTest::topology_;
+iree_allocator_t HostQueueTimestampTest::host_allocator_;
+iree_hal_amdgpu_libhsa_t HostQueueTimestampTest::libhsa_;
+iree_hal_amdgpu_topology_t HostQueueTimestampTest::topology_;
 
 // Minimal logical-device harness (mirrors host_queue_submission_test.cc).
 class TestLogicalDevice {
@@ -95,9 +95,8 @@ iree_status_t AllocateTimestampBuffer(iree_hal_device_t* device,
   params.type =
       IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL | IREE_HAL_MEMORY_TYPE_HOST_VISIBLE;
   params.usage = IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_MAPPING;
-  return iree_hal_allocator_allocate_buffer(iree_hal_device_allocator(device),
-                                            params, sizeof(uint64_t),
-                                            out_buffer);
+  return iree_hal_allocator_allocate_buffer(
+      iree_hal_device_allocator(device), params, sizeof(uint64_t), out_buffer);
 }
 
 // Builds a single-semaphore timeline list pointing at |value|.
@@ -112,7 +111,7 @@ static iree_hal_semaphore_list_t TimelinePoint(iree_hal_semaphore_t** semaphore,
 }
 
 // The device exposes a usable device-timestamp domain via the device spec.
-TEST_F(HostQueueTimestampCaptureTest, DeviceSpecAdvertisesTimestamps) {
+TEST_F(HostQueueTimestampTest, DeviceSpecAdvertisesTimestamps) {
   iree_hal_amdgpu_logical_device_options_t options;
   iree_hal_amdgpu_logical_device_options_initialize(&options);
   TestLogicalDevice test_device;
@@ -131,7 +130,7 @@ TEST_F(HostQueueTimestampCaptureTest, DeviceSpecAdvertisesTimestamps) {
 }
 
 // Two ordered captures write non-zero, monotonically non-decreasing ticks.
-TEST_F(HostQueueTimestampCaptureTest, CaptureWritesMonotonicDeviceTicks) {
+TEST_F(HostQueueTimestampTest, WritesMonotonicDeviceTicks) {
   iree_hal_amdgpu_logical_device_options_t options;
   iree_hal_amdgpu_logical_device_options_initialize(&options);
   TestLogicalDevice test_device;
@@ -151,14 +150,14 @@ TEST_F(HostQueueTimestampCaptureTest, CaptureWritesMonotonicDeviceTicks) {
 
   uint64_t v1 = 1;
   uint64_t v2 = 2;
-  IREE_ASSERT_OK(iree_hal_device_queue_capture_timestamp(
+  IREE_ASSERT_OK(iree_hal_device_queue_timestamp(
       device, IREE_HAL_QUEUE_AFFINITY_ANY, iree_hal_semaphore_list_empty(),
       TimelinePoint(&timeline, &v1), tick0, /*target_offset=*/0,
-      IREE_HAL_CAPTURE_TIMESTAMP_FLAG_NONE));
-  IREE_ASSERT_OK(iree_hal_device_queue_capture_timestamp(
+      IREE_HAL_TIMESTAMP_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_device_queue_timestamp(
       device, IREE_HAL_QUEUE_AFFINITY_ANY, TimelinePoint(&timeline, &v1),
       TimelinePoint(&timeline, &v2), tick1, /*target_offset=*/0,
-      IREE_HAL_CAPTURE_TIMESTAMP_FLAG_NONE));
+      IREE_HAL_TIMESTAMP_FLAG_NONE));
   IREE_ASSERT_OK(iree_hal_semaphore_wait(
       timeline, 2ull, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
 
@@ -180,7 +179,7 @@ TEST_F(HostQueueTimestampCaptureTest, CaptureWritesMonotonicDeviceTicks) {
 
 // A capture bracketing real device work yields a strictly positive elapsed
 // time that converts to a sane number of milliseconds.
-TEST_F(HostQueueTimestampCaptureTest, CaptureMeasuresElapsedAroundWork) {
+TEST_F(HostQueueTimestampTest, MeasuresElapsedAroundWork) {
   iree_hal_amdgpu_logical_device_options_t options;
   iree_hal_amdgpu_logical_device_options_initialize(&options);
   TestLogicalDevice test_device;
@@ -218,18 +217,19 @@ TEST_F(HostQueueTimestampCaptureTest, CaptureMeasuresElapsedAroundWork) {
   uint64_t v2 = 2;
   uint64_t v3 = 3;
   const uint32_t pattern = 0xABCDu;
-  IREE_ASSERT_OK(iree_hal_device_queue_capture_timestamp(
+  IREE_ASSERT_OK(iree_hal_device_queue_timestamp(
       device, IREE_HAL_QUEUE_AFFINITY_ANY, iree_hal_semaphore_list_empty(),
       TimelinePoint(&timeline, &v1), tick0, /*target_offset=*/0,
-      IREE_HAL_CAPTURE_TIMESTAMP_FLAG_NONE));
+      IREE_HAL_TIMESTAMP_FLAG_NONE));
   IREE_ASSERT_OK(iree_hal_device_queue_fill(
       device, IREE_HAL_QUEUE_AFFINITY_ANY, TimelinePoint(&timeline, &v1),
-      TimelinePoint(&timeline, &v2), scratch, /*target_offset=*/0, kScratchBytes,
-      &pattern, /*pattern_length=*/sizeof(pattern), IREE_HAL_FILL_FLAG_NONE));
-  IREE_ASSERT_OK(iree_hal_device_queue_capture_timestamp(
+      TimelinePoint(&timeline, &v2), scratch, /*target_offset=*/0,
+      kScratchBytes, &pattern, /*pattern_length=*/sizeof(pattern),
+      IREE_HAL_FILL_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_device_queue_timestamp(
       device, IREE_HAL_QUEUE_AFFINITY_ANY, TimelinePoint(&timeline, &v2),
       TimelinePoint(&timeline, &v3), tick1, /*target_offset=*/0,
-      IREE_HAL_CAPTURE_TIMESTAMP_FLAG_NONE));
+      IREE_HAL_TIMESTAMP_FLAG_NONE));
   IREE_ASSERT_OK(iree_hal_semaphore_wait(
       timeline, 3ull, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
 
@@ -258,9 +258,9 @@ TEST_F(HostQueueTimestampCaptureTest, CaptureMeasuresElapsedAroundWork) {
 // Allocates a host-visible device transfer buffer of |size| bytes usable as a
 // timestamp target. Mirrors AllocateTimestampBuffer but with a caller-chosen
 // size so offset/range cases can use buffers larger than a single tick.
-static iree_status_t AllocateTimestampBufferSized(iree_hal_device_t* device,
-                                                  iree_device_size_t size,
-                                                  iree_hal_buffer_t** out_buffer) {
+static iree_status_t AllocateTimestampBufferSized(
+    iree_hal_device_t* device, iree_device_size_t size,
+    iree_hal_buffer_t** out_buffer) {
   iree_hal_buffer_params_t params = {0};
   params.type =
       IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL | IREE_HAL_MEMORY_TYPE_HOST_VISIBLE;
@@ -271,9 +271,9 @@ static iree_status_t AllocateTimestampBufferSized(iree_hal_device_t* device,
 
 // A target whose 8-byte-aligned device address is offset by a non-multiple of 8
 // is rejected. The range (offset 4 + 8 bytes) fits the 16-byte buffer, so this
-// exercises the alignment check in prepare_capture_timestamp_target rather than
+// exercises the alignment check in prepare_timestamp_target rather than
 // the range check.
-TEST_F(HostQueueTimestampCaptureTest, CaptureRejectsMisalignedOffset) {
+TEST_F(HostQueueTimestampTest, RejectsMisalignedOffset) {
   iree_hal_amdgpu_logical_device_options_t options;
   iree_hal_amdgpu_logical_device_options_initialize(&options);
   TestLogicalDevice test_device;
@@ -294,10 +294,10 @@ TEST_F(HostQueueTimestampCaptureTest, CaptureRejectsMisalignedOffset) {
   // boundary and the alignment check rejects it.
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
-      iree_hal_device_queue_capture_timestamp(
+      iree_hal_device_queue_timestamp(
           device, IREE_HAL_QUEUE_AFFINITY_ANY, iree_hal_semaphore_list_empty(),
           TimelinePoint(&timeline, &v1), target, /*target_offset=*/4,
-          IREE_HAL_CAPTURE_TIMESTAMP_FLAG_NONE));
+          IREE_HAL_TIMESTAMP_FLAG_NONE));
 
   iree_hal_semaphore_release(timeline);
   iree_hal_buffer_release(target);
@@ -306,7 +306,7 @@ TEST_F(HostQueueTimestampCaptureTest, CaptureRejectsMisalignedOffset) {
 // A target offset whose 8-byte tick would run off the end of the buffer is
 // rejected by iree_hal_buffer_validate_range. That helper reports OUT_OF_RANGE
 // (not INVALID_ARGUMENT) and the seam forwards the code unchanged.
-TEST_F(HostQueueTimestampCaptureTest, CaptureRejectsOutOfRangeOffset) {
+TEST_F(HostQueueTimestampTest, RejectsOutOfRangeOffset) {
   iree_hal_amdgpu_logical_device_options_t options;
   iree_hal_amdgpu_logical_device_options_initialize(&options);
   TestLogicalDevice test_device;
@@ -326,10 +326,10 @@ TEST_F(HostQueueTimestampCaptureTest, CaptureRejectsOutOfRangeOffset) {
   // offset 8 + sizeof(uint64_t) == 16 exceeds the 8-byte buffer.
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_OUT_OF_RANGE,
-      iree_hal_device_queue_capture_timestamp(
+      iree_hal_device_queue_timestamp(
           device, IREE_HAL_QUEUE_AFFINITY_ANY, iree_hal_semaphore_list_empty(),
           TimelinePoint(&timeline, &v1), target, /*target_offset=*/8,
-          IREE_HAL_CAPTURE_TIMESTAMP_FLAG_NONE));
+          IREE_HAL_TIMESTAMP_FLAG_NONE));
 
   iree_hal_semaphore_release(timeline);
   iree_hal_buffer_release(target);
@@ -341,7 +341,7 @@ TEST_F(HostQueueTimestampCaptureTest, CaptureRejectsOutOfRangeOffset) {
 // resolve_placement), so a MAPPING-only request yields a buffer whose
 // allowed_usage lacks TRANSFER_TARGET. validate_usage reports PERMISSION_DENIED
 // (not INVALID_ARGUMENT) and the seam forwards the code unchanged.
-TEST_F(HostQueueTimestampCaptureTest, CaptureRejectsBufferWithoutTransferTarget) {
+TEST_F(HostQueueTimestampTest, RejectsBufferWithoutTransferTarget) {
   iree_hal_amdgpu_logical_device_options_t options;
   iree_hal_amdgpu_logical_device_options_initialize(&options);
   TestLogicalDevice test_device;
@@ -370,10 +370,10 @@ TEST_F(HostQueueTimestampCaptureTest, CaptureRejectsBufferWithoutTransferTarget)
   uint64_t v1 = 1;
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_PERMISSION_DENIED,
-      iree_hal_device_queue_capture_timestamp(
+      iree_hal_device_queue_timestamp(
           device, IREE_HAL_QUEUE_AFFINITY_ANY, iree_hal_semaphore_list_empty(),
           TimelinePoint(&timeline, &v1), target, /*target_offset=*/0,
-          IREE_HAL_CAPTURE_TIMESTAMP_FLAG_NONE));
+          IREE_HAL_TIMESTAMP_FLAG_NONE));
 
   iree_hal_semaphore_release(timeline);
   iree_hal_buffer_release(target);
@@ -381,7 +381,7 @@ TEST_F(HostQueueTimestampCaptureTest, CaptureRejectsBufferWithoutTransferTarget)
 
 // Any non-NONE capture flag is rejected synchronously. An empty wait list keeps
 // the immediate (non-deferred) submit path, which validates flags inline.
-TEST_F(HostQueueTimestampCaptureTest, CaptureRejectsUnsupportedFlags) {
+TEST_F(HostQueueTimestampTest, RejectsUnsupportedFlags) {
   iree_hal_amdgpu_logical_device_options_t options;
   iree_hal_amdgpu_logical_device_options_initialize(&options);
   TestLogicalDevice test_device;
@@ -398,14 +398,14 @@ TEST_F(HostQueueTimestampCaptureTest, CaptureRejectsUnsupportedFlags) {
                                            &timeline));
 
   uint64_t v1 = 1;
-  const iree_hal_capture_timestamp_flags_t bad_flags =
-      (iree_hal_capture_timestamp_flags_t)(1ull << 0);
+  const iree_hal_timestamp_flags_t bad_flags =
+      (iree_hal_timestamp_flags_t)(1ull << 0);
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
-      iree_hal_device_queue_capture_timestamp(
-          device, IREE_HAL_QUEUE_AFFINITY_ANY, iree_hal_semaphore_list_empty(),
-          TimelinePoint(&timeline, &v1), target, /*target_offset=*/0,
-          bad_flags));
+      iree_hal_device_queue_timestamp(device, IREE_HAL_QUEUE_AFFINITY_ANY,
+                                      iree_hal_semaphore_list_empty(),
+                                      TimelinePoint(&timeline, &v1), target,
+                                      /*target_offset=*/0, bad_flags));
 
   iree_hal_semaphore_release(timeline);
   iree_hal_buffer_release(target);
@@ -414,7 +414,7 @@ TEST_F(HostQueueTimestampCaptureTest, CaptureRejectsUnsupportedFlags) {
 // Capturing into a non-zero target offset writes the tick at that offset. This
 // exercises the offset plumbing and the
 // iree_hal_buffer_byte_offset() + target_offset address math.
-TEST_F(HostQueueTimestampCaptureTest, CaptureWritesAtNonZeroOffset) {
+TEST_F(HostQueueTimestampTest, WritesAtNonZeroOffset) {
   iree_hal_amdgpu_logical_device_options_t options;
   iree_hal_amdgpu_logical_device_options_initialize(&options);
   TestLogicalDevice test_device;
@@ -431,10 +431,10 @@ TEST_F(HostQueueTimestampCaptureTest, CaptureWritesAtNonZeroOffset) {
                                            &timeline));
 
   uint64_t v1 = 1;
-  IREE_ASSERT_OK(iree_hal_device_queue_capture_timestamp(
+  IREE_ASSERT_OK(iree_hal_device_queue_timestamp(
       device, IREE_HAL_QUEUE_AFFINITY_ANY, iree_hal_semaphore_list_empty(),
       TimelinePoint(&timeline, &v1), target, /*target_offset=*/8,
-      IREE_HAL_CAPTURE_TIMESTAMP_FLAG_NONE));
+      IREE_HAL_TIMESTAMP_FLAG_NONE));
   IREE_ASSERT_OK(iree_hal_semaphore_wait(
       timeline, 1ull, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
 
@@ -447,15 +447,15 @@ TEST_F(HostQueueTimestampCaptureTest, CaptureWritesAtNonZeroOffset) {
   iree_hal_buffer_release(target);
 }
 
-// Forces the deferred submission path: the capture waits on a value that has not
-// been signaled at enqueue time, so resolve_waits cannot satisfy the wait and
-// sets needs_deferral=true. That routes through defer_capture_timestamp /
-// issue_capture_timestamp (which retain/release the target buffer). The host
+// Forces the deferred submission path: the capture waits on a value that has
+// not been signaled at enqueue time, so resolve_waits cannot satisfy the wait
+// and sets needs_deferral=true. That routes through defer_timestamp /
+// issue_timestamp (which retain/release the target buffer). The host
 // then signals the wait, the deferred op issues, and the tick lands. Uses a
 // separate wait semaphore released purely from the host (matching the
 // wait-before-signal idiom in host_queue_pending_test.cc) so the queue cannot
 // elide the wait via same-queue producer-axis tracking.
-TEST_F(HostQueueTimestampCaptureTest, CaptureDefersUntilWaitSignaled) {
+TEST_F(HostQueueTimestampTest, DefersUntilWaitSignaled) {
   iree_hal_amdgpu_logical_device_options_t options;
   iree_hal_amdgpu_logical_device_options_initialize(&options);
   TestLogicalDevice test_device;
@@ -479,18 +479,19 @@ TEST_F(HostQueueTimestampCaptureTest, CaptureDefersUntilWaitSignaled) {
 
   uint64_t wait_value = 1;
   uint64_t signal_value = 1;
-  IREE_ASSERT_OK(iree_hal_device_queue_capture_timestamp(
-      device, IREE_HAL_QUEUE_AFFINITY_ANY, TimelinePoint(&wait_sem, &wait_value),
+  IREE_ASSERT_OK(iree_hal_device_queue_timestamp(
+      device, IREE_HAL_QUEUE_AFFINITY_ANY,
+      TimelinePoint(&wait_sem, &wait_value),
       TimelinePoint(&signal_sem, &signal_value), target, /*target_offset=*/0,
-      IREE_HAL_CAPTURE_TIMESTAMP_FLAG_NONE));
+      IREE_HAL_TIMESTAMP_FLAG_NONE));
 
   // Release the deferred capture from the host. The deferred op now issues and
   // signals signal_sem once the GPU writes the tick.
   IREE_ASSERT_OK(iree_hal_semaphore_signal(wait_sem, wait_value,
                                            /*frontier=*/NULL));
-  IREE_ASSERT_OK(iree_hal_semaphore_wait(
-      signal_sem, signal_value, iree_infinite_timeout(),
-      IREE_ASYNC_WAIT_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_semaphore_wait(signal_sem, signal_value,
+                                         iree_infinite_timeout(),
+                                         IREE_ASYNC_WAIT_FLAG_NONE));
 
   uint64_t tick = 0;
   IREE_ASSERT_OK(iree_hal_buffer_map_read(target, 0, &tick, sizeof(tick)));

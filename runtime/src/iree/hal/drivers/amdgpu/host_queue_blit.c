@@ -303,8 +303,7 @@ static iree_status_t iree_hal_amdgpu_host_queue_submit_pm4_copy_data(
 
 // Validates a timestamp-capture target and resolves the 8-byte-aligned target
 // device pointer the GPU clock tick is written to.
-static iree_status_t
-iree_hal_amdgpu_host_queue_prepare_capture_timestamp_target(
+static iree_status_t iree_hal_amdgpu_host_queue_prepare_timestamp_target(
     iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
     uint8_t** out_target_device_ptr) {
   *out_target_device_ptr = NULL;
@@ -342,12 +341,12 @@ iree_hal_amdgpu_host_queue_prepare_capture_timestamp_target(
   return iree_ok_status();
 }
 
-iree_status_t iree_hal_amdgpu_host_queue_submit_capture_timestamp(
+iree_status_t iree_hal_amdgpu_host_queue_submit_timestamp(
     iree_hal_amdgpu_host_queue_t* queue,
     const iree_hal_amdgpu_wait_resolution_t* resolution,
     const iree_hal_semaphore_list_t signal_semaphore_list,
     iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
-    iree_hal_capture_timestamp_flags_t flags,
+    iree_hal_timestamp_flags_t flags,
     iree_hal_amdgpu_host_queue_submission_flags_t submission_flags,
     bool* out_ready) {
   IREE_ASSERT_ARGUMENT(out_ready);
@@ -355,32 +354,26 @@ iree_status_t iree_hal_amdgpu_host_queue_submit_capture_timestamp(
   if (IREE_UNLIKELY(queue->is_shutting_down)) {
     return iree_make_status(IREE_STATUS_CANCELLED, "queue shutting down");
   }
-  if (IREE_UNLIKELY(flags != IREE_HAL_CAPTURE_TIMESTAMP_FLAG_NONE)) {
+  if (IREE_UNLIKELY(flags != IREE_HAL_TIMESTAMP_FLAG_NONE)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "unsupported capture timestamp flags: 0x%" PRIx64,
-                            flags);
+                            "unsupported timestamp flags: 0x%" PRIx64, flags);
   }
 
-  // Device timestamps are emitted as a PM4 COPY_DATA of the GPU clock counter.
-  // When the queue cannot emit PM4 IBs or the agent has no supported timestamp
-  // strategy there is no device path; report UNIMPLEMENTED so the caller can
-  // fall back to a host-observed timestamp.
-  // pm4_ib_slots and pm4_timestamp_strategy are immutable after queue init, so
-  // this re-check never actually fires on the reachable immediate/deferred-issue
-  // paths (they only reach here once the entry point has already confirmed
-  // capability); it guards direct public callers of this function.
-  if (!queue->pm4_ib_slots ||
-      iree_hal_amdgpu_pm4_copy_timestamp_control(
-          queue->pm4_timestamp_strategy) == 0) {
+  // Defensive: this function is only reached after the device-spec
+  // DEVICE_TIMESTAMPS query confirmed support, so on the reachable
+  // immediate/deferred-issue paths this check never fires (pm4_ib_slots and
+  // pm4_timestamp_strategy are immutable after queue init). It guards direct
+  // internal callers of this function.
+  if (!queue->pm4_ib_slots || iree_hal_amdgpu_pm4_copy_timestamp_control(
+                                  queue->pm4_timestamp_strategy) == 0) {
     return iree_make_status(
         IREE_STATUS_UNIMPLEMENTED,
         "queue does not support device-side timestamp capture");
   }
 
   uint8_t* target_device_ptr = NULL;
-  IREE_RETURN_IF_ERROR(
-      iree_hal_amdgpu_host_queue_prepare_capture_timestamp_target(
-          target_buffer, target_offset, &target_device_ptr));
+  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_host_queue_prepare_timestamp_target(
+      target_buffer, target_offset, &target_device_ptr));
 
   iree_hal_resource_t* operation_resources[1] = {
       (iree_hal_resource_t*)target_buffer,

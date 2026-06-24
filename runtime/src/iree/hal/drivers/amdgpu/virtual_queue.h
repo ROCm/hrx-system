@@ -215,12 +215,12 @@ typedef struct iree_hal_amdgpu_virtual_queue_vtable_t {
       iree_hal_buffer_binding_table_t binding_table,
       iree_hal_execute_flags_t flags);
 
-  iree_status_t(IREE_API_PTR* capture_timestamp)(
+  iree_status_t(IREE_API_PTR* timestamp)(
       iree_hal_amdgpu_virtual_queue_t* queue,
       const iree_hal_semaphore_list_t wait_semaphore_list,
       const iree_hal_semaphore_list_t signal_semaphore_list,
       iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
-      iree_hal_capture_timestamp_flags_t flags);
+      iree_hal_timestamp_flags_t flags);
 
   iree_status_t(IREE_API_PTR* flush)(iree_hal_amdgpu_virtual_queue_t* queue);
 } iree_hal_amdgpu_virtual_queue_vtable_t;
