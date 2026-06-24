@@ -319,6 +319,38 @@
       ]
     },
     {
+      "name": "reports no-op unroll factor policy clearing",
+      "run": {
+        "tool": "loom-opt",
+        "args": [
+          "--pass=unroll-scf-for",
+          "--pass-report=json",
+          "--output={tmp}/cleared-unroll-factor.loom"
+        ],
+        "stdin": {
+          "text": "func.def @clear_noop_factor() {\n  %start = index.constant 0 : index\n  %end = index.constant 4 : index\n  %step = index.constant 1 : index\n  %factor = index.constant 1 : index\n  scf.for %i = [%start to %end step %step] unroll(%factor) schedule(interleaved) {\n    test.use %i : index\n  }\n  func.return\n}\n"
+        }
+      },
+      "stderr": {
+        "contains": [
+          "\"pass\":\"unroll-scf-for\"",
+          "\"category\":\"scf-unroll\"",
+          "\"outcome\":\"cleared\"",
+          "\"policy\":\"factor\"",
+          "\"schedule\":\"interleaved\"",
+          "\"unroll_factor\":1",
+          "\"clear_reason\":\"factor_le_one\""
+        ]
+      },
+      "files": [
+        {
+          "path": "{tmp}/cleared-unroll-factor.loom",
+          "contains": ["scf.for %i"],
+          "not_contains": ["unroll(%factor)", "schedule(interleaved)"]
+        }
+      ]
+    },
+    {
       "name": "reports dynamic linear stripmine with guarded tail",
       "run": {
         "tool": "loom-opt",
@@ -339,8 +371,7 @@
           "\"policy\":\"factor\"",
           "\"schedule\":\"linear\"",
           "\"unroll_factor\":2",
-          "\"tail_guards\":true",
-          "\"tail_loop\":false",
+          "\"tail_strategy\":\"guarded_lanes\"",
           "\"trip_count_state\":\"unresolved\""
         ]
       },
@@ -372,8 +403,7 @@
           "\"policy\":\"factor\"",
           "\"schedule\":\"interleaved\"",
           "\"unroll_factor\":2",
-          "\"tail_guards\":false",
-          "\"tail_loop\":true",
+          "\"tail_strategy\":\"tail_loop\"",
           "\"trip_count_state\":\"unresolved\""
         ]
       },

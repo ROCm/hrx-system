@@ -384,6 +384,8 @@ scf_for = Op(
     examples=[
         "scf.for %iv = [%c0 to %n step %c1] {\n  scf.yield\n}",
         "%result = scf.for %iv = [%c0 to %n step %c1](%acc = %init : f32) -> (f32) {\n  %next = scalar.addf %acc, %acc : f32\n  scf.yield %next : f32\n}",
+        "scf.for %iv = [%c0 to %n step %c1] unroll(%factor) {\n  scf.yield\n}",
+        "scf.for %iv = [%c0 to %n step %c1] unroll(%factor) schedule(interleaved) {\n  scf.yield\n}",
     ],
 )
 

@@ -356,6 +356,17 @@ static iree_string_view_t loom_scf_unroll_schedule_name(
   return IREE_SV("unknown");
 }
 
+static iree_string_view_t loom_scf_unroll_tail_strategy_name(
+    loom_scf_unroll_partial_unroll_flags_t flags) {
+  if (iree_any_bit_set(flags, LOOM_SCF_UNROLL_PARTIAL_UNROLL_FLAG_GUARD_TAIL)) {
+    return IREE_SV("guarded_lanes");
+  }
+  if (iree_any_bit_set(flags, LOOM_SCF_UNROLL_PARTIAL_UNROLL_FLAG_TAIL_LOOP)) {
+    return IREE_SV("tail_loop");
+  }
+  return IREE_SV("none");
+}
+
 static iree_status_t loom_scf_unroll_append_report_detail(
     const loom_scf_unroll_context_t* context, loom_op_t* op,
     iree_string_view_t policy, loom_scf_for_unroll_schedule_t schedule,
@@ -413,7 +424,7 @@ static iree_status_t loom_scf_unroll_append_partial_report_detail(
     return iree_ok_status();
   }
 
-  loom_pass_report_detail_field_t fields[11];
+  loom_pass_report_detail_field_t fields[10];
   uint16_t field_count = 0;
   fields[field_count++] = loom_pass_report_detail_string_field(
       IREE_SV("outcome"), IREE_SV("stripmined"));
@@ -427,12 +438,8 @@ static iree_status_t loom_scf_unroll_append_partial_report_detail(
       IREE_SV("unroll_factor"), unroll_factor);
   fields[field_count++] =
       loom_pass_report_detail_int64_field(IREE_SV("step"), step);
-  fields[field_count++] = loom_pass_report_detail_bool_field(
-      IREE_SV("tail_guards"),
-      iree_any_bit_set(flags, LOOM_SCF_UNROLL_PARTIAL_UNROLL_FLAG_GUARD_TAIL));
-  fields[field_count++] = loom_pass_report_detail_bool_field(
-      IREE_SV("tail_loop"),
-      iree_any_bit_set(flags, LOOM_SCF_UNROLL_PARTIAL_UNROLL_FLAG_TAIL_LOOP));
+  fields[field_count++] = loom_pass_report_detail_string_field(
+      IREE_SV("tail_strategy"), loom_scf_unroll_tail_strategy_name(flags));
   fields[field_count++] = loom_pass_report_detail_string_field(
       IREE_SV("trip_count_state"),
       loom_scf_unroll_trip_count_state_name(trip_count_state));
@@ -493,6 +500,31 @@ static iree_status_t loom_scf_unroll_append_policy_absent_report_detail(
           IREE_SV("lower_range_max"), trip_count.lower_range_max);
       break;
   }
+  return loom_pass_report_append_detail(context->pass, IREE_SV("scf-unroll"),
+                                        fields, field_count);
+}
+
+static iree_status_t loom_scf_unroll_append_clear_report_detail(
+    const loom_scf_unroll_context_t* context, loom_op_t* op,
+    int64_t unroll_factor, loom_scf_for_unroll_schedule_t schedule) {
+  if (!context->reports_enabled) {
+    return iree_ok_status();
+  }
+
+  loom_pass_report_detail_field_t fields[6];
+  uint16_t field_count = 0;
+  fields[field_count++] = loom_pass_report_detail_string_field(
+      IREE_SV("outcome"), IREE_SV("cleared"));
+  fields[field_count++] = loom_pass_report_detail_string_field(
+      IREE_SV("op"), loom_op_name(context->module, op));
+  fields[field_count++] = loom_pass_report_detail_string_field(
+      IREE_SV("policy"), IREE_SV("factor"));
+  fields[field_count++] = loom_pass_report_detail_string_field(
+      IREE_SV("schedule"), loom_scf_unroll_schedule_name(schedule));
+  fields[field_count++] = loom_pass_report_detail_int64_field(
+      IREE_SV("unroll_factor"), unroll_factor);
+  fields[field_count++] = loom_pass_report_detail_string_field(
+      IREE_SV("clear_reason"), IREE_SV("factor_le_one"));
   return loom_pass_report_append_detail(context->pass, IREE_SV("scf-unroll"),
                                         fields, field_count);
 }
@@ -825,8 +857,12 @@ static iree_status_t loom_scf_unroll_adjust_tied_results_for_policy_clear(
 
 static iree_status_t loom_scf_unroll_clear_policy(
     loom_scf_unroll_context_t* context, loom_op_t* op, loom_op_t* yield,
+    int64_t unroll_factor, loom_scf_for_unroll_schedule_t schedule,
     bool* out_changed) {
   *out_changed = false;
+  IREE_RETURN_IF_ERROR(loom_scf_unroll_append_clear_report_detail(
+      context, op, unroll_factor, schedule));
+
   loom_value_slice_t iter_args = loom_scf_for_iter_args(op);
   loom_value_slice_t yielded_values = loom_scf_yield_values(yield);
   loom_type_t* result_types = NULL;
@@ -2102,10 +2138,15 @@ static iree_status_t loom_scf_unroll_build_dynamic_interleaved_main_upper(
     trip_count = loom_index_div_result(trip_count_op);
   }
 
+  loom_op_t* factor_op = NULL;
+  IREE_RETURN_IF_ERROR(loom_index_constant_build(
+      &context->rewriter->builder, loom_attr_i64(unroll_factor), index_type,
+      op->location, &factor_op));
   loom_op_t* tile_count_op = NULL;
-  IREE_RETURN_IF_ERROR(loom_index_div_build(
-      &context->rewriter->builder, trip_count, loom_scf_for_unroll_factor(op),
-      index_type, op->location, &tile_count_op));
+  IREE_RETURN_IF_ERROR(
+      loom_index_div_build(&context->rewriter->builder, trip_count,
+                           loom_index_constant_result(factor_op), index_type,
+                           op->location, &tile_count_op));
   loom_op_t* main_span_op = NULL;
   IREE_RETURN_IF_ERROR(loom_index_mul_build(
       &context->rewriter->builder, loom_index_div_result(tile_count_op),
@@ -2341,7 +2382,8 @@ static iree_status_t loom_scf_unroll_try_unroll(
           IREE_SV("nonnegative unroll factor"));
     }
     if (unroll_factor <= 1) {
-      return loom_scf_unroll_clear_policy(context, op, yield, out_changed);
+      return loom_scf_unroll_clear_policy(context, op, yield, unroll_factor,
+                                          unroll_schedule, out_changed);
     }
     if (unroll_factor > UINT32_MAX) {
       return loom_scf_unroll_emit_policy_error(
