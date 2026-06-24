@@ -49,7 +49,7 @@ kernel.def target(@id4_gfx1100) export("id4_vae_conv1x1_bias_bf16_wmma") @id4_va
   %output_aligned = buffer.assume.alignment %output_global {minimum_alignment = 16} : buffer
   %input_view = buffer.view %input_aligned[%base] : buffer -> view<[%pixel_count]x[%input_channel_count]xbf16, #dense>
   %weight_view = buffer.view %weight_aligned[%base] : buffer -> view<[%input_channel_count]x[%output_channel_count]xbf16, %weight_layout>
-  %bias_view = buffer.view %bias_aligned[%base] : buffer -> view<[%output_channel_count]xf32, #dense>
+  %bias_view = buffer.view %bias_aligned[%base] : buffer -> view<[%output_channel_count]xbf16, #dense>
   %output_view = buffer.view %output_aligned[%base] : buffer -> view<[%pixel_count]x[%output_channel_count]xbf16, #dense>
 
   %init00 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
@@ -73,8 +73,10 @@ kernel.def target(@id4_gfx1100) export("id4_vae_conv1x1_bias_bf16_wmma") @id4_va
   %lane_group = index.div %lane, %sixteen : index
   %column0 = index.add %output_channel_origin0, %lane_column : index
   %column1 = index.add %output_channel_origin1, %lane_column : index
-  %bias0 = view.load %bias_view[%column0] : view<[%output_channel_count]xf32, #dense> -> f32
-  %bias1 = view.load %bias_view[%column1] : view<[%output_channel_count]xf32, #dense> -> f32
+  %bias0_bf16 = view.load %bias_view[%column0] : view<[%output_channel_count]xbf16, #dense> -> bf16
+  %bias1_bf16 = view.load %bias_view[%column1] : view<[%output_channel_count]xbf16, #dense> -> bf16
+  %bias0 = scalar.extf %bias0_bf16 : bf16 to f32
+  %bias1 = scalar.extf %bias1_bf16 : bf16 to f32
   scf.for %register_index = [%zero to %eight step %unit] {
     %register_pixel_base = index.mul %register_index, %two : index
     %local_pixel = index.add %register_pixel_base, %lane_group : index
@@ -203,10 +205,10 @@ kernel.def target(@id4_gfx1100) export("id4_vae_conv1x1_bias_bf16_f32_wmma") @id
 check.case public @id4_vae_conv1x1_bias_bf16_wmma_small_case {
   %input = check.generate.fill value(1.0) : tensor<32x16xbf16>
   %weight = check.generate.fill value(1.0) : tensor<32x16xbf16>
-  %bias = check.generate.fill value(1.0) : tensor<32xf32>
+  %bias = check.generate.fill value(1.0) : tensor<32xbf16>
   %output = check.generate.fill value(0.0) : tensor<32x32xbf16>
   %expected = check.generate.fill value(17.0) : tensor<32x32xbf16>
-  func.call @id4_vae_conv1x1_bias_bf16_wmma(%input, %weight, %bias, %output) : (tensor<32x16xbf16>, tensor<32x16xbf16>, tensor<32xf32>, tensor<32x32xbf16>)
+  func.call @id4_vae_conv1x1_bias_bf16_wmma(%input, %weight, %bias, %output) : (tensor<32x16xbf16>, tensor<32x16xbf16>, tensor<32xbf16>, tensor<32x32xbf16>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<32x32xbf16>
   check.return
 }
@@ -214,10 +216,10 @@ check.case public @id4_vae_conv1x1_bias_bf16_wmma_small_case {
 check.case public @id4_vae_conv1x1_bias_bf16_wmma_flux2_post_quant_shape_case {
   %input = check.generate.fill value(1.0) : tensor<16384x32xbf16>
   %weight = check.generate.fill value(0.0) : tensor<32x32xbf16>
-  %bias = check.generate.fill value(0.0) : tensor<32xf32>
+  %bias = check.generate.fill value(0.0) : tensor<32xbf16>
   %output = check.generate.fill value(1.0) : tensor<16384x32xbf16>
   %expected = check.generate.fill value(0.0) : tensor<16384x32xbf16>
-  func.call @id4_vae_conv1x1_bias_bf16_wmma(%input, %weight, %bias, %output) : (tensor<16384x32xbf16>, tensor<32x32xbf16>, tensor<32xf32>, tensor<16384x32xbf16>)
+  func.call @id4_vae_conv1x1_bias_bf16_wmma(%input, %weight, %bias, %output) : (tensor<16384x32xbf16>, tensor<32x32xbf16>, tensor<32xbf16>, tensor<16384x32xbf16>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<16384x32xbf16>
   check.return
 }

@@ -13,6 +13,7 @@ add_custom_command(OUTPUT loom_sources.stamp
     COMMAND ${CMAKE_COMMAND} -E touch loom_sources.stamp
   DEPENDS
     "elementwise/add_f32.loom"
+    "elementwise/cast_bf16_f32.loom"
     "elementwise/cast_f32_bf16.loom"
     "ideogram4/adaln_split_f32.loom"
     "ideogram4/attention_f32.loom"
@@ -71,6 +72,7 @@ add_custom_command(OUTPUT loom_sources.stamp
     "vae/conv1x1_bias_bf16_wmma.loom"
     "vae/conv1x1_bias_f32.loom"
     "vae/conv3x3_bias_f32.loom"
+    "vae/conv3x3_bias_packed_bf16.loom"
     "vae/conv3x3_bias_packed_block_f32.loom"
     "vae/conv3x3_bias_packed_f32.loom"
     "vae/decode_nearest_f32.loom"
@@ -95,6 +97,7 @@ iree_c_embed_data(
     embedded_loom_sources
   SRCS
     "elementwise/add_f32.loom"
+    "elementwise/cast_bf16_f32.loom"
     "elementwise/cast_f32_bf16.loom"
     "ideogram4/adaln_split_f32.loom"
     "ideogram4/attention_f32.loom"
@@ -153,6 +156,7 @@ iree_c_embed_data(
     "vae/conv1x1_bias_bf16_wmma.loom"
     "vae/conv1x1_bias_f32.loom"
     "vae/conv3x3_bias_f32.loom"
+    "vae/conv3x3_bias_packed_bf16.loom"
     "vae/conv3x3_bias_packed_block_f32.loom"
     "vae/conv3x3_bias_packed_f32.loom"
     "vae/decode_nearest_f32.loom"
@@ -215,6 +219,21 @@ iree_native_test(
     "--dry-run"
     "--output-format=jsonl"
     "--config=id4.elementwise.cast_f32_bf16.element_count=4"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
+    "elementwise_cast_bf16_f32_small_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/elementwise/cast_bf16_f32.loom}}"
+    "--benchmark=@id4_elementwise_cast_bf16_f32_small"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.elementwise.cast_bf16_f32.element_count=4"
   SRC
     loom::tools::iree-benchmark-loom
   LABELS
@@ -1186,6 +1205,50 @@ iree_native_test(
 
 iree_native_test(
   NAME
+    "vae_conv3x3_bias_ic4_oc16_packed_bf16_small_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv3x3_bias_packed_bf16.loom}}"
+    "--benchmark=@id4_vae_conv3x3_bias_ic4_oc16_packed_bf16_small"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.vae.conv3x3_bias.width=2"
+    "--config=id4.vae.conv3x3_bias.height=1"
+    "--config=id4.vae.conv3x3_bias.input_channel_count=4"
+    "--config=id4.vae.conv3x3_bias.output_channel_count=16"
+    "--config=id4.vae.conv3x3_bias.batch_count=1"
+    "--config=id4.vae.conv3x3_bias.output_element_count=32"
+    "--config=id4.vae.conv3x3_bias.output_channel_tile_count=1"
+    "--config=id4.vae.conv3x3_bias.output_tile_element_count=2"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
+    "vae_conv3x3_bias_ic4_oc16_packed_bf16_flux2_conv_in_shape_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv3x3_bias_packed_bf16.loom}}"
+    "--benchmark=@id4_vae_conv3x3_bias_ic4_oc16_packed_bf16_flux2_conv_in_shape"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.vae.conv3x3_bias.width=128"
+    "--config=id4.vae.conv3x3_bias.height=128"
+    "--config=id4.vae.conv3x3_bias.input_channel_count=32"
+    "--config=id4.vae.conv3x3_bias.output_channel_count=512"
+    "--config=id4.vae.conv3x3_bias.batch_count=1"
+    "--config=id4.vae.conv3x3_bias.output_element_count=8388608"
+    "--config=id4.vae.conv3x3_bias.output_channel_tile_count=32"
+    "--config=id4.vae.conv3x3_bias.output_tile_element_count=524288"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
     "vae_conv3x3_bias_f32_small_same_padding_plan_test"
   ARGS
     "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv3x3_bias_f32.loom}}"
@@ -1848,6 +1911,40 @@ iree_native_test(
     "--config=id4.vae.pack_conv3x3_weight.input_channel_count=512"
     "--config=id4.vae.pack_conv3x3_weight.output_channel_count=512"
     "--config=id4.vae.pack_conv3x3_weight.element_count=2359296"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
+    "vae_pack_conv3x3_weight_f32_bf16_small_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/pack_conv3x3_weight_f32.loom}}"
+    "--benchmark=@id4_vae_pack_conv3x3_weight_f32_bf16_small"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.vae.pack_conv3x3_weight.input_channel_count=2"
+    "--config=id4.vae.pack_conv3x3_weight.output_channel_count=2"
+    "--config=id4.vae.pack_conv3x3_weight.element_count=36"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
+    "vae_pack_conv3x3_weight_f32_bf16_flux2_conv_in_shape_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/pack_conv3x3_weight_f32.loom}}"
+    "--benchmark=@id4_vae_pack_conv3x3_weight_f32_bf16_flux2_conv_in_shape"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.vae.pack_conv3x3_weight.input_channel_count=32"
+    "--config=id4.vae.pack_conv3x3_weight.output_channel_count=512"
+    "--config=id4.vae.pack_conv3x3_weight.element_count=147456"
   SRC
     loom::tools::iree-benchmark-loom
   LABELS
@@ -4589,6 +4686,25 @@ endif()
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
 iree_native_test(
   NAME
+    "elementwise_cast_bf16_f32_small_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/elementwise/cast_bf16_f32.loom}}"
+    "--case=@id4_elementwise_cast_bf16_f32_small_case"
+    "--device=amdgpu://0"
+    "--config=id4.elementwise.cast_bf16_f32.element_count=4"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
     "ideogram4_adaln_split_f32_small_hal_test"
   ARGS
     "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/adaln_split_f32.loom}}"
@@ -5772,6 +5888,58 @@ endif()
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
 iree_native_test(
   NAME
+    "vae_conv3x3_bias_ic4_oc16_packed_bf16_small_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv3x3_bias_packed_bf16.loom}}"
+    "--case=@id4_vae_conv3x3_bias_ic4_oc16_packed_bf16_small_case"
+    "--device=amdgpu://0"
+    "--config=id4.vae.conv3x3_bias.width=2"
+    "--config=id4.vae.conv3x3_bias.height=1"
+    "--config=id4.vae.conv3x3_bias.input_channel_count=4"
+    "--config=id4.vae.conv3x3_bias.output_channel_count=16"
+    "--config=id4.vae.conv3x3_bias.batch_count=1"
+    "--config=id4.vae.conv3x3_bias.output_element_count=32"
+    "--config=id4.vae.conv3x3_bias.output_channel_tile_count=1"
+    "--config=id4.vae.conv3x3_bias.output_tile_element_count=2"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
+    "vae_conv3x3_bias_ic4_oc16_packed_bf16_flux2_conv_in_shape_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv3x3_bias_packed_bf16.loom}}"
+    "--case=@id4_vae_conv3x3_bias_ic4_oc16_packed_bf16_flux2_conv_in_shape_case"
+    "--device=amdgpu://0"
+    "--config=id4.vae.conv3x3_bias.width=128"
+    "--config=id4.vae.conv3x3_bias.height=128"
+    "--config=id4.vae.conv3x3_bias.input_channel_count=32"
+    "--config=id4.vae.conv3x3_bias.output_channel_count=512"
+    "--config=id4.vae.conv3x3_bias.batch_count=1"
+    "--config=id4.vae.conv3x3_bias.output_element_count=8388608"
+    "--config=id4.vae.conv3x3_bias.output_channel_tile_count=32"
+    "--config=id4.vae.conv3x3_bias.output_tile_element_count=524288"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
     "vae_conv3x3_bias_f32_small_same_padding_hal_test"
   ARGS
     "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv3x3_bias_f32.loom}}"
@@ -6557,6 +6725,48 @@ iree_native_test(
     "--config=id4.vae.pack_conv3x3_weight.input_channel_count=512"
     "--config=id4.vae.pack_conv3x3_weight.output_channel_count=512"
     "--config=id4.vae.pack_conv3x3_weight.element_count=2359296"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
+    "vae_pack_conv3x3_weight_f32_bf16_small_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/pack_conv3x3_weight_f32.loom}}"
+    "--case=@id4_vae_pack_conv3x3_weight_f32_bf16_small_case"
+    "--device=amdgpu://0"
+    "--config=id4.vae.pack_conv3x3_weight.input_channel_count=2"
+    "--config=id4.vae.pack_conv3x3_weight.output_channel_count=2"
+    "--config=id4.vae.pack_conv3x3_weight.element_count=36"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
+    "vae_pack_conv3x3_weight_f32_bf16_flux2_conv_in_shape_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/pack_conv3x3_weight_f32.loom}}"
+    "--case=@id4_vae_pack_conv3x3_weight_f32_bf16_flux2_conv_in_shape_case"
+    "--device=amdgpu://0"
+    "--config=id4.vae.pack_conv3x3_weight.input_channel_count=32"
+    "--config=id4.vae.pack_conv3x3_weight.output_channel_count=512"
+    "--config=id4.vae.pack_conv3x3_weight.element_count=147456"
   SRC
     loom::tools::iree-test-loom
   LABELS

@@ -48,14 +48,14 @@ iree_status_t id4_vae_parameter_format_packed_conv3x3_weight_key(
 bool id4_vae_parameter_parse_packed_conv3x3_weight_key(
     iree_string_view_t key, iree_string_view_t* out_source_key);
 
-// Formats the virtual key for a dense F32 weight materialized as BF16.
-iree_status_t id4_vae_parameter_format_bf16_weight_key(
+// Formats the virtual key for a dense F32 parameter materialized as BF16.
+iree_status_t id4_vae_parameter_format_bf16_key(
     iree_string_view_t source_key, char* buffer,
     iree_host_size_t buffer_capacity, iree_string_view_t* out_key);
 
-// Parses a BF16 virtual weight key and returns the F32 source key.
-bool id4_vae_parameter_parse_bf16_weight_key(
-    iree_string_view_t key, iree_string_view_t* out_source_key);
+// Parses a BF16 virtual parameter key and returns the F32 source key.
+bool id4_vae_parameter_parse_bf16_key(iree_string_view_t key,
+                                      iree_string_view_t* out_source_key);
 
 // Creates a provider wrapper that materializes VAE-derived parameter layouts.
 iree_status_t id4_vae_parameter_provider_create(

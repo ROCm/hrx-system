@@ -46,6 +46,51 @@ kernel.def export("id4_vae_pack_conv3x3_weight_f32") @id4_vae_pack_conv3x3_weigh
   kernel.return
 }
 
+kernel.def export("id4_vae_pack_conv3x3_weight_f32_bf16") @id4_vae_pack_conv3x3_weight_f32_bf16() {
+  %unit = index.constant 1 : index
+  %workgroup_size_x = index.constant 256 : index
+  %element_count = config.get @id4.vae.pack_conv3x3_weight.element_count : index
+  %rounding = index.sub %workgroup_size_x, %unit : index
+  %rounded = index.add %element_count, %rounding : index
+  %workgroups_x = index.div %rounded, %workgroup_size_x : index
+  kernel.launch.config workgroups(%workgroups_x, %unit, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
+} launch(%source: buffer, %target: buffer) {
+  %base = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %unit = index.constant 1 : index
+  %three = index.constant 3 : index
+  %nine = index.constant 9 : index
+  %workgroup = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %workgroup_size_x = index.constant 256 : index
+  %input_channel_count = config.get @id4.vae.pack_conv3x3_weight.input_channel_count : index
+  %output_channel_count = config.get @id4.vae.pack_conv3x3_weight.output_channel_count : index
+  %element_count = config.get @id4.vae.pack_conv3x3_weight.element_count : index
+  %element_index = index.madd %workgroup, %workgroup_size_x, %lane : index
+  %in_bounds = index.cmp ult, %element_index, %element_count : index
+
+  %source_noalias, %target_noalias = buffer.assume.noalias %source, %target : buffer, buffer
+  %source_global = buffer.assume.memory_space<global> %source_noalias : buffer
+  %target_global = buffer.assume.memory_space<global> %target_noalias : buffer
+  %source_view = buffer.view %source_global[%base] : buffer -> view<[%output_channel_count]x[%input_channel_count]x3x3xf32, #dense>
+  %target_view = buffer.view %target_global[%base] : buffer -> view<[%input_channel_count]x3x3x[%output_channel_count]xbf16, #dense>
+
+  scf.if %in_bounds {
+    %output_channel = index.rem %element_index, %output_channel_count : index
+    %packed_row = index.div %element_index, %output_channel_count : index
+    %kernel_x = index.rem %packed_row, %three : index
+    %kernel_row = index.div %packed_row, %three : index
+    %kernel_y = index.rem %kernel_row, %three : index
+    %input_channel = index.div %packed_row, %nine : index
+    %last_valid_input_channel = index.sub %input_channel_count, %unit : index
+    %valid_input_channel = index.assume %input_channel [ge(%input_channel, 0), le(%input_channel, %last_valid_input_channel)] : index
+    %value = view.load %source_view[%output_channel, %valid_input_channel, %kernel_y, %kernel_x] : view<[%output_channel_count]x[%input_channel_count]x3x3xf32, #dense> -> f32
+    %rounded = scalar.fptrunc %value : f32 to bf16
+    view.store %rounded, %target_view[%valid_input_channel, %kernel_y, %kernel_x, %output_channel] : bf16, view<[%input_channel_count]x3x3x[%output_channel_count]xbf16, #dense>
+  }
+  kernel.return
+}
+
 check.case public @id4_vae_pack_conv3x3_weight_f32_small_case {
   %source = check.generate.iota offset(0.0) step(1.0) : tensor<2x2x3x3xf32>
   %target = check.generate.fill value(0.0) : tensor<2x3x3x2xf32>
@@ -64,5 +109,26 @@ check.case public @id4_vae_pack_conv3x3_weight_f32_flux2_mid_shape_case {
   check.return
 }
 
+check.case public @id4_vae_pack_conv3x3_weight_f32_bf16_small_case {
+  %source = check.generate.fill value(1.0) : tensor<2x2x3x3xf32>
+  %target = check.generate.fill value(0.0) : tensor<2x3x3x2xbf16>
+  %expected = check.generate.fill value(1.0) : tensor<2x3x3x2xbf16>
+  func.call @id4_vae_pack_conv3x3_weight_f32_bf16(%source, %target) : (tensor<2x2x3x3xf32>, tensor<2x3x3x2xbf16>)
+  check.expect.close actual(%target) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2x3x3x2xbf16>
+  check.return
+}
+
+check.case public @id4_vae_pack_conv3x3_weight_f32_bf16_flux2_conv_in_shape_case {
+  %source = check.generate.fill value(1.0) : tensor<512x32x3x3xf32>
+  %target = check.generate.fill value(0.0) : tensor<32x3x3x512xbf16>
+  %expected = check.generate.fill value(1.0) : tensor<32x3x3x512xbf16>
+  func.call @id4_vae_pack_conv3x3_weight_f32_bf16(%source, %target) : (tensor<512x32x3x3xf32>, tensor<32x3x3x512xbf16>)
+  check.expect.close actual(%target) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<32x3x3x512xbf16>
+  check.return
+}
+
 check.benchmark<@id4_vae_pack_conv3x3_weight_f32_small_case> @id4_vae_pack_conv3x3_weight_f32_small
 check.benchmark<@id4_vae_pack_conv3x3_weight_f32_flux2_mid_shape_case> @id4_vae_pack_conv3x3_weight_f32_flux2_mid_shape
+
+check.benchmark<@id4_vae_pack_conv3x3_weight_f32_bf16_small_case> @id4_vae_pack_conv3x3_weight_f32_bf16_small
+check.benchmark<@id4_vae_pack_conv3x3_weight_f32_bf16_flux2_conv_in_shape_case> @id4_vae_pack_conv3x3_weight_f32_bf16_flux2_conv_in_shape
