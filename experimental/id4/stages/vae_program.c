@@ -1494,6 +1494,7 @@ static iree_status_t id4_vae_program_author_group_norm(
           ? IREE_SV("id4_vae_group_norm_silu_f32")
           : IREE_SV("id4_vae_group_norm_f32");
   uint32_t apply_dispatch_element_count = (uint32_t)output_element_count;
+  uint32_t apply_dispatch_workgroup_count_y = 1;
   id4_vae_program_config_list_t apply_config_list;
   IREE_RETURN_IF_ERROR(id4_vae_program_build_group_norm_apply_configs(
       width, height, channel_count, group_count, batch_count,
@@ -1502,8 +1503,10 @@ static iree_status_t id4_vae_program_author_group_norm(
   if (iree_any_bit_set(flags, ID4_VAE_PROGRAM_GROUP_NORM_FLAG_APPLY_SILU) &&
       batch_count == 1 && channel_count >= 4 && channel_count % 4 == 0 &&
       channels_per_group % 4 == 0) {
-    apply_function_name = IREE_SV("id4_vae_group_norm_silu_ic4_oc4_f32");
-    apply_dispatch_element_count = (uint32_t)(output_element_count / 4);
+    apply_function_name = IREE_SV("id4_vae_group_norm_silu_ic4_oc4_2d_f32");
+    apply_dispatch_workgroup_count_y = channel_count / 4;
+    apply_dispatch_element_count =
+        (uint32_t)(output_element_count / channel_count);
     IREE_RETURN_IF_ERROR(id4_vae_program_add_group_norm_apply_oc4_configs(
         channel_count, output_element_count, &apply_config_list));
   }
@@ -1514,7 +1517,10 @@ static iree_status_t id4_vae_program_author_group_norm(
   apply_dispatch_options.kernel = id4_pipeline_make_kernel_ref(
       IREE_SV("vae/group_norm_f32"), apply_function_name);
   apply_dispatch_options.dispatch_config =
-      id4_vae_program_make_dispatch_config(apply_dispatch_element_count);
+      id4_vae_program_make_static_dispatch_config(
+          id4_vae_program_ceil_div_u32(apply_dispatch_element_count,
+                                       ID4_VAE_DECODE_WORKGROUP_SIZE_X),
+          apply_dispatch_workgroup_count_y, 1);
   apply_dispatch_options.config_binding_count = apply_config_list.count;
   apply_dispatch_options.config_bindings = apply_config_list.bindings;
   apply_dispatch_options.binding_count = IREE_ARRAYSIZE(apply_bindings);
