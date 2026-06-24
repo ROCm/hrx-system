@@ -2098,6 +2098,36 @@ _KERNEL_CASES = [
         "target_name": "vae_upsample_conv3x3_bias_ic4_oc16_packed_2d_bf16_flux2_tile_mid_shape",
     },
     {
+        "actual_case": "@id4_vae_upsample_nearest_bf16_scale2_case",
+        "benchmark": "@id4_vae_upsample_nearest_bf16_scale2",
+        "configs": [
+            "--config=id4.vae.upsample_nearest.input_width=2",
+            "--config=id4.vae.upsample_nearest.input_height=2",
+            "--config=id4.vae.upsample_nearest.channel_count=4",
+            "--config=id4.vae.upsample_nearest.batch_count=1",
+            "--config=id4.vae.upsample_nearest.output_width=4",
+            "--config=id4.vae.upsample_nearest.output_height=4",
+            "--config=id4.vae.upsample_nearest.output_element_count=64",
+        ],
+        "source": "vae/upsample_nearest_bf16.loom",
+        "target_name": "vae_upsample_nearest_bf16_scale2",
+    },
+    {
+        "actual_case": "@id4_vae_upsample_nearest_bf16_flux2_mid_shape_case",
+        "benchmark": "@id4_vae_upsample_nearest_bf16_flux2_mid_shape",
+        "configs": [
+            "--config=id4.vae.upsample_nearest.input_width=128",
+            "--config=id4.vae.upsample_nearest.input_height=128",
+            "--config=id4.vae.upsample_nearest.channel_count=256",
+            "--config=id4.vae.upsample_nearest.batch_count=1",
+            "--config=id4.vae.upsample_nearest.output_width=256",
+            "--config=id4.vae.upsample_nearest.output_height=256",
+            "--config=id4.vae.upsample_nearest.output_element_count=16777216",
+        ],
+        "source": "vae/upsample_nearest_bf16.loom",
+        "target_name": "vae_upsample_nearest_bf16_flux2_mid_shape",
+    },
+    {
         "actual_case": "@id4_vae_decode_nearest_f32_scale2_case",
         "benchmark": "@id4_vae_decode_nearest_f32_scale2",
         "configs": [
@@ -3599,6 +3629,7 @@ _KERNEL_SOURCES = [
     "vae/tile_io_f32.loom",
     "vae/upsample_conv3x3_bias_bf16.loom",
     "vae/upsample_conv3x3_bias_f32.loom",
+    "vae/upsample_nearest_bf16.loom",
 ]
 
 exports_files(_KERNEL_SOURCES)

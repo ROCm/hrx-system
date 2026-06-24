@@ -1,0 +1,94 @@
+config.decl @id4.vae.upsample_nearest.input_width : %value: index where [range(%value, 1, 65536)]
+
+config.decl @id4.vae.upsample_nearest.input_height : %value: index where [range(%value, 1, 65536)]
+
+config.decl @id4.vae.upsample_nearest.channel_count : %value: index where [range(%value, 1, 4096)]
+
+config.decl @id4.vae.upsample_nearest.batch_count : %value: index where [range(%value, 1, 1024)]
+
+config.decl @id4.vae.upsample_nearest.output_width : %value: index where [range(%value, 2, 131072)]
+
+config.decl @id4.vae.upsample_nearest.output_height : %value: index where [range(%value, 2, 131072)]
+
+config.decl @id4.vae.upsample_nearest.output_element_count : %value: index where [range(%value, 1, 268435456)]
+
+kernel.def export("id4_vae_upsample_nearest_bf16") @id4_vae_upsample_nearest_bf16() {
+  %unit = index.constant 1 : index
+  %workgroup_size_x = index.constant 256 : index
+  %element_count = config.get @id4.vae.upsample_nearest.output_element_count : index
+  %rounding = index.sub %workgroup_size_x, %unit : index
+  %rounded = index.add %element_count, %rounding : index
+  %workgroups_x = index.div %rounded, %workgroup_size_x : index
+  kernel.launch.config workgroups(%workgroups_x, %unit, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %two = index.constant 2 : index
+  %workgroup_size_x = index.constant 256 : index
+  %workgroup = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %input_width = config.get @id4.vae.upsample_nearest.input_width : index
+  %input_height = config.get @id4.vae.upsample_nearest.input_height : index
+  %channel_count = config.get @id4.vae.upsample_nearest.channel_count : index
+  %batch_count0 = config.get @id4.vae.upsample_nearest.batch_count : index
+  %batch_count = index.assume %batch_count0 [range(%batch_count0, 1, 1)] : index
+  %output_width = config.get @id4.vae.upsample_nearest.output_width : index
+  %output_height = config.get @id4.vae.upsample_nearest.output_height : index
+  %output_element_count = config.get @id4.vae.upsample_nearest.output_element_count : index
+  %element_index = index.madd %workgroup, %workgroup_size_x, %lane : index
+  %in_bounds = index.cmp ult, %element_index, %output_element_count : index
+  %input_noalias, %output_noalias = buffer.assume.noalias %input, %output : buffer, buffer
+  %input_global = buffer.assume.memory_space<global> %input_noalias : buffer
+  %output_global = buffer.assume.memory_space<global> %output_noalias : buffer
+  %input_pixel_count = index.mul %input_width, %input_height : index
+  %input_pixel_element_count = index.mul %input_pixel_count, %channel_count : index
+  %input_element_count = index.mul %input_pixel_element_count, %batch_count : index
+  %input_view = buffer.view %input_global[%base] : buffer -> view<[%input_element_count]xbf16, #dense>
+  %output_view = buffer.view %output_global[%base] : buffer -> view<[%output_element_count]xbf16, #dense>
+  scf.if %in_bounds {
+    %output_x = index.rem %element_index, %output_width : index
+    %output_row = index.div %element_index, %output_width : index
+    %output_y = index.rem %output_row, %output_height : index
+    %output_plane = index.div %output_row, %output_height : index
+    %channel0 = index.rem %output_plane, %channel_count : index
+    %channel = index.assume %channel0 [ge(%channel0, 0), lt(%channel0, %channel_count)] : index
+    %batch0 = index.div %output_plane, %channel_count : index
+    %batch = index.assume %batch0 [range(%batch0, 0, 0)] : index
+    %input_x0 = index.div %output_x, %two : index
+    %input_x = index.assume %input_x0 [ge(%input_x0, 0), lt(%input_x0, %input_width)] : index
+    %input_y0 = index.div %output_y, %two : index
+    %input_y = index.assume %input_y0 [ge(%input_y0, 0), lt(%input_y0, %input_height)] : index
+    %input_x_row_base = index.mul %input_x, %input_height : index
+    %input_pixel_base = index.add %input_x_row_base, %input_y : index
+    %input_pixel_element_base = index.mul %input_pixel_base, %channel_count : index
+    %input_channel_element = index.add %input_pixel_element_base, %channel : index
+    %input_batch_base = index.mul %input_channel_element, %batch_count : index
+    %input_element0 = index.add %input_batch_base, %batch : index
+    %input_element = index.assume %input_element0 [ge(%input_element0, 0), lt(%input_element0, %input_element_count)] : index
+    %value = view.load %input_view[%input_element] : view<[%input_element_count]xbf16, #dense> -> bf16
+    view.store %value, %output_view[%element_index] : bf16, view<[%output_element_count]xbf16, #dense>
+  }
+  kernel.return
+}
+
+check.case public @id4_vae_upsample_nearest_bf16_scale2_case {
+  %input = check.generate.fill value(3.0) : tensor<2x2x4x1xbf16>
+  %output = check.generate.fill value(0.0) : tensor<4x4x4x1xbf16>
+  %expected = check.generate.fill value(3.0) : tensor<4x4x4x1xbf16>
+  func.call @id4_vae_upsample_nearest_bf16(%input, %output) : (tensor<2x2x4x1xbf16>, tensor<4x4x4x1xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<4x4x4x1xbf16>
+  check.return
+}
+
+check.case public @id4_vae_upsample_nearest_bf16_flux2_mid_shape_case {
+  %input = check.generate.fill value(1.0) : tensor<128x128x256x1xbf16>
+  %output = check.generate.fill value(0.0) : tensor<256x256x256x1xbf16>
+  %expected = check.generate.fill value(1.0) : tensor<256x256x256x1xbf16>
+  func.call @id4_vae_upsample_nearest_bf16(%input, %output) : (tensor<128x128x256x1xbf16>, tensor<256x256x256x1xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<256x256x256x1xbf16>
+  check.return
+}
+
+check.benchmark<@id4_vae_upsample_nearest_bf16_scale2_case> @id4_vae_upsample_nearest_bf16_scale2
+
+check.benchmark<@id4_vae_upsample_nearest_bf16_flux2_mid_shape_case> @id4_vae_upsample_nearest_bf16_flux2_mid_shape

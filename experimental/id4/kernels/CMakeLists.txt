@@ -94,6 +94,7 @@ add_custom_command(OUTPUT loom_sources.stamp
     "vae/tile_io_f32.loom"
     "vae/upsample_conv3x3_bias_bf16.loom"
     "vae/upsample_conv3x3_bias_f32.loom"
+    "vae/upsample_nearest_bf16.loom"
 )
 
 add_custom_target(loom_sources
@@ -186,6 +187,7 @@ iree_c_embed_data(
     "vae/tile_io_f32.loom"
     "vae/upsample_conv3x3_bias_bf16.loom"
     "vae/upsample_conv3x3_bias_f32.loom"
+    "vae/upsample_nearest_bf16.loom"
   C_FILE_OUTPUT
     "embedded_loom_sources.c"
   H_FILE_OUTPUT
@@ -3156,6 +3158,48 @@ iree_native_test(
     "--config=id4.vae.upsample_conv3x3_bias.output_height=256"
     "--config=id4.vae.upsample_conv3x3_bias.output_element_count=16777216"
     "--config=id4.vae.upsample_conv3x3_bias.output_channel_tile_count=16"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
+    "vae_upsample_nearest_bf16_scale2_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/upsample_nearest_bf16.loom}}"
+    "--benchmark=@id4_vae_upsample_nearest_bf16_scale2"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.vae.upsample_nearest.input_width=2"
+    "--config=id4.vae.upsample_nearest.input_height=2"
+    "--config=id4.vae.upsample_nearest.channel_count=4"
+    "--config=id4.vae.upsample_nearest.batch_count=1"
+    "--config=id4.vae.upsample_nearest.output_width=4"
+    "--config=id4.vae.upsample_nearest.output_height=4"
+    "--config=id4.vae.upsample_nearest.output_element_count=64"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
+    "vae_upsample_nearest_bf16_flux2_mid_shape_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/upsample_nearest_bf16.loom}}"
+    "--benchmark=@id4_vae_upsample_nearest_bf16_flux2_mid_shape"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.vae.upsample_nearest.input_width=128"
+    "--config=id4.vae.upsample_nearest.input_height=128"
+    "--config=id4.vae.upsample_nearest.channel_count=256"
+    "--config=id4.vae.upsample_nearest.batch_count=1"
+    "--config=id4.vae.upsample_nearest.output_width=256"
+    "--config=id4.vae.upsample_nearest.output_height=256"
+    "--config=id4.vae.upsample_nearest.output_element_count=16777216"
   SRC
     loom::tools::iree-benchmark-loom
   LABELS
@@ -8780,6 +8824,56 @@ iree_native_test(
     "--config=id4.vae.upsample_conv3x3_bias.output_height=256"
     "--config=id4.vae.upsample_conv3x3_bias.output_element_count=16777216"
     "--config=id4.vae.upsample_conv3x3_bias.output_channel_tile_count=16"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
+    "vae_upsample_nearest_bf16_scale2_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/upsample_nearest_bf16.loom}}"
+    "--case=@id4_vae_upsample_nearest_bf16_scale2_case"
+    "--device=amdgpu://0"
+    "--config=id4.vae.upsample_nearest.input_width=2"
+    "--config=id4.vae.upsample_nearest.input_height=2"
+    "--config=id4.vae.upsample_nearest.channel_count=4"
+    "--config=id4.vae.upsample_nearest.batch_count=1"
+    "--config=id4.vae.upsample_nearest.output_width=4"
+    "--config=id4.vae.upsample_nearest.output_height=4"
+    "--config=id4.vae.upsample_nearest.output_element_count=64"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
+    "vae_upsample_nearest_bf16_flux2_mid_shape_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/upsample_nearest_bf16.loom}}"
+    "--case=@id4_vae_upsample_nearest_bf16_flux2_mid_shape_case"
+    "--device=amdgpu://0"
+    "--config=id4.vae.upsample_nearest.input_width=128"
+    "--config=id4.vae.upsample_nearest.input_height=128"
+    "--config=id4.vae.upsample_nearest.channel_count=256"
+    "--config=id4.vae.upsample_nearest.batch_count=1"
+    "--config=id4.vae.upsample_nearest.output_width=256"
+    "--config=id4.vae.upsample_nearest.output_height=256"
+    "--config=id4.vae.upsample_nearest.output_element_count=16777216"
   SRC
     loom::tools::iree-test-loom
   LABELS
