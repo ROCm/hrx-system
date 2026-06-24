@@ -1533,6 +1533,102 @@ static iree_status_t id4_vae_program_author_conv3x3_bias_bf16(
   return iree_ok_status();
 }
 
+static iree_status_t id4_vae_program_author_conv3x3_bias_add_bf16(
+    id4_pipeline_program_builder_t* builder, iree_string_view_t dispatch_name,
+    id4_pipeline_program_tensor_t input, id4_pipeline_program_tensor_t shortcut,
+    uint32_t width, uint32_t height, uint32_t channel_count,
+    uint32_t batch_count, iree_string_view_t weight_key,
+    iree_string_view_t bias_key, iree_string_view_t output_name,
+    id4_pipeline_program_tensor_t* out_output) {
+  uint64_t output_element_count = 0;
+  IREE_RETURN_IF_ERROR(id4_vae_program_whcb_element_count(
+      width, height, channel_count, batch_count, &output_element_count));
+  if (output_element_count > ID4_VAE_DECODE_MAX_ELEMENT_COUNT) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "VAE BF16 fused conv3x3 output element count %" PRIu64
+        " exceeds max count %u",
+        output_element_count, ID4_VAE_DECODE_MAX_ELEMENT_COUNT);
+  }
+  if (batch_count != 1 || channel_count < 16 || channel_count % 16 != 0) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "VAE BF16 fused conv3x3 residual requires batch-1 and channel "
+        "multiple of 16");
+  }
+
+  id4_pipeline_program_tensor_t output = id4_pipeline_program_tensor_invalid();
+  IREE_RETURN_IF_ERROR(id4_vae_program_acquire_tensor(
+      builder, output_name, ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+      id4_pipeline_program_make_shape_rank4(width, height, channel_count,
+                                            batch_count),
+      &output));
+
+  id4_vae_program_config_list_t config_list;
+  IREE_RETURN_IF_ERROR(id4_vae_program_build_conv3x3_bias_configs(
+      width, height, channel_count, channel_count, batch_count,
+      output_element_count, &config_list));
+  IREE_RETURN_IF_ERROR(id4_vae_program_add_conv3x3_bias_output_tile_configs(
+      channel_count, 16, output_element_count, &config_list));
+
+  iree_string_view_t packed_weight_key = iree_string_view_empty();
+  id4_pipeline_program_shape_t weight_shape;
+  char packed_weight_key_storage[ID4_VAE_PROGRAM_NAME_BUFFER_CAPACITY];
+  IREE_RETURN_IF_ERROR(id4_vae_program_resolve_conv3x3_weight(
+      weight_key, channel_count, channel_count,
+      ID4_VAE_PROGRAM_CONV3X3_WEIGHT_LAYOUT_PACKED_IC_KY_KX_OC,
+      packed_weight_key_storage, sizeof(packed_weight_key_storage),
+      &packed_weight_key, &weight_shape));
+  iree_string_view_t resolved_weight_key = iree_string_view_empty();
+  char resolved_weight_key_storage[ID4_VAE_PROGRAM_NAME_BUFFER_CAPACITY];
+  IREE_RETURN_IF_ERROR(id4_vae_parameter_format_bf16_key(
+      packed_weight_key, resolved_weight_key_storage,
+      sizeof(resolved_weight_key_storage), &resolved_weight_key));
+  iree_string_view_t resolved_bias_key = iree_string_view_empty();
+  char resolved_bias_key_storage[ID4_VAE_PROGRAM_NAME_BUFFER_CAPACITY];
+  IREE_RETURN_IF_ERROR(id4_vae_parameter_format_bf16_key(
+      bias_key, resolved_bias_key_storage, sizeof(resolved_bias_key_storage),
+      &resolved_bias_key));
+
+  id4_pipeline_program_tensor_t weight = id4_pipeline_program_tensor_invalid();
+  IREE_RETURN_IF_ERROR(id4_vae_program_parameter_tensor(
+      builder, resolved_weight_key, ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+      weight_shape, &weight));
+  id4_pipeline_program_tensor_t bias = id4_pipeline_program_tensor_invalid();
+  IREE_RETURN_IF_ERROR(id4_vae_program_parameter_tensor(
+      builder, resolved_bias_key, ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+      id4_pipeline_program_make_shape_rank1(channel_count), &bias));
+
+  id4_pipeline_program_dispatch_binding_t bindings[] = {
+      id4_pipeline_program_read(input),   id4_pipeline_program_read(weight),
+      id4_pipeline_program_read(bias),    id4_pipeline_program_read(shortcut),
+      id4_pipeline_program_write(output),
+  };
+  const uint32_t pixel_element_count =
+      (uint32_t)(output_element_count / channel_count);
+  id4_pipeline_program_dispatch_loom_options_t dispatch_options;
+  memset(&dispatch_options, 0, sizeof(dispatch_options));
+  dispatch_options.structure_size = sizeof(dispatch_options);
+  dispatch_options.name = dispatch_name;
+  dispatch_options.kernel = id4_pipeline_make_kernel_ref(
+      IREE_SV("vae/conv3x3_bias_packed_bf16"),
+      IREE_SV("id4_vae_conv3x3_bias_add_ic4_oc16_packed_bf16"));
+  dispatch_options.dispatch_config =
+      id4_vae_program_make_static_dispatch_config(
+          id4_vae_program_ceil_div_u32(pixel_element_count,
+                                       ID4_VAE_DECODE_WORKGROUP_SIZE_X),
+          channel_count / 16, 1);
+  dispatch_options.config_binding_count = config_list.count;
+  dispatch_options.config_bindings = config_list.bindings;
+  dispatch_options.binding_count = IREE_ARRAYSIZE(bindings);
+  dispatch_options.bindings = bindings;
+  IREE_RETURN_IF_ERROR(
+      id4_pipeline_program_dispatch_loom(builder, &dispatch_options));
+
+  *out_output = output;
+  return iree_ok_status();
+}
+
 static iree_status_t id4_vae_program_dispatch_conv3x3_bias_bf16_rounded_f32(
     id4_pipeline_program_builder_t* builder, iree_string_view_t dispatch_name,
     id4_pipeline_program_tensor_t input, uint32_t width, uint32_t height,
@@ -2428,8 +2524,11 @@ static iree_status_t id4_vae_program_author_resnet_block(
       flags, ID4_VAE_PROGRAM_RESNET_BLOCK_FLAG_PRESERVE_CONV2_TAP);
   if (input_channel_count == output_channel_count && batch_count == 1 &&
       output_channel_count >= 4 && output_channel_count % 4 == 0) {
-    if (activation_dtype == ID4_PIPELINE_PROGRAM_DTYPE_BF16 ||
-        preserve_conv2_tap) {
+    const bool can_use_bf16_fused_add =
+        output_channel_count >= 16 && output_channel_count % 16 == 0;
+    if (preserve_conv2_tap ||
+        (activation_dtype == ID4_PIPELINE_PROGRAM_DTYPE_BF16 &&
+         !can_use_bf16_fused_add)) {
       id4_pipeline_program_tensor_t conv2 =
           id4_pipeline_program_tensor_invalid();
       if (activation_dtype == ID4_PIPELINE_PROGRAM_DTYPE_BF16) {
@@ -2480,10 +2579,17 @@ static iree_status_t id4_vae_program_author_resnet_block(
 
     id4_pipeline_program_tensor_t output =
         id4_pipeline_program_tensor_invalid();
-    IREE_RETURN_IF_ERROR(id4_vae_program_author_conv3x3_bias_add(
-        builder, conv2_name, norm2_silu, input, width, height,
-        output_channel_count, batch_count, conv2_weight_key, conv2_bias_key,
-        output_name, &output));
+    if (activation_dtype == ID4_PIPELINE_PROGRAM_DTYPE_BF16) {
+      IREE_RETURN_IF_ERROR(id4_vae_program_author_conv3x3_bias_add_bf16(
+          builder, conv2_name, norm2_silu, input, width, height,
+          output_channel_count, batch_count, conv2_weight_key, conv2_bias_key,
+          output_name, &output));
+    } else {
+      IREE_RETURN_IF_ERROR(id4_vae_program_author_conv3x3_bias_add(
+          builder, conv2_name, norm2_silu, input, width, height,
+          output_channel_count, batch_count, conv2_weight_key, conv2_bias_key,
+          output_name, &output));
+    }
     iree_string_view_t output_barrier_name = iree_string_view_empty();
     char output_barrier_name_storage[ID4_VAE_PROGRAM_NAME_BUFFER_CAPACITY];
     IREE_RETURN_IF_ERROR(id4_vae_program_format_suffix(
