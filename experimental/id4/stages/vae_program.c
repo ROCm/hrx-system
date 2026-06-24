@@ -1508,6 +1508,8 @@ static iree_status_t id4_vae_program_author_conv3x3_bias_bf16(
   IREE_RETURN_IF_ERROR(id4_vae_program_build_conv3x3_bias_configs(
       width, height, input_channel_count, output_channel_count, batch_count,
       output_element_count, &config_list));
+  const bool use_wmma_oc64 =
+      output_channel_count >= 64 && output_channel_count % 64 == 0;
   const bool use_wmma =
       output_channel_count >= 32 && output_channel_count % 32 == 0;
   if (!use_wmma) {
@@ -1555,7 +1557,16 @@ static iree_status_t id4_vae_program_author_conv3x3_bias_bf16(
   memset(&dispatch_options, 0, sizeof(dispatch_options));
   dispatch_options.structure_size = sizeof(dispatch_options);
   dispatch_options.name = dispatch_name;
-  if (use_wmma) {
+  if (use_wmma_oc64) {
+    dispatch_options.kernel =
+        id4_pipeline_make_kernel_ref(IREE_SV("vae/conv3x3_bias_packed_bf16"),
+                                     IREE_SV("id4_vae_conv3x3_bias_bf16_"
+                                             "wmma_oc64"));
+    dispatch_options.dispatch_config =
+        id4_vae_program_make_static_dispatch_config_with_workgroup_size_x(
+            id4_vae_program_ceil_div_u32(pixel_element_count, 32),
+            output_channel_count / 64, 1, 32);
+  } else if (use_wmma) {
     dispatch_options.kernel =
         id4_pipeline_make_kernel_ref(IREE_SV("vae/conv3x3_bias_packed_bf16"),
                                      IREE_SV("id4_vae_conv3x3_bias_bf16_wmma"));
