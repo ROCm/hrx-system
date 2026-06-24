@@ -1,0 +1,131 @@
+amdgpu.target<gfx1100> @id4_gfx1100
+
+config.decl @id4.vae.conv1x1_bias_wmma.pixel_count : %value: index where [range(%value, 32, 16777216), mul(%value, 32)]
+config.decl @id4.vae.conv1x1_bias_wmma.input_channel_count : %value: index where [range(%value, 16, 4096), mul(%value, 16)]
+config.decl @id4.vae.conv1x1_bias_wmma.output_channel_count : %value: index where [range(%value, 32, 4096), mul(%value, 32)]
+
+kernel.def target(@id4_gfx1100) export("id4_vae_conv1x1_bias_bf16_wmma") @id4_vae_conv1x1_bias_bf16_wmma() {
+  %unit = index.constant 1 : index
+  %thirty_two = index.constant 32 : index
+  %workgroup_size_x = index.constant 32 : index
+  %pixel_count = config.get @id4.vae.conv1x1_bias_wmma.pixel_count : index
+  %output_channel_count = config.get @id4.vae.conv1x1_bias_wmma.output_channel_count : index
+  %pixel_tile_count = index.div %pixel_count, %thirty_two : index
+  %output_channel_tile_count = index.div %output_channel_count, %thirty_two : index
+  kernel.launch.config workgroups(%pixel_tile_count, %output_channel_tile_count, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
+} launch(%input: buffer, %weight: buffer, %bias: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %unit = index.constant 1 : index
+  %two = index.constant 2 : index
+  %eight = index.constant 8 : index
+  %sixteen = index.constant 16 : index
+  %thirty_two = index.constant 32 : index
+  %pixel_tile = kernel.workgroup.id<x> : index
+  %output_channel_tile = kernel.workgroup.id<y> : index
+  %lane = kernel.workitem.id<x> : index
+  %pixel_count = config.get @id4.vae.conv1x1_bias_wmma.pixel_count : index
+  %input_channel_count = config.get @id4.vae.conv1x1_bias_wmma.input_channel_count : index
+  %output_channel_count = config.get @id4.vae.conv1x1_bias_wmma.output_channel_count : index
+  %k_tile_count = index.div %input_channel_count, %sixteen : index
+  %pixel_origin0 = index.mul %pixel_tile, %thirty_two : index
+  %pixel_origin1 = index.add %pixel_origin0, %sixteen : index
+  %output_channel_origin0 = index.mul %output_channel_tile, %thirty_two : index
+  %output_channel_origin1 = index.add %output_channel_origin0, %sixteen : index
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 16 : index
+  %weight_layout = encoding.layout.strided [1, %input_channel_count] : encoding<layout>
+  %zero_acc = vector.constant 0.0 : vector<8xf32>
+
+  %input_noalias, %weight_noalias, %bias_noalias, %output_noalias = buffer.assume.noalias %input, %weight, %bias, %output : buffer, buffer, buffer, buffer
+  %input_global = buffer.assume.memory_space<global> %input_noalias : buffer
+  %weight_global = buffer.assume.memory_space<global> %weight_noalias : buffer
+  %bias_global = buffer.assume.memory_space<global> %bias_noalias : buffer
+  %output_global = buffer.assume.memory_space<global> %output_noalias : buffer
+  %input_aligned = buffer.assume.alignment %input_global {minimum_alignment = 16} : buffer
+  %weight_aligned = buffer.assume.alignment %weight_global {minimum_alignment = 16} : buffer
+  %bias_aligned = buffer.assume.alignment %bias_global {minimum_alignment = 16} : buffer
+  %output_aligned = buffer.assume.alignment %output_global {minimum_alignment = 16} : buffer
+  %input_view = buffer.view %input_aligned[%base] : buffer -> view<[%pixel_count]x[%input_channel_count]xbf16, #dense>
+  %weight_view = buffer.view %weight_aligned[%base] : buffer -> view<[%input_channel_count]x[%output_channel_count]xbf16, %weight_layout>
+  %bias_view = buffer.view %bias_aligned[%base] : buffer -> view<[%output_channel_count]xf32, #dense>
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<[%pixel_count]x[%output_channel_count]xbf16, #dense>
+
+  %init00 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
+  %init01 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
+  %init10 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
+  %init11 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
+  %result00, %result01, %result10, %result11 = scf.for %k_tile = [%zero to %k_tile_count step %unit](%acc00 = %init00 : vector<8xf32>, %acc01 = %init01 : vector<8xf32>, %acc10 = %init10 : vector<8xf32>, %acc11 = %init11 : vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
+    %k_origin = index.mul %k_tile, %sixteen : index
+    %lhs0 = vector.fragment.load<lhs> %input_view[%pixel_origin0, %k_origin] shape [%m, %k] : view<[%pixel_count]x[%input_channel_count]xbf16, #dense> -> vector<16xbf16>
+    %lhs1 = vector.fragment.load<lhs> %input_view[%pixel_origin1, %k_origin] shape [%m, %k] : view<[%pixel_count]x[%input_channel_count]xbf16, #dense> -> vector<16xbf16>
+    %rhs0 = vector.fragment.load<rhs> %weight_view[%k_origin, %output_channel_origin0] shape [%k, %n] : view<[%input_channel_count]x[%output_channel_count]xbf16, %weight_layout> -> vector<16xbf16>
+    %rhs1 = vector.fragment.load<rhs> %weight_view[%k_origin, %output_channel_origin1] shape [%k, %n] : view<[%input_channel_count]x[%output_channel_count]xbf16, %weight_layout> -> vector<16xbf16>
+    %next00 = vector.mma %lhs0, %rhs0, %acc00 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next01 = vector.mma %lhs0, %rhs1, %acc01 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next10 = vector.mma %lhs1, %rhs0, %acc10 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next11 = vector.mma %lhs1, %rhs1, %acc11 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    scf.yield %next00, %next01, %next10, %next11 : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>
+  }
+
+  %lane_column = index.rem %lane, %sixteen : index
+  %lane_group = index.div %lane, %sixteen : index
+  %column0 = index.add %output_channel_origin0, %lane_column : index
+  %column1 = index.add %output_channel_origin1, %lane_column : index
+  %bias0 = view.load %bias_view[%column0] : view<[%output_channel_count]xf32, #dense> -> f32
+  %bias1 = view.load %bias_view[%column1] : view<[%output_channel_count]xf32, #dense> -> f32
+  scf.for %register_index = [%zero to %eight step %unit] {
+    %register_pixel_base = index.mul %register_index, %two : index
+    %local_pixel = index.add %register_pixel_base, %lane_group : index
+    %pixel0 = index.add %pixel_origin0, %local_pixel : index
+    %pixel1 = index.add %pixel_origin1, %local_pixel : index
+
+    %value00 = vector.extract %result00[%register_index] : vector<8xf32> -> f32
+    %biased00 = scalar.addf<reassoc|nnan|ninf|nsz> %value00, %bias0 : f32
+    %rounded00 = scalar.fptrunc %biased00 : f32 to bf16
+    view.store %rounded00, %output_view[%pixel0, %column0] : bf16, view<[%pixel_count]x[%output_channel_count]xbf16, #dense>
+
+    %value01 = vector.extract %result01[%register_index] : vector<8xf32> -> f32
+    %biased01 = scalar.addf<reassoc|nnan|ninf|nsz> %value01, %bias1 : f32
+    %rounded01 = scalar.fptrunc %biased01 : f32 to bf16
+    view.store %rounded01, %output_view[%pixel0, %column1] : bf16, view<[%pixel_count]x[%output_channel_count]xbf16, #dense>
+
+    %value10 = vector.extract %result10[%register_index] : vector<8xf32> -> f32
+    %biased10 = scalar.addf<reassoc|nnan|ninf|nsz> %value10, %bias0 : f32
+    %rounded10 = scalar.fptrunc %biased10 : f32 to bf16
+    view.store %rounded10, %output_view[%pixel1, %column0] : bf16, view<[%pixel_count]x[%output_channel_count]xbf16, #dense>
+
+    %value11 = vector.extract %result11[%register_index] : vector<8xf32> -> f32
+    %biased11 = scalar.addf<reassoc|nnan|ninf|nsz> %value11, %bias1 : f32
+    %rounded11 = scalar.fptrunc %biased11 : f32 to bf16
+    view.store %rounded11, %output_view[%pixel1, %column1] : bf16, view<[%pixel_count]x[%output_channel_count]xbf16, #dense>
+  }
+  kernel.return
+}
+
+check.case public @id4_vae_conv1x1_bias_bf16_wmma_small_case {
+  %input = check.generate.fill value(1.0) : tensor<32x16xbf16>
+  %weight = check.generate.fill value(1.0) : tensor<32x16xbf16>
+  %bias = check.generate.fill value(1.0) : tensor<32xf32>
+  %output = check.generate.fill value(0.0) : tensor<32x32xbf16>
+  %expected = check.generate.fill value(17.0) : tensor<32x32xbf16>
+  func.call @id4_vae_conv1x1_bias_bf16_wmma(%input, %weight, %bias, %output) : (tensor<32x16xbf16>, tensor<32x16xbf16>, tensor<32xf32>, tensor<32x32xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<32x32xbf16>
+  check.return
+}
+
+check.case public @id4_vae_conv1x1_bias_bf16_wmma_flux2_post_quant_shape_case {
+  %input = check.generate.fill value(1.0) : tensor<16384x32xbf16>
+  %weight = check.generate.fill value(0.0) : tensor<32x32xbf16>
+  %bias = check.generate.fill value(0.0) : tensor<32xf32>
+  %output = check.generate.fill value(1.0) : tensor<16384x32xbf16>
+  %expected = check.generate.fill value(0.0) : tensor<16384x32xbf16>
+  func.call @id4_vae_conv1x1_bias_bf16_wmma(%input, %weight, %bias, %output) : (tensor<16384x32xbf16>, tensor<32x32xbf16>, tensor<32xf32>, tensor<16384x32xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<16384x32xbf16>
+  check.return
+}
+
+check.benchmark<@id4_vae_conv1x1_bias_bf16_wmma_small_case> @id4_vae_conv1x1_bias_bf16_wmma_small
+
+check.benchmark<@id4_vae_conv1x1_bias_bf16_wmma_flux2_post_quant_shape_case> @id4_vae_conv1x1_bias_bf16_wmma_flux2_post_quant_shape
