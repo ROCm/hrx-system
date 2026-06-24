@@ -2665,6 +2665,111 @@ iree_native_test(
 
 iree_native_test(
   NAME
+    "vae_group_norm_stats_bf16_flux2_256x256x512_shape_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_bf16.loom}}"
+    "--benchmark=@id4_vae_group_norm_stats_bf16_flux2_256x256x512_shape"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.vae.group_norm.width=256"
+    "--config=id4.vae.group_norm.height=256"
+    "--config=id4.vae.group_norm.channel_count=512"
+    "--config=id4.vae.group_norm.group_count=32"
+    "--config=id4.vae.group_norm.channels_per_group=16"
+    "--config=id4.vae.group_norm.batch_count=1"
+    "--config=id4.vae.group_norm.group_element_count=1048576"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
+    "vae_group_norm_stats_bf16_flux2_512x512x512_shape_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_bf16.loom}}"
+    "--benchmark=@id4_vae_group_norm_stats_bf16_flux2_512x512x512_shape"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.vae.group_norm.width=512"
+    "--config=id4.vae.group_norm.height=512"
+    "--config=id4.vae.group_norm.channel_count=512"
+    "--config=id4.vae.group_norm.group_count=32"
+    "--config=id4.vae.group_norm.channels_per_group=16"
+    "--config=id4.vae.group_norm.batch_count=1"
+    "--config=id4.vae.group_norm.group_element_count=4194304"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
+    "vae_group_norm_stats_bf16_flux2_512x512x256_shape_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_bf16.loom}}"
+    "--benchmark=@id4_vae_group_norm_stats_bf16_flux2_512x512x256_shape"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.vae.group_norm.width=512"
+    "--config=id4.vae.group_norm.height=512"
+    "--config=id4.vae.group_norm.channel_count=256"
+    "--config=id4.vae.group_norm.group_count=32"
+    "--config=id4.vae.group_norm.channels_per_group=8"
+    "--config=id4.vae.group_norm.batch_count=1"
+    "--config=id4.vae.group_norm.group_element_count=2097152"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
+    "vae_group_norm_stats_bf16_flux2_1024x1024x256_shape_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_bf16.loom}}"
+    "--benchmark=@id4_vae_group_norm_stats_bf16_flux2_1024x1024x256_shape"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.vae.group_norm.width=1024"
+    "--config=id4.vae.group_norm.height=1024"
+    "--config=id4.vae.group_norm.channel_count=256"
+    "--config=id4.vae.group_norm.group_count=32"
+    "--config=id4.vae.group_norm.channels_per_group=8"
+    "--config=id4.vae.group_norm.batch_count=1"
+    "--config=id4.vae.group_norm.group_element_count=8388608"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
+    "vae_group_norm_stats_bf16_flux2_1024x1024x128_shape_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_bf16.loom}}"
+    "--benchmark=@id4_vae_group_norm_stats_bf16_flux2_1024x1024x128_shape"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.vae.group_norm.width=1024"
+    "--config=id4.vae.group_norm.height=1024"
+    "--config=id4.vae.group_norm.channel_count=128"
+    "--config=id4.vae.group_norm.group_count=32"
+    "--config=id4.vae.group_norm.channels_per_group=4"
+    "--config=id4.vae.group_norm.batch_count=1"
+    "--config=id4.vae.group_norm.group_element_count=4194304"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
     "vae_group_norm_silu_ic4_oc4_2d_bf16_small_plan_test"
   ARGS
     "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_oc4_bf16.loom}}"
@@ -8678,6 +8783,131 @@ iree_native_test(
     "--config=id4.vae.group_norm.channels_per_group=16"
     "--config=id4.vae.group_norm.batch_count=1"
     "--config=id4.vae.group_norm.group_element_count=262144"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
+    "vae_group_norm_stats_bf16_flux2_256x256x512_shape_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_bf16.loom}}"
+    "--case=@id4_vae_group_norm_stats_bf16_flux2_256x256x512_shape_case"
+    "--device=amdgpu://0"
+    "--config=id4.vae.group_norm.width=256"
+    "--config=id4.vae.group_norm.height=256"
+    "--config=id4.vae.group_norm.channel_count=512"
+    "--config=id4.vae.group_norm.group_count=32"
+    "--config=id4.vae.group_norm.channels_per_group=16"
+    "--config=id4.vae.group_norm.batch_count=1"
+    "--config=id4.vae.group_norm.group_element_count=1048576"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
+    "vae_group_norm_stats_bf16_flux2_512x512x512_shape_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_bf16.loom}}"
+    "--case=@id4_vae_group_norm_stats_bf16_flux2_512x512x512_shape_case"
+    "--device=amdgpu://0"
+    "--config=id4.vae.group_norm.width=512"
+    "--config=id4.vae.group_norm.height=512"
+    "--config=id4.vae.group_norm.channel_count=512"
+    "--config=id4.vae.group_norm.group_count=32"
+    "--config=id4.vae.group_norm.channels_per_group=16"
+    "--config=id4.vae.group_norm.batch_count=1"
+    "--config=id4.vae.group_norm.group_element_count=4194304"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
+    "vae_group_norm_stats_bf16_flux2_512x512x256_shape_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_bf16.loom}}"
+    "--case=@id4_vae_group_norm_stats_bf16_flux2_512x512x256_shape_case"
+    "--device=amdgpu://0"
+    "--config=id4.vae.group_norm.width=512"
+    "--config=id4.vae.group_norm.height=512"
+    "--config=id4.vae.group_norm.channel_count=256"
+    "--config=id4.vae.group_norm.group_count=32"
+    "--config=id4.vae.group_norm.channels_per_group=8"
+    "--config=id4.vae.group_norm.batch_count=1"
+    "--config=id4.vae.group_norm.group_element_count=2097152"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
+    "vae_group_norm_stats_bf16_flux2_1024x1024x256_shape_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_bf16.loom}}"
+    "--case=@id4_vae_group_norm_stats_bf16_flux2_1024x1024x256_shape_case"
+    "--device=amdgpu://0"
+    "--config=id4.vae.group_norm.width=1024"
+    "--config=id4.vae.group_norm.height=1024"
+    "--config=id4.vae.group_norm.channel_count=256"
+    "--config=id4.vae.group_norm.group_count=32"
+    "--config=id4.vae.group_norm.channels_per_group=8"
+    "--config=id4.vae.group_norm.batch_count=1"
+    "--config=id4.vae.group_norm.group_element_count=8388608"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
+    "vae_group_norm_stats_bf16_flux2_1024x1024x128_shape_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_bf16.loom}}"
+    "--case=@id4_vae_group_norm_stats_bf16_flux2_1024x1024x128_shape_case"
+    "--device=amdgpu://0"
+    "--config=id4.vae.group_norm.width=1024"
+    "--config=id4.vae.group_norm.height=1024"
+    "--config=id4.vae.group_norm.channel_count=128"
+    "--config=id4.vae.group_norm.group_count=32"
+    "--config=id4.vae.group_norm.channels_per_group=4"
+    "--config=id4.vae.group_norm.batch_count=1"
+    "--config=id4.vae.group_norm.group_element_count=4194304"
   SRC
     loom::tools::iree-test-loom
   LABELS
