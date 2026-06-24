@@ -1354,6 +1354,51 @@ _KERNEL_CASES = [
         "target_name": "vae_spatial_attention_f32_uniform_softmax",
     },
     {
+        "actual_case": "@id4_vae_spatial_attention_vec2_f32_single_token_case",
+        "benchmark": "@id4_vae_spatial_attention_vec2_f32_single_token",
+        "configs": [
+            "--config=id4.vae.spatial_attention.width=1",
+            "--config=id4.vae.spatial_attention.height=1",
+            "--config=id4.vae.spatial_attention.channel_count=8",
+            "--config=id4.vae.spatial_attention.batch_count=1",
+            "--config=id4.vae.spatial_attention.token_count=1",
+        ],
+        "source": "vae/spatial_attention_vec2_f32.loom",
+        "target_name": "vae_spatial_attention_vec2_f32_single_token",
+    },
+    {
+        "actual_case": "@id4_vae_spatial_attention_vec2_f32_uniform_softmax_case",
+        "benchmark": "@id4_vae_spatial_attention_vec2_f32_uniform_softmax",
+        "configs": [
+            "--config=id4.vae.spatial_attention.width=2",
+            "--config=id4.vae.spatial_attention.height=1",
+            "--config=id4.vae.spatial_attention.channel_count=8",
+            "--config=id4.vae.spatial_attention.batch_count=1",
+            "--config=id4.vae.spatial_attention.token_count=2",
+        ],
+        "source": "vae/spatial_attention_vec2_f32.loom",
+        "target_name": "vae_spatial_attention_vec2_f32_uniform_softmax",
+    },
+    {
+        "actual_case": "@id4_vae_spatial_attention_vec2_f32_nonuniform_case",
+        "benchmark": "@id4_vae_spatial_attention_vec2_f32_nonuniform",
+        "configs": [
+            "--config=id4.vae.spatial_attention.width=4",
+            "--config=id4.vae.spatial_attention.height=4",
+            "--config=id4.vae.spatial_attention.channel_count=8",
+            "--config=id4.vae.spatial_attention.batch_count=1",
+            "--config=id4.vae.spatial_attention.token_count=16",
+        ],
+        "data": [
+            "vae/testdata/vae_spatial_attention_vec2_f32_nonuniform_expected.npy",
+            "vae/testdata/vae_spatial_attention_vec2_f32_nonuniform_key.npy",
+            "vae/testdata/vae_spatial_attention_vec2_f32_nonuniform_query.npy",
+            "vae/testdata/vae_spatial_attention_vec2_f32_nonuniform_value.npy",
+        ],
+        "source": "vae/spatial_attention_vec2_f32.loom",
+        "target_name": "vae_spatial_attention_vec2_f32_nonuniform",
+    },
+    {
         "actual_case": "@id4_vae_upsample_conv3x3_bias_f32_small_case",
         "benchmark": "@id4_vae_upsample_conv3x3_bias_f32_small",
         "configs": [
@@ -2955,6 +3000,7 @@ _KERNEL_SOURCES = [
     "vae/group_norm_oc16_f32.loom",
     "vae/pack_conv3x3_weight_f32.loom",
     "vae/spatial_attention_f32.loom",
+    "vae/spatial_attention_vec2_f32.loom",
     "vae/tile_io_f32.loom",
     "vae/upsample_conv3x3_bias_f32.loom",
 ]

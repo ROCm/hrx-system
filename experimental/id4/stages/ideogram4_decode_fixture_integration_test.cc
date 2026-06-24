@@ -12,16 +12,24 @@
 #include "experimental/id4/pipeline/stage.h"
 #include "experimental/id4/stages/hal_integration_util.h"
 #include "experimental/id4/stages/ideogram4_decode.h"
+#include "experimental/id4/tooling/capture.h"
 #include "experimental/id4/tooling/image.h"
 #include "iree/base/tooling/flags.h"
+#include "iree/io/file_contents.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
+IREE_FLAG(string, id4_capture_dir, "",
+          "Directory that receives exported ID4 decode boundary and "
+          "diagnostic tap tensor captures.");
 IREE_FLAG(string, id4_fixture_dir, "",
           "Directory containing an ID4 final-latent fixture manifest and "
           "tensor payloads used to initialize the decode stage input.");
 IREE_FLAG(string, id4_output_image, "",
           "Optional binary PPM path receiving the decoded image tensor.");
+IREE_FLAG(string, id4_plan_output, "",
+          "Path that receives the planned ID4 decode stage JSON before "
+          "preparation.");
 
 namespace {
 
@@ -287,6 +295,21 @@ TEST(Ideogram4DecodeStageFixtureIntegration,
   id4::test::OwningRef<id4_pipeline_plan_t, id4_pipeline_plan_release> plan;
   IREE_ASSERT_OK(
       id4_pipeline_stage_plan(stage.get(), &plan_options, plan.out()));
+  iree_string_view_t plan_output_path =
+      iree_make_cstring_view(FLAG_id4_plan_output);
+  if (!iree_string_view_is_empty(plan_output_path)) {
+    iree_string_builder_t plan_json_builder;
+    iree_string_builder_initialize(iree_allocator_system(), &plan_json_builder);
+    IREE_ASSERT_OK(
+        id4_pipeline_plan_format_json(plan.get(), &plan_json_builder));
+    const iree_string_view_t plan_json_view =
+        iree_string_builder_view(&plan_json_builder);
+    IREE_ASSERT_OK(iree_io_file_contents_write(
+        plan_output_path,
+        iree_make_const_byte_span(plan_json_view.data, plan_json_view.size),
+        iree_allocator_system()));
+    iree_string_builder_deinitialize(&plan_json_builder);
+  }
 
   id4_pipeline_stage_prepare_options_t prepare_options;
   std::memset(&prepare_options, 0, sizeof(prepare_options));
@@ -377,6 +400,31 @@ TEST(Ideogram4DecodeStageFixtureIntegration,
   id4::test::SemaphoreListStorage read_wait;
   read_wait.semaphore = issue_semaphore.get();
   read_wait.payload_value = issue_signal.payload_value;
+  iree_string_view_t capture_directory =
+      iree_make_cstring_view(FLAG_id4_capture_dir);
+  if (!iree_string_view_is_empty(capture_directory)) {
+    id4_tooling_capture_execution_options_t capture_options;
+    std::memset(&capture_options, 0, sizeof(capture_options));
+    capture_options.structure_size = sizeof(capture_options);
+    capture_options.run_id = IREE_SV("ideogram4_decode_fixture");
+    capture_options.output_directory = capture_directory;
+    capture_options.plan = plan.get();
+    capture_options.device = context.device.get();
+    capture_options.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
+    capture_options.boundary_binding_count = boundary_bindings.count;
+    capture_options.boundary_bindings = boundary_bindings.bindings;
+    capture_options.diagnostic_tap_binding_count =
+        diagnostic_tap_bindings.count;
+    capture_options.diagnostic_tap_bindings = diagnostic_tap_bindings.bindings;
+    capture_options.wait_semaphore_list = read_wait.list();
+    capture_options.host_allocator = iree_allocator_system();
+    IREE_ASSERT_OK(id4_tooling_capture_execution(&capture_options));
+    IREE_ASSERT_OK(id4::test::VerifyCapturedExportedBoundaryTensorsWereWritten(
+        plan.get(), capture_directory, kOutputSentinel));
+    IREE_ASSERT_OK(id4::test::VerifyCapturedDiagnosticTapTensorsWereWritten(
+        plan.get(), capture_directory, kOutputSentinel));
+  }
+
   std::vector<uint8_t> decoded_bytes;
   IREE_ASSERT_OK(id4::test::ReadBindingToHost(
       context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, &decoded_binding,
@@ -397,10 +445,6 @@ TEST(Ideogram4DecodeStageFixtureIntegration,
     image_options.host_allocator = iree_allocator_system();
     IREE_ASSERT_OK(id4_tooling_write_f32_rgb_ppm(&image_options));
   }
-  IREE_ASSERT_OK(id4::test::CompareF32BindingWithFixtureTensor(
-      context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, &decoded_binding,
-      read_wait.list(), *expected_decoded_image));
-
   iree_hal_buffer_binding_t internal_latent_binding = {};
   IREE_ASSERT_OK(id4::test::FindDiagnosticTapBinding(
       plan.get(), diagnostic_tap_bindings, IREE_SV("vae.flux2.internal_latent"),
@@ -532,6 +576,10 @@ TEST(Ideogram4DecodeStageFixtureIntegration,
   IREE_ASSERT_OK(id4::test::CompareF32BindingWithFixtureTensor(
       context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY,
       &mid_block_2_output_binding, read_wait.list(), *mid_block_2_output));
+
+  IREE_ASSERT_OK(id4::test::CompareF32BindingWithFixtureTensor(
+      context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, &decoded_binding,
+      read_wait.list(), *expected_decoded_image));
 }
 
 }  // namespace

@@ -79,6 +79,7 @@ add_custom_command(OUTPUT loom_sources.stamp
     "vae/group_norm_oc8_f32.loom"
     "vae/pack_conv3x3_weight_f32.loom"
     "vae/spatial_attention_f32.loom"
+    "vae/spatial_attention_vec2_f32.loom"
     "vae/tile_io_f32.loom"
     "vae/upsample_conv3x3_bias_f32.loom"
 )
@@ -158,6 +159,7 @@ iree_c_embed_data(
     "vae/group_norm_oc8_f32.loom"
     "vae/pack_conv3x3_weight_f32.loom"
     "vae/spatial_attention_f32.loom"
+    "vae/spatial_attention_vec2_f32.loom"
     "vae/tile_io_f32.loom"
     "vae/upsample_conv3x3_bias_f32.loom"
   C_FILE_OUTPUT
@@ -2092,6 +2094,63 @@ iree_native_test(
     "--config=id4.vae.spatial_attention.channel_count=2"
     "--config=id4.vae.spatial_attention.batch_count=1"
     "--config=id4.vae.spatial_attention.token_count=2"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
+    "vae_spatial_attention_vec2_f32_single_token_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/spatial_attention_vec2_f32.loom}}"
+    "--benchmark=@id4_vae_spatial_attention_vec2_f32_single_token"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.vae.spatial_attention.width=1"
+    "--config=id4.vae.spatial_attention.height=1"
+    "--config=id4.vae.spatial_attention.channel_count=8"
+    "--config=id4.vae.spatial_attention.batch_count=1"
+    "--config=id4.vae.spatial_attention.token_count=1"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
+    "vae_spatial_attention_vec2_f32_uniform_softmax_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/spatial_attention_vec2_f32.loom}}"
+    "--benchmark=@id4_vae_spatial_attention_vec2_f32_uniform_softmax"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.vae.spatial_attention.width=2"
+    "--config=id4.vae.spatial_attention.height=1"
+    "--config=id4.vae.spatial_attention.channel_count=8"
+    "--config=id4.vae.spatial_attention.batch_count=1"
+    "--config=id4.vae.spatial_attention.token_count=2"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
+    "vae_spatial_attention_vec2_f32_nonuniform_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/spatial_attention_vec2_f32.loom}}"
+    "--benchmark=@id4_vae_spatial_attention_vec2_f32_nonuniform"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.vae.spatial_attention.width=4"
+    "--config=id4.vae.spatial_attention.height=4"
+    "--config=id4.vae.spatial_attention.channel_count=8"
+    "--config=id4.vae.spatial_attention.batch_count=1"
+    "--config=id4.vae.spatial_attention.token_count=16"
   SRC
     loom::tools::iree-benchmark-loom
   LABELS
@@ -6635,6 +6694,75 @@ iree_native_test(
     "--config=id4.vae.spatial_attention.channel_count=2"
     "--config=id4.vae.spatial_attention.batch_count=1"
     "--config=id4.vae.spatial_attention.token_count=2"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
+    "vae_spatial_attention_vec2_f32_single_token_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/spatial_attention_vec2_f32.loom}}"
+    "--case=@id4_vae_spatial_attention_vec2_f32_single_token_case"
+    "--device=amdgpu://0"
+    "--config=id4.vae.spatial_attention.width=1"
+    "--config=id4.vae.spatial_attention.height=1"
+    "--config=id4.vae.spatial_attention.channel_count=8"
+    "--config=id4.vae.spatial_attention.batch_count=1"
+    "--config=id4.vae.spatial_attention.token_count=1"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
+    "vae_spatial_attention_vec2_f32_uniform_softmax_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/spatial_attention_vec2_f32.loom}}"
+    "--case=@id4_vae_spatial_attention_vec2_f32_uniform_softmax_case"
+    "--device=amdgpu://0"
+    "--config=id4.vae.spatial_attention.width=2"
+    "--config=id4.vae.spatial_attention.height=1"
+    "--config=id4.vae.spatial_attention.channel_count=8"
+    "--config=id4.vae.spatial_attention.batch_count=1"
+    "--config=id4.vae.spatial_attention.token_count=2"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
+    "vae_spatial_attention_vec2_f32_nonuniform_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/spatial_attention_vec2_f32.loom}}"
+    "--case=@id4_vae_spatial_attention_vec2_f32_nonuniform_case"
+    "--device=amdgpu://0"
+    "--config=id4.vae.spatial_attention.width=4"
+    "--config=id4.vae.spatial_attention.height=4"
+    "--config=id4.vae.spatial_attention.channel_count=8"
+    "--config=id4.vae.spatial_attention.batch_count=1"
+    "--config=id4.vae.spatial_attention.token_count=16"
   SRC
     loom::tools::iree-test-loom
   LABELS

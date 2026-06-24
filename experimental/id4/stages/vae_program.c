@@ -1676,9 +1676,15 @@ static iree_status_t id4_vae_program_author_spatial_attention(
   memset(&dispatch_options, 0, sizeof(dispatch_options));
   dispatch_options.structure_size = sizeof(dispatch_options);
   dispatch_options.name = dispatch_name;
+  iree_string_view_t module_path = IREE_SV("vae/spatial_attention_f32");
+  iree_string_view_t function_name = IREE_SV("id4_vae_spatial_attention_f32");
+  if (batch_count == 1 && channel_count >= 2 && channel_count <= 512 &&
+      channel_count % 2 == 0) {
+    module_path = IREE_SV("vae/spatial_attention_vec2_f32");
+    function_name = IREE_SV("id4_vae_spatial_attention_vec2_f32");
+  }
   dispatch_options.kernel =
-      id4_pipeline_make_kernel_ref(IREE_SV("vae/spatial_attention_f32"),
-                                   IREE_SV("id4_vae_spatial_attention_f32"));
+      id4_pipeline_make_kernel_ref(module_path, function_name);
   dispatch_options.dispatch_config =
       id4_vae_program_make_static_dispatch_config((uint32_t)token_count,
                                                   batch_count, 1);

@@ -456,8 +456,10 @@ iree_cc_test(
     iree::base::tooling::flags
     iree::experimental::id4::pipeline::plan
     iree::experimental::id4::pipeline::stage
+    iree::experimental::id4::tooling::capture
     iree::experimental::id4::tooling::image
     iree::hal
+    iree::io::file_handle
     iree::testing::gtest
     iree::testing::gtest_main
   LABELS
