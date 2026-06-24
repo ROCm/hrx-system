@@ -265,6 +265,12 @@ typedef enum loomc_structure_type_e {
 
   /// `loomc_sanitizer_options_t`.
   LOOMC_STRUCTURE_TYPE_SANITIZER_OPTIONS = 32,
+
+  /// `loomc_launch_config_eval_options_t`.
+  LOOMC_STRUCTURE_TYPE_LAUNCH_CONFIG_EVAL_OPTIONS = 33,
+
+  /// `loomc_launch_config_t`.
+  LOOMC_STRUCTURE_TYPE_LAUNCH_CONFIG = 34,
 } loomc_structure_type_t;
 
 /// One loose string option entry.

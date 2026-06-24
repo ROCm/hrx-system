@@ -211,17 +211,6 @@ TEST(ModuleTest, QueriesFunctionsAndKernelSidecars) {
   EXPECT_EQ(helper->function_ordinal, 0u);
   EXPECT_EQ(helper->kind, LOOMC_MODULE_FUNCTION_KIND_FUNCTION);
   EXPECT_TRUE(helper->flags & LOOMC_MODULE_FUNCTION_FLAG_PUBLIC);
-  loomc_module_kernel_function_info_t kernel_info = {};
-  EXPECT_FALSE(loomc_module_function_try_get_kernel_info(module.get(), helper,
-                                                         &kernel_info));
-  EXPECT_FALSE(loomc_module_function_try_get_kernel_info_at(
-      module.get(), helper->function_ordinal, &kernel_info));
-  status =
-      loomc_module_function_get_kernel_info(module.get(), helper, &kernel_info);
-  LOOMC_EXPECT_STATUS_IS(LOOMC_STATUS_NOT_FOUND, status);
-  status = loomc_module_function_get_kernel_info_at(
-      module.get(), helper->function_ordinal, &kernel_info);
-  LOOMC_EXPECT_STATUS_IS(LOOMC_STATUS_NOT_FOUND, status);
   loomc_module_function_export_info_t export_info = {};
   EXPECT_FALSE(loomc_module_function_try_get_export_info_at(
       module.get(), helper->function_ordinal, &export_info));
@@ -234,21 +223,6 @@ TEST(ModuleTest, QueriesFunctionsAndKernelSidecars) {
   EXPECT_EQ(entry->function_ordinal, 1u);
   EXPECT_EQ(entry->kind, LOOMC_MODULE_FUNCTION_KIND_KERNEL);
   EXPECT_TRUE(entry->flags & LOOMC_MODULE_FUNCTION_FLAG_HAS_EXPORT_INFO);
-  ASSERT_TRUE(loomc_module_function_try_get_kernel_info(module.get(), entry,
-                                                        &kernel_info));
-  ASSERT_TRUE(loomc_module_function_try_get_kernel_info_at(
-      module.get(), entry->function_ordinal, &kernel_info));
-  EXPECT_TRUE(
-      kernel_info.flags &
-      LOOMC_MODULE_KERNEL_FUNCTION_FLAG_HAS_STATIC_DISPATCH_WORKGROUP_COUNT);
-  EXPECT_EQ(kernel_info.static_dispatch_workgroup_count.x, 2u);
-  EXPECT_EQ(kernel_info.static_dispatch_workgroup_count.y, 3u);
-  EXPECT_EQ(kernel_info.static_dispatch_workgroup_count.z, 4u);
-  EXPECT_TRUE(kernel_info.flags &
-              LOOMC_MODULE_KERNEL_FUNCTION_FLAG_HAS_STATIC_WORKGROUP_SIZE);
-  EXPECT_EQ(kernel_info.static_workgroup_size.x, 5u);
-  EXPECT_EQ(kernel_info.static_workgroup_size.y, 6u);
-  EXPECT_EQ(kernel_info.static_workgroup_size.z, 1u);
 
   export_info = {};
   ASSERT_TRUE(loomc_module_function_try_get_export_info(module.get(), entry,
@@ -372,13 +346,6 @@ TEST(ModuleTest, RejectsMalformedFunctionViewsWithoutCrashing) {
   LOOMC_ASSERT_OK(status);
   function.symbol_name =
       loomc_make_string_view(nullptr, function.symbol_name.size);
-
-  loomc_module_kernel_function_info_t kernel_info = {};
-  EXPECT_FALSE(loomc_module_function_try_get_kernel_info(
-      module.get(), &function, &kernel_info));
-  status = loomc_module_function_get_kernel_info(module.get(), &function,
-                                                 &kernel_info);
-  LOOMC_EXPECT_STATUS_IS(LOOMC_STATUS_INVALID_ARGUMENT, status);
 
   loomc_module_function_export_info_t export_info = {};
   EXPECT_FALSE(loomc_module_function_try_get_export_info(

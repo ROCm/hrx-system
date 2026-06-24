@@ -26,6 +26,7 @@ loom_cc_library(
     "include/loomc/diagnostic.h"
     "include/loomc/emit.h"
     "include/loomc/iree.h"
+    "include/loomc/launch_config.h"
     "include/loomc/link.h"
     "include/loomc/link_index.h"
     "include/loomc/loomc.h"
@@ -60,6 +61,7 @@ loom_cc_library(
     "src/context.c"
     "src/diagnostic.c"
     "src/emit.c"
+    "src/launch_config.c"
     "src/link.c"
     "src/link_index.c"
     "src/module.c"
@@ -78,6 +80,7 @@ loom_cc_library(
     iree::base::internal::arena
     iree::io::file_handle
     iree::io::stream
+    loom::analysis::kernel_launch_config
     loom::codegen::low::pipeline::pass_environment
     loom::codegen::low::target_binding
     loom::codegen::low::text_asm
@@ -143,6 +146,7 @@ loom_cc_library(
     "include/loomc/diagnostic.h"
     "include/loomc/emit.h"
     "include/loomc/iree.h"
+    "include/loomc/launch_config.h"
     "include/loomc/link.h"
     "include/loomc/link_index.h"
     "include/loomc/loomc.h"

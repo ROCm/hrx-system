@@ -12,9 +12,7 @@
 #include "loom/ir/attribute.h"
 #include "loom/ir/module.h"
 #include "loom/ops/func/ops.h"
-#include "loom/ops/kernel/launch_config.h"
 #include "loom/ops/kernel/ops.h"
-#include "loom/ops/low/kernel.h"
 #include "loom/ops/low/ops.h"
 #include "loom/ops/op_defs.h"
 #include "loomc/iree.h"
@@ -129,24 +127,6 @@ static bool loomc_module_function_symbol_kind(
     return true;
   }
   return false;
-}
-
-static loomc_dimension3_t loomc_dimension3_from_workgroup_size(
-    loom_target_workgroup_size_t value) {
-  return (loomc_dimension3_t){
-      .x = value.x,
-      .y = value.y,
-      .z = value.z,
-  };
-}
-
-static loomc_dimension3_t loomc_dimension3_from_workgroup_count(
-    loom_target_dispatch_workgroup_count_t value) {
-  return (loomc_dimension3_t){
-      .x = value.x,
-      .y = value.y,
-      .z = value.z,
-  };
 }
 
 static iree_string_view_t loomc_module_function_symbol_name(
@@ -445,37 +425,6 @@ static bool loomc_module_function_populate_export_info(
   return out_info->flags != 0;
 }
 
-static void loomc_module_function_populate_source_kernel_info(
-    const loom_module_t* module, const loom_op_t* op,
-    loomc_module_kernel_function_info_t* out_info) {
-  loom_target_dispatch_workgroup_count_t workgroup_count = {0};
-  if (loom_kernel_def_static_workgroup_count(module, op, &workgroup_count)) {
-    out_info->static_dispatch_workgroup_count =
-        loomc_dimension3_from_workgroup_count(workgroup_count);
-    out_info->flags |=
-        LOOMC_MODULE_KERNEL_FUNCTION_FLAG_HAS_STATIC_DISPATCH_WORKGROUP_COUNT;
-  }
-
-  loom_target_workgroup_size_t workgroup_size = {0};
-  if (loom_kernel_def_static_workgroup_size(module, op, &workgroup_size)) {
-    out_info->static_workgroup_size =
-        loomc_dimension3_from_workgroup_size(workgroup_size);
-    out_info->flags |=
-        LOOMC_MODULE_KERNEL_FUNCTION_FLAG_HAS_STATIC_WORKGROUP_SIZE;
-  }
-}
-
-static void loomc_module_function_populate_target_kernel_info(
-    const loom_op_t* op, loomc_module_kernel_function_info_t* out_info) {
-  loom_target_workgroup_size_t workgroup_size = {0};
-  if (loom_low_kernel_def_static_workgroup_size(op, &workgroup_size)) {
-    out_info->static_workgroup_size =
-        loomc_dimension3_from_workgroup_size(workgroup_size);
-    out_info->flags |=
-        LOOMC_MODULE_KERNEL_FUNCTION_FLAG_HAS_STATIC_WORKGROUP_SIZE;
-  }
-}
-
 loomc_status_t loomc_module_query_functions(
     const loomc_module_t* module,
     const loomc_module_function_query_options_t* options,
@@ -702,117 +651,6 @@ loomc_status_t loomc_module_function_get_export_info(
                                                   out_info)) {
     return loomc_make_status(LOOMC_STATUS_NOT_FOUND,
                              "module function has no export metadata");
-  }
-  return loomc_ok_status();
-}
-
-bool loomc_module_function_try_get_kernel_info_at(
-    const loomc_module_t* module, loomc_host_size_t function_ordinal,
-    loomc_module_kernel_function_info_t* out_info) {
-  if (out_info == NULL) {
-    return false;
-  }
-  *out_info = (loomc_module_kernel_function_info_t){0};
-  const loom_module_t* internal_module = loomc_module_const_loom_module(module);
-  const loom_symbol_t* symbol = NULL;
-  loomc_module_function_kind_t kind = LOOMC_MODULE_FUNCTION_KIND_UNKNOWN;
-  if (!loomc_module_function_try_resolve_at(internal_module, function_ordinal,
-                                            &symbol, &kind) ||
-      !loomc_module_function_kind_is_kernel(kind)) {
-    return false;
-  }
-  if (kind == LOOMC_MODULE_FUNCTION_KIND_KERNEL) {
-    loomc_module_function_populate_source_kernel_info(
-        internal_module, symbol->defining_op, out_info);
-  } else {
-    loomc_module_function_populate_target_kernel_info(symbol->defining_op,
-                                                      out_info);
-  }
-  return true;
-}
-
-loomc_status_t loomc_module_function_get_kernel_info_at(
-    const loomc_module_t* module, loomc_host_size_t function_ordinal,
-    loomc_module_kernel_function_info_t* out_info) {
-  if (module == NULL || out_info == NULL) {
-    return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
-                             "module and out_info must not be NULL");
-  }
-  *out_info = (loomc_module_kernel_function_info_t){0};
-  const loom_module_t* internal_module = loomc_module_const_loom_module(module);
-  if (internal_module == NULL) {
-    return loomc_make_status(LOOMC_STATUS_FAILED_PRECONDITION,
-                             "module does not contain internal IR");
-  }
-  const loom_symbol_t* symbol = NULL;
-  loomc_module_function_kind_t kind = LOOMC_MODULE_FUNCTION_KIND_UNKNOWN;
-  if (!loomc_module_function_try_resolve_at(internal_module, function_ordinal,
-                                            &symbol, &kind)) {
-    return loomc_make_status(LOOMC_STATUS_NOT_FOUND,
-                             "module function ordinal was not found");
-  }
-  if (!loomc_module_function_kind_is_kernel(kind)) {
-    return loomc_make_status(LOOMC_STATUS_NOT_FOUND,
-                             "module function is not a kernel");
-  }
-  if (kind == LOOMC_MODULE_FUNCTION_KIND_KERNEL) {
-    loomc_module_function_populate_source_kernel_info(
-        internal_module, symbol->defining_op, out_info);
-  } else {
-    loomc_module_function_populate_target_kernel_info(symbol->defining_op,
-                                                      out_info);
-  }
-  return loomc_ok_status();
-}
-
-bool loomc_module_function_try_get_kernel_info(
-    const loomc_module_t* module, const loomc_module_function_t* function,
-    loomc_module_kernel_function_info_t* out_info) {
-  if (out_info == NULL) {
-    return false;
-  }
-  *out_info = (loomc_module_kernel_function_info_t){0};
-  const loom_module_t* internal_module = NULL;
-  const loom_symbol_t* symbol = NULL;
-  loomc_module_function_kind_t kind = LOOMC_MODULE_FUNCTION_KIND_UNKNOWN;
-  if (!loomc_module_function_try_resolve(module, function, &internal_module,
-                                         &symbol, &kind) ||
-      !loomc_module_function_kind_is_kernel(kind)) {
-    return false;
-  }
-  if (kind == LOOMC_MODULE_FUNCTION_KIND_KERNEL) {
-    loomc_module_function_populate_source_kernel_info(
-        internal_module, symbol->defining_op, out_info);
-  } else {
-    loomc_module_function_populate_target_kernel_info(symbol->defining_op,
-                                                      out_info);
-  }
-  return true;
-}
-
-loomc_status_t loomc_module_function_get_kernel_info(
-    const loomc_module_t* module, const loomc_module_function_t* function,
-    loomc_module_kernel_function_info_t* out_info) {
-  if (out_info == NULL) {
-    return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
-                             "out_info must not be NULL");
-  }
-  *out_info = (loomc_module_kernel_function_info_t){0};
-  const loom_module_t* internal_module = NULL;
-  const loom_symbol_t* symbol = NULL;
-  loomc_module_function_kind_t kind = LOOMC_MODULE_FUNCTION_KIND_UNKNOWN;
-  LOOMC_RETURN_IF_ERROR(loomc_module_function_resolve(
-      module, function, &internal_module, &symbol, &kind));
-  if (!loomc_module_function_kind_is_kernel(kind)) {
-    return loomc_make_status(LOOMC_STATUS_NOT_FOUND,
-                             "module function is not a kernel");
-  }
-  if (kind == LOOMC_MODULE_FUNCTION_KIND_KERNEL) {
-    loomc_module_function_populate_source_kernel_info(
-        internal_module, symbol->defining_op, out_info);
-  } else {
-    loomc_module_function_populate_target_kernel_info(symbol->defining_op,
-                                                      out_info);
   }
   return loomc_ok_status();
 }

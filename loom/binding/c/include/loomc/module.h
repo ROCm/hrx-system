@@ -88,7 +88,7 @@ extern "C" {
 /// such as compiling a module require exclusive access to that module handle.
 typedef struct loomc_module_t loomc_module_t;
 
-/// Three-dimensional unsigned extent used by function metadata.
+/// Three-dimensional unsigned extent used by Loom C API structs.
 typedef struct loomc_dimension3_t {
   /// Extent along the x dimension.
   uint32_t x;
@@ -143,8 +143,8 @@ typedef uint32_t loomc_module_function_flags_t;
 /// Function metadata view written into caller-provided storage.
 ///
 /// This is the common identity record for every function kind. Function-kind
-/// specific payloads, such as kernel launch metadata, are queried with typed
-/// accessors instead of being mixed into this structure.
+/// specific payloads remain on the owning APIs instead of being mixed into this
+/// structure.
 ///
 /// @lifetime
 /// `symbol_name` borrows from the module that produced this view. The view and
@@ -188,39 +188,6 @@ typedef struct loomc_module_function_export_info_t {
   /// Optional artifact export symbol without a leading `@`.
   loomc_string_view_t export_symbol;
 } loomc_module_function_export_info_t;
-
-/// Kernel function metadata flag bits.
-typedef enum loomc_module_kernel_function_flag_bits_e {
-  /// `loomc_module_kernel_function_info_t::static_dispatch_workgroup_count` is
-  /// present.
-  LOOMC_MODULE_KERNEL_FUNCTION_FLAG_HAS_STATIC_DISPATCH_WORKGROUP_COUNT = 1u
-                                                                          << 0,
-
-  /// `loomc_module_kernel_function_info_t::static_workgroup_size` is present.
-  LOOMC_MODULE_KERNEL_FUNCTION_FLAG_HAS_STATIC_WORKGROUP_SIZE = 1u << 1,
-} loomc_module_kernel_function_flag_bits_t;
-
-/// Bitmask of `loomc_module_kernel_function_flag_bits_t` values.
-typedef uint32_t loomc_module_kernel_function_flags_t;
-
-/// Kernel-specific metadata view written into caller-provided storage.
-///
-/// Probe this view only for functions whose kind is
-/// `LOOMC_MODULE_FUNCTION_KIND_KERNEL` or
-/// `LOOMC_MODULE_FUNCTION_KIND_TARGET_KERNEL`. Fields whose presence depends
-/// on source metadata, lowering state, or analysis have corresponding `flags`
-/// bits. When a flag is absent, the related field is a zero value and should
-/// not be interpreted as a default chosen by Loom.
-typedef struct loomc_module_kernel_function_info_t {
-  /// Present kernel metadata flags.
-  loomc_module_kernel_function_flags_t flags;
-
-  /// Optional statically known dispatch workgroup count.
-  loomc_dimension3_t static_dispatch_workgroup_count;
-
-  /// Optional statically known workgroup size.
-  loomc_dimension3_t static_workgroup_size;
-} loomc_module_kernel_function_info_t;
 
 /// Module function query options.
 ///
@@ -467,10 +434,10 @@ LOOMC_API_EXPORT loomc_status_t loomc_module_clone(
 /// module operation is active.
 ///
 /// @par Example
-/// Find source kernels with a fully static launch grid:
+/// Enumerate exported source kernels:
 ///
 /// @code{.c}
-/// static loomc_status_t dispatch_static_kernels(loomc_module_t* module) {
+/// static loomc_status_t list_exported_kernels(loomc_module_t* module) {
 ///   loomc_allocator_t allocator = loomc_allocator_system();
 ///   loomc_module_function_query_options_t options = {
 ///       .type = LOOMC_STRUCTURE_TYPE_MODULE_FUNCTION_QUERY_OPTIONS,
@@ -499,15 +466,11 @@ LOOMC_API_EXPORT loomc_status_t loomc_module_clone(
 ///   if (loomc_status_is_ok(status) && result != NULL &&
 ///       loomc_result_succeeded(result)) {
 ///     for (loomc_host_size_t i = 0; i < function_count; ++i) {
-///       loomc_module_kernel_function_info_t kernel_info;
-///       bool has_static_grid =
-///           loomc_module_function_try_get_kernel_info_at(
-///               module, functions[i].function_ordinal, &kernel_info) &&
-///           (kernel_info.flags &
-///            LOOMC_MODULE_KERNEL_FUNCTION_FLAG_HAS_STATIC_DISPATCH_WORKGROUP_COUNT);
-///       if (has_static_grid) {
-///         dispatch(functions[i].symbol_name,
-///                  kernel_info.static_dispatch_workgroup_count);
+///       loomc_module_function_export_info_t export_info;
+///       if (loomc_module_function_try_get_export_info_at(
+///               module, functions[i].function_ordinal, &export_info)) {
+///         register_export(functions[i].symbol_name,
+///                         export_info.export_symbol);
 ///       }
 ///     }
 ///   }
@@ -737,52 +700,6 @@ LOOMC_API_EXPORT bool loomc_module_function_try_get_export_info(
 LOOMC_API_EXPORT loomc_status_t loomc_module_function_get_export_info(
     const loomc_module_t* module, const loomc_module_function_t* function,
     loomc_module_function_export_info_t* out_info);
-
-/// Tries to get kernel metadata by public function ordinal without allocating a
-/// status.
-///
-/// @param module Module to inspect.
-/// @param function_ordinal Ordinal in the module's unfiltered function metadata
-/// sequence.
-/// @param out_info Receives kernel metadata when the ordinal names a
-/// kernel-shaped function.
-/// @return True when `function_ordinal` names a kernel function.
-LOOMC_API_EXPORT bool loomc_module_function_try_get_kernel_info_at(
-    const loomc_module_t* module, loomc_host_size_t function_ordinal,
-    loomc_module_kernel_function_info_t* out_info);
-
-/// Gets kernel metadata by public function ordinal.
-///
-/// @param module Module to inspect.
-/// @param function_ordinal Ordinal in the module's unfiltered function metadata
-/// sequence.
-/// @param out_info Receives kernel metadata.
-/// @return OK when the ordinal names a kernel function, NOT_FOUND when it does
-/// not, or another non-OK status for API misuse.
-LOOMC_API_EXPORT loomc_status_t loomc_module_function_get_kernel_info_at(
-    const loomc_module_t* module, loomc_host_size_t function_ordinal,
-    loomc_module_kernel_function_info_t* out_info);
-
-/// Tries to get kernel metadata for a function without allocating a status.
-///
-/// @param module Module that produced `function`.
-/// @param function Function metadata from `module`.
-/// @param out_info Receives kernel metadata when `function` is kernel-shaped.
-/// @return True when `function` is a kernel function.
-LOOMC_API_EXPORT bool loomc_module_function_try_get_kernel_info(
-    const loomc_module_t* module, const loomc_module_function_t* function,
-    loomc_module_kernel_function_info_t* out_info);
-
-/// Gets kernel metadata for a function.
-///
-/// @param module Module that produced `function`.
-/// @param function Function metadata from `module`.
-/// @param out_info Receives kernel metadata.
-/// @return OK when `function` is kernel-shaped, NOT_FOUND when it is not, or
-/// another non-OK status for API misuse.
-LOOMC_API_EXPORT loomc_status_t loomc_module_function_get_kernel_info(
-    const loomc_module_t* module, const loomc_module_function_t* function,
-    loomc_module_kernel_function_info_t* out_info);
 
 /// Serializes a module into an immutable source handle.
 ///

@@ -133,6 +133,18 @@ loom_cc_test(
 
 loom_cc_test(
   NAME
+    launch_config_test
+  SRCS
+    "launch_config_test.cc"
+  DEPS
+    ::test_util
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::binding::c::loomc
+)
+
+loom_cc_test(
+  NAME
     module_test
   SRCS
     "module_test.cc"

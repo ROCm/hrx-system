@@ -137,6 +137,17 @@ loom_cc_test(
 )
 
 loom_cc_test(
+    name = "launch_config_test",
+    srcs = ["launch_config_test.cc"],
+    deps = [
+        ":test_util",
+        "//loom/binding/c:loomc",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
     name = "module_test",
     srcs = ["module_test.cc"],
     deps = [

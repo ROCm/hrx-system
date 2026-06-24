@@ -234,6 +234,41 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "kernel_launch_config",
+    srcs = ["kernel_launch_config.c"],
+    hdrs = ["kernel_launch_config.h"],
+    deps = [
+        ":symbol_facts",
+        "//loom/src/loom/error:emitter",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ir:facts",
+        "//loom/src/loom/ops:func_symbol_facts",
+        "//loom/src/loom/ops/kernel",
+        "//loom/src/loom/pass:value_facts",
+        "//loom/src/loom/target:function_contract",
+        "//loom/src/loom/target:types",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "kernel_launch_config_test",
+    srcs = ["kernel_launch_config_test.cc"],
+    deps = [
+        ":kernel_launch_config",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/testing:context",
+        "//loom/src/loom/testing:module_ptr",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
     name = "vector_memory_footprint",
     srcs = ["vector_memory_footprint.c"],
     hdrs = ["vector_memory_footprint.h"],

@@ -265,6 +265,45 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
+    kernel_launch_config
+  HDRS
+    "kernel_launch_config.h"
+  SRCS
+    "kernel_launch_config.c"
+  DEPS
+    ::symbol_facts
+    iree::base
+    iree::base::internal::arena
+    loom::error::emitter
+    loom::ir
+    loom::ir::facts
+    loom::ops::func_symbol_facts
+    loom::ops::kernel
+    loom::pass::value_facts
+    loom::target::function_contract
+    loom::target::types
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    kernel_launch_config_test
+  SRCS
+    "kernel_launch_config_test.cc"
+  DEPS
+    ::kernel_launch_config
+    iree::base
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::format::text::parser
+    loom::ir
+    loom::testing::context
+    loom::testing::module_ptr
+)
+
+loom_cc_library(
+  NAME
     vector_memory_footprint
   HDRS
     "vector_memory_footprint.h"

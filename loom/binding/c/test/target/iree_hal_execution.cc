@@ -516,22 +516,37 @@ void RunIreeHalKernelExecutionTest(const IreeHalKernelExecutionTarget& target) {
   ASSERT_TRUE(ResultSucceeded(result.get(), "source deserialization"));
   result.reset();
 
-  loomc_module_function_t kernel_function = {};
-  LOOMC_ASSERT_OK(loomc_module_lookup_function(
-      module.get(), target.kernel_function_symbol, &kernel_function));
-  loomc_module_kernel_function_info_t kernel_info = {};
-  ASSERT_TRUE(loomc_module_function_try_get_kernel_info_at(
-      module.get(), kernel_function.function_ordinal, &kernel_info));
-  ASSERT_TRUE(
-      kernel_info.flags &
-      LOOMC_MODULE_KERNEL_FUNCTION_FLAG_HAS_STATIC_DISPATCH_WORKGROUP_COUNT);
-  ASSERT_TRUE(kernel_info.flags &
-              LOOMC_MODULE_KERNEL_FUNCTION_FLAG_HAS_STATIC_WORKGROUP_SIZE);
-  EXPECT_EQ(kernel_info.static_workgroup_size.x, 1u);
-  EXPECT_EQ(kernel_info.static_workgroup_size.y, 1u);
-  EXPECT_EQ(kernel_info.static_workgroup_size.z, 1u);
-  loomc_dimension3_t workgroup_count =
-      kernel_info.static_dispatch_workgroup_count;
+  loomc_launch_config_eval_options_t launch_config_options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_LAUNCH_CONFIG_EVAL_OPTIONS,
+      /*.structure_size=*/sizeof(launch_config_options),
+      /*.next=*/nullptr,
+      /*.function_symbol=*/target.kernel_function_symbol,
+      /*.config=*/{},
+      /*.workload_arguments=*/nullptr,
+      /*.workload_argument_count=*/0,
+      /*.required_fields=*/
+      LOOMC_LAUNCH_CONFIG_FIELD_FLAG_WORKGROUP_COUNT |
+          LOOMC_LAUNCH_CONFIG_FIELD_FLAG_WORKGROUP_SIZE,
+  };
+  loomc_launch_config_t launch_config = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_LAUNCH_CONFIG,
+      /*.structure_size=*/sizeof(launch_config),
+  };
+  loomc_result_t* launch_config_result = nullptr;
+  LOOMC_ASSERT_OK(loomc_module_evaluate_launch_config(
+      module.get(), workspace.get(), &launch_config_options,
+      loomc_allocator_system(), &launch_config, &launch_config_result));
+  result.reset(launch_config_result);
+  ASSERT_TRUE(ResultSucceeded(result.get(), "launch config evaluation"));
+  ASSERT_TRUE(launch_config.fields &
+              LOOMC_LAUNCH_CONFIG_FIELD_FLAG_WORKGROUP_COUNT);
+  ASSERT_TRUE(launch_config.fields &
+              LOOMC_LAUNCH_CONFIG_FIELD_FLAG_WORKGROUP_SIZE);
+  EXPECT_EQ(launch_config.workgroup_size.x, 1u);
+  EXPECT_EQ(launch_config.workgroup_size.y, 1u);
+  EXPECT_EQ(launch_config.workgroup_size.z, 1u);
+  loomc_dimension3_t workgroup_count = launch_config.workgroup_count;
+  result.reset();
 
   CompilerPtr compiler;
   loomc_compiler_t* compiler_handle = nullptr;
