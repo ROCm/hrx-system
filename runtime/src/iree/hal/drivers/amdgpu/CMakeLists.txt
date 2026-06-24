@@ -40,6 +40,8 @@ iree_cc_library(
     iree::base
     iree::hal
     iree::hal::drivers::amdgpu::util::libhsa
+    iree::hal::drivers::amdgpu::util::packet
+    iree::hal::drivers::amdgpu::util::queue_primitives
     iree::hal::drivers::amdgpu::util::target_id
     iree::hal::drivers::amdgpu::util::topology
   PUBLIC
