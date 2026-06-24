@@ -30,6 +30,8 @@ typedef struct id4_vae_stage_t {
   iree_string_view_t parameter_scope;
   // Static VAE model dimensions and implementation capabilities.
   id4_vae_model_config_t model;
+  // Activation storage format selected during VAE program authoring.
+  id4_vae_activation_format_t activation_format;
   // True after load has completed.
   bool is_loaded;
 } id4_vae_stage_t;
@@ -61,6 +63,19 @@ static iree_status_t id4_vae_stage_validate_model_config(
   return id4_vae_program_resolve_decode_tiling(model, request, &tiling_plan);
 }
 
+static iree_status_t id4_vae_stage_validate_activation_format(
+    id4_vae_activation_format_t activation_format) {
+  switch (activation_format) {
+    case ID4_VAE_ACTIVATION_FORMAT_F32_CANONICAL:
+    case ID4_VAE_ACTIVATION_FORMAT_BF16_CONV_INPUT:
+      return iree_ok_status();
+    default:
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "VAE activation format %" PRIu32 " is invalid",
+                              (uint32_t)activation_format);
+  }
+}
+
 static iree_status_t id4_vae_stage_validate_create_options(
     const id4_vae_stage_create_options_t* options) {
   if (!options) {
@@ -78,7 +93,8 @@ static iree_status_t id4_vae_stage_validate_create_options(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "VAE stage device group is required");
   }
-  return id4_vae_stage_validate_model_config(options->model);
+  IREE_RETURN_IF_ERROR(id4_vae_stage_validate_model_config(options->model));
+  return id4_vae_stage_validate_activation_format(options->activation_format);
 }
 
 static iree_status_t id4_vae_stage_copy_parameter_scope(
@@ -140,6 +156,7 @@ static iree_status_t id4_vae_stage_author_program(
     program_options.structure_size = sizeof(program_options);
     program_options.model = stage->model;
     program_options.request = request;
+    program_options.activation_format = stage->activation_format;
     status = id4_vae_program_author_decode(&program_options, builder);
   }
   if (iree_status_is_ok(status)) {
@@ -327,6 +344,7 @@ iree_status_t id4_vae_stage_create(
     stage->kernel_cache = options->kernel_cache;
     id4_pipeline_kernel_cache_retain(stage->kernel_cache);
     stage->model = options->model;
+    stage->activation_format = options->activation_format;
     status =
         id4_vae_stage_copy_parameter_scope(options->parameter_scope, stage);
   }

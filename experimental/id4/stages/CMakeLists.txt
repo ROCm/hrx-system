@@ -375,6 +375,18 @@ iree_cc_test(
 
 iree_cc_test(
   NAME
+    vae_parameters_test
+  SRCS
+    "vae_parameters_test.cc"
+  DEPS
+    ::vae_parameters
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_test(
+  NAME
     ideogram4_decode_program_test
   SRCS
     "ideogram4_decode_program_test.cc"

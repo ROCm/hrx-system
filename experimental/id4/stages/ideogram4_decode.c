@@ -30,6 +30,8 @@ typedef struct id4_ideogram4_decode_stage_t {
   iree_string_view_t parameter_scope;
   // Static decode model configuration owned by the stage.
   id4_ideogram4_decode_model_config_t model;
+  // Activation storage format selected during VAE program authoring.
+  id4_vae_activation_format_t vae_activation_format;
   // True after load has completed.
   bool is_loaded;
 } id4_ideogram4_decode_stage_t;
@@ -69,9 +71,21 @@ static iree_status_t id4_ideogram4_decode_stage_validate_create_options(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "Ideogram4 decode stage device group is required");
   }
-  return id4_ideogram4_decode_program_validate_diffusion_latent_shape(
-      options->model, id4_pipeline_program_make_shape_rank4(
-                          1, 1, options->model.vae.latent_channel_count, 1));
+  IREE_RETURN_IF_ERROR(
+      id4_ideogram4_decode_program_validate_diffusion_latent_shape(
+          options->model,
+          id4_pipeline_program_make_shape_rank4(
+              1, 1, options->model.vae.latent_channel_count, 1)));
+  switch (options->vae_activation_format) {
+    case ID4_VAE_ACTIVATION_FORMAT_F32_CANONICAL:
+    case ID4_VAE_ACTIVATION_FORMAT_BF16_CONV_INPUT:
+      return iree_ok_status();
+    default:
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "Ideogram4 decode VAE activation format %" PRIu32
+                              " is invalid",
+                              (uint32_t)options->vae_activation_format);
+  }
 }
 
 static iree_status_t id4_ideogram4_decode_stage_copy_parameter_scope(
@@ -140,6 +154,7 @@ static iree_status_t id4_ideogram4_decode_stage_author_program(
     program_options.structure_size = sizeof(program_options);
     program_options.model = stage->model;
     program_options.request = request;
+    program_options.vae_activation_format = stage->vae_activation_format;
     status =
         id4_ideogram4_decode_program_author_decode(&program_options, builder);
   }
@@ -336,6 +351,7 @@ iree_status_t id4_ideogram4_decode_stage_create(
     stage->kernel_cache = options->kernel_cache;
     id4_pipeline_kernel_cache_retain(stage->kernel_cache);
     stage->model = options->model;
+    stage->vae_activation_format = options->vae_activation_format;
     status = id4_ideogram4_decode_stage_copy_parameter_scope(
         options->parameter_scope, stage);
   }

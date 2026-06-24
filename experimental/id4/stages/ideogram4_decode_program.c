@@ -59,6 +59,21 @@ static iree_status_t id4_ideogram4_decode_program_validate_model_config(
   return iree_ok_status();
 }
 
+static iree_status_t
+id4_ideogram4_decode_program_validate_vae_activation_format(
+    id4_vae_activation_format_t activation_format) {
+  switch (activation_format) {
+    case ID4_VAE_ACTIVATION_FORMAT_F32_CANONICAL:
+    case ID4_VAE_ACTIVATION_FORMAT_BF16_CONV_INPUT:
+      return iree_ok_status();
+    default:
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "Ideogram4 decode VAE activation format %" PRIu32
+                              " is invalid",
+                              (uint32_t)activation_format);
+  }
+}
+
 static iree_status_t id4_ideogram4_decode_program_validate_options(
     const id4_ideogram4_decode_program_options_t* options,
     const id4_pipeline_program_builder_t* builder,
@@ -82,6 +97,9 @@ static iree_status_t id4_ideogram4_decode_program_validate_options(
   }
   IREE_RETURN_IF_ERROR(
       id4_ideogram4_decode_program_validate_model_config(options->model));
+  IREE_RETURN_IF_ERROR(
+      id4_ideogram4_decode_program_validate_vae_activation_format(
+          options->vae_activation_format));
   IREE_RETURN_IF_ERROR(id4_pipeline_program_shape_element_count(
       options->request.diffusion_latent_shape, out_diffusion_element_count));
   if (*out_diffusion_element_count == 0 ||
@@ -168,6 +186,7 @@ iree_status_t id4_ideogram4_decode_program_author_decode(
   vae_options.model = options->model.vae;
   vae_options.request.latent_shape = options->request.diffusion_latent_shape;
   vae_options.request.tiling = options->request.vae_tiling;
+  vae_options.activation_format = options->vae_activation_format;
   id4_pipeline_program_tensor_t decoded_image =
       id4_pipeline_program_tensor_invalid();
   return id4_vae_program_author_decode_from_tensor(

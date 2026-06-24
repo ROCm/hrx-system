@@ -56,6 +56,16 @@ typedef enum id4_vae_implementation_e {
   ID4_VAE_IMPLEMENTATION_FLUX2 = 1,
 } id4_vae_implementation_t;
 
+// Activation storage format selected while authoring VAE intermediates.
+typedef enum id4_vae_activation_format_e {
+  // Invalid activation storage format.
+  ID4_VAE_ACTIVATION_FORMAT_INVALID = 0,
+  // Reference format matching tensor taps: F32 WHCB tensors.
+  ID4_VAE_ACTIVATION_FORMAT_F32_CANONICAL = 1,
+  // Production prelude format using BF16 tensor-core inputs where available.
+  ID4_VAE_ACTIVATION_FORMAT_BF16_CONV_INPUT = 2,
+} id4_vae_activation_format_t;
+
 // Static VAE model and implementation capabilities.
 typedef struct id4_vae_model_config_t {
   // Latent-to-image scale factor along the width axis.
@@ -168,6 +178,8 @@ typedef struct id4_vae_program_options_t {
   id4_vae_model_config_t model;
   // Dynamic decode request dimensions and tiling policy.
   id4_vae_decode_request_config_t request;
+  // Activation storage format for internal VAE intermediates.
+  id4_vae_activation_format_t activation_format;
 } id4_vae_program_options_t;
 
 // Resolves |request| into concrete VAE decode tiling facts.

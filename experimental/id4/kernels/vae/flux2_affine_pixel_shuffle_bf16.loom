@@ -1,0 +1,97 @@
+config.decl @id4.vae.flux2_affine_pixel_shuffle.public_width : %value: index where [range(%value, 1, 65536)]
+config.decl @id4.vae.flux2_affine_pixel_shuffle.public_height : %value: index where [range(%value, 1, 65536)]
+config.decl @id4.vae.flux2_affine_pixel_shuffle.public_channel_count : %value: index where [range(%value, 4, 4096)]
+config.decl @id4.vae.flux2_affine_pixel_shuffle.batch_count : %value: index where [range(%value, 1, 1024)]
+config.decl @id4.vae.flux2_affine_pixel_shuffle.internal_width : %value: index where [range(%value, 2, 131072)]
+config.decl @id4.vae.flux2_affine_pixel_shuffle.internal_height : %value: index where [range(%value, 2, 131072)]
+config.decl @id4.vae.flux2_affine_pixel_shuffle.internal_channel_count : %value: index where [range(%value, 1, 1024)]
+config.decl @id4.vae.flux2_affine_pixel_shuffle.output_element_count : %value: index where [range(%value, 1, 268435456)]
+
+kernel.def export("id4_vae_flux2_affine_pixel_shuffle_bf16") @id4_vae_flux2_affine_pixel_shuffle_bf16() {
+  %unit = index.constant 1 : index
+  %workgroup_size_x = index.constant 256 : index
+  %element_count = config.get @id4.vae.flux2_affine_pixel_shuffle.output_element_count : index
+  %rounding = index.sub %workgroup_size_x, %unit : index
+  %rounded = index.add %element_count, %rounding : index
+  %workgroups_x = index.div %rounded, %workgroup_size_x : index
+  kernel.launch.config workgroups(%workgroups_x, %unit, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
+} launch(%public_latent: buffer, %latent_mean: buffer, %latent_std: buffer, %internal_latent: buffer) {
+  %base = index.constant 0 : offset
+  %unit = index.constant 1 : index
+  %two = index.constant 2 : index
+  %four = index.constant 4 : index
+  %workgroup = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %workgroup_size_x = index.constant 256 : index
+  %public_width = config.get @id4.vae.flux2_affine_pixel_shuffle.public_width : index
+  %public_height = config.get @id4.vae.flux2_affine_pixel_shuffle.public_height : index
+  %public_channel_count_unaligned = config.get @id4.vae.flux2_affine_pixel_shuffle.public_channel_count : index
+  %public_channel_count = index.assume %public_channel_count_unaligned [mul(%public_channel_count_unaligned, 4)] : index
+  %batch_count = config.get @id4.vae.flux2_affine_pixel_shuffle.batch_count : index
+  %internal_width = config.get @id4.vae.flux2_affine_pixel_shuffle.internal_width : index
+  %internal_height = config.get @id4.vae.flux2_affine_pixel_shuffle.internal_height : index
+  %internal_channel_count = config.get @id4.vae.flux2_affine_pixel_shuffle.internal_channel_count : index
+  %output_element_count = config.get @id4.vae.flux2_affine_pixel_shuffle.output_element_count : index
+  %element_index = index.madd %workgroup, %workgroup_size_x, %lane : index
+  %in_bounds = index.cmp ult, %element_index, %output_element_count : index
+
+  %public_noalias, %mean_noalias, %std_noalias, %internal_noalias = buffer.assume.noalias %public_latent, %latent_mean, %latent_std, %internal_latent : buffer, buffer, buffer, buffer
+  %public_global = buffer.assume.memory_space<global> %public_noalias : buffer
+  %mean_global = buffer.assume.memory_space<global> %mean_noalias : buffer
+  %std_global = buffer.assume.memory_space<global> %std_noalias : buffer
+  %internal_global = buffer.assume.memory_space<global> %internal_noalias : buffer
+  %public_view = buffer.view %public_global[%base] : buffer -> view<[%public_width]x[%public_height]x[%public_channel_count]x[%batch_count]xf32, #dense>
+  %mean_view = buffer.view %mean_global[%base] : buffer -> view<[%public_channel_count]xf32, #dense>
+  %std_view = buffer.view %std_global[%base] : buffer -> view<[%public_channel_count]xf32, #dense>
+  %internal_view = buffer.view %internal_global[%base] : buffer -> view<[%internal_width]x[%internal_height]x[%internal_channel_count]x[%batch_count]xbf16, #dense>
+
+  scf.if %in_bounds {
+    %internal_x = index.rem %element_index, %internal_width : index
+    %internal_row = index.div %element_index, %internal_width : index
+    %internal_y = index.rem %internal_row, %internal_height : index
+    %internal_plane = index.div %internal_row, %internal_height : index
+    %internal_channel = index.rem %internal_plane, %internal_channel_count : index
+    %batch = index.div %internal_plane, %internal_channel_count : index
+    %patch_x = index.rem %internal_x, %two : index
+    %patch_y = index.rem %internal_y, %two : index
+    %public_x = index.div %internal_x, %two : index
+    %public_y = index.div %internal_y, %two : index
+    %public_channel_base = index.mul %internal_channel, %four : index
+    %public_channel_y_offset = index.mul %patch_y, %two : index
+    %public_channel_xy = index.add %patch_x, %public_channel_y_offset : index
+    %public_channel = index.add %public_channel_base, %public_channel_xy : index
+    %value = view.load %public_view[%public_x, %public_y, %public_channel, %batch] : view<[%public_width]x[%public_height]x[%public_channel_count]x[%batch_count]xf32, #dense> -> f32
+    %mean = view.load %mean_view[%public_channel] : view<[%public_channel_count]xf32, #dense> -> f32
+    %std = view.load %std_view[%public_channel] : view<[%public_channel_count]xf32, #dense> -> f32
+    %scaled = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %value, %std : f32
+    %output_f32 = scalar.addf<reassoc|nnan|ninf|nsz|contract> %scaled, %mean : f32
+    %output = scalar.fptrunc %output_f32 : f32 to bf16
+    view.store %output, %internal_view[%internal_x, %internal_y, %internal_channel, %batch] : bf16, view<[%internal_width]x[%internal_height]x[%internal_channel_count]x[%batch_count]xbf16, #dense>
+  }
+  kernel.return
+}
+
+check.case public @id4_vae_flux2_affine_pixel_shuffle_bf16_small_case {
+  %public_latent = check.generate.fill value(1.0) : tensor<1x1x4x1xf32>
+  %latent_mean = check.generate.fill value(10.0) : tensor<4xf32>
+  %latent_std = check.generate.fill value(2.0) : tensor<4xf32>
+  %internal_latent = check.generate.fill value(0.0) : tensor<2x2x1x1xbf16>
+  %expected = check.generate.fill value(12.0) : tensor<2x2x1x1xbf16>
+  func.call @id4_vae_flux2_affine_pixel_shuffle_bf16(%public_latent, %latent_mean, %latent_std, %internal_latent) : (tensor<1x1x4x1xf32>, tensor<4xf32>, tensor<4xf32>, tensor<2x2x1x1xbf16>)
+  check.expect.close actual(%internal_latent) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2x2x1x1xbf16>
+  check.return
+}
+
+check.case public @id4_vae_flux2_affine_pixel_shuffle_bf16_flux2_tile_case {
+  %public_latent = check.generate.fill value(1.0) : tensor<32x32x128x1xf32>
+  %latent_mean = check.generate.fill value(0.0) : tensor<128xf32>
+  %latent_std = check.generate.fill value(1.0) : tensor<128xf32>
+  %internal_latent = check.generate.fill value(0.0) : tensor<64x64x32x1xbf16>
+  %expected = check.generate.fill value(1.0) : tensor<64x64x32x1xbf16>
+  func.call @id4_vae_flux2_affine_pixel_shuffle_bf16(%public_latent, %latent_mean, %latent_std, %internal_latent) : (tensor<32x32x128x1xf32>, tensor<128xf32>, tensor<128xf32>, tensor<64x64x32x1xbf16>)
+  check.expect.close actual(%internal_latent) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<64x64x32x1xbf16>
+  check.return
+}
+
+check.benchmark<@id4_vae_flux2_affine_pixel_shuffle_bf16_small_case> @id4_vae_flux2_affine_pixel_shuffle_bf16_small
+check.benchmark<@id4_vae_flux2_affine_pixel_shuffle_bf16_flux2_tile_case> @id4_vae_flux2_affine_pixel_shuffle_bf16_flux2_tile

@@ -74,6 +74,7 @@ add_custom_command(OUTPUT loom_sources.stamp
     "vae/conv3x3_bias_packed_block_f32.loom"
     "vae/conv3x3_bias_packed_f32.loom"
     "vae/decode_nearest_f32.loom"
+    "vae/flux2_affine_pixel_shuffle_bf16.loom"
     "vae/flux2_affine_pixel_shuffle_f32.loom"
     "vae/group_norm_f32.loom"
     "vae/group_norm_oc16_f32.loom"
@@ -155,6 +156,7 @@ iree_c_embed_data(
     "vae/conv3x3_bias_packed_block_f32.loom"
     "vae/conv3x3_bias_packed_f32.loom"
     "vae/decode_nearest_f32.loom"
+    "vae/flux2_affine_pixel_shuffle_bf16.loom"
     "vae/flux2_affine_pixel_shuffle_f32.loom"
     "vae/group_norm_f32.loom"
     "vae/group_norm_oc16_f32.loom"
@@ -1137,6 +1139,40 @@ iree_native_test(
   ARGS
     "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv1x1_bias_bf16_wmma.loom}}"
     "--benchmark=@id4_vae_conv1x1_bias_bf16_wmma_flux2_post_quant_shape"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.vae.conv1x1_bias_wmma.pixel_count=16384"
+    "--config=id4.vae.conv1x1_bias_wmma.input_channel_count=32"
+    "--config=id4.vae.conv1x1_bias_wmma.output_channel_count=32"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
+    "vae_conv1x1_bias_bf16_f32_wmma_small_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv1x1_bias_bf16_wmma.loom}}"
+    "--benchmark=@id4_vae_conv1x1_bias_bf16_f32_wmma_small"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.vae.conv1x1_bias_wmma.pixel_count=32"
+    "--config=id4.vae.conv1x1_bias_wmma.input_channel_count=16"
+    "--config=id4.vae.conv1x1_bias_wmma.output_channel_count=32"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
+    "vae_conv1x1_bias_bf16_f32_wmma_flux2_post_quant_shape_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv1x1_bias_bf16_wmma.loom}}"
+    "--benchmark=@id4_vae_conv1x1_bias_bf16_f32_wmma_flux2_post_quant_shape"
     "--dry-run"
     "--output-format=jsonl"
     "--config=id4.vae.conv1x1_bias_wmma.pixel_count=16384"
@@ -2695,6 +2731,50 @@ iree_native_test(
   ARGS
     "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/flux2_affine_pixel_shuffle_f32.loom}}"
     "--benchmark=@id4_vae_flux2_affine_pixel_shuffle_f32_flux2_tile"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.vae.flux2_affine_pixel_shuffle.public_width=32"
+    "--config=id4.vae.flux2_affine_pixel_shuffle.public_height=32"
+    "--config=id4.vae.flux2_affine_pixel_shuffle.public_channel_count=128"
+    "--config=id4.vae.flux2_affine_pixel_shuffle.batch_count=1"
+    "--config=id4.vae.flux2_affine_pixel_shuffle.internal_width=64"
+    "--config=id4.vae.flux2_affine_pixel_shuffle.internal_height=64"
+    "--config=id4.vae.flux2_affine_pixel_shuffle.internal_channel_count=32"
+    "--config=id4.vae.flux2_affine_pixel_shuffle.output_element_count=131072"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
+    "vae_flux2_affine_pixel_shuffle_bf16_small_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/flux2_affine_pixel_shuffle_bf16.loom}}"
+    "--benchmark=@id4_vae_flux2_affine_pixel_shuffle_bf16_small"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.vae.flux2_affine_pixel_shuffle.public_width=1"
+    "--config=id4.vae.flux2_affine_pixel_shuffle.public_height=1"
+    "--config=id4.vae.flux2_affine_pixel_shuffle.public_channel_count=4"
+    "--config=id4.vae.flux2_affine_pixel_shuffle.batch_count=1"
+    "--config=id4.vae.flux2_affine_pixel_shuffle.internal_width=2"
+    "--config=id4.vae.flux2_affine_pixel_shuffle.internal_height=2"
+    "--config=id4.vae.flux2_affine_pixel_shuffle.internal_channel_count=1"
+    "--config=id4.vae.flux2_affine_pixel_shuffle.output_element_count=4"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
+    "vae_flux2_affine_pixel_shuffle_bf16_flux2_tile_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/flux2_affine_pixel_shuffle_bf16.loom}}"
+    "--benchmark=@id4_vae_flux2_affine_pixel_shuffle_bf16_flux2_tile"
     "--dry-run"
     "--output-format=jsonl"
     "--config=id4.vae.flux2_affine_pixel_shuffle.public_width=32"
@@ -5650,6 +5730,48 @@ endif()
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
 iree_native_test(
   NAME
+    "vae_conv1x1_bias_bf16_f32_wmma_small_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv1x1_bias_bf16_wmma.loom}}"
+    "--case=@id4_vae_conv1x1_bias_bf16_f32_wmma_small_case"
+    "--device=amdgpu://0"
+    "--config=id4.vae.conv1x1_bias_wmma.pixel_count=32"
+    "--config=id4.vae.conv1x1_bias_wmma.input_channel_count=16"
+    "--config=id4.vae.conv1x1_bias_wmma.output_channel_count=32"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
+    "vae_conv1x1_bias_bf16_f32_wmma_flux2_post_quant_shape_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv1x1_bias_bf16_wmma.loom}}"
+    "--case=@id4_vae_conv1x1_bias_bf16_f32_wmma_flux2_post_quant_shape_case"
+    "--device=amdgpu://0"
+    "--config=id4.vae.conv1x1_bias_wmma.pixel_count=16384"
+    "--config=id4.vae.conv1x1_bias_wmma.input_channel_count=32"
+    "--config=id4.vae.conv1x1_bias_wmma.output_channel_count=32"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
     "vae_conv3x3_bias_f32_small_same_padding_hal_test"
   ARGS
     "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv3x3_bias_f32.loom}}"
@@ -7471,6 +7593,58 @@ iree_native_test(
   ARGS
     "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/flux2_affine_pixel_shuffle_f32.loom}}"
     "--case=@id4_vae_flux2_affine_pixel_shuffle_f32_flux2_tile_case"
+    "--device=amdgpu://0"
+    "--config=id4.vae.flux2_affine_pixel_shuffle.public_width=32"
+    "--config=id4.vae.flux2_affine_pixel_shuffle.public_height=32"
+    "--config=id4.vae.flux2_affine_pixel_shuffle.public_channel_count=128"
+    "--config=id4.vae.flux2_affine_pixel_shuffle.batch_count=1"
+    "--config=id4.vae.flux2_affine_pixel_shuffle.internal_width=64"
+    "--config=id4.vae.flux2_affine_pixel_shuffle.internal_height=64"
+    "--config=id4.vae.flux2_affine_pixel_shuffle.internal_channel_count=32"
+    "--config=id4.vae.flux2_affine_pixel_shuffle.output_element_count=131072"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
+    "vae_flux2_affine_pixel_shuffle_bf16_small_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/flux2_affine_pixel_shuffle_bf16.loom}}"
+    "--case=@id4_vae_flux2_affine_pixel_shuffle_bf16_small_case"
+    "--device=amdgpu://0"
+    "--config=id4.vae.flux2_affine_pixel_shuffle.public_width=1"
+    "--config=id4.vae.flux2_affine_pixel_shuffle.public_height=1"
+    "--config=id4.vae.flux2_affine_pixel_shuffle.public_channel_count=4"
+    "--config=id4.vae.flux2_affine_pixel_shuffle.batch_count=1"
+    "--config=id4.vae.flux2_affine_pixel_shuffle.internal_width=2"
+    "--config=id4.vae.flux2_affine_pixel_shuffle.internal_height=2"
+    "--config=id4.vae.flux2_affine_pixel_shuffle.internal_channel_count=1"
+    "--config=id4.vae.flux2_affine_pixel_shuffle.output_element_count=4"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
+    "vae_flux2_affine_pixel_shuffle_bf16_flux2_tile_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/flux2_affine_pixel_shuffle_bf16.loom}}"
+    "--case=@id4_vae_flux2_affine_pixel_shuffle_bf16_flux2_tile_case"
     "--device=amdgpu://0"
     "--config=id4.vae.flux2_affine_pixel_shuffle.public_width=32"
     "--config=id4.vae.flux2_affine_pixel_shuffle.public_height=32"

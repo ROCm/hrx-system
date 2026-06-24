@@ -54,6 +54,7 @@ static id4_pipeline_stage_t* CreateStage(iree_hal_device_group_t* device_group,
   create_options.structure_size = sizeof(create_options);
   create_options.services = services;
   create_options.model = model;
+  create_options.activation_format = ID4_VAE_ACTIVATION_FORMAT_F32_CANONICAL;
 
   id4_pipeline_stage_t* stage = nullptr;
   IREE_CHECK_OK(
@@ -178,6 +179,7 @@ TEST(VaeStage, RejectsInvalidStaticModelConfig) {
   create_options.structure_size = sizeof(create_options);
   create_options.services = services;
   create_options.model = model;
+  create_options.activation_format = ID4_VAE_ACTIVATION_FORMAT_F32_CANONICAL;
 
   id4_pipeline_stage_t* stage = nullptr;
   IREE_EXPECT_STATUS_IS(

@@ -120,6 +120,8 @@ static id4_vae_program_options_t MakeProgramOptions(
       /*.model=*/model,
       // Dynamic decode request.
       /*.request=*/request,
+      // Activation storage format.
+      /*.activation_format=*/ID4_VAE_ACTIVATION_FORMAT_F32_CANONICAL,
   };
   return options;
 }
@@ -158,6 +160,21 @@ static bool ProgramExportsTensorWithShape(
     const id4_pipeline_program_tensor_record_t* tensor =
         id4_pipeline_program_tensor_at(
             program, operation->payload.export_value.tensor.ordinal);
+    if (!tensor) continue;
+    if (tensor->dtype != dtype) continue;
+    if (!ShapeEquals(tensor->shape, expected_shape)) continue;
+    return true;
+  }
+  return false;
+}
+
+static bool ProgramContainsTensorWithShape(
+    const id4_pipeline_program_t* program, id4_pipeline_program_dtype_t dtype,
+    id4_pipeline_program_shape_t expected_shape) {
+  for (iree_host_size_t i = 0; i < id4_pipeline_program_tensor_count(program);
+       ++i) {
+    const id4_pipeline_program_tensor_record_t* tensor =
+        id4_pipeline_program_tensor_at(program, i);
     if (!tensor) continue;
     if (tensor->dtype != dtype) continue;
     if (!ShapeEquals(tensor->shape, expected_shape)) continue;
@@ -252,6 +269,27 @@ TEST(VaeProgram, AuthorsFlux2SingleTileDecodeBoundaryContract) {
   id4_pipeline_program_release(program);
 }
 
+TEST(VaeProgram, AuthorsFlux2Bf16PreludeContract) {
+  const id4_vae_model_config_t model = *id4_vae_program_flux2_model_config();
+  id4_vae_decode_request_config_t request = MakeExplicitRequest(
+      id4_pipeline_program_make_shape_rank4(4, 4, 128, 1), 4, 4, 0.0f);
+  id4_vae_program_options_t options = MakeProgramOptions(model, request);
+  options.activation_format = ID4_VAE_ACTIVATION_FORMAT_BF16_CONV_INPUT;
+  id4_pipeline_program_t* program = CreateVaeProgram(&options);
+
+  EXPECT_TRUE(ProgramContainsTensorWithShape(
+      program, ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+      id4_pipeline_program_make_shape_rank4(8, 8, 32, 1)));
+  EXPECT_TRUE(ProgramContainsTensorWithShape(
+      program, ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+      id4_pipeline_program_make_shape_rank2(32, 32)));
+  EXPECT_TRUE(ProgramExportsTensorWithShape(
+      program, ID4_PIPELINE_PROGRAM_DTYPE_F32,
+      id4_pipeline_program_make_shape_rank4(64, 64, 3, 1)));
+
+  id4_pipeline_program_release(program);
+}
+
 TEST(VaeProgram, AuthorsFlux2TiledDecodeBoundaryContract) {
   const id4_vae_model_config_t model = *id4_vae_program_flux2_model_config();
   id4_vae_decode_request_config_t request = MakeExplicitRequest(
@@ -287,6 +325,19 @@ TEST(VaeProgram, RejectsTileSizeOutsideLatentShape) {
 
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_OUT_OF_RANGE,
+      id4_vae_program_author_decode(&options, builder_scope.builder()));
+}
+
+TEST(VaeProgram, RejectsInvalidActivationFormat) {
+  ProgramBuilderScope builder_scope;
+  id4_vae_model_config_t model = MakeSmallModelConfig();
+  id4_vae_decode_request_config_t request = MakeExplicitRequest(
+      id4_pipeline_program_make_shape_rank4(2, 2, 1, 1), 2, 2, 0.0f);
+  id4_vae_program_options_t options = MakeProgramOptions(model, request);
+  options.activation_format = ID4_VAE_ACTIVATION_FORMAT_INVALID;
+
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
       id4_vae_program_author_decode(&options, builder_scope.builder()));
 }
 

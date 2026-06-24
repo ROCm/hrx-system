@@ -44,6 +44,8 @@ typedef struct id4_ideogram4_decode_program_options_t {
   id4_ideogram4_decode_model_config_t model;
   // Dynamic decode request dimensions.
   id4_ideogram4_decode_request_config_t request;
+  // Activation storage format for internal VAE intermediates.
+  id4_vae_activation_format_t vae_activation_format;
 } id4_ideogram4_decode_program_options_t;
 
 // Validates an Ideogram4 diffusion latent against the VAE public contract.

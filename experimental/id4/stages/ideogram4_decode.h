@@ -34,6 +34,8 @@ typedef struct id4_ideogram4_decode_stage_create_options_t {
   iree_string_view_t parameter_scope;
   // Static Ideogram4 decode model contract.
   id4_ideogram4_decode_model_config_t model;
+  // Activation storage format selected during VAE program authoring.
+  id4_vae_activation_format_t vae_activation_format;
 } id4_ideogram4_decode_stage_create_options_t;
 
 // Stage-specific plan extension carrying dynamic decode dimensions.

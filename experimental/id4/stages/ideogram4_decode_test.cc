@@ -62,6 +62,8 @@ static id4_pipeline_stage_t* CreateStage(
   create_options.structure_size = sizeof(create_options);
   create_options.services = services;
   create_options.model = model;
+  create_options.vae_activation_format =
+      ID4_VAE_ACTIVATION_FORMAT_F32_CANONICAL;
 
   id4_pipeline_stage_t* stage = nullptr;
   IREE_CHECK_OK(id4_ideogram4_decode_stage_create(
@@ -180,6 +182,8 @@ TEST(Ideogram4DecodeStage, RejectsInvalidStaticModelConfig) {
   create_options.structure_size = sizeof(create_options);
   create_options.services = services;
   create_options.model = model;
+  create_options.vae_activation_format =
+      ID4_VAE_ACTIVATION_FORMAT_F32_CANONICAL;
 
   id4_pipeline_stage_t* stage = nullptr;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,

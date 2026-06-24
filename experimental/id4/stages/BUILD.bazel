@@ -333,6 +333,17 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_test(
+    name = "vae_parameters_test",
+    srcs = ["vae_parameters_test.cc"],
+    deps = [
+        ":vae_parameters",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
     name = "ideogram4_decode_program_test",
     srcs = ["ideogram4_decode_program_test.cc"],
     deps = [

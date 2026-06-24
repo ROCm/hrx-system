@@ -34,6 +34,8 @@ typedef struct id4_vae_stage_create_options_t {
   iree_string_view_t parameter_scope;
   // Static VAE implementation capabilities.
   id4_vae_model_config_t model;
+  // Activation storage format selected during VAE program authoring.
+  id4_vae_activation_format_t activation_format;
 } id4_vae_stage_create_options_t;
 
 // Stage-specific plan extension carrying dynamic VAE decode dimensions.

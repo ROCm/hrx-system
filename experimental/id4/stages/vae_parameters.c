@@ -14,19 +14,37 @@
 enum {
   ID4_VAE_PARAMETER_CONFIG_VALUE_CAPACITY = 24,
   ID4_VAE_PARAMETER_PACK_CONFIG_COUNT = 3,
+  ID4_VAE_PARAMETER_CAST_CONFIG_COUNT = 1,
   ID4_VAE_PARAMETER_PACK_WORKGROUP_SIZE_X = 256,
 };
 
 static const iree_string_view_t id4_vae_parameter_packed_conv3x3_suffix =
     IREE_SVL(".packed_ic_ky_kx_oc");
+static const iree_string_view_t id4_vae_parameter_bf16_suffix =
+    IREE_SVL(".bf16");
+
+typedef enum id4_vae_parameter_transform_kind_e {
+  // Invalid parameter transform.
+  ID4_VAE_PARAMETER_TRANSFORM_KIND_INVALID = 0,
+  // Reorders F32 conv3x3 weights from OCxICxKYxKX to ICxKYxKXxOC.
+  ID4_VAE_PARAMETER_TRANSFORM_KIND_PACK_CONV3X3_F32 = 1,
+  // Casts dense F32 source storage to dense BF16 target storage.
+  ID4_VAE_PARAMETER_TRANSFORM_KIND_CAST_F32_BF16 = 2,
+} id4_vae_parameter_transform_kind_t;
 
 typedef struct id4_vae_parameter_mapping_t {
-  // Virtual packed parameter key visible to the program plan.
+  // Virtual parameter key visible to the program plan.
   iree_string_view_t virtual_key;
   // Source parameter key in the wrapped provider.
   iree_string_view_t source_key;
-  // Dense source and target tensor byte length.
-  iree_device_size_t byte_length;
+  // Transform used to materialize the virtual parameter.
+  id4_vae_parameter_transform_kind_t transform_kind;
+  // Dense source tensor byte length gathered from the wrapped provider.
+  iree_device_size_t source_byte_length;
+  // Dense target tensor byte length exposed by the virtual parameter.
+  iree_device_size_t target_byte_length;
+  // Number of scalar elements processed by the transform kernel.
+  uint64_t element_count;
   // Number of input channels in the convolution weight.
   uint32_t input_channel_count;
   // Number of output channels in the convolution weight.
@@ -88,6 +106,17 @@ typedef struct id4_vae_parameter_pack_config_t {
                     [ID4_VAE_PARAMETER_CONFIG_VALUE_CAPACITY];
 } id4_vae_parameter_pack_config_t;
 
+typedef struct id4_vae_parameter_cast_config_t {
+  // Number of config bindings.
+  iree_host_size_t count;
+  // Fixed-capacity config binding storage.
+  id4_pipeline_kernel_config_binding_t
+      bindings[ID4_VAE_PARAMETER_CAST_CONFIG_COUNT];
+  // Fixed-capacity string storage backing binding values.
+  char value_storage[ID4_VAE_PARAMETER_CAST_CONFIG_COUNT]
+                    [ID4_VAE_PARAMETER_CONFIG_VALUE_CAPACITY];
+} id4_vae_parameter_cast_config_t;
+
 static const iree_io_parameter_provider_vtable_t
     id4_vae_parameter_provider_vtable;
 
@@ -116,6 +145,39 @@ bool id4_vae_parameter_parse_packed_conv3x3_weight_key(
   if (suffix_position == IREE_STRING_VIEW_NPOS ||
       suffix_position + id4_vae_parameter_packed_conv3x3_suffix.size !=
           key.size) {
+    return false;
+  }
+  if (suffix_position == 0) return false;
+  if (out_source_key) {
+    *out_source_key = iree_string_view_substr(key, 0, suffix_position);
+  }
+  return true;
+}
+
+iree_status_t id4_vae_parameter_format_bf16_weight_key(
+    iree_string_view_t source_key, char* buffer,
+    iree_host_size_t buffer_capacity, iree_string_view_t* out_key) {
+  IREE_ASSERT_ARGUMENT(buffer);
+  IREE_ASSERT_ARGUMENT(out_key);
+  int length =
+      snprintf(buffer, buffer_capacity, "%.*s%.*s", (int)source_key.size,
+               source_key.data, (int)id4_vae_parameter_bf16_suffix.size,
+               id4_vae_parameter_bf16_suffix.data);
+  if (length < 0 || (iree_host_size_t)length >= buffer_capacity) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "failed to format VAE BF16 parameter key");
+  }
+  *out_key = iree_make_string_view(buffer, (iree_host_size_t)length);
+  return iree_ok_status();
+}
+
+bool id4_vae_parameter_parse_bf16_weight_key(
+    iree_string_view_t key, iree_string_view_t* out_source_key) {
+  if (out_source_key) *out_source_key = iree_string_view_empty();
+  const iree_host_size_t suffix_position =
+      iree_string_view_find(key, id4_vae_parameter_bf16_suffix, 0);
+  if (suffix_position == IREE_STRING_VIEW_NPOS ||
+      suffix_position + id4_vae_parameter_bf16_suffix.size != key.size) {
     return false;
   }
   if (suffix_position == 0) return false;
@@ -192,6 +254,15 @@ static bool id4_vae_parameter_is_packed_conv3x3_tensor(
                                                            out_source_key);
 }
 
+static bool id4_vae_parameter_is_bf16_tensor(
+    const id4_pipeline_program_tensor_record_t* tensor,
+    iree_string_view_t* out_source_key) {
+  if (!tensor || tensor->dtype != ID4_PIPELINE_PROGRAM_DTYPE_BF16) {
+    return false;
+  }
+  return id4_vae_parameter_parse_bf16_weight_key(tensor->name, out_source_key);
+}
+
 static iree_status_t id4_vae_parameter_count_mappings(
     const id4_pipeline_plan_t* plan, iree_host_size_t* out_mapping_count) {
   *out_mapping_count = 0;
@@ -207,10 +278,81 @@ static iree_status_t id4_vae_parameter_count_mappings(
         id4_pipeline_program_tensor_at(program,
                                        op->payload.parameter.tensor.ordinal);
     iree_string_view_t source_key = iree_string_view_empty();
-    if (id4_vae_parameter_is_packed_conv3x3_tensor(tensor, &source_key)) {
+    if (id4_vae_parameter_is_packed_conv3x3_tensor(tensor, &source_key) ||
+        id4_vae_parameter_is_bf16_tensor(tensor, &source_key)) {
       ++*out_mapping_count;
     }
   }
+  return iree_ok_status();
+}
+
+static iree_status_t id4_vae_parameter_populate_packed_conv3x3_mapping(
+    const id4_pipeline_program_tensor_record_t* tensor,
+    iree_string_view_t source_key, id4_vae_parameter_mapping_t* out_mapping) {
+  if (tensor->shape.dims[0] > UINT32_MAX ||
+      tensor->shape.dims[3] > UINT32_MAX) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "VAE packed conv3x3 parameter %.*s channel count is out of range",
+        (int)tensor->name.size, tensor->name.data);
+  }
+  if (tensor->byte_length % sizeof(float) != 0) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "VAE packed conv3x3 parameter %.*s byte length is not F32 aligned",
+        (int)tensor->name.size, tensor->name.data);
+  }
+  *out_mapping = (id4_vae_parameter_mapping_t){
+      // Virtual packed parameter key from the plan.
+      .virtual_key = tensor->name,
+      // Original source key in the wrapped provider.
+      .source_key = source_key,
+      // Transform used to materialize the virtual parameter.
+      .transform_kind = ID4_VAE_PARAMETER_TRANSFORM_KIND_PACK_CONV3X3_F32,
+      // Dense source byte length.
+      .source_byte_length = tensor->byte_length,
+      // Dense target byte length.
+      .target_byte_length = tensor->byte_length,
+      // F32 scalar element count.
+      .element_count = tensor->byte_length / sizeof(float),
+      // Input channel dimension in ICxKYxKXxOC layout.
+      .input_channel_count = (uint32_t)tensor->shape.dims[0],
+      // Output channel dimension in ICxKYxKXxOC layout.
+      .output_channel_count = (uint32_t)tensor->shape.dims[3],
+  };
+  return iree_ok_status();
+}
+
+static iree_status_t id4_vae_parameter_populate_bf16_mapping(
+    const id4_pipeline_program_tensor_record_t* tensor,
+    iree_string_view_t source_key, id4_vae_parameter_mapping_t* out_mapping) {
+  uint64_t element_count = 0;
+  IREE_RETURN_IF_ERROR(
+      id4_pipeline_program_shape_element_count(tensor->shape, &element_count));
+  if (element_count > UINT32_MAX) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "VAE BF16 parameter %.*s element count is out of range",
+        (int)tensor->name.size, tensor->name.data);
+  }
+  *out_mapping = (id4_vae_parameter_mapping_t){
+      // Virtual BF16 parameter key from the plan.
+      .virtual_key = tensor->name,
+      // Original F32 source key in the wrapped provider.
+      .source_key = source_key,
+      // Transform used to materialize the virtual parameter.
+      .transform_kind = ID4_VAE_PARAMETER_TRANSFORM_KIND_CAST_F32_BF16,
+      // Dense F32 source byte length.
+      .source_byte_length = element_count * sizeof(float),
+      // Dense BF16 target byte length.
+      .target_byte_length = tensor->byte_length,
+      // Scalar element count.
+      .element_count = element_count,
+      // Not used by the cast transform.
+      .input_channel_count = 0,
+      // Not used by the cast transform.
+      .output_channel_count = 0,
+  };
   return iree_ok_status();
 }
 
@@ -229,28 +371,16 @@ static iree_status_t id4_vae_parameter_populate_mappings(
         id4_pipeline_program_tensor_at(program,
                                        op->payload.parameter.tensor.ordinal);
     iree_string_view_t source_key = iree_string_view_empty();
-    if (!id4_vae_parameter_is_packed_conv3x3_tensor(tensor, &source_key)) {
+    if (id4_vae_parameter_is_packed_conv3x3_tensor(tensor, &source_key)) {
+      IREE_RETURN_IF_ERROR(id4_vae_parameter_populate_packed_conv3x3_mapping(
+          tensor, source_key, &mappings[mapping_index++]));
       continue;
     }
-    if (tensor->shape.dims[0] > UINT32_MAX ||
-        tensor->shape.dims[3] > UINT32_MAX) {
-      return iree_make_status(
-          IREE_STATUS_OUT_OF_RANGE,
-          "VAE packed conv3x3 parameter %.*s channel count is out of range",
-          (int)tensor->name.size, tensor->name.data);
+    if (id4_vae_parameter_is_bf16_tensor(tensor, &source_key)) {
+      IREE_RETURN_IF_ERROR(id4_vae_parameter_populate_bf16_mapping(
+          tensor, source_key, &mappings[mapping_index++]));
+      continue;
     }
-    mappings[mapping_index++] = (id4_vae_parameter_mapping_t){
-        // Virtual packed parameter key from the plan.
-        .virtual_key = tensor->name,
-        // Original source key in the wrapped provider.
-        .source_key = source_key,
-        // Dense byte length shared by source and packed layouts.
-        .byte_length = tensor->byte_length,
-        // Input channel dimension in ICxKYxKXxOC layout.
-        .input_channel_count = (uint32_t)tensor->shape.dims[0],
-        // Output channel dimension in ICxKYxKXxOC layout.
-        .output_channel_count = (uint32_t)tensor->shape.dims[3],
-    };
   }
   return iree_ok_status();
 }
@@ -322,8 +452,7 @@ static iree_status_t id4_vae_parameter_pack_config(
     const id4_vae_parameter_mapping_t* mapping,
     id4_vae_parameter_pack_config_t* out_config) {
   memset(out_config, 0, sizeof(*out_config));
-  const iree_device_size_t element_count = mapping->byte_length / sizeof(float);
-  if (element_count > UINT32_MAX) {
+  if (mapping->element_count > UINT32_MAX) {
     return iree_make_status(
         IREE_STATUS_OUT_OF_RANGE,
         "VAE packed conv3x3 parameter %.*s element count is out of range",
@@ -337,13 +466,32 @@ static iree_status_t id4_vae_parameter_pack_config(
       mapping->output_channel_count));
   return id4_vae_parameter_pack_config_add_u32(
       out_config, IREE_SV("id4.vae.pack_conv3x3_weight.element_count"),
-      (uint32_t)element_count);
+      (uint32_t)mapping->element_count);
 }
 
-static iree_hal_dispatch_config_t id4_vae_parameter_pack_dispatch_config(
+static iree_status_t id4_vae_parameter_cast_config(
+    const id4_vae_parameter_mapping_t* mapping,
+    id4_vae_parameter_cast_config_t* out_config) {
+  memset(out_config, 0, sizeof(*out_config));
+  if (mapping->element_count > UINT32_MAX) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "VAE BF16 parameter %.*s element count is out of range",
+        (int)mapping->virtual_key.size, mapping->virtual_key.data);
+  }
+  iree_string_view_t value_string = iree_string_view_empty();
+  IREE_RETURN_IF_ERROR(id4_vae_parameter_format_u32(
+      (uint32_t)mapping->element_count, out_config->value_storage[0],
+      IREE_ARRAYSIZE(out_config->value_storage[0]), &value_string));
+  out_config->bindings[0] = id4_pipeline_make_kernel_config_binding(
+      IREE_SV("id4.elementwise.cast_f32_bf16.element_count"), value_string);
+  out_config->count = 1;
+  return iree_ok_status();
+}
+
+static iree_hal_dispatch_config_t id4_vae_parameter_transform_dispatch_config(
     const id4_vae_parameter_mapping_t* mapping) {
-  const uint32_t element_count =
-      (uint32_t)(mapping->byte_length / sizeof(float));
+  const uint32_t element_count = (uint32_t)mapping->element_count;
   iree_hal_dispatch_config_t dispatch_config =
       iree_hal_make_static_dispatch_config(
           element_count / ID4_VAE_PARAMETER_PACK_WORKGROUP_SIZE_X +
@@ -425,6 +573,76 @@ static iree_status_t id4_vae_parameter_prepare_pack_executable(
   return status;
 }
 
+static iree_status_t id4_vae_parameter_prepare_cast_executable(
+    id4_vae_parameter_provider_t* provider,
+    iree_hal_queue_affinity_t queue_affinity,
+    const id4_vae_parameter_mapping_t* mapping,
+    id4_pipeline_kernel_executable_t** out_executable,
+    iree_hal_executable_function_t* out_function) {
+  *out_executable = NULL;
+  *out_function = iree_hal_executable_function_invalid();
+
+  const id4_pipeline_kernel_module_t* module = NULL;
+  IREE_RETURN_IF_ERROR(id4_pipeline_kernel_library_lookup(
+      provider->kernel_library, IREE_SV("elementwise/cast_f32_bf16"), &module));
+  id4_vae_parameter_cast_config_t config;
+  IREE_RETURN_IF_ERROR(id4_vae_parameter_cast_config(mapping, &config));
+
+  id4_pipeline_kernel_cache_prepare_options_t prepare_options;
+  memset(&prepare_options, 0, sizeof(prepare_options));
+  prepare_options.structure_size = sizeof(prepare_options);
+  prepare_options.executable_cache = provider->executable_cache;
+  prepare_options.queue_affinity = queue_affinity;
+  prepare_options.caching_mode = IREE_HAL_EXECUTABLE_CACHING_MODE_NONE;
+  prepare_options.source_identifier = module->source_identifier;
+  prepare_options.source_contents = module->source_contents;
+  prepare_options.module_path = module->module_path;
+  prepare_options.function_name = IREE_SV("id4_elementwise_cast_f32_bf16");
+  prepare_options.config_binding_count = config.count;
+  prepare_options.config_bindings = config.bindings;
+  prepare_options.diagnostic_artifact_flags =
+      ID4_PIPELINE_KERNEL_DIAGNOSTIC_ARTIFACT_FLAG_COMPILE_REPORT_JSON;
+  prepare_options.diagnostics_sink = provider->diagnostics_sink;
+
+  id4_pipeline_kernel_executable_t* executable = NULL;
+  IREE_RETURN_IF_ERROR(id4_pipeline_kernel_cache_prepare_executable(
+      provider->kernel_cache, &prepare_options, &executable));
+  iree_hal_executable_function_t function =
+      iree_hal_executable_function_invalid();
+  iree_status_t status = iree_hal_executable_lookup_function_by_name(
+      id4_pipeline_kernel_executable_hal_executable(executable),
+      prepare_options.function_name, &function);
+  if (iree_status_is_ok(status)) {
+    *out_executable = executable;
+    *out_function = function;
+    executable = NULL;
+  }
+  id4_pipeline_kernel_executable_release(executable);
+  return status;
+}
+
+static iree_status_t id4_vae_parameter_prepare_transform_executable(
+    id4_vae_parameter_provider_t* provider,
+    iree_hal_queue_affinity_t queue_affinity,
+    const id4_vae_parameter_mapping_t* mapping,
+    id4_pipeline_kernel_executable_t** out_executable,
+    iree_hal_executable_function_t* out_function) {
+  switch (mapping->transform_kind) {
+    case ID4_VAE_PARAMETER_TRANSFORM_KIND_PACK_CONV3X3_F32:
+      return id4_vae_parameter_prepare_pack_executable(
+          provider, queue_affinity, mapping, out_executable, out_function);
+    case ID4_VAE_PARAMETER_TRANSFORM_KIND_CAST_F32_BF16:
+      return id4_vae_parameter_prepare_cast_executable(
+          provider, queue_affinity, mapping, out_executable, out_function);
+    default:
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "VAE parameter %.*s transform kind %d is invalid",
+                              (int)mapping->virtual_key.size,
+                              mapping->virtual_key.data,
+                              (int)mapping->transform_kind);
+  }
+}
+
 static iree_status_t id4_vae_parameter_submit_transform(
     id4_vae_parameter_provider_t* provider, iree_hal_device_t* device,
     iree_hal_queue_affinity_t queue_affinity, iree_string_view_t source_scope,
@@ -435,7 +653,7 @@ static iree_status_t id4_vae_parameter_submit_transform(
   id4_pipeline_kernel_executable_t* executable = NULL;
   iree_hal_executable_function_t function =
       iree_hal_executable_function_invalid();
-  IREE_RETURN_IF_ERROR(id4_vae_parameter_prepare_pack_executable(
+  IREE_RETURN_IF_ERROR(id4_vae_parameter_prepare_transform_executable(
       provider, queue_affinity, mapping, &executable, &function));
 
   iree_hal_semaphore_t* alloca_semaphore = NULL;
@@ -489,7 +707,7 @@ static iree_status_t id4_vae_parameter_submit_transform(
   if (iree_status_is_ok(status)) {
     status = iree_hal_device_queue_alloca(
         device, queue_affinity, wait_semaphore_list, alloca_signal_list,
-        /*pool=*/NULL, staging_params, mapping->byte_length,
+        /*pool=*/NULL, staging_params, mapping->source_byte_length,
         IREE_HAL_ALLOCA_FLAG_NONE, &staging_buffer);
     alloca_submitted = iree_status_is_ok(status);
   }
@@ -502,7 +720,7 @@ static iree_status_t id4_vae_parameter_submit_transform(
             {
                 .parameter_offset = 0,
                 .buffer_offset = 0,
-                .length = mapping->byte_length,
+                .length = mapping->source_byte_length,
             },
     };
     id4_vae_parameter_request_enumerator_t enumerator_state = {
@@ -519,7 +737,8 @@ static iree_status_t id4_vae_parameter_submit_transform(
   }
   if (iree_status_is_ok(status)) {
     iree_hal_buffer_ref_t bindings[2] = {
-        iree_hal_make_buffer_ref(staging_buffer, 0, mapping->byte_length),
+        iree_hal_make_buffer_ref(staging_buffer, 0,
+                                 mapping->source_byte_length),
         iree_hal_make_buffer_ref(target_buffer,
                                  transform.target_span.buffer_offset,
                                  transform.target_span.length),
@@ -533,7 +752,7 @@ static iree_status_t id4_vae_parameter_submit_transform(
     status = iree_hal_device_queue_dispatch(
         device, queue_affinity, gather_signal_list, encode_signal_list,
         id4_pipeline_kernel_executable_hal_executable(executable), function,
-        id4_vae_parameter_pack_dispatch_config(mapping),
+        id4_vae_parameter_transform_dispatch_config(mapping),
         iree_const_byte_span_empty(), binding_list,
         IREE_HAL_DISPATCH_FLAG_NONE);
     encode_submitted = iree_status_is_ok(status);
@@ -690,10 +909,11 @@ static iree_status_t id4_vae_parameter_provider_gather(
     const id4_vae_parameter_mapping_t* mapping =
         id4_vae_parameter_find_mapping(provider, key);
     if (mapping) {
-      if (span.parameter_offset != 0 || span.length != mapping->byte_length) {
+      if (span.parameter_offset != 0 ||
+          span.length != mapping->target_byte_length) {
         status = iree_make_status(
             IREE_STATUS_UNIMPLEMENTED,
-            "VAE packed conv3x3 parameter %.*s requires a whole-parameter "
+            "VAE derived parameter %.*s requires a whole-parameter "
             "gather request",
             (int)mapping->virtual_key.size, mapping->virtual_key.data);
         break;

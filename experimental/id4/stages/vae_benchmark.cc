@@ -160,6 +160,7 @@ static iree_status_t CreateVaeStage(const id4::test::LiveStageContext& live,
   create_options.services = services;
   create_options.kernel_cache = live.kernel_cache.get();
   create_options.model = *id4_vae_program_flux2_model_config();
+  create_options.activation_format = ID4_VAE_ACTIVATION_FORMAT_F32_CANONICAL;
   return id4_vae_stage_create(&create_options, iree_allocator_system(),
                               out_stage);
 }

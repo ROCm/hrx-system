@@ -80,6 +80,8 @@ static iree_status_t CreateDecodeStage(
   create_options.services = services;
   create_options.kernel_cache = context.kernel_cache.get();
   create_options.model = *id4_ideogram4_decode_program_ideogram4_model_config();
+  create_options.vae_activation_format =
+      ID4_VAE_ACTIVATION_FORMAT_F32_CANONICAL;
   return id4_ideogram4_decode_stage_create(&create_options,
                                            iree_allocator_system(), out_stage);
 }
