@@ -970,21 +970,15 @@ static iree_status_t id4_vae_program_build_upsample_conv3x3_bias_configs(
 }
 
 static iree_status_t
-id4_vae_program_add_upsample_conv3x3_bias_output_tile_configs(
+id4_vae_program_add_upsample_conv3x3_bias_channel_tile_config(
     uint32_t channel_count, uint32_t output_channel_tile_width,
-    uint64_t output_element_count, id4_vae_program_config_list_t* config_list) {
+    id4_vae_program_config_list_t* config_list) {
   const uint32_t output_channel_tile_count =
       id4_vae_program_ceil_div_u32(channel_count, output_channel_tile_width);
-  const uint64_t output_tile_element_count = id4_vae_program_ceil_div_u64(
-      output_element_count, output_channel_tile_width);
-  IREE_RETURN_IF_ERROR(id4_vae_program_config_list_add_u64(
-      config_list,
-      IREE_SV("id4.vae.upsample_conv3x3_bias.output_channel_tile_count"),
-      output_channel_tile_count));
   return id4_vae_program_config_list_add_u64(
       config_list,
-      IREE_SV("id4.vae.upsample_conv3x3_bias.output_tile_element_count"),
-      output_tile_element_count);
+      IREE_SV("id4.vae.upsample_conv3x3_bias.output_channel_tile_count"),
+      output_channel_tile_count);
 }
 
 static iree_status_t id4_vae_program_build_flux2_affine_configs(
@@ -1960,19 +1954,19 @@ static iree_status_t id4_vae_program_author_upsample_conv3x3_bias(
       IREE_SV("id4_vae_upsample_conv3x3_bias_f32");
   uint32_t output_channel_tile_width = 1;
   uint32_t dispatch_element_count = (uint32_t)output_element_count;
+  uint32_t dispatch_workgroup_count_y = 1;
   id4_vae_program_conv3x3_weight_layout_t weight_layout =
       ID4_VAE_PROGRAM_CONV3X3_WEIGHT_LAYOUT_SOURCE;
   if (batch_count == 1 && channel_count >= 16 && channel_count % 16 == 0) {
     function_name =
-        IREE_SV("id4_vae_upsample_conv3x3_bias_ic4_oc16_packed_f32");
+        IREE_SV("id4_vae_upsample_conv3x3_bias_ic4_oc16_packed_2d_f32");
     output_channel_tile_width = 16;
     weight_layout = ID4_VAE_PROGRAM_CONV3X3_WEIGHT_LAYOUT_PACKED_IC_KY_KX_OC;
-    dispatch_element_count =
-        (uint32_t)(output_element_count / output_channel_tile_width);
+    dispatch_element_count = (uint32_t)(output_element_count / channel_count);
+    dispatch_workgroup_count_y = channel_count / output_channel_tile_width;
     IREE_RETURN_IF_ERROR(
-        id4_vae_program_add_upsample_conv3x3_bias_output_tile_configs(
-            channel_count, output_channel_tile_width, output_element_count,
-            &config_list));
+        id4_vae_program_add_upsample_conv3x3_bias_channel_tile_config(
+            channel_count, output_channel_tile_width, &config_list));
   } else if (batch_count == 1 && channel_count >= 8 && channel_count % 8 == 0) {
     function_name = IREE_SV("id4_vae_upsample_conv3x3_bias_ic4_oc8_packed_f32");
     output_channel_tile_width = 8;
@@ -1980,18 +1974,16 @@ static iree_status_t id4_vae_program_author_upsample_conv3x3_bias(
     dispatch_element_count =
         (uint32_t)(output_element_count / output_channel_tile_width);
     IREE_RETURN_IF_ERROR(
-        id4_vae_program_add_upsample_conv3x3_bias_output_tile_configs(
-            channel_count, output_channel_tile_width, output_element_count,
-            &config_list));
+        id4_vae_program_add_upsample_conv3x3_bias_channel_tile_config(
+            channel_count, output_channel_tile_width, &config_list));
   } else if (batch_count == 1 && channel_count >= 4 && channel_count % 4 == 0) {
     function_name = IREE_SV("id4_vae_upsample_conv3x3_bias_ic4_oc4_f32");
     output_channel_tile_width = 4;
     dispatch_element_count =
         (uint32_t)(output_element_count / output_channel_tile_width);
     IREE_RETURN_IF_ERROR(
-        id4_vae_program_add_upsample_conv3x3_bias_output_tile_configs(
-            channel_count, output_channel_tile_width, output_element_count,
-            &config_list));
+        id4_vae_program_add_upsample_conv3x3_bias_channel_tile_config(
+            channel_count, output_channel_tile_width, &config_list));
   }
 
   iree_string_view_t resolved_weight_key = iree_string_view_empty();
@@ -2018,7 +2010,10 @@ static iree_status_t id4_vae_program_author_upsample_conv3x3_bias(
   dispatch_options.kernel = id4_pipeline_make_kernel_ref(
       IREE_SV("vae/upsample_conv3x3_bias_f32"), function_name);
   dispatch_options.dispatch_config =
-      id4_vae_program_make_dispatch_config(dispatch_element_count);
+      id4_vae_program_make_static_dispatch_config(
+          id4_vae_program_ceil_div_u32(dispatch_element_count,
+                                       ID4_VAE_DECODE_WORKGROUP_SIZE_X),
+          dispatch_workgroup_count_y, 1);
   dispatch_options.config_binding_count = config_list.count;
   dispatch_options.config_bindings = config_list.bindings;
   dispatch_options.binding_count = IREE_ARRAYSIZE(bindings);
