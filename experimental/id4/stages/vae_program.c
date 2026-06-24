@@ -2133,6 +2133,14 @@ static iree_status_t id4_vae_program_author_group_norm_bf16(
         iree_any_bit_set(flags, ID4_VAE_PROGRAM_GROUP_NORM_FLAG_APPLY_SILU)
             ? IREE_SV("id4_vae_group_norm_silu_ic4_oc16_2d_bf16")
             : IREE_SV("id4_vae_group_norm_ic4_oc16_2d_bf16");
+  } else if (channels_per_group >= 8 && channels_per_group % 8 == 0 &&
+             channel_count % 8 == 0) {
+    output_channel_tile_width = 8;
+    apply_module_path = IREE_SV("vae/group_norm_oc8_bf16");
+    apply_function_name =
+        iree_any_bit_set(flags, ID4_VAE_PROGRAM_GROUP_NORM_FLAG_APPLY_SILU)
+            ? IREE_SV("id4_vae_group_norm_silu_ic4_oc8_2d_bf16")
+            : IREE_SV("id4_vae_group_norm_ic4_oc8_2d_bf16");
   }
   IREE_RETURN_IF_ERROR(id4_vae_program_add_group_norm_apply_tile_configs(
       channel_count, output_element_count, output_channel_tile_width,
