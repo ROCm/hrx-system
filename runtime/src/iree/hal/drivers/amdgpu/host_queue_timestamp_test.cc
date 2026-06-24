@@ -355,10 +355,11 @@ TEST_F(HostQueueTimestampTest, RejectsBufferWithoutTransferTarget) {
       test_device.Initialize(&options, &libhsa_, &topology_, host_allocator_));
   iree_hal_device_t* device = test_device.base_device();
 
-  // Host-visible device-local buffer with mapping usage only (no transfer).
+  // Host-visible buffer (host pool, so it allocates on GPUs without a large-BAR
+  // device pool) with mapping usage only and no transfer-target, so the op must
+  // reject it.
   iree_hal_buffer_params_t params = {0};
-  params.type =
-      IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL | IREE_HAL_MEMORY_TYPE_HOST_VISIBLE;
+  params.type = IREE_HAL_MEMORY_TYPE_HOST_VISIBLE;
   params.usage = IREE_HAL_BUFFER_USAGE_MAPPING;
   iree_hal_buffer_t* target = NULL;
   IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
