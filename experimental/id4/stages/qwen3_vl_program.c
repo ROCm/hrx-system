@@ -21,6 +21,7 @@ enum {
   ID4_QWEN3_VL_WMMA_TILE_SIZE = 16,
   ID4_QWEN3_VL_LINEAR_WMMA_TOKEN_BLOCK = 32,
   ID4_QWEN3_VL_LINEAR_WMMA_OUTPUT_ROW_BLOCK = 32,
+  ID4_QWEN3_VL_CONDITION_BLOCK_ELEMENT_COUNT = 2048,
   ID4_QWEN3_VL_CONFIG_VALUE_BUFFER_CAPACITY = 16,
   ID4_QWEN3_VL_MAX_KERNEL_CONFIG_BINDING_COUNT = 8,
 };
@@ -163,6 +164,20 @@ static iree_status_t id4_qwen3_vl_program_make_matrix_element_dispatch_config(
   }
   return id4_qwen3_vl_program_make_element_dispatch_config(element_count,
                                                            out_dispatch_config);
+}
+
+static iree_status_t id4_qwen3_vl_program_make_condition_partial_count(
+    uint32_t hidden_row_count, uint32_t token_count,
+    uint32_t* out_partial_count) {
+  uint32_t element_count = 0;
+  if (!id4_qwen3_vl_program_checked_mul_u32(hidden_row_count, token_count,
+                                            &element_count)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "Qwen3-VL condition element count overflow");
+  }
+  *out_partial_count = id4_qwen3_vl_program_ceil_div_u32(
+      element_count, ID4_QWEN3_VL_CONDITION_BLOCK_ELEMENT_COUNT);
+  return iree_ok_status();
 }
 
 static uint32_t id4_qwen3_vl_program_query_width(
@@ -523,8 +538,10 @@ typedef enum id4_qwen3_vl_kernel_kind_e {
   ID4_QWEN3_VL_KERNEL_SELECTED_HIDDEN_PACK = 11,
   // Condition token-weight application kernel.
   ID4_QWEN3_VL_KERNEL_CONDITION_APPLY_TOKEN_WEIGHTS = 12,
+  // Condition token-weight partial stats reduction kernel.
+  ID4_QWEN3_VL_KERNEL_CONDITION_REDUCE_TOKEN_WEIGHT_STATS = 13,
   // Condition token-weight normalization kernel.
-  ID4_QWEN3_VL_KERNEL_CONDITION_NORMALIZE_TOKEN_WEIGHTS = 13,
+  ID4_QWEN3_VL_KERNEL_CONDITION_NORMALIZE_TOKEN_WEIGHTS = 14,
 } id4_qwen3_vl_kernel_kind_t;
 
 typedef enum id4_qwen3_vl_config_key_e {
@@ -881,6 +898,9 @@ static const id4_pipeline_kernel_ref_t
         [ID4_QWEN3_VL_KERNEL_CONDITION_APPLY_TOKEN_WEIGHTS] =
             {IREE_SVL("qwen3_vl/condition"),
              IREE_SVL("id4_qwen3_vl_condition_apply_token_weights_f32")},
+        [ID4_QWEN3_VL_KERNEL_CONDITION_REDUCE_TOKEN_WEIGHT_STATS] =
+            {IREE_SVL("qwen3_vl/condition"),
+             IREE_SVL("id4_qwen3_vl_condition_reduce_token_weight_stats_f32")},
         [ID4_QWEN3_VL_KERNEL_CONDITION_NORMALIZE_TOKEN_WEIGHTS] =
             {IREE_SVL("qwen3_vl/condition"),
              IREE_SVL("id4_qwen3_vl_condition_normalize_token_weights_f32")},
@@ -1004,6 +1024,13 @@ static const iree_string_view_t id4_qwen3_vl_program_config_keys
                              "index"),
             },
         [ID4_QWEN3_VL_KERNEL_CONDITION_APPLY_TOKEN_WEIGHTS] =
+            {
+                [ID4_QWEN3_VL_CONFIG_TOKEN_COUNT] =
+                    IREE_SVL("id4.qwen3_vl.condition.token_count"),
+                [ID4_QWEN3_VL_CONFIG_HIDDEN_ROW_COUNT] =
+                    IREE_SVL("id4.qwen3_vl.condition.hidden_row_count"),
+            },
+        [ID4_QWEN3_VL_KERNEL_CONDITION_REDUCE_TOKEN_WEIGHT_STATS] =
             {
                 [ID4_QWEN3_VL_CONFIG_TOKEN_COUNT] =
                     IREE_SVL("id4.qwen3_vl.condition.token_count"),
@@ -2102,18 +2129,29 @@ static iree_status_t id4_qwen3_vl_program_author_condition(
   const uint32_t token_count = options->request.token_count;
   const uint32_t hidden_row_count =
       id4_qwen3_vl_program_selected_hidden_row_count(&options->model);
+  uint32_t stats_row_count = 0;
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_make_condition_partial_count(
+      hidden_row_count, token_count, &stats_row_count));
   id4_pipeline_program_tensor_t stats = id4_pipeline_program_tensor_invalid();
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_acquire_tensor(
       builder, ID4_QWEN3_VL_TENSOR_CONDITION_STATS, UINT32_MAX,
-      ID4_PIPELINE_PROGRAM_DTYPE_F32, id4_pipeline_program_make_shape_rank1(2),
-      &stats));
+      ID4_PIPELINE_PROGRAM_DTYPE_F32,
+      id4_pipeline_program_make_shape_rank2(stats_row_count, 2), &stats));
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_import_tensor(
       builder, ID4_QWEN3_VL_TENSOR_OUTPUT, /*flags=*/0,
       ID4_PIPELINE_PROGRAM_DTYPE_F32,
       id4_pipeline_program_make_shape_rank2(hidden_row_count, token_count),
       out_condition));
 
-  const id4_qwen3_vl_program_config_value_t apply_config_values[] = {
+  char apply_dispatch_name_buffer[ID4_QWEN3_VL_FORMAT_BUFFER_CAPACITY];
+  iree_string_view_t apply_dispatch_name = iree_string_view_empty();
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_format_operation_name(
+      ID4_QWEN3_VL_OPERATION_CONDITION_APPLY_TOKEN_WEIGHTS, UINT32_MAX,
+      ID4_QWEN3_VL_OPERATION_SITE_CONDITION_APPLY_TOKEN_WEIGHTS,
+      apply_dispatch_name_buffer, IREE_ARRAYSIZE(apply_dispatch_name_buffer),
+      &apply_dispatch_name));
+
+  const id4_qwen3_vl_program_config_value_t condition_config_values[] = {
       {ID4_QWEN3_VL_CONFIG_HIDDEN_ROW_COUNT, hidden_row_count},
       {ID4_QWEN3_VL_CONFIG_TOKEN_COUNT, token_count},
   };
@@ -2123,7 +2161,7 @@ static iree_status_t id4_qwen3_vl_program_author_condition(
       apply_config_bindings[ID4_QWEN3_VL_MAX_KERNEL_CONFIG_BINDING_COUNT];
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_make_config_bindings(
       ID4_QWEN3_VL_KERNEL_CONDITION_APPLY_TOKEN_WEIGHTS,
-      IREE_ARRAYSIZE(apply_config_values), apply_config_values,
+      IREE_ARRAYSIZE(condition_config_values), condition_config_values,
       apply_value_buffers, apply_config_bindings));
   id4_pipeline_program_dispatch_binding_t apply_bindings[] = {
       id4_pipeline_program_read(selected_hidden_states),
@@ -2132,28 +2170,54 @@ static iree_status_t id4_qwen3_vl_program_author_condition(
       id4_pipeline_program_write(stats),
   };
   const iree_hal_dispatch_config_t apply_dispatch_config =
-      id4_qwen3_vl_program_make_reduction_dispatch_config();
-  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_dispatch(
-      builder, ID4_QWEN3_VL_OPERATION_CONDITION_APPLY_TOKEN_WEIGHTS, UINT32_MAX,
-      ID4_QWEN3_VL_OPERATION_SITE_CONDITION_APPLY_TOKEN_WEIGHTS,
+      id4_qwen3_vl_program_make_dispatch_config(stats_row_count, 1, 1);
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_dispatch_named(
+      builder, apply_dispatch_name,
       ID4_QWEN3_VL_KERNEL_CONDITION_APPLY_TOKEN_WEIGHTS, apply_dispatch_config,
-      IREE_ARRAYSIZE(apply_config_values), apply_config_bindings,
+      IREE_ARRAYSIZE(condition_config_values), apply_config_bindings,
       IREE_ARRAYSIZE(apply_bindings), apply_bindings));
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_barrier(
       builder, UINT32_MAX,
       ID4_QWEN3_VL_OPERATION_SITE_AFTER_CONDITION_APPLY_TOKEN_WEIGHTS));
 
-  const id4_qwen3_vl_program_config_value_t normalize_config_values[] = {
-      {ID4_QWEN3_VL_CONFIG_HIDDEN_ROW_COUNT, hidden_row_count},
-      {ID4_QWEN3_VL_CONFIG_TOKEN_COUNT, token_count},
+  char reduce_dispatch_name_buffer[ID4_QWEN3_VL_FORMAT_BUFFER_CAPACITY];
+  iree_string_view_t reduce_dispatch_name = iree_string_view_empty();
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_format_child_name(
+      apply_dispatch_name, IREE_SV("reduce_stats"), reduce_dispatch_name_buffer,
+      IREE_ARRAYSIZE(reduce_dispatch_name_buffer), &reduce_dispatch_name));
+  char reduce_value_buffers[ID4_QWEN3_VL_MAX_KERNEL_CONFIG_BINDING_COUNT]
+                           [ID4_QWEN3_VL_CONFIG_VALUE_BUFFER_CAPACITY];
+  id4_pipeline_kernel_config_binding_t
+      reduce_config_bindings[ID4_QWEN3_VL_MAX_KERNEL_CONFIG_BINDING_COUNT];
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_make_config_bindings(
+      ID4_QWEN3_VL_KERNEL_CONDITION_REDUCE_TOKEN_WEIGHT_STATS,
+      IREE_ARRAYSIZE(condition_config_values), condition_config_values,
+      reduce_value_buffers, reduce_config_bindings));
+  id4_pipeline_program_dispatch_binding_t reduce_bindings[] = {
+      id4_pipeline_program_read_write(stats),
   };
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_dispatch_named(
+      builder, reduce_dispatch_name,
+      ID4_QWEN3_VL_KERNEL_CONDITION_REDUCE_TOKEN_WEIGHT_STATS,
+      id4_qwen3_vl_program_make_reduction_dispatch_config(),
+      IREE_ARRAYSIZE(condition_config_values), reduce_config_bindings,
+      IREE_ARRAYSIZE(reduce_bindings), reduce_bindings));
+  char after_reduce_name_buffer[ID4_QWEN3_VL_FORMAT_BUFFER_CAPACITY];
+  iree_string_view_t after_reduce_name = iree_string_view_empty();
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_format_child_name(
+      apply_dispatch_name, IREE_SV("after_reduce_stats"),
+      after_reduce_name_buffer, IREE_ARRAYSIZE(after_reduce_name_buffer),
+      &after_reduce_name));
+  IREE_RETURN_IF_ERROR(
+      id4_qwen3_vl_program_barrier_named(builder, after_reduce_name));
+
   char normalize_value_buffers[ID4_QWEN3_VL_MAX_KERNEL_CONFIG_BINDING_COUNT]
                               [ID4_QWEN3_VL_CONFIG_VALUE_BUFFER_CAPACITY];
   id4_pipeline_kernel_config_binding_t
       normalize_config_bindings[ID4_QWEN3_VL_MAX_KERNEL_CONFIG_BINDING_COUNT];
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_make_config_bindings(
       ID4_QWEN3_VL_KERNEL_CONDITION_NORMALIZE_TOKEN_WEIGHTS,
-      IREE_ARRAYSIZE(normalize_config_values), normalize_config_values,
+      IREE_ARRAYSIZE(condition_config_values), condition_config_values,
       normalize_value_buffers, normalize_config_bindings));
   id4_pipeline_program_dispatch_binding_t normalize_bindings[] = {
       id4_pipeline_program_read_write(*out_condition),
@@ -2166,7 +2230,7 @@ static iree_status_t id4_qwen3_vl_program_author_condition(
       builder, ID4_QWEN3_VL_OPERATION_CONDITION_NORMALIZE_TOKEN_WEIGHTS,
       UINT32_MAX, ID4_QWEN3_VL_OPERATION_SITE_CONDITION_NORMALIZE_TOKEN_WEIGHTS,
       ID4_QWEN3_VL_KERNEL_CONDITION_NORMALIZE_TOKEN_WEIGHTS,
-      normalize_dispatch_config, IREE_ARRAYSIZE(normalize_config_values),
+      normalize_dispatch_config, IREE_ARRAYSIZE(condition_config_values),
       normalize_config_bindings, IREE_ARRAYSIZE(normalize_bindings),
       normalize_bindings));
   return id4_qwen3_vl_program_barrier(

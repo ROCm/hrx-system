@@ -6049,6 +6049,22 @@ iree_native_test(
 
 iree_native_test(
   NAME
+    "qwen3_vl_condition_f32_multi_partial_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/condition.loom}}"
+    "--benchmark=@id4_qwen3_vl_condition_forward_f32_multi_partial"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.qwen3_vl.condition.hidden_row_count=1"
+    "--config=id4.qwen3_vl.condition.token_count=4098"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
     "qwen3_vl_selected_hidden_pack_f32_small_plan_test"
   ARGS
     "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/selected_hidden_pack_f32.loom}}"
@@ -13293,6 +13309,26 @@ iree_native_test(
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.condition.hidden_row_count=32"
     "--config=id4.qwen3_vl.condition.token_count=64"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
+    "qwen3_vl_condition_f32_multi_partial_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/condition.loom}}"
+    "--case=@id4_qwen3_vl_condition_forward_f32_multi_partial_case"
+    "--device=amdgpu://0"
+    "--config=id4.qwen3_vl.condition.hidden_row_count=1"
+    "--config=id4.qwen3_vl.condition.token_count=4098"
   SRC
     loom::tools::iree-test-loom
   LABELS
