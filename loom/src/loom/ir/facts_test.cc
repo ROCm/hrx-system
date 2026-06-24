@@ -402,12 +402,125 @@ static loom_predicate_t make_predicate_not_nan(void) {
   return pred;
 }
 
+static loom_predicate_t make_predicate_not_inf(void) {
+  loom_predicate_t pred = {0};
+  pred.kind = (uint8_t)LOOM_PREDICATE_NOT_INF;
+  pred.arg_count = 1;
+  pred.arg_tags[0] = LOOM_PRED_ARG_VALUE;
+  return pred;
+}
+
 static loom_predicate_t make_predicate_finite(void) {
   loom_predicate_t pred = {0};
   pred.kind = (uint8_t)LOOM_PREDICATE_FINITE;
   pred.arg_count = 1;
   pred.arg_tags[0] = LOOM_PRED_ARG_VALUE;
   return pred;
+}
+
+TEST(FactsPredicateConflict, RangeDisjointFromKnownRange) {
+  loom_value_facts_t f = loom_value_facts_make(0, 63, 1);
+  loom_predicate_t pred = make_predicate_range(128, 255);
+  loom_value_fact_predicate_conflict_t conflict = {};
+  ASSERT_TRUE(loom_value_facts_predicate_conflict(f, &pred, &conflict));
+  EXPECT_EQ(conflict.kind, LOOM_VALUE_FACT_PREDICATE_CONFLICT_RANGE);
+  EXPECT_EQ(conflict.known_minimum, 0);
+  EXPECT_EQ(conflict.known_maximum, 63);
+  EXPECT_EQ(conflict.required_minimum, 128);
+  EXPECT_EQ(conflict.required_maximum, 255);
+}
+
+TEST(FactsPredicateConflict, RangeOverlappingKnownRangeIsSatisfiable) {
+  loom_value_facts_t f = loom_value_facts_make(0, 255, 1);
+  loom_predicate_t pred = make_predicate_range(128, 511);
+  EXPECT_FALSE(loom_value_facts_predicate_conflict(f, &pred, NULL));
+}
+
+TEST(FactsPredicateConflict, EmptyPredicateRangeAlwaysConflicts) {
+  loom_value_facts_t f = loom_value_facts_unknown();
+  loom_predicate_t pred = make_predicate_1(LOOM_PREDICATE_LT, INT64_MIN);
+  loom_value_fact_predicate_conflict_t conflict = {};
+  ASSERT_TRUE(loom_value_facts_predicate_conflict(f, &pred, &conflict));
+  EXPECT_EQ(conflict.kind, LOOM_VALUE_FACT_PREDICATE_CONFLICT_RANGE);
+  EXPECT_GT(conflict.required_minimum, conflict.required_maximum);
+}
+
+TEST(FactsPredicateConflict, NotEqualExcludesExactKnownValue) {
+  loom_value_facts_t f = loom_value_facts_exact_i64(64);
+  loom_predicate_t pred = make_predicate_1(LOOM_PREDICATE_NE, 64);
+  loom_value_fact_predicate_conflict_t conflict = {};
+  ASSERT_TRUE(loom_value_facts_predicate_conflict(f, &pred, &conflict));
+  EXPECT_EQ(conflict.kind, LOOM_VALUE_FACT_PREDICATE_CONFLICT_EXACT_I64);
+  EXPECT_EQ(conflict.known_value, 64);
+  EXPECT_EQ(conflict.predicate_value, 64);
+}
+
+TEST(FactsPredicateConflict, DivisibilityRejectsExactNonMultiple) {
+  loom_value_facts_t f = loom_value_facts_exact_i64(66);
+  loom_predicate_t pred = make_predicate_1(LOOM_PREDICATE_MUL, 64);
+  loom_value_fact_predicate_conflict_t conflict = {};
+  ASSERT_TRUE(loom_value_facts_predicate_conflict(f, &pred, &conflict));
+  EXPECT_EQ(conflict.kind, LOOM_VALUE_FACT_PREDICATE_CONFLICT_EXACT_I64);
+  EXPECT_EQ(conflict.known_value, 66);
+  EXPECT_EQ(conflict.predicate_value, 64);
+}
+
+TEST(FactsPredicateConflict, PowerOfTwoRejectsExactNonPower) {
+  loom_value_facts_t f = loom_value_facts_exact_i64(66);
+  loom_predicate_t pred = make_predicate_pow2();
+  loom_value_fact_predicate_conflict_t conflict = {};
+  ASSERT_TRUE(loom_value_facts_predicate_conflict(f, &pred, &conflict));
+  EXPECT_EQ(conflict.kind, LOOM_VALUE_FACT_PREDICATE_CONFLICT_EXACT_I64);
+  EXPECT_EQ(conflict.known_value, 66);
+}
+
+TEST(FactsPredicateConflict, NotNanRejectsExactNan) {
+  loom_value_facts_t f =
+      loom_value_facts_exact_f64(std::numeric_limits<double>::quiet_NaN());
+  loom_predicate_t pred = make_predicate_not_nan();
+  loom_value_fact_predicate_conflict_t conflict = {};
+  ASSERT_TRUE(loom_value_facts_predicate_conflict(f, &pred, &conflict));
+  EXPECT_EQ(conflict.kind, LOOM_VALUE_FACT_PREDICATE_CONFLICT_EXACT_F64);
+  EXPECT_EQ(conflict.known_float_class,
+            LOOM_VALUE_FACT_PREDICATE_CONFLICT_FLOAT_CLASS_NAN);
+}
+
+TEST(FactsPredicateConflict, NotInfRejectsExactInfinity) {
+  loom_value_facts_t f =
+      loom_value_facts_exact_f64(std::numeric_limits<double>::infinity());
+  loom_predicate_t pred = make_predicate_not_inf();
+  loom_value_fact_predicate_conflict_t conflict = {};
+  ASSERT_TRUE(loom_value_facts_predicate_conflict(f, &pred, &conflict));
+  EXPECT_EQ(conflict.kind, LOOM_VALUE_FACT_PREDICATE_CONFLICT_EXACT_F64);
+  EXPECT_EQ(conflict.known_float_class,
+            LOOM_VALUE_FACT_PREDICATE_CONFLICT_FLOAT_CLASS_INFINITY);
+}
+
+TEST(FactsPredicateConflict, FiniteRejectsExactNanAndInfinity) {
+  loom_predicate_t pred = make_predicate_finite();
+
+  loom_value_fact_predicate_conflict_t nan_conflict = {};
+  ASSERT_TRUE(loom_value_facts_predicate_conflict(
+      loom_value_facts_exact_f64(std::numeric_limits<double>::quiet_NaN()),
+      &pred, &nan_conflict));
+  EXPECT_EQ(nan_conflict.kind, LOOM_VALUE_FACT_PREDICATE_CONFLICT_EXACT_F64);
+  EXPECT_EQ(nan_conflict.known_float_class,
+            LOOM_VALUE_FACT_PREDICATE_CONFLICT_FLOAT_CLASS_NAN);
+
+  loom_value_fact_predicate_conflict_t infinity_conflict = {};
+  ASSERT_TRUE(loom_value_facts_predicate_conflict(
+      loom_value_facts_exact_f64(-std::numeric_limits<double>::infinity()),
+      &pred, &infinity_conflict));
+  EXPECT_EQ(infinity_conflict.kind,
+            LOOM_VALUE_FACT_PREDICATE_CONFLICT_EXACT_F64);
+  EXPECT_EQ(infinity_conflict.known_float_class,
+            LOOM_VALUE_FACT_PREDICATE_CONFLICT_FLOAT_CLASS_INFINITY);
+}
+
+TEST(FactsPredicateConflict, FiniteAcceptsExactFiniteFloat) {
+  loom_value_facts_t f = loom_value_facts_exact_f64(1.5);
+  loom_predicate_t pred = make_predicate_finite();
+  EXPECT_FALSE(loom_value_facts_predicate_conflict(f, &pred, NULL));
 }
 
 TEST(FactsApplyPredicate, Eq) {

@@ -69,6 +69,42 @@ func.def target(@test_target) @require_native_rejects_reduce_axes_reference_fall
 
 test.target<low_core> @test_target
 
+func.def target(@test_target) @rejects_assume_range_contradicting_exact_facts() -> (index) {
+  %exact = index.constant 64 : index
+  // ERROR@+1: TARGET/059 {predicate_name="range", value_name="exact", required_min="128", required_max="255", known_min="64", known_max="64"}
+  %assumed = index.assume %exact [range(%exact, 128, 255)] : index
+  func.return %assumed : index
+}
+
+// ====
+// RUN: pass target-legalize
+
+test.target<low_core> @test_target
+
+func.def target(@test_target) @rejects_assume_ne_contradicting_exact_facts() -> (index) {
+  %exact = index.constant 64 : index
+  // ERROR@+1: TARGET/060 {predicate_name="ne", value_name="exact", known_value="64"}
+  %assumed = index.assume %exact [ne(%exact, 64)] : index
+  func.return %assumed : index
+}
+
+// ====
+// RUN: pass target-legalize
+
+test.target<low_core> @test_target
+
+func.def target(@test_target) @rejects_assume_divisibility_contradicting_exact_facts() -> (index) {
+  %exact = index.constant 66 : index
+  // ERROR@+1: TARGET/060 {predicate_name="mul", value_name="exact", known_value="66"}
+  %assumed = index.assume %exact [mul(%exact, 64)] : index
+  func.return %assumed : index
+}
+
+// ====
+// RUN: pass target-legalize
+
+test.target<low_core> @test_target
+
 kernel.def target(@test_target) @rejects_workitem_id_assume_excluding_static_workgroup() {
   %c1 = index.constant 1 : index
   %c64 = index.constant 64 : index

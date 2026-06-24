@@ -504,10 +504,57 @@ static inline void loom_value_facts_meet(
 // Predicate application
 //===----------------------------------------------------------------------===//
 
+typedef enum loom_value_fact_predicate_conflict_kind_e {
+  LOOM_VALUE_FACT_PREDICATE_CONFLICT_NONE = 0,
+  LOOM_VALUE_FACT_PREDICATE_CONFLICT_RANGE = 1,
+  LOOM_VALUE_FACT_PREDICATE_CONFLICT_EXACT_I64 = 2,
+  LOOM_VALUE_FACT_PREDICATE_CONFLICT_EXACT_F64 = 3,
+} loom_value_fact_predicate_conflict_kind_t;
+
+typedef enum loom_value_fact_predicate_conflict_float_class_e {
+  LOOM_VALUE_FACT_PREDICATE_CONFLICT_FLOAT_CLASS_NONE = 0,
+  LOOM_VALUE_FACT_PREDICATE_CONFLICT_FLOAT_CLASS_NAN = 1,
+  LOOM_VALUE_FACT_PREDICATE_CONFLICT_FLOAT_CLASS_INFINITY = 2,
+} loom_value_fact_predicate_conflict_float_class_t;
+
+typedef struct loom_value_fact_predicate_conflict_t {
+  // Kind of contradiction proven by the fact lattice.
+  loom_value_fact_predicate_conflict_kind_t kind;
+
+  // Minimum known value from the incoming fact range.
+  int64_t known_minimum;
+
+  // Maximum known value from the incoming fact range.
+  int64_t known_maximum;
+
+  // Minimum value required by the predicate range.
+  int64_t required_minimum;
+
+  // Maximum value required by the predicate range.
+  int64_t required_maximum;
+
+  // Exact integer value proven by incoming facts.
+  int64_t known_value;
+
+  // Integer predicate parameter that conflicts with |known_value|.
+  int64_t predicate_value;
+
+  // Exact floating-point class that conflicts with a float predicate.
+  loom_value_fact_predicate_conflict_float_class_t known_float_class;
+} loom_value_fact_predicate_conflict_t;
+
 // Recomputes the cached flags from range_lo, range_hi, and known_divisor.
 // Preserves facts that are not derived from the integer range, such as
 // predicate, floating-point type, and execution distribution flags.
 void loom_value_facts_recompute_flags(loom_value_facts_t* facts);
+
+// Returns true when |predicate| is statically impossible for |facts|. This is a
+// validation query, not a transfer function: callers that accept user assumes
+// should diagnose true results before applying the predicate to avoid turning
+// provably empty facts into ordinary unknown facts.
+bool loom_value_facts_predicate_conflict(
+    loom_value_facts_t facts, const loom_predicate_t* predicate,
+    loom_value_fact_predicate_conflict_t* out_conflict);
 
 // Tightens facts using a single predicate constraint. Modifies the facts in
 // place and recomputes flags afterward. The caller is responsible for enforcing

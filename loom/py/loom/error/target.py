@@ -1028,6 +1028,82 @@ ERR_TARGET_058 = ErrorDef(
     ),
 )
 
+# ERR_TARGET_059: Assume predicate contradicts known value range.
+ERR_TARGET_059 = ErrorDef(
+    domain=ErrorDomain.TARGET,
+    code=59,
+    severity=Severity.ERROR,
+    summary="Assume predicate contradicts known value range.",
+    message=(
+        "target '{target_key}' export '{export_name}' config '{config_key}' "
+        "rejected '{op_name}' in '@{function_name}': predicate "
+        "'{predicate_name}' on '{value_name}' requires range "
+        "[{required_min}, {required_max}] but known facts prove range "
+        "[{known_min}, {known_max}]"
+    ),
+    params=(
+        *_TARGET_CONTEXT_PARAMS,
+        ErrorParam("predicate_name", ParamKind.STRING),
+        ErrorParam("value_name", ParamKind.STRING),
+        ErrorParam("required_min", ParamKind.I64),
+        ErrorParam("required_max", ParamKind.I64),
+        ErrorParam("known_min", ParamKind.I64),
+        ErrorParam("known_max", ParamKind.I64),
+    ),
+    fix_hint=(
+        "Remove the impossible assume, widen the predicate, or guard the "
+        "assume so only values satisfying the predicate can reach it."
+    ),
+)
+
+# ERR_TARGET_060: Assume predicate contradicts exact integer facts.
+ERR_TARGET_060 = ErrorDef(
+    domain=ErrorDomain.TARGET,
+    code=60,
+    severity=Severity.ERROR,
+    summary="Assume predicate contradicts exact integer facts.",
+    message=(
+        "target '{target_key}' export '{export_name}' config '{config_key}' "
+        "rejected '{op_name}' in '@{function_name}': predicate "
+        "'{predicate_name}' on '{value_name}' cannot be satisfied by exact "
+        "integer value {known_value}"
+    ),
+    params=(
+        *_TARGET_CONTEXT_PARAMS,
+        ErrorParam("predicate_name", ParamKind.STRING),
+        ErrorParam("value_name", ParamKind.STRING),
+        ErrorParam("known_value", ParamKind.I64),
+    ),
+    fix_hint=(
+        "Remove the impossible assume, change the exact value, or guard the "
+        "assume so only values satisfying the predicate can reach it."
+    ),
+)
+
+# ERR_TARGET_061: Assume predicate contradicts exact floating-point facts.
+ERR_TARGET_061 = ErrorDef(
+    domain=ErrorDomain.TARGET,
+    code=61,
+    severity=Severity.ERROR,
+    summary="Assume predicate contradicts exact floating-point facts.",
+    message=(
+        "target '{target_key}' export '{export_name}' config '{config_key}' "
+        "rejected '{op_name}' in '@{function_name}': predicate "
+        "'{predicate_name}' on '{value_name}' cannot be satisfied by exact "
+        "floating-point class '{value_class}'"
+    ),
+    params=(
+        *_TARGET_CONTEXT_PARAMS,
+        ErrorParam("predicate_name", ParamKind.STRING),
+        ErrorParam("value_name", ParamKind.STRING),
+        ErrorParam("value_class", ParamKind.STRING),
+    ),
+    fix_hint=(
+        "Remove the impossible assume, change the exact value, or guard the "
+        "assume so only values satisfying the predicate can reach it."
+    ),
+)
+
 ALL_TARGET_ERRORS = (
     ERR_TARGET_001,
     ERR_TARGET_002,
@@ -1079,4 +1155,7 @@ ALL_TARGET_ERRORS = (
     ERR_TARGET_056,
     ERR_TARGET_057,
     ERR_TARGET_058,
+    ERR_TARGET_059,
+    ERR_TARGET_060,
+    ERR_TARGET_061,
 )

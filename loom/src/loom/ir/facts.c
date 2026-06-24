@@ -296,6 +296,219 @@ void loom_value_facts_recompute_flags(loom_value_facts_t* facts) {
 // Predicate application
 //===----------------------------------------------------------------------===//
 
+static bool loom_value_facts_predicate_const_arg(
+    const loom_predicate_t* predicate, uint8_t index, int64_t* out_value) {
+  if (predicate->arg_count <= index ||
+      predicate->arg_tags[index] != LOOM_PRED_ARG_CONST) {
+    return false;
+  }
+  *out_value = predicate->args[index];
+  return true;
+}
+
+static bool loom_value_facts_predicate_value_first_arg(
+    const loom_predicate_t* predicate) {
+  return predicate->arg_count >= 1 &&
+         predicate->arg_tags[0] == LOOM_PRED_ARG_VALUE;
+}
+
+static bool loom_value_facts_predicate_required_range(
+    const loom_predicate_t* predicate, int64_t* out_minimum,
+    int64_t* out_maximum) {
+  *out_minimum = INT64_MIN;
+  *out_maximum = INT64_MAX;
+  if (!loom_value_facts_predicate_value_first_arg(predicate)) return false;
+
+  int64_t constant = 0;
+  switch ((loom_predicate_kind_t)predicate->kind) {
+    case LOOM_PREDICATE_EQ:
+      if (!loom_value_facts_predicate_const_arg(predicate, 1, &constant)) {
+        return false;
+      }
+      *out_minimum = constant;
+      *out_maximum = constant;
+      return true;
+    case LOOM_PREDICATE_LT:
+      if (!loom_value_facts_predicate_const_arg(predicate, 1, &constant)) {
+        return false;
+      }
+      if (constant == INT64_MIN) {
+        *out_minimum = INT64_MAX;
+        *out_maximum = INT64_MIN;
+        return true;
+      }
+      *out_maximum = constant - 1;
+      return true;
+    case LOOM_PREDICATE_LE:
+    case LOOM_PREDICATE_MAX:
+      if (!loom_value_facts_predicate_const_arg(predicate, 1, &constant)) {
+        return false;
+      }
+      *out_maximum = constant;
+      return true;
+    case LOOM_PREDICATE_GT:
+      if (!loom_value_facts_predicate_const_arg(predicate, 1, &constant)) {
+        return false;
+      }
+      if (constant == INT64_MAX) {
+        *out_minimum = INT64_MAX;
+        *out_maximum = INT64_MIN;
+        return true;
+      }
+      *out_minimum = constant + 1;
+      return true;
+    case LOOM_PREDICATE_GE:
+    case LOOM_PREDICATE_MIN:
+      if (!loom_value_facts_predicate_const_arg(predicate, 1, &constant)) {
+        return false;
+      }
+      *out_minimum = constant;
+      return true;
+    case LOOM_PREDICATE_RANGE:
+      if (!loom_value_facts_predicate_const_arg(predicate, 1, out_minimum) ||
+          !loom_value_facts_predicate_const_arg(predicate, 2, out_maximum)) {
+        return false;
+      }
+      return true;
+    default:
+      return false;
+  }
+}
+
+static bool loom_value_facts_predicate_range_conflict(
+    loom_value_facts_t facts, const loom_predicate_t* predicate,
+    loom_value_fact_predicate_conflict_t* out_conflict) {
+  int64_t required_minimum = INT64_MIN;
+  int64_t required_maximum = INT64_MAX;
+  if (!loom_value_facts_predicate_required_range(predicate, &required_minimum,
+                                                 &required_maximum)) {
+    return false;
+  }
+  if (required_minimum <= required_maximum &&
+      required_maximum >= facts.range_lo &&
+      required_minimum <= facts.range_hi) {
+    return false;
+  }
+  if (out_conflict != NULL) {
+    *out_conflict = (loom_value_fact_predicate_conflict_t){
+        .kind = LOOM_VALUE_FACT_PREDICATE_CONFLICT_RANGE,
+        .known_minimum = facts.range_lo,
+        .known_maximum = facts.range_hi,
+        .required_minimum = required_minimum,
+        .required_maximum = required_maximum,
+    };
+  }
+  return true;
+}
+
+static bool loom_value_facts_predicate_exact_i64_conflict(
+    loom_value_facts_t facts, const loom_predicate_t* predicate,
+    loom_value_fact_predicate_conflict_t* out_conflict) {
+  int64_t known_value = 0;
+  if (!loom_value_facts_as_exact_i64(facts, &known_value) ||
+      !loom_value_facts_predicate_value_first_arg(predicate)) {
+    return false;
+  }
+
+  int64_t predicate_value = 0;
+  bool conflicts = false;
+  switch ((loom_predicate_kind_t)predicate->kind) {
+    case LOOM_PREDICATE_NE:
+      conflicts = loom_value_facts_predicate_const_arg(predicate, 1,
+                                                       &predicate_value) &&
+                  known_value == predicate_value;
+      break;
+    case LOOM_PREDICATE_MUL:
+      conflicts = loom_value_facts_predicate_const_arg(predicate, 1,
+                                                       &predicate_value) &&
+                  predicate_value > 0 && known_value % predicate_value != 0;
+      break;
+    case LOOM_PREDICATE_POW2:
+      conflicts = known_value <= 0 || (known_value & (known_value - 1)) != 0;
+      break;
+    default:
+      return false;
+  }
+  if (!conflicts) return false;
+
+  if (out_conflict != NULL) {
+    *out_conflict = (loom_value_fact_predicate_conflict_t){
+        .kind = LOOM_VALUE_FACT_PREDICATE_CONFLICT_EXACT_I64,
+        .known_minimum = facts.range_lo,
+        .known_maximum = facts.range_hi,
+        .known_value = known_value,
+        .predicate_value = predicate_value,
+    };
+  }
+  return true;
+}
+
+static bool loom_value_facts_predicate_exact_f64_conflict(
+    loom_value_facts_t facts, const loom_predicate_t* predicate,
+    loom_value_fact_predicate_conflict_t* out_conflict) {
+  if (!loom_value_facts_is_exact(facts) ||
+      !loom_value_facts_predicate_value_first_arg(predicate)) {
+    return false;
+  }
+
+  const double known_value = loom_value_facts_as_f64(facts);
+  loom_value_fact_predicate_conflict_float_class_t float_class =
+      LOOM_VALUE_FACT_PREDICATE_CONFLICT_FLOAT_CLASS_NONE;
+  switch ((loom_predicate_kind_t)predicate->kind) {
+    case LOOM_PREDICATE_NOT_NAN:
+      if (isnan(known_value)) {
+        float_class = LOOM_VALUE_FACT_PREDICATE_CONFLICT_FLOAT_CLASS_NAN;
+      }
+      break;
+    case LOOM_PREDICATE_NOT_INF:
+      if (isinf(known_value)) {
+        float_class = LOOM_VALUE_FACT_PREDICATE_CONFLICT_FLOAT_CLASS_INFINITY;
+      }
+      break;
+    case LOOM_PREDICATE_FINITE:
+      if (isnan(known_value)) {
+        float_class = LOOM_VALUE_FACT_PREDICATE_CONFLICT_FLOAT_CLASS_NAN;
+      } else if (isinf(known_value)) {
+        float_class = LOOM_VALUE_FACT_PREDICATE_CONFLICT_FLOAT_CLASS_INFINITY;
+      }
+      break;
+    default:
+      return false;
+  }
+  if (float_class == LOOM_VALUE_FACT_PREDICATE_CONFLICT_FLOAT_CLASS_NONE) {
+    return false;
+  }
+
+  if (out_conflict != NULL) {
+    *out_conflict = (loom_value_fact_predicate_conflict_t){
+        .kind = LOOM_VALUE_FACT_PREDICATE_CONFLICT_EXACT_F64,
+        .known_float_class = float_class,
+    };
+  }
+  return true;
+}
+
+bool loom_value_facts_predicate_conflict(
+    loom_value_facts_t facts, const loom_predicate_t* predicate,
+    loom_value_fact_predicate_conflict_t* out_conflict) {
+  if (out_conflict != NULL) {
+    *out_conflict = (loom_value_fact_predicate_conflict_t){
+        .kind = LOOM_VALUE_FACT_PREDICATE_CONFLICT_NONE,
+    };
+  }
+  if (predicate == NULL) {
+    return false;
+  }
+  if (loom_value_facts_is_float(facts)) {
+    return loom_value_facts_predicate_exact_f64_conflict(facts, predicate,
+                                                         out_conflict);
+  }
+  return loom_value_facts_predicate_range_conflict(facts, predicate,
+                                                   out_conflict) ||
+         loom_value_facts_predicate_exact_i64_conflict(facts, predicate,
+                                                       out_conflict);
+}
+
 void loom_value_facts_apply_predicate(loom_value_facts_t* facts,
                                       const loom_predicate_t* predicate) {
   // This scalar fact lattice can consume predicates with literal bounds. Value

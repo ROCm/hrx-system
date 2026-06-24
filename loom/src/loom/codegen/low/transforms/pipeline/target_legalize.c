@@ -427,6 +427,17 @@ static iree_string_view_t loom_low_target_legalize_nonempty(
   return iree_string_view_is_empty(value) ? placeholder : value;
 }
 
+static iree_string_view_t loom_low_target_legalize_value_name(
+    const loom_module_t* module, loom_value_id_t value_id) {
+  if (value_id >= module->values.count) return IREE_SV("<unknown>");
+  const loom_value_t* value = loom_module_value(module, value_id);
+  if (value->name_id == LOOM_STRING_ID_INVALID ||
+      value->name_id >= module->strings.count) {
+    return IREE_SV("<unnamed>");
+  }
+  return module->strings.entries[value->name_id];
+}
+
 static bool loom_low_target_legalize_should_stop_preflight(
     const loom_low_target_legalize_function_state_t* state) {
   return state->pass_state->max_errors != 0 &&
@@ -563,35 +574,38 @@ static bool loom_low_target_legalize_lookup_assume_operand_facts(
   return false;
 }
 
+static void loom_low_target_legalize_context_params(
+    loom_low_target_legalize_function_state_t* state, const loom_op_t* op,
+    loom_diagnostic_param_t* params) {
+  const loom_target_bundle_t* bundle = state->selection->target_bundle;
+  const loom_target_config_t* config = bundle ? bundle->config : NULL;
+  const loom_target_export_plan_t* export_plan =
+      bundle ? bundle->export_plan : NULL;
+  params[0] = loom_param_string(loom_low_target_legalize_nonempty(
+      bundle ? bundle->name : iree_string_view_empty(), IREE_SV("<empty>")));
+  params[1] = loom_param_string(loom_low_target_legalize_nonempty(
+      export_plan ? export_plan->name : iree_string_view_empty(),
+      IREE_SV("<empty>")));
+  params[2] = loom_param_string(loom_low_target_legalize_nonempty(
+      config ? config->name : iree_string_view_empty(), IREE_SV("<empty>")));
+  params[3] = loom_param_string(loom_low_target_legalize_nonempty(
+      loom_low_target_legalize_function_name(state), IREE_SV("<module>")));
+  params[4] = loom_param_string(loom_op_name(state->module, op));
+}
+
 static iree_status_t loom_low_target_legalize_emit_topology_assume_error(
     loom_low_target_legalize_function_state_t* state, const loom_op_t* op,
     iree_string_view_t value_kind, iree_string_view_t axis,
     int64_t required_minimum, int64_t required_maximum, int64_t assumed_minimum,
     int64_t assumed_maximum) {
-  const loom_target_bundle_t* bundle = state->selection->target_bundle;
-  const loom_target_config_t* config = bundle ? bundle->config : NULL;
-  const loom_target_export_plan_t* export_plan =
-      bundle ? bundle->export_plan : NULL;
-  const loom_diagnostic_param_t params[] = {
-      loom_param_string(loom_low_target_legalize_nonempty(
-          bundle ? bundle->name : iree_string_view_empty(),
-          IREE_SV("<empty>"))),
-      loom_param_string(loom_low_target_legalize_nonempty(
-          export_plan ? export_plan->name : iree_string_view_empty(),
-          IREE_SV("<empty>"))),
-      loom_param_string(loom_low_target_legalize_nonempty(
-          config ? config->name : iree_string_view_empty(),
-          IREE_SV("<empty>"))),
-      loom_param_string(loom_low_target_legalize_nonempty(
-          loom_low_target_legalize_function_name(state), IREE_SV("<module>"))),
-      loom_param_string(loom_op_name(state->module, op)),
-      loom_param_string(value_kind),
-      loom_param_string(axis),
-      loom_param_i64(required_minimum),
-      loom_param_i64(required_maximum),
-      loom_param_i64(assumed_minimum),
-      loom_param_i64(assumed_maximum),
-  };
+  loom_diagnostic_param_t params[11];
+  loom_low_target_legalize_context_params(state, op, params);
+  params[5] = loom_param_string(value_kind);
+  params[6] = loom_param_string(axis);
+  params[7] = loom_param_i64(required_minimum);
+  params[8] = loom_param_i64(required_maximum);
+  params[9] = loom_param_i64(assumed_minimum);
+  params[10] = loom_param_i64(assumed_maximum);
   const loom_diagnostic_emission_t emission = {
       .op = op,
       .error = LOOM_ERR_TARGET_058,
@@ -601,6 +615,147 @@ static iree_status_t loom_low_target_legalize_emit_topology_assume_error(
   IREE_RETURN_IF_ERROR(
       iree_diagnostic_emit(state->pass->diagnostic_emitter, &emission));
   ++state->preflight_error_count;
+  return iree_ok_status();
+}
+
+static iree_status_t loom_low_target_legalize_emit_assume_range_conflict_error(
+    loom_low_target_legalize_function_state_t* state, const loom_op_t* op,
+    const loom_predicate_t* predicate, loom_value_id_t value_id,
+    loom_value_fact_predicate_conflict_t conflict) {
+  const char* predicate_name = loom_predicate_kind_name(predicate->kind);
+  loom_diagnostic_param_t params[11];
+  loom_low_target_legalize_context_params(state, op, params);
+  params[5] =
+      loom_param_string(predicate_name ? iree_make_cstring_view(predicate_name)
+                                       : IREE_SV("<unknown>"));
+  params[6] = loom_param_string(
+      loom_low_target_legalize_value_name(state->module, value_id));
+  params[7] = loom_param_i64(conflict.required_minimum);
+  params[8] = loom_param_i64(conflict.required_maximum);
+  params[9] = loom_param_i64(conflict.known_minimum);
+  params[10] = loom_param_i64(conflict.known_maximum);
+  const loom_diagnostic_emission_t emission = {
+      .op = op,
+      .error = LOOM_ERR_TARGET_059,
+      .params = params,
+      .param_count = IREE_ARRAYSIZE(params),
+  };
+  IREE_RETURN_IF_ERROR(
+      iree_diagnostic_emit(state->pass->diagnostic_emitter, &emission));
+  ++state->preflight_error_count;
+  return iree_ok_status();
+}
+
+static iree_status_t loom_low_target_legalize_emit_assume_exact_i64_error(
+    loom_low_target_legalize_function_state_t* state, const loom_op_t* op,
+    const loom_predicate_t* predicate, loom_value_id_t value_id,
+    loom_value_fact_predicate_conflict_t conflict) {
+  const char* predicate_name = loom_predicate_kind_name(predicate->kind);
+  loom_diagnostic_param_t params[8];
+  loom_low_target_legalize_context_params(state, op, params);
+  params[5] =
+      loom_param_string(predicate_name ? iree_make_cstring_view(predicate_name)
+                                       : IREE_SV("<unknown>"));
+  params[6] = loom_param_string(
+      loom_low_target_legalize_value_name(state->module, value_id));
+  params[7] = loom_param_i64(conflict.known_value);
+  const loom_diagnostic_emission_t emission = {
+      .op = op,
+      .error = LOOM_ERR_TARGET_060,
+      .params = params,
+      .param_count = IREE_ARRAYSIZE(params),
+  };
+  IREE_RETURN_IF_ERROR(
+      iree_diagnostic_emit(state->pass->diagnostic_emitter, &emission));
+  ++state->preflight_error_count;
+  return iree_ok_status();
+}
+
+static iree_string_view_t loom_low_target_legalize_float_class_name(
+    loom_value_fact_predicate_conflict_float_class_t float_class) {
+  switch (float_class) {
+    case LOOM_VALUE_FACT_PREDICATE_CONFLICT_FLOAT_CLASS_NAN:
+      return IREE_SV("nan");
+    case LOOM_VALUE_FACT_PREDICATE_CONFLICT_FLOAT_CLASS_INFINITY:
+      return IREE_SV("infinity");
+    case LOOM_VALUE_FACT_PREDICATE_CONFLICT_FLOAT_CLASS_NONE:
+      return IREE_SV("<unknown>");
+  }
+  return IREE_SV("<unknown>");
+}
+
+static iree_status_t loom_low_target_legalize_emit_assume_exact_f64_error(
+    loom_low_target_legalize_function_state_t* state, const loom_op_t* op,
+    const loom_predicate_t* predicate, loom_value_id_t value_id,
+    loom_value_fact_predicate_conflict_t conflict) {
+  const char* predicate_name = loom_predicate_kind_name(predicate->kind);
+  loom_diagnostic_param_t params[8];
+  loom_low_target_legalize_context_params(state, op, params);
+  params[5] =
+      loom_param_string(predicate_name ? iree_make_cstring_view(predicate_name)
+                                       : IREE_SV("<unknown>"));
+  params[6] = loom_param_string(
+      loom_low_target_legalize_value_name(state->module, value_id));
+  params[7] = loom_param_string(
+      loom_low_target_legalize_float_class_name(conflict.known_float_class));
+  const loom_diagnostic_emission_t emission = {
+      .op = op,
+      .error = LOOM_ERR_TARGET_061,
+      .params = params,
+      .param_count = IREE_ARRAYSIZE(params),
+  };
+  IREE_RETURN_IF_ERROR(
+      iree_diagnostic_emit(state->pass->diagnostic_emitter, &emission));
+  ++state->preflight_error_count;
+  return iree_ok_status();
+}
+
+static iree_status_t loom_low_target_legalize_emit_assume_conflict_error(
+    loom_low_target_legalize_function_state_t* state, const loom_op_t* op,
+    const loom_predicate_t* predicate, loom_value_id_t value_id,
+    loom_value_fact_predicate_conflict_t conflict) {
+  switch (conflict.kind) {
+    case LOOM_VALUE_FACT_PREDICATE_CONFLICT_RANGE:
+      return loom_low_target_legalize_emit_assume_range_conflict_error(
+          state, op, predicate, value_id, conflict);
+    case LOOM_VALUE_FACT_PREDICATE_CONFLICT_EXACT_I64:
+      return loom_low_target_legalize_emit_assume_exact_i64_error(
+          state, op, predicate, value_id, conflict);
+    case LOOM_VALUE_FACT_PREDICATE_CONFLICT_EXACT_F64:
+      return loom_low_target_legalize_emit_assume_exact_f64_error(
+          state, op, predicate, value_id, conflict);
+    case LOOM_VALUE_FACT_PREDICATE_CONFLICT_NONE:
+      return iree_ok_status();
+  }
+  return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                          "unknown assume predicate conflict kind %d",
+                          (int)conflict.kind);
+}
+
+static iree_status_t loom_low_target_legalize_check_assume_predicate_conflicts(
+    loom_low_target_legalize_function_state_t* state, const loom_op_t* op,
+    const loom_value_fact_table_t* fact_table, loom_value_slice_t values,
+    const loom_predicate_t* predicates, uint16_t predicate_count) {
+  if (loom_low_target_legalize_should_stop_preflight(state)) {
+    return iree_ok_status();
+  }
+  for (uint16_t i = 0; i < predicate_count &&
+                       !loom_low_target_legalize_should_stop_preflight(state);
+       ++i) {
+    loom_value_facts_t facts = loom_value_facts_unknown();
+    if (!loom_low_target_legalize_lookup_assume_operand_facts(
+            fact_table, values, &predicates[i], &facts)) {
+      continue;
+    }
+    loom_value_fact_predicate_conflict_t conflict = {0};
+    if (!loom_value_facts_predicate_conflict(facts, &predicates[i],
+                                             &conflict)) {
+      continue;
+    }
+    IREE_RETURN_IF_ERROR(loom_low_target_legalize_emit_assume_conflict_error(
+        state, op, &predicates[i], (loom_value_id_t)predicates[i].args[0],
+        conflict));
+  }
   return iree_ok_status();
 }
 
@@ -642,23 +797,31 @@ static iree_status_t loom_low_target_legalize_check_assume_topology_domain(
   return iree_ok_status();
 }
 
-static iree_status_t loom_low_target_legalize_check_assume_topology_domains(
+static iree_status_t loom_low_target_legalize_check_assume_predicates(
     loom_low_target_legalize_function_state_t* state, const loom_op_t* op,
     const loom_value_fact_table_t* fact_table) {
-  // Entry-block assumes are launch-wide author contracts. Assumes in nested
-  // regions or non-entry CFG blocks are path-sensitive facts from the control
-  // flow that reached them.
-  if (!loom_low_target_legalize_op_is_in_function_entry_block(state, op)) {
-    return iree_ok_status();
-  }
   if (loom_index_assume_isa(op)) {
     loom_attribute_t predicate_attr = loom_index_assume_predicates(op);
+    IREE_RETURN_IF_ERROR(
+        loom_low_target_legalize_check_assume_predicate_conflicts(
+            state, op, fact_table, loom_index_assume_values(op),
+            predicate_attr.predicate_list, predicate_attr.count));
+    if (!loom_low_target_legalize_op_is_in_function_entry_block(state, op)) {
+      return iree_ok_status();
+    }
     return loom_low_target_legalize_check_assume_topology_domain(
         state, op, fact_table, loom_index_assume_values(op),
         predicate_attr.predicate_list, predicate_attr.count);
   }
   if (loom_scalar_assume_isa(op)) {
     loom_attribute_t predicate_attr = loom_scalar_assume_predicates(op);
+    IREE_RETURN_IF_ERROR(
+        loom_low_target_legalize_check_assume_predicate_conflicts(
+            state, op, fact_table, loom_scalar_assume_values(op),
+            predicate_attr.predicate_list, predicate_attr.count));
+    if (!loom_low_target_legalize_op_is_in_function_entry_block(state, op)) {
+      return iree_ok_status();
+    }
     return loom_low_target_legalize_check_assume_topology_domain(
         state, op, fact_table, loom_scalar_assume_values(op),
         predicate_attr.predicate_list, predicate_attr.count);
@@ -1143,7 +1306,7 @@ static iree_status_t loom_low_target_legalize_rewrite_op(
   if (state->preflight_error_count != 0) {
     return iree_ok_status();
   }
-  IREE_RETURN_IF_ERROR(loom_low_target_legalize_check_assume_topology_domains(
+  IREE_RETURN_IF_ERROR(loom_low_target_legalize_check_assume_predicates(
       state, op, driver->latest_facts));
   if (state->preflight_error_count != 0) {
     return iree_ok_status();
