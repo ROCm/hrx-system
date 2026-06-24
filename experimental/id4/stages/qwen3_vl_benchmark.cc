@@ -14,6 +14,7 @@
 #include "iree/hal/api.h"
 #include "iree/io/parameter_provider.h"
 #include "iree/testing/benchmark.h"
+#include "iree/tooling/device_util.h"
 
 namespace {
 
@@ -334,24 +335,36 @@ static iree_status_t RunIssueBenchmark(iree_benchmark_state_t* benchmark_state,
   uint64_t wait_value = fill_value;
   uint64_t signal_value = 0;
   uint64_t iteration_count = 0;
-  while (iree_benchmark_keep_running(benchmark_state, 1)) {
+  iree_hal_profiling_from_flags_t* profiling = nullptr;
+  iree_status_t status = iree_hal_begin_device_group_profiling_from_flags(
+      context.live.device_group.get(), iree_allocator_system(), &profiling);
+  while (iree_status_is_ok(status) &&
+         iree_benchmark_keep_running(benchmark_state, 1)) {
     ++signal_value;
-    IREE_RETURN_IF_ERROR(IssueQwenBundle(
-        &context, bundle.get(), boundary_bindings, wait_semaphore, wait_value,
-        issue_semaphore.get(), signal_value));
-    if (timing_mode == QwenIssueTimingMode::kSubmitOnly) {
+    status = IssueQwenBundle(&context, bundle.get(), boundary_bindings,
+                             wait_semaphore, wait_value, issue_semaphore.get(),
+                             signal_value);
+    bool timing_paused = false;
+    if (iree_status_is_ok(status) &&
+        timing_mode == QwenIssueTimingMode::kSubmitOnly) {
       iree_benchmark_pause_timing(benchmark_state);
+      timing_paused = true;
     }
-    iree_status_t status =
-        WaitForSemaphore(issue_semaphore.get(), signal_value);
-    if (timing_mode == QwenIssueTimingMode::kSubmitOnly) {
+    if (iree_status_is_ok(status)) {
+      status = WaitForSemaphore(issue_semaphore.get(), signal_value);
+    }
+    if (timing_paused) {
       iree_benchmark_resume_timing(benchmark_state);
     }
-    IREE_RETURN_IF_ERROR(status);
-    wait_semaphore = issue_semaphore.get();
-    wait_value = signal_value;
-    ++iteration_count;
+    if (iree_status_is_ok(status)) {
+      wait_semaphore = issue_semaphore.get();
+      wait_value = signal_value;
+      ++iteration_count;
+    }
   }
+  status =
+      iree_status_join(status, iree_hal_end_profiling_from_flags(profiling));
+  IREE_RETURN_IF_ERROR(status);
   iree_benchmark_set_items_processed(
       benchmark_state,
       static_cast<int64_t>(iteration_count * shape.token_count));
