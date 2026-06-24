@@ -625,6 +625,66 @@ func.def @partial_factor_divisible_trip_count_omits_tail_guard() {
 
 // ====
 
+func.def @partial_factor_dynamic_tail_guard(%end: index) {
+  %start = index.constant 0 : index
+  %step = index.constant 1 : index
+  %factor = index.constant 2 : index
+  scf.for %i = [%start to %end step %step] unroll(%factor) {
+    test.use %i : index
+  }
+  func.return
+}
+
+// ----
+func.def @partial_factor_dynamic_tail_guard(%end: index) {
+  %start = index.constant 0 : index
+  %step = index.constant 1 : index
+  %factor = index.constant 2 : index
+  %5 = index.constant 2 : index
+  scf.for %i = [%start to %end step %5] {
+    test.use %i : index
+    %7 = index.constant 1 : index
+    %i_1 = index.add %i, %7 : index
+    %9 = index.cmp slt, %i_1, %end : index
+    scf.if %9 {
+      test.use %i_1 : index
+    }
+  }
+  func.return
+}
+
+// ====
+
+func.def @partial_factor_dynamic_tail_guard_step_two(%end: index) {
+  %start = index.constant 0 : index
+  %step = index.constant 2 : index
+  %factor = index.constant 2 : index
+  scf.for %i = [%start to %end step %step] unroll(%factor) {
+    test.use %i : index
+  }
+  func.return
+}
+
+// ----
+func.def @partial_factor_dynamic_tail_guard_step_two(%end: index) {
+  %start = index.constant 0 : index
+  %step = index.constant 2 : index
+  %factor = index.constant 2 : index
+  %5 = index.constant 4 : index
+  scf.for %i = [%start to %end step %5] {
+    test.use %i : index
+    %7 = index.constant 2 : index
+    %i_2 = index.add %i, %7 : index
+    %9 = index.cmp slt, %i_2, %end : index
+    scf.if %9 {
+      test.use %i_2 : index
+    }
+  }
+  func.return
+}
+
+// ====
+
 func.def @interleaved_partial_factor_divisible_trip_count() {
   %start = index.constant 0 : index
   %end = index.constant 4 : index

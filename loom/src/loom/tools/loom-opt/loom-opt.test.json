@@ -319,6 +319,72 @@
       ]
     },
     {
+      "name": "reports dynamic linear stripmine with guarded tail",
+      "run": {
+        "tool": "loom-opt",
+        "args": [
+          "--pass=unroll-scf-for",
+          "--pass-report=json",
+          "--output={tmp}/linear-stripmine-tail.loom"
+        ],
+        "stdin": {
+          "text": "func.def @linear_stripmine_tail(%end: index) {\n  %start = index.constant 0 : index\n  %step = index.constant 1 : index\n  %factor = index.constant 2 : index\n  scf.for %i = [%start to %end step %step] unroll(%factor) {\n    test.use %i : index\n  }\n  func.return\n}\n"
+        }
+      },
+      "stderr": {
+        "contains": [
+          "\"pass\":\"unroll-scf-for\"",
+          "\"category\":\"scf-unroll\"",
+          "\"outcome\":\"stripmined\"",
+          "\"policy\":\"factor\"",
+          "\"schedule\":\"linear\"",
+          "\"unroll_factor\":2",
+          "\"tail_guards\":true",
+          "\"tail_loop\":false",
+          "\"trip_count_state\":\"unresolved\""
+        ]
+      },
+      "files": [
+        {
+          "path": "{tmp}/linear-stripmine-tail.loom",
+          "contains": ["scf.if"]
+        }
+      ]
+    },
+    {
+      "name": "reports dynamic interleaved stripmine with tail loop",
+      "run": {
+        "tool": "loom-opt",
+        "args": [
+          "--pass=unroll-scf-for",
+          "--pass-report=json",
+          "--output={tmp}/interleaved-stripmine-tail.loom"
+        ],
+        "stdin": {
+          "text": "func.def @interleaved_stripmine_tail(%end: index) {\n  %start = index.constant 0 : index\n  %step = index.constant 1 : index\n  %factor = index.constant 2 : index\n  scf.for %i = [%start to %end step %step] unroll(%factor) schedule(interleaved) {\n    test.use %i : index\n  }\n  func.return\n}\n"
+        }
+      },
+      "stderr": {
+        "contains": [
+          "\"pass\":\"unroll-scf-for\"",
+          "\"category\":\"scf-unroll\"",
+          "\"outcome\":\"stripmined\"",
+          "\"policy\":\"factor\"",
+          "\"schedule\":\"interleaved\"",
+          "\"unroll_factor\":2",
+          "\"tail_guards\":false",
+          "\"tail_loop\":true",
+          "\"trip_count_state\":\"unresolved\""
+        ]
+      },
+      "files": [
+        {
+          "path": "{tmp}/interleaved-stripmine-tail.loom",
+          "contains": ["scf.for %i"]
+        }
+      ]
+    },
+    {
       "name": "prints full target register types in text diagnostics",
       "run": {
         "tool": "loom-opt",
