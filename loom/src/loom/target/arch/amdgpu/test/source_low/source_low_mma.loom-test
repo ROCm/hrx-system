@@ -835,6 +835,84 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) @f16_wmmar3_wave64_half_
 
 amdgpu.target<gfx1100> @target {subgroup_size = 64}
 
+kernel.def target(@target) @f16_wmmar3_wave64_half_acc_loop_f32_fragment_memory() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%out_buffer: buffer) {
+  %base = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %two = index.constant 2 : index
+  %sixteen = index.constant 16 : index
+  %sixty_four = index.constant 64 : index
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 16 : index
+  %layout = encoding.layout.strided [1, %sixty_four] : encoding<layout>
+  %out_global = buffer.assume.memory_space<global> %out_buffer : buffer
+  %out_aligned = buffer.assume.alignment %out_global {minimum_alignment = 16} : buffer
+  %out_view = buffer.view %out_aligned[%base] : buffer -> view<64x64xf32, %layout>
+  %lhs_values = vector.constant 0.0 : vector<16xf16>
+  %rhs_values = vector.constant 0.0 : vector<16xf16>
+  %init_values = vector.constant 1.0 : vector<8xf16>
+  %lhs = vector.fragment<lhs> %lhs_values shape [%m, %k] : vector<16xf16>
+  %rhs = vector.fragment<rhs> %rhs_values shape [%k, %n] : vector<16xf16>
+  %init = vector.fragment<init> %init_values shape [%m, %n] : vector<8xf16>
+  %result = scf.for %i = [%zero to %two step %one](%acc = %init : vector<8xf16>) -> (vector<8xf16>) {
+    %next = vector.mma %lhs, %rhs, %acc : vector<16xf16>, vector<16xf16>, vector<8xf16>
+    scf.yield %next : vector<8xf16>
+  }
+  vector.fragment.store<result> %result, %out_view[%zero, %sixteen] shape [%m, %n] : vector<8xf16>, view<64x64xf32, %layout>
+  kernel.return
+}
+
+// ----
+low.kernel.def target(@target) workgroup_size(64, 1, 1) @f16_wmmar3_wave64_half_acc_loop_f32_fragment_memory() asm<amdgpu.rdna3.core> {
+  %34 = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %out_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %zero = s_mov_b32 0
+  %one = s_mov_b32 1
+  %two = s_mov_b32 2
+  %39 = v_mov_b32 0
+  %rhs = concat(%39, %39, %39, %39, %39, %39, %39, %39) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x8>
+  %48 = v_mov_b32 1006648320
+  %init = concat(%48, %48, %48, %48) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  low.br ^_bb1(%zero: reg<amdgpu.sgpr>, %init: reg<amdgpu.vgpr x4>)
+^_bb1(%i: reg<amdgpu.sgpr>, %acc: reg<amdgpu.vgpr x4>):
+  %53 = s_cmp_lt_i32 %i, %two
+  low.cond_br %53, ^_bb2, ^_bb3 : reg<amdgpu.scc>
+^_bb2:
+  %54 = copy %acc : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x4>
+  %next = v_wmma_f16_16x16x16_f16_w64 %rhs, %rhs, %54
+  %56 = s_add_u32 %i, %one
+  low.br ^_bb1(%56: reg<amdgpu.sgpr>, %next: reg<amdgpu.vgpr x4>)
+^_bb3:
+  %57 = v_and_b32_src0_inline %34, 15
+  %58 = v_lshrrev_b32_src0_inline %34, 4
+  %59 = v_lshlrev_b32_src0_inline %58, 2
+  %60 = v_lshlrev_b32_src0_inline %57, 8
+  %61 = v_add_u32 %59, %60
+  %62 = slice %acc[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %63 = v_cvt_f32_f16 %62
+  %64 = v_add_u32_lit %61, 4096
+  global_store_b32_saddr %64, %63, %out_view
+  %65 = slice %acc[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %66 = v_cvt_f32_f16 %65
+  global_store_b32_saddr %64, %66, %out_view {offset = 16}
+  %68 = slice %acc[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %69 = v_cvt_f32_f16 %68
+  global_store_b32_saddr %64, %69, %out_view {offset = 32}
+  %71 = slice %acc[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %72 = v_cvt_f32_f16 %71
+  global_store_b32_saddr %64, %72, %out_view {offset = 48}
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target {subgroup_size = 64}
+
 kernel.def target(@target) @f16_wmmar3_wave64_half_acc_f32_epilogue_fragment_memory() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index

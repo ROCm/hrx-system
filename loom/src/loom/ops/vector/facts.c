@@ -595,6 +595,10 @@ iree_status_t loom_vector_fragment_facts(
   loom_vector_fragment_copy_present_auxiliary(parameters.auxiliary,
                                               &fact.auxiliary);
 
+  if (loom_vector_fragment_role(op) == LOOM_VECTOR_ROLE_INIT) {
+    fact.flags |= LOOM_VECTOR_FRAGMENT_FACT_FLAG_HAS_NATIVE_STORAGE;
+  }
+
   if (parameters.has_schema) {
     fact.flags |= LOOM_VECTOR_FRAGMENT_FACT_FLAG_HAS_SCHEMA;
     fact.schema_value_id = parameters.schema_value_id;
