@@ -181,8 +181,30 @@ TEST(VaeProgram, ResolvesStableDiffusionStyleFlux2Tiling) {
   EXPECT_EQ(tiling_plan.tile_size_y, 32u);
   EXPECT_EQ(tiling_plan.tile_count_x, 3u);
   EXPECT_EQ(tiling_plan.tile_count_y, 3u);
+  EXPECT_EQ(tiling_plan.overlap_pixels_x, 16u);
+  EXPECT_EQ(tiling_plan.overlap_pixels_y, 16u);
+  EXPECT_EQ(tiling_plan.tile_step_x, 16u);
+  EXPECT_EQ(tiling_plan.tile_step_y, 16u);
   EXPECT_EQ(tiling_plan.overlap_milli, 500u);
   EXPECT_EQ(tiling_plan.tile_element_count, 1u * 512u * 512u * 3u);
+}
+
+TEST(VaeProgram, ResolvesAdjustedOverlapForNonDivisibleTileGrid) {
+  const id4_vae_model_config_t* model = id4_vae_program_flux2_model_config();
+  id4_vae_decode_request_config_t request = MakeExplicitRequest(
+      id4_pipeline_program_make_shape_rank4(65, 65, 128, 1), 32, 32, 0.5f);
+
+  id4_vae_decode_tiling_plan_t tiling_plan;
+  IREE_ASSERT_OK(
+      id4_vae_program_resolve_decode_tiling(*model, request, &tiling_plan));
+
+  EXPECT_EQ(tiling_plan.tile_count_x, 3u);
+  EXPECT_EQ(tiling_plan.tile_count_y, 3u);
+  EXPECT_EQ(tiling_plan.overlap_pixels_x, 15u);
+  EXPECT_EQ(tiling_plan.overlap_pixels_y, 15u);
+  EXPECT_EQ(tiling_plan.tile_step_x, 17u);
+  EXPECT_EQ(tiling_plan.tile_step_y, 17u);
+  EXPECT_EQ(tiling_plan.overlap_milli, 484u);
 }
 
 TEST(VaeProgram, ResolvesMemoryBudgetTiling) {

@@ -422,14 +422,65 @@ static iree_status_t id4_vae_program_resolve_tile_size(
   }
 }
 
-static uint32_t id4_vae_program_tile_count(uint32_t latent_size,
-                                           uint32_t tile_size, float overlap) {
-  if (tile_size >= latent_size) return 1;
-  uint32_t overlap_pixels =
-      id4_vae_program_round_positive_to_u32((float)tile_size * overlap);
+typedef struct id4_vae_program_axis_tiling_t {
+  // Number of tiles covering this axis.
+  uint32_t tile_count;
+  // Integer overlap between adjacent tiles.
+  uint32_t overlap_pixels;
+  // Integer step between adjacent tile origins.
+  uint32_t tile_step;
+  // Fractional overlap resolved for this axis.
+  float overlap;
+} id4_vae_program_axis_tiling_t;
+
+static iree_status_t id4_vae_program_resolve_axis_tiling(
+    uint32_t latent_size, uint32_t tile_size, float requested_overlap,
+    id4_vae_program_axis_tiling_t* out_axis_tiling) {
+  IREE_ASSERT_ARGUMENT(out_axis_tiling);
+  memset(out_axis_tiling, 0, sizeof(*out_axis_tiling));
+  if (latent_size == 0 || tile_size == 0 || tile_size > latent_size) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "VAE axis tiling requires 0 < tile size <= latent size");
+  }
+  if (tile_size >= latent_size) {
+    out_axis_tiling->tile_count = 1;
+    out_axis_tiling->overlap_pixels = 0;
+    out_axis_tiling->tile_step = tile_size;
+    out_axis_tiling->overlap = 0.0f;
+    return iree_ok_status();
+  }
+
+  uint32_t overlap_pixels = (uint32_t)((float)tile_size * requested_overlap);
   if (overlap_pixels >= tile_size) overlap_pixels = tile_size - 1;
-  const uint32_t step = tile_size - overlap_pixels;
-  return id4_vae_program_ceil_div_u32(latent_size - tile_size, step) + 1;
+  const uint32_t non_overlap = tile_size - overlap_pixels;
+  uint32_t tile_count = (latent_size - overlap_pixels) / non_overlap;
+  const uint32_t half_tile_without_overlap = tile_size / 2u - overlap_pixels;
+  const uint64_t overshoot_source =
+      ((uint64_t)tile_count + 1u) * non_overlap + overlap_pixels;
+  const uint32_t overshoot = (uint32_t)(overshoot_source % latent_size);
+  if (overshoot != non_overlap &&
+      overshoot <= tile_count * half_tile_without_overlap) {
+    ++tile_count;
+  }
+
+  float overlap = 0.0f;
+  if (tile_count <= 2) {
+    tile_count = 2;
+    overlap = (float)(2u * tile_size - latent_size) / (float)tile_size;
+  } else {
+    overlap = (float)(tile_size * tile_count - latent_size) /
+              (float)(tile_size * (tile_count - 1u));
+  }
+  if (overlap < 0.0f) overlap = 0.0f;
+  overlap_pixels = (uint32_t)((float)tile_size * overlap);
+  if (overlap_pixels >= tile_size) overlap_pixels = tile_size - 1;
+
+  out_axis_tiling->tile_count = tile_count;
+  out_axis_tiling->overlap_pixels = overlap_pixels;
+  out_axis_tiling->tile_step = tile_size - overlap_pixels;
+  out_axis_tiling->overlap = overlap;
+  return iree_ok_status();
 }
 
 static iree_status_t id4_vae_program_validate_decode_options(
@@ -1699,10 +1750,12 @@ iree_status_t id4_vae_program_resolve_decode_tiling(
                             : request.tiling.overlap;
   const uint32_t decoded_height = latent_height * model.scale_y;
   const uint32_t decoded_width = latent_width * model.scale_x;
-  const uint32_t tile_count_x =
-      id4_vae_program_tile_count(latent_width, tile_size_x, overlap);
-  const uint32_t tile_count_y =
-      id4_vae_program_tile_count(latent_height, tile_size_y, overlap);
+  id4_vae_program_axis_tiling_t axis_x;
+  IREE_RETURN_IF_ERROR(id4_vae_program_resolve_axis_tiling(
+      latent_width, tile_size_x, overlap, &axis_x));
+  id4_vae_program_axis_tiling_t axis_y;
+  IREE_RETURN_IF_ERROR(id4_vae_program_resolve_axis_tiling(
+      latent_height, tile_size_y, overlap, &axis_y));
 
   uint64_t decoded_element_count = 0;
   IREE_RETURN_IF_ERROR(id4_vae_program_whcb_element_count(
@@ -1734,12 +1787,16 @@ iree_status_t id4_vae_program_resolve_decode_tiling(
   out_tiling_plan->decoded_channel_count = model.decoded_channel_count;
   out_tiling_plan->tile_size_x = tile_size_x;
   out_tiling_plan->tile_size_y = tile_size_y;
-  out_tiling_plan->tile_count_x = tile_count_x;
-  out_tiling_plan->tile_count_y = tile_count_y;
-  out_tiling_plan->overlap_x = overlap;
-  out_tiling_plan->overlap_y = overlap;
+  out_tiling_plan->tile_count_x = axis_x.tile_count;
+  out_tiling_plan->tile_count_y = axis_y.tile_count;
+  out_tiling_plan->overlap_pixels_x = axis_x.overlap_pixels;
+  out_tiling_plan->overlap_pixels_y = axis_y.overlap_pixels;
+  out_tiling_plan->tile_step_x = axis_x.tile_step;
+  out_tiling_plan->tile_step_y = axis_y.tile_step;
+  out_tiling_plan->overlap_x = axis_x.overlap;
+  out_tiling_plan->overlap_y = axis_y.overlap;
   out_tiling_plan->overlap_milli =
-      id4_vae_program_round_positive_to_u32(overlap * 1000.0f);
+      id4_vae_program_round_positive_to_u32(axis_x.overlap * 1000.0f);
   out_tiling_plan->decoded_element_count = decoded_element_count;
   out_tiling_plan->latent_element_count = latent_element_count;
   out_tiling_plan->tile_element_count = tile_element_count;

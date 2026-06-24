@@ -134,6 +134,14 @@ typedef struct id4_vae_decode_tiling_plan_t {
   uint32_t tile_count_x;
   // Number of tiles covering the latent height.
   uint32_t tile_count_y;
+  // Actual width-axis overlap between adjacent latent tiles, in pixels.
+  uint32_t overlap_pixels_x;
+  // Actual height-axis overlap between adjacent latent tiles, in pixels.
+  uint32_t overlap_pixels_y;
+  // Width-axis step between adjacent tile origins, in latent pixels.
+  uint32_t tile_step_x;
+  // Height-axis step between adjacent tile origins, in latent pixels.
+  uint32_t tile_step_y;
   // Resolved fractional width-axis tile overlap.
   float overlap_x;
   // Resolved fractional height-axis tile overlap.
