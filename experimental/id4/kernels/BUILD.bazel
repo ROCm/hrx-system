@@ -734,7 +734,7 @@ _KERNEL_CASES = [
             "--config=id4.vae.conv3x3_bias.output_channel_tile_count=1",
             "--config=id4.vae.conv3x3_bias.output_tile_element_count=4",
         ],
-        "source": "vae/conv3x3_bias_f32.loom",
+        "source": "vae/conv3x3_bias_packed_f32.loom",
         "target_name": "vae_conv3x3_bias_ic4_oc16_packed_f32_small_same_padding",
     },
     {
@@ -750,7 +750,7 @@ _KERNEL_CASES = [
             "--config=id4.vae.conv3x3_bias.output_channel_tile_count=1",
             "--config=id4.vae.conv3x3_bias.output_tile_element_count=4",
         ],
-        "source": "vae/conv3x3_bias_f32.loom",
+        "source": "vae/conv3x3_bias_packed_f32.loom",
         "target_name": "vae_conv3x3_bias_ic4_oc16_packed_2d_f32_small_same_padding",
     },
     {
@@ -798,7 +798,7 @@ _KERNEL_CASES = [
             "--config=id4.vae.conv3x3_bias.output_channel_tile_count=32",
             "--config=id4.vae.conv3x3_bias.output_tile_element_count=131072",
         ],
-        "source": "vae/conv3x3_bias_f32.loom",
+        "source": "vae/conv3x3_bias_packed_f32.loom",
         "target_name": "vae_conv3x3_bias_ic4_oc16_packed_f32_flux2_tile_mid_shape",
     },
     {
@@ -814,7 +814,7 @@ _KERNEL_CASES = [
             "--config=id4.vae.conv3x3_bias.output_channel_tile_count=32",
             "--config=id4.vae.conv3x3_bias.output_tile_element_count=131072",
         ],
-        "source": "vae/conv3x3_bias_f32.loom",
+        "source": "vae/conv3x3_bias_packed_f32.loom",
         "target_name": "vae_conv3x3_bias_ic4_oc16_packed_2d_f32_flux2_tile_mid_shape",
     },
     {
@@ -906,7 +906,7 @@ _KERNEL_CASES = [
             "--config=id4.vae.conv3x3_bias.output_channel_tile_count=1",
             "--config=id4.vae.conv3x3_bias.output_tile_element_count=4",
         ],
-        "source": "vae/conv3x3_bias_f32.loom",
+        "source": "vae/conv3x3_bias_packed_f32.loom",
         "target_name": "vae_conv3x3_bias_add_ic4_oc16_packed_f32_small_same_padding",
     },
     {
@@ -922,7 +922,7 @@ _KERNEL_CASES = [
             "--config=id4.vae.conv3x3_bias.output_channel_tile_count=1",
             "--config=id4.vae.conv3x3_bias.output_tile_element_count=4",
         ],
-        "source": "vae/conv3x3_bias_f32.loom",
+        "source": "vae/conv3x3_bias_packed_f32.loom",
         "target_name": "vae_conv3x3_bias_add_ic4_oc16_packed_2d_f32_small_same_padding",
     },
     {
@@ -970,7 +970,7 @@ _KERNEL_CASES = [
             "--config=id4.vae.conv3x3_bias.output_channel_tile_count=8",
             "--config=id4.vae.conv3x3_bias.output_tile_element_count=524288",
         ],
-        "source": "vae/conv3x3_bias_f32.loom",
+        "source": "vae/conv3x3_bias_packed_f32.loom",
         "target_name": "vae_conv3x3_bias_add_ic4_oc16_packed_f32_flux2_tile_residual_shape",
     },
     {
@@ -986,7 +986,7 @@ _KERNEL_CASES = [
             "--config=id4.vae.conv3x3_bias.output_channel_tile_count=8",
             "--config=id4.vae.conv3x3_bias.output_tile_element_count=524288",
         ],
-        "source": "vae/conv3x3_bias_f32.loom",
+        "source": "vae/conv3x3_bias_packed_f32.loom",
         "target_name": "vae_conv3x3_bias_add_ic4_oc16_packed_2d_f32_flux2_tile_residual_shape",
     },
     {
@@ -2764,6 +2764,7 @@ _KERNEL_SOURCES = [
     "smoke_configured.loom",
     "vae/conv1x1_bias_f32.loom",
     "vae/conv3x3_bias_f32.loom",
+    "vae/conv3x3_bias_packed_f32.loom",
     "vae/decode_nearest_f32.loom",
     "vae/flux2_affine_pixel_shuffle_f32.loom",
     "vae/group_norm_f32.loom",

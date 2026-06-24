@@ -1196,6 +1196,7 @@ static iree_status_t id4_vae_program_dispatch_conv3x3_bias(
         output_element_count, ID4_VAE_DECODE_MAX_ELEMENT_COUNT);
   }
 
+  iree_string_view_t module_path = IREE_SV("vae/conv3x3_bias_f32");
   iree_string_view_t function_name = IREE_SV("id4_vae_conv3x3_bias_f32");
   uint32_t dispatch_element_count = (uint32_t)output_element_count;
   uint32_t dispatch_workgroup_count_y = 1;
@@ -1205,6 +1206,7 @@ static iree_status_t id4_vae_program_dispatch_conv3x3_bias(
   if (batch_count == 1 && input_channel_count >= 4 &&
       input_channel_count % 4 == 0 && output_channel_count >= 16 &&
       output_channel_count % 16 == 0) {
+    module_path = IREE_SV("vae/conv3x3_bias_packed_f32");
     function_name = IREE_SV("id4_vae_conv3x3_bias_ic4_oc16_packed_2d_f32");
     output_channel_tile_width = 16;
     weight_layout = ID4_VAE_PROGRAM_CONV3X3_WEIGHT_LAYOUT_PACKED_IC_KY_KX_OC;
@@ -1266,8 +1268,8 @@ static iree_status_t id4_vae_program_dispatch_conv3x3_bias(
   memset(&dispatch_options, 0, sizeof(dispatch_options));
   dispatch_options.structure_size = sizeof(dispatch_options);
   dispatch_options.name = dispatch_name;
-  dispatch_options.kernel = id4_pipeline_make_kernel_ref(
-      IREE_SV("vae/conv3x3_bias_f32"), function_name);
+  dispatch_options.kernel =
+      id4_pipeline_make_kernel_ref(module_path, function_name);
   dispatch_options.dispatch_config =
       id4_vae_program_make_static_dispatch_config(
           id4_vae_program_ceil_div_u32(dispatch_element_count,
@@ -1324,6 +1326,7 @@ static iree_status_t id4_vae_program_author_conv3x3_bias_add(
                             ID4_VAE_DECODE_MAX_ELEMENT_COUNT);
   }
 
+  iree_string_view_t module_path = IREE_SV("vae/conv3x3_bias_f32");
   iree_string_view_t function_name =
       IREE_SV("id4_vae_conv3x3_bias_add_ic4_oc4_f32");
   uint32_t output_channel_tile_width = 4;
@@ -1333,6 +1336,7 @@ static iree_status_t id4_vae_program_author_conv3x3_bias_add(
   id4_vae_program_conv3x3_weight_layout_t weight_layout =
       ID4_VAE_PROGRAM_CONV3X3_WEIGHT_LAYOUT_SOURCE;
   if (channel_count >= 16 && channel_count % 16 == 0) {
+    module_path = IREE_SV("vae/conv3x3_bias_packed_f32");
     function_name = IREE_SV("id4_vae_conv3x3_bias_add_ic4_oc16_packed_2d_f32");
     output_channel_tile_width = 16;
     weight_layout = ID4_VAE_PROGRAM_CONV3X3_WEIGHT_LAYOUT_PACKED_IC_KY_KX_OC;
@@ -1384,8 +1388,8 @@ static iree_status_t id4_vae_program_author_conv3x3_bias_add(
   memset(&dispatch_options, 0, sizeof(dispatch_options));
   dispatch_options.structure_size = sizeof(dispatch_options);
   dispatch_options.name = dispatch_name;
-  dispatch_options.kernel = id4_pipeline_make_kernel_ref(
-      IREE_SV("vae/conv3x3_bias_f32"), function_name);
+  dispatch_options.kernel =
+      id4_pipeline_make_kernel_ref(module_path, function_name);
   dispatch_options.dispatch_config =
       id4_vae_program_make_static_dispatch_config(
           id4_vae_program_ceil_div_u32(dispatch_element_count,

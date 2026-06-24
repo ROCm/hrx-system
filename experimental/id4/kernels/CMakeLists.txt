@@ -70,6 +70,7 @@ add_custom_command(OUTPUT loom_sources.stamp
     "smoke_configured.loom"
     "vae/conv1x1_bias_f32.loom"
     "vae/conv3x3_bias_f32.loom"
+    "vae/conv3x3_bias_packed_f32.loom"
     "vae/decode_nearest_f32.loom"
     "vae/flux2_affine_pixel_shuffle_f32.loom"
     "vae/group_norm_f32.loom"
@@ -145,6 +146,7 @@ iree_c_embed_data(
     "smoke_configured.loom"
     "vae/conv1x1_bias_f32.loom"
     "vae/conv3x3_bias_f32.loom"
+    "vae/conv3x3_bias_packed_f32.loom"
     "vae/decode_nearest_f32.loom"
     "vae/flux2_affine_pixel_shuffle_f32.loom"
     "vae/group_norm_f32.loom"
@@ -1232,7 +1234,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_ic4_oc16_packed_f32_small_same_padding_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv3x3_bias_f32.loom}}"
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv3x3_bias_packed_f32.loom}}"
     "--benchmark=@id4_vae_conv3x3_bias_ic4_oc16_packed_f32_small_same_padding"
     "--dry-run"
     "--output-format=jsonl"
@@ -1254,7 +1256,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_ic4_oc16_packed_2d_f32_small_same_padding_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv3x3_bias_f32.loom}}"
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv3x3_bias_packed_f32.loom}}"
     "--benchmark=@id4_vae_conv3x3_bias_ic4_oc16_packed_2d_f32_small_same_padding"
     "--dry-run"
     "--output-format=jsonl"
@@ -1320,7 +1322,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_ic4_oc16_packed_f32_flux2_tile_mid_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv3x3_bias_f32.loom}}"
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv3x3_bias_packed_f32.loom}}"
     "--benchmark=@id4_vae_conv3x3_bias_ic4_oc16_packed_f32_flux2_tile_mid_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -1342,7 +1344,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_ic4_oc16_packed_2d_f32_flux2_tile_mid_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv3x3_bias_f32.loom}}"
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv3x3_bias_packed_f32.loom}}"
     "--benchmark=@id4_vae_conv3x3_bias_ic4_oc16_packed_2d_f32_flux2_tile_mid_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -1470,7 +1472,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_add_ic4_oc16_packed_f32_small_same_padding_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv3x3_bias_f32.loom}}"
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv3x3_bias_packed_f32.loom}}"
     "--benchmark=@id4_vae_conv3x3_bias_add_ic4_oc16_packed_f32_small_same_padding"
     "--dry-run"
     "--output-format=jsonl"
@@ -1492,7 +1494,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_add_ic4_oc16_packed_2d_f32_small_same_padding_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv3x3_bias_f32.loom}}"
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv3x3_bias_packed_f32.loom}}"
     "--benchmark=@id4_vae_conv3x3_bias_add_ic4_oc16_packed_2d_f32_small_same_padding"
     "--dry-run"
     "--output-format=jsonl"
@@ -1558,7 +1560,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_add_ic4_oc16_packed_f32_flux2_tile_residual_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv3x3_bias_f32.loom}}"
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv3x3_bias_packed_f32.loom}}"
     "--benchmark=@id4_vae_conv3x3_bias_add_ic4_oc16_packed_f32_flux2_tile_residual_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -1580,7 +1582,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_add_ic4_oc16_packed_2d_f32_flux2_tile_residual_shape_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv3x3_bias_f32.loom}}"
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv3x3_bias_packed_f32.loom}}"
     "--benchmark=@id4_vae_conv3x3_bias_add_ic4_oc16_packed_2d_f32_flux2_tile_residual_shape"
     "--dry-run"
     "--output-format=jsonl"
@@ -5372,7 +5374,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_ic4_oc16_packed_f32_small_same_padding_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv3x3_bias_f32.loom}}"
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv3x3_bias_packed_f32.loom}}"
     "--case=@id4_vae_conv3x3_bias_ic4_oc16_packed_f32_small_same_padding_case"
     "--device=amdgpu://0"
     "--config=id4.vae.conv3x3_bias.width=2"
@@ -5398,7 +5400,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_ic4_oc16_packed_2d_f32_small_same_padding_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv3x3_bias_f32.loom}}"
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv3x3_bias_packed_f32.loom}}"
     "--case=@id4_vae_conv3x3_bias_ic4_oc16_packed_2d_f32_small_same_padding_case"
     "--device=amdgpu://0"
     "--config=id4.vae.conv3x3_bias.width=2"
@@ -5476,7 +5478,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_ic4_oc16_packed_f32_flux2_tile_mid_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv3x3_bias_f32.loom}}"
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv3x3_bias_packed_f32.loom}}"
     "--case=@id4_vae_conv3x3_bias_ic4_oc16_packed_f32_flux2_tile_mid_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.conv3x3_bias.width=64"
@@ -5502,7 +5504,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_ic4_oc16_packed_2d_f32_flux2_tile_mid_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv3x3_bias_f32.loom}}"
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv3x3_bias_packed_f32.loom}}"
     "--case=@id4_vae_conv3x3_bias_ic4_oc16_packed_2d_f32_flux2_tile_mid_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.conv3x3_bias.width=64"
@@ -5654,7 +5656,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_add_ic4_oc16_packed_f32_small_same_padding_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv3x3_bias_f32.loom}}"
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv3x3_bias_packed_f32.loom}}"
     "--case=@id4_vae_conv3x3_bias_add_ic4_oc16_packed_f32_small_same_padding_case"
     "--device=amdgpu://0"
     "--config=id4.vae.conv3x3_bias.width=2"
@@ -5680,7 +5682,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_add_ic4_oc16_packed_2d_f32_small_same_padding_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv3x3_bias_f32.loom}}"
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv3x3_bias_packed_f32.loom}}"
     "--case=@id4_vae_conv3x3_bias_add_ic4_oc16_packed_2d_f32_small_same_padding_case"
     "--device=amdgpu://0"
     "--config=id4.vae.conv3x3_bias.width=2"
@@ -5758,7 +5760,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_add_ic4_oc16_packed_f32_flux2_tile_residual_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv3x3_bias_f32.loom}}"
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv3x3_bias_packed_f32.loom}}"
     "--case=@id4_vae_conv3x3_bias_add_ic4_oc16_packed_f32_flux2_tile_residual_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.conv3x3_bias.width=256"
@@ -5784,7 +5786,7 @@ iree_native_test(
   NAME
     "vae_conv3x3_bias_add_ic4_oc16_packed_2d_f32_flux2_tile_residual_shape_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv3x3_bias_f32.loom}}"
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/conv3x3_bias_packed_f32.loom}}"
     "--case=@id4_vae_conv3x3_bias_add_ic4_oc16_packed_2d_f32_flux2_tile_residual_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.conv3x3_bias.width=256"
