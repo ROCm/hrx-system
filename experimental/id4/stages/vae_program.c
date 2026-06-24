@@ -2333,6 +2333,7 @@ static iree_status_t id4_vae_program_author_spatial_attention(
 
   iree_string_view_t module_path = IREE_SV("vae/spatial_attention_f32");
   iree_string_view_t function_name = IREE_SV("id4_vae_spatial_attention_f32");
+  uint32_t workgroup_size_x = ID4_VAE_DECODE_WORKGROUP_SIZE_X;
   if (activation_dtype == ID4_PIPELINE_PROGRAM_DTYPE_F32) {
     if (batch_count == 1 && channel_count >= 2 && channel_count <= 512 &&
         channel_count % 2 == 0) {
@@ -2340,15 +2341,17 @@ static iree_status_t id4_vae_program_author_spatial_attention(
       function_name = IREE_SV("id4_vae_spatial_attention_vec2_f32");
     }
   } else if (activation_dtype == ID4_PIPELINE_PROGRAM_DTYPE_BF16) {
-    if (batch_count != 1 || channel_count < 2 || channel_count > 512 ||
-        channel_count % 2 != 0) {
+    if (batch_count != 1 || channel_count < 8 || channel_count > 512 ||
+        channel_count % 8 != 0) {
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
-          "VAE BF16 spatial attention requires batch-1 and even channels <= "
+          "VAE BF16 spatial attention requires batch-1 and channels "
+          "multiple-of-8 <= "
           "512");
     }
-    module_path = IREE_SV("vae/spatial_attention_vec2_bf16");
-    function_name = IREE_SV("id4_vae_spatial_attention_vec2_bf16");
+    module_path = IREE_SV("vae/spatial_attention_vec8_bf16");
+    function_name = IREE_SV("id4_vae_spatial_attention_vec8_bf16");
+    workgroup_size_x = 64;
   } else {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "VAE spatial attention dtype %d is unsupported",
@@ -2378,8 +2381,8 @@ static iree_status_t id4_vae_program_author_spatial_attention(
   dispatch_options.kernel =
       id4_pipeline_make_kernel_ref(module_path, function_name);
   dispatch_options.dispatch_config =
-      id4_vae_program_make_static_dispatch_config((uint32_t)token_count,
-                                                  batch_count, 1);
+      id4_vae_program_make_static_dispatch_config_with_workgroup_size_x(
+          (uint32_t)token_count, batch_count, 1, workgroup_size_x);
   dispatch_options.config_binding_count = config_list.count;
   dispatch_options.config_bindings = config_list.bindings;
   dispatch_options.binding_count = IREE_ARRAYSIZE(bindings);

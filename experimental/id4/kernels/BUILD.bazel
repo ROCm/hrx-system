@@ -1877,6 +1877,45 @@ _KERNEL_CASES = [
         "target_name": "vae_spatial_attention_vec2_bf16_flux2_mid_block_shape",
     },
     {
+        "actual_case": "@id4_vae_spatial_attention_vec8_bf16_single_token_case",
+        "benchmark": "@id4_vae_spatial_attention_vec8_bf16_single_token",
+        "configs": [
+            "--config=id4.vae.spatial_attention.width=1",
+            "--config=id4.vae.spatial_attention.height=1",
+            "--config=id4.vae.spatial_attention.channel_count=8",
+            "--config=id4.vae.spatial_attention.batch_count=1",
+            "--config=id4.vae.spatial_attention.token_count=1",
+        ],
+        "source": "vae/spatial_attention_vec8_bf16.loom",
+        "target_name": "vae_spatial_attention_vec8_bf16_single_token",
+    },
+    {
+        "actual_case": "@id4_vae_spatial_attention_vec8_bf16_uniform_softmax_case",
+        "benchmark": "@id4_vae_spatial_attention_vec8_bf16_uniform_softmax",
+        "configs": [
+            "--config=id4.vae.spatial_attention.width=2",
+            "--config=id4.vae.spatial_attention.height=1",
+            "--config=id4.vae.spatial_attention.channel_count=8",
+            "--config=id4.vae.spatial_attention.batch_count=1",
+            "--config=id4.vae.spatial_attention.token_count=2",
+        ],
+        "source": "vae/spatial_attention_vec8_bf16.loom",
+        "target_name": "vae_spatial_attention_vec8_bf16_uniform_softmax",
+    },
+    {
+        "actual_case": "@id4_vae_spatial_attention_vec8_bf16_flux2_mid_block_shape_case",
+        "benchmark": "@id4_vae_spatial_attention_vec8_bf16_flux2_mid_block_shape",
+        "configs": [
+            "--config=id4.vae.spatial_attention.width=128",
+            "--config=id4.vae.spatial_attention.height=128",
+            "--config=id4.vae.spatial_attention.channel_count=512",
+            "--config=id4.vae.spatial_attention.batch_count=1",
+            "--config=id4.vae.spatial_attention.token_count=16384",
+        ],
+        "source": "vae/spatial_attention_vec8_bf16.loom",
+        "target_name": "vae_spatial_attention_vec8_bf16_flux2_mid_block_shape",
+    },
+    {
         "actual_case": "@id4_vae_upsample_conv3x3_bias_f32_small_case",
         "benchmark": "@id4_vae_upsample_conv3x3_bias_f32_small",
         "configs": [
@@ -3625,6 +3664,7 @@ _KERNEL_SOURCES = [
     "vae/spatial_attention_f32.loom",
     "vae/spatial_attention_vec2_bf16.loom",
     "vae/spatial_attention_vec2_f32.loom",
+    "vae/spatial_attention_vec8_bf16.loom",
     "vae/tile_io_bf16.loom",
     "vae/tile_io_f32.loom",
     "vae/upsample_conv3x3_bias_bf16.loom",
