@@ -295,12 +295,12 @@ kernel.def export("id4_vae_upsample_conv3x3_bias_bf16_wmma") @id4_vae_upsample_c
         %kernel_x = index.assume %kernel_x0 [range(%kernel_x0, 0, 2)] : index
         %input_channel0 = index.rem %after_y, %channel_count : index
         %input_channel = index.assume %input_channel0 [ge(%input_channel0, 0), lt(%input_channel0, %channel_count)] : index
-        %output_x0 = index.rem %global_pixel_valid, %output_width : index
-        %output_x = index.assume %output_x0 [ge(%output_x0, 0), lt(%output_x0, %output_width)] : index
-        %row = index.div %global_pixel_valid, %output_width : index
-        %output_y0 = index.rem %row, %output_height : index
+        %output_y0 = index.rem %global_pixel_valid, %output_height : index
         %output_y = index.assume %output_y0 [ge(%output_y0, 0), lt(%output_y0, %output_height)] : index
-        %batch0 = index.div %row, %output_height : index
+        %row = index.div %global_pixel_valid, %output_height : index
+        %output_x0 = index.rem %row, %output_width : index
+        %output_x = index.assume %output_x0 [ge(%output_x0, 0), lt(%output_x0, %output_width)] : index
+        %batch0 = index.div %row, %output_width : index
         %batch = index.assume %batch0 [range(%batch0, 0, 0)] : index
         %x_is_left = index.cmp eq, %output_x, %zero : index
         %x_is_right = index.cmp eq, %output_x, %last_output_x : index
@@ -397,10 +397,10 @@ kernel.def export("id4_vae_upsample_conv3x3_bias_bf16_wmma") @id4_vae_upsample_c
     %pixel1 = index.add %pixel_origin_high, %local_pixel : index
     %pixel0_valid = index.cmp ult, %pixel0, %pixel_count : index
     scf.if %pixel0_valid {
-      %x0 = index.rem %pixel0, %output_width : index
-      %row0 = index.div %pixel0, %output_width : index
-      %y0 = index.rem %row0, %output_height : index
-      %batch0 = index.div %row0, %output_height : index
+      %y0 = index.rem %pixel0, %output_height : index
+      %row0 = index.div %pixel0, %output_height : index
+      %x0 = index.rem %row0, %output_width : index
+      %batch0 = index.div %row0, %output_width : index
       %output_x_row_base0 = index.mul %x0, %output_height : index
       %output_pixel_base0 = index.add %output_x_row_base0, %y0 : index
       %output_pixel_element_base0 = index.mul %output_pixel_base0, %channel_count : index
@@ -421,10 +421,10 @@ kernel.def export("id4_vae_upsample_conv3x3_bias_bf16_wmma") @id4_vae_upsample_c
     }
     %pixel1_valid = index.cmp ult, %pixel1, %pixel_count : index
     scf.if %pixel1_valid {
-      %x1 = index.rem %pixel1, %output_width : index
-      %row1 = index.div %pixel1, %output_width : index
-      %y1 = index.rem %row1, %output_height : index
-      %batch1 = index.div %row1, %output_height : index
+      %y1 = index.rem %pixel1, %output_height : index
+      %row1 = index.div %pixel1, %output_height : index
+      %x1 = index.rem %row1, %output_width : index
+      %batch1 = index.div %row1, %output_width : index
       %output_x_row_base1 = index.mul %x1, %output_height : index
       %output_pixel_base1 = index.add %output_x_row_base1, %y1 : index
       %output_pixel_element_base1 = index.mul %output_pixel_base1, %channel_count : index
@@ -560,12 +560,12 @@ kernel.def export("id4_vae_upsample_conv3x3_bias_bf16_wmma_oc64") @id4_vae_upsam
         %kernel_x = index.assume %kernel_x0 [range(%kernel_x0, 0, 2)] : index
         %input_channel0 = index.rem %after_y, %channel_count : index
         %input_channel = index.assume %input_channel0 [ge(%input_channel0, 0), lt(%input_channel0, %channel_count)] : index
-        %output_x0 = index.rem %global_pixel_valid, %output_width : index
-        %output_x = index.assume %output_x0 [ge(%output_x0, 0), lt(%output_x0, %output_width)] : index
-        %row = index.div %global_pixel_valid, %output_width : index
-        %output_y0 = index.rem %row, %output_height : index
+        %output_y0 = index.rem %global_pixel_valid, %output_height : index
         %output_y = index.assume %output_y0 [ge(%output_y0, 0), lt(%output_y0, %output_height)] : index
-        %batch0 = index.div %row, %output_height : index
+        %row = index.div %global_pixel_valid, %output_height : index
+        %output_x0 = index.rem %row, %output_width : index
+        %output_x = index.assume %output_x0 [ge(%output_x0, 0), lt(%output_x0, %output_width)] : index
+        %batch0 = index.div %row, %output_width : index
         %batch = index.assume %batch0 [range(%batch0, 0, 0)] : index
         %x_is_left = index.cmp eq, %output_x, %zero : index
         %x_is_right = index.cmp eq, %output_x, %last_output_x : index
@@ -674,10 +674,10 @@ kernel.def export("id4_vae_upsample_conv3x3_bias_bf16_wmma_oc64") @id4_vae_upsam
     %pixel1 = index.add %pixel_origin_high, %local_pixel : index
     %pixel0_valid = index.cmp ult, %pixel0, %pixel_count : index
     scf.if %pixel0_valid {
-      %x0 = index.rem %pixel0, %output_width : index
-      %row0 = index.div %pixel0, %output_width : index
-      %y0 = index.rem %row0, %output_height : index
-      %batch0 = index.div %row0, %output_height : index
+      %y0 = index.rem %pixel0, %output_height : index
+      %row0 = index.div %pixel0, %output_height : index
+      %x0 = index.rem %row0, %output_width : index
+      %batch0 = index.div %row0, %output_width : index
       %output_x_row_base0 = index.mul %x0, %output_height : index
       %output_pixel_base0 = index.add %output_x_row_base0, %y0 : index
       %output_pixel_element_base0 = index.mul %output_pixel_base0, %channel_count : index
@@ -712,10 +712,10 @@ kernel.def export("id4_vae_upsample_conv3x3_bias_bf16_wmma_oc64") @id4_vae_upsam
     }
     %pixel1_valid = index.cmp ult, %pixel1, %pixel_count : index
     scf.if %pixel1_valid {
-      %x1 = index.rem %pixel1, %output_width : index
-      %row1 = index.div %pixel1, %output_width : index
-      %y1 = index.rem %row1, %output_height : index
-      %batch1 = index.div %row1, %output_height : index
+      %y1 = index.rem %pixel1, %output_height : index
+      %row1 = index.div %pixel1, %output_height : index
+      %x1 = index.rem %row1, %output_width : index
+      %batch1 = index.div %row1, %output_width : index
       %output_x_row_base1 = index.mul %x1, %output_height : index
       %output_pixel_base1 = index.add %output_x_row_base1, %y1 : index
       %output_pixel_element_base1 = index.mul %output_pixel_base1, %channel_count : index

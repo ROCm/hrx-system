@@ -1762,11 +1762,18 @@ static iree_status_t id4_vae_program_dispatch_conv3x3_bias_bf16_rounded_f32(
   dispatch_options.structure_size = sizeof(dispatch_options);
   dispatch_options.name = dispatch_name;
   if (output_channel_count == 3) {
+    if (batch_count != 1) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "VAE BF16 RGB WMMA conv3x3 requires batch 1");
+    }
+    const uint32_t image_element_count =
+        (uint32_t)(output_element_count / output_channel_count);
     dispatch_options.kernel = id4_pipeline_make_kernel_ref(
         IREE_SV("vae/conv3x3_bias_bf16"),
-        IREE_SV("id4_vae_conv3x3_bias_bf16_rgb_f32"));
-    dispatch_options.dispatch_config = id4_vae_program_make_dispatch_config(
-        (uint32_t)(output_element_count / output_channel_count));
+        IREE_SV("id4_vae_conv3x3_bias_bf16_rgb_f32_wmma"));
+    dispatch_options.dispatch_config =
+        id4_vae_program_make_static_dispatch_config_with_workgroup_size_x(
+            id4_vae_program_ceil_div_u32(image_element_count, 32), 1, 1, 32);
   } else {
     dispatch_options.kernel = id4_pipeline_make_kernel_ref(
         IREE_SV("vae/conv3x3_bias_bf16"),
