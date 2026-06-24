@@ -2793,6 +2793,7 @@ static iree_status_t id4_vae_program_author_upsample_conv3x3_bias(
     IREE_RETURN_IF_ERROR(id4_vae_program_build_upsample_conv3x3_bias_configs(
         input_width, input_height, channel_count, batch_count, output_width,
         output_height, output_element_count, &config_list));
+    const bool use_wmma_oc64 = channel_count >= 64 && channel_count % 64 == 0;
 
     iree_string_view_t packed_weight_key = iree_string_view_empty();
     id4_pipeline_program_shape_t weight_shape;
@@ -2833,14 +2834,25 @@ static iree_status_t id4_vae_program_author_upsample_conv3x3_bias(
     memset(&dispatch_options, 0, sizeof(dispatch_options));
     dispatch_options.structure_size = sizeof(dispatch_options);
     dispatch_options.name = dispatch_name;
-    dispatch_options.kernel = id4_pipeline_make_kernel_ref(
-        IREE_SV("vae/upsample_conv3x3_bias_bf16"),
-        IREE_SV("id4_vae_upsample_conv3x3_bias_bf16_wmma"));
-    dispatch_options.dispatch_config =
-        id4_vae_program_make_static_dispatch_config_with_workgroup_size_x(
-            id4_vae_program_ceil_div_u32(
-                (uint32_t)(output_element_count / channel_count), 32),
-            channel_count / 32, 1, 32);
+    const uint32_t output_pixel_count =
+        (uint32_t)(output_element_count / channel_count);
+    if (use_wmma_oc64) {
+      dispatch_options.kernel = id4_pipeline_make_kernel_ref(
+          IREE_SV("vae/upsample_conv3x3_bias_bf16"),
+          IREE_SV("id4_vae_upsample_conv3x3_bias_bf16_wmma_oc64"));
+      dispatch_options.dispatch_config =
+          id4_vae_program_make_static_dispatch_config_with_workgroup_size_x(
+              id4_vae_program_ceil_div_u32(output_pixel_count, 32),
+              channel_count / 64, 1, 32);
+    } else {
+      dispatch_options.kernel = id4_pipeline_make_kernel_ref(
+          IREE_SV("vae/upsample_conv3x3_bias_bf16"),
+          IREE_SV("id4_vae_upsample_conv3x3_bias_bf16_wmma"));
+      dispatch_options.dispatch_config =
+          id4_vae_program_make_static_dispatch_config_with_workgroup_size_x(
+              id4_vae_program_ceil_div_u32(output_pixel_count, 32),
+              channel_count / 32, 1, 32);
+    }
     dispatch_options.config_binding_count = config_list.count;
     dispatch_options.config_bindings = config_list.bindings;
     dispatch_options.binding_count = IREE_ARRAYSIZE(bindings);

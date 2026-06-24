@@ -2255,6 +2255,22 @@ _KERNEL_CASES = [
         "target_name": "vae_upsample_conv3x3_bias_bf16_wmma_matches_scalar_small",
     },
     {
+        "actual_case": "@id4_vae_upsample_conv3x3_bias_bf16_wmma_oc64_matches_scalar_medium_case",
+        "benchmark": "@id4_vae_upsample_conv3x3_bias_bf16_wmma_oc64_matches_scalar_medium",
+        "configs": [
+            "--config=id4.vae.upsample_conv3x3_bias.input_width=4",
+            "--config=id4.vae.upsample_conv3x3_bias.input_height=4",
+            "--config=id4.vae.upsample_conv3x3_bias.channel_count=64",
+            "--config=id4.vae.upsample_conv3x3_bias.batch_count=1",
+            "--config=id4.vae.upsample_conv3x3_bias.output_width=8",
+            "--config=id4.vae.upsample_conv3x3_bias.output_height=8",
+            "--config=id4.vae.upsample_conv3x3_bias.output_element_count=4096",
+            "--config=id4.vae.upsample_conv3x3_bias.output_channel_tile_count=4",
+        ],
+        "source": "vae/upsample_conv3x3_bias_bf16.loom",
+        "target_name": "vae_upsample_conv3x3_bias_bf16_wmma_oc64_matches_scalar_medium",
+    },
+    {
         "actual_case": "@id4_vae_upsample_conv3x3_bias_bf16_wmma_flux2_tile_mid_shape_case",
         "benchmark": "@id4_vae_upsample_conv3x3_bias_bf16_wmma_flux2_tile_mid_shape",
         "configs": [
@@ -2269,6 +2285,21 @@ _KERNEL_CASES = [
         ],
         "source": "vae/upsample_conv3x3_bias_bf16.loom",
         "target_name": "vae_upsample_conv3x3_bias_bf16_wmma_flux2_tile_mid_shape",
+    },
+    {
+        "actual_case": "@id4_vae_upsample_conv3x3_bias_bf16_wmma_oc64_flux2_tile_mid_shape_case",
+        "benchmark": "@id4_vae_upsample_conv3x3_bias_bf16_wmma_oc64_flux2_tile_mid_shape",
+        "configs": [
+            "--config=id4.vae.upsample_conv3x3_bias.input_width=128",
+            "--config=id4.vae.upsample_conv3x3_bias.input_height=128",
+            "--config=id4.vae.upsample_conv3x3_bias.channel_count=256",
+            "--config=id4.vae.upsample_conv3x3_bias.batch_count=1",
+            "--config=id4.vae.upsample_conv3x3_bias.output_width=256",
+            "--config=id4.vae.upsample_conv3x3_bias.output_height=256",
+            "--config=id4.vae.upsample_conv3x3_bias.output_element_count=16777216",
+        ],
+        "source": "vae/upsample_conv3x3_bias_bf16.loom",
+        "target_name": "vae_upsample_conv3x3_bias_bf16_wmma_oc64_flux2_tile_mid_shape",
     },
     {
         "actual_case": "@id4_vae_upsample_nearest_bf16_scale2_case",
