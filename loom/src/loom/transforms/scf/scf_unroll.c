@@ -1207,20 +1207,6 @@ static iree_status_t loom_scf_unroll_collect_interleavable_body_ops(
           LOOM_SCF_FOR_UNROLL_SCHEDULE_INTERLEAVED,
           IREE_SV("body operations without nested regions or successors"));
     }
-    if (op->result_count != 0) {
-      loom_trait_flags_t traits =
-          loom_op_effective_traits(context->module, body_op);
-      if (body_op->tied_result_count != 0 ||
-          !iree_any_bit_set(traits, LOOM_TRAIT_PURE) ||
-          iree_any_bit_set(traits, LOOM_TRAIT_HINT | LOOM_TRAIT_CONVERGENT) ||
-          loom_traits_may_read(traits) || loom_traits_may_write(traits)) {
-        return loom_scf_unroll_emit_policy_error(
-            context, op, IREE_SV("schedule"),
-            LOOM_SCF_FOR_UNROLL_SCHEDULE_INTERLEAVED,
-            IREE_SV("effect-free body operations when interleaving "
-                    "loop-carried values"));
-      }
-    }
     if (count == UINT32_MAX) {
       return loom_scf_unroll_emit_policy_error(
           context, op, IREE_SV("schedule"), count,
