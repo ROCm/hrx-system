@@ -27,6 +27,9 @@
 namespace id4::test {
 
 static constexpr iree_host_size_t kQueueUpdateChunkLength = 4 * 1024 * 1024;
+static constexpr uint8_t kId4TensorMagic[8] = {
+    'I', 'D', '4', 'T', 'E', 'N', 'S', 'R',
+};
 
 iree_hal_semaphore_list_t SemaphoreListStorage::list() {
   return iree_hal_semaphore_list_t{
@@ -163,6 +166,17 @@ static iree_status_t ReadBinaryFile(const std::string& path,
     }
   }
   return iree_ok_status();
+}
+
+static bool FileExists(const std::string& path) {
+  std::ifstream file(path, std::ios::binary);
+  return file.good();
+}
+
+static bool HasPrefix(const std::vector<uint8_t>& contents,
+                      const uint8_t* prefix, iree_host_size_t prefix_length) {
+  return contents.size() >= prefix_length &&
+         std::memcmp(contents.data(), prefix, prefix_length) == 0;
 }
 
 static std::string JoinPath(iree_string_view_t directory,
@@ -515,6 +529,135 @@ static iree_status_t LoadNpyTensorPayload(
   return iree_ok_status();
 }
 
+static iree_status_t LoadExactTensorPayload(
+    const std::string& path, id4_pipeline_tensor_dtype_t expected_dtype,
+    id4_pipeline_tensor_shape_t expected_shape,
+    std::vector<uint8_t>* out_payload) {
+  std::vector<uint8_t> file_contents;
+  IREE_RETURN_IF_ERROR(ReadBinaryFile(path, &file_contents));
+  if (!HasPrefix(file_contents, kId4TensorMagic,
+                 IREE_ARRAYSIZE(kId4TensorMagic))) {
+    return iree_make_status(IREE_STATUS_DATA_LOSS,
+                            "fixture tensor is not an ID4 tensor payload: %s",
+                            path.c_str());
+  }
+  if (file_contents.size() < IREE_ARRAYSIZE(kId4TensorMagic) + 4) {
+    return iree_make_status(IREE_STATUS_DATA_LOSS,
+                            "fixture tensor ID4 header is truncated: %s",
+                            path.c_str());
+  }
+  const iree_host_size_t header_length =
+      static_cast<iree_host_size_t>(file_contents[8]) |
+      (static_cast<iree_host_size_t>(file_contents[9]) << 8) |
+      (static_cast<iree_host_size_t>(file_contents[10]) << 16) |
+      (static_cast<iree_host_size_t>(file_contents[11]) << 24);
+  const iree_host_size_t payload_offset = 12 + header_length;
+  if (payload_offset > file_contents.size()) {
+    return iree_make_status(IREE_STATUS_DATA_LOSS,
+                            "fixture tensor ID4 header overruns file: %s",
+                            path.c_str());
+  }
+  iree_string_view_t header = iree_make_string_view(
+      reinterpret_cast<const char*>(file_contents.data() + 12), header_length);
+  iree_string_view_t version_value = iree_string_view_empty();
+  IREE_RETURN_IF_ERROR(iree_json_lookup_object_value(header, IREE_SV("version"),
+                                                     &version_value));
+  uint64_t version = 0;
+  IREE_RETURN_IF_ERROR(iree_json_parse_uint64(version_value, &version));
+  if (version != 1) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "unsupported ID4 tensor version %" PRIu64 " for %s",
+                            version, path.c_str());
+  }
+  std::string kind;
+  IREE_RETURN_IF_ERROR(JsonLookupSimpleString(header, IREE_SV("kind"), &kind));
+  if (kind != "tensor") {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "ID4 payload is not a tensor: %s", path.c_str());
+  }
+  std::string layout;
+  IREE_RETURN_IF_ERROR(
+      JsonLookupSimpleString(header, IREE_SV("layout"), &layout));
+  if (layout != "dense-row-major") {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "unsupported ID4 tensor layout `%s` for %s",
+                            layout.c_str(), path.c_str());
+  }
+  std::string dtype;
+  IREE_RETURN_IF_ERROR(
+      JsonLookupSimpleString(header, IREE_SV("dtype"), &dtype));
+  id4_pipeline_tensor_dtype_t actual_dtype = ID4_PIPELINE_TENSOR_DTYPE_INVALID;
+  IREE_RETURN_IF_ERROR(ParseFixtureDtype(
+      iree_make_string_view(dtype.data(), dtype.size()), &actual_dtype));
+  std::string storage_dtype;
+  IREE_RETURN_IF_ERROR(
+      JsonLookupSimpleString(header, IREE_SV("storage_dtype"), &storage_dtype));
+  id4_pipeline_tensor_dtype_t actual_storage_dtype =
+      ID4_PIPELINE_TENSOR_DTYPE_INVALID;
+  IREE_RETURN_IF_ERROR(ParseFixtureDtype(
+      iree_make_string_view(storage_dtype.data(), storage_dtype.size()),
+      &actual_storage_dtype));
+  if (actual_dtype != expected_dtype ||
+      actual_storage_dtype != expected_dtype) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "fixture tensor ID4 dtype does not match manifest for %s",
+        path.c_str());
+  }
+  iree_string_view_t shape_value = iree_string_view_empty();
+  IREE_RETURN_IF_ERROR(
+      iree_json_lookup_object_value(header, IREE_SV("shape"), &shape_value));
+  id4_pipeline_tensor_shape_t actual_shape = {};
+  IREE_RETURN_IF_ERROR(ParseFixtureShape(shape_value, &actual_shape));
+  if (!ShapeEquals(actual_shape, expected_shape)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "fixture tensor ID4 shape does not match manifest for %s",
+        path.c_str());
+  }
+  iree_string_view_t storage_shape_value = iree_string_view_empty();
+  IREE_RETURN_IF_ERROR(iree_json_lookup_object_value(
+      header, IREE_SV("storage_shape"), &storage_shape_value));
+  id4_pipeline_tensor_shape_t actual_storage_shape = {};
+  IREE_RETURN_IF_ERROR(
+      ParseFixtureShape(storage_shape_value, &actual_storage_shape));
+  if (!ShapeEquals(actual_storage_shape, expected_shape)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "fixture tensor ID4 storage shape does not match manifest for %s",
+        path.c_str());
+  }
+  iree_string_view_t byte_length_value = iree_string_view_empty();
+  IREE_RETURN_IF_ERROR(iree_json_lookup_object_value(
+      header, IREE_SV("byte_length"), &byte_length_value));
+  uint64_t byte_length = 0;
+  IREE_RETURN_IF_ERROR(iree_json_parse_uint64(byte_length_value, &byte_length));
+  if (byte_length != file_contents.size() - payload_offset) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "fixture tensor ID4 byte length does not match payload for %s",
+        path.c_str());
+  }
+  out_payload->assign(file_contents.begin() + payload_offset,
+                      file_contents.end());
+  return iree_ok_status();
+}
+
+static iree_status_t LoadTensorPayload(
+    const std::string& path, id4_pipeline_tensor_dtype_t expected_dtype,
+    id4_pipeline_tensor_shape_t expected_shape,
+    std::vector<uint8_t>* out_payload) {
+  std::vector<uint8_t> file_contents;
+  IREE_RETURN_IF_ERROR(ReadBinaryFile(path, &file_contents));
+  if (HasPrefix(file_contents, kId4TensorMagic,
+                IREE_ARRAYSIZE(kId4TensorMagic))) {
+    return LoadExactTensorPayload(path, expected_dtype, expected_shape,
+                                  out_payload);
+  }
+  return LoadNpyTensorPayload(path, expected_dtype, expected_shape,
+                              out_payload);
+}
+
 static iree_status_t LoadFixtureTensorRecord(
     iree_string_view_t record, FixtureTensorSet* fixture_tensors) {
   std::string kind;
@@ -558,8 +701,8 @@ static iree_status_t LoadFixtureTensorRecord(
   IREE_RETURN_IF_ERROR(ParseFixtureSlice(record, &tensor));
   IREE_RETURN_IF_ERROR(ParseFixtureTolerance(record, &tensor));
   IREE_RETURN_IF_ERROR(
-      LoadNpyTensorPayload(JoinPath(fixture_tensors->directory, tensor.file),
-                           tensor.dtype, tensor.shape, &tensor.payload));
+      LoadTensorPayload(JoinPath(fixture_tensors->directory, tensor.file),
+                        tensor.dtype, tensor.shape, &tensor.payload));
   fixture_tensors->tensors.push_back(std::move(tensor));
   return iree_ok_status();
 }
@@ -1622,29 +1765,52 @@ static iree_status_t VerifyCapturedPayloadWasWritten(
     iree_string_view_t capture_directory, iree_string_view_t file_prefix,
     iree_host_size_t file_ordinal, iree_string_view_t tensor_name,
     uint8_t sentinel) {
-  char file_name[32];
-  snprintf(file_name, sizeof(file_name), "%.*s_%04" PRIhsz ".npy",
+  char file_name[48];
+  snprintf(file_name, sizeof(file_name), "%.*s_%04" PRIhsz ".id4tensor",
            static_cast<int>(file_prefix.size), file_prefix.data, file_ordinal);
-  std::vector<uint8_t> npy;
-  IREE_RETURN_IF_ERROR(
-      ReadBinaryFile(JoinPath(capture_directory, file_name), &npy));
-  if (npy.size() < 10 || npy[0] != 0x93 || npy[1] != 'N' || npy[2] != 'U' ||
-      npy[3] != 'M' || npy[4] != 'P' || npy[5] != 'Y') {
+  std::string capture_path = JoinPath(capture_directory, file_name);
+  if (!FileExists(capture_path)) {
+    snprintf(file_name, sizeof(file_name), "%.*s_%04" PRIhsz ".npy",
+             static_cast<int>(file_prefix.size), file_prefix.data,
+             file_ordinal);
+    capture_path = JoinPath(capture_directory, file_name);
+  }
+  std::vector<uint8_t> capture;
+  IREE_RETURN_IF_ERROR(ReadBinaryFile(capture_path, &capture));
+  iree_host_size_t payload_offset = 0;
+  if (HasPrefix(capture, kId4TensorMagic, IREE_ARRAYSIZE(kId4TensorMagic))) {
+    if (capture.size() < IREE_ARRAYSIZE(kId4TensorMagic) + 4) {
+      return iree_make_status(IREE_STATUS_DATA_LOSS,
+                              "capture for %.*s has a truncated ID4 header",
+                              (int)tensor_name.size, tensor_name.data);
+    }
+    const iree_host_size_t header_length =
+        static_cast<iree_host_size_t>(capture[8]) |
+        (static_cast<iree_host_size_t>(capture[9]) << 8) |
+        (static_cast<iree_host_size_t>(capture[10]) << 16) |
+        (static_cast<iree_host_size_t>(capture[11]) << 24);
+    payload_offset = 12 + header_length;
+  } else if (capture.size() >= 10 && capture[0] == 0x93 && capture[1] == 'N' &&
+             capture[2] == 'U' && capture[3] == 'M' && capture[4] == 'P' &&
+             capture[5] == 'Y') {
+    const iree_host_size_t header_length =
+        static_cast<iree_host_size_t>(capture[8]) |
+        (static_cast<iree_host_size_t>(capture[9]) << 8);
+    payload_offset = 10 + header_length;
+  } else {
     return iree_make_status(IREE_STATUS_DATA_LOSS,
-                            "capture for %.*s is not an NPY payload",
+                            "capture for %.*s has unsupported tensor payload "
+                            "format",
                             (int)tensor_name.size, tensor_name.data);
   }
-  const iree_host_size_t header_length =
-      (iree_host_size_t)npy[8] | ((iree_host_size_t)npy[9] << 8);
-  const iree_host_size_t payload_offset = 10 + header_length;
-  if (payload_offset >= npy.size()) {
+  if (payload_offset >= capture.size()) {
     return iree_make_status(IREE_STATUS_DATA_LOSS,
                             "capture for %.*s has no tensor payload",
                             (int)tensor_name.size, tensor_name.data);
   }
   bool payload_is_sentinel = true;
-  for (iree_host_size_t i = payload_offset; i < npy.size(); ++i) {
-    if (npy[i] != sentinel) {
+  for (iree_host_size_t i = payload_offset; i < capture.size(); ++i) {
+    if (capture[i] != sentinel) {
       payload_is_sentinel = false;
       break;
     }

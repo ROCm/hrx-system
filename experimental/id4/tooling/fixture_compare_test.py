@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import json
+import struct
 import tempfile
 import unittest
 from pathlib import Path
@@ -31,6 +32,37 @@ def _write_tensor_fixture(
     payload: bytes,
 ) -> None:
     trace_reduce.write_npy(root / file_name, dtype, shape, payload)
+
+
+def _write_id4_tensor(
+    root: Path,
+    file_name: str,
+    dtype: str,
+    shape: list[int],
+    payload: bytes,
+) -> None:
+    path = root / file_name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    header = json.dumps(
+        {
+            "byte_length": len(payload),
+            "dtype": dtype,
+            "kind": "tensor",
+            "layout": "dense-row-major",
+            "shape": shape,
+            "storage_dtype": dtype,
+            "storage_shape": shape,
+            "version": 1,
+        },
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    path.write_bytes(
+        fixture_compare.ID4_TENSOR_MAGIC
+        + struct.pack("<I", len(header))
+        + header
+        + payload
+    )
 
 
 class FixtureCompareTest(unittest.TestCase):
@@ -134,6 +166,71 @@ class FixtureCompareTest(unittest.TestCase):
             self.assertEqual(condition["status"], "pass")
             self.assertEqual(condition["mismatch_count"], 0)
             self.assertLess(condition["max_abs_error"], condition["atol"])
+
+    def test_compares_expected_npy_against_actual_id4_tensor(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            fixture_dir = root / "fixture"
+            actual_dir = root / "actual"
+
+            _write_tensor_fixture(
+                fixture_dir,
+                "condition.npy",
+                "bf16",
+                [2],
+                b"\x80\x3f\x00\x40",
+            )
+            _write_id4_tensor(
+                actual_dir,
+                "condition.id4tensor",
+                "bf16",
+                [2],
+                b"\x80\x3f\x00\x40",
+            )
+            _write_json(
+                fixture_dir / "manifest.json",
+                {
+                    "fixture_id": "unit_fixture",
+                    "records": [
+                        {
+                            "dtype": "bf16",
+                            "file": "condition.npy",
+                            "kind": "tensor",
+                            "name": "condition",
+                            "role": "expected",
+                            "shape": [2],
+                            "stage": "qwen.encoder",
+                            "tolerance": {"atol": 0.0, "rtol": 0.0},
+                        }
+                    ],
+                    "schema_version": 1,
+                },
+            )
+            _write_json(
+                actual_dir / "manifest.json",
+                {
+                    "records": [
+                        {
+                            "dtype": "bf16",
+                            "file": "condition.id4tensor",
+                            "kind": "tensor",
+                            "name": "condition",
+                            "role": "actual",
+                            "shape": [2],
+                            "stage": "qwen.encoder",
+                        }
+                    ],
+                    "run_id": "unit_run",
+                    "schema_version": 1,
+                },
+            )
+
+            report = fixture_compare.compare_fixtures(fixture_dir, actual_dir)
+
+            comparison = report["comparisons"][0]
+            self.assertEqual(comparison["status"], "pass")
+            self.assertEqual(comparison["dtype"], "bf16")
+            self.assertEqual(comparison["mismatch_count"], 0)
 
     def test_reports_tensor_tolerance_failure(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -256,7 +256,10 @@ bazel run //experimental/id4/build_tools:generate_fixture -- \
 Generated fixture directories contain payload files plus `manifest.json` and
 `inventory.json`. The manifest is the detailed provenance and checksum record.
 The inventory is the compact stage/role/shape view intended for planning stage
-tests, benchmark harnesses, and kernel-family triage.
+tests, benchmark harnesses, and kernel-family triage. Legacy reduced fixtures
+may use NPY payloads for simple dense tensors, but captures use exact ID4 tensor
+payloads so BF16, FP8, scaled, packed, and blocked storage can be represented
+without widening or descriptor tricks.
 
 Actual stage captures use the same manifest record shape with `role` values
 such as `actual` or `output`. The fixture comparator matches `expected`

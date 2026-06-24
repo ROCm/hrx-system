@@ -23,6 +23,7 @@ from typing import Any
 import trace_reduce
 
 NPY_MAGIC = b"\x93NUMPY"
+ID4_TENSOR_MAGIC = b"ID4TENSR"
 SUPPORTED_ACTUAL_ROLES = frozenset(("actual", "output"))
 SUPPORTED_EXPECTED_ROLES = frozenset(("expected",))
 
@@ -179,6 +180,83 @@ def _read_npy_tensor(path: Path) -> TensorPayload:
     return TensorPayload(dtype=dtype, shape=shape, values=values)
 
 
+def _read_id4_tensor(path: Path) -> TensorPayload:
+    payload = path.read_bytes()
+    if len(payload) < len(ID4_TENSOR_MAGIC) + 4:
+        raise FixtureCompareError(f"ID4 tensor payload is truncated: {path}")
+    if payload[: len(ID4_TENSOR_MAGIC)] != ID4_TENSOR_MAGIC:
+        raise FixtureCompareError(f"ID4 tensor payload missing magic: {path}")
+    header_length = struct.unpack("<I", payload[len(ID4_TENSOR_MAGIC) : 12])[0]
+    header_start = len(ID4_TENSOR_MAGIC) + 4
+    header_end = header_start + header_length
+    if header_end > len(payload):
+        raise FixtureCompareError(f"ID4 tensor header overruns file: {path}")
+    try:
+        header = json.loads(payload[header_start:header_end].decode("utf-8"))
+    except json.JSONDecodeError as exc:
+        raise FixtureCompareError(f"invalid ID4 tensor header: {path}: {exc}") from exc
+    if not isinstance(header, dict):
+        raise FixtureCompareError(f"ID4 tensor header must be an object: {path}")
+    if _require_int(header.get("version"), "id4tensor.version") != 1:
+        raise FixtureCompareError(f"unsupported ID4 tensor version in {path}")
+    if _require_string(header.get("kind"), "id4tensor.kind") != "tensor":
+        raise FixtureCompareError(f"ID4 payload is not a tensor: {path}")
+    if _require_string(header.get("layout"), "id4tensor.layout") != "dense-row-major":
+        raise FixtureCompareError(f"unsupported ID4 tensor layout: {path}")
+    dtype = _require_string(header.get("dtype"), "id4tensor.dtype")
+    storage_dtype = _require_string(
+        header.get("storage_dtype"), "id4tensor.storage_dtype"
+    )
+    if dtype != storage_dtype:
+        raise FixtureCompareError(
+            f"ID4 tensor dtype/storage_dtype mismatch in {path}: "
+            f"{dtype} vs {storage_dtype}"
+        )
+    if dtype not in trace_reduce.DTYPE_TABLE:
+        raise FixtureCompareError(f"unsupported ID4 tensor dtype in {path}: {dtype}")
+    shape = tuple(
+        _require_int(dim, "id4tensor.shape")
+        for dim in _require_list(header.get("shape"), "id4tensor.shape")
+    )
+    storage_shape = tuple(
+        _require_int(dim, "id4tensor.storage_shape")
+        for dim in _require_list(header.get("storage_shape"), "id4tensor.storage_shape")
+    )
+    if shape != storage_shape:
+        raise FixtureCompareError(
+            f"ID4 tensor shape/storage_shape mismatch in {path}: "
+            f"{list(shape)} vs {list(storage_shape)}"
+        )
+    data = payload[header_end:]
+    byte_length = _require_int(header.get("byte_length"), "id4tensor.byte_length")
+    if byte_length != len(data):
+        raise FixtureCompareError(
+            f"ID4 tensor payload byte length mismatch for {path}: header "
+            f"{byte_length}, found {len(data)}"
+        )
+    info = trace_reduce.DTYPE_TABLE[dtype]
+    expected_byte_count = math.prod(shape) * int(info["byte_count"])
+    if len(data) != expected_byte_count:
+        raise FixtureCompareError(
+            f"ID4 tensor dense byte length mismatch for {path}: expected "
+            f"{expected_byte_count}, found {len(data)}"
+        )
+    return TensorPayload(
+        dtype=dtype,
+        shape=shape,
+        values=trace_reduce.unpack_numeric_payload(dtype, data),
+    )
+
+
+def _read_tensor_payload(path: Path) -> TensorPayload:
+    prefix = path.read_bytes()[: max(len(NPY_MAGIC), len(ID4_TENSOR_MAGIC))]
+    if prefix.startswith(NPY_MAGIC):
+        return _read_npy_tensor(path)
+    if prefix.startswith(ID4_TENSOR_MAGIC):
+        return _read_id4_tensor(path)
+    raise FixtureCompareError(f"unsupported tensor payload format: {path}")
+
+
 def _row_major_strides(shape: tuple[int, ...]) -> tuple[int, ...]:
     strides = [1] * len(shape)
     running = 1
@@ -274,15 +352,15 @@ def _record_tensor(
     path = root / _relative_path(record.get("file"), f"{description}.file")
     if not path.is_file():
         raise FixtureCompareError(f"{description} payload not found: {path}")
-    tensor = _read_npy_tensor(path)
+    tensor = _read_tensor_payload(path)
     if tensor.dtype != dtype:
         raise FixtureCompareError(
-            f"{description} dtype mismatch: manifest {dtype}, NPY {tensor.dtype}"
+            f"{description} dtype mismatch: manifest {dtype}, payload {tensor.dtype}"
         )
     if tensor.shape != shape:
         raise FixtureCompareError(
             f"{description} shape mismatch: manifest {list(shape)}, "
-            f"NPY {list(tensor.shape)}"
+            f"payload {list(tensor.shape)}"
         )
     return tensor
 

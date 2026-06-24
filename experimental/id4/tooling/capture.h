@@ -48,7 +48,7 @@ typedef struct id4_tooling_capture_execution_options_t {
 
 // Captures all exported boundary tensors and planned diagnostic taps in
 // |options->plan| into |options->output_directory| as an actual fixture
-// manifest and NPY payloads.
+// manifest and exact tensor payloads.
 iree_status_t id4_tooling_capture_execution(
     const id4_tooling_capture_execution_options_t* options);
 

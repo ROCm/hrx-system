@@ -113,11 +113,13 @@ typedef struct FixtureTensor {
   std::string stage;
   // Fixture tensor role such as input or expected.
   std::string role;
-  // Relative NPY payload path from the fixture manifest.
+  // Relative tensor payload path from the fixture manifest.
   std::string file;
-  // Tensor dtype declared by the fixture manifest and validated against NPY.
+  // Tensor dtype declared by the fixture manifest and validated against
+  // payload.
   id4_pipeline_tensor_dtype_t dtype = ID4_PIPELINE_TENSOR_DTYPE_INVALID;
-  // Tensor shape declared by the fixture manifest and validated against NPY.
+  // Tensor shape declared by the fixture manifest and validated against
+  // payload.
   id4_pipeline_tensor_shape_t shape = {};
   // Full source tensor shape before fixture slicing.
   id4_pipeline_tensor_shape_t source_shape = {};
@@ -129,7 +131,7 @@ typedef struct FixtureTensor {
   double relative_tolerance = 0.0;
   // True when tolerance metadata was present in the fixture manifest.
   bool has_tolerance = false;
-  // Raw dense tensor bytes parsed from the NPY payload.
+  // Raw dense tensor bytes parsed from the payload.
   std::vector<uint8_t> payload;
 } FixtureTensor;
 

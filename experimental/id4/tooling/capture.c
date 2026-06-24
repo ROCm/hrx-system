@@ -12,7 +12,9 @@
 
 #include "experimental/id4/tooling/filesystem.h"
 
-#define ID4_TOOLING_CAPTURE_NPY_PREFIX_LENGTH 10
+static const uint8_t id4_tooling_capture_tensor_magic[8] = {
+    'I', 'D', '4', 'T', 'E', 'N', 'S', 'R',
+};
 
 typedef struct id4_tooling_capture_host_bytes_t {
   // Number of valid bytes in data.
@@ -239,114 +241,77 @@ static iree_status_t id4_tooling_capture_append_shape_json(
   return iree_string_builder_append_cstring(builder, "]");
 }
 
-static iree_status_t id4_tooling_capture_npy_descriptor(
-    id4_pipeline_tensor_dtype_t dtype, iree_string_view_t* out_descriptor) {
-  switch (dtype) {
-    case ID4_PIPELINE_TENSOR_DTYPE_F32:
-      *out_descriptor = IREE_SV("<f4");
-      return iree_ok_status();
-    case ID4_PIPELINE_TENSOR_DTYPE_F16:
-      *out_descriptor = IREE_SV("<f2");
-      return iree_ok_status();
-    case ID4_PIPELINE_TENSOR_DTYPE_BF16:
-      // NumPy has no portable bfloat16 descriptor. The manifest carries the
-      // logical dtype while the NPY payload stores the raw 16-bit lanes.
-      *out_descriptor = IREE_SV("<u2");
-      return iree_ok_status();
-    case ID4_PIPELINE_TENSOR_DTYPE_I32:
-      *out_descriptor = IREE_SV("<i4");
-      return iree_ok_status();
-    case ID4_PIPELINE_TENSOR_DTYPE_U32:
-      *out_descriptor = IREE_SV("<u4");
-      return iree_ok_status();
-    default:
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "capture only supports f32, f16, bf16, i32, and u32 tensor payloads");
-  }
-}
-
-static iree_status_t id4_tooling_capture_append_npy_shape(
-    iree_string_builder_t* builder, id4_pipeline_tensor_shape_t shape) {
-  IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "("));
-  for (uint32_t i = 0; i < shape.rank; ++i) {
-    if (i != 0) {
-      IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, ", "));
-    }
-    IREE_RETURN_IF_ERROR(
-        iree_string_builder_append_format(builder, "%" PRIu64, shape.dims[i]));
-  }
-  if (shape.rank == 1) {
-    IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, ","));
-  }
-  return iree_string_builder_append_cstring(builder, ")");
-}
-
-static iree_status_t id4_tooling_capture_write_npy(
+static iree_status_t id4_tooling_capture_write_tensor(
     iree_string_view_t path, const id4_pipeline_tensor_layout_t* layout,
     iree_const_byte_span_t payload, iree_allocator_t host_allocator) {
-  iree_string_view_t descriptor = iree_string_view_empty();
-  IREE_RETURN_IF_ERROR(
-      id4_tooling_capture_npy_descriptor(layout->dtype, &descriptor));
+  if (id4_pipeline_tensor_dtype_byte_length(layout->dtype) == 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "capture tensor %.*s has invalid dtype",
+                            (int)layout->name.size, layout->name.data);
+  }
 
   iree_string_builder_t header_builder;
   iree_string_builder_initialize(host_allocator, &header_builder);
-  iree_status_t status =
-      iree_string_builder_append_cstring(&header_builder, "{'descr': '");
+  iree_status_t status = iree_string_builder_append_cstring(
+      &header_builder, "{\"version\":1,\"kind\":\"tensor\",\"dtype\":");
   if (iree_status_is_ok(status)) {
-    status = iree_string_builder_append_string(&header_builder, descriptor);
+    status = id4_tooling_capture_append_json_string(
+        &header_builder, id4_pipeline_tensor_dtype_format(layout->dtype));
   }
   if (iree_status_is_ok(status)) {
-    status = iree_string_builder_append_cstring(
-        &header_builder, "', 'fortran_order': False, 'shape': ");
+    status = iree_string_builder_append_cstring(&header_builder, ",\"shape\":");
   }
   if (iree_status_is_ok(status)) {
     status =
-        id4_tooling_capture_append_npy_shape(&header_builder, layout->shape);
+        id4_tooling_capture_append_shape_json(&header_builder, layout->shape);
   }
   if (iree_status_is_ok(status)) {
-    status = iree_string_builder_append_cstring(&header_builder, ", }");
+    status = iree_string_builder_append_cstring(&header_builder,
+                                                ",\"storage_dtype\":");
   }
-  iree_host_size_t padding = 0;
   if (iree_status_is_ok(status)) {
-    const iree_host_size_t unpadded_length =
-        ID4_TOOLING_CAPTURE_NPY_PREFIX_LENGTH +
-        iree_string_builder_size(&header_builder) + 1;
-    padding = 16 - (unpadded_length % 16);
-    if (padding == 16) padding = 0;
+    status = id4_tooling_capture_append_json_string(
+        &header_builder, id4_pipeline_tensor_dtype_format(layout->dtype));
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_string_builder_append_cstring(&header_builder,
+                                                ",\"storage_shape\":");
+  }
+  if (iree_status_is_ok(status)) {
+    status =
+        id4_tooling_capture_append_shape_json(&header_builder, layout->shape);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_string_builder_append_format(
+        &header_builder,
+        ",\"layout\":\"dense-row-major\",\"byte_length\":%" PRIhsz "}",
+        payload.data_length);
   }
 
   iree_string_builder_t file_builder;
   iree_string_builder_initialize(host_allocator, &file_builder);
   if (iree_status_is_ok(status)) {
-    const uint8_t prefix[] = {
-        0x93, 'N', 'U', 'M', 'P', 'Y', 0x01, 0x00, 0x00, 0x00,
-    };
-    status = iree_string_builder_append_string(
-        &file_builder,
-        iree_make_string_view((const char*)prefix, sizeof(prefix)));
-  }
-  if (iree_status_is_ok(status)) {
     const iree_host_size_t header_length =
-        iree_string_builder_size(&header_builder) + padding + 1;
-    if (header_length > UINT16_MAX) {
+        iree_string_builder_size(&header_builder);
+    if (header_length > UINT32_MAX) {
       status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                                "capture NPY header is too large");
+                                "capture tensor header is too large");
     } else {
-      char* file_storage = (char*)iree_string_builder_buffer(&file_builder);
-      file_storage[8] = (char)(header_length & 0xFFu);
-      file_storage[9] = (char)((header_length >> 8) & 0xFFu);
+      uint8_t prefix[sizeof(id4_tooling_capture_tensor_magic) + 4];
+      memcpy(prefix, id4_tooling_capture_tensor_magic,
+             sizeof(id4_tooling_capture_tensor_magic));
+      prefix[8] = (uint8_t)(header_length & 0xFFu);
+      prefix[9] = (uint8_t)((header_length >> 8) & 0xFFu);
+      prefix[10] = (uint8_t)((header_length >> 16) & 0xFFu);
+      prefix[11] = (uint8_t)((header_length >> 24) & 0xFFu);
+      status = iree_string_builder_append_string(
+          &file_builder,
+          iree_make_string_view((const char*)prefix, sizeof(prefix)));
     }
   }
   if (iree_status_is_ok(status)) {
     status = iree_string_builder_append_string(
         &file_builder, iree_string_builder_view(&header_builder));
-  }
-  for (iree_host_size_t i = 0; i < padding && iree_status_is_ok(status); ++i) {
-    status = iree_string_builder_append_cstring(&file_builder, " ");
-  }
-  if (iree_status_is_ok(status)) {
-    status = iree_string_builder_append_cstring(&file_builder, "\n");
   }
   if (iree_status_is_ok(status) && payload.data_length != 0) {
     status = iree_string_builder_append_string(
@@ -450,6 +415,8 @@ static iree_status_t id4_tooling_capture_append_record_json(
   IREE_RETURN_IF_ERROR(
       id4_tooling_capture_append_json_string(manifest_builder, file_name));
   IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(
+      manifest_builder, ",\"format\":\"id4tensor-v1\""));
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(
       manifest_builder, ",\"kind\":\"tensor\""));
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_cstring(manifest_builder, ",\"name\":"));
@@ -476,8 +443,8 @@ static iree_status_t id4_tooling_capture_capture_tensor(
     const iree_hal_buffer_binding_t* binding, iree_host_size_t* record_count) {
   char file_name_storage[64];
   snprintf(file_name_storage, sizeof(file_name_storage),
-           "%.*s_%04" PRIhsz ".npy", (int)file_prefix.size, file_prefix.data,
-           file_ordinal);
+           "%.*s_%04" PRIhsz ".id4tensor", (int)file_prefix.size,
+           file_prefix.data, file_ordinal);
   iree_string_view_t file_name = iree_make_cstring_view(file_name_storage);
   iree_string_view_t file_path = iree_string_view_empty();
   iree_status_t status =
@@ -490,7 +457,7 @@ static iree_status_t id4_tooling_capture_capture_tensor(
         id4_tooling_capture_readback_tensor(options, layout, binding, &bytes);
   }
   if (iree_status_is_ok(status)) {
-    status = id4_tooling_capture_write_npy(
+    status = id4_tooling_capture_write_tensor(
         file_path, layout, iree_make_const_byte_span(bytes.data, bytes.length),
         options->host_allocator);
   }
