@@ -186,6 +186,131 @@ low.func.def target(@target) abi(hal_kernel) @index_i1_reused_after_salu_scc_clo
 
 amdgpu.target<gfx1100> @target
 
+func.def target(@target) @uniform_branch_condition_combined_with_lane_mask(%values: vector<2xi32>, %x: i32, %limit: i32, %true_value: i32, %false_value: i32) -> (i32) {
+  %zero = scalar.constant 0 : i32
+  %lane = vector.extract %values[0] : vector<2xi32> -> i32
+  %lane_ok = scalar.cmpi slt, %lane, %limit : i32
+  %x_lower = scalar.cmpi sge, %x, %zero : i32
+  %x_upper = scalar.cmpi slt, %x, %limit : i32
+  %x_ok = scalar.andi %x_lower, %x_upper : i1
+  %combined = scalar.andi %lane_ok, %x_ok : i1
+  cfg.cond_br %x_ok, ^valid, ^clamped
+^valid:
+  cfg.br ^join(%true_value: i32)
+^clamped:
+  cfg.br ^join(%false_value: i32)
+^join(%selected: i32):
+  %selected_vgpr = scalar.addi %selected, %lane : i32
+  %result = scf.select %combined, %selected_vgpr, %lane : i32
+  func.return %result : i32
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @uniform_branch_condition_combined_with_lane_mask(%values: reg<amdgpu.vgpr x2>, %x: reg<amdgpu.sgpr>, %limit: reg<amdgpu.sgpr>, %true_value: reg<amdgpu.sgpr>, %false_value: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %zero = s_mov_b32 0
+  %lane = slice %values[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %25 = v_mov_b32_copy %limit
+  %lane_ok = v_cmp_lt_i32 %lane, %25
+  %x_lower = s_cmp_ge_i32 %x, %zero
+  %x_upper = s_cmp_lt_i32 %x, %limit
+  %30 = s_mov_b32 1
+  %31 = s_cselect_b32 %30, %zero, %x_lower
+  %32 = s_cselect_b32 %30, %zero, %x_upper
+  %x_ok = s_and_b32 %31, %32
+  %35 = s_cmp_lg_i32 %x_ok, %zero
+  %36 = s_mov_b64_exec_read
+  %37 = slice %36[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %38 = slice %36[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %39 = s_cselect_b32 %37, %zero, %35
+  %40 = s_cselect_b32 %38, %zero, %35
+  %41 = concat(%39, %40) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %combined = s_and_b64 %lane_ok, %41
+  %44 = s_cmp_lg_i32 %x_ok, %zero
+  low.cond_br %44, ^valid, ^clamped : reg<amdgpu.scc>
+^valid:
+  low.br ^join(%true_value: reg<amdgpu.sgpr>)
+^clamped:
+  low.br ^join(%false_value: reg<amdgpu.sgpr>)
+^join(%selected: reg<amdgpu.sgpr>):
+  %45 = v_mov_b32_copy %selected
+  %selected_vgpr = v_add_u32 %45, %lane
+  %result = v_cndmask_b32 %lane, %selected_vgpr, %combined
+  return %result
+}
+
+// ====
+// RUN: emit amdgpu-assembly @uniform_branch_condition_combined_with_lane_mask_assembly strategy=source
+
+amdgpu.target<gfx1100> @target
+
+low.func.def target(@target) @uniform_branch_condition_combined_with_lane_mask_assembly(%values: reg<amdgpu.vgpr x2>, %x: reg<amdgpu.sgpr>, %limit: reg<amdgpu.sgpr>, %true_value: reg<amdgpu.sgpr>, %false_value: reg<amdgpu.sgpr>, %output: reg<amdgpu.sgpr x2>) asm<amdgpu.rdna3.core> {
+  %zero = s_mov_b32 0
+  %lane = slice %values[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %limit_vgpr = v_mov_b32_copy %limit
+  %lane_ok = v_cmp_lt_i32 %lane, %limit_vgpr
+  %x_lower = s_cmp_ge_i32 %x, %zero
+  %x_upper = s_cmp_lt_i32 %x, %limit
+  %one = s_mov_b32 1
+  %x_lower_bool = s_cselect_b32 %one, %zero, %x_lower
+  %x_upper_bool = s_cselect_b32 %one, %zero, %x_upper
+  %x_ok = s_and_b32 %x_lower_bool, %x_upper_bool
+  %x_ok_for_mask = s_cmp_lg_i32 %x_ok, %zero
+  %exec = s_mov_b64_exec_read
+  %exec_low = slice %exec[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %exec_high = slice %exec[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %mask_low = s_cselect_b32 %exec_low, %zero, %x_ok_for_mask
+  %mask_high = s_cselect_b32 %exec_high, %zero, %x_ok_for_mask
+  %x_ok_mask = concat(%mask_low, %mask_high) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %combined = s_and_b64 %lane_ok, %x_ok_mask
+  %x_ok_for_branch = s_cmp_lg_i32 %x_ok, %zero
+  low.cond_br %x_ok_for_branch, ^valid, ^clamped : reg<amdgpu.scc>
+^valid:
+  low.br ^join(%true_value: reg<amdgpu.sgpr>)
+^clamped:
+  low.br ^join(%false_value: reg<amdgpu.sgpr>)
+^join(%selected: reg<amdgpu.sgpr>):
+  %selected_vgpr = v_mov_b32_copy %selected
+  %sum = v_add_u32 %selected_vgpr, %lane
+  %result = v_cndmask_b32 %lane, %sum, %combined
+  global_store_b32_saddr %lane, %result, %output
+  return
+}
+
+// ----
+  s_mov_b32 s6, 0
+  v_mov_b32_copy v1, s1
+  s_delay_alu instid0(VALU_DEP_1)
+  v_cmp_lt_i32 s[8:9], v0, v1
+  s_cmp_ge_i32 s0, s6
+  s_mov_b32 s7, 1
+  s_cselect_b32 s10, s7, s6
+  s_cmp_lt_i32 s0, s1
+  s_cselect_b32 s0, s7, s6
+  s_and_b32 s0, s10, s0
+  s_cmp_lg_i32 s0, s6
+  s_mov_b64_exec_read s[10:11]
+  s_cselect_b32 s10, s10, s6
+  s_cselect_b32 s11, s11, s6
+  s_and_b64 s[8:9], s[8:9], s[10:11]
+  s_cmp_lg_i32 s0, s6
+  s_cbranch_scc0 .Lbb2
+.Lbb1:
+  s_branch .Lbb3
+.Lbb2:
+  s_mov_b32 s2, s3
+.Lbb3:
+  v_mov_b32_copy v1, s2
+  s_delay_alu instid0(VALU_DEP_1)
+  v_add_u32 v1, v1, v0
+  s_delay_alu instid0(VALU_DEP_1)
+  v_cndmask_b32 v1, v0, v1, s[8:9]
+  global_store_b32 v0, v1, s[4:5] offset:0
+  s_endpgm
+
+// ====
+
+amdgpu.target<gfx1100> @target
+
 func.def target(@target) @cfg_if_scalar_compare(%lhs: i32, %rhs: i32, %a: i32, %b: i32) -> (i32) {
   %cond = scalar.cmpi slt, %lhs, %rhs : i32
   cfg.cond_br %cond, ^then, ^else
