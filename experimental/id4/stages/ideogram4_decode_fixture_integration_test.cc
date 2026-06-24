@@ -46,6 +46,117 @@ static iree_status_t FindFixtureTensor(
                           static_cast<int>(role.size), role.data);
 }
 
+static iree_string_view_t FixtureTensorName(
+    const id4::test::FixtureTensor& tensor) {
+  return iree_make_string_view(tensor.name.data(), tensor.name.size());
+}
+
+static iree_status_t FindBoundaryPlan(
+    const id4_pipeline_plan_t* plan, iree_string_view_t name,
+    const id4_pipeline_boundary_tensor_plan_t** out_boundary) {
+  *out_boundary = nullptr;
+  const iree_host_size_t boundary_count =
+      id4_pipeline_plan_boundary_tensor_count(plan);
+  for (iree_host_size_t i = 0; i < boundary_count; ++i) {
+    const id4_pipeline_boundary_tensor_plan_t* boundary =
+        id4_pipeline_plan_boundary_tensor_at(plan, i);
+    if (boundary && iree_string_view_equal(boundary->layout.name, name)) {
+      *out_boundary = boundary;
+      return iree_ok_status();
+    }
+  }
+  return iree_make_status(IREE_STATUS_NOT_FOUND,
+                          "boundary tensor `%.*s` not found",
+                          static_cast<int>(name.size), name.data);
+}
+
+static iree_status_t FindDiagnosticTapPlan(
+    const id4_pipeline_plan_t* plan, iree_string_view_t name,
+    const id4_pipeline_diagnostic_tap_plan_t** out_diagnostic_tap) {
+  *out_diagnostic_tap = nullptr;
+  const iree_host_size_t diagnostic_tap_count =
+      id4_pipeline_plan_diagnostic_tap_count(plan);
+  for (iree_host_size_t i = 0; i < diagnostic_tap_count; ++i) {
+    const id4_pipeline_diagnostic_tap_plan_t* diagnostic_tap =
+        id4_pipeline_plan_diagnostic_tap_at(plan, i);
+    if (diagnostic_tap && iree_string_view_equal(diagnostic_tap->name, name)) {
+      *out_diagnostic_tap = diagnostic_tap;
+      return iree_ok_status();
+    }
+  }
+  return iree_make_status(IREE_STATUS_NOT_FOUND,
+                          "diagnostic tap `%.*s` not found",
+                          static_cast<int>(name.size), name.data);
+}
+
+static id4_pipeline_tensor_layout_t FixtureComparisonLayout(
+    const id4_pipeline_tensor_layout_t* actual_layout,
+    const id4::test::FixtureTensor& expected_tensor) {
+  id4_pipeline_tensor_layout_t layout = *actual_layout;
+  if (layout.shape.rank == expected_tensor.source_shape.rank + 1 &&
+      layout.shape.dims[expected_tensor.source_shape.rank] == 1) {
+    layout.shape = expected_tensor.source_shape;
+  }
+  return layout;
+}
+
+static iree_status_t CompareDiagnosticTapWithFixtureTensor(
+    iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
+    const id4_pipeline_plan_t* plan,
+    const id4::test::BufferBindingSet& diagnostic_tap_bindings,
+    id4_vae_activation_format_t vae_activation_format,
+    const id4::test::FixtureTensor& expected_tensor,
+    iree_hal_semaphore_list_t wait_list) {
+  const iree_string_view_t tensor_name = FixtureTensorName(expected_tensor);
+  iree_hal_buffer_binding_t binding = {};
+  IREE_RETURN_IF_ERROR(id4::test::FindDiagnosticTapBinding(
+      plan, diagnostic_tap_bindings, tensor_name, &binding));
+  const id4_pipeline_diagnostic_tap_plan_t* diagnostic_tap = nullptr;
+  IREE_RETURN_IF_ERROR(
+      FindDiagnosticTapPlan(plan, tensor_name, &diagnostic_tap));
+  const id4_pipeline_tensor_layout_t comparison_layout =
+      FixtureComparisonLayout(&diagnostic_tap->layout, expected_tensor);
+  if (vae_activation_format == ID4_VAE_ACTIVATION_FORMAT_BF16_CONV_INPUT &&
+      iree_string_view_equal(tensor_name,
+                             IREE_SV("vae.flux2.internal_latent"))) {
+    return id4::test::CompareBf16BindingWithRoundedF32FixtureTensor(
+        device, queue_affinity, &binding, wait_list, &comparison_layout,
+        expected_tensor);
+  }
+  return id4::test::CompareBindingWithFixtureTensor(
+      device, queue_affinity, &binding, wait_list, &comparison_layout,
+      expected_tensor);
+}
+
+static iree_status_t CompareBoundaryWithFixtureTensor(
+    iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
+    const id4_pipeline_plan_t* plan,
+    const id4::test::BufferBindingSet& boundary_bindings,
+    iree_string_view_t boundary_name,
+    const id4::test::FixtureTensor& expected_tensor,
+    iree_hal_semaphore_list_t wait_list) {
+  iree_hal_buffer_binding_t binding = {};
+  IREE_RETURN_IF_ERROR(id4::test::FindBoundaryBinding(plan, boundary_bindings,
+                                                      boundary_name, &binding));
+  const id4_pipeline_boundary_tensor_plan_t* boundary = nullptr;
+  IREE_RETURN_IF_ERROR(FindBoundaryPlan(plan, boundary_name, &boundary));
+  const id4_pipeline_tensor_layout_t comparison_layout =
+      FixtureComparisonLayout(&boundary->layout, expected_tensor);
+  return id4::test::CompareBindingWithFixtureTensor(
+      device, queue_affinity, &binding, wait_list, &comparison_layout,
+      expected_tensor);
+}
+
+static bool ShouldCompareF32FixtureTap(
+    id4_vae_activation_format_t vae_activation_format,
+    iree_string_view_t diagnostic_tap_name) {
+  if (vae_activation_format == ID4_VAE_ACTIVATION_FORMAT_F32_CANONICAL) {
+    return true;
+  }
+  return iree_string_view_equal(diagnostic_tap_name,
+                                IREE_SV("vae.flux2.internal_latent"));
+}
+
 static iree_status_t MakeProgramShape(
     id4_pipeline_tensor_shape_t tensor_shape,
     id4_pipeline_program_shape_t* out_program_shape) {
@@ -64,6 +175,7 @@ static iree_status_t MakeProgramShape(
 
 static iree_status_t CreateDecodeStage(
     const id4::test::LiveStageContext& context,
+    id4_vae_activation_format_t vae_activation_format,
     id4_pipeline_stage_t** out_stage) {
   IREE_ASSERT_ARGUMENT(out_stage);
   *out_stage = nullptr;
@@ -80,8 +192,7 @@ static iree_status_t CreateDecodeStage(
   create_options.services = services;
   create_options.kernel_cache = context.kernel_cache.get();
   create_options.model = *id4_ideogram4_decode_program_ideogram4_model_config();
-  create_options.vae_activation_format =
-      ID4_VAE_ACTIVATION_FORMAT_F32_CANONICAL;
+  create_options.vae_activation_format = vae_activation_format;
   return id4_ideogram4_decode_stage_create(&create_options,
                                            iree_allocator_system(), out_stage);
 }
@@ -129,8 +240,9 @@ static iree_status_t VerifyDecodedImageContents(
   return iree_ok_status();
 }
 
-TEST(Ideogram4DecodeStageFixtureIntegration,
-     PrepareAndIssueFinalLatentFixture) {
+static void RunFinalLatentFixture(
+    id4_vae_activation_format_t vae_activation_format,
+    iree_string_view_t capture_run_id) {
   iree_string_view_t fixture_directory =
       iree_make_cstring_view(FLAG_id4_fixture_dir);
   ASSERT_FALSE(iree_string_view_is_empty(fixture_directory))
@@ -144,86 +256,6 @@ TEST(Ideogram4DecodeStageFixtureIntegration,
   IREE_ASSERT_OK(FindFixtureTensor(fixture_tensors, IREE_SV("input"),
                                    IREE_SV("latent"), &latent));
   ASSERT_EQ(latent->dtype, ID4_PIPELINE_TENSOR_DTYPE_F32);
-  const id4::test::FixtureTensor* internal_latent = nullptr;
-  IREE_ASSERT_OK(FindFixtureTensor(fixture_tensors, IREE_SV("tap"),
-                                   IREE_SV("vae.flux2.internal_latent"),
-                                   &internal_latent));
-  ASSERT_EQ(internal_latent->dtype, ID4_PIPELINE_TENSOR_DTYPE_F32);
-  const id4::test::FixtureTensor* post_quant = nullptr;
-  IREE_ASSERT_OK(FindFixtureTensor(fixture_tensors, IREE_SV("tap"),
-                                   IREE_SV("vae.flux2.post_quant_conv"),
-                                   &post_quant));
-  ASSERT_EQ(post_quant->dtype, ID4_PIPELINE_TENSOR_DTYPE_F32);
-  const id4::test::FixtureTensor* decoder_conv_in = nullptr;
-  IREE_ASSERT_OK(FindFixtureTensor(fixture_tensors, IREE_SV("tap"),
-                                   IREE_SV("vae.decoder.conv_in"),
-                                   &decoder_conv_in));
-  ASSERT_EQ(decoder_conv_in->dtype, ID4_PIPELINE_TENSOR_DTYPE_F32);
-  const id4::test::FixtureTensor* mid_block_1_norm1_silu = nullptr;
-  IREE_ASSERT_OK(FindFixtureTensor(
-      fixture_tensors, IREE_SV("tap"),
-      IREE_SV("vae.decoder.mid.block_1.norm1_silu"), &mid_block_1_norm1_silu));
-  ASSERT_EQ(mid_block_1_norm1_silu->dtype, ID4_PIPELINE_TENSOR_DTYPE_F32);
-  const id4::test::FixtureTensor* mid_block_1_conv1 = nullptr;
-  IREE_ASSERT_OK(FindFixtureTensor(fixture_tensors, IREE_SV("tap"),
-                                   IREE_SV("vae.decoder.mid.block_1.conv1"),
-                                   &mid_block_1_conv1));
-  ASSERT_EQ(mid_block_1_conv1->dtype, ID4_PIPELINE_TENSOR_DTYPE_F32);
-  const id4::test::FixtureTensor* mid_block_1_norm2_silu = nullptr;
-  IREE_ASSERT_OK(FindFixtureTensor(
-      fixture_tensors, IREE_SV("tap"),
-      IREE_SV("vae.decoder.mid.block_1.norm2_silu"), &mid_block_1_norm2_silu));
-  ASSERT_EQ(mid_block_1_norm2_silu->dtype, ID4_PIPELINE_TENSOR_DTYPE_F32);
-  const id4::test::FixtureTensor* mid_block_1_conv2 = nullptr;
-  IREE_ASSERT_OK(FindFixtureTensor(fixture_tensors, IREE_SV("tap"),
-                                   IREE_SV("vae.decoder.mid.block_1.conv2"),
-                                   &mid_block_1_conv2));
-  ASSERT_EQ(mid_block_1_conv2->dtype, ID4_PIPELINE_TENSOR_DTYPE_F32);
-  const id4::test::FixtureTensor* mid_block_1_output = nullptr;
-  IREE_ASSERT_OK(FindFixtureTensor(fixture_tensors, IREE_SV("tap"),
-                                   IREE_SV("vae.decoder.mid.block_1.output"),
-                                   &mid_block_1_output));
-  ASSERT_EQ(mid_block_1_output->dtype, ID4_PIPELINE_TENSOR_DTYPE_F32);
-  const id4::test::FixtureTensor* mid_attention_norm = nullptr;
-  IREE_ASSERT_OK(FindFixtureTensor(fixture_tensors, IREE_SV("tap"),
-                                   IREE_SV("vae.decoder.mid.attn_1.norm"),
-                                   &mid_attention_norm));
-  ASSERT_EQ(mid_attention_norm->dtype, ID4_PIPELINE_TENSOR_DTYPE_F32);
-  const id4::test::FixtureTensor* mid_attention_q = nullptr;
-  IREE_ASSERT_OK(FindFixtureTensor(fixture_tensors, IREE_SV("tap"),
-                                   IREE_SV("vae.decoder.mid.attn_1.q"),
-                                   &mid_attention_q));
-  ASSERT_EQ(mid_attention_q->dtype, ID4_PIPELINE_TENSOR_DTYPE_F32);
-  const id4::test::FixtureTensor* mid_attention_k = nullptr;
-  IREE_ASSERT_OK(FindFixtureTensor(fixture_tensors, IREE_SV("tap"),
-                                   IREE_SV("vae.decoder.mid.attn_1.k"),
-                                   &mid_attention_k));
-  ASSERT_EQ(mid_attention_k->dtype, ID4_PIPELINE_TENSOR_DTYPE_F32);
-  const id4::test::FixtureTensor* mid_attention_v = nullptr;
-  IREE_ASSERT_OK(FindFixtureTensor(fixture_tensors, IREE_SV("tap"),
-                                   IREE_SV("vae.decoder.mid.attn_1.v"),
-                                   &mid_attention_v));
-  ASSERT_EQ(mid_attention_v->dtype, ID4_PIPELINE_TENSOR_DTYPE_F32);
-  const id4::test::FixtureTensor* mid_attention = nullptr;
-  IREE_ASSERT_OK(FindFixtureTensor(fixture_tensors, IREE_SV("tap"),
-                                   IREE_SV("vae.decoder.mid.attn_1.attention"),
-                                   &mid_attention));
-  ASSERT_EQ(mid_attention->dtype, ID4_PIPELINE_TENSOR_DTYPE_F32);
-  const id4::test::FixtureTensor* mid_attention_proj = nullptr;
-  IREE_ASSERT_OK(FindFixtureTensor(fixture_tensors, IREE_SV("tap"),
-                                   IREE_SV("vae.decoder.mid.attn_1.proj_out"),
-                                   &mid_attention_proj));
-  ASSERT_EQ(mid_attention_proj->dtype, ID4_PIPELINE_TENSOR_DTYPE_F32);
-  const id4::test::FixtureTensor* mid_attention_output = nullptr;
-  IREE_ASSERT_OK(FindFixtureTensor(fixture_tensors, IREE_SV("tap"),
-                                   IREE_SV("vae.decoder.mid.attn_1.output"),
-                                   &mid_attention_output));
-  ASSERT_EQ(mid_attention_output->dtype, ID4_PIPELINE_TENSOR_DTYPE_F32);
-  const id4::test::FixtureTensor* mid_block_2_output = nullptr;
-  IREE_ASSERT_OK(FindFixtureTensor(fixture_tensors, IREE_SV("tap"),
-                                   IREE_SV("vae.decoder.mid.block_2.output"),
-                                   &mid_block_2_output));
-  ASSERT_EQ(mid_block_2_output->dtype, ID4_PIPELINE_TENSOR_DTYPE_F32);
   const id4::test::FixtureTensor* expected_decoded_image = nullptr;
   IREE_ASSERT_OK(FindFixtureTensor(fixture_tensors, IREE_SV("expected"),
                                    IREE_SV("media.image.decoded"),
@@ -240,7 +272,8 @@ TEST(Ideogram4DecodeStageFixtureIntegration,
   IREE_ASSERT_OK(id4::test::CreateEmbeddedKernelLibrary(kernel_library.out()));
 
   id4::test::OwningRef<id4_pipeline_stage_t, id4_pipeline_stage_release> stage;
-  IREE_ASSERT_OK(CreateDecodeStage(context, stage.out()));
+  IREE_ASSERT_OK(
+      CreateDecodeStage(context, vae_activation_format, stage.out()));
   id4::test::OwningRef<iree_io_parameter_provider_t,
                        iree_io_parameter_provider_release>
       parameter_provider;
@@ -408,7 +441,7 @@ TEST(Ideogram4DecodeStageFixtureIntegration,
     id4_tooling_capture_execution_options_t capture_options;
     std::memset(&capture_options, 0, sizeof(capture_options));
     capture_options.structure_size = sizeof(capture_options);
-    capture_options.run_id = IREE_SV("ideogram4_decode_fixture");
+    capture_options.run_id = capture_run_id;
     capture_options.output_directory = capture_directory;
     capture_options.plan = plan.get();
     capture_options.device = context.device.get();
@@ -447,141 +480,38 @@ TEST(Ideogram4DecodeStageFixtureIntegration,
     image_options.host_allocator = iree_allocator_system();
     IREE_ASSERT_OK(id4_tooling_write_f32_rgb_ppm(&image_options));
   }
-  iree_hal_buffer_binding_t internal_latent_binding = {};
-  IREE_ASSERT_OK(id4::test::FindDiagnosticTapBinding(
-      plan.get(), diagnostic_tap_bindings, IREE_SV("vae.flux2.internal_latent"),
-      &internal_latent_binding));
-  IREE_ASSERT_OK(id4::test::CompareF32BindingWithFixtureTensor(
-      context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY,
-      &internal_latent_binding, read_wait.list(), *internal_latent));
+  for (iree_string_view_t diagnostic_tap_name : diagnostic_tap_names) {
+    if (!ShouldCompareF32FixtureTap(vae_activation_format,
+                                    diagnostic_tap_name)) {
+      continue;
+    }
+    const id4::test::FixtureTensor* expected_tap = nullptr;
+    IREE_ASSERT_OK(FindFixtureTensor(fixture_tensors, IREE_SV("tap"),
+                                     diagnostic_tap_name, &expected_tap));
+    IREE_ASSERT_OK(CompareDiagnosticTapWithFixtureTensor(
+        context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, plan.get(),
+        diagnostic_tap_bindings, vae_activation_format, *expected_tap,
+        read_wait.list()));
+  }
 
-  iree_hal_buffer_binding_t post_quant_binding = {};
-  IREE_ASSERT_OK(id4::test::FindDiagnosticTapBinding(
-      plan.get(), diagnostic_tap_bindings, IREE_SV("vae.flux2.post_quant_conv"),
-      &post_quant_binding));
-  IREE_ASSERT_OK(id4::test::CompareF32BindingWithFixtureTensor(
-      context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, &post_quant_binding,
-      read_wait.list(), *post_quant));
+  if (vae_activation_format == ID4_VAE_ACTIVATION_FORMAT_F32_CANONICAL) {
+    IREE_ASSERT_OK(CompareBoundaryWithFixtureTensor(
+        context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, plan.get(),
+        boundary_bindings, IREE_SV("media.image.decoded"),
+        *expected_decoded_image, read_wait.list()));
+  }
+}
 
-  iree_hal_buffer_binding_t decoder_conv_in_binding = {};
-  IREE_ASSERT_OK(id4::test::FindDiagnosticTapBinding(
-      plan.get(), diagnostic_tap_bindings, IREE_SV("vae.decoder.conv_in"),
-      &decoder_conv_in_binding));
-  IREE_ASSERT_OK(id4::test::CompareF32BindingWithFixtureTensor(
-      context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY,
-      &decoder_conv_in_binding, read_wait.list(), *decoder_conv_in));
+TEST(Ideogram4DecodeStageFixtureIntegration,
+     PrepareAndIssueFinalLatentFixture) {
+  RunFinalLatentFixture(ID4_VAE_ACTIVATION_FORMAT_F32_CANONICAL,
+                        IREE_SV("ideogram4_decode_fixture_f32"));
+}
 
-  iree_hal_buffer_binding_t mid_block_1_norm1_silu_binding = {};
-  IREE_ASSERT_OK(id4::test::FindDiagnosticTapBinding(
-      plan.get(), diagnostic_tap_bindings,
-      IREE_SV("vae.decoder.mid.block_1.norm1_silu"),
-      &mid_block_1_norm1_silu_binding));
-  IREE_ASSERT_OK(id4::test::CompareF32BindingWithFixtureTensor(
-      context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY,
-      &mid_block_1_norm1_silu_binding, read_wait.list(),
-      *mid_block_1_norm1_silu));
-
-  iree_hal_buffer_binding_t mid_block_1_conv1_binding = {};
-  IREE_ASSERT_OK(id4::test::FindDiagnosticTapBinding(
-      plan.get(), diagnostic_tap_bindings,
-      IREE_SV("vae.decoder.mid.block_1.conv1"), &mid_block_1_conv1_binding));
-  IREE_ASSERT_OK(id4::test::CompareF32BindingWithFixtureTensor(
-      context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY,
-      &mid_block_1_conv1_binding, read_wait.list(), *mid_block_1_conv1));
-
-  iree_hal_buffer_binding_t mid_block_1_norm2_silu_binding = {};
-  IREE_ASSERT_OK(id4::test::FindDiagnosticTapBinding(
-      plan.get(), diagnostic_tap_bindings,
-      IREE_SV("vae.decoder.mid.block_1.norm2_silu"),
-      &mid_block_1_norm2_silu_binding));
-  IREE_ASSERT_OK(id4::test::CompareF32BindingWithFixtureTensor(
-      context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY,
-      &mid_block_1_norm2_silu_binding, read_wait.list(),
-      *mid_block_1_norm2_silu));
-
-  iree_hal_buffer_binding_t mid_block_1_conv2_binding = {};
-  IREE_ASSERT_OK(id4::test::FindDiagnosticTapBinding(
-      plan.get(), diagnostic_tap_bindings,
-      IREE_SV("vae.decoder.mid.block_1.conv2"), &mid_block_1_conv2_binding));
-  IREE_ASSERT_OK(id4::test::CompareF32BindingWithFixtureTensor(
-      context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY,
-      &mid_block_1_conv2_binding, read_wait.list(), *mid_block_1_conv2));
-
-  iree_hal_buffer_binding_t mid_block_1_output_binding = {};
-  IREE_ASSERT_OK(id4::test::FindDiagnosticTapBinding(
-      plan.get(), diagnostic_tap_bindings,
-      IREE_SV("vae.decoder.mid.block_1.output"), &mid_block_1_output_binding));
-  IREE_ASSERT_OK(id4::test::CompareF32BindingWithFixtureTensor(
-      context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY,
-      &mid_block_1_output_binding, read_wait.list(), *mid_block_1_output));
-
-  iree_hal_buffer_binding_t mid_attention_norm_binding = {};
-  IREE_ASSERT_OK(id4::test::FindDiagnosticTapBinding(
-      plan.get(), diagnostic_tap_bindings,
-      IREE_SV("vae.decoder.mid.attn_1.norm"), &mid_attention_norm_binding));
-  IREE_ASSERT_OK(id4::test::CompareF32BindingWithFixtureTensor(
-      context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY,
-      &mid_attention_norm_binding, read_wait.list(), *mid_attention_norm));
-
-  iree_hal_buffer_binding_t mid_attention_q_binding = {};
-  IREE_ASSERT_OK(id4::test::FindDiagnosticTapBinding(
-      plan.get(), diagnostic_tap_bindings, IREE_SV("vae.decoder.mid.attn_1.q"),
-      &mid_attention_q_binding));
-  IREE_ASSERT_OK(id4::test::CompareF32BindingWithFixtureTensor(
-      context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY,
-      &mid_attention_q_binding, read_wait.list(), *mid_attention_q));
-
-  iree_hal_buffer_binding_t mid_attention_k_binding = {};
-  IREE_ASSERT_OK(id4::test::FindDiagnosticTapBinding(
-      plan.get(), diagnostic_tap_bindings, IREE_SV("vae.decoder.mid.attn_1.k"),
-      &mid_attention_k_binding));
-  IREE_ASSERT_OK(id4::test::CompareF32BindingWithFixtureTensor(
-      context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY,
-      &mid_attention_k_binding, read_wait.list(), *mid_attention_k));
-
-  iree_hal_buffer_binding_t mid_attention_v_binding = {};
-  IREE_ASSERT_OK(id4::test::FindDiagnosticTapBinding(
-      plan.get(), diagnostic_tap_bindings, IREE_SV("vae.decoder.mid.attn_1.v"),
-      &mid_attention_v_binding));
-  IREE_ASSERT_OK(id4::test::CompareF32BindingWithFixtureTensor(
-      context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY,
-      &mid_attention_v_binding, read_wait.list(), *mid_attention_v));
-
-  iree_hal_buffer_binding_t mid_attention_binding = {};
-  IREE_ASSERT_OK(id4::test::FindDiagnosticTapBinding(
-      plan.get(), diagnostic_tap_bindings,
-      IREE_SV("vae.decoder.mid.attn_1.attention"), &mid_attention_binding));
-  IREE_ASSERT_OK(id4::test::CompareF32BindingWithFixtureTensor(
-      context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, &mid_attention_binding,
-      read_wait.list(), *mid_attention));
-
-  iree_hal_buffer_binding_t mid_attention_proj_binding = {};
-  IREE_ASSERT_OK(id4::test::FindDiagnosticTapBinding(
-      plan.get(), diagnostic_tap_bindings,
-      IREE_SV("vae.decoder.mid.attn_1.proj_out"), &mid_attention_proj_binding));
-  IREE_ASSERT_OK(id4::test::CompareF32BindingWithFixtureTensor(
-      context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY,
-      &mid_attention_proj_binding, read_wait.list(), *mid_attention_proj));
-
-  iree_hal_buffer_binding_t mid_attention_output_binding = {};
-  IREE_ASSERT_OK(id4::test::FindDiagnosticTapBinding(
-      plan.get(), diagnostic_tap_bindings,
-      IREE_SV("vae.decoder.mid.attn_1.output"), &mid_attention_output_binding));
-  IREE_ASSERT_OK(id4::test::CompareF32BindingWithFixtureTensor(
-      context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY,
-      &mid_attention_output_binding, read_wait.list(), *mid_attention_output));
-
-  iree_hal_buffer_binding_t mid_block_2_output_binding = {};
-  IREE_ASSERT_OK(id4::test::FindDiagnosticTapBinding(
-      plan.get(), diagnostic_tap_bindings,
-      IREE_SV("vae.decoder.mid.block_2.output"), &mid_block_2_output_binding));
-  IREE_ASSERT_OK(id4::test::CompareF32BindingWithFixtureTensor(
-      context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY,
-      &mid_block_2_output_binding, read_wait.list(), *mid_block_2_output));
-
-  IREE_ASSERT_OK(id4::test::CompareF32BindingWithFixtureTensor(
-      context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, &decoded_binding,
-      read_wait.list(), *expected_decoded_image));
+TEST(Ideogram4DecodeStageFixtureIntegration,
+     IssueFinalLatentFixtureBf16PreludeSmoke) {
+  RunFinalLatentFixture(ID4_VAE_ACTIVATION_FORMAT_BF16_CONV_INPUT,
+                        IREE_SV("ideogram4_decode_fixture_bf16"));
 }
 
 }  // namespace

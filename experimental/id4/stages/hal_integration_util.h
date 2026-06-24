@@ -266,6 +266,15 @@ iree_status_t CompareF32BindingWithFixtureTensor(
     const iree_hal_buffer_binding_t* binding,
     iree_hal_semaphore_list_t wait_list, const FixtureTensor& expected_tensor);
 
+// Reads a BF16 |binding| and verifies it exactly matches the expected F32
+// fixture tensor after F32-to-BF16 rounding.
+iree_status_t CompareBf16BindingWithRoundedF32FixtureTensor(
+    iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_buffer_binding_t* binding,
+    iree_hal_semaphore_list_t wait_list,
+    const id4_pipeline_tensor_layout_t* actual_layout,
+    const FixtureTensor& expected_tensor);
+
 // Reads |binding| and verifies it matches an expected F32 fixture tensor.
 //
 // |actual_layout| describes the binding's planned dtype and shape. F32, F16,
