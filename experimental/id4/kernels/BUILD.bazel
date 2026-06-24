@@ -3913,6 +3913,61 @@ _KERNEL_CASES = [
         "target_name": "qwen3_vl_attention_materialized_f32_qwen_slice",
     },
     {
+        "actual_case": "@id4_qwen3_vl_linear_input_pack_f32_bf16_small_case",
+        "benchmark": "@id4_qwen3_vl_linear_input_pack_f32_bf16_small",
+        "configs": [
+            "--config=id4.qwen3_vl.linear_input_pack.token_count=3",
+            "--config=id4.qwen3_vl.linear_input_pack.input_size=2",
+            "--config=id4.qwen3_vl.linear_input_pack.element_count=6",
+        ],
+        "source": "qwen3_vl/linear_input_pack_f32_bf16.loom",
+        "target_name": "qwen3_vl_linear_input_pack_f32_bf16_small",
+    },
+    {
+        "actual_case": "@id4_qwen3_vl_linear_input_pack_f32_bf16_qwen_projection_shape_case",
+        "benchmark": "@id4_qwen3_vl_linear_input_pack_f32_bf16_qwen_projection_shape",
+        "configs": [
+            "--config=id4.qwen3_vl.linear_input_pack.token_count=451",
+            "--config=id4.qwen3_vl.linear_input_pack.input_size=4096",
+            "--config=id4.qwen3_vl.linear_input_pack.element_count=1847296",
+        ],
+        "source": "qwen3_vl/linear_input_pack_f32_bf16.loom",
+        "target_name": "qwen3_vl_linear_input_pack_f32_bf16_qwen_projection_shape",
+    },
+    {
+        "actual_case": "@id4_qwen3_vl_linear_bf16_f32_wmma_small_case",
+        "benchmark": "@id4_qwen3_vl_linear_bf16_f32_wmma_small",
+        "configs": [
+            "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=16",
+            "--config=id4.qwen3_vl.linear_wmma.input_size=16",
+            "--config=id4.qwen3_vl.linear_wmma.output_size=32",
+        ],
+        "source": "qwen3_vl/linear_bf16_f32_wmma.loom",
+        "target_name": "qwen3_vl_linear_bf16_f32_wmma_small",
+    },
+    {
+        "actual_case": "@id4_qwen3_vl_linear_bf16_f32_wmma_zero_case",
+        "benchmark": "@id4_qwen3_vl_linear_bf16_f32_wmma_zero",
+        "configs": [
+            "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=16",
+            "--config=id4.qwen3_vl.linear_wmma.input_size=16",
+            "--config=id4.qwen3_vl.linear_wmma.output_size=32",
+        ],
+        "source": "qwen3_vl/linear_bf16_f32_wmma.loom",
+        "target_name": "qwen3_vl_linear_bf16_f32_wmma_zero",
+    },
+    {
+        "actual_case": "@id4_qwen3_vl_linear_bf16_f32_wmma_qwen_projection_shape_case",
+        "benchmark": "@id4_qwen3_vl_linear_bf16_f32_wmma_qwen_projection_shape",
+        "configs": [
+            "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=464",
+            "--config=id4.qwen3_vl.linear_wmma.input_size=4096",
+            "--config=id4.qwen3_vl.linear_wmma.output_size=4096",
+        ],
+        "source": "qwen3_vl/linear_bf16_f32_wmma.loom",
+        "target_name": "qwen3_vl_linear_bf16_f32_wmma_qwen_projection_shape",
+    },
+    {
         "actual_case": "@id4_qwen3_vl_token_embedding_bf16_f32_small_case",
         "benchmark": "@id4_qwen3_vl_token_embedding_bf16_f32_small",
         "configs": [
@@ -4145,7 +4200,9 @@ _KERNEL_SOURCES = [
     "ideogram4/unpatchify_scale_f32.loom",
     "qwen3_vl/attention_materialized_f32.loom",
     "qwen3_vl/condition.loom",
+    "qwen3_vl/linear_bf16_f32_wmma.loom",
     "qwen3_vl/linear_bf16_f32.loom",
+    "qwen3_vl/linear_input_pack_f32_bf16.loom",
     "qwen3_vl/residual_add_f32.loom",
     "qwen3_vl/rotary_embedding.loom",
     "qwen3_vl/rmsnorm.loom",

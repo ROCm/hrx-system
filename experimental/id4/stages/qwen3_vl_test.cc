@@ -23,15 +23,15 @@ static id4_qwen3_vl_model_config_t MakeModelConfig(uint32_t layer_count) {
       // Vocabulary row count.
       /*.vocab_size=*/32,
       // Hidden-state channel count.
-      /*.hidden_size=*/8,
+      /*.hidden_size=*/32,
       // MLP intermediate channel count.
-      /*.intermediate_size=*/16,
+      /*.intermediate_size=*/64,
       // Number of query attention heads.
       /*.attention_head_count=*/2,
       // Number of key/value attention heads.
-      /*.key_value_head_count=*/1,
+      /*.key_value_head_count=*/2,
       // Channel count per attention head.
-      /*.head_size=*/4,
+      /*.head_size=*/16,
       // Number of selected layer outputs.
       /*.selected_layer_count=*/IREE_ARRAYSIZE(kSelectedLayerOrdinals),
       // Selected layer output ordinals.
@@ -96,7 +96,7 @@ TEST(Qwen3VlStage, PlansForwardStageFromRequestConfig) {
   id4_qwen3_vl_stage_plan_options_t qwen_options;
   memset(&qwen_options, 0, sizeof(qwen_options));
   qwen_options.structure_size = sizeof(qwen_options);
-  qwen_options.request.token_count = 3;
+  qwen_options.request.token_count = 19;
 
   id4_pipeline_stage_plan_options_t plan_options;
   memset(&plan_options, 0, sizeof(plan_options));
