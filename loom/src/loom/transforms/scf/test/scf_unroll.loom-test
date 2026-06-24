@@ -625,16 +625,172 @@ func.def @partial_factor_divisible_trip_count_omits_tail_guard() {
 
 // ====
 
-func.def @interleaved_partial_factor_requires_exact_full_unroll() {
+func.def @interleaved_partial_factor_divisible_trip_count() {
   %start = index.constant 0 : index
   %end = index.constant 4 : index
   %step = index.constant 1 : index
   %factor = index.constant 2 : index
-  // ERROR@+1: STRUCTURE/014 {attr_name="schedule", expected_constraint="exact full unroll without stripmining"}
   scf.for %i = [%start to %end step %step] unroll(%factor) schedule(interleaved) {
     test.use %i : index
   }
   func.return
+}
+
+// ----
+func.def @interleaved_partial_factor_divisible_trip_count() {
+  %start = index.constant 0 : index
+  %end = index.constant 4 : index
+  %step = index.constant 1 : index
+  %factor = index.constant 2 : index
+  %5 = index.constant 2 : index
+  %6 = index.constant 4 : index
+  scf.for %i = [%start to %6 step %5] {
+    %8 = index.constant 1 : index
+    %i_1 = index.add %i, %8 : index
+    test.use %i : index
+    test.use %i_1 : index
+  }
+  func.return
+}
+
+// ====
+
+func.def @interleaved_partial_factor_static_tail_loop() {
+  %start = index.constant 0 : index
+  %end = index.constant 5 : index
+  %step = index.constant 1 : index
+  %factor = index.constant 2 : index
+  scf.for %i = [%start to %end step %step] unroll(%factor) schedule(interleaved) {
+    test.use %i : index
+  }
+  func.return
+}
+
+// ----
+func.def @interleaved_partial_factor_static_tail_loop() {
+  %start = index.constant 0 : index
+  %end = index.constant 5 : index
+  %step = index.constant 1 : index
+  %factor = index.constant 2 : index
+  %5 = index.constant 2 : index
+  %6 = index.constant 4 : index
+  scf.for %i = [%start to %6 step %5] {
+    %8 = index.constant 1 : index
+    %i_1 = index.add %i, %8 : index
+    test.use %i : index
+    test.use %i_1 : index
+  }
+  scf.for %i = [%6 to %end step %step] {
+    test.use %i : index
+  }
+  func.return
+}
+
+// ====
+
+func.def @interleaved_partial_factor_dynamic_tail_loop(%end: index) {
+  %start = index.constant 0 : index
+  %step = index.constant 1 : index
+  %factor = index.constant 2 : index
+  scf.for %i = [%start to %end step %step] unroll(%factor) schedule(interleaved) {
+    test.use %i : index
+  }
+  func.return
+}
+
+// ----
+func.def @interleaved_partial_factor_dynamic_tail_loop(%end: index) {
+  %start = index.constant 0 : index
+  %step = index.constant 1 : index
+  %factor = index.constant 2 : index
+  %5 = index.constant 2 : index
+  %6 = index.constant 0 : index
+  %7 = index.sub %end, %start : index
+  %8 = index.max %7, %6 : index
+  %9 = index.div %8, %factor : index
+  %10 = index.mul %9, %5 : index
+  %11 = index.add %start, %10 : index
+  scf.for %i = [%start to %11 step %5] {
+    %13 = index.constant 1 : index
+    %i_1 = index.add %i, %13 : index
+    test.use %i : index
+    test.use %i_1 : index
+  }
+  scf.for %i = [%11 to %end step %step] {
+    test.use %i : index
+  }
+  func.return
+}
+
+// ====
+
+func.def @interleaved_partial_factor_dynamic_tail_step_two(%end: index) {
+  %start = index.constant 0 : index
+  %step = index.constant 2 : index
+  %factor = index.constant 2 : index
+  scf.for %i = [%start to %end step %step] unroll(%factor) schedule(interleaved) {
+    test.use %i : index
+  }
+  func.return
+}
+
+// ----
+func.def @interleaved_partial_factor_dynamic_tail_step_two(%end: index) {
+  %start = index.constant 0 : index
+  %step = index.constant 2 : index
+  %factor = index.constant 2 : index
+  %5 = index.constant 4 : index
+  %6 = index.constant 0 : index
+  %7 = index.sub %end, %start : index
+  %8 = index.max %7, %6 : index
+  %9 = index.constant 1 : index
+  %10 = index.add %8, %9 : index
+  %11 = index.div %10, %step : index
+  %12 = index.div %11, %factor : index
+  %13 = index.mul %12, %5 : index
+  %14 = index.add %start, %13 : index
+  scf.for %i = [%start to %14 step %5] {
+    %16 = index.constant 2 : index
+    %i_2 = index.add %i, %16 : index
+    test.use %i : index
+    test.use %i_2 : index
+  }
+  scf.for %i = [%14 to %end step %step] {
+    test.use %i : index
+  }
+  func.return
+}
+
+// ====
+
+func.def @interleaved_partial_factor_carried_loop(%input: i32) -> (i32) {
+  %start = index.constant 0 : index
+  %end = index.constant 4 : index
+  %step = index.constant 1 : index
+  %factor = index.constant 2 : index
+  %result = scf.for %i = [%start to %end step %step](%acc = %input : i32) -> (i32) unroll(%factor) schedule(interleaved) {
+    %next = test.addi %acc, %input : i32
+    scf.yield %next : i32
+  }
+  func.return %result : i32
+}
+
+// ----
+func.def @interleaved_partial_factor_carried_loop(%input: i32) -> (i32) {
+  %start = index.constant 0 : index
+  %end = index.constant 4 : index
+  %step = index.constant 1 : index
+  %factor = index.constant 2 : index
+  %10 = index.constant 2 : index
+  %11 = index.constant 4 : index
+  %result = scf.for %i = [%start to %11 step %10](%acc = %input : i32) -> (i32) {
+    %15 = index.constant 1 : index
+    %i_1 = index.add %i, %15 : index
+    %next = test.addi %acc, %input : i32
+    %next_1 = test.addi %next, %input : i32
+    scf.yield %next_1 : i32
+  }
+  func.return %result : i32
 }
 
 // ====
