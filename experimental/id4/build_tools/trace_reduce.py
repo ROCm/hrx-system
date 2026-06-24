@@ -22,6 +22,9 @@ from typing import Any
 NPY_MAGIC = b"\x93NUMPY"
 NPY_VERSION = b"\x01\x00"
 NPY_PREFIX_LENGTH = len(NPY_MAGIC) + len(NPY_VERSION) + 2
+ID4_TENSOR_MAGIC = b"ID4TENSR"
+ID4_TENSOR_FORMAT = "id4tensor-v1"
+NPY_FORMAT = "npy-v1"
 
 DTYPE_TABLE = {
     "f32": {
@@ -292,6 +295,65 @@ def write_npy(path: Path, dtype: str, shape: list[int], payload: bytes) -> None:
         file.write(payload)
 
 
+def write_id4_tensor(path: Path, dtype: str, shape: list[int], payload: bytes) -> None:
+    dtype_info = DTYPE_TABLE[dtype]
+    expected_byte_count = math.prod(shape) * int(dtype_info["byte_count"])
+    if len(payload) != expected_byte_count:
+        raise TraceReduceError(
+            f"ID4 tensor payload for {path} has {len(payload)} bytes, expected "
+            f"{expected_byte_count}"
+        )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    header = json.dumps(
+        {
+            "byte_length": len(payload),
+            "dtype": dtype,
+            "kind": "tensor",
+            "layout": "dense-row-major",
+            "shape": shape,
+            "storage_dtype": dtype,
+            "storage_shape": shape,
+            "version": 1,
+        },
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    if len(header) > 0xFFFFFFFF:
+        raise TraceReduceError(f"ID4 tensor header is too large for {path}")
+    with path.open("wb") as file:
+        file.write(ID4_TENSOR_MAGIC)
+        file.write(struct.pack("<I", len(header)))
+        file.write(header)
+        file.write(payload)
+
+
+def _tensor_output_path_and_format(output_path: Path, dtype: str) -> tuple[Path, str]:
+    if dtype == "f32" and output_path.suffix != ".id4tensor":
+        return output_path, NPY_FORMAT
+    if output_path.suffix == ".npy":
+        return output_path.with_suffix(".id4tensor"), ID4_TENSOR_FORMAT
+    if output_path.suffix == ".id4tensor":
+        return output_path, ID4_TENSOR_FORMAT
+    raise TraceReduceError(f"non-f32 tensor output {output_path} must use .id4tensor")
+
+
+def write_tensor_payload(
+    output_dir: Path,
+    requested_output_path: Path,
+    dtype: str,
+    shape: list[int],
+    payload: bytes,
+) -> tuple[Path, str]:
+    output_path, payload_format = _tensor_output_path_and_format(
+        requested_output_path, dtype
+    )
+    if payload_format == NPY_FORMAT:
+        write_npy(output_dir / output_path, dtype, shape, payload)
+    else:
+        write_id4_tensor(output_dir / output_path, dtype, shape, payload)
+    return output_path, payload_format
+
+
 def _summarize_numeric_payload(dtype: str, payload: bytes) -> dict[str, Any]:
     dtype_info = DTYPE_TABLE[dtype]
     finite_count = 0
@@ -390,7 +452,9 @@ def _reduce_tensor(
     if not tensor_path.is_file():
         raise TraceReduceError(f"tensor payload not found: {tensor_path}")
     payload = _read_tensor_slice(tensor_path, shape, dtype, slices)
-    write_npy(output_dir / output_path, dtype, output_shape, payload)
+    actual_output_path, payload_format = write_tensor_payload(
+        output_dir, output_path, dtype, output_shape, payload
+    )
     reduced_record = {
         "kind": "tensor",
         "role": role,
@@ -403,7 +467,8 @@ def _reduce_tensor(
         "slice": [{"start": start, "length": length} for start, length in slices],
         "dtype": dtype,
         "shape": output_shape,
-        "file": output_path.as_posix(),
+        "file": actual_output_path.as_posix(),
+        "format": payload_format,
         "summary": _summarize_numeric_payload(dtype, payload),
     }
     if tolerance is not None:
@@ -473,6 +538,7 @@ def _inventory_record(record: dict[str, Any]) -> dict[str, Any]:
     inventory.update(
         {
             "dtype": record["dtype"],
+            "format": record["format"],
             "shape": record["shape"],
             "source_dtype": record["source_dtype"],
             "source_shape": record["source_shape"],

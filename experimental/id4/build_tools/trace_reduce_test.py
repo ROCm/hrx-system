@@ -35,6 +35,16 @@ def _read_npy(path: Path) -> tuple[str, tuple[int, ...], bytes]:
     return header["descr"], tuple(header["shape"]), data
 
 
+def _read_id4_tensor(path: Path) -> tuple[str, tuple[int, ...], bytes]:
+    payload = path.read_bytes()
+    if payload[:8] != trace_reduce.ID4_TENSOR_MAGIC:
+        raise AssertionError("missing ID4 tensor magic")
+    header_length = struct.unpack("<I", payload[8:12])[0]
+    header = json.loads(payload[12 : 12 + header_length].decode("utf-8"))
+    data = payload[12 + header_length :]
+    return header["dtype"], tuple(header["shape"]), data
+
+
 class TraceReduceTest(unittest.TestCase):
     def test_reduces_text_and_tensor_slices(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -133,8 +143,10 @@ class TraceReduceTest(unittest.TestCase):
                 "structured prompt\n",
             )
 
-            descr, shape, data = _read_npy(output_dir / "qwen" / "token_ids.npy")
-            self.assertEqual(descr, "<i4")
+            dtype, shape, data = _read_id4_tensor(
+                output_dir / "qwen" / "token_ids.id4tensor"
+            )
+            self.assertEqual(dtype, "i32")
             self.assertEqual(shape, (3,))
             self.assertEqual(struct.unpack("<3i", data), (11, 12, 13))
 
@@ -144,6 +156,10 @@ class TraceReduceTest(unittest.TestCase):
             self.assertEqual(struct.unpack("<4f", data), (9.0, 13.0, 10.0, 14.0))
 
             condition_record = manifest["records"][2]
+            self.assertEqual(manifest["records"][1]["file"], "qwen/token_ids.id4tensor")
+            self.assertEqual(manifest["records"][1]["format"], "id4tensor-v1")
+            self.assertEqual(condition_record["file"], "qwen/condition.npy")
+            self.assertEqual(condition_record["format"], "npy-v1")
             self.assertEqual(condition_record["summary"]["finite_count"], 4)
             self.assertEqual(condition_record["summary"]["min"], 9.0)
             self.assertEqual(condition_record["summary"]["max"], 14.0)
@@ -172,6 +188,7 @@ class TraceReduceTest(unittest.TestCase):
             encoder_record = inventory["stages"][0]["records"][0]
             self.assertEqual(encoder_record["name"], "condition")
             self.assertEqual(encoder_record["dtype"], "f32")
+            self.assertEqual(encoder_record["format"], "npy-v1")
             self.assertEqual(encoder_record["shape"], [2, 2])
             self.assertEqual(encoder_record["source_shape"], [4, 5])
             self.assertEqual(
@@ -183,6 +200,7 @@ class TraceReduceTest(unittest.TestCase):
                 [(record["kind"], record["name"]) for record in prompt_records],
                 [("text", "wrapped_prompt"), ("tensor", "token_ids")],
             )
+            self.assertEqual(prompt_records[1]["format"], "id4tensor-v1")
 
     def test_rejects_floating_expected_tensor_without_tolerance(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -223,6 +241,53 @@ class TraceReduceTest(unittest.TestCase):
                 "tolerance is required",
             ):
                 trace_reduce.reduce_trace(trace_dir, root / "out", plan)
+
+    def test_reduces_bf16_tensor_to_exact_payload(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            trace_dir = root / "trace"
+            output_dir = root / "fixtures"
+            (trace_dir / "tensors").mkdir(parents=True)
+            (trace_dir / "tensors" / "hidden.bin").write_bytes(b"\x80\x3f\x00\x40")
+            _write_manifest_record(
+                trace_dir,
+                {
+                    "dtype": "bf16",
+                    "file": "tensors/hidden.bin",
+                    "kind": "tensor",
+                    "name": "hidden",
+                    "ordinal": 0,
+                    "shape": [2],
+                    "stage": "qwen.encoder",
+                },
+            )
+            plan = {
+                "fixture_id": "bf16_fixture",
+                "texts": [],
+                "tensors": [
+                    {
+                        "name": "hidden",
+                        "output": "hidden.npy",
+                        "role": "expected",
+                        "slice": [{"length": 2, "start": 0}],
+                        "stage": "qwen.encoder",
+                        "tolerance": {"atol": 0.0, "rtol": 0.0},
+                    }
+                ],
+            }
+
+            manifest = trace_reduce.reduce_trace(trace_dir, output_dir, plan)
+
+            dtype, shape, data = _read_id4_tensor(output_dir / "hidden.id4tensor")
+            self.assertEqual(dtype, "bf16")
+            self.assertEqual(shape, (2,))
+            self.assertEqual(data, b"\x80\x3f\x00\x40")
+            record = manifest["records"][0]
+            self.assertEqual(record["file"], "hidden.id4tensor")
+            self.assertEqual(record["format"], "id4tensor-v1")
+            self.assertEqual(record["summary"]["finite_count"], 2)
+            self.assertEqual(record["summary"]["min"], 1.0)
+            self.assertEqual(record["summary"]["max"], 2.0)
 
 
 if __name__ == "__main__":
