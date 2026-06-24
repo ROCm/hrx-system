@@ -1327,16 +1327,23 @@ static iree_status_t id4_vae_program_author_conv3x3_bias_add(
   iree_string_view_t function_name =
       IREE_SV("id4_vae_conv3x3_bias_add_ic4_oc4_f32");
   uint32_t output_channel_tile_width = 4;
+  uint32_t dispatch_element_count =
+      (uint32_t)(output_element_count / output_channel_tile_width);
+  uint32_t dispatch_workgroup_count_y = 1;
   id4_vae_program_conv3x3_weight_layout_t weight_layout =
       ID4_VAE_PROGRAM_CONV3X3_WEIGHT_LAYOUT_SOURCE;
   if (channel_count >= 16 && channel_count % 16 == 0) {
-    function_name = IREE_SV("id4_vae_conv3x3_bias_add_ic4_oc16_packed_f32");
+    function_name = IREE_SV("id4_vae_conv3x3_bias_add_ic4_oc16_packed_2d_f32");
     output_channel_tile_width = 16;
     weight_layout = ID4_VAE_PROGRAM_CONV3X3_WEIGHT_LAYOUT_PACKED_IC_KY_KX_OC;
+    dispatch_element_count = (uint32_t)(output_element_count / channel_count);
+    dispatch_workgroup_count_y = channel_count / output_channel_tile_width;
   } else if (channel_count >= 8 && channel_count % 8 == 0) {
     function_name = IREE_SV("id4_vae_conv3x3_bias_add_ic4_oc8_packed_f32");
     output_channel_tile_width = 8;
     weight_layout = ID4_VAE_PROGRAM_CONV3X3_WEIGHT_LAYOUT_PACKED_IC_KY_KX_OC;
+    dispatch_element_count =
+        (uint32_t)(output_element_count / output_channel_tile_width);
   }
 
   iree_string_view_t resolved_weight_key = iree_string_view_empty();
@@ -1379,8 +1386,11 @@ static iree_status_t id4_vae_program_author_conv3x3_bias_add(
   dispatch_options.name = dispatch_name;
   dispatch_options.kernel = id4_pipeline_make_kernel_ref(
       IREE_SV("vae/conv3x3_bias_f32"), function_name);
-  dispatch_options.dispatch_config = id4_vae_program_make_dispatch_config(
-      (uint32_t)(output_element_count / output_channel_tile_width));
+  dispatch_options.dispatch_config =
+      id4_vae_program_make_static_dispatch_config(
+          id4_vae_program_ceil_div_u32(dispatch_element_count,
+                                       ID4_VAE_DECODE_WORKGROUP_SIZE_X),
+          dispatch_workgroup_count_y, 1);
   dispatch_options.config_binding_count = config_list.count;
   dispatch_options.config_bindings = config_list.bindings;
   dispatch_options.binding_count = IREE_ARRAYSIZE(bindings);
