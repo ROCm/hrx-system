@@ -92,8 +92,11 @@ class TestLogicalDevice {
 iree_status_t AllocateTimestampBuffer(iree_hal_device_t* device,
                                       iree_hal_buffer_t** out_buffer) {
   iree_hal_buffer_params_t params = {0};
-  params.type =
-      IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL | IREE_HAL_MEMORY_TYPE_HOST_VISIBLE;
+  // Host-visible host-pool buffer; adding DEVICE_LOCAL would require a
+  // fine-grained device pool that only large-BAR / APU GPUs expose. The host
+  // pool is device-visible, so the device still writes the tick here and the
+  // host maps it to read it back.
+  params.type = IREE_HAL_MEMORY_TYPE_HOST_VISIBLE;
   params.usage = IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_MAPPING;
   return iree_hal_allocator_allocate_buffer(
       iree_hal_device_allocator(device), params, sizeof(uint64_t), out_buffer);
@@ -262,8 +265,11 @@ static iree_status_t AllocateTimestampBufferSized(
     iree_hal_device_t* device, iree_device_size_t size,
     iree_hal_buffer_t** out_buffer) {
   iree_hal_buffer_params_t params = {0};
-  params.type =
-      IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL | IREE_HAL_MEMORY_TYPE_HOST_VISIBLE;
+  // Host-visible host-pool buffer; adding DEVICE_LOCAL would require a
+  // fine-grained device pool that only large-BAR / APU GPUs expose. The host
+  // pool is device-visible, so the device still writes the tick here and the
+  // host maps it to read it back.
+  params.type = IREE_HAL_MEMORY_TYPE_HOST_VISIBLE;
   params.usage = IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_MAPPING;
   return iree_hal_allocator_allocate_buffer(iree_hal_device_allocator(device),
                                             params, size, out_buffer);
