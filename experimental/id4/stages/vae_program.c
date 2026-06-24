@@ -1761,11 +1761,19 @@ static iree_status_t id4_vae_program_dispatch_conv3x3_bias_bf16_rounded_f32(
   memset(&dispatch_options, 0, sizeof(dispatch_options));
   dispatch_options.structure_size = sizeof(dispatch_options);
   dispatch_options.name = dispatch_name;
-  dispatch_options.kernel = id4_pipeline_make_kernel_ref(
-      IREE_SV("vae/conv3x3_bias_bf16"),
-      IREE_SV("id4_vae_conv3x3_bias_bf16_rounded_f32"));
-  dispatch_options.dispatch_config =
-      id4_vae_program_make_dispatch_config((uint32_t)output_element_count);
+  if (output_channel_count == 3) {
+    dispatch_options.kernel = id4_pipeline_make_kernel_ref(
+        IREE_SV("vae/conv3x3_bias_bf16"),
+        IREE_SV("id4_vae_conv3x3_bias_bf16_rgb_f32"));
+    dispatch_options.dispatch_config = id4_vae_program_make_dispatch_config(
+        (uint32_t)(output_element_count / output_channel_count));
+  } else {
+    dispatch_options.kernel = id4_pipeline_make_kernel_ref(
+        IREE_SV("vae/conv3x3_bias_bf16"),
+        IREE_SV("id4_vae_conv3x3_bias_bf16_rounded_f32"));
+    dispatch_options.dispatch_config =
+        id4_vae_program_make_dispatch_config((uint32_t)output_element_count);
+  }
   dispatch_options.config_binding_count = config_list.count;
   dispatch_options.config_bindings = config_list.bindings;
   dispatch_options.binding_count = IREE_ARRAYSIZE(bindings);
