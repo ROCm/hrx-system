@@ -1196,6 +1196,135 @@ func.def public @from_bytecode() -> (index) {
             std::string::npos);
 }
 
+TEST(LinkTest, LinkModuleAcceptsDeclaredUnusedConfigFromBytecodeIndex) {
+  std::vector<uint8_t> bytecode = WriteBytecodeModule(R"(
+config.decl @id4.vae.conv3x3_bias.output_channel_count : %value: index where [range(%value, 1, 8192)]
+
+func.def public @generic() -> (index) {
+  %channels = config.get @id4.vae.conv3x3_bias.output_channel_count : index
+  func.return %channels : index
+}
+
+func.def public @specialized_rgb() -> (index) {
+  %channels = index.constant 3 : index
+  func.return %channels : index
+}
+)");
+  ContextPtr context = CreateContext();
+  BuilderPtr builder = CreateBuilder(context.get());
+  SourcePtr source = CreateSource(LOOMC_SOURCE_FORMAT_BYTECODE, "module.loombc",
+                                  bytecode.data(), bytecode.size());
+  AddSource(builder.get(), source.get(), "bytecode",
+            LOOMC_LINK_PROVIDER_ROLE_INPUT);
+
+  LinkIndexPtr link_index;
+  FinishIndex(builder.get(), &link_index);
+  source.reset();
+  bytecode.clear();
+
+  LinkerPtr linker = CreateLinker(context.get());
+  WorkspacePtr workspace = CreateWorkspace();
+  const loomc_string_view_t roots[] = {
+      loomc_make_cstring_view("@specialized_rgb"),
+  };
+  loomc_config_binding_t bindings[] = {
+      {
+          /*.key=*/
+          loomc_make_cstring_view("@id4.vae.conv3x3_bias.output_channel_count"),
+          /*.value=*/loomc_make_cstring_view("3"),
+      },
+  };
+  loomc_link_options_t options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_NONE,
+      /*.structure_size=*/0,
+      /*.next=*/nullptr,
+      /*.link_index=*/nullptr,
+      /*.module_name=*/loomc_string_view_empty(),
+      /*.root_symbols=*/roots,
+      /*.root_symbol_count=*/1,
+      /*.flags=*/0,
+      /*.config=*/
+      {
+          /*.bindings=*/bindings,
+          /*.binding_count=*/1,
+          /*.json_object=*/loomc_string_view_empty(),
+          /*.flags=*/LOOMC_CONFIG_POLICY_FLAG_REJECT_UNKNOWN |
+              LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED,
+      },
+  };
+  ResultPtr result;
+  ModulePtr module = LinkIndex(linker.get(), workspace.get(), link_index.get(),
+                               &options, &result);
+
+  ASSERT_TRUE(loomc_result_succeeded(result.get()));
+  ASSERT_NE(module.get(), nullptr);
+  std::string text = SerializeModuleToText(module.get());
+  EXPECT_NE(text.find("func.def public @specialized_rgb"), std::string::npos);
+  EXPECT_EQ(text.find("func.def public @generic"), std::string::npos);
+  EXPECT_EQ(text.find("id4.vae.conv3x3_bias.output_channel_count"),
+            std::string::npos);
+}
+
+TEST(LinkTest, LinkModuleRejectsConfigDeclaredOnlyByUnselectedProvider) {
+  ContextPtr context = CreateContext();
+  BuilderPtr builder = CreateBuilder(context.get());
+  SourcePtr selected_source = CreateTextSource("selected.loom", R"(
+func.def public @selected() -> (index) {
+  %value = index.constant 1 : index
+  func.return %value : index
+}
+)");
+  AddSource(builder.get(), selected_source.get(), "selected",
+            LOOMC_LINK_PROVIDER_ROLE_INPUT);
+  SourcePtr unused_source = CreateTextSource("unused.loom", R"(
+config.decl @unused.operation.tile_count : index
+
+func.def public @unused() -> (index) {
+  %tiles = config.get @unused.operation.tile_count : index
+  func.return %tiles : index
+}
+)");
+  AddSource(builder.get(), unused_source.get(), "unused",
+            LOOMC_LINK_PROVIDER_ROLE_LIBRARY);
+
+  LinkIndexPtr link_index;
+  FinishIndex(builder.get(), &link_index);
+  LinkerPtr linker = CreateLinker(context.get());
+  WorkspacePtr workspace = CreateWorkspace();
+  const loomc_string_view_t roots[] = {
+      loomc_make_cstring_view("@selected"),
+  };
+  loomc_config_binding_t bindings[] = {
+      {
+          /*.key=*/loomc_make_cstring_view("@unused.operation.tile_count"),
+          /*.value=*/loomc_make_cstring_view("4"),
+      },
+  };
+  loomc_link_options_t options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_NONE,
+      /*.structure_size=*/0,
+      /*.next=*/nullptr,
+      /*.link_index=*/nullptr,
+      /*.module_name=*/loomc_string_view_empty(),
+      /*.root_symbols=*/roots,
+      /*.root_symbol_count=*/1,
+      /*.flags=*/0,
+      /*.config=*/
+      {
+          /*.bindings=*/bindings,
+          /*.binding_count=*/1,
+          /*.json_object=*/loomc_string_view_empty(),
+          /*.flags=*/LOOMC_CONFIG_POLICY_FLAG_REJECT_UNKNOWN,
+      },
+  };
+  ResultPtr result;
+  ModulePtr module = LinkIndex(linker.get(), workspace.get(), link_index.get(),
+                               &options, &result);
+
+  EXPECT_EQ(module.get(), nullptr);
+  ExpectFailedResultCode(result.get(), "CONFIG/INVALID");
+}
+
 TEST(LinkTest, LinkModuleReportsUnknownConfigAsResultDiagnostic) {
   ContextPtr context = CreateContext();
   BuilderPtr builder = CreateBuilder(context.get());

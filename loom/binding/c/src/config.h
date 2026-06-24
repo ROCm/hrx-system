@@ -18,6 +18,11 @@
 extern "C" {
 #endif
 
+// Returns true when |key| names a config symbol known to the enclosing
+// invocation before final pruning.
+typedef bool (*loomc_config_known_key_fn_t)(void* user_data,
+                                            iree_string_view_t key);
+
 // Module config application options.
 typedef struct loomc_config_apply_to_module_options_t {
   // Public per-invocation config options to materialize.
@@ -31,6 +36,15 @@ typedef struct loomc_config_apply_to_module_options_t {
 
   // Diagnostic code used when config-domain statuses become result diagnostics.
   loomc_string_view_t diagnostic_code;
+
+  // Optional config-key membership query used for REJECT_UNKNOWN. When set,
+  // unknown bindings are rejected against this query before materialization,
+  // and bindings known by the invocation but pruned from |module| are ignored
+  // by final materialization.
+  loomc_config_known_key_fn_t is_known_key;
+
+  // User data passed to |is_known_key|.
+  void* known_key_user_data;
 
   // Block pool for transient config materialization storage.
   iree_arena_block_pool_t* block_pool;

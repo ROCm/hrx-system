@@ -68,6 +68,15 @@ typedef struct loomc_link_diagnostic_capture_t {
   const loomc_source_t* source;
 } loomc_link_diagnostic_capture_t;
 
+typedef struct loomc_link_config_known_key_query_t {
+  // Frozen index that supplied the link plan.
+  const loom_link_module_index_t* index;
+  // Module ordinals selected by the link plan.
+  const uint8_t* selected_modules;
+  // Number of entries in |selected_modules|.
+  iree_host_size_t selected_module_count;
+} loomc_link_config_known_key_query_t;
+
 static iree_allocator_t loomc_link_iree_allocator(loomc_allocator_t allocator) {
   return iree_allocator_from_loomc(allocator);
 }
@@ -75,6 +84,12 @@ static iree_allocator_t loomc_link_iree_allocator(loomc_allocator_t allocator) {
 static bool loomc_link_any_flag_set(loomc_link_flags_t flags,
                                     loomc_link_flags_t bits) {
   return (flags & bits) != 0;
+}
+
+static bool loomc_link_config_options_have_bindings(
+    const loomc_config_options_t* config) {
+  return config && (config->binding_count != 0 ||
+                    !loomc_string_view_is_empty(config->json_object));
 }
 
 static loomc_status_t loomc_link_validate_linker_options(
@@ -385,6 +400,68 @@ static iree_status_t loomc_link_plan_build_roots(
   return iree_ok_status();
 }
 
+static iree_status_t loomc_link_plan_build_module_bitmap(
+    const loom_link_plan_t* plan, iree_arena_allocator_t* arena,
+    const uint8_t** out_selected_modules,
+    iree_host_size_t* out_selected_module_count) {
+  *out_selected_modules = NULL;
+  *out_selected_module_count = 0;
+  const loom_link_module_index_t* index = loom_link_plan_index(plan);
+  const iree_host_size_t module_count =
+      loom_link_module_index_module_count(index);
+  if (module_count == 0) {
+    return iree_ok_status();
+  }
+
+  uint8_t* selected_modules = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, module_count,
+                                                 sizeof(*selected_modules),
+                                                 (void**)&selected_modules));
+  memset(selected_modules, 0, module_count * sizeof(*selected_modules));
+
+  const iree_host_size_t plan_symbol_count = loom_link_plan_symbol_count(plan);
+  for (iree_host_size_t i = 0; i < plan_symbol_count; ++i) {
+    const loom_link_plan_symbol_t* planned = loom_link_plan_symbol_at(plan, i);
+    const loom_link_module_index_symbol_t* symbol =
+        loom_link_module_index_symbol_at(index, planned->symbol_ordinal);
+    const loom_link_module_index_module_t* module =
+        loom_link_module_index_symbol_module(index, symbol);
+    if (module == NULL || module->ordinal >= module_count) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "link plan referenced a stale module");
+    }
+    selected_modules[module->ordinal] = 1;
+  }
+
+  *out_selected_modules = selected_modules;
+  *out_selected_module_count = module_count;
+  return iree_ok_status();
+}
+
+static bool loomc_link_config_key_known(void* user_data,
+                                        iree_string_view_t key) {
+  const loomc_link_config_known_key_query_t* query =
+      (const loomc_link_config_known_key_query_t*)user_data;
+  if (!query || !query->index || !query->selected_modules) {
+    return false;
+  }
+  const iree_host_size_t symbol_count =
+      loom_link_module_index_symbol_count(query->index);
+  for (iree_host_size_t i = 0; i < symbol_count; ++i) {
+    const loom_link_module_index_symbol_t* symbol =
+        loom_link_module_index_symbol_at(query->index, i);
+    if (!symbol || symbol->module_ordinal >= query->selected_module_count ||
+        !query->selected_modules[symbol->module_ordinal] ||
+        !iree_any_bit_set(symbol->flags, LOOM_LINK_SYMBOL_FLAG_CONFIG)) {
+      continue;
+    }
+    if (iree_string_view_equal(symbol->name, key)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 static iree_status_t loomc_link_add_planned_modules(
     loomc_link_materialization_cache_t* cache, const loom_link_plan_t* plan,
     bool selective, iree_arena_allocator_t* arena, loom_linker_t* linker) {
@@ -541,6 +618,9 @@ loomc_status_t loomc_link_module(loomc_linker_t* linker,
   loomc_module_t* module = NULL;
   loom_linker_t* internal_linker = NULL;
   loom_module_t* linked_module = NULL;
+  const uint8_t* config_selected_modules = NULL;
+  iree_host_size_t config_selected_module_count = 0;
+  loomc_link_config_known_key_query_t config_known_key_query = {0};
 
   loomc_status_t status = loomc_link_materialization_cache_initialize(
       linker, workspace, options->link_index, result, &cache);
@@ -620,11 +700,28 @@ loomc_status_t loomc_link_module(loomc_linker_t* linker,
         operation_status);
   }
   if (loomc_status_is_ok(status) && loomc_result_succeeded(result)) {
+    if (iree_any_bit_set(options->config.flags,
+                         LOOMC_CONFIG_POLICY_FLAG_REJECT_UNKNOWN) &&
+        loomc_link_config_options_have_bindings(&options->config)) {
+      status = loomc_status_from_iree(loomc_link_plan_build_module_bitmap(
+          plan, &arena, &config_selected_modules,
+          &config_selected_module_count));
+      config_known_key_query = (loomc_link_config_known_key_query_t){
+          .index = cache.module_index,
+          .selected_modules = config_selected_modules,
+          .selected_module_count = config_selected_module_count,
+      };
+    }
+  }
+  if (loomc_status_is_ok(status) && loomc_result_succeeded(result)) {
     loomc_config_apply_to_module_options_t config_apply_options = {
         .config = &options->config,
         .module = linked_module,
         .result = result,
         .diagnostic_code = loomc_make_cstring_view("CONFIG/INVALID"),
+        .is_known_key =
+            config_selected_modules ? loomc_link_config_key_known : NULL,
+        .known_key_user_data = &config_known_key_query,
         .block_pool = loomc_workspace_block_pool(workspace),
         .allocator = linker->allocator,
     };

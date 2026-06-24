@@ -57,7 +57,9 @@ typedef struct loomc_config_binding_t {
 
 /// Configuration validation and resolution policy bit values.
 typedef enum loomc_config_policy_flag_bits_e {
-  /// Reject config bindings that do not match any known config symbol.
+  /// Reject config bindings outside the current operation's known config
+  /// declaration set. Link operations validate this before final pruning so
+  /// declared-but-unused bindings may be accepted and ignored.
   LOOMC_CONFIG_POLICY_FLAG_REJECT_UNKNOWN = 1u << 0,
 
   /// Require all final operation config values to be resolved.
