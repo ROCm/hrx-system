@@ -65,6 +65,7 @@ add_custom_command(OUTPUT loom_sources.stamp
     "qwen3_vl/linear_bf16_f32.loom"
     "qwen3_vl/linear_bf16_f32_wmma.loom"
     "qwen3_vl/linear_input_pack_f32_bf16.loom"
+    "qwen3_vl/mlp_gate_up_silu_product_bf16_wmma.loom"
     "qwen3_vl/residual_add_f32.loom"
     "qwen3_vl/rmsnorm.loom"
     "qwen3_vl/rotary_embedding.loom"
@@ -163,6 +164,7 @@ iree_c_embed_data(
     "qwen3_vl/linear_bf16_f32.loom"
     "qwen3_vl/linear_bf16_f32_wmma.loom"
     "qwen3_vl/linear_input_pack_f32_bf16.loom"
+    "qwen3_vl/mlp_gate_up_silu_product_bf16_wmma.loom"
     "qwen3_vl/residual_add_f32.loom"
     "qwen3_vl/rmsnorm.loom"
     "qwen3_vl/rotary_embedding.loom"
@@ -6152,6 +6154,57 @@ iree_native_test(
     "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=480"
     "--config=id4.qwen3_vl.linear_wmma.input_size=12288"
     "--config=id4.qwen3_vl.linear_wmma.output_size=4096"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
+    "qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_small_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/mlp_gate_up_silu_product_bf16_wmma.loom}}"
+    "--benchmark=@id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_small"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.qwen3_vl.mlp_gate_up_silu_product_wmma.dispatch_token_count=16"
+    "--config=id4.qwen3_vl.mlp_gate_up_silu_product_wmma.input_size=16"
+    "--config=id4.qwen3_vl.mlp_gate_up_silu_product_wmma.intermediate_size=32"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
+    "qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_zero_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/mlp_gate_up_silu_product_bf16_wmma.loom}}"
+    "--benchmark=@id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_zero"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.qwen3_vl.mlp_gate_up_silu_product_wmma.dispatch_token_count=16"
+    "--config=id4.qwen3_vl.mlp_gate_up_silu_product_wmma.input_size=16"
+    "--config=id4.qwen3_vl.mlp_gate_up_silu_product_wmma.intermediate_size=32"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
+    "qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_qwen_shape_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/mlp_gate_up_silu_product_bf16_wmma.loom}}"
+    "--benchmark=@id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_qwen_shape"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.qwen3_vl.mlp_gate_up_silu_product_wmma.dispatch_token_count=480"
+    "--config=id4.qwen3_vl.mlp_gate_up_silu_product_wmma.input_size=4096"
+    "--config=id4.qwen3_vl.mlp_gate_up_silu_product_wmma.intermediate_size=12288"
   SRC
     loom::tools::iree-benchmark-loom
   LABELS
@@ -13621,6 +13674,69 @@ iree_native_test(
     "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=480"
     "--config=id4.qwen3_vl.linear_wmma.input_size=12288"
     "--config=id4.qwen3_vl.linear_wmma.output_size=4096"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
+    "qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_small_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/mlp_gate_up_silu_product_bf16_wmma.loom}}"
+    "--case=@id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_small_case"
+    "--device=amdgpu://0"
+    "--config=id4.qwen3_vl.mlp_gate_up_silu_product_wmma.dispatch_token_count=16"
+    "--config=id4.qwen3_vl.mlp_gate_up_silu_product_wmma.input_size=16"
+    "--config=id4.qwen3_vl.mlp_gate_up_silu_product_wmma.intermediate_size=32"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
+    "qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_zero_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/mlp_gate_up_silu_product_bf16_wmma.loom}}"
+    "--case=@id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_zero_case"
+    "--device=amdgpu://0"
+    "--config=id4.qwen3_vl.mlp_gate_up_silu_product_wmma.dispatch_token_count=16"
+    "--config=id4.qwen3_vl.mlp_gate_up_silu_product_wmma.input_size=16"
+    "--config=id4.qwen3_vl.mlp_gate_up_silu_product_wmma.intermediate_size=32"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
+    "qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_qwen_shape_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/mlp_gate_up_silu_product_bf16_wmma.loom}}"
+    "--case=@id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_qwen_shape_case"
+    "--device=amdgpu://0"
+    "--config=id4.qwen3_vl.mlp_gate_up_silu_product_wmma.dispatch_token_count=480"
+    "--config=id4.qwen3_vl.mlp_gate_up_silu_product_wmma.input_size=4096"
+    "--config=id4.qwen3_vl.mlp_gate_up_silu_product_wmma.intermediate_size=12288"
   SRC
     loom::tools::iree-test-loom
   LABELS

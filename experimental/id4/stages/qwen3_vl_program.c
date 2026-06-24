@@ -376,26 +376,22 @@ typedef enum id4_qwen3_vl_tensor_kind_e {
   ID4_QWEN3_VL_TENSOR_LAYER_AFTER_ATTENTION = 16,
   // Per-layer post-attention RMSNorm output.
   ID4_QWEN3_VL_TENSOR_LAYER_POST_ATTENTION_NORM = 17,
-  // Per-layer MLP gate projection output.
-  ID4_QWEN3_VL_TENSOR_LAYER_MLP_GATE = 18,
-  // Per-layer MLP up projection output.
-  ID4_QWEN3_VL_TENSOR_LAYER_MLP_UP = 19,
   // Per-layer SiLU-gated activation output.
-  ID4_QWEN3_VL_TENSOR_LAYER_MLP_ACTIVATION = 20,
+  ID4_QWEN3_VL_TENSOR_LAYER_MLP_ACTIVATION = 18,
   // Per-layer MLP down projection output.
-  ID4_QWEN3_VL_TENSOR_LAYER_MLP_DOWN = 21,
+  ID4_QWEN3_VL_TENSOR_LAYER_MLP_DOWN = 19,
   // Per-layer decoder output after MLP residual.
-  ID4_QWEN3_VL_TENSOR_LAYER_OUTPUT = 22,
+  ID4_QWEN3_VL_TENSOR_LAYER_OUTPUT = 20,
   // Concatenated selected post-layer hidden states.
-  ID4_QWEN3_VL_TENSOR_SELECTED_HIDDEN_STATES = 23,
+  ID4_QWEN3_VL_TENSOR_SELECTED_HIDDEN_STATES = 21,
   // Token-weighted condition output.
-  ID4_QWEN3_VL_TENSOR_CONDITION = 24,
+  ID4_QWEN3_VL_TENSOR_CONDITION = 22,
   // Two-scalar condition normalization statistics buffer.
-  ID4_QWEN3_VL_TENSOR_CONDITION_STATS = 25,
+  ID4_QWEN3_VL_TENSOR_CONDITION_STATS = 23,
   // Final decoder RMSNorm output.
-  ID4_QWEN3_VL_TENSOR_FINAL_NORM = 26,
+  ID4_QWEN3_VL_TENSOR_FINAL_NORM = 24,
   // Exported condition tensor.
-  ID4_QWEN3_VL_TENSOR_OUTPUT = 27,
+  ID4_QWEN3_VL_TENSOR_OUTPUT = 25,
 } id4_qwen3_vl_tensor_kind_t;
 
 typedef enum id4_qwen3_vl_operation_kind_e {
@@ -409,8 +405,8 @@ typedef enum id4_qwen3_vl_operation_kind_e {
   ID4_QWEN3_VL_OPERATION_ROTARY = 3,
   // Attention score/probability/value operation.
   ID4_QWEN3_VL_OPERATION_ATTENTION = 4,
-  // SiLU and gate multiplication operation.
-  ID4_QWEN3_VL_OPERATION_SILU_GATE = 5,
+  // Gated MLP product operation.
+  ID4_QWEN3_VL_OPERATION_MLP_GATE_UP_SILU_PRODUCT = 5,
   // Residual add operation.
   ID4_QWEN3_VL_OPERATION_RESIDUAL_ADD = 6,
   // Selected hidden-state packing operation.
@@ -476,40 +472,34 @@ typedef enum id4_qwen3_vl_operation_site_e {
   ID4_QWEN3_VL_OPERATION_SITE_POST_ATTENTION_LAYERNORM = 23,
   // Barrier after per-layer post-attention RMSNorm.
   ID4_QWEN3_VL_OPERATION_SITE_AFTER_POST_ATTENTION_LAYERNORM = 24,
-  // Per-layer MLP gate projection site.
-  ID4_QWEN3_VL_OPERATION_SITE_MLP_GATE_PROJECTION = 25,
-  // Per-layer MLP up projection site.
-  ID4_QWEN3_VL_OPERATION_SITE_MLP_UP_PROJECTION = 26,
-  // Barrier after per-layer MLP up/gate projections.
-  ID4_QWEN3_VL_OPERATION_SITE_AFTER_MLP_UP_GATE_PROJECTION = 27,
   // Per-layer MLP activation site.
-  ID4_QWEN3_VL_OPERATION_SITE_MLP = 28,
+  ID4_QWEN3_VL_OPERATION_SITE_MLP = 25,
   // Barrier after per-layer MLP activation.
-  ID4_QWEN3_VL_OPERATION_SITE_AFTER_MLP_ACTIVATION = 29,
+  ID4_QWEN3_VL_OPERATION_SITE_AFTER_MLP_ACTIVATION = 26,
   // Per-layer MLP down projection site.
-  ID4_QWEN3_VL_OPERATION_SITE_MLP_DOWN_PROJECTION = 30,
+  ID4_QWEN3_VL_OPERATION_SITE_MLP_DOWN_PROJECTION = 27,
   // Barrier after per-layer MLP down projection.
-  ID4_QWEN3_VL_OPERATION_SITE_AFTER_MLP_DOWN_PROJECTION = 31,
+  ID4_QWEN3_VL_OPERATION_SITE_AFTER_MLP_DOWN_PROJECTION = 28,
   // Barrier after per-layer decoder output.
-  ID4_QWEN3_VL_OPERATION_SITE_AFTER_LAYER_OUTPUT = 32,
+  ID4_QWEN3_VL_OPERATION_SITE_AFTER_LAYER_OUTPUT = 29,
   // Per-layer selected hidden-state pack site.
-  ID4_QWEN3_VL_OPERATION_SITE_SELECTED_HIDDEN_PACK = 33,
+  ID4_QWEN3_VL_OPERATION_SITE_SELECTED_HIDDEN_PACK = 30,
   // Barrier after all selected hidden states are packed.
-  ID4_QWEN3_VL_OPERATION_SITE_AFTER_SELECTED_HIDDEN_PACK = 34,
+  ID4_QWEN3_VL_OPERATION_SITE_AFTER_SELECTED_HIDDEN_PACK = 31,
   // Global condition token-weight application site.
-  ID4_QWEN3_VL_OPERATION_SITE_CONDITION_APPLY_TOKEN_WEIGHTS = 35,
+  ID4_QWEN3_VL_OPERATION_SITE_CONDITION_APPLY_TOKEN_WEIGHTS = 32,
   // Barrier after condition token-weight application.
-  ID4_QWEN3_VL_OPERATION_SITE_AFTER_CONDITION_APPLY_TOKEN_WEIGHTS = 36,
+  ID4_QWEN3_VL_OPERATION_SITE_AFTER_CONDITION_APPLY_TOKEN_WEIGHTS = 33,
   // Global condition token-weight normalization site.
-  ID4_QWEN3_VL_OPERATION_SITE_CONDITION_NORMALIZE_TOKEN_WEIGHTS = 37,
+  ID4_QWEN3_VL_OPERATION_SITE_CONDITION_NORMALIZE_TOKEN_WEIGHTS = 34,
   // Barrier after the exported condition tensor is complete.
-  ID4_QWEN3_VL_OPERATION_SITE_AFTER_CONDITION = 38,
+  ID4_QWEN3_VL_OPERATION_SITE_AFTER_CONDITION = 35,
   // Final decoder RMSNorm site.
-  ID4_QWEN3_VL_OPERATION_SITE_FINAL_NORM = 39,
+  ID4_QWEN3_VL_OPERATION_SITE_FINAL_NORM = 36,
   // Barrier after final decoder RMSNorm.
-  ID4_QWEN3_VL_OPERATION_SITE_AFTER_FINAL_NORM = 40,
+  ID4_QWEN3_VL_OPERATION_SITE_AFTER_FINAL_NORM = 37,
   // Forward output diagnostic site.
-  ID4_QWEN3_VL_OPERATION_SITE_OUTPUT = 41,
+  ID4_QWEN3_VL_OPERATION_SITE_OUTPUT = 38,
 } id4_qwen3_vl_operation_site_t;
 
 typedef enum id4_qwen3_vl_kernel_kind_e {
@@ -531,8 +521,8 @@ typedef enum id4_qwen3_vl_kernel_kind_e {
   ID4_QWEN3_VL_KERNEL_ATTENTION_SOFTMAX = 7,
   // Materialized attention probability/value WMMA kernel.
   ID4_QWEN3_VL_KERNEL_ATTENTION_PV = 8,
-  // SiLU gate kernel.
-  ID4_QWEN3_VL_KERNEL_SILU_GATE = 9,
+  // Gated MLP product WMMA kernel.
+  ID4_QWEN3_VL_KERNEL_MLP_GATE_UP_SILU_PRODUCT = 9,
   // Residual add kernel.
   ID4_QWEN3_VL_KERNEL_RESIDUAL_ADD = 10,
   // Selected hidden-state packing kernel.
@@ -759,10 +749,6 @@ static const id4_qwen3_vl_program_format_pattern_t
         [ID4_QWEN3_VL_TENSOR_LAYER_POST_ATTENTION_NORM] =
             {true,
              IREE_SVL("qwen3_vl.layers.%" PRIu32 ".post_attention_layernorm")},
-        [ID4_QWEN3_VL_TENSOR_LAYER_MLP_GATE] =
-            {true, IREE_SVL("qwen3_vl.layers.%" PRIu32 ".mlp.gate")},
-        [ID4_QWEN3_VL_TENSOR_LAYER_MLP_UP] =
-            {true, IREE_SVL("qwen3_vl.layers.%" PRIu32 ".mlp.up")},
         [ID4_QWEN3_VL_TENSOR_LAYER_MLP_ACTIVATION] =
             {true, IREE_SVL("qwen3_vl.layers.%" PRIu32 ".mlp.activation")},
         [ID4_QWEN3_VL_TENSOR_LAYER_MLP_DOWN] =
@@ -836,13 +822,6 @@ static const id4_qwen3_vl_program_operation_site_entry_t
             {true, IREE_SVL("post_attention_layernorm")},
         [ID4_QWEN3_VL_OPERATION_SITE_AFTER_POST_ATTENTION_LAYERNORM] =
             {true, IREE_SVL("after_post_attention_layernorm")},
-        [ID4_QWEN3_VL_OPERATION_SITE_MLP_GATE_PROJECTION] =
-            {true, IREE_SVL("mlp.gate_proj")},
-        [ID4_QWEN3_VL_OPERATION_SITE_MLP_UP_PROJECTION] = {true,
-                                                           IREE_SVL(
-                                                               "mlp.up_proj")},
-        [ID4_QWEN3_VL_OPERATION_SITE_AFTER_MLP_UP_GATE_PROJECTION] =
-            {true, IREE_SVL("after_mlp_up_gate_projection")},
         [ID4_QWEN3_VL_OPERATION_SITE_MLP] = {true, IREE_SVL("mlp")},
         [ID4_QWEN3_VL_OPERATION_SITE_AFTER_MLP_ACTIVATION] =
             {true, IREE_SVL("after_mlp_activation")},
@@ -878,7 +857,8 @@ static const id4_qwen3_vl_program_operation_kind_entry_t
         [ID4_QWEN3_VL_OPERATION_LINEAR] = {true, IREE_SVL("linear")},
         [ID4_QWEN3_VL_OPERATION_ROTARY] = {true, IREE_SVL("rotary")},
         [ID4_QWEN3_VL_OPERATION_ATTENTION] = {true, IREE_SVL("attention")},
-        [ID4_QWEN3_VL_OPERATION_SILU_GATE] = {true, IREE_SVL("silu_gate")},
+        [ID4_QWEN3_VL_OPERATION_MLP_GATE_UP_SILU_PRODUCT] =
+            {true, IREE_SVL("gate_up_silu_product")},
         [ID4_QWEN3_VL_OPERATION_RESIDUAL_ADD] = {true,
                                                  IREE_SVL("residual_add")},
         [ID4_QWEN3_VL_OPERATION_SELECTED_HIDDEN_PACK] = {true,
@@ -922,9 +902,9 @@ static const id4_pipeline_kernel_ref_t
         [ID4_QWEN3_VL_KERNEL_ATTENTION_PV] =
             {IREE_SVL("qwen3_vl/attention_wmma"),
              IREE_SVL("id4_qwen3_vl_attention_pv_bf16_bf16_wmma")},
-        [ID4_QWEN3_VL_KERNEL_SILU_GATE] = {IREE_SVL("qwen3_vl/silu_gate_f32"),
-                                           IREE_SVL(
-                                               "id4_qwen3_vl_silu_gate_f32")},
+        [ID4_QWEN3_VL_KERNEL_MLP_GATE_UP_SILU_PRODUCT] =
+            {IREE_SVL("qwen3_vl/mlp_gate_up_silu_product_bf16_wmma"),
+             IREE_SVL("id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma")},
         [ID4_QWEN3_VL_KERNEL_RESIDUAL_ADD] =
             {IREE_SVL("qwen3_vl/residual_add_f32"),
              IREE_SVL("id4_qwen3_vl_residual_add_f32")},
@@ -1044,12 +1024,16 @@ static const iree_string_view_t id4_qwen3_vl_program_config_keys
                 [ID4_QWEN3_VL_CONFIG_HEAD_SIZE] =
                     IREE_SVL("id4.qwen3_vl.attention_wmma.head_size"),
             },
-        [ID4_QWEN3_VL_KERNEL_SILU_GATE] =
+        [ID4_QWEN3_VL_KERNEL_MLP_GATE_UP_SILU_PRODUCT] =
             {
-                [ID4_QWEN3_VL_CONFIG_TOKEN_COUNT] =
-                    IREE_SVL("id4.qwen3_vl.silu_gate.token_count"),
+                [ID4_QWEN3_VL_CONFIG_DISPATCH_TOKEN_COUNT] = IREE_SVL(
+                    "id4.qwen3_vl.mlp_gate_up_silu_product_wmma.dispatch_"
+                    "token_count"),
+                [ID4_QWEN3_VL_CONFIG_INPUT_SIZE] = IREE_SVL(
+                    "id4.qwen3_vl.mlp_gate_up_silu_product_wmma.input_size"),
                 [ID4_QWEN3_VL_CONFIG_INTERMEDIATE_SIZE] =
-                    IREE_SVL("id4.qwen3_vl.silu_gate.intermediate_size"),
+                    IREE_SVL("id4.qwen3_vl.mlp_gate_up_silu_product_wmma."
+                             "intermediate_size"),
             },
         [ID4_QWEN3_VL_KERNEL_RESIDUAL_ADD] =
             {
@@ -2155,20 +2139,60 @@ static iree_status_t id4_qwen3_vl_program_author_attention(
       IREE_ARRAYSIZE(pv_bindings), pv_bindings);
 }
 
-static iree_status_t id4_qwen3_vl_program_author_silu_gate(
+static iree_status_t
+id4_qwen3_vl_program_author_mlp_gate_up_silu_product_from_packed(
     const id4_qwen3_vl_program_options_t* options,
     id4_pipeline_program_builder_t* builder, uint32_t layer_ordinal,
-    id4_pipeline_program_tensor_t gate, id4_pipeline_program_tensor_t up,
-    id4_pipeline_program_tensor_t* out_activation) {
-  const uint32_t token_count = options->request.token_count;
+    const id4_qwen3_vl_program_packed_linear_input_t* packed_input,
+    id4_qwen3_vl_program_packed_linear_input_t* out_activation) {
+  const uint32_t hidden_size = options->model.hidden_size;
   const uint32_t intermediate_size = options->model.intermediate_size;
+  if ((intermediate_size % ID4_QWEN3_VL_LINEAR_WMMA_OUTPUT_ROW_BLOCK) != 0) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "Qwen3-VL MLP intermediate size %" PRIu32 " must be a multiple of %u",
+        intermediate_size, ID4_QWEN3_VL_LINEAR_WMMA_OUTPUT_ROW_BLOCK);
+  }
+
+  char dispatch_name_buffer[ID4_QWEN3_VL_FORMAT_BUFFER_CAPACITY];
+  iree_string_view_t dispatch_name = iree_string_view_empty();
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_format_operation_name(
+      ID4_QWEN3_VL_OPERATION_MLP_GATE_UP_SILU_PRODUCT, layer_ordinal,
+      ID4_QWEN3_VL_OPERATION_SITE_MLP, dispatch_name_buffer,
+      IREE_ARRAYSIZE(dispatch_name_buffer), &dispatch_name));
+
+  id4_pipeline_program_tensor_t gate_weight =
+      id4_pipeline_program_tensor_invalid();
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_parameter(
+      builder, ID4_QWEN3_VL_PARAMETER_LAYER_GATE_PROJECTION, layer_ordinal,
+      ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+      id4_pipeline_program_make_shape_rank2(intermediate_size, hidden_size),
+      &gate_weight));
+  id4_pipeline_program_tensor_t up_weight =
+      id4_pipeline_program_tensor_invalid();
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_parameter(
+      builder, ID4_QWEN3_VL_PARAMETER_LAYER_UP_PROJECTION, layer_ordinal,
+      ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+      id4_pipeline_program_make_shape_rank2(intermediate_size, hidden_size),
+      &up_weight));
+
+  *out_activation = (id4_qwen3_vl_program_packed_linear_input_t){
+      .tensor = id4_pipeline_program_tensor_invalid(),
+      .token_tile_count = packed_input->token_tile_count,
+      .token_group_count = packed_input->token_group_count,
+      .dispatch_token_count = packed_input->dispatch_token_count,
+  };
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_acquire_tensor(
       builder, ID4_QWEN3_VL_TENSOR_LAYER_MLP_ACTIVATION, layer_ordinal,
-      ID4_PIPELINE_PROGRAM_DTYPE_F32,
-      id4_pipeline_program_make_shape_rank2(token_count, intermediate_size),
-      out_activation));
+      ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+      id4_pipeline_program_make_shape_rank2(
+          out_activation->dispatch_token_count, intermediate_size),
+      &out_activation->tensor));
+
   const id4_qwen3_vl_program_config_value_t config_values[] = {
-      {ID4_QWEN3_VL_CONFIG_TOKEN_COUNT, token_count},
+      {ID4_QWEN3_VL_CONFIG_DISPATCH_TOKEN_COUNT,
+       packed_input->dispatch_token_count},
+      {ID4_QWEN3_VL_CONFIG_INPUT_SIZE, hidden_size},
       {ID4_QWEN3_VL_CONFIG_INTERMEDIATE_SIZE, intermediate_size},
   };
   char value_buffers[ID4_QWEN3_VL_MAX_KERNEL_CONFIG_BINDING_COUNT]
@@ -2176,21 +2200,25 @@ static iree_status_t id4_qwen3_vl_program_author_silu_gate(
   id4_pipeline_kernel_config_binding_t
       config_bindings[ID4_QWEN3_VL_MAX_KERNEL_CONFIG_BINDING_COUNT];
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_make_config_bindings(
-      ID4_QWEN3_VL_KERNEL_SILU_GATE, IREE_ARRAYSIZE(config_values),
-      config_values, value_buffers, config_bindings));
-  id4_pipeline_program_dispatch_binding_t bindings[] = {
-      id4_pipeline_program_read(gate),
-      id4_pipeline_program_read(up),
-      id4_pipeline_program_write(*out_activation),
+      ID4_QWEN3_VL_KERNEL_MLP_GATE_UP_SILU_PRODUCT,
+      IREE_ARRAYSIZE(config_values), config_values, value_buffers,
+      config_bindings));
+  const id4_pipeline_program_dispatch_binding_t bindings[] = {
+      id4_pipeline_program_read(packed_input->tensor),
+      id4_pipeline_program_read(gate_weight),
+      id4_pipeline_program_read(up_weight),
+      id4_pipeline_program_write(out_activation->tensor),
   };
-  iree_hal_dispatch_config_t dispatch_config;
-  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_make_matrix_element_dispatch_config(
-      token_count, intermediate_size, &dispatch_config));
   return id4_qwen3_vl_program_dispatch(
-      builder, ID4_QWEN3_VL_OPERATION_SILU_GATE, layer_ordinal,
-      ID4_QWEN3_VL_OPERATION_SITE_MLP, ID4_QWEN3_VL_KERNEL_SILU_GATE,
-      dispatch_config, IREE_ARRAYSIZE(config_values), config_bindings,
-      IREE_ARRAYSIZE(bindings), bindings);
+      builder, ID4_QWEN3_VL_OPERATION_MLP_GATE_UP_SILU_PRODUCT, layer_ordinal,
+      ID4_QWEN3_VL_OPERATION_SITE_MLP,
+      ID4_QWEN3_VL_KERNEL_MLP_GATE_UP_SILU_PRODUCT,
+      id4_qwen3_vl_program_make_dispatch_config_with_workgroup_size(
+          packed_input->token_tile_count,
+          intermediate_size / ID4_QWEN3_VL_LINEAR_WMMA_OUTPUT_ROW_BLOCK, 1,
+          ID4_QWEN3_VL_WMMA_WORKGROUP_SIZE_X),
+      IREE_ARRAYSIZE(config_values), config_bindings, IREE_ARRAYSIZE(bindings),
+      bindings);
 }
 
 static iree_status_t id4_qwen3_vl_program_author_residual_add(
@@ -2536,39 +2564,24 @@ static iree_status_t id4_qwen3_vl_program_author_layer(
       layer_ordinal, post_attention_norm, hidden_size,
       &post_attention_norm_bf16));
 
-  id4_pipeline_program_tensor_t gate = id4_pipeline_program_tensor_invalid();
-  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_author_linear_from_packed(
-      options, builder, layer_ordinal,
-      ID4_QWEN3_VL_OPERATION_SITE_MLP_GATE_PROJECTION,
-      ID4_QWEN3_VL_PARAMETER_LAYER_GATE_PROJECTION,
-      ID4_QWEN3_VL_TENSOR_LAYER_MLP_GATE, &post_attention_norm_bf16,
-      hidden_size, options->model.intermediate_size, &gate));
-  id4_pipeline_program_tensor_t up = id4_pipeline_program_tensor_invalid();
-  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_author_linear_from_packed(
-      options, builder, layer_ordinal,
-      ID4_QWEN3_VL_OPERATION_SITE_MLP_UP_PROJECTION,
-      ID4_QWEN3_VL_PARAMETER_LAYER_UP_PROJECTION,
-      ID4_QWEN3_VL_TENSOR_LAYER_MLP_UP, &post_attention_norm_bf16, hidden_size,
-      options->model.intermediate_size, &up));
-  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_barrier(
-      builder, layer_ordinal,
-      ID4_QWEN3_VL_OPERATION_SITE_AFTER_MLP_UP_GATE_PROJECTION));
-
-  id4_pipeline_program_tensor_t activation =
-      id4_pipeline_program_tensor_invalid();
-  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_author_silu_gate(
-      options, builder, layer_ordinal, gate, up, &activation));
+  id4_qwen3_vl_program_packed_linear_input_t activation = {
+      .tensor = id4_pipeline_program_tensor_invalid(),
+  };
+  IREE_RETURN_IF_ERROR(
+      id4_qwen3_vl_program_author_mlp_gate_up_silu_product_from_packed(
+          options, builder, layer_ordinal, &post_attention_norm_bf16,
+          &activation));
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_barrier(
       builder, layer_ordinal,
       ID4_QWEN3_VL_OPERATION_SITE_AFTER_MLP_ACTIVATION));
 
   id4_pipeline_program_tensor_t mlp_down =
       id4_pipeline_program_tensor_invalid();
-  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_author_linear(
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_author_linear_from_packed(
       options, builder, layer_ordinal,
       ID4_QWEN3_VL_OPERATION_SITE_MLP_DOWN_PROJECTION,
       ID4_QWEN3_VL_PARAMETER_LAYER_DOWN_PROJECTION,
-      ID4_QWEN3_VL_TENSOR_LAYER_MLP_DOWN, activation,
+      ID4_QWEN3_VL_TENSOR_LAYER_MLP_DOWN, &activation,
       options->model.intermediate_size, hidden_size, &mlp_down));
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_barrier(
       builder, layer_ordinal,
