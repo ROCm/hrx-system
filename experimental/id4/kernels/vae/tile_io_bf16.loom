@@ -1,0 +1,72 @@
+config.decl @id4.vae.tile.source_width : %value: index where [range(%value, 1, 65536)]
+
+config.decl @id4.vae.tile.source_height : %value: index where [range(%value, 1, 65536)]
+
+config.decl @id4.vae.tile.source_channel_count : %value: index where [range(%value, 1, 4096)]
+
+config.decl @id4.vae.tile.batch_count : %value: index where [range(%value, 1, 1024)]
+
+config.decl @id4.vae.tile.tile_width : %value: index where [range(%value, 1, 65536)]
+
+config.decl @id4.vae.tile.tile_height : %value: index where [range(%value, 1, 65536)]
+
+config.decl @id4.vae.tile.tile_origin_x : %value: index where [range(%value, 0, 65535)]
+
+config.decl @id4.vae.tile.tile_origin_y : %value: index where [range(%value, 0, 65535)]
+
+config.decl @id4.vae.tile.tile_element_count : %value: index where [range(%value, 1, 268435456)]
+
+kernel.def export("id4_vae_tile_extract_bf16") @id4_vae_tile_extract_bf16() {
+  %unit = index.constant 1 : index
+  %workgroup_size_x = index.constant 256 : index
+  %element_count = config.get @id4.vae.tile.tile_element_count : index
+  %rounding = index.sub %workgroup_size_x, %unit : index
+  %rounded = index.add %element_count, %rounding : index
+  %workgroups_x = index.div %rounded, %workgroup_size_x : index
+  kernel.launch.config workgroups(%workgroups_x, %unit, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
+} launch(%source: buffer, %tile: buffer) {
+  %base = index.constant 0 : offset
+  %workgroup_size_x = index.constant 256 : index
+  %workgroup = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %source_width = config.get @id4.vae.tile.source_width : index
+  %source_height = config.get @id4.vae.tile.source_height : index
+  %source_channel_count = config.get @id4.vae.tile.source_channel_count : index
+  %batch_count = config.get @id4.vae.tile.batch_count : index
+  %tile_width = config.get @id4.vae.tile.tile_width : index
+  %tile_height = config.get @id4.vae.tile.tile_height : index
+  %tile_origin_x = config.get @id4.vae.tile.tile_origin_x : index
+  %tile_origin_y = config.get @id4.vae.tile.tile_origin_y : index
+  %element_count = config.get @id4.vae.tile.tile_element_count : index
+  %element_index = index.madd %workgroup, %workgroup_size_x, %lane : index
+  %in_bounds = index.cmp ult, %element_index, %element_count : index
+  %source_noalias, %tile_noalias = buffer.assume.noalias %source, %tile : buffer, buffer
+  %source_global = buffer.assume.memory_space<global> %source_noalias : buffer
+  %tile_global = buffer.assume.memory_space<global> %tile_noalias : buffer
+  %source_view = buffer.view %source_global[%base] : buffer -> view<[%source_width]x[%source_height]x[%source_channel_count]x[%batch_count]xbf16, #dense>
+  %tile_view = buffer.view %tile_global[%base] : buffer -> view<[%tile_width]x[%tile_height]x[%source_channel_count]x[%batch_count]xbf16, #dense>
+  scf.if %in_bounds {
+    %tile_x = index.rem %element_index, %tile_width : index
+    %tile_row = index.div %element_index, %tile_width : index
+    %tile_y = index.rem %tile_row, %tile_height : index
+    %tile_plane = index.div %tile_row, %tile_height : index
+    %channel = index.rem %tile_plane, %source_channel_count : index
+    %batch = index.div %tile_plane, %source_channel_count : index
+    %source_x = index.add %tile_origin_x, %tile_x : index
+    %source_y = index.add %tile_origin_y, %tile_y : index
+    %value = view.load %source_view[%source_x, %source_y, %channel, %batch] : view<[%source_width]x[%source_height]x[%source_channel_count]x[%batch_count]xbf16, #dense> -> bf16
+    view.store %value, %tile_view[%tile_x, %tile_y, %channel, %batch] : bf16, view<[%tile_width]x[%tile_height]x[%source_channel_count]x[%batch_count]xbf16, #dense>
+  }
+  kernel.return
+}
+
+check.case public @id4_vae_tile_extract_bf16_x_case {
+  %source = check.generate.fill value(3.0) : tensor<4x1x1x1xbf16>
+  %tile = check.generate.fill value(0.0) : tensor<2x1x1x1xbf16>
+  %expected = check.generate.fill value(3.0) : tensor<2x1x1x1xbf16>
+  func.call @id4_vae_tile_extract_bf16(%source, %tile) : (tensor<4x1x1x1xbf16>, tensor<2x1x1x1xbf16>)
+  check.expect.close actual(%tile) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2x1x1x1xbf16>
+  check.return
+}
+
+check.benchmark<@id4_vae_tile_extract_bf16_x_case> @id4_vae_tile_extract_bf16_x
