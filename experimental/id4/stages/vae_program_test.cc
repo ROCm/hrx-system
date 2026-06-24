@@ -238,6 +238,34 @@ TEST(VaeProgram, AuthorsDecodeBoundaryContract) {
   id4_pipeline_program_release(program);
 }
 
+TEST(VaeProgram, AuthorsFlux2SingleTileDecodeBoundaryContract) {
+  const id4_vae_model_config_t model = *id4_vae_program_flux2_model_config();
+  id4_vae_decode_request_config_t request = MakeExplicitRequest(
+      id4_pipeline_program_make_shape_rank4(4, 4, 128, 1), 4, 4, 0.0f);
+  id4_vae_program_options_t options = MakeProgramOptions(model, request);
+  id4_pipeline_program_t* program = CreateVaeProgram(&options);
+
+  EXPECT_TRUE(ProgramExportsTensorWithShape(
+      program, ID4_PIPELINE_PROGRAM_DTYPE_F32,
+      id4_pipeline_program_make_shape_rank4(64, 64, 3, 1)));
+
+  id4_pipeline_program_release(program);
+}
+
+TEST(VaeProgram, AuthorsFlux2TiledDecodeBoundaryContract) {
+  const id4_vae_model_config_t model = *id4_vae_program_flux2_model_config();
+  id4_vae_decode_request_config_t request = MakeExplicitRequest(
+      id4_pipeline_program_make_shape_rank4(8, 8, 128, 1), 4, 4, 0.5f);
+  id4_vae_program_options_t options = MakeProgramOptions(model, request);
+  id4_pipeline_program_t* program = CreateVaeProgram(&options);
+
+  EXPECT_TRUE(ProgramExportsTensorWithShape(
+      program, ID4_PIPELINE_PROGRAM_DTYPE_F32,
+      id4_pipeline_program_make_shape_rank4(128, 128, 3, 1)));
+
+  id4_pipeline_program_release(program);
+}
+
 TEST(VaeProgram, RejectsLatentShapeWithWrongChannelCount) {
   ProgramBuilderScope builder_scope;
   id4_vae_model_config_t model = MakeSmallModelConfig();

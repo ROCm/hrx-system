@@ -149,12 +149,18 @@ kernel.def export("id4_vae_tile_merge_f32") @id4_vae_tile_merge_f32() {
       %tile_value = view.load %tile_view[%tile_x, %tile_y, %channel, %batch] : view<[%tile_width]x[%tile_height]x[%image_channel_count]x[%batch_count]xf32, #dense> -> f32
       %old_value = view.load %image_view[%image_x, %image_y, %channel, %batch] : view<[%image_width]x[%image_height]x[%image_channel_count]x[%batch_count]xf32, #dense> -> f32
 
-      %has_left_overlap = index.cmp ugt, %tile_origin_x, %zero : index
+      %overlap_x_positive = index.cmp ugt, %overlap_x, %zero : index
+      %tile_has_left_overlap = index.cmp ugt, %tile_origin_x, %zero : index
+      %has_left_overlap = scalar.andi %overlap_x_positive, %tile_has_left_overlap : i1
       %image_right_edge = index.sub %image_width, %tile_width : index
-      %has_right_overlap = index.cmp ult, %tile_origin_x, %image_right_edge : index
-      %has_top_overlap = index.cmp ugt, %tile_origin_y, %zero : index
+      %tile_has_right_overlap = index.cmp ult, %tile_origin_x, %image_right_edge : index
+      %has_right_overlap = scalar.andi %overlap_x_positive, %tile_has_right_overlap : i1
+      %overlap_y_positive = index.cmp ugt, %overlap_y, %zero : index
+      %tile_has_top_overlap = index.cmp ugt, %tile_origin_y, %zero : index
+      %has_top_overlap = scalar.andi %overlap_y_positive, %tile_has_top_overlap : i1
       %image_bottom_edge = index.sub %image_height, %tile_height : index
-      %has_bottom_overlap = index.cmp ult, %tile_origin_y, %image_bottom_edge : index
+      %tile_has_bottom_overlap = index.cmp ult, %tile_origin_y, %image_bottom_edge : index
+      %has_bottom_overlap = scalar.andi %overlap_y_positive, %tile_has_bottom_overlap : i1
 
       %left_weight = scf.if %has_left_overlap -> (f32) {
         %overlap_i32 = index.cast %overlap_x : index to i32
