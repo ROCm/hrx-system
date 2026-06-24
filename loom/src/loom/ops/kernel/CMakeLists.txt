@@ -48,6 +48,7 @@ loom_generated_cc_library(
     loom::target::types
     loom::util::fact_table
     loom::util::math
+    loom::util::walk
 )
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

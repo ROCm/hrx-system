@@ -243,6 +243,63 @@ func.def @barrier_rejects_device_scope() {
 
 test.target<low_core> @test_target
 
+kernel.def @workgroup_barrier_accepts_uniform_branch() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch() {
+  %zero = index.constant 0 : index
+  %workgroup = kernel.workgroup.id<x> : index
+  %is_first_workgroup = index.cmp eq, %workgroup, %zero : index
+  scf.if %is_first_workgroup {
+    kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+    scf.yield
+  }
+  kernel.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+kernel.def @workgroup_barrier_rejects_lane_predicated_branch() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch() {
+  %limit = index.constant 32 : index
+  %lane = kernel.workitem.id<x> : index
+  %active = index.cmp ult, %lane, %limit : index
+  scf.if %active {
+    // ERROR@+1: STRUCTURE/038 "kernel.barrier" "region selector" "active" "scf.if"
+    kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+    scf.yield
+  }
+  kernel.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+kernel.def @workgroup_barrier_rejects_lane_varying_counted_loop_bound() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch() {
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %lane = kernel.workitem.id<x> : index
+  scf.for %i = [%zero to %lane step %one] {
+    // ERROR@+1: STRUCTURE/038 "kernel.barrier" "loop upper bound" "lane" "scf.for"
+    kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  }
+  kernel.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
 func.def @async_copy_requires_static_byte_footprint(%buffer: buffer, %offset: offset, %n: index) {
   %zero = index.constant 0 : offset
   %bytes = index.constant 1024 : offset

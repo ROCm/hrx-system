@@ -625,6 +625,28 @@ ERR_STRUCTURE_037 = ErrorDef(
     ),
 )
 
+# ERR_STRUCTURE_038: Workgroup barrier is under divergent control.
+ERR_STRUCTURE_038 = ErrorDef(
+    domain=ErrorDomain.STRUCTURE,
+    code=38,
+    severity=Severity.ERROR,
+    summary="Workgroup barrier is under divergent control.",
+    message=(
+        "'{op_name}' with workgroup scope is control-dependent on "
+        "lane-varying {control_kind} '{control_value}' from '{control_op_name}'"
+    ),
+    params=(
+        ErrorParam("op_name", ParamKind.STRING),
+        ErrorParam("control_kind", ParamKind.STRING),
+        ErrorParam("control_value", ParamKind.STRING),
+        ErrorParam("control_op_name", ParamKind.STRING),
+    ),
+    fix_hint=(
+        "Move the workgroup barrier outside lane-varying control and guard "
+        "only the memory access or final store"
+    ),
+)
+
 ALL_STRUCTURE_ERRORS: tuple[ErrorDef, ...] = (
     ERR_STRUCTURE_001,
     ERR_STRUCTURE_002,
@@ -663,4 +685,5 @@ ALL_STRUCTURE_ERRORS: tuple[ErrorDef, ...] = (
     ERR_STRUCTURE_035,
     ERR_STRUCTURE_036,
     ERR_STRUCTURE_037,
+    ERR_STRUCTURE_038,
 )
