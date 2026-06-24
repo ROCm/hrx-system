@@ -342,9 +342,11 @@ static iree_status_t id4_pipeline_kernel_cache_require_loom_result(
       message = iree_string_view_from_loomc(diagnostic->message);
     }
   }
-  return iree_make_status(IREE_STATUS_FAILED_PRECONDITION, "%.*s failed: %.*s",
-                          (int)phase.size, phase.data, (int)message.size,
-                          message.data);
+  return iree_make_status(
+      IREE_STATUS_FAILED_PRECONDITION, "%.*s failed for %.*s:%.*s: %.*s",
+      (int)phase.size, phase.data, (int)options->module_path.size,
+      options->module_path.data, (int)options->function_name.size,
+      options->function_name.data, (int)message.size, message.data);
 }
 
 static loomc_compile_artifact_flags_t
