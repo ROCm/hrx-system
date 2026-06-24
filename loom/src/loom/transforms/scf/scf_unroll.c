@@ -1297,10 +1297,32 @@ static void loom_scf_unroll_endpoint_region(
   };
 }
 
+static bool loom_scf_unroll_symbolic_expr_contains_value(
+    const loom_symbolic_expr_t* expression, loom_value_id_t value_id) {
+  if (!loom_symbolic_expr_is_linear(expression)) return false;
+  for (iree_host_size_t i = 0; i < expression->term_count; ++i) {
+    const loom_symbolic_term_t term = expression->terms[i];
+    if (term.value_id == value_id || term.relation_value_id == value_id) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static bool loom_scf_unroll_endpoint_contains_value(
+    const loom_movement_endpoint_t* endpoint, loom_value_id_t value_id) {
+  return loom_scf_unroll_symbolic_expr_contains_value(
+             &endpoint->begin_byte_offset, value_id) ||
+         loom_scf_unroll_symbolic_expr_contains_value(&endpoint->byte_length,
+                                                      value_id) ||
+         loom_scf_unroll_symbolic_expr_contains_value(
+             &endpoint->end_byte_offset, value_id);
+}
+
 static iree_status_t loom_scf_unroll_endpoints_no_overlap(
     loom_movement_analysis_t* movement_analysis,
     const loom_movement_endpoint_t* left, const loom_movement_endpoint_t* right,
-    bool* out_no_overlap) {
+    loom_value_id_t varying_value_id, bool* out_no_overlap) {
   *out_no_overlap = false;
   if (left->kind != LOOM_MOVEMENT_ENDPOINT_VIEW ||
       right->kind != LOOM_MOVEMENT_ENDPOINT_VIEW) {
@@ -1309,6 +1331,11 @@ static iree_status_t loom_scf_unroll_endpoints_no_overlap(
   if (left->root_value_id == LOOM_VALUE_ID_INVALID ||
       right->root_value_id == LOOM_VALUE_ID_INVALID ||
       left->root_value_id != right->root_value_id) {
+    return iree_ok_status();
+  }
+  if (varying_value_id != LOOM_VALUE_ID_INVALID &&
+      (loom_scf_unroll_endpoint_contains_value(left, varying_value_id) ||
+       loom_scf_unroll_endpoint_contains_value(right, varying_value_id))) {
     return iree_ok_status();
   }
   loom_view_region_t left_region = {0};
@@ -1345,7 +1372,8 @@ static iree_status_t loom_scf_unroll_movement_requests_conflict(
     const loom_movement_request_t* prior_request,
     loom_scf_unroll_effect_flags_t prior_flags,
     const loom_movement_request_t* candidate_request,
-    loom_scf_unroll_effect_flags_t candidate_flags, bool* out_conflict) {
+    loom_scf_unroll_effect_flags_t candidate_flags,
+    loom_value_id_t varying_value_id, bool* out_conflict) {
   *out_conflict = true;
   const loom_movement_endpoint_t* prior_write = NULL;
   const loom_movement_endpoint_t* prior_read = NULL;
@@ -1380,7 +1408,7 @@ static iree_status_t loom_scf_unroll_movement_requests_conflict(
 
   bool no_overlap = false;
   IREE_RETURN_IF_ERROR(loom_scf_unroll_endpoints_no_overlap(
-      movement_analysis, left, right, &no_overlap));
+      movement_analysis, left, right, varying_value_id, &no_overlap));
   *out_conflict = !no_overlap;
   return iree_ok_status();
 }
@@ -1426,7 +1454,7 @@ static iree_status_t loom_scf_unroll_effects_conflict_with_movement(
     const loom_scf_unroll_effect_dependency_plan_t* plan,
     const loom_scf_unroll_effect_flags_t* effect_flags,
     uint32_t prior_effect_index, uint32_t candidate_effect_index,
-    bool* out_conflict) {
+    loom_value_id_t varying_value_id, bool* out_conflict) {
   const uint32_t prior_op_index = plan->body_op_indices[prior_effect_index];
   const uint32_t candidate_op_index =
       plan->body_op_indices[candidate_effect_index];
@@ -1448,7 +1476,7 @@ static iree_status_t loom_scf_unroll_effects_conflict_with_movement(
   return loom_scf_unroll_movement_requests_conflict(
       movement_analysis, &movement_requests[prior_effect_index], prior_flags,
       &movement_requests[candidate_effect_index], candidate_flags,
-      out_conflict);
+      varying_value_id, out_conflict);
 }
 
 static bool loom_scf_unroll_effects_conflict_is_refinable(
@@ -1610,7 +1638,7 @@ static iree_status_t loom_scf_unroll_build_effect_dependency_plan(
         status = loom_scf_unroll_effects_conflict_with_movement(
             &movement_analysis, movement_requests, described_movements, &plan,
             effect_flags, prior_effect_index, candidate_effect_index,
-            &conflicts[matrix_index]);
+            body_block->arg_ids[0], &conflicts[matrix_index]);
         if (!iree_status_is_ok(status)) break;
       }
     }

@@ -272,6 +272,86 @@ func.def @interleaved_disjoint_vector_stores_commute(%buffer: buffer) {
 
 // ====
 
+func.def @interleaved_dynamic_base_vector_stores_commute(%buffer: buffer, %base: offset) {
+  %value0 = scalar.constant 1 : i32
+  %value1 = scalar.constant 2 : i32
+  %vec0 = vector.splat %value0 : vector<4xi32>
+  %vec1 = vector.splat %value1 : vector<4xi32>
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%base] : buffer -> view<8xi32, %layout>
+  %start = index.constant 0 : index
+  %end = index.constant 2 : index
+  %step = index.constant 1 : index
+  scf.for %i = [%start to %end step %step] unroll schedule(interleaved) {
+    vector.store %vec0, %view[0] : vector<4xi32>, view<8xi32, %layout>
+    vector.store %vec1, %view[4] : vector<4xi32>, view<8xi32, %layout>
+  }
+  func.return
+}
+
+// ----
+func.def @interleaved_dynamic_base_vector_stores_commute(%buffer: buffer, %base: offset) {
+  %value0 = scalar.constant 1 : i32
+  %value1 = scalar.constant 2 : i32
+  %vec0 = vector.splat %value0 : vector<4xi32>
+  %vec1 = vector.splat %value1 : vector<4xi32>
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%base] : buffer -> view<8xi32, %layout>
+  %start = index.constant 0 : index
+  %end = index.constant 2 : index
+  %step = index.constant 1 : index
+  %i_0 = index.constant 0 : index
+  %i_1 = index.constant 1 : index
+  vector.store %vec0, %view[0] : vector<4xi32>, view<8xi32, %layout>
+  vector.store %vec0, %view[0] : vector<4xi32>, view<8xi32, %layout>
+  vector.store %vec1, %view[4] : vector<4xi32>, view<8xi32, %layout>
+  vector.store %vec1, %view[4] : vector<4xi32>, view<8xi32, %layout>
+  func.return
+}
+
+// ====
+
+func.def @interleaved_dynamic_index_vector_stores_commute(%buffer: buffer, %row: index) {
+  %zero = index.constant 0 : offset
+  %value0 = scalar.constant 1 : i32
+  %value1 = scalar.constant 2 : i32
+  %vec0 = vector.splat %value0 : vector<4xi32>
+  %vec1 = vector.splat %value1 : vector<4xi32>
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%zero] : buffer -> view<4x8xi32, %layout>
+  %start = index.constant 0 : index
+  %end = index.constant 2 : index
+  %step = index.constant 1 : index
+  scf.for %i = [%start to %end step %step] unroll schedule(interleaved) {
+    vector.store %vec0, %view[%row, 0] : vector<4xi32>, view<4x8xi32, %layout>
+    vector.store %vec1, %view[%row, 4] : vector<4xi32>, view<4x8xi32, %layout>
+  }
+  func.return
+}
+
+// ----
+func.def @interleaved_dynamic_index_vector_stores_commute(%buffer: buffer, %row: index) {
+  %zero = index.constant 0 : offset
+  %value0 = scalar.constant 1 : i32
+  %value1 = scalar.constant 2 : i32
+  %vec0 = vector.splat %value0 : vector<4xi32>
+  %vec1 = vector.splat %value1 : vector<4xi32>
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%zero] : buffer -> view<4x8xi32, %layout>
+  %start = index.constant 0 : index
+  %end = index.constant 2 : index
+  %step = index.constant 1 : index
+  %i_0 = index.constant 0 : index
+  %i_1 = index.constant 1 : index
+  vector.store %vec0, %view[%row, 0] : vector<4xi32>, view<4x8xi32, %layout>
+  vector.store %vec0, %view[%row, 0] : vector<4xi32>, view<4x8xi32, %layout>
+  vector.store %vec1, %view[%row, 4] : vector<4xi32>, view<4x8xi32, %layout>
+  vector.store %vec1, %view[%row, 4] : vector<4xi32>, view<4x8xi32, %layout>
+  func.return
+}
+
+// ====
+
 func.def @interleaved_overlapping_vector_stores_preserve_order(%buffer: buffer) {
   %zero = index.constant 0 : offset
   %value0 = scalar.constant 1 : i32
@@ -308,6 +388,52 @@ func.def @interleaved_overlapping_vector_stores_preserve_order(%buffer: buffer) 
   vector.store %vec1, %view[0] : vector<4xi32>, view<4xi32, %layout>
   vector.store %vec0, %view[0] : vector<4xi32>, view<4xi32, %layout>
   vector.store %vec1, %view[0] : vector<4xi32>, view<4xi32, %layout>
+  func.return
+}
+
+// ====
+
+func.def @interleaved_induction_vector_stores_preserve_order(%buffer: buffer) {
+  %zero = index.constant 0 : offset
+  %one = index.constant 1 : index
+  %value0 = scalar.constant 1 : i32
+  %value1 = scalar.constant 2 : i32
+  %vec0 = vector.splat %value0 : vector<1xi32>
+  %vec1 = vector.splat %value1 : vector<1xi32>
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%zero] : buffer -> view<4xi32, %layout>
+  %start = index.constant 0 : index
+  %end = index.constant 2 : index
+  %step = index.constant 1 : index
+  scf.for %i = [%start to %end step %step] unroll schedule(interleaved) {
+    %next = index.add %i, %one : index
+    vector.store %vec0, %view[%i] : vector<1xi32>, view<4xi32, %layout>
+    vector.store %vec1, %view[%next] : vector<1xi32>, view<4xi32, %layout>
+  }
+  func.return
+}
+
+// ----
+func.def @interleaved_induction_vector_stores_preserve_order(%buffer: buffer) {
+  %zero = index.constant 0 : offset
+  %one = index.constant 1 : index
+  %value0 = scalar.constant 1 : i32
+  %value1 = scalar.constant 2 : i32
+  %vec0 = vector.splat %value0 : vector<1xi32>
+  %vec1 = vector.splat %value1 : vector<1xi32>
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%zero] : buffer -> view<4xi32, %layout>
+  %start = index.constant 0 : index
+  %end = index.constant 2 : index
+  %step = index.constant 1 : index
+  %i_0 = index.constant 0 : index
+  %i_1 = index.constant 1 : index
+  %next = index.add %i_0, %one : index
+  %next_1 = index.add %i_1, %one : index
+  vector.store %vec0, %view[%i_0] : vector<1xi32>, view<4xi32, %layout>
+  vector.store %vec1, %view[%next] : vector<1xi32>, view<4xi32, %layout>
+  vector.store %vec0, %view[%i_1] : vector<1xi32>, view<4xi32, %layout>
+  vector.store %vec1, %view[%next_1] : vector<1xi32>, view<4xi32, %layout>
   func.return
 }
 

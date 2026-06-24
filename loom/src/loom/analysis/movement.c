@@ -142,18 +142,125 @@ static bool loom_movement_vector_footprint_byte_length(
                               out_byte_length);
 }
 
-static bool loom_movement_vector_static_begin_byte_offset(
-    const loom_vector_memory_access_t* access, loom_attribute_t static_indices,
-    int64_t* out_byte_offset) {
-  *out_byte_offset = 0;
+static iree_status_t loom_movement_origin_index_expr(
+    loom_movement_analysis_t* analysis, loom_attribute_t static_indices,
+    loom_value_slice_t dynamic_indices, uint8_t axis,
+    loom_symbolic_expr_t* out_expression, bool* out_known) {
+  *out_known = false;
   if (static_indices.kind != LOOM_ATTR_I64_ARRAY ||
-      static_indices.count != access->view_rank) {
-    return false;
+      axis >= static_indices.count) {
+    return iree_ok_status();
   }
-  int64_t lane_indices[LOOM_ENCODING_ADDRESS_LAYOUT_MAX_RANK] = {0};
-  return loom_vector_memory_access_static_lane_byte_offset(
-      access, static_indices, lane_indices, access->vector_rank,
-      out_byte_offset);
+
+  uint16_t dynamic_ordinal = 0;
+  for (uint8_t i = 0; i <= axis; ++i) {
+    int64_t static_index = static_indices.i64_array[i];
+    if (static_index != INT64_MIN) {
+      if (i == axis) {
+        loom_symbolic_expr_constant(static_index, out_expression);
+        *out_known = true;
+        return iree_ok_status();
+      }
+      continue;
+    }
+    if (i == axis) {
+      if (dynamic_ordinal >= dynamic_indices.count) {
+        return iree_ok_status();
+      }
+      IREE_RETURN_IF_ERROR(loom_symbolic_expr_from_value(
+          &analysis->view_regions.expression_context,
+          dynamic_indices.values[dynamic_ordinal], out_expression));
+      *out_known = true;
+      return iree_ok_status();
+    }
+    ++dynamic_ordinal;
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_movement_vector_origin_byte_offset_expr(
+    loom_movement_analysis_t* analysis,
+    const loom_vector_memory_access_t* access, loom_attribute_t static_indices,
+    loom_value_slice_t dynamic_indices, loom_symbolic_expr_t* out_expression,
+    bool* out_known) {
+  *out_known = false;
+  if (access->static_element_byte_count <= 0 ||
+      static_indices.kind != LOOM_ATTR_I64_ARRAY ||
+      static_indices.count != access->view_rank) {
+    return iree_ok_status();
+  }
+
+  loom_symbolic_expr_t element_offset = {0};
+  loom_symbolic_expr_constant(0, &element_offset);
+  for (uint8_t view_axis = 0; view_axis < access->view_rank; ++view_axis) {
+    int64_t stride = 0;
+    if (!loom_vector_memory_access_static_axis_stride(access, view_axis,
+                                                      &stride)) {
+      return iree_ok_status();
+    }
+    if (stride == 0) continue;
+
+    loom_symbolic_expr_t origin = {0};
+    bool origin_known = false;
+    IREE_RETURN_IF_ERROR(loom_movement_origin_index_expr(
+        analysis, static_indices, dynamic_indices, view_axis, &origin,
+        &origin_known));
+    if (!origin_known) return iree_ok_status();
+
+    loom_symbolic_expr_t contribution = {0};
+    IREE_RETURN_IF_ERROR(
+        loom_symbolic_expr_mul_i64(&analysis->view_regions.expression_context,
+                                   &origin, stride, &contribution));
+    IREE_RETURN_IF_ERROR(loom_symbolic_expr_add(
+        &analysis->view_regions.expression_context, &element_offset,
+        &contribution, &element_offset));
+  }
+
+  IREE_RETURN_IF_ERROR(loom_symbolic_expr_mul_i64(
+      &analysis->view_regions.expression_context, &element_offset,
+      access->static_element_byte_count, out_expression));
+  *out_known = true;
+  return iree_ok_status();
+}
+
+static void loom_movement_endpoint_refresh_static_bounds(
+    loom_movement_endpoint_t* endpoint) {
+  endpoint->flags &= ~(LOOM_MOVEMENT_ENDPOINT_STATIC_BEGIN |
+                       LOOM_MOVEMENT_ENDPOINT_STATIC_LENGTH);
+  endpoint->static_begin_byte_offset = 0;
+  endpoint->static_byte_length = 0;
+  if (loom_movement_exact_i64(endpoint->begin_byte_offset,
+                              &endpoint->static_begin_byte_offset)) {
+    endpoint->flags |= LOOM_MOVEMENT_ENDPOINT_STATIC_BEGIN;
+  }
+  if (loom_movement_exact_i64(endpoint->byte_length,
+                              &endpoint->static_byte_length)) {
+    endpoint->flags |= LOOM_MOVEMENT_ENDPOINT_STATIC_LENGTH;
+  }
+}
+
+static iree_status_t loom_movement_endpoint_apply_vector_footprint(
+    loom_movement_analysis_t* analysis, const loom_symbolic_expr_t* origin,
+    int64_t byte_length, loom_movement_endpoint_t* endpoint) {
+  if (endpoint->kind != LOOM_MOVEMENT_ENDPOINT_VIEW) {
+    return iree_ok_status();
+  }
+
+  loom_symbolic_expr_t begin = {0};
+  IREE_RETURN_IF_ERROR(
+      loom_symbolic_expr_add(&analysis->view_regions.expression_context,
+                             &endpoint->begin_byte_offset, origin, &begin));
+  loom_symbolic_expr_t length = {0};
+  loom_symbolic_expr_constant(byte_length, &length);
+  loom_symbolic_expr_t end = {0};
+  IREE_RETURN_IF_ERROR(loom_symbolic_expr_add(
+      &analysis->view_regions.expression_context, &begin, &length, &end));
+
+  endpoint->begin_byte_offset = begin;
+  endpoint->byte_length = length;
+  endpoint->end_byte_offset = end;
+  loom_movement_endpoint_refresh_static_bounds(endpoint);
+  return iree_ok_status();
 }
 
 static loom_movement_layout_kind_t loom_movement_direct_layout_kind(
@@ -224,11 +331,14 @@ static void loom_movement_endpoint_for_register(
   };
 }
 
-static bool loom_movement_apply_vector_access(
+static iree_status_t loom_movement_apply_vector_access(
     loom_movement_analysis_t* analysis, loom_value_id_t view_value_id,
     loom_type_t vector_type, loom_attribute_t static_indices,
+    loom_value_slice_t dynamic_indices,
     loom_movement_layout_kind_t fallback_layout_kind,
-    loom_movement_request_t* request, loom_movement_diagnostic_t* diagnostic) {
+    loom_movement_request_t* request, loom_movement_diagnostic_t* diagnostic,
+    bool* out_applied) {
+  *out_applied = false;
   const loom_type_t view_type =
       loom_module_value_type(analysis->module, view_value_id);
   const loom_fact_context_t* fact_context =
@@ -237,23 +347,23 @@ static bool loom_movement_apply_vector_access(
                                           view_type, vector_type,
                                           &request->vector_access)) {
     diagnostic->rejection_bits |= LOOM_MOVEMENT_REJECTION_VECTOR_ACCESS;
-    return false;
+    return iree_ok_status();
   }
 
   if (request->vector_access.layout_kind == LOOM_VECTOR_MEMORY_LAYOUT_UNKNOWN) {
     diagnostic->rejection_bits |= LOOM_MOVEMENT_REJECTION_LAYOUT;
-    return false;
+    return iree_ok_status();
   }
   if (request->vector_access.static_element_byte_count <= 0) {
     diagnostic->rejection_bits |= LOOM_MOVEMENT_REJECTION_ELEMENT_WIDTH;
-    return false;
+    return iree_ok_status();
   }
 
   int64_t transferred_byte_count = 0;
   if (!loom_movement_vector_transfer_byte_count(&request->vector_access,
                                                 &transferred_byte_count)) {
     diagnostic->rejection_bits |= LOOM_MOVEMENT_REJECTION_LANE_COUNT;
-    return false;
+    return iree_ok_status();
   }
   request->flags |= LOOM_MOVEMENT_REQUEST_STATIC_TRANSFER;
   request->transferred_byte_count = transferred_byte_count;
@@ -276,54 +386,27 @@ static bool loom_movement_apply_vector_access(
     request->dest.static_byte_length = endpoint_byte_length;
   }
 
-  int64_t static_begin = 0;
-  if (loom_movement_vector_static_begin_byte_offset(
-          &request->vector_access, static_indices, &static_begin)) {
-    if (request->source.kind == LOOM_MOVEMENT_ENDPOINT_VIEW &&
-        iree_all_bits_set(request->source.flags,
-                          LOOM_MOVEMENT_ENDPOINT_STATIC_BEGIN |
-                              LOOM_MOVEMENT_ENDPOINT_STATIC_LENGTH)) {
-      if (!iree_checked_add_i64(request->source.static_begin_byte_offset,
-                                static_begin,
-                                &request->source.static_begin_byte_offset)) {
-        diagnostic->rejection_bits |= LOOM_MOVEMENT_REJECTION_FOOTPRINT;
-        return false;
-      }
-      int64_t static_end = 0;
-      if (!iree_checked_add_i64(request->source.static_begin_byte_offset,
-                                request->source.static_byte_length,
-                                &static_end)) {
-        diagnostic->rejection_bits |= LOOM_MOVEMENT_REJECTION_FOOTPRINT;
-        return false;
-      }
-      loom_symbolic_expr_constant(request->source.static_begin_byte_offset,
-                                  &request->source.begin_byte_offset);
-      loom_symbolic_expr_constant(static_end, &request->source.end_byte_offset);
-    }
-    if (request->dest.kind == LOOM_MOVEMENT_ENDPOINT_VIEW &&
-        iree_all_bits_set(request->dest.flags,
-                          LOOM_MOVEMENT_ENDPOINT_STATIC_BEGIN |
-                              LOOM_MOVEMENT_ENDPOINT_STATIC_LENGTH)) {
-      if (!iree_checked_add_i64(request->dest.static_begin_byte_offset,
-                                static_begin,
-                                &request->dest.static_begin_byte_offset)) {
-        diagnostic->rejection_bits |= LOOM_MOVEMENT_REJECTION_FOOTPRINT;
-        return false;
-      }
-      int64_t static_end = 0;
-      if (!iree_checked_add_i64(request->dest.static_begin_byte_offset,
-                                request->dest.static_byte_length,
-                                &static_end)) {
-        diagnostic->rejection_bits |= LOOM_MOVEMENT_REJECTION_FOOTPRINT;
-        return false;
-      }
-      loom_symbolic_expr_constant(request->dest.static_begin_byte_offset,
-                                  &request->dest.begin_byte_offset);
-      loom_symbolic_expr_constant(static_end, &request->dest.end_byte_offset);
-    }
+  if (endpoint_byte_length == 0 ||
+      iree_any_bit_set(request->flags,
+                       LOOM_MOVEMENT_REQUEST_IRREGULAR_OFFSETS)) {
+    *out_applied = true;
+    return iree_ok_status();
   }
 
-  return true;
+  loom_symbolic_expr_t origin = {0};
+  bool origin_known = false;
+  IREE_RETURN_IF_ERROR(loom_movement_vector_origin_byte_offset_expr(
+      analysis, &request->vector_access, static_indices, dynamic_indices,
+      &origin, &origin_known));
+  if (origin_known) {
+    IREE_RETURN_IF_ERROR(loom_movement_endpoint_apply_vector_footprint(
+        analysis, &origin, endpoint_byte_length, &request->source));
+    IREE_RETURN_IF_ERROR(loom_movement_endpoint_apply_vector_footprint(
+        analysis, &origin, endpoint_byte_length, &request->dest));
+  }
+
+  *out_applied = true;
+  return iree_ok_status();
 }
 
 static bool loom_movement_cache_policy_from_attrs(
@@ -516,11 +599,15 @@ static iree_status_t loom_movement_describe_vector(
                                         &request->dest);
   }
 
-  if (!loom_movement_apply_vector_access(
-          analysis, view_value_id,
-          loom_module_value_type(analysis->module, register_value_id),
-          loom_op_const_attrs(op)[2], descriptor->layout_kind, request,
-          diagnostic)) {
+  loom_memory_access_t access = loom_memory_access_cast(analysis->module, op);
+  bool applied = false;
+  IREE_RETURN_IF_ERROR(loom_movement_apply_vector_access(
+      analysis, view_value_id,
+      loom_module_value_type(analysis->module, register_value_id),
+      loom_memory_access_static_indices(access),
+      loom_memory_access_dynamic_indices(access), descriptor->layout_kind,
+      request, diagnostic, &applied));
+  if (!applied) {
     return loom_movement_describe_result(false, out_described);
   }
   return loom_movement_describe_result(true, out_described);
