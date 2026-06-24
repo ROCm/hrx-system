@@ -43,6 +43,8 @@ struct VaeBenchmarkShape {
   uint64_t decoded_element_count;
   // VAE tiling policy used to plan the decode stage.
   id4_vae_tiling_config_t tiling;
+  // Activation and parameter-storage route configured on the stage.
+  id4_vae_activation_format_t activation_format;
   // File name used when --id4_plan_output_dir requests a plan dump.
   const char* plan_file_name;
 };
@@ -95,6 +97,8 @@ static constexpr VaeBenchmarkShape kFlux2FullImageShape = {
     /*.decoded_element_count=*/kFlux2DecodedElementCount,
     // Full-frame VAE decode with no spatial tiling.
     /*.tiling=*/DisabledTiling(),
+    // Canonical F32 activation storage.
+    /*.activation_format=*/ID4_VAE_ACTIVATION_FORMAT_F32_CANONICAL,
     // Plan dump file name.
     /*.plan_file_name=*/"decode_full_frame.json",
 };
@@ -109,6 +113,8 @@ static constexpr VaeBenchmarkShape kFlux2TiledFullImageShape = {
     // Stable-style 32x32 latent tiles with 50% overlap.
     /*.tiling=*/
     ExplicitTileSizeTiling(kFlux2TileLatentWidth, kFlux2TileLatentHeight, 0.5f),
+    // Canonical F32 activation storage.
+    /*.activation_format=*/ID4_VAE_ACTIVATION_FORMAT_F32_CANONICAL,
     // Plan dump file name.
     /*.plan_file_name=*/"decode_tiled.json",
 };
@@ -122,8 +128,56 @@ static constexpr VaeBenchmarkShape kFlux2TileLocalShape = {
     /*.decoded_element_count=*/kFlux2TileDecodedElementCount,
     // Single-tile local VAE decode with no spatial tiling.
     /*.tiling=*/DisabledTiling(),
+    // Canonical F32 activation storage.
+    /*.activation_format=*/ID4_VAE_ACTIVATION_FORMAT_F32_CANONICAL,
     // Plan dump file name.
     /*.plan_file_name=*/"decode_tile_local.json",
+};
+
+static constexpr VaeBenchmarkShape kFlux2Bf16FullImageShape = {
+    // Full 1024x1024 image latent width.
+    /*.latent_width=*/kFlux2LatentWidth,
+    // Full 1024x1024 image latent height.
+    /*.latent_height=*/kFlux2LatentHeight,
+    // Full 1024x1024 RGB output element count.
+    /*.decoded_element_count=*/kFlux2DecodedElementCount,
+    // Full-frame VAE decode with no spatial tiling.
+    /*.tiling=*/DisabledTiling(),
+    // BF16 prelude activation and post-quant storage.
+    /*.activation_format=*/ID4_VAE_ACTIVATION_FORMAT_BF16_CONV_INPUT,
+    // Plan dump file name.
+    /*.plan_file_name=*/"decode_bf16_full_frame.json",
+};
+
+static constexpr VaeBenchmarkShape kFlux2Bf16TiledFullImageShape = {
+    // Full 1024x1024 image latent width.
+    /*.latent_width=*/kFlux2LatentWidth,
+    // Full 1024x1024 image latent height.
+    /*.latent_height=*/kFlux2LatentHeight,
+    // Full 1024x1024 RGB output element count.
+    /*.decoded_element_count=*/kFlux2DecodedElementCount,
+    // Stable-style 32x32 latent tiles with 50% overlap.
+    /*.tiling=*/
+    ExplicitTileSizeTiling(kFlux2TileLatentWidth, kFlux2TileLatentHeight, 0.5f),
+    // BF16 prelude activation and post-quant storage.
+    /*.activation_format=*/ID4_VAE_ACTIVATION_FORMAT_BF16_CONV_INPUT,
+    // Plan dump file name.
+    /*.plan_file_name=*/"decode_bf16_tiled.json",
+};
+
+static constexpr VaeBenchmarkShape kFlux2Bf16TileLocalShape = {
+    // Stable-style tile latent width.
+    /*.latent_width=*/kFlux2TileLatentWidth,
+    // Stable-style tile latent height.
+    /*.latent_height=*/kFlux2TileLatentHeight,
+    // Tile-local 512x512 RGB output element count.
+    /*.decoded_element_count=*/kFlux2TileDecodedElementCount,
+    // Single-tile local VAE decode with no spatial tiling.
+    /*.tiling=*/DisabledTiling(),
+    // BF16 prelude activation and post-quant storage.
+    /*.activation_format=*/ID4_VAE_ACTIVATION_FORMAT_BF16_CONV_INPUT,
+    // Plan dump file name.
+    /*.plan_file_name=*/"decode_bf16_tile_local.json",
 };
 
 struct VaeBenchmarkContext {
@@ -143,8 +197,10 @@ struct VaeBenchmarkContext {
   id4_pipeline_diagnostics_sink_t diagnostics_sink;
 };
 
-static iree_status_t CreateVaeStage(const id4::test::LiveStageContext& live,
-                                    id4_pipeline_stage_t** out_stage) {
+static iree_status_t CreateVaeStage(
+    const id4::test::LiveStageContext& live,
+    id4_vae_activation_format_t activation_format,
+    id4_pipeline_stage_t** out_stage) {
   IREE_ASSERT_ARGUMENT(out_stage);
   *out_stage = nullptr;
 
@@ -160,20 +216,21 @@ static iree_status_t CreateVaeStage(const id4::test::LiveStageContext& live,
   create_options.services = services;
   create_options.kernel_cache = live.kernel_cache.get();
   create_options.model = *id4_vae_program_flux2_model_config();
-  create_options.activation_format = ID4_VAE_ACTIVATION_FORMAT_F32_CANONICAL;
+  create_options.activation_format = activation_format;
   return id4_vae_stage_create(&create_options, iree_allocator_system(),
                               out_stage);
 }
 
 static iree_status_t CreateLoadedVaeStageContext(
-    VaeBenchmarkContext* out_context) {
+    VaeBenchmarkContext* out_context,
+    id4_vae_activation_format_t activation_format) {
   IREE_ASSERT_ARGUMENT(out_context);
   out_context->diagnostics_sink =
       id4::test::DiagnosticsSink(&out_context->diagnostics);
   IREE_RETURN_IF_ERROR(
       id4::test::CreateLiveStageContextFromFlags(&out_context->live));
-  IREE_RETURN_IF_ERROR(
-      CreateVaeStage(out_context->live, out_context->stage.out()));
+  IREE_RETURN_IF_ERROR(CreateVaeStage(out_context->live, activation_format,
+                                      out_context->stage.out()));
 
   id4_pipeline_stage_load_options_t load_options;
   std::memset(&load_options, 0, sizeof(load_options));
@@ -183,8 +240,9 @@ static iree_status_t CreateLoadedVaeStageContext(
 }
 
 static iree_status_t CreateLoadedVaeBenchmarkContext(
-    VaeBenchmarkContext* out_context) {
-  IREE_RETURN_IF_ERROR(CreateLoadedVaeStageContext(out_context));
+    VaeBenchmarkContext* out_context, VaeBenchmarkShape shape) {
+  IREE_RETURN_IF_ERROR(
+      CreateLoadedVaeStageContext(out_context, shape.activation_format));
   IREE_RETURN_IF_ERROR(id4::test::CreateEmbeddedKernelLibrary(
       out_context->kernel_library.out()));
   return id4::test::CreateParameterProviderFromFlags(
@@ -328,7 +386,8 @@ static const iree_benchmark_def_t* RegisterVaeBenchmark(
 
 IREE_BENCHMARK_FN(BM_VaeStagePlanFlux2Decode) {
   VaeBenchmarkContext context;
-  IREE_RETURN_IF_ERROR(CreateLoadedVaeStageContext(&context));
+  IREE_RETURN_IF_ERROR(CreateLoadedVaeStageContext(
+      &context, kFlux2FullImageShape.activation_format));
   IREE_RETURN_IF_ERROR(
       WritePlanJsonIfRequested(&context, kFlux2FullImageShape));
 
@@ -348,7 +407,8 @@ ID4_VAE_BENCHMARK_REGISTER(BM_VaeStagePlanFlux2Decode, MICROSECOND);
 
 IREE_BENCHMARK_FN(BM_VaeStagePlanFlux2TiledDecode) {
   VaeBenchmarkContext context;
-  IREE_RETURN_IF_ERROR(CreateLoadedVaeStageContext(&context));
+  IREE_RETURN_IF_ERROR(CreateLoadedVaeStageContext(
+      &context, kFlux2TiledFullImageShape.activation_format));
   IREE_RETURN_IF_ERROR(
       WritePlanJsonIfRequested(&context, kFlux2TiledFullImageShape));
 
@@ -367,15 +427,36 @@ IREE_BENCHMARK_FN(BM_VaeStagePlanFlux2TiledDecode) {
 }
 ID4_VAE_BENCHMARK_REGISTER(BM_VaeStagePlanFlux2TiledDecode, MICROSECOND);
 
-IREE_BENCHMARK_FN(BM_VaeStagePrepareCachedKernels) {
+IREE_BENCHMARK_FN(BM_VaeStagePlanFlux2Bf16Decode) {
   VaeBenchmarkContext context;
-  IREE_RETURN_IF_ERROR(CreateLoadedVaeBenchmarkContext(&context));
+  IREE_RETURN_IF_ERROR(CreateLoadedVaeStageContext(
+      &context, kFlux2Bf16FullImageShape.activation_format));
+  IREE_RETURN_IF_ERROR(
+      WritePlanJsonIfRequested(&context, kFlux2Bf16FullImageShape));
+
+  uint64_t iteration_count = 0;
+  while (iree_benchmark_keep_running(benchmark_state, 1)) {
+    id4_pipeline_plan_t* plan = nullptr;
+    IREE_RETURN_IF_ERROR(
+        CreateVaePlan(&context, kFlux2Bf16FullImageShape, &plan));
+    iree_optimization_barrier(plan);
+    id4_pipeline_plan_release(plan);
+    ++iteration_count;
+  }
+  iree_benchmark_set_items_processed(benchmark_state,
+                                     static_cast<int64_t>(iteration_count));
+  return iree_ok_status();
+}
+ID4_VAE_BENCHMARK_REGISTER(BM_VaeStagePlanFlux2Bf16Decode, MICROSECOND);
+
+static iree_status_t RunVaeStagePrepareCachedKernels(
+    iree_benchmark_state_t* benchmark_state, VaeBenchmarkShape shape) {
+  VaeBenchmarkContext context;
+  IREE_RETURN_IF_ERROR(CreateLoadedVaeBenchmarkContext(&context, shape));
 
   id4::test::OwningRef<id4_pipeline_plan_t, id4_pipeline_plan_release> plan;
-  IREE_RETURN_IF_ERROR(
-      CreateVaePlan(&context, kFlux2FullImageShape, plan.out()));
-  IREE_RETURN_IF_ERROR(
-      WritePlanJsonIfRequested(kFlux2FullImageShape, plan.get()));
+  IREE_RETURN_IF_ERROR(CreateVaePlan(&context, shape, plan.out()));
+  IREE_RETURN_IF_ERROR(WritePlanJsonIfRequested(shape, plan.get()));
 
   id4::test::OwningRef<iree_hal_semaphore_t, iree_hal_semaphore_release>
       prepare_semaphore;
@@ -410,12 +491,22 @@ IREE_BENCHMARK_FN(BM_VaeStagePrepareCachedKernels) {
                                      static_cast<int64_t>(iteration_count));
   return iree_ok_status();
 }
+
+IREE_BENCHMARK_FN(BM_VaeStagePrepareCachedKernels) {
+  return RunVaeStagePrepareCachedKernels(benchmark_state, kFlux2FullImageShape);
+}
 ID4_VAE_BENCHMARK_REGISTER(BM_VaeStagePrepareCachedKernels, MICROSECOND);
+
+IREE_BENCHMARK_FN(BM_VaeStagePrepareBf16CachedKernels) {
+  return RunVaeStagePrepareCachedKernels(benchmark_state,
+                                         kFlux2Bf16FullImageShape);
+}
+ID4_VAE_BENCHMARK_REGISTER(BM_VaeStagePrepareBf16CachedKernels, MICROSECOND);
 
 static iree_status_t RunVaeStageIssueEndToEnd(
     iree_benchmark_state_t* benchmark_state, VaeBenchmarkShape shape) {
   VaeBenchmarkContext context;
-  IREE_RETURN_IF_ERROR(CreateLoadedVaeBenchmarkContext(&context));
+  IREE_RETURN_IF_ERROR(CreateLoadedVaeBenchmarkContext(&context, shape));
 
   id4::test::OwningRef<id4_pipeline_plan_t, id4_pipeline_plan_release> plan;
   IREE_RETURN_IF_ERROR(CreateVaePlan(&context, shape, plan.out()));
@@ -493,5 +584,21 @@ IREE_BENCHMARK_FN(BM_VaeStageIssueTileLocalEndToEnd) {
   return RunVaeStageIssueEndToEnd(benchmark_state, kFlux2TileLocalShape);
 }
 ID4_VAE_BENCHMARK_REGISTER(BM_VaeStageIssueTileLocalEndToEnd, MILLISECOND);
+
+IREE_BENCHMARK_FN(BM_VaeStageIssueBf16EndToEnd) {
+  return RunVaeStageIssueEndToEnd(benchmark_state, kFlux2Bf16FullImageShape);
+}
+ID4_VAE_BENCHMARK_REGISTER(BM_VaeStageIssueBf16EndToEnd, MILLISECOND);
+
+IREE_BENCHMARK_FN(BM_VaeStageIssueBf16TiledEndToEnd) {
+  return RunVaeStageIssueEndToEnd(benchmark_state,
+                                  kFlux2Bf16TiledFullImageShape);
+}
+ID4_VAE_BENCHMARK_REGISTER(BM_VaeStageIssueBf16TiledEndToEnd, MILLISECOND);
+
+IREE_BENCHMARK_FN(BM_VaeStageIssueBf16TileLocalEndToEnd) {
+  return RunVaeStageIssueEndToEnd(benchmark_state, kFlux2Bf16TileLocalShape);
+}
+ID4_VAE_BENCHMARK_REGISTER(BM_VaeStageIssueBf16TileLocalEndToEnd, MILLISECOND);
 
 }  // namespace
