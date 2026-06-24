@@ -367,6 +367,28 @@ static iree_string_view_t loom_scf_unroll_tail_strategy_name(
   return IREE_SV("none");
 }
 
+static void loom_scf_unroll_append_lower_bound_report_fields(
+    loom_pass_report_detail_field_t* fields, uint16_t* field_count,
+    const loom_scf_unroll_trip_count_t* trip_count) {
+  fields[(*field_count)++] = loom_pass_report_detail_string_field(
+      IREE_SV("lower_bound_kind"),
+      loom_scf_unroll_lower_bound_kind_name(trip_count->lower_kind));
+  switch (trip_count->lower_kind) {
+    case LOOM_SCF_UNROLL_LOWER_BOUND_STATIC:
+      fields[(*field_count)++] = loom_pass_report_detail_int64_field(
+          IREE_SV("lower"), trip_count->lower_i64);
+      break;
+    case LOOM_SCF_UNROLL_LOWER_BOUND_DYNAMIC:
+      fields[(*field_count)++] = loom_pass_report_detail_uint64_field(
+          IREE_SV("lower_value_id"), trip_count->lower_value);
+      fields[(*field_count)++] = loom_pass_report_detail_int64_field(
+          IREE_SV("lower_range_min"), trip_count->lower_range_min);
+      fields[(*field_count)++] = loom_pass_report_detail_int64_field(
+          IREE_SV("lower_range_max"), trip_count->lower_range_max);
+      break;
+  }
+}
+
 static iree_status_t loom_scf_unroll_append_report_detail(
     const loom_scf_unroll_context_t* context, loom_op_t* op,
     iree_string_view_t policy, loom_scf_for_unroll_schedule_t schedule,
@@ -389,27 +411,12 @@ static iree_status_t loom_scf_unroll_append_report_detail(
       IREE_SV("trip_count"), trip_count->count);
   fields[field_count++] =
       loom_pass_report_detail_int64_field(IREE_SV("step"), trip_count->step);
-  fields[field_count++] = loom_pass_report_detail_string_field(
-      IREE_SV("lower_bound_kind"),
-      loom_scf_unroll_lower_bound_kind_name(trip_count->lower_kind));
   if (unroll_factor >= 0) {
     fields[field_count++] = loom_pass_report_detail_int64_field(
         IREE_SV("unroll_factor"), unroll_factor);
   }
-  switch (trip_count->lower_kind) {
-    case LOOM_SCF_UNROLL_LOWER_BOUND_STATIC:
-      fields[field_count++] = loom_pass_report_detail_int64_field(
-          IREE_SV("lower"), trip_count->lower_i64);
-      break;
-    case LOOM_SCF_UNROLL_LOWER_BOUND_DYNAMIC:
-      fields[field_count++] = loom_pass_report_detail_uint64_field(
-          IREE_SV("lower_value_id"), trip_count->lower_value);
-      fields[field_count++] = loom_pass_report_detail_int64_field(
-          IREE_SV("lower_range_min"), trip_count->lower_range_min);
-      fields[field_count++] = loom_pass_report_detail_int64_field(
-          IREE_SV("lower_range_max"), trip_count->lower_range_max);
-      break;
-  }
+  loom_scf_unroll_append_lower_bound_report_fields(fields, &field_count,
+                                                   trip_count);
   return loom_pass_report_append_detail(context->pass, IREE_SV("scf-unroll"),
                                         fields, field_count);
 }
@@ -424,7 +431,7 @@ static iree_status_t loom_scf_unroll_append_partial_report_detail(
     return iree_ok_status();
   }
 
-  loom_pass_report_detail_field_t fields[10];
+  loom_pass_report_detail_field_t fields[13];
   uint16_t field_count = 0;
   fields[field_count++] = loom_pass_report_detail_string_field(
       IREE_SV("outcome"), IREE_SV("stripmined"));
@@ -446,9 +453,8 @@ static iree_status_t loom_scf_unroll_append_partial_report_detail(
   if (trip_count_state == LOOM_SCF_UNROLL_TRIP_COUNT_EXACT) {
     fields[field_count++] = loom_pass_report_detail_uint64_field(
         IREE_SV("trip_count"), trip_count->count);
-    fields[field_count++] = loom_pass_report_detail_string_field(
-        IREE_SV("lower_bound_kind"),
-        loom_scf_unroll_lower_bound_kind_name(trip_count->lower_kind));
+    loom_scf_unroll_append_lower_bound_report_fields(fields, &field_count,
+                                                     trip_count);
   }
   return loom_pass_report_append_detail(context->pass, IREE_SV("scf-unroll"),
                                         fields, field_count);
@@ -483,23 +489,8 @@ static iree_status_t loom_scf_unroll_append_policy_absent_report_detail(
       IREE_SV("trip_count"), trip_count.count);
   fields[field_count++] =
       loom_pass_report_detail_int64_field(IREE_SV("step"), trip_count.step);
-  fields[field_count++] = loom_pass_report_detail_string_field(
-      IREE_SV("lower_bound_kind"),
-      loom_scf_unroll_lower_bound_kind_name(trip_count.lower_kind));
-  switch (trip_count.lower_kind) {
-    case LOOM_SCF_UNROLL_LOWER_BOUND_STATIC:
-      fields[field_count++] = loom_pass_report_detail_int64_field(
-          IREE_SV("lower"), trip_count.lower_i64);
-      break;
-    case LOOM_SCF_UNROLL_LOWER_BOUND_DYNAMIC:
-      fields[field_count++] = loom_pass_report_detail_uint64_field(
-          IREE_SV("lower_value_id"), trip_count.lower_value);
-      fields[field_count++] = loom_pass_report_detail_int64_field(
-          IREE_SV("lower_range_min"), trip_count.lower_range_min);
-      fields[field_count++] = loom_pass_report_detail_int64_field(
-          IREE_SV("lower_range_max"), trip_count.lower_range_max);
-      break;
-  }
+  loom_scf_unroll_append_lower_bound_report_fields(fields, &field_count,
+                                                   &trip_count);
   return loom_pass_report_append_detail(context->pass, IREE_SV("scf-unroll"),
                                         fields, field_count);
 }

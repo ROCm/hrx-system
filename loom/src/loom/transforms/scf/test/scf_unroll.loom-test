@@ -685,6 +685,38 @@ func.def @partial_factor_dynamic_tail_guard_step_two(%end: index) {
 
 // ====
 
+func.def @partial_factor_dynamic_lower_static_tail_guard(%lane0: index) {
+  %lane = index.assume %lane0 [range(%lane0, 0, 63)] : index
+  %end = index.constant 192 : index
+  %step = index.constant 64 : index
+  %factor = index.constant 2 : index
+  scf.for %column = [%lane to %end step %step] unroll(%factor) {
+    test.use %column : index
+  }
+  func.return
+}
+
+// ----
+func.def @partial_factor_dynamic_lower_static_tail_guard(%lane0: index) {
+  %lane = index.assume %lane0 [range(%lane0, 0, 63)] : index
+  %end = index.constant 192 : index
+  %step = index.constant 64 : index
+  %factor = index.constant 2 : index
+  %6 = index.constant 128 : index
+  scf.for %column = [%lane to %end step %6] {
+    test.use %column : index
+    %8 = index.constant 64 : index
+    %column_64 = index.add %column, %8 : index
+    %10 = index.cmp slt, %column_64, %end : index
+    scf.if %10 {
+      test.use %column_64 : index
+    }
+  }
+  func.return
+}
+
+// ====
+
 func.def @interleaved_partial_factor_divisible_trip_count() {
   %start = index.constant 0 : index
   %end = index.constant 4 : index

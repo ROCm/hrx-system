@@ -449,6 +449,79 @@
       ]
     },
     {
+      "name": "reports exact linear stripmine with guarded tail",
+      "run": {
+        "tool": "loom-opt",
+        "args": [
+          "--pass=unroll-scf-for",
+          "--pass-report=json",
+          "--output={tmp}/linear-exact-stripmine-tail.loom"
+        ],
+        "stdin": {
+          "text": "func.def @linear_exact_stripmine_tail() {\n  %start = index.constant 0 : index\n  %end = index.constant 5 : index\n  %step = index.constant 1 : index\n  %factor = index.constant 2 : index\n  scf.for %i = [%start to %end step %step] unroll(%factor) {\n    test.use %i : index\n  }\n  func.return\n}\n"
+        }
+      },
+      "stderr": {
+        "contains": [
+          "\"pass\":\"unroll-scf-for\"",
+          "\"category\":\"scf-unroll\"",
+          "\"outcome\":\"stripmined\"",
+          "\"policy\":\"factor\"",
+          "\"schedule\":\"linear\"",
+          "\"unroll_factor\":2",
+          "\"step\":1",
+          "\"tail_strategy\":\"guarded_lanes\"",
+          "\"trip_count_state\":\"exact\"",
+          "\"trip_count\":5",
+          "\"lower_bound_kind\":\"static\"",
+          "\"lower\":0"
+        ]
+      },
+      "files": [
+        {
+          "path": "{tmp}/linear-exact-stripmine-tail.loom",
+          "contains": ["scf.if"]
+        }
+      ]
+    },
+    {
+      "name": "reports exact interleaved stripmine with dynamic lower",
+      "run": {
+        "tool": "loom-opt",
+        "args": [
+          "--pass=unroll-scf-for",
+          "--pass-report=json",
+          "--output={tmp}/interleaved-dynamic-lower-stripmine-tail.loom"
+        ],
+        "stdin": {
+          "text": "func.def @interleaved_dynamic_lower_stripmine_tail(%lane0: index) {\n  %lane = index.assume %lane0 [range(%lane0, 0, 63)] : index\n  %end = index.constant 192 : index\n  %step = index.constant 64 : index\n  %factor = index.constant 2 : index\n  scf.for %column = [%lane to %end step %step] unroll(%factor) schedule(interleaved) {\n    test.use %column : index\n  }\n  func.return\n}\n"
+        }
+      },
+      "stderr": {
+        "contains": [
+          "\"pass\":\"unroll-scf-for\"",
+          "\"category\":\"scf-unroll\"",
+          "\"outcome\":\"stripmined\"",
+          "\"policy\":\"factor\"",
+          "\"schedule\":\"interleaved\"",
+          "\"unroll_factor\":2",
+          "\"step\":64",
+          "\"tail_strategy\":\"tail_loop\"",
+          "\"trip_count_state\":\"exact\"",
+          "\"trip_count\":3",
+          "\"lower_bound_kind\":\"dynamic\"",
+          "\"lower_range_min\":0",
+          "\"lower_range_max\":63"
+        ]
+      },
+      "files": [
+        {
+          "path": "{tmp}/interleaved-dynamic-lower-stripmine-tail.loom",
+          "contains": ["scf.for %column"]
+        }
+      ]
+    },
+    {
       "name": "prints full target register types in text diagnostics",
       "run": {
         "tool": "loom-opt",
