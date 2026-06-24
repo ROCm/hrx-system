@@ -383,6 +383,36 @@ func.def @interleaved_partial_factor_requires_exact_full_unroll() {
 
 // ====
 
+func.def @interleaved_carried_loop_rejects_read_effect(%pool: pool<16>, %input: i32) -> (i32) {
+  %start = index.constant 0 : index
+  %end = index.constant 3 : index
+  %step = index.constant 1 : index
+  // ERROR@+1: STRUCTURE/014 {attr_name="schedule", expected_constraint="effect-free body operations when interleaving loop-carried values"}
+  %result = scf.for %i = [%start to %end step %step](%acc = %input : i32) -> (i32) unroll schedule(interleaved) {
+    %tile = test.read_resource %pool : pool<16> -> i32
+    %next = test.addi %acc, %tile : i32
+    scf.yield %next : i32
+  }
+  func.return %result : i32
+}
+
+// ====
+
+func.def @interleaved_carried_loop_rejects_write_effect(%pool: pool<16>, %input: i32) -> (i32) {
+  %start = index.constant 0 : index
+  %end = index.constant 3 : index
+  %step = index.constant 1 : index
+  // ERROR@+1: STRUCTURE/014 {attr_name="schedule", expected_constraint="effect-free body operations when interleaving loop-carried values"}
+  %result = scf.for %i = [%start to %end step %step](%acc = %input : i32) -> (i32) unroll schedule(interleaved) {
+    %next = test.addi %acc, %acc : i32
+    test.write_resource %pool, %next : pool<16>, i32
+    scf.yield %next : i32
+  }
+  func.return %result : i32
+}
+
+// ====
+
 func.def @dynamic_bound_factor_stripmines(%end: index) {
   %start = index.constant 0 : index
   %step = index.constant 1 : index
