@@ -978,64 +978,35 @@ func.def @interleaved_partial_factor_carried_loop(%input: i32) -> (i32) {
 
 // ====
 
-func.def @interleaved_carried_loop_reads_before_carried_updates(%pool: pool<16>, %input: i32) -> (i32) {
+func.def @interleaved_carried_loop_rejects_vector_read(%buffer: buffer, %input: vector<4xi32>) -> (vector<4xi32>) {
+  %zero_offset = index.constant 0 : offset
+  %layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %buffer[%zero_offset] : buffer -> view<4xi32, %layout>
   %start = index.constant 0 : index
   %end = index.constant 3 : index
   %step = index.constant 1 : index
-  %result = scf.for %i = [%start to %end step %step](%acc = %input : i32) -> (i32) unroll schedule(interleaved) {
-    %tile = test.read_resource %pool : pool<16> -> i32
-    %next = test.addi %acc, %tile : i32
-    scf.yield %next : i32
+  // ERROR@+1: STRUCTURE/014 {attr_name="schedule", expected_constraint="effect-free body operations when interleaving loop-carried values"}
+  %result = scf.for %i = [%start to %end step %step](%acc = %input : vector<4xi32>) -> (vector<4xi32>) unroll schedule(interleaved) {
+    %loaded = vector.load %view[%i] : view<4xi32, %layout> -> vector<4xi32>
+    %next = vector.addi %acc, %loaded : vector<4xi32>
+    scf.yield %next : vector<4xi32>
   }
-  func.return %result : i32
-}
-
-// ----
-func.def @interleaved_carried_loop_reads_before_carried_updates(%pool: pool<16>, %input: i32) -> (i32) {
-  %start = index.constant 0 : index
-  %end = index.constant 3 : index
-  %step = index.constant 1 : index
-  %i_0 = index.constant 0 : index
-  %i_1 = index.constant 1 : index
-  %i_2 = index.constant 2 : index
-  %tile = test.read_resource %pool : pool<16> -> i32
-  %tile_1 = test.read_resource %pool : pool<16> -> i32
-  %tile_2 = test.read_resource %pool : pool<16> -> i32
-  %next = test.addi %input, %tile : i32
-  %next_1 = test.addi %next, %tile_1 : i32
-  %next_2 = test.addi %next_1, %tile_2 : i32
-  func.return %next_2 : i32
+  func.return %result : vector<4xi32>
 }
 
 // ====
 
-func.def @interleaved_carried_loop_preserves_write_effect_order(%pool: pool<16>, %input: i32) -> (i32) {
+func.def @interleaved_carried_loop_rejects_resource_write(%pool: pool<16>, %input: i32) -> (i32) {
   %start = index.constant 0 : index
   %end = index.constant 3 : index
   %step = index.constant 1 : index
+  // ERROR@+1: STRUCTURE/014 {attr_name="schedule", expected_constraint="effect-free body operations when interleaving loop-carried values"}
   %result = scf.for %i = [%start to %end step %step](%acc = %input : i32) -> (i32) unroll schedule(interleaved) {
     %next = test.addi %acc, %acc : i32
     test.write_resource %pool, %next : pool<16>, i32
     scf.yield %next : i32
   }
   func.return %result : i32
-}
-
-// ----
-func.def @interleaved_carried_loop_preserves_write_effect_order(%pool: pool<16>, %input: i32) -> (i32) {
-  %start = index.constant 0 : index
-  %end = index.constant 3 : index
-  %step = index.constant 1 : index
-  %i_0 = index.constant 0 : index
-  %i_1 = index.constant 1 : index
-  %i_2 = index.constant 2 : index
-  %next = test.addi %input, %input : i32
-  test.write_resource %pool, %next : pool<16>, i32
-  %next_1 = test.addi %next, %next : i32
-  test.write_resource %pool, %next_1 : pool<16>, i32
-  %next_2 = test.addi %next_1, %next_1 : i32
-  test.write_resource %pool, %next_2 : pool<16>, i32
-  func.return %next_2 : i32
 }
 
 // ====

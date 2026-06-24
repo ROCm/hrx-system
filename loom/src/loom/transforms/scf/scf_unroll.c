@@ -1286,6 +1286,9 @@ static loom_scf_unroll_effect_flags_t loom_scf_unroll_op_effect_flags(
                       LOOM_TRAIT_CONVERGENT)) {
     flags |= LOOM_SCF_UNROLL_EFFECT_ORDERED;
   }
+  if (flags == 0 && !iree_any_bit_set(traits, LOOM_TRAIT_PURE)) {
+    flags |= LOOM_SCF_UNROLL_EFFECT_ORDERED;
+  }
   return flags;
 }
 
@@ -1455,6 +1458,15 @@ static iree_status_t loom_scf_unroll_collect_effect_flags(
   }
   *out_effect_flags = effect_flags;
   return iree_ok_status();
+}
+
+static bool loom_scf_unroll_has_effectful_body_op(
+    const loom_scf_unroll_body_op_list_t* body_ops,
+    const loom_scf_unroll_effect_flags_t* effect_flags) {
+  for (uint32_t i = 0; i < body_ops->count; ++i) {
+    if (effect_flags[i] != 0) return true;
+  }
+  return false;
 }
 
 static iree_status_t loom_scf_unroll_describe_movement_requests(
@@ -1863,6 +1875,14 @@ static iree_status_t loom_scf_unroll_emit_interleaved_tile(
     }
     return iree_ok_status();
   }
+  if (carried_count > 0 &&
+      loom_scf_unroll_has_effectful_body_op(&body_ops, effect_flags)) {
+    return loom_scf_unroll_emit_policy_error(
+        context, op, IREE_SV("schedule"),
+        LOOM_SCF_FOR_UNROLL_SCHEDULE_INTERLEAVED,
+        IREE_SV("effect-free body operations when interleaving loop-carried "
+                "values"));
+  }
 
   loom_ir_remap_t* remaps = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
@@ -2003,12 +2023,15 @@ static iree_status_t loom_scf_unroll_full_unroll_interleaved_with_arena(
         (void**)&final_carried_values));
   }
 
+  loom_builder_ip_t saved_ip = loom_builder_save(&context->rewriter->builder);
   loom_builder_set_before(&context->rewriter->builder, op);
   loom_value_id_t value_checkpoint =
       loom_rewriter_value_checkpoint(context->rewriter);
-  IREE_RETURN_IF_ERROR(loom_scf_unroll_emit_interleaved_tile(
+  iree_status_t status = loom_scf_unroll_emit_interleaved_tile(
       context, op, body_block, yield, trip_count, iter_args.values,
-      carried_count, scratch_arena, final_carried_values));
+      carried_count, scratch_arena, final_carried_values);
+  loom_builder_restore(&context->rewriter->builder, saved_ip);
+  IREE_RETURN_IF_ERROR(status);
 
   if (carried_count > 0) {
     IREE_RETURN_IF_ERROR(loom_rewriter_preserve_result_names_on_new_values(
@@ -2258,14 +2281,17 @@ static iree_status_t loom_scf_unroll_partial_unroll_interleaved_with_arena(
       .lower_range_min = 0,
       .lower_range_max = 0,
   };
-  IREE_RETURN_IF_ERROR(loom_scf_unroll_emit_interleaved_tile(
+  iree_status_t status = loom_scf_unroll_emit_interleaved_tile(
       context, op, old_block, yield, &tile_trip_count, main_carried_values,
-      op->result_count, scratch_arena, final_main_carried_values));
-  loom_op_t* main_yield = NULL;
-  IREE_RETURN_IF_ERROR(loom_scf_yield_build(
-      &context->rewriter->builder, final_main_carried_values, op->result_count,
-      op->location, &main_yield));
+      op->result_count, scratch_arena, final_main_carried_values);
+  if (iree_status_is_ok(status)) {
+    loom_op_t* main_yield = NULL;
+    status = loom_scf_yield_build(&context->rewriter->builder,
+                                  final_main_carried_values, op->result_count,
+                                  op->location, &main_yield);
+  }
   loom_builder_restore(&context->rewriter->builder, saved_ip);
+  IREE_RETURN_IF_ERROR(status);
 
   const loom_value_id_t* replacement_values = NULL;
   if (op->result_count > 0) {
@@ -2541,7 +2567,9 @@ static iree_status_t loom_scf_unroll_process_function_once(
                          },
                          context->pass->arena, &walk_result));
 
-  for (iree_host_size_t i = 0; i < loops.count; ++i) {
+  for (iree_host_size_t i = 0;
+       i < loops.count && !loom_pass_has_error_diagnostics(context->pass);
+       ++i) {
     bool changed = false;
     IREE_RETURN_IF_ERROR(
         loom_scf_unroll_try_unroll(context, loops.ops[i], &changed));
@@ -2575,7 +2603,8 @@ iree_status_t loom_scf_unroll_run(loom_pass_t* pass, loom_module_t* module,
   iree_status_t status = iree_ok_status();
   bool changed = true;
   bool any_changed = false;
-  while (iree_status_is_ok(status) && changed) {
+  while (iree_status_is_ok(status) && changed &&
+         !loom_pass_has_error_diagnostics(pass)) {
     changed = false;
     status = loom_pass_value_facts_acquire(
         pass, module, loom_pass_value_fact_scope_function(function),
