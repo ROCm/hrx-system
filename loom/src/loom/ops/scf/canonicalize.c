@@ -1631,6 +1631,12 @@ static iree_status_t loom_scf_for_forward_loop_carried_results(
     build_flags |= LOOM_SCF_FOR_BUILD_FLAG_HAS_UNROLL_POLICY;
     unroll_policy = loom_scf_for_unroll_policy(op);
   }
+  loom_scf_for_unroll_schedule_t unroll_schedule = 0;
+  if (!loom_attr_is_absent(
+          loom_op_attrs(op)[loom_scf_for_unroll_schedule_ATTR_INDEX])) {
+    build_flags |= LOOM_SCF_FOR_BUILD_FLAG_HAS_UNROLL_SCHEDULE;
+    unroll_schedule = loom_scf_for_unroll_schedule(op);
+  }
   uint16_t old_iter_arg_offset =
       (uint16_t)(iter_args.values - loom_op_const_operands(op));
   uint16_t new_iter_arg_offset = 3;
@@ -1708,8 +1714,8 @@ static iree_status_t loom_scf_for_forward_loop_carried_results(
       &rewriter->builder, build_flags, loom_scf_for_lower_bound(op),
       loom_scf_for_upper_bound(op), loom_scf_for_step(op), kept_iter_args,
       kept_count, kept_result_types, kept_count, tied_results,
-      tied_result_count, unroll_factor, unroll_policy, op->location,
-      &new_loop));
+      tied_result_count, unroll_factor, unroll_policy, unroll_schedule,
+      op->location, &new_loop));
 
   loom_region_t* new_body = loom_scf_for_body(new_loop);
   loom_builder_ip_t saved_ip =

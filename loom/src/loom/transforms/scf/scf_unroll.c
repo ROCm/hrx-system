@@ -13,8 +13,10 @@
 #include "loom/error/error_catalog.h"
 #include "loom/ir/attribute.h"
 #include "loom/ir/context.h"
+#include "loom/ir/encoding.h"
 #include "loom/ir/facts.h"
 #include "loom/ir/module.h"
+#include "loom/ir/types.h"
 #include "loom/ops/index/ops.h"
 #include "loom/ops/op_defs.h"
 #include "loom/ops/scf/ops.h"
@@ -338,10 +340,23 @@ static iree_string_view_t loom_scf_unroll_trip_count_state_name(
   return IREE_SV("unknown");
 }
 
+static iree_string_view_t loom_scf_unroll_schedule_name(
+    loom_scf_for_unroll_schedule_t schedule) {
+  switch (schedule) {
+    case LOOM_SCF_FOR_UNROLL_SCHEDULE_LINEAR:
+      return IREE_SV("linear");
+    case LOOM_SCF_FOR_UNROLL_SCHEDULE_INTERLEAVED:
+      return IREE_SV("interleaved");
+    case LOOM_SCF_FOR_UNROLL_SCHEDULE_COUNT_:
+      break;
+  }
+  return IREE_SV("unknown");
+}
+
 static iree_status_t loom_scf_unroll_append_report_detail(
     const loom_scf_unroll_context_t* context, loom_op_t* op,
-    iree_string_view_t policy, int64_t unroll_factor,
-    const loom_scf_unroll_trip_count_t* trip_count) {
+    iree_string_view_t policy, loom_scf_for_unroll_schedule_t schedule,
+    int64_t unroll_factor, const loom_scf_unroll_trip_count_t* trip_count) {
   if (!context->reports_enabled) {
     return iree_ok_status();
   }
@@ -354,6 +369,8 @@ static iree_status_t loom_scf_unroll_append_report_detail(
       IREE_SV("op"), loom_op_name(context->module, op));
   fields[field_count++] =
       loom_pass_report_detail_string_field(IREE_SV("policy"), policy);
+  fields[field_count++] = loom_pass_report_detail_string_field(
+      IREE_SV("schedule"), loom_scf_unroll_schedule_name(schedule));
   fields[field_count++] = loom_pass_report_detail_uint64_field(
       IREE_SV("trip_count"), trip_count->count);
   fields[field_count++] =
@@ -385,8 +402,8 @@ static iree_status_t loom_scf_unroll_append_report_detail(
 
 static iree_status_t loom_scf_unroll_append_partial_report_detail(
     const loom_scf_unroll_context_t* context, loom_op_t* op,
-    int64_t unroll_factor, int64_t step,
-    loom_scf_unroll_trip_count_state_t trip_count_state,
+    int64_t unroll_factor, loom_scf_for_unroll_schedule_t schedule,
+    int64_t step, loom_scf_unroll_trip_count_state_t trip_count_state,
     const loom_scf_unroll_trip_count_t* trip_count,
     loom_scf_unroll_partial_unroll_flags_t flags) {
   if (!context->reports_enabled) {
@@ -401,6 +418,8 @@ static iree_status_t loom_scf_unroll_append_partial_report_detail(
       IREE_SV("op"), loom_op_name(context->module, op));
   fields[field_count++] = loom_pass_report_detail_string_field(
       IREE_SV("policy"), IREE_SV("factor"));
+  fields[field_count++] = loom_pass_report_detail_string_field(
+      IREE_SV("schedule"), loom_scf_unroll_schedule_name(schedule));
   fields[field_count++] = loom_pass_report_detail_int64_field(
       IREE_SV("unroll_factor"), unroll_factor);
   fields[field_count++] =
@@ -505,7 +524,9 @@ static iree_status_t loom_scf_unroll_emit_trip_count_error(
 static bool loom_scf_unroll_policy_present(loom_op_t* op) {
   return loom_scf_for_unroll_factor_is_present(op) ||
          !loom_attr_is_absent(
-             loom_op_attrs(op)[loom_scf_for_unroll_policy_ATTR_INDEX]);
+             loom_op_attrs(op)[loom_scf_for_unroll_policy_ATTR_INDEX]) ||
+         !loom_attr_is_absent(
+             loom_op_attrs(op)[loom_scf_for_unroll_schedule_ATTR_INDEX]);
 }
 
 static bool loom_scf_unroll_shape_is_supported(loom_op_t* op,
@@ -820,7 +841,7 @@ static iree_status_t loom_scf_unroll_clear_policy(
       loom_scf_for_lower_bound(op), loom_scf_for_upper_bound(op),
       loom_scf_for_step(op), iter_args.values, iter_args.count, result_types,
       op->result_count, tied_results, tied_result_count, LOOM_VALUE_ID_INVALID,
-      /*unroll_policy=*/0, op->location, &new_loop));
+      /*unroll_policy=*/0, /*unroll_schedule=*/0, op->location, &new_loop));
 
   loom_region_t* old_body = loom_scf_for_body(op);
   loom_block_t* old_block = loom_region_entry_block(old_body);
@@ -926,7 +947,7 @@ static iree_status_t loom_scf_unroll_partial_unroll(
       loom_scf_for_lower_bound(op), loom_scf_for_upper_bound(op), scaled_step,
       iter_args.values, iter_args.count, result_types, op->result_count,
       tied_results, tied_result_count, LOOM_VALUE_ID_INVALID,
-      /*unroll_policy=*/0, op->location, &new_loop));
+      /*unroll_policy=*/0, /*unroll_schedule=*/0, op->location, &new_loop));
 
   loom_region_t* old_body = loom_scf_for_body(op);
   loom_block_t* old_block = loom_region_entry_block(old_body);
@@ -1009,6 +1030,441 @@ static iree_status_t loom_scf_unroll_partial_unroll(
   return iree_ok_status();
 }
 
+typedef struct loom_scf_unroll_body_op_list_t {
+  const loom_op_t** ops;
+  uint32_t count;
+} loom_scf_unroll_body_op_list_t;
+
+typedef struct loom_scf_unroll_payload_readiness_t {
+  const loom_scf_unroll_context_t* context;
+  const loom_block_t* body_block;
+  const loom_op_t* source_op;
+  const loom_ir_remap_t* remap;
+  bool ready;
+} loom_scf_unroll_payload_readiness_t;
+
+static bool loom_scf_unroll_value_ref_is_ready(
+    const loom_scf_unroll_payload_readiness_t* query,
+    loom_value_id_t value_id) {
+  const loom_value_t* value =
+      loom_module_value(query->context->module, value_id);
+  if (loom_value_is_block_arg(value)) {
+    if (loom_value_def_block(value) != query->body_block) return true;
+  } else {
+    const loom_op_t* def_op = loom_value_def_op(value);
+    if (!def_op || def_op->parent_block != query->body_block) return true;
+    if (def_op == query->source_op) return true;
+  }
+
+  loom_value_id_t mapped_value = LOOM_VALUE_ID_INVALID;
+  return loom_ir_remap_try_lookup_value(query->remap, value_id, &mapped_value);
+}
+
+static iree_status_t loom_scf_unroll_check_type_ref_is_ready(
+    loom_value_id_t value_id, void* user_data) {
+  loom_scf_unroll_payload_readiness_t* query =
+      (loom_scf_unroll_payload_readiness_t*)user_data;
+  if (!loom_scf_unroll_value_ref_is_ready(query, value_id)) {
+    query->ready = false;
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_scf_unroll_type_refs_are_ready(
+    loom_scf_unroll_payload_readiness_t* query, loom_type_t type,
+    bool* out_ready) {
+  query->ready = true;
+  IREE_RETURN_IF_ERROR(loom_type_walk_value_refs(
+      type, loom_scf_unroll_check_type_ref_is_ready, query));
+  *out_ready = query->ready;
+  return iree_ok_status();
+}
+
+static bool loom_scf_unroll_predicate_refs_are_ready(
+    const loom_scf_unroll_payload_readiness_t* query,
+    const loom_predicate_t* predicate) {
+  for (uint8_t i = 0; i < IREE_ARRAYSIZE(predicate->arg_tags); ++i) {
+    if (predicate->arg_tags[i] != LOOM_PRED_ARG_VALUE) continue;
+    if (predicate->args[i] < 0) return false;
+    if (!loom_scf_unroll_value_ref_is_ready(
+            query, (loom_value_id_t)predicate->args[i])) {
+      return false;
+    }
+  }
+  return true;
+}
+
+static iree_status_t loom_scf_unroll_attr_refs_are_ready(
+    loom_scf_unroll_payload_readiness_t* query, const loom_attribute_t* attr,
+    uint8_t depth, bool* out_ready) {
+  *out_ready = false;
+  if (!attr || depth > LOOM_ATTR_DICT_MAX_NESTING_DEPTH) {
+    return iree_ok_status();
+  }
+  switch ((loom_attr_kind_t)attr->kind) {
+    case LOOM_ATTR_ABSENT:
+    case LOOM_ATTR_I64:
+    case LOOM_ATTR_F64:
+    case LOOM_ATTR_STRING:
+    case LOOM_ATTR_BOOL:
+    case LOOM_ATTR_ENUM:
+    case LOOM_ATTR_I64_ARRAY:
+    case LOOM_ATTR_SYMBOL:
+    case LOOM_ATTR_BYTES:
+      *out_ready = true;
+      return iree_ok_status();
+    case LOOM_ATTR_TYPE:
+      if (attr->type_id == LOOM_TYPE_ID_INVALID ||
+          attr->type_id >= query->context->module->types.count) {
+        return iree_ok_status();
+      }
+      return loom_scf_unroll_type_refs_are_ready(
+          query, query->context->module->types.entries[attr->type_id],
+          out_ready);
+    case LOOM_ATTR_PREDICATE_LIST:
+      if (attr->count > 0 && !attr->predicate_list) return iree_ok_status();
+      for (uint16_t i = 0; i < attr->count; ++i) {
+        if (!loom_scf_unroll_predicate_refs_are_ready(
+                query, &attr->predicate_list[i])) {
+          return iree_ok_status();
+        }
+      }
+      *out_ready = true;
+      return iree_ok_status();
+    case LOOM_ATTR_DICT:
+      if (attr->count > 0 && !attr->dict_entries) return iree_ok_status();
+      for (uint16_t i = 0; i < attr->count; ++i) {
+        IREE_RETURN_IF_ERROR(loom_scf_unroll_attr_refs_are_ready(
+            query, &attr->dict_entries[i].value, (uint8_t)(depth + 1),
+            out_ready));
+        if (!*out_ready) return iree_ok_status();
+      }
+      *out_ready = true;
+      return iree_ok_status();
+    case LOOM_ATTR_ENCODING: {
+      if (attr->encoding_id > UINT16_MAX) return iree_ok_status();
+      const loom_encoding_t* encoding = loom_module_encoding(
+          query->context->module, (uint16_t)attr->encoding_id);
+      if (!encoding) return iree_ok_status();
+      if (encoding->attribute_count > 0 && !encoding->attributes) {
+        return iree_ok_status();
+      }
+      for (uint8_t i = 0; i < encoding->attribute_count; ++i) {
+        IREE_RETURN_IF_ERROR(loom_scf_unroll_attr_refs_are_ready(
+            query, &encoding->attributes[i].value, (uint8_t)(depth + 1),
+            out_ready));
+        if (!*out_ready) return iree_ok_status();
+      }
+      *out_ready = true;
+      return iree_ok_status();
+    }
+    default:
+      return iree_ok_status();
+  }
+}
+
+static iree_status_t loom_scf_unroll_collect_interleavable_body_ops(
+    const loom_scf_unroll_context_t* context, loom_op_t* op,
+    const loom_block_t* body_block, const loom_op_t* yield,
+    loom_scf_unroll_body_op_list_t* out_body_ops) {
+  *out_body_ops = (loom_scf_unroll_body_op_list_t){0};
+
+  uint32_t count = 0;
+  for (const loom_op_t* body_op = body_block->first_op;
+       body_op && body_op != yield; body_op = body_op->next_op) {
+    if (iree_any_bit_set(body_op->flags, LOOM_OP_FLAG_DEAD)) continue;
+    if (body_op->region_count != 0 || body_op->successor_count != 0) {
+      return loom_scf_unroll_emit_policy_error(
+          context, op, IREE_SV("schedule"),
+          LOOM_SCF_FOR_UNROLL_SCHEDULE_INTERLEAVED,
+          IREE_SV("body operations without nested regions or successors"));
+    }
+    if (count == UINT32_MAX) {
+      return loom_scf_unroll_emit_policy_error(
+          context, op, IREE_SV("schedule"), count,
+          IREE_SV("body operation count representable as uint32"));
+    }
+    ++count;
+  }
+
+  if (count == 0) {
+    return iree_ok_status();
+  }
+
+  const loom_op_t** ops = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(context->pass->arena, count,
+                                                 sizeof(*ops), (void**)&ops));
+  uint32_t index = 0;
+  for (const loom_op_t* body_op = body_block->first_op;
+       body_op && body_op != yield; body_op = body_op->next_op) {
+    if (iree_any_bit_set(body_op->flags, LOOM_OP_FLAG_DEAD)) continue;
+    ops[index++] = body_op;
+  }
+  *out_body_ops = (loom_scf_unroll_body_op_list_t){
+      .ops = ops,
+      .count = count,
+  };
+  return iree_ok_status();
+}
+
+static iree_status_t loom_scf_unroll_body_op_payload_is_ready(
+    const loom_scf_unroll_context_t* context, const loom_block_t* body_block,
+    const loom_op_t* source_op, const loom_ir_remap_t* remap, bool* out_ready) {
+  *out_ready = false;
+  loom_scf_unroll_payload_readiness_t query = {
+      .context = context,
+      .body_block = body_block,
+      .source_op = source_op,
+      .remap = remap,
+      .ready = true,
+  };
+  const loom_value_id_t* operands = loom_op_const_operands(source_op);
+  for (uint16_t i = 0; i < source_op->operand_count; ++i) {
+    if (!loom_scf_unroll_value_ref_is_ready(&query, operands[i])) {
+      return iree_ok_status();
+    }
+  }
+  const loom_value_id_t* results = loom_op_const_results(source_op);
+  for (uint16_t i = 0; i < source_op->result_count; ++i) {
+    bool ready = false;
+    IREE_RETURN_IF_ERROR(loom_scf_unroll_type_refs_are_ready(
+        &query, loom_module_value_type(context->module, results[i]), &ready));
+    if (!ready) return iree_ok_status();
+  }
+  const loom_attribute_t* attrs = loom_op_const_attrs(source_op);
+  for (uint8_t i = 0; i < source_op->attribute_count; ++i) {
+    bool ready = false;
+    IREE_RETURN_IF_ERROR(
+        loom_scf_unroll_attr_refs_are_ready(&query, &attrs[i], 0, &ready));
+    if (!ready) {
+      return iree_ok_status();
+    }
+  }
+  *out_ready = true;
+  return iree_ok_status();
+}
+
+static iree_status_t loom_scf_unroll_rename_cloned_op_results(
+    loom_scf_unroll_context_t* context, const loom_op_t* source_op,
+    loom_op_t* cloned_op, uint32_t ordinal) {
+  if (ordinal == 0 ||
+      !iree_any_bit_set(context->rewriter->name_policy,
+                        LOOM_REWRITER_NAME_POLICY_DERIVE_DEBUG_NAMES)) {
+    return iree_ok_status();
+  }
+
+  char suffix[32] = {0};
+  int suffix_length =
+      iree_snprintf(suffix, sizeof(suffix), "%" PRIu32, ordinal);
+  if (suffix_length <= 0 || (iree_host_size_t)suffix_length >= sizeof(suffix)) {
+    return iree_ok_status();
+  }
+  iree_string_view_t suffix_view =
+      iree_make_string_view(suffix, (iree_host_size_t)suffix_length);
+  const loom_value_id_t* source_results = loom_op_const_results(source_op);
+  const loom_value_id_t* cloned_results = loom_op_const_results(cloned_op);
+  for (uint16_t i = 0; i < source_op->result_count; ++i) {
+    IREE_RETURN_IF_ERROR(
+        loom_rewriter_clear_value_name(context->rewriter, cloned_results[i]));
+    IREE_RETURN_IF_ERROR(loom_rewriter_try_set_derived_value_name(
+        context->rewriter, source_results[i], cloned_results[i], suffix_view));
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_scf_unroll_mark_iteration_complete(
+    loom_scf_unroll_context_t* context, const loom_block_t* body_block,
+    const loom_op_t* yield, uint32_t ordinal, uint32_t trip_count,
+    uint16_t carried_count, loom_ir_remap_t* remaps,
+    loom_value_id_t* final_carried_values) {
+  if (carried_count == 0) return iree_ok_status();
+
+  loom_value_slice_t yielded_values = loom_scf_yield_values(yield);
+  loom_value_id_t* resolved_values = final_carried_values;
+  if (ordinal + 1 < trip_count) {
+    resolved_values = NULL;
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        context->pass->arena, carried_count, sizeof(*resolved_values),
+        (void**)&resolved_values));
+  }
+  for (uint16_t i = 0; i < carried_count; ++i) {
+    IREE_RETURN_IF_ERROR(loom_ir_remap_resolve_value(
+        &remaps[ordinal], yielded_values.values[i], &resolved_values[i]));
+  }
+  if (ordinal + 1 < trip_count) {
+    for (uint16_t i = 0; i < carried_count; ++i) {
+      IREE_RETURN_IF_ERROR(loom_ir_remap_map_value(&remaps[ordinal + 1],
+                                                   body_block->arg_ids[1 + i],
+                                                   resolved_values[i]));
+    }
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_scf_unroll_full_unroll_interleaved(
+    loom_scf_unroll_context_t* context, loom_op_t* op, loom_op_t* yield,
+    const loom_scf_unroll_trip_count_t* trip_count, bool* out_changed) {
+  *out_changed = false;
+
+  loom_region_t* body = loom_scf_for_body(op);
+  loom_block_t* body_block = loom_region_entry_block(body);
+  loom_scf_unroll_body_op_list_t body_ops = {0};
+  IREE_RETURN_IF_ERROR(loom_scf_unroll_collect_interleavable_body_ops(
+      context, op, body_block, yield, &body_ops));
+
+  loom_builder_set_before(&context->rewriter->builder, op);
+  loom_value_id_t value_checkpoint =
+      loom_rewriter_value_checkpoint(context->rewriter);
+  loom_value_slice_t iter_args = loom_scf_for_iter_args(op);
+  const uint32_t unroll_count = trip_count->count;
+  const uint16_t carried_count = op->result_count;
+  if (unroll_count == 0) {
+    if (carried_count > 0) {
+      IREE_RETURN_IF_ERROR(loom_rewriter_preserve_result_names_on_new_values(
+          context->rewriter, op, iter_args.values, carried_count,
+          value_checkpoint));
+      IREE_RETURN_IF_ERROR(loom_rewriter_replace_all_uses_and_erase(
+          context->rewriter, op, iter_args.values, carried_count));
+    } else {
+      IREE_RETURN_IF_ERROR(loom_rewriter_erase(context->rewriter, op));
+    }
+    ++context->statistics->loops_unrolled;
+    *out_changed = true;
+    return iree_ok_status();
+  }
+
+  loom_ir_remap_t* remaps = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      context->pass->arena, unroll_count, sizeof(*remaps), (void**)&remaps));
+  bool* completed_iterations = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      context->pass->arena, unroll_count, sizeof(*completed_iterations),
+      (void**)&completed_iterations));
+  memset(completed_iterations, 0,
+         (iree_host_size_t)unroll_count * sizeof(*completed_iterations));
+  uint32_t* cloned_counts = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      context->pass->arena, unroll_count, sizeof(*cloned_counts),
+      (void**)&cloned_counts));
+  memset(cloned_counts, 0,
+         (iree_host_size_t)unroll_count * sizeof(*cloned_counts));
+
+  bool* cloned = NULL;
+  iree_host_size_t clone_slot_count = 0;
+  if (!iree_host_size_checked_mul((iree_host_size_t)unroll_count,
+                                  body_ops.count, &clone_slot_count)) {
+    return loom_scf_unroll_emit_policy_error(
+        context, op, IREE_SV("schedule"),
+        LOOM_SCF_FOR_UNROLL_SCHEDULE_INTERLEAVED,
+        IREE_SV("unroll count * body operation count representable"));
+  }
+  if (clone_slot_count != 0) {
+    IREE_RETURN_IF_ERROR(
+        iree_arena_allocate_array(context->pass->arena, clone_slot_count,
+                                  sizeof(*cloned), (void**)&cloned));
+    memset(cloned, 0, clone_slot_count * sizeof(*cloned));
+  }
+
+  loom_value_id_t induction_variable = body_block->arg_ids[0];
+  for (uint32_t ordinal = 0; ordinal < unroll_count; ++ordinal) {
+    IREE_RETURN_IF_ERROR(loom_ir_remap_initialize(
+        context->module, context->module, context->pass->arena,
+        &(loom_ir_remap_options_t){
+            .allow_unmapped_values = true,
+            .remap_symbol = loom_ir_remap_symbol_callback_empty(),
+        },
+        &remaps[ordinal]));
+    loom_value_id_t iteration_index = LOOM_VALUE_ID_INVALID;
+    IREE_RETURN_IF_ERROR(loom_scf_unroll_build_iteration_index(
+        context, op, induction_variable, trip_count, ordinal,
+        &iteration_index));
+    if (iteration_index == LOOM_VALUE_ID_INVALID) {
+      return loom_scf_unroll_emit_policy_error(
+          context, op, IREE_SV("schedule"), ordinal,
+          IREE_SV("iteration index representable as i64"));
+    }
+    IREE_RETURN_IF_ERROR(loom_ir_remap_map_value(
+        &remaps[ordinal], induction_variable, iteration_index));
+  }
+
+  for (uint16_t i = 0; i < carried_count; ++i) {
+    IREE_RETURN_IF_ERROR(loom_ir_remap_map_value(
+        &remaps[0], body_block->arg_ids[1 + i], iter_args.values[i]));
+  }
+
+  loom_value_id_t* final_carried_values = NULL;
+  if (carried_count > 0) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        context->pass->arena, carried_count, sizeof(*final_carried_values),
+        (void**)&final_carried_values));
+  }
+
+  if (body_ops.count == 0) {
+    for (uint32_t ordinal = 0; ordinal < unroll_count; ++ordinal) {
+      IREE_RETURN_IF_ERROR(loom_scf_unroll_mark_iteration_complete(
+          context, body_block, yield, ordinal, unroll_count, carried_count,
+          remaps, final_carried_values));
+    }
+  }
+
+  iree_host_size_t remaining = clone_slot_count;
+  while (remaining > 0) {
+    bool made_progress = false;
+    for (uint32_t op_index = 0; op_index < body_ops.count; ++op_index) {
+      const loom_op_t* source_op = body_ops.ops[op_index];
+      for (uint32_t ordinal = 0; ordinal < unroll_count; ++ordinal) {
+        bool* cloned_slot =
+            &cloned[(iree_host_size_t)ordinal * body_ops.count + op_index];
+        if (*cloned_slot) continue;
+        bool payload_ready = false;
+        IREE_RETURN_IF_ERROR(loom_scf_unroll_body_op_payload_is_ready(
+            context, body_block, source_op, &remaps[ordinal], &payload_ready));
+        if (!payload_ready) {
+          continue;
+        }
+        loom_op_t* cloned_op = NULL;
+        IREE_RETURN_IF_ERROR(loom_ir_clone_op(&context->rewriter->builder,
+                                              source_op, &remaps[ordinal],
+                                              &cloned_op));
+        IREE_RETURN_IF_ERROR(loom_scf_unroll_rename_cloned_op_results(
+            context, source_op, cloned_op, ordinal));
+        *cloned_slot = true;
+        ++cloned_counts[ordinal];
+        --remaining;
+        made_progress = true;
+        if (cloned_counts[ordinal] == body_ops.count &&
+            !completed_iterations[ordinal]) {
+          IREE_RETURN_IF_ERROR(loom_scf_unroll_mark_iteration_complete(
+              context, body_block, yield, ordinal, unroll_count, carried_count,
+              remaps, final_carried_values));
+          completed_iterations[ordinal] = true;
+        }
+      }
+    }
+    if (!made_progress) {
+      return loom_scf_unroll_emit_policy_error(
+          context, op, IREE_SV("schedule"),
+          LOOM_SCF_FOR_UNROLL_SCHEDULE_INTERLEAVED,
+          IREE_SV("acyclic body-local SSA dependencies"));
+    }
+  }
+
+  if (carried_count > 0) {
+    IREE_RETURN_IF_ERROR(loom_rewriter_preserve_result_names_on_new_values(
+        context->rewriter, op, final_carried_values, carried_count,
+        value_checkpoint));
+    IREE_RETURN_IF_ERROR(loom_rewriter_replace_all_uses_and_erase(
+        context->rewriter, op, final_carried_values, carried_count));
+  } else {
+    IREE_RETURN_IF_ERROR(loom_rewriter_erase(context->rewriter, op));
+  }
+
+  ++context->statistics->loops_unrolled;
+  context->statistics->iterations_materialized += unroll_count;
+  *out_changed = true;
+  return iree_ok_status();
+}
+
 static iree_status_t loom_scf_unroll_try_unroll(
     loom_scf_unroll_context_t* context, loom_op_t* op, bool* out_changed) {
   *out_changed = false;
@@ -1022,10 +1478,22 @@ static iree_status_t loom_scf_unroll_try_unroll(
   bool has_unroll_factor = loom_scf_for_unroll_factor_is_present(op);
   bool has_unroll_policy = !loom_attr_is_absent(
       loom_op_attrs(op)[loom_scf_for_unroll_policy_ATTR_INDEX]);
+  bool has_unroll_schedule = !loom_attr_is_absent(
+      loom_op_attrs(op)[loom_scf_for_unroll_schedule_ATTR_INDEX]);
   if (has_unroll_factor && has_unroll_policy) {
     return loom_scf_unroll_emit_policy_error(
         context, op, IREE_SV("unroll"), 2,
         IREE_SV("either bare unroll or unroll factor, not both"));
+  }
+  if (has_unroll_schedule && !has_unroll_factor && !has_unroll_policy) {
+    return loom_scf_unroll_emit_policy_error(
+        context, op, IREE_SV("schedule"), 0,
+        IREE_SV("paired with bare unroll or unroll factor"));
+  }
+  loom_scf_for_unroll_schedule_t unroll_schedule =
+      LOOM_SCF_FOR_UNROLL_SCHEDULE_LINEAR;
+  if (has_unroll_schedule) {
+    unroll_schedule = loom_scf_for_unroll_schedule(op);
   }
 
   loom_op_t* yield = NULL;
@@ -1082,8 +1550,14 @@ static iree_status_t loom_scf_unroll_try_unroll(
           IREE_SV("positive exact static step"));
     }
     IREE_RETURN_IF_ERROR(loom_scf_unroll_append_partial_report_detail(
-        context, op, unroll_factor, step, trip_count_state, &trip_count,
-        LOOM_SCF_UNROLL_PARTIAL_UNROLL_FLAG_GUARD_TAIL));
+        context, op, unroll_factor, unroll_schedule, step, trip_count_state,
+        &trip_count, LOOM_SCF_UNROLL_PARTIAL_UNROLL_FLAG_GUARD_TAIL));
+    if (unroll_schedule == LOOM_SCF_FOR_UNROLL_SCHEDULE_INTERLEAVED) {
+      return loom_scf_unroll_emit_policy_error(
+          context, op, IREE_SV("schedule"),
+          LOOM_SCF_FOR_UNROLL_SCHEDULE_INTERLEAVED,
+          IREE_SV("exact full unroll without generated tail guards"));
+    }
     return loom_scf_unroll_partial_unroll(
         context, op, yield, step, unroll_factor_u32,
         LOOM_SCF_UNROLL_PARTIAL_UNROLL_FLAG_GUARD_TAIL, out_changed);
@@ -1094,15 +1568,26 @@ static iree_status_t loom_scf_unroll_try_unroll(
             ? 0
             : LOOM_SCF_UNROLL_PARTIAL_UNROLL_FLAG_GUARD_TAIL;
     IREE_RETURN_IF_ERROR(loom_scf_unroll_append_partial_report_detail(
-        context, op, unroll_factor, trip_count.step, trip_count_state,
-        &trip_count, partial_flags));
+        context, op, unroll_factor, unroll_schedule, trip_count.step,
+        trip_count_state, &trip_count, partial_flags));
+    if (unroll_schedule == LOOM_SCF_FOR_UNROLL_SCHEDULE_INTERLEAVED) {
+      return loom_scf_unroll_emit_policy_error(
+          context, op, IREE_SV("schedule"),
+          LOOM_SCF_FOR_UNROLL_SCHEDULE_INTERLEAVED,
+          IREE_SV("exact full unroll without stripmining"));
+    }
     return loom_scf_unroll_partial_unroll(context, op, yield, trip_count.step,
                                           unroll_factor_u32, partial_flags,
                                           out_changed);
   }
   IREE_RETURN_IF_ERROR(loom_scf_unroll_append_report_detail(
       context, op, has_unroll_factor ? IREE_SV("factor") : IREE_SV("bare"),
-      has_unroll_factor ? unroll_factor : -1, &trip_count));
+      unroll_schedule, has_unroll_factor ? unroll_factor : -1, &trip_count));
+
+  if (unroll_schedule == LOOM_SCF_FOR_UNROLL_SCHEDULE_INTERLEAVED) {
+    return loom_scf_unroll_full_unroll_interleaved(context, op, yield,
+                                                   &trip_count, out_changed);
+  }
 
   loom_region_t* body = loom_scf_for_body(op);
   loom_block_t* body_block = loom_region_entry_block(body);

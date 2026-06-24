@@ -98,6 +98,19 @@ ScfForUnrollPolicy = EnumDef(
     doc="Local scf.for unroll policy.",
 )
 
+ScfForUnrollSchedule = EnumDef(
+    "ScfForUnrollSchedule",
+    [
+        EnumCase("linear", 0, doc="Materialize unrolled iterations in source order."),
+        EnumCase(
+            "interleaved",
+            1,
+            doc="Materialize corresponding body positions across unrolled iterations when dependencies allow.",
+        ),
+    ],
+    doc="Local scf.for unroll body ordering.",
+)
+
 # ============================================================================
 # scf.yield — variadic region terminator
 # ============================================================================
@@ -302,6 +315,13 @@ scf_for = Op(
             optional=True,
             doc="Optional bare unroll policy for required full unroll.",
         ),
+        AttrDef(
+            "unroll_schedule",
+            ATTR_TYPE_ENUM,
+            enum_def=ScfForUnrollSchedule,
+            optional=True,
+            doc="Optional schedule used when materializing unrolled loop body copies.",
+        ),
     ],
     results=[Result("results", ANY, variadic=True)],
     regions=[
@@ -354,6 +374,10 @@ scf_for = Op(
         OptionalGroup(
             [Attr("unroll_policy")],
             anchor="unroll_policy",
+        ),
+        OptionalGroup(
+            [Clause("schedule", Attr("unroll_schedule"))],
+            anchor="unroll_schedule",
         ),
         Region("body"),
     ],

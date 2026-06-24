@@ -36,6 +36,13 @@ typedef enum loom_scf_for_unroll_policy_e {
   LOOM_SCF_FOR_UNROLL_POLICY_COUNT_ = 2,
 } loom_scf_for_unroll_policy_t;
 
+// Local scf.for unroll body ordering.
+typedef enum loom_scf_for_unroll_schedule_e {
+  LOOM_SCF_FOR_UNROLL_SCHEDULE_LINEAR = 0,
+  LOOM_SCF_FOR_UNROLL_SCHEDULE_INTERLEAVED = 1,
+  LOOM_SCF_FOR_UNROLL_SCHEDULE_COUNT_ = 2,
+} loom_scf_for_unroll_schedule_t;
+
 // LOOM_OP_SCF_FOR: Bounded counted loop with optional loop-carried state.
 // scf.for %iv = [%c0 to %n step %c1] {
 //   scf.yield
@@ -48,10 +55,12 @@ LOOM_DEFINE_SEGMENTED_OPERANDS(loom_scf_for_iter_args, 3)
 LOOM_DEFINE_SEGMENTED_OPTIONAL_OPERAND(loom_scf_for_unroll_factor, 4)
 LOOM_DEFINE_VARIADIC_RESULTS(loom_scf_for_results, 0)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_scf_for_unroll_policy, 0, loom_scf_for_unroll_policy_t)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_scf_for_unroll_schedule, 1, loom_scf_for_unroll_schedule_t)
 LOOM_DEFINE_REGION(loom_scf_for_body, 0)
 enum loom_scf_for_build_flag_bits_e {
   LOOM_SCF_FOR_BUILD_FLAG_HAS_UNROLL_FACTOR = 1u << 0,
   LOOM_SCF_FOR_BUILD_FLAG_HAS_UNROLL_POLICY = 1u << 1,
+  LOOM_SCF_FOR_BUILD_FLAG_HAS_UNROLL_SCHEDULE = 1u << 2,
 };
 typedef uint32_t loom_scf_for_build_flags_t;
 iree_status_t loom_scf_for_build(
@@ -68,6 +77,7 @@ iree_status_t loom_scf_for_build(
     iree_host_size_t tied_result_count,
     loom_optional loom_may_consume loom_value_id_t unroll_factor,
     loom_optional uint8_t unroll_policy,
+    loom_optional uint8_t unroll_schedule,
     loom_location_id_t location,
     loom_op_t** out_op);
 iree_status_t loom_scf_for_canonicalize(loom_op_t* op, loom_rewriter_t* rewriter);

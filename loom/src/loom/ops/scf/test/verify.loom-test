@@ -64,6 +64,16 @@ func.def @for_unroll_policy_is_exclusive(%lo: index, %hi: index, %step: index, %
 
 // ====
 
+// An unroll schedule only has meaning when an unroll directive is present.
+func.def @for_unroll_schedule_requires_unroll(%lo: index, %hi: index, %step: index) {
+  // ERROR@+1: STRUCTURE/014 {attr_name="schedule", expected_constraint="paired with bare unroll or unroll factor"}
+  scf.for %iv = [%lo to %hi step %step] schedule(interleaved) {
+  }
+  func.return
+}
+
+// ====
+
 // Yield/result type matching remaps parent result references to the values
 // yielded by each region. This keeps co-result-shaped types valid without
 // forcing branch-local layouts to escape their region.

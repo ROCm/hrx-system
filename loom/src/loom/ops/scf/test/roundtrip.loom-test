@@ -64,6 +64,26 @@ func.def @dynamic_unroll_policy(%lo: index, %hi: index, %step: index, %factor: i
 
 // ====
 
+// scf.for with an explicit unroll materialization schedule.
+func.def @dynamic_unroll_interleaved_schedule(%lo: index, %hi: index, %step: index, %factor: index, %init: f32) -> (f32) {
+  %result = scf.for %iv = [%lo to %hi step %step](%acc = %init : f32) -> (f32) unroll(%factor) schedule(interleaved) {
+    scf.yield %acc : f32
+  }
+  func.return %result : f32
+}
+
+// ====
+
+// scf.for with an explicit linear schedule prints the requested schedule rather
+// than relying on the absent-attribute default.
+func.def @dynamic_unroll_linear_schedule(%lo: index, %hi: index, %step: index, %factor: index) {
+  scf.for %iv = [%lo to %hi step %step] unroll(%factor) schedule(linear) {
+  }
+  func.return
+}
+
+// ====
+
 // scf.for also accepts grouped iter_arg type lists, then prints the canonical
 // per-binding type form.
 func.def @multi_vector_iter_grouped_types(%lo: index, %hi: index, %step: index, %gate_zero: vector<1xf32>, %up_zero: vector<1xf32>) -> (vector<1xf32>, vector<1xf32>) {
