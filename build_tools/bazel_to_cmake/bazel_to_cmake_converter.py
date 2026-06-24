@@ -13,6 +13,7 @@ See bazel_to_cmake.py for usage.
 # pylint: disable=unused-argument
 # pylint: disable=exec-used
 
+import ast
 import itertools
 import os
 import re
@@ -1093,7 +1094,16 @@ class BuildFileFunctions(object):
         try:
             namespace = {}
             with open(abs_path) as f:
-                exec(f.read(), namespace)
+                source = f.read()
+            tree = ast.parse(source)
+            for node in ast.iter_child_nodes(tree):
+                if isinstance(node, ast.Assign):
+                    for target in node.targets:
+                        if isinstance(target, ast.Name):
+                            try:
+                                namespace[target.id] = ast.literal_eval(node.value)
+                            except (ValueError, TypeError):
+                                pass
             for name in names:
                 if name in namespace and hasattr(self, "_exec_namespace"):
                     # Only bind names not already provided by converter
@@ -2997,5 +3007,6 @@ def convert_build_file(
 
     exec_namespace = GetDict(build_file_functions)
     build_file_functions._exec_namespace = exec_namespace
-    exec(build_file_code, exec_namespace)
+    exec_namespace["__builtins__"] = {}  # Restrict builtins to sandbox execution
+    exec(compile(build_file_code, "<build>", "exec"), exec_namespace)  # nosemgrep: python.lang.security.audit.exec-detected.exec-detected
     return converter.convert()
