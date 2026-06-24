@@ -1,5 +1,7 @@
 config.decl @id4.qwen3_vl.linear_input_pack.token_count : %value: index where [range(%value, 1, 65536)]
 
+config.decl @id4.qwen3_vl.linear_input_pack.dispatch_token_count : %value: index where [range(%value, 1, 65536)]
+
 config.decl @id4.qwen3_vl.linear_input_pack.input_size : %value: index where [range(%value, 1, 65536)]
 
 config.decl @id4.qwen3_vl.linear_input_pack.element_count : %value: index where [range(%value, 1, 268435456)]
@@ -7,7 +9,9 @@ config.decl @id4.qwen3_vl.linear_input_pack.element_count : %value: index where 
 kernel.def export("id4_qwen3_vl_linear_input_pack_f32_bf16") @id4_qwen3_vl_linear_input_pack_f32_bf16() {
   %unit = index.constant 1 : index
   %workgroup_size_x = index.constant 256 : index
-  %element_count = config.get @id4.qwen3_vl.linear_input_pack.element_count : index
+  %dispatch_token_count = config.get @id4.qwen3_vl.linear_input_pack.dispatch_token_count : index
+  %input_size = config.get @id4.qwen3_vl.linear_input_pack.input_size : index
+  %element_count = index.mul %dispatch_token_count, %input_size : index
   %rounding = index.constant 255 : index
   %rounded = index.add %element_count, %rounding : index
   %workgroups_x = index.div %rounded, %workgroup_size_x : index
@@ -18,21 +22,30 @@ kernel.def export("id4_qwen3_vl_linear_input_pack_f32_bf16") @id4_qwen3_vl_linea
   %lane = kernel.workitem.id<x> : index
   %workgroup_size_x = index.constant 256 : index
   %token_count = config.get @id4.qwen3_vl.linear_input_pack.token_count : index
+  %dispatch_token_count = config.get @id4.qwen3_vl.linear_input_pack.dispatch_token_count : index
   %input_size = config.get @id4.qwen3_vl.linear_input_pack.input_size : index
-  %element_count = config.get @id4.qwen3_vl.linear_input_pack.element_count : index
+  %input_element_count = config.get @id4.qwen3_vl.linear_input_pack.element_count : index
+  %element_count = index.mul %dispatch_token_count, %input_size : index
   %element_index = index.madd %workgroup, %workgroup_size_x, %lane : index
   %in_bounds = index.cmp ult, %element_index, %element_count : index
   %input_noalias, %packed_output_noalias = buffer.assume.noalias %input, %packed_output : buffer, buffer
   %input_global = buffer.assume.memory_space<global> %input_noalias : buffer
   %packed_output_global = buffer.assume.memory_space<global> %packed_output_noalias : buffer
   %input_view = buffer.view %input_global[%base] : buffer -> view<[%token_count]x[%input_size]xf32, #dense>
-  %packed_output_view = buffer.view %packed_output_global[%base] : buffer -> view<[%token_count]x[%input_size]xbf16, #dense>
+  %packed_output_view = buffer.view %packed_output_global[%base] : buffer -> view<[%dispatch_token_count]x[%input_size]xbf16, #dense>
+  %zero = scalar.constant 0.0 : bf16
   scf.if %in_bounds {
     %token = index.div %element_index, %input_size : index
     %input_row = index.rem %element_index, %input_size : index
-    %value = view.load %input_view[%token, %input_row] : view<[%token_count]x[%input_size]xf32, #dense> -> f32
-    %rounded = scalar.fptrunc %value : f32 to bf16
-    view.store %rounded, %packed_output_view[%token, %input_row] : bf16, view<[%token_count]x[%input_size]xbf16, #dense>
+    %is_input_element = index.cmp ult, %element_index, %input_element_count : index
+    %packed_value = scf.if %is_input_element -> (bf16) {
+      %value = view.load %input_view[%token, %input_row] : view<[%token_count]x[%input_size]xf32, #dense> -> f32
+      %rounded = scalar.fptrunc %value : f32 to bf16
+      scf.yield %rounded : bf16
+    } else {
+      scf.yield %zero : bf16
+    }
+    view.store %packed_value, %packed_output_view[%token, %input_row] : bf16, view<[%dispatch_token_count]x[%input_size]xbf16, #dense>
   }
   kernel.return
 }

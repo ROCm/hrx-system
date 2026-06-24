@@ -1,0 +1,176 @@
+amdgpu.target<gfx1100> @id4_gfx1100
+
+config.decl @id4.qwen3_vl.attention_wmma.token_count : %value: index where [range(%value, 1, 4096)]
+
+config.decl @id4.qwen3_vl.attention_wmma.dispatch_token_count : %value: index where [range(%value, 16, 4096), mul(%value, 16)]
+
+config.decl @id4.qwen3_vl.attention_wmma.hidden_size : %value: index where [range(%value, 16, 65536), mul(%value, 16)]
+
+config.decl @id4.qwen3_vl.attention_wmma.attention_head_count : %value: index where [range(%value, 1, 1024)]
+
+config.decl @id4.qwen3_vl.attention_wmma.key_value_head_count : %value: index where [range(%value, 1, 1024)]
+
+config.decl @id4.qwen3_vl.attention_wmma.head_size : %value: index where [range(%value, 16, 1024), mul(%value, 16)]
+
+kernel.def target(@id4_gfx1100) export("id4_qwen3_vl_attention_qk_scores_bf16_f32_wmma") @id4_qwen3_vl_attention_qk_scores_bf16_f32_wmma() {
+  %unit = index.constant 1 : index
+  %sixteen = index.constant 16 : index
+  %workgroup_size_x = index.constant 32 : index
+  %dispatch_token_count = config.get @id4.qwen3_vl.attention_wmma.dispatch_token_count : index
+  %attention_head_count = config.get @id4.qwen3_vl.attention_wmma.attention_head_count : index
+  %tile_count = index.div %dispatch_token_count, %sixteen : index
+  kernel.launch.config workgroups(%tile_count, %tile_count, %attention_head_count) workgroup_size(%workgroup_size_x, %unit, %unit) : index
+} launch(%query: buffer, %key: buffer, %scores: buffer) {
+  %base = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %four_bytes = index.constant 4 : offset
+  %sixteen = index.constant 16 : index
+  %query_tile = kernel.workgroup.id<x> : index
+  %key_tile = kernel.workgroup.id<y> : index
+  %query_head = kernel.workgroup.id<z> : index
+  %dispatch_token_count = config.get @id4.qwen3_vl.attention_wmma.dispatch_token_count : index
+  %hidden_size = config.get @id4.qwen3_vl.attention_wmma.hidden_size : index
+  %attention_head_count = config.get @id4.qwen3_vl.attention_wmma.attention_head_count : index
+  %key_value_head_count = config.get @id4.qwen3_vl.attention_wmma.key_value_head_count : index
+  %head_size = config.get @id4.qwen3_vl.attention_wmma.head_size : index
+  %query_heads_per_key = index.div %attention_head_count, %key_value_head_count : index
+  %key_value_width = index.mul %key_value_head_count, %head_size : index
+  %query_head_base = index.mul %query_head, %head_size : index
+  %key_value_head = index.div %query_head, %query_heads_per_key : index
+  %key_value_head_base = index.mul %key_value_head, %head_size : index
+  %head_tile_count = index.div %head_size, %sixteen : index
+  %query_origin = index.mul %query_tile, %sixteen : index
+  %key_origin = index.mul %key_tile, %sixteen : index
+  %score_head_elements = index.mul %dispatch_token_count, %dispatch_token_count : index
+  %score_head_base = index.mul %query_head, %score_head_elements : index
+  %scores_offset = index.scale %score_head_base, %four_bytes : index, offset -> offset
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 16 : index
+  %zero_acc = vector.constant 0.0 : vector<8xf32>
+  %head_size_i32 = index.cast %head_size : index to i32
+  %head_size_f32 = scalar.sitofp %head_size_i32 : i32 to f32
+  %attention_scale = scalar.rsqrtf<nnan|ninf|nsz|afn> %head_size_f32 : f32
+  %attention_scale_vector = vector.splat %attention_scale : vector<8xf32>
+  %key_transposed_layout = encoding.layout.strided [1, %key_value_width] : encoding<layout>
+  %query_noalias, %key_noalias, %scores_noalias = buffer.assume.noalias %query, %key, %scores : buffer, buffer, buffer
+  %query_global = buffer.assume.memory_space<global> %query_noalias : buffer
+  %key_global = buffer.assume.memory_space<global> %key_noalias : buffer
+  %scores_global = buffer.assume.memory_space<global> %scores_noalias : buffer
+  %query_aligned = buffer.assume.alignment %query_global {minimum_alignment = 16} : buffer
+  %key_aligned = buffer.assume.alignment %key_global {minimum_alignment = 16} : buffer
+  %scores_aligned = buffer.assume.alignment %scores_global {minimum_alignment = 16} : buffer
+  %query_view = buffer.view %query_aligned[%base] : buffer -> view<[%dispatch_token_count]x[%hidden_size]xbf16, #dense>
+  %key_transposed_view = buffer.view %key_aligned[%base] : buffer -> view<[%key_value_width]x[%dispatch_token_count]xbf16, %key_transposed_layout>
+  %scores_view = buffer.view %scores_aligned[%scores_offset] : buffer -> view<[%dispatch_token_count]x[%dispatch_token_count]xf32, #dense>
+  %init = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
+  %raw_scores = scf.for %head_tile = [%zero to %head_tile_count step %one](%acc = %init : vector<8xf32>) -> (vector<8xf32>) {
+    %head_tile_offset = index.mul %head_tile, %sixteen : index
+    %query_channel_origin = index.add %query_head_base, %head_tile_offset : index
+    %key_channel_origin = index.add %key_value_head_base, %head_tile_offset : index
+    %lhs = vector.fragment.load<lhs> %query_view[%query_origin, %query_channel_origin] shape [%m, %k] : view<[%dispatch_token_count]x[%hidden_size]xbf16, #dense> -> vector<16xbf16>
+    %rhs = vector.fragment.load<rhs> %key_transposed_view[%key_channel_origin, %key_origin] shape [%k, %n] : view<[%key_value_width]x[%dispatch_token_count]xbf16, %key_transposed_layout> -> vector<16xbf16>
+    %next = vector.mma %lhs, %rhs, %acc : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    scf.yield %next : vector<8xf32>
+  }
+  %scaled_scores = vector.mulf<reassoc|nnan|ninf|nsz|contract> %raw_scores, %attention_scale_vector : vector<8xf32>
+  vector.fragment.store<result> %scaled_scores, %scores_view[%query_origin, %key_origin] shape [%m, %n] : vector<8xf32>, view<[%dispatch_token_count]x[%dispatch_token_count]xf32, #dense>
+  kernel.return
+}
+
+kernel.def export("id4_qwen3_vl_attention_softmax_mask_f32") @id4_qwen3_vl_attention_softmax_mask_f32() {
+  %unit = index.constant 1 : index
+  %workgroup_size_x = index.constant 256 : index
+  %token_count = config.get @id4.qwen3_vl.attention_wmma.token_count : index
+  %attention_head_count = config.get @id4.qwen3_vl.attention_wmma.attention_head_count : index
+  kernel.launch.config workgroups(%token_count, %attention_head_count, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
+} launch(%scores: buffer, %attention_mask: buffer, %probabilities: buffer) {
+  %base = index.constant 0 : offset
+  %four_bytes = index.constant 4 : offset
+  %zero_f32 = scalar.constant 0.0 : f32
+  %one_f32 = scalar.constant 1.0 : f32
+  %negative_large = scalar.constant -1000000000.0 : f32
+  %workgroup_size_x = index.constant 256 : index
+  %query_token = kernel.workgroup.id<x> : index
+  %query_head = kernel.workgroup.id<y> : index
+  %lane = kernel.workitem.id<x> : index
+  %token_count = config.get @id4.qwen3_vl.attention_wmma.token_count : index
+  %dispatch_token_count = config.get @id4.qwen3_vl.attention_wmma.dispatch_token_count : index
+  %attention_head_count = config.get @id4.qwen3_vl.attention_wmma.attention_head_count : index
+  %score_head_elements = index.mul %dispatch_token_count, %dispatch_token_count : index
+  %score_head_base = index.mul %query_head, %score_head_elements : index
+  %scores_offset = index.scale %score_head_base, %four_bytes : index, offset -> offset
+  %scores_noalias, %attention_mask_noalias, %probabilities_noalias = buffer.assume.noalias %scores, %attention_mask, %probabilities : buffer, buffer, buffer
+  %scores_global = buffer.assume.memory_space<global> %scores_noalias : buffer
+  %attention_mask_global = buffer.assume.memory_space<global> %attention_mask_noalias : buffer
+  %probabilities_global = buffer.assume.memory_space<global> %probabilities_noalias : buffer
+  %scores_view = buffer.view %scores_global[%scores_offset] : buffer -> view<[%dispatch_token_count]x[%dispatch_token_count]xf32, #dense>
+  %attention_mask_view = buffer.view %attention_mask_global[%base] : buffer -> view<[%token_count]x[%token_count]xf32, #dense>
+  %probabilities_view = buffer.view %probabilities_global[%base] : buffer -> view<[%attention_head_count]x[%token_count]x[%token_count]xf32, #dense>
+  %lane_max = scf.for %key_token = [%lane to %token_count step %workgroup_size_x](%current_max = %negative_large : f32) -> (f32) {
+    %raw_score = view.load %scores_view[%query_token, %key_token] : view<[%dispatch_token_count]x[%dispatch_token_count]xf32, #dense> -> f32
+    %mask_value = view.load %attention_mask_view[%query_token, %key_token] : view<[%token_count]x[%token_count]xf32, #dense> -> f32
+    %score = scalar.addf<reassoc|nnan|ninf|nsz> %raw_score, %mask_value : f32
+    %next_max = scalar.maxnumf %current_max, %score : f32
+    scf.yield %next_max : f32
+  }
+  %row_max = kernel.workgroup.reduce<maxnumf> %lane_max : f32
+  %lane_sum = scf.for %key_token = [%lane to %token_count step %workgroup_size_x](%current_sum = %zero_f32 : f32) -> (f32) {
+    %raw_score = view.load %scores_view[%query_token, %key_token] : view<[%dispatch_token_count]x[%dispatch_token_count]xf32, #dense> -> f32
+    %mask_value = view.load %attention_mask_view[%query_token, %key_token] : view<[%token_count]x[%token_count]xf32, #dense> -> f32
+    %score = scalar.addf<reassoc|nnan|ninf|nsz> %raw_score, %mask_value : f32
+    %centered = scalar.subf<reassoc|nnan|ninf|nsz> %score, %row_max : f32
+    %weight = scalar.expf<afn> %centered : f32
+    %next_sum = scalar.addf<reassoc|nnan|ninf|nsz> %current_sum, %weight : f32
+    scf.yield %next_sum : f32
+  }
+  %row_sum = kernel.workgroup.reduce<addf> %lane_sum : f32
+  %inverse_sum = scalar.divf<nnan|ninf|nsz|arcp> %one_f32, %row_sum : f32
+  scf.for %key_token = [%lane to %token_count step %workgroup_size_x] {
+    %raw_score = view.load %scores_view[%query_token, %key_token] : view<[%dispatch_token_count]x[%dispatch_token_count]xf32, #dense> -> f32
+    %mask_value = view.load %attention_mask_view[%query_token, %key_token] : view<[%token_count]x[%token_count]xf32, #dense> -> f32
+    %score = scalar.addf<reassoc|nnan|ninf|nsz> %raw_score, %mask_value : f32
+    %centered = scalar.subf<reassoc|nnan|ninf|nsz> %score, %row_max : f32
+    %weight = scalar.expf<afn> %centered : f32
+    %probability = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %weight, %inverse_sum : f32
+    view.store %probability, %probabilities_view[%query_head, %query_token, %key_token] : f32, view<[%attention_head_count]x[%token_count]x[%token_count]xf32, #dense>
+  }
+  kernel.return
+}
+
+check.case public @id4_qwen3_vl_attention_wmma_qk_zero_case {
+  %query = check.generate.fill value(0.0) : tensor<16x32xbf16>
+  %key = check.generate.fill value(0.0) : tensor<16x32xbf16>
+  %scores = check.generate.fill value(1.0) : tensor<2x16x16xf32>
+  %expected = check.generate.fill value(0.0) : tensor<2x16x16xf32>
+  func.call @id4_qwen3_vl_attention_qk_scores_bf16_f32_wmma(%query, %key, %scores) : (tensor<16x32xbf16>, tensor<16x32xbf16>, tensor<2x16x16xf32>)
+  check.expect.close actual(%scores) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2x16x16xf32>
+  check.return
+}
+
+check.case public @id4_qwen3_vl_attention_wmma_qk_ones_case {
+  %query = check.generate.fill value(1.0) : tensor<16x32xbf16>
+  %key = check.generate.fill value(1.0) : tensor<16x32xbf16>
+  %scores = check.generate.fill value(0.0) : tensor<2x16x16xf32>
+  %expected = check.generate.fill value(4.0) : tensor<2x16x16xf32>
+  func.call @id4_qwen3_vl_attention_qk_scores_bf16_f32_wmma(%query, %key, %scores) : (tensor<16x32xbf16>, tensor<16x32xbf16>, tensor<2x16x16xf32>)
+  check.expect.close actual(%scores) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2x16x16xf32>
+  check.return
+}
+
+check.case public @id4_qwen3_vl_attention_wmma_softmax_uniform_case {
+  %scores = check.generate.fill value(0.0) : tensor<2x16x16xf32>
+  %attention_mask = check.generate.fill value(0.0) : tensor<16x16xf32>
+  %probabilities = check.generate.fill value(0.0) : tensor<2x16x16xf32>
+  %expected = check.generate.fill value(0.0625) : tensor<2x16x16xf32>
+  func.call @id4_qwen3_vl_attention_softmax_mask_f32(%scores, %attention_mask, %probabilities) : (tensor<2x16x16xf32>, tensor<16x16xf32>, tensor<2x16x16xf32>)
+  check.expect.close actual(%probabilities) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2x16x16xf32>
+  check.return
+}
+
+check.benchmark<@id4_qwen3_vl_attention_wmma_qk_zero_case> @id4_qwen3_vl_attention_wmma_qk_zero
+
+check.benchmark<@id4_qwen3_vl_attention_wmma_qk_ones_case> @id4_qwen3_vl_attention_wmma_qk_ones
+
+check.benchmark<@id4_qwen3_vl_attention_wmma_softmax_uniform_case> @id4_qwen3_vl_attention_wmma_softmax_uniform
