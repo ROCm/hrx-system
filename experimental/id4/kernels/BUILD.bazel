@@ -2137,6 +2137,38 @@ _KERNEL_CASES = [
         "target_name": "vae_upsample_conv3x3_bias_ic4_oc16_packed_2d_bf16_flux2_tile_mid_shape",
     },
     {
+        "actual_case": "@id4_vae_upsample_conv3x3_bias_bf16_wmma_matches_scalar_small_case",
+        "benchmark": "@id4_vae_upsample_conv3x3_bias_bf16_wmma_matches_scalar_small",
+        "configs": [
+            "--config=id4.vae.upsample_conv3x3_bias.input_width=1",
+            "--config=id4.vae.upsample_conv3x3_bias.input_height=1",
+            "--config=id4.vae.upsample_conv3x3_bias.channel_count=32",
+            "--config=id4.vae.upsample_conv3x3_bias.batch_count=1",
+            "--config=id4.vae.upsample_conv3x3_bias.output_width=2",
+            "--config=id4.vae.upsample_conv3x3_bias.output_height=2",
+            "--config=id4.vae.upsample_conv3x3_bias.output_element_count=128",
+            "--config=id4.vae.upsample_conv3x3_bias.output_channel_tile_count=2",
+        ],
+        "source": "vae/upsample_conv3x3_bias_bf16.loom",
+        "target_name": "vae_upsample_conv3x3_bias_bf16_wmma_matches_scalar_small",
+    },
+    {
+        "actual_case": "@id4_vae_upsample_conv3x3_bias_bf16_wmma_flux2_tile_mid_shape_case",
+        "benchmark": "@id4_vae_upsample_conv3x3_bias_bf16_wmma_flux2_tile_mid_shape",
+        "configs": [
+            "--config=id4.vae.upsample_conv3x3_bias.input_width=128",
+            "--config=id4.vae.upsample_conv3x3_bias.input_height=128",
+            "--config=id4.vae.upsample_conv3x3_bias.channel_count=256",
+            "--config=id4.vae.upsample_conv3x3_bias.batch_count=1",
+            "--config=id4.vae.upsample_conv3x3_bias.output_width=256",
+            "--config=id4.vae.upsample_conv3x3_bias.output_height=256",
+            "--config=id4.vae.upsample_conv3x3_bias.output_element_count=16777216",
+            "--config=id4.vae.upsample_conv3x3_bias.output_channel_tile_count=8",
+        ],
+        "source": "vae/upsample_conv3x3_bias_bf16.loom",
+        "target_name": "vae_upsample_conv3x3_bias_bf16_wmma_flux2_tile_mid_shape",
+    },
+    {
         "actual_case": "@id4_vae_upsample_nearest_bf16_scale2_case",
         "benchmark": "@id4_vae_upsample_nearest_bf16_scale2",
         "configs": [

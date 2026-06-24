@@ -2755,44 +2755,73 @@ static iree_status_t id4_vae_program_author_upsample_conv3x3_bias(
   }
 
   if (activation_dtype == ID4_PIPELINE_PROGRAM_DTYPE_BF16) {
-    if (batch_count != 1 || channel_count < 16 || channel_count % 16 != 0) {
+    if (batch_count != 1 || channel_count < 32 || channel_count % 32 != 0) {
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
           "VAE BF16 upsample conv3x3 requires batch-1 and channel multiple "
-          "of 16");
+          "of 32");
     }
 
-    iree_string_view_t nearest_name = iree_string_view_empty();
-    char nearest_name_storage[ID4_VAE_PROGRAM_NAME_BUFFER_CAPACITY];
-    IREE_RETURN_IF_ERROR(id4_vae_program_format_suffix(
-        dispatch_name, IREE_SV(".nearest"), nearest_name_storage,
-        sizeof(nearest_name_storage), &nearest_name));
-    id4_pipeline_program_tensor_t nearest =
+    id4_pipeline_program_tensor_t output =
         id4_pipeline_program_tensor_invalid();
     IREE_RETURN_IF_ERROR(id4_vae_program_acquire_tensor(
-        builder, nearest_name, ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+        builder, output_name, ID4_PIPELINE_PROGRAM_DTYPE_BF16,
         id4_pipeline_program_make_shape_rank4(output_width, output_height,
                                               channel_count, batch_count),
-        &nearest));
+        &output));
 
     id4_vae_program_config_list_t config_list;
-    IREE_RETURN_IF_ERROR(id4_vae_program_build_upsample_nearest_configs(
+    IREE_RETURN_IF_ERROR(id4_vae_program_build_upsample_conv3x3_bias_configs(
         input_width, input_height, channel_count, batch_count, output_width,
         output_height, output_element_count, &config_list));
 
+    iree_string_view_t packed_weight_key = iree_string_view_empty();
+    id4_pipeline_program_shape_t weight_shape;
+    char packed_weight_key_storage[ID4_VAE_PROGRAM_NAME_BUFFER_CAPACITY];
+    IREE_RETURN_IF_ERROR(id4_vae_program_resolve_conv3x3_weight(
+        weight_key, channel_count, channel_count,
+        ID4_VAE_PROGRAM_CONV3X3_WEIGHT_LAYOUT_PACKED_IC_KY_KX_OC,
+        packed_weight_key_storage, sizeof(packed_weight_key_storage),
+        &packed_weight_key, &weight_shape));
+    iree_string_view_t resolved_weight_key = iree_string_view_empty();
+    char resolved_weight_key_storage[ID4_VAE_PROGRAM_NAME_BUFFER_CAPACITY];
+    IREE_RETURN_IF_ERROR(id4_vae_parameter_format_bf16_key(
+        packed_weight_key, resolved_weight_key_storage,
+        sizeof(resolved_weight_key_storage), &resolved_weight_key));
+    iree_string_view_t resolved_bias_key = iree_string_view_empty();
+    char resolved_bias_key_storage[ID4_VAE_PROGRAM_NAME_BUFFER_CAPACITY];
+    IREE_RETURN_IF_ERROR(id4_vae_parameter_format_bf16_key(
+        bias_key, resolved_bias_key_storage, sizeof(resolved_bias_key_storage),
+        &resolved_bias_key));
+
+    id4_pipeline_program_tensor_t weight =
+        id4_pipeline_program_tensor_invalid();
+    IREE_RETURN_IF_ERROR(id4_vae_program_parameter_tensor(
+        builder, resolved_weight_key, ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+        weight_shape, &weight));
+    id4_pipeline_program_tensor_t bias = id4_pipeline_program_tensor_invalid();
+    IREE_RETURN_IF_ERROR(id4_vae_program_parameter_tensor(
+        builder, resolved_bias_key, ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+        id4_pipeline_program_make_shape_rank1(channel_count), &bias));
+
     id4_pipeline_program_dispatch_binding_t bindings[] = {
         id4_pipeline_program_read(input),
-        id4_pipeline_program_write(nearest),
+        id4_pipeline_program_read(weight),
+        id4_pipeline_program_read(bias),
+        id4_pipeline_program_write(output),
     };
     id4_pipeline_program_dispatch_loom_options_t dispatch_options;
     memset(&dispatch_options, 0, sizeof(dispatch_options));
     dispatch_options.structure_size = sizeof(dispatch_options);
-    dispatch_options.name = nearest_name;
-    dispatch_options.kernel =
-        id4_pipeline_make_kernel_ref(IREE_SV("vae/upsample_nearest_bf16"),
-                                     IREE_SV("id4_vae_upsample_nearest_bf16"));
+    dispatch_options.name = dispatch_name;
+    dispatch_options.kernel = id4_pipeline_make_kernel_ref(
+        IREE_SV("vae/upsample_conv3x3_bias_bf16"),
+        IREE_SV("id4_vae_upsample_conv3x3_bias_bf16_wmma"));
     dispatch_options.dispatch_config =
-        id4_vae_program_make_dispatch_config((uint32_t)output_element_count);
+        id4_vae_program_make_static_dispatch_config_with_workgroup_size_x(
+            id4_vae_program_ceil_div_u32(
+                (uint32_t)(output_element_count / channel_count), 32),
+            channel_count / 32, 1, 32);
     dispatch_options.config_binding_count = config_list.count;
     dispatch_options.config_bindings = config_list.bindings;
     dispatch_options.binding_count = IREE_ARRAYSIZE(bindings);
@@ -2800,17 +2829,8 @@ static iree_status_t id4_vae_program_author_upsample_conv3x3_bias(
     IREE_RETURN_IF_ERROR(
         id4_pipeline_program_dispatch_loom(builder, &dispatch_options));
 
-    iree_string_view_t after_nearest_name = iree_string_view_empty();
-    char after_nearest_name_storage[ID4_VAE_PROGRAM_NAME_BUFFER_CAPACITY];
-    IREE_RETURN_IF_ERROR(id4_vae_program_format_suffix(
-        dispatch_name, IREE_SV(".after_nearest"), after_nearest_name_storage,
-        sizeof(after_nearest_name_storage), &after_nearest_name));
-    IREE_RETURN_IF_ERROR(id4_vae_program_barrier(builder, after_nearest_name));
-
-    return id4_vae_program_author_conv3x3_bias_bf16(
-        builder, dispatch_name, nearest, output_width, output_height,
-        channel_count, channel_count, batch_count, weight_key, bias_key,
-        output_name, out_output);
+    *out_output = output;
+    return iree_ok_status();
   }
 
   if (activation_dtype != ID4_PIPELINE_PROGRAM_DTYPE_F32) {
