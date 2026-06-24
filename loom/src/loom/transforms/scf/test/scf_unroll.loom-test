@@ -1094,6 +1094,37 @@ func.def @bare_unroll_dynamic_lower_static_trip_count(%slot0: index) {
 
 // ====
 
+config.def @runtime.sequence_width = 128 : index
+config.def @runtime.workgroup_size = 64 : index
+
+func.def @bare_unroll_config_specialized_sequence_width(%lane0: index) {
+  %lane = index.assume %lane0 [range(%lane0, 0, 63)] : index
+  %sequence_width = config.get @runtime.sequence_width : index
+  %workgroup_size = config.get @runtime.workgroup_size : index
+  scf.for %column = [%lane to %sequence_width step %workgroup_size] unroll {
+    test.use %column : index
+  }
+  func.return
+}
+
+// ----
+config.def @runtime.sequence_width = 128 : index
+
+config.def @runtime.workgroup_size = 64 : index
+
+func.def @bare_unroll_config_specialized_sequence_width(%lane0: index) {
+  %lane = index.assume %lane0 [range(%lane0, 0, 63)] : index
+  %sequence_width = config.get @runtime.sequence_width : index
+  %workgroup_size = config.get @runtime.workgroup_size : index
+  test.use %lane : index
+  %7 = index.constant 64 : index
+  %column_64 = index.add %lane, %7 : index
+  test.use %column_64 : index
+  func.return
+}
+
+// ====
+
 func.def @bare_unroll_range_dependent_dynamic_lower_rejected(%slot0: index) {
   %slot = index.assume %slot0 [range(%slot0, 0, 8)] : index
   %end = index.constant 16 : index

@@ -319,6 +319,40 @@
       ]
     },
     {
+      "name": "reports config-specialized sequence loop trip count",
+      "run": {
+        "tool": "loom-opt",
+        "args": [
+          "--pass=unroll-scf-for",
+          "--pass-report=json",
+          "--output={tmp}/structured-sequence-loop.loom"
+        ],
+        "stdin": {
+          "text": "config.def @runtime.sequence_width = 128 : index\nconfig.def @runtime.workgroup_size = 64 : index\n\nfunc.def @structured_sequence_loop(%lane0: index) {\n  %lane = index.assume %lane0 [range(%lane0, 0, 63)] : index\n  %sequence_width = config.get @runtime.sequence_width : index\n  %workgroup_size = config.get @runtime.workgroup_size : index\n  scf.for %column = [%lane to %sequence_width step %workgroup_size] {\n    test.use %column : index\n  }\n  func.return\n}\n"
+        }
+      },
+      "stderr": {
+        "contains": [
+          "\"pass\":\"unroll-scf-for\"",
+          "\"category\":\"scf-unroll\"",
+          "\"outcome\":\"structured\"",
+          "\"policy\":\"absent\"",
+          "\"trip_count_state\":\"exact\"",
+          "\"trip_count\":2",
+          "\"step\":64",
+          "\"lower_bound_kind\":\"dynamic\"",
+          "\"lower_range_min\":0",
+          "\"lower_range_max\":63"
+        ]
+      },
+      "files": [
+        {
+          "path": "{tmp}/structured-sequence-loop.loom",
+          "contains": ["scf.for %column"]
+        }
+      ]
+    },
+    {
       "name": "reports no-op unroll factor policy clearing",
       "run": {
         "tool": "loom-opt",
