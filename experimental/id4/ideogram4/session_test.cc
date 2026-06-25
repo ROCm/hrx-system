@@ -287,6 +287,17 @@ TEST_F(SessionTest, PlansGenerationFromDynamicPromptLength) {
   EXPECT_EQ(long_summary.dit_activation_format,
             ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT);
   EXPECT_EQ(long_summary.vae_tiling.mode, ID4_VAE_TILING_MODE_DISABLED);
+
+  iree_string_builder_t builder;
+  iree_string_builder_initialize(iree_allocator_system(), &builder);
+  IREE_ASSERT_OK(id4_ideogram4_generation_plan_format_json(
+      long_plan_owner.get(), &builder));
+  iree_string_view_t json = iree_string_builder_view(&builder);
+  EXPECT_NE(iree_string_view_find(json, IREE_SV("\"ideogram4_generation\""), 0),
+            IREE_STRING_VIEW_NPOS);
+  EXPECT_NE(iree_string_view_find(json, IREE_SV("\"stages\""), 0),
+            IREE_STRING_VIEW_NPOS);
+  iree_string_builder_deinitialize(&builder);
 }
 
 TEST_F(SessionTest, RejectsInvalidGenerationConfig) {

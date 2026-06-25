@@ -228,6 +228,11 @@ iree_status_t id4_ideogram4_generation_plan_summary(
     const id4_ideogram4_generation_plan_t* plan,
     id4_ideogram4_generation_plan_summary_t* out_summary);
 
+// Appends an inspectable generation-plan JSON object to |builder|.
+iree_status_t id4_ideogram4_generation_plan_format_json(
+    const id4_ideogram4_generation_plan_t* plan,
+    iree_string_builder_t* builder);
+
 // Prepares reusable HAL state for every stage in |plan|.
 iree_status_t id4_ideogram4_session_prepare_generation(
     id4_ideogram4_session_t* session,

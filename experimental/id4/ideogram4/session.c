@@ -712,6 +712,79 @@ iree_status_t id4_ideogram4_generation_plan_summary(
   return iree_ok_status();
 }
 
+static iree_status_t id4_ideogram4_generation_plan_append_shape_json(
+    iree_string_builder_t* builder, id4_pipeline_program_shape_t shape) {
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+      builder, "{\"rank\":%u,\"dims\":[", shape.rank));
+  for (uint32_t i = 0; i < shape.rank; ++i) {
+    if (i != 0) {
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, ","));
+    }
+    IREE_RETURN_IF_ERROR(
+        iree_string_builder_append_format(builder, "%" PRIu64, shape.dims[i]));
+  }
+  return iree_string_builder_append_cstring(builder, "]}");
+}
+
+static iree_status_t id4_ideogram4_generation_plan_append_tiling_json(
+    iree_string_builder_t* builder, id4_vae_tiling_config_t tiling) {
+  return iree_string_builder_append_format(
+      builder,
+      "{\"mode\":%u,\"tile_size_x\":%" PRIu32 ",\"tile_size_y\":%" PRIu32
+      ",\"relative_size_x\":%g"
+      ",\"relative_size_y\":%g,\"overlap\":%g,\"memory_budget\":%" PRIu64 "}",
+      (uint32_t)tiling.mode, tiling.tile_size_x, tiling.tile_size_y,
+      (double)tiling.relative_size_x, (double)tiling.relative_size_y,
+      (double)tiling.overlap, (uint64_t)tiling.memory_budget);
+}
+
+static iree_status_t id4_ideogram4_generation_plan_append_stage_json(
+    iree_string_builder_t* builder, const char* key,
+    const id4_pipeline_plan_t* stage_plan) {
+  IREE_RETURN_IF_ERROR(
+      iree_string_builder_append_format(builder, "\"%s\":", key));
+  return id4_pipeline_plan_format_json(stage_plan, builder);
+}
+
+iree_status_t id4_ideogram4_generation_plan_format_json(
+    const id4_ideogram4_generation_plan_t* plan,
+    iree_string_builder_t* builder) {
+  IREE_ASSERT_ARGUMENT(plan);
+  IREE_ASSERT_ARGUMENT(builder);
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(
+      builder,
+      "{\"kind\":\"ideogram4_generation\",\"summary\":{\"qwen_token_count\":"));
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+      builder,
+      "%" PRIu32 ",\"denoise_step_count\":%" PRIu32
+      ",\"diffusion_latent_shape\":",
+      plan->summary.qwen_token_count, plan->summary.denoise_step_count));
+  IREE_RETURN_IF_ERROR(id4_ideogram4_generation_plan_append_shape_json(
+      builder, plan->summary.diffusion_latent_shape));
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+      builder, ",\"dit_activation_format\":%u,\"vae_tiling\":",
+      (uint32_t)plan->summary.dit_activation_format));
+  IREE_RETURN_IF_ERROR(id4_ideogram4_generation_plan_append_tiling_json(
+      builder, plan->summary.vae_tiling));
+  IREE_RETURN_IF_ERROR(
+      iree_string_builder_append_cstring(builder, "},\"stages\":{"));
+  IREE_RETURN_IF_ERROR(id4_ideogram4_generation_plan_append_stage_json(
+      builder, "qwen", plan->qwen_plan));
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, ","));
+  IREE_RETURN_IF_ERROR(id4_ideogram4_generation_plan_append_stage_json(
+      builder, "dit_conditioned", plan->dit_conditioned_plan));
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, ","));
+  IREE_RETURN_IF_ERROR(id4_ideogram4_generation_plan_append_stage_json(
+      builder, "dit_unconditioned", plan->dit_unconditioned_plan));
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, ","));
+  IREE_RETURN_IF_ERROR(id4_ideogram4_generation_plan_append_stage_json(
+      builder, "sampler", plan->sampler_plan));
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, ","));
+  IREE_RETURN_IF_ERROR(id4_ideogram4_generation_plan_append_stage_json(
+      builder, "decode", plan->decode_plan));
+  return iree_string_builder_append_cstring(builder, "}}");
+}
+
 static iree_status_t id4_ideogram4_validate_generation_prepare_options(
     const id4_ideogram4_session_t* session,
     const id4_ideogram4_generation_plan_t* plan,
