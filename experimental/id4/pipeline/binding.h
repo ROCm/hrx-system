@@ -55,6 +55,16 @@ iree_status_t id4_pipeline_find_diagnostic_tap_binding(
     const id4_pipeline_buffer_binding_set_t* binding_set,
     iree_string_view_t name, iree_hal_buffer_binding_t* out_binding);
 
+// Replaces an owned boundary binding with |replacement|.
+//
+// The replacement binding must cover the planned tensor byte range and satisfy
+// the planned tensor alignment. The binding set retains |replacement.buffer|
+// and releases the previous buffer at the matching plan slot.
+iree_status_t id4_pipeline_replace_boundary_binding(
+    const id4_pipeline_plan_t* plan,
+    id4_pipeline_buffer_binding_set_t* binding_set, iree_string_view_t name,
+    iree_hal_buffer_binding_t replacement);
+
 // Queues chunked host-to-device updates into |binding| on |semaphore|.
 iree_status_t id4_pipeline_queue_update_binding(
     iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,

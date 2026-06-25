@@ -127,6 +127,21 @@ class BindingTest : public ::testing::Test {
         IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &transfer_semaphore_));
   }
 
+  void AllocateDeviceBuffer(iree_device_size_t length,
+                            iree_hal_buffer_t** out_buffer) {
+    iree_hal_buffer_params_t params;
+    std::memset(&params, 0, sizeof(params));
+    params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
+    params.access = IREE_HAL_MEMORY_ACCESS_ALL;
+    params.usage = IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE |
+                   IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET |
+                   IREE_HAL_BUFFER_USAGE_TRANSFER_SOURCE;
+    params.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
+    params.min_alignment = alignof(uint32_t);
+    IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
+        iree_hal_device_allocator(device_), params, length, out_buffer));
+  }
+
   void ReadBindingToHost(const iree_hal_buffer_binding_t* binding,
                          uint64_t wait_payload_value, void* target_data,
                          iree_device_size_t target_length) {
@@ -201,6 +216,97 @@ TEST_F(BindingTest, AllocatesFindsAndUpdatesBoundaryBinding) {
   uint32_t actual[4] = {};
   ReadBindingToHost(&binding, payload_value, actual, sizeof(actual));
   EXPECT_EQ(std::memcmp(actual, source, sizeof(source)), 0);
+}
+
+TEST_F(BindingTest, ReplacesBoundaryBindingWithRetainedBuffer) {
+  CreatePlan();
+  AllocateBindings();
+  CreateTransferSemaphore();
+
+  iree_hal_buffer_t* replacement_buffer = nullptr;
+  AllocateDeviceBuffer(4 * sizeof(uint32_t), &replacement_buffer);
+  iree_hal_buffer_binding_t replacement = {
+      // Replacement buffer borrowed from the caller until replacement.
+      /*.buffer=*/replacement_buffer,
+      // Replacement range starts at byte zero.
+      /*.offset=*/0,
+      // Replacement range covers the planned boundary tensor.
+      /*.length=*/4 * sizeof(uint32_t),
+  };
+  IREE_ASSERT_OK(id4_pipeline_replace_boundary_binding(
+      plan_, &binding_set_, IREE_SV("input"), replacement));
+  iree_hal_buffer_release(replacement_buffer);
+
+  iree_hal_buffer_binding_t binding;
+  FindInputBinding(&binding);
+  EXPECT_EQ(binding.buffer, replacement.buffer);
+  EXPECT_EQ(binding.offset, 0);
+  EXPECT_EQ(binding.length, 4 * sizeof(uint32_t));
+
+  const uint32_t source[4] = {0x11111111u, 0x22222222u, 0x33333333u,
+                              0x44444444u};
+  uint64_t payload_value = 0;
+  IREE_ASSERT_OK(id4_pipeline_queue_update_binding(
+      device_, IREE_HAL_QUEUE_AFFINITY_ANY, &binding, source, sizeof(source),
+      iree_hal_semaphore_list_empty(), transfer_semaphore_, &payload_value));
+
+  uint32_t actual[4] = {};
+  ReadBindingToHost(&binding, payload_value, actual, sizeof(actual));
+  EXPECT_EQ(std::memcmp(actual, source, sizeof(source)), 0);
+}
+
+TEST_F(BindingTest, RejectsInvalidReplacementBinding) {
+  CreatePlan();
+  AllocateBindings();
+
+  iree_hal_buffer_binding_t original;
+  FindInputBinding(&original);
+
+  iree_hal_buffer_binding_t missing_buffer = {
+      // Missing buffer is invalid.
+      /*.buffer=*/nullptr,
+      // Offset still starts at zero.
+      /*.offset=*/0,
+      // Length otherwise covers the boundary tensor.
+      /*.length=*/4 * sizeof(uint32_t),
+  };
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      id4_pipeline_replace_boundary_binding(plan_, &binding_set_,
+                                            IREE_SV("input"), missing_buffer));
+
+  iree_hal_buffer_t* replacement_buffer = nullptr;
+  AllocateDeviceBuffer(4 * sizeof(uint32_t), &replacement_buffer);
+  iree_hal_buffer_binding_t too_short = {
+      // Replacement buffer borrowed from the caller.
+      /*.buffer=*/replacement_buffer,
+      // Replacement range starts at byte zero.
+      /*.offset=*/0,
+      // Replacement range is shorter than the planned tensor.
+      /*.length=*/3 * sizeof(uint32_t),
+  };
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        id4_pipeline_replace_boundary_binding(
+                            plan_, &binding_set_, IREE_SV("input"), too_short));
+
+  iree_hal_buffer_binding_t unaligned = {
+      // Replacement buffer borrowed from the caller.
+      /*.buffer=*/replacement_buffer,
+      // Replacement range violates the boundary tensor alignment.
+      /*.offset=*/1,
+      // Replacement range covers the planned tensor.
+      /*.length=*/4 * sizeof(uint32_t),
+  };
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        id4_pipeline_replace_boundary_binding(
+                            plan_, &binding_set_, IREE_SV("input"), unaligned));
+  iree_hal_buffer_release(replacement_buffer);
+
+  iree_hal_buffer_binding_t unchanged;
+  FindInputBinding(&unchanged);
+  EXPECT_EQ(unchanged.buffer, original.buffer);
+  EXPECT_EQ(unchanged.offset, original.offset);
+  EXPECT_EQ(unchanged.length, original.length);
 }
 
 TEST_F(BindingTest, RejectsMismatchedUpdateLength) {

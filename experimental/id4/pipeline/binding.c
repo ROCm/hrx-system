@@ -236,6 +236,73 @@ iree_status_t id4_pipeline_find_diagnostic_tap_binding(
                           name.data);
 }
 
+static iree_status_t id4_pipeline_validate_replacement_binding(
+    const id4_pipeline_tensor_layout_t* layout,
+    iree_hal_buffer_binding_t replacement) {
+  if (!replacement.buffer) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "replacement binding for boundary tensor `%.*s` has no buffer",
+        (int)layout->name.size, layout->name.data);
+  }
+  if (replacement.length < layout->byte_length) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "replacement binding for boundary tensor `%.*s` has length %" PRIu64
+        " but requires %" PRIu64,
+        (int)layout->name.size, layout->name.data, (uint64_t)replacement.length,
+        (uint64_t)layout->byte_length);
+  }
+  const iree_device_size_t alignment =
+      layout->alignment ? layout->alignment : 1;
+  if ((replacement.offset % alignment) != 0) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "replacement binding for boundary tensor `%.*s` has offset %" PRIu64
+        " that is not aligned to %" PRIu64,
+        (int)layout->name.size, layout->name.data, (uint64_t)replacement.offset,
+        (uint64_t)alignment);
+  }
+  return iree_ok_status();
+}
+
+iree_status_t id4_pipeline_replace_boundary_binding(
+    const id4_pipeline_plan_t* plan,
+    id4_pipeline_buffer_binding_set_t* binding_set, iree_string_view_t name,
+    iree_hal_buffer_binding_t replacement) {
+  if (!plan || !binding_set) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "boundary binding replacement requires plan and "
+                            "set");
+  }
+  const iree_host_size_t boundary_count =
+      id4_pipeline_plan_boundary_tensor_count(plan);
+  if (binding_set->count != boundary_count) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "boundary binding set has %" PRIhsz
+                            " entries but plan has %" PRIhsz
+                            " boundary tensors",
+                            binding_set->count, boundary_count);
+  }
+  for (iree_host_size_t i = 0; i < boundary_count; ++i) {
+    const id4_pipeline_boundary_tensor_plan_t* boundary =
+        id4_pipeline_plan_boundary_tensor_at(plan, i);
+    if (!boundary || !iree_string_view_equal(boundary->layout.name, name)) {
+      continue;
+    }
+    IREE_RETURN_IF_ERROR(id4_pipeline_validate_replacement_binding(
+        &boundary->layout, replacement));
+    iree_hal_buffer_retain(replacement.buffer);
+    iree_hal_buffer_release(binding_set->buffers[i]);
+    binding_set->buffers[i] = replacement.buffer;
+    binding_set->bindings[i] = replacement;
+    return iree_ok_status();
+  }
+  return iree_make_status(IREE_STATUS_NOT_FOUND,
+                          "boundary tensor `%.*s` not found", (int)name.size,
+                          name.data);
+}
+
 iree_status_t id4_pipeline_queue_update_binding(
     iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
     const iree_hal_buffer_binding_t* binding, const void* source_data,
