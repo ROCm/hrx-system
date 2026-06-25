@@ -44,6 +44,21 @@ static void iree_hal_streaming_graph_node_deinitialize_attrs(
   }
 }
 
+static bool iree_hal_streaming_graph_contains_graph_memory_nodes(
+    const iree_hal_streaming_graph_t* graph) {
+  for (iree_hal_streaming_node_block_t* block = graph->node_blocks; block;
+       block = block->next) {
+    for (iree_host_size_t i = 0; i < block->count; ++i) {
+      iree_hal_streaming_graph_node_t* node = block->nodes[i];
+      if (node->type == IREE_HAL_STREAMING_GRAPH_NODE_TYPE_MEM_ALLOC ||
+          node->type == IREE_HAL_STREAMING_GRAPH_NODE_TYPE_MEM_FREE) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 static iree_atomic_uint64_t iree_hal_streaming_next_graph_debug_id =
     IREE_ATOMIC_VAR_INIT(1);
 static iree_atomic_uint64_t iree_hal_streaming_next_node_debug_id =
@@ -1922,6 +1937,9 @@ iree_status_t iree_hal_streaming_graph_destroy_node(
                             "node must belong to an active graph");
   }
   iree_hal_streaming_graph_t* graph = node->graph;
+  const bool removed_graph_memory_node =
+      node->type == IREE_HAL_STREAMING_GRAPH_NODE_TYPE_MEM_ALLOC ||
+      node->type == IREE_HAL_STREAMING_GRAPH_NODE_TYPE_MEM_FREE;
   IREE_TRACE_ZONE_BEGIN(z0);
 
   iree_hal_streaming_graph_remove_dependency_refs(graph, node);
@@ -1940,6 +1958,10 @@ iree_status_t iree_hal_streaming_graph_destroy_node(
   }
   if (removed_from_nodes) {
     iree_hal_streaming_graph_node_deinitialize_attrs(node);
+    if (removed_graph_memory_node) {
+      graph->has_graph_memory_nodes =
+          iree_hal_streaming_graph_contains_graph_memory_nodes(graph);
+    }
     iree_hal_streaming_graph_renumber_nodes(graph);
     node->graph = NULL;
     node->dependency_count = 0;

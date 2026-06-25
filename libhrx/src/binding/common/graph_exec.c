@@ -337,19 +337,20 @@ static iree_host_size_t iree_hal_streaming_graph_visible_node_count(
     const iree_hal_streaming_graph_t* graph);
 
 static void iree_hal_streaming_graph_memory_add_high_water(
-    iree_hal_streaming_context_t* context, uint64_t value) {
-  context->graph_memory_used_high =
-      iree_max(context->graph_memory_used_high, value);
-  context->graph_memory_reserved_high =
-      iree_max(context->graph_memory_reserved_high, value);
+    iree_hal_streaming_device_t* device) {
+  device->graph_memory_used_high = iree_max(device->graph_memory_used_high,
+                                            device->graph_memory_used_current);
+  device->graph_memory_reserved_high =
+      iree_max(device->graph_memory_reserved_high,
+               device->graph_memory_reserved_current);
 }
 
 static iree_hal_streaming_graph_memory_size_entry_t*
 iree_hal_streaming_graph_memory_find_reusable_size_entry(
-    iree_hal_streaming_context_t* context, iree_device_size_t size,
+    iree_hal_streaming_device_t* device, iree_device_size_t size,
     iree_hal_streaming_graph_memory_size_entry_t*** out_previous_next) {
   iree_hal_streaming_graph_memory_size_entry_t** previous_next =
-      &context->graph_memory_reusable_size_entries;
+      &device->graph_memory_reusable_size_entries;
   while (*previous_next) {
     if ((*previous_next)->size == size) {
       if (out_previous_next) *out_previous_next = previous_next;
@@ -451,9 +452,10 @@ static iree_status_t iree_hal_streaming_graph_memory_build_contributions(
 static iree_status_t iree_hal_streaming_graph_memory_retain_exec(
     iree_hal_streaming_graph_exec_t* exec) {
   iree_hal_streaming_context_t* context = exec->context;
-  uint64_t orphan_bytes = 0;
-  iree_slim_mutex_lock(&context->mutex);
+  iree_hal_streaming_device_t* device = context->device_entry;
+  iree_slim_mutex_lock(&device->graph_memory_mutex);
   iree_status_t status = iree_ok_status();
+  uint32_t retained_contribution_count = 0;
   for (uint32_t i = 0;
        iree_status_is_ok(status) && i < exec->graph_memory_contribution_count;
        ++i) {
@@ -463,121 +465,145 @@ static iree_status_t iree_hal_streaming_graph_memory_retain_exec(
     if (contribution->reusable) {
       iree_hal_streaming_graph_memory_size_entry_t* entry =
           iree_hal_streaming_graph_memory_find_reusable_size_entry(
-              context, contribution->size, NULL);
+              device, contribution->size, NULL);
       if (entry) {
+        if (entry->reference_count == 0) {
+          device->graph_memory_used_current += bytes;
+          iree_hal_streaming_graph_memory_add_high_water(device);
+        }
         ++entry->reference_count;
+        retained_contribution_count = i + 1;
       } else {
         status = iree_allocator_malloc(context->host_allocator, sizeof(*entry),
                                        (void**)&entry);
         if (iree_status_is_ok(status)) {
-          entry->next = context->graph_memory_reusable_size_entries;
+          entry->next = device->graph_memory_reusable_size_entries;
           entry->size = contribution->size;
           entry->reference_count = 1;
-          context->graph_memory_reusable_size_entries = entry;
-          context->graph_memory_used_current += bytes;
-          context->graph_memory_reserved_current += bytes;
-          iree_hal_streaming_graph_memory_add_high_water(context, bytes);
+          device->graph_memory_reusable_size_entries = entry;
+          device->graph_memory_used_current += bytes;
+          device->graph_memory_reserved_current += bytes;
+          iree_hal_streaming_graph_memory_add_high_water(device);
+          retained_contribution_count = i + 1;
         }
       }
     } else {
-      context->graph_memory_used_current += bytes;
-      context->graph_memory_reserved_current += bytes;
-      orphan_bytes += bytes;
+      device->graph_memory_used_current += bytes;
+      device->graph_memory_reserved_current += bytes;
+      iree_hal_streaming_graph_memory_add_high_water(device);
+      retained_contribution_count = i + 1;
     }
   }
-  if (orphan_bytes > 0) {
-    iree_hal_streaming_graph_memory_add_high_water(
-        context, context->graph_memory_used_current);
+  if (!iree_status_is_ok(status)) {
+    exec->graph_memory_contribution_count = retained_contribution_count;
   }
-  iree_slim_mutex_unlock(&context->mutex);
+  iree_slim_mutex_unlock(&device->graph_memory_mutex);
   return status;
 }
 
 static void iree_hal_streaming_graph_memory_release_exec(
     iree_hal_streaming_graph_exec_t* exec) {
   iree_hal_streaming_context_t* context = exec->context;
-  iree_slim_mutex_lock(&context->mutex);
+  iree_hal_streaming_device_t* device = context->device_entry;
+  iree_slim_mutex_lock(&device->graph_memory_mutex);
   for (uint32_t i = 0; i < exec->graph_memory_contribution_count; ++i) {
     iree_hal_streaming_graph_memory_contribution_t* contribution =
         &exec->graph_memory_contributions[i];
     const uint64_t bytes = (uint64_t)contribution->size * contribution->count;
     if (contribution->reusable) {
-      iree_hal_streaming_graph_memory_size_entry_t** previous_next = NULL;
       iree_hal_streaming_graph_memory_size_entry_t* entry =
           iree_hal_streaming_graph_memory_find_reusable_size_entry(
-              context, contribution->size, &previous_next);
+              device, contribution->size, NULL);
       if (entry && entry->reference_count > 1) {
         --entry->reference_count;
-      } else if (entry) {
-        *previous_next = entry->next;
-        context->graph_memory_used_current -=
-            iree_min(context->graph_memory_used_current, bytes);
-        context->graph_memory_reserved_current -=
-            iree_min(context->graph_memory_reserved_current, bytes);
-        iree_allocator_free(context->host_allocator, entry);
+      } else if (entry && entry->reference_count == 1) {
+        entry->reference_count = 0;
+        device->graph_memory_used_current -=
+            iree_min(device->graph_memory_used_current, bytes);
       }
     } else {
-      context->graph_memory_used_current -=
-          iree_min(context->graph_memory_used_current, bytes);
-      context->graph_memory_reserved_current -=
-          iree_min(context->graph_memory_reserved_current, bytes);
+      device->graph_memory_used_current -=
+          iree_min(device->graph_memory_used_current, bytes);
+      device->graph_memory_reserved_current -=
+          iree_min(device->graph_memory_reserved_current, bytes);
     }
   }
-  iree_slim_mutex_unlock(&context->mutex);
+  iree_slim_mutex_unlock(&device->graph_memory_mutex);
 }
 
 uint64_t iree_hal_streaming_graph_memory_used_current(
-    iree_hal_streaming_context_t* context) {
-  iree_slim_mutex_lock(&context->mutex);
-  uint64_t value = context->graph_memory_used_current;
-  iree_slim_mutex_unlock(&context->mutex);
+    iree_hal_streaming_device_t* device) {
+  iree_slim_mutex_lock(&device->graph_memory_mutex);
+  uint64_t value = device->graph_memory_used_current;
+  iree_slim_mutex_unlock(&device->graph_memory_mutex);
   return value;
 }
 
 uint64_t iree_hal_streaming_graph_memory_used_high(
-    iree_hal_streaming_context_t* context) {
-  iree_slim_mutex_lock(&context->mutex);
-  uint64_t value = context->graph_memory_used_high;
-  iree_slim_mutex_unlock(&context->mutex);
+    iree_hal_streaming_device_t* device) {
+  iree_slim_mutex_lock(&device->graph_memory_mutex);
+  uint64_t value = device->graph_memory_used_high;
+  iree_slim_mutex_unlock(&device->graph_memory_mutex);
   return value;
 }
 
 uint64_t iree_hal_streaming_graph_memory_reserved_current(
-    iree_hal_streaming_context_t* context) {
-  iree_slim_mutex_lock(&context->mutex);
-  uint64_t value = context->graph_memory_reserved_current;
-  iree_slim_mutex_unlock(&context->mutex);
+    iree_hal_streaming_device_t* device) {
+  iree_slim_mutex_lock(&device->graph_memory_mutex);
+  uint64_t value = device->graph_memory_reserved_current;
+  iree_slim_mutex_unlock(&device->graph_memory_mutex);
   return value;
 }
 
 uint64_t iree_hal_streaming_graph_memory_reserved_high(
-    iree_hal_streaming_context_t* context) {
-  iree_slim_mutex_lock(&context->mutex);
-  uint64_t value = context->graph_memory_reserved_high;
-  iree_slim_mutex_unlock(&context->mutex);
+    iree_hal_streaming_device_t* device) {
+  iree_slim_mutex_lock(&device->graph_memory_mutex);
+  uint64_t value = device->graph_memory_reserved_high;
+  iree_slim_mutex_unlock(&device->graph_memory_mutex);
   return value;
 }
 
-void iree_hal_streaming_graph_memory_reset_high(
-    iree_hal_streaming_context_t* context) {
-  iree_slim_mutex_lock(&context->mutex);
-  context->graph_memory_used_high = 0;
-  context->graph_memory_reserved_high = 0;
-  iree_slim_mutex_unlock(&context->mutex);
+void iree_hal_streaming_graph_memory_reset_used_high(
+    iree_hal_streaming_device_t* device) {
+  iree_slim_mutex_lock(&device->graph_memory_mutex);
+  device->graph_memory_used_high = 0;
+  iree_slim_mutex_unlock(&device->graph_memory_mutex);
 }
 
-void iree_hal_streaming_graph_memory_trim(
-    iree_hal_streaming_context_t* context) {
-  iree_slim_mutex_lock(&context->mutex);
-  context->graph_memory_used_current = 0;
-  context->graph_memory_reserved_current = 0;
-  iree_hal_streaming_graph_memory_size_entry_t* entry =
-      context->graph_memory_reusable_size_entries;
-  context->graph_memory_reusable_size_entries = NULL;
-  iree_slim_mutex_unlock(&context->mutex);
+void iree_hal_streaming_graph_memory_reset_reserved_high(
+    iree_hal_streaming_device_t* device) {
+  iree_slim_mutex_lock(&device->graph_memory_mutex);
+  device->graph_memory_reserved_high = 0;
+  iree_slim_mutex_unlock(&device->graph_memory_mutex);
+}
+
+void iree_hal_streaming_graph_memory_trim(iree_hal_streaming_device_t* device) {
+  iree_hal_streaming_device_registry_t* device_registry =
+      iree_hal_streaming_device_registry();
+  iree_allocator_t host_allocator = device_registry
+                                        ? device_registry->host_allocator
+                                        : iree_allocator_system();
+  iree_hal_streaming_graph_memory_size_entry_t* entry = NULL;
+  iree_slim_mutex_lock(&device->graph_memory_mutex);
+  iree_hal_streaming_graph_memory_size_entry_t** previous_next =
+      &device->graph_memory_reusable_size_entries;
+  while (*previous_next) {
+    iree_hal_streaming_graph_memory_size_entry_t* current_entry =
+        *previous_next;
+    if (current_entry->reference_count > 0) {
+      previous_next = &current_entry->next;
+      continue;
+    }
+    *previous_next = current_entry->next;
+    device->graph_memory_reserved_current -= iree_min(
+        device->graph_memory_reserved_current, (uint64_t)current_entry->size);
+    current_entry->next = entry;
+    entry = current_entry;
+  }
+  iree_slim_mutex_unlock(&device->graph_memory_mutex);
   while (entry) {
     iree_hal_streaming_graph_memory_size_entry_t* next_entry = entry->next;
-    iree_allocator_free(context->host_allocator, entry);
+    iree_allocator_free(host_allocator, entry);
     entry = next_entry;
   }
 }

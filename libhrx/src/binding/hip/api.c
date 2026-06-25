@@ -2415,95 +2415,90 @@ HIPAPI hipError_t hipDeviceGetStreamPriorityRange(int* leastPriority,
   return hipSuccess;
 }
 
+static hipError_t iree_hip_graph_memory_device(
+    int device, iree_hal_streaming_device_t** out_device) {
+  if (out_device) *out_device = NULL;
+  hipError_t init_result = iree_hip_ensure_initialized();
+  if (init_result != hipSuccess) return init_result;
+  iree_hal_streaming_device_t* device_entry = iree_hal_streaming_device_entry(
+      (iree_hal_streaming_device_ordinal_t)device);
+  if (!device_entry) return hipErrorInvalidDevice;
+  if (out_device) *out_device = device_entry;
+  return hipSuccess;
+}
+
 HIPAPI hipError_t hipDeviceGetGraphMemAttribute(int device, int attr,
                                                 void* value) {
+  iree_hal_streaming_device_t* device_entry = NULL;
+  hipError_t device_result =
+      iree_hip_graph_memory_device(device, &device_entry);
+  if (device_result != hipSuccess) {
+    HIP_RETURN_ERROR(device_result);
+  }
   if (!value) {
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
-  int device_count = 0;
-  hipError_t count_result = hipGetDeviceCount(&device_count);
-  if (count_result != hipSuccess) {
-    HIP_RETURN_ERROR(count_result);
-  }
-  if (device < 0 || device >= device_count) {
-    HIP_RETURN_ERROR(hipErrorInvalidDevice);
-  }
-  if (attr < hipGraphMemAttrUsedMemCurrent ||
-      attr > hipGraphMemAttrReservedMemHigh) {
-    HIP_RETURN_ERROR(hipErrorInvalidValue);
-  }
-  iree_hal_streaming_context_t* context = NULL;
-  hipError_t init_result = iree_hip_ensure_context(&context);
-  if (init_result != hipSuccess) {
-    HIP_RETURN_ERROR(init_result);
-  }
   switch ((hipGraphMemAttributeType)attr) {
     case hipGraphMemAttrUsedMemCurrent:
-      *(uint64_t*)value = iree_hal_streaming_graph_memory_used_current(context);
+      *(uint64_t*)value =
+          iree_hal_streaming_graph_memory_used_current(device_entry);
       break;
     case hipGraphMemAttrUsedMemHigh:
-      *(uint64_t*)value = iree_hal_streaming_graph_memory_used_high(context);
+      *(uint64_t*)value =
+          iree_hal_streaming_graph_memory_used_high(device_entry);
       break;
     case hipGraphMemAttrReservedMemCurrent:
       *(uint64_t*)value =
-          iree_hal_streaming_graph_memory_reserved_current(context);
+          iree_hal_streaming_graph_memory_reserved_current(device_entry);
       break;
     case hipGraphMemAttrReservedMemHigh:
       *(uint64_t*)value =
-          iree_hal_streaming_graph_memory_reserved_high(context);
+          iree_hal_streaming_graph_memory_reserved_high(device_entry);
       break;
+    default:
+      HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
   return hipSuccess;
 }
 
 HIPAPI hipError_t hipDeviceSetGraphMemAttribute(int device, int attr,
                                                 void* value) {
-  if (!value || value == (void*)-1) {
+  iree_hal_streaming_device_t* device_entry = NULL;
+  hipError_t device_result =
+      iree_hip_graph_memory_device(device, &device_entry);
+  if (device_result != hipSuccess) {
+    HIP_RETURN_ERROR(device_result);
+  }
+  if (!value) {
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
-  int device_count = 0;
-  hipError_t count_result = hipGetDeviceCount(&device_count);
-  if (count_result != hipSuccess) {
-    HIP_RETURN_ERROR(count_result);
+  switch ((hipGraphMemAttributeType)attr) {
+    case hipGraphMemAttrUsedMemHigh:
+      if (*(const uint64_t*)value != 0) {
+        HIP_RETURN_ERROR(hipErrorInvalidValue);
+      }
+      iree_hal_streaming_graph_memory_reset_used_high(device_entry);
+      break;
+    case hipGraphMemAttrReservedMemHigh:
+      if (*(const uint64_t*)value != 0) {
+        HIP_RETURN_ERROR(hipErrorInvalidValue);
+      }
+      iree_hal_streaming_graph_memory_reset_reserved_high(device_entry);
+      break;
+    default:
+      HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
-  if (device < 0 || device >= device_count) {
-    HIP_RETURN_ERROR(hipErrorInvalidDevice);
-  }
-  if (attr < hipGraphMemAttrUsedMemCurrent ||
-      attr > hipGraphMemAttrReservedMemHigh) {
-    HIP_RETURN_ERROR(hipErrorInvalidValue);
-  }
-  if (attr == hipGraphMemAttrUsedMemCurrent ||
-      attr == hipGraphMemAttrReservedMemCurrent) {
-    HIP_RETURN_ERROR(hipErrorInvalidValue);
-  }
-  if (*(const uint64_t*)value != 0) {
-    HIP_RETURN_ERROR(hipErrorInvalidValue);
-  }
-  iree_hal_streaming_context_t* context = NULL;
-  hipError_t init_result = iree_hip_ensure_context(&context);
-  if (init_result != hipSuccess) {
-    HIP_RETURN_ERROR(init_result);
-  }
-  iree_hal_streaming_graph_memory_reset_high(context);
   return hipSuccess;
 }
 
 HIPAPI hipError_t hipDeviceGraphMemTrim(int device) {
-  int device_count = 0;
-  hipError_t count_result = hipGetDeviceCount(&device_count);
-  if (count_result != hipSuccess) {
-    HIP_RETURN_ERROR(count_result);
+  iree_hal_streaming_device_t* device_entry = NULL;
+  hipError_t device_result =
+      iree_hip_graph_memory_device(device, &device_entry);
+  if (device_result != hipSuccess) {
+    HIP_RETURN_ERROR(device_result);
   }
-  if (device < 0 || device >= device_count) {
-    HIP_RETURN_ERROR(hipErrorInvalidDevice);
-  }
-  iree_hal_streaming_context_t* context = NULL;
-  hipError_t init_result = iree_hip_ensure_context(&context);
-  if (init_result != hipSuccess) {
-    HIP_RETURN_ERROR(init_result);
-  }
-  iree_hal_streaming_graph_memory_trim(context);
+  iree_hal_streaming_graph_memory_trim(device_entry);
   return hipSuccess;
 }
 

@@ -68,11 +68,6 @@ iree_status_t iree_hal_streaming_context_create(
   context->peer_capacity = 0;
   memset(&context->symbol_map, 0, sizeof(context->symbol_map));
   memset(&context->buffer_table, 0, sizeof(context->buffer_table));
-  context->graph_memory_used_current = 0;
-  context->graph_memory_used_high = 0;
-  context->graph_memory_reserved_current = 0;
-  context->graph_memory_reserved_high = 0;
-  context->graph_memory_reusable_size_entries = NULL;
   context->pageable_h2d_staging_buffer = NULL;
   context->pageable_h2d_staging_size = 0;
   iree_atomic_store(&context->capture_stream_count, 0,
@@ -186,15 +181,6 @@ static void iree_hal_streaming_context_destroy(
 
   // Deinitialize buffer mapping table.
   hrx_buffer_table_deinitialize(&context->buffer_table);
-
-  iree_hal_streaming_graph_memory_size_entry_t* graph_memory_entry =
-      context->graph_memory_reusable_size_entries;
-  while (graph_memory_entry) {
-    iree_hal_streaming_graph_memory_size_entry_t* next_entry =
-        graph_memory_entry->next;
-    iree_allocator_free(context->host_allocator, graph_memory_entry);
-    graph_memory_entry = next_entry;
-  }
 
   // Release default stream.
   // This releases the context's reference but not the list's reference.
