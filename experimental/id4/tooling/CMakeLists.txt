@@ -50,6 +50,32 @@ iree_cc_library(
   PUBLIC
 )
 
+iree_cc_library(
+  NAME
+    runtime
+  HDRS
+    "runtime.h"
+  SRCS
+    "runtime.c"
+  DEPS
+    iree::async
+    iree::async::util::proactor_pool
+    iree::base
+    iree::experimental::id4::kernels::embedded_loom_sources
+    iree::experimental::id4::pipeline::kernel_cache
+    iree::experimental::id4::pipeline::kernel_library
+    iree::experimental::id4::pipeline::plan
+    iree::experimental::id4::pipeline::stage
+    iree::hal
+    iree::io::parameter_index
+    iree::io::parameter_index_provider
+    iree::io::parameter_provider
+    iree::io::scope_map
+    iree::tooling::device_util
+    iree::tooling::parameter_util
+  PUBLIC
+)
+
 iree_cc_test(
   NAME
     capture_test
@@ -91,6 +117,20 @@ iree_cc_test(
     iree::testing::gtest
     iree::testing::gtest_main
     iree::testing::temp_file
+)
+
+iree_cc_test(
+  NAME
+    runtime_test
+  SRCS
+    "runtime_test.cc"
+  DEPS
+    ::runtime
+    iree::base
+    iree::experimental::id4::pipeline::kernel_library
+    iree::io::parameter_provider
+    iree::testing::gtest
+    iree::testing::gtest_main
 )
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###
