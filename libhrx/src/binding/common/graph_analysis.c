@@ -161,8 +161,8 @@ static uint32_t iree_hal_streaming_graph_node_map_lookup(
 // Complexity: O(N * avg_deps) ~= O(N) for sparse graphs
 static iree_hal_streaming_graph_prepare_result_t
 iree_hal_streaming_graph_prepare_nodes(
-    iree_hal_streaming_node_block_t* node_blocks,
-    const uint8_t* disabled_nodes, iree_host_size_t disabled_node_count,
+    iree_hal_streaming_node_block_t* node_blocks, const uint8_t* disabled_nodes,
+    iree_host_size_t disabled_node_count,
     iree_hal_streaming_graph_sort_node_t* sort_nodes, uint32_t* node_index_map,
     iree_host_size_t node_index_map_count) {
   for (iree_host_size_t i = 0; i < node_index_map_count; ++i) {
@@ -281,8 +281,7 @@ static iree_status_t iree_hal_streaming_graph_topological_sort(
     uint16_t in_degree = 0;
     for (uint32_t j = 0; j < nodes[i].node->dependency_count; ++j) {
       const uint32_t dep_index = iree_hal_streaming_graph_node_map_lookup(
-          node_index_map, node_index_map_count,
-          nodes[i].node->dependencies[j]);
+          node_index_map, node_index_map_count, nodes[i].node->dependencies[j]);
       if (dep_index != UINT32_MAX) {
         ++in_degree;
       }
@@ -659,10 +658,10 @@ iree_status_t iree_hal_streaming_graph_schedule_nodes(
     memset(out_schedule, 0, sizeof(*out_schedule));
     return iree_ok_status();
   }
-  if (IREE_UNLIKELY(actual_node_count > UINT32_MAX ||
-                    !iree_host_size_checked_add(
-                        (iree_host_size_t)max_node_index, 1,
-                        &node_index_map_count))) {
+  if (IREE_UNLIKELY(
+          actual_node_count > UINT32_MAX ||
+          !iree_host_size_checked_add((iree_host_size_t)max_node_index, 1,
+                                      &node_index_map_count))) {
     return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                             "graph node index map size overflow");
   }

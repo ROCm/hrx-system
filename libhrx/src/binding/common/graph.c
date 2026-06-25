@@ -74,9 +74,8 @@ iree_status_t iree_hal_streaming_graph_create(
   graph->current_node_block = NULL;
   graph->node_count = 0;
   graph->child_graph_node_count = 0;
-  graph->debug_id =
-      iree_atomic_fetch_add(&iree_hal_streaming_next_graph_debug_id, 1,
-                            iree_memory_order_relaxed);
+  graph->debug_id = iree_atomic_fetch_add(
+      &iree_hal_streaming_next_graph_debug_id, 1, iree_memory_order_relaxed);
   graph->clone_source_graph_debug_id = 0;
   graph->next_clone_source_node_index = 0;
   graph->root_blocks = NULL;
@@ -524,9 +523,8 @@ static iree_status_t iree_hal_streaming_graph_add_node(
   node->graph = graph;
   node->node_index = (uint32_t)graph->node_count;
   node->clone_source_node_index = graph->next_clone_source_node_index++;
-  node->debug_id =
-      iree_atomic_fetch_add(&iree_hal_streaming_next_node_debug_id, 1,
-                            iree_memory_order_relaxed);
+  node->debug_id = iree_atomic_fetch_add(&iree_hal_streaming_next_node_debug_id,
+                                         1, iree_memory_order_relaxed);
 
   // Add to node blocks.
   if (!graph->current_node_block ||
@@ -640,8 +638,7 @@ static iree_status_t iree_hal_streaming_graph_clone_host_allocations(
 
   iree_host_size_t allocation_map_size = 0;
   if (IREE_UNLIKELY(!iree_host_size_checked_mul(
-          allocation_count, sizeof(**out_allocations),
-          &allocation_map_size))) {
+          allocation_count, sizeof(**out_allocations), &allocation_map_size))) {
     return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                             "graph clone host allocation map size overflow");
   }
@@ -693,10 +690,9 @@ iree_status_t iree_hal_streaming_graph_clone(
 
   iree_hal_streaming_graph_t* clone_graph = NULL;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hal_streaming_graph_create(source_graph->context,
-                                          source_graph->flags,
-                                          source_graph->host_allocator,
-                                          &clone_graph));
+      z0, iree_hal_streaming_graph_create(
+              source_graph->context, source_graph->flags,
+              source_graph->host_allocator, &clone_graph));
   clone_graph->has_graph_memory_nodes = source_graph->has_graph_memory_nodes;
   clone_graph->clone_source_graph_debug_id = source_graph->debug_id;
 
@@ -705,8 +701,7 @@ iree_status_t iree_hal_streaming_graph_clone(
   iree_host_size_t host_allocation_count = 0;
   iree_status_t status = iree_ok_status();
   status = iree_hal_streaming_graph_clone_host_allocations(
-      source_graph, clone_graph, &host_allocation_map,
-      &host_allocation_count);
+      source_graph, clone_graph, &host_allocation_map, &host_allocation_count);
   if (!iree_status_is_ok(status)) {
     iree_hal_streaming_graph_release(clone_graph);
     IREE_TRACE_ZONE_END(z0);
@@ -762,17 +757,18 @@ iree_status_t iree_hal_streaming_graph_clone(
                  IREE_HAL_STREAMING_GRAPH_NODE_TYPE_BATCH_MEM_OP) {
         iree_host_size_t params_size = 0;
         iree_host_size_t param_array_size = 0;
-        if (IREE_UNLIKELY(
-                !iree_host_size_checked_align(
-                    source_node->attrs.batch_mem_op.params_size,
-                    iree_max_align_t, &params_size) ||
-                !iree_host_size_checked_align(
-                    source_node->attrs.batch_mem_op.param_array_size,
-                    iree_max_align_t, &param_array_size) ||
-                !iree_host_size_checked_add(params_size, param_array_size,
-                                            &extra_data_size))) {
-          status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                                    "graph clone batch node data size overflow");
+        if (IREE_UNLIKELY(!iree_host_size_checked_align(
+                              source_node->attrs.batch_mem_op.params_size,
+                              iree_max_align_t, &params_size) ||
+                          !iree_host_size_checked_align(
+                              source_node->attrs.batch_mem_op.param_array_size,
+                              iree_max_align_t, &param_array_size) ||
+                          !iree_host_size_checked_add(params_size,
+                                                      param_array_size,
+                                                      &extra_data_size))) {
+          status =
+              iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                               "graph clone batch node data size overflow");
           break;
         }
       }
@@ -799,11 +795,10 @@ iree_status_t iree_hal_streaming_graph_clone(
             constants, source_node->attrs.kernel.constants.data_length);
         clone_node->attrs.kernel.constants_capacity =
             source_node->attrs.kernel.constants_capacity;
-        iree_hal_buffer_ref_t* bindings = extra_data_size
-                                               ? (iree_hal_buffer_ref_t*)(
-                                                     extra_data +
-                                                     constants_size)
-                                               : NULL;
+        iree_hal_buffer_ref_t* bindings =
+            extra_data_size
+                ? (iree_hal_buffer_ref_t*)(extra_data + constants_size)
+                : NULL;
         clone_node->attrs.kernel.bindings.values = bindings;
         clone_node->attrs.kernel.binding_capacity =
             source_node->attrs.kernel.binding_capacity;
@@ -883,11 +878,10 @@ iree_status_t iree_hal_streaming_graph_clone(
                  source_attrs->params_size);
           iree_host_size_t params_size = 0;
           if (IREE_UNLIKELY(!iree_host_size_checked_align(
-                  source_attrs->params_size, iree_max_align_t,
-                  &params_size))) {
-            status = iree_make_status(
-                IREE_STATUS_RESOURCE_EXHAUSTED,
-                "graph clone batch params alignment overflow");
+                  source_attrs->params_size, iree_max_align_t, &params_size))) {
+            status =
+                iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                                 "graph clone batch params alignment overflow");
             break;
           }
           cursor += params_size;
@@ -1248,8 +1242,7 @@ iree_status_t iree_hal_streaming_graph_add_kernel_node(
 }
 
 iree_status_t iree_hal_streaming_graph_set_kernel_node_params(
-    iree_hal_streaming_graph_node_t* node,
-    iree_hal_streaming_symbol_t* symbol,
+    iree_hal_streaming_graph_node_t* node, iree_hal_streaming_symbol_t* symbol,
     const iree_hal_streaming_dispatch_params_t* params) {
   IREE_ASSERT_ARGUMENT(node);
   IREE_ASSERT_ARGUMENT(symbol);
@@ -1375,11 +1368,9 @@ iree_status_t iree_hal_streaming_graph_set_kernel_node_params(
 static iree_status_t iree_hal_streaming_graph_add_memcpy_node_resolved(
     iree_hal_streaming_graph_t* graph,
     iree_hal_streaming_graph_node_t** dependencies,
-    iree_host_size_t dependency_count,
-    iree_hal_streaming_buffer_ref_t dst_ref,
-    iree_hal_streaming_buffer_ref_t src_ref, void* hip_dst,
-    const void* hip_src, iree_host_size_t size,
-    iree_hal_streaming_graph_node_t** out_node) {
+    iree_host_size_t dependency_count, iree_hal_streaming_buffer_ref_t dst_ref,
+    iree_hal_streaming_buffer_ref_t src_ref, void* hip_dst, const void* hip_src,
+    iree_host_size_t size, iree_hal_streaming_graph_node_t** out_node) {
   // Allocate node with dependencies in a single allocation.
   iree_hal_streaming_graph_node_t* node = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_streaming_graph_allocate_node(
@@ -1479,15 +1470,14 @@ iree_status_t iree_hal_streaming_graph_add_memcpy_node(
 iree_status_t iree_hal_streaming_graph_add_memcpy_node_from_refs(
     iree_hal_streaming_graph_t* graph,
     iree_hal_streaming_graph_node_t** dependencies,
-    iree_host_size_t dependency_count,
-    iree_hal_streaming_buffer_ref_t dst_ref,
+    iree_host_size_t dependency_count, iree_hal_streaming_buffer_ref_t dst_ref,
     iree_hal_streaming_buffer_ref_t src_ref, iree_device_size_t size,
     iree_hal_streaming_graph_node_t** out_node) {
   IREE_ASSERT_ARGUMENT(graph);
   IREE_TRACE_ZONE_BEGIN(z0);
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hal_streaming_graph_validate_dependencies(
-              graph, dependencies, dependency_count));
+      z0, iree_hal_streaming_graph_validate_dependencies(graph, dependencies,
+                                                         dependency_count));
   iree_status_t status = iree_hal_streaming_graph_add_memcpy_node_resolved(
       graph, dependencies, dependency_count, dst_ref, src_ref, NULL, NULL, size,
       out_node);
@@ -1495,8 +1485,7 @@ iree_status_t iree_hal_streaming_graph_add_memcpy_node_from_refs(
   return status;
 }
 
-iree_status_t
-iree_hal_streaming_graph_add_memcpy_node_with_extra_dependency(
+iree_status_t iree_hal_streaming_graph_add_memcpy_node_with_extra_dependency(
     iree_hal_streaming_graph_t* graph,
     iree_hal_streaming_graph_node_t** dependencies,
     iree_host_size_t dependency_count,
@@ -1526,8 +1515,8 @@ iree_hal_streaming_graph_add_memcpy_node_with_extra_dependency(
                             "graph dependency count overflow");
   }
   if (dependency_count == 0) {
-    return iree_hal_streaming_graph_add_memcpy_node(
-        graph, &extra_dependency, 1, dst, src, size, out_node);
+    return iree_hal_streaming_graph_add_memcpy_node(graph, &extra_dependency, 1,
+                                                    dst, src, size, out_node);
   }
   iree_host_size_t dependency_list_size = 0;
   if (IREE_UNLIKELY(!iree_host_size_checked_mul(
@@ -1537,8 +1526,9 @@ iree_hal_streaming_graph_add_memcpy_node_with_extra_dependency(
   }
 
   iree_hal_streaming_graph_node_t** merged_dependencies = NULL;
-  IREE_RETURN_IF_ERROR(iree_allocator_malloc(
-      graph->host_allocator, dependency_list_size, (void**)&merged_dependencies));
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc(graph->host_allocator,
+                                             dependency_list_size,
+                                             (void**)&merged_dependencies));
   memcpy(merged_dependencies, dependencies,
          dependency_count * sizeof(*dependencies));
   merged_dependencies[dependency_count] = extra_dependency;
@@ -1716,15 +1706,14 @@ iree_status_t iree_hal_streaming_graph_add_batch_mem_op_node(
     iree_hal_streaming_graph_node_t** out_node) {
   IREE_ASSERT_ARGUMENT(graph);
   IREE_TRACE_ZONE_BEGIN(z0);
-  if ((params_size > 0 && !params) ||
-      (param_array_size > 0 && !param_array)) {
+  if ((params_size > 0 && !params) || (param_array_size > 0 && !param_array)) {
     IREE_TRACE_ZONE_END(z0);
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "batch mem op payload must be provided");
   }
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hal_streaming_graph_validate_dependencies(
-              graph, dependencies, dependency_count));
+      z0, iree_hal_streaming_graph_validate_dependencies(graph, dependencies,
+                                                         dependency_count));
 
   iree_host_size_t params_capacity = 0;
   iree_host_size_t param_array_capacity = 0;
@@ -1823,8 +1812,7 @@ iree_status_t iree_hal_streaming_graph_set_batch_mem_op_node_params(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "node must be a batch mem op node");
   }
-  if ((params_size > 0 && !params) ||
-      (param_array_size > 0 && !param_array)) {
+  if ((params_size > 0 && !params) || (param_array_size > 0 && !param_array)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "batch mem op payload must be provided");
   }
@@ -1840,9 +1828,8 @@ iree_status_t iree_hal_streaming_graph_set_batch_mem_op_node_params(
   }
   if (param_array_size > attrs->param_array_capacity) {
     void* param_array_storage = NULL;
-    IREE_RETURN_IF_ERROR(iree_arena_allocate(&node->graph->arena,
-                                             param_array_size,
-                                             &param_array_storage));
+    IREE_RETURN_IF_ERROR(iree_arena_allocate(
+        &node->graph->arena, param_array_size, &param_array_storage));
     attrs->param_array = param_array_storage;
     attrs->param_array_capacity = param_array_size;
   }
@@ -2059,8 +2046,7 @@ iree_status_t iree_hal_streaming_begin_capture(
   stream->capture_origin = true;
   stream->capture_joined_to_origin = true;
   stream->capture_id = capture_id;
-  stream->capture_owner_thread_id =
-      iree_hal_streaming_current_thread_token();
+  stream->capture_owner_thread_id = iree_hal_streaming_current_thread_token();
   stream->capture_dependency_count = 0;
   iree_hal_streaming_stream_set_capture_status(
       stream, IREE_HAL_STREAMING_CAPTURE_STATUS_ACTIVE);
@@ -2120,8 +2106,7 @@ iree_status_t iree_hal_streaming_begin_capture_to_graph(
   stream->capture_origin = true;
   stream->capture_joined_to_origin = true;
   stream->capture_id = capture_id;
-  stream->capture_owner_thread_id =
-      iree_hal_streaming_current_thread_token();
+  stream->capture_owner_thread_id = iree_hal_streaming_current_thread_token();
   stream->capture_dependency_count = dependency_count;
   iree_hal_streaming_stream_set_capture_status(
       stream, IREE_HAL_STREAMING_CAPTURE_STATUS_ACTIVE);
@@ -2593,11 +2578,10 @@ iree_status_t iree_hal_streaming_update_capture_dependencies(
                                                           dependencies[i])) {
       iree_slim_mutex_unlock(&stream->mutex);
       IREE_TRACE_ZONE_END(z0);
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "capture dependency at index %" PRIhsz
-          " does not belong to the active capture graph",
-          i);
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "capture dependency at index %" PRIhsz
+                              " does not belong to the active capture graph",
+                              i);
     }
   }
 

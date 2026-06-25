@@ -281,8 +281,8 @@ iree_status_t iree_hal_streaming_device_ensure_default_mem_pool(
         .location_type = 1,  // device
         .location_id = (int)device->ordinal,
     };
-    IREE_RETURN_IF_ERROR(HRX_CALL(hrx_mem_pool_create(
-        device->hrx_device, &props, &default_mem_pool)));
+    IREE_RETURN_IF_ERROR(HRX_CALL(
+        hrx_mem_pool_create(device->hrx_device, &props, &default_mem_pool)));
     device->default_mem_pool = default_mem_pool;
   }
 

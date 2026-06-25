@@ -310,7 +310,8 @@ iree_status_t iree_hal_streaming_global_symbol_registry_insert_function(
   return status;
 }
 
-static iree_status_t iree_hal_streaming_global_symbol_registry_insert_variable_with_type(
+static iree_status_t
+iree_hal_streaming_global_symbol_registry_insert_variable_with_type(
     iree_hal_streaming_global_symbol_registry_t* registry,
     iree_hal_streaming_module_registration_t* module, void* host_variable,
     const char* device_name, size_t size, uint32_t alignment,

@@ -528,8 +528,8 @@ HIPAPI hipError_t hipDrvMemcpy2DUnaligned(const hip_Memcpy2D* pCopy) {
     kind = hipMemcpyDeviceToDevice;
   }
 
-  const char* src_base = (const char*)src + pCopy->srcY * pCopy->srcPitch +
-                         pCopy->srcXInBytes;
+  const char* src_base =
+      (const char*)src + pCopy->srcY * pCopy->srcPitch + pCopy->srcXInBytes;
   char* dst_base =
       (char*)dst + pCopy->dstY * pCopy->dstPitch + pCopy->dstXInBytes;
   hipError_t result =
@@ -1147,8 +1147,8 @@ static hipError_t hrx_hip_batch_set_pointer_operand(
     hipMemcpy3DParms* params) {
   if (operand->type == hipMemcpyOperandTypeArray) return hipErrorNotSupported;
   if (operand->type != hipMemcpyOperandTypePointer) return hipErrorInvalidValue;
-  if (!operand->op.ptr.ptr &&
-      extent->width != 0 && extent->height != 0 && extent->depth != 0) {
+  if (!operand->op.ptr.ptr && extent->width != 0 && extent->height != 0 &&
+      extent->depth != 0) {
     return hipErrorInvalidValue;
   }
 
@@ -1171,8 +1171,8 @@ static hipError_t hrx_hip_batch_set_pointer_operand(
   return hipSuccess;
 }
 
-static hipError_t hrx_hip_batch_make_3d_params(
-    const hipMemcpy3DBatchOp* op, hipMemcpy3DParms* params) {
+static hipError_t hrx_hip_batch_make_3d_params(const hipMemcpy3DBatchOp* op,
+                                               hipMemcpy3DParms* params) {
   if (!hrx_hip_batch_access_order_valid(op->srcAccessOrder) ||
       op->flags != hipMemcpyFlagDefault) {
     return hipErrorInvalidValue;
@@ -1250,12 +1250,9 @@ HIPAPI hipError_t hipMemcpyBatchAsync(void** dsts, void** srcs, size_t* sizes,
   return hipSuccess;
 }
 
-static hipError_t iree_hip_memset_d2d_async_rows(hipDeviceptr_t dst,
-                                                 size_t dstPitch,
-                                                 const void* value,
-                                                 size_t element_size,
-                                                 size_t width, size_t height,
-                                                 hipStream_t stream) {
+static hipError_t iree_hip_memset_d2d_async_rows(
+    hipDeviceptr_t dst, size_t dstPitch, const void* value, size_t element_size,
+    size_t width, size_t height, hipStream_t stream) {
   if (width == 0 || height == 0) return hipSuccess;
   if (!dst || !value || element_size == 0 || width > dstPitch ||
       width % element_size != 0) {

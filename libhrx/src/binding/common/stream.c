@@ -575,8 +575,8 @@ iree_status_t iree_hal_streaming_stream_wait_event(
       unsigned long long capture_id = 0;
       if (!event->recording_stream) {
         IREE_RETURN_AND_END_ZONE_IF_ERROR(
-            z0, iree_hal_streaming_context_allocate_capture_id(
-                    stream->context, &capture_id));
+            z0, iree_hal_streaming_context_allocate_capture_id(stream->context,
+                                                               &capture_id));
       }
 
       iree_slim_mutex_lock(&stream->mutex);
@@ -658,14 +658,14 @@ static bool iree_hal_streaming_buffer_can_import_for_context(
     const iree_hal_streaming_buffer_t* buffer) {
   if (!buffer) return false;
   if (buffer->is_managed) return true;
-  return iree_all_bits_set((iree_hal_memory_type_t)buffer->memory_type,
-                           IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
-                               IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE);
+  return iree_all_bits_set(
+      (iree_hal_memory_type_t)buffer->memory_type,
+      IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE);
 }
 
 static iree_status_t iree_hal_streaming_device_buffer_for_context(
-    iree_hal_streaming_context_t* context,
-    iree_hal_streaming_buffer_t* buffer, iree_hal_buffer_t** out_buffer,
+    iree_hal_streaming_context_t* context, iree_hal_streaming_buffer_t* buffer,
+    iree_hal_buffer_t** out_buffer,
     iree_hal_streaming_deviceptr_t* out_device_ptr) {
   IREE_ASSERT_ARGUMENT(context);
   IREE_ASSERT_ARGUMENT(buffer);
@@ -690,9 +690,8 @@ static iree_status_t iree_hal_streaming_device_buffer_for_context(
         "cross-device managed memory requires one stable host/device address");
   }
   if (!buffer->buffer || buffer->device_ptr == 0 || buffer->size == 0) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "allocation is missing device import metadata");
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "allocation is missing device import metadata");
   }
   iree_status_t status = iree_ok_status();
   iree_slim_mutex_lock(&buffer->context_import_mutex);
@@ -707,10 +706,9 @@ static iree_status_t iree_hal_streaming_device_buffer_for_context(
   }
 
   iree_hal_buffer_t* imported_buffer = NULL;
-  const bool import_host_allocation =
-      iree_all_bits_set((iree_hal_memory_type_t)buffer->memory_type,
-                        IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
-                            IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE);
+  const bool import_host_allocation = iree_all_bits_set(
+      (iree_hal_memory_type_t)buffer->memory_type,
+      IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE);
   iree_hal_buffer_params_t params = {
       .usage = iree_hal_buffer_allowed_usage(buffer->buffer),
       .access = iree_hal_buffer_allowed_access(buffer->buffer),
@@ -764,8 +762,9 @@ static iree_status_t iree_hal_streaming_lookup_kernel_buffer_ref(
 
   // This resolves explicit pointer arguments described by kernel metadata into
   // HAL buffer bindings. It is not a lifetime analysis: HIP device pointers can
-  // be hidden in opaque kernarg bytes or device memory, so free/unregister paths
-  // must conservatively order destruction without relying on lookup coverage.
+  // be hidden in opaque kernarg bytes or device memory, so free/unregister
+  // paths must conservatively order destruction without relying on lookup
+  // coverage.
   iree_hal_streaming_buffer_ref_t stream_ref;
   iree_status_t status = iree_hal_streaming_memory_lookup(
       context, (iree_hal_streaming_deviceptr_t)(uintptr_t)device_ptr,
@@ -844,9 +843,8 @@ iree_status_t iree_hal_streaming_unpack_parameters(
       continue;
     }
 
-    iree_status_t lookup_status =
-        iree_hal_streaming_lookup_kernel_buffer_ref(
-            context, device_ptr, &bindings[resolve_op.dst_ordinal]);
+    iree_status_t lookup_status = iree_hal_streaming_lookup_kernel_buffer_ref(
+        context, device_ptr, &bindings[resolve_op.dst_ordinal]);
     // If lookup fails, the kernel uses external device pointers.
     // Return NOT_FOUND to signal that this kernel needs raw argument passing.
     if (!iree_status_is_ok(lookup_status)) {
@@ -910,9 +908,8 @@ iree_status_t iree_hal_streaming_unpack_parameter_list(
       continue;
     }
 
-    iree_status_t lookup_status =
-        iree_hal_streaming_lookup_kernel_buffer_ref(
-            context, device_ptr, &bindings[resolve_op.dst_ordinal]);
+    iree_status_t lookup_status = iree_hal_streaming_lookup_kernel_buffer_ref(
+        context, device_ptr, &bindings[resolve_op.dst_ordinal]);
     // If lookup fails, the kernel uses external device pointers.
     // Return NOT_FOUND to signal that this kernel needs raw argument passing.
     if (!iree_status_is_ok(lookup_status)) {

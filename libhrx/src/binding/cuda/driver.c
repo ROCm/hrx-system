@@ -2107,7 +2107,8 @@ CUDAAPI CUresult cuModuleUnload(CUmodule hmod) {
   }
 
   iree_hal_streaming_module_t* module = (iree_hal_streaming_module_t*)hmod;
-  iree_status_t status = iree_hal_streaming_context_synchronize(module->context);
+  iree_status_t status =
+      iree_hal_streaming_context_synchronize(module->context);
   if (!iree_status_is_ok(status)) {
     CUresult result = iree_status_to_cu_result(status);
     IREE_TRACE_ZONE_END(z0);

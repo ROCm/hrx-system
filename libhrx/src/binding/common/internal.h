@@ -238,9 +238,11 @@ struct iree_hal_streaming_context_t {
   uint64_t graph_memory_used_current;
   // High-water graph-memory bytes visible via hipGraphMemAttrUsedMemHigh.
   uint64_t graph_memory_used_high;
-  // Current graph-memory reservation visible via hipGraphMemAttrReservedMemCurrent.
+  // Current graph-memory reservation visible via
+  // hipGraphMemAttrReservedMemCurrent.
   uint64_t graph_memory_reserved_current;
-  // High-water graph-memory reservation visible via hipGraphMemAttrReservedMemHigh.
+  // High-water graph-memory reservation visible via
+  // hipGraphMemAttrReservedMemHigh.
   uint64_t graph_memory_reserved_high;
   // Reusable graph-memory size classes retained by live executable graphs.
   iree_hal_streaming_graph_memory_size_entry_t*
@@ -580,9 +582,9 @@ typedef union iree_hal_streaming_parameter_op_t {
 // Kernel launch parameters may arrive as a pointer array or packed argument
 // buffer and need to be converted into IREE constants and bindings for
 // dispatch. Bindless constant-only parameters are accepted by directly copying
-// buffer pointers to constant storage. Resolving buffer pointers to HAL bindings
-// is preferred because it gives the runtime explicit resource ownership and is
-// required by IREE async allocation support.
+// buffer pointers to constant storage. Resolving buffer pointers to HAL
+// bindings is preferred because it gives the runtime explicit resource
+// ownership and is required by IREE async allocation support.
 typedef struct iree_hal_streaming_parameter_info_t {
   // Total size, in bytes, of the final parameter pack.
   uint16_t buffer_size;
@@ -1939,8 +1941,7 @@ iree_status_t iree_hal_streaming_graph_add_kernel_node(
     iree_hal_streaming_graph_node_t** out_node);
 
 iree_status_t iree_hal_streaming_graph_set_kernel_node_params(
-    iree_hal_streaming_graph_node_t* node,
-    iree_hal_streaming_symbol_t* symbol,
+    iree_hal_streaming_graph_node_t* node, iree_hal_streaming_symbol_t* symbol,
     const iree_hal_streaming_dispatch_params_t* params);
 
 iree_status_t iree_hal_streaming_graph_add_memcpy_node(
@@ -1953,13 +1954,11 @@ iree_status_t iree_hal_streaming_graph_add_memcpy_node(
 iree_status_t iree_hal_streaming_graph_add_memcpy_node_from_refs(
     iree_hal_streaming_graph_t* graph,
     iree_hal_streaming_graph_node_t** dependencies,
-    iree_host_size_t dependency_count,
-    iree_hal_streaming_buffer_ref_t dst_ref,
+    iree_host_size_t dependency_count, iree_hal_streaming_buffer_ref_t dst_ref,
     iree_hal_streaming_buffer_ref_t src_ref, iree_device_size_t size,
     iree_hal_streaming_graph_node_t** out_node);
 
-iree_status_t
-iree_hal_streaming_graph_add_memcpy_node_with_extra_dependency(
+iree_status_t iree_hal_streaming_graph_add_memcpy_node_with_extra_dependency(
     iree_hal_streaming_graph_t* graph,
     iree_hal_streaming_graph_node_t** dependencies,
     iree_host_size_t dependency_count,
