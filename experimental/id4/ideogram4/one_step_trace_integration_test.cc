@@ -11,6 +11,7 @@
 #include <string>
 #include <vector>
 
+#include "experimental/id4/ideogram4/request.h"
 #include "experimental/id4/pipeline/plan.h"
 #include "experimental/id4/pipeline/stage.h"
 #include "experimental/id4/stages/hal_integration_util.h"
@@ -59,6 +60,15 @@ class RetainedHalFiles {
  private:
   // Imported HAL files retained while queued reads may be in flight.
   std::vector<iree_hal_file_t*> files_;
+};
+
+struct ScopedDenoiseSchedule {
+  ~ScopedDenoiseSchedule() {
+    id4_ideogram4_denoise_schedule_deinitialize(&value,
+                                                iree_allocator_system());
+  }
+
+  id4_ideogram4_denoise_schedule_t value = {};
 };
 
 static iree_status_t FindFixtureTensor(
@@ -614,38 +624,6 @@ static iree_status_t MaybeWriteDecodedImage(
   return id4_tooling_write_f32_rgb_ppm(&options);
 }
 
-static iree_status_t BuildIdeogram4DiscreteFlowSchedule(
-    int32_t step_count, std::vector<float>* out_sigmas,
-    std::vector<float>* out_timesteps) {
-  if (step_count <= 0) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "--id4_step_count must be positive");
-  }
-  out_sigmas->clear();
-  out_timesteps->clear();
-  out_sigmas->reserve(static_cast<size_t>(step_count) + 1);
-  out_timesteps->reserve(static_cast<size_t>(step_count));
-
-  if (step_count == 1) {
-    out_sigmas->push_back(1.0f);
-    out_sigmas->push_back(0.0f);
-    out_timesteps->push_back(0.0f);
-    return iree_ok_status();
-  }
-
-  const float max_timestep = 999.0f;
-  const float timestep_delta =
-      max_timestep / static_cast<float>(step_count - 1);
-  for (int32_t i = 0; i < step_count; ++i) {
-    const float scheduler_t = max_timestep - timestep_delta * i;
-    const float sigma = (scheduler_t + 1.0f) / 1000.0f;
-    out_sigmas->push_back(sigma);
-    out_timesteps->push_back(1000.0f - sigma * 1000.0f);
-  }
-  out_sigmas->push_back(0.0f);
-  return iree_ok_status();
-}
-
 static iree_status_t LoadFixtureF32Vector(
     const id4::test::FixtureTensorSet& fixture_tensors,
     iree_string_view_t stage, iree_string_view_t name,
@@ -687,12 +665,9 @@ TEST(Ideogram4OneStepTraceIntegration,
   const iree_string_view_t capture_directory =
       iree_make_cstring_view(FLAG_id4_capture_dir);
   const int32_t step_count = FLAG_id4_step_count;
+  ASSERT_GT(step_count, 0) << "--id4_step_count must be positive";
+  const uint32_t denoise_step_count = static_cast<uint32_t>(step_count);
   const bool compare_one_step_fixture = step_count == 1;
-
-  std::vector<float> sigmas;
-  std::vector<float> timesteps;
-  IREE_ASSERT_OK(
-      BuildIdeogram4DiscreteFlowSchedule(step_count, &sigmas, &timesteps));
 
   id4::test::FixtureTensorSet fixture_tensors;
   IREE_ASSERT_OK(
@@ -924,6 +899,12 @@ TEST(Ideogram4OneStepTraceIntegration,
   IREE_ASSERT_OK(
       LoadFixtureF32Vector(fixture_tensors, IREE_SV("sampler.step.1"),
                            IREE_SV("guidance"), 3, &guidance_values));
+  id4_ideogram4_request_generation_t schedule_generation = {};
+  schedule_generation.denoise_step_count = denoise_step_count;
+  schedule_generation.guidance_scale = guidance_values[0];
+  ScopedDenoiseSchedule denoise_schedule;
+  IREE_ASSERT_OK(id4_ideogram4_request_generation_lower_denoise_schedule(
+      &schedule_generation, iree_allocator_system(), &denoise_schedule.value));
   std::vector<uint8_t> current_x_bytes;
   IREE_ASSERT_OK(LoadFixtureBytes(fixture_tensors, cond_input_stage,
                                   IREE_SV("x"), &current_x_bytes));
@@ -1050,18 +1031,16 @@ TEST(Ideogram4OneStepTraceIntegration,
   IREE_ASSERT_OK(id4::test::FindBoundaryBinding(
       sampler_plan.get(), sampler_boundaries, IREE_SV("x_next"), &x_next));
 
-  for (int32_t step_ordinal = 0; step_ordinal < step_count; ++step_ordinal) {
-    const float sigma = sigmas[step_ordinal];
-    const float next_sigma = sigmas[step_ordinal + 1];
-    const float timestep = timesteps[step_ordinal];
-    const float scalings[3] = {1.0f, -sigma, 1.0f};
-    const float step_sigmas[2] = {sigma, next_sigma};
+  for (uint32_t step_ordinal = 0; step_ordinal < denoise_step_count;
+       ++step_ordinal) {
+    const id4_ideogram4_denoise_step_t& step =
+        denoise_schedule.value.steps[step_ordinal];
     if (!compare_one_step_fixture) {
       fprintf(stderr,
-              "[ ID4       ] denoise step %d/%d sigma=%g next_sigma=%g "
+              "[ ID4       ] denoise step %u/%u sigma=%g next_sigma=%g "
               "timestep=%g\n",
-              step_ordinal + 1, step_count, (double)sigma, (double)next_sigma,
-              (double)timestep);
+              step_ordinal + 1, denoise_step_count, (double)step.sigmas[0],
+              (double)step.sigmas[1], (double)step.timestep);
     }
 
     if (step_ordinal > 0) {
@@ -1080,24 +1059,23 @@ TEST(Ideogram4OneStepTraceIntegration,
     }
     IREE_ASSERT_OK(QueueUpdateBoundary(context.device.get(), cond_plan.get(),
                                        cond_boundaries, IREE_SV("timestep"),
-                                       &timestep, sizeof(timestep),
+                                       &step.timestep, sizeof(step.timestep),
                                        update_semaphore.get(), &update_value));
     IREE_ASSERT_OK(QueueUpdateBoundary(context.device.get(), uncond_plan.get(),
                                        uncond_boundaries, IREE_SV("timestep"),
-                                       &timestep, sizeof(timestep),
+                                       &step.timestep, sizeof(step.timestep),
                                        update_semaphore.get(), &update_value));
     IREE_ASSERT_OK(QueueUpdateBoundary(context.device.get(), sampler_plan.get(),
                                        sampler_boundaries, IREE_SV("scalings"),
-                                       scalings, sizeof(scalings),
+                                       step.scalings, sizeof(step.scalings),
                                        update_semaphore.get(), &update_value));
     IREE_ASSERT_OK(QueueUpdateBoundary(context.device.get(), sampler_plan.get(),
                                        sampler_boundaries, IREE_SV("sigmas"),
-                                       step_sigmas, sizeof(step_sigmas),
+                                       step.sigmas, sizeof(step.sigmas),
                                        update_semaphore.get(), &update_value));
     IREE_ASSERT_OK(QueueUpdateBoundary(context.device.get(), sampler_plan.get(),
                                        sampler_boundaries, IREE_SV("guidance"),
-                                       guidance_values.data(),
-                                       guidance_values.size() * sizeof(float),
+                                       step.guidance, sizeof(step.guidance),
                                        update_semaphore.get(), &update_value));
 
     id4::test::FixedSemaphoreListStorage cond_wait;

@@ -17,6 +17,16 @@ static const char id4_ideogram4_qwen_prompt_prefix[] = "<|im_start|>user\n";
 static const char id4_ideogram4_qwen_prompt_suffix[] =
     "<|im_end|>\n<|im_start|>assistant\n";
 
+enum {
+  ID4_IDEOGRAM4_DIT_TEXT_INDICATOR = 0,
+  ID4_IDEOGRAM4_DIT_IMAGE_INDICATOR = 1,
+  ID4_IDEOGRAM4_DIT_IMAGE_POSITION_OFFSET = 65536,
+  ID4_IDEOGRAM4_DIT_MROPE_SECTION_HEIGHT = 20,
+  ID4_IDEOGRAM4_DIT_MROPE_SECTION_WIDTH = 20,
+};
+
+static const float id4_ideogram4_dit_mrope_theta = 5000000.0f;
+
 static iree_status_t id4_ideogram4_request_count_member(
     void* user_data, iree_string_view_t key, iree_string_view_t value) {
   (void)key;
@@ -439,4 +449,360 @@ void id4_ideogram4_qwen_inputs_deinitialize(id4_ideogram4_qwen_inputs_t* inputs,
   iree_allocator_free(host_allocator, inputs->token_weights);
   iree_allocator_free(host_allocator, inputs->token_ids);
   memset(inputs, 0, sizeof(*inputs));
+}
+
+typedef enum id4_ideogram4_request_dit_branch_kind_e {
+  ID4_IDEOGRAM4_REQUEST_DIT_BRANCH_CONDITIONED = 0,
+  ID4_IDEOGRAM4_REQUEST_DIT_BRANCH_UNCONDITIONED = 1,
+} id4_ideogram4_request_dit_branch_kind_t;
+
+static iree_status_t id4_ideogram4_request_checked_mul_u32(
+    uint32_t lhs, uint32_t rhs, iree_string_view_t label,
+    uint32_t* out_result) {
+  if (lhs != 0 && rhs > UINT32_MAX / lhs) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "Ideogram 4 %.*s count overflows uint32",
+                            (int)label.size, label.data);
+  }
+  *out_result = lhs * rhs;
+  return iree_ok_status();
+}
+
+static iree_status_t id4_ideogram4_request_checked_add_u32(
+    uint32_t lhs, uint32_t rhs, iree_string_view_t label,
+    uint32_t* out_result) {
+  if (rhs > UINT32_MAX - lhs) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "Ideogram 4 %.*s count overflows uint32",
+                            (int)label.size, label.data);
+  }
+  *out_result = lhs + rhs;
+  return iree_ok_status();
+}
+
+static iree_status_t id4_ideogram4_request_validate_dit_lowering_options(
+    const id4_ideogram4_dit_lowering_options_t* options) {
+  if (!options) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "DiT request lowering options are required");
+  }
+  if (options->structure_size < sizeof(*options)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "DiT request lowering options structure size "
+                            "%" PRIhsz " is smaller than expected %" PRIhsz,
+                            options->structure_size, sizeof(*options));
+  }
+  if (options->next) {
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "DiT request lowering extension structures are not supported");
+  }
+  if (!options->generation) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "DiT request lowering generation is required");
+  }
+  if (options->generation->latent_width == 0 ||
+      options->generation->latent_height == 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "DiT request lowering latent shape is empty");
+  }
+  if (options->text_token_count == 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "DiT request lowering text token count is zero");
+  }
+  if (options->attention_head_size == 0 ||
+      (options->attention_head_size % 2) != 0) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "DiT request lowering attention head size must be nonzero and even");
+  }
+  const uint32_t half_size = options->attention_head_size / 2;
+  const uint32_t required_height_half_size =
+      ID4_IDEOGRAM4_DIT_MROPE_SECTION_HEIGHT * 3;
+  const uint32_t required_width_half_size =
+      ID4_IDEOGRAM4_DIT_MROPE_SECTION_WIDTH * 3;
+  const uint32_t required_half_size =
+      required_height_half_size > required_width_half_size
+          ? required_height_half_size
+          : required_width_half_size;
+  if (half_size < required_half_size) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "DiT request lowering attention head size %" PRIu32
+                            " is too small for Ideogram 4 MRoPE sections",
+                            options->attention_head_size);
+  }
+  return iree_ok_status();
+}
+
+static void id4_ideogram4_dit_branch_inputs_deinitialize(
+    id4_ideogram4_dit_branch_inputs_t* inputs,
+    iree_allocator_t host_allocator) {
+  iree_allocator_free(host_allocator, inputs->position_embedding);
+  iree_allocator_free(host_allocator, inputs->image_indicator);
+  memset(inputs, 0, sizeof(*inputs));
+}
+
+static iree_status_t id4_ideogram4_request_calculate_dit_byte_length(
+    iree_host_size_t element_count, iree_host_size_t element_size,
+    iree_string_view_t label, iree_host_size_t* out_byte_length) {
+  if (!iree_host_size_checked_mul(element_count, element_size,
+                                  out_byte_length)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "Ideogram 4 %.*s byte length overflows host size",
+                            (int)label.size, label.data);
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t id4_ideogram4_request_allocate_dit_branch_inputs(
+    uint32_t token_count, uint32_t attention_head_size,
+    iree_allocator_t host_allocator,
+    id4_ideogram4_dit_branch_inputs_t* out_inputs) {
+  out_inputs->token_count = token_count;
+  IREE_RETURN_IF_ERROR(id4_ideogram4_request_calculate_dit_byte_length(
+      token_count, sizeof(out_inputs->image_indicator[0]),
+      IREE_SV("DiT image indicator"),
+      &out_inputs->image_indicator_byte_length));
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
+      host_allocator, token_count, sizeof(out_inputs->image_indicator[0]),
+      (void**)&out_inputs->image_indicator));
+
+  const uint32_t half_size = attention_head_size / 2;
+  iree_host_size_t position_element_count = 0;
+  if (!iree_host_size_checked_mul(4, half_size, &position_element_count) ||
+      !iree_host_size_checked_mul(position_element_count, token_count,
+                                  &position_element_count)) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "Ideogram 4 DiT position embedding element count overflows host size");
+  }
+  IREE_RETURN_IF_ERROR(id4_ideogram4_request_calculate_dit_byte_length(
+      position_element_count, sizeof(out_inputs->position_embedding[0]),
+      IREE_SV("DiT position embedding"),
+      &out_inputs->position_embedding_byte_length));
+  return iree_allocator_malloc_array(host_allocator, position_element_count,
+                                     sizeof(out_inputs->position_embedding[0]),
+                                     (void**)&out_inputs->position_embedding);
+}
+
+static uint32_t id4_ideogram4_request_dit_position_axis(uint32_t half_channel) {
+  if (half_channel < ID4_IDEOGRAM4_DIT_MROPE_SECTION_HEIGHT * 3 &&
+      (half_channel % 3) == 1) {
+    return 1;
+  }
+  if (half_channel < ID4_IDEOGRAM4_DIT_MROPE_SECTION_WIDTH * 3 &&
+      (half_channel % 3) == 2) {
+    return 2;
+  }
+  return 0;
+}
+
+static void id4_ideogram4_request_calculate_dit_position(
+    id4_ideogram4_request_dit_branch_kind_t branch_kind,
+    const id4_ideogram4_request_generation_t* generation,
+    uint32_t text_token_count, uint32_t token_ordinal,
+    uint32_t out_position[3]) {
+  if (branch_kind == ID4_IDEOGRAM4_REQUEST_DIT_BRANCH_CONDITIONED &&
+      token_ordinal < text_token_count) {
+    out_position[0] = token_ordinal;
+    out_position[1] = token_ordinal;
+    out_position[2] = token_ordinal;
+    return;
+  }
+
+  const uint32_t image_ordinal =
+      branch_kind == ID4_IDEOGRAM4_REQUEST_DIT_BRANCH_CONDITIONED
+          ? token_ordinal - text_token_count
+          : token_ordinal;
+  const uint32_t image_x = image_ordinal % generation->latent_width;
+  const uint32_t image_y = image_ordinal / generation->latent_width;
+  out_position[0] = ID4_IDEOGRAM4_DIT_IMAGE_POSITION_OFFSET;
+  out_position[1] = ID4_IDEOGRAM4_DIT_IMAGE_POSITION_OFFSET + image_y;
+  out_position[2] = ID4_IDEOGRAM4_DIT_IMAGE_POSITION_OFFSET + image_x;
+}
+
+static iree_host_size_t id4_ideogram4_request_dit_position_embedding_offset(
+    uint32_t token_count, uint32_t half_size, uint32_t outer_ordinal,
+    uint32_t inner_ordinal, uint32_t half_channel, uint32_t token_ordinal) {
+  return ((((iree_host_size_t)outer_ordinal * 2 + inner_ordinal) * half_size +
+           half_channel) *
+          token_count) +
+         token_ordinal;
+}
+
+static void id4_ideogram4_request_fill_dit_branch_inputs(
+    id4_ideogram4_request_dit_branch_kind_t branch_kind,
+    const id4_ideogram4_dit_lowering_options_t* options,
+    id4_ideogram4_dit_branch_inputs_t* inputs) {
+  const uint32_t text_token_count =
+      branch_kind == ID4_IDEOGRAM4_REQUEST_DIT_BRANCH_CONDITIONED
+          ? options->text_token_count
+          : 0;
+  for (uint32_t i = 0; i < inputs->token_count; ++i) {
+    inputs->image_indicator[i] = i < text_token_count
+                                     ? ID4_IDEOGRAM4_DIT_TEXT_INDICATOR
+                                     : ID4_IDEOGRAM4_DIT_IMAGE_INDICATOR;
+  }
+
+  const uint32_t half_size = options->attention_head_size / 2;
+  for (uint32_t half_channel = 0; half_channel < half_size; ++half_channel) {
+    const uint32_t axis = id4_ideogram4_request_dit_position_axis(half_channel);
+    const float exponent =
+        (2.0f * (float)half_channel) / (float)options->attention_head_size;
+    const float inv_frequency =
+        1.0f / powf(id4_ideogram4_dit_mrope_theta, exponent);
+    for (uint32_t token_ordinal = 0; token_ordinal < inputs->token_count;
+         ++token_ordinal) {
+      uint32_t position[3] = {0, 0, 0};
+      id4_ideogram4_request_calculate_dit_position(
+          branch_kind, options->generation, options->text_token_count,
+          token_ordinal, position);
+      const float frequency = (float)position[axis] * inv_frequency;
+      const float cos_value = cosf(frequency);
+      const float sin_value = sinf(frequency);
+      inputs->position_embedding
+          [id4_ideogram4_request_dit_position_embedding_offset(
+              inputs->token_count, half_size, 0, 0, half_channel,
+              token_ordinal)] = cos_value;
+      inputs->position_embedding
+          [id4_ideogram4_request_dit_position_embedding_offset(
+              inputs->token_count, half_size, 0, 1, half_channel,
+              token_ordinal)] = sin_value;
+      inputs->position_embedding
+          [id4_ideogram4_request_dit_position_embedding_offset(
+              inputs->token_count, half_size, 1, 0, half_channel,
+              token_ordinal)] = -sin_value;
+      inputs->position_embedding
+          [id4_ideogram4_request_dit_position_embedding_offset(
+              inputs->token_count, half_size, 1, 1, half_channel,
+              token_ordinal)] = cos_value;
+    }
+  }
+}
+
+iree_status_t id4_ideogram4_request_lower_dit_inputs(
+    const id4_ideogram4_dit_lowering_options_t* options,
+    iree_allocator_t host_allocator, id4_ideogram4_dit_inputs_t* out_inputs) {
+  IREE_ASSERT_ARGUMENT(out_inputs);
+  memset(out_inputs, 0, sizeof(*out_inputs));
+  IREE_RETURN_IF_ERROR(
+      id4_ideogram4_request_validate_dit_lowering_options(options));
+
+  uint32_t image_token_count = 0;
+  IREE_RETURN_IF_ERROR(id4_ideogram4_request_checked_mul_u32(
+      options->generation->latent_width, options->generation->latent_height,
+      IREE_SV("DiT image token"), &image_token_count));
+  uint32_t conditioned_token_count = 0;
+  IREE_RETURN_IF_ERROR(id4_ideogram4_request_checked_add_u32(
+      options->text_token_count, image_token_count,
+      IREE_SV("DiT conditioned token"), &conditioned_token_count));
+
+  iree_status_t status = id4_ideogram4_request_allocate_dit_branch_inputs(
+      conditioned_token_count, options->attention_head_size, host_allocator,
+      &out_inputs->conditioned);
+  if (iree_status_is_ok(status)) {
+    status = id4_ideogram4_request_allocate_dit_branch_inputs(
+        image_token_count, options->attention_head_size, host_allocator,
+        &out_inputs->unconditioned);
+  }
+  if (iree_status_is_ok(status)) {
+    out_inputs->text_token_count = options->text_token_count;
+    out_inputs->image_token_count = image_token_count;
+    id4_ideogram4_request_fill_dit_branch_inputs(
+        ID4_IDEOGRAM4_REQUEST_DIT_BRANCH_CONDITIONED, options,
+        &out_inputs->conditioned);
+    id4_ideogram4_request_fill_dit_branch_inputs(
+        ID4_IDEOGRAM4_REQUEST_DIT_BRANCH_UNCONDITIONED, options,
+        &out_inputs->unconditioned);
+  } else {
+    id4_ideogram4_dit_inputs_deinitialize(out_inputs, host_allocator);
+  }
+  return status;
+}
+
+void id4_ideogram4_dit_inputs_deinitialize(id4_ideogram4_dit_inputs_t* inputs,
+                                           iree_allocator_t host_allocator) {
+  if (!inputs) return;
+  id4_ideogram4_dit_branch_inputs_deinitialize(&inputs->unconditioned,
+                                               host_allocator);
+  id4_ideogram4_dit_branch_inputs_deinitialize(&inputs->conditioned,
+                                               host_allocator);
+  memset(inputs, 0, sizeof(*inputs));
+}
+
+static iree_status_t id4_ideogram4_request_validate_denoise_generation(
+    const id4_ideogram4_request_generation_t* generation) {
+  if (!generation) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "Ideogram 4 generation metadata is required");
+  }
+  if (generation->denoise_step_count == 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "Ideogram 4 denoise step count is zero");
+  }
+  if (!isfinite(generation->guidance_scale) ||
+      generation->guidance_scale <= 0.0f ||
+      generation->guidance_scale > FLT_MAX) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "Ideogram 4 guidance scale is invalid");
+  }
+  return iree_ok_status();
+}
+
+static float id4_ideogram4_request_denoise_step_sigma(uint32_t step_ordinal,
+                                                      uint32_t step_count) {
+  if (step_ordinal == step_count) return 0.0f;
+  if (step_count == 1) return 1.0f;
+  const float max_timestep = 999.0f;
+  const float timestep_delta = max_timestep / (float)(step_count - 1);
+  const float scheduler_t = max_timestep - timestep_delta * (float)step_ordinal;
+  return (scheduler_t + 1.0f) / 1000.0f;
+}
+
+static void id4_ideogram4_request_initialize_denoise_step(
+    const id4_ideogram4_request_generation_t* generation, uint32_t step_ordinal,
+    id4_ideogram4_denoise_step_t* out_step) {
+  memset(out_step, 0, sizeof(*out_step));
+  const float sigma = id4_ideogram4_request_denoise_step_sigma(
+      step_ordinal, generation->denoise_step_count);
+  const float next_sigma = id4_ideogram4_request_denoise_step_sigma(
+      step_ordinal + 1, generation->denoise_step_count);
+  out_step->timestep = 1000.0f - sigma * 1000.0f;
+  out_step->scalings[0] = 1.0f;
+  out_step->scalings[1] = -sigma;
+  out_step->scalings[2] = 1.0f;
+  out_step->sigmas[0] = sigma;
+  out_step->sigmas[1] = next_sigma;
+  out_step->guidance[0] = generation->guidance_scale;
+}
+
+iree_status_t id4_ideogram4_request_generation_lower_denoise_schedule(
+    const id4_ideogram4_request_generation_t* generation,
+    iree_allocator_t host_allocator,
+    id4_ideogram4_denoise_schedule_t* out_schedule) {
+  IREE_ASSERT_ARGUMENT(out_schedule);
+  memset(out_schedule, 0, sizeof(*out_schedule));
+  IREE_RETURN_IF_ERROR(
+      id4_ideogram4_request_validate_denoise_generation(generation));
+
+  id4_ideogram4_denoise_step_t* steps = NULL;
+  iree_status_t status = iree_allocator_malloc_array(
+      host_allocator, generation->denoise_step_count, sizeof(steps[0]),
+      (void**)&steps);
+  if (iree_status_is_ok(status)) {
+    for (uint32_t i = 0; i < generation->denoise_step_count; ++i) {
+      id4_ideogram4_request_initialize_denoise_step(generation, i, &steps[i]);
+    }
+    out_schedule->step_count = generation->denoise_step_count;
+    out_schedule->steps = steps;
+  }
+  return status;
+}
+
+void id4_ideogram4_denoise_schedule_deinitialize(
+    id4_ideogram4_denoise_schedule_t* schedule,
+    iree_allocator_t host_allocator) {
+  if (!schedule) return;
+  iree_allocator_free(host_allocator, schedule->steps);
+  memset(schedule, 0, sizeof(*schedule));
 }

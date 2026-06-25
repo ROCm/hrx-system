@@ -61,6 +61,62 @@ typedef struct id4_ideogram4_qwen_inputs_t {
   float* token_weights;
 } id4_ideogram4_qwen_inputs_t;
 
+// Number of F32 denoise coefficients consumed by the sampler stage.
+#define ID4_IDEOGRAM4_DENOISE_SCALING_COUNT 3
+
+// Number of F32 sigma values consumed by one Euler sampler step.
+#define ID4_IDEOGRAM4_DENOISE_SIGMA_COUNT 2
+
+// Number of F32 guidance values consumed by the sampler stage.
+#define ID4_IDEOGRAM4_GUIDANCE_VALUE_COUNT 3
+
+// Host-side scalar tensors lowered for one denoise step.
+typedef struct id4_ideogram4_denoise_step_t {
+  // DiT timestep scalar consumed by timestep embedding.
+  float timestep;
+  // Sampler denoise coefficient vector in `{c_skip, c_out, c_in}` order.
+  float scalings[ID4_IDEOGRAM4_DENOISE_SCALING_COUNT];
+  // Euler sigma vector in `{sigma, next_sigma}` order.
+  float sigmas[ID4_IDEOGRAM4_DENOISE_SIGMA_COUNT];
+  // Sampler guidance vector; element 0 is the text CFG scale.
+  float guidance[ID4_IDEOGRAM4_GUIDANCE_VALUE_COUNT];
+} id4_ideogram4_denoise_step_t;
+
+// Host-side denoise schedule lowered from generation metadata.
+typedef struct id4_ideogram4_denoise_schedule_t {
+  // Number of denoise steps in |steps|.
+  uint32_t step_count;
+  // Heap-allocated step table with |step_count| entries.
+  id4_ideogram4_denoise_step_t* steps;
+} id4_ideogram4_denoise_schedule_t;
+
+// Host-side request metadata tensors for one DiT branch.
+typedef struct id4_ideogram4_dit_branch_inputs_t {
+  // Number of token positions represented by every branch tensor.
+  uint32_t token_count;
+  // Rank-2 I32 image-indicator tensor with token_count x 1 elements.
+  int32_t* image_indicator;
+  // Byte length of |image_indicator|.
+  iree_host_size_t image_indicator_byte_length;
+  // Packed rank-4 F32 rotary tensor with 2 x 2 x head_size/2 x token_count
+  // elements.
+  float* position_embedding;
+  // Byte length of |position_embedding|.
+  iree_host_size_t position_embedding_byte_length;
+} id4_ideogram4_dit_branch_inputs_t;
+
+// Host-side DiT metadata tensors lowered from generation dimensions.
+typedef struct id4_ideogram4_dit_inputs_t {
+  // Number of text conditioning token positions in the conditioned branch.
+  uint32_t text_token_count;
+  // Number of image latent token positions in both branches.
+  uint32_t image_token_count;
+  // Metadata tensors for the conditioned branch.
+  id4_ideogram4_dit_branch_inputs_t conditioned;
+  // Metadata tensors for the unconditioned branch.
+  id4_ideogram4_dit_branch_inputs_t unconditioned;
+} id4_ideogram4_dit_inputs_t;
+
 // Options controlling request-to-Qwen input lowering.
 typedef struct id4_ideogram4_qwen_lowering_options_t {
   // Size of this structure for versioning.
@@ -76,6 +132,20 @@ typedef struct id4_ideogram4_qwen_lowering_options_t {
   // Maximum token count accepted by the caller's planned request shape.
   uint32_t max_token_count;
 } id4_ideogram4_qwen_lowering_options_t;
+
+// Options controlling request-to-DiT metadata lowering.
+typedef struct id4_ideogram4_dit_lowering_options_t {
+  // Size of this structure for versioning.
+  iree_host_size_t structure_size;
+  // Extension structure chain; must be NULL for now.
+  const void* next;
+  // Full-generation dimensions and sampling metadata.
+  const id4_ideogram4_request_generation_t* generation;
+  // Number of Qwen text conditioning token positions.
+  uint32_t text_token_count;
+  // DiT attention head channel count used by MRoPE.
+  uint32_t attention_head_size;
+} id4_ideogram4_dit_lowering_options_t;
 
 // Parses a strict Ideogram 4 request JSON object.
 iree_status_t id4_ideogram4_request_parse_json(
@@ -97,9 +167,29 @@ iree_status_t id4_ideogram4_request_count_qwen_tokens(
     const id4_ideogram4_qwen_lowering_options_t* options,
     iree_allocator_t host_allocator, uint32_t* out_token_count);
 
+// Lowers generation metadata into the scalar tensors used by each denoise step.
+iree_status_t id4_ideogram4_request_generation_lower_denoise_schedule(
+    const id4_ideogram4_request_generation_t* generation,
+    iree_allocator_t host_allocator,
+    id4_ideogram4_denoise_schedule_t* out_schedule);
+
+// Lowers generation metadata into the host-side DiT branch metadata tensors.
+iree_status_t id4_ideogram4_request_lower_dit_inputs(
+    const id4_ideogram4_dit_lowering_options_t* options,
+    iree_allocator_t host_allocator, id4_ideogram4_dit_inputs_t* out_inputs);
+
 // Releases storage owned by |inputs|.
 void id4_ideogram4_qwen_inputs_deinitialize(id4_ideogram4_qwen_inputs_t* inputs,
                                             iree_allocator_t host_allocator);
+
+// Releases storage owned by |inputs|.
+void id4_ideogram4_dit_inputs_deinitialize(id4_ideogram4_dit_inputs_t* inputs,
+                                           iree_allocator_t host_allocator);
+
+// Releases storage owned by |schedule|.
+void id4_ideogram4_denoise_schedule_deinitialize(
+    id4_ideogram4_denoise_schedule_t* schedule,
+    iree_allocator_t host_allocator);
 
 #ifdef __cplusplus
 }  // extern "C"

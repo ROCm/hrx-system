@@ -124,6 +124,7 @@ iree_runtime_cc_test(
         "requires-gpu",
     ],
     deps = [
+        ":request",
         "//experimental/id4/pipeline:plan",
         "//experimental/id4/pipeline:stage",
         "//experimental/id4/stages:hal_integration_util",

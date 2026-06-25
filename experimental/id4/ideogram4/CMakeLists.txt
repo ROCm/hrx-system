@@ -128,6 +128,7 @@ iree_cc_test(
   SRCS
     "one_step_trace_integration_test.cc"
   DEPS
+    ::request
     iree::base
     iree::base::tooling::flags
     iree::experimental::id4::pipeline::plan
