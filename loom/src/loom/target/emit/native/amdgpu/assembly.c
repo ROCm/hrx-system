@@ -77,6 +77,19 @@ static bool loom_amdgpu_assignments_match(
          lhs->location_count == rhs->location_count;
 }
 
+static bool loom_amdgpu_op_ties_result_to_operand(const loom_op_t* op,
+                                                  uint16_t result_index,
+                                                  uint16_t operand_index) {
+  const loom_tied_result_t* tied_results = loom_op_tied_results(op);
+  for (uint16_t i = 0; i < op->tied_result_count; ++i) {
+    if (tied_results[i].result_index == result_index &&
+        tied_results[i].operand_index == operand_index) {
+      return true;
+    }
+  }
+  return false;
+}
+
 static iree_status_t loom_amdgpu_append_register_range(
     const loom_native_assembly_packet_context_t* context, const char* prefix,
     const loom_low_allocation_assignment_t* assignment) {
@@ -2630,20 +2643,32 @@ static iree_status_t loom_amdgpu_append_storage_address_packet(
 
 static iree_status_t loom_amdgpu_append_matrix_packet(
     const loom_native_assembly_packet_context_t* context) {
+  const loom_low_descriptor_set_t* descriptor_set =
+      context->schedule->target.descriptor_set;
+  const loom_low_descriptor_t* descriptor = context->packet->descriptor;
   const loom_op_t* op = context->packet->node->op;
   uint16_t accumulator_operand_index = UINT16_MAX;
-  const loom_tied_result_t* tied_results = loom_op_tied_results(op);
-  for (uint16_t i = 0; i < op->tied_result_count; ++i) {
-    if (tied_results[i].result_index == 0) {
-      accumulator_operand_index = tied_results[i].operand_index;
+  for (uint16_t i = 0; i < op->operand_count; ++i) {
+    const uint16_t descriptor_operand_index =
+        loom_low_descriptor_packet_operand_descriptor_index(descriptor_set,
+                                                            descriptor, i);
+    IREE_ASSERT_NE(descriptor_operand_index, LOOM_LOW_ID_NONE);
+    if (descriptor_operand_index != LOOM_LOW_ID_NONE &&
+        loom_low_descriptor_operands_are_tied(descriptor_set, descriptor,
+                                              /*lhs_operand_index=*/0,
+                                              descriptor_operand_index)) {
+      accumulator_operand_index = i;
       break;
     }
   }
-  if (accumulator_operand_index == UINT16_MAX ||
-      accumulator_operand_index >= op->operand_count) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "AMDGPU matrix result must be tied to an accumulator operand");
+  if (accumulator_operand_index == UINT16_MAX) {
+    return loom_amdgpu_append_canonical_asm_form_packet(context);
+  }
+  if (!loom_amdgpu_op_ties_result_to_operand(op, /*result_index=*/0,
+                                             accumulator_operand_index)) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "AMDGPU matrix descriptor tie is missing from the "
+                            "scheduled low packet");
   }
   const loom_low_allocation_assignment_t* result_assignment =
       loom_amdgpu_map_assignment(context, loom_op_const_results(op)[0]);
