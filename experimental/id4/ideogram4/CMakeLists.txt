@@ -9,6 +9,34 @@
 
 iree_add_all_subdirs()
 
+iree_cc_library(
+  NAME
+    request
+  HDRS
+    "request.h"
+  SRCS
+    "request.c"
+  DEPS
+    iree::base
+    iree::base::internal::json
+    iree::tokenizer
+  PUBLIC
+)
+
+iree_cc_test(
+  NAME
+    request_test
+  SRCS
+    "request_test.cc"
+  DEPS
+    ::request
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+    iree::tokenizer::format::huggingface::tokenizer_json
+    iree::tokenizer::testdata::streaming_testdata
+)
+
 iree_cc_test(
   NAME
     one_step_integration_test
