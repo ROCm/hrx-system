@@ -12,24 +12,6 @@ iree_add_all_subdirs()
 if(IREE_HAL_DRIVER_AMDGPU)
 iree_cc_library(
   NAME
-    device_spec_builder
-  HDRS
-    "device_spec_builder.h"
-  SRCS
-    "device_spec_builder.c"
-  DEPS
-    ::physical_device_capabilities
-    iree::base
-    iree::hal
-    iree::hal::drivers::amdgpu::util::target_id
-    iree::hal::utils::device_spec_builder
-  PUBLIC
-)
-endif()
-
-if(IREE_HAL_DRIVER_AMDGPU)
-iree_cc_library(
-  NAME
     physical_device_capabilities
   HDRS
     "physical_device_capabilities.h"
@@ -44,6 +26,24 @@ iree_cc_library(
     iree::hal::drivers::amdgpu::util::queue_primitives
     iree::hal::drivers::amdgpu::util::target_id
     iree::hal::drivers::amdgpu::util::topology
+  PUBLIC
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDGPU)
+iree_cc_library(
+  NAME
+    device_spec_builder
+  HDRS
+    "device_spec_builder.h"
+  SRCS
+    "device_spec_builder.c"
+  DEPS
+    ::physical_device_capabilities
+    iree::base
+    iree::hal
+    iree::hal::drivers::amdgpu::util::target_id
+    iree::hal::utils::device_spec_builder
   PUBLIC
 )
 endif()
