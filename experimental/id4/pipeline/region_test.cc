@@ -359,6 +359,161 @@ TEST_F(RegionBuilderTest, SameEpochReadAfterWriteRequiresBarrier) {
   id4_pipeline_region_builder_destroy(builder);
 }
 
+TEST_F(RegionBuilderTest, DisjointWritesCanShareEpoch) {
+  id4_pipeline_region_builder_t* builder = CreateDryBuilder();
+  id4_pipeline_tensor_layout_t layout =
+      MakeTensorLayout(IREE_SV("scratch"), 16);
+  id4_pipeline_tensor_t tensor;
+  IREE_ASSERT_OK(id4_pipeline_region_acquire_tensor(builder, &layout, &tensor));
+
+  id4_pipeline_region_kernel_t write_first_kernel =
+      MakeDryKernel(IREE_SV("write_first"), 1);
+  id4_pipeline_region_dispatch_binding_t write_first_binding = {
+      /*.tensor=*/tensor,
+      /*.access=*/ID4_PIPELINE_TENSOR_ACCESS_WRITE,
+      /*.flags=*/ID4_PIPELINE_REGION_DISPATCH_BINDING_FLAG_WRITE_RANGE,
+      /*.write_range=*/
+      {
+          /*.offset=*/0,
+          /*.length=*/8,
+      },
+  };
+  IREE_ASSERT_OK(id4_pipeline_region_dispatch(
+      builder, &write_first_kernel,
+      iree_hal_make_static_dispatch_config(1, 1, 1),
+      iree_const_byte_span_empty(), /*binding_count=*/1, &write_first_binding,
+      IREE_HAL_DISPATCH_FLAG_NONE));
+
+  id4_pipeline_region_kernel_t write_second_kernel =
+      MakeDryKernel(IREE_SV("write_second"), 1);
+  id4_pipeline_region_dispatch_binding_t write_second_binding = {
+      /*.tensor=*/tensor,
+      /*.access=*/ID4_PIPELINE_TENSOR_ACCESS_WRITE,
+      /*.flags=*/ID4_PIPELINE_REGION_DISPATCH_BINDING_FLAG_WRITE_RANGE,
+      /*.write_range=*/
+      {
+          /*.offset=*/8,
+          /*.length=*/8,
+      },
+  };
+  IREE_ASSERT_OK(id4_pipeline_region_dispatch(
+      builder, &write_second_kernel,
+      iree_hal_make_static_dispatch_config(1, 1, 1),
+      iree_const_byte_span_empty(), /*binding_count=*/1, &write_second_binding,
+      IREE_HAL_DISPATCH_FLAG_NONE));
+
+  IREE_ASSERT_OK(id4_pipeline_region_barrier(
+      builder, IREE_HAL_EXECUTION_STAGE_DISPATCH,
+      IREE_HAL_EXECUTION_STAGE_DISPATCH, IREE_HAL_EXECUTION_BARRIER_FLAG_NONE,
+      /*memory_barrier_count=*/0, /*memory_barriers=*/nullptr,
+      /*buffer_barrier_count=*/0, /*buffer_barriers=*/nullptr));
+
+  id4_pipeline_region_kernel_t read_kernel = MakeDryKernel(IREE_SV("read"), 1);
+  id4_pipeline_region_dispatch_binding_t read_binding = {
+      /*.tensor=*/tensor,
+      /*.access=*/ID4_PIPELINE_TENSOR_ACCESS_READ,
+  };
+  IREE_ASSERT_OK(id4_pipeline_region_dispatch(
+      builder, &read_kernel, iree_hal_make_static_dispatch_config(1, 1, 1),
+      iree_const_byte_span_empty(), /*binding_count=*/1, &read_binding,
+      IREE_HAL_DISPATCH_FLAG_NONE));
+
+  id4_pipeline_region_builder_destroy(builder);
+}
+
+TEST_F(RegionBuilderTest, OverlappingWritesConflictInSameEpoch) {
+  id4_pipeline_region_builder_t* builder = CreateDryBuilder();
+  id4_pipeline_tensor_layout_t layout =
+      MakeTensorLayout(IREE_SV("scratch"), 16);
+  id4_pipeline_tensor_t tensor;
+  IREE_ASSERT_OK(id4_pipeline_region_acquire_tensor(builder, &layout, &tensor));
+
+  id4_pipeline_region_kernel_t write_first_kernel =
+      MakeDryKernel(IREE_SV("write_first"), 1);
+  id4_pipeline_region_dispatch_binding_t write_first_binding = {
+      /*.tensor=*/tensor,
+      /*.access=*/ID4_PIPELINE_TENSOR_ACCESS_WRITE,
+      /*.flags=*/ID4_PIPELINE_REGION_DISPATCH_BINDING_FLAG_WRITE_RANGE,
+      /*.write_range=*/
+      {
+          /*.offset=*/0,
+          /*.length=*/8,
+      },
+  };
+  IREE_ASSERT_OK(id4_pipeline_region_dispatch(
+      builder, &write_first_kernel,
+      iree_hal_make_static_dispatch_config(1, 1, 1),
+      iree_const_byte_span_empty(), /*binding_count=*/1, &write_first_binding,
+      IREE_HAL_DISPATCH_FLAG_NONE));
+
+  id4_pipeline_region_kernel_t write_second_kernel =
+      MakeDryKernel(IREE_SV("write_second"), 1);
+  id4_pipeline_region_dispatch_binding_t write_second_binding = {
+      /*.tensor=*/tensor,
+      /*.access=*/ID4_PIPELINE_TENSOR_ACCESS_WRITE,
+      /*.flags=*/ID4_PIPELINE_REGION_DISPATCH_BINDING_FLAG_WRITE_RANGE,
+      /*.write_range=*/
+      {
+          /*.offset=*/4,
+          /*.length=*/8,
+      },
+  };
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_FAILED_PRECONDITION,
+      id4_pipeline_region_dispatch(
+          builder, &write_second_kernel,
+          iree_hal_make_static_dispatch_config(1, 1, 1),
+          iree_const_byte_span_empty(), /*binding_count=*/1,
+          &write_second_binding, IREE_HAL_DISPATCH_FLAG_NONE));
+
+  id4_pipeline_region_builder_destroy(builder);
+}
+
+TEST_F(RegionBuilderTest, PartialWriteDoesNotInitializeFullTensor) {
+  id4_pipeline_region_builder_t* builder = CreateDryBuilder();
+  id4_pipeline_tensor_layout_t layout =
+      MakeTensorLayout(IREE_SV("scratch"), 16);
+  id4_pipeline_tensor_t tensor;
+  IREE_ASSERT_OK(id4_pipeline_region_acquire_tensor(builder, &layout, &tensor));
+
+  id4_pipeline_region_kernel_t write_kernel =
+      MakeDryKernel(IREE_SV("write"), 1);
+  id4_pipeline_region_dispatch_binding_t write_binding = {
+      /*.tensor=*/tensor,
+      /*.access=*/ID4_PIPELINE_TENSOR_ACCESS_WRITE,
+      /*.flags=*/ID4_PIPELINE_REGION_DISPATCH_BINDING_FLAG_WRITE_RANGE,
+      /*.write_range=*/
+      {
+          /*.offset=*/0,
+          /*.length=*/8,
+      },
+  };
+  IREE_ASSERT_OK(id4_pipeline_region_dispatch(
+      builder, &write_kernel, iree_hal_make_static_dispatch_config(1, 1, 1),
+      iree_const_byte_span_empty(), /*binding_count=*/1, &write_binding,
+      IREE_HAL_DISPATCH_FLAG_NONE));
+
+  IREE_ASSERT_OK(id4_pipeline_region_barrier(
+      builder, IREE_HAL_EXECUTION_STAGE_DISPATCH,
+      IREE_HAL_EXECUTION_STAGE_DISPATCH, IREE_HAL_EXECUTION_BARRIER_FLAG_NONE,
+      /*memory_barrier_count=*/0, /*memory_barriers=*/nullptr,
+      /*buffer_barrier_count=*/0, /*buffer_barriers=*/nullptr));
+
+  id4_pipeline_region_kernel_t read_kernel = MakeDryKernel(IREE_SV("read"), 1);
+  id4_pipeline_region_dispatch_binding_t read_binding = {
+      /*.tensor=*/tensor,
+      /*.access=*/ID4_PIPELINE_TENSOR_ACCESS_READ,
+  };
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_FAILED_PRECONDITION,
+      id4_pipeline_region_dispatch(
+          builder, &read_kernel, iree_hal_make_static_dispatch_config(1, 1, 1),
+          iree_const_byte_span_empty(), /*binding_count=*/1, &read_binding,
+          IREE_HAL_DISPATCH_FLAG_NONE));
+
+  id4_pipeline_region_builder_destroy(builder);
+}
+
 TEST_F(RegionBuilderTest, ImportedInitializedTensorCanBeRead) {
   id4_pipeline_region_builder_t* builder = CreateDryBuilder();
   id4_pipeline_tensor_layout_t layout =

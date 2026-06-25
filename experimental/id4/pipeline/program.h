@@ -79,6 +79,23 @@ typedef enum id4_pipeline_program_tensor_access_flag_bits_e {
   ID4_PIPELINE_PROGRAM_TENSOR_ACCESS_WRITE = 1u << 1,
 } id4_pipeline_program_tensor_access_flag_bits_t;
 
+// Semantic dispatch binding behavior flags.
+typedef uint32_t id4_pipeline_program_dispatch_binding_flags_t;
+
+// Semantic dispatch binding behavior flag bits.
+typedef enum id4_pipeline_program_dispatch_binding_flag_bits_e {
+  // write_range describes the byte interval written by this binding.
+  ID4_PIPELINE_PROGRAM_DISPATCH_BINDING_FLAG_WRITE_RANGE = 1u << 0,
+} id4_pipeline_program_dispatch_binding_flag_bits_t;
+
+// Tensor byte interval relative to the bound logical tensor.
+typedef struct id4_pipeline_program_tensor_byte_range_t {
+  // Byte offset from the start of the logical tensor.
+  iree_device_size_t offset;
+  // Byte length of the interval.
+  iree_device_size_t length;
+} id4_pipeline_program_tensor_byte_range_t;
+
 // External tensor import flags.
 typedef uint32_t id4_pipeline_program_import_tensor_flags_t;
 
@@ -122,6 +139,10 @@ typedef struct id4_pipeline_program_dispatch_binding_t {
   id4_pipeline_program_tensor_t tensor;
   // Access performed by the dispatch.
   id4_pipeline_program_tensor_access_flags_t access;
+  // Dispatch binding behavior flags.
+  id4_pipeline_program_dispatch_binding_flags_t flags;
+  // Tensor-relative byte range covered by writes when WRITE_RANGE is set.
+  id4_pipeline_program_tensor_byte_range_t write_range;
 } id4_pipeline_program_dispatch_binding_t;
 
 // Imported tensor operation payload.
@@ -435,9 +456,33 @@ static inline id4_pipeline_program_dispatch_binding_t
 id4_pipeline_program_dispatch_binding(
     id4_pipeline_program_tensor_t tensor,
     id4_pipeline_program_tensor_access_flags_t access) {
-  id4_pipeline_program_dispatch_binding_t binding;
-  binding.tensor = tensor;
-  binding.access = access;
+  return (id4_pipeline_program_dispatch_binding_t){
+      // Tensor bound to the dispatch argument.
+      /*.tensor=*/tensor,
+      // Access performed by the dispatch.
+      /*.access=*/access,
+      // No optional binding behavior flags.
+      /*.flags=*/0,
+      // No explicit write coverage for whole-tensor writes.
+      /*.write_range=*/{0, 0},
+  };
+}
+
+// Returns a dispatch binding with explicit tensor write coverage.
+static inline id4_pipeline_program_dispatch_binding_t
+id4_pipeline_program_dispatch_binding_write_range(
+    id4_pipeline_program_tensor_t tensor,
+    id4_pipeline_program_tensor_access_flags_t access,
+    iree_device_size_t offset, iree_device_size_t length) {
+  id4_pipeline_program_dispatch_binding_t binding =
+      id4_pipeline_program_dispatch_binding(tensor, access);
+  binding.flags = ID4_PIPELINE_PROGRAM_DISPATCH_BINDING_FLAG_WRITE_RANGE;
+  binding.write_range = (id4_pipeline_program_tensor_byte_range_t){
+      // Byte offset from the start of the logical tensor.
+      /*.offset=*/offset,
+      // Byte length of the interval.
+      /*.length=*/length,
+  };
   return binding;
 }
 
@@ -453,6 +498,15 @@ static inline id4_pipeline_program_dispatch_binding_t
 id4_pipeline_program_write(id4_pipeline_program_tensor_t tensor) {
   return id4_pipeline_program_dispatch_binding(
       tensor, ID4_PIPELINE_PROGRAM_TENSOR_ACCESS_WRITE);
+}
+
+// Returns a write-only dispatch binding with explicit byte coverage.
+static inline id4_pipeline_program_dispatch_binding_t
+id4_pipeline_program_write_range(id4_pipeline_program_tensor_t tensor,
+                                 iree_device_size_t offset,
+                                 iree_device_size_t length) {
+  return id4_pipeline_program_dispatch_binding_write_range(
+      tensor, ID4_PIPELINE_PROGRAM_TENSOR_ACCESS_WRITE, offset, length);
 }
 
 // Returns a read-write dispatch binding.

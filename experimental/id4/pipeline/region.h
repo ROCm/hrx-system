@@ -65,6 +65,23 @@ typedef enum id4_pipeline_tensor_access_flag_bits_e {
   ID4_PIPELINE_TENSOR_ACCESS_WRITE = 1u << 1,
 } id4_pipeline_tensor_access_flag_bits_t;
 
+// Region dispatch binding behavior flags.
+typedef uint32_t id4_pipeline_region_dispatch_binding_flags_t;
+
+// Region dispatch binding behavior flag bits.
+typedef enum id4_pipeline_region_dispatch_binding_flag_bits_e {
+  // write_range describes the byte interval written by this binding.
+  ID4_PIPELINE_REGION_DISPATCH_BINDING_FLAG_WRITE_RANGE = 1u << 0,
+} id4_pipeline_region_dispatch_binding_flag_bits_t;
+
+// Tensor byte interval relative to the bound logical tensor.
+typedef struct id4_pipeline_region_tensor_byte_range_t {
+  // Byte offset from the start of the logical tensor.
+  iree_device_size_t offset;
+  // Byte length of the interval.
+  iree_device_size_t length;
+} id4_pipeline_region_tensor_byte_range_t;
+
 // Tensor import flags.
 typedef uint32_t id4_pipeline_tensor_import_flags_t;
 
@@ -241,6 +258,10 @@ typedef struct id4_pipeline_region_dispatch_binding_t {
   id4_pipeline_tensor_t tensor;
   // Access performed by the dispatch.
   id4_pipeline_tensor_access_flags_t access;
+  // Dispatch binding behavior flags.
+  id4_pipeline_region_dispatch_binding_flags_t flags;
+  // Tensor-relative byte range covered by writes when WRITE_RANGE is set.
+  id4_pipeline_region_tensor_byte_range_t write_range;
 } id4_pipeline_region_dispatch_binding_t;
 
 // Region statistics accumulated by dry-run or record builders.

@@ -141,6 +141,57 @@ static iree_status_t id4_pipeline_program_validate_access(
   return iree_ok_status();
 }
 
+static iree_status_t id4_pipeline_program_validate_dispatch_binding_flags(
+    id4_pipeline_program_dispatch_binding_flags_t flags,
+    iree_string_view_t dispatch_name, iree_host_size_t binding_index) {
+  const id4_pipeline_program_dispatch_binding_flags_t allowed_flags =
+      ID4_PIPELINE_PROGRAM_DISPATCH_BINDING_FLAG_WRITE_RANGE;
+  if (!iree_any_bit_set(flags, ~allowed_flags)) return iree_ok_status();
+  return iree_make_status(
+      IREE_STATUS_INVALID_ARGUMENT,
+      "dispatch %.*s binding %" PRIhsz " has unsupported flags 0x%x",
+      (int)dispatch_name.size, dispatch_name.data, binding_index, flags);
+}
+
+static iree_status_t id4_pipeline_program_validate_dispatch_binding_range(
+    const id4_pipeline_program_dispatch_binding_t* binding,
+    const id4_pipeline_program_tensor_record_t* tensor_record,
+    iree_string_view_t dispatch_name, iree_host_size_t binding_index) {
+  if (!iree_all_bits_set(
+          binding->flags,
+          ID4_PIPELINE_PROGRAM_DISPATCH_BINDING_FLAG_WRITE_RANGE)) {
+    return iree_ok_status();
+  }
+  if (!iree_any_bit_set(binding->access,
+                        ID4_PIPELINE_PROGRAM_TENSOR_ACCESS_WRITE)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "dispatch %.*s binding %" PRIhsz
+                            " has write coverage without write access",
+                            (int)dispatch_name.size, dispatch_name.data,
+                            binding_index);
+  }
+  if (binding->write_range.length == 0) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "dispatch %.*s binding %" PRIhsz " write coverage is empty",
+        (int)dispatch_name.size, dispatch_name.data, binding_index);
+  }
+  iree_device_size_t end = 0;
+  if (!iree_device_size_checked_add(binding->write_range.offset,
+                                    binding->write_range.length, &end) ||
+      end > tensor_record->byte_length) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "dispatch %.*s binding %" PRIhsz " write coverage [%" PRIu64
+        ", %" PRIu64 ") exceeds tensor %.*s byte length %" PRIu64,
+        (int)dispatch_name.size, dispatch_name.data, binding_index,
+        (uint64_t)binding->write_range.offset, (uint64_t)end,
+        (int)tensor_record->name.size, tensor_record->name.data,
+        (uint64_t)tensor_record->byte_length);
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t id4_pipeline_program_validate_import_flags(
     id4_pipeline_program_import_tensor_flags_t flags,
     iree_string_view_t tensor_name) {
@@ -1019,9 +1070,13 @@ iree_status_t id4_pipeline_program_dispatch_loom(
   for (iree_host_size_t i = 0; i < options->binding_count; ++i) {
     IREE_RETURN_IF_ERROR(id4_pipeline_program_validate_access(
         options->bindings[i].access, options->name, i));
+    IREE_RETURN_IF_ERROR(id4_pipeline_program_validate_dispatch_binding_flags(
+        options->bindings[i].flags, options->name, i));
     id4_pipeline_program_tensor_state_t* state = NULL;
     IREE_RETURN_IF_ERROR(id4_pipeline_program_builder_validate_tensor(
         builder, options->bindings[i].tensor, &state));
+    IREE_RETURN_IF_ERROR(id4_pipeline_program_validate_dispatch_binding_range(
+        &options->bindings[i], &state->record, options->name, i));
     if (iree_any_bit_set(options->bindings[i].access,
                          ID4_PIPELINE_PROGRAM_TENSOR_ACCESS_READ) &&
         !state->initialized) {

@@ -38,6 +38,12 @@ typedef struct id4_pipeline_region_tensor_record_t {
   id4_pipeline_tensor_access_flags_t epoch_access;
   // Epoch that epoch_access describes.
   uint32_t access_epoch;
+  // Write coverage ranges observed in access_epoch.
+  id4_pipeline_region_tensor_byte_range_t* epoch_write_ranges;
+  // Number of write coverage ranges observed in access_epoch.
+  iree_host_size_t epoch_write_range_count;
+  // Allocated capacity of epoch_write_ranges.
+  iree_host_size_t epoch_write_range_capacity;
   // True when the tensor contents may be read.
   bool initialized;
   // True after a local tensor has been released.
@@ -308,6 +314,86 @@ static iree_status_t id4_pipeline_region_validate_access(
   return iree_ok_status();
 }
 
+static iree_status_t id4_pipeline_region_validate_dispatch_binding_flags(
+    id4_pipeline_region_dispatch_binding_flags_t flags,
+    iree_string_view_t kernel_name, iree_host_size_t binding_index) {
+  const id4_pipeline_region_dispatch_binding_flags_t allowed_flags =
+      ID4_PIPELINE_REGION_DISPATCH_BINDING_FLAG_WRITE_RANGE;
+  if (!iree_any_bit_set(flags, ~allowed_flags)) return iree_ok_status();
+  return iree_make_status(
+      IREE_STATUS_INVALID_ARGUMENT,
+      "kernel %.*s binding %" PRIhsz " has unsupported flags 0x%x",
+      (int)kernel_name.size, kernel_name.data, binding_index, flags);
+}
+
+static id4_pipeline_region_tensor_byte_range_t
+id4_pipeline_region_binding_write_range(
+    const id4_pipeline_region_dispatch_binding_t* binding) {
+  if (iree_all_bits_set(
+          binding->flags,
+          ID4_PIPELINE_REGION_DISPATCH_BINDING_FLAG_WRITE_RANGE)) {
+    return binding->write_range;
+  }
+  return (id4_pipeline_region_tensor_byte_range_t){
+      // Byte offset from the start of the logical tensor.
+      .offset = 0,
+      // Byte length covering the full logical tensor.
+      .length = binding->tensor.length,
+  };
+}
+
+static iree_status_t id4_pipeline_region_tensor_byte_range_end(
+    id4_pipeline_region_tensor_byte_range_t range,
+    iree_device_size_t* out_end) {
+  if (!iree_device_size_checked_add(range.offset, range.length, out_end)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "tensor byte range length overflow");
+  }
+  return iree_ok_status();
+}
+
+static bool id4_pipeline_region_tensor_byte_ranges_overlap(
+    id4_pipeline_region_tensor_byte_range_t lhs,
+    id4_pipeline_region_tensor_byte_range_t rhs) {
+  const iree_device_size_t lhs_end = lhs.offset + lhs.length;
+  const iree_device_size_t rhs_end = rhs.offset + rhs.length;
+  return lhs.offset < rhs_end && rhs.offset < lhs_end;
+}
+
+static iree_status_t id4_pipeline_region_validate_binding_write_range(
+    const id4_pipeline_region_dispatch_binding_t* binding,
+    iree_string_view_t kernel_name, iree_host_size_t binding_index) {
+  if (!iree_all_bits_set(
+          binding->flags,
+          ID4_PIPELINE_REGION_DISPATCH_BINDING_FLAG_WRITE_RANGE)) {
+    return iree_ok_status();
+  }
+  if (!iree_any_bit_set(binding->access, ID4_PIPELINE_TENSOR_ACCESS_WRITE)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "kernel %.*s binding %" PRIhsz
+                            " has write coverage without write access",
+                            (int)kernel_name.size, kernel_name.data,
+                            binding_index);
+  }
+  if (binding->write_range.length == 0) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "kernel %.*s binding %" PRIhsz " write coverage is empty",
+        (int)kernel_name.size, kernel_name.data, binding_index);
+  }
+  iree_device_size_t end = 0;
+  IREE_RETURN_IF_ERROR(
+      id4_pipeline_region_tensor_byte_range_end(binding->write_range, &end));
+  if (end <= binding->tensor.length) return iree_ok_status();
+  return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                          "kernel %.*s binding %" PRIhsz
+                          " write coverage [%" PRIu64 ", %" PRIu64
+                          ") exceeds tensor length %" PRIu64,
+                          (int)kernel_name.size, kernel_name.data,
+                          binding_index, (uint64_t)binding->write_range.offset,
+                          (uint64_t)end, (uint64_t)binding->tensor.length);
+}
+
 static iree_status_t id4_pipeline_region_reserve_tensor_records(
     id4_pipeline_region_builder_t* builder, iree_host_size_t capacity) {
   if (capacity <= builder->tensor_record_capacity) return iree_ok_status();
@@ -333,6 +419,16 @@ static iree_status_t id4_pipeline_region_reserve_free_ranges(
                                capacity, sizeof(builder->free_ranges[0]),
                                &builder->free_range_capacity,
                                (void**)&builder->free_ranges);
+}
+
+static iree_status_t id4_pipeline_region_reserve_epoch_write_ranges(
+    id4_pipeline_region_builder_t* builder,
+    id4_pipeline_region_tensor_record_t* record, iree_host_size_t capacity) {
+  if (capacity <= record->epoch_write_range_capacity) return iree_ok_status();
+  return iree_arena_grow_array(&builder->arena, record->epoch_write_range_count,
+                               capacity, sizeof(record->epoch_write_ranges[0]),
+                               &record->epoch_write_range_capacity,
+                               (void**)&record->epoch_write_ranges);
 }
 
 static void id4_pipeline_region_remove_free_range(
@@ -935,9 +1031,13 @@ static iree_status_t id4_pipeline_region_validate_dispatch_binding(
     id4_pipeline_region_tensor_record_t** out_record) {
   IREE_RETURN_IF_ERROR(id4_pipeline_region_validate_access(
       binding->access, kernel->name, binding_index));
+  IREE_RETURN_IF_ERROR(id4_pipeline_region_validate_dispatch_binding_flags(
+      binding->flags, kernel->name, binding_index));
   IREE_RETURN_IF_ERROR(id4_pipeline_region_lookup_tensor_record(
       builder, binding->tensor, out_record));
   id4_pipeline_region_tensor_record_t* record = *out_record;
+  IREE_RETURN_IF_ERROR(id4_pipeline_region_validate_binding_write_range(
+      binding, kernel->name, binding_index));
   if (record->released) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
@@ -967,30 +1067,85 @@ static iree_status_t id4_pipeline_region_validate_dispatch_binding(
                             record->name.data);
   }
   if (iree_any_bit_set(binding->access, ID4_PIPELINE_TENSOR_ACCESS_WRITE) &&
-      record->epoch_access != 0) {
+      iree_any_bit_set(record->epoch_access, ID4_PIPELINE_TENSOR_ACCESS_READ)) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "kernel %.*s binding %" PRIhsz
-                            " writes tensor %.*s already used in the same "
+                            " writes tensor %.*s already read in the same "
                             "epoch",
                             (int)kernel->name.size, kernel->name.data,
                             binding_index, (int)record->name.size,
                             record->name.data);
   }
+  if (iree_any_bit_set(binding->access, ID4_PIPELINE_TENSOR_ACCESS_WRITE)) {
+    const id4_pipeline_region_tensor_byte_range_t write_range =
+        id4_pipeline_region_binding_write_range(binding);
+    for (iree_host_size_t i = 0; i < record->epoch_write_range_count; ++i) {
+      if (!id4_pipeline_region_tensor_byte_ranges_overlap(
+              write_range, record->epoch_write_ranges[i])) {
+        continue;
+      }
+      iree_device_size_t write_end = 0;
+      iree_device_size_t existing_end = 0;
+      IREE_RETURN_IF_ERROR(
+          id4_pipeline_region_tensor_byte_range_end(write_range, &write_end));
+      IREE_RETURN_IF_ERROR(id4_pipeline_region_tensor_byte_range_end(
+          record->epoch_write_ranges[i], &existing_end));
+      return iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "kernel %.*s binding %" PRIhsz " writes tensor %.*s range [%" PRIu64
+          ", %" PRIu64 ") overlapping same-epoch write range [%" PRIu64
+          ", %" PRIu64 ")",
+          (int)kernel->name.size, kernel->name.data, binding_index,
+          (int)record->name.size, record->name.data,
+          (uint64_t)write_range.offset, (uint64_t)write_end,
+          (uint64_t)record->epoch_write_ranges[i].offset,
+          (uint64_t)existing_end);
+    }
+  }
   return iree_ok_status();
 }
 
-static void id4_pipeline_region_apply_dispatch_binding_access(
+static bool id4_pipeline_region_epoch_writes_cover_tensor(
+    const id4_pipeline_region_tensor_record_t* record) {
+  iree_device_size_t covered_end = 0;
+  bool changed = true;
+  while (changed && covered_end < record->tensor.length) {
+    changed = false;
+    for (iree_host_size_t i = 0; i < record->epoch_write_range_count; ++i) {
+      const id4_pipeline_region_tensor_byte_range_t range =
+          record->epoch_write_ranges[i];
+      if (range.offset > covered_end) continue;
+      const iree_device_size_t range_end = range.offset + range.length;
+      if (range_end <= covered_end) continue;
+      covered_end = range_end;
+      changed = true;
+    }
+  }
+  return covered_end >= record->tensor.length;
+}
+
+static iree_status_t id4_pipeline_region_apply_dispatch_binding_access(
     id4_pipeline_region_builder_t* builder,
     id4_pipeline_region_tensor_record_t* record,
-    id4_pipeline_tensor_access_flags_t access) {
+    const id4_pipeline_region_dispatch_binding_t* binding) {
   if (record->access_epoch != builder->statistics.current_epoch) {
     record->access_epoch = builder->statistics.current_epoch;
     record->epoch_access = 0;
+    record->epoch_write_range_count = 0;
   }
+  const id4_pipeline_tensor_access_flags_t access = binding->access;
   record->epoch_access |= access;
   if (iree_any_bit_set(access, ID4_PIPELINE_TENSOR_ACCESS_WRITE)) {
-    record->initialized = true;
+    const id4_pipeline_region_tensor_byte_range_t write_range =
+        id4_pipeline_region_binding_write_range(binding);
+    IREE_RETURN_IF_ERROR(id4_pipeline_region_reserve_epoch_write_ranges(
+        builder, record, record->epoch_write_range_count + 1));
+    record->epoch_write_ranges[record->epoch_write_range_count++] = write_range;
+    if (id4_pipeline_region_epoch_writes_cover_tensor(record)) {
+      record->initialized = true;
+    }
   }
+  return iree_ok_status();
 }
 
 static iree_status_t id4_pipeline_region_collect_dispatch_records(
@@ -1044,16 +1199,17 @@ static iree_status_t id4_pipeline_region_record_dispatch(
       dispatch_config, constants, hal_binding_list, flags);
 }
 
-static void id4_pipeline_region_commit_dispatch(
+static iree_status_t id4_pipeline_region_commit_dispatch(
     id4_pipeline_region_builder_t* builder, iree_host_size_t binding_count,
     id4_pipeline_region_tensor_record_t** records,
     const id4_pipeline_region_dispatch_binding_t* bindings) {
   for (iree_host_size_t i = 0; i < binding_count; ++i) {
-    id4_pipeline_region_apply_dispatch_binding_access(builder, records[i],
-                                                      bindings[i].access);
+    IREE_RETURN_IF_ERROR(id4_pipeline_region_apply_dispatch_binding_access(
+        builder, records[i], &bindings[i]));
   }
   ++builder->statistics.operation_count;
   ++builder->statistics.dispatch_count;
+  return iree_ok_status();
 }
 
 static iree_status_t id4_pipeline_region_validate_kernel(
@@ -1209,9 +1365,8 @@ iree_status_t id4_pipeline_region_dispatch(
   IREE_RETURN_IF_ERROR(id4_pipeline_region_record_dispatch(
       builder, kernel, dispatch_config, constants, binding_count, bindings,
       flags));
-  id4_pipeline_region_commit_dispatch(builder, binding_count, records,
-                                      bindings);
-  return iree_ok_status();
+  return id4_pipeline_region_commit_dispatch(builder, binding_count, records,
+                                             bindings);
 }
 
 static iree_status_t id4_pipeline_region_validate_copy_tensor(
@@ -1291,10 +1446,22 @@ iree_status_t id4_pipeline_region_copy_tensor(
       builder, source, target, &source_record, &target_record));
   IREE_RETURN_IF_ERROR(
       id4_pipeline_region_record_copy_tensor(builder, source, target, flags));
-  id4_pipeline_region_apply_dispatch_binding_access(
-      builder, source_record, ID4_PIPELINE_TENSOR_ACCESS_READ);
-  id4_pipeline_region_apply_dispatch_binding_access(
-      builder, target_record, ID4_PIPELINE_TENSOR_ACCESS_WRITE);
+  const id4_pipeline_region_dispatch_binding_t source_binding = {
+      // Tensor bound to the copy source.
+      .tensor = source,
+      // Copy reads the full source tensor.
+      .access = ID4_PIPELINE_TENSOR_ACCESS_READ,
+  };
+  const id4_pipeline_region_dispatch_binding_t target_binding = {
+      // Tensor bound to the copy target.
+      .tensor = target,
+      // Copy writes the full target tensor.
+      .access = ID4_PIPELINE_TENSOR_ACCESS_WRITE,
+  };
+  IREE_RETURN_IF_ERROR(id4_pipeline_region_apply_dispatch_binding_access(
+      builder, source_record, &source_binding));
+  IREE_RETURN_IF_ERROR(id4_pipeline_region_apply_dispatch_binding_access(
+      builder, target_record, &target_binding));
   ++builder->statistics.operation_count;
   ++builder->statistics.copy_count;
   return iree_ok_status();
@@ -1327,9 +1494,8 @@ iree_status_t id4_pipeline_region_dispatch_loom(
   IREE_RETURN_IF_ERROR(id4_pipeline_region_record_dispatch(
       builder, &hal_kernel, dispatch_config, constants, binding_count, bindings,
       flags));
-  id4_pipeline_region_commit_dispatch(builder, binding_count, records,
-                                      bindings);
-  return iree_ok_status();
+  return id4_pipeline_region_commit_dispatch(builder, binding_count, records,
+                                             bindings);
 }
 
 iree_status_t id4_pipeline_region_barrier(

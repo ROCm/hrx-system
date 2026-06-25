@@ -548,8 +548,21 @@ static iree_status_t id4_pipeline_program_region_lower_dispatch_binding(
   memset(region_binding, 0, sizeof(*region_binding));
   IREE_RETURN_IF_ERROR(id4_pipeline_program_region_load_tensor(
       context, program_binding->tensor, &region_binding->tensor));
-  return id4_pipeline_program_region_convert_tensor_access(
-      program_binding->access, &region_binding->access);
+  IREE_RETURN_IF_ERROR(id4_pipeline_program_region_convert_tensor_access(
+      program_binding->access, &region_binding->access));
+  if (iree_all_bits_set(
+          program_binding->flags,
+          ID4_PIPELINE_PROGRAM_DISPATCH_BINDING_FLAG_WRITE_RANGE)) {
+    region_binding->flags =
+        ID4_PIPELINE_REGION_DISPATCH_BINDING_FLAG_WRITE_RANGE;
+    region_binding->write_range = (id4_pipeline_region_tensor_byte_range_t){
+        // Byte offset from the start of the logical tensor.
+        .offset = program_binding->write_range.offset,
+        // Byte length of the interval.
+        .length = program_binding->write_range.length,
+    };
+  }
+  return iree_ok_status();
 }
 
 static iree_status_t id4_pipeline_program_region_resolve_kernel(
