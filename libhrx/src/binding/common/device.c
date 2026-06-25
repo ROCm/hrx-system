@@ -262,7 +262,7 @@ iree_status_t iree_hal_streaming_device_primary_context_state(
   return iree_ok_status();
 }
 
-iree_status_t iree_hal_streaming_device_ensure_default_mem_pool(
+static iree_status_t iree_hal_streaming_device_ensure_default_mem_pool_locked(
     iree_hal_streaming_device_t* device) {
   IREE_ASSERT_ARGUMENT(device);
   if (device->default_mem_pool && device->current_mem_pool) {
@@ -291,6 +291,16 @@ iree_status_t iree_hal_streaming_device_ensure_default_mem_pool(
     hrx_mem_pool_retain(device->current_mem_pool);
   }
   return iree_ok_status();
+}
+
+iree_status_t iree_hal_streaming_device_ensure_default_mem_pool(
+    iree_hal_streaming_device_t* device) {
+  IREE_ASSERT_ARGUMENT(device);
+  iree_slim_mutex_lock(&device->primary_context_mutex);
+  iree_status_t status =
+      iree_hal_streaming_device_ensure_default_mem_pool_locked(device);
+  iree_slim_mutex_unlock(&device->primary_context_mutex);
+  return status;
 }
 
 iree_status_t iree_hal_streaming_device_get_or_create_primary_context(
@@ -334,7 +344,7 @@ iree_status_t iree_hal_streaming_device_get_or_create_primary_context(
 
   // Ensure runtime allocations have a backing pool for this device.
   if (iree_status_is_ok(status)) {
-    status = iree_hal_streaming_device_ensure_default_mem_pool(device);
+    status = iree_hal_streaming_device_ensure_default_mem_pool_locked(device);
   }
 
   if (iree_status_is_ok(status)) {
@@ -383,7 +393,7 @@ iree_status_t iree_hal_streaming_device_retain_primary_context(
 
     // Ensure runtime allocations have a backing pool for this device.
     if (iree_status_is_ok(status)) {
-      status = iree_hal_streaming_device_ensure_default_mem_pool(device);
+      status = iree_hal_streaming_device_ensure_default_mem_pool_locked(device);
     }
 
     if (!iree_status_is_ok(status)) {

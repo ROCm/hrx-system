@@ -815,6 +815,18 @@ void iree_hal_streaming_graph_exec_release(
   }
 }
 
+bool iree_hal_streaming_graph_exec_try_retain_live(
+    iree_hal_streaming_graph_exec_t* exec) {
+  if (!exec) return false;
+  iree_slim_mutex_lock(&exec->mutex);
+  const bool is_live = !exec->is_destroyed;
+  if (is_live) {
+    iree_hal_streaming_graph_exec_retain(exec);
+  }
+  iree_slim_mutex_unlock(&exec->mutex);
+  return is_live;
+}
+
 bool iree_hal_streaming_graph_exec_is_live(
     iree_hal_streaming_graph_exec_t* exec) {
   return exec && !exec->is_destroyed;

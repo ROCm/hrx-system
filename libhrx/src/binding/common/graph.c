@@ -2458,7 +2458,8 @@ iree_status_t iree_hal_streaming_end_capture(
   }
   if (has_unjoined_participant) {
     const bool capture_graph_owned = stream->capture_graph_owned;
-    stream->capture_status = IREE_HAL_STREAMING_CAPTURE_STATUS_NONE;
+    iree_hal_streaming_stream_set_capture_status(
+        stream, IREE_HAL_STREAMING_CAPTURE_STATUS_NONE);
     stream->capture_graph = NULL;
     stream->capture_graph_owned = false;
     stream->capture_origin = false;

@@ -2022,6 +2022,8 @@ void iree_hal_streaming_graph_exec_retain(
     iree_hal_streaming_graph_exec_t* exec);
 void iree_hal_streaming_graph_exec_release(
     iree_hal_streaming_graph_exec_t* exec);
+bool iree_hal_streaming_graph_exec_try_retain_live(
+    iree_hal_streaming_graph_exec_t* exec);
 bool iree_hal_streaming_graph_exec_is_live(
     iree_hal_streaming_graph_exec_t* exec);
 iree_status_t iree_hal_streaming_graph_exec_destroy_handle(

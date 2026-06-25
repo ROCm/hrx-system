@@ -364,6 +364,20 @@ void iree_hal_streaming_memory_release_pageable_staging(
   }
 }
 
+static iree_status_t iree_hal_streaming_buffer_ref_validate_range(
+    const iree_hal_streaming_buffer_ref_t* ref, iree_device_size_t size) {
+  if (!ref->buffer) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "buffer reference is empty");
+  }
+  if (ref->offset > ref->buffer->size ||
+      size > ref->buffer->size - ref->offset) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "buffer reference range exceeds allocation");
+  }
+  return iree_ok_status();
+}
+
 iree_hal_streaming_deviceptr_t iree_hal_streaming_buffer_device_pointer(
     iree_hal_streaming_buffer_t* buffer) {
   return buffer ? buffer->device_ptr : 0;
@@ -1327,31 +1341,37 @@ iree_status_t iree_hal_streaming_memory_memset(
   // Look up the entire destination range. Managed allocations are process-wide
   // HIP pointers, so a device switch after allocation must still resolve them.
   iree_hal_streaming_buffer_ref_t dst_ref;
+  iree_hal_streaming_context_t* owner_context = NULL;
   iree_status_t lookup_status =
       iree_hal_streaming_memory_lookup_range(context, dst, length, &dst_ref);
   if (!iree_status_is_ok(lookup_status) &&
       iree_status_code(lookup_status) == IREE_STATUS_NOT_FOUND) {
     iree_status_ignore(lookup_status);
-    iree_hal_streaming_context_t* owner_context = NULL;
     lookup_status = iree_hal_streaming_memory_lookup_range_across_contexts(
         dst, length, &owner_context, &dst_ref);
     if (iree_status_is_ok(lookup_status)) {
       if (!dst_ref.buffer->is_managed) {
         iree_hal_streaming_context_release(owner_context);
+        owner_context = NULL;
         lookup_status = iree_status_from_code(IREE_STATUS_NOT_FOUND);
-      } else {
-        iree_hal_streaming_context_release(owner_context);
       }
     }
   }
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, lookup_status, "resolving `dst` buffer ref %p", (void*)dst);
+  if (!iree_status_is_ok(lookup_status)) {
+    iree_hal_streaming_context_release(owner_context);
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, lookup_status, "resolving `dst` buffer ref %p", (void*)dst);
+  }
 
   if (dst_ref.buffer->is_managed && dst_ref.buffer->host_ptr) {
-    IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, iree_hal_streaming_stream_synchronize(stream));
+    iree_status_t sync_status = iree_hal_streaming_stream_synchronize(stream);
+    if (!iree_status_is_ok(sync_status)) {
+      iree_hal_streaming_context_release(owner_context);
+      IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, sync_status);
+    }
     uint8_t* dest = (uint8_t*)dst_ref.buffer->host_ptr + dst_ref.offset;
     iree_hal_streaming_repeat_pattern(dest, length, pattern, pattern_length);
+    iree_hal_streaming_context_release(owner_context);
     IREE_TRACE_ZONE_END(z0);
     return iree_ok_status();
   }
@@ -1362,9 +1382,11 @@ iree_status_t iree_hal_streaming_memory_memset(
     if (dst_ref.buffer->host_ptr) {
       uint8_t* dest = (uint8_t*)dst_ref.buffer->host_ptr + dst_ref.offset;
       iree_hal_streaming_repeat_pattern(dest, length, pattern, pattern_length);
+      iree_hal_streaming_context_release(owner_context);
       IREE_TRACE_ZONE_END(z0);
       return iree_ok_status();
     }
+    iree_hal_streaming_context_release(owner_context);
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
         z0, iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                              "no buffer available for memset"));
@@ -1384,6 +1406,7 @@ iree_status_t iree_hal_streaming_memory_memset(
     status = iree_hal_streaming_command_buffer_barrier(stream->command_buffer);
   }
   iree_slim_mutex_unlock(&stream->mutex);
+  iree_hal_streaming_context_release(owner_context);
   IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, status);
 
   IREE_TRACE_ZONE_END(z0);
@@ -1595,7 +1618,11 @@ iree_status_t iree_hal_streaming_memcpy_host_to_device(
   if (dst_ref.buffer->host_ptr &&
       iree_any_bit_set((iree_hal_memory_type_t)dst_ref.buffer->memory_type,
                        IREE_HAL_MEMORY_TYPE_HOST_LOCAL)) {
-    iree_status_t status = iree_hal_streaming_context_synchronize_all();
+    iree_status_t status =
+        iree_hal_streaming_buffer_ref_validate_range(&dst_ref, size);
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_streaming_context_synchronize_all();
+    }
     if (iree_status_is_ok(status)) {
       memcpy((uint8_t*)dst_ref.buffer->host_ptr + dst_ref.offset, src, size);
     }
@@ -1747,7 +1774,11 @@ iree_status_t iree_hal_streaming_memcpy_device_to_host(
   if (src_ref.buffer->host_ptr &&
       iree_any_bit_set((iree_hal_memory_type_t)src_ref.buffer->memory_type,
                        IREE_HAL_MEMORY_TYPE_HOST_LOCAL)) {
-    iree_status_t status = iree_hal_streaming_context_synchronize_all();
+    iree_status_t status =
+        iree_hal_streaming_buffer_ref_validate_range(&src_ref, size);
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_streaming_context_synchronize_all();
+    }
     if (iree_status_is_ok(status)) {
       memcpy(dst, (const uint8_t*)src_ref.buffer->host_ptr + src_ref.offset,
              size);

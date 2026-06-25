@@ -766,6 +766,7 @@ static iree_status_t iree_hal_streaming_lookup_kernel_buffer_ref(
   // paths must conservatively order destruction without relying on lookup
   // coverage.
   iree_hal_streaming_buffer_ref_t stream_ref;
+  iree_hal_streaming_context_t* owner_context = NULL;
   iree_status_t status = iree_hal_streaming_memory_lookup(
       context, (iree_hal_streaming_deviceptr_t)(uintptr_t)device_ptr,
       &stream_ref);
@@ -774,7 +775,6 @@ static iree_status_t iree_hal_streaming_lookup_kernel_buffer_ref(
     if (!iree_status_is_ok(status)) return status;
   } else {
     iree_status_ignore(status);
-    iree_hal_streaming_context_t* owner_context = NULL;
     status = iree_hal_streaming_memory_lookup_range_across_contexts(
         (iree_hal_streaming_deviceptr_t)(uintptr_t)device_ptr, 1,
         &owner_context, &stream_ref);
@@ -784,17 +784,21 @@ static iree_status_t iree_hal_streaming_lookup_kernel_buffer_ref(
       iree_hal_streaming_context_release(owner_context);
       return iree_status_from_code(IREE_STATUS_NOT_FOUND);
     }
-    iree_hal_streaming_context_release(owner_context);
   }
 
   iree_hal_buffer_t* device_buffer = NULL;
-  IREE_RETURN_IF_ERROR(iree_hal_streaming_device_buffer_for_context(
-      context, stream_ref.buffer, &device_buffer, NULL));
+  status = iree_hal_streaming_device_buffer_for_context(
+      context, stream_ref.buffer, &device_buffer, NULL);
+  if (!iree_status_is_ok(status)) {
+    iree_hal_streaming_context_release(owner_context);
+    return status;
+  }
   const iree_device_size_t length =
       stream_ref.offset < stream_ref.buffer->size
           ? stream_ref.buffer->size - stream_ref.offset
           : 0;
   *out_ref = iree_hal_make_buffer_ref(device_buffer, stream_ref.offset, length);
+  iree_hal_streaming_context_release(owner_context);
   return iree_ok_status();
 }
 
