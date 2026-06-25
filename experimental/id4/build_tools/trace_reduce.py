@@ -223,8 +223,7 @@ def _require_source_layout(entry: dict[str, Any], entry_name: str) -> str:
         raise TraceReduceError(f"{entry_name}.source_layout must be a non-empty string")
     if source_layout not in VALID_SOURCE_LAYOUTS:
         raise TraceReduceError(
-            f"{entry_name}.source_layout must be one of "
-            f"{sorted(VALID_SOURCE_LAYOUTS)}"
+            f"{entry_name}.source_layout must be one of {sorted(VALID_SOURCE_LAYOUTS)}"
         )
     return source_layout
 

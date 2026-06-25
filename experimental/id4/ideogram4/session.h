@@ -1,0 +1,132 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+#ifndef EXPERIMENTAL_ID4_IDEOGRAM4_SESSION_H_
+#define EXPERIMENTAL_ID4_IDEOGRAM4_SESSION_H_
+
+#include "experimental/id4/ideogram4/request.h"
+#include "experimental/id4/pipeline/diagnostics.h"
+#include "experimental/id4/pipeline/kernel_cache.h"
+#include "experimental/id4/pipeline/kernel_library.h"
+#include "experimental/id4/pipeline/plan.h"
+#include "experimental/id4/pipeline/stage.h"
+#include "iree/base/api.h"
+#include "iree/hal/api.h"
+#include "iree/io/parameter_provider.h"
+#include "iree/tokenizer/tokenizer.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif  // __cplusplus
+
+// Opaque Ideogram 4 model session owning coarse pipeline stages.
+typedef struct id4_ideogram4_session_t id4_ideogram4_session_t;
+
+// Opaque asynchronous Qwen3-VL execution handle.
+typedef struct id4_ideogram4_qwen_execution_t id4_ideogram4_qwen_execution_t;
+
+// Options for creating an Ideogram 4 model session.
+typedef struct id4_ideogram4_session_create_options_t {
+  // Size of this structure for versioning.
+  iree_host_size_t structure_size;
+  // Extension structure chain; must be NULL for now.
+  const void* next;
+  // Shared pipeline services used by all session stages.
+  id4_pipeline_stage_services_t services;
+  // Loom kernel cache used by session stages during preparation.
+  id4_pipeline_kernel_cache_t* kernel_cache;
+  // Parameter provider scope containing model weights; empty selects the
+  // anonymous scope. The session copies this string during creation.
+  iree_string_view_t parameter_scope;
+} id4_ideogram4_session_create_options_t;
+
+// Options for loading immutable model session state.
+typedef struct id4_ideogram4_session_load_options_t {
+  // Size of this structure for versioning.
+  iree_host_size_t structure_size;
+  // Extension structure chain; must be NULL for now.
+  const void* next;
+  // Diagnostics sink for load events.
+  id4_pipeline_diagnostics_sink_t* diagnostics_sink;
+} id4_ideogram4_session_load_options_t;
+
+// Options for issuing one asynchronous Qwen3-VL conditioning execution.
+typedef struct id4_ideogram4_qwen_issue_options_t {
+  // Size of this structure for versioning.
+  iree_host_size_t structure_size;
+  // Extension structure chain; must be NULL for now.
+  const void* next;
+  // Parsed request supplying structured prompt JSON.
+  const id4_ideogram4_request_t* request;
+  // Tokenizer used to lower the request's Qwen prompt into Qwen inputs.
+  const iree_tokenizer_t* tokenizer;
+  // Tokenizer flags used while encoding the Qwen prompt text.
+  iree_tokenizer_encode_flags_t tokenizer_flags;
+  // Parameter provider containing Qwen weights in the session parameter scope.
+  iree_io_parameter_provider_t* parameter_provider;
+  // Kernel library used to resolve planned Loom module paths.
+  id4_pipeline_kernel_library_t* kernel_library;
+  // Device index within the session device group used for this Qwen plan.
+  iree_host_size_t device_index;
+  // Queue affinity used by Qwen preparation, uploads, and execution.
+  iree_hal_queue_affinity_t queue_affinity;
+  // HAL command-buffer mode used when preparing reusable regions.
+  iree_hal_command_buffer_mode_t command_buffer_mode;
+  // Caller-owned diagnostic tap names to capture.
+  iree_string_view_list_t diagnostic_tap_names;
+  // Semaphores that preparation, input upload, and execution wait on.
+  iree_hal_semaphore_list_t wait_semaphore_list;
+  // Semaphores signaled when Qwen execution completes.
+  iree_hal_semaphore_list_t signal_semaphore_list;
+  // Diagnostics sink for plan, prepare, and issue events.
+  id4_pipeline_diagnostics_sink_t* diagnostics_sink;
+} id4_ideogram4_qwen_issue_options_t;
+
+// Result bindings produced by one Qwen3-VL execution.
+typedef struct id4_ideogram4_qwen_result_t {
+  // Number of prompt token positions in the execution.
+  uint32_t token_count;
+  // Exported condition tensor binding owned by the execution handle.
+  iree_hal_buffer_binding_t condition_binding;
+} id4_ideogram4_qwen_result_t;
+
+// Creates an Ideogram 4 model session.
+iree_status_t id4_ideogram4_session_create(
+    const id4_ideogram4_session_create_options_t* options,
+    iree_allocator_t host_allocator, id4_ideogram4_session_t** out_session);
+
+// Releases |session| from the caller.
+void id4_ideogram4_session_release(id4_ideogram4_session_t* session);
+
+// Loads immutable stage state for |session|.
+iree_status_t id4_ideogram4_session_load(
+    id4_ideogram4_session_t* session,
+    const id4_ideogram4_session_load_options_t* options);
+
+// Issues one asynchronous Qwen3-VL conditioning execution.
+iree_status_t id4_ideogram4_session_issue_qwen(
+    id4_ideogram4_session_t* session,
+    const id4_ideogram4_qwen_issue_options_t* options,
+    id4_ideogram4_qwen_execution_t** out_execution);
+
+// Releases |execution| from the caller after its completion signal is reached.
+void id4_ideogram4_qwen_execution_release(
+    id4_ideogram4_qwen_execution_t* execution);
+
+// Returns the plan retained by |execution|.
+const id4_pipeline_plan_t* id4_ideogram4_qwen_execution_plan(
+    const id4_ideogram4_qwen_execution_t* execution);
+
+// Returns the result bindings retained by |execution|.
+iree_status_t id4_ideogram4_qwen_execution_result(
+    const id4_ideogram4_qwen_execution_t* execution,
+    id4_ideogram4_qwen_result_t* out_result);
+
+#ifdef __cplusplus
+}  // extern "C"
+#endif  // __cplusplus
+
+#endif  // EXPERIMENTAL_ID4_IDEOGRAM4_SESSION_H_

@@ -293,6 +293,7 @@ iree_runtime_cc_test(
     deps = [
         ":qwen3_vl",
         ":test_util",
+        "//experimental/id4/pipeline:kernel_cache",
         "//experimental/id4/pipeline:plan",
         "//experimental/id4/pipeline:stage",
         "//runtime/src/iree/base",

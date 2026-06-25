@@ -17,6 +17,16 @@ iree_cc_binary(
   DEPS
     iree::base
     iree::base::tooling::flags
+    iree::experimental::id4::ideogram4::request
+    iree::experimental::id4::ideogram4::session
+    iree::experimental::id4::pipeline::diagnostics
+    iree::experimental::id4::pipeline::kernel_library
+    iree::experimental::id4::tooling::runtime
+    iree::hal
+    iree::io::file_handle
+    iree::io::parameter_provider
+    iree::tokenizer
+    iree::tokenizer::format::huggingface::tokenizer_json
 )
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

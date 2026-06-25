@@ -15,6 +15,17 @@ package(
 )
 
 iree_runtime_cc_library(
+    name = "binding",
+    srcs = ["binding.c"],
+    hdrs = ["binding.h"],
+    deps = [
+        ":plan",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "diagnostics",
     srcs = ["diagnostics.c"],
     hdrs = ["diagnostics.h"],
@@ -173,6 +184,20 @@ iree_runtime_cc_library(
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/io:parameter_provider",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "binding_test",
+    srcs = ["binding_test.cc"],
+    deps = [
+        ":binding",
+        "//experimental/id4/stages:test_util",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/io:file_handle",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 

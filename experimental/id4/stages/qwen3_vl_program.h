@@ -34,6 +34,8 @@ typedef struct id4_qwen3_vl_model_config_t {
   uint32_t key_value_head_count;
   // Channel count per attention head.
   uint32_t head_size;
+  // Maximum prompt token positions accepted by the model runner.
+  uint32_t max_token_count;
   // Number of post-layer hidden states concatenated into the condition output.
   uint32_t selected_layer_count;
   // Zero-based layer ordinals selected after the layer output residual.

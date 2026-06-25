@@ -11,6 +11,20 @@ iree_add_all_subdirs()
 
 iree_cc_library(
   NAME
+    binding
+  HDRS
+    "binding.h"
+  SRCS
+    "binding.c"
+  DEPS
+    ::plan
+    iree::base
+    iree::hal
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
     diagnostics
   HDRS
     "diagnostics.h"
@@ -205,6 +219,21 @@ iree_cc_library(
     iree::hal
     iree::io::parameter_provider
   PUBLIC
+)
+
+iree_cc_test(
+  NAME
+    binding_test
+  SRCS
+    "binding_test.cc"
+  DEPS
+    ::binding
+    iree::base
+    iree::experimental::id4::stages::test_util
+    iree::hal
+    iree::io::file_handle
+    iree::testing::gtest
+    iree::testing::gtest_main
 )
 
 iree_cc_test(

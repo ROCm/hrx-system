@@ -23,6 +23,29 @@ iree_cc_library(
   PUBLIC
 )
 
+iree_cc_library(
+  NAME
+    session
+  HDRS
+    "session.h"
+  SRCS
+    "session.c"
+  DEPS
+    ::request
+    iree::base
+    iree::experimental::id4::pipeline::binding
+    iree::experimental::id4::pipeline::diagnostics
+    iree::experimental::id4::pipeline::kernel_cache
+    iree::experimental::id4::pipeline::kernel_library
+    iree::experimental::id4::pipeline::plan
+    iree::experimental::id4::pipeline::stage
+    iree::experimental::id4::stages::qwen3_vl
+    iree::hal
+    iree::io::parameter_provider
+    iree::tokenizer
+  PUBLIC
+)
+
 iree_cc_test(
   NAME
     request_test
@@ -35,6 +58,20 @@ iree_cc_test(
     iree::testing::gtest_main
     iree::tokenizer::format::huggingface::tokenizer_json
     iree::tokenizer::testdata::streaming_testdata
+)
+
+iree_cc_test(
+  NAME
+    session_test
+  SRCS
+    "session_test.cc"
+  DEPS
+    ::session
+    iree::base
+    iree::experimental::id4::stages::test_util
+    iree::hal
+    iree::testing::gtest
+    iree::testing::gtest_main
 )
 
 iree_cc_test(

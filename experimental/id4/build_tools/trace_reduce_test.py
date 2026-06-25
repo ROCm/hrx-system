@@ -209,12 +209,8 @@ class TraceReduceTest(unittest.TestCase):
             trace_dir = root / "trace"
             output_dir = root / "fixtures"
             (trace_dir / "tensors").mkdir(parents=True)
-            matrix_payload = struct.pack(
-                "<12f", *[float(value) for value in range(12)]
-            )
-            (trace_dir / "tensors" / "attention_mask.bin").write_bytes(
-                matrix_payload
-            )
+            matrix_payload = struct.pack("<12f", *[float(value) for value in range(12)])
+            (trace_dir / "tensors" / "attention_mask.bin").write_bytes(matrix_payload)
             _write_manifest_record(
                 trace_dir,
                 {

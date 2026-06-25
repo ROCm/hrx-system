@@ -61,7 +61,7 @@ static iree_status_t id4_qwen3_vl_stage_validate_model_config(
   if (model->layer_count == 0 || model->vocab_size == 0 ||
       model->hidden_size == 0 || model->intermediate_size == 0 ||
       model->attention_head_count == 0 || model->key_value_head_count == 0 ||
-      model->head_size == 0) {
+      model->head_size == 0 || model->max_token_count == 0) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "Qwen3-VL model dimensions must be nonzero");
   }
@@ -89,6 +89,10 @@ static iree_status_t id4_qwen3_vl_stage_validate_create_options(
   if (!options->services.device_group) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "Qwen3-VL stage device group is required");
+  }
+  if (!options->kernel_cache) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "Qwen3-VL stage kernel cache is required");
   }
   return id4_qwen3_vl_stage_validate_model_config(&options->model);
 }

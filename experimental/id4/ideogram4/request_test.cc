@@ -57,22 +57,36 @@ static TokenizerPtr LoadTokenizer() {
   return TokenizerPtr(tokenizer);
 }
 
-TEST(Ideogram4RequestTest, ParsesStrictPromptJson) {
+TEST(Ideogram4RequestTest, ParsesStructuredPromptJson) {
   ScopedRequest request;
   IREE_ASSERT_OK(id4_ideogram4_request_parse_json(
       IREE_SV("{\"prompt\":\"hello world\"}"), iree_allocator_system(),
       &request.value));
-  EXPECT_TRUE(
-      iree_string_view_equal(request.value.prompt, IREE_SV("hello world")));
+  EXPECT_TRUE(iree_string_view_equal(request.value.raw_prompt_json,
+                                     IREE_SV("{\"prompt\":\"hello world\"}")));
+  EXPECT_TRUE(iree_string_view_equal(
+      request.value.qwen_prompt,
+      IREE_SV("<|im_start|>user\n{\"prompt\":\"hello world\"}<|im_end|>\n"
+              "<|im_start|>assistant\n")));
+
+  ScopedRequest structured_request;
+  IREE_ASSERT_OK(id4_ideogram4_request_parse_json(
+      IREE_SV("{\"high_level_description\":\"hello\","
+              "\"style_description\":{\"medium\":\"photo\"}}"),
+      iree_allocator_system(), &structured_request.value));
+  EXPECT_TRUE(iree_string_view_equal(
+      structured_request.value.raw_prompt_json,
+      IREE_SV("{\"high_level_description\":\"hello\","
+              "\"style_description\":{\"medium\":\"photo\"}}")));
 
   id4_ideogram4_request_t rejected_request = {};
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      id4_ideogram4_request_parse_json(IREE_SV("{}"), iree_allocator_system(),
+                                       &rejected_request));
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         id4_ideogram4_request_parse_json(
-                            IREE_SV("{\"prompt\":\"hello\",\"seed\":1}"),
-                            iree_allocator_system(), &rejected_request));
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
-                        id4_ideogram4_request_parse_json(
-                            IREE_SV("{\"prompt\":\"\"}"),
+                            IREE_SV("[\"not an object\"]"),
                             iree_allocator_system(), &rejected_request));
 }
 
@@ -89,15 +103,12 @@ TEST(Ideogram4RequestTest, LowersPromptToQwenInputTensors) {
   options.tokenizer = tokenizer.get();
   options.request = &request.value;
   options.tokenizer_flags = IREE_TOKENIZER_ENCODE_FLAG_NONE;
-  options.max_token_count = 16;
+  options.max_token_count = 128;
 
   ScopedQwenInputs inputs;
   IREE_ASSERT_OK(id4_ideogram4_request_lower_qwen_inputs(
       &options, iree_allocator_system(), &inputs.value));
-  ASSERT_EQ(inputs.value.token_count, 3u);
-  EXPECT_EQ(inputs.value.token_ids[0], 98);
-  EXPECT_EQ(inputs.value.token_ids[1], 105);
-  EXPECT_EQ(inputs.value.token_ids[2], 110);
+  ASSERT_GT(inputs.value.token_count, 3u);
   for (uint32_t i = 0; i < inputs.value.token_count; ++i) {
     EXPECT_EQ(inputs.value.token_weights[i], 1.0f);
   }

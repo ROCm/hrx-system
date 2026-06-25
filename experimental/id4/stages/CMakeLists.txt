@@ -334,6 +334,7 @@ iree_cc_test(
     ::qwen3_vl
     ::test_util
     iree::base
+    iree::experimental::id4::pipeline::kernel_cache
     iree::experimental::id4::pipeline::plan
     iree::experimental::id4::pipeline::stage
     iree::hal

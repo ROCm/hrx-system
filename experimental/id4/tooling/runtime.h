@@ -9,7 +9,6 @@
 
 #include "experimental/id4/pipeline/kernel_cache.h"
 #include "experimental/id4/pipeline/kernel_library.h"
-#include "experimental/id4/pipeline/plan.h"
 #include "experimental/id4/pipeline/stage.h"
 #include "iree/base/api.h"
 #include "iree/hal/api.h"
@@ -50,18 +49,6 @@ typedef struct id4_tooling_runtime_context_options_t {
   iree_string_view_t executable_cache_identifier;
 } id4_tooling_runtime_context_options_t;
 
-// Owned set of standalone HAL buffers and binding table entries.
-typedef struct id4_tooling_buffer_binding_set_t {
-  // Allocator used for arrays in this set.
-  iree_allocator_t host_allocator;
-  // Number of bindings in plan order.
-  iree_host_size_t count;
-  // Owned buffers backing each binding.
-  iree_hal_buffer_t** buffers;
-  // Binding table entries in plan order.
-  iree_hal_buffer_binding_t* bindings;
-} id4_tooling_buffer_binding_set_t;
-
 // Initializes |out_context| from standard --device= and profiling flags.
 iree_status_t id4_tooling_runtime_context_initialize_from_flags(
     const id4_tooling_runtime_context_options_t* options,
@@ -89,41 +76,6 @@ iree_status_t id4_tooling_create_embedded_kernel_library(
 iree_status_t id4_tooling_create_parameter_provider_from_flags(
     iree_string_view_t scope, iree_allocator_t host_allocator,
     iree_io_parameter_provider_t** out_provider);
-
-// Releases all buffers and arrays owned by |binding_set|.
-void id4_tooling_buffer_binding_set_deinitialize(
-    id4_tooling_buffer_binding_set_t* binding_set);
-
-// Allocates one device-local buffer for each planned boundary tensor.
-iree_status_t id4_tooling_allocate_boundary_bindings(
-    iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
-    const id4_pipeline_plan_t* plan, iree_allocator_t host_allocator,
-    id4_tooling_buffer_binding_set_t* out_binding_set);
-
-// Allocates one device-local buffer for each planned diagnostic tap.
-iree_status_t id4_tooling_allocate_diagnostic_tap_bindings(
-    iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
-    const id4_pipeline_plan_t* plan, iree_allocator_t host_allocator,
-    id4_tooling_buffer_binding_set_t* out_binding_set);
-
-// Finds a boundary binding by planned boundary tensor name.
-iree_status_t id4_tooling_find_boundary_binding(
-    const id4_pipeline_plan_t* plan,
-    const id4_tooling_buffer_binding_set_t* binding_set,
-    iree_string_view_t name, iree_hal_buffer_binding_t* out_binding);
-
-// Finds a diagnostic tap binding by planned tap name.
-iree_status_t id4_tooling_find_diagnostic_tap_binding(
-    const id4_pipeline_plan_t* plan,
-    const id4_tooling_buffer_binding_set_t* binding_set,
-    iree_string_view_t name, iree_hal_buffer_binding_t* out_binding);
-
-// Queues chunked host-to-device updates into |binding| on |semaphore|.
-iree_status_t id4_tooling_queue_update_binding(
-    iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
-    const iree_hal_buffer_binding_t* binding, const void* source_data,
-    iree_host_size_t source_length, iree_hal_semaphore_t* semaphore,
-    uint64_t* inout_payload_value);
 
 #ifdef __cplusplus
 }  // extern "C"

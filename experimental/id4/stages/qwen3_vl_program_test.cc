@@ -40,6 +40,8 @@ static id4_qwen3_vl_program_options_t MakeProgramOptions(uint32_t layer_count) {
           /*.key_value_head_count=*/2,
           // Channel count per attention head.
           /*.head_size=*/16,
+          // Maximum prompt token positions accepted by the model runner.
+          /*.max_token_count=*/128,
           // Number of selected layer outputs.
           /*.selected_layer_count=*/IREE_ARRAYSIZE(kSelectedLayerOrdinals),
           // Selected layer output ordinals.

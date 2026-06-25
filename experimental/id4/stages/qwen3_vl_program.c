@@ -43,6 +43,8 @@ static const id4_qwen3_vl_model_config_t
         .key_value_head_count = 8,
         // Channel count per attention head.
         .head_size = 128,
+        // Maximum prompt token positions accepted by the runner.
+        .max_token_count = 4096,
         // Number of post-layer hidden states used by Ideogram 4 conditioning.
         .selected_layer_count =
             IREE_ARRAYSIZE(id4_qwen3_vl_program_ideogram4_selected_layers),
@@ -149,6 +151,10 @@ static iree_status_t id4_qwen3_vl_program_validate_model_config(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "Qwen3-VL head size must be even");
   }
+  if (config->max_token_count == 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "Qwen3-VL max token count must be nonzero");
+  }
   if (config->selected_layer_count == 0) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "Qwen3-VL selected layer count must be nonzero");
@@ -224,6 +230,12 @@ static iree_status_t id4_qwen3_vl_program_validate_options(
   if (options->request.token_count == 0) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "Qwen3-VL token count must be nonzero");
+  }
+  if (options->request.token_count > options->model.max_token_count) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "Qwen3-VL token count %" PRIu32 " exceeds model maximum %" PRIu32,
+        options->request.token_count, options->model.max_token_count);
   }
   return id4_qwen3_vl_program_validate_model_config(&options->model);
 }

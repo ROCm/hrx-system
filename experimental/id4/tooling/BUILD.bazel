@@ -51,7 +51,6 @@ iree_runtime_cc_library(
         "//experimental/id4/kernels:embedded_loom_sources",
         "//experimental/id4/pipeline:kernel_cache",
         "//experimental/id4/pipeline:kernel_library",
-        "//experimental/id4/pipeline:plan",
         "//experimental/id4/pipeline:stage",
         "//runtime/src/iree/async",
         "//runtime/src/iree/async/util:proactor_pool",

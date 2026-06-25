@@ -16,8 +16,10 @@ extern "C" {
 
 // Parsed high-level Ideogram 4 generation request.
 typedef struct id4_ideogram4_request_t {
-  // Prompt text owned by the request.
-  iree_string_view_t prompt;
+  // Raw structured JSON prompt object owned by the request.
+  iree_string_view_t raw_prompt_json;
+  // Qwen chat-wrapped prompt text owned by the request.
+  iree_string_view_t qwen_prompt;
 } id4_ideogram4_request_t;
 
 // Host-side Qwen3-VL input tensors lowered from a generation request.
@@ -38,7 +40,7 @@ typedef struct id4_ideogram4_qwen_lowering_options_t {
   iree_host_size_t structure_size;
   // Extension structure chain; must be NULL for now.
   const void* next;
-  // Tokenizer used to encode the prompt text.
+  // Tokenizer used to encode the Qwen chat-wrapped prompt text.
   const iree_tokenizer_t* tokenizer;
   // Parsed request to lower.
   const id4_ideogram4_request_t* request;

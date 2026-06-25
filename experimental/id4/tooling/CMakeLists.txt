@@ -64,7 +64,6 @@ iree_cc_library(
     iree::experimental::id4::kernels::embedded_loom_sources
     iree::experimental::id4::pipeline::kernel_cache
     iree::experimental::id4::pipeline::kernel_library
-    iree::experimental::id4::pipeline::plan
     iree::experimental::id4::pipeline::stage
     iree::hal
     iree::io::parameter_index

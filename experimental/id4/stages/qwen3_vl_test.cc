@@ -32,6 +32,8 @@ static id4_qwen3_vl_model_config_t MakeModelConfig(uint32_t layer_count) {
       /*.key_value_head_count=*/2,
       // Channel count per attention head.
       /*.head_size=*/16,
+      // Maximum prompt token positions accepted by the model runner.
+      /*.max_token_count=*/128,
       // Number of selected layer outputs.
       /*.selected_layer_count=*/IREE_ARRAYSIZE(kSelectedLayerOrdinals),
       // Selected layer output ordinals.
@@ -42,6 +44,15 @@ static id4_qwen3_vl_model_config_t MakeModelConfig(uint32_t layer_count) {
 static id4_pipeline_stage_t* CreateStage(
     iree_hal_device_group_t* device_group,
     const id4_qwen3_vl_model_config_t* model) {
+  id4_pipeline_kernel_cache_create_options_t kernel_cache_options;
+  memset(&kernel_cache_options, 0, sizeof(kernel_cache_options));
+  kernel_cache_options.structure_size = sizeof(kernel_cache_options);
+  kernel_cache_options.target_processor =
+      id4_pipeline_kernel_cache_default_target_processor();
+  id4_pipeline_kernel_cache_t* kernel_cache = nullptr;
+  IREE_CHECK_OK(id4_pipeline_kernel_cache_create(
+      &kernel_cache_options, iree_allocator_system(), &kernel_cache));
+
   id4_pipeline_stage_services_t services;
   memset(&services, 0, sizeof(services));
   services.device_group = device_group;
@@ -51,11 +62,13 @@ static id4_pipeline_stage_t* CreateStage(
   memset(&create_options, 0, sizeof(create_options));
   create_options.structure_size = sizeof(create_options);
   create_options.services = services;
+  create_options.kernel_cache = kernel_cache;
   create_options.model = *model;
 
   id4_pipeline_stage_t* stage = nullptr;
   IREE_CHECK_OK(id4_qwen3_vl_stage_create(&create_options,
                                           iree_allocator_system(), &stage));
+  id4_pipeline_kernel_cache_release(kernel_cache);
   return stage;
 }
 
@@ -194,10 +207,20 @@ TEST(Qwen3VlStage, RejectsInvalidStaticModelConfig) {
   services.device_group = device_group;
   services.host_allocator = iree_allocator_system();
 
+  id4_pipeline_kernel_cache_create_options_t kernel_cache_options;
+  memset(&kernel_cache_options, 0, sizeof(kernel_cache_options));
+  kernel_cache_options.structure_size = sizeof(kernel_cache_options);
+  kernel_cache_options.target_processor =
+      id4_pipeline_kernel_cache_default_target_processor();
+  id4_pipeline_kernel_cache_t* kernel_cache = nullptr;
+  IREE_ASSERT_OK(id4_pipeline_kernel_cache_create(
+      &kernel_cache_options, iree_allocator_system(), &kernel_cache));
+
   id4_qwen3_vl_stage_create_options_t create_options;
   memset(&create_options, 0, sizeof(create_options));
   create_options.structure_size = sizeof(create_options);
   create_options.services = services;
+  create_options.kernel_cache = kernel_cache;
   create_options.model = MakeModelConfig(/*layer_count=*/0);
 
   id4_pipeline_stage_t* stage = nullptr;
@@ -206,6 +229,7 @@ TEST(Qwen3VlStage, RejectsInvalidStaticModelConfig) {
                             &create_options, iree_allocator_system(), &stage));
   EXPECT_EQ(stage, nullptr);
 
+  id4_pipeline_kernel_cache_release(kernel_cache);
   iree_hal_device_group_release(device_group);
 }
 

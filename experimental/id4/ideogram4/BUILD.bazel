@@ -24,6 +24,26 @@ iree_runtime_cc_library(
     ],
 )
 
+iree_runtime_cc_library(
+    name = "session",
+    srcs = ["session.c"],
+    hdrs = ["session.h"],
+    deps = [
+        ":request",
+        "//experimental/id4/pipeline:binding",
+        "//experimental/id4/pipeline:diagnostics",
+        "//experimental/id4/pipeline:kernel_cache",
+        "//experimental/id4/pipeline:kernel_library",
+        "//experimental/id4/pipeline:plan",
+        "//experimental/id4/pipeline:stage",
+        "//experimental/id4/stages:qwen3_vl",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/io:parameter_provider",
+        "//runtime/src/iree/tokenizer",
+    ],
+)
+
 iree_runtime_cc_test(
     name = "request_test",
     srcs = ["request_test.cc"],
@@ -34,6 +54,19 @@ iree_runtime_cc_test(
         "//runtime/src/iree/testing:gtest_main",
         "//runtime/src/iree/tokenizer/format/huggingface:tokenizer_json",
         "//runtime/src/iree/tokenizer/testdata:streaming_testdata",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "session_test",
+    srcs = ["session_test.cc"],
+    deps = [
+        ":session",
+        "//experimental/id4/stages:test_util",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 

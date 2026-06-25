@@ -10,6 +10,19 @@
 
 #include "iree/base/internal/json.h"
 
+static const char id4_ideogram4_qwen_prompt_prefix[] = "<|im_start|>user\n";
+static const char id4_ideogram4_qwen_prompt_suffix[] =
+    "<|im_end|>\n<|im_start|>assistant\n";
+
+static iree_status_t id4_ideogram4_request_count_member(
+    void* user_data, iree_string_view_t key, iree_string_view_t value) {
+  (void)key;
+  (void)value;
+  iree_host_size_t* count = (iree_host_size_t*)user_data;
+  ++*count;
+  return iree_ok_status();
+}
+
 static iree_status_t id4_ideogram4_request_validate_lowering_options(
     const id4_ideogram4_qwen_lowering_options_t* options) {
   if (!options) {
@@ -35,14 +48,53 @@ static iree_status_t id4_ideogram4_request_validate_lowering_options(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "Qwen request lowering request is required");
   }
-  if (iree_string_view_is_empty(options->request->prompt)) {
+  if (iree_string_view_is_empty(options->request->qwen_prompt)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "Qwen request lowering prompt is empty");
+                            "Qwen request lowering wrapped prompt is empty");
   }
   if (options->max_token_count == 0) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "Qwen request lowering max token count is zero");
   }
+  return iree_ok_status();
+}
+
+static iree_status_t id4_ideogram4_request_copy_string(
+    iree_string_view_t value, iree_allocator_t host_allocator,
+    iree_string_view_t* out_value) {
+  *out_value = iree_string_view_empty();
+  char* storage = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_allocator_malloc(host_allocator, value.size, (void**)&storage));
+  memcpy(storage, value.data, value.size);
+  *out_value = iree_make_string_view(storage, value.size);
+  return iree_ok_status();
+}
+
+static iree_status_t id4_ideogram4_request_wrap_qwen_prompt(
+    iree_string_view_t raw_prompt_json, iree_allocator_t host_allocator,
+    iree_string_view_t* out_qwen_prompt) {
+  *out_qwen_prompt = iree_string_view_empty();
+  const iree_host_size_t prefix_length =
+      sizeof(id4_ideogram4_qwen_prompt_prefix) - 1;
+  const iree_host_size_t suffix_length =
+      sizeof(id4_ideogram4_qwen_prompt_suffix) - 1;
+  if (raw_prompt_json.size > IREE_HOST_SIZE_MAX - prefix_length ||
+      raw_prompt_json.size + prefix_length >
+          IREE_HOST_SIZE_MAX - suffix_length) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "Ideogram 4 Qwen prompt is too large");
+  }
+  const iree_host_size_t prompt_length =
+      prefix_length + raw_prompt_json.size + suffix_length;
+  char* storage = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_allocator_malloc(host_allocator, prompt_length, (void**)&storage));
+  memcpy(storage, id4_ideogram4_qwen_prompt_prefix, prefix_length);
+  memcpy(storage + prefix_length, raw_prompt_json.data, raw_prompt_json.size);
+  memcpy(storage + prefix_length + raw_prompt_json.size,
+         id4_ideogram4_qwen_prompt_suffix, suffix_length);
+  *out_qwen_prompt = iree_make_string_view(storage, prompt_length);
   return iree_ok_status();
 }
 
@@ -53,6 +105,7 @@ iree_status_t id4_ideogram4_request_parse_json(
   memset(out_request, 0, sizeof(*out_request));
 
   iree_string_view_t remaining = json;
+  IREE_RETURN_IF_ERROR(iree_json_consume_insignificant(&remaining));
   iree_string_view_t object = iree_string_view_empty();
   IREE_RETURN_IF_ERROR(iree_json_consume_object(&remaining, &object));
   IREE_RETURN_IF_ERROR(iree_json_consume_insignificant(&remaining));
@@ -61,30 +114,23 @@ iree_status_t id4_ideogram4_request_parse_json(
                             "trailing data after Ideogram 4 request object");
   }
 
-  const iree_string_view_t allowed_keys[] = {IREE_SV("prompt")};
-  IREE_RETURN_IF_ERROR(iree_json_validate_object_keys(
-      object, allowed_keys, IREE_ARRAYSIZE(allowed_keys)));
-
-  iree_string_view_t prompt_value = iree_string_view_empty();
-  IREE_RETURN_IF_ERROR(
-      iree_json_lookup_object_value(object, IREE_SV("prompt"), &prompt_value));
-  iree_host_size_t prompt_length = 0;
-  IREE_RETURN_IF_ERROR(
-      iree_json_unescape_string(prompt_value, 0, NULL, &prompt_length));
-  if (prompt_length == 0) {
+  iree_host_size_t member_count = 0;
+  IREE_RETURN_IF_ERROR(iree_json_enumerate_object(
+      object, id4_ideogram4_request_count_member, &member_count));
+  if (member_count == 0) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "Ideogram 4 request prompt is empty");
+                            "Ideogram 4 request object is empty");
   }
 
-  char* prompt_storage = NULL;
-  IREE_RETURN_IF_ERROR(iree_allocator_malloc(host_allocator, prompt_length,
-                                             (void**)&prompt_storage));
-  iree_status_t status = iree_json_unescape_string(
-      prompt_value, prompt_length, prompt_storage, &prompt_length);
+  iree_status_t status = id4_ideogram4_request_copy_string(
+      object, host_allocator, &out_request->raw_prompt_json);
   if (iree_status_is_ok(status)) {
-    out_request->prompt = iree_make_string_view(prompt_storage, prompt_length);
-  } else {
-    iree_allocator_free(host_allocator, prompt_storage);
+    status = id4_ideogram4_request_wrap_qwen_prompt(
+        out_request->raw_prompt_json, host_allocator,
+        &out_request->qwen_prompt);
+  }
+  if (!iree_status_is_ok(status)) {
+    id4_ideogram4_request_deinitialize(out_request, host_allocator);
   }
   return status;
 }
@@ -92,7 +138,8 @@ iree_status_t id4_ideogram4_request_parse_json(
 void id4_ideogram4_request_deinitialize(id4_ideogram4_request_t* request,
                                         iree_allocator_t host_allocator) {
   if (!request) return;
-  iree_allocator_free(host_allocator, (void*)request->prompt.data);
+  iree_allocator_free(host_allocator, (void*)request->qwen_prompt.data);
+  iree_allocator_free(host_allocator, (void*)request->raw_prompt_json.data);
   memset(request, 0, sizeof(*request));
 }
 
@@ -130,7 +177,8 @@ iree_status_t id4_ideogram4_request_lower_qwen_inputs(
   iree_host_size_t token_count = 0;
   if (iree_status_is_ok(status)) {
     status = iree_tokenizer_encode(
-        options->tokenizer, options->request->prompt, options->tokenizer_flags,
+        options->tokenizer, options->request->qwen_prompt,
+        options->tokenizer_flags,
         iree_tokenizer_make_token_output(token_storage, NULL, NULL,
                                          options->max_token_count),
         host_allocator, &token_count);
