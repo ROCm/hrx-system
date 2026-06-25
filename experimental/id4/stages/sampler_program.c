@@ -108,6 +108,15 @@ static iree_status_t id4_sampler_program_acquire_tensor(
   return id4_pipeline_program_acquire_tensor(builder, &options, out_tensor);
 }
 
+static iree_status_t id4_sampler_program_barrier(
+    id4_pipeline_program_builder_t* builder, iree_string_view_t name) {
+  id4_pipeline_program_barrier_options_t options;
+  memset(&options, 0, sizeof(options));
+  options.structure_size = sizeof(options);
+  options.name = name;
+  return id4_pipeline_program_barrier(builder, &options);
+}
+
 iree_status_t id4_sampler_program_author_denoise_step(
     const id4_sampler_program_options_t* options,
     id4_pipeline_program_builder_t* builder) {
@@ -142,6 +151,11 @@ iree_status_t id4_sampler_program_author_denoise_step(
       builder, IREE_SV("scalings"),
       ID4_PIPELINE_PROGRAM_IMPORT_TENSOR_FLAG_INITIALIZED,
       id4_pipeline_program_make_shape_rank1(3), &scalings));
+  id4_pipeline_program_tensor_t sigmas = id4_pipeline_program_tensor_invalid();
+  IREE_RETURN_IF_ERROR(id4_sampler_program_import_tensor(
+      builder, IREE_SV("sigmas"),
+      ID4_PIPELINE_PROGRAM_IMPORT_TENSOR_FLAG_INITIALIZED,
+      id4_pipeline_program_make_shape_rank1(2), &sigmas));
   id4_pipeline_program_tensor_t guidance =
       id4_pipeline_program_tensor_invalid();
   IREE_RETURN_IF_ERROR(id4_sampler_program_import_tensor(
@@ -166,11 +180,11 @@ iree_status_t id4_sampler_program_author_denoise_step(
   IREE_RETURN_IF_ERROR(id4_sampler_program_format_u64(
       element_count, element_count_buffer, IREE_ARRAYSIZE(element_count_buffer),
       &element_count_string));
-  id4_pipeline_kernel_config_binding_t config_bindings[] = {
+  id4_pipeline_kernel_config_binding_t denoise_config_bindings[] = {
       id4_pipeline_make_kernel_config_binding(
           IREE_SV("id4.sampler.element_count"), element_count_string),
   };
-  id4_pipeline_program_dispatch_binding_t bindings[] = {
+  id4_pipeline_program_dispatch_binding_t denoise_bindings[] = {
       id4_pipeline_program_read(cond_out),
       id4_pipeline_program_read(uncond_out),
       id4_pipeline_program_read(x_t),
@@ -178,7 +192,6 @@ iree_status_t id4_sampler_program_author_denoise_step(
       id4_pipeline_program_read(guidance),
       id4_pipeline_program_write(guided_pred),
       id4_pipeline_program_write(denoised),
-      id4_pipeline_program_write(x_next),
   };
 
   id4_pipeline_program_dispatch_loom_options_t dispatch_options;
@@ -188,10 +201,38 @@ iree_status_t id4_sampler_program_author_denoise_step(
   dispatch_options.kernel =
       id4_pipeline_make_kernel_ref(IREE_SV("sampler/cfg_denoise_f32"),
                                    IREE_SV("id4_sampler_cfg_denoise_f32"));
-  dispatch_options.config_binding_count = IREE_ARRAYSIZE(config_bindings);
-  dispatch_options.config_bindings = config_bindings;
-  dispatch_options.binding_count = IREE_ARRAYSIZE(bindings);
-  dispatch_options.bindings = bindings;
+  dispatch_options.config_binding_count =
+      IREE_ARRAYSIZE(denoise_config_bindings);
+  dispatch_options.config_bindings = denoise_config_bindings;
+  dispatch_options.binding_count = IREE_ARRAYSIZE(denoise_bindings);
+  dispatch_options.bindings = denoise_bindings;
+  IREE_RETURN_IF_ERROR(
+      id4_pipeline_program_dispatch_loom(builder, &dispatch_options));
+
+  IREE_RETURN_IF_ERROR(id4_sampler_program_barrier(
+      builder, IREE_SV("sampler.denoise_step.after_cfg_denoise")));
+
+  id4_pipeline_kernel_config_binding_t euler_config_bindings[] = {
+      id4_pipeline_make_kernel_config_binding(
+          IREE_SV("id4.sampler.euler_step.element_count"),
+          element_count_string),
+  };
+  id4_pipeline_program_dispatch_binding_t euler_bindings[] = {
+      id4_pipeline_program_read(x_t),
+      id4_pipeline_program_read(denoised),
+      id4_pipeline_program_read(sigmas),
+      id4_pipeline_program_write(x_next),
+  };
+
+  memset(&dispatch_options, 0, sizeof(dispatch_options));
+  dispatch_options.structure_size = sizeof(dispatch_options);
+  dispatch_options.name = IREE_SV("sampler.denoise_step.euler_step");
+  dispatch_options.kernel = id4_pipeline_make_kernel_ref(
+      IREE_SV("sampler/euler_step_f32"), IREE_SV("id4_sampler_euler_step_f32"));
+  dispatch_options.config_binding_count = IREE_ARRAYSIZE(euler_config_bindings);
+  dispatch_options.config_bindings = euler_config_bindings;
+  dispatch_options.binding_count = IREE_ARRAYSIZE(euler_bindings);
+  dispatch_options.bindings = euler_bindings;
   IREE_RETURN_IF_ERROR(
       id4_pipeline_program_dispatch_loom(builder, &dispatch_options));
 

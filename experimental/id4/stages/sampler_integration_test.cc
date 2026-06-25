@@ -194,10 +194,33 @@ TEST(SamplerDenoiseStageIntegration, PrepareAndIssueDenoiseStepFixture) {
       context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, 0,
       IREE_HAL_SEMAPHORE_FLAG_DEFAULT, update_semaphore.out()));
   uint64_t update_value = 0;
-  IREE_ASSERT_OK(id4::test::QueueUpdateInitializedBoundaryTensorsFromFixture(
+  IREE_ASSERT_OK(id4::test::QueueUpdateBoundaryTensorFromFixture(
       context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, plan.get(),
-      boundary_bindings, fixture_tensors, update_semaphore.get(),
-      &update_value));
+      boundary_bindings, IREE_SV("cond_out"), fixture_tensors,
+      IREE_SV("cond_out"), update_semaphore.get(), &update_value));
+  IREE_ASSERT_OK(id4::test::QueueUpdateBoundaryTensorFromFixture(
+      context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, plan.get(),
+      boundary_bindings, IREE_SV("uncond_out"), fixture_tensors,
+      IREE_SV("uncond_out"), update_semaphore.get(), &update_value));
+  IREE_ASSERT_OK(id4::test::QueueUpdateBoundaryTensorFromFixture(
+      context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, plan.get(),
+      boundary_bindings, IREE_SV("x_t"), fixture_tensors, IREE_SV("x_t"),
+      update_semaphore.get(), &update_value));
+  IREE_ASSERT_OK(id4::test::QueueUpdateBoundaryTensorFromFixture(
+      context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, plan.get(),
+      boundary_bindings, IREE_SV("scalings"), fixture_tensors,
+      IREE_SV("scalings"), update_semaphore.get(), &update_value));
+  IREE_ASSERT_OK(id4::test::QueueUpdateBoundaryTensorFromFixture(
+      context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, plan.get(),
+      boundary_bindings, IREE_SV("guidance"), fixture_tensors,
+      IREE_SV("guidance"), update_semaphore.get(), &update_value));
+  const float step_sigmas[2] = {1.0f, 0.0f};
+  iree_hal_buffer_binding_t sigmas_binding = {};
+  IREE_ASSERT_OK(id4::test::FindBoundaryBinding(
+      plan.get(), boundary_bindings, IREE_SV("sigmas"), &sigmas_binding));
+  IREE_ASSERT_OK(id4::test::QueueUpdateBinding(
+      context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, &sigmas_binding,
+      step_sigmas, sizeof(step_sigmas), update_semaphore.get(), &update_value));
 
   const uint8_t sentinel = 0xA5;
   iree_hal_buffer_binding_t denoised_binding = {};

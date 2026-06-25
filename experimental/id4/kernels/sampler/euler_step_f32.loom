@@ -1,0 +1,66 @@
+config.decl @id4.sampler.euler_step.element_count : %value: index where [range(%value, 1, 1048576)]
+
+kernel.def @id4_sampler_euler_step_f32() {
+  %unit = index.constant 1 : index
+  %workgroup_size_x = index.constant 256 : index
+  %rounding = index.constant 255 : index
+  %element_count = config.get @id4.sampler.euler_step.element_count : index
+  %rounded = index.add %element_count, %rounding : index
+  %workgroups_x = index.div %rounded, %workgroup_size_x : index
+  kernel.launch.config workgroups(%workgroups_x, %unit, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
+} launch(%x_t: buffer, %denoised: buffer, %sigmas: buffer, %x_next: buffer) {
+  %base = index.constant 0 : offset
+  %workgroup_size_x = index.constant 256 : index
+  %workgroup = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %element_count = config.get @id4.sampler.euler_step.element_count : index
+  %sigma_count = index.constant 2 : index
+  %element_index = index.madd %workgroup, %workgroup_size_x, %lane : index
+  %in_bounds = index.cmp ult, %element_index, %element_count : index
+  %x_t_noalias, %denoised_noalias, %sigmas_noalias, %x_next_noalias = buffer.assume.noalias %x_t, %denoised, %sigmas, %x_next : buffer, buffer, buffer, buffer
+  %x_t_view = buffer.view %x_t_noalias[%base] : buffer -> view<[%element_count]xf32, #dense>
+  %denoised_view = buffer.view %denoised_noalias[%base] : buffer -> view<[%element_count]xf32, #dense>
+  %sigmas_view = buffer.view %sigmas_noalias[%base] : buffer -> view<[%sigma_count]xf32, #dense>
+  %x_next_view = buffer.view %x_next_noalias[%base] : buffer -> view<[%element_count]xf32, #dense>
+  scf.if %in_bounds {
+    %x_t_value = view.load %x_t_view[%element_index] : view<[%element_count]xf32, #dense> -> f32
+    %denoised_value = view.load %denoised_view[%element_index] : view<[%element_count]xf32, #dense> -> f32
+    %zero = index.constant 0 : index
+    %one = index.constant 1 : index
+    %sigma = view.load %sigmas_view[%zero] : view<[%sigma_count]xf32, #dense> -> f32
+    %next_sigma = view.load %sigmas_view[%one] : view<[%sigma_count]xf32, #dense> -> f32
+    %delta = scalar.subf<reassoc|nnan|ninf|nsz> %x_t_value, %denoised_value : f32
+    %derivative = scalar.divf<nnan|ninf|nsz|arcp> %delta, %sigma : f32
+    %sigma_delta = scalar.subf<reassoc|nnan|ninf|nsz> %next_sigma, %sigma : f32
+    %scaled_derivative = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %derivative, %sigma_delta : f32
+    %x_next_value = scalar.addf<reassoc|nnan|ninf|nsz|contract> %x_t_value, %scaled_derivative : f32
+    view.store %x_next_value, %x_next_view[%element_index] : f32, view<[%element_count]xf32, #dense>
+  }
+  kernel.return
+}
+
+check.case public @id4_sampler_euler_step_f32_small_case {
+  %x_t = check.generate.fill value(10.0) : tensor<257xf32>
+  %denoised = check.generate.iota offset(3.0) step(-1.0) : tensor<257xf32>
+  %sigmas = check.generate.iota offset(2.0) step(-1.0) : tensor<2xf32>
+  %x_next = check.generate.fill value(0.0) : tensor<257xf32>
+  %expected_x_next = check.generate.iota offset(6.5) step(-0.5) : tensor<257xf32>
+  func.call @id4_sampler_euler_step_f32(%x_t, %denoised, %sigmas, %x_next) : (tensor<257xf32>, tensor<257xf32>, tensor<2xf32>, tensor<257xf32>)
+  check.expect.close actual(%x_next) expected(%expected_x_next) atol(0.0) rtol(0.0) nan(same) : tensor<257xf32>
+  check.return
+}
+
+check.case public @id4_sampler_euler_step_f32_full_latent_case {
+  %x_t = check.generate.fill value(10.0) : tensor<524288xf32>
+  %denoised = check.generate.iota offset(3.0) step(-1.0) : tensor<524288xf32>
+  %sigmas = check.generate.iota offset(2.0) step(-1.0) : tensor<2xf32>
+  %x_next = check.generate.fill value(0.0) : tensor<524288xf32>
+  %expected_x_next = check.generate.iota offset(6.5) step(-0.5) : tensor<524288xf32>
+  func.call @id4_sampler_euler_step_f32(%x_t, %denoised, %sigmas, %x_next) : (tensor<524288xf32>, tensor<524288xf32>, tensor<2xf32>, tensor<524288xf32>)
+  check.expect.close actual(%x_next) expected(%expected_x_next) atol(0.0) rtol(0.0) nan(same) : tensor<524288xf32>
+  check.return
+}
+
+check.benchmark<@id4_sampler_euler_step_f32_small_case> @id4_sampler_euler_step_f32_small
+
+check.benchmark<@id4_sampler_euler_step_f32_full_latent_case> @id4_sampler_euler_step_f32_full_latent

@@ -208,8 +208,7 @@ iree_status_t id4_ideogram4_session_load(
     id4_ideogram4_session_t* session,
     const id4_ideogram4_session_load_options_t* options);
 
-// Creates a generation plan for one parsed request and explicit generation
-// configuration.
+// Creates a generation plan for one parsed full-generation request.
 iree_status_t id4_ideogram4_session_plan_generation(
     id4_ideogram4_session_t* session,
     const id4_ideogram4_generation_plan_options_t* options,

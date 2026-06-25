@@ -3861,6 +3861,24 @@ _KERNEL_CASES = [
         "target_name": "sampler_cfg_denoise_f32_full_latent",
     },
     {
+        "actual_case": "@id4_sampler_euler_step_f32_small_case",
+        "benchmark": "@id4_sampler_euler_step_f32_small",
+        "configs": [
+            "--config=id4.sampler.euler_step.element_count=257",
+        ],
+        "source": "sampler/euler_step_f32.loom",
+        "target_name": "sampler_euler_step_f32_small",
+    },
+    {
+        "actual_case": "@id4_sampler_euler_step_f32_full_latent_case",
+        "benchmark": "@id4_sampler_euler_step_f32_full_latent",
+        "configs": [
+            "--config=id4.sampler.euler_step.element_count=524288",
+        ],
+        "source": "sampler/euler_step_f32.loom",
+        "target_name": "sampler_euler_step_f32_full_latent",
+    },
+    {
         "actual_case": "@id4_qwen3_vl_attention_materialized_f32_single_token_case",
         "benchmark": "@id4_qwen3_vl_attention_materialized_f32_single_token",
         "configs": [
@@ -4619,6 +4637,7 @@ _KERNEL_SOURCES = [
     "qwen3_vl/silu_gate_f32.loom",
     "qwen3_vl/token_embedding.loom",
     "sampler/cfg_denoise_f32.loom",
+    "sampler/euler_step_f32.loom",
     "smoke_configured.loom",
     "vae/conv1x1_bias_bf16_wmma.loom",
     "vae/conv1x1_bias_f32.loom",

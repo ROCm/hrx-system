@@ -255,6 +255,14 @@ iree_status_t QueueFillDiagnosticTapTensors(
     iree_host_size_t pattern_length, iree_hal_semaphore_t* fill_semaphore,
     uint64_t* out_fill_value);
 
+// Queues one fixture input tensor into a named boundary tensor.
+iree_status_t QueueUpdateBoundaryTensorFromFixture(
+    iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
+    const id4_pipeline_plan_t* plan, const BufferBindingSet& binding_set,
+    iree_string_view_t boundary_name, const FixtureTensorSet& fixture_tensors,
+    iree_string_view_t fixture_name, iree_hal_semaphore_t* update_semaphore,
+    uint64_t* inout_update_value);
+
 // Reads |binding| into a host byte vector after |wait_list| is satisfied.
 iree_status_t ReadBindingToHost(iree_hal_device_t* device,
                                 iree_hal_queue_affinity_t queue_affinity,

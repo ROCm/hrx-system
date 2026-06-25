@@ -1191,6 +1191,67 @@ iree_status_t QueueFillDiagnosticTapTensors(
   return iree_ok_status();
 }
 
+iree_status_t QueueUpdateBoundaryTensorFromFixture(
+    iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
+    const id4_pipeline_plan_t* plan, const BufferBindingSet& binding_set,
+    iree_string_view_t boundary_name, const FixtureTensorSet& fixture_tensors,
+    iree_string_view_t fixture_name, iree_hal_semaphore_t* update_semaphore,
+    uint64_t* inout_update_value) {
+  const FixtureTensor* fixture_tensor =
+      fixture_tensors.FindTensor(IREE_SV("input"), fixture_name);
+  if (!fixture_tensor) {
+    return iree_make_status(
+        IREE_STATUS_NOT_FOUND, "fixture is missing required `%.*s` input",
+        static_cast<int>(fixture_name.size), fixture_name.data);
+  }
+  for (iree_host_size_t i = 0;
+       i < id4_pipeline_plan_boundary_tensor_count(plan); ++i) {
+    const id4_pipeline_boundary_tensor_plan_t* boundary =
+        id4_pipeline_plan_boundary_tensor_at(plan, i);
+    if (!boundary ||
+        !iree_string_view_equal(boundary->layout.name, boundary_name)) {
+      continue;
+    }
+    if (i >= binding_set.count) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "boundary tensor `%.*s` has no allocated binding",
+                              static_cast<int>(boundary_name.size),
+                              boundary_name.data);
+    }
+    if (fixture_tensor->dtype != boundary->layout.dtype) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "fixture tensor `%.*s` dtype does not match boundary `%.*s` dtype",
+          static_cast<int>(fixture_name.size), fixture_name.data,
+          static_cast<int>(boundary_name.size), boundary_name.data);
+    }
+    if (!ShapeEquals(fixture_tensor->shape, boundary->layout.shape)) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "fixture tensor `%.*s` shape does not match boundary `%.*s` shape",
+          static_cast<int>(fixture_name.size), fixture_name.data,
+          static_cast<int>(boundary_name.size), boundary_name.data);
+    }
+    if (fixture_tensor->payload.size() != boundary->layout.byte_length) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "fixture tensor `%.*s` payload length %zu does not match boundary "
+          "`%.*s` byte length %" PRIu64,
+          static_cast<int>(fixture_name.size), fixture_name.data,
+          fixture_tensor->payload.size(), static_cast<int>(boundary_name.size),
+          boundary_name.data,
+          static_cast<uint64_t>(boundary->layout.byte_length));
+    }
+    return QueueUpdateBinding(device, queue_affinity, &binding_set.bindings[i],
+                              fixture_tensor->payload.data(),
+                              fixture_tensor->payload.size(), update_semaphore,
+                              inout_update_value);
+  }
+  return iree_make_status(
+      IREE_STATUS_NOT_FOUND, "boundary tensor `%.*s` not found",
+      static_cast<int>(boundary_name.size), boundary_name.data);
+}
+
 iree_status_t ReadBindingToHost(iree_hal_device_t* device,
                                 iree_hal_queue_affinity_t queue_affinity,
                                 const iree_hal_buffer_binding_t* binding,

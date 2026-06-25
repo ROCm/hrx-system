@@ -122,6 +122,21 @@ typedef struct id4_ideogram4_generation_boundary_alias_t {
   iree_string_view_t target_name;
 } id4_ideogram4_generation_boundary_alias_t;
 
+typedef struct id4_ideogram4_boundary_upload_context_t {
+  // Device receiving the queued upload operations.
+  iree_hal_device_t* device;
+  // Queue affinity used for every upload in this context.
+  iree_hal_queue_affinity_t queue_affinity;
+  // Plan whose boundary tensor table is searched by name.
+  const id4_pipeline_plan_t* plan;
+  // Binding set whose entries are updated by name.
+  const id4_pipeline_buffer_binding_set_t* boundary_bindings;
+  // Semaphore chaining the upload queue operations.
+  iree_hal_semaphore_t* semaphore;
+  // Payload value mutated after every queued update.
+  uint64_t* payload_value;
+} id4_ideogram4_boundary_upload_context_t;
+
 struct id4_ideogram4_generation_bundle_t {
   // Allocator used for bundle-owned storage.
   iree_allocator_t host_allocator;
@@ -225,6 +240,24 @@ static iree_status_t id4_ideogram4_validate_diagnostic_tap_names(
     }
   }
   return iree_ok_status();
+}
+
+static iree_status_t id4_ideogram4_upload_boundary_tensor(
+    const id4_ideogram4_boundary_upload_context_t* context,
+    iree_string_view_t binding_name, const void* source_data,
+    iree_host_size_t source_length,
+    iree_hal_semaphore_list_t initial_wait_semaphore_list) {
+  if (!context) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "boundary upload context is required");
+  }
+  iree_hal_buffer_binding_t binding;
+  IREE_RETURN_IF_ERROR(id4_pipeline_find_boundary_binding(
+      context->plan, context->boundary_bindings, binding_name, &binding));
+  return id4_pipeline_queue_update_binding(
+      context->device, context->queue_affinity, &binding, source_data,
+      source_length, initial_wait_semaphore_list, context->semaphore,
+      context->payload_value);
 }
 
 static iree_hal_semaphore_list_t id4_ideogram4_single_semaphore_list(
@@ -1497,21 +1530,6 @@ static iree_status_t id4_ideogram4_qwen_allocate_bindings(
   return status;
 }
 
-static iree_status_t id4_ideogram4_qwen_upload_binding(
-    iree_hal_device_t* device,
-    const id4_ideogram4_qwen_issue_options_t* options,
-    id4_ideogram4_qwen_execution_t* execution, iree_string_view_t binding_name,
-    const void* source_data, iree_host_size_t source_length,
-    iree_hal_semaphore_list_t initial_wait_semaphore_list) {
-  iree_hal_buffer_binding_t binding;
-  IREE_RETURN_IF_ERROR(id4_pipeline_find_boundary_binding(
-      execution->plan, &execution->boundary_bindings, binding_name, &binding));
-  return id4_pipeline_queue_update_binding(
-      device, options->queue_affinity, &binding, source_data, source_length,
-      initial_wait_semaphore_list, execution->upload_semaphore,
-      &execution->upload_payload_value);
-}
-
 static iree_status_t id4_ideogram4_qwen_upload_inputs(
     iree_hal_device_t* device,
     const id4_ideogram4_qwen_issue_options_t* options,
@@ -1525,17 +1543,24 @@ static iree_status_t id4_ideogram4_qwen_upload_inputs(
   const iree_host_size_t token_weights_length =
       inputs->token_count * (iree_host_size_t)sizeof(inputs->token_weights[0]);
 
-  IREE_RETURN_IF_ERROR(id4_ideogram4_qwen_upload_binding(
-      device, options, execution, IREE_SV("token_ids"), inputs->token_ids,
+  id4_ideogram4_boundary_upload_context_t upload_context = {
+      .device = device,
+      .queue_affinity = options->queue_affinity,
+      .plan = execution->plan,
+      .boundary_bindings = &execution->boundary_bindings,
+      .semaphore = execution->upload_semaphore,
+      .payload_value = &execution->upload_payload_value,
+  };
+
+  IREE_RETURN_IF_ERROR(id4_ideogram4_upload_boundary_tensor(
+      &upload_context, IREE_SV("token_ids"), inputs->token_ids,
       token_ids_length, options->wait_semaphore_list));
-  IREE_RETURN_IF_ERROR(id4_ideogram4_qwen_upload_binding(
-      device, options, execution, IREE_SV("attention_mask"),
-      inputs->attention_mask, attention_mask_length,
-      iree_hal_semaphore_list_empty()));
-  return id4_ideogram4_qwen_upload_binding(
-      device, options, execution, IREE_SV("token_weights"),
-      inputs->token_weights, token_weights_length,
-      iree_hal_semaphore_list_empty());
+  IREE_RETURN_IF_ERROR(id4_ideogram4_upload_boundary_tensor(
+      &upload_context, IREE_SV("attention_mask"), inputs->attention_mask,
+      attention_mask_length, iree_hal_semaphore_list_empty()));
+  return id4_ideogram4_upload_boundary_tensor(
+      &upload_context, IREE_SV("token_weights"), inputs->token_weights,
+      token_weights_length, iree_hal_semaphore_list_empty());
 }
 
 static iree_status_t id4_ideogram4_qwen_find_outputs(

@@ -362,59 +362,6 @@ static iree_status_t ReplaceBoundaryBinding(
                           static_cast<int>(name.size), name.data);
 }
 
-static bool TensorShapeEquals(id4_pipeline_tensor_shape_t lhs,
-                              id4_pipeline_tensor_shape_t rhs) {
-  if (lhs.rank != rhs.rank) return false;
-  for (uint32_t i = 0; i < lhs.rank; ++i) {
-    if (lhs.dims[i] != rhs.dims[i]) return false;
-  }
-  return true;
-}
-
-static iree_status_t QueueUpdateBoundaryTensorFromFixture(
-    iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
-    const id4_pipeline_plan_t* plan,
-    const id4::test::BufferBindingSet& binding_set,
-    iree_string_view_t boundary_name,
-    const id4::test::FixtureTensorSet& fixture_tensors,
-    iree_string_view_t fixture_name, iree_hal_semaphore_t* update_semaphore,
-    uint64_t* inout_update_value) {
-  const id4::test::FixtureTensor* fixture_tensor = nullptr;
-  IREE_RETURN_IF_ERROR(FindFixtureTensor(fixture_tensors, IREE_SV("input"),
-                                         fixture_name, &fixture_tensor));
-  for (iree_host_size_t i = 0;
-       i < id4_pipeline_plan_boundary_tensor_count(plan); ++i) {
-    const id4_pipeline_boundary_tensor_plan_t* boundary =
-        id4_pipeline_plan_boundary_tensor_at(plan, i);
-    if (!boundary ||
-        !iree_string_view_equal(boundary->layout.name, boundary_name)) {
-      continue;
-    }
-    if (fixture_tensor->dtype != boundary->layout.dtype) {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "fixture tensor `%.*s` dtype does not match boundary `%.*s` dtype",
-          static_cast<int>(fixture_name.size), fixture_name.data,
-          static_cast<int>(boundary_name.size), boundary_name.data);
-    }
-    if (!TensorShapeEquals(fixture_tensor->shape, boundary->layout.shape)) {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "fixture tensor `%.*s` shape does not match boundary `%.*s` shape",
-          static_cast<int>(fixture_name.size), fixture_name.data,
-          static_cast<int>(boundary_name.size), boundary_name.data);
-    }
-    IREE_RETURN_IF_ERROR(id4::test::QueueUpdateBinding(
-        device, queue_affinity, &binding_set.bindings[i],
-        fixture_tensor->payload.data(), fixture_tensor->payload.size(),
-        update_semaphore, inout_update_value));
-    return iree_ok_status();
-  }
-  return iree_make_status(
-      IREE_STATUS_NOT_FOUND, "boundary tensor `%.*s` not found",
-      static_cast<int>(boundary_name.size), boundary_name.data);
-}
-
 static iree_status_t CompareExpectedDiagnosticTaps(
     iree_hal_device_t* device, const id4_pipeline_plan_t* plan,
     const id4::test::BufferBindingSet& diagnostic_tap_bindings,
@@ -657,15 +604,23 @@ TEST(Ideogram4OneStepIntegration,
       context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, dit_uncond_plan.get(),
       dit_uncond_boundaries, dit_uncond_tensors, update_semaphore.get(),
       &update_value));
-  IREE_ASSERT_OK(QueueUpdateBoundaryTensorFromFixture(
+  IREE_ASSERT_OK(id4::test::QueueUpdateBoundaryTensorFromFixture(
       context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, sampler_plan.get(),
       sampler_boundaries, IREE_SV("x_t"), dit_cond_tensors, IREE_SV("x"),
       update_semaphore.get(), &update_value));
-  IREE_ASSERT_OK(QueueUpdateBoundaryTensorFromFixture(
+  IREE_ASSERT_OK(id4::test::QueueUpdateBoundaryTensorFromFixture(
       context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, sampler_plan.get(),
       sampler_boundaries, IREE_SV("scalings"), sampler_tensors,
       IREE_SV("scalings"), update_semaphore.get(), &update_value));
-  IREE_ASSERT_OK(QueueUpdateBoundaryTensorFromFixture(
+  const float step_sigmas[2] = {1.0f, 0.0f};
+  iree_hal_buffer_binding_t sigmas_binding = {};
+  IREE_ASSERT_OK(
+      id4::test::FindBoundaryBinding(sampler_plan.get(), sampler_boundaries,
+                                     IREE_SV("sigmas"), &sigmas_binding));
+  IREE_ASSERT_OK(id4::test::QueueUpdateBinding(
+      context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, &sigmas_binding,
+      step_sigmas, sizeof(step_sigmas), update_semaphore.get(), &update_value));
+  IREE_ASSERT_OK(id4::test::QueueUpdateBoundaryTensorFromFixture(
       context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, sampler_plan.get(),
       sampler_boundaries, IREE_SV("guidance"), sampler_tensors,
       IREE_SV("guidance"), update_semaphore.get(), &update_value));

@@ -1054,7 +1054,8 @@ TEST(Ideogram4OneStepTraceIntegration,
     const float sigma = sigmas[step_ordinal];
     const float next_sigma = sigmas[step_ordinal + 1];
     const float timestep = timesteps[step_ordinal];
-    const float scalings[3] = {1.0f, -sigma, next_sigma - sigma};
+    const float scalings[3] = {1.0f, -sigma, 1.0f};
+    const float step_sigmas[2] = {sigma, next_sigma};
     if (!compare_one_step_fixture) {
       fprintf(stderr,
               "[ ID4       ] denoise step %d/%d sigma=%g next_sigma=%g "
@@ -1088,6 +1089,10 @@ TEST(Ideogram4OneStepTraceIntegration,
     IREE_ASSERT_OK(QueueUpdateBoundary(context.device.get(), sampler_plan.get(),
                                        sampler_boundaries, IREE_SV("scalings"),
                                        scalings, sizeof(scalings),
+                                       update_semaphore.get(), &update_value));
+    IREE_ASSERT_OK(QueueUpdateBoundary(context.device.get(), sampler_plan.get(),
+                                       sampler_boundaries, IREE_SV("sigmas"),
+                                       step_sigmas, sizeof(step_sigmas),
                                        update_semaphore.get(), &update_value));
     IREE_ASSERT_OK(QueueUpdateBoundary(context.device.get(), sampler_plan.get(),
                                        sampler_boundaries, IREE_SV("guidance"),
