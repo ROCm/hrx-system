@@ -109,6 +109,17 @@ typedef struct id4_ideogram4_generation_stage_slot_t {
   iree_hal_semaphore_t* prepare_semaphore;
 } id4_ideogram4_generation_stage_slot_t;
 
+typedef struct id4_ideogram4_generation_boundary_alias_t {
+  // Stage slot producing the replacement binding.
+  id4_ideogram4_generation_stage_ordinal_t source_stage;
+  // Boundary tensor exported by the producer stage.
+  iree_string_view_t source_name;
+  // Stage slot consuming the replacement binding.
+  id4_ideogram4_generation_stage_ordinal_t target_stage;
+  // Boundary tensor imported by the consumer stage.
+  iree_string_view_t target_name;
+} id4_ideogram4_generation_boundary_alias_t;
+
 struct id4_ideogram4_generation_bundle_t {
   // Allocator used for bundle-owned storage.
   iree_allocator_t host_allocator;
@@ -123,6 +134,38 @@ struct id4_ideogram4_generation_bundle_t {
   // Coarse stage slots owned by this generation bundle.
   id4_ideogram4_generation_stage_slot_t
       stages[ID4_IDEOGRAM4_GENERATION_STAGE_COUNT];
+};
+
+static const id4_ideogram4_generation_boundary_alias_t
+    id4_ideogram4_generation_boundary_aliases[] = {
+        {
+            // Qwen text conditioning consumed by the conditioned DiT branch.
+            .source_stage = ID4_IDEOGRAM4_GENERATION_STAGE_QWEN,
+            .source_name = IREE_SVL("condition"),
+            .target_stage = ID4_IDEOGRAM4_GENERATION_STAGE_DIT_CONDITIONED,
+            .target_name = IREE_SVL("condition"),
+        },
+        {
+            // Conditioned DiT velocity consumed by CFG sampling.
+            .source_stage = ID4_IDEOGRAM4_GENERATION_STAGE_DIT_CONDITIONED,
+            .source_name = IREE_SVL("velocity"),
+            .target_stage = ID4_IDEOGRAM4_GENERATION_STAGE_SAMPLER,
+            .target_name = IREE_SVL("cond_out"),
+        },
+        {
+            // Unconditioned DiT velocity consumed by CFG sampling.
+            .source_stage = ID4_IDEOGRAM4_GENERATION_STAGE_DIT_UNCONDITIONED,
+            .source_name = IREE_SVL("velocity"),
+            .target_stage = ID4_IDEOGRAM4_GENERATION_STAGE_SAMPLER,
+            .target_name = IREE_SVL("uncond_out"),
+        },
+        {
+            // Final denoised latent consumed by VAE-backed decode.
+            .source_stage = ID4_IDEOGRAM4_GENERATION_STAGE_SAMPLER,
+            .source_name = IREE_SVL("denoised"),
+            .target_stage = ID4_IDEOGRAM4_GENERATION_STAGE_DECODE,
+            .target_name = IREE_SVL("media.latent.diffusion"),
+        },
 };
 
 static iree_status_t id4_ideogram4_validate_options_size(
@@ -1012,6 +1055,115 @@ static iree_status_t id4_ideogram4_generation_bundle_allocate_bindings(
   return status;
 }
 
+static bool id4_ideogram4_generation_shapes_equal(
+    id4_pipeline_tensor_shape_t lhs, id4_pipeline_tensor_shape_t rhs) {
+  if (lhs.rank != rhs.rank) return false;
+  for (uint32_t i = 0; i < lhs.rank; ++i) {
+    if (lhs.dims[i] != rhs.dims[i]) return false;
+  }
+  return true;
+}
+
+static iree_status_t id4_ideogram4_generation_find_boundary_tensor(
+    const id4_pipeline_plan_t* plan, iree_string_view_t name,
+    const id4_pipeline_boundary_tensor_plan_t** out_boundary) {
+  *out_boundary = NULL;
+  const iree_host_size_t boundary_count =
+      id4_pipeline_plan_boundary_tensor_count(plan);
+  for (iree_host_size_t i = 0; i < boundary_count; ++i) {
+    const id4_pipeline_boundary_tensor_plan_t* boundary =
+        id4_pipeline_plan_boundary_tensor_at(plan, i);
+    if (boundary && iree_string_view_equal(boundary->layout.name, name)) {
+      *out_boundary = boundary;
+      return iree_ok_status();
+    }
+  }
+  iree_string_view_t stage_name = id4_pipeline_plan_stage_name(plan);
+  return iree_make_status(
+      IREE_STATUS_NOT_FOUND,
+      "Ideogram 4 generation stage %.*s has no boundary tensor `%.*s`",
+      (int)stage_name.size, stage_name.data, (int)name.size, name.data);
+}
+
+static iree_status_t id4_ideogram4_generation_validate_boundary_alias(
+    const id4_ideogram4_generation_stage_slot_t* source_slot,
+    iree_string_view_t source_name,
+    const id4_ideogram4_generation_stage_slot_t* target_slot,
+    iree_string_view_t target_name) {
+  const id4_pipeline_boundary_tensor_plan_t* source_boundary = NULL;
+  IREE_RETURN_IF_ERROR(id4_ideogram4_generation_find_boundary_tensor(
+      source_slot->plan, source_name, &source_boundary));
+  const id4_pipeline_boundary_tensor_plan_t* target_boundary = NULL;
+  IREE_RETURN_IF_ERROR(id4_ideogram4_generation_find_boundary_tensor(
+      target_slot->plan, target_name, &target_boundary));
+
+  iree_string_view_t source_stage_name =
+      id4_pipeline_plan_stage_name(source_slot->plan);
+  iree_string_view_t target_stage_name =
+      id4_pipeline_plan_stage_name(target_slot->plan);
+  if (!iree_all_bits_set(source_boundary->flags,
+                         ID4_PIPELINE_BOUNDARY_TENSOR_FLAG_EXPORTED)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "Ideogram 4 generation alias source %.*s/%.*s is not exported",
+        (int)source_stage_name.size, source_stage_name.data,
+        (int)source_name.size, source_name.data);
+  }
+  if (!iree_all_bits_set(target_boundary->flags,
+                         ID4_PIPELINE_BOUNDARY_TENSOR_FLAG_IMPORTED)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "Ideogram 4 generation alias target %.*s/%.*s is not imported",
+        (int)target_stage_name.size, target_stage_name.data,
+        (int)target_name.size, target_name.data);
+  }
+  const id4_pipeline_tensor_layout_t* source_layout = &source_boundary->layout;
+  const id4_pipeline_tensor_layout_t* target_layout = &target_boundary->layout;
+  if (source_layout->dtype != target_layout->dtype ||
+      !id4_ideogram4_generation_shapes_equal(source_layout->shape,
+                                             target_layout->shape) ||
+      source_layout->byte_length != target_layout->byte_length ||
+      source_layout->alignment != target_layout->alignment) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "Ideogram 4 generation boundary alias %.*s/%.*s to %.*s/%.*s has "
+        "incompatible tensor layouts",
+        (int)source_stage_name.size, source_stage_name.data,
+        (int)source_name.size, source_name.data, (int)target_stage_name.size,
+        target_stage_name.data, (int)target_name.size, target_name.data);
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t id4_ideogram4_generation_bundle_apply_boundary_alias(
+    id4_ideogram4_generation_bundle_t* bundle,
+    const id4_ideogram4_generation_boundary_alias_t* alias) {
+  id4_ideogram4_generation_stage_slot_t* source_slot =
+      &bundle->stages[alias->source_stage];
+  id4_ideogram4_generation_stage_slot_t* target_slot =
+      &bundle->stages[alias->target_stage];
+  IREE_RETURN_IF_ERROR(id4_ideogram4_generation_validate_boundary_alias(
+      source_slot, alias->source_name, target_slot, alias->target_name));
+
+  iree_hal_buffer_binding_t replacement;
+  IREE_RETURN_IF_ERROR(id4_pipeline_find_boundary_binding(
+      source_slot->plan, &source_slot->boundary_bindings, alias->source_name,
+      &replacement));
+  return id4_pipeline_replace_boundary_binding(target_slot->plan,
+                                               &target_slot->boundary_bindings,
+                                               alias->target_name, replacement);
+}
+
+static iree_status_t id4_ideogram4_generation_bundle_apply_boundary_aliases(
+    id4_ideogram4_generation_bundle_t* bundle) {
+  for (iree_host_size_t i = 0;
+       i < IREE_ARRAYSIZE(id4_ideogram4_generation_boundary_aliases); ++i) {
+    IREE_RETURN_IF_ERROR(id4_ideogram4_generation_bundle_apply_boundary_alias(
+        bundle, &id4_ideogram4_generation_boundary_aliases[i]));
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t id4_ideogram4_generation_bundle_create_prepare_semaphores(
     id4_ideogram4_generation_bundle_t* bundle) {
   iree_status_t status = iree_ok_status();
@@ -1129,6 +1281,9 @@ iree_status_t id4_ideogram4_session_prepare_generation(
   }
   if (iree_status_is_ok(status)) {
     status = id4_ideogram4_generation_bundle_allocate_bindings(bundle);
+  }
+  if (iree_status_is_ok(status)) {
+    status = id4_ideogram4_generation_bundle_apply_boundary_aliases(bundle);
   }
   if (iree_status_is_ok(status)) {
     status = id4_ideogram4_generation_bundle_create_prepare_semaphores(bundle);
