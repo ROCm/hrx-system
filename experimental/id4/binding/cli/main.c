@@ -170,6 +170,8 @@ static iree_status_t id4_cli_run_qwen(iree_allocator_t host_allocator) {
     session_options.services =
         id4_tooling_runtime_context_stage_services(&runtime_context);
     session_options.kernel_cache = runtime_context.kernel_cache;
+    session_options.vae_activation_format =
+        ID4_VAE_ACTIVATION_FORMAT_BF16_CONV_INPUT;
     status = id4_ideogram4_session_create(&session_options, host_allocator,
                                           &session);
   }

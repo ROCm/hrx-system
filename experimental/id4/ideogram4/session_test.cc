@@ -50,6 +50,7 @@ class SessionTest : public ::testing::Test {
     options.structure_size = sizeof(options);
     options.services = services;
     options.kernel_cache = kernel_cache_;
+    options.vae_activation_format = ID4_VAE_ACTIVATION_FORMAT_BF16_CONV_INPUT;
     return options;
   }
 
@@ -76,6 +77,18 @@ TEST_F(SessionTest, LoadsOnce) {
                         id4_ideogram4_session_load(session, &load_options));
 
   id4_ideogram4_session_release(session);
+}
+
+TEST_F(SessionTest, RequiresVaeActivationFormat) {
+  id4_ideogram4_session_create_options_t create_options = CreateOptions();
+  create_options.vae_activation_format = ID4_VAE_ACTIVATION_FORMAT_INVALID;
+
+  id4_ideogram4_session_t* session = nullptr;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      id4_ideogram4_session_create(&create_options, iree_allocator_system(),
+                                   &session));
+  EXPECT_EQ(session, nullptr);
 }
 
 TEST_F(SessionTest, IssueRequiresLoadedSession) {

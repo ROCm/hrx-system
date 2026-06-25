@@ -11,7 +11,10 @@
 #include <string.h>
 
 #include "experimental/id4/pipeline/binding.h"
+#include "experimental/id4/stages/ideogram4_decode.h"
+#include "experimental/id4/stages/ideogram4_dit.h"
 #include "experimental/id4/stages/qwen3_vl.h"
+#include "experimental/id4/stages/sampler.h"
 
 struct id4_ideogram4_session_t {
   // Reference count for shared session ownership.
@@ -20,8 +23,20 @@ struct id4_ideogram4_session_t {
   iree_allocator_t host_allocator;
   // Qwen3-VL model dimensions used by the text conditioning stage.
   id4_qwen3_vl_model_config_t qwen_model;
+  // Ideogram 4 DiT model dimensions used by conditioned/unconditioned stages.
+  id4_ideogram4_dit_model_config_t dit_model;
+  // Ideogram 4 latent-to-image decode model contract.
+  id4_ideogram4_decode_model_config_t decode_model;
   // Coarse Qwen3-VL forward stage owned by the session.
   id4_pipeline_stage_t* qwen_stage;
+  // Conditioned Ideogram 4 DiT forward stage owned by the session.
+  id4_pipeline_stage_t* dit_conditioned_stage;
+  // Unconditioned Ideogram 4 DiT forward stage owned by the session.
+  id4_pipeline_stage_t* dit_unconditioned_stage;
+  // Device-side sampler denoise-step stage owned by the session.
+  id4_pipeline_stage_t* sampler_stage;
+  // Ideogram 4 VAE-backed latent decode stage owned by the session.
+  id4_pipeline_stage_t* decode_stage;
   // True after immutable session state has loaded.
   bool is_loaded;
 };
@@ -173,25 +188,96 @@ static iree_status_t id4_ideogram4_validate_session_create_options(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "Ideogram 4 session kernel cache is required");
   }
+  if (options->vae_activation_format == ID4_VAE_ACTIVATION_FORMAT_INVALID) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "Ideogram 4 session VAE activation format is required");
+  }
   return iree_ok_status();
 }
 
 static iree_status_t id4_ideogram4_create_qwen_stage(
     const id4_ideogram4_session_create_options_t* options,
     id4_ideogram4_session_t* session) {
-  const id4_qwen3_vl_model_config_t* qwen_model =
-      id4_qwen3_vl_program_ideogram4_model_config();
-  session->qwen_model = *qwen_model;
-
   id4_qwen3_vl_stage_create_options_t stage_options;
   memset(&stage_options, 0, sizeof(stage_options));
   stage_options.structure_size = sizeof(stage_options);
   stage_options.services = options->services;
   stage_options.kernel_cache = options->kernel_cache;
-  stage_options.parameter_scope = options->parameter_scope;
+  stage_options.parameter_scope = options->parameter_scopes.qwen;
   stage_options.model = session->qwen_model;
   return id4_qwen3_vl_stage_create(&stage_options, session->host_allocator,
                                    &session->qwen_stage);
+}
+
+static iree_status_t id4_ideogram4_create_dit_stage(
+    const id4_ideogram4_session_create_options_t* options,
+    id4_ideogram4_session_t* session, iree_string_view_t parameter_scope,
+    id4_pipeline_stage_t** out_stage) {
+  id4_ideogram4_dit_stage_create_options_t stage_options;
+  memset(&stage_options, 0, sizeof(stage_options));
+  stage_options.structure_size = sizeof(stage_options);
+  stage_options.services = options->services;
+  stage_options.kernel_cache = options->kernel_cache;
+  stage_options.parameter_scope = parameter_scope;
+  stage_options.model = session->dit_model;
+  return id4_ideogram4_dit_stage_create(&stage_options, session->host_allocator,
+                                        out_stage);
+}
+
+static iree_status_t id4_ideogram4_create_sampler_stage(
+    const id4_ideogram4_session_create_options_t* options,
+    id4_ideogram4_session_t* session) {
+  id4_sampler_denoise_stage_create_options_t stage_options;
+  memset(&stage_options, 0, sizeof(stage_options));
+  stage_options.structure_size = sizeof(stage_options);
+  stage_options.services = options->services;
+  stage_options.kernel_cache = options->kernel_cache;
+  return id4_sampler_denoise_stage_create(
+      &stage_options, session->host_allocator, &session->sampler_stage);
+}
+
+static iree_status_t id4_ideogram4_create_decode_stage(
+    const id4_ideogram4_session_create_options_t* options,
+    id4_ideogram4_session_t* session) {
+  id4_ideogram4_decode_stage_create_options_t stage_options;
+  memset(&stage_options, 0, sizeof(stage_options));
+  stage_options.structure_size = sizeof(stage_options);
+  stage_options.services = options->services;
+  stage_options.kernel_cache = options->kernel_cache;
+  stage_options.parameter_scope = options->parameter_scopes.vae;
+  stage_options.model = session->decode_model;
+  stage_options.vae_activation_format = options->vae_activation_format;
+  return id4_ideogram4_decode_stage_create(
+      &stage_options, session->host_allocator, &session->decode_stage);
+}
+
+static iree_status_t id4_ideogram4_create_stages(
+    const id4_ideogram4_session_create_options_t* options,
+    id4_ideogram4_session_t* session) {
+  session->qwen_model = *id4_qwen3_vl_program_ideogram4_model_config();
+  session->dit_model = *id4_ideogram4_dit_program_ideogram4_model_config();
+  session->decode_model =
+      *id4_ideogram4_decode_program_ideogram4_model_config();
+
+  iree_status_t status = id4_ideogram4_create_qwen_stage(options, session);
+  if (iree_status_is_ok(status)) {
+    status = id4_ideogram4_create_dit_stage(
+        options, session, options->parameter_scopes.dit_conditioned,
+        &session->dit_conditioned_stage);
+  }
+  if (iree_status_is_ok(status)) {
+    status = id4_ideogram4_create_dit_stage(
+        options, session, options->parameter_scopes.dit_unconditioned,
+        &session->dit_unconditioned_stage);
+  }
+  if (iree_status_is_ok(status)) {
+    status = id4_ideogram4_create_sampler_stage(options, session);
+  }
+  if (iree_status_is_ok(status)) {
+    status = id4_ideogram4_create_decode_stage(options, session);
+  }
+  return status;
 }
 
 iree_status_t id4_ideogram4_session_create(
@@ -208,7 +294,7 @@ iree_status_t id4_ideogram4_session_create(
     memset(session, 0, sizeof(*session));
     iree_atomic_ref_count_init(&session->ref_count);
     session->host_allocator = host_allocator;
-    status = id4_ideogram4_create_qwen_stage(options, session);
+    status = id4_ideogram4_create_stages(options, session);
   }
   if (iree_status_is_ok(status)) {
     *out_session = session;
@@ -226,6 +312,10 @@ static void id4_ideogram4_session_retain(id4_ideogram4_session_t* session) {
 void id4_ideogram4_session_release(id4_ideogram4_session_t* session) {
   if (session && iree_atomic_ref_count_dec(&session->ref_count) == 1) {
     iree_allocator_t host_allocator = session->host_allocator;
+    id4_pipeline_stage_release(session->decode_stage);
+    id4_pipeline_stage_release(session->sampler_stage);
+    id4_pipeline_stage_release(session->dit_unconditioned_stage);
+    id4_pipeline_stage_release(session->dit_conditioned_stage);
     id4_pipeline_stage_release(session->qwen_stage);
     iree_allocator_free(host_allocator, session);
   }
@@ -268,6 +358,14 @@ iree_status_t id4_ideogram4_session_load(
   stage_options.diagnostics_sink = options->diagnostics_sink;
   IREE_RETURN_IF_ERROR(
       id4_pipeline_stage_load(session->qwen_stage, &stage_options));
+  IREE_RETURN_IF_ERROR(
+      id4_pipeline_stage_load(session->dit_conditioned_stage, &stage_options));
+  IREE_RETURN_IF_ERROR(id4_pipeline_stage_load(session->dit_unconditioned_stage,
+                                               &stage_options));
+  IREE_RETURN_IF_ERROR(
+      id4_pipeline_stage_load(session->sampler_stage, &stage_options));
+  IREE_RETURN_IF_ERROR(
+      id4_pipeline_stage_load(session->decode_stage, &stage_options));
   session->is_loaded = true;
   return iree_ok_status();
 }

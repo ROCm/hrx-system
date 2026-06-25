@@ -13,6 +13,7 @@
 #include "experimental/id4/pipeline/kernel_library.h"
 #include "experimental/id4/pipeline/plan.h"
 #include "experimental/id4/pipeline/stage.h"
+#include "experimental/id4/stages/vae_program.h"
 #include "iree/base/api.h"
 #include "iree/hal/api.h"
 #include "iree/io/parameter_provider.h"
@@ -28,6 +29,18 @@ typedef struct id4_ideogram4_session_t id4_ideogram4_session_t;
 // Opaque asynchronous Qwen3-VL execution handle.
 typedef struct id4_ideogram4_qwen_execution_t id4_ideogram4_qwen_execution_t;
 
+// Parameter scopes used by concrete Ideogram 4 stages.
+typedef struct id4_ideogram4_session_parameter_scopes_t {
+  // Scope containing Qwen3-VL text encoder weights.
+  iree_string_view_t qwen;
+  // Scope containing conditioned Ideogram 4 DiT weights.
+  iree_string_view_t dit_conditioned;
+  // Scope containing unconditioned Ideogram 4 DiT weights.
+  iree_string_view_t dit_unconditioned;
+  // Scope containing VAE weights.
+  iree_string_view_t vae;
+} id4_ideogram4_session_parameter_scopes_t;
+
 // Options for creating an Ideogram 4 model session.
 typedef struct id4_ideogram4_session_create_options_t {
   // Size of this structure for versioning.
@@ -38,9 +51,10 @@ typedef struct id4_ideogram4_session_create_options_t {
   id4_pipeline_stage_services_t services;
   // Loom kernel cache used by session stages during preparation.
   id4_pipeline_kernel_cache_t* kernel_cache;
-  // Parameter provider scope containing model weights; empty selects the
-  // anonymous scope. The session copies this string during creation.
-  iree_string_view_t parameter_scope;
+  // Parameter scopes selected by session-owned stages.
+  id4_ideogram4_session_parameter_scopes_t parameter_scopes;
+  // Activation storage format selected for the session-owned VAE decode stage.
+  id4_vae_activation_format_t vae_activation_format;
 } id4_ideogram4_session_create_options_t;
 
 // Options for loading immutable model session state.
