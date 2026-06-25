@@ -1026,7 +1026,8 @@ static void loom_amdgpu_atomic_select_packet_attrs(
 
 static iree_status_t loom_amdgpu_atomic_select(
     const loom_module_t* module, const loom_value_fact_table_t* fact_table,
-    const loom_low_descriptor_set_t* descriptor_set, const loom_op_t* source_op,
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_view_region_table_t* view_regions, const loom_op_t* source_op,
     loom_amdgpu_atomic_selection_t* out_selection,
     loom_low_source_memory_access_diagnostic_t* source_diagnostic,
     loom_amdgpu_memory_access_diagnostic_t* memory_diagnostic,
@@ -1043,9 +1044,9 @@ static iree_status_t loom_amdgpu_atomic_select(
     return iree_ok_status();
   }
 
-  if (!loom_low_source_memory_access_plan_build(module, fact_table, source_op,
-                                                &out_selection->source,
-                                                source_diagnostic)) {
+  if (!loom_low_source_memory_access_plan_build_with_view_regions(
+          module, fact_table, view_regions, source_op, &out_selection->source,
+          source_diagnostic)) {
     return iree_ok_status();
   }
   switch (out_selection->source.operation_kind) {
@@ -1250,12 +1251,16 @@ iree_status_t loom_amdgpu_select_atomic_plan(
   loom_amdgpu_memory_access_diagnostic_t memory_diagnostic = {0};
   loom_amdgpu_atomic_diagnostic_t diagnostic = {0};
   loom_amdgpu_atomic_selection_t selection = {0};
+  const loom_view_region_table_t* view_regions = NULL;
+  IREE_RETURN_IF_ERROR(
+      loom_low_lower_context_view_regions(context, &view_regions));
   bool selected = false;
   IREE_RETURN_IF_ERROR(loom_amdgpu_atomic_select(
       loom_low_lower_context_module(context),
       loom_low_lower_context_fact_table(context),
-      loom_low_lower_context_descriptor_set(context), source_op, &selection,
-      &source_diagnostic, &memory_diagnostic, &diagnostic, &selected));
+      loom_low_lower_context_descriptor_set(context), view_regions, source_op,
+      &selection, &source_diagnostic, &memory_diagnostic, &diagnostic,
+      &selected));
   if (!selected) {
     return iree_ok_status();
   }
@@ -1638,11 +1643,15 @@ iree_status_t loom_amdgpu_low_legality_verify_atomic(
   loom_amdgpu_memory_access_diagnostic_t memory_diagnostic = {0};
   loom_amdgpu_atomic_diagnostic_t diagnostic = {0};
   const loom_module_t* module = loom_target_low_legality_module(context);
+  const loom_view_region_table_t* view_regions = NULL;
+  IREE_RETURN_IF_ERROR(
+      loom_target_low_legality_view_regions(context, &view_regions));
   bool selected = false;
   IREE_RETURN_IF_ERROR(loom_amdgpu_atomic_select(
       module, loom_target_low_legality_fact_table(context),
-      loom_target_low_legality_descriptor_set(context), op, &selection,
-      &source_diagnostic, &memory_diagnostic, &diagnostic, &selected));
+      loom_target_low_legality_descriptor_set(context), view_regions, op,
+      &selection, &source_diagnostic, &memory_diagnostic, &diagnostic,
+      &selected));
   if (selected) {
     return iree_ok_status();
   }

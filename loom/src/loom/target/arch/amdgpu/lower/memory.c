@@ -2624,8 +2624,9 @@ bool loom_amdgpu_memory_access_plan_select(
   *out_source_diagnostic = (loom_low_source_memory_access_diagnostic_t){0};
   *out_diagnostic = (loom_amdgpu_memory_access_diagnostic_t){0};
 
-  if (!loom_low_source_memory_access_plan_build(
-          module, fact_table, source_op, out_source, out_source_diagnostic)) {
+  if (!loom_low_source_memory_access_plan_build_with_view_regions(
+          module, fact_table, view_regions, source_op, out_source,
+          out_source_diagnostic)) {
     return false;
   }
 

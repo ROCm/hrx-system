@@ -406,6 +406,7 @@ index_rotli = binary_op(
     doc="Left rotate over logical coordinate values. Offsets are physical byte counts and cannot use this op.",
     canonicalize="loom_index_rotli_canonicalize",
     facts="loom_index_rotli_facts",
+    traits=[DISTRIBUTION_TRANSFER],
     examples=["%r = index.rotli %lhs, %rhs : index"],
 )
 
@@ -417,6 +418,7 @@ index_rotri = binary_op(
     doc="Right rotate over logical coordinate values. Offsets are physical byte counts and cannot use this op.",
     canonicalize="loom_index_rotri_canonicalize",
     facts="loom_index_rotri_facts",
+    traits=[DISTRIBUTION_TRANSFER],
     examples=["%r = index.rotri %lhs, %rhs : index"],
 )
 

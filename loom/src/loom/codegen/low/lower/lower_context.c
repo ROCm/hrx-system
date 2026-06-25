@@ -201,6 +201,11 @@ const loom_low_lower_abi_argument_t* loom_low_lower_context_argument_map(
   return context->lowering.argument_map;
 }
 
+const loom_local_value_domain_t* loom_low_lower_context_value_domain(
+    const loom_low_lower_context_t* context) {
+  return &context->lowering.value_domain;
+}
+
 loom_op_t* loom_low_lower_context_low_function(
     const loom_low_lower_context_t* context) {
   return context->low_func_op;

@@ -560,6 +560,7 @@ loom_cc_library(
     ::memory_access
     iree::base
     loom::analysis::symbolic_expr
+    loom::analysis::view_regions
     loom::ir
     loom::ir::facts
     loom::ops::buffer
