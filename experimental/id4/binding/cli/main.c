@@ -192,27 +192,15 @@ static iree_status_t id4_cli_create_loaded_session(
   return status;
 }
 
-static iree_status_t id4_cli_make_generation_config(
-    const id4_ideogram4_request_t* request,
-    id4_ideogram4_generation_config_t* out_config) {
-  IREE_ASSERT_ARGUMENT(out_config);
-  memset(out_config, 0, sizeof(*out_config));
-  if (!request ||
-      !iree_all_bits_set(request->flags,
-                         ID4_IDEOGRAM4_REQUEST_FLAG_HAS_GENERATION)) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "dry-run generation requires request generation metadata");
-  }
-  out_config->structure_size = sizeof(*out_config);
-  out_config->diffusion_latent_shape = id4_pipeline_program_make_shape_rank4(
-      request->generation.latent_width, request->generation.latent_height, 128,
-      1);
-  out_config->denoise_step_count = request->generation.denoise_step_count;
-  out_config->dit_activation_format =
+static id4_ideogram4_generation_plan_policy_t
+id4_cli_make_generation_plan_policy(void) {
+  id4_ideogram4_generation_plan_policy_t policy;
+  memset(&policy, 0, sizeof(policy));
+  policy.structure_size = sizeof(policy);
+  policy.dit_activation_format =
       ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT;
-  out_config->vae_tiling.mode = ID4_VAE_TILING_MODE_DISABLED;
-  return iree_ok_status();
+  policy.vae_tiling.mode = ID4_VAE_TILING_MODE_DISABLED;
+  return policy;
 }
 
 static iree_status_t id4_cli_run_generation_dry_run(
@@ -249,11 +237,6 @@ static iree_status_t id4_cli_run_generation_dry_run(
     status = id4_cli_create_loaded_session(&runtime_context, &diagnostics_sink,
                                            host_allocator, &session);
   }
-  id4_ideogram4_generation_config_t generation_config;
-  memset(&generation_config, 0, sizeof(generation_config));
-  if (iree_status_is_ok(status)) {
-    status = id4_cli_make_generation_config(&request, &generation_config);
-  }
   if (iree_status_is_ok(status)) {
     id4_ideogram4_generation_plan_options_t plan_options;
     memset(&plan_options, 0, sizeof(plan_options));
@@ -261,7 +244,7 @@ static iree_status_t id4_cli_run_generation_dry_run(
     plan_options.request = &request;
     plan_options.tokenizer = tokenizer;
     plan_options.tokenizer_flags = IREE_TOKENIZER_ENCODE_FLAG_NONE;
-    plan_options.generation = generation_config;
+    plan_options.policy = id4_cli_make_generation_plan_policy();
     plan_options.device_index = 0;
     plan_options.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
     plan_options.diagnostics_sink = &diagnostics_sink;

@@ -75,21 +75,17 @@ typedef struct id4_ideogram4_session_load_options_t {
   id4_pipeline_diagnostics_sink_t* diagnostics_sink;
 } id4_ideogram4_session_load_options_t;
 
-// Dynamic generation dimensions and scheduling policy selected by the caller.
-typedef struct id4_ideogram4_generation_config_t {
+// Target and representation policy selected when planning a generation.
+typedef struct id4_ideogram4_generation_plan_policy_t {
   // Size of this structure for versioning.
   iree_host_size_t structure_size;
   // Extension structure chain; must be NULL for now.
   const void* next;
-  // Diffusion latent tensor shape in row-major WHCB order.
-  id4_pipeline_program_shape_t diffusion_latent_shape;
-  // Number of denoise steps in the outer diffusion loop.
-  uint32_t denoise_step_count;
   // Activation storage format selected for DiT intermediates.
   id4_ideogram4_dit_activation_format_t dit_activation_format;
   // VAE tiling policy used by the final latent decode stage.
   id4_vae_tiling_config_t vae_tiling;
-} id4_ideogram4_generation_config_t;
+} id4_ideogram4_generation_plan_policy_t;
 
 // Options for creating a session-owned generation plan from one prompt.
 typedef struct id4_ideogram4_generation_plan_options_t {
@@ -103,8 +99,8 @@ typedef struct id4_ideogram4_generation_plan_options_t {
   const iree_tokenizer_t* tokenizer;
   // Tokenizer flags used while encoding the Qwen prompt text.
   iree_tokenizer_encode_flags_t tokenizer_flags;
-  // Dynamic generation dimensions and scheduling policy.
-  id4_ideogram4_generation_config_t generation;
+  // Target and representation policy for this generation plan.
+  id4_ideogram4_generation_plan_policy_t policy;
   // Device index within the session device group used by every stage plan.
   iree_host_size_t device_index;
   // Queue affinity used by every stage plan.

@@ -67,17 +67,29 @@ static TokenizerPtr LoadTokenizer() {
   return TokenizerPtr(tokenizer);
 }
 
-static id4_ideogram4_generation_config_t MakeGenerationConfig() {
-  id4_ideogram4_generation_config_t config;
-  std::memset(&config, 0, sizeof(config));
-  config.structure_size = sizeof(config);
-  config.diffusion_latent_shape =
-      id4_pipeline_program_make_shape_rank4(8, 8, 128, 1);
-  config.denoise_step_count = 2;
-  config.dit_activation_format =
+static id4_ideogram4_generation_plan_policy_t MakeGenerationPolicy() {
+  id4_ideogram4_generation_plan_policy_t policy;
+  std::memset(&policy, 0, sizeof(policy));
+  policy.structure_size = sizeof(policy);
+  policy.dit_activation_format =
       ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT;
-  config.vae_tiling.mode = ID4_VAE_TILING_MODE_DISABLED;
-  return config;
+  policy.vae_tiling.mode = ID4_VAE_TILING_MODE_DISABLED;
+  return policy;
+}
+
+static iree_string_view_t ShortFullRequestJson() {
+  return IREE_SV(
+      "{\"prompt\":\"a city\",\"generation\":{\"latent_width\":8,"
+      "\"latent_height\":8,\"denoise_steps\":2,\"seed\":1,"
+      "\"guidance_scale\":3.5}}");
+}
+
+static iree_string_view_t LongFullRequestJson() {
+  return IREE_SV(
+      "{\"prompt\":\"three people walking through a reflective city street "
+      "with umbrellas and neon signs\",\"generation\":{\"latent_width\":8,"
+      "\"latent_height\":8,\"denoise_steps\":2,\"seed\":1,"
+      "\"guidance_scale\":3.5}}");
 }
 
 class SessionTest : public ::testing::Test {
@@ -146,7 +158,7 @@ class SessionTest : public ::testing::Test {
     plan_options.request = request;
     plan_options.tokenizer = tokenizer;
     plan_options.tokenizer_flags = IREE_TOKENIZER_ENCODE_FLAG_NONE;
-    plan_options.generation = MakeGenerationConfig();
+    plan_options.policy = MakeGenerationPolicy();
     plan_options.device_index = 0;
     plan_options.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
     id4::test::StageDiagnostics diagnostics = {};
@@ -224,7 +236,7 @@ TEST_F(SessionTest, PlanGenerationRequiresLoadedSession) {
   id4_ideogram4_generation_plan_options_t plan_options;
   std::memset(&plan_options, 0, sizeof(plan_options));
   plan_options.structure_size = sizeof(plan_options);
-  plan_options.generation = MakeGenerationConfig();
+  plan_options.policy = MakeGenerationPolicy();
 
   id4_ideogram4_generation_plan_t* plan = nullptr;
   IREE_EXPECT_STATUS_IS(
@@ -239,13 +251,10 @@ TEST_F(SessionTest, PlansGenerationFromDynamicPromptLength) {
   TokenizerPtr tokenizer = LoadTokenizer();
   ScopedRequest short_request;
   IREE_ASSERT_OK(id4_ideogram4_request_parse_json(
-      IREE_SV("{\"prompt\":\"a city\"}"), iree_allocator_system(),
-      &short_request.value));
+      ShortFullRequestJson(), iree_allocator_system(), &short_request.value));
   ScopedRequest long_request;
   IREE_ASSERT_OK(id4_ideogram4_request_parse_json(
-      IREE_SV("{\"prompt\":\"three people walking through a reflective city "
-              "street with umbrellas and neon signs\"}"),
-      iree_allocator_system(), &long_request.value));
+      LongFullRequestJson(), iree_allocator_system(), &long_request.value));
 
   SessionPtr session = CreateLoadedSession();
   id4_ideogram4_generation_plan_options_t plan_options;
@@ -253,7 +262,7 @@ TEST_F(SessionTest, PlansGenerationFromDynamicPromptLength) {
   plan_options.structure_size = sizeof(plan_options);
   plan_options.tokenizer = tokenizer.get();
   plan_options.tokenizer_flags = IREE_TOKENIZER_ENCODE_FLAG_NONE;
-  plan_options.generation = MakeGenerationConfig();
+  plan_options.policy = MakeGenerationPolicy();
   plan_options.device_index = 0;
   plan_options.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
   id4::test::StageDiagnostics diagnostics = {};
@@ -300,7 +309,7 @@ TEST_F(SessionTest, PlansGenerationFromDynamicPromptLength) {
   iree_string_builder_deinitialize(&builder);
 }
 
-TEST_F(SessionTest, RejectsInvalidGenerationConfig) {
+TEST_F(SessionTest, RejectsMissingGenerationMetadata) {
   TokenizerPtr tokenizer = LoadTokenizer();
   ScopedRequest request;
   IREE_ASSERT_OK(id4_ideogram4_request_parse_json(
@@ -313,10 +322,9 @@ TEST_F(SessionTest, RejectsInvalidGenerationConfig) {
   plan_options.structure_size = sizeof(plan_options);
   plan_options.request = &request.value;
   plan_options.tokenizer = tokenizer.get();
-  plan_options.generation = MakeGenerationConfig();
+  plan_options.policy = MakeGenerationPolicy();
   plan_options.device_index = 0;
   plan_options.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
-  plan_options.generation.denoise_step_count = 0;
 
   id4_ideogram4_generation_plan_t* plan = nullptr;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
@@ -329,8 +337,7 @@ TEST_F(SessionTest, PrepareGenerationRequiresFinalSignal) {
   TokenizerPtr tokenizer = LoadTokenizer();
   ScopedRequest request;
   IREE_ASSERT_OK(id4_ideogram4_request_parse_json(
-      IREE_SV("{\"prompt\":\"a city\"}"), iree_allocator_system(),
-      &request.value));
+      ShortFullRequestJson(), iree_allocator_system(), &request.value));
   SessionPtr session = CreateLoadedSession();
   GenerationPlanPtr plan =
       PlanGeneration(session.get(), tokenizer.get(), &request.value);
@@ -351,8 +358,7 @@ TEST_F(SessionTest, PrepareGenerationRequiresParameterProviders) {
   TokenizerPtr tokenizer = LoadTokenizer();
   ScopedRequest request;
   IREE_ASSERT_OK(id4_ideogram4_request_parse_json(
-      IREE_SV("{\"prompt\":\"a city\"}"), iree_allocator_system(),
-      &request.value));
+      ShortFullRequestJson(), iree_allocator_system(), &request.value));
   SessionPtr session = CreateLoadedSession();
   GenerationPlanPtr plan =
       PlanGeneration(session.get(), tokenizer.get(), &request.value);

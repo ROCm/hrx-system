@@ -31,17 +31,14 @@ static iree_tokenizer_t* LoadTokenizer() {
   return tokenizer;
 }
 
-static id4_ideogram4_generation_config_t MakeGenerationConfig() {
-  id4_ideogram4_generation_config_t config;
-  std::memset(&config, 0, sizeof(config));
-  config.structure_size = sizeof(config);
-  config.diffusion_latent_shape =
-      id4_pipeline_program_make_shape_rank4(16, 16, 128, 1);
-  config.denoise_step_count = 20;
-  config.dit_activation_format =
+static id4_ideogram4_generation_plan_policy_t MakeGenerationPolicy() {
+  id4_ideogram4_generation_plan_policy_t policy;
+  std::memset(&policy, 0, sizeof(policy));
+  policy.structure_size = sizeof(policy);
+  policy.dit_activation_format =
       ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT;
-  config.vae_tiling.mode = ID4_VAE_TILING_MODE_DISABLED;
-  return config;
+  policy.vae_tiling.mode = ID4_VAE_TILING_MODE_DISABLED;
+  return policy;
 }
 
 static id4_ideogram4_session_t* CreateLoadedSession(
@@ -128,7 +125,7 @@ static void RunPlanGenerationBenchmark(benchmark::State& state,
     plan_options.request = &request;
     plan_options.tokenizer = tokenizer;
     plan_options.tokenizer_flags = IREE_TOKENIZER_ENCODE_FLAG_NONE;
-    plan_options.generation = MakeGenerationConfig();
+    plan_options.policy = MakeGenerationPolicy();
     plan_options.device_index = 0;
     plan_options.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
     plan_options.diagnostics_sink = &diagnostics_sink;
@@ -154,7 +151,11 @@ static void RunPlanGenerationBenchmark(benchmark::State& state,
 }
 
 static void BM_Ideogram4SessionPlanGenerationShort(benchmark::State& state) {
-  RunPlanGenerationBenchmark(state, IREE_SV("{\"prompt\":\"a city\"}"));
+  RunPlanGenerationBenchmark(
+      state,
+      IREE_SV("{\"prompt\":\"a city\",\"generation\":{\"latent_width\":16,"
+              "\"latent_height\":16,\"denoise_steps\":20,\"seed\":1,"
+              "\"guidance_scale\":3.5}}"));
 }
 BENCHMARK(BM_Ideogram4SessionPlanGenerationShort);
 
@@ -162,7 +163,9 @@ static void BM_Ideogram4SessionPlanGenerationMedium(benchmark::State& state) {
   RunPlanGenerationBenchmark(
       state,
       IREE_SV("{\"prompt\":\"three people walking through a reflective city "
-              "street with umbrellas and neon signs\"}"));
+              "street with umbrellas and neon signs\","
+              "\"generation\":{\"latent_width\":16,\"latent_height\":16,"
+              "\"denoise_steps\":20,\"seed\":1,\"guidance_scale\":3.5}}"));
 }
 BENCHMARK(BM_Ideogram4SessionPlanGenerationMedium);
 
@@ -170,11 +173,13 @@ static void BM_Ideogram4SessionPlanGenerationStructured(
     benchmark::State& state) {
   RunPlanGenerationBenchmark(
       state,
-      IREE_SV("{\"high_level_description\":\"three people walking through a "
-              "rainy reflective city street\","
+      IREE_SV("{\"prompt\":{\"high_level_description\":\"three people walking "
+              "through a rainy reflective city street\","
               "\"style_description\":{\"medium\":\"cinematic photo\","
               "\"lighting\":\"neon signs and warm window reflections\"},"
-              "\"negative_prompt\":\"blurred faces, malformed hands, text\"}"));
+              "\"negative_prompt\":\"blurred faces, malformed hands, text\"},"
+              "\"generation\":{\"latent_width\":16,\"latent_height\":16,"
+              "\"denoise_steps\":20,\"seed\":1,\"guidance_scale\":3.5}}"));
 }
 BENCHMARK(BM_Ideogram4SessionPlanGenerationStructured);
 

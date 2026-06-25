@@ -6,6 +6,8 @@
 
 #include "experimental/id4/ideogram4/session.h"
 
+#include <float.h>
+#include <math.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <string.h>
@@ -472,39 +474,68 @@ iree_status_t id4_ideogram4_session_load(
   return iree_ok_status();
 }
 
-static iree_status_t id4_ideogram4_validate_generation_config(
+static id4_pipeline_program_shape_t
+id4_ideogram4_generation_request_diffusion_latent_shape(
+    const id4_ideogram4_request_t* request) {
+  return id4_pipeline_program_make_shape_rank4(
+      request->generation.latent_width, request->generation.latent_height, 128,
+      1);
+}
+
+static iree_status_t id4_ideogram4_validate_generation_request(
     const id4_ideogram4_session_t* session,
-    id4_ideogram4_generation_config_t config) {
-  IREE_RETURN_IF_ERROR(id4_ideogram4_validate_options_size(
-      config.structure_size, sizeof(config),
-      IREE_SV("Ideogram 4 generation config")));
-  if (config.next) {
-    return iree_make_status(
-        IREE_STATUS_UNIMPLEMENTED,
-        "Ideogram 4 generation config extension structures are not supported");
+    const id4_ideogram4_request_t* request) {
+  if (!request) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "Ideogram 4 generation request is required");
   }
-  if (config.denoise_step_count == 0) {
+  if (!iree_all_bits_set(request->flags,
+                         ID4_IDEOGRAM4_REQUEST_FLAG_HAS_GENERATION)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "Ideogram 4 generation request metadata is required");
+  }
+  if (request->generation.denoise_step_count == 0) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "Ideogram 4 generation step count is zero");
   }
-  if (config.diffusion_latent_shape.rank != 4) {
+  if (request->generation.latent_width == 0 ||
+      request->generation.latent_height == 0) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "Ideogram 4 generation latent shape rank must be "
-                            "4");
+                            "Ideogram 4 generation latent dimensions must be "
+                            "nonzero");
   }
-  if (config.diffusion_latent_shape.dims[2] !=
-      session->dit_model.input_channel_count) {
+  if (!isfinite(request->generation.guidance_scale) ||
+      request->generation.guidance_scale <= 0.0f ||
+      request->generation.guidance_scale > FLT_MAX) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "Ideogram 4 generation guidance scale is invalid");
+  }
+  id4_pipeline_program_shape_t latent_shape =
+      id4_ideogram4_generation_request_diffusion_latent_shape(request);
+  if (latent_shape.dims[2] != session->dit_model.input_channel_count) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "Ideogram 4 generation latent channel count %" PRIu64
         " does not match DiT channel count %" PRIu32,
-        config.diffusion_latent_shape.dims[2],
-        session->dit_model.input_channel_count);
+        latent_shape.dims[2], session->dit_model.input_channel_count);
   }
-  IREE_RETURN_IF_ERROR(
-      id4_ideogram4_decode_program_validate_diffusion_latent_shape(
-          session->decode_model, config.diffusion_latent_shape));
-  switch (config.dit_activation_format) {
+  return id4_ideogram4_decode_program_validate_diffusion_latent_shape(
+      session->decode_model, latent_shape);
+}
+
+static iree_status_t id4_ideogram4_validate_generation_policy(
+    id4_ideogram4_generation_plan_policy_t policy) {
+  IREE_RETURN_IF_ERROR(id4_ideogram4_validate_options_size(
+      policy.structure_size, sizeof(policy),
+      IREE_SV("Ideogram 4 generation plan policy")));
+  if (policy.next) {
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "Ideogram 4 generation plan policy extension structures are not "
+        "supported");
+  }
+  switch (policy.dit_activation_format) {
     case ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_F32_CANONICAL:
     case ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT:
       break;
@@ -512,9 +543,9 @@ static iree_status_t id4_ideogram4_validate_generation_config(
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
           "Ideogram 4 generation DiT activation format %" PRIu32 " is invalid",
-          (uint32_t)config.dit_activation_format);
+          (uint32_t)policy.dit_activation_format);
   }
-  switch (config.vae_tiling.mode) {
+  switch (policy.vae_tiling.mode) {
     case ID4_VAE_TILING_MODE_DISABLED:
     case ID4_VAE_TILING_MODE_EXPLICIT_TILE_SIZE:
     case ID4_VAE_TILING_MODE_RELATIVE_TILE_SIZE:
@@ -524,7 +555,7 @@ static iree_status_t id4_ideogram4_validate_generation_config(
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "Ideogram 4 generation VAE tiling mode %" PRIu32
                               " is invalid",
-                              (uint32_t)config.vae_tiling.mode);
+                              (uint32_t)policy.vae_tiling.mode);
   }
   return iree_ok_status();
 }
@@ -553,10 +584,6 @@ static iree_status_t id4_ideogram4_validate_generation_plan_options(
         IREE_STATUS_UNIMPLEMENTED,
         "Ideogram 4 generation plan extension structures are not supported");
   }
-  if (!options->request) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "Ideogram 4 generation request is required");
-  }
   if (!options->tokenizer) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "Ideogram 4 generation tokenizer is required");
@@ -570,7 +597,9 @@ static iree_status_t id4_ideogram4_validate_generation_plan_options(
                             options->device_index, device_count);
   }
   IREE_RETURN_IF_ERROR(
-      id4_ideogram4_validate_generation_config(session, options->generation));
+      id4_ideogram4_validate_generation_request(session, options->request));
+  IREE_RETURN_IF_ERROR(
+      id4_ideogram4_validate_generation_policy(options->policy));
   IREE_RETURN_IF_ERROR(id4_pipeline_diagnostics_validate_sink(
       options->diagnostics_sink, IREE_SV("Ideogram 4 generation plan")));
   return iree_ok_status();
@@ -625,10 +654,11 @@ static iree_status_t id4_ideogram4_plan_generation_dit(
   id4_ideogram4_dit_stage_plan_options_t dit_options;
   memset(&dit_options, 0, sizeof(dit_options));
   dit_options.structure_size = sizeof(dit_options);
-  dit_options.request.latent_shape = options->generation.diffusion_latent_shape;
+  dit_options.request.latent_shape =
+      id4_ideogram4_generation_request_diffusion_latent_shape(options->request);
   dit_options.request.conditioning_mode = conditioning_mode;
   dit_options.request.text_token_count = text_token_count;
-  dit_options.activation_format = options->generation.dit_activation_format;
+  dit_options.activation_format = options->policy.dit_activation_format;
   return id4_ideogram4_plan_stage(stage, &dit_options, options, out_plan);
 }
 
@@ -640,7 +670,7 @@ static iree_status_t id4_ideogram4_plan_generation_sampler(
   memset(&sampler_options, 0, sizeof(sampler_options));
   sampler_options.structure_size = sizeof(sampler_options);
   sampler_options.request.latent_shape =
-      options->generation.diffusion_latent_shape;
+      id4_ideogram4_generation_request_diffusion_latent_shape(options->request);
   return id4_ideogram4_plan_stage(session->sampler_stage, &sampler_options,
                                   options, out_plan);
 }
@@ -653,8 +683,8 @@ static iree_status_t id4_ideogram4_plan_generation_decode(
   memset(&decode_options, 0, sizeof(decode_options));
   decode_options.structure_size = sizeof(decode_options);
   decode_options.request.diffusion_latent_shape =
-      options->generation.diffusion_latent_shape;
-  decode_options.request.vae_tiling = options->generation.vae_tiling;
+      id4_ideogram4_generation_request_diffusion_latent_shape(options->request);
+  decode_options.request.vae_tiling = options->policy.vae_tiling;
   return id4_ideogram4_plan_stage(session->decode_stage, &decode_options,
                                   options, out_plan);
 }
@@ -675,12 +705,12 @@ static iree_status_t id4_ideogram4_plan_generation_stages(
       &qwen_lowering_options, session->host_allocator, &token_count));
 
   plan->summary.qwen_token_count = token_count;
-  plan->summary.denoise_step_count = options->generation.denoise_step_count;
+  plan->summary.denoise_step_count =
+      options->request->generation.denoise_step_count;
   plan->summary.diffusion_latent_shape =
-      options->generation.diffusion_latent_shape;
-  plan->summary.dit_activation_format =
-      options->generation.dit_activation_format;
-  plan->summary.vae_tiling = options->generation.vae_tiling;
+      id4_ideogram4_generation_request_diffusion_latent_shape(options->request);
+  plan->summary.dit_activation_format = options->policy.dit_activation_format;
+  plan->summary.vae_tiling = options->policy.vae_tiling;
 
   iree_status_t status = id4_ideogram4_plan_generation_qwen(
       session, options, token_count, &plan->qwen_plan);
