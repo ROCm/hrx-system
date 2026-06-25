@@ -13,6 +13,7 @@
 #include "experimental/id4/pipeline/kernel_library.h"
 #include "experimental/id4/pipeline/plan.h"
 #include "experimental/id4/pipeline/stage.h"
+#include "experimental/id4/stages/ideogram4_dit_program.h"
 #include "experimental/id4/stages/vae_program.h"
 #include "iree/base/api.h"
 #include "iree/hal/api.h"
@@ -28,6 +29,9 @@ typedef struct id4_ideogram4_session_t id4_ideogram4_session_t;
 
 // Opaque asynchronous Qwen3-VL execution handle.
 typedef struct id4_ideogram4_qwen_execution_t id4_ideogram4_qwen_execution_t;
+
+// Opaque planned generation assembled from session-owned coarse stages.
+typedef struct id4_ideogram4_generation_plan_t id4_ideogram4_generation_plan_t;
 
 // Parameter scopes used by concrete Ideogram 4 stages.
 typedef struct id4_ideogram4_session_parameter_scopes_t {
@@ -66,6 +70,58 @@ typedef struct id4_ideogram4_session_load_options_t {
   // Diagnostics sink for load events.
   id4_pipeline_diagnostics_sink_t* diagnostics_sink;
 } id4_ideogram4_session_load_options_t;
+
+// Dynamic generation dimensions and scheduling policy selected by the caller.
+typedef struct id4_ideogram4_generation_config_t {
+  // Size of this structure for versioning.
+  iree_host_size_t structure_size;
+  // Extension structure chain; must be NULL for now.
+  const void* next;
+  // Diffusion latent tensor shape in row-major WHCB order.
+  id4_pipeline_program_shape_t diffusion_latent_shape;
+  // Number of denoise steps in the outer diffusion loop.
+  uint32_t denoise_step_count;
+  // Activation storage format selected for DiT intermediates.
+  id4_ideogram4_dit_activation_format_t dit_activation_format;
+  // VAE tiling policy used by the final latent decode stage.
+  id4_vae_tiling_config_t vae_tiling;
+} id4_ideogram4_generation_config_t;
+
+// Options for creating a session-owned generation plan from one prompt.
+typedef struct id4_ideogram4_generation_plan_options_t {
+  // Size of this structure for versioning.
+  iree_host_size_t structure_size;
+  // Extension structure chain; must be NULL for now.
+  const void* next;
+  // Parsed request supplying structured prompt JSON.
+  const id4_ideogram4_request_t* request;
+  // Tokenizer used to derive Qwen prompt length from |request|.
+  const iree_tokenizer_t* tokenizer;
+  // Tokenizer flags used while encoding the Qwen prompt text.
+  iree_tokenizer_encode_flags_t tokenizer_flags;
+  // Dynamic generation dimensions and scheduling policy.
+  id4_ideogram4_generation_config_t generation;
+  // Device index within the session device group used by every stage plan.
+  iree_host_size_t device_index;
+  // Queue affinity used by every stage plan.
+  iree_hal_queue_affinity_t queue_affinity;
+  // Diagnostics sink for plan events.
+  id4_pipeline_diagnostics_sink_t* diagnostics_sink;
+} id4_ideogram4_generation_plan_options_t;
+
+// Stable summary of a session-owned generation plan.
+typedef struct id4_ideogram4_generation_plan_summary_t {
+  // Qwen prompt token positions used by conditioned DiT planning.
+  uint32_t qwen_token_count;
+  // Number of denoise steps requested for the generation.
+  uint32_t denoise_step_count;
+  // Diffusion latent tensor shape shared by DiT, sampler, and decode stages.
+  id4_pipeline_program_shape_t diffusion_latent_shape;
+  // DiT activation storage format selected by the plan.
+  id4_ideogram4_dit_activation_format_t dit_activation_format;
+  // VAE tiling policy selected by the plan.
+  id4_vae_tiling_config_t vae_tiling;
+} id4_ideogram4_generation_plan_summary_t;
 
 // Options for issuing one asynchronous Qwen3-VL conditioning execution.
 typedef struct id4_ideogram4_qwen_issue_options_t {
@@ -119,6 +175,22 @@ void id4_ideogram4_session_release(id4_ideogram4_session_t* session);
 iree_status_t id4_ideogram4_session_load(
     id4_ideogram4_session_t* session,
     const id4_ideogram4_session_load_options_t* options);
+
+// Creates a generation plan for one parsed request and explicit generation
+// configuration.
+iree_status_t id4_ideogram4_session_plan_generation(
+    id4_ideogram4_session_t* session,
+    const id4_ideogram4_generation_plan_options_t* options,
+    id4_ideogram4_generation_plan_t** out_plan);
+
+// Releases |plan| from the caller.
+void id4_ideogram4_generation_plan_release(
+    id4_ideogram4_generation_plan_t* plan);
+
+// Returns a stable summary for |plan|.
+iree_status_t id4_ideogram4_generation_plan_summary(
+    const id4_ideogram4_generation_plan_t* plan,
+    id4_ideogram4_generation_plan_summary_t* out_summary);
 
 // Issues one asynchronous Qwen3-VL conditioning execution.
 iree_status_t id4_ideogram4_session_issue_qwen(

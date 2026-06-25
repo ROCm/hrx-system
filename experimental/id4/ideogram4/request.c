@@ -162,13 +162,12 @@ static iree_status_t id4_ideogram4_request_allocate_qwen_inputs(
   return iree_ok_status();
 }
 
-iree_status_t id4_ideogram4_request_lower_qwen_inputs(
+static iree_status_t id4_ideogram4_request_encode_qwen_tokens(
     const id4_ideogram4_qwen_lowering_options_t* options,
-    iree_allocator_t host_allocator, id4_ideogram4_qwen_inputs_t* out_inputs) {
-  IREE_ASSERT_ARGUMENT(out_inputs);
-  memset(out_inputs, 0, sizeof(*out_inputs));
-  IREE_RETURN_IF_ERROR(
-      id4_ideogram4_request_validate_lowering_options(options));
+    iree_allocator_t host_allocator,
+    iree_tokenizer_token_id_t** out_token_storage, uint32_t* out_token_count) {
+  *out_token_storage = NULL;
+  *out_token_count = 0;
 
   iree_tokenizer_token_id_t* token_storage = NULL;
   iree_status_t status = iree_allocator_malloc_array(
@@ -194,8 +193,29 @@ iree_status_t id4_ideogram4_request_lower_qwen_inputs(
                               token_count);
   }
   if (iree_status_is_ok(status)) {
+    *out_token_storage = token_storage;
+    *out_token_count = (uint32_t)token_count;
+  } else {
+    iree_allocator_free(host_allocator, token_storage);
+  }
+  return status;
+}
+
+iree_status_t id4_ideogram4_request_lower_qwen_inputs(
+    const id4_ideogram4_qwen_lowering_options_t* options,
+    iree_allocator_t host_allocator, id4_ideogram4_qwen_inputs_t* out_inputs) {
+  IREE_ASSERT_ARGUMENT(out_inputs);
+  memset(out_inputs, 0, sizeof(*out_inputs));
+  IREE_RETURN_IF_ERROR(
+      id4_ideogram4_request_validate_lowering_options(options));
+
+  iree_tokenizer_token_id_t* token_storage = NULL;
+  uint32_t token_count = 0;
+  iree_status_t status = id4_ideogram4_request_encode_qwen_tokens(
+      options, host_allocator, &token_storage, &token_count);
+  if (iree_status_is_ok(status)) {
     status = id4_ideogram4_request_allocate_qwen_inputs(
-        (uint32_t)token_count, host_allocator, out_inputs);
+        token_count, host_allocator, out_inputs);
   }
   if (iree_status_is_ok(status)) {
     memcpy(out_inputs->token_ids, token_storage,
@@ -211,6 +231,21 @@ iree_status_t id4_ideogram4_request_lower_qwen_inputs(
   } else {
     id4_ideogram4_qwen_inputs_deinitialize(out_inputs, host_allocator);
   }
+  iree_allocator_free(host_allocator, token_storage);
+  return status;
+}
+
+iree_status_t id4_ideogram4_request_count_qwen_tokens(
+    const id4_ideogram4_qwen_lowering_options_t* options,
+    iree_allocator_t host_allocator, uint32_t* out_token_count) {
+  IREE_ASSERT_ARGUMENT(out_token_count);
+  *out_token_count = 0;
+  IREE_RETURN_IF_ERROR(
+      id4_ideogram4_request_validate_lowering_options(options));
+
+  iree_tokenizer_token_id_t* token_storage = NULL;
+  iree_status_t status = id4_ideogram4_request_encode_qwen_tokens(
+      options, host_allocator, &token_storage, out_token_count);
   iree_allocator_free(host_allocator, token_storage);
   return status;
 }

@@ -66,6 +66,25 @@ struct id4_ideogram4_qwen_execution_t {
   iree_hal_buffer_binding_t condition_binding;
 };
 
+struct id4_ideogram4_generation_plan_t {
+  // Allocator used for plan-owned storage.
+  iree_allocator_t host_allocator;
+  // Session retained for the lifetime of the generation plan.
+  id4_ideogram4_session_t* session;
+  // Stable generation-level shape and scheduling summary.
+  id4_ideogram4_generation_plan_summary_t summary;
+  // Planned Qwen3-VL prompt conditioning stage.
+  id4_pipeline_plan_t* qwen_plan;
+  // Planned conditioned Ideogram 4 DiT stage.
+  id4_pipeline_plan_t* dit_conditioned_plan;
+  // Planned unconditioned Ideogram 4 DiT stage.
+  id4_pipeline_plan_t* dit_unconditioned_plan;
+  // Planned device-side sampler denoise-step stage.
+  id4_pipeline_plan_t* sampler_plan;
+  // Planned VAE-backed latent decode stage.
+  id4_pipeline_plan_t* decode_plan;
+};
+
 static iree_status_t id4_ideogram4_validate_options_size(
     iree_host_size_t actual_size, iree_host_size_t expected_size,
     iree_string_view_t options_name) {
@@ -367,6 +386,289 @@ iree_status_t id4_ideogram4_session_load(
   IREE_RETURN_IF_ERROR(
       id4_pipeline_stage_load(session->decode_stage, &stage_options));
   session->is_loaded = true;
+  return iree_ok_status();
+}
+
+static iree_status_t id4_ideogram4_validate_generation_config(
+    const id4_ideogram4_session_t* session,
+    id4_ideogram4_generation_config_t config) {
+  IREE_RETURN_IF_ERROR(id4_ideogram4_validate_options_size(
+      config.structure_size, sizeof(config),
+      IREE_SV("Ideogram 4 generation config")));
+  if (config.next) {
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "Ideogram 4 generation config extension structures are not supported");
+  }
+  if (config.denoise_step_count == 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "Ideogram 4 generation step count is zero");
+  }
+  if (config.diffusion_latent_shape.rank != 4) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "Ideogram 4 generation latent shape rank must be "
+                            "4");
+  }
+  if (config.diffusion_latent_shape.dims[2] !=
+      session->dit_model.input_channel_count) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "Ideogram 4 generation latent channel count %" PRIu64
+        " does not match DiT channel count %" PRIu32,
+        config.diffusion_latent_shape.dims[2],
+        session->dit_model.input_channel_count);
+  }
+  IREE_RETURN_IF_ERROR(
+      id4_ideogram4_decode_program_validate_diffusion_latent_shape(
+          session->decode_model, config.diffusion_latent_shape));
+  switch (config.dit_activation_format) {
+    case ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_F32_CANONICAL:
+    case ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT:
+      break;
+    default:
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "Ideogram 4 generation DiT activation format %" PRIu32 " is invalid",
+          (uint32_t)config.dit_activation_format);
+  }
+  switch (config.vae_tiling.mode) {
+    case ID4_VAE_TILING_MODE_DISABLED:
+    case ID4_VAE_TILING_MODE_EXPLICIT_TILE_SIZE:
+    case ID4_VAE_TILING_MODE_RELATIVE_TILE_SIZE:
+    case ID4_VAE_TILING_MODE_MEMORY_BUDGET:
+      break;
+    default:
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "Ideogram 4 generation VAE tiling mode %" PRIu32
+                              " is invalid",
+                              (uint32_t)config.vae_tiling.mode);
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t id4_ideogram4_validate_generation_plan_options(
+    const id4_ideogram4_session_t* session,
+    const id4_ideogram4_generation_plan_options_t* options) {
+  if (!session) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "Ideogram 4 session is required");
+  }
+  if (!session->is_loaded) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "Ideogram 4 session must be loaded before "
+                            "generation planning");
+  }
+  if (!options) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "Ideogram 4 generation plan options are required");
+  }
+  IREE_RETURN_IF_ERROR(id4_ideogram4_validate_options_size(
+      options->structure_size, sizeof(*options),
+      IREE_SV("Ideogram 4 generation plan")));
+  if (options->next) {
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "Ideogram 4 generation plan extension structures are not supported");
+  }
+  if (!options->request) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "Ideogram 4 generation request is required");
+  }
+  if (!options->tokenizer) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "Ideogram 4 generation tokenizer is required");
+  }
+  const iree_host_size_t device_count = iree_hal_device_group_device_count(
+      id4_pipeline_stage_services(session->qwen_stage)->device_group);
+  if (options->device_index >= device_count) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "Ideogram 4 generation device index %" PRIhsz
+                            " exceeds device count %" PRIhsz,
+                            options->device_index, device_count);
+  }
+  IREE_RETURN_IF_ERROR(
+      id4_ideogram4_validate_generation_config(session, options->generation));
+  IREE_RETURN_IF_ERROR(id4_pipeline_diagnostics_validate_sink(
+      options->diagnostics_sink, IREE_SV("Ideogram 4 generation plan")));
+  return iree_ok_status();
+}
+
+static iree_status_t id4_ideogram4_generation_plan_allocate(
+    id4_ideogram4_session_t* session, iree_allocator_t host_allocator,
+    id4_ideogram4_generation_plan_t** out_plan) {
+  *out_plan = NULL;
+  id4_ideogram4_generation_plan_t* plan = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_allocator_malloc(host_allocator, sizeof(*plan), (void**)&plan));
+  memset(plan, 0, sizeof(*plan));
+  plan->host_allocator = host_allocator;
+  plan->session = session;
+  id4_ideogram4_session_retain(session);
+  *out_plan = plan;
+  return iree_ok_status();
+}
+
+static iree_status_t id4_ideogram4_plan_stage(
+    id4_pipeline_stage_t* stage, const void* stage_options,
+    const id4_ideogram4_generation_plan_options_t* options,
+    id4_pipeline_plan_t** out_plan) {
+  id4_pipeline_stage_plan_options_t plan_options;
+  memset(&plan_options, 0, sizeof(plan_options));
+  plan_options.structure_size = sizeof(plan_options);
+  plan_options.next = stage_options;
+  plan_options.device_index = options->device_index;
+  plan_options.queue_affinity = options->queue_affinity;
+  plan_options.diagnostics_sink = options->diagnostics_sink;
+  return id4_pipeline_stage_plan(stage, &plan_options, out_plan);
+}
+
+static iree_status_t id4_ideogram4_plan_generation_qwen(
+    id4_ideogram4_session_t* session,
+    const id4_ideogram4_generation_plan_options_t* options,
+    uint32_t token_count, id4_pipeline_plan_t** out_plan) {
+  id4_qwen3_vl_stage_plan_options_t qwen_options;
+  memset(&qwen_options, 0, sizeof(qwen_options));
+  qwen_options.structure_size = sizeof(qwen_options);
+  qwen_options.request.token_count = token_count;
+  return id4_ideogram4_plan_stage(session->qwen_stage, &qwen_options, options,
+                                  out_plan);
+}
+
+static iree_status_t id4_ideogram4_plan_generation_dit(
+    id4_pipeline_stage_t* stage,
+    const id4_ideogram4_generation_plan_options_t* options,
+    id4_ideogram4_dit_conditioning_mode_t conditioning_mode,
+    uint32_t text_token_count, id4_pipeline_plan_t** out_plan) {
+  id4_ideogram4_dit_stage_plan_options_t dit_options;
+  memset(&dit_options, 0, sizeof(dit_options));
+  dit_options.structure_size = sizeof(dit_options);
+  dit_options.request.latent_shape = options->generation.diffusion_latent_shape;
+  dit_options.request.conditioning_mode = conditioning_mode;
+  dit_options.request.text_token_count = text_token_count;
+  dit_options.activation_format = options->generation.dit_activation_format;
+  return id4_ideogram4_plan_stage(stage, &dit_options, options, out_plan);
+}
+
+static iree_status_t id4_ideogram4_plan_generation_sampler(
+    id4_ideogram4_session_t* session,
+    const id4_ideogram4_generation_plan_options_t* options,
+    id4_pipeline_plan_t** out_plan) {
+  id4_sampler_denoise_stage_plan_options_t sampler_options;
+  memset(&sampler_options, 0, sizeof(sampler_options));
+  sampler_options.structure_size = sizeof(sampler_options);
+  sampler_options.request.latent_shape =
+      options->generation.diffusion_latent_shape;
+  return id4_ideogram4_plan_stage(session->sampler_stage, &sampler_options,
+                                  options, out_plan);
+}
+
+static iree_status_t id4_ideogram4_plan_generation_decode(
+    id4_ideogram4_session_t* session,
+    const id4_ideogram4_generation_plan_options_t* options,
+    id4_pipeline_plan_t** out_plan) {
+  id4_ideogram4_decode_stage_plan_options_t decode_options;
+  memset(&decode_options, 0, sizeof(decode_options));
+  decode_options.structure_size = sizeof(decode_options);
+  decode_options.request.diffusion_latent_shape =
+      options->generation.diffusion_latent_shape;
+  decode_options.request.vae_tiling = options->generation.vae_tiling;
+  return id4_ideogram4_plan_stage(session->decode_stage, &decode_options,
+                                  options, out_plan);
+}
+
+static iree_status_t id4_ideogram4_plan_generation_stages(
+    id4_ideogram4_session_t* session,
+    const id4_ideogram4_generation_plan_options_t* options,
+    id4_ideogram4_generation_plan_t* plan) {
+  uint32_t token_count = 0;
+  id4_ideogram4_qwen_lowering_options_t qwen_lowering_options;
+  memset(&qwen_lowering_options, 0, sizeof(qwen_lowering_options));
+  qwen_lowering_options.structure_size = sizeof(qwen_lowering_options);
+  qwen_lowering_options.tokenizer = options->tokenizer;
+  qwen_lowering_options.request = options->request;
+  qwen_lowering_options.tokenizer_flags = options->tokenizer_flags;
+  qwen_lowering_options.max_token_count = session->qwen_model.max_token_count;
+  IREE_RETURN_IF_ERROR(id4_ideogram4_request_count_qwen_tokens(
+      &qwen_lowering_options, session->host_allocator, &token_count));
+
+  plan->summary.qwen_token_count = token_count;
+  plan->summary.denoise_step_count = options->generation.denoise_step_count;
+  plan->summary.diffusion_latent_shape =
+      options->generation.diffusion_latent_shape;
+  plan->summary.dit_activation_format =
+      options->generation.dit_activation_format;
+  plan->summary.vae_tiling = options->generation.vae_tiling;
+
+  iree_status_t status = id4_ideogram4_plan_generation_qwen(
+      session, options, token_count, &plan->qwen_plan);
+  if (iree_status_is_ok(status)) {
+    status = id4_ideogram4_plan_generation_dit(
+        session->dit_conditioned_stage, options,
+        ID4_IDEOGRAM4_DIT_CONDITIONING_MODE_CONDITIONED, token_count,
+        &plan->dit_conditioned_plan);
+  }
+  if (iree_status_is_ok(status)) {
+    status = id4_ideogram4_plan_generation_dit(
+        session->dit_unconditioned_stage, options,
+        ID4_IDEOGRAM4_DIT_CONDITIONING_MODE_UNCONDITIONED, 0,
+        &plan->dit_unconditioned_plan);
+  }
+  if (iree_status_is_ok(status)) {
+    status = id4_ideogram4_plan_generation_sampler(session, options,
+                                                   &plan->sampler_plan);
+  }
+  if (iree_status_is_ok(status)) {
+    status = id4_ideogram4_plan_generation_decode(session, options,
+                                                  &plan->decode_plan);
+  }
+  return status;
+}
+
+iree_status_t id4_ideogram4_session_plan_generation(
+    id4_ideogram4_session_t* session,
+    const id4_ideogram4_generation_plan_options_t* options,
+    id4_ideogram4_generation_plan_t** out_plan) {
+  IREE_ASSERT_ARGUMENT(out_plan);
+  *out_plan = NULL;
+  IREE_RETURN_IF_ERROR(
+      id4_ideogram4_validate_generation_plan_options(session, options));
+
+  id4_ideogram4_generation_plan_t* plan = NULL;
+  iree_status_t status = id4_ideogram4_generation_plan_allocate(
+      session, session->host_allocator, &plan);
+  if (iree_status_is_ok(status)) {
+    status = id4_ideogram4_plan_generation_stages(session, options, plan);
+  }
+  if (iree_status_is_ok(status)) {
+    *out_plan = plan;
+  } else {
+    id4_ideogram4_generation_plan_release(plan);
+  }
+  return status;
+}
+
+void id4_ideogram4_generation_plan_release(
+    id4_ideogram4_generation_plan_t* plan) {
+  if (!plan) return;
+  id4_pipeline_plan_release(plan->decode_plan);
+  id4_pipeline_plan_release(plan->sampler_plan);
+  id4_pipeline_plan_release(plan->dit_unconditioned_plan);
+  id4_pipeline_plan_release(plan->dit_conditioned_plan);
+  id4_pipeline_plan_release(plan->qwen_plan);
+  id4_ideogram4_session_release(plan->session);
+  iree_allocator_t host_allocator = plan->host_allocator;
+  iree_allocator_free(host_allocator, plan);
+}
+
+iree_status_t id4_ideogram4_generation_plan_summary(
+    const id4_ideogram4_generation_plan_t* plan,
+    id4_ideogram4_generation_plan_summary_t* out_summary) {
+  if (!plan || !out_summary) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "Ideogram 4 generation plan and summary output are required");
+  }
+  *out_summary = plan->summary;
   return iree_ok_status();
 }
 

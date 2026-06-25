@@ -116,6 +116,11 @@ TEST(Ideogram4RequestTest, LowersPromptToQwenInputTensors) {
        ++i) {
     EXPECT_EQ(inputs.value.attention_mask[i], 0.0f);
   }
+
+  uint32_t counted_token_count = 0;
+  IREE_ASSERT_OK(id4_ideogram4_request_count_qwen_tokens(
+      &options, iree_allocator_system(), &counted_token_count));
+  EXPECT_EQ(counted_token_count, inputs.value.token_count);
 }
 
 TEST(Ideogram4RequestTest, RejectsTokenOverflow) {

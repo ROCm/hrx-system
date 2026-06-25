@@ -38,6 +38,7 @@ iree_runtime_cc_library(
         "//experimental/id4/pipeline:stage",
         "//experimental/id4/stages:ideogram4_decode",
         "//experimental/id4/stages:ideogram4_dit",
+        "//experimental/id4/stages:ideogram4_dit_program",
         "//experimental/id4/stages:qwen3_vl",
         "//experimental/id4/stages:sampler",
         "//experimental/id4/stages:vae_program",
@@ -71,6 +72,8 @@ iree_runtime_cc_test(
         "//runtime/src/iree/hal",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/tokenizer/format/huggingface:tokenizer_json",
+        "//runtime/src/iree/tokenizer/testdata:streaming_testdata",
     ],
 )
 

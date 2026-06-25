@@ -7,12 +7,78 @@
 #include "experimental/id4/ideogram4/session.h"
 
 #include <cstring>
+#include <memory>
 
 #include "experimental/id4/stages/test_util.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "iree/tokenizer/format/huggingface/tokenizer_json.h"
+#include "iree/tokenizer/testdata/streaming_testdata.h"
 
 namespace {
+
+static iree_string_view_t GetEmbeddedTokenizerJson() {
+  const iree_file_toc_t* toc = iree_tokenizer_streaming_testdata_create();
+  for (size_t i = 0; i < iree_tokenizer_streaming_testdata_size(); ++i) {
+    if (std::strcmp(toc[i].name, "bpe_bytelevel_minimal.json") == 0) {
+      return iree_make_string_view(toc[i].data, toc[i].size);
+    }
+  }
+  return iree_string_view_empty();
+}
+
+struct TokenizerDeleter {
+  void operator()(iree_tokenizer_t* tokenizer) const {
+    iree_tokenizer_free(tokenizer);
+  }
+};
+
+using TokenizerPtr = std::unique_ptr<iree_tokenizer_t, TokenizerDeleter>;
+
+struct ScopedRequest {
+  ~ScopedRequest() {
+    id4_ideogram4_request_deinitialize(&value, iree_allocator_system());
+  }
+
+  id4_ideogram4_request_t value = {};
+};
+
+struct SessionDeleter {
+  void operator()(id4_ideogram4_session_t* session) const {
+    id4_ideogram4_session_release(session);
+  }
+};
+
+using SessionPtr = std::unique_ptr<id4_ideogram4_session_t, SessionDeleter>;
+
+struct GenerationPlanDeleter {
+  void operator()(id4_ideogram4_generation_plan_t* plan) const {
+    id4_ideogram4_generation_plan_release(plan);
+  }
+};
+
+using GenerationPlanPtr =
+    std::unique_ptr<id4_ideogram4_generation_plan_t, GenerationPlanDeleter>;
+
+static TokenizerPtr LoadTokenizer() {
+  iree_tokenizer_t* tokenizer = nullptr;
+  IREE_CHECK_OK(iree_tokenizer_from_huggingface_json(
+      GetEmbeddedTokenizerJson(), iree_allocator_system(), &tokenizer));
+  return TokenizerPtr(tokenizer);
+}
+
+static id4_ideogram4_generation_config_t MakeGenerationConfig() {
+  id4_ideogram4_generation_config_t config;
+  std::memset(&config, 0, sizeof(config));
+  config.structure_size = sizeof(config);
+  config.diffusion_latent_shape =
+      id4_pipeline_program_make_shape_rank4(8, 8, 128, 1);
+  config.denoise_step_count = 2;
+  config.dit_activation_format =
+      ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT;
+  config.vae_tiling.mode = ID4_VAE_TILING_MODE_DISABLED;
+  return config;
+}
 
 class SessionTest : public ::testing::Test {
  protected:
@@ -52,6 +118,23 @@ class SessionTest : public ::testing::Test {
     options.kernel_cache = kernel_cache_;
     options.vae_activation_format = ID4_VAE_ACTIVATION_FORMAT_BF16_CONV_INPUT;
     return options;
+  }
+
+  SessionPtr CreateLoadedSession() {
+    id4_ideogram4_session_create_options_t create_options = CreateOptions();
+    id4_ideogram4_session_t* session = nullptr;
+    IREE_CHECK_OK(id4_ideogram4_session_create(
+        &create_options, iree_allocator_system(), &session));
+
+    id4_ideogram4_session_load_options_t load_options;
+    std::memset(&load_options, 0, sizeof(load_options));
+    load_options.structure_size = sizeof(load_options);
+    id4::test::StageDiagnostics diagnostics = {};
+    id4_pipeline_diagnostics_sink_t diagnostics_sink =
+        id4::test::DiagnosticsSink(&diagnostics);
+    load_options.diagnostics_sink = &diagnostics_sink;
+    IREE_CHECK_OK(id4_ideogram4_session_load(session, &load_options));
+    return SessionPtr(session);
   }
 
   iree_hal_device_group_t* device_group_ = nullptr;
@@ -107,6 +190,105 @@ TEST_F(SessionTest, IssueRequiresLoadedSession) {
   EXPECT_EQ(execution, nullptr);
 
   id4_ideogram4_session_release(session);
+}
+
+TEST_F(SessionTest, PlanGenerationRequiresLoadedSession) {
+  id4_ideogram4_session_create_options_t create_options = CreateOptions();
+  id4_ideogram4_session_t* session = nullptr;
+  IREE_ASSERT_OK(id4_ideogram4_session_create(
+      &create_options, iree_allocator_system(), &session));
+
+  id4_ideogram4_generation_plan_options_t plan_options;
+  std::memset(&plan_options, 0, sizeof(plan_options));
+  plan_options.structure_size = sizeof(plan_options);
+  plan_options.generation = MakeGenerationConfig();
+
+  id4_ideogram4_generation_plan_t* plan = nullptr;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_FAILED_PRECONDITION,
+      id4_ideogram4_session_plan_generation(session, &plan_options, &plan));
+  EXPECT_EQ(plan, nullptr);
+
+  id4_ideogram4_session_release(session);
+}
+
+TEST_F(SessionTest, PlansGenerationFromDynamicPromptLength) {
+  TokenizerPtr tokenizer = LoadTokenizer();
+  ScopedRequest short_request;
+  IREE_ASSERT_OK(id4_ideogram4_request_parse_json(
+      IREE_SV("{\"prompt\":\"a city\"}"), iree_allocator_system(),
+      &short_request.value));
+  ScopedRequest long_request;
+  IREE_ASSERT_OK(id4_ideogram4_request_parse_json(
+      IREE_SV("{\"prompt\":\"three people walking through a reflective city "
+              "street with umbrellas and neon signs\"}"),
+      iree_allocator_system(), &long_request.value));
+
+  SessionPtr session = CreateLoadedSession();
+  id4_ideogram4_generation_plan_options_t plan_options;
+  std::memset(&plan_options, 0, sizeof(plan_options));
+  plan_options.structure_size = sizeof(plan_options);
+  plan_options.tokenizer = tokenizer.get();
+  plan_options.tokenizer_flags = IREE_TOKENIZER_ENCODE_FLAG_NONE;
+  plan_options.generation = MakeGenerationConfig();
+  plan_options.device_index = 0;
+  plan_options.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
+  id4::test::StageDiagnostics diagnostics = {};
+  id4_pipeline_diagnostics_sink_t diagnostics_sink =
+      id4::test::DiagnosticsSink(&diagnostics);
+  plan_options.diagnostics_sink = &diagnostics_sink;
+
+  plan_options.request = &short_request.value;
+  id4_ideogram4_generation_plan_t* short_plan = nullptr;
+  IREE_ASSERT_OK(id4_ideogram4_session_plan_generation(
+      session.get(), &plan_options, &short_plan));
+  GenerationPlanPtr short_plan_owner(short_plan);
+
+  plan_options.request = &long_request.value;
+  id4_ideogram4_generation_plan_t* long_plan = nullptr;
+  IREE_ASSERT_OK(id4_ideogram4_session_plan_generation(
+      session.get(), &plan_options, &long_plan));
+  GenerationPlanPtr long_plan_owner(long_plan);
+
+  id4_ideogram4_generation_plan_summary_t short_summary;
+  IREE_ASSERT_OK(id4_ideogram4_generation_plan_summary(short_plan_owner.get(),
+                                                       &short_summary));
+  id4_ideogram4_generation_plan_summary_t long_summary;
+  IREE_ASSERT_OK(id4_ideogram4_generation_plan_summary(long_plan_owner.get(),
+                                                       &long_summary));
+  EXPECT_GT(short_summary.qwen_token_count, 0u);
+  EXPECT_GT(long_summary.qwen_token_count, short_summary.qwen_token_count);
+  EXPECT_EQ(long_summary.denoise_step_count, 2u);
+  EXPECT_EQ(long_summary.diffusion_latent_shape.rank, 4u);
+  EXPECT_EQ(long_summary.diffusion_latent_shape.dims[2], 128u);
+  EXPECT_EQ(long_summary.dit_activation_format,
+            ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT);
+  EXPECT_EQ(long_summary.vae_tiling.mode, ID4_VAE_TILING_MODE_DISABLED);
+}
+
+TEST_F(SessionTest, RejectsInvalidGenerationConfig) {
+  TokenizerPtr tokenizer = LoadTokenizer();
+  ScopedRequest request;
+  IREE_ASSERT_OK(id4_ideogram4_request_parse_json(
+      IREE_SV("{\"prompt\":\"a city\"}"), iree_allocator_system(),
+      &request.value));
+  SessionPtr session = CreateLoadedSession();
+
+  id4_ideogram4_generation_plan_options_t plan_options;
+  std::memset(&plan_options, 0, sizeof(plan_options));
+  plan_options.structure_size = sizeof(plan_options);
+  plan_options.request = &request.value;
+  plan_options.tokenizer = tokenizer.get();
+  plan_options.generation = MakeGenerationConfig();
+  plan_options.device_index = 0;
+  plan_options.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
+  plan_options.generation.denoise_step_count = 0;
+
+  id4_ideogram4_generation_plan_t* plan = nullptr;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        id4_ideogram4_session_plan_generation(
+                            session.get(), &plan_options, &plan));
+  EXPECT_EQ(plan, nullptr);
 }
 
 }  // namespace

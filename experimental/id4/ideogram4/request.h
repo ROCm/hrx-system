@@ -64,6 +64,12 @@ iree_status_t id4_ideogram4_request_lower_qwen_inputs(
     const id4_ideogram4_qwen_lowering_options_t* options,
     iree_allocator_t host_allocator, id4_ideogram4_qwen_inputs_t* out_inputs);
 
+// Counts the Qwen3-VL prompt tokens produced by |options| without materializing
+// request tensor payloads.
+iree_status_t id4_ideogram4_request_count_qwen_tokens(
+    const id4_ideogram4_qwen_lowering_options_t* options,
+    iree_allocator_t host_allocator, uint32_t* out_token_count);
+
 // Releases storage owned by |inputs|.
 void id4_ideogram4_qwen_inputs_deinitialize(id4_ideogram4_qwen_inputs_t* inputs,
                                             iree_allocator_t host_allocator);

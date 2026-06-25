@@ -41,6 +41,7 @@ iree_cc_library(
     iree::experimental::id4::pipeline::stage
     iree::experimental::id4::stages::ideogram4_decode
     iree::experimental::id4::stages::ideogram4_dit
+    iree::experimental::id4::stages::ideogram4_dit_program
     iree::experimental::id4::stages::qwen3_vl
     iree::experimental::id4::stages::sampler
     iree::experimental::id4::stages::vae_program
@@ -76,6 +77,8 @@ iree_cc_test(
     iree::hal
     iree::testing::gtest
     iree::testing::gtest_main
+    iree::tokenizer::format::huggingface::tokenizer_json
+    iree::tokenizer::testdata::streaming_testdata
 )
 
 iree_cc_test(
