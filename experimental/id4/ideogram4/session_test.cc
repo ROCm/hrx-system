@@ -137,6 +137,29 @@ class SessionTest : public ::testing::Test {
     return SessionPtr(session);
   }
 
+  GenerationPlanPtr PlanGeneration(id4_ideogram4_session_t* session,
+                                   const iree_tokenizer_t* tokenizer,
+                                   const id4_ideogram4_request_t* request) {
+    id4_ideogram4_generation_plan_options_t plan_options;
+    std::memset(&plan_options, 0, sizeof(plan_options));
+    plan_options.structure_size = sizeof(plan_options);
+    plan_options.request = request;
+    plan_options.tokenizer = tokenizer;
+    plan_options.tokenizer_flags = IREE_TOKENIZER_ENCODE_FLAG_NONE;
+    plan_options.generation = MakeGenerationConfig();
+    plan_options.device_index = 0;
+    plan_options.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
+    id4::test::StageDiagnostics diagnostics = {};
+    id4_pipeline_diagnostics_sink_t diagnostics_sink =
+        id4::test::DiagnosticsSink(&diagnostics);
+    plan_options.diagnostics_sink = &diagnostics_sink;
+
+    id4_ideogram4_generation_plan_t* plan = nullptr;
+    IREE_CHECK_OK(
+        id4_ideogram4_session_plan_generation(session, &plan_options, &plan));
+    return GenerationPlanPtr(plan);
+  }
+
   iree_hal_device_group_t* device_group_ = nullptr;
   iree_hal_executable_cache_t* executable_cache_ = nullptr;
   id4_pipeline_kernel_cache_t* kernel_cache_ = nullptr;
@@ -289,6 +312,67 @@ TEST_F(SessionTest, RejectsInvalidGenerationConfig) {
                         id4_ideogram4_session_plan_generation(
                             session.get(), &plan_options, &plan));
   EXPECT_EQ(plan, nullptr);
+}
+
+TEST_F(SessionTest, PrepareGenerationRequiresFinalSignal) {
+  TokenizerPtr tokenizer = LoadTokenizer();
+  ScopedRequest request;
+  IREE_ASSERT_OK(id4_ideogram4_request_parse_json(
+      IREE_SV("{\"prompt\":\"a city\"}"), iree_allocator_system(),
+      &request.value));
+  SessionPtr session = CreateLoadedSession();
+  GenerationPlanPtr plan =
+      PlanGeneration(session.get(), tokenizer.get(), &request.value);
+
+  id4_ideogram4_generation_prepare_options_t prepare_options;
+  std::memset(&prepare_options, 0, sizeof(prepare_options));
+  prepare_options.structure_size = sizeof(prepare_options);
+
+  id4_ideogram4_generation_bundle_t* bundle = nullptr;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      id4_ideogram4_session_prepare_generation(session.get(), plan.get(),
+                                               &prepare_options, &bundle));
+  EXPECT_EQ(bundle, nullptr);
+}
+
+TEST_F(SessionTest, PrepareGenerationRequiresParameterProviders) {
+  TokenizerPtr tokenizer = LoadTokenizer();
+  ScopedRequest request;
+  IREE_ASSERT_OK(id4_ideogram4_request_parse_json(
+      IREE_SV("{\"prompt\":\"a city\"}"), iree_allocator_system(),
+      &request.value));
+  SessionPtr session = CreateLoadedSession();
+  GenerationPlanPtr plan =
+      PlanGeneration(session.get(), tokenizer.get(), &request.value);
+
+  iree_hal_device_t* device =
+      iree_hal_device_group_device_at(device_group_, /*index=*/0);
+  iree_hal_semaphore_t* semaphore = nullptr;
+  IREE_ASSERT_OK(iree_hal_semaphore_create(device, IREE_HAL_QUEUE_AFFINITY_ANY,
+                                           0, IREE_HAL_SEMAPHORE_FLAG_NONE,
+                                           &semaphore));
+  iree_hal_semaphore_t* signal_semaphores[] = {semaphore};
+  uint64_t signal_payload_values[] = {1};
+  iree_hal_semaphore_list_t signal_list = {
+      /*.count=*/1,
+      /*.semaphores=*/signal_semaphores,
+      /*.payload_values=*/signal_payload_values,
+  };
+
+  id4_ideogram4_generation_prepare_options_t prepare_options;
+  std::memset(&prepare_options, 0, sizeof(prepare_options));
+  prepare_options.structure_size = sizeof(prepare_options);
+  prepare_options.signal_semaphore_list = signal_list;
+
+  id4_ideogram4_generation_bundle_t* bundle = nullptr;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      id4_ideogram4_session_prepare_generation(session.get(), plan.get(),
+                                               &prepare_options, &bundle));
+  EXPECT_EQ(bundle, nullptr);
+
+  iree_hal_semaphore_release(semaphore);
 }
 
 }  // namespace

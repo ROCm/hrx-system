@@ -33,6 +33,10 @@ typedef struct id4_ideogram4_qwen_execution_t id4_ideogram4_qwen_execution_t;
 // Opaque planned generation assembled from session-owned coarse stages.
 typedef struct id4_ideogram4_generation_plan_t id4_ideogram4_generation_plan_t;
 
+// Opaque prepared generation bundle assembled from one generation plan.
+typedef struct id4_ideogram4_generation_bundle_t
+    id4_ideogram4_generation_bundle_t;
+
 // Parameter scopes used by concrete Ideogram 4 stages.
 typedef struct id4_ideogram4_session_parameter_scopes_t {
   // Scope containing Qwen3-VL text encoder weights.
@@ -123,6 +127,38 @@ typedef struct id4_ideogram4_generation_plan_summary_t {
   id4_vae_tiling_config_t vae_tiling;
 } id4_ideogram4_generation_plan_summary_t;
 
+// Parameter providers used when preparing one generation plan.
+typedef struct id4_ideogram4_generation_parameter_providers_t {
+  // Provider containing Qwen3-VL text encoder weights.
+  iree_io_parameter_provider_t* qwen;
+  // Provider containing conditioned Ideogram 4 DiT weights.
+  iree_io_parameter_provider_t* dit_conditioned;
+  // Provider containing unconditioned Ideogram 4 DiT weights.
+  iree_io_parameter_provider_t* dit_unconditioned;
+  // Provider containing VAE decode weights.
+  iree_io_parameter_provider_t* vae;
+} id4_ideogram4_generation_parameter_providers_t;
+
+// Options for preparing reusable HAL state from one generation plan.
+typedef struct id4_ideogram4_generation_prepare_options_t {
+  // Size of this structure for versioning.
+  iree_host_size_t structure_size;
+  // Extension structure chain; must be NULL for now.
+  const void* next;
+  // Parameter providers selected for each session-owned model component.
+  id4_ideogram4_generation_parameter_providers_t parameter_providers;
+  // Kernel library used to resolve planned Loom module paths.
+  id4_pipeline_kernel_library_t* kernel_library;
+  // HAL command-buffer mode used when preparing reusable regions.
+  iree_hal_command_buffer_mode_t command_buffer_mode;
+  // Semaphores that asynchronous parameter loading waits on.
+  iree_hal_semaphore_list_t wait_semaphore_list;
+  // Semaphores signaled after every prepared stage is ready for issue.
+  iree_hal_semaphore_list_t signal_semaphore_list;
+  // Diagnostics sink for prepare events.
+  id4_pipeline_diagnostics_sink_t* diagnostics_sink;
+} id4_ideogram4_generation_prepare_options_t;
+
 // Options for issuing one asynchronous Qwen3-VL conditioning execution.
 typedef struct id4_ideogram4_qwen_issue_options_t {
   // Size of this structure for versioning.
@@ -191,6 +227,17 @@ void id4_ideogram4_generation_plan_release(
 iree_status_t id4_ideogram4_generation_plan_summary(
     const id4_ideogram4_generation_plan_t* plan,
     id4_ideogram4_generation_plan_summary_t* out_summary);
+
+// Prepares reusable HAL state for every stage in |plan|.
+iree_status_t id4_ideogram4_session_prepare_generation(
+    id4_ideogram4_session_t* session,
+    const id4_ideogram4_generation_plan_t* plan,
+    const id4_ideogram4_generation_prepare_options_t* options,
+    id4_ideogram4_generation_bundle_t** out_bundle);
+
+// Releases |bundle| after all queued work using it has completed.
+void id4_ideogram4_generation_bundle_release(
+    id4_ideogram4_generation_bundle_t* bundle);
 
 // Issues one asynchronous Qwen3-VL conditioning execution.
 iree_status_t id4_ideogram4_session_issue_qwen(
