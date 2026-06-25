@@ -13,7 +13,6 @@
 #include "experimental/id4/pipeline/program.h"
 #include "experimental/id4/stages/ideogram4_dit_program.h"
 #include "iree/base/api.h"
-#include "iree/hal/command_buffer.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -91,13 +90,6 @@ bool id4_ideogram4_dit_program_checked_mul_u64(uint64_t lhs, uint64_t rhs,
 
 bool id4_ideogram4_dit_program_has_diagnostic_tap(
     iree_string_view_list_t diagnostic_tap_names, iree_string_view_t name);
-
-iree_hal_dispatch_config_t id4_ideogram4_dit_program_make_dispatch_config(
-    uint32_t workgroup_count_x, uint32_t workgroup_count_y,
-    uint32_t workgroup_count_z);
-
-iree_status_t id4_ideogram4_dit_program_make_element_dispatch_config(
-    uint32_t element_count, iree_hal_dispatch_config_t* out_dispatch_config);
 
 iree_status_t id4_ideogram4_dit_program_parameter(
     id4_pipeline_program_builder_t* builder, iree_string_view_t key,

@@ -15,7 +15,6 @@ enum {
   ID4_VAE_PARAMETER_CONFIG_VALUE_CAPACITY = 24,
   ID4_VAE_PARAMETER_PACK_CONFIG_COUNT = 3,
   ID4_VAE_PARAMETER_CAST_CONFIG_COUNT = 1,
-  ID4_VAE_PARAMETER_PACK_WORKGROUP_SIZE_X = 256,
 };
 
 static const iree_string_view_t id4_vae_parameter_packed_conv3x3_suffix =
@@ -548,22 +547,6 @@ static iree_status_t id4_vae_parameter_cast_config(
   return iree_ok_status();
 }
 
-static iree_hal_dispatch_config_t id4_vae_parameter_transform_dispatch_config(
-    const id4_vae_parameter_mapping_t* mapping) {
-  const uint32_t element_count = (uint32_t)mapping->element_count;
-  iree_hal_dispatch_config_t dispatch_config =
-      iree_hal_make_static_dispatch_config(
-          element_count / ID4_VAE_PARAMETER_PACK_WORKGROUP_SIZE_X +
-              (element_count % ID4_VAE_PARAMETER_PACK_WORKGROUP_SIZE_X != 0
-                   ? 1
-                   : 0),
-          1, 1);
-  dispatch_config.workgroup_size[0] = ID4_VAE_PARAMETER_PACK_WORKGROUP_SIZE_X;
-  dispatch_config.workgroup_size[1] = 1;
-  dispatch_config.workgroup_size[2] = 1;
-  return dispatch_config;
-}
-
 static iree_hal_semaphore_list_t id4_vae_parameter_one_semaphore_list(
     iree_hal_semaphore_t** semaphore, uint64_t* payload_value) {
   return (iree_hal_semaphore_list_t){
@@ -816,7 +799,7 @@ static iree_status_t id4_vae_parameter_submit_transform(
     status = iree_hal_device_queue_dispatch(
         device, queue_affinity, gather_signal_list, encode_signal_list,
         id4_pipeline_kernel_executable_hal_executable(executable), function,
-        id4_vae_parameter_transform_dispatch_config(mapping),
+        id4_pipeline_kernel_executable_dispatch_config(executable),
         iree_const_byte_span_empty(), binding_list,
         IREE_HAL_DISPATCH_FLAG_NONE);
     encode_submitted = iree_status_is_ok(status);

@@ -15,6 +15,7 @@
 #include "loomc/context.h"
 #include "loomc/emit.h"
 #include "loomc/iree.h"
+#include "loomc/launch_config.h"
 #include "loomc/link.h"
 #include "loomc/link_index.h"
 #include "loomc/module.h"
@@ -56,6 +57,8 @@ struct id4_pipeline_kernel_executable_t {
   iree_allocator_t host_allocator;
   // Retained HAL executable prepared from the emitted artifact.
   iree_hal_executable_t* hal_executable;
+  // Resolved static dispatch configuration for the prepared kernel.
+  iree_hal_dispatch_config_t dispatch_config;
   // HAL executable format inferred from the primary artifact.
   iree_string_view_t hal_executable_format;
   // Valid executable byte length inferred by the HAL cache.
@@ -385,12 +388,61 @@ static const loomc_artifact_t* id4_pipeline_kernel_cache_find_artifact(
   return NULL;
 }
 
+static iree_status_t id4_pipeline_kernel_cache_make_dispatch_config(
+    const loomc_launch_config_t* launch_config, iree_string_view_t module_path,
+    iree_string_view_t function_name,
+    iree_hal_dispatch_config_t* out_dispatch_config) {
+  memset(out_dispatch_config, 0, sizeof(*out_dispatch_config));
+  if (!iree_all_bits_set(launch_config->fields,
+                         LOOMC_LAUNCH_CONFIG_FIELD_FLAG_WORKGROUP_COUNT)) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "launch config for %.*s:%.*s did not resolve workgroup count",
+        (int)module_path.size, module_path.data, (int)function_name.size,
+        function_name.data);
+  }
+  if (!iree_all_bits_set(launch_config->fields,
+                         LOOMC_LAUNCH_CONFIG_FIELD_FLAG_WORKGROUP_SIZE)) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "launch config for %.*s:%.*s did not resolve workgroup size",
+        (int)module_path.size, module_path.data, (int)function_name.size,
+        function_name.data);
+  }
+  if (launch_config->workgroup_count.x == 0 ||
+      launch_config->workgroup_count.y == 0 ||
+      launch_config->workgroup_count.z == 0) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "launch config for %.*s:%.*s resolved an empty workgroup count",
+        (int)module_path.size, module_path.data, (int)function_name.size,
+        function_name.data);
+  }
+  if (launch_config->workgroup_size.x == 0 ||
+      launch_config->workgroup_size.y == 0 ||
+      launch_config->workgroup_size.z == 0) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "launch config for %.*s:%.*s resolved an empty workgroup size",
+        (int)module_path.size, module_path.data, (int)function_name.size,
+        function_name.data);
+  }
+  *out_dispatch_config = iree_hal_make_static_dispatch_config(
+      launch_config->workgroup_count.x, launch_config->workgroup_count.y,
+      launch_config->workgroup_count.z);
+  out_dispatch_config->workgroup_size[0] = launch_config->workgroup_size.x;
+  out_dispatch_config->workgroup_size[1] = launch_config->workgroup_size.y;
+  out_dispatch_config->workgroup_size[2] = launch_config->workgroup_size.z;
+  return iree_ok_status();
+}
+
 static iree_status_t id4_pipeline_kernel_executable_create(
     iree_string_view_t hal_executable_format,
     iree_host_size_t inferred_executable_byte_length,
-    iree_hal_executable_t* hal_executable, const loomc_result_t* compile_result,
-    const loomc_result_t* emit_result, const loomc_artifact_t* primary_artifact,
-    iree_allocator_t host_allocator,
+    iree_hal_executable_t* hal_executable,
+    iree_hal_dispatch_config_t dispatch_config,
+    const loomc_result_t* compile_result, const loomc_result_t* emit_result,
+    const loomc_artifact_t* primary_artifact, iree_allocator_t host_allocator,
     id4_pipeline_kernel_executable_t** out_executable) {
   IREE_ASSERT_ARGUMENT(hal_executable);
   IREE_ASSERT_ARGUMENT(primary_artifact);
@@ -406,6 +458,7 @@ static iree_status_t id4_pipeline_kernel_executable_create(
     executable->host_allocator = host_allocator;
     executable->hal_executable = hal_executable;
     iree_hal_executable_retain(executable->hal_executable);
+    executable->dispatch_config = dispatch_config;
     executable->inferred_executable_byte_length =
         inferred_executable_byte_length;
     executable->primary_artifact_index = IREE_HOST_SIZE_MAX;
@@ -687,9 +740,12 @@ iree_status_t id4_pipeline_kernel_cache_prepare_executable(
   loomc_module_t* module = NULL;
   loomc_result_t* link_index_result = NULL;
   loomc_result_t* link_result = NULL;
+  loomc_result_t* launch_config_result = NULL;
   loomc_result_t* compile_result = NULL;
   loomc_result_t* emit_result = NULL;
   iree_hal_executable_t* hal_executable = NULL;
+  iree_hal_dispatch_config_t dispatch_config;
+  memset(&dispatch_config, 0, sizeof(dispatch_config));
   iree_status_t status = iree_ok_status();
 
   if (options->config_binding_count != 0) {
@@ -813,6 +869,57 @@ iree_status_t id4_pipeline_kernel_cache_prepare_executable(
   if (iree_status_is_ok(status)) {
     status = id4_pipeline_kernel_cache_require_loom_result(
         kernel_cache, options, IREE_SV("link"), link_result);
+  }
+  if (iree_status_is_ok(status)) {
+    loomc_launch_config_eval_options_t launch_options = {
+        // Launch-config evaluation descriptor type.
+        .type = LOOMC_STRUCTURE_TYPE_LAUNCH_CONFIG_EVAL_OPTIONS,
+        // Size of this descriptor.
+        .structure_size = sizeof(launch_options),
+        // No launch-config extensions are used.
+        .next = NULL,
+        // Kernel function selected as the link root.
+        .function_symbol = root_symbol,
+        // Configs were materialized by the selective link invocation.
+        .config =
+            {
+                // No additional config bindings remain after linking.
+                .bindings = NULL,
+                // No additional config bindings remain after linking.
+                .binding_count = 0,
+                // ID4 runtime scheduling does not use JSON config payloads.
+                .json_object = loomc_string_view_empty(),
+                // No config work remains after linking selected roots.
+                .flags = 0,
+            },
+        // This first integration pass uses config-resolved launch regions.
+        .workload_arguments = NULL,
+        // This first integration pass uses config-resolved launch regions.
+        .workload_argument_count = 0,
+        // HAL queue dispatch requires static group count and local size.
+        .required_fields = LOOMC_LAUNCH_CONFIG_FIELD_FLAG_WORKGROUP_COUNT |
+                           LOOMC_LAUNCH_CONFIG_FIELD_FLAG_WORKGROUP_SIZE,
+    };
+    loomc_launch_config_t launch_config = {
+        // Launch-config result descriptor type.
+        .type = LOOMC_STRUCTURE_TYPE_LAUNCH_CONFIG,
+        // Size of this result structure.
+        .structure_size = sizeof(launch_config),
+    };
+    status = iree_status_from_loomc(loomc_module_evaluate_launch_config(
+        module, workspace, &launch_options,
+        loomc_allocator_from_iree(kernel_cache->host_allocator), &launch_config,
+        &launch_config_result));
+    if (iree_status_is_ok(status)) {
+      status = id4_pipeline_kernel_cache_require_loom_result(
+          kernel_cache, options, IREE_SV("launch_config"),
+          launch_config_result);
+    }
+    if (iree_status_is_ok(status)) {
+      status = id4_pipeline_kernel_cache_make_dispatch_config(
+          &launch_config, options->module_path, options->function_name,
+          &dispatch_config);
+    }
   }
   if (iree_status_is_ok(status)) {
     loomc_target_selection_options_t target_options = {
@@ -1014,7 +1121,7 @@ iree_status_t id4_pipeline_kernel_cache_prepare_executable(
   if (iree_status_is_ok(status)) {
     status = id4_pipeline_kernel_executable_create(
         hal_executable_format, inferred_executable_byte_length, hal_executable,
-        compile_result, emit_result, primary_artifact,
+        dispatch_config, compile_result, emit_result, primary_artifact,
         kernel_cache->host_allocator, out_executable);
   }
   if (iree_status_is_ok(status)) {
@@ -1055,6 +1162,7 @@ iree_status_t id4_pipeline_kernel_cache_prepare_executable(
   iree_hal_executable_release(hal_executable);
   loomc_result_release(emit_result);
   loomc_result_release(compile_result);
+  loomc_result_release(launch_config_result);
   loomc_result_release(link_result);
   loomc_result_release(link_index_result);
   loomc_module_release(module);
@@ -1096,6 +1204,16 @@ void id4_pipeline_kernel_executable_release(
 iree_hal_executable_t* id4_pipeline_kernel_executable_hal_executable(
     const id4_pipeline_kernel_executable_t* executable) {
   return executable ? executable->hal_executable : NULL;
+}
+
+iree_hal_dispatch_config_t id4_pipeline_kernel_executable_dispatch_config(
+    const id4_pipeline_kernel_executable_t* executable) {
+  iree_hal_dispatch_config_t dispatch_config;
+  memset(&dispatch_config, 0, sizeof(dispatch_config));
+  if (executable) {
+    dispatch_config = executable->dispatch_config;
+  }
+  return dispatch_config;
 }
 
 iree_string_view_t id4_pipeline_kernel_executable_hal_format(

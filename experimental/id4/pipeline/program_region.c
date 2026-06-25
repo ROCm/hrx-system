@@ -581,6 +581,38 @@ static iree_status_t id4_pipeline_program_region_resolve_kernel(
                                           dispatch_ordinal, out_resolution);
 }
 
+static iree_status_t id4_pipeline_program_region_validate_dispatch_config(
+    const id4_pipeline_program_dispatch_loom_op_t* dispatch_op,
+    iree_hal_dispatch_config_t dispatch_config) {
+  if (dispatch_config.workgroup_count_ref.buffer) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "program dispatch %.*s resolved indirect workgroup counts",
+        (int)dispatch_op->name.size, dispatch_op->name.data);
+  }
+  for (iree_host_size_t i = 0;
+       i < IREE_ARRAYSIZE(dispatch_config.workgroup_count); ++i) {
+    if (dispatch_config.workgroup_count[i] == 0) {
+      return iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "program dispatch %.*s resolved zero workgroup count dimension "
+          "%" PRIhsz,
+          (int)dispatch_op->name.size, dispatch_op->name.data, i);
+    }
+  }
+  for (iree_host_size_t i = 0;
+       i < IREE_ARRAYSIZE(dispatch_config.workgroup_size); ++i) {
+    if (dispatch_config.workgroup_size[i] == 0) {
+      return iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "program dispatch %.*s resolved zero workgroup size dimension "
+          "%" PRIhsz,
+          (int)dispatch_op->name.size, dispatch_op->name.data, i);
+    }
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t id4_pipeline_program_region_lower_dispatch(
     id4_pipeline_program_region_context_t* context,
     const id4_pipeline_program_dispatch_loom_op_t* dispatch_op,
@@ -623,10 +655,20 @@ static iree_status_t id4_pipeline_program_region_lower_dispatch(
         // Config bindings borrowed from the immutable semantic program.
         .config_bindings = dispatch_op->config_bindings,
     };
-    status = id4_pipeline_region_dispatch_loom(
-        context->options->builder, &kernel, dispatch_op->dispatch_config,
-        iree_const_byte_span_empty(), dispatch_op->binding_count,
-        context->dispatch_bindings, IREE_HAL_DISPATCH_FLAG_NONE);
+    iree_hal_dispatch_config_t dispatch_config;
+    memset(&dispatch_config, 0, sizeof(dispatch_config));
+    if (id4_pipeline_region_builder_mode(context->options->builder) ==
+        ID4_PIPELINE_REGION_BUILDER_MODE_RECORD) {
+      dispatch_config = resolution.dispatch_config;
+      status = id4_pipeline_program_region_validate_dispatch_config(
+          dispatch_op, dispatch_config);
+    }
+    if (iree_status_is_ok(status)) {
+      status = id4_pipeline_region_dispatch_loom(
+          context->options->builder, &kernel, dispatch_config,
+          iree_const_byte_span_empty(), dispatch_op->binding_count,
+          context->dispatch_bindings, IREE_HAL_DISPATCH_FLAG_NONE);
+    }
   }
   iree_allocator_free(context->host_allocator, (void*)specialization_key.data);
   return status;

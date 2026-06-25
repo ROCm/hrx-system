@@ -10,10 +10,8 @@
 #include <string.h>
 
 #include "experimental/id4/pipeline/program.h"
-#include "iree/hal/command_buffer.h"
 
 enum {
-  ID4_SAMPLER_WORKGROUP_SIZE_X = 256,
   ID4_SAMPLER_CONFIG_VALUE_BUFFER_CAPACITY = 16,
 };
 
@@ -80,24 +78,6 @@ static iree_status_t id4_sampler_program_validate_options(
   }
   return id4_sampler_program_request_element_count(options->request,
                                                    out_element_count);
-}
-
-static uint32_t id4_sampler_program_ceil_div_u32(uint32_t dividend,
-                                                 uint32_t divisor) {
-  return dividend / divisor + (dividend % divisor != 0 ? 1 : 0);
-}
-
-static iree_hal_dispatch_config_t id4_sampler_program_make_dispatch_config(
-    uint32_t element_count) {
-  iree_hal_dispatch_config_t dispatch_config =
-      iree_hal_make_static_dispatch_config(
-          id4_sampler_program_ceil_div_u32(element_count,
-                                           ID4_SAMPLER_WORKGROUP_SIZE_X),
-          1, 1);
-  dispatch_config.workgroup_size[0] = ID4_SAMPLER_WORKGROUP_SIZE_X;
-  dispatch_config.workgroup_size[1] = 1;
-  dispatch_config.workgroup_size[2] = 1;
-  return dispatch_config;
 }
 
 static iree_status_t id4_sampler_program_import_tensor(
@@ -203,8 +183,6 @@ iree_status_t id4_sampler_program_author_denoise_step(
   dispatch_options.kernel =
       id4_pipeline_make_kernel_ref(IREE_SV("sampler/cfg_denoise_f32"),
                                    IREE_SV("id4_sampler_cfg_denoise_f32"));
-  dispatch_options.dispatch_config =
-      id4_sampler_program_make_dispatch_config((uint32_t)element_count);
   dispatch_options.config_binding_count = IREE_ARRAYSIZE(config_bindings);
   dispatch_options.config_bindings = config_bindings;
   dispatch_options.binding_count = IREE_ARRAYSIZE(bindings);

@@ -187,26 +187,12 @@ static iree_status_t id4_smoke_stage_format_specialization_key(
   return iree_ok_status();
 }
 
-static iree_hal_dispatch_config_t id4_smoke_stage_make_dispatch_config(void) {
-  // This mirrors kernels/smoke_configured.loom kernel.launch.config until the
-  // runtime can evaluate Loom launch regions directly.
-  const uint32_t workgroup_size_x = 64;
-  const uint32_t workgroups_x =
-      (ID4_SMOKE_STAGE_OUTPUT_ELEMENT_COUNT + workgroup_size_x - 1) /
-      workgroup_size_x;
-  iree_hal_dispatch_config_t dispatch_config =
-      iree_hal_make_static_dispatch_config(workgroups_x, 1, 1);
-  dispatch_config.workgroup_size[0] = workgroup_size_x;
-  dispatch_config.workgroup_size[1] = 1;
-  dispatch_config.workgroup_size[2] = 1;
-  return dispatch_config;
-}
-
 static iree_status_t id4_smoke_stage_author_region(
     id4_smoke_stage_t* stage, id4_pipeline_region_builder_t* builder,
     id4_smoke_stage_region_flags_t region_flags,
     iree_hal_executable_t* hal_executable,
-    iree_hal_executable_function_t function) {
+    iree_hal_executable_function_t function,
+    iree_hal_dispatch_config_t dispatch_config) {
   id4_pipeline_tensor_import_t output_import;
   memset(&output_import, 0, sizeof(output_import));
   output_import.layout.name = IREE_SV("smoke.output");
@@ -262,9 +248,6 @@ static iree_status_t id4_smoke_stage_author_region(
   kernel.constant_byte_length = 0;
   kernel.config_binding_count = IREE_ARRAYSIZE(config_bindings);
   kernel.config_bindings = config_bindings;
-
-  iree_hal_dispatch_config_t dispatch_config =
-      id4_smoke_stage_make_dispatch_config();
 
   id4_pipeline_region_dispatch_binding_t binding;
   memset(&binding, 0, sizeof(binding));
@@ -325,7 +308,8 @@ static iree_status_t id4_smoke_stage_create_dry_run_builder(
   if (iree_status_is_ok(status)) {
     status =
         id4_smoke_stage_author_region(stage, builder, region_flags, NULL,
-                                      iree_hal_executable_function_invalid());
+                                      iree_hal_executable_function_invalid(),
+                                      (iree_hal_dispatch_config_t){0});
   }
   if (iree_status_is_ok(status)) {
     *out_builder = builder;
@@ -618,8 +602,9 @@ static iree_status_t id4_smoke_stage_record_region(
         &builder_options, stage->host_allocator, &builder);
   }
   if (iree_status_is_ok(status)) {
-    status = id4_smoke_stage_author_region(stage, builder, region_flags,
-                                           hal_executable, function);
+    status = id4_smoke_stage_author_region(
+        stage, builder, region_flags, hal_executable, function,
+        id4_pipeline_kernel_executable_dispatch_config(executable));
   }
   if (iree_status_is_ok(status)) {
     status = iree_hal_command_buffer_end(command_buffer);

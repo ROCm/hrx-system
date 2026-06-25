@@ -51,10 +51,9 @@ integration tests.
 Loom config values describe model, tensor, dtype, and shape facts. Launch
 geometry is not public stage configuration and should not be passed as generic
 config knobs. Put workgroup-count and workgroup-size arithmetic in the
-`kernel.launch.config` region and mirror it in C only where the current runtime
-cannot yet execute that region directly. That mirror must stay local to the
-dispatch authoring code so future VM-backed launch evaluation can replace it
-without changing stage APIs.
+`kernel.launch.config` region. The ID4 prepare path evaluates that region
+through `loomc` and stores the resolved dispatch configuration with the
+prepared executable; stage authoring code must not mirror the arithmetic in C.
 
 Every struct field added in C headers or runtime structs needs its own adjacent
 field comment. Use full words in identifiers unless an external API forces a

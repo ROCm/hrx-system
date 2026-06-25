@@ -144,6 +144,10 @@ void id4_pipeline_kernel_executable_release(
 iree_hal_executable_t* id4_pipeline_kernel_executable_hal_executable(
     const id4_pipeline_kernel_executable_t* executable);
 
+// Returns the resolved static HAL dispatch configuration.
+iree_hal_dispatch_config_t id4_pipeline_kernel_executable_dispatch_config(
+    const id4_pipeline_kernel_executable_t* executable);
+
 // Returns the HAL executable format inferred from the primary artifact bytes.
 iree_string_view_t id4_pipeline_kernel_executable_hal_format(
     const id4_pipeline_kernel_executable_t* executable);

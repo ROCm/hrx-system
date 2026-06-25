@@ -22,6 +22,8 @@ typedef struct id4_pipeline_program_region_kernel_resolution_t {
   iree_hal_executable_t* executable;
   // HAL executable function used when the region builder is in RECORD mode.
   iree_hal_executable_function_t function;
+  // Static HAL dispatch configuration resolved from Loom launch config.
+  iree_hal_dispatch_config_t dispatch_config;
 } id4_pipeline_program_region_kernel_resolution_t;
 
 // Diagnostic tap lowering mode.

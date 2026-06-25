@@ -181,8 +181,6 @@ typedef struct id4_pipeline_program_dispatch_loom_op_t {
   iree_string_view_t name;
   // Exported Loom kernel selected by the program.
   id4_pipeline_kernel_ref_t kernel;
-  // HAL dispatch geometry mirrored from the Loom launch config region.
-  iree_hal_dispatch_config_t dispatch_config;
   // Number of copied Loom config bindings.
   iree_host_size_t config_binding_count;
   // Copied Loom config bindings.
@@ -324,8 +322,6 @@ typedef struct id4_pipeline_program_dispatch_loom_options_t {
   iree_string_view_t name;
   // Exported Loom kernel selected by the program.
   id4_pipeline_kernel_ref_t kernel;
-  // HAL dispatch geometry mirrored from the Loom launch config region.
-  iree_hal_dispatch_config_t dispatch_config;
   // Number of Loom config bindings.
   iree_host_size_t config_binding_count;
   // Loom config bindings borrowed for the dispatch call.

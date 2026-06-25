@@ -1518,14 +1518,6 @@ static iree_status_t id4_pipeline_plan_append_program_dispatch_json(
   IREE_RETURN_IF_ERROR(id4_pipeline_plan_append_json_string(
       builder, dispatch->kernel.function_name));
   IREE_RETURN_IF_ERROR(
-      iree_string_builder_append_cstring(builder, ",\"workgroup_count\":"));
-  IREE_RETURN_IF_ERROR(id4_pipeline_plan_append_u32_array3_json(
-      builder, dispatch->dispatch_config.workgroup_count));
-  IREE_RETURN_IF_ERROR(
-      iree_string_builder_append_cstring(builder, ",\"workgroup_size\":"));
-  IREE_RETURN_IF_ERROR(id4_pipeline_plan_append_u32_array3_json(
-      builder, dispatch->dispatch_config.workgroup_size));
-  IREE_RETURN_IF_ERROR(
       iree_string_builder_append_cstring(builder, ",\"config_bindings\":"));
   IREE_RETURN_IF_ERROR(id4_pipeline_plan_append_config_bindings_json(
       builder, dispatch->config_binding_count, dispatch->config_bindings));

@@ -12,11 +12,8 @@
 
 #include "experimental/id4/pipeline/program.h"
 #include "experimental/id4/stages/ideogram4_dit_program_block.h"
-#include "iree/hal/command_buffer.h"
 
 enum {
-  ID4_IDEOGRAM4_DIT_WORKGROUP_SIZE_X = 256,
-  ID4_IDEOGRAM4_DIT_WMMA_WORKGROUP_SIZE_X = 32,
   ID4_IDEOGRAM4_DIT_LINEAR_TOKEN_BLOCK = 16,
   ID4_IDEOGRAM4_DIT_LINEAR_WMMA_TOKEN_BLOCK = 32,
   ID4_IDEOGRAM4_DIT_LINEAR_OUTPUT_ROW_BLOCK = 16,
@@ -365,48 +362,6 @@ static iree_status_t id4_ideogram4_dit_program_validate_options(
                                                 out_total_token_count);
 }
 
-static iree_hal_dispatch_config_t
-id4_ideogram4_dit_program_make_dispatch_config_with_workgroup_size(
-    uint32_t workgroup_count_x, uint32_t workgroup_count_y,
-    uint32_t workgroup_count_z, uint32_t workgroup_size_x) {
-  iree_hal_dispatch_config_t dispatch_config =
-      iree_hal_make_static_dispatch_config(workgroup_count_x, workgroup_count_y,
-                                           workgroup_count_z);
-  dispatch_config.workgroup_size[0] = workgroup_size_x;
-  dispatch_config.workgroup_size[1] = 1;
-  dispatch_config.workgroup_size[2] = 1;
-  return dispatch_config;
-}
-
-iree_hal_dispatch_config_t id4_ideogram4_dit_program_make_dispatch_config(
-    uint32_t workgroup_count_x, uint32_t workgroup_count_y,
-    uint32_t workgroup_count_z) {
-  return id4_ideogram4_dit_program_make_dispatch_config_with_workgroup_size(
-      workgroup_count_x, workgroup_count_y, workgroup_count_z,
-      ID4_IDEOGRAM4_DIT_WORKGROUP_SIZE_X);
-}
-
-iree_status_t id4_ideogram4_dit_program_make_element_dispatch_config(
-    uint32_t element_count, iree_hal_dispatch_config_t* out_dispatch_config) {
-  if (element_count == 0) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "Ideogram4 DiT dispatch element count must be "
-                            "nonzero");
-  }
-  const uint32_t workgroup_count_x = id4_ideogram4_dit_program_ceil_div_u32(
-      element_count, ID4_IDEOGRAM4_DIT_WORKGROUP_SIZE_X);
-  *out_dispatch_config =
-      id4_ideogram4_dit_program_make_dispatch_config(workgroup_count_x, 1, 1);
-  return iree_ok_status();
-}
-
-static iree_hal_dispatch_config_t
-id4_ideogram4_dit_program_make_prelude_image_dispatch_config(
-    uint32_t token_count, uint32_t hidden_size) {
-  return id4_ideogram4_dit_program_make_dispatch_config(token_count,
-                                                        hidden_size, 1);
-}
-
 static iree_status_t id4_ideogram4_dit_program_make_config_binding(
     iree_string_view_t key, uint32_t value, char* value_buffer,
     iree_host_size_t value_buffer_capacity,
@@ -495,7 +450,6 @@ iree_status_t id4_ideogram4_dit_program_acquire_tensor(
 static iree_status_t id4_ideogram4_dit_program_dispatch_loom(
     id4_pipeline_program_builder_t* builder, iree_string_view_t name,
     iree_string_view_t module_path, iree_string_view_t function_name,
-    iree_hal_dispatch_config_t dispatch_config,
     iree_host_size_t config_binding_count,
     const id4_pipeline_kernel_config_binding_t* config_bindings,
     iree_host_size_t binding_count,
@@ -504,7 +458,6 @@ static iree_status_t id4_ideogram4_dit_program_dispatch_loom(
       .structure_size = sizeof(options),
       .name = name,
       .kernel = id4_pipeline_make_kernel_ref(module_path, function_name),
-      .dispatch_config = dispatch_config,
       .config_binding_count = config_binding_count,
       .config_bindings = config_bindings,
       .binding_count = binding_count,
@@ -585,8 +538,6 @@ static iree_status_t id4_ideogram4_dit_program_dispatch_prelude_image(
       builder, IREE_SV("ideogram4.prelude.image_projection"),
       IREE_SV("ideogram4/prelude_image_bf16_f32"),
       IREE_SV("id4_ideogram4_prelude_image_bf16_f32"),
-      id4_ideogram4_dit_program_make_prelude_image_dispatch_config(
-          image_token_count, hidden_size),
       IREE_ARRAYSIZE(config_values), config_bindings, IREE_ARRAYSIZE(bindings),
       bindings);
 }
@@ -620,7 +571,6 @@ static iree_status_t id4_ideogram4_dit_program_dispatch_condition_rmsnorm(
       builder, IREE_SV("ideogram4.cond.prelude.llm_cond_norm"),
       IREE_SV("ideogram4/condition_rmsnorm_f32"),
       IREE_SV("id4_ideogram4_condition_rmsnorm_f32"),
-      id4_ideogram4_dit_program_make_dispatch_config(text_token_count, 1, 1),
       IREE_ARRAYSIZE(config_values), config_bindings, IREE_ARRAYSIZE(bindings),
       bindings);
 }
@@ -666,8 +616,6 @@ static iree_status_t id4_ideogram4_dit_program_dispatch_condition_rmsnorm_pack(
       builder, IREE_SV("ideogram4.cond.prelude.llm_cond_norm_pack"),
       IREE_SV("ideogram4/condition_rmsnorm_pack_f32_bf16"),
       IREE_SV("id4_ideogram4_condition_rmsnorm_pack_f32_bf16"),
-      id4_ideogram4_dit_program_make_dispatch_config(padded_text_token_count, 1,
-                                                     1),
       IREE_ARRAYSIZE(config_values), config_bindings, IREE_ARRAYSIZE(bindings),
       bindings);
 }
@@ -728,10 +676,6 @@ id4_ideogram4_dit_program_dispatch_condition_project_packed(
       builder, IREE_SV("ideogram4.cond.prelude.llm_cond_proj.wmma"),
       IREE_SV("ideogram4/linear_bf16_f32_wmma"),
       IREE_SV("id4_ideogram4_linear_bf16_f32_wmma"),
-      id4_ideogram4_dit_program_make_dispatch_config_with_workgroup_size(
-          padded_text_token_count / ID4_IDEOGRAM4_DIT_LINEAR_TOKEN_BLOCK,
-          hidden_size / ID4_IDEOGRAM4_DIT_LINEAR_WMMA_OUTPUT_ROW_BLOCK, 1,
-          ID4_IDEOGRAM4_DIT_WMMA_WORKGROUP_SIZE_X),
       IREE_ARRAYSIZE(linear_config_values), linear_config_bindings,
       IREE_ARRAYSIZE(linear_bindings), linear_bindings));
   IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_barrier(
@@ -767,10 +711,6 @@ id4_ideogram4_dit_program_dispatch_condition_project_packed(
       builder, IREE_SV("ideogram4.cond.prelude.llm_cond_proj.bias_indicator"),
       IREE_SV("ideogram4/condition_project_bias_indicator_f32"),
       IREE_SV("id4_ideogram4_condition_project_bias_indicator_f32"),
-      id4_ideogram4_dit_program_make_dispatch_config(
-          id4_ideogram4_dit_program_ceil_div_u32(
-              post_element_count, ID4_IDEOGRAM4_DIT_WORKGROUP_SIZE_X),
-          1, 1),
       IREE_ARRAYSIZE(post_config_values), post_config_bindings,
       IREE_ARRAYSIZE(post_bindings), post_bindings);
 }
@@ -830,10 +770,6 @@ static iree_status_t id4_ideogram4_dit_program_dispatch_condition_project(
       builder, IREE_SV("ideogram4.cond.prelude.llm_cond_pack"),
       IREE_SV("ideogram4/condition_input_pack_f32_bf16"),
       IREE_SV("id4_ideogram4_condition_input_pack_f32_bf16"),
-      id4_ideogram4_dit_program_make_dispatch_config(
-          id4_ideogram4_dit_program_ceil_div_u32(
-              pack_element_count, ID4_IDEOGRAM4_DIT_WORKGROUP_SIZE_X),
-          1, 1),
       IREE_ARRAYSIZE(pack_config_values), pack_config_bindings,
       IREE_ARRAYSIZE(pack_bindings), pack_bindings));
   IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_barrier(
@@ -868,14 +804,10 @@ iree_status_t id4_ideogram4_dit_program_dispatch_adaln_split(
       id4_pipeline_program_write(scale_mlp),
       id4_pipeline_program_write(gate_mlp),
   };
-  iree_hal_dispatch_config_t dispatch_config;
-  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_make_element_dispatch_config(
-      hidden_size, &dispatch_config));
   return id4_ideogram4_dit_program_dispatch_loom(
       builder, name, IREE_SV("ideogram4/adaln_split_f32"),
-      IREE_SV("id4_ideogram4_adaln_split_f32"), dispatch_config,
-      IREE_ARRAYSIZE(config_values), config_bindings, IREE_ARRAYSIZE(bindings),
-      bindings);
+      IREE_SV("id4_ideogram4_adaln_split_f32"), IREE_ARRAYSIZE(config_values),
+      config_bindings, IREE_ARRAYSIZE(bindings), bindings);
 }
 
 iree_status_t id4_ideogram4_dit_program_dispatch_modulated_rmsnorm(
@@ -903,7 +835,6 @@ iree_status_t id4_ideogram4_dit_program_dispatch_modulated_rmsnorm(
   return id4_ideogram4_dit_program_dispatch_loom(
       builder, name, IREE_SV("ideogram4/modulated_rmsnorm_f32"),
       IREE_SV("id4_ideogram4_modulated_rmsnorm_f32"),
-      id4_ideogram4_dit_program_make_dispatch_config(token_count, 1, 1),
       IREE_ARRAYSIZE(config_values), config_bindings, IREE_ARRAYSIZE(bindings),
       bindings);
 }
@@ -934,7 +865,6 @@ id4_ideogram4_dit_program_dispatch_modulated_rmsnorm_linear_input_bf16(
   return id4_ideogram4_dit_program_dispatch_loom(
       builder, name, IREE_SV("ideogram4/modulated_rmsnorm_f32"),
       IREE_SV("id4_ideogram4_modulated_rmsnorm_linear_input_bf16"),
-      id4_ideogram4_dit_program_make_dispatch_config(token_count, 1, 1),
       IREE_ARRAYSIZE(config_values), config_bindings, IREE_ARRAYSIZE(bindings),
       bindings);
 }
@@ -966,7 +896,6 @@ iree_status_t id4_ideogram4_dit_program_dispatch_rmsnorm_gated_residual(
   return id4_ideogram4_dit_program_dispatch_loom(
       builder, name, IREE_SV("ideogram4/rmsnorm_gated_residual_f32"),
       IREE_SV("id4_ideogram4_rmsnorm_gated_residual_f32"),
-      id4_ideogram4_dit_program_make_dispatch_config(token_count, 1, 1),
       IREE_ARRAYSIZE(config_values), config_bindings, IREE_ARRAYSIZE(bindings),
       bindings);
 }
@@ -999,7 +928,6 @@ id4_ideogram4_dit_program_dispatch_rmsnorm_gated_residual_input_bf16(
   return id4_ideogram4_dit_program_dispatch_loom(
       builder, name, IREE_SV("ideogram4/rmsnorm_gated_residual_f32"),
       IREE_SV("id4_ideogram4_rmsnorm_gated_residual_input_bf16"),
-      id4_ideogram4_dit_program_make_dispatch_config(token_count, 1, 1),
       IREE_ARRAYSIZE(config_values), config_bindings, IREE_ARRAYSIZE(bindings),
       bindings);
 }
@@ -1030,16 +958,9 @@ iree_status_t id4_ideogram4_dit_program_dispatch_mlp_gate_up_silu(
       id4_pipeline_program_read(up_weight),
       id4_pipeline_program_write(output),
   };
-  const uint32_t token_tile_count = id4_ideogram4_dit_program_ceil_div_u32(
-      token_count, ID4_IDEOGRAM4_DIT_LINEAR_TOKEN_BLOCK);
-  const uint32_t intermediate_tile_count =
-      id4_ideogram4_dit_program_ceil_div_u32(
-          intermediate_size, ID4_IDEOGRAM4_DIT_LINEAR_OUTPUT_ROW_BLOCK);
   return id4_ideogram4_dit_program_dispatch_loom(
       builder, name, IREE_SV("ideogram4/mlp_gate_up_silu_f32"),
       IREE_SV("id4_ideogram4_mlp_gate_up_silu_f32"),
-      id4_ideogram4_dit_program_make_dispatch_config(
-          token_tile_count, intermediate_tile_count, 1),
       IREE_ARRAYSIZE(config_values), config_bindings, IREE_ARRAYSIZE(bindings),
       bindings);
 }
@@ -1071,16 +992,9 @@ id4_ideogram4_dit_program_dispatch_mlp_gate_up_silu_linear_input_bf16(
       id4_pipeline_program_read(up_weight),
       id4_pipeline_program_write(output),
   };
-  const uint32_t token_tile_count = id4_ideogram4_dit_program_ceil_div_u32(
-      token_count, ID4_IDEOGRAM4_DIT_LINEAR_TOKEN_BLOCK);
-  const uint32_t intermediate_tile_count =
-      id4_ideogram4_dit_program_ceil_div_u32(
-          intermediate_size, ID4_IDEOGRAM4_DIT_LINEAR_OUTPUT_ROW_BLOCK);
   return id4_ideogram4_dit_program_dispatch_loom(
       builder, name, IREE_SV("ideogram4/mlp_gate_up_silu_f32"),
       IREE_SV("id4_ideogram4_mlp_gate_up_silu_linear_input_bf16"),
-      id4_ideogram4_dit_program_make_dispatch_config(
-          token_tile_count, intermediate_tile_count, 1),
       IREE_ARRAYSIZE(config_values), config_bindings, IREE_ARRAYSIZE(bindings),
       bindings);
 }
@@ -1151,17 +1065,10 @@ id4_ideogram4_dit_program_dispatch_mlp_up_silu_product_packed_bf16(
         id4_pipeline_program_read(gate),
         id4_pipeline_program_write(output),
     };
-    const uint32_t token_tile_count =
-        body_token_count / ID4_IDEOGRAM4_DIT_LINEAR_TOKEN_BLOCK;
-    const uint32_t intermediate_tile_count =
-        intermediate_size / ID4_IDEOGRAM4_DIT_LINEAR_WMMA_OUTPUT_ROW_BLOCK;
     IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_dispatch_loom(
         builder, body_dispatch_name,
         IREE_SV("ideogram4/mlp_up_silu_product_bf16_wmma"),
         IREE_SV("id4_ideogram4_mlp_up_silu_product_bf16_wmma"),
-        id4_ideogram4_dit_program_make_dispatch_config_with_workgroup_size(
-            token_tile_count, intermediate_tile_count, 1,
-            ID4_IDEOGRAM4_DIT_WMMA_WORKGROUP_SIZE_X),
         IREE_ARRAYSIZE(body_config_values), body_config_bindings,
         IREE_ARRAYSIZE(body_bindings), body_bindings));
   }
@@ -1206,18 +1113,10 @@ id4_ideogram4_dit_program_dispatch_mlp_up_silu_product_packed_bf16(
         id4_pipeline_program_read(gate),
         id4_pipeline_program_write(output),
     };
-    const uint32_t tail_token_tile_count =
-        id4_ideogram4_dit_program_ceil_div_u32(
-            tail_token_count, ID4_IDEOGRAM4_DIT_LINEAR_TOKEN_BLOCK);
-    const uint32_t intermediate_tile_count =
-        id4_ideogram4_dit_program_ceil_div_u32(
-            intermediate_size, ID4_IDEOGRAM4_DIT_LINEAR_OUTPUT_ROW_BLOCK);
     IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_dispatch_loom(
         builder, tail_dispatch_name,
         IREE_SV("ideogram4/mlp_up_silu_product_bf16_tail"),
         IREE_SV("id4_ideogram4_mlp_up_silu_product_bf16_tail"),
-        id4_ideogram4_dit_program_make_dispatch_config(
-            tail_token_tile_count, intermediate_tile_count, 1),
         IREE_ARRAYSIZE(tail_config_values), tail_config_bindings,
         IREE_ARRAYSIZE(tail_bindings), tail_bindings));
   }
@@ -1292,14 +1191,8 @@ static iree_status_t id4_ideogram4_dit_program_dispatch_linear_packed_bf16(
         id4_pipeline_program_read(weight),
         id4_pipeline_program_write(output),
     };
-    const uint32_t token_tile_count = body_token_count / body_token_block;
-    const uint32_t output_row_tile_count =
-        output_size / ID4_IDEOGRAM4_DIT_LINEAR_WMMA_OUTPUT_ROW_BLOCK;
     IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_dispatch_loom(
         builder, body_dispatch_name, body_module_path, body_function_name,
-        id4_ideogram4_dit_program_make_dispatch_config_with_workgroup_size(
-            token_tile_count, output_row_tile_count, 1,
-            ID4_IDEOGRAM4_DIT_WMMA_WORKGROUP_SIZE_X),
         IREE_ARRAYSIZE(body_config_values), body_config_bindings,
         IREE_ARRAYSIZE(body_bindings), body_bindings));
   }
@@ -1339,16 +1232,8 @@ static iree_status_t id4_ideogram4_dit_program_dispatch_linear_packed_bf16(
         id4_pipeline_program_read(weight),
         id4_pipeline_program_write(output),
     };
-    const uint32_t tail_token_tile_count =
-        id4_ideogram4_dit_program_ceil_div_u32(
-            tail_token_count, ID4_IDEOGRAM4_DIT_LINEAR_TOKEN_BLOCK);
-    const uint32_t output_row_tile_count =
-        id4_ideogram4_dit_program_ceil_div_u32(
-            output_size, ID4_IDEOGRAM4_DIT_LINEAR_OUTPUT_ROW_BLOCK);
     IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_dispatch_loom(
         builder, tail_dispatch_name, tail_module_path, tail_function_name,
-        id4_ideogram4_dit_program_make_dispatch_config(
-            tail_token_tile_count, output_row_tile_count, 1),
         IREE_ARRAYSIZE(tail_config_values), tail_config_bindings,
         IREE_ARRAYSIZE(tail_bindings), tail_bindings));
   }
@@ -1449,13 +1334,10 @@ static iree_status_t id4_ideogram4_dit_program_dispatch_linear_bf16_from_f32(
       id4_pipeline_program_read(input),
       id4_pipeline_program_write(packed_input),
   };
-  iree_hal_dispatch_config_t pack_dispatch_config;
-  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_make_element_dispatch_config(
-      input_element_count, &pack_dispatch_config));
   IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_dispatch_loom(
       builder, pack_dispatch_name,
       IREE_SV("ideogram4/linear_input_pack_f32_bf16"),
-      IREE_SV("id4_ideogram4_linear_input_pack_f32_bf16"), pack_dispatch_config,
+      IREE_SV("id4_ideogram4_linear_input_pack_f32_bf16"),
       IREE_ARRAYSIZE(pack_config_values), pack_config_bindings,
       IREE_ARRAYSIZE(pack_bindings), pack_bindings));
   IREE_RETURN_IF_ERROR(
@@ -1512,14 +1394,10 @@ static iree_status_t id4_ideogram4_dit_program_dispatch_silu(
       id4_pipeline_program_read(input),
       id4_pipeline_program_write(output),
   };
-  iree_hal_dispatch_config_t dispatch_config;
-  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_make_element_dispatch_config(
-      element_count, &dispatch_config));
   return id4_ideogram4_dit_program_dispatch_loom(
       builder, name, IREE_SV("ideogram4/silu_f32"),
-      IREE_SV("id4_ideogram4_silu_f32"), dispatch_config,
-      IREE_ARRAYSIZE(config_values), config_bindings, IREE_ARRAYSIZE(bindings),
-      bindings);
+      IREE_SV("id4_ideogram4_silu_f32"), IREE_ARRAYSIZE(config_values),
+      config_bindings, IREE_ARRAYSIZE(bindings), bindings);
 }
 
 static iree_status_t id4_ideogram4_dit_program_dispatch_modulated_layernorm(
@@ -1546,7 +1424,6 @@ static iree_status_t id4_ideogram4_dit_program_dispatch_modulated_layernorm(
   return id4_ideogram4_dit_program_dispatch_loom(
       builder, name, IREE_SV("ideogram4/modulated_layernorm_f32"),
       IREE_SV("id4_ideogram4_modulated_layernorm_f32"),
-      id4_ideogram4_dit_program_make_dispatch_config(token_count, 1, 1),
       IREE_ARRAYSIZE(config_values), config_bindings, IREE_ARRAYSIZE(bindings),
       bindings);
 }
@@ -1587,8 +1464,6 @@ static iree_status_t id4_ideogram4_dit_program_dispatch_linear_bias_bf16_f32(
   return id4_ideogram4_dit_program_dispatch_loom(
       builder, name, IREE_SV("ideogram4/linear_bias_bf16_f32"),
       IREE_SV("id4_ideogram4_linear_bias_bf16_f32"),
-      id4_ideogram4_dit_program_make_dispatch_config(dispatch_token_count,
-                                                     output_size, 1),
       IREE_ARRAYSIZE(config_values), config_bindings, IREE_ARRAYSIZE(bindings),
       bindings);
 }
@@ -1620,22 +1495,9 @@ static iree_status_t id4_ideogram4_dit_program_dispatch_unpatchify_scale(
       id4_pipeline_program_read(projected),
       id4_pipeline_program_write(output),
   };
-  uint64_t spatial_count64 = 0;
-  uint64_t element_count64 = 0;
-  if (!id4_ideogram4_dit_program_checked_mul_u64(width, height,
-                                                 &spatial_count64) ||
-      !id4_ideogram4_dit_program_checked_mul_u64(
-          spatial_count64, input_channel_count, &element_count64) ||
-      element_count64 > UINT32_MAX) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "Ideogram4 DiT unpatchify output size overflow");
-  }
-  iree_hal_dispatch_config_t dispatch_config;
-  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_make_element_dispatch_config(
-      (uint32_t)element_count64, &dispatch_config));
   return id4_ideogram4_dit_program_dispatch_loom(
       builder, name, IREE_SV("ideogram4/unpatchify_scale_f32"),
-      IREE_SV("id4_ideogram4_unpatchify_scale_f32"), dispatch_config,
+      IREE_SV("id4_ideogram4_unpatchify_scale_f32"),
       IREE_ARRAYSIZE(config_values), config_bindings, IREE_ARRAYSIZE(bindings),
       bindings);
 }
@@ -1662,21 +1524,10 @@ iree_status_t id4_ideogram4_dit_program_dispatch_qkv_split(
       id4_pipeline_program_write(key),
       id4_pipeline_program_write(value),
   };
-  iree_hal_dispatch_config_t dispatch_config;
-  uint64_t element_count64 = 0;
-  if (!id4_ideogram4_dit_program_checked_mul_u64(token_count, hidden_size,
-                                                 &element_count64) ||
-      element_count64 > UINT32_MAX) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "Ideogram4 DiT QKV split size overflow");
-  }
-  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_make_element_dispatch_config(
-      (uint32_t)element_count64, &dispatch_config));
   return id4_ideogram4_dit_program_dispatch_loom(
       builder, name, IREE_SV("ideogram4/qkv_split_f32"),
-      IREE_SV("id4_ideogram4_qkv_split_f32"), dispatch_config,
-      IREE_ARRAYSIZE(config_values), config_bindings, IREE_ARRAYSIZE(bindings),
-      bindings);
+      IREE_SV("id4_ideogram4_qkv_split_f32"), IREE_ARRAYSIZE(config_values),
+      config_bindings, IREE_ARRAYSIZE(bindings), bindings);
 }
 
 iree_status_t id4_ideogram4_dit_program_dispatch_qkv_norm_rotary(
@@ -1729,11 +1580,8 @@ iree_status_t id4_ideogram4_dit_program_dispatch_qkv_norm_rotary(
                               (uint32_t)activation_format);
   }
   return id4_ideogram4_dit_program_dispatch_loom(
-      builder, name, module_path, function_name,
-      id4_ideogram4_dit_program_make_dispatch_config(token_count,
-                                                     attention_head_count, 1),
-      IREE_ARRAYSIZE(config_values), config_bindings, IREE_ARRAYSIZE(bindings),
-      bindings);
+      builder, name, module_path, function_name, IREE_ARRAYSIZE(config_values),
+      config_bindings, IREE_ARRAYSIZE(bindings), bindings);
 }
 
 iree_status_t
@@ -1774,8 +1622,6 @@ id4_ideogram4_dit_program_dispatch_qkv_norm_rotary_bf16_packed_value(
   return id4_ideogram4_dit_program_dispatch_loom(
       builder, name, IREE_SV("ideogram4/qkv_norm_rotary_bf16"),
       IREE_SV("id4_ideogram4_qkv_norm_rotary_bf16_packed_value"),
-      id4_ideogram4_dit_program_make_dispatch_config(token_count,
-                                                     attention_head_count, 1),
       IREE_ARRAYSIZE(config_values), config_bindings, IREE_ARRAYSIZE(bindings),
       bindings);
 }
@@ -1818,12 +1664,9 @@ iree_status_t id4_ideogram4_dit_program_dispatch_attention_qkv_tail_zero_bf16(
       id4_pipeline_program_write(key),
       id4_pipeline_program_write(value),
   };
-  const uint32_t workgroup_count_x = id4_ideogram4_dit_program_ceil_div_u32(
-      element_count, ID4_IDEOGRAM4_DIT_WORKGROUP_SIZE_X);
   return id4_ideogram4_dit_program_dispatch_loom(
       builder, name, IREE_SV("ideogram4/attention_qkv_tail_zero_bf16"),
       IREE_SV("id4_ideogram4_attention_qkv_tail_zero_bf16"),
-      id4_ideogram4_dit_program_make_dispatch_config(workgroup_count_x, 1, 1),
       IREE_ARRAYSIZE(config_values), config_bindings, IREE_ARRAYSIZE(bindings),
       bindings);
 }
@@ -1853,11 +1696,8 @@ iree_status_t id4_ideogram4_dit_program_dispatch_head_rmsnorm(
   };
   return id4_ideogram4_dit_program_dispatch_loom(
       builder, name, IREE_SV("ideogram4/head_rmsnorm_f32"),
-      IREE_SV("id4_ideogram4_head_rmsnorm_f32"),
-      id4_ideogram4_dit_program_make_dispatch_config(token_count,
-                                                     attention_head_count, 1),
-      IREE_ARRAYSIZE(config_values), config_bindings, IREE_ARRAYSIZE(bindings),
-      bindings);
+      IREE_SV("id4_ideogram4_head_rmsnorm_f32"), IREE_ARRAYSIZE(config_values),
+      config_bindings, IREE_ARRAYSIZE(bindings), bindings);
 }
 
 iree_status_t id4_ideogram4_dit_program_dispatch_rotary_apply(
@@ -1889,11 +1729,8 @@ iree_status_t id4_ideogram4_dit_program_dispatch_rotary_apply(
   };
   return id4_ideogram4_dit_program_dispatch_loom(
       builder, name, IREE_SV("ideogram4/rotary_apply_f32"),
-      IREE_SV("id4_ideogram4_rotary_apply_f32"),
-      id4_ideogram4_dit_program_make_dispatch_config(token_count,
-                                                     attention_head_count, 1),
-      IREE_ARRAYSIZE(config_values), config_bindings, IREE_ARRAYSIZE(bindings),
-      bindings);
+      IREE_SV("id4_ideogram4_rotary_apply_f32"), IREE_ARRAYSIZE(config_values),
+      config_bindings, IREE_ARRAYSIZE(bindings), bindings);
 }
 
 static iree_status_t id4_ideogram4_dit_program_dispatch_attention_export(
@@ -1902,13 +1739,6 @@ static iree_status_t id4_ideogram4_dit_program_dispatch_attention_export(
     uint32_t token_count, uint32_t attention_head_count, uint32_t head_size,
     id4_pipeline_program_tensor_t query, id4_pipeline_program_tensor_t key,
     id4_pipeline_program_tensor_t value, id4_pipeline_program_tensor_t output) {
-  if (head_size > ID4_IDEOGRAM4_DIT_WORKGROUP_SIZE_X) {
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "Ideogram4 DiT attention head size %u exceeds workgroup size %u",
-        head_size, ID4_IDEOGRAM4_DIT_WORKGROUP_SIZE_X);
-  }
-
   const id4_ideogram4_dit_program_config_value_t config_values[] = {
       {IREE_SV("id4.ideogram4.attention_query_block8_rounded.token_count"),
        token_count},
@@ -1931,15 +1761,9 @@ static iree_status_t id4_ideogram4_dit_program_dispatch_attention_export(
       id4_pipeline_program_read(value),
       id4_pipeline_program_write(output),
   };
-  const uint32_t query_tile_count =
-      (token_count + ID4_IDEOGRAM4_DIT_ATTENTION_QUERY_BLOCK_SIZE - 1) /
-      ID4_IDEOGRAM4_DIT_ATTENTION_QUERY_BLOCK_SIZE;
   return id4_ideogram4_dit_program_dispatch_loom(
-      builder, name, module_path, function_name,
-      id4_ideogram4_dit_program_make_dispatch_config(query_tile_count,
-                                                     attention_head_count, 1),
-      IREE_ARRAYSIZE(config_values), config_bindings, IREE_ARRAYSIZE(bindings),
-      bindings);
+      builder, name, module_path, function_name, IREE_ARRAYSIZE(config_values),
+      config_bindings, IREE_ARRAYSIZE(bindings), bindings);
 }
 
 iree_status_t id4_ideogram4_dit_program_dispatch_attention(
@@ -2003,13 +1827,9 @@ id4_ideogram4_dit_program_dispatch_attention_qk_scores_bf16_f32_wmma(
       id4_pipeline_program_read(key),
       id4_pipeline_program_write(scores),
   };
-  const uint32_t tile_count =
-      padded_token_count / ID4_IDEOGRAM4_DIT_LINEAR_TOKEN_BLOCK;
   return id4_ideogram4_dit_program_dispatch_loom(
       builder, name, IREE_SV("ideogram4/attention_qk_scores_bf16_f32_wmma"),
       IREE_SV("id4_ideogram4_attention_qk_scores_bf16_f32_wmma"),
-      id4_ideogram4_dit_program_make_dispatch_config_with_workgroup_size(
-          tile_count, tile_count, 1, ID4_IDEOGRAM4_DIT_WMMA_WORKGROUP_SIZE_X),
       IREE_ARRAYSIZE(config_values), config_bindings, IREE_ARRAYSIZE(bindings),
       bindings);
 }
@@ -2046,10 +1866,6 @@ id4_ideogram4_dit_program_dispatch_attention_score_mask_f32(
   return id4_ideogram4_dit_program_dispatch_loom(
       builder, name, IREE_SV("ideogram4/attention_score_mask_f32"),
       IREE_SV("id4_ideogram4_attention_score_mask_f32"),
-      id4_ideogram4_dit_program_make_dispatch_config(
-          id4_ideogram4_dit_program_ceil_div_u32(
-              (uint32_t)element_count64, ID4_IDEOGRAM4_DIT_WORKGROUP_SIZE_X),
-          1, 1),
       IREE_ARRAYSIZE(config_values), config_bindings, IREE_ARRAYSIZE(bindings),
       bindings);
 }
@@ -2077,7 +1893,6 @@ id4_ideogram4_dit_program_dispatch_attention_softmax_f32_bf16(
   return id4_ideogram4_dit_program_dispatch_loom(
       builder, name, IREE_SV("ideogram4/attention_softmax_f32_bf16"),
       IREE_SV("id4_ideogram4_attention_softmax_f32_bf16"),
-      id4_ideogram4_dit_program_make_dispatch_config(token_count, 1, 1),
       IREE_ARRAYSIZE(config_values), config_bindings, IREE_ARRAYSIZE(bindings),
       bindings);
 }
@@ -2109,16 +1924,9 @@ id4_ideogram4_dit_program_dispatch_attention_pv_bf16_bf16_wmma(
       id4_pipeline_program_read(value),
       id4_pipeline_program_write(output),
   };
-  const uint32_t query_tile_count =
-      padded_token_count / ID4_IDEOGRAM4_DIT_LINEAR_TOKEN_BLOCK;
-  const uint32_t channel_tile_count =
-      head_size / ID4_IDEOGRAM4_DIT_LINEAR_OUTPUT_ROW_BLOCK;
   return id4_ideogram4_dit_program_dispatch_loom(
       builder, name, IREE_SV("ideogram4/attention_pv_bf16_bf16_wmma"),
       IREE_SV("id4_ideogram4_attention_pv_bf16_bf16_wmma"),
-      id4_ideogram4_dit_program_make_dispatch_config_with_workgroup_size(
-          query_tile_count, channel_tile_count, 1,
-          ID4_IDEOGRAM4_DIT_WMMA_WORKGROUP_SIZE_X),
       IREE_ARRAYSIZE(config_values), config_bindings, IREE_ARRAYSIZE(bindings),
       bindings);
 }
@@ -2263,12 +2071,9 @@ static iree_status_t id4_ideogram4_dit_program_dispatch_timestep_embedding(
       id4_pipeline_program_read(timestep),
       id4_pipeline_program_write(output),
   };
-  iree_hal_dispatch_config_t dispatch_config;
-  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_make_element_dispatch_config(
-      hidden_size, &dispatch_config));
   return id4_ideogram4_dit_program_dispatch_loom(
       builder, name, IREE_SV("ideogram4/timestep_embedding_f32"),
-      IREE_SV("id4_ideogram4_timestep_embedding_f32"), dispatch_config,
+      IREE_SV("id4_ideogram4_timestep_embedding_f32"),
       IREE_ARRAYSIZE(config_values), config_bindings, IREE_ARRAYSIZE(bindings),
       bindings);
 }
@@ -2343,8 +2148,6 @@ iree_status_t id4_ideogram4_dit_program_dense_bf16_f32(
       builder, options->operation_name,
       IREE_SV("ideogram4/dense_bias_bf16_f32"),
       IREE_SV("id4_ideogram4_dense_bias_bf16_f32"),
-      id4_ideogram4_dit_program_make_dispatch_config(options->output_size, 1,
-                                                     1),
       IREE_ARRAYSIZE(config_values), config_bindings, IREE_ARRAYSIZE(bindings),
       bindings);
 }

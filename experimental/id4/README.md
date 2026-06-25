@@ -135,11 +135,12 @@ fragments are kernel families authored inside those stages.
 
 Kernel configuration should describe model and tensor facts such as token
 counts, hidden sizes, dtype lanes, layout choices, and optional feature paths.
-Launch geometry belongs in Loom launch-config regions. Until the C runtime can
-execute those regions through the VM, stage authoring code may mirror the same
-workgroup-count and workgroup-size arithmetic locally when recording HAL
-dispatches, but that mirror is not part of the stage API or plan
-configuration.
+Launch geometry belongs in Loom launch-config regions. The C runtime evaluates
+those regions through the `loomc` API during preparation and records the
+resulting HAL dispatch configuration with the prepared executable. Stage
+authoring code should not mirror workgroup-count or workgroup-size arithmetic;
+it supplies operation configs and bindings, while the selected kernel owns its
+launch shape.
 
 The CPU should eventually own only prompt ingestion, tokenization, high-level
 request control, and final result delivery. The diffusion loop, CFG,

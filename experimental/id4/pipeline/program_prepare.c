@@ -18,6 +18,8 @@ typedef struct id4_pipeline_program_prepared_kernel_t {
   id4_pipeline_kernel_executable_t* executable;
   // HAL executable function selected for the planned export name.
   iree_hal_executable_function_t function;
+  // Static HAL dispatch configuration resolved by the kernel cache.
+  iree_hal_dispatch_config_t dispatch_config;
 } id4_pipeline_program_prepared_kernel_t;
 
 struct id4_pipeline_program_prepared_t {
@@ -208,6 +210,8 @@ static iree_status_t id4_pipeline_program_prepare_kernel(
   if (iree_status_is_ok(status)) {
     prepared->kernels[kernel_index].executable = executable;
     prepared->kernels[kernel_index].function = function;
+    prepared->kernels[kernel_index].dispatch_config =
+        id4_pipeline_kernel_executable_dispatch_config(executable);
     executable = NULL;
   }
   id4_pipeline_kernel_executable_release(executable);
@@ -541,6 +545,7 @@ static iree_status_t id4_pipeline_program_prepare_resolve_kernel(
   out_resolution->executable =
       id4_pipeline_kernel_executable_hal_executable(kernel->executable);
   out_resolution->function = kernel->function;
+  out_resolution->dispatch_config = kernel->dispatch_config;
   return iree_ok_status();
 }
 

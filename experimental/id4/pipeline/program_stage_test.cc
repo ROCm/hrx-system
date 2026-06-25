@@ -91,15 +91,6 @@ static iree_hal_device_group_t* CreateLocalSyncDeviceGroup() {
   return device_group;
 }
 
-static iree_hal_dispatch_config_t MakeDispatchConfig(uint32_t element_count) {
-  iree_hal_dispatch_config_t config =
-      iree_hal_make_static_dispatch_config((element_count + 255) / 256, 1, 1);
-  config.workgroup_size[0] = 256;
-  config.workgroup_size[1] = 1;
-  config.workgroup_size[2] = 1;
-  return config;
-}
-
 static id4_pipeline_program_t* CreateSamplerProgram() {
   ProgramBuilderScope builder_scope;
   id4_pipeline_program_builder_t* builder = builder_scope.builder();
@@ -159,7 +150,6 @@ static id4_pipeline_program_t* CreateSamplerProgram() {
       /*.kernel=*/
       id4_pipeline_make_kernel_ref(IREE_SV("sampler/test"),
                                    IREE_SV("sampler_test")),
-      /*.dispatch_config=*/MakeDispatchConfig(/*element_count=*/8),
       /*.config_binding_count=*/IREE_ARRAYSIZE(config_bindings),
       /*.config_bindings=*/config_bindings,
       /*.binding_count=*/IREE_ARRAYSIZE(bindings),

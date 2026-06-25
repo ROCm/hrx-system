@@ -60,15 +60,6 @@ class ProgramBuilderScope {
   id4_pipeline_program_builder_t* builder_ = nullptr;
 };
 
-static iree_hal_dispatch_config_t MakeTestDispatchConfig() {
-  iree_hal_dispatch_config_t config =
-      iree_hal_make_static_dispatch_config(1, 1, 1);
-  config.workgroup_size[0] = 1;
-  config.workgroup_size[1] = 1;
-  config.workgroup_size[2] = 1;
-  return config;
-}
-
 static iree_hal_device_group_t* CreateLocalSyncDeviceGroup() {
   iree_async_proactor_pool_t* proactor_pool = nullptr;
   IREE_CHECK_OK(iree_async_proactor_pool_create(
@@ -166,7 +157,6 @@ static id4_pipeline_program_t* CreateLinearProgram() {
       /*.name=*/IREE_SV("block0.linear.first"),
       /*.kernel=*/
       id4_pipeline_make_kernel_ref(IREE_SV("test/linear"), IREE_SV("linear")),
-      /*.dispatch_config=*/MakeTestDispatchConfig(),
       /*.config_binding_count=*/IREE_ARRAYSIZE(config_bindings),
       /*.config_bindings=*/config_bindings,
       /*.binding_count=*/IREE_ARRAYSIZE(first_bindings),
@@ -192,7 +182,6 @@ static id4_pipeline_program_t* CreateLinearProgram() {
       /*.name=*/IREE_SV("block0.linear.second"),
       /*.kernel=*/
       id4_pipeline_make_kernel_ref(IREE_SV("test/linear"), IREE_SV("linear")),
-      /*.dispatch_config=*/MakeTestDispatchConfig(),
       /*.config_binding_count=*/IREE_ARRAYSIZE(config_bindings),
       /*.config_bindings=*/config_bindings,
       /*.binding_count=*/IREE_ARRAYSIZE(second_bindings),
@@ -261,7 +250,6 @@ static id4_pipeline_program_t* CreateLocalReuseProgram() {
       /*.name=*/IREE_SV("reuse.first"),
       /*.kernel=*/
       id4_pipeline_make_kernel_ref(IREE_SV("test/reuse"), IREE_SV("reuse")),
-      /*.dispatch_config=*/MakeTestDispatchConfig(),
       /*.config_binding_count=*/0,
       /*.config_bindings=*/nullptr,
       /*.binding_count=*/IREE_ARRAYSIZE(first_bindings),
@@ -298,7 +286,6 @@ static id4_pipeline_program_t* CreateLocalReuseProgram() {
       /*.name=*/IREE_SV("reuse.second"),
       /*.kernel=*/
       id4_pipeline_make_kernel_ref(IREE_SV("test/reuse"), IREE_SV("reuse")),
-      /*.dispatch_config=*/MakeTestDispatchConfig(),
       /*.config_binding_count=*/0,
       /*.config_bindings=*/nullptr,
       /*.binding_count=*/IREE_ARRAYSIZE(second_bindings),
@@ -335,7 +322,6 @@ static id4_pipeline_program_t* CreateLocalReuseProgram() {
       /*.name=*/IREE_SV("reuse.third"),
       /*.kernel=*/
       id4_pipeline_make_kernel_ref(IREE_SV("test/reuse"), IREE_SV("reuse")),
-      /*.dispatch_config=*/MakeTestDispatchConfig(),
       /*.config_binding_count=*/0,
       /*.config_bindings=*/nullptr,
       /*.binding_count=*/IREE_ARRAYSIZE(third_bindings),
@@ -575,7 +561,6 @@ TEST(PipelineProgramPlan, DerivesConstantSlabPlan) {
       /*.name=*/IREE_SV("scale.dispatch"),
       /*.kernel=*/
       id4_pipeline_make_kernel_ref(IREE_SV("test/scale"), IREE_SV("scale")),
-      /*.dispatch_config=*/MakeTestDispatchConfig(),
       /*.config_binding_count=*/0,
       /*.config_bindings=*/nullptr,
       /*.binding_count=*/IREE_ARRAYSIZE(bindings),

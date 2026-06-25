@@ -218,41 +218,6 @@ static iree_status_t id4_pipeline_program_validate_kernel_ref(
   return iree_ok_status();
 }
 
-static iree_status_t id4_pipeline_program_validate_dispatch_config(
-    iree_hal_dispatch_config_t dispatch_config,
-    iree_string_view_t dispatch_name) {
-  if (dispatch_config.workgroup_count_ref.buffer) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "dispatch %.*s indirect workgroup counts are not "
-                            "supported by semantic programs",
-                            (int)dispatch_name.size, dispatch_name.data);
-  }
-  for (iree_host_size_t i = 0;
-       i < IREE_ARRAYSIZE(dispatch_config.workgroup_count); ++i) {
-    if (dispatch_config.workgroup_count[i] == 0) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "dispatch %.*s workgroup count dimension %" PRIhsz
-                              " is zero",
-                              (int)dispatch_name.size, dispatch_name.data, i);
-    }
-  }
-  bool has_workgroup_size_override = false;
-  bool has_partial_workgroup_size_override = false;
-  for (iree_host_size_t i = 0;
-       i < IREE_ARRAYSIZE(dispatch_config.workgroup_size); ++i) {
-    has_workgroup_size_override |= dispatch_config.workgroup_size[i] != 0;
-    has_partial_workgroup_size_override |=
-        dispatch_config.workgroup_size[i] == 0;
-  }
-  if (has_workgroup_size_override && has_partial_workgroup_size_override) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "dispatch %.*s workgroup size override must be "
-                            "fully specified or fully omitted",
-                            (int)dispatch_name.size, dispatch_name.data);
-  }
-  return iree_ok_status();
-}
-
 static iree_status_t id4_pipeline_program_validate_config_bindings(
     iree_string_view_t dispatch_name, iree_host_size_t config_binding_count,
     const id4_pipeline_kernel_config_binding_t* config_bindings) {
@@ -456,8 +421,6 @@ static iree_status_t id4_pipeline_program_copy_op(
     case ID4_PIPELINE_PROGRAM_OP_KIND_DISPATCH_LOOM:
       target->payload.dispatch_loom.binding_count =
           source->payload.dispatch_loom.binding_count;
-      target->payload.dispatch_loom.dispatch_config =
-          source->payload.dispatch_loom.dispatch_config;
       target->payload.dispatch_loom.kernel.module_path =
           iree_string_view_empty();
       target->payload.dispatch_loom.kernel.function_name =
@@ -1058,8 +1021,6 @@ iree_status_t id4_pipeline_program_dispatch_loom(
   }
   IREE_RETURN_IF_ERROR(
       id4_pipeline_program_validate_kernel_ref(options->kernel, options->name));
-  IREE_RETURN_IF_ERROR(id4_pipeline_program_validate_dispatch_config(
-      options->dispatch_config, options->name));
   IREE_RETURN_IF_ERROR(id4_pipeline_program_validate_config_bindings(
       options->name, options->config_binding_count, options->config_bindings));
   if (options->binding_count == 0 || !options->bindings) {
@@ -1095,7 +1056,6 @@ iree_status_t id4_pipeline_program_dispatch_loom(
           {
               .name = options->name,
               .kernel = options->kernel,
-              .dispatch_config = options->dispatch_config,
               .config_binding_count = options->config_binding_count,
               .config_bindings = options->config_bindings,
               .binding_count = options->binding_count,
