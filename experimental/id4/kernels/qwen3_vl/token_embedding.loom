@@ -1,5 +1,7 @@
 config.decl @id4.qwen3_vl.token_embedding.token_count : %value: index where [range(%value, 1, 65536)]
+
 config.decl @id4.qwen3_vl.token_embedding.hidden_size : %value: index where [range(%value, 1, 65536)]
+
 config.decl @id4.qwen3_vl.token_embedding.vocab_size : %value: index where [range(%value, 1, 262144)]
 
 kernel.def export("id4_qwen3_vl_token_embedding_bf16_f32") @id4_qwen3_vl_token_embedding_bf16_f32() {
@@ -23,7 +25,6 @@ kernel.def export("id4_qwen3_vl_token_embedding_bf16_f32") @id4_qwen3_vl_token_e
   %element_count = index.mul %token_count, %hidden_size : index
   %element_index = index.madd %workgroup, %workgroup_size_x, %lane : index
   %in_bounds = index.cmp ult, %element_index, %element_count : index
-
   %token_ids_noalias, %embedding_noalias, %output_noalias = buffer.assume.noalias %token_ids, %embedding, %output : buffer, buffer, buffer
   %token_ids_global = buffer.assume.memory_space<global> %token_ids_noalias : buffer
   %embedding_global = buffer.assume.memory_space<global> %embedding_noalias : buffer
@@ -31,7 +32,6 @@ kernel.def export("id4_qwen3_vl_token_embedding_bf16_f32") @id4_qwen3_vl_token_e
   %token_ids_view = buffer.view %token_ids_global[%base] : buffer -> view<[%token_count]xi32, #dense>
   %embedding_view = buffer.view %embedding_global[%base] : buffer -> view<[%vocab_size]x[%hidden_size]xbf16, #dense>
   %output_view = buffer.view %output_global[%base] : buffer -> view<[%token_count]x[%hidden_size]xf32, #dense>
-
   scf.if %in_bounds {
     %token = index.div %element_index, %hidden_size : index
     %channel = index.rem %element_index, %hidden_size : index
@@ -40,6 +40,45 @@ kernel.def export("id4_qwen3_vl_token_embedding_bf16_f32") @id4_qwen3_vl_token_e
     %embedded_bf16 = view.load %embedding_view[%source_token, %channel] : view<[%vocab_size]x[%hidden_size]xbf16, #dense> -> bf16
     %embedded = scalar.extf %embedded_bf16 : bf16 to f32
     view.store %embedded, %output_view[%token, %channel] : f32, view<[%token_count]x[%hidden_size]xf32, #dense>
+  }
+  kernel.return
+}
+
+kernel.def export("id4_qwen3_vl_token_embedding_bf16_bf16") @id4_qwen3_vl_token_embedding_bf16_bf16() {
+  %unit = index.constant 1 : index
+  %workgroup_size_x = index.constant 256 : index
+  %token_count = config.get @id4.qwen3_vl.token_embedding.token_count : index
+  %hidden_size = config.get @id4.qwen3_vl.token_embedding.hidden_size : index
+  %element_count = index.mul %token_count, %hidden_size : index
+  %rounding = index.sub %workgroup_size_x, %unit : index
+  %rounded = index.add %element_count, %rounding : index
+  %workgroups_x = index.div %rounded, %workgroup_size_x : index
+  kernel.launch.config workgroups(%workgroups_x, %unit, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
+} launch(%token_ids: buffer, %embedding: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %workgroup = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %workgroup_size_x = index.constant 256 : index
+  %token_count = config.get @id4.qwen3_vl.token_embedding.token_count : index
+  %hidden_size = config.get @id4.qwen3_vl.token_embedding.hidden_size : index
+  %vocab_size = config.get @id4.qwen3_vl.token_embedding.vocab_size : index
+  %element_count = index.mul %token_count, %hidden_size : index
+  %element_index = index.madd %workgroup, %workgroup_size_x, %lane : index
+  %in_bounds = index.cmp ult, %element_index, %element_count : index
+  %token_ids_noalias, %embedding_noalias, %output_noalias = buffer.assume.noalias %token_ids, %embedding, %output : buffer, buffer, buffer
+  %token_ids_global = buffer.assume.memory_space<global> %token_ids_noalias : buffer
+  %embedding_global = buffer.assume.memory_space<global> %embedding_noalias : buffer
+  %output_global = buffer.assume.memory_space<global> %output_noalias : buffer
+  %token_ids_view = buffer.view %token_ids_global[%base] : buffer -> view<[%token_count]xi32, #dense>
+  %embedding_view = buffer.view %embedding_global[%base] : buffer -> view<[%vocab_size]x[%hidden_size]xbf16, #dense>
+  %output_view = buffer.view %output_global[%base] : buffer -> view<[%token_count]x[%hidden_size]xbf16, #dense>
+  scf.if %in_bounds {
+    %token = index.div %element_index, %hidden_size : index
+    %channel = index.rem %element_index, %hidden_size : index
+    %source_token_i32 = view.load %token_ids_view[%token] : view<[%token_count]xi32, #dense> -> i32
+    %source_token = index.cast %source_token_i32 : i32 to index
+    %embedded = view.load %embedding_view[%source_token, %channel] : view<[%vocab_size]x[%hidden_size]xbf16, #dense> -> bf16
+    view.store %embedded, %output_view[%token, %channel] : bf16, view<[%token_count]x[%hidden_size]xbf16, #dense>
   }
   kernel.return
 }
@@ -54,6 +93,16 @@ check.case public @id4_qwen3_vl_token_embedding_bf16_f32_small_case {
   check.return
 }
 
+check.case public @id4_qwen3_vl_token_embedding_bf16_bf16_small_case {
+  %token_ids = check.generate.iota offset(1) step(1) : tensor<2xi32>
+  %embedding = check.generate.iota offset(0.5) step(0.5) : tensor<3x4xbf16>
+  %output = check.generate.fill value(0.0) : tensor<2x4xbf16>
+  %expected = check.generate.iota offset(2.5) step(0.5) : tensor<2x4xbf16>
+  func.call @id4_qwen3_vl_token_embedding_bf16_bf16(%token_ids, %embedding, %output) : (tensor<2xi32>, tensor<3x4xbf16>, tensor<2x4xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2x4xbf16>
+  check.return
+}
+
 check.case public @id4_qwen3_vl_token_embedding_bf16_f32_qwen_slice_case {
   %token_ids = check.generate.fill value(0) : tensor<64xi32>
   %embedding = check.generate.fill value(3.0) : tensor<151936x4096xbf16>
@@ -65,4 +114,7 @@ check.case public @id4_qwen3_vl_token_embedding_bf16_f32_qwen_slice_case {
 }
 
 check.benchmark<@id4_qwen3_vl_token_embedding_bf16_f32_small_case> @id4_qwen3_vl_token_embedding_bf16_f32_small
+
+check.benchmark<@id4_qwen3_vl_token_embedding_bf16_bf16_small_case> @id4_qwen3_vl_token_embedding_bf16_bf16_small
+
 check.benchmark<@id4_qwen3_vl_token_embedding_bf16_f32_qwen_slice_case> @id4_qwen3_vl_token_embedding_bf16_f32_qwen_slice

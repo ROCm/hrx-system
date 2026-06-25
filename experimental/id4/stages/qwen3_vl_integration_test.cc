@@ -5,6 +5,8 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 #include <cstring>
+#include <string>
+#include <vector>
 
 #include "experimental/id4/pipeline/plan.h"
 #include "experimental/id4/pipeline/stage.h"
@@ -18,6 +20,8 @@
 
 IREE_FLAG(string, id4_capture_dir, "",
           "Directory that receives exported ID4 boundary tensor captures.");
+IREE_FLAG_LIST(string, id4_diagnostic_tap,
+               "Additional diagnostic tap names to capture.");
 IREE_FLAG(string, id4_fixture_dir, "",
           "Directory containing an ID4 reference fixture manifest and tensor "
           "payloads used to initialize stage inputs.");
@@ -63,6 +67,8 @@ TEST(Qwen3VlStageIntegration, PrepareAndIssueForwardWithDenseParameters) {
 
   id4::test::OwningRef<id4_pipeline_stage_t, id4_pipeline_stage_release> stage;
   IREE_ASSERT_OK(CreateQwen3VlStage(context, stage.out()));
+  const id4_qwen3_vl_model_config_t* model_config =
+      id4_qwen3_vl_program_ideogram4_model_config();
 
   iree_string_view_t fixture_directory =
       iree_make_cstring_view(FLAG_id4_fixture_dir);
@@ -95,13 +101,33 @@ TEST(Qwen3VlStageIntegration, PrepareAndIssueForwardWithDenseParameters) {
   std::memset(&plan_options, 0, sizeof(plan_options));
   plan_options.structure_size = sizeof(plan_options);
   plan_options.next = &qwen_options;
-  const iree_string_view_t diagnostic_tap_names[] = {
-      IREE_SV("qwen3_vl.output.tap"),
-  };
+  std::vector<std::string> diagnostic_tap_name_storage;
+  const iree_flag_string_list_t extra_diagnostic_taps =
+      FLAG_id4_diagnostic_tap_list();
+  diagnostic_tap_name_storage.reserve(3 + model_config->selected_layer_count +
+                                      extra_diagnostic_taps.count);
+  diagnostic_tap_name_storage.emplace_back("qwen3_vl.embedded_hidden_states");
+  diagnostic_tap_name_storage.emplace_back("selected_hidden_states");
+  diagnostic_tap_name_storage.emplace_back("qwen3_vl.output.tap");
+  for (uint32_t i = 0; i < model_config->selected_layer_count; ++i) {
+    diagnostic_tap_name_storage.emplace_back(
+        "qwen3_vl.layers." +
+        std::to_string(model_config->selected_layer_ordinals[i]) + ".output");
+  }
+  for (iree_host_size_t i = 0; i < extra_diagnostic_taps.count; ++i) {
+    iree_string_view_t tap_name = extra_diagnostic_taps.values[i];
+    diagnostic_tap_name_storage.emplace_back(tap_name.data, tap_name.size);
+  }
+  std::vector<iree_string_view_t> diagnostic_tap_names;
+  diagnostic_tap_names.reserve(diagnostic_tap_name_storage.size());
+  for (const std::string& tap_name : diagnostic_tap_name_storage) {
+    diagnostic_tap_names.push_back(
+        iree_make_string_view(tap_name.data(), tap_name.size()));
+  }
   plan_options.flags = ID4_PIPELINE_STAGE_PLAN_FLAG_CAPTURE_DIAGNOSTIC_TAPS;
   plan_options.diagnostic_tap_names = (iree_string_view_list_t){
-      IREE_ARRAYSIZE(diagnostic_tap_names),
-      diagnostic_tap_names,
+      diagnostic_tap_names.size(),
+      diagnostic_tap_names.data(),
   };
   plan_options.device_index = 0;
   plan_options.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;

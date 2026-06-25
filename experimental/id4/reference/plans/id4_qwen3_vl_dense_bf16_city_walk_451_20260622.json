@@ -1,0 +1,88 @@
+{
+  "fixture_id": "id4_qwen3_vl_dense_bf16_city_walk_451_20260622",
+  "source_label": "stable-diffusion.cpp BF16 city-walk dense Qwen trace, 1024px, one Euler step",
+  "source_trace_id": "stage-bf16-city-walk-1024-1step-hidden-20260622",
+  "texts": [
+    {
+      "name": "wrapped_prompt",
+      "output": "qwen/wrapped_prompt.txt",
+      "role": "metadata",
+      "stage": "qwen.prompt"
+    }
+  ],
+  "tensors": [
+    {
+      "name": "token_ids",
+      "output": "qwen/token_ids.npy",
+      "role": "input",
+      "slice": [
+        {
+          "length": 451,
+          "start": 0
+        }
+      ],
+      "stage": "qwen.prompt"
+    },
+    {
+      "name": "token_weights",
+      "output": "qwen/token_weights.npy",
+      "role": "input",
+      "slice": [
+        {
+          "length": 451,
+          "start": 0
+        }
+      ],
+      "stage": "qwen.prompt"
+    },
+    {
+      "name": "attention_mask",
+      "output": "qwen/attention_mask.npy",
+      "role": "input",
+      "slice": [
+        {
+          "length": 451,
+          "start": 0
+        },
+        {
+          "length": 451,
+          "start": 0
+        }
+      ],
+      "source_layout": "row-major",
+      "stage": "qwen.prompt"
+    },
+    {
+      "name": "selected_hidden_states",
+      "output": "qwen/selected_hidden_states.npy",
+      "role": "metadata",
+      "slice": [
+        {
+          "length": 53248,
+          "start": 0
+        },
+        {
+          "length": 451,
+          "start": 0
+        }
+      ],
+      "stage": "qwen.encoder"
+    },
+    {
+      "name": "condition",
+      "output": "qwen/condition.npy",
+      "role": "metadata",
+      "slice": [
+        {
+          "length": 53248,
+          "start": 0
+        },
+        {
+          "length": 451,
+          "start": 0
+        }
+      ],
+      "stage": "qwen.encoder"
+    }
+  ]
+}

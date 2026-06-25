@@ -13,13 +13,13 @@ kernel.def export("id4_qwen3_vl_attention_scores_f32") @id4_qwen3_vl_attention_s
   %workgroup_size_x = index.constant 256 : index
   %token_count = config.get @id4.qwen3_vl.attention.token_count : index
   %attention_head_count = config.get @id4.qwen3_vl.attention.attention_head_count : index
-  kernel.launch.config workgroups(%token_count, %attention_head_count, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
+  kernel.launch.config workgroups(%token_count, %attention_head_count, %token_count) workgroup_size(%workgroup_size_x, %unit, %unit) : index
 } launch(%query: buffer, %key: buffer, %attention_mask: buffer, %scores: buffer) {
   %base = index.constant 0 : offset
   %zero = index.constant 0 : index
-  %one = index.constant 1 : index
   %query_token = kernel.workgroup.id<x> : index
   %query_head = kernel.workgroup.id<y> : index
+  %key_token = kernel.workgroup.id<z> : index
   %lane = kernel.workitem.id<x> : index
   %zero_f32 = scalar.constant 0.0 : f32
   %token_count = config.get @id4.qwen3_vl.attention.token_count : index
@@ -46,24 +46,22 @@ kernel.def export("id4_qwen3_vl_attention_scores_f32") @id4_qwen3_vl_attention_s
   %key_view = buffer.view %key_global[%base] : buffer -> view<[%token_count]x[%key_value_width]xf32, #dense>
   %attention_mask_view = buffer.view %attention_mask_global[%base] : buffer -> view<[%token_count]x[%token_count]xf32, #dense>
   %scores_view = buffer.view %scores_global[%base] : buffer -> view<[%attention_head_count]x[%token_count]x[%token_count]xf32, #dense>
-  scf.for %key_token = [%zero to %token_count step %one] {
-    %lane_product = scf.if %lane_has_channel -> (f32) {
-      %query_channel = index.add %query_head_base, %lane : index
-      %key_channel = index.add %key_value_head_base, %lane : index
-      %query_value = view.load %query_view[%query_token, %query_channel] : view<[%token_count]x[%hidden_size]xf32, #dense> -> f32
-      %key_value = view.load %key_view[%key_token, %key_channel] : view<[%token_count]x[%key_value_width]xf32, #dense> -> f32
-      %product = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %query_value, %key_value : f32
-      scf.yield %product : f32
-    } else {
-      scf.yield %zero_f32 : f32
-    }
-    %dot = kernel.workgroup.reduce<addf> %lane_product : f32
-    scf.if %is_lane_zero {
-      %scaled_dot = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %dot, %attention_scale : f32
-      %mask_value = view.load %attention_mask_view[%query_token, %key_token] : view<[%token_count]x[%token_count]xf32, #dense> -> f32
-      %score = scalar.addf<reassoc|nnan|ninf|nsz> %scaled_dot, %mask_value : f32
-      view.store %score, %scores_view[%query_head, %query_token, %key_token] : f32, view<[%attention_head_count]x[%token_count]x[%token_count]xf32, #dense>
-    }
+  %lane_product = scf.if %lane_has_channel -> (f32) {
+    %query_channel = index.add %query_head_base, %lane : index
+    %key_channel = index.add %key_value_head_base, %lane : index
+    %query_value = view.load %query_view[%query_token, %query_channel] : view<[%token_count]x[%hidden_size]xf32, #dense> -> f32
+    %key_value = view.load %key_view[%key_token, %key_channel] : view<[%token_count]x[%key_value_width]xf32, #dense> -> f32
+    %product = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %query_value, %key_value : f32
+    scf.yield %product : f32
+  } else {
+    scf.yield %zero_f32 : f32
+  }
+  %dot = kernel.workgroup.reduce<addf> %lane_product : f32
+  scf.if %is_lane_zero {
+    %scaled_dot = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %dot, %attention_scale : f32
+    %mask_value = view.load %attention_mask_view[%query_token, %key_token] : view<[%token_count]x[%token_count]xf32, #dense> -> f32
+    %score = scalar.addf<reassoc|nnan|ninf|nsz> %scaled_dot, %mask_value : f32
+    view.store %score, %scores_view[%query_head, %query_token, %key_token] : f32, view<[%attention_head_count]x[%token_count]x[%token_count]xf32, #dense>
   }
   kernel.return
 }
@@ -162,6 +160,164 @@ kernel.def export("id4_qwen3_vl_attention_pv_f32") @id4_qwen3_vl_attention_pv_f3
   kernel.return
 }
 
+kernel.def export("id4_qwen3_vl_attention_scores_bf16_f32") @id4_qwen3_vl_attention_scores_bf16_f32() {
+  %unit = index.constant 1 : index
+  %workgroup_size_x = index.constant 256 : index
+  %token_count = config.get @id4.qwen3_vl.attention.token_count : index
+  %attention_head_count = config.get @id4.qwen3_vl.attention.attention_head_count : index
+  kernel.launch.config workgroups(%token_count, %attention_head_count, %token_count) workgroup_size(%workgroup_size_x, %unit, %unit) : index
+} launch(%query: buffer, %key: buffer, %attention_mask: buffer, %scores: buffer) {
+  %base = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %query_token = kernel.workgroup.id<x> : index
+  %query_head = kernel.workgroup.id<y> : index
+  %key_token = kernel.workgroup.id<z> : index
+  %lane = kernel.workitem.id<x> : index
+  %zero_f32 = scalar.constant 0.0 : f32
+  %token_count = config.get @id4.qwen3_vl.attention.token_count : index
+  %hidden_size = config.get @id4.qwen3_vl.attention.hidden_size : index
+  %attention_head_count = config.get @id4.qwen3_vl.attention.attention_head_count : index
+  %key_value_head_count = config.get @id4.qwen3_vl.attention.key_value_head_count : index
+  %head_size = config.get @id4.qwen3_vl.attention.head_size : index
+  %query_heads_per_key = index.div %attention_head_count, %key_value_head_count : index
+  %key_value_width = index.mul %key_value_head_count, %head_size : index
+  %lane_has_channel = index.cmp ult, %lane, %head_size : index
+  %is_lane_zero = index.cmp eq, %lane, %zero : index
+  %head_size_i32 = index.cast %head_size : index to i32
+  %head_size_f32 = scalar.sitofp %head_size_i32 : i32 to f32
+  %attention_scale = scalar.rsqrtf<nnan|ninf|nsz|afn> %head_size_f32 : f32
+  %query_head_base = index.mul %query_head, %head_size : index
+  %key_value_head = index.div %query_head, %query_heads_per_key : index
+  %key_value_head_base = index.mul %key_value_head, %head_size : index
+  %query_noalias, %key_noalias, %attention_mask_noalias, %scores_noalias = buffer.assume.noalias %query, %key, %attention_mask, %scores : buffer, buffer, buffer, buffer
+  %query_global = buffer.assume.memory_space<global> %query_noalias : buffer
+  %key_global = buffer.assume.memory_space<global> %key_noalias : buffer
+  %attention_mask_global = buffer.assume.memory_space<global> %attention_mask_noalias : buffer
+  %scores_global = buffer.assume.memory_space<global> %scores_noalias : buffer
+  %query_view = buffer.view %query_global[%base] : buffer -> view<[%token_count]x[%hidden_size]xbf16, #dense>
+  %key_view = buffer.view %key_global[%base] : buffer -> view<[%token_count]x[%key_value_width]xbf16, #dense>
+  %attention_mask_view = buffer.view %attention_mask_global[%base] : buffer -> view<[%token_count]x[%token_count]xf32, #dense>
+  %scores_view = buffer.view %scores_global[%base] : buffer -> view<[%attention_head_count]x[%token_count]x[%token_count]xf32, #dense>
+  %lane_product = scf.if %lane_has_channel -> (f32) {
+    %query_channel = index.add %query_head_base, %lane : index
+    %key_channel = index.add %key_value_head_base, %lane : index
+    %query_value_bf16 = view.load %query_view[%query_token, %query_channel] : view<[%token_count]x[%hidden_size]xbf16, #dense> -> bf16
+    %key_value_bf16 = view.load %key_view[%key_token, %key_channel] : view<[%token_count]x[%key_value_width]xbf16, #dense> -> bf16
+    %query_value = scalar.extf %query_value_bf16 : bf16 to f32
+    %key_value = scalar.extf %key_value_bf16 : bf16 to f32
+    %product = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %query_value, %key_value : f32
+    scf.yield %product : f32
+  } else {
+    scf.yield %zero_f32 : f32
+  }
+  %dot = kernel.workgroup.reduce<addf> %lane_product : f32
+  scf.if %is_lane_zero {
+    %scaled_dot = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %dot, %attention_scale : f32
+    %mask_value = view.load %attention_mask_view[%query_token, %key_token] : view<[%token_count]x[%token_count]xf32, #dense> -> f32
+    %score = scalar.addf<reassoc|nnan|ninf|nsz> %scaled_dot, %mask_value : f32
+    view.store %score, %scores_view[%query_head, %query_token, %key_token] : f32, view<[%attention_head_count]x[%token_count]x[%token_count]xf32, #dense>
+  }
+  kernel.return
+}
+
+kernel.def export("id4_qwen3_vl_attention_softmax_bf16") @id4_qwen3_vl_attention_softmax_bf16() {
+  %unit = index.constant 1 : index
+  %workgroup_size_x = index.constant 256 : index
+  %token_count = config.get @id4.qwen3_vl.attention.token_count : index
+  %attention_head_count = config.get @id4.qwen3_vl.attention.attention_head_count : index
+  kernel.launch.config workgroups(%token_count, %attention_head_count, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
+} launch(%scores: buffer, %probabilities: buffer) {
+  %base = index.constant 0 : offset
+  %zero_f32 = scalar.constant 0.0 : f32
+  %one_f32 = scalar.constant 1.0 : f32
+  %negative_large = scalar.constant -1000000000.0 : f32
+  %workgroup_size_x = index.constant 256 : index
+  %query_token = kernel.workgroup.id<x> : index
+  %query_head = kernel.workgroup.id<y> : index
+  %lane = kernel.workitem.id<x> : index
+  %token_count = config.get @id4.qwen3_vl.attention.token_count : index
+  %attention_head_count = config.get @id4.qwen3_vl.attention.attention_head_count : index
+  %scores_noalias, %probabilities_noalias = buffer.assume.noalias %scores, %probabilities : buffer, buffer
+  %scores_global = buffer.assume.memory_space<global> %scores_noalias : buffer
+  %probabilities_global = buffer.assume.memory_space<global> %probabilities_noalias : buffer
+  %scores_view = buffer.view %scores_global[%base] : buffer -> view<[%attention_head_count]x[%token_count]x[%token_count]xf32, #dense>
+  %probabilities_view = buffer.view %probabilities_global[%base] : buffer -> view<[%attention_head_count]x[%token_count]x[%token_count]xbf16, #dense>
+  %lane_max = scf.for %key_token = [%lane to %token_count step %workgroup_size_x](%current_max = %negative_large : f32) -> (f32) {
+    %score = view.load %scores_view[%query_head, %query_token, %key_token] : view<[%attention_head_count]x[%token_count]x[%token_count]xf32, #dense> -> f32
+    %next_max = scalar.maxnumf %current_max, %score : f32
+    scf.yield %next_max : f32
+  }
+  %row_max = kernel.workgroup.reduce<maxnumf> %lane_max : f32
+  %lane_sum = scf.for %key_token = [%lane to %token_count step %workgroup_size_x](%current_sum = %zero_f32 : f32) -> (f32) {
+    %score = view.load %scores_view[%query_head, %query_token, %key_token] : view<[%attention_head_count]x[%token_count]x[%token_count]xf32, #dense> -> f32
+    %centered = scalar.subf<reassoc|nnan|ninf|nsz> %score, %row_max : f32
+    %weight = scalar.expf<afn> %centered : f32
+    %next_sum = scalar.addf<reassoc|nnan|ninf|nsz> %current_sum, %weight : f32
+    scf.yield %next_sum : f32
+  }
+  %row_sum = kernel.workgroup.reduce<addf> %lane_sum : f32
+  %inverse_sum = scalar.divf<nnan|ninf|nsz|arcp> %one_f32, %row_sum : f32
+  scf.for %key_token = [%lane to %token_count step %workgroup_size_x] {
+    %score = view.load %scores_view[%query_head, %query_token, %key_token] : view<[%attention_head_count]x[%token_count]x[%token_count]xf32, #dense> -> f32
+    %centered = scalar.subf<reassoc|nnan|ninf|nsz> %score, %row_max : f32
+    %weight = scalar.expf<afn> %centered : f32
+    %probability = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %weight, %inverse_sum : f32
+    %probability_bf16 = scalar.fptrunc %probability : f32 to bf16
+    view.store %probability_bf16, %probabilities_view[%query_head, %query_token, %key_token] : bf16, view<[%attention_head_count]x[%token_count]x[%token_count]xbf16, #dense>
+  }
+  kernel.return
+}
+
+kernel.def export("id4_qwen3_vl_attention_pv_bf16") @id4_qwen3_vl_attention_pv_bf16() {
+  %unit = index.constant 1 : index
+  %workgroup_size_x = index.constant 256 : index
+  %token_count = config.get @id4.qwen3_vl.attention.token_count : index
+  %attention_head_count = config.get @id4.qwen3_vl.attention.attention_head_count : index
+  kernel.launch.config workgroups(%token_count, %attention_head_count, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
+} launch(%probabilities: buffer, %value: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %query_token = kernel.workgroup.id<x> : index
+  %query_head = kernel.workgroup.id<y> : index
+  %lane = kernel.workitem.id<x> : index
+  %zero_f32 = scalar.constant 0.0 : f32
+  %token_count = config.get @id4.qwen3_vl.attention.token_count : index
+  %hidden_size = config.get @id4.qwen3_vl.attention.hidden_size : index
+  %attention_head_count = config.get @id4.qwen3_vl.attention.attention_head_count : index
+  %key_value_head_count = config.get @id4.qwen3_vl.attention.key_value_head_count : index
+  %head_size = config.get @id4.qwen3_vl.attention.head_size : index
+  %query_heads_per_key = index.div %attention_head_count, %key_value_head_count : index
+  %key_value_width = index.mul %key_value_head_count, %head_size : index
+  %lane_has_channel = index.cmp ult, %lane, %head_size : index
+  %query_head_base = index.mul %query_head, %head_size : index
+  %output_channel = index.add %query_head_base, %lane : index
+  %key_value_head = index.div %query_head, %query_heads_per_key : index
+  %key_value_head_base = index.mul %key_value_head, %head_size : index
+  %value_channel = index.add %key_value_head_base, %lane : index
+  %probabilities_noalias, %value_noalias, %output_noalias = buffer.assume.noalias %probabilities, %value, %output : buffer, buffer, buffer
+  %probabilities_global = buffer.assume.memory_space<global> %probabilities_noalias : buffer
+  %value_global = buffer.assume.memory_space<global> %value_noalias : buffer
+  %output_global = buffer.assume.memory_space<global> %output_noalias : buffer
+  %probabilities_view = buffer.view %probabilities_global[%base] : buffer -> view<[%attention_head_count]x[%token_count]x[%token_count]xbf16, #dense>
+  %value_view = buffer.view %value_global[%base] : buffer -> view<[%token_count]x[%key_value_width]xbf16, #dense>
+  %output_view = buffer.view %output_global[%base] : buffer -> view<[%token_count]x[%hidden_size]xbf16, #dense>
+  scf.if %lane_has_channel {
+    %weighted_value_sum = scf.for %key_token = [%zero to %token_count step %one](%value_acc = %zero_f32 : f32) -> (f32) {
+      %probability_bf16 = view.load %probabilities_view[%query_head, %query_token, %key_token] : view<[%attention_head_count]x[%token_count]x[%token_count]xbf16, #dense> -> bf16
+      %value_component_bf16 = view.load %value_view[%key_token, %value_channel] : view<[%token_count]x[%key_value_width]xbf16, #dense> -> bf16
+      %probability = scalar.extf %probability_bf16 : bf16 to f32
+      %value_component = scalar.extf %value_component_bf16 : bf16 to f32
+      %weighted_component = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %probability, %value_component : f32
+      %next_value = scalar.addf<reassoc|nnan|ninf|nsz> %value_acc, %weighted_component : f32
+      scf.yield %next_value : f32
+    }
+    %output_bf16 = scalar.fptrunc %weighted_value_sum : f32 to bf16
+    view.store %output_bf16, %output_view[%query_token, %output_channel] : bf16, view<[%token_count]x[%hidden_size]xbf16, #dense>
+  }
+  kernel.return
+}
+
 check.case public @id4_qwen3_vl_attention_materialized_f32_single_token_case {
   %query = check.generate.fill value(0.0) : tensor<1x2xf32>
   %key = check.generate.fill value(0.0) : tensor<1x2xf32>
@@ -174,6 +330,21 @@ check.case public @id4_qwen3_vl_attention_materialized_f32_single_token_case {
   func.call @id4_qwen3_vl_attention_softmax_f32(%scores, %probabilities) : (tensor<1x1x1xf32>, tensor<1x1x1xf32>)
   func.call @id4_qwen3_vl_attention_pv_f32(%probabilities, %value, %output) : (tensor<1x1x1xf32>, tensor<1x2xf32>, tensor<1x2xf32>)
   check.expect.close actual(%output) expected(%value) atol(0.0) rtol(0.0) nan(same) : tensor<1x2xf32>
+  check.return
+}
+
+check.case public @id4_qwen3_vl_attention_materialized_bf16_single_token_case {
+  %query = check.generate.fill value(0.0) : tensor<1x2xbf16>
+  %key = check.generate.fill value(0.0) : tensor<1x2xbf16>
+  %value = check.generate.iota offset(3.0) step(2.0) : tensor<1x2xbf16>
+  %attention_mask = check.generate.fill value(0.0) : tensor<1x1xf32>
+  %scores = check.generate.fill value(0.0) : tensor<1x1x1xf32>
+  %probabilities = check.generate.fill value(0.0) : tensor<1x1x1xbf16>
+  %output = check.generate.fill value(0.0) : tensor<1x2xbf16>
+  func.call @id4_qwen3_vl_attention_scores_bf16_f32(%query, %key, %attention_mask, %scores) : (tensor<1x2xbf16>, tensor<1x2xbf16>, tensor<1x1xf32>, tensor<1x1x1xf32>)
+  func.call @id4_qwen3_vl_attention_softmax_bf16(%scores, %probabilities) : (tensor<1x1x1xf32>, tensor<1x1x1xbf16>)
+  func.call @id4_qwen3_vl_attention_pv_bf16(%probabilities, %value, %output) : (tensor<1x1x1xbf16>, tensor<1x2xbf16>, tensor<1x2xbf16>)
+  check.expect.close actual(%output) expected(%value) atol(0.0) rtol(0.0) nan(same) : tensor<1x2xbf16>
   check.return
 }
 
@@ -193,6 +364,22 @@ check.case public @id4_qwen3_vl_attention_materialized_f32_uniform_softmax_case 
   check.return
 }
 
+check.case public @id4_qwen3_vl_attention_materialized_bf16_uniform_softmax_case {
+  %query = check.generate.fill value(0.0) : tensor<2x1xbf16>
+  %key = check.generate.fill value(0.0) : tensor<2x1xbf16>
+  %value = check.generate.iota offset(1.0) step(2.0) : tensor<2x1xbf16>
+  %attention_mask = check.generate.fill value(0.0) : tensor<2x2xf32>
+  %scores = check.generate.fill value(0.0) : tensor<1x2x2xf32>
+  %probabilities = check.generate.fill value(0.0) : tensor<1x2x2xbf16>
+  %output = check.generate.fill value(0.0) : tensor<2x1xbf16>
+  %expected = check.generate.fill value(2.0) : tensor<2x1xbf16>
+  func.call @id4_qwen3_vl_attention_scores_bf16_f32(%query, %key, %attention_mask, %scores) : (tensor<2x1xbf16>, tensor<2x1xbf16>, tensor<2x2xf32>, tensor<1x2x2xf32>)
+  func.call @id4_qwen3_vl_attention_softmax_bf16(%scores, %probabilities) : (tensor<1x2x2xf32>, tensor<1x2x2xbf16>)
+  func.call @id4_qwen3_vl_attention_pv_bf16(%probabilities, %value, %output) : (tensor<1x2x2xbf16>, tensor<2x1xbf16>, tensor<2x1xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2x1xbf16>
+  check.return
+}
+
 check.case public @id4_qwen3_vl_attention_materialized_f32_grouped_query_case {
   %query = check.generate.fill value(0.0) : tensor<2x2xf32>
   %key = check.generate.fill value(0.0) : tensor<2x1xf32>
@@ -206,6 +393,22 @@ check.case public @id4_qwen3_vl_attention_materialized_f32_grouped_query_case {
   func.call @id4_qwen3_vl_attention_softmax_f32(%scores, %probabilities) : (tensor<2x2x2xf32>, tensor<2x2x2xf32>)
   func.call @id4_qwen3_vl_attention_pv_f32(%probabilities, %value, %output) : (tensor<2x2x2xf32>, tensor<2x1xf32>, tensor<2x2xf32>)
   check.expect.close actual(%output) expected(%expected) atol(0.0001) rtol(0.0001) nan(same) : tensor<2x2xf32>
+  check.return
+}
+
+check.case public @id4_qwen3_vl_attention_materialized_bf16_grouped_query_case {
+  %query = check.generate.fill value(0.0) : tensor<2x2xbf16>
+  %key = check.generate.fill value(0.0) : tensor<2x1xbf16>
+  %value = check.generate.iota offset(1.0) step(2.0) : tensor<2x1xbf16>
+  %attention_mask = check.generate.fill value(0.0) : tensor<2x2xf32>
+  %scores = check.generate.fill value(0.0) : tensor<2x2x2xf32>
+  %probabilities = check.generate.fill value(0.0) : tensor<2x2x2xbf16>
+  %output = check.generate.fill value(0.0) : tensor<2x2xbf16>
+  %expected = check.generate.fill value(2.0) : tensor<2x2xbf16>
+  func.call @id4_qwen3_vl_attention_scores_bf16_f32(%query, %key, %attention_mask, %scores) : (tensor<2x2xbf16>, tensor<2x1xbf16>, tensor<2x2xf32>, tensor<2x2x2xf32>)
+  func.call @id4_qwen3_vl_attention_softmax_bf16(%scores, %probabilities) : (tensor<2x2x2xf32>, tensor<2x2x2xbf16>)
+  func.call @id4_qwen3_vl_attention_pv_bf16(%probabilities, %value, %output) : (tensor<2x2x2xbf16>, tensor<2x1xbf16>, tensor<2x2xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2x2xbf16>
   check.return
 }
 
@@ -227,8 +430,14 @@ check.case public @id4_qwen3_vl_attention_materialized_f32_qwen_slice_case {
 
 check.benchmark<@id4_qwen3_vl_attention_materialized_f32_single_token_case> @id4_qwen3_vl_attention_materialized_f32_single_token
 
+check.benchmark<@id4_qwen3_vl_attention_materialized_bf16_single_token_case> @id4_qwen3_vl_attention_materialized_bf16_single_token
+
 check.benchmark<@id4_qwen3_vl_attention_materialized_f32_uniform_softmax_case> @id4_qwen3_vl_attention_materialized_f32_uniform_softmax
 
+check.benchmark<@id4_qwen3_vl_attention_materialized_bf16_uniform_softmax_case> @id4_qwen3_vl_attention_materialized_bf16_uniform_softmax
+
 check.benchmark<@id4_qwen3_vl_attention_materialized_f32_grouped_query_case> @id4_qwen3_vl_attention_materialized_f32_grouped_query
+
+check.benchmark<@id4_qwen3_vl_attention_materialized_bf16_grouped_query_case> @id4_qwen3_vl_attention_materialized_bf16_grouped_query
 
 check.benchmark<@id4_qwen3_vl_attention_materialized_f32_qwen_slice_case> @id4_qwen3_vl_attention_materialized_f32_qwen_slice

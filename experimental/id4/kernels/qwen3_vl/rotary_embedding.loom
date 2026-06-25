@@ -1,5 +1,7 @@
 config.decl @id4.qwen3_vl.rotary.token_count : %value: index where [range(%value, 1, 65536)]
+
 config.decl @id4.qwen3_vl.rotary.output_size : %value: index where [range(%value, 2, 65536)]
+
 config.decl @id4.qwen3_vl.rotary.head_size : %value: index where [range(%value, 2, 1024)]
 
 kernel.def export("id4_qwen3_vl_rotary_embedding_f32") @id4_qwen3_vl_rotary_embedding_f32() {
@@ -28,13 +30,11 @@ kernel.def export("id4_qwen3_vl_rotary_embedding_f32") @id4_qwen3_vl_rotary_embe
   %element_count = index.mul %token_count, %pair_count : index
   %element_index = index.madd %workgroup, %workgroup_size_x, %lane : index
   %in_bounds = index.cmp ult, %element_index, %element_count : index
-
   %input_noalias, %output_noalias = buffer.assume.noalias %input, %output : buffer, buffer
   %input_global = buffer.assume.memory_space<global> %input_noalias : buffer
   %output_global = buffer.assume.memory_space<global> %output_noalias : buffer
   %input_view = buffer.view %input_global[%base] : buffer -> view<[%token_count]x[%output_size]xf32, #dense>
   %output_view = buffer.view %output_global[%base] : buffer -> view<[%token_count]x[%output_size]xf32, #dense>
-
   scf.if %in_bounds {
     %token = index.div %element_index, %pair_count : index
     %pair_channel = index.rem %element_index, %pair_count : index
@@ -44,7 +44,6 @@ kernel.def export("id4_qwen3_vl_rotary_embedding_f32") @id4_qwen3_vl_rotary_embe
     %upper_offset = index.add %freq_index, %half_head_size : index
     %lower_channel = index.add %head_base, %freq_index : index
     %upper_channel = index.add %head_base, %upper_offset : index
-
     %token_i32 = index.cast %token : index to i32
     %freq_index_i32 = index.cast %freq_index : index to i32
     %head_size_i32 = index.cast %head_size : index to i32
@@ -62,7 +61,6 @@ kernel.def export("id4_qwen3_vl_rotary_embedding_f32") @id4_qwen3_vl_rotary_embe
     %turns = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %angle, %inverse_two_pi : f32
     %cosine = scalar.costurnsf<afn> %turns : f32
     %sine = scalar.sinturnsf<afn> %turns : f32
-
     %lower_value = view.load %input_view[%token, %lower_channel] : view<[%token_count]x[%output_size]xf32, #dense> -> f32
     %upper_value = view.load %input_view[%token, %upper_channel] : view<[%token_count]x[%output_size]xf32, #dense> -> f32
     %lower_cos = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %lower_value, %cosine : f32
@@ -77,11 +75,94 @@ kernel.def export("id4_qwen3_vl_rotary_embedding_f32") @id4_qwen3_vl_rotary_embe
   kernel.return
 }
 
+kernel.def export("id4_qwen3_vl_rotary_embedding_bf16") @id4_qwen3_vl_rotary_embedding_bf16() {
+  %unit = index.constant 1 : index
+  %two = index.constant 2 : index
+  %workgroup_size_x = index.constant 256 : index
+  %token_count = config.get @id4.qwen3_vl.rotary.token_count : index
+  %output_size = config.get @id4.qwen3_vl.rotary.output_size : index
+  %pair_count = index.div %output_size, %two : index
+  %element_count = index.mul %token_count, %pair_count : index
+  %rounding = index.sub %workgroup_size_x, %unit : index
+  %rounded = index.add %element_count, %rounding : index
+  %workgroups_x = index.div %rounded, %workgroup_size_x : index
+  kernel.launch.config workgroups(%workgroups_x, %unit, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %two = index.constant 2 : index
+  %workgroup = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %workgroup_size_x = index.constant 256 : index
+  %token_count = config.get @id4.qwen3_vl.rotary.token_count : index
+  %output_size = config.get @id4.qwen3_vl.rotary.output_size : index
+  %head_size = config.get @id4.qwen3_vl.rotary.head_size : index
+  %half_head_size = index.div %head_size, %two : index
+  %pair_count = index.div %output_size, %two : index
+  %element_count = index.mul %token_count, %pair_count : index
+  %element_index = index.madd %workgroup, %workgroup_size_x, %lane : index
+  %in_bounds = index.cmp ult, %element_index, %element_count : index
+  %input_noalias, %output_noalias = buffer.assume.noalias %input, %output : buffer, buffer
+  %input_global = buffer.assume.memory_space<global> %input_noalias : buffer
+  %output_global = buffer.assume.memory_space<global> %output_noalias : buffer
+  %input_view = buffer.view %input_global[%base] : buffer -> view<[%token_count]x[%output_size]xbf16, #dense>
+  %output_view = buffer.view %output_global[%base] : buffer -> view<[%token_count]x[%output_size]xbf16, #dense>
+  scf.if %in_bounds {
+    %token = index.div %element_index, %pair_count : index
+    %pair_channel = index.rem %element_index, %pair_count : index
+    %head = index.div %pair_channel, %half_head_size : index
+    %freq_index = index.rem %pair_channel, %half_head_size : index
+    %head_base = index.mul %head, %head_size : index
+    %upper_offset = index.add %freq_index, %half_head_size : index
+    %lower_channel = index.add %head_base, %freq_index : index
+    %upper_channel = index.add %head_base, %upper_offset : index
+    %token_i32 = index.cast %token : index to i32
+    %freq_index_i32 = index.cast %freq_index : index to i32
+    %head_size_i32 = index.cast %head_size : index to i32
+    %token_f32 = scalar.sitofp %token_i32 : i32 to f32
+    %freq_index_f32 = scalar.sitofp %freq_index_i32 : i32 to f32
+    %head_size_f32 = scalar.sitofp %head_size_i32 : i32 to f32
+    %negative_two = scalar.constant -2.0 : f32
+    %rope_theta_log2 = scalar.constant 22.253496664211536 : f32
+    %inverse_two_pi = scalar.constant 0.15915494309189535 : f32
+    %freq_scale_numerator = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %freq_index_f32, %negative_two : f32
+    %freq_scale = scalar.divf<nnan|ninf|nsz|arcp> %freq_scale_numerator, %head_size_f32 : f32
+    %freq_log2 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %freq_scale, %rope_theta_log2 : f32
+    %inverse_frequency = scalar.exp2f<afn> %freq_log2 : f32
+    %angle = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %token_f32, %inverse_frequency : f32
+    %turns = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %angle, %inverse_two_pi : f32
+    %cosine = scalar.costurnsf<afn> %turns : f32
+    %sine = scalar.sinturnsf<afn> %turns : f32
+    %lower_bf16 = view.load %input_view[%token, %lower_channel] : view<[%token_count]x[%output_size]xbf16, #dense> -> bf16
+    %upper_bf16 = view.load %input_view[%token, %upper_channel] : view<[%token_count]x[%output_size]xbf16, #dense> -> bf16
+    %lower_value = scalar.extf %lower_bf16 : bf16 to f32
+    %upper_value = scalar.extf %upper_bf16 : bf16 to f32
+    %lower_cos = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %lower_value, %cosine : f32
+    %upper_sin = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %upper_value, %sine : f32
+    %rotated_lower = scalar.subf<reassoc|nnan|ninf|nsz|contract> %lower_cos, %upper_sin : f32
+    %lower_sin = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %lower_value, %sine : f32
+    %upper_cos = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %upper_value, %cosine : f32
+    %rotated_upper = scalar.addf<reassoc|nnan|ninf|nsz|contract> %lower_sin, %upper_cos : f32
+    %rotated_lower_bf16 = scalar.fptrunc %rotated_lower : f32 to bf16
+    %rotated_upper_bf16 = scalar.fptrunc %rotated_upper : f32 to bf16
+    view.store %rotated_lower_bf16, %output_view[%token, %lower_channel] : bf16, view<[%token_count]x[%output_size]xbf16, #dense>
+    view.store %rotated_upper_bf16, %output_view[%token, %upper_channel] : bf16, view<[%token_count]x[%output_size]xbf16, #dense>
+  }
+  kernel.return
+}
+
 check.case public @id4_qwen3_vl_rotary_embedding_f32_identity_case {
   %input = check.generate.iota offset(1.0) step(1.0) : tensor<1x4xf32>
   %output = check.generate.fill value(0.0) : tensor<1x4xf32>
   func.call @id4_qwen3_vl_rotary_embedding_f32(%input, %output) : (tensor<1x4xf32>, tensor<1x4xf32>)
   check.expect.close actual(%output) expected(%input) atol(0.0) rtol(0.0) nan(same) : tensor<1x4xf32>
+  check.return
+}
+
+check.case public @id4_qwen3_vl_rotary_embedding_bf16_identity_case {
+  %input = check.generate.iota offset(1.0) step(1.0) : tensor<1x4xbf16>
+  %output = check.generate.fill value(0.0) : tensor<1x4xbf16>
+  func.call @id4_qwen3_vl_rotary_embedding_bf16(%input, %output) : (tensor<1x4xbf16>, tensor<1x4xbf16>)
+  check.expect.close actual(%output) expected(%input) atol(0.0) rtol(0.0) nan(same) : tensor<1x4xbf16>
   check.return
 }
 
@@ -101,5 +182,9 @@ check.case public @id4_qwen3_vl_rotary_embedding_f32_qwen_slice_case {
 }
 
 check.benchmark<@id4_qwen3_vl_rotary_embedding_f32_identity_case> @id4_qwen3_vl_rotary_embedding_f32_identity
+
+check.benchmark<@id4_qwen3_vl_rotary_embedding_bf16_identity_case> @id4_qwen3_vl_rotary_embedding_bf16_identity
+
 check.benchmark<@id4_qwen3_vl_rotary_embedding_f32_qwen_key_identity_case> @id4_qwen3_vl_rotary_embedding_f32_qwen_key_identity
+
 check.benchmark<@id4_qwen3_vl_rotary_embedding_f32_qwen_slice_case> @id4_qwen3_vl_rotary_embedding_f32_qwen_slice

@@ -62,6 +62,7 @@ add_custom_command(OUTPUT loom_sources.stamp
     "qwen3_vl/attention_materialized_f32.loom"
     "qwen3_vl/attention_wmma.loom"
     "qwen3_vl/condition.loom"
+    "qwen3_vl/linear_bf16_bf16_tail.loom"
     "qwen3_vl/linear_bf16_f32.loom"
     "qwen3_vl/linear_bf16_f32_wmma.loom"
     "qwen3_vl/linear_input_pack_f32_bf16.loom"
@@ -161,6 +162,7 @@ iree_c_embed_data(
     "qwen3_vl/attention_materialized_f32.loom"
     "qwen3_vl/attention_wmma.loom"
     "qwen3_vl/condition.loom"
+    "qwen3_vl/linear_bf16_bf16_tail.loom"
     "qwen3_vl/linear_bf16_f32.loom"
     "qwen3_vl/linear_bf16_f32_wmma.loom"
     "qwen3_vl/linear_input_pack_f32_bf16.loom"
@@ -5713,6 +5715,25 @@ iree_native_test(
 
 iree_native_test(
   NAME
+    "qwen3_vl_attention_materialized_bf16_single_token_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_materialized_f32.loom}}"
+    "--benchmark=@id4_qwen3_vl_attention_materialized_bf16_single_token"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.qwen3_vl.attention.token_count=1"
+    "--config=id4.qwen3_vl.attention.hidden_size=2"
+    "--config=id4.qwen3_vl.attention.attention_head_count=1"
+    "--config=id4.qwen3_vl.attention.key_value_head_count=1"
+    "--config=id4.qwen3_vl.attention.head_size=2"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
     "qwen3_vl_attention_materialized_f32_uniform_softmax_plan_test"
   ARGS
     "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_materialized_f32.loom}}"
@@ -5732,10 +5753,48 @@ iree_native_test(
 
 iree_native_test(
   NAME
+    "qwen3_vl_attention_materialized_bf16_uniform_softmax_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_materialized_f32.loom}}"
+    "--benchmark=@id4_qwen3_vl_attention_materialized_bf16_uniform_softmax"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.qwen3_vl.attention.token_count=2"
+    "--config=id4.qwen3_vl.attention.hidden_size=1"
+    "--config=id4.qwen3_vl.attention.attention_head_count=1"
+    "--config=id4.qwen3_vl.attention.key_value_head_count=1"
+    "--config=id4.qwen3_vl.attention.head_size=1"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
     "qwen3_vl_attention_materialized_f32_grouped_query_plan_test"
   ARGS
     "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_materialized_f32.loom}}"
     "--benchmark=@id4_qwen3_vl_attention_materialized_f32_grouped_query"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.qwen3_vl.attention.token_count=2"
+    "--config=id4.qwen3_vl.attention.hidden_size=2"
+    "--config=id4.qwen3_vl.attention.attention_head_count=2"
+    "--config=id4.qwen3_vl.attention.key_value_head_count=1"
+    "--config=id4.qwen3_vl.attention.head_size=1"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
+    "qwen3_vl_attention_materialized_bf16_grouped_query_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_materialized_f32.loom}}"
+    "--benchmark=@id4_qwen3_vl_attention_materialized_bf16_grouped_query"
     "--dry-run"
     "--output-format=jsonl"
     "--config=id4.qwen3_vl.attention.token_count=2"
@@ -5962,6 +6021,23 @@ iree_native_test(
   ARGS
     "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_f32_wmma.loom}}"
     "--benchmark=@id4_qwen3_vl_linear_bf16_f32_wmma_m32n64_small"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=32"
+    "--config=id4.qwen3_vl.linear_wmma.input_size=16"
+    "--config=id4.qwen3_vl.linear_wmma.output_size=64"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
+    "qwen3_vl_linear_bf16_bf16_wmma_m32n64_small_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_f32_wmma.loom}}"
+    "--benchmark=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n64_small"
     "--dry-run"
     "--output-format=jsonl"
     "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=32"
@@ -6230,6 +6306,23 @@ iree_native_test(
 
 iree_native_test(
   NAME
+    "qwen3_vl_token_embedding_bf16_bf16_small_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/token_embedding.loom}}"
+    "--benchmark=@id4_qwen3_vl_token_embedding_bf16_bf16_small"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.qwen3_vl.token_embedding.token_count=2"
+    "--config=id4.qwen3_vl.token_embedding.hidden_size=4"
+    "--config=id4.qwen3_vl.token_embedding.vocab_size=3"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
     "qwen3_vl_token_embedding_bf16_f32_qwen_slice_plan_test"
   ARGS
     "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/token_embedding.loom}}"
@@ -6279,22 +6372,6 @@ iree_native_test(
 
 iree_native_test(
   NAME
-    "qwen3_vl_condition_f32_multi_partial_plan_test"
-  ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/condition.loom}}"
-    "--benchmark=@id4_qwen3_vl_condition_forward_f32_multi_partial"
-    "--dry-run"
-    "--output-format=jsonl"
-    "--config=id4.qwen3_vl.condition.hidden_row_count=1"
-    "--config=id4.qwen3_vl.condition.token_count=4098"
-  SRC
-    loom::tools::iree-benchmark-loom
-  LABELS
-    "hostonly"
-)
-
-iree_native_test(
-  NAME
     "qwen3_vl_selected_hidden_pack_f32_small_plan_test"
   ARGS
     "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/selected_hidden_pack_f32.loom}}"
@@ -6305,6 +6382,60 @@ iree_native_test(
     "--config=id4.qwen3_vl.selected_hidden_pack.hidden_size=1"
     "--config=id4.qwen3_vl.selected_hidden_pack.hidden_row_count=1"
     "--config=id4.qwen3_vl.selected_hidden_pack.selected_layer_index=0"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
+    "qwen3_vl_selected_hidden_pack_bf16_f32_small_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/selected_hidden_pack_f32.loom}}"
+    "--benchmark=@id4_qwen3_vl_selected_hidden_pack_bf16_f32_small"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.qwen3_vl.selected_hidden_pack.token_count=4"
+    "--config=id4.qwen3_vl.selected_hidden_pack.hidden_size=1"
+    "--config=id4.qwen3_vl.selected_hidden_pack.hidden_row_count=1"
+    "--config=id4.qwen3_vl.selected_hidden_pack.selected_layer_index=0"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
+    "qwen3_vl_selected_hidden_pack_f32_pytorch_order_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/selected_hidden_pack_f32.loom}}"
+    "--benchmark=@id4_qwen3_vl_selected_hidden_pack_f32_pytorch_order"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.qwen3_vl.selected_hidden_pack.token_count=2"
+    "--config=id4.qwen3_vl.selected_hidden_pack.hidden_size=3"
+    "--config=id4.qwen3_vl.selected_hidden_pack.hidden_row_count=6"
+    "--config=id4.qwen3_vl.selected_hidden_pack.selected_layer_index=1"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
+    "qwen3_vl_selected_hidden_pack_bf16_f32_pytorch_order_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/selected_hidden_pack_f32.loom}}"
+    "--benchmark=@id4_qwen3_vl_selected_hidden_pack_bf16_f32_pytorch_order"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.qwen3_vl.selected_hidden_pack.token_count=2"
+    "--config=id4.qwen3_vl.selected_hidden_pack.hidden_size=3"
+    "--config=id4.qwen3_vl.selected_hidden_pack.hidden_row_count=6"
+    "--config=id4.qwen3_vl.selected_hidden_pack.selected_layer_index=1"
   SRC
     loom::tools::iree-benchmark-loom
   LABELS
@@ -6347,6 +6478,22 @@ iree_native_test(
 
 iree_native_test(
   NAME
+    "qwen3_vl_rmsnorm_bf16_small_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/rmsnorm.loom}}"
+    "--benchmark=@id4_qwen3_vl_rmsnorm_bf16_small"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.qwen3_vl.rmsnorm.token_count=1"
+    "--config=id4.qwen3_vl.rmsnorm.hidden_size=4"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
     "qwen3_vl_rmsnorm_f32_qwen_slice_plan_test"
   ARGS
     "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/rmsnorm.loom}}"
@@ -6367,6 +6514,23 @@ iree_native_test(
   ARGS
     "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/rotary_embedding.loom}}"
     "--benchmark=@id4_qwen3_vl_rotary_embedding_f32_identity"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.qwen3_vl.rotary.token_count=1"
+    "--config=id4.qwen3_vl.rotary.output_size=4"
+    "--config=id4.qwen3_vl.rotary.head_size=4"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
+    "qwen3_vl_rotary_embedding_bf16_identity_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/rotary_embedding.loom}}"
+    "--benchmark=@id4_qwen3_vl_rotary_embedding_bf16_identity"
     "--dry-run"
     "--output-format=jsonl"
     "--config=id4.qwen3_vl.rotary.token_count=1"
@@ -6430,6 +6594,22 @@ iree_native_test(
 
 iree_native_test(
   NAME
+    "qwen3_vl_silu_gate_bf16_small_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/silu_gate_f32.loom}}"
+    "--benchmark=@id4_qwen3_vl_silu_gate_bf16_small"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.qwen3_vl.silu_gate.token_count=2"
+    "--config=id4.qwen3_vl.silu_gate.intermediate_size=3"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
     "qwen3_vl_silu_gate_f32_qwen_slice_plan_test"
   ARGS
     "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/silu_gate_f32.loom}}"
@@ -6450,6 +6630,22 @@ iree_native_test(
   ARGS
     "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/residual_add_f32.loom}}"
     "--benchmark=@id4_qwen3_vl_residual_add_f32_small"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.qwen3_vl.residual_add.token_count=2"
+    "--config=id4.qwen3_vl.residual_add.hidden_size=3"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
+    "qwen3_vl_residual_add_bf16_small_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/residual_add_f32.loom}}"
+    "--benchmark=@id4_qwen3_vl_residual_add_bf16_small"
     "--dry-run"
     "--output-format=jsonl"
     "--config=id4.qwen3_vl.residual_add.token_count=2"
@@ -6487,6 +6683,42 @@ iree_native_test(
     "--config=id4.qwen3_vl.linear.token_count=1"
     "--config=id4.qwen3_vl.linear.input_size=4"
     "--config=id4.qwen3_vl.linear.output_size=2"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
+    "qwen3_vl_linear_bf16_bf16_small_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_f32.loom}}"
+    "--benchmark=@id4_qwen3_vl_linear_bf16_bf16_small"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.qwen3_vl.linear.token_count=1"
+    "--config=id4.qwen3_vl.linear.input_size=4"
+    "--config=id4.qwen3_vl.linear.output_size=2"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
+    "qwen3_vl_linear_bf16_bf16_tail_small_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_tail.loom}}"
+    "--benchmark=@id4_qwen3_vl_linear_bf16_bf16_tail_small"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.qwen3_vl.linear_tail.token_count=2"
+    "--config=id4.qwen3_vl.linear_tail.token_start=0"
+    "--config=id4.qwen3_vl.linear_tail.dispatch_token_count=2"
+    "--config=id4.qwen3_vl.linear_tail.input_size=4"
+    "--config=id4.qwen3_vl.linear_tail.output_size=2"
   SRC
     loom::tools::iree-benchmark-loom
   LABELS
@@ -13138,6 +13370,29 @@ endif()
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
 iree_native_test(
   NAME
+    "qwen3_vl_attention_materialized_bf16_single_token_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_materialized_f32.loom}}"
+    "--case=@id4_qwen3_vl_attention_materialized_bf16_single_token_case"
+    "--device=amdgpu://0"
+    "--config=id4.qwen3_vl.attention.token_count=1"
+    "--config=id4.qwen3_vl.attention.hidden_size=2"
+    "--config=id4.qwen3_vl.attention.attention_head_count=1"
+    "--config=id4.qwen3_vl.attention.key_value_head_count=1"
+    "--config=id4.qwen3_vl.attention.head_size=2"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
     "qwen3_vl_attention_materialized_f32_uniform_softmax_hal_test"
   ARGS
     "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_materialized_f32.loom}}"
@@ -13161,10 +13416,56 @@ endif()
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
 iree_native_test(
   NAME
+    "qwen3_vl_attention_materialized_bf16_uniform_softmax_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_materialized_f32.loom}}"
+    "--case=@id4_qwen3_vl_attention_materialized_bf16_uniform_softmax_case"
+    "--device=amdgpu://0"
+    "--config=id4.qwen3_vl.attention.token_count=2"
+    "--config=id4.qwen3_vl.attention.hidden_size=1"
+    "--config=id4.qwen3_vl.attention.attention_head_count=1"
+    "--config=id4.qwen3_vl.attention.key_value_head_count=1"
+    "--config=id4.qwen3_vl.attention.head_size=1"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
     "qwen3_vl_attention_materialized_f32_grouped_query_hal_test"
   ARGS
     "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_materialized_f32.loom}}"
     "--case=@id4_qwen3_vl_attention_materialized_f32_grouped_query_case"
+    "--device=amdgpu://0"
+    "--config=id4.qwen3_vl.attention.token_count=2"
+    "--config=id4.qwen3_vl.attention.hidden_size=2"
+    "--config=id4.qwen3_vl.attention.attention_head_count=2"
+    "--config=id4.qwen3_vl.attention.key_value_head_count=1"
+    "--config=id4.qwen3_vl.attention.head_size=1"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
+    "qwen3_vl_attention_materialized_bf16_grouped_query_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_materialized_f32.loom}}"
+    "--case=@id4_qwen3_vl_attention_materialized_bf16_grouped_query_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.attention.token_count=2"
     "--config=id4.qwen3_vl.attention.hidden_size=2"
@@ -13439,6 +13740,27 @@ iree_native_test(
   ARGS
     "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_f32_wmma.loom}}"
     "--case=@id4_qwen3_vl_linear_bf16_f32_wmma_m32n64_small_case"
+    "--device=amdgpu://0"
+    "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=32"
+    "--config=id4.qwen3_vl.linear_wmma.input_size=16"
+    "--config=id4.qwen3_vl.linear_wmma.output_size=64"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
+    "qwen3_vl_linear_bf16_bf16_wmma_m32n64_small_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_f32_wmma.loom}}"
+    "--case=@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n64_small_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=32"
     "--config=id4.qwen3_vl.linear_wmma.input_size=16"
@@ -13771,6 +14093,27 @@ endif()
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
 iree_native_test(
   NAME
+    "qwen3_vl_token_embedding_bf16_bf16_small_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/token_embedding.loom}}"
+    "--case=@id4_qwen3_vl_token_embedding_bf16_bf16_small_case"
+    "--device=amdgpu://0"
+    "--config=id4.qwen3_vl.token_embedding.token_count=2"
+    "--config=id4.qwen3_vl.token_embedding.hidden_size=4"
+    "--config=id4.qwen3_vl.token_embedding.vocab_size=3"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
     "qwen3_vl_token_embedding_bf16_f32_qwen_slice_hal_test"
   ARGS
     "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/token_embedding.loom}}"
@@ -13832,13 +14175,15 @@ endif()
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
 iree_native_test(
   NAME
-    "qwen3_vl_condition_f32_multi_partial_hal_test"
+    "qwen3_vl_selected_hidden_pack_f32_small_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/condition.loom}}"
-    "--case=@id4_qwen3_vl_condition_forward_f32_multi_partial_case"
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/selected_hidden_pack_f32.loom}}"
+    "--case=@id4_qwen3_vl_selected_hidden_pack_f32_small_case"
     "--device=amdgpu://0"
-    "--config=id4.qwen3_vl.condition.hidden_row_count=1"
-    "--config=id4.qwen3_vl.condition.token_count=4098"
+    "--config=id4.qwen3_vl.selected_hidden_pack.token_count=4"
+    "--config=id4.qwen3_vl.selected_hidden_pack.hidden_size=1"
+    "--config=id4.qwen3_vl.selected_hidden_pack.hidden_row_count=1"
+    "--config=id4.qwen3_vl.selected_hidden_pack.selected_layer_index=0"
   SRC
     loom::tools::iree-test-loom
   LABELS
@@ -13852,15 +14197,59 @@ endif()
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
 iree_native_test(
   NAME
-    "qwen3_vl_selected_hidden_pack_f32_small_hal_test"
+    "qwen3_vl_selected_hidden_pack_bf16_f32_small_hal_test"
   ARGS
     "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/selected_hidden_pack_f32.loom}}"
-    "--case=@id4_qwen3_vl_selected_hidden_pack_f32_small_case"
+    "--case=@id4_qwen3_vl_selected_hidden_pack_bf16_f32_small_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.selected_hidden_pack.token_count=4"
     "--config=id4.qwen3_vl.selected_hidden_pack.hidden_size=1"
     "--config=id4.qwen3_vl.selected_hidden_pack.hidden_row_count=1"
     "--config=id4.qwen3_vl.selected_hidden_pack.selected_layer_index=0"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
+    "qwen3_vl_selected_hidden_pack_f32_pytorch_order_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/selected_hidden_pack_f32.loom}}"
+    "--case=@id4_qwen3_vl_selected_hidden_pack_f32_pytorch_order_case"
+    "--device=amdgpu://0"
+    "--config=id4.qwen3_vl.selected_hidden_pack.token_count=2"
+    "--config=id4.qwen3_vl.selected_hidden_pack.hidden_size=3"
+    "--config=id4.qwen3_vl.selected_hidden_pack.hidden_row_count=6"
+    "--config=id4.qwen3_vl.selected_hidden_pack.selected_layer_index=1"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
+    "qwen3_vl_selected_hidden_pack_bf16_f32_pytorch_order_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/selected_hidden_pack_f32.loom}}"
+    "--case=@id4_qwen3_vl_selected_hidden_pack_bf16_f32_pytorch_order_case"
+    "--device=amdgpu://0"
+    "--config=id4.qwen3_vl.selected_hidden_pack.token_count=2"
+    "--config=id4.qwen3_vl.selected_hidden_pack.hidden_size=3"
+    "--config=id4.qwen3_vl.selected_hidden_pack.hidden_row_count=6"
+    "--config=id4.qwen3_vl.selected_hidden_pack.selected_layer_index=1"
   SRC
     loom::tools::iree-test-loom
   LABELS
@@ -13916,6 +14305,26 @@ endif()
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
 iree_native_test(
   NAME
+    "qwen3_vl_rmsnorm_bf16_small_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/rmsnorm.loom}}"
+    "--case=@id4_qwen3_vl_rmsnorm_bf16_small_case"
+    "--device=amdgpu://0"
+    "--config=id4.qwen3_vl.rmsnorm.token_count=1"
+    "--config=id4.qwen3_vl.rmsnorm.hidden_size=4"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
     "qwen3_vl_rmsnorm_f32_qwen_slice_hal_test"
   ARGS
     "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/rmsnorm.loom}}"
@@ -13940,6 +14349,27 @@ iree_native_test(
   ARGS
     "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/rotary_embedding.loom}}"
     "--case=@id4_qwen3_vl_rotary_embedding_f32_identity_case"
+    "--device=amdgpu://0"
+    "--config=id4.qwen3_vl.rotary.token_count=1"
+    "--config=id4.qwen3_vl.rotary.output_size=4"
+    "--config=id4.qwen3_vl.rotary.head_size=4"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
+    "qwen3_vl_rotary_embedding_bf16_identity_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/rotary_embedding.loom}}"
+    "--case=@id4_qwen3_vl_rotary_embedding_bf16_identity_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.rotary.token_count=1"
     "--config=id4.qwen3_vl.rotary.output_size=4"
@@ -14019,6 +14449,26 @@ endif()
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
 iree_native_test(
   NAME
+    "qwen3_vl_silu_gate_bf16_small_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/silu_gate_f32.loom}}"
+    "--case=@id4_qwen3_vl_silu_gate_bf16_small_case"
+    "--device=amdgpu://0"
+    "--config=id4.qwen3_vl.silu_gate.token_count=2"
+    "--config=id4.qwen3_vl.silu_gate.intermediate_size=3"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
     "qwen3_vl_silu_gate_f32_qwen_slice_hal_test"
   ARGS
     "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/silu_gate_f32.loom}}"
@@ -14043,6 +14493,26 @@ iree_native_test(
   ARGS
     "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/residual_add_f32.loom}}"
     "--case=@id4_qwen3_vl_residual_add_f32_small_case"
+    "--device=amdgpu://0"
+    "--config=id4.qwen3_vl.residual_add.token_count=2"
+    "--config=id4.qwen3_vl.residual_add.hidden_size=3"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
+    "qwen3_vl_residual_add_bf16_small_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/residual_add_f32.loom}}"
+    "--case=@id4_qwen3_vl_residual_add_bf16_small_case"
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.residual_add.token_count=2"
     "--config=id4.qwen3_vl.residual_add.hidden_size=3"
@@ -14087,6 +14557,50 @@ iree_native_test(
     "--config=id4.qwen3_vl.linear.token_count=1"
     "--config=id4.qwen3_vl.linear.input_size=4"
     "--config=id4.qwen3_vl.linear.output_size=2"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
+    "qwen3_vl_linear_bf16_bf16_small_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_f32.loom}}"
+    "--case=@id4_qwen3_vl_linear_bf16_bf16_small_case"
+    "--device=amdgpu://0"
+    "--config=id4.qwen3_vl.linear.token_count=1"
+    "--config=id4.qwen3_vl.linear.input_size=4"
+    "--config=id4.qwen3_vl.linear.output_size=2"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
+    "qwen3_vl_linear_bf16_bf16_tail_small_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_bf16_tail.loom}}"
+    "--case=@id4_qwen3_vl_linear_bf16_bf16_tail_small_case"
+    "--device=amdgpu://0"
+    "--config=id4.qwen3_vl.linear_tail.token_count=2"
+    "--config=id4.qwen3_vl.linear_tail.token_start=0"
+    "--config=id4.qwen3_vl.linear_tail.dispatch_token_count=2"
+    "--config=id4.qwen3_vl.linear_tail.input_size=4"
+    "--config=id4.qwen3_vl.linear_tail.output_size=2"
   SRC
     loom::tools::iree-test-loom
   LABELS

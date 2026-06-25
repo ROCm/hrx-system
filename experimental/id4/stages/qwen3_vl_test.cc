@@ -142,42 +142,45 @@ TEST(Qwen3VlStage, PlansIdeogram4ForwardBoundaryContract) {
   load_options.diagnostics_sink = &diagnostics_sink;
   IREE_ASSERT_OK(id4_pipeline_stage_load(stage, &load_options));
 
-  id4_qwen3_vl_stage_plan_options_t qwen_options;
-  memset(&qwen_options, 0, sizeof(qwen_options));
-  qwen_options.structure_size = sizeof(qwen_options);
-  qwen_options.request.token_count = 64;
+  constexpr uint32_t kTokenCounts[] = {64, 451};
+  for (uint32_t token_count : kTokenCounts) {
+    id4_qwen3_vl_stage_plan_options_t qwen_options;
+    memset(&qwen_options, 0, sizeof(qwen_options));
+    qwen_options.structure_size = sizeof(qwen_options);
+    qwen_options.request.token_count = token_count;
 
-  id4_pipeline_stage_plan_options_t plan_options;
-  memset(&plan_options, 0, sizeof(plan_options));
-  plan_options.structure_size = sizeof(plan_options);
-  plan_options.next = &qwen_options;
-  plan_options.device_index = 0;
-  plan_options.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
-  plan_options.diagnostics_sink = &diagnostics_sink;
+    id4_pipeline_stage_plan_options_t plan_options;
+    memset(&plan_options, 0, sizeof(plan_options));
+    plan_options.structure_size = sizeof(plan_options);
+    plan_options.next = &qwen_options;
+    plan_options.device_index = 0;
+    plan_options.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
+    plan_options.diagnostics_sink = &diagnostics_sink;
 
-  id4_pipeline_plan_t* plan = nullptr;
-  IREE_ASSERT_OK(id4_pipeline_stage_plan(stage, &plan_options, &plan));
+    id4_pipeline_plan_t* plan = nullptr;
+    IREE_ASSERT_OK(id4_pipeline_stage_plan(stage, &plan_options, &plan));
 
-  const id4_pipeline_boundary_tensor_plan_t* exported_boundary = nullptr;
-  for (iree_host_size_t i = 0;
-       i < id4_pipeline_plan_boundary_tensor_count(plan); ++i) {
-    const id4_pipeline_boundary_tensor_plan_t* boundary =
-        id4_pipeline_plan_boundary_tensor_at(plan, i);
-    if (boundary &&
-        iree_all_bits_set(boundary->flags,
-                          ID4_PIPELINE_BOUNDARY_TENSOR_FLAG_EXPORTED)) {
-      exported_boundary = boundary;
-      break;
+    const id4_pipeline_boundary_tensor_plan_t* exported_boundary = nullptr;
+    for (iree_host_size_t i = 0;
+         i < id4_pipeline_plan_boundary_tensor_count(plan); ++i) {
+      const id4_pipeline_boundary_tensor_plan_t* boundary =
+          id4_pipeline_plan_boundary_tensor_at(plan, i);
+      if (boundary &&
+          iree_all_bits_set(boundary->flags,
+                            ID4_PIPELINE_BOUNDARY_TENSOR_FLAG_EXPORTED)) {
+        exported_boundary = boundary;
+        break;
+      }
     }
-  }
-  ASSERT_NE(exported_boundary, nullptr);
-  EXPECT_EQ(exported_boundary->layout.shape.rank, 2u);
-  EXPECT_EQ(
-      exported_boundary->layout.shape.dims[0],
-      static_cast<uint64_t>(model->selected_layer_count) * model->hidden_size);
-  EXPECT_EQ(exported_boundary->layout.shape.dims[1], 64u);
+    ASSERT_NE(exported_boundary, nullptr);
+    EXPECT_EQ(exported_boundary->layout.shape.rank, 2u);
+    EXPECT_EQ(exported_boundary->layout.shape.dims[0],
+              static_cast<uint64_t>(model->selected_layer_count) *
+                  model->hidden_size);
+    EXPECT_EQ(exported_boundary->layout.shape.dims[1], token_count);
 
-  id4_pipeline_plan_release(plan);
+    id4_pipeline_plan_release(plan);
+  }
   id4_pipeline_stage_release(stage);
   iree_hal_device_group_release(device_group);
 }
