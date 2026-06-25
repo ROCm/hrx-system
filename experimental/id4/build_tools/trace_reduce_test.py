@@ -190,6 +190,7 @@ class TraceReduceTest(unittest.TestCase):
             self.assertEqual(encoder_record["dtype"], "f32")
             self.assertEqual(encoder_record["format"], "npy-v1")
             self.assertEqual(encoder_record["shape"], [2, 2])
+            self.assertEqual(encoder_record["source_layout"], "dim0-contiguous")
             self.assertEqual(encoder_record["source_shape"], [4, 5])
             self.assertEqual(
                 encoder_record["tolerance"],
@@ -201,6 +202,60 @@ class TraceReduceTest(unittest.TestCase):
                 [("text", "wrapped_prompt"), ("tensor", "token_ids")],
             )
             self.assertEqual(prompt_records[1]["format"], "id4tensor-v1")
+
+    def test_reduces_row_major_tensor_slice(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            trace_dir = root / "trace"
+            output_dir = root / "fixtures"
+            (trace_dir / "tensors").mkdir(parents=True)
+            matrix_payload = struct.pack(
+                "<12f", *[float(value) for value in range(12)]
+            )
+            (trace_dir / "tensors" / "attention_mask.bin").write_bytes(
+                matrix_payload
+            )
+            _write_manifest_record(
+                trace_dir,
+                {
+                    "dtype": "f32",
+                    "file": "tensors/attention_mask.bin",
+                    "kind": "tensor",
+                    "name": "attention_mask",
+                    "ordinal": 0,
+                    "shape": [3, 4],
+                    "stage": "qwen.prompt",
+                },
+            )
+            plan = {
+                "fixture_id": "row_major_slice",
+                "texts": [],
+                "tensors": [
+                    {
+                        "name": "attention_mask",
+                        "output": "qwen/attention_mask.npy",
+                        "role": "input",
+                        "slice": [
+                            {"length": 2, "start": 1},
+                            {"length": 2, "start": 1},
+                        ],
+                        "source_layout": "row-major",
+                        "stage": "qwen.prompt",
+                    }
+                ],
+            }
+
+            manifest = trace_reduce.reduce_trace(trace_dir, output_dir, plan)
+
+            descr, shape, data = _read_npy(output_dir / "qwen" / "attention_mask.npy")
+            self.assertEqual(descr, "<f4")
+            self.assertEqual(shape, (2, 2))
+            self.assertEqual(struct.unpack("<4f", data), (5.0, 6.0, 9.0, 10.0))
+            self.assertEqual(manifest["records"][0]["source_layout"], "row-major")
+            inventory = json.loads((output_dir / "inventory.json").read_text())
+            self.assertEqual(
+                inventory["stages"][0]["records"][0]["source_layout"], "row-major"
+            )
 
     def test_rejects_floating_expected_tensor_without_tolerance(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

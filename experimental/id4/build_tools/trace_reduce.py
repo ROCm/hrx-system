@@ -25,6 +25,14 @@ NPY_PREFIX_LENGTH = len(NPY_MAGIC) + len(NPY_VERSION) + 2
 ID4_TENSOR_MAGIC = b"ID4TENSR"
 ID4_TENSOR_FORMAT = "id4tensor-v1"
 NPY_FORMAT = "npy-v1"
+SOURCE_LAYOUT_DIM0_CONTIGUOUS = "dim0-contiguous"
+SOURCE_LAYOUT_ROW_MAJOR = "row-major"
+VALID_SOURCE_LAYOUTS = frozenset(
+    (
+        SOURCE_LAYOUT_DIM0_CONTIGUOUS,
+        SOURCE_LAYOUT_ROW_MAJOR,
+    )
+)
 
 DTYPE_TABLE = {
     "f32": {
@@ -209,16 +217,32 @@ def _normalize_slice(shape: list[int], slice_specs: list[Any]) -> list[tuple[int
     return normalized
 
 
-def _trace_payload_strides(shape: list[int]) -> list[int]:
-    # Reference traces are emitted from sd::Tensor/ggml buffers, where
-    # dimension 0 is contiguous. The reduced NPY payload is written in row-major
-    # order so fixture consumers do not inherit that storage convention.
+def _require_source_layout(entry: dict[str, Any], entry_name: str) -> str:
+    source_layout = entry.get("source_layout", SOURCE_LAYOUT_DIM0_CONTIGUOUS)
+    if not isinstance(source_layout, str) or not source_layout:
+        raise TraceReduceError(f"{entry_name}.source_layout must be a non-empty string")
+    if source_layout not in VALID_SOURCE_LAYOUTS:
+        raise TraceReduceError(
+            f"{entry_name}.source_layout must be one of "
+            f"{sorted(VALID_SOURCE_LAYOUTS)}"
+        )
+    return source_layout
+
+
+def _source_payload_strides(shape: list[int], source_layout: str) -> list[int]:
     strides = [1] * len(shape)
     running = 1
-    for dim_index, dim_size in enumerate(shape):
-        strides[dim_index] = running
-        running *= dim_size
-    return strides
+    if source_layout == SOURCE_LAYOUT_DIM0_CONTIGUOUS:
+        for dim_index, dim_size in enumerate(shape):
+            strides[dim_index] = running
+            running *= dim_size
+        return strides
+    if source_layout == SOURCE_LAYOUT_ROW_MAJOR:
+        for dim_index in range(len(shape) - 1, -1, -1):
+            strides[dim_index] = running
+            running *= shape[dim_index]
+        return strides
+    raise TraceReduceError(f"unsupported source tensor layout: {source_layout}")
 
 
 def _read_tensor_slice(
@@ -226,10 +250,11 @@ def _read_tensor_slice(
     shape: list[int],
     dtype: str,
     slices: list[tuple[int, int]],
+    source_layout: str,
 ) -> bytes:
     dtype_info = DTYPE_TABLE[dtype]
     element_byte_count = int(dtype_info["byte_count"])
-    strides = _trace_payload_strides(shape)
+    strides = _source_payload_strides(shape, source_layout)
     output = bytearray()
 
     with tensor_path.open("rb") as tensor_file:
@@ -446,12 +471,13 @@ def _reduce_tensor(
         shape, _require_list(entry.get("slice"), f"{entry_name}.slice")
     )
     output_shape = [length for _, length in slices]
+    source_layout = _require_source_layout(entry, entry_name)
     tolerance = _validate_expected_tolerance(entry, role, dtype, entry_name)
     source_file = _relative_path(record.payload.get("file"), f"{stage}/{name}.file")
     tensor_path = trace_dir / source_file
     if not tensor_path.is_file():
         raise TraceReduceError(f"tensor payload not found: {tensor_path}")
-    payload = _read_tensor_slice(tensor_path, shape, dtype, slices)
+    payload = _read_tensor_slice(tensor_path, shape, dtype, slices, source_layout)
     actual_output_path, payload_format = write_tensor_payload(
         output_dir, output_path, dtype, output_shape, payload
     )
@@ -463,6 +489,7 @@ def _reduce_tensor(
         "source_ordinal": record.ordinal,
         "source_dtype": dtype,
         "source_shape": shape,
+        "source_layout": source_layout,
         "source_file_sha256": _file_sha256(tensor_path),
         "slice": [{"start": start, "length": length} for start, length in slices],
         "dtype": dtype,
@@ -542,6 +569,7 @@ def _inventory_record(record: dict[str, Any]) -> dict[str, Any]:
             "shape": record["shape"],
             "source_dtype": record["source_dtype"],
             "source_shape": record["source_shape"],
+            "source_layout": record["source_layout"],
         }
     )
     if "tolerance" in record:
