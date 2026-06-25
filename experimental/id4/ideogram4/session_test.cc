@@ -325,6 +325,11 @@ TEST_F(SessionTest, PlansGenerationFromDynamicPromptLength) {
   EXPECT_EQ(long_summary.denoise_step_count, 2u);
   EXPECT_EQ(long_summary.diffusion_latent_shape.rank, 4u);
   EXPECT_EQ(long_summary.diffusion_latent_shape.dims[2], 128u);
+  EXPECT_EQ(long_summary.decoded_image_shape.rank, 4u);
+  EXPECT_EQ(long_summary.decoded_image_shape.dims[0], 128u);
+  EXPECT_EQ(long_summary.decoded_image_shape.dims[1], 128u);
+  EXPECT_EQ(long_summary.decoded_image_shape.dims[2], 3u);
+  EXPECT_EQ(long_summary.decoded_image_shape.dims[3], 1u);
   EXPECT_EQ(long_summary.dit_activation_format,
             ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT);
   EXPECT_EQ(long_summary.vae_tiling.mode, ID4_VAE_TILING_MODE_DISABLED);

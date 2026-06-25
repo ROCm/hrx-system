@@ -52,6 +52,20 @@ iree_cc_library(
 
 iree_cc_library(
   NAME
+    readback
+  HDRS
+    "readback.h"
+  SRCS
+    "readback.c"
+  DEPS
+    iree::base
+    iree::hal
+    iree::io::file_handle
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
     runtime
   HDRS
     "runtime.h"
@@ -116,6 +130,20 @@ iree_cc_test(
     iree::testing::gtest
     iree::testing::gtest_main
     iree::testing::temp_file
+)
+
+iree_cc_test(
+  NAME
+    readback_test
+  SRCS
+    "readback_test.cc"
+  DEPS
+    ::readback
+    iree::base
+    iree::experimental::id4::stages::test_util
+    iree::hal
+    iree::testing::gtest
+    iree::testing::gtest_main
 )
 
 iree_cc_test(

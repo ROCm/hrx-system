@@ -11,7 +11,8 @@
 
 #include "experimental/id4/ideogram4/session.h"
 #include "experimental/id4/pipeline/diagnostics.h"
-#include "experimental/id4/pipeline/plan.h"
+#include "experimental/id4/tooling/image.h"
+#include "experimental/id4/tooling/readback.h"
 #include "experimental/id4/tooling/runtime.h"
 #include "iree/base/api.h"
 #include "iree/base/tooling/flags.h"
@@ -92,12 +93,7 @@ static iree_status_t id4_cli_parse_request(
   return status;
 }
 
-static iree_status_t id4_cli_reject_unimplemented_flags(void) {
-  if (strlen(FLAG_output) != 0) {
-    return iree_make_status(
-        IREE_STATUS_UNIMPLEMENTED,
-        "--output requires downstream sampler, DiT, and VAE CLI wiring");
-  }
+static iree_status_t id4_cli_reject_unimplemented_diagnostics_flags(void) {
   if (strlen(FLAG_dump_diagnostics) != 0) {
     return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
                             "--dump_diagnostics is not wired yet");
@@ -109,22 +105,23 @@ static iree_status_t id4_cli_reject_unimplemented_flags(void) {
   return iree_ok_status();
 }
 
-static iree_status_t id4_cli_write_plan(iree_string_view_t output_path,
-                                        const id4_pipeline_plan_t* plan,
-                                        iree_allocator_t host_allocator) {
-  if (iree_string_view_is_empty(output_path)) return iree_ok_status();
-
-  iree_string_builder_t builder;
-  iree_string_builder_initialize(host_allocator, &builder);
-  iree_status_t status = id4_pipeline_plan_format_json(plan, &builder);
-  if (iree_status_is_ok(status)) {
-    iree_string_view_t json = iree_string_builder_view(&builder);
-    status = iree_io_file_contents_write(
-        output_path, iree_make_const_byte_span(json.data, json.size),
-        host_allocator);
+static iree_status_t id4_cli_validate_execution_flags(void) {
+  IREE_RETURN_IF_ERROR(id4_cli_reject_unimplemented_diagnostics_flags());
+  if (strlen(FLAG_output) == 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "--output is required when executing generation");
   }
-  iree_string_builder_deinitialize(&builder);
-  return status;
+  return iree_ok_status();
+}
+
+static iree_status_t id4_cli_validate_dry_run_flags(void) {
+  IREE_RETURN_IF_ERROR(id4_cli_reject_unimplemented_diagnostics_flags());
+  if (strlen(FLAG_output) != 0) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "--output requires generation execution; omit --dry_run");
+  }
+  return iree_ok_status();
 }
 
 static iree_status_t id4_cli_write_generation_plan(
@@ -203,6 +200,15 @@ id4_cli_make_generation_plan_policy(void) {
   return policy;
 }
 
+static id4_pipeline_tensor_shape_t id4_cli_convert_program_shape(
+    id4_pipeline_program_shape_t shape) {
+  id4_pipeline_tensor_shape_t tensor_shape;
+  memset(&tensor_shape, 0, sizeof(tensor_shape));
+  tensor_shape.rank = shape.rank;
+  memcpy(tensor_shape.dims, shape.dims, sizeof(tensor_shape.dims));
+  return tensor_shape;
+}
+
 static iree_status_t id4_cli_run_generation_dry_run(
     iree_allocator_t host_allocator) {
   id4_ideogram4_request_t request;
@@ -214,7 +220,7 @@ static iree_status_t id4_cli_run_generation_dry_run(
   id4_ideogram4_session_t* session = NULL;
   id4_ideogram4_generation_plan_t* generation_plan = NULL;
 
-  iree_status_t status = id4_cli_reject_unimplemented_flags();
+  iree_status_t status = id4_cli_validate_dry_run_flags();
   if (iree_status_is_ok(status)) {
     status = id4_cli_parse_request(host_allocator, &request);
   }
@@ -263,11 +269,13 @@ static iree_status_t id4_cli_run_generation_dry_run(
     if (iree_status_is_ok(status)) {
       fprintf(stdout,
               "Ideogram 4 generation plan: tokens=%" PRIu32 " latent=%" PRIu64
-              "x%" PRIu64 "x%" PRIu64 " steps=%" PRIu32 "\n",
+              "x%" PRIu64 "x%" PRIu64 " image=%" PRIu64 "x%" PRIu64
+              " steps=%" PRIu32 "\n",
               summary.qwen_token_count, summary.diffusion_latent_shape.dims[0],
               summary.diffusion_latent_shape.dims[1],
               summary.diffusion_latent_shape.dims[2],
-              summary.denoise_step_count);
+              summary.decoded_image_shape.dims[0],
+              summary.decoded_image_shape.dims[1], summary.denoise_step_count);
     }
   }
 
@@ -281,7 +289,24 @@ static iree_status_t id4_cli_run_generation_dry_run(
   return status;
 }
 
-static iree_status_t id4_cli_run_qwen(iree_allocator_t host_allocator) {
+static iree_status_t id4_cli_write_decoded_image(
+    iree_string_view_t output_path,
+    id4_ideogram4_generation_plan_summary_t summary,
+    iree_const_byte_span_t decoded_image, iree_allocator_t host_allocator) {
+  id4_tooling_write_f32_rgb_ppm_options_t image_options;
+  memset(&image_options, 0, sizeof(image_options));
+  image_options.structure_size = sizeof(image_options);
+  image_options.path = output_path;
+  image_options.shape =
+      id4_cli_convert_program_shape(summary.decoded_image_shape);
+  image_options.pixels = decoded_image;
+  image_options.normalization =
+      ID4_TOOLING_IMAGE_NORMALIZATION_MINUS_ONE_TO_ONE;
+  image_options.host_allocator = host_allocator;
+  return id4_tooling_write_f32_rgb_ppm(&image_options);
+}
+
+static iree_status_t id4_cli_run_generation(iree_allocator_t host_allocator) {
   id4_ideogram4_request_t request;
   memset(&request, 0, sizeof(request));
   iree_tokenizer_t* tokenizer = NULL;
@@ -291,13 +316,19 @@ static iree_status_t id4_cli_run_qwen(iree_allocator_t host_allocator) {
   id4_pipeline_kernel_library_t* kernel_library = NULL;
   iree_io_parameter_provider_t* parameter_provider = NULL;
   id4_ideogram4_session_t* session = NULL;
+  id4_ideogram4_generation_plan_t* generation_plan = NULL;
+  id4_ideogram4_generation_bundle_t* generation_bundle = NULL;
+  iree_hal_semaphore_t* prepare_semaphore = NULL;
   iree_hal_semaphore_t* completion_semaphore = NULL;
-  id4_ideogram4_qwen_execution_t* execution = NULL;
-  bool qwen_was_issued = false;
+  id4_ideogram4_generation_execution_t* execution = NULL;
+  bool generation_was_prepared = false;
+  bool generation_was_issued = false;
+  id4_tooling_host_bytes_t decoded_image_bytes;
+  memset(&decoded_image_bytes, 0, sizeof(decoded_image_bytes));
   id4_pipeline_diagnostics_sink_t diagnostics_sink;
   id4_pipeline_diagnostics_sink_initialize_ignore(&diagnostics_sink);
 
-  iree_status_t status = id4_cli_reject_unimplemented_flags();
+  iree_status_t status = id4_cli_validate_execution_flags();
   if (iree_status_is_ok(status)) {
     status = id4_cli_parse_request(host_allocator, &request);
   }
@@ -331,7 +362,62 @@ static iree_status_t id4_cli_run_qwen(iree_allocator_t host_allocator) {
         id4_tooling_runtime_context_primary_device(&runtime_context);
     status = iree_hal_semaphore_create(device, IREE_HAL_QUEUE_AFFINITY_ANY, 0,
                                        IREE_HAL_SEMAPHORE_FLAG_NONE,
+                                       &prepare_semaphore);
+  }
+  if (iree_status_is_ok(status)) {
+    iree_hal_device_t* device =
+        id4_tooling_runtime_context_primary_device(&runtime_context);
+    status = iree_hal_semaphore_create(device, IREE_HAL_QUEUE_AFFINITY_ANY, 0,
+                                       IREE_HAL_SEMAPHORE_FLAG_NONE,
                                        &completion_semaphore);
+  }
+  if (iree_status_is_ok(status)) {
+    id4_ideogram4_generation_plan_options_t plan_options;
+    memset(&plan_options, 0, sizeof(plan_options));
+    plan_options.structure_size = sizeof(plan_options);
+    plan_options.request = &request;
+    plan_options.tokenizer = tokenizer;
+    plan_options.tokenizer_flags = IREE_TOKENIZER_ENCODE_FLAG_NONE;
+    plan_options.policy = id4_cli_make_generation_plan_policy();
+    plan_options.device_index = 0;
+    plan_options.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
+    plan_options.diagnostics_sink = &diagnostics_sink;
+    status = id4_ideogram4_session_plan_generation(session, &plan_options,
+                                                   &generation_plan);
+  }
+  id4_ideogram4_generation_plan_summary_t summary;
+  memset(&summary, 0, sizeof(summary));
+  if (iree_status_is_ok(status)) {
+    status = id4_ideogram4_generation_plan_summary(generation_plan, &summary);
+  }
+  if (iree_status_is_ok(status)) {
+    status =
+        id4_cli_write_generation_plan(iree_make_cstring_view(FLAG_dump_plan),
+                                      generation_plan, host_allocator);
+  }
+  iree_hal_semaphore_t* prepare_semaphore_storage = NULL;
+  uint64_t prepare_payload_storage = 1;
+  iree_hal_semaphore_list_t prepare_signal_list =
+      iree_hal_semaphore_list_empty();
+  if (iree_status_is_ok(status)) {
+    prepare_signal_list = id4_cli_single_semaphore_list(
+        &prepare_semaphore_storage, &prepare_payload_storage, prepare_semaphore,
+        prepare_payload_storage);
+    id4_ideogram4_generation_prepare_options_t prepare_options;
+    memset(&prepare_options, 0, sizeof(prepare_options));
+    prepare_options.structure_size = sizeof(prepare_options);
+    prepare_options.parameter_providers.qwen = parameter_provider;
+    prepare_options.parameter_providers.dit_conditioned = parameter_provider;
+    prepare_options.parameter_providers.dit_unconditioned = parameter_provider;
+    prepare_options.parameter_providers.vae = parameter_provider;
+    prepare_options.kernel_library = kernel_library;
+    prepare_options.command_buffer_mode = runtime_context.command_buffer_mode;
+    prepare_options.wait_semaphore_list = iree_hal_semaphore_list_empty();
+    prepare_options.signal_semaphore_list = prepare_signal_list;
+    prepare_options.diagnostics_sink = &diagnostics_sink;
+    status = id4_ideogram4_session_prepare_generation(
+        session, generation_plan, &prepare_options, &generation_bundle);
+    generation_was_prepared = iree_status_is_ok(status);
   }
   iree_hal_semaphore_t* completion_semaphore_storage = NULL;
   uint64_t completion_payload_storage = 1;
@@ -340,48 +426,68 @@ static iree_status_t id4_cli_run_qwen(iree_allocator_t host_allocator) {
     completion_list = id4_cli_single_semaphore_list(
         &completion_semaphore_storage, &completion_payload_storage,
         completion_semaphore, completion_payload_storage);
-    id4_ideogram4_qwen_issue_options_t issue_options;
+    id4_ideogram4_generation_issue_options_t issue_options;
     memset(&issue_options, 0, sizeof(issue_options));
     issue_options.structure_size = sizeof(issue_options);
     issue_options.request = &request;
     issue_options.tokenizer = tokenizer;
     issue_options.tokenizer_flags = IREE_TOKENIZER_ENCODE_FLAG_NONE;
-    issue_options.parameter_provider = parameter_provider;
-    issue_options.kernel_library = kernel_library;
-    issue_options.device_index = 0;
-    issue_options.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
-    issue_options.command_buffer_mode = runtime_context.command_buffer_mode;
-    issue_options.wait_semaphore_list = iree_hal_semaphore_list_empty();
+    issue_options.wait_semaphore_list = prepare_signal_list;
     issue_options.signal_semaphore_list = completion_list;
     issue_options.diagnostics_sink = &diagnostics_sink;
-    status =
-        id4_ideogram4_session_issue_qwen(session, &issue_options, &execution);
-    qwen_was_issued = iree_status_is_ok(status);
+    status = id4_ideogram4_session_issue_generation(session, generation_bundle,
+                                                    &issue_options, &execution);
+    generation_was_issued = iree_status_is_ok(status);
   }
-  if (iree_status_is_ok(status)) {
-    status = id4_cli_write_plan(iree_make_cstring_view(FLAG_dump_plan),
-                                id4_ideogram4_qwen_execution_plan(execution),
-                                host_allocator);
-  }
-  if (qwen_was_issued) {
+  if (generation_was_issued) {
     status = iree_status_join(
         status,
         iree_hal_semaphore_list_wait(completion_list, iree_infinite_timeout(),
                                      IREE_ASYNC_WAIT_FLAG_NONE));
+  } else if (generation_was_prepared) {
+    status = iree_status_join(
+        status, iree_hal_semaphore_list_wait(prepare_signal_list,
+                                             iree_infinite_timeout(),
+                                             IREE_ASYNC_WAIT_FLAG_NONE));
   }
   if (iree_status_is_ok(status)) {
-    id4_ideogram4_qwen_result_t result;
+    id4_ideogram4_generation_result_t result;
     memset(&result, 0, sizeof(result));
-    status = id4_ideogram4_qwen_execution_result(execution, &result);
+    status = id4_ideogram4_generation_execution_result(execution, &result);
+    id4_tooling_readback_buffer_binding_options_t readback_options;
+    memset(&readback_options, 0, sizeof(readback_options));
+    readback_options.structure_size = sizeof(readback_options);
+    readback_options.device =
+        id4_tooling_runtime_context_primary_device(&runtime_context);
+    readback_options.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
+    readback_options.binding = result.decoded_image_binding;
+    readback_options.wait_semaphore_list = completion_list;
+    readback_options.host_allocator = host_allocator;
     if (iree_status_is_ok(status)) {
-      fprintf(stdout,
-              "Qwen conditioning complete: tokens=%" PRIu32
-              " condition_bytes=%" PRIu64 "\n",
-              result.token_count, (uint64_t)result.condition_binding.length);
+      status = id4_tooling_readback_buffer_binding(&readback_options,
+                                                   &decoded_image_bytes);
     }
   }
+  if (iree_status_is_ok(status)) {
+    status = id4_cli_write_decoded_image(
+        iree_make_cstring_view(FLAG_output), summary,
+        iree_make_const_byte_span(decoded_image_bytes.data,
+                                  decoded_image_bytes.length),
+        host_allocator);
+  }
+  if (iree_status_is_ok(status)) {
+    fprintf(stdout,
+            "Ideogram 4 generation complete: tokens=%" PRIu32 " image=%" PRIu64
+            "x%" PRIu64 " output=%s\n",
+            summary.qwen_token_count, summary.decoded_image_shape.dims[0],
+            summary.decoded_image_shape.dims[1], FLAG_output);
+  }
 
-  id4_ideogram4_qwen_execution_release(execution);
+  id4_tooling_host_bytes_deinitialize(&decoded_image_bytes, host_allocator);
+  id4_ideogram4_generation_execution_release(execution);
+  id4_ideogram4_generation_bundle_release(generation_bundle);
+  id4_ideogram4_generation_plan_release(generation_plan);
+  iree_hal_semaphore_release(prepare_semaphore);
   iree_hal_semaphore_release(completion_semaphore);
   id4_ideogram4_session_release(session);
   iree_io_parameter_provider_release(parameter_provider);
@@ -402,8 +508,8 @@ int main(int argc, char** argv) {
       "id4",
       "Experimental Ideogram 4 HAL pipeline runner.\n"
       "\n"
-      "Loads a prompt JSON request, tokenizes it, and either plans a full "
-      "generation or runs the Qwen3-VL conditioning stage.\n"
+      "Loads a prompt JSON request, tokenizes it, and either plans or runs a "
+      "full generation.\n"
       "Pass exactly one of --prompt_json=... or --prompt_json_file=....\n"
       "Model parameters are loaded with standard --parameters= flags.\n");
   iree_flags_parse_checked(IREE_FLAGS_PARSE_MODE_DEFAULT, &argc, &argv);
@@ -417,7 +523,7 @@ int main(int argc, char** argv) {
   } else if (FLAG_dry_run) {
     status = id4_cli_run_generation_dry_run(host_allocator);
   } else {
-    status = id4_cli_run_qwen(host_allocator);
+    status = id4_cli_run_generation(host_allocator);
   }
 
   if (!iree_status_is_ok(status)) {

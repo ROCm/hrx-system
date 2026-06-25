@@ -595,6 +595,16 @@ id4_ideogram4_generation_request_diffusion_latent_shape(
       1);
 }
 
+static id4_pipeline_program_shape_t
+id4_ideogram4_generation_decoded_image_shape(
+    id4_ideogram4_decode_model_config_t model,
+    id4_pipeline_program_shape_t diffusion_latent_shape) {
+  return id4_pipeline_program_make_shape_rank4(
+      diffusion_latent_shape.dims[0] * model.vae.scale_x,
+      diffusion_latent_shape.dims[1] * model.vae.scale_y,
+      model.vae.decoded_channel_count, diffusion_latent_shape.dims[3]);
+}
+
 static iree_status_t id4_ideogram4_validate_generation_request(
     const id4_ideogram4_session_t* session,
     const id4_ideogram4_request_t* request) {
@@ -835,6 +845,9 @@ static iree_status_t id4_ideogram4_plan_generation_stages(
       options->request->generation.denoise_step_count;
   plan->summary.diffusion_latent_shape =
       id4_ideogram4_generation_request_diffusion_latent_shape(options->request);
+  plan->summary.decoded_image_shape =
+      id4_ideogram4_generation_decoded_image_shape(
+          session->decode_model, plan->summary.diffusion_latent_shape);
   plan->summary.dit_activation_format = options->policy.dit_activation_format;
   plan->summary.vae_tiling = options->policy.vae_tiling;
 
@@ -965,6 +978,10 @@ iree_status_t id4_ideogram4_generation_plan_format_json(
       plan->summary.qwen_token_count, plan->summary.denoise_step_count));
   IREE_RETURN_IF_ERROR(id4_ideogram4_generation_plan_append_shape_json(
       builder, plan->summary.diffusion_latent_shape));
+  IREE_RETURN_IF_ERROR(
+      iree_string_builder_append_format(builder, ",\"decoded_image_shape\":"));
+  IREE_RETURN_IF_ERROR(id4_ideogram4_generation_plan_append_shape_json(
+      builder, plan->summary.decoded_image_shape));
   IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
       builder, ",\"dit_activation_format\":%u,\"vae_tiling\":",
       (uint32_t)plan->summary.dit_activation_format));

@@ -121,6 +121,8 @@ typedef struct id4_ideogram4_generation_plan_summary_t {
   uint32_t denoise_step_count;
   // Diffusion latent tensor shape shared by DiT, sampler, and decode stages.
   id4_pipeline_program_shape_t diffusion_latent_shape;
+  // Decoded image tensor shape produced by the final decode stage.
+  id4_pipeline_program_shape_t decoded_image_shape;
   // DiT activation storage format selected by the plan.
   id4_ideogram4_dit_activation_format_t dit_activation_format;
   // VAE tiling policy selected by the plan.
