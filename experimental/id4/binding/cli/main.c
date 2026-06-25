@@ -11,6 +11,7 @@
 
 #include "experimental/id4/ideogram4/session.h"
 #include "experimental/id4/pipeline/diagnostics.h"
+#include "experimental/id4/pipeline/plan.h"
 #include "experimental/id4/tooling/runtime.h"
 #include "iree/base/api.h"
 #include "iree/base/tooling/flags.h"
@@ -94,10 +95,6 @@ static iree_status_t id4_cli_reject_unimplemented_flags(void) {
         IREE_STATUS_UNIMPLEMENTED,
         "--output requires downstream sampler, DiT, and VAE CLI wiring");
   }
-  if (strlen(FLAG_dump_plan) != 0) {
-    return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                            "--dump_plan is not wired yet");
-  }
   if (strlen(FLAG_dump_diagnostics) != 0) {
     return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
                             "--dump_diagnostics is not wired yet");
@@ -107,6 +104,24 @@ static iree_status_t id4_cli_reject_unimplemented_flags(void) {
                             "--profile_output is not wired yet");
   }
   return iree_ok_status();
+}
+
+static iree_status_t id4_cli_write_plan(iree_string_view_t output_path,
+                                        const id4_pipeline_plan_t* plan,
+                                        iree_allocator_t host_allocator) {
+  if (iree_string_view_is_empty(output_path)) return iree_ok_status();
+
+  iree_string_builder_t builder;
+  iree_string_builder_initialize(host_allocator, &builder);
+  iree_status_t status = id4_pipeline_plan_format_json(plan, &builder);
+  if (iree_status_is_ok(status)) {
+    iree_string_view_t json = iree_string_builder_view(&builder);
+    status = iree_io_file_contents_write(
+        output_path, iree_make_const_byte_span(json.data, json.size),
+        host_allocator);
+  }
+  iree_string_builder_deinitialize(&builder);
+  return status;
 }
 
 static iree_hal_semaphore_list_t id4_cli_single_semaphore_list(
@@ -137,6 +152,7 @@ static iree_status_t id4_cli_run_qwen(iree_allocator_t host_allocator) {
   id4_ideogram4_session_t* session = NULL;
   iree_hal_semaphore_t* completion_semaphore = NULL;
   id4_ideogram4_qwen_execution_t* execution = NULL;
+  bool qwen_was_issued = false;
 
   iree_status_t status = id4_cli_reject_unimplemented_flags();
   if (iree_status_is_ok(status)) {
@@ -214,10 +230,18 @@ static iree_status_t id4_cli_run_qwen(iree_allocator_t host_allocator) {
     issue_options.diagnostics_sink = &diagnostics_sink;
     status =
         id4_ideogram4_session_issue_qwen(session, &issue_options, &execution);
+    qwen_was_issued = iree_status_is_ok(status);
   }
   if (iree_status_is_ok(status)) {
-    status = iree_hal_semaphore_list_wait(
-        completion_list, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE);
+    status = id4_cli_write_plan(iree_make_cstring_view(FLAG_dump_plan),
+                                id4_ideogram4_qwen_execution_plan(execution),
+                                host_allocator);
+  }
+  if (qwen_was_issued) {
+    status = iree_status_join(
+        status,
+        iree_hal_semaphore_list_wait(completion_list, iree_infinite_timeout(),
+                                     IREE_ASYNC_WAIT_FLAG_NONE));
   }
   if (iree_status_is_ok(status)) {
     id4_ideogram4_qwen_result_t result;

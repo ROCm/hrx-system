@@ -21,6 +21,7 @@ iree_cc_binary(
     iree::experimental::id4::ideogram4::session
     iree::experimental::id4::pipeline::diagnostics
     iree::experimental::id4::pipeline::kernel_library
+    iree::experimental::id4::pipeline::plan
     iree::experimental::id4::tooling::runtime
     iree::hal
     iree::io::file_handle

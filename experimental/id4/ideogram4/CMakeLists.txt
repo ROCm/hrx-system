@@ -81,6 +81,23 @@ iree_cc_test(
     iree::tokenizer::testdata::streaming_testdata
 )
 
+iree_cc_binary_benchmark(
+  NAME
+    session_benchmark
+  SRCS
+    "session_benchmark.cc"
+  DEPS
+    ::session
+    iree::base
+    iree::experimental::id4::stages::test_util
+    iree::hal
+    iree::testing::gbenchmark_harness
+    iree::third_party::google_benchmark
+    iree::tokenizer::format::huggingface::tokenizer_json
+    iree::tokenizer::testdata::streaming_testdata
+  TESTONLY
+)
+
 iree_cc_test(
   NAME
     one_step_integration_test
