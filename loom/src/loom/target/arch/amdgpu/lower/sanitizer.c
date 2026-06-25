@@ -609,7 +609,8 @@ static bool loom_amdgpu_sanitizer_access_byte_stride(
 
 static bool loom_amdgpu_sanitizer_assert_access_plan_build(
     const loom_module_t* module, const loom_value_fact_table_t* fact_table,
-    const loom_op_t* op, loom_amdgpu_sanitizer_access_plan_t* out_plan,
+    const loom_view_region_table_t* view_regions, const loom_op_t* op,
+    loom_amdgpu_sanitizer_access_plan_t* out_plan,
     loom_amdgpu_sanitizer_access_diagnostic_t* out_diagnostic) {
   *out_plan = (loom_amdgpu_sanitizer_access_plan_t){
       .site_id = LOOM_SANITIZER_SITE_ID_INVALID,
@@ -686,8 +687,8 @@ static bool loom_amdgpu_sanitizer_assert_access_plan_build(
 
   loom_low_source_memory_access_plan_t source = {0};
   loom_vector_memory_cache_policy_t cache_policy = {0};
-  if (!loom_low_source_memory_access_plan_build_indexed(
-          module, fact_table, source_kind, view_value_id, indices,
+  if (!loom_low_source_memory_access_plan_build_indexed_with_view_regions(
+          module, fact_table, view_regions, source_kind, view_value_id, indices,
           static_indices, base_vector_type, cache_policy, &source,
           &out_diagnostic->source)) {
     return false;
@@ -748,10 +749,13 @@ iree_status_t loom_amdgpu_select_sanitizer_assert_access_plan(
   }
 
   loom_amdgpu_sanitizer_access_diagnostic_t diagnostic = {0};
+  const loom_view_region_table_t* view_regions = NULL;
+  IREE_RETURN_IF_ERROR(
+      loom_low_lower_context_view_regions(context, &view_regions));
   if (!loom_amdgpu_sanitizer_assert_access_plan_build(
           loom_low_lower_context_module(context),
-          loom_low_lower_context_fact_table(context), source_op, out_plan,
-          &diagnostic)) {
+          loom_low_lower_context_fact_table(context), view_regions, source_op,
+          out_plan, &diagnostic)) {
     return iree_ok_status();
   }
   const loom_sanitizer_reporting_mode_t reporting_mode =
@@ -779,9 +783,12 @@ iree_status_t loom_amdgpu_low_legality_verify_sanitizer_assert_access(
 
   loom_amdgpu_sanitizer_access_plan_t plan = {0};
   loom_amdgpu_sanitizer_access_diagnostic_t diagnostic = {0};
+  const loom_view_region_table_t* view_regions = NULL;
+  IREE_RETURN_IF_ERROR(
+      loom_target_low_legality_view_regions(context, &view_regions));
   if (!loom_amdgpu_sanitizer_assert_access_plan_build(
           loom_target_low_legality_module(context),
-          loom_target_low_legality_fact_table(context), op, &plan,
+          loom_target_low_legality_fact_table(context), view_regions, op, &plan,
           &diagnostic)) {
     return loom_amdgpu_sanitizer_assert_access_reject(context, op, &plan,
                                                       &diagnostic);

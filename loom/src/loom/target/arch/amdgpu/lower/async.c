@@ -138,16 +138,17 @@ static bool loom_amdgpu_async_gather_select_descriptor(
 static bool loom_amdgpu_async_gather_select_source(
     const loom_module_t* module, const loom_value_fact_table_t* fact_table,
     const loom_low_descriptor_set_t* descriptor_set,
-    loom_value_id_t source_view, loom_vector_memory_cache_policy_t cache_policy,
+    const loom_view_region_table_t* view_regions, loom_value_id_t source_view,
+    loom_vector_memory_cache_policy_t cache_policy,
     loom_amdgpu_async_gather_selection_t* selection,
     loom_amdgpu_async_gather_diagnostic_t* diagnostic,
     uint32_t* out_descriptor_ordinal) {
   *out_descriptor_ordinal = LOOM_LOW_DESCRIPTOR_ORDINAL_NONE;
 
-  if (!loom_low_source_memory_access_plan_build_view(
-          module, fact_table, LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD,
-          source_view, cache_policy, &selection->source,
-          &diagnostic->source_diagnostic)) {
+  if (!loom_low_source_memory_access_plan_build_view_with_view_regions(
+          module, fact_table, view_regions,
+          LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD, source_view, cache_policy,
+          &selection->source, &diagnostic->source_diagnostic)) {
     diagnostic->rejection_bits |=
         LOOM_AMDGPU_ASYNC_GATHER_REJECTION_SOURCE_PLAN;
     return false;
@@ -253,6 +254,7 @@ static bool loom_amdgpu_async_gather_select_dest(
 static bool loom_amdgpu_async_gather_select(
     const loom_module_t* module, const loom_value_fact_table_t* fact_table,
     const loom_low_descriptor_set_t* descriptor_set,
+    const loom_view_region_table_t* view_regions,
     loom_func_like_t source_function, const loom_op_t* source_op,
     loom_amdgpu_async_gather_selection_t* out_selection,
     loom_amdgpu_async_gather_diagnostic_t* out_diagnostic) {
@@ -277,8 +279,9 @@ static bool loom_amdgpu_async_gather_select(
   out_selection->dest_view = loom_kernel_async_gather_dest(source_op);
   uint32_t descriptor_ordinal = LOOM_LOW_DESCRIPTOR_ORDINAL_NONE;
   if (!loom_amdgpu_async_gather_select_source(
-          module, fact_table, descriptor_set, out_selection->source_view,
-          cache_policy, out_selection, out_diagnostic, &descriptor_ordinal) ||
+          module, fact_table, descriptor_set, view_regions,
+          out_selection->source_view, cache_policy, out_selection,
+          out_diagnostic, &descriptor_ordinal) ||
       !loom_amdgpu_async_gather_select_dest(fact_table, source_function,
                                             out_selection->dest_view,
                                             out_selection, out_diagnostic)) {
@@ -358,10 +361,13 @@ iree_status_t loom_amdgpu_select_kernel_async_gather_plan(
   *out_selected = false;
   loom_amdgpu_async_gather_diagnostic_t diagnostic = {0};
   loom_amdgpu_async_gather_selection_t selection = {0};
+  const loom_view_region_table_t* view_regions = NULL;
+  IREE_RETURN_IF_ERROR(
+      loom_low_lower_context_view_regions(context, &view_regions));
   if (!loom_amdgpu_async_gather_select(
           loom_low_lower_context_module(context),
           loom_low_lower_context_fact_table(context),
-          loom_low_lower_context_descriptor_set(context),
+          loom_low_lower_context_descriptor_set(context), view_regions,
           loom_low_lower_context_source_function(context), source_op,
           &selection, &diagnostic)) {
     return iree_ok_status();
@@ -708,10 +714,13 @@ static iree_status_t loom_amdgpu_low_legality_verify_kernel_async_gather(
     loom_target_low_legality_context_t* context, const loom_op_t* op) {
   loom_amdgpu_async_gather_selection_t selection = {0};
   loom_amdgpu_async_gather_diagnostic_t diagnostic = {0};
+  const loom_view_region_table_t* view_regions = NULL;
+  IREE_RETURN_IF_ERROR(
+      loom_target_low_legality_view_regions(context, &view_regions));
   if (loom_amdgpu_async_gather_select(
           loom_target_low_legality_module(context),
           loom_target_low_legality_fact_table(context),
-          loom_target_low_legality_descriptor_set(context),
+          loom_target_low_legality_descriptor_set(context), view_regions,
           loom_target_low_legality_function(context), op, &selection,
           &diagnostic)) {
     return iree_ok_status();

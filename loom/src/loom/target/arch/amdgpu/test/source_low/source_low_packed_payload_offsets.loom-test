@@ -21,21 +21,17 @@ func.def target(@target) @packed4_payload_word_offset(%weights: buffer, %block0:
 // ----
 low.func.def target(@target) abi(hal_kernel) @packed4_payload_word_offset(%block: reg<amdgpu.sgpr>, %word: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
   %word_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %block_byte_stride = s_mov_b32 18
-  %payload_header_offset = s_mov_b32 2
-  %word_byte_stride = s_mov_b32 4
-  %block_base = s_mul_i32 %block, %block_byte_stride
-  %payload_base = s_add_u32 %block_base, %payload_header_offset
-  %word_byte_offset = s_mul_i32 %word, %word_byte_stride
-  %byte_offset = s_add_u32 %payload_base, %word_byte_offset
   %27 = v_mov_b32 0
-  %28 = slice %word_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %29 = slice %word_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %30 = s_mov_b32 0
-  %31 = s_add_u32 %28, %byte_offset
-  %32 = s_addc_u32 %29, %30
-  %33 = concat(%31, %32) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %packed_word = global_load_b32_saddr %27, %33
+  %28 = s_mul_i32_rhs_inline %block, 18
+  %29 = s_lshl_b32_rhs_inline %word, 2
+  %30 = s_add_u32 %28, %29
+  %31 = slice %word_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %32 = slice %word_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %33 = s_mov_b32 0
+  %34 = s_add_u32 %31, %30
+  %35 = s_addc_u32 %32, %33
+  %36 = concat(%34, %35) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %packed_word = global_load_b32_saddr %27, %36 {offset = 2}
   return %packed_word
 }
 
@@ -65,13 +61,6 @@ func.def target(@target) @packed5_split_payload_offsets(%weights: buffer, %block
 // ----
 low.func.def target(@target) abi(hal_kernel) @packed5_split_payload_offsets(%block: reg<amdgpu.sgpr>, %word: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
   %low_bits_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %block_byte_stride = s_mov_b32 22
-  %low_bits_header_offset = s_mov_b32 6
-  %word_byte_stride = s_mov_b32 4
-  %block_base = s_mul_i32 %block, %block_byte_stride
-  %low_bits_base = s_add_u32 %block_base, %low_bits_header_offset
-  %low_word_byte_offset = s_mul_i32 %word, %word_byte_stride
-  %low_bits_byte_offset = s_add_u32 %low_bits_base, %low_word_byte_offset
   %35 = v_mov_b32 0
   %36 = s_mul_i32_rhs_inline %block, 22
   %37 = slice %low_bits_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
@@ -81,10 +70,12 @@ low.func.def target(@target) abi(hal_kernel) @packed5_split_payload_offsets(%blo
   %41 = s_addc_u32 %38, %39
   %42 = concat(%40, %41) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
   %side_bits_word = global_load_b32_saddr %35, %42 {offset = 2}
-  %48 = s_add_u32 %37, %low_bits_byte_offset
-  %49 = s_addc_u32 %38, %39
-  %50 = concat(%48, %49) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %low_bits_word = global_load_b32_saddr %35, %50
+  %46 = s_lshl_b32_rhs_inline %word, 2
+  %47 = s_add_u32 %36, %46
+  %51 = s_add_u32 %37, %47
+  %52 = s_addc_u32 %38, %39
+  %53 = concat(%51, %52) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %low_bits_word = global_load_b32_saddr %35, %53 {offset = 6}
   return %side_bits_word, %low_bits_word
 }
 
@@ -125,35 +116,29 @@ func.def target(@target) @packed6_split_payload_offsets(%weights: buffer, %block
 // ----
 low.func.def target(@target) abi(hal_kernel) @packed6_split_payload_offsets(%block: reg<amdgpu.sgpr>, %low_word: reg<amdgpu.sgpr>, %high_word: reg<amdgpu.sgpr>, %scale: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
   %scale_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %block_byte_stride = s_mov_b32 210
-  %high_bits_header_offset = s_mov_b32 128
-  %scale_header_offset = s_mov_b32 192
-  %word_byte_stride = s_mov_b32 4
-  %half_byte_stride = s_mov_b32 2
-  %block_base = s_mul_i32 %block, %block_byte_stride
-  %high_bits_base = s_add_u32 %block_base, %high_bits_header_offset
-  %scale_base = s_add_u32 %block_base, %scale_header_offset
-  %low_word_byte_offset = s_mul_i32 %low_word, %word_byte_stride
-  %high_word_byte_offset = s_mul_i32 %high_word, %word_byte_stride
-  %scale_element_byte_offset = s_mul_i32 %scale, %half_byte_stride
-  %low_bits_byte_offset = s_add_u32 %block_base, %low_word_byte_offset
-  %high_bits_byte_offset = s_add_u32 %high_bits_base, %high_word_byte_offset
-  %scale_byte_offset = s_add_u32 %scale_base, %scale_element_byte_offset
   %57 = v_mov_b32 0
-  %58 = slice %scale_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %59 = slice %scale_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %60 = s_mov_b32 0
-  %61 = s_add_u32 %58, %low_bits_byte_offset
-  %62 = s_addc_u32 %59, %60
-  %63 = concat(%61, %62) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %low_bits_word = global_load_b32_saddr %57, %63
-  %69 = s_add_u32 %58, %high_bits_byte_offset
-  %70 = s_addc_u32 %59, %60
-  %71 = concat(%69, %70) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %high_bits_word = global_load_b32_saddr %57, %71
-  %77 = s_add_u32 %58, %scale_byte_offset
-  %78 = s_addc_u32 %59, %60
+  %58 = s_mov_b32 210
+  %59 = s_mul_i32 %block, %58
+  %60 = s_lshl_b32_rhs_inline %low_word, 2
+  %61 = s_add_u32 %59, %60
+  %62 = slice %scale_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %63 = slice %scale_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %64 = s_mov_b32 0
+  %65 = s_add_u32 %62, %61
+  %66 = s_addc_u32 %63, %64
+  %67 = concat(%65, %66) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %low_bits_word = global_load_b32_saddr %57, %67
+  %72 = s_lshl_b32_rhs_inline %high_word, 2
+  %73 = s_add_u32 %59, %72
+  %77 = s_add_u32 %62, %73
+  %78 = s_addc_u32 %63, %64
   %79 = concat(%77, %78) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %scale_value = global_load_u16_saddr %57, %79
+  %high_bits_word = global_load_b32_saddr %57, %79 {offset = 128}
+  %84 = s_lshl_b32_rhs_inline %scale, 1
+  %85 = s_add_u32 %59, %84
+  %89 = s_add_u32 %62, %85
+  %90 = s_addc_u32 %63, %64
+  %91 = concat(%89, %90) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %scale_value = global_load_u16_saddr %57, %91 {offset = 192}
   return %low_bits_word, %high_bits_word, %scale_value
 }

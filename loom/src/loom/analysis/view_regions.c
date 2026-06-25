@@ -547,6 +547,7 @@ static iree_status_t loom_view_region_build_default(
       .view_value_id = value_id,
       .root_value_id = reference.root_value_id,
       .begin_byte_offset = begin,
+      .begin_value_id = LOOM_VALUE_ID_INVALID,
       .byte_length = length,
       .end_byte_offset = end,
       .minimum_alignment = reference.minimum_alignment,
@@ -593,6 +594,7 @@ static iree_status_t loom_view_region_build_buffer_view(
   IREE_RETURN_IF_ERROR(loom_view_region_build_default(
       table, value_id, view_type, reference, out_region));
   out_region->root_value_id = reference.root_value_id;
+  out_region->begin_value_id = loom_buffer_view_byte_offset(op);
   IREE_RETURN_IF_ERROR(loom_symbolic_expr_from_value(
       &table->expression_context, loom_buffer_view_byte_offset(op),
       &out_region->begin_byte_offset));
@@ -627,6 +629,9 @@ static iree_status_t loom_view_region_build_subview(
   IREE_RETURN_IF_ERROR(loom_view_region_expr_add(
       table, &source_region->begin_byte_offset, &additional_offset, &begin));
   out_region->root_value_id = source_region->root_value_id;
+  if (loom_symbolic_expr_is_constant(&additional_offset)) {
+    out_region->begin_value_id = source_region->begin_value_id;
+  }
   out_region->begin_byte_offset = begin;
   loom_view_region_expression_refine_facts(&out_region->begin_byte_offset,
                                            reference.base_byte_offset);
@@ -648,6 +653,7 @@ static iree_status_t loom_view_region_build_refine(
       table, value_id, view_type, reference, out_region));
   if (!source_region) return iree_ok_status();
   out_region->root_value_id = source_region->root_value_id;
+  out_region->begin_value_id = source_region->begin_value_id;
   out_region->begin_byte_offset = source_region->begin_byte_offset;
   loom_view_region_expression_refine_facts(&out_region->begin_byte_offset,
                                            reference.base_byte_offset);
@@ -738,6 +744,28 @@ iree_status_t loom_view_region_table_get(
         LOOM_VIEW_REGION_VALUE_EMPTY;
   }
   return status;
+}
+
+bool loom_view_region_table_try_lookup(const loom_view_region_table_t* table,
+                                       loom_value_id_t value_id,
+                                       const loom_view_region_t** out_region) {
+  *out_region = NULL;
+  if (!table || value_id >= table->module->values.count) return false;
+  const loom_value_ordinal_t value_ordinal =
+      loom_local_value_domain_try_ordinal(table->value_domain, value_id);
+  if (value_ordinal == LOOM_VALUE_ORDINAL_INVALID) return false;
+  if (table->states_by_value_ordinal[value_ordinal] !=
+      LOOM_VIEW_REGION_VALUE_READY) {
+    return false;
+  }
+  const loom_view_region_id_t region_id =
+      table->region_ids_by_value_ordinal[value_ordinal];
+  if (region_id == LOOM_VIEW_REGION_ID_INVALID ||
+      region_id >= table->region_count) {
+    return false;
+  }
+  *out_region = &table->regions[region_id];
+  return true;
 }
 
 //===----------------------------------------------------------------------===//

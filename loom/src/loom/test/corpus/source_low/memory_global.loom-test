@@ -231,6 +231,19 @@ func.def @descriptor_dynamic_base_static_extent_load_i32(%input: buffer, %base_i
 
 // ====
 
+func.def @descriptor_dynamic_projected_base_static_extent_load_i32(%input: buffer, %base_i32: i32) -> (i32) {
+  %base0 = index.cast %base_i32 : i32 to offset
+  %base = index.assume %base0 [range(%base0, 0, 4092), mul(%base0, 4)] : offset
+  %input_descriptor = buffer.assume.memory_space<descriptor> %input : buffer
+  %input_view = buffer.view %input_descriptor[%base] : buffer -> view<8xi32, #dense>
+  %input_subview = view.subview %input_view[1] : view<8xi32, #dense> -> view<4xi32, #dense>
+  %input_refined = view.refine %input_subview : view<4xi32, #dense> -> view<4xi32, #dense>
+  %loaded = view.load %input_refined[2] : view<4xi32, #dense> -> i32
+  func.return %loaded : i32
+}
+
+// ====
+
 func.def @descriptor_dynamic_extent_load_f32(%input: buffer, %element_count_i32: i32, %element_i32: i32) -> (f32) {
   %base = index.constant 0 : offset
   %input_descriptor = buffer.assume.memory_space<descriptor> %input : buffer

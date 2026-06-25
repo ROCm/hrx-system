@@ -75,6 +75,10 @@ typedef struct loom_view_region_t {
   // Symbolic byte offset of the view base relative to root_value_id.
   loom_symbolic_expr_t begin_byte_offset;
 
+  // Existing SSA value that materializes begin_byte_offset, or invalid when
+  // the begin offset only exists as a symbolic expression.
+  loom_value_id_t begin_value_id;
+
   // Symbolic byte length of the conservative footprint envelope.
   loom_symbolic_expr_t byte_length;
 
@@ -150,6 +154,13 @@ iree_status_t loom_view_region_table_initialize(
 iree_status_t loom_view_region_table_get(loom_view_region_table_t* table,
                                          loom_value_id_t value_id,
                                          const loom_view_region_t** out_region);
+
+// Looks up an already constructed region summary without allocating or
+// recursively constructing missing producers. Returns false when |value_id| is
+// outside the analyzed local domain or when the summary is not ready.
+bool loom_view_region_table_try_lookup(const loom_view_region_table_t* table,
+                                       loom_value_id_t value_id,
+                                       const loom_view_region_t** out_region);
 
 // Walks the table's local value domain region, constructs summaries for view
 // values, and derives per-view access flags from memory-operand descriptors.

@@ -29,6 +29,8 @@
 extern "C" {
 #endif
 
+typedef struct loom_view_region_table_t loom_view_region_table_t;
+
 #define LOOM_LOW_SOURCE_MEMORY_ACCESS_BYTE_SHIFT_NONE UINT32_MAX
 
 typedef enum loom_low_source_memory_operation_kind_e {
@@ -220,6 +222,18 @@ bool loom_low_source_memory_access_plan_build(
     const loom_op_t* source_op, loom_low_source_memory_access_plan_t* out_plan,
     loom_low_source_memory_access_diagnostic_t* out_diagnostic);
 
+// Builds a source memory plan with optional precomputed view-region summaries.
+//
+// When present, |view_regions| is only queried with a non-mutating lookup and
+// must already have been analyzed by the caller. This lets lowering reuse its
+// function-local analysis without turning each memory access into a fresh
+// producer walk or analysis construction site.
+bool loom_low_source_memory_access_plan_build_with_view_regions(
+    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
+    const loom_view_region_table_t* view_regions, const loom_op_t* source_op,
+    loom_low_source_memory_access_plan_t* out_plan,
+    loom_low_source_memory_access_diagnostic_t* out_diagnostic);
+
 // Builds a target-independent source memory plan for an indexed view access.
 //
 // This is the component-level sibling of vector.load/store planning for source
@@ -227,6 +241,18 @@ bool loom_low_source_memory_access_plan_build(
 // element or vector footprint, such as sanitizer access assertions.
 bool loom_low_source_memory_access_plan_build_indexed(
     const loom_module_t* module, const loom_value_fact_table_t* fact_table,
+    loom_low_source_memory_operation_kind_t operation_kind,
+    loom_value_id_t view_value_id, loom_value_slice_t dynamic_indices,
+    loom_attribute_t static_indices, loom_type_t vector_type,
+    loom_vector_memory_cache_policy_t cache_policy,
+    loom_low_source_memory_access_plan_t* out_plan,
+    loom_low_source_memory_access_diagnostic_t* out_diagnostic);
+
+// Builds an indexed source memory plan with optional precomputed view-region
+// summaries. See loom_low_source_memory_access_plan_build_with_view_regions.
+bool loom_low_source_memory_access_plan_build_indexed_with_view_regions(
+    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
+    const loom_view_region_table_t* view_regions,
     loom_low_source_memory_operation_kind_t operation_kind,
     loom_value_id_t view_value_id, loom_value_slice_t dynamic_indices,
     loom_attribute_t static_indices, loom_type_t vector_type,
@@ -244,6 +270,17 @@ bool loom_low_source_memory_access_plan_build_indexed(
 // names a view projection rather than an indexed vector load.
 bool loom_low_source_memory_access_plan_build_view(
     const loom_module_t* module, const loom_value_fact_table_t* fact_table,
+    loom_low_source_memory_operation_kind_t operation_kind,
+    loom_value_id_t view_value_id,
+    loom_vector_memory_cache_policy_t cache_policy,
+    loom_low_source_memory_access_plan_t* out_plan,
+    loom_low_source_memory_access_diagnostic_t* out_diagnostic);
+
+// Builds a whole-view source memory plan with optional precomputed view-region
+// summaries. See loom_low_source_memory_access_plan_build_with_view_regions.
+bool loom_low_source_memory_access_plan_build_view_with_view_regions(
+    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
+    const loom_view_region_table_t* view_regions,
     loom_low_source_memory_operation_kind_t operation_kind,
     loom_value_id_t view_value_id,
     loom_vector_memory_cache_policy_t cache_policy,
