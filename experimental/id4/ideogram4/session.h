@@ -171,10 +171,7 @@ typedef struct id4_ideogram4_generation_issue_options_t {
   const iree_tokenizer_t* tokenizer;
   // Tokenizer flags used while encoding the Qwen prompt text.
   iree_tokenizer_encode_flags_t tokenizer_flags;
-  // Device-local initial diffusion latent binding consumed and updated in
-  // place by the denoising loop.
-  iree_hal_buffer_binding_t initial_latent_binding;
-  // Semaphores that request uploads and initial latent consumption wait on.
+  // Semaphores that request uploads and generation execution wait on.
   iree_hal_semaphore_list_t wait_semaphore_list;
   // Semaphores signaled when the final decoded image is ready.
   iree_hal_semaphore_list_t signal_semaphore_list;
@@ -226,7 +223,7 @@ typedef struct id4_ideogram4_qwen_result_t {
 typedef struct id4_ideogram4_generation_result_t {
   // Final decoded RGB image binding owned by the execution handle.
   iree_hal_buffer_binding_t decoded_image_binding;
-  // Final diffusion latent binding owned by the caller of the issue operation.
+  // Final diffusion latent binding retained by the execution handle.
   iree_hal_buffer_binding_t final_latent_binding;
 } id4_ideogram4_generation_result_t;
 

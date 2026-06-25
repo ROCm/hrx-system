@@ -17,11 +17,10 @@ kernel.def @id4_sampler_euler_step_f32() {
   %sigma_count = index.constant 2 : index
   %element_index = index.madd %workgroup, %workgroup_size_x, %lane : index
   %in_bounds = index.cmp ult, %element_index, %element_count : index
-  %x_t_noalias, %denoised_noalias, %sigmas_noalias, %x_next_noalias = buffer.assume.noalias %x_t, %denoised, %sigmas, %x_next : buffer, buffer, buffer, buffer
-  %x_t_view = buffer.view %x_t_noalias[%base] : buffer -> view<[%element_count]xf32, #dense>
-  %denoised_view = buffer.view %denoised_noalias[%base] : buffer -> view<[%element_count]xf32, #dense>
-  %sigmas_view = buffer.view %sigmas_noalias[%base] : buffer -> view<[%sigma_count]xf32, #dense>
-  %x_next_view = buffer.view %x_next_noalias[%base] : buffer -> view<[%element_count]xf32, #dense>
+  %x_t_view = buffer.view %x_t[%base] : buffer -> view<[%element_count]xf32, #dense>
+  %denoised_view = buffer.view %denoised[%base] : buffer -> view<[%element_count]xf32, #dense>
+  %sigmas_view = buffer.view %sigmas[%base] : buffer -> view<[%sigma_count]xf32, #dense>
+  %x_next_view = buffer.view %x_next[%base] : buffer -> view<[%element_count]xf32, #dense>
   scf.if %in_bounds {
     %x_t_value = view.load %x_t_view[%element_index] : view<[%element_count]xf32, #dense> -> f32
     %denoised_value = view.load %denoised_view[%element_index] : view<[%element_count]xf32, #dense> -> f32
@@ -50,6 +49,16 @@ check.case public @id4_sampler_euler_step_f32_small_case {
   check.return
 }
 
+check.case public @id4_sampler_euler_step_f32_in_place_case {
+  %x = check.generate.fill value(10.0) : tensor<257xf32>
+  %denoised = check.generate.iota offset(3.0) step(-1.0) : tensor<257xf32>
+  %sigmas = check.generate.iota offset(2.0) step(-1.0) : tensor<2xf32>
+  %expected_x = check.generate.iota offset(6.5) step(-0.5) : tensor<257xf32>
+  func.call @id4_sampler_euler_step_f32(%x, %denoised, %sigmas, %x) : (tensor<257xf32>, tensor<257xf32>, tensor<2xf32>, tensor<257xf32>)
+  check.expect.close actual(%x) expected(%expected_x) atol(0.0) rtol(0.0) nan(same) : tensor<257xf32>
+  check.return
+}
+
 check.case public @id4_sampler_euler_step_f32_full_latent_case {
   %x_t = check.generate.fill value(10.0) : tensor<524288xf32>
   %denoised = check.generate.iota offset(3.0) step(-1.0) : tensor<524288xf32>
@@ -62,5 +71,7 @@ check.case public @id4_sampler_euler_step_f32_full_latent_case {
 }
 
 check.benchmark<@id4_sampler_euler_step_f32_small_case> @id4_sampler_euler_step_f32_small
+
+check.benchmark<@id4_sampler_euler_step_f32_in_place_case> @id4_sampler_euler_step_f32_in_place
 
 check.benchmark<@id4_sampler_euler_step_f32_full_latent_case> @id4_sampler_euler_step_f32_full_latent

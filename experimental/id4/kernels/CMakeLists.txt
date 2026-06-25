@@ -75,6 +75,7 @@ add_custom_command(OUTPUT loom_sources.stamp
     "qwen3_vl/token_embedding.loom"
     "sampler/cfg_denoise_f32.loom"
     "sampler/euler_step_f32.loom"
+    "sampler/noise_f32.loom"
     "smoke_configured.loom"
     "vae/conv1x1_bias_bf16_wmma.loom"
     "vae/conv1x1_bias_f32.loom"
@@ -176,6 +177,7 @@ iree_c_embed_data(
     "qwen3_vl/token_embedding.loom"
     "sampler/cfg_denoise_f32.loom"
     "sampler/euler_step_f32.loom"
+    "sampler/noise_f32.loom"
     "smoke_configured.loom"
     "vae/conv1x1_bias_bf16_wmma.loom"
     "vae/conv1x1_bias_f32.loom"
@@ -5713,6 +5715,21 @@ iree_native_test(
 
 iree_native_test(
   NAME
+    "sampler_euler_step_f32_in_place_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/sampler/euler_step_f32.loom}}"
+    "--benchmark=@id4_sampler_euler_step_f32_in_place"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.sampler.euler_step.element_count=257"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
     "sampler_euler_step_f32_full_latent_plan_test"
   ARGS
     "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/sampler/euler_step_f32.loom}}"
@@ -5720,6 +5737,36 @@ iree_native_test(
     "--dry-run"
     "--output-format=jsonl"
     "--config=id4.sampler.euler_step.element_count=524288"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
+    "sampler_noise_f32_small_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/sampler/noise_f32.loom}}"
+    "--benchmark=@id4_sampler_noise_f32_small"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.sampler.noise.element_count=8"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
+    "sampler_noise_f32_full_latent_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/sampler/noise_f32.loom}}"
+    "--benchmark=@id4_sampler_noise_f32_full_latent"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.sampler.noise.element_count=524288"
   SRC
     loom::tools::iree-benchmark-loom
   LABELS
@@ -13398,12 +13445,69 @@ endif()
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
 iree_native_test(
   NAME
+    "sampler_euler_step_f32_in_place_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/sampler/euler_step_f32.loom}}"
+    "--case=@id4_sampler_euler_step_f32_in_place_case"
+    "--device=amdgpu://0"
+    "--config=id4.sampler.euler_step.element_count=257"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
     "sampler_euler_step_f32_full_latent_hal_test"
   ARGS
     "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/sampler/euler_step_f32.loom}}"
     "--case=@id4_sampler_euler_step_f32_full_latent_case"
     "--device=amdgpu://0"
     "--config=id4.sampler.euler_step.element_count=524288"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
+    "sampler_noise_f32_small_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/sampler/noise_f32.loom}}"
+    "--case=@id4_sampler_noise_f32_small_case"
+    "--device=amdgpu://0"
+    "--config=id4.sampler.noise.element_count=8"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
+    "sampler_noise_f32_full_latent_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/sampler/noise_f32.loom}}"
+    "--case=@id4_sampler_noise_f32_full_latent_case"
+    "--device=amdgpu://0"
+    "--config=id4.sampler.noise.element_count=524288"
   SRC
     loom::tools::iree-test-loom
   LABELS

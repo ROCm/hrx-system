@@ -53,9 +53,9 @@ class ProgramBuilderScope {
   id4_pipeline_program_builder_t* builder_ = nullptr;
 };
 
-static id4_sampler_program_options_t MakeProgramOptions(
+static id4_sampler_denoise_program_options_t MakeDenoiseProgramOptions(
     id4_pipeline_program_shape_t latent_shape) {
-  id4_sampler_program_options_t options = {
+  id4_sampler_denoise_program_options_t options = {
       // Size of this structure for versioning.
       /*.structure_size=*/sizeof(options),
       // Extension structure chain.
@@ -70,11 +70,40 @@ static id4_sampler_program_options_t MakeProgramOptions(
   return options;
 }
 
-static id4_pipeline_program_t* CreateSamplerProgram(
-    const id4_sampler_program_options_t* options) {
+static id4_sampler_noise_program_options_t MakeNoiseProgramOptions(
+    id4_pipeline_program_shape_t latent_shape) {
+  id4_sampler_noise_program_options_t options = {
+      // Size of this structure for versioning.
+      /*.structure_size=*/sizeof(options),
+      // Extension structure chain.
+      /*.next=*/nullptr,
+      // Dynamic request dimensions.
+      /*.request=*/
+      {
+          // Latent tensor shape.
+          /*.latent_shape=*/latent_shape,
+      },
+  };
+  return options;
+}
+
+static id4_pipeline_program_t* CreateDenoiseProgram(
+    const id4_sampler_denoise_program_options_t* options) {
   ProgramBuilderScope builder_scope;
   IREE_CHECK_OK(id4_sampler_program_author_denoise_step(
       options, builder_scope.builder()));
+  id4_pipeline_program_t* program = nullptr;
+  IREE_CHECK_OK(id4_pipeline_program_builder_seal(
+      builder_scope.builder(), iree_allocator_system(), &program));
+  builder_scope.DestroyBuilder();
+  return program;
+}
+
+static id4_pipeline_program_t* CreateNoiseProgram(
+    const id4_sampler_noise_program_options_t* options) {
+  ProgramBuilderScope builder_scope;
+  IREE_CHECK_OK(
+      id4_sampler_program_author_noise(options, builder_scope.builder()));
   id4_pipeline_program_t* program = nullptr;
   IREE_CHECK_OK(id4_pipeline_program_builder_seal(
       builder_scope.builder(), iree_allocator_system(), &program));
@@ -136,8 +165,9 @@ static bool ProgramTapsTensorWithShape(
 TEST(SamplerProgram, AuthorsDenoiseStepBoundaryContract) {
   id4_pipeline_program_shape_t latent_shape =
       id4_pipeline_program_make_shape_rank4(1, 2, 128, 1);
-  id4_sampler_program_options_t options = MakeProgramOptions(latent_shape);
-  id4_pipeline_program_t* program = CreateSamplerProgram(&options);
+  id4_sampler_denoise_program_options_t options =
+      MakeDenoiseProgramOptions(latent_shape);
+  id4_pipeline_program_t* program = CreateDenoiseProgram(&options);
 
   EXPECT_TRUE(ProgramExportsTensorWithShape(
       program, ID4_PIPELINE_PROGRAM_DTYPE_F32, latent_shape));
@@ -147,10 +177,23 @@ TEST(SamplerProgram, AuthorsDenoiseStepBoundaryContract) {
   id4_pipeline_program_release(program);
 }
 
+TEST(SamplerProgram, AuthorsNoiseBoundaryContract) {
+  id4_pipeline_program_shape_t latent_shape =
+      id4_pipeline_program_make_shape_rank4(1, 2, 128, 1);
+  id4_sampler_noise_program_options_t options =
+      MakeNoiseProgramOptions(latent_shape);
+  id4_pipeline_program_t* program = CreateNoiseProgram(&options);
+
+  EXPECT_TRUE(ProgramExportsTensorWithShape(
+      program, ID4_PIPELINE_PROGRAM_DTYPE_F32, latent_shape));
+
+  id4_pipeline_program_release(program);
+}
+
 TEST(SamplerProgram, RejectsScalarLatentShape) {
   ProgramBuilderScope builder_scope;
-  id4_sampler_program_options_t options =
-      MakeProgramOptions(id4_pipeline_program_make_shape_rank0());
+  id4_sampler_denoise_program_options_t options =
+      MakeDenoiseProgramOptions(id4_pipeline_program_make_shape_rank0());
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         id4_sampler_program_author_denoise_step(
                             &options, builder_scope.builder()));
@@ -158,8 +201,8 @@ TEST(SamplerProgram, RejectsScalarLatentShape) {
 
 TEST(SamplerProgram, RejectsElementCountAboveKernelRange) {
   ProgramBuilderScope builder_scope;
-  id4_sampler_program_options_t options =
-      MakeProgramOptions(id4_pipeline_program_make_shape_rank1(
+  id4_sampler_denoise_program_options_t options =
+      MakeDenoiseProgramOptions(id4_pipeline_program_make_shape_rank1(
           ID4_SAMPLER_DENOISE_MAX_ELEMENT_COUNT + 1ull));
   IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
                         id4_sampler_program_author_denoise_step(

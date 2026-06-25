@@ -1,0 +1,90 @@
+config.decl @id4.sampler.noise.element_count : %value: index where [range(%value, 1, 1048576)]
+
+kernel.def export("id4_sampler_noise_f32") @id4_sampler_noise_f32() {
+  %unit = index.constant 1 : index
+  %workgroup_size_x = index.constant 256 : index
+  %rounding = index.constant 255 : index
+  %element_count = config.get @id4.sampler.noise.element_count : index
+  %rounded = index.add %element_count, %rounding : index
+  %workgroups_x = index.div %rounded, %workgroup_size_x : index
+  kernel.launch.config workgroups(%workgroups_x, %unit, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
+} launch(%seed: buffer, %latent: buffer) {
+  %base = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %workgroup_size_x = index.constant 256 : index
+  %workgroup = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %element_count = config.get @id4.sampler.noise.element_count : index
+  %element_index = index.madd %workgroup, %workgroup_size_x, %lane : index
+  %in_bounds = index.cmp ult, %element_index, %element_count : index
+  %seed_noalias, %latent_noalias = buffer.assume.noalias %seed, %latent : buffer, buffer
+  %seed_global = buffer.assume.memory_space<global> %seed_noalias : buffer
+  %latent_global = buffer.assume.memory_space<global> %latent_noalias : buffer
+  %seed_view = buffer.view %seed_global[%base] : buffer -> view<2xi32, #dense>
+  %latent_view = buffer.view %latent_global[%base] : buffer -> view<[%element_count]xf32, #dense>
+  scf.if %in_bounds {
+    %seed_low = view.load %seed_view[%zero] : view<2xi32, #dense> -> i32
+    %seed_high = view.load %seed_view[%one] : view<2xi32, #dense> -> i32
+    %element_i32 = index.cast %element_index : index to i32
+    %shift5 = scalar.constant 5 : i32
+    %shift13 = scalar.constant 13 : i32
+    %shift16 = scalar.constant 16 : i32
+    %shift17 = scalar.constant 17 : i32
+    %mask23 = scalar.constant 8388607 : i32
+    %one_i32 = scalar.constant 1 : i32
+    %mix_bias = scalar.constant 1831565813 : i32
+    %seed_high_shifted = scalar.shli %seed_high, %shift16 : i32
+    %base_mix0 = scalar.xori %element_i32, %seed_low : i32
+    %base_mix1 = scalar.xori %base_mix0, %seed_high_shifted : i32
+    %x0_shift13 = scalar.shli %base_mix1, %shift13 : i32
+    %x1 = scalar.xori %base_mix1, %x0_shift13 : i32
+    %x1_shift17 = scalar.shrui %x1, %shift17 : i32
+    %x2 = scalar.xori %x1, %x1_shift17 : i32
+    %x2_shift5 = scalar.shli %x2, %shift5 : i32
+    %x3 = scalar.xori %x2, %x2_shift5 : i32
+    %y_seed0 = scalar.addi %base_mix1, %seed_high : i32
+    %y_seed1 = scalar.addi %y_seed0, %mix_bias : i32
+    %y0_shift13 = scalar.shli %y_seed1, %shift13 : i32
+    %y1 = scalar.xori %y_seed1, %y0_shift13 : i32
+    %y1_shift17 = scalar.shrui %y1, %shift17 : i32
+    %y2 = scalar.xori %y1, %y1_shift17 : i32
+    %y2_shift5 = scalar.shli %y2, %shift5 : i32
+    %y3 = scalar.xori %y2, %y2_shift5 : i32
+    %x_mantissa = scalar.andi %x3, %mask23 : i32
+    %y_mantissa = scalar.andi %y3, %mask23 : i32
+    %x_unit_bits = scalar.addi %x_mantissa, %one_i32 : i32
+    %y_unit_bits = scalar.addi %y_mantissa, %one_i32 : i32
+    %x_unit_f32 = scalar.uitofp %x_unit_bits : i32 to f32
+    %y_unit_f32 = scalar.uitofp %y_unit_bits : i32 to f32
+    %unit_scale = scalar.constant 1.1920928955078125e-07 : f32
+    %u1 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %x_unit_f32, %unit_scale : f32
+    %u2 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %y_unit_f32, %unit_scale : f32
+    %negative_two = scalar.constant -2.0 : f32
+    %log_u1 = scalar.logf<afn> %u1 : f32
+    %radius_square = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %negative_two, %log_u1 : f32
+    %radius = scalar.sqrtf<afn> %radius_square : f32
+    %cosine = scalar.costurnsf<afn> %u2 : f32
+    %value = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %radius, %cosine : f32
+    view.store %value, %latent_view[%element_index] : f32, view<[%element_count]xf32, #dense>
+  }
+  kernel.return
+}
+
+check.case public @id4_sampler_noise_f32_small_case {
+  %seed = check.generate.iota offset(0) step(1) : tensor<2xi32>
+  %latent = check.generate.fill value(0.0) : tensor<8xf32>
+  func.call @id4_sampler_noise_f32(%seed, %latent) : (tensor<2xi32>, tensor<8xf32>)
+  check.return
+}
+
+check.case public @id4_sampler_noise_f32_full_latent_case {
+  %seed = check.generate.iota offset(0) step(1) : tensor<2xi32>
+  %latent = check.generate.fill value(0.0) : tensor<524288xf32>
+  func.call @id4_sampler_noise_f32(%seed, %latent) : (tensor<2xi32>, tensor<524288xf32>)
+  check.return
+}
+
+check.benchmark<@id4_sampler_noise_f32_small_case> @id4_sampler_noise_f32_small
+
+check.benchmark<@id4_sampler_noise_f32_full_latent_case> @id4_sampler_noise_f32_full_latent

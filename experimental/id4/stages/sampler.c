@@ -15,26 +15,70 @@
 #include "experimental/id4/pipeline/program_stage.h"
 #include "iree/base/internal/arena.h"
 
-#define ID4_SAMPLER_DENOISE_STAGE_ALIGNMENT 16
-#define ID4_SAMPLER_DENOISE_STAGE_PROGRAM_BLOCK_SIZE (16 * 1024)
+#define ID4_SAMPLER_STAGE_ALIGNMENT 16
+#define ID4_SAMPLER_STAGE_PROGRAM_BLOCK_SIZE (16 * 1024)
 
-typedef struct id4_sampler_denoise_stage_t {
+typedef enum id4_sampler_stage_kind_e {
+  // Device-side initial latent noise generation.
+  ID4_SAMPLER_STAGE_KIND_NOISE = 0,
+  // Device-side classifier-free guidance and Euler denoise step.
+  ID4_SAMPLER_STAGE_KIND_DENOISE = 1,
+} id4_sampler_stage_kind_t;
+
+typedef struct id4_sampler_stage_descriptor_t {
+  // Concrete sampler stage semantic kind.
+  id4_sampler_stage_kind_t kind;
+  // Stable stage name used in plans and diagnostics.
+  iree_string_view_t stage_name;
+  // Human-readable create-options label for diagnostics.
+  iree_string_view_t create_options_name;
+  // Human-readable plan-options label for diagnostics.
+  iree_string_view_t plan_options_name;
+  // Lifecycle load message emitted by this stage.
+  iree_string_view_t loaded_message;
+  // Maximum flattened latent element count accepted by the stage kernel.
+  uint64_t max_element_count;
+} id4_sampler_stage_descriptor_t;
+
+typedef struct id4_sampler_stage_t {
   // Base stage; must be the first field.
   id4_pipeline_stage_t base;
+  // Descriptor selecting the concrete sampler program family.
+  const id4_sampler_stage_descriptor_t* descriptor;
   // Allocator used for stage-owned metadata.
   iree_allocator_t host_allocator;
   // Kernel cache used for Loom compilation and HAL executable preparation.
   id4_pipeline_kernel_cache_t* kernel_cache;
   // True after load has completed.
   bool is_loaded;
-} id4_sampler_denoise_stage_t;
+} id4_sampler_stage_t;
 
-static id4_sampler_denoise_stage_t* id4_sampler_denoise_stage_cast(
+static const id4_sampler_stage_descriptor_t id4_sampler_noise_stage_descriptor =
+    {
+        .kind = ID4_SAMPLER_STAGE_KIND_NOISE,
+        .stage_name = IREE_SVL(ID4_SAMPLER_NOISE_STAGE_NAME),
+        .create_options_name = IREE_SVL("sampler noise stage create"),
+        .plan_options_name = IREE_SVL("sampler noise stage plan"),
+        .loaded_message = IREE_SVL("loaded sampler noise stage"),
+        .max_element_count = ID4_SAMPLER_NOISE_MAX_ELEMENT_COUNT,
+};
+
+static const id4_sampler_stage_descriptor_t
+    id4_sampler_denoise_stage_descriptor = {
+        .kind = ID4_SAMPLER_STAGE_KIND_DENOISE,
+        .stage_name = IREE_SVL(ID4_SAMPLER_DENOISE_STAGE_NAME),
+        .create_options_name = IREE_SVL("sampler denoise stage create"),
+        .plan_options_name = IREE_SVL("sampler denoise stage plan"),
+        .loaded_message = IREE_SVL("loaded sampler denoise stage"),
+        .max_element_count = ID4_SAMPLER_DENOISE_MAX_ELEMENT_COUNT,
+};
+
+static id4_sampler_stage_t* id4_sampler_stage_cast(
     id4_pipeline_stage_t* base_stage) {
-  return (id4_sampler_denoise_stage_t*)base_stage;
+  return (id4_sampler_stage_t*)base_stage;
 }
 
-static iree_status_t id4_sampler_denoise_stage_validate_options_size(
+static iree_status_t id4_sampler_stage_validate_options_size(
     iree_host_size_t actual_size, iree_host_size_t expected_size,
     iree_string_view_t options_name) {
   if (actual_size >= expected_size) return iree_ok_status();
@@ -45,36 +89,106 @@ static iree_status_t id4_sampler_denoise_stage_validate_options_size(
                           actual_size, expected_size);
 }
 
-static iree_status_t id4_sampler_denoise_stage_validate_create_options(
-    const id4_sampler_denoise_stage_create_options_t* options) {
-  if (!options) {
+static iree_status_t id4_sampler_stage_validate_create_values(
+    const id4_sampler_stage_descriptor_t* descriptor,
+    id4_pipeline_stage_services_t services) {
+  if (!services.device_group) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "sampler denoise stage create options are "
-                            "required");
-  }
-  IREE_RETURN_IF_ERROR(id4_sampler_denoise_stage_validate_options_size(
-      options->structure_size, sizeof(*options),
-      IREE_SV("sampler denoise stage create")));
-  if (options->next) {
-    return iree_make_status(
-        IREE_STATUS_UNIMPLEMENTED,
-        "sampler denoise stage create extension structures are not supported");
-  }
-  if (!options->services.device_group) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "sampler denoise stage device group is required");
+                            "%.*s device group is required",
+                            (int)descriptor->create_options_name.size,
+                            descriptor->create_options_name.data);
   }
   return iree_ok_status();
 }
 
-static id4_pipeline_diagnostic_event_t
-id4_sampler_denoise_stage_lifecycle_event(iree_string_view_t key,
-                                          iree_string_view_t message) {
+static iree_status_t id4_sampler_stage_parse_noise_plan_options(
+    const id4_pipeline_stage_plan_options_t* options,
+    id4_pipeline_program_shape_t* out_latent_shape) {
+  const id4_sampler_noise_stage_plan_options_t* sampler_options =
+      (const id4_sampler_noise_stage_plan_options_t*)options->next;
+  IREE_RETURN_IF_ERROR(id4_sampler_stage_validate_options_size(
+      sampler_options->structure_size, sizeof(*sampler_options),
+      IREE_SV("sampler noise stage plan")));
+  if (sampler_options->next) {
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "sampler noise stage plan extension structures are not supported");
+  }
+  *out_latent_shape = sampler_options->request.latent_shape;
+  return iree_ok_status();
+}
+
+static iree_status_t id4_sampler_stage_parse_denoise_plan_options(
+    const id4_pipeline_stage_plan_options_t* options,
+    id4_pipeline_program_shape_t* out_latent_shape) {
+  const id4_sampler_denoise_stage_plan_options_t* sampler_options =
+      (const id4_sampler_denoise_stage_plan_options_t*)options->next;
+  IREE_RETURN_IF_ERROR(id4_sampler_stage_validate_options_size(
+      sampler_options->structure_size, sizeof(*sampler_options),
+      IREE_SV("sampler denoise stage plan")));
+  if (sampler_options->next) {
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "sampler denoise stage plan extension structures are not supported");
+  }
+  *out_latent_shape = sampler_options->request.latent_shape;
+  return iree_ok_status();
+}
+
+static iree_status_t id4_sampler_stage_parse_plan_extension(
+    const id4_sampler_stage_t* stage,
+    const id4_pipeline_stage_plan_options_t* options,
+    id4_pipeline_program_shape_t* out_latent_shape) {
+  if (!options || !options->next) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "%.*s options are required",
+                            (int)stage->descriptor->plan_options_name.size,
+                            stage->descriptor->plan_options_name.data);
+  }
+  switch (stage->descriptor->kind) {
+    case ID4_SAMPLER_STAGE_KIND_NOISE:
+      return id4_sampler_stage_parse_noise_plan_options(options,
+                                                        out_latent_shape);
+    case ID4_SAMPLER_STAGE_KIND_DENOISE:
+      return id4_sampler_stage_parse_denoise_plan_options(options,
+                                                          out_latent_shape);
+  }
+  return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                          "sampler stage kind %" PRIu32 " is invalid",
+                          (uint32_t)stage->descriptor->kind);
+}
+
+static iree_status_t id4_sampler_stage_validate_latent_shape(
+    const id4_sampler_stage_t* stage,
+    id4_pipeline_program_shape_t latent_shape) {
+  uint64_t element_count = 0;
+  IREE_RETURN_IF_ERROR(
+      id4_pipeline_program_shape_element_count(latent_shape, &element_count));
+  if (latent_shape.rank == 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "%.*s latent shape rank must be nonzero",
+                            (int)stage->descriptor->stage_name.size,
+                            stage->descriptor->stage_name.data);
+  }
+  if (element_count > stage->descriptor->max_element_count) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "%.*s latent element count %" PRIu64
+                            " exceeds max count %" PRIu64,
+                            (int)stage->descriptor->stage_name.size,
+                            stage->descriptor->stage_name.data, element_count,
+                            stage->descriptor->max_element_count);
+  }
+  return iree_ok_status();
+}
+
+static id4_pipeline_diagnostic_event_t id4_sampler_stage_lifecycle_event(
+    const id4_sampler_stage_t* stage, iree_string_view_t key,
+    iree_string_view_t message) {
   id4_pipeline_diagnostic_event_t event = {
       // Lifecycle event emitted by the concrete sampler stage.
       .kind = ID4_PIPELINE_DIAGNOSTIC_EVENT_KIND_LIFECYCLE,
       // Stable stage name used across sampler diagnostics.
-      .stage_name = IREE_SV(ID4_SAMPLER_DENOISE_STAGE_NAME),
+      .stage_name = stage->descriptor->stage_name,
       // Stable lifecycle key.
       .key = key,
       // Short lifecycle summary.
@@ -83,38 +197,68 @@ id4_sampler_denoise_stage_lifecycle_event(iree_string_view_t key,
   return event;
 }
 
-static iree_status_t id4_sampler_denoise_stage_emit_lifecycle(
+static iree_status_t id4_sampler_stage_emit_lifecycle(
+    const id4_sampler_stage_t* stage,
     id4_pipeline_diagnostics_sink_t* diagnostics_sink, iree_string_view_t key,
     iree_string_view_t message) {
   id4_pipeline_diagnostic_event_t event =
-      id4_sampler_denoise_stage_lifecycle_event(key, message);
+      id4_sampler_stage_lifecycle_event(stage, key, message);
   return id4_pipeline_diagnostics_emit(diagnostics_sink, &event);
 }
 
-static iree_status_t id4_sampler_denoise_stage_author_program(
-    id4_sampler_denoise_request_config_t request,
+static iree_status_t id4_sampler_stage_author_noise_program(
+    id4_pipeline_program_shape_t latent_shape,
+    id4_pipeline_program_builder_t* builder) {
+  id4_sampler_noise_program_options_t program_options;
+  memset(&program_options, 0, sizeof(program_options));
+  program_options.structure_size = sizeof(program_options);
+  program_options.request.latent_shape = latent_shape;
+  return id4_sampler_program_author_noise(&program_options, builder);
+}
+
+static iree_status_t id4_sampler_stage_author_denoise_program(
+    id4_pipeline_program_shape_t latent_shape,
+    id4_pipeline_program_builder_t* builder) {
+  id4_sampler_denoise_program_options_t program_options;
+  memset(&program_options, 0, sizeof(program_options));
+  program_options.structure_size = sizeof(program_options);
+  program_options.request.latent_shape = latent_shape;
+  return id4_sampler_program_author_denoise_step(&program_options, builder);
+}
+
+static iree_status_t id4_sampler_stage_author_program(
+    const id4_sampler_stage_t* stage, id4_pipeline_program_shape_t latent_shape,
     iree_allocator_t host_allocator, id4_pipeline_program_t** out_program) {
   IREE_ASSERT_ARGUMENT(out_program);
   *out_program = NULL;
 
   iree_arena_block_pool_t block_pool;
-  iree_arena_block_pool_initialize(ID4_SAMPLER_DENOISE_STAGE_PROGRAM_BLOCK_SIZE,
+  iree_arena_block_pool_initialize(ID4_SAMPLER_STAGE_PROGRAM_BLOCK_SIZE,
                                    host_allocator, &block_pool);
 
   id4_pipeline_program_builder_t* builder = NULL;
   id4_pipeline_program_builder_create_options_t builder_options;
   memset(&builder_options, 0, sizeof(builder_options));
   builder_options.structure_size = sizeof(builder_options);
-  builder_options.program_name = IREE_SV(ID4_SAMPLER_DENOISE_STAGE_NAME);
+  builder_options.program_name = stage->descriptor->stage_name;
   builder_options.block_pool = &block_pool;
   iree_status_t status = id4_pipeline_program_builder_create(
       &builder_options, host_allocator, &builder);
   if (iree_status_is_ok(status)) {
-    id4_sampler_program_options_t program_options;
-    memset(&program_options, 0, sizeof(program_options));
-    program_options.structure_size = sizeof(program_options);
-    program_options.request = request;
-    status = id4_sampler_program_author_denoise_step(&program_options, builder);
+    switch (stage->descriptor->kind) {
+      case ID4_SAMPLER_STAGE_KIND_NOISE:
+        status = id4_sampler_stage_author_noise_program(latent_shape, builder);
+        break;
+      case ID4_SAMPLER_STAGE_KIND_DENOISE:
+        status =
+            id4_sampler_stage_author_denoise_program(latent_shape, builder);
+        break;
+      default:
+        status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                  "sampler stage kind %" PRIu32 " is invalid",
+                                  (uint32_t)stage->descriptor->kind);
+        break;
+    }
   }
   if (iree_status_is_ok(status)) {
     status =
@@ -125,111 +269,79 @@ static iree_status_t id4_sampler_denoise_stage_author_program(
   return status;
 }
 
-static iree_status_t id4_sampler_denoise_stage_parse_plan_extension(
-    const id4_pipeline_stage_plan_options_t* options,
-    const id4_sampler_denoise_stage_plan_options_t** out_sampler_options) {
-  *out_sampler_options = NULL;
-  if (!options->next) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "sampler denoise stage plan options are required");
-  }
-  const id4_sampler_denoise_stage_plan_options_t* sampler_options =
-      (const id4_sampler_denoise_stage_plan_options_t*)options->next;
-  IREE_RETURN_IF_ERROR(id4_sampler_denoise_stage_validate_options_size(
-      sampler_options->structure_size, sizeof(*sampler_options),
-      IREE_SV("sampler denoise stage plan")));
-  if (sampler_options->next) {
-    return iree_make_status(
-        IREE_STATUS_UNIMPLEMENTED,
-        "sampler denoise stage plan extension structures are not supported");
-  }
-  uint64_t element_count = 0;
-  IREE_RETURN_IF_ERROR(id4_pipeline_program_shape_element_count(
-      sampler_options->request.latent_shape, &element_count));
-  if (sampler_options->request.latent_shape.rank == 0) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "sampler latent shape rank must be nonzero");
-  }
-  if (element_count > ID4_SAMPLER_DENOISE_MAX_ELEMENT_COUNT) {
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "sampler latent element count %" PRIu64 " exceeds max count %u",
-        element_count, ID4_SAMPLER_DENOISE_MAX_ELEMENT_COUNT);
-  }
-  *out_sampler_options = sampler_options;
-  return iree_ok_status();
-}
-
-static iree_status_t id4_sampler_denoise_stage_create_program_plan(
-    id4_sampler_denoise_stage_t* stage,
+static iree_status_t id4_sampler_stage_create_program_plan(
+    id4_sampler_stage_t* stage,
     const id4_pipeline_stage_plan_options_t* options,
     id4_pipeline_program_t* program, id4_pipeline_plan_t** out_plan) {
   id4_pipeline_program_stage_plan_options_t plan_options;
   memset(&plan_options, 0, sizeof(plan_options));
   plan_options.structure_size = sizeof(plan_options);
-  plan_options.stage_name = IREE_SV(ID4_SAMPLER_DENOISE_STAGE_NAME);
+  plan_options.stage_name = stage->descriptor->stage_name;
   plan_options.stage_options = options;
   plan_options.program = program;
   plan_options.device_group = stage->base.services.device_group;
   plan_options.parameter_scope = iree_string_view_empty();
-  plan_options.alignment = ID4_SAMPLER_DENOISE_STAGE_ALIGNMENT;
+  plan_options.alignment = ID4_SAMPLER_STAGE_ALIGNMENT;
   return id4_pipeline_program_stage_create_plan(
       &plan_options, stage->host_allocator, out_plan);
 }
 
-static iree_status_t id4_sampler_denoise_stage_load(
+static iree_status_t id4_sampler_stage_load(
     id4_pipeline_stage_t* base_stage,
     const id4_pipeline_stage_load_options_t* options) {
-  id4_sampler_denoise_stage_t* stage =
-      id4_sampler_denoise_stage_cast(base_stage);
+  id4_sampler_stage_t* stage = id4_sampler_stage_cast(base_stage);
   stage->is_loaded = true;
-  return id4_sampler_denoise_stage_emit_lifecycle(
-      options->diagnostics_sink, IREE_SV("stage.load"),
-      IREE_SV("loaded sampler denoise stage"));
+  return id4_sampler_stage_emit_lifecycle(stage, options->diagnostics_sink,
+                                          IREE_SV("stage.load"),
+                                          stage->descriptor->loaded_message);
 }
 
-static iree_status_t id4_sampler_denoise_stage_plan(
+static iree_status_t id4_sampler_stage_plan(
     id4_pipeline_stage_t* base_stage,
     const id4_pipeline_stage_plan_options_t* options,
     id4_pipeline_plan_t** out_plan) {
-  id4_sampler_denoise_stage_t* stage =
-      id4_sampler_denoise_stage_cast(base_stage);
+  id4_sampler_stage_t* stage = id4_sampler_stage_cast(base_stage);
   if (!stage->is_loaded) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "sampler denoise stage must be loaded before planning");
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "%.*s stage must be loaded before planning",
+                            (int)stage->descriptor->stage_name.size,
+                            stage->descriptor->stage_name.data);
   }
-  const id4_sampler_denoise_stage_plan_options_t* sampler_options = NULL;
-  IREE_RETURN_IF_ERROR(id4_sampler_denoise_stage_parse_plan_extension(
-      options, &sampler_options));
+
+  id4_pipeline_program_shape_t latent_shape =
+      id4_pipeline_program_make_shape_rank0();
+  IREE_RETURN_IF_ERROR(
+      id4_sampler_stage_parse_plan_extension(stage, options, &latent_shape));
+  IREE_RETURN_IF_ERROR(
+      id4_sampler_stage_validate_latent_shape(stage, latent_shape));
 
   id4_pipeline_program_t* program = NULL;
-  iree_status_t status = id4_sampler_denoise_stage_author_program(
-      sampler_options->request, stage->host_allocator, &program);
+  iree_status_t status = id4_sampler_stage_author_program(
+      stage, latent_shape, stage->host_allocator, &program);
   if (iree_status_is_ok(status)) {
-    status = id4_sampler_denoise_stage_create_program_plan(stage, options,
-                                                           program, out_plan);
+    status = id4_sampler_stage_create_program_plan(stage, options, program,
+                                                   out_plan);
   }
   id4_pipeline_program_release(program);
   return status;
 }
 
-static iree_status_t id4_sampler_denoise_stage_prepare(
+static iree_status_t id4_sampler_stage_prepare(
     id4_pipeline_stage_t* base_stage, const id4_pipeline_plan_t* plan,
     const id4_pipeline_stage_prepare_options_t* options,
     id4_pipeline_bundle_t** out_bundle) {
-  id4_sampler_denoise_stage_t* stage =
-      id4_sampler_denoise_stage_cast(base_stage);
+  id4_sampler_stage_t* stage = id4_sampler_stage_cast(base_stage);
   if (!stage->is_loaded) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "sampler denoise stage must be loaded before preparation");
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "%.*s stage must be loaded before preparation",
+                            (int)stage->descriptor->stage_name.size,
+                            stage->descriptor->stage_name.data);
   }
 
   id4_pipeline_program_stage_prepare_options_t prepare_options;
   memset(&prepare_options, 0, sizeof(prepare_options));
   prepare_options.structure_size = sizeof(prepare_options);
-  prepare_options.stage_name = IREE_SV(ID4_SAMPLER_DENOISE_STAGE_NAME);
+  prepare_options.stage_name = stage->descriptor->stage_name;
   prepare_options.stage_options = options;
   prepare_options.plan = plan;
   prepare_options.device_group = stage->base.services.device_group;
@@ -239,60 +351,102 @@ static iree_status_t id4_sampler_denoise_stage_prepare(
                                             stage->host_allocator, out_bundle);
 }
 
-static iree_status_t id4_sampler_denoise_stage_issue(
+static iree_status_t id4_sampler_stage_issue(
     id4_pipeline_stage_t* base_stage, id4_pipeline_bundle_t* bundle,
     const id4_pipeline_stage_issue_options_t* options) {
-  (void)base_stage;
-  return id4_pipeline_program_stage_issue(
-      IREE_SV(ID4_SAMPLER_DENOISE_STAGE_NAME), bundle, options);
+  id4_sampler_stage_t* stage = id4_sampler_stage_cast(base_stage);
+  return id4_pipeline_program_stage_issue(stage->descriptor->stage_name, bundle,
+                                          options);
 }
 
-static void id4_sampler_denoise_stage_destroy(
-    id4_pipeline_stage_t* base_stage) {
-  id4_sampler_denoise_stage_t* stage =
-      id4_sampler_denoise_stage_cast(base_stage);
+static void id4_sampler_stage_destroy(id4_pipeline_stage_t* base_stage) {
+  id4_sampler_stage_t* stage = id4_sampler_stage_cast(base_stage);
   iree_allocator_t host_allocator = stage->host_allocator;
   id4_pipeline_kernel_cache_release(stage->kernel_cache);
   id4_pipeline_stage_deinitialize(base_stage);
   iree_allocator_free(host_allocator, stage);
 }
 
-static const id4_pipeline_stage_vtable_t id4_sampler_denoise_stage_vtable = {
-    // Destroys the concrete sampler denoise stage.
-    id4_sampler_denoise_stage_destroy,
-    // Loads sampler denoise immutable state.
-    id4_sampler_denoise_stage_load,
-    // Builds a sampler denoise-step plan.
-    id4_sampler_denoise_stage_plan,
-    // Prepares a sampler denoise-step bundle.
-    id4_sampler_denoise_stage_prepare,
-    // Issues a sampler denoise-step bundle.
-    id4_sampler_denoise_stage_issue,
+static const id4_pipeline_stage_vtable_t id4_sampler_stage_vtable = {
+    // Destroys the concrete sampler stage.
+    id4_sampler_stage_destroy,
+    // Loads sampler immutable state.
+    id4_sampler_stage_load,
+    // Builds a sampler plan.
+    id4_sampler_stage_plan,
+    // Prepares a sampler bundle.
+    id4_sampler_stage_prepare,
+    // Issues a sampler bundle.
+    id4_sampler_stage_issue,
 };
 
-iree_status_t id4_sampler_denoise_stage_create(
-    const id4_sampler_denoise_stage_create_options_t* options,
-    iree_allocator_t host_allocator, id4_pipeline_stage_t** out_stage) {
+static iree_status_t id4_sampler_stage_create(
+    const id4_sampler_stage_descriptor_t* descriptor,
+    id4_pipeline_stage_services_t services,
+    id4_pipeline_kernel_cache_t* kernel_cache, iree_allocator_t host_allocator,
+    id4_pipeline_stage_t** out_stage) {
   IREE_ASSERT_ARGUMENT(out_stage);
   *out_stage = NULL;
   IREE_RETURN_IF_ERROR(
-      id4_sampler_denoise_stage_validate_create_options(options));
+      id4_sampler_stage_validate_create_values(descriptor, services));
 
-  id4_sampler_denoise_stage_t* stage = NULL;
+  id4_sampler_stage_t* stage = NULL;
   iree_status_t status =
       iree_allocator_malloc(host_allocator, sizeof(*stage), (void**)&stage);
   if (iree_status_is_ok(status)) {
     memset(stage, 0, sizeof(*stage));
+    stage->descriptor = descriptor;
     stage->host_allocator = host_allocator;
-    status = id4_pipeline_stage_initialize(&id4_sampler_denoise_stage_vtable,
-                                           &options->services, &stage->base);
+    status = id4_pipeline_stage_initialize(&id4_sampler_stage_vtable, &services,
+                                           &stage->base);
   }
   if (iree_status_is_ok(status)) {
-    stage->kernel_cache = options->kernel_cache;
+    stage->kernel_cache = kernel_cache;
     id4_pipeline_kernel_cache_retain(stage->kernel_cache);
     *out_stage = &stage->base;
   } else if (stage) {
-    id4_sampler_denoise_stage_destroy(&stage->base);
+    id4_sampler_stage_destroy(&stage->base);
   }
   return status;
+}
+
+iree_status_t id4_sampler_denoise_stage_create(
+    const id4_sampler_denoise_stage_create_options_t* options,
+    iree_allocator_t host_allocator, id4_pipeline_stage_t** out_stage) {
+  if (!options) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "sampler denoise stage create options are "
+                            "required");
+  }
+  IREE_RETURN_IF_ERROR(id4_sampler_stage_validate_options_size(
+      options->structure_size, sizeof(*options),
+      IREE_SV("sampler denoise stage create")));
+  if (options->next) {
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "sampler denoise stage create extension structures are not supported");
+  }
+  return id4_sampler_stage_create(&id4_sampler_denoise_stage_descriptor,
+                                  options->services, options->kernel_cache,
+                                  host_allocator, out_stage);
+}
+
+iree_status_t id4_sampler_noise_stage_create(
+    const id4_sampler_noise_stage_create_options_t* options,
+    iree_allocator_t host_allocator, id4_pipeline_stage_t** out_stage) {
+  if (!options) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "sampler noise stage create options are required");
+  }
+  IREE_RETURN_IF_ERROR(id4_sampler_stage_validate_options_size(
+      options->structure_size, sizeof(*options),
+      IREE_SV("sampler noise stage create")));
+  if (options->next) {
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "sampler noise stage create extension structures are not supported");
+  }
+  return id4_sampler_stage_create(&id4_sampler_noise_stage_descriptor,
+                                  options->services, options->kernel_cache,
+                                  host_allocator, out_stage);
 }
