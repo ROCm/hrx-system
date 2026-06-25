@@ -37,6 +37,10 @@ typedef struct id4_ideogram4_generation_plan_t id4_ideogram4_generation_plan_t;
 typedef struct id4_ideogram4_generation_bundle_t
     id4_ideogram4_generation_bundle_t;
 
+// Opaque asynchronous full-generation execution handle.
+typedef struct id4_ideogram4_generation_execution_t
+    id4_ideogram4_generation_execution_t;
+
 // Parameter scopes used by concrete Ideogram 4 stages.
 typedef struct id4_ideogram4_session_parameter_scopes_t {
   // Scope containing Qwen3-VL text encoder weights.
@@ -155,6 +159,29 @@ typedef struct id4_ideogram4_generation_prepare_options_t {
   id4_pipeline_diagnostics_sink_t* diagnostics_sink;
 } id4_ideogram4_generation_prepare_options_t;
 
+// Options for issuing one prepared full-generation execution.
+typedef struct id4_ideogram4_generation_issue_options_t {
+  // Size of this structure for versioning.
+  iree_host_size_t structure_size;
+  // Extension structure chain; must be NULL for now.
+  const void* next;
+  // Parsed request matching the prepared generation bundle shape.
+  const id4_ideogram4_request_t* request;
+  // Tokenizer used to lower the request's Qwen prompt into Qwen inputs.
+  const iree_tokenizer_t* tokenizer;
+  // Tokenizer flags used while encoding the Qwen prompt text.
+  iree_tokenizer_encode_flags_t tokenizer_flags;
+  // Device-local initial diffusion latent binding consumed and updated in
+  // place by the denoising loop.
+  iree_hal_buffer_binding_t initial_latent_binding;
+  // Semaphores that request uploads and initial latent consumption wait on.
+  iree_hal_semaphore_list_t wait_semaphore_list;
+  // Semaphores signaled when the final decoded image is ready.
+  iree_hal_semaphore_list_t signal_semaphore_list;
+  // Diagnostics sink for issue events.
+  id4_pipeline_diagnostics_sink_t* diagnostics_sink;
+} id4_ideogram4_generation_issue_options_t;
+
 // Options for issuing one asynchronous Qwen3-VL conditioning execution.
 typedef struct id4_ideogram4_qwen_issue_options_t {
   // Size of this structure for versioning.
@@ -194,6 +221,14 @@ typedef struct id4_ideogram4_qwen_result_t {
   // Exported condition tensor binding owned by the execution handle.
   iree_hal_buffer_binding_t condition_binding;
 } id4_ideogram4_qwen_result_t;
+
+// Result bindings produced by one full-generation execution.
+typedef struct id4_ideogram4_generation_result_t {
+  // Final decoded RGB image binding owned by the execution handle.
+  iree_hal_buffer_binding_t decoded_image_binding;
+  // Final diffusion latent binding owned by the caller of the issue operation.
+  iree_hal_buffer_binding_t final_latent_binding;
+} id4_ideogram4_generation_result_t;
 
 // Creates an Ideogram 4 model session.
 iree_status_t id4_ideogram4_session_create(
@@ -238,6 +273,25 @@ iree_status_t id4_ideogram4_session_prepare_generation(
 // Releases |bundle| after all queued work using it has completed.
 void id4_ideogram4_generation_bundle_release(
     id4_ideogram4_generation_bundle_t* bundle);
+
+// Issues one asynchronous full-generation execution from |bundle|.
+//
+// Generation bundles have mutable boundary binding tables and must not be
+// issued concurrently. The returned execution handle retains |bundle| until it
+// is released.
+iree_status_t id4_ideogram4_session_issue_generation(
+    id4_ideogram4_session_t* session, id4_ideogram4_generation_bundle_t* bundle,
+    const id4_ideogram4_generation_issue_options_t* options,
+    id4_ideogram4_generation_execution_t** out_execution);
+
+// Releases |execution| from the caller after its completion signal is reached.
+void id4_ideogram4_generation_execution_release(
+    id4_ideogram4_generation_execution_t* execution);
+
+// Returns the result bindings retained by |execution|.
+iree_status_t id4_ideogram4_generation_execution_result(
+    const id4_ideogram4_generation_execution_t* execution,
+    id4_ideogram4_generation_result_t* out_result);
 
 // Issues one asynchronous Qwen3-VL conditioning execution.
 iree_status_t id4_ideogram4_session_issue_qwen(

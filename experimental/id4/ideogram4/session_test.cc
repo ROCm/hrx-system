@@ -227,6 +227,38 @@ TEST_F(SessionTest, IssueRequiresLoadedSession) {
   id4_ideogram4_session_release(session);
 }
 
+TEST_F(SessionTest, IssueGenerationRequiresLoadedSession) {
+  id4_ideogram4_session_create_options_t create_options = CreateOptions();
+  id4_ideogram4_session_t* session = nullptr;
+  IREE_ASSERT_OK(id4_ideogram4_session_create(
+      &create_options, iree_allocator_system(), &session));
+
+  id4_ideogram4_generation_issue_options_t issue_options;
+  std::memset(&issue_options, 0, sizeof(issue_options));
+  issue_options.structure_size = sizeof(issue_options);
+  id4_ideogram4_generation_execution_t* execution = nullptr;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
+                        id4_ideogram4_session_issue_generation(
+                            session, nullptr, &issue_options, &execution));
+  EXPECT_EQ(execution, nullptr);
+
+  id4_ideogram4_session_release(session);
+}
+
+TEST_F(SessionTest, IssueGenerationRequiresPreparedBundle) {
+  SessionPtr session = CreateLoadedSession();
+
+  id4_ideogram4_generation_issue_options_t issue_options;
+  std::memset(&issue_options, 0, sizeof(issue_options));
+  issue_options.structure_size = sizeof(issue_options);
+  id4_ideogram4_generation_execution_t* execution = nullptr;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      id4_ideogram4_session_issue_generation(session.get(), nullptr,
+                                             &issue_options, &execution));
+  EXPECT_EQ(execution, nullptr);
+}
+
 TEST_F(SessionTest, PlanGenerationRequiresLoadedSession) {
   id4_ideogram4_session_create_options_t create_options = CreateOptions();
   id4_ideogram4_session_t* session = nullptr;
