@@ -678,32 +678,6 @@ static iree_status_t LoadFixtureBytes(
   return iree_ok_status();
 }
 
-static iree_status_t ComputeEulerNextLatent(
-    const std::vector<uint8_t>& x_bytes,
-    const std::vector<uint8_t>& denoised_bytes, float sigma, float next_sigma,
-    std::vector<uint8_t>* out_next_x) {
-  if (x_bytes.size() != denoised_bytes.size() ||
-      (x_bytes.size() % sizeof(float)) != 0) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "Euler latent update requires same-size f32 x and denoised tensors");
-  }
-  if (sigma == 0.0f) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "Euler latent update received zero sigma");
-  }
-  out_next_x->assign(x_bytes.size(), 0);
-  const float* x = reinterpret_cast<const float*>(x_bytes.data());
-  const float* denoised = reinterpret_cast<const float*>(denoised_bytes.data());
-  float* next_x = reinterpret_cast<float*>(out_next_x->data());
-  const iree_host_size_t element_count = x_bytes.size() / sizeof(float);
-  const float delta_sigma = next_sigma - sigma;
-  for (iree_host_size_t i = 0; i < element_count; ++i) {
-    next_x[i] = x[i] + ((x[i] - denoised[i]) / sigma) * delta_sigma;
-  }
-  return iree_ok_status();
-}
-
 TEST(Ideogram4OneStepTraceIntegration,
      RunsReferenceDiTSamplerAndDecodeOnDevice) {
   const iree_string_view_t fixture_directory =
@@ -1072,12 +1046,15 @@ TEST(Ideogram4OneStepTraceIntegration,
   iree_hal_buffer_binding_t denoised = {};
   IREE_ASSERT_OK(id4::test::FindBoundaryBinding(
       sampler_plan.get(), sampler_boundaries, IREE_SV("denoised"), &denoised));
+  iree_hal_buffer_binding_t x_next = {};
+  IREE_ASSERT_OK(id4::test::FindBoundaryBinding(
+      sampler_plan.get(), sampler_boundaries, IREE_SV("x_next"), &x_next));
 
   for (int32_t step_ordinal = 0; step_ordinal < step_count; ++step_ordinal) {
     const float sigma = sigmas[step_ordinal];
     const float next_sigma = sigmas[step_ordinal + 1];
     const float timestep = timesteps[step_ordinal];
-    const float scalings[3] = {1.0f, -sigma, 1.0f};
+    const float scalings[3] = {1.0f, -sigma, next_sigma - sigma};
     if (!compare_one_step_fixture) {
       fprintf(stderr,
               "[ ID4       ] denoise step %d/%d sigma=%g next_sigma=%g "
@@ -1194,20 +1171,17 @@ TEST(Ideogram4OneStepTraceIntegration,
           IREE_SV("latent"), sampler_read_wait.list()));
     }
     if (step_ordinal + 1 < step_count) {
-      std::vector<uint8_t> denoised_bytes;
-      IREE_ASSERT_OK(id4::test::ReadBindingToHost(
-          context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, &denoised,
-          sampler_read_wait.list(), &denoised_bytes));
       std::vector<uint8_t> next_x_bytes;
-      IREE_ASSERT_OK(ComputeEulerNextLatent(current_x_bytes, denoised_bytes,
-                                            sigma, next_sigma, &next_x_bytes));
+      IREE_ASSERT_OK(id4::test::ReadBindingToHost(
+          context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, &x_next,
+          sampler_read_wait.list(), &next_x_bytes));
       current_x_bytes = std::move(next_x_bytes);
     }
   }
 
   IREE_ASSERT_OK(ReplaceBoundaryBinding(decode_plan.get(), &decode_boundaries,
                                         IREE_SV("media.latent.diffusion"),
-                                        denoised));
+                                        x_next));
 
   id4::test::FixedSemaphoreListStorage decode_wait;
   IREE_ASSERT_OK(decode_wait.push(update_semaphore.get(), update_value));

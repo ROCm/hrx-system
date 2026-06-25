@@ -160,9 +160,9 @@ static const id4_ideogram4_generation_boundary_alias_t
             .target_name = IREE_SVL("uncond_out"),
         },
         {
-            // Final denoised latent consumed by VAE-backed decode.
+            // Final Euler latent consumed by VAE-backed decode.
             .source_stage = ID4_IDEOGRAM4_GENERATION_STAGE_SAMPLER,
-            .source_name = IREE_SVL("denoised"),
+            .source_name = IREE_SVL("x_next"),
             .target_stage = ID4_IDEOGRAM4_GENERATION_STAGE_DECODE,
             .target_name = IREE_SVL("media.latent.diffusion"),
         },

@@ -8,7 +8,7 @@ kernel.def @id4_sampler_cfg_denoise_f32() {
   %rounded = index.add %element_count, %rounding : index
   %workgroups_x = index.div %rounded, %workgroup_size_x : index
   kernel.launch.config workgroups(%workgroups_x, %unit, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
-} launch(%cond: buffer, %uncond: buffer, %x_t: buffer, %scalings: buffer, %guidance: buffer, %guided_pred: buffer, %denoised: buffer) {
+} launch(%cond: buffer, %uncond: buffer, %x_t: buffer, %scalings: buffer, %guidance: buffer, %guided_pred: buffer, %denoised: buffer, %x_next: buffer) {
   %base = index.constant 0 : offset
   %workgroup_size_x = index.constant 256 : index
   %workgroup = kernel.workgroup.id<x> : index
@@ -18,7 +18,7 @@ kernel.def @id4_sampler_cfg_denoise_f32() {
   %element_index = index.madd %workgroup, %workgroup_size_x, %lane : index
   %in_bounds = index.cmp ult, %element_index, %element_count : index
 
-  %cond_noalias, %uncond_noalias, %x_t_noalias, %scalings_noalias, %guidance_noalias, %guided_pred_noalias, %denoised_noalias = buffer.assume.noalias %cond, %uncond, %x_t, %scalings, %guidance, %guided_pred, %denoised : buffer, buffer, buffer, buffer, buffer, buffer, buffer
+  %cond_noalias, %uncond_noalias, %x_t_noalias, %scalings_noalias, %guidance_noalias, %guided_pred_noalias, %denoised_noalias, %x_next_noalias = buffer.assume.noalias %cond, %uncond, %x_t, %scalings, %guidance, %guided_pred, %denoised, %x_next : buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer
   %cond_view = buffer.view %cond_noalias[%base] : buffer -> view<[%element_count]xf32, #dense>
   %uncond_view = buffer.view %uncond_noalias[%base] : buffer -> view<[%element_count]xf32, #dense>
   %x_t_view = buffer.view %x_t_noalias[%base] : buffer -> view<[%element_count]xf32, #dense>
@@ -26,6 +26,7 @@ kernel.def @id4_sampler_cfg_denoise_f32() {
   %guidance_view = buffer.view %guidance_noalias[%base] : buffer -> view<[%scalar_count]xf32, #dense>
   %guided_pred_view = buffer.view %guided_pred_noalias[%base] : buffer -> view<[%element_count]xf32, #dense>
   %denoised_view = buffer.view %denoised_noalias[%base] : buffer -> view<[%element_count]xf32, #dense>
+  %x_next_view = buffer.view %x_next_noalias[%base] : buffer -> view<[%element_count]xf32, #dense>
 
   scf.if %in_bounds {
     %cond_value = view.load %cond_view[%element_index] : view<[%element_count]xf32, #dense> -> f32
@@ -36,6 +37,8 @@ kernel.def @id4_sampler_cfg_denoise_f32() {
     %txt_cfg = view.load %guidance_view[%zero] : view<[%scalar_count]xf32, #dense> -> f32
     %c_skip = view.load %scalings_view[%zero] : view<[%scalar_count]xf32, #dense> -> f32
     %c_out = view.load %scalings_view[%one] : view<[%scalar_count]xf32, #dense> -> f32
+    %two = index.constant 2 : index
+    %delta_sigma = view.load %scalings_view[%two] : view<[%scalar_count]xf32, #dense> -> f32
 
     %cfg_delta = scalar.subf %cond_value, %uncond_value : f32
     %scaled_delta = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %txt_cfg, %cfg_delta : f32
@@ -46,6 +49,10 @@ kernel.def @id4_sampler_cfg_denoise_f32() {
     %scaled_x_t = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %x_t_value, %c_skip : f32
     %denoised_value = scalar.addf<reassoc|nnan|ninf|nsz|contract> %scaled_guided, %scaled_x_t : f32
     view.store %denoised_value, %denoised_view[%element_index] : f32, view<[%element_count]xf32, #dense>
+
+    %scaled_delta_sigma = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %guided_value, %delta_sigma : f32
+    %x_next_value = scalar.addf<reassoc|nnan|ninf|nsz|contract> %x_t_value, %scaled_delta_sigma : f32
+    view.store %x_next_value, %x_next_view[%element_index] : f32, view<[%element_count]xf32, #dense>
   }
   kernel.return
 }
@@ -58,11 +65,14 @@ check.case public @id4_sampler_cfg_denoise_f32_small_case {
   %guidance = check.generate.iota offset(7.0) step(-6.0) : tensor<3xf32>
   %guided_pred = check.generate.fill value(0.0) : tensor<257xf32>
   %denoised = check.generate.fill value(0.0) : tensor<257xf32>
+  %x_next = check.generate.fill value(0.0) : tensor<257xf32>
   %expected_guided_pred = check.generate.iota offset(7.0) step(1.0) : tensor<257xf32>
   %expected_denoised = check.generate.iota offset(3.0) step(-1.0) : tensor<257xf32>
-  func.call @id4_sampler_cfg_denoise_f32(%cond, %uncond, %x_t, %scalings, %guidance, %guided_pred, %denoised) : (tensor<257xf32>, tensor<257xf32>, tensor<257xf32>, tensor<3xf32>, tensor<3xf32>, tensor<257xf32>, tensor<257xf32>)
+  %expected_x_next = check.generate.iota offset(-11.0) step(-3.0) : tensor<257xf32>
+  func.call @id4_sampler_cfg_denoise_f32(%cond, %uncond, %x_t, %scalings, %guidance, %guided_pred, %denoised, %x_next) : (tensor<257xf32>, tensor<257xf32>, tensor<257xf32>, tensor<3xf32>, tensor<3xf32>, tensor<257xf32>, tensor<257xf32>, tensor<257xf32>)
   check.expect.close actual(%guided_pred) expected(%expected_guided_pred) atol(0.0) rtol(0.0) nan(same) : tensor<257xf32>
   check.expect.close actual(%denoised) expected(%expected_denoised) atol(0.0) rtol(0.0) nan(same) : tensor<257xf32>
+  check.expect.close actual(%x_next) expected(%expected_x_next) atol(0.0) rtol(0.0) nan(same) : tensor<257xf32>
   check.return
 }
 
@@ -74,11 +84,14 @@ check.case public @id4_sampler_cfg_denoise_f32_full_latent_case {
   %guidance = check.generate.iota offset(7.0) step(-6.0) : tensor<3xf32>
   %guided_pred = check.generate.fill value(0.0) : tensor<524288xf32>
   %denoised = check.generate.fill value(0.0) : tensor<524288xf32>
+  %x_next = check.generate.fill value(0.0) : tensor<524288xf32>
   %expected_guided_pred = check.generate.iota offset(7.0) step(1.0) : tensor<524288xf32>
   %expected_denoised = check.generate.iota offset(3.0) step(-1.0) : tensor<524288xf32>
-  func.call @id4_sampler_cfg_denoise_f32(%cond, %uncond, %x_t, %scalings, %guidance, %guided_pred, %denoised) : (tensor<524288xf32>, tensor<524288xf32>, tensor<524288xf32>, tensor<3xf32>, tensor<3xf32>, tensor<524288xf32>, tensor<524288xf32>)
+  %expected_x_next = check.generate.iota offset(-11.0) step(-3.0) : tensor<524288xf32>
+  func.call @id4_sampler_cfg_denoise_f32(%cond, %uncond, %x_t, %scalings, %guidance, %guided_pred, %denoised, %x_next) : (tensor<524288xf32>, tensor<524288xf32>, tensor<524288xf32>, tensor<3xf32>, tensor<3xf32>, tensor<524288xf32>, tensor<524288xf32>, tensor<524288xf32>)
   check.expect.close actual(%guided_pred) expected(%expected_guided_pred) atol(0.0) rtol(0.0) nan(same) : tensor<524288xf32>
   check.expect.close actual(%denoised) expected(%expected_denoised) atol(0.0) rtol(0.0) nan(same) : tensor<524288xf32>
+  check.expect.close actual(%x_next) expected(%expected_x_next) atol(0.0) rtol(0.0) nan(same) : tensor<524288xf32>
   check.return
 }
 
