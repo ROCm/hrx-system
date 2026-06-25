@@ -6,6 +6,9 @@
 
 #include "experimental/id4/ideogram4/request.h"
 
+#include <float.h>
+#include <math.h>
+#include <stdbool.h>
 #include <string.h>
 
 #include "iree/base/internal/json.h"
@@ -21,6 +24,73 @@ static iree_status_t id4_ideogram4_request_count_member(
   iree_host_size_t* count = (iree_host_size_t*)user_data;
   ++*count;
   return iree_ok_status();
+}
+
+typedef struct id4_ideogram4_request_schema_validation_t {
+  // Number of top-level object members seen by the validator.
+  iree_host_size_t member_count;
+  // True when the top-level prompt payload member was seen.
+  bool has_prompt;
+  // True when the top-level generation metadata member was seen.
+  bool has_generation;
+} id4_ideogram4_request_schema_validation_t;
+
+typedef struct id4_ideogram4_request_generation_lookup_t {
+  // True when a top-level generation member is present.
+  bool has_generation;
+  // Raw top-level generation member value.
+  iree_string_view_t generation;
+} id4_ideogram4_request_generation_lookup_t;
+
+static iree_status_t id4_ideogram4_request_find_generation_member(
+    void* user_data, iree_string_view_t key, iree_json_value_type_t type,
+    iree_string_view_t value) {
+  (void)type;
+  id4_ideogram4_request_generation_lookup_t* lookup =
+      (id4_ideogram4_request_generation_lookup_t*)user_data;
+  if (!iree_string_view_equal(key, IREE_SV("generation"))) {
+    return iree_ok_status();
+  }
+  if (lookup->has_generation) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "full Ideogram 4 request has duplicate generation metadata");
+  }
+  lookup->has_generation = true;
+  lookup->generation = value;
+  return iree_ok_status();
+}
+
+static iree_status_t id4_ideogram4_request_validate_full_schema_member(
+    void* user_data, iree_string_view_t key, iree_json_value_type_t type,
+    iree_string_view_t value) {
+  (void)value;
+  id4_ideogram4_request_schema_validation_t* validation =
+      (id4_ideogram4_request_schema_validation_t*)user_data;
+  ++validation->member_count;
+  if (iree_string_view_equal(key, IREE_SV("prompt"))) {
+    validation->has_prompt = true;
+    switch (type) {
+      case IREE_JSON_VALUE_TYPE_STRING:
+      case IREE_JSON_VALUE_TYPE_OBJECT:
+        return iree_ok_status();
+      default:
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "full Ideogram 4 request prompt must be a string or object");
+    }
+  }
+  if (iree_string_view_equal(key, IREE_SV("generation"))) {
+    validation->has_generation = true;
+    if (type == IREE_JSON_VALUE_TYPE_OBJECT) return iree_ok_status();
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "full Ideogram 4 request generation metadata must "
+                            "be an object");
+  }
+  return iree_make_status(
+      IREE_STATUS_INVALID_ARGUMENT,
+      "full Ideogram 4 request has unsupported top-level member `%.*s`",
+      (int)key.size, key.data);
 }
 
 static iree_status_t id4_ideogram4_request_validate_lowering_options(
@@ -71,6 +141,77 @@ static iree_status_t id4_ideogram4_request_copy_string(
   return iree_ok_status();
 }
 
+static iree_status_t id4_ideogram4_request_lookup_required(
+    iree_string_view_t object, iree_string_view_t key,
+    iree_string_view_t* out_value) {
+  IREE_RETURN_IF_ERROR(iree_json_lookup_object_value(object, key, out_value));
+  if (iree_string_view_is_empty(*out_value)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "Ideogram 4 request field `%.*s` must not be empty",
+                            (int)key.size, key.data);
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t id4_ideogram4_request_parse_required_u32(
+    iree_string_view_t object, iree_string_view_t key, uint32_t* out_value) {
+  iree_string_view_t value = iree_string_view_empty();
+  IREE_RETURN_IF_ERROR(
+      id4_ideogram4_request_lookup_required(object, key, &value));
+  uint64_t raw_value = 0;
+  IREE_RETURN_IF_ERROR(iree_json_parse_uint64(value, &raw_value));
+  if (raw_value == 0 || raw_value > UINT32_MAX) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "Ideogram 4 request field `%.*s` value %" PRIu64
+                            " is outside the accepted uint32 range",
+                            (int)key.size, key.data, raw_value);
+  }
+  *out_value = (uint32_t)raw_value;
+  return iree_ok_status();
+}
+
+static iree_status_t id4_ideogram4_request_parse_required_u64(
+    iree_string_view_t object, iree_string_view_t key, uint64_t* out_value) {
+  iree_string_view_t value = iree_string_view_empty();
+  IREE_RETURN_IF_ERROR(
+      id4_ideogram4_request_lookup_required(object, key, &value));
+  return iree_json_parse_uint64(value, out_value);
+}
+
+static iree_status_t id4_ideogram4_request_parse_required_f32_positive(
+    iree_string_view_t object, iree_string_view_t key, float* out_value) {
+  iree_string_view_t value = iree_string_view_empty();
+  IREE_RETURN_IF_ERROR(
+      id4_ideogram4_request_lookup_required(object, key, &value));
+  double raw_value = 0.0;
+  IREE_RETURN_IF_ERROR(iree_json_parse_double(value, &raw_value));
+  if (!isfinite(raw_value) || raw_value <= 0.0 || raw_value > FLT_MAX) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "Ideogram 4 request field `%.*s` value %g is not a positive f32",
+        (int)key.size, key.data, raw_value);
+  }
+  *out_value = (float)raw_value;
+  return iree_ok_status();
+}
+
+static iree_status_t id4_ideogram4_request_parse_generation(
+    iree_string_view_t generation,
+    id4_ideogram4_request_generation_t* out_generation) {
+  memset(out_generation, 0, sizeof(*out_generation));
+  IREE_RETURN_IF_ERROR(id4_ideogram4_request_parse_required_u32(
+      generation, IREE_SV("latent_width"), &out_generation->latent_width));
+  IREE_RETURN_IF_ERROR(id4_ideogram4_request_parse_required_u32(
+      generation, IREE_SV("latent_height"), &out_generation->latent_height));
+  IREE_RETURN_IF_ERROR(id4_ideogram4_request_parse_required_u32(
+      generation, IREE_SV("denoise_steps"),
+      &out_generation->denoise_step_count));
+  IREE_RETURN_IF_ERROR(id4_ideogram4_request_parse_required_u64(
+      generation, IREE_SV("seed"), &out_generation->seed));
+  return id4_ideogram4_request_parse_required_f32_positive(
+      generation, IREE_SV("guidance_scale"), &out_generation->guidance_scale);
+}
+
 static iree_status_t id4_ideogram4_request_wrap_qwen_prompt(
     iree_string_view_t raw_prompt_json, iree_allocator_t host_allocator,
     iree_string_view_t* out_qwen_prompt) {
@@ -98,6 +239,34 @@ static iree_status_t id4_ideogram4_request_wrap_qwen_prompt(
   return iree_ok_status();
 }
 
+static iree_status_t id4_ideogram4_request_select_prompt_payload(
+    iree_string_view_t object, iree_string_view_t* out_prompt_payload,
+    iree_string_view_t* out_generation) {
+  *out_prompt_payload = object;
+  *out_generation = iree_string_view_empty();
+
+  id4_ideogram4_request_generation_lookup_t lookup;
+  memset(&lookup, 0, sizeof(lookup));
+  IREE_RETURN_IF_ERROR(iree_json_enumerate_object_typed(
+      object, id4_ideogram4_request_find_generation_member, &lookup));
+  if (!lookup.has_generation) return iree_ok_status();
+  *out_generation = lookup.generation;
+
+  id4_ideogram4_request_schema_validation_t validation;
+  memset(&validation, 0, sizeof(validation));
+  IREE_RETURN_IF_ERROR(iree_json_enumerate_object_typed(
+      object, id4_ideogram4_request_validate_full_schema_member, &validation));
+  if (!validation.has_prompt || !validation.has_generation ||
+      validation.member_count != 2) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "full Ideogram 4 requests must contain exactly `prompt` and "
+        "`generation` members");
+  }
+  return id4_ideogram4_request_lookup_required(object, IREE_SV("prompt"),
+                                               out_prompt_payload);
+}
+
 iree_status_t id4_ideogram4_request_parse_json(
     iree_string_view_t json, iree_allocator_t host_allocator,
     id4_ideogram4_request_t* out_request) {
@@ -122,12 +291,25 @@ iree_status_t id4_ideogram4_request_parse_json(
                             "Ideogram 4 request object is empty");
   }
 
-  iree_status_t status = id4_ideogram4_request_copy_string(
-      object, host_allocator, &out_request->raw_prompt_json);
+  iree_string_view_t prompt_payload = iree_string_view_empty();
+  iree_string_view_t generation = iree_string_view_empty();
+  iree_status_t status = id4_ideogram4_request_select_prompt_payload(
+      object, &prompt_payload, &generation);
+  if (iree_status_is_ok(status)) {
+    status = id4_ideogram4_request_copy_string(prompt_payload, host_allocator,
+                                               &out_request->raw_prompt_json);
+  }
+  if (iree_status_is_ok(status) && !iree_string_view_is_empty(generation)) {
+    status = id4_ideogram4_request_parse_generation(generation,
+                                                    &out_request->generation);
+  }
   if (iree_status_is_ok(status)) {
     status = id4_ideogram4_request_wrap_qwen_prompt(
         out_request->raw_prompt_json, host_allocator,
         &out_request->qwen_prompt);
+  }
+  if (iree_status_is_ok(status) && !iree_string_view_is_empty(generation)) {
+    out_request->flags |= ID4_IDEOGRAM4_REQUEST_FLAG_HAS_GENERATION;
   }
   if (!iree_status_is_ok(status)) {
     id4_ideogram4_request_deinitialize(out_request, host_allocator);

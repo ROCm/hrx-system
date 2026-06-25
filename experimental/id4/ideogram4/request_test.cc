@@ -90,6 +90,69 @@ TEST(Ideogram4RequestTest, ParsesStructuredPromptJson) {
                             iree_allocator_system(), &rejected_request));
 }
 
+TEST(Ideogram4RequestTest, ParsesFullGenerationJson) {
+  ScopedRequest request;
+  IREE_ASSERT_OK(id4_ideogram4_request_parse_json(
+      IREE_SV("{\"prompt\":{\"high_level_description\":\"hello\","
+              "\"style_description\":{\"medium\":\"photo\"}},"
+              "\"generation\":{\"latent_width\":8,\"latent_height\":16,"
+              "\"denoise_steps\":20,\"seed\":20260625,"
+              "\"guidance_scale\":3.5}}"),
+      iree_allocator_system(), &request.value));
+  EXPECT_TRUE(iree_all_bits_set(request.value.flags,
+                                ID4_IDEOGRAM4_REQUEST_FLAG_HAS_GENERATION));
+  EXPECT_TRUE(iree_string_view_equal(
+      request.value.raw_prompt_json,
+      IREE_SV("{\"high_level_description\":\"hello\","
+              "\"style_description\":{\"medium\":\"photo\"}}")));
+  EXPECT_TRUE(iree_string_view_equal(
+      request.value.qwen_prompt,
+      IREE_SV("<|im_start|>user\n{\"high_level_description\":\"hello\","
+              "\"style_description\":{\"medium\":\"photo\"}}<|im_end|>\n"
+              "<|im_start|>assistant\n")));
+  EXPECT_EQ(request.value.generation.latent_width, 8u);
+  EXPECT_EQ(request.value.generation.latent_height, 16u);
+  EXPECT_EQ(request.value.generation.denoise_step_count, 20u);
+  EXPECT_EQ(request.value.generation.seed, 20260625u);
+  EXPECT_EQ(request.value.generation.guidance_scale, 3.5f);
+}
+
+TEST(Ideogram4RequestTest, RejectsMalformedFullGenerationJson) {
+  id4_ideogram4_request_t request = {};
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      id4_ideogram4_request_parse_json(
+          IREE_SV("{\"generation\":{\"latent_width\":8,\"latent_height\":8,"
+                  "\"denoise_steps\":20,\"seed\":1,\"guidance_scale\":3.5}}"),
+          iree_allocator_system(), &request));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      id4_ideogram4_request_parse_json(
+          IREE_SV("{\"prompt\":\"hello\",\"generation\":{\"latent_width\":8,"
+                  "\"latent_height\":8,\"denoise_steps\":20,\"seed\":1},"
+                  "\"extra\":true}"),
+          iree_allocator_system(), &request));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      id4_ideogram4_request_parse_json(
+          IREE_SV("{\"prompt\":\"hello\",\"generation\":{\"latent_width\":0,"
+                  "\"latent_height\":8,\"denoise_steps\":20,\"seed\":1,"
+                  "\"guidance_scale\":3.5}}"),
+          iree_allocator_system(), &request));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      id4_ideogram4_request_parse_json(
+          IREE_SV("{\"prompt\":\"hello\",\"generation\":{\"latent_width\":8,"
+                  "\"latent_height\":8,\"denoise_steps\":20,\"seed\":1,"
+                  "\"guidance_scale\":0.0}}"),
+          iree_allocator_system(), &request));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      id4_ideogram4_request_parse_json(
+          IREE_SV("{\"prompt\":\"hello\",\"generation\":\"\"}"),
+          iree_allocator_system(), &request));
+}
+
 TEST(Ideogram4RequestTest, LowersPromptToQwenInputTensors) {
   TokenizerPtr tokenizer = LoadTokenizer();
   ScopedRequest request;

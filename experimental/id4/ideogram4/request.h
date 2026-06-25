@@ -14,12 +14,39 @@
 extern "C" {
 #endif  // __cplusplus
 
+// Parsed request behavior flags.
+typedef uint32_t id4_ideogram4_request_flags_t;
+
+// Parsed request behavior flag bits.
+typedef enum id4_ideogram4_request_flag_bits_e {
+  // Request includes full-generation dimensions and sampling parameters.
+  ID4_IDEOGRAM4_REQUEST_FLAG_HAS_GENERATION = 1u << 0,
+} id4_ideogram4_request_flag_bits_t;
+
+// Full-generation dimensions and sampling parameters parsed from JSON.
+typedef struct id4_ideogram4_request_generation_t {
+  // Diffusion latent tensor width in latent-token positions.
+  uint32_t latent_width;
+  // Diffusion latent tensor height in latent-token positions.
+  uint32_t latent_height;
+  // Number of denoise steps in the host-controlled sampler loop.
+  uint32_t denoise_step_count;
+  // Request seed used by the deterministic noise producer.
+  uint64_t seed;
+  // Text guidance scale consumed by classifier-free guidance.
+  float guidance_scale;
+} id4_ideogram4_request_generation_t;
+
 // Parsed high-level Ideogram 4 generation request.
 typedef struct id4_ideogram4_request_t {
+  // Parsed request behavior flags.
+  id4_ideogram4_request_flags_t flags;
   // Raw structured JSON prompt object owned by the request.
   iree_string_view_t raw_prompt_json;
   // Qwen chat-wrapped prompt text owned by the request.
   iree_string_view_t qwen_prompt;
+  // Full-generation dimensions and sampling parameters when present.
+  id4_ideogram4_request_generation_t generation;
 } id4_ideogram4_request_t;
 
 // Host-side Qwen3-VL input tensors lowered from a generation request.

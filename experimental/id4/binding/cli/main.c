@@ -28,12 +28,6 @@ IREE_FLAG(string, output, "", "Output image path.");
 IREE_FLAG(bool, dry_run, false,
           "Plan a full generation request and exit without loading parameters "
           "or issuing device work.");
-IREE_FLAG(int32_t, latent_width, 0,
-          "Diffusion latent width for full generation planning.");
-IREE_FLAG(int32_t, latent_height, 0,
-          "Diffusion latent height for full generation planning.");
-IREE_FLAG(int32_t, denoise_steps, 0,
-          "Denoise step count for full generation planning.");
 IREE_FLAG(string, dump_plan, "",
           "Path to write the structured pipeline plan JSON.");
 IREE_FLAG(string, dump_diagnostics, "",
@@ -111,14 +105,6 @@ static iree_status_t id4_cli_reject_unimplemented_flags(void) {
   if (strlen(FLAG_profile_output) != 0) {
     return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
                             "--profile_output is not wired yet");
-  }
-  const bool has_generation_flags = FLAG_latent_width != 0 ||
-                                    FLAG_latent_height != 0 ||
-                                    FLAG_denoise_steps != 0;
-  if (!FLAG_dry_run && has_generation_flags) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "generation shape flags require --dry_run until "
-                            "full generation issue is wired");
   }
   return iree_ok_status();
 }
@@ -207,25 +193,22 @@ static iree_status_t id4_cli_create_loaded_session(
 }
 
 static iree_status_t id4_cli_make_generation_config(
+    const id4_ideogram4_request_t* request,
     id4_ideogram4_generation_config_t* out_config) {
   IREE_ASSERT_ARGUMENT(out_config);
   memset(out_config, 0, sizeof(*out_config));
-  if (FLAG_latent_width <= 0) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "--latent_width must be positive");
-  }
-  if (FLAG_latent_height <= 0) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "--latent_height must be positive");
-  }
-  if (FLAG_denoise_steps <= 0) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "--denoise_steps must be positive");
+  if (!request ||
+      !iree_all_bits_set(request->flags,
+                         ID4_IDEOGRAM4_REQUEST_FLAG_HAS_GENERATION)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "dry-run generation requires request generation metadata");
   }
   out_config->structure_size = sizeof(*out_config);
   out_config->diffusion_latent_shape = id4_pipeline_program_make_shape_rank4(
-      (uint64_t)FLAG_latent_width, (uint64_t)FLAG_latent_height, 128, 1);
-  out_config->denoise_step_count = (uint32_t)FLAG_denoise_steps;
+      request->generation.latent_width, request->generation.latent_height, 128,
+      1);
+  out_config->denoise_step_count = request->generation.denoise_step_count;
   out_config->dit_activation_format =
       ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT;
   out_config->vae_tiling.mode = ID4_VAE_TILING_MODE_DISABLED;
@@ -269,7 +252,7 @@ static iree_status_t id4_cli_run_generation_dry_run(
   id4_ideogram4_generation_config_t generation_config;
   memset(&generation_config, 0, sizeof(generation_config));
   if (iree_status_is_ok(status)) {
-    status = id4_cli_make_generation_config(&generation_config);
+    status = id4_cli_make_generation_config(&request, &generation_config);
   }
   if (iree_status_is_ok(status)) {
     id4_ideogram4_generation_plan_options_t plan_options;
