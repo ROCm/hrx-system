@@ -39,6 +39,7 @@ iree_runtime_cc_library(
         "//experimental/id4/pipeline:stage",
         "//experimental/id4/stages:ideogram4_decode",
         "//experimental/id4/stages:ideogram4_dit",
+        "//experimental/id4/stages:ideogram4_dit_parameters",
         "//experimental/id4/stages:ideogram4_dit_program",
         "//experimental/id4/stages:qwen3_vl",
         "//experimental/id4/stages:sampler",
@@ -98,6 +99,7 @@ iree_runtime_cc_benchmark(
     deps = [
         ":session",
         "//experimental/id4/stages:hal_integration_util",
+        "//experimental/id4/stages:ideogram4_dit_parameters",
         "//experimental/id4/tooling:runtime",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/tooling:flags",

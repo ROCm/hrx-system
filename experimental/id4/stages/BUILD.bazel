@@ -146,6 +146,16 @@ iree_runtime_cc_library(
 )
 
 iree_runtime_cc_library(
+    name = "ideogram4_dit_parameters",
+    srcs = ["ideogram4_dit_parameters.c"],
+    hdrs = ["ideogram4_dit_parameters.h"],
+    deps = [
+        ":ideogram4_dit_program",
+        "//runtime/src/iree/base",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "sampler_program",
     srcs = ["sampler_program.c"],
     hdrs = ["sampler_program.h"],
@@ -288,6 +298,17 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_test(
+    name = "ideogram4_dit_parameters_test",
+    srcs = ["ideogram4_dit_parameters_test.cc"],
+    deps = [
+        ":ideogram4_dit_parameters",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
     name = "qwen3_vl_test",
     srcs = ["qwen3_vl_test.cc"],
     deps = [
@@ -380,9 +401,11 @@ iree_runtime_cc_test(
     deps = [
         ":hal_integration_util",
         ":ideogram4_dit",
+        ":ideogram4_dit_parameters",
         "//experimental/id4/pipeline:plan",
         "//experimental/id4/pipeline:stage",
         "//experimental/id4/tooling:capture",
+        "//experimental/id4/tooling:runtime",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/tooling:flags",
         "//runtime/src/iree/hal",

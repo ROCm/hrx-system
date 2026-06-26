@@ -170,15 +170,6 @@ typedef struct id4_ideogram4_generation_residency_statistics_t {
   iree_device_size_t stage_boundary_byte_length;
 } id4_ideogram4_generation_residency_statistics_t;
 
-typedef struct id4_ideogram4_dit_parameter_source_rules_t {
-  // Number of exact source rules in |values|.
-  iree_host_size_t count;
-  // Exact source rules generated for one DiT branch.
-  id4_ideogram4_dit_parameter_source_rule_t* values;
-  // Contiguous storage backing rule key string views.
-  char* key_storage;
-} id4_ideogram4_dit_parameter_source_rules_t;
-
 typedef struct id4_ideogram4_boundary_upload_context_t {
   // Device receiving the queued upload operations.
   iree_hal_device_t* device;
@@ -437,7 +428,7 @@ static iree_status_t id4_ideogram4_validate_diagnostic_tap_names(
 static iree_status_t id4_ideogram4_validate_dit_parameter_format(
     const id4_ideogram4_session_create_options_t* options) {
   switch (options->dit_parameter_format) {
-    case ID4_IDEOGRAM4_SESSION_DIT_PARAMETER_FORMAT_BF16:
+    case ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_BF16:
       if (!iree_string_view_is_empty(
               options->parameter_scopes.dit_conditioned_fp8) ||
           !iree_string_view_is_empty(
@@ -448,7 +439,7 @@ static iree_status_t id4_ideogram4_validate_dit_parameter_format(
             "parameter scopes");
       }
       return iree_ok_status();
-    case ID4_IDEOGRAM4_SESSION_DIT_PARAMETER_FORMAT_MIXED_BF16_FP8_E4M3:
+    case ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_MIXED_BF16_FP8_E4M3:
       if (iree_string_view_is_empty(
               options->parameter_scopes.dit_conditioned_fp8)) {
         return iree_make_status(
@@ -564,67 +555,6 @@ static iree_status_t id4_ideogram4_validate_session_create_options(
   return iree_ok_status();
 }
 
-static void id4_ideogram4_dit_parameter_source_rules_deinitialize(
-    id4_ideogram4_dit_parameter_source_rules_t* rules,
-    iree_allocator_t host_allocator) {
-  if (!rules) return;
-  iree_allocator_free(host_allocator, rules->key_storage);
-  iree_allocator_free(host_allocator, rules->values);
-  memset(rules, 0, sizeof(*rules));
-}
-
-static iree_status_t id4_ideogram4_dit_parameter_source_rules_initialize(
-    const id4_ideogram4_session_create_options_t* options,
-    id4_ideogram4_dit_model_config_t model,
-    iree_string_view_t fp8_parameter_scope,
-    id4_ideogram4_dit_parameter_source_rules_t* out_rules) {
-  memset(out_rules, 0, sizeof(*out_rules));
-  if (options->dit_parameter_format ==
-      ID4_IDEOGRAM4_SESSION_DIT_PARAMETER_FORMAT_BF16) {
-    return iree_ok_status();
-  }
-
-  const iree_host_size_t rule_count = model.layer_count;
-  iree_allocator_t host_allocator = options->services.host_allocator;
-  iree_status_t status = iree_allocator_malloc_array(
-      host_allocator, rule_count, sizeof(out_rules->values[0]),
-      (void**)&out_rules->values);
-  if (iree_status_is_ok(status)) {
-    status = iree_allocator_malloc_array(
-        host_allocator, rule_count,
-        ID4_IDEOGRAM4_DIT_PROGRAM_FORMAT_BUFFER_CAPACITY,
-        (void**)&out_rules->key_storage);
-  }
-  if (iree_status_is_ok(status)) {
-    memset(out_rules->values, 0, rule_count * sizeof(out_rules->values[0]));
-  }
-  for (iree_host_size_t i = 0; i < rule_count && iree_status_is_ok(status);
-       ++i) {
-    char* key_storage = out_rules->key_storage +
-                        i * ID4_IDEOGRAM4_DIT_PROGRAM_FORMAT_BUFFER_CAPACITY;
-    iree_string_view_t key = iree_string_view_empty();
-    status = id4_ideogram4_dit_program_format_layer_parameter(
-        (uint32_t)i, IREE_SV("attention.qkv.weight"), key_storage,
-        ID4_IDEOGRAM4_DIT_PROGRAM_FORMAT_BUFFER_CAPACITY, &key);
-    if (iree_status_is_ok(status)) {
-      out_rules->values[i] = (id4_ideogram4_dit_parameter_source_rule_t){
-          // Exact logical parameter key.
-          .key = key,
-          // Scope containing the compact FP8 weight and row scale.
-          .source_scope = fp8_parameter_scope,
-          // Physical storage expected from the selected scope.
-          .storage = ID4_IDEOGRAM4_DIT_PARAMETER_STORAGE_FP8_E4M3_SCALED,
-      };
-      ++out_rules->count;
-    }
-  }
-  if (!iree_status_is_ok(status)) {
-    id4_ideogram4_dit_parameter_source_rules_deinitialize(out_rules,
-                                                          host_allocator);
-  }
-  return status;
-}
-
 static iree_status_t id4_ideogram4_create_qwen_stage(
     const id4_ideogram4_session_create_options_t* options,
     id4_ideogram4_session_t* session) {
@@ -643,9 +573,10 @@ static iree_status_t id4_ideogram4_create_dit_stage(
     const id4_ideogram4_session_create_options_t* options,
     id4_ideogram4_session_t* session, iree_string_view_t parameter_scope,
     iree_string_view_t fp8_parameter_scope, id4_pipeline_stage_t** out_stage) {
-  id4_ideogram4_dit_parameter_source_rules_t source_rules;
-  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_parameter_source_rules_initialize(
-      options, session->dit_model, fp8_parameter_scope, &source_rules));
+  id4_ideogram4_dit_parameter_source_rule_list_t source_rules;
+  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_parameter_source_rule_list_initialize(
+      options->dit_parameter_format, session->dit_model, fp8_parameter_scope,
+      options->services.host_allocator, &source_rules));
 
   id4_ideogram4_dit_stage_create_options_t stage_options;
   memset(&stage_options, 0, sizeof(stage_options));
@@ -658,7 +589,7 @@ static iree_status_t id4_ideogram4_create_dit_stage(
   stage_options.model = session->dit_model;
   iree_status_t status = id4_ideogram4_dit_stage_create(
       &stage_options, session->host_allocator, out_stage);
-  id4_ideogram4_dit_parameter_source_rules_deinitialize(
+  id4_ideogram4_dit_parameter_source_rule_list_deinitialize(
       &source_rules, options->services.host_allocator);
   return status;
 }

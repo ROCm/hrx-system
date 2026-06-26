@@ -128,8 +128,7 @@ class SessionTest : public ::testing::Test {
     options.structure_size = sizeof(options);
     options.services = services;
     options.kernel_cache = kernel_cache_;
-    options.dit_parameter_format =
-        ID4_IDEOGRAM4_SESSION_DIT_PARAMETER_FORMAT_BF16;
+    options.dit_parameter_format = ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_BF16;
     options.vae_activation_format = ID4_VAE_ACTIVATION_FORMAT_BF16_CONV_INPUT;
     return options;
   }
@@ -218,7 +217,7 @@ TEST_F(SessionTest, RequiresVaeActivationFormat) {
 TEST_F(SessionTest, RequiresDitParameterFormat) {
   id4_ideogram4_session_create_options_t create_options = CreateOptions();
   create_options.dit_parameter_format =
-      ID4_IDEOGRAM4_SESSION_DIT_PARAMETER_FORMAT_INVALID;
+      ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_INVALID;
 
   id4_ideogram4_session_t* session = nullptr;
   IREE_EXPECT_STATUS_IS(
@@ -395,7 +394,7 @@ TEST_F(SessionTest, PlansMixedBf16Fp8DitSources) {
   create_options.parameter_scopes.dit_unconditioned_fp8 =
       IREE_SV("dit_uncond_fp8");
   create_options.dit_parameter_format =
-      ID4_IDEOGRAM4_SESSION_DIT_PARAMETER_FORMAT_MIXED_BF16_FP8_E4M3;
+      ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_MIXED_BF16_FP8_E4M3;
   SessionPtr session = CreateLoadedSession(create_options);
 
   id4_ideogram4_generation_plan_options_t plan_options;

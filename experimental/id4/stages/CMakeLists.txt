@@ -164,6 +164,19 @@ iree_cc_library(
 
 iree_cc_library(
   NAME
+    ideogram4_dit_parameters
+  HDRS
+    "ideogram4_dit_parameters.h"
+  SRCS
+    "ideogram4_dit_parameters.c"
+  DEPS
+    ::ideogram4_dit_program
+    iree::base
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
     sampler_program
   HDRS
     "sampler_program.h"
@@ -327,6 +340,18 @@ iree_cc_test(
 
 iree_cc_test(
   NAME
+    ideogram4_dit_parameters_test
+  SRCS
+    "ideogram4_dit_parameters_test.cc"
+  DEPS
+    ::ideogram4_dit_parameters
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_test(
+  NAME
     qwen3_vl_test
   SRCS
     "qwen3_vl_test.cc"
@@ -422,11 +447,13 @@ iree_cc_test(
   DEPS
     ::hal_integration_util
     ::ideogram4_dit
+    ::ideogram4_dit_parameters
     iree::base
     iree::base::tooling::flags
     iree::experimental::id4::pipeline::plan
     iree::experimental::id4::pipeline::stage
     iree::experimental::id4::tooling::capture
+    iree::experimental::id4::tooling::runtime
     iree::hal
     iree::io::file_handle
     iree::io::parameter_provider

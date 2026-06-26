@@ -41,6 +41,7 @@ iree_cc_library(
     iree::experimental::id4::pipeline::stage
     iree::experimental::id4::stages::ideogram4_decode
     iree::experimental::id4::stages::ideogram4_dit
+    iree::experimental::id4::stages::ideogram4_dit_parameters
     iree::experimental::id4::stages::ideogram4_dit_program
     iree::experimental::id4::stages::qwen3_vl
     iree::experimental::id4::stages::sampler
@@ -108,6 +109,7 @@ iree_cc_binary_benchmark(
     iree::base
     iree::base::tooling::flags
     iree::experimental::id4::stages::hal_integration_util
+    iree::experimental::id4::stages::ideogram4_dit_parameters
     iree::experimental::id4::tooling::runtime
     iree::hal
     iree::io::file_handle

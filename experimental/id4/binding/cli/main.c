@@ -11,6 +11,7 @@
 
 #include "experimental/id4/ideogram4/session.h"
 #include "experimental/id4/pipeline/diagnostics.h"
+#include "experimental/id4/stages/ideogram4_dit_parameters.h"
 #include "experimental/id4/tooling/image.h"
 #include "experimental/id4/tooling/readback.h"
 #include "experimental/id4/tooling/runtime.h"
@@ -114,21 +115,11 @@ static iree_status_t id4_cli_reject_unimplemented_diagnostics_flags(void) {
 }
 
 static iree_status_t id4_cli_parse_dit_parameter_format(
-    id4_ideogram4_session_dit_parameter_format_t* out_format) {
-  IREE_ASSERT_ARGUMENT(out_format);
-  iree_string_view_t value = iree_make_cstring_view(FLAG_dit_parameter_format);
-  if (iree_string_view_equal(value, IREE_SV("bf16"))) {
-    *out_format = ID4_IDEOGRAM4_SESSION_DIT_PARAMETER_FORMAT_BF16;
-    return iree_ok_status();
-  }
-  if (iree_string_view_equal(value, IREE_SV("mixed_bf16_fp8_e4m3"))) {
-    *out_format =
-        ID4_IDEOGRAM4_SESSION_DIT_PARAMETER_FORMAT_MIXED_BF16_FP8_E4M3;
-    return iree_ok_status();
-  }
-  return iree_make_status(
-      IREE_STATUS_INVALID_ARGUMENT,
-      "--dit_parameter_format must be bf16 or mixed_bf16_fp8_e4m3");
+    id4_ideogram4_dit_parameter_format_t* out_format) {
+  iree_status_t status = id4_ideogram4_dit_parameter_format_parse(
+      iree_make_cstring_view(FLAG_dit_parameter_format), out_format);
+  if (iree_status_is_ok(status)) return status;
+  return iree_status_annotate(status, IREE_SV("--dit_parameter_format"));
 }
 
 static iree_status_t id4_cli_parse_dit_activation_format(
@@ -221,7 +212,7 @@ static iree_status_t id4_cli_create_loaded_session(
   IREE_RETURN_IF_ERROR(id4_cli_parse_dit_parameter_format(
       &session_options.dit_parameter_format));
   if (session_options.dit_parameter_format ==
-      ID4_IDEOGRAM4_SESSION_DIT_PARAMETER_FORMAT_MIXED_BF16_FP8_E4M3) {
+      ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_MIXED_BF16_FP8_E4M3) {
     session_options.parameter_scopes.dit_conditioned_fp8 =
         iree_make_cstring_view(FLAG_dit_conditioned_fp8_scope);
     session_options.parameter_scopes.dit_unconditioned_fp8 =
@@ -271,13 +262,13 @@ static iree_status_t id4_cli_create_parameter_providers(
     iree_allocator_t host_allocator,
     id4_ideogram4_generation_parameter_providers_t* out_providers) {
   memset(out_providers, 0, sizeof(*out_providers));
-  id4_ideogram4_session_dit_parameter_format_t dit_parameter_format =
-      ID4_IDEOGRAM4_SESSION_DIT_PARAMETER_FORMAT_INVALID;
+  id4_ideogram4_dit_parameter_format_t dit_parameter_format =
+      ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_INVALID;
   IREE_RETURN_IF_ERROR(
       id4_cli_parse_dit_parameter_format(&dit_parameter_format));
 
   iree_status_t status = iree_ok_status();
-  if (dit_parameter_format == ID4_IDEOGRAM4_SESSION_DIT_PARAMETER_FORMAT_BF16) {
+  if (dit_parameter_format == ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_BF16) {
     id4_tooling_parameter_provider_request_t requests[] = {
         {
             // Qwen3-VL text encoder parameter scope.

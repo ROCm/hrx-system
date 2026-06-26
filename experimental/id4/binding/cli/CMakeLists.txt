@@ -21,6 +21,7 @@ iree_cc_binary(
     iree::experimental::id4::ideogram4::session
     iree::experimental::id4::pipeline::diagnostics
     iree::experimental::id4::pipeline::kernel_library
+    iree::experimental::id4::stages::ideogram4_dit_parameters
     iree::experimental::id4::tooling::image
     iree::experimental::id4::tooling::readback
     iree::experimental::id4::tooling::runtime

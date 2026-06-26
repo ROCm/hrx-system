@@ -12,7 +12,9 @@
 #include "experimental/id4/pipeline/stage.h"
 #include "experimental/id4/stages/hal_integration_util.h"
 #include "experimental/id4/stages/ideogram4_dit.h"
+#include "experimental/id4/stages/ideogram4_dit_parameters.h"
 #include "experimental/id4/tooling/capture.h"
+#include "experimental/id4/tooling/runtime.h"
 #include "iree/base/tooling/flags.h"
 #include "iree/io/file_contents.h"
 #include "iree/testing/gtest.h"
@@ -21,6 +23,8 @@
 IREE_FLAG(string, id4_capture_dir, "",
           "Directory that receives exported ID4 DiT boundary and diagnostic "
           "tap tensor captures.");
+IREE_FLAG_LIST(string, id4_diagnostic_tap,
+               "Additional diagnostic tap names to capture.");
 IREE_FLAG(
     string, id4_fixture_dir, "",
     "Directory containing an ID4 DiT fixture manifest and tensor "
@@ -28,14 +32,45 @@ IREE_FLAG(
 IREE_FLAG(string, id4_plan_output, "",
           "Path that receives the planned ID4 DiT stage JSON before "
           "preparation.");
+IREE_FLAG(string, dit_parameter_format, "bf16",
+          "DiT parameter format: bf16 or mixed_bf16_fp8_e4m3.");
+IREE_FLAG(string, dit_conditioned_fp8_scope, "dit_cond_fp8",
+          "Conditioned DiT native-FP8 parameter scope.");
+IREE_FLAG(string, dit_unconditioned_fp8_scope, "dit_uncond_fp8",
+          "Unconditioned DiT native-FP8 parameter scope.");
 
 namespace {
 
 constexpr uint8_t kOutputSentinel = 0xA5;
 
+using ParameterProviderRef =
+    id4::test::OwningRef<iree_io_parameter_provider_t,
+                         iree_io_parameter_provider_release>;
+
+static iree_status_t ParseDitParameterFormat(
+    id4_ideogram4_dit_parameter_format_t* out_format) {
+  iree_status_t status = id4_ideogram4_dit_parameter_format_parse(
+      iree_make_cstring_view(FLAG_dit_parameter_format), out_format);
+  if (iree_status_is_ok(status)) return status;
+  return iree_status_annotate(status, IREE_SV("--dit_parameter_format"));
+}
+
+static iree_string_view_t Fp8ParameterScopeForRequest(
+    const id4_ideogram4_dit_request_config_t& request) {
+  switch (request.conditioning_mode) {
+    case ID4_IDEOGRAM4_DIT_CONDITIONING_MODE_CONDITIONED:
+      return iree_make_cstring_view(FLAG_dit_conditioned_fp8_scope);
+    case ID4_IDEOGRAM4_DIT_CONDITIONING_MODE_UNCONDITIONED:
+      return iree_make_cstring_view(FLAG_dit_unconditioned_fp8_scope);
+    default:
+      return iree_string_view_empty();
+  }
+}
+
 static iree_status_t CreateIdeogram4DitStage(
     const id4::test::LiveStageContext& context,
-    id4_pipeline_stage_t** out_stage) {
+    id4_ideogram4_dit_parameter_format_t parameter_format,
+    iree_string_view_t fp8_parameter_scope, id4_pipeline_stage_t** out_stage) {
   IREE_ASSERT_ARGUMENT(out_stage);
   *out_stage = nullptr;
 
@@ -45,14 +80,24 @@ static iree_status_t CreateIdeogram4DitStage(
   services.executable_cache = context.executable_cache.get();
   services.host_allocator = iree_allocator_system();
 
+  id4_ideogram4_dit_parameter_source_rule_list_t source_rules;
+  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_parameter_source_rule_list_initialize(
+      parameter_format, *id4_ideogram4_dit_program_ideogram4_model_config(),
+      fp8_parameter_scope, iree_allocator_system(), &source_rules));
+
   id4_ideogram4_dit_stage_create_options_t create_options;
   std::memset(&create_options, 0, sizeof(create_options));
   create_options.structure_size = sizeof(create_options);
   create_options.services = services;
   create_options.kernel_cache = context.kernel_cache.get();
   create_options.model = *id4_ideogram4_dit_program_ideogram4_model_config();
-  return id4_ideogram4_dit_stage_create(&create_options,
-                                        iree_allocator_system(), out_stage);
+  create_options.parameter_source_rule_count = source_rules.count;
+  create_options.parameter_source_rules = source_rules.values;
+  iree_status_t status = id4_ideogram4_dit_stage_create(
+      &create_options, iree_allocator_system(), out_stage);
+  id4_ideogram4_dit_parameter_source_rule_list_deinitialize(
+      &source_rules, iree_allocator_system());
+  return status;
 }
 
 static iree_status_t FindFixtureTensor(
@@ -226,6 +271,54 @@ static iree_status_t WritePlanJsonIfRequested(const id4_pipeline_plan_t* plan) {
   }
   iree_string_builder_deinitialize(&builder);
   return status;
+}
+
+static iree_status_t CreateDitParameterProviderFromFlags(
+    id4_ideogram4_dit_parameter_format_t parameter_format,
+    iree_string_view_t fp8_parameter_scope,
+    iree_io_parameter_provider_t** out_provider) {
+  IREE_ASSERT_ARGUMENT(out_provider);
+  *out_provider = nullptr;
+  if (parameter_format == ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_BF16) {
+    return id4::test::CreateParameterProviderFromFlags(iree_string_view_empty(),
+                                                       out_provider);
+  }
+
+  ParameterProviderRef bf16_provider;
+  ParameterProviderRef fp8_provider;
+  id4_tooling_parameter_provider_request_t requests[] = {
+      {
+          // BF16-expanded fallback parameter scope.
+          .scope = iree_string_view_empty(),
+          // BF16-expanded provider output.
+          .out_provider = bf16_provider.out(),
+      },
+      {
+          // Native-FP8 parameter scope.
+          .scope = fp8_parameter_scope,
+          // Native-FP8 provider output.
+          .out_provider = fp8_provider.out(),
+      },
+  };
+  IREE_RETURN_IF_ERROR(id4_tooling_create_parameter_providers_from_flags(
+      IREE_ARRAYSIZE(requests), requests, iree_allocator_system()));
+
+  const id4_tooling_parameter_provider_set_entry_t entries[] = {
+      {
+          // BF16-expanded fallback parameter scope.
+          .scope = iree_string_view_empty(),
+          // BF16-expanded provider.
+          .provider = bf16_provider.get(),
+      },
+      {
+          // Native-FP8 parameter scope.
+          .scope = fp8_parameter_scope,
+          // Native-FP8 provider.
+          .provider = fp8_provider.get(),
+      },
+  };
+  return id4_tooling_create_parameter_provider_set(
+      IREE_ARRAYSIZE(entries), entries, iree_allocator_system(), out_provider);
 }
 
 static id4_pipeline_tensor_layout_t FixtureComparisonLayout(
@@ -434,6 +527,10 @@ static void RunDitFixture(const DitFixtureRunOptions& options) {
   id4_ideogram4_dit_request_config_t request;
   IREE_ASSERT_OK(ConfigureRequestFromFixture(fixture_tensors,
                                              options.input_stage, &request));
+  id4_ideogram4_dit_parameter_format_t parameter_format =
+      ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_INVALID;
+  IREE_ASSERT_OK(ParseDitParameterFormat(&parameter_format));
+  iree_string_view_t fp8_parameter_scope = Fp8ParameterScopeForRequest(request);
 
   id4::test::LiveStageContext context;
   IREE_ASSERT_OK(id4::test::CreateLiveStageContextFromFlags(&context));
@@ -444,11 +541,12 @@ static void RunDitFixture(const DitFixtureRunOptions& options) {
   id4::test::OwningRef<iree_io_parameter_provider_t,
                        iree_io_parameter_provider_release>
       parameter_provider;
-  IREE_ASSERT_OK(id4::test::CreateParameterProviderFromFlags(
-      iree_string_view_empty(), parameter_provider.out()));
+  IREE_ASSERT_OK(CreateDitParameterProviderFromFlags(
+      parameter_format, fp8_parameter_scope, parameter_provider.out()));
 
   id4::test::OwningRef<id4_pipeline_stage_t, id4_pipeline_stage_release> stage;
-  IREE_ASSERT_OK(CreateIdeogram4DitStage(context, stage.out()));
+  IREE_ASSERT_OK(CreateIdeogram4DitStage(context, parameter_format,
+                                         fp8_parameter_scope, stage.out()));
 
   id4::test::StageDiagnostics diagnostics = {};
   id4_pipeline_diagnostics_sink_t diagnostics_sink =
@@ -481,13 +579,18 @@ static void RunDitFixture(const DitFixtureRunOptions& options) {
     ASSERT_FALSE(diagnostic_tap_names.empty())
         << "DiT fixture contains no expected tensors";
   }
+  const iree_flag_string_list_t extra_diagnostic_taps =
+      FLAG_id4_diagnostic_tap_list();
+  for (iree_host_size_t i = 0; i < extra_diagnostic_taps.count; ++i) {
+    diagnostic_tap_names.push_back(extra_diagnostic_taps.values[i]);
+  }
+  const bool captures_diagnostic_taps = !diagnostic_tap_names.empty();
 
   id4_pipeline_stage_plan_options_t plan_options;
   std::memset(&plan_options, 0, sizeof(plan_options));
   plan_options.structure_size = sizeof(plan_options);
   plan_options.next = &dit_options;
-  if (iree_all_bits_set(options.flags,
-                        ID4_DIT_FIXTURE_RUN_FLAG_CAPTURE_EXPECTED_TAPS)) {
+  if (captures_diagnostic_taps) {
     plan_options.flags = ID4_PIPELINE_STAGE_PLAN_FLAG_CAPTURE_DIAGNOSTIC_TAPS;
   }
   plan_options.diagnostic_tap_names = (iree_string_view_list_t){
@@ -606,8 +709,7 @@ static void RunDitFixture(const DitFixtureRunOptions& options) {
     IREE_ASSERT_OK(id4_tooling_capture_execution(&capture_options));
     IREE_ASSERT_OK(id4::test::VerifyCapturedExportedBoundaryTensorsWereWritten(
         plan.get(), capture_directory, kOutputSentinel));
-    if (iree_all_bits_set(options.flags,
-                          ID4_DIT_FIXTURE_RUN_FLAG_CAPTURE_EXPECTED_TAPS)) {
+    if (captures_diagnostic_taps) {
       IREE_ASSERT_OK(id4::test::VerifyCapturedDiagnosticTapTensorsWereWritten(
           plan.get(), capture_directory, kOutputSentinel));
     }

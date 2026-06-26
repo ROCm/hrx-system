@@ -9,6 +9,7 @@
 
 #include "experimental/id4/ideogram4/session.h"
 #include "experimental/id4/stages/hal_integration_util.h"
+#include "experimental/id4/stages/ideogram4_dit_parameters.h"
 #include "experimental/id4/tooling/runtime.h"
 #include "iree/base/tooling/flags.h"
 #include "iree/io/file_contents.h"
@@ -150,21 +151,11 @@ static id4_ideogram4_generation_plan_policy_t MakeGenerationPolicy() {
 }
 
 static iree_status_t ParseDitParameterFormat(
-    id4_ideogram4_session_dit_parameter_format_t* out_format) {
-  IREE_ASSERT_ARGUMENT(out_format);
-  iree_string_view_t value = iree_make_cstring_view(FLAG_dit_parameter_format);
-  if (iree_string_view_equal(value, IREE_SV("bf16"))) {
-    *out_format = ID4_IDEOGRAM4_SESSION_DIT_PARAMETER_FORMAT_BF16;
-    return iree_ok_status();
-  }
-  if (iree_string_view_equal(value, IREE_SV("mixed_bf16_fp8_e4m3"))) {
-    *out_format =
-        ID4_IDEOGRAM4_SESSION_DIT_PARAMETER_FORMAT_MIXED_BF16_FP8_E4M3;
-    return iree_ok_status();
-  }
-  return iree_make_status(
-      IREE_STATUS_INVALID_ARGUMENT,
-      "--dit_parameter_format must be bf16 or mixed_bf16_fp8_e4m3");
+    id4_ideogram4_dit_parameter_format_t* out_format) {
+  iree_status_t status = id4_ideogram4_dit_parameter_format_parse(
+      iree_make_cstring_view(FLAG_dit_parameter_format), out_format);
+  if (iree_status_is_ok(status)) return status;
+  return iree_status_annotate(status, IREE_SV("--dit_parameter_format"));
 }
 
 static iree_status_t ParseDitActivationFormat(
@@ -252,7 +243,7 @@ static iree_status_t CreateLoadedLiveSession(
   IREE_RETURN_IF_ERROR(
       ParseDitParameterFormat(&create_options.dit_parameter_format));
   if (create_options.dit_parameter_format ==
-      ID4_IDEOGRAM4_SESSION_DIT_PARAMETER_FORMAT_MIXED_BF16_FP8_E4M3) {
+      ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_MIXED_BF16_FP8_E4M3) {
     create_options.parameter_scopes.dit_conditioned_fp8 =
         iree_make_cstring_view(FLAG_dit_conditioned_fp8_scope);
     create_options.parameter_scopes.dit_unconditioned_fp8 =
@@ -283,10 +274,10 @@ static iree_status_t CreateLoadedLiveSession(
 static iree_status_t CreateParameterProviders(
     LiveGenerationBenchmarkContext* context) {
   IREE_ASSERT_ARGUMENT(context);
-  id4_ideogram4_session_dit_parameter_format_t dit_parameter_format =
-      ID4_IDEOGRAM4_SESSION_DIT_PARAMETER_FORMAT_INVALID;
+  id4_ideogram4_dit_parameter_format_t dit_parameter_format =
+      ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_INVALID;
   IREE_RETURN_IF_ERROR(ParseDitParameterFormat(&dit_parameter_format));
-  if (dit_parameter_format == ID4_IDEOGRAM4_SESSION_DIT_PARAMETER_FORMAT_BF16) {
+  if (dit_parameter_format == ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_BF16) {
     id4_tooling_parameter_provider_request_t requests[] = {
         {
             // Qwen3-VL text encoder parameter scope.

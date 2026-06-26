@@ -13,6 +13,7 @@
 #include "experimental/id4/pipeline/kernel_library.h"
 #include "experimental/id4/pipeline/plan.h"
 #include "experimental/id4/pipeline/stage.h"
+#include "experimental/id4/stages/ideogram4_dit_parameters.h"
 #include "experimental/id4/stages/ideogram4_dit_program.h"
 #include "experimental/id4/stages/vae_program.h"
 #include "iree/base/api.h"
@@ -57,17 +58,6 @@ typedef struct id4_ideogram4_session_parameter_scopes_t {
   iree_string_view_t vae;
 } id4_ideogram4_session_parameter_scopes_t;
 
-// DiT parameter storage policy selected for session-owned DiT stages.
-typedef enum id4_ideogram4_session_dit_parameter_format_e {
-  // Invalid DiT parameter storage policy.
-  ID4_IDEOGRAM4_SESSION_DIT_PARAMETER_FORMAT_INVALID = 0,
-  // All DiT parameters are sourced from BF16-expanded parameter scopes.
-  ID4_IDEOGRAM4_SESSION_DIT_PARAMETER_FORMAT_BF16 = 1,
-  // Supported DiT weights are sourced from native scaled FP8 scopes while
-  // other DiT parameters remain sourced from BF16-expanded scopes.
-  ID4_IDEOGRAM4_SESSION_DIT_PARAMETER_FORMAT_MIXED_BF16_FP8_E4M3 = 2,
-} id4_ideogram4_session_dit_parameter_format_t;
-
 // Options for creating an Ideogram 4 model session.
 typedef struct id4_ideogram4_session_create_options_t {
   // Size of this structure for versioning.
@@ -81,7 +71,7 @@ typedef struct id4_ideogram4_session_create_options_t {
   // Parameter scopes selected by session-owned stages.
   id4_ideogram4_session_parameter_scopes_t parameter_scopes;
   // DiT parameter storage policy selected by session-owned DiT stages.
-  id4_ideogram4_session_dit_parameter_format_t dit_parameter_format;
+  id4_ideogram4_dit_parameter_format_t dit_parameter_format;
   // Activation storage format selected for the session-owned VAE decode stage.
   id4_vae_activation_format_t vae_activation_format;
 } id4_ideogram4_session_create_options_t;
