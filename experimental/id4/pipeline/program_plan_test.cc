@@ -427,6 +427,15 @@ TEST(PipelineProgramPlan, DerivesParameterKernelRegionAndTapPlans) {
                         IREE_SV("model.layers.0.linear.weight"));
   EXPECT_EQ(parameter_slab->requests[0].span.buffer_offset, 0u);
   EXPECT_EQ(parameter_slab->requests[0].span.length, 32u);
+  ASSERT_EQ(id4_pipeline_plan_parameter_load_step_count(plan), 1u);
+  const id4_pipeline_parameter_load_step_t* load_step =
+      id4_pipeline_plan_parameter_load_step_at(plan, 0);
+  ASSERT_NE(load_step, nullptr);
+  ExpectStringViewEqual(load_step->name, IREE_SV("parameters.gather"));
+  EXPECT_EQ(load_step->kind, ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_GATHER);
+  EXPECT_EQ(load_step->target_slab_index, 0u);
+  EXPECT_EQ(load_step->request_offset, 0u);
+  EXPECT_EQ(load_step->request_count, 1u);
   EXPECT_EQ(id4_pipeline_plan_memory_slab_count(plan), 0u);
 
   ASSERT_EQ(id4_pipeline_plan_boundary_tensor_count(plan), 2u);

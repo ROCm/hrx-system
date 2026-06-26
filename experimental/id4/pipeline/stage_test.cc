@@ -358,6 +358,10 @@ static iree_status_t SmokeStagePlan(
           IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_MAPPING |
               IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE_READ,
           /*byte_length=*/16, /*alignment=*/16, /*request_count=*/1, &request);
+  id4_pipeline_parameter_load_step_t load_step =
+      id4_pipeline_parameter_gather_load_step(
+          IREE_SV("parameters.gather"), /*target_slab_index=*/0,
+          /*request_offset=*/0, /*request_count=*/1);
 
   id4_pipeline_device_placement_t placement;
   memset(&placement, 0, sizeof(placement));
@@ -374,6 +378,8 @@ static iree_status_t SmokeStagePlan(
   create_options.placements = &placement;
   create_options.parameter_slab_count = 1;
   create_options.parameter_slabs = &slab;
+  create_options.parameter_load_step_count = 1;
+  create_options.parameter_load_steps = &load_step;
   create_options.diagnostics_sink = options->diagnostics_sink;
   return id4_pipeline_plan_create(&create_options,
                                   stage->services.host_allocator, out_plan);
@@ -568,6 +574,8 @@ TEST(PipelineStage, PlanCopiesPlacementAndParameterSlabMetadata) {
   id4_pipeline_parameter_slab_enumerator_state_t enumerator_state;
   memset(&enumerator_state, 0, sizeof(enumerator_state));
   enumerator_state.slab = slab;
+  enumerator_state.request_offset = 0;
+  enumerator_state.request_count = slab->request_count;
   iree_io_parameter_enumerator_t enumerator =
       id4_pipeline_parameter_slab_enumerator(&enumerator_state);
   iree_string_view_t key = iree_string_view_empty();
@@ -577,12 +585,23 @@ TEST(PipelineStage, PlanCopiesPlacementAndParameterSlabMetadata) {
   EXPECT_EQ(ToString(key), "smoke.weight");
   EXPECT_EQ(span.length, 16u);
 
+  EXPECT_EQ(id4_pipeline_plan_parameter_load_step_count(plan), 1u);
+  const id4_pipeline_parameter_load_step_t* load_step =
+      id4_pipeline_plan_parameter_load_step_at(plan, 0);
+  ASSERT_NE(load_step, nullptr);
+  EXPECT_EQ(ToString(load_step->name), "parameters.gather");
+  EXPECT_EQ(load_step->kind, ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_GATHER);
+  EXPECT_EQ(load_step->target_slab_index, 0u);
+  EXPECT_EQ(load_step->request_offset, 0u);
+  EXPECT_EQ(load_step->request_count, 1u);
+
   iree_string_builder_t builder;
   iree_string_builder_initialize(iree_allocator_system(), &builder);
   IREE_ASSERT_OK(id4_pipeline_plan_format_json(plan, &builder));
   std::string json = ToString(iree_string_builder_view(&builder));
   EXPECT_NE(json.find("\"stage\":\"smoke\""), std::string::npos);
   EXPECT_NE(json.find("\"parameter_slabs\""), std::string::npos);
+  EXPECT_NE(json.find("\"parameter_load_steps\""), std::string::npos);
   EXPECT_NE(json.find("\"target_params\""), std::string::npos);
   EXPECT_NE(json.find("\"smoke.weight\""), std::string::npos);
   iree_string_builder_deinitialize(&builder);
@@ -607,6 +626,49 @@ TEST(PipelineStage, PlanCopiesPlacementAndParameterSlabMetadata) {
 
   id4_pipeline_plan_release(plan);
   id4_pipeline_stage_release(stage);
+}
+
+TEST(PipelineStage, PlanRequiresExplicitParameterLoadSteps) {
+  iree_hal_device_group_t* device_group = CreateMockDeviceGroup();
+  id4_pipeline_diagnostics_sink_t diagnostics_sink = IgnoreDiagnosticsSink();
+
+  id4_pipeline_parameter_request_t request = id4_pipeline_parameter_request(
+      IREE_SV("smoke.weight"),
+      id4_pipeline_parameter_span(/*parameter_offset=*/0,
+                                  /*buffer_offset=*/0, /*length=*/16));
+  id4_pipeline_parameter_slab_plan_t slab =
+      id4_pipeline_make_device_local_parameter_slab_plan(
+          IREE_SV("smoke"), /*placement_id=*/0, /*binding_slot=*/0,
+          IREE_HAL_QUEUE_AFFINITY_ANY,
+          IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_MAPPING |
+              IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE_READ,
+          /*byte_length=*/16, /*alignment=*/16, /*request_count=*/1, &request);
+  id4_pipeline_device_placement_t placement = {
+      // Human-readable placement role.
+      /*.role=*/IREE_SV("default"),
+      // Device index in the test device group.
+      /*.device_index=*/0,
+      // Queue affinity used for loading.
+      /*.queue_affinity=*/IREE_HAL_QUEUE_AFFINITY_ANY,
+  };
+  id4_pipeline_plan_create_options_t create_options;
+  memset(&create_options, 0, sizeof(create_options));
+  create_options.structure_size = sizeof(create_options);
+  create_options.stage_name = IREE_SV("smoke");
+  create_options.device_group = device_group;
+  create_options.placement_count = 1;
+  create_options.placements = &placement;
+  create_options.parameter_slab_count = 1;
+  create_options.parameter_slabs = &slab;
+  create_options.diagnostics_sink = &diagnostics_sink;
+
+  id4_pipeline_plan_t* plan = nullptr;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        id4_pipeline_plan_create(
+                            &create_options, iree_allocator_system(), &plan));
+  EXPECT_EQ(plan, nullptr);
+
+  iree_hal_device_group_release(device_group);
 }
 
 TEST(PipelineStage, BundlePayloadIsInlineAndDestroyed) {

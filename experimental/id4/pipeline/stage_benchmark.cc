@@ -58,6 +58,10 @@ static void BM_PipelinePlanCreateAndFormatJson(benchmark::State& state) {
                 IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE,
             /*byte_length=*/16, /*alignment=*/16, /*request_count=*/1,
             &request);
+    id4_pipeline_parameter_load_step_t load_step =
+        id4_pipeline_parameter_gather_load_step(
+            IREE_SV("parameters.gather"), /*target_slab_index=*/0,
+            /*request_offset=*/0, /*request_count=*/1);
 
     id4_pipeline_device_placement_t placement;
     memset(&placement, 0, sizeof(placement));
@@ -74,6 +78,8 @@ static void BM_PipelinePlanCreateAndFormatJson(benchmark::State& state) {
     create_options.placements = &placement;
     create_options.parameter_slab_count = 1;
     create_options.parameter_slabs = &slab;
+    create_options.parameter_load_step_count = 1;
+    create_options.parameter_load_steps = &load_step;
     create_options.diagnostics_sink = &diagnostics_sink;
 
     id4_pipeline_plan_t* plan = NULL;

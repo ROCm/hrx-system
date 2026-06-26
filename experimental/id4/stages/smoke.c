@@ -397,6 +397,10 @@ static iree_status_t id4_smoke_stage_create_plan(
           IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET |
               IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE,
           /*byte_length=*/16, /*alignment=*/16, /*request_count=*/1, &request);
+  id4_pipeline_parameter_load_step_t load_step =
+      id4_pipeline_parameter_gather_load_step(
+          IREE_SV("parameters.gather"), /*target_slab_index=*/0,
+          /*request_offset=*/0, /*request_count=*/1);
 
   id4_pipeline_device_placement_t placement;
   memset(&placement, 0, sizeof(placement));
@@ -456,6 +460,8 @@ static iree_status_t id4_smoke_stage_create_plan(
     create_options.placements = &placement;
     create_options.parameter_slab_count = 1;
     create_options.parameter_slabs = &slab;
+    create_options.parameter_load_step_count = 1;
+    create_options.parameter_load_steps = &load_step;
     create_options.memory_slab_count = 1;
     create_options.memory_slabs = &memory_slab;
     create_options.kernel_count = kernel_count;

@@ -184,6 +184,10 @@ typedef struct id4_pipeline_plan_create_options_t {
   iree_host_size_t parameter_slab_count;
   // Parameter slabs to copy into the plan.
   const id4_pipeline_parameter_slab_plan_t* parameter_slabs;
+  // Number of prepare-time parameter load steps.
+  iree_host_size_t parameter_load_step_count;
+  // Prepare-time parameter load steps to copy into the plan.
+  const id4_pipeline_parameter_load_step_t* parameter_load_steps;
   // Number of planned constant slabs.
   iree_host_size_t constant_slab_count;
   // Constant slabs to copy into the plan.
@@ -250,6 +254,15 @@ iree_host_size_t id4_pipeline_plan_parameter_slab_count(
 // Returns parameter slab |index| or NULL when out of range.
 const id4_pipeline_parameter_slab_plan_t* id4_pipeline_plan_parameter_slab_at(
     const id4_pipeline_plan_t* plan, iree_host_size_t index);
+
+// Returns the number of parameter load steps in |plan|.
+iree_host_size_t id4_pipeline_plan_parameter_load_step_count(
+    const id4_pipeline_plan_t* plan);
+
+// Returns parameter load step |index| or NULL when out of range.
+const id4_pipeline_parameter_load_step_t*
+id4_pipeline_plan_parameter_load_step_at(const id4_pipeline_plan_t* plan,
+                                         iree_host_size_t index);
 
 // Returns the number of constant slabs in |plan|.
 iree_host_size_t id4_pipeline_plan_constant_slab_count(

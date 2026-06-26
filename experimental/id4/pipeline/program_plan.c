@@ -1072,6 +1072,14 @@ iree_status_t id4_pipeline_program_create_plan(
         parameter_requests);
   }
 
+  id4_pipeline_parameter_load_step_t parameter_load_step;
+  memset(&parameter_load_step, 0, sizeof(parameter_load_step));
+  if (iree_status_is_ok(status) && counts.parameter_count != 0) {
+    parameter_load_step = id4_pipeline_parameter_gather_load_step(
+        IREE_SV("parameters.gather"), /*target_slab_index=*/0,
+        /*request_offset=*/0, counts.parameter_count);
+  }
+
   iree_string_view_t constant_slab_name = iree_string_view_empty();
   id4_pipeline_constant_slab_plan_t constant_slab;
   memset(&constant_slab, 0, sizeof(constant_slab));
@@ -1154,6 +1162,10 @@ iree_status_t id4_pipeline_program_create_plan(
     create_options.parameter_slab_count = counts.parameter_count == 0 ? 0 : 1;
     create_options.parameter_slabs =
         counts.parameter_count == 0 ? NULL : &parameter_slab;
+    create_options.parameter_load_step_count =
+        counts.parameter_count == 0 ? 0 : 1;
+    create_options.parameter_load_steps =
+        counts.parameter_count == 0 ? NULL : &parameter_load_step;
     create_options.constant_slab_count = counts.constant_count == 0 ? 0 : 1;
     create_options.constant_slabs =
         counts.constant_count == 0 ? NULL : &constant_slab;

@@ -92,6 +92,44 @@ typedef struct id4_pipeline_parameter_slab_plan_t {
   const id4_pipeline_parameter_request_t* requests;
 } id4_pipeline_parameter_slab_plan_t;
 
+// Prepare-time parameter loading step kind.
+typedef uint32_t id4_pipeline_parameter_load_step_kind_t;
+
+// Parameter loading step kind values.
+typedef enum id4_pipeline_parameter_load_step_kind_e {
+  // Direct IREE parameter provider gather into a final parameter slab.
+  ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_GATHER = 1u,
+} id4_pipeline_parameter_load_step_kind_e;
+
+// Prepare-time work that populates final parameter slab storage.
+typedef struct id4_pipeline_parameter_load_step_t {
+  // Human-readable load step name for diagnostics and plan dumps.
+  iree_string_view_t name;
+  // Operation performed by this loading step.
+  id4_pipeline_parameter_load_step_kind_t kind;
+  // Final parameter slab populated by this step.
+  iree_host_size_t target_slab_index;
+  // First request ordinal in the target slab request table.
+  iree_host_size_t request_offset;
+  // Number of requests consumed from the target slab request table.
+  iree_host_size_t request_count;
+} id4_pipeline_parameter_load_step_t;
+
+// Returns a direct provider-gather load step into a final parameter slab.
+static inline id4_pipeline_parameter_load_step_t
+id4_pipeline_parameter_gather_load_step(iree_string_view_t name,
+                                        iree_host_size_t target_slab_index,
+                                        iree_host_size_t request_offset,
+                                        iree_host_size_t request_count) {
+  id4_pipeline_parameter_load_step_t step;
+  step.name = name;
+  step.kind = ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_GATHER;
+  step.target_slab_index = target_slab_index;
+  step.request_offset = request_offset;
+  step.request_count = request_count;
+  return step;
+}
+
 // Returns a parameter slab plan value for |requests|.
 static inline id4_pipeline_parameter_slab_plan_t
 id4_pipeline_make_parameter_slab_plan(
@@ -131,6 +169,10 @@ id4_pipeline_make_device_local_parameter_slab_plan(
 typedef struct id4_pipeline_parameter_slab_enumerator_state_t {
   // Slab plan being enumerated.
   const id4_pipeline_parameter_slab_plan_t* slab;
+  // First request ordinal visible to the enumerator.
+  iree_host_size_t request_offset;
+  // Number of requests visible to the enumerator.
+  iree_host_size_t request_count;
 } id4_pipeline_parameter_slab_enumerator_state_t;
 
 // Resolved parameter slab load work for one planned slab.
@@ -156,6 +198,11 @@ iree_status_t id4_pipeline_parameter_slab_validate(
     const id4_pipeline_parameter_slab_plan_t* slab,
     iree_host_size_t placement_count);
 
+// Validates that |step| references a valid final slab request range.
+iree_status_t id4_pipeline_parameter_load_step_validate(
+    const id4_pipeline_parameter_load_step_t* step, iree_host_size_t slab_count,
+    const id4_pipeline_parameter_slab_plan_t* slabs);
+
 // Enumerates one planned parameter request in IREE provider callback form.
 iree_status_t id4_pipeline_parameter_slab_enumerate(
     void* user_data, iree_host_size_t i, iree_string_view_t* out_key,
@@ -172,6 +219,8 @@ iree_status_t id4_pipeline_parameter_slab_set_load(
     const iree_hal_semaphore_list_t signal_semaphore_list,
     iree_host_size_t load_count,
     const id4_pipeline_parameter_slab_load_t* loads,
+    iree_host_size_t load_step_count,
+    const id4_pipeline_parameter_load_step_t* load_steps,
     iree_string_view_t stage_name,
     id4_pipeline_diagnostics_sink_t* diagnostics_sink,
     iree_allocator_t host_allocator,

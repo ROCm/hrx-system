@@ -89,6 +89,65 @@ iree_status_t id4_pipeline_parameter_slab_validate(
   return iree_ok_status();
 }
 
+static iree_status_t id4_pipeline_parameter_load_step_validate_header(
+    const id4_pipeline_parameter_load_step_t* step) {
+  IREE_ASSERT_ARGUMENT(step);
+  if (iree_string_view_is_empty(step->name)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "parameter load step has no name");
+  }
+  if (step->kind != ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_GATHER) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "parameter load step '%.*s' has unknown kind %u",
+                            (int)step->name.size, step->name.data,
+                            (uint32_t)step->kind);
+  }
+  if (step->request_count == 0) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "parameter load step '%.*s' request count must be nonzero",
+        (int)step->name.size, step->name.data);
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t id4_pipeline_parameter_load_step_validate_request_range(
+    const id4_pipeline_parameter_load_step_t* step,
+    iree_host_size_t target_request_count) {
+  if (step->request_offset > target_request_count ||
+      step->request_count > target_request_count - step->request_offset) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "parameter load step '%.*s' request range [%" PRIhsz ", %" PRIhsz
+        ") exceeds target slab request count %" PRIhsz,
+        (int)step->name.size, step->name.data, step->request_offset,
+        step->request_offset + step->request_count, target_request_count);
+  }
+  return iree_ok_status();
+}
+
+iree_status_t id4_pipeline_parameter_load_step_validate(
+    const id4_pipeline_parameter_load_step_t* step, iree_host_size_t slab_count,
+    const id4_pipeline_parameter_slab_plan_t* slabs) {
+  IREE_RETURN_IF_ERROR(id4_pipeline_parameter_load_step_validate_header(step));
+  if (step->target_slab_index >= slab_count) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "parameter load step '%.*s' target slab index %" PRIhsz
+        " outside slab count %" PRIhsz,
+        (int)step->name.size, step->name.data, step->target_slab_index,
+        slab_count);
+  }
+  if (!slabs) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "parameter load step slab array is required");
+  }
+  const id4_pipeline_parameter_slab_plan_t* slab =
+      &slabs[step->target_slab_index];
+  return id4_pipeline_parameter_load_step_validate_request_range(
+      step, slab->request_count);
+}
+
 iree_status_t id4_pipeline_parameter_slab_enumerate(
     void* user_data, iree_host_size_t i, iree_string_view_t* out_key,
     iree_io_parameter_span_t* out_span) {
@@ -97,12 +156,21 @@ iree_status_t id4_pipeline_parameter_slab_enumerate(
   IREE_ASSERT_ARGUMENT(out_span);
   id4_pipeline_parameter_slab_enumerator_state_t* state =
       (id4_pipeline_parameter_slab_enumerator_state_t*)user_data;
-  if (!state->slab || i >= state->slab->request_count) {
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "parameter request index %" PRIhsz " is outside slab request count", i);
+  if (!state->slab || i >= state->request_count) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "parameter request index %" PRIhsz
+                            " is outside enumerated request count %" PRIhsz,
+                            i, state->request_count);
   }
-  const id4_pipeline_parameter_request_t* request = &state->slab->requests[i];
+  const iree_host_size_t request_index = state->request_offset + i;
+  if (request_index >= state->slab->request_count) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "parameter request index %" PRIhsz
+                            " is outside slab request count %" PRIhsz,
+                            request_index, state->slab->request_count);
+  }
+  const id4_pipeline_parameter_request_t* request =
+      &state->slab->requests[request_index];
   *out_key = request->key;
   *out_span = request->span;
   return iree_ok_status();
@@ -150,6 +218,9 @@ static iree_status_t id4_pipeline_parameter_slab_set_create_empty(
     status = iree_allocator_malloc_array(host_allocator, count,
                                          sizeof(slab_set->buffers[0]),
                                          (void**)&slab_set->buffers);
+    if (iree_status_is_ok(status)) {
+      memset(slab_set->buffers, 0, count * sizeof(slab_set->buffers[0]));
+    }
   }
   if (iree_status_is_ok(status)) {
     *out_slab_set = slab_set;
@@ -199,6 +270,31 @@ static iree_status_t id4_pipeline_parameter_slab_validate_semaphore_list(
     }
   }
   return iree_ok_status();
+}
+
+static iree_status_t id4_pipeline_parameter_load_step_validate_against_loads(
+    const id4_pipeline_parameter_load_step_t* step, iree_host_size_t load_count,
+    const id4_pipeline_parameter_slab_load_t* loads) {
+  IREE_ASSERT_ARGUMENT(loads);
+  IREE_RETURN_IF_ERROR(id4_pipeline_parameter_load_step_validate_header(step));
+  if (step->target_slab_index >= load_count) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "parameter load step '%.*s' target slab index %" PRIhsz
+        " outside load count %" PRIhsz,
+        (int)step->name.size, step->name.data, step->target_slab_index,
+        load_count);
+  }
+  const id4_pipeline_parameter_slab_load_t* load =
+      &loads[step->target_slab_index];
+  if (!load->slab) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "parameter load step '%.*s' target slab has no plan",
+        (int)step->name.size, step->name.data);
+  }
+  return id4_pipeline_parameter_load_step_validate_request_range(
+      step, load->slab->request_count);
 }
 
 static id4_pipeline_parameter_slab_diagnostic_t
@@ -268,14 +364,15 @@ static iree_status_t id4_pipeline_parameter_slab_emit_diagnostic(
 }
 
 static iree_status_t id4_pipeline_parameter_slab_create_chain_semaphores(
-    iree_host_size_t load_count,
+    iree_host_size_t load_step_count,
     const id4_pipeline_parameter_slab_load_t* loads,
+    const id4_pipeline_parameter_load_step_t* load_steps,
     iree_allocator_t host_allocator, iree_hal_semaphore_t*** out_semaphores,
     iree_host_size_t* out_semaphore_count) {
   IREE_ASSERT_ARGUMENT(out_semaphores);
   IREE_ASSERT_ARGUMENT(out_semaphore_count);
   *out_semaphores = NULL;
-  *out_semaphore_count = load_count > 1 ? load_count - 1 : 0;
+  *out_semaphore_count = load_step_count > 1 ? load_step_count - 1 : 0;
   if (*out_semaphore_count == 0) return iree_ok_status();
 
   iree_hal_semaphore_t** semaphores = NULL;
@@ -284,7 +381,8 @@ static iree_status_t id4_pipeline_parameter_slab_create_chain_semaphores(
                                   sizeof(semaphores[0]), (void**)&semaphores);
   for (iree_host_size_t i = 0;
        i < *out_semaphore_count && iree_status_is_ok(status); ++i) {
-    const id4_pipeline_parameter_slab_load_t* load = &loads[i];
+    const id4_pipeline_parameter_slab_load_t* load =
+        &loads[load_steps[i].target_slab_index];
     status = iree_hal_semaphore_create(
         load->device, load->queue_affinity,
         /*initial_value=*/0, IREE_HAL_SEMAPHORE_FLAG_NONE, &semaphores[i]);
@@ -315,6 +413,8 @@ iree_status_t id4_pipeline_parameter_slab_set_load(
     const iree_hal_semaphore_list_t signal_semaphore_list,
     iree_host_size_t load_count,
     const id4_pipeline_parameter_slab_load_t* loads,
+    iree_host_size_t load_step_count,
+    const id4_pipeline_parameter_load_step_t* load_steps,
     iree_string_view_t stage_name,
     id4_pipeline_diagnostics_sink_t* diagnostics_sink,
     iree_allocator_t host_allocator,
@@ -327,6 +427,25 @@ iree_status_t id4_pipeline_parameter_slab_set_load(
   if (load_count != 0 && !loads) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "parameter slab load array is required");
+  }
+  if (load_count == 0 && load_step_count != 0) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "parameter load steps require at least one parameter slab load");
+  }
+  if (load_count != 0 && load_step_count == 0) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "parameter slabs require an explicit parameter load step schedule");
+  }
+  if (load_step_count != 0 && !load_steps) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "parameter load step array is required");
+  }
+  for (iree_host_size_t i = 0; i < load_step_count; ++i) {
+    IREE_RETURN_IF_ERROR(
+        id4_pipeline_parameter_load_step_validate_against_loads(
+            &load_steps[i], load_count, loads));
   }
   IREE_RETURN_IF_ERROR(id4_pipeline_parameter_slab_validate_semaphore_list(
       wait_semaphore_list, IREE_SV("parameter slab wait")));
@@ -359,12 +478,14 @@ iree_status_t id4_pipeline_parameter_slab_set_load(
   iree_hal_semaphore_t** chain_semaphores = NULL;
   if (iree_status_is_ok(status)) {
     status = id4_pipeline_parameter_slab_create_chain_semaphores(
-        load_count, loads, host_allocator, &chain_semaphores,
+        load_step_count, loads, load_steps, host_allocator, &chain_semaphores,
         &chain_semaphore_count);
   }
-  for (iree_host_size_t i = 0; i < load_count && iree_status_is_ok(status);
+  for (iree_host_size_t i = 0; i < load_step_count && iree_status_is_ok(status);
        ++i) {
-    const id4_pipeline_parameter_slab_load_t* load = &loads[i];
+    const id4_pipeline_parameter_load_step_t* step = &load_steps[i];
+    const id4_pipeline_parameter_slab_load_t* load =
+        &loads[step->target_slab_index];
     if (!iree_io_parameter_provider_query_support(provider,
                                                   load->slab->scope)) {
       status =
@@ -383,15 +504,20 @@ iree_status_t id4_pipeline_parameter_slab_set_load(
         IREE_SV("loading parameter slab"), IREE_HOST_SIZE_MAX,
         diagnostics_sink);
     for (iree_host_size_t j = 0;
-         j < load->slab->request_count && iree_status_is_ok(status); ++j) {
+         j < step->request_count && iree_status_is_ok(status); ++j) {
       status = id4_pipeline_parameter_slab_emit_diagnostic(
           load, stage_name, IREE_SV("parameter_slab.gather"),
-          IREE_SV("gathering parameter request"), j, diagnostics_sink);
+          IREE_SV("gathering parameter request"), step->request_offset + j,
+          diagnostics_sink);
     }
     if (!iree_status_is_ok(status)) break;
     id4_pipeline_parameter_slab_enumerator_state_t enumerator_state = {
         // Slab plan supplying request keys and spans.
         .slab = load->slab,
+        // First request ordinal loaded by this step.
+        .request_offset = step->request_offset,
+        // Number of requests loaded by this step.
+        .request_count = step->request_count,
     };
     iree_io_parameter_enumerator_t enumerator =
         id4_pipeline_parameter_slab_enumerator(&enumerator_state);
@@ -409,10 +535,10 @@ iree_status_t id4_pipeline_parameter_slab_set_load(
                      .payload_values = &chain_wait_value,
                  };
     iree_hal_semaphore_t* chain_signal_semaphore =
-        i + 1 == load_count ? NULL : chain_semaphores[i];
+        i + 1 == load_step_count ? NULL : chain_semaphores[i];
     uint64_t chain_signal_value = 1;
     iree_hal_semaphore_list_t gather_signal_semaphore_list =
-        i + 1 == load_count
+        i + 1 == load_step_count
             ? signal_semaphore_list
             : (iree_hal_semaphore_list_t){
                   // One internal chain semaphore.
@@ -425,8 +551,8 @@ iree_status_t id4_pipeline_parameter_slab_set_load(
     status = iree_io_parameter_provider_gather(
         provider, load->device, load->queue_affinity,
         gather_wait_semaphore_list, gather_signal_semaphore_list,
-        load->slab->scope, slab_set->buffers[i], load->slab->request_count,
-        enumerator);
+        load->slab->scope, slab_set->buffers[step->target_slab_index],
+        step->request_count, enumerator);
     if (!iree_status_is_ok(status)) {
       status = iree_status_join(
           status, id4_pipeline_parameter_slab_emit_diagnostic(
