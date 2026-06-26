@@ -72,6 +72,20 @@ iree_status_t id4_tooling_create_embedded_kernel_library(
     iree_allocator_t host_allocator,
     id4_pipeline_kernel_library_t** out_library);
 
+// One scoped parameter provider requested from standard --parameters= flags.
+typedef struct id4_tooling_parameter_provider_request_t {
+  // Parameter scope name required by the caller.
+  iree_string_view_t scope;
+  // Receives a newly-created provider for |scope| on success.
+  iree_io_parameter_provider_t** out_provider;
+} id4_tooling_parameter_provider_request_t;
+
+// Creates scoped parameter providers from one shared parse of --parameters=.
+iree_status_t id4_tooling_create_parameter_providers_from_flags(
+    iree_host_size_t request_count,
+    const id4_tooling_parameter_provider_request_t* requests,
+    iree_allocator_t host_allocator);
+
 // Creates a parameter provider for |scope| from standard --parameters= flags.
 iree_status_t id4_tooling_create_parameter_provider_from_flags(
     iree_string_view_t scope, iree_allocator_t host_allocator,

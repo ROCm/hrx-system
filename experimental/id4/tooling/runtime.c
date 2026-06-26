@@ -217,59 +217,109 @@ iree_status_t id4_tooling_create_embedded_kernel_library(
   return status;
 }
 
-iree_status_t id4_tooling_create_parameter_provider_from_flags(
-    iree_string_view_t scope, iree_allocator_t host_allocator,
-    iree_io_parameter_provider_t** out_provider) {
-  IREE_ASSERT_ARGUMENT(out_provider);
-  *out_provider = NULL;
+static iree_status_t id4_tooling_find_parameter_index(
+    iree_io_scope_map_t* scope_map, iree_string_view_t scope,
+    iree_io_parameter_index_t** out_index) {
+  *out_index = NULL;
+  for (iree_host_size_t i = 0; i < scope_map->count; ++i) {
+    iree_io_scope_map_entry_t* entry = scope_map->entries[i];
+    if (iree_string_view_equal(entry->scope, scope)) {
+      *out_index = entry->index;
+      return iree_ok_status();
+    }
+  }
+  if (iree_string_view_is_empty(scope)) {
+    return iree_make_status(IREE_STATUS_NOT_FOUND,
+                            "required anonymous parameter scope was not "
+                            "loaded; pass --parameters=<file>");
+  }
+  return iree_make_status(
+      IREE_STATUS_NOT_FOUND,
+      "required parameter scope `%.*s` was not loaded; pass "
+      "--parameters=%.*s=<file>",
+      (int)scope.size, scope.data, (int)scope.size, scope.data);
+}
+
+static iree_status_t id4_tooling_validate_parameter_index(
+    iree_string_view_t scope, iree_io_parameter_index_t* index) {
+  if (iree_io_parameter_index_count(index) == 0) {
+    if (iree_string_view_is_empty(scope)) {
+      return iree_make_status(
+          IREE_STATUS_NOT_FOUND,
+          "anonymous parameter scope was loaded with no parameters");
+    }
+    return iree_make_status(
+        IREE_STATUS_NOT_FOUND,
+        "parameter scope `%.*s` was loaded with no parameters", (int)scope.size,
+        scope.data);
+  }
+  return iree_ok_status();
+}
+
+static void id4_tooling_release_parameter_provider_requests(
+    iree_host_size_t request_count,
+    const id4_tooling_parameter_provider_request_t* requests) {
+  for (iree_host_size_t i = 0; i < request_count; ++i) {
+    if (!requests[i].out_provider) continue;
+    iree_io_parameter_provider_release(*requests[i].out_provider);
+    *requests[i].out_provider = NULL;
+  }
+}
+
+iree_status_t id4_tooling_create_parameter_providers_from_flags(
+    iree_host_size_t request_count,
+    const id4_tooling_parameter_provider_request_t* requests,
+    iree_allocator_t host_allocator) {
+  if (request_count == 0) return iree_ok_status();
+  if (!requests) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "parameter provider requests are required");
+  }
+  for (iree_host_size_t i = 0; i < request_count; ++i) {
+    if (!requests[i].out_provider) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "parameter provider request %" PRIhsz " output is required", i);
+    }
+    *requests[i].out_provider = NULL;
+  }
 
   iree_io_scope_map_t scope_map;
   iree_io_scope_map_initialize(host_allocator, &scope_map);
   iree_status_t status =
       iree_tooling_build_parameter_indices_from_flags(&scope_map);
-
-  iree_io_parameter_index_t* index = NULL;
-  if (iree_status_is_ok(status)) {
-    for (iree_host_size_t i = 0; i < scope_map.count; ++i) {
-      iree_io_scope_map_entry_t* entry = scope_map.entries[i];
-      if (iree_string_view_equal(entry->scope, scope)) {
-        index = entry->index;
-        break;
-      }
+  for (iree_host_size_t i = 0; i < request_count && iree_status_is_ok(status);
+       ++i) {
+    const id4_tooling_parameter_provider_request_t* request = &requests[i];
+    iree_io_parameter_index_t* index = NULL;
+    status =
+        id4_tooling_find_parameter_index(&scope_map, request->scope, &index);
+    if (iree_status_is_ok(status)) {
+      status = id4_tooling_validate_parameter_index(request->scope, index);
     }
-    if (!index) {
-      if (iree_string_view_is_empty(scope)) {
-        status = iree_make_status(
-            IREE_STATUS_NOT_FOUND,
-            "required anonymous parameter scope was not loaded; pass "
-            "--parameters=<file>");
-      } else {
-        status = iree_make_status(
-            IREE_STATUS_NOT_FOUND,
-            "required parameter scope `%.*s` was not loaded; pass "
-            "--parameters=%.*s=<file>",
-            (int)scope.size, scope.data, (int)scope.size, scope.data);
-      }
+    if (iree_status_is_ok(status)) {
+      status = iree_io_parameter_index_provider_create(
+          request->scope, index,
+          IREE_IO_PARAMETER_INDEX_PROVIDER_DEFAULT_MAX_CONCURRENT_OPERATIONS,
+          host_allocator, request->out_provider);
     }
   }
-  if (iree_status_is_ok(status) && iree_io_parameter_index_count(index) == 0) {
-    if (iree_string_view_is_empty(scope)) {
-      status = iree_make_status(
-          IREE_STATUS_NOT_FOUND,
-          "anonymous parameter scope was loaded with no parameters");
-    } else {
-      status = iree_make_status(
-          IREE_STATUS_NOT_FOUND,
-          "parameter scope `%.*s` was loaded with no parameters",
-          (int)scope.size, scope.data);
-    }
-  }
-  if (iree_status_is_ok(status)) {
-    status = iree_io_parameter_index_provider_create(
-        scope, index,
-        IREE_IO_PARAMETER_INDEX_PROVIDER_DEFAULT_MAX_CONCURRENT_OPERATIONS,
-        host_allocator, out_provider);
+  if (!iree_status_is_ok(status)) {
+    id4_tooling_release_parameter_provider_requests(request_count, requests);
   }
   iree_io_scope_map_deinitialize(&scope_map);
   return status;
+}
+
+iree_status_t id4_tooling_create_parameter_provider_from_flags(
+    iree_string_view_t scope, iree_allocator_t host_allocator,
+    iree_io_parameter_provider_t** out_provider) {
+  id4_tooling_parameter_provider_request_t request = {
+      // Parameter scope required by the caller.
+      .scope = scope,
+      // Receives the created provider.
+      .out_provider = out_provider,
+  };
+  return id4_tooling_create_parameter_providers_from_flags(1, &request,
+                                                           host_allocator);
 }

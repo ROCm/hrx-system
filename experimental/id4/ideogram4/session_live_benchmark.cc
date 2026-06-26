@@ -232,18 +232,36 @@ static iree_status_t CreateLoadedLiveSession(
 static iree_status_t CreateParameterProviders(
     LiveGenerationBenchmarkContext* context) {
   IREE_ASSERT_ARGUMENT(context);
-  IREE_RETURN_IF_ERROR(id4_tooling_create_parameter_provider_from_flags(
-      IREE_SV("qwen"), iree_allocator_system(),
-      context->qwen_parameter_provider.out()));
-  IREE_RETURN_IF_ERROR(id4_tooling_create_parameter_provider_from_flags(
-      IREE_SV("dit_cond"), iree_allocator_system(),
-      context->conditioned_dit_parameter_provider.out()));
-  IREE_RETURN_IF_ERROR(id4_tooling_create_parameter_provider_from_flags(
-      IREE_SV("dit_uncond"), iree_allocator_system(),
-      context->unconditioned_dit_parameter_provider.out()));
-  return id4_tooling_create_parameter_provider_from_flags(
-      IREE_SV("vae"), iree_allocator_system(),
-      context->vae_parameter_provider.out());
+  id4_tooling_parameter_provider_request_t requests[] = {
+      {
+          // Qwen3-VL text encoder parameter scope.
+          /*.scope=*/IREE_SV("qwen"),
+          // Qwen provider output.
+          /*.out_provider=*/context->qwen_parameter_provider.out(),
+      },
+      {
+          // Conditioned DiT parameter scope.
+          /*.scope=*/IREE_SV("dit_cond"),
+          // Conditioned DiT provider output.
+          /*.out_provider=*/
+          context->conditioned_dit_parameter_provider.out(),
+      },
+      {
+          // Unconditioned DiT parameter scope.
+          /*.scope=*/IREE_SV("dit_uncond"),
+          // Unconditioned DiT provider output.
+          /*.out_provider=*/
+          context->unconditioned_dit_parameter_provider.out(),
+      },
+      {
+          // VAE parameter scope.
+          /*.scope=*/IREE_SV("vae"),
+          // VAE provider output.
+          /*.out_provider=*/context->vae_parameter_provider.out(),
+      },
+  };
+  return id4_tooling_create_parameter_providers_from_flags(
+      IREE_ARRAYSIZE(requests), requests, iree_allocator_system());
 }
 
 static iree_status_t CreateLiveGenerationBenchmarkContext(

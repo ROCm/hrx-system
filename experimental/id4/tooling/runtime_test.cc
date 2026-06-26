@@ -74,4 +74,32 @@ TEST(Id4ToolingRuntimeTest, RequiresParameterScopeFromFlags) {
           iree_string_view_empty(), iree_allocator_system(), provider.out()));
 }
 
+TEST(Id4ToolingRuntimeTest, BatchProviderCreationRequiresRequestedScopes) {
+  Ref<iree_io_parameter_provider_t, iree_io_parameter_provider_release>
+      qwen_provider;
+  Ref<iree_io_parameter_provider_t, iree_io_parameter_provider_release>
+      vae_provider;
+
+  id4_tooling_parameter_provider_request_t requests[] = {
+      {
+          // Qwen parameter scope required by the caller.
+          /*.scope=*/IREE_SV("qwen"),
+          // Qwen provider output.
+          /*.out_provider=*/qwen_provider.out(),
+      },
+      {
+          // VAE parameter scope required by the caller.
+          /*.scope=*/IREE_SV("vae"),
+          // VAE provider output.
+          /*.out_provider=*/vae_provider.out(),
+      },
+  };
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_NOT_FOUND,
+      id4_tooling_create_parameter_providers_from_flags(
+          IREE_ARRAYSIZE(requests), requests, iree_allocator_system()));
+  EXPECT_EQ(qwen_provider.get(), nullptr);
+  EXPECT_EQ(vae_provider.get(), nullptr);
+}
+
 }  // namespace

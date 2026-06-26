@@ -208,29 +208,34 @@ static iree_status_t id4_cli_create_parameter_providers(
     iree_allocator_t host_allocator,
     id4_ideogram4_generation_parameter_providers_t* out_providers) {
   memset(out_providers, 0, sizeof(*out_providers));
-  iree_status_t status = id4_tooling_create_parameter_provider_from_flags(
-      IREE_SV("qwen"), host_allocator, &out_providers->qwen);
-  if (iree_status_is_ok(status)) {
-    status = id4_tooling_create_parameter_provider_from_flags(
-        IREE_SV("dit_cond"), host_allocator, &out_providers->dit_conditioned);
-  }
-  if (iree_status_is_ok(status)) {
-    status = id4_tooling_create_parameter_provider_from_flags(
-        IREE_SV("dit_uncond"), host_allocator,
-        &out_providers->dit_unconditioned);
-  }
-  if (iree_status_is_ok(status)) {
-    status = id4_tooling_create_parameter_provider_from_flags(
-        IREE_SV("vae"), host_allocator, &out_providers->vae);
-  }
-  if (!iree_status_is_ok(status)) {
-    iree_io_parameter_provider_release(out_providers->vae);
-    iree_io_parameter_provider_release(out_providers->dit_unconditioned);
-    iree_io_parameter_provider_release(out_providers->dit_conditioned);
-    iree_io_parameter_provider_release(out_providers->qwen);
-    memset(out_providers, 0, sizeof(*out_providers));
-  }
-  return status;
+  id4_tooling_parameter_provider_request_t requests[] = {
+      {
+          // Qwen3-VL text encoder parameter scope.
+          .scope = IREE_SV("qwen"),
+          // Qwen provider output.
+          .out_provider = &out_providers->qwen,
+      },
+      {
+          // Conditioned DiT parameter scope.
+          .scope = IREE_SV("dit_cond"),
+          // Conditioned DiT provider output.
+          .out_provider = &out_providers->dit_conditioned,
+      },
+      {
+          // Unconditioned DiT parameter scope.
+          .scope = IREE_SV("dit_uncond"),
+          // Unconditioned DiT provider output.
+          .out_provider = &out_providers->dit_unconditioned,
+      },
+      {
+          // VAE parameter scope.
+          .scope = IREE_SV("vae"),
+          // VAE provider output.
+          .out_provider = &out_providers->vae,
+      },
+  };
+  return id4_tooling_create_parameter_providers_from_flags(
+      IREE_ARRAYSIZE(requests), requests, host_allocator);
 }
 
 static void id4_cli_release_parameter_providers(
