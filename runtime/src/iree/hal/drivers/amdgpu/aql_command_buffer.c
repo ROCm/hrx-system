@@ -1726,7 +1726,17 @@ static iree_status_t iree_hal_amdgpu_aql_command_buffer_write_dispatch_tail(
     uint8_t* tail_payload) {
   switch (kernarg_storage_mode) {
     case IREE_HAL_AMDGPU_COMMAND_BUFFER_KERNARG_STORAGE_MODE_CUSTOM_DIRECT: {
-      const iree_host_size_t explicit_bytes = layout->explicit_kernarg_size;
+      iree_host_size_t explicit_bytes = layout->explicit_kernarg_size;
+      if (explicit_bytes == 0) {
+        // Zero means dynamic explicit bytes; with an implicit suffix, user
+        // kernargs end where the runtime-owned hidden args begin.
+        explicit_bytes = layout->has_implicit_args
+                             ? layout->implicit_args_offset
+                             : layout->total_kernarg_size;
+        if (explicit_bytes == 0) {
+          explicit_bytes = constants.data_length;
+        }
+      }
       const iree_host_size_t copy_bytes = constants.data_length < explicit_bytes
                                               ? constants.data_length
                                               : explicit_bytes;

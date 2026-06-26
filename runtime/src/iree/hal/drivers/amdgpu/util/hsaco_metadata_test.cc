@@ -142,13 +142,14 @@ static std::vector<uint8_t> BuildKernelMetadata(
 
   AppendMsgPackString(&output, IREE_SV("amdhsa.kernels"));
   AppendMsgPackArray(&output, 1);
-  AppendMsgPackMap(&output, 8);
+  AppendMsgPackMap(&output, 9);
   AppendStringField(&output, IREE_SV(".name"), IREE_SV("vector_add"));
   AppendStringField(&output, IREE_SV(".symbol"), IREE_SV("vector_add.kd"));
   AppendUintField(&output, IREE_SV(".kernarg_segment_size"), 24);
   AppendUintField(&output, IREE_SV(".kernarg_segment_align"), 8);
   AppendUintField(&output, IREE_SV(".group_segment_fixed_size"), 1024);
   AppendUintField(&output, IREE_SV(".private_segment_fixed_size"), 64);
+  AppendUintField(&output, IREE_SV(".max_flat_workgroup_size"), 256);
   AppendMsgPackString(&output, IREE_SV(".reqd_workgroup_size"));
   AppendMsgPackArray(&output, 3);
   AppendMsgPackUint(&output, 16);
@@ -426,6 +427,7 @@ TEST(HsacoMetadataTest, ParsesValidMetadata) {
   EXPECT_EQ(kernel.kernarg_segment_alignment, 8);
   EXPECT_EQ(kernel.group_segment_fixed_size, 1024);
   EXPECT_EQ(kernel.private_segment_fixed_size, 64);
+  EXPECT_EQ(kernel.max_flat_workgroup_size, 256);
   ASSERT_TRUE(kernel.has_required_workgroup_size);
   EXPECT_EQ(kernel.required_workgroup_size[0], 16);
   EXPECT_EQ(kernel.required_workgroup_size[1], 4);

@@ -125,6 +125,9 @@ enum iree_hal_executable_function_flag_bits_e {
   // The workgroup size specified on the function info is the minimum size and
   // granularity and any dynamic workgroup size chosen must be a multiple.
   IREE_HAL_EXECUTABLE_FUNCTION_FLAG_WORKGROUP_SIZE_DYNAMIC = 1ull << 1,
+  // OpenCL/HIP uniform-workgroup-size metadata requires global work sizes to
+  // divide evenly by local workgroup sizes.
+  IREE_HAL_EXECUTABLE_FUNCTION_FLAG_UNIFORM_WORKGROUP_SIZE = 1ull << 2,
 };
 typedef uint64_t iree_hal_executable_function_flags_t;
 
@@ -145,6 +148,12 @@ typedef struct iree_hal_executable_function_info_t {
   // If IREE_HAL_EXECUTABLE_FUNCTION_FLAG_WORKGROUP_SIZE_DYNAMIC is set then
   // any dynamic workgroup size must be a multiple of this value.
   uint32_t workgroup_size[3];
+  // Maximum total work-items per workgroup accepted by this function.
+  uint32_t max_workgroup_size;
+  // Fixed workgroup-local memory required by the function, in bytes.
+  uint32_t workgroup_local_memory_size;
+  // Fixed private memory required per work-item, in bytes.
+  uint32_t private_memory_size;
   // Occupancy information hinting at how this function should be scheduled.
   iree_hal_occupancy_info_t occupancy_info;
 } iree_hal_executable_function_info_t;

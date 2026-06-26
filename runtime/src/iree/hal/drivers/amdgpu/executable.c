@@ -1785,6 +1785,9 @@ static iree_status_t iree_hal_amdgpu_executable_initialize_export_infos(
     const bool custom_direct_only = iree_any_bit_set(
         metadata_export->flags,
         IREE_HAL_AMDGPU_EXECUTABLE_EXPORT_FLAG_CUSTOM_DIRECT_ONLY);
+    const bool uniform_workgroup_size = iree_any_bit_set(
+        metadata_export->flags,
+        IREE_HAL_AMDGPU_EXECUTABLE_EXPORT_FLAG_UNIFORM_WORKGROUP_SIZE);
 
     const iree_hal_amdgpu_kernarg_layout_t* layout = NULL;
     if (!custom_direct_only) {
@@ -1797,18 +1800,52 @@ static iree_status_t iree_hal_amdgpu_executable_initialize_export_infos(
       IREE_RETURN_IF_ERROR(iree_hal_amdgpu_executable_validate_workgroup_size(
           reflection->symbol_name, metadata_export->workgroup_size, limits));
     }
+    const uint32_t max_workgroup_size =
+        metadata_export->max_workgroup_size != 0
+            ? metadata_export->max_workgroup_size
+            : limits->max_workgroup_size;
+    if (IREE_UNLIKELY(max_workgroup_size > limits->max_workgroup_size)) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "AMDGPU kernel `%.*s` max workgroup size %u exceeds device maximum "
+          "%u",
+          (int)reflection->symbol_name.size, reflection->symbol_name.data,
+          max_workgroup_size, limits->max_workgroup_size);
+    }
+    if (!requires_dispatch_workgroup_size &&
+        metadata_export->max_workgroup_size != 0) {
+      const uint64_t fixed_workgroup_size =
+          (uint64_t)metadata_export->workgroup_size[0] *
+          metadata_export->workgroup_size[1] * metadata_export->workgroup_size[2];
+      if (IREE_UNLIKELY(fixed_workgroup_size > max_workgroup_size)) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "AMDGPU kernel `%.*s` workgroup size total %" PRIu64
+            " exceeds kernel maximum %u",
+            (int)reflection->symbol_name.size, reflection->symbol_name.data,
+            fixed_workgroup_size, max_workgroup_size);
+      }
+    }
 
     executable->custom_direct_only_exports[i] = custom_direct_only;
     executable->export_parameter_offsets[i] = reflection->parameter_offset;
 
     memset(info, 0, sizeof(*info));
     info->name = reflection->name;
-    info->flags = requires_dispatch_workgroup_size
-                      ? IREE_HAL_EXECUTABLE_FUNCTION_FLAG_WORKGROUP_SIZE_DYNAMIC
-                      : IREE_HAL_EXECUTABLE_FUNCTION_FLAG_NONE;
+    info->flags = IREE_HAL_EXECUTABLE_FUNCTION_FLAG_NONE;
+    if (requires_dispatch_workgroup_size) {
+      info->flags |= IREE_HAL_EXECUTABLE_FUNCTION_FLAG_WORKGROUP_SIZE_DYNAMIC;
+    }
+    if (uniform_workgroup_size) {
+      info->flags |= IREE_HAL_EXECUTABLE_FUNCTION_FLAG_UNIFORM_WORKGROUP_SIZE;
+    }
     info->constant_byte_length = layout ? layout->constant_byte_length : 0;
     info->binding_count = layout ? layout->binding_count : 0;
     info->parameter_count = reflection->parameter_count;
+    info->max_workgroup_size = max_workgroup_size;
+    info->workgroup_local_memory_size =
+        metadata_export->fixed_group_segment_size;
+    info->private_memory_size = metadata_export->fixed_private_segment_size;
     if (requires_dispatch_workgroup_size) {
       info->workgroup_size[0] = 1;
       info->workgroup_size[1] = 1;
