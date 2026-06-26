@@ -106,15 +106,18 @@ typedef struct id4_ideogram4_generation_stage_slot_t {
   id4_pipeline_stage_t* stage;
   // Retained plan for this coarse stage.
   id4_pipeline_plan_t* plan;
-  // Prepared reusable bundle for this coarse stage.
-  id4_pipeline_bundle_t* bundle;
   // Owned boundary tensor buffers in plan order.
   id4_pipeline_buffer_binding_set_t boundary_bindings;
   // Owned diagnostic tap buffers in plan order.
   id4_pipeline_buffer_binding_set_t diagnostic_tap_bindings;
-  // Semaphore signaled when this stage's async parameter loads complete.
-  iree_hal_semaphore_t* prepare_semaphore;
 } id4_ideogram4_generation_stage_slot_t;
+
+typedef struct id4_ideogram4_generation_phase_bundle_t {
+  // Prepared stage bundle owned by the current generation issue phase.
+  id4_pipeline_bundle_t* bundle;
+  // Whether |bundle| has been submitted to HAL queue execution.
+  bool was_issued;
+} id4_ideogram4_generation_phase_bundle_t;
 
 typedef struct id4_ideogram4_generation_boundary_alias_t {
   // Stage slot producing the replacement binding.
@@ -155,6 +158,12 @@ struct id4_ideogram4_generation_bundle_t {
   iree_hal_device_t* device;
   // Queue affinity shared by every prepared stage in the current plan.
   iree_hal_queue_affinity_t queue_affinity;
+  // Parameter providers retained for phase-resident stage preparation.
+  id4_ideogram4_generation_parameter_providers_t parameter_providers;
+  // Kernel library retained for phase-resident stage preparation.
+  id4_pipeline_kernel_library_t* kernel_library;
+  // HAL command-buffer mode used when preparing phase-resident stages.
+  iree_hal_command_buffer_mode_t command_buffer_mode;
   // Coarse stage slots owned by this generation bundle.
   id4_ideogram4_generation_stage_slot_t
       stages[ID4_IDEOGRAM4_GENERATION_STAGE_COUNT];
@@ -1096,10 +1105,36 @@ static void id4_ideogram4_generation_stage_slot_deinitialize(
     id4_ideogram4_generation_stage_slot_t* slot) {
   id4_pipeline_buffer_binding_set_deinitialize(&slot->diagnostic_tap_bindings);
   id4_pipeline_buffer_binding_set_deinitialize(&slot->boundary_bindings);
-  id4_pipeline_bundle_release(slot->bundle);
   id4_pipeline_plan_release(slot->plan);
-  iree_hal_semaphore_release(slot->prepare_semaphore);
   memset(slot, 0, sizeof(*slot));
+}
+
+static void id4_ideogram4_generation_parameter_providers_retain(
+    const id4_ideogram4_generation_parameter_providers_t* providers) {
+  iree_io_parameter_provider_retain(providers->qwen);
+  iree_io_parameter_provider_retain(providers->dit_conditioned);
+  iree_io_parameter_provider_retain(providers->dit_unconditioned);
+  iree_io_parameter_provider_retain(providers->vae);
+}
+
+static void id4_ideogram4_generation_parameter_providers_release(
+    id4_ideogram4_generation_parameter_providers_t* providers) {
+  iree_io_parameter_provider_release(providers->vae);
+  iree_io_parameter_provider_release(providers->dit_unconditioned);
+  iree_io_parameter_provider_release(providers->dit_conditioned);
+  iree_io_parameter_provider_release(providers->qwen);
+  memset(providers, 0, sizeof(*providers));
+}
+
+static void id4_ideogram4_generation_bundle_capture_prepare_resources(
+    id4_ideogram4_generation_bundle_t* bundle,
+    const id4_ideogram4_generation_prepare_options_t* options) {
+  bundle->parameter_providers = options->parameter_providers;
+  id4_ideogram4_generation_parameter_providers_retain(
+      &bundle->parameter_providers);
+  bundle->kernel_library = options->kernel_library;
+  id4_pipeline_kernel_library_retain(bundle->kernel_library);
+  bundle->command_buffer_mode = options->command_buffer_mode;
 }
 
 static void id4_ideogram4_generation_bundle_assign_slot(
@@ -1355,21 +1390,6 @@ static iree_status_t id4_ideogram4_generation_bundle_apply_boundary_aliases(
   return iree_ok_status();
 }
 
-static iree_status_t id4_ideogram4_generation_bundle_create_prepare_semaphores(
-    id4_ideogram4_generation_bundle_t* bundle) {
-  iree_status_t status = iree_ok_status();
-  for (iree_host_size_t i = 0;
-       i < ID4_IDEOGRAM4_GENERATION_STAGE_COUNT && iree_status_is_ok(status);
-       ++i) {
-    id4_ideogram4_generation_stage_slot_t* slot = &bundle->stages[i];
-    if (id4_pipeline_plan_parameter_slab_count(slot->plan) == 0) continue;
-    status = iree_hal_semaphore_create(bundle->device, bundle->queue_affinity,
-                                       0, IREE_HAL_SEMAPHORE_FLAG_NONE,
-                                       &slot->prepare_semaphore);
-  }
-  return status;
-}
-
 static iree_io_parameter_provider_t*
 id4_ideogram4_generation_prepare_stage_parameter_provider(
     const id4_ideogram4_generation_parameter_providers_t* providers,
@@ -1387,71 +1407,11 @@ id4_ideogram4_generation_prepare_stage_parameter_provider(
   return stage_providers[stage_ordinal];
 }
 
-static iree_status_t id4_ideogram4_generation_prepare_stage(
-    id4_ideogram4_generation_bundle_t* bundle,
-    const id4_ideogram4_generation_prepare_options_t* options,
-    id4_ideogram4_generation_stage_ordinal_t stage_ordinal) {
-  id4_ideogram4_generation_stage_slot_t* slot = &bundle->stages[stage_ordinal];
-  iree_hal_semaphore_t* signal_semaphore = NULL;
-  uint64_t signal_payload_value = 1;
-  iree_hal_semaphore_list_t signal_list = iree_hal_semaphore_list_empty();
-  if (slot->prepare_semaphore) {
-    signal_list = id4_ideogram4_single_semaphore_list(
-        &signal_semaphore, &signal_payload_value, slot->prepare_semaphore,
-        signal_payload_value);
-  }
-
-  id4_pipeline_stage_prepare_options_t prepare_options;
-  memset(&prepare_options, 0, sizeof(prepare_options));
-  prepare_options.structure_size = sizeof(prepare_options);
-  prepare_options.parameter_provider =
-      id4_ideogram4_generation_prepare_stage_parameter_provider(
-          &options->parameter_providers, stage_ordinal);
-  prepare_options.kernel_library = options->kernel_library;
-  prepare_options.wait_semaphore_list = slot->prepare_semaphore
-                                            ? options->wait_semaphore_list
-                                            : iree_hal_semaphore_list_empty();
-  prepare_options.signal_semaphore_list = signal_list;
-  prepare_options.command_buffer_mode = options->command_buffer_mode;
-  prepare_options.diagnostics_sink = options->diagnostics_sink;
-  return id4_pipeline_stage_prepare(slot->stage, slot->plan, &prepare_options,
-                                    &slot->bundle);
-}
-
-static iree_status_t id4_ideogram4_generation_bundle_prepare_stages(
+static iree_status_t id4_ideogram4_generation_bundle_signal_prepared(
     id4_ideogram4_generation_bundle_t* bundle,
     const id4_ideogram4_generation_prepare_options_t* options) {
-  iree_status_t status = iree_ok_status();
-  for (iree_host_size_t i = 0;
-       i < ID4_IDEOGRAM4_GENERATION_STAGE_COUNT && iree_status_is_ok(status);
-       ++i) {
-    status = id4_ideogram4_generation_prepare_stage(
-        bundle, options, (id4_ideogram4_generation_stage_ordinal_t)i);
-  }
-  return status;
-}
-
-static iree_status_t id4_ideogram4_generation_bundle_signal_readiness(
-    id4_ideogram4_generation_bundle_t* bundle,
-    const id4_ideogram4_generation_prepare_options_t* options) {
-  iree_hal_semaphore_t* wait_semaphores[ID4_IDEOGRAM4_GENERATION_STAGE_COUNT];
-  uint64_t wait_payload_values[ID4_IDEOGRAM4_GENERATION_STAGE_COUNT];
-  iree_host_size_t wait_count = 0;
-  for (iree_host_size_t i = 0; i < ID4_IDEOGRAM4_GENERATION_STAGE_COUNT; ++i) {
-    iree_hal_semaphore_t* semaphore = bundle->stages[i].prepare_semaphore;
-    if (!semaphore) continue;
-    wait_semaphores[wait_count] = semaphore;
-    wait_payload_values[wait_count] = 1;
-    ++wait_count;
-  }
-  iree_hal_semaphore_list_t wait_list = iree_hal_semaphore_list_empty();
-  if (wait_count != 0) {
-    wait_list.count = wait_count;
-    wait_list.semaphores = wait_semaphores;
-    wait_list.payload_values = wait_payload_values;
-  }
   return iree_hal_device_queue_barrier(
-      bundle->device, bundle->queue_affinity, wait_list,
+      bundle->device, bundle->queue_affinity, options->wait_semaphore_list,
       options->signal_semaphore_list, IREE_HAL_EXECUTE_FLAG_NONE);
 }
 
@@ -1478,13 +1438,10 @@ iree_status_t id4_ideogram4_session_prepare_generation(
     status = id4_ideogram4_generation_bundle_apply_boundary_aliases(bundle);
   }
   if (iree_status_is_ok(status)) {
-    status = id4_ideogram4_generation_bundle_create_prepare_semaphores(bundle);
+    id4_ideogram4_generation_bundle_capture_prepare_resources(bundle, options);
   }
   if (iree_status_is_ok(status)) {
-    status = id4_ideogram4_generation_bundle_prepare_stages(bundle, options);
-  }
-  if (iree_status_is_ok(status)) {
-    status = id4_ideogram4_generation_bundle_signal_readiness(bundle, options);
+    status = id4_ideogram4_generation_bundle_signal_prepared(bundle, options);
   }
   if (iree_status_is_ok(status)) {
     *out_bundle = bundle;
@@ -1502,6 +1459,9 @@ void id4_ideogram4_generation_bundle_release(
          ++i) {
       id4_ideogram4_generation_stage_slot_deinitialize(&bundle->stages[i]);
     }
+    id4_pipeline_kernel_library_release(bundle->kernel_library);
+    id4_ideogram4_generation_parameter_providers_release(
+        &bundle->parameter_providers);
     id4_ideogram4_session_release(bundle->session);
     iree_allocator_t host_allocator = bundle->host_allocator;
     iree_allocator_free(host_allocator, bundle);
@@ -1762,6 +1722,90 @@ static void id4_ideogram4_generation_push_wait(
   ++*inout_count;
 }
 
+static iree_status_t id4_ideogram4_generation_wait_stage_bundle_readiness(
+    id4_pipeline_bundle_t* stage_bundle) {
+  if (!stage_bundle) return iree_ok_status();
+  return iree_hal_semaphore_list_wait(
+      id4_pipeline_bundle_readiness_semaphore_list(stage_bundle),
+      iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE);
+}
+
+static iree_status_t id4_ideogram4_generation_release_phase_bundle(
+    id4_ideogram4_generation_phase_bundle_t* phase_bundle) {
+  if (!phase_bundle->bundle) return iree_ok_status();
+  iree_status_t status = iree_ok_status();
+  if (!phase_bundle->was_issued) {
+    status = id4_ideogram4_generation_wait_stage_bundle_readiness(
+        phase_bundle->bundle);
+  }
+  id4_pipeline_bundle_release(phase_bundle->bundle);
+  phase_bundle->bundle = NULL;
+  phase_bundle->was_issued = false;
+  return status;
+}
+
+static iree_status_t id4_ideogram4_generation_release_phase_bundles(
+    id4_ideogram4_generation_phase_bundle_t* phase_bundles) {
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0; i < ID4_IDEOGRAM4_GENERATION_STAGE_COUNT; ++i) {
+    status = iree_status_join(
+        status,
+        id4_ideogram4_generation_release_phase_bundle(&phase_bundles[i]));
+  }
+  return status;
+}
+
+static iree_status_t id4_ideogram4_generation_prepare_stage_bundle(
+    id4_ideogram4_generation_execution_t* execution,
+    id4_ideogram4_generation_stage_ordinal_t stage_ordinal,
+    iree_hal_semaphore_list_t wait_semaphore_list,
+    id4_pipeline_diagnostics_sink_t* diagnostics_sink,
+    id4_pipeline_bundle_t** out_stage_bundle) {
+  IREE_ASSERT_ARGUMENT(out_stage_bundle);
+  *out_stage_bundle = NULL;
+  id4_ideogram4_generation_bundle_t* bundle = execution->bundle;
+  id4_ideogram4_generation_stage_slot_t* slot = &bundle->stages[stage_ordinal];
+  const bool has_parameter_slabs =
+      id4_pipeline_plan_parameter_slab_count(slot->plan) != 0;
+
+  iree_hal_semaphore_t* prepare_semaphore = NULL;
+  iree_hal_semaphore_t* prepare_semaphore_storage = NULL;
+  uint64_t prepare_payload_storage = 1;
+  iree_hal_semaphore_list_t signal_list = iree_hal_semaphore_list_empty();
+  iree_status_t status = iree_ok_status();
+  if (has_parameter_slabs) {
+    status = iree_hal_semaphore_create(bundle->device, bundle->queue_affinity,
+                                       0, IREE_HAL_SEMAPHORE_FLAG_NONE,
+                                       &prepare_semaphore);
+  }
+  if (iree_status_is_ok(status) && has_parameter_slabs) {
+    signal_list = id4_ideogram4_single_semaphore_list(
+        &prepare_semaphore_storage, &prepare_payload_storage, prepare_semaphore,
+        prepare_payload_storage);
+  }
+
+  id4_pipeline_stage_prepare_options_t prepare_options;
+  memset(&prepare_options, 0, sizeof(prepare_options));
+  prepare_options.structure_size = sizeof(prepare_options);
+  prepare_options.parameter_provider =
+      id4_ideogram4_generation_prepare_stage_parameter_provider(
+          &bundle->parameter_providers, stage_ordinal);
+  prepare_options.kernel_library = bundle->kernel_library;
+  prepare_options.wait_semaphore_list = has_parameter_slabs
+                                            ? wait_semaphore_list
+                                            : iree_hal_semaphore_list_empty();
+  prepare_options.signal_semaphore_list = signal_list;
+  prepare_options.command_buffer_mode = bundle->command_buffer_mode;
+  prepare_options.diagnostics_sink = diagnostics_sink;
+  if (iree_status_is_ok(status)) {
+    status = id4_pipeline_stage_prepare(slot->stage, slot->plan,
+                                        &prepare_options, out_stage_bundle);
+  }
+
+  iree_hal_semaphore_release(prepare_semaphore);
+  return status;
+}
+
 static iree_status_t id4_ideogram4_generation_chain_upload_after_sampler(
     id4_ideogram4_generation_execution_t* execution,
     uint64_t sampler_payload_value) {
@@ -1791,6 +1835,7 @@ static iree_status_t id4_ideogram4_generation_chain_upload_after_sampler(
 static iree_status_t id4_ideogram4_generation_issue_stage(
     id4_ideogram4_generation_execution_t* execution,
     id4_ideogram4_generation_stage_ordinal_t stage_ordinal,
+    id4_pipeline_bundle_t* stage_bundle,
     iree_hal_semaphore_list_t wait_semaphore_list,
     iree_hal_semaphore_t* signal_semaphore, uint64_t signal_payload_value,
     id4_pipeline_diagnostics_sink_t* diagnostics_sink) {
@@ -1814,12 +1859,12 @@ static iree_status_t id4_ideogram4_generation_issue_stage(
   issue_options.wait_semaphore_list = wait_semaphore_list;
   issue_options.signal_semaphore_list = signal_list;
   issue_options.diagnostics_sink = diagnostics_sink;
-  return id4_pipeline_stage_issue(slot->stage, slot->bundle, &issue_options);
+  return id4_pipeline_stage_issue(slot->stage, stage_bundle, &issue_options);
 }
 
 static iree_status_t id4_ideogram4_generation_issue_qwen(
     id4_ideogram4_generation_execution_t* execution,
-    uint64_t qwen_upload_payload_value,
+    id4_pipeline_bundle_t* qwen_bundle, uint64_t qwen_upload_payload_value,
     id4_pipeline_diagnostics_sink_t* diagnostics_sink) {
   iree_hal_semaphore_t* wait_semaphores[2];
   uint64_t wait_payload_values[2];
@@ -1827,21 +1872,16 @@ static iree_status_t id4_ideogram4_generation_issue_qwen(
   id4_ideogram4_generation_push_wait(wait_semaphores, wait_payload_values,
                                      &wait_count, execution->upload_semaphore,
                                      qwen_upload_payload_value);
-  id4_ideogram4_generation_push_wait(
-      wait_semaphores, wait_payload_values, &wait_count,
-      execution->bundle->stages[ID4_IDEOGRAM4_GENERATION_STAGE_QWEN]
-          .prepare_semaphore,
-      1);
   iree_hal_semaphore_list_t wait_list = id4_ideogram4_generation_make_wait_list(
       wait_semaphores, wait_payload_values, wait_count);
   return id4_ideogram4_generation_issue_stage(
-      execution, ID4_IDEOGRAM4_GENERATION_STAGE_QWEN, wait_list,
+      execution, ID4_IDEOGRAM4_GENERATION_STAGE_QWEN, qwen_bundle, wait_list,
       execution->qwen_done_semaphore, 1, diagnostics_sink);
 }
 
 static iree_status_t id4_ideogram4_generation_issue_noise(
     id4_ideogram4_generation_execution_t* execution,
-    uint64_t seed_upload_payload_value,
+    id4_pipeline_bundle_t* noise_bundle, uint64_t seed_upload_payload_value,
     id4_pipeline_diagnostics_sink_t* diagnostics_sink) {
   iree_hal_semaphore_t* wait_semaphores[2];
   uint64_t wait_payload_values[2];
@@ -1849,21 +1889,17 @@ static iree_status_t id4_ideogram4_generation_issue_noise(
   id4_ideogram4_generation_push_wait(wait_semaphores, wait_payload_values,
                                      &wait_count, execution->upload_semaphore,
                                      seed_upload_payload_value);
-  id4_ideogram4_generation_push_wait(
-      wait_semaphores, wait_payload_values, &wait_count,
-      execution->bundle->stages[ID4_IDEOGRAM4_GENERATION_STAGE_NOISE]
-          .prepare_semaphore,
-      1);
   iree_hal_semaphore_list_t wait_list = id4_ideogram4_generation_make_wait_list(
       wait_semaphores, wait_payload_values, wait_count);
   return id4_ideogram4_generation_issue_stage(
-      execution, ID4_IDEOGRAM4_GENERATION_STAGE_NOISE, wait_list,
+      execution, ID4_IDEOGRAM4_GENERATION_STAGE_NOISE, noise_bundle, wait_list,
       execution->noise_done_semaphore, 1, diagnostics_sink);
 }
 
 static iree_status_t id4_ideogram4_generation_issue_dit_branch(
     id4_ideogram4_generation_execution_t* execution,
     id4_ideogram4_generation_stage_ordinal_t stage_ordinal,
+    id4_pipeline_bundle_t* branch_bundle,
     iree_hal_semaphore_t* latent_semaphore, uint64_t latent_payload_value,
     iree_hal_semaphore_t* condition_semaphore, uint64_t condition_payload_value,
     iree_hal_semaphore_t* branch_done_semaphore, uint64_t branch_payload_value,
@@ -1880,18 +1916,16 @@ static iree_status_t id4_ideogram4_generation_issue_dit_branch(
   id4_ideogram4_generation_push_wait(wait_semaphores, wait_payload_values,
                                      &wait_count, condition_semaphore,
                                      condition_payload_value);
-  id4_ideogram4_generation_push_wait(
-      wait_semaphores, wait_payload_values, &wait_count,
-      execution->bundle->stages[stage_ordinal].prepare_semaphore, 1);
   iree_hal_semaphore_list_t wait_list = id4_ideogram4_generation_make_wait_list(
       wait_semaphores, wait_payload_values, wait_count);
   return id4_ideogram4_generation_issue_stage(
-      execution, stage_ordinal, wait_list, branch_done_semaphore,
+      execution, stage_ordinal, branch_bundle, wait_list, branch_done_semaphore,
       branch_payload_value, diagnostics_sink);
 }
 
 static iree_status_t id4_ideogram4_generation_issue_sampler(
-    id4_ideogram4_generation_execution_t* execution, uint64_t payload_value,
+    id4_ideogram4_generation_execution_t* execution,
+    id4_pipeline_bundle_t* sampler_bundle, uint64_t payload_value,
     id4_pipeline_diagnostics_sink_t* diagnostics_sink) {
   iree_hal_semaphore_t* wait_semaphores[3];
   uint64_t wait_payload_values[3];
@@ -1908,12 +1942,14 @@ static iree_status_t id4_ideogram4_generation_issue_sampler(
   iree_hal_semaphore_list_t wait_list = id4_ideogram4_generation_make_wait_list(
       wait_semaphores, wait_payload_values, wait_count);
   return id4_ideogram4_generation_issue_stage(
-      execution, ID4_IDEOGRAM4_GENERATION_STAGE_SAMPLER, wait_list,
-      execution->sampler_done_semaphore, payload_value, diagnostics_sink);
+      execution, ID4_IDEOGRAM4_GENERATION_STAGE_SAMPLER, sampler_bundle,
+      wait_list, execution->sampler_done_semaphore, payload_value,
+      diagnostics_sink);
 }
 
 static iree_status_t id4_ideogram4_generation_issue_decode(
-    id4_ideogram4_generation_execution_t* execution, uint64_t sampler_payload,
+    id4_ideogram4_generation_execution_t* execution,
+    id4_pipeline_bundle_t* decode_bundle, uint64_t sampler_payload,
     iree_hal_semaphore_list_t final_signal_list,
     id4_pipeline_diagnostics_sink_t* diagnostics_sink) {
   iree_hal_semaphore_t* wait_semaphores[2];
@@ -1922,16 +1958,11 @@ static iree_status_t id4_ideogram4_generation_issue_decode(
   id4_ideogram4_generation_push_wait(
       wait_semaphores, wait_payload_values, &wait_count,
       execution->sampler_done_semaphore, sampler_payload);
-  id4_ideogram4_generation_push_wait(
-      wait_semaphores, wait_payload_values, &wait_count,
-      execution->bundle->stages[ID4_IDEOGRAM4_GENERATION_STAGE_DECODE]
-          .prepare_semaphore,
-      1);
   iree_hal_semaphore_list_t wait_list = id4_ideogram4_generation_make_wait_list(
       wait_semaphores, wait_payload_values, wait_count);
   IREE_RETURN_IF_ERROR(id4_ideogram4_generation_issue_stage(
-      execution, ID4_IDEOGRAM4_GENERATION_STAGE_DECODE, wait_list,
-      execution->decode_done_semaphore, 1, diagnostics_sink));
+      execution, ID4_IDEOGRAM4_GENERATION_STAGE_DECODE, decode_bundle,
+      wait_list, execution->decode_done_semaphore, 1, diagnostics_sink));
   iree_hal_semaphore_t* wait_semaphore = NULL;
   uint64_t wait_payload_value = 1;
   wait_list = id4_ideogram4_single_semaphore_list(
@@ -1974,6 +2005,9 @@ iree_status_t id4_ideogram4_session_issue_generation(
   id4_ideogram4_generation_execution_t* execution = NULL;
   uint64_t qwen_upload_payload_value = 0;
   uint64_t seed_upload_payload_value = 0;
+  id4_ideogram4_generation_phase_bundle_t
+      phase_bundles[ID4_IDEOGRAM4_GENERATION_STAGE_COUNT];
+  memset(phase_bundles, 0, sizeof(phase_bundles));
 
   iree_status_t status = id4_ideogram4_generation_execution_allocate(
       bundle, session->host_allocator, &execution);
@@ -2017,8 +2051,31 @@ iree_status_t id4_ideogram4_session_issue_generation(
     status = id4_ideogram4_generation_execution_create_semaphores(execution);
   }
   if (iree_status_is_ok(status)) {
+    status = iree_hal_semaphore_list_wait(options->wait_semaphore_list,
+                                          iree_infinite_timeout(),
+                                          IREE_ASYNC_WAIT_FLAG_NONE);
+  }
+  if (iree_status_is_ok(status)) {
+    status = id4_ideogram4_generation_prepare_stage_bundle(
+        execution, ID4_IDEOGRAM4_GENERATION_STAGE_QWEN,
+        iree_hal_semaphore_list_empty(), options->diagnostics_sink,
+        &phase_bundles[ID4_IDEOGRAM4_GENERATION_STAGE_QWEN].bundle);
+  }
+  if (iree_status_is_ok(status)) {
+    status = id4_ideogram4_generation_prepare_stage_bundle(
+        execution, ID4_IDEOGRAM4_GENERATION_STAGE_NOISE,
+        iree_hal_semaphore_list_empty(), options->diagnostics_sink,
+        &phase_bundles[ID4_IDEOGRAM4_GENERATION_STAGE_NOISE].bundle);
+  }
+  if (iree_status_is_ok(status)) {
+    status = id4_ideogram4_generation_prepare_stage_bundle(
+        execution, ID4_IDEOGRAM4_GENERATION_STAGE_SAMPLER,
+        iree_hal_semaphore_list_empty(), options->diagnostics_sink,
+        &phase_bundles[ID4_IDEOGRAM4_GENERATION_STAGE_SAMPLER].bundle);
+  }
+  if (iree_status_is_ok(status)) {
     status = id4_ideogram4_generation_upload_qwen_inputs(
-        execution, &qwen_inputs, options->wait_semaphore_list);
+        execution, &qwen_inputs, iree_hal_semaphore_list_empty());
   }
   if (iree_status_is_ok(status)) {
     qwen_upload_payload_value = execution->upload_payload_value;
@@ -2050,11 +2107,50 @@ iree_status_t id4_ideogram4_session_issue_generation(
   }
   if (iree_status_is_ok(status)) {
     status = id4_ideogram4_generation_issue_qwen(
-        execution, qwen_upload_payload_value, options->diagnostics_sink);
+        execution, phase_bundles[ID4_IDEOGRAM4_GENERATION_STAGE_QWEN].bundle,
+        qwen_upload_payload_value, options->diagnostics_sink);
+    phase_bundles[ID4_IDEOGRAM4_GENERATION_STAGE_QWEN].was_issued =
+        iree_status_is_ok(status);
+    status = iree_status_join(
+        status, id4_ideogram4_generation_release_phase_bundle(
+                    &phase_bundles[ID4_IDEOGRAM4_GENERATION_STAGE_QWEN]));
   }
   if (iree_status_is_ok(status)) {
     status = id4_ideogram4_generation_issue_noise(
-        execution, seed_upload_payload_value, options->diagnostics_sink);
+        execution, phase_bundles[ID4_IDEOGRAM4_GENERATION_STAGE_NOISE].bundle,
+        seed_upload_payload_value, options->diagnostics_sink);
+    phase_bundles[ID4_IDEOGRAM4_GENERATION_STAGE_NOISE].was_issued =
+        iree_status_is_ok(status);
+    status = iree_status_join(
+        status, id4_ideogram4_generation_release_phase_bundle(
+                    &phase_bundles[ID4_IDEOGRAM4_GENERATION_STAGE_NOISE]));
+  }
+  if (iree_status_is_ok(status)) {
+    iree_hal_semaphore_t* qwen_done_semaphore = execution->qwen_done_semaphore;
+    uint64_t qwen_done_payload_value = 1;
+    iree_hal_semaphore_list_t qwen_done_list = {
+        // One Qwen completion edge required before allocating DiT weights.
+        .count = 1,
+        // Stack-backed Qwen completion semaphore.
+        .semaphores = &qwen_done_semaphore,
+        // Stack-backed Qwen completion payload value.
+        .payload_values = &qwen_done_payload_value,
+    };
+    status = iree_hal_semaphore_list_wait(
+        qwen_done_list, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE);
+  }
+  if (iree_status_is_ok(status)) {
+    status = id4_ideogram4_generation_prepare_stage_bundle(
+        execution, ID4_IDEOGRAM4_GENERATION_STAGE_DIT_CONDITIONED,
+        iree_hal_semaphore_list_empty(), options->diagnostics_sink,
+        &phase_bundles[ID4_IDEOGRAM4_GENERATION_STAGE_DIT_CONDITIONED].bundle);
+  }
+  if (iree_status_is_ok(status)) {
+    status = id4_ideogram4_generation_prepare_stage_bundle(
+        execution, ID4_IDEOGRAM4_GENERATION_STAGE_DIT_UNCONDITIONED,
+        iree_hal_semaphore_list_empty(), options->diagnostics_sink,
+        &phase_bundles[ID4_IDEOGRAM4_GENERATION_STAGE_DIT_UNCONDITIONED]
+             .bundle);
   }
   for (uint32_t i = 0;
        i < denoise_schedule.step_count && iree_status_is_ok(status); ++i) {
@@ -2074,29 +2170,61 @@ iree_status_t id4_ideogram4_session_issue_generation(
     if (iree_status_is_ok(status)) {
       status = id4_ideogram4_generation_issue_dit_branch(
           execution, ID4_IDEOGRAM4_GENERATION_STAGE_DIT_CONDITIONED,
+          phase_bundles[ID4_IDEOGRAM4_GENERATION_STAGE_DIT_CONDITIONED].bundle,
           latent_semaphore, latent_payload_value,
           execution->qwen_done_semaphore, 1,
           execution->dit_conditioned_done_semaphore, payload_value,
           options->diagnostics_sink);
+      phase_bundles[ID4_IDEOGRAM4_GENERATION_STAGE_DIT_CONDITIONED]
+          .was_issued |= iree_status_is_ok(status);
     }
     if (iree_status_is_ok(status)) {
       status = id4_ideogram4_generation_issue_dit_branch(
           execution, ID4_IDEOGRAM4_GENERATION_STAGE_DIT_UNCONDITIONED,
+          phase_bundles[ID4_IDEOGRAM4_GENERATION_STAGE_DIT_UNCONDITIONED]
+              .bundle,
           latent_semaphore, latent_payload_value, NULL, 0,
           execution->dit_unconditioned_done_semaphore, payload_value,
           options->diagnostics_sink);
+      phase_bundles[ID4_IDEOGRAM4_GENERATION_STAGE_DIT_UNCONDITIONED]
+          .was_issued |= iree_status_is_ok(status);
     }
     if (iree_status_is_ok(status)) {
       status = id4_ideogram4_generation_issue_sampler(
-          execution, payload_value, options->diagnostics_sink);
+          execution,
+          phase_bundles[ID4_IDEOGRAM4_GENERATION_STAGE_SAMPLER].bundle,
+          payload_value, options->diagnostics_sink);
+      phase_bundles[ID4_IDEOGRAM4_GENERATION_STAGE_SAMPLER].was_issued |=
+          iree_status_is_ok(status);
     }
+  }
+  status = iree_status_join(
+      status,
+      id4_ideogram4_generation_release_phase_bundle(
+          &phase_bundles[ID4_IDEOGRAM4_GENERATION_STAGE_DIT_CONDITIONED]));
+  status = iree_status_join(
+      status,
+      id4_ideogram4_generation_release_phase_bundle(
+          &phase_bundles[ID4_IDEOGRAM4_GENERATION_STAGE_DIT_UNCONDITIONED]));
+  status = iree_status_join(
+      status, id4_ideogram4_generation_release_phase_bundle(
+                  &phase_bundles[ID4_IDEOGRAM4_GENERATION_STAGE_SAMPLER]));
+  if (iree_status_is_ok(status)) {
+    status = id4_ideogram4_generation_prepare_stage_bundle(
+        execution, ID4_IDEOGRAM4_GENERATION_STAGE_DECODE,
+        iree_hal_semaphore_list_empty(), options->diagnostics_sink,
+        &phase_bundles[ID4_IDEOGRAM4_GENERATION_STAGE_DECODE].bundle);
   }
   if (iree_status_is_ok(status)) {
     status = id4_ideogram4_generation_issue_decode(
-        execution, denoise_schedule.step_count, options->signal_semaphore_list,
+        execution, phase_bundles[ID4_IDEOGRAM4_GENERATION_STAGE_DECODE].bundle,
+        denoise_schedule.step_count, options->signal_semaphore_list,
         options->diagnostics_sink);
+    phase_bundles[ID4_IDEOGRAM4_GENERATION_STAGE_DECODE].was_issued =
+        iree_status_is_ok(status);
   }
-
+  status = iree_status_join(
+      status, id4_ideogram4_generation_release_phase_bundles(phase_bundles));
   id4_ideogram4_denoise_schedule_deinitialize(&denoise_schedule,
                                               session->host_allocator);
   id4_ideogram4_dit_inputs_deinitialize(&dit_inputs, session->host_allocator);

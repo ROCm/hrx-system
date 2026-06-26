@@ -141,7 +141,7 @@ typedef struct id4_ideogram4_generation_parameter_providers_t {
   iree_io_parameter_provider_t* vae;
 } id4_ideogram4_generation_parameter_providers_t;
 
-// Options for preparing reusable HAL state from one generation plan.
+// Options for preparing reusable generation state from one generation plan.
 typedef struct id4_ideogram4_generation_prepare_options_t {
   // Size of this structure for versioning.
   iree_host_size_t structure_size;
@@ -153,9 +153,9 @@ typedef struct id4_ideogram4_generation_prepare_options_t {
   id4_pipeline_kernel_library_t* kernel_library;
   // HAL command-buffer mode used when preparing reusable regions.
   iree_hal_command_buffer_mode_t command_buffer_mode;
-  // Semaphores that asynchronous parameter loading waits on.
+  // Semaphores that generation preparation waits on.
   iree_hal_semaphore_list_t wait_semaphore_list;
-  // Semaphores signaled after every prepared stage is ready for issue.
+  // Semaphores signaled after generation state is ready for issue.
   iree_hal_semaphore_list_t signal_semaphore_list;
   // Diagnostics sink for prepare events.
   id4_pipeline_diagnostics_sink_t* diagnostics_sink;
@@ -262,7 +262,12 @@ iree_status_t id4_ideogram4_generation_plan_format_json(
     const id4_ideogram4_generation_plan_t* plan,
     iree_string_builder_t* builder);
 
-// Prepares reusable HAL state for every stage in |plan|.
+// Prepares reusable generation boundary state for |plan|.
+//
+// Heavy stage bundles and their parameter slabs are phase-resident: they are
+// prepared during issue when enough memory is available, submitted to the HAL,
+// and then released from host ownership after the queue captures their
+// resources.
 iree_status_t id4_ideogram4_session_prepare_generation(
     id4_ideogram4_session_t* session,
     const id4_ideogram4_generation_plan_t* plan,

@@ -171,6 +171,10 @@ static iree_status_t id4_cli_create_loaded_session(
   session_options.services =
       id4_tooling_runtime_context_stage_services(runtime_context);
   session_options.kernel_cache = runtime_context->kernel_cache;
+  session_options.parameter_scopes.qwen = IREE_SV("qwen");
+  session_options.parameter_scopes.dit_conditioned = IREE_SV("dit_cond");
+  session_options.parameter_scopes.dit_unconditioned = IREE_SV("dit_uncond");
+  session_options.parameter_scopes.vae = IREE_SV("vae");
   session_options.vae_activation_format =
       ID4_VAE_ACTIVATION_FORMAT_BF16_CONV_INPUT;
   IREE_RETURN_IF_ERROR(id4_ideogram4_session_create(
@@ -198,6 +202,44 @@ id4_cli_make_generation_plan_policy(void) {
       ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT;
   policy.vae_tiling.mode = ID4_VAE_TILING_MODE_DISABLED;
   return policy;
+}
+
+static iree_status_t id4_cli_create_parameter_providers(
+    iree_allocator_t host_allocator,
+    id4_ideogram4_generation_parameter_providers_t* out_providers) {
+  memset(out_providers, 0, sizeof(*out_providers));
+  iree_status_t status = id4_tooling_create_parameter_provider_from_flags(
+      IREE_SV("qwen"), host_allocator, &out_providers->qwen);
+  if (iree_status_is_ok(status)) {
+    status = id4_tooling_create_parameter_provider_from_flags(
+        IREE_SV("dit_cond"), host_allocator, &out_providers->dit_conditioned);
+  }
+  if (iree_status_is_ok(status)) {
+    status = id4_tooling_create_parameter_provider_from_flags(
+        IREE_SV("dit_uncond"), host_allocator,
+        &out_providers->dit_unconditioned);
+  }
+  if (iree_status_is_ok(status)) {
+    status = id4_tooling_create_parameter_provider_from_flags(
+        IREE_SV("vae"), host_allocator, &out_providers->vae);
+  }
+  if (!iree_status_is_ok(status)) {
+    iree_io_parameter_provider_release(out_providers->vae);
+    iree_io_parameter_provider_release(out_providers->dit_unconditioned);
+    iree_io_parameter_provider_release(out_providers->dit_conditioned);
+    iree_io_parameter_provider_release(out_providers->qwen);
+    memset(out_providers, 0, sizeof(*out_providers));
+  }
+  return status;
+}
+
+static void id4_cli_release_parameter_providers(
+    id4_ideogram4_generation_parameter_providers_t* providers) {
+  iree_io_parameter_provider_release(providers->vae);
+  iree_io_parameter_provider_release(providers->dit_unconditioned);
+  iree_io_parameter_provider_release(providers->dit_conditioned);
+  iree_io_parameter_provider_release(providers->qwen);
+  memset(providers, 0, sizeof(*providers));
 }
 
 static id4_pipeline_tensor_shape_t id4_cli_convert_program_shape(
@@ -314,7 +356,8 @@ static iree_status_t id4_cli_run_generation(iree_allocator_t host_allocator) {
   memset(&runtime_context, 0, sizeof(runtime_context));
   bool runtime_context_initialized = false;
   id4_pipeline_kernel_library_t* kernel_library = NULL;
-  iree_io_parameter_provider_t* parameter_provider = NULL;
+  id4_ideogram4_generation_parameter_providers_t parameter_providers;
+  memset(&parameter_providers, 0, sizeof(parameter_providers));
   id4_ideogram4_session_t* session = NULL;
   id4_ideogram4_generation_plan_t* generation_plan = NULL;
   id4_ideogram4_generation_bundle_t* generation_bundle = NULL;
@@ -350,8 +393,8 @@ static iree_status_t id4_cli_run_generation(iree_allocator_t host_allocator) {
                                                         &kernel_library);
   }
   if (iree_status_is_ok(status)) {
-    status = id4_tooling_create_parameter_provider_from_flags(
-        iree_string_view_empty(), host_allocator, &parameter_provider);
+    status = id4_cli_create_parameter_providers(host_allocator,
+                                                &parameter_providers);
   }
   if (iree_status_is_ok(status)) {
     status = id4_cli_create_loaded_session(&runtime_context, &diagnostics_sink,
@@ -406,10 +449,7 @@ static iree_status_t id4_cli_run_generation(iree_allocator_t host_allocator) {
     id4_ideogram4_generation_prepare_options_t prepare_options;
     memset(&prepare_options, 0, sizeof(prepare_options));
     prepare_options.structure_size = sizeof(prepare_options);
-    prepare_options.parameter_providers.qwen = parameter_provider;
-    prepare_options.parameter_providers.dit_conditioned = parameter_provider;
-    prepare_options.parameter_providers.dit_unconditioned = parameter_provider;
-    prepare_options.parameter_providers.vae = parameter_provider;
+    prepare_options.parameter_providers = parameter_providers;
     prepare_options.kernel_library = kernel_library;
     prepare_options.command_buffer_mode = runtime_context.command_buffer_mode;
     prepare_options.wait_semaphore_list = iree_hal_semaphore_list_empty();
@@ -490,7 +530,7 @@ static iree_status_t id4_cli_run_generation(iree_allocator_t host_allocator) {
   iree_hal_semaphore_release(prepare_semaphore);
   iree_hal_semaphore_release(completion_semaphore);
   id4_ideogram4_session_release(session);
-  iree_io_parameter_provider_release(parameter_provider);
+  id4_cli_release_parameter_providers(&parameter_providers);
   id4_pipeline_kernel_library_release(kernel_library);
   if (runtime_context_initialized) {
     id4_tooling_runtime_context_deinitialize(&runtime_context);

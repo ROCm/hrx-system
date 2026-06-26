@@ -1,6 +1,6 @@
 config.decl @id4.sampler.element_count : %value: index where [range(%value, 1, 1048576)]
 
-kernel.def @id4_sampler_cfg_denoise_f32() {
+kernel.def export("id4_sampler_cfg_denoise_f32") @id4_sampler_cfg_denoise_f32() {
   %unit = index.constant 1 : index
   %workgroup_size_x = index.constant 256 : index
   %rounding = index.constant 255 : index
