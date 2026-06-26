@@ -204,7 +204,15 @@ static iree_status_t iree_hal_streaming_module_extract_metadata(
     iree_hal_executable_t* executable =
         module->executables ? module->executables[executable_ordinal]
                             : module->executable;
-    module->symbol_count += iree_hal_executable_export_count(executable);
+    iree_host_size_t new_symbol_count = 0;
+    if (IREE_UNLIKELY(!iree_host_size_checked_add(
+            module->symbol_count, iree_hal_executable_export_count(executable),
+            &new_symbol_count))) {
+      IREE_TRACE_ZONE_END(z0);
+      return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                              "module symbol count overflow");
+    }
+    module->symbol_count = new_symbol_count;
   }
   if (module->symbol_count == 0) {
     IREE_TRACE_ZONE_END(z0);
@@ -220,23 +228,39 @@ static iree_status_t iree_hal_streaming_module_extract_metadata(
     uint16_t copy_count;
     uint16_t resolve_count;
   } op_counts_t;
-  const iree_host_size_t export_infos_size =
-      module->symbol_count * sizeof(iree_hal_executable_export_info_t);
-  const iree_host_size_t export_executables_size =
-      module->symbol_count * sizeof(iree_hal_executable_t*);
-  const iree_host_size_t export_ordinals_size =
-      module->symbol_count * sizeof(iree_hal_executable_export_ordinal_t);
-  const iree_host_size_t op_counts_size =
-      module->symbol_count * sizeof(op_counts_t);
+  iree_host_size_t export_infos_size = 0;
+  iree_host_size_t export_executables_size = 0;
+  iree_host_size_t export_ordinals_size = 0;
+  iree_host_size_t op_counts_size = 0;
+  iree_host_size_t total_temp_size = 0;
+  if (IREE_UNLIKELY(
+          !iree_host_size_checked_mul(module->symbol_count,
+                                      sizeof(iree_hal_executable_export_info_t),
+                                      &export_infos_size) ||
+          !iree_host_size_checked_mul(module->symbol_count,
+                                      sizeof(iree_hal_executable_t*),
+                                      &export_executables_size) ||
+          !iree_host_size_checked_mul(
+              module->symbol_count,
+              sizeof(iree_hal_executable_export_ordinal_t),
+              &export_ordinals_size) ||
+          !iree_host_size_checked_mul(module->symbol_count, sizeof(op_counts_t),
+                                      &op_counts_size) ||
+          !iree_host_size_checked_add(
+              export_infos_size, export_executables_size, &total_temp_size) ||
+          !iree_host_size_checked_add(total_temp_size, export_ordinals_size,
+                                      &total_temp_size) ||
+          !iree_host_size_checked_add(total_temp_size, op_counts_size,
+                                      &total_temp_size))) {
+    IREE_TRACE_ZONE_END(z0);
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "module export metadata size overflow");
+  }
   uint8_t* temp_buffer = NULL;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_allocator_malloc(module->host_allocator,
-                                export_infos_size + export_executables_size +
-                                    export_ordinals_size + op_counts_size,
+      z0, iree_allocator_malloc(module->host_allocator, total_temp_size,
                                 (void**)&temp_buffer));
-  memset(temp_buffer, 0,
-         export_infos_size + export_executables_size + export_ordinals_size +
-             op_counts_size);
+  memset(temp_buffer, 0, total_temp_size);
   iree_hal_executable_export_info_t* export_infos =
       (iree_hal_executable_export_info_t*)temp_buffer;
   iree_hal_executable_t** export_executables =
@@ -269,7 +293,13 @@ static iree_status_t iree_hal_streaming_module_extract_metadata(
                                                export_ordinals[symbol_index],
                                                &export_infos[symbol_index]);
       if (!iree_status_is_ok(status)) break;
-      total_parameter_count += export_infos[symbol_index].parameter_count;
+      if (IREE_UNLIKELY(!iree_host_size_checked_add(
+              total_parameter_count, export_infos[symbol_index].parameter_count,
+              &total_parameter_count))) {
+        status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                                  "module parameter count overflow");
+        break;
+      }
       ++symbol_index;
     }
   }
@@ -277,9 +307,15 @@ static iree_status_t iree_hal_streaming_module_extract_metadata(
   // Allocate the scratch space for querying parameter info.
   iree_hal_executable_export_parameter_t* parameters = NULL;
   if (iree_status_is_ok(status) && total_parameter_count > 0) {
-    status = iree_allocator_malloc(module->host_allocator,
-                                   total_parameter_count * sizeof(*parameters),
-                                   (void**)&parameters);
+    iree_host_size_t parameters_size = 0;
+    if (IREE_UNLIKELY(!iree_host_size_checked_mul(
+            total_parameter_count, sizeof(*parameters), &parameters_size))) {
+      status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                                "module parameter metadata size overflow");
+    } else {
+      status = iree_allocator_malloc(module->host_allocator, parameters_size,
+                                     (void**)&parameters);
+    }
   }
 
   // Analyze each export to determine operation counts.
@@ -311,19 +347,32 @@ static iree_status_t iree_hal_streaming_module_extract_metadata(
 
   // Allocate all permanent storage in a single block.
   // Memory layout: [Symbol Array][Symbol0 ops][Symbol1 ops]...
-  const iree_host_size_t symbols_size =
-      module->symbol_count * sizeof(iree_hal_streaming_symbol_t);
-  const iree_host_size_t ops_size =
-      total_ops * sizeof(iree_hal_streaming_parameter_op_t);
-  const iree_host_size_t total_size = symbols_size + ops_size;
+  iree_host_size_t symbols_size = 0;
+  iree_host_size_t ops_size = 0;
+  iree_host_size_t total_size = 0;
+  if (iree_status_is_ok(status) &&
+      IREE_UNLIKELY(
+          !iree_host_size_checked_mul(module->symbol_count,
+                                      sizeof(iree_hal_streaming_symbol_t),
+                                      &symbols_size) ||
+          !iree_host_size_checked_mul(total_ops,
+                                      sizeof(iree_hal_streaming_parameter_op_t),
+                                      &ops_size) ||
+          !iree_host_size_checked_add(symbols_size, ops_size, &total_size))) {
+    status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                              "module symbol storage size overflow");
+  }
   uint8_t* buffer = NULL;
   if (iree_status_is_ok(status)) {
     status = iree_allocator_malloc(module->host_allocator, total_size,
                                    (void**)&buffer);
   }
-  module->symbols = (iree_hal_streaming_symbol_t*)buffer;
-  iree_hal_streaming_parameter_op_t* ops_base =
-      (iree_hal_streaming_parameter_op_t*)(buffer + symbols_size);
+  iree_hal_streaming_parameter_op_t* ops_base = NULL;
+  if (iree_status_is_ok(status)) {
+    memset(buffer, 0, total_size);
+    module->symbols = (iree_hal_streaming_symbol_t*)buffer;
+    ops_base = (iree_hal_streaming_parameter_op_t*)(buffer + symbols_size);
+  }
 
   iree_hal_streaming_parameter_op_t* current_ops = ops_base;
   for (iree_host_size_t i = 0, parameter_base = 0;
@@ -336,14 +385,28 @@ static iree_status_t iree_hal_streaming_module_extract_metadata(
     symbol->executable = export_executables[i];
     symbol->export_ordinal = export_ordinals[i];
 
-    // Function attributes - TODO: Query from export metadata when available.
-    // TODO(benvanik): populate from occupancy_info when available.
+    // Function attributes are sourced from executable metadata when present and
+    // fall back to conservative device-level defaults otherwise.
     symbol->occupancy_info = export_infos[i].occupancy_info;
-    symbol->max_threads_per_block = 1024;       // TODO: from metadata.
-    symbol->shared_size_bytes = 0;              // TODO: from metadata.
-    symbol->local_size_bytes = 0;               // TODO: from metadata.
-    symbol->num_regs = 32;                      // TODO: from metadata.
-    symbol->max_dynamic_shared_size_bytes = 0;  // TODO: from metadata.
+    symbol->max_threads_per_block = export_infos[i].max_workgroup_size;
+    if (symbol->max_threads_per_block == 0 && module->context &&
+        module->context->device_entry) {
+      symbol->max_threads_per_block =
+          module->context->device_entry->max_threads_per_block;
+    }
+    if (symbol->max_threads_per_block == 0) {
+      symbol->max_threads_per_block = 1024;
+    }
+    symbol->shared_size_bytes = export_infos[i].workgroup_local_memory_size;
+    symbol->local_size_bytes = export_infos[i].private_memory_size;
+    // Register usage is not currently exposed by the executable metadata.
+    symbol->num_regs = 0;
+    symbol->max_dynamic_shared_size_bytes = 0;
+    symbol->preferred_shared_memory_carveout = 0;
+    symbol->cache_mode_ca = 0;
+    symbol->uniform_workgroup_size = iree_any_bit_set(
+        export_infos[i].flags,
+        IREE_HAL_EXECUTABLE_FUNCTION_FLAG_UNIFORM_WORKGROUP_SIZE);
 
     // Initialize parameter info.
     iree_hal_streaming_parameter_info_t* parameter_info = &symbol->parameters;

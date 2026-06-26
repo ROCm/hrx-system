@@ -689,20 +689,35 @@ typedef struct iree_hal_streaming_printf_format_t {
 typedef struct iree_hal_streaming_symbol_t {
   // Parent module. Unowned.
   iree_hal_streaming_module_t* module;
+  // HIP-visible symbol name. Aliases executable/module-owned string storage.
   iree_string_view_t name;
+  // Symbol kind determining which metadata fields are active.
   iree_hal_streaming_symbol_type_t type;
+  // HAL executable containing this function export, if this is a function.
   iree_hal_executable_t* executable;
+  // HAL executable export ordinal for function dispatch and metadata queries.
   iree_hal_executable_export_ordinal_t export_ordinal;
 
-  // Function attributes (only valid for FUNCTION type).
+  // Occupancy scheduling hints for function dispatch.
   iree_hal_occupancy_info_t occupancy_info;
   // Maximum workgroup size reported by executable metadata, or the device
   // limit when metadata does not specify one.
   uint32_t max_threads_per_block;
+  // Fixed workgroup-local memory required by the function, in bytes.
   uint32_t shared_size_bytes;
+  // Fixed private memory required per work-item, in bytes.
   uint32_t local_size_bytes;
+  // Registers used per work-item, or 0 when executable metadata omits it.
   uint32_t num_regs;
+  // Maximum dynamic shared memory accepted by this function, in bytes.
   uint32_t max_dynamic_shared_size_bytes;
+  // Preferred shared-memory carveout percentage reported through HIP function
+  // attribute queries.
+  int32_t preferred_shared_memory_carveout;
+  // Cache mode flag reported through HIP function attribute queries.
+  uint32_t cache_mode_ca;
+  // True when OpenCL/HIP metadata requires uniform workgroup sizes.
+  bool uniform_workgroup_size;
 
   // Function parameter information used for argument packing and unpacking.
   iree_hal_streaming_parameter_info_t parameters;
