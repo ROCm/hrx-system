@@ -1743,6 +1743,9 @@ iree_status_t iree_hal_streaming_memory_allocate_device_from_pool(
     iree_device_size_t size, iree_hal_streaming_memory_flags_t flags,
     iree_hal_streaming_buffer_t** out_buffer);
 
+// Row pitch alignment used by HIP pitched allocations.
+#define IREE_HAL_STREAMING_PITCHED_ALLOCATION_ALIGNMENT 512u
+
 // Synchronization: none (allocates pitched memory).
 iree_status_t iree_hal_streaming_memory_allocate_device_pitched(
     iree_hal_streaming_context_t* context, iree_device_size_t width_bytes,

@@ -45,6 +45,33 @@ typedef struct hipArray_st* hipArray_t;
 typedef const struct hipArray_st* hipArray_const_t;
 typedef void* hipDeviceptr_t;
 
+typedef enum hipArray_Format {
+  HIP_AD_FORMAT_UNSIGNED_INT8 = 0x01,
+  HIP_AD_FORMAT_UNSIGNED_INT16 = 0x02,
+  HIP_AD_FORMAT_UNSIGNED_INT32 = 0x03,
+  HIP_AD_FORMAT_SIGNED_INT8 = 0x08,
+  HIP_AD_FORMAT_SIGNED_INT16 = 0x09,
+  HIP_AD_FORMAT_SIGNED_INT32 = 0x0a,
+  HIP_AD_FORMAT_HALF = 0x10,
+  HIP_AD_FORMAT_FLOAT = 0x20,
+} hipArray_Format;
+
+typedef struct HIP_ARRAY_DESCRIPTOR {
+  size_t Width;                 // Logical array width in elements.
+  size_t Height;                // Logical array height in elements.
+  hipArray_Format Format;       // Element format for each channel.
+  unsigned int NumChannels;     // Number of packed channels per element.
+} HIP_ARRAY_DESCRIPTOR;
+
+typedef struct HIP_ARRAY3D_DESCRIPTOR {
+  size_t Width;                 // Logical array width in elements.
+  size_t Height;                // Logical array height in elements.
+  size_t Depth;                 // Logical array depth in elements.
+  hipArray_Format Format;       // Element format for each channel.
+  unsigned int NumChannels;     // Number of packed channels per element.
+  unsigned int Flags;           // Creation flags.
+} HIP_ARRAY3D_DESCRIPTOR;
+
 // Dimension type.
 typedef struct dim3 {
   unsigned int x, y, z;
@@ -64,6 +91,12 @@ typedef struct hipExtent {
   size_t height;  // Height in elements.
   size_t depth;   // Depth in elements.
 } hipExtent;
+
+#define hipArrayDefault 0x00
+#define hipArrayLayered 0x01
+#define hipArraySurfaceLoadStore 0x02
+#define hipArrayCubemap 0x04
+#define hipArrayTextureGather 0x08
 
 // Context scheduling flags (matching CUDA).
 #define hipDeviceScheduleAuto 0x00
@@ -1271,6 +1304,19 @@ HIPAPI hipError_t hipIpcGetEventHandle(hipIpcEventHandle_t* handle,
 HIPAPI hipError_t hipIpcOpenEventHandle(hipEvent_t* event,
                                         hipIpcEventHandle_t handle);
 
+// Array management.
+HIPAPI hipError_t hipArrayCreate(hipArray_t* pHandle,
+                                 const HIP_ARRAY_DESCRIPTOR* pAllocateArray);
+HIPAPI hipError_t hipArray3DCreate(
+    hipArray_t* array, const HIP_ARRAY3D_DESCRIPTOR* pAllocateArray);
+HIPAPI hipError_t hipArrayDestroy(hipArray_t array);
+HIPAPI hipError_t hipArrayGetDescriptor(HIP_ARRAY_DESCRIPTOR* pArrayDescriptor,
+                                        hipArray_t array);
+HIPAPI hipError_t hipArray3DGetDescriptor(
+    HIP_ARRAY3D_DESCRIPTOR* pArrayDescriptor, hipArray_t array);
+HIPAPI hipError_t hipArrayGetInfo(hipChannelFormatDesc* desc, hipExtent* extent,
+                                  unsigned int* flags, hipArray_t array);
+
 // Memory transfers
 HIPAPI hipError_t hipMemcpy(void* dst, const void* src, size_t sizeBytes,
                             hipMemcpyKind kind);
@@ -1393,6 +1439,8 @@ HIPAPI hipError_t hipMemset3D(hipPitchedPtr pitchedDevPtr, int value,
                               hipExtent extent);
 HIPAPI hipError_t hipMemset3DAsync(hipPitchedPtr pitchedDevPtr, int value,
                                    hipExtent extent, hipStream_t stream);
+HIPAPI hipError_t hipGetChannelDesc(hipChannelFormatDesc* desc,
+                                    hipArray_const_t array);
 
 // Stream management
 HIPAPI hipError_t hipStreamCreate(hipStream_t* phStream);
