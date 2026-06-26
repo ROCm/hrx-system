@@ -28,6 +28,7 @@ hrx_cc_library(
         "graph_analysis.c",
         "graph_exec.c",
         "init.c",
+        "kpack.c",
         "mem_pool.c",
         "memory.c",
         "module.c",
@@ -41,6 +42,7 @@ hrx_cc_library(
         "graph.h",
         "hrx_bridge.h",
         "internal.h",
+        "kpack.h",
         "tls.h",
     ],
     includes = [
@@ -90,6 +92,17 @@ hrx_cc_test(
 hrx_cc_test(
     name = "fat_binary_test",
     srcs = ["fat_binary_test.cc"],
+    deps = [
+        ":common",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
+    name = "kpack_test",
+    srcs = ["kpack_test.cc"],
     deps = [
         ":common",
         "//runtime/src/iree/base",

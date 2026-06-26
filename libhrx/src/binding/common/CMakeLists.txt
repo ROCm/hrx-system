@@ -12,6 +12,7 @@ iree_cc_library(
     "graph.h"
     "hrx_bridge.h"
     "internal.h"
+    "kpack.h"
     "tls.h"
   SRCS
     "context.c"
@@ -22,6 +23,7 @@ iree_cc_library(
     "graph_analysis.c"
     "graph_exec.c"
     "init.c"
+    "kpack.c"
     "mem_pool.c"
     "memory.c"
     "module.c"
@@ -90,6 +92,19 @@ iree_cc_test(
     libhrx_defs
 )
 
+iree_cc_test(
+  NAME
+    kpack_test
+  SRCS
+    "kpack_test.cc"
+  DEPS
+    ::common
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+    libhrx_defs
+)
+
 iree_cc_binary_benchmark(
   NAME
     buffer_table_benchmark
@@ -144,6 +159,16 @@ if(HRX_ENABLE_ZSTD)
     target_link_options(libhrx_src_binding_common_common PUBLIC
       ${HRX_ZSTD_LDFLAGS_OTHER}
     )
+    # Let the kpack unit test compile and run its zstd-per-kernel round-trip
+    # (KpackArchive.ZstdGetKernelRoundTrips), which is HRX_ENABLE_ZSTD-gated.
+    if(TARGET libhrx_src_binding_common_kpack_test)
+      target_compile_definitions(libhrx_src_binding_common_kpack_test PRIVATE
+        HRX_ENABLE_ZSTD=1
+      )
+      target_include_directories(libhrx_src_binding_common_kpack_test PRIVATE
+        ${ZSTD_INCLUDE_DIRS}
+      )
+    endif()
     message(STATUS
       "hrx-runtime: CCOB zstd decompression ENABLED "
       "(libzstd ${HRX_ZSTD_VERSION})"
