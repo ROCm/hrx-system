@@ -84,16 +84,17 @@ static std::vector<float> ToF32Vector(const std::vector<uint8_t>& bytes) {
 static void ExpectF32TensorNear(const std::vector<uint8_t>& actual_bytes,
                                 const id4::test::FixtureTensor& expected) {
   ASSERT_EQ(expected.dtype, ID4_PIPELINE_TENSOR_DTYPE_F32);
-  ASSERT_TRUE(expected.has_tolerance);
+  ASSERT_EQ(expected.tolerance.mode,
+            id4::test::FixtureToleranceMode::kElementwise);
   ASSERT_EQ(actual_bytes.size(), expected.payload.size());
 
   std::vector<float> actual = ToF32Vector(actual_bytes);
   std::vector<float> expected_values = ToF32Vector(expected.payload);
   ASSERT_EQ(actual.size(), expected_values.size());
   for (iree_host_size_t i = 0; i < actual.size(); ++i) {
-    const double tolerance =
-        expected.absolute_tolerance +
-        expected.relative_tolerance * std::fabs((double)expected_values[i]);
+    const double tolerance = expected.tolerance.absolute_tolerance +
+                             expected.tolerance.relative_tolerance *
+                                 std::fabs((double)expected_values[i]);
     EXPECT_NEAR(actual[i], expected_values[i], tolerance) << "element " << i;
   }
 }
