@@ -8,6 +8,12 @@
 
 #include <string.h>
 
+static const char* kMixedBf16Fp8LayerLinearWeightSuffixes[] = {
+    "attention.qkv.weight",
+    "attention.o.weight",
+    "feed_forward.w2.weight",
+};
+
 iree_status_t id4_ideogram4_dit_parameter_format_parse(
     iree_string_view_t value,
     id4_ideogram4_dit_parameter_format_t* out_format) {
@@ -70,7 +76,9 @@ iree_status_t id4_ideogram4_dit_parameter_source_rule_list_initialize(
                               (uint32_t)format);
   }
 
-  const iree_host_size_t rule_count = model.layer_count;
+  const iree_host_size_t rule_count =
+      model.layer_count *
+      IREE_ARRAYSIZE(kMixedBf16Fp8LayerLinearWeightSuffixes);
   iree_status_t status = iree_allocator_malloc_array(
       host_allocator, rule_count, sizeof(out_rules->values[0]),
       (void**)&out_rules->values);
@@ -83,24 +91,39 @@ iree_status_t id4_ideogram4_dit_parameter_source_rule_list_initialize(
   if (iree_status_is_ok(status)) {
     memset(out_rules->values, 0, rule_count * sizeof(out_rules->values[0]));
   }
-  for (iree_host_size_t i = 0; i < rule_count && iree_status_is_ok(status);
-       ++i) {
-    char* key_storage = out_rules->key_storage +
-                        i * ID4_IDEOGRAM4_DIT_PROGRAM_FORMAT_BUFFER_CAPACITY;
-    iree_string_view_t key = iree_string_view_empty();
-    status = id4_ideogram4_dit_program_format_layer_parameter(
-        (uint32_t)i, IREE_SV("attention.qkv.weight"), key_storage,
-        ID4_IDEOGRAM4_DIT_PROGRAM_FORMAT_BUFFER_CAPACITY, &key);
-    if (iree_status_is_ok(status)) {
-      out_rules->values[i] = (id4_ideogram4_dit_parameter_source_rule_t){
-          // Exact logical parameter key.
-          .key = key,
-          // Scope containing the compact FP8 weight and row scale.
-          .source_scope = fp8_parameter_scope,
-          // Physical storage expected from the selected scope.
-          .storage = ID4_IDEOGRAM4_DIT_PARAMETER_STORAGE_FP8_E4M3_SCALED,
-      };
-      ++out_rules->count;
+  for (iree_host_size_t layer_ordinal = 0;
+       layer_ordinal < model.layer_count && iree_status_is_ok(status);
+       ++layer_ordinal) {
+    for (iree_host_size_t suffix_ordinal = 0;
+         suffix_ordinal <
+             IREE_ARRAYSIZE(kMixedBf16Fp8LayerLinearWeightSuffixes) &&
+         iree_status_is_ok(status);
+         ++suffix_ordinal) {
+      const iree_host_size_t rule_ordinal =
+          layer_ordinal *
+              IREE_ARRAYSIZE(kMixedBf16Fp8LayerLinearWeightSuffixes) +
+          suffix_ordinal;
+      char* key_storage =
+          out_rules->key_storage +
+          rule_ordinal * ID4_IDEOGRAM4_DIT_PROGRAM_FORMAT_BUFFER_CAPACITY;
+      iree_string_view_t key = iree_string_view_empty();
+      status = id4_ideogram4_dit_program_format_layer_parameter(
+          (uint32_t)layer_ordinal,
+          iree_make_cstring_view(
+              kMixedBf16Fp8LayerLinearWeightSuffixes[suffix_ordinal]),
+          key_storage, ID4_IDEOGRAM4_DIT_PROGRAM_FORMAT_BUFFER_CAPACITY, &key);
+      if (iree_status_is_ok(status)) {
+        out_rules->values[rule_ordinal] =
+            (id4_ideogram4_dit_parameter_source_rule_t){
+                // Exact logical parameter key.
+                .key = key,
+                // Scope containing the compact FP8 weight and row scale.
+                .source_scope = fp8_parameter_scope,
+                // Physical storage expected from the selected scope.
+                .storage = ID4_IDEOGRAM4_DIT_PARAMETER_STORAGE_FP8_E4M3_SCALED,
+            };
+        ++out_rules->count;
+      }
     }
   }
   if (!iree_status_is_ok(status)) {
