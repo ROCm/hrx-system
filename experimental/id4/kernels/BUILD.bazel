@@ -4147,6 +4147,50 @@ _KERNEL_CASES = [
         "target_name": "qwen3_vl_linear_bf16_bf16_wmma_m32n64_small",
     },
     {
+        "actual_case": "@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n64_qwen_projection_shape_case",
+        "benchmark": "@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n64_qwen_projection_shape",
+        "configs": [
+            "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=480",
+            "--config=id4.qwen3_vl.linear_wmma.input_size=4096",
+            "--config=id4.qwen3_vl.linear_wmma.output_size=4096",
+        ],
+        "source": "qwen3_vl/linear_bf16_f32_wmma.loom",
+        "target_name": "qwen3_vl_linear_bf16_bf16_wmma_m32n64_qwen_projection_shape",
+    },
+    {
+        "actual_case": "@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n64_qwen_kv_shape_case",
+        "benchmark": "@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n64_qwen_kv_shape",
+        "configs": [
+            "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=480",
+            "--config=id4.qwen3_vl.linear_wmma.input_size=4096",
+            "--config=id4.qwen3_vl.linear_wmma.output_size=1024",
+        ],
+        "source": "qwen3_vl/linear_bf16_f32_wmma.loom",
+        "target_name": "qwen3_vl_linear_bf16_bf16_wmma_m32n64_qwen_kv_shape",
+    },
+    {
+        "actual_case": "@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n64_qwen_mlp_up_shape_case",
+        "benchmark": "@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n64_qwen_mlp_up_shape",
+        "configs": [
+            "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=480",
+            "--config=id4.qwen3_vl.linear_wmma.input_size=4096",
+            "--config=id4.qwen3_vl.linear_wmma.output_size=12288",
+        ],
+        "source": "qwen3_vl/linear_bf16_f32_wmma.loom",
+        "target_name": "qwen3_vl_linear_bf16_bf16_wmma_m32n64_qwen_mlp_up_shape",
+    },
+    {
+        "actual_case": "@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n64_qwen_mlp_down_shape_case",
+        "benchmark": "@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n64_qwen_mlp_down_shape",
+        "configs": [
+            "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=480",
+            "--config=id4.qwen3_vl.linear_wmma.input_size=12288",
+            "--config=id4.qwen3_vl.linear_wmma.output_size=4096",
+        ],
+        "source": "qwen3_vl/linear_bf16_f32_wmma.loom",
+        "target_name": "qwen3_vl_linear_bf16_bf16_wmma_m32n64_qwen_mlp_down_shape",
+    },
+    {
         "actual_case": "@id4_qwen3_vl_linear_bf16_f32_wmma_zero_case",
         "benchmark": "@id4_qwen3_vl_linear_bf16_f32_wmma_zero",
         "configs": [
@@ -4354,6 +4398,16 @@ _KERNEL_CASES = [
         "target_name": "qwen3_vl_condition_f32_fixture_slice",
     },
     {
+        "actual_case": "@id4_qwen3_vl_condition_forward_f32_id4_text451_case",
+        "benchmark": "@id4_qwen3_vl_condition_forward_f32_id4_text451",
+        "configs": [
+            "--config=id4.qwen3_vl.condition.hidden_row_count=53248",
+            "--config=id4.qwen3_vl.condition.token_count=451",
+        ],
+        "source": "qwen3_vl/condition.loom",
+        "target_name": "qwen3_vl_condition_f32_id4_text451",
+    },
+    {
         "actual_case": "@id4_qwen3_vl_selected_hidden_pack_f32_small_case",
         "benchmark": "@id4_qwen3_vl_selected_hidden_pack_f32_small",
         "configs": [
@@ -4378,8 +4432,8 @@ _KERNEL_CASES = [
         "target_name": "qwen3_vl_selected_hidden_pack_bf16_f32_small",
     },
     {
-        "actual_case": "@id4_qwen3_vl_selected_hidden_pack_f32_pytorch_order_case",
-        "benchmark": "@id4_qwen3_vl_selected_hidden_pack_f32_pytorch_order",
+        "actual_case": "@id4_qwen3_vl_selected_hidden_pack_f32_layer_major_case",
+        "benchmark": "@id4_qwen3_vl_selected_hidden_pack_f32_layer_major",
         "configs": [
             "--config=id4.qwen3_vl.selected_hidden_pack.token_count=2",
             "--config=id4.qwen3_vl.selected_hidden_pack.hidden_size=3",
@@ -4387,14 +4441,14 @@ _KERNEL_CASES = [
             "--config=id4.qwen3_vl.selected_hidden_pack.selected_layer_index=1",
         ],
         "data": [
-            "qwen3_vl/testdata/qwen3_vl_selected_hidden_pack_f32_pytorch_order_expected.npy",
+            "qwen3_vl/testdata/qwen3_vl_selected_hidden_pack_f32_layer_major_expected.npy",
         ],
         "source": "qwen3_vl/selected_hidden_pack_f32.loom",
-        "target_name": "qwen3_vl_selected_hidden_pack_f32_pytorch_order",
+        "target_name": "qwen3_vl_selected_hidden_pack_f32_layer_major",
     },
     {
-        "actual_case": "@id4_qwen3_vl_selected_hidden_pack_bf16_f32_pytorch_order_case",
-        "benchmark": "@id4_qwen3_vl_selected_hidden_pack_bf16_f32_pytorch_order",
+        "actual_case": "@id4_qwen3_vl_selected_hidden_pack_bf16_f32_layer_major_case",
+        "benchmark": "@id4_qwen3_vl_selected_hidden_pack_bf16_f32_layer_major",
         "configs": [
             "--config=id4.qwen3_vl.selected_hidden_pack.token_count=2",
             "--config=id4.qwen3_vl.selected_hidden_pack.hidden_size=3",
@@ -4402,10 +4456,10 @@ _KERNEL_CASES = [
             "--config=id4.qwen3_vl.selected_hidden_pack.selected_layer_index=1",
         ],
         "data": [
-            "qwen3_vl/testdata/qwen3_vl_selected_hidden_pack_f32_pytorch_order_expected.npy",
+            "qwen3_vl/testdata/qwen3_vl_selected_hidden_pack_f32_layer_major_expected.npy",
         ],
         "source": "qwen3_vl/selected_hidden_pack_f32.loom",
-        "target_name": "qwen3_vl_selected_hidden_pack_bf16_f32_pytorch_order",
+        "target_name": "qwen3_vl_selected_hidden_pack_bf16_f32_layer_major",
     },
     {
         "actual_case": "@id4_qwen3_vl_selected_hidden_pack_f32_qwen_slice_case",
@@ -4418,6 +4472,18 @@ _KERNEL_CASES = [
         ],
         "source": "qwen3_vl/selected_hidden_pack_f32.loom",
         "target_name": "qwen3_vl_selected_hidden_pack_f32_qwen_slice",
+    },
+    {
+        "actual_case": "@id4_qwen3_vl_selected_hidden_pack_bf16_f32_id4_text451_case",
+        "benchmark": "@id4_qwen3_vl_selected_hidden_pack_bf16_f32_id4_text451",
+        "configs": [
+            "--config=id4.qwen3_vl.selected_hidden_pack.token_count=451",
+            "--config=id4.qwen3_vl.selected_hidden_pack.hidden_size=4096",
+            "--config=id4.qwen3_vl.selected_hidden_pack.hidden_row_count=53248",
+            "--config=id4.qwen3_vl.selected_hidden_pack.selected_layer_index=12",
+        ],
+        "source": "qwen3_vl/selected_hidden_pack_f32.loom",
+        "target_name": "qwen3_vl_selected_hidden_pack_bf16_f32_id4_text451",
     },
     {
         "actual_case": "@id4_qwen3_vl_rmsnorm_f32_small_case",

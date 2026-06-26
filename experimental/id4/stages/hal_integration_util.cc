@@ -6,6 +6,7 @@
 
 #include "experimental/id4/stages/hal_integration_util.h"
 
+#include <algorithm>
 #include <cerrno>
 #include <cmath>
 #include <cstdlib>
@@ -261,31 +262,129 @@ static iree_status_t ParseFixtureTolerance(iree_string_view_t record,
   if (iree_string_view_is_empty(tolerance)) return iree_ok_status();
 
   iree_string_view_t absolute_tolerance = iree_string_view_empty();
-  IREE_RETURN_IF_ERROR(iree_json_lookup_object_value(tolerance, IREE_SV("atol"),
-                                                     &absolute_tolerance));
-  double parsed_absolute_tolerance = 0.0;
-  IREE_RETURN_IF_ERROR(
-      iree_json_parse_double(absolute_tolerance, &parsed_absolute_tolerance));
-  if (parsed_absolute_tolerance < 0.0) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "fixture tolerance atol must be non-negative");
-  }
-
+  IREE_RETURN_IF_ERROR(iree_json_try_lookup_object_value(
+      tolerance, IREE_SV("atol"), &absolute_tolerance));
   iree_string_view_t relative_tolerance = iree_string_view_empty();
-  IREE_RETURN_IF_ERROR(iree_json_lookup_object_value(tolerance, IREE_SV("rtol"),
-                                                     &relative_tolerance));
-  double parsed_relative_tolerance = 0.0;
-  IREE_RETURN_IF_ERROR(
-      iree_json_parse_double(relative_tolerance, &parsed_relative_tolerance));
-  if (parsed_relative_tolerance < 0.0) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "fixture tolerance rtol must be non-negative");
-  }
+  IREE_RETURN_IF_ERROR(iree_json_try_lookup_object_value(
+      tolerance, IREE_SV("rtol"), &relative_tolerance));
+  const bool has_elementwise_tolerance =
+      !iree_string_view_is_empty(absolute_tolerance) ||
+      !iree_string_view_is_empty(relative_tolerance);
 
-  tensor->absolute_tolerance = parsed_absolute_tolerance;
-  tensor->relative_tolerance = parsed_relative_tolerance;
-  tensor->has_tolerance = true;
-  return iree_ok_status();
+  iree_string_view_t mean_absolute_error = iree_string_view_empty();
+  IREE_RETURN_IF_ERROR(iree_json_try_lookup_object_value(
+      tolerance, IREE_SV("mean_abs"), &mean_absolute_error));
+  iree_string_view_t p99_absolute_error = iree_string_view_empty();
+  IREE_RETURN_IF_ERROR(iree_json_try_lookup_object_value(
+      tolerance, IREE_SV("p99_abs"), &p99_absolute_error));
+  iree_string_view_t max_absolute_error = iree_string_view_empty();
+  IREE_RETURN_IF_ERROR(iree_json_try_lookup_object_value(
+      tolerance, IREE_SV("max_abs"), &max_absolute_error));
+  const bool has_aggregate_tolerance =
+      !iree_string_view_is_empty(mean_absolute_error) ||
+      !iree_string_view_is_empty(p99_absolute_error) ||
+      !iree_string_view_is_empty(max_absolute_error);
+
+  if (has_elementwise_tolerance && has_aggregate_tolerance) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "fixture tolerance must declare exactly one mode");
+  }
+  if (has_elementwise_tolerance) {
+    if (iree_string_view_is_empty(absolute_tolerance) ||
+        iree_string_view_is_empty(relative_tolerance)) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "fixture elementwise tolerance requires both atol and rtol");
+    }
+    IREE_RETURN_IF_ERROR(iree_json_parse_double(
+        absolute_tolerance, &tensor->tolerance.absolute_tolerance));
+    IREE_RETURN_IF_ERROR(iree_json_parse_double(
+        relative_tolerance, &tensor->tolerance.relative_tolerance));
+    if (tensor->tolerance.absolute_tolerance < 0.0 ||
+        tensor->tolerance.relative_tolerance < 0.0) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "fixture elementwise tolerance values must be non-negative");
+    }
+    tensor->tolerance.mode = FixtureToleranceMode::kElementwise;
+    return iree_ok_status();
+  }
+  if (has_aggregate_tolerance) {
+    if (iree_string_view_is_empty(mean_absolute_error) ||
+        iree_string_view_is_empty(p99_absolute_error) ||
+        iree_string_view_is_empty(max_absolute_error)) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "fixture aggregate tolerance requires mean_abs, p99_abs, and "
+          "max_abs");
+    }
+    IREE_RETURN_IF_ERROR(iree_json_parse_double(
+        mean_absolute_error, &tensor->tolerance.mean_absolute_error));
+    IREE_RETURN_IF_ERROR(iree_json_parse_double(
+        p99_absolute_error, &tensor->tolerance.p99_absolute_error));
+    IREE_RETURN_IF_ERROR(iree_json_parse_double(
+        max_absolute_error, &tensor->tolerance.max_absolute_error));
+    if (tensor->tolerance.mean_absolute_error < 0.0 ||
+        tensor->tolerance.p99_absolute_error < 0.0 ||
+        tensor->tolerance.max_absolute_error < 0.0) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "fixture aggregate tolerance values must be non-negative");
+    }
+    tensor->tolerance.mode = FixtureToleranceMode::kAggregate;
+    return iree_ok_status();
+  }
+  return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                          "fixture tolerance must declare a comparison mode");
+}
+
+static bool FixtureToleranceIsDeclared(const FixtureTensor& tensor) {
+  return tensor.tolerance.mode != FixtureToleranceMode::kNone;
+}
+
+static bool FixtureToleranceIsElementwise(const FixtureTensor& tensor) {
+  return tensor.tolerance.mode == FixtureToleranceMode::kElementwise;
+}
+
+static bool FixtureToleranceIsAggregate(const FixtureTensor& tensor) {
+  return tensor.tolerance.mode == FixtureToleranceMode::kAggregate;
+}
+
+static iree_status_t VerifyAggregateTolerance(
+    const FixtureTensor& expected_tensor, std::vector<float>* absolute_errors) {
+  if (absolute_errors->empty()) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "aggregate comparison requires at least one "
+                            "tensor element");
+  }
+  double absolute_error_sum = 0.0;
+  float max_absolute_error = 0.0f;
+  for (float absolute_error : *absolute_errors) {
+    absolute_error_sum += absolute_error;
+    max_absolute_error = std::max(max_absolute_error, absolute_error);
+  }
+  const double mean_absolute_error =
+      absolute_error_sum / (double)absolute_errors->size();
+  const iree_host_size_t p99_index =
+      (absolute_errors->size() * 99 + 99) / 100 - 1;
+  std::nth_element(absolute_errors->begin(),
+                   absolute_errors->begin() + p99_index,
+                   absolute_errors->end());
+  const double p99_absolute_error = (*absolute_errors)[p99_index];
+  if (mean_absolute_error <= expected_tensor.tolerance.mean_absolute_error &&
+      p99_absolute_error <= expected_tensor.tolerance.p99_absolute_error &&
+      (double)max_absolute_error <=
+          expected_tensor.tolerance.max_absolute_error) {
+    return iree_ok_status();
+  }
+  return iree_make_status(
+      IREE_STATUS_FAILED_PRECONDITION,
+      "tensor `%s` aggregate mismatch: mean_abs=%g limit=%g p99_abs=%g "
+      "limit=%g max_abs=%g limit=%g",
+      expected_tensor.name.c_str(), mean_absolute_error,
+      expected_tensor.tolerance.mean_absolute_error, p99_absolute_error,
+      expected_tensor.tolerance.p99_absolute_error, (double)max_absolute_error,
+      expected_tensor.tolerance.max_absolute_error);
 }
 
 static bool ShapeEquals(id4_pipeline_tensor_shape_t lhs,
@@ -1350,6 +1449,20 @@ static iree_status_t LoadTensorElementAsF32(id4_pipeline_tensor_dtype_t dtype,
   }
 }
 
+static iree_status_t PushF32AbsoluteError(
+    const FixtureTensor& expected_tensor,
+    id4_pipeline_tensor_dtype_t actual_dtype, iree_host_size_t expected_index,
+    iree_host_size_t actual_index, const std::vector<uint8_t>& actual,
+    std::vector<float>* absolute_errors) {
+  float actual_value = 0.0f;
+  IREE_RETURN_IF_ERROR(LoadTensorElementAsF32(actual_dtype, actual,
+                                              actual_index, &actual_value));
+  const float expected_value =
+      LoadF32(&expected_tensor.payload[expected_index * sizeof(float)]);
+  absolute_errors->push_back(std::fabs(actual_value - expected_value));
+  return iree_ok_status();
+}
+
 static iree_status_t ShapeElementCount(id4_pipeline_tensor_shape_t shape,
                                        iree_host_size_t* out_element_count) {
   IREE_ASSERT_ARGUMENT(out_element_count);
@@ -1408,9 +1521,9 @@ static iree_status_t CompareF32Element(const FixtureTensor& expected_tensor,
                                               actual_index, &actual_value));
   const float expected_value =
       LoadF32(&expected_tensor.payload[expected_index * sizeof(float)]);
-  const double tolerance =
-      expected_tensor.absolute_tolerance +
-      expected_tensor.relative_tolerance * std::fabs((double)expected_value);
+  const double tolerance = expected_tensor.tolerance.absolute_tolerance +
+                           expected_tensor.tolerance.relative_tolerance *
+                               std::fabs((double)expected_value);
   const double absolute_error =
       std::fabs((double)actual_value - (double)expected_value);
   if (absolute_error <= tolerance) return iree_ok_status();
@@ -1429,6 +1542,16 @@ static iree_status_t CompareF32DensePayload(
   iree_host_size_t element_count = 0;
   IREE_RETURN_IF_ERROR(
       ShapeElementCount(expected_tensor.shape, &element_count));
+  if (FixtureToleranceIsAggregate(expected_tensor)) {
+    std::vector<float> absolute_errors;
+    absolute_errors.reserve(element_count);
+    for (iree_host_size_t i = 0; i < element_count; ++i) {
+      IREE_RETURN_IF_ERROR(PushF32AbsoluteError(expected_tensor,
+                                                actual_layout->dtype, i, i,
+                                                actual, &absolute_errors));
+    }
+    return VerifyAggregateTolerance(expected_tensor, &absolute_errors);
+  }
   for (iree_host_size_t i = 0; i < element_count; ++i) {
     IREE_RETURN_IF_ERROR(
         CompareF32Element(expected_tensor, actual_layout->dtype, i, i, actual));
@@ -1450,6 +1573,10 @@ static iree_status_t CompareF32SourceSlice(
   iree_host_size_t element_count = 0;
   IREE_RETURN_IF_ERROR(
       ShapeElementCount(expected_tensor.shape, &element_count));
+  std::vector<float> absolute_errors;
+  if (FixtureToleranceIsAggregate(expected_tensor)) {
+    absolute_errors.reserve(element_count);
+  }
   for (iree_host_size_t expected_index = 0; expected_index < element_count;
        ++expected_index) {
     iree_host_size_t remaining = expected_index;
@@ -1462,9 +1589,18 @@ static iree_status_t CompareF32SourceSlice(
                        coordinate) *
                       actual_strides[dim];
     }
-    IREE_RETURN_IF_ERROR(CompareF32Element(expected_tensor,
-                                           actual_layout->dtype, expected_index,
-                                           actual_index, actual));
+    if (FixtureToleranceIsAggregate(expected_tensor)) {
+      IREE_RETURN_IF_ERROR(PushF32AbsoluteError(
+          expected_tensor, actual_layout->dtype, expected_index, actual_index,
+          actual, &absolute_errors));
+    } else {
+      IREE_RETURN_IF_ERROR(
+          CompareF32Element(expected_tensor, actual_layout->dtype,
+                            expected_index, actual_index, actual));
+    }
+  }
+  if (FixtureToleranceIsAggregate(expected_tensor)) {
+    return VerifyAggregateTolerance(expected_tensor, &absolute_errors);
   }
   return iree_ok_status();
 }
@@ -1632,10 +1768,17 @@ iree_status_t CompareBindingWithFixtureTensor(
         "expected tensor `%s` must be f32 for F32 comparison",
         expected_tensor.name.c_str());
   }
-  if (!expected_tensor.has_tolerance) {
+  if (!FixtureToleranceIsDeclared(expected_tensor)) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "expected tensor `%s` is missing comparison tolerance",
+        expected_tensor.name.c_str());
+  }
+  if (!FixtureToleranceIsElementwise(expected_tensor) &&
+      !FixtureToleranceIsAggregate(expected_tensor)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "expected tensor `%s` has unsupported comparison tolerance",
         expected_tensor.name.c_str());
   }
   std::vector<uint8_t> actual_bytes;

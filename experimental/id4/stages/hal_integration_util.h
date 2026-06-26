@@ -106,6 +106,30 @@ class BufferBindingSet {
   iree_hal_buffer_binding_t* bindings = nullptr;
 };
 
+enum class FixtureToleranceMode {
+  // No comparison tolerance was declared.
+  kNone = 0,
+  // Every element is checked against atol + rtol * abs(expected).
+  kElementwise,
+  // The full tensor is checked against aggregate absolute-error limits.
+  kAggregate,
+};
+
+typedef struct FixtureTolerance {
+  // Comparison mode declared by the fixture manifest.
+  FixtureToleranceMode mode = FixtureToleranceMode::kNone;
+  // Elementwise absolute tolerance.
+  double absolute_tolerance = 0.0;
+  // Elementwise relative tolerance.
+  double relative_tolerance = 0.0;
+  // Aggregate mean absolute error limit.
+  double mean_absolute_error = 0.0;
+  // Aggregate p99 absolute error limit.
+  double p99_absolute_error = 0.0;
+  // Aggregate maximum absolute error limit.
+  double max_absolute_error = 0.0;
+} FixtureTolerance;
+
 typedef struct FixtureTensor {
   // Stable tensor name from the fixture manifest.
   std::string name;
@@ -125,12 +149,8 @@ typedef struct FixtureTensor {
   id4_pipeline_tensor_shape_t source_shape = {};
   // Per-dimension source offsets for this payload slice.
   id4_pipeline_tensor_shape_t slice_offsets = {};
-  // Absolute tolerance used when this tensor is an expected value.
-  double absolute_tolerance = 0.0;
-  // Relative tolerance used when this tensor is an expected value.
-  double relative_tolerance = 0.0;
-  // True when tolerance metadata was present in the fixture manifest.
-  bool has_tolerance = false;
+  // Comparison tolerance used when this tensor is an expected value.
+  FixtureTolerance tolerance = {};
   // Raw dense tensor bytes parsed from the payload.
   std::vector<uint8_t> payload;
 } FixtureTensor;

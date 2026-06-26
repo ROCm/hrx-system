@@ -131,9 +131,10 @@ TEST(HalIntegrationUtilTest, ComparesExpectedSliceAgainstFullActualBinding) {
   expected_tensor.slice_offsets.rank = 2;
   expected_tensor.slice_offsets.dims[0] = 1;
   expected_tensor.slice_offsets.dims[1] = 1;
-  expected_tensor.absolute_tolerance = 0.0;
-  expected_tensor.relative_tolerance = 0.0;
-  expected_tensor.has_tolerance = true;
+  expected_tensor.tolerance.mode =
+      id4::test::FixtureToleranceMode::kElementwise;
+  expected_tensor.tolerance.absolute_tolerance = 0.0;
+  expected_tensor.tolerance.relative_tolerance = 0.0;
   const auto* expected_bytes = reinterpret_cast<const uint8_t*>(kExpectedSlice);
   expected_tensor.payload.assign(expected_bytes,
                                  expected_bytes + sizeof(kExpectedSlice));
@@ -141,6 +142,76 @@ TEST(HalIntegrationUtilTest, ComparesExpectedSliceAgainstFullActualBinding) {
   IREE_ASSERT_OK(id4::test::CompareF32BindingWithFixtureTensor(
       device, IREE_HAL_QUEUE_AFFINITY_ANY, &binding, wait.list(),
       expected_tensor));
+}
+
+TEST(HalIntegrationUtilTest,
+     ComparesAggregateToleranceAgainstFullActualBinding) {
+  id4::test::HalDeviceGroupRef device_group;
+  IREE_ASSERT_OK(CreateLocalSyncDeviceGroup(device_group.out()));
+  iree_hal_device_t* device =
+      iree_hal_device_group_device_at(device_group.get(), /*device_index=*/0);
+
+  constexpr float kActualValues[4] = {1.0f, 2.2f, 3.1f, 4.0f};
+  id4::test::OwningRef<iree_hal_buffer_t, iree_hal_buffer_release> buffer;
+  iree_hal_buffer_params_t params;
+  std::memset(&params, 0, sizeof(params));
+  params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
+  params.access = IREE_HAL_MEMORY_ACCESS_ALL;
+  params.usage = IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET |
+                 IREE_HAL_BUFFER_USAGE_TRANSFER_SOURCE;
+  params.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
+  IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
+      iree_hal_device_allocator(device), params, sizeof(kActualValues),
+      buffer.out()));
+  iree_hal_buffer_binding_t binding = {
+      // Full actual tensor buffer.
+      /*.buffer=*/buffer.get(),
+      // Full actual tensor begins at the buffer base.
+      /*.offset=*/0,
+      // Full actual tensor byte length.
+      /*.length=*/sizeof(kActualValues),
+  };
+
+  id4::test::OwningRef<iree_hal_semaphore_t, iree_hal_semaphore_release>
+      update_semaphore;
+  IREE_ASSERT_OK(iree_hal_semaphore_create(device, IREE_HAL_QUEUE_AFFINITY_ANY,
+                                           0, IREE_HAL_SEMAPHORE_FLAG_DEFAULT,
+                                           update_semaphore.out()));
+  uint64_t update_value = 0;
+  IREE_ASSERT_OK(id4::test::QueueUpdateBinding(
+      device, IREE_HAL_QUEUE_AFFINITY_ANY, &binding, kActualValues,
+      sizeof(kActualValues), update_semaphore.get(), &update_value));
+  id4::test::SemaphoreListStorage wait;
+  wait.semaphore = update_semaphore.get();
+  wait.payload_value = update_value;
+
+  constexpr float kExpectedValues[4] = {1.0f, 2.0f, 3.0f, 4.0f};
+  id4::test::FixtureTensor expected_tensor;
+  expected_tensor.name = "unit.aggregate";
+  expected_tensor.role = "expected";
+  expected_tensor.dtype = ID4_PIPELINE_TENSOR_DTYPE_F32;
+  expected_tensor.shape.rank = 1;
+  expected_tensor.shape.dims[0] = 4;
+  expected_tensor.source_shape = expected_tensor.shape;
+  expected_tensor.slice_offsets.rank = 1;
+  expected_tensor.tolerance.mode = id4::test::FixtureToleranceMode::kAggregate;
+  expected_tensor.tolerance.mean_absolute_error = 0.1;
+  expected_tensor.tolerance.p99_absolute_error = 0.25;
+  expected_tensor.tolerance.max_absolute_error = 0.25;
+  const auto* expected_bytes =
+      reinterpret_cast<const uint8_t*>(kExpectedValues);
+  expected_tensor.payload.assign(expected_bytes,
+                                 expected_bytes + sizeof(kExpectedValues));
+
+  IREE_ASSERT_OK(id4::test::CompareF32BindingWithFixtureTensor(
+      device, IREE_HAL_QUEUE_AFFINITY_ANY, &binding, wait.list(),
+      expected_tensor));
+
+  expected_tensor.tolerance.max_absolute_error = 0.05;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
+                        id4::test::CompareF32BindingWithFixtureTensor(
+                            device, IREE_HAL_QUEUE_AFFINITY_ANY, &binding,
+                            wait.list(), expected_tensor));
 }
 
 TEST(HalIntegrationUtilTest, ComparesF16ActualSliceAgainstF32Expected) {
@@ -204,9 +275,10 @@ TEST(HalIntegrationUtilTest, ComparesF16ActualSliceAgainstF32Expected) {
   expected_tensor.slice_offsets.rank = 2;
   expected_tensor.slice_offsets.dims[0] = 1;
   expected_tensor.slice_offsets.dims[1] = 1;
-  expected_tensor.absolute_tolerance = 0.0;
-  expected_tensor.relative_tolerance = 0.0;
-  expected_tensor.has_tolerance = true;
+  expected_tensor.tolerance.mode =
+      id4::test::FixtureToleranceMode::kElementwise;
+  expected_tensor.tolerance.absolute_tolerance = 0.0;
+  expected_tensor.tolerance.relative_tolerance = 0.0;
   const auto* expected_bytes = reinterpret_cast<const uint8_t*>(kExpectedSlice);
   expected_tensor.payload.assign(expected_bytes,
                                  expected_bytes + sizeof(kExpectedSlice));

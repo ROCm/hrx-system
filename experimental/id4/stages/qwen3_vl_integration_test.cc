@@ -81,6 +81,10 @@ TEST(Qwen3VlStageIntegration, PrepareAndIssueForwardWithDenseParameters) {
   IREE_ASSERT_OK(id4::test::InferRank1TensorLengthFromFixture(
       fixture_tensors, IREE_SV("token_ids"), ID4_PIPELINE_TENSOR_DTYPE_I32,
       &token_count));
+  const id4::test::FixtureTensor* expected_condition =
+      fixture_tensors.FindTensor(IREE_SV("expected"), IREE_SV("condition"));
+  ASSERT_NE(expected_condition, nullptr)
+      << "fixture must provide the expected Qwen condition tensor";
 
   id4::test::StageDiagnostics diagnostics = {};
   id4_pipeline_diagnostics_sink_t diagnostics_sink =
@@ -252,6 +256,13 @@ TEST(Qwen3VlStageIntegration, PrepareAndIssueForwardWithDenseParameters) {
       plan.get(), capture_directory, kExportedBoundarySentinel));
   IREE_ASSERT_OK(id4::test::VerifyCapturedDiagnosticTapTensorsWereWritten(
       plan.get(), capture_directory, kExportedBoundarySentinel));
+
+  iree_hal_buffer_binding_t condition_binding = {};
+  IREE_ASSERT_OK(id4::test::FindBoundaryBinding(
+      plan.get(), boundary_bindings, IREE_SV("condition"), &condition_binding));
+  IREE_ASSERT_OK(id4::test::CompareF32BindingWithFixtureTensor(
+      context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, &condition_binding,
+      capture_wait.list(), *expected_condition));
 }
 
 }  // namespace

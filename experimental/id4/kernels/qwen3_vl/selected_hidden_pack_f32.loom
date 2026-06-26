@@ -25,7 +25,6 @@ kernel.def export("id4_qwen3_vl_selected_hidden_pack_f32") @id4_qwen3_vl_selecte
   %hidden_size = config.get @id4.qwen3_vl.selected_hidden_pack.hidden_size : index
   %hidden_row_count = config.get @id4.qwen3_vl.selected_hidden_pack.hidden_row_count : index
   %selected_layer_index = config.get @id4.qwen3_vl.selected_hidden_pack.selected_layer_index : index
-  %selected_layer_count = index.div %hidden_row_count, %hidden_size : index
   %element_count = index.mul %token_count, %hidden_size : index
   %element_index = index.madd %workgroup, %workgroup_size_x, %lane : index
   %in_bounds = index.cmp ult, %element_index, %element_count : index
@@ -37,8 +36,8 @@ kernel.def export("id4_qwen3_vl_selected_hidden_pack_f32") @id4_qwen3_vl_selecte
   scf.if %in_bounds {
     %token = index.div %element_index, %hidden_size : index
     %channel = index.rem %element_index, %hidden_size : index
-    %channel_base = index.mul %channel, %selected_layer_count : index
-    %row = index.add %channel_base, %selected_layer_index : index
+    %layer_base = index.mul %selected_layer_index, %hidden_size : index
+    %row = index.add %layer_base, %channel : index
     %value = view.load %hidden_view[%token, %channel] : view<[%token_count]x[%hidden_size]xf32, #dense> -> f32
     view.store %value, %selected_view[%row, %token] : f32, view<[%hidden_row_count]x[%token_count]xf32, #dense>
   }
@@ -64,7 +63,6 @@ kernel.def export("id4_qwen3_vl_selected_hidden_pack_bf16_f32") @id4_qwen3_vl_se
   %hidden_size = config.get @id4.qwen3_vl.selected_hidden_pack.hidden_size : index
   %hidden_row_count = config.get @id4.qwen3_vl.selected_hidden_pack.hidden_row_count : index
   %selected_layer_index = config.get @id4.qwen3_vl.selected_hidden_pack.selected_layer_index : index
-  %selected_layer_count = index.div %hidden_row_count, %hidden_size : index
   %element_count = index.mul %token_count, %hidden_size : index
   %element_index = index.madd %workgroup, %workgroup_size_x, %lane : index
   %in_bounds = index.cmp ult, %element_index, %element_count : index
@@ -76,8 +74,8 @@ kernel.def export("id4_qwen3_vl_selected_hidden_pack_bf16_f32") @id4_qwen3_vl_se
   scf.if %in_bounds {
     %token = index.div %element_index, %hidden_size : index
     %channel = index.rem %element_index, %hidden_size : index
-    %channel_base = index.mul %channel, %selected_layer_count : index
-    %row = index.add %channel_base, %selected_layer_index : index
+    %layer_base = index.mul %selected_layer_index, %hidden_size : index
+    %row = index.add %layer_base, %channel : index
     %value_bf16 = view.load %hidden_view[%token, %channel] : view<[%token_count]x[%hidden_size]xbf16, #dense> -> bf16
     %value = scalar.extf %value_bf16 : bf16 to f32
     view.store %value, %selected_view[%row, %token] : f32, view<[%hidden_row_count]x[%token_count]xf32, #dense>
@@ -103,19 +101,19 @@ check.case public @id4_qwen3_vl_selected_hidden_pack_bf16_f32_small_case {
   check.return
 }
 
-check.case public @id4_qwen3_vl_selected_hidden_pack_f32_pytorch_order_case {
+check.case public @id4_qwen3_vl_selected_hidden_pack_f32_layer_major_case {
   %hidden_states = check.generate.iota offset(1.0) step(1.0) : tensor<2x3xf32>
   %selected_hidden_states = check.generate.fill value(0.0) : tensor<6x2xf32>
-  %expected = check.file.read.npy path("testdata/qwen3_vl_selected_hidden_pack_f32_pytorch_order_expected.npy") : tensor<6x2xf32>
+  %expected = check.file.read.npy path("testdata/qwen3_vl_selected_hidden_pack_f32_layer_major_expected.npy") : tensor<6x2xf32>
   func.call @id4_qwen3_vl_selected_hidden_pack_f32(%hidden_states, %selected_hidden_states) : (tensor<2x3xf32>, tensor<6x2xf32>)
   check.expect.close actual(%selected_hidden_states) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<6x2xf32>
   check.return
 }
 
-check.case public @id4_qwen3_vl_selected_hidden_pack_bf16_f32_pytorch_order_case {
+check.case public @id4_qwen3_vl_selected_hidden_pack_bf16_f32_layer_major_case {
   %hidden_states = check.generate.iota offset(1.0) step(1.0) : tensor<2x3xbf16>
   %selected_hidden_states = check.generate.fill value(0.0) : tensor<6x2xf32>
-  %expected = check.file.read.npy path("testdata/qwen3_vl_selected_hidden_pack_f32_pytorch_order_expected.npy") : tensor<6x2xf32>
+  %expected = check.file.read.npy path("testdata/qwen3_vl_selected_hidden_pack_f32_layer_major_expected.npy") : tensor<6x2xf32>
   func.call @id4_qwen3_vl_selected_hidden_pack_bf16_f32(%hidden_states, %selected_hidden_states) : (tensor<2x3xbf16>, tensor<6x2xf32>)
   check.expect.close actual(%selected_hidden_states) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<6x2xf32>
   check.return
@@ -130,12 +128,23 @@ check.case public @id4_qwen3_vl_selected_hidden_pack_f32_qwen_slice_case {
   check.return
 }
 
+check.case public @id4_qwen3_vl_selected_hidden_pack_bf16_f32_id4_text451_case {
+  %hidden_states = check.generate.fill value(0.0) : tensor<451x4096xbf16>
+  %selected_hidden_states = check.generate.fill value(0.0) : tensor<53248x451xf32>
+  %expected = check.generate.fill value(0.0) : tensor<53248x451xf32>
+  func.call @id4_qwen3_vl_selected_hidden_pack_bf16_f32(%hidden_states, %selected_hidden_states) : (tensor<451x4096xbf16>, tensor<53248x451xf32>)
+  check.expect.close actual(%selected_hidden_states) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<53248x451xf32>
+  check.return
+}
+
 check.benchmark<@id4_qwen3_vl_selected_hidden_pack_f32_small_case> @id4_qwen3_vl_selected_hidden_pack_f32_small
 
 check.benchmark<@id4_qwen3_vl_selected_hidden_pack_bf16_f32_small_case> @id4_qwen3_vl_selected_hidden_pack_bf16_f32_small
 
-check.benchmark<@id4_qwen3_vl_selected_hidden_pack_f32_pytorch_order_case> @id4_qwen3_vl_selected_hidden_pack_f32_pytorch_order
+check.benchmark<@id4_qwen3_vl_selected_hidden_pack_f32_layer_major_case> @id4_qwen3_vl_selected_hidden_pack_f32_layer_major
 
-check.benchmark<@id4_qwen3_vl_selected_hidden_pack_bf16_f32_pytorch_order_case> @id4_qwen3_vl_selected_hidden_pack_bf16_f32_pytorch_order
+check.benchmark<@id4_qwen3_vl_selected_hidden_pack_bf16_f32_layer_major_case> @id4_qwen3_vl_selected_hidden_pack_bf16_f32_layer_major
 
 check.benchmark<@id4_qwen3_vl_selected_hidden_pack_f32_qwen_slice_case> @id4_qwen3_vl_selected_hidden_pack_f32_qwen_slice
+
+check.benchmark<@id4_qwen3_vl_selected_hidden_pack_bf16_f32_id4_text451_case> @id4_qwen3_vl_selected_hidden_pack_bf16_f32_id4_text451

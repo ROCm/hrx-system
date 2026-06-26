@@ -28,20 +28,20 @@ kernel.def export("id4_qwen3_vl_rmsnorm_f32") @id4_qwen3_vl_rmsnorm_f32() {
   %output_view = buffer.view %output_global[%base] : buffer -> view<[%token_count]x[%hidden_size]xf32, #dense>
   %lane_square_sum = scf.for %column = [%lane to %hidden_size step %workgroup_size_x](%acc = %zero_f32 : f32) -> (f32) {
     %value = view.load %input_view[%row, %column] : view<[%token_count]x[%hidden_size]xf32, #dense> -> f32
-    %square = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %value, %value : f32
-    %next = scalar.addf<reassoc|nnan|ninf|nsz> %acc, %square : f32
+    %square = scalar.mulf %value, %value : f32
+    %next = scalar.addf %acc, %square : f32
     scf.yield %next : f32
   }
   %square_sum = kernel.workgroup.reduce<addf> %lane_square_sum : f32
-  %mean_square = scalar.divf<nnan|ninf|nsz|arcp> %square_sum, %hidden_size_f32 : f32
-  %mean_square_epsilon = scalar.addf<nnan|ninf|nsz> %mean_square, %epsilon : f32
-  %row_scale = scalar.rsqrtf<nnan|ninf|nsz|afn> %mean_square_epsilon : f32
+  %mean_square = scalar.divf %square_sum, %hidden_size_f32 : f32
+  %mean_square_epsilon = scalar.addf %mean_square, %epsilon : f32
+  %row_scale = scalar.rsqrtf %mean_square_epsilon : f32
   scf.for %column = [%lane to %hidden_size step %workgroup_size_x] {
     %value = view.load %input_view[%row, %column] : view<[%token_count]x[%hidden_size]xf32, #dense> -> f32
     %weight_bf16 = view.load %weight_view[%column] : view<[%hidden_size]xbf16, #dense> -> bf16
     %weight_value = scalar.extf %weight_bf16 : bf16 to f32
-    %normalized = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %value, %row_scale : f32
-    %weighted = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %normalized, %weight_value : f32
+    %normalized = scalar.mulf %value, %row_scale : f32
+    %weighted = scalar.mulf %normalized, %weight_value : f32
     view.store %weighted, %output_view[%row, %column] : f32, view<[%token_count]x[%hidden_size]xf32, #dense>
   }
   kernel.return
@@ -74,21 +74,21 @@ kernel.def export("id4_qwen3_vl_rmsnorm_bf16") @id4_qwen3_vl_rmsnorm_bf16() {
   %lane_square_sum = scf.for %column = [%lane to %hidden_size step %workgroup_size_x](%acc = %zero_f32 : f32) -> (f32) {
     %input_value = view.load %input_view[%row, %column] : view<[%token_count]x[%hidden_size]xbf16, #dense> -> bf16
     %value = scalar.extf %input_value : bf16 to f32
-    %square = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %value, %value : f32
-    %next = scalar.addf<reassoc|nnan|ninf|nsz> %acc, %square : f32
+    %square = scalar.mulf %value, %value : f32
+    %next = scalar.addf %acc, %square : f32
     scf.yield %next : f32
   }
   %square_sum = kernel.workgroup.reduce<addf> %lane_square_sum : f32
-  %mean_square = scalar.divf<nnan|ninf|nsz|arcp> %square_sum, %hidden_size_f32 : f32
-  %mean_square_epsilon = scalar.addf<nnan|ninf|nsz> %mean_square, %epsilon : f32
-  %row_scale = scalar.rsqrtf<nnan|ninf|nsz|afn> %mean_square_epsilon : f32
+  %mean_square = scalar.divf %square_sum, %hidden_size_f32 : f32
+  %mean_square_epsilon = scalar.addf %mean_square, %epsilon : f32
+  %row_scale = scalar.rsqrtf %mean_square_epsilon : f32
   scf.for %column = [%lane to %hidden_size step %workgroup_size_x] {
     %input_value = view.load %input_view[%row, %column] : view<[%token_count]x[%hidden_size]xbf16, #dense> -> bf16
     %weight_bf16 = view.load %weight_view[%column] : view<[%hidden_size]xbf16, #dense> -> bf16
     %value = scalar.extf %input_value : bf16 to f32
     %weight_value = scalar.extf %weight_bf16 : bf16 to f32
-    %normalized = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %value, %row_scale : f32
-    %weighted = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %normalized, %weight_value : f32
+    %normalized = scalar.mulf %value, %row_scale : f32
+    %weighted = scalar.mulf %normalized, %weight_value : f32
     %rounded = scalar.fptrunc %weighted : f32 to bf16
     view.store %rounded, %output_view[%row, %column] : bf16, view<[%token_count]x[%hidden_size]xbf16, #dense>
   }
