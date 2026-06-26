@@ -4,6 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include <cstdio>
 #include <cstring>
 
 #include "experimental/id4/ideogram4/session.h"
@@ -400,6 +401,8 @@ static iree_status_t RunGenerationEndToEndBenchmark(
   uint64_t completion_value = 0;
   uint64_t iteration_count = 0;
   uint32_t token_count = 0;
+  id4_ideogram4_generation_plan_summary_t last_summary;
+  std::memset(&last_summary, 0, sizeof(last_summary));
   iree_hal_profiling_from_flags_t* profiling = nullptr;
   iree_status_t status = iree_hal_begin_device_group_profiling_from_flags(
       context.runtime_context.device_group, iree_allocator_system(),
@@ -415,6 +418,7 @@ static iree_status_t RunGenerationEndToEndBenchmark(
     }
     if (iree_status_is_ok(status)) {
       token_count = summary.qwen_token_count;
+      last_summary = summary;
     }
 
     ++prepare_value;
@@ -449,6 +453,17 @@ static iree_status_t RunGenerationEndToEndBenchmark(
   status =
       iree_status_join(status, iree_hal_end_profiling_from_flags(profiling));
   IREE_RETURN_IF_ERROR(status);
+  char label[160];
+  std::snprintf(label, sizeof(label),
+                "tokens=%" PRIu32 " latent=%" PRIu64 "x%" PRIu64
+                " steps=%" PRIu32 " image=%" PRIu64 "x%" PRIu64,
+                last_summary.qwen_token_count,
+                last_summary.diffusion_latent_shape.dims[0],
+                last_summary.diffusion_latent_shape.dims[1],
+                last_summary.denoise_step_count,
+                last_summary.decoded_image_shape.dims[0],
+                last_summary.decoded_image_shape.dims[1]);
+  iree_benchmark_set_label(benchmark_state, label);
   iree_benchmark_set_items_processed(
       benchmark_state, static_cast<int64_t>(iteration_count * token_count));
   return iree_ok_status();
