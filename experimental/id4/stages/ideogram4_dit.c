@@ -28,6 +28,10 @@ typedef struct id4_ideogram4_dit_stage_t {
   id4_pipeline_kernel_cache_t* kernel_cache;
   // Parameter provider scope containing Ideogram4 DiT weights.
   iree_string_view_t parameter_scope;
+  // Number of exact parameter source rules owned by the stage.
+  iree_host_size_t parameter_source_rule_count;
+  // Exact parameter source rules owned by the stage.
+  id4_ideogram4_dit_parameter_source_rule_t* parameter_source_rules;
   // Static model configuration owned by the stage.
   id4_ideogram4_dit_model_config_t model;
   // True after load has completed.
@@ -200,19 +204,136 @@ static iree_status_t id4_ideogram4_dit_stage_validate_create_options(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "Ideogram4 DiT stage device group is required");
   }
+  if (options->parameter_source_rule_count != 0 &&
+      !options->parameter_source_rules) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "Ideogram4 DiT stage parameter source rules are required when rule "
+        "count is nonzero");
+  }
+  if (options->parameter_source_rule_count == 0 &&
+      options->parameter_source_rules) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "Ideogram4 DiT stage parameter source rules must be NULL when rule "
+        "count is zero");
+  }
+  for (iree_host_size_t i = 0; i < options->parameter_source_rule_count; ++i) {
+    const id4_ideogram4_dit_parameter_source_rule_t rule =
+        options->parameter_source_rules[i];
+    if (iree_string_view_is_empty(rule.key)) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "Ideogram4 DiT stage parameter source rule %" PRIhsz " key is empty",
+          i);
+    }
+    if (rule.storage != ID4_IDEOGRAM4_DIT_PARAMETER_STORAGE_BF16 &&
+        rule.storage != ID4_IDEOGRAM4_DIT_PARAMETER_STORAGE_FP8_E4M3_SCALED) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "Ideogram4 DiT stage parameter source rule `%.*s` storage %" PRIu32
+          " is invalid",
+          (int)rule.key.size, rule.key.data, (uint32_t)rule.storage);
+    }
+    for (iree_host_size_t j = 0; j < i; ++j) {
+      if (iree_string_view_equal(rule.key,
+                                 options->parameter_source_rules[j].key)) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "Ideogram4 DiT stage parameter source rule `%.*s` is duplicated",
+            (int)rule.key.size, rule.key.data);
+      }
+    }
+  }
   return id4_ideogram4_dit_stage_validate_model_config(&options->model);
+}
+
+static void id4_ideogram4_dit_stage_free_string(iree_allocator_t host_allocator,
+                                                iree_string_view_t* string) {
+  iree_allocator_free(host_allocator, (void*)string->data);
+  *string = iree_string_view_empty();
+}
+
+static iree_status_t id4_ideogram4_dit_stage_copy_string(
+    iree_allocator_t host_allocator, iree_string_view_t source,
+    iree_string_view_t* out_string) {
+  *out_string = iree_string_view_empty();
+  if (iree_string_view_is_empty(source)) return iree_ok_status();
+  if (source.size == IREE_HOST_SIZE_MAX) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "Ideogram4 DiT stage string is too large to copy");
+  }
+  char* storage = NULL;
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
+      host_allocator, source.size + 1, sizeof(storage[0]), (void**)&storage));
+  memcpy(storage, source.data, source.size);
+  storage[source.size] = 0;
+  *out_string = iree_make_string_view(storage, source.size);
+  return iree_ok_status();
 }
 
 static iree_status_t id4_ideogram4_dit_stage_copy_parameter_scope(
     iree_string_view_t source, id4_ideogram4_dit_stage_t* stage) {
-  stage->parameter_scope = iree_string_view_empty();
-  if (iree_string_view_is_empty(source)) return iree_ok_status();
-  char* storage = NULL;
-  IREE_RETURN_IF_ERROR(iree_allocator_malloc(stage->host_allocator, source.size,
-                                             (void**)&storage));
-  memcpy(storage, source.data, source.size);
-  stage->parameter_scope = iree_make_string_view(storage, source.size);
-  return iree_ok_status();
+  return id4_ideogram4_dit_stage_copy_string(stage->host_allocator, source,
+                                             &stage->parameter_scope);
+}
+
+static void id4_ideogram4_dit_stage_free_parameter_source_rules(
+    id4_ideogram4_dit_stage_t* stage) {
+  for (iree_host_size_t i = 0; i < stage->parameter_source_rule_count; ++i) {
+    id4_ideogram4_dit_stage_free_string(stage->host_allocator,
+                                        &stage->parameter_source_rules[i].key);
+    id4_ideogram4_dit_stage_free_string(
+        stage->host_allocator, &stage->parameter_source_rules[i].source_scope);
+  }
+  iree_allocator_free(stage->host_allocator, stage->parameter_source_rules);
+  stage->parameter_source_rule_count = 0;
+  stage->parameter_source_rules = NULL;
+}
+
+static iree_status_t id4_ideogram4_dit_stage_copy_parameter_source_rules(
+    const id4_ideogram4_dit_stage_create_options_t* options,
+    id4_ideogram4_dit_stage_t* stage) {
+  if (options->parameter_source_rule_count == 0) return iree_ok_status();
+
+  iree_status_t status = iree_allocator_malloc_array(
+      stage->host_allocator, options->parameter_source_rule_count,
+      sizeof(stage->parameter_source_rules[0]),
+      (void**)&stage->parameter_source_rules);
+  if (iree_status_is_ok(status)) {
+    memset(stage->parameter_source_rules, 0,
+           options->parameter_source_rule_count *
+               sizeof(stage->parameter_source_rules[0]));
+  }
+  for (iree_host_size_t i = 0;
+       i < options->parameter_source_rule_count && iree_status_is_ok(status);
+       ++i) {
+    id4_ideogram4_dit_parameter_source_rule_t copied_rule;
+    memset(&copied_rule, 0, sizeof(copied_rule));
+    copied_rule.storage = options->parameter_source_rules[i].storage;
+    status = id4_ideogram4_dit_stage_copy_string(
+        stage->host_allocator, options->parameter_source_rules[i].key,
+        &copied_rule.key);
+    if (iree_status_is_ok(status)) {
+      status = id4_ideogram4_dit_stage_copy_string(
+          stage->host_allocator,
+          options->parameter_source_rules[i].source_scope,
+          &copied_rule.source_scope);
+    }
+    if (iree_status_is_ok(status)) {
+      stage->parameter_source_rules[stage->parameter_source_rule_count++] =
+          copied_rule;
+    } else {
+      id4_ideogram4_dit_stage_free_string(stage->host_allocator,
+                                          &copied_rule.key);
+      id4_ideogram4_dit_stage_free_string(stage->host_allocator,
+                                          &copied_rule.source_scope);
+    }
+  }
+  if (!iree_status_is_ok(status)) {
+    id4_ideogram4_dit_stage_free_parameter_source_rules(stage);
+  }
+  return status;
 }
 
 static id4_pipeline_diagnostic_event_t id4_ideogram4_dit_stage_lifecycle_event(
@@ -263,6 +384,9 @@ static iree_status_t id4_ideogram4_dit_stage_author_program(
     memset(&program_options, 0, sizeof(program_options));
     program_options.structure_size = sizeof(program_options);
     program_options.parameter_sources.default_scope = stage->parameter_scope;
+    program_options.parameter_sources.rule_count =
+        stage->parameter_source_rule_count;
+    program_options.parameter_sources.rules = stage->parameter_source_rules;
     program_options.model = stage->model;
     program_options.request = dit_options->request;
     program_options.activation_format = dit_options->activation_format;
@@ -399,7 +523,8 @@ static void id4_ideogram4_dit_stage_destroy(id4_pipeline_stage_t* base_stage) {
   id4_ideogram4_dit_stage_t* stage = id4_ideogram4_dit_stage_cast(base_stage);
   iree_allocator_t host_allocator = stage->host_allocator;
   id4_pipeline_kernel_cache_release(stage->kernel_cache);
-  iree_allocator_free(host_allocator, (void*)stage->parameter_scope.data);
+  id4_ideogram4_dit_stage_free_parameter_source_rules(stage);
+  id4_ideogram4_dit_stage_free_string(host_allocator, &stage->parameter_scope);
   id4_pipeline_stage_deinitialize(base_stage);
   iree_allocator_free(host_allocator, stage);
 }
@@ -440,6 +565,10 @@ iree_status_t id4_ideogram4_dit_stage_create(
     id4_pipeline_kernel_cache_retain(stage->kernel_cache);
     status = id4_ideogram4_dit_stage_copy_parameter_scope(
         options->parameter_scope, stage);
+  }
+  if (iree_status_is_ok(status)) {
+    status =
+        id4_ideogram4_dit_stage_copy_parameter_source_rules(options, stage);
   }
   if (iree_status_is_ok(status)) {
     *out_stage = &stage->base;

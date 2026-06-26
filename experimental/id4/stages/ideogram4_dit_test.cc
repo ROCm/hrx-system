@@ -37,7 +37,10 @@ static id4_ideogram4_dit_model_config_t MakeModelConfig() {
 
 static id4_pipeline_stage_t* CreateStage(
     iree_hal_device_group_t* device_group,
-    id4_ideogram4_dit_model_config_t model) {
+    id4_ideogram4_dit_model_config_t model,
+    iree_host_size_t parameter_source_rule_count = 0,
+    const id4_ideogram4_dit_parameter_source_rule_t* parameter_source_rules =
+        nullptr) {
   id4_pipeline_stage_services_t services;
   memset(&services, 0, sizeof(services));
   services.device_group = device_group;
@@ -47,6 +50,8 @@ static id4_pipeline_stage_t* CreateStage(
   memset(&create_options, 0, sizeof(create_options));
   create_options.structure_size = sizeof(create_options);
   create_options.services = services;
+  create_options.parameter_source_rule_count = parameter_source_rule_count;
+  create_options.parameter_source_rules = parameter_source_rules;
   create_options.model = model;
 
   id4_pipeline_stage_t* stage = nullptr;
@@ -296,6 +301,96 @@ TEST(Ideogram4DitStage, PlansConditionedPreludeSliceFromRequestConfig) {
     }
   }
   EXPECT_TRUE(found_prelude_tap);
+
+  id4_pipeline_plan_release(plan);
+  id4_pipeline_stage_release(stage);
+  iree_hal_device_group_release(device_group);
+}
+
+TEST(Ideogram4DitStage, PlansExactFp8QkvSourceRule) {
+  iree_hal_device_group_t* device_group =
+      id4::test::CreateLocalSyncDeviceGroup();
+  id4_ideogram4_dit_model_config_t model = MakeModelConfig();
+  const id4_ideogram4_dit_parameter_source_rule_t rules[] = {
+      {
+          // Logical parameter key.
+          /*.key=*/IREE_SV("layers.0.attention.qkv.weight"),
+          // Provider source scope.
+          /*.source_scope=*/IREE_SV("fp8"),
+          // Physical storage format.
+          /*.storage=*/ID4_IDEOGRAM4_DIT_PARAMETER_STORAGE_FP8_E4M3_SCALED,
+      },
+  };
+  id4_pipeline_stage_t* stage =
+      CreateStage(device_group, model, IREE_ARRAYSIZE(rules), rules);
+
+  id4_pipeline_diagnostics_sink_t diagnostics_sink;
+  id4_pipeline_diagnostics_sink_initialize_ignore(&diagnostics_sink);
+  id4_pipeline_stage_load_options_t load_options;
+  memset(&load_options, 0, sizeof(load_options));
+  load_options.structure_size = sizeof(load_options);
+  load_options.diagnostics_sink = &diagnostics_sink;
+  IREE_ASSERT_OK(id4_pipeline_stage_load(stage, &load_options));
+
+  id4_ideogram4_dit_stage_plan_options_t dit_options;
+  memset(&dit_options, 0, sizeof(dit_options));
+  dit_options.structure_size = sizeof(dit_options);
+  dit_options.request.latent_shape =
+      id4_pipeline_program_make_shape_rank4(1, 2, 4, 1);
+  dit_options.request.conditioning_mode =
+      ID4_IDEOGRAM4_DIT_CONDITIONING_MODE_UNCONDITIONED;
+  dit_options.activation_format =
+      ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_F32_CANONICAL;
+
+  id4_pipeline_stage_plan_options_t plan_options;
+  memset(&plan_options, 0, sizeof(plan_options));
+  plan_options.structure_size = sizeof(plan_options);
+  plan_options.next = &dit_options;
+  plan_options.device_index = 0;
+  plan_options.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
+  plan_options.diagnostics_sink = &diagnostics_sink;
+
+  id4_pipeline_plan_t* plan = nullptr;
+  IREE_ASSERT_OK(id4_pipeline_stage_plan(stage, &plan_options, &plan));
+
+  bool found_fp8_load_step = false;
+  for (iree_host_size_t i = 0;
+       i < id4_pipeline_plan_parameter_load_step_count(plan); ++i) {
+    const id4_pipeline_parameter_load_step_t* load_step =
+        id4_pipeline_plan_parameter_load_step_at(plan, i);
+    if (!load_step) continue;
+    if (!iree_string_view_equal(load_step->source_scope, IREE_SV("fp8"))) {
+      continue;
+    }
+    found_fp8_load_step = true;
+    EXPECT_EQ(load_step->request_count, 2u);
+  }
+
+  bool found_qkv_weight = false;
+  bool found_qkv_scale = false;
+  const iree_device_size_t qkv_size = model.hidden_size * 3;
+  for (iree_host_size_t i = 0; i < id4_pipeline_plan_parameter_slab_count(plan);
+       ++i) {
+    const id4_pipeline_parameter_slab_plan_t* slab =
+        id4_pipeline_plan_parameter_slab_at(plan, i);
+    if (!slab) continue;
+    for (iree_host_size_t j = 0; j < slab->request_count; ++j) {
+      const id4_pipeline_parameter_request_t* request = &slab->requests[j];
+      if (iree_string_view_equal(request->key,
+                                 IREE_SV("layers.0.attention.qkv.weight"))) {
+        found_qkv_weight = true;
+        EXPECT_EQ(request->span.length, qkv_size * model.hidden_size);
+      } else if (iree_string_view_equal(
+                     request->key,
+                     IREE_SV("layers.0.attention.qkv.weight_scale"))) {
+        found_qkv_scale = true;
+        EXPECT_EQ(request->span.length, qkv_size * sizeof(float));
+      }
+    }
+  }
+  EXPECT_TRUE(found_fp8_load_step);
+  EXPECT_TRUE(found_qkv_weight);
+  EXPECT_TRUE(found_qkv_scale);
 
   id4_pipeline_plan_release(plan);
   id4_pipeline_stage_release(stage);

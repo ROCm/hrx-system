@@ -32,6 +32,10 @@ typedef struct id4_ideogram4_dit_stage_create_options_t {
   // Parameter provider scope containing Ideogram4 DiT weights; empty selects
   // the anonymous scope. The stage copies this string during creation.
   iree_string_view_t parameter_scope;
+  // Number of exact parameter source rules borrowed for creation.
+  iree_host_size_t parameter_source_rule_count;
+  // Exact parameter source rules copied by the stage during creation.
+  const id4_ideogram4_dit_parameter_source_rule_t* parameter_source_rules;
   // Static Ideogram4 DiT model dimensions.
   id4_ideogram4_dit_model_config_t model;
 } id4_ideogram4_dit_stage_create_options_t;
