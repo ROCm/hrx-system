@@ -181,6 +181,8 @@ static iree_status_t CreateLoadedSession(
   create_options.structure_size = sizeof(create_options);
   create_options.services = services;
   create_options.kernel_cache = context.kernel_cache.get();
+  create_options.dit_parameter_format =
+      ID4_IDEOGRAM4_SESSION_DIT_PARAMETER_FORMAT_BF16;
   create_options.vae_activation_format =
       ID4_VAE_ACTIVATION_FORMAT_BF16_CONV_INPUT;
 

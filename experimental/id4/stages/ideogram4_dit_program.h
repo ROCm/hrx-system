@@ -22,6 +22,9 @@ extern "C" {
 // Current combined text+image prelude flattened token-count limit.
 #define ID4_IDEOGRAM4_DIT_PRELUDE_MAX_TOKEN_COUNT 131072u
 
+// Maximum formatted DiT parameter key or tensor diagnostic name byte length.
+#define ID4_IDEOGRAM4_DIT_PROGRAM_FORMAT_BUFFER_CAPACITY 192
+
 // Conditioning path selected for an Ideogram4 DiT forward request.
 typedef enum id4_ideogram4_dit_conditioning_mode_e {
   // Invalid conditioning mode.
@@ -125,6 +128,11 @@ typedef struct id4_ideogram4_dit_program_options_t {
 iree_status_t id4_ideogram4_dit_program_author_forward(
     const id4_ideogram4_dit_program_options_t* options,
     id4_pipeline_program_builder_t* builder);
+
+// Formats a layer-ordinal parameter key using the canonical DiT key scheme.
+iree_status_t id4_ideogram4_dit_program_format_layer_parameter(
+    uint32_t layer_ordinal, iree_string_view_t suffix, char* buffer,
+    iree_host_size_t buffer_capacity, iree_string_view_t* out_string);
 
 // Returns the Ideogram 4 DiT model configuration.
 const id4_ideogram4_dit_model_config_t*

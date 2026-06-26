@@ -18,7 +18,8 @@
 extern "C" {
 #endif  // __cplusplus
 
-#define ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY 192
+#define ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY \
+  ID4_IDEOGRAM4_DIT_PROGRAM_FORMAT_BUFFER_CAPACITY
 
 enum {
   ID4_IDEOGRAM4_DIT_ACTIVATION_IDENTITY = 0,
@@ -79,10 +80,6 @@ iree_status_t id4_ideogram4_dit_program_format(char* buffer,
                                                iree_host_size_t buffer_capacity,
                                                iree_string_view_t* out_string,
                                                const char* format, ...);
-
-iree_status_t id4_ideogram4_dit_program_format_layer_parameter(
-    uint32_t layer_ordinal, iree_string_view_t suffix, char* buffer,
-    iree_host_size_t buffer_capacity, iree_string_view_t* out_string);
 
 iree_status_t id4_ideogram4_dit_program_format_branch_layer_name(
     iree_string_view_t branch_name, uint32_t layer_ordinal,

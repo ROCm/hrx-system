@@ -128,12 +128,14 @@ class SessionTest : public ::testing::Test {
     options.structure_size = sizeof(options);
     options.services = services;
     options.kernel_cache = kernel_cache_;
+    options.dit_parameter_format =
+        ID4_IDEOGRAM4_SESSION_DIT_PARAMETER_FORMAT_BF16;
     options.vae_activation_format = ID4_VAE_ACTIVATION_FORMAT_BF16_CONV_INPUT;
     return options;
   }
 
-  SessionPtr CreateLoadedSession() {
-    id4_ideogram4_session_create_options_t create_options = CreateOptions();
+  SessionPtr CreateLoadedSession(
+      id4_ideogram4_session_create_options_t create_options) {
     id4_ideogram4_session_t* session = nullptr;
     IREE_CHECK_OK(id4_ideogram4_session_create(
         &create_options, iree_allocator_system(), &session));
@@ -147,6 +149,10 @@ class SessionTest : public ::testing::Test {
     load_options.diagnostics_sink = &diagnostics_sink;
     IREE_CHECK_OK(id4_ideogram4_session_load(session, &load_options));
     return SessionPtr(session);
+  }
+
+  SessionPtr CreateLoadedSession() {
+    return CreateLoadedSession(CreateOptions());
   }
 
   GenerationPlanPtr PlanGeneration(id4_ideogram4_session_t* session,
@@ -200,6 +206,31 @@ TEST_F(SessionTest, LoadsOnce) {
 TEST_F(SessionTest, RequiresVaeActivationFormat) {
   id4_ideogram4_session_create_options_t create_options = CreateOptions();
   create_options.vae_activation_format = ID4_VAE_ACTIVATION_FORMAT_INVALID;
+
+  id4_ideogram4_session_t* session = nullptr;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      id4_ideogram4_session_create(&create_options, iree_allocator_system(),
+                                   &session));
+  EXPECT_EQ(session, nullptr);
+}
+
+TEST_F(SessionTest, RequiresDitParameterFormat) {
+  id4_ideogram4_session_create_options_t create_options = CreateOptions();
+  create_options.dit_parameter_format =
+      ID4_IDEOGRAM4_SESSION_DIT_PARAMETER_FORMAT_INVALID;
+
+  id4_ideogram4_session_t* session = nullptr;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      id4_ideogram4_session_create(&create_options, iree_allocator_system(),
+                                   &session));
+  EXPECT_EQ(session, nullptr);
+}
+
+TEST_F(SessionTest, RejectsFp8ScopesForBf16DitParameterFormat) {
+  id4_ideogram4_session_create_options_t create_options = CreateOptions();
+  create_options.parameter_scopes.dit_conditioned_fp8 = IREE_SV("dit_cond_fp8");
 
   id4_ideogram4_session_t* session = nullptr;
   IREE_EXPECT_STATUS_IS(
@@ -347,6 +378,63 @@ TEST_F(SessionTest, PlansGenerationFromDynamicPromptLength) {
                 json, IREE_SV("\"phase_parameter_high_water_mark\""), 0),
             IREE_STRING_VIEW_NPOS);
   EXPECT_NE(iree_string_view_find(json, IREE_SV("\"stages\""), 0),
+            IREE_STRING_VIEW_NPOS);
+  iree_string_builder_deinitialize(&builder);
+}
+
+TEST_F(SessionTest, PlansMixedBf16Fp8DitSources) {
+  TokenizerPtr tokenizer = LoadTokenizer();
+  ScopedRequest request;
+  IREE_ASSERT_OK(id4_ideogram4_request_parse_json(
+      ShortFullRequestJson(), iree_allocator_system(), &request.value));
+
+  id4_ideogram4_session_create_options_t create_options = CreateOptions();
+  create_options.parameter_scopes.dit_conditioned = IREE_SV("dit_cond");
+  create_options.parameter_scopes.dit_conditioned_fp8 = IREE_SV("dit_cond_fp8");
+  create_options.parameter_scopes.dit_unconditioned = IREE_SV("dit_uncond");
+  create_options.parameter_scopes.dit_unconditioned_fp8 =
+      IREE_SV("dit_uncond_fp8");
+  create_options.dit_parameter_format =
+      ID4_IDEOGRAM4_SESSION_DIT_PARAMETER_FORMAT_MIXED_BF16_FP8_E4M3;
+  SessionPtr session = CreateLoadedSession(create_options);
+
+  id4_ideogram4_generation_plan_options_t plan_options;
+  std::memset(&plan_options, 0, sizeof(plan_options));
+  plan_options.structure_size = sizeof(plan_options);
+  plan_options.request = &request.value;
+  plan_options.tokenizer = tokenizer.get();
+  plan_options.tokenizer_flags = IREE_TOKENIZER_ENCODE_FLAG_NONE;
+  plan_options.policy = MakeGenerationPolicy();
+  plan_options.policy.dit_activation_format =
+      ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_F32_CANONICAL;
+  plan_options.device_index = 0;
+  plan_options.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
+  id4::test::StageDiagnostics diagnostics = {};
+  id4_pipeline_diagnostics_sink_t diagnostics_sink =
+      id4::test::DiagnosticsSink(&diagnostics);
+  plan_options.diagnostics_sink = &diagnostics_sink;
+
+  id4_ideogram4_generation_plan_t* plan = nullptr;
+  IREE_ASSERT_OK(id4_ideogram4_session_plan_generation(session.get(),
+                                                       &plan_options, &plan));
+  GenerationPlanPtr plan_owner(plan);
+
+  id4_ideogram4_generation_plan_summary_t summary;
+  IREE_ASSERT_OK(
+      id4_ideogram4_generation_plan_summary(plan_owner.get(), &summary));
+  EXPECT_EQ(summary.dit_activation_format,
+            ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_F32_CANONICAL);
+
+  iree_string_builder_t builder;
+  iree_string_builder_initialize(iree_allocator_system(), &builder);
+  IREE_ASSERT_OK(
+      id4_ideogram4_generation_plan_format_json(plan_owner.get(), &builder));
+  iree_string_view_t json = iree_string_builder_view(&builder);
+  EXPECT_NE(iree_string_view_find(
+                json, IREE_SV("\"source_scope\":\"dit_cond_fp8\""), 0),
+            IREE_STRING_VIEW_NPOS);
+  EXPECT_NE(iree_string_view_find(
+                json, IREE_SV("\"source_scope\":\"dit_uncond_fp8\""), 0),
             IREE_STRING_VIEW_NPOS);
   iree_string_builder_deinitialize(&builder);
 }

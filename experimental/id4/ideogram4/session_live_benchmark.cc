@@ -208,6 +208,8 @@ static iree_status_t CreateLoadedLiveSession(
   create_options.parameter_scopes.dit_conditioned = IREE_SV("dit_cond");
   create_options.parameter_scopes.dit_unconditioned = IREE_SV("dit_uncond");
   create_options.parameter_scopes.vae = IREE_SV("vae");
+  create_options.dit_parameter_format =
+      ID4_IDEOGRAM4_SESSION_DIT_PARAMETER_FORMAT_BF16;
   create_options.vae_activation_format =
       ID4_VAE_ACTIVATION_FORMAT_BF16_CONV_INPUT;
 
