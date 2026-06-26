@@ -415,10 +415,13 @@ iree_status_t id4_ideogram4_request_lower_qwen_inputs(
     for (iree_host_size_t i = 0; i < token_count; ++i) {
       out_inputs->token_weights[i] = 1.0f;
     }
-    const iree_host_size_t attention_element_count =
-        token_count * (iree_host_size_t)token_count;
-    for (iree_host_size_t i = 0; i < attention_element_count; ++i) {
-      out_inputs->attention_mask[i] = 0.0f;
+    const float future_token_mask = -FLT_MAX / 4.0f;
+    for (iree_host_size_t query = 0; query < token_count; ++query) {
+      for (iree_host_size_t key = 0; key < token_count; ++key) {
+        out_inputs
+            ->attention_mask[query * (iree_host_size_t)token_count + key] =
+            key <= query ? 0.0f : future_token_mask;
+      }
     }
   } else {
     id4_ideogram4_qwen_inputs_deinitialize(out_inputs, host_allocator);

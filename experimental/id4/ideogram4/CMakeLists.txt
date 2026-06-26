@@ -146,6 +146,29 @@ iree_cc_test(
 
 iree_cc_test(
   NAME
+    qwen_session_integration_test
+  SRCS
+    "qwen_session_integration_test.cc"
+  DEPS
+    ::session
+    iree::base
+    iree::base::tooling::flags
+    iree::experimental::id4::stages::hal_integration_util
+    iree::experimental::id4::stages::qwen3_vl_program
+    iree::hal
+    iree::io::file_handle
+    iree::io::parameter_provider
+    iree::testing::gtest
+    iree::testing::gtest_main
+    iree::tokenizer
+    iree::tokenizer::format::huggingface::tokenizer_json
+  LABELS
+    "manual"
+    "requires-gpu"
+)
+
+iree_cc_test(
+  NAME
     one_step_trace_integration_test
   SRCS
     "one_step_trace_integration_test.cc"

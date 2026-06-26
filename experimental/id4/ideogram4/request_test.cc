@@ -6,6 +6,7 @@
 
 #include "experimental/id4/ideogram4/request.h"
 
+#include <cfloat>
 #include <cmath>
 #include <cstring>
 #include <memory>
@@ -208,9 +209,13 @@ TEST(Ideogram4RequestTest, LowersPromptToQwenInputTensors) {
   for (uint32_t i = 0; i < inputs.value.token_count; ++i) {
     EXPECT_EQ(inputs.value.token_weights[i], 1.0f);
   }
-  for (uint32_t i = 0; i < inputs.value.token_count * inputs.value.token_count;
-       ++i) {
-    EXPECT_EQ(inputs.value.attention_mask[i], 0.0f);
+  const float future_token_mask = -FLT_MAX / 4.0f;
+  for (uint32_t query = 0; query < inputs.value.token_count; ++query) {
+    for (uint32_t key = 0; key < inputs.value.token_count; ++key) {
+      EXPECT_EQ(
+          inputs.value.attention_mask[query * inputs.value.token_count + key],
+          key <= query ? 0.0f : future_token_mask);
+    }
   }
 
   uint32_t counted_token_count = 0;

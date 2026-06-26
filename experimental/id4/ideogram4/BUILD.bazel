@@ -136,6 +136,29 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_test(
+    name = "qwen_session_integration_test",
+    srcs = ["qwen_session_integration_test.cc"],
+    tags = [
+        "manual",
+        "requires-gpu",
+    ],
+    deps = [
+        ":session",
+        "//experimental/id4/stages:hal_integration_util",
+        "//experimental/id4/stages:qwen3_vl_program",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/tooling:flags",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/io:file_handle",
+        "//runtime/src/iree/io:parameter_provider",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/tokenizer",
+        "//runtime/src/iree/tokenizer/format/huggingface:tokenizer_json",
+    ],
+)
+
+iree_runtime_cc_test(
     name = "one_step_trace_integration_test",
     srcs = ["one_step_trace_integration_test.cc"],
     tags = [
