@@ -18,6 +18,14 @@
 
 IREE_FLAG(string, id4_tokenizer, "",
           "Hugging Face tokenizer JSON used by live generation benchmarks.");
+IREE_FLAG(string, dit_parameter_format, "bf16",
+          "DiT parameter format: bf16 or mixed_bf16_fp8_e4m3.");
+IREE_FLAG(string, dit_activation_format, "bf16_linear_input",
+          "DiT activation format: bf16_linear_input or f32_canonical.");
+IREE_FLAG(string, dit_conditioned_fp8_scope, "dit_cond_fp8",
+          "Conditioned DiT native-FP8 parameter scope.");
+IREE_FLAG(string, dit_unconditioned_fp8_scope, "dit_uncond_fp8",
+          "Unconditioned DiT native-FP8 parameter scope.");
 
 namespace {
 
@@ -137,10 +145,43 @@ static id4_ideogram4_generation_plan_policy_t MakeGenerationPolicy() {
   id4_ideogram4_generation_plan_policy_t policy;
   std::memset(&policy, 0, sizeof(policy));
   policy.structure_size = sizeof(policy);
-  policy.dit_activation_format =
-      ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT;
   policy.vae_tiling.mode = ID4_VAE_TILING_MODE_DISABLED;
   return policy;
+}
+
+static iree_status_t ParseDitParameterFormat(
+    id4_ideogram4_session_dit_parameter_format_t* out_format) {
+  IREE_ASSERT_ARGUMENT(out_format);
+  iree_string_view_t value = iree_make_cstring_view(FLAG_dit_parameter_format);
+  if (iree_string_view_equal(value, IREE_SV("bf16"))) {
+    *out_format = ID4_IDEOGRAM4_SESSION_DIT_PARAMETER_FORMAT_BF16;
+    return iree_ok_status();
+  }
+  if (iree_string_view_equal(value, IREE_SV("mixed_bf16_fp8_e4m3"))) {
+    *out_format =
+        ID4_IDEOGRAM4_SESSION_DIT_PARAMETER_FORMAT_MIXED_BF16_FP8_E4M3;
+    return iree_ok_status();
+  }
+  return iree_make_status(
+      IREE_STATUS_INVALID_ARGUMENT,
+      "--dit_parameter_format must be bf16 or mixed_bf16_fp8_e4m3");
+}
+
+static iree_status_t ParseDitActivationFormat(
+    id4_ideogram4_dit_activation_format_t* out_format) {
+  IREE_ASSERT_ARGUMENT(out_format);
+  iree_string_view_t value = iree_make_cstring_view(FLAG_dit_activation_format);
+  if (iree_string_view_equal(value, IREE_SV("bf16_linear_input"))) {
+    *out_format = ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT;
+    return iree_ok_status();
+  }
+  if (iree_string_view_equal(value, IREE_SV("f32_canonical"))) {
+    *out_format = ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_F32_CANONICAL;
+    return iree_ok_status();
+  }
+  return iree_make_status(
+      IREE_STATUS_INVALID_ARGUMENT,
+      "--dit_activation_format must be bf16_linear_input or f32_canonical");
 }
 
 static iree_status_t ParseRequest(iree_string_view_t json,
@@ -208,8 +249,15 @@ static iree_status_t CreateLoadedLiveSession(
   create_options.parameter_scopes.dit_conditioned = IREE_SV("dit_cond");
   create_options.parameter_scopes.dit_unconditioned = IREE_SV("dit_uncond");
   create_options.parameter_scopes.vae = IREE_SV("vae");
-  create_options.dit_parameter_format =
-      ID4_IDEOGRAM4_SESSION_DIT_PARAMETER_FORMAT_BF16;
+  IREE_RETURN_IF_ERROR(
+      ParseDitParameterFormat(&create_options.dit_parameter_format));
+  if (create_options.dit_parameter_format ==
+      ID4_IDEOGRAM4_SESSION_DIT_PARAMETER_FORMAT_MIXED_BF16_FP8_E4M3) {
+    create_options.parameter_scopes.dit_conditioned_fp8 =
+        iree_make_cstring_view(FLAG_dit_conditioned_fp8_scope);
+    create_options.parameter_scopes.dit_unconditioned_fp8 =
+        iree_make_cstring_view(FLAG_dit_unconditioned_fp8_scope);
+  }
   create_options.vae_activation_format =
       ID4_VAE_ACTIVATION_FORMAT_BF16_CONV_INPUT;
 
@@ -235,6 +283,50 @@ static iree_status_t CreateLoadedLiveSession(
 static iree_status_t CreateParameterProviders(
     LiveGenerationBenchmarkContext* context) {
   IREE_ASSERT_ARGUMENT(context);
+  id4_ideogram4_session_dit_parameter_format_t dit_parameter_format =
+      ID4_IDEOGRAM4_SESSION_DIT_PARAMETER_FORMAT_INVALID;
+  IREE_RETURN_IF_ERROR(ParseDitParameterFormat(&dit_parameter_format));
+  if (dit_parameter_format == ID4_IDEOGRAM4_SESSION_DIT_PARAMETER_FORMAT_BF16) {
+    id4_tooling_parameter_provider_request_t requests[] = {
+        {
+            // Qwen3-VL text encoder parameter scope.
+            /*.scope=*/IREE_SV("qwen"),
+            // Qwen provider output.
+            /*.out_provider=*/context->qwen_parameter_provider.out(),
+        },
+        {
+            // Conditioned DiT parameter scope.
+            /*.scope=*/IREE_SV("dit_cond"),
+            // Conditioned DiT provider output.
+            /*.out_provider=*/
+            context->conditioned_dit_parameter_provider.out(),
+        },
+        {
+            // Unconditioned DiT parameter scope.
+            /*.scope=*/IREE_SV("dit_uncond"),
+            // Unconditioned DiT provider output.
+            /*.out_provider=*/
+            context->unconditioned_dit_parameter_provider.out(),
+        },
+        {
+            // VAE parameter scope.
+            /*.scope=*/IREE_SV("vae"),
+            // VAE provider output.
+            /*.out_provider=*/context->vae_parameter_provider.out(),
+        },
+    };
+    return id4_tooling_create_parameter_providers_from_flags(
+        IREE_ARRAYSIZE(requests), requests, iree_allocator_system());
+  }
+
+  ParameterProviderRef conditioned_bf16;
+  ParameterProviderRef conditioned_fp8;
+  ParameterProviderRef unconditioned_bf16;
+  ParameterProviderRef unconditioned_fp8;
+  const iree_string_view_t conditioned_fp8_scope =
+      iree_make_cstring_view(FLAG_dit_conditioned_fp8_scope);
+  const iree_string_view_t unconditioned_fp8_scope =
+      iree_make_cstring_view(FLAG_dit_unconditioned_fp8_scope);
   id4_tooling_parameter_provider_request_t requests[] = {
       {
           // Qwen3-VL text encoder parameter scope.
@@ -243,18 +335,28 @@ static iree_status_t CreateParameterProviders(
           /*.out_provider=*/context->qwen_parameter_provider.out(),
       },
       {
-          // Conditioned DiT parameter scope.
+          // Conditioned DiT BF16 parameter scope.
           /*.scope=*/IREE_SV("dit_cond"),
-          // Conditioned DiT provider output.
-          /*.out_provider=*/
-          context->conditioned_dit_parameter_provider.out(),
+          // Conditioned DiT BF16 provider output.
+          /*.out_provider=*/conditioned_bf16.out(),
       },
       {
-          // Unconditioned DiT parameter scope.
+          // Conditioned DiT native-FP8 parameter scope.
+          /*.scope=*/conditioned_fp8_scope,
+          // Conditioned DiT native-FP8 provider output.
+          /*.out_provider=*/conditioned_fp8.out(),
+      },
+      {
+          // Unconditioned DiT BF16 parameter scope.
           /*.scope=*/IREE_SV("dit_uncond"),
-          // Unconditioned DiT provider output.
-          /*.out_provider=*/
-          context->unconditioned_dit_parameter_provider.out(),
+          // Unconditioned DiT BF16 provider output.
+          /*.out_provider=*/unconditioned_bf16.out(),
+      },
+      {
+          // Unconditioned DiT native-FP8 parameter scope.
+          /*.scope=*/unconditioned_fp8_scope,
+          // Unconditioned DiT native-FP8 provider output.
+          /*.out_provider=*/unconditioned_fp8.out(),
       },
       {
           // VAE parameter scope.
@@ -263,8 +365,46 @@ static iree_status_t CreateParameterProviders(
           /*.out_provider=*/context->vae_parameter_provider.out(),
       },
   };
-  return id4_tooling_create_parameter_providers_from_flags(
-      IREE_ARRAYSIZE(requests), requests, iree_allocator_system());
+  IREE_RETURN_IF_ERROR(id4_tooling_create_parameter_providers_from_flags(
+      IREE_ARRAYSIZE(requests), requests, iree_allocator_system()));
+
+  const id4_tooling_parameter_provider_set_entry_t conditioned_entries[] = {
+      {
+          // Conditioned DiT BF16 parameter scope.
+          /*.scope=*/IREE_SV("dit_cond"),
+          // Conditioned DiT BF16 provider.
+          /*.provider=*/conditioned_bf16.get(),
+      },
+      {
+          // Conditioned DiT native-FP8 parameter scope.
+          /*.scope=*/conditioned_fp8_scope,
+          // Conditioned DiT native-FP8 provider.
+          /*.provider=*/conditioned_fp8.get(),
+      },
+  };
+  IREE_RETURN_IF_ERROR(id4_tooling_create_parameter_provider_set(
+      IREE_ARRAYSIZE(conditioned_entries), conditioned_entries,
+      iree_allocator_system(),
+      context->conditioned_dit_parameter_provider.out()));
+
+  const id4_tooling_parameter_provider_set_entry_t unconditioned_entries[] = {
+      {
+          // Unconditioned DiT BF16 parameter scope.
+          /*.scope=*/IREE_SV("dit_uncond"),
+          // Unconditioned DiT BF16 provider.
+          /*.provider=*/unconditioned_bf16.get(),
+      },
+      {
+          // Unconditioned DiT native-FP8 parameter scope.
+          /*.scope=*/unconditioned_fp8_scope,
+          // Unconditioned DiT native-FP8 provider.
+          /*.provider=*/unconditioned_fp8.get(),
+      },
+  };
+  return id4_tooling_create_parameter_provider_set(
+      IREE_ARRAYSIZE(unconditioned_entries), unconditioned_entries,
+      iree_allocator_system(),
+      context->unconditioned_dit_parameter_provider.out());
 }
 
 static iree_status_t CreateLiveGenerationBenchmarkContext(
@@ -284,9 +424,9 @@ static iree_status_t CreateLiveGenerationBenchmarkContext(
 
   IREE_RETURN_IF_ERROR(id4_tooling_create_embedded_kernel_library(
       iree_allocator_system(), out_context->kernel_library.out()));
-  IREE_RETURN_IF_ERROR(CreateParameterProviders(out_context));
-  return CreateLoadedLiveSession(&out_context->runtime_context,
-                                 out_context->session.out());
+  IREE_RETURN_IF_ERROR(CreateLoadedLiveSession(&out_context->runtime_context,
+                                               out_context->session.out()));
+  return CreateParameterProviders(out_context);
 }
 
 static iree_status_t CreateGenerationPlan(
@@ -304,6 +444,8 @@ static iree_status_t CreateGenerationPlan(
   plan_options.tokenizer = context.tokenizer.get();
   plan_options.tokenizer_flags = IREE_TOKENIZER_ENCODE_FLAG_NONE;
   plan_options.policy = MakeGenerationPolicy();
+  IREE_RETURN_IF_ERROR(
+      ParseDitActivationFormat(&plan_options.policy.dit_activation_format));
   plan_options.device_index = 0;
   plan_options.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
   plan_options.diagnostics_sink = diagnostics_sink;
