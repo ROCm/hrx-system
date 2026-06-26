@@ -29,6 +29,7 @@ iree_cc_library(
     libhrx_defs
   SHARED
   LINKOPTS
+    "-Wl,-z,nodelete"
     "-Wl,--undefined-version"
     "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/amdhip64.map"
   INCLUDES

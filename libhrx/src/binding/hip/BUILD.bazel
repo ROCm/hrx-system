@@ -34,6 +34,7 @@ hrx_cc_shared_library(
         "../../libhrx",
     ],
     linkopts = [
+        "-Wl,-z,nodelete",
         "-Wl,--undefined-version",
         "-Wl,--version-script=$(location :amdhip64.map)",
     ],
