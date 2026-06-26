@@ -341,6 +341,11 @@ TEST_F(SessionTest, PlansGenerationFromDynamicPromptLength) {
   iree_string_view_t json = iree_string_builder_view(&builder);
   EXPECT_NE(iree_string_view_find(json, IREE_SV("\"ideogram4_generation\""), 0),
             IREE_STRING_VIEW_NPOS);
+  EXPECT_NE(iree_string_view_find(json, IREE_SV("\"residency\""), 0),
+            IREE_STRING_VIEW_NPOS);
+  EXPECT_NE(iree_string_view_find(
+                json, IREE_SV("\"phase_parameter_high_water_mark\""), 0),
+            IREE_STRING_VIEW_NPOS);
   EXPECT_NE(iree_string_view_find(json, IREE_SV("\"stages\""), 0),
             IREE_STRING_VIEW_NPOS);
   iree_string_builder_deinitialize(&builder);

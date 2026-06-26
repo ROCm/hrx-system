@@ -101,6 +101,13 @@ typedef enum id4_ideogram4_generation_stage_ordinal_e {
   ID4_IDEOGRAM4_GENERATION_STAGE_COUNT = 6,
 } id4_ideogram4_generation_stage_ordinal_t;
 
+typedef struct id4_ideogram4_generation_stage_descriptor_t {
+  // Stage ordinal used by generation scheduling tables.
+  id4_ideogram4_generation_stage_ordinal_t ordinal;
+  // Stable generation-plan JSON key for the stage.
+  const char* key;
+} id4_ideogram4_generation_stage_descriptor_t;
+
 typedef struct id4_ideogram4_generation_stage_slot_t {
   // Session-owned stage implementation selected for this slot.
   id4_pipeline_stage_t* stage;
@@ -130,6 +137,39 @@ typedef struct id4_ideogram4_generation_boundary_alias_t {
   iree_string_view_t target_name;
 } id4_ideogram4_generation_boundary_alias_t;
 
+typedef uint32_t id4_ideogram4_generation_residency_phase_flags_t;
+
+typedef enum id4_ideogram4_generation_residency_phase_flag_bits_e {
+  // Phase is issued once for every denoise step.
+  ID4_IDEOGRAM4_GENERATION_RESIDENCY_PHASE_REPEATED_PER_DENOISE_STEP = 1u << 0,
+} id4_ideogram4_generation_residency_phase_flag_bits_t;
+
+typedef struct id4_ideogram4_generation_residency_phase_t {
+  // Human-readable phase name for diagnostics and plan dumps.
+  iree_string_view_t name;
+  // Phase behavior flags.
+  id4_ideogram4_generation_residency_phase_flags_t flags;
+  // Number of stage ordinals in |stage_ordinals|.
+  iree_host_size_t stage_count;
+  // Stage ordinals whose stage bundles may be co-resident in this phase.
+  id4_ideogram4_generation_stage_ordinal_t stage_ordinals[3];
+} id4_ideogram4_generation_residency_phase_t;
+
+typedef struct id4_ideogram4_generation_residency_statistics_t {
+  // Sum of final parameter slab bytes across included stages.
+  iree_device_size_t parameter_byte_length;
+  // Largest final parameter slab byte length in any one included stage.
+  iree_device_size_t largest_stage_parameter_byte_length;
+  // Sum of embedded constant slab bytes across included stages.
+  iree_device_size_t constant_byte_length;
+  // Sum of local transient slab allocation bytes across included stages.
+  iree_device_size_t local_slab_byte_length;
+  // Sum of local transient high-water marks across included stages.
+  iree_device_size_t local_high_water_mark;
+  // Sum of planned stage boundary tensor bytes across included stages.
+  iree_device_size_t stage_boundary_byte_length;
+} id4_ideogram4_generation_residency_statistics_t;
+
 typedef struct id4_ideogram4_boundary_upload_context_t {
   // Device receiving the queued upload operations.
   iree_hal_device_t* device;
@@ -144,6 +184,78 @@ typedef struct id4_ideogram4_boundary_upload_context_t {
   // Payload value mutated after every queued update.
   uint64_t* payload_value;
 } id4_ideogram4_boundary_upload_context_t;
+
+static const id4_ideogram4_generation_stage_descriptor_t
+    id4_ideogram4_generation_stage_descriptors[] = {
+        {
+            // Initial latent noise stage.
+            .ordinal = ID4_IDEOGRAM4_GENERATION_STAGE_NOISE,
+            .key = "sampler_noise",
+        },
+        {
+            // Qwen text conditioning stage.
+            .ordinal = ID4_IDEOGRAM4_GENERATION_STAGE_QWEN,
+            .key = "qwen",
+        },
+        {
+            // Conditioned DiT denoise branch stage.
+            .ordinal = ID4_IDEOGRAM4_GENERATION_STAGE_DIT_CONDITIONED,
+            .key = "dit_conditioned",
+        },
+        {
+            // Unconditioned DiT denoise branch stage.
+            .ordinal = ID4_IDEOGRAM4_GENERATION_STAGE_DIT_UNCONDITIONED,
+            .key = "dit_unconditioned",
+        },
+        {
+            // CFG sampler denoise-step stage.
+            .ordinal = ID4_IDEOGRAM4_GENERATION_STAGE_SAMPLER,
+            .key = "sampler_denoise",
+        },
+        {
+            // VAE-backed latent decode stage.
+            .ordinal = ID4_IDEOGRAM4_GENERATION_STAGE_DECODE,
+            .key = "decode",
+        },
+};
+
+static const id4_ideogram4_generation_residency_phase_t
+    id4_ideogram4_generation_residency_phases[] = {
+        {
+            // Phase that produces prompt conditioning and initial latent noise.
+            .name = IREE_SVL("conditioning"),
+            .flags = 0,
+            .stage_count = 2,
+            .stage_ordinals =
+                {
+                    ID4_IDEOGRAM4_GENERATION_STAGE_QWEN,
+                    ID4_IDEOGRAM4_GENERATION_STAGE_NOISE,
+                },
+        },
+        {
+            // Phase that repeats the conditioned/unconditioned DiT branches.
+            .name = IREE_SVL("denoise"),
+            .flags =
+                ID4_IDEOGRAM4_GENERATION_RESIDENCY_PHASE_REPEATED_PER_DENOISE_STEP,
+            .stage_count = 3,
+            .stage_ordinals =
+                {
+                    ID4_IDEOGRAM4_GENERATION_STAGE_DIT_CONDITIONED,
+                    ID4_IDEOGRAM4_GENERATION_STAGE_DIT_UNCONDITIONED,
+                    ID4_IDEOGRAM4_GENERATION_STAGE_SAMPLER,
+                },
+        },
+        {
+            // Phase that decodes the final latent into an image.
+            .name = IREE_SVL("decode"),
+            .flags = 0,
+            .stage_count = 1,
+            .stage_ordinals =
+                {
+                    ID4_IDEOGRAM4_GENERATION_STAGE_DECODE,
+                },
+        },
+};
 
 struct id4_ideogram4_generation_bundle_t {
   // Reference count for shared prepared-bundle ownership.
@@ -964,11 +1076,252 @@ static iree_status_t id4_ideogram4_generation_plan_append_tiling_json(
       (double)tiling.overlap, (uint64_t)tiling.memory_budget);
 }
 
-static iree_status_t id4_ideogram4_generation_plan_append_stage_json(
-    iree_string_builder_t* builder, const char* key,
-    const id4_pipeline_plan_t* stage_plan) {
+static const id4_ideogram4_generation_stage_descriptor_t*
+id4_ideogram4_generation_stage_descriptor(
+    id4_ideogram4_generation_stage_ordinal_t ordinal) {
+  for (iree_host_size_t i = 0;
+       i < IREE_ARRAYSIZE(id4_ideogram4_generation_stage_descriptors); ++i) {
+    const id4_ideogram4_generation_stage_descriptor_t* descriptor =
+        &id4_ideogram4_generation_stage_descriptors[i];
+    if (descriptor->ordinal == ordinal) return descriptor;
+  }
+  return NULL;
+}
+
+static const id4_pipeline_plan_t* id4_ideogram4_generation_stage_plan(
+    const id4_ideogram4_generation_plan_t* plan,
+    id4_ideogram4_generation_stage_ordinal_t ordinal) {
+  switch (ordinal) {
+    case ID4_IDEOGRAM4_GENERATION_STAGE_NOISE:
+      return plan->sampler_noise_plan;
+    case ID4_IDEOGRAM4_GENERATION_STAGE_QWEN:
+      return plan->qwen_plan;
+    case ID4_IDEOGRAM4_GENERATION_STAGE_DIT_CONDITIONED:
+      return plan->dit_conditioned_plan;
+    case ID4_IDEOGRAM4_GENERATION_STAGE_DIT_UNCONDITIONED:
+      return plan->dit_unconditioned_plan;
+    case ID4_IDEOGRAM4_GENERATION_STAGE_SAMPLER:
+      return plan->sampler_denoise_plan;
+    case ID4_IDEOGRAM4_GENERATION_STAGE_DECODE:
+      return plan->decode_plan;
+    default:
+      return NULL;
+  }
+}
+
+static iree_device_size_t id4_ideogram4_generation_plan_parameter_bytes(
+    const id4_pipeline_plan_t* plan,
+    iree_device_size_t* out_largest_slab_byte_length) {
+  iree_device_size_t total_byte_length = 0;
+  iree_device_size_t largest_slab_byte_length = 0;
+  const iree_host_size_t slab_count =
+      id4_pipeline_plan_parameter_slab_count(plan);
+  for (iree_host_size_t i = 0; i < slab_count; ++i) {
+    const id4_pipeline_parameter_slab_plan_t* slab =
+        id4_pipeline_plan_parameter_slab_at(plan, i);
+    if (!slab) continue;
+    total_byte_length += slab->byte_length;
+    if (slab->byte_length > largest_slab_byte_length) {
+      largest_slab_byte_length = slab->byte_length;
+    }
+  }
+  *out_largest_slab_byte_length = largest_slab_byte_length;
+  return total_byte_length;
+}
+
+static iree_device_size_t id4_ideogram4_generation_plan_constant_bytes(
+    const id4_pipeline_plan_t* plan) {
+  iree_device_size_t total_byte_length = 0;
+  const iree_host_size_t slab_count =
+      id4_pipeline_plan_constant_slab_count(plan);
+  for (iree_host_size_t i = 0; i < slab_count; ++i) {
+    const id4_pipeline_constant_slab_plan_t* slab =
+        id4_pipeline_plan_constant_slab_at(plan, i);
+    if (!slab) continue;
+    total_byte_length += slab->byte_length;
+  }
+  return total_byte_length;
+}
+
+static void id4_ideogram4_generation_plan_accumulate_local_bytes(
+    const id4_pipeline_plan_t* plan, iree_device_size_t* io_slab_byte_length,
+    iree_device_size_t* io_high_water_mark) {
+  const iree_host_size_t slab_count = id4_pipeline_plan_memory_slab_count(plan);
+  for (iree_host_size_t i = 0; i < slab_count; ++i) {
+    const id4_pipeline_memory_slab_plan_t* slab =
+        id4_pipeline_plan_memory_slab_at(plan, i);
+    if (!slab) continue;
+    *io_slab_byte_length += slab->byte_length;
+    *io_high_water_mark += slab->high_water_mark;
+  }
+}
+
+static iree_device_size_t id4_ideogram4_generation_plan_boundary_bytes(
+    const id4_pipeline_plan_t* plan) {
+  iree_device_size_t total_byte_length = 0;
+  const iree_host_size_t boundary_count =
+      id4_pipeline_plan_boundary_tensor_count(plan);
+  for (iree_host_size_t i = 0; i < boundary_count; ++i) {
+    const id4_pipeline_boundary_tensor_plan_t* boundary =
+        id4_pipeline_plan_boundary_tensor_at(plan, i);
+    if (!boundary) continue;
+    total_byte_length += boundary->layout.byte_length;
+  }
+  return total_byte_length;
+}
+
+static iree_status_t id4_ideogram4_generation_residency_statistics_accumulate(
+    const id4_ideogram4_generation_plan_t* plan,
+    const id4_ideogram4_generation_residency_phase_t* phase,
+    id4_ideogram4_generation_residency_statistics_t* io_statistics) {
+  for (iree_host_size_t i = 0; i < phase->stage_count; ++i) {
+    const id4_pipeline_plan_t* stage_plan =
+        id4_ideogram4_generation_stage_plan(plan, phase->stage_ordinals[i]);
+    if (!stage_plan) {
+      const id4_ideogram4_generation_stage_descriptor_t* descriptor =
+          id4_ideogram4_generation_stage_descriptor(phase->stage_ordinals[i]);
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "Ideogram 4 generation residency phase %.*s references missing "
+          "stage %s",
+          (int)phase->name.size, phase->name.data,
+          descriptor ? descriptor->key : "<unknown>");
+    }
+    iree_device_size_t largest_stage_slab_byte_length = 0;
+    io_statistics->parameter_byte_length +=
+        id4_ideogram4_generation_plan_parameter_bytes(
+            stage_plan, &largest_stage_slab_byte_length);
+    if (largest_stage_slab_byte_length >
+        io_statistics->largest_stage_parameter_byte_length) {
+      io_statistics->largest_stage_parameter_byte_length =
+          largest_stage_slab_byte_length;
+    }
+    io_statistics->constant_byte_length +=
+        id4_ideogram4_generation_plan_constant_bytes(stage_plan);
+    id4_ideogram4_generation_plan_accumulate_local_bytes(
+        stage_plan, &io_statistics->local_slab_byte_length,
+        &io_statistics->local_high_water_mark);
+    io_statistics->stage_boundary_byte_length +=
+        id4_ideogram4_generation_plan_boundary_bytes(stage_plan);
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t id4_ideogram4_generation_plan_append_stage_key_json(
+    iree_string_builder_t* builder,
+    id4_ideogram4_generation_stage_ordinal_t ordinal) {
+  const id4_ideogram4_generation_stage_descriptor_t* descriptor =
+      id4_ideogram4_generation_stage_descriptor(ordinal);
+  if (!descriptor) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "unknown Ideogram 4 generation stage ordinal %u",
+                            (uint32_t)ordinal);
+  }
+  return iree_string_builder_append_format(builder, "\"%s\"", descriptor->key);
+}
+
+static iree_status_t id4_ideogram4_generation_plan_append_residency_phase_json(
+    const id4_ideogram4_generation_plan_t* plan, iree_string_builder_t* builder,
+    const id4_ideogram4_generation_residency_phase_t* phase) {
+  id4_ideogram4_generation_residency_statistics_t statistics;
+  memset(&statistics, 0, sizeof(statistics));
+  IREE_RETURN_IF_ERROR(id4_ideogram4_generation_residency_statistics_accumulate(
+      plan, phase, &statistics));
+
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+      builder, "{\"name\":\"%.*s\"", (int)phase->name.size, phase->name.data));
   IREE_RETURN_IF_ERROR(
-      iree_string_builder_append_format(builder, "\"%s\":", key));
+      iree_string_builder_append_cstring(builder, ",\"stage_keys\":["));
+  for (iree_host_size_t i = 0; i < phase->stage_count; ++i) {
+    if (i != 0) {
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, ","));
+    }
+    IREE_RETURN_IF_ERROR(id4_ideogram4_generation_plan_append_stage_key_json(
+        builder, phase->stage_ordinals[i]));
+  }
+  const bool repeated_per_denoise_step = iree_any_bit_set(
+      phase->flags,
+      ID4_IDEOGRAM4_GENERATION_RESIDENCY_PHASE_REPEATED_PER_DENOISE_STEP);
+  return iree_string_builder_append_format(
+      builder,
+      "],\"repeated_per_denoise_step\":%s"
+      ",\"parameter_byte_length\":%" PRIu64
+      ",\"largest_stage_parameter_byte_length\":%" PRIu64
+      ",\"constant_byte_length\":%" PRIu64
+      ",\"local_slab_byte_length\":%" PRIu64
+      ",\"local_high_water_mark\":%" PRIu64
+      ",\"stage_boundary_byte_length\":%" PRIu64 "}",
+      repeated_per_denoise_step ? "true" : "false",
+      (uint64_t)statistics.parameter_byte_length,
+      (uint64_t)statistics.largest_stage_parameter_byte_length,
+      (uint64_t)statistics.constant_byte_length,
+      (uint64_t)statistics.local_slab_byte_length,
+      (uint64_t)statistics.local_high_water_mark,
+      (uint64_t)statistics.stage_boundary_byte_length);
+}
+
+static iree_status_t id4_ideogram4_generation_plan_append_residency_json(
+    const id4_ideogram4_generation_plan_t* plan,
+    iree_string_builder_t* builder) {
+  id4_ideogram4_generation_residency_statistics_t total_statistics;
+  memset(&total_statistics, 0, sizeof(total_statistics));
+  for (iree_host_size_t i = 0;
+       i < IREE_ARRAYSIZE(id4_ideogram4_generation_residency_phases); ++i) {
+    IREE_RETURN_IF_ERROR(
+        id4_ideogram4_generation_residency_statistics_accumulate(
+            plan, &id4_ideogram4_generation_residency_phases[i],
+            &total_statistics));
+  }
+
+  iree_device_size_t parameter_high_water_mark = 0;
+  for (iree_host_size_t i = 0;
+       i < IREE_ARRAYSIZE(id4_ideogram4_generation_residency_phases); ++i) {
+    id4_ideogram4_generation_residency_statistics_t phase_statistics;
+    memset(&phase_statistics, 0, sizeof(phase_statistics));
+    IREE_RETURN_IF_ERROR(
+        id4_ideogram4_generation_residency_statistics_accumulate(
+            plan, &id4_ideogram4_generation_residency_phases[i],
+            &phase_statistics));
+    if (phase_statistics.parameter_byte_length > parameter_high_water_mark) {
+      parameter_high_water_mark = phase_statistics.parameter_byte_length;
+    }
+  }
+
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+      builder,
+      "{\"total_stage_parameter_byte_length\":%" PRIu64
+      ",\"phase_parameter_high_water_mark\":%" PRIu64
+      ",\"largest_stage_parameter_byte_length\":%" PRIu64
+      ",\"total_stage_boundary_byte_length\":%" PRIu64 ",\"phases\":[",
+      (uint64_t)total_statistics.parameter_byte_length,
+      (uint64_t)parameter_high_water_mark,
+      (uint64_t)total_statistics.largest_stage_parameter_byte_length,
+      (uint64_t)total_statistics.stage_boundary_byte_length));
+  for (iree_host_size_t i = 0;
+       i < IREE_ARRAYSIZE(id4_ideogram4_generation_residency_phases); ++i) {
+    if (i != 0) {
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, ","));
+    }
+    IREE_RETURN_IF_ERROR(
+        id4_ideogram4_generation_plan_append_residency_phase_json(
+            plan, builder, &id4_ideogram4_generation_residency_phases[i]));
+  }
+  return iree_string_builder_append_cstring(builder, "]}");
+}
+
+static iree_status_t id4_ideogram4_generation_plan_append_stage_json(
+    iree_string_builder_t* builder,
+    id4_ideogram4_generation_stage_ordinal_t ordinal,
+    const id4_pipeline_plan_t* stage_plan) {
+  const id4_ideogram4_generation_stage_descriptor_t* descriptor =
+      id4_ideogram4_generation_stage_descriptor(ordinal);
+  if (!descriptor) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "unknown Ideogram 4 generation stage ordinal %u",
+                            (uint32_t)ordinal);
+  }
+  IREE_RETURN_IF_ERROR(
+      iree_string_builder_append_format(builder, "\"%s\":", descriptor->key));
   return id4_pipeline_plan_format_json(stage_plan, builder);
 }
 
@@ -997,24 +1350,31 @@ iree_status_t id4_ideogram4_generation_plan_format_json(
   IREE_RETURN_IF_ERROR(id4_ideogram4_generation_plan_append_tiling_json(
       builder, plan->summary.vae_tiling));
   IREE_RETURN_IF_ERROR(
-      iree_string_builder_append_cstring(builder, "},\"stages\":{"));
+      iree_string_builder_append_cstring(builder, "},\"residency\":"));
+  IREE_RETURN_IF_ERROR(
+      id4_ideogram4_generation_plan_append_residency_json(plan, builder));
+  IREE_RETURN_IF_ERROR(
+      iree_string_builder_append_cstring(builder, ",\"stages\":{"));
   IREE_RETURN_IF_ERROR(id4_ideogram4_generation_plan_append_stage_json(
-      builder, "qwen", plan->qwen_plan));
+      builder, ID4_IDEOGRAM4_GENERATION_STAGE_QWEN, plan->qwen_plan));
   IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, ","));
   IREE_RETURN_IF_ERROR(id4_ideogram4_generation_plan_append_stage_json(
-      builder, "dit_conditioned", plan->dit_conditioned_plan));
+      builder, ID4_IDEOGRAM4_GENERATION_STAGE_DIT_CONDITIONED,
+      plan->dit_conditioned_plan));
   IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, ","));
   IREE_RETURN_IF_ERROR(id4_ideogram4_generation_plan_append_stage_json(
-      builder, "dit_unconditioned", plan->dit_unconditioned_plan));
+      builder, ID4_IDEOGRAM4_GENERATION_STAGE_DIT_UNCONDITIONED,
+      plan->dit_unconditioned_plan));
   IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, ","));
   IREE_RETURN_IF_ERROR(id4_ideogram4_generation_plan_append_stage_json(
-      builder, "sampler_noise", plan->sampler_noise_plan));
+      builder, ID4_IDEOGRAM4_GENERATION_STAGE_NOISE, plan->sampler_noise_plan));
   IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, ","));
   IREE_RETURN_IF_ERROR(id4_ideogram4_generation_plan_append_stage_json(
-      builder, "sampler_denoise", plan->sampler_denoise_plan));
+      builder, ID4_IDEOGRAM4_GENERATION_STAGE_SAMPLER,
+      plan->sampler_denoise_plan));
   IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, ","));
   IREE_RETURN_IF_ERROR(id4_ideogram4_generation_plan_append_stage_json(
-      builder, "decode", plan->decode_plan));
+      builder, ID4_IDEOGRAM4_GENERATION_STAGE_DECODE, plan->decode_plan));
   return iree_string_builder_append_cstring(builder, "}}");
 }
 
