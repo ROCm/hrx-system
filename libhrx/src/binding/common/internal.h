@@ -436,6 +436,13 @@ typedef enum iree_hal_streaming_stream_flag_bits_e {
   IREE_HAL_STREAMING_STREAM_FLAG_NON_BLOCKING = 1ull << 0,
 } iree_hal_streaming_stream_flags_t;
 
+typedef enum iree_hal_streaming_synchronization_policy_e {
+  IREE_HAL_STREAMING_SYNCHRONIZATION_POLICY_AUTO = 1,
+  IREE_HAL_STREAMING_SYNCHRONIZATION_POLICY_SPIN = 2,
+  IREE_HAL_STREAMING_SYNCHRONIZATION_POLICY_YIELD = 3,
+  IREE_HAL_STREAMING_SYNCHRONIZATION_POLICY_BLOCKING_SYNC = 4,
+} iree_hal_streaming_synchronization_policy_t;
+
 // Stream capture status enum.
 typedef enum iree_hal_streaming_capture_status_e {
   IREE_HAL_STREAMING_CAPTURE_STATUS_NONE = 0,
@@ -466,9 +473,16 @@ typedef struct iree_hal_streaming_stream_t {
   // Parent context, unowned (to avoid cycles).
   iree_hal_streaming_context_t* context;
 
-  // Stream properties.
+  // HIP stream creation flags.
   iree_hal_streaming_stream_flags_t flags;
+  // HIP synchronization policy value for stream attribute queries.
+  iree_hal_streaming_synchronization_policy_t synchronization_policy;
+  // HIP stream scheduling priority hint.
   int priority;
+  // Number of 32-bit entries in |cu_mask|.
+  iree_host_size_t cu_mask_count;
+  // Optional HIP CU mask owned by this stream; NULL means default device mask.
+  uint32_t* cu_mask;
   // Stable HIP stream identifier, unique within this context.
   unsigned long long stream_id;
 
