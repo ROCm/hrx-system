@@ -157,6 +157,8 @@ static void id4_pipeline_plan_destroy(id4_pipeline_plan_t* plan) {
   for (iree_host_size_t i = 0; i < plan->parameter_load_step_count; ++i) {
     id4_pipeline_string_release(plan->parameter_load_steps[i].name,
                                 host_allocator);
+    id4_pipeline_string_release(plan->parameter_load_steps[i].source_scope,
+                                host_allocator);
   }
   iree_allocator_free(host_allocator, plan->parameter_load_steps);
   for (iree_host_size_t i = 0; i < plan->parameter_slab_count; ++i) {
@@ -301,6 +303,8 @@ static iree_status_t id4_pipeline_plan_copy_parameter_load_steps(
     target->request_count = source->request_count;
     IREE_RETURN_IF_ERROR(id4_pipeline_string_clone(
         source->name, plan->host_allocator, &target->name));
+    IREE_RETURN_IF_ERROR(id4_pipeline_string_clone(
+        source->source_scope, plan->host_allocator, &target->source_scope));
   }
   return iree_ok_status();
 }
@@ -1479,6 +1483,8 @@ static iree_string_view_t id4_pipeline_plan_program_dtype_format(
       return IREE_SV("i32");
     case ID4_PIPELINE_PROGRAM_DTYPE_U32:
       return IREE_SV("u32");
+    case ID4_PIPELINE_PROGRAM_DTYPE_F8_E4M3:
+      return IREE_SV("f8e4m3");
     default:
       return IREE_SV("invalid");
   }
@@ -1750,6 +1756,10 @@ iree_status_t id4_pipeline_plan_format_json(const id4_pipeline_plan_t* plan,
         iree_string_builder_append_cstring(builder, "{\"name\":"));
     IREE_RETURN_IF_ERROR(
         id4_pipeline_plan_append_json_string(builder, step->name));
+    IREE_RETURN_IF_ERROR(
+        iree_string_builder_append_cstring(builder, ",\"source_scope\":"));
+    IREE_RETURN_IF_ERROR(
+        id4_pipeline_plan_append_json_string(builder, step->source_scope));
     IREE_RETURN_IF_ERROR(
         iree_string_builder_append_cstring(builder, ",\"kind\":"));
     IREE_RETURN_IF_ERROR(id4_pipeline_plan_append_parameter_load_step_kind_json(

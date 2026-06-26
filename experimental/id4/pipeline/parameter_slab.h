@@ -107,6 +107,8 @@ typedef struct id4_pipeline_parameter_load_step_t {
   iree_string_view_t name;
   // Operation performed by this loading step.
   id4_pipeline_parameter_load_step_kind_t kind;
+  // Provider source scope supplying the selected parameter requests.
+  iree_string_view_t source_scope;
   // Final parameter slab populated by this step.
   iree_host_size_t target_slab_index;
   // First request ordinal in the target slab request table.
@@ -118,12 +120,14 @@ typedef struct id4_pipeline_parameter_load_step_t {
 // Returns a direct provider-gather load step into a final parameter slab.
 static inline id4_pipeline_parameter_load_step_t
 id4_pipeline_parameter_gather_load_step(iree_string_view_t name,
+                                        iree_string_view_t source_scope,
                                         iree_host_size_t target_slab_index,
                                         iree_host_size_t request_offset,
                                         iree_host_size_t request_count) {
   id4_pipeline_parameter_load_step_t step;
   step.name = name;
   step.kind = ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_GATHER;
+  step.source_scope = source_scope;
   step.target_slab_index = target_slab_index;
   step.request_offset = request_offset;
   step.request_count = request_count;

@@ -371,6 +371,10 @@ static void id4_pipeline_program_free_op(id4_pipeline_program_op_t* op,
       id4_pipeline_program_free_string(&op->payload.dispatch_loom.name,
                                        host_allocator);
       break;
+    case ID4_PIPELINE_PROGRAM_OP_KIND_PARAMETER:
+      id4_pipeline_program_free_string(&op->payload.parameter.source_scope,
+                                       host_allocator);
+      break;
     case ID4_PIPELINE_PROGRAM_OP_KIND_CONSTANT:
       id4_pipeline_program_free_constant_data(op->payload.constant.data,
                                               host_allocator);
@@ -404,7 +408,10 @@ static iree_status_t id4_pipeline_program_copy_op(
       target->payload.import_value = source->payload.import_value;
       break;
     case ID4_PIPELINE_PROGRAM_OP_KIND_PARAMETER:
-      target->payload.parameter = source->payload.parameter;
+      target->payload.parameter.tensor = source->payload.parameter.tensor;
+      status = id4_pipeline_program_copy_string(
+          source->payload.parameter.source_scope, host_allocator,
+          &target->payload.parameter.source_scope);
       break;
     case ID4_PIPELINE_PROGRAM_OP_KIND_CONSTANT:
       target->payload.constant.tensor = source->payload.constant.tensor;
@@ -681,6 +688,8 @@ iree_device_size_t id4_pipeline_program_dtype_byte_length(
     case ID4_PIPELINE_PROGRAM_DTYPE_F16:
     case ID4_PIPELINE_PROGRAM_DTYPE_BF16:
       return 2;
+    case ID4_PIPELINE_PROGRAM_DTYPE_F8_E4M3:
+      return 1;
     default:
       return 0;
   }
@@ -865,6 +874,13 @@ iree_status_t id4_pipeline_program_parameter(
           "program parameter %.*s was requested with incompatible metadata",
           (int)options->key.size, options->key.data);
     }
+    if (!iree_string_view_equal(producer->payload.parameter.source_scope,
+                                options->source_scope)) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "program parameter %.*s was requested with incompatible source scope",
+          (int)options->key.size, options->key.data);
+    }
     *out_tensor = existing_tensor;
     return iree_ok_status();
   }
@@ -877,7 +893,11 @@ iree_status_t id4_pipeline_program_parameter(
   id4_pipeline_program_op_t op = {
       .kind = ID4_PIPELINE_PROGRAM_OP_KIND_PARAMETER,
       .ordinal = operation_ordinal,
-      .payload.parameter.tensor = tensor,
+      .payload.parameter =
+          {
+              .source_scope = options->source_scope,
+              .tensor = tensor,
+          },
   };
   iree_status_t status = id4_pipeline_program_builder_append_op(builder, &op);
   if (iree_status_is_ok(status)) {

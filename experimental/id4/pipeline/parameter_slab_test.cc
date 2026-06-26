@@ -86,8 +86,9 @@ TEST(PipelineParameterSlab, ValidateLoadStepRange) {
 
   id4_pipeline_parameter_load_step_t step =
       id4_pipeline_parameter_gather_load_step(
-          IREE_SV("parameters.gather.tail"), /*target_slab_index=*/0,
-          /*request_offset=*/1, /*request_count=*/1);
+          IREE_SV("parameters.gather.tail"), IREE_SV("scope"),
+          /*target_slab_index=*/0, /*request_offset=*/1,
+          /*request_count=*/1);
   IREE_EXPECT_OK(id4_pipeline_parameter_load_step_validate(
       &step, /*slab_count=*/1, &slab));
 
@@ -102,8 +103,8 @@ TEST(PipelineParameterSlab, ValidateLoadStepRange) {
                             &step, /*slab_count=*/1, &slab));
 
   step = id4_pipeline_parameter_gather_load_step(
-      iree_string_view_empty(), /*target_slab_index=*/0, /*request_offset=*/0,
-      /*request_count=*/1);
+      iree_string_view_empty(), IREE_SV("scope"), /*target_slab_index=*/0,
+      /*request_offset=*/0, /*request_count=*/1);
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         id4_pipeline_parameter_load_step_validate(
                             &step, /*slab_count=*/1, &slab));

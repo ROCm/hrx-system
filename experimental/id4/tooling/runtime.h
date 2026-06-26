@@ -80,6 +80,27 @@ typedef struct id4_tooling_parameter_provider_request_t {
   iree_io_parameter_provider_t** out_provider;
 } id4_tooling_parameter_provider_request_t;
 
+// One scoped child provider retained by a parameter provider set.
+typedef struct id4_tooling_parameter_provider_set_entry_t {
+  // Parameter scope routed to |provider|.
+  iree_string_view_t scope;
+  // Provider that must support |scope|.
+  iree_io_parameter_provider_t* provider;
+} id4_tooling_parameter_provider_set_entry_t;
+
+// Creates one provider that routes operations to scoped child providers.
+iree_status_t id4_tooling_create_parameter_provider_set(
+    iree_host_size_t entry_count,
+    const id4_tooling_parameter_provider_set_entry_t* entries,
+    iree_allocator_t host_allocator,
+    iree_io_parameter_provider_t** out_provider);
+
+// Creates one provider for |scopes| from standard --parameters= flags.
+iree_status_t id4_tooling_create_parameter_provider_set_from_flags(
+    iree_host_size_t scope_count, const iree_string_view_t* scopes,
+    iree_allocator_t host_allocator,
+    iree_io_parameter_provider_t** out_provider);
+
 // Creates scoped parameter providers from one shared parse of --parameters=.
 iree_status_t id4_tooling_create_parameter_providers_from_flags(
     iree_host_size_t request_count,

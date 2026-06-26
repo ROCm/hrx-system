@@ -44,6 +44,8 @@ typedef enum id4_pipeline_program_dtype_e {
   ID4_PIPELINE_PROGRAM_DTYPE_I32 = 4,
   // Unsigned 32-bit integer.
   ID4_PIPELINE_PROGRAM_DTYPE_U32 = 5,
+  // E4M3 8-bit floating point value.
+  ID4_PIPELINE_PROGRAM_DTYPE_F8_E4M3 = 6,
 } id4_pipeline_program_dtype_t;
 
 // Kind of operation authored into a semantic pipeline program.
@@ -155,6 +157,8 @@ typedef struct id4_pipeline_program_import_op_t {
 
 // Parameter tensor operation payload.
 typedef struct id4_pipeline_program_parameter_op_t {
+  // Provider source scope used when loading this parameter.
+  iree_string_view_t source_scope;
   // Initialized tensor whose record name is the provider key.
   id4_pipeline_program_tensor_t tensor;
 } id4_pipeline_program_parameter_op_t;
@@ -274,6 +278,8 @@ typedef struct id4_pipeline_program_parameter_options_t {
   iree_host_size_t structure_size;
   // Extension structure chain; must be NULL for now.
   const void* next;
+  // Provider source scope used when loading this parameter.
+  iree_string_view_t source_scope;
   // Parameter key and tensor diagnostic name.
   iree_string_view_t key;
   // Scalar element type.

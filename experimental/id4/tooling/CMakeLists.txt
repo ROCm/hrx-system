@@ -155,6 +155,7 @@ iree_cc_test(
     ::runtime
     iree::base
     iree::experimental::id4::pipeline::kernel_library
+    iree::hal
     iree::io::parameter_provider
     iree::testing::gtest
     iree::testing::gtest_main

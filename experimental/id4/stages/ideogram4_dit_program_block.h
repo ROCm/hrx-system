@@ -30,6 +30,8 @@ typedef struct id4_ideogram4_dit_program_dense_options_t {
   iree_string_view_t operation_name;
   // Stable output tensor name used for diagnostics.
   iree_string_view_t output_name;
+  // Parameter source policy used when loading dense parameters.
+  id4_ideogram4_dit_parameter_sources_t parameter_sources;
   // Parameter key prefix that owns ".weight" and ".bias" tensors.
   iree_string_view_t parameter_prefix;
   // Dense input vector.
@@ -47,6 +49,8 @@ typedef struct id4_ideogram4_dit_program_block_options_t {
   id4_pipeline_program_builder_t* builder;
   // Branch diagnostic prefix, such as "ideogram4.cond".
   iree_string_view_t branch_name;
+  // Parameter source policy used when loading DiT block parameters.
+  id4_ideogram4_dit_parameter_sources_t parameter_sources;
   // Transformer layer ordinal used for parameter keys and diagnostic names.
   uint32_t layer_ordinal;
   // AdaLN conditioning vector channel count.
@@ -92,15 +96,18 @@ bool id4_ideogram4_dit_program_has_diagnostic_tap(
     iree_string_view_list_t diagnostic_tap_names, iree_string_view_t name);
 
 iree_status_t id4_ideogram4_dit_program_parameter(
-    id4_pipeline_program_builder_t* builder, iree_string_view_t key,
-    id4_pipeline_program_dtype_t dtype, id4_pipeline_program_shape_t shape,
-    id4_pipeline_program_tensor_t* out_tensor);
-
-iree_status_t id4_ideogram4_dit_program_layer_parameter(
-    id4_pipeline_program_builder_t* builder, uint32_t layer_ordinal,
-    iree_string_view_t suffix, id4_pipeline_program_dtype_t dtype,
+    id4_pipeline_program_builder_t* builder, iree_string_view_t source_scope,
+    iree_string_view_t key, id4_pipeline_program_dtype_t dtype,
     id4_pipeline_program_shape_t shape,
     id4_pipeline_program_tensor_t* out_tensor);
+
+iree_status_t id4_ideogram4_dit_program_parameter_source_resolve(
+    id4_ideogram4_dit_parameter_sources_t sources, iree_string_view_t key,
+    id4_ideogram4_dit_parameter_source_rule_t* out_source);
+
+iree_status_t id4_ideogram4_dit_program_format_parameter_scale_key(
+    iree_string_view_t weight_key, char* buffer,
+    iree_host_size_t buffer_capacity, iree_string_view_t* out_string);
 
 iree_status_t id4_ideogram4_dit_program_acquire_tensor(
     id4_pipeline_program_builder_t* builder, iree_string_view_t name,
@@ -198,6 +205,12 @@ iree_status_t id4_ideogram4_dit_program_dispatch_linear_bf16_bf16(
     uint32_t token_count, uint32_t input_size, uint32_t output_size,
     id4_pipeline_program_tensor_t input, id4_pipeline_program_tensor_t weight,
     id4_pipeline_program_tensor_t output);
+
+iree_status_t id4_ideogram4_dit_program_dispatch_linear_fp8_f32(
+    id4_pipeline_program_builder_t* builder, iree_string_view_t name,
+    uint32_t token_count, uint32_t input_size, uint32_t output_size,
+    id4_pipeline_program_tensor_t input, id4_pipeline_program_tensor_t weight,
+    id4_pipeline_program_tensor_t scale, id4_pipeline_program_tensor_t output);
 
 iree_status_t id4_ideogram4_dit_program_dispatch_qkv_split(
     id4_pipeline_program_builder_t* builder, iree_string_view_t name,

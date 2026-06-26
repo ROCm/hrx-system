@@ -63,6 +63,9 @@ TEST(PipelineProgram, ComputesDenseTensorByteLength) {
       id4_pipeline_program_dtype_byte_length(ID4_PIPELINE_PROGRAM_DTYPE_F32),
       4u);
   EXPECT_EQ(id4_pipeline_program_dtype_byte_length(
+                ID4_PIPELINE_PROGRAM_DTYPE_F8_E4M3),
+            1u);
+  EXPECT_EQ(id4_pipeline_program_dtype_byte_length(
                 ID4_PIPELINE_PROGRAM_DTYPE_INVALID),
             0u);
 
@@ -100,6 +103,7 @@ TEST(PipelineProgram, AuthorsProgramAndSealsImmutableCopies) {
   id4_pipeline_program_parameter_options_t weight_options = {
       /*.structure_size=*/sizeof(weight_options),
       /*.next=*/nullptr,
+      /*.source_scope=*/IREE_SV(""),
       /*.key=*/IREE_SV("model.layers.0.linear.weight"),
       /*.dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_BF16,
       /*.shape=*/id4_pipeline_program_make_shape_rank2(4, 4),
@@ -231,6 +235,7 @@ TEST(PipelineProgram, InternsRepeatedParameterDeclarations) {
   id4_pipeline_program_parameter_options_t weight_options = {
       /*.structure_size=*/sizeof(weight_options),
       /*.next=*/nullptr,
+      /*.source_scope=*/IREE_SV(""),
       /*.key=*/IREE_SV("model.layers.0.linear.weight"),
       /*.dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_BF16,
       /*.shape=*/id4_pipeline_program_make_shape_rank2(4, 4),
@@ -469,6 +474,7 @@ TEST(PipelineProgram, RejectsAmbiguousIdentitiesAndInvalidHandles) {
   id4_pipeline_program_parameter_options_t duplicate_parameter_options = {
       /*.structure_size=*/sizeof(duplicate_parameter_options),
       /*.next=*/nullptr,
+      /*.source_scope=*/IREE_SV(""),
       /*.key=*/IREE_SV("hidden_states"),
       /*.dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_F32,
       /*.shape=*/id4_pipeline_program_make_shape_rank1(4),

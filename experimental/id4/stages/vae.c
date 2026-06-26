@@ -156,6 +156,7 @@ static iree_status_t id4_vae_stage_author_program(
     program_options.structure_size = sizeof(program_options);
     program_options.model = stage->model;
     program_options.request = request;
+    program_options.parameter_scope = stage->parameter_scope;
     program_options.activation_format = stage->activation_format;
     status = id4_vae_program_author_decode(&program_options, builder);
   }

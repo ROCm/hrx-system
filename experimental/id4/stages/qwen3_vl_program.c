@@ -1235,9 +1235,9 @@ static iree_status_t id4_qwen3_vl_program_import_tensor(
 }
 
 static iree_status_t id4_qwen3_vl_program_parameter(
-    id4_pipeline_program_builder_t* builder, id4_qwen3_vl_parameter_kind_t kind,
-    uint32_t layer_ordinal, id4_pipeline_program_dtype_t dtype,
-    id4_pipeline_program_shape_t shape,
+    id4_pipeline_program_builder_t* builder, iree_string_view_t source_scope,
+    id4_qwen3_vl_parameter_kind_t kind, uint32_t layer_ordinal,
+    id4_pipeline_program_dtype_t dtype, id4_pipeline_program_shape_t shape,
     id4_pipeline_program_tensor_t* out_tensor) {
   char key_buffer[ID4_QWEN3_VL_FORMAT_BUFFER_CAPACITY];
   iree_string_view_t key = iree_string_view_empty();
@@ -1245,6 +1245,7 @@ static iree_status_t id4_qwen3_vl_program_parameter(
       kind, layer_ordinal, key_buffer, IREE_ARRAYSIZE(key_buffer), &key));
   id4_pipeline_program_parameter_options_t options = {
       .structure_size = sizeof(options),
+      .source_scope = source_scope,
       .key = key,
       .dtype = dtype,
       .shape = shape,
@@ -1385,8 +1386,8 @@ static iree_status_t id4_qwen3_vl_program_author_token_embedding(
   id4_pipeline_program_tensor_t embedding =
       id4_pipeline_program_tensor_invalid();
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_parameter(
-      builder, ID4_QWEN3_VL_PARAMETER_TOKEN_EMBEDDING, UINT32_MAX,
-      ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+      builder, options->parameter_scope, ID4_QWEN3_VL_PARAMETER_TOKEN_EMBEDDING,
+      UINT32_MAX, ID4_PIPELINE_PROGRAM_DTYPE_BF16,
       id4_pipeline_program_make_shape_rank2(options->model.vocab_size,
                                             hidden_size),
       &embedding));
@@ -1433,7 +1434,8 @@ static iree_status_t id4_qwen3_vl_program_author_rmsnorm_rows(
     id4_pipeline_program_tensor_t* out_output) {
   id4_pipeline_program_tensor_t weight = id4_pipeline_program_tensor_invalid();
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_parameter(
-      builder, parameter_kind, layer_ordinal, ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+      builder, options->parameter_scope, parameter_kind, layer_ordinal,
+      ID4_PIPELINE_PROGRAM_DTYPE_BF16,
       id4_pipeline_program_make_shape_rank1(channel_count), &weight));
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_acquire_tensor(
       builder, output_kind, layer_ordinal, ID4_PIPELINE_PROGRAM_DTYPE_BF16,
@@ -1493,7 +1495,8 @@ static iree_status_t id4_qwen3_vl_program_author_linear(
   }
   id4_pipeline_program_tensor_t weight = id4_pipeline_program_tensor_invalid();
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_parameter(
-      builder, parameter_kind, layer_ordinal, ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+      builder, options->parameter_scope, parameter_kind, layer_ordinal,
+      ID4_PIPELINE_PROGRAM_DTYPE_BF16,
       id4_pipeline_program_make_shape_rank2(output_size, input_size), &weight));
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_acquire_tensor(
       builder, output_kind, layer_ordinal, ID4_PIPELINE_PROGRAM_DTYPE_BF16,

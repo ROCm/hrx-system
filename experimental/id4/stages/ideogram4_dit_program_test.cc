@@ -81,6 +81,16 @@ static id4_ideogram4_dit_program_options_t MakeProgramOptions(
       /*.structure_size=*/sizeof(options),
       // Extension structure chain.
       /*.next=*/nullptr,
+      // Parameter source policy.
+      /*.parameter_sources=*/
+      {
+          // Default provider source scope.
+          /*.default_scope=*/IREE_SV("model"),
+          // Exact source rule count.
+          /*.rule_count=*/0,
+          // Exact source rules.
+          /*.rules=*/nullptr,
+      },
       // Static model dimensions.
       /*.model=*/MakeModelConfig(),
       // Dynamic request dimensions.
@@ -181,6 +191,35 @@ static bool ProgramExportsTensorWithShape(
   return false;
 }
 
+static bool ProgramHasParameter(const id4_pipeline_program_t* program,
+                                iree_string_view_t key,
+                                iree_string_view_t source_scope,
+                                id4_pipeline_program_dtype_t dtype,
+                                id4_pipeline_program_shape_t expected_shape) {
+  for (iree_host_size_t i = 0;
+       i < id4_pipeline_program_operation_count(program); ++i) {
+    const id4_pipeline_program_op_t* operation =
+        id4_pipeline_program_operation_at(program, i);
+    if (!operation ||
+        operation->kind != ID4_PIPELINE_PROGRAM_OP_KIND_PARAMETER) {
+      continue;
+    }
+    if (!iree_string_view_equal(operation->payload.parameter.source_scope,
+                                source_scope)) {
+      continue;
+    }
+    const id4_pipeline_program_tensor_record_t* tensor =
+        id4_pipeline_program_tensor_at(
+            program, operation->payload.parameter.tensor.ordinal);
+    if (!tensor) continue;
+    if (!iree_string_view_equal(tensor->name, key)) continue;
+    if (tensor->dtype != dtype) continue;
+    if (!ShapeEquals(tensor->shape, expected_shape)) continue;
+    return true;
+  }
+  return false;
+}
+
 TEST(Ideogram4DitProgram, AuthorsForwardPreludeSliceContract) {
   id4_pipeline_program_shape_t latent_shape =
       id4_pipeline_program_make_shape_rank4(1, 2, 4, 1);
@@ -268,6 +307,39 @@ TEST(Ideogram4DitProgram, AuthorsConditionedPreludeSliceContract) {
       id4_pipeline_program_make_shape_rank1(options.model.adaln_size)));
   EXPECT_TRUE(ProgramExportsTensorWithShape(
       program, ID4_PIPELINE_PROGRAM_DTYPE_F32, latent_shape));
+
+  id4_pipeline_program_release(program);
+}
+
+TEST(Ideogram4DitProgram, AuthorsScaledFp8QkvParameterContract) {
+  id4_pipeline_program_shape_t latent_shape =
+      id4_pipeline_program_make_shape_rank4(1, 2, 4, 1);
+  id4_ideogram4_dit_program_options_t options =
+      MakeProgramOptions(latent_shape);
+  const id4_ideogram4_dit_parameter_source_rule_t rules[] = {
+      {
+          // Logical parameter key.
+          /*.key=*/IREE_SV("layers.0.attention.qkv.weight"),
+          // Provider source scope.
+          /*.source_scope=*/IREE_SV("fp8"),
+          // Physical storage format.
+          /*.storage=*/ID4_IDEOGRAM4_DIT_PARAMETER_STORAGE_FP8_E4M3_SCALED,
+      },
+  };
+  options.parameter_sources.rule_count = IREE_ARRAYSIZE(rules);
+  options.parameter_sources.rules = rules;
+
+  id4_pipeline_program_t* program = CreateForwardProgram(&options);
+  const uint32_t qkv_size = options.model.hidden_size * 3;
+  EXPECT_TRUE(
+      ProgramHasParameter(program, IREE_SV("layers.0.attention.qkv.weight"),
+                          IREE_SV("fp8"), ID4_PIPELINE_PROGRAM_DTYPE_F8_E4M3,
+                          id4_pipeline_program_make_shape_rank2(
+                              qkv_size, options.model.hidden_size)));
+  EXPECT_TRUE(ProgramHasParameter(
+      program, IREE_SV("layers.0.attention.qkv.weight_scale"), IREE_SV("fp8"),
+      ID4_PIPELINE_PROGRAM_DTYPE_F32,
+      id4_pipeline_program_make_shape_rank1(qkv_size)));
 
   id4_pipeline_program_release(program);
 }

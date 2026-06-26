@@ -208,6 +208,49 @@ static iree_status_t id4_ideogram4_dit_program_validate_activation_format(
   }
 }
 
+static iree_status_t id4_ideogram4_dit_program_validate_parameter_storage(
+    id4_ideogram4_dit_parameter_storage_t storage) {
+  switch (storage) {
+    case ID4_IDEOGRAM4_DIT_PARAMETER_STORAGE_BF16:
+    case ID4_IDEOGRAM4_DIT_PARAMETER_STORAGE_FP8_E4M3_SCALED:
+      return iree_ok_status();
+    default:
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "Ideogram4 DiT parameter storage %" PRIu32
+                              " is invalid",
+                              (uint32_t)storage);
+  }
+}
+
+static iree_status_t id4_ideogram4_dit_program_validate_parameter_sources(
+    id4_ideogram4_dit_parameter_sources_t sources) {
+  if (sources.rule_count != 0 && !sources.rules) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "Ideogram4 DiT parameter source rules are required when rule count is "
+        "nonzero");
+  }
+  for (iree_host_size_t i = 0; i < sources.rule_count; ++i) {
+    const id4_ideogram4_dit_parameter_source_rule_t rule = sources.rules[i];
+    if (iree_string_view_is_empty(rule.key)) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "Ideogram4 DiT parameter source rule %" PRIhsz " key is empty", i);
+    }
+    IREE_RETURN_IF_ERROR(
+        id4_ideogram4_dit_program_validate_parameter_storage(rule.storage));
+    for (iree_host_size_t j = 0; j < i; ++j) {
+      if (iree_string_view_equal(rule.key, sources.rules[j].key)) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "Ideogram4 DiT parameter source rule `%.*s` is duplicated",
+            (int)rule.key.size, rule.key.data);
+      }
+    }
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t id4_ideogram4_dit_program_validate_diagnostic_taps(
     iree_string_view_list_t diagnostic_tap_names) {
   if (diagnostic_tap_names.count == 0) {
@@ -354,6 +397,8 @@ static iree_status_t id4_ideogram4_dit_program_validate_options(
   }
   IREE_RETURN_IF_ERROR(
       id4_ideogram4_dit_program_validate_model_config(&options->model));
+  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_validate_parameter_sources(
+      options->parameter_sources));
   IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_validate_activation_format(
       options->activation_format));
   IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_validate_diagnostic_taps(
@@ -409,11 +454,13 @@ static iree_status_t id4_ideogram4_dit_program_import_tensor(
 }
 
 iree_status_t id4_ideogram4_dit_program_parameter(
-    id4_pipeline_program_builder_t* builder, iree_string_view_t key,
-    id4_pipeline_program_dtype_t dtype, id4_pipeline_program_shape_t shape,
+    id4_pipeline_program_builder_t* builder, iree_string_view_t source_scope,
+    iree_string_view_t key, id4_pipeline_program_dtype_t dtype,
+    id4_pipeline_program_shape_t shape,
     id4_pipeline_program_tensor_t* out_tensor) {
   id4_pipeline_program_parameter_options_t options = {
       .structure_size = sizeof(options),
+      .source_scope = source_scope,
       .key = key,
       .dtype = dtype,
       .shape = shape,
@@ -421,17 +468,49 @@ iree_status_t id4_ideogram4_dit_program_parameter(
   return id4_pipeline_program_parameter(builder, &options, out_tensor);
 }
 
-iree_status_t id4_ideogram4_dit_program_layer_parameter(
-    id4_pipeline_program_builder_t* builder, uint32_t layer_ordinal,
-    iree_string_view_t suffix, id4_pipeline_program_dtype_t dtype,
+iree_status_t id4_ideogram4_dit_program_parameter_source_resolve(
+    id4_ideogram4_dit_parameter_sources_t sources, iree_string_view_t key,
+    id4_ideogram4_dit_parameter_source_rule_t* out_source) {
+  IREE_ASSERT_ARGUMENT(out_source);
+  for (iree_host_size_t i = 0; i < sources.rule_count; ++i) {
+    if (iree_string_view_equal(sources.rules[i].key, key)) {
+      *out_source = sources.rules[i];
+      return iree_ok_status();
+    }
+  }
+  *out_source = (id4_ideogram4_dit_parameter_source_rule_t){
+      .key = key,
+      .source_scope = sources.default_scope,
+      .storage = ID4_IDEOGRAM4_DIT_PARAMETER_STORAGE_BF16,
+  };
+  return iree_ok_status();
+}
+
+iree_status_t id4_ideogram4_dit_program_format_parameter_scale_key(
+    iree_string_view_t weight_key, char* buffer,
+    iree_host_size_t buffer_capacity, iree_string_view_t* out_string) {
+  return id4_ideogram4_dit_program_format(buffer, buffer_capacity, out_string,
+                                          "%.*s_scale", (int)weight_key.size,
+                                          weight_key.data);
+}
+
+static iree_status_t id4_ideogram4_dit_program_parameter_bf16(
+    id4_pipeline_program_builder_t* builder,
+    id4_ideogram4_dit_parameter_sources_t sources, iree_string_view_t key,
     id4_pipeline_program_shape_t shape,
     id4_pipeline_program_tensor_t* out_tensor) {
-  char key_buffer[ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
-  iree_string_view_t key = iree_string_view_empty();
-  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_format_layer_parameter(
-      layer_ordinal, suffix, key_buffer, IREE_ARRAYSIZE(key_buffer), &key));
-  return id4_ideogram4_dit_program_parameter(builder, key, dtype, shape,
-                                             out_tensor);
+  id4_ideogram4_dit_parameter_source_rule_t source;
+  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_parameter_source_resolve(
+      sources, key, &source));
+  if (source.storage != ID4_IDEOGRAM4_DIT_PARAMETER_STORAGE_BF16) {
+    return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                            "Ideogram4 DiT parameter `%.*s` storage %" PRIu32
+                            " is not supported at this authoring site",
+                            (int)key.size, key.data, (uint32_t)source.storage);
+  }
+  return id4_ideogram4_dit_program_parameter(builder, source.source_scope, key,
+                                             ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+                                             shape, out_tensor);
 }
 
 iree_status_t id4_ideogram4_dit_program_acquire_tensor(
@@ -1376,6 +1455,50 @@ iree_status_t id4_ideogram4_dit_program_dispatch_linear_bf16_bf16(
       IREE_SV("id4_ideogram4_linear_bf16_bf16_tail"));
 }
 
+iree_status_t id4_ideogram4_dit_program_dispatch_linear_fp8_f32(
+    id4_pipeline_program_builder_t* builder, iree_string_view_t name,
+    uint32_t token_count, uint32_t input_size, uint32_t output_size,
+    id4_pipeline_program_tensor_t input, id4_pipeline_program_tensor_t weight,
+    id4_pipeline_program_tensor_t scale, id4_pipeline_program_tensor_t output) {
+  if (token_count == 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "Ideogram4 FP8 linear token count must be nonzero");
+  }
+  if (input_size == 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "Ideogram4 FP8 linear input size must be nonzero");
+  }
+  if (output_size == 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "Ideogram4 FP8 linear output size must be nonzero");
+  }
+
+  const id4_ideogram4_dit_program_config_value_t config_values[] = {
+      {IREE_SV("id4.ideogram4.linear_fp8.token_count"), token_count},
+      {IREE_SV("id4.ideogram4.linear_fp8.token_offset"), 0},
+      {IREE_SV("id4.ideogram4.linear_fp8.dispatch_token_count"), token_count},
+      {IREE_SV("id4.ideogram4.linear_fp8.input_size"), input_size},
+      {IREE_SV("id4.ideogram4.linear_fp8.output_size"), output_size},
+  };
+  char value_buffers[ID4_IDEOGRAM4_DIT_MAX_KERNEL_CONFIG_BINDING_COUNT]
+                    [ID4_IDEOGRAM4_DIT_CONFIG_VALUE_BUFFER_CAPACITY];
+  id4_pipeline_kernel_config_binding_t
+      config_bindings[ID4_IDEOGRAM4_DIT_MAX_KERNEL_CONFIG_BINDING_COUNT];
+  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_make_config_bindings(
+      IREE_ARRAYSIZE(config_values), config_values, value_buffers,
+      config_bindings));
+  id4_pipeline_program_dispatch_binding_t bindings[] = {
+      id4_pipeline_program_read(input),
+      id4_pipeline_program_read(weight),
+      id4_pipeline_program_read(scale),
+      id4_pipeline_program_write(output),
+  };
+  return id4_ideogram4_dit_program_dispatch_loom(
+      builder, name, IREE_SV("ideogram4/linear_fp8_f32"),
+      IREE_SV("id4_ideogram4_linear_fp8_f32"), IREE_ARRAYSIZE(config_values),
+      config_bindings, IREE_ARRAYSIZE(bindings), bindings);
+}
+
 static iree_status_t id4_ideogram4_dit_program_dispatch_silu(
     id4_pipeline_program_builder_t* builder, iree_string_view_t name,
     uint32_t element_count, id4_pipeline_program_tensor_t input,
@@ -2111,15 +2234,26 @@ iree_status_t id4_ideogram4_dit_program_dense_bf16_f32(
       bias_key_buffer, IREE_ARRAYSIZE(bias_key_buffer), &bias_key, "%.*s.bias",
       (int)options->parameter_prefix.size, options->parameter_prefix.data));
 
+  id4_ideogram4_dit_parameter_source_rule_t weight_source;
+  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_parameter_source_resolve(
+      options->parameter_sources, weight_key, &weight_source));
+  if (weight_source.storage != ID4_IDEOGRAM4_DIT_PARAMETER_STORAGE_BF16) {
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "Ideogram4 DiT dense parameter `%.*s` storage %" PRIu32
+        " is not supported",
+        (int)weight_key.size, weight_key.data, (uint32_t)weight_source.storage);
+  }
   id4_pipeline_program_tensor_t weight = id4_pipeline_program_tensor_invalid();
   IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_parameter(
-      builder, weight_key, ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+      builder, weight_source.source_scope, weight_key,
+      ID4_PIPELINE_PROGRAM_DTYPE_BF16,
       id4_pipeline_program_make_shape_rank2(options->output_size,
                                             options->input_size),
       &weight));
   id4_pipeline_program_tensor_t bias = id4_pipeline_program_tensor_invalid();
-  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_parameter(
-      builder, bias_key, ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_parameter_bf16(
+      builder, options->parameter_sources, bias_key,
       id4_pipeline_program_make_shape_rank1(options->output_size), &bias));
   IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_acquire_tensor(
       builder, options->output_name, ID4_PIPELINE_PROGRAM_DTYPE_F32,
@@ -2214,6 +2348,7 @@ static iree_status_t id4_ideogram4_dit_program_author_final_output(
   const id4_ideogram4_dit_program_dense_options_t final_scale_options = {
       .operation_name = final_scale_name,
       .output_name = final_scale_name,
+      .parameter_sources = options->parameter_sources,
       .parameter_prefix = IREE_SV("final_layer.adaln_modulation"),
       .input = final_silu,
       .input_size = adaln_size,
@@ -2264,16 +2399,14 @@ static iree_status_t id4_ideogram4_dit_program_author_final_output(
 
   id4_pipeline_program_tensor_t final_linear_weight =
       id4_pipeline_program_tensor_invalid();
-  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_parameter(
-      builder, IREE_SV("final_layer.linear.weight"),
-      ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_parameter_bf16(
+      builder, options->parameter_sources, IREE_SV("final_layer.linear.weight"),
       id4_pipeline_program_make_shape_rank2(input_channel_count, hidden_size),
       &final_linear_weight));
   id4_pipeline_program_tensor_t final_linear_bias =
       id4_pipeline_program_tensor_invalid();
-  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_parameter(
-      builder, IREE_SV("final_layer.linear.bias"),
-      ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_parameter_bf16(
+      builder, options->parameter_sources, IREE_SV("final_layer.linear.bias"),
       id4_pipeline_program_make_shape_rank1(input_channel_count),
       &final_linear_bias));
 
@@ -2440,20 +2573,20 @@ iree_status_t id4_ideogram4_dit_program_author_forward(
 
   id4_pipeline_program_tensor_t input_proj_weight =
       id4_pipeline_program_tensor_invalid();
-  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_parameter(
-      builder, IREE_SV("input_proj.weight"), ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_parameter_bf16(
+      builder, options->parameter_sources, IREE_SV("input_proj.weight"),
       id4_pipeline_program_make_shape_rank2(hidden_size, input_channel_count),
       &input_proj_weight));
   id4_pipeline_program_tensor_t input_proj_bias =
       id4_pipeline_program_tensor_invalid();
-  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_parameter(
-      builder, IREE_SV("input_proj.bias"), ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_parameter_bf16(
+      builder, options->parameter_sources, IREE_SV("input_proj.bias"),
       id4_pipeline_program_make_shape_rank1(hidden_size), &input_proj_bias));
   id4_pipeline_program_tensor_t image_indicator_embedding =
       id4_pipeline_program_tensor_invalid();
-  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_parameter(
-      builder, IREE_SV("embed_image_indicator.weight"),
-      ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_parameter_bf16(
+      builder, options->parameter_sources,
+      IREE_SV("embed_image_indicator.weight"),
       id4_pipeline_program_make_shape_rank2(
           options->model.image_indicator_count, hidden_size),
       &image_indicator_embedding));
@@ -2464,18 +2597,16 @@ iree_status_t id4_ideogram4_dit_program_author_forward(
   id4_pipeline_program_tensor_t llm_cond_proj_bias =
       id4_pipeline_program_tensor_invalid();
   if (is_conditioned) {
-    IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_parameter(
-        builder, IREE_SV("llm_cond_norm.weight"),
-        ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+    IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_parameter_bf16(
+        builder, options->parameter_sources, IREE_SV("llm_cond_norm.weight"),
         id4_pipeline_program_make_shape_rank1(llm_feature_count),
         &llm_cond_norm_weight));
-    IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_parameter(
-        builder, IREE_SV("llm_cond_proj.weight"),
-        ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+    IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_parameter_bf16(
+        builder, options->parameter_sources, IREE_SV("llm_cond_proj.weight"),
         id4_pipeline_program_make_shape_rank2(hidden_size, llm_feature_count),
         &llm_cond_proj_weight));
-    IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_parameter(
-        builder, IREE_SV("llm_cond_proj.bias"), ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+    IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_parameter_bf16(
+        builder, options->parameter_sources, IREE_SV("llm_cond_proj.bias"),
         id4_pipeline_program_make_shape_rank1(hidden_size),
         &llm_cond_proj_bias));
   }
@@ -2559,6 +2690,7 @@ iree_status_t id4_ideogram4_dit_program_author_forward(
   const id4_ideogram4_dit_program_dense_options_t mlp_in_options = {
       .operation_name = timestep_mlp_in_name,
       .output_name = timestep_mlp_in_name,
+      .parameter_sources = options->parameter_sources,
       .parameter_prefix = IREE_SV("t_embedding.mlp_in"),
       .input = timestep_embedding,
       .input_size = hidden_size,
@@ -2575,6 +2707,7 @@ iree_status_t id4_ideogram4_dit_program_author_forward(
   const id4_ideogram4_dit_program_dense_options_t mlp_out_options = {
       .operation_name = timestep_mlp_out_name,
       .output_name = timestep_mlp_out_name,
+      .parameter_sources = options->parameter_sources,
       .parameter_prefix = IREE_SV("t_embedding.mlp_out"),
       .input = timestep_mlp_in,
       .input_size = hidden_size,
@@ -2591,6 +2724,7 @@ iree_status_t id4_ideogram4_dit_program_author_forward(
   const id4_ideogram4_dit_program_dense_options_t adaln_options = {
       .operation_name = IREE_SV("ideogram4.prelude.adaln_proj"),
       .output_name = adaln_input_name,
+      .parameter_sources = options->parameter_sources,
       .parameter_prefix = IREE_SV("adaln_proj"),
       .input = timestep_mlp_out,
       .input_size = hidden_size,
@@ -2615,6 +2749,7 @@ iree_status_t id4_ideogram4_dit_program_author_forward(
     id4_ideogram4_dit_program_block_options_t block_options = {
         .builder = builder,
         .branch_name = branch_name,
+        .parameter_sources = options->parameter_sources,
         .layer_ordinal = layer_ordinal,
         .adaln_size = adaln_size,
         .hidden_size = hidden_size,

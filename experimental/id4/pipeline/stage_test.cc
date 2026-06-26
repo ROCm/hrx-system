@@ -360,8 +360,9 @@ static iree_status_t SmokeStagePlan(
           /*byte_length=*/16, /*alignment=*/16, /*request_count=*/1, &request);
   id4_pipeline_parameter_load_step_t load_step =
       id4_pipeline_parameter_gather_load_step(
-          IREE_SV("parameters.gather"), /*target_slab_index=*/0,
-          /*request_offset=*/0, /*request_count=*/1);
+          IREE_SV("parameters.gather"), IREE_SV("smoke"),
+          /*target_slab_index=*/0, /*request_offset=*/0,
+          /*request_count=*/1);
 
   id4_pipeline_device_placement_t placement;
   memset(&placement, 0, sizeof(placement));
@@ -591,6 +592,7 @@ TEST(PipelineStage, PlanCopiesPlacementAndParameterSlabMetadata) {
   ASSERT_NE(load_step, nullptr);
   EXPECT_EQ(ToString(load_step->name), "parameters.gather");
   EXPECT_EQ(load_step->kind, ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_GATHER);
+  EXPECT_EQ(ToString(load_step->source_scope), "smoke");
   EXPECT_EQ(load_step->target_slab_index, 0u);
   EXPECT_EQ(load_step->request_offset, 0u);
   EXPECT_EQ(load_step->request_count, 1u);
@@ -602,6 +604,7 @@ TEST(PipelineStage, PlanCopiesPlacementAndParameterSlabMetadata) {
   EXPECT_NE(json.find("\"stage\":\"smoke\""), std::string::npos);
   EXPECT_NE(json.find("\"parameter_slabs\""), std::string::npos);
   EXPECT_NE(json.find("\"parameter_load_steps\""), std::string::npos);
+  EXPECT_NE(json.find("\"source_scope\":\"smoke\""), std::string::npos);
   EXPECT_NE(json.find("\"target_params\""), std::string::npos);
   EXPECT_NE(json.find("\"smoke.weight\""), std::string::npos);
   iree_string_builder_deinitialize(&builder);

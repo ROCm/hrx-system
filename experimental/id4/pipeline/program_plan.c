@@ -285,6 +285,7 @@ static iree_status_t id4_pipeline_program_plan_build_parameter_requests(
     const id4_pipeline_program_plan_options_t* options,
     id4_pipeline_program_plan_counts_t counts,
     id4_pipeline_parameter_request_t* requests,
+    iree_string_view_t* source_scopes,
     iree_device_size_t* out_parameter_slab_byte_length) {
   *out_parameter_slab_byte_length = 0;
   if (counts.parameter_count == 0) return iree_ok_status();
@@ -310,9 +311,34 @@ static iree_status_t id4_pipeline_program_plan_build_parameter_requests(
         out_parameter_slab_byte_length, &span));
     requests[request_index] =
         id4_pipeline_parameter_request(tensor->name, span);
+    source_scopes[request_index] = op->payload.parameter.source_scope;
     ++request_index;
   }
   return iree_ok_status();
+}
+
+static void id4_pipeline_program_plan_build_parameter_load_steps(
+    iree_host_size_t parameter_count, const iree_string_view_t* source_scopes,
+    id4_pipeline_parameter_load_step_t* load_steps,
+    iree_host_size_t* out_load_step_count) {
+  *out_load_step_count = 0;
+  if (parameter_count == 0) return;
+  iree_host_size_t run_start = 0;
+  iree_string_view_t run_scope = source_scopes[0];
+  for (iree_host_size_t i = 1; i <= parameter_count; ++i) {
+    if (i < parameter_count &&
+        iree_string_view_equal(source_scopes[i], run_scope)) {
+      continue;
+    }
+    load_steps[*out_load_step_count] = id4_pipeline_parameter_gather_load_step(
+        IREE_SV("parameters.gather"), run_scope, /*target_slab_index=*/0,
+        run_start, i - run_start);
+    ++*out_load_step_count;
+    if (i < parameter_count) {
+      run_start = i;
+      run_scope = source_scopes[i];
+    }
+  }
 }
 
 static iree_status_t id4_pipeline_program_plan_build_constant_requests(
@@ -985,10 +1011,13 @@ iree_status_t id4_pipeline_program_create_plan(
       id4_pipeline_program_plan_validate_diagnostic_tap_slots(options, counts));
 
   id4_pipeline_parameter_request_t* parameter_requests = NULL;
+  iree_string_view_t* parameter_source_scopes = NULL;
+  id4_pipeline_parameter_load_step_t* parameter_load_steps = NULL;
   id4_pipeline_constant_request_t* constant_requests = NULL;
   id4_pipeline_boundary_tensor_plan_t* boundary_tensors = NULL;
   id4_pipeline_kernel_plan_t* kernels = NULL;
   id4_pipeline_diagnostic_tap_plan_t* taps = NULL;
+  iree_host_size_t parameter_load_step_count = 0;
   const iree_host_size_t planned_tap_count =
       id4_pipeline_program_plan_captures_diagnostic_taps(options)
           ? options->diagnostic_tap_names.count
@@ -998,6 +1027,16 @@ iree_status_t id4_pipeline_program_create_plan(
     status = iree_allocator_malloc_array(host_allocator, counts.parameter_count,
                                          sizeof(parameter_requests[0]),
                                          (void**)&parameter_requests);
+  }
+  if (iree_status_is_ok(status) && counts.parameter_count != 0) {
+    status = iree_allocator_malloc_array(host_allocator, counts.parameter_count,
+                                         sizeof(parameter_source_scopes[0]),
+                                         (void**)&parameter_source_scopes);
+  }
+  if (iree_status_is_ok(status) && counts.parameter_count != 0) {
+    status = iree_allocator_malloc_array(host_allocator, counts.parameter_count,
+                                         sizeof(parameter_load_steps[0]),
+                                         (void**)&parameter_load_steps);
   }
   if (iree_status_is_ok(status) && counts.constant_count != 0) {
     status = iree_allocator_malloc_array(host_allocator, counts.constant_count,
@@ -1021,7 +1060,13 @@ iree_status_t id4_pipeline_program_create_plan(
   iree_device_size_t parameter_slab_byte_length = 0;
   if (iree_status_is_ok(status)) {
     status = id4_pipeline_program_plan_build_parameter_requests(
-        options, counts, parameter_requests, &parameter_slab_byte_length);
+        options, counts, parameter_requests, parameter_source_scopes,
+        &parameter_slab_byte_length);
+  }
+  if (iree_status_is_ok(status) && counts.parameter_count != 0) {
+    id4_pipeline_program_plan_build_parameter_load_steps(
+        counts.parameter_count, parameter_source_scopes, parameter_load_steps,
+        &parameter_load_step_count);
   }
 
   iree_device_size_t constant_slab_byte_length = 0;
@@ -1070,14 +1115,6 @@ iree_status_t id4_pipeline_program_create_plan(
         options->parameter_slab_target_params, parameter_slab_byte_length,
         options->parameter_slab_alignment, counts.parameter_count,
         parameter_requests);
-  }
-
-  id4_pipeline_parameter_load_step_t parameter_load_step;
-  memset(&parameter_load_step, 0, sizeof(parameter_load_step));
-  if (iree_status_is_ok(status) && counts.parameter_count != 0) {
-    parameter_load_step = id4_pipeline_parameter_gather_load_step(
-        IREE_SV("parameters.gather"), /*target_slab_index=*/0,
-        /*request_offset=*/0, counts.parameter_count);
   }
 
   iree_string_view_t constant_slab_name = iree_string_view_empty();
@@ -1162,10 +1199,9 @@ iree_status_t id4_pipeline_program_create_plan(
     create_options.parameter_slab_count = counts.parameter_count == 0 ? 0 : 1;
     create_options.parameter_slabs =
         counts.parameter_count == 0 ? NULL : &parameter_slab;
-    create_options.parameter_load_step_count =
-        counts.parameter_count == 0 ? 0 : 1;
+    create_options.parameter_load_step_count = parameter_load_step_count;
     create_options.parameter_load_steps =
-        counts.parameter_count == 0 ? NULL : &parameter_load_step;
+        parameter_load_step_count == 0 ? NULL : parameter_load_steps;
     create_options.constant_slab_count = counts.constant_count == 0 ? 0 : 1;
     create_options.constant_slabs =
         counts.constant_count == 0 ? NULL : &constant_slab;
@@ -1195,6 +1231,8 @@ iree_status_t id4_pipeline_program_create_plan(
   iree_allocator_free(host_allocator, kernels);
   iree_allocator_free(host_allocator, boundary_tensors);
   iree_allocator_free(host_allocator, constant_requests);
+  iree_allocator_free(host_allocator, parameter_load_steps);
+  iree_allocator_free(host_allocator, parameter_source_scopes);
   iree_allocator_free(host_allocator, parameter_requests);
   return status;
 }

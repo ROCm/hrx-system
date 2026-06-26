@@ -42,6 +42,16 @@ typedef enum id4_ideogram4_dit_activation_format_e {
   ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT = 2,
 } id4_ideogram4_dit_activation_format_t;
 
+// Physical storage format selected for a DiT parameter source.
+typedef enum id4_ideogram4_dit_parameter_storage_e {
+  // Invalid parameter storage format.
+  ID4_IDEOGRAM4_DIT_PARAMETER_STORAGE_INVALID = 0,
+  // BF16 tensor stored directly in the selected parameter source.
+  ID4_IDEOGRAM4_DIT_PARAMETER_STORAGE_BF16 = 1,
+  // FP8 e4m3 weight tensor with a sibling F32 row-scale tensor.
+  ID4_IDEOGRAM4_DIT_PARAMETER_STORAGE_FP8_E4M3_SCALED = 2,
+} id4_ideogram4_dit_parameter_storage_t;
+
 // Ideogram4 DiT model dimensions used when authoring the forward program.
 typedef struct id4_ideogram4_dit_model_config_t {
   // Number of transformer blocks in the DiT.
@@ -72,12 +82,35 @@ typedef struct id4_ideogram4_dit_request_config_t {
   uint32_t text_token_count;
 } id4_ideogram4_dit_request_config_t;
 
+// Exact-source rule for one logical DiT parameter key.
+typedef struct id4_ideogram4_dit_parameter_source_rule_t {
+  // Logical parameter key matched exactly, such as
+  // layers.0.attention.qkv.weight.
+  iree_string_view_t key;
+  // Provider source scope containing this parameter and any sibling metadata.
+  iree_string_view_t source_scope;
+  // Physical storage format expected from the selected source scope.
+  id4_ideogram4_dit_parameter_storage_t storage;
+} id4_ideogram4_dit_parameter_source_rule_t;
+
+// Resolved parameter source policy used while authoring a DiT program.
+typedef struct id4_ideogram4_dit_parameter_sources_t {
+  // Provider source scope used for parameters without an exact rule.
+  iree_string_view_t default_scope;
+  // Number of exact parameter source rules.
+  iree_host_size_t rule_count;
+  // Exact parameter source rules borrowed for the authoring call.
+  const id4_ideogram4_dit_parameter_source_rule_t* rules;
+} id4_ideogram4_dit_parameter_sources_t;
+
 // Options for authoring an Ideogram4 DiT forward semantic program.
 typedef struct id4_ideogram4_dit_program_options_t {
   // Size of this structure for versioning.
   iree_host_size_t structure_size;
   // Extension structure chain; must be NULL for now.
   const void* next;
+  // Parameter source policy used when loading DiT parameters.
+  id4_ideogram4_dit_parameter_sources_t parameter_sources;
   // Static model dimensions.
   id4_ideogram4_dit_model_config_t model;
   // Dynamic request dimensions.

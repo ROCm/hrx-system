@@ -186,6 +186,7 @@ iree_status_t id4_ideogram4_decode_program_author_decode(
   vae_options.model = options->model.vae;
   vae_options.request.latent_shape = options->request.diffusion_latent_shape;
   vae_options.request.tiling = options->request.vae_tiling;
+  vae_options.parameter_scope = options->parameter_scope;
   vae_options.activation_format = options->vae_activation_format;
   id4_pipeline_program_tensor_t decoded_image =
       id4_pipeline_program_tensor_invalid();

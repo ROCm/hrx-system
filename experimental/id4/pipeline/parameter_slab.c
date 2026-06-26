@@ -299,7 +299,7 @@ static iree_status_t id4_pipeline_parameter_load_step_validate_against_loads(
 
 static id4_pipeline_parameter_slab_diagnostic_t
 id4_pipeline_parameter_slab_make_diagnostic(
-    const id4_pipeline_parameter_slab_load_t* load,
+    const id4_pipeline_parameter_slab_load_t* load, iree_string_view_t scope,
     iree_host_size_t request_index) {
   const id4_pipeline_parameter_slab_plan_t* slab = load->slab;
   id4_pipeline_parameter_slab_diagnostic_t diagnostic = {
@@ -307,8 +307,8 @@ id4_pipeline_parameter_slab_make_diagnostic(
       .slab_index = load->slab_index,
       // Request index or IREE_HOST_SIZE_MAX for slab-level events.
       .request_index = request_index,
-      // Provider scope used by the slab.
-      .scope = slab->scope,
+      // Parameter scope associated with this event.
+      .scope = scope,
       // Parameter key populated below for request-level events.
       .parameter_key = iree_string_view_empty(),
       // Source parameter byte offset populated below for request events.
@@ -344,10 +344,11 @@ id4_pipeline_parameter_slab_make_diagnostic(
 static iree_status_t id4_pipeline_parameter_slab_emit_diagnostic(
     const id4_pipeline_parameter_slab_load_t* load,
     iree_string_view_t stage_name, iree_string_view_t key,
-    iree_string_view_t message, iree_host_size_t request_index,
+    iree_string_view_t message, iree_string_view_t scope,
+    iree_host_size_t request_index,
     id4_pipeline_diagnostics_sink_t* diagnostics_sink) {
   id4_pipeline_parameter_slab_diagnostic_t parameter_slab =
-      id4_pipeline_parameter_slab_make_diagnostic(load, request_index);
+      id4_pipeline_parameter_slab_make_diagnostic(load, scope, request_index);
   id4_pipeline_diagnostic_event_t event = {
       // Event kind for parameter slab diagnostics.
       .kind = ID4_PIPELINE_DIAGNOSTIC_EVENT_KIND_PARAMETER_SLAB,
@@ -469,8 +470,8 @@ iree_status_t id4_pipeline_parameter_slab_set_load(
           status,
           id4_pipeline_parameter_slab_emit_diagnostic(
               &loads[i], stage_name, IREE_SV("parameter_slab.load.error"),
-              IREE_SV("parameter slab allocation failed"), IREE_HOST_SIZE_MAX,
-              diagnostics_sink));
+              IREE_SV("parameter slab allocation failed"), loads[i].slab->scope,
+              IREE_HOST_SIZE_MAX, diagnostics_sink));
     }
   }
 
@@ -487,28 +488,30 @@ iree_status_t id4_pipeline_parameter_slab_set_load(
     const id4_pipeline_parameter_slab_load_t* load =
         &loads[step->target_slab_index];
     if (!iree_io_parameter_provider_query_support(provider,
-                                                  load->slab->scope)) {
-      status =
-          iree_make_status(IREE_STATUS_NOT_FOUND,
-                           "parameter provider does not support scope '%.*s'",
-                           (int)load->slab->scope.size, load->slab->scope.data);
+                                                  step->source_scope)) {
+      status = iree_make_status(
+          IREE_STATUS_NOT_FOUND,
+          "parameter provider does not support source scope '%.*s'",
+          (int)step->source_scope.size, step->source_scope.data);
       status = iree_status_join(
-          status, id4_pipeline_parameter_slab_emit_diagnostic(
-                      load, stage_name, IREE_SV("parameter_slab.load.error"),
-                      IREE_SV("parameter provider does not support scope"),
-                      IREE_HOST_SIZE_MAX, diagnostics_sink));
+          status,
+          id4_pipeline_parameter_slab_emit_diagnostic(
+              load, stage_name, IREE_SV("parameter_slab.load.error"),
+              IREE_SV("parameter provider does not support source "
+                      "scope"),
+              step->source_scope, IREE_HOST_SIZE_MAX, diagnostics_sink));
       break;
     }
     status = id4_pipeline_parameter_slab_emit_diagnostic(
         load, stage_name, IREE_SV("parameter_slab.load"),
-        IREE_SV("loading parameter slab"), IREE_HOST_SIZE_MAX,
-        diagnostics_sink);
+        IREE_SV("loading parameter slab"), step->source_scope,
+        IREE_HOST_SIZE_MAX, diagnostics_sink);
     for (iree_host_size_t j = 0;
          j < step->request_count && iree_status_is_ok(status); ++j) {
       status = id4_pipeline_parameter_slab_emit_diagnostic(
           load, stage_name, IREE_SV("parameter_slab.gather"),
-          IREE_SV("gathering parameter request"), step->request_offset + j,
-          diagnostics_sink);
+          IREE_SV("gathering parameter request"), step->source_scope,
+          step->request_offset + j, diagnostics_sink);
     }
     if (!iree_status_is_ok(status)) break;
     id4_pipeline_parameter_slab_enumerator_state_t enumerator_state = {
@@ -551,14 +554,15 @@ iree_status_t id4_pipeline_parameter_slab_set_load(
     status = iree_io_parameter_provider_gather(
         provider, load->device, load->queue_affinity,
         gather_wait_semaphore_list, gather_signal_semaphore_list,
-        load->slab->scope, slab_set->buffers[step->target_slab_index],
+        step->source_scope, slab_set->buffers[step->target_slab_index],
         step->request_count, enumerator);
     if (!iree_status_is_ok(status)) {
       status = iree_status_join(
-          status, id4_pipeline_parameter_slab_emit_diagnostic(
-                      load, stage_name, IREE_SV("parameter_slab.load.error"),
-                      IREE_SV("parameter gather submission failed"),
-                      IREE_HOST_SIZE_MAX, diagnostics_sink));
+          status,
+          id4_pipeline_parameter_slab_emit_diagnostic(
+              load, stage_name, IREE_SV("parameter_slab.load.error"),
+              IREE_SV("parameter gather submission failed"), step->source_scope,
+              IREE_HOST_SIZE_MAX, diagnostics_sink));
     }
   }
   id4_pipeline_parameter_slab_release_chain_semaphores(

@@ -262,6 +262,7 @@ static iree_status_t id4_ideogram4_dit_stage_author_program(
     id4_ideogram4_dit_program_options_t program_options;
     memset(&program_options, 0, sizeof(program_options));
     program_options.structure_size = sizeof(program_options);
+    program_options.parameter_sources.default_scope = stage->parameter_scope;
     program_options.model = stage->model;
     program_options.request = dit_options->request;
     program_options.activation_format = dit_options->activation_format;

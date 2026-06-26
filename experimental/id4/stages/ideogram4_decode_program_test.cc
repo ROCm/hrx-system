@@ -127,6 +127,8 @@ static id4_ideogram4_decode_program_options_t MakeProgramOptions(
       /*.model=*/model,
       // Dynamic decode request.
       /*.request=*/request,
+      // Provider source scope.
+      /*.parameter_scope=*/IREE_SV("model"),
       // Activation storage format for internal VAE intermediates.
       /*.vae_activation_format=*/ID4_VAE_ACTIVATION_FORMAT_F32_CANONICAL,
   };

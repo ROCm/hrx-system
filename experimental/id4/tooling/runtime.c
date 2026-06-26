@@ -256,6 +256,321 @@ static iree_status_t id4_tooling_validate_parameter_index(
   return iree_ok_status();
 }
 
+static iree_status_t id4_tooling_string_clone(iree_string_view_t source,
+                                              iree_allocator_t host_allocator,
+                                              iree_string_view_t* out_target) {
+  IREE_ASSERT_ARGUMENT(out_target);
+  *out_target = iree_string_view_empty();
+  if (source.size == 0) return iree_ok_status();
+  char* storage = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_allocator_malloc(host_allocator, source.size, (void**)&storage));
+  memcpy(storage, source.data, source.size);
+  *out_target = iree_make_string_view(storage, source.size);
+  return iree_ok_status();
+}
+
+static void id4_tooling_string_release(iree_string_view_t value,
+                                       iree_allocator_t host_allocator) {
+  iree_allocator_free(host_allocator, (void*)value.data);
+}
+
+typedef struct id4_tooling_parameter_provider_set_t {
+  // Base parameter provider interface.
+  iree_io_parameter_provider_t base;
+  // Allocator used for provider-set storage.
+  iree_allocator_t host_allocator;
+  // Number of scoped child provider entries.
+  iree_host_size_t entry_count;
+  // Scoped child provider entries retained by this set.
+  id4_tooling_parameter_provider_set_entry_t* entries;
+} id4_tooling_parameter_provider_set_t;
+
+static id4_tooling_parameter_provider_set_t*
+id4_tooling_parameter_provider_set_cast(
+    iree_io_parameter_provider_t* base_provider) {
+  return (id4_tooling_parameter_provider_set_t*)base_provider;
+}
+
+static iree_io_parameter_provider_t*
+id4_tooling_parameter_provider_set_provider_for_scope(
+    id4_tooling_parameter_provider_set_t* provider, iree_string_view_t scope) {
+  for (iree_host_size_t i = 0; i < provider->entry_count; ++i) {
+    id4_tooling_parameter_provider_set_entry_t* entry = &provider->entries[i];
+    if (iree_string_view_equal(entry->scope, scope) &&
+        iree_io_parameter_provider_query_support(entry->provider, scope)) {
+      return entry->provider;
+    }
+  }
+  return NULL;
+}
+
+static iree_status_t id4_tooling_parameter_provider_set_scope_not_found(
+    iree_string_view_t scope) {
+  return iree_make_status(
+      IREE_STATUS_NOT_FOUND,
+      "parameter provider set does not support scope `%.*s`", (int)scope.size,
+      scope.data);
+}
+
+static void id4_tooling_parameter_provider_set_destroy(
+    iree_io_parameter_provider_t* base_provider) {
+  id4_tooling_parameter_provider_set_t* provider =
+      id4_tooling_parameter_provider_set_cast(base_provider);
+  iree_allocator_t host_allocator = provider->host_allocator;
+  for (iree_host_size_t i = 0; i < provider->entry_count; ++i) {
+    id4_tooling_string_release(provider->entries[i].scope, host_allocator);
+    iree_io_parameter_provider_release(provider->entries[i].provider);
+  }
+  iree_allocator_free(host_allocator, provider->entries);
+  iree_allocator_free(host_allocator, provider);
+}
+
+static iree_status_t id4_tooling_parameter_provider_set_notify(
+    iree_io_parameter_provider_t* base_provider,
+    iree_io_parameter_provider_signal_t signal) {
+  id4_tooling_parameter_provider_set_t* provider =
+      id4_tooling_parameter_provider_set_cast(base_provider);
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0; i < provider->entry_count; ++i) {
+    status =
+        iree_status_join(status, iree_io_parameter_provider_notify(
+                                     provider->entries[i].provider, signal));
+  }
+  return status;
+}
+
+static bool id4_tooling_parameter_provider_set_query_support(
+    iree_io_parameter_provider_t* base_provider, iree_string_view_t scope) {
+  id4_tooling_parameter_provider_set_t* provider =
+      id4_tooling_parameter_provider_set_cast(base_provider);
+  return id4_tooling_parameter_provider_set_provider_for_scope(provider,
+                                                               scope) != NULL;
+}
+
+static iree_status_t id4_tooling_parameter_provider_set_load(
+    iree_io_parameter_provider_t* base_provider, iree_hal_device_t* device,
+    iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_string_view_t source_scope, iree_hal_buffer_params_t target_params,
+    iree_host_size_t count, iree_io_parameter_enumerator_t enumerator,
+    iree_io_parameter_emitter_t emitter) {
+  id4_tooling_parameter_provider_set_t* provider =
+      id4_tooling_parameter_provider_set_cast(base_provider);
+  iree_io_parameter_provider_t* child =
+      id4_tooling_parameter_provider_set_provider_for_scope(provider,
+                                                            source_scope);
+  if (!child) {
+    return id4_tooling_parameter_provider_set_scope_not_found(source_scope);
+  }
+  return iree_io_parameter_provider_load(
+      child, device, queue_affinity, wait_semaphore_list, signal_semaphore_list,
+      source_scope, target_params, count, enumerator, emitter);
+}
+
+static iree_status_t id4_tooling_parameter_provider_set_gather(
+    iree_io_parameter_provider_t* base_provider, iree_hal_device_t* device,
+    iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_string_view_t source_scope, iree_hal_buffer_t* target_buffer,
+    iree_host_size_t count, iree_io_parameter_enumerator_t enumerator) {
+  id4_tooling_parameter_provider_set_t* provider =
+      id4_tooling_parameter_provider_set_cast(base_provider);
+  iree_io_parameter_provider_t* child =
+      id4_tooling_parameter_provider_set_provider_for_scope(provider,
+                                                            source_scope);
+  if (!child) {
+    return id4_tooling_parameter_provider_set_scope_not_found(source_scope);
+  }
+  return iree_io_parameter_provider_gather(
+      child, device, queue_affinity, wait_semaphore_list, signal_semaphore_list,
+      source_scope, target_buffer, count, enumerator);
+}
+
+static iree_status_t id4_tooling_parameter_provider_set_scatter(
+    iree_io_parameter_provider_t* base_provider, iree_hal_device_t* device,
+    iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* source_buffer, iree_string_view_t target_scope,
+    iree_host_size_t count, iree_io_parameter_enumerator_t enumerator) {
+  id4_tooling_parameter_provider_set_t* provider =
+      id4_tooling_parameter_provider_set_cast(base_provider);
+  iree_io_parameter_provider_t* child =
+      id4_tooling_parameter_provider_set_provider_for_scope(provider,
+                                                            target_scope);
+  if (!child) {
+    return id4_tooling_parameter_provider_set_scope_not_found(target_scope);
+  }
+  return iree_io_parameter_provider_scatter(
+      child, device, queue_affinity, wait_semaphore_list, signal_semaphore_list,
+      source_buffer, target_scope, count, enumerator);
+}
+
+static const iree_io_parameter_provider_vtable_t
+    id4_tooling_parameter_provider_set_vtable = {
+        // Releases all scoped child providers.
+        .destroy = id4_tooling_parameter_provider_set_destroy,
+        // Forwards process lifecycle notifications to every child provider.
+        .notify = id4_tooling_parameter_provider_set_notify,
+        // Returns whether a child provider supports the requested scope.
+        .query_support = id4_tooling_parameter_provider_set_query_support,
+        // Routes scoped load requests to the matching child provider.
+        .load = id4_tooling_parameter_provider_set_load,
+        // Routes scoped gather requests to the matching child provider.
+        .gather = id4_tooling_parameter_provider_set_gather,
+        // Routes scoped scatter requests to the matching child provider.
+        .scatter = id4_tooling_parameter_provider_set_scatter,
+};
+
+static iree_status_t id4_tooling_validate_parameter_provider_set_entries(
+    iree_host_size_t entry_count,
+    const id4_tooling_parameter_provider_set_entry_t* entries) {
+  if (entry_count == 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "parameter provider set requires at least one "
+                            "entry");
+  }
+  if (!entries) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "parameter provider set entries are required");
+  }
+  for (iree_host_size_t i = 0; i < entry_count; ++i) {
+    if (!entries[i].provider) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "parameter provider set entry %" PRIhsz " has no provider", i);
+    }
+    if (!iree_io_parameter_provider_query_support(entries[i].provider,
+                                                  entries[i].scope)) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "parameter provider set entry %" PRIhsz
+                              " provider does not support scope `%.*s`",
+                              i, (int)entries[i].scope.size,
+                              entries[i].scope.data);
+    }
+    for (iree_host_size_t j = 0; j < i; ++j) {
+      if (iree_string_view_equal(entries[i].scope, entries[j].scope)) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "parameter provider set scope `%.*s` is duplicated",
+            (int)entries[i].scope.size, entries[i].scope.data);
+      }
+    }
+  }
+  return iree_ok_status();
+}
+
+iree_status_t id4_tooling_create_parameter_provider_set(
+    iree_host_size_t entry_count,
+    const id4_tooling_parameter_provider_set_entry_t* entries,
+    iree_allocator_t host_allocator,
+    iree_io_parameter_provider_t** out_provider) {
+  IREE_ASSERT_ARGUMENT(out_provider);
+  *out_provider = NULL;
+  IREE_RETURN_IF_ERROR(id4_tooling_validate_parameter_provider_set_entries(
+      entry_count, entries));
+
+  id4_tooling_parameter_provider_set_t* provider = NULL;
+  iree_status_t status = iree_allocator_malloc(
+      host_allocator, sizeof(*provider), (void**)&provider);
+  if (iree_status_is_ok(status)) {
+    memset(provider, 0, sizeof(*provider));
+    iree_atomic_ref_count_init(&provider->base.ref_count);
+    provider->base.vtable = &id4_tooling_parameter_provider_set_vtable;
+    provider->host_allocator = host_allocator;
+    provider->entry_count = entry_count;
+    status = iree_allocator_malloc_array(host_allocator, entry_count,
+                                         sizeof(provider->entries[0]),
+                                         (void**)&provider->entries);
+  }
+  if (iree_status_is_ok(status)) {
+    memset(provider->entries, 0, entry_count * sizeof(provider->entries[0]));
+  }
+  for (iree_host_size_t i = 0; i < entry_count && iree_status_is_ok(status);
+       ++i) {
+    status = id4_tooling_string_clone(entries[i].scope, host_allocator,
+                                      &provider->entries[i].scope);
+    if (iree_status_is_ok(status)) {
+      provider->entries[i].provider = entries[i].provider;
+      iree_io_parameter_provider_retain(provider->entries[i].provider);
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    *out_provider = &provider->base;
+  } else if (provider) {
+    id4_tooling_parameter_provider_set_destroy(&provider->base);
+  }
+  return status;
+}
+
+iree_status_t id4_tooling_create_parameter_provider_set_from_flags(
+    iree_host_size_t scope_count, const iree_string_view_t* scopes,
+    iree_allocator_t host_allocator,
+    iree_io_parameter_provider_t** out_provider) {
+  IREE_ASSERT_ARGUMENT(out_provider);
+  *out_provider = NULL;
+  if (scope_count == 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "parameter provider set requires at least one "
+                            "scope");
+  }
+  if (!scopes) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "parameter provider set scopes are required");
+  }
+  for (iree_host_size_t i = 0; i < scope_count; ++i) {
+    for (iree_host_size_t j = 0; j < i; ++j) {
+      if (iree_string_view_equal(scopes[i], scopes[j])) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "parameter provider set scope `%.*s` is duplicated",
+            (int)scopes[i].size, scopes[i].data);
+      }
+    }
+  }
+
+  id4_tooling_parameter_provider_set_entry_t* entries = NULL;
+  iree_status_t status = iree_allocator_malloc_array(
+      host_allocator, scope_count, sizeof(entries[0]), (void**)&entries);
+  if (iree_status_is_ok(status)) {
+    memset(entries, 0, scope_count * sizeof(entries[0]));
+  }
+
+  iree_io_scope_map_t scope_map;
+  iree_io_scope_map_initialize(host_allocator, &scope_map);
+  if (iree_status_is_ok(status)) {
+    status = iree_tooling_build_parameter_indices_from_flags(&scope_map);
+  }
+  for (iree_host_size_t i = 0; i < scope_count && iree_status_is_ok(status);
+       ++i) {
+    entries[i].scope = scopes[i];
+    iree_io_parameter_index_t* index = NULL;
+    status = id4_tooling_find_parameter_index(&scope_map, scopes[i], &index);
+    if (iree_status_is_ok(status)) {
+      status = id4_tooling_validate_parameter_index(scopes[i], index);
+    }
+    if (iree_status_is_ok(status)) {
+      status = iree_io_parameter_index_provider_create(
+          scopes[i], index,
+          IREE_IO_PARAMETER_INDEX_PROVIDER_DEFAULT_MAX_CONCURRENT_OPERATIONS,
+          host_allocator, &entries[i].provider);
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    status = id4_tooling_create_parameter_provider_set(
+        scope_count, entries, host_allocator, out_provider);
+  }
+  for (iree_host_size_t i = 0; i < scope_count; ++i) {
+    iree_io_parameter_provider_release(entries[i].provider);
+  }
+  iree_io_scope_map_deinitialize(&scope_map);
+  iree_allocator_free(host_allocator, entries);
+  return status;
+}
+
 static void id4_tooling_release_parameter_provider_requests(
     iree_host_size_t request_count,
     const id4_tooling_parameter_provider_request_t* requests) {

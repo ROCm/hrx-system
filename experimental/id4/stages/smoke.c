@@ -399,8 +399,9 @@ static iree_status_t id4_smoke_stage_create_plan(
           /*byte_length=*/16, /*alignment=*/16, /*request_count=*/1, &request);
   id4_pipeline_parameter_load_step_t load_step =
       id4_pipeline_parameter_gather_load_step(
-          IREE_SV("parameters.gather"), /*target_slab_index=*/0,
-          /*request_offset=*/0, /*request_count=*/1);
+          IREE_SV("parameters.gather"), IREE_SV("smoke"),
+          /*target_slab_index=*/0, /*request_offset=*/0,
+          /*request_count=*/1);
 
   id4_pipeline_device_placement_t placement;
   memset(&placement, 0, sizeof(placement));

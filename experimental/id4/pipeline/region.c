@@ -136,6 +136,8 @@ iree_device_size_t id4_pipeline_tensor_dtype_byte_length(
     case ID4_PIPELINE_TENSOR_DTYPE_F16:
     case ID4_PIPELINE_TENSOR_DTYPE_BF16:
       return 2;
+    case ID4_PIPELINE_TENSOR_DTYPE_F8_E4M3:
+      return 1;
     default:
       return 0;
   }
@@ -154,6 +156,8 @@ iree_string_view_t id4_pipeline_tensor_dtype_format(
       return IREE_SV("i32");
     case ID4_PIPELINE_TENSOR_DTYPE_U32:
       return IREE_SV("u32");
+    case ID4_PIPELINE_TENSOR_DTYPE_F8_E4M3:
+      return IREE_SV("f8e4m3");
     default:
       return IREE_SV("invalid");
   }

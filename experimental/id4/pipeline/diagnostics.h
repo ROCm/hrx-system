@@ -34,7 +34,7 @@ typedef struct id4_pipeline_parameter_slab_diagnostic_t {
   iree_host_size_t slab_index;
   // Request index, or IREE_HOST_SIZE_MAX when the event describes the slab.
   iree_host_size_t request_index;
-  // Provider scope used by the parameter request.
+  // Parameter scope associated with this event.
   iree_string_view_t scope;
   // Parameter key for request-level events.
   iree_string_view_t parameter_key;

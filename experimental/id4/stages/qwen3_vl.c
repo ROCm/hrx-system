@@ -170,6 +170,7 @@ static iree_status_t id4_qwen3_vl_stage_author_program(
     id4_qwen3_vl_program_options_t program_options;
     memset(&program_options, 0, sizeof(program_options));
     program_options.structure_size = sizeof(program_options);
+    program_options.parameter_scope = stage->parameter_scope;
     program_options.model = stage->model;
     program_options.request = request;
     status = id4_qwen3_vl_program_author_forward(&program_options, builder);

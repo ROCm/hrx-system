@@ -54,6 +54,8 @@ typedef struct id4_qwen3_vl_program_options_t {
   iree_host_size_t structure_size;
   // Extension structure chain; must be NULL for now.
   const void* next;
+  // Provider source scope used when loading Qwen3-VL parameters.
+  iree_string_view_t parameter_scope;
   // Static model dimensions.
   id4_qwen3_vl_model_config_t model;
   // Dynamic request dimensions.

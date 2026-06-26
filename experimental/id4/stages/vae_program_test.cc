@@ -120,6 +120,8 @@ static id4_vae_program_options_t MakeProgramOptions(
       /*.model=*/model,
       // Dynamic decode request.
       /*.request=*/request,
+      // Provider source scope.
+      /*.parameter_scope=*/IREE_SV("model"),
       // Activation storage format.
       /*.activation_format=*/ID4_VAE_ACTIVATION_FORMAT_F32_CANONICAL,
   };

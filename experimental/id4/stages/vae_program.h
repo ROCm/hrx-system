@@ -178,6 +178,8 @@ typedef struct id4_vae_program_options_t {
   id4_vae_model_config_t model;
   // Dynamic decode request dimensions and tiling policy.
   id4_vae_decode_request_config_t request;
+  // Provider source scope used when loading VAE parameters.
+  iree_string_view_t parameter_scope;
   // Activation storage format for internal VAE intermediates.
   id4_vae_activation_format_t activation_format;
 } id4_vae_program_options_t;

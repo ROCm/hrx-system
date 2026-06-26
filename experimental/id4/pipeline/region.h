@@ -114,6 +114,8 @@ typedef enum id4_pipeline_tensor_dtype_e {
   ID4_PIPELINE_TENSOR_DTYPE_I32 = 4,
   // Unsigned 32-bit integer.
   ID4_PIPELINE_TENSOR_DTYPE_U32 = 5,
+  // E4M3 8-bit floating point value.
+  ID4_PIPELINE_TENSOR_DTYPE_F8_E4M3 = 6,
 } id4_pipeline_tensor_dtype_t;
 
 // Inline tensor shape used by region planning.

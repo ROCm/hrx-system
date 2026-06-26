@@ -136,6 +136,7 @@ iree_runtime_cc_test(
         ":runtime",
         "//experimental/id4/pipeline:kernel_library",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
         "//runtime/src/iree/io:parameter_provider",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",

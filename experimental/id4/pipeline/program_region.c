@@ -293,6 +293,8 @@ id4_pipeline_tensor_dtype_t id4_pipeline_program_region_convert_dtype(
       return ID4_PIPELINE_TENSOR_DTYPE_I32;
     case ID4_PIPELINE_PROGRAM_DTYPE_U32:
       return ID4_PIPELINE_TENSOR_DTYPE_U32;
+    case ID4_PIPELINE_PROGRAM_DTYPE_F8_E4M3:
+      return ID4_PIPELINE_TENSOR_DTYPE_F8_E4M3;
     default:
       return ID4_PIPELINE_TENSOR_DTYPE_INVALID;
   }

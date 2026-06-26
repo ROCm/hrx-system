@@ -23,6 +23,8 @@ static id4_qwen3_vl_program_options_t MakeProgramOptions(uint32_t layer_count) {
       /*.structure_size=*/sizeof(options),
       // Extension structure chain.
       /*.next=*/nullptr,
+      // Provider source scope.
+      /*.parameter_scope=*/IREE_SV("model"),
       // Static model dimensions.
       /*.model=*/
       {

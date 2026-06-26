@@ -122,6 +122,7 @@ static id4_pipeline_program_t* CreateLinearProgram() {
   id4_pipeline_program_parameter_options_t weight_options = {
       /*.structure_size=*/sizeof(weight_options),
       /*.next=*/nullptr,
+      /*.source_scope=*/IREE_SV("model"),
       /*.key=*/IREE_SV("model.layers.0.linear.weight"),
       /*.dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_BF16,
       /*.shape=*/id4_pipeline_program_make_shape_rank2(4, 4),
@@ -363,7 +364,7 @@ static id4_pipeline_program_plan_options_t MakePlanOptions(
       /*.device_group=*/device_group,
       /*.placement_count=*/1,
       /*.placements=*/placement,
-      /*.parameter_scope=*/IREE_SV(""),
+      /*.parameter_scope=*/IREE_SV("model"),
       /*.parameter_slab_placement_id=*/0,
       /*.parameter_slab_binding_slot=*/0,
       /*.parameter_slab_target_params=*/parameter_params,
@@ -433,6 +434,7 @@ TEST(PipelineProgramPlan, DerivesParameterKernelRegionAndTapPlans) {
   ASSERT_NE(load_step, nullptr);
   ExpectStringViewEqual(load_step->name, IREE_SV("parameters.gather"));
   EXPECT_EQ(load_step->kind, ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_GATHER);
+  ExpectStringViewEqual(load_step->source_scope, IREE_SV("model"));
   EXPECT_EQ(load_step->target_slab_index, 0u);
   EXPECT_EQ(load_step->request_offset, 0u);
   EXPECT_EQ(load_step->request_count, 1u);
