@@ -98,6 +98,28 @@ iree_cc_binary_benchmark(
   TESTONLY
 )
 
+iree_cc_binary_benchmark(
+  NAME
+    session_live_benchmark
+  SRCS
+    "session_live_benchmark.cc"
+  DEPS
+    ::session
+    iree::base
+    iree::base::tooling::flags
+    iree::experimental::id4::stages::hal_integration_util
+    iree::experimental::id4::tooling::runtime
+    iree::hal
+    iree::io::file_handle
+    iree::io::parameter_provider
+    iree::testing::benchmark
+    iree::testing::benchmark_main
+    iree::third_party::google_benchmark
+    iree::tokenizer::format::huggingface::tokenizer_json
+    iree::tooling::device_util
+  TESTONLY
+)
+
 iree_cc_test(
   NAME
     one_step_integration_test

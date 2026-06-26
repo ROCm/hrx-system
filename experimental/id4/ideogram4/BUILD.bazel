@@ -92,6 +92,25 @@ iree_runtime_cc_benchmark(
     ],
 )
 
+iree_runtime_cc_benchmark(
+    name = "session_live_benchmark",
+    srcs = ["session_live_benchmark.cc"],
+    deps = [
+        ":session",
+        "//experimental/id4/stages:hal_integration_util",
+        "//experimental/id4/tooling:runtime",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/tooling:flags",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/io:file_handle",
+        "//runtime/src/iree/io:parameter_provider",
+        "//runtime/src/iree/testing:benchmark",
+        "//runtime/src/iree/testing:benchmark_main",
+        "//runtime/src/iree/tokenizer/format/huggingface:tokenizer_json",
+        "//runtime/src/iree/tooling:device_util",
+    ],
+)
+
 iree_runtime_cc_test(
     name = "one_step_integration_test",
     srcs = ["one_step_integration_test.cc"],
