@@ -2971,42 +2971,30 @@ static iree_status_t loom_amdgpu_emit_fragment_memory_clean_fp8_to_bf16_lane(
       context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_LSHLREV_B32_LIT, 8,
       low_sign_bits, vgpr_type, &low_sign_bits));
 
-  const uint32_t mantissa_mask = (UINT32_C(1) << format.mantissa_bits) - 1u;
-  const uint32_t exponent_mask = ((UINT32_C(1) << format.exponent_bits) - 1u)
-                                 << format.mantissa_bits;
-  loom_value_id_t low_exponent = LOOM_VALUE_ID_INVALID;
+  loom_value_id_t low_source_no_sign = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_binary_immediate(
       context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_AND_B32_LIT, low_byte,
-      exponent_mask, vgpr_type, &low_exponent));
-  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_shift(
-      context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_LSHRREV_B32_LIT,
-      format.mantissa_bits, low_exponent, vgpr_type, &low_exponent));
+      UINT32_C(0x7F), vgpr_type, &low_source_no_sign));
 
+  const uint32_t mantissa_mask = (UINT32_C(1) << format.mantissa_bits) - 1u;
   loom_value_id_t low_mantissa = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_binary_immediate(
-      context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_AND_B32_LIT, low_byte,
-      mantissa_mask, vgpr_type, &low_mantissa));
+      context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_AND_B32_LIT,
+      low_source_no_sign, mantissa_mask, vgpr_type, &low_mantissa));
 
-  loom_value_id_t low_normal_exponent = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_binary_immediate(
-      context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_ADD_U32_LIT,
-      low_exponent, 127u - format.exponent_bias, vgpr_type,
-      &low_normal_exponent));
-  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_shift(
-      context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_LSHLREV_B32_LIT, 7,
-      low_normal_exponent, vgpr_type, &low_normal_exponent));
-  loom_value_id_t low_normal_mantissa = LOOM_VALUE_ID_INVALID;
+  loom_value_id_t low_normal_payload = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_shift(
       context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_LSHLREV_B32_LIT,
-      7u - format.mantissa_bits, low_mantissa, vgpr_type,
-      &low_normal_mantissa));
+      7u - format.mantissa_bits, low_source_no_sign, vgpr_type,
+      &low_normal_payload));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_binary_immediate(
+      context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_ADD_U32_LIT,
+      low_normal_payload, (127u - format.exponent_bias) << 7, vgpr_type,
+      &low_normal_payload));
   loom_value_id_t low_normal_bits = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_binary(
       context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_OR_B32, low_sign_bits,
-      low_normal_exponent, vgpr_type, &low_normal_bits));
-  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_binary(
-      context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_OR_B32, low_normal_bits,
-      low_normal_mantissa, vgpr_type, &low_normal_bits));
+      low_normal_payload, vgpr_type, &low_normal_bits));
 
   loom_value_id_t low_subnormal_bits = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fragment_memory_fp8_subnormal_bf16_bits(
@@ -3014,17 +3002,14 @@ static iree_status_t loom_amdgpu_emit_fragment_memory_clean_fp8_to_bf16_lane(
       mask_type, &low_subnormal_bits));
   loom_value_id_t low_exponent_is_zero = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fragment_memory_cmp_u32_lit(
-      context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_CMP_EQ_I32, low_exponent,
-      0, vgpr_type, mask_type, &low_exponent_is_zero));
+      context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_CMP_ULT_U32,
+      low_source_no_sign, UINT32_C(1) << format.mantissa_bits, vgpr_type,
+      mask_type, &low_exponent_is_zero));
   loom_value_id_t low_finite_bits = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fragment_memory_select_b32(
       context, source_op, low_normal_bits, low_subnormal_bits,
       low_exponent_is_zero, vgpr_type, &low_finite_bits));
 
-  loom_value_id_t low_source_no_sign = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_binary_immediate(
-      context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_AND_B32_LIT, low_byte,
-      UINT32_C(0x7F), vgpr_type, &low_source_no_sign));
   loom_value_id_t low_quiet_nan = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_amdgpu_emit_const_u32(
       context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_MOV_B32, 0x7FC0,
