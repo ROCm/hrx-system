@@ -316,6 +316,8 @@ TEST(Ideogram4DitProgram, AuthorsScaledFp8ProjectionParameterContract) {
       id4_pipeline_program_make_shape_rank4(1, 2, 4, 1);
   id4_ideogram4_dit_program_options_t options =
       MakeProgramOptions(latent_shape);
+  options.activation_format =
+      ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT;
   const id4_ideogram4_dit_parameter_source_rule_t rules[] = {
       {
           // Logical parameter key.
