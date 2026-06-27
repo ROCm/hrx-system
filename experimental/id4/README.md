@@ -592,11 +592,13 @@ kernel benchmarks and C API benchmarks.
 
 ## Smoke Test
 
-Add and maintain a checked-in smoke-test script once the CLI can produce an
-image. The script should run one fixed structured JSON prompt through the public
-CLI or API binary, write every requested artifact into one caller-selected output
-directory, and validate that the resulting image has plausible contents rather
-than merely existing as a file.
+Maintain a checked-in smoke-test script now that the CLI can produce an image.
+The first harness runs one fixed structured JSON prompt through the public CLI,
+writes artifacts into one caller-selected output directory, and validates that
+the resulting image has plausible contents rather than merely existing as a
+file. The request parser canonicalizes JSON prompt payloads before tokenization,
+so human-readable and compact spellings of the same request stay in the same
+token bucket.
 
 The smoke-test output directory should be self-contained:
 

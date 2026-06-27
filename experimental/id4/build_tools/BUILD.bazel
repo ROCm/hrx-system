@@ -25,6 +25,11 @@ py_binary(
 )
 
 py_binary(
+    name = "smoke_test",
+    srcs = ["smoke_test.py"],
+)
+
+py_binary(
     name = "trace_reduce",
     srcs = ["trace_reduce.py"],
 )
@@ -49,6 +54,14 @@ py_test(
     srcs = [
         "presubmit.py",
         "presubmit_test.py",
+    ],
+)
+
+py_test(
+    name = "smoke_test_test",
+    srcs = [
+        "smoke_test.py",
+        "smoke_test_test.py",
     ],
 )
 
