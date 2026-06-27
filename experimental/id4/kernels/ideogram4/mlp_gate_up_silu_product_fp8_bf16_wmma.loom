@@ -21,10 +21,10 @@ kernel.def target(@id4_gfx1100) export("id4_ideogram4_mlp_gate_up_silu_product_f
   %base = index.constant 0 : offset
   %zero = index.constant 0 : index
   %one = index.constant 1 : index
+  %two = index.constant 2 : index
+  %eight = index.constant 8 : index
   %sixteen = index.constant 16 : index
   %thirty_two = index.constant 32 : index
-  %rhs_scratch_bytes = index.constant 1024 : offset
-  %acc_scratch_bytes = index.constant 4096 : offset
   %token_tile = kernel.workgroup.id<x> : index
   %row_pair = kernel.workgroup.id<y> : index
   %lane = kernel.workitem.id<x> : index
@@ -40,8 +40,7 @@ kernel.def target(@id4_gfx1100) export("id4_ideogram4_mlp_gate_up_silu_product_f
   %n = index.constant 16 : index
   %k = index.constant 16 : index
   %weight_layout = encoding.layout.strided [1, %input_size] : encoding<layout>
-  %rhs_scratch_layout = encoding.layout.strided [1, %sixteen] : encoding<layout>
-  %zero_f32 = scalar.constant 0.0 : f32
+  %zero_acc = vector.constant 0.0 : vector<8xf32>
   %input_noalias, %gate_weight_noalias, %gate_scale_noalias, %up_weight_noalias, %up_scale_noalias, %output_noalias = buffer.assume.noalias %input, %gate_weight, %gate_scale, %up_weight, %up_scale, %output : buffer, buffer, buffer, buffer, buffer, buffer
   %input_global = buffer.assume.memory_space<global> %input_noalias : buffer
   %gate_weight_global = buffer.assume.memory_space<global> %gate_weight_noalias : buffer
@@ -61,115 +60,93 @@ kernel.def target(@id4_gfx1100) export("id4_ideogram4_mlp_gate_up_silu_product_f
   %up_weight_view = buffer.view %up_weight_aligned[%base] : buffer -> view<[%input_size]x[%intermediate_size]xf8E4M3, %weight_layout>
   %up_scale_view = buffer.view %up_scale_aligned[%base] : buffer -> view<[%intermediate_size]xf32, #dense>
   %output_view = buffer.view %output_aligned[%base] : buffer -> view<[%token_capacity]x[%intermediate_size]xbf16, #dense>
-  %gate_rhs_scratch = buffer.alloca %rhs_scratch_bytes {base_alignment = 16, memory_space = workgroup} : buffer
-  %up_rhs_scratch = buffer.alloca %rhs_scratch_bytes {base_alignment = 16, memory_space = workgroup} : buffer
-  %gate_acc_scratch = buffer.alloca %acc_scratch_bytes {base_alignment = 16, memory_space = workgroup} : buffer
-  %up_acc_scratch = buffer.alloca %acc_scratch_bytes {base_alignment = 16, memory_space = workgroup} : buffer
-  %gate_rhs_scratch_view = buffer.view %gate_rhs_scratch[%base] : buffer -> view<16x32xbf16, %rhs_scratch_layout>
-  %up_rhs_scratch_view = buffer.view %up_rhs_scratch[%base] : buffer -> view<16x32xbf16, %rhs_scratch_layout>
-  %gate_acc_scratch_view = buffer.view %gate_acc_scratch[%base] : buffer -> view<32x32xf32, #dense>
-  %up_acc_scratch_view = buffer.view %up_acc_scratch[%base] : buffer -> view<32x32xf32, #dense>
-  %gate_acc_scratch_linear_view = buffer.view %gate_acc_scratch[%base] : buffer -> view<1024xf32, #dense>
-  %up_acc_scratch_linear_view = buffer.view %up_acc_scratch[%base] : buffer -> view<1024xf32, #dense>
-  %acc_element_count = index.constant 1024 : index
-  scf.for %acc_linear = [%lane to %acc_element_count step %thirty_two] {
-    view.store %zero_f32, %gate_acc_scratch_linear_view[%acc_linear] : f32, view<1024xf32, #dense>
-    view.store %zero_f32, %up_acc_scratch_linear_view[%acc_linear] : f32, view<1024xf32, #dense>
-  }
-  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
-  %rhs_element_count = index.constant 512 : index
-  scf.for %k_tile = [%zero to %k_tile_count step %one] {
+  %init00 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
+  %init01 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
+  %init10 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
+  %init11 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
+  %gate_result00, %gate_result01, %gate_result10, %gate_result11, %up_result00, %up_result01, %up_result10, %up_result11 = scf.for %k_tile = [%zero to %k_tile_count step %one](%gate_acc00 = %init00 : vector<8xf32>, %gate_acc01 = %init01 : vector<8xf32>, %gate_acc10 = %init10 : vector<8xf32>, %gate_acc11 = %init11 : vector<8xf32>, %up_acc00 = %init00 : vector<8xf32>, %up_acc01 = %init01 : vector<8xf32>, %up_acc10 = %init10 : vector<8xf32>, %up_acc11 = %init11 : vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
     %k_origin = index.mul %k_tile, %sixteen : index
-    scf.for %rhs_linear = [%lane to %rhs_element_count step %thirty_two] {
-      %local_k = index.rem %rhs_linear, %sixteen : index
-      %local_row = index.div %rhs_linear, %sixteen : index
-      %output_row = index.add %row_origin0, %local_row : index
-      %weight_k = index.add %k_origin, %local_k : index
-      %gate_weight_value = view.load %gate_weight_view[%weight_k, %output_row] : view<[%input_size]x[%intermediate_size]xf8E4M3, %weight_layout> -> f8E4M3
-      %gate_weight_f32 = scalar.extf %gate_weight_value : f8E4M3 to f32
-      %gate_scale_f32 = view.load %gate_scale_view[%output_row] : view<[%intermediate_size]xf32, #dense> -> f32
-      %gate_scaled = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %gate_weight_f32, %gate_scale_f32 : f32
-      %gate_weight_bf16 = scalar.fptrunc %gate_scaled : f32 to bf16
-      view.store %gate_weight_bf16, %gate_rhs_scratch_view[%local_k, %local_row] : bf16, view<16x32xbf16, %rhs_scratch_layout>
-      %up_weight_value = view.load %up_weight_view[%weight_k, %output_row] : view<[%input_size]x[%intermediate_size]xf8E4M3, %weight_layout> -> f8E4M3
-      %up_weight_f32 = scalar.extf %up_weight_value : f8E4M3 to f32
-      %up_scale_f32 = view.load %up_scale_view[%output_row] : view<[%intermediate_size]xf32, #dense> -> f32
-      %up_scaled = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %up_weight_f32, %up_scale_f32 : f32
-      %up_weight_bf16 = scalar.fptrunc %up_scaled : f32 to bf16
-      view.store %up_weight_bf16, %up_rhs_scratch_view[%local_k, %local_row] : bf16, view<16x32xbf16, %rhs_scratch_layout>
-    }
-    kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
-    %gate_acc00 = vector.fragment.load<init> %gate_acc_scratch_view[%zero, %zero] shape [%m, %n] : view<32x32xf32, #dense> -> vector<8xf32>
-    %gate_acc01 = vector.fragment.load<init> %gate_acc_scratch_view[%zero, %sixteen] shape [%m, %n] : view<32x32xf32, #dense> -> vector<8xf32>
-    %gate_acc10 = vector.fragment.load<init> %gate_acc_scratch_view[%sixteen, %zero] shape [%m, %n] : view<32x32xf32, #dense> -> vector<8xf32>
-    %gate_acc11 = vector.fragment.load<init> %gate_acc_scratch_view[%sixteen, %sixteen] shape [%m, %n] : view<32x32xf32, #dense> -> vector<8xf32>
-    %up_acc00 = vector.fragment.load<init> %up_acc_scratch_view[%zero, %zero] shape [%m, %n] : view<32x32xf32, #dense> -> vector<8xf32>
-    %up_acc01 = vector.fragment.load<init> %up_acc_scratch_view[%zero, %sixteen] shape [%m, %n] : view<32x32xf32, #dense> -> vector<8xf32>
-    %up_acc10 = vector.fragment.load<init> %up_acc_scratch_view[%sixteen, %zero] shape [%m, %n] : view<32x32xf32, #dense> -> vector<8xf32>
-    %up_acc11 = vector.fragment.load<init> %up_acc_scratch_view[%sixteen, %sixteen] shape [%m, %n] : view<32x32xf32, #dense> -> vector<8xf32>
     %lhs0 = vector.fragment.load<lhs> %input_view[%token_origin0, %k_origin] shape [%m, %k] : view<[%token_capacity]x[%input_size]xbf16, #dense> -> vector<16xbf16>
     %lhs1 = vector.fragment.load<lhs> %input_view[%token_origin1, %k_origin] shape [%m, %k] : view<[%token_capacity]x[%input_size]xbf16, #dense> -> vector<16xbf16>
-    %gate_rhs0 = vector.fragment.load<rhs> %gate_rhs_scratch_view[%zero, %zero] shape [%k, %n] : view<16x32xbf16, %rhs_scratch_layout> -> vector<16xbf16>
-    %gate_rhs1 = vector.fragment.load<rhs> %gate_rhs_scratch_view[%zero, %sixteen] shape [%k, %n] : view<16x32xbf16, %rhs_scratch_layout> -> vector<16xbf16>
-    %up_rhs0 = vector.fragment.load<rhs> %up_rhs_scratch_view[%zero, %zero] shape [%k, %n] : view<16x32xbf16, %rhs_scratch_layout> -> vector<16xbf16>
-    %up_rhs1 = vector.fragment.load<rhs> %up_rhs_scratch_view[%zero, %sixteen] shape [%k, %n] : view<16x32xbf16, %rhs_scratch_layout> -> vector<16xbf16>
-    %gate_result00 = vector.mma %lhs0, %gate_rhs0, %gate_acc00 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
-    %gate_result01 = vector.mma %lhs0, %gate_rhs1, %gate_acc01 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
-    %gate_result10 = vector.mma %lhs1, %gate_rhs0, %gate_acc10 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
-    %gate_result11 = vector.mma %lhs1, %gate_rhs1, %gate_acc11 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
-    %up_result00 = vector.mma %lhs0, %up_rhs0, %up_acc00 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
-    %up_result01 = vector.mma %lhs0, %up_rhs1, %up_acc01 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
-    %up_result10 = vector.mma %lhs1, %up_rhs0, %up_acc10 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
-    %up_result11 = vector.mma %lhs1, %up_rhs1, %up_acc11 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
-    vector.fragment.store<result> %gate_result00, %gate_acc_scratch_view[%zero, %zero] shape [%m, %n] : vector<8xf32>, view<32x32xf32, #dense>
-    vector.fragment.store<result> %gate_result01, %gate_acc_scratch_view[%zero, %sixteen] shape [%m, %n] : vector<8xf32>, view<32x32xf32, #dense>
-    vector.fragment.store<result> %gate_result10, %gate_acc_scratch_view[%sixteen, %zero] shape [%m, %n] : vector<8xf32>, view<32x32xf32, #dense>
-    vector.fragment.store<result> %gate_result11, %gate_acc_scratch_view[%sixteen, %sixteen] shape [%m, %n] : vector<8xf32>, view<32x32xf32, #dense>
-    vector.fragment.store<result> %up_result00, %up_acc_scratch_view[%zero, %zero] shape [%m, %n] : vector<8xf32>, view<32x32xf32, #dense>
-    vector.fragment.store<result> %up_result01, %up_acc_scratch_view[%zero, %sixteen] shape [%m, %n] : vector<8xf32>, view<32x32xf32, #dense>
-    vector.fragment.store<result> %up_result10, %up_acc_scratch_view[%sixteen, %zero] shape [%m, %n] : vector<8xf32>, view<32x32xf32, #dense>
-    vector.fragment.store<result> %up_result11, %up_acc_scratch_view[%sixteen, %sixteen] shape [%m, %n] : vector<8xf32>, view<32x32xf32, #dense>
-    kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+    %gate_rhs0 = vector.fragment.load<rhs> %gate_weight_view[%k_origin, %row_origin0] shape [%k, %n] : view<[%input_size]x[%intermediate_size]xf8E4M3, %weight_layout> -> vector<16xbf16>
+    %gate_rhs1 = vector.fragment.load<rhs> %gate_weight_view[%k_origin, %row_origin1] shape [%k, %n] : view<[%input_size]x[%intermediate_size]xf8E4M3, %weight_layout> -> vector<16xbf16>
+    %up_rhs0 = vector.fragment.load<rhs> %up_weight_view[%k_origin, %row_origin0] shape [%k, %n] : view<[%input_size]x[%intermediate_size]xf8E4M3, %weight_layout> -> vector<16xbf16>
+    %up_rhs1 = vector.fragment.load<rhs> %up_weight_view[%k_origin, %row_origin1] shape [%k, %n] : view<[%input_size]x[%intermediate_size]xf8E4M3, %weight_layout> -> vector<16xbf16>
+    %next_gate00 = vector.mma %lhs0, %gate_rhs0, %gate_acc00 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next_gate01 = vector.mma %lhs0, %gate_rhs1, %gate_acc01 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next_gate10 = vector.mma %lhs1, %gate_rhs0, %gate_acc10 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next_gate11 = vector.mma %lhs1, %gate_rhs1, %gate_acc11 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next_up00 = vector.mma %lhs0, %up_rhs0, %up_acc00 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next_up01 = vector.mma %lhs0, %up_rhs1, %up_acc01 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next_up10 = vector.mma %lhs1, %up_rhs0, %up_acc10 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next_up11 = vector.mma %lhs1, %up_rhs1, %up_acc11 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    scf.yield %next_gate00, %next_gate01, %next_gate10, %next_gate11, %next_up00, %next_up01, %next_up10, %next_up11 : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>
   }
-  %gate_final00 = vector.fragment.load<init> %gate_acc_scratch_view[%zero, %zero] shape [%m, %n] : view<32x32xf32, #dense> -> vector<8xf32>
-  %gate_final01 = vector.fragment.load<init> %gate_acc_scratch_view[%zero, %sixteen] shape [%m, %n] : view<32x32xf32, #dense> -> vector<8xf32>
-  %gate_final10 = vector.fragment.load<init> %gate_acc_scratch_view[%sixteen, %zero] shape [%m, %n] : view<32x32xf32, #dense> -> vector<8xf32>
-  %gate_final11 = vector.fragment.load<init> %gate_acc_scratch_view[%sixteen, %sixteen] shape [%m, %n] : view<32x32xf32, #dense> -> vector<8xf32>
-  %up_final00 = vector.fragment.load<init> %up_acc_scratch_view[%zero, %zero] shape [%m, %n] : view<32x32xf32, #dense> -> vector<8xf32>
-  %up_final01 = vector.fragment.load<init> %up_acc_scratch_view[%zero, %sixteen] shape [%m, %n] : view<32x32xf32, #dense> -> vector<8xf32>
-  %up_final10 = vector.fragment.load<init> %up_acc_scratch_view[%sixteen, %zero] shape [%m, %n] : view<32x32xf32, #dense> -> vector<8xf32>
-  %up_final11 = vector.fragment.load<init> %up_acc_scratch_view[%sixteen, %sixteen] shape [%m, %n] : view<32x32xf32, #dense> -> vector<8xf32>
-  %gate_final00_bf16 = vector.fptrunc %gate_final00 : vector<8xf32> to vector<8xbf16>
-  %gate_final01_bf16 = vector.fptrunc %gate_final01 : vector<8xf32> to vector<8xbf16>
-  %gate_final10_bf16 = vector.fptrunc %gate_final10 : vector<8xf32> to vector<8xbf16>
-  %gate_final11_bf16 = vector.fptrunc %gate_final11 : vector<8xf32> to vector<8xbf16>
-  %gate_final00_rounded = vector.extf %gate_final00_bf16 : vector<8xbf16> to vector<8xf32>
-  %gate_final01_rounded = vector.extf %gate_final01_bf16 : vector<8xbf16> to vector<8xf32>
-  %gate_final10_rounded = vector.extf %gate_final10_bf16 : vector<8xbf16> to vector<8xf32>
-  %gate_final11_rounded = vector.extf %gate_final11_bf16 : vector<8xbf16> to vector<8xf32>
-  %gate_silu00 = vector.siluf %gate_final00_rounded : vector<8xf32>
-  %gate_silu01 = vector.siluf %gate_final01_rounded : vector<8xf32>
-  %gate_silu10 = vector.siluf %gate_final10_rounded : vector<8xf32>
-  %gate_silu11 = vector.siluf %gate_final11_rounded : vector<8xf32>
-  %product00 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %gate_silu00, %up_final00 : vector<8xf32>
-  %product01 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %gate_silu01, %up_final01 : vector<8xf32>
-  %product10 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %gate_silu10, %up_final10 : vector<8xf32>
-  %product11 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %gate_silu11, %up_final11 : vector<8xf32>
-  vector.fragment.store<result> %product00, %output_view[%token_origin0, %row_origin0] shape [%m, %n] : vector<8xf32>, view<[%token_capacity]x[%intermediate_size]xbf16, #dense>
-  vector.fragment.store<result> %product01, %output_view[%token_origin0, %row_origin1] shape [%m, %n] : vector<8xf32>, view<[%token_capacity]x[%intermediate_size]xbf16, #dense>
-  vector.fragment.store<result> %product10, %output_view[%token_origin1, %row_origin0] shape [%m, %n] : vector<8xf32>, view<[%token_capacity]x[%intermediate_size]xbf16, #dense>
-  vector.fragment.store<result> %product11, %output_view[%token_origin1, %row_origin1] shape [%m, %n] : vector<8xf32>, view<[%token_capacity]x[%intermediate_size]xbf16, #dense>
+  %lane_column = index.rem %lane, %sixteen : index
+  %lane_group = index.div %lane, %sixteen : index
+  %column0 = index.add %row_origin0, %lane_column : index
+  %column1 = index.add %row_origin1, %lane_column : index
+  %gate_scale0 = view.load %gate_scale_view[%column0] : view<[%intermediate_size]xf32, #dense> -> f32
+  %gate_scale1 = view.load %gate_scale_view[%column1] : view<[%intermediate_size]xf32, #dense> -> f32
+  %up_scale0 = view.load %up_scale_view[%column0] : view<[%intermediate_size]xf32, #dense> -> f32
+  %up_scale1 = view.load %up_scale_view[%column1] : view<[%intermediate_size]xf32, #dense> -> f32
+  scf.for %register_index = [%zero to %eight step %one] {
+    %register_token_base = index.mul %register_index, %two : index
+    %local_token = index.add %register_token_base, %lane_group : index
+    %token0 = index.add %token_origin0, %local_token : index
+    %token1 = index.add %token_origin1, %local_token : index
+    %gate_value00 = vector.extract %gate_result00[%register_index] : vector<8xf32> -> f32
+    %gate_scaled00 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %gate_value00, %gate_scale0 : f32
+    %gate_bf16_00 = scalar.fptrunc %gate_scaled00 : f32 to bf16
+    %gate_rounded00 = scalar.extf %gate_bf16_00 : bf16 to f32
+    %gate_silu00 = scalar.siluf %gate_rounded00 : f32
+    %up_value00 = vector.extract %up_result00[%register_index] : vector<8xf32> -> f32
+    %up_scaled00 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %up_value00, %up_scale0 : f32
+    %product00 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %gate_silu00, %up_scaled00 : f32
+    %rounded00 = scalar.fptrunc %product00 : f32 to bf16
+    view.store %rounded00, %output_view[%token0, %column0] : bf16, view<[%token_capacity]x[%intermediate_size]xbf16, #dense>
+    %gate_value01 = vector.extract %gate_result01[%register_index] : vector<8xf32> -> f32
+    %gate_scaled01 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %gate_value01, %gate_scale1 : f32
+    %gate_bf16_01 = scalar.fptrunc %gate_scaled01 : f32 to bf16
+    %gate_rounded01 = scalar.extf %gate_bf16_01 : bf16 to f32
+    %gate_silu01 = scalar.siluf %gate_rounded01 : f32
+    %up_value01 = vector.extract %up_result01[%register_index] : vector<8xf32> -> f32
+    %up_scaled01 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %up_value01, %up_scale1 : f32
+    %product01 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %gate_silu01, %up_scaled01 : f32
+    %rounded01 = scalar.fptrunc %product01 : f32 to bf16
+    view.store %rounded01, %output_view[%token0, %column1] : bf16, view<[%token_capacity]x[%intermediate_size]xbf16, #dense>
+    %gate_value10 = vector.extract %gate_result10[%register_index] : vector<8xf32> -> f32
+    %gate_scaled10 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %gate_value10, %gate_scale0 : f32
+    %gate_bf16_10 = scalar.fptrunc %gate_scaled10 : f32 to bf16
+    %gate_rounded10 = scalar.extf %gate_bf16_10 : bf16 to f32
+    %gate_silu10 = scalar.siluf %gate_rounded10 : f32
+    %up_value10 = vector.extract %up_result10[%register_index] : vector<8xf32> -> f32
+    %up_scaled10 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %up_value10, %up_scale0 : f32
+    %product10 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %gate_silu10, %up_scaled10 : f32
+    %rounded10 = scalar.fptrunc %product10 : f32 to bf16
+    view.store %rounded10, %output_view[%token1, %column0] : bf16, view<[%token_capacity]x[%intermediate_size]xbf16, #dense>
+    %gate_value11 = vector.extract %gate_result11[%register_index] : vector<8xf32> -> f32
+    %gate_scaled11 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %gate_value11, %gate_scale1 : f32
+    %gate_bf16_11 = scalar.fptrunc %gate_scaled11 : f32 to bf16
+    %gate_rounded11 = scalar.extf %gate_bf16_11 : bf16 to f32
+    %gate_silu11 = scalar.siluf %gate_rounded11 : f32
+    %up_value11 = vector.extract %up_result11[%register_index] : vector<8xf32> -> f32
+    %up_scaled11 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %up_value11, %up_scale1 : f32
+    %product11 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %gate_silu11, %up_scaled11 : f32
+    %rounded11 = scalar.fptrunc %product11 : f32 to bf16
+    view.store %rounded11, %output_view[%token1, %column1] : bf16, view<[%token_capacity]x[%intermediate_size]xbf16, #dense>
+  }
   kernel.return
 }
 
 check.case public @id4_ideogram4_mlp_gate_up_silu_product_fp8_bf16_wmma_small_case {
   %input = check.generate.fill value(1.0) : tensor<32x16xbf16>
   %gate_weight = check.generate.fill value(1.0) : tensor<32x16xf8E4M3>
-  %gate_scale = check.generate.fill value(1.0) : tensor<32xf32>
+  %gate_scale = check.generate.fill value(2.0) : tensor<32xf32>
   %up_weight = check.generate.fill value(2.0) : tensor<32x16xf8E4M3>
-  %up_scale = check.generate.fill value(1.0) : tensor<32xf32>
+  %up_scale = check.generate.fill value(2.0) : tensor<32xf32>
   %output = check.generate.fill value(0.0) : tensor<32x32xbf16>
-  %expected = check.generate.fill value(512.0) : tensor<32x32xbf16>
+  %expected = check.generate.fill value(2048.0) : tensor<32x32xbf16>
   func.call @id4_ideogram4_mlp_gate_up_silu_product_fp8_bf16_wmma(%input, %gate_weight, %gate_scale, %up_weight, %up_scale, %output) : (tensor<32x16xbf16>, tensor<32x16xf8E4M3>, tensor<32xf32>, tensor<32x16xf8E4M3>, tensor<32xf32>, tensor<32x32xbf16>)
   check.expect.close actual(%output) expected(%expected) atol(0.5) rtol(0.01) nan(same) : tensor<32x32xbf16>
   check.return
