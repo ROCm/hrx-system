@@ -96,7 +96,7 @@ TEST(Ideogram4RequestTest, ParsesStructuredPromptJson) {
   IREE_ASSERT_OK(id4_ideogram4_request_parse_json(
       IREE_SV("{\"prompt\":\"hello world\"}"), iree_allocator_system(),
       &request.value));
-  EXPECT_TRUE(iree_string_view_equal(request.value.raw_prompt_json,
+  EXPECT_TRUE(iree_string_view_equal(request.value.prompt_payload,
                                      IREE_SV("{\"prompt\":\"hello world\"}")));
   EXPECT_TRUE(iree_string_view_equal(
       request.value.qwen_prompt,
@@ -109,7 +109,7 @@ TEST(Ideogram4RequestTest, ParsesStructuredPromptJson) {
               "\"style_description\":{\"medium\":\"photo\"}}"),
       iree_allocator_system(), &structured_request.value));
   EXPECT_TRUE(iree_string_view_equal(
-      structured_request.value.raw_prompt_json,
+      structured_request.value.prompt_payload,
       IREE_SV("{\"high_level_description\":\"hello\","
               "\"style_description\":{\"medium\":\"photo\"}}")));
 
@@ -136,7 +136,7 @@ TEST(Ideogram4RequestTest, ParsesFullGenerationJson) {
   EXPECT_TRUE(iree_all_bits_set(request.value.flags,
                                 ID4_IDEOGRAM4_REQUEST_FLAG_HAS_GENERATION));
   EXPECT_TRUE(iree_string_view_equal(
-      request.value.raw_prompt_json,
+      request.value.prompt_payload,
       IREE_SV("{\"high_level_description\":\"hello\","
               "\"style_description\":{\"medium\":\"photo\"}}")));
   EXPECT_TRUE(iree_string_view_equal(
@@ -149,6 +149,59 @@ TEST(Ideogram4RequestTest, ParsesFullGenerationJson) {
   EXPECT_EQ(request.value.generation.denoise_step_count, 20u);
   EXPECT_EQ(request.value.generation.seed, 20260625u);
   EXPECT_EQ(request.value.generation.guidance_scale, 3.5f);
+}
+
+TEST(Ideogram4RequestTest, CanonicalizesPromptPayloadJson) {
+  ScopedRequest compact_request;
+  IREE_ASSERT_OK(id4_ideogram4_request_parse_json(
+      IREE_SV("{\"prompt\":{\"high_level_description\":\"hello\","
+              "\"style_description\":{\"medium\":\"photo\","
+              "\"tags\":[\"city\",\"walk\"]}},\"generation\":{"
+              "\"latent_width\":8,\"latent_height\":8,"
+              "\"denoise_steps\":20,\"seed\":20260625,"
+              "\"guidance_scale\":3.5}}"),
+      iree_allocator_system(), &compact_request.value));
+
+  ScopedRequest pretty_request;
+  IREE_ASSERT_OK(id4_ideogram4_request_parse_json(
+      IREE_SV("{\n"
+              "  \"prompt\": {\n"
+              "    \"high_level_description\": \"hello\",\n"
+              "    \"style_description\": {\n"
+              "      \"medium\": \"photo\",\n"
+              "      \"tags\": [\"city\", \"walk\",],\n"
+              "    },\n"
+              "  },\n"
+              "  \"generation\": {\n"
+              "    \"latent_width\": 8,\n"
+              "    \"latent_height\": 8,\n"
+              "    \"denoise_steps\": 20,\n"
+              "    \"seed\": 20260625,\n"
+              "    \"guidance_scale\": 3.5,\n"
+              "  },\n"
+              "}"),
+      iree_allocator_system(), &pretty_request.value));
+
+  EXPECT_TRUE(iree_string_view_equal(compact_request.value.prompt_payload,
+                                     pretty_request.value.prompt_payload));
+  EXPECT_TRUE(iree_string_view_equal(compact_request.value.qwen_prompt,
+                                     pretty_request.value.qwen_prompt));
+
+  ScopedRequest standalone_request;
+  IREE_ASSERT_OK(id4_ideogram4_request_parse_json(
+      IREE_SV("{\n"
+              "  \"high_level_description\": \"hello\",\n"
+              "  \"style_description\": {\n"
+              "    \"medium\": \"photo\",\n"
+              "    \"tags\": [\"city\", \"walk\"],\n"
+              "  },\n"
+              "}"),
+      iree_allocator_system(), &standalone_request.value));
+  EXPECT_TRUE(iree_string_view_equal(
+      standalone_request.value.prompt_payload,
+      IREE_SV("{\"high_level_description\":\"hello\","
+              "\"style_description\":{\"medium\":\"photo\","
+              "\"tags\":[\"city\",\"walk\"]}}")));
 }
 
 TEST(Ideogram4RequestTest, RejectsMalformedFullGenerationJson) {

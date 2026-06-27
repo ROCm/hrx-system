@@ -151,6 +151,175 @@ static iree_status_t id4_ideogram4_request_copy_string(
   return iree_ok_status();
 }
 
+enum { ID4_IDEOGRAM4_REQUEST_JSON_MAX_DEPTH = 128 };
+
+static iree_status_t id4_ideogram4_request_append_compact_json_value(
+    iree_string_view_t* value, iree_string_builder_t* builder,
+    iree_host_size_t depth);
+
+static iree_status_t id4_ideogram4_request_append_compact_json_string(
+    iree_string_builder_t* builder, iree_string_view_t value) {
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "\""));
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_string(builder, value));
+  return iree_string_builder_append_cstring(builder, "\"");
+}
+
+static iree_status_t id4_ideogram4_request_append_compact_json_object(
+    iree_string_view_t* object, iree_string_builder_t* builder,
+    iree_host_size_t depth) {
+  if (depth >= ID4_IDEOGRAM4_REQUEST_JSON_MAX_DEPTH) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "Ideogram 4 prompt JSON nesting is too deep");
+  }
+  if (!iree_string_view_consume_prefix_char(object, '{')) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "Ideogram 4 prompt JSON object is missing `{`");
+  }
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "{"));
+  IREE_RETURN_IF_ERROR(iree_json_consume_insignificant(object));
+  bool first_member = true;
+  while (!iree_string_view_is_empty(*object) &&
+         !iree_string_view_starts_with_char(*object, '}')) {
+    iree_string_view_t key = iree_string_view_empty();
+    IREE_RETURN_IF_ERROR(iree_json_consume_string(object, &key));
+    IREE_RETURN_IF_ERROR(iree_json_consume_insignificant(object));
+    if (!iree_string_view_consume_prefix_char(object, ':')) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "Ideogram 4 prompt JSON object member is "
+                              "missing `:`");
+    }
+    if (first_member) {
+      first_member = false;
+    } else {
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, ","));
+    }
+    IREE_RETURN_IF_ERROR(
+        id4_ideogram4_request_append_compact_json_string(builder, key));
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, ":"));
+    IREE_RETURN_IF_ERROR(id4_ideogram4_request_append_compact_json_value(
+        object, builder, depth + 1));
+    IREE_RETURN_IF_ERROR(iree_json_consume_insignificant(object));
+    if (!iree_string_view_consume_prefix_char(object, ',')) break;
+    IREE_RETURN_IF_ERROR(iree_json_consume_insignificant(object));
+  }
+  if (!iree_string_view_consume_prefix_char(object, '}')) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "Ideogram 4 prompt JSON object is missing `}`");
+  }
+  return iree_string_builder_append_cstring(builder, "}");
+}
+
+static iree_status_t id4_ideogram4_request_append_compact_json_array(
+    iree_string_view_t* array, iree_string_builder_t* builder,
+    iree_host_size_t depth) {
+  if (depth >= ID4_IDEOGRAM4_REQUEST_JSON_MAX_DEPTH) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "Ideogram 4 prompt JSON nesting is too deep");
+  }
+  if (!iree_string_view_consume_prefix_char(array, '[')) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "Ideogram 4 prompt JSON array is missing `[`");
+  }
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "["));
+  IREE_RETURN_IF_ERROR(iree_json_consume_insignificant(array));
+  bool first_element = true;
+  while (!iree_string_view_is_empty(*array) &&
+         !iree_string_view_starts_with_char(*array, ']')) {
+    if (first_element) {
+      first_element = false;
+    } else {
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, ","));
+    }
+    IREE_RETURN_IF_ERROR(id4_ideogram4_request_append_compact_json_value(
+        array, builder, depth + 1));
+    IREE_RETURN_IF_ERROR(iree_json_consume_insignificant(array));
+    if (!iree_string_view_consume_prefix_char(array, ',')) break;
+    IREE_RETURN_IF_ERROR(iree_json_consume_insignificant(array));
+  }
+  if (!iree_string_view_consume_prefix_char(array, ']')) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "Ideogram 4 prompt JSON array is missing `]`");
+  }
+  return iree_string_builder_append_cstring(builder, "]");
+}
+
+static iree_status_t id4_ideogram4_request_append_compact_json_value(
+    iree_string_view_t* value, iree_string_builder_t* builder,
+    iree_host_size_t depth) {
+  IREE_RETURN_IF_ERROR(iree_json_consume_insignificant(value));
+  if (iree_string_view_is_empty(*value)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "Ideogram 4 prompt JSON value is empty");
+  }
+  switch (value->data[0]) {
+    case '{':
+      return id4_ideogram4_request_append_compact_json_object(value, builder,
+                                                              depth);
+    case '[':
+      return id4_ideogram4_request_append_compact_json_array(value, builder,
+                                                             depth);
+    case '"': {
+      iree_string_view_t string_value = iree_string_view_empty();
+      IREE_RETURN_IF_ERROR(iree_json_consume_string(value, &string_value));
+      return id4_ideogram4_request_append_compact_json_string(builder,
+                                                              string_value);
+    }
+    case 't': {
+      iree_string_view_t keyword = iree_string_view_empty();
+      IREE_RETURN_IF_ERROR(
+          iree_json_consume_keyword(value, IREE_SV("true"), &keyword));
+      return iree_string_builder_append_string(builder, keyword);
+    }
+    case 'f': {
+      iree_string_view_t keyword = iree_string_view_empty();
+      IREE_RETURN_IF_ERROR(
+          iree_json_consume_keyword(value, IREE_SV("false"), &keyword));
+      return iree_string_builder_append_string(builder, keyword);
+    }
+    case 'n': {
+      iree_string_view_t keyword = iree_string_view_empty();
+      IREE_RETURN_IF_ERROR(
+          iree_json_consume_keyword(value, IREE_SV("null"), &keyword));
+      return iree_string_builder_append_string(builder, keyword);
+    }
+    default: {
+      iree_string_view_t number = iree_string_view_empty();
+      IREE_RETURN_IF_ERROR(iree_json_consume_number(value, &number));
+      return iree_string_builder_append_string(builder, number);
+    }
+  }
+}
+
+static iree_status_t id4_ideogram4_request_copy_prompt_payload(
+    iree_string_view_t value, iree_allocator_t host_allocator,
+    iree_string_view_t* out_value) {
+  *out_value = iree_string_view_empty();
+  if (!iree_string_view_starts_with_char(value, '{') &&
+      !iree_string_view_starts_with_char(value, '[')) {
+    return id4_ideogram4_request_copy_string(value, host_allocator, out_value);
+  }
+
+  iree_string_builder_t builder;
+  iree_string_builder_initialize(host_allocator, &builder);
+  iree_string_view_t remaining = value;
+  iree_status_t status = id4_ideogram4_request_append_compact_json_value(
+      &remaining, &builder, /*depth=*/0);
+  if (iree_status_is_ok(status)) {
+    status = iree_json_consume_insignificant(&remaining);
+  }
+  if (iree_status_is_ok(status) && !iree_string_view_is_empty(remaining)) {
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "trailing data after Ideogram 4 prompt payload");
+  }
+  if (iree_status_is_ok(status)) {
+    const iree_host_size_t prompt_size = iree_string_builder_size(&builder);
+    char* storage = iree_string_builder_take_storage(&builder);
+    *out_value = iree_make_string_view(storage, prompt_size);
+  }
+  iree_string_builder_deinitialize(&builder);
+  return status;
+}
+
 static iree_status_t id4_ideogram4_request_lookup_required(
     iree_string_view_t object, iree_string_view_t key,
     iree_string_view_t* out_value) {
@@ -223,27 +392,27 @@ static iree_status_t id4_ideogram4_request_parse_generation(
 }
 
 static iree_status_t id4_ideogram4_request_wrap_qwen_prompt(
-    iree_string_view_t raw_prompt_json, iree_allocator_t host_allocator,
+    iree_string_view_t prompt_payload, iree_allocator_t host_allocator,
     iree_string_view_t* out_qwen_prompt) {
   *out_qwen_prompt = iree_string_view_empty();
   const iree_host_size_t prefix_length =
       sizeof(id4_ideogram4_qwen_prompt_prefix) - 1;
   const iree_host_size_t suffix_length =
       sizeof(id4_ideogram4_qwen_prompt_suffix) - 1;
-  if (raw_prompt_json.size > IREE_HOST_SIZE_MAX - prefix_length ||
-      raw_prompt_json.size + prefix_length >
+  if (prompt_payload.size > IREE_HOST_SIZE_MAX - prefix_length ||
+      prompt_payload.size + prefix_length >
           IREE_HOST_SIZE_MAX - suffix_length) {
     return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                             "Ideogram 4 Qwen prompt is too large");
   }
   const iree_host_size_t prompt_length =
-      prefix_length + raw_prompt_json.size + suffix_length;
+      prefix_length + prompt_payload.size + suffix_length;
   char* storage = NULL;
   IREE_RETURN_IF_ERROR(
       iree_allocator_malloc(host_allocator, prompt_length, (void**)&storage));
   memcpy(storage, id4_ideogram4_qwen_prompt_prefix, prefix_length);
-  memcpy(storage + prefix_length, raw_prompt_json.data, raw_prompt_json.size);
-  memcpy(storage + prefix_length + raw_prompt_json.size,
+  memcpy(storage + prefix_length, prompt_payload.data, prompt_payload.size);
+  memcpy(storage + prefix_length + prompt_payload.size,
          id4_ideogram4_qwen_prompt_suffix, suffix_length);
   *out_qwen_prompt = iree_make_string_view(storage, prompt_length);
   return iree_ok_status();
@@ -306,8 +475,8 @@ iree_status_t id4_ideogram4_request_parse_json(
   iree_status_t status = id4_ideogram4_request_select_prompt_payload(
       object, &prompt_payload, &generation);
   if (iree_status_is_ok(status)) {
-    status = id4_ideogram4_request_copy_string(prompt_payload, host_allocator,
-                                               &out_request->raw_prompt_json);
+    status = id4_ideogram4_request_copy_prompt_payload(
+        prompt_payload, host_allocator, &out_request->prompt_payload);
   }
   if (iree_status_is_ok(status) && !iree_string_view_is_empty(generation)) {
     status = id4_ideogram4_request_parse_generation(generation,
@@ -315,8 +484,7 @@ iree_status_t id4_ideogram4_request_parse_json(
   }
   if (iree_status_is_ok(status)) {
     status = id4_ideogram4_request_wrap_qwen_prompt(
-        out_request->raw_prompt_json, host_allocator,
-        &out_request->qwen_prompt);
+        out_request->prompt_payload, host_allocator, &out_request->qwen_prompt);
   }
   if (iree_status_is_ok(status) && !iree_string_view_is_empty(generation)) {
     out_request->flags |= ID4_IDEOGRAM4_REQUEST_FLAG_HAS_GENERATION;
@@ -331,7 +499,7 @@ void id4_ideogram4_request_deinitialize(id4_ideogram4_request_t* request,
                                         iree_allocator_t host_allocator) {
   if (!request) return;
   iree_allocator_free(host_allocator, (void*)request->qwen_prompt.data);
-  iree_allocator_free(host_allocator, (void*)request->raw_prompt_json.data);
+  iree_allocator_free(host_allocator, (void*)request->prompt_payload.data);
   memset(request, 0, sizeof(*request));
 }
 

@@ -41,8 +41,8 @@ typedef struct id4_ideogram4_request_generation_t {
 typedef struct id4_ideogram4_request_t {
   // Parsed request behavior flags.
   id4_ideogram4_request_flags_t flags;
-  // Raw structured JSON prompt object owned by the request.
-  iree_string_view_t raw_prompt_json;
+  // Canonical prompt payload text owned by the request.
+  iree_string_view_t prompt_payload;
   // Qwen chat-wrapped prompt text owned by the request.
   iree_string_view_t qwen_prompt;
   // Full-generation dimensions and sampling parameters when present.
