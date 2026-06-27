@@ -492,12 +492,48 @@ static iree_status_t VerifyExportedBoundariesWereWritten(
   return iree_ok_status();
 }
 
+static iree_status_t VerifyDiagnosticTapsWereWritten(
+    iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
+    const id4_pipeline_plan_t* plan,
+    const id4::test::BufferBindingSet& diagnostic_tap_bindings,
+    iree_hal_semaphore_list_t wait_list) {
+  const iree_host_size_t diagnostic_tap_count =
+      id4_pipeline_plan_diagnostic_tap_count(plan);
+  if (diagnostic_tap_count == 0) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "DiT plan contains no diagnostic taps");
+  }
+  for (iree_host_size_t i = 0; i < diagnostic_tap_count; ++i) {
+    const id4_pipeline_diagnostic_tap_plan_t* diagnostic_tap =
+        id4_pipeline_plan_diagnostic_tap_at(plan, i);
+    std::vector<uint8_t> bytes;
+    IREE_RETURN_IF_ERROR(id4::test::ReadBindingToHost(
+        device, queue_affinity, &diagnostic_tap_bindings.bindings[i], wait_list,
+        &bytes));
+    bool all_sentinel = true;
+    for (uint8_t byte : bytes) {
+      if (byte != kOutputSentinel) {
+        all_sentinel = false;
+        break;
+      }
+    }
+    if (all_sentinel) {
+      return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                              "diagnostic tap `%.*s` was not written",
+                              static_cast<int>(diagnostic_tap->name.size),
+                              diagnostic_tap->name.data);
+    }
+  }
+  return iree_ok_status();
+}
+
 typedef uint32_t DitFixtureRunFlags;
 
 typedef enum DitFixtureRunFlagBits {
   ID4_DIT_FIXTURE_RUN_FLAG_CAPTURE_EXPECTED_TAPS = 1u << 0,
   ID4_DIT_FIXTURE_RUN_FLAG_COMPARE_EXPECTED_TAPS = 1u << 1,
   ID4_DIT_FIXTURE_RUN_FLAG_COMPARE_OUTPUT_BOUNDARY = 1u << 2,
+  ID4_DIT_FIXTURE_RUN_FLAG_VERIFY_DIAGNOSTIC_TAPS_WRITTEN = 1u << 3,
 } DitFixtureRunFlagBits;
 
 typedef struct DitFixtureRunOptions {
@@ -509,6 +545,8 @@ typedef struct DitFixtureRunOptions {
   iree_string_view_t input_stage;
   // Expected diagnostic tap name prefix selected from the fixture.
   iree_string_view_t expected_tap_prefix;
+  // Additional diagnostic tap names requested by this run.
+  iree_string_view_list_t diagnostic_tap_names;
   // Expected fixture tensor compared against the exported velocity boundary.
   iree_string_view_t expected_output_name;
   // Integration-run capture identifier used when --id4_capture_dir is set.
@@ -582,6 +620,9 @@ static void RunDitFixture(const DitFixtureRunOptions& options) {
     }
     ASSERT_FALSE(diagnostic_tap_names.empty())
         << "DiT fixture contains no expected tensors";
+  }
+  for (iree_host_size_t i = 0; i < options.diagnostic_tap_names.count; ++i) {
+    diagnostic_tap_names.push_back(options.diagnostic_tap_names.values[i]);
   }
   const iree_flag_string_list_t extra_diagnostic_taps =
       FLAG_id4_diagnostic_tap_list();
@@ -692,6 +733,13 @@ static void RunDitFixture(const DitFixtureRunOptions& options) {
   id4::test::SemaphoreListStorage read_wait;
   read_wait.semaphore = issue_semaphore.get();
   read_wait.payload_value = issue_signal.payload_value;
+  if (iree_all_bits_set(
+          options.flags,
+          ID4_DIT_FIXTURE_RUN_FLAG_VERIFY_DIAGNOSTIC_TAPS_WRITTEN)) {
+    IREE_ASSERT_OK(VerifyDiagnosticTapsWereWritten(
+        context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, plan.get(),
+        diagnostic_tap_bindings, read_wait.list()));
+  }
   iree_string_view_t capture_directory =
       iree_make_cstring_view(FLAG_id4_capture_dir);
   if (!iree_string_view_is_empty(capture_directory)) {
@@ -768,6 +816,10 @@ TEST(Ideogram4DitStageIntegration, PrepareAndIssueBf16LinearInputFixture) {
 
 TEST(Ideogram4DitStageIntegration,
      PrepareAndIssueMaterializedWmmaAttentionFixture) {
+  const iree_string_view_t diagnostic_tap_names[] = {
+      IREE_SV("ideogram4.cond.layers.0.attention.context"),
+      IREE_SV("ideogram4.cond.layers.0.attention.output"),
+  };
   RunDitFixture(DitFixtureRunOptions{
       .activation_format =
           ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT,
@@ -775,10 +827,15 @@ TEST(Ideogram4DitStageIntegration,
           ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_MATERIALIZED_WMMA,
       .input_stage = IREE_SV("ideogram4.cond.input"),
       .expected_tap_prefix = iree_string_view_empty(),
+      .diagnostic_tap_names =
+          {
+              IREE_ARRAYSIZE(diagnostic_tap_names),
+              diagnostic_tap_names,
+          },
       .expected_output_name = iree_string_view_empty(),
       .capture_run_id =
           IREE_SV("ideogram4_dit_materialized_wmma_attention_integration"),
-      .flags = 0,
+      .flags = ID4_DIT_FIXTURE_RUN_FLAG_VERIFY_DIAGNOSTIC_TAPS_WRITTEN,
   });
 }
 

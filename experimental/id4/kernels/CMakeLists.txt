@@ -47,6 +47,7 @@ add_custom_command(OUTPUT loom_sources.stamp
     "ideogram4/linear_fp8_bf16_wmma.loom"
     "ideogram4/linear_fp8_f32.loom"
     "ideogram4/linear_input_pack_f32_bf16.loom"
+    "ideogram4/linear_input_unpack_bf16_f32.loom"
     "ideogram4/mlp_gate_up_silu_f32.loom"
     "ideogram4/mlp_gate_up_silu_product_bf16_wmma.loom"
     "ideogram4/mlp_gate_up_silu_product_fp8_bf16_wmma.loom"
@@ -155,6 +156,7 @@ iree_c_embed_data(
     "ideogram4/linear_fp8_bf16_wmma.loom"
     "ideogram4/linear_fp8_f32.loom"
     "ideogram4/linear_input_pack_f32_bf16.loom"
+    "ideogram4/linear_input_unpack_bf16_f32.loom"
     "ideogram4/mlp_gate_up_silu_f32.loom"
     "ideogram4/mlp_gate_up_silu_product_bf16_wmma.loom"
     "ideogram4/mlp_gate_up_silu_product_fp8_bf16_wmma.loom"
@@ -5354,6 +5356,42 @@ iree_native_test(
     "--config=id4.ideogram4.linear_input_pack.token_capacity=4096"
     "--config=id4.ideogram4.linear_input_pack.input_size=12288"
     "--config=id4.ideogram4.linear_input_pack.element_count=50331648"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
+    "ideogram4_linear_input_unpack_bf16_f32_single_token_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_input_unpack_bf16_f32.loom}}"
+    "--benchmark=@id4_ideogram4_linear_input_unpack_bf16_f32_single_token"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.ideogram4.linear_input_unpack.token_count=1"
+    "--config=id4.ideogram4.linear_input_unpack.token_capacity=1"
+    "--config=id4.ideogram4.linear_input_unpack.input_size=4"
+    "--config=id4.ideogram4.linear_input_unpack.element_count=4"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
+    "ideogram4_linear_input_unpack_bf16_f32_uncond_hidden_1024_shape_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_input_unpack_bf16_f32.loom}}"
+    "--benchmark=@id4_ideogram4_linear_input_unpack_bf16_f32_uncond_hidden_1024_shape"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.ideogram4.linear_input_unpack.token_count=4096"
+    "--config=id4.ideogram4.linear_input_unpack.token_capacity=4096"
+    "--config=id4.ideogram4.linear_input_unpack.input_size=4608"
+    "--config=id4.ideogram4.linear_input_unpack.element_count=18874368"
   SRC
     loom::tools::iree-benchmark-loom
   LABELS
@@ -13563,6 +13601,50 @@ iree_native_test(
     "--config=id4.ideogram4.linear_input_pack.token_capacity=4096"
     "--config=id4.ideogram4.linear_input_pack.input_size=12288"
     "--config=id4.ideogram4.linear_input_pack.element_count=50331648"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
+    "ideogram4_linear_input_unpack_bf16_f32_single_token_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_input_unpack_bf16_f32.loom}}"
+    "--case=@id4_ideogram4_linear_input_unpack_bf16_f32_single_token_case"
+    "--device=amdgpu://0"
+    "--config=id4.ideogram4.linear_input_unpack.token_count=1"
+    "--config=id4.ideogram4.linear_input_unpack.token_capacity=1"
+    "--config=id4.ideogram4.linear_input_unpack.input_size=4"
+    "--config=id4.ideogram4.linear_input_unpack.element_count=4"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
+    "ideogram4_linear_input_unpack_bf16_f32_uncond_hidden_1024_shape_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_input_unpack_bf16_f32.loom}}"
+    "--case=@id4_ideogram4_linear_input_unpack_bf16_f32_uncond_hidden_1024_shape_case"
+    "--device=amdgpu://0"
+    "--config=id4.ideogram4.linear_input_unpack.token_count=4096"
+    "--config=id4.ideogram4.linear_input_unpack.token_capacity=4096"
+    "--config=id4.ideogram4.linear_input_unpack.input_size=4608"
+    "--config=id4.ideogram4.linear_input_unpack.element_count=18874368"
   SRC
     loom::tools::iree-test-loom
   LABELS

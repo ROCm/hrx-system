@@ -107,6 +107,27 @@ static iree_status_t id4_ideogram4_dit_program_layer_linear_parameter(
   return iree_ok_status();
 }
 
+static iree_status_t id4_ideogram4_dit_program_tap_linear_input_bf16_as_f32(
+    id4_pipeline_program_builder_t* builder, iree_string_view_t tap_name,
+    iree_string_view_t canonical_tensor_name, iree_string_view_t dispatch_name,
+    iree_string_view_t barrier_name, uint32_t token_count,
+    uint32_t token_capacity, uint32_t input_size,
+    id4_pipeline_program_tensor_t packed_input) {
+  id4_pipeline_program_tensor_t canonical_tensor =
+      id4_pipeline_program_tensor_invalid();
+  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_acquire_tensor(
+      builder, canonical_tensor_name, ID4_PIPELINE_PROGRAM_DTYPE_F32,
+      id4_pipeline_program_make_shape_rank2(input_size, token_count),
+      &canonical_tensor));
+  IREE_RETURN_IF_ERROR(
+      id4_ideogram4_dit_program_dispatch_linear_input_unpack_bf16_f32(
+          builder, dispatch_name, token_count, token_capacity, input_size,
+          packed_input, canonical_tensor));
+  IREE_RETURN_IF_ERROR(
+      id4_ideogram4_dit_program_barrier(builder, barrier_name));
+  return id4_ideogram4_dit_program_tap(builder, tap_name, canonical_tensor);
+}
+
 static iree_status_t id4_ideogram4_dit_program_dispatch_linear_parameter_f32(
     id4_pipeline_program_builder_t* builder, iree_string_view_t name,
     uint32_t token_count, uint32_t input_size, uint32_t output_size,
@@ -636,12 +657,6 @@ iree_status_t id4_ideogram4_dit_program_author_transformer_block(
 
   id4_pipeline_program_tensor_t attention_context =
       id4_pipeline_program_tensor_invalid();
-  if (materialized_wmma_attention && capture_attention_context) {
-    return iree_make_status(
-        IREE_STATUS_UNIMPLEMENTED,
-        "Ideogram4 DiT materialized WMMA attention does not yet provide the "
-        "canonical F32 attention.context diagnostic tap");
-  }
   if (materialized_wmma_attention) {
     IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_acquire_tensor(
         builder, attention_context_name, ID4_PIPELINE_PROGRAM_DTYPE_BF16,
@@ -761,8 +776,44 @@ iree_status_t id4_ideogram4_dit_program_author_transformer_block(
   IREE_RETURN_IF_ERROR(
       id4_ideogram4_dit_program_barrier(builder, after_attention_name));
   if (capture_attention_context) {
-    IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_tap(
-        builder, attention_context_name, attention_context));
+    if (materialized_wmma_attention) {
+      char canonical_attention_context_name_buffer
+          [ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
+      char unpack_attention_context_dispatch_name_buffer
+          [ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
+      char after_unpack_attention_context_name_buffer
+          [ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
+      iree_string_view_t canonical_attention_context_name =
+          iree_string_view_empty();
+      iree_string_view_t unpack_attention_context_dispatch_name =
+          iree_string_view_empty();
+      iree_string_view_t after_unpack_attention_context_name =
+          iree_string_view_empty();
+      IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_format_branch_layer_name(
+          branch_name, layer_ordinal, IREE_SV("attention.context.canonical"),
+          canonical_attention_context_name_buffer,
+          IREE_ARRAYSIZE(canonical_attention_context_name_buffer),
+          &canonical_attention_context_name));
+      IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_format_branch_layer_name(
+          branch_name, layer_ordinal, IREE_SV("attention.context.unpack"),
+          unpack_attention_context_dispatch_name_buffer,
+          IREE_ARRAYSIZE(unpack_attention_context_dispatch_name_buffer),
+          &unpack_attention_context_dispatch_name));
+      IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_format_branch_layer_name(
+          branch_name, layer_ordinal, IREE_SV("after_attention_context_unpack"),
+          after_unpack_attention_context_name_buffer,
+          IREE_ARRAYSIZE(after_unpack_attention_context_name_buffer),
+          &after_unpack_attention_context_name));
+      IREE_RETURN_IF_ERROR(
+          id4_ideogram4_dit_program_tap_linear_input_bf16_as_f32(
+              builder, attention_context_name, canonical_attention_context_name,
+              unpack_attention_context_dispatch_name,
+              after_unpack_attention_context_name, total_token_count,
+              bf16_token_capacity, hidden_size, attention_context));
+    } else {
+      IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_tap(
+          builder, attention_context_name, attention_context));
+    }
   }
 
   char attention_output_name_buffer[ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
@@ -790,13 +841,8 @@ iree_status_t id4_ideogram4_dit_program_author_transformer_block(
       f32_canonical_activations ||
       id4_ideogram4_dit_program_has_diagnostic_tap(diagnostic_tap_names,
                                                    attention_output_name);
-  if (materialized_wmma_attention && tap_attention_output) {
-    return iree_make_status(
-        IREE_STATUS_UNIMPLEMENTED,
-        "Ideogram4 DiT materialized WMMA attention does not yet provide the "
-        "canonical F32 attention.output diagnostic tap");
-  }
-  const bool f32_attention_output = tap_attention_output;
+  const bool f32_attention_output =
+      tap_attention_output && !materialized_wmma_attention;
   const id4_pipeline_program_dtype_t attention_output_dtype =
       f32_attention_output ? ID4_PIPELINE_PROGRAM_DTYPE_F32
                            : ID4_PIPELINE_PROGRAM_DTYPE_BF16;
@@ -839,8 +885,44 @@ iree_status_t id4_ideogram4_dit_program_author_transformer_block(
   IREE_RETURN_IF_ERROR(
       id4_ideogram4_dit_program_barrier(builder, after_attention_output_name));
   if (tap_attention_output) {
-    IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_tap(
-        builder, attention_output_name, attention_output));
+    if (materialized_wmma_attention) {
+      char canonical_attention_output_name_buffer
+          [ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
+      char unpack_attention_output_dispatch_name_buffer
+          [ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
+      char after_unpack_attention_output_name_buffer
+          [ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
+      iree_string_view_t canonical_attention_output_name =
+          iree_string_view_empty();
+      iree_string_view_t unpack_attention_output_dispatch_name =
+          iree_string_view_empty();
+      iree_string_view_t after_unpack_attention_output_name =
+          iree_string_view_empty();
+      IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_format_branch_layer_name(
+          branch_name, layer_ordinal, IREE_SV("attention.output.canonical"),
+          canonical_attention_output_name_buffer,
+          IREE_ARRAYSIZE(canonical_attention_output_name_buffer),
+          &canonical_attention_output_name));
+      IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_format_branch_layer_name(
+          branch_name, layer_ordinal, IREE_SV("attention.output.unpack"),
+          unpack_attention_output_dispatch_name_buffer,
+          IREE_ARRAYSIZE(unpack_attention_output_dispatch_name_buffer),
+          &unpack_attention_output_dispatch_name));
+      IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_format_branch_layer_name(
+          branch_name, layer_ordinal, IREE_SV("after_attention_output_unpack"),
+          after_unpack_attention_output_name_buffer,
+          IREE_ARRAYSIZE(after_unpack_attention_output_name_buffer),
+          &after_unpack_attention_output_name));
+      IREE_RETURN_IF_ERROR(
+          id4_ideogram4_dit_program_tap_linear_input_bf16_as_f32(
+              builder, attention_output_name, canonical_attention_output_name,
+              unpack_attention_output_dispatch_name,
+              after_unpack_attention_output_name, total_token_count,
+              bf16_token_capacity, hidden_size, attention_output));
+    } else {
+      IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_tap(
+          builder, attention_output_name, attention_output));
+    }
   }
 
   char post_attention_hidden_name_buffer
