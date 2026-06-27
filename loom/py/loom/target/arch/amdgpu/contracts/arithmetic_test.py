@@ -192,7 +192,7 @@ def test_vector_packed_float_conversion_rules_publish_contract_only_shape_rows()
     compiled = _compiled_arithmetic_rules()
 
     expected_rule_counts = {
-        vector.vector_extf: 4,
+        vector.vector_extf: 6,
         vector.vector_fptrunc: 2,
     }
     for source_op, expected_rule_count in expected_rule_counts.items():
