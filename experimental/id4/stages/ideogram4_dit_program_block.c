@@ -261,7 +261,7 @@ iree_status_t id4_ideogram4_dit_program_author_transformer_block(
       .output_size = modulation_output_size,
       .activation_kind = ID4_IDEOGRAM4_DIT_ACTIVATION_IDENTITY,
   };
-  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_dense_bf16_f32(
+  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_dense_f32(
       builder, &adaln_modulation_options, &raw_modulation));
 
   char after_adaln_modulation_name_buffer

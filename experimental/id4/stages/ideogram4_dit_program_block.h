@@ -278,7 +278,7 @@ iree_status_t id4_ideogram4_dit_program_dispatch_attention_bf16(
     id4_pipeline_program_tensor_t query, id4_pipeline_program_tensor_t key,
     id4_pipeline_program_tensor_t value, id4_pipeline_program_tensor_t output);
 
-iree_status_t id4_ideogram4_dit_program_dense_bf16_f32(
+iree_status_t id4_ideogram4_dit_program_dense_f32(
     id4_pipeline_program_builder_t* builder,
     const id4_ideogram4_dit_program_dense_options_t* options,
     id4_pipeline_program_tensor_t* out_output);

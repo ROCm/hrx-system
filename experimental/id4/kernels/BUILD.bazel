@@ -548,6 +548,50 @@ _KERNEL_CASES = [
         "target_name": "ideogram4_dense_bias_bf16_f32_adaln_shape",
     },
     {
+        "actual_case": "@id4_ideogram4_dense_bias_bf16_f32_adaln_modulation_shape_case",
+        "benchmark": "@id4_ideogram4_dense_bias_bf16_f32_adaln_modulation_shape",
+        "configs": [
+            "--config=id4.ideogram4.dense_bias.input_size=512",
+            "--config=id4.ideogram4.dense_bias.output_size=18432",
+            "--config=id4.ideogram4.dense_bias.activation_kind=0",
+        ],
+        "source": "ideogram4/dense_bias_bf16_f32.loom",
+        "target_name": "ideogram4_dense_bias_bf16_f32_adaln_modulation_shape",
+    },
+    {
+        "actual_case": "@id4_ideogram4_dense_bias_fp8_f32_identity_case",
+        "benchmark": "@id4_ideogram4_dense_bias_fp8_f32_identity",
+        "configs": [
+            "--config=id4.ideogram4.dense_bias_fp8.input_size=4",
+            "--config=id4.ideogram4.dense_bias_fp8.output_size=2",
+            "--config=id4.ideogram4.dense_bias_fp8.activation_kind=0",
+        ],
+        "source": "ideogram4/dense_bias_fp8_f32.loom",
+        "target_name": "ideogram4_dense_bias_fp8_f32_identity",
+    },
+    {
+        "actual_case": "@id4_ideogram4_dense_bias_fp8_f32_silu_case",
+        "benchmark": "@id4_ideogram4_dense_bias_fp8_f32_silu",
+        "configs": [
+            "--config=id4.ideogram4.dense_bias_fp8.input_size=4",
+            "--config=id4.ideogram4.dense_bias_fp8.output_size=2",
+            "--config=id4.ideogram4.dense_bias_fp8.activation_kind=1",
+        ],
+        "source": "ideogram4/dense_bias_fp8_f32.loom",
+        "target_name": "ideogram4_dense_bias_fp8_f32_silu",
+    },
+    {
+        "actual_case": "@id4_ideogram4_dense_bias_fp8_f32_adaln_modulation_shape_case",
+        "benchmark": "@id4_ideogram4_dense_bias_fp8_f32_adaln_modulation_shape",
+        "configs": [
+            "--config=id4.ideogram4.dense_bias_fp8.input_size=512",
+            "--config=id4.ideogram4.dense_bias_fp8.output_size=18432",
+            "--config=id4.ideogram4.dense_bias_fp8.activation_kind=0",
+        ],
+        "source": "ideogram4/dense_bias_fp8_f32.loom",
+        "target_name": "ideogram4_dense_bias_fp8_f32_adaln_modulation_shape",
+    },
+    {
         "actual_case": "@id4_ideogram4_prelude_image_bf16_f32_small_case",
         "benchmark": "@id4_ideogram4_prelude_image_bf16_f32_small",
         "configs": [
@@ -3677,6 +3721,32 @@ _KERNEL_CASES = [
         "target_name": "ideogram4_linear_bias_bf16_f32_ideogram_shape",
     },
     {
+        "actual_case": "@id4_ideogram4_linear_bias_fp8_f32_small_case",
+        "benchmark": "@id4_ideogram4_linear_bias_fp8_f32_small",
+        "configs": [
+            "--config=id4.ideogram4.linear_bias_fp8.token_count=3",
+            "--config=id4.ideogram4.linear_bias_fp8.token_offset=1",
+            "--config=id4.ideogram4.linear_bias_fp8.dispatch_token_count=2",
+            "--config=id4.ideogram4.linear_bias_fp8.input_size=4",
+            "--config=id4.ideogram4.linear_bias_fp8.output_size=1",
+        ],
+        "source": "ideogram4/linear_bias_fp8_f32.loom",
+        "target_name": "ideogram4_linear_bias_fp8_f32_small",
+    },
+    {
+        "actual_case": "@id4_ideogram4_linear_bias_fp8_f32_ideogram_shape_case",
+        "benchmark": "@id4_ideogram4_linear_bias_fp8_f32_ideogram_shape",
+        "configs": [
+            "--config=id4.ideogram4.linear_bias_fp8.token_count=2",
+            "--config=id4.ideogram4.linear_bias_fp8.token_offset=0",
+            "--config=id4.ideogram4.linear_bias_fp8.dispatch_token_count=2",
+            "--config=id4.ideogram4.linear_bias_fp8.input_size=4608",
+            "--config=id4.ideogram4.linear_bias_fp8.output_size=128",
+        ],
+        "source": "ideogram4/linear_bias_fp8_f32.loom",
+        "target_name": "ideogram4_linear_bias_fp8_f32_ideogram_shape",
+    },
+    {
         "actual_case": "@id4_ideogram4_modulated_layernorm_f32_small_case",
         "benchmark": "@id4_ideogram4_modulated_layernorm_f32_small",
         "configs": [
@@ -4825,6 +4895,7 @@ _KERNEL_SOURCES = [
     "ideogram4/condition_rmsnorm_f32.loom",
     "ideogram4/condition_rmsnorm_pack_f32_bf16.loom",
     "ideogram4/dense_bias_bf16_f32.loom",
+    "ideogram4/dense_bias_fp8_f32.loom",
     "ideogram4/head_rmsnorm_f32.loom",
     "ideogram4/linear_bf16_bf16_tail.loom",
     "ideogram4/linear_bf16_bf16_wmma.loom",
@@ -4832,6 +4903,7 @@ _KERNEL_SOURCES = [
     "ideogram4/linear_bf16_f32_tail.loom",
     "ideogram4/linear_bf16_f32_wmma.loom",
     "ideogram4/linear_bias_bf16_f32.loom",
+    "ideogram4/linear_bias_fp8_f32.loom",
     "ideogram4/linear_fp8_bf16_f32_wmma.loom",
     "ideogram4/linear_fp8_bf16_wmma.loom",
     "ideogram4/linear_fp8_f32.loom",

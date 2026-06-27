@@ -14,16 +14,20 @@ static const iree_string_view_t kMixedBf16Fp8LayerLinearWeightSuffixes[] = {
     IREE_SVL("feed_forward.w2.weight"),
 };
 
-static const iree_string_view_t
-    kMixedBf16Fp8AllSupportedLayerLinearWeightSuffixes[] = {
+static const iree_string_view_t kMixedBf16Fp8AllSupportedLayerWeightSuffixes[] =
+    {
         IREE_SVL("attention.qkv.weight"),   IREE_SVL("attention.o.weight"),
         IREE_SVL("feed_forward.w1.weight"), IREE_SVL("feed_forward.w3.weight"),
-        IREE_SVL("feed_forward.w2.weight"),
+        IREE_SVL("feed_forward.w2.weight"), IREE_SVL("adaln_modulation.weight"),
 };
 
-static const iree_string_view_t
-    kMixedBf16Fp8AllSupportedExactLinearWeightKeys[] = {
-        IREE_SVL("llm_cond_proj.weight"),
+static const iree_string_view_t kMixedBf16Fp8AllSupportedExactWeightKeys[] = {
+    IREE_SVL("t_embedding.mlp_in.weight"),
+    IREE_SVL("t_embedding.mlp_out.weight"),
+    IREE_SVL("adaln_proj.weight"),
+    IREE_SVL("llm_cond_proj.weight"),
+    IREE_SVL("final_layer.adaln_modulation.weight"),
+    IREE_SVL("final_layer.linear.weight"),
 };
 
 iree_status_t id4_ideogram4_dit_parameter_format_parse(
@@ -77,9 +81,8 @@ static iree_status_t id4_ideogram4_dit_parameter_format_suffixes(
       return iree_ok_status();
     case ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_MIXED_BF16_FP8_E4M3_ALL_SUPPORTED:
       *out_suffixes = (iree_string_view_list_t){
-          .count = IREE_ARRAYSIZE(
-              kMixedBf16Fp8AllSupportedLayerLinearWeightSuffixes),
-          .values = kMixedBf16Fp8AllSupportedLayerLinearWeightSuffixes,
+          .count = IREE_ARRAYSIZE(kMixedBf16Fp8AllSupportedLayerWeightSuffixes),
+          .values = kMixedBf16Fp8AllSupportedLayerWeightSuffixes,
       };
       return iree_ok_status();
     default:
@@ -100,9 +103,8 @@ static iree_status_t id4_ideogram4_dit_parameter_format_exact_keys(
       return iree_ok_status();
     case ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_MIXED_BF16_FP8_E4M3_ALL_SUPPORTED:
       *out_exact_keys = (iree_string_view_list_t){
-          .count =
-              IREE_ARRAYSIZE(kMixedBf16Fp8AllSupportedExactLinearWeightKeys),
-          .values = kMixedBf16Fp8AllSupportedExactLinearWeightKeys,
+          .count = IREE_ARRAYSIZE(kMixedBf16Fp8AllSupportedExactWeightKeys),
+          .values = kMixedBf16Fp8AllSupportedExactWeightKeys,
       };
       return iree_ok_status();
     default:
