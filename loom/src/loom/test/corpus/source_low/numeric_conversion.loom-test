@@ -725,6 +725,40 @@ kernel.def @scalar_extf_direct_f8e5m2_load_store() {
 
 // ====
 
+kernel.def @vector_extf_direct_f8e4m3_load_store() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %lane = kernel.workitem.id<x> : index
+  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E4M3, #dense>
+  %output_view = buffer.view %output[%base] : buffer -> view<64x4xf32, #dense>
+  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E4M3, #dense> -> vector<4xf8E4M3>
+  %value = vector.extf %packed : vector<4xf8E4M3> to vector<4xf32>
+  vector.store %value, %output_view[%lane, 0] : vector<4xf32>, view<64x4xf32, #dense>
+  kernel.return
+}
+
+// ====
+
+kernel.def @vector_extf_direct_f8e5m2_load_store() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %lane = kernel.workitem.id<x> : index
+  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E5M2, #dense>
+  %output_view = buffer.view %output[%base] : buffer -> view<64x4xf32, #dense>
+  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E5M2, #dense> -> vector<4xf8E5M2>
+  %value = vector.extf %packed : vector<4xf8E5M2> to vector<4xf32>
+  vector.store %value, %output_view[%lane, 0] : vector<4xf32>, view<64x4xf32, #dense>
+  kernel.return
+}
+
+// ====
+
 func.def @vector_uitofp_i32x2(%input: vector<2xi32>) -> (vector<2xf32>) {
   %converted = vector.uitofp %input : vector<2xi32> to vector<2xf32>
   func.return %converted : vector<2xf32>

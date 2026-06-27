@@ -184,6 +184,24 @@ bool loom_amdgpu_type_vector_storage(
       };
       return true;
     }
+    case LOOM_SCALAR_TYPE_F8E4M3:
+    case LOOM_SCALAR_TYPE_F8E5M2: {
+      uint32_t payload_bit_count = 0;
+      uint32_t register_count = 0;
+      if (!loom_amdgpu_type_packed_8bit_float_storage(type, &payload_bit_count,
+                                                      &register_count)) {
+        return false;
+      }
+      *out_storage = (loom_amdgpu_vector_storage_t){
+          .kind = LOOM_AMDGPU_VECTOR_STORAGE_KIND_PACKED_8BIT_FLOAT,
+          .element_type = element_type,
+          .element_count = payload_bit_count / 8u,
+          .register_count = register_count,
+          .element_register_count = 1,
+          .element_bit_count = 8,
+      };
+      return true;
+    }
     case LOOM_SCALAR_TYPE_I8:
     case LOOM_SCALAR_TYPE_I16: {
       uint32_t payload_bit_count = 0;
@@ -338,6 +356,30 @@ bool loom_amdgpu_type_packed_integer_storage(loom_type_t type,
   }
   *out_payload_bit_count = shape.payload_bit_count;
   *out_register_count = shape.storage_unit_count;
+  return true;
+}
+
+bool loom_amdgpu_type_packed_8bit_float_storage(loom_type_t type,
+                                                uint32_t* out_payload_bit_count,
+                                                uint32_t* out_register_count) {
+  *out_payload_bit_count = 0;
+  *out_register_count = 0;
+  if (!loom_type_is_vector(type) || loom_type_rank(type) != 1 ||
+      !loom_type_is_all_static(type)) {
+    return false;
+  }
+  const int64_t lane_count = loom_type_dim_static_size_at(type, 0);
+  if (lane_count < 1 || lane_count > (int64_t)LOOM_AMDGPU_MAX_PACKED_I8_LANES) {
+    return false;
+  }
+  const loom_scalar_type_t element_type = loom_type_element_type(type);
+  if (element_type != LOOM_SCALAR_TYPE_F8E4M3 &&
+      element_type != LOOM_SCALAR_TYPE_F8E5M2) {
+    return false;
+  }
+  const uint32_t register_count = (uint32_t)((lane_count + 3) / 4);
+  *out_payload_bit_count = (uint32_t)lane_count * 8u;
+  *out_register_count = register_count;
   return true;
 }
 
@@ -2521,6 +2563,7 @@ static bool loom_amdgpu_source_vector_value_register_shape(
           vector_storage.register_count);
       return true;
     case LOOM_AMDGPU_VECTOR_STORAGE_KIND_PACKED_16BIT_FLOAT:
+    case LOOM_AMDGPU_VECTOR_STORAGE_KIND_PACKED_8BIT_FLOAT:
     case LOOM_AMDGPU_VECTOR_STORAGE_KIND_PACKED_INTEGER:
       *out_shape = loom_amdgpu_register_shape(LOOM_AMDGPU_REG_CLASS_ID_VGPR,
                                               vector_storage.register_count);

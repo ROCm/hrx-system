@@ -190,6 +190,7 @@ static bool loom_amdgpu_select_vector_storage(
       *out_allows_vector_mask = true;
       return true;
     case LOOM_AMDGPU_VECTOR_STORAGE_KIND_PACKED_16BIT_FLOAT:
+    case LOOM_AMDGPU_VECTOR_STORAGE_KIND_PACKED_8BIT_FLOAT:
     case LOOM_AMDGPU_VECTOR_STORAGE_KIND_PACKED_INTEGER:
       return true;
     case LOOM_AMDGPU_VECTOR_STORAGE_KIND_I1_MASK:
