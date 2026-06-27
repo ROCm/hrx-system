@@ -26,6 +26,8 @@ typedef enum id4_pipeline_diagnostic_event_kind_e {
   ID4_PIPELINE_DIAGNOSTIC_EVENT_KIND_PARAMETER_SLAB = 2,
   // Kernel compilation, emission, or HAL preparation event.
   ID4_PIPELINE_DIAGNOSTIC_EVENT_KIND_KERNEL = 3,
+  // Host-observed phase timing event.
+  ID4_PIPELINE_DIAGNOSTIC_EVENT_KIND_TIMING = 4,
 } id4_pipeline_diagnostic_event_kind_t;
 
 // Parameter slab payload attached to parameter-slab diagnostic events.
@@ -89,6 +91,16 @@ typedef struct id4_pipeline_kernel_diagnostic_t {
   iree_hal_executable_caching_mode_t caching_mode;
 } id4_pipeline_kernel_diagnostic_t;
 
+// Host-observed timing payload attached to timing diagnostic events.
+typedef struct id4_pipeline_timing_diagnostic_t {
+  // Monotonic start timestamp in nanoseconds.
+  iree_time_t start_time_ns;
+  // Monotonic end timestamp in nanoseconds.
+  iree_time_t end_time_ns;
+  // Elapsed duration in nanoseconds.
+  iree_duration_t duration_ns;
+} id4_pipeline_timing_diagnostic_t;
+
 // Structured diagnostic event emitted by pipeline infrastructure.
 typedef struct id4_pipeline_diagnostic_event_t {
   // Kind of event being emitted.
@@ -103,6 +115,8 @@ typedef struct id4_pipeline_diagnostic_event_t {
   const id4_pipeline_parameter_slab_diagnostic_t* parameter_slab;
   // Optional kernel payload valid only during the emit callback.
   const id4_pipeline_kernel_diagnostic_t* kernel;
+  // Optional timing payload valid only during the emit callback.
+  const id4_pipeline_timing_diagnostic_t* timing;
 } id4_pipeline_diagnostic_event_t;
 
 // Function pointer used to consume a diagnostic event.

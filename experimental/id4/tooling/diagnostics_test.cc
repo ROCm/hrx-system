@@ -83,6 +83,23 @@ TEST(DiagnosticsTest, WritesJsonLinesEvents) {
   };
   IREE_ASSERT_OK(
       id4_pipeline_diagnostics_emit(&diagnostics_sink, &kernel_event));
+
+  const id4_pipeline_timing_diagnostic_t timing = {
+      /*.start_time_ns=*/100,
+      /*.end_time_ns=*/175,
+      /*.duration_ns=*/75,
+  };
+  id4_pipeline_diagnostic_event_t timing_event = {
+      /*.kind=*/ID4_PIPELINE_DIAGNOSTIC_EVENT_KIND_TIMING,
+      /*.stage_name=*/IREE_SV("id4.cli"),
+      /*.key=*/IREE_SV("cli.phase"),
+      /*.message=*/IREE_SV("completed phase"),
+      /*.parameter_slab=*/NULL,
+      /*.kernel=*/NULL,
+      /*.timing=*/&timing,
+  };
+  IREE_ASSERT_OK(
+      id4_pipeline_diagnostics_emit(&diagnostics_sink, &timing_event));
   IREE_ASSERT_OK(id4_tooling_diagnostics_file_sink_deinitialize(&file_sink));
 
   const std::string event_log =
@@ -95,6 +112,9 @@ TEST(DiagnosticsTest, WritesJsonLinesEvents) {
   ExpectFinds(event_log, "\"kind\":\"kernel\"");
   ExpectFinds(event_log, "\"module_path\":\"qwen3_vl/rmsnorm\"");
   ExpectFinds(event_log, "\"artifact_byte_length\":4096");
+  ExpectFinds(event_log, "\"kind\":\"timing\"");
+  ExpectFinds(event_log, "\"stage\":\"id4.cli\"");
+  ExpectFinds(event_log, "\"duration_ns\":75");
 }
 
 }  // namespace

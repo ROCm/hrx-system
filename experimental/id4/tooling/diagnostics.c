@@ -22,6 +22,8 @@ static iree_string_view_t id4_tooling_diagnostics_event_kind_name(
       return IREE_SV("parameter_slab");
     case ID4_PIPELINE_DIAGNOSTIC_EVENT_KIND_KERNEL:
       return IREE_SV("kernel");
+    case ID4_PIPELINE_DIAGNOSTIC_EVENT_KIND_TIMING:
+      return IREE_SV("timing");
     default:
       return IREE_SV("unknown");
   }
@@ -156,6 +158,16 @@ static iree_status_t id4_tooling_diagnostics_append_kernel_json(
   return iree_string_builder_append_cstring(builder, "}");
 }
 
+static iree_status_t id4_tooling_diagnostics_append_timing_json(
+    iree_string_builder_t* builder,
+    const id4_pipeline_timing_diagnostic_t* timing) {
+  return iree_string_builder_append_format(
+      builder,
+      ",\"timing\":{\"start_time_ns\":%" PRIi64 ",\"end_time_ns\":%" PRIi64
+      ",\"duration_ns\":%" PRIi64 "}",
+      timing->start_time_ns, timing->end_time_ns, timing->duration_ns);
+}
+
 static iree_status_t id4_tooling_diagnostics_format_event(
     const id4_pipeline_diagnostic_event_t* event,
     iree_allocator_t host_allocator, iree_string_builder_t* builder) {
@@ -179,6 +191,10 @@ static iree_status_t id4_tooling_diagnostics_format_event(
   if (event->kernel) {
     IREE_RETURN_IF_ERROR(
         id4_tooling_diagnostics_append_kernel_json(builder, event->kernel));
+  }
+  if (event->timing) {
+    IREE_RETURN_IF_ERROR(
+        id4_tooling_diagnostics_append_timing_json(builder, event->timing));
   }
   return iree_string_builder_append_cstring(builder, "}");
 }

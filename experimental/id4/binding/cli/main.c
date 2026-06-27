@@ -17,6 +17,7 @@
 #include "experimental/id4/tooling/readback.h"
 #include "experimental/id4/tooling/runtime.h"
 #include "iree/base/api.h"
+#include "iree/base/time.h"
 #include "iree/base/tooling/flags.h"
 #include "iree/io/file_contents.h"
 #include "iree/tokenizer/format/huggingface/tokenizer_json.h"
@@ -331,6 +332,37 @@ static iree_status_t id4_cli_write_generation_plan(
   }
   iree_string_builder_deinitialize(&builder);
   return status;
+}
+
+static iree_status_t id4_cli_emit_timing(
+    id4_pipeline_diagnostics_sink_t* diagnostics_sink, iree_string_view_t key,
+    iree_string_view_t message, iree_time_t start_time_ns,
+    iree_time_t end_time_ns) {
+  id4_pipeline_timing_diagnostic_t timing = {
+      // Monotonic start timestamp for this CLI phase.
+      .start_time_ns = start_time_ns,
+      // Monotonic end timestamp for this CLI phase.
+      .end_time_ns = end_time_ns,
+      // Elapsed duration for this CLI phase.
+      .duration_ns = end_time_ns - start_time_ns,
+  };
+  id4_pipeline_diagnostic_event_t event = {
+      // This event describes a host-observed CLI phase duration.
+      .kind = ID4_PIPELINE_DIAGNOSTIC_EVENT_KIND_TIMING,
+      // CLI phase timings are emitted outside any one model stage.
+      .stage_name = IREE_SV("id4.cli"),
+      // Stable timing key identifying the CLI phase.
+      .key = key,
+      // Short phase summary.
+      .message = message,
+      // No parameter slab payload is attached to timing events.
+      .parameter_slab = NULL,
+      // No kernel payload is attached to timing events.
+      .kernel = NULL,
+      // Timing payload valid for this emit call.
+      .timing = &timing,
+  };
+  return id4_pipeline_diagnostics_emit(diagnostics_sink, &event);
 }
 
 static iree_hal_semaphore_list_t id4_cli_single_semaphore_list(
@@ -697,6 +729,7 @@ static iree_status_t id4_cli_run_generation(iree_allocator_t host_allocator) {
   bool diagnostics_file_sink_initialized = false;
   id4_pipeline_diagnostics_sink_t diagnostics_sink;
   id4_pipeline_diagnostics_sink_initialize_ignore(&diagnostics_sink);
+  const iree_time_t generation_start_time_ns = iree_time_now();
 
   iree_status_t status = id4_cli_validate_execution_flags();
   if (iree_status_is_ok(status)) {
@@ -747,6 +780,13 @@ static iree_status_t id4_cli_run_generation(iree_allocator_t host_allocator) {
                                        &completion_semaphore);
   }
   if (iree_status_is_ok(status)) {
+    status =
+        id4_cli_emit_timing(&diagnostics_sink, IREE_SV("cli.setup"),
+                            IREE_SV("initialized CLI generation resources"),
+                            generation_start_time_ns, iree_time_now());
+  }
+  if (iree_status_is_ok(status)) {
+    const iree_time_t phase_start_time_ns = iree_time_now();
     id4_ideogram4_generation_plan_options_t plan_options;
     memset(&plan_options, 0, sizeof(plan_options));
     plan_options.structure_size = sizeof(plan_options);
@@ -760,6 +800,11 @@ static iree_status_t id4_cli_run_generation(iree_allocator_t host_allocator) {
     if (iree_status_is_ok(status)) {
       status = id4_ideogram4_session_plan_generation(session, &plan_options,
                                                      &generation_plan);
+    }
+    if (iree_status_is_ok(status)) {
+      status = id4_cli_emit_timing(
+          &diagnostics_sink, IREE_SV("cli.plan_generation"),
+          IREE_SV("planned generation"), phase_start_time_ns, iree_time_now());
     }
   }
   id4_ideogram4_generation_plan_summary_t summary;
@@ -777,6 +822,7 @@ static iree_status_t id4_cli_run_generation(iree_allocator_t host_allocator) {
   iree_hal_semaphore_list_t prepare_signal_list =
       iree_hal_semaphore_list_empty();
   if (iree_status_is_ok(status)) {
+    const iree_time_t phase_start_time_ns = iree_time_now();
     prepare_signal_list = id4_cli_single_semaphore_list(
         &prepare_semaphore_storage, &prepare_payload_storage, prepare_semaphore,
         prepare_payload_storage);
@@ -792,11 +838,18 @@ static iree_status_t id4_cli_run_generation(iree_allocator_t host_allocator) {
     status = id4_ideogram4_session_prepare_generation(
         session, generation_plan, &prepare_options, &generation_bundle);
     generation_was_prepared = iree_status_is_ok(status);
+    if (iree_status_is_ok(status)) {
+      status = id4_cli_emit_timing(&diagnostics_sink,
+                                   IREE_SV("cli.prepare_generation"),
+                                   IREE_SV("prepared generation bundle"),
+                                   phase_start_time_ns, iree_time_now());
+    }
   }
   iree_hal_semaphore_t* completion_semaphore_storage = NULL;
   uint64_t completion_payload_storage = 1;
   iree_hal_semaphore_list_t completion_list = iree_hal_semaphore_list_empty();
   if (iree_status_is_ok(status)) {
+    const iree_time_t phase_start_time_ns = iree_time_now();
     completion_list = id4_cli_single_semaphore_list(
         &completion_semaphore_storage, &completion_payload_storage,
         completion_semaphore, completion_payload_storage);
@@ -812,19 +865,40 @@ static iree_status_t id4_cli_run_generation(iree_allocator_t host_allocator) {
     status = id4_ideogram4_session_issue_generation(session, generation_bundle,
                                                     &issue_options, &execution);
     generation_was_issued = iree_status_is_ok(status);
+    if (iree_status_is_ok(status)) {
+      status = id4_cli_emit_timing(&diagnostics_sink,
+                                   IREE_SV("cli.issue_generation"),
+                                   IREE_SV("issued generation work"),
+                                   phase_start_time_ns, iree_time_now());
+    }
   }
   if (generation_was_issued) {
+    const iree_time_t phase_start_time_ns = iree_time_now();
     status = iree_status_join(
         status,
         iree_hal_semaphore_list_wait(completion_list, iree_infinite_timeout(),
                                      IREE_ASYNC_WAIT_FLAG_NONE));
+    if (iree_status_is_ok(status)) {
+      status =
+          id4_cli_emit_timing(&diagnostics_sink, IREE_SV("cli.wait_completion"),
+                              IREE_SV("waited for generation completion"),
+                              phase_start_time_ns, iree_time_now());
+    }
   } else if (generation_was_prepared) {
+    const iree_time_t phase_start_time_ns = iree_time_now();
     status = iree_status_join(
         status, iree_hal_semaphore_list_wait(prepare_signal_list,
                                              iree_infinite_timeout(),
                                              IREE_ASYNC_WAIT_FLAG_NONE));
+    if (iree_status_is_ok(status)) {
+      status =
+          id4_cli_emit_timing(&diagnostics_sink, IREE_SV("cli.wait_prepare"),
+                              IREE_SV("waited for prepare completion"),
+                              phase_start_time_ns, iree_time_now());
+    }
   }
   if (iree_status_is_ok(status)) {
+    const iree_time_t phase_start_time_ns = iree_time_now();
     id4_ideogram4_generation_result_t result;
     memset(&result, 0, sizeof(result));
     status = id4_ideogram4_generation_execution_result(execution, &result);
@@ -841,13 +915,29 @@ static iree_status_t id4_cli_run_generation(iree_allocator_t host_allocator) {
       status = id4_tooling_readback_buffer_binding(&readback_options,
                                                    &decoded_image_bytes);
     }
+    if (iree_status_is_ok(status)) {
+      status = id4_cli_emit_timing(&diagnostics_sink, IREE_SV("cli.readback"),
+                                   IREE_SV("read back decoded image"),
+                                   phase_start_time_ns, iree_time_now());
+    }
   }
   if (iree_status_is_ok(status)) {
+    const iree_time_t phase_start_time_ns = iree_time_now();
     status = id4_cli_write_decoded_image(
         iree_make_cstring_view(FLAG_output), summary,
         iree_make_const_byte_span(decoded_image_bytes.data,
                                   decoded_image_bytes.length),
         host_allocator);
+    if (iree_status_is_ok(status)) {
+      status = id4_cli_emit_timing(
+          &diagnostics_sink, IREE_SV("cli.write_output"),
+          IREE_SV("wrote decoded image"), phase_start_time_ns, iree_time_now());
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    status = id4_cli_emit_timing(&diagnostics_sink, IREE_SV("cli.total"),
+                                 IREE_SV("completed generation command"),
+                                 generation_start_time_ns, iree_time_now());
   }
   if (iree_status_is_ok(status)) {
     fprintf(stdout,
