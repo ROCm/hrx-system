@@ -52,7 +52,15 @@ kernel.def target(@id4_gfx1100) export("id4_ideogram4_linear_bf16_bf16_wmma") @i
   %init01 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
   %init10 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
   %init11 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
-  %result00, %result01, %result10, %result11 = scf.for %k_tile = [%zero to %k_tile_count step %one](%acc00 = %init00 : vector<8xf32>, %acc01 = %init01 : vector<8xf32>, %acc10 = %init10 : vector<8xf32>, %acc11 = %init11 : vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
+  %lhs_first0 = vector.fragment.load<lhs> %input_view[%token_origin0, %zero] shape [%m, %k] : view<[%token_count]x[%input_size]xbf16, #dense> -> vector<16xbf16>
+  %lhs_first1 = vector.fragment.load<lhs> %input_view[%token_origin1, %zero] shape [%m, %k] : view<[%token_count]x[%input_size]xbf16, #dense> -> vector<16xbf16>
+  %rhs_first0 = vector.fragment.load<rhs> %weight_view[%zero, %row_origin0] shape [%k, %n] : view<[%input_size]x[%output_size]xbf16, %weight_layout> -> vector<16xbf16>
+  %rhs_first1 = vector.fragment.load<rhs> %weight_view[%zero, %row_origin1] shape [%k, %n] : view<[%input_size]x[%output_size]xbf16, %weight_layout> -> vector<16xbf16>
+  %first00 = vector.mma %lhs_first0, %rhs_first0, %init00 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  %first01 = vector.mma %lhs_first0, %rhs_first1, %init01 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  %first10 = vector.mma %lhs_first1, %rhs_first0, %init10 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  %first11 = vector.mma %lhs_first1, %rhs_first1, %init11 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  %result00, %result01, %result10, %result11 = scf.for %k_tile = [%one to %k_tile_count step %one](%acc00 = %first00 : vector<8xf32>, %acc01 = %first01 : vector<8xf32>, %acc10 = %first10 : vector<8xf32>, %acc11 = %first11 : vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
     %k_origin = index.mul %k_tile, %sixteen : index
     %lhs0 = vector.fragment.load<lhs> %input_view[%token_origin0, %k_origin] shape [%m, %k] : view<[%token_count]x[%input_size]xbf16, #dense> -> vector<16xbf16>
     %lhs1 = vector.fragment.load<lhs> %input_view[%token_origin1, %k_origin] shape [%m, %k] : view<[%token_count]x[%input_size]xbf16, #dense> -> vector<16xbf16>
