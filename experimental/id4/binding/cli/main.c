@@ -4,6 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include <errno.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -19,6 +20,8 @@
 #include "iree/base/api.h"
 #include "iree/base/time.h"
 #include "iree/base/tooling/flags.h"
+#include "iree/hal/api.h"
+#include "iree/hal/utils/statistics_sink.h"
 #include "iree/io/file_contents.h"
 #include "iree/tokenizer/format/huggingface/tokenizer_json.h"
 #include "iree/tokenizer/tokenizer.h"
@@ -120,14 +123,6 @@ static iree_status_t id4_cli_parse_request(
   }
   iree_io_file_contents_free(file_contents);
   return status;
-}
-
-static iree_status_t id4_cli_reject_unimplemented_profile_flags(void) {
-  if (strlen(FLAG_profile_output) != 0) {
-    return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                            "--profile_output is not wired yet");
-  }
-  return iree_ok_status();
 }
 
 static iree_status_t id4_cli_initialize_diagnostics_sink(
@@ -298,7 +293,6 @@ static iree_status_t id4_cli_parse_vae_tiling_config(
 }
 
 static iree_status_t id4_cli_validate_execution_flags(void) {
-  IREE_RETURN_IF_ERROR(id4_cli_reject_unimplemented_profile_flags());
   if (strlen(FLAG_output) == 0) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "--output is required when executing generation");
@@ -307,13 +301,87 @@ static iree_status_t id4_cli_validate_execution_flags(void) {
 }
 
 static iree_status_t id4_cli_validate_dry_run_flags(void) {
-  IREE_RETURN_IF_ERROR(id4_cli_reject_unimplemented_profile_flags());
+  if (strlen(FLAG_profile_output) != 0) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "--profile_output requires generation execution; omit --dry_run");
+  }
   if (strlen(FLAG_output) != 0) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "--output requires generation execution; omit --dry_run");
   }
   return iree_ok_status();
+}
+
+static iree_status_t id4_cli_write_profile_statistics(
+    iree_hal_profile_statistics_sink_t* statistics_sink) {
+  IREE_ASSERT_ARGUMENT(statistics_sink);
+  if (strlen(FLAG_profile_output) == 0) return iree_ok_status();
+
+  FILE* file = fopen(FLAG_profile_output, "w");
+  if (!file) {
+    return iree_make_status(IREE_STATUS_UNAVAILABLE,
+                            "failed to open --profile_output=%s: %s",
+                            FLAG_profile_output, strerror(errno));
+  }
+  iree_status_t status =
+      iree_hal_profile_statistics_sink_fprint(file, statistics_sink);
+  if (fclose(file) != 0) {
+    status = iree_status_join(
+        status, iree_make_status(IREE_STATUS_UNAVAILABLE,
+                                 "failed to close --profile_output=%s: %s",
+                                 FLAG_profile_output, strerror(errno)));
+  }
+  return status;
+}
+
+static iree_status_t id4_cli_begin_profile_statistics(
+    iree_hal_device_t* device, iree_allocator_t host_allocator,
+    iree_hal_profile_statistics_sink_t** out_statistics_sink,
+    bool* out_profile_started) {
+  IREE_ASSERT_ARGUMENT(device);
+  IREE_ASSERT_ARGUMENT(out_statistics_sink);
+  IREE_ASSERT_ARGUMENT(out_profile_started);
+  *out_statistics_sink = NULL;
+  *out_profile_started = false;
+  if (strlen(FLAG_profile_output) == 0) return iree_ok_status();
+
+  iree_hal_profile_statistics_sink_t* statistics_sink = NULL;
+  iree_status_t status =
+      iree_hal_profile_statistics_sink_create(host_allocator, &statistics_sink);
+  if (iree_status_is_ok(status)) {
+    iree_hal_device_profiling_options_t profiling_options = {0};
+    profiling_options.data_families =
+        IREE_HAL_DEVICE_PROFILING_DATA_QUEUE_EVENTS |
+        IREE_HAL_DEVICE_PROFILING_DATA_DEVICE_QUEUE_EVENTS |
+        IREE_HAL_DEVICE_PROFILING_DATA_DISPATCH_EVENTS |
+        IREE_HAL_DEVICE_PROFILING_DATA_EXECUTABLE_METADATA;
+    profiling_options.sink =
+        iree_hal_profile_statistics_sink_base(statistics_sink);
+    status = iree_hal_device_profiling_begin(device, &profiling_options);
+  }
+  if (iree_status_is_ok(status)) {
+    *out_statistics_sink = statistics_sink;
+    *out_profile_started = true;
+  } else {
+    iree_hal_profile_statistics_sink_release(statistics_sink);
+  }
+  return status;
+}
+
+static iree_status_t id4_cli_end_profile_statistics(
+    iree_hal_device_t* device,
+    iree_hal_profile_statistics_sink_t* statistics_sink) {
+  IREE_ASSERT_ARGUMENT(device);
+  IREE_ASSERT_ARGUMENT(statistics_sink);
+
+  iree_status_t status = iree_hal_device_profiling_flush(device);
+  status = iree_status_join(status, iree_hal_device_profiling_end(device));
+  if (iree_status_is_ok(status)) {
+    status = id4_cli_write_profile_statistics(statistics_sink);
+  }
+  return status;
 }
 
 static iree_status_t id4_cli_write_generation_plan(
@@ -738,6 +806,8 @@ static iree_status_t id4_cli_run_generation(iree_allocator_t host_allocator) {
   bool diagnostics_file_sink_initialized = false;
   id4_pipeline_diagnostics_sink_t diagnostics_sink;
   id4_pipeline_diagnostics_sink_initialize_ignore(&diagnostics_sink);
+  iree_hal_profile_statistics_sink_t* profile_statistics_sink = NULL;
+  bool profile_started = false;
   const iree_time_t generation_start_time_ns = iree_time_now();
 
   iree_status_t status = id4_cli_validate_execution_flags();
@@ -825,6 +895,12 @@ static iree_status_t id4_cli_run_generation(iree_allocator_t host_allocator) {
     status =
         id4_cli_write_generation_plan(iree_make_cstring_view(FLAG_dump_plan),
                                       generation_plan, host_allocator);
+  }
+  if (iree_status_is_ok(status)) {
+    iree_hal_device_t* device =
+        id4_tooling_runtime_context_primary_device(&runtime_context);
+    status = id4_cli_begin_profile_statistics(
+        device, host_allocator, &profile_statistics_sink, &profile_started);
   }
   iree_hal_semaphore_t* prepare_semaphore_storage = NULL;
   uint64_t prepare_payload_storage = 1;
@@ -948,6 +1024,13 @@ static iree_status_t id4_cli_run_generation(iree_allocator_t host_allocator) {
                                  IREE_SV("completed generation command"),
                                  generation_start_time_ns, iree_time_now());
   }
+  if (profile_started) {
+    iree_hal_device_t* device =
+        id4_tooling_runtime_context_primary_device(&runtime_context);
+    status = iree_status_join(status, id4_cli_end_profile_statistics(
+                                          device, profile_statistics_sink));
+    profile_started = false;
+  }
   if (iree_status_is_ok(status)) {
     fprintf(stdout,
             "Ideogram 4 generation complete: tokens=%" PRIu32 " image=%" PRIu64
@@ -962,6 +1045,7 @@ static iree_status_t id4_cli_run_generation(iree_allocator_t host_allocator) {
   id4_ideogram4_generation_plan_release(generation_plan);
   iree_hal_semaphore_release(prepare_semaphore);
   iree_hal_semaphore_release(completion_semaphore);
+  iree_hal_profile_statistics_sink_release(profile_statistics_sink);
   id4_ideogram4_session_release(session);
   id4_cli_release_parameter_providers(&parameter_providers);
   id4_pipeline_kernel_library_release(kernel_library);

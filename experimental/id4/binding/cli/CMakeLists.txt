@@ -27,6 +27,7 @@ iree_cc_binary(
     iree::experimental::id4::tooling::readback
     iree::experimental::id4::tooling::runtime
     iree::hal
+    iree::hal::utils::statistics_sink
     iree::io::file_handle
     iree::io::parameter_provider
     iree::tokenizer

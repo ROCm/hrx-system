@@ -28,6 +28,7 @@ iree_runtime_cc_binary(
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/tooling:flags",
         "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/utils:statistics_sink",
         "//runtime/src/iree/io:file_handle",
         "//runtime/src/iree/io:parameter_provider",
         "//runtime/src/iree/tokenizer",
