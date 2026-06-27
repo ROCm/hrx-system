@@ -20,7 +20,8 @@
 IREE_FLAG(string, id4_tokenizer, "",
           "Hugging Face tokenizer JSON used by live generation benchmarks.");
 IREE_FLAG(string, dit_parameter_format, "bf16",
-          "DiT parameter format: bf16 or mixed_bf16_fp8_e4m3.");
+          "DiT parameter format: bf16, mixed_bf16_fp8_e4m3, or "
+          "mixed_bf16_fp8_e4m3_all_supported.");
 IREE_FLAG(string, dit_activation_format, "bf16_linear_input",
           "DiT activation format: bf16_linear_input or f32_canonical.");
 IREE_FLAG(string, dit_conditioned_fp8_scope, "dit_cond_fp8",
@@ -242,12 +243,20 @@ static iree_status_t CreateLoadedLiveSession(
   create_options.parameter_scopes.vae = IREE_SV("vae");
   IREE_RETURN_IF_ERROR(
       ParseDitParameterFormat(&create_options.dit_parameter_format));
-  if (create_options.dit_parameter_format ==
-      ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_MIXED_BF16_FP8_E4M3) {
-    create_options.parameter_scopes.dit_conditioned_fp8 =
-        iree_make_cstring_view(FLAG_dit_conditioned_fp8_scope);
-    create_options.parameter_scopes.dit_unconditioned_fp8 =
-        iree_make_cstring_view(FLAG_dit_unconditioned_fp8_scope);
+  switch (create_options.dit_parameter_format) {
+    case ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_BF16:
+      break;
+    case ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_MIXED_BF16_FP8_E4M3:
+    case ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_MIXED_BF16_FP8_E4M3_ALL_SUPPORTED:
+      create_options.parameter_scopes.dit_conditioned_fp8 =
+          iree_make_cstring_view(FLAG_dit_conditioned_fp8_scope);
+      create_options.parameter_scopes.dit_unconditioned_fp8 =
+          iree_make_cstring_view(FLAG_dit_unconditioned_fp8_scope);
+      break;
+    default:
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "invalid DiT parameter format %" PRIu32,
+                              (uint32_t)create_options.dit_parameter_format);
   }
   create_options.vae_activation_format =
       ID4_VAE_ACTIVATION_FORMAT_BF16_CONV_INPUT;

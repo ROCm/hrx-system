@@ -48,6 +48,15 @@ TEST(Ideogram4DitParameters, ParsesParameterFormatNames) {
       iree_string_view_equal(id4_ideogram4_dit_parameter_format_name(format),
                              IREE_SV("mixed_bf16_fp8_e4m3")));
 
+  IREE_ASSERT_OK(id4_ideogram4_dit_parameter_format_parse(
+      IREE_SV("mixed_bf16_fp8_e4m3_all_supported"), &format));
+  EXPECT_EQ(
+      format,
+      ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_MIXED_BF16_FP8_E4M3_ALL_SUPPORTED);
+  EXPECT_TRUE(
+      iree_string_view_equal(id4_ideogram4_dit_parameter_format_name(format),
+                             IREE_SV("mixed_bf16_fp8_e4m3_all_supported")));
+
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
       id4_ideogram4_dit_parameter_format_parse(IREE_SV("q4"), &format));
@@ -93,6 +102,46 @@ TEST(Ideogram4DitParameters, MixedFp8FormatProducesLayerProjectionSourceRules) {
       IREE_SV("layers.1.feed_forward.w2.weight"),
       IREE_SV("layers.2.attention.qkv.weight"),
       IREE_SV("layers.2.attention.o.weight"),
+      IREE_SV("layers.2.feed_forward.w2.weight"),
+  };
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(expected_keys); ++i) {
+    EXPECT_TRUE(iree_string_view_equal(rules.values[i].key, expected_keys[i]));
+    EXPECT_TRUE(iree_string_view_equal(rules.values[i].source_scope,
+                                       IREE_SV("native_fp8")));
+    EXPECT_EQ(rules.values[i].storage,
+              ID4_IDEOGRAM4_DIT_PARAMETER_STORAGE_FP8_E4M3_SCALED);
+  }
+
+  id4_ideogram4_dit_parameter_source_rule_list_deinitialize(
+      &rules, iree_allocator_system());
+}
+
+TEST(Ideogram4DitParameters,
+     AllSupportedMixedFp8FormatProducesLayerProjectionSourceRules) {
+  id4_ideogram4_dit_parameter_source_rule_list_t rules;
+  IREE_ASSERT_OK(id4_ideogram4_dit_parameter_source_rule_list_initialize(
+      ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_MIXED_BF16_FP8_E4M3_ALL_SUPPORTED,
+      MakeModelConfig(), IREE_SV("native_fp8"), iree_allocator_system(),
+      &rules));
+
+  ASSERT_EQ(rules.count, 15u);
+  ASSERT_NE(rules.values, nullptr);
+  ASSERT_NE(rules.key_storage, nullptr);
+  const iree_string_view_t expected_keys[] = {
+      IREE_SV("layers.0.attention.qkv.weight"),
+      IREE_SV("layers.0.attention.o.weight"),
+      IREE_SV("layers.0.feed_forward.w1.weight"),
+      IREE_SV("layers.0.feed_forward.w3.weight"),
+      IREE_SV("layers.0.feed_forward.w2.weight"),
+      IREE_SV("layers.1.attention.qkv.weight"),
+      IREE_SV("layers.1.attention.o.weight"),
+      IREE_SV("layers.1.feed_forward.w1.weight"),
+      IREE_SV("layers.1.feed_forward.w3.weight"),
+      IREE_SV("layers.1.feed_forward.w2.weight"),
+      IREE_SV("layers.2.attention.qkv.weight"),
+      IREE_SV("layers.2.attention.o.weight"),
+      IREE_SV("layers.2.feed_forward.w1.weight"),
+      IREE_SV("layers.2.feed_forward.w3.weight"),
       IREE_SV("layers.2.feed_forward.w2.weight"),
   };
   for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(expected_keys); ++i) {

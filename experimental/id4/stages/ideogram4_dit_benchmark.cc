@@ -27,7 +27,8 @@ IREE_FLAG(
 IREE_FLAG(string, id4_plan_output_dir, "",
           "Optional directory receiving benchmark DiT stage plan JSON files.");
 IREE_FLAG(string, dit_parameter_format, "bf16",
-          "DiT parameter format: bf16 or mixed_bf16_fp8_e4m3.");
+          "DiT parameter format: bf16, mixed_bf16_fp8_e4m3, or "
+          "mixed_bf16_fp8_e4m3_all_supported.");
 IREE_FLAG(string, dit_conditioned_fp8_scope, "dit_cond_fp8",
           "Conditioned DiT native-FP8 parameter scope.");
 IREE_FLAG(string, dit_unconditioned_fp8_scope, "dit_uncond_fp8",

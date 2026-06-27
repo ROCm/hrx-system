@@ -440,6 +440,7 @@ static iree_status_t id4_ideogram4_validate_dit_parameter_format(
       }
       return iree_ok_status();
     case ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_MIXED_BF16_FP8_E4M3:
+    case ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_MIXED_BF16_FP8_E4M3_ALL_SUPPORTED:
       if (iree_string_view_is_empty(
               options->parameter_scopes.dit_conditioned_fp8)) {
         return iree_make_status(

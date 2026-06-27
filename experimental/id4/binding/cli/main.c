@@ -30,7 +30,8 @@ IREE_FLAG(string, prompt_json_file, "",
           "Path to a JSON prompt/configuration payload for one generation.");
 IREE_FLAG(string, output, "", "Output image path.");
 IREE_FLAG(string, dit_parameter_format, "bf16",
-          "DiT parameter format: bf16 or mixed_bf16_fp8_e4m3.");
+          "DiT parameter format: bf16, mixed_bf16_fp8_e4m3, or "
+          "mixed_bf16_fp8_e4m3_all_supported.");
 IREE_FLAG(string, dit_activation_format, "bf16_linear_input",
           "DiT activation format: bf16_linear_input or f32_canonical.");
 IREE_FLAG(string, dit_conditioned_fp8_scope, "dit_cond_fp8",
@@ -399,12 +400,20 @@ static iree_status_t id4_cli_create_loaded_session(
   session_options.parameter_scopes.vae = IREE_SV("vae");
   IREE_RETURN_IF_ERROR(id4_cli_parse_dit_parameter_format(
       &session_options.dit_parameter_format));
-  if (session_options.dit_parameter_format ==
-      ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_MIXED_BF16_FP8_E4M3) {
-    session_options.parameter_scopes.dit_conditioned_fp8 =
-        iree_make_cstring_view(FLAG_dit_conditioned_fp8_scope);
-    session_options.parameter_scopes.dit_unconditioned_fp8 =
-        iree_make_cstring_view(FLAG_dit_unconditioned_fp8_scope);
+  switch (session_options.dit_parameter_format) {
+    case ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_BF16:
+      break;
+    case ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_MIXED_BF16_FP8_E4M3:
+    case ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_MIXED_BF16_FP8_E4M3_ALL_SUPPORTED:
+      session_options.parameter_scopes.dit_conditioned_fp8 =
+          iree_make_cstring_view(FLAG_dit_conditioned_fp8_scope);
+      session_options.parameter_scopes.dit_unconditioned_fp8 =
+          iree_make_cstring_view(FLAG_dit_unconditioned_fp8_scope);
+      break;
+    default:
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "invalid DiT parameter format %" PRIu32,
+                              (uint32_t)session_options.dit_parameter_format);
   }
   session_options.vae_activation_format =
       ID4_VAE_ACTIVATION_FORMAT_BF16_CONV_INPUT;

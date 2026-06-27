@@ -23,6 +23,10 @@ typedef enum id4_ideogram4_dit_parameter_format_e {
   // Supported DiT weights are sourced from native scaled FP8 scopes while
   // other DiT parameters remain sourced from BF16-expanded scopes.
   ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_MIXED_BF16_FP8_E4M3 = 2,
+  // All currently implemented native scaled FP8 DiT linear weights are sourced
+  // from FP8 scopes while unsupported parameters remain sourced from
+  // BF16-expanded scopes.
+  ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_MIXED_BF16_FP8_E4M3_ALL_SUPPORTED = 3,
 } id4_ideogram4_dit_parameter_format_t;
 
 // Owned exact-source rule list generated from one parameter format policy.
