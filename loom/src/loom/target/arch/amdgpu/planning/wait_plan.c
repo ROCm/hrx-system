@@ -16,6 +16,7 @@
 #include "loom/ir/ir.h"
 #include "loom/ops/low/ops.h"
 #include "loom/target/arch/amdgpu/planning/descriptor_semantics.h"
+#include "loom/target/arch/amdgpu/planning/wait_packet_tables.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
 #include "loom/target/arch/amdgpu/target_id/target_id.h"
 
@@ -1080,12 +1081,12 @@ static iree_status_t loom_amdgpu_wait_plan_finish_node_classification(
     if (node_state->has_generic_counter_effect) {
       node_state->explicit_wait_counter_mask |= node_state->hazard_counter_mask;
     }
-    if (node_state->has_generic_counter_effect &&
-        node_state->explicit_wait_counter_mask == 0) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "AMDGPU generic counter-effect node %zu has no "
-                              "wait-counter hazard rows",
-                              i);
+    if (node_state->explicit_wait_counter_mask != 0 ||
+        node_state->has_generic_counter_effect) {
+      const loom_low_schedule_node_t* node = &schedule->nodes[i];
+      IREE_RETURN_IF_ERROR(loom_amdgpu_wait_packet_explicit_counter_mask(
+          descriptor_set, node->descriptor, schedule->module, node->op,
+          &node_state->explicit_wait_counter_mask));
     }
     if (node_state->explicit_wait_counter_mask != 0 &&
         node_state->hazard_counter_mask == 0) {
