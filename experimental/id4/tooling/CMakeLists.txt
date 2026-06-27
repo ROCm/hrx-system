@@ -39,6 +39,20 @@ iree_cc_library(
 
 iree_cc_library(
   NAME
+    diagnostics
+  HDRS
+    "diagnostics.h"
+  SRCS
+    "diagnostics.c"
+  DEPS
+    ::filesystem
+    iree::base
+    iree::experimental::id4::pipeline::diagnostics
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
     image
   HDRS
     "image.h"
@@ -114,6 +128,21 @@ iree_cc_test(
   DEPS
     ::filesystem
     iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+    iree::testing::temp_file
+)
+
+iree_cc_test(
+  NAME
+    diagnostics_test
+  SRCS
+    "diagnostics_test.cc"
+  DEPS
+    ::diagnostics
+    iree::base
+    iree::experimental::id4::pipeline::diagnostics
+    iree::hal
     iree::testing::gtest
     iree::testing::gtest_main
     iree::testing::temp_file

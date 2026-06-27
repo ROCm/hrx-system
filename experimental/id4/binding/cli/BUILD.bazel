@@ -21,6 +21,7 @@ iree_runtime_cc_binary(
         "//experimental/id4/pipeline:diagnostics",
         "//experimental/id4/pipeline:kernel_library",
         "//experimental/id4/stages:ideogram4_dit_parameters",
+        "//experimental/id4/tooling:diagnostics",
         "//experimental/id4/tooling:image",
         "//experimental/id4/tooling:readback",
         "//experimental/id4/tooling:runtime",

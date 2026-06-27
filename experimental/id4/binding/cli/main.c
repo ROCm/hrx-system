@@ -12,6 +12,7 @@
 #include "experimental/id4/ideogram4/session.h"
 #include "experimental/id4/pipeline/diagnostics.h"
 #include "experimental/id4/stages/ideogram4_dit_parameters.h"
+#include "experimental/id4/tooling/diagnostics.h"
 #include "experimental/id4/tooling/image.h"
 #include "experimental/id4/tooling/readback.h"
 #include "experimental/id4/tooling/runtime.h"
@@ -119,15 +120,33 @@ static iree_status_t id4_cli_parse_request(
   return status;
 }
 
-static iree_status_t id4_cli_reject_unimplemented_diagnostics_flags(void) {
-  if (strlen(FLAG_dump_diagnostics) != 0) {
-    return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                            "--dump_diagnostics is not wired yet");
-  }
+static iree_status_t id4_cli_reject_unimplemented_profile_flags(void) {
   if (strlen(FLAG_profile_output) != 0) {
     return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
                             "--profile_output is not wired yet");
   }
+  return iree_ok_status();
+}
+
+static iree_status_t id4_cli_initialize_diagnostics_sink(
+    iree_allocator_t host_allocator,
+    id4_tooling_diagnostics_file_sink_t* file_sink,
+    id4_pipeline_diagnostics_sink_t* out_sink,
+    bool* out_file_sink_initialized) {
+  IREE_ASSERT_ARGUMENT(file_sink);
+  IREE_ASSERT_ARGUMENT(out_sink);
+  IREE_ASSERT_ARGUMENT(out_file_sink_initialized);
+  memset(file_sink, 0, sizeof(*file_sink));
+  *out_file_sink_initialized = false;
+  iree_string_view_t dump_directory =
+      iree_make_cstring_view(FLAG_dump_diagnostics);
+  if (iree_string_view_is_empty(dump_directory)) {
+    id4_pipeline_diagnostics_sink_initialize_ignore(out_sink);
+    return iree_ok_status();
+  }
+  IREE_RETURN_IF_ERROR(id4_tooling_diagnostics_file_sink_initialize(
+      dump_directory, host_allocator, file_sink, out_sink));
+  *out_file_sink_initialized = true;
   return iree_ok_status();
 }
 
@@ -277,7 +296,7 @@ static iree_status_t id4_cli_parse_vae_tiling_config(
 }
 
 static iree_status_t id4_cli_validate_execution_flags(void) {
-  IREE_RETURN_IF_ERROR(id4_cli_reject_unimplemented_diagnostics_flags());
+  IREE_RETURN_IF_ERROR(id4_cli_reject_unimplemented_profile_flags());
   if (strlen(FLAG_output) == 0) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "--output is required when executing generation");
@@ -286,7 +305,7 @@ static iree_status_t id4_cli_validate_execution_flags(void) {
 }
 
 static iree_status_t id4_cli_validate_dry_run_flags(void) {
-  IREE_RETURN_IF_ERROR(id4_cli_reject_unimplemented_diagnostics_flags());
+  IREE_RETURN_IF_ERROR(id4_cli_reject_unimplemented_profile_flags());
   if (strlen(FLAG_output) != 0) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
@@ -551,10 +570,20 @@ static iree_status_t id4_cli_run_generation_dry_run(
   bool runtime_context_initialized = false;
   id4_ideogram4_session_t* session = NULL;
   id4_ideogram4_generation_plan_t* generation_plan = NULL;
+  id4_tooling_diagnostics_file_sink_t diagnostics_file_sink;
+  memset(&diagnostics_file_sink, 0, sizeof(diagnostics_file_sink));
+  bool diagnostics_file_sink_initialized = false;
+  id4_pipeline_diagnostics_sink_t diagnostics_sink;
+  id4_pipeline_diagnostics_sink_initialize_ignore(&diagnostics_sink);
 
   iree_status_t status = id4_cli_validate_dry_run_flags();
   if (iree_status_is_ok(status)) {
     status = id4_cli_parse_request(host_allocator, &request);
+  }
+  if (iree_status_is_ok(status)) {
+    status = id4_cli_initialize_diagnostics_sink(
+        host_allocator, &diagnostics_file_sink, &diagnostics_sink,
+        &diagnostics_file_sink_initialized);
   }
   if (iree_status_is_ok(status)) {
     status = id4_cli_load_tokenizer(iree_make_cstring_view(FLAG_tokenizer),
@@ -569,8 +598,6 @@ static iree_status_t id4_cli_run_generation_dry_run(
         &runtime_options, host_allocator, &runtime_context);
     runtime_context_initialized = iree_status_is_ok(status);
   }
-  id4_pipeline_diagnostics_sink_t diagnostics_sink;
-  id4_pipeline_diagnostics_sink_initialize_ignore(&diagnostics_sink);
   if (iree_status_is_ok(status)) {
     status = id4_cli_create_loaded_session(&runtime_context, &diagnostics_sink,
                                            host_allocator, &session);
@@ -618,6 +645,11 @@ static iree_status_t id4_cli_run_generation_dry_run(
   if (runtime_context_initialized) {
     id4_tooling_runtime_context_deinitialize(&runtime_context);
   }
+  if (diagnostics_file_sink_initialized) {
+    status = iree_status_join(
+        status,
+        id4_tooling_diagnostics_file_sink_deinitialize(&diagnostics_file_sink));
+  }
   iree_tokenizer_free(tokenizer);
   id4_ideogram4_request_deinitialize(&request, host_allocator);
   return status;
@@ -660,12 +692,20 @@ static iree_status_t id4_cli_run_generation(iree_allocator_t host_allocator) {
   bool generation_was_issued = false;
   id4_tooling_host_bytes_t decoded_image_bytes;
   memset(&decoded_image_bytes, 0, sizeof(decoded_image_bytes));
+  id4_tooling_diagnostics_file_sink_t diagnostics_file_sink;
+  memset(&diagnostics_file_sink, 0, sizeof(diagnostics_file_sink));
+  bool diagnostics_file_sink_initialized = false;
   id4_pipeline_diagnostics_sink_t diagnostics_sink;
   id4_pipeline_diagnostics_sink_initialize_ignore(&diagnostics_sink);
 
   iree_status_t status = id4_cli_validate_execution_flags();
   if (iree_status_is_ok(status)) {
     status = id4_cli_parse_request(host_allocator, &request);
+  }
+  if (iree_status_is_ok(status)) {
+    status = id4_cli_initialize_diagnostics_sink(
+        host_allocator, &diagnostics_file_sink, &diagnostics_sink,
+        &diagnostics_file_sink_initialized);
   }
   if (iree_status_is_ok(status)) {
     status = id4_cli_load_tokenizer(iree_make_cstring_view(FLAG_tokenizer),
@@ -828,6 +868,11 @@ static iree_status_t id4_cli_run_generation(iree_allocator_t host_allocator) {
   id4_pipeline_kernel_library_release(kernel_library);
   if (runtime_context_initialized) {
     id4_tooling_runtime_context_deinitialize(&runtime_context);
+  }
+  if (diagnostics_file_sink_initialized) {
+    status = iree_status_join(
+        status,
+        id4_tooling_diagnostics_file_sink_deinitialize(&diagnostics_file_sink));
   }
   iree_tokenizer_free(tokenizer);
   id4_ideogram4_request_deinitialize(&request, host_allocator);

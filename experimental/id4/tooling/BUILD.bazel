@@ -34,6 +34,17 @@ iree_runtime_cc_library(
 )
 
 iree_runtime_cc_library(
+    name = "diagnostics",
+    srcs = ["diagnostics.c"],
+    hdrs = ["diagnostics.h"],
+    deps = [
+        ":filesystem",
+        "//experimental/id4/pipeline:diagnostics",
+        "//runtime/src/iree/base",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "image",
     srcs = ["image.c"],
     hdrs = ["image.h"],
@@ -98,6 +109,20 @@ iree_runtime_cc_test(
     deps = [
         ":filesystem",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/testing:temp_file",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "diagnostics_test",
+    srcs = ["diagnostics_test.cc"],
+    deps = [
+        ":diagnostics",
+        "//experimental/id4/pipeline:diagnostics",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
         "//runtime/src/iree/testing:temp_file",

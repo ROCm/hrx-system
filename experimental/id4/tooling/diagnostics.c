@@ -1,0 +1,268 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+#include "experimental/id4/tooling/diagnostics.h"
+
+#include <errno.h>
+#include <string.h>
+
+#include "experimental/id4/tooling/filesystem.h"
+
+static iree_string_view_t id4_tooling_diagnostics_event_kind_name(
+    id4_pipeline_diagnostic_event_kind_t kind) {
+  switch (kind) {
+    case ID4_PIPELINE_DIAGNOSTIC_EVENT_KIND_LIFECYCLE:
+      return IREE_SV("lifecycle");
+    case ID4_PIPELINE_DIAGNOSTIC_EVENT_KIND_PLAN:
+      return IREE_SV("plan");
+    case ID4_PIPELINE_DIAGNOSTIC_EVENT_KIND_PARAMETER_SLAB:
+      return IREE_SV("parameter_slab");
+    case ID4_PIPELINE_DIAGNOSTIC_EVENT_KIND_KERNEL:
+      return IREE_SV("kernel");
+    default:
+      return IREE_SV("unknown");
+  }
+}
+
+static iree_status_t id4_tooling_diagnostics_append_json_string(
+    iree_string_builder_t* builder, iree_string_view_t value) {
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "\""));
+  for (iree_host_size_t i = 0; i < value.size; ++i) {
+    const unsigned char c = (unsigned char)value.data[i];
+    switch (c) {
+      case '\"': {
+        IREE_RETURN_IF_ERROR(
+            iree_string_builder_append_cstring(builder, "\\\""));
+        break;
+      }
+      case '\\': {
+        IREE_RETURN_IF_ERROR(
+            iree_string_builder_append_cstring(builder, "\\\\"));
+        break;
+      }
+      case '\b': {
+        IREE_RETURN_IF_ERROR(
+            iree_string_builder_append_cstring(builder, "\\b"));
+        break;
+      }
+      case '\f': {
+        IREE_RETURN_IF_ERROR(
+            iree_string_builder_append_cstring(builder, "\\f"));
+        break;
+      }
+      case '\n': {
+        IREE_RETURN_IF_ERROR(
+            iree_string_builder_append_cstring(builder, "\\n"));
+        break;
+      }
+      case '\r': {
+        IREE_RETURN_IF_ERROR(
+            iree_string_builder_append_cstring(builder, "\\r"));
+        break;
+      }
+      case '\t': {
+        IREE_RETURN_IF_ERROR(
+            iree_string_builder_append_cstring(builder, "\\t"));
+        break;
+      }
+      default: {
+        if (c < 0x20) {
+          IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+              builder, "\\u%04x", (unsigned int)c));
+        } else {
+          IREE_RETURN_IF_ERROR(
+              iree_string_builder_append_format(builder, "%c", c));
+        }
+        break;
+      }
+    }
+  }
+  return iree_string_builder_append_cstring(builder, "\"");
+}
+
+static iree_status_t id4_tooling_diagnostics_append_json_field_string(
+    iree_string_builder_t* builder, const char* key, iree_string_view_t value) {
+  IREE_RETURN_IF_ERROR(
+      iree_string_builder_append_format(builder, "\"%s\":", key));
+  return id4_tooling_diagnostics_append_json_string(builder, value);
+}
+
+static iree_status_t id4_tooling_diagnostics_append_parameter_slab_json(
+    iree_string_builder_t* builder,
+    const id4_pipeline_parameter_slab_diagnostic_t* parameter_slab) {
+  IREE_RETURN_IF_ERROR(
+      iree_string_builder_append_cstring(builder, ",\"parameter_slab\":{"));
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+      builder,
+      "\"slab_index\":%" PRIu64 ",\"request_index\":%" PRIu64
+      ",\"placement_id\":%u,\"device_index\":%" PRIu64
+      ",\"queue_affinity\":%" PRIu64 ",\"parameter_offset\":%" PRIu64
+      ",\"buffer_offset\":%" PRIu64 ",\"length\":%" PRIu64
+      ",\"slab_byte_length\":%" PRIu64 ",\"slab_alignment\":%" PRIu64
+      ",\"request_count\":%" PRIu64 ",",
+      (uint64_t)parameter_slab->slab_index,
+      (uint64_t)parameter_slab->request_index, parameter_slab->placement_id,
+      (uint64_t)parameter_slab->device_index,
+      (uint64_t)parameter_slab->queue_affinity,
+      parameter_slab->parameter_offset, parameter_slab->buffer_offset,
+      parameter_slab->length, (uint64_t)parameter_slab->slab_byte_length,
+      (uint64_t)parameter_slab->slab_alignment,
+      (uint64_t)parameter_slab->request_count));
+  IREE_RETURN_IF_ERROR(id4_tooling_diagnostics_append_json_field_string(
+      builder, "scope", parameter_slab->scope));
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, ","));
+  IREE_RETURN_IF_ERROR(id4_tooling_diagnostics_append_json_field_string(
+      builder, "parameter_key", parameter_slab->parameter_key));
+  return iree_string_builder_append_cstring(builder, "}");
+}
+
+static iree_status_t id4_tooling_diagnostics_append_kernel_json(
+    iree_string_builder_t* builder,
+    const id4_pipeline_kernel_diagnostic_t* kernel) {
+  IREE_RETURN_IF_ERROR(
+      iree_string_builder_append_cstring(builder, ",\"kernel\":{"));
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+      builder,
+      "\"config_binding_count\":%" PRIu64 ",\"artifact_byte_length\":%" PRIu64
+      ",\"inferred_executable_byte_length\":%" PRIu64
+      ",\"diagnostic_index\":%" PRIu64
+      ",\"diagnostic_severity\":%d"
+      ",\"queue_affinity\":%" PRIu64 ",\"caching_mode\":%u,",
+      (uint64_t)kernel->config_binding_count,
+      (uint64_t)kernel->artifact_byte_length,
+      (uint64_t)kernel->inferred_executable_byte_length,
+      (uint64_t)kernel->diagnostic_index, kernel->diagnostic_severity,
+      (uint64_t)kernel->queue_affinity, (uint32_t)kernel->caching_mode));
+  IREE_RETURN_IF_ERROR(id4_tooling_diagnostics_append_json_field_string(
+      builder, "phase", kernel->phase));
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, ","));
+  IREE_RETURN_IF_ERROR(id4_tooling_diagnostics_append_json_field_string(
+      builder, "source_identifier", kernel->source_identifier));
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, ","));
+  IREE_RETURN_IF_ERROR(id4_tooling_diagnostics_append_json_field_string(
+      builder, "module_path", kernel->module_path));
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, ","));
+  IREE_RETURN_IF_ERROR(id4_tooling_diagnostics_append_json_field_string(
+      builder, "target_processor", kernel->target_processor));
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, ","));
+  IREE_RETURN_IF_ERROR(id4_tooling_diagnostics_append_json_field_string(
+      builder, "loom_artifact_format", kernel->loom_artifact_format));
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, ","));
+  IREE_RETURN_IF_ERROR(id4_tooling_diagnostics_append_json_field_string(
+      builder, "hal_executable_format", kernel->hal_executable_format));
+  return iree_string_builder_append_cstring(builder, "}");
+}
+
+static iree_status_t id4_tooling_diagnostics_format_event(
+    const id4_pipeline_diagnostic_event_t* event,
+    iree_allocator_t host_allocator, iree_string_builder_t* builder) {
+  iree_string_builder_initialize(host_allocator, builder);
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "{"));
+  IREE_RETURN_IF_ERROR(id4_tooling_diagnostics_append_json_field_string(
+      builder, "kind", id4_tooling_diagnostics_event_kind_name(event->kind)));
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, ","));
+  IREE_RETURN_IF_ERROR(id4_tooling_diagnostics_append_json_field_string(
+      builder, "stage", event->stage_name));
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, ","));
+  IREE_RETURN_IF_ERROR(id4_tooling_diagnostics_append_json_field_string(
+      builder, "key", event->key));
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, ","));
+  IREE_RETURN_IF_ERROR(id4_tooling_diagnostics_append_json_field_string(
+      builder, "message", event->message));
+  if (event->parameter_slab) {
+    IREE_RETURN_IF_ERROR(id4_tooling_diagnostics_append_parameter_slab_json(
+        builder, event->parameter_slab));
+  }
+  if (event->kernel) {
+    IREE_RETURN_IF_ERROR(
+        id4_tooling_diagnostics_append_kernel_json(builder, event->kernel));
+  }
+  return iree_string_builder_append_cstring(builder, "}");
+}
+
+static iree_status_t id4_tooling_diagnostics_file_sink_emit(
+    void* user_data, const id4_pipeline_diagnostic_event_t* event) {
+  if (!user_data) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "diagnostics file sink is required");
+  }
+  if (!event) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "diagnostic event is required");
+  }
+  id4_tooling_diagnostics_file_sink_t* file_sink =
+      (id4_tooling_diagnostics_file_sink_t*)user_data;
+  if (!file_sink->event_log_file) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "diagnostics file sink is not initialized");
+  }
+
+  iree_string_builder_t builder;
+  iree_status_t status = id4_tooling_diagnostics_format_event(
+      event, file_sink->host_allocator, &builder);
+  if (iree_status_is_ok(status)) {
+    iree_string_view_t line = iree_string_builder_view(&builder);
+    if (fwrite(line.data, 1, line.size, file_sink->event_log_file) !=
+            line.size ||
+        fputc('\n', file_sink->event_log_file) == EOF ||
+        fflush(file_sink->event_log_file) != 0) {
+      const int write_errno = errno;
+      status = iree_make_status(write_errno
+                                    ? iree_status_code_from_errno(write_errno)
+                                    : IREE_STATUS_DATA_LOSS,
+                                "failed to write diagnostics event");
+    }
+  }
+  iree_string_builder_deinitialize(&builder);
+  return status;
+}
+
+iree_status_t id4_tooling_diagnostics_file_sink_initialize(
+    iree_string_view_t directory, iree_allocator_t host_allocator,
+    id4_tooling_diagnostics_file_sink_t* out_file_sink,
+    id4_pipeline_diagnostics_sink_t* out_sink) {
+  IREE_ASSERT_ARGUMENT(out_file_sink);
+  IREE_ASSERT_ARGUMENT(out_sink);
+  memset(out_file_sink, 0, sizeof(*out_file_sink));
+  memset(out_sink, 0, sizeof(*out_sink));
+  IREE_RETURN_IF_ERROR(id4_tooling_ensure_directory(directory, host_allocator));
+
+  iree_string_view_t event_log_path = iree_string_view_empty();
+  iree_status_t status = id4_tooling_format_child_path(
+      directory, IREE_SV("events.jsonl"), host_allocator, &event_log_path);
+  FILE* file = NULL;
+  if (iree_status_is_ok(status)) {
+    file = fopen(event_log_path.data, "wb");
+    if (!file) {
+      status = iree_make_status(iree_status_code_from_errno(errno),
+                                "failed to open diagnostics event log");
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    out_file_sink->host_allocator = host_allocator;
+    out_file_sink->event_log_path = event_log_path;
+    out_file_sink->event_log_file = file;
+    out_sink->emit = id4_tooling_diagnostics_file_sink_emit;
+    out_sink->user_data = out_file_sink;
+  } else {
+    if (file) fclose(file);
+    id4_tooling_free_path(&event_log_path, host_allocator);
+  }
+  return status;
+}
+
+iree_status_t id4_tooling_diagnostics_file_sink_deinitialize(
+    id4_tooling_diagnostics_file_sink_t* file_sink) {
+  if (!file_sink) return iree_ok_status();
+  iree_status_t status = iree_ok_status();
+  if (file_sink->event_log_file && fclose(file_sink->event_log_file) != 0) {
+    status = iree_make_status(iree_status_code_from_errno(errno),
+                              "failed to close diagnostics event log");
+  }
+  id4_tooling_free_path(&file_sink->event_log_path, file_sink->host_allocator);
+  memset(file_sink, 0, sizeof(*file_sink));
+  return status;
+}
