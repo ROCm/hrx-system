@@ -29,6 +29,8 @@ IREE_FLAG(string, id4_plan_output_dir, "",
 IREE_FLAG(string, dit_parameter_format, "bf16",
           "DiT parameter format: bf16, mixed_bf16_fp8_e4m3, or "
           "mixed_bf16_fp8_e4m3_all_supported.");
+IREE_FLAG(string, dit_attention_implementation, "streaming",
+          "DiT attention implementation: streaming or materialized_wmma.");
 IREE_FLAG(string, dit_conditioned_fp8_scope, "dit_cond_fp8",
           "Conditioned DiT native-FP8 parameter scope.");
 IREE_FLAG(string, dit_unconditioned_fp8_scope, "dit_uncond_fp8",
@@ -76,6 +78,9 @@ struct DitBenchmarkContext {
   id4::test::FixtureTensorSet fixture_tensors;
   // Dynamic request dimensions inferred from the fixture.
   id4_ideogram4_dit_request_config_t request = {};
+  // Attention implementation selected for plan and issue benchmarks.
+  id4_ideogram4_dit_attention_implementation_t attention_implementation =
+      ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_STREAMING;
   // Diagnostic event counters collected by lifecycle calls.
   id4::test::StageDiagnostics diagnostics = {};
   // Diagnostics sink passed to stage lifecycle calls.
@@ -130,6 +135,25 @@ static iree_status_t ParseDitParameterFormat(
       iree_make_cstring_view(FLAG_dit_parameter_format), out_format);
   if (iree_status_is_ok(status)) return status;
   return iree_status_annotate(status, IREE_SV("--dit_parameter_format"));
+}
+
+static iree_status_t ParseDitAttentionImplementation(
+    id4_ideogram4_dit_attention_implementation_t* out_implementation) {
+  IREE_ASSERT_ARGUMENT(out_implementation);
+  iree_string_view_t value =
+      iree_make_cstring_view(FLAG_dit_attention_implementation);
+  if (iree_string_view_equal(value, IREE_SV("streaming"))) {
+    *out_implementation = ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_STREAMING;
+    return iree_ok_status();
+  }
+  if (iree_string_view_equal(value, IREE_SV("materialized_wmma"))) {
+    *out_implementation =
+        ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_MATERIALIZED_WMMA;
+    return iree_ok_status();
+  }
+  return iree_make_status(
+      IREE_STATUS_INVALID_ARGUMENT,
+      "--dit_attention_implementation must be streaming or materialized_wmma");
 }
 
 static iree_status_t WritePlanJsonIfRequested(DitBenchmarkBranch branch,
@@ -287,6 +311,8 @@ static iree_status_t CreateLoadedDitStageContext(
   out_context->diagnostics_sink =
       id4::test::DiagnosticsSink(&out_context->diagnostics);
   IREE_RETURN_IF_ERROR(
+      ParseDitAttentionImplementation(&out_context->attention_implementation));
+  IREE_RETURN_IF_ERROR(
       id4::test::CreateLiveStageContextFromFlags(&out_context->live));
   IREE_RETURN_IF_ERROR(
       LoadFixtureAndConfigureRequest(out_context, branch_config));
@@ -375,8 +401,7 @@ static iree_status_t CreateDitPlan(DitBenchmarkContext* context,
   dit_options.request = context->request;
   dit_options.activation_format =
       ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT;
-  dit_options.attention_implementation =
-      ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_STREAMING;
+  dit_options.attention_implementation = context->attention_implementation;
 
   id4_pipeline_stage_plan_options_t plan_options;
   std::memset(&plan_options, 0, sizeof(plan_options));
