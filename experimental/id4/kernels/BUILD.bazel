@@ -3515,6 +3515,18 @@ _KERNEL_CASES = [
         "target_name": "ideogram4_linear_bf16_bf16_wmma_uncond_hidden_1024_shape",
     },
     {
+        "actual_case": "@id4_ideogram4_linear_bf16_bf16_wmma_uncond_mlp_up_1024_shape_case",
+        "benchmark": "@id4_ideogram4_linear_bf16_bf16_wmma_uncond_mlp_up_1024_shape",
+        "configs": [
+            "--config=id4.ideogram4.linear_wmma.token_count=4096",
+            "--config=id4.ideogram4.linear_wmma.dispatch_token_count=4096",
+            "--config=id4.ideogram4.linear_wmma.input_size=4608",
+            "--config=id4.ideogram4.linear_wmma.output_size=12288",
+        ],
+        "source": "ideogram4/linear_bf16_bf16_wmma.loom",
+        "target_name": "ideogram4_linear_bf16_bf16_wmma_uncond_mlp_up_1024_shape",
+    },
+    {
         "actual_case": "@id4_ideogram4_linear_bf16_bf16_wmma_uncond_mlp_down_1024_shape_case",
         "benchmark": "@id4_ideogram4_linear_bf16_bf16_wmma_uncond_mlp_down_1024_shape",
         "configs": [
@@ -3790,8 +3802,8 @@ _KERNEL_CASES = [
         "actual_case": "@id4_ideogram4_mlp_up_silu_product_bf16_wmma_small_case",
         "benchmark": "@id4_ideogram4_mlp_up_silu_product_bf16_wmma_small",
         "configs": [
-            "--config=id4.ideogram4.mlp_up_silu_product_wmma.token_count=16",
-            "--config=id4.ideogram4.mlp_up_silu_product_wmma.dispatch_token_count=16",
+            "--config=id4.ideogram4.mlp_up_silu_product_wmma.token_count=32",
+            "--config=id4.ideogram4.mlp_up_silu_product_wmma.dispatch_token_count=32",
             "--config=id4.ideogram4.mlp_up_silu_product_wmma.input_size=16",
             "--config=id4.ideogram4.mlp_up_silu_product_wmma.intermediate_size=32",
         ],

@@ -1260,7 +1260,8 @@ id4_ideogram4_dit_program_dispatch_mlp_up_silu_product_packed_bf16(
         intermediate_size, ID4_IDEOGRAM4_DIT_LINEAR_WMMA_OUTPUT_ROW_BLOCK);
   }
   const uint32_t body_token_count =
-      token_capacity - (token_capacity % ID4_IDEOGRAM4_DIT_LINEAR_TOKEN_BLOCK);
+      token_capacity -
+      (token_capacity % ID4_IDEOGRAM4_DIT_LINEAR_WMMA_TOKEN_BLOCK);
   const uint32_t tail_token_count =
       token_count > body_token_count ? token_count - body_token_count : 0;
 
