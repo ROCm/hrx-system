@@ -158,10 +158,10 @@ full weight slices, generated images, and multi-megabyte tensor goldens live in
 external artifact roots, not in git.
 
 NPY fixtures are an F32 interchange convenience, not the tensor artifact model.
-BF16, FP8, scaled FP8, quantized, and packed or blocked tensors need an exact
-artifact format that records logical dtype, physical storage, shape, layout,
-padding, and scale metadata instead of widening through F32 or smuggling bits
-through integer arrays.
+BF16, FP8, scaled FP8, and packed or blocked tensors need an exact artifact
+format that records logical dtype, physical storage, shape, layout, padding,
+and scale metadata instead of widening through F32 or smuggling bits through
+integer arrays.
 
 Reference trace tooling is checked in; reference payloads are not. Use explicit
 artifact roots such as `ID4_REFERENCE_TRACE_ROOT` for raw traces and

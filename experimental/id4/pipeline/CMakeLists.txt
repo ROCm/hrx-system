@@ -75,6 +75,7 @@ iree_cc_library(
     "parameter_slab.c"
   DEPS
     ::diagnostics
+    ::region
     iree::base
     iree::hal
     iree::io::parameter_provider

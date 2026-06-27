@@ -110,6 +110,55 @@ TEST(PipelineParameterSlab, ValidateLoadStepRange) {
                             &step, /*slab_count=*/1, &slab));
 }
 
+TEST(PipelineParameterSlab, ValidatesFp8ScaledEncodeLoadStep) {
+  id4_pipeline_parameter_request_t requests[] = {
+      id4_pipeline_parameter_request(
+          IREE_SV("weight.0"),
+          id4_pipeline_parameter_span(/*parameter_offset=*/0,
+                                      /*buffer_offset=*/0, /*length=*/32)),
+  };
+  id4_pipeline_parameter_slab_plan_t slab =
+      id4_pipeline_make_device_local_parameter_slab_plan(
+          IREE_SV("scope"), /*placement_id=*/0, /*binding_slot=*/1,
+          IREE_HAL_QUEUE_AFFINITY_ANY,
+          IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE_READ, /*byte_length=*/32,
+          /*alignment=*/16, IREE_ARRAYSIZE(requests), requests);
+  id4_pipeline_tensor_shape_t weight_shape = {
+      /*.rank=*/2,
+      /*.dims=*/{4, 4},
+  };
+  id4_pipeline_tensor_shape_t scale_shape = {
+      /*.rank=*/1,
+      /*.dims=*/{4},
+  };
+  const id4_pipeline_parameter_load_source_t sources[] = {
+      id4_pipeline_parameter_load_source(IREE_SV("fp8"), IREE_SV("weight.0"),
+                                         ID4_PIPELINE_TENSOR_DTYPE_F8_E4M3,
+                                         weight_shape,
+                                         /*byte_length=*/16),
+      id4_pipeline_parameter_load_source(
+          IREE_SV("fp8"), IREE_SV("weight.0_scale"),
+          ID4_PIPELINE_TENSOR_DTYPE_F32, scale_shape,
+          /*byte_length=*/16),
+  };
+  id4_pipeline_parameter_load_step_t step =
+      id4_pipeline_parameter_encode_fp8_e4m3_scaled_to_bf16_load_step(
+          IREE_SV("parameters.encode_fp8"), IREE_ARRAYSIZE(sources), sources,
+          /*target_slab_index=*/0, /*request_offset=*/0);
+  IREE_EXPECT_OK(id4_pipeline_parameter_load_step_validate(
+      &step, /*slab_count=*/1, &slab));
+
+  id4_pipeline_parameter_load_source_t bad_sources[] = {
+      sources[0],
+      sources[1],
+  };
+  bad_sources[1].shape.dims[0] = 5;
+  step.sources = bad_sources;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        id4_pipeline_parameter_load_step_validate(
+                            &step, /*slab_count=*/1, &slab));
+}
+
 TEST(PipelineParameterSlab, EnumeratorCoversSelectedRequestRange) {
   id4_pipeline_parameter_request_t requests[] = {
       id4_pipeline_parameter_request(

@@ -100,6 +100,11 @@ iree_status_t id4_ideogram4_dit_program_parameter(
     id4_pipeline_program_shape_t shape,
     id4_pipeline_program_tensor_t* out_tensor);
 
+iree_status_t id4_ideogram4_dit_program_parameter_fp8_e4m3_scaled_to_bf16(
+    id4_pipeline_program_builder_t* builder, iree_string_view_t source_scope,
+    iree_string_view_t weight_key, uint32_t input_size, uint32_t output_size,
+    id4_pipeline_program_tensor_t* out_tensor);
+
 iree_status_t id4_ideogram4_dit_program_parameter_source_resolve(
     id4_ideogram4_dit_parameter_sources_t sources, iree_string_view_t key,
     id4_ideogram4_dit_parameter_source_rule_t* out_source);

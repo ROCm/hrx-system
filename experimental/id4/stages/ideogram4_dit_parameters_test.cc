@@ -69,9 +69,9 @@ TEST(Ideogram4DitParameters, ParsesParameterFormatNames) {
   EXPECT_TRUE(iree_string_view_equal(
       id4_ideogram4_dit_parameter_format_name(format), IREE_SV("fp8_e4m3")));
 
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_INVALID_ARGUMENT,
-      id4_ideogram4_dit_parameter_format_parse(IREE_SV("q4"), &format));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        id4_ideogram4_dit_parameter_format_parse(
+                            IREE_SV("unsupported"), &format));
 }
 
 TEST(Ideogram4DitParameters, Bf16FormatProducesNoSourceOverrides) {

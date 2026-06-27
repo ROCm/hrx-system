@@ -83,6 +83,65 @@ TEST(PipelineProgram, ComputesDenseTensorByteLength) {
           id4_pipeline_program_make_shape_rank1(1), &byte_length));
 }
 
+TEST(PipelineProgram, AuthorsFp8ScaledParameterAsBf16ExecutionTensor) {
+  ProgramBuilderScope builder_scope;
+  id4_pipeline_program_builder_t* builder = builder_scope.builder();
+
+  const id4_pipeline_program_parameter_source_t sources[] = {
+      {
+          /*.source_scope=*/IREE_SV("fp8"),
+          /*.key=*/IREE_SV("linear.weight"),
+          /*.dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_F8_E4M3,
+          /*.shape=*/id4_pipeline_program_make_shape_rank2(4, 4),
+      },
+      {
+          /*.source_scope=*/IREE_SV("fp8"),
+          /*.key=*/IREE_SV("linear.weight_scale"),
+          /*.dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_F32,
+          /*.shape=*/id4_pipeline_program_make_shape_rank1(4),
+      },
+  };
+  id4_pipeline_program_parameter_options_t options = {
+      /*.structure_size=*/sizeof(options),
+      /*.next=*/nullptr,
+      /*.encoding=*/
+      ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_FP8_E4M3_SCALED_TO_BF16,
+      /*.source_count=*/IREE_ARRAYSIZE(sources),
+      /*.sources=*/sources,
+      /*.key=*/IREE_SV("linear.weight"),
+      /*.dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+      /*.shape=*/id4_pipeline_program_make_shape_rank2(4, 4),
+  };
+  id4_pipeline_program_tensor_t weight = id4_pipeline_program_tensor_invalid();
+  IREE_ASSERT_OK(id4_pipeline_program_parameter(builder, &options, &weight));
+
+  id4_pipeline_program_t* program = nullptr;
+  IREE_ASSERT_OK(id4_pipeline_program_builder_seal(
+      builder, iree_allocator_system(), &program));
+  builder_scope.DestroyBuilder();
+
+  const id4_pipeline_program_tensor_record_t* tensor =
+      id4_pipeline_program_tensor_at(program, weight.ordinal);
+  ASSERT_NE(tensor, nullptr);
+  EXPECT_EQ(tensor->dtype, ID4_PIPELINE_PROGRAM_DTYPE_BF16);
+  EXPECT_EQ(tensor->byte_length, 32u);
+
+  ASSERT_EQ(id4_pipeline_program_operation_count(program), 1u);
+  const id4_pipeline_program_op_t* op =
+      id4_pipeline_program_operation_at(program, 0);
+  ASSERT_NE(op, nullptr);
+  ASSERT_EQ(op->kind, ID4_PIPELINE_PROGRAM_OP_KIND_PARAMETER);
+  EXPECT_EQ(op->payload.parameter.encoding,
+            ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_FP8_E4M3_SCALED_TO_BF16);
+  ASSERT_EQ(op->payload.parameter.source_count, 2u);
+  EXPECT_EQ(op->payload.parameter.sources[0].dtype,
+            ID4_PIPELINE_PROGRAM_DTYPE_F8_E4M3);
+  EXPECT_EQ(op->payload.parameter.sources[1].dtype,
+            ID4_PIPELINE_PROGRAM_DTYPE_F32);
+
+  id4_pipeline_program_release(program);
+}
+
 TEST(PipelineProgram, AuthorsProgramAndSealsImmutableCopies) {
   ProgramBuilderScope builder_scope;
   id4_pipeline_program_builder_t* builder = builder_scope.builder();
@@ -100,10 +159,20 @@ TEST(PipelineProgram, AuthorsProgramAndSealsImmutableCopies) {
       id4_pipeline_program_import_tensor(builder, &input_options, &input));
 
   id4_pipeline_program_tensor_t weight = id4_pipeline_program_tensor_invalid();
+  const id4_pipeline_program_parameter_source_t weight_sources[] = {
+      {
+          /*.source_scope=*/IREE_SV(""),
+          /*.key=*/IREE_SV("model.layers.0.linear.weight"),
+          /*.dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+          /*.shape=*/id4_pipeline_program_make_shape_rank2(4, 4),
+      },
+  };
   id4_pipeline_program_parameter_options_t weight_options = {
       /*.structure_size=*/sizeof(weight_options),
       /*.next=*/nullptr,
-      /*.source_scope=*/IREE_SV(""),
+      /*.encoding=*/ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_DIRECT,
+      /*.source_count=*/IREE_ARRAYSIZE(weight_sources),
+      /*.sources=*/weight_sources,
       /*.key=*/IREE_SV("model.layers.0.linear.weight"),
       /*.dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_BF16,
       /*.shape=*/id4_pipeline_program_make_shape_rank2(4, 4),
@@ -232,10 +301,20 @@ TEST(PipelineProgram, InternsRepeatedParameterDeclarations) {
   ProgramBuilderScope builder_scope;
   id4_pipeline_program_builder_t* builder = builder_scope.builder();
 
+  const id4_pipeline_program_parameter_source_t weight_sources[] = {
+      {
+          /*.source_scope=*/IREE_SV(""),
+          /*.key=*/IREE_SV("model.layers.0.linear.weight"),
+          /*.dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+          /*.shape=*/id4_pipeline_program_make_shape_rank2(4, 4),
+      },
+  };
   id4_pipeline_program_parameter_options_t weight_options = {
       /*.structure_size=*/sizeof(weight_options),
       /*.next=*/nullptr,
-      /*.source_scope=*/IREE_SV(""),
+      /*.encoding=*/ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_DIRECT,
+      /*.source_count=*/IREE_ARRAYSIZE(weight_sources),
+      /*.sources=*/weight_sources,
       /*.key=*/IREE_SV("model.layers.0.linear.weight"),
       /*.dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_BF16,
       /*.shape=*/id4_pipeline_program_make_shape_rank2(4, 4),
@@ -471,10 +550,21 @@ TEST(PipelineProgram, RejectsAmbiguousIdentitiesAndInvalidHandles) {
   IREE_ASSERT_OK(
       id4_pipeline_program_import_tensor(builder, &input_options, &input));
 
+  const id4_pipeline_program_parameter_source_t duplicate_parameter_sources[] =
+      {
+          {
+              /*.source_scope=*/IREE_SV(""),
+              /*.key=*/IREE_SV("hidden_states"),
+              /*.dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_F32,
+              /*.shape=*/id4_pipeline_program_make_shape_rank1(4),
+          },
+      };
   id4_pipeline_program_parameter_options_t duplicate_parameter_options = {
       /*.structure_size=*/sizeof(duplicate_parameter_options),
       /*.next=*/nullptr,
-      /*.source_scope=*/IREE_SV(""),
+      /*.encoding=*/ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_DIRECT,
+      /*.source_count=*/IREE_ARRAYSIZE(duplicate_parameter_sources),
+      /*.sources=*/duplicate_parameter_sources,
       /*.key=*/IREE_SV("hidden_states"),
       /*.dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_F32,
       /*.shape=*/id4_pipeline_program_make_shape_rank1(4),

@@ -111,6 +111,15 @@ static iree_status_t id4_pipeline_program_validate_shape(
   return iree_ok_status();
 }
 
+static bool id4_pipeline_program_shape_equal(id4_pipeline_program_shape_t lhs,
+                                             id4_pipeline_program_shape_t rhs) {
+  if (lhs.rank != rhs.rank) return false;
+  for (uint32_t i = 0; i < lhs.rank; ++i) {
+    if (lhs.dims[i] != rhs.dims[i]) return false;
+  }
+  return true;
+}
+
 static iree_status_t id4_pipeline_program_validate_tensor_metadata(
     iree_string_view_t name, id4_pipeline_program_dtype_t dtype,
     id4_pipeline_program_shape_t shape, iree_device_size_t* out_byte_length) {
@@ -120,6 +129,110 @@ static iree_status_t id4_pipeline_program_validate_tensor_metadata(
   }
   IREE_RETURN_IF_ERROR(id4_pipeline_program_validate_shape(shape, name));
   return id4_pipeline_program_tensor_byte_length(dtype, shape, out_byte_length);
+}
+
+static iree_status_t id4_pipeline_program_validate_parameter_source(
+    const id4_pipeline_program_parameter_source_t* source,
+    iree_host_size_t source_index) {
+  if (iree_string_view_is_empty(source->key)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "parameter source %" PRIhsz " key is required",
+                            source_index);
+  }
+  iree_device_size_t byte_length = 0;
+  return id4_pipeline_program_validate_tensor_metadata(
+      source->key, source->dtype, source->shape, &byte_length);
+}
+
+static iree_status_t id4_pipeline_program_validate_direct_parameter_encoding(
+    const id4_pipeline_program_parameter_options_t* options) {
+  const id4_pipeline_program_parameter_source_t* source = &options->sources[0];
+  if (!iree_string_view_equal(source->key, options->key) ||
+      source->dtype != options->dtype ||
+      !id4_pipeline_program_shape_equal(source->shape, options->shape)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "direct parameter %.*s source metadata must match execution metadata",
+        (int)options->key.size, options->key.data);
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t
+id4_pipeline_program_validate_fp8_e4m3_scaled_to_bf16_parameter_encoding(
+    const id4_pipeline_program_parameter_options_t* options) {
+  if (options->dtype != ID4_PIPELINE_PROGRAM_DTYPE_BF16) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "FP8 e4m3 scaled parameter %.*s must produce BF16 execution storage",
+        (int)options->key.size, options->key.data);
+  }
+  const id4_pipeline_program_parameter_source_t* weight_source =
+      &options->sources[0];
+  const id4_pipeline_program_parameter_source_t* scale_source =
+      &options->sources[1];
+  if (weight_source->dtype != ID4_PIPELINE_PROGRAM_DTYPE_F8_E4M3 ||
+      !id4_pipeline_program_shape_equal(weight_source->shape, options->shape)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "FP8 e4m3 scaled parameter %.*s weight source must be f8_e4m3 with "
+        "the execution shape",
+        (int)options->key.size, options->key.data);
+  }
+  if (scale_source->dtype != ID4_PIPELINE_PROGRAM_DTYPE_F32 ||
+      scale_source->shape.rank != 1 || options->shape.rank == 0 ||
+      scale_source->shape.dims[0] != options->shape.dims[0]) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "FP8 e4m3 scaled parameter %.*s scale source must be f32[output]",
+        (int)options->key.size, options->key.data);
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t id4_pipeline_program_validate_parameter_encoding(
+    const id4_pipeline_program_parameter_options_t* options) {
+  if (options->source_count == 0 ||
+      options->source_count > ID4_PIPELINE_PROGRAM_PARAMETER_MAX_SOURCE_COUNT) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "parameter %.*s source count %" PRIhsz " is invalid",
+        (int)options->key.size, options->key.data, options->source_count);
+  }
+  if (!options->sources) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "parameter %.*s source array is required",
+                            (int)options->key.size, options->key.data);
+  }
+  for (iree_host_size_t i = 0; i < options->source_count; ++i) {
+    IREE_RETURN_IF_ERROR(id4_pipeline_program_validate_parameter_source(
+        &options->sources[i], i));
+  }
+  switch (options->encoding) {
+    case ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_DIRECT:
+      if (options->source_count != 1) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "direct parameter %.*s must have exactly one source",
+            (int)options->key.size, options->key.data);
+      }
+      return id4_pipeline_program_validate_direct_parameter_encoding(options);
+    case ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_FP8_E4M3_SCALED_TO_BF16:
+      if (options->source_count != 2) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "FP8 e4m3 scaled parameter %.*s must have weight and scale "
+            "sources",
+            (int)options->key.size, options->key.data);
+      }
+      return id4_pipeline_program_validate_fp8_e4m3_scaled_to_bf16_parameter_encoding(
+          options);
+    default:
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "parameter %.*s encoding %u is invalid",
+                              (int)options->key.size, options->key.data,
+                              (uint32_t)options->encoding);
+  }
 }
 
 static iree_status_t id4_pipeline_program_validate_access(
@@ -354,6 +467,66 @@ static iree_status_t id4_pipeline_program_copy_tensor_record(
                                           &target->name);
 }
 
+static bool id4_pipeline_program_parameter_source_equal(
+    const id4_pipeline_program_parameter_source_t* lhs,
+    const id4_pipeline_program_parameter_source_t* rhs) {
+  return iree_string_view_equal(lhs->source_scope, rhs->source_scope) &&
+         iree_string_view_equal(lhs->key, rhs->key) &&
+         lhs->dtype == rhs->dtype &&
+         id4_pipeline_program_shape_equal(lhs->shape, rhs->shape);
+}
+
+static void id4_pipeline_program_free_parameter_sources(
+    iree_host_size_t source_count,
+    const id4_pipeline_program_parameter_source_t* source_values,
+    iree_allocator_t host_allocator) {
+  if (!source_values) return;
+  id4_pipeline_program_parameter_source_t* mutable_values =
+      (id4_pipeline_program_parameter_source_t*)source_values;
+  for (iree_host_size_t i = 0; i < source_count; ++i) {
+    id4_pipeline_program_free_string(&mutable_values[i].source_scope,
+                                     host_allocator);
+    id4_pipeline_program_free_string(&mutable_values[i].key, host_allocator);
+  }
+  iree_allocator_free(host_allocator, mutable_values);
+}
+
+static iree_status_t id4_pipeline_program_copy_parameter_sources(
+    iree_host_size_t source_count,
+    const id4_pipeline_program_parameter_source_t* source_values,
+    iree_allocator_t host_allocator, iree_host_size_t* out_target_count,
+    const id4_pipeline_program_parameter_source_t** out_target_values) {
+  *out_target_count = 0;
+  *out_target_values = NULL;
+  if (source_count == 0) return iree_ok_status();
+  id4_pipeline_program_parameter_source_t* target_values = NULL;
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(host_allocator, source_count,
+                                                   sizeof(target_values[0]),
+                                                   (void**)&target_values));
+  memset(target_values, 0, source_count * sizeof(target_values[0]));
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0; i < source_count && iree_status_is_ok(status);
+       ++i) {
+    target_values[i].dtype = source_values[i].dtype;
+    target_values[i].shape = source_values[i].shape;
+    status = id4_pipeline_program_copy_string(source_values[i].source_scope,
+                                              host_allocator,
+                                              &target_values[i].source_scope);
+    if (iree_status_is_ok(status)) {
+      status = id4_pipeline_program_copy_string(
+          source_values[i].key, host_allocator, &target_values[i].key);
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    *out_target_count = source_count;
+    *out_target_values = target_values;
+  } else {
+    id4_pipeline_program_free_parameter_sources(source_count, target_values,
+                                                host_allocator);
+  }
+  return status;
+}
+
 static void id4_pipeline_program_free_op(id4_pipeline_program_op_t* op,
                                          iree_allocator_t host_allocator) {
   if (!op) return;
@@ -372,8 +545,9 @@ static void id4_pipeline_program_free_op(id4_pipeline_program_op_t* op,
                                        host_allocator);
       break;
     case ID4_PIPELINE_PROGRAM_OP_KIND_PARAMETER:
-      id4_pipeline_program_free_string(&op->payload.parameter.source_scope,
-                                       host_allocator);
+      id4_pipeline_program_free_parameter_sources(
+          op->payload.parameter.source_count, op->payload.parameter.sources,
+          host_allocator);
       break;
     case ID4_PIPELINE_PROGRAM_OP_KIND_CONSTANT:
       id4_pipeline_program_free_constant_data(op->payload.constant.data,
@@ -409,9 +583,12 @@ static iree_status_t id4_pipeline_program_copy_op(
       break;
     case ID4_PIPELINE_PROGRAM_OP_KIND_PARAMETER:
       target->payload.parameter.tensor = source->payload.parameter.tensor;
-      status = id4_pipeline_program_copy_string(
-          source->payload.parameter.source_scope, host_allocator,
-          &target->payload.parameter.source_scope);
+      target->payload.parameter.encoding = source->payload.parameter.encoding;
+      status = id4_pipeline_program_copy_parameter_sources(
+          source->payload.parameter.source_count,
+          source->payload.parameter.sources, host_allocator,
+          &target->payload.parameter.source_count,
+          &target->payload.parameter.sources);
       break;
     case ID4_PIPELINE_PROGRAM_OP_KIND_CONSTANT:
       target->payload.constant.tensor = source->payload.constant.tensor;
@@ -485,15 +662,6 @@ static iree_status_t id4_pipeline_program_copy_op(
     id4_pipeline_program_free_op(target, host_allocator);
   }
   return status;
-}
-
-static bool id4_pipeline_program_shape_equal(id4_pipeline_program_shape_t lhs,
-                                             id4_pipeline_program_shape_t rhs) {
-  if (lhs.rank != rhs.rank) return false;
-  for (uint32_t i = 0; i < lhs.rank; ++i) {
-    if (lhs.dims[i] != rhs.dims[i]) return false;
-  }
-  return true;
 }
 
 static bool id4_pipeline_program_builder_find_tensor_by_name(
@@ -843,6 +1011,8 @@ iree_status_t id4_pipeline_program_parameter(
   iree_device_size_t byte_length = 0;
   IREE_RETURN_IF_ERROR(id4_pipeline_program_validate_tensor_metadata(
       options->key, options->dtype, options->shape, &byte_length));
+  IREE_RETURN_IF_ERROR(
+      id4_pipeline_program_validate_parameter_encoding(options));
 
   id4_pipeline_program_tensor_t existing_tensor =
       id4_pipeline_program_tensor_invalid();
@@ -874,12 +1044,22 @@ iree_status_t id4_pipeline_program_parameter(
           "program parameter %.*s was requested with incompatible metadata",
           (int)options->key.size, options->key.data);
     }
-    if (!iree_string_view_equal(producer->payload.parameter.source_scope,
-                                options->source_scope)) {
+    if (producer->payload.parameter.encoding != options->encoding ||
+        producer->payload.parameter.source_count != options->source_count) {
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
-          "program parameter %.*s was requested with incompatible source scope",
+          "program parameter %.*s was requested with incompatible sources",
           (int)options->key.size, options->key.data);
+    }
+    for (iree_host_size_t i = 0; i < options->source_count; ++i) {
+      if (!id4_pipeline_program_parameter_source_equal(
+              &producer->payload.parameter.sources[i], &options->sources[i])) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "program parameter %.*s was requested with incompatible source "
+            "%" PRIhsz,
+            (int)options->key.size, options->key.data, i);
+      }
     }
     *out_tensor = existing_tensor;
     return iree_ok_status();
@@ -895,7 +1075,9 @@ iree_status_t id4_pipeline_program_parameter(
       .ordinal = operation_ordinal,
       .payload.parameter =
           {
-              .source_scope = options->source_scope,
+              .encoding = options->encoding,
+              .source_count = options->source_count,
+              .sources = options->sources,
               .tensor = tensor,
           },
   };

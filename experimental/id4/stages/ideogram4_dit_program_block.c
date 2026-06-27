@@ -80,20 +80,10 @@ static iree_status_t id4_ideogram4_dit_program_layer_linear_parameter(
       break;
     }
     case ID4_IDEOGRAM4_DIT_PARAMETER_STORAGE_FP8_E4M3_SCALED: {
-      IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_parameter(
-          builder, source.source_scope, weight_key,
-          ID4_PIPELINE_PROGRAM_DTYPE_F8_E4M3, weight_shape,
-          &out_parameter->weight));
-      char scale_key_buffer[ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
-      iree_string_view_t scale_key = iree_string_view_empty();
-      IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_format_parameter_scale_key(
-          weight_key, scale_key_buffer, IREE_ARRAYSIZE(scale_key_buffer),
-          &scale_key));
-      IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_parameter(
-          builder, source.source_scope, scale_key,
-          ID4_PIPELINE_PROGRAM_DTYPE_F32,
-          id4_pipeline_program_make_shape_rank1(output_size),
-          &out_parameter->scale));
+      IREE_RETURN_IF_ERROR(
+          id4_ideogram4_dit_program_parameter_fp8_e4m3_scaled_to_bf16(
+              builder, source.source_scope, weight_key, input_size, output_size,
+              &out_parameter->weight));
       break;
     }
     default:
@@ -103,7 +93,7 @@ static iree_status_t id4_ideogram4_dit_program_layer_linear_parameter(
                               (int)weight_key.size, weight_key.data,
                               (uint32_t)source.storage);
   }
-  out_parameter->storage = source.storage;
+  out_parameter->storage = ID4_IDEOGRAM4_DIT_PARAMETER_STORAGE_BF16;
   return iree_ok_status();
 }
 

@@ -119,10 +119,20 @@ static id4_pipeline_program_t* CreateLinearProgram() {
       id4_pipeline_program_import_tensor(builder, &input_options, &input));
 
   id4_pipeline_program_tensor_t weight = id4_pipeline_program_tensor_invalid();
+  const id4_pipeline_program_parameter_source_t weight_sources[] = {
+      {
+          /*.source_scope=*/IREE_SV("model"),
+          /*.key=*/IREE_SV("model.layers.0.linear.weight"),
+          /*.dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+          /*.shape=*/id4_pipeline_program_make_shape_rank2(4, 4),
+      },
+  };
   id4_pipeline_program_parameter_options_t weight_options = {
       /*.structure_size=*/sizeof(weight_options),
       /*.next=*/nullptr,
-      /*.source_scope=*/IREE_SV("model"),
+      /*.encoding=*/ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_DIRECT,
+      /*.source_count=*/IREE_ARRAYSIZE(weight_sources),
+      /*.sources=*/weight_sources,
       /*.key=*/IREE_SV("model.layers.0.linear.weight"),
       /*.dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_BF16,
       /*.shape=*/id4_pipeline_program_make_shape_rank2(4, 4),
@@ -338,6 +348,46 @@ static id4_pipeline_program_t* CreateLocalReuseProgram() {
   return program;
 }
 
+static id4_pipeline_program_t* CreateEncodedParameterProgram() {
+  ProgramBuilderScope builder_scope;
+  id4_pipeline_program_builder_t* builder = builder_scope.builder();
+
+  const id4_pipeline_program_parameter_source_t sources[] = {
+      {
+          /*.source_scope=*/IREE_SV("fp8"),
+          /*.key=*/IREE_SV("model.layers.0.linear.weight"),
+          /*.dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_F8_E4M3,
+          /*.shape=*/id4_pipeline_program_make_shape_rank2(4, 4),
+      },
+      {
+          /*.source_scope=*/IREE_SV("fp8"),
+          /*.key=*/IREE_SV("model.layers.0.linear.weight_scale"),
+          /*.dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_F32,
+          /*.shape=*/id4_pipeline_program_make_shape_rank1(4),
+      },
+  };
+  id4_pipeline_program_parameter_options_t weight_options = {
+      /*.structure_size=*/sizeof(weight_options),
+      /*.next=*/nullptr,
+      /*.encoding=*/
+      ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_FP8_E4M3_SCALED_TO_BF16,
+      /*.source_count=*/IREE_ARRAYSIZE(sources),
+      /*.sources=*/sources,
+      /*.key=*/IREE_SV("model.layers.0.linear.weight"),
+      /*.dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+      /*.shape=*/id4_pipeline_program_make_shape_rank2(4, 4),
+  };
+  id4_pipeline_program_tensor_t weight = id4_pipeline_program_tensor_invalid();
+  IREE_CHECK_OK(
+      id4_pipeline_program_parameter(builder, &weight_options, &weight));
+
+  id4_pipeline_program_t* program = nullptr;
+  IREE_CHECK_OK(id4_pipeline_program_builder_seal(
+      builder, iree_allocator_system(), &program));
+  builder_scope.DestroyBuilder();
+  return program;
+}
+
 static id4_pipeline_program_plan_options_t MakePlanOptions(
     const id4_pipeline_program_t* program,
     iree_hal_device_group_t* device_group,
@@ -514,6 +564,66 @@ TEST(PipelineProgramPlan, DerivesParameterKernelRegionAndTapPlans) {
   ExpectFinds(json, IREE_SV("\"name\":\"hidden_states.input\""));
   ExpectFinds(json, IREE_SV("\"access\":\"read\""));
   iree_string_builder_deinitialize(&json_builder);
+
+  id4_pipeline_plan_release(plan);
+  iree_hal_device_group_release(device_group);
+  id4_pipeline_program_release(program);
+}
+
+TEST(PipelineProgramPlan, PlansFp8ScaledParameterLoadStep) {
+  id4_pipeline_program_t* program = CreateEncodedParameterProgram();
+  iree_hal_device_group_t* device_group = CreateLocalSyncDeviceGroup();
+  id4_pipeline_device_placement_t placement = {
+      /*.role=*/IREE_SV("default"),
+      /*.device_index=*/0,
+      /*.queue_affinity=*/IREE_HAL_QUEUE_AFFINITY_ANY,
+  };
+  id4_pipeline_diagnostics_sink_t diagnostics_sink;
+  id4_pipeline_diagnostics_sink_initialize_ignore(&diagnostics_sink);
+  id4_pipeline_program_plan_options_t options =
+      MakePlanOptions(program, device_group, &placement, &diagnostics_sink);
+
+  id4_pipeline_plan_t* plan = nullptr;
+  IREE_ASSERT_OK(id4_pipeline_program_create_plan(
+      &options, iree_allocator_system(), &plan));
+
+  ASSERT_EQ(id4_pipeline_plan_parameter_slab_count(plan), 1u);
+  const id4_pipeline_parameter_slab_plan_t* parameter_slab =
+      id4_pipeline_plan_parameter_slab_at(plan, 0);
+  ASSERT_NE(parameter_slab, nullptr);
+  ASSERT_EQ(parameter_slab->request_count, 1u);
+  EXPECT_EQ(parameter_slab->byte_length, 32u);
+  ExpectStringViewEqual(parameter_slab->requests[0].key,
+                        IREE_SV("model.layers.0.linear.weight"));
+  EXPECT_EQ(parameter_slab->requests[0].span.length, 32u);
+
+  ASSERT_EQ(id4_pipeline_plan_parameter_load_step_count(plan), 1u);
+  const id4_pipeline_parameter_load_step_t* load_step =
+      id4_pipeline_plan_parameter_load_step_at(plan, 0);
+  ASSERT_NE(load_step, nullptr);
+  EXPECT_EQ(
+      load_step->kind,
+      ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_ENCODE_FP8_E4M3_SCALED_TO_BF16);
+  EXPECT_EQ(load_step->request_offset, 0u);
+  EXPECT_EQ(load_step->request_count, 1u);
+  ASSERT_EQ(load_step->source_count, 2u);
+  ExpectStringViewEqual(load_step->sources[0].source_scope, IREE_SV("fp8"));
+  ExpectStringViewEqual(load_step->sources[0].key,
+                        IREE_SV("model.layers.0.linear.weight"));
+  EXPECT_EQ(load_step->sources[0].dtype, ID4_PIPELINE_TENSOR_DTYPE_F8_E4M3);
+  EXPECT_EQ(load_step->sources[0].byte_length, 16u);
+  ExpectStringViewEqual(load_step->sources[1].key,
+                        IREE_SV("model.layers.0.linear.weight_scale"));
+  EXPECT_EQ(load_step->sources[1].dtype, ID4_PIPELINE_TENSOR_DTYPE_F32);
+  EXPECT_EQ(load_step->sources[1].byte_length, 16u);
+
+  iree_string_builder_t builder;
+  iree_string_builder_initialize(iree_allocator_system(), &builder);
+  IREE_ASSERT_OK(id4_pipeline_plan_format_json(plan, &builder));
+  iree_string_view_t json = iree_string_builder_view(&builder);
+  ExpectFinds(json, IREE_SV("encode_fp8_e4m3_scaled_to_bf16"));
+  ExpectFinds(json, IREE_SV("model.layers.0.linear.weight_scale"));
+  iree_string_builder_deinitialize(&builder);
 
   id4_pipeline_plan_release(plan);
   iree_hal_device_group_release(device_group);

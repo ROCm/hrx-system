@@ -10,6 +10,7 @@
 #include <stdint.h>
 
 #include "experimental/id4/pipeline/diagnostics.h"
+#include "experimental/id4/pipeline/region.h"
 #include "iree/base/api.h"
 #include "iree/hal/api.h"
 #include "iree/io/parameter_provider.h"
@@ -99,7 +100,39 @@ typedef uint32_t id4_pipeline_parameter_load_step_kind_t;
 typedef enum id4_pipeline_parameter_load_step_kind_e {
   // Direct IREE parameter provider gather into a final parameter slab.
   ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_GATHER = 1u,
+  // Provider FP8 e4m3 weights and F32 row scales encoded into BF16 storage.
+  ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_ENCODE_FP8_E4M3_SCALED_TO_BF16 = 2u,
 } id4_pipeline_parameter_load_step_kind_e;
+
+// Provider source tensor consumed by a parameter load step.
+typedef struct id4_pipeline_parameter_load_source_t {
+  // Provider scope containing the source tensor.
+  iree_string_view_t source_scope;
+  // Provider key for the source tensor.
+  iree_string_view_t key;
+  // Scalar element type stored by the provider.
+  id4_pipeline_tensor_dtype_t dtype;
+  // Logical tensor shape stored by the provider.
+  id4_pipeline_tensor_shape_t shape;
+  // Dense source tensor byte length.
+  iree_device_size_t byte_length;
+} id4_pipeline_parameter_load_source_t;
+
+// Returns a parameter load source descriptor.
+static inline id4_pipeline_parameter_load_source_t
+id4_pipeline_parameter_load_source(iree_string_view_t source_scope,
+                                   iree_string_view_t key,
+                                   id4_pipeline_tensor_dtype_t dtype,
+                                   id4_pipeline_tensor_shape_t shape,
+                                   iree_device_size_t byte_length) {
+  id4_pipeline_parameter_load_source_t source;
+  source.source_scope = source_scope;
+  source.key = key;
+  source.dtype = dtype;
+  source.shape = shape;
+  source.byte_length = byte_length;
+  return source;
+}
 
 // Prepare-time work that populates final parameter slab storage.
 typedef struct id4_pipeline_parameter_load_step_t {
@@ -107,8 +140,12 @@ typedef struct id4_pipeline_parameter_load_step_t {
   iree_string_view_t name;
   // Operation performed by this loading step.
   id4_pipeline_parameter_load_step_kind_t kind;
-  // Provider source scope supplying the selected parameter requests.
+  // Provider source scope supplying direct gather requests.
   iree_string_view_t source_scope;
+  // Number of provider source descriptors used by encoded load steps.
+  iree_host_size_t source_count;
+  // Provider source descriptors used by encoded load steps.
+  const id4_pipeline_parameter_load_source_t* sources;
   // Final parameter slab populated by this step.
   iree_host_size_t target_slab_index;
   // First request ordinal in the target slab request table.
@@ -128,9 +165,30 @@ id4_pipeline_parameter_gather_load_step(iree_string_view_t name,
   step.name = name;
   step.kind = ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_GATHER;
   step.source_scope = source_scope;
+  step.source_count = 0;
+  step.sources = NULL;
   step.target_slab_index = target_slab_index;
   step.request_offset = request_offset;
   step.request_count = request_count;
+  return step;
+}
+
+// Returns an FP8 e4m3 plus row-scale encoder load step into a final slab.
+static inline id4_pipeline_parameter_load_step_t
+id4_pipeline_parameter_encode_fp8_e4m3_scaled_to_bf16_load_step(
+    iree_string_view_t name, iree_host_size_t source_count,
+    const id4_pipeline_parameter_load_source_t* sources,
+    iree_host_size_t target_slab_index, iree_host_size_t request_offset) {
+  id4_pipeline_parameter_load_step_t step;
+  step.name = name;
+  step.kind =
+      ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_ENCODE_FP8_E4M3_SCALED_TO_BF16;
+  step.source_scope = iree_string_view_empty();
+  step.source_count = source_count;
+  step.sources = sources;
+  step.target_slab_index = target_slab_index;
+  step.request_offset = request_offset;
+  step.request_count = 1;
   return step;
 }
 

@@ -519,9 +519,23 @@ iree_status_t id4_ideogram4_dit_program_parameter(
     iree_string_view_t key, id4_pipeline_program_dtype_t dtype,
     id4_pipeline_program_shape_t shape,
     id4_pipeline_program_tensor_t* out_tensor) {
+  const id4_pipeline_program_parameter_source_t sources[] = {
+      {
+          // Provider scope containing the direct parameter tensor.
+          .source_scope = source_scope,
+          // Provider key for the direct parameter tensor.
+          .key = key,
+          // Provider dtype matching the execution tensor.
+          .dtype = dtype,
+          // Provider shape matching the execution tensor.
+          .shape = shape,
+      },
+  };
   id4_pipeline_program_parameter_options_t options = {
       .structure_size = sizeof(options),
-      .source_scope = source_scope,
+      .encoding = ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_DIRECT,
+      .source_count = IREE_ARRAYSIZE(sources),
+      .sources = sources,
       .key = key,
       .dtype = dtype,
       .shape = shape,
@@ -553,6 +567,52 @@ iree_status_t id4_ideogram4_dit_program_format_parameter_scale_key(
   return id4_ideogram4_dit_program_format(buffer, buffer_capacity, out_string,
                                           "%.*s_scale", (int)weight_key.size,
                                           weight_key.data);
+}
+
+iree_status_t id4_ideogram4_dit_program_parameter_fp8_e4m3_scaled_to_bf16(
+    id4_pipeline_program_builder_t* builder, iree_string_view_t source_scope,
+    iree_string_view_t weight_key, uint32_t input_size, uint32_t output_size,
+    id4_pipeline_program_tensor_t* out_tensor) {
+  const id4_pipeline_program_shape_t weight_shape =
+      id4_pipeline_program_make_shape_rank2(output_size, input_size);
+  char scale_key_buffer[ID4_IDEOGRAM4_DIT_PROGRAM_FORMAT_BUFFER_CAPACITY];
+  iree_string_view_t scale_key = iree_string_view_empty();
+  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_format_parameter_scale_key(
+      weight_key, scale_key_buffer, IREE_ARRAYSIZE(scale_key_buffer),
+      &scale_key));
+  const id4_pipeline_program_parameter_source_t sources[] = {
+      {
+          // Provider scope containing the compact FP8 weight tensor.
+          .source_scope = source_scope,
+          // Provider key for the compact FP8 weight tensor.
+          .key = weight_key,
+          // Provider dtype for the compact weight tensor.
+          .dtype = ID4_PIPELINE_PROGRAM_DTYPE_F8_E4M3,
+          // Provider shape matching the BF16 execution tensor.
+          .shape = weight_shape,
+      },
+      {
+          // Provider scope containing the F32 row-scale tensor.
+          .source_scope = source_scope,
+          // Provider key for the F32 row-scale tensor.
+          .key = scale_key,
+          // Provider dtype for the row-scale tensor.
+          .dtype = ID4_PIPELINE_PROGRAM_DTYPE_F32,
+          // Provider shape with one scale value per output row.
+          .shape = id4_pipeline_program_make_shape_rank1(output_size),
+      },
+  };
+  id4_pipeline_program_parameter_options_t options = {
+      .structure_size = sizeof(options),
+      .encoding =
+          ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_FP8_E4M3_SCALED_TO_BF16,
+      .source_count = IREE_ARRAYSIZE(sources),
+      .sources = sources,
+      .key = weight_key,
+      .dtype = ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+      .shape = weight_shape,
+  };
+  return id4_pipeline_program_parameter(builder, &options, out_tensor);
 }
 
 static iree_status_t id4_ideogram4_dit_program_parameter_bf16(
@@ -598,18 +658,10 @@ static iree_status_t id4_ideogram4_dit_program_linear_parameter(
       break;
     }
     case ID4_IDEOGRAM4_DIT_PARAMETER_STORAGE_FP8_E4M3_SCALED: {
-      IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_parameter(
-          builder, source.source_scope, key, ID4_PIPELINE_PROGRAM_DTYPE_F8_E4M3,
-          weight_shape, &out_parameter->weight));
-      char scale_key_buffer[ID4_IDEOGRAM4_DIT_PROGRAM_FORMAT_BUFFER_CAPACITY];
-      iree_string_view_t scale_key = iree_string_view_empty();
-      IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_format_parameter_scale_key(
-          key, scale_key_buffer, IREE_ARRAYSIZE(scale_key_buffer), &scale_key));
-      IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_parameter(
-          builder, source.source_scope, scale_key,
-          ID4_PIPELINE_PROGRAM_DTYPE_F32,
-          id4_pipeline_program_make_shape_rank1(output_size),
-          &out_parameter->scale));
+      IREE_RETURN_IF_ERROR(
+          id4_ideogram4_dit_program_parameter_fp8_e4m3_scaled_to_bf16(
+              builder, source.source_scope, key, input_size, output_size,
+              &out_parameter->weight));
       break;
     }
     default:
@@ -619,7 +671,7 @@ static iree_status_t id4_ideogram4_dit_program_linear_parameter(
                               (int)key.size, key.data,
                               (uint32_t)source.storage);
   }
-  out_parameter->storage = source.storage;
+  out_parameter->storage = ID4_IDEOGRAM4_DIT_PARAMETER_STORAGE_BF16;
   return iree_ok_status();
 }
 

@@ -207,8 +207,10 @@ static bool ProgramHasParameter(const id4_pipeline_program_t* program,
         operation->kind != ID4_PIPELINE_PROGRAM_OP_KIND_PARAMETER) {
       continue;
     }
-    if (!iree_string_view_equal(operation->payload.parameter.source_scope,
-                                source_scope)) {
+    if (operation->payload.parameter.source_count == 0 ||
+        !iree_string_view_equal(
+            operation->payload.parameter.sources[0].source_scope,
+            source_scope)) {
       continue;
     }
     const id4_pipeline_program_tensor_record_t* tensor =
@@ -218,6 +220,52 @@ static bool ProgramHasParameter(const id4_pipeline_program_t* program,
     if (!iree_string_view_equal(tensor->name, key)) continue;
     if (tensor->dtype != dtype) continue;
     if (!ShapeEquals(tensor->shape, expected_shape)) continue;
+    return true;
+  }
+  return false;
+}
+
+static bool ProgramHasFp8ScaledBf16ExecutionParameter(
+    const id4_pipeline_program_t* program, iree_string_view_t key,
+    iree_string_view_t scale_key, iree_string_view_t source_scope,
+    id4_pipeline_program_shape_t weight_shape,
+    id4_pipeline_program_shape_t scale_shape) {
+  for (iree_host_size_t i = 0;
+       i < id4_pipeline_program_operation_count(program); ++i) {
+    const id4_pipeline_program_op_t* operation =
+        id4_pipeline_program_operation_at(program, i);
+    if (!operation ||
+        operation->kind != ID4_PIPELINE_PROGRAM_OP_KIND_PARAMETER) {
+      continue;
+    }
+    const id4_pipeline_program_tensor_record_t* tensor =
+        id4_pipeline_program_tensor_at(
+            program, operation->payload.parameter.tensor.ordinal);
+    if (!tensor) continue;
+    if (!iree_string_view_equal(tensor->name, key)) continue;
+    if (tensor->dtype != ID4_PIPELINE_PROGRAM_DTYPE_BF16) continue;
+    if (!ShapeEquals(tensor->shape, weight_shape)) continue;
+    if (operation->payload.parameter.encoding !=
+        ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_FP8_E4M3_SCALED_TO_BF16) {
+      continue;
+    }
+    if (operation->payload.parameter.source_count != 2) continue;
+    const id4_pipeline_program_parameter_source_t* weight_source =
+        &operation->payload.parameter.sources[0];
+    const id4_pipeline_program_parameter_source_t* scale_source =
+        &operation->payload.parameter.sources[1];
+    if (!iree_string_view_equal(weight_source->source_scope, source_scope)) {
+      continue;
+    }
+    if (!iree_string_view_equal(weight_source->key, key)) continue;
+    if (weight_source->dtype != ID4_PIPELINE_PROGRAM_DTYPE_F8_E4M3) continue;
+    if (!ShapeEquals(weight_source->shape, weight_shape)) continue;
+    if (!iree_string_view_equal(scale_source->source_scope, source_scope)) {
+      continue;
+    }
+    if (!iree_string_view_equal(scale_source->key, scale_key)) continue;
+    if (scale_source->dtype != ID4_PIPELINE_PROGRAM_DTYPE_F32) continue;
+    if (!ShapeEquals(scale_source->shape, scale_shape)) continue;
     return true;
   }
   return false;
@@ -368,50 +416,35 @@ TEST(Ideogram4DitProgram, AuthorsScaledFp8ProjectionParameterContract) {
 
   id4_pipeline_program_t* program = CreateForwardProgram(&options);
   const uint32_t qkv_size = options.model.hidden_size * 3;
-  EXPECT_TRUE(
-      ProgramHasParameter(program, IREE_SV("layers.0.attention.qkv.weight"),
-                          IREE_SV("fp8"), ID4_PIPELINE_PROGRAM_DTYPE_F8_E4M3,
-                          id4_pipeline_program_make_shape_rank2(
-                              qkv_size, options.model.hidden_size)));
-  EXPECT_TRUE(ProgramHasParameter(
-      program, IREE_SV("layers.0.attention.qkv.weight_scale"), IREE_SV("fp8"),
-      ID4_PIPELINE_PROGRAM_DTYPE_F32,
+  EXPECT_TRUE(ProgramHasFp8ScaledBf16ExecutionParameter(
+      program, IREE_SV("layers.0.attention.qkv.weight"),
+      IREE_SV("layers.0.attention.qkv.weight_scale"), IREE_SV("fp8"),
+      id4_pipeline_program_make_shape_rank2(qkv_size,
+                                            options.model.hidden_size),
       id4_pipeline_program_make_shape_rank1(qkv_size)));
-  EXPECT_TRUE(ProgramHasParameter(
-      program, IREE_SV("layers.0.attention.o.weight"), IREE_SV("fp8"),
-      ID4_PIPELINE_PROGRAM_DTYPE_F8_E4M3,
+  EXPECT_TRUE(ProgramHasFp8ScaledBf16ExecutionParameter(
+      program, IREE_SV("layers.0.attention.o.weight"),
+      IREE_SV("layers.0.attention.o.weight_scale"), IREE_SV("fp8"),
       id4_pipeline_program_make_shape_rank2(options.model.hidden_size,
-                                            options.model.hidden_size)));
-  EXPECT_TRUE(ProgramHasParameter(
-      program, IREE_SV("layers.0.attention.o.weight_scale"), IREE_SV("fp8"),
-      ID4_PIPELINE_PROGRAM_DTYPE_F32,
+                                            options.model.hidden_size),
       id4_pipeline_program_make_shape_rank1(options.model.hidden_size)));
-  EXPECT_TRUE(ProgramHasParameter(
-      program, IREE_SV("layers.0.feed_forward.w1.weight"), IREE_SV("fp8"),
-      ID4_PIPELINE_PROGRAM_DTYPE_F8_E4M3,
+  EXPECT_TRUE(ProgramHasFp8ScaledBf16ExecutionParameter(
+      program, IREE_SV("layers.0.feed_forward.w1.weight"),
+      IREE_SV("layers.0.feed_forward.w1.weight_scale"), IREE_SV("fp8"),
       id4_pipeline_program_make_shape_rank2(options.model.intermediate_size,
-                                            options.model.hidden_size)));
-  EXPECT_TRUE(ProgramHasParameter(
-      program, IREE_SV("layers.0.feed_forward.w1.weight_scale"), IREE_SV("fp8"),
-      ID4_PIPELINE_PROGRAM_DTYPE_F32,
+                                            options.model.hidden_size),
       id4_pipeline_program_make_shape_rank1(options.model.intermediate_size)));
-  EXPECT_TRUE(ProgramHasParameter(
-      program, IREE_SV("layers.0.feed_forward.w3.weight"), IREE_SV("fp8"),
-      ID4_PIPELINE_PROGRAM_DTYPE_F8_E4M3,
+  EXPECT_TRUE(ProgramHasFp8ScaledBf16ExecutionParameter(
+      program, IREE_SV("layers.0.feed_forward.w3.weight"),
+      IREE_SV("layers.0.feed_forward.w3.weight_scale"), IREE_SV("fp8"),
       id4_pipeline_program_make_shape_rank2(options.model.intermediate_size,
-                                            options.model.hidden_size)));
-  EXPECT_TRUE(ProgramHasParameter(
-      program, IREE_SV("layers.0.feed_forward.w3.weight_scale"), IREE_SV("fp8"),
-      ID4_PIPELINE_PROGRAM_DTYPE_F32,
+                                            options.model.hidden_size),
       id4_pipeline_program_make_shape_rank1(options.model.intermediate_size)));
-  EXPECT_TRUE(ProgramHasParameter(
-      program, IREE_SV("layers.0.feed_forward.w2.weight"), IREE_SV("fp8"),
-      ID4_PIPELINE_PROGRAM_DTYPE_F8_E4M3,
+  EXPECT_TRUE(ProgramHasFp8ScaledBf16ExecutionParameter(
+      program, IREE_SV("layers.0.feed_forward.w2.weight"),
+      IREE_SV("layers.0.feed_forward.w2.weight_scale"), IREE_SV("fp8"),
       id4_pipeline_program_make_shape_rank2(options.model.hidden_size,
-                                            options.model.intermediate_size)));
-  EXPECT_TRUE(ProgramHasParameter(
-      program, IREE_SV("layers.0.feed_forward.w2.weight_scale"), IREE_SV("fp8"),
-      ID4_PIPELINE_PROGRAM_DTYPE_F32,
+                                            options.model.intermediate_size),
       id4_pipeline_program_make_shape_rank1(options.model.hidden_size)));
 
   id4_pipeline_program_release(program);

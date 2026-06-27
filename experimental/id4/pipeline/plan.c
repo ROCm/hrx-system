@@ -100,6 +100,59 @@ static uint32_t id4_pipeline_plan_calculate_topology_fingerprint(
   return value;
 }
 
+static void id4_pipeline_plan_release_parameter_load_sources(
+    iree_host_size_t source_count,
+    const id4_pipeline_parameter_load_source_t* sources,
+    iree_allocator_t host_allocator) {
+  if (!sources) return;
+  id4_pipeline_parameter_load_source_t* mutable_sources =
+      (id4_pipeline_parameter_load_source_t*)sources;
+  for (iree_host_size_t i = 0; i < source_count; ++i) {
+    id4_pipeline_string_release(mutable_sources[i].source_scope,
+                                host_allocator);
+    id4_pipeline_string_release(mutable_sources[i].key, host_allocator);
+  }
+  iree_allocator_free(host_allocator, mutable_sources);
+}
+
+static iree_status_t id4_pipeline_plan_copy_parameter_load_sources(
+    iree_host_size_t source_count,
+    const id4_pipeline_parameter_load_source_t* sources,
+    iree_allocator_t host_allocator,
+    const id4_pipeline_parameter_load_source_t** out_sources) {
+  *out_sources = NULL;
+  if (source_count == 0) return iree_ok_status();
+  if (!sources) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "parameter load source array is required");
+  }
+  id4_pipeline_parameter_load_source_t* target_sources = NULL;
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(host_allocator, source_count,
+                                                   sizeof(target_sources[0]),
+                                                   (void**)&target_sources));
+  memset(target_sources, 0, source_count * sizeof(target_sources[0]));
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0; i < source_count && iree_status_is_ok(status);
+       ++i) {
+    target_sources[i].dtype = sources[i].dtype;
+    target_sources[i].shape = sources[i].shape;
+    target_sources[i].byte_length = sources[i].byte_length;
+    status = id4_pipeline_string_clone(sources[i].source_scope, host_allocator,
+                                       &target_sources[i].source_scope);
+    if (iree_status_is_ok(status)) {
+      status = id4_pipeline_string_clone(sources[i].key, host_allocator,
+                                         &target_sources[i].key);
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    *out_sources = target_sources;
+  } else {
+    id4_pipeline_plan_release_parameter_load_sources(
+        source_count, target_sources, host_allocator);
+  }
+  return status;
+}
+
 static void id4_pipeline_plan_destroy(id4_pipeline_plan_t* plan) {
   iree_allocator_t host_allocator = plan->host_allocator;
   for (iree_host_size_t i = 0; i < plan->diagnostic_tap_count; ++i) {
@@ -159,6 +212,9 @@ static void id4_pipeline_plan_destroy(id4_pipeline_plan_t* plan) {
                                 host_allocator);
     id4_pipeline_string_release(plan->parameter_load_steps[i].source_scope,
                                 host_allocator);
+    id4_pipeline_plan_release_parameter_load_sources(
+        plan->parameter_load_steps[i].source_count,
+        plan->parameter_load_steps[i].sources, host_allocator);
   }
   iree_allocator_free(host_allocator, plan->parameter_load_steps);
   for (iree_host_size_t i = 0; i < plan->parameter_slab_count; ++i) {
@@ -301,10 +357,14 @@ static iree_status_t id4_pipeline_plan_copy_parameter_load_steps(
     target->target_slab_index = source->target_slab_index;
     target->request_offset = source->request_offset;
     target->request_count = source->request_count;
+    target->source_count = source->source_count;
     IREE_RETURN_IF_ERROR(id4_pipeline_string_clone(
         source->name, plan->host_allocator, &target->name));
     IREE_RETURN_IF_ERROR(id4_pipeline_string_clone(
         source->source_scope, plan->host_allocator, &target->source_scope));
+    IREE_RETURN_IF_ERROR(id4_pipeline_plan_copy_parameter_load_sources(
+        source->source_count, source->sources, plan->host_allocator,
+        &target->sources));
   }
   return iree_ok_status();
 }
@@ -1411,6 +1471,9 @@ static iree_status_t id4_pipeline_plan_append_parameter_load_step_kind_json(
   switch (kind) {
     case ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_GATHER:
       return id4_pipeline_plan_append_json_string(builder, IREE_SV("gather"));
+    case ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_ENCODE_FP8_E4M3_SCALED_TO_BF16:
+      return id4_pipeline_plan_append_json_string(
+          builder, IREE_SV("encode_fp8_e4m3_scaled_to_bf16"));
     default:
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "unknown parameter load step kind %u",
@@ -1447,6 +1510,37 @@ static iree_status_t id4_pipeline_plan_append_shape_json(
     }
     IREE_RETURN_IF_ERROR(
         iree_string_builder_append_format(builder, "%" PRIu64, shape.dims[i]));
+  }
+  return iree_string_builder_append_cstring(builder, "]");
+}
+
+static iree_status_t id4_pipeline_plan_append_parameter_load_sources_json(
+    iree_string_builder_t* builder, iree_host_size_t source_count,
+    const id4_pipeline_parameter_load_source_t* sources) {
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "["));
+  for (iree_host_size_t i = 0; i < source_count; ++i) {
+    if (i != 0) {
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, ","));
+    }
+    const id4_pipeline_parameter_load_source_t* source = &sources[i];
+    IREE_RETURN_IF_ERROR(
+        iree_string_builder_append_cstring(builder, "{\"source_scope\":"));
+    IREE_RETURN_IF_ERROR(
+        id4_pipeline_plan_append_json_string(builder, source->source_scope));
+    IREE_RETURN_IF_ERROR(
+        iree_string_builder_append_cstring(builder, ",\"key\":"));
+    IREE_RETURN_IF_ERROR(
+        id4_pipeline_plan_append_json_string(builder, source->key));
+    IREE_RETURN_IF_ERROR(
+        iree_string_builder_append_cstring(builder, ",\"dtype\":"));
+    IREE_RETURN_IF_ERROR(id4_pipeline_plan_append_json_string(
+        builder, id4_pipeline_tensor_dtype_format(source->dtype)));
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+        builder, ",\"byte_length\":%" PRIu64 ",\"shape\":",
+        (uint64_t)source->byte_length));
+    IREE_RETURN_IF_ERROR(
+        id4_pipeline_plan_append_shape_json(builder, source->shape));
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "}"));
   }
   return iree_string_builder_append_cstring(builder, "]");
 }
@@ -1764,6 +1858,12 @@ iree_status_t id4_pipeline_plan_format_json(const id4_pipeline_plan_t* plan,
         iree_string_builder_append_cstring(builder, ",\"kind\":"));
     IREE_RETURN_IF_ERROR(id4_pipeline_plan_append_parameter_load_step_kind_json(
         builder, step->kind));
+    if (step->source_count != 0) {
+      IREE_RETURN_IF_ERROR(
+          iree_string_builder_append_cstring(builder, ",\"sources\":"));
+      IREE_RETURN_IF_ERROR(id4_pipeline_plan_append_parameter_load_sources_json(
+          builder, step->source_count, step->sources));
+    }
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
         builder,
         ",\"target_slab_index\":%" PRIhsz ",\"request_offset\":%" PRIhsz

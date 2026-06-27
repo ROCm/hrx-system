@@ -65,6 +65,7 @@ iree_runtime_cc_library(
     hdrs = ["parameter_slab.h"],
     deps = [
         ":diagnostics",
+        ":region",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/io:parameter_provider",

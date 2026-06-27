@@ -24,6 +24,9 @@ extern "C" {
 // Invalid semantic program tensor ordinal.
 #define ID4_PIPELINE_PROGRAM_TENSOR_ORDINAL_INVALID UINT32_MAX
 
+// Maximum provider source tensors used to populate one execution parameter.
+#define ID4_PIPELINE_PROGRAM_PARAMETER_MAX_SOURCE_COUNT 2
+
 // Immutable semantic pipeline program authored by a stage.
 typedef struct id4_pipeline_program_t id4_pipeline_program_t;
 
@@ -121,6 +124,28 @@ typedef struct id4_pipeline_program_tensor_t {
   uint32_t ordinal;
 } id4_pipeline_program_tensor_t;
 
+// Prepare-time transformation from provider sources to execution storage.
+typedef enum id4_pipeline_program_parameter_encoding_e {
+  // Invalid parameter encoding.
+  ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_INVALID = 0,
+  // Copies one provider source tensor directly into execution storage.
+  ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_DIRECT = 1,
+  // Converts FP8 e4m3 source weights and F32 row scales to BF16 storage.
+  ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_FP8_E4M3_SCALED_TO_BF16 = 2,
+} id4_pipeline_program_parameter_encoding_t;
+
+// Provider tensor used while preparing one execution parameter.
+typedef struct id4_pipeline_program_parameter_source_t {
+  // Provider scope containing this source tensor.
+  iree_string_view_t source_scope;
+  // Provider key for this source tensor.
+  iree_string_view_t key;
+  // Scalar element type stored by the provider source.
+  id4_pipeline_program_dtype_t dtype;
+  // Logical shape stored by the provider source.
+  id4_pipeline_program_shape_t shape;
+} id4_pipeline_program_parameter_source_t;
+
 // Tensor metadata copied into a semantic program.
 typedef struct id4_pipeline_program_tensor_record_t {
   // Stable tensor name used for diagnostics, taps, and plan dumps.
@@ -157,8 +182,12 @@ typedef struct id4_pipeline_program_import_op_t {
 
 // Parameter tensor operation payload.
 typedef struct id4_pipeline_program_parameter_op_t {
-  // Provider source scope used when loading this parameter.
-  iree_string_view_t source_scope;
+  // Prepare-time source-to-execution transformation.
+  id4_pipeline_program_parameter_encoding_t encoding;
+  // Number of provider source descriptors.
+  iree_host_size_t source_count;
+  // Provider source descriptors copied into the program.
+  const id4_pipeline_program_parameter_source_t* sources;
   // Initialized tensor whose record name is the provider key.
   id4_pipeline_program_tensor_t tensor;
 } id4_pipeline_program_parameter_op_t;
@@ -278,9 +307,13 @@ typedef struct id4_pipeline_program_parameter_options_t {
   iree_host_size_t structure_size;
   // Extension structure chain; must be NULL for now.
   const void* next;
-  // Provider source scope used when loading this parameter.
-  iree_string_view_t source_scope;
-  // Parameter key and tensor diagnostic name.
+  // Prepare-time source-to-execution transformation.
+  id4_pipeline_program_parameter_encoding_t encoding;
+  // Number of provider source descriptors.
+  iree_host_size_t source_count;
+  // Provider source descriptors borrowed for the call and copied by builder.
+  const id4_pipeline_program_parameter_source_t* sources;
+  // Execution tensor key and diagnostic name.
   iree_string_view_t key;
   // Scalar element type.
   id4_pipeline_program_dtype_t dtype;

@@ -1243,9 +1243,23 @@ static iree_status_t id4_qwen3_vl_program_parameter(
   iree_string_view_t key = iree_string_view_empty();
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_format_parameter_key(
       kind, layer_ordinal, key_buffer, IREE_ARRAYSIZE(key_buffer), &key));
+  const id4_pipeline_program_parameter_source_t sources[] = {
+      {
+          // Provider scope containing the direct parameter tensor.
+          .source_scope = source_scope,
+          // Provider key for the direct parameter tensor.
+          .key = key,
+          // Provider dtype matching the execution tensor.
+          .dtype = dtype,
+          // Provider shape matching the execution tensor.
+          .shape = shape,
+      },
+  };
   id4_pipeline_program_parameter_options_t options = {
       .structure_size = sizeof(options),
-      .source_scope = source_scope,
+      .encoding = ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_DIRECT,
+      .source_count = IREE_ARRAYSIZE(sources),
+      .sources = sources,
       .key = key,
       .dtype = dtype,
       .shape = shape,

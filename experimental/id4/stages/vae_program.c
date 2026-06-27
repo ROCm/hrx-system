@@ -690,10 +690,24 @@ static iree_status_t id4_vae_program_parameter_tensor(
     iree_string_view_t key, id4_pipeline_program_dtype_t dtype,
     id4_pipeline_program_shape_t shape,
     id4_pipeline_program_tensor_t* out_tensor) {
+  const id4_pipeline_program_parameter_source_t sources[] = {
+      {
+          // Provider scope containing the direct parameter tensor.
+          .source_scope = source_scope,
+          // Provider key for the direct parameter tensor.
+          .key = key,
+          // Provider dtype matching the execution tensor.
+          .dtype = dtype,
+          // Provider shape matching the execution tensor.
+          .shape = shape,
+      },
+  };
   id4_pipeline_program_parameter_options_t options;
   memset(&options, 0, sizeof(options));
   options.structure_size = sizeof(options);
-  options.source_scope = source_scope;
+  options.encoding = ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_DIRECT;
+  options.source_count = IREE_ARRAYSIZE(sources);
+  options.sources = sources;
   options.key = key;
   options.dtype = dtype;
   options.shape = shape;

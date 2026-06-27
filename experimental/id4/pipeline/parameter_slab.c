@@ -96,19 +96,146 @@ static iree_status_t id4_pipeline_parameter_load_step_validate_header(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "parameter load step has no name");
   }
-  if (step->kind != ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_GATHER) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "parameter load step '%.*s' has unknown kind %u",
-                            (int)step->name.size, step->name.data,
-                            (uint32_t)step->kind);
-  }
   if (step->request_count == 0) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "parameter load step '%.*s' request count must be nonzero",
         (int)step->name.size, step->name.data);
   }
+  switch (step->kind) {
+    case ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_GATHER:
+      if (step->source_count != 0 || step->sources) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "parameter gather load step '%.*s' must not have encoded sources",
+            (int)step->name.size, step->name.data);
+      }
+      break;
+    case ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_ENCODE_FP8_E4M3_SCALED_TO_BF16:
+      if (step->request_count != 1) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "parameter encode load step '%.*s' must target one request",
+            (int)step->name.size, step->name.data);
+      }
+      if (step->source_count != 2 || !step->sources) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "parameter encode load step '%.*s' must have weight and scale "
+            "sources",
+            (int)step->name.size, step->name.data);
+      }
+      break;
+    default:
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "parameter load step '%.*s' has unknown kind %u",
+                              (int)step->name.size, step->name.data,
+                              (uint32_t)step->kind);
+  }
   return iree_ok_status();
+}
+
+static iree_status_t id4_pipeline_parameter_load_source_validate(
+    const id4_pipeline_parameter_load_source_t* source,
+    iree_string_view_t step_name, iree_host_size_t source_index) {
+  if (iree_string_view_is_empty(source->key)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "parameter load step '%.*s' source %" PRIhsz
+                            " key is required",
+                            (int)step_name.size, step_name.data, source_index);
+  }
+  if (source->shape.rank > ID4_PIPELINE_TENSOR_MAX_RANK) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "parameter load step '%.*s' source %" PRIhsz
+                            " rank %u exceeds max %u",
+                            (int)step_name.size, step_name.data, source_index,
+                            source->shape.rank, ID4_PIPELINE_TENSOR_MAX_RANK);
+  }
+  uint64_t element_count = 1;
+  for (uint32_t i = 0; i < source->shape.rank; ++i) {
+    if (source->shape.dims[i] == 0) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "parameter load step '%.*s' source %" PRIhsz " dimension %u is zero",
+          (int)step_name.size, step_name.data, source_index, i);
+    }
+    if (element_count > UINT64_MAX / source->shape.dims[i]) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "parameter load step '%.*s' source %" PRIhsz
+                              " element count overflows",
+                              (int)step_name.size, step_name.data,
+                              source_index);
+    }
+    element_count *= source->shape.dims[i];
+  }
+  const iree_device_size_t dtype_byte_length =
+      id4_pipeline_tensor_dtype_byte_length(source->dtype);
+  if (dtype_byte_length == 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "parameter load step '%.*s' source %" PRIhsz
+                            " dtype %u is invalid",
+                            (int)step_name.size, step_name.data, source_index,
+                            (uint32_t)source->dtype);
+  }
+  if (element_count > IREE_DEVICE_SIZE_MAX / dtype_byte_length) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "parameter load step '%.*s' source %" PRIhsz
+                            " byte length overflows",
+                            (int)step_name.size, step_name.data, source_index);
+  }
+  const iree_device_size_t byte_length =
+      (iree_device_size_t)element_count * dtype_byte_length;
+  if (source->byte_length != byte_length) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "parameter load step '%.*s' source %" PRIhsz " byte length %" PRIu64
+        " does not match dense length %" PRIu64,
+        (int)step_name.size, step_name.data, source_index,
+        (uint64_t)source->byte_length, (uint64_t)byte_length);
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t
+id4_pipeline_parameter_encode_fp8_e4m3_scaled_to_bf16_step_validate(
+    const id4_pipeline_parameter_load_step_t* step) {
+  const id4_pipeline_parameter_load_source_t* weight_source = &step->sources[0];
+  const id4_pipeline_parameter_load_source_t* scale_source = &step->sources[1];
+  if (weight_source->dtype != ID4_PIPELINE_TENSOR_DTYPE_F8_E4M3) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "parameter encode load step '%.*s' weight source must be f8e4m3",
+        (int)step->name.size, step->name.data);
+  }
+  if (scale_source->dtype != ID4_PIPELINE_TENSOR_DTYPE_F32 ||
+      scale_source->shape.rank != 1 || weight_source->shape.rank == 0 ||
+      scale_source->shape.dims[0] != weight_source->shape.dims[0]) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "parameter encode load step '%.*s' scale source must be f32[output]",
+        (int)step->name.size, step->name.data);
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t id4_pipeline_parameter_load_step_validate_sources(
+    const id4_pipeline_parameter_load_step_t* step) {
+  for (iree_host_size_t i = 0; i < step->source_count; ++i) {
+    IREE_RETURN_IF_ERROR(id4_pipeline_parameter_load_source_validate(
+        &step->sources[i], step->name, i));
+  }
+  switch (step->kind) {
+    case ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_GATHER:
+      return iree_ok_status();
+    case ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_ENCODE_FP8_E4M3_SCALED_TO_BF16:
+      return id4_pipeline_parameter_encode_fp8_e4m3_scaled_to_bf16_step_validate(
+          step);
+    default:
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "parameter load step '%.*s' has unknown kind %u",
+                              (int)step->name.size, step->name.data,
+                              (uint32_t)step->kind);
+  }
 }
 
 static iree_status_t id4_pipeline_parameter_load_step_validate_request_range(
@@ -144,6 +271,7 @@ iree_status_t id4_pipeline_parameter_load_step_validate(
   }
   const id4_pipeline_parameter_slab_plan_t* slab =
       &slabs[step->target_slab_index];
+  IREE_RETURN_IF_ERROR(id4_pipeline_parameter_load_step_validate_sources(step));
   return id4_pipeline_parameter_load_step_validate_request_range(
       step, slab->request_count);
 }
@@ -293,8 +421,20 @@ static iree_status_t id4_pipeline_parameter_load_step_validate_against_loads(
         "parameter load step '%.*s' target slab has no plan",
         (int)step->name.size, step->name.data);
   }
+  IREE_RETURN_IF_ERROR(id4_pipeline_parameter_load_step_validate_sources(step));
   return id4_pipeline_parameter_load_step_validate_request_range(
       step, load->slab->request_count);
+}
+
+static iree_string_view_t id4_pipeline_parameter_load_step_primary_scope(
+    const id4_pipeline_parameter_load_step_t* step) {
+  if (step->kind == ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_GATHER) {
+    return step->source_scope;
+  }
+  if (step->source_count != 0 && step->sources) {
+    return step->sources[0].source_scope;
+  }
+  return iree_string_view_empty();
 }
 
 static id4_pipeline_parameter_slab_diagnostic_t
@@ -487,6 +627,22 @@ iree_status_t id4_pipeline_parameter_slab_set_load(
     const id4_pipeline_parameter_load_step_t* step = &load_steps[i];
     const id4_pipeline_parameter_slab_load_t* load =
         &loads[step->target_slab_index];
+    if (step->kind ==
+        ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_ENCODE_FP8_E4M3_SCALED_TO_BF16) {
+      const iree_string_view_t scope =
+          id4_pipeline_parameter_load_step_primary_scope(step);
+      status = iree_make_status(
+          IREE_STATUS_UNIMPLEMENTED,
+          "parameter load step '%.*s' FP8 e4m3 to BF16 encoder is not "
+          "implemented",
+          (int)step->name.size, step->name.data);
+      status = iree_status_join(
+          status, id4_pipeline_parameter_slab_emit_diagnostic(
+                      load, stage_name, IREE_SV("parameter_slab.load.error"),
+                      IREE_SV("parameter load step encoder is not implemented"),
+                      scope, step->request_offset, diagnostics_sink));
+      break;
+    }
     if (!iree_io_parameter_provider_query_support(provider,
                                                   step->source_scope)) {
       status = iree_make_status(

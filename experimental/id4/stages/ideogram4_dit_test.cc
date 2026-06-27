@@ -404,22 +404,39 @@ TEST(Ideogram4DitStage, PlansExactFp8QkvSourceRule) {
   id4_pipeline_plan_t* plan = nullptr;
   IREE_ASSERT_OK(id4_pipeline_stage_plan(stage, &plan_options, &plan));
 
-  bool found_fp8_load_step = false;
+  bool found_qkv_encode_step = false;
+  const iree_device_size_t qkv_size = model.hidden_size * 3;
   for (iree_host_size_t i = 0;
        i < id4_pipeline_plan_parameter_load_step_count(plan); ++i) {
     const id4_pipeline_parameter_load_step_t* load_step =
         id4_pipeline_plan_parameter_load_step_at(plan, i);
     if (!load_step) continue;
-    if (!iree_string_view_equal(load_step->source_scope, IREE_SV("fp8"))) {
+    if (load_step->kind !=
+        ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_ENCODE_FP8_E4M3_SCALED_TO_BF16) {
       continue;
     }
-    found_fp8_load_step = true;
-    EXPECT_EQ(load_step->request_count, 2u);
+    ASSERT_EQ(load_step->source_count, 2u);
+    if (!iree_string_view_equal(load_step->sources[0].key,
+                                IREE_SV("layers.0.attention.qkv.weight"))) {
+      continue;
+    }
+    found_qkv_encode_step = true;
+    EXPECT_EQ(load_step->request_count, 1u);
+    EXPECT_TRUE(iree_string_view_equal(load_step->sources[0].source_scope,
+                                       IREE_SV("fp8")));
+    EXPECT_EQ(load_step->sources[0].dtype, ID4_PIPELINE_TENSOR_DTYPE_F8_E4M3);
+    EXPECT_EQ(load_step->sources[0].byte_length, qkv_size * model.hidden_size);
+    EXPECT_TRUE(
+        iree_string_view_equal(load_step->sources[1].key,
+                               IREE_SV("layers.0.attention.qkv.weight_scale")));
+    EXPECT_TRUE(iree_string_view_equal(load_step->sources[1].source_scope,
+                                       IREE_SV("fp8")));
+    EXPECT_EQ(load_step->sources[1].dtype, ID4_PIPELINE_TENSOR_DTYPE_F32);
+    EXPECT_EQ(load_step->sources[1].byte_length, qkv_size * sizeof(float));
   }
 
   bool found_qkv_weight = false;
   bool found_qkv_scale = false;
-  const iree_device_size_t qkv_size = model.hidden_size * 3;
   for (iree_host_size_t i = 0; i < id4_pipeline_plan_parameter_slab_count(plan);
        ++i) {
     const id4_pipeline_parameter_slab_plan_t* slab =
@@ -430,18 +447,18 @@ TEST(Ideogram4DitStage, PlansExactFp8QkvSourceRule) {
       if (iree_string_view_equal(request->key,
                                  IREE_SV("layers.0.attention.qkv.weight"))) {
         found_qkv_weight = true;
-        EXPECT_EQ(request->span.length, qkv_size * model.hidden_size);
+        EXPECT_EQ(request->span.length,
+                  qkv_size * model.hidden_size * sizeof(uint16_t));
       } else if (iree_string_view_equal(
                      request->key,
                      IREE_SV("layers.0.attention.qkv.weight_scale"))) {
         found_qkv_scale = true;
-        EXPECT_EQ(request->span.length, qkv_size * sizeof(float));
       }
     }
   }
-  EXPECT_TRUE(found_fp8_load_step);
+  EXPECT_TRUE(found_qkv_encode_step);
   EXPECT_TRUE(found_qkv_weight);
-  EXPECT_TRUE(found_qkv_scale);
+  EXPECT_FALSE(found_qkv_scale);
 
   id4_pipeline_plan_release(plan);
   id4_pipeline_stage_release(stage);
