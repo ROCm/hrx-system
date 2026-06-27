@@ -766,4 +766,20 @@ TEST(Ideogram4DitStageIntegration, PrepareAndIssueBf16LinearInputFixture) {
   });
 }
 
+TEST(Ideogram4DitStageIntegration,
+     PrepareAndIssueMaterializedWmmaAttentionFixture) {
+  RunDitFixture(DitFixtureRunOptions{
+      .activation_format =
+          ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT,
+      .attention_implementation =
+          ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_MATERIALIZED_WMMA,
+      .input_stage = IREE_SV("ideogram4.cond.input"),
+      .expected_tap_prefix = iree_string_view_empty(),
+      .expected_output_name = iree_string_view_empty(),
+      .capture_run_id =
+          IREE_SV("ideogram4_dit_materialized_wmma_attention_integration"),
+      .flags = 0,
+  });
+}
+
 }  // namespace
