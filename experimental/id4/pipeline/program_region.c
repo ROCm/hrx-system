@@ -738,9 +738,12 @@ static iree_status_t id4_pipeline_program_region_lower_tap(
       id4_pipeline_region_copy_tensor(context->options->builder, source_tensor,
                                       target_tensor, IREE_HAL_COPY_FLAG_NONE));
   const iree_hal_memory_barrier_t transfer_to_dispatch_barrier = {
-      // The diagnostic copy writes the capture buffer before following work.
-      .source_scope = IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE,
-      // Following dispatches may read or write tensors in the next epoch.
+      // The diagnostic copy reads the source tensor and writes the capture
+      // buffer before following work.
+      .source_scope = IREE_HAL_ACCESS_SCOPE_TRANSFER_READ |
+                      IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE,
+      // Following dispatches may read or write reused tensors in the next
+      // epoch.
       .target_scope = IREE_HAL_ACCESS_SCOPE_DISPATCH_READ |
                       IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE,
   };

@@ -785,9 +785,11 @@ iree_status_t id4_ideogram4_dit_program_author_transformer_block(
       activation_format == ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_F32_CANONICAL ||
       id4_ideogram4_dit_program_has_diagnostic_tap(diagnostic_tap_names,
                                                    mlp_hidden_name);
+  const bool capture_mlp_hidden_as_f32 =
+      activation_format == ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_F32_CANONICAL;
   const bool capture_ffn_input =
-      capture_mlp_hidden || id4_ideogram4_dit_program_has_diagnostic_tap(
-                                diagnostic_tap_names, ffn_input_name);
+      capture_mlp_hidden_as_f32 || id4_ideogram4_dit_program_has_diagnostic_tap(
+                                       diagnostic_tap_names, ffn_input_name);
 
   id4_pipeline_program_tensor_t ffn_norm1_weight =
       id4_pipeline_program_tensor_invalid();
@@ -849,7 +851,7 @@ iree_status_t id4_ideogram4_dit_program_author_transformer_block(
 
   id4_pipeline_program_tensor_t mlp_hidden =
       id4_pipeline_program_tensor_invalid();
-  if (capture_mlp_hidden) {
+  if (capture_mlp_hidden_as_f32) {
     if (feed_forward_w1_parameter.storage !=
             ID4_IDEOGRAM4_DIT_PARAMETER_STORAGE_BF16 ||
         feed_forward_w3_parameter.storage !=
@@ -990,19 +992,24 @@ iree_status_t id4_ideogram4_dit_program_author_transformer_block(
   const bool capture_mlp_output =
       f32_canonical_activations || id4_ideogram4_dit_program_has_diagnostic_tap(
                                        diagnostic_tap_names, mlp_output_name);
+  const bool capture_mlp_output_as_f32 =
+      capture_mlp_output &&
+      (f32_canonical_activations || capture_mlp_hidden_as_f32 ||
+       feed_forward_w2_parameter.storage ==
+           ID4_IDEOGRAM4_DIT_PARAMETER_STORAGE_BF16);
   const id4_pipeline_program_dtype_t mlp_output_dtype =
-      capture_mlp_output ? ID4_PIPELINE_PROGRAM_DTYPE_F32
-                         : ID4_PIPELINE_PROGRAM_DTYPE_BF16;
+      capture_mlp_output_as_f32 ? ID4_PIPELINE_PROGRAM_DTYPE_F32
+                                : ID4_PIPELINE_PROGRAM_DTYPE_BF16;
   const id4_pipeline_program_shape_t mlp_output_shape =
-      capture_mlp_output ? id4_pipeline_program_make_shape_rank2(
-                               hidden_size, total_token_count)
-                         : id4_pipeline_program_make_shape_rank2(
-                               bf16_token_capacity, hidden_size);
+      capture_mlp_output_as_f32 ? id4_pipeline_program_make_shape_rank2(
+                                      hidden_size, total_token_count)
+                                : id4_pipeline_program_make_shape_rank2(
+                                      bf16_token_capacity, hidden_size);
   IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_acquire_tensor(
       builder, mlp_output_name, mlp_output_dtype, mlp_output_shape,
       &mlp_output));
-  if (capture_mlp_output) {
-    if (capture_mlp_hidden) {
+  if (capture_mlp_output_as_f32) {
+    if (capture_mlp_hidden_as_f32) {
       IREE_RETURN_IF_ERROR(
           id4_ideogram4_dit_program_dispatch_linear_parameter_f32(
               builder, mlp_output_dispatch_name, total_token_count,
@@ -1023,7 +1030,7 @@ iree_status_t id4_ideogram4_dit_program_author_transformer_block(
               feed_forward_w2_parameter.weight, mlp_output));
     }
   } else {
-    if (capture_mlp_hidden) {
+    if (capture_mlp_hidden_as_f32) {
       IREE_RETURN_IF_ERROR(
           id4_ideogram4_dit_program_dispatch_linear_parameter_f32_bf16(
               builder, mlp_output_dispatch_name, total_token_count,
@@ -1076,7 +1083,7 @@ iree_status_t id4_ideogram4_dit_program_author_transformer_block(
       builder, layer_output_name, ID4_PIPELINE_PROGRAM_DTYPE_F32,
       id4_pipeline_program_make_shape_rank2(hidden_size, total_token_count),
       &layer_output));
-  if (capture_mlp_output) {
+  if (capture_mlp_output_as_f32) {
     IREE_RETURN_IF_ERROR(
         id4_ideogram4_dit_program_dispatch_rmsnorm_gated_residual(
             builder, mlp_residual_dispatch_name, total_token_count, hidden_size,
