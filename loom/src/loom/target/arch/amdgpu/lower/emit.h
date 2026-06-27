@@ -323,6 +323,12 @@ iree_status_t loom_amdgpu_emit_f32_to_bf16_lane(
     loom_value_id_t source_lane, loom_type_t lane_type,
     loom_value_id_t* out_lane);
 
+// Emits a software expansion from one FP8 storage byte to one f32 lane.
+iree_status_t loom_amdgpu_emit_fp8_to_f32_lane(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_value_id_t source_byte, loom_scalar_type_t source_element_type,
+    loom_type_t lane_type, loom_value_id_t* out_lane);
+
 // Emits round-to-nearest-even conversion from two f32 lanes to one packed BF16
 // register. The low source becomes the low 16 bits of the result.
 iree_status_t loom_amdgpu_emit_f32_pair_to_packed_bf16(

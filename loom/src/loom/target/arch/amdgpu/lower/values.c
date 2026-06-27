@@ -4994,6 +4994,365 @@ static iree_status_t loom_amdgpu_extract_f16_lane_as_low_bits(
       register_bit_offset, source_register, lane_type, out_lane);
 }
 
+typedef enum loom_amdgpu_fp8_special_policy_e {
+  LOOM_AMDGPU_FP8_SPECIAL_POLICY_IEEE = 0,
+  LOOM_AMDGPU_FP8_SPECIAL_POLICY_FINITE_NAN = 1,
+} loom_amdgpu_fp8_special_policy_t;
+
+typedef struct loom_amdgpu_fp8_decode_format_t {
+  // Number of encoded exponent bits.
+  uint8_t exponent_bits;
+  // Number of encoded mantissa bits.
+  uint8_t mantissa_bits;
+  // Exponent bias used by the FP8 format.
+  uint8_t exponent_bias;
+  // Top-exponent handling policy for infinities and NaNs.
+  loom_amdgpu_fp8_special_policy_t special_policy;
+} loom_amdgpu_fp8_decode_format_t;
+
+static bool loom_amdgpu_fp8_decode_format_from_type(
+    loom_scalar_type_t scalar_type,
+    loom_amdgpu_fp8_decode_format_t* out_format) {
+  switch (scalar_type) {
+    case LOOM_SCALAR_TYPE_F8E4M3:
+      *out_format = (loom_amdgpu_fp8_decode_format_t){
+          .exponent_bits = 4,
+          .mantissa_bits = 3,
+          .exponent_bias = 7,
+          .special_policy = LOOM_AMDGPU_FP8_SPECIAL_POLICY_FINITE_NAN,
+      };
+      return true;
+    case LOOM_SCALAR_TYPE_F8E5M2:
+      *out_format = (loom_amdgpu_fp8_decode_format_t){
+          .exponent_bits = 5,
+          .mantissa_bits = 2,
+          .exponent_bias = 15,
+          .special_policy = LOOM_AMDGPU_FP8_SPECIAL_POLICY_IEEE,
+      };
+      return true;
+    default:
+      return false;
+  }
+}
+
+static iree_status_t loom_amdgpu_emit_vgpr_compare_i32_immediate(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_amdgpu_descriptor_ref_t compare_descriptor_ref,
+    loom_amdgpu_descriptor_ref_t inline_descriptor_ref, loom_value_id_t value,
+    uint32_t immediate, loom_type_t lane_type, loom_type_t mask_lane_type,
+    loom_value_id_t* out_condition) {
+  *out_condition = LOOM_VALUE_ID_INVALID;
+  const loom_low_descriptor_set_t* descriptor_set =
+      loom_low_lower_context_descriptor_set(context);
+  if (immediate <= 64 && loom_amdgpu_descriptor_set_has_ref(
+                             descriptor_set, inline_descriptor_ref)) {
+    loom_named_attr_t attrs[1] = {0};
+    iree_host_size_t attr_count = 0;
+    IREE_RETURN_IF_ERROR(
+        loom_amdgpu_append_i64_attr(context, IREE_SV("rhs"), immediate, attrs,
+                                    IREE_ARRAYSIZE(attrs), &attr_count));
+    const loom_value_id_t operands[] = {value};
+    loom_op_t* low_op = NULL;
+    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_low_op(
+        context, source_op, inline_descriptor_ref, operands,
+        IREE_ARRAYSIZE(operands), loom_make_named_attr_slice(attrs, attr_count),
+        &mask_lane_type, 1, &low_op));
+    *out_condition = loom_value_slice_get(loom_low_op_results(low_op), 0);
+    return iree_ok_status();
+  }
+
+  loom_value_id_t immediate_value = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_const_u32(
+      context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_MOV_B32, immediate,
+      lane_type, &immediate_value));
+  const loom_value_id_t operands[] = {value, immediate_value};
+  loom_op_t* low_op = NULL;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_low_op(
+      context, source_op, compare_descriptor_ref, operands,
+      IREE_ARRAYSIZE(operands), loom_make_named_attr_slice(NULL, 0),
+      &mask_lane_type, 1, &low_op));
+  *out_condition = loom_value_slice_get(loom_low_op_results(low_op), 0);
+  return iree_ok_status();
+}
+
+static iree_status_t loom_amdgpu_emit_vgpr_cndmask(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_value_id_t false_value, loom_value_id_t true_value,
+    loom_value_id_t condition, loom_type_t lane_type,
+    loom_value_id_t* out_value) {
+  *out_value = LOOM_VALUE_ID_INVALID;
+  const loom_value_id_t operands[] = {false_value, true_value, condition};
+  loom_op_t* low_op = NULL;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_low_op(
+      context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_CNDMASK_B32, operands,
+      IREE_ARRAYSIZE(operands), loom_make_named_attr_slice(NULL, 0), &lane_type,
+      1, &low_op));
+  *out_value = loom_value_slice_get(loom_low_op_results(low_op), 0);
+  return iree_ok_status();
+}
+
+static iree_status_t loom_amdgpu_emit_vgpr_cndmask_true_immediate(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_value_id_t false_value, uint32_t true_value, loom_value_id_t condition,
+    loom_type_t lane_type, loom_value_id_t* out_value) {
+  *out_value = LOOM_VALUE_ID_INVALID;
+  loom_low_lower_resolved_descriptor_t descriptor = {0};
+  bool descriptor_present = false;
+  if (true_value <= 64) {
+    IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_descriptor_ref_if_present(
+        context, LOOM_AMDGPU_DESCRIPTOR_REF_V_CNDMASK_B32_SRC1_INLINE,
+        &descriptor, &descriptor_present));
+    if (descriptor_present) {
+      loom_named_attr_t attrs[1] = {0};
+      iree_host_size_t attr_count = 0;
+      IREE_RETURN_IF_ERROR(loom_amdgpu_append_i64_attr(
+          context, IREE_SV("true_value"), true_value, attrs,
+          IREE_ARRAYSIZE(attrs), &attr_count));
+      const loom_value_id_t operands[] = {false_value, condition};
+      loom_op_t* low_op = NULL;
+      IREE_RETURN_IF_ERROR(loom_low_lower_emit_resolved_descriptor_op(
+          context, &descriptor, operands, IREE_ARRAYSIZE(operands),
+          loom_make_named_attr_slice(attrs, attr_count), &lane_type, 1,
+          /*tied_results=*/NULL, /*tied_result_count=*/0, source_op->location,
+          &low_op));
+      *out_value = loom_value_slice_get(loom_low_op_results(low_op), 0);
+      return iree_ok_status();
+    }
+  }
+
+  IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_descriptor_ref_if_present(
+      context, LOOM_AMDGPU_DESCRIPTOR_REF_V_CNDMASK_B32_SRC1_LIT, &descriptor,
+      &descriptor_present));
+  if (descriptor_present) {
+    loom_named_attr_t attrs[1] = {0};
+    iree_host_size_t attr_count = 0;
+    IREE_RETURN_IF_ERROR(
+        loom_amdgpu_append_i64_attr(context, IREE_SV("imm32"), true_value,
+                                    attrs, IREE_ARRAYSIZE(attrs), &attr_count));
+    const loom_value_id_t operands[] = {false_value, condition};
+    loom_op_t* low_op = NULL;
+    IREE_RETURN_IF_ERROR(loom_low_lower_emit_resolved_descriptor_op(
+        context, &descriptor, operands, IREE_ARRAYSIZE(operands),
+        loom_make_named_attr_slice(attrs, attr_count), &lane_type, 1,
+        /*tied_results=*/NULL, /*tied_result_count=*/0, source_op->location,
+        &low_op));
+    *out_value = loom_value_slice_get(loom_low_op_results(low_op), 0);
+    return iree_ok_status();
+  }
+
+  loom_value_id_t true_register = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_const_u32(
+      context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_MOV_B32, true_value,
+      lane_type, &true_register));
+  return loom_amdgpu_emit_vgpr_cndmask(context, source_op, false_value,
+                                       true_register, condition, lane_type,
+                                       out_value);
+}
+
+static iree_status_t loom_amdgpu_emit_fp8_leading_index(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_amdgpu_fp8_decode_format_t* format, loom_value_id_t mantissa,
+    loom_type_t lane_type, loom_type_t mask_lane_type,
+    loom_value_id_t* out_value) {
+  *out_value = LOOM_VALUE_ID_INVALID;
+  loom_value_id_t leading_index = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_const_u32(
+      context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_MOV_B32, 0, lane_type,
+      &leading_index));
+  for (uint8_t i = 1; i < format->mantissa_bits; ++i) {
+    loom_value_id_t mask = LOOM_VALUE_ID_INVALID;
+    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_binary_immediate(
+        context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_AND_B32_LIT, mantissa,
+        UINT32_C(1) << i, lane_type, &mask));
+    loom_value_id_t has_bit = LOOM_VALUE_ID_INVALID;
+    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_compare_i32_immediate(
+        context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_CMP_NE_I32,
+        LOOM_AMDGPU_DESCRIPTOR_REF_V_CMP_NE_I32_SRC1_INLINE, mask, 0, lane_type,
+        mask_lane_type, &has_bit));
+    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_cndmask_true_immediate(
+        context, source_op, leading_index, i, has_bit, lane_type,
+        &leading_index));
+  }
+  *out_value = leading_index;
+  return iree_ok_status();
+}
+
+static iree_status_t loom_amdgpu_emit_fp8_subnormal_bits(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_amdgpu_fp8_decode_format_t* format, loom_value_id_t sign_bits,
+    loom_value_id_t mantissa, loom_type_t lane_type, loom_type_t mask_lane_type,
+    loom_value_id_t* out_value) {
+  *out_value = LOOM_VALUE_ID_INVALID;
+  loom_value_id_t leading_index = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fp8_leading_index(
+      context, source_op, format, mantissa, lane_type, mask_lane_type,
+      &leading_index));
+  loom_value_id_t exponent_bits = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_binary_immediate(
+      context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_ADD_U32_LIT,
+      leading_index, 128u - format->exponent_bias - format->mantissa_bits,
+      lane_type, &exponent_bits));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_shift(
+      context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_LSHLREV_B32_LIT, 23,
+      exponent_bits, lane_type, &exponent_bits));
+
+  loom_value_id_t f32_mantissa_shift = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_const_u32(
+      context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_MOV_B32, 23, lane_type,
+      &f32_mantissa_shift));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_binary(
+      context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_SUB_U32,
+      f32_mantissa_shift, leading_index, lane_type, &f32_mantissa_shift));
+  loom_value_id_t fraction_bits = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_binary(
+      context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_LSHLREV_B32,
+      f32_mantissa_shift, mantissa, lane_type, &fraction_bits));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_binary_immediate(
+      context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_AND_B32_LIT,
+      fraction_bits, UINT32_C(0x007FFFFF), lane_type, &fraction_bits));
+
+  loom_value_id_t nonzero_bits = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_binary(
+      context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_OR_B32, sign_bits,
+      exponent_bits, lane_type, &nonzero_bits));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_binary(
+      context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_OR_B32, nonzero_bits,
+      fraction_bits, lane_type, &nonzero_bits));
+  loom_value_id_t is_zero = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_compare_i32_immediate(
+      context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_CMP_EQ_I32,
+      LOOM_AMDGPU_DESCRIPTOR_REF_V_CMP_EQ_I32_SRC1_INLINE, mantissa, 0,
+      lane_type, mask_lane_type, &is_zero));
+  return loom_amdgpu_emit_vgpr_cndmask(context, source_op, nonzero_bits,
+                                       sign_bits, is_zero, lane_type,
+                                       out_value);
+}
+
+iree_status_t loom_amdgpu_emit_fp8_to_f32_lane(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_value_id_t source_byte, loom_scalar_type_t source_element_type,
+    loom_type_t lane_type, loom_value_id_t* out_lane) {
+  *out_lane = LOOM_VALUE_ID_INVALID;
+  loom_amdgpu_fp8_decode_format_t format = {0};
+  if (!loom_amdgpu_fp8_decode_format_from_type(source_element_type, &format)) {
+    IREE_ASSERT_UNREACHABLE("selected AMDGPU FP8 decode source type");
+    IREE_BUILTIN_UNREACHABLE();
+  }
+
+  IREE_RETURN_IF_ERROR(loom_amdgpu_materialize_low_vgpr_b32(
+      context, source_op, source_byte, &source_byte));
+  loom_type_t mask_lane_type = loom_type_none();
+  IREE_RETURN_IF_ERROR(
+      loom_amdgpu_make_sgpr_range_type(context, 2, &mask_lane_type));
+
+  const uint32_t sign_shift = format.exponent_bits + format.mantissa_bits;
+  const uint32_t sign_mask = UINT32_C(1) << sign_shift;
+  const uint32_t mantissa_mask = (UINT32_C(1) << format.mantissa_bits) - 1u;
+  const uint32_t exponent_mask = ((UINT32_C(1) << format.exponent_bits) - 1u)
+                                 << format.mantissa_bits;
+  const uint32_t exponent_all_ones = (UINT32_C(1) << format.exponent_bits) - 1u;
+
+  loom_value_id_t source_i32 = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_binary_immediate(
+      context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_AND_B32_LIT, source_byte,
+      UINT32_C(0xFF), lane_type, &source_i32));
+
+  loom_value_id_t sign_bits = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_binary_immediate(
+      context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_AND_B32_LIT, source_i32,
+      sign_mask, lane_type, &sign_bits));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_shift(
+      context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_LSHLREV_B32_LIT,
+      31u - sign_shift, sign_bits, lane_type, &sign_bits));
+
+  loom_value_id_t exponent = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_binary_immediate(
+      context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_AND_B32_LIT, source_i32,
+      exponent_mask, lane_type, &exponent));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_shift(
+      context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_LSHRREV_B32_LIT,
+      format.mantissa_bits, exponent, lane_type, &exponent));
+
+  loom_value_id_t mantissa = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_binary_immediate(
+      context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_AND_B32_LIT, source_i32,
+      mantissa_mask, lane_type, &mantissa));
+
+  loom_value_id_t normal_exponent = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_binary_immediate(
+      context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_ADD_U32_LIT, exponent,
+      127u - format.exponent_bias, lane_type, &normal_exponent));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_shift(
+      context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_LSHLREV_B32_LIT, 23,
+      normal_exponent, lane_type, &normal_exponent));
+  loom_value_id_t normal_mantissa = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_shift(
+      context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_LSHLREV_B32_LIT,
+      23u - format.mantissa_bits, mantissa, lane_type, &normal_mantissa));
+  loom_value_id_t normal_bits = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_binary(
+      context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_OR_B32, sign_bits,
+      normal_exponent, lane_type, &normal_bits));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_binary(
+      context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_OR_B32, normal_bits,
+      normal_mantissa, lane_type, &normal_bits));
+
+  loom_value_id_t subnormal_bits = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fp8_subnormal_bits(
+      context, source_op, &format, sign_bits, mantissa, lane_type,
+      mask_lane_type, &subnormal_bits));
+  loom_value_id_t exponent_is_zero = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_compare_i32_immediate(
+      context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_CMP_EQ_I32,
+      LOOM_AMDGPU_DESCRIPTOR_REF_V_CMP_EQ_I32_SRC1_INLINE, exponent, 0,
+      lane_type, mask_lane_type, &exponent_is_zero));
+  loom_value_id_t finite_bits = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_cndmask(
+      context, source_op, normal_bits, subnormal_bits, exponent_is_zero,
+      lane_type, &finite_bits));
+
+  loom_value_id_t exponent_is_top = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_compare_i32_immediate(
+      context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_CMP_EQ_I32,
+      LOOM_AMDGPU_DESCRIPTOR_REF_V_CMP_EQ_I32_SRC1_INLINE, exponent,
+      exponent_all_ones, lane_type, mask_lane_type, &exponent_is_top));
+  if (format.special_policy == LOOM_AMDGPU_FP8_SPECIAL_POLICY_IEEE) {
+    loom_value_id_t infinity_bits = LOOM_VALUE_ID_INVALID;
+    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_binary_immediate(
+        context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_OR_B32_LIT, sign_bits,
+        UINT32_C(0x7F800000), lane_type, &infinity_bits));
+    loom_value_id_t mantissa_is_zero = LOOM_VALUE_ID_INVALID;
+    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_compare_i32_immediate(
+        context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_CMP_EQ_I32,
+        LOOM_AMDGPU_DESCRIPTOR_REF_V_CMP_EQ_I32_SRC1_INLINE, mantissa, 0,
+        lane_type, mask_lane_type, &mantissa_is_zero));
+    loom_value_id_t quiet_nan_bits = LOOM_VALUE_ID_INVALID;
+    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_const_u32(
+        context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_MOV_B32,
+        UINT32_C(0x7FC00000), lane_type, &quiet_nan_bits));
+    loom_value_id_t top_bits = LOOM_VALUE_ID_INVALID;
+    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_cndmask(
+        context, source_op, quiet_nan_bits, infinity_bits, mantissa_is_zero,
+        lane_type, &top_bits));
+    return loom_amdgpu_emit_vgpr_cndmask(context, source_op, finite_bits,
+                                         top_bits, exponent_is_top, lane_type,
+                                         out_lane);
+  }
+
+  loom_value_id_t mantissa_is_nan = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_compare_i32_immediate(
+      context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_CMP_EQ_I32,
+      LOOM_AMDGPU_DESCRIPTOR_REF_V_CMP_EQ_I32_SRC1_INLINE, mantissa,
+      mantissa_mask, lane_type, mask_lane_type, &mantissa_is_nan));
+  loom_value_id_t use_nan = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_sgpr_binary(
+      context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_S_AND_B64, exponent_is_top,
+      mantissa_is_nan, mask_lane_type, &use_nan));
+  return loom_amdgpu_emit_vgpr_cndmask_true_immediate(
+      context, source_op, finite_bits, UINT32_C(0x7FC00000), use_nan, lane_type,
+      out_lane);
+}
+
 iree_status_t loom_amdgpu_emit_f32_to_bf16_lane(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_value_id_t source_lane, loom_type_t lane_type,

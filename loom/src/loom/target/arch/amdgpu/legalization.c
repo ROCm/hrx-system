@@ -1167,6 +1167,9 @@ static iree_status_t loom_amdgpu_fragment_store_plan_can_join_group(
     uint16_t register_count, loom_amdgpu_fragment_memory_plan_t* out_plan,
     bool* out_selected) {
   *out_selected = false;
+  if (!loom_vector_fragment_store_isa(op)) {
+    return iree_ok_status();
+  }
   bool selected = false;
   IREE_RETURN_IF_ERROR(loom_amdgpu_analyze_vector_fragment_memory_plan(
       context->module, context->fact_table, context->bundle,

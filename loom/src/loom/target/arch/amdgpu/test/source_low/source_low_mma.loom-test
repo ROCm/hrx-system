@@ -509,6 +509,722 @@ low.kernel.def target(@target) workgroup_size(32, 1, 1) @bf16_wmmar3_fragment_me
 
 amdgpu.target<gfx1100> @target
 
+kernel.def target(@target) @bf16_wmmar3_fp8_rhs_fragment_memory() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%lhs_buffer: buffer, %rhs_buffer: buffer, %out_buffer: buffer) {
+  %base = index.constant 0 : offset
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 16 : index
+  %zero = vector.constant 0.0 : vector<8xf32>
+  %rhs_layout = encoding.layout.strided [1, 16] : encoding<layout>
+  %lhs_view = buffer.view %lhs_buffer[%base] : buffer -> view<16x16xbf16, #dense>
+  %rhs_view = buffer.view %rhs_buffer[%base] : buffer -> view<16x16xf8E4M3, %rhs_layout>
+  %out_view = buffer.view %out_buffer[%base] : buffer -> view<16x16xbf16, #dense>
+  %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] : view<16x16xbf16, #dense> -> vector<16xbf16>
+  %rhs = vector.fragment.load<rhs> %rhs_view[0, 0] shape [%k, %n] : view<16x16xf8E4M3, %rhs_layout> -> vector<16xbf16>
+  %init = vector.fragment<init> %zero shape [%m, %n] : vector<8xf32>
+  %result = vector.mma %lhs, %rhs, %init : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  vector.fragment.store<result> %result, %out_view[0, 0] shape [%m, %n] : vector<8xf32>, view<16x16xbf16, #dense>
+  kernel.return
+}
+
+// ----
+low.kernel.def target(@target) workgroup_size(32, 1, 1) @bf16_wmmar3_fp8_rhs_fragment_memory() asm<amdgpu.rdna3.core> {
+  %45 = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %lhs_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
+  %rhs_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %out_view = resource<hal_binding> {index = 2, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
+  %49 = v_mov_b32 0
+  %init = concat(%49, %49, %49, %49, %49, %49, %49, %49) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x8>
+  %58 = v_and_b32_src0_inline %45, 15
+  %60 = v_lshlrev_b32_src0_inline %58, 5
+  %61 = global_load_b128_saddr %60, %lhs_view
+  %62 = global_load_b128_saddr %60, %lhs_view {offset = 16}
+  %lhs = concat(%61, %62) : (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>) -> reg<amdgpu.vgpr x8>
+  %66 = v_lshlrev_b32_src0_inline %58, 4
+  %67 = global_load_i8_saddr %66, %rhs_view
+  %68 = v_and_b32_lit %67, 255
+  %69 = v_and_b32_lit %68, 128
+  %70 = v_lshlrev_b32_src0_inline %69, 24
+  %71 = v_and_b32_lit %68, 120
+  %72 = v_lshrrev_b32_src0_inline %71, 3
+  %73 = v_and_b32_src0_inline %68, 7
+  %74 = v_add_u32_lit %72, 120
+  %75 = v_lshlrev_b32_src0_inline %74, 23
+  %76 = v_lshlrev_b32_src0_inline %73, 20
+  %77 = v_or_b32 %70, %75
+  %78 = v_or_b32 %77, %76
+  %80 = v_and_b32_src0_inline %73, 2
+  %81 = v_cmp_ne_i32_src1_inline %80 {rhs = 0}
+  %82 = v_cndmask_b32_src1_inline %49, %81 {true_value = 1}
+  %83 = v_and_b32_src0_inline %73, 4
+  %84 = v_cmp_ne_i32_src1_inline %83 {rhs = 0}
+  %85 = v_cndmask_b32_src1_inline %82, %84 {true_value = 2}
+  %86 = v_add_u32_lit %85, 118
+  %87 = v_lshlrev_b32_src0_inline %86, 23
+  %88 = v_mov_b32 23
+  %89 = v_sub_nc_u32 %88, %85
+  %90 = v_lshlrev_b32 %89, %73
+  %91 = v_and_b32_lit %90, 8388607
+  %92 = v_or_b32 %70, %87
+  %93 = v_or_b32 %92, %91
+  %94 = v_cmp_eq_i32_src1_inline %73 {rhs = 0}
+  %95 = v_cndmask_b32 %93, %70, %94
+  %96 = v_cmp_eq_i32_src1_inline %72 {rhs = 0}
+  %97 = v_cndmask_b32 %78, %95, %96
+  %98 = v_cmp_eq_i32_src1_inline %72 {rhs = 15}
+  %99 = v_cmp_eq_i32_src1_inline %73 {rhs = 7}
+  %100 = s_and_b64 %98, %99
+  %101 = v_cndmask_b32_src1_lit %97, %100, 2143289344
+  %102 = global_load_i8_saddr %66, %rhs_view {offset = 1}
+  %103 = v_and_b32_lit %102, 255
+  %104 = v_and_b32_lit %103, 128
+  %105 = v_lshlrev_b32_src0_inline %104, 24
+  %106 = v_and_b32_lit %103, 120
+  %107 = v_lshrrev_b32_src0_inline %106, 3
+  %108 = v_and_b32_src0_inline %103, 7
+  %109 = v_add_u32_lit %107, 120
+  %110 = v_lshlrev_b32_src0_inline %109, 23
+  %111 = v_lshlrev_b32_src0_inline %108, 20
+  %112 = v_or_b32 %105, %110
+  %113 = v_or_b32 %112, %111
+  %115 = v_and_b32_src0_inline %108, 2
+  %116 = v_cmp_ne_i32_src1_inline %115 {rhs = 0}
+  %117 = v_cndmask_b32_src1_inline %49, %116 {true_value = 1}
+  %118 = v_and_b32_src0_inline %108, 4
+  %119 = v_cmp_ne_i32_src1_inline %118 {rhs = 0}
+  %120 = v_cndmask_b32_src1_inline %117, %119 {true_value = 2}
+  %121 = v_add_u32_lit %120, 118
+  %122 = v_lshlrev_b32_src0_inline %121, 23
+  %124 = v_sub_nc_u32 %88, %120
+  %125 = v_lshlrev_b32 %124, %108
+  %126 = v_and_b32_lit %125, 8388607
+  %127 = v_or_b32 %105, %122
+  %128 = v_or_b32 %127, %126
+  %129 = v_cmp_eq_i32_src1_inline %108 {rhs = 0}
+  %130 = v_cndmask_b32 %128, %105, %129
+  %131 = v_cmp_eq_i32_src1_inline %107 {rhs = 0}
+  %132 = v_cndmask_b32 %113, %130, %131
+  %133 = v_cmp_eq_i32_src1_inline %107 {rhs = 15}
+  %134 = v_cmp_eq_i32_src1_inline %108 {rhs = 7}
+  %135 = s_and_b64 %133, %134
+  %136 = v_cndmask_b32_src1_lit %132, %135, 2143289344
+  %137 = v_lshrrev_b32_src0_inline %101, 16
+  %138 = v_and_b32_src0_inline %137, 1
+  %139 = v_add_u32_lit %138, 32767
+  %140 = v_add_u32 %101, %139
+  %141 = v_lshrrev_b32_src0_inline %140, 16
+  %142 = v_lshrrev_b32_src0_inline %136, 16
+  %143 = v_and_b32_src0_inline %142, 1
+  %144 = v_add_u32_lit %143, 32767
+  %145 = v_add_u32 %136, %144
+  %146 = v_lshrrev_b32_src0_inline %145, 16
+  %147 = v_cvt_pk_u16_u32 %141, %146
+  %148 = global_load_i8_saddr %66, %rhs_view {offset = 2}
+  %149 = v_and_b32_lit %148, 255
+  %150 = v_and_b32_lit %149, 128
+  %151 = v_lshlrev_b32_src0_inline %150, 24
+  %152 = v_and_b32_lit %149, 120
+  %153 = v_lshrrev_b32_src0_inline %152, 3
+  %154 = v_and_b32_src0_inline %149, 7
+  %155 = v_add_u32_lit %153, 120
+  %156 = v_lshlrev_b32_src0_inline %155, 23
+  %157 = v_lshlrev_b32_src0_inline %154, 20
+  %158 = v_or_b32 %151, %156
+  %159 = v_or_b32 %158, %157
+  %161 = v_and_b32_src0_inline %154, 2
+  %162 = v_cmp_ne_i32_src1_inline %161 {rhs = 0}
+  %163 = v_cndmask_b32_src1_inline %49, %162 {true_value = 1}
+  %164 = v_and_b32_src0_inline %154, 4
+  %165 = v_cmp_ne_i32_src1_inline %164 {rhs = 0}
+  %166 = v_cndmask_b32_src1_inline %163, %165 {true_value = 2}
+  %167 = v_add_u32_lit %166, 118
+  %168 = v_lshlrev_b32_src0_inline %167, 23
+  %170 = v_sub_nc_u32 %88, %166
+  %171 = v_lshlrev_b32 %170, %154
+  %172 = v_and_b32_lit %171, 8388607
+  %173 = v_or_b32 %151, %168
+  %174 = v_or_b32 %173, %172
+  %175 = v_cmp_eq_i32_src1_inline %154 {rhs = 0}
+  %176 = v_cndmask_b32 %174, %151, %175
+  %177 = v_cmp_eq_i32_src1_inline %153 {rhs = 0}
+  %178 = v_cndmask_b32 %159, %176, %177
+  %179 = v_cmp_eq_i32_src1_inline %153 {rhs = 15}
+  %180 = v_cmp_eq_i32_src1_inline %154 {rhs = 7}
+  %181 = s_and_b64 %179, %180
+  %182 = v_cndmask_b32_src1_lit %178, %181, 2143289344
+  %183 = global_load_i8_saddr %66, %rhs_view {offset = 3}
+  %184 = v_and_b32_lit %183, 255
+  %185 = v_and_b32_lit %184, 128
+  %186 = v_lshlrev_b32_src0_inline %185, 24
+  %187 = v_and_b32_lit %184, 120
+  %188 = v_lshrrev_b32_src0_inline %187, 3
+  %189 = v_and_b32_src0_inline %184, 7
+  %190 = v_add_u32_lit %188, 120
+  %191 = v_lshlrev_b32_src0_inline %190, 23
+  %192 = v_lshlrev_b32_src0_inline %189, 20
+  %193 = v_or_b32 %186, %191
+  %194 = v_or_b32 %193, %192
+  %196 = v_and_b32_src0_inline %189, 2
+  %197 = v_cmp_ne_i32_src1_inline %196 {rhs = 0}
+  %198 = v_cndmask_b32_src1_inline %49, %197 {true_value = 1}
+  %199 = v_and_b32_src0_inline %189, 4
+  %200 = v_cmp_ne_i32_src1_inline %199 {rhs = 0}
+  %201 = v_cndmask_b32_src1_inline %198, %200 {true_value = 2}
+  %202 = v_add_u32_lit %201, 118
+  %203 = v_lshlrev_b32_src0_inline %202, 23
+  %205 = v_sub_nc_u32 %88, %201
+  %206 = v_lshlrev_b32 %205, %189
+  %207 = v_and_b32_lit %206, 8388607
+  %208 = v_or_b32 %186, %203
+  %209 = v_or_b32 %208, %207
+  %210 = v_cmp_eq_i32_src1_inline %189 {rhs = 0}
+  %211 = v_cndmask_b32 %209, %186, %210
+  %212 = v_cmp_eq_i32_src1_inline %188 {rhs = 0}
+  %213 = v_cndmask_b32 %194, %211, %212
+  %214 = v_cmp_eq_i32_src1_inline %188 {rhs = 15}
+  %215 = v_cmp_eq_i32_src1_inline %189 {rhs = 7}
+  %216 = s_and_b64 %214, %215
+  %217 = v_cndmask_b32_src1_lit %213, %216, 2143289344
+  %218 = v_lshrrev_b32_src0_inline %182, 16
+  %219 = v_and_b32_src0_inline %218, 1
+  %220 = v_add_u32_lit %219, 32767
+  %221 = v_add_u32 %182, %220
+  %222 = v_lshrrev_b32_src0_inline %221, 16
+  %223 = v_lshrrev_b32_src0_inline %217, 16
+  %224 = v_and_b32_src0_inline %223, 1
+  %225 = v_add_u32_lit %224, 32767
+  %226 = v_add_u32 %217, %225
+  %227 = v_lshrrev_b32_src0_inline %226, 16
+  %228 = v_cvt_pk_u16_u32 %222, %227
+  %229 = global_load_i8_saddr %66, %rhs_view {offset = 4}
+  %230 = v_and_b32_lit %229, 255
+  %231 = v_and_b32_lit %230, 128
+  %232 = v_lshlrev_b32_src0_inline %231, 24
+  %233 = v_and_b32_lit %230, 120
+  %234 = v_lshrrev_b32_src0_inline %233, 3
+  %235 = v_and_b32_src0_inline %230, 7
+  %236 = v_add_u32_lit %234, 120
+  %237 = v_lshlrev_b32_src0_inline %236, 23
+  %238 = v_lshlrev_b32_src0_inline %235, 20
+  %239 = v_or_b32 %232, %237
+  %240 = v_or_b32 %239, %238
+  %242 = v_and_b32_src0_inline %235, 2
+  %243 = v_cmp_ne_i32_src1_inline %242 {rhs = 0}
+  %244 = v_cndmask_b32_src1_inline %49, %243 {true_value = 1}
+  %245 = v_and_b32_src0_inline %235, 4
+  %246 = v_cmp_ne_i32_src1_inline %245 {rhs = 0}
+  %247 = v_cndmask_b32_src1_inline %244, %246 {true_value = 2}
+  %248 = v_add_u32_lit %247, 118
+  %249 = v_lshlrev_b32_src0_inline %248, 23
+  %251 = v_sub_nc_u32 %88, %247
+  %252 = v_lshlrev_b32 %251, %235
+  %253 = v_and_b32_lit %252, 8388607
+  %254 = v_or_b32 %232, %249
+  %255 = v_or_b32 %254, %253
+  %256 = v_cmp_eq_i32_src1_inline %235 {rhs = 0}
+  %257 = v_cndmask_b32 %255, %232, %256
+  %258 = v_cmp_eq_i32_src1_inline %234 {rhs = 0}
+  %259 = v_cndmask_b32 %240, %257, %258
+  %260 = v_cmp_eq_i32_src1_inline %234 {rhs = 15}
+  %261 = v_cmp_eq_i32_src1_inline %235 {rhs = 7}
+  %262 = s_and_b64 %260, %261
+  %263 = v_cndmask_b32_src1_lit %259, %262, 2143289344
+  %264 = global_load_i8_saddr %66, %rhs_view {offset = 5}
+  %265 = v_and_b32_lit %264, 255
+  %266 = v_and_b32_lit %265, 128
+  %267 = v_lshlrev_b32_src0_inline %266, 24
+  %268 = v_and_b32_lit %265, 120
+  %269 = v_lshrrev_b32_src0_inline %268, 3
+  %270 = v_and_b32_src0_inline %265, 7
+  %271 = v_add_u32_lit %269, 120
+  %272 = v_lshlrev_b32_src0_inline %271, 23
+  %273 = v_lshlrev_b32_src0_inline %270, 20
+  %274 = v_or_b32 %267, %272
+  %275 = v_or_b32 %274, %273
+  %277 = v_and_b32_src0_inline %270, 2
+  %278 = v_cmp_ne_i32_src1_inline %277 {rhs = 0}
+  %279 = v_cndmask_b32_src1_inline %49, %278 {true_value = 1}
+  %280 = v_and_b32_src0_inline %270, 4
+  %281 = v_cmp_ne_i32_src1_inline %280 {rhs = 0}
+  %282 = v_cndmask_b32_src1_inline %279, %281 {true_value = 2}
+  %283 = v_add_u32_lit %282, 118
+  %284 = v_lshlrev_b32_src0_inline %283, 23
+  %286 = v_sub_nc_u32 %88, %282
+  %287 = v_lshlrev_b32 %286, %270
+  %288 = v_and_b32_lit %287, 8388607
+  %289 = v_or_b32 %267, %284
+  %290 = v_or_b32 %289, %288
+  %291 = v_cmp_eq_i32_src1_inline %270 {rhs = 0}
+  %292 = v_cndmask_b32 %290, %267, %291
+  %293 = v_cmp_eq_i32_src1_inline %269 {rhs = 0}
+  %294 = v_cndmask_b32 %275, %292, %293
+  %295 = v_cmp_eq_i32_src1_inline %269 {rhs = 15}
+  %296 = v_cmp_eq_i32_src1_inline %270 {rhs = 7}
+  %297 = s_and_b64 %295, %296
+  %298 = v_cndmask_b32_src1_lit %294, %297, 2143289344
+  %299 = v_lshrrev_b32_src0_inline %263, 16
+  %300 = v_and_b32_src0_inline %299, 1
+  %301 = v_add_u32_lit %300, 32767
+  %302 = v_add_u32 %263, %301
+  %303 = v_lshrrev_b32_src0_inline %302, 16
+  %304 = v_lshrrev_b32_src0_inline %298, 16
+  %305 = v_and_b32_src0_inline %304, 1
+  %306 = v_add_u32_lit %305, 32767
+  %307 = v_add_u32 %298, %306
+  %308 = v_lshrrev_b32_src0_inline %307, 16
+  %309 = v_cvt_pk_u16_u32 %303, %308
+  %310 = global_load_i8_saddr %66, %rhs_view {offset = 6}
+  %311 = v_and_b32_lit %310, 255
+  %312 = v_and_b32_lit %311, 128
+  %313 = v_lshlrev_b32_src0_inline %312, 24
+  %314 = v_and_b32_lit %311, 120
+  %315 = v_lshrrev_b32_src0_inline %314, 3
+  %316 = v_and_b32_src0_inline %311, 7
+  %317 = v_add_u32_lit %315, 120
+  %318 = v_lshlrev_b32_src0_inline %317, 23
+  %319 = v_lshlrev_b32_src0_inline %316, 20
+  %320 = v_or_b32 %313, %318
+  %321 = v_or_b32 %320, %319
+  %323 = v_and_b32_src0_inline %316, 2
+  %324 = v_cmp_ne_i32_src1_inline %323 {rhs = 0}
+  %325 = v_cndmask_b32_src1_inline %49, %324 {true_value = 1}
+  %326 = v_and_b32_src0_inline %316, 4
+  %327 = v_cmp_ne_i32_src1_inline %326 {rhs = 0}
+  %328 = v_cndmask_b32_src1_inline %325, %327 {true_value = 2}
+  %329 = v_add_u32_lit %328, 118
+  %330 = v_lshlrev_b32_src0_inline %329, 23
+  %332 = v_sub_nc_u32 %88, %328
+  %333 = v_lshlrev_b32 %332, %316
+  %334 = v_and_b32_lit %333, 8388607
+  %335 = v_or_b32 %313, %330
+  %336 = v_or_b32 %335, %334
+  %337 = v_cmp_eq_i32_src1_inline %316 {rhs = 0}
+  %338 = v_cndmask_b32 %336, %313, %337
+  %339 = v_cmp_eq_i32_src1_inline %315 {rhs = 0}
+  %340 = v_cndmask_b32 %321, %338, %339
+  %341 = v_cmp_eq_i32_src1_inline %315 {rhs = 15}
+  %342 = v_cmp_eq_i32_src1_inline %316 {rhs = 7}
+  %343 = s_and_b64 %341, %342
+  %344 = v_cndmask_b32_src1_lit %340, %343, 2143289344
+  %345 = global_load_i8_saddr %66, %rhs_view {offset = 7}
+  %346 = v_and_b32_lit %345, 255
+  %347 = v_and_b32_lit %346, 128
+  %348 = v_lshlrev_b32_src0_inline %347, 24
+  %349 = v_and_b32_lit %346, 120
+  %350 = v_lshrrev_b32_src0_inline %349, 3
+  %351 = v_and_b32_src0_inline %346, 7
+  %352 = v_add_u32_lit %350, 120
+  %353 = v_lshlrev_b32_src0_inline %352, 23
+  %354 = v_lshlrev_b32_src0_inline %351, 20
+  %355 = v_or_b32 %348, %353
+  %356 = v_or_b32 %355, %354
+  %358 = v_and_b32_src0_inline %351, 2
+  %359 = v_cmp_ne_i32_src1_inline %358 {rhs = 0}
+  %360 = v_cndmask_b32_src1_inline %49, %359 {true_value = 1}
+  %361 = v_and_b32_src0_inline %351, 4
+  %362 = v_cmp_ne_i32_src1_inline %361 {rhs = 0}
+  %363 = v_cndmask_b32_src1_inline %360, %362 {true_value = 2}
+  %364 = v_add_u32_lit %363, 118
+  %365 = v_lshlrev_b32_src0_inline %364, 23
+  %367 = v_sub_nc_u32 %88, %363
+  %368 = v_lshlrev_b32 %367, %351
+  %369 = v_and_b32_lit %368, 8388607
+  %370 = v_or_b32 %348, %365
+  %371 = v_or_b32 %370, %369
+  %372 = v_cmp_eq_i32_src1_inline %351 {rhs = 0}
+  %373 = v_cndmask_b32 %371, %348, %372
+  %374 = v_cmp_eq_i32_src1_inline %350 {rhs = 0}
+  %375 = v_cndmask_b32 %356, %373, %374
+  %376 = v_cmp_eq_i32_src1_inline %350 {rhs = 15}
+  %377 = v_cmp_eq_i32_src1_inline %351 {rhs = 7}
+  %378 = s_and_b64 %376, %377
+  %379 = v_cndmask_b32_src1_lit %375, %378, 2143289344
+  %380 = v_lshrrev_b32_src0_inline %344, 16
+  %381 = v_and_b32_src0_inline %380, 1
+  %382 = v_add_u32_lit %381, 32767
+  %383 = v_add_u32 %344, %382
+  %384 = v_lshrrev_b32_src0_inline %383, 16
+  %385 = v_lshrrev_b32_src0_inline %379, 16
+  %386 = v_and_b32_src0_inline %385, 1
+  %387 = v_add_u32_lit %386, 32767
+  %388 = v_add_u32 %379, %387
+  %389 = v_lshrrev_b32_src0_inline %388, 16
+  %390 = v_cvt_pk_u16_u32 %384, %389
+  %391 = global_load_i8_saddr %66, %rhs_view {offset = 8}
+  %392 = v_and_b32_lit %391, 255
+  %393 = v_and_b32_lit %392, 128
+  %394 = v_lshlrev_b32_src0_inline %393, 24
+  %395 = v_and_b32_lit %392, 120
+  %396 = v_lshrrev_b32_src0_inline %395, 3
+  %397 = v_and_b32_src0_inline %392, 7
+  %398 = v_add_u32_lit %396, 120
+  %399 = v_lshlrev_b32_src0_inline %398, 23
+  %400 = v_lshlrev_b32_src0_inline %397, 20
+  %401 = v_or_b32 %394, %399
+  %402 = v_or_b32 %401, %400
+  %404 = v_and_b32_src0_inline %397, 2
+  %405 = v_cmp_ne_i32_src1_inline %404 {rhs = 0}
+  %406 = v_cndmask_b32_src1_inline %49, %405 {true_value = 1}
+  %407 = v_and_b32_src0_inline %397, 4
+  %408 = v_cmp_ne_i32_src1_inline %407 {rhs = 0}
+  %409 = v_cndmask_b32_src1_inline %406, %408 {true_value = 2}
+  %410 = v_add_u32_lit %409, 118
+  %411 = v_lshlrev_b32_src0_inline %410, 23
+  %413 = v_sub_nc_u32 %88, %409
+  %414 = v_lshlrev_b32 %413, %397
+  %415 = v_and_b32_lit %414, 8388607
+  %416 = v_or_b32 %394, %411
+  %417 = v_or_b32 %416, %415
+  %418 = v_cmp_eq_i32_src1_inline %397 {rhs = 0}
+  %419 = v_cndmask_b32 %417, %394, %418
+  %420 = v_cmp_eq_i32_src1_inline %396 {rhs = 0}
+  %421 = v_cndmask_b32 %402, %419, %420
+  %422 = v_cmp_eq_i32_src1_inline %396 {rhs = 15}
+  %423 = v_cmp_eq_i32_src1_inline %397 {rhs = 7}
+  %424 = s_and_b64 %422, %423
+  %425 = v_cndmask_b32_src1_lit %421, %424, 2143289344
+  %426 = global_load_i8_saddr %66, %rhs_view {offset = 9}
+  %427 = v_and_b32_lit %426, 255
+  %428 = v_and_b32_lit %427, 128
+  %429 = v_lshlrev_b32_src0_inline %428, 24
+  %430 = v_and_b32_lit %427, 120
+  %431 = v_lshrrev_b32_src0_inline %430, 3
+  %432 = v_and_b32_src0_inline %427, 7
+  %433 = v_add_u32_lit %431, 120
+  %434 = v_lshlrev_b32_src0_inline %433, 23
+  %435 = v_lshlrev_b32_src0_inline %432, 20
+  %436 = v_or_b32 %429, %434
+  %437 = v_or_b32 %436, %435
+  %439 = v_and_b32_src0_inline %432, 2
+  %440 = v_cmp_ne_i32_src1_inline %439 {rhs = 0}
+  %441 = v_cndmask_b32_src1_inline %49, %440 {true_value = 1}
+  %442 = v_and_b32_src0_inline %432, 4
+  %443 = v_cmp_ne_i32_src1_inline %442 {rhs = 0}
+  %444 = v_cndmask_b32_src1_inline %441, %443 {true_value = 2}
+  %445 = v_add_u32_lit %444, 118
+  %446 = v_lshlrev_b32_src0_inline %445, 23
+  %448 = v_sub_nc_u32 %88, %444
+  %449 = v_lshlrev_b32 %448, %432
+  %450 = v_and_b32_lit %449, 8388607
+  %451 = v_or_b32 %429, %446
+  %452 = v_or_b32 %451, %450
+  %453 = v_cmp_eq_i32_src1_inline %432 {rhs = 0}
+  %454 = v_cndmask_b32 %452, %429, %453
+  %455 = v_cmp_eq_i32_src1_inline %431 {rhs = 0}
+  %456 = v_cndmask_b32 %437, %454, %455
+  %457 = v_cmp_eq_i32_src1_inline %431 {rhs = 15}
+  %458 = v_cmp_eq_i32_src1_inline %432 {rhs = 7}
+  %459 = s_and_b64 %457, %458
+  %460 = v_cndmask_b32_src1_lit %456, %459, 2143289344
+  %461 = v_lshrrev_b32_src0_inline %425, 16
+  %462 = v_and_b32_src0_inline %461, 1
+  %463 = v_add_u32_lit %462, 32767
+  %464 = v_add_u32 %425, %463
+  %465 = v_lshrrev_b32_src0_inline %464, 16
+  %466 = v_lshrrev_b32_src0_inline %460, 16
+  %467 = v_and_b32_src0_inline %466, 1
+  %468 = v_add_u32_lit %467, 32767
+  %469 = v_add_u32 %460, %468
+  %470 = v_lshrrev_b32_src0_inline %469, 16
+  %471 = v_cvt_pk_u16_u32 %465, %470
+  %472 = global_load_i8_saddr %66, %rhs_view {offset = 10}
+  %473 = v_and_b32_lit %472, 255
+  %474 = v_and_b32_lit %473, 128
+  %475 = v_lshlrev_b32_src0_inline %474, 24
+  %476 = v_and_b32_lit %473, 120
+  %477 = v_lshrrev_b32_src0_inline %476, 3
+  %478 = v_and_b32_src0_inline %473, 7
+  %479 = v_add_u32_lit %477, 120
+  %480 = v_lshlrev_b32_src0_inline %479, 23
+  %481 = v_lshlrev_b32_src0_inline %478, 20
+  %482 = v_or_b32 %475, %480
+  %483 = v_or_b32 %482, %481
+  %485 = v_and_b32_src0_inline %478, 2
+  %486 = v_cmp_ne_i32_src1_inline %485 {rhs = 0}
+  %487 = v_cndmask_b32_src1_inline %49, %486 {true_value = 1}
+  %488 = v_and_b32_src0_inline %478, 4
+  %489 = v_cmp_ne_i32_src1_inline %488 {rhs = 0}
+  %490 = v_cndmask_b32_src1_inline %487, %489 {true_value = 2}
+  %491 = v_add_u32_lit %490, 118
+  %492 = v_lshlrev_b32_src0_inline %491, 23
+  %494 = v_sub_nc_u32 %88, %490
+  %495 = v_lshlrev_b32 %494, %478
+  %496 = v_and_b32_lit %495, 8388607
+  %497 = v_or_b32 %475, %492
+  %498 = v_or_b32 %497, %496
+  %499 = v_cmp_eq_i32_src1_inline %478 {rhs = 0}
+  %500 = v_cndmask_b32 %498, %475, %499
+  %501 = v_cmp_eq_i32_src1_inline %477 {rhs = 0}
+  %502 = v_cndmask_b32 %483, %500, %501
+  %503 = v_cmp_eq_i32_src1_inline %477 {rhs = 15}
+  %504 = v_cmp_eq_i32_src1_inline %478 {rhs = 7}
+  %505 = s_and_b64 %503, %504
+  %506 = v_cndmask_b32_src1_lit %502, %505, 2143289344
+  %507 = global_load_i8_saddr %66, %rhs_view {offset = 11}
+  %508 = v_and_b32_lit %507, 255
+  %509 = v_and_b32_lit %508, 128
+  %510 = v_lshlrev_b32_src0_inline %509, 24
+  %511 = v_and_b32_lit %508, 120
+  %512 = v_lshrrev_b32_src0_inline %511, 3
+  %513 = v_and_b32_src0_inline %508, 7
+  %514 = v_add_u32_lit %512, 120
+  %515 = v_lshlrev_b32_src0_inline %514, 23
+  %516 = v_lshlrev_b32_src0_inline %513, 20
+  %517 = v_or_b32 %510, %515
+  %518 = v_or_b32 %517, %516
+  %520 = v_and_b32_src0_inline %513, 2
+  %521 = v_cmp_ne_i32_src1_inline %520 {rhs = 0}
+  %522 = v_cndmask_b32_src1_inline %49, %521 {true_value = 1}
+  %523 = v_and_b32_src0_inline %513, 4
+  %524 = v_cmp_ne_i32_src1_inline %523 {rhs = 0}
+  %525 = v_cndmask_b32_src1_inline %522, %524 {true_value = 2}
+  %526 = v_add_u32_lit %525, 118
+  %527 = v_lshlrev_b32_src0_inline %526, 23
+  %529 = v_sub_nc_u32 %88, %525
+  %530 = v_lshlrev_b32 %529, %513
+  %531 = v_and_b32_lit %530, 8388607
+  %532 = v_or_b32 %510, %527
+  %533 = v_or_b32 %532, %531
+  %534 = v_cmp_eq_i32_src1_inline %513 {rhs = 0}
+  %535 = v_cndmask_b32 %533, %510, %534
+  %536 = v_cmp_eq_i32_src1_inline %512 {rhs = 0}
+  %537 = v_cndmask_b32 %518, %535, %536
+  %538 = v_cmp_eq_i32_src1_inline %512 {rhs = 15}
+  %539 = v_cmp_eq_i32_src1_inline %513 {rhs = 7}
+  %540 = s_and_b64 %538, %539
+  %541 = v_cndmask_b32_src1_lit %537, %540, 2143289344
+  %542 = v_lshrrev_b32_src0_inline %506, 16
+  %543 = v_and_b32_src0_inline %542, 1
+  %544 = v_add_u32_lit %543, 32767
+  %545 = v_add_u32 %506, %544
+  %546 = v_lshrrev_b32_src0_inline %545, 16
+  %547 = v_lshrrev_b32_src0_inline %541, 16
+  %548 = v_and_b32_src0_inline %547, 1
+  %549 = v_add_u32_lit %548, 32767
+  %550 = v_add_u32 %541, %549
+  %551 = v_lshrrev_b32_src0_inline %550, 16
+  %552 = v_cvt_pk_u16_u32 %546, %551
+  %553 = global_load_i8_saddr %66, %rhs_view {offset = 12}
+  %554 = v_and_b32_lit %553, 255
+  %555 = v_and_b32_lit %554, 128
+  %556 = v_lshlrev_b32_src0_inline %555, 24
+  %557 = v_and_b32_lit %554, 120
+  %558 = v_lshrrev_b32_src0_inline %557, 3
+  %559 = v_and_b32_src0_inline %554, 7
+  %560 = v_add_u32_lit %558, 120
+  %561 = v_lshlrev_b32_src0_inline %560, 23
+  %562 = v_lshlrev_b32_src0_inline %559, 20
+  %563 = v_or_b32 %556, %561
+  %564 = v_or_b32 %563, %562
+  %566 = v_and_b32_src0_inline %559, 2
+  %567 = v_cmp_ne_i32_src1_inline %566 {rhs = 0}
+  %568 = v_cndmask_b32_src1_inline %49, %567 {true_value = 1}
+  %569 = v_and_b32_src0_inline %559, 4
+  %570 = v_cmp_ne_i32_src1_inline %569 {rhs = 0}
+  %571 = v_cndmask_b32_src1_inline %568, %570 {true_value = 2}
+  %572 = v_add_u32_lit %571, 118
+  %573 = v_lshlrev_b32_src0_inline %572, 23
+  %575 = v_sub_nc_u32 %88, %571
+  %576 = v_lshlrev_b32 %575, %559
+  %577 = v_and_b32_lit %576, 8388607
+  %578 = v_or_b32 %556, %573
+  %579 = v_or_b32 %578, %577
+  %580 = v_cmp_eq_i32_src1_inline %559 {rhs = 0}
+  %581 = v_cndmask_b32 %579, %556, %580
+  %582 = v_cmp_eq_i32_src1_inline %558 {rhs = 0}
+  %583 = v_cndmask_b32 %564, %581, %582
+  %584 = v_cmp_eq_i32_src1_inline %558 {rhs = 15}
+  %585 = v_cmp_eq_i32_src1_inline %559 {rhs = 7}
+  %586 = s_and_b64 %584, %585
+  %587 = v_cndmask_b32_src1_lit %583, %586, 2143289344
+  %588 = global_load_i8_saddr %66, %rhs_view {offset = 13}
+  %589 = v_and_b32_lit %588, 255
+  %590 = v_and_b32_lit %589, 128
+  %591 = v_lshlrev_b32_src0_inline %590, 24
+  %592 = v_and_b32_lit %589, 120
+  %593 = v_lshrrev_b32_src0_inline %592, 3
+  %594 = v_and_b32_src0_inline %589, 7
+  %595 = v_add_u32_lit %593, 120
+  %596 = v_lshlrev_b32_src0_inline %595, 23
+  %597 = v_lshlrev_b32_src0_inline %594, 20
+  %598 = v_or_b32 %591, %596
+  %599 = v_or_b32 %598, %597
+  %601 = v_and_b32_src0_inline %594, 2
+  %602 = v_cmp_ne_i32_src1_inline %601 {rhs = 0}
+  %603 = v_cndmask_b32_src1_inline %49, %602 {true_value = 1}
+  %604 = v_and_b32_src0_inline %594, 4
+  %605 = v_cmp_ne_i32_src1_inline %604 {rhs = 0}
+  %606 = v_cndmask_b32_src1_inline %603, %605 {true_value = 2}
+  %607 = v_add_u32_lit %606, 118
+  %608 = v_lshlrev_b32_src0_inline %607, 23
+  %610 = v_sub_nc_u32 %88, %606
+  %611 = v_lshlrev_b32 %610, %594
+  %612 = v_and_b32_lit %611, 8388607
+  %613 = v_or_b32 %591, %608
+  %614 = v_or_b32 %613, %612
+  %615 = v_cmp_eq_i32_src1_inline %594 {rhs = 0}
+  %616 = v_cndmask_b32 %614, %591, %615
+  %617 = v_cmp_eq_i32_src1_inline %593 {rhs = 0}
+  %618 = v_cndmask_b32 %599, %616, %617
+  %619 = v_cmp_eq_i32_src1_inline %593 {rhs = 15}
+  %620 = v_cmp_eq_i32_src1_inline %594 {rhs = 7}
+  %621 = s_and_b64 %619, %620
+  %622 = v_cndmask_b32_src1_lit %618, %621, 2143289344
+  %623 = v_lshrrev_b32_src0_inline %587, 16
+  %624 = v_and_b32_src0_inline %623, 1
+  %625 = v_add_u32_lit %624, 32767
+  %626 = v_add_u32 %587, %625
+  %627 = v_lshrrev_b32_src0_inline %626, 16
+  %628 = v_lshrrev_b32_src0_inline %622, 16
+  %629 = v_and_b32_src0_inline %628, 1
+  %630 = v_add_u32_lit %629, 32767
+  %631 = v_add_u32 %622, %630
+  %632 = v_lshrrev_b32_src0_inline %631, 16
+  %633 = v_cvt_pk_u16_u32 %627, %632
+  %634 = global_load_i8_saddr %66, %rhs_view {offset = 14}
+  %635 = v_and_b32_lit %634, 255
+  %636 = v_and_b32_lit %635, 128
+  %637 = v_lshlrev_b32_src0_inline %636, 24
+  %638 = v_and_b32_lit %635, 120
+  %639 = v_lshrrev_b32_src0_inline %638, 3
+  %640 = v_and_b32_src0_inline %635, 7
+  %641 = v_add_u32_lit %639, 120
+  %642 = v_lshlrev_b32_src0_inline %641, 23
+  %643 = v_lshlrev_b32_src0_inline %640, 20
+  %644 = v_or_b32 %637, %642
+  %645 = v_or_b32 %644, %643
+  %647 = v_and_b32_src0_inline %640, 2
+  %648 = v_cmp_ne_i32_src1_inline %647 {rhs = 0}
+  %649 = v_cndmask_b32_src1_inline %49, %648 {true_value = 1}
+  %650 = v_and_b32_src0_inline %640, 4
+  %651 = v_cmp_ne_i32_src1_inline %650 {rhs = 0}
+  %652 = v_cndmask_b32_src1_inline %649, %651 {true_value = 2}
+  %653 = v_add_u32_lit %652, 118
+  %654 = v_lshlrev_b32_src0_inline %653, 23
+  %656 = v_sub_nc_u32 %88, %652
+  %657 = v_lshlrev_b32 %656, %640
+  %658 = v_and_b32_lit %657, 8388607
+  %659 = v_or_b32 %637, %654
+  %660 = v_or_b32 %659, %658
+  %661 = v_cmp_eq_i32_src1_inline %640 {rhs = 0}
+  %662 = v_cndmask_b32 %660, %637, %661
+  %663 = v_cmp_eq_i32_src1_inline %639 {rhs = 0}
+  %664 = v_cndmask_b32 %645, %662, %663
+  %665 = v_cmp_eq_i32_src1_inline %639 {rhs = 15}
+  %666 = v_cmp_eq_i32_src1_inline %640 {rhs = 7}
+  %667 = s_and_b64 %665, %666
+  %668 = v_cndmask_b32_src1_lit %664, %667, 2143289344
+  %669 = global_load_i8_saddr %66, %rhs_view {offset = 15}
+  %670 = v_and_b32_lit %669, 255
+  %671 = v_and_b32_lit %670, 128
+  %672 = v_lshlrev_b32_src0_inline %671, 24
+  %673 = v_and_b32_lit %670, 120
+  %674 = v_lshrrev_b32_src0_inline %673, 3
+  %675 = v_and_b32_src0_inline %670, 7
+  %676 = v_add_u32_lit %674, 120
+  %677 = v_lshlrev_b32_src0_inline %676, 23
+  %678 = v_lshlrev_b32_src0_inline %675, 20
+  %679 = v_or_b32 %672, %677
+  %680 = v_or_b32 %679, %678
+  %682 = v_and_b32_src0_inline %675, 2
+  %683 = v_cmp_ne_i32_src1_inline %682 {rhs = 0}
+  %684 = v_cndmask_b32_src1_inline %49, %683 {true_value = 1}
+  %685 = v_and_b32_src0_inline %675, 4
+  %686 = v_cmp_ne_i32_src1_inline %685 {rhs = 0}
+  %687 = v_cndmask_b32_src1_inline %684, %686 {true_value = 2}
+  %688 = v_add_u32_lit %687, 118
+  %689 = v_lshlrev_b32_src0_inline %688, 23
+  %691 = v_sub_nc_u32 %88, %687
+  %692 = v_lshlrev_b32 %691, %675
+  %693 = v_and_b32_lit %692, 8388607
+  %694 = v_or_b32 %672, %689
+  %695 = v_or_b32 %694, %693
+  %696 = v_cmp_eq_i32_src1_inline %675 {rhs = 0}
+  %697 = v_cndmask_b32 %695, %672, %696
+  %698 = v_cmp_eq_i32_src1_inline %674 {rhs = 0}
+  %699 = v_cndmask_b32 %680, %697, %698
+  %700 = v_cmp_eq_i32_src1_inline %674 {rhs = 15}
+  %701 = v_cmp_eq_i32_src1_inline %675 {rhs = 7}
+  %702 = s_and_b64 %700, %701
+  %703 = v_cndmask_b32_src1_lit %699, %702, 2143289344
+  %704 = v_lshrrev_b32_src0_inline %668, 16
+  %705 = v_and_b32_src0_inline %704, 1
+  %706 = v_add_u32_lit %705, 32767
+  %707 = v_add_u32 %668, %706
+  %708 = v_lshrrev_b32_src0_inline %707, 16
+  %709 = v_lshrrev_b32_src0_inline %703, 16
+  %710 = v_and_b32_src0_inline %709, 1
+  %711 = v_add_u32_lit %710, 32767
+  %712 = v_add_u32 %703, %711
+  %713 = v_lshrrev_b32_src0_inline %712, 16
+  %714 = v_cvt_pk_u16_u32 %708, %713
+  %rhs = concat(%147, %228, %309, %390, %471, %552, %633, %714) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x8>
+  %716 = copy %init : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x8>
+  %result = v_wmma_f32_16x16x16_bf16 %lhs, %rhs, %716
+  %718 = s_mov_b32 0
+  %719 = s_mov_b32 8
+  %720 = s_mov_b32 1
+  low.br ^_bb1(%718: reg<amdgpu.sgpr>)
+^_bb1(%44: reg<amdgpu.sgpr>):
+  %721 = s_cmp_lt_i32 %44, %719
+  low.cond_br %721, ^_bb2, ^_bb3 : reg<amdgpu.scc>
+^_bb2:
+  %722 = slice %result[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %723 = v_mov_b32_copy %44
+  %724 = v_mov_b32 1
+  %725 = v_cmp_eq_i32 %723, %724
+  %726 = slice %result[1] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %727 = v_cndmask_b32 %722, %726, %725
+  %728 = v_mov_b32 2
+  %729 = v_cmp_eq_i32 %723, %728
+  %730 = slice %result[2] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %731 = v_cndmask_b32 %727, %730, %729
+  %732 = v_mov_b32 3
+  %733 = v_cmp_eq_i32 %723, %732
+  %734 = slice %result[3] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %735 = v_cndmask_b32 %731, %734, %733
+  %736 = v_mov_b32 4
+  %737 = v_cmp_eq_i32 %723, %736
+  %738 = slice %result[4] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %739 = v_cndmask_b32 %735, %738, %737
+  %740 = v_mov_b32 5
+  %741 = v_cmp_eq_i32 %723, %740
+  %742 = slice %result[5] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %743 = v_cndmask_b32 %739, %742, %741
+  %744 = v_mov_b32 6
+  %745 = v_cmp_eq_i32 %723, %744
+  %746 = slice %result[6] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %747 = v_cndmask_b32 %743, %746, %745
+  %748 = v_mov_b32 7
+  %749 = v_cmp_eq_i32 %723, %748
+  %750 = slice %result[7] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %751 = v_cndmask_b32 %747, %750, %749
+  %752 = v_lshrrev_b32_lit %751, 16
+  %753 = v_and_b32_lit %752, 1
+  %754 = v_add_u32_lit %753, 32767
+  %755 = v_add_u32 %751, %754
+  %756 = v_lshrrev_b32_lit %755, 16
+  %758 = v_mov_b32 15
+  %759 = v_and_b32 %45, %758
+  %760 = v_lshrrev_b32_lit %45, 4
+  %761 = v_lshl_add_u32_shift_imm %44, %760, 1
+  %762 = v_lshl_add_u32_shift_imm %761, %759, 4
+  %763 = v_lshlrev_b32_src0_inline %762, 1
+  global_store_short_saddr %763, %756, %out_view
+  %764 = s_add_u32 %44, %720
+  low.br ^_bb1(%764: reg<amdgpu.sgpr>)
+^_bb3:
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+
 kernel.def target(@target) @bf16_result_fragment_load_to_f32_epilogue() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 32 : index

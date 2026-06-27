@@ -29,6 +29,7 @@ kernel.def target(@target) @bf16_result_fragment_epilogue_two_tiles() {
   %scale = vector.constant 2.0 : vector<8xf32>
   %product0 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %gate0, %scale : vector<8xf32>
   %product1 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %gate1, %scale : vector<8xf32>
+  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
   vector.fragment.store<result> %product0, %output_view[%token_origin, %row_origin0] shape [%sixteen, %sixteen] : vector<8xf32>, view<64x64xbf16, #dense>
   vector.fragment.store<result> %product1, %output_view[%token_origin, %row_origin1] shape [%sixteen, %sixteen] : vector<8xf32>, view<64x64xbf16, #dense>
   kernel.return
@@ -39,6 +40,7 @@ low.kernel.def target(@target) workgroup_size(32, 1, 1) @bf16_result_fragment_ep
   %117 = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %gate_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 8192} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 8192} : reg<amdgpu.sgpr x2>
+  s_waitcnt {lgkmcnt = 0}
   %120 = s_mov_b32 0
   %121 = s_mov_b32 8
   %122 = s_mov_b32 1

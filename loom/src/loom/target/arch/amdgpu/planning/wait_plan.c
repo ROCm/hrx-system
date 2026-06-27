@@ -49,6 +49,8 @@ typedef struct loom_amdgpu_wait_node_state_t {
   uint32_t workgroup_barrier_counter_mask;
   // Whether this structural node forwards wait dependencies to its users.
   bool forwards_dependencies;
+  // Whether the node has any wait-counter effect.
+  bool has_counter_effect;
   // Whether the node has a counter effect without a concrete counter id.
   bool has_generic_counter_effect;
   // Whether a memory read effect uses the target's default read counter.
@@ -262,6 +264,109 @@ static uint32_t loom_amdgpu_wait_counter_mask_from_slot(uint32_t slot) {
 
 static uint32_t loom_amdgpu_wait_counter_slot(uint16_t counter_id) {
   return counter_id - 1;
+}
+
+static uint32_t loom_amdgpu_wait_counter_mask_from_immediate_encoding_id(
+    uint16_t encoding_id) {
+  switch (encoding_id) {
+    case LOOM_AMDGPU_IMMEDIATE_ENCODING_ID_WAIT_COUNTER_VMEM:
+      return LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM;
+    case LOOM_AMDGPU_IMMEDIATE_ENCODING_ID_WAIT_COUNTER_LGKM:
+      return LOOM_AMDGPU_WAIT_COUNTER_MASK_LDS |
+             LOOM_AMDGPU_WAIT_COUNTER_MASK_SMEM;
+    case LOOM_AMDGPU_IMMEDIATE_ENCODING_ID_WAIT_COUNTER_VMEM_LOAD:
+      return LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM_LOAD;
+    case LOOM_AMDGPU_IMMEDIATE_ENCODING_ID_WAIT_COUNTER_VMEM_STORE:
+      return LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM_STORE;
+    case LOOM_AMDGPU_IMMEDIATE_ENCODING_ID_WAIT_COUNTER_LDS:
+      return LOOM_AMDGPU_WAIT_COUNTER_MASK_LDS;
+    case LOOM_AMDGPU_IMMEDIATE_ENCODING_ID_WAIT_COUNTER_SMEM:
+      return LOOM_AMDGPU_WAIT_COUNTER_MASK_SMEM;
+    case LOOM_AMDGPU_IMMEDIATE_ENCODING_ID_WAIT_COUNTER_ALU:
+      return LOOM_AMDGPU_WAIT_COUNTER_MASK_ALU;
+    default:
+      return 0;
+  }
+}
+
+static bool loom_amdgpu_wait_plan_immediate_has_default(
+    const loom_low_immediate_t* immediate) {
+  return iree_any_bit_set(immediate->flags,
+                          LOOM_LOW_IMMEDIATE_FLAG_DEFAULT_VALUE);
+}
+
+static const loom_named_attr_t* loom_amdgpu_wait_plan_find_attr(
+    loom_named_attr_slice_t attrs, loom_string_id_t name_id) {
+  for (iree_host_size_t i = 0; i < attrs.count; ++i) {
+    if (attrs.entries[i].name_id == name_id) return &attrs.entries[i];
+  }
+  return NULL;
+}
+
+static loom_named_attr_slice_t loom_amdgpu_wait_plan_node_attrs(
+    const loom_op_t* op) {
+  if (loom_low_op_isa(op)) return loom_low_op_attrs(op);
+  if (loom_low_const_isa(op)) return loom_low_const_attrs(op);
+  return loom_named_attr_slice_empty();
+}
+
+static int64_t loom_amdgpu_wait_plan_read_i64_immediate(
+    const loom_low_schedule_table_t* schedule,
+    const loom_low_immediate_t* immediate, const loom_op_t* op) {
+  const loom_low_descriptor_set_t* descriptor_set =
+      schedule->target.descriptor_set;
+  const iree_string_view_t immediate_name = loom_low_descriptor_set_string(
+      descriptor_set, immediate->field_name_string_offset);
+  const loom_string_id_t immediate_name_id =
+      loom_module_lookup_string(schedule->module, immediate_name);
+  if (immediate_name_id != LOOM_STRING_ID_INVALID) {
+    const loom_named_attr_t* attr = loom_amdgpu_wait_plan_find_attr(
+        loom_amdgpu_wait_plan_node_attrs(op), immediate_name_id);
+    if (attr != NULL) {
+      if (attr->value.kind != LOOM_ATTR_I64) {
+        IREE_ASSERT_UNREACHABLE("verified low wait immediate type");
+        IREE_BUILTIN_UNREACHABLE();
+      }
+      return loom_attr_as_i64(attr->value);
+    }
+  }
+  if (loom_amdgpu_wait_plan_immediate_has_default(immediate)) {
+    return immediate->default_value;
+  }
+  IREE_ASSERT_UNREACHABLE("verified low wait immediate presence");
+  IREE_BUILTIN_UNREACHABLE();
+}
+
+static void loom_amdgpu_wait_plan_counter_immediate_mask(
+    const loom_amdgpu_wait_plan_builder_t* builder, uint32_t node_index,
+    uint32_t* out_counter_mask, bool* out_has_counter_immediate) {
+  *out_counter_mask = 0;
+  *out_has_counter_immediate = false;
+  const loom_low_schedule_table_t* schedule = builder->schedule;
+  const loom_low_schedule_node_t* node = &schedule->nodes[node_index];
+  if (node->descriptor == NULL) return;
+
+  const loom_low_descriptor_set_t* descriptor_set =
+      schedule->target.descriptor_set;
+  const loom_amdgpu_wait_node_state_t* node_state =
+      &builder->node_states[node_index];
+  for (uint16_t i = 0; i < node->descriptor->immediate_count; ++i) {
+    const loom_low_immediate_t* immediate =
+        &descriptor_set->immediates[node->descriptor->immediate_start + i];
+    const uint32_t counter_mask =
+        loom_amdgpu_wait_counter_mask_from_immediate_encoding_id(
+            immediate->encoding_id) &
+        node_state->hazard_counter_mask;
+    if (counter_mask == 0) continue;
+    *out_has_counter_immediate = true;
+
+    const int64_t immediate_value =
+        loom_amdgpu_wait_plan_read_i64_immediate(schedule, immediate, node->op);
+    if (immediate_value >= 0 &&
+        (uint64_t)immediate_value < immediate->unsigned_max) {
+      *out_counter_mask |= counter_mask;
+    }
+  }
 }
 
 static uint32_t loom_amdgpu_wait_plan_saturating_add_u32(uint32_t lhs,
@@ -1050,6 +1155,7 @@ static iree_status_t loom_amdgpu_wait_plan_classify_effects(
         }
         break;
       case LOOM_LOW_EFFECT_KIND_COUNTER: {
+        node_state->has_counter_effect = true;
         if (effect->counter_id == LOOM_AMDGPU_WAIT_COUNTER_NONE) {
           node_state->has_generic_counter_effect = true;
           break;
@@ -1080,12 +1186,15 @@ static iree_status_t loom_amdgpu_wait_plan_finish_node_classification(
     if (node_state->has_generic_counter_effect) {
       node_state->explicit_wait_counter_mask |= node_state->hazard_counter_mask;
     }
-    if (node_state->has_generic_counter_effect &&
-        node_state->explicit_wait_counter_mask == 0) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "AMDGPU generic counter-effect node %zu has no "
-                              "wait-counter hazard rows",
-                              i);
+    if (node_state->has_counter_effect) {
+      uint32_t counter_immediate_mask = 0;
+      bool has_counter_immediate = false;
+      loom_amdgpu_wait_plan_counter_immediate_mask(builder, (uint32_t)i,
+                                                   &counter_immediate_mask,
+                                                   &has_counter_immediate);
+      if (has_counter_immediate) {
+        node_state->explicit_wait_counter_mask &= counter_immediate_mask;
+      }
     }
     if (node_state->explicit_wait_counter_mask != 0 &&
         node_state->hazard_counter_mask == 0) {

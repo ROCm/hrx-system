@@ -1054,6 +1054,8 @@ typedef enum loom_amdgpu_fragment_memory_payload_form_e {
   LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_STORE_NARROW_F32_TO_BF16 = 2,
   // A f16 low-subword result fragment is widened to f32 lanes before store.
   LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_STORE_EXTEND_F16_TO_F32 = 3,
+  // FP8 memory lanes are expanded to BF16 fragment payload lanes on load.
+  LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_LOAD_FP8_TO_BF16 = 4,
 } loom_amdgpu_fragment_memory_payload_form_t;
 
 typedef struct loom_amdgpu_fragment_memory_plan_t {
@@ -1077,6 +1079,8 @@ typedef struct loom_amdgpu_fragment_memory_plan_t {
   uint16_t payload_register_count;
   // Logical elements packed in each 32-bit fragment register.
   uint16_t elements_per_register;
+  // Scalar element type addressed in the source view.
+  loom_scalar_type_t view_element_type;
   // Byte count of one logical fragment element.
   uint16_t element_byte_count;
   // Direct memory packets emitted in increasing fragment-register order.
