@@ -118,11 +118,10 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--guidance_scale", type=float, default=3.5)
     parser.add_argument(
         "--dit_parameter_format",
-        default="mixed_bf16_fp8_e4m3",
+        default="fp8_e4m3",
         choices=(
             "bf16",
-            "mixed_bf16_fp8_e4m3",
-            "mixed_bf16_fp8_e4m3_all_supported",
+            "fp8_e4m3",
         ),
     )
     parser.add_argument(

@@ -166,9 +166,9 @@ TEST(Id4ToolingRuntimeTest, ParameterProviderSetRoutesByScope) {
           /*.provider=*/&bf16_provider.base,
       },
       {
-          // Native FP8 parameter source scope.
+          // FP8 e4m3 parameter source scope.
           /*.scope=*/IREE_SV("dit_fp8"),
-          // Provider backing the native FP8 source scope.
+          // Provider backing the FP8 e4m3 source scope.
           /*.provider=*/&fp8_provider.base,
       },
   };

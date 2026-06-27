@@ -20,16 +20,15 @@
 IREE_FLAG(string, id4_tokenizer, "",
           "Hugging Face tokenizer JSON used by live generation benchmarks.");
 IREE_FLAG(string, dit_parameter_format, "bf16",
-          "DiT parameter format: bf16, mixed_bf16_fp8_e4m3, or "
-          "mixed_bf16_fp8_e4m3_all_supported.");
+          "DiT parameter format: bf16 or fp8_e4m3.");
 IREE_FLAG(string, dit_activation_format, "bf16_linear_input",
           "DiT activation format: bf16_linear_input or f32_canonical.");
 IREE_FLAG(string, dit_attention_implementation, "streaming",
           "DiT attention implementation: streaming or materialized_wmma.");
 IREE_FLAG(string, dit_conditioned_fp8_scope, "dit_cond_fp8",
-          "Conditioned DiT native-FP8 parameter scope.");
+          "Conditioned DiT FP8 e4m3 source parameter scope.");
 IREE_FLAG(string, dit_unconditioned_fp8_scope, "dit_uncond_fp8",
-          "Unconditioned DiT native-FP8 parameter scope.");
+          "Unconditioned DiT FP8 e4m3 source parameter scope.");
 
 namespace {
 
@@ -269,8 +268,7 @@ static iree_status_t CreateLoadedLiveSession(
   switch (create_options.dit_parameter_format) {
     case ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_BF16:
       break;
-    case ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_MIXED_BF16_FP8_E4M3:
-    case ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_MIXED_BF16_FP8_E4M3_ALL_SUPPORTED:
+    case ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_FP8_E4M3:
       create_options.parameter_scopes.dit_conditioned_fp8 =
           iree_make_cstring_view(FLAG_dit_conditioned_fp8_scope);
       create_options.parameter_scopes.dit_unconditioned_fp8 =
@@ -364,9 +362,9 @@ static iree_status_t CreateParameterProviders(
           /*.out_provider=*/conditioned_bf16.out(),
       },
       {
-          // Conditioned DiT native-FP8 parameter scope.
+          // Conditioned DiT FP8 e4m3 source parameter scope.
           /*.scope=*/conditioned_fp8_scope,
-          // Conditioned DiT native-FP8 provider output.
+          // Conditioned DiT FP8 e4m3 source provider output.
           /*.out_provider=*/conditioned_fp8.out(),
       },
       {
@@ -376,9 +374,9 @@ static iree_status_t CreateParameterProviders(
           /*.out_provider=*/unconditioned_bf16.out(),
       },
       {
-          // Unconditioned DiT native-FP8 parameter scope.
+          // Unconditioned DiT FP8 e4m3 source parameter scope.
           /*.scope=*/unconditioned_fp8_scope,
-          // Unconditioned DiT native-FP8 provider output.
+          // Unconditioned DiT FP8 e4m3 source provider output.
           /*.out_provider=*/unconditioned_fp8.out(),
       },
       {
@@ -399,9 +397,9 @@ static iree_status_t CreateParameterProviders(
           /*.provider=*/conditioned_bf16.get(),
       },
       {
-          // Conditioned DiT native-FP8 parameter scope.
+          // Conditioned DiT FP8 e4m3 source parameter scope.
           /*.scope=*/conditioned_fp8_scope,
-          // Conditioned DiT native-FP8 provider.
+          // Conditioned DiT FP8 e4m3 source provider.
           /*.provider=*/conditioned_fp8.get(),
       },
   };
@@ -418,9 +416,9 @@ static iree_status_t CreateParameterProviders(
           /*.provider=*/unconditioned_bf16.get(),
       },
       {
-          // Unconditioned DiT native-FP8 parameter scope.
+          // Unconditioned DiT FP8 e4m3 source parameter scope.
           /*.scope=*/unconditioned_fp8_scope,
-          // Unconditioned DiT native-FP8 provider.
+          // Unconditioned DiT FP8 e4m3 source provider.
           /*.provider=*/unconditioned_fp8.get(),
       },
   };

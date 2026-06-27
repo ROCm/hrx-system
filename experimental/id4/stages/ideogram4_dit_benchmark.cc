@@ -27,14 +27,13 @@ IREE_FLAG(
 IREE_FLAG(string, id4_plan_output_dir, "",
           "Optional directory receiving benchmark DiT stage plan JSON files.");
 IREE_FLAG(string, dit_parameter_format, "bf16",
-          "DiT parameter format: bf16, mixed_bf16_fp8_e4m3, or "
-          "mixed_bf16_fp8_e4m3_all_supported.");
+          "DiT parameter format: bf16 or fp8_e4m3.");
 IREE_FLAG(string, dit_attention_implementation, "streaming",
           "DiT attention implementation: streaming or materialized_wmma.");
 IREE_FLAG(string, dit_conditioned_fp8_scope, "dit_cond_fp8",
-          "Conditioned DiT native-FP8 parameter scope.");
+          "Conditioned DiT FP8 e4m3 source parameter scope.");
 IREE_FLAG(string, dit_unconditioned_fp8_scope, "dit_uncond_fp8",
-          "Unconditioned DiT native-FP8 parameter scope.");
+          "Unconditioned DiT FP8 e4m3 source parameter scope.");
 
 namespace {
 
@@ -55,7 +54,7 @@ enum class DitBenchmarkIssueMode {
 struct DitBenchmarkBranchConfig {
   // Parameter scope expected by the stage and --parameters flag.
   iree_string_view_t parameter_scope;
-  // Native-FP8 parameter scope used in mixed parameter formats.
+  // FP8 e4m3 source parameter scope used by the FP8 source policy.
   iree_string_view_t fp8_parameter_scope;
   // Fixture stage containing boundary input tensors.
   iree_string_view_t fixture_stage;
@@ -93,7 +92,7 @@ static DitBenchmarkBranchConfig BranchConfig(DitBenchmarkBranch branch) {
       return DitBenchmarkBranchConfig{
           // Conditioned DiT parameter scope.
           /*.parameter_scope=*/IREE_SV("dit_cond"),
-          // Conditioned DiT native-FP8 parameter scope.
+          // Conditioned DiT FP8 e4m3 source parameter scope.
           /*.fp8_parameter_scope=*/
           iree_make_cstring_view(FLAG_dit_conditioned_fp8_scope),
           // Fixture stage carrying conditioned DiT inputs.
@@ -106,7 +105,7 @@ static DitBenchmarkBranchConfig BranchConfig(DitBenchmarkBranch branch) {
       return DitBenchmarkBranchConfig{
           // Unconditioned DiT parameter scope.
           /*.parameter_scope=*/IREE_SV("dit_uncond"),
-          // Unconditioned DiT native-FP8 parameter scope.
+          // Unconditioned DiT FP8 e4m3 source parameter scope.
           /*.fp8_parameter_scope=*/
           iree_make_cstring_view(FLAG_dit_unconditioned_fp8_scope),
           // Fixture stage carrying unconditioned DiT inputs.
@@ -349,15 +348,15 @@ static iree_status_t AttachDitPreparationInputs(DitBenchmarkBranch branch,
       fp8_provider;
   id4_tooling_parameter_provider_request_t requests[] = {
       {
-          // BF16-expanded fallback parameter scope.
+          // BF16-expanded parameter scope.
           .scope = branch_config.parameter_scope,
           // BF16-expanded provider output.
           .out_provider = bf16_provider.out(),
       },
       {
-          // Native-FP8 parameter scope.
+          // FP8 e4m3 source parameter scope.
           .scope = branch_config.fp8_parameter_scope,
-          // Native-FP8 provider output.
+          // FP8 e4m3 source provider output.
           .out_provider = fp8_provider.out(),
       },
   };
@@ -366,15 +365,15 @@ static iree_status_t AttachDitPreparationInputs(DitBenchmarkBranch branch,
 
   const id4_tooling_parameter_provider_set_entry_t entries[] = {
       {
-          // BF16-expanded fallback parameter scope.
+          // BF16-expanded parameter scope.
           .scope = branch_config.parameter_scope,
           // BF16-expanded provider.
           .provider = bf16_provider.get(),
       },
       {
-          // Native-FP8 parameter scope.
+          // FP8 e4m3 source parameter scope.
           .scope = branch_config.fp8_parameter_scope,
-          // Native-FP8 provider.
+          // FP8 e4m3 source provider.
           .provider = fp8_provider.get(),
       },
   };

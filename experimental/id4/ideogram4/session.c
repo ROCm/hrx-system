@@ -439,20 +439,19 @@ static iree_status_t id4_ideogram4_validate_dit_parameter_format(
             "parameter scopes");
       }
       return iree_ok_status();
-    case ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_MIXED_BF16_FP8_E4M3:
-    case ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_MIXED_BF16_FP8_E4M3_ALL_SUPPORTED:
+    case ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_FP8_E4M3:
       if (iree_string_view_is_empty(
               options->parameter_scopes.dit_conditioned_fp8)) {
         return iree_make_status(
             IREE_STATUS_INVALID_ARGUMENT,
-            "Ideogram 4 mixed BF16/FP8 DiT parameter format requires a "
+            "Ideogram 4 FP8 e4m3 DiT parameter format requires a "
             "conditioned FP8 parameter scope");
       }
       if (iree_string_view_is_empty(
               options->parameter_scopes.dit_unconditioned_fp8)) {
         return iree_make_status(
             IREE_STATUS_INVALID_ARGUMENT,
-            "Ideogram 4 mixed BF16/FP8 DiT parameter format requires an "
+            "Ideogram 4 FP8 e4m3 DiT parameter format requires an "
             "unconditioned FP8 parameter scope");
       }
       return iree_ok_status();

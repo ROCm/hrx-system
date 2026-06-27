@@ -33,12 +33,11 @@ IREE_FLAG(string, id4_plan_output, "",
           "Path that receives the planned ID4 DiT stage JSON before "
           "preparation.");
 IREE_FLAG(string, dit_parameter_format, "bf16",
-          "DiT parameter format: bf16, mixed_bf16_fp8_e4m3, or "
-          "mixed_bf16_fp8_e4m3_all_supported.");
+          "DiT parameter format: bf16 or fp8_e4m3.");
 IREE_FLAG(string, dit_conditioned_fp8_scope, "dit_cond_fp8",
-          "Conditioned DiT native-FP8 parameter scope.");
+          "Conditioned DiT FP8 e4m3 source parameter scope.");
 IREE_FLAG(string, dit_unconditioned_fp8_scope, "dit_uncond_fp8",
-          "Unconditioned DiT native-FP8 parameter scope.");
+          "Unconditioned DiT FP8 e4m3 source parameter scope.");
 
 namespace {
 
@@ -289,15 +288,15 @@ static iree_status_t CreateDitParameterProviderFromFlags(
   ParameterProviderRef fp8_provider;
   id4_tooling_parameter_provider_request_t requests[] = {
       {
-          // BF16-expanded fallback parameter scope.
+          // BF16-expanded parameter scope.
           .scope = iree_string_view_empty(),
           // BF16-expanded provider output.
           .out_provider = bf16_provider.out(),
       },
       {
-          // Native-FP8 parameter scope.
+          // FP8 e4m3 source parameter scope.
           .scope = fp8_parameter_scope,
-          // Native-FP8 provider output.
+          // FP8 e4m3 source provider output.
           .out_provider = fp8_provider.out(),
       },
   };
@@ -306,15 +305,15 @@ static iree_status_t CreateDitParameterProviderFromFlags(
 
   const id4_tooling_parameter_provider_set_entry_t entries[] = {
       {
-          // BF16-expanded fallback parameter scope.
+          // BF16-expanded parameter scope.
           .scope = iree_string_view_empty(),
           // BF16-expanded provider.
           .provider = bf16_provider.get(),
       },
       {
-          // Native-FP8 parameter scope.
+          // FP8 e4m3 source parameter scope.
           .scope = fp8_parameter_scope,
-          // Native-FP8 provider.
+          // FP8 e4m3 source provider.
           .provider = fp8_provider.get(),
       },
   };

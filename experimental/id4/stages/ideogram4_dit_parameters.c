@@ -8,20 +8,13 @@
 
 #include <string.h>
 
-static const iree_string_view_t kMixedBf16Fp8LayerLinearWeightSuffixes[] = {
-    IREE_SVL("attention.qkv.weight"),
-    IREE_SVL("attention.o.weight"),
-    IREE_SVL("feed_forward.w2.weight"),
+static const iree_string_view_t kFp8E4m3LayerWeightSuffixes[] = {
+    IREE_SVL("attention.qkv.weight"),   IREE_SVL("attention.o.weight"),
+    IREE_SVL("feed_forward.w1.weight"), IREE_SVL("feed_forward.w3.weight"),
+    IREE_SVL("feed_forward.w2.weight"), IREE_SVL("adaln_modulation.weight"),
 };
 
-static const iree_string_view_t kMixedBf16Fp8AllSupportedLayerWeightSuffixes[] =
-    {
-        IREE_SVL("attention.qkv.weight"),   IREE_SVL("attention.o.weight"),
-        IREE_SVL("feed_forward.w1.weight"), IREE_SVL("feed_forward.w3.weight"),
-        IREE_SVL("feed_forward.w2.weight"), IREE_SVL("adaln_modulation.weight"),
-};
-
-static const iree_string_view_t kMixedBf16Fp8AllSupportedExactWeightKeys[] = {
+static const iree_string_view_t kFp8E4m3ExactWeightKeys[] = {
     IREE_SVL("t_embedding.mlp_in.weight"),
     IREE_SVL("t_embedding.mlp_out.weight"),
     IREE_SVL("adaln_proj.weight"),
@@ -39,20 +32,12 @@ iree_status_t id4_ideogram4_dit_parameter_format_parse(
     *out_format = ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_BF16;
     return iree_ok_status();
   }
-  if (iree_string_view_equal(value, IREE_SV("mixed_bf16_fp8_e4m3"))) {
-    *out_format = ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_MIXED_BF16_FP8_E4M3;
+  if (iree_string_view_equal(value, IREE_SV("fp8_e4m3"))) {
+    *out_format = ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_FP8_E4M3;
     return iree_ok_status();
   }
-  if (iree_string_view_equal(value,
-                             IREE_SV("mixed_bf16_fp8_e4m3_all_supported"))) {
-    *out_format =
-        ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_MIXED_BF16_FP8_E4M3_ALL_SUPPORTED;
-    return iree_ok_status();
-  }
-  return iree_make_status(
-      IREE_STATUS_INVALID_ARGUMENT,
-      "DiT parameter format must be bf16, mixed_bf16_fp8_e4m3, or "
-      "mixed_bf16_fp8_e4m3_all_supported");
+  return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                          "DiT parameter format must be bf16 or fp8_e4m3");
 }
 
 iree_string_view_t id4_ideogram4_dit_parameter_format_name(
@@ -60,10 +45,8 @@ iree_string_view_t id4_ideogram4_dit_parameter_format_name(
   switch (format) {
     case ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_BF16:
       return IREE_SV("bf16");
-    case ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_MIXED_BF16_FP8_E4M3:
-      return IREE_SV("mixed_bf16_fp8_e4m3");
-    case ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_MIXED_BF16_FP8_E4M3_ALL_SUPPORTED:
-      return IREE_SV("mixed_bf16_fp8_e4m3_all_supported");
+    case ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_FP8_E4M3:
+      return IREE_SV("fp8_e4m3");
     default:
       return IREE_SV("invalid");
   }
@@ -74,16 +57,10 @@ static iree_status_t id4_ideogram4_dit_parameter_format_suffixes(
     iree_string_view_list_t* out_suffixes) {
   IREE_ASSERT_ARGUMENT(out_suffixes);
   switch (format) {
-    case ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_MIXED_BF16_FP8_E4M3:
+    case ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_FP8_E4M3:
       *out_suffixes = (iree_string_view_list_t){
-          .count = IREE_ARRAYSIZE(kMixedBf16Fp8LayerLinearWeightSuffixes),
-          .values = kMixedBf16Fp8LayerLinearWeightSuffixes,
-      };
-      return iree_ok_status();
-    case ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_MIXED_BF16_FP8_E4M3_ALL_SUPPORTED:
-      *out_suffixes = (iree_string_view_list_t){
-          .count = IREE_ARRAYSIZE(kMixedBf16Fp8AllSupportedLayerWeightSuffixes),
-          .values = kMixedBf16Fp8AllSupportedLayerWeightSuffixes,
+          .count = IREE_ARRAYSIZE(kFp8E4m3LayerWeightSuffixes),
+          .values = kFp8E4m3LayerWeightSuffixes,
       };
       return iree_ok_status();
     default:
@@ -99,13 +76,10 @@ static iree_status_t id4_ideogram4_dit_parameter_format_exact_keys(
     iree_string_view_list_t* out_exact_keys) {
   IREE_ASSERT_ARGUMENT(out_exact_keys);
   switch (format) {
-    case ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_MIXED_BF16_FP8_E4M3:
-      *out_exact_keys = iree_string_view_list_empty();
-      return iree_ok_status();
-    case ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_MIXED_BF16_FP8_E4M3_ALL_SUPPORTED:
+    case ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_FP8_E4M3:
       *out_exact_keys = (iree_string_view_list_t){
-          .count = IREE_ARRAYSIZE(kMixedBf16Fp8AllSupportedExactWeightKeys),
-          .values = kMixedBf16Fp8AllSupportedExactWeightKeys,
+          .count = IREE_ARRAYSIZE(kFp8E4m3ExactWeightKeys),
+          .values = kFp8E4m3ExactWeightKeys,
       };
       return iree_ok_status();
     default:
@@ -135,13 +109,11 @@ iree_status_t id4_ideogram4_dit_parameter_source_rule_list_initialize(
   switch (format) {
     case ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_BF16:
       return iree_ok_status();
-    case ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_MIXED_BF16_FP8_E4M3:
-    case ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_MIXED_BF16_FP8_E4M3_ALL_SUPPORTED:
+    case ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_FP8_E4M3:
       if (iree_string_view_is_empty(fp8_parameter_scope)) {
         return iree_make_status(
             IREE_STATUS_INVALID_ARGUMENT,
-            "mixed native-FP8 DiT parameter format requires an FP8 "
-            "parameter scope");
+            "FP8 e4m3 DiT parameter format requires an FP8 parameter scope");
       }
       break;
     default:

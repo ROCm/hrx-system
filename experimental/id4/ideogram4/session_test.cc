@@ -385,7 +385,7 @@ TEST_F(SessionTest, PlansGenerationFromDynamicPromptLength) {
   iree_string_builder_deinitialize(&builder);
 }
 
-TEST_F(SessionTest, PlansMixedBf16Fp8DitSources) {
+TEST_F(SessionTest, PlansFp8E4m3DitSources) {
   TokenizerPtr tokenizer = LoadTokenizer();
   ScopedRequest request;
   IREE_ASSERT_OK(id4_ideogram4_request_parse_json(
@@ -398,7 +398,7 @@ TEST_F(SessionTest, PlansMixedBf16Fp8DitSources) {
   create_options.parameter_scopes.dit_unconditioned_fp8 =
       IREE_SV("dit_uncond_fp8");
   create_options.dit_parameter_format =
-      ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_MIXED_BF16_FP8_E4M3;
+      ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_FP8_E4M3;
   SessionPtr session = CreateLoadedSession(create_options);
 
   id4_ideogram4_generation_plan_options_t plan_options;

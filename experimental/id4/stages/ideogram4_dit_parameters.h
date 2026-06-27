@@ -14,19 +14,14 @@
 extern "C" {
 #endif  // __cplusplus
 
-// DiT parameter storage policy selected for Ideogram 4 DiT stages.
+// DiT parameter source policy selected for Ideogram 4 DiT stages.
 typedef enum id4_ideogram4_dit_parameter_format_e {
-  // Invalid DiT parameter storage policy.
+  // Invalid DiT parameter source policy.
   ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_INVALID = 0,
   // All DiT parameters are sourced from BF16-expanded parameter scopes.
   ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_BF16 = 1,
-  // Supported DiT weights are sourced from native scaled FP8 scopes while
-  // other DiT parameters remain sourced from BF16-expanded scopes.
-  ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_MIXED_BF16_FP8_E4M3 = 2,
-  // All currently implemented native scaled FP8 DiT linear weights are sourced
-  // from FP8 scopes while unsupported parameters remain sourced from
-  // BF16-expanded scopes.
-  ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_MIXED_BF16_FP8_E4M3_ALL_SUPPORTED = 3,
+  // Upstream FP8 linear weights are sourced as e4m3 values plus F32 row scales.
+  ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_FP8_E4M3 = 2,
 } id4_ideogram4_dit_parameter_format_t;
 
 // Owned exact-source rule list generated from one parameter format policy.

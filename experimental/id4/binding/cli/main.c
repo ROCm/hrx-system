@@ -33,16 +33,15 @@ IREE_FLAG(string, prompt_json_file, "",
           "Path to a JSON prompt/configuration payload for one generation.");
 IREE_FLAG(string, output, "", "Output image path.");
 IREE_FLAG(string, dit_parameter_format, "bf16",
-          "DiT parameter format: bf16, mixed_bf16_fp8_e4m3, or "
-          "mixed_bf16_fp8_e4m3_all_supported.");
+          "DiT parameter format: bf16 or fp8_e4m3.");
 IREE_FLAG(string, dit_activation_format, "bf16_linear_input",
           "DiT activation format: bf16_linear_input or f32_canonical.");
 IREE_FLAG(string, dit_attention_implementation, "streaming",
           "DiT attention implementation: streaming or materialized_wmma.");
 IREE_FLAG(string, dit_conditioned_fp8_scope, "dit_cond_fp8",
-          "Conditioned DiT native-FP8 parameter scope.");
+          "Conditioned DiT FP8 e4m3 source parameter scope.");
 IREE_FLAG(string, dit_unconditioned_fp8_scope, "dit_uncond_fp8",
-          "Unconditioned DiT native-FP8 parameter scope.");
+          "Unconditioned DiT FP8 e4m3 source parameter scope.");
 IREE_FLAG(string, vae_tiling_mode, "disabled",
           "VAE tiling mode: disabled, explicit_tile_size, relative_tile_size, "
           "or memory_budget.");
@@ -499,8 +498,7 @@ static iree_status_t id4_cli_create_loaded_session(
   switch (session_options.dit_parameter_format) {
     case ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_BF16:
       break;
-    case ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_MIXED_BF16_FP8_E4M3:
-    case ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_MIXED_BF16_FP8_E4M3_ALL_SUPPORTED:
+    case ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_FP8_E4M3:
       session_options.parameter_scopes.dit_conditioned_fp8 =
           iree_make_cstring_view(FLAG_dit_conditioned_fp8_scope);
       session_options.parameter_scopes.dit_unconditioned_fp8 =
@@ -615,9 +613,9 @@ static iree_status_t id4_cli_create_parameter_providers(
             .out_provider = &dit_conditioned_bf16,
         },
         {
-            // Conditioned DiT native-FP8 parameter scope.
+            // Conditioned DiT FP8 e4m3 source parameter scope.
             .scope = dit_conditioned_fp8_scope,
-            // Conditioned DiT native-FP8 provider output.
+            // Conditioned DiT FP8 e4m3 source provider output.
             .out_provider = &dit_conditioned_fp8,
         },
         {
@@ -627,9 +625,9 @@ static iree_status_t id4_cli_create_parameter_providers(
             .out_provider = &dit_unconditioned_bf16,
         },
         {
-            // Unconditioned DiT native-FP8 parameter scope.
+            // Unconditioned DiT FP8 e4m3 source parameter scope.
             .scope = dit_unconditioned_fp8_scope,
-            // Unconditioned DiT native-FP8 provider output.
+            // Unconditioned DiT FP8 e4m3 source provider output.
             .out_provider = &dit_unconditioned_fp8,
         },
         {
@@ -650,9 +648,9 @@ static iree_status_t id4_cli_create_parameter_providers(
               .provider = dit_conditioned_bf16,
           },
           {
-              // Conditioned DiT native-FP8 parameter scope.
+              // Conditioned DiT FP8 e4m3 source parameter scope.
               .scope = dit_conditioned_fp8_scope,
-              // Conditioned DiT native-FP8 provider.
+              // Conditioned DiT FP8 e4m3 source provider.
               .provider = dit_conditioned_fp8,
           },
       };
@@ -669,9 +667,9 @@ static iree_status_t id4_cli_create_parameter_providers(
               .provider = dit_unconditioned_bf16,
           },
           {
-              // Unconditioned DiT native-FP8 parameter scope.
+              // Unconditioned DiT FP8 e4m3 source parameter scope.
               .scope = dit_unconditioned_fp8_scope,
-              // Unconditioned DiT native-FP8 provider.
+              // Unconditioned DiT FP8 e4m3 source provider.
               .provider = dit_unconditioned_fp8,
           },
       };
