@@ -37,6 +37,8 @@ IREE_FLAG(string, dit_parameter_format, "bf16",
           "mixed_bf16_fp8_e4m3_all_supported.");
 IREE_FLAG(string, dit_activation_format, "bf16_linear_input",
           "DiT activation format: bf16_linear_input or f32_canonical.");
+IREE_FLAG(string, dit_attention_implementation, "streaming",
+          "DiT attention implementation: streaming or materialized_wmma.");
 IREE_FLAG(string, dit_conditioned_fp8_scope, "dit_cond_fp8",
           "Conditioned DiT native-FP8 parameter scope.");
 IREE_FLAG(string, dit_unconditioned_fp8_scope, "dit_uncond_fp8",
@@ -170,6 +172,25 @@ static iree_status_t id4_cli_parse_dit_activation_format(
   return iree_make_status(
       IREE_STATUS_INVALID_ARGUMENT,
       "--dit_activation_format must be bf16_linear_input or f32_canonical");
+}
+
+static iree_status_t id4_cli_parse_dit_attention_implementation(
+    id4_ideogram4_dit_attention_implementation_t* out_implementation) {
+  IREE_ASSERT_ARGUMENT(out_implementation);
+  iree_string_view_t value =
+      iree_make_cstring_view(FLAG_dit_attention_implementation);
+  if (iree_string_view_equal(value, IREE_SV("streaming"))) {
+    *out_implementation = ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_STREAMING;
+    return iree_ok_status();
+  }
+  if (iree_string_view_equal(value, IREE_SV("materialized_wmma"))) {
+    *out_implementation =
+        ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_MATERIALIZED_WMMA;
+    return iree_ok_status();
+  }
+  return iree_make_status(
+      IREE_STATUS_INVALID_ARGUMENT,
+      "--dit_attention_implementation must be streaming or materialized_wmma");
 }
 
 static iree_status_t id4_cli_parse_positive_u32_flag(
@@ -516,6 +537,8 @@ static iree_status_t id4_cli_make_generation_plan_policy(
   policy.structure_size = sizeof(policy);
   IREE_RETURN_IF_ERROR(
       id4_cli_parse_dit_activation_format(&policy.dit_activation_format));
+  IREE_RETURN_IF_ERROR(id4_cli_parse_dit_attention_implementation(
+      &policy.dit_attention_implementation));
   IREE_RETURN_IF_ERROR(id4_cli_parse_vae_tiling_config(&policy.vae_tiling));
   *out_policy = policy;
   return iree_ok_status();

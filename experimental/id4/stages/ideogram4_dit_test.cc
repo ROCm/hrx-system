@@ -108,6 +108,8 @@ TEST(Ideogram4DitStage, PlansPreludeSliceFromRequestConfig) {
       ID4_IDEOGRAM4_DIT_CONDITIONING_MODE_UNCONDITIONED;
   dit_options.activation_format =
       ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_F32_CANONICAL;
+  dit_options.attention_implementation =
+      ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_STREAMING;
 
   id4_pipeline_stage_plan_options_t plan_options;
   memset(&plan_options, 0, sizeof(plan_options));
@@ -227,6 +229,8 @@ TEST(Ideogram4DitStage, PlansConditionedPreludeSliceFromRequestConfig) {
   dit_options.request.text_token_count = 3;
   dit_options.activation_format =
       ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_F32_CANONICAL;
+  dit_options.attention_implementation =
+      ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_STREAMING;
 
   id4_pipeline_stage_plan_options_t plan_options;
   memset(&plan_options, 0, sizeof(plan_options));
@@ -307,6 +311,51 @@ TEST(Ideogram4DitStage, PlansConditionedPreludeSliceFromRequestConfig) {
   iree_hal_device_group_release(device_group);
 }
 
+TEST(Ideogram4DitStage, PlansMaterializedWmmaAttention) {
+  iree_hal_device_group_t* device_group =
+      id4::test::CreateLocalSyncDeviceGroup();
+  id4_ideogram4_dit_model_config_t model = MakeModelConfig();
+  id4_pipeline_stage_t* stage = CreateStage(device_group, model);
+
+  id4_pipeline_diagnostics_sink_t diagnostics_sink;
+  id4_pipeline_diagnostics_sink_initialize_ignore(&diagnostics_sink);
+
+  id4_pipeline_stage_load_options_t load_options;
+  memset(&load_options, 0, sizeof(load_options));
+  load_options.structure_size = sizeof(load_options);
+  load_options.diagnostics_sink = &diagnostics_sink;
+  IREE_ASSERT_OK(id4_pipeline_stage_load(stage, &load_options));
+
+  id4_ideogram4_dit_stage_plan_options_t dit_options;
+  memset(&dit_options, 0, sizeof(dit_options));
+  dit_options.structure_size = sizeof(dit_options);
+  dit_options.request.latent_shape =
+      id4_pipeline_program_make_shape_rank4(1, 2, 4, 1);
+  dit_options.request.conditioning_mode =
+      ID4_IDEOGRAM4_DIT_CONDITIONING_MODE_UNCONDITIONED;
+  dit_options.activation_format =
+      ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT;
+  dit_options.attention_implementation =
+      ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_MATERIALIZED_WMMA;
+
+  id4_pipeline_stage_plan_options_t plan_options;
+  memset(&plan_options, 0, sizeof(plan_options));
+  plan_options.structure_size = sizeof(plan_options);
+  plan_options.next = &dit_options;
+  plan_options.device_index = 0;
+  plan_options.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
+  plan_options.diagnostics_sink = &diagnostics_sink;
+
+  id4_pipeline_plan_t* plan = nullptr;
+  IREE_ASSERT_OK(id4_pipeline_stage_plan(stage, &plan_options, &plan));
+  EXPECT_GT(id4_pipeline_plan_memory_slab_count(plan), 0u);
+  EXPECT_GT(id4_pipeline_plan_kernel_count(plan), 0u);
+
+  id4_pipeline_plan_release(plan);
+  id4_pipeline_stage_release(stage);
+  iree_hal_device_group_release(device_group);
+}
+
 TEST(Ideogram4DitStage, PlansExactFp8QkvSourceRule) {
   iree_hal_device_group_t* device_group =
       id4::test::CreateLocalSyncDeviceGroup();
@@ -341,6 +390,8 @@ TEST(Ideogram4DitStage, PlansExactFp8QkvSourceRule) {
       ID4_IDEOGRAM4_DIT_CONDITIONING_MODE_UNCONDITIONED;
   dit_options.activation_format =
       ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_F32_CANONICAL;
+  dit_options.attention_implementation =
+      ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_STREAMING;
 
   id4_pipeline_stage_plan_options_t plan_options;
   memset(&plan_options, 0, sizeof(plan_options));
@@ -445,6 +496,8 @@ TEST(Ideogram4DitStage, RejectsInvalidRequestShape) {
       ID4_IDEOGRAM4_DIT_CONDITIONING_MODE_UNCONDITIONED;
   dit_options.activation_format =
       ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT;
+  dit_options.attention_implementation =
+      ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_STREAMING;
 
   id4_pipeline_stage_plan_options_t plan_options;
   memset(&plan_options, 0, sizeof(plan_options));

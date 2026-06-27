@@ -73,6 +73,8 @@ static id4_ideogram4_generation_plan_policy_t MakeGenerationPolicy() {
   policy.structure_size = sizeof(policy);
   policy.dit_activation_format =
       ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT;
+  policy.dit_attention_implementation =
+      ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_STREAMING;
   policy.vae_tiling.mode = ID4_VAE_TILING_MODE_DISABLED;
   return policy;
 }
@@ -362,6 +364,8 @@ TEST_F(SessionTest, PlansGenerationFromDynamicPromptLength) {
   EXPECT_EQ(long_summary.decoded_image_shape.dims[3], 1u);
   EXPECT_EQ(long_summary.dit_activation_format,
             ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT);
+  EXPECT_EQ(long_summary.dit_attention_implementation,
+            ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_STREAMING);
   EXPECT_EQ(long_summary.vae_tiling.mode, ID4_VAE_TILING_MODE_DISABLED);
 
   iree_string_builder_t builder;
@@ -421,6 +425,8 @@ TEST_F(SessionTest, PlansMixedBf16Fp8DitSources) {
       id4_ideogram4_generation_plan_summary(plan_owner.get(), &summary));
   EXPECT_EQ(summary.dit_activation_format,
             ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT);
+  EXPECT_EQ(summary.dit_attention_implementation,
+            ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_STREAMING);
 
   iree_string_builder_t builder;
   iree_string_builder_initialize(iree_allocator_system(), &builder);

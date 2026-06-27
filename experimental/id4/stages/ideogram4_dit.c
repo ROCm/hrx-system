@@ -186,6 +186,20 @@ static iree_status_t id4_ideogram4_dit_stage_validate_activation_format(
   }
 }
 
+static iree_status_t id4_ideogram4_dit_stage_validate_attention_implementation(
+    id4_ideogram4_dit_attention_implementation_t attention_implementation) {
+  switch (attention_implementation) {
+    case ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_STREAMING:
+    case ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_MATERIALIZED_WMMA:
+      return iree_ok_status();
+    default:
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "Ideogram4 DiT attention implementation %" PRIu32
+                              " is invalid",
+                              (uint32_t)attention_implementation);
+  }
+}
+
 static iree_status_t id4_ideogram4_dit_stage_validate_create_options(
     const id4_ideogram4_dit_stage_create_options_t* options) {
   if (!options) {
@@ -390,6 +404,8 @@ static iree_status_t id4_ideogram4_dit_stage_author_program(
     program_options.model = stage->model;
     program_options.request = dit_options->request;
     program_options.activation_format = dit_options->activation_format;
+    program_options.attention_implementation =
+        dit_options->attention_implementation;
     if (iree_all_bits_set(
             stage_options->flags,
             ID4_PIPELINE_STAGE_PLAN_FLAG_CAPTURE_DIAGNOSTIC_TAPS)) {
@@ -431,6 +447,9 @@ static iree_status_t id4_ideogram4_dit_stage_parse_plan_extension(
       &stage->model, dit_options->request));
   IREE_RETURN_IF_ERROR(id4_ideogram4_dit_stage_validate_activation_format(
       dit_options->activation_format));
+  IREE_RETURN_IF_ERROR(
+      id4_ideogram4_dit_stage_validate_attention_implementation(
+          dit_options->attention_implementation));
   *out_dit_options = dit_options;
   return iree_ok_status();
 }

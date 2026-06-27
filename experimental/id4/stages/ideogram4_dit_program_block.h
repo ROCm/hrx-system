@@ -72,6 +72,8 @@ typedef struct id4_ideogram4_dit_program_block_options_t {
   id4_pipeline_program_tensor_t position_embedding;
   // Activation storage format for internal linear-input producers.
   id4_ideogram4_dit_activation_format_t activation_format;
+  // Attention implementation selected for this transformer block.
+  id4_ideogram4_dit_attention_implementation_t attention_implementation;
   // Diagnostic tap names requested by the stage plan.
   iree_string_view_list_t diagnostic_tap_names;
 } id4_ideogram4_dit_program_block_options_t;
@@ -252,6 +254,18 @@ iree_status_t id4_ideogram4_dit_program_dispatch_qkv_norm_rotary(
     id4_pipeline_program_tensor_t rotated_key,
     id4_pipeline_program_tensor_t value);
 
+iree_status_t id4_ideogram4_dit_program_dispatch_qkv_norm_rotary_packed_value(
+    id4_pipeline_program_builder_t* builder, iree_string_view_t name,
+    uint32_t token_count, uint32_t token_capacity,
+    uint32_t attention_head_count, uint32_t head_size,
+    id4_pipeline_program_tensor_t qkv,
+    id4_pipeline_program_tensor_t norm_q_weight,
+    id4_pipeline_program_tensor_t norm_k_weight,
+    id4_pipeline_program_tensor_t position_embedding,
+    id4_pipeline_program_tensor_t rotated_query,
+    id4_pipeline_program_tensor_t rotated_key,
+    id4_pipeline_program_tensor_t value);
+
 iree_status_t id4_ideogram4_dit_program_dispatch_head_rmsnorm(
     id4_pipeline_program_builder_t* builder, iree_string_view_t name,
     uint32_t token_count, uint32_t attention_head_count, uint32_t head_size,
@@ -276,6 +290,30 @@ iree_status_t id4_ideogram4_dit_program_dispatch_attention_bf16(
     id4_pipeline_program_builder_t* builder, iree_string_view_t name,
     uint32_t token_count, uint32_t attention_head_count, uint32_t head_size,
     id4_pipeline_program_tensor_t query, id4_pipeline_program_tensor_t key,
+    id4_pipeline_program_tensor_t value, id4_pipeline_program_tensor_t output);
+
+iree_status_t
+id4_ideogram4_dit_program_dispatch_attention_qk_scores_all_heads_bf16_f32_wmma(
+    id4_pipeline_program_builder_t* builder, iree_string_view_t name,
+    uint32_t valid_token_count, uint32_t padded_token_count,
+    uint32_t attention_head_count, uint32_t head_size,
+    id4_pipeline_program_tensor_t query, id4_pipeline_program_tensor_t key,
+    id4_pipeline_program_tensor_t scores);
+
+iree_status_t
+id4_ideogram4_dit_program_dispatch_attention_softmax_all_heads_f32_bf16(
+    id4_pipeline_program_builder_t* builder, iree_string_view_t name,
+    uint32_t valid_token_count, uint32_t padded_token_count,
+    uint32_t attention_head_count, uint32_t head_size,
+    id4_pipeline_program_tensor_t scores,
+    id4_pipeline_program_tensor_t probabilities);
+
+iree_status_t
+id4_ideogram4_dit_program_dispatch_attention_pv_all_heads_bf16_bf16_wmma(
+    id4_pipeline_program_builder_t* builder, iree_string_view_t name,
+    uint32_t valid_token_count, uint32_t padded_token_count,
+    uint32_t attention_head_count, uint32_t head_size,
+    id4_pipeline_program_tensor_t probabilities,
     id4_pipeline_program_tensor_t value, id4_pipeline_program_tensor_t output);
 
 iree_status_t id4_ideogram4_dit_program_dense_f32(

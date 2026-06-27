@@ -841,6 +841,17 @@ static iree_status_t id4_ideogram4_validate_generation_policy(
           "Ideogram 4 generation DiT activation format %" PRIu32 " is invalid",
           (uint32_t)policy.dit_activation_format);
   }
+  switch (policy.dit_attention_implementation) {
+    case ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_STREAMING:
+    case ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_MATERIALIZED_WMMA:
+      break;
+    default:
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "Ideogram 4 generation DiT attention implementation %" PRIu32
+          " is invalid",
+          (uint32_t)policy.dit_attention_implementation);
+  }
   switch (policy.vae_tiling.mode) {
     case ID4_VAE_TILING_MODE_DISABLED:
     case ID4_VAE_TILING_MODE_EXPLICIT_TILE_SIZE:
@@ -955,6 +966,8 @@ static iree_status_t id4_ideogram4_plan_generation_dit(
   dit_options.request.conditioning_mode = conditioning_mode;
   dit_options.request.text_token_count = text_token_count;
   dit_options.activation_format = options->policy.dit_activation_format;
+  dit_options.attention_implementation =
+      options->policy.dit_attention_implementation;
   return id4_ideogram4_plan_stage(stage, &dit_options, options, out_plan);
 }
 
@@ -1022,6 +1035,8 @@ static iree_status_t id4_ideogram4_plan_generation_stages(
       id4_ideogram4_generation_decoded_image_shape(
           session->decode_model, plan->summary.diffusion_latent_shape);
   plan->summary.dit_activation_format = options->policy.dit_activation_format;
+  plan->summary.dit_attention_implementation =
+      options->policy.dit_attention_implementation;
   plan->summary.vae_tiling = options->policy.vae_tiling;
 
   iree_status_t status = id4_ideogram4_plan_generation_qwen(
@@ -1397,8 +1412,11 @@ iree_status_t id4_ideogram4_generation_plan_format_json(
   IREE_RETURN_IF_ERROR(id4_ideogram4_generation_plan_append_shape_json(
       builder, plan->summary.decoded_image_shape));
   IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-      builder, ",\"dit_activation_format\":%u,\"vae_tiling\":",
-      (uint32_t)plan->summary.dit_activation_format));
+      builder,
+      ",\"dit_activation_format\":%u,\"dit_attention_implementation\":%u,"
+      "\"vae_tiling\":",
+      (uint32_t)plan->summary.dit_activation_format,
+      (uint32_t)plan->summary.dit_attention_implementation));
   IREE_RETURN_IF_ERROR(id4_ideogram4_generation_plan_append_tiling_json(
       builder, plan->summary.vae_tiling));
   IREE_RETURN_IF_ERROR(

@@ -343,18 +343,6 @@ _KERNEL_CASES = [
         "target_name": "ideogram4_attention_qk_scores_all_heads_bf16_f32_wmma_small",
     },
     {
-        "actual_case": "@id4_ideogram4_attention_qkv_tail_zero_bf16_small_case",
-        "benchmark": "@id4_ideogram4_attention_qkv_tail_zero_bf16_small",
-        "configs": [
-            "--config=id4.ideogram4.attention_qkv_tail_zero.token_offset=0",
-            "--config=id4.ideogram4.attention_qkv_tail_zero.padded_token_count=16",
-            "--config=id4.ideogram4.attention_qkv_tail_zero.hidden_size=16",
-            "--config=id4.ideogram4.attention_qkv_tail_zero.element_count=256",
-        ],
-        "source": "ideogram4/attention_qkv_tail_zero_bf16.loom",
-        "target_name": "ideogram4_attention_qkv_tail_zero_bf16_small",
-    },
-    {
         "actual_case": "@id4_ideogram4_attention_score_mask_f32_small_case",
         "benchmark": "@id4_ideogram4_attention_score_mask_f32_small",
         "configs": [
@@ -4040,6 +4028,18 @@ _KERNEL_CASES = [
         "target_name": "ideogram4_qkv_norm_rotary_bf16_packed_value_small",
     },
     {
+        "actual_case": "@id4_ideogram4_qkv_norm_rotary_bf16_packed_value_tail_zero_case",
+        "benchmark": "@id4_ideogram4_qkv_norm_rotary_bf16_packed_value_tail_zero",
+        "configs": [
+            "--config=id4.ideogram4.qkv_norm_rotary.token_count=1",
+            "--config=id4.ideogram4.qkv_norm_rotary.attention_head_count=1",
+            "--config=id4.ideogram4.qkv_norm_rotary.head_size=2",
+            "--config=id4.ideogram4.qkv_norm_rotary.value_token_stride=2",
+        ],
+        "source": "ideogram4/qkv_norm_rotary_bf16.loom",
+        "target_name": "ideogram4_qkv_norm_rotary_bf16_packed_value_tail_zero",
+    },
+    {
         "actual_case": "@id4_ideogram4_qkv_norm_rotary_bf16_packed_value_ideogram_shape_case",
         "benchmark": "@id4_ideogram4_qkv_norm_rotary_bf16_packed_value_ideogram_shape",
         "configs": [
@@ -4999,7 +4999,6 @@ _KERNEL_SOURCES = [
     "ideogram4/attention_materialized_bf16_wmma.loom",
     "ideogram4/attention_pv_bf16_bf16_wmma.loom",
     "ideogram4/attention_qk_scores_bf16_f32_wmma.loom",
-    "ideogram4/attention_qkv_tail_zero_bf16.loom",
     "ideogram4/attention_rounded_f32.loom",
     "ideogram4/attention_query_block8_rounded_bf16.loom",
     "ideogram4/attention_query_block8_rounded_f32.loom",

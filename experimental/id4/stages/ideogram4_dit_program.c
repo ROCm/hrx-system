@@ -217,6 +217,21 @@ static iree_status_t id4_ideogram4_dit_program_validate_activation_format(
   }
 }
 
+static iree_status_t
+id4_ideogram4_dit_program_validate_attention_implementation(
+    id4_ideogram4_dit_attention_implementation_t attention_implementation) {
+  switch (attention_implementation) {
+    case ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_STREAMING:
+    case ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_MATERIALIZED_WMMA:
+      return iree_ok_status();
+    default:
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "Ideogram4 DiT attention implementation %" PRIu32
+                              " is invalid",
+                              (uint32_t)attention_implementation);
+  }
+}
+
 static iree_status_t id4_ideogram4_dit_program_validate_parameter_storage(
     id4_ideogram4_dit_parameter_storage_t storage) {
   switch (storage) {
@@ -410,6 +425,9 @@ static iree_status_t id4_ideogram4_dit_program_validate_options(
       options->parameter_sources));
   IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_validate_activation_format(
       options->activation_format));
+  IREE_RETURN_IF_ERROR(
+      id4_ideogram4_dit_program_validate_attention_implementation(
+          options->attention_implementation));
   IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_validate_diagnostic_taps(
       options->diagnostic_tap_names));
   return id4_ideogram4_dit_program_token_counts(options, out_image_token_count,
@@ -2068,6 +2086,48 @@ iree_status_t id4_ideogram4_dit_program_dispatch_qkv_norm_rotary(
       config_bindings, IREE_ARRAYSIZE(bindings), bindings);
 }
 
+iree_status_t id4_ideogram4_dit_program_dispatch_qkv_norm_rotary_packed_value(
+    id4_pipeline_program_builder_t* builder, iree_string_view_t name,
+    uint32_t token_count, uint32_t token_capacity,
+    uint32_t attention_head_count, uint32_t head_size,
+    id4_pipeline_program_tensor_t qkv,
+    id4_pipeline_program_tensor_t norm_q_weight,
+    id4_pipeline_program_tensor_t norm_k_weight,
+    id4_pipeline_program_tensor_t position_embedding,
+    id4_pipeline_program_tensor_t rotated_query,
+    id4_pipeline_program_tensor_t rotated_key,
+    id4_pipeline_program_tensor_t value) {
+  const id4_ideogram4_dit_program_config_value_t config_values[] = {
+      {IREE_SV("id4.ideogram4.qkv_norm_rotary.token_count"), token_count},
+      {IREE_SV("id4.ideogram4.qkv_norm_rotary.attention_head_count"),
+       attention_head_count},
+      {IREE_SV("id4.ideogram4.qkv_norm_rotary.head_size"), head_size},
+      {IREE_SV("id4.ideogram4.qkv_norm_rotary.value_token_stride"),
+       token_capacity},
+  };
+  char value_buffers[ID4_IDEOGRAM4_DIT_MAX_KERNEL_CONFIG_BINDING_COUNT]
+                    [ID4_IDEOGRAM4_DIT_CONFIG_VALUE_BUFFER_CAPACITY];
+  id4_pipeline_kernel_config_binding_t
+      config_bindings[ID4_IDEOGRAM4_DIT_MAX_KERNEL_CONFIG_BINDING_COUNT];
+  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_make_config_bindings(
+      IREE_ARRAYSIZE(config_values), config_values, value_buffers,
+      config_bindings));
+  id4_pipeline_program_dispatch_binding_t bindings[] = {
+      id4_pipeline_program_read(qkv),
+      id4_pipeline_program_read(norm_q_weight),
+      id4_pipeline_program_read(norm_k_weight),
+      id4_pipeline_program_read(position_embedding),
+      id4_pipeline_program_write(rotated_query),
+      id4_pipeline_program_write(rotated_key),
+      id4_pipeline_program_write(value),
+  };
+  return id4_ideogram4_dit_program_dispatch_loom(
+      builder, name, IREE_SV("ideogram4/qkv_norm_rotary_bf16"),
+      IREE_SV("id4_ideogram4_qkv_norm_rotary_bf16_packed_value"),
+      IREE_ARRAYSIZE(config_values), config_bindings, IREE_ARRAYSIZE(bindings),
+      bindings);
+}
+
 iree_status_t id4_ideogram4_dit_program_dispatch_head_rmsnorm(
     id4_pipeline_program_builder_t* builder, iree_string_view_t name,
     uint32_t token_count, uint32_t attention_head_count, uint32_t head_size,
@@ -2183,6 +2243,93 @@ iree_status_t id4_ideogram4_dit_program_dispatch_attention_bf16(
       builder, name, IREE_SV("ideogram4/attention_query_block8_rounded_bf16"),
       IREE_SV("id4_ideogram4_attention_query_block8_rounded_bf16_f32"),
       token_count, attention_head_count, head_size, query, key, value, output);
+}
+
+static iree_status_t
+id4_ideogram4_dit_program_dispatch_attention_materialized_export(
+    id4_pipeline_program_builder_t* builder, iree_string_view_t name,
+    iree_string_view_t function_name, uint32_t valid_token_count,
+    uint32_t padded_token_count, uint32_t attention_head_count,
+    uint32_t head_size, iree_host_size_t binding_count,
+    id4_pipeline_program_dispatch_binding_t* bindings) {
+  const id4_ideogram4_dit_program_config_value_t config_values[] = {
+      {IREE_SV("id4.ideogram4.attention_materialized_wmma.valid_token_count"),
+       valid_token_count},
+      {IREE_SV("id4.ideogram4.attention_materialized_wmma.padded_token_count"),
+       padded_token_count},
+      {IREE_SV(
+           "id4.ideogram4.attention_materialized_wmma.attention_head_count"),
+       attention_head_count},
+      {IREE_SV("id4.ideogram4.attention_materialized_wmma.head_size"),
+       head_size},
+  };
+  char value_buffers[ID4_IDEOGRAM4_DIT_MAX_KERNEL_CONFIG_BINDING_COUNT]
+                    [ID4_IDEOGRAM4_DIT_CONFIG_VALUE_BUFFER_CAPACITY];
+  id4_pipeline_kernel_config_binding_t
+      config_bindings[ID4_IDEOGRAM4_DIT_MAX_KERNEL_CONFIG_BINDING_COUNT];
+  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_make_config_bindings(
+      IREE_ARRAYSIZE(config_values), config_values, value_buffers,
+      config_bindings));
+  return id4_ideogram4_dit_program_dispatch_loom(
+      builder, name, IREE_SV("ideogram4/attention_materialized_bf16_wmma"),
+      function_name, IREE_ARRAYSIZE(config_values), config_bindings,
+      binding_count, bindings);
+}
+
+iree_status_t
+id4_ideogram4_dit_program_dispatch_attention_qk_scores_all_heads_bf16_f32_wmma(
+    id4_pipeline_program_builder_t* builder, iree_string_view_t name,
+    uint32_t valid_token_count, uint32_t padded_token_count,
+    uint32_t attention_head_count, uint32_t head_size,
+    id4_pipeline_program_tensor_t query, id4_pipeline_program_tensor_t key,
+    id4_pipeline_program_tensor_t scores) {
+  id4_pipeline_program_dispatch_binding_t bindings[] = {
+      id4_pipeline_program_read(query),
+      id4_pipeline_program_read(key),
+      id4_pipeline_program_write(scores),
+  };
+  return id4_ideogram4_dit_program_dispatch_attention_materialized_export(
+      builder, name,
+      IREE_SV("id4_ideogram4_attention_qk_scores_all_heads_bf16_f32_wmma"),
+      valid_token_count, padded_token_count, attention_head_count, head_size,
+      IREE_ARRAYSIZE(bindings), bindings);
+}
+
+iree_status_t
+id4_ideogram4_dit_program_dispatch_attention_softmax_all_heads_f32_bf16(
+    id4_pipeline_program_builder_t* builder, iree_string_view_t name,
+    uint32_t valid_token_count, uint32_t padded_token_count,
+    uint32_t attention_head_count, uint32_t head_size,
+    id4_pipeline_program_tensor_t scores,
+    id4_pipeline_program_tensor_t probabilities) {
+  id4_pipeline_program_dispatch_binding_t bindings[] = {
+      id4_pipeline_program_read(scores),
+      id4_pipeline_program_write(probabilities),
+  };
+  return id4_ideogram4_dit_program_dispatch_attention_materialized_export(
+      builder, name,
+      IREE_SV("id4_ideogram4_attention_softmax_all_heads_f32_bf16"),
+      valid_token_count, padded_token_count, attention_head_count, head_size,
+      IREE_ARRAYSIZE(bindings), bindings);
+}
+
+iree_status_t
+id4_ideogram4_dit_program_dispatch_attention_pv_all_heads_bf16_bf16_wmma(
+    id4_pipeline_program_builder_t* builder, iree_string_view_t name,
+    uint32_t valid_token_count, uint32_t padded_token_count,
+    uint32_t attention_head_count, uint32_t head_size,
+    id4_pipeline_program_tensor_t probabilities,
+    id4_pipeline_program_tensor_t value, id4_pipeline_program_tensor_t output) {
+  id4_pipeline_program_dispatch_binding_t bindings[] = {
+      id4_pipeline_program_read(probabilities),
+      id4_pipeline_program_read(value),
+      id4_pipeline_program_write(output),
+  };
+  return id4_ideogram4_dit_program_dispatch_attention_materialized_export(
+      builder, name,
+      IREE_SV("id4_ideogram4_attention_pv_all_heads_bf16_bf16_wmma"),
+      valid_token_count, padded_token_count, attention_head_count, head_size,
+      IREE_ARRAYSIZE(bindings), bindings);
 }
 
 static iree_status_t id4_ideogram4_dit_program_dispatch_timestep_embedding(
@@ -2806,6 +2953,7 @@ iree_status_t id4_ideogram4_dit_program_author_forward(
         .adaln_input = adaln_input,
         .position_embedding = position_embedding,
         .activation_format = options->activation_format,
+        .attention_implementation = options->attention_implementation,
         .diagnostic_tap_names = options->diagnostic_tap_names,
     };
     IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_author_transformer_block(

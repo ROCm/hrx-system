@@ -107,6 +107,9 @@ static id4_ideogram4_dit_program_options_t MakeProgramOptions(
       // Activation storage format.
       /*.activation_format=*/
       ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_F32_CANONICAL,
+      // Attention implementation.
+      /*.attention_implementation=*/
+      ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_STREAMING,
       // Diagnostic tap names requested by the stage plan.
       /*.diagnostic_tap_names=*/iree_string_view_list_empty(),
   };
@@ -414,6 +417,43 @@ TEST(Ideogram4DitProgram, AuthorsScaledFp8ProjectionParameterContract) {
   id4_pipeline_program_release(program);
 }
 
+TEST(Ideogram4DitProgram, AuthorsMaterializedWmmaAttentionIntermediates) {
+  id4_pipeline_program_shape_t latent_shape =
+      id4_pipeline_program_make_shape_rank4(1, 2, 4, 1);
+  id4_ideogram4_dit_program_options_t options =
+      MakeProgramOptions(latent_shape);
+  options.activation_format =
+      ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT;
+  options.attention_implementation =
+      ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_MATERIALIZED_WMMA;
+
+  id4_pipeline_program_t* program = CreateForwardProgram(&options);
+  EXPECT_TRUE(ProgramHasTensorWithShape(
+      program, ID4_PIPELINE_PROGRAM_DTYPE_F32,
+      id4_pipeline_program_make_shape_rank3(options.model.attention_head_count,
+                                            32, 32)));
+  EXPECT_TRUE(ProgramHasTensorWithShape(
+      program, ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+      id4_pipeline_program_make_shape_rank3(options.model.attention_head_count,
+                                            32, 32)));
+  EXPECT_TRUE(ProgramHasTensorWithShape(
+      program, ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+      id4_pipeline_program_make_shape_rank2(32, options.model.hidden_size)));
+
+  id4_pipeline_program_release(program);
+}
+
+TEST(Ideogram4DitProgram, RejectsMaterializedWmmaAttentionWithCanonicalF32) {
+  ProgramBuilderScope builder_scope;
+  id4_ideogram4_dit_program_options_t options =
+      MakeProgramOptions(id4_pipeline_program_make_shape_rank4(1, 2, 4, 1));
+  options.attention_implementation =
+      ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_MATERIALIZED_WMMA;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_UNIMPLEMENTED,
+                        id4_ideogram4_dit_program_author_forward(
+                            &options, builder_scope.builder()));
+}
+
 TEST(Ideogram4DitProgram, RejectsInvalidLatentRank) {
   ProgramBuilderScope builder_scope;
   id4_ideogram4_dit_program_options_t options =
@@ -428,6 +468,17 @@ TEST(Ideogram4DitProgram, RejectsInvalidActivationFormat) {
   id4_ideogram4_dit_program_options_t options =
       MakeProgramOptions(id4_pipeline_program_make_shape_rank4(1, 2, 4, 1));
   options.activation_format = ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_INVALID;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        id4_ideogram4_dit_program_author_forward(
+                            &options, builder_scope.builder()));
+}
+
+TEST(Ideogram4DitProgram, RejectsInvalidAttentionImplementation) {
+  ProgramBuilderScope builder_scope;
+  id4_ideogram4_dit_program_options_t options =
+      MakeProgramOptions(id4_pipeline_program_make_shape_rank4(1, 2, 4, 1));
+  options.attention_implementation =
+      ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_INVALID;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         id4_ideogram4_dit_program_author_forward(
                             &options, builder_scope.builder()));

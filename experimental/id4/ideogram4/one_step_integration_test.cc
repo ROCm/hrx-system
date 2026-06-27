@@ -230,6 +230,8 @@ static iree_status_t PlanDitStage(
   dit_options.request = request;
   dit_options.activation_format =
       ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT;
+  dit_options.attention_implementation =
+      ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_STREAMING;
 
   std::vector<iree_string_view_t> diagnostic_tap_names;
   for (const id4::test::FixtureTensor& tensor : fixture_tensors.tensors) {

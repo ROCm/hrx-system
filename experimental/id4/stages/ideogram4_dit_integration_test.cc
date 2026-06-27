@@ -503,6 +503,8 @@ typedef enum DitFixtureRunFlagBits {
 typedef struct DitFixtureRunOptions {
   // Activation format requested from the DiT stage planner.
   id4_ideogram4_dit_activation_format_t activation_format;
+  // Attention implementation requested from the DiT stage planner.
+  id4_ideogram4_dit_attention_implementation_t attention_implementation;
   // Fixture input stage used to initialize imported boundary tensors.
   iree_string_view_t input_stage;
   // Expected diagnostic tap name prefix selected from the fixture.
@@ -564,6 +566,7 @@ static void RunDitFixture(const DitFixtureRunOptions& options) {
   dit_options.structure_size = sizeof(dit_options);
   dit_options.request = request;
   dit_options.activation_format = options.activation_format;
+  dit_options.attention_implementation = options.attention_implementation;
 
   std::vector<iree_string_view_t> diagnostic_tap_names;
   if (iree_all_bits_set(options.flags,
@@ -737,6 +740,8 @@ static void RunDitFixture(const DitFixtureRunOptions& options) {
 TEST(Ideogram4DitStageIntegration, PrepareAndIssueForwardPreludeFixture) {
   RunDitFixture(DitFixtureRunOptions{
       .activation_format = ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_F32_CANONICAL,
+      .attention_implementation =
+          ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_STREAMING,
       .input_stage = IREE_SV("ideogram4.cond.input"),
       .expected_tap_prefix = IREE_SV("ideogram4.cond."),
       .expected_output_name = IREE_SV("ideogram4.cond.output.velocity"),
@@ -751,6 +756,8 @@ TEST(Ideogram4DitStageIntegration, PrepareAndIssueBf16LinearInputFixture) {
   RunDitFixture(DitFixtureRunOptions{
       .activation_format =
           ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT,
+      .attention_implementation =
+          ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_STREAMING,
       .input_stage = IREE_SV("ideogram4.cond.input"),
       .expected_tap_prefix = IREE_SV("ideogram4.cond."),
       .expected_output_name = IREE_SV("ideogram4.cond.output.velocity"),

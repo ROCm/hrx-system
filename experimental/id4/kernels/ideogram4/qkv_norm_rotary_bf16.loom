@@ -1,6 +1,9 @@
 config.decl @id4.ideogram4.qkv_norm_rotary.token_count : %value: index where [range(%value, 1, 131072)]
+
 config.decl @id4.ideogram4.qkv_norm_rotary.attention_head_count : %value: index where [range(%value, 1, 1024)]
+
 config.decl @id4.ideogram4.qkv_norm_rotary.head_size : %value: index where [range(%value, 2, 1024)]
+
 config.decl @id4.ideogram4.qkv_norm_rotary.value_token_stride : %value: index where [range(%value, 1, 131072)]
 
 kernel.def export("id4_ideogram4_qkv_norm_rotary_bf16") @id4_ideogram4_qkv_norm_rotary_bf16() {
@@ -32,8 +35,7 @@ kernel.def export("id4_ideogram4_qkv_norm_rotary_bf16") @id4_ideogram4_qkv_norm_
   %head_size_i32 = index.cast %head_size : index to i32
   %head_size_f32 = scalar.sitofp %head_size_i32 : i32 to f32
   %zero_f32 = scalar.constant 0.0 : f32
-  %epsilon = scalar.constant 0.00001 : f32
-
+  %epsilon = scalar.constant 1.0000000000000001e-05 : f32
   %qkv_noalias, %norm_q_weight_noalias, %norm_k_weight_noalias, %position_embedding_noalias, %rotated_query_noalias, %rotated_key_noalias, %value_noalias = buffer.assume.noalias %qkv, %norm_q_weight, %norm_k_weight, %position_embedding, %rotated_query, %rotated_key, %value : buffer, buffer, buffer, buffer, buffer, buffer, buffer
   %qkv_global = buffer.assume.memory_space<global> %qkv_noalias : buffer
   %norm_q_weight_global = buffer.assume.memory_space<global> %norm_q_weight_noalias : buffer
@@ -49,7 +51,6 @@ kernel.def export("id4_ideogram4_qkv_norm_rotary_bf16") @id4_ideogram4_qkv_norm_
   %rotated_query_view = buffer.view %rotated_query_global[%base] : buffer -> view<[%token_count]x[%hidden_size]xbf16, #dense>
   %rotated_key_view = buffer.view %rotated_key_global[%base] : buffer -> view<[%token_count]x[%hidden_size]xbf16, #dense>
   %value_view = buffer.view %value_global[%base] : buffer -> view<[%token_count]x[%hidden_size]xbf16, #dense>
-
   %query_lane_square_sum = scf.for %head_channel = [%lane to %head_size step %workgroup_size_x](%acc = %zero_f32 : f32) -> (f32) {
     %channel = index.add %head_base, %head_channel : index
     %query_value_bf16 = view.load %qkv_view[%token, %channel] : view<[%token_count]x[%qkv_size]xbf16, #dense> -> bf16
@@ -74,7 +75,6 @@ kernel.def export("id4_ideogram4_qkv_norm_rotary_bf16") @id4_ideogram4_qkv_norm_
   %key_mean_square_epsilon = scalar.addf<nnan|ninf|nsz> %key_mean_square, %epsilon : f32
   %query_row_scale = scalar.rsqrtf<nnan|ninf|nsz|afn> %query_mean_square_epsilon : f32
   %key_row_scale = scalar.rsqrtf<nnan|ninf|nsz|afn> %key_mean_square_epsilon : f32
-
   scf.for %half_channel = [%lane to %half_size step %workgroup_size_x] {
     %upper_head_channel = index.add %half_channel, %half_size : index
     %lower_channel = index.add %head_base, %half_channel : index
@@ -87,7 +87,6 @@ kernel.def export("id4_ideogram4_qkv_norm_rotary_bf16") @id4_ideogram4_qkv_norm_
     %negative_sin = view.load %position_embedding_view[%one, %zero, %half_channel, %token] : view<2x2x[%half_size]x[%token_count]xf32, #dense> -> f32
     %sin = view.load %position_embedding_view[%zero, %one, %half_channel, %token] : view<2x2x[%half_size]x[%token_count]xf32, #dense> -> f32
     %cos1 = view.load %position_embedding_view[%one, %one, %half_channel, %token] : view<2x2x[%half_size]x[%token_count]xf32, #dense> -> f32
-
     %query_lower_raw_bf16 = view.load %qkv_view[%token, %lower_channel] : view<[%token_count]x[%qkv_size]xbf16, #dense> -> bf16
     %query_upper_raw_bf16 = view.load %qkv_view[%token, %upper_channel] : view<[%token_count]x[%qkv_size]xbf16, #dense> -> bf16
     %query_lower_raw = scalar.extf %query_lower_raw_bf16 : bf16 to f32
@@ -110,7 +109,6 @@ kernel.def export("id4_ideogram4_qkv_norm_rotary_bf16") @id4_ideogram4_qkv_norm_
     %rotated_query_upper_bf16 = scalar.fptrunc %rotated_query_upper : f32 to bf16
     view.store %rotated_query_lower_bf16, %rotated_query_view[%token, %lower_channel] : bf16, view<[%token_count]x[%hidden_size]xbf16, #dense>
     view.store %rotated_query_upper_bf16, %rotated_query_view[%token, %upper_channel] : bf16, view<[%token_count]x[%hidden_size]xbf16, #dense>
-
     %key_lower_raw_bf16 = view.load %qkv_view[%token, %key_lower_row] : view<[%token_count]x[%qkv_size]xbf16, #dense> -> bf16
     %key_upper_raw_bf16 = view.load %qkv_view[%token, %key_upper_row] : view<[%token_count]x[%qkv_size]xbf16, #dense> -> bf16
     %key_lower_raw = scalar.extf %key_lower_raw_bf16 : bf16 to f32
@@ -133,7 +131,6 @@ kernel.def export("id4_ideogram4_qkv_norm_rotary_bf16") @id4_ideogram4_qkv_norm_
     %rotated_key_upper_bf16 = scalar.fptrunc %rotated_key_upper : f32 to bf16
     view.store %rotated_key_lower_bf16, %rotated_key_view[%token, %lower_channel] : bf16, view<[%token_count]x[%hidden_size]xbf16, #dense>
     view.store %rotated_key_upper_bf16, %rotated_key_view[%token, %upper_channel] : bf16, view<[%token_count]x[%hidden_size]xbf16, #dense>
-
     %value_lower_raw_bf16 = view.load %qkv_view[%token, %value_lower_row] : view<[%token_count]x[%qkv_size]xbf16, #dense> -> bf16
     %value_upper_raw_bf16 = view.load %qkv_view[%token, %value_upper_row] : view<[%token_count]x[%qkv_size]xbf16, #dense> -> bf16
     %value_lower = scalar.extf %value_lower_raw_bf16 : bf16 to f32
@@ -145,7 +142,6 @@ kernel.def export("id4_ideogram4_qkv_norm_rotary_bf16") @id4_ideogram4_qkv_norm_
   }
   kernel.return
 }
-
 
 kernel.def export("id4_ideogram4_qkv_norm_rotary_bf16_packed_value") @id4_ideogram4_qkv_norm_rotary_bf16_packed_value() {
   %unit = index.constant 1 : index
@@ -177,8 +173,8 @@ kernel.def export("id4_ideogram4_qkv_norm_rotary_bf16_packed_value") @id4_ideogr
   %head_size_i32 = index.cast %head_size : index to i32
   %head_size_f32 = scalar.sitofp %head_size_i32 : i32 to f32
   %zero_f32 = scalar.constant 0.0 : f32
-  %epsilon = scalar.constant 0.00001 : f32
-
+  %zero_bf16 = scalar.fptrunc %zero_f32 : f32 to bf16
+  %epsilon = scalar.constant 1.0000000000000001e-05 : f32
   %qkv_noalias, %norm_q_weight_noalias, %norm_k_weight_noalias, %position_embedding_noalias, %rotated_query_noalias, %rotated_key_noalias, %value_noalias = buffer.assume.noalias %qkv, %norm_q_weight, %norm_k_weight, %position_embedding, %rotated_query, %rotated_key, %value : buffer, buffer, buffer, buffer, buffer, buffer, buffer
   %qkv_global = buffer.assume.memory_space<global> %qkv_noalias : buffer
   %norm_q_weight_global = buffer.assume.memory_space<global> %norm_q_weight_noalias : buffer
@@ -192,10 +188,9 @@ kernel.def export("id4_ideogram4_qkv_norm_rotary_bf16_packed_value") @id4_ideogr
   %norm_k_weight_view = buffer.view %norm_k_weight_global[%base] : buffer -> view<[%head_size]xbf16, #dense>
   %position_embedding_view = buffer.view %position_embedding_global[%base] : buffer -> view<2x2x[%half_size]x[%token_count]xf32, #dense>
   %value_layout = encoding.layout.strided [1, %value_token_stride] : encoding<layout>
-  %rotated_query_view = buffer.view %rotated_query_global[%base] : buffer -> view<[%token_count]x[%hidden_size]xbf16, #dense>
-  %rotated_key_view = buffer.view %rotated_key_global[%base] : buffer -> view<[%token_count]x[%hidden_size]xbf16, #dense>
-  %value_view = buffer.view %value_global[%base] : buffer -> view<[%token_count]x[%hidden_size]xbf16, %value_layout>
-
+  %rotated_query_view = buffer.view %rotated_query_global[%base] : buffer -> view<[%value_token_stride]x[%hidden_size]xbf16, #dense>
+  %rotated_key_view = buffer.view %rotated_key_global[%base] : buffer -> view<[%value_token_stride]x[%hidden_size]xbf16, #dense>
+  %value_view = buffer.view %value_global[%base] : buffer -> view<[%value_token_stride]x[%hidden_size]xbf16, %value_layout>
   %query_lane_square_sum = scf.for %head_channel = [%lane to %head_size step %workgroup_size_x](%acc = %zero_f32 : f32) -> (f32) {
     %channel = index.add %head_base, %head_channel : index
     %query_value_bf16 = view.load %qkv_view[%token, %channel] : view<[%token_count]x[%qkv_size]xbf16, #dense> -> bf16
@@ -220,7 +215,6 @@ kernel.def export("id4_ideogram4_qkv_norm_rotary_bf16_packed_value") @id4_ideogr
   %key_mean_square_epsilon = scalar.addf<nnan|ninf|nsz> %key_mean_square, %epsilon : f32
   %query_row_scale = scalar.rsqrtf<nnan|ninf|nsz|afn> %query_mean_square_epsilon : f32
   %key_row_scale = scalar.rsqrtf<nnan|ninf|nsz|afn> %key_mean_square_epsilon : f32
-
   scf.for %half_channel = [%lane to %half_size step %workgroup_size_x] {
     %upper_head_channel = index.add %half_channel, %half_size : index
     %lower_channel = index.add %head_base, %half_channel : index
@@ -233,7 +227,6 @@ kernel.def export("id4_ideogram4_qkv_norm_rotary_bf16_packed_value") @id4_ideogr
     %negative_sin = view.load %position_embedding_view[%one, %zero, %half_channel, %token] : view<2x2x[%half_size]x[%token_count]xf32, #dense> -> f32
     %sin = view.load %position_embedding_view[%zero, %one, %half_channel, %token] : view<2x2x[%half_size]x[%token_count]xf32, #dense> -> f32
     %cos1 = view.load %position_embedding_view[%one, %one, %half_channel, %token] : view<2x2x[%half_size]x[%token_count]xf32, #dense> -> f32
-
     %query_lower_raw_bf16 = view.load %qkv_view[%token, %lower_channel] : view<[%token_count]x[%qkv_size]xbf16, #dense> -> bf16
     %query_upper_raw_bf16 = view.load %qkv_view[%token, %upper_channel] : view<[%token_count]x[%qkv_size]xbf16, #dense> -> bf16
     %query_lower_raw = scalar.extf %query_lower_raw_bf16 : bf16 to f32
@@ -254,9 +247,8 @@ kernel.def export("id4_ideogram4_qkv_norm_rotary_bf16_packed_value") @id4_ideogr
     %rotated_query_upper = scalar.addf<reassoc|nnan|ninf|nsz> %query_lower_sin, %query_upper_cos : f32
     %rotated_query_lower_bf16 = scalar.fptrunc %rotated_query_lower : f32 to bf16
     %rotated_query_upper_bf16 = scalar.fptrunc %rotated_query_upper : f32 to bf16
-    view.store %rotated_query_lower_bf16, %rotated_query_view[%token, %lower_channel] : bf16, view<[%token_count]x[%hidden_size]xbf16, #dense>
-    view.store %rotated_query_upper_bf16, %rotated_query_view[%token, %upper_channel] : bf16, view<[%token_count]x[%hidden_size]xbf16, #dense>
-
+    view.store %rotated_query_lower_bf16, %rotated_query_view[%token, %lower_channel] : bf16, view<[%value_token_stride]x[%hidden_size]xbf16, #dense>
+    view.store %rotated_query_upper_bf16, %rotated_query_view[%token, %upper_channel] : bf16, view<[%value_token_stride]x[%hidden_size]xbf16, #dense>
     %key_lower_raw_bf16 = view.load %qkv_view[%token, %key_lower_row] : view<[%token_count]x[%qkv_size]xbf16, #dense> -> bf16
     %key_upper_raw_bf16 = view.load %qkv_view[%token, %key_upper_row] : view<[%token_count]x[%qkv_size]xbf16, #dense> -> bf16
     %key_lower_raw = scalar.extf %key_lower_raw_bf16 : bf16 to f32
@@ -277,17 +269,30 @@ kernel.def export("id4_ideogram4_qkv_norm_rotary_bf16_packed_value") @id4_ideogr
     %rotated_key_upper = scalar.addf<reassoc|nnan|ninf|nsz> %key_lower_sin, %key_upper_cos : f32
     %rotated_key_lower_bf16 = scalar.fptrunc %rotated_key_lower : f32 to bf16
     %rotated_key_upper_bf16 = scalar.fptrunc %rotated_key_upper : f32 to bf16
-    view.store %rotated_key_lower_bf16, %rotated_key_view[%token, %lower_channel] : bf16, view<[%token_count]x[%hidden_size]xbf16, #dense>
-    view.store %rotated_key_upper_bf16, %rotated_key_view[%token, %upper_channel] : bf16, view<[%token_count]x[%hidden_size]xbf16, #dense>
-
+    view.store %rotated_key_lower_bf16, %rotated_key_view[%token, %lower_channel] : bf16, view<[%value_token_stride]x[%hidden_size]xbf16, #dense>
+    view.store %rotated_key_upper_bf16, %rotated_key_view[%token, %upper_channel] : bf16, view<[%value_token_stride]x[%hidden_size]xbf16, #dense>
     %value_lower_raw_bf16 = view.load %qkv_view[%token, %value_lower_row] : view<[%token_count]x[%qkv_size]xbf16, #dense> -> bf16
     %value_upper_raw_bf16 = view.load %qkv_view[%token, %value_upper_row] : view<[%token_count]x[%qkv_size]xbf16, #dense> -> bf16
     %value_lower = scalar.extf %value_lower_raw_bf16 : bf16 to f32
     %value_upper = scalar.extf %value_upper_raw_bf16 : bf16 to f32
     %value_lower_bf16 = scalar.fptrunc %value_lower : f32 to bf16
     %value_upper_bf16 = scalar.fptrunc %value_upper : f32 to bf16
-    view.store %value_lower_bf16, %value_view[%token, %lower_channel] : bf16, view<[%token_count]x[%hidden_size]xbf16, %value_layout>
-    view.store %value_upper_bf16, %value_view[%token, %upper_channel] : bf16, view<[%token_count]x[%hidden_size]xbf16, %value_layout>
+    view.store %value_lower_bf16, %value_view[%token, %lower_channel] : bf16, view<[%value_token_stride]x[%hidden_size]xbf16, %value_layout>
+    view.store %value_upper_bf16, %value_view[%token, %upper_channel] : bf16, view<[%value_token_stride]x[%hidden_size]xbf16, %value_layout>
+  }
+  %is_first_token = index.cmp eq, %token, %zero : index
+  scf.if %is_first_token {
+    %tail_token_count = index.sub %value_token_stride, %token_count : index
+    %tail_element_count = index.mul %tail_token_count, %head_size : index
+    scf.for %tail_element = [%lane to %tail_element_count step %workgroup_size_x] {
+      %tail_token_ordinal = index.div %tail_element, %head_size : index
+      %tail_head_channel = index.rem %tail_element, %head_size : index
+      %tail_token = index.add %token_count, %tail_token_ordinal : index
+      %tail_channel = index.add %head_base, %tail_head_channel : index
+      view.store %zero_bf16, %rotated_query_view[%tail_token, %tail_channel] : bf16, view<[%value_token_stride]x[%hidden_size]xbf16, #dense>
+      view.store %zero_bf16, %rotated_key_view[%tail_token, %tail_channel] : bf16, view<[%value_token_stride]x[%hidden_size]xbf16, #dense>
+      view.store %zero_bf16, %value_view[%tail_token, %tail_channel] : bf16, view<[%value_token_stride]x[%hidden_size]xbf16, %value_layout>
+    }
   }
   kernel.return
 }
@@ -300,8 +305,8 @@ check.case public @id4_ideogram4_qkv_norm_rotary_bf16_small_case {
   %rotated_query = check.generate.fill value(0.0) : tensor<1x2xbf16>
   %rotated_key = check.generate.fill value(0.0) : tensor<1x2xbf16>
   %value = check.generate.fill value(0.0) : tensor<1x2xbf16>
-  %expected_query = check.generate.fill value(1.89844) : tensor<1x2xbf16>
-  %expected_key = check.generate.fill value(1.97656) : tensor<1x2xbf16>
+  %expected_query = check.generate.fill value(1.8984399999999999) : tensor<1x2xbf16>
+  %expected_key = check.generate.fill value(1.9765600000000001) : tensor<1x2xbf16>
   %expected_value = check.generate.iota offset(5.0) step(1.0) : tensor<1x2xbf16>
   func.call @id4_ideogram4_qkv_norm_rotary_bf16(%qkv, %norm_q_weight, %norm_k_weight, %position_embedding, %rotated_query, %rotated_key, %value) : (tensor<1x6xbf16>, tensor<2xbf16>, tensor<2xbf16>, tensor<2x2x1x1xf32>, tensor<1x2xbf16>, tensor<1x2xbf16>, tensor<1x2xbf16>)
   check.expect.close actual(%rotated_query) expected(%expected_query) atol(0.0001) rtol(0.0001) nan(same) : tensor<1x2xbf16>
@@ -322,8 +327,8 @@ check.case public @id4_ideogram4_qkv_norm_rotary_bf16_ideogram_shape_case {
   %expected_key = check.generate.fill value(2.0) : tensor<2x4608xbf16>
   %expected_value = check.generate.fill value(2.0) : tensor<2x4608xbf16>
   func.call @id4_ideogram4_qkv_norm_rotary_bf16(%qkv, %norm_q_weight, %norm_k_weight, %position_embedding, %rotated_query, %rotated_key, %value) : (tensor<2x13824xbf16>, tensor<256xbf16>, tensor<256xbf16>, tensor<2x2x128x2xf32>, tensor<2x4608xbf16>, tensor<2x4608xbf16>, tensor<2x4608xbf16>)
-  check.expect.close actual(%rotated_query) expected(%expected_rotated) atol(0.00005) rtol(0.00005) nan(same) : tensor<2x4608xbf16>
-  check.expect.close actual(%rotated_key) expected(%expected_key) atol(0.00005) rtol(0.00005) nan(same) : tensor<2x4608xbf16>
+  check.expect.close actual(%rotated_query) expected(%expected_rotated) atol(5.0000000000000002e-05) rtol(5.0000000000000002e-05) nan(same) : tensor<2x4608xbf16>
+  check.expect.close actual(%rotated_key) expected(%expected_key) atol(5.0000000000000002e-05) rtol(5.0000000000000002e-05) nan(same) : tensor<2x4608xbf16>
   check.expect.close actual(%value) expected(%expected_value) atol(0.0) rtol(0.0) nan(same) : tensor<2x4608xbf16>
   check.return
 }
@@ -336,13 +341,29 @@ check.case public @id4_ideogram4_qkv_norm_rotary_bf16_packed_value_small_case {
   %rotated_query = check.generate.fill value(0.0) : tensor<1x2xbf16>
   %rotated_key = check.generate.fill value(0.0) : tensor<1x2xbf16>
   %value = check.generate.fill value(0.0) : tensor<1x2xbf16>
-  %expected_query = check.generate.fill value(1.89844) : tensor<1x2xbf16>
-  %expected_key = check.generate.fill value(1.97656) : tensor<1x2xbf16>
+  %expected_query = check.generate.fill value(1.8984399999999999) : tensor<1x2xbf16>
+  %expected_key = check.generate.fill value(1.9765600000000001) : tensor<1x2xbf16>
   %expected_value = check.generate.iota offset(5.0) step(1.0) : tensor<1x2xbf16>
   func.call @id4_ideogram4_qkv_norm_rotary_bf16_packed_value(%qkv, %norm_q_weight, %norm_k_weight, %position_embedding, %rotated_query, %rotated_key, %value) : (tensor<1x6xbf16>, tensor<2xbf16>, tensor<2xbf16>, tensor<2x2x1x1xf32>, tensor<1x2xbf16>, tensor<1x2xbf16>, tensor<1x2xbf16>)
   check.expect.close actual(%rotated_query) expected(%expected_query) atol(0.0001) rtol(0.0001) nan(same) : tensor<1x2xbf16>
   check.expect.close actual(%rotated_key) expected(%expected_key) atol(0.0001) rtol(0.0001) nan(same) : tensor<1x2xbf16>
   check.expect.close actual(%value) expected(%expected_value) atol(0.0) rtol(0.0) nan(same) : tensor<1x2xbf16>
+  check.return
+}
+
+check.case public @id4_ideogram4_qkv_norm_rotary_bf16_packed_value_tail_zero_case {
+  %qkv = check.generate.fill value(0.0) : tensor<1x6xbf16>
+  %norm_q_weight = check.generate.fill value(1.0) : tensor<2xbf16>
+  %norm_k_weight = check.generate.fill value(1.0) : tensor<2xbf16>
+  %position_embedding = check.generate.fill value(1.0) : tensor<2x2x1x1xf32>
+  %rotated_query = check.generate.fill value(9.0) : tensor<2x2xbf16>
+  %rotated_key = check.generate.fill value(9.0) : tensor<2x2xbf16>
+  %value = check.generate.fill value(9.0) : tensor<2x2xbf16>
+  %expected = check.generate.fill value(0.0) : tensor<2x2xbf16>
+  func.call @id4_ideogram4_qkv_norm_rotary_bf16_packed_value(%qkv, %norm_q_weight, %norm_k_weight, %position_embedding, %rotated_query, %rotated_key, %value) : (tensor<1x6xbf16>, tensor<2xbf16>, tensor<2xbf16>, tensor<2x2x1x1xf32>, tensor<2x2xbf16>, tensor<2x2xbf16>, tensor<2x2xbf16>)
+  check.expect.close actual(%rotated_query) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2x2xbf16>
+  check.expect.close actual(%rotated_key) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2x2xbf16>
+  check.expect.close actual(%value) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2x2xbf16>
   check.return
 }
 
@@ -358,13 +379,18 @@ check.case public @id4_ideogram4_qkv_norm_rotary_bf16_packed_value_ideogram_shap
   %expected_key = check.generate.fill value(2.0) : tensor<2x4608xbf16>
   %expected_value = check.generate.fill value(2.0) : tensor<2x4608xbf16>
   func.call @id4_ideogram4_qkv_norm_rotary_bf16_packed_value(%qkv, %norm_q_weight, %norm_k_weight, %position_embedding, %rotated_query, %rotated_key, %value) : (tensor<2x13824xbf16>, tensor<256xbf16>, tensor<256xbf16>, tensor<2x2x128x2xf32>, tensor<2x4608xbf16>, tensor<2x4608xbf16>, tensor<2x4608xbf16>)
-  check.expect.close actual(%rotated_query) expected(%expected_rotated) atol(0.00005) rtol(0.00005) nan(same) : tensor<2x4608xbf16>
-  check.expect.close actual(%rotated_key) expected(%expected_key) atol(0.00005) rtol(0.00005) nan(same) : tensor<2x4608xbf16>
+  check.expect.close actual(%rotated_query) expected(%expected_rotated) atol(5.0000000000000002e-05) rtol(5.0000000000000002e-05) nan(same) : tensor<2x4608xbf16>
+  check.expect.close actual(%rotated_key) expected(%expected_key) atol(5.0000000000000002e-05) rtol(5.0000000000000002e-05) nan(same) : tensor<2x4608xbf16>
   check.expect.close actual(%value) expected(%expected_value) atol(0.0) rtol(0.0) nan(same) : tensor<2x4608xbf16>
   check.return
 }
 
 check.benchmark<@id4_ideogram4_qkv_norm_rotary_bf16_small_case> @id4_ideogram4_qkv_norm_rotary_bf16_small
+
 check.benchmark<@id4_ideogram4_qkv_norm_rotary_bf16_ideogram_shape_case> @id4_ideogram4_qkv_norm_rotary_bf16_ideogram_shape
+
 check.benchmark<@id4_ideogram4_qkv_norm_rotary_bf16_packed_value_small_case> @id4_ideogram4_qkv_norm_rotary_bf16_packed_value_small
+
+check.benchmark<@id4_ideogram4_qkv_norm_rotary_bf16_packed_value_tail_zero_case> @id4_ideogram4_qkv_norm_rotary_bf16_packed_value_tail_zero
+
 check.benchmark<@id4_ideogram4_qkv_norm_rotary_bf16_packed_value_ideogram_shape_case> @id4_ideogram4_qkv_norm_rotary_bf16_packed_value_ideogram_shape

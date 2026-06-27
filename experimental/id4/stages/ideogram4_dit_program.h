@@ -45,6 +45,16 @@ typedef enum id4_ideogram4_dit_activation_format_e {
   ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT = 2,
 } id4_ideogram4_dit_activation_format_t;
 
+// Attention implementation selected while authoring DiT transformer blocks.
+typedef enum id4_ideogram4_dit_attention_implementation_e {
+  // Invalid attention implementation.
+  ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_INVALID = 0,
+  // Streaming scalar attention that does not materialize scores.
+  ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_STREAMING = 1,
+  // BF16 WMMA attention that materializes score and probability tensors.
+  ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_MATERIALIZED_WMMA = 2,
+} id4_ideogram4_dit_attention_implementation_t;
+
 // Physical storage format selected for a DiT parameter source.
 typedef enum id4_ideogram4_dit_parameter_storage_e {
   // Invalid parameter storage format.
@@ -120,6 +130,8 @@ typedef struct id4_ideogram4_dit_program_options_t {
   id4_ideogram4_dit_request_config_t request;
   // Activation storage format for internal linear-input producers.
   id4_ideogram4_dit_activation_format_t activation_format;
+  // Attention implementation selected for transformer blocks.
+  id4_ideogram4_dit_attention_implementation_t attention_implementation;
   // Diagnostic tap names requested by the stage plan.
   iree_string_view_list_t diagnostic_tap_names;
 } id4_ideogram4_dit_program_options_t;

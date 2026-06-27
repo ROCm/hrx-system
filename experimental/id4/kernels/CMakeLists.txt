@@ -21,7 +21,6 @@ add_custom_command(OUTPUT loom_sources.stamp
     "ideogram4/attention_materialized_bf16_wmma.loom"
     "ideogram4/attention_pv_bf16_bf16_wmma.loom"
     "ideogram4/attention_qk_scores_bf16_f32_wmma.loom"
-    "ideogram4/attention_qkv_tail_zero_bf16.loom"
     "ideogram4/attention_query4_rounded_f32.loom"
     "ideogram4/attention_query_block8_rounded_bf16.loom"
     "ideogram4/attention_query_block8_rounded_f32.loom"
@@ -130,7 +129,6 @@ iree_c_embed_data(
     "ideogram4/attention_materialized_bf16_wmma.loom"
     "ideogram4/attention_pv_bf16_bf16_wmma.loom"
     "ideogram4/attention_qk_scores_bf16_f32_wmma.loom"
-    "ideogram4/attention_qkv_tail_zero_bf16.loom"
     "ideogram4/attention_query4_rounded_f32.loom"
     "ideogram4/attention_query_block8_rounded_bf16.loom"
     "ideogram4/attention_query_block8_rounded_f32.loom"
@@ -737,24 +735,6 @@ iree_native_test(
     "--config=id4.ideogram4.attention_materialized_wmma.padded_token_count=16"
     "--config=id4.ideogram4.attention_materialized_wmma.attention_head_count=2"
     "--config=id4.ideogram4.attention_materialized_wmma.head_size=16"
-  SRC
-    loom::tools::iree-benchmark-loom
-  LABELS
-    "hostonly"
-)
-
-iree_native_test(
-  NAME
-    "ideogram4_attention_qkv_tail_zero_bf16_small_plan_test"
-  ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/attention_qkv_tail_zero_bf16.loom}}"
-    "--benchmark=@id4_ideogram4_attention_qkv_tail_zero_bf16_small"
-    "--dry-run"
-    "--output-format=jsonl"
-    "--config=id4.ideogram4.attention_qkv_tail_zero.token_offset=0"
-    "--config=id4.ideogram4.attention_qkv_tail_zero.padded_token_count=16"
-    "--config=id4.ideogram4.attention_qkv_tail_zero.hidden_size=16"
-    "--config=id4.ideogram4.attention_qkv_tail_zero.element_count=256"
   SRC
     loom::tools::iree-benchmark-loom
   LABELS
@@ -5965,6 +5945,24 @@ iree_native_test(
 
 iree_native_test(
   NAME
+    "ideogram4_qkv_norm_rotary_bf16_packed_value_tail_zero_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/qkv_norm_rotary_bf16.loom}}"
+    "--benchmark=@id4_ideogram4_qkv_norm_rotary_bf16_packed_value_tail_zero"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.ideogram4.qkv_norm_rotary.token_count=1"
+    "--config=id4.ideogram4.qkv_norm_rotary.attention_head_count=1"
+    "--config=id4.ideogram4.qkv_norm_rotary.head_size=2"
+    "--config=id4.ideogram4.qkv_norm_rotary.value_token_stride=2"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
     "ideogram4_qkv_norm_rotary_bf16_packed_value_ideogram_shape_plan_test"
   ARGS
     "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/qkv_norm_rotary_bf16.loom}}"
@@ -8042,28 +8040,6 @@ iree_native_test(
     "--config=id4.ideogram4.attention_materialized_wmma.padded_token_count=16"
     "--config=id4.ideogram4.attention_materialized_wmma.attention_head_count=2"
     "--config=id4.ideogram4.attention_materialized_wmma.head_size=16"
-  SRC
-    loom::tools::iree-test-loom
-  LABELS
-    "iree-run-requirement=runtime.resource.amd_gpu"
-    "manual"
-    "requires-gpu-amd"
-    "runtime-resource=amd-gpu"
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
-iree_native_test(
-  NAME
-    "ideogram4_attention_qkv_tail_zero_bf16_small_hal_test"
-  ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/attention_qkv_tail_zero_bf16.loom}}"
-    "--case=@id4_ideogram4_attention_qkv_tail_zero_bf16_small_case"
-    "--device=amdgpu://0"
-    "--config=id4.ideogram4.attention_qkv_tail_zero.token_offset=0"
-    "--config=id4.ideogram4.attention_qkv_tail_zero.padded_token_count=16"
-    "--config=id4.ideogram4.attention_qkv_tail_zero.hidden_size=16"
-    "--config=id4.ideogram4.attention_qkv_tail_zero.element_count=256"
   SRC
     loom::tools::iree-test-loom
   LABELS
@@ -14306,6 +14282,28 @@ iree_native_test(
     "--config=id4.ideogram4.qkv_norm_rotary.attention_head_count=1"
     "--config=id4.ideogram4.qkv_norm_rotary.head_size=2"
     "--config=id4.ideogram4.qkv_norm_rotary.value_token_stride=1"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
+    "ideogram4_qkv_norm_rotary_bf16_packed_value_tail_zero_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/qkv_norm_rotary_bf16.loom}}"
+    "--case=@id4_ideogram4_qkv_norm_rotary_bf16_packed_value_tail_zero_case"
+    "--device=amdgpu://0"
+    "--config=id4.ideogram4.qkv_norm_rotary.token_count=1"
+    "--config=id4.ideogram4.qkv_norm_rotary.attention_head_count=1"
+    "--config=id4.ideogram4.qkv_norm_rotary.head_size=2"
+    "--config=id4.ideogram4.qkv_norm_rotary.value_token_stride=2"
   SRC
     loom::tools::iree-test-loom
   LABELS
