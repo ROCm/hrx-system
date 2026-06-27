@@ -639,7 +639,7 @@ static iree_status_t id4_ideogram4_dit_program_dispatch_prelude_image(
     uint32_t total_token_count, uint32_t output_token_offset,
     uint32_t image_width, uint32_t image_height, uint32_t input_channel_count,
     uint32_t hidden_size, id4_pipeline_program_tensor_t image_tokens,
-    id4_pipeline_program_tensor_t input_proj_weight,
+    id4_ideogram4_dit_program_linear_parameter_t input_proj,
     id4_pipeline_program_tensor_t input_proj_bias,
     id4_pipeline_program_tensor_t image_indicator,
     id4_pipeline_program_tensor_t image_indicator_embedding,
@@ -663,20 +663,46 @@ static iree_status_t id4_ideogram4_dit_program_dispatch_prelude_image(
   IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_make_config_bindings(
       IREE_ARRAYSIZE(config_values), config_values, value_buffers,
       config_bindings));
-  id4_pipeline_program_dispatch_binding_t bindings[] = {
-      id4_pipeline_program_read(image_tokens),
-      id4_pipeline_program_read(input_proj_weight),
-      id4_pipeline_program_read(input_proj_bias),
-      id4_pipeline_program_read(image_indicator),
-      id4_pipeline_program_read(image_indicator_embedding),
-      id4_pipeline_program_write(output),
-  };
-  return id4_ideogram4_dit_program_dispatch_loom(
-      builder, IREE_SV("ideogram4.prelude.image_projection"),
-      IREE_SV("ideogram4/prelude_image_bf16_f32"),
-      IREE_SV("id4_ideogram4_prelude_image_bf16_f32"),
-      IREE_ARRAYSIZE(config_values), config_bindings, IREE_ARRAYSIZE(bindings),
-      bindings);
+  switch (input_proj.storage) {
+    case ID4_IDEOGRAM4_DIT_PARAMETER_STORAGE_BF16: {
+      id4_pipeline_program_dispatch_binding_t bindings[] = {
+          id4_pipeline_program_read(image_tokens),
+          id4_pipeline_program_read(input_proj.weight),
+          id4_pipeline_program_read(input_proj_bias),
+          id4_pipeline_program_read(image_indicator),
+          id4_pipeline_program_read(image_indicator_embedding),
+          id4_pipeline_program_write(output),
+      };
+      return id4_ideogram4_dit_program_dispatch_loom(
+          builder, IREE_SV("ideogram4.prelude.image_projection"),
+          IREE_SV("ideogram4/prelude_image_bf16_f32"),
+          IREE_SV("id4_ideogram4_prelude_image_bf16_f32"),
+          IREE_ARRAYSIZE(config_values), config_bindings,
+          IREE_ARRAYSIZE(bindings), bindings);
+    }
+    case ID4_IDEOGRAM4_DIT_PARAMETER_STORAGE_FP8_E4M3_SCALED: {
+      id4_pipeline_program_dispatch_binding_t bindings[] = {
+          id4_pipeline_program_read(image_tokens),
+          id4_pipeline_program_read(input_proj.weight),
+          id4_pipeline_program_read(input_proj.scale),
+          id4_pipeline_program_read(input_proj_bias),
+          id4_pipeline_program_read(image_indicator),
+          id4_pipeline_program_read(image_indicator_embedding),
+          id4_pipeline_program_write(output),
+      };
+      return id4_ideogram4_dit_program_dispatch_loom(
+          builder, IREE_SV("ideogram4.prelude.image_projection"),
+          IREE_SV("ideogram4/prelude_image_fp8_f32"),
+          IREE_SV("id4_ideogram4_prelude_image_fp8_f32"),
+          IREE_ARRAYSIZE(config_values), config_bindings,
+          IREE_ARRAYSIZE(bindings), bindings);
+    }
+    default:
+      return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                              "Ideogram4 image projection storage %" PRIu32
+                              " is not supported",
+                              (uint32_t)input_proj.storage);
+  }
 }
 
 static iree_status_t id4_ideogram4_dit_program_dispatch_condition_rmsnorm(
@@ -2588,12 +2614,14 @@ iree_status_t id4_ideogram4_dit_program_author_forward(
         &condition));
   }
 
-  id4_pipeline_program_tensor_t input_proj_weight =
-      id4_pipeline_program_tensor_invalid();
-  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_parameter_bf16(
+  id4_ideogram4_dit_program_linear_parameter_t input_proj = {
+      .storage = ID4_IDEOGRAM4_DIT_PARAMETER_STORAGE_INVALID,
+      .weight = id4_pipeline_program_tensor_invalid(),
+      .scale = id4_pipeline_program_tensor_invalid(),
+  };
+  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_linear_parameter(
       builder, options->parameter_sources, IREE_SV("input_proj.weight"),
-      id4_pipeline_program_make_shape_rank2(hidden_size, input_channel_count),
-      &input_proj_weight));
+      input_channel_count, hidden_size, &input_proj));
   id4_pipeline_program_tensor_t input_proj_bias =
       id4_pipeline_program_tensor_invalid();
   IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_parameter_bf16(
@@ -2695,7 +2723,7 @@ iree_status_t id4_ideogram4_dit_program_author_forward(
       builder, image_token_count, total_token_count, text_token_count,
       (uint32_t)options->request.latent_shape.dims[0],
       (uint32_t)options->request.latent_shape.dims[1], input_channel_count,
-      hidden_size, x, input_proj_weight, input_proj_bias, image_indicator,
+      hidden_size, x, input_proj, input_proj_bias, image_indicator,
       image_indicator_embedding, prelude_hidden));
   IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_dispatch_timestep_embedding(
       builder, timestep_embedding_name, hidden_size, timestep,

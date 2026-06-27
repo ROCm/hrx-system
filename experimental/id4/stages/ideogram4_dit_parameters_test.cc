@@ -144,10 +144,10 @@ TEST(Ideogram4DitParameters,
   ExpectFp8SourceRule(rules, IREE_SV("t_embedding.mlp_in.weight"));
   ExpectFp8SourceRule(rules, IREE_SV("t_embedding.mlp_out.weight"));
   ExpectFp8SourceRule(rules, IREE_SV("adaln_proj.weight"));
+  ExpectFp8SourceRule(rules, IREE_SV("input_proj.weight"));
   ExpectFp8SourceRule(rules, IREE_SV("llm_cond_proj.weight"));
   ExpectFp8SourceRule(rules, IREE_SV("final_layer.adaln_modulation.weight"));
   ExpectFp8SourceRule(rules, IREE_SV("final_layer.linear.weight"));
-  EXPECT_EQ(FindSourceRule(rules, IREE_SV("input_proj.weight")), nullptr);
 
   id4_ideogram4_dit_parameter_source_rule_list_deinitialize(
       &rules, iree_allocator_system());

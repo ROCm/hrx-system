@@ -55,6 +55,7 @@ add_custom_command(OUTPUT loom_sources.stamp
     "ideogram4/modulated_layernorm_f32.loom"
     "ideogram4/modulated_rmsnorm_f32.loom"
     "ideogram4/prelude_image_bf16_f32.loom"
+    "ideogram4/prelude_image_fp8_f32.loom"
     "ideogram4/qkv_norm_rotary_bf16.loom"
     "ideogram4/qkv_norm_rotary_f32.loom"
     "ideogram4/qkv_split_f32.loom"
@@ -162,6 +163,7 @@ iree_c_embed_data(
     "ideogram4/modulated_layernorm_f32.loom"
     "ideogram4/modulated_rmsnorm_f32.loom"
     "ideogram4/prelude_image_bf16_f32.loom"
+    "ideogram4/prelude_image_fp8_f32.loom"
     "ideogram4/qkv_norm_rotary_bf16.loom"
     "ideogram4/qkv_norm_rotary_f32.loom"
     "ideogram4/qkv_split_f32.loom"
@@ -1168,6 +1170,69 @@ iree_native_test(
   ARGS
     "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/prelude_image_bf16_f32.loom}}"
     "--benchmark=@id4_ideogram4_prelude_image_bf16_f32_patchified_channel"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.ideogram4.prelude_image.token_count=1"
+    "--config=id4.ideogram4.prelude_image.output_token_count=1"
+    "--config=id4.ideogram4.prelude_image.output_token_offset=0"
+    "--config=id4.ideogram4.prelude_image.image_width=1"
+    "--config=id4.ideogram4.prelude_image.image_height=1"
+    "--config=id4.ideogram4.prelude_image.input_channel_count=128"
+    "--config=id4.ideogram4.prelude_image.hidden_size=1"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
+    "ideogram4_prelude_image_fp8_f32_small_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/prelude_image_fp8_f32.loom}}"
+    "--benchmark=@id4_ideogram4_prelude_image_fp8_f32_small"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.ideogram4.prelude_image.token_count=2"
+    "--config=id4.ideogram4.prelude_image.output_token_count=2"
+    "--config=id4.ideogram4.prelude_image.output_token_offset=0"
+    "--config=id4.ideogram4.prelude_image.image_width=1"
+    "--config=id4.ideogram4.prelude_image.image_height=2"
+    "--config=id4.ideogram4.prelude_image.input_channel_count=4"
+    "--config=id4.ideogram4.prelude_image.hidden_size=2"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
+    "ideogram4_prelude_image_fp8_f32_zero_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/prelude_image_fp8_f32.loom}}"
+    "--benchmark=@id4_ideogram4_prelude_image_fp8_f32_zero"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.ideogram4.prelude_image.token_count=2"
+    "--config=id4.ideogram4.prelude_image.output_token_count=2"
+    "--config=id4.ideogram4.prelude_image.output_token_offset=0"
+    "--config=id4.ideogram4.prelude_image.image_width=1"
+    "--config=id4.ideogram4.prelude_image.image_height=2"
+    "--config=id4.ideogram4.prelude_image.input_channel_count=128"
+    "--config=id4.ideogram4.prelude_image.hidden_size=4608"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
+    "ideogram4_prelude_image_fp8_f32_patchified_channel_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/prelude_image_fp8_f32.loom}}"
+    "--benchmark=@id4_ideogram4_prelude_image_fp8_f32_patchified_channel"
     "--dry-run"
     "--output-format=jsonl"
     "--config=id4.ideogram4.prelude_image.token_count=1"
@@ -8403,6 +8468,81 @@ iree_native_test(
   ARGS
     "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/prelude_image_bf16_f32.loom}}"
     "--case=@id4_ideogram4_prelude_image_bf16_f32_patchified_channel_case"
+    "--device=amdgpu://0"
+    "--config=id4.ideogram4.prelude_image.token_count=1"
+    "--config=id4.ideogram4.prelude_image.output_token_count=1"
+    "--config=id4.ideogram4.prelude_image.output_token_offset=0"
+    "--config=id4.ideogram4.prelude_image.image_width=1"
+    "--config=id4.ideogram4.prelude_image.image_height=1"
+    "--config=id4.ideogram4.prelude_image.input_channel_count=128"
+    "--config=id4.ideogram4.prelude_image.hidden_size=1"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
+    "ideogram4_prelude_image_fp8_f32_small_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/prelude_image_fp8_f32.loom}}"
+    "--case=@id4_ideogram4_prelude_image_fp8_f32_small_case"
+    "--device=amdgpu://0"
+    "--config=id4.ideogram4.prelude_image.token_count=2"
+    "--config=id4.ideogram4.prelude_image.output_token_count=2"
+    "--config=id4.ideogram4.prelude_image.output_token_offset=0"
+    "--config=id4.ideogram4.prelude_image.image_width=1"
+    "--config=id4.ideogram4.prelude_image.image_height=2"
+    "--config=id4.ideogram4.prelude_image.input_channel_count=4"
+    "--config=id4.ideogram4.prelude_image.hidden_size=2"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
+    "ideogram4_prelude_image_fp8_f32_zero_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/prelude_image_fp8_f32.loom}}"
+    "--case=@id4_ideogram4_prelude_image_fp8_f32_zero_case"
+    "--device=amdgpu://0"
+    "--config=id4.ideogram4.prelude_image.token_count=2"
+    "--config=id4.ideogram4.prelude_image.output_token_count=2"
+    "--config=id4.ideogram4.prelude_image.output_token_offset=0"
+    "--config=id4.ideogram4.prelude_image.image_width=1"
+    "--config=id4.ideogram4.prelude_image.image_height=2"
+    "--config=id4.ideogram4.prelude_image.input_channel_count=128"
+    "--config=id4.ideogram4.prelude_image.hidden_size=4608"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
+    "ideogram4_prelude_image_fp8_f32_patchified_channel_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/prelude_image_fp8_f32.loom}}"
+    "--case=@id4_ideogram4_prelude_image_fp8_f32_patchified_channel_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.prelude_image.token_count=1"
     "--config=id4.ideogram4.prelude_image.output_token_count=1"

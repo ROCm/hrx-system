@@ -25,6 +25,7 @@ static const iree_string_view_t kMixedBf16Fp8AllSupportedExactWeightKeys[] = {
     IREE_SVL("t_embedding.mlp_in.weight"),
     IREE_SVL("t_embedding.mlp_out.weight"),
     IREE_SVL("adaln_proj.weight"),
+    IREE_SVL("input_proj.weight"),
     IREE_SVL("llm_cond_proj.weight"),
     IREE_SVL("final_layer.adaln_modulation.weight"),
     IREE_SVL("final_layer.linear.weight"),
