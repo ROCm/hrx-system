@@ -70,6 +70,7 @@ typedef enum loom_amdgpu_vector_storage_kind_e {
   LOOM_AMDGPU_VECTOR_STORAGE_KIND_I1_MASK = 3,
   LOOM_AMDGPU_VECTOR_STORAGE_KIND_PACKED_16BIT_FLOAT = 4,
   LOOM_AMDGPU_VECTOR_STORAGE_KIND_PACKED_INTEGER = 5,
+  LOOM_AMDGPU_VECTOR_STORAGE_KIND_PACKED_8BIT_FLOAT = 6,
 } loom_amdgpu_vector_storage_kind_t;
 
 typedef struct loom_amdgpu_vector_storage_t {
@@ -151,6 +152,13 @@ uint32_t loom_amdgpu_vector_i8_lane_count(loom_type_t type);
 bool loom_amdgpu_type_packed_integer_storage(loom_type_t type,
                                              uint32_t* out_payload_bit_count,
                                              uint32_t* out_register_count);
+
+// Returns true when the source type is an f8 vector payload that can be stored
+// in packed 32-bit registers. Partial registers occupy low bytes; unused high
+// bytes in the final register are unspecified.
+bool loom_amdgpu_type_packed_8bit_float_storage(loom_type_t type,
+                                                uint32_t* out_payload_bit_count,
+                                                uint32_t* out_register_count);
 
 // Returns true when the source type is an f16/bf16 vector payload that can be
 // stored in packed 32-bit registers. Odd lane counts occupy the low half of the

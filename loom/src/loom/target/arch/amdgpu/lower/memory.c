@@ -114,10 +114,16 @@ static bool loom_amdgpu_memory_access_register_footprint(
 
   uint32_t payload_bit_count = 0;
   bool packed_16bit_float = false;
+  bool packed_8bit_float = false;
   if (!loom_amdgpu_type_packed_integer_storage(vector_type, &payload_bit_count,
                                                &register_count)) {
-    packed_16bit_float = loom_amdgpu_type_packed_16bit_float_storage(
-        vector_type, &payload_bit_count, &register_count);
+    if (!loom_amdgpu_type_packed_8bit_float_storage(
+            vector_type, &payload_bit_count, &register_count)) {
+      packed_16bit_float = loom_amdgpu_type_packed_16bit_float_storage(
+          vector_type, &payload_bit_count, &register_count);
+    } else {
+      packed_8bit_float = true;
+    }
   }
   if (payload_bit_count == 0) {
     diagnostic->rejection_bits |=
@@ -129,12 +135,14 @@ static bool loom_amdgpu_memory_access_register_footprint(
                               register_count == 1u &&
                               loom_amdgpu_static_vector_lane_count(
                                   vector_type, LOOM_SCALAR_TYPE_I8, 2) == 2;
+  const bool packed_f8_pair =
+      packed_8bit_float && payload_bit_count == 16u && register_count == 1u;
   const bool packed_i16_scalar = payload_bit_count == 16u &&
                                  register_count == 1u &&
                                  loom_amdgpu_static_vector_lane_count(
                                      vector_type, LOOM_SCALAR_TYPE_I16, 1) == 1;
   if (payload_bit_count != register_bit_count && !packed_16bit_float &&
-      !packed_i8_pair && !packed_i16_scalar) {
+      !packed_i8_pair && !packed_f8_pair && !packed_i16_scalar) {
     diagnostic->rejection_bits |=
         LOOM_AMDGPU_MEMORY_ACCESS_REJECTION_PACKED_REGISTER_FOOTPRINT;
     diagnostic->payload_type = vector_type;

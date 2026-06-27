@@ -203,6 +203,16 @@ _VEC_I8_PACKED = Vector(
     minimum_lanes=1,
     maximum_lanes="LOOM_AMDGPU_MAX_PACKED_I8_LANES",
 )
+_VEC_F8E4M3_PACKED = Vector(
+    "f8E4M3",
+    minimum_lanes=1,
+    maximum_lanes="LOOM_AMDGPU_MAX_PACKED_I8_LANES",
+)
+_VEC_F8E5M2_PACKED = Vector(
+    "f8E5M2",
+    minimum_lanes=1,
+    maximum_lanes="LOOM_AMDGPU_MAX_PACKED_I8_LANES",
+)
 _I8 = Scalar("i8")
 _I16 = Scalar("i16")
 _I32 = Scalar("i32")
@@ -272,6 +282,11 @@ _VEC_I8_PACKED_DIAGNOSTIC = GuardDiagnostic(
     subject_role="type",
     subject_name="vector<i8>",
     constraint_key="amdgpu.arithmetic.vector_i8_packed",
+)
+_VEC_F8_PACKED_DIAGNOSTIC = GuardDiagnostic(
+    subject_role="type",
+    subject_name="vector<f8>",
+    constraint_key="amdgpu.arithmetic.vector_f8_packed",
 )
 _VEC_I16_PACKED_EVEN_LANES_DIAGNOSTIC = GuardDiagnostic(
     subject_role="lane-count",
@@ -420,7 +435,7 @@ _VECTOR_EXTRACT_SHAPE_DIAGNOSTIC = GuardDiagnostic(
 )
 _VECTOR_16BIT_FLOAT_CONVERSION_SHAPE_DIAGNOSTIC = GuardDiagnostic(
     subject_role="shape",
-    subject_name="vector.16bit_float_conversion",
+    subject_name="vector.packed_float_conversion",
     constraint_key="amdgpu.arithmetic.vector_16bit_float_conversion_shape",
 )
 
@@ -446,6 +461,8 @@ def _type_diagnostic(type_pattern: TypePattern) -> GuardDiagnostic:
         return _VEC_I16_PACKED_DIAGNOSTIC
     if type_pattern == _VEC_I8_PACKED:
         return _VEC_I8_PACKED_DIAGNOSTIC
+    if type_pattern in (_VEC_F8E4M3_PACKED, _VEC_F8E5M2_PACKED):
+        return _VEC_F8_PACKED_DIAGNOSTIC
     if type_pattern == _I32:
         return _I32_DIAGNOSTIC
     if type_pattern == _I64:
@@ -818,6 +835,8 @@ def _vector_extract_recipe_rules() -> tuple[RecipeRule, ...]:
         (_VEC_BF16_PACKED_STORAGE, _BF16),
         (_VEC_I16_PACKED_STORAGE, _I16),
         (_VEC_I8_PACKED, _I8),
+        (_VEC_F8E4M3_PACKED, _F8E4M3),
+        (_VEC_F8E5M2_PACKED, _F8E5M2),
     )
     return tuple(
         _vector_extract_recipe_rule(source_type, result_type)
@@ -854,6 +873,16 @@ def _vector_16bit_float_conversion_recipe_rules() -> tuple[RecipeRule, ...]:
         _vector_16bit_float_conversion_recipe_rule(
             vector.vector_extf,
             _VEC_BF16_PACKED_STORAGE,
+            _VEC_F32_STATIC,
+        ),
+        _vector_16bit_float_conversion_recipe_rule(
+            vector.vector_extf,
+            _VEC_F8E4M3_PACKED,
+            _VEC_F32_STATIC,
+        ),
+        _vector_16bit_float_conversion_recipe_rule(
+            vector.vector_extf,
+            _VEC_F8E5M2_PACKED,
             _VEC_F32_STATIC,
         ),
         _vector_16bit_float_conversion_recipe_rule(

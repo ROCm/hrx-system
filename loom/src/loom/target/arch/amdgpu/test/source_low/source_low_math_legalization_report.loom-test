@@ -14,11 +14,11 @@ COMPILE-REPORT: source_low selected_ops=8 emitted_ops=7 rows=8
 COMPILE-REPORT: math_legalization[0] function=report_scalar_round_away_recipe source_op=scalar.roundf action=rewritten policy=amdgpu-math math_op=roundf domain=scalar element=f32 recipe=round-away-f32 constraint=math.recipe.round_away_f32 bundle=target config=target source_fastmath=0x00 recipe_fastmath=0x00 created_ops=8 erased_ops=1
 COMPILE-REPORT: source_low[0] function=report_scalar_round_away_recipe source_op=scalar.constant selection=plan plan=597 descriptor=0 emitted_ops=0
 COMPILE-REPORT: source_low[1] function=report_scalar_round_away_recipe source_op=scalar.constant selection=plan plan=597 descriptor=0 emitted_ops=1
-COMPILE-REPORT: source_low[2] function=report_scalar_round_away_recipe source_op=scalar.absf selection=rule rule_set=0 rule=387 descriptor=1747636869416133384 emitted_ops=1
+COMPILE-REPORT: source_low[2] function=report_scalar_round_away_recipe source_op=scalar.absf selection=rule rule_set=0 rule=391 descriptor=1747636869416133384 emitted_ops=1
 COMPILE-REPORT: source_low[3] function=report_scalar_round_away_recipe source_op=scalar.cmpf selection=plan plan=581 descriptor=0 emitted_ops=1
-COMPILE-REPORT: source_low[4] function=report_scalar_round_away_recipe source_op=scalar.addf selection=rule rule_set=0 rule=278 descriptor=2493415658881486753 emitted_ops=1
-COMPILE-REPORT: source_low[5] function=report_scalar_round_away_recipe source_op=scalar.truncf selection=rule rule_set=0 rule=423 descriptor=3641742240926975688 emitted_ops=1
-COMPILE-REPORT: source_low[6] function=report_scalar_round_away_recipe source_op=scalar.copysignf selection=rule rule_set=0 rule=388 descriptor=4489095985271686921 emitted_ops=1
+COMPILE-REPORT: source_low[4] function=report_scalar_round_away_recipe source_op=scalar.addf selection=rule rule_set=0 rule=282 descriptor=2493415658881486753 emitted_ops=1
+COMPILE-REPORT: source_low[5] function=report_scalar_round_away_recipe source_op=scalar.truncf selection=rule rule_set=0 rule=427 descriptor=3641742240926975688 emitted_ops=1
+COMPILE-REPORT: source_low[6] function=report_scalar_round_away_recipe source_op=scalar.copysignf selection=rule rule_set=0 rule=392 descriptor=4489095985271686921 emitted_ops=1
 COMPILE-REPORT: source_low[7] function=report_scalar_round_away_recipe source_op=scf.select selection=plan plan=1284 descriptor=0 emitted_ops=1
 
 // ====
@@ -40,7 +40,7 @@ COMPILE-REPORT: source_low[1] function=report_vector_round_away_recipe source_op
 COMPILE-REPORT: source_low[2] function=report_vector_round_away_recipe source_op=vector.absf selection=rule rule_set=0 rule=105 descriptor=1747636869416133384 emitted_ops=5
 COMPILE-REPORT: source_low[3] function=report_vector_round_away_recipe source_op=vector.cmpf selection=plan plan=3622 descriptor=0 emitted_ops=7
 COMPILE-REPORT: source_low[4] function=report_vector_round_away_recipe source_op=vector.addf selection=rule rule_set=0 rule=3 descriptor=2493415658881486753 emitted_ops=5
-COMPILE-REPORT: source_low[5] function=report_vector_round_away_recipe source_op=vector.truncf selection=rule rule_set=0 rule=158 descriptor=3641742240926975688 emitted_ops=5
+COMPILE-REPORT: source_low[5] function=report_vector_round_away_recipe source_op=vector.truncf selection=rule rule_set=0 rule=162 descriptor=3641742240926975688 emitted_ops=5
 COMPILE-REPORT: source_low[6] function=report_vector_round_away_recipe source_op=vector.copysignf selection=rule rule_set=0 rule=106 descriptor=4489095985271686921 emitted_ops=7
 COMPILE-REPORT: source_low[7] function=report_vector_round_away_recipe source_op=vector.select selection=plan plan=3620 descriptor=0 emitted_ops=9
 
@@ -56,7 +56,7 @@ func.def target(@target) @report_vector_roundeven_native(%input: vector<2xf32>) 
 // ----
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
 COMPILE-REPORT: source_low selected_ops=1 emitted_ops=5 rows=1
-COMPILE-REPORT: source_low[0] function=report_vector_roundeven_native source_op=vector.roundevenf selection=rule rule_set=0 rule=157 plan_key=amdgpu.vector_roundevenf.strategy.rndne descriptor=5149499237128073059 emitted_ops=5
+COMPILE-REPORT: source_low[0] function=report_vector_roundeven_native source_op=vector.roundevenf selection=rule rule_set=0 rule=161 plan_key=amdgpu.vector_roundevenf.strategy.rndne descriptor=5149499237128073059 emitted_ops=5
 
 // ====
 
@@ -70,4 +70,4 @@ func.def target(@target) @report_vector_round_afn_native(%input: vector<2xf32>) 
 // ----
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
 COMPILE-REPORT: source_low selected_ops=1 emitted_ops=5 rows=1
-COMPILE-REPORT: source_low[0] function=report_vector_round_afn_native source_op=vector.roundf selection=rule rule_set=0 rule=156 plan_key=amdgpu.vector_roundf.strategy.afn_rndne descriptor=5149499237128073059 emitted_ops=5
+COMPILE-REPORT: source_low[0] function=report_vector_round_afn_native source_op=vector.roundf selection=rule rule_set=0 rule=160 plan_key=amdgpu.vector_roundf.strategy.afn_rndne descriptor=5149499237128073059 emitted_ops=5
