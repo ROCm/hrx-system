@@ -1009,6 +1009,11 @@ static bool loom_amdgpu_fragment_epilogue_plan_needs_physical_loop(
       return false;
   }
   for (uint16_t i = 0; i < plan->packet_count; ++i) {
+    if (iree_all_bits_set(
+            plan->packets[i].flags,
+            LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_CROSSLANE_PACKED_B16_STORE)) {
+      return false;
+    }
     if (plan->packets[i].result_register_count != 1) {
       return false;
     }

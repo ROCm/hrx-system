@@ -1034,6 +1034,14 @@ typedef struct loom_amdgpu_memory_access_plan_t {
   uint32_t packet_count;
 } loom_amdgpu_memory_access_plan_t;
 
+typedef enum loom_amdgpu_fragment_memory_packet_flag_bits_e {
+  // Adjacent-lane f32 result values are packed into one BF16 store packet.
+  LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_CROSSLANE_PACKED_B16_STORE = 1u << 0,
+} loom_amdgpu_fragment_memory_packet_flag_bits_t;
+
+// Bitset of loom_amdgpu_fragment_memory_packet_flag_bits_t values.
+typedef uint32_t loom_amdgpu_fragment_memory_packet_flags_t;
+
 typedef struct loom_amdgpu_fragment_memory_packet_plan_t {
   // First target fragment coordinate register covered by this packet.
   uint16_t register_index;
@@ -1041,6 +1049,8 @@ typedef struct loom_amdgpu_fragment_memory_packet_plan_t {
   uint16_t result_register_count;
   // Number of 32-bit memory packet registers moved by the descriptor.
   uint16_t packet_register_count;
+  // Packet-local lowering strategy bits for non-native memory payloads.
+  loom_amdgpu_fragment_memory_packet_flags_t flags;
   // Descriptor row selected for this packet.
   loom_amdgpu_descriptor_ref_t descriptor_ref;
 } loom_amdgpu_fragment_memory_packet_plan_t;
