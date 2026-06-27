@@ -124,7 +124,7 @@ TEST(Ideogram4DitParameters,
       MakeModelConfig(), IREE_SV("native_fp8"), iree_allocator_system(),
       &rules));
 
-  ASSERT_EQ(rules.count, 15u);
+  ASSERT_EQ(rules.count, 16u);
   ASSERT_NE(rules.values, nullptr);
   ASSERT_NE(rules.key_storage, nullptr);
   const iree_string_view_t expected_keys[] = {
@@ -143,6 +143,7 @@ TEST(Ideogram4DitParameters,
       IREE_SV("layers.2.feed_forward.w1.weight"),
       IREE_SV("layers.2.feed_forward.w3.weight"),
       IREE_SV("layers.2.feed_forward.w2.weight"),
+      IREE_SV("llm_cond_proj.weight"),
   };
   for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(expected_keys); ++i) {
     EXPECT_TRUE(iree_string_view_equal(rules.values[i].key, expected_keys[i]));

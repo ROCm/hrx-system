@@ -21,6 +21,11 @@ static const iree_string_view_t
         IREE_SVL("feed_forward.w2.weight"),
 };
 
+static const iree_string_view_t
+    kMixedBf16Fp8AllSupportedExactLinearWeightKeys[] = {
+        IREE_SVL("llm_cond_proj.weight"),
+};
+
 iree_status_t id4_ideogram4_dit_parameter_format_parse(
     iree_string_view_t value,
     id4_ideogram4_dit_parameter_format_t* out_format) {
@@ -85,6 +90,29 @@ static iree_status_t id4_ideogram4_dit_parameter_format_suffixes(
   }
 }
 
+static iree_status_t id4_ideogram4_dit_parameter_format_exact_keys(
+    id4_ideogram4_dit_parameter_format_t format,
+    iree_string_view_list_t* out_exact_keys) {
+  IREE_ASSERT_ARGUMENT(out_exact_keys);
+  switch (format) {
+    case ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_MIXED_BF16_FP8_E4M3:
+      *out_exact_keys = iree_string_view_list_empty();
+      return iree_ok_status();
+    case ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_MIXED_BF16_FP8_E4M3_ALL_SUPPORTED:
+      *out_exact_keys = (iree_string_view_list_t){
+          .count =
+              IREE_ARRAYSIZE(kMixedBf16Fp8AllSupportedExactLinearWeightKeys),
+          .values = kMixedBf16Fp8AllSupportedExactLinearWeightKeys,
+      };
+      return iree_ok_status();
+    default:
+      *out_exact_keys = iree_string_view_list_empty();
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "invalid mixed DiT parameter format %" PRIu32,
+                              (uint32_t)format);
+  }
+}
+
 void id4_ideogram4_dit_parameter_source_rule_list_deinitialize(
     id4_ideogram4_dit_parameter_source_rule_list_t* rules,
     iree_allocator_t host_allocator) {
@@ -122,7 +150,11 @@ iree_status_t id4_ideogram4_dit_parameter_source_rule_list_initialize(
   iree_string_view_list_t suffixes = iree_string_view_list_empty();
   IREE_RETURN_IF_ERROR(
       id4_ideogram4_dit_parameter_format_suffixes(format, &suffixes));
-  const iree_host_size_t rule_count = model.layer_count * suffixes.count;
+  iree_string_view_list_t exact_keys = iree_string_view_list_empty();
+  IREE_RETURN_IF_ERROR(
+      id4_ideogram4_dit_parameter_format_exact_keys(format, &exact_keys));
+  const iree_host_size_t layer_rule_count = model.layer_count * suffixes.count;
+  const iree_host_size_t rule_count = layer_rule_count + exact_keys.count;
   iree_status_t status = iree_allocator_malloc_array(
       host_allocator, rule_count, sizeof(out_rules->values[0]),
       (void**)&out_rules->values);
@@ -163,6 +195,21 @@ iree_status_t id4_ideogram4_dit_parameter_source_rule_list_initialize(
         ++out_rules->count;
       }
     }
+  }
+  for (iree_host_size_t exact_key_ordinal = 0;
+       exact_key_ordinal < exact_keys.count && iree_status_is_ok(status);
+       ++exact_key_ordinal) {
+    const iree_host_size_t rule_ordinal = layer_rule_count + exact_key_ordinal;
+    out_rules->values[rule_ordinal] =
+        (id4_ideogram4_dit_parameter_source_rule_t){
+            // Exact logical parameter key.
+            .key = exact_keys.values[exact_key_ordinal],
+            // Scope containing the compact FP8 weight and row scale.
+            .source_scope = fp8_parameter_scope,
+            // Physical storage expected from the selected scope.
+            .storage = ID4_IDEOGRAM4_DIT_PARAMETER_STORAGE_FP8_E4M3_SCALED,
+        };
+    ++out_rules->count;
   }
   if (!iree_status_is_ok(status)) {
     id4_ideogram4_dit_parameter_source_rule_list_deinitialize(out_rules,
