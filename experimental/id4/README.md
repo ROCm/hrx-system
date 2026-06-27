@@ -441,6 +441,14 @@ asynchronous queue work. The design should keep the loop body pure enough that
 a future `queue_execute_while`-style primitive could move the step control to
 the device.
 
+The CLI accepts the same generation policy that the C API carries into
+planning. `--dry_run` should be able to tokenize a full prompt, build the
+generation plan, and dump the structured plan without loading parameters or
+issuing device work. VAE tiling is an explicit plan policy: disabled decode,
+explicit latent tile size, relative latent tile size, and memory-budgeted tile
+selection are distinct modes, and mode-specific fields must either be provided
+where required or rejected when they would otherwise be ignored.
+
 ## Reference Oracle Plan
 
 The reference oracle is a known-good `stable-diffusion.cpp` run using dense

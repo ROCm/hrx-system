@@ -35,6 +35,23 @@ IREE_FLAG(string, dit_conditioned_fp8_scope, "dit_cond_fp8",
           "Conditioned DiT native-FP8 parameter scope.");
 IREE_FLAG(string, dit_unconditioned_fp8_scope, "dit_uncond_fp8",
           "Unconditioned DiT native-FP8 parameter scope.");
+IREE_FLAG(string, vae_tiling_mode, "disabled",
+          "VAE tiling mode: disabled, explicit_tile_size, relative_tile_size, "
+          "or memory_budget.");
+IREE_FLAG(int32_t, vae_tile_size_x, 0,
+          "VAE latent tile width for --vae_tiling_mode=explicit_tile_size.");
+IREE_FLAG(int32_t, vae_tile_size_y, 0,
+          "VAE latent tile height for --vae_tiling_mode=explicit_tile_size.");
+IREE_FLAG(float, vae_relative_size_x, 0.0f,
+          "VAE relative width factor for "
+          "--vae_tiling_mode=relative_tile_size.");
+IREE_FLAG(float, vae_relative_size_y, 0.0f,
+          "VAE relative height factor for "
+          "--vae_tiling_mode=relative_tile_size.");
+IREE_FLAG(float, vae_overlap, 0.0f,
+          "VAE fractional tile overlap for tiling modes.");
+IREE_FLAG(int64_t, vae_memory_budget, 0,
+          "VAE tile scratch byte budget for --vae_tiling_mode=memory_budget.");
 IREE_FLAG(bool, dry_run, false,
           "Plan a full generation request and exit without loading parameters "
           "or issuing device work.");
@@ -137,6 +154,126 @@ static iree_status_t id4_cli_parse_dit_activation_format(
   return iree_make_status(
       IREE_STATUS_INVALID_ARGUMENT,
       "--dit_activation_format must be bf16_linear_input or f32_canonical");
+}
+
+static iree_status_t id4_cli_parse_positive_u32_flag(
+    int32_t value, iree_string_view_t flag_name, uint32_t* out_value) {
+  if (value <= 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "%.*s must be greater than zero",
+                            (int)flag_name.size, flag_name.data);
+  }
+  *out_value = (uint32_t)value;
+  return iree_ok_status();
+}
+
+static iree_status_t id4_cli_parse_positive_i64_flag(
+    int64_t value, iree_string_view_t flag_name,
+    iree_device_size_t* out_value) {
+  if (value <= 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "%.*s must be greater than zero",
+                            (int)flag_name.size, flag_name.data);
+  }
+  *out_value = (iree_device_size_t)value;
+  return iree_ok_status();
+}
+
+static bool id4_cli_vae_tiling_auxiliary_flags_are_default(void) {
+  return FLAG_vae_tile_size_x == 0 && FLAG_vae_tile_size_y == 0 &&
+         FLAG_vae_relative_size_x == 0.0f && FLAG_vae_relative_size_y == 0.0f &&
+         FLAG_vae_overlap == 0.0f && FLAG_vae_memory_budget == 0;
+}
+
+static iree_status_t id4_cli_reject_unused_vae_tile_size_flags(
+    iree_string_view_t mode) {
+  if (FLAG_vae_tile_size_x != 0 || FLAG_vae_tile_size_y != 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "--vae_tile_size_x/y only apply to "
+                            "--vae_tiling_mode=explicit_tile_size, not `%.*s`",
+                            (int)mode.size, mode.data);
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t id4_cli_reject_unused_vae_relative_size_flags(
+    iree_string_view_t mode) {
+  if (FLAG_vae_relative_size_x != 0.0f || FLAG_vae_relative_size_y != 0.0f) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "--vae_relative_size_x/y only apply to "
+                            "--vae_tiling_mode=relative_tile_size, not `%.*s`",
+                            (int)mode.size, mode.data);
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t id4_cli_reject_unused_vae_memory_budget_flag(
+    iree_string_view_t mode) {
+  if (FLAG_vae_memory_budget != 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "--vae_memory_budget only applies to "
+                            "--vae_tiling_mode=memory_budget, not `%.*s`",
+                            (int)mode.size, mode.data);
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t id4_cli_parse_vae_tiling_config(
+    id4_vae_tiling_config_t* out_tiling) {
+  IREE_ASSERT_ARGUMENT(out_tiling);
+  memset(out_tiling, 0, sizeof(*out_tiling));
+  iree_string_view_t mode = iree_make_cstring_view(FLAG_vae_tiling_mode);
+  if (iree_string_view_equal(mode, IREE_SV("disabled"))) {
+    if (!id4_cli_vae_tiling_auxiliary_flags_are_default()) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "--vae_tiling_mode=disabled does not accept VAE tiling detail flags");
+    }
+    out_tiling->mode = ID4_VAE_TILING_MODE_DISABLED;
+    return iree_ok_status();
+  }
+  if (iree_string_view_equal(mode, IREE_SV("explicit_tile_size"))) {
+    IREE_RETURN_IF_ERROR(id4_cli_reject_unused_vae_relative_size_flags(mode));
+    IREE_RETURN_IF_ERROR(id4_cli_reject_unused_vae_memory_budget_flag(mode));
+    out_tiling->mode = ID4_VAE_TILING_MODE_EXPLICIT_TILE_SIZE;
+    IREE_RETURN_IF_ERROR(id4_cli_parse_positive_u32_flag(
+        FLAG_vae_tile_size_x, IREE_SV("--vae_tile_size_x"),
+        &out_tiling->tile_size_x));
+    IREE_RETURN_IF_ERROR(id4_cli_parse_positive_u32_flag(
+        FLAG_vae_tile_size_y, IREE_SV("--vae_tile_size_y"),
+        &out_tiling->tile_size_y));
+    out_tiling->overlap = FLAG_vae_overlap;
+    return iree_ok_status();
+  }
+  if (iree_string_view_equal(mode, IREE_SV("relative_tile_size"))) {
+    IREE_RETURN_IF_ERROR(id4_cli_reject_unused_vae_tile_size_flags(mode));
+    IREE_RETURN_IF_ERROR(id4_cli_reject_unused_vae_memory_budget_flag(mode));
+    if (FLAG_vae_relative_size_x <= 0.0f || FLAG_vae_relative_size_y <= 0.0f) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "--vae_relative_size_x/y must be greater than zero for "
+          "--vae_tiling_mode=relative_tile_size");
+    }
+    out_tiling->mode = ID4_VAE_TILING_MODE_RELATIVE_TILE_SIZE;
+    out_tiling->relative_size_x = FLAG_vae_relative_size_x;
+    out_tiling->relative_size_y = FLAG_vae_relative_size_y;
+    out_tiling->overlap = FLAG_vae_overlap;
+    return iree_ok_status();
+  }
+  if (iree_string_view_equal(mode, IREE_SV("memory_budget"))) {
+    IREE_RETURN_IF_ERROR(id4_cli_reject_unused_vae_tile_size_flags(mode));
+    IREE_RETURN_IF_ERROR(id4_cli_reject_unused_vae_relative_size_flags(mode));
+    out_tiling->mode = ID4_VAE_TILING_MODE_MEMORY_BUDGET;
+    IREE_RETURN_IF_ERROR(id4_cli_parse_positive_i64_flag(
+        FLAG_vae_memory_budget, IREE_SV("--vae_memory_budget"),
+        &out_tiling->memory_budget));
+    out_tiling->overlap = FLAG_vae_overlap;
+    return iree_ok_status();
+  }
+  return iree_make_status(
+      IREE_STATUS_INVALID_ARGUMENT,
+      "--vae_tiling_mode must be disabled, explicit_tile_size, "
+      "relative_tile_size, or memory_budget");
 }
 
 static iree_status_t id4_cli_validate_execution_flags(void) {
@@ -244,7 +381,7 @@ static iree_status_t id4_cli_make_generation_plan_policy(
   policy.structure_size = sizeof(policy);
   IREE_RETURN_IF_ERROR(
       id4_cli_parse_dit_activation_format(&policy.dit_activation_format));
-  policy.vae_tiling.mode = ID4_VAE_TILING_MODE_DISABLED;
+  IREE_RETURN_IF_ERROR(id4_cli_parse_vae_tiling_config(&policy.vae_tiling));
   *out_policy = policy;
   return iree_ok_status();
 }
