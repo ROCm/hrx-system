@@ -234,24 +234,6 @@ iree_status_t id4_ideogram4_dit_program_dispatch_qkv_norm_rotary(
     id4_pipeline_program_tensor_t rotated_key,
     id4_pipeline_program_tensor_t value);
 
-iree_status_t
-id4_ideogram4_dit_program_dispatch_qkv_norm_rotary_bf16_packed_value(
-    id4_pipeline_program_builder_t* builder, iree_string_view_t name,
-    uint32_t token_count, uint32_t attention_head_count, uint32_t head_size,
-    uint32_t value_token_stride, id4_pipeline_program_tensor_t qkv,
-    id4_pipeline_program_tensor_t norm_q_weight,
-    id4_pipeline_program_tensor_t norm_k_weight,
-    id4_pipeline_program_tensor_t position_embedding,
-    id4_pipeline_program_tensor_t rotated_query,
-    id4_pipeline_program_tensor_t rotated_key,
-    id4_pipeline_program_tensor_t value);
-
-iree_status_t id4_ideogram4_dit_program_dispatch_attention_qkv_tail_zero_bf16(
-    id4_pipeline_program_builder_t* builder, iree_string_view_t name,
-    uint32_t token_offset, uint32_t padded_token_count, uint32_t hidden_size,
-    id4_pipeline_program_tensor_t query, id4_pipeline_program_tensor_t key,
-    id4_pipeline_program_tensor_t value);
-
 iree_status_t id4_ideogram4_dit_program_dispatch_head_rmsnorm(
     id4_pipeline_program_builder_t* builder, iree_string_view_t name,
     uint32_t token_count, uint32_t attention_head_count, uint32_t head_size,
@@ -272,19 +254,7 @@ iree_status_t id4_ideogram4_dit_program_dispatch_attention(
     id4_pipeline_program_tensor_t query, id4_pipeline_program_tensor_t key,
     id4_pipeline_program_tensor_t value, id4_pipeline_program_tensor_t output);
 
-iree_status_t id4_ideogram4_dit_program_dispatch_attention_linear_input_bf16(
-    id4_pipeline_program_builder_t* builder, iree_string_view_t name,
-    uint32_t token_count, uint32_t attention_head_count, uint32_t head_size,
-    id4_pipeline_program_tensor_t query, id4_pipeline_program_tensor_t key,
-    id4_pipeline_program_tensor_t value, id4_pipeline_program_tensor_t output);
-
 iree_status_t id4_ideogram4_dit_program_dispatch_attention_bf16(
-    id4_pipeline_program_builder_t* builder, iree_string_view_t name,
-    uint32_t token_count, uint32_t attention_head_count, uint32_t head_size,
-    id4_pipeline_program_tensor_t query, id4_pipeline_program_tensor_t key,
-    id4_pipeline_program_tensor_t value, id4_pipeline_program_tensor_t output);
-
-iree_status_t id4_ideogram4_dit_program_dispatch_attention_bf16_linear_input(
     id4_pipeline_program_builder_t* builder, iree_string_view_t name,
     uint32_t token_count, uint32_t attention_head_count, uint32_t head_size,
     id4_pipeline_program_tensor_t query, id4_pipeline_program_tensor_t key,
