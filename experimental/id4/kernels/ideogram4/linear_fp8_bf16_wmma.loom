@@ -21,8 +21,6 @@ kernel.def target(@id4_gfx1100) export("id4_ideogram4_linear_fp8_bf16_wmma") @id
   %base = index.constant 0 : offset
   %zero = index.constant 0 : index
   %one = index.constant 1 : index
-  %two = index.constant 2 : index
-  %eight = index.constant 8 : index
   %sixteen = index.constant 16 : index
   %thirty_two = index.constant 32 : index
   %token_tile = kernel.workgroup.id<x> : index
@@ -71,33 +69,20 @@ kernel.def target(@id4_gfx1100) export("id4_ideogram4_linear_fp8_bf16_wmma") @id
     scf.yield %next00, %next01, %next10, %next11 : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>
   }
   %lane_column = index.rem %lane, %sixteen : index
-  %lane_group = index.div %lane, %sixteen : index
   %column0 = index.add %row_origin0, %lane_column : index
   %column1 = index.add %row_origin1, %lane_column : index
   %scale0 = view.load %scale_view[%column0] : view<[%output_size]xf32, #dense> -> f32
   %scale1 = view.load %scale_view[%column1] : view<[%output_size]xf32, #dense> -> f32
-  scf.for %register_index = [%zero to %eight step %one] {
-    %register_token_base = index.mul %register_index, %two : index
-    %local_token = index.add %register_token_base, %lane_group : index
-    %token0 = index.add %token_origin0, %local_token : index
-    %token1 = index.add %token_origin1, %local_token : index
-    %value00 = vector.extract %result00[%register_index] : vector<8xf32> -> f32
-    %scaled00 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %value00, %scale0 : f32
-    %rounded00 = scalar.fptrunc %scaled00 : f32 to bf16
-    view.store %rounded00, %output_view[%token0, %column0] : bf16, view<[%token_count]x[%output_size]xbf16, #dense>
-    %value01 = vector.extract %result01[%register_index] : vector<8xf32> -> f32
-    %scaled01 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %value01, %scale1 : f32
-    %rounded01 = scalar.fptrunc %scaled01 : f32 to bf16
-    view.store %rounded01, %output_view[%token0, %column1] : bf16, view<[%token_count]x[%output_size]xbf16, #dense>
-    %value10 = vector.extract %result10[%register_index] : vector<8xf32> -> f32
-    %scaled10 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %value10, %scale0 : f32
-    %rounded10 = scalar.fptrunc %scaled10 : f32 to bf16
-    view.store %rounded10, %output_view[%token1, %column0] : bf16, view<[%token_count]x[%output_size]xbf16, #dense>
-    %value11 = vector.extract %result11[%register_index] : vector<8xf32> -> f32
-    %scaled11 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %value11, %scale1 : f32
-    %rounded11 = scalar.fptrunc %scaled11 : f32 to bf16
-    view.store %rounded11, %output_view[%token1, %column1] : bf16, view<[%token_count]x[%output_size]xbf16, #dense>
-  }
+  %scale0_vector = vector.splat %scale0 : vector<8xf32>
+  %scale1_vector = vector.splat %scale1 : vector<8xf32>
+  %scaled00 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %result00, %scale0_vector : vector<8xf32>
+  %scaled01 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %result01, %scale1_vector : vector<8xf32>
+  %scaled10 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %result10, %scale0_vector : vector<8xf32>
+  %scaled11 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %result11, %scale1_vector : vector<8xf32>
+  vector.fragment.store<result> %scaled00, %output_view[%token_origin0, %row_origin0] shape [%m, %n] : vector<8xf32>, view<[%token_count]x[%output_size]xbf16, #dense>
+  vector.fragment.store<result> %scaled01, %output_view[%token_origin0, %row_origin1] shape [%m, %n] : vector<8xf32>, view<[%token_count]x[%output_size]xbf16, #dense>
+  vector.fragment.store<result> %scaled10, %output_view[%token_origin1, %row_origin0] shape [%m, %n] : vector<8xf32>, view<[%token_count]x[%output_size]xbf16, #dense>
+  vector.fragment.store<result> %scaled11, %output_view[%token_origin1, %row_origin1] shape [%m, %n] : vector<8xf32>, view<[%token_count]x[%output_size]xbf16, #dense>
   kernel.return
 }
 
