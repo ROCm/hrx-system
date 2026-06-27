@@ -80,3 +80,65 @@ low.kernel.def target(@target) workgroup_size(32, 1, 1) @bf16_result_fragment_ep
 ^_bb3:
   return
 }
+
+// ====
+
+amdgpu.target<gfx1100> @target
+kernel.def target(@target) @bf16_result_fragment_epilogue_after_barrier() {
+  %one = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+} launch(%gate: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %sixteen = index.constant 16 : index
+  %gate_global = buffer.assume.memory_space<global> %gate : buffer
+  %output_global = buffer.assume.memory_space<global> %output : buffer
+  %gate_noalias, %output_noalias = buffer.assume.noalias %gate_global, %output_global : buffer, buffer
+  %gate_aligned = buffer.assume.alignment %gate_noalias {minimum_alignment = 16} : buffer
+  %output_aligned = buffer.assume.alignment %output_noalias {minimum_alignment = 16} : buffer
+  %gate_view = buffer.view %gate_aligned[%base] : buffer -> view<16x16xbf16, #dense>
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<16x16xbf16, #dense>
+  %gate_bf16 = vector.fragment.load<result> %gate_view[%zero, %zero] shape [%sixteen, %sixteen] : view<16x16xbf16, #dense> -> vector<8xbf16>
+  %gate_f32 = vector.extf %gate_bf16 : vector<8xbf16> to vector<8xf32>
+  %scale = vector.constant 2.0 : vector<8xf32>
+  %product = vector.mulf<reassoc|nnan|ninf|nsz|contract> %gate_f32, %scale : vector<8xf32>
+  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  vector.fragment.store<result> %product, %output_view[%zero, %zero] shape [%sixteen, %sixteen] : vector<8xf32>, view<16x16xbf16, #dense>
+  kernel.return
+}
+
+// ----
+low.kernel.def target(@target) workgroup_size(32, 1, 1) @bf16_result_fragment_epilogue_after_barrier() asm<amdgpu.rdna3.core> {
+  %66 = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %gate_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
+  %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
+  s_waitcnt {lgkmcnt = 0}
+  %69 = s_mov_b32 0
+  %70 = s_mov_b32 8
+  %71 = s_mov_b32 1
+  low.br ^_bb1(%69: reg<amdgpu.sgpr>)
+^_bb1(%65: reg<amdgpu.sgpr>):
+  %72 = s_cmp_lt_i32 %65, %70
+  low.cond_br %72, ^_bb2, ^_bb3 : reg<amdgpu.scc>
+^_bb2:
+  %74 = v_mov_b32 15
+  %75 = v_and_b32 %66, %74
+  %76 = v_lshrrev_b32_lit %66, 4
+  %77 = v_lshl_add_u32_shift_imm %65, %76, 1
+  %78 = v_lshl_add_u32_shift_imm %77, %75, 4
+  %79 = v_lshlrev_b32_src0_inline %78, 1
+  %80 = global_load_d16_b16_saddr %79, %gate_view
+  %81 = v_lshlrev_b32_src0_16_low16 %80
+  %82 = v_mul_f32_src0_inline %81, 1073741824
+  %83 = v_lshrrev_b32_lit %82, 16
+  %84 = v_and_b32_lit %83, 1
+  %85 = v_add_u32_lit %84, 32767
+  %86 = v_add_u32 %82, %85
+  %87 = v_lshrrev_b32_lit %86, 16
+  global_store_short_saddr %79, %87, %output_view
+  %89 = s_add_u32 %65, %71
+  low.br ^_bb1(%89: reg<amdgpu.sgpr>)
+^_bb3:
+  return
+}
