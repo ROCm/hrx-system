@@ -155,12 +155,23 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "wait_counters",
+    hdrs = ["wait_counters.h"],
+    visibility = _AMDGPU_ROOT_VISIBILITY + _AMDGPU_LOWER_VISIBILITY,
+    deps = [
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
     name = "wait_plan",
     srcs = ["wait_plan.c"],
     hdrs = ["wait_plan.h"],
     visibility = _AMDGPU_ROOT_VISIBILITY + _AMDGPU_LOWER_VISIBILITY,
     deps = [
         ":descriptor_semantics",
+        ":wait_counters",
+        ":wait_packet_tables",
         "//loom/src/loom/codegen/low:allocation",
         "//loom/src/loom/codegen/low:descriptors",
         "//loom/src/loom/codegen/low:move_sequence",
@@ -206,9 +217,9 @@ loom_generated_textual_header(
 )
 
 loom_cc_library(
-    name = "wait_packets",
-    srcs = ["wait_packets.c"],
-    hdrs = ["wait_packets.h"],
+    name = "wait_packet_tables",
+    srcs = ["wait_packet_tables.c"],
+    hdrs = ["wait_packet_tables.h"],
     textual_hdrs = [
         ":wait_packet_descriptor_ranges.inl",
         ":wait_packet_descriptors.inl",
@@ -216,12 +227,27 @@ loom_cc_library(
     ],
     visibility = _AMDGPU_ROOT_VISIBILITY + _AMDGPU_LOWER_VISIBILITY,
     deps = [
+        ":wait_counters",
+        "//loom/src/loom/codegen/low:descriptors",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/target/arch/amdgpu:target_info_defs",
+        "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "wait_packets",
+    srcs = ["wait_packets.c"],
+    hdrs = ["wait_packets.h"],
+    visibility = _AMDGPU_ROOT_VISIBILITY + _AMDGPU_LOWER_VISIBILITY,
+    deps = [
+        ":wait_packet_tables",
         ":wait_plan",
         "//loom/src/loom/codegen/low:descriptors",
         "//loom/src/loom/codegen/low:function",
         "//loom/src/loom/ir",
-        "//loom/src/loom/ops/low",
-        "//loom/src/loom/target/arch/amdgpu:target_info",
         "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
         "//loom/src/loom/util:json",
         "//loom/src/loom/util:stream",

@@ -136,6 +136,18 @@ endif()
 if(LOOM_TARGET_ARCH_AMDGPU)
 loom_cc_library(
   NAME
+    wait_counters
+  HDRS
+    "wait_counters.h"
+  DEPS
+    iree::base
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU)
+loom_cc_library(
+  NAME
     wait_plan
   HDRS
     "wait_plan.h"
@@ -143,6 +155,8 @@ loom_cc_library(
     "wait_plan.c"
   DEPS
     ::descriptor_semantics
+    ::wait_counters
+    ::wait_packet_tables
     iree::base
     iree::base::internal::arena
     loom::codegen::low::allocation
@@ -242,16 +256,37 @@ endif()
 if(LOOM_TARGET_ARCH_AMDGPU)
 loom_cc_library(
   NAME
-    wait_packets
+    wait_packet_tables
   HDRS
-    "wait_packets.h"
+    "wait_packet_tables.h"
   TEXTUAL_HDRS
     "wait_packet_descriptor_ranges.inl"
     "wait_packet_descriptors.inl"
     "wait_packet_immediates.inl"
   SRCS
+    "wait_packet_tables.c"
+  DEPS
+    ::wait_counters
+    iree::base
+    loom::codegen::low::descriptors
+    loom::ir
+    loom::ops::low
+    loom::target::arch::amdgpu::refs::target_refs
+    loom::target::arch::amdgpu::target_info_defs
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU)
+loom_cc_library(
+  NAME
+    wait_packets
+  HDRS
+    "wait_packets.h"
+  SRCS
     "wait_packets.c"
   DEPS
+    ::wait_packet_tables
     ::wait_plan
     iree::base
     iree::base::internal
@@ -259,9 +294,7 @@ loom_cc_library(
     loom::codegen::low::descriptors
     loom::codegen::low::function
     loom::ir
-    loom::ops::low
     loom::target::arch::amdgpu::refs::target_refs
-    loom::target::arch::amdgpu::target_info
     loom::util::json
     loom::util::stream
   PUBLIC

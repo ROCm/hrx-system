@@ -9,9 +9,9 @@ low.func.def target(@target) @concat_forwards_lds_wait(%addr: reg<amdgpu.vgpr>, 
   return %result
 }
 
-// ----
 // Nodes 0 and 1 are the LDS reads, node 2 is the transparent concat, and node 3
 // is the WMMA consumer. The planned wait must attach to node 3, not node 2.
+// ----
 {"format":"loom.low.packet_hazard_plan.v1","function":"concat_forwards_lds_wait","target":"target","descriptor_set":"amdgpu.rdna3.core","progress_count":2,"hazard_count":1,"progress":[{"index":0,"packet":0,"node":0,"block":0,"scheduled_ordinal":0,"class_id":3,"class_name":"amdgpu.lds","action":"advance","units":1},{"index":1,"packet":1,"node":1,"block":0,"scheduled_ordinal":1,"class_id":3,"class_name":"amdgpu.lds","action":"advance","units":1}],"hazards":[{"index":0,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":2,"reason_name":"amdgpu.ssa_use","producer_node":1,"producer_packet":1,"producer_scheduled_ordinal":1,"consumer_node":3,"insertion_packet":3,"block":0,"scheduled_ordinal":3,"progress_class_id":3,"progress_class_name":"amdgpu.lds","required":2,"observed":0,"residual":2}]}
 
 // ====
@@ -25,9 +25,9 @@ low.func.def target(@target) @slice_forwards_lds_wait(%addr: reg<amdgpu.vgpr>, %
   return %result
 }
 
-// ----
 // Node 1 is the transparent slice. The wait must be planned at node 2, where
 // the sliced LDS payload is actually consumed by VALU.
+// ----
 {"format":"loom.low.packet_hazard_plan.v1","function":"slice_forwards_lds_wait","target":"target","descriptor_set":"amdgpu.rdna3.core","progress_count":1,"hazard_count":1,"progress":[{"index":0,"packet":0,"node":0,"block":0,"scheduled_ordinal":0,"class_id":3,"class_name":"amdgpu.lds","action":"advance","units":1}],"hazards":[{"index":0,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":2,"reason_name":"amdgpu.ssa_use","producer_node":0,"producer_packet":0,"producer_scheduled_ordinal":0,"consumer_node":2,"insertion_packet":2,"block":0,"scheduled_ordinal":2,"progress_class_id":3,"progress_class_name":"amdgpu.lds","required":1,"observed":0,"residual":1}]}
 
 // ====
@@ -41,9 +41,9 @@ low.func.def target(@target) @copy_forwards_lds_wait(%addr: reg<amdgpu.vgpr>, %r
   return %result
 }
 
-// ----
 // Node 1 is the coalesced copy. The wait must be planned at node 2, where the
 // copied LDS payload is actually consumed by VALU.
+// ----
 {"format":"loom.low.packet_hazard_plan.v1","function":"copy_forwards_lds_wait","target":"target","descriptor_set":"amdgpu.rdna3.core","progress_count":1,"hazard_count":1,"progress":[{"index":0,"packet":0,"node":0,"block":0,"scheduled_ordinal":0,"class_id":3,"class_name":"amdgpu.lds","action":"advance","units":1}],"hazards":[{"index":0,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":2,"reason_name":"amdgpu.ssa_use","producer_node":0,"producer_packet":0,"producer_scheduled_ordinal":0,"consumer_node":2,"insertion_packet":2,"block":0,"scheduled_ordinal":2,"progress_class_id":3,"progress_class_name":"amdgpu.lds","required":1,"observed":0,"residual":1}]}
 
 // ====
@@ -60,9 +60,9 @@ low.func.def target(@target) @smem_load_address_dependency(%kernarg: reg<amdgpu.
   return %value, %noise0, %noise1, %noise2 : reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>
 }
 
-// ----
 // The pointer-producing scalar load is oldest among four outstanding SMEM
 // packets, but dependent SMEM consumers must still request a full SMEM drain.
+// ----
 {"format":"loom.low.packet_hazard_plan.v1","function":"smem_load_address_dependency","target":"target","descriptor_set":"amdgpu.rdna3.core","progress_count":5,"hazard_count":2,"progress":[{"index":0,"packet":1,"node":1,"block":0,"scheduled_ordinal":1,"class_id":4,"class_name":"amdgpu.smem","action":"advance","units":1},{"index":1,"packet":2,"node":2,"block":0,"scheduled_ordinal":2,"class_id":4,"class_name":"amdgpu.smem","action":"advance","units":1},{"index":2,"packet":3,"node":3,"block":0,"scheduled_ordinal":3,"class_id":4,"class_name":"amdgpu.smem","action":"advance","units":1},{"index":3,"packet":4,"node":4,"block":0,"scheduled_ordinal":4,"class_id":4,"class_name":"amdgpu.smem","action":"advance","units":1},{"index":4,"packet":5,"node":5,"block":0,"scheduled_ordinal":5,"class_id":4,"class_name":"amdgpu.smem","action":"advance","units":1}],"hazards":[{"index":0,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":2,"reason_name":"amdgpu.ssa_use","producer_node":1,"producer_packet":1,"producer_scheduled_ordinal":1,"consumer_node":5,"insertion_packet":5,"block":0,"scheduled_ordinal":5,"progress_class_id":4,"progress_class_name":"amdgpu.smem","required":4,"observed":0,"residual":4},{"index":1,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":2,"reason_name":"amdgpu.ssa_use","producer_node":5,"producer_packet":5,"producer_scheduled_ordinal":5,"consumer_node":6,"insertion_packet":6,"block":0,"scheduled_ordinal":6,"progress_class_id":4,"progress_class_name":"amdgpu.smem","required":1,"observed":0,"residual":1}]}
 
 // ====
@@ -100,4 +100,56 @@ s_mov_b32 s4, 0
   s_add_u32 s0, s0, s9
   v_mov_b32_copy v1, s0
   global_store_b32 v0, v1, s[2:3] offset:0
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-wait-counter-plan-json @explicit_lgkm_wait_keeps_vmem_pending
+
+amdgpu.target<gfx1100> @target {subgroup_size = 64}
+low.func.def target(@target) @explicit_lgkm_wait_keeps_vmem_pending(%addr: reg<amdgpu.vgpr>, %global: reg<amdgpu.sgpr x2>, %acc: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>) asm<amdgpu.rdna3.core> {
+  %lhs0 = global_load_b128_saddr %addr, %global
+  %lhs1 = global_load_b128_saddr %addr, %global {offset = 16}
+  %lhs = concat(%lhs0, %lhs1) : (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>) -> reg<amdgpu.vgpr x8>
+  %rhs0 = ds_read_b128 %addr
+  %rhs1 = ds_read_b128 %addr {offset = 16}
+  %rhs = concat(%rhs0, %rhs1) : (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>) -> reg<amdgpu.vgpr x8>
+  %result = v_wmma_f16_16x16x16_f16_w64 %lhs, %rhs, %acc
+  s_waitcnt {lgkmcnt = 0, vmcnt = 63}
+  return %result
+}
+
+// The explicit wait drains LDS and SMEM only. VMEM loads feeding the WMMA remain
+// outstanding, so the planner must still add a VMEM wait before the WMMA.
+// ----
+{"format":"loom.low.packet_hazard_plan.v1","function":"explicit_lgkm_wait_keeps_vmem_pending","target":"target","descriptor_set":"amdgpu.rdna3.core","progress_count":6,"hazard_count":1,"progress":[{"index":0,"packet":0,"node":0,"block":0,"scheduled_ordinal":0,"class_id":1,"class_name":"amdgpu.vmem_load","action":"advance","units":1},{"index":1,"packet":1,"node":1,"block":0,"scheduled_ordinal":1,"class_id":1,"class_name":"amdgpu.vmem_load","action":"advance","units":1},{"index":2,"packet":2,"node":3,"block":0,"scheduled_ordinal":2,"class_id":3,"class_name":"amdgpu.lds","action":"advance","units":1},{"index":3,"packet":3,"node":4,"block":0,"scheduled_ordinal":3,"class_id":3,"class_name":"amdgpu.lds","action":"advance","units":1},{"index":4,"packet":4,"node":7,"block":0,"scheduled_ordinal":4,"class_id":3,"class_name":"amdgpu.lds","action":"reset","units":0},{"index":5,"packet":4,"node":7,"block":0,"scheduled_ordinal":4,"class_id":4,"class_name":"amdgpu.smem","action":"reset","units":0}],"hazards":[{"index":0,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":2,"reason_name":"amdgpu.ssa_use","producer_node":1,"producer_packet":1,"producer_scheduled_ordinal":1,"consumer_node":6,"insertion_packet":7,"block":0,"scheduled_ordinal":7,"progress_class_id":1,"progress_class_name":"amdgpu.vmem_load","required":2,"observed":0,"residual":2}]}
+
+// ====
+// RUN: emit amdgpu-assembly @explicit_lgkm_wait_keeps_vmem_pending_assembly
+
+amdgpu.target<gfx1100> @target {subgroup_size = 64}
+low.func.def target(@target) @explicit_lgkm_wait_keeps_vmem_pending_assembly(%addr: reg<amdgpu.vgpr>, %global: reg<amdgpu.sgpr x2>, %output: reg<amdgpu.sgpr x2>, %acc: reg<amdgpu.vgpr x4>) asm<amdgpu.rdna3.core> {
+  %lhs0 = global_load_b128_saddr %addr, %global
+  %lhs1 = global_load_b128_saddr %addr, %global {offset = 16}
+  %lhs = concat(%lhs0, %lhs1) : (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>) -> reg<amdgpu.vgpr x8>
+  %rhs0 = ds_read_b128 %addr
+  %rhs1 = ds_read_b128 %addr {offset = 16}
+  %rhs = concat(%rhs0, %rhs1) : (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>) -> reg<amdgpu.vgpr x8>
+  %result = v_wmma_f16_16x16x16_f16_w64 %lhs, %rhs, %acc
+  s_waitcnt {lgkmcnt = 0, vmcnt = 63}
+  global_store_b128_saddr %addr, %result, %output
+  return
+}
+
+// The explicit wait may be scheduled before the WMMA, but it must stay a
+// no-wait for VMEM. A separate VMEM wait is required before the WMMA consumes
+// global-load operands.
+// ----
+  global_load_b128 v[8:11], v4, s[0:1] offset:0
+  global_load_b128 v[12:15], v4, s[0:1] offset:16
+  ds_read_b128 v[16:19], v4 offset:0
+  ds_read_b128 v[20:23], v4 offset:16
+  s_waitcnt vmcnt(63) lgkmcnt(0)
+  s_waitcnt vmcnt(0) lgkmcnt(63)
+  v_wmma_f16_16x16x16_f16 v[0:3], v[8:15], v[16:23], v[0:3]
+  global_store_b128 v4, v[0:3], s[2:3] offset:0
   s_endpgm

@@ -20,8 +20,10 @@ low.func.def target(@gfx11_target) @gfx11_explicit_smem_wait(%kernarg: reg<amdgp
   return %sum
 }
 
+// lgkmcnt drains LDS and SMEM on gfx11; the implicit vmcnt default remains a
+// no-wait and must not reset VMEM progress.
 // ----
-{"format":"loom.low.packet_hazard_plan.v1","function":"gfx11_explicit_smem_wait","target":"gfx11_target","descriptor_set":"amdgpu.rdna3.core","progress_count":4,"hazard_count":0,"progress":[{"index":0,"packet":0,"node":0,"block":0,"scheduled_ordinal":0,"class_id":4,"class_name":"amdgpu.smem","action":"advance","units":1},{"index":1,"packet":1,"node":1,"block":0,"scheduled_ordinal":1,"class_id":1,"class_name":"amdgpu.vmem_load","action":"reset","units":0},{"index":2,"packet":1,"node":1,"block":0,"scheduled_ordinal":1,"class_id":3,"class_name":"amdgpu.lds","action":"reset","units":0},{"index":3,"packet":1,"node":1,"block":0,"scheduled_ordinal":1,"class_id":4,"class_name":"amdgpu.smem","action":"reset","units":0}],"hazards":[]}
+{"format":"loom.low.packet_hazard_plan.v1","function":"gfx11_explicit_smem_wait","target":"gfx11_target","descriptor_set":"amdgpu.rdna3.core","progress_count":3,"hazard_count":0,"progress":[{"index":0,"packet":0,"node":0,"block":0,"scheduled_ordinal":0,"class_id":4,"class_name":"amdgpu.smem","action":"advance","units":1},{"index":1,"packet":1,"node":1,"block":0,"scheduled_ordinal":1,"class_id":3,"class_name":"amdgpu.lds","action":"reset","units":0},{"index":2,"packet":1,"node":1,"block":0,"scheduled_ordinal":1,"class_id":4,"class_name":"amdgpu.smem","action":"reset","units":0}],"hazards":[]}
 
 // ====
 
