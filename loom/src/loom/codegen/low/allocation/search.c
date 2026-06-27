@@ -55,15 +55,12 @@ static bool loom_low_allocation_search_has_pressure_release_records(
          context->storage_leases->pressure_release_record_count != 0;
 }
 
-bool loom_low_allocation_search_location_conflicts(
-    loom_low_allocation_search_context_t* context,
+static loom_low_allocation_assignment_t
+loom_low_allocation_search_candidate_assignment(
+    const loom_low_allocation_search_context_t* context,
     const loom_liveness_interval_t* interval, uint16_t reg_class_id,
     loom_low_allocation_location_kind_t location_kind, uint32_t location_base,
-    uint32_t location_count, const loom_value_id_t* ignored_value_ids,
-    uint16_t ignored_value_count,
-    const loom_value_id_t* ignored_storage_lease_value_ids,
-    uint16_t ignored_storage_lease_value_count,
-    loom_low_allocation_storage_release_policy_t release_policy) {
+    uint32_t location_count) {
   loom_low_allocation_assignment_t candidate = {
       .value_id = interval->value_id,
       .value_class = interval->value_class,
@@ -79,6 +76,26 @@ bool loom_low_allocation_search_location_conflicts(
           loom_low_allocation_search_unit_end_point_start_for_value(
               context, interval->value_id),
   };
+  candidate.end_point =
+      loom_low_allocation_live_range_assignment_max_unit_end_point(
+          context->unit_liveness->end_points,
+          context->unit_liveness->end_point_count, &candidate);
+  return candidate;
+}
+
+bool loom_low_allocation_search_location_conflicts(
+    loom_low_allocation_search_context_t* context,
+    const loom_liveness_interval_t* interval, uint16_t reg_class_id,
+    loom_low_allocation_location_kind_t location_kind, uint32_t location_base,
+    uint32_t location_count, const loom_value_id_t* ignored_value_ids,
+    uint16_t ignored_value_count,
+    const loom_value_id_t* ignored_storage_lease_value_ids,
+    uint16_t ignored_storage_lease_value_count,
+    loom_low_allocation_storage_release_policy_t release_policy) {
+  loom_low_allocation_assignment_t candidate =
+      loom_low_allocation_search_candidate_assignment(
+          context, interval, reg_class_id, location_kind, location_base,
+          location_count);
   if (loom_low_allocation_active_set_conflicts(
           context->active_set, context->descriptor_set,
           context->unit_liveness->end_points,
@@ -271,25 +288,14 @@ static iree_status_t loom_low_allocation_search_collect_active_spill_victim_set(
   *out_unit_count = 0;
   *out_latest_end_point = 0;
   *out_blocked = false;
-  const uint32_t interval_end =
-      loom_low_allocation_live_range_interval_storage_end_point(interval);
   const uint16_t conflict_assignment_capacity =
       (uint16_t)context->active_set->count;
 
-  const loom_low_allocation_assignment_t candidate = {
-      .value_id = interval->value_id,
-      .value_class = interval->value_class,
-      .descriptor_reg_class_id = capacity->descriptor_reg_class_id,
-      .start_point = interval->start_point,
-      .end_point = interval_end,
-      .unit_count = interval->unit_count,
-      .location_kind = capacity->location_kind,
-      .location_base = location_base,
-      .location_count = interval->unit_count,
-      .unit_end_point_start =
-          loom_low_allocation_search_unit_end_point_start_for_value(
-              context, interval->value_id),
-  };
+  const loom_low_allocation_assignment_t candidate =
+      loom_low_allocation_search_candidate_assignment(
+          context, interval, capacity->descriptor_reg_class_id,
+          capacity->location_kind, location_base, interval->unit_count);
+  const uint32_t interval_end = candidate.end_point;
 
   uint16_t conflict_assignment_count = 0;
   const bool active_unit_index_enabled =

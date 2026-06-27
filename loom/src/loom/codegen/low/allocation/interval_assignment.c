@@ -48,6 +48,27 @@ loom_low_allocation_interval_assignment_unit_end_point_start_for_value_ordinal(
       state->context->unit_liveness, state->context->liveness, value_ordinal);
 }
 
+static uint32_t
+loom_low_allocation_interval_assignment_max_unit_end_point_for_interval(
+    const loom_low_allocation_interval_assignment_state_t* state,
+    const loom_liveness_interval_t* interval,
+    loom_value_ordinal_t value_ordinal) {
+  const loom_low_allocation_assignment_t candidate = {
+      .value_id = interval->value_id,
+      .value_class = interval->value_class,
+      .start_point = interval->start_point,
+      .end_point =
+          loom_low_allocation_live_range_interval_storage_end_point(interval),
+      .unit_count = interval->unit_count,
+      .unit_end_point_start =
+          loom_low_allocation_interval_assignment_unit_end_point_start_for_value_ordinal(
+              state, value_ordinal),
+  };
+  return loom_low_allocation_live_range_assignment_max_unit_end_point(
+      state->context->unit_liveness->end_points,
+      state->context->unit_liveness->end_point_count, &candidate);
+}
+
 static loom_low_allocation_search_context_t
 loom_low_allocation_interval_assignment_search_context(
     loom_low_allocation_interval_assignment_state_t* state) {
@@ -102,7 +123,7 @@ loom_low_allocation_interval_assignment_failure_candidate(
     loom_value_ordinal_t value_ordinal,
     const loom_low_allocation_class_capacity_t* capacity,
     uint32_t location_base) {
-  return (loom_low_allocation_assignment_t){
+  loom_low_allocation_assignment_t candidate = {
       .value_id = interval->value_id,
       .value_class = interval->value_class,
       .descriptor_reg_class_id = capacity->descriptor_reg_class_id,
@@ -117,6 +138,10 @@ loom_low_allocation_interval_assignment_failure_candidate(
           loom_low_allocation_interval_assignment_unit_end_point_start_for_value_ordinal(
               state, value_ordinal),
   };
+  candidate.end_point =
+      loom_low_allocation_interval_assignment_max_unit_end_point_for_interval(
+          state, interval, value_ordinal);
+  return candidate;
 }
 
 static void loom_low_allocation_interval_assignment_failure_set_conflict(
@@ -144,7 +169,8 @@ static iree_status_t loom_low_allocation_interval_assignment_record_failure(
       .descriptor_reg_class_id = capacity->descriptor_reg_class_id,
       .start_point = interval->start_point,
       .end_point =
-          loom_low_allocation_live_range_interval_storage_end_point(interval),
+          loom_low_allocation_interval_assignment_max_unit_end_point_for_interval(
+              state, interval, value_ordinal),
       .required_unit_count = interval->unit_count,
       .budget_units = budget_units,
       .peak_live_units =

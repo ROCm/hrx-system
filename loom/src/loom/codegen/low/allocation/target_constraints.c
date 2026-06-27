@@ -1126,7 +1126,7 @@ bool loom_low_allocation_target_constraints_fixed_value_conflicts(
             candidate->descriptor_reg_class_id)) {
       continue;
     }
-    const loom_low_allocation_assignment_t fixed_assignment = {
+    loom_low_allocation_assignment_t fixed_assignment = {
         .value_id = fixed_value->value_id,
         .value_class = fixed_value->interval->value_class,
         .descriptor_reg_class_id = fixed_value->descriptor_reg_class_id,
@@ -1141,6 +1141,10 @@ bool loom_low_allocation_target_constraints_fixed_value_conflicts(
             loom_low_allocation_unit_liveness_end_point_start_for_value_ordinal(
                 unit_liveness, liveness, fixed_value->value_ordinal),
     };
+    fixed_assignment.end_point =
+        loom_low_allocation_live_range_assignment_max_unit_end_point(
+            unit_liveness->end_points, unit_liveness->end_point_count,
+            &fixed_assignment);
     if (loom_low_allocation_live_range_assignments_conflict(
             descriptor_set, unit_liveness->end_points,
             unit_liveness->end_point_count, &fixed_assignment, candidate)) {
