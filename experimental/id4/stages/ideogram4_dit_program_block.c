@@ -153,6 +153,30 @@ static iree_status_t id4_ideogram4_dit_program_dispatch_linear_parameter_bf16(
   }
 }
 
+static iree_status_t
+id4_ideogram4_dit_program_dispatch_linear_parameter_f32_bf16(
+    id4_pipeline_program_builder_t* builder, iree_string_view_t name,
+    uint32_t token_count, uint32_t token_capacity, uint32_t input_size,
+    uint32_t output_size, id4_pipeline_program_tensor_t input,
+    id4_ideogram4_dit_program_linear_parameter_t parameter,
+    id4_pipeline_program_tensor_t output) {
+  switch (parameter.storage) {
+    case ID4_IDEOGRAM4_DIT_PARAMETER_STORAGE_BF16:
+      return id4_ideogram4_dit_program_dispatch_linear_bf16_bf16(
+          builder, name, token_count, input_size, output_size, input,
+          parameter.weight, output);
+    case ID4_IDEOGRAM4_DIT_PARAMETER_STORAGE_FP8_E4M3_SCALED:
+      return id4_ideogram4_dit_program_dispatch_linear_fp8_bf16(
+          builder, name, token_count, token_capacity, input_size, output_size,
+          input, parameter.weight, parameter.scale, output);
+    default:
+      return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                              "Ideogram4 DiT linear dispatch storage %" PRIu32
+                              " is not supported",
+                              (uint32_t)parameter.storage);
+  }
+}
+
 iree_status_t id4_ideogram4_dit_program_author_transformer_block(
     const id4_ideogram4_dit_program_block_options_t* options,
     id4_pipeline_program_tensor_t* out_hidden) {
@@ -633,10 +657,7 @@ iree_status_t id4_ideogram4_dit_program_author_transformer_block(
       f32_canonical_activations ||
       id4_ideogram4_dit_program_has_diagnostic_tap(diagnostic_tap_names,
                                                    attention_output_name);
-  const bool f32_attention_output =
-      tap_attention_output ||
-      attention_output_parameter.storage ==
-          ID4_IDEOGRAM4_DIT_PARAMETER_STORAGE_FP8_E4M3_SCALED;
+  const bool f32_attention_output = tap_attention_output;
   const id4_pipeline_program_dtype_t attention_output_dtype =
       f32_attention_output ? ID4_PIPELINE_PROGRAM_DTYPE_F32
                            : ID4_PIPELINE_PROGRAM_DTYPE_BF16;
@@ -655,17 +676,11 @@ iree_status_t id4_ideogram4_dit_program_author_transformer_block(
             hidden_size, hidden_size, attention_context,
             attention_output_parameter, attention_output));
   } else {
-    if (attention_output_parameter.storage !=
-        ID4_IDEOGRAM4_DIT_PARAMETER_STORAGE_BF16) {
-      return iree_make_status(
-          IREE_STATUS_UNIMPLEMENTED,
-          "Ideogram4 DiT FP8 attention output from F32 context requires a "
-          "packed BF16 input bridge");
-    }
-    IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_dispatch_linear_bf16_bf16(
-        builder, attention_output_dispatch_name, total_token_count, hidden_size,
-        hidden_size, attention_context, attention_output_parameter.weight,
-        attention_output));
+    IREE_RETURN_IF_ERROR(
+        id4_ideogram4_dit_program_dispatch_linear_parameter_f32_bf16(
+            builder, attention_output_dispatch_name, total_token_count,
+            bf16_token_capacity, hidden_size, hidden_size, attention_context,
+            attention_output_parameter, attention_output));
   }
 
   char after_attention_output_name_buffer
@@ -972,17 +987,11 @@ iree_status_t id4_ideogram4_dit_program_author_transformer_block(
     }
   } else {
     if (capture_mlp_hidden) {
-      if (feed_forward_w2_parameter.storage !=
-          ID4_IDEOGRAM4_DIT_PARAMETER_STORAGE_BF16) {
-        return iree_make_status(
-            IREE_STATUS_UNIMPLEMENTED,
-            "Ideogram4 DiT FP8 feed-forward output from F32 hidden requires a "
-            "packed BF16 input bridge");
-      }
-      IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_dispatch_linear_bf16_bf16(
-          builder, mlp_output_dispatch_name, total_token_count,
-          intermediate_size, hidden_size, mlp_hidden,
-          feed_forward_w2_parameter.weight, mlp_output));
+      IREE_RETURN_IF_ERROR(
+          id4_ideogram4_dit_program_dispatch_linear_parameter_f32_bf16(
+              builder, mlp_output_dispatch_name, total_token_count,
+              bf16_token_capacity, intermediate_size, hidden_size, mlp_hidden,
+              feed_forward_w2_parameter, mlp_output));
     } else {
       IREE_RETURN_IF_ERROR(
           id4_ideogram4_dit_program_dispatch_linear_parameter_bf16(

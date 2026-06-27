@@ -4958,8 +4958,27 @@ iree_native_test(
     "--dry-run"
     "--output-format=jsonl"
     "--config=id4.ideogram4.linear_input_pack.token_count=3"
+    "--config=id4.ideogram4.linear_input_pack.token_capacity=3"
     "--config=id4.ideogram4.linear_input_pack.input_size=2"
     "--config=id4.ideogram4.linear_input_pack.element_count=6"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
+    "ideogram4_linear_input_pack_f32_bf16_padded_zero_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_input_pack_f32_bf16.loom}}"
+    "--benchmark=@id4_ideogram4_linear_input_pack_f32_bf16_padded_zero"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.ideogram4.linear_input_pack.token_count=3"
+    "--config=id4.ideogram4.linear_input_pack.token_capacity=4"
+    "--config=id4.ideogram4.linear_input_pack.input_size=2"
+    "--config=id4.ideogram4.linear_input_pack.element_count=8"
   SRC
     loom::tools::iree-benchmark-loom
   LABELS
@@ -4975,6 +4994,7 @@ iree_native_test(
     "--dry-run"
     "--output-format=jsonl"
     "--config=id4.ideogram4.linear_input_pack.token_count=4096"
+    "--config=id4.ideogram4.linear_input_pack.token_capacity=4096"
     "--config=id4.ideogram4.linear_input_pack.input_size=4608"
     "--config=id4.ideogram4.linear_input_pack.element_count=18874368"
   SRC
@@ -4992,6 +5012,7 @@ iree_native_test(
     "--dry-run"
     "--output-format=jsonl"
     "--config=id4.ideogram4.linear_input_pack.token_count=4096"
+    "--config=id4.ideogram4.linear_input_pack.token_capacity=4096"
     "--config=id4.ideogram4.linear_input_pack.input_size=12288"
     "--config=id4.ideogram4.linear_input_pack.element_count=50331648"
   SRC
@@ -12641,8 +12662,31 @@ iree_native_test(
     "--case=@id4_ideogram4_linear_input_pack_f32_bf16_small_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_input_pack.token_count=3"
+    "--config=id4.ideogram4.linear_input_pack.token_capacity=3"
     "--config=id4.ideogram4.linear_input_pack.input_size=2"
     "--config=id4.ideogram4.linear_input_pack.element_count=6"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
+    "ideogram4_linear_input_pack_f32_bf16_padded_zero_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_input_pack_f32_bf16.loom}}"
+    "--case=@id4_ideogram4_linear_input_pack_f32_bf16_padded_zero_case"
+    "--device=amdgpu://0"
+    "--config=id4.ideogram4.linear_input_pack.token_count=3"
+    "--config=id4.ideogram4.linear_input_pack.token_capacity=4"
+    "--config=id4.ideogram4.linear_input_pack.input_size=2"
+    "--config=id4.ideogram4.linear_input_pack.element_count=8"
   SRC
     loom::tools::iree-test-loom
   LABELS
@@ -12662,6 +12706,7 @@ iree_native_test(
     "--case=@id4_ideogram4_linear_input_pack_f32_bf16_uncond_hidden_1024_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_input_pack.token_count=4096"
+    "--config=id4.ideogram4.linear_input_pack.token_capacity=4096"
     "--config=id4.ideogram4.linear_input_pack.input_size=4608"
     "--config=id4.ideogram4.linear_input_pack.element_count=18874368"
   SRC
@@ -12683,6 +12728,7 @@ iree_native_test(
     "--case=@id4_ideogram4_linear_input_pack_f32_bf16_uncond_mlp_down_1024_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.linear_input_pack.token_count=4096"
+    "--config=id4.ideogram4.linear_input_pack.token_capacity=4096"
     "--config=id4.ideogram4.linear_input_pack.input_size=12288"
     "--config=id4.ideogram4.linear_input_pack.element_count=50331648"
   SRC

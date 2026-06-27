@@ -1,5 +1,9 @@
 config.decl @id4.ideogram4.linear_input_pack.token_count : %value: index where [range(%value, 1, 131072)]
+
+config.decl @id4.ideogram4.linear_input_pack.token_capacity : %value: index where [range(%value, 1, 131072)]
+
 config.decl @id4.ideogram4.linear_input_pack.input_size : %value: index where [range(%value, 1, 131072)]
+
 config.decl @id4.ideogram4.linear_input_pack.element_count : %value: index where [range(%value, 1, 268435456)]
 
 kernel.def export("id4_ideogram4_linear_input_pack_f32_bf16") @id4_ideogram4_linear_input_pack_f32_bf16() {
@@ -16,23 +20,29 @@ kernel.def export("id4_ideogram4_linear_input_pack_f32_bf16") @id4_ideogram4_lin
   %lane = kernel.workitem.id<x> : index
   %workgroup_size_x = index.constant 256 : index
   %token_count = config.get @id4.ideogram4.linear_input_pack.token_count : index
+  %token_capacity = config.get @id4.ideogram4.linear_input_pack.token_capacity : index
   %input_size = config.get @id4.ideogram4.linear_input_pack.input_size : index
   %element_count = config.get @id4.ideogram4.linear_input_pack.element_count : index
   %element_index = index.madd %workgroup, %workgroup_size_x, %lane : index
   %in_bounds = index.cmp ult, %element_index, %element_count : index
-
+  %zero_f32 = scalar.constant 0.0 : f32
   %input_noalias, %packed_output_noalias = buffer.assume.noalias %input, %packed_output : buffer, buffer
   %input_global = buffer.assume.memory_space<global> %input_noalias : buffer
   %packed_output_global = buffer.assume.memory_space<global> %packed_output_noalias : buffer
   %input_view = buffer.view %input_global[%base] : buffer -> view<[%input_size]x[%token_count]xf32, #dense>
-  %packed_output_view = buffer.view %packed_output_global[%base] : buffer -> view<[%token_count]x[%input_size]xbf16, #dense>
-
+  %packed_output_view = buffer.view %packed_output_global[%base] : buffer -> view<[%token_capacity]x[%input_size]xbf16, #dense>
   scf.if %in_bounds {
-    %input_row = index.div %element_index, %token_count : index
-    %token = index.rem %element_index, %token_count : index
-    %value = view.load %input_view[%input_row, %token] : view<[%input_size]x[%token_count]xf32, #dense> -> f32
+    %input_row = index.div %element_index, %token_capacity : index
+    %token = index.rem %element_index, %token_capacity : index
+    %has_input = index.cmp ult, %token, %token_count : index
+    %value = scf.if %has_input -> (f32) {
+      %loaded = view.load %input_view[%input_row, %token] : view<[%input_size]x[%token_count]xf32, #dense> -> f32
+      scf.yield %loaded : f32
+    } else {
+      scf.yield %zero_f32 : f32
+    }
     %rounded = scalar.fptrunc %value : f32 to bf16
-    view.store %rounded, %packed_output_view[%token, %input_row] : bf16, view<[%token_count]x[%input_size]xbf16, #dense>
+    view.store %rounded, %packed_output_view[%token, %input_row] : bf16, view<[%token_capacity]x[%input_size]xbf16, #dense>
   }
   kernel.return
 }
@@ -55,6 +65,15 @@ check.case public @id4_ideogram4_linear_input_pack_f32_bf16_uncond_hidden_1024_s
   check.return
 }
 
+check.case public @id4_ideogram4_linear_input_pack_f32_bf16_padded_zero_case {
+  %input = check.generate.fill value(0.0) : tensor<2x3xf32>
+  %output = check.generate.fill value(1.0) : tensor<4x2xbf16>
+  %expected = check.generate.fill value(0.0) : tensor<4x2xbf16>
+  func.call @id4_ideogram4_linear_input_pack_f32_bf16(%input, %output) : (tensor<2x3xf32>, tensor<4x2xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<4x2xbf16>
+  check.return
+}
+
 check.case public @id4_ideogram4_linear_input_pack_f32_bf16_uncond_mlp_down_1024_shape_case {
   %input = check.generate.fill value(1.0) : tensor<12288x4096xf32>
   %output = check.generate.fill value(0.0) : tensor<4096x12288xbf16>
@@ -65,5 +84,9 @@ check.case public @id4_ideogram4_linear_input_pack_f32_bf16_uncond_mlp_down_1024
 }
 
 check.benchmark<@id4_ideogram4_linear_input_pack_f32_bf16_small_case> @id4_ideogram4_linear_input_pack_f32_bf16_small
+
 check.benchmark<@id4_ideogram4_linear_input_pack_f32_bf16_uncond_hidden_1024_shape_case> @id4_ideogram4_linear_input_pack_f32_bf16_uncond_hidden_1024_shape
+
+check.benchmark<@id4_ideogram4_linear_input_pack_f32_bf16_padded_zero_case> @id4_ideogram4_linear_input_pack_f32_bf16_padded_zero
+
 check.benchmark<@id4_ideogram4_linear_input_pack_f32_bf16_uncond_mlp_down_1024_shape_case> @id4_ideogram4_linear_input_pack_f32_bf16_uncond_mlp_down_1024_shape

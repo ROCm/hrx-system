@@ -3384,6 +3384,7 @@ _KERNEL_CASES = [
         "benchmark": "@id4_ideogram4_linear_input_pack_f32_bf16_small",
         "configs": [
             "--config=id4.ideogram4.linear_input_pack.token_count=3",
+            "--config=id4.ideogram4.linear_input_pack.token_capacity=3",
             "--config=id4.ideogram4.linear_input_pack.input_size=2",
             "--config=id4.ideogram4.linear_input_pack.element_count=6",
         ],
@@ -3391,10 +3392,23 @@ _KERNEL_CASES = [
         "target_name": "ideogram4_linear_input_pack_f32_bf16_small",
     },
     {
+        "actual_case": "@id4_ideogram4_linear_input_pack_f32_bf16_padded_zero_case",
+        "benchmark": "@id4_ideogram4_linear_input_pack_f32_bf16_padded_zero",
+        "configs": [
+            "--config=id4.ideogram4.linear_input_pack.token_count=3",
+            "--config=id4.ideogram4.linear_input_pack.token_capacity=4",
+            "--config=id4.ideogram4.linear_input_pack.input_size=2",
+            "--config=id4.ideogram4.linear_input_pack.element_count=8",
+        ],
+        "source": "ideogram4/linear_input_pack_f32_bf16.loom",
+        "target_name": "ideogram4_linear_input_pack_f32_bf16_padded_zero",
+    },
+    {
         "actual_case": "@id4_ideogram4_linear_input_pack_f32_bf16_uncond_hidden_1024_shape_case",
         "benchmark": "@id4_ideogram4_linear_input_pack_f32_bf16_uncond_hidden_1024_shape",
         "configs": [
             "--config=id4.ideogram4.linear_input_pack.token_count=4096",
+            "--config=id4.ideogram4.linear_input_pack.token_capacity=4096",
             "--config=id4.ideogram4.linear_input_pack.input_size=4608",
             "--config=id4.ideogram4.linear_input_pack.element_count=18874368",
         ],
@@ -3406,6 +3420,7 @@ _KERNEL_CASES = [
         "benchmark": "@id4_ideogram4_linear_input_pack_f32_bf16_uncond_mlp_down_1024_shape",
         "configs": [
             "--config=id4.ideogram4.linear_input_pack.token_count=4096",
+            "--config=id4.ideogram4.linear_input_pack.token_capacity=4096",
             "--config=id4.ideogram4.linear_input_pack.input_size=12288",
             "--config=id4.ideogram4.linear_input_pack.element_count=50331648",
         ],

@@ -1417,16 +1417,25 @@ iree_status_t id4_ideogram4_dit_program_dispatch_linear_packed_fp8_bf16(
       bindings);
 }
 
-static iree_status_t id4_ideogram4_dit_program_dispatch_linear_bf16_from_f32(
+static iree_status_t id4_ideogram4_dit_program_pack_linear_input_f32_bf16(
     id4_pipeline_program_builder_t* builder, iree_string_view_t name,
-    uint32_t token_count, uint32_t input_size, uint32_t output_size,
-    id4_pipeline_program_tensor_t input, id4_pipeline_program_tensor_t weight,
-    id4_pipeline_program_tensor_t output, uint32_t body_token_block,
-    iree_string_view_t body_module_path, iree_string_view_t body_function_name,
-    iree_string_view_t tail_module_path,
-    iree_string_view_t tail_function_name) {
+    uint32_t token_count, uint32_t token_capacity, uint32_t input_size,
+    id4_pipeline_program_tensor_t input,
+    id4_pipeline_program_tensor_t* out_packed_input) {
+  if (token_count == 0) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "Ideogram4 linear input pack token count must be nonzero");
+  }
+  if (token_capacity < token_count) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "Ideogram4 linear input pack token capacity %" PRIu32
+        " is smaller than token count %" PRIu32,
+        token_capacity, token_count);
+  }
   uint64_t input_element_count_u64 = 0;
-  if (!id4_ideogram4_dit_program_checked_mul_u64(token_count, input_size,
+  if (!id4_ideogram4_dit_program_checked_mul_u64(token_capacity, input_size,
                                                  &input_element_count_u64)) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "Ideogram4 linear input element count overflow");
@@ -1461,11 +1470,13 @@ static iree_status_t id4_ideogram4_dit_program_dispatch_linear_bf16_from_f32(
       id4_pipeline_program_tensor_invalid();
   IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_acquire_tensor(
       builder, packed_input_name, ID4_PIPELINE_PROGRAM_DTYPE_BF16,
-      id4_pipeline_program_make_shape_rank2(token_count, input_size),
+      id4_pipeline_program_make_shape_rank2(token_capacity, input_size),
       &packed_input));
 
   const id4_ideogram4_dit_program_config_value_t pack_config_values[] = {
       {IREE_SV("id4.ideogram4.linear_input_pack.token_count"), token_count},
+      {IREE_SV("id4.ideogram4.linear_input_pack.token_capacity"),
+       token_capacity},
       {IREE_SV("id4.ideogram4.linear_input_pack.input_size"), input_size},
       {IREE_SV("id4.ideogram4.linear_input_pack.element_count"),
        input_element_count},
@@ -1489,6 +1500,23 @@ static iree_status_t id4_ideogram4_dit_program_dispatch_linear_bf16_from_f32(
       IREE_ARRAYSIZE(pack_bindings), pack_bindings));
   IREE_RETURN_IF_ERROR(
       id4_ideogram4_dit_program_barrier(builder, after_pack_name));
+  *out_packed_input = packed_input;
+  return iree_ok_status();
+}
+
+static iree_status_t id4_ideogram4_dit_program_dispatch_linear_bf16_from_f32(
+    id4_pipeline_program_builder_t* builder, iree_string_view_t name,
+    uint32_t token_count, uint32_t input_size, uint32_t output_size,
+    id4_pipeline_program_tensor_t input, id4_pipeline_program_tensor_t weight,
+    id4_pipeline_program_tensor_t output, uint32_t body_token_block,
+    iree_string_view_t body_module_path, iree_string_view_t body_function_name,
+    iree_string_view_t tail_module_path,
+    iree_string_view_t tail_function_name) {
+  id4_pipeline_program_tensor_t packed_input =
+      id4_pipeline_program_tensor_invalid();
+  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_pack_linear_input_f32_bf16(
+      builder, name, token_count, token_count, input_size, input,
+      &packed_input));
   return id4_ideogram4_dit_program_dispatch_linear_packed_bf16(
       builder, name, token_count, token_count, input_size, output_size,
       packed_input, weight, output, body_token_block, body_module_path,
@@ -1521,6 +1549,22 @@ iree_status_t id4_ideogram4_dit_program_dispatch_linear_bf16_bf16(
       IREE_SV("id4_ideogram4_linear_bf16_bf16_wmma"),
       IREE_SV("ideogram4/linear_bf16_bf16_tail"),
       IREE_SV("id4_ideogram4_linear_bf16_bf16_tail"));
+}
+
+iree_status_t id4_ideogram4_dit_program_dispatch_linear_fp8_bf16(
+    id4_pipeline_program_builder_t* builder, iree_string_view_t name,
+    uint32_t token_count, uint32_t token_capacity, uint32_t input_size,
+    uint32_t output_size, id4_pipeline_program_tensor_t input,
+    id4_pipeline_program_tensor_t weight, id4_pipeline_program_tensor_t scale,
+    id4_pipeline_program_tensor_t output) {
+  id4_pipeline_program_tensor_t packed_input =
+      id4_pipeline_program_tensor_invalid();
+  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_pack_linear_input_f32_bf16(
+      builder, name, token_count, token_capacity, input_size, input,
+      &packed_input));
+  return id4_ideogram4_dit_program_dispatch_linear_packed_fp8_bf16(
+      builder, name, token_count, token_capacity, input_size, output_size,
+      packed_input, weight, scale, output);
 }
 
 iree_status_t id4_ideogram4_dit_program_dispatch_linear_fp8_f32(
