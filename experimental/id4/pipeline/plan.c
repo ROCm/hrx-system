@@ -1374,18 +1374,13 @@ const id4_pipeline_diagnostic_tap_plan_t* id4_pipeline_plan_diagnostic_tap_at(
 }
 
 iree_status_t id4_pipeline_plan_load_parameter_slabs(
-    const id4_pipeline_plan_t* plan, iree_io_parameter_provider_t* provider,
-    const iree_hal_semaphore_list_t wait_semaphore_list,
-    const iree_hal_semaphore_list_t signal_semaphore_list,
-    id4_pipeline_diagnostics_sink_t* diagnostics_sink,
+    const id4_pipeline_plan_t* plan,
+    const id4_pipeline_parameter_slab_set_load_options_t* options,
     iree_allocator_t host_allocator,
     id4_pipeline_parameter_slab_set_t** out_slab_set) {
   IREE_ASSERT_ARGUMENT(plan);
-  IREE_ASSERT_ARGUMENT(provider);
   IREE_ASSERT_ARGUMENT(out_slab_set);
   *out_slab_set = NULL;
-  IREE_RETURN_IF_ERROR(id4_pipeline_diagnostics_validate_sink(
-      diagnostics_sink, IREE_SV("parameter slab load")));
 
   id4_pipeline_parameter_slab_load_t* loads = NULL;
   if (plan->parameter_slab_count != 0) {
@@ -1416,10 +1411,9 @@ iree_status_t id4_pipeline_plan_load_parameter_slabs(
   }
   if (iree_status_is_ok(status)) {
     status = id4_pipeline_parameter_slab_set_load(
-        provider, wait_semaphore_list, signal_semaphore_list,
-        plan->parameter_slab_count, loads, plan->parameter_load_step_count,
-        plan->parameter_load_steps, plan->stage_name, diagnostics_sink,
-        host_allocator, out_slab_set);
+        options, plan->parameter_slab_count, loads,
+        plan->parameter_load_step_count, plan->parameter_load_steps,
+        plan->stage_name, host_allocator, out_slab_set);
   }
   iree_allocator_free(host_allocator, loads);
   return status;

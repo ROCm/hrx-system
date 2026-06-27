@@ -405,10 +405,15 @@ static iree_status_t SmokeStagePrepare(
   }
   iree_status_t status = iree_ok_status();
   if (parameter_slab_count != 0) {
+    id4_pipeline_parameter_slab_set_load_options_t load_options;
+    std::memset(&load_options, 0, sizeof(load_options));
+    load_options.structure_size = sizeof(load_options);
+    load_options.provider = options->parameter_provider;
+    load_options.wait_semaphore_list = options->wait_semaphore_list;
+    load_options.signal_semaphore_list = options->signal_semaphore_list;
+    load_options.diagnostics_sink = options->diagnostics_sink;
     status = id4_pipeline_plan_load_parameter_slabs(
-        plan, options->parameter_provider, options->wait_semaphore_list,
-        options->signal_semaphore_list, options->diagnostics_sink,
-        stage->services.host_allocator, &parameter_slabs);
+        plan, &load_options, stage->services.host_allocator, &parameter_slabs);
   } else if (options->signal_semaphore_list.count != 0) {
     status = iree_hal_semaphore_list_signal(options->signal_semaphore_list,
                                             /*frontier=*/NULL);

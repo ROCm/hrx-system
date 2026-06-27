@@ -65,6 +65,8 @@ iree_runtime_cc_library(
     hdrs = ["parameter_slab.h"],
     deps = [
         ":diagnostics",
+        ":kernel_cache",
+        ":kernel_library",
         ":region",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
@@ -232,6 +234,30 @@ iree_runtime_cc_test(
         ":parameter_slab",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "parameter_slab_integration_test",
+    srcs = ["parameter_slab_integration_test.cc"],
+    tags = [
+        "manual",
+        "requires-gpu",
+    ],
+    deps = [
+        ":diagnostics",
+        ":kernel_cache",
+        ":kernel_library",
+        ":parameter_slab",
+        ":plan",
+        "//experimental/id4/tooling:runtime",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/tooling:flags",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/io:parameter_index",
+        "//runtime/src/iree/io:parameter_index_provider",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

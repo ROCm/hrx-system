@@ -753,10 +753,21 @@ static iree_status_t id4_smoke_stage_prepare(
     region_flags |= ID4_SMOKE_STAGE_REGION_FLAG_CAPTURE_DIAGNOSTIC_TAP;
   }
 
+  id4_pipeline_parameter_slab_set_load_options_t load_options;
+  memset(&load_options, 0, sizeof(load_options));
+  load_options.structure_size = sizeof(load_options);
+  load_options.provider = options->parameter_provider;
+  load_options.kernel_library = options->kernel_library;
+  load_options.kernel_cache = stage->kernel_cache;
+  load_options.executable_cache = stage->base.services.executable_cache;
+  load_options.diagnostic_artifact_flags =
+      ID4_PIPELINE_KERNEL_DIAGNOSTIC_ARTIFACT_FLAG_COMPILE_REPORT_JSON |
+      ID4_PIPELINE_KERNEL_DIAGNOSTIC_ARTIFACT_FLAG_EMIT_MANIFEST_JSON;
+  load_options.wait_semaphore_list = options->wait_semaphore_list;
+  load_options.signal_semaphore_list = options->signal_semaphore_list;
+  load_options.diagnostics_sink = options->diagnostics_sink;
   iree_status_t status = id4_pipeline_plan_load_parameter_slabs(
-      plan, options->parameter_provider, options->wait_semaphore_list,
-      options->signal_semaphore_list, options->diagnostics_sink,
-      stage->host_allocator, &parameter_slabs);
+      plan, &load_options, stage->host_allocator, &parameter_slabs);
   parameter_load_submitted = iree_status_is_ok(status);
   if (iree_status_is_ok(status)) {
     status = id4_smoke_stage_prepare_kernel_executable(

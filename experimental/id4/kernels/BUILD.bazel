@@ -70,6 +70,36 @@ _KERNEL_CASES = [
         "target_name": "elementwise_cast_bf16_f32_small",
     },
     {
+        "actual_case": "@id4_parameter_fp8_e4m3_scaled_to_bf16_small_case",
+        "benchmark": "@id4_parameter_fp8_e4m3_scaled_to_bf16_small",
+        "configs": [
+            "--config=id4.parameter.fp8_e4m3_scaled_to_bf16.output_size=3",
+            "--config=id4.parameter.fp8_e4m3_scaled_to_bf16.input_size=4",
+        ],
+        "source": "parameter/fp8_e4m3_scaled_to_bf16.loom",
+        "target_name": "parameter_fp8_e4m3_scaled_to_bf16_small",
+    },
+    {
+        "actual_case": "@id4_parameter_fp8_e4m3_scaled_to_bf16_qkv_shape_case",
+        "benchmark": "@id4_parameter_fp8_e4m3_scaled_to_bf16_qkv_shape",
+        "configs": [
+            "--config=id4.parameter.fp8_e4m3_scaled_to_bf16.output_size=13824",
+            "--config=id4.parameter.fp8_e4m3_scaled_to_bf16.input_size=4608",
+        ],
+        "source": "parameter/fp8_e4m3_scaled_to_bf16.loom",
+        "target_name": "parameter_fp8_e4m3_scaled_to_bf16_qkv_shape",
+    },
+    {
+        "actual_case": "@id4_parameter_fp8_e4m3_scaled_to_bf16_mlp_up_shape_case",
+        "benchmark": "@id4_parameter_fp8_e4m3_scaled_to_bf16_mlp_up_shape",
+        "configs": [
+            "--config=id4.parameter.fp8_e4m3_scaled_to_bf16.output_size=12288",
+            "--config=id4.parameter.fp8_e4m3_scaled_to_bf16.input_size=4608",
+        ],
+        "source": "parameter/fp8_e4m3_scaled_to_bf16.loom",
+        "target_name": "parameter_fp8_e4m3_scaled_to_bf16_mlp_up_shape",
+    },
+    {
         "actual_case": "@id4_ideogram4_adaln_split_f32_small_case",
         "benchmark": "@id4_ideogram4_adaln_split_f32_small",
         "configs": [
@@ -5054,6 +5084,7 @@ _KERNEL_SOURCES = [
     "elementwise/add_f32.loom",
     "elementwise/cast_bf16_f32.loom",
     "elementwise/cast_f32_bf16.loom",
+    "parameter/fp8_e4m3_scaled_to_bf16.loom",
     "ideogram4/adaln_split_f32.loom",
     "ideogram4/attention_f32.loom",
     "ideogram4/attention_materialized_bf16_wmma.loom",

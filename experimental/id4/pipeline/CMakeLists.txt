@@ -75,6 +75,8 @@ iree_cc_library(
     "parameter_slab.c"
   DEPS
     ::diagnostics
+    ::kernel_cache
+    ::kernel_library
     ::region
     iree::base
     iree::hal
@@ -273,6 +275,30 @@ iree_cc_test(
     iree::hal
     iree::testing::gtest
     iree::testing::gtest_main
+)
+
+iree_cc_test(
+  NAME
+    parameter_slab_integration_test
+  SRCS
+    "parameter_slab_integration_test.cc"
+  DEPS
+    ::diagnostics
+    ::kernel_cache
+    ::kernel_library
+    ::parameter_slab
+    ::plan
+    iree::base
+    iree::base::tooling::flags
+    iree::experimental::id4::tooling::runtime
+    iree::hal
+    iree::io::parameter_index
+    iree::io::parameter_index_provider
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "manual"
+    "requires-gpu"
 )
 
 iree_cc_test(

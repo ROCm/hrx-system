@@ -312,12 +312,10 @@ iree_host_size_t id4_pipeline_plan_diagnostic_tap_count(
 const id4_pipeline_diagnostic_tap_plan_t* id4_pipeline_plan_diagnostic_tap_at(
     const id4_pipeline_plan_t* plan, iree_host_size_t index);
 
-// Loads all planned parameter slabs through |provider|.
+// Loads all planned parameter slabs using |options|.
 iree_status_t id4_pipeline_plan_load_parameter_slabs(
-    const id4_pipeline_plan_t* plan, iree_io_parameter_provider_t* provider,
-    const iree_hal_semaphore_list_t wait_semaphore_list,
-    const iree_hal_semaphore_list_t signal_semaphore_list,
-    id4_pipeline_diagnostics_sink_t* diagnostics_sink,
+    const id4_pipeline_plan_t* plan,
+    const id4_pipeline_parameter_slab_set_load_options_t* options,
     iree_allocator_t host_allocator,
     id4_pipeline_parameter_slab_set_t** out_slab_set);
 

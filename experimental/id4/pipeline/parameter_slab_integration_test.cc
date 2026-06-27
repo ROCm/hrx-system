@@ -1,0 +1,387 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+#include <cstdint>
+#include <cstring>
+
+#include "experimental/id4/pipeline/diagnostics.h"
+#include "experimental/id4/pipeline/kernel_cache.h"
+#include "experimental/id4/pipeline/kernel_library.h"
+#include "experimental/id4/pipeline/parameter_slab.h"
+#include "experimental/id4/pipeline/plan.h"
+#include "experimental/id4/tooling/runtime.h"
+#include "iree/base/tooling/flags.h"
+#include "iree/io/parameter_index.h"
+#include "iree/io/parameter_index_provider.h"
+#include "iree/testing/gtest.h"
+#include "iree/testing/status_matchers.h"
+
+namespace {
+
+template <typename T, void (*Release)(T*)>
+class OwningRef {
+ public:
+  OwningRef() = default;
+  OwningRef(const OwningRef&) = delete;
+  OwningRef& operator=(const OwningRef&) = delete;
+
+  ~OwningRef() { reset(); }
+
+  T* get() const { return value_; }
+
+  T** out() {
+    reset();
+    return &value_;
+  }
+
+  void reset(T* value = nullptr) {
+    if (value_) Release(value_);
+    value_ = value;
+  }
+
+ private:
+  // Owned reference released by this wrapper.
+  T* value_ = nullptr;
+};
+
+class RuntimeContext {
+ public:
+  RuntimeContext() { std::memset(&value, 0, sizeof(value)); }
+  RuntimeContext(const RuntimeContext&) = delete;
+  RuntimeContext& operator=(const RuntimeContext&) = delete;
+
+  ~RuntimeContext() {
+    if (initialized) {
+      id4_tooling_runtime_context_deinitialize(&value);
+    }
+  }
+
+  // Runtime context value initialized from standard ID4 runtime flags.
+  id4_tooling_runtime_context_t value;
+  // True after |value| has been initialized and must be deinitialized.
+  bool initialized = false;
+};
+
+static iree_status_t AddSplatParameter(iree_io_parameter_index_t* index,
+                                       iree_string_view_t key, uint64_t length,
+                                       iree_const_byte_span_t pattern) {
+  if (pattern.data_length == 0 ||
+      pattern.data_length > IREE_IO_PARAMETER_MAX_SPLAT_PATTERN_LENGTH) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "splat parameter pattern length %" PRIhsz
+                            " is outside the supported range",
+                            pattern.data_length);
+  }
+  iree_io_parameter_index_entry_t entry;
+  std::memset(&entry, 0, sizeof(entry));
+  entry.key = key;
+  entry.length = length;
+  entry.type = IREE_IO_PARAMETER_INDEX_ENTRY_STORAGE_TYPE_SPLAT;
+  entry.storage.splat.pattern_length =
+      static_cast<uint8_t>(pattern.data_length);
+  std::memcpy(entry.storage.splat.pattern, pattern.data, pattern.data_length);
+  return iree_io_parameter_index_add(index, &entry);
+}
+
+static iree_status_t CreateFp8SourceProvider(
+    iree_io_parameter_provider_t** out_provider) {
+  IREE_ASSERT_ARGUMENT(out_provider);
+  *out_provider = nullptr;
+
+  OwningRef<iree_io_parameter_index_t, iree_io_parameter_index_release> index;
+  IREE_RETURN_IF_ERROR(
+      iree_io_parameter_index_create(iree_allocator_system(), index.out()));
+
+  const uint8_t fp8_one = 0x38;
+  IREE_RETURN_IF_ERROR(
+      AddSplatParameter(index.get(), IREE_SV("weight"), /*length=*/512,
+                        iree_make_const_byte_span(&fp8_one, sizeof(fp8_one))));
+  const uint32_t f32_two = 0x40000000u;
+  IREE_RETURN_IF_ERROR(
+      AddSplatParameter(index.get(), IREE_SV("weight_scale"), /*length=*/128,
+                        iree_make_const_byte_span(&f32_two, sizeof(f32_two))));
+
+  return iree_io_parameter_index_provider_create(
+      IREE_SV("fp8"), index.get(),
+      IREE_IO_PARAMETER_INDEX_PROVIDER_DEFAULT_MAX_CONCURRENT_OPERATIONS,
+      iree_allocator_system(), out_provider);
+}
+
+static iree_status_t PrepareLinearWmmaExecutable(
+    RuntimeContext* context, id4_pipeline_kernel_library_t* kernel_library,
+    id4_pipeline_diagnostics_sink_t* diagnostics_sink,
+    id4_pipeline_kernel_executable_t** out_executable,
+    iree_hal_executable_function_t* out_function) {
+  *out_executable = nullptr;
+  *out_function = iree_hal_executable_function_invalid();
+
+  const id4_pipeline_kernel_module_t* module = nullptr;
+  IREE_RETURN_IF_ERROR(id4_pipeline_kernel_library_lookup(
+      kernel_library, IREE_SV("ideogram4/linear_bf16_f32_wmma"), &module));
+  const id4_pipeline_kernel_config_binding_t config_bindings[] = {
+      id4_pipeline_make_kernel_config_binding(
+          IREE_SV("id4.ideogram4.linear_wmma.token_count"), IREE_SV("16")),
+      id4_pipeline_make_kernel_config_binding(
+          IREE_SV("id4.ideogram4.linear_wmma.dispatch_token_count"),
+          IREE_SV("16")),
+      id4_pipeline_make_kernel_config_binding(
+          IREE_SV("id4.ideogram4.linear_wmma.input_size"), IREE_SV("16")),
+      id4_pipeline_make_kernel_config_binding(
+          IREE_SV("id4.ideogram4.linear_wmma.output_size"), IREE_SV("32")),
+  };
+  id4_pipeline_kernel_cache_prepare_options_t prepare_options;
+  std::memset(&prepare_options, 0, sizeof(prepare_options));
+  prepare_options.structure_size = sizeof(prepare_options);
+  prepare_options.executable_cache = context->value.executable_cache;
+  prepare_options.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
+  prepare_options.caching_mode = IREE_HAL_EXECUTABLE_CACHING_MODE_NONE;
+  prepare_options.source_identifier = module->source_identifier;
+  prepare_options.source_contents = module->source_contents;
+  prepare_options.module_path = module->module_path;
+  prepare_options.function_name = IREE_SV("id4_ideogram4_linear_bf16_f32_wmma");
+  prepare_options.config_binding_count = IREE_ARRAYSIZE(config_bindings);
+  prepare_options.config_bindings = config_bindings;
+  prepare_options.diagnostics_sink = diagnostics_sink;
+
+  id4_pipeline_kernel_executable_t* executable = nullptr;
+  IREE_RETURN_IF_ERROR(id4_pipeline_kernel_cache_prepare_executable(
+      context->value.kernel_cache, &prepare_options, &executable));
+  iree_hal_executable_function_t function =
+      iree_hal_executable_function_invalid();
+  iree_status_t status = iree_hal_executable_lookup_function_by_name(
+      id4_pipeline_kernel_executable_hal_executable(executable),
+      prepare_options.function_name, &function);
+  if (iree_status_is_ok(status)) {
+    *out_executable = executable;
+    *out_function = function;
+    executable = nullptr;
+  }
+  id4_pipeline_kernel_executable_release(executable);
+  return status;
+}
+
+static iree_status_t AllocateDeviceBuffer(iree_hal_device_t* device,
+                                          iree_hal_buffer_usage_t usage,
+                                          iree_device_size_t byte_length,
+                                          iree_hal_buffer_t** out_buffer) {
+  iree_hal_buffer_params_t params;
+  std::memset(&params, 0, sizeof(params));
+  params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
+  params.access = IREE_HAL_MEMORY_ACCESS_ALL;
+  params.usage = usage;
+  params.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
+  params.min_alignment = 16;
+  return iree_hal_allocator_allocate_buffer(iree_hal_device_allocator(device),
+                                            params, byte_length, out_buffer);
+}
+
+static iree_hal_semaphore_list_t MakeOneSemaphoreList(
+    iree_hal_semaphore_t** semaphore, uint64_t* payload_value) {
+  iree_hal_semaphore_list_t list;
+  std::memset(&list, 0, sizeof(list));
+  list.count = 1;
+  list.semaphores = semaphore;
+  list.payload_values = payload_value;
+  return list;
+}
+
+TEST(ParameterSlabIntegration, EncodedFp8WeightsFeedBf16WmmaLinear) {
+  RuntimeContext context;
+  id4_tooling_runtime_context_options_t context_options;
+  std::memset(&context_options, 0, sizeof(context_options));
+  context_options.structure_size = sizeof(context_options);
+  context_options.executable_cache_identifier =
+      IREE_SV("id4.parameter_slab.integration");
+  IREE_ASSERT_OK(id4_tooling_runtime_context_initialize_from_flags(
+      &context_options, iree_allocator_system(), &context.value));
+  context.initialized = true;
+
+  id4_pipeline_diagnostics_sink_t diagnostics_sink;
+  id4_pipeline_diagnostics_sink_initialize_ignore(&diagnostics_sink);
+
+  OwningRef<id4_pipeline_kernel_library_t, id4_pipeline_kernel_library_release>
+      kernel_library;
+  IREE_ASSERT_OK(id4_tooling_create_embedded_kernel_library(
+      iree_allocator_system(), kernel_library.out()));
+  OwningRef<iree_io_parameter_provider_t, iree_io_parameter_provider_release>
+      provider;
+  IREE_ASSERT_OK(CreateFp8SourceProvider(provider.out()));
+
+  id4_pipeline_device_placement_t placement;
+  std::memset(&placement, 0, sizeof(placement));
+  placement.role = IREE_SV("default");
+  placement.device_index = 0;
+  placement.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
+
+  id4_pipeline_parameter_request_t target_request =
+      id4_pipeline_parameter_request(
+          IREE_SV("weight"),
+          id4_pipeline_parameter_span(/*parameter_offset=*/0,
+                                      /*buffer_offset=*/0, /*length=*/1024));
+  id4_pipeline_parameter_slab_plan_t slab =
+      id4_pipeline_make_device_local_parameter_slab_plan(
+          IREE_SV("execution"), /*placement_id=*/0, /*binding_slot=*/0,
+          IREE_HAL_QUEUE_AFFINITY_ANY,
+          IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE |
+              IREE_HAL_BUFFER_USAGE_TRANSFER_SOURCE,
+          /*byte_length=*/1024, /*alignment=*/16, /*request_count=*/1,
+          &target_request);
+
+  id4_pipeline_tensor_shape_t weight_shape;
+  std::memset(&weight_shape, 0, sizeof(weight_shape));
+  weight_shape.rank = 2;
+  weight_shape.dims[0] = 32;
+  weight_shape.dims[1] = 16;
+  id4_pipeline_tensor_shape_t scale_shape;
+  std::memset(&scale_shape, 0, sizeof(scale_shape));
+  scale_shape.rank = 1;
+  scale_shape.dims[0] = 32;
+  const id4_pipeline_parameter_load_source_t sources[] = {
+      id4_pipeline_parameter_load_source(IREE_SV("fp8"), IREE_SV("weight"),
+                                         ID4_PIPELINE_TENSOR_DTYPE_F8_E4M3,
+                                         weight_shape,
+                                         /*byte_length=*/512),
+      id4_pipeline_parameter_load_source(
+          IREE_SV("fp8"), IREE_SV("weight_scale"),
+          ID4_PIPELINE_TENSOR_DTYPE_F32, scale_shape,
+          /*byte_length=*/128),
+  };
+  id4_pipeline_parameter_load_step_t load_step =
+      id4_pipeline_parameter_encode_fp8_e4m3_scaled_to_bf16_load_step(
+          IREE_SV("parameters.encode_fp8"), IREE_ARRAYSIZE(sources), sources,
+          /*target_slab_index=*/0, /*request_offset=*/0);
+
+  id4_pipeline_plan_create_options_t plan_options;
+  std::memset(&plan_options, 0, sizeof(plan_options));
+  plan_options.structure_size = sizeof(plan_options);
+  plan_options.stage_name = IREE_SV("parameter_slab");
+  plan_options.device_group = context.value.device_group;
+  plan_options.diagnostics_sink = &diagnostics_sink;
+  plan_options.placement_count = 1;
+  plan_options.placements = &placement;
+  plan_options.parameter_slab_count = 1;
+  plan_options.parameter_slabs = &slab;
+  plan_options.parameter_load_step_count = 1;
+  plan_options.parameter_load_steps = &load_step;
+  OwningRef<id4_pipeline_plan_t, id4_pipeline_plan_release> plan;
+  IREE_ASSERT_OK(id4_pipeline_plan_create(&plan_options,
+                                          iree_allocator_system(), plan.out()));
+
+  OwningRef<iree_hal_semaphore_t, iree_hal_semaphore_release> prepare_semaphore;
+  IREE_ASSERT_OK(iree_hal_semaphore_create(
+      id4_tooling_runtime_context_primary_device(&context.value),
+      IREE_HAL_QUEUE_AFFINITY_ANY, /*initial_value=*/0,
+      IREE_HAL_SEMAPHORE_FLAG_DEFAULT, prepare_semaphore.out()));
+  iree_hal_semaphore_t* prepare_signal_semaphore = prepare_semaphore.get();
+  uint64_t prepare_signal_value = 1;
+  iree_hal_semaphore_list_t prepare_signal_list =
+      MakeOneSemaphoreList(&prepare_signal_semaphore, &prepare_signal_value);
+
+  id4_pipeline_parameter_slab_set_load_options_t load_options;
+  std::memset(&load_options, 0, sizeof(load_options));
+  load_options.structure_size = sizeof(load_options);
+  load_options.provider = provider.get();
+  load_options.kernel_library = kernel_library.get();
+  load_options.kernel_cache = context.value.kernel_cache;
+  load_options.executable_cache = context.value.executable_cache;
+  load_options.wait_semaphore_list = iree_hal_semaphore_list_empty();
+  load_options.signal_semaphore_list = prepare_signal_list;
+  load_options.diagnostics_sink = &diagnostics_sink;
+  OwningRef<id4_pipeline_parameter_slab_set_t,
+            id4_pipeline_parameter_slab_set_release>
+      slab_set;
+  IREE_ASSERT_OK(id4_pipeline_plan_load_parameter_slabs(
+      plan.get(), &load_options, iree_allocator_system(), slab_set.out()));
+  IREE_ASSERT_OK(iree_hal_semaphore_wait(
+      prepare_semaphore.get(), prepare_signal_value, iree_infinite_timeout(),
+      IREE_ASYNC_WAIT_FLAG_NONE));
+
+  uint16_t encoded_weight[512] = {};
+  IREE_ASSERT_OK(iree_hal_device_transfer_d2h(
+      id4_tooling_runtime_context_primary_device(&context.value),
+      id4_pipeline_parameter_slab_set_buffer_at(slab_set.get(), 0),
+      /*source_offset=*/0, encoded_weight, sizeof(encoded_weight),
+      IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT, iree_infinite_timeout()));
+  for (uint16_t value : encoded_weight) {
+    EXPECT_EQ(value, 0x4000u);
+  }
+
+  iree_hal_device_t* device =
+      id4_tooling_runtime_context_primary_device(&context.value);
+  OwningRef<iree_hal_buffer_t, iree_hal_buffer_release> input_buffer;
+  IREE_ASSERT_OK(AllocateDeviceBuffer(
+      device,
+      IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET |
+          IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE,
+      /*byte_length=*/16 * 16 * sizeof(uint16_t), input_buffer.out()));
+  OwningRef<iree_hal_buffer_t, iree_hal_buffer_release> output_buffer;
+  IREE_ASSERT_OK(AllocateDeviceBuffer(
+      device,
+      IREE_HAL_BUFFER_USAGE_TRANSFER_SOURCE |
+          IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE,
+      /*byte_length=*/16 * 32 * sizeof(float), output_buffer.out()));
+
+  uint16_t input[16 * 16];
+  for (uint16_t& value : input) {
+    value = 0x3f80u;
+  }
+  IREE_ASSERT_OK(iree_hal_device_transfer_h2d(
+      device, input, input_buffer.get(), /*target_offset=*/0, sizeof(input),
+      IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT, iree_infinite_timeout()));
+
+  OwningRef<id4_pipeline_kernel_executable_t,
+            id4_pipeline_kernel_executable_release>
+      linear_executable;
+  iree_hal_executable_function_t linear_function =
+      iree_hal_executable_function_invalid();
+  IREE_ASSERT_OK(PrepareLinearWmmaExecutable(
+      &context, kernel_library.get(), &diagnostics_sink,
+      linear_executable.out(), &linear_function));
+
+  iree_hal_buffer_ref_t bindings[3];
+  bindings[0] = iree_hal_make_buffer_ref(input_buffer.get(), 0,
+                                         16 * 16 * sizeof(input[0]));
+  bindings[1] = iree_hal_make_buffer_ref(
+      id4_pipeline_parameter_slab_set_buffer_at(slab_set.get(), 0), 0, 1024);
+  bindings[2] =
+      iree_hal_make_buffer_ref(output_buffer.get(), 0, 16 * 32 * sizeof(float));
+  iree_hal_buffer_ref_list_t binding_list;
+  std::memset(&binding_list, 0, sizeof(binding_list));
+  binding_list.count = IREE_ARRAYSIZE(bindings);
+  binding_list.values = bindings;
+
+  OwningRef<iree_hal_semaphore_t, iree_hal_semaphore_release>
+      dispatch_semaphore;
+  IREE_ASSERT_OK(iree_hal_semaphore_create(
+      device, IREE_HAL_QUEUE_AFFINITY_ANY, /*initial_value=*/0,
+      IREE_HAL_SEMAPHORE_FLAG_DEFAULT, dispatch_semaphore.out()));
+  iree_hal_semaphore_t* dispatch_signal_semaphore = dispatch_semaphore.get();
+  uint64_t dispatch_signal_value = 1;
+  iree_hal_semaphore_list_t dispatch_signal_list =
+      MakeOneSemaphoreList(&dispatch_signal_semaphore, &dispatch_signal_value);
+
+  IREE_ASSERT_OK(iree_hal_device_queue_dispatch(
+      device, IREE_HAL_QUEUE_AFFINITY_ANY, iree_hal_semaphore_list_empty(),
+      dispatch_signal_list,
+      id4_pipeline_kernel_executable_hal_executable(linear_executable.get()),
+      linear_function,
+      id4_pipeline_kernel_executable_dispatch_config(linear_executable.get()),
+      iree_const_byte_span_empty(), binding_list, IREE_HAL_DISPATCH_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_semaphore_wait(
+      dispatch_semaphore.get(), dispatch_signal_value, iree_infinite_timeout(),
+      IREE_ASYNC_WAIT_FLAG_NONE));
+
+  float linear_output[16 * 32] = {};
+  IREE_ASSERT_OK(iree_hal_device_transfer_d2h(
+      device, output_buffer.get(), /*source_offset=*/0, linear_output,
+      sizeof(linear_output), IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT,
+      iree_infinite_timeout()));
+  for (float value : linear_output) {
+    EXPECT_EQ(value, 32.0f);
+  }
+}
+
+}  // namespace

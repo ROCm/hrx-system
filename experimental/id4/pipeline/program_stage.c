@@ -416,12 +416,23 @@ iree_status_t id4_pipeline_program_stage_prepare(
 
   iree_status_t status = iree_ok_status();
   if (parameter_slab_count != 0) {
+    id4_pipeline_parameter_slab_set_load_options_t load_options;
+    memset(&load_options, 0, sizeof(load_options));
+    load_options.structure_size = sizeof(load_options);
+    load_options.provider = options->stage_options->parameter_provider;
+    load_options.kernel_library = options->stage_options->kernel_library;
+    load_options.kernel_cache = options->kernel_cache;
+    load_options.executable_cache = options->executable_cache;
+    load_options.diagnostic_artifact_flags =
+        ID4_PIPELINE_KERNEL_DIAGNOSTIC_ARTIFACT_FLAG_COMPILE_REPORT_JSON |
+        ID4_PIPELINE_KERNEL_DIAGNOSTIC_ARTIFACT_FLAG_EMIT_MANIFEST_JSON;
+    load_options.wait_semaphore_list =
+        options->stage_options->wait_semaphore_list;
+    load_options.signal_semaphore_list =
+        options->stage_options->signal_semaphore_list;
+    load_options.diagnostics_sink = options->stage_options->diagnostics_sink;
     status = id4_pipeline_plan_load_parameter_slabs(
-        options->plan, options->stage_options->parameter_provider,
-        options->stage_options->wait_semaphore_list,
-        options->stage_options->signal_semaphore_list,
-        options->stage_options->diagnostics_sink, host_allocator,
-        &parameter_slabs);
+        options->plan, &load_options, host_allocator, &parameter_slabs);
     parameter_load_submitted = iree_status_is_ok(status);
   }
   if (iree_status_is_ok(status)) {

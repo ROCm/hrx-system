@@ -10,6 +10,7 @@
 #include <stdint.h>
 
 #include "experimental/id4/pipeline/diagnostics.h"
+#include "experimental/id4/pipeline/kernel_cache.h"
 #include "experimental/id4/pipeline/region.h"
 #include "iree/base/api.h"
 #include "iree/hal/api.h"
@@ -251,6 +252,30 @@ typedef struct id4_pipeline_parameter_slab_load_t {
   iree_hal_queue_affinity_t queue_affinity;
 } id4_pipeline_parameter_slab_load_t;
 
+// Options for allocating and populating planned parameter slab buffers.
+typedef struct id4_pipeline_parameter_slab_set_load_options_t {
+  // Size of this structure for versioning.
+  iree_host_size_t structure_size;
+  // Extension structure chain; must be NULL for now.
+  const void* next;
+  // Provider used for direct gathers and encoded source tensor gathers.
+  iree_io_parameter_provider_t* provider;
+  // Kernel library used by encoded load steps.
+  id4_pipeline_kernel_library_t* kernel_library;
+  // Loom kernel cache used by encoded load steps.
+  id4_pipeline_kernel_cache_t* kernel_cache;
+  // HAL executable cache used by encoded load steps.
+  iree_hal_executable_cache_t* executable_cache;
+  // Diagnostic artifact classes requested while JITing encoder kernels.
+  id4_pipeline_kernel_diagnostic_artifact_flags_t diagnostic_artifact_flags;
+  // Semaphores that all parameter loading waits on.
+  iree_hal_semaphore_list_t wait_semaphore_list;
+  // Semaphores signaled when all parameter loading is complete.
+  iree_hal_semaphore_list_t signal_semaphore_list;
+  // Diagnostics sink for load, gather, encode, and failure events.
+  id4_pipeline_diagnostics_sink_t* diagnostics_sink;
+} id4_pipeline_parameter_slab_set_load_options_t;
+
 // Loaded parameter slab buffers owned by a prepared bundle.
 typedef struct id4_pipeline_parameter_slab_set_t
     id4_pipeline_parameter_slab_set_t;
@@ -274,18 +299,14 @@ iree_status_t id4_pipeline_parameter_slab_enumerate(
 iree_io_parameter_enumerator_t id4_pipeline_parameter_slab_enumerator(
     id4_pipeline_parameter_slab_enumerator_state_t* state);
 
-// Allocates and asynchronously gathers all planned slabs from |provider|.
+// Allocates and asynchronously populates all planned slabs.
 iree_status_t id4_pipeline_parameter_slab_set_load(
-    iree_io_parameter_provider_t* provider,
-    const iree_hal_semaphore_list_t wait_semaphore_list,
-    const iree_hal_semaphore_list_t signal_semaphore_list,
+    const id4_pipeline_parameter_slab_set_load_options_t* options,
     iree_host_size_t load_count,
     const id4_pipeline_parameter_slab_load_t* loads,
     iree_host_size_t load_step_count,
     const id4_pipeline_parameter_load_step_t* load_steps,
-    iree_string_view_t stage_name,
-    id4_pipeline_diagnostics_sink_t* diagnostics_sink,
-    iree_allocator_t host_allocator,
+    iree_string_view_t stage_name, iree_allocator_t host_allocator,
     id4_pipeline_parameter_slab_set_t** out_slab_set);
 
 // Retains |slab_set| for the caller.
