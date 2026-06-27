@@ -1050,10 +1050,12 @@ typedef enum loom_amdgpu_fragment_memory_payload_form_e {
   LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_NATIVE = 0,
   // A 16-bit float vector is loaded with f32 result-fragment coordinates.
   LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_LOAD_PACKED_16BIT_RESULT = 1,
+  // FP8 memory lanes are converted to packed BF16 operand registers on load.
+  LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_LOAD_FP8_TO_BF16 = 2,
   // A f32 result fragment is rounded to BF16 lanes before a 16-bit store.
-  LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_STORE_NARROW_F32_TO_BF16 = 2,
+  LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_STORE_NARROW_F32_TO_BF16 = 3,
   // A f16 low-subword result fragment is widened to f32 lanes before store.
-  LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_STORE_EXTEND_F16_TO_F32 = 3,
+  LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_STORE_EXTEND_F16_TO_F32 = 4,
 } loom_amdgpu_fragment_memory_payload_form_t;
 
 typedef struct loom_amdgpu_fragment_memory_plan_t {
@@ -1079,6 +1081,8 @@ typedef struct loom_amdgpu_fragment_memory_plan_t {
   uint16_t elements_per_register;
   // Byte count of one logical fragment element.
   uint16_t element_byte_count;
+  // Element type stored in the source or destination view.
+  loom_scalar_type_t view_element_type;
   // Direct memory packets emitted in increasing fragment-register order.
   loom_amdgpu_fragment_memory_packet_plan_t
       packets[LOOM_AMDGPU_MAX_PACKED_32BIT_REGISTERS];

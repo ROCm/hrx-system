@@ -56,6 +56,24 @@ enum loom_scalar_type_e {
 // ordinals until validation reports them.
 typedef uint8_t loom_scalar_type_t;
 
+typedef enum loom_scalar_type_fp8_special_policy_e {
+  // Top exponent encodes infinities and NaNs.
+  LOOM_SCALAR_TYPE_FP8_SPECIAL_POLICY_IEEE = 0,
+  // Top exponent remains finite except for the all-ones mantissa NaN.
+  LOOM_SCALAR_TYPE_FP8_SPECIAL_POLICY_FINITE_NAN = 1,
+} loom_scalar_type_fp8_special_policy_t;
+
+typedef struct loom_scalar_type_fp8_format_t {
+  // Number of encoded exponent bits.
+  uint8_t exponent_bits;
+  // Number of encoded mantissa bits.
+  uint8_t mantissa_bits;
+  // Exponent bias used by the encoded type.
+  uint8_t exponent_bias;
+  // Top-exponent handling policy.
+  loom_scalar_type_fp8_special_policy_t special_policy;
+} loom_scalar_type_fp8_format_t;
+
 // Returns the name string for a scalar type (e.g., "f32", "index").
 // Returns NULL if |type| is out of range.
 const char* loom_scalar_type_name(loom_scalar_type_t type);
@@ -69,6 +87,10 @@ int32_t loom_scalar_type_bitwidth(loom_scalar_type_t type);
 // because IR integer literals are signed i64 payloads.
 bool loom_scalar_type_integer_domain(loom_scalar_type_t type, int64_t* out_lo,
                                      int64_t* out_hi);
+
+// Returns the FP8 binary format for |type|, if |type| is an FP8 scalar.
+bool loom_scalar_type_fp8_format(loom_scalar_type_t type,
+                                 loom_scalar_type_fp8_format_t* out_format);
 
 // Parses a scalar type name. Returns true on success.
 bool loom_scalar_type_parse(iree_string_view_t name,
