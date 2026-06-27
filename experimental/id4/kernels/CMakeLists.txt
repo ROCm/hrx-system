@@ -18,6 +18,7 @@ add_custom_command(OUTPUT loom_sources.stamp
     "elementwise/cast_f32_bf16.loom"
     "ideogram4/adaln_split_f32.loom"
     "ideogram4/attention_f32.loom"
+    "ideogram4/attention_materialized_bf16_wmma.loom"
     "ideogram4/attention_pv_bf16_bf16_wmma.loom"
     "ideogram4/attention_qk_scores_bf16_f32_wmma.loom"
     "ideogram4/attention_qkv_tail_zero_bf16.loom"
@@ -126,6 +127,7 @@ iree_c_embed_data(
     "elementwise/cast_f32_bf16.loom"
     "ideogram4/adaln_split_f32.loom"
     "ideogram4/attention_f32.loom"
+    "ideogram4/attention_materialized_bf16_wmma.loom"
     "ideogram4/attention_pv_bf16_bf16_wmma.loom"
     "ideogram4/attention_qk_scores_bf16_f32_wmma.loom"
     "ideogram4/attention_qkv_tail_zero_bf16.loom"
@@ -725,6 +727,24 @@ iree_native_test(
 
 iree_native_test(
   NAME
+    "ideogram4_attention_qk_scores_all_heads_bf16_f32_wmma_small_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/attention_materialized_bf16_wmma.loom}}"
+    "--benchmark=@id4_ideogram4_attention_qk_scores_all_heads_bf16_f32_wmma_small"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.ideogram4.attention_materialized_wmma.valid_token_count=16"
+    "--config=id4.ideogram4.attention_materialized_wmma.padded_token_count=16"
+    "--config=id4.ideogram4.attention_materialized_wmma.attention_head_count=2"
+    "--config=id4.ideogram4.attention_materialized_wmma.head_size=16"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
     "ideogram4_attention_qkv_tail_zero_bf16_small_plan_test"
   ARGS
     "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/attention_qkv_tail_zero_bf16.loom}}"
@@ -778,6 +798,24 @@ iree_native_test(
 
 iree_native_test(
   NAME
+    "ideogram4_attention_qk_scores_all_heads_bf16_f32_wmma_zero_1024_shape_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/attention_materialized_bf16_wmma.loom}}"
+    "--benchmark=@id4_ideogram4_attention_qk_scores_all_heads_bf16_f32_wmma_zero_1024_shape"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.ideogram4.attention_materialized_wmma.valid_token_count=4096"
+    "--config=id4.ideogram4.attention_materialized_wmma.padded_token_count=4096"
+    "--config=id4.ideogram4.attention_materialized_wmma.attention_head_count=18"
+    "--config=id4.ideogram4.attention_materialized_wmma.head_size=256"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
     "ideogram4_attention_softmax_f32_bf16_small_plan_test"
   ARGS
     "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/attention_softmax_f32_bf16.loom}}"
@@ -793,6 +831,24 @@ iree_native_test(
 
 iree_native_test(
   NAME
+    "ideogram4_attention_softmax_all_heads_f32_bf16_small_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/attention_materialized_bf16_wmma.loom}}"
+    "--benchmark=@id4_ideogram4_attention_softmax_all_heads_f32_bf16_small"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.ideogram4.attention_materialized_wmma.valid_token_count=16"
+    "--config=id4.ideogram4.attention_materialized_wmma.padded_token_count=16"
+    "--config=id4.ideogram4.attention_materialized_wmma.attention_head_count=2"
+    "--config=id4.ideogram4.attention_materialized_wmma.head_size=16"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
     "ideogram4_attention_softmax_f32_bf16_zero_1024_shape_plan_test"
   ARGS
     "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/attention_softmax_f32_bf16.loom}}"
@@ -800,6 +856,24 @@ iree_native_test(
     "--dry-run"
     "--output-format=jsonl"
     "--config=id4.ideogram4.attention_softmax_probs.token_count=4096"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
+    "ideogram4_attention_softmax_all_heads_f32_bf16_zero_1024_shape_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/attention_materialized_bf16_wmma.loom}}"
+    "--benchmark=@id4_ideogram4_attention_softmax_all_heads_f32_bf16_zero_1024_shape"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.ideogram4.attention_materialized_wmma.valid_token_count=4096"
+    "--config=id4.ideogram4.attention_materialized_wmma.padded_token_count=4096"
+    "--config=id4.ideogram4.attention_materialized_wmma.attention_head_count=18"
+    "--config=id4.ideogram4.attention_materialized_wmma.head_size=256"
   SRC
     loom::tools::iree-benchmark-loom
   LABELS
@@ -826,6 +900,24 @@ iree_native_test(
 
 iree_native_test(
   NAME
+    "ideogram4_attention_pv_all_heads_bf16_bf16_wmma_small_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/attention_materialized_bf16_wmma.loom}}"
+    "--benchmark=@id4_ideogram4_attention_pv_all_heads_bf16_bf16_wmma_small"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.ideogram4.attention_materialized_wmma.valid_token_count=16"
+    "--config=id4.ideogram4.attention_materialized_wmma.padded_token_count=16"
+    "--config=id4.ideogram4.attention_materialized_wmma.attention_head_count=2"
+    "--config=id4.ideogram4.attention_materialized_wmma.head_size=16"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
     "ideogram4_attention_pv_bf16_bf16_wmma_zero_1024_shape_plan_test"
   ARGS
     "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/attention_pv_bf16_bf16_wmma.loom}}"
@@ -836,6 +928,24 @@ iree_native_test(
     "--config=id4.ideogram4.attention_pv_wmma.attention_head_count=18"
     "--config=id4.ideogram4.attention_pv_wmma.head_size=256"
     "--config=id4.ideogram4.attention_pv_wmma.head_ordinal=0"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
+    "ideogram4_attention_pv_all_heads_bf16_bf16_wmma_zero_1024_shape_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/attention_materialized_bf16_wmma.loom}}"
+    "--benchmark=@id4_ideogram4_attention_pv_all_heads_bf16_bf16_wmma_zero_1024_shape"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.ideogram4.attention_materialized_wmma.valid_token_count=4096"
+    "--config=id4.ideogram4.attention_materialized_wmma.padded_token_count=4096"
+    "--config=id4.ideogram4.attention_materialized_wmma.attention_head_count=18"
+    "--config=id4.ideogram4.attention_materialized_wmma.head_size=256"
   SRC
     loom::tools::iree-benchmark-loom
   LABELS
@@ -7923,6 +8033,28 @@ endif()
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
 iree_native_test(
   NAME
+    "ideogram4_attention_qk_scores_all_heads_bf16_f32_wmma_small_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/attention_materialized_bf16_wmma.loom}}"
+    "--case=@id4_ideogram4_attention_qk_scores_all_heads_bf16_f32_wmma_small_case"
+    "--device=amdgpu://0"
+    "--config=id4.ideogram4.attention_materialized_wmma.valid_token_count=16"
+    "--config=id4.ideogram4.attention_materialized_wmma.padded_token_count=16"
+    "--config=id4.ideogram4.attention_materialized_wmma.attention_head_count=2"
+    "--config=id4.ideogram4.attention_materialized_wmma.head_size=16"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
     "ideogram4_attention_qkv_tail_zero_bf16_small_hal_test"
   ARGS
     "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/attention_qkv_tail_zero_bf16.loom}}"
@@ -7988,6 +8120,28 @@ endif()
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
 iree_native_test(
   NAME
+    "ideogram4_attention_qk_scores_all_heads_bf16_f32_wmma_zero_1024_shape_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/attention_materialized_bf16_wmma.loom}}"
+    "--case=@id4_ideogram4_attention_qk_scores_all_heads_bf16_f32_wmma_zero_1024_shape_case"
+    "--device=amdgpu://0"
+    "--config=id4.ideogram4.attention_materialized_wmma.valid_token_count=4096"
+    "--config=id4.ideogram4.attention_materialized_wmma.padded_token_count=4096"
+    "--config=id4.ideogram4.attention_materialized_wmma.attention_head_count=18"
+    "--config=id4.ideogram4.attention_materialized_wmma.head_size=256"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
     "ideogram4_attention_softmax_f32_bf16_small_hal_test"
   ARGS
     "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/attention_softmax_f32_bf16.loom}}"
@@ -8007,12 +8161,56 @@ endif()
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
 iree_native_test(
   NAME
+    "ideogram4_attention_softmax_all_heads_f32_bf16_small_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/attention_materialized_bf16_wmma.loom}}"
+    "--case=@id4_ideogram4_attention_softmax_all_heads_f32_bf16_small_case"
+    "--device=amdgpu://0"
+    "--config=id4.ideogram4.attention_materialized_wmma.valid_token_count=16"
+    "--config=id4.ideogram4.attention_materialized_wmma.padded_token_count=16"
+    "--config=id4.ideogram4.attention_materialized_wmma.attention_head_count=2"
+    "--config=id4.ideogram4.attention_materialized_wmma.head_size=16"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
     "ideogram4_attention_softmax_f32_bf16_zero_1024_shape_hal_test"
   ARGS
     "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/attention_softmax_f32_bf16.loom}}"
     "--case=@id4_ideogram4_attention_softmax_f32_bf16_zero_1024_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.attention_softmax_probs.token_count=4096"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
+    "ideogram4_attention_softmax_all_heads_f32_bf16_zero_1024_shape_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/attention_materialized_bf16_wmma.loom}}"
+    "--case=@id4_ideogram4_attention_softmax_all_heads_f32_bf16_zero_1024_shape_case"
+    "--device=amdgpu://0"
+    "--config=id4.ideogram4.attention_materialized_wmma.valid_token_count=4096"
+    "--config=id4.ideogram4.attention_materialized_wmma.padded_token_count=4096"
+    "--config=id4.ideogram4.attention_materialized_wmma.attention_head_count=18"
+    "--config=id4.ideogram4.attention_materialized_wmma.head_size=256"
   SRC
     loom::tools::iree-test-loom
   LABELS
@@ -8048,6 +8246,28 @@ endif()
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
 iree_native_test(
   NAME
+    "ideogram4_attention_pv_all_heads_bf16_bf16_wmma_small_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/attention_materialized_bf16_wmma.loom}}"
+    "--case=@id4_ideogram4_attention_pv_all_heads_bf16_bf16_wmma_small_case"
+    "--device=amdgpu://0"
+    "--config=id4.ideogram4.attention_materialized_wmma.valid_token_count=16"
+    "--config=id4.ideogram4.attention_materialized_wmma.padded_token_count=16"
+    "--config=id4.ideogram4.attention_materialized_wmma.attention_head_count=2"
+    "--config=id4.ideogram4.attention_materialized_wmma.head_size=16"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
     "ideogram4_attention_pv_bf16_bf16_wmma_zero_1024_shape_hal_test"
   ARGS
     "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/attention_pv_bf16_bf16_wmma.loom}}"
@@ -8057,6 +8277,28 @@ iree_native_test(
     "--config=id4.ideogram4.attention_pv_wmma.attention_head_count=18"
     "--config=id4.ideogram4.attention_pv_wmma.head_size=256"
     "--config=id4.ideogram4.attention_pv_wmma.head_ordinal=0"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
+    "ideogram4_attention_pv_all_heads_bf16_bf16_wmma_zero_1024_shape_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/attention_materialized_bf16_wmma.loom}}"
+    "--case=@id4_ideogram4_attention_pv_all_heads_bf16_bf16_wmma_zero_1024_shape_case"
+    "--device=amdgpu://0"
+    "--config=id4.ideogram4.attention_materialized_wmma.valid_token_count=4096"
+    "--config=id4.ideogram4.attention_materialized_wmma.padded_token_count=4096"
+    "--config=id4.ideogram4.attention_materialized_wmma.attention_head_count=18"
+    "--config=id4.ideogram4.attention_materialized_wmma.head_size=256"
   SRC
     loom::tools::iree-test-loom
   LABELS
