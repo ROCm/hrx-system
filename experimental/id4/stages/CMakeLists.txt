@@ -640,11 +640,13 @@ iree_cc_binary_benchmark(
   DEPS
     ::hal_integration_util
     ::ideogram4_dit
+    ::ideogram4_dit_parameters
     iree::base
     iree::base::tooling::flags
     iree::experimental::id4::pipeline::plan
     iree::experimental::id4::pipeline::stage
     iree::experimental::id4::tooling::filesystem
+    iree::experimental::id4::tooling::runtime
     iree::hal
     iree::io::file_handle
     iree::io::parameter_provider

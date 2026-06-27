@@ -589,9 +589,11 @@ iree_runtime_cc_benchmark(
     deps = [
         ":hal_integration_util",
         ":ideogram4_dit",
+        ":ideogram4_dit_parameters",
         "//experimental/id4/pipeline:plan",
         "//experimental/id4/pipeline:stage",
         "//experimental/id4/tooling:filesystem",
+        "//experimental/id4/tooling:runtime",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/tooling:flags",
         "//runtime/src/iree/hal",

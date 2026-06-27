@@ -11,7 +11,9 @@
 #include "experimental/id4/pipeline/stage.h"
 #include "experimental/id4/stages/hal_integration_util.h"
 #include "experimental/id4/stages/ideogram4_dit.h"
+#include "experimental/id4/stages/ideogram4_dit_parameters.h"
 #include "experimental/id4/tooling/filesystem.h"
+#include "experimental/id4/tooling/runtime.h"
 #include "iree/base/tooling/flags.h"
 #include "iree/hal/api.h"
 #include "iree/io/file_contents.h"
@@ -24,6 +26,12 @@ IREE_FLAG(
     "Directory containing a full or DiT-only Ideogram4 fixture manifest.");
 IREE_FLAG(string, id4_plan_output_dir, "",
           "Optional directory receiving benchmark DiT stage plan JSON files.");
+IREE_FLAG(string, dit_parameter_format, "bf16",
+          "DiT parameter format: bf16 or mixed_bf16_fp8_e4m3.");
+IREE_FLAG(string, dit_conditioned_fp8_scope, "dit_cond_fp8",
+          "Conditioned DiT native-FP8 parameter scope.");
+IREE_FLAG(string, dit_unconditioned_fp8_scope, "dit_uncond_fp8",
+          "Unconditioned DiT native-FP8 parameter scope.");
 
 namespace {
 
@@ -44,6 +52,8 @@ enum class DitBenchmarkIssueMode {
 struct DitBenchmarkBranchConfig {
   // Parameter scope expected by the stage and --parameters flag.
   iree_string_view_t parameter_scope;
+  // Native-FP8 parameter scope used in mixed parameter formats.
+  iree_string_view_t fp8_parameter_scope;
   // Fixture stage containing boundary input tensors.
   iree_string_view_t fixture_stage;
   // Dynamic conditioning mode used when planning the DiT request.
@@ -77,6 +87,9 @@ static DitBenchmarkBranchConfig BranchConfig(DitBenchmarkBranch branch) {
       return DitBenchmarkBranchConfig{
           // Conditioned DiT parameter scope.
           /*.parameter_scope=*/IREE_SV("dit_cond"),
+          // Conditioned DiT native-FP8 parameter scope.
+          /*.fp8_parameter_scope=*/
+          iree_make_cstring_view(FLAG_dit_conditioned_fp8_scope),
           // Fixture stage carrying conditioned DiT inputs.
           /*.fixture_stage=*/IREE_SV("ideogram4.cond.input"),
           // Conditioned request consumes Qwen context tokens.
@@ -87,6 +100,9 @@ static DitBenchmarkBranchConfig BranchConfig(DitBenchmarkBranch branch) {
       return DitBenchmarkBranchConfig{
           // Unconditioned DiT parameter scope.
           /*.parameter_scope=*/IREE_SV("dit_uncond"),
+          // Unconditioned DiT native-FP8 parameter scope.
+          /*.fp8_parameter_scope=*/
+          iree_make_cstring_view(FLAG_dit_unconditioned_fp8_scope),
           // Fixture stage carrying unconditioned DiT inputs.
           /*.fixture_stage=*/IREE_SV("ideogram4.uncond.input"),
           // Unconditioned request consumes image tokens only.
@@ -105,6 +121,14 @@ static iree_string_view_t BranchPlanFileName(DitBenchmarkBranch branch) {
       return IREE_SV("uncond.json");
   }
   return iree_string_view_empty();
+}
+
+static iree_status_t ParseDitParameterFormat(
+    id4_ideogram4_dit_parameter_format_t* out_format) {
+  iree_status_t status = id4_ideogram4_dit_parameter_format_parse(
+      iree_make_cstring_view(FLAG_dit_parameter_format), out_format);
+  if (iree_status_is_ok(status)) return status;
+  return iree_status_annotate(status, IREE_SV("--dit_parameter_format"));
 }
 
 static iree_status_t WritePlanJsonIfRequested(DitBenchmarkBranch branch,
@@ -205,7 +229,8 @@ static iree_status_t ConfigureRequestFromFixture(
 }
 
 static iree_status_t CreateDitStage(const id4::test::LiveStageContext& live,
-                                    iree_string_view_t parameter_scope,
+                                    DitBenchmarkBranchConfig branch,
+                                    id4_ideogram4_dit_parameter_format_t format,
                                     id4_pipeline_stage_t** out_stage) {
   IREE_ASSERT_ARGUMENT(out_stage);
   *out_stage = nullptr;
@@ -216,15 +241,25 @@ static iree_status_t CreateDitStage(const id4::test::LiveStageContext& live,
   services.executable_cache = live.executable_cache.get();
   services.host_allocator = iree_allocator_system();
 
+  id4_ideogram4_dit_parameter_source_rule_list_t source_rules;
+  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_parameter_source_rule_list_initialize(
+      format, *id4_ideogram4_dit_program_ideogram4_model_config(),
+      branch.fp8_parameter_scope, iree_allocator_system(), &source_rules));
+
   id4_ideogram4_dit_stage_create_options_t create_options;
   std::memset(&create_options, 0, sizeof(create_options));
   create_options.structure_size = sizeof(create_options);
   create_options.services = services;
   create_options.kernel_cache = live.kernel_cache.get();
-  create_options.parameter_scope = parameter_scope;
+  create_options.parameter_scope = branch.parameter_scope;
+  create_options.parameter_source_rule_count = source_rules.count;
+  create_options.parameter_source_rules = source_rules.values;
   create_options.model = *id4_ideogram4_dit_program_ideogram4_model_config();
-  return id4_ideogram4_dit_stage_create(&create_options,
-                                        iree_allocator_system(), out_stage);
+  iree_status_t status = id4_ideogram4_dit_stage_create(
+      &create_options, iree_allocator_system(), out_stage);
+  id4_ideogram4_dit_parameter_source_rule_list_deinitialize(
+      &source_rules, iree_allocator_system());
+  return status;
 }
 
 static iree_status_t LoadFixtureAndConfigureRequest(
@@ -245,14 +280,17 @@ static iree_status_t CreateLoadedDitStageContext(
     DitBenchmarkBranch branch, DitBenchmarkContext* out_context) {
   IREE_ASSERT_ARGUMENT(out_context);
   const DitBenchmarkBranchConfig branch_config = BranchConfig(branch);
+  id4_ideogram4_dit_parameter_format_t parameter_format =
+      ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_INVALID;
+  IREE_RETURN_IF_ERROR(ParseDitParameterFormat(&parameter_format));
   out_context->diagnostics_sink =
       id4::test::DiagnosticsSink(&out_context->diagnostics);
   IREE_RETURN_IF_ERROR(
       id4::test::CreateLiveStageContextFromFlags(&out_context->live));
   IREE_RETURN_IF_ERROR(
       LoadFixtureAndConfigureRequest(out_context, branch_config));
-  IREE_RETURN_IF_ERROR(CreateDitStage(out_context->live,
-                                      branch_config.parameter_scope,
+  IREE_RETURN_IF_ERROR(CreateDitStage(out_context->live, branch_config,
+                                      parameter_format,
                                       out_context->stage.out()));
 
   id4_pipeline_stage_load_options_t load_options;
@@ -268,8 +306,54 @@ static iree_status_t AttachDitPreparationInputs(DitBenchmarkBranch branch,
   const DitBenchmarkBranchConfig branch_config = BranchConfig(branch);
   IREE_RETURN_IF_ERROR(
       id4::test::CreateEmbeddedKernelLibrary(context->kernel_library.out()));
-  return id4::test::CreateParameterProviderFromFlags(
-      branch_config.parameter_scope, context->parameter_provider.out());
+  id4_ideogram4_dit_parameter_format_t parameter_format =
+      ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_INVALID;
+  IREE_RETURN_IF_ERROR(ParseDitParameterFormat(&parameter_format));
+  if (parameter_format == ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_BF16) {
+    return id4::test::CreateParameterProviderFromFlags(
+        branch_config.parameter_scope, context->parameter_provider.out());
+  }
+
+  id4::test::OwningRef<iree_io_parameter_provider_t,
+                       iree_io_parameter_provider_release>
+      bf16_provider;
+  id4::test::OwningRef<iree_io_parameter_provider_t,
+                       iree_io_parameter_provider_release>
+      fp8_provider;
+  id4_tooling_parameter_provider_request_t requests[] = {
+      {
+          // BF16-expanded fallback parameter scope.
+          .scope = branch_config.parameter_scope,
+          // BF16-expanded provider output.
+          .out_provider = bf16_provider.out(),
+      },
+      {
+          // Native-FP8 parameter scope.
+          .scope = branch_config.fp8_parameter_scope,
+          // Native-FP8 provider output.
+          .out_provider = fp8_provider.out(),
+      },
+  };
+  IREE_RETURN_IF_ERROR(id4_tooling_create_parameter_providers_from_flags(
+      IREE_ARRAYSIZE(requests), requests, iree_allocator_system()));
+
+  const id4_tooling_parameter_provider_set_entry_t entries[] = {
+      {
+          // BF16-expanded fallback parameter scope.
+          .scope = branch_config.parameter_scope,
+          // BF16-expanded provider.
+          .provider = bf16_provider.get(),
+      },
+      {
+          // Native-FP8 parameter scope.
+          .scope = branch_config.fp8_parameter_scope,
+          // Native-FP8 provider.
+          .provider = fp8_provider.get(),
+      },
+  };
+  return id4_tooling_create_parameter_provider_set(
+      IREE_ARRAYSIZE(entries), entries, iree_allocator_system(),
+      context->parameter_provider.out());
 }
 
 static iree_status_t CreateLoadedDitBenchmarkContext(

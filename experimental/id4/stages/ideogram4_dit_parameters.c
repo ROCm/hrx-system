@@ -9,8 +9,8 @@
 #include <string.h>
 
 static const char* kMixedBf16Fp8LayerLinearWeightSuffixes[] = {
-    "attention.qkv.weight",   "attention.o.weight",
-    "feed_forward.w1.weight", "feed_forward.w3.weight",
+    "attention.qkv.weight",
+    "attention.o.weight",
     "feed_forward.w2.weight",
 };
 
