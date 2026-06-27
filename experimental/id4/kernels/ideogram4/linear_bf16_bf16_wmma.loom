@@ -99,49 +99,5 @@ check.case public @id4_ideogram4_linear_bf16_bf16_wmma_zero_case {
   check.return
 }
 
-check.case public @id4_ideogram4_linear_bf16_bf16_wmma_uncond_qkv_1024_shape_case {
-  %input = check.generate.fill value(1.0) : tensor<4096x4608xbf16>
-  %weight = check.generate.fill value(0.0) : tensor<4608x13824xbf16>
-  %output = check.generate.fill value(1.0) : tensor<4096x13824xbf16>
-  %expected = check.generate.fill value(0.0) : tensor<4096x13824xbf16>
-  func.call @id4_ideogram4_linear_bf16_bf16_wmma(%input, %weight, %output) : (tensor<4096x4608xbf16>, tensor<4608x13824xbf16>, tensor<4096x13824xbf16>)
-  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<4096x13824xbf16>
-  check.return
-}
-
-check.case public @id4_ideogram4_linear_bf16_bf16_wmma_uncond_hidden_1024_shape_case {
-  %input = check.generate.fill value(1.0) : tensor<4096x4608xbf16>
-  %weight = check.generate.fill value(0.0) : tensor<4608x4608xbf16>
-  %output = check.generate.fill value(1.0) : tensor<4096x4608xbf16>
-  %expected = check.generate.fill value(0.0) : tensor<4096x4608xbf16>
-  func.call @id4_ideogram4_linear_bf16_bf16_wmma(%input, %weight, %output) : (tensor<4096x4608xbf16>, tensor<4608x4608xbf16>, tensor<4096x4608xbf16>)
-  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<4096x4608xbf16>
-  check.return
-}
-
-check.case public @id4_ideogram4_linear_bf16_bf16_wmma_uncond_mlp_up_1024_shape_case {
-  %input = check.generate.fill value(1.0) : tensor<4096x4608xbf16>
-  %weight = check.generate.fill value(0.0) : tensor<4608x12288xbf16>
-  %output = check.generate.fill value(1.0) : tensor<4096x12288xbf16>
-  %expected = check.generate.fill value(0.0) : tensor<4096x12288xbf16>
-  func.call @id4_ideogram4_linear_bf16_bf16_wmma(%input, %weight, %output) : (tensor<4096x4608xbf16>, tensor<4608x12288xbf16>, tensor<4096x12288xbf16>)
-  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<4096x12288xbf16>
-  check.return
-}
-
-check.case public @id4_ideogram4_linear_bf16_bf16_wmma_uncond_mlp_down_1024_shape_case {
-  %input = check.generate.fill value(1.0) : tensor<4096x12288xbf16>
-  %weight = check.generate.fill value(0.0) : tensor<12288x4608xbf16>
-  %output = check.generate.fill value(1.0) : tensor<4096x4608xbf16>
-  %expected = check.generate.fill value(0.0) : tensor<4096x4608xbf16>
-  func.call @id4_ideogram4_linear_bf16_bf16_wmma(%input, %weight, %output) : (tensor<4096x12288xbf16>, tensor<12288x4608xbf16>, tensor<4096x4608xbf16>)
-  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<4096x4608xbf16>
-  check.return
-}
-
 check.benchmark<@id4_ideogram4_linear_bf16_bf16_wmma_small_case> @id4_ideogram4_linear_bf16_bf16_wmma_small
 check.benchmark<@id4_ideogram4_linear_bf16_bf16_wmma_zero_case> @id4_ideogram4_linear_bf16_bf16_wmma_zero
-check.benchmark<@id4_ideogram4_linear_bf16_bf16_wmma_uncond_qkv_1024_shape_case> @id4_ideogram4_linear_bf16_bf16_wmma_uncond_qkv_1024_shape
-check.benchmark<@id4_ideogram4_linear_bf16_bf16_wmma_uncond_hidden_1024_shape_case> @id4_ideogram4_linear_bf16_bf16_wmma_uncond_hidden_1024_shape
-check.benchmark<@id4_ideogram4_linear_bf16_bf16_wmma_uncond_mlp_up_1024_shape_case> @id4_ideogram4_linear_bf16_bf16_wmma_uncond_mlp_up_1024_shape
-check.benchmark<@id4_ideogram4_linear_bf16_bf16_wmma_uncond_mlp_down_1024_shape_case> @id4_ideogram4_linear_bf16_bf16_wmma_uncond_mlp_down_1024_shape
