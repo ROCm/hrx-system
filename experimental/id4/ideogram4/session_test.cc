@@ -404,8 +404,6 @@ TEST_F(SessionTest, PlansMixedBf16Fp8DitSources) {
   plan_options.tokenizer = tokenizer.get();
   plan_options.tokenizer_flags = IREE_TOKENIZER_ENCODE_FLAG_NONE;
   plan_options.policy = MakeGenerationPolicy();
-  plan_options.policy.dit_activation_format =
-      ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_F32_CANONICAL;
   plan_options.device_index = 0;
   plan_options.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
   id4::test::StageDiagnostics diagnostics = {};
@@ -422,7 +420,7 @@ TEST_F(SessionTest, PlansMixedBf16Fp8DitSources) {
   IREE_ASSERT_OK(
       id4_ideogram4_generation_plan_summary(plan_owner.get(), &summary));
   EXPECT_EQ(summary.dit_activation_format,
-            ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_F32_CANONICAL);
+            ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT);
 
   iree_string_builder_t builder;
   iree_string_builder_initialize(iree_allocator_system(), &builder);

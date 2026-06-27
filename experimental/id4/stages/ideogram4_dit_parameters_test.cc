@@ -81,18 +81,24 @@ TEST(Ideogram4DitParameters, MixedFp8FormatProducesLayerProjectionSourceRules) {
       ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_MIXED_BF16_FP8_E4M3, MakeModelConfig(),
       IREE_SV("native_fp8"), iree_allocator_system(), &rules));
 
-  ASSERT_EQ(rules.count, 9u);
+  ASSERT_EQ(rules.count, 15u);
   ASSERT_NE(rules.values, nullptr);
   ASSERT_NE(rules.key_storage, nullptr);
   const iree_string_view_t expected_keys[] = {
       IREE_SV("layers.0.attention.qkv.weight"),
       IREE_SV("layers.0.attention.o.weight"),
+      IREE_SV("layers.0.feed_forward.w1.weight"),
+      IREE_SV("layers.0.feed_forward.w3.weight"),
       IREE_SV("layers.0.feed_forward.w2.weight"),
       IREE_SV("layers.1.attention.qkv.weight"),
       IREE_SV("layers.1.attention.o.weight"),
+      IREE_SV("layers.1.feed_forward.w1.weight"),
+      IREE_SV("layers.1.feed_forward.w3.weight"),
       IREE_SV("layers.1.feed_forward.w2.weight"),
       IREE_SV("layers.2.attention.qkv.weight"),
       IREE_SV("layers.2.attention.o.weight"),
+      IREE_SV("layers.2.feed_forward.w1.weight"),
+      IREE_SV("layers.2.feed_forward.w3.weight"),
       IREE_SV("layers.2.feed_forward.w2.weight"),
   };
   for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(expected_keys); ++i) {
