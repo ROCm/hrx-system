@@ -1389,7 +1389,10 @@ vector_fragment_load = Op(
         "shape, view layout, and target legality; it is not an ordinary "
         "trailing-axis footprint of the view. The result carries fragment "
         "facts directly so vector.mma can consume it without a separate "
-        "vector.fragment wrapper."
+        "vector.fragment wrapper. When the view and payload element types "
+        "differ, the operation represents a fragment-shaped numeric conversion "
+        "at the load boundary and target lowering must either select that "
+        "conversion explicitly or reject it with target diagnostics."
     ),
     operands=[
         Operand("view", VIEW, doc="Typed source view holding logical matrix data."),
@@ -1402,7 +1405,6 @@ vector_fragment_load = Op(
         AttrDef("role", ATTR_TYPE_ENUM, enum_def=VectorFragmentRole),
         *_indexed_memory_attrs(),
     ],
-    constraints=[SameElementType("view", "result")],
     traits=[REFINABLE_RESULT_TYPE_REFS],
     effects=[Reads("view")],
     interfaces=[_memory_access_interface()],

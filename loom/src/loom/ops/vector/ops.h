@@ -702,7 +702,7 @@ iree_status_t loom_vector_transform_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
 
-// LOOM_OP_VECTOR_FRAGMENT_LOAD: Load a target-shaped matrix fragment payload from a typed view at a full-rank logical origin. Unlike vector.load, the result vector shape is the physical fragment payload selected by role, logical matrix shape, view layout, and target legality; it is not an ordinary trailing-axis footprint of the view. The result carries fragment facts directly so vector.mma can consume it without a separate vector.fragment wrapper.
+// LOOM_OP_VECTOR_FRAGMENT_LOAD: Load a target-shaped matrix fragment payload from a typed view at a full-rank logical origin. Unlike vector.load, the result vector shape is the physical fragment payload selected by role, logical matrix shape, view layout, and target legality; it is not an ordinary trailing-axis footprint of the view. The result carries fragment facts directly so vector.mma can consume it without a separate vector.fragment wrapper. When the view and payload element types differ, the operation represents a fragment-shaped numeric conversion at the load boundary and target lowering must either select that conversion explicitly or reject it with target diagnostics.
 // %lhs = vector.fragment.load<lhs> %a[%row, %k0] shape [%m, %k] : view<[%M]x[%K]xf16, %layout> -> vector<16xf16>
 LOOM_DEFINE_ISA(loom_vector_fragment_load_isa, LOOM_OP_VECTOR_FRAGMENT_LOAD)
 LOOM_DEFINE_OPERAND(loom_vector_fragment_load_view, 0)
