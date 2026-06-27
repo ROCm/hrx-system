@@ -36,6 +36,7 @@ typedef struct id4_tooling_runtime_context_t {
   // Loom kernel cache shared by prepared stages.
   id4_pipeline_kernel_cache_t* kernel_cache;
   // Command-buffer mode selected from HAL profiling flags.
+  // Profile-retained modes preserve command operation and dispatch attribution.
   iree_hal_command_buffer_mode_t command_buffer_mode;
 } id4_tooling_runtime_context_t;
 

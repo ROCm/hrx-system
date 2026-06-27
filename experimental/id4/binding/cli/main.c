@@ -384,6 +384,13 @@ static iree_status_t id4_cli_end_profile_statistics(
   return status;
 }
 
+static iree_hal_command_buffer_mode_t id4_cli_generation_command_buffer_mode(
+    iree_hal_command_buffer_mode_t base_mode) {
+  if (strlen(FLAG_profile_output) == 0) return base_mode;
+  return base_mode | IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_PROFILE_METADATA |
+         IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_DISPATCH_METADATA;
+}
+
 static iree_status_t id4_cli_write_generation_plan(
     iree_string_view_t output_path, const id4_ideogram4_generation_plan_t* plan,
     iree_allocator_t host_allocator) {
@@ -916,7 +923,9 @@ static iree_status_t id4_cli_run_generation(iree_allocator_t host_allocator) {
     prepare_options.structure_size = sizeof(prepare_options);
     prepare_options.parameter_providers = parameter_providers;
     prepare_options.kernel_library = kernel_library;
-    prepare_options.command_buffer_mode = runtime_context.command_buffer_mode;
+    prepare_options.command_buffer_mode =
+        id4_cli_generation_command_buffer_mode(
+            runtime_context.command_buffer_mode);
     prepare_options.wait_semaphore_list = iree_hal_semaphore_list_empty();
     prepare_options.signal_semaphore_list = prepare_signal_list;
     prepare_options.diagnostics_sink = &diagnostics_sink;
