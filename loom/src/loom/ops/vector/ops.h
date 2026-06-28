@@ -2784,6 +2784,7 @@ iree_status_t loom_vector_extf_build(
     loom_builder_t* builder, loom_value_id_t input,
     loom_type_t input_type, loom_type_t result_type,
     loom_location_id_t location, loom_op_t** out_op);
+iree_status_t loom_vector_extf_canonicalize(loom_op_t* op, loom_rewriter_t* rewriter);
 iree_status_t loom_vector_extf_facts(
     loom_fact_context_t* context,
     const loom_module_t* module, const loom_op_t* op,
@@ -2799,6 +2800,7 @@ iree_status_t loom_vector_fptrunc_build(
     loom_builder_t* builder, loom_value_id_t input,
     loom_type_t input_type, loom_type_t result_type,
     loom_location_id_t location, loom_op_t** out_op);
+iree_status_t loom_vector_fptrunc_canonicalize(loom_op_t* op, loom_rewriter_t* rewriter);
 
 // LOOM_OP_VECTOR_EXTSI: Lanewise signed integer extension. Source and result shapes match exactly, and each source lane is sign-extended to the result element width.
 // vector.extsi

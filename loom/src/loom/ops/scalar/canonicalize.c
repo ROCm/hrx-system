@@ -1670,12 +1670,6 @@ iree_status_t loom_scalar_fptrunc_canonicalize(loom_op_t* op,
         op, rewriter, inner_input,
         loom_module_value_type(rewriter->module, inner_input));
   }
-  if (input_def && loom_scalar_fptrunc_isa(input_def)) {
-    loom_value_id_t inner_input = loom_scalar_fptrunc_input(input_def);
-    return loom_scalar_replace_single_result_with_float_resize(
-        op, rewriter, inner_input,
-        loom_module_value_type(rewriter->module, inner_input));
-  }
   return iree_ok_status();
 }
 

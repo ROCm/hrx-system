@@ -779,3 +779,198 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx1250_scaled_f8e5m2_x
   global_store_b128_saddr %148, %149, %output_view {offset = 16}
   return
 }
+
+// ====
+
+amdgpu.target<gfx1100> @target
+kernel.def target(@target) @gfx1100_finite_storage_scaled_f8e4m3_x8_to_bf16_store_bf16_scale() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %scale: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %lane = kernel.workitem.id<x> : index
+  %input_layout = encoding.layout.strided [8, 1] : encoding<layout>
+  %input_schema = encoding.define #matrix_operand<element_format=f8e4m3, payload_elements=8, payload_registers=2, rounding=finite_only> : encoding<schema>
+  %input_storage = encoding.define #physical_storage {layout = %input_layout : encoding<layout>, schema = %input_schema : encoding<schema>} : encoding<storage>
+  %input_view = buffer.view %input[%base] : buffer -> view<64x8xf8E4M3, %input_storage>
+  %scale_view = buffer.view %scale[%base] : buffer -> view<64xbf16, #dense>
+  %output_view = buffer.view %output[%base] : buffer -> view<64x8xbf16, #dense>
+  %packed = vector.load %input_view[%lane, 0] : view<64x8xf8E4M3, %input_storage> -> vector<8xf8E4M3>
+  %decoded = vector.extf %packed : vector<8xf8E4M3> to vector<8xbf16>
+  %row_scale = view.load %scale_view[%lane] : view<64xbf16, #dense> -> bf16
+  %scale_vector = vector.splat %row_scale : vector<8xbf16>
+  %scaled = vector.mulf %decoded, %scale_vector : vector<8xbf16>
+  vector.store %scaled, %output_view[%lane, 0] : vector<8xbf16>, view<64x8xbf16, #dense>
+  kernel.return
+}
+
+// ----
+low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx1100_finite_storage_scaled_f8e4m3_x8_to_bf16_store_bf16_scale() asm<amdgpu.rdna3.core> {
+  %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
+  %scale_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 128} : reg<amdgpu.sgpr x2>
+  %output_view = resource<hal_binding> {index = 2, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
+  %34 = v_lshlrev_b32_src0_inline %lane, 3
+  %packed = global_load_b64_saddr %34, %input_view
+  %36 = v_lshlrev_b32_src0_inline %lane, 1
+  %row_scale = global_load_d16_b16_saddr %36, %scale_view
+  %38 = slice %packed[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %39 = v_and_b32_lit %38, 128
+  %40 = v_lshlrev_b32_src0_inline %39, 8
+  %41 = v_and_b32_lit %38, 127
+  %42 = v_mov_b32 15360
+  %43 = v_lshl_add_u32_shift_imm %41, %42, 4
+  %44 = v_mov_b32 3229614080
+  %45 = v_mov_b32 1614815232
+  %46 = v_perm_b32 %45, %44, %41
+  %47 = v_mov_b32 993737472
+  %48 = v_mov_b32 1010580540
+  %49 = v_perm_b32 %48, %47, %41
+  %50 = v_lshlrev_b32_src0_inline %49, 8
+  %51 = v_or_b32 %46, %50
+  %52 = v_cmp_lt_u32_src1_inline %41 {rhs = 8}
+  %53 = v_cndmask_b32 %43, %51, %52
+  %54 = v_or_b32 %40, %53
+  %55 = v_lshlrev_b32_src0_inline %54, 16
+  %57 = v_lshrrev_b32_src0_inline %38, 8
+  %58 = v_and_b32_lit %57, 128
+  %59 = v_lshlrev_b32_src0_inline %58, 8
+  %60 = v_and_b32_lit %57, 127
+  %62 = v_lshl_add_u32_shift_imm %60, %42, 4
+  %65 = v_perm_b32 %45, %44, %60
+  %68 = v_perm_b32 %48, %47, %60
+  %69 = v_lshlrev_b32_src0_inline %68, 8
+  %70 = v_or_b32 %65, %69
+  %71 = v_cmp_lt_u32_src1_inline %60 {rhs = 8}
+  %72 = v_cndmask_b32 %62, %70, %71
+  %73 = v_or_b32 %59, %72
+  %74 = v_lshlrev_b32_src0_inline %73, 16
+  %76 = v_lshrrev_b32_src0_inline %38, 16
+  %77 = v_and_b32_lit %76, 128
+  %78 = v_lshlrev_b32_src0_inline %77, 8
+  %79 = v_and_b32_lit %76, 127
+  %81 = v_lshl_add_u32_shift_imm %79, %42, 4
+  %84 = v_perm_b32 %45, %44, %79
+  %87 = v_perm_b32 %48, %47, %79
+  %88 = v_lshlrev_b32_src0_inline %87, 8
+  %89 = v_or_b32 %84, %88
+  %90 = v_cmp_lt_u32_src1_inline %79 {rhs = 8}
+  %91 = v_cndmask_b32 %81, %89, %90
+  %92 = v_or_b32 %78, %91
+  %93 = v_lshlrev_b32_src0_inline %92, 16
+  %95 = v_lshrrev_b32_src0_inline %38, 24
+  %96 = v_and_b32_lit %95, 128
+  %97 = v_lshlrev_b32_src0_inline %96, 8
+  %98 = v_and_b32_lit %95, 127
+  %100 = v_lshl_add_u32_shift_imm %98, %42, 4
+  %103 = v_perm_b32 %45, %44, %98
+  %106 = v_perm_b32 %48, %47, %98
+  %107 = v_lshlrev_b32_src0_inline %106, 8
+  %108 = v_or_b32 %103, %107
+  %109 = v_cmp_lt_u32_src1_inline %98 {rhs = 8}
+  %110 = v_cndmask_b32 %100, %108, %109
+  %111 = v_or_b32 %97, %110
+  %112 = v_lshlrev_b32_src0_inline %111, 16
+  %113 = slice %packed[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %114 = v_and_b32_lit %113, 128
+  %115 = v_lshlrev_b32_src0_inline %114, 8
+  %116 = v_and_b32_lit %113, 127
+  %118 = v_lshl_add_u32_shift_imm %116, %42, 4
+  %121 = v_perm_b32 %45, %44, %116
+  %124 = v_perm_b32 %48, %47, %116
+  %125 = v_lshlrev_b32_src0_inline %124, 8
+  %126 = v_or_b32 %121, %125
+  %127 = v_cmp_lt_u32_src1_inline %116 {rhs = 8}
+  %128 = v_cndmask_b32 %118, %126, %127
+  %129 = v_or_b32 %115, %128
+  %130 = v_lshlrev_b32_src0_inline %129, 16
+  %132 = v_lshrrev_b32_src0_inline %113, 8
+  %133 = v_and_b32_lit %132, 128
+  %134 = v_lshlrev_b32_src0_inline %133, 8
+  %135 = v_and_b32_lit %132, 127
+  %137 = v_lshl_add_u32_shift_imm %135, %42, 4
+  %140 = v_perm_b32 %45, %44, %135
+  %143 = v_perm_b32 %48, %47, %135
+  %144 = v_lshlrev_b32_src0_inline %143, 8
+  %145 = v_or_b32 %140, %144
+  %146 = v_cmp_lt_u32_src1_inline %135 {rhs = 8}
+  %147 = v_cndmask_b32 %137, %145, %146
+  %148 = v_or_b32 %134, %147
+  %149 = v_lshlrev_b32_src0_inline %148, 16
+  %151 = v_lshrrev_b32_src0_inline %113, 16
+  %152 = v_and_b32_lit %151, 128
+  %153 = v_lshlrev_b32_src0_inline %152, 8
+  %154 = v_and_b32_lit %151, 127
+  %156 = v_lshl_add_u32_shift_imm %154, %42, 4
+  %159 = v_perm_b32 %45, %44, %154
+  %162 = v_perm_b32 %48, %47, %154
+  %163 = v_lshlrev_b32_src0_inline %162, 8
+  %164 = v_or_b32 %159, %163
+  %165 = v_cmp_lt_u32_src1_inline %154 {rhs = 8}
+  %166 = v_cndmask_b32 %156, %164, %165
+  %167 = v_or_b32 %153, %166
+  %168 = v_lshlrev_b32_src0_inline %167, 16
+  %170 = v_lshrrev_b32_src0_inline %113, 24
+  %171 = v_and_b32_lit %170, 128
+  %172 = v_lshlrev_b32_src0_inline %171, 8
+  %173 = v_and_b32_lit %170, 127
+  %175 = v_lshl_add_u32_shift_imm %173, %42, 4
+  %178 = v_perm_b32 %45, %44, %173
+  %181 = v_perm_b32 %48, %47, %173
+  %182 = v_lshlrev_b32_src0_inline %181, 8
+  %183 = v_or_b32 %178, %182
+  %184 = v_cmp_lt_u32_src1_inline %173 {rhs = 8}
+  %185 = v_cndmask_b32 %175, %183, %184
+  %186 = v_or_b32 %172, %185
+  %187 = v_lshlrev_b32_src0_inline %186, 16
+  %189 = v_lshlrev_b32_src0_16_low16 %row_scale
+  %193 = v_mul_f32 %55, %189
+  %196 = v_mul_f32 %74, %189
+  %199 = v_mul_f32 %93, %189
+  %202 = v_mul_f32 %112, %189
+  %205 = v_mul_f32 %130, %189
+  %208 = v_mul_f32 %149, %189
+  %211 = v_mul_f32 %168, %189
+  %214 = v_mul_f32 %187, %189
+  %218 = v_lshrrev_b32_src0_inline %193, 16
+  %219 = v_and_b32_src0_inline %218, 1
+  %220 = v_add3_u32_src2_lit %193, %219, 32767
+  %221 = v_lshrrev_b32_src0_inline %220, 16
+  %222 = v_lshrrev_b32_src0_inline %196, 16
+  %223 = v_and_b32_src0_inline %222, 1
+  %224 = v_add3_u32_src2_lit %196, %223, 32767
+  %225 = v_lshrrev_b32_src0_inline %224, 16
+  %226 = v_cvt_pk_u16_u32 %221, %225
+  %229 = v_lshrrev_b32_src0_inline %199, 16
+  %230 = v_and_b32_src0_inline %229, 1
+  %231 = v_add3_u32_src2_lit %199, %230, 32767
+  %232 = v_lshrrev_b32_src0_inline %231, 16
+  %233 = v_lshrrev_b32_src0_inline %202, 16
+  %234 = v_and_b32_src0_inline %233, 1
+  %235 = v_add3_u32_src2_lit %202, %234, 32767
+  %236 = v_lshrrev_b32_src0_inline %235, 16
+  %237 = v_cvt_pk_u16_u32 %232, %236
+  %240 = v_lshrrev_b32_src0_inline %205, 16
+  %241 = v_and_b32_src0_inline %240, 1
+  %242 = v_add3_u32_src2_lit %205, %241, 32767
+  %243 = v_lshrrev_b32_src0_inline %242, 16
+  %244 = v_lshrrev_b32_src0_inline %208, 16
+  %245 = v_and_b32_src0_inline %244, 1
+  %246 = v_add3_u32_src2_lit %208, %245, 32767
+  %247 = v_lshrrev_b32_src0_inline %246, 16
+  %248 = v_cvt_pk_u16_u32 %243, %247
+  %251 = v_lshrrev_b32_src0_inline %211, 16
+  %252 = v_and_b32_src0_inline %251, 1
+  %253 = v_add3_u32_src2_lit %211, %252, 32767
+  %254 = v_lshrrev_b32_src0_inline %253, 16
+  %255 = v_lshrrev_b32_src0_inline %214, 16
+  %256 = v_and_b32_src0_inline %255, 1
+  %257 = v_add3_u32_src2_lit %214, %256, 32767
+  %258 = v_lshrrev_b32_src0_inline %257, 16
+  %259 = v_cvt_pk_u16_u32 %254, %258
+  %scaled = concat(%226, %237, %248, %259) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  %261 = v_lshlrev_b32_src0_inline %lane, 4
+  global_store_b128_saddr %261, %scaled, %output_view
+  return
+}

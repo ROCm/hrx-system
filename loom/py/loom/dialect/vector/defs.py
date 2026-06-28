@@ -3272,7 +3272,7 @@ vector_extf = _vector_cast(
     doc=("Lanewise floating-point precision extension. Source and result shapes match exactly; only the floating-point element type widens."),
     constraints=[ElementWidthGreaterThan("result", "input")],
     facts="loom_vector_extf_facts",
-    canonicalize="loom_vector_uniform_result_canonicalize",
+    canonicalize="loom_vector_extf_canonicalize",
 )
 
 vector_fptrunc = _vector_cast(
@@ -3282,6 +3282,7 @@ vector_fptrunc = _vector_cast(
     result_constraint=FLOAT_ELEMENT,
     doc=("Lanewise floating-point precision truncation. Source and result shapes match exactly; only the floating-point element type narrows."),
     constraints=[ElementWidthLessThan("result", "input")],
+    canonicalize="loom_vector_fptrunc_canonicalize",
 )
 
 vector_extsi = _vector_cast(
