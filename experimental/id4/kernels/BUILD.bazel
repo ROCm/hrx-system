@@ -492,6 +492,20 @@ _KERNEL_CASES = [
         "target_name": "ideogram4_attention_blocked_softmax_f32_bf16_small",
     },
     {
+        "actual_case": "@id4_ideogram4_attention_blocked_softmax_f32_bf16_zero_1024_shape_case",
+        "benchmark": "@id4_ideogram4_attention_blocked_softmax_f32_bf16_zero_1024_shape",
+        "configs": [
+            "--config=id4.ideogram4.attention_blocked_wmma.valid_token_count=4096",
+            "--config=id4.ideogram4.attention_blocked_wmma.padded_token_count=4096",
+            "--config=id4.ideogram4.attention_blocked_wmma.query_block_offset=0",
+            "--config=id4.ideogram4.attention_blocked_wmma.query_block_token_count=512",
+            "--config=id4.ideogram4.attention_blocked_wmma.attention_head_count=18",
+            "--config=id4.ideogram4.attention_blocked_wmma.head_size=256",
+        ],
+        "source": "ideogram4/attention_blocked_bf16_wmma.loom",
+        "target_name": "ideogram4_attention_blocked_softmax_f32_bf16_zero_1024_shape",
+    },
+    {
         "actual_case": "@id4_ideogram4_attention_pv_bf16_bf16_wmma_small_case",
         "benchmark": "@id4_ideogram4_attention_pv_bf16_bf16_wmma_small",
         "configs": [
@@ -552,6 +566,20 @@ _KERNEL_CASES = [
         ],
         "source": "ideogram4/attention_blocked_bf16_wmma.loom",
         "target_name": "ideogram4_attention_blocked_pv_bf16_bf16_wmma_small",
+    },
+    {
+        "actual_case": "@id4_ideogram4_attention_blocked_pv_bf16_bf16_wmma_zero_1024_shape_case",
+        "benchmark": "@id4_ideogram4_attention_blocked_pv_bf16_bf16_wmma_zero_1024_shape",
+        "configs": [
+            "--config=id4.ideogram4.attention_blocked_wmma.valid_token_count=4096",
+            "--config=id4.ideogram4.attention_blocked_wmma.padded_token_count=4096",
+            "--config=id4.ideogram4.attention_blocked_wmma.query_block_offset=0",
+            "--config=id4.ideogram4.attention_blocked_wmma.query_block_token_count=512",
+            "--config=id4.ideogram4.attention_blocked_wmma.attention_head_count=18",
+            "--config=id4.ideogram4.attention_blocked_wmma.head_size=256",
+        ],
+        "source": "ideogram4/attention_blocked_bf16_wmma.loom",
+        "target_name": "ideogram4_attention_blocked_pv_bf16_bf16_wmma_zero_1024_shape",
     },
     {
         "actual_case": "@id4_ideogram4_attention_split_f32_uniform_softmax_case",
