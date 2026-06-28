@@ -82,6 +82,15 @@ struct GenerationBenchmarkPlanStatistics {
   iree_host_size_t kernel_count;
   // Total planned dispatches across coarse stage plans.
   iree_host_size_t dispatch_count;
+  // Number of populated per-stage statistics entries.
+  iree_host_size_t stage_count;
+  // Per-stage statistics in generation-plan stage order.
+  struct {
+    // Stable generation-plan key for this coarse stage.
+    iree_string_view_t key;
+    // Statistics for this coarse stage plan.
+    id4_pipeline_plan_statistics_t statistics;
+  } stages[8];
 };
 
 static const GenerationPrompt kShortPrompt = {
@@ -302,6 +311,14 @@ static iree_status_t AccumulateGenerationBenchmarkPlanStatistics(
 
   const iree_host_size_t stage_count =
       id4_ideogram4_generation_plan_stage_count(plan);
+  if (stage_count > IREE_ARRAYSIZE(out_statistics->stages)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "generation benchmark supports at most %" PRIhsz
+                            " coarse stages but plan contains %" PRIhsz,
+                            IREE_ARRAYSIZE(out_statistics->stages),
+                            stage_count);
+  }
+  out_statistics->stage_count = stage_count;
   for (iree_host_size_t i = 0; i < stage_count; ++i) {
     iree_string_view_t stage_key = iree_string_view_empty();
     const id4_pipeline_plan_t* stage_plan = nullptr;
@@ -309,6 +326,8 @@ static iree_status_t AccumulateGenerationBenchmarkPlanStatistics(
         plan, i, &stage_key, &stage_plan));
     id4_pipeline_plan_statistics_t stage_statistics =
         id4_pipeline_plan_statistics(stage_plan);
+    out_statistics->stages[i].key = stage_key;
+    out_statistics->stages[i].statistics = stage_statistics;
     out_statistics->total_parameter_slab_byte_length +=
         stage_statistics.parameter_slab_byte_length;
     if (stage_statistics.largest_parameter_slab_byte_length >
@@ -674,7 +693,28 @@ static iree_status_t IssueGenerationBundle(
                                                 &issue_options, out_execution);
 }
 
-static void SetGenerationBenchmarkLabel(
+static iree_status_t AppendGenerationBenchmarkStageLabels(
+    iree_string_builder_t* builder,
+    const GenerationBenchmarkPlanStatistics& statistics) {
+  for (iree_host_size_t i = 0; i < statistics.stage_count; ++i) {
+    const iree_string_view_t key = statistics.stages[i].key;
+    const id4_pipeline_plan_statistics_t& stage =
+        statistics.stages[i].statistics;
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+        builder,
+        " stage.%.*s[param=%" PRIu64 "MiB,local_hw=%" PRIu64
+        "MiB,boundary=%" PRIu64 "MiB,kernels=%" PRIhsz ",dispatches=%" PRIhsz
+        "]",
+        static_cast<int>(key.size), key.data,
+        CeilMiB(stage.parameter_slab_byte_length),
+        CeilMiB(stage.memory_slab_high_water_mark),
+        CeilMiB(stage.boundary_tensor_byte_length), stage.kernel_count,
+        stage.dispatch_count));
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t SetGenerationBenchmarkLabel(
     iree_benchmark_state_t* benchmark_state,
     const LiveGenerationBenchmarkContext& context,
     const id4_ideogram4_generation_plan_summary_t& summary,
@@ -687,9 +727,10 @@ static void SetGenerationBenchmarkLabel(
       DitAttentionImplementationName(summary.dit_attention_implementation);
   const iree_string_view_t feed_forward_implementation =
       DitFeedForwardImplementationName(summary.dit_feed_forward_implementation);
-  char label[512];
-  std::snprintf(
-      label, sizeof(label),
+  iree_string_builder_t label_builder;
+  iree_string_builder_initialize(iree_allocator_system(), &label_builder);
+  iree_status_t status = iree_string_builder_append_format(
+      &label_builder,
       "tokens=%" PRIu32 " latent=%" PRIu64 "x%" PRIu64 " steps=%" PRIu32
       " image=%" PRIu64 "x%" PRIu64
       " params=%.*s activation=%.*s attention=%.*s ff=%.*s"
@@ -713,7 +754,15 @@ static void SetGenerationBenchmarkLabel(
       CeilMiB(statistics.largest_local_slab_high_water_mark),
       CeilMiB(statistics.boundary_tensor_byte_length), statistics.kernel_count,
       statistics.dispatch_count);
-  iree_benchmark_set_label(benchmark_state, label);
+  if (iree_status_is_ok(status)) {
+    status = AppendGenerationBenchmarkStageLabels(&label_builder, statistics);
+  }
+  if (iree_status_is_ok(status)) {
+    iree_benchmark_set_label(benchmark_state,
+                             iree_string_builder_buffer(&label_builder));
+  }
+  iree_string_builder_deinitialize(&label_builder);
+  return status;
 }
 
 static iree_status_t RunGenerationEndToEndBenchmark(
@@ -808,8 +857,8 @@ static iree_status_t RunGenerationEndToEndBenchmark(
   status =
       iree_status_join(status, iree_hal_end_profiling_from_flags(profiling));
   IREE_RETURN_IF_ERROR(status);
-  SetGenerationBenchmarkLabel(benchmark_state, context, last_summary,
-                              last_statistics);
+  IREE_RETURN_IF_ERROR(SetGenerationBenchmarkLabel(
+      benchmark_state, context, last_summary, last_statistics));
   iree_benchmark_set_items_processed(
       benchmark_state, static_cast<int64_t>(iteration_count * token_count));
   return iree_ok_status();
