@@ -33,6 +33,8 @@ typedef enum loom_amdgpu_fp8_decode_plan_flag_bits_e {
   LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_PK_MIN_U16 = 1u << 8,
   LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_PK_MUL_LO_U16 = 1u << 9,
   LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_BFI_B32_SRC0_LITERAL = 1u << 10,
+  LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_PK_ADD_U16 = 1u << 11,
+  LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_PK_ASHRREV_I16 = 1u << 12,
 } loom_amdgpu_fp8_decode_plan_flag_bits_t;
 typedef uint32_t loom_amdgpu_fp8_decode_plan_flags_t;
 
@@ -109,6 +111,10 @@ typedef struct loom_amdgpu_fp8_decode_plan_t {
   loom_low_lower_resolved_descriptor_t pk_min_u16_descriptor;
   // Packed unsigned 16-bit low-multiply descriptor.
   loom_low_lower_resolved_descriptor_t pk_mul_lo_u16_descriptor;
+  // Packed unsigned 16-bit add descriptor.
+  loom_low_lower_resolved_descriptor_t pk_add_u16_descriptor;
+  // Packed signed 16-bit arithmetic-right-shift descriptor.
+  loom_low_lower_resolved_descriptor_t pk_ashrrev_i16_descriptor;
   // Bitfield insert descriptor with an inline mask operand.
   loom_low_lower_resolved_descriptor_t bfi_b32_src0_literal_descriptor;
 } loom_amdgpu_fp8_decode_plan_t;
