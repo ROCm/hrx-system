@@ -552,8 +552,8 @@ _KERNEL_CASES = [
         "target_name": "ideogram4_attention_row_stats_bf16_f32_wmma_zero_1024_shape",
     },
     {
-        "actual_case": "@id4_ideogram4_attention_online_chunk128_bf16_bf16_wmma_small_case",
-        "benchmark": "@id4_ideogram4_attention_online_chunk128_bf16_bf16_wmma_small",
+        "actual_case": "@id4_ideogram4_attention_online_bf16_bf16_wmma_small_case",
+        "benchmark": "@id4_ideogram4_attention_online_bf16_bf16_wmma_small",
         "configs": [
             "--config=id4.ideogram4.attention_online_wmma.valid_token_count=16",
             "--config=id4.ideogram4.attention_online_wmma.padded_token_count=16",
@@ -563,11 +563,11 @@ _KERNEL_CASES = [
             "--config=id4.ideogram4.attention_online_wmma.head_size=256",
         ],
         "source": "ideogram4/attention_online_bf16_wmma.loom",
-        "target_name": "ideogram4_attention_online_chunk128_bf16_bf16_wmma_small",
+        "target_name": "ideogram4_attention_online_bf16_bf16_wmma_small",
     },
     {
-        "actual_case": "@id4_ideogram4_attention_online_chunk128_bf16_bf16_wmma_zero_1024_shape_case",
-        "benchmark": "@id4_ideogram4_attention_online_chunk128_bf16_bf16_wmma_zero_1024_shape",
+        "actual_case": "@id4_ideogram4_attention_online_bf16_bf16_wmma_zero_1024_shape_case",
+        "benchmark": "@id4_ideogram4_attention_online_bf16_bf16_wmma_zero_1024_shape",
         "configs": [
             "--config=id4.ideogram4.attention_online_wmma.valid_token_count=4096",
             "--config=id4.ideogram4.attention_online_wmma.padded_token_count=4096",
@@ -577,7 +577,7 @@ _KERNEL_CASES = [
             "--config=id4.ideogram4.attention_online_wmma.head_size=256",
         ],
         "source": "ideogram4/attention_online_bf16_wmma.loom",
-        "target_name": "ideogram4_attention_online_chunk128_bf16_bf16_wmma_zero_1024_shape",
+        "target_name": "ideogram4_attention_online_bf16_bf16_wmma_zero_1024_shape",
     },
     {
         "actual_case": "@id4_ideogram4_attention_softmax_f32_bf16_small_case",

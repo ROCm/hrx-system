@@ -1102,10 +1102,10 @@ iree_native_test(
 
 iree_native_test(
   NAME
-    "ideogram4_attention_online_chunk128_bf16_bf16_wmma_small_plan_test"
+    "ideogram4_attention_online_bf16_bf16_wmma_small_plan_test"
   ARGS
     "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/attention_online_bf16_wmma.loom}}"
-    "--benchmark=@id4_ideogram4_attention_online_chunk128_bf16_bf16_wmma_small"
+    "--benchmark=@id4_ideogram4_attention_online_bf16_bf16_wmma_small"
     "--dry-run"
     "--output-format=jsonl"
     "--config=id4.ideogram4.attention_online_wmma.valid_token_count=16"
@@ -1122,10 +1122,10 @@ iree_native_test(
 
 iree_native_test(
   NAME
-    "ideogram4_attention_online_chunk128_bf16_bf16_wmma_zero_1024_shape_plan_test"
+    "ideogram4_attention_online_bf16_bf16_wmma_zero_1024_shape_plan_test"
   ARGS
     "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/attention_online_bf16_wmma.loom}}"
-    "--benchmark=@id4_ideogram4_attention_online_chunk128_bf16_bf16_wmma_zero_1024_shape"
+    "--benchmark=@id4_ideogram4_attention_online_bf16_bf16_wmma_zero_1024_shape"
     "--dry-run"
     "--output-format=jsonl"
     "--config=id4.ideogram4.attention_online_wmma.valid_token_count=4096"
@@ -10384,10 +10384,10 @@ endif()
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
 iree_native_test(
   NAME
-    "ideogram4_attention_online_chunk128_bf16_bf16_wmma_small_hal_test"
+    "ideogram4_attention_online_bf16_bf16_wmma_small_hal_test"
   ARGS
     "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/attention_online_bf16_wmma.loom}}"
-    "--case=@id4_ideogram4_attention_online_chunk128_bf16_bf16_wmma_small_case"
+    "--case=@id4_ideogram4_attention_online_bf16_bf16_wmma_small_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.attention_online_wmma.valid_token_count=16"
     "--config=id4.ideogram4.attention_online_wmma.padded_token_count=16"
@@ -10408,10 +10408,10 @@ endif()
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
 iree_native_test(
   NAME
-    "ideogram4_attention_online_chunk128_bf16_bf16_wmma_zero_1024_shape_hal_test"
+    "ideogram4_attention_online_bf16_bf16_wmma_zero_1024_shape_hal_test"
   ARGS
     "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/attention_online_bf16_wmma.loom}}"
-    "--case=@id4_ideogram4_attention_online_chunk128_bf16_bf16_wmma_zero_1024_shape_case"
+    "--case=@id4_ideogram4_attention_online_bf16_bf16_wmma_zero_1024_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.attention_online_wmma.valid_token_count=4096"
     "--config=id4.ideogram4.attention_online_wmma.padded_token_count=4096"

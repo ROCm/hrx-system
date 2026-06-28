@@ -12,18 +12,18 @@ config.decl @id4.ideogram4.attention_online_wmma.attention_head_count : %value: 
 
 config.decl @id4.ideogram4.attention_online_wmma.head_size : %value: index where [range(%value, 256, 256)]
 
-kernel.def target(@id4_gfx1100) export("id4_ideogram4_attention_online_chunk128_bf16_bf16_wmma") @id4_ideogram4_attention_online_chunk128_bf16_bf16_wmma() {
+kernel.def target(@id4_gfx1100) export("id4_ideogram4_attention_online_bf16_bf16_wmma") @id4_ideogram4_attention_online_bf16_bf16_wmma() {
   %unit = index.constant 1 : index
-  %two = index.constant 2 : index
   %sixteen = index.constant 16 : index
   %workgroup_size_x = index.constant 32 : index
   %query_block_token_count = config.get @id4.ideogram4.attention_online_wmma.query_block_token_count : index
   %attention_head_count = config.get @id4.ideogram4.attention_online_wmma.attention_head_count : index
   %query_tile_count = index.div %query_block_token_count, %sixteen : index
-  kernel.launch.config workgroups(%query_tile_count, %attention_head_count, %two) workgroup_size(%workgroup_size_x, %unit, %unit) : index
+  kernel.launch.config workgroups(%query_tile_count, %attention_head_count, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
 } launch(%query: buffer, %key: buffer, %value: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %probability_scratch_bytes = index.constant 512 : offset
+  %accumulator_scratch_bytes = index.constant 16384 : offset
   %zero = index.constant 0 : index
   %one = index.constant 1 : index
   %eight = index.constant 8 : index
@@ -37,7 +37,6 @@ kernel.def target(@id4_gfx1100) export("id4_ideogram4_attention_online_chunk128_
   %one_twenty_eight = index.constant 128 : index
   %query_tile = kernel.workgroup.id<x> : index
   %query_head = kernel.workgroup.id<y> : index
-  %head_chunk = kernel.workgroup.id<z> : index
   %lane = kernel.workitem.id<x> : index
   %lane_column = index.rem %lane, %sixteen : index
   %lane_group = index.div %lane, %sixteen : index
@@ -49,8 +48,7 @@ kernel.def target(@id4_gfx1100) export("id4_ideogram4_attention_online_chunk128_
   %head_size = config.get @id4.ideogram4.attention_online_wmma.head_size : index
   %hidden_size = index.mul %attention_head_count, %head_size : index
   %head_base = index.mul %query_head, %head_size : index
-  %head_chunk_offset = index.mul %head_chunk, %one_twenty_eight : index
-  %value_base = index.add %head_base, %head_chunk_offset : index
+  %value_base = index.add %head_base, %zero : index
   %local_query_origin = index.mul %query_tile, %sixteen : index
   %query_origin = index.add %query_block_offset, %local_query_origin : index
   %key_tile_count = index.div %padded_token_count, %sixteen : index
@@ -83,8 +81,43 @@ kernel.def target(@id4_gfx1100) export("id4_ideogram4_attention_online_chunk128_
   %output_view = buffer.view %output_aligned[%base] : buffer -> view<[%padded_token_count]x[%hidden_size]xbf16, #dense>
   %probability_scratch = buffer.alloca %probability_scratch_bytes {base_alignment = 16, memory_space = workgroup} : buffer
   %probability_scratch_view = buffer.view %probability_scratch[%base] : buffer -> view<16x16xbf16, #dense>
+  %accumulator_scratch = buffer.alloca %accumulator_scratch_bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %accumulator_scratch_view = buffer.view %accumulator_scratch[%base] : buffer -> view<16x256xf32, #dense>
   %init = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
-  %final_max_even, %final_sum_even, %final_max_odd, %final_sum_odd, %result0, %result1, %result2, %result3, %result4, %result5, %result6, %result7 = scf.for %key_tile = [%zero to %key_tile_count step %one](%current_max_even = %negative_vector : vector<8xf32>, %current_sum_even = %zero_vector : vector<8xf32>, %current_max_odd = %negative_vector : vector<8xf32>, %current_sum_odd = %zero_vector : vector<8xf32>, %acc0 = %init : vector<8xf32>, %acc1 = %init : vector<8xf32>, %acc2 = %init : vector<8xf32>, %acc3 = %init : vector<8xf32>, %acc4 = %init : vector<8xf32>, %acc5 = %init : vector<8xf32>, %acc6 = %init : vector<8xf32>, %acc7 = %init : vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
+  %scratch_channel0 = index.add %zero, %zero : index
+  %scratch_channel1 = index.add %scratch_channel0, %sixteen : index
+  %scratch_channel2 = index.add %scratch_channel1, %sixteen : index
+  %scratch_channel3 = index.add %scratch_channel2, %sixteen : index
+  %scratch_channel4 = index.add %scratch_channel3, %sixteen : index
+  %scratch_channel5 = index.add %scratch_channel4, %sixteen : index
+  %scratch_channel6 = index.add %scratch_channel5, %sixteen : index
+  %scratch_channel7 = index.add %scratch_channel6, %sixteen : index
+  %scratch_channel8 = index.add %scratch_channel7, %sixteen : index
+  %scratch_channel9 = index.add %scratch_channel8, %sixteen : index
+  %scratch_channel10 = index.add %scratch_channel9, %sixteen : index
+  %scratch_channel11 = index.add %scratch_channel10, %sixteen : index
+  %scratch_channel12 = index.add %scratch_channel11, %sixteen : index
+  %scratch_channel13 = index.add %scratch_channel12, %sixteen : index
+  %scratch_channel14 = index.add %scratch_channel13, %sixteen : index
+  %scratch_channel15 = index.add %scratch_channel14, %sixteen : index
+  vector.fragment.store<result> %init, %accumulator_scratch_view[%zero, %scratch_channel0] shape [%m, %n] : vector<8xf32>, view<16x256xf32, #dense>
+  vector.fragment.store<result> %init, %accumulator_scratch_view[%zero, %scratch_channel1] shape [%m, %n] : vector<8xf32>, view<16x256xf32, #dense>
+  vector.fragment.store<result> %init, %accumulator_scratch_view[%zero, %scratch_channel2] shape [%m, %n] : vector<8xf32>, view<16x256xf32, #dense>
+  vector.fragment.store<result> %init, %accumulator_scratch_view[%zero, %scratch_channel3] shape [%m, %n] : vector<8xf32>, view<16x256xf32, #dense>
+  vector.fragment.store<result> %init, %accumulator_scratch_view[%zero, %scratch_channel4] shape [%m, %n] : vector<8xf32>, view<16x256xf32, #dense>
+  vector.fragment.store<result> %init, %accumulator_scratch_view[%zero, %scratch_channel5] shape [%m, %n] : vector<8xf32>, view<16x256xf32, #dense>
+  vector.fragment.store<result> %init, %accumulator_scratch_view[%zero, %scratch_channel6] shape [%m, %n] : vector<8xf32>, view<16x256xf32, #dense>
+  vector.fragment.store<result> %init, %accumulator_scratch_view[%zero, %scratch_channel7] shape [%m, %n] : vector<8xf32>, view<16x256xf32, #dense>
+  vector.fragment.store<result> %init, %accumulator_scratch_view[%zero, %scratch_channel8] shape [%m, %n] : vector<8xf32>, view<16x256xf32, #dense>
+  vector.fragment.store<result> %init, %accumulator_scratch_view[%zero, %scratch_channel9] shape [%m, %n] : vector<8xf32>, view<16x256xf32, #dense>
+  vector.fragment.store<result> %init, %accumulator_scratch_view[%zero, %scratch_channel10] shape [%m, %n] : vector<8xf32>, view<16x256xf32, #dense>
+  vector.fragment.store<result> %init, %accumulator_scratch_view[%zero, %scratch_channel11] shape [%m, %n] : vector<8xf32>, view<16x256xf32, #dense>
+  vector.fragment.store<result> %init, %accumulator_scratch_view[%zero, %scratch_channel12] shape [%m, %n] : vector<8xf32>, view<16x256xf32, #dense>
+  vector.fragment.store<result> %init, %accumulator_scratch_view[%zero, %scratch_channel13] shape [%m, %n] : vector<8xf32>, view<16x256xf32, #dense>
+  vector.fragment.store<result> %init, %accumulator_scratch_view[%zero, %scratch_channel14] shape [%m, %n] : vector<8xf32>, view<16x256xf32, #dense>
+  vector.fragment.store<result> %init, %accumulator_scratch_view[%zero, %scratch_channel15] shape [%m, %n] : vector<8xf32>, view<16x256xf32, #dense>
+  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  %final_max_even, %final_sum_even, %final_max_odd, %final_sum_odd = scf.for %key_tile = [%zero to %key_tile_count step %one](%current_max_even = %negative_vector : vector<8xf32>, %current_sum_even = %zero_vector : vector<8xf32>, %current_max_odd = %negative_vector : vector<8xf32>, %current_sum_odd = %zero_vector : vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
     %key_origin = index.mul %key_tile, %sixteen : index
     %key_token = index.add %key_origin, %lane_column : index
     %key_valid = index.cmp ult, %key_token, %valid_token_count : index
@@ -164,6 +197,14 @@ kernel.def target(@id4_gfx1100) export("id4_ideogram4_attention_online_chunk128_
     %channel5 = index.add %value_base, %eighty : index
     %channel6 = index.add %value_base, %ninety_six : index
     %channel7 = index.add %value_base, %one_twelve : index
+    %channel8 = index.add %value_base, %one_twenty_eight : index
+    %channel9 = index.add %channel8, %sixteen : index
+    %channel10 = index.add %channel9, %sixteen : index
+    %channel11 = index.add %channel10, %sixteen : index
+    %channel12 = index.add %channel11, %sixteen : index
+    %channel13 = index.add %channel12, %sixteen : index
+    %channel14 = index.add %channel13, %sixteen : index
+    %channel15 = index.add %channel14, %sixteen : index
     %rhs0 = vector.fragment.load<rhs> %value_view[%key_origin, %channel0] shape [%k, %n] : view<[%padded_token_count]x[%hidden_size]xbf16, %value_layout> -> vector<16xbf16>
     %rhs1 = vector.fragment.load<rhs> %value_view[%key_origin, %channel1] shape [%k, %n] : view<[%padded_token_count]x[%hidden_size]xbf16, %value_layout> -> vector<16xbf16>
     %rhs2 = vector.fragment.load<rhs> %value_view[%key_origin, %channel2] shape [%k, %n] : view<[%padded_token_count]x[%hidden_size]xbf16, %value_layout> -> vector<16xbf16>
@@ -172,6 +213,14 @@ kernel.def target(@id4_gfx1100) export("id4_ideogram4_attention_online_chunk128_
     %rhs5 = vector.fragment.load<rhs> %value_view[%key_origin, %channel5] shape [%k, %n] : view<[%padded_token_count]x[%hidden_size]xbf16, %value_layout> -> vector<16xbf16>
     %rhs6 = vector.fragment.load<rhs> %value_view[%key_origin, %channel6] shape [%k, %n] : view<[%padded_token_count]x[%hidden_size]xbf16, %value_layout> -> vector<16xbf16>
     %rhs7 = vector.fragment.load<rhs> %value_view[%key_origin, %channel7] shape [%k, %n] : view<[%padded_token_count]x[%hidden_size]xbf16, %value_layout> -> vector<16xbf16>
+    %rhs8 = vector.fragment.load<rhs> %value_view[%key_origin, %channel8] shape [%k, %n] : view<[%padded_token_count]x[%hidden_size]xbf16, %value_layout> -> vector<16xbf16>
+    %rhs9 = vector.fragment.load<rhs> %value_view[%key_origin, %channel9] shape [%k, %n] : view<[%padded_token_count]x[%hidden_size]xbf16, %value_layout> -> vector<16xbf16>
+    %rhs10 = vector.fragment.load<rhs> %value_view[%key_origin, %channel10] shape [%k, %n] : view<[%padded_token_count]x[%hidden_size]xbf16, %value_layout> -> vector<16xbf16>
+    %rhs11 = vector.fragment.load<rhs> %value_view[%key_origin, %channel11] shape [%k, %n] : view<[%padded_token_count]x[%hidden_size]xbf16, %value_layout> -> vector<16xbf16>
+    %rhs12 = vector.fragment.load<rhs> %value_view[%key_origin, %channel12] shape [%k, %n] : view<[%padded_token_count]x[%hidden_size]xbf16, %value_layout> -> vector<16xbf16>
+    %rhs13 = vector.fragment.load<rhs> %value_view[%key_origin, %channel13] shape [%k, %n] : view<[%padded_token_count]x[%hidden_size]xbf16, %value_layout> -> vector<16xbf16>
+    %rhs14 = vector.fragment.load<rhs> %value_view[%key_origin, %channel14] shape [%k, %n] : view<[%padded_token_count]x[%hidden_size]xbf16, %value_layout> -> vector<16xbf16>
+    %rhs15 = vector.fragment.load<rhs> %value_view[%key_origin, %channel15] shape [%k, %n] : view<[%padded_token_count]x[%hidden_size]xbf16, %value_layout> -> vector<16xbf16>
     %tile0 = vector.mma %probability_lhs, %rhs0, %init : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
     %tile1 = vector.mma %probability_lhs, %rhs1, %init : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
     %tile2 = vector.mma %probability_lhs, %rhs2, %init : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
@@ -180,6 +229,30 @@ kernel.def target(@id4_gfx1100) export("id4_ideogram4_attention_online_chunk128_
     %tile5 = vector.mma %probability_lhs, %rhs5, %init : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
     %tile6 = vector.mma %probability_lhs, %rhs6, %init : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
     %tile7 = vector.mma %probability_lhs, %rhs7, %init : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %tile8 = vector.mma %probability_lhs, %rhs8, %init : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %tile9 = vector.mma %probability_lhs, %rhs9, %init : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %tile10 = vector.mma %probability_lhs, %rhs10, %init : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %tile11 = vector.mma %probability_lhs, %rhs11, %init : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %tile12 = vector.mma %probability_lhs, %rhs12, %init : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %tile13 = vector.mma %probability_lhs, %rhs13, %init : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %tile14 = vector.mma %probability_lhs, %rhs14, %init : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %tile15 = vector.mma %probability_lhs, %rhs15, %init : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %acc0 = vector.fragment.load<init> %accumulator_scratch_view[%zero, %scratch_channel0] shape [%m, %n] : view<16x256xf32, #dense> -> vector<8xf32>
+    %acc1 = vector.fragment.load<init> %accumulator_scratch_view[%zero, %scratch_channel1] shape [%m, %n] : view<16x256xf32, #dense> -> vector<8xf32>
+    %acc2 = vector.fragment.load<init> %accumulator_scratch_view[%zero, %scratch_channel2] shape [%m, %n] : view<16x256xf32, #dense> -> vector<8xf32>
+    %acc3 = vector.fragment.load<init> %accumulator_scratch_view[%zero, %scratch_channel3] shape [%m, %n] : view<16x256xf32, #dense> -> vector<8xf32>
+    %acc4 = vector.fragment.load<init> %accumulator_scratch_view[%zero, %scratch_channel4] shape [%m, %n] : view<16x256xf32, #dense> -> vector<8xf32>
+    %acc5 = vector.fragment.load<init> %accumulator_scratch_view[%zero, %scratch_channel5] shape [%m, %n] : view<16x256xf32, #dense> -> vector<8xf32>
+    %acc6 = vector.fragment.load<init> %accumulator_scratch_view[%zero, %scratch_channel6] shape [%m, %n] : view<16x256xf32, #dense> -> vector<8xf32>
+    %acc7 = vector.fragment.load<init> %accumulator_scratch_view[%zero, %scratch_channel7] shape [%m, %n] : view<16x256xf32, #dense> -> vector<8xf32>
+    %acc8 = vector.fragment.load<init> %accumulator_scratch_view[%zero, %scratch_channel8] shape [%m, %n] : view<16x256xf32, #dense> -> vector<8xf32>
+    %acc9 = vector.fragment.load<init> %accumulator_scratch_view[%zero, %scratch_channel9] shape [%m, %n] : view<16x256xf32, #dense> -> vector<8xf32>
+    %acc10 = vector.fragment.load<init> %accumulator_scratch_view[%zero, %scratch_channel10] shape [%m, %n] : view<16x256xf32, #dense> -> vector<8xf32>
+    %acc11 = vector.fragment.load<init> %accumulator_scratch_view[%zero, %scratch_channel11] shape [%m, %n] : view<16x256xf32, #dense> -> vector<8xf32>
+    %acc12 = vector.fragment.load<init> %accumulator_scratch_view[%zero, %scratch_channel12] shape [%m, %n] : view<16x256xf32, #dense> -> vector<8xf32>
+    %acc13 = vector.fragment.load<init> %accumulator_scratch_view[%zero, %scratch_channel13] shape [%m, %n] : view<16x256xf32, #dense> -> vector<8xf32>
+    %acc14 = vector.fragment.load<init> %accumulator_scratch_view[%zero, %scratch_channel14] shape [%m, %n] : view<16x256xf32, #dense> -> vector<8xf32>
+    %acc15 = vector.fragment.load<init> %accumulator_scratch_view[%zero, %scratch_channel15] shape [%m, %n] : view<16x256xf32, #dense> -> vector<8xf32>
     %scaled_acc0 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %acc0, %selected_old_scale : vector<8xf32>
     %scaled_acc1 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %acc1, %selected_old_scale : vector<8xf32>
     %scaled_acc2 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %acc2, %selected_old_scale : vector<8xf32>
@@ -188,6 +261,14 @@ kernel.def target(@id4_gfx1100) export("id4_ideogram4_attention_online_chunk128_
     %scaled_acc5 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %acc5, %selected_old_scale : vector<8xf32>
     %scaled_acc6 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %acc6, %selected_old_scale : vector<8xf32>
     %scaled_acc7 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %acc7, %selected_old_scale : vector<8xf32>
+    %scaled_acc8 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %acc8, %selected_old_scale : vector<8xf32>
+    %scaled_acc9 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %acc9, %selected_old_scale : vector<8xf32>
+    %scaled_acc10 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %acc10, %selected_old_scale : vector<8xf32>
+    %scaled_acc11 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %acc11, %selected_old_scale : vector<8xf32>
+    %scaled_acc12 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %acc12, %selected_old_scale : vector<8xf32>
+    %scaled_acc13 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %acc13, %selected_old_scale : vector<8xf32>
+    %scaled_acc14 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %acc14, %selected_old_scale : vector<8xf32>
+    %scaled_acc15 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %acc15, %selected_old_scale : vector<8xf32>
     %next0 = vector.addf<reassoc|nnan|ninf|nsz> %scaled_acc0, %tile0 : vector<8xf32>
     %next1 = vector.addf<reassoc|nnan|ninf|nsz> %scaled_acc1, %tile1 : vector<8xf32>
     %next2 = vector.addf<reassoc|nnan|ninf|nsz> %scaled_acc2, %tile2 : vector<8xf32>
@@ -196,14 +277,54 @@ kernel.def target(@id4_gfx1100) export("id4_ideogram4_attention_online_chunk128_
     %next5 = vector.addf<reassoc|nnan|ninf|nsz> %scaled_acc5, %tile5 : vector<8xf32>
     %next6 = vector.addf<reassoc|nnan|ninf|nsz> %scaled_acc6, %tile6 : vector<8xf32>
     %next7 = vector.addf<reassoc|nnan|ninf|nsz> %scaled_acc7, %tile7 : vector<8xf32>
+    %next8 = vector.addf<reassoc|nnan|ninf|nsz> %scaled_acc8, %tile8 : vector<8xf32>
+    %next9 = vector.addf<reassoc|nnan|ninf|nsz> %scaled_acc9, %tile9 : vector<8xf32>
+    %next10 = vector.addf<reassoc|nnan|ninf|nsz> %scaled_acc10, %tile10 : vector<8xf32>
+    %next11 = vector.addf<reassoc|nnan|ninf|nsz> %scaled_acc11, %tile11 : vector<8xf32>
+    %next12 = vector.addf<reassoc|nnan|ninf|nsz> %scaled_acc12, %tile12 : vector<8xf32>
+    %next13 = vector.addf<reassoc|nnan|ninf|nsz> %scaled_acc13, %tile13 : vector<8xf32>
+    %next14 = vector.addf<reassoc|nnan|ninf|nsz> %scaled_acc14, %tile14 : vector<8xf32>
+    %next15 = vector.addf<reassoc|nnan|ninf|nsz> %scaled_acc15, %tile15 : vector<8xf32>
+    vector.fragment.store<result> %next0, %accumulator_scratch_view[%zero, %scratch_channel0] shape [%m, %n] : vector<8xf32>, view<16x256xf32, #dense>
+    vector.fragment.store<result> %next1, %accumulator_scratch_view[%zero, %scratch_channel1] shape [%m, %n] : vector<8xf32>, view<16x256xf32, #dense>
+    vector.fragment.store<result> %next2, %accumulator_scratch_view[%zero, %scratch_channel2] shape [%m, %n] : vector<8xf32>, view<16x256xf32, #dense>
+    vector.fragment.store<result> %next3, %accumulator_scratch_view[%zero, %scratch_channel3] shape [%m, %n] : vector<8xf32>, view<16x256xf32, #dense>
+    vector.fragment.store<result> %next4, %accumulator_scratch_view[%zero, %scratch_channel4] shape [%m, %n] : vector<8xf32>, view<16x256xf32, #dense>
+    vector.fragment.store<result> %next5, %accumulator_scratch_view[%zero, %scratch_channel5] shape [%m, %n] : vector<8xf32>, view<16x256xf32, #dense>
+    vector.fragment.store<result> %next6, %accumulator_scratch_view[%zero, %scratch_channel6] shape [%m, %n] : vector<8xf32>, view<16x256xf32, #dense>
+    vector.fragment.store<result> %next7, %accumulator_scratch_view[%zero, %scratch_channel7] shape [%m, %n] : vector<8xf32>, view<16x256xf32, #dense>
+    vector.fragment.store<result> %next8, %accumulator_scratch_view[%zero, %scratch_channel8] shape [%m, %n] : vector<8xf32>, view<16x256xf32, #dense>
+    vector.fragment.store<result> %next9, %accumulator_scratch_view[%zero, %scratch_channel9] shape [%m, %n] : vector<8xf32>, view<16x256xf32, #dense>
+    vector.fragment.store<result> %next10, %accumulator_scratch_view[%zero, %scratch_channel10] shape [%m, %n] : vector<8xf32>, view<16x256xf32, #dense>
+    vector.fragment.store<result> %next11, %accumulator_scratch_view[%zero, %scratch_channel11] shape [%m, %n] : vector<8xf32>, view<16x256xf32, #dense>
+    vector.fragment.store<result> %next12, %accumulator_scratch_view[%zero, %scratch_channel12] shape [%m, %n] : vector<8xf32>, view<16x256xf32, #dense>
+    vector.fragment.store<result> %next13, %accumulator_scratch_view[%zero, %scratch_channel13] shape [%m, %n] : vector<8xf32>, view<16x256xf32, #dense>
+    vector.fragment.store<result> %next14, %accumulator_scratch_view[%zero, %scratch_channel14] shape [%m, %n] : vector<8xf32>, view<16x256xf32, #dense>
+    vector.fragment.store<result> %next15, %accumulator_scratch_view[%zero, %scratch_channel15] shape [%m, %n] : vector<8xf32>, view<16x256xf32, #dense>
     kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
-    scf.yield %next_max_even, %next_sum_even, %next_max_odd, %next_sum_odd, %next0, %next1, %next2, %next3, %next4, %next5, %next6, %next7 : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>
+    scf.yield %next_max_even, %next_sum_even, %next_max_odd, %next_sum_odd : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>
   }
   %selected_final_sum = scf.if %lane_group_even -> (vector<8xf32>) {
     scf.yield %final_sum_even : vector<8xf32>
   } else {
     scf.yield %final_sum_odd : vector<8xf32>
   }
+  %result0 = vector.fragment.load<init> %accumulator_scratch_view[%zero, %scratch_channel0] shape [%m, %n] : view<16x256xf32, #dense> -> vector<8xf32>
+  %result1 = vector.fragment.load<init> %accumulator_scratch_view[%zero, %scratch_channel1] shape [%m, %n] : view<16x256xf32, #dense> -> vector<8xf32>
+  %result2 = vector.fragment.load<init> %accumulator_scratch_view[%zero, %scratch_channel2] shape [%m, %n] : view<16x256xf32, #dense> -> vector<8xf32>
+  %result3 = vector.fragment.load<init> %accumulator_scratch_view[%zero, %scratch_channel3] shape [%m, %n] : view<16x256xf32, #dense> -> vector<8xf32>
+  %result4 = vector.fragment.load<init> %accumulator_scratch_view[%zero, %scratch_channel4] shape [%m, %n] : view<16x256xf32, #dense> -> vector<8xf32>
+  %result5 = vector.fragment.load<init> %accumulator_scratch_view[%zero, %scratch_channel5] shape [%m, %n] : view<16x256xf32, #dense> -> vector<8xf32>
+  %result6 = vector.fragment.load<init> %accumulator_scratch_view[%zero, %scratch_channel6] shape [%m, %n] : view<16x256xf32, #dense> -> vector<8xf32>
+  %result7 = vector.fragment.load<init> %accumulator_scratch_view[%zero, %scratch_channel7] shape [%m, %n] : view<16x256xf32, #dense> -> vector<8xf32>
+  %result8 = vector.fragment.load<init> %accumulator_scratch_view[%zero, %scratch_channel8] shape [%m, %n] : view<16x256xf32, #dense> -> vector<8xf32>
+  %result9 = vector.fragment.load<init> %accumulator_scratch_view[%zero, %scratch_channel9] shape [%m, %n] : view<16x256xf32, #dense> -> vector<8xf32>
+  %result10 = vector.fragment.load<init> %accumulator_scratch_view[%zero, %scratch_channel10] shape [%m, %n] : view<16x256xf32, #dense> -> vector<8xf32>
+  %result11 = vector.fragment.load<init> %accumulator_scratch_view[%zero, %scratch_channel11] shape [%m, %n] : view<16x256xf32, #dense> -> vector<8xf32>
+  %result12 = vector.fragment.load<init> %accumulator_scratch_view[%zero, %scratch_channel12] shape [%m, %n] : view<16x256xf32, #dense> -> vector<8xf32>
+  %result13 = vector.fragment.load<init> %accumulator_scratch_view[%zero, %scratch_channel13] shape [%m, %n] : view<16x256xf32, #dense> -> vector<8xf32>
+  %result14 = vector.fragment.load<init> %accumulator_scratch_view[%zero, %scratch_channel14] shape [%m, %n] : view<16x256xf32, #dense> -> vector<8xf32>
+  %result15 = vector.fragment.load<init> %accumulator_scratch_view[%zero, %scratch_channel15] shape [%m, %n] : view<16x256xf32, #dense> -> vector<8xf32>
   %output0 = vector.divf<nnan|ninf|nsz|arcp> %result0, %selected_final_sum : vector<8xf32>
   %output1 = vector.divf<nnan|ninf|nsz|arcp> %result1, %selected_final_sum : vector<8xf32>
   %output2 = vector.divf<nnan|ninf|nsz|arcp> %result2, %selected_final_sum : vector<8xf32>
@@ -212,6 +333,14 @@ kernel.def target(@id4_gfx1100) export("id4_ideogram4_attention_online_chunk128_
   %output5 = vector.divf<nnan|ninf|nsz|arcp> %result5, %selected_final_sum : vector<8xf32>
   %output6 = vector.divf<nnan|ninf|nsz|arcp> %result6, %selected_final_sum : vector<8xf32>
   %output7 = vector.divf<nnan|ninf|nsz|arcp> %result7, %selected_final_sum : vector<8xf32>
+  %output8 = vector.divf<nnan|ninf|nsz|arcp> %result8, %selected_final_sum : vector<8xf32>
+  %output9 = vector.divf<nnan|ninf|nsz|arcp> %result9, %selected_final_sum : vector<8xf32>
+  %output10 = vector.divf<nnan|ninf|nsz|arcp> %result10, %selected_final_sum : vector<8xf32>
+  %output11 = vector.divf<nnan|ninf|nsz|arcp> %result11, %selected_final_sum : vector<8xf32>
+  %output12 = vector.divf<nnan|ninf|nsz|arcp> %result12, %selected_final_sum : vector<8xf32>
+  %output13 = vector.divf<nnan|ninf|nsz|arcp> %result13, %selected_final_sum : vector<8xf32>
+  %output14 = vector.divf<nnan|ninf|nsz|arcp> %result14, %selected_final_sum : vector<8xf32>
+  %output15 = vector.divf<nnan|ninf|nsz|arcp> %result15, %selected_final_sum : vector<8xf32>
   %channel0 = index.add %value_base, %zero : index
   %channel1 = index.add %value_base, %sixteen : index
   %channel2 = index.add %value_base, %thirty_two : index
@@ -220,6 +349,14 @@ kernel.def target(@id4_gfx1100) export("id4_ideogram4_attention_online_chunk128_
   %channel5 = index.add %value_base, %eighty : index
   %channel6 = index.add %value_base, %ninety_six : index
   %channel7 = index.add %value_base, %one_twelve : index
+  %channel8 = index.add %value_base, %one_twenty_eight : index
+  %channel9 = index.add %channel8, %sixteen : index
+  %channel10 = index.add %channel9, %sixteen : index
+  %channel11 = index.add %channel10, %sixteen : index
+  %channel12 = index.add %channel11, %sixteen : index
+  %channel13 = index.add %channel12, %sixteen : index
+  %channel14 = index.add %channel13, %sixteen : index
+  %channel15 = index.add %channel14, %sixteen : index
   vector.fragment.store<result> %output0, %output_view[%query_origin, %channel0] shape [%m, %n] : vector<8xf32>, view<[%padded_token_count]x[%hidden_size]xbf16, #dense>
   vector.fragment.store<result> %output1, %output_view[%query_origin, %channel1] shape [%m, %n] : vector<8xf32>, view<[%padded_token_count]x[%hidden_size]xbf16, #dense>
   vector.fragment.store<result> %output2, %output_view[%query_origin, %channel2] shape [%m, %n] : vector<8xf32>, view<[%padded_token_count]x[%hidden_size]xbf16, #dense>
@@ -228,31 +365,39 @@ kernel.def target(@id4_gfx1100) export("id4_ideogram4_attention_online_chunk128_
   vector.fragment.store<result> %output5, %output_view[%query_origin, %channel5] shape [%m, %n] : vector<8xf32>, view<[%padded_token_count]x[%hidden_size]xbf16, #dense>
   vector.fragment.store<result> %output6, %output_view[%query_origin, %channel6] shape [%m, %n] : vector<8xf32>, view<[%padded_token_count]x[%hidden_size]xbf16, #dense>
   vector.fragment.store<result> %output7, %output_view[%query_origin, %channel7] shape [%m, %n] : vector<8xf32>, view<[%padded_token_count]x[%hidden_size]xbf16, #dense>
+  vector.fragment.store<result> %output8, %output_view[%query_origin, %channel8] shape [%m, %n] : vector<8xf32>, view<[%padded_token_count]x[%hidden_size]xbf16, #dense>
+  vector.fragment.store<result> %output9, %output_view[%query_origin, %channel9] shape [%m, %n] : vector<8xf32>, view<[%padded_token_count]x[%hidden_size]xbf16, #dense>
+  vector.fragment.store<result> %output10, %output_view[%query_origin, %channel10] shape [%m, %n] : vector<8xf32>, view<[%padded_token_count]x[%hidden_size]xbf16, #dense>
+  vector.fragment.store<result> %output11, %output_view[%query_origin, %channel11] shape [%m, %n] : vector<8xf32>, view<[%padded_token_count]x[%hidden_size]xbf16, #dense>
+  vector.fragment.store<result> %output12, %output_view[%query_origin, %channel12] shape [%m, %n] : vector<8xf32>, view<[%padded_token_count]x[%hidden_size]xbf16, #dense>
+  vector.fragment.store<result> %output13, %output_view[%query_origin, %channel13] shape [%m, %n] : vector<8xf32>, view<[%padded_token_count]x[%hidden_size]xbf16, #dense>
+  vector.fragment.store<result> %output14, %output_view[%query_origin, %channel14] shape [%m, %n] : vector<8xf32>, view<[%padded_token_count]x[%hidden_size]xbf16, #dense>
+  vector.fragment.store<result> %output15, %output_view[%query_origin, %channel15] shape [%m, %n] : vector<8xf32>, view<[%padded_token_count]x[%hidden_size]xbf16, #dense>
   kernel.return
 }
 
-check.case public @id4_ideogram4_attention_online_chunk128_bf16_bf16_wmma_small_case {
+check.case public @id4_ideogram4_attention_online_bf16_bf16_wmma_small_case {
   %query = check.generate.fill value(1.0) : tensor<16x512xbf16>
   %key = check.generate.fill value(1.0) : tensor<16x512xbf16>
   %value = check.generate.fill value(2.0) : tensor<16x512xbf16>
   %output = check.generate.fill value(0.0) : tensor<16x512xbf16>
   %expected = check.generate.fill value(2.0) : tensor<16x512xbf16>
-  func.call @id4_ideogram4_attention_online_chunk128_bf16_bf16_wmma(%query, %key, %value, %output) : (tensor<16x512xbf16>, tensor<16x512xbf16>, tensor<16x512xbf16>, tensor<16x512xbf16>)
+  func.call @id4_ideogram4_attention_online_bf16_bf16_wmma(%query, %key, %value, %output) : (tensor<16x512xbf16>, tensor<16x512xbf16>, tensor<16x512xbf16>, tensor<16x512xbf16>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<16x512xbf16>
   check.return
 }
 
-check.case public @id4_ideogram4_attention_online_chunk128_bf16_bf16_wmma_zero_1024_shape_case {
+check.case public @id4_ideogram4_attention_online_bf16_bf16_wmma_zero_1024_shape_case {
   %query = check.generate.fill value(0.0) : tensor<4096x4608xbf16>
   %key = check.generate.fill value(0.0) : tensor<4096x4608xbf16>
   %value = check.generate.fill value(0.0) : tensor<4096x4608xbf16>
   %output = check.generate.fill value(0.0) : tensor<4096x4608xbf16>
   %expected = check.generate.fill value(0.0) : tensor<4096x4608xbf16>
-  func.call @id4_ideogram4_attention_online_chunk128_bf16_bf16_wmma(%query, %key, %value, %output) : (tensor<4096x4608xbf16>, tensor<4096x4608xbf16>, tensor<4096x4608xbf16>, tensor<4096x4608xbf16>)
+  func.call @id4_ideogram4_attention_online_bf16_bf16_wmma(%query, %key, %value, %output) : (tensor<4096x4608xbf16>, tensor<4096x4608xbf16>, tensor<4096x4608xbf16>, tensor<4096x4608xbf16>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<4096x4608xbf16>
   check.return
 }
 
-check.benchmark<@id4_ideogram4_attention_online_chunk128_bf16_bf16_wmma_small_case> @id4_ideogram4_attention_online_chunk128_bf16_bf16_wmma_small
+check.benchmark<@id4_ideogram4_attention_online_bf16_bf16_wmma_small_case> @id4_ideogram4_attention_online_bf16_bf16_wmma_small
 
-check.benchmark<@id4_ideogram4_attention_online_chunk128_bf16_bf16_wmma_zero_1024_shape_case> @id4_ideogram4_attention_online_chunk128_bf16_bf16_wmma_zero_1024_shape
+check.benchmark<@id4_ideogram4_attention_online_bf16_bf16_wmma_zero_1024_shape_case> @id4_ideogram4_attention_online_bf16_bf16_wmma_zero_1024_shape

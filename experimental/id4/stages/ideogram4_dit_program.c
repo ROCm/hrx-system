@@ -3586,7 +3586,7 @@ id4_ideogram4_dit_program_dispatch_attention_online_bf16_bf16_wmma(
   };
   return id4_ideogram4_dit_program_dispatch_loom(
       builder, name, IREE_SV("ideogram4/attention_online_bf16_wmma"),
-      IREE_SV("id4_ideogram4_attention_online_chunk128_bf16_bf16_wmma"),
+      IREE_SV("id4_ideogram4_attention_online_bf16_bf16_wmma"),
       IREE_ARRAYSIZE(config_values), config_bindings, IREE_ARRAYSIZE(bindings),
       bindings);
 }
