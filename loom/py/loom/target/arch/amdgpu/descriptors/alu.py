@@ -4058,6 +4058,58 @@ def _v_cvt_f16_f32_overlay() -> AmdgpuDescriptorOverlay:
     )
 
 
+_PACKED8_SOURCE_SIZE_REASON = "packed8-conversion-reads-byte-lanes-of-b32-source"
+
+
+def _v_cvt_f32_packed8_overlay(source_type: str) -> AmdgpuDescriptorOverlay:
+    return AmdgpuDescriptorOverlay(
+        descriptor_key=f"amdgpu.v_cvt_f32_{source_type}",
+        instruction_name=f"V_CVT_F32_{source_type.upper()}",
+        mnemonic=f"v_cvt_f32_{source_type}",
+        encoding_name="ENC_VOP1",
+        semantic_tag=f"convert.float.{source_type}.f32",
+        schedule_class=_SCHEDULE_VALU,
+        operands=(
+            AmdgpuOperandOverlay("VDST", _vgpr_result()),
+            AmdgpuOperandOverlay(
+                "SRC0",
+                _sgpr_vgpr_operand("input"),
+                size_exception_reason=_PACKED8_SOURCE_SIZE_REASON,
+            ),
+        ),
+        flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    )
+
+
+def _v_cvt_pk_f32_packed8_overlay(source_type: str) -> AmdgpuDescriptorOverlay:
+    return AmdgpuDescriptorOverlay(
+        descriptor_key=f"amdgpu.v_cvt_pk_f32_{source_type}",
+        instruction_name=f"V_CVT_PK_F32_{source_type.upper()}",
+        mnemonic=f"v_cvt_pk_f32_{source_type}",
+        encoding_name="ENC_VOP1",
+        semantic_tag=f"convert.float.{source_type}x2.f32x2",
+        schedule_class=_SCHEDULE_VALU,
+        operands=(
+            AmdgpuOperandOverlay("VDST", _vgpr_result(units=2)),
+            AmdgpuOperandOverlay(
+                "SRC0",
+                _sgpr_vgpr_operand("input"),
+                size_exception_reason=_PACKED8_SOURCE_SIZE_REASON,
+            ),
+        ),
+        flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    )
+
+
+def _v_cvt_f32_packed8_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
+    return (
+        _v_cvt_f32_packed8_overlay("fp8"),
+        _v_cvt_f32_packed8_overlay("bf8"),
+        _v_cvt_pk_f32_packed8_overlay("fp8"),
+        _v_cvt_pk_f32_packed8_overlay("bf8"),
+    )
+
+
 def _v_cvt_pk_u16_u32_overlay() -> AmdgpuDescriptorOverlay:
     return AmdgpuDescriptorOverlay(
         descriptor_key="amdgpu.v_cvt_pk_u16_u32",
@@ -4874,6 +4926,7 @@ __all__ = (
     "_v_cvt_f16_f32_overlay",
     "_v_cvt_f32_f16_overlay",
     "_v_cvt_f32_i32_overlay",
+    "_v_cvt_f32_packed8_overlays",
     "_v_cvt_f32_u32_overlay",
     "_v_cvt_i32_f32_overlay",
     "_v_cvt_pk_bf16_f32_overlay",
