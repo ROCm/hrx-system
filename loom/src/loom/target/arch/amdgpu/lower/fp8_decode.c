@@ -1040,6 +1040,45 @@ bool loom_amdgpu_can_emit_fp8_pair_to_packed_bf16(
          LOOM_AMDGPU_FP8_PACKED_BF16_MISSING_REQUIREMENT_NONE;
 }
 
+loom_amdgpu_fp8_packed_bf16_repairs_t
+loom_amdgpu_fp8_pair_to_packed_bf16_repairs(
+    const loom_amdgpu_fp8_decode_plan_t* plan,
+    loom_amdgpu_fp8_decode_value_flags_t value_flags) {
+  loom_amdgpu_fp8_packed_bf16_repairs_t repairs =
+      LOOM_AMDGPU_FP8_PACKED_BF16_REPAIR_NONE;
+  const bool can_use_normal_path =
+      loom_amdgpu_can_emit_fp8_pair_to_packed_bf16_normal_path(plan,
+                                                               value_flags);
+  const bool can_use_exact_repair =
+      loom_amdgpu_fp8_decode_plan_has_packed_e4m3fn_repair(plan);
+  if (!can_use_normal_path && !can_use_exact_repair) {
+    return repairs;
+  }
+
+  const bool value_non_zero =
+      iree_any_bit_set(value_flags, LOOM_AMDGPU_FP8_DECODE_VALUE_FLAG_NON_ZERO);
+  const bool value_not_subnormal = iree_any_bit_set(
+      value_flags, LOOM_AMDGPU_FP8_DECODE_VALUE_FLAG_NOT_SUBNORMAL);
+  const bool value_not_nan =
+      iree_any_bit_set(value_flags, LOOM_AMDGPU_FP8_DECODE_VALUE_FLAG_NOT_NAN);
+  if (can_use_exact_repair && !can_use_normal_path) {
+    if (!value_not_subnormal) {
+      repairs |= LOOM_AMDGPU_FP8_PACKED_BF16_REPAIR_SUBNORMAL;
+    } else if (!value_non_zero) {
+      repairs |= LOOM_AMDGPU_FP8_PACKED_BF16_REPAIR_ZERO;
+    }
+    if (!value_not_nan) {
+      repairs |= LOOM_AMDGPU_FP8_PACKED_BF16_REPAIR_NAN;
+    }
+    return repairs;
+  }
+
+  if (!value_non_zero) {
+    repairs |= LOOM_AMDGPU_FP8_PACKED_BF16_REPAIR_ZERO;
+  }
+  return repairs;
+}
+
 loom_amdgpu_fp8_packed_bf16_missing_requirements_t
 loom_amdgpu_fp8_pair_to_packed_bf16_missing_requirements(
     const loom_amdgpu_fp8_decode_plan_t* plan,

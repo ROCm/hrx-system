@@ -62,6 +62,14 @@ typedef enum loom_amdgpu_fp8_packed_bf16_missing_requirement_bits_e {
 } loom_amdgpu_fp8_packed_bf16_missing_requirement_bits_t;
 typedef uint32_t loom_amdgpu_fp8_packed_bf16_missing_requirements_t;
 
+typedef enum loom_amdgpu_fp8_packed_bf16_repair_bits_e {
+  LOOM_AMDGPU_FP8_PACKED_BF16_REPAIR_NONE = 0u,
+  LOOM_AMDGPU_FP8_PACKED_BF16_REPAIR_ZERO = 1u << 0,
+  LOOM_AMDGPU_FP8_PACKED_BF16_REPAIR_SUBNORMAL = 1u << 1,
+  LOOM_AMDGPU_FP8_PACKED_BF16_REPAIR_NAN = 1u << 2,
+} loom_amdgpu_fp8_packed_bf16_repair_bits_t;
+typedef uint32_t loom_amdgpu_fp8_packed_bf16_repairs_t;
+
 enum {
   LOOM_AMDGPU_FP8_BF16_BYTE_COUNT = 2u,
   LOOM_AMDGPU_FP8_BF16_BYTE_TABLE_WORD_COUNT = 2u,
@@ -133,6 +141,13 @@ iree_status_t loom_amdgpu_select_fp8_decode_plan(
 // packed FP8-to-BF16 pair decode path.
 loom_amdgpu_fp8_packed_bf16_missing_requirements_t
 loom_amdgpu_fp8_pair_to_packed_bf16_missing_requirements(
+    const loom_amdgpu_fp8_decode_plan_t* plan,
+    loom_amdgpu_fp8_decode_value_flags_t value_flags);
+
+// Returns the special-value repairs emitted by the packed FP8-to-BF16 pair
+// decode path for |plan| and |value_flags|.
+loom_amdgpu_fp8_packed_bf16_repairs_t
+loom_amdgpu_fp8_pair_to_packed_bf16_repairs(
     const loom_amdgpu_fp8_decode_plan_t* plan,
     loom_amdgpu_fp8_decode_value_flags_t value_flags);
 
