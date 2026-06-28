@@ -39,6 +39,72 @@ static iree_status_t id4_tooling_image_dup_cstring(
   return iree_ok_status();
 }
 
+static iree_status_t id4_tooling_image_validate_normalization(
+    id4_tooling_image_normalization_t normalization) {
+  switch (normalization) {
+    case ID4_TOOLING_IMAGE_NORMALIZATION_ZERO_TO_ONE:
+    case ID4_TOOLING_IMAGE_NORMALIZATION_MINUS_ONE_TO_ONE:
+      return iree_ok_status();
+    default:
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "image normalization %d is invalid",
+                              (int)normalization);
+  }
+}
+
+static iree_status_t id4_tooling_image_validate_f32_rgb_tensor(
+    id4_pipeline_tensor_shape_t shape, iree_const_byte_span_t pixels,
+    iree_host_size_t* out_element_count) {
+  IREE_ASSERT_ARGUMENT(out_element_count);
+  *out_element_count = 0;
+  if (shape.rank != 4) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "image tensor must be rank-4 WHCB");
+  }
+  if (shape.dims[0] == 0 || shape.dims[1] == 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "image width and height must be non-zero");
+  }
+  if (shape.dims[2] != 3) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "image tensor channel count must be 3");
+  }
+  if (shape.dims[3] != 1) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "image tensor batch count must be 1");
+  }
+  iree_host_size_t pixel_count = 0;
+  if (!iree_host_size_checked_mul((iree_host_size_t)shape.dims[0],
+                                  (iree_host_size_t)shape.dims[1],
+                                  &pixel_count)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "image pixel count overflowed");
+  }
+  iree_host_size_t element_count = 0;
+  if (!iree_host_size_checked_mul(pixel_count, 3, &element_count)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "image element count overflowed");
+  }
+  iree_host_size_t expected_byte_length = 0;
+  if (!iree_host_size_checked_mul(element_count, sizeof(float),
+                                  &expected_byte_length)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "image tensor byte length overflowed");
+  }
+  if (pixels.data_length != expected_byte_length) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "image tensor byte length %" PRIhsz
+                            " does not match expected %" PRIhsz,
+                            pixels.data_length, expected_byte_length);
+  }
+  if (!pixels.data) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "image tensor bytes are required");
+  }
+  *out_element_count = element_count;
+  return iree_ok_status();
+}
+
 static iree_status_t id4_tooling_image_validate_options(
     const id4_tooling_write_f32_rgb_ppm_options_t* options) {
   if (!options) {
@@ -60,64 +126,15 @@ static iree_status_t id4_tooling_image_validate_options(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "image host allocator is required");
   }
-  if (options->shape.rank != 4) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "image tensor must be rank-4 WHCB");
-  }
-  if (options->shape.dims[0] == 0 || options->shape.dims[1] == 0) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "image width and height must be non-zero");
-  }
-  if (options->shape.dims[2] != 3) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "image tensor channel count must be 3");
-  }
-  if (options->shape.dims[3] != 1) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "image tensor batch count must be 1");
-  }
   if (options->shape.dims[0] > UINT32_MAX ||
       options->shape.dims[1] > UINT32_MAX) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "image dimensions exceed PPM writer limits");
   }
-  iree_host_size_t pixel_count = 0;
-  if (!iree_host_size_checked_mul((iree_host_size_t)options->shape.dims[0],
-                                  (iree_host_size_t)options->shape.dims[1],
-                                  &pixel_count)) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "image pixel count overflowed");
-  }
   iree_host_size_t element_count = 0;
-  if (!iree_host_size_checked_mul(pixel_count, 3, &element_count)) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "image element count overflowed");
-  }
-  iree_host_size_t expected_byte_length = 0;
-  if (!iree_host_size_checked_mul(element_count, sizeof(float),
-                                  &expected_byte_length)) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "image tensor byte length overflowed");
-  }
-  if (options->pixels.data_length != expected_byte_length) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "image tensor byte length %" PRIhsz
-                            " does not match expected %" PRIhsz,
-                            options->pixels.data_length, expected_byte_length);
-  }
-  if (!options->pixels.data) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "image tensor bytes are required");
-  }
-  switch (options->normalization) {
-    case ID4_TOOLING_IMAGE_NORMALIZATION_ZERO_TO_ONE:
-    case ID4_TOOLING_IMAGE_NORMALIZATION_MINUS_ONE_TO_ONE:
-      return iree_ok_status();
-    default:
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "image normalization %d is invalid",
-                              (int)options->normalization);
-  }
+  IREE_RETURN_IF_ERROR(id4_tooling_image_validate_f32_rgb_tensor(
+      options->shape, options->pixels, &element_count));
+  return id4_tooling_image_validate_normalization(options->normalization);
 }
 
 static float id4_tooling_image_normalize(
@@ -189,4 +206,50 @@ iree_status_t id4_tooling_write_f32_rgb_ppm(
                               "failed to close image file (%d)", errno);
   }
   return status;
+}
+
+iree_status_t id4_tooling_validate_f32_rgb_image_contents(
+    const id4_tooling_validate_f32_rgb_image_contents_options_t* options) {
+  if (!options) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "image validation options are required");
+  }
+  IREE_RETURN_IF_ERROR(id4_tooling_image_validate_options_size(
+      options->structure_size, sizeof(*options), IREE_SV("image validation")));
+  if (options->next) {
+    return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                            "image validation extension structures are not "
+                            "supported");
+  }
+  iree_host_size_t element_count = 0;
+  IREE_RETURN_IF_ERROR(id4_tooling_image_validate_f32_rgb_tensor(
+      options->shape, options->pixels, &element_count));
+  IREE_RETURN_IF_ERROR(
+      id4_tooling_image_validate_normalization(options->normalization));
+
+  const float* pixels = (const float*)options->pixels.data;
+  bool saw_nonzero = false;
+  uint8_t quantized_min = UINT8_MAX;
+  uint8_t quantized_max = 0;
+  for (iree_host_size_t i = 0; i < element_count; ++i) {
+    const float value = pixels[i];
+    if (!isfinite(value)) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "image element %" PRIhsz " is not finite", i);
+    }
+    if (value != 0.0f) saw_nonzero = true;
+    const uint8_t quantized = id4_tooling_image_quantize(
+        id4_tooling_image_normalize(value, options->normalization));
+    if (quantized < quantized_min) quantized_min = quantized;
+    if (quantized > quantized_max) quantized_max = quantized;
+  }
+  if (!saw_nonzero) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "image tensor contains only zero values");
+  }
+  if (quantized_min == quantized_max) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "image tensor quantizes to a flat image");
+  }
+  return iree_ok_status();
 }

@@ -42,9 +42,28 @@ typedef struct id4_tooling_write_f32_rgb_ppm_options_t {
   iree_allocator_t host_allocator;
 } id4_tooling_write_f32_rgb_ppm_options_t;
 
+// Options for validating decoded WHCB F32 RGB image contents.
+typedef struct id4_tooling_validate_f32_rgb_image_contents_options_t {
+  // Size of this structure for versioning.
+  iree_host_size_t structure_size;
+  // Extension structure chain; must be NULL for now.
+  const void* next;
+  // WHCB tensor shape. Rank must be 4, C must be 3, and B must be 1.
+  id4_pipeline_tensor_shape_t shape;
+  // Raw F32 tensor bytes in WHCB dense order.
+  iree_const_byte_span_t pixels;
+  // Pixel normalization applied before flat-image detection.
+  id4_tooling_image_normalization_t normalization;
+} id4_tooling_validate_f32_rgb_image_contents_options_t;
+
 // Writes a WHCB F32 RGB tensor as a binary PPM image.
 iree_status_t id4_tooling_write_f32_rgb_ppm(
     const id4_tooling_write_f32_rgb_ppm_options_t* options);
+
+// Validates that a decoded WHCB F32 RGB tensor contains finite, non-flat image
+// data suitable for runner smoke checks.
+iree_status_t id4_tooling_validate_f32_rgb_image_contents(
+    const id4_tooling_validate_f32_rgb_image_contents_options_t* options);
 
 #ifdef __cplusplus
 }  // extern "C"

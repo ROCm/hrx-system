@@ -845,6 +845,17 @@ static iree_status_t id4_cli_write_decoded_image(
     iree_string_view_t output_path,
     id4_ideogram4_generation_plan_summary_t summary,
     iree_const_byte_span_t decoded_image, iree_allocator_t host_allocator) {
+  id4_tooling_validate_f32_rgb_image_contents_options_t validation_options;
+  memset(&validation_options, 0, sizeof(validation_options));
+  validation_options.structure_size = sizeof(validation_options);
+  validation_options.shape =
+      id4_cli_convert_program_shape(summary.decoded_image_shape);
+  validation_options.pixels = decoded_image;
+  validation_options.normalization =
+      ID4_TOOLING_IMAGE_NORMALIZATION_MINUS_ONE_TO_ONE;
+  IREE_RETURN_IF_ERROR(
+      id4_tooling_validate_f32_rgb_image_contents(&validation_options));
+
   id4_tooling_write_f32_rgb_ppm_options_t image_options;
   memset(&image_options, 0, sizeof(image_options));
   image_options.structure_size = sizeof(image_options);

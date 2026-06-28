@@ -35,6 +35,18 @@ static id4_pipeline_tensor_shape_t MakeRgbShape(uint64_t width,
   return shape;
 }
 
+static id4_tooling_validate_f32_rgb_image_contents_options_t
+MakeValidationOptions(id4_pipeline_tensor_shape_t shape,
+                      iree_const_byte_span_t pixels,
+                      id4_tooling_image_normalization_t normalization) {
+  id4_tooling_validate_f32_rgb_image_contents_options_t options = {};
+  options.structure_size = sizeof(options);
+  options.shape = shape;
+  options.pixels = pixels;
+  options.normalization = normalization;
+  return options;
+}
+
 TEST(ImageWriterTest, WritesWhcbF32RgbAsRowMajorBinaryPpm) {
   const float pixels[] = {
       1.0f, 0.0f, 0.0f,  // x0, y0: red
@@ -81,6 +93,52 @@ TEST(ImageWriterTest, NormalizesMinusOneToOneBeforeQuantization) {
       'P', '6', '\n', '1', ' ', '1', '\n', '2', '5', '5', '\n', 0, 128, 255,
   };
   EXPECT_EQ(contents, expected);
+}
+
+TEST(ImageValidationTest, AcceptsFiniteNonFlatPixels) {
+  const float pixels[] = {
+      -1.0f, 0.0f, 1.0f,   // x0, y0
+      0.25f, 0.5f, 0.75f,  // x0, y1
+  };
+
+  const id4_tooling_validate_f32_rgb_image_contents_options_t options =
+      MakeValidationOptions(MakeRgbShape(1, 2),
+                            iree_make_const_byte_span(pixels, sizeof(pixels)),
+                            ID4_TOOLING_IMAGE_NORMALIZATION_MINUS_ONE_TO_ONE);
+  IREE_ASSERT_OK(id4_tooling_validate_f32_rgb_image_contents(&options));
+}
+
+TEST(ImageValidationTest, RejectsOnlyZeroPixels) {
+  const float pixels[] = {0.0f, 0.0f, 0.0f};
+
+  const id4_tooling_validate_f32_rgb_image_contents_options_t options =
+      MakeValidationOptions(MakeRgbShape(1, 1),
+                            iree_make_const_byte_span(pixels, sizeof(pixels)),
+                            ID4_TOOLING_IMAGE_NORMALIZATION_ZERO_TO_ONE);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        id4_tooling_validate_f32_rgb_image_contents(&options));
+}
+
+TEST(ImageValidationTest, RejectsFlatQuantizedPixels) {
+  const float pixels[] = {0.25f, 0.25f, 0.25f};
+
+  const id4_tooling_validate_f32_rgb_image_contents_options_t options =
+      MakeValidationOptions(MakeRgbShape(1, 1),
+                            iree_make_const_byte_span(pixels, sizeof(pixels)),
+                            ID4_TOOLING_IMAGE_NORMALIZATION_ZERO_TO_ONE);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        id4_tooling_validate_f32_rgb_image_contents(&options));
+}
+
+TEST(ImageValidationTest, RejectsNonFinitePixels) {
+  const float pixels[] = {0.0f, 0.0f, NAN};
+
+  const id4_tooling_validate_f32_rgb_image_contents_options_t options =
+      MakeValidationOptions(MakeRgbShape(1, 1),
+                            iree_make_const_byte_span(pixels, sizeof(pixels)),
+                            ID4_TOOLING_IMAGE_NORMALIZATION_ZERO_TO_ONE);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        id4_tooling_validate_f32_rgb_image_contents(&options));
 }
 
 TEST(ImageWriterTest, RejectsNonFinitePixels) {
