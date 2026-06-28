@@ -3019,12 +3019,14 @@ iree_status_t id4_ideogram4_dit_program_author_forward(
       id4_pipeline_program_make_shape_rank1(hidden_size), &timestep_embedding));
 
   if (is_conditioned) {
-    const bool needs_canonical_condition_norm =
+    const bool f32_canonical_activations =
         options->activation_format ==
-            ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_F32_CANONICAL ||
+        ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_F32_CANONICAL;
+    const bool tap_condition_norm =
         id4_ideogram4_dit_program_has_diagnostic_tap(
             options->diagnostic_tap_names,
             IREE_SV("ideogram4.cond.prelude.llm_cond_norm"));
+    const bool needs_canonical_condition_norm = f32_canonical_activations;
     if (needs_canonical_condition_norm) {
       id4_pipeline_program_tensor_t condition_norm =
           id4_pipeline_program_tensor_invalid();
@@ -3055,6 +3057,17 @@ iree_status_t id4_ideogram4_dit_program_author_forward(
               llm_cond_norm_weight, &packed_condition));
       IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_barrier(
           builder, IREE_SV("ideogram4.cond.prelude.after_llm_cond_norm_pack")));
+      if (tap_condition_norm) {
+        const uint32_t padded_text_token_count =
+            id4_ideogram4_dit_program_ceil_div_u32(
+                text_token_count, ID4_IDEOGRAM4_DIT_LINEAR_TOKEN_BLOCK) *
+            ID4_IDEOGRAM4_DIT_LINEAR_TOKEN_BLOCK;
+        IREE_RETURN_IF_ERROR(
+            id4_ideogram4_dit_program_tap_linear_input_bf16_as_f32(
+                builder, IREE_SV("ideogram4.cond.prelude.llm_cond_norm"),
+                text_token_count, padded_text_token_count, llm_feature_count,
+                packed_condition));
+      }
       IREE_RETURN_IF_ERROR(
           id4_ideogram4_dit_program_dispatch_condition_project_packed(
               builder, text_token_count, total_token_count, llm_feature_count,

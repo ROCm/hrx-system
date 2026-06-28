@@ -193,6 +193,29 @@ static bool ProgramTapsTensorWithShape(
   return false;
 }
 
+static bool ProgramTapsTensor(const id4_pipeline_program_t* program,
+                              iree_string_view_t name,
+                              id4_pipeline_program_dtype_t dtype,
+                              id4_pipeline_program_shape_t expected_shape) {
+  for (iree_host_size_t i = 0;
+       i < id4_pipeline_program_operation_count(program); ++i) {
+    const id4_pipeline_program_op_t* operation =
+        id4_pipeline_program_operation_at(program, i);
+    if (!operation || operation->kind != ID4_PIPELINE_PROGRAM_OP_KIND_TAP) {
+      continue;
+    }
+    if (!iree_string_view_equal(operation->payload.tap.name, name)) continue;
+    const id4_pipeline_program_tensor_record_t* tensor =
+        id4_pipeline_program_tensor_at(program,
+                                       operation->payload.tap.tensor.ordinal);
+    if (!tensor) continue;
+    if (tensor->dtype != dtype) continue;
+    if (!ShapeEquals(tensor->shape, expected_shape)) continue;
+    return true;
+  }
+  return false;
+}
+
 static bool ProgramExportsTensorWithShape(
     const id4_pipeline_program_t* program, id4_pipeline_program_dtype_t dtype,
     id4_pipeline_program_shape_t expected_shape) {
@@ -382,6 +405,39 @@ TEST(Ideogram4DitProgram, AuthorsConditionedPreludeSliceContract) {
   id4_pipeline_program_release(program);
 }
 
+TEST(Ideogram4DitProgram, TapsBf16ConditionPreludeWithoutChangingStorage) {
+  id4_pipeline_program_shape_t latent_shape =
+      id4_pipeline_program_make_shape_rank4(1, 2, 4, 1);
+  id4_ideogram4_dit_program_options_t options =
+      MakeProgramOptions(latent_shape);
+  options.activation_format =
+      ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT;
+  options.request.conditioning_mode =
+      ID4_IDEOGRAM4_DIT_CONDITIONING_MODE_CONDITIONED;
+  options.request.text_token_count = 3;
+  const iree_string_view_t diagnostic_tap_names[] = {
+      IREE_SV("ideogram4.cond.prelude.llm_cond_norm"),
+  };
+  options.diagnostic_tap_names = (iree_string_view_list_t){
+      IREE_ARRAYSIZE(diagnostic_tap_names),
+      diagnostic_tap_names,
+  };
+
+  id4_pipeline_program_t* program = CreateForwardProgram(&options);
+  EXPECT_TRUE(ProgramHasTensor(
+      program, IREE_SV("ideogram4.cond.prelude.llm_cond_norm_packed"),
+      ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+      id4_pipeline_program_make_shape_rank2(16,
+                                            options.model.llm_feature_count)));
+  EXPECT_TRUE(ProgramTapsTensor(
+      program, IREE_SV("ideogram4.cond.prelude.llm_cond_norm"),
+      ID4_PIPELINE_PROGRAM_DTYPE_F32,
+      id4_pipeline_program_make_shape_rank2(options.model.llm_feature_count,
+                                            options.request.text_token_count)));
+
+  id4_pipeline_program_release(program);
+}
+
 TEST(Ideogram4DitProgram, AuthorsScaledFp8ProjectionParameterContract) {
   id4_pipeline_program_shape_t latent_shape =
       id4_pipeline_program_make_shape_rank4(1, 2, 4, 1);
@@ -523,6 +579,50 @@ TEST(Ideogram4DitProgram, AuthorsPyTorchParityFeedForwardIntermediates) {
   id4_pipeline_program_release(program);
 }
 
+TEST(Ideogram4DitProgram, TapsBf16BlockBoundariesWithoutChangingStorage) {
+  id4_pipeline_program_shape_t latent_shape =
+      id4_pipeline_program_make_shape_rank4(1, 2, 4, 1);
+  id4_ideogram4_dit_program_options_t options =
+      MakeProgramOptions(latent_shape);
+  options.activation_format =
+      ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT;
+  const iree_string_view_t diagnostic_tap_names[] = {
+      IREE_SV("ideogram4.uncond.layers.0.attention_input"),
+      IREE_SV("ideogram4.uncond.layers.0.attention.output"),
+      IREE_SV("ideogram4.uncond.layers.0.ffn.output"),
+  };
+  options.diagnostic_tap_names = (iree_string_view_list_t){
+      IREE_ARRAYSIZE(diagnostic_tap_names),
+      diagnostic_tap_names,
+  };
+
+  id4_pipeline_program_t* program = CreateForwardProgram(&options);
+  const id4_pipeline_program_shape_t internal_shape =
+      id4_pipeline_program_make_shape_rank2(32, options.model.hidden_size);
+  const id4_pipeline_program_shape_t tap_shape =
+      id4_pipeline_program_make_shape_rank2(options.model.hidden_size, 2);
+  EXPECT_TRUE(ProgramHasTensor(
+      program, IREE_SV("ideogram4.uncond.layers.0.attention_input"),
+      ID4_PIPELINE_PROGRAM_DTYPE_BF16, internal_shape));
+  EXPECT_TRUE(ProgramHasTensor(
+      program, IREE_SV("ideogram4.uncond.layers.0.attention.output"),
+      ID4_PIPELINE_PROGRAM_DTYPE_BF16, internal_shape));
+  EXPECT_TRUE(
+      ProgramHasTensor(program, IREE_SV("ideogram4.uncond.layers.0.ffn.output"),
+                       ID4_PIPELINE_PROGRAM_DTYPE_BF16, internal_shape));
+  EXPECT_TRUE(ProgramTapsTensor(
+      program, IREE_SV("ideogram4.uncond.layers.0.attention_input"),
+      ID4_PIPELINE_PROGRAM_DTYPE_F32, tap_shape));
+  EXPECT_TRUE(ProgramTapsTensor(
+      program, IREE_SV("ideogram4.uncond.layers.0.attention.output"),
+      ID4_PIPELINE_PROGRAM_DTYPE_F32, tap_shape));
+  EXPECT_TRUE(ProgramTapsTensor(program,
+                                IREE_SV("ideogram4.uncond.layers.0.ffn.output"),
+                                ID4_PIPELINE_PROGRAM_DTYPE_F32, tap_shape));
+
+  id4_pipeline_program_release(program);
+}
+
 TEST(Ideogram4DitProgram, RejectsMaterializedWmmaAttentionWithCanonicalF32) {
   ProgramBuilderScope builder_scope;
   id4_ideogram4_dit_program_options_t options =
@@ -540,6 +640,24 @@ TEST(Ideogram4DitProgram, RejectsPyTorchParityFeedForwardWithCanonicalF32) {
       MakeProgramOptions(id4_pipeline_program_make_shape_rank4(1, 2, 4, 1));
   options.feed_forward_implementation =
       ID4_IDEOGRAM4_DIT_FEED_FORWARD_IMPLEMENTATION_PYTORCH_PARITY;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_UNIMPLEMENTED,
+                        id4_ideogram4_dit_program_author_forward(
+                            &options, builder_scope.builder()));
+}
+
+TEST(Ideogram4DitProgram, RejectsProjectionTapWithoutPyTorchParityFeedForward) {
+  ProgramBuilderScope builder_scope;
+  id4_ideogram4_dit_program_options_t options =
+      MakeProgramOptions(id4_pipeline_program_make_shape_rank4(1, 2, 4, 1));
+  options.activation_format =
+      ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT;
+  const iree_string_view_t diagnostic_tap_names[] = {
+      IREE_SV("ideogram4.uncond.layers.0.ffn.w1_projection.output"),
+  };
+  options.diagnostic_tap_names = (iree_string_view_list_t){
+      IREE_ARRAYSIZE(diagnostic_tap_names),
+      diagnostic_tap_names,
+  };
   IREE_EXPECT_STATUS_IS(IREE_STATUS_UNIMPLEMENTED,
                         id4_ideogram4_dit_program_author_forward(
                             &options, builder_scope.builder()));

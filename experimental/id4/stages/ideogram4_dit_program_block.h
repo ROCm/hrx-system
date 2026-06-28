@@ -127,6 +127,11 @@ iree_status_t id4_ideogram4_dit_program_tap(
     id4_pipeline_program_builder_t* builder, iree_string_view_t name,
     id4_pipeline_program_tensor_t tensor);
 
+iree_status_t id4_ideogram4_dit_program_tap_linear_input_bf16_as_f32(
+    id4_pipeline_program_builder_t* builder, iree_string_view_t name,
+    uint32_t token_count, uint32_t token_capacity, uint32_t input_size,
+    id4_pipeline_program_tensor_t packed_input);
+
 iree_status_t id4_ideogram4_dit_program_dispatch_adaln_split(
     id4_pipeline_program_builder_t* builder, iree_string_view_t name,
     uint32_t hidden_size, id4_pipeline_program_tensor_t raw_modulation,
