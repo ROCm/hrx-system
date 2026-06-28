@@ -128,6 +128,19 @@ TEST(ContractStorageTest, MapsMatrixStorageSchemaToGenericOperand) {
                                 LOOM_CONTRACT_CAPABILITY_ZERO_SCALE_FALLBACK));
 }
 
+TEST(ContractStorageTest, MapsEncodedFloat8FormatsToMatrixNumerics) {
+  loom_contract_numeric_type_t numeric_type = LOOM_CONTRACT_NUMERIC_UNKNOWN;
+  ASSERT_TRUE(loom_contract_numeric_type_from_encoded_format(
+      LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3, &numeric_type));
+  EXPECT_EQ(numeric_type, LOOM_CONTRACT_NUMERIC_FP8);
+  ASSERT_TRUE(loom_contract_numeric_type_from_encoded_format(
+      LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E5M2, &numeric_type));
+  EXPECT_EQ(numeric_type, LOOM_CONTRACT_NUMERIC_BF8);
+  ASSERT_TRUE(loom_contract_numeric_type_from_encoded_format(
+      LOOM_VALUE_FACT_NUMERIC_FORMAT_BF8, &numeric_type));
+  EXPECT_EQ(numeric_type, LOOM_CONTRACT_NUMERIC_BF8);
+}
+
 TEST(ContractStorageTest, RejectsUnknownMatrixFormat) {
   loom_value_fact_storage_schema_t schema = {};
 
