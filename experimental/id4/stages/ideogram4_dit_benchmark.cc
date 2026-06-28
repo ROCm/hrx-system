@@ -30,6 +30,9 @@ IREE_FLAG(string, dit_parameter_format, "fp8_e4m3",
           "DiT parameter format: bf16 or fp8_e4m3.");
 IREE_FLAG(string, dit_attention_implementation, "streaming",
           "DiT attention implementation: streaming or materialized_wmma.");
+IREE_FLAG(string, dit_feed_forward_implementation, "pytorch_parity",
+          "DiT feed-forward implementation: fused_product or "
+          "pytorch_parity.");
 IREE_FLAG(string, dit_conditioned_fp8_scope, "dit_cond_fp8",
           "Conditioned DiT FP8 e4m3 source parameter scope.");
 IREE_FLAG(string, dit_unconditioned_fp8_scope, "dit_uncond_fp8",
@@ -80,6 +83,9 @@ struct DitBenchmarkContext {
   // Attention implementation selected for plan and issue benchmarks.
   id4_ideogram4_dit_attention_implementation_t attention_implementation =
       ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_STREAMING;
+  // Feed-forward implementation selected for plan and issue benchmarks.
+  id4_ideogram4_dit_feed_forward_implementation_t feed_forward_implementation =
+      ID4_IDEOGRAM4_DIT_FEED_FORWARD_IMPLEMENTATION_PYTORCH_PARITY;
   // Diagnostic event counters collected by lifecycle calls.
   id4::test::StageDiagnostics diagnostics = {};
   // Diagnostics sink passed to stage lifecycle calls.
@@ -153,6 +159,26 @@ static iree_status_t ParseDitAttentionImplementation(
   return iree_make_status(
       IREE_STATUS_INVALID_ARGUMENT,
       "--dit_attention_implementation must be streaming or materialized_wmma");
+}
+
+static iree_status_t ParseDitFeedForwardImplementation(
+    id4_ideogram4_dit_feed_forward_implementation_t* out_implementation) {
+  IREE_ASSERT_ARGUMENT(out_implementation);
+  iree_string_view_t value =
+      iree_make_cstring_view(FLAG_dit_feed_forward_implementation);
+  if (iree_string_view_equal(value, IREE_SV("fused_product"))) {
+    *out_implementation =
+        ID4_IDEOGRAM4_DIT_FEED_FORWARD_IMPLEMENTATION_FUSED_PRODUCT;
+    return iree_ok_status();
+  }
+  if (iree_string_view_equal(value, IREE_SV("pytorch_parity"))) {
+    *out_implementation =
+        ID4_IDEOGRAM4_DIT_FEED_FORWARD_IMPLEMENTATION_PYTORCH_PARITY;
+    return iree_ok_status();
+  }
+  return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                          "--dit_feed_forward_implementation must be "
+                          "fused_product or pytorch_parity");
 }
 
 static iree_status_t WritePlanJsonIfRequested(DitBenchmarkBranch branch,
@@ -311,6 +337,8 @@ static iree_status_t CreateLoadedDitStageContext(
       id4::test::DiagnosticsSink(&out_context->diagnostics);
   IREE_RETURN_IF_ERROR(
       ParseDitAttentionImplementation(&out_context->attention_implementation));
+  IREE_RETURN_IF_ERROR(ParseDitFeedForwardImplementation(
+      &out_context->feed_forward_implementation));
   IREE_RETURN_IF_ERROR(
       id4::test::CreateLiveStageContextFromFlags(&out_context->live));
   IREE_RETURN_IF_ERROR(
@@ -401,6 +429,8 @@ static iree_status_t CreateDitPlan(DitBenchmarkContext* context,
   dit_options.activation_format =
       ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT;
   dit_options.attention_implementation = context->attention_implementation;
+  dit_options.feed_forward_implementation =
+      context->feed_forward_implementation;
 
   id4_pipeline_stage_plan_options_t plan_options;
   std::memset(&plan_options, 0, sizeof(plan_options));

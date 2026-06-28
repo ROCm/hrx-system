@@ -266,6 +266,22 @@ id4_ideogram4_dit_program_validate_attention_implementation(
   }
 }
 
+static iree_status_t
+id4_ideogram4_dit_program_validate_feed_forward_implementation(
+    id4_ideogram4_dit_feed_forward_implementation_t
+        feed_forward_implementation) {
+  switch (feed_forward_implementation) {
+    case ID4_IDEOGRAM4_DIT_FEED_FORWARD_IMPLEMENTATION_FUSED_PRODUCT:
+    case ID4_IDEOGRAM4_DIT_FEED_FORWARD_IMPLEMENTATION_PYTORCH_PARITY:
+      return iree_ok_status();
+    default:
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "Ideogram4 DiT feed-forward implementation %" PRIu32 " is invalid",
+          (uint32_t)feed_forward_implementation);
+  }
+}
+
 static iree_status_t id4_ideogram4_dit_program_validate_parameter_storage(
     id4_ideogram4_dit_parameter_storage_t storage) {
   switch (storage) {
@@ -462,6 +478,9 @@ static iree_status_t id4_ideogram4_dit_program_validate_options(
   IREE_RETURN_IF_ERROR(
       id4_ideogram4_dit_program_validate_attention_implementation(
           options->attention_implementation));
+  IREE_RETURN_IF_ERROR(
+      id4_ideogram4_dit_program_validate_feed_forward_implementation(
+          options->feed_forward_implementation));
   IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_validate_diagnostic_taps(
       options->diagnostic_tap_names));
   return id4_ideogram4_dit_program_token_counts(options, out_image_token_count,
@@ -3136,6 +3155,7 @@ iree_status_t id4_ideogram4_dit_program_author_forward(
         .position_embedding = position_embedding,
         .activation_format = options->activation_format,
         .attention_implementation = options->attention_implementation,
+        .feed_forward_implementation = options->feed_forward_implementation,
         .diagnostic_tap_names = options->diagnostic_tap_names,
     };
     IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_author_transformer_block(

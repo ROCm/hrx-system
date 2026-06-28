@@ -55,6 +55,16 @@ typedef enum id4_ideogram4_dit_attention_implementation_e {
   ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_MATERIALIZED_WMMA = 2,
 } id4_ideogram4_dit_attention_implementation_t;
 
+// Feed-forward implementation selected while authoring DiT transformer blocks.
+typedef enum id4_ideogram4_dit_feed_forward_implementation_e {
+  // Invalid feed-forward implementation.
+  ID4_IDEOGRAM4_DIT_FEED_FORWARD_IMPLEMENTATION_INVALID = 0,
+  // Implementation may fuse projection, activation, and product work.
+  ID4_IDEOGRAM4_DIT_FEED_FORWARD_IMPLEMENTATION_FUSED_PRODUCT = 1,
+  // Implementation preserves PyTorch W1, W3, product, and W2 boundaries.
+  ID4_IDEOGRAM4_DIT_FEED_FORWARD_IMPLEMENTATION_PYTORCH_PARITY = 2,
+} id4_ideogram4_dit_feed_forward_implementation_t;
+
 // Physical storage format selected for a DiT parameter source.
 typedef enum id4_ideogram4_dit_parameter_storage_e {
   // Invalid parameter storage format.
@@ -132,6 +142,8 @@ typedef struct id4_ideogram4_dit_program_options_t {
   id4_ideogram4_dit_activation_format_t activation_format;
   // Attention implementation selected for transformer blocks.
   id4_ideogram4_dit_attention_implementation_t attention_implementation;
+  // Feed-forward implementation selected for transformer blocks.
+  id4_ideogram4_dit_feed_forward_implementation_t feed_forward_implementation;
   // Diagnostic tap names requested by the stage plan.
   iree_string_view_list_t diagnostic_tap_names;
 } id4_ideogram4_dit_program_options_t;

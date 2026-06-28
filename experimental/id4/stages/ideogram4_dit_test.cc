@@ -207,6 +207,8 @@ TEST(Ideogram4DitStage, PlansPreludeSliceFromRequestConfig) {
       ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_F32_CANONICAL;
   dit_options.attention_implementation =
       ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_STREAMING;
+  dit_options.feed_forward_implementation =
+      ID4_IDEOGRAM4_DIT_FEED_FORWARD_IMPLEMENTATION_FUSED_PRODUCT;
 
   id4_pipeline_stage_plan_options_t plan_options;
   memset(&plan_options, 0, sizeof(plan_options));
@@ -328,6 +330,8 @@ TEST(Ideogram4DitStage, PlansConditionedPreludeSliceFromRequestConfig) {
       ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_F32_CANONICAL;
   dit_options.attention_implementation =
       ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_STREAMING;
+  dit_options.feed_forward_implementation =
+      ID4_IDEOGRAM4_DIT_FEED_FORWARD_IMPLEMENTATION_FUSED_PRODUCT;
 
   id4_pipeline_stage_plan_options_t plan_options;
   memset(&plan_options, 0, sizeof(plan_options));
@@ -434,6 +438,8 @@ TEST(Ideogram4DitStage, PlansMaterializedWmmaAttention) {
       ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT;
   dit_options.attention_implementation =
       ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_MATERIALIZED_WMMA;
+  dit_options.feed_forward_implementation =
+      ID4_IDEOGRAM4_DIT_FEED_FORWARD_IMPLEMENTATION_FUSED_PRODUCT;
 
   id4_pipeline_stage_plan_options_t plan_options;
   memset(&plan_options, 0, sizeof(plan_options));
@@ -479,6 +485,8 @@ TEST(Ideogram4DitStage, PlansPyTorchParityMlpDiagnosticTaps) {
       ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT;
   dit_options.attention_implementation =
       ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_MATERIALIZED_WMMA;
+  dit_options.feed_forward_implementation =
+      ID4_IDEOGRAM4_DIT_FEED_FORWARD_IMPLEMENTATION_PYTORCH_PARITY;
 
   const iree_string_view_t diagnostic_tap_names[] = {
       IREE_SV("ideogram4.uncond.layers.0.ffn.input"),
@@ -666,6 +674,8 @@ TEST(Ideogram4DitStage, PlansOfficialFp8SourcesAsBf16ExecutionParameters) {
         ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT;
     dit_options.attention_implementation =
         request_case.attention_implementation;
+    dit_options.feed_forward_implementation =
+        ID4_IDEOGRAM4_DIT_FEED_FORWARD_IMPLEMENTATION_PYTORCH_PARITY;
 
     id4_pipeline_stage_plan_options_t plan_options;
     memset(&plan_options, 0, sizeof(plan_options));
@@ -742,6 +752,8 @@ TEST(Ideogram4DitStage, RejectsInvalidRequestShape) {
       ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT;
   dit_options.attention_implementation =
       ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_STREAMING;
+  dit_options.feed_forward_implementation =
+      ID4_IDEOGRAM4_DIT_FEED_FORWARD_IMPLEMENTATION_FUSED_PRODUCT;
 
   id4_pipeline_stage_plan_options_t plan_options;
   memset(&plan_options, 0, sizeof(plan_options));

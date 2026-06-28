@@ -247,6 +247,8 @@ iree_status_t id4_ideogram4_dit_program_author_transformer_block(
       options->activation_format;
   const id4_ideogram4_dit_attention_implementation_t attention_implementation =
       options->attention_implementation;
+  const id4_ideogram4_dit_feed_forward_implementation_t
+      feed_forward_implementation = options->feed_forward_implementation;
   const iree_string_view_list_t diagnostic_tap_names =
       options->diagnostic_tap_names;
   const uint32_t head_size = hidden_size / attention_head_count;
@@ -255,6 +257,9 @@ iree_status_t id4_ideogram4_dit_program_author_transformer_block(
   const bool materialized_wmma_attention =
       attention_implementation ==
       ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_MATERIALIZED_WMMA;
+  const bool pytorch_parity_feed_forward =
+      feed_forward_implementation ==
+      ID4_IDEOGRAM4_DIT_FEED_FORWARD_IMPLEMENTATION_PYTORCH_PARITY;
   switch (attention_implementation) {
     case ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_STREAMING:
     case ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_MATERIALIZED_WMMA:
@@ -265,10 +270,26 @@ iree_status_t id4_ideogram4_dit_program_author_transformer_block(
                               " is invalid",
                               (uint32_t)attention_implementation);
   }
+  switch (feed_forward_implementation) {
+    case ID4_IDEOGRAM4_DIT_FEED_FORWARD_IMPLEMENTATION_FUSED_PRODUCT:
+    case ID4_IDEOGRAM4_DIT_FEED_FORWARD_IMPLEMENTATION_PYTORCH_PARITY:
+      break;
+    default:
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "Ideogram4 DiT feed-forward implementation %" PRIu32 " is invalid",
+          (uint32_t)feed_forward_implementation);
+  }
   if (materialized_wmma_attention && f32_canonical_activations) {
     return iree_make_status(
         IREE_STATUS_UNIMPLEMENTED,
         "Ideogram4 DiT materialized WMMA attention requires BF16 linear-input "
+        "activations");
+  }
+  if (pytorch_parity_feed_forward && f32_canonical_activations) {
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "Ideogram4 DiT PyTorch feed-forward parity requires BF16 linear-input "
         "activations");
   }
   if (total_token_count >
@@ -998,6 +1019,8 @@ iree_status_t id4_ideogram4_dit_program_author_transformer_block(
       diagnostic_tap_names, mlp_gate_name);
   const bool tap_mlp_up = id4_ideogram4_dit_program_has_diagnostic_tap(
       diagnostic_tap_names, mlp_up_name);
+  const bool materialize_feed_forward_projections =
+      pytorch_parity_feed_forward || tap_mlp_gate || tap_mlp_up;
 
   id4_pipeline_program_tensor_t ffn_norm1_weight =
       id4_pipeline_program_tensor_invalid();
@@ -1103,7 +1126,7 @@ iree_status_t id4_ideogram4_dit_program_author_transformer_block(
               bf16_token_capacity, hidden_size, intermediate_size, ffn_input,
               feed_forward_w1_parameter.weight, mlp_gate));
 
-      if (tap_mlp_gate || tap_mlp_up) {
+      if (materialize_feed_forward_projections) {
         id4_pipeline_program_tensor_t mlp_up =
             id4_pipeline_program_tensor_invalid();
         IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_acquire_tensor(
@@ -1166,6 +1189,12 @@ iree_status_t id4_ideogram4_dit_program_author_transformer_block(
                    ID4_IDEOGRAM4_DIT_PARAMETER_STORAGE_FP8_E4M3_SCALED &&
                feed_forward_w3_parameter.storage ==
                    ID4_IDEOGRAM4_DIT_PARAMETER_STORAGE_FP8_E4M3_SCALED) {
+      if (pytorch_parity_feed_forward) {
+        return iree_make_status(
+            IREE_STATUS_UNIMPLEMENTED,
+            "Ideogram4 DiT PyTorch feed-forward parity requires BF16 "
+            "execution weights");
+      }
       IREE_RETURN_IF_ERROR(
           id4_ideogram4_dit_program_dispatch_mlp_gate_up_silu_product_packed_fp8_bf16(
               builder, mlp_hidden_dispatch_name, total_token_count,

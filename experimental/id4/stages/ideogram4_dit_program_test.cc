@@ -110,6 +110,9 @@ static id4_ideogram4_dit_program_options_t MakeProgramOptions(
       // Attention implementation.
       /*.attention_implementation=*/
       ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_STREAMING,
+      // Feed-forward implementation.
+      /*.feed_forward_implementation=*/
+      ID4_IDEOGRAM4_DIT_FEED_FORWARD_IMPLEMENTATION_FUSED_PRODUCT,
       // Diagnostic tap names requested by the stage plan.
       /*.diagnostic_tap_names=*/iree_string_view_list_empty(),
   };
@@ -145,6 +148,23 @@ static bool ProgramHasTensorWithShape(
     const id4_pipeline_program_tensor_record_t* tensor =
         id4_pipeline_program_tensor_at(program, i);
     if (!tensor) continue;
+    if (tensor->dtype != dtype) continue;
+    if (!ShapeEquals(tensor->shape, expected_shape)) continue;
+    return true;
+  }
+  return false;
+}
+
+static bool ProgramHasTensor(const id4_pipeline_program_t* program,
+                             iree_string_view_t name,
+                             id4_pipeline_program_dtype_t dtype,
+                             id4_pipeline_program_shape_t expected_shape) {
+  for (iree_host_size_t i = 0; i < id4_pipeline_program_tensor_count(program);
+       ++i) {
+    const id4_pipeline_program_tensor_record_t* tensor =
+        id4_pipeline_program_tensor_at(program, i);
+    if (!tensor) continue;
+    if (!iree_string_view_equal(tensor->name, name)) continue;
     if (tensor->dtype != dtype) continue;
     if (!ShapeEquals(tensor->shape, expected_shape)) continue;
     return true;
@@ -476,12 +496,50 @@ TEST(Ideogram4DitProgram, AuthorsMaterializedWmmaAttentionIntermediates) {
   id4_pipeline_program_release(program);
 }
 
+TEST(Ideogram4DitProgram, AuthorsPyTorchParityFeedForwardIntermediates) {
+  id4_pipeline_program_shape_t latent_shape =
+      id4_pipeline_program_make_shape_rank4(1, 2, 4, 1);
+  id4_ideogram4_dit_program_options_t options =
+      MakeProgramOptions(latent_shape);
+  options.activation_format =
+      ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT;
+  options.feed_forward_implementation =
+      ID4_IDEOGRAM4_DIT_FEED_FORWARD_IMPLEMENTATION_PYTORCH_PARITY;
+
+  id4_pipeline_program_t* program = CreateForwardProgram(&options);
+  const id4_pipeline_program_shape_t projection_shape =
+      id4_pipeline_program_make_shape_rank2(32,
+                                            options.model.intermediate_size);
+  EXPECT_TRUE(ProgramHasTensor(
+      program, IREE_SV("ideogram4.uncond.layers.0.ffn.w1_projection.output"),
+      ID4_PIPELINE_PROGRAM_DTYPE_BF16, projection_shape));
+  EXPECT_TRUE(ProgramHasTensor(
+      program, IREE_SV("ideogram4.uncond.layers.0.ffn.w3_projection.output"),
+      ID4_PIPELINE_PROGRAM_DTYPE_BF16, projection_shape));
+  EXPECT_TRUE(
+      ProgramHasTensor(program, IREE_SV("ideogram4.uncond.layers.0.ffn.hidden"),
+                       ID4_PIPELINE_PROGRAM_DTYPE_BF16, projection_shape));
+
+  id4_pipeline_program_release(program);
+}
+
 TEST(Ideogram4DitProgram, RejectsMaterializedWmmaAttentionWithCanonicalF32) {
   ProgramBuilderScope builder_scope;
   id4_ideogram4_dit_program_options_t options =
       MakeProgramOptions(id4_pipeline_program_make_shape_rank4(1, 2, 4, 1));
   options.attention_implementation =
       ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_MATERIALIZED_WMMA;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_UNIMPLEMENTED,
+                        id4_ideogram4_dit_program_author_forward(
+                            &options, builder_scope.builder()));
+}
+
+TEST(Ideogram4DitProgram, RejectsPyTorchParityFeedForwardWithCanonicalF32) {
+  ProgramBuilderScope builder_scope;
+  id4_ideogram4_dit_program_options_t options =
+      MakeProgramOptions(id4_pipeline_program_make_shape_rank4(1, 2, 4, 1));
+  options.feed_forward_implementation =
+      ID4_IDEOGRAM4_DIT_FEED_FORWARD_IMPLEMENTATION_PYTORCH_PARITY;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_UNIMPLEMENTED,
                         id4_ideogram4_dit_program_author_forward(
                             &options, builder_scope.builder()));
@@ -512,6 +570,17 @@ TEST(Ideogram4DitProgram, RejectsInvalidAttentionImplementation) {
       MakeProgramOptions(id4_pipeline_program_make_shape_rank4(1, 2, 4, 1));
   options.attention_implementation =
       ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_INVALID;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        id4_ideogram4_dit_program_author_forward(
+                            &options, builder_scope.builder()));
+}
+
+TEST(Ideogram4DitProgram, RejectsInvalidFeedForwardImplementation) {
+  ProgramBuilderScope builder_scope;
+  id4_ideogram4_dit_program_options_t options =
+      MakeProgramOptions(id4_pipeline_program_make_shape_rank4(1, 2, 4, 1));
+  options.feed_forward_implementation =
+      ID4_IDEOGRAM4_DIT_FEED_FORWARD_IMPLEMENTATION_INVALID;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         id4_ideogram4_dit_program_author_forward(
                             &options, builder_scope.builder()));

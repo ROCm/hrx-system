@@ -38,6 +38,9 @@ IREE_FLAG(string, dit_activation_format, "bf16_linear_input",
           "DiT activation format: bf16_linear_input or f32_canonical.");
 IREE_FLAG(string, dit_attention_implementation, "streaming",
           "DiT attention implementation: streaming or materialized_wmma.");
+IREE_FLAG(string, dit_feed_forward_implementation, "pytorch_parity",
+          "DiT feed-forward implementation: fused_product or "
+          "pytorch_parity.");
 IREE_FLAG(string, dit_conditioned_fp8_scope, "dit_cond_fp8",
           "Conditioned DiT FP8 e4m3 source parameter scope.");
 IREE_FLAG(string, dit_unconditioned_fp8_scope, "dit_uncond_fp8",
@@ -190,6 +193,26 @@ static iree_status_t id4_cli_parse_dit_attention_implementation(
   return iree_make_status(
       IREE_STATUS_INVALID_ARGUMENT,
       "--dit_attention_implementation must be streaming or materialized_wmma");
+}
+
+static iree_status_t id4_cli_parse_dit_feed_forward_implementation(
+    id4_ideogram4_dit_feed_forward_implementation_t* out_implementation) {
+  IREE_ASSERT_ARGUMENT(out_implementation);
+  iree_string_view_t value =
+      iree_make_cstring_view(FLAG_dit_feed_forward_implementation);
+  if (iree_string_view_equal(value, IREE_SV("fused_product"))) {
+    *out_implementation =
+        ID4_IDEOGRAM4_DIT_FEED_FORWARD_IMPLEMENTATION_FUSED_PRODUCT;
+    return iree_ok_status();
+  }
+  if (iree_string_view_equal(value, IREE_SV("pytorch_parity"))) {
+    *out_implementation =
+        ID4_IDEOGRAM4_DIT_FEED_FORWARD_IMPLEMENTATION_PYTORCH_PARITY;
+    return iree_ok_status();
+  }
+  return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                          "--dit_feed_forward_implementation must be "
+                          "fused_product or pytorch_parity");
 }
 
 static iree_status_t id4_cli_parse_positive_u32_flag(
@@ -537,6 +560,8 @@ static iree_status_t id4_cli_make_generation_plan_policy(
       id4_cli_parse_dit_activation_format(&policy.dit_activation_format));
   IREE_RETURN_IF_ERROR(id4_cli_parse_dit_attention_implementation(
       &policy.dit_attention_implementation));
+  IREE_RETURN_IF_ERROR(id4_cli_parse_dit_feed_forward_implementation(
+      &policy.dit_feed_forward_implementation));
   IREE_RETURN_IF_ERROR(id4_cli_parse_vae_tiling_config(&policy.vae_tiling));
   *out_policy = policy;
   return iree_ok_status();

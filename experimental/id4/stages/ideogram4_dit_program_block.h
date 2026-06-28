@@ -74,6 +74,8 @@ typedef struct id4_ideogram4_dit_program_block_options_t {
   id4_ideogram4_dit_activation_format_t activation_format;
   // Attention implementation selected for this transformer block.
   id4_ideogram4_dit_attention_implementation_t attention_implementation;
+  // Feed-forward implementation selected for this transformer block.
+  id4_ideogram4_dit_feed_forward_implementation_t feed_forward_implementation;
   // Diagnostic tap names requested by the stage plan.
   iree_string_view_list_t diagnostic_tap_names;
 } id4_ideogram4_dit_program_block_options_t;

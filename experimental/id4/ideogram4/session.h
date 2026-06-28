@@ -96,6 +96,9 @@ typedef struct id4_ideogram4_generation_plan_policy_t {
   id4_ideogram4_dit_activation_format_t dit_activation_format;
   // Attention implementation selected for DiT transformer blocks.
   id4_ideogram4_dit_attention_implementation_t dit_attention_implementation;
+  // Feed-forward implementation selected for DiT transformer blocks.
+  id4_ideogram4_dit_feed_forward_implementation_t
+      dit_feed_forward_implementation;
   // VAE tiling policy used by the final latent decode stage.
   id4_vae_tiling_config_t vae_tiling;
 } id4_ideogram4_generation_plan_policy_t;
@@ -136,6 +139,9 @@ typedef struct id4_ideogram4_generation_plan_summary_t {
   id4_ideogram4_dit_activation_format_t dit_activation_format;
   // DiT attention implementation selected by the plan.
   id4_ideogram4_dit_attention_implementation_t dit_attention_implementation;
+  // DiT feed-forward implementation selected by the plan.
+  id4_ideogram4_dit_feed_forward_implementation_t
+      dit_feed_forward_implementation;
   // VAE tiling policy selected by the plan.
   id4_vae_tiling_config_t vae_tiling;
 } id4_ideogram4_generation_plan_summary_t;

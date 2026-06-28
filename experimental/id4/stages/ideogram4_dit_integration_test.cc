@@ -540,6 +540,8 @@ typedef struct DitFixtureRunOptions {
   id4_ideogram4_dit_activation_format_t activation_format;
   // Attention implementation requested from the DiT stage planner.
   id4_ideogram4_dit_attention_implementation_t attention_implementation;
+  // Feed-forward implementation requested from the DiT stage planner.
+  id4_ideogram4_dit_feed_forward_implementation_t feed_forward_implementation;
   // Fixture input stage used to initialize imported boundary tensors.
   iree_string_view_t input_stage;
   // Expected diagnostic tap name prefix selected from the fixture.
@@ -604,6 +606,7 @@ static void RunDitFixture(const DitFixtureRunOptions& options) {
   dit_options.request = request;
   dit_options.activation_format = options.activation_format;
   dit_options.attention_implementation = options.attention_implementation;
+  dit_options.feed_forward_implementation = options.feed_forward_implementation;
 
   std::vector<iree_string_view_t> diagnostic_tap_names;
   if (iree_all_bits_set(options.flags,
@@ -789,6 +792,8 @@ TEST(Ideogram4DitStageIntegration, PrepareAndIssueForwardPreludeFixture) {
       .activation_format = ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_F32_CANONICAL,
       .attention_implementation =
           ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_STREAMING,
+      .feed_forward_implementation =
+          ID4_IDEOGRAM4_DIT_FEED_FORWARD_IMPLEMENTATION_FUSED_PRODUCT,
       .input_stage = IREE_SV("ideogram4.cond.input"),
       .expected_tap_prefix = IREE_SV("ideogram4.cond."),
       .expected_output_name = IREE_SV("ideogram4.cond.output.velocity"),
@@ -805,6 +810,8 @@ TEST(Ideogram4DitStageIntegration, PrepareAndIssueBf16LinearInputFixture) {
           ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT,
       .attention_implementation =
           ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_STREAMING,
+      .feed_forward_implementation =
+          ID4_IDEOGRAM4_DIT_FEED_FORWARD_IMPLEMENTATION_PYTORCH_PARITY,
       .input_stage = IREE_SV("ideogram4.cond.input"),
       .expected_tap_prefix = IREE_SV("ideogram4.cond."),
       .expected_output_name = IREE_SV("ideogram4.cond.output.velocity"),
@@ -824,6 +831,8 @@ TEST(Ideogram4DitStageIntegration,
           ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT,
       .attention_implementation =
           ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_MATERIALIZED_WMMA,
+      .feed_forward_implementation =
+          ID4_IDEOGRAM4_DIT_FEED_FORWARD_IMPLEMENTATION_PYTORCH_PARITY,
       .input_stage = IREE_SV("ideogram4.cond.input"),
       .expected_tap_prefix = iree_string_view_empty(),
       .diagnostic_tap_names =
