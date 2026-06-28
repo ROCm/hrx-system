@@ -150,6 +150,7 @@ static iree_status_t id4_qwen3_vl_stage_emit_lifecycle(
 
 static iree_status_t id4_qwen3_vl_stage_author_program(
     const id4_qwen3_vl_stage_t* stage, id4_qwen3_vl_request_config_t request,
+    iree_string_view_list_t diagnostic_tap_names,
     iree_allocator_t host_allocator, id4_pipeline_program_t** out_program) {
   IREE_ASSERT_ARGUMENT(out_program);
   *out_program = NULL;
@@ -173,6 +174,7 @@ static iree_status_t id4_qwen3_vl_stage_author_program(
     program_options.parameter_scope = stage->parameter_scope;
     program_options.model = stage->model;
     program_options.request = request;
+    program_options.diagnostic_tap_names = diagnostic_tap_names;
     status = id4_qwen3_vl_program_author_forward(&program_options, builder);
   }
   if (iree_status_is_ok(status)) {
@@ -252,7 +254,8 @@ static iree_status_t id4_qwen3_vl_stage_plan(
 
   id4_pipeline_program_t* program = NULL;
   iree_status_t status = id4_qwen3_vl_stage_author_program(
-      stage, qwen_options->request, stage->host_allocator, &program);
+      stage, qwen_options->request, options->diagnostic_tap_names,
+      stage->host_allocator, &program);
   if (iree_status_is_ok(status)) {
     status = id4_qwen3_vl_stage_create_program_plan(stage, options, program,
                                                     out_plan);

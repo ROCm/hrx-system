@@ -60,6 +60,8 @@ typedef struct id4_qwen3_vl_program_options_t {
   id4_qwen3_vl_model_config_t model;
   // Dynamic request dimensions.
   id4_qwen3_vl_request_config_t request;
+  // Diagnostic tap names requested by the caller during planning.
+  iree_string_view_list_t diagnostic_tap_names;
 } id4_qwen3_vl_program_options_t;
 
 // Authors the Qwen3-VL forward program into |builder|.

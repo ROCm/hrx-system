@@ -55,6 +55,8 @@ static id4_qwen3_vl_program_options_t MakeProgramOptions(uint32_t layer_count) {
           // Number of token positions.
           /*.token_count=*/19,
       },
+      // Diagnostic tap names requested by the caller.
+      /*.diagnostic_tap_names=*/iree_string_view_list_empty(),
   };
   return options;
 }
