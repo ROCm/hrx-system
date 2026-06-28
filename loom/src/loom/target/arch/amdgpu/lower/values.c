@@ -5465,9 +5465,17 @@ static iree_status_t loom_amdgpu_lower_vector_fp8_to_f32_software_lane(
   IREE_RETURN_IF_ERROR(loom_amdgpu_extract_vector_fp8_lane(
       context, source_op, plan, extract_plan, low_source, source_lane_type,
       lane_index, &low_byte));
-  loom_value_id_t bf16_lane = LOOM_VALUE_ID_INVALID;
   const loom_amdgpu_fp8_decode_value_flags_t value_flags =
       loom_amdgpu_vector_fp8_decode_value_flags(context, plan, lane_index);
+  bool selected_direct_f32 = false;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_try_emit_fp8_not_subnormal_to_f32_lane(
+      context, source_op, decode_plan, low_byte, value_flags, result_lane_type,
+      *mask_type, out_low_lane, &selected_direct_f32));
+  if (selected_direct_f32) {
+    return iree_ok_status();
+  }
+
+  loom_value_id_t bf16_lane = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fp8_to_bf16_lane(
       context, source_op, decode_plan, low_byte, value_flags, result_lane_type,
       *mask_type, &bf16_lane));
