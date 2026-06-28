@@ -27,10 +27,16 @@ class KernelAggregate:
     count: int = 0
     valid_count: int = 0
     invalid_count: int = 0
+    duration_ns_available_count: int = 0
     total_duration_ns: int = 0
     min_duration_ns: int | None = None
     max_duration_ns: int = 0
     durations_ns: list[int] | None = None
+    duration_ticks_available_count: int = 0
+    total_duration_ticks: int = 0
+    min_duration_ticks: int | None = None
+    max_duration_ticks: int = 0
+    durations_ticks: list[int] | None = None
 
 
 GENERATION_STAGE_ISSUE_ORDER = (
@@ -83,6 +89,15 @@ def _require_int(value: Any, field_name: str) -> int:
 def _require_bool(value: Any, field_name: str) -> bool:
     if type(value) is not bool:
         raise DispatchProfileJoinError(f"{field_name} must be a boolean")
+    return value
+
+
+def _optional_nonnegative_int(value: Any, field_name: str) -> int | None:
+    if value is None:
+        return None
+    value = _require_int(value, field_name)
+    if value < 0:
+        raise DispatchProfileJoinError(f"{field_name} must be non-negative")
     return value
 
 
@@ -325,13 +340,26 @@ def _join_row(
     )
 
     valid = _require_bool(profile_event.get("valid"), "profile.valid")
-    duration_ns = profile_event.get("duration_ns")
     if valid:
-        duration_ns = _require_int(duration_ns, "profile.duration_ns")
-        if duration_ns < 0:
-            raise DispatchProfileJoinError("profile.duration_ns must be non-negative")
+        duration_ns_available = profile_event.get("clock_fit_available")
+        if duration_ns_available is None:
+            duration_ns_available = "duration_ns" in profile_event
+        else:
+            duration_ns_available = _require_bool(
+                duration_ns_available, "profile.clock_fit_available"
+            )
+        duration_ns = (
+            _optional_nonnegative_int(profile_event.get("duration_ns"), "duration_ns")
+            if duration_ns_available
+            else None
+        )
+        duration_ticks = _optional_nonnegative_int(
+            profile_event.get("duration_ticks"), "duration_ticks"
+        )
     else:
+        duration_ns_available = False
         duration_ns = None
+        duration_ticks = None
 
     region_id = _require_int(region_row.get("id"), "region.id")
     return {
@@ -367,7 +395,9 @@ def _join_row(
         ),
         "bindings": _require_list(plan_dispatch.get("bindings"), "bindings"),
         "valid": valid,
+        "duration_ns_available": duration_ns_available,
         "duration_ns": duration_ns,
+        "duration_ticks": duration_ticks,
     }
 
 
@@ -434,15 +464,34 @@ def _accumulate_kernel_aggregate(
     aggregate.count += 1
     if row["valid"]:
         aggregate.valid_count += 1
-        duration_ns = _require_int(row["duration_ns"], "duration_ns")
-        aggregate.total_duration_ns += duration_ns
-        if aggregate.min_duration_ns is None:
-            aggregate.min_duration_ns = duration_ns
-        aggregate.min_duration_ns = min(aggregate.min_duration_ns, duration_ns)
-        aggregate.max_duration_ns = max(aggregate.max_duration_ns, duration_ns)
-        if aggregate.durations_ns is None:
-            aggregate.durations_ns = []
-        aggregate.durations_ns.append(duration_ns)
+        duration_ns = row["duration_ns"]
+        if duration_ns is not None:
+            duration_ns = _optional_nonnegative_int(duration_ns, "duration_ns")
+            aggregate.duration_ns_available_count += 1
+            aggregate.total_duration_ns += duration_ns
+            if aggregate.min_duration_ns is None:
+                aggregate.min_duration_ns = duration_ns
+            aggregate.min_duration_ns = min(aggregate.min_duration_ns, duration_ns)
+            aggregate.max_duration_ns = max(aggregate.max_duration_ns, duration_ns)
+            if aggregate.durations_ns is None:
+                aggregate.durations_ns = []
+            aggregate.durations_ns.append(duration_ns)
+        duration_ticks = row["duration_ticks"]
+        if duration_ticks is not None:
+            duration_ticks = _optional_nonnegative_int(duration_ticks, "duration_ticks")
+            aggregate.duration_ticks_available_count += 1
+            aggregate.total_duration_ticks += duration_ticks
+            if aggregate.min_duration_ticks is None:
+                aggregate.min_duration_ticks = duration_ticks
+            aggregate.min_duration_ticks = min(
+                aggregate.min_duration_ticks, duration_ticks
+            )
+            aggregate.max_duration_ticks = max(
+                aggregate.max_duration_ticks, duration_ticks
+            )
+            if aggregate.durations_ticks is None:
+                aggregate.durations_ticks = []
+            aggregate.durations_ticks.append(duration_ticks)
     else:
         aggregate.invalid_count += 1
 
@@ -450,17 +499,45 @@ def _accumulate_kernel_aggregate(
 def _kernel_aggregate_duration_fields(aggregate: KernelAggregate) -> dict[str, Any]:
     durations_ns = aggregate.durations_ns or []
     durations_ns.sort()
+    durations_ticks = aggregate.durations_ticks or []
+    durations_ticks.sort()
     return {
         "count": aggregate.count,
         "valid_count": aggregate.valid_count,
         "invalid_count": aggregate.invalid_count,
-        "total_duration_ns": aggregate.total_duration_ns,
+        "duration_ns_available_count": aggregate.duration_ns_available_count,
+        "total_duration_ns": (
+            aggregate.total_duration_ns
+            if aggregate.duration_ns_available_count == aggregate.valid_count
+            else None
+        ),
         "min_duration_ns": aggregate.min_duration_ns,
         "p50_duration_ns": _percentile(durations_ns, 50),
         "p90_duration_ns": _percentile(durations_ns, 90),
         "p99_duration_ns": _percentile(durations_ns, 99),
         "max_duration_ns": aggregate.max_duration_ns,
+        "duration_ticks_available_count": aggregate.duration_ticks_available_count,
+        "total_duration_ticks": (
+            aggregate.total_duration_ticks
+            if aggregate.duration_ticks_available_count == aggregate.valid_count
+            else None
+        ),
+        "min_duration_ticks": aggregate.min_duration_ticks,
+        "p50_duration_ticks": _percentile(durations_ticks, 50),
+        "p90_duration_ticks": _percentile(durations_ticks, 90),
+        "p99_duration_ticks": _percentile(durations_ticks, 99),
+        "max_duration_ticks": aggregate.max_duration_ticks,
     }
+
+
+def _duration_sort_key(row: dict[str, Any]) -> tuple[int, int]:
+    duration_ns = row.get("total_duration_ns")
+    if duration_ns is not None:
+        return (0, -_require_int(duration_ns, "total_duration_ns"))
+    duration_ticks = row.get("total_duration_ticks")
+    if duration_ticks is not None:
+        return (1, -_require_int(duration_ticks, "total_duration_ticks"))
+    return (2, 0)
 
 
 def _aggregate_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -480,7 +557,7 @@ def _aggregate_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 **_kernel_aggregate_duration_fields(aggregate),
             }
         )
-    records.sort(key=lambda row: (-row["total_duration_ns"], row["function_name"]))
+    records.sort(key=lambda row: (*_duration_sort_key(row), row["function_name"]))
     return records
 
 
@@ -528,14 +605,38 @@ def _join_stage_dispatches(
 
 def _summary_for_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
     valid_duration_count = sum(1 for row in rows if row["valid"])
+    duration_ns_available_count = sum(
+        1 for row in rows if row["valid"] and row["duration_ns"] is not None
+    )
     total_duration_ns = sum(
-        _require_int(row["duration_ns"], "duration_ns") for row in rows if row["valid"]
+        _optional_nonnegative_int(row["duration_ns"], "duration_ns") or 0
+        for row in rows
+        if row["valid"] and row["duration_ns"] is not None
+    )
+    duration_ticks_available_count = sum(
+        1 for row in rows if row["valid"] and row["duration_ticks"] is not None
+    )
+    total_duration_ticks = sum(
+        _optional_nonnegative_int(row["duration_ticks"], "duration_ticks") or 0
+        for row in rows
+        if row["valid"] and row["duration_ticks"] is not None
     )
     return {
         "dispatch_count": len(rows),
         "valid_duration_count": valid_duration_count,
         "invalid_duration_count": len(rows) - valid_duration_count,
-        "total_duration_ns": total_duration_ns,
+        "duration_ns_available_count": duration_ns_available_count,
+        "total_duration_ns": (
+            total_duration_ns
+            if duration_ns_available_count == valid_duration_count
+            else None
+        ),
+        "duration_ticks_available_count": duration_ticks_available_count,
+        "total_duration_ticks": (
+            total_duration_ticks
+            if duration_ticks_available_count == valid_duration_count
+            else None
+        ),
     }
 
 
@@ -584,7 +685,7 @@ def _aggregate_generation_stages(
                 **_kernel_aggregate_duration_fields(aggregate),
             }
         )
-    records.sort(key=lambda row: (-row["total_duration_ns"], row["stage_key"]))
+    records.sort(key=lambda row: (*_duration_sort_key(row), row["stage_key"]))
     return records
 
 
@@ -611,7 +712,7 @@ def _aggregate_generation_kernels(rows: list[dict[str, Any]]) -> list[dict[str, 
         )
     records.sort(
         key=lambda row: (
-            -row["total_duration_ns"],
+            *_duration_sort_key(row),
             row["stage_key"],
             row["function_name"],
         )
@@ -623,11 +724,26 @@ def _profile_only_rows(profile_events: list[dict[str, Any]]) -> list[dict[str, A
     rows = []
     for event in profile_events:
         valid = _require_bool(event.get("valid"), "profile.valid")
-        duration_ns = event.get("duration_ns")
         if valid:
-            duration_ns = _require_int(duration_ns, "profile.duration_ns")
+            duration_ns_available = event.get("clock_fit_available")
+            if duration_ns_available is None:
+                duration_ns_available = "duration_ns" in event
+            else:
+                duration_ns_available = _require_bool(
+                    duration_ns_available, "profile.clock_fit_available"
+                )
+            duration_ns = (
+                _optional_nonnegative_int(event.get("duration_ns"), "duration_ns")
+                if duration_ns_available
+                else None
+            )
+            duration_ticks = _optional_nonnegative_int(
+                event.get("duration_ticks"), "duration_ticks"
+            )
         else:
+            duration_ns_available = False
             duration_ns = None
+            duration_ticks = None
         rows.append(
             {
                 "stage": "profile_only",
@@ -650,7 +766,9 @@ def _profile_only_rows(profile_events: list[dict[str, Any]]) -> list[dict[str, A
                     _u32_triplet(event.get("workgroup_size"), "workgroup_size")
                 ),
                 "valid": valid,
+                "duration_ns_available": duration_ns_available,
                 "duration_ns": duration_ns,
+                "duration_ticks": duration_ticks,
             }
         )
     return rows
@@ -669,7 +787,7 @@ def _aggregate_profile_only_rows(rows: list[dict[str, Any]]) -> list[dict[str, A
                 **_kernel_aggregate_duration_fields(aggregate),
             }
         )
-    records.sort(key=lambda row: (-row["total_duration_ns"], row["function_name"]))
+    records.sort(key=lambda row: (*_duration_sort_key(row), row["function_name"]))
     return records
 
 

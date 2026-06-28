@@ -195,8 +195,10 @@ def _profile_event(
     command_index: int,
     submission_id: int = 20,
     command_buffer_id: int = 30,
+    duration_ticks: int | None = None,
+    clock_fit_available: bool | None = None,
 ) -> dict[str, object]:
-    return {
+    event = {
         "type": "dispatch_event",
         "event_id": event_id,
         "submission_id": submission_id,
@@ -208,6 +210,11 @@ def _profile_event(
         "valid": True,
         "duration_ns": duration_ns,
     }
+    if duration_ticks is not None:
+        event["duration_ticks"] = duration_ticks
+    if clock_fit_available is not None:
+        event["clock_fit_available"] = clock_fit_available
+    return event
 
 
 def _generation_profile() -> list[dict[str, object]]:
@@ -313,6 +320,28 @@ class DispatchProfileJoinTest(unittest.TestCase):
             report["by_kernel"], "dit_conditioned", "dit.forward"
         )
         self.assertEqual(dit_forward["total_duration_ns"], 1200)
+
+    def test_preserves_ticks_when_clock_fit_is_unavailable(self) -> None:
+        profile = _profile()
+        profile[0] = dict(profile[0])
+        profile[0]["clock_fit_available"] = False
+        profile[0]["duration_ns"] = 0
+        profile[0]["duration_ticks"] = 100
+        profile[1] = dict(profile[1])
+        profile[1]["clock_fit_available"] = False
+        profile[1]["duration_ns"] = 0
+        profile[1]["duration_ticks"] = 50
+
+        report = dispatch_profile_join.join_dispatch_profile(_plan(), profile)
+
+        self.assertEqual(report["summary"]["duration_ns_available_count"], 0)
+        self.assertIsNone(report["summary"]["total_duration_ns"])
+        self.assertEqual(report["summary"]["duration_ticks_available_count"], 2)
+        self.assertEqual(report["summary"]["total_duration_ticks"], 150)
+        self.assertIsNone(report["dispatches"][0]["duration_ns"])
+        self.assertEqual(report["dispatches"][0]["duration_ticks"], 100)
+        self.assertEqual(report["by_kernel"][0]["function_name"], "id4_test_first")
+        self.assertEqual(report["by_kernel"][0]["total_duration_ticks"], 100)
 
     def test_rejects_generation_profile_without_stage_group(self) -> None:
         profile = _generation_profile()
