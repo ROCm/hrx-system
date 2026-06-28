@@ -9,6 +9,7 @@
 #include <cstring>
 #include <memory>
 
+#include "experimental/id4/stages/qwen3_vl_program.h"
 #include "experimental/id4/stages/test_util.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -94,6 +95,186 @@ static iree_string_view_t LongFullRequestJson() {
       "with umbrellas and neon signs\",\"generation\":{\"latent_width\":8,"
       "\"latent_height\":8,\"denoise_steps\":2,\"seed\":1,"
       "\"guidance_scale\":3.5}}");
+}
+
+static iree_string_view_t WideLongFullRequestJson() {
+  return IREE_SV(
+      "{\"prompt\":\"three people walking through a reflective city street "
+      "with umbrellas, neon signs, storefront windows, wet pavement, careful "
+      "hands, and realistic faces\",\"generation\":{\"latent_width\":16,"
+      "\"latent_height\":8,\"denoise_steps\":3,\"seed\":2,"
+      "\"guidance_scale\":3.5}}");
+}
+
+static id4_pipeline_tensor_shape_t TensorShape(
+    id4_pipeline_program_shape_t program_shape) {
+  id4_pipeline_tensor_shape_t shape;
+  std::memset(&shape, 0, sizeof(shape));
+  shape.rank = program_shape.rank;
+  for (uint32_t i = 0; i < shape.rank; ++i) {
+    shape.dims[i] = program_shape.dims[i];
+  }
+  return shape;
+}
+
+static bool ShapeEquals(id4_pipeline_tensor_shape_t lhs,
+                        id4_pipeline_tensor_shape_t rhs) {
+  if (lhs.rank != rhs.rank) return false;
+  for (uint32_t i = 0; i < lhs.rank; ++i) {
+    if (lhs.dims[i] != rhs.dims[i]) return false;
+  }
+  return true;
+}
+
+static const id4_pipeline_plan_t* FindStagePlan(
+    const id4_ideogram4_generation_plan_t* plan, iree_string_view_t stage_key) {
+  const iree_host_size_t stage_count =
+      id4_ideogram4_generation_plan_stage_count(plan);
+  for (iree_host_size_t i = 0; i < stage_count; ++i) {
+    iree_string_view_t current_key = iree_string_view_empty();
+    const id4_pipeline_plan_t* stage_plan = nullptr;
+    IREE_CHECK_OK(id4_ideogram4_generation_plan_stage_at(plan, i, &current_key,
+                                                         &stage_plan));
+    if (iree_string_view_equal(current_key, stage_key)) return stage_plan;
+  }
+  return nullptr;
+}
+
+static const id4_pipeline_tensor_layout_t* FindBoundaryLayout(
+    const id4_pipeline_plan_t* plan, iree_string_view_t name) {
+  for (iree_host_size_t i = 0;
+       i < id4_pipeline_plan_boundary_tensor_count(plan); ++i) {
+    const id4_pipeline_boundary_tensor_plan_t* boundary =
+        id4_pipeline_plan_boundary_tensor_at(plan, i);
+    if (boundary && iree_string_view_equal(boundary->layout.name, name)) {
+      return &boundary->layout;
+    }
+  }
+  return nullptr;
+}
+
+static void ExpectBoundaryLayout(const id4_pipeline_plan_t* plan,
+                                 iree_string_view_t name,
+                                 id4_pipeline_tensor_dtype_t dtype,
+                                 id4_pipeline_tensor_shape_t shape) {
+  const id4_pipeline_tensor_layout_t* layout = FindBoundaryLayout(plan, name);
+  ASSERT_NE(layout, nullptr) << id4::test::ToString(name);
+  EXPECT_EQ(layout->dtype, dtype) << id4::test::ToString(name);
+  EXPECT_TRUE(ShapeEquals(layout->shape, shape)) << id4::test::ToString(name);
+}
+
+static void ExpectNoBoundaryLayout(const id4_pipeline_plan_t* plan,
+                                   iree_string_view_t name) {
+  EXPECT_EQ(FindBoundaryLayout(plan, name), nullptr)
+      << id4::test::ToString(name);
+}
+
+static void ExpectGenerationStageBoundaryContract(
+    const id4_ideogram4_generation_plan_t* plan,
+    id4_ideogram4_generation_plan_summary_t summary) {
+  const id4_qwen3_vl_model_config_t* qwen_model =
+      id4_qwen3_vl_program_ideogram4_model_config();
+  const id4_ideogram4_dit_model_config_t* dit_model =
+      id4_ideogram4_dit_program_ideogram4_model_config();
+  const uint64_t condition_row_count =
+      (uint64_t)qwen_model->selected_layer_count * qwen_model->hidden_size;
+  ASSERT_EQ(condition_row_count, dit_model->llm_feature_count);
+  const uint64_t image_token_count = summary.diffusion_latent_shape.dims[0] *
+                                     summary.diffusion_latent_shape.dims[1];
+  const uint64_t conditioned_token_count =
+      summary.qwen_token_count + image_token_count;
+  const uint64_t attention_head_size =
+      dit_model->hidden_size / dit_model->attention_head_count;
+  const id4_pipeline_tensor_shape_t latent_shape =
+      TensorShape(summary.diffusion_latent_shape);
+  const id4_pipeline_tensor_shape_t decoded_image_shape =
+      TensorShape(summary.decoded_image_shape);
+
+  const id4_pipeline_plan_t* qwen_plan = FindStagePlan(plan, IREE_SV("qwen"));
+  ASSERT_NE(qwen_plan, nullptr);
+  ExpectBoundaryLayout(
+      qwen_plan, IREE_SV("token_ids"), ID4_PIPELINE_TENSOR_DTYPE_I32,
+      TensorShape(
+          id4_pipeline_program_make_shape_rank1(summary.qwen_token_count)));
+  ExpectBoundaryLayout(
+      qwen_plan, IREE_SV("attention_mask"), ID4_PIPELINE_TENSOR_DTYPE_F32,
+      TensorShape(id4_pipeline_program_make_shape_rank2(
+          summary.qwen_token_count, summary.qwen_token_count)));
+  ExpectBoundaryLayout(
+      qwen_plan, IREE_SV("token_weights"), ID4_PIPELINE_TENSOR_DTYPE_F32,
+      TensorShape(
+          id4_pipeline_program_make_shape_rank1(summary.qwen_token_count)));
+  ExpectBoundaryLayout(qwen_plan, IREE_SV("condition"),
+                       ID4_PIPELINE_TENSOR_DTYPE_F32,
+                       TensorShape(id4_pipeline_program_make_shape_rank2(
+                           condition_row_count, summary.qwen_token_count)));
+
+  const id4_pipeline_plan_t* conditioned_plan =
+      FindStagePlan(plan, IREE_SV("dit_conditioned"));
+  ASSERT_NE(conditioned_plan, nullptr);
+  ExpectBoundaryLayout(conditioned_plan, IREE_SV("condition"),
+                       ID4_PIPELINE_TENSOR_DTYPE_F32,
+                       TensorShape(id4_pipeline_program_make_shape_rank2(
+                           condition_row_count, summary.qwen_token_count)));
+  ExpectBoundaryLayout(conditioned_plan, IREE_SV("image_indicator"),
+                       ID4_PIPELINE_TENSOR_DTYPE_I32,
+                       TensorShape(id4_pipeline_program_make_shape_rank2(
+                           conditioned_token_count, 1)));
+  ExpectBoundaryLayout(
+      conditioned_plan, IREE_SV("position_embedding"),
+      ID4_PIPELINE_TENSOR_DTYPE_F32,
+      TensorShape(id4_pipeline_program_make_shape_rank4(
+          2, 2, attention_head_size / 2, conditioned_token_count)));
+  ExpectBoundaryLayout(conditioned_plan, IREE_SV("x"),
+                       ID4_PIPELINE_TENSOR_DTYPE_F32, latent_shape);
+  ExpectBoundaryLayout(conditioned_plan, IREE_SV("velocity"),
+                       ID4_PIPELINE_TENSOR_DTYPE_F32, latent_shape);
+
+  const id4_pipeline_plan_t* unconditioned_plan =
+      FindStagePlan(plan, IREE_SV("dit_unconditioned"));
+  ASSERT_NE(unconditioned_plan, nullptr);
+  ExpectNoBoundaryLayout(unconditioned_plan, IREE_SV("condition"));
+  ExpectBoundaryLayout(
+      unconditioned_plan, IREE_SV("image_indicator"),
+      ID4_PIPELINE_TENSOR_DTYPE_I32,
+      TensorShape(id4_pipeline_program_make_shape_rank2(image_token_count, 1)));
+  ExpectBoundaryLayout(unconditioned_plan, IREE_SV("position_embedding"),
+                       ID4_PIPELINE_TENSOR_DTYPE_F32,
+                       TensorShape(id4_pipeline_program_make_shape_rank4(
+                           2, 2, attention_head_size / 2, image_token_count)));
+  ExpectBoundaryLayout(unconditioned_plan, IREE_SV("x"),
+                       ID4_PIPELINE_TENSOR_DTYPE_F32, latent_shape);
+  ExpectBoundaryLayout(unconditioned_plan, IREE_SV("velocity"),
+                       ID4_PIPELINE_TENSOR_DTYPE_F32, latent_shape);
+
+  const id4_pipeline_plan_t* noise_plan =
+      FindStagePlan(plan, IREE_SV("sampler_noise"));
+  ASSERT_NE(noise_plan, nullptr);
+  ExpectBoundaryLayout(noise_plan, IREE_SV("seed"),
+                       ID4_PIPELINE_TENSOR_DTYPE_I32,
+                       TensorShape(id4_pipeline_program_make_shape_rank1(2)));
+  ExpectBoundaryLayout(noise_plan, IREE_SV("x"), ID4_PIPELINE_TENSOR_DTYPE_F32,
+                       latent_shape);
+
+  const id4_pipeline_plan_t* sampler_plan =
+      FindStagePlan(plan, IREE_SV("sampler_denoise"));
+  ASSERT_NE(sampler_plan, nullptr);
+  ExpectBoundaryLayout(sampler_plan, IREE_SV("x_t"),
+                       ID4_PIPELINE_TENSOR_DTYPE_F32, latent_shape);
+  ExpectBoundaryLayout(sampler_plan, IREE_SV("cond_out"),
+                       ID4_PIPELINE_TENSOR_DTYPE_F32, latent_shape);
+  ExpectBoundaryLayout(sampler_plan, IREE_SV("uncond_out"),
+                       ID4_PIPELINE_TENSOR_DTYPE_F32, latent_shape);
+  ExpectBoundaryLayout(sampler_plan, IREE_SV("x_next"),
+                       ID4_PIPELINE_TENSOR_DTYPE_F32, latent_shape);
+
+  const id4_pipeline_plan_t* decode_plan =
+      FindStagePlan(plan, IREE_SV("decode"));
+  ASSERT_NE(decode_plan, nullptr);
+  ExpectBoundaryLayout(decode_plan, IREE_SV("media.latent.diffusion"),
+                       ID4_PIPELINE_TENSOR_DTYPE_F32, latent_shape);
+  ExpectBoundaryLayout(decode_plan, IREE_SV("media.image.decoded"),
+                       ID4_PIPELINE_TENSOR_DTYPE_F32, decoded_image_shape);
 }
 
 class SessionTest : public ::testing::Test {
@@ -371,6 +552,8 @@ TEST_F(SessionTest, PlansGenerationFromDynamicPromptLength) {
   EXPECT_EQ(long_summary.dit_feed_forward_implementation,
             ID4_IDEOGRAM4_DIT_FEED_FORWARD_IMPLEMENTATION_PYTORCH_PARITY);
   EXPECT_EQ(long_summary.vae_tiling.mode, ID4_VAE_TILING_MODE_DISABLED);
+  ExpectGenerationStageBoundaryContract(short_plan_owner.get(), short_summary);
+  ExpectGenerationStageBoundaryContract(long_plan_owner.get(), long_summary);
 
   iree_string_builder_t builder;
   iree_string_builder_initialize(iree_allocator_system(), &builder);
@@ -387,6 +570,33 @@ TEST_F(SessionTest, PlansGenerationFromDynamicPromptLength) {
   EXPECT_NE(iree_string_view_find(json, IREE_SV("\"stages\""), 0),
             IREE_STRING_VIEW_NPOS);
   iree_string_builder_deinitialize(&builder);
+}
+
+TEST_F(SessionTest, PlansGenerationBoundaryShapesFromDynamicLatentShape) {
+  TokenizerPtr tokenizer = LoadTokenizer();
+  ScopedRequest request;
+  IREE_ASSERT_OK(id4_ideogram4_request_parse_json(
+      WideLongFullRequestJson(), iree_allocator_system(), &request.value));
+
+  SessionPtr session = CreateLoadedSession();
+  GenerationPlanPtr plan =
+      PlanGeneration(session.get(), tokenizer.get(), &request.value);
+
+  id4_ideogram4_generation_plan_summary_t summary;
+  IREE_ASSERT_OK(id4_ideogram4_generation_plan_summary(plan.get(), &summary));
+  EXPECT_GT(summary.qwen_token_count, 0u);
+  EXPECT_EQ(summary.denoise_step_count, 3u);
+  EXPECT_EQ(summary.diffusion_latent_shape.rank, 4u);
+  EXPECT_EQ(summary.diffusion_latent_shape.dims[0], 16u);
+  EXPECT_EQ(summary.diffusion_latent_shape.dims[1], 8u);
+  EXPECT_EQ(summary.diffusion_latent_shape.dims[2], 128u);
+  EXPECT_EQ(summary.diffusion_latent_shape.dims[3], 1u);
+  EXPECT_EQ(summary.decoded_image_shape.rank, 4u);
+  EXPECT_EQ(summary.decoded_image_shape.dims[0], 256u);
+  EXPECT_EQ(summary.decoded_image_shape.dims[1], 128u);
+  EXPECT_EQ(summary.decoded_image_shape.dims[2], 3u);
+  EXPECT_EQ(summary.decoded_image_shape.dims[3], 1u);
+  ExpectGenerationStageBoundaryContract(plan.get(), summary);
 }
 
 TEST_F(SessionTest, PlansFp8E4m3DitSources) {

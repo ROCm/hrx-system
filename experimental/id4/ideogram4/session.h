@@ -274,6 +274,19 @@ iree_status_t id4_ideogram4_generation_plan_summary(
     const id4_ideogram4_generation_plan_t* plan,
     id4_ideogram4_generation_plan_summary_t* out_summary);
 
+// Returns the number of coarse stage plans retained by |plan|.
+iree_host_size_t id4_ideogram4_generation_plan_stage_count(
+    const id4_ideogram4_generation_plan_t* plan);
+
+// Returns borrowed metadata for coarse stage plan |index|.
+//
+// |out_stage_key| receives the same stable key used by generation-plan JSON.
+// |out_stage_plan| receives a borrowed plan valid until |plan| is released.
+iree_status_t id4_ideogram4_generation_plan_stage_at(
+    const id4_ideogram4_generation_plan_t* plan, iree_host_size_t index,
+    iree_string_view_t* out_stage_key,
+    const id4_pipeline_plan_t** out_stage_plan);
+
 // Appends an inspectable generation-plan JSON object to |builder|.
 iree_status_t id4_ideogram4_generation_plan_format_json(
     const id4_ideogram4_generation_plan_t* plan,

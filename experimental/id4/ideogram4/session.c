@@ -1132,6 +1132,11 @@ iree_status_t id4_ideogram4_generation_plan_summary(
   return iree_ok_status();
 }
 
+iree_host_size_t id4_ideogram4_generation_plan_stage_count(
+    const id4_ideogram4_generation_plan_t* plan) {
+  return plan ? IREE_ARRAYSIZE(id4_ideogram4_generation_stage_descriptors) : 0;
+}
+
 static iree_status_t id4_ideogram4_generation_plan_append_shape_json(
     iree_string_builder_t* builder, id4_pipeline_program_shape_t shape) {
   IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
@@ -1189,6 +1194,41 @@ static const id4_pipeline_plan_t* id4_ideogram4_generation_stage_plan(
     default:
       return NULL;
   }
+}
+
+iree_status_t id4_ideogram4_generation_plan_stage_at(
+    const id4_ideogram4_generation_plan_t* plan, iree_host_size_t index,
+    iree_string_view_t* out_stage_key,
+    const id4_pipeline_plan_t** out_stage_plan) {
+  if (!plan || !out_stage_key || !out_stage_plan) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "Ideogram 4 generation plan, stage key output, and stage plan output "
+        "are required");
+  }
+  *out_stage_key = iree_string_view_empty();
+  *out_stage_plan = NULL;
+  const iree_host_size_t stage_count =
+      id4_ideogram4_generation_plan_stage_count(plan);
+  if (index >= stage_count) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "Ideogram 4 generation plan stage index %" PRIhsz
+                            " exceeds stage count %" PRIhsz,
+                            index, stage_count);
+  }
+
+  const id4_ideogram4_generation_stage_descriptor_t* descriptor =
+      &id4_ideogram4_generation_stage_descriptors[index];
+  const id4_pipeline_plan_t* stage_plan =
+      id4_ideogram4_generation_stage_plan(plan, descriptor->ordinal);
+  if (!stage_plan) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "Ideogram 4 generation plan stage %s is missing",
+                            descriptor->key);
+  }
+  *out_stage_key = iree_make_cstring_view(descriptor->key);
+  *out_stage_plan = stage_plan;
+  return iree_ok_status();
 }
 
 static iree_device_size_t id4_ideogram4_generation_plan_parameter_bytes(
