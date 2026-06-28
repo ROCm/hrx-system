@@ -25,6 +25,15 @@ py_binary(
 )
 
 py_binary(
+    name = "generation_benchmark_summary",
+    srcs = [
+        "generation_benchmark_summary.py",
+        "smoke_test.py",
+    ],
+    imports = ["."],
+)
+
+py_binary(
     name = "smoke_test",
     srcs = ["smoke_test.py"],
 )
@@ -47,6 +56,16 @@ py_test(
         "generate_fixture_test.py",
     ],
     deps = [":trace_reduce_lib"],
+)
+
+py_test(
+    name = "generation_benchmark_summary_test",
+    srcs = [
+        "generation_benchmark_summary.py",
+        "generation_benchmark_summary_test.py",
+        "smoke_test.py",
+    ],
+    imports = ["."],
 )
 
 py_test(
