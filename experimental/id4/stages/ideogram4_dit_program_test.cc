@@ -155,6 +155,24 @@ static bool ProgramHasTensorWithShape(
   return false;
 }
 
+static bool ProgramHasBoundedAttentionScratch(
+    const id4_pipeline_program_t* program, id4_pipeline_program_dtype_t dtype,
+    uint32_t attention_head_count, uint32_t padded_token_count) {
+  for (iree_host_size_t i = 0; i < id4_pipeline_program_tensor_count(program);
+       ++i) {
+    const id4_pipeline_program_tensor_record_t* tensor =
+        id4_pipeline_program_tensor_at(program, i);
+    if (!tensor) continue;
+    if (tensor->dtype != dtype) continue;
+    if (tensor->shape.rank != 3) continue;
+    if (tensor->shape.dims[0] != attention_head_count) continue;
+    if (tensor->shape.dims[2] != padded_token_count) continue;
+    if (tensor->shape.dims[1] >= padded_token_count) continue;
+    return true;
+  }
+  return false;
+}
+
 static bool ProgramHasTensor(const id4_pipeline_program_t* program,
                              iree_string_view_t name,
                              id4_pipeline_program_dtype_t dtype,
@@ -552,6 +570,65 @@ TEST(Ideogram4DitProgram, AuthorsMaterializedWmmaAttentionIntermediates) {
   id4_pipeline_program_release(program);
 }
 
+TEST(Ideogram4DitProgram, AuthorsStreamingBf16AttentionContextAsLinearInput) {
+  id4_pipeline_program_shape_t latent_shape =
+      id4_pipeline_program_make_shape_rank4(1, 2, 4, 1);
+  id4_ideogram4_dit_program_options_t options =
+      MakeProgramOptions(latent_shape);
+  options.activation_format =
+      ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT;
+  options.attention_implementation =
+      ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_STREAMING;
+
+  id4_pipeline_program_t* program = CreateForwardProgram(&options);
+  EXPECT_TRUE(ProgramHasTensor(
+      program, IREE_SV("ideogram4.uncond.layers.0.attention.context"),
+      ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+      id4_pipeline_program_make_shape_rank2(32, options.model.hidden_size)));
+  EXPECT_FALSE(ProgramHasTensor(
+      program, IREE_SV("ideogram4.uncond.layers.0.attention.context"),
+      ID4_PIPELINE_PROGRAM_DTYPE_F32,
+      id4_pipeline_program_make_shape_rank2(options.model.hidden_size, 32)));
+
+  id4_pipeline_program_release(program);
+}
+
+TEST(Ideogram4DitProgram, AuthorsBlockedWmmaAttentionScratchBlocks) {
+  id4_pipeline_program_shape_t latent_shape =
+      id4_pipeline_program_make_shape_rank4(16, 64, 4, 1);
+  id4_ideogram4_dit_program_options_t options =
+      MakeProgramOptions(latent_shape);
+  options.activation_format =
+      ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT;
+  options.attention_implementation =
+      ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_BLOCKED_WMMA;
+
+  id4_pipeline_program_t* program = CreateForwardProgram(&options);
+  const uint32_t padded_token_count = 1024;
+  EXPECT_TRUE(ProgramHasBoundedAttentionScratch(
+      program, ID4_PIPELINE_PROGRAM_DTYPE_F32,
+      options.model.attention_head_count, padded_token_count));
+  EXPECT_TRUE(ProgramHasBoundedAttentionScratch(
+      program, ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+      options.model.attention_head_count, padded_token_count));
+  EXPECT_TRUE(ProgramHasTensorWithShape(
+      program, ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+      id4_pipeline_program_make_shape_rank2(padded_token_count,
+                                            options.model.hidden_size)));
+  EXPECT_FALSE(ProgramHasTensorWithShape(
+      program, ID4_PIPELINE_PROGRAM_DTYPE_F32,
+      id4_pipeline_program_make_shape_rank3(options.model.attention_head_count,
+                                            padded_token_count,
+                                            padded_token_count)));
+  EXPECT_FALSE(ProgramHasTensorWithShape(
+      program, ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+      id4_pipeline_program_make_shape_rank3(options.model.attention_head_count,
+                                            padded_token_count,
+                                            padded_token_count)));
+
+  id4_pipeline_program_release(program);
+}
+
 TEST(Ideogram4DitProgram, AuthorsPyTorchParityFeedForwardIntermediates) {
   id4_pipeline_program_shape_t latent_shape =
       id4_pipeline_program_make_shape_rank4(1, 2, 4, 1);
@@ -629,6 +706,17 @@ TEST(Ideogram4DitProgram, RejectsMaterializedWmmaAttentionWithCanonicalF32) {
       MakeProgramOptions(id4_pipeline_program_make_shape_rank4(1, 2, 4, 1));
   options.attention_implementation =
       ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_MATERIALIZED_WMMA;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_UNIMPLEMENTED,
+                        id4_ideogram4_dit_program_author_forward(
+                            &options, builder_scope.builder()));
+}
+
+TEST(Ideogram4DitProgram, RejectsBlockedWmmaAttentionWithCanonicalF32) {
+  ProgramBuilderScope builder_scope;
+  id4_ideogram4_dit_program_options_t options =
+      MakeProgramOptions(id4_pipeline_program_make_shape_rank4(1, 2, 4, 1));
+  options.attention_implementation =
+      ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_BLOCKED_WMMA;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_UNIMPLEMENTED,
                         id4_ideogram4_dit_program_author_forward(
                             &options, builder_scope.builder()));

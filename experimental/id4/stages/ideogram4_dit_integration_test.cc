@@ -4,8 +4,11 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <limits>
+#include <string>
 #include <vector>
 
 #include "experimental/id4/pipeline/plan.h"
@@ -32,6 +35,10 @@ IREE_FLAG(
 IREE_FLAG(string, id4_plan_output, "",
           "Path that receives the planned ID4 DiT stage JSON before "
           "preparation.");
+IREE_FLAG(
+    string, id4_pytorch_oracle_dir, "",
+    "Directory containing PyTorch DiT oracle .npy tensors using cond/ and "
+    "uncond/ subdirectories.");
 IREE_FLAG(string, dit_parameter_format, "fp8_e4m3",
           "DiT parameter format: bf16 or fp8_e4m3.");
 IREE_FLAG(string, dit_conditioned_fp8_scope, "dit_cond_fp8",
@@ -450,6 +457,338 @@ static iree_status_t CompareExpectedOutputBoundary(
       *expected_output);
 }
 
+typedef struct PytorchOracleTolerance {
+  // Aggregate mean absolute error limit.
+  double mean_absolute_error;
+  // Aggregate p99 absolute error limit.
+  double p99_absolute_error;
+  // Aggregate maximum absolute error limit.
+  double max_absolute_error;
+} PytorchOracleTolerance;
+
+static float LoadF32(const uint8_t* bytes) {
+  float value = 0.0f;
+  std::memcpy(&value, bytes, sizeof(value));
+  return value;
+}
+
+static iree_status_t ShapeElementCount(id4_pipeline_tensor_shape_t shape,
+                                       iree_host_size_t* out_element_count) {
+  iree_host_size_t element_count = 1;
+  for (uint32_t i = 0; i < shape.rank; ++i) {
+    if (shape.dims[i] > std::numeric_limits<iree_host_size_t>::max()) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "tensor dimension %u exceeds host size", i);
+    }
+    const iree_host_size_t dim = static_cast<iree_host_size_t>(shape.dims[i]);
+    if (dim == 0) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "tensor dimension %u is zero", i);
+    }
+    if (element_count > std::numeric_limits<iree_host_size_t>::max() / dim) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "tensor element count overflow");
+    }
+    element_count *= dim;
+  }
+  *out_element_count = element_count;
+  return iree_ok_status();
+}
+
+static id4_pipeline_tensor_shape_t MakeShapeRank3(uint64_t dim0, uint64_t dim1,
+                                                  uint64_t dim2) {
+  id4_pipeline_tensor_shape_t shape = {};
+  shape.rank = 3;
+  shape.dims[0] = dim0;
+  shape.dims[1] = dim1;
+  shape.dims[2] = dim2;
+  return shape;
+}
+
+static std::string JoinPath(iree_string_view_t root, const char* first,
+                            const char* second) {
+  std::string path(root.data, root.size);
+  if (!path.empty() && path.back() != '/') path.push_back('/');
+  path.append(first);
+  if (second && second[0] != '\0') {
+    path.push_back('/');
+    path.append(second);
+  }
+  return path;
+}
+
+static iree_status_t PytorchOracleBranchName(
+    id4_ideogram4_dit_conditioning_mode_t conditioning_mode,
+    const char** out_branch_name) {
+  switch (conditioning_mode) {
+    case ID4_IDEOGRAM4_DIT_CONDITIONING_MODE_CONDITIONED:
+      *out_branch_name = "cond";
+      return iree_ok_status();
+    case ID4_IDEOGRAM4_DIT_CONDITIONING_MODE_UNCONDITIONED:
+      *out_branch_name = "uncond";
+      return iree_ok_status();
+    default:
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "DiT conditioning mode %" PRIu32
+                              " has no PyTorch oracle branch",
+                              (uint32_t)conditioning_mode);
+  }
+}
+
+static iree_status_t PytorchOraclePathForBoundary(
+    iree_string_view_t oracle_directory,
+    id4_ideogram4_dit_conditioning_mode_t conditioning_mode,
+    iree_string_view_t boundary_name, std::string* out_path) {
+  if (!iree_string_view_equal(boundary_name, IREE_SV("velocity"))) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "boundary `%.*s` has no PyTorch oracle path",
+                            static_cast<int>(boundary_name.size),
+                            boundary_name.data);
+  }
+  const char* branch_name = nullptr;
+  IREE_RETURN_IF_ERROR(
+      PytorchOracleBranchName(conditioning_mode, &branch_name));
+  *out_path = JoinPath(oracle_directory, branch_name, "velocity.npy");
+  return iree_ok_status();
+}
+
+static iree_status_t PytorchOraclePathForTap(
+    iree_string_view_t oracle_directory,
+    id4_ideogram4_dit_conditioning_mode_t conditioning_mode,
+    iree_string_view_t tap_name, std::string* out_path) {
+  const char* branch_name = nullptr;
+  IREE_RETURN_IF_ERROR(
+      PytorchOracleBranchName(conditioning_mode, &branch_name));
+  const iree_string_view_t prefix =
+      conditioning_mode == ID4_IDEOGRAM4_DIT_CONDITIONING_MODE_CONDITIONED
+          ? IREE_SV("ideogram4.cond.")
+          : IREE_SV("ideogram4.uncond.");
+  if (!iree_string_view_starts_with(tap_name, prefix)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "diagnostic tap `%.*s` does not match the requested oracle branch",
+        static_cast<int>(tap_name.size), tap_name.data);
+  }
+  const iree_string_view_t relative_name =
+      iree_string_view_remove_prefix(tap_name, prefix.size);
+  *out_path = JoinPath(oracle_directory, branch_name, "taps");
+  out_path->push_back('/');
+  out_path->append(relative_name.data, relative_name.size);
+  out_path->append(".npy");
+  return iree_ok_status();
+}
+
+static iree_status_t ExpectedPytorchOracleShape(
+    const id4_pipeline_tensor_layout_t* actual_layout,
+    id4_pipeline_tensor_shape_t* out_expected_shape) {
+  if (actual_layout->dtype != ID4_PIPELINE_TENSOR_DTYPE_F32) {
+    iree_string_view_t dtype_name =
+        id4_pipeline_tensor_dtype_format(actual_layout->dtype);
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "PyTorch oracle compare requires f32 actual "
+                            "tensors, but `%.*s` is `%.*s`",
+                            static_cast<int>(actual_layout->name.size),
+                            actual_layout->name.data,
+                            static_cast<int>(dtype_name.size), dtype_name.data);
+  }
+  const id4_pipeline_tensor_shape_t actual_shape = actual_layout->shape;
+  if (actual_shape.rank == 4 && actual_shape.dims[3] == 1) {
+    *out_expected_shape = MakeShapeRank3(
+        actual_shape.dims[0], actual_shape.dims[1], actual_shape.dims[2]);
+    return iree_ok_status();
+  }
+  if (actual_shape.rank == 2) {
+    *out_expected_shape =
+        MakeShapeRank3(1, actual_shape.dims[1], actual_shape.dims[0]);
+    return iree_ok_status();
+  }
+  return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                          "actual tensor `%.*s` shape rank %u has no PyTorch "
+                          "oracle mapping",
+                          static_cast<int>(actual_layout->name.size),
+                          actual_layout->name.data, actual_shape.rank);
+}
+
+static iree_status_t PytorchOracleExpectedIndex(
+    const id4_pipeline_tensor_layout_t* actual_layout,
+    iree_host_size_t actual_index, iree_host_size_t* out_expected_index) {
+  const id4_pipeline_tensor_shape_t actual_shape = actual_layout->shape;
+  if (actual_shape.rank == 4 && actual_shape.dims[3] == 1) {
+    *out_expected_index = actual_index;
+    return iree_ok_status();
+  }
+  if (actual_shape.rank == 2) {
+    const iree_host_size_t hidden_size =
+        static_cast<iree_host_size_t>(actual_shape.dims[0]);
+    const iree_host_size_t token_count =
+        static_cast<iree_host_size_t>(actual_shape.dims[1]);
+    const iree_host_size_t hidden_ordinal = actual_index / token_count;
+    const iree_host_size_t token_ordinal = actual_index % token_count;
+    *out_expected_index = token_ordinal * hidden_size + hidden_ordinal;
+    return iree_ok_status();
+  }
+  return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                          "actual tensor `%.*s` shape rank %u has no PyTorch "
+                          "oracle index mapping",
+                          static_cast<int>(actual_layout->name.size),
+                          actual_layout->name.data, actual_shape.rank);
+}
+
+static iree_status_t CompareBindingWithPytorchOracle(
+    iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_buffer_binding_t* binding,
+    iree_hal_semaphore_list_t wait_list,
+    const id4_pipeline_tensor_layout_t* actual_layout,
+    iree_string_view_t oracle_path, PytorchOracleTolerance tolerance) {
+  id4_pipeline_tensor_shape_t expected_shape = {};
+  IREE_RETURN_IF_ERROR(
+      ExpectedPytorchOracleShape(actual_layout, &expected_shape));
+  std::vector<uint8_t> expected_payload;
+  IREE_RETURN_IF_ERROR(id4::test::LoadReferenceTensorPayload(
+      oracle_path, ID4_PIPELINE_TENSOR_DTYPE_F32, expected_shape,
+      &expected_payload));
+
+  std::vector<uint8_t> actual_payload;
+  IREE_RETURN_IF_ERROR(id4::test::ReadBindingToHost(
+      device, queue_affinity, binding, wait_list, &actual_payload));
+  iree_host_size_t actual_element_count = 0;
+  IREE_RETURN_IF_ERROR(
+      ShapeElementCount(actual_layout->shape, &actual_element_count));
+  if (actual_payload.size() != actual_element_count * sizeof(float)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "actual tensor `%.*s` byte length %zu does not match f32 shape byte "
+        "length %" PRIhsz,
+        static_cast<int>(actual_layout->name.size), actual_layout->name.data,
+        actual_payload.size(), actual_element_count * sizeof(float));
+  }
+  if (expected_payload.size() != actual_element_count * sizeof(float)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "PyTorch oracle `%.*s` byte length %zu does not match actual element "
+        "byte length %" PRIhsz,
+        static_cast<int>(oracle_path.size), oracle_path.data,
+        expected_payload.size(), actual_element_count * sizeof(float));
+  }
+
+  std::vector<float> absolute_errors;
+  absolute_errors.reserve(actual_element_count);
+  double mean_absolute_error = 0.0;
+  double max_absolute_error = 0.0;
+  iree_host_size_t max_index = 0;
+  for (iree_host_size_t actual_index = 0; actual_index < actual_element_count;
+       ++actual_index) {
+    iree_host_size_t expected_index = 0;
+    IREE_RETURN_IF_ERROR(PytorchOracleExpectedIndex(actual_layout, actual_index,
+                                                    &expected_index));
+    const float actual_value =
+        LoadF32(&actual_payload[actual_index * sizeof(float)]);
+    const float expected_value =
+        LoadF32(&expected_payload[expected_index * sizeof(float)]);
+    const float absolute_error = std::fabs(actual_value - expected_value);
+    absolute_errors.push_back(absolute_error);
+    mean_absolute_error += absolute_error;
+    if (absolute_error > max_absolute_error) {
+      max_absolute_error = absolute_error;
+      max_index = actual_index;
+    }
+  }
+  mean_absolute_error /=
+      static_cast<double>(std::max<iree_host_size_t>(actual_element_count, 1));
+  std::sort(absolute_errors.begin(), absolute_errors.end());
+  const iree_host_size_t p99_index =
+      (absolute_errors.size() * 99) / 100 >= absolute_errors.size()
+          ? absolute_errors.size() - 1
+          : (absolute_errors.size() * 99) / 100;
+  const double p99_absolute_error = absolute_errors[p99_index];
+  if (mean_absolute_error <= tolerance.mean_absolute_error &&
+      p99_absolute_error <= tolerance.p99_absolute_error &&
+      max_absolute_error <= tolerance.max_absolute_error) {
+    return iree_ok_status();
+  }
+  return iree_make_status(
+      IREE_STATUS_FAILED_PRECONDITION,
+      "PyTorch oracle mismatch for `%.*s`: mean_abs=%g/%g p99_abs=%g/%g "
+      "max_abs=%g/%g max_actual_index=%" PRIhsz,
+      static_cast<int>(actual_layout->name.size), actual_layout->name.data,
+      mean_absolute_error, tolerance.mean_absolute_error, p99_absolute_error,
+      tolerance.p99_absolute_error, max_absolute_error,
+      tolerance.max_absolute_error, max_index);
+}
+
+static PytorchOracleTolerance PytorchOracleToleranceForBoundary(
+    iree_string_view_t boundary_name) {
+  (void)boundary_name;
+  return PytorchOracleTolerance{
+      // Mean absolute error limit for exported velocity.
+      /*.mean_absolute_error=*/0.005,
+      // P99 absolute error limit for exported velocity.
+      /*.p99_absolute_error=*/0.025,
+      // Maximum absolute error limit for exported velocity.
+      /*.max_absolute_error=*/0.125,
+  };
+}
+
+static PytorchOracleTolerance PytorchOracleToleranceForTap(
+    iree_string_view_t tap_name) {
+  (void)tap_name;
+  return PytorchOracleTolerance{
+      // Mean absolute error limit for semantic BF16 taps.
+      /*.mean_absolute_error=*/0.002,
+      // P99 absolute error limit for semantic BF16 taps.
+      /*.p99_absolute_error=*/0.010,
+      // Maximum absolute error limit for semantic BF16 taps.
+      /*.max_absolute_error=*/0.125,
+  };
+}
+
+static iree_status_t ComparePytorchOracleOutputBoundary(
+    iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
+    const id4_pipeline_plan_t* plan,
+    const id4::test::BufferBindingSet& boundary_bindings,
+    const id4_ideogram4_dit_request_config_t& request,
+    iree_string_view_t oracle_directory, iree_hal_semaphore_list_t wait_list) {
+  const id4_pipeline_boundary_tensor_plan_t* boundary = nullptr;
+  IREE_RETURN_IF_ERROR(FindBoundaryPlan(plan, IREE_SV("velocity"), &boundary));
+  iree_hal_buffer_binding_t binding = {};
+  IREE_RETURN_IF_ERROR(id4::test::FindBoundaryBinding(
+      plan, boundary_bindings, IREE_SV("velocity"), &binding));
+  std::string oracle_path;
+  IREE_RETURN_IF_ERROR(
+      PytorchOraclePathForBoundary(oracle_directory, request.conditioning_mode,
+                                   IREE_SV("velocity"), &oracle_path));
+  return CompareBindingWithPytorchOracle(
+      device, queue_affinity, &binding, wait_list, &boundary->layout,
+      iree_make_string_view(oracle_path.data(), oracle_path.size()),
+      PytorchOracleToleranceForBoundary(IREE_SV("velocity")));
+}
+
+static iree_status_t ComparePytorchOracleDiagnosticTaps(
+    iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
+    const id4_pipeline_plan_t* plan,
+    const id4::test::BufferBindingSet& diagnostic_tap_bindings,
+    const id4_ideogram4_dit_request_config_t& request,
+    iree_string_view_t oracle_directory, iree_hal_semaphore_list_t wait_list) {
+  for (iree_host_size_t i = 0; i < id4_pipeline_plan_diagnostic_tap_count(plan);
+       ++i) {
+    const id4_pipeline_diagnostic_tap_plan_t* diagnostic_tap =
+        id4_pipeline_plan_diagnostic_tap_at(plan, i);
+    if (!diagnostic_tap) continue;
+    iree_hal_buffer_binding_t binding = {};
+    IREE_RETURN_IF_ERROR(id4::test::FindDiagnosticTapBinding(
+        plan, diagnostic_tap_bindings, diagnostic_tap->name, &binding));
+    std::string oracle_path;
+    IREE_RETURN_IF_ERROR(
+        PytorchOraclePathForTap(oracle_directory, request.conditioning_mode,
+                                diagnostic_tap->name, &oracle_path));
+    IREE_RETURN_IF_ERROR(CompareBindingWithPytorchOracle(
+        device, queue_affinity, &binding, wait_list, &diagnostic_tap->layout,
+        iree_make_string_view(oracle_path.data(), oracle_path.size()),
+        PytorchOracleToleranceForTap(diagnostic_tap->name)));
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t VerifyExportedBoundariesWereWritten(
     iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
     const id4_pipeline_plan_t* plan,
@@ -775,8 +1114,22 @@ static void RunDitFixture(const DitFixtureRunOptions& options) {
         diagnostic_tap_bindings, fixture_tensors, request,
         options.expected_tap_prefix, read_wait.list()));
   }
-  if (iree_all_bits_set(options.flags,
-                        ID4_DIT_FIXTURE_RUN_FLAG_COMPARE_OUTPUT_BOUNDARY)) {
+  iree_string_view_t pytorch_oracle_directory =
+      iree_make_cstring_view(FLAG_id4_pytorch_oracle_dir);
+  if (!iree_string_view_is_empty(pytorch_oracle_directory)) {
+    if (captures_diagnostic_taps) {
+      IREE_ASSERT_OK(ComparePytorchOracleDiagnosticTaps(
+          context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, plan.get(),
+          diagnostic_tap_bindings, request, pytorch_oracle_directory,
+          read_wait.list()));
+    }
+    IREE_ASSERT_OK(ComparePytorchOracleOutputBoundary(
+        context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, plan.get(),
+        boundary_bindings, request, pytorch_oracle_directory,
+        read_wait.list()));
+  } else if (iree_all_bits_set(
+                 options.flags,
+                 ID4_DIT_FIXTURE_RUN_FLAG_COMPARE_OUTPUT_BOUNDARY)) {
     IREE_ASSERT_OK(CompareExpectedOutputBoundary(
         context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, plan.get(),
         boundary_bindings, fixture_tensors, options.expected_output_name,
@@ -843,6 +1196,32 @@ TEST(Ideogram4DitStageIntegration,
       .expected_output_name = iree_string_view_empty(),
       .capture_run_id =
           IREE_SV("ideogram4_dit_materialized_wmma_attention_integration"),
+      .flags = ID4_DIT_FIXTURE_RUN_FLAG_VERIFY_DIAGNOSTIC_TAPS_WRITTEN,
+  });
+}
+
+TEST(Ideogram4DitStageIntegration, PrepareAndIssueBlockedWmmaAttentionFixture) {
+  const iree_string_view_t diagnostic_tap_names[] = {
+      IREE_SV("ideogram4.cond.layers.0.attention.context"),
+      IREE_SV("ideogram4.cond.layers.0.attention.output"),
+  };
+  RunDitFixture(DitFixtureRunOptions{
+      .activation_format =
+          ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT,
+      .attention_implementation =
+          ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_BLOCKED_WMMA,
+      .feed_forward_implementation =
+          ID4_IDEOGRAM4_DIT_FEED_FORWARD_IMPLEMENTATION_PYTORCH_PARITY,
+      .input_stage = IREE_SV("ideogram4.cond.input"),
+      .expected_tap_prefix = iree_string_view_empty(),
+      .diagnostic_tap_names =
+          {
+              IREE_ARRAYSIZE(diagnostic_tap_names),
+              diagnostic_tap_names,
+          },
+      .expected_output_name = iree_string_view_empty(),
+      .capture_run_id =
+          IREE_SV("ideogram4_dit_blocked_wmma_attention_integration"),
       .flags = ID4_DIT_FIXTURE_RUN_FLAG_VERIFY_DIAGNOSTIC_TAPS_WRITTEN,
   });
 }

@@ -315,6 +315,12 @@ iree_status_t id4_ideogram4_dit_program_dispatch_attention_bf16(
     id4_pipeline_program_tensor_t query, id4_pipeline_program_tensor_t key,
     id4_pipeline_program_tensor_t value, id4_pipeline_program_tensor_t output);
 
+iree_status_t id4_ideogram4_dit_program_dispatch_attention_bf16_linear_input(
+    id4_pipeline_program_builder_t* builder, iree_string_view_t name,
+    uint32_t token_count, uint32_t attention_head_count, uint32_t head_size,
+    id4_pipeline_program_tensor_t query, id4_pipeline_program_tensor_t key,
+    id4_pipeline_program_tensor_t value, id4_pipeline_program_tensor_t output);
+
 iree_status_t
 id4_ideogram4_dit_program_dispatch_attention_qk_scores_all_heads_bf16_f32_wmma(
     id4_pipeline_program_builder_t* builder, iree_string_view_t name,
@@ -335,6 +341,33 @@ iree_status_t
 id4_ideogram4_dit_program_dispatch_attention_pv_all_heads_bf16_bf16_wmma(
     id4_pipeline_program_builder_t* builder, iree_string_view_t name,
     uint32_t valid_token_count, uint32_t padded_token_count,
+    uint32_t attention_head_count, uint32_t head_size,
+    id4_pipeline_program_tensor_t probabilities,
+    id4_pipeline_program_tensor_t value, id4_pipeline_program_tensor_t output);
+
+iree_status_t
+id4_ideogram4_dit_program_dispatch_attention_blocked_qk_scores_bf16_f32_wmma(
+    id4_pipeline_program_builder_t* builder, iree_string_view_t name,
+    uint32_t valid_token_count, uint32_t padded_token_count,
+    uint32_t query_block_offset, uint32_t query_block_token_count,
+    uint32_t attention_head_count, uint32_t head_size,
+    id4_pipeline_program_tensor_t query, id4_pipeline_program_tensor_t key,
+    id4_pipeline_program_tensor_t scores);
+
+iree_status_t
+id4_ideogram4_dit_program_dispatch_attention_blocked_softmax_f32_bf16(
+    id4_pipeline_program_builder_t* builder, iree_string_view_t name,
+    uint32_t valid_token_count, uint32_t padded_token_count,
+    uint32_t query_block_offset, uint32_t query_block_token_count,
+    uint32_t attention_head_count, uint32_t head_size,
+    id4_pipeline_program_tensor_t scores,
+    id4_pipeline_program_tensor_t probabilities);
+
+iree_status_t
+id4_ideogram4_dit_program_dispatch_attention_blocked_pv_bf16_bf16_wmma(
+    id4_pipeline_program_builder_t* builder, iree_string_view_t name,
+    uint32_t valid_token_count, uint32_t padded_token_count,
+    uint32_t query_block_offset, uint32_t query_block_token_count,
     uint32_t attention_head_count, uint32_t head_size,
     id4_pipeline_program_tensor_t probabilities,
     id4_pipeline_program_tensor_t value, id4_pipeline_program_tensor_t output);

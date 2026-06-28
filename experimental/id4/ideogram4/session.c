@@ -843,6 +843,7 @@ static iree_status_t id4_ideogram4_validate_generation_policy(
   switch (policy.dit_attention_implementation) {
     case ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_STREAMING:
     case ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_MATERIALIZED_WMMA:
+    case ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_BLOCKED_WMMA:
       break;
     default:
       return iree_make_status(

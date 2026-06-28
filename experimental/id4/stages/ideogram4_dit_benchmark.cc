@@ -31,7 +31,8 @@ IREE_FLAG(string, id4_plan_output_dir, "",
 IREE_FLAG(string, dit_parameter_format, "fp8_e4m3",
           "DiT parameter format: bf16 or fp8_e4m3.");
 IREE_FLAG(string, dit_attention_implementation, "materialized_wmma",
-          "DiT attention implementation: streaming or materialized_wmma.");
+          "DiT attention implementation: streaming, materialized_wmma, or "
+          "blocked_wmma.");
 IREE_FLAG(string, dit_feed_forward_implementation, "pytorch_parity",
           "DiT feed-forward implementation: fused_product or "
           "pytorch_parity.");
@@ -171,9 +172,15 @@ static iree_status_t ParseDitAttentionImplementation(
         ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_MATERIALIZED_WMMA;
     return iree_ok_status();
   }
+  if (iree_string_view_equal(value, IREE_SV("blocked_wmma"))) {
+    *out_implementation =
+        ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_BLOCKED_WMMA;
+    return iree_ok_status();
+  }
   return iree_make_status(
       IREE_STATUS_INVALID_ARGUMENT,
-      "--dit_attention_implementation must be streaming or materialized_wmma");
+      "--dit_attention_implementation must be streaming, materialized_wmma, or "
+      "blocked_wmma");
 }
 
 static iree_string_view_t AttentionImplementationName(
@@ -183,6 +190,8 @@ static iree_string_view_t AttentionImplementationName(
       return IREE_SV("streaming");
     case ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_MATERIALIZED_WMMA:
       return IREE_SV("materialized_wmma");
+    case ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_BLOCKED_WMMA:
+      return IREE_SV("blocked_wmma");
     default:
       return IREE_SV("invalid");
   }

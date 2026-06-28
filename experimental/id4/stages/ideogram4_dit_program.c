@@ -257,6 +257,7 @@ id4_ideogram4_dit_program_validate_attention_implementation(
   switch (attention_implementation) {
     case ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_STREAMING:
     case ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_MATERIALIZED_WMMA:
+    case ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_BLOCKED_WMMA:
       return iree_ok_status();
     default:
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -2446,6 +2447,17 @@ iree_status_t id4_ideogram4_dit_program_dispatch_attention_bf16(
       token_count, attention_head_count, head_size, query, key, value, output);
 }
 
+iree_status_t id4_ideogram4_dit_program_dispatch_attention_bf16_linear_input(
+    id4_pipeline_program_builder_t* builder, iree_string_view_t name,
+    uint32_t token_count, uint32_t attention_head_count, uint32_t head_size,
+    id4_pipeline_program_tensor_t query, id4_pipeline_program_tensor_t key,
+    id4_pipeline_program_tensor_t value, id4_pipeline_program_tensor_t output) {
+  return id4_ideogram4_dit_program_dispatch_attention_export(
+      builder, name, IREE_SV("ideogram4/attention_query_block8_rounded_bf16"),
+      IREE_SV("id4_ideogram4_attention_query_block8_rounded_bf16_linear_input"),
+      token_count, attention_head_count, head_size, query, key, value, output);
+}
+
 static iree_status_t
 id4_ideogram4_dit_program_dispatch_attention_materialized_export(
     id4_pipeline_program_builder_t* builder, iree_string_view_t name,
@@ -2530,6 +2542,102 @@ id4_ideogram4_dit_program_dispatch_attention_pv_all_heads_bf16_bf16_wmma(
       builder, name,
       IREE_SV("id4_ideogram4_attention_pv_all_heads_bf16_bf16_wmma"),
       valid_token_count, padded_token_count, attention_head_count, head_size,
+      IREE_ARRAYSIZE(bindings), bindings);
+}
+
+static iree_status_t
+id4_ideogram4_dit_program_dispatch_attention_blocked_export(
+    id4_pipeline_program_builder_t* builder, iree_string_view_t name,
+    iree_string_view_t function_name, uint32_t valid_token_count,
+    uint32_t padded_token_count, uint32_t query_block_offset,
+    uint32_t query_block_token_count, uint32_t attention_head_count,
+    uint32_t head_size, iree_host_size_t binding_count,
+    id4_pipeline_program_dispatch_binding_t* bindings) {
+  const id4_ideogram4_dit_program_config_value_t config_values[] = {
+      {IREE_SV("id4.ideogram4.attention_blocked_wmma.valid_token_count"),
+       valid_token_count},
+      {IREE_SV("id4.ideogram4.attention_blocked_wmma.padded_token_count"),
+       padded_token_count},
+      {IREE_SV("id4.ideogram4.attention_blocked_wmma.query_block_offset"),
+       query_block_offset},
+      {IREE_SV("id4.ideogram4.attention_blocked_wmma.query_block_token_count"),
+       query_block_token_count},
+      {IREE_SV("id4.ideogram4.attention_blocked_wmma.attention_head_count"),
+       attention_head_count},
+      {IREE_SV("id4.ideogram4.attention_blocked_wmma.head_size"), head_size},
+  };
+  char value_buffers[ID4_IDEOGRAM4_DIT_MAX_KERNEL_CONFIG_BINDING_COUNT]
+                    [ID4_IDEOGRAM4_DIT_CONFIG_VALUE_BUFFER_CAPACITY];
+  id4_pipeline_kernel_config_binding_t
+      config_bindings[ID4_IDEOGRAM4_DIT_MAX_KERNEL_CONFIG_BINDING_COUNT];
+  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_make_config_bindings(
+      IREE_ARRAYSIZE(config_values), config_values, value_buffers,
+      config_bindings));
+  return id4_ideogram4_dit_program_dispatch_loom(
+      builder, name, IREE_SV("ideogram4/attention_blocked_bf16_wmma"),
+      function_name, IREE_ARRAYSIZE(config_values), config_bindings,
+      binding_count, bindings);
+}
+
+iree_status_t
+id4_ideogram4_dit_program_dispatch_attention_blocked_qk_scores_bf16_f32_wmma(
+    id4_pipeline_program_builder_t* builder, iree_string_view_t name,
+    uint32_t valid_token_count, uint32_t padded_token_count,
+    uint32_t query_block_offset, uint32_t query_block_token_count,
+    uint32_t attention_head_count, uint32_t head_size,
+    id4_pipeline_program_tensor_t query, id4_pipeline_program_tensor_t key,
+    id4_pipeline_program_tensor_t scores) {
+  id4_pipeline_program_dispatch_binding_t bindings[] = {
+      id4_pipeline_program_read(query),
+      id4_pipeline_program_read(key),
+      id4_pipeline_program_write(scores),
+  };
+  return id4_ideogram4_dit_program_dispatch_attention_blocked_export(
+      builder, name,
+      IREE_SV("id4_ideogram4_attention_blocked_qk_scores_bf16_f32_wmma"),
+      valid_token_count, padded_token_count, query_block_offset,
+      query_block_token_count, attention_head_count, head_size,
+      IREE_ARRAYSIZE(bindings), bindings);
+}
+
+iree_status_t
+id4_ideogram4_dit_program_dispatch_attention_blocked_softmax_f32_bf16(
+    id4_pipeline_program_builder_t* builder, iree_string_view_t name,
+    uint32_t valid_token_count, uint32_t padded_token_count,
+    uint32_t query_block_offset, uint32_t query_block_token_count,
+    uint32_t attention_head_count, uint32_t head_size,
+    id4_pipeline_program_tensor_t scores,
+    id4_pipeline_program_tensor_t probabilities) {
+  id4_pipeline_program_dispatch_binding_t bindings[] = {
+      id4_pipeline_program_read(scores),
+      id4_pipeline_program_write(probabilities),
+  };
+  return id4_ideogram4_dit_program_dispatch_attention_blocked_export(
+      builder, name,
+      IREE_SV("id4_ideogram4_attention_blocked_softmax_f32_bf16"),
+      valid_token_count, padded_token_count, query_block_offset,
+      query_block_token_count, attention_head_count, head_size,
+      IREE_ARRAYSIZE(bindings), bindings);
+}
+
+iree_status_t
+id4_ideogram4_dit_program_dispatch_attention_blocked_pv_bf16_bf16_wmma(
+    id4_pipeline_program_builder_t* builder, iree_string_view_t name,
+    uint32_t valid_token_count, uint32_t padded_token_count,
+    uint32_t query_block_offset, uint32_t query_block_token_count,
+    uint32_t attention_head_count, uint32_t head_size,
+    id4_pipeline_program_tensor_t probabilities,
+    id4_pipeline_program_tensor_t value, id4_pipeline_program_tensor_t output) {
+  id4_pipeline_program_dispatch_binding_t bindings[] = {
+      id4_pipeline_program_read(probabilities),
+      id4_pipeline_program_read(value),
+      id4_pipeline_program_write(output),
+  };
+  return id4_ideogram4_dit_program_dispatch_attention_blocked_export(
+      builder, name,
+      IREE_SV("id4_ideogram4_attention_blocked_pv_bf16_bf16_wmma"),
+      valid_token_count, padded_token_count, query_block_offset,
+      query_block_token_count, attention_head_count, head_size,
       IREE_ARRAYSIZE(bindings), bindings);
 }
 

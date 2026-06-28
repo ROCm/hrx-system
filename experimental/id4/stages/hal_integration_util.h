@@ -173,6 +173,12 @@ typedef struct FixtureTensorSet {
                                   iree_string_view_t name) const;
 } FixtureTensorSet;
 
+// Loads a dense tensor payload from an NPY or ID4 tensor artifact file.
+iree_status_t LoadReferenceTensorPayload(
+    iree_string_view_t file_path, id4_pipeline_tensor_dtype_t expected_dtype,
+    id4_pipeline_tensor_shape_t expected_shape,
+    std::vector<uint8_t>* out_payload);
+
 typedef struct LiveStageContext {
   // Proactor pool used by the live HAL device.
   ProactorPoolRef proactor_pool;

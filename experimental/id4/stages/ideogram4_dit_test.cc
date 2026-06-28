@@ -663,6 +663,18 @@ TEST(Ideogram4DitStage, PlansOfficialFp8SourcesAsBf16ExecutionParameters) {
           /*.attention_implementation=*/
           ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_MATERIALIZED_WMMA,
       },
+      {
+          /*.request=*/
+          {
+              /*.latent_shape=*/id4_pipeline_program_make_shape_rank4(4, 6, 4,
+                                                                      1),
+              /*.conditioning_mode=*/
+              ID4_IDEOGRAM4_DIT_CONDITIONING_MODE_CONDITIONED,
+              /*.text_token_count=*/19,
+          },
+          /*.attention_implementation=*/
+          ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_BLOCKED_WMMA,
+      },
   };
 
   for (const auto& request_case : requests) {

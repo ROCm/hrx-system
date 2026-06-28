@@ -758,6 +758,14 @@ static iree_status_t LoadTensorPayload(
                               out_payload);
 }
 
+iree_status_t LoadReferenceTensorPayload(
+    iree_string_view_t file_path, id4_pipeline_tensor_dtype_t expected_dtype,
+    id4_pipeline_tensor_shape_t expected_shape,
+    std::vector<uint8_t>* out_payload) {
+  return LoadTensorPayload(std::string(file_path.data, file_path.size),
+                           expected_dtype, expected_shape, out_payload);
+}
+
 static iree_status_t LoadFixtureTensorRecord(
     iree_string_view_t record, FixtureTensorSet* fixture_tensors) {
   std::string kind;
