@@ -2421,6 +2421,48 @@ id4_ideogram4_dit_program_dispatch_modulated_layernorm_bf16(
       bindings);
 }
 
+static iree_status_t
+id4_ideogram4_dit_program_dispatch_modulated_layernorm_image_bf16(
+    id4_pipeline_program_builder_t* builder, iree_string_view_t name,
+    uint32_t token_count, uint32_t token_offset, uint32_t dispatch_token_count,
+    uint32_t hidden_size, id4_pipeline_program_tensor_t input,
+    id4_pipeline_program_tensor_t scale, id4_pipeline_program_tensor_t output) {
+  if (token_offset > token_count ||
+      dispatch_token_count > token_count - token_offset) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "Ideogram4 DiT BF16 image layernorm dispatch token range overflow");
+  }
+  const id4_ideogram4_dit_program_config_value_t config_values[] = {
+      {IREE_SV("id4.ideogram4.modulated_layernorm_image_bf16.token_count"),
+       token_count},
+      {IREE_SV("id4.ideogram4.modulated_layernorm_image_bf16.token_offset"),
+       token_offset},
+      {IREE_SV("id4.ideogram4.modulated_layernorm_image_bf16."
+               "dispatch_token_count"),
+       dispatch_token_count},
+      {IREE_SV("id4.ideogram4.modulated_layernorm_image_bf16.hidden_size"),
+       hidden_size},
+  };
+  char value_buffers[ID4_IDEOGRAM4_DIT_MAX_KERNEL_CONFIG_BINDING_COUNT]
+                    [ID4_IDEOGRAM4_DIT_CONFIG_VALUE_BUFFER_CAPACITY];
+  id4_pipeline_kernel_config_binding_t
+      config_bindings[ID4_IDEOGRAM4_DIT_MAX_KERNEL_CONFIG_BINDING_COUNT];
+  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_make_config_bindings(
+      IREE_ARRAYSIZE(config_values), config_values, value_buffers,
+      config_bindings));
+  id4_pipeline_program_dispatch_binding_t bindings[] = {
+      id4_pipeline_program_read(input),
+      id4_pipeline_program_read(scale),
+      id4_pipeline_program_write(output),
+  };
+  return id4_ideogram4_dit_program_dispatch_loom(
+      builder, name, IREE_SV("ideogram4/modulated_layernorm_image_bf16"),
+      IREE_SV("id4_ideogram4_modulated_layernorm_image_bf16"),
+      IREE_ARRAYSIZE(config_values), config_bindings, IREE_ARRAYSIZE(bindings),
+      bindings);
+}
+
 static iree_status_t id4_ideogram4_dit_program_dispatch_cast(
     id4_pipeline_program_builder_t* builder, iree_string_view_t name,
     iree_string_view_t config_key, iree_string_view_t module_path,
@@ -2662,6 +2704,55 @@ static iree_status_t id4_ideogram4_dit_program_dispatch_linear_bias_bf16(
   }
 }
 
+static iree_status_t
+id4_ideogram4_dit_program_dispatch_linear_bias_packed_bf16_bf16_wmma(
+    id4_pipeline_program_builder_t* builder, iree_string_view_t name,
+    uint32_t token_count, uint32_t input_size, uint32_t output_size,
+    id4_pipeline_program_tensor_t input, id4_pipeline_program_tensor_t weight,
+    id4_pipeline_program_tensor_t bias, id4_pipeline_program_tensor_t output) {
+  if (token_count == 0 || token_count % 32 != 0) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "Ideogram4 DiT BF16 linear-bias WMMA token count must be a "
+        "nonzero multiple of 32");
+  }
+  if (input_size == 0 || input_size % 16 != 0) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "Ideogram4 DiT BF16 linear-bias WMMA input size must be a "
+        "nonzero multiple of 16");
+  }
+  if (output_size == 0 || output_size % 64 != 0) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "Ideogram4 DiT BF16 linear-bias WMMA output size must be a "
+        "nonzero multiple of 64");
+  }
+  const id4_ideogram4_dit_program_config_value_t config_values[] = {
+      {IREE_SV("id4.ideogram4.linear_bias_bf16_wmma.token_count"), token_count},
+      {IREE_SV("id4.ideogram4.linear_bias_bf16_wmma.input_size"), input_size},
+      {IREE_SV("id4.ideogram4.linear_bias_bf16_wmma.output_size"), output_size},
+  };
+  char value_buffers[ID4_IDEOGRAM4_DIT_MAX_KERNEL_CONFIG_BINDING_COUNT]
+                    [ID4_IDEOGRAM4_DIT_CONFIG_VALUE_BUFFER_CAPACITY];
+  id4_pipeline_kernel_config_binding_t
+      config_bindings[ID4_IDEOGRAM4_DIT_MAX_KERNEL_CONFIG_BINDING_COUNT];
+  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_make_config_bindings(
+      IREE_ARRAYSIZE(config_values), config_values, value_buffers,
+      config_bindings));
+  id4_pipeline_program_dispatch_binding_t bindings[] = {
+      id4_pipeline_program_read(input),
+      id4_pipeline_program_read(weight),
+      id4_pipeline_program_read(bias),
+      id4_pipeline_program_write(output),
+  };
+  return id4_ideogram4_dit_program_dispatch_loom(
+      builder, name, IREE_SV("ideogram4/linear_bias_bf16_bf16_wmma"),
+      IREE_SV("id4_ideogram4_linear_bias_bf16_bf16_wmma"),
+      IREE_ARRAYSIZE(config_values), config_bindings, IREE_ARRAYSIZE(bindings),
+      bindings);
+}
+
 static iree_status_t id4_ideogram4_dit_program_dispatch_unpatchify_scale(
     id4_pipeline_program_builder_t* builder, iree_string_view_t name,
     uint32_t width, uint32_t height, uint32_t input_channel_count,
@@ -2692,6 +2783,37 @@ static iree_status_t id4_ideogram4_dit_program_dispatch_unpatchify_scale(
   return id4_ideogram4_dit_program_dispatch_loom(
       builder, name, IREE_SV("ideogram4/unpatchify_scale_f32"),
       IREE_SV("id4_ideogram4_unpatchify_scale_f32"),
+      IREE_ARRAYSIZE(config_values), config_bindings, IREE_ARRAYSIZE(bindings),
+      bindings);
+}
+
+static iree_status_t
+id4_ideogram4_dit_program_dispatch_unpatchify_scale_packed_bf16(
+    id4_pipeline_program_builder_t* builder, iree_string_view_t name,
+    uint32_t width, uint32_t height, uint32_t input_channel_count,
+    id4_pipeline_program_tensor_t projected,
+    id4_pipeline_program_tensor_t output) {
+  const id4_ideogram4_dit_program_config_value_t config_values[] = {
+      {IREE_SV("id4.ideogram4.unpatchify_scale_packed_bf16.width"), width},
+      {IREE_SV("id4.ideogram4.unpatchify_scale_packed_bf16.height"), height},
+      {IREE_SV("id4.ideogram4.unpatchify_scale_packed_bf16."
+               "input_channel_count"),
+       input_channel_count},
+  };
+  char value_buffers[ID4_IDEOGRAM4_DIT_MAX_KERNEL_CONFIG_BINDING_COUNT]
+                    [ID4_IDEOGRAM4_DIT_CONFIG_VALUE_BUFFER_CAPACITY];
+  id4_pipeline_kernel_config_binding_t
+      config_bindings[ID4_IDEOGRAM4_DIT_MAX_KERNEL_CONFIG_BINDING_COUNT];
+  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_make_config_bindings(
+      IREE_ARRAYSIZE(config_values), config_values, value_buffers,
+      config_bindings));
+  id4_pipeline_program_dispatch_binding_t bindings[] = {
+      id4_pipeline_program_read(projected),
+      id4_pipeline_program_write(output),
+  };
+  return id4_ideogram4_dit_program_dispatch_loom(
+      builder, name, IREE_SV("ideogram4/unpatchify_scale_packed_bf16"),
+      IREE_SV("id4_ideogram4_unpatchify_scale_packed_bf16"),
       IREE_ARRAYSIZE(config_values), config_bindings, IREE_ARRAYSIZE(bindings),
       bindings);
 }
@@ -3651,20 +3773,33 @@ static iree_status_t id4_ideogram4_dit_program_author_final_output(
   }
 
   char final_norm_name_buffer[ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
+  char final_norm_packed_name_buffer[ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
   char
       final_norm_dispatch_name_buffer[ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
+  char final_norm_packed_dispatch_name_buffer
+      [ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
   char after_final_norm_name_buffer[ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
   iree_string_view_t final_norm_name = iree_string_view_empty();
+  iree_string_view_t final_norm_packed_name = iree_string_view_empty();
   iree_string_view_t final_norm_dispatch_name = iree_string_view_empty();
+  iree_string_view_t final_norm_packed_dispatch_name = iree_string_view_empty();
   iree_string_view_t after_final_norm_name = iree_string_view_empty();
   IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_format(
       final_norm_name_buffer, IREE_ARRAYSIZE(final_norm_name_buffer),
       &final_norm_name, "%.*s.final.normalized", (int)branch_name.size,
       branch_name.data));
+  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_format_child_name(
+      final_norm_name, IREE_SV("image_packed"), final_norm_packed_name_buffer,
+      IREE_ARRAYSIZE(final_norm_packed_name_buffer), &final_norm_packed_name));
   IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_format(
       final_norm_dispatch_name_buffer,
       IREE_ARRAYSIZE(final_norm_dispatch_name_buffer),
       &final_norm_dispatch_name, "%.*s.final.modulated_layernorm",
+      (int)branch_name.size, branch_name.data));
+  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_format(
+      final_norm_packed_dispatch_name_buffer,
+      IREE_ARRAYSIZE(final_norm_packed_dispatch_name_buffer),
+      &final_norm_packed_dispatch_name, "%.*s.final.modulated_layernorm_image",
       (int)branch_name.size, branch_name.data));
   IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_format(
       after_final_norm_name_buffer,
@@ -3672,36 +3807,6 @@ static iree_status_t id4_ideogram4_dit_program_author_final_output(
       "%.*s.final.after_layernorm", (int)branch_name.size, branch_name.data));
   const bool tap_final_norm = id4_ideogram4_dit_program_has_diagnostic_tap(
       options->diagnostic_tap_names, final_norm_name);
-
-  id4_pipeline_program_tensor_t final_norm =
-      id4_pipeline_program_tensor_invalid();
-  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_acquire_tensor(
-      builder, final_norm_name,
-      f32_canonical_activations ? ID4_PIPELINE_PROGRAM_DTYPE_F32
-                                : ID4_PIPELINE_PROGRAM_DTYPE_BF16,
-      id4_pipeline_program_make_shape_rank2(hidden_size, total_token_count),
-      &final_norm));
-  if (f32_canonical_activations) {
-    IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_dispatch_modulated_layernorm(
-        builder, final_norm_dispatch_name, total_token_count, hidden_size,
-        hidden, final_scale, final_norm));
-  } else {
-    IREE_RETURN_IF_ERROR(
-        id4_ideogram4_dit_program_dispatch_modulated_layernorm_bf16(
-            builder, final_norm_dispatch_name, total_token_count, hidden_size,
-            hidden, final_scale, final_norm));
-  }
-  IREE_RETURN_IF_ERROR(
-      id4_ideogram4_dit_program_barrier(builder, after_final_norm_name));
-  if (f32_canonical_activations) {
-    IREE_RETURN_IF_ERROR(
-        id4_ideogram4_dit_program_tap(builder, final_norm_name, final_norm));
-  } else if (tap_final_norm) {
-    IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_tap_bf16_as_f32(
-        builder, final_norm_name,
-        id4_pipeline_program_make_shape_rank2(hidden_size, total_token_count),
-        final_norm));
-  }
 
   id4_ideogram4_dit_program_linear_parameter_t final_linear_weight = {
       .storage = ID4_IDEOGRAM4_DIT_PARAMETER_STORAGE_INVALID,
@@ -3719,7 +3824,62 @@ static iree_status_t id4_ideogram4_dit_program_author_final_output(
       id4_pipeline_program_make_shape_rank1(input_channel_count),
       &final_linear_bias));
 
+  const bool use_packed_bf16_final_projection =
+      !f32_canonical_activations &&
+      final_linear_weight.storage == ID4_IDEOGRAM4_DIT_PARAMETER_STORAGE_BF16 &&
+      image_token_count % 32 == 0 && hidden_size % 16 == 0 &&
+      input_channel_count % 64 == 0;
+  const id4_pipeline_program_shape_t final_norm_shape =
+      id4_pipeline_program_make_shape_rank2(hidden_size, total_token_count);
+  const id4_pipeline_program_shape_t final_norm_packed_shape =
+      id4_pipeline_program_make_shape_rank2(image_token_count, hidden_size);
+  id4_pipeline_program_tensor_t final_norm =
+      id4_pipeline_program_tensor_invalid();
+  id4_pipeline_program_tensor_t final_norm_packed =
+      id4_pipeline_program_tensor_invalid();
+  if (f32_canonical_activations || !use_packed_bf16_final_projection ||
+      tap_final_norm) {
+    IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_acquire_tensor(
+        builder, final_norm_name,
+        f32_canonical_activations ? ID4_PIPELINE_PROGRAM_DTYPE_F32
+                                  : ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+        final_norm_shape, &final_norm));
+    if (f32_canonical_activations) {
+      IREE_RETURN_IF_ERROR(
+          id4_ideogram4_dit_program_dispatch_modulated_layernorm(
+              builder, final_norm_dispatch_name, total_token_count, hidden_size,
+              hidden, final_scale, final_norm));
+    } else {
+      IREE_RETURN_IF_ERROR(
+          id4_ideogram4_dit_program_dispatch_modulated_layernorm_bf16(
+              builder, final_norm_dispatch_name, total_token_count, hidden_size,
+              hidden, final_scale, final_norm));
+    }
+  }
+  if (use_packed_bf16_final_projection) {
+    IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_acquire_tensor(
+        builder, final_norm_packed_name, ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+        final_norm_packed_shape, &final_norm_packed));
+    IREE_RETURN_IF_ERROR(
+        id4_ideogram4_dit_program_dispatch_modulated_layernorm_image_bf16(
+            builder, final_norm_packed_dispatch_name, total_token_count,
+            text_token_count, image_token_count, hidden_size, hidden,
+            final_scale, final_norm_packed));
+  }
+  IREE_RETURN_IF_ERROR(
+      id4_ideogram4_dit_program_barrier(builder, after_final_norm_name));
+  if (f32_canonical_activations) {
+    IREE_RETURN_IF_ERROR(
+        id4_ideogram4_dit_program_tap(builder, final_norm_name, final_norm));
+  } else if (tap_final_norm) {
+    IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_tap_bf16_as_f32(
+        builder, final_norm_name,
+        id4_pipeline_program_make_shape_rank2(hidden_size, total_token_count),
+        final_norm));
+  }
+
   char projected_name_buffer[ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
+  char projected_packed_name_buffer[ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
   char projected_dispatch_name_buffer[ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
   char after_projected_name_buffer[ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
   char projected_f32_name_buffer[ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
@@ -3727,6 +3887,7 @@ static iree_status_t id4_ideogram4_dit_program_author_final_output(
   char after_projected_cast_name_buffer
       [ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
   iree_string_view_t projected_name = iree_string_view_empty();
+  iree_string_view_t projected_packed_name = iree_string_view_empty();
   iree_string_view_t projected_dispatch_name = iree_string_view_empty();
   iree_string_view_t after_projected_name = iree_string_view_empty();
   iree_string_view_t projected_f32_name = iree_string_view_empty();
@@ -3736,6 +3897,9 @@ static iree_status_t id4_ideogram4_dit_program_author_final_output(
       projected_name_buffer, IREE_ARRAYSIZE(projected_name_buffer),
       &projected_name, "%.*s.final.projected", (int)branch_name.size,
       branch_name.data));
+  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_format_child_name(
+      projected_name, IREE_SV("packed"), projected_packed_name_buffer,
+      IREE_ARRAYSIZE(projected_packed_name_buffer), &projected_packed_name));
   IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_format(
       projected_dispatch_name_buffer,
       IREE_ARRAYSIZE(projected_dispatch_name_buffer), &projected_dispatch_name,
@@ -3763,40 +3927,74 @@ static iree_status_t id4_ideogram4_dit_program_author_final_output(
   const id4_pipeline_program_shape_t projected_shape =
       id4_pipeline_program_make_shape_rank2(input_channel_count,
                                             image_token_count);
-  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_acquire_tensor(
-      builder, projected_name,
-      f32_canonical_activations ? ID4_PIPELINE_PROGRAM_DTYPE_F32
-                                : ID4_PIPELINE_PROGRAM_DTYPE_BF16,
-      projected_shape, &projected));
-  if (f32_canonical_activations) {
-    IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_dispatch_linear_bias_f32(
-        builder, projected_dispatch_name, total_token_count, text_token_count,
-        image_token_count, hidden_size, input_channel_count, final_norm,
-        final_linear_weight, final_linear_bias, projected));
-  } else {
-    IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_dispatch_linear_bias_bf16(
-        builder, projected_dispatch_name, total_token_count, text_token_count,
-        image_token_count, hidden_size, input_channel_count, final_norm,
-        final_linear_weight, final_linear_bias, projected));
-  }
-  IREE_RETURN_IF_ERROR(
-      id4_ideogram4_dit_program_barrier(builder, after_projected_name));
-  id4_pipeline_program_tensor_t projected_f32 = projected;
-  if (f32_canonical_activations) {
-    IREE_RETURN_IF_ERROR(
-        id4_ideogram4_dit_program_tap(builder, projected_name, projected));
-  } else {
+  const id4_pipeline_program_shape_t projected_packed_shape =
+      id4_pipeline_program_make_shape_rank2(image_token_count,
+                                            input_channel_count);
+  id4_pipeline_program_tensor_t projected_f32 =
+      id4_pipeline_program_tensor_invalid();
+  id4_pipeline_program_tensor_t projected_packed =
+      id4_pipeline_program_tensor_invalid();
+  if (use_packed_bf16_final_projection) {
     IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_acquire_tensor(
-        builder, projected_f32_name, ID4_PIPELINE_PROGRAM_DTYPE_F32,
-        projected_shape, &projected_f32));
-    IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_dispatch_cast_bf16_f32(
-        builder, projected_cast_name, projected_shape, projected,
-        projected_f32));
+        builder, projected_packed_name, ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+        projected_packed_shape, &projected_packed));
     IREE_RETURN_IF_ERROR(
-        id4_ideogram4_dit_program_barrier(builder, after_projected_cast_name));
+        id4_ideogram4_dit_program_dispatch_linear_bias_packed_bf16_bf16_wmma(
+            builder, projected_dispatch_name, image_token_count, hidden_size,
+            input_channel_count, final_norm_packed, final_linear_weight.weight,
+            final_linear_bias, projected_packed));
+    IREE_RETURN_IF_ERROR(
+        id4_ideogram4_dit_program_barrier(builder, after_projected_name));
     if (tap_projected) {
+      IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_acquire_tensor(
+          builder, projected_f32_name, ID4_PIPELINE_PROGRAM_DTYPE_F32,
+          projected_shape, &projected_f32));
+      IREE_RETURN_IF_ERROR(
+          id4_ideogram4_dit_program_dispatch_linear_input_unpack_bf16_f32(
+              builder, projected_cast_name, image_token_count,
+              image_token_count, input_channel_count, projected_packed,
+              projected_f32));
+      IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_barrier(
+          builder, after_projected_cast_name));
       IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_tap(
           builder, projected_name, projected_f32));
+    }
+  } else {
+    IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_acquire_tensor(
+        builder, projected_name,
+        f32_canonical_activations ? ID4_PIPELINE_PROGRAM_DTYPE_F32
+                                  : ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+        projected_shape, &projected));
+    if (f32_canonical_activations) {
+      IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_dispatch_linear_bias_f32(
+          builder, projected_dispatch_name, total_token_count, text_token_count,
+          image_token_count, hidden_size, input_channel_count, final_norm,
+          final_linear_weight, final_linear_bias, projected));
+    } else {
+      IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_dispatch_linear_bias_bf16(
+          builder, projected_dispatch_name, total_token_count, text_token_count,
+          image_token_count, hidden_size, input_channel_count, final_norm,
+          final_linear_weight, final_linear_bias, projected));
+    }
+    IREE_RETURN_IF_ERROR(
+        id4_ideogram4_dit_program_barrier(builder, after_projected_name));
+    if (f32_canonical_activations) {
+      projected_f32 = projected;
+      IREE_RETURN_IF_ERROR(
+          id4_ideogram4_dit_program_tap(builder, projected_name, projected));
+    } else {
+      IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_acquire_tensor(
+          builder, projected_f32_name, ID4_PIPELINE_PROGRAM_DTYPE_F32,
+          projected_shape, &projected_f32));
+      IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_dispatch_cast_bf16_f32(
+          builder, projected_cast_name, projected_shape, projected,
+          projected_f32));
+      IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_barrier(
+          builder, after_projected_cast_name));
+      if (tap_projected) {
+        IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_tap(
+            builder, projected_name, projected_f32));
+      }
     }
   }
 
@@ -3825,9 +4023,16 @@ static iree_status_t id4_ideogram4_dit_program_author_final_output(
       IREE_ARRAYSIZE(velocity_capture_name_buffer), &velocity_capture_name,
       "%.*s.output.velocity", (int)branch_name.size, branch_name.data));
 
-  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_dispatch_unpatchify_scale(
-      builder, velocity_dispatch_name, width, height, input_channel_count,
-      image_token_count, 0, projected_f32, velocity));
+  if (use_packed_bf16_final_projection) {
+    IREE_RETURN_IF_ERROR(
+        id4_ideogram4_dit_program_dispatch_unpatchify_scale_packed_bf16(
+            builder, velocity_dispatch_name, width, height, input_channel_count,
+            projected_packed, velocity));
+  } else {
+    IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_dispatch_unpatchify_scale(
+        builder, velocity_dispatch_name, width, height, input_channel_count,
+        image_token_count, 0, projected_f32, velocity));
+  }
   IREE_RETURN_IF_ERROR(
       id4_ideogram4_dit_program_barrier(builder, after_velocity_name));
   IREE_RETURN_IF_ERROR(

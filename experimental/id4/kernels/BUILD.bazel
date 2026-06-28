@@ -4288,6 +4288,28 @@ _KERNEL_CASES = [
         "target_name": "ideogram4_linear_bias_bf16_bf16_ideogram_shape",
     },
     {
+        "actual_case": "@id4_ideogram4_linear_bias_bf16_bf16_wmma_small_case",
+        "benchmark": "@id4_ideogram4_linear_bias_bf16_bf16_wmma_small",
+        "configs": [
+            "--config=id4.ideogram4.linear_bias_bf16_wmma.token_count=32",
+            "--config=id4.ideogram4.linear_bias_bf16_wmma.input_size=16",
+            "--config=id4.ideogram4.linear_bias_bf16_wmma.output_size=64",
+        ],
+        "source": "ideogram4/linear_bias_bf16_bf16_wmma.loom",
+        "target_name": "ideogram4_linear_bias_bf16_bf16_wmma_small",
+    },
+    {
+        "actual_case": "@id4_ideogram4_linear_bias_bf16_bf16_wmma_ideogram_shape_case",
+        "benchmark": "@id4_ideogram4_linear_bias_bf16_bf16_wmma_ideogram_shape",
+        "configs": [
+            "--config=id4.ideogram4.linear_bias_bf16_wmma.token_count=4096",
+            "--config=id4.ideogram4.linear_bias_bf16_wmma.input_size=4608",
+            "--config=id4.ideogram4.linear_bias_bf16_wmma.output_size=128",
+        ],
+        "source": "ideogram4/linear_bias_bf16_bf16_wmma.loom",
+        "target_name": "ideogram4_linear_bias_bf16_bf16_wmma_ideogram_shape",
+    },
+    {
         "actual_case": "@id4_ideogram4_linear_bias_fp8_f32_small_case",
         "benchmark": "@id4_ideogram4_linear_bias_fp8_f32_small",
         "configs": [
@@ -4352,6 +4374,30 @@ _KERNEL_CASES = [
         ],
         "source": "ideogram4/modulated_layernorm_bf16.loom",
         "target_name": "ideogram4_modulated_layernorm_bf16_ideogram_shape",
+    },
+    {
+        "actual_case": "@id4_ideogram4_modulated_layernorm_image_bf16_small_case",
+        "benchmark": "@id4_ideogram4_modulated_layernorm_image_bf16_small",
+        "configs": [
+            "--config=id4.ideogram4.modulated_layernorm_image_bf16.token_count=3",
+            "--config=id4.ideogram4.modulated_layernorm_image_bf16.token_offset=1",
+            "--config=id4.ideogram4.modulated_layernorm_image_bf16.dispatch_token_count=2",
+            "--config=id4.ideogram4.modulated_layernorm_image_bf16.hidden_size=4",
+        ],
+        "source": "ideogram4/modulated_layernorm_image_bf16.loom",
+        "target_name": "ideogram4_modulated_layernorm_image_bf16_small",
+    },
+    {
+        "actual_case": "@id4_ideogram4_modulated_layernorm_image_bf16_ideogram_shape_case",
+        "benchmark": "@id4_ideogram4_modulated_layernorm_image_bf16_ideogram_shape",
+        "configs": [
+            "--config=id4.ideogram4.modulated_layernorm_image_bf16.token_count=4547",
+            "--config=id4.ideogram4.modulated_layernorm_image_bf16.token_offset=451",
+            "--config=id4.ideogram4.modulated_layernorm_image_bf16.dispatch_token_count=4096",
+            "--config=id4.ideogram4.modulated_layernorm_image_bf16.hidden_size=4608",
+        ],
+        "source": "ideogram4/modulated_layernorm_image_bf16.loom",
+        "target_name": "ideogram4_modulated_layernorm_image_bf16_ideogram_shape",
     },
     {
         "actual_case": "@id4_ideogram4_modulated_rmsnorm_f32_small_case",
@@ -4678,6 +4724,28 @@ _KERNEL_CASES = [
         ],
         "source": "ideogram4/unpatchify_scale_f32.loom",
         "target_name": "ideogram4_unpatchify_scale_f32_conditioned_slice",
+    },
+    {
+        "actual_case": "@id4_ideogram4_unpatchify_scale_packed_bf16_small_case",
+        "benchmark": "@id4_ideogram4_unpatchify_scale_packed_bf16_small",
+        "configs": [
+            "--config=id4.ideogram4.unpatchify_scale_packed_bf16.width=1",
+            "--config=id4.ideogram4.unpatchify_scale_packed_bf16.height=1",
+            "--config=id4.ideogram4.unpatchify_scale_packed_bf16.input_channel_count=4",
+        ],
+        "source": "ideogram4/unpatchify_scale_packed_bf16.loom",
+        "target_name": "ideogram4_unpatchify_scale_packed_bf16_small",
+    },
+    {
+        "actual_case": "@id4_ideogram4_unpatchify_scale_packed_bf16_two_token_case",
+        "benchmark": "@id4_ideogram4_unpatchify_scale_packed_bf16_two_token",
+        "configs": [
+            "--config=id4.ideogram4.unpatchify_scale_packed_bf16.width=2",
+            "--config=id4.ideogram4.unpatchify_scale_packed_bf16.height=1",
+            "--config=id4.ideogram4.unpatchify_scale_packed_bf16.input_channel_count=4",
+        ],
+        "source": "ideogram4/unpatchify_scale_packed_bf16.loom",
+        "target_name": "ideogram4_unpatchify_scale_packed_bf16_two_token",
     },
     {
         "actual_case": "@id4_configured_smoke_case",
@@ -5915,6 +5983,7 @@ _KERNEL_SOURCES = [
     "ideogram4/linear_bf16_f32_tail.loom",
     "ideogram4/linear_bf16_f32_wmma.loom",
     "ideogram4/linear_bias_bf16_bf16.loom",
+    "ideogram4/linear_bias_bf16_bf16_wmma.loom",
     "ideogram4/linear_bias_bf16_f32.loom",
     "ideogram4/linear_bias_fp8_f32.loom",
     "ideogram4/linear_fp8_bf16_f32_wmma.loom",
@@ -5928,6 +5997,7 @@ _KERNEL_SOURCES = [
     "ideogram4/mlp_up_silu_product_bf16_tail.loom",
     "ideogram4/mlp_up_silu_product_bf16_wmma.loom",
     "ideogram4/modulated_layernorm_bf16.loom",
+    "ideogram4/modulated_layernorm_image_bf16.loom",
     "ideogram4/modulated_layernorm_f32.loom",
     "ideogram4/modulated_rmsnorm_f32.loom",
     "ideogram4/prelude_image_bf16_f32.loom",
@@ -5943,6 +6013,7 @@ _KERNEL_SOURCES = [
     "ideogram4/silu_product_f32.loom",
     "ideogram4/timestep_embedding_f32.loom",
     "ideogram4/unpatchify_scale_f32.loom",
+    "ideogram4/unpatchify_scale_packed_bf16.loom",
     "qwen3_vl/attention_materialized_f32.loom",
     "qwen3_vl/attention_wmma.loom",
     "qwen3_vl/condition.loom",
