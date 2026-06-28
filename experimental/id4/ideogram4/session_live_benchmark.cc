@@ -799,10 +799,20 @@ static iree_status_t RunGenerationEndToEndBenchmark(
   std::memset(&last_summary, 0, sizeof(last_summary));
   GenerationBenchmarkPlanStatistics last_statistics;
   std::memset(&last_statistics, 0, sizeof(last_statistics));
+  const iree_hal_command_buffer_mode_t profiled_dispatch_metadata_mode =
+      IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_PROFILE_METADATA |
+      IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_DISPATCH_METADATA;
+  const bool capture_issue_profile =
+      iree_all_bits_set(context.runtime_context.command_buffer_mode,
+                        profiled_dispatch_metadata_mode);
+  bool issue_profile_captured = false;
   iree_hal_profiling_from_flags_t* profiling = nullptr;
-  iree_status_t status = iree_hal_begin_device_group_profiling_from_flags(
-      context.runtime_context.device_group, iree_allocator_system(),
-      &profiling);
+  iree_status_t status = iree_ok_status();
+  if (!capture_issue_profile) {
+    status = iree_hal_begin_device_group_profiling_from_flags(
+        context.runtime_context.device_group, iree_allocator_system(),
+        &profiling);
+  }
   while (iree_status_is_ok(status) &&
          iree_benchmark_keep_running(benchmark_state, 1)) {
     GenerationPlanRef plan;
@@ -833,6 +843,22 @@ static iree_status_t RunGenerationEndToEndBenchmark(
                                        bundle.out());
     }
 
+    const bool profile_this_issue =
+        capture_issue_profile && !issue_profile_captured;
+    if (iree_status_is_ok(status) && profile_this_issue) {
+      id4::test::SemaphoreListStorage prepare_wait;
+      prepare_wait.semaphore = prepare_semaphore.get();
+      prepare_wait.payload_value = prepare_value;
+      status = iree_hal_semaphore_list_wait(prepare_wait.list(),
+                                            iree_infinite_timeout(),
+                                            IREE_ASYNC_WAIT_FLAG_NONE);
+    }
+    if (iree_status_is_ok(status) && profile_this_issue) {
+      status = iree_hal_begin_device_group_profiling_from_flags(
+          context.runtime_context.device_group, iree_allocator_system(),
+          &profiling);
+    }
+
     ++completion_value;
     GenerationExecutionRef execution;
     if (iree_status_is_ok(status)) {
@@ -853,9 +879,17 @@ static iree_status_t RunGenerationEndToEndBenchmark(
       iree_optimization_barrier(execution.get());
       ++iteration_count;
     }
+    if (profile_this_issue) {
+      status = iree_status_join(status,
+                                iree_hal_end_profiling_from_flags(profiling));
+      profiling = nullptr;
+      issue_profile_captured = true;
+    }
   }
-  status =
-      iree_status_join(status, iree_hal_end_profiling_from_flags(profiling));
+  if (!capture_issue_profile) {
+    status =
+        iree_status_join(status, iree_hal_end_profiling_from_flags(profiling));
+  }
   IREE_RETURN_IF_ERROR(status);
   IREE_RETURN_IF_ERROR(SetGenerationBenchmarkLabel(
       benchmark_state, context, last_summary, last_statistics));
