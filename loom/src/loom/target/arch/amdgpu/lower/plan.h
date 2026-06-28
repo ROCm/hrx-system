@@ -1038,20 +1038,23 @@ typedef struct loom_amdgpu_memory_access_plan_t {
 typedef enum loom_amdgpu_fragment_memory_packet_flag_bits_e {
   // Adjacent-lane f32 result values are packed into one BF16 store packet.
   LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_CROSSLANE_PACKED_B16_STORE = 1u << 0,
+  // Adjacent-lane f32 result values are exchanged with a DPP packet.
+  LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_CROSSLANE_PACKED_B16_STORE_DPP = 1u
+                                                                           << 1,
   // FP8 load payloads are decoded with native packed FP8-to-F32 conversion.
-  LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_NATIVE_F32_PAIR = 1u << 1,
+  LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_NATIVE_F32_PAIR = 1u << 2,
   // FP8 load payloads are decoded with the finite packed-BF16 software path.
-  LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_PACKED_BF16_DECODE = 1u << 2,
+  LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_PACKED_BF16_DECODE = 1u << 3,
   // FP8 load payloads require full per-lane BF16 software decode.
-  LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_FULL_BF16_DECODE = 1u << 3,
+  LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_FULL_BF16_DECODE = 1u << 4,
   // Full FP8 decode was selected because value facts do not prove finiteness.
-  LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_MISSING_VALUE_FINITE = 1u << 4,
+  LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_MISSING_VALUE_FINITE = 1u << 5,
   // Full FP8 decode was selected because value facts do not prove non-subnormal
   // values.
   LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_MISSING_VALUE_NOT_SUBNORMAL =
-      1u << 5,
+      1u << 6,
   // Full FP8 decode was selected because target packets are unavailable.
-  LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_MISSING_TARGET_PACKETS = 1u << 6,
+  LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_MISSING_TARGET_PACKETS = 1u << 7,
 } loom_amdgpu_fragment_memory_packet_flag_bits_t;
 
 // Bitset of loom_amdgpu_fragment_memory_packet_flag_bits_t values.

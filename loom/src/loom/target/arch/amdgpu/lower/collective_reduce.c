@@ -24,12 +24,6 @@
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
 
 #define LOOM_AMDGPU_MAX_SUBGROUP_TREE_STEPS 6u
-#define LOOM_AMDGPU_DPP_ROW_LANE_COUNT 16u
-#define LOOM_AMDGPU_DPP_CTRL_QUAD_SWAP_1 UINT32_C(0x0B1)
-#define LOOM_AMDGPU_DPP_CTRL_QUAD_SWAP_2 UINT32_C(0x04E)
-#define LOOM_AMDGPU_DPP_CTRL_ROW_HALF_MIRROR UINT32_C(0x141)
-#define LOOM_AMDGPU_DPP_CTRL_ROW_MIRROR UINT32_C(0x140)
-
 static uint32_t loom_amdgpu_subgroup_u32_log2(uint32_t value) {
   uint32_t log2 = 0;
   while (value > 1) {
@@ -1117,27 +1111,6 @@ static iree_status_t loom_amdgpu_emit_subgroup_readlane_register(
   IREE_RETURN_IF_ERROR(loom_low_lower_emit_resolved_descriptor_op(
       context, descriptor, &source_value, 1,
       loom_make_named_attr_slice(attrs, attr_count), &result_type, 1,
-      /*tied_results=*/NULL, /*tied_result_count=*/0, source_op->location,
-      &low_op));
-  *out_low_result = loom_value_slice_get(loom_low_op_results(low_op), 0);
-  return iree_ok_status();
-}
-
-static iree_status_t loom_amdgpu_emit_subgroup_dpp_register(
-    loom_low_lower_context_t* context, const loom_op_t* source_op,
-    const loom_low_lower_resolved_descriptor_t* descriptor,
-    loom_value_id_t low_source_value, uint32_t dpp_ctrl, loom_type_t lane_type,
-    loom_value_id_t* out_low_result) {
-  *out_low_result = LOOM_VALUE_ID_INVALID;
-  loom_named_attr_t attrs[1];
-  iree_host_size_t attr_count = 0;
-  IREE_RETURN_IF_ERROR(
-      loom_amdgpu_append_i64_attr(context, IREE_SV("dpp_ctrl"), dpp_ctrl, attrs,
-                                  IREE_ARRAYSIZE(attrs), &attr_count));
-  loom_op_t* low_op = NULL;
-  IREE_RETURN_IF_ERROR(loom_low_lower_emit_resolved_descriptor_op(
-      context, descriptor, &low_source_value, 1,
-      loom_make_named_attr_slice(attrs, attr_count), &lane_type, 1,
       /*tied_results=*/NULL, /*tied_result_count=*/0, source_op->location,
       &low_op));
   *out_low_result = loom_value_slice_get(loom_low_op_results(low_op), 0);
