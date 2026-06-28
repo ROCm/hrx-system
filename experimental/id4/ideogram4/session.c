@@ -308,6 +308,12 @@ struct id4_ideogram4_generation_execution_t {
   iree_allocator_t host_allocator;
   // Prepared generation bundle retained while queued work may use it.
   id4_ideogram4_generation_bundle_t* bundle;
+  // Lowered Qwen prompt inputs used by the conditioning phase.
+  id4_ideogram4_qwen_inputs_t qwen_inputs;
+  // Lowered DiT conditioning and guidance inputs used by the denoise phase.
+  id4_ideogram4_dit_inputs_t dit_inputs;
+  // Lowered denoise schedule uploaded before each sampler step.
+  id4_ideogram4_denoise_schedule_t denoise_schedule;
   // Semaphore chaining host-to-device request tensor uploads.
   iree_hal_semaphore_t* upload_semaphore;
   // Semaphore signaled when the Qwen stage completes.
@@ -324,6 +330,10 @@ struct id4_ideogram4_generation_execution_t {
   iree_hal_semaphore_t* decode_done_semaphore;
   // Final payload value signaled on |upload_semaphore|.
   uint64_t upload_payload_value;
+  // Upload payload value for Qwen conditioning inputs.
+  uint64_t qwen_upload_payload_value;
+  // Upload payload value for sampler seed input.
+  uint64_t seed_upload_payload_value;
   // Final decoded image binding retained from the decode stage.
   iree_hal_buffer_binding_t decoded_image_binding;
   // Final diffusion latent binding retained from the sampler stage.
@@ -2840,6 +2850,99 @@ static iree_status_t id4_ideogram4_generation_find_outputs(
       IREE_SV("x_next"), &execution->final_latent_binding);
 }
 
+static iree_status_t id4_ideogram4_generation_begin_execution(
+    id4_ideogram4_session_t* session, id4_ideogram4_generation_bundle_t* bundle,
+    const id4_ideogram4_generation_issue_options_t* options,
+    id4_ideogram4_generation_execution_t** out_execution) {
+  id4_ideogram4_generation_execution_t* execution = NULL;
+  iree_status_t status = id4_ideogram4_generation_execution_allocate(
+      bundle, session->host_allocator, &execution);
+  if (iree_status_is_ok(status)) {
+    id4_ideogram4_qwen_lowering_options_t qwen_lowering_options;
+    memset(&qwen_lowering_options, 0, sizeof(qwen_lowering_options));
+    qwen_lowering_options.structure_size = sizeof(qwen_lowering_options);
+    qwen_lowering_options.tokenizer = options->tokenizer;
+    qwen_lowering_options.request = options->request;
+    qwen_lowering_options.tokenizer_flags = options->tokenizer_flags;
+    qwen_lowering_options.max_token_count = session->qwen_model.max_token_count;
+    status = id4_ideogram4_request_lower_qwen_inputs(&qwen_lowering_options,
+                                                     execution->host_allocator,
+                                                     &execution->qwen_inputs);
+  }
+  if (iree_status_is_ok(status) &&
+      execution->qwen_inputs.token_count != bundle->summary.qwen_token_count) {
+    status = iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "Ideogram 4 generation issue Qwen token count %" PRIu32
+        " does not match prepared bundle count %" PRIu32,
+        execution->qwen_inputs.token_count, bundle->summary.qwen_token_count);
+  }
+  if (iree_status_is_ok(status)) {
+    id4_ideogram4_dit_lowering_options_t dit_lowering_options;
+    memset(&dit_lowering_options, 0, sizeof(dit_lowering_options));
+    dit_lowering_options.structure_size = sizeof(dit_lowering_options);
+    dit_lowering_options.generation = &options->request->generation;
+    dit_lowering_options.text_token_count = execution->qwen_inputs.token_count;
+    dit_lowering_options.attention_head_size =
+        session->dit_model.hidden_size /
+        session->dit_model.attention_head_count;
+    status = id4_ideogram4_request_lower_dit_inputs(&dit_lowering_options,
+                                                    execution->host_allocator,
+                                                    &execution->dit_inputs);
+  }
+  if (iree_status_is_ok(status)) {
+    status = id4_ideogram4_request_generation_lower_denoise_schedule(
+        &options->request->generation, execution->host_allocator,
+        &execution->denoise_schedule);
+  }
+  if (iree_status_is_ok(status)) {
+    status = id4_ideogram4_generation_execution_create_semaphores(execution);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_semaphore_list_wait(options->wait_semaphore_list,
+                                          iree_infinite_timeout(),
+                                          IREE_ASYNC_WAIT_FLAG_NONE);
+  }
+  if (iree_status_is_ok(status)) {
+    status = id4_ideogram4_generation_upload_qwen_inputs(
+        execution, &execution->qwen_inputs, iree_hal_semaphore_list_empty());
+  }
+  if (iree_status_is_ok(status)) {
+    execution->qwen_upload_payload_value = execution->upload_payload_value;
+  }
+  if (iree_status_is_ok(status)) {
+    status = id4_ideogram4_generation_upload_noise_seed(
+        execution, options->request->generation.seed,
+        iree_hal_semaphore_list_empty());
+  }
+  if (iree_status_is_ok(status)) {
+    execution->seed_upload_payload_value = execution->upload_payload_value;
+  }
+  if (iree_status_is_ok(status)) {
+    status = id4_ideogram4_generation_upload_dit_branch_inputs(
+        execution, ID4_IDEOGRAM4_GENERATION_STAGE_DIT_CONDITIONED,
+        &execution->dit_inputs.conditioned);
+  }
+  if (iree_status_is_ok(status)) {
+    status = id4_ideogram4_generation_upload_dit_branch_inputs(
+        execution, ID4_IDEOGRAM4_GENERATION_STAGE_DIT_UNCONDITIONED,
+        &execution->dit_inputs.unconditioned);
+  }
+  if (iree_status_is_ok(status)) {
+    status = id4_ideogram4_generation_upload_denoise_step(
+        execution, &execution->denoise_schedule.steps[0]);
+  }
+  if (iree_status_is_ok(status)) {
+    status = id4_ideogram4_generation_find_outputs(execution);
+  }
+  if (iree_status_is_ok(status)) {
+    *out_execution = execution;
+  } else {
+    id4_ideogram4_generation_execution_release(execution);
+  }
+  return status;
+}
+
 iree_status_t id4_ideogram4_session_issue_generation(
     id4_ideogram4_session_t* session, id4_ideogram4_generation_bundle_t* bundle,
     const id4_ideogram4_generation_issue_options_t* options,
@@ -2849,15 +2952,7 @@ iree_status_t id4_ideogram4_session_issue_generation(
   IREE_RETURN_IF_ERROR(id4_ideogram4_validate_generation_issue_options(
       session, bundle, options));
 
-  id4_ideogram4_qwen_inputs_t qwen_inputs;
-  memset(&qwen_inputs, 0, sizeof(qwen_inputs));
-  id4_ideogram4_dit_inputs_t dit_inputs;
-  memset(&dit_inputs, 0, sizeof(dit_inputs));
-  id4_ideogram4_denoise_schedule_t denoise_schedule;
-  memset(&denoise_schedule, 0, sizeof(denoise_schedule));
   id4_ideogram4_generation_execution_t* execution = NULL;
-  uint64_t qwen_upload_payload_value = 0;
-  uint64_t seed_upload_payload_value = 0;
   id4_ideogram4_generation_phase_bundle_t conditioning_phase;
   id4_ideogram4_generation_phase_bundle_initialize(
       ID4_IDEOGRAM4_GENERATION_RESIDENCY_PHASE_CONDITIONING,
@@ -2869,52 +2964,8 @@ iree_status_t id4_ideogram4_session_issue_generation(
   id4_ideogram4_generation_phase_bundle_initialize(
       ID4_IDEOGRAM4_GENERATION_RESIDENCY_PHASE_DECODE, &decode_phase);
 
-  iree_status_t status = id4_ideogram4_generation_execution_allocate(
-      bundle, session->host_allocator, &execution);
-  if (iree_status_is_ok(status)) {
-    id4_ideogram4_qwen_lowering_options_t qwen_lowering_options;
-    memset(&qwen_lowering_options, 0, sizeof(qwen_lowering_options));
-    qwen_lowering_options.structure_size = sizeof(qwen_lowering_options);
-    qwen_lowering_options.tokenizer = options->tokenizer;
-    qwen_lowering_options.request = options->request;
-    qwen_lowering_options.tokenizer_flags = options->tokenizer_flags;
-    qwen_lowering_options.max_token_count = session->qwen_model.max_token_count;
-    status = id4_ideogram4_request_lower_qwen_inputs(
-        &qwen_lowering_options, session->host_allocator, &qwen_inputs);
-  }
-  if (iree_status_is_ok(status) &&
-      qwen_inputs.token_count != bundle->summary.qwen_token_count) {
-    status = iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "Ideogram 4 generation issue Qwen token count %" PRIu32
-        " does not match prepared bundle count %" PRIu32,
-        qwen_inputs.token_count, bundle->summary.qwen_token_count);
-  }
-  if (iree_status_is_ok(status)) {
-    id4_ideogram4_dit_lowering_options_t dit_lowering_options;
-    memset(&dit_lowering_options, 0, sizeof(dit_lowering_options));
-    dit_lowering_options.structure_size = sizeof(dit_lowering_options);
-    dit_lowering_options.generation = &options->request->generation;
-    dit_lowering_options.text_token_count = qwen_inputs.token_count;
-    dit_lowering_options.attention_head_size =
-        session->dit_model.hidden_size /
-        session->dit_model.attention_head_count;
-    status = id4_ideogram4_request_lower_dit_inputs(
-        &dit_lowering_options, session->host_allocator, &dit_inputs);
-  }
-  if (iree_status_is_ok(status)) {
-    status = id4_ideogram4_request_generation_lower_denoise_schedule(
-        &options->request->generation, session->host_allocator,
-        &denoise_schedule);
-  }
-  if (iree_status_is_ok(status)) {
-    status = id4_ideogram4_generation_execution_create_semaphores(execution);
-  }
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_semaphore_list_wait(options->wait_semaphore_list,
-                                          iree_infinite_timeout(),
-                                          IREE_ASYNC_WAIT_FLAG_NONE);
-  }
+  iree_status_t status = id4_ideogram4_generation_begin_execution(
+      session, bundle, options, &execution);
   if (iree_status_is_ok(status)) {
     status = id4_ideogram4_generation_prepare_phase_bundle(
         bundle, ID4_IDEOGRAM4_GENERATION_RESIDENCY_PHASE_CONDITIONING,
@@ -2922,43 +2973,11 @@ iree_status_t id4_ideogram4_session_issue_generation(
         &conditioning_phase);
   }
   if (iree_status_is_ok(status)) {
-    status = id4_ideogram4_generation_upload_qwen_inputs(
-        execution, &qwen_inputs, iree_hal_semaphore_list_empty());
-  }
-  if (iree_status_is_ok(status)) {
-    qwen_upload_payload_value = execution->upload_payload_value;
-  }
-  if (iree_status_is_ok(status)) {
-    status = id4_ideogram4_generation_upload_noise_seed(
-        execution, options->request->generation.seed,
-        iree_hal_semaphore_list_empty());
-  }
-  if (iree_status_is_ok(status)) {
-    seed_upload_payload_value = execution->upload_payload_value;
-  }
-  if (iree_status_is_ok(status)) {
-    status = id4_ideogram4_generation_upload_dit_branch_inputs(
-        execution, ID4_IDEOGRAM4_GENERATION_STAGE_DIT_CONDITIONED,
-        &dit_inputs.conditioned);
-  }
-  if (iree_status_is_ok(status)) {
-    status = id4_ideogram4_generation_upload_dit_branch_inputs(
-        execution, ID4_IDEOGRAM4_GENERATION_STAGE_DIT_UNCONDITIONED,
-        &dit_inputs.unconditioned);
-  }
-  if (iree_status_is_ok(status)) {
-    status = id4_ideogram4_generation_upload_denoise_step(
-        execution, &denoise_schedule.steps[0]);
-  }
-  if (iree_status_is_ok(status)) {
-    status = id4_ideogram4_generation_find_outputs(execution);
-  }
-  if (iree_status_is_ok(status)) {
     status = id4_ideogram4_generation_issue_qwen(
         execution,
         id4_ideogram4_generation_phase_stage_bundle(
             &conditioning_phase, ID4_IDEOGRAM4_GENERATION_STAGE_QWEN),
-        qwen_upload_payload_value, options->diagnostics_sink);
+        execution->qwen_upload_payload_value, options->diagnostics_sink);
     conditioning_phase.stage_bundle_refs[ID4_IDEOGRAM4_GENERATION_STAGE_QWEN]
         .was_issued = iree_status_is_ok(status);
   }
@@ -2967,7 +2986,7 @@ iree_status_t id4_ideogram4_session_issue_generation(
         execution,
         id4_ideogram4_generation_phase_stage_bundle(
             &conditioning_phase, ID4_IDEOGRAM4_GENERATION_STAGE_NOISE),
-        seed_upload_payload_value, options->diagnostics_sink);
+        execution->seed_upload_payload_value, options->diagnostics_sink);
     conditioning_phase.stage_bundle_refs[ID4_IDEOGRAM4_GENERATION_STAGE_NOISE]
         .was_issued = iree_status_is_ok(status);
   }
@@ -2995,7 +3014,8 @@ iree_status_t id4_ideogram4_session_issue_generation(
         &denoise_phase);
   }
   for (uint32_t i = 0;
-       i < denoise_schedule.step_count && iree_status_is_ok(status); ++i) {
+       i < execution->denoise_schedule.step_count && iree_status_is_ok(status);
+       ++i) {
     const uint64_t payload_value = (uint64_t)i + 1;
     iree_hal_semaphore_t* latent_semaphore =
         i == 0 ? execution->noise_done_semaphore
@@ -3006,7 +3026,7 @@ iree_status_t id4_ideogram4_session_issue_generation(
                                                                    (uint64_t)i);
       if (iree_status_is_ok(status)) {
         status = id4_ideogram4_generation_upload_denoise_step(
-            execution, &denoise_schedule.steps[i]);
+            execution, &execution->denoise_schedule.steps[i]);
       }
     }
     if (iree_status_is_ok(status)) {
@@ -3058,7 +3078,7 @@ iree_status_t id4_ideogram4_session_issue_generation(
         execution,
         id4_ideogram4_generation_phase_stage_bundle(
             &decode_phase, ID4_IDEOGRAM4_GENERATION_STAGE_DECODE),
-        denoise_schedule.step_count, options->signal_semaphore_list,
+        execution->denoise_schedule.step_count, options->signal_semaphore_list,
         options->diagnostics_sink);
     decode_phase.stage_bundle_refs[ID4_IDEOGRAM4_GENERATION_STAGE_DECODE]
         .was_issued = iree_status_is_ok(status);
@@ -3072,10 +3092,6 @@ iree_status_t id4_ideogram4_session_issue_generation(
   status = iree_status_join(
       status,
       id4_ideogram4_generation_phase_bundle_deinitialize(&denoise_phase));
-  id4_ideogram4_denoise_schedule_deinitialize(&denoise_schedule,
-                                              session->host_allocator);
-  id4_ideogram4_dit_inputs_deinitialize(&dit_inputs, session->host_allocator);
-  id4_ideogram4_qwen_inputs_deinitialize(&qwen_inputs, session->host_allocator);
   if (iree_status_is_ok(status)) {
     *out_execution = execution;
   } else {
@@ -3087,6 +3103,12 @@ iree_status_t id4_ideogram4_session_issue_generation(
 void id4_ideogram4_generation_execution_release(
     id4_ideogram4_generation_execution_t* execution) {
   if (!execution) return;
+  id4_ideogram4_denoise_schedule_deinitialize(&execution->denoise_schedule,
+                                              execution->host_allocator);
+  id4_ideogram4_dit_inputs_deinitialize(&execution->dit_inputs,
+                                        execution->host_allocator);
+  id4_ideogram4_qwen_inputs_deinitialize(&execution->qwen_inputs,
+                                         execution->host_allocator);
   iree_hal_semaphore_release(execution->decode_done_semaphore);
   iree_hal_semaphore_release(execution->sampler_done_semaphore);
   iree_hal_semaphore_release(execution->dit_unconditioned_done_semaphore);
