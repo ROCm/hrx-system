@@ -232,11 +232,123 @@ COMPILE-REPORT: source_low_memory[4] function=report_bf16_result_fragment_packet
 COMPILE-REPORT: source_low_memory[5] function=report_bf16_result_fragment_packets source_op=vector.fragment.load memory_space=global operation=load packet=amdgpu.global_load_b16_d16_saddr address_form=global_saddr dynamic_term_kind=vaddr fallback_reason=fragment_noncontiguous_registers static_offset_bytes=320 element_bytes=2 vector_lanes=1 dynamic_stride_bytes=2 vector_lane_stride_bytes=2 bank_stride_words=0 bank_conflict_degree=0 bank_conflict_kind=-
 COMPILE-REPORT: source_low_memory[6] function=report_bf16_result_fragment_packets source_op=vector.fragment.load memory_space=global operation=load packet=amdgpu.global_load_b16_d16_saddr address_form=global_saddr dynamic_term_kind=vaddr fallback_reason=fragment_noncontiguous_registers static_offset_bytes=384 element_bytes=2 vector_lanes=1 dynamic_stride_bytes=2 vector_lane_stride_bytes=2 bank_stride_words=0 bank_conflict_degree=0 bank_conflict_kind=-
 COMPILE-REPORT: source_low_memory[7] function=report_bf16_result_fragment_packets source_op=vector.fragment.load memory_space=global operation=load packet=amdgpu.global_load_b16_d16_saddr address_form=global_saddr dynamic_term_kind=vaddr fallback_reason=- static_offset_bytes=448 element_bytes=2 vector_lanes=1 dynamic_stride_bytes=2 vector_lane_stride_bytes=2 bank_stride_words=0 bank_conflict_degree=0 bank_conflict_kind=-
-COMPILE-REPORT: source_low_memory[8] function=report_bf16_result_fragment_packets source_op=vector.fragment.store memory_space=global operation=store packet=amdgpu.global_store_b32_saddr address_form=global_saddr dynamic_term_kind=vaddr fallback_reason=- static_offset_bytes=0 element_bytes=2 vector_lanes=2 dynamic_stride_bytes=2 vector_lane_stride_bytes=2 bank_stride_words=0 bank_conflict_degree=0 bank_conflict_kind=-
-COMPILE-REPORT: source_low_memory[9] function=report_bf16_result_fragment_packets source_op=vector.fragment.store memory_space=global operation=store packet=amdgpu.global_store_b32_saddr address_form=global_saddr dynamic_term_kind=vaddr fallback_reason=- static_offset_bytes=64 element_bytes=2 vector_lanes=2 dynamic_stride_bytes=2 vector_lane_stride_bytes=2 bank_stride_words=0 bank_conflict_degree=0 bank_conflict_kind=-
-COMPILE-REPORT: source_low_memory[10] function=report_bf16_result_fragment_packets source_op=vector.fragment.store memory_space=global operation=store packet=amdgpu.global_store_b32_saddr address_form=global_saddr dynamic_term_kind=vaddr fallback_reason=- static_offset_bytes=128 element_bytes=2 vector_lanes=2 dynamic_stride_bytes=2 vector_lane_stride_bytes=2 bank_stride_words=0 bank_conflict_degree=0 bank_conflict_kind=-
-COMPILE-REPORT: source_low_memory[11] function=report_bf16_result_fragment_packets source_op=vector.fragment.store memory_space=global operation=store packet=amdgpu.global_store_b32_saddr address_form=global_saddr dynamic_term_kind=vaddr fallback_reason=- static_offset_bytes=192 element_bytes=2 vector_lanes=2 dynamic_stride_bytes=2 vector_lane_stride_bytes=2 bank_stride_words=0 bank_conflict_degree=0 bank_conflict_kind=-
-COMPILE-REPORT: source_low_memory[12] function=report_bf16_result_fragment_packets source_op=vector.fragment.store memory_space=global operation=store packet=amdgpu.global_store_b32_saddr address_form=global_saddr dynamic_term_kind=vaddr fallback_reason=- static_offset_bytes=256 element_bytes=2 vector_lanes=2 dynamic_stride_bytes=2 vector_lane_stride_bytes=2 bank_stride_words=0 bank_conflict_degree=0 bank_conflict_kind=-
-COMPILE-REPORT: source_low_memory[13] function=report_bf16_result_fragment_packets source_op=vector.fragment.store memory_space=global operation=store packet=amdgpu.global_store_b32_saddr address_form=global_saddr dynamic_term_kind=vaddr fallback_reason=- static_offset_bytes=320 element_bytes=2 vector_lanes=2 dynamic_stride_bytes=2 vector_lane_stride_bytes=2 bank_stride_words=0 bank_conflict_degree=0 bank_conflict_kind=-
-COMPILE-REPORT: source_low_memory[14] function=report_bf16_result_fragment_packets source_op=vector.fragment.store memory_space=global operation=store packet=amdgpu.global_store_b32_saddr address_form=global_saddr dynamic_term_kind=vaddr fallback_reason=- static_offset_bytes=384 element_bytes=2 vector_lanes=2 dynamic_stride_bytes=2 vector_lane_stride_bytes=2 bank_stride_words=0 bank_conflict_degree=0 bank_conflict_kind=-
-COMPILE-REPORT: source_low_memory[15] function=report_bf16_result_fragment_packets source_op=vector.fragment.store memory_space=global operation=store packet=amdgpu.global_store_b32_saddr address_form=global_saddr dynamic_term_kind=vaddr fallback_reason=- static_offset_bytes=448 element_bytes=2 vector_lanes=2 dynamic_stride_bytes=2 vector_lane_stride_bytes=2 bank_stride_words=0 bank_conflict_degree=0 bank_conflict_kind=-
+COMPILE-REPORT: source_low_memory[8] function=report_bf16_result_fragment_packets source_op=vector.fragment.store memory_space=global operation=store packet=amdgpu.global_store_b32_saddr address_form=global_saddr dynamic_term_kind=vaddr fallback_reason=crosslane_packed_bf16_store static_offset_bytes=0 element_bytes=2 vector_lanes=2 dynamic_stride_bytes=2 vector_lane_stride_bytes=2 bank_stride_words=0 bank_conflict_degree=0 bank_conflict_kind=-
+COMPILE-REPORT: source_low_memory[9] function=report_bf16_result_fragment_packets source_op=vector.fragment.store memory_space=global operation=store packet=amdgpu.global_store_b32_saddr address_form=global_saddr dynamic_term_kind=vaddr fallback_reason=crosslane_packed_bf16_store static_offset_bytes=64 element_bytes=2 vector_lanes=2 dynamic_stride_bytes=2 vector_lane_stride_bytes=2 bank_stride_words=0 bank_conflict_degree=0 bank_conflict_kind=-
+COMPILE-REPORT: source_low_memory[10] function=report_bf16_result_fragment_packets source_op=vector.fragment.store memory_space=global operation=store packet=amdgpu.global_store_b32_saddr address_form=global_saddr dynamic_term_kind=vaddr fallback_reason=crosslane_packed_bf16_store static_offset_bytes=128 element_bytes=2 vector_lanes=2 dynamic_stride_bytes=2 vector_lane_stride_bytes=2 bank_stride_words=0 bank_conflict_degree=0 bank_conflict_kind=-
+COMPILE-REPORT: source_low_memory[11] function=report_bf16_result_fragment_packets source_op=vector.fragment.store memory_space=global operation=store packet=amdgpu.global_store_b32_saddr address_form=global_saddr dynamic_term_kind=vaddr fallback_reason=crosslane_packed_bf16_store static_offset_bytes=192 element_bytes=2 vector_lanes=2 dynamic_stride_bytes=2 vector_lane_stride_bytes=2 bank_stride_words=0 bank_conflict_degree=0 bank_conflict_kind=-
+COMPILE-REPORT: source_low_memory[12] function=report_bf16_result_fragment_packets source_op=vector.fragment.store memory_space=global operation=store packet=amdgpu.global_store_b32_saddr address_form=global_saddr dynamic_term_kind=vaddr fallback_reason=crosslane_packed_bf16_store static_offset_bytes=256 element_bytes=2 vector_lanes=2 dynamic_stride_bytes=2 vector_lane_stride_bytes=2 bank_stride_words=0 bank_conflict_degree=0 bank_conflict_kind=-
+COMPILE-REPORT: source_low_memory[13] function=report_bf16_result_fragment_packets source_op=vector.fragment.store memory_space=global operation=store packet=amdgpu.global_store_b32_saddr address_form=global_saddr dynamic_term_kind=vaddr fallback_reason=crosslane_packed_bf16_store static_offset_bytes=320 element_bytes=2 vector_lanes=2 dynamic_stride_bytes=2 vector_lane_stride_bytes=2 bank_stride_words=0 bank_conflict_degree=0 bank_conflict_kind=-
+COMPILE-REPORT: source_low_memory[14] function=report_bf16_result_fragment_packets source_op=vector.fragment.store memory_space=global operation=store packet=amdgpu.global_store_b32_saddr address_form=global_saddr dynamic_term_kind=vaddr fallback_reason=crosslane_packed_bf16_store static_offset_bytes=384 element_bytes=2 vector_lanes=2 dynamic_stride_bytes=2 vector_lane_stride_bytes=2 bank_stride_words=0 bank_conflict_degree=0 bank_conflict_kind=-
+COMPILE-REPORT: source_low_memory[15] function=report_bf16_result_fragment_packets source_op=vector.fragment.store memory_space=global operation=store packet=amdgpu.global_store_b32_saddr address_form=global_saddr dynamic_term_kind=vaddr fallback_reason=crosslane_packed_bf16_store static_offset_bytes=448 element_bytes=2 vector_lanes=2 dynamic_stride_bytes=2 vector_lane_stride_bytes=2 bank_stride_words=0 bank_conflict_degree=0 bank_conflict_kind=-
+
+// ====
+
+amdgpu.target<gfx1100> @target
+
+kernel.def target(@target) @report_fp8_fragment_full_decode() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %zero = index.constant 0 : offset
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 16 : index
+  %input_layout = encoding.layout.strided [1, 16] : encoding<layout>
+  %input_view = buffer.view %input[%zero] : buffer -> view<16x16xf8E4M3, %input_layout>
+  %output_view = buffer.view %output[%zero] : buffer -> view<16xbf16, #dense>
+  %loaded = vector.fragment.load<rhs> %input_view[0, 0] shape [%k, %n] : view<16x16xf8E4M3, %input_layout> -> vector<16xbf16>
+  vector.store %loaded, %output_view[0] : vector<16xbf16>, view<16xbf16, #dense>
+  kernel.return
+}
+
+// ----
+COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
+COMPILE-REPORT: source_low selected_ops=8 emitted_ops=367 rows=8
+COMPILE-REPORT: source_low_memory rows=3
+COMPILE-REPORT: source_low[0] function=report_fp8_fragment_full_decode source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
+COMPILE-REPORT: source_low[1] function=report_fp8_fragment_full_decode source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
+COMPILE-REPORT: source_low[2] function=report_fp8_fragment_full_decode source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
+COMPILE-REPORT: source_low[3] function=report_fp8_fragment_full_decode source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
+COMPILE-REPORT: source_low[4] function=report_fp8_fragment_full_decode source_op=buffer.view selection=rule rule_set=1 rule=0 descriptor=0 emitted_ops=0
+COMPILE-REPORT: source_low[5] function=report_fp8_fragment_full_decode source_op=buffer.view selection=rule rule_set=1 rule=0 descriptor=0 emitted_ops=0
+COMPILE-REPORT: source_low[6] function=report_fp8_fragment_full_decode source_op=vector.fragment.load selection=plan plan=3603 descriptor=0 emitted_ops=361
+COMPILE-REPORT: source_low[7] function=report_fp8_fragment_full_decode source_op=vector.store selection=plan plan=3606 descriptor=0 emitted_ops=6
+COMPILE-REPORT: source_low_memory[0] function=report_fp8_fragment_full_decode source_op=vector.fragment.load memory_space=global operation=load packet=amdgpu.global_load_b128_saddr address_form=global_saddr dynamic_term_kind=vaddr fallback_reason=fp8_full_bf16_decode static_offset_bytes=0 element_bytes=1 vector_lanes=16 dynamic_stride_bytes=16 vector_lane_stride_bytes=1 bank_stride_words=0 bank_conflict_degree=0 bank_conflict_kind=-
+COMPILE-REPORT: source_low_memory[1] function=report_fp8_fragment_full_decode source_op=vector.store memory_space=global operation=store packet=amdgpu.global_store_b128_saddr address_form=global_saddr dynamic_term_kind=none fallback_reason=- static_offset_bytes=0 element_bytes=2 vector_lanes=8 dynamic_stride_bytes=0 vector_lane_stride_bytes=2 bank_stride_words=0 bank_conflict_degree=0 bank_conflict_kind=-
+COMPILE-REPORT: source_low_memory[2] function=report_fp8_fragment_full_decode source_op=vector.store memory_space=global operation=store packet=amdgpu.global_store_b128_saddr address_form=global_saddr dynamic_term_kind=none fallback_reason=- static_offset_bytes=16 element_bytes=2 vector_lanes=8 dynamic_stride_bytes=0 vector_lane_stride_bytes=2 bank_stride_words=0 bank_conflict_degree=0 bank_conflict_kind=-
+
+// ====
+
+amdgpu.target<gfx1100> @target
+
+kernel.def target(@target) @report_fp8_fragment_finite_packed_decode() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %zero = index.constant 0 : offset
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 16 : index
+  %input_layout = encoding.layout.strided [1, 16] : encoding<layout>
+  %input_schema = encoding.define #matrix_operand<element_format=f8e4m3fn, payload_elements=16, payload_registers=4, rounding=finite_flush_subnormal> : encoding<schema>
+  %input_storage = encoding.define #physical_storage {layout = %input_layout : encoding<layout>, schema = %input_schema : encoding<schema>} : encoding<storage>
+  %input_view = buffer.view %input[%zero] : buffer -> view<16x16xf8E4M3, %input_storage>
+  %output_view = buffer.view %output[%zero] : buffer -> view<16xbf16, #dense>
+  %loaded = vector.fragment.load<rhs> %input_view[0, 0] shape [%k, %n] : view<16x16xf8E4M3, %input_storage> -> vector<16xbf16>
+  vector.store %loaded, %output_view[0] : vector<16xbf16>, view<16xbf16, #dense>
+  kernel.return
+}
+
+// ----
+COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
+COMPILE-REPORT: source_low selected_ops=8 emitted_ops=99 rows=8
+COMPILE-REPORT: source_low_memory rows=3
+COMPILE-REPORT: source_low[0] function=report_fp8_fragment_finite_packed_decode source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
+COMPILE-REPORT: source_low[1] function=report_fp8_fragment_finite_packed_decode source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
+COMPILE-REPORT: source_low[2] function=report_fp8_fragment_finite_packed_decode source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
+COMPILE-REPORT: source_low[3] function=report_fp8_fragment_finite_packed_decode source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
+COMPILE-REPORT: source_low[4] function=report_fp8_fragment_finite_packed_decode source_op=buffer.view selection=rule rule_set=1 rule=0 descriptor=0 emitted_ops=0
+COMPILE-REPORT: source_low[5] function=report_fp8_fragment_finite_packed_decode source_op=buffer.view selection=rule rule_set=1 rule=0 descriptor=0 emitted_ops=0
+COMPILE-REPORT: source_low[6] function=report_fp8_fragment_finite_packed_decode source_op=vector.fragment.load selection=plan plan=3603 descriptor=0 emitted_ops=93
+COMPILE-REPORT: source_low[7] function=report_fp8_fragment_finite_packed_decode source_op=vector.store selection=plan plan=3606 descriptor=0 emitted_ops=6
+COMPILE-REPORT: source_low_memory[0] function=report_fp8_fragment_finite_packed_decode source_op=vector.fragment.load memory_space=global operation=load packet=amdgpu.global_load_b128_saddr address_form=global_saddr dynamic_term_kind=vaddr fallback_reason=fp8_packed_bf16_decode static_offset_bytes=0 element_bytes=1 vector_lanes=16 dynamic_stride_bytes=16 vector_lane_stride_bytes=1 bank_stride_words=0 bank_conflict_degree=0 bank_conflict_kind=-
+COMPILE-REPORT: source_low_memory[1] function=report_fp8_fragment_finite_packed_decode source_op=vector.store memory_space=global operation=store packet=amdgpu.global_store_b128_saddr address_form=global_saddr dynamic_term_kind=none fallback_reason=- static_offset_bytes=0 element_bytes=2 vector_lanes=8 dynamic_stride_bytes=0 vector_lane_stride_bytes=2 bank_stride_words=0 bank_conflict_degree=0 bank_conflict_kind=-
+COMPILE-REPORT: source_low_memory[2] function=report_fp8_fragment_finite_packed_decode source_op=vector.store memory_space=global operation=store packet=amdgpu.global_store_b128_saddr address_form=global_saddr dynamic_term_kind=none fallback_reason=- static_offset_bytes=16 element_bytes=2 vector_lanes=8 dynamic_stride_bytes=0 vector_lane_stride_bytes=2 bank_stride_words=0 bank_conflict_degree=0 bank_conflict_kind=-
+
+// ====
+
+amdgpu.target<gfx950> @target
+
+kernel.def target(@target) @report_fp8_fragment_native_decode() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %zero = index.constant 0 : offset
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 16 : index
+  %input_layout = encoding.layout.strided [1, 16] : encoding<layout>
+  %input_view = buffer.view %input[%zero] : buffer -> view<16x16xf8E4M3, %input_layout>
+  %output_view = buffer.view %output[%zero] : buffer -> view<4xbf16, #dense>
+  %loaded = vector.fragment.load<rhs> %input_view[0, 0] shape [%k, %n] : view<16x16xf8E4M3, %input_layout> -> vector<4xbf16>
+  vector.store %loaded, %output_view[0] : vector<4xbf16>, view<4xbf16, #dense>
+  kernel.return
+}
+
+// ----
+COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
+COMPILE-REPORT: source_low selected_ops=8 emitted_ops=20 rows=8
+COMPILE-REPORT: source_low_memory rows=2
+COMPILE-REPORT: source_low[0] function=report_fp8_fragment_native_decode source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
+COMPILE-REPORT: source_low[1] function=report_fp8_fragment_native_decode source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
+COMPILE-REPORT: source_low[2] function=report_fp8_fragment_native_decode source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
+COMPILE-REPORT: source_low[3] function=report_fp8_fragment_native_decode source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
+COMPILE-REPORT: source_low[4] function=report_fp8_fragment_native_decode source_op=buffer.view selection=rule rule_set=1 rule=0 descriptor=0 emitted_ops=0
+COMPILE-REPORT: source_low[5] function=report_fp8_fragment_native_decode source_op=buffer.view selection=rule rule_set=1 rule=0 descriptor=0 emitted_ops=0
+COMPILE-REPORT: source_low[6] function=report_fp8_fragment_native_decode source_op=vector.fragment.load selection=plan plan=3603 descriptor=0 emitted_ops=17
+COMPILE-REPORT: source_low[7] function=report_fp8_fragment_native_decode source_op=vector.store selection=plan plan=3606 descriptor=0 emitted_ops=3
+COMPILE-REPORT: source_low_memory[0] function=report_fp8_fragment_native_decode source_op=vector.fragment.load memory_space=global operation=load packet=amdgpu.global_load_b32_saddr address_form=global_saddr dynamic_term_kind=vaddr fallback_reason=fp8_native_f32_pair static_offset_bytes=0 element_bytes=1 vector_lanes=4 dynamic_stride_bytes=16 vector_lane_stride_bytes=1 bank_stride_words=0 bank_conflict_degree=0 bank_conflict_kind=-
+COMPILE-REPORT: source_low_memory[1] function=report_fp8_fragment_native_decode source_op=vector.store memory_space=global operation=store packet=amdgpu.global_store_b64_saddr address_form=global_saddr dynamic_term_kind=none fallback_reason=- static_offset_bytes=0 element_bytes=2 vector_lanes=4 dynamic_stride_bytes=0 vector_lane_stride_bytes=2 bank_stride_words=0 bank_conflict_degree=0 bank_conflict_kind=-
