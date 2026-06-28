@@ -67,6 +67,11 @@ static iree_status_t loom_encoding_facts_make_summary(
   return loom_value_facts_make_encoding_summary(context, summary, out);
 }
 
+static bool loom_encoding_define_has_dynamic_params(
+    const loom_encoding_define_param_view_t* params) {
+  return params->dynamic_values.count != 0 || params->dynamic_names.count != 0;
+}
+
 static iree_status_t loom_encoding_facts_make_unknown_address_layout(
     loom_fact_context_t* context, loom_value_facts_t* out) {
   return loom_encoding_facts_make_summary(
@@ -191,6 +196,7 @@ iree_status_t loom_encoding_define_facts(
     role = loom_encoding_static_role(module, params.spec);
   }
 
+  bool has_dynamic_params = loom_encoding_define_has_dynamic_params(&params);
   loom_value_fact_address_layout_t address_layout = {0};
   loom_value_fact_storage_schema_t storage_schema = {0};
   loom_value_facts_t static_strides[LOOM_ENCODING_ADDRESS_LAYOUT_MAX_RANK] = {
@@ -202,6 +208,9 @@ iree_status_t loom_encoding_define_facts(
   } else if (role == LOOM_ENCODING_ROLE_STORAGE_SCHEMA) {
     (void)loom_encoding_query_static_storage_schema(
         module, loom_encoding_define_spec(op), &storage_schema);
+    if (has_dynamic_params) {
+      storage_schema.static_spec_encoding_id = 0;
+    }
   } else if (role == LOOM_ENCODING_ROLE_PHYSICAL_STORAGE) {
     const loom_named_attr_t* dynamic_layout = loom_encoding_facts_find_param(
         module, params.dynamic_names, loom_encoding_facts_layout_param_name());
@@ -234,9 +243,11 @@ iree_status_t loom_encoding_define_facts(
     }
   }
 
+  uint16_t static_spec_encoding_id =
+      has_dynamic_params ? 0 : loom_encoding_define_spec(op);
   return loom_encoding_facts_make_summary(
-      context, role, loom_encoding_define_spec(op), address_layout,
-      storage_schema, &result_facts[0]);
+      context, role, static_spec_encoding_id, address_layout, storage_schema,
+      &result_facts[0]);
 }
 
 iree_status_t loom_encoding_assume_spec_facts(

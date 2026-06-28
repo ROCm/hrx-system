@@ -568,6 +568,17 @@ static bool loom_vector_fragment_query_storage_schema_from_facts(
   return true;
 }
 
+static bool loom_vector_fragment_load_preserves_view_element_type(
+    const loom_module_t* module, const loom_op_t* op) {
+  loom_type_t view_type =
+      loom_module_value_type(module, loom_vector_fragment_load_view(op));
+  loom_type_t result_type =
+      loom_module_value_type(module, loom_vector_fragment_load_result(op));
+  return loom_type_is_view(view_type) && loom_type_is_vector(result_type) &&
+         loom_type_element_type(view_type) ==
+             loom_type_element_type(result_type);
+}
+
 iree_status_t loom_vector_fragment_facts(
     loom_fact_context_t* context, const loom_module_t* module,
     const loom_op_t* op, const loom_value_facts_t* operand_facts,
@@ -654,7 +665,8 @@ iree_status_t loom_vector_fragment_load_facts(
 
   const loom_value_id_t view_value_id = loom_vector_fragment_load_view(op);
   loom_value_fact_storage_schema_t storage_schema = {0};
-  if (loom_encoding_query_type_storage_schema(
+  if (loom_vector_fragment_load_preserves_view_element_type(module, op) &&
+      loom_encoding_query_type_storage_schema(
           context, module, loom_module_value_type(module, view_value_id),
           &storage_schema) &&
       !loom_value_fact_encoded_operand_schema_is_unknown(
