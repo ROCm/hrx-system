@@ -21,9 +21,9 @@
 #include "loom/ops/view/ops.h"
 #include "loom/target/arch/amdgpu/lower/constants.h"
 #include "loom/target/arch/amdgpu/lower/emit.h"
-#include "loom/target/arch/amdgpu/lower/fp8_decode.h"
 #include "loom/target/arch/amdgpu/lower/legality.h"
 #include "loom/target/arch/amdgpu/lower/memory.h"
+#include "loom/target/arch/amdgpu/lower/narrow_float/fp8.h"
 #include "loom/target/arch/amdgpu/lower/subgroup.h"
 #include "loom/target/arch/amdgpu/lower/topology.h"
 #include "loom/target/arch/amdgpu/lower/types.h"
@@ -3352,7 +3352,7 @@ loom_amdgpu_emit_fragment_memory_fp8_to_packed_bf16_register(
     bool selected_packed_decode = false;
     IREE_RETURN_IF_ERROR(loom_amdgpu_try_emit_fp8_pair_to_packed_bf16(
         context, source_op, decode_plan, low_source_register, byte_index & 3u,
-        decode_value_flags, vgpr_type, sgpr_type, out_low_packet,
+        decode_value_flags, vgpr_type, sgpr_type, mask_type, out_low_packet,
         &selected_packed_decode));
     if (selected_packed_decode) {
       return iree_ok_status();

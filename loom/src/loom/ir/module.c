@@ -3077,6 +3077,7 @@ iree_status_t loom_region_insert_block(loom_module_t* module,
                                        loom_region_t* region,
                                        uint16_t block_index,
                                        loom_block_t** out_block) {
+  IREE_ASSERT_ARGUMENT(region);
   if (block_index > region->block_count) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,

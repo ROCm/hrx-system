@@ -20,8 +20,8 @@
 #include "loom/target/arch/amdgpu/lower/bitpack.h"
 #include "loom/target/arch/amdgpu/lower/constants.h"
 #include "loom/target/arch/amdgpu/lower/emit.h"
-#include "loom/target/arch/amdgpu/lower/fp8_decode.h"
 #include "loom/target/arch/amdgpu/lower/legality.h"
+#include "loom/target/arch/amdgpu/lower/narrow_float/fp8.h"
 #include "loom/target/arch/amdgpu/lower/types.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
 
@@ -5649,7 +5649,8 @@ static iree_status_t loom_amdgpu_try_lower_vector_fp8_pair_to_packed_bf16(
 
   return loom_amdgpu_try_emit_fp8_pair_to_packed_bf16(
       context, source_op, decode_plan, source_register, byte_offset,
-      value_flags, result_lane_type, *sgpr_type, out_low_packet, out_selected);
+      value_flags, result_lane_type, *sgpr_type, *mask_type, out_low_packet,
+      out_selected);
 }
 
 static iree_status_t loom_amdgpu_try_lower_vector_fp8_pair_to_f32(
