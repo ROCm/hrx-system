@@ -16,7 +16,8 @@
 
 enum {
   ID4_QWEN3_VL_LINEAR_SCALAR_INPUT_BLOCK = 4,
-  ID4_QWEN3_VL_LINEAR_WMMA_TOKEN_BLOCK = 32,
+  ID4_QWEN3_VL_LINEAR_WMMA_TOKEN_BLOCK_M16 = 16,
+  ID4_QWEN3_VL_LINEAR_WMMA_TOKEN_BLOCK_M32 = 32,
   ID4_QWEN3_VL_LINEAR_WMMA_INPUT_BLOCK = 16,
   ID4_QWEN3_VL_LINEAR_WMMA_OUTPUT_ROW_BLOCK = 64,
   ID4_QWEN3_VL_CONFIG_VALUE_BUFFER_CAPACITY = 16,
@@ -114,6 +115,21 @@ static uint32_t id4_qwen3_vl_program_key_value_width(
 static uint32_t id4_qwen3_vl_program_selected_hidden_row_count(
     const id4_qwen3_vl_model_config_t* config) {
   return config->selected_layer_count * config->hidden_size;
+}
+
+static iree_status_t id4_qwen3_vl_program_bf16_token_capacity(
+    const id4_qwen3_vl_program_options_t* options,
+    uint32_t* out_token_capacity) {
+  iree_host_size_t token_capacity = 0;
+  if (!iree_host_size_checked_align(options->request.token_count,
+                                    ID4_QWEN3_VL_LINEAR_WMMA_TOKEN_BLOCK_M16,
+                                    &token_capacity) ||
+      token_capacity > UINT32_MAX) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "Qwen3-VL BF16 token capacity overflow");
+  }
+  *out_token_capacity = (uint32_t)token_capacity;
+  return iree_ok_status();
 }
 
 static iree_status_t id4_qwen3_vl_program_validate_model_config(
@@ -467,10 +483,12 @@ typedef enum id4_qwen3_vl_kernel_kind_e {
   ID4_QWEN3_VL_KERNEL_CONDITION_APPLY_TOKEN_WEIGHTS = 10,
   // Condition token-weight normalization kernel.
   ID4_QWEN3_VL_KERNEL_CONDITION_NORMALIZE_TOKEN_WEIGHTS = 11,
-  // Dense BF16 activation/weight WMMA linear kernel.
-  ID4_QWEN3_VL_KERNEL_LINEAR_BF16_BF16_WMMA = 12,
+  // Dense BF16 activation/weight WMMA linear kernel for 16-token tiles.
+  ID4_QWEN3_VL_KERNEL_LINEAR_BF16_BF16_WMMA_M16N64 = 12,
+  // Dense BF16 activation/weight WMMA linear kernel for 32-token tiles.
+  ID4_QWEN3_VL_KERNEL_LINEAR_BF16_BF16_WMMA_M32N64 = 13,
   // Dense BF16 activation/weight scalar linear tail kernel.
-  ID4_QWEN3_VL_KERNEL_LINEAR_BF16_BF16_TAIL = 13,
+  ID4_QWEN3_VL_KERNEL_LINEAR_BF16_BF16_TAIL = 14,
 } id4_qwen3_vl_kernel_kind_t;
 
 typedef enum id4_qwen3_vl_config_key_e {
@@ -550,6 +568,49 @@ typedef struct id4_qwen3_vl_program_config_value_t {
   // Unsigned integer config value formatted for loomc.
   uint32_t value;
 } id4_qwen3_vl_program_config_value_t;
+
+typedef struct id4_qwen3_vl_program_linear_wmma_tile_t {
+  // Number of token rows covered by one WMMA dispatch tile.
+  uint32_t token_block;
+  // Kernel kind implementing this tile shape.
+  id4_qwen3_vl_kernel_kind_t kernel_kind;
+} id4_qwen3_vl_program_linear_wmma_tile_t;
+
+static const id4_qwen3_vl_program_linear_wmma_tile_t
+    id4_qwen3_vl_program_linear_wmma_m32n64_tile = {
+        // Number of token rows covered by one WMMA dispatch tile.
+        .token_block = ID4_QWEN3_VL_LINEAR_WMMA_TOKEN_BLOCK_M32,
+        // Kernel kind implementing this tile shape.
+        .kernel_kind = ID4_QWEN3_VL_KERNEL_LINEAR_BF16_BF16_WMMA_M32N64,
+};
+
+static const id4_qwen3_vl_program_linear_wmma_tile_t
+    id4_qwen3_vl_program_linear_wmma_m16n64_tile = {
+        // Number of token rows covered by one WMMA dispatch tile.
+        .token_block = ID4_QWEN3_VL_LINEAR_WMMA_TOKEN_BLOCK_M16,
+        // Kernel kind implementing this tile shape.
+        .kernel_kind = ID4_QWEN3_VL_KERNEL_LINEAR_BF16_BF16_WMMA_M16N64,
+};
+
+static const id4_qwen3_vl_program_linear_wmma_tile_t*
+id4_qwen3_vl_program_select_linear_wmma_tile(uint32_t token_count,
+                                             uint32_t input_size,
+                                             uint32_t output_size) {
+  if ((input_size % ID4_QWEN3_VL_LINEAR_WMMA_INPUT_BLOCK) != 0 ||
+      (output_size % ID4_QWEN3_VL_LINEAR_WMMA_OUTPUT_ROW_BLOCK) != 0) {
+    return NULL;
+  }
+  const uint32_t m32_remainder =
+      token_count % ID4_QWEN3_VL_LINEAR_WMMA_TOKEN_BLOCK_M32;
+  if (token_count >= ID4_QWEN3_VL_LINEAR_WMMA_TOKEN_BLOCK_M32 &&
+      m32_remainder < ID4_QWEN3_VL_LINEAR_WMMA_TOKEN_BLOCK_M16) {
+    return &id4_qwen3_vl_program_linear_wmma_m32n64_tile;
+  }
+  if (token_count >= ID4_QWEN3_VL_LINEAR_WMMA_TOKEN_BLOCK_M16) {
+    return &id4_qwen3_vl_program_linear_wmma_m16n64_tile;
+  }
+  return NULL;
+}
 
 static const char* const id4_qwen3_vl_program_operation_name_patterns
     [ID4_QWEN3_VL_PROGRAM_OPERATION_NAME_PATTERN_COUNT] = {
@@ -813,7 +874,10 @@ static const id4_pipeline_kernel_ref_t
         [ID4_QWEN3_VL_KERNEL_CONDITION_NORMALIZE_TOKEN_WEIGHTS] =
             {IREE_SVL("qwen3_vl/condition"),
              IREE_SVL("id4_qwen3_vl_condition_normalize_token_weights_f32")},
-        [ID4_QWEN3_VL_KERNEL_LINEAR_BF16_BF16_WMMA] =
+        [ID4_QWEN3_VL_KERNEL_LINEAR_BF16_BF16_WMMA_M16N64] =
+            {IREE_SVL("qwen3_vl/linear_bf16_f32_wmma"),
+             IREE_SVL("id4_qwen3_vl_linear_bf16_bf16_wmma_m16n64")},
+        [ID4_QWEN3_VL_KERNEL_LINEAR_BF16_BF16_WMMA_M32N64] =
             {IREE_SVL("qwen3_vl/linear_bf16_f32_wmma"),
              IREE_SVL("id4_qwen3_vl_linear_bf16_bf16_wmma_m32n64")},
         [ID4_QWEN3_VL_KERNEL_LINEAR_BF16_BF16_TAIL] =
@@ -930,7 +994,16 @@ static const iree_string_view_t id4_qwen3_vl_program_config_keys
                 [ID4_QWEN3_VL_CONFIG_HIDDEN_ROW_COUNT] =
                     IREE_SVL("id4.qwen3_vl.condition.hidden_row_count"),
             },
-        [ID4_QWEN3_VL_KERNEL_LINEAR_BF16_BF16_WMMA] =
+        [ID4_QWEN3_VL_KERNEL_LINEAR_BF16_BF16_WMMA_M16N64] =
+            {
+                [ID4_QWEN3_VL_CONFIG_DISPATCH_TOKEN_COUNT] =
+                    IREE_SVL("id4.qwen3_vl.linear_wmma.dispatch_token_count"),
+                [ID4_QWEN3_VL_CONFIG_INPUT_SIZE] =
+                    IREE_SVL("id4.qwen3_vl.linear_wmma.input_size"),
+                [ID4_QWEN3_VL_CONFIG_OUTPUT_SIZE] =
+                    IREE_SVL("id4.qwen3_vl.linear_wmma.output_size"),
+            },
+        [ID4_QWEN3_VL_KERNEL_LINEAR_BF16_BF16_WMMA_M32N64] =
             {
                 [ID4_QWEN3_VL_CONFIG_DISPATCH_TOKEN_COUNT] =
                     IREE_SVL("id4.qwen3_vl.linear_wmma.dispatch_token_count"),
@@ -1379,6 +1452,9 @@ static iree_status_t id4_qwen3_vl_program_author_token_embedding(
     id4_pipeline_program_tensor_t* out_token_weights) {
   const uint32_t token_count = options->request.token_count;
   const uint32_t hidden_size = options->model.hidden_size;
+  uint32_t token_capacity = 0;
+  IREE_RETURN_IF_ERROR(
+      id4_qwen3_vl_program_bf16_token_capacity(options, &token_capacity));
   id4_pipeline_program_tensor_t token_ids =
       id4_pipeline_program_tensor_invalid();
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_import_tensor(
@@ -1408,7 +1484,7 @@ static iree_status_t id4_qwen3_vl_program_author_token_embedding(
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_acquire_tensor(
       builder, ID4_QWEN3_VL_TENSOR_EMBEDDED_HIDDEN_STATES, UINT32_MAX,
       ID4_PIPELINE_PROGRAM_DTYPE_BF16,
-      id4_pipeline_program_make_shape_rank2(token_count, hidden_size),
+      id4_pipeline_program_make_shape_rank2(token_capacity, hidden_size),
       out_hidden_states));
 
   const id4_qwen3_vl_program_config_value_t config_values[] = {
@@ -1446,6 +1522,9 @@ static iree_status_t id4_qwen3_vl_program_author_rmsnorm_rows(
     id4_qwen3_vl_tensor_kind_t output_kind, id4_pipeline_program_tensor_t input,
     uint32_t row_count, uint32_t channel_count, uint32_t output_width,
     id4_pipeline_program_tensor_t* out_output) {
+  uint32_t token_capacity = 0;
+  IREE_RETURN_IF_ERROR(
+      id4_qwen3_vl_program_bf16_token_capacity(options, &token_capacity));
   id4_pipeline_program_tensor_t weight = id4_pipeline_program_tensor_invalid();
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_parameter(
       builder, options->parameter_scope, parameter_kind, layer_ordinal,
@@ -1453,8 +1532,7 @@ static iree_status_t id4_qwen3_vl_program_author_rmsnorm_rows(
       id4_pipeline_program_make_shape_rank1(channel_count), &weight));
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_acquire_tensor(
       builder, output_kind, layer_ordinal, ID4_PIPELINE_PROGRAM_DTYPE_BF16,
-      id4_pipeline_program_make_shape_rank2(options->request.token_count,
-                                            output_width),
+      id4_pipeline_program_make_shape_rank2(token_capacity, output_width),
       out_output));
 
   const id4_qwen3_vl_program_config_value_t config_values[] = {
@@ -1501,6 +1579,9 @@ static iree_status_t id4_qwen3_vl_program_author_linear(
     uint32_t input_size, uint32_t output_size,
     id4_pipeline_program_tensor_t* out_output) {
   const uint32_t token_count = options->request.token_count;
+  uint32_t token_capacity = 0;
+  IREE_RETURN_IF_ERROR(
+      id4_qwen3_vl_program_bf16_token_capacity(options, &token_capacity));
   if ((input_size % ID4_QWEN3_VL_LINEAR_SCALAR_INPUT_BLOCK) != 0) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "Qwen3-VL scalar linear input size %" PRIu32
@@ -1514,16 +1595,15 @@ static iree_status_t id4_qwen3_vl_program_author_linear(
       id4_pipeline_program_make_shape_rank2(output_size, input_size), &weight));
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_acquire_tensor(
       builder, output_kind, layer_ordinal, ID4_PIPELINE_PROGRAM_DTYPE_BF16,
-      id4_pipeline_program_make_shape_rank2(token_count, output_size),
+      id4_pipeline_program_make_shape_rank2(token_capacity, output_size),
       out_output));
 
-  const bool can_use_wmma_schedule =
-      (input_size % ID4_QWEN3_VL_LINEAR_WMMA_INPUT_BLOCK) == 0 &&
-      (output_size % ID4_QWEN3_VL_LINEAR_WMMA_OUTPUT_ROW_BLOCK) == 0;
+  const id4_qwen3_vl_program_linear_wmma_tile_t* wmma_tile =
+      id4_qwen3_vl_program_select_linear_wmma_tile(token_capacity, input_size,
+                                                   output_size);
   const uint32_t wmma_token_count =
-      can_use_wmma_schedule
-          ? token_count - (token_count % ID4_QWEN3_VL_LINEAR_WMMA_TOKEN_BLOCK)
-          : 0;
+      wmma_tile ? token_capacity - (token_capacity % wmma_tile->token_block)
+                : 0;
   if (wmma_token_count != 0) {
     iree_device_size_t row_byte_length = 0;
     if (!iree_device_size_checked_mul(output_size, sizeof(uint16_t),
@@ -1560,20 +1640,20 @@ static iree_status_t id4_qwen3_vl_program_author_linear(
     id4_pipeline_kernel_config_binding_t
         wmma_config_bindings[ID4_QWEN3_VL_MAX_KERNEL_CONFIG_BINDING_COUNT];
     IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_make_config_bindings(
-        ID4_QWEN3_VL_KERNEL_LINEAR_BF16_BF16_WMMA,
-        IREE_ARRAYSIZE(wmma_config_values), wmma_config_values,
-        wmma_value_buffers, wmma_config_bindings));
+        wmma_tile->kernel_kind, IREE_ARRAYSIZE(wmma_config_values),
+        wmma_config_values, wmma_value_buffers, wmma_config_bindings));
     id4_pipeline_program_dispatch_binding_t wmma_bindings[] = {
         id4_pipeline_program_read(input),
         id4_pipeline_program_read(weight),
         id4_pipeline_program_write_range(*out_output, 0, wmma_byte_length),
     };
     IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_dispatch_named(
-        builder, wmma_name, ID4_QWEN3_VL_KERNEL_LINEAR_BF16_BF16_WMMA,
+        builder, wmma_name, wmma_tile->kernel_kind,
         IREE_ARRAYSIZE(wmma_config_values), wmma_config_bindings,
         IREE_ARRAYSIZE(wmma_bindings), wmma_bindings));
 
-    const uint32_t tail_token_count = token_count - wmma_token_count;
+    const uint32_t tail_token_count =
+        token_count > wmma_token_count ? token_count - wmma_token_count : 0;
     if (tail_token_count == 0) return iree_ok_status();
     iree_device_size_t tail_byte_length = 0;
     if (!iree_device_size_checked_mul(tail_token_count, row_byte_length,
@@ -1644,13 +1724,16 @@ static iree_status_t id4_qwen3_vl_program_author_rotary(
     uint32_t channel_count, id4_qwen3_vl_tensor_kind_t output_kind,
     id4_pipeline_program_tensor_t* out_output) {
   const uint32_t token_count = options->request.token_count;
+  uint32_t token_capacity = 0;
+  IREE_RETURN_IF_ERROR(
+      id4_qwen3_vl_program_bf16_token_capacity(options, &token_capacity));
   if ((channel_count % 2) != 0 || (options->model.head_size % 2) != 0) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "Qwen3-VL rotary dimensions must be even");
   }
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_acquire_tensor(
       builder, output_kind, layer_ordinal, ID4_PIPELINE_PROGRAM_DTYPE_BF16,
-      id4_pipeline_program_make_shape_rank2(token_count, channel_count),
+      id4_pipeline_program_make_shape_rank2(token_capacity, channel_count),
       out_output));
   const id4_qwen3_vl_program_config_value_t config_values[] = {
       {ID4_QWEN3_VL_CONFIG_TOKEN_COUNT, token_count},
@@ -1704,6 +1787,9 @@ static iree_status_t id4_qwen3_vl_program_author_attention(
   const uint32_t token_count = options->request.token_count;
   const uint32_t hidden_size = options->model.hidden_size;
   const uint32_t attention_head_count = options->model.attention_head_count;
+  uint32_t token_capacity = 0;
+  IREE_RETURN_IF_ERROR(
+      id4_qwen3_vl_program_bf16_token_capacity(options, &token_capacity));
   id4_pipeline_program_tensor_t scores = id4_pipeline_program_tensor_invalid();
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_acquire_tensor(
       builder, ID4_QWEN3_VL_TENSOR_LAYER_ATTENTION_SCORES, layer_ordinal,
@@ -1722,7 +1808,7 @@ static iree_status_t id4_qwen3_vl_program_author_attention(
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_acquire_tensor(
       builder, ID4_QWEN3_VL_TENSOR_LAYER_ATTENTION_CONTEXT, layer_ordinal,
       ID4_PIPELINE_PROGRAM_DTYPE_BF16,
-      id4_pipeline_program_make_shape_rank2(token_count, hidden_size),
+      id4_pipeline_program_make_shape_rank2(token_capacity, hidden_size),
       out_context));
 
   const id4_pipeline_program_dispatch_binding_t score_bindings[] = {
@@ -1800,10 +1886,13 @@ static iree_status_t id4_qwen3_vl_program_author_silu_gate(
     id4_pipeline_program_tensor_t* out_activation) {
   const uint32_t token_count = options->request.token_count;
   const uint32_t intermediate_size = options->model.intermediate_size;
+  uint32_t token_capacity = 0;
+  IREE_RETURN_IF_ERROR(
+      id4_qwen3_vl_program_bf16_token_capacity(options, &token_capacity));
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_acquire_tensor(
       builder, ID4_QWEN3_VL_TENSOR_LAYER_MLP_ACTIVATION, layer_ordinal,
       ID4_PIPELINE_PROGRAM_DTYPE_BF16,
-      id4_pipeline_program_make_shape_rank2(token_count, intermediate_size),
+      id4_pipeline_program_make_shape_rank2(token_capacity, intermediate_size),
       out_activation));
   const id4_qwen3_vl_program_config_value_t config_values[] = {
       {ID4_QWEN3_VL_CONFIG_TOKEN_COUNT, token_count},
@@ -1836,9 +1925,12 @@ static iree_status_t id4_qwen3_vl_program_author_residual_add(
     id4_pipeline_program_tensor_t* out_output) {
   const uint32_t token_count = options->request.token_count;
   const uint32_t hidden_size = options->model.hidden_size;
+  uint32_t token_capacity = 0;
+  IREE_RETURN_IF_ERROR(
+      id4_qwen3_vl_program_bf16_token_capacity(options, &token_capacity));
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_acquire_tensor(
       builder, output_kind, layer_ordinal, ID4_PIPELINE_PROGRAM_DTYPE_BF16,
-      id4_pipeline_program_make_shape_rank2(token_count, hidden_size),
+      id4_pipeline_program_make_shape_rank2(token_capacity, hidden_size),
       out_output));
   const id4_qwen3_vl_program_config_value_t config_values[] = {
       {ID4_QWEN3_VL_CONFIG_TOKEN_COUNT, token_count},
