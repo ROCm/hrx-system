@@ -33,8 +33,8 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx1100_scaled_f8e4m3_x
   %34 = v_and_b32_lit %33, 128
   %35 = v_lshlrev_b32_src0_inline %34, 8
   %36 = v_and_b32_lit %33, 127
-  %37 = v_lshlrev_b32_src0_inline %36, 4
-  %38 = v_add_u32_lit %37, 15360
+  %37 = v_mov_b32 15360
+  %38 = v_lshl_add_u32_shift_imm %36, %37, 4
   %39 = v_mov_b32 3229614080
   %40 = v_mov_b32 1614815232
   %41 = v_perm_b32 %40, %39, %36
@@ -55,8 +55,7 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx1100_scaled_f8e4m3_x
   %57 = v_and_b32_lit %56, 128
   %58 = v_lshlrev_b32_src0_inline %57, 8
   %59 = v_and_b32_lit %56, 127
-  %60 = v_lshlrev_b32_src0_inline %59, 4
-  %61 = v_add_u32_lit %60, 15360
+  %61 = v_lshl_add_u32_shift_imm %59, %37, 4
   %64 = v_perm_b32 %40, %39, %59
   %67 = v_perm_b32 %43, %42, %59
   %68 = v_lshlrev_b32_src0_inline %67, 8
@@ -71,8 +70,7 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx1100_scaled_f8e4m3_x
   %80 = v_and_b32_lit %79, 128
   %81 = v_lshlrev_b32_src0_inline %80, 8
   %82 = v_and_b32_lit %79, 127
-  %83 = v_lshlrev_b32_src0_inline %82, 4
-  %84 = v_add_u32_lit %83, 15360
+  %84 = v_lshl_add_u32_shift_imm %82, %37, 4
   %87 = v_perm_b32 %40, %39, %82
   %90 = v_perm_b32 %43, %42, %82
   %91 = v_lshlrev_b32_src0_inline %90, 8
@@ -87,8 +85,7 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx1100_scaled_f8e4m3_x
   %103 = v_and_b32_lit %102, 128
   %104 = v_lshlrev_b32_src0_inline %103, 8
   %105 = v_and_b32_lit %102, 127
-  %106 = v_lshlrev_b32_src0_inline %105, 4
-  %107 = v_add_u32_lit %106, 15360
+  %107 = v_lshl_add_u32_shift_imm %105, %37, 4
   %110 = v_perm_b32 %40, %39, %105
   %113 = v_perm_b32 %43, %42, %105
   %114 = v_lshlrev_b32_src0_inline %113, 8
@@ -103,8 +100,7 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx1100_scaled_f8e4m3_x
   %125 = v_and_b32_lit %124, 128
   %126 = v_lshlrev_b32_src0_inline %125, 8
   %127 = v_and_b32_lit %124, 127
-  %128 = v_lshlrev_b32_src0_inline %127, 4
-  %129 = v_add_u32_lit %128, 15360
+  %129 = v_lshl_add_u32_shift_imm %127, %37, 4
   %132 = v_perm_b32 %40, %39, %127
   %135 = v_perm_b32 %43, %42, %127
   %136 = v_lshlrev_b32_src0_inline %135, 8
@@ -119,8 +115,7 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx1100_scaled_f8e4m3_x
   %148 = v_and_b32_lit %147, 128
   %149 = v_lshlrev_b32_src0_inline %148, 8
   %150 = v_and_b32_lit %147, 127
-  %151 = v_lshlrev_b32_src0_inline %150, 4
-  %152 = v_add_u32_lit %151, 15360
+  %152 = v_lshl_add_u32_shift_imm %150, %37, 4
   %155 = v_perm_b32 %40, %39, %150
   %158 = v_perm_b32 %43, %42, %150
   %159 = v_lshlrev_b32_src0_inline %158, 8
@@ -135,8 +130,7 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx1100_scaled_f8e4m3_x
   %171 = v_and_b32_lit %170, 128
   %172 = v_lshlrev_b32_src0_inline %171, 8
   %173 = v_and_b32_lit %170, 127
-  %174 = v_lshlrev_b32_src0_inline %173, 4
-  %175 = v_add_u32_lit %174, 15360
+  %175 = v_lshl_add_u32_shift_imm %173, %37, 4
   %178 = v_perm_b32 %40, %39, %173
   %181 = v_perm_b32 %43, %42, %173
   %182 = v_lshlrev_b32_src0_inline %181, 8
@@ -151,8 +145,7 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx1100_scaled_f8e4m3_x
   %194 = v_and_b32_lit %193, 128
   %195 = v_lshlrev_b32_src0_inline %194, 8
   %196 = v_and_b32_lit %193, 127
-  %197 = v_lshlrev_b32_src0_inline %196, 4
-  %198 = v_add_u32_lit %197, 15360
+  %198 = v_lshl_add_u32_shift_imm %196, %37, 4
   %201 = v_perm_b32 %40, %39, %196
   %204 = v_perm_b32 %43, %42, %196
   %205 = v_lshlrev_b32_src0_inline %204, 8
