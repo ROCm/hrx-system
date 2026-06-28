@@ -2443,25 +2443,24 @@ low.func.def target(@target) abi(hal_kernel) @vector_extf_splat_finite_f8e4m3_to
   %13 = v_mov_b32 0
   %finite = global_load_i8_saddr %13, %input_view
   %15 = v_and_b32_lit %finite, 255
-  %16 = v_and_b32_lit %15, 128
-  %17 = v_lshlrev_b32_src0_inline %16, 8
-  %18 = v_and_b32_lit %15, 127
-  %19 = v_mov_b32 15360
-  %20 = v_lshl_add_u32_shift_imm %18, %19, 4
-  %21 = v_mov_b32 3229614080
-  %22 = v_mov_b32 1614815232
-  %23 = v_perm_b32 %22, %21, %18
-  %24 = v_mov_b32 993737472
-  %25 = v_mov_b32 1010580540
-  %26 = v_perm_b32 %25, %24, %18
-  %27 = v_lshlrev_b32_src0_inline %26, 8
-  %28 = v_or_b32 %23, %27
-  %29 = v_cmp_lt_u32_src1_inline %18 {rhs = 8}
-  %30 = v_cndmask_b32 %20, %28, %29
-  %31 = v_or_b32 %17, %30
-  %32 = v_and_b32_lit %31, 65535
-  %34 = v_lshlrev_b32_src0_inline %32, 16
-  %value = v_or_b32 %32, %34
+  %16 = v_and_b32_lit %15, 127
+  %17 = v_mov_b32 15360
+  %18 = v_lshl_add_u32_shift_imm %16, %17, 4
+  %19 = v_mov_b32 3229614080
+  %20 = v_mov_b32 1614815232
+  %21 = v_perm_b32 %20, %19, %16
+  %22 = v_mov_b32 993737472
+  %23 = v_mov_b32 1010580540
+  %24 = v_perm_b32 %23, %22, %16
+  %25 = v_lshlrev_b32_src0_inline %24, 8
+  %26 = v_or_b32 %21, %25
+  %27 = v_cmp_lt_u32_src1_inline %16 {rhs = 8}
+  %28 = v_cndmask_b32 %18, %26, %27
+  %29 = v_lshlrev_b32_src0_inline %15, 8
+  %30 = v_bfi_b32_src0_lit %29, %28, 32768
+  %31 = v_and_b32_lit %30, 65535
+  %33 = v_lshlrev_b32_src0_inline %31, 16
+  %value = v_or_b32 %31, %33
   global_store_b32_saddr %13, %value, %output_view
   return
 }
@@ -2488,25 +2487,24 @@ low.func.def target(@target) abi(hal_kernel) @vector_extf_splat_finite_f8e5m2_to
   %13 = v_mov_b32 0
   %finite = global_load_i8_saddr %13, %input_view
   %15 = v_and_b32_lit %finite, 255
-  %16 = v_and_b32_lit %15, 128
-  %17 = v_lshlrev_b32_src0_inline %16, 8
-  %18 = v_and_b32_lit %15, 127
-  %19 = v_mov_b32 14336
-  %20 = v_lshl_add_u32_shift_imm %18, %19, 5
-  %21 = v_lshlrev_b32_src0_inline %18, 1
-  %22 = v_add_u32_src0_inline %21, 1
-  %23 = v_lshlrev_b32_src0_inline %22, 8
-  %24 = v_or_b32 %21, %23
-  %25 = v_mov_b32 931135488
-  %26 = v_mov_b32 943732736
-  %27 = v_perm_b32 %26, %25, %24
-  %28 = v_and_b32_lit %27, 65535
-  %29 = v_cmp_lt_u32_src1_inline %18 {rhs = 4}
-  %30 = v_cndmask_b32 %20, %28, %29
-  %31 = v_or_b32 %17, %30
-  %32 = v_and_b32_lit %31, 65535
-  %34 = v_lshlrev_b32_src0_inline %32, 16
-  %value = v_or_b32 %32, %34
+  %16 = v_and_b32_lit %15, 127
+  %17 = v_mov_b32 14336
+  %18 = v_lshl_add_u32_shift_imm %16, %17, 5
+  %19 = v_lshlrev_b32_src0_inline %16, 1
+  %20 = v_add_u32_src0_inline %19, 1
+  %21 = v_lshlrev_b32_src0_inline %20, 8
+  %22 = v_or_b32 %19, %21
+  %23 = v_mov_b32 931135488
+  %24 = v_mov_b32 943732736
+  %25 = v_perm_b32 %24, %23, %22
+  %26 = v_and_b32_lit %25, 65535
+  %27 = v_cmp_lt_u32_src1_inline %16 {rhs = 4}
+  %28 = v_cndmask_b32 %18, %26, %27
+  %29 = v_lshlrev_b32_src0_inline %15, 8
+  %30 = v_bfi_b32_src0_lit %29, %28, 32768
+  %31 = v_and_b32_lit %30, 65535
+  %33 = v_lshlrev_b32_src0_inline %31, 16
+  %value = v_or_b32 %31, %33
   global_store_b32_saddr %13, %value, %output_view
   return
 }
