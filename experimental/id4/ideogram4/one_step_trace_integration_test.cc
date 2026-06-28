@@ -17,9 +17,11 @@
 #include "experimental/id4/stages/hal_integration_util.h"
 #include "experimental/id4/stages/ideogram4_decode.h"
 #include "experimental/id4/stages/ideogram4_dit.h"
+#include "experimental/id4/stages/ideogram4_dit_parameters.h"
 #include "experimental/id4/stages/sampler.h"
 #include "experimental/id4/tooling/capture.h"
 #include "experimental/id4/tooling/image.h"
+#include "experimental/id4/tooling/runtime.h"
 #include "iree/base/tooling/flags.h"
 #include "iree/io/file_contents.h"
 #include "iree/io/file_handle.h"
@@ -38,10 +40,27 @@ IREE_FLAG(string, id4_plan_output_dir, "",
 IREE_FLAG(int32_t, id4_step_count, 1,
           "Number of Euler denoise steps to run. Values greater than one run "
           "a smoke path without one-step fixture comparisons.");
+IREE_FLAG(string, id4_reference_mode, "none",
+          "Reference comparison mode: none or bf16_fixture.");
+IREE_FLAG(string, dit_parameter_format, "fp8_e4m3",
+          "DiT parameter format: bf16 or fp8_e4m3.");
+IREE_FLAG(string, dit_conditioned_fp8_scope, "dit_cond_fp8",
+          "Conditioned DiT FP8 e4m3 source parameter scope.");
+IREE_FLAG(string, dit_unconditioned_fp8_scope, "dit_uncond_fp8",
+          "Unconditioned DiT FP8 e4m3 source parameter scope.");
 
 namespace {
 
 constexpr uint8_t kOutputSentinel = 0xA5;
+
+using ParameterProviderRef =
+    id4::test::OwningRef<iree_io_parameter_provider_t,
+                         iree_io_parameter_provider_release>;
+
+enum class ReferenceMode {
+  kNone,
+  kBf16Fixture,
+};
 
 class RetainedHalFiles {
  public:
@@ -126,6 +145,42 @@ static iree_status_t WritePlanJsonIfRequested(const id4_pipeline_plan_t* plan,
   }
   iree_string_builder_deinitialize(&builder);
   return status;
+}
+
+static iree_status_t ParseDitParameterFormat(
+    id4_ideogram4_dit_parameter_format_t* out_format) {
+  iree_status_t status = id4_ideogram4_dit_parameter_format_parse(
+      iree_make_cstring_view(FLAG_dit_parameter_format), out_format);
+  if (iree_status_is_ok(status)) return status;
+  return iree_status_annotate(status, IREE_SV("--dit_parameter_format"));
+}
+
+static iree_status_t ParseReferenceMode(ReferenceMode* out_mode) {
+  const iree_string_view_t value =
+      iree_make_cstring_view(FLAG_id4_reference_mode);
+  if (iree_string_view_equal(value, IREE_SV("none"))) {
+    *out_mode = ReferenceMode::kNone;
+    return iree_ok_status();
+  }
+  if (iree_string_view_equal(value, IREE_SV("bf16_fixture"))) {
+    *out_mode = ReferenceMode::kBf16Fixture;
+    return iree_ok_status();
+  }
+  return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                          "unsupported --id4_reference_mode `%.*s`",
+                          static_cast<int>(value.size), value.data);
+}
+
+static iree_string_view_t Fp8ParameterScopeForRequest(
+    id4_ideogram4_dit_conditioning_mode_t conditioning_mode) {
+  switch (conditioning_mode) {
+    case ID4_IDEOGRAM4_DIT_CONDITIONING_MODE_CONDITIONED:
+      return iree_make_cstring_view(FLAG_dit_conditioned_fp8_scope);
+    case ID4_IDEOGRAM4_DIT_CONDITIONING_MODE_UNCONDITIONED:
+      return iree_make_cstring_view(FLAG_dit_unconditioned_fp8_scope);
+    default:
+      return iree_string_view_empty();
+  }
 }
 
 static bool TensorShapeEquals(id4_pipeline_tensor_shape_t lhs,
@@ -360,12 +415,19 @@ static iree_status_t ConfigureDitRequestFromFixture(
 
 static iree_status_t CreateDitStage(const id4::test::LiveStageContext& context,
                                     iree_string_view_t parameter_scope,
+                                    iree_string_view_t fp8_parameter_scope,
+                                    id4_ideogram4_dit_parameter_format_t format,
                                     id4_pipeline_stage_t** out_stage) {
   id4_pipeline_stage_services_t services;
   std::memset(&services, 0, sizeof(services));
   services.device_group = context.device_group.get();
   services.executable_cache = context.executable_cache.get();
   services.host_allocator = iree_allocator_system();
+
+  id4_ideogram4_dit_parameter_source_rule_list_t source_rules;
+  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_parameter_source_rule_list_initialize(
+      format, *id4_ideogram4_dit_program_ideogram4_model_config(),
+      fp8_parameter_scope, iree_allocator_system(), &source_rules));
 
   id4_ideogram4_dit_stage_create_options_t options;
   std::memset(&options, 0, sizeof(options));
@@ -374,8 +436,13 @@ static iree_status_t CreateDitStage(const id4::test::LiveStageContext& context,
   options.kernel_cache = context.kernel_cache.get();
   options.parameter_scope = parameter_scope;
   options.model = *id4_ideogram4_dit_program_ideogram4_model_config();
-  return id4_ideogram4_dit_stage_create(&options, iree_allocator_system(),
-                                        out_stage);
+  options.parameter_source_rule_count = source_rules.count;
+  options.parameter_source_rules = source_rules.values;
+  iree_status_t status = id4_ideogram4_dit_stage_create(
+      &options, iree_allocator_system(), out_stage);
+  id4_ideogram4_dit_parameter_source_rule_list_deinitialize(
+      &source_rules, iree_allocator_system());
+  return status;
 }
 
 static iree_status_t CreateSamplerStage(
@@ -424,6 +491,52 @@ static iree_status_t LoadStage(id4_pipeline_stage_t* stage,
   options.structure_size = sizeof(options);
   options.diagnostics_sink = sink;
   return id4_pipeline_stage_load(stage, &options);
+}
+
+static iree_status_t CreateDitParameterProviderFromFlags(
+    iree_string_view_t parameter_scope, iree_string_view_t fp8_parameter_scope,
+    id4_ideogram4_dit_parameter_format_t format,
+    iree_io_parameter_provider_t** out_provider) {
+  if (format == ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_BF16) {
+    return id4::test::CreateParameterProviderFromFlags(parameter_scope,
+                                                       out_provider);
+  }
+
+  ParameterProviderRef bf16_provider;
+  ParameterProviderRef fp8_provider;
+  id4_tooling_parameter_provider_request_t requests[] = {
+      {
+          // BF16-expanded fallback parameter scope.
+          .scope = parameter_scope,
+          // BF16-expanded provider output.
+          .out_provider = bf16_provider.out(),
+      },
+      {
+          // FP8 e4m3 source parameter scope.
+          .scope = fp8_parameter_scope,
+          // FP8 e4m3 source provider output.
+          .out_provider = fp8_provider.out(),
+      },
+  };
+  IREE_RETURN_IF_ERROR(id4_tooling_create_parameter_providers_from_flags(
+      IREE_ARRAYSIZE(requests), requests, iree_allocator_system()));
+
+  const id4_tooling_parameter_provider_set_entry_t entries[] = {
+      {
+          // BF16-expanded fallback parameter scope.
+          .scope = parameter_scope,
+          // BF16-expanded fallback provider.
+          .provider = bf16_provider.get(),
+      },
+      {
+          // FP8 e4m3 source parameter scope.
+          .scope = fp8_parameter_scope,
+          // FP8 e4m3 source provider.
+          .provider = fp8_provider.get(),
+      },
+  };
+  return id4_tooling_create_parameter_provider_set(
+      IREE_ARRAYSIZE(entries), entries, iree_allocator_system(), out_provider);
 }
 
 static iree_status_t PlanDitStage(
@@ -669,7 +782,20 @@ TEST(Ideogram4OneStepTraceIntegration,
   const int32_t step_count = FLAG_id4_step_count;
   ASSERT_GT(step_count, 0) << "--id4_step_count must be positive";
   const uint32_t denoise_step_count = static_cast<uint32_t>(step_count);
-  const bool compare_one_step_fixture = step_count == 1;
+  id4_ideogram4_dit_parameter_format_t dit_parameter_format =
+      ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_INVALID;
+  IREE_ASSERT_OK(ParseDitParameterFormat(&dit_parameter_format));
+  ReferenceMode reference_mode = ReferenceMode::kNone;
+  IREE_ASSERT_OK(ParseReferenceMode(&reference_mode));
+  const bool capture_one_step_trace = step_count == 1;
+  const bool compare_one_step_fixture =
+      reference_mode == ReferenceMode::kBf16Fixture;
+  if (compare_one_step_fixture) {
+    ASSERT_TRUE(capture_one_step_trace)
+        << "bf16_fixture reference mode requires --id4_step_count=1";
+    ASSERT_EQ(dit_parameter_format, ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_BF16)
+        << "bf16_fixture reference mode requires --dit_parameter_format=bf16";
+  }
 
   id4::test::FixtureTensorSet fixture_tensors;
   IREE_ASSERT_OK(
@@ -697,30 +823,33 @@ TEST(Ideogram4OneStepTraceIntegration,
   id4::test::KernelLibraryRef kernel_library;
   IREE_ASSERT_OK(id4::test::CreateEmbeddedKernelLibrary(kernel_library.out()));
 
-  id4::test::OwningRef<iree_io_parameter_provider_t,
-                       iree_io_parameter_provider_release>
-      cond_provider;
-  IREE_ASSERT_OK(id4::test::CreateParameterProviderFromFlags(
-      IREE_SV("dit_cond"), cond_provider.out()));
-  id4::test::OwningRef<iree_io_parameter_provider_t,
-                       iree_io_parameter_provider_release>
-      uncond_provider;
-  IREE_ASSERT_OK(id4::test::CreateParameterProviderFromFlags(
-      IREE_SV("dit_uncond"), uncond_provider.out()));
-  id4::test::OwningRef<iree_io_parameter_provider_t,
-                       iree_io_parameter_provider_release>
-      vae_provider;
+  const iree_string_view_t cond_fp8_parameter_scope =
+      Fp8ParameterScopeForRequest(cond_request.conditioning_mode);
+  const iree_string_view_t uncond_fp8_parameter_scope =
+      Fp8ParameterScopeForRequest(uncond_request.conditioning_mode);
+
+  ParameterProviderRef cond_provider;
+  IREE_ASSERT_OK(CreateDitParameterProviderFromFlags(
+      IREE_SV("dit_cond"), cond_fp8_parameter_scope, dit_parameter_format,
+      cond_provider.out()));
+  ParameterProviderRef uncond_provider;
+  IREE_ASSERT_OK(CreateDitParameterProviderFromFlags(
+      IREE_SV("dit_uncond"), uncond_fp8_parameter_scope, dit_parameter_format,
+      uncond_provider.out()));
+  ParameterProviderRef vae_provider;
   IREE_ASSERT_OK(id4::test::CreateParameterProviderFromFlags(
       IREE_SV("vae"), vae_provider.out()));
 
   id4::test::OwningRef<id4_pipeline_stage_t, id4_pipeline_stage_release>
       cond_stage;
-  IREE_ASSERT_OK(
-      CreateDitStage(context, IREE_SV("dit_cond"), cond_stage.out()));
+  IREE_ASSERT_OK(CreateDitStage(context, IREE_SV("dit_cond"),
+                                cond_fp8_parameter_scope, dit_parameter_format,
+                                cond_stage.out()));
   id4::test::OwningRef<id4_pipeline_stage_t, id4_pipeline_stage_release>
       uncond_stage;
-  IREE_ASSERT_OK(
-      CreateDitStage(context, IREE_SV("dit_uncond"), uncond_stage.out()));
+  IREE_ASSERT_OK(CreateDitStage(context, IREE_SV("dit_uncond"),
+                                uncond_fp8_parameter_scope,
+                                dit_parameter_format, uncond_stage.out()));
   id4::test::OwningRef<id4_pipeline_stage_t, id4_pipeline_stage_release>
       sampler_stage;
   IREE_ASSERT_OK(CreateSamplerStage(context, sampler_stage.out()));
@@ -1089,7 +1218,7 @@ TEST(Ideogram4OneStepTraceIntegration,
     IREE_ASSERT_OK(IssueStage(cond_stage.get(), cond_bundle.get(),
                               cond_boundaries, cond_taps, cond_wait.list(),
                               cond_signal.list(), &diagnostics_sink));
-    if (compare_one_step_fixture) {
+    if (capture_one_step_trace) {
       IREE_ASSERT_OK(CaptureStageIfRequested(
           capture_directory, IREE_SV("cond"), IREE_SV("ideogram4.cond.dit"),
           context.device.get(), cond_plan.get(), cond_boundaries, cond_taps,
@@ -1103,7 +1232,7 @@ TEST(Ideogram4OneStepTraceIntegration,
     IREE_ASSERT_OK(IssueStage(
         uncond_stage.get(), uncond_bundle.get(), uncond_boundaries, uncond_taps,
         uncond_wait.list(), uncond_signal.list(), &diagnostics_sink));
-    if (compare_one_step_fixture) {
+    if (capture_one_step_trace) {
       IREE_ASSERT_OK(CaptureStageIfRequested(
           capture_directory, IREE_SV("uncond"), IREE_SV("ideogram4.uncond.dit"),
           context.device.get(), uncond_plan.get(), uncond_boundaries,

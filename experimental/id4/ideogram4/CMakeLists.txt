@@ -183,9 +183,11 @@ iree_cc_test(
     iree::experimental::id4::stages::hal_integration_util
     iree::experimental::id4::stages::ideogram4_decode
     iree::experimental::id4::stages::ideogram4_dit
+    iree::experimental::id4::stages::ideogram4_dit_parameters
     iree::experimental::id4::stages::sampler
     iree::experimental::id4::tooling::capture
     iree::experimental::id4::tooling::image
+    iree::experimental::id4::tooling::runtime
     iree::hal
     iree::io::file_handle
     iree::io::parameter_provider
