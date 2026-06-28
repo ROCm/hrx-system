@@ -100,6 +100,9 @@ loom_value_facts_t loom_value_facts_exact_f64(double value) {
   facts.flags = LOOM_VALUE_FACT_EXACT | LOOM_VALUE_FACT_FLOAT;
   if (!isnan(value)) facts.flags |= LOOM_VALUE_FACT_NOT_NAN;
   if (!isinf(value)) facts.flags |= LOOM_VALUE_FACT_NOT_INF;
+  if (fpclassify(value) != FP_SUBNORMAL) {
+    facts.flags |= LOOM_VALUE_FACT_NOT_SUBNORMAL;
+  }
   if (isfinite(value)) {
     facts.flags |= LOOM_VALUE_FACT_NOT_NAN | LOOM_VALUE_FACT_NOT_INF |
                    LOOM_VALUE_FACT_FINITE;
@@ -283,9 +286,9 @@ void loom_value_facts_recompute_flags(loom_value_facts_t* facts) {
       facts->flags &
       (LOOM_VALUE_FACT_POWER_OF_TWO | LOOM_VALUE_FACT_FLOAT |
        LOOM_VALUE_FACT_NOT_NAN | LOOM_VALUE_FACT_NOT_INF |
-       LOOM_VALUE_FACT_FINITE | LOOM_VALUE_FACT_UNIFORM |
-       LOOM_VALUE_FACT_LANE_VARYING | LOOM_VALUE_FACT_LANE_PREDICATE |
-       LOOM_VALUE_FACT_SUBGROUP_LANE_MASK |
+       LOOM_VALUE_FACT_FINITE | LOOM_VALUE_FACT_NOT_SUBNORMAL |
+       LOOM_VALUE_FACT_UNIFORM | LOOM_VALUE_FACT_LANE_VARYING |
+       LOOM_VALUE_FACT_LANE_PREDICATE | LOOM_VALUE_FACT_SUBGROUP_LANE_MASK |
        LOOM_VALUE_FACT_TOPOLOGY_DOMAIN_MASK);
   facts->flags =
       loom_value_facts_compute_flags(facts->range_lo, facts->range_hi) |

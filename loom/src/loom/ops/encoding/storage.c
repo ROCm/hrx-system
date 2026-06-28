@@ -678,16 +678,18 @@ bool loom_encoding_query_type_storage_content_facts(
                        LOOM_VALUE_FACT_ROUNDING_POLICY_FINITE_ONLY)) {
     out_facts->flags |= LOOM_VALUE_FACT_NOT_NAN | LOOM_VALUE_FACT_NOT_INF |
                         LOOM_VALUE_FACT_FINITE;
-    return true;
   }
   if (iree_any_bit_set(storage_schema.encoded_operand.element_format,
                        LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3FN |
                            LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3FNUZ |
                            LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E5M2FNUZ)) {
     out_facts->flags |= LOOM_VALUE_FACT_NOT_INF;
-    return true;
   }
-  return false;
+  if (iree_any_bit_set(storage_schema.encoded_operand.rounding_policy,
+                       LOOM_VALUE_FACT_ROUNDING_POLICY_FLUSH_SUBNORMAL)) {
+    out_facts->flags |= LOOM_VALUE_FACT_NOT_SUBNORMAL;
+  }
+  return out_facts->flags != 0;
 }
 
 static iree_status_t loom_encoding_emit(iree_diagnostic_emitter_t emitter,
