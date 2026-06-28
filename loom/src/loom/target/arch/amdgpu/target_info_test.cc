@@ -214,11 +214,12 @@ TEST(AmdgpuTargetInfoTest, Gfx94xMatrixProfileMatchesProcessorSupport) {
   struct Case {
     iree_string_view_t processor_name;
     loom_amdgpu_matrix_feature_profile_t expected_matrix_profile;
+    bool supports_hsaco;
   };
   static const Case cases[] = {
-      {IREE_SV("gfx940"), LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_NONE},
-      {IREE_SV("gfx941"), LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_NONE},
-      {IREE_SV("gfx942"), LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX940},
+      {IREE_SV("gfx940"), LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_NONE, false},
+      {IREE_SV("gfx941"), LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_NONE, false},
+      {IREE_SV("gfx942"), LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX940, true},
   };
   for (const Case& c : cases) {
     const loom_amdgpu_processor_info_t* processor = nullptr;
@@ -226,6 +227,8 @@ TEST(AmdgpuTargetInfoTest, Gfx94xMatrixProfileMatchesProcessorSupport) {
         loom_amdgpu_target_info_lookup_processor(c.processor_name, &processor));
     ASSERT_NE(processor, nullptr);
     EXPECT_EQ(processor->features.matrix, c.expected_matrix_profile)
+        << std::string(c.processor_name.data, c.processor_name.size);
+    EXPECT_EQ(loom_amdgpu_processor_supports_hsaco(processor), c.supports_hsaco)
         << std::string(c.processor_name.data, c.processor_name.size);
   }
 }

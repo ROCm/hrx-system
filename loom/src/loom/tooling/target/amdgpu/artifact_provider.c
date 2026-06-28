@@ -42,10 +42,7 @@ static iree_status_t loom_amdgpu_hal_artifact_provider_try_select_processor(
     return iree_ok_status();
   }
 
-  bool emit_supported = false;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_target_info_processor_supports_hsaco(
-      processor, &emit_supported));
-  if (!emit_supported) {
+  if (!loom_amdgpu_processor_supports_hsaco(processor)) {
     return iree_ok_status();
   }
 
@@ -170,10 +167,7 @@ static iree_status_t loom_amdgpu_hal_artifact_provider_select_target_key(
   const loom_amdgpu_processor_info_t* processor = NULL;
   IREE_RETURN_IF_ERROR(
       loom_amdgpu_target_info_lookup_processor(target_key, &processor));
-  bool emit_supported = false;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_target_info_processor_supports_hsaco(
-      processor, &emit_supported));
-  if (!emit_supported) {
+  if (!loom_amdgpu_processor_supports_hsaco(processor)) {
     return iree_make_status(IREE_STATUS_UNAVAILABLE,
                             "AMDGPU processor '%.*s' cannot be emitted as "
                             "HSACO by Loom",
