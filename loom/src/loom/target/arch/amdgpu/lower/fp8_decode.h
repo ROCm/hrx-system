@@ -108,6 +108,15 @@ iree_status_t loom_amdgpu_emit_fp8_to_bf16_lane(
     loom_amdgpu_fp8_decode_value_flags_t value_flags, loom_type_t vgpr_type,
     loom_type_t mask_type, loom_value_id_t* out_lane);
 
+// Emits one 32-bit F32 bit payload when |value_flags| prove no subnormal
+// reconstruction is required. Returns |out_selected| false without emitting
+// anything when the value facts are not strong enough.
+iree_status_t loom_amdgpu_try_emit_fp8_not_subnormal_to_f32_lane(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_amdgpu_fp8_decode_plan_t* plan, loom_value_id_t low_byte,
+    loom_amdgpu_fp8_decode_value_flags_t value_flags, loom_type_t vgpr_type,
+    loom_type_t mask_type, loom_value_id_t* out_lane, bool* out_selected);
+
 // Emits one packed VGPR containing two BF16 bit payloads.
 iree_status_t loom_amdgpu_emit_packed_bf16_pair(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
