@@ -220,6 +220,12 @@ TEST(ContractTest, MapsScalarNumericTypes) {
   ASSERT_TRUE(loom_contract_numeric_type_from_scalar(LOOM_SCALAR_TYPE_BF16,
                                                      false, &numeric_type));
   EXPECT_EQ(numeric_type, LOOM_CONTRACT_NUMERIC_BF16);
+  ASSERT_TRUE(loom_contract_numeric_type_from_scalar(LOOM_SCALAR_TYPE_F8E4M3,
+                                                     false, &numeric_type));
+  EXPECT_EQ(numeric_type, LOOM_CONTRACT_NUMERIC_FP8);
+  ASSERT_TRUE(loom_contract_numeric_type_from_scalar(LOOM_SCALAR_TYPE_F8E5M2,
+                                                     false, &numeric_type));
+  EXPECT_EQ(numeric_type, LOOM_CONTRACT_NUMERIC_BF8);
 }
 
 }  // namespace

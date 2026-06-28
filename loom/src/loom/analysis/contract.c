@@ -257,6 +257,12 @@ bool loom_contract_numeric_type_from_scalar(
     case LOOM_SCALAR_TYPE_BF16:
       *out_numeric_type = LOOM_CONTRACT_NUMERIC_BF16;
       return true;
+    case LOOM_SCALAR_TYPE_F8E4M3:
+      *out_numeric_type = LOOM_CONTRACT_NUMERIC_FP8;
+      return true;
+    case LOOM_SCALAR_TYPE_F8E5M2:
+      *out_numeric_type = LOOM_CONTRACT_NUMERIC_BF8;
+      return true;
     case LOOM_SCALAR_TYPE_F32:
       *out_numeric_type = LOOM_CONTRACT_NUMERIC_F32;
       return true;

@@ -37,6 +37,7 @@ enum {
   LOOM_AMDGPU_FRAGMENT_LANE_MODULUS = 16,
   LOOM_AMDGPU_FRAGMENT_REGISTER_BYTE_COUNT = 4,
   LOOM_AMDGPU_FRAGMENT_MEMORY_MAX_PACKET_REGISTERS = 4,
+  LOOM_AMDGPU_FRAGMENT_PACKED_B8_ELEMENT_BIT_COUNT = 8,
   LOOM_AMDGPU_FRAGMENT_PACKED_B16_ELEMENT_COUNT = 2,
   LOOM_AMDGPU_FRAGMENT_PACKED_B16_ELEMENT_BIT_COUNT = 16,
 };
@@ -446,6 +447,23 @@ static bool loom_amdgpu_fragment_memory_role_uses_packed_b16_elements(
              LOOM_AMDGPU_FRAGMENT_PACKED_B16_ELEMENT_COUNT;
 }
 
+static bool loom_amdgpu_fragment_memory_packed_float_storage(
+    loom_type_t type, uint16_t element_bit_count,
+    uint32_t* out_payload_bit_count, uint32_t* out_register_count) {
+  *out_payload_bit_count = 0;
+  *out_register_count = 0;
+  switch (element_bit_count) {
+    case LOOM_AMDGPU_FRAGMENT_PACKED_B8_ELEMENT_BIT_COUNT:
+      return loom_amdgpu_type_packed_8bit_float_storage(
+          type, out_payload_bit_count, out_register_count);
+    case LOOM_AMDGPU_FRAGMENT_PACKED_B16_ELEMENT_BIT_COUNT:
+      return loom_amdgpu_type_packed_16bit_float_storage(
+          type, out_payload_bit_count, out_register_count);
+    default:
+      return false;
+  }
+}
+
 static bool loom_amdgpu_fragment_memory_role_packed_element_axis(
     const loom_amdgpu_matrix_fragment_role_layout_t* role_layout,
     uint8_t* out_axis) {
@@ -513,13 +531,15 @@ static bool loom_amdgpu_fragment_memory_payload_matches_role_storage(
     return loom_amdgpu_vector_f32_lane_count(payload_type) ==
            role_layout->register_count;
   }
-  if (element_bit_count != 16) {
+  if (element_bit_count != LOOM_AMDGPU_FRAGMENT_PACKED_B8_ELEMENT_BIT_COUNT &&
+      element_bit_count != LOOM_AMDGPU_FRAGMENT_PACKED_B16_ELEMENT_BIT_COUNT) {
     return false;
   }
   uint32_t payload_bit_count = 0;
   uint32_t register_count = 0;
-  return loom_amdgpu_type_packed_16bit_float_storage(
-             payload_type, &payload_bit_count, &register_count) &&
+  return loom_amdgpu_fragment_memory_packed_float_storage(
+             payload_type, (uint16_t)element_bit_count, &payload_bit_count,
+             &register_count) &&
          register_count == role_layout->register_count &&
          payload_bit_count == (uint32_t)role_layout->register_count *
                                   role_layout->elements_per_register *
@@ -561,9 +581,15 @@ static bool loom_amdgpu_fragment_memory_payload_storage_register_count(
   }
   uint32_t unused_payload_bit_count = 0;
   uint32_t register_count = 0;
-  if (!loom_amdgpu_type_packed_16bit_float_storage(
-          payload_type, &unused_payload_bit_count, &register_count) ||
-      register_count == 0 || register_count > UINT16_MAX) {
+  if (!loom_amdgpu_fragment_memory_packed_float_storage(
+          payload_type, LOOM_AMDGPU_FRAGMENT_PACKED_B8_ELEMENT_BIT_COUNT,
+          &unused_payload_bit_count, &register_count) &&
+      !loom_amdgpu_fragment_memory_packed_float_storage(
+          payload_type, LOOM_AMDGPU_FRAGMENT_PACKED_B16_ELEMENT_BIT_COUNT,
+          &unused_payload_bit_count, &register_count)) {
+    return false;
+  }
+  if (register_count == 0 || register_count > UINT16_MAX) {
     return false;
   }
   *out_register_count = (uint16_t)register_count;
@@ -641,6 +667,12 @@ static bool loom_amdgpu_fragment_memory_scalar_type_from_numeric(
       return true;
     case LOOM_AMDGPU_MATRIX_NUMERIC_BF16:
       *out_element_type = LOOM_SCALAR_TYPE_BF16;
+      return true;
+    case LOOM_AMDGPU_MATRIX_NUMERIC_FP8:
+      *out_element_type = LOOM_SCALAR_TYPE_F8E4M3;
+      return true;
+    case LOOM_AMDGPU_MATRIX_NUMERIC_BF8:
+      *out_element_type = LOOM_SCALAR_TYPE_F8E5M2;
       return true;
     case LOOM_AMDGPU_MATRIX_NUMERIC_F32:
       *out_element_type = LOOM_SCALAR_TYPE_F32;

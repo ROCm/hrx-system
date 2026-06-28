@@ -23,12 +23,12 @@ bool loom_contract_numeric_type_from_encoded_format(
   *out_numeric_type = LOOM_CONTRACT_NUMERIC_UNKNOWN;
   switch (format) {
     case LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3:
-    case LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E5M2:
     case LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3FN:
     case LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3FNUZ:
-    case LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E5M2FNUZ:
       *out_numeric_type = LOOM_CONTRACT_NUMERIC_FP8;
       return true;
+    case LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E5M2:
+    case LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E5M2FNUZ:
     case LOOM_VALUE_FACT_NUMERIC_FORMAT_BF8:
       *out_numeric_type = LOOM_CONTRACT_NUMERIC_BF8;
       return true;
