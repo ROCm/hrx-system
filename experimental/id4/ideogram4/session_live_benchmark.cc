@@ -733,7 +733,7 @@ static iree_status_t SetGenerationBenchmarkLabel(
       &label_builder,
       "tokens=%" PRIu32 " latent=%" PRIu64 "x%" PRIu64 " steps=%" PRIu32
       " image=%" PRIu64 "x%" PRIu64
-      " params=%.*s activation=%.*s attention=%.*s ff=%.*s"
+      " residency=phase params=%.*s activation=%.*s attention=%.*s ff=%.*s"
       " param_total=%" PRIu64 "MiB param_largest=%" PRIu64
       "MiB"
       " local_hw_total=%" PRIu64 "MiB local_hw_largest=%" PRIu64
@@ -802,13 +802,13 @@ static iree_status_t RunGenerationEndToEndBenchmark(
   const iree_hal_command_buffer_mode_t profiled_dispatch_metadata_mode =
       IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_PROFILE_METADATA |
       IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_DISPATCH_METADATA;
-  const bool capture_issue_profile =
+  const bool capture_execution_profile =
       iree_all_bits_set(context.runtime_context.command_buffer_mode,
                         profiled_dispatch_metadata_mode);
-  bool issue_profile_captured = false;
+  bool execution_profile_captured = false;
   iree_hal_profiling_from_flags_t* profiling = nullptr;
   iree_status_t status = iree_ok_status();
-  if (!capture_issue_profile) {
+  if (!capture_execution_profile) {
     status = iree_hal_begin_device_group_profiling_from_flags(
         context.runtime_context.device_group, iree_allocator_system(),
         &profiling);
@@ -843,9 +843,9 @@ static iree_status_t RunGenerationEndToEndBenchmark(
                                        bundle.out());
     }
 
-    const bool profile_this_issue =
-        capture_issue_profile && !issue_profile_captured;
-    if (iree_status_is_ok(status) && profile_this_issue) {
+    const bool profile_this_execution =
+        capture_execution_profile && !execution_profile_captured;
+    if (iree_status_is_ok(status) && profile_this_execution) {
       id4::test::SemaphoreListStorage prepare_wait;
       prepare_wait.semaphore = prepare_semaphore.get();
       prepare_wait.payload_value = prepare_value;
@@ -853,7 +853,7 @@ static iree_status_t RunGenerationEndToEndBenchmark(
                                             iree_infinite_timeout(),
                                             IREE_ASYNC_WAIT_FLAG_NONE);
     }
-    if (iree_status_is_ok(status) && profile_this_issue) {
+    if (iree_status_is_ok(status) && profile_this_execution) {
       status = iree_hal_begin_device_group_profiling_from_flags(
           context.runtime_context.device_group, iree_allocator_system(),
           &profiling);
@@ -879,14 +879,14 @@ static iree_status_t RunGenerationEndToEndBenchmark(
       iree_optimization_barrier(execution.get());
       ++iteration_count;
     }
-    if (profile_this_issue) {
+    if (profile_this_execution) {
       status = iree_status_join(status,
                                 iree_hal_end_profiling_from_flags(profiling));
       profiling = nullptr;
-      issue_profile_captured = true;
+      execution_profile_captured = true;
     }
   }
-  if (!capture_issue_profile) {
+  if (!capture_execution_profile) {
     status =
         iree_status_join(status, iree_hal_end_profiling_from_flags(profiling));
   }
