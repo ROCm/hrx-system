@@ -2943,6 +2943,120 @@ static iree_status_t id4_ideogram4_generation_begin_execution(
   return status;
 }
 
+static iree_status_t id4_ideogram4_generation_issue_conditioning_phase(
+    id4_ideogram4_generation_execution_t* execution,
+    id4_ideogram4_generation_phase_bundle_t* phase_bundle,
+    id4_pipeline_diagnostics_sink_t* diagnostics_sink) {
+  iree_status_t status = id4_ideogram4_generation_issue_qwen(
+      execution,
+      id4_ideogram4_generation_phase_stage_bundle(
+          phase_bundle, ID4_IDEOGRAM4_GENERATION_STAGE_QWEN),
+      execution->qwen_upload_payload_value, diagnostics_sink);
+  phase_bundle->stage_bundle_refs[ID4_IDEOGRAM4_GENERATION_STAGE_QWEN]
+      .was_issued = iree_status_is_ok(status);
+  if (iree_status_is_ok(status)) {
+    status = id4_ideogram4_generation_issue_noise(
+        execution,
+        id4_ideogram4_generation_phase_stage_bundle(
+            phase_bundle, ID4_IDEOGRAM4_GENERATION_STAGE_NOISE),
+        execution->seed_upload_payload_value, diagnostics_sink);
+    phase_bundle->stage_bundle_refs[ID4_IDEOGRAM4_GENERATION_STAGE_NOISE]
+        .was_issued = iree_status_is_ok(status);
+  }
+  return status;
+}
+
+static iree_status_t id4_ideogram4_generation_wait_conditioning_phase(
+    id4_ideogram4_generation_execution_t* execution) {
+  iree_hal_semaphore_t* qwen_done_semaphore = execution->qwen_done_semaphore;
+  uint64_t qwen_done_payload_value = 1;
+  iree_hal_semaphore_list_t qwen_done_list = {
+      // One Qwen completion edge required before allocating DiT weights.
+      .count = 1,
+      // Stack-backed Qwen completion semaphore.
+      .semaphores = &qwen_done_semaphore,
+      // Stack-backed Qwen completion payload value.
+      .payload_values = &qwen_done_payload_value,
+  };
+  return iree_hal_semaphore_list_wait(qwen_done_list, iree_infinite_timeout(),
+                                      IREE_ASYNC_WAIT_FLAG_NONE);
+}
+
+static iree_status_t id4_ideogram4_generation_issue_denoise_phase(
+    id4_ideogram4_generation_execution_t* execution,
+    id4_ideogram4_generation_phase_bundle_t* phase_bundle,
+    id4_pipeline_diagnostics_sink_t* diagnostics_sink) {
+  iree_status_t status = iree_ok_status();
+  for (uint32_t i = 0;
+       i < execution->denoise_schedule.step_count && iree_status_is_ok(status);
+       ++i) {
+    const uint64_t payload_value = (uint64_t)i + 1;
+    iree_hal_semaphore_t* latent_semaphore =
+        i == 0 ? execution->noise_done_semaphore
+               : execution->sampler_done_semaphore;
+    const uint64_t latent_payload_value = i == 0 ? 1 : (uint64_t)i;
+    if (i > 0) {
+      status = id4_ideogram4_generation_chain_upload_after_sampler(execution,
+                                                                   (uint64_t)i);
+      if (iree_status_is_ok(status)) {
+        status = id4_ideogram4_generation_upload_denoise_step(
+            execution, &execution->denoise_schedule.steps[i]);
+      }
+    }
+    if (iree_status_is_ok(status)) {
+      status = id4_ideogram4_generation_issue_dit_branch(
+          execution, ID4_IDEOGRAM4_GENERATION_STAGE_DIT_CONDITIONED,
+          id4_ideogram4_generation_phase_stage_bundle(
+              phase_bundle, ID4_IDEOGRAM4_GENERATION_STAGE_DIT_CONDITIONED),
+          latent_semaphore, latent_payload_value,
+          execution->qwen_done_semaphore, 1,
+          execution->dit_conditioned_done_semaphore, payload_value,
+          diagnostics_sink);
+      phase_bundle
+          ->stage_bundle_refs[ID4_IDEOGRAM4_GENERATION_STAGE_DIT_CONDITIONED]
+          .was_issued |= iree_status_is_ok(status);
+    }
+    if (iree_status_is_ok(status)) {
+      status = id4_ideogram4_generation_issue_dit_branch(
+          execution, ID4_IDEOGRAM4_GENERATION_STAGE_DIT_UNCONDITIONED,
+          id4_ideogram4_generation_phase_stage_bundle(
+              phase_bundle, ID4_IDEOGRAM4_GENERATION_STAGE_DIT_UNCONDITIONED),
+          latent_semaphore, latent_payload_value, NULL, 0,
+          execution->dit_unconditioned_done_semaphore, payload_value,
+          diagnostics_sink);
+      phase_bundle
+          ->stage_bundle_refs[ID4_IDEOGRAM4_GENERATION_STAGE_DIT_UNCONDITIONED]
+          .was_issued |= iree_status_is_ok(status);
+    }
+    if (iree_status_is_ok(status)) {
+      status = id4_ideogram4_generation_issue_sampler(
+          execution,
+          id4_ideogram4_generation_phase_stage_bundle(
+              phase_bundle, ID4_IDEOGRAM4_GENERATION_STAGE_SAMPLER),
+          payload_value, diagnostics_sink);
+      phase_bundle->stage_bundle_refs[ID4_IDEOGRAM4_GENERATION_STAGE_SAMPLER]
+          .was_issued |= iree_status_is_ok(status);
+    }
+  }
+  return status;
+}
+
+static iree_status_t id4_ideogram4_generation_issue_decode_phase(
+    id4_ideogram4_generation_execution_t* execution,
+    id4_ideogram4_generation_phase_bundle_t* phase_bundle,
+    iree_hal_semaphore_list_t final_signal_list,
+    id4_pipeline_diagnostics_sink_t* diagnostics_sink) {
+  iree_status_t status = id4_ideogram4_generation_issue_decode(
+      execution,
+      id4_ideogram4_generation_phase_stage_bundle(
+          phase_bundle, ID4_IDEOGRAM4_GENERATION_STAGE_DECODE),
+      execution->denoise_schedule.step_count, final_signal_list,
+      diagnostics_sink);
+  phase_bundle->stage_bundle_refs[ID4_IDEOGRAM4_GENERATION_STAGE_DECODE]
+      .was_issued = iree_status_is_ok(status);
+  return status;
+}
+
 iree_status_t id4_ideogram4_session_issue_generation(
     id4_ideogram4_session_t* session, id4_ideogram4_generation_bundle_t* bundle,
     const id4_ideogram4_generation_issue_options_t* options,
@@ -2973,39 +3087,14 @@ iree_status_t id4_ideogram4_session_issue_generation(
         &conditioning_phase);
   }
   if (iree_status_is_ok(status)) {
-    status = id4_ideogram4_generation_issue_qwen(
-        execution,
-        id4_ideogram4_generation_phase_stage_bundle(
-            &conditioning_phase, ID4_IDEOGRAM4_GENERATION_STAGE_QWEN),
-        execution->qwen_upload_payload_value, options->diagnostics_sink);
-    conditioning_phase.stage_bundle_refs[ID4_IDEOGRAM4_GENERATION_STAGE_QWEN]
-        .was_issued = iree_status_is_ok(status);
-  }
-  if (iree_status_is_ok(status)) {
-    status = id4_ideogram4_generation_issue_noise(
-        execution,
-        id4_ideogram4_generation_phase_stage_bundle(
-            &conditioning_phase, ID4_IDEOGRAM4_GENERATION_STAGE_NOISE),
-        execution->seed_upload_payload_value, options->diagnostics_sink);
-    conditioning_phase.stage_bundle_refs[ID4_IDEOGRAM4_GENERATION_STAGE_NOISE]
-        .was_issued = iree_status_is_ok(status);
+    status = id4_ideogram4_generation_issue_conditioning_phase(
+        execution, &conditioning_phase, options->diagnostics_sink);
   }
   status = iree_status_join(
       status,
       id4_ideogram4_generation_phase_bundle_deinitialize(&conditioning_phase));
   if (iree_status_is_ok(status)) {
-    iree_hal_semaphore_t* qwen_done_semaphore = execution->qwen_done_semaphore;
-    uint64_t qwen_done_payload_value = 1;
-    iree_hal_semaphore_list_t qwen_done_list = {
-        // One Qwen completion edge required before allocating DiT weights.
-        .count = 1,
-        // Stack-backed Qwen completion semaphore.
-        .semaphores = &qwen_done_semaphore,
-        // Stack-backed Qwen completion payload value.
-        .payload_values = &qwen_done_payload_value,
-    };
-    status = iree_hal_semaphore_list_wait(
-        qwen_done_list, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE);
+    status = id4_ideogram4_generation_wait_conditioning_phase(execution);
   }
   if (iree_status_is_ok(status)) {
     status = id4_ideogram4_generation_prepare_phase_bundle(
@@ -3013,56 +3102,9 @@ iree_status_t id4_ideogram4_session_issue_generation(
         iree_hal_semaphore_list_empty(), options->diagnostics_sink,
         &denoise_phase);
   }
-  for (uint32_t i = 0;
-       i < execution->denoise_schedule.step_count && iree_status_is_ok(status);
-       ++i) {
-    const uint64_t payload_value = (uint64_t)i + 1;
-    iree_hal_semaphore_t* latent_semaphore =
-        i == 0 ? execution->noise_done_semaphore
-               : execution->sampler_done_semaphore;
-    const uint64_t latent_payload_value = i == 0 ? 1 : (uint64_t)i;
-    if (i > 0) {
-      status = id4_ideogram4_generation_chain_upload_after_sampler(execution,
-                                                                   (uint64_t)i);
-      if (iree_status_is_ok(status)) {
-        status = id4_ideogram4_generation_upload_denoise_step(
-            execution, &execution->denoise_schedule.steps[i]);
-      }
-    }
-    if (iree_status_is_ok(status)) {
-      status = id4_ideogram4_generation_issue_dit_branch(
-          execution, ID4_IDEOGRAM4_GENERATION_STAGE_DIT_CONDITIONED,
-          id4_ideogram4_generation_phase_stage_bundle(
-              &denoise_phase, ID4_IDEOGRAM4_GENERATION_STAGE_DIT_CONDITIONED),
-          latent_semaphore, latent_payload_value,
-          execution->qwen_done_semaphore, 1,
-          execution->dit_conditioned_done_semaphore, payload_value,
-          options->diagnostics_sink);
-      denoise_phase
-          .stage_bundle_refs[ID4_IDEOGRAM4_GENERATION_STAGE_DIT_CONDITIONED]
-          .was_issued |= iree_status_is_ok(status);
-    }
-    if (iree_status_is_ok(status)) {
-      status = id4_ideogram4_generation_issue_dit_branch(
-          execution, ID4_IDEOGRAM4_GENERATION_STAGE_DIT_UNCONDITIONED,
-          id4_ideogram4_generation_phase_stage_bundle(
-              &denoise_phase, ID4_IDEOGRAM4_GENERATION_STAGE_DIT_UNCONDITIONED),
-          latent_semaphore, latent_payload_value, NULL, 0,
-          execution->dit_unconditioned_done_semaphore, payload_value,
-          options->diagnostics_sink);
-      denoise_phase
-          .stage_bundle_refs[ID4_IDEOGRAM4_GENERATION_STAGE_DIT_UNCONDITIONED]
-          .was_issued |= iree_status_is_ok(status);
-    }
-    if (iree_status_is_ok(status)) {
-      status = id4_ideogram4_generation_issue_sampler(
-          execution,
-          id4_ideogram4_generation_phase_stage_bundle(
-              &denoise_phase, ID4_IDEOGRAM4_GENERATION_STAGE_SAMPLER),
-          payload_value, options->diagnostics_sink);
-      denoise_phase.stage_bundle_refs[ID4_IDEOGRAM4_GENERATION_STAGE_SAMPLER]
-          .was_issued |= iree_status_is_ok(status);
-    }
+  if (iree_status_is_ok(status)) {
+    status = id4_ideogram4_generation_issue_denoise_phase(
+        execution, &denoise_phase, options->diagnostics_sink);
   }
   status = iree_status_join(
       status,
@@ -3074,14 +3116,9 @@ iree_status_t id4_ideogram4_session_issue_generation(
         &decode_phase);
   }
   if (iree_status_is_ok(status)) {
-    status = id4_ideogram4_generation_issue_decode(
-        execution,
-        id4_ideogram4_generation_phase_stage_bundle(
-            &decode_phase, ID4_IDEOGRAM4_GENERATION_STAGE_DECODE),
-        execution->denoise_schedule.step_count, options->signal_semaphore_list,
+    status = id4_ideogram4_generation_issue_decode_phase(
+        execution, &decode_phase, options->signal_semaphore_list,
         options->diagnostics_sink);
-    decode_phase.stage_bundle_refs[ID4_IDEOGRAM4_GENERATION_STAGE_DECODE]
-        .was_issued = iree_status_is_ok(status);
   }
   status = iree_status_join(
       status,
