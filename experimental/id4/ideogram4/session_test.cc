@@ -74,7 +74,7 @@ static id4_ideogram4_generation_plan_policy_t MakeGenerationPolicy() {
   policy.dit_activation_format =
       ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT;
   policy.dit_attention_implementation =
-      ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_STREAMING;
+      ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_MATERIALIZED_WMMA;
   policy.dit_feed_forward_implementation =
       ID4_IDEOGRAM4_DIT_FEED_FORWARD_IMPLEMENTATION_PYTORCH_PARITY;
   policy.vae_tiling.mode = ID4_VAE_TILING_MODE_DISABLED;
@@ -367,7 +367,7 @@ TEST_F(SessionTest, PlansGenerationFromDynamicPromptLength) {
   EXPECT_EQ(long_summary.dit_activation_format,
             ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT);
   EXPECT_EQ(long_summary.dit_attention_implementation,
-            ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_STREAMING);
+            ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_MATERIALIZED_WMMA);
   EXPECT_EQ(long_summary.dit_feed_forward_implementation,
             ID4_IDEOGRAM4_DIT_FEED_FORWARD_IMPLEMENTATION_PYTORCH_PARITY);
   EXPECT_EQ(long_summary.vae_tiling.mode, ID4_VAE_TILING_MODE_DISABLED);
@@ -430,7 +430,7 @@ TEST_F(SessionTest, PlansFp8E4m3DitSources) {
   EXPECT_EQ(summary.dit_activation_format,
             ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT);
   EXPECT_EQ(summary.dit_attention_implementation,
-            ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_STREAMING);
+            ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_MATERIALIZED_WMMA);
   EXPECT_EQ(summary.dit_feed_forward_implementation,
             ID4_IDEOGRAM4_DIT_FEED_FORWARD_IMPLEMENTATION_PYTORCH_PARITY);
 

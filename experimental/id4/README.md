@@ -88,26 +88,29 @@ numeric tolerance. The first implementation may bind BF16 weights directly, but
 the same operation family should have room for target-specialized weight
 loaders and inner loops.
 
-The planned precision sequence is:
+The active precision sequence is:
 
 - BF16 weights and BF16-activation kernels first, using the Python BF16
   execution path as the tensor-golden reference.
-- FP8-weight kernels on RDNA3/gfx1100 next, where FP8 values and their scale
-  metadata are loaded from compact weight slabs and converted to BF16 in
-  software inside the kernel before BF16 or FP16 matrix math.
+- FP8-weight structural parity next, matching the Python path: official FP8
+  e4m3 source weights plus F32 row scales are prepared into BF16 execution
+  layouts and consumed by BF16-activation WMMA kernels.
+- Direct FP8-weight kernels on RDNA3/gfx1100 after parity is established, where
+  compact FP8 values and scale metadata may be decoded in the kernel when that
+  wins over prepared BF16 layouts.
 - Native FP8-weight kernels on CDNA3/gfx942, using the same logical operation
   contracts and goldens while specializing the implementation to the target's
   FP8 execution path.
 - Later FP8 targets, including gfx12-class machines, should fit the same model:
   target-specific internals behind stable kernel I/O and comparison fixtures.
 
-FP8 emulation on gfx1100 is an important bandwidth and capacity experiment: a
-good schedule can overlap weight loads, scale application, and BF16 conversion
-with the surrounding matrix work while preserving numerics close to the
-BF16-expanded model. Native FP8 on gfx942 then becomes a second implementation
-of the same semantic kernel family. Compiler reports and benchmark artifacts
-should make the chosen inner loop visible, including whether the generated code
-uses WMMA/MFMA instructions for the relevant target.
+FP8 storage on gfx1100 is an important bandwidth and capacity experiment, but
+the first usable product shape should stay structurally close to the Python
+implementation. Prepared BF16 execution layouts give us a correctness and
+schedule baseline before asking whether direct in-kernel FP8 decode or native
+FP8 target paths are better. Compiler reports and benchmark artifacts should
+make the chosen inner loop visible, including whether the generated code uses
+WMMA/MFMA instructions for the relevant target.
 
 ## Product Goal
 
