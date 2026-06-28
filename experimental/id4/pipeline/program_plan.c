@@ -379,14 +379,34 @@ static void id4_pipeline_program_plan_build_parameter_load_steps(
   for (iree_host_size_t i = 0; i < parameter_count; ++i) {
     const id4_pipeline_program_plan_parameter_load_record_t* record =
         &load_records[i];
-    if (record->encoding == ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_DIRECT) {
-      continue;
+    switch (record->encoding) {
+      case ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_DIRECT:
+        continue;
+      case ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_FP8_E4M3_SCALED_TO_BF16:
+        load_steps[*out_load_step_count] =
+            id4_pipeline_parameter_encode_fp8_e4m3_scaled_to_bf16_load_step(
+                IREE_SV("parameters.encode_fp8_e4m3_scaled_to_bf16"),
+                record->source_count, record->sources,
+                /*target_slab_index=*/0, /*request_offset=*/i);
+        break;
+      case ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_BF16_LINEAR_RHS_TILE:
+        load_steps[*out_load_step_count] =
+            id4_pipeline_parameter_encode_bf16_linear_rhs_tile_load_step(
+                IREE_SV("parameters.encode_bf16_linear_rhs_tile"),
+                record->source_count, record->sources,
+                /*target_slab_index=*/0, /*request_offset=*/i);
+        break;
+      case ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_FP8_E4M3_SCALED_TO_BF16_LINEAR_RHS_TILE:
+        load_steps[*out_load_step_count] =
+            id4_pipeline_parameter_encode_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_load_step(
+                IREE_SV("parameters.encode_fp8_e4m3_scaled_to_bf16_linear_rhs_"
+                        "tile"),
+                record->source_count, record->sources,
+                /*target_slab_index=*/0, /*request_offset=*/i);
+        break;
+      default:
+        continue;
     }
-    load_steps[*out_load_step_count] =
-        id4_pipeline_parameter_encode_fp8_e4m3_scaled_to_bf16_load_step(
-            IREE_SV("parameters.encode_fp8_e4m3_scaled_to_bf16"),
-            record->source_count, record->sources,
-            /*target_slab_index=*/0, /*request_offset=*/i);
     ++*out_load_step_count;
   }
 

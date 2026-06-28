@@ -114,9 +114,12 @@ static const id4_pipeline_parameter_load_step_t* FindEncodedLoadStep(
     const id4_pipeline_parameter_load_step_t* load_step =
         id4_pipeline_plan_parameter_load_step_at(plan, i);
     if (!load_step) continue;
-    if (load_step->kind !=
-        ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_ENCODE_FP8_E4M3_SCALED_TO_BF16) {
-      continue;
+    switch (load_step->kind) {
+      case ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_ENCODE_FP8_E4M3_SCALED_TO_BF16:
+      case ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_ENCODE_FP8_E4M3_SCALED_TO_BF16_LINEAR_RHS_TILE:
+        break;
+      default:
+        continue;
     }
     if (load_step->source_count != 2) continue;
     if (iree_string_view_equal(load_step->sources[0].key, key)) {

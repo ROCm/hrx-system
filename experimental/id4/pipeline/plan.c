@@ -1420,7 +1420,9 @@ id4_pipeline_plan_statistics_t id4_pipeline_plan_statistics(
         ++statistics.parameter_gather_load_step_count;
         break;
       }
-      case ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_ENCODE_FP8_E4M3_SCALED_TO_BF16: {
+      case ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_ENCODE_FP8_E4M3_SCALED_TO_BF16:
+      case ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_ENCODE_BF16_LINEAR_RHS_TILE:
+      case ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_ENCODE_FP8_E4M3_SCALED_TO_BF16_LINEAR_RHS_TILE: {
         const iree_device_size_t byte_length =
             id4_pipeline_plan_encoded_load_step_source_length(step);
         statistics.parameter_encoded_source_byte_length += byte_length;
@@ -1555,6 +1557,12 @@ static iree_status_t id4_pipeline_plan_append_parameter_load_step_kind_json(
     case ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_ENCODE_FP8_E4M3_SCALED_TO_BF16:
       return id4_pipeline_plan_append_json_string(
           builder, IREE_SV("encode_fp8_e4m3_scaled_to_bf16"));
+    case ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_ENCODE_BF16_LINEAR_RHS_TILE:
+      return id4_pipeline_plan_append_json_string(
+          builder, IREE_SV("encode_bf16_linear_rhs_tile"));
+    case ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_ENCODE_FP8_E4M3_SCALED_TO_BF16_LINEAR_RHS_TILE:
+      return id4_pipeline_plan_append_json_string(
+          builder, IREE_SV("encode_fp8_e4m3_scaled_to_bf16_linear_rhs_tile"));
     default:
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "unknown parameter load step kind %u",

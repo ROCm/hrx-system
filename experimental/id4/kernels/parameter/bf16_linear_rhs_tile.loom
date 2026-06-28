@@ -1,0 +1,82 @@
+config.decl @id4.parameter.bf16_linear_rhs_tile.output_size : %value: index where [range(%value, 16, 131072), mul(%value, 16)]
+
+config.decl @id4.parameter.bf16_linear_rhs_tile.input_size : %value: index where [range(%value, 16, 131072), mul(%value, 16)]
+
+kernel.def export("id4_parameter_bf16_linear_rhs_tile") @id4_parameter_bf16_linear_rhs_tile() {
+  %unit = index.constant 1 : index
+  %workgroup_size_x = index.constant 256 : index
+  %output_size = config.get @id4.parameter.bf16_linear_rhs_tile.output_size : index
+  %input_size = config.get @id4.parameter.bf16_linear_rhs_tile.input_size : index
+  %element_count = index.mul %output_size, %input_size : index
+  %rounding = index.sub %workgroup_size_x, %unit : index
+  %rounded = index.add %element_count, %rounding : index
+  %workgroups_x = index.div %rounded, %workgroup_size_x : index
+  kernel.launch.config workgroups(%workgroups_x, %unit, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
+} launch(%source: buffer, %target: buffer) {
+  %base = index.constant 0 : offset
+  %sixteen = index.constant 16 : index
+  %two_fifty_six = index.constant 256 : index
+  %workgroup = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %workgroup_size_x = index.constant 256 : index
+  %output_size = config.get @id4.parameter.bf16_linear_rhs_tile.output_size : index
+  %input_size = config.get @id4.parameter.bf16_linear_rhs_tile.input_size : index
+  %element_count = index.mul %output_size, %input_size : index
+  %element_index = index.madd %workgroup, %workgroup_size_x, %lane : index
+  %in_bounds = index.cmp ult, %element_index, %element_count : index
+  %source_noalias, %target_noalias = buffer.assume.noalias %source, %target : buffer, buffer
+  %source_global = buffer.assume.memory_space<global> %source_noalias : buffer
+  %target_global = buffer.assume.memory_space<global> %target_noalias : buffer
+  %source_view = buffer.view %source_global[%base] : buffer -> view<[%output_size]x[%input_size]xbf16, #dense>
+  %target_view = buffer.view %target_global[%base] : buffer -> view<[%element_count]xbf16, #dense>
+  scf.if %in_bounds {
+    %input = index.rem %element_index, %input_size : index
+    %output_row = index.div %element_index, %input_size : index
+    %input_tile = index.div %input, %sixteen : index
+    %output_tile = index.div %output_row, %sixteen : index
+    %input_lane = index.rem %input, %sixteen : index
+    %output_lane = index.rem %output_row, %sixteen : index
+    %k_tile_count = index.div %input_size, %sixteen : index
+    %tile = index.madd %output_tile, %k_tile_count, %input_tile : index
+    %tile_offset = index.mul %tile, %two_fifty_six : index
+    %output_lane_offset = index.mul %output_lane, %sixteen : index
+    %tile_element = index.add %output_lane_offset, %input_lane : index
+    %target_index = index.add %tile_offset, %tile_element : index
+    %value = view.load %source_view[%output_row, %input] : view<[%output_size]x[%input_size]xbf16, #dense> -> bf16
+    view.store %value, %target_view[%target_index] : bf16, view<[%element_count]xbf16, #dense>
+  }
+  kernel.return
+}
+
+check.case public @id4_parameter_bf16_linear_rhs_tile_small_case {
+  %source = check.generate.iota offset(0.0) step(1.0) : tensor<16x16xbf16>
+  %target = check.generate.fill value(0.0) : tensor<256xbf16>
+  %expected = check.generate.iota offset(0.0) step(1.0) : tensor<256xbf16>
+  func.call @id4_parameter_bf16_linear_rhs_tile(%source, %target) : (tensor<16x16xbf16>, tensor<256xbf16>)
+  check.expect.close actual(%target) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<256xbf16>
+  check.return
+}
+
+check.case public @id4_parameter_bf16_linear_rhs_tile_qkv_shape_case {
+  %source = check.generate.fill value(1.0) : tensor<13824x4608xbf16>
+  %target = check.generate.fill value(0.0) : tensor<63700992xbf16>
+  %expected = check.generate.fill value(1.0) : tensor<63700992xbf16>
+  func.call @id4_parameter_bf16_linear_rhs_tile(%source, %target) : (tensor<13824x4608xbf16>, tensor<63700992xbf16>)
+  check.expect.close actual(%target) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<63700992xbf16>
+  check.return
+}
+
+check.case public @id4_parameter_bf16_linear_rhs_tile_mlp_up_shape_case {
+  %source = check.generate.fill value(1.0) : tensor<12288x4608xbf16>
+  %target = check.generate.fill value(0.0) : tensor<56623104xbf16>
+  %expected = check.generate.fill value(1.0) : tensor<56623104xbf16>
+  func.call @id4_parameter_bf16_linear_rhs_tile(%source, %target) : (tensor<12288x4608xbf16>, tensor<56623104xbf16>)
+  check.expect.close actual(%target) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<56623104xbf16>
+  check.return
+}
+
+check.benchmark<@id4_parameter_bf16_linear_rhs_tile_small_case> @id4_parameter_bf16_linear_rhs_tile_small
+
+check.benchmark<@id4_parameter_bf16_linear_rhs_tile_qkv_shape_case> @id4_parameter_bf16_linear_rhs_tile_qkv_shape
+
+check.benchmark<@id4_parameter_bf16_linear_rhs_tile_mlp_up_shape_case> @id4_parameter_bf16_linear_rhs_tile_mlp_up_shape

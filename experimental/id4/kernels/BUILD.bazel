@@ -70,6 +70,36 @@ _KERNEL_CASES = [
         "target_name": "elementwise_cast_bf16_f32_small",
     },
     {
+        "actual_case": "@id4_parameter_bf16_linear_rhs_tile_small_case",
+        "benchmark": "@id4_parameter_bf16_linear_rhs_tile_small",
+        "configs": [
+            "--config=id4.parameter.bf16_linear_rhs_tile.output_size=16",
+            "--config=id4.parameter.bf16_linear_rhs_tile.input_size=16",
+        ],
+        "source": "parameter/bf16_linear_rhs_tile.loom",
+        "target_name": "parameter_bf16_linear_rhs_tile_small",
+    },
+    {
+        "actual_case": "@id4_parameter_bf16_linear_rhs_tile_qkv_shape_case",
+        "benchmark": "@id4_parameter_bf16_linear_rhs_tile_qkv_shape",
+        "configs": [
+            "--config=id4.parameter.bf16_linear_rhs_tile.output_size=13824",
+            "--config=id4.parameter.bf16_linear_rhs_tile.input_size=4608",
+        ],
+        "source": "parameter/bf16_linear_rhs_tile.loom",
+        "target_name": "parameter_bf16_linear_rhs_tile_qkv_shape",
+    },
+    {
+        "actual_case": "@id4_parameter_bf16_linear_rhs_tile_mlp_up_shape_case",
+        "benchmark": "@id4_parameter_bf16_linear_rhs_tile_mlp_up_shape",
+        "configs": [
+            "--config=id4.parameter.bf16_linear_rhs_tile.output_size=12288",
+            "--config=id4.parameter.bf16_linear_rhs_tile.input_size=4608",
+        ],
+        "source": "parameter/bf16_linear_rhs_tile.loom",
+        "target_name": "parameter_bf16_linear_rhs_tile_mlp_up_shape",
+    },
+    {
         "actual_case": "@id4_parameter_fp8_e4m3_scaled_to_bf16_small_case",
         "benchmark": "@id4_parameter_fp8_e4m3_scaled_to_bf16_small",
         "configs": [
@@ -98,6 +128,36 @@ _KERNEL_CASES = [
         ],
         "source": "parameter/fp8_e4m3_scaled_to_bf16.loom",
         "target_name": "parameter_fp8_e4m3_scaled_to_bf16_mlp_up_shape",
+    },
+    {
+        "actual_case": "@id4_parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_small_case",
+        "benchmark": "@id4_parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_small",
+        "configs": [
+            "--config=id4.parameter.fp8_e4m3_scaled_to_bf16_linear_rhs_tile.output_size=16",
+            "--config=id4.parameter.fp8_e4m3_scaled_to_bf16_linear_rhs_tile.input_size=16",
+        ],
+        "source": "parameter/fp8_e4m3_scaled_to_bf16_linear_rhs_tile.loom",
+        "target_name": "parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_small",
+    },
+    {
+        "actual_case": "@id4_parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_qkv_shape_case",
+        "benchmark": "@id4_parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_qkv_shape",
+        "configs": [
+            "--config=id4.parameter.fp8_e4m3_scaled_to_bf16_linear_rhs_tile.output_size=13824",
+            "--config=id4.parameter.fp8_e4m3_scaled_to_bf16_linear_rhs_tile.input_size=4608",
+        ],
+        "source": "parameter/fp8_e4m3_scaled_to_bf16_linear_rhs_tile.loom",
+        "target_name": "parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_qkv_shape",
+    },
+    {
+        "actual_case": "@id4_parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_mlp_up_shape_case",
+        "benchmark": "@id4_parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_mlp_up_shape",
+        "configs": [
+            "--config=id4.parameter.fp8_e4m3_scaled_to_bf16_linear_rhs_tile.output_size=12288",
+            "--config=id4.parameter.fp8_e4m3_scaled_to_bf16_linear_rhs_tile.input_size=4608",
+        ],
+        "source": "parameter/fp8_e4m3_scaled_to_bf16_linear_rhs_tile.loom",
+        "target_name": "parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_mlp_up_shape",
     },
     {
         "actual_case": "@id4_ideogram4_adaln_split_f32_small_case",
@@ -4052,6 +4112,66 @@ _KERNEL_CASES = [
         "target_name": "ideogram4_linear_bf16_bf16_wmma_m128n64_2wave_cond_mlp_down_1024_shape",
     },
     {
+        "actual_case": "@id4_ideogram4_linear_bf16_bf16_wmma_compact_rhs_tile_m128n64_2wave_zero_case",
+        "benchmark": "@id4_ideogram4_linear_bf16_bf16_wmma_compact_rhs_tile_m128n64_2wave_zero",
+        "configs": [
+            "--config=id4.ideogram4.linear_wmma.token_count=128",
+            "--config=id4.ideogram4.linear_wmma.dispatch_token_count=128",
+            "--config=id4.ideogram4.linear_wmma.input_size=16",
+            "--config=id4.ideogram4.linear_wmma.output_size=128",
+        ],
+        "source": "ideogram4/linear_bf16_bf16_wmma_compact_rhs_tile_m128n64_2wave.loom",
+        "target_name": "ideogram4_linear_bf16_bf16_wmma_compact_rhs_tile_m128n64_2wave_zero",
+    },
+    {
+        "actual_case": "@id4_ideogram4_linear_bf16_bf16_wmma_compact_rhs_tile_m128n64_2wave_cond_qkv_1024_shape_case",
+        "benchmark": "@id4_ideogram4_linear_bf16_bf16_wmma_compact_rhs_tile_m128n64_2wave_cond_qkv_1024_shape",
+        "configs": [
+            "--config=id4.ideogram4.linear_wmma.token_count=4608",
+            "--config=id4.ideogram4.linear_wmma.dispatch_token_count=4608",
+            "--config=id4.ideogram4.linear_wmma.input_size=4608",
+            "--config=id4.ideogram4.linear_wmma.output_size=13824",
+        ],
+        "source": "ideogram4/linear_bf16_bf16_wmma_compact_rhs_tile_m128n64_2wave.loom",
+        "target_name": "ideogram4_linear_bf16_bf16_wmma_compact_rhs_tile_m128n64_2wave_cond_qkv_1024_shape",
+    },
+    {
+        "actual_case": "@id4_ideogram4_linear_bf16_bf16_wmma_compact_rhs_tile_m128n64_2wave_cond_hidden_1024_shape_case",
+        "benchmark": "@id4_ideogram4_linear_bf16_bf16_wmma_compact_rhs_tile_m128n64_2wave_cond_hidden_1024_shape",
+        "configs": [
+            "--config=id4.ideogram4.linear_wmma.token_count=4608",
+            "--config=id4.ideogram4.linear_wmma.dispatch_token_count=4608",
+            "--config=id4.ideogram4.linear_wmma.input_size=4608",
+            "--config=id4.ideogram4.linear_wmma.output_size=4608",
+        ],
+        "source": "ideogram4/linear_bf16_bf16_wmma_compact_rhs_tile_m128n64_2wave.loom",
+        "target_name": "ideogram4_linear_bf16_bf16_wmma_compact_rhs_tile_m128n64_2wave_cond_hidden_1024_shape",
+    },
+    {
+        "actual_case": "@id4_ideogram4_linear_bf16_bf16_wmma_compact_rhs_tile_m128n64_2wave_cond_mlp_up_1024_shape_case",
+        "benchmark": "@id4_ideogram4_linear_bf16_bf16_wmma_compact_rhs_tile_m128n64_2wave_cond_mlp_up_1024_shape",
+        "configs": [
+            "--config=id4.ideogram4.linear_wmma.token_count=4608",
+            "--config=id4.ideogram4.linear_wmma.dispatch_token_count=4608",
+            "--config=id4.ideogram4.linear_wmma.input_size=4608",
+            "--config=id4.ideogram4.linear_wmma.output_size=12288",
+        ],
+        "source": "ideogram4/linear_bf16_bf16_wmma_compact_rhs_tile_m128n64_2wave.loom",
+        "target_name": "ideogram4_linear_bf16_bf16_wmma_compact_rhs_tile_m128n64_2wave_cond_mlp_up_1024_shape",
+    },
+    {
+        "actual_case": "@id4_ideogram4_linear_bf16_bf16_wmma_compact_rhs_tile_m128n64_2wave_cond_mlp_down_1024_shape_case",
+        "benchmark": "@id4_ideogram4_linear_bf16_bf16_wmma_compact_rhs_tile_m128n64_2wave_cond_mlp_down_1024_shape",
+        "configs": [
+            "--config=id4.ideogram4.linear_wmma.token_count=4608",
+            "--config=id4.ideogram4.linear_wmma.dispatch_token_count=4608",
+            "--config=id4.ideogram4.linear_wmma.input_size=12288",
+            "--config=id4.ideogram4.linear_wmma.output_size=4608",
+        ],
+        "source": "ideogram4/linear_bf16_bf16_wmma_compact_rhs_tile_m128n64_2wave.loom",
+        "target_name": "ideogram4_linear_bf16_bf16_wmma_compact_rhs_tile_m128n64_2wave_cond_mlp_down_1024_shape",
+    },
+    {
         "actual_case": "@id4_ideogram4_linear_bf16_bf16_tail_small_case",
         "benchmark": "@id4_ideogram4_linear_bf16_bf16_tail_small",
         "configs": [
@@ -6090,7 +6210,9 @@ _KERNEL_SOURCES = [
     "elementwise/add_f32.loom",
     "elementwise/cast_bf16_f32.loom",
     "elementwise/cast_f32_bf16.loom",
+    "parameter/bf16_linear_rhs_tile.loom",
     "parameter/fp8_e4m3_scaled_to_bf16.loom",
+    "parameter/fp8_e4m3_scaled_to_bf16_linear_rhs_tile.loom",
     "ideogram4/adaln_split_f32.loom",
     "ideogram4/attention_blocked_bf16_wmma.loom",
     "ideogram4/attention_f32.loom",
@@ -6119,6 +6241,7 @@ _KERNEL_SOURCES = [
     "ideogram4/linear_bf16_bf16_wmma.loom",
     "ideogram4/linear_bf16_bf16_wmma_m32n64.loom",
     "ideogram4/linear_bf16_bf16_wmma_m128n64_2wave.loom",
+    "ideogram4/linear_bf16_bf16_wmma_compact_rhs_tile_m128n64_2wave.loom",
     "ideogram4/linear_bf16_bf16_wmma_m64n64.loom",
     "ideogram4/linear_bf16_f32.loom",
     "ideogram4/linear_bf16_f32_tail.loom",

@@ -190,6 +190,41 @@ id4_pipeline_program_validate_fp8_e4m3_scaled_to_bf16_parameter_encoding(
   return iree_ok_status();
 }
 
+static iree_status_t id4_pipeline_program_validate_linear_rhs_tile_shape(
+    const id4_pipeline_program_parameter_options_t* options,
+    iree_string_view_t encoding_name) {
+  if (options->dtype != ID4_PIPELINE_PROGRAM_DTYPE_BF16 ||
+      options->shape.rank != 2 || (options->shape.dims[0] % 16) != 0 ||
+      (options->shape.dims[1] % 16) != 0) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "%.*s parameter %.*s must produce BF16 rank-2 execution storage with "
+        "both dimensions divisible by 16",
+        (int)encoding_name.size, encoding_name.data, (int)options->key.size,
+        options->key.data);
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t
+id4_pipeline_program_validate_bf16_linear_rhs_tile_parameter_encoding(
+    const id4_pipeline_program_parameter_options_t* options) {
+  IREE_RETURN_IF_ERROR(
+      id4_pipeline_program_validate_direct_parameter_encoding(options));
+  return id4_pipeline_program_validate_linear_rhs_tile_shape(
+      options, IREE_SV("BF16 linear RHS tile"));
+}
+
+static iree_status_t
+id4_pipeline_program_validate_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_parameter_encoding(
+    const id4_pipeline_program_parameter_options_t* options) {
+  IREE_RETURN_IF_ERROR(
+      id4_pipeline_program_validate_fp8_e4m3_scaled_to_bf16_parameter_encoding(
+          options));
+  return id4_pipeline_program_validate_linear_rhs_tile_shape(
+      options, IREE_SV("FP8 e4m3 scaled linear RHS tile"));
+}
+
 static iree_status_t id4_pipeline_program_validate_parameter_encoding(
     const id4_pipeline_program_parameter_options_t* options) {
   if (options->source_count == 0 ||
@@ -226,6 +261,25 @@ static iree_status_t id4_pipeline_program_validate_parameter_encoding(
             (int)options->key.size, options->key.data);
       }
       return id4_pipeline_program_validate_fp8_e4m3_scaled_to_bf16_parameter_encoding(
+          options);
+    case ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_BF16_LINEAR_RHS_TILE:
+      if (options->source_count != 1) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "BF16 linear RHS tile parameter %.*s must have exactly one source",
+            (int)options->key.size, options->key.data);
+      }
+      return id4_pipeline_program_validate_bf16_linear_rhs_tile_parameter_encoding(
+          options);
+    case ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_FP8_E4M3_SCALED_TO_BF16_LINEAR_RHS_TILE:
+      if (options->source_count != 2) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "FP8 e4m3 scaled linear RHS tile parameter %.*s must have weight "
+            "and scale sources",
+            (int)options->key.size, options->key.data);
+      }
+      return id4_pipeline_program_validate_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_parameter_encoding(
           options);
     default:
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,

@@ -860,6 +860,83 @@ iree_status_t id4_ideogram4_dit_program_parameter_fp8_e4m3_scaled_to_bf16(
   return id4_pipeline_program_parameter(builder, &options, out_tensor);
 }
 
+iree_status_t id4_ideogram4_dit_program_parameter_bf16_linear_rhs_tile(
+    id4_pipeline_program_builder_t* builder, iree_string_view_t source_scope,
+    iree_string_view_t weight_key, uint32_t input_size, uint32_t output_size,
+    id4_pipeline_program_tensor_t* out_tensor) {
+  const id4_pipeline_program_shape_t weight_shape =
+      id4_pipeline_program_make_shape_rank2(output_size, input_size);
+  const id4_pipeline_program_parameter_source_t sources[] = {
+      {
+          // Provider scope containing the logical row-major BF16 weight tensor.
+          .source_scope = source_scope,
+          // Provider key for the logical row-major BF16 weight tensor.
+          .key = weight_key,
+          // Provider dtype for the logical weight tensor.
+          .dtype = ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+          // Provider shape matching the logical execution tensor.
+          .shape = weight_shape,
+      },
+  };
+  id4_pipeline_program_parameter_options_t options = {
+      .structure_size = sizeof(options),
+      .encoding = ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_BF16_LINEAR_RHS_TILE,
+      .source_count = IREE_ARRAYSIZE(sources),
+      .sources = sources,
+      .key = weight_key,
+      .dtype = ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+      .shape = weight_shape,
+  };
+  return id4_pipeline_program_parameter(builder, &options, out_tensor);
+}
+
+iree_status_t
+id4_ideogram4_dit_program_parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile(
+    id4_pipeline_program_builder_t* builder, iree_string_view_t source_scope,
+    iree_string_view_t weight_key, uint32_t input_size, uint32_t output_size,
+    id4_pipeline_program_tensor_t* out_tensor) {
+  const id4_pipeline_program_shape_t weight_shape =
+      id4_pipeline_program_make_shape_rank2(output_size, input_size);
+  char scale_key_buffer[ID4_IDEOGRAM4_DIT_PROGRAM_FORMAT_BUFFER_CAPACITY];
+  iree_string_view_t scale_key = iree_string_view_empty();
+  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_format_parameter_scale_key(
+      weight_key, scale_key_buffer, IREE_ARRAYSIZE(scale_key_buffer),
+      &scale_key));
+  const id4_pipeline_program_parameter_source_t sources[] = {
+      {
+          // Provider scope containing the compact FP8 weight tensor.
+          .source_scope = source_scope,
+          // Provider key for the compact FP8 weight tensor.
+          .key = weight_key,
+          // Provider dtype for the compact weight tensor.
+          .dtype = ID4_PIPELINE_PROGRAM_DTYPE_F8_E4M3,
+          // Provider shape matching the logical execution tensor.
+          .shape = weight_shape,
+      },
+      {
+          // Provider scope containing the F32 row-scale tensor.
+          .source_scope = source_scope,
+          // Provider key for the F32 row-scale tensor.
+          .key = scale_key,
+          // Provider dtype for the row-scale tensor.
+          .dtype = ID4_PIPELINE_PROGRAM_DTYPE_F32,
+          // Provider shape with one scale value per output row.
+          .shape = id4_pipeline_program_make_shape_rank1(output_size),
+      },
+  };
+  id4_pipeline_program_parameter_options_t options = {
+      .structure_size = sizeof(options),
+      .encoding =
+          ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_FP8_E4M3_SCALED_TO_BF16_LINEAR_RHS_TILE,
+      .source_count = IREE_ARRAYSIZE(sources),
+      .sources = sources,
+      .key = weight_key,
+      .dtype = ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+      .shape = weight_shape,
+  };
+  return id4_pipeline_program_parameter(builder, &options, out_tensor);
+}
+
 iree_status_t id4_ideogram4_dit_program_parameter_fp8_e4m3_scaled(
     id4_pipeline_program_builder_t* builder, iree_string_view_t source_scope,
     iree_string_view_t weight_key, uint32_t input_size, uint32_t output_size,
@@ -2064,6 +2141,51 @@ iree_status_t id4_ideogram4_dit_program_dispatch_linear_packed_bf16_bf16(
       .dispatch_token_count_limit = 64,
       .module_path = IREE_SV("ideogram4/linear_bf16_bf16_tail"),
       .function_name = IREE_SV("id4_ideogram4_linear_bf16_bf16_tail"),
+  };
+  return id4_ideogram4_dit_program_dispatch_linear_packed_bf16(
+      builder, name, token_count, token_capacity, input_size, output_size,
+      input, weight, output,
+      ID4_IDEOGRAM4_DIT_PROGRAM_LINEAR_OUTPUT_LAYOUT_BF16_PACKED, body, tail);
+}
+
+iree_status_t
+id4_ideogram4_dit_program_dispatch_linear_packed_bf16_bf16_compact_rhs_tile(
+    id4_pipeline_program_builder_t* builder, iree_string_view_t name,
+    uint32_t token_count, uint32_t token_capacity, uint32_t input_size,
+    uint32_t output_size, id4_pipeline_program_tensor_t input,
+    id4_pipeline_program_tensor_t weight,
+    id4_pipeline_program_tensor_t output) {
+  if ((token_capacity %
+       ID4_IDEOGRAM4_DIT_LINEAR_BF16_BF16_TWO_WAVE_TOKEN_BLOCK) != 0) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "Ideogram4 compact RHS linear token capacity %" PRIu32
+        " must be a multiple of %u",
+        token_capacity,
+        ID4_IDEOGRAM4_DIT_LINEAR_BF16_BF16_TWO_WAVE_TOKEN_BLOCK);
+  }
+  if ((output_size %
+       ID4_IDEOGRAM4_DIT_LINEAR_BF16_BF16_TWO_WAVE_OUTPUT_ROW_BLOCK) != 0) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "Ideogram4 compact RHS linear output size %" PRIu32
+        " must be a multiple of %u",
+        output_size,
+        ID4_IDEOGRAM4_DIT_LINEAR_BF16_BF16_TWO_WAVE_OUTPUT_ROW_BLOCK);
+  }
+  const id4_ideogram4_dit_program_linear_body_t body = {
+      .token_block = ID4_IDEOGRAM4_DIT_LINEAR_BF16_BF16_TWO_WAVE_TOKEN_BLOCK,
+      .output_row_block =
+          ID4_IDEOGRAM4_DIT_LINEAR_BF16_BF16_TWO_WAVE_OUTPUT_ROW_BLOCK,
+      .module_path = IREE_SV(
+          "ideogram4/linear_bf16_bf16_wmma_compact_rhs_tile_m128n64_2wave"),
+      .function_name = IREE_SV(
+          "id4_ideogram4_linear_bf16_bf16_wmma_compact_rhs_tile_m128n64_2wave"),
+  };
+  const id4_ideogram4_dit_program_linear_tail_t tail = {
+      .dispatch_token_count_limit = 1,
+      .module_path = iree_string_view_empty(),
+      .function_name = iree_string_view_empty(),
   };
   return id4_ideogram4_dit_program_dispatch_linear_packed_bf16(
       builder, name, token_count, token_capacity, input_size, output_size,

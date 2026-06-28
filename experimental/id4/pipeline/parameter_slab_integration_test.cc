@@ -86,7 +86,7 @@ static iree_status_t AddSplatParameter(iree_io_parameter_index_t* index,
   return iree_io_parameter_index_add(index, &entry);
 }
 
-static iree_status_t CreateFp8SourceProvider(
+static iree_status_t CreateParameterSourceProvider(
     iree_io_parameter_provider_t** out_provider) {
   IREE_ASSERT_ARGUMENT(out_provider);
   *out_provider = nullptr;
@@ -111,8 +111,19 @@ static iree_status_t CreateFp8SourceProvider(
       index.get(), IREE_SV("weight.second_scale"), /*length=*/128,
       iree_make_const_byte_span(&f32_three, sizeof(f32_three))));
 
+  const uint16_t bf16_one = 0x3F80u;
+  IREE_RETURN_IF_ERROR(AddSplatParameter(
+      index.get(), IREE_SV("weight.bf16_tile"), /*length=*/512,
+      iree_make_const_byte_span(&bf16_one, sizeof(bf16_one))));
+  IREE_RETURN_IF_ERROR(
+      AddSplatParameter(index.get(), IREE_SV("weight.fp8_tile"), /*length=*/256,
+                        iree_make_const_byte_span(&fp8_one, sizeof(fp8_one))));
+  IREE_RETURN_IF_ERROR(AddSplatParameter(
+      index.get(), IREE_SV("weight.fp8_tile_scale"), /*length=*/64,
+      iree_make_const_byte_span(&f32_two, sizeof(f32_two))));
+
   return iree_io_parameter_index_provider_create(
-      IREE_SV("fp8"), index.get(),
+      IREE_SV("parameters"), index.get(),
       IREE_IO_PARAMETER_INDEX_PROVIDER_DEFAULT_MAX_CONCURRENT_OPERATIONS,
       iree_allocator_system(), out_provider);
 }
@@ -195,6 +206,11 @@ static iree_hal_semaphore_list_t MakeOneSemaphoreList(
   return list;
 }
 
+static void RunCompactLinearRhsTileEncoding(
+    RuntimeContext* context, id4_pipeline_kernel_library_t* kernel_library,
+    iree_io_parameter_provider_t* provider,
+    id4_pipeline_diagnostics_sink_t* diagnostics_sink);
+
 TEST(ParameterSlabIntegration, EncodedFp8WeightsFeedBf16WmmaLinear) {
   RuntimeContext context;
   id4_tooling_runtime_context_options_t context_options;
@@ -215,7 +231,7 @@ TEST(ParameterSlabIntegration, EncodedFp8WeightsFeedBf16WmmaLinear) {
       iree_allocator_system(), kernel_library.out()));
   OwningRef<iree_io_parameter_provider_t, iree_io_parameter_provider_release>
       provider;
-  IREE_ASSERT_OK(CreateFp8SourceProvider(provider.out()));
+  IREE_ASSERT_OK(CreateParameterSourceProvider(provider.out()));
 
   id4_pipeline_device_placement_t placement;
   std::memset(&placement, 0, sizeof(placement));
@@ -253,22 +269,22 @@ TEST(ParameterSlabIntegration, EncodedFp8WeightsFeedBf16WmmaLinear) {
   scale_shape.rank = 1;
   scale_shape.dims[0] = 32;
   const id4_pipeline_parameter_load_source_t first_sources[] = {
-      id4_pipeline_parameter_load_source(IREE_SV("fp8"), IREE_SV("weight"),
-                                         ID4_PIPELINE_TENSOR_DTYPE_F8_E4M3,
-                                         weight_shape,
-                                         /*byte_length=*/512),
       id4_pipeline_parameter_load_source(
-          IREE_SV("fp8"), IREE_SV("weight_scale"),
+          IREE_SV("parameters"), IREE_SV("weight"),
+          ID4_PIPELINE_TENSOR_DTYPE_F8_E4M3, weight_shape,
+          /*byte_length=*/512),
+      id4_pipeline_parameter_load_source(
+          IREE_SV("parameters"), IREE_SV("weight_scale"),
           ID4_PIPELINE_TENSOR_DTYPE_F32, scale_shape,
           /*byte_length=*/128),
   };
   const id4_pipeline_parameter_load_source_t second_sources[] = {
       id4_pipeline_parameter_load_source(
-          IREE_SV("fp8"), IREE_SV("weight.second"),
+          IREE_SV("parameters"), IREE_SV("weight.second"),
           ID4_PIPELINE_TENSOR_DTYPE_F8_E4M3, weight_shape,
           /*byte_length=*/512),
       id4_pipeline_parameter_load_source(
-          IREE_SV("fp8"), IREE_SV("weight.second_scale"),
+          IREE_SV("parameters"), IREE_SV("weight.second_scale"),
           ID4_PIPELINE_TENSOR_DTYPE_F32, scale_shape,
           /*byte_length=*/128),
   };
@@ -413,6 +429,133 @@ TEST(ParameterSlabIntegration, EncodedFp8WeightsFeedBf16WmmaLinear) {
       iree_infinite_timeout()));
   for (float value : linear_output) {
     EXPECT_EQ(value, 32.0f);
+  }
+
+  RunCompactLinearRhsTileEncoding(&context, kernel_library.get(),
+                                  provider.get(), &diagnostics_sink);
+}
+
+static void RunCompactLinearRhsTileEncoding(
+    RuntimeContext* context, id4_pipeline_kernel_library_t* kernel_library,
+    iree_io_parameter_provider_t* provider,
+    id4_pipeline_diagnostics_sink_t* diagnostics_sink) {
+  id4_pipeline_device_placement_t placement;
+  std::memset(&placement, 0, sizeof(placement));
+  placement.role = IREE_SV("default");
+  placement.device_index = 0;
+  placement.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
+
+  id4_pipeline_parameter_request_t target_requests[] = {
+      id4_pipeline_parameter_request(
+          IREE_SV("weight.bf16_tile"),
+          id4_pipeline_parameter_span(/*parameter_offset=*/0,
+                                      /*buffer_offset=*/0, /*length=*/512)),
+      id4_pipeline_parameter_request(
+          IREE_SV("weight.fp8_tile"),
+          id4_pipeline_parameter_span(/*parameter_offset=*/0,
+                                      /*buffer_offset=*/512, /*length=*/512)),
+  };
+  id4_pipeline_parameter_slab_plan_t slab =
+      id4_pipeline_make_device_local_parameter_slab_plan(
+          IREE_SV("execution"), /*placement_id=*/0, /*binding_slot=*/0,
+          IREE_HAL_QUEUE_AFFINITY_ANY,
+          IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE |
+              IREE_HAL_BUFFER_USAGE_TRANSFER_SOURCE,
+          /*byte_length=*/1024, /*alignment=*/16,
+          IREE_ARRAYSIZE(target_requests), target_requests);
+
+  id4_pipeline_tensor_shape_t weight_shape;
+  std::memset(&weight_shape, 0, sizeof(weight_shape));
+  weight_shape.rank = 2;
+  weight_shape.dims[0] = 16;
+  weight_shape.dims[1] = 16;
+  id4_pipeline_tensor_shape_t scale_shape;
+  std::memset(&scale_shape, 0, sizeof(scale_shape));
+  scale_shape.rank = 1;
+  scale_shape.dims[0] = 16;
+  const id4_pipeline_parameter_load_source_t bf16_sources[] = {
+      id4_pipeline_parameter_load_source(
+          IREE_SV("parameters"), IREE_SV("weight.bf16_tile"),
+          ID4_PIPELINE_TENSOR_DTYPE_BF16, weight_shape,
+          /*byte_length=*/512),
+  };
+  const id4_pipeline_parameter_load_source_t fp8_sources[] = {
+      id4_pipeline_parameter_load_source(
+          IREE_SV("parameters"), IREE_SV("weight.fp8_tile"),
+          ID4_PIPELINE_TENSOR_DTYPE_F8_E4M3, weight_shape,
+          /*byte_length=*/256),
+      id4_pipeline_parameter_load_source(
+          IREE_SV("parameters"), IREE_SV("weight.fp8_tile_scale"),
+          ID4_PIPELINE_TENSOR_DTYPE_F32, scale_shape,
+          /*byte_length=*/64),
+  };
+  id4_pipeline_parameter_load_step_t load_steps[] = {
+      id4_pipeline_parameter_encode_bf16_linear_rhs_tile_load_step(
+          IREE_SV("parameters.encode_bf16_tile"), IREE_ARRAYSIZE(bf16_sources),
+          bf16_sources,
+          /*target_slab_index=*/0, /*request_offset=*/0),
+      id4_pipeline_parameter_encode_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_load_step(
+          IREE_SV("parameters.encode_fp8_tile"), IREE_ARRAYSIZE(fp8_sources),
+          fp8_sources,
+          /*target_slab_index=*/0, /*request_offset=*/1),
+  };
+
+  id4_pipeline_plan_create_options_t plan_options;
+  std::memset(&plan_options, 0, sizeof(plan_options));
+  plan_options.structure_size = sizeof(plan_options);
+  plan_options.stage_name = IREE_SV("parameter_slab");
+  plan_options.device_group = context->value.device_group;
+  plan_options.diagnostics_sink = diagnostics_sink;
+  plan_options.placement_count = 1;
+  plan_options.placements = &placement;
+  plan_options.parameter_slab_count = 1;
+  plan_options.parameter_slabs = &slab;
+  plan_options.parameter_load_step_count = IREE_ARRAYSIZE(load_steps);
+  plan_options.parameter_load_steps = load_steps;
+  OwningRef<id4_pipeline_plan_t, id4_pipeline_plan_release> plan;
+  IREE_ASSERT_OK(id4_pipeline_plan_create(&plan_options,
+                                          iree_allocator_system(), plan.out()));
+
+  OwningRef<iree_hal_semaphore_t, iree_hal_semaphore_release> prepare_semaphore;
+  IREE_ASSERT_OK(iree_hal_semaphore_create(
+      id4_tooling_runtime_context_primary_device(&context->value),
+      IREE_HAL_QUEUE_AFFINITY_ANY, /*initial_value=*/0,
+      IREE_HAL_SEMAPHORE_FLAG_DEFAULT, prepare_semaphore.out()));
+  iree_hal_semaphore_t* prepare_signal_semaphore = prepare_semaphore.get();
+  uint64_t prepare_signal_value = 1;
+  iree_hal_semaphore_list_t prepare_signal_list =
+      MakeOneSemaphoreList(&prepare_signal_semaphore, &prepare_signal_value);
+
+  id4_pipeline_parameter_slab_set_load_options_t load_options;
+  std::memset(&load_options, 0, sizeof(load_options));
+  load_options.structure_size = sizeof(load_options);
+  load_options.provider = provider;
+  load_options.kernel_library = kernel_library;
+  load_options.kernel_cache = context->value.kernel_cache;
+  load_options.executable_cache = context->value.executable_cache;
+  load_options.wait_semaphore_list = iree_hal_semaphore_list_empty();
+  load_options.signal_semaphore_list = prepare_signal_list;
+  load_options.diagnostics_sink = diagnostics_sink;
+  OwningRef<id4_pipeline_parameter_slab_set_t,
+            id4_pipeline_parameter_slab_set_release>
+      slab_set;
+  IREE_ASSERT_OK(id4_pipeline_plan_load_parameter_slabs(
+      plan.get(), &load_options, iree_allocator_system(), slab_set.out()));
+  IREE_ASSERT_OK(iree_hal_semaphore_wait(
+      prepare_semaphore.get(), prepare_signal_value, iree_infinite_timeout(),
+      IREE_ASYNC_WAIT_FLAG_NONE));
+
+  uint16_t encoded_weight[512] = {};
+  IREE_ASSERT_OK(iree_hal_device_transfer_d2h(
+      id4_tooling_runtime_context_primary_device(&context->value),
+      id4_pipeline_parameter_slab_set_buffer_at(slab_set.get(), 0),
+      /*source_offset=*/0, encoded_weight, sizeof(encoded_weight),
+      IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT, iree_infinite_timeout()));
+  for (iree_host_size_t i = 0; i < 256; ++i) {
+    EXPECT_EQ(encoded_weight[i], 0x3F80u);
+  }
+  for (iree_host_size_t i = 256; i < IREE_ARRAYSIZE(encoded_weight); ++i) {
+    EXPECT_EQ(encoded_weight[i], 0x4000u);
   }
 }
 

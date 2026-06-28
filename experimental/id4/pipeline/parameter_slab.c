@@ -13,9 +13,11 @@
 enum {
   ID4_PIPELINE_PARAMETER_ENCODER_CONFIG_VALUE_CAPACITY = 24,
   ID4_PIPELINE_PARAMETER_ENCODER_CHUNK_STEP_CAPACITY = 32,
+  ID4_PIPELINE_PARAMETER_ENCODER_MAX_SOURCE_COUNT = 2,
   ID4_PIPELINE_PARAMETER_ENCODER_CHUNK_SOURCE_CAPACITY =
-      ID4_PIPELINE_PARAMETER_ENCODER_CHUNK_STEP_CAPACITY * 2,
-  ID4_PIPELINE_PARAMETER_ENCODER_FP8_TO_BF16_CONFIG_COUNT = 2,
+      ID4_PIPELINE_PARAMETER_ENCODER_CHUNK_STEP_CAPACITY *
+      ID4_PIPELINE_PARAMETER_ENCODER_MAX_SOURCE_COUNT,
+  ID4_PIPELINE_PARAMETER_ENCODER_LINEAR_CONFIG_COUNT = 2,
 };
 
 static const iree_device_size_t
@@ -139,6 +141,38 @@ static iree_status_t id4_pipeline_parameter_load_step_validate_header(
             (int)step->name.size, step->name.data);
       }
       break;
+    case ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_ENCODE_BF16_LINEAR_RHS_TILE:
+      if (step->request_count != 1) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "parameter BF16 RHS tile encode load step '%.*s' must target one "
+            "request",
+            (int)step->name.size, step->name.data);
+      }
+      if (step->source_count != 1 || !step->sources) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "parameter BF16 RHS tile encode load step '%.*s' must have one "
+            "source",
+            (int)step->name.size, step->name.data);
+      }
+      break;
+    case ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_ENCODE_FP8_E4M3_SCALED_TO_BF16_LINEAR_RHS_TILE:
+      if (step->request_count != 1) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "parameter FP8 RHS tile encode load step '%.*s' must target one "
+            "request",
+            (int)step->name.size, step->name.data);
+      }
+      if (step->source_count != 2 || !step->sources) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "parameter FP8 RHS tile encode load step '%.*s' must have weight "
+            "and scale sources",
+            (int)step->name.size, step->name.data);
+      }
+      break;
     default:
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "parameter load step '%.*s' has unknown kind %u",
@@ -209,6 +243,18 @@ static iree_status_t id4_pipeline_parameter_load_source_validate(
   return iree_ok_status();
 }
 
+static bool id4_pipeline_parameter_load_step_is_encode(
+    const id4_pipeline_parameter_load_step_t* step) {
+  switch (step->kind) {
+    case ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_ENCODE_FP8_E4M3_SCALED_TO_BF16:
+    case ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_ENCODE_BF16_LINEAR_RHS_TILE:
+    case ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_ENCODE_FP8_E4M3_SCALED_TO_BF16_LINEAR_RHS_TILE:
+      return true;
+    default:
+      return false;
+  }
+}
+
 static iree_status_t
 id4_pipeline_parameter_encode_fp8_e4m3_scaled_to_bf16_step_validate(
     const id4_pipeline_parameter_load_step_t* step) {
@@ -231,6 +277,48 @@ id4_pipeline_parameter_encode_fp8_e4m3_scaled_to_bf16_step_validate(
   return iree_ok_status();
 }
 
+static iree_status_t id4_pipeline_parameter_validate_linear_rhs_tile_shape(
+    const id4_pipeline_parameter_load_step_t* step,
+    const id4_pipeline_parameter_load_source_t* weight_source,
+    iree_string_view_t encoding_name) {
+  if (weight_source->shape.rank != 2 ||
+      (weight_source->shape.dims[0] % 16) != 0 ||
+      (weight_source->shape.dims[1] % 16) != 0) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "parameter %.*s load step '%.*s' weight source must be rank 2 with "
+        "both dimensions divisible by 16",
+        (int)encoding_name.size, encoding_name.data, (int)step->name.size,
+        step->name.data);
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t
+id4_pipeline_parameter_encode_bf16_linear_rhs_tile_step_validate(
+    const id4_pipeline_parameter_load_step_t* step) {
+  const id4_pipeline_parameter_load_source_t* weight_source = &step->sources[0];
+  if (weight_source->dtype != ID4_PIPELINE_TENSOR_DTYPE_BF16) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "parameter BF16 RHS tile encode load step '%.*s' weight source must "
+        "be bf16",
+        (int)step->name.size, step->name.data);
+  }
+  return id4_pipeline_parameter_validate_linear_rhs_tile_shape(
+      step, weight_source, IREE_SV("BF16 RHS tile encode"));
+}
+
+static iree_status_t
+id4_pipeline_parameter_encode_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_step_validate(
+    const id4_pipeline_parameter_load_step_t* step) {
+  IREE_RETURN_IF_ERROR(
+      id4_pipeline_parameter_encode_fp8_e4m3_scaled_to_bf16_step_validate(
+          step));
+  return id4_pipeline_parameter_validate_linear_rhs_tile_shape(
+      step, &step->sources[0], IREE_SV("FP8 RHS tile encode"));
+}
+
 static iree_status_t id4_pipeline_parameter_load_step_validate_sources(
     const id4_pipeline_parameter_load_step_t* step) {
   for (iree_host_size_t i = 0; i < step->source_count; ++i) {
@@ -242,6 +330,12 @@ static iree_status_t id4_pipeline_parameter_load_step_validate_sources(
       return iree_ok_status();
     case ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_ENCODE_FP8_E4M3_SCALED_TO_BF16:
       return id4_pipeline_parameter_encode_fp8_e4m3_scaled_to_bf16_step_validate(
+          step);
+    case ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_ENCODE_BF16_LINEAR_RHS_TILE:
+      return id4_pipeline_parameter_encode_bf16_linear_rhs_tile_step_validate(
+          step);
+    case ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_ENCODE_FP8_E4M3_SCALED_TO_BF16_LINEAR_RHS_TILE:
+      return id4_pipeline_parameter_encode_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_step_validate(
           step);
     default:
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -269,10 +363,8 @@ static iree_status_t id4_pipeline_parameter_load_step_validate_request_range(
 static iree_status_t id4_pipeline_parameter_load_step_validate_target_request(
     const id4_pipeline_parameter_load_step_t* step,
     const id4_pipeline_parameter_slab_plan_t* slab) {
-  if (step->kind !=
-      ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_ENCODE_FP8_E4M3_SCALED_TO_BF16) {
+  if (!id4_pipeline_parameter_load_step_is_encode(step))
     return iree_ok_status();
-  }
   const id4_pipeline_parameter_request_t* request =
       &slab->requests[step->request_offset];
   const id4_pipeline_parameter_load_source_t* weight_source = &step->sources[0];
@@ -282,14 +374,29 @@ static iree_status_t id4_pipeline_parameter_load_step_validate_target_request(
         "parameter encode load step '%.*s' weight source must be rank 2",
         (int)step->name.size, step->name.data);
   }
-  if (weight_source->byte_length > IREE_DEVICE_SIZE_MAX / sizeof(uint16_t)) {
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "parameter encode load step '%.*s' target byte length overflows",
-        (int)step->name.size, step->name.data);
+  iree_device_size_t expected_target_byte_length = 0;
+  switch (step->kind) {
+    case ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_ENCODE_FP8_E4M3_SCALED_TO_BF16:
+    case ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_ENCODE_FP8_E4M3_SCALED_TO_BF16_LINEAR_RHS_TILE:
+      if (weight_source->byte_length >
+          IREE_DEVICE_SIZE_MAX / sizeof(uint16_t)) {
+        return iree_make_status(
+            IREE_STATUS_OUT_OF_RANGE,
+            "parameter encode load step '%.*s' target byte length overflows",
+            (int)step->name.size, step->name.data);
+      }
+      expected_target_byte_length =
+          weight_source->byte_length * sizeof(uint16_t);
+      break;
+    case ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_ENCODE_BF16_LINEAR_RHS_TILE:
+      expected_target_byte_length = weight_source->byte_length;
+      break;
+    default:
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "parameter load step '%.*s' has unknown kind %u",
+                              (int)step->name.size, step->name.data,
+                              (uint32_t)step->kind);
   }
-  const iree_device_size_t expected_target_byte_length =
-      weight_source->byte_length * sizeof(uint16_t);
   if (request->span.parameter_offset != 0 ||
       request->span.length != expected_target_byte_length) {
     return iree_make_status(
@@ -465,8 +572,7 @@ static bool id4_pipeline_parameter_load_steps_require_encoder(
     const id4_pipeline_parameter_load_step_t* load_steps) {
   if (!load_steps) return false;
   for (iree_host_size_t i = 0; i < load_step_count; ++i) {
-    if (load_steps[i].kind ==
-        ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_ENCODE_FP8_E4M3_SCALED_TO_BF16) {
+    if (id4_pipeline_parameter_load_step_is_encode(&load_steps[i])) {
       return true;
     }
   }
@@ -666,9 +772,9 @@ typedef struct id4_pipeline_parameter_encoder_config_t {
   iree_host_size_t count;
   // Fixed-capacity config binding storage.
   id4_pipeline_kernel_config_binding_t
-      bindings[ID4_PIPELINE_PARAMETER_ENCODER_FP8_TO_BF16_CONFIG_COUNT];
+      bindings[ID4_PIPELINE_PARAMETER_ENCODER_LINEAR_CONFIG_COUNT];
   // Fixed-capacity string storage backing binding values.
-  char value_storage[ID4_PIPELINE_PARAMETER_ENCODER_FP8_TO_BF16_CONFIG_COUNT]
+  char value_storage[ID4_PIPELINE_PARAMETER_ENCODER_LINEAR_CONFIG_COUNT]
                     [ID4_PIPELINE_PARAMETER_ENCODER_CONFIG_VALUE_CAPACITY];
 } id4_pipeline_parameter_encoder_config_t;
 
@@ -686,8 +792,9 @@ static iree_status_t id4_pipeline_parameter_format_u64(
   return iree_ok_status();
 }
 
-static iree_status_t id4_pipeline_parameter_encoder_make_config(
+static iree_status_t id4_pipeline_parameter_encoder_make_linear_config(
     const id4_pipeline_parameter_load_step_t* step,
+    iree_string_view_t output_size_key, iree_string_view_t input_size_key,
     id4_pipeline_parameter_encoder_config_t* out_config) {
   memset(out_config, 0, sizeof(*out_config));
   const id4_pipeline_parameter_load_source_t* weight_source = &step->sources[0];
@@ -695,20 +802,19 @@ static iree_status_t id4_pipeline_parameter_encoder_make_config(
   IREE_RETURN_IF_ERROR(id4_pipeline_parameter_format_u64(
       weight_source->shape.dims[0], out_config->value_storage[0],
       IREE_ARRAYSIZE(out_config->value_storage[0]), &output_size));
-  out_config->bindings[0] = id4_pipeline_make_kernel_config_binding(
-      IREE_SV("id4.parameter.fp8_e4m3_scaled_to_bf16.output_size"),
-      output_size);
+  out_config->bindings[0] =
+      id4_pipeline_make_kernel_config_binding(output_size_key, output_size);
   iree_string_view_t input_size = iree_string_view_empty();
   IREE_RETURN_IF_ERROR(id4_pipeline_parameter_format_u64(
       weight_source->shape.dims[1], out_config->value_storage[1],
       IREE_ARRAYSIZE(out_config->value_storage[1]), &input_size));
-  out_config->bindings[1] = id4_pipeline_make_kernel_config_binding(
-      IREE_SV("id4.parameter.fp8_e4m3_scaled_to_bf16.input_size"), input_size);
-  out_config->count = ID4_PIPELINE_PARAMETER_ENCODER_FP8_TO_BF16_CONFIG_COUNT;
+  out_config->bindings[1] =
+      id4_pipeline_make_kernel_config_binding(input_size_key, input_size);
+  out_config->count = ID4_PIPELINE_PARAMETER_ENCODER_LINEAR_CONFIG_COUNT;
   return iree_ok_status();
 }
 
-static iree_status_t id4_pipeline_parameter_prepare_fp8_e4m3_to_bf16(
+static iree_status_t id4_pipeline_parameter_prepare_encoder(
     const id4_pipeline_parameter_slab_set_load_options_t* options,
     const id4_pipeline_parameter_slab_load_t* load,
     const id4_pipeline_parameter_load_step_t* step,
@@ -717,13 +823,49 @@ static iree_status_t id4_pipeline_parameter_prepare_fp8_e4m3_to_bf16(
   *out_executable = NULL;
   *out_function = iree_hal_executable_function_invalid();
 
+  iree_string_view_t module_path = iree_string_view_empty();
+  iree_string_view_t function_name = iree_string_view_empty();
+  iree_string_view_t output_size_key = iree_string_view_empty();
+  iree_string_view_t input_size_key = iree_string_view_empty();
+  switch (step->kind) {
+    case ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_ENCODE_FP8_E4M3_SCALED_TO_BF16:
+      module_path = IREE_SV("parameter/fp8_e4m3_scaled_to_bf16");
+      function_name = IREE_SV("id4_parameter_fp8_e4m3_scaled_to_bf16");
+      output_size_key =
+          IREE_SV("id4.parameter.fp8_e4m3_scaled_to_bf16.output_size");
+      input_size_key =
+          IREE_SV("id4.parameter.fp8_e4m3_scaled_to_bf16.input_size");
+      break;
+    case ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_ENCODE_BF16_LINEAR_RHS_TILE:
+      module_path = IREE_SV("parameter/bf16_linear_rhs_tile");
+      function_name = IREE_SV("id4_parameter_bf16_linear_rhs_tile");
+      output_size_key =
+          IREE_SV("id4.parameter.bf16_linear_rhs_tile.output_size");
+      input_size_key = IREE_SV("id4.parameter.bf16_linear_rhs_tile.input_size");
+      break;
+    case ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_ENCODE_FP8_E4M3_SCALED_TO_BF16_LINEAR_RHS_TILE:
+      module_path =
+          IREE_SV("parameter/fp8_e4m3_scaled_to_bf16_linear_rhs_tile");
+      function_name =
+          IREE_SV("id4_parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile");
+      output_size_key = IREE_SV(
+          "id4.parameter.fp8_e4m3_scaled_to_bf16_linear_rhs_tile.output_size");
+      input_size_key = IREE_SV(
+          "id4.parameter.fp8_e4m3_scaled_to_bf16_linear_rhs_tile.input_size");
+      break;
+    default:
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "parameter load step '%.*s' has unknown kind %u",
+                              (int)step->name.size, step->name.data,
+                              (uint32_t)step->kind);
+  }
+
   const id4_pipeline_kernel_module_t* module = NULL;
   IREE_RETURN_IF_ERROR(id4_pipeline_kernel_library_lookup(
-      options->kernel_library, IREE_SV("parameter/fp8_e4m3_scaled_to_bf16"),
-      &module));
+      options->kernel_library, module_path, &module));
   id4_pipeline_parameter_encoder_config_t config;
-  IREE_RETURN_IF_ERROR(
-      id4_pipeline_parameter_encoder_make_config(step, &config));
+  IREE_RETURN_IF_ERROR(id4_pipeline_parameter_encoder_make_linear_config(
+      step, output_size_key, input_size_key, &config));
 
   id4_pipeline_kernel_cache_prepare_options_t prepare_options;
   memset(&prepare_options, 0, sizeof(prepare_options));
@@ -734,8 +876,7 @@ static iree_status_t id4_pipeline_parameter_prepare_fp8_e4m3_to_bf16(
   prepare_options.source_identifier = module->source_identifier;
   prepare_options.source_contents = module->source_contents;
   prepare_options.module_path = module->module_path;
-  prepare_options.function_name =
-      IREE_SV("id4_parameter_fp8_e4m3_scaled_to_bf16");
+  prepare_options.function_name = function_name;
   prepare_options.config_binding_count = config.count;
   prepare_options.config_bindings = config.bindings;
   prepare_options.diagnostic_artifact_flags =
@@ -806,10 +947,9 @@ static iree_status_t id4_pipeline_parameter_submit_source_gather(
 }
 
 typedef struct id4_pipeline_parameter_encode_step_staging_layout_t {
-  // Staging offset where the FP8 weight tensor starts.
-  iree_device_size_t weight_offset;
-  // Staging offset where the F32 row-scale tensor starts.
-  iree_device_size_t scale_offset;
+  // Staging offsets where each encoded source tensor starts.
+  iree_device_size_t
+      source_offsets[ID4_PIPELINE_PARAMETER_ENCODER_MAX_SOURCE_COUNT];
   // Staging byte length consumed through this packed step.
   iree_device_size_t end_offset;
 } id4_pipeline_parameter_encode_step_staging_layout_t;
@@ -818,38 +958,27 @@ static iree_status_t id4_pipeline_parameter_encode_step_staging_layout(
     const id4_pipeline_parameter_load_step_t* step,
     iree_device_size_t base_offset,
     id4_pipeline_parameter_encode_step_staging_layout_t* out_layout) {
-  iree_device_size_t weight_offset = 0;
-  if (!iree_device_size_checked_align(base_offset, 16, &weight_offset)) {
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "parameter load step '%.*s' staging weight offset overflows",
-        (int)step->name.size, step->name.data);
+  memset(out_layout, 0, sizeof(*out_layout));
+  iree_device_size_t end_offset = base_offset;
+  for (iree_host_size_t i = 0; i < step->source_count; ++i) {
+    iree_device_size_t source_offset = 0;
+    if (!iree_device_size_checked_align(end_offset, 16, &source_offset)) {
+      return iree_make_status(
+          IREE_STATUS_OUT_OF_RANGE,
+          "parameter load step '%.*s' staging source %" PRIhsz
+          " offset overflows",
+          (int)step->name.size, step->name.data, i);
+    }
+    if (!iree_device_size_checked_add(
+            source_offset, step->sources[i].byte_length, &end_offset)) {
+      return iree_make_status(
+          IREE_STATUS_OUT_OF_RANGE,
+          "parameter load step '%.*s' staging source %" PRIhsz
+          " byte length overflows",
+          (int)step->name.size, step->name.data, i);
+    }
+    out_layout->source_offsets[i] = source_offset;
   }
-  iree_device_size_t weight_end = 0;
-  if (!iree_device_size_checked_add(weight_offset, step->sources[0].byte_length,
-                                    &weight_end)) {
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "parameter load step '%.*s' staging weight byte length overflows",
-        (int)step->name.size, step->name.data);
-  }
-  iree_device_size_t scale_offset = 0;
-  if (!iree_device_size_checked_align(weight_end, 16, &scale_offset)) {
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "parameter load step '%.*s' staging scale offset overflows",
-        (int)step->name.size, step->name.data);
-  }
-  iree_device_size_t end_offset = 0;
-  if (!iree_device_size_checked_add(scale_offset, step->sources[1].byte_length,
-                                    &end_offset)) {
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "parameter load step '%.*s' staging byte length overflows",
-        (int)step->name.size, step->name.data);
-  }
-  out_layout->weight_offset = weight_offset;
-  out_layout->scale_offset = scale_offset;
   out_layout->end_offset = end_offset;
   return iree_ok_status();
 }
@@ -957,7 +1086,7 @@ static void id4_pipeline_parameter_release_source_semaphores(
   }
 }
 
-static iree_status_t id4_pipeline_parameter_slab_submit_encode_fp8_to_bf16_run(
+static iree_status_t id4_pipeline_parameter_slab_submit_encode_run(
     const id4_pipeline_parameter_slab_set_load_options_t* options,
     const id4_pipeline_parameter_slab_load_t* load, iree_host_size_t step_count,
     const id4_pipeline_parameter_load_step_t* steps,
@@ -1055,49 +1184,35 @@ static iree_status_t id4_pipeline_parameter_slab_submit_encode_fp8_to_bf16_run(
     uint64_t source_signal_payload_values
         [ID4_PIPELINE_PARAMETER_ENCODER_CHUNK_SOURCE_CAPACITY] = {0};
     ++source_payload_value;
-    const iree_host_size_t chunk_source_count = chunk_step_count * 2;
+    iree_host_size_t chunk_source_count = 0;
+    for (iree_host_size_t i = 0; i < chunk_step_count; ++i) {
+      chunk_source_count += steps[step_offset + i].source_count;
+    }
     for (iree_host_size_t i = 0; i < chunk_source_count; ++i) {
       source_signal_payload_values[i] = source_payload_value;
     }
 
+    iree_host_size_t source_index = 0;
     for (iree_host_size_t i = 0;
          i < chunk_step_count && iree_status_is_ok(status); ++i) {
       const id4_pipeline_parameter_load_step_t* step = &steps[step_offset + i];
-      const id4_pipeline_parameter_load_source_t* weight_source =
-          &step->sources[0];
-      const id4_pipeline_parameter_load_source_t* scale_source =
-          &step->sources[1];
-      const iree_host_size_t weight_source_index = i * 2;
-      const iree_host_size_t scale_source_index = weight_source_index + 1;
-      iree_hal_semaphore_list_t weight_signal_list =
-          id4_pipeline_parameter_one_semaphore_list(
-              &source_semaphores[weight_source_index],
-              &source_signal_payload_values[weight_source_index]);
-      iree_hal_semaphore_list_t scale_signal_list =
-          id4_pipeline_parameter_one_semaphore_list(
-              &source_semaphores[scale_source_index],
-              &source_signal_payload_values[scale_source_index]);
-      status = id4_pipeline_parameter_submit_source_gather(
-          options, load, weight_source, layouts[i].weight_offset,
-          staging_buffer, source_wait_list, weight_signal_list);
-      if (iree_status_is_ok(status)) {
-        cleanup_wait_semaphores[weight_source_index] =
-            source_semaphores[weight_source_index];
-        cleanup_wait_payload_values[weight_source_index] =
-            source_signal_payload_values[weight_source_index];
-        cleanup_wait_count = weight_source_index + 1;
-      }
-      if (iree_status_is_ok(status)) {
+      for (iree_host_size_t j = 0;
+           j < step->source_count && iree_status_is_ok(status); ++j) {
+        iree_hal_semaphore_list_t source_signal_list =
+            id4_pipeline_parameter_one_semaphore_list(
+                &source_semaphores[source_index],
+                &source_signal_payload_values[source_index]);
         status = id4_pipeline_parameter_submit_source_gather(
-            options, load, scale_source, layouts[i].scale_offset,
-            staging_buffer, source_wait_list, scale_signal_list);
+            options, load, &step->sources[j], layouts[i].source_offsets[j],
+            staging_buffer, source_wait_list, source_signal_list);
         if (iree_status_is_ok(status)) {
-          cleanup_wait_semaphores[scale_source_index] =
-              source_semaphores[scale_source_index];
-          cleanup_wait_payload_values[scale_source_index] =
-              source_signal_payload_values[scale_source_index];
-          cleanup_wait_count = scale_source_index + 1;
+          cleanup_wait_semaphores[source_index] =
+              source_semaphores[source_index];
+          cleanup_wait_payload_values[source_index] =
+              source_signal_payload_values[source_index];
+          cleanup_wait_count = source_index + 1;
         }
+        ++source_index;
       }
     }
 
@@ -1119,34 +1234,32 @@ static iree_status_t id4_pipeline_parameter_slab_submit_encode_fp8_to_bf16_run(
           &load->slab->requests[step->request_offset];
       const id4_pipeline_parameter_load_source_t* weight_source =
           &step->sources[0];
-      const id4_pipeline_parameter_load_source_t* scale_source =
-          &step->sources[1];
 
       id4_pipeline_kernel_executable_t* executable = NULL;
       iree_hal_executable_function_t function =
           iree_hal_executable_function_invalid();
-      status = id4_pipeline_parameter_prepare_fp8_e4m3_to_bf16(
-          options, load, step, &executable, &function);
+      status = id4_pipeline_parameter_prepare_encoder(options, load, step,
+                                                      &executable, &function);
       if (iree_status_is_ok(status)) {
         status = id4_pipeline_parameter_slab_emit_diagnostic(
             load, stage_name, IREE_SV("parameter_slab.encode"),
-            IREE_SV("encoding FP8 e4m3 parameter to BF16"),
+            IREE_SV("encoding parameter into resident execution layout"),
             weight_source->source_scope, step->request_offset,
             options->diagnostics_sink);
       }
       if (iree_status_is_ok(status)) {
-        iree_hal_buffer_ref_t bindings[3] = {
-            iree_hal_make_buffer_ref(staging_buffer, layouts[i].weight_offset,
-                                     weight_source->byte_length),
-            iree_hal_make_buffer_ref(staging_buffer, layouts[i].scale_offset,
-                                     scale_source->byte_length),
-            iree_hal_make_buffer_ref(target_buffer,
-                                     target_request->span.buffer_offset,
-                                     target_request->span.length),
-        };
+        iree_hal_buffer_ref_t bindings[3];
+        for (iree_host_size_t j = 0; j < step->source_count; ++j) {
+          bindings[j] = iree_hal_make_buffer_ref(staging_buffer,
+                                                 layouts[i].source_offsets[j],
+                                                 step->sources[j].byte_length);
+        }
+        bindings[step->source_count] = iree_hal_make_buffer_ref(
+            target_buffer, target_request->span.buffer_offset,
+            target_request->span.length);
         iree_hal_buffer_ref_list_t binding_list = {
-            // Weight source, row-scale source, and BF16 target.
-            .count = IREE_ARRAYSIZE(bindings),
+            // Encoded sources followed by the resident target.
+            .count = step->source_count + 1,
             // Direct source and target buffer refs.
             .values = bindings,
         };
@@ -1223,11 +1336,9 @@ static iree_host_size_t id4_pipeline_parameter_slab_encode_run_count(
   const iree_host_size_t target_slab_index =
       load_steps[start_index].target_slab_index;
   iree_host_size_t end_index = start_index;
-  while (
-      end_index < load_step_count &&
-      load_steps[end_index].kind ==
-          ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_ENCODE_FP8_E4M3_SCALED_TO_BF16 &&
-      load_steps[end_index].target_slab_index == target_slab_index) {
+  while (end_index < load_step_count &&
+         id4_pipeline_parameter_load_step_is_encode(&load_steps[end_index]) &&
+         load_steps[end_index].target_slab_index == target_slab_index) {
     ++end_index;
   }
   return end_index - start_index;
@@ -1326,8 +1437,7 @@ static iree_status_t id4_pipeline_parameter_slab_submit_load_step(
   const id4_pipeline_parameter_slab_load_t* load =
       &loads[step->target_slab_index];
   iree_host_size_t next_step_index = step_index + 1;
-  if (step->kind ==
-      ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_ENCODE_FP8_E4M3_SCALED_TO_BF16) {
+  if (id4_pipeline_parameter_load_step_is_encode(step)) {
     next_step_index = step_index + id4_pipeline_parameter_slab_encode_run_count(
                                        step_index, load_step_count, load_steps);
   }
@@ -1346,9 +1456,8 @@ static iree_status_t id4_pipeline_parameter_slab_submit_load_step(
           &chain_signal_value, &chain_signal_semaphore);
 
   iree_status_t status = iree_ok_status();
-  if (step->kind ==
-      ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_ENCODE_FP8_E4M3_SCALED_TO_BF16) {
-    status = id4_pipeline_parameter_slab_submit_encode_fp8_to_bf16_run(
+  if (id4_pipeline_parameter_load_step_is_encode(step)) {
+    status = id4_pipeline_parameter_slab_submit_encode_run(
         options, load, next_step_index - step_index, step, stage_name,
         slab_set->buffers[step->target_slab_index], step_wait_semaphore_list,
         step_signal_semaphore_list);
