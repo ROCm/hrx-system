@@ -145,6 +145,9 @@ static const loom_encoding_matrix_operand_symbol_t
          LOOM_VALUE_FACT_ROUNDING_POLICY_OVERFLOW_TO_NAN},
         {IREE_SVL("flush_subnormal"),
          LOOM_VALUE_FACT_ROUNDING_POLICY_FLUSH_SUBNORMAL},
+        {IREE_SVL("finite_flush_subnormal"),
+         LOOM_VALUE_FACT_ROUNDING_POLICY_FINITE_ONLY |
+             LOOM_VALUE_FACT_ROUNDING_POLICY_FLUSH_SUBNORMAL},
         {IREE_SVL("preserve_subnormal"),
          LOOM_VALUE_FACT_ROUNDING_POLICY_PRESERVE_SUBNORMAL},
         {IREE_SVL("relu_clamp"), LOOM_VALUE_FACT_ROUNDING_POLICY_RELU_CLAMP},
