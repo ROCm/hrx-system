@@ -1824,3 +1824,41 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx1100_finite_flush_su
   global_store_b128_saddr %197, %scaled, %output_view
   return
 }
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @gfx1100_nonzero_finite_flush_subnormal_f8e4m3_splat_to_bf16_store(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %layout = encoding.layout.dense : encoding<layout>
+  %schema = encoding.define #matrix_operand<element_format=f8e4m3fn, payload_elements=1, payload_registers=1, rounding=finite_flush_subnormal> : encoding<schema>
+  %storage = encoding.define #physical_storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
+  %input_view = buffer.view %input[%base] : buffer -> view<1xf8E4M3, %storage>
+  %output_view = buffer.view %output[%base] : buffer -> view<2xbf16, #dense>
+  %raw = view.load %input_view[0] : view<1xf8E4M3, %storage> -> f8E4M3
+  %nonzero = scalar.assume %raw [ne(%raw, 0)] : f8E4M3
+  %packed = vector.splat %nonzero : vector<2xf8E4M3>
+  %value = vector.extf %packed : vector<2xf8E4M3> to vector<2xbf16>
+  vector.store %value, %output_view[0] : vector<2xbf16>, view<2xbf16, #dense>
+  func.return
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @gfx1100_nonzero_finite_flush_subnormal_f8e4m3_splat_to_bf16_store() asm<amdgpu.rdna3.core> {
+  %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 1} : reg<amdgpu.sgpr x2>
+  %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
+  %16 = v_mov_b32 0
+  %nonzero = global_load_i8_saddr %16, %input_view
+  %18 = v_and_b32_lit %nonzero, 255
+  %19 = v_and_b32_lit %18, 128
+  %20 = v_lshlrev_b32_src0_inline %19, 8
+  %21 = v_and_b32_lit %18, 127
+  %22 = v_mov_b32 15360
+  %23 = v_lshl_add_u32_shift_imm %21, %22, 4
+  %24 = v_or_b32 %20, %23
+  %25 = v_and_b32_lit %24, 65535
+  %27 = v_lshlrev_b32_src0_inline %25, 16
+  %value = v_or_b32 %25, %27
+  global_store_b32_saddr %16, %value, %output_view
+  return
+}
