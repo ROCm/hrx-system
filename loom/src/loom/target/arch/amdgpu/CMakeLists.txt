@@ -142,6 +142,7 @@ loom_cc_library(
     "math_policy.c"
   DEPS
     iree::base
+    loom::target::arch::amdgpu::lower::kinds
     loom::target::math_policy
   PUBLIC
 )
@@ -190,6 +191,7 @@ loom_cc_library(
   DEPS
     iree::base
     loom::analysis::symbolic_expr
+    loom::codegen::low::descriptors
     loom::ir
     loom::ops::index
     loom::ops::kernel

@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "loom/analysis/symbolic_expr.h"
+#include "loom/codegen/low/descriptors.h"
 #include "loom/ir/module.h"
 #include "loom/ir/scalar_type.h"
 #include "loom/ops/index/ops.h"
@@ -398,6 +399,183 @@ static loom_type_t loom_amdgpu_vector_memory_chunk_type_at(
   return loom_amdgpu_vector_memory_chunk_type(
       vector_type,
       loom_amdgpu_vector_memory_chunk_lane_count(shape, chunk_index));
+}
+
+typedef struct loom_amdgpu_packed_bf16_arithmetic_rule_t {
+  // Source op kind with lanewise BF16 arithmetic semantics.
+  loom_op_kind_t op_kind;
+  // Single-register packed BF16 descriptor required for each rewritten chunk.
+  iree_string_view_t descriptor_key;
+} loom_amdgpu_packed_bf16_arithmetic_rule_t;
+
+static const loom_amdgpu_packed_bf16_arithmetic_rule_t
+    kLoomAmdgpuPackedBf16ArithmeticRules[] = {
+        {
+            .op_kind = LOOM_OP_VECTOR_MULF,
+            .descriptor_key = IREE_SVL("amdgpu.v_pk_mul_bf16"),
+        },
+        {
+            .op_kind = LOOM_OP_VECTOR_FMAF,
+            .descriptor_key = IREE_SVL("amdgpu.v_pk_fma_bf16"),
+        },
+};
+
+static const loom_amdgpu_packed_bf16_arithmetic_rule_t*
+loom_amdgpu_packed_bf16_arithmetic_rule(loom_op_kind_t op_kind) {
+  for (iree_host_size_t i = 0;
+       i < IREE_ARRAYSIZE(kLoomAmdgpuPackedBf16ArithmeticRules); ++i) {
+    const loom_amdgpu_packed_bf16_arithmetic_rule_t* rule =
+        &kLoomAmdgpuPackedBf16ArithmeticRules[i];
+    if (rule->op_kind == op_kind) return rule;
+  }
+  return NULL;
+}
+
+static bool loom_amdgpu_descriptor_set_has_descriptor(
+    const loom_low_descriptor_set_t* descriptor_set, iree_string_view_t key) {
+  return descriptor_set != NULL &&
+         loom_low_descriptor_set_lookup_descriptor(descriptor_set, key) !=
+             LOOM_LOW_DESCRIPTOR_ORDINAL_NONE;
+}
+
+static bool loom_amdgpu_static_packed_bf16_vector_type(
+    loom_type_t type, uint32_t* out_lane_count) {
+  *out_lane_count = 0;
+  if (!loom_type_is_vector(type) || loom_type_rank(type) != 1 ||
+      !loom_type_is_all_static(type) ||
+      loom_type_element_type(type) != LOOM_SCALAR_TYPE_BF16) {
+    return false;
+  }
+  const int64_t lane_count_i64 = loom_type_dim_static_size_at(type, 0);
+  if (lane_count_i64 < 1 ||
+      lane_count_i64 > LOOM_AMDGPU_MAX_PACKED_16BIT_FLOAT_LANES) {
+    return false;
+  }
+  *out_lane_count = (uint32_t)lane_count_i64;
+  return true;
+}
+
+static iree_status_t loom_amdgpu_build_packed_bf16_arithmetic_chunk(
+    loom_builder_t* builder, const loom_op_t* source_op,
+    const loom_value_id_t* operands, loom_type_t result_type,
+    loom_location_id_t location, loom_op_t** out_op) {
+  loom_op_t* op = NULL;
+  IREE_RETURN_IF_ERROR(loom_builder_allocate_op(
+      builder, source_op->kind, source_op->operand_count,
+      source_op->result_count, /*region_count=*/0, /*tied_result_count=*/0,
+      source_op->attribute_count, location, &op));
+  op->instance_flags = source_op->instance_flags;
+  memcpy(loom_op_operands(op), operands,
+         source_op->operand_count * sizeof(*operands));
+  if (source_op->attribute_count != 0) {
+    memcpy(loom_op_attrs(op), loom_op_const_attrs(source_op),
+           source_op->attribute_count * sizeof(loom_attribute_t));
+  }
+  loom_value_id_t result = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(
+      loom_builder_define_value(builder, result_type, &result));
+  loom_op_results(op)[0] = result;
+  IREE_RETURN_IF_ERROR(loom_builder_finalize_op(builder, op));
+  *out_op = op;
+  return iree_ok_status();
+}
+
+static iree_status_t loom_amdgpu_legalize_packed_bf16_vector_arithmetic(
+    const loom_target_legalizer_entry_t* entry,
+    loom_target_legalization_context_t* context, loom_op_t* op,
+    loom_target_legalizer_result_t* out_result) {
+  (void)entry;
+  *out_result = (loom_target_legalizer_result_t){
+      .action = LOOM_TARGET_LEGALIZER_ACTION_NO_COMMENT,
+  };
+  if (!loom_amdgpu_legalizer_descriptor_set_is_amdgpu(
+          context->descriptor_set)) {
+    return iree_ok_status();
+  }
+  const loom_amdgpu_packed_bf16_arithmetic_rule_t* rule =
+      loom_amdgpu_packed_bf16_arithmetic_rule(op->kind);
+  if (rule == NULL ||
+      !loom_amdgpu_descriptor_set_has_descriptor(context->descriptor_set,
+                                                 rule->descriptor_key) ||
+      op->result_count != 1 || op->operand_count == 0) {
+    return iree_ok_status();
+  }
+
+  const loom_value_id_t source_result = loom_op_const_results(op)[0];
+  const loom_type_t result_type =
+      loom_module_value_type(context->module, source_result);
+  uint32_t lane_count = 0;
+  if (!loom_amdgpu_static_packed_bf16_vector_type(result_type, &lane_count) ||
+      lane_count <= 2 || (lane_count % 2) != 0) {
+    return iree_ok_status();
+  }
+  for (uint16_t operand_index = 0; operand_index < op->operand_count;
+       ++operand_index) {
+    const loom_type_t operand_type = loom_module_value_type(
+        context->module, loom_op_const_operands(op)[operand_index]);
+    uint32_t operand_lane_count = 0;
+    if (!loom_amdgpu_static_packed_bf16_vector_type(operand_type,
+                                                    &operand_lane_count) ||
+        operand_lane_count != lane_count) {
+      return iree_ok_status();
+    }
+  }
+
+  loom_rewriter_t* rewriter = context->rewriter;
+  loom_builder_t* builder = &rewriter->builder;
+  loom_builder_set_before(builder, op);
+  const loom_value_id_t value_checkpoint =
+      loom_rewriter_value_checkpoint(rewriter);
+
+  const uint32_t chunk_lane_count = 2;
+  const uint32_t chunk_count = lane_count / chunk_lane_count;
+  const loom_type_t chunk_type = loom_type_shaped_1d(
+      LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_BF16,
+      loom_dim_pack_static(chunk_lane_count), result_type.encoding_id);
+
+  loom_value_id_t* chunk_results = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(context->arena, chunk_count,
+                                                 sizeof(*chunk_results),
+                                                 (void**)&chunk_results));
+  loom_value_id_t* chunk_operands = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      context->arena, op->operand_count, sizeof(*chunk_operands),
+      (void**)&chunk_operands));
+
+  const loom_value_id_t* source_operands = loom_op_const_operands(op);
+  for (uint32_t chunk_index = 0; chunk_index < chunk_count; ++chunk_index) {
+    const int64_t static_offset = (int64_t)(chunk_index * chunk_lane_count);
+    for (uint16_t operand_index = 0; operand_index < op->operand_count;
+         ++operand_index) {
+      loom_op_t* slice_op = NULL;
+      IREE_RETURN_IF_ERROR(loom_vector_slice_build(
+          builder, source_operands[operand_index], /*offsets=*/NULL,
+          /*offsets_count=*/0, &static_offset, /*static_offsets_count=*/1,
+          chunk_type, op->location, &slice_op));
+      chunk_operands[operand_index] = loom_vector_slice_result(slice_op);
+    }
+
+    loom_op_t* chunk_op = NULL;
+    IREE_RETURN_IF_ERROR(loom_amdgpu_build_packed_bf16_arithmetic_chunk(
+        builder, op, chunk_operands, chunk_type, op->location, &chunk_op));
+    chunk_results[chunk_index] = loom_op_const_results(chunk_op)[0];
+  }
+
+  loom_op_t* concat_op = NULL;
+  IREE_RETURN_IF_ERROR(
+      loom_vector_concat_build(builder, /*axis=*/0, chunk_results, chunk_count,
+                               result_type, op->location, &concat_op));
+  loom_value_id_t replacement = loom_vector_concat_result(concat_op);
+
+  IREE_RETURN_IF_ERROR(loom_rewriter_preserve_result_names_on_new_values(
+      rewriter, op, &replacement, 1, value_checkpoint));
+  IREE_RETURN_IF_ERROR(
+      loom_rewriter_replace_all_uses_and_erase(rewriter, op, &replacement, 1));
+
+  *out_result = (loom_target_legalizer_result_t){
+      .action = LOOM_TARGET_LEGALIZER_ACTION_REWRITTEN,
+  };
+  return iree_ok_status();
 }
 
 static bool loom_amdgpu_vector_memory_chunk_shape_equal(
@@ -1508,6 +1686,14 @@ static const loom_target_legalizer_entry_t kAmdgpuLegalizerEntries[] = {
     {
         .root_kind = LOOM_OP_VECTOR_REDUCE,
         .legalize = loom_amdgpu_legalize_oversized_vector_reduce,
+    },
+    {
+        .root_kind = LOOM_OP_VECTOR_MULF,
+        .legalize = loom_amdgpu_legalize_packed_bf16_vector_arithmetic,
+    },
+    {
+        .root_kind = LOOM_OP_VECTOR_FMAF,
+        .legalize = loom_amdgpu_legalize_packed_bf16_vector_arithmetic,
     },
     {
         .root_kind = LOOM_OP_VECTOR_BITFIELD_EXTRACTU,
