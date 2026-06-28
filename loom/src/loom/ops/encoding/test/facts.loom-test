@@ -197,6 +197,30 @@ func.def @ggml_q8_0_schema_summary() -> (i64, i64, i64, i64, i64, i64, i64) {
 
 // ====
 
+// Named FP8 storage schemas expose their target-independent numeric format and
+// dense one-byte payload contract.
+func.def @named_fp8_schema_summary() -> (i64, i64, i64, i64) {
+  %ieee = encoding.define #ieee_fp8_e4m3 : encoding<schema>
+  %fn = encoding.define #fp8_e4m3fn : encoding<schema>
+  %fnuz = encoding.define #fp8_e4m3fnuz : encoding<schema>
+  %e5m2fnuz = encoding.define #fp8_e5m2fnuz : encoding<schema>
+  %ieee_format = test.fact_encoding_matrix_field %ieee["element_format"] : encoding<schema> -> i64
+  %fn_format = test.fact_encoding_matrix_field %fn["element_format"] : encoding<schema> -> i64
+  %fnuz_packing = test.fact_encoding_matrix_field %fnuz["payload_packing"] : encoding<schema> -> i64
+  %e5m2fnuz_elements = test.fact_encoding_matrix_field %e5m2fnuz["payload_elements"] : encoding<schema> -> i64
+  func.return %ieee_format, %fn_format, %fnuz_packing, %e5m2fnuz_elements : i64, i64, i64, i64
+}
+// ----
+func.def @named_fp8_schema_summary() -> (i64, i64, i64, i64) {
+  %ieee_format = scalar.constant 8388608 : i64
+  %fn_format = scalar.constant 33554432 : i64
+  %fnuz_packing = scalar.constant 1 : i64
+  %e5m2fnuz_elements = scalar.constant 1 : i64
+  func.return %ieee_format, %fn_format, %fnuz_packing, %e5m2fnuz_elements : i64, i64, i64, i64
+}
+
+// ====
+
 // Dynamic physical-storage composition carries nested schema facts along with
 // layout facts, giving consumers one encoding value to query.
 func.def @physical_storage_matrix_schema_summary() -> (i64, i64, i64, i64) {
