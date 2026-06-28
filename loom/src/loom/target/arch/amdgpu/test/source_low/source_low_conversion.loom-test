@@ -1761,17 +1761,17 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) @vector_extf_direct_f8e4
   %28 = v_and_b32_lit %27, 8323199
   %29 = v_mov_b32 1006648320
   %30 = v_lshl_add_u32_shift_imm %28, %29, 4
-  %31 = v_mov_b32 3229614080
-  %32 = v_mov_b32 1614815232
+  %31 = s_mov_b32 3229614080
+  %32 = s_mov_b32 1614815232
   %33 = v_perm_b32 %32, %31, %28
-  %34 = v_mov_b32 993737472
-  %35 = v_mov_b32 1010580540
+  %34 = s_mov_b32 993737472
+  %35 = s_mov_b32 1010580540
   %36 = v_perm_b32 %35, %34, %28
   %37 = v_lshlrev_b32_src0_inline %36, 8
   %38 = v_or_b32 %33, %37
-  %39 = v_mov_b32 4294508536
+  %39 = s_mov_b32 4294508536
   %40 = v_pk_add_u16 %28, %39
-  %41 = v_mov_b32 983055
+  %41 = s_mov_b32 983055
   %42 = v_pk_ashrrev_i16 %41, %40
   %43 = v_xor_b32 %30, %38
   %44 = v_and_b32 %43, %42
@@ -1779,7 +1779,7 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) @vector_extf_direct_f8e4
   %46 = v_lshlrev_b32_src0_inline %27, 8
   %47 = v_bfi_b32_src0_lit %46, %45, 2147516416
   %48 = v_xor_b32_lit %28, 8323199
-  %49 = v_mov_b32 4294967295
+  %49 = s_mov_b32 4294967295
   %50 = v_pk_add_u16 %48, %49
   %52 = v_pk_ashrrev_i16 %41, %50
   %53 = v_mov_b32 2143322048
@@ -1852,17 +1852,17 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) @vector_extf_scaled_f8e4
   %35 = v_and_b32_lit %34, 8323199
   %36 = v_mov_b32 1006648320
   %37 = v_lshl_add_u32_shift_imm %35, %36, 4
-  %38 = v_mov_b32 3229614080
-  %39 = v_mov_b32 1614815232
+  %38 = s_mov_b32 3229614080
+  %39 = s_mov_b32 1614815232
   %40 = v_perm_b32 %39, %38, %35
-  %41 = v_mov_b32 993737472
-  %42 = v_mov_b32 1010580540
+  %41 = s_mov_b32 993737472
+  %42 = s_mov_b32 1010580540
   %43 = v_perm_b32 %42, %41, %35
   %44 = v_lshlrev_b32_src0_inline %43, 8
   %45 = v_or_b32 %40, %44
-  %46 = v_mov_b32 4294508536
+  %46 = s_mov_b32 4294508536
   %47 = v_pk_add_u16 %35, %46
-  %48 = v_mov_b32 983055
+  %48 = s_mov_b32 983055
   %49 = v_pk_ashrrev_i16 %48, %47
   %50 = v_xor_b32 %37, %45
   %51 = v_and_b32 %50, %49
@@ -1870,7 +1870,7 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) @vector_extf_scaled_f8e4
   %53 = v_lshlrev_b32_src0_inline %34, 8
   %54 = v_bfi_b32_src0_lit %53, %52, 2147516416
   %55 = v_xor_b32_lit %35, 8323199
-  %56 = v_mov_b32 4294967295
+  %56 = s_mov_b32 4294967295
   %57 = v_pk_add_u16 %55, %56
   %59 = v_pk_ashrrev_i16 %48, %57
   %60 = v_mov_b32 2143322048
@@ -1960,17 +1960,17 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) @vector_extf_direct_f8e4
   %28 = v_and_b32_lit %27, 8323199
   %29 = v_mov_b32 1006648320
   %30 = v_lshl_add_u32_shift_imm %28, %29, 4
-  %31 = v_mov_b32 3229614080
-  %32 = v_mov_b32 1614815232
+  %31 = s_mov_b32 3229614080
+  %32 = s_mov_b32 1614815232
   %33 = v_perm_b32 %32, %31, %28
-  %34 = v_mov_b32 993737472
-  %35 = v_mov_b32 1010580540
+  %34 = s_mov_b32 993737472
+  %35 = s_mov_b32 1010580540
   %36 = v_perm_b32 %35, %34, %28
   %37 = v_lshlrev_b32_src0_inline %36, 8
   %38 = v_or_b32 %33, %37
-  %39 = v_mov_b32 4294508536
+  %39 = s_mov_b32 4294508536
   %40 = v_pk_add_u16 %28, %39
-  %41 = v_mov_b32 983055
+  %41 = s_mov_b32 983055
   %42 = v_pk_ashrrev_i16 %41, %40
   %43 = v_xor_b32 %30, %38
   %44 = v_and_b32 %43, %42
@@ -1978,7 +1978,7 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) @vector_extf_direct_f8e4
   %46 = v_lshlrev_b32_src0_inline %27, 8
   %47 = v_bfi_b32_src0_lit %46, %45, 2147516416
   %48 = v_xor_b32_lit %28, 8323199
-  %49 = v_mov_b32 4294967295
+  %49 = s_mov_b32 4294967295
   %50 = v_pk_add_u16 %48, %49
   %52 = v_pk_ashrrev_i16 %41, %50
   %53 = v_mov_b32 2143322048
@@ -2045,8 +2045,8 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) @vector_extf_direct_f8e5
   %32 = v_add_u32_src0_inline %31, 1
   %33 = v_lshlrev_b32_src0_inline %32, 8
   %34 = v_or_b32 %31, %33
-  %35 = v_mov_b32 931135488
-  %36 = v_mov_b32 943732736
+  %35 = s_mov_b32 931135488
+  %36 = s_mov_b32 943732736
   %37 = v_perm_b32 %36, %35, %34
   %38 = v_and_b32_lit %37, 65535
   %39 = v_cmp_lt_u32_src1_inline %28 {rhs = 4}
@@ -2160,8 +2160,8 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) @vector_extf_direct_f8e5
   %32 = v_add_u32_src0_inline %31, 1
   %33 = v_lshlrev_b32_src0_inline %32, 8
   %34 = v_or_b32 %31, %33
-  %35 = v_mov_b32 931135488
-  %36 = v_mov_b32 943732736
+  %35 = s_mov_b32 931135488
+  %36 = s_mov_b32 943732736
   %37 = v_perm_b32 %36, %35, %34
   %38 = v_and_b32_lit %37, 65535
   %39 = v_cmp_lt_u32_src1_inline %28 {rhs = 4}
@@ -2279,8 +2279,8 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) @vector_extf_scaled_f8e5
   %39 = v_add_u32_src0_inline %38, 1
   %40 = v_lshlrev_b32_src0_inline %39, 8
   %41 = v_or_b32 %38, %40
-  %42 = v_mov_b32 931135488
-  %43 = v_mov_b32 943732736
+  %42 = s_mov_b32 931135488
+  %43 = s_mov_b32 943732736
   %44 = v_perm_b32 %43, %42, %41
   %45 = v_and_b32_lit %44, 65535
   %46 = v_cmp_lt_u32_src1_inline %35 {rhs = 4}
@@ -2408,11 +2408,11 @@ low.func.def target(@target) abi(hal_kernel) @vector_extf_splat_finite_f8e4m3_to
   %16 = v_and_b32_lit %15, 127
   %17 = v_mov_b32 15360
   %18 = v_lshl_add_u32_shift_imm %16, %17, 4
-  %19 = v_mov_b32 3229614080
-  %20 = v_mov_b32 1614815232
+  %19 = s_mov_b32 3229614080
+  %20 = s_mov_b32 1614815232
   %21 = v_perm_b32 %20, %19, %16
-  %22 = v_mov_b32 993737472
-  %23 = v_mov_b32 1010580540
+  %22 = s_mov_b32 993737472
+  %23 = s_mov_b32 1010580540
   %24 = v_perm_b32 %23, %22, %16
   %25 = v_lshlrev_b32_src0_inline %24, 8
   %26 = v_or_b32 %21, %25
@@ -2456,8 +2456,8 @@ low.func.def target(@target) abi(hal_kernel) @vector_extf_splat_finite_f8e5m2_to
   %20 = v_add_u32_src0_inline %19, 1
   %21 = v_lshlrev_b32_src0_inline %20, 8
   %22 = v_or_b32 %19, %21
-  %23 = v_mov_b32 931135488
-  %24 = v_mov_b32 943732736
+  %23 = s_mov_b32 931135488
+  %24 = s_mov_b32 943732736
   %25 = v_perm_b32 %24, %23, %22
   %26 = v_and_b32_lit %25, 65535
   %27 = v_cmp_lt_u32_src1_inline %16 {rhs = 4}
@@ -2502,8 +2502,8 @@ low.func.def target(@target) abi(hal_kernel) @vector_extf_splat_not_nan_f8e5m2_t
   %22 = v_add_u32_src0_inline %21, 1
   %23 = v_lshlrev_b32_src0_inline %22, 8
   %24 = v_or_b32 %21, %23
-  %25 = v_mov_b32 931135488
-  %26 = v_mov_b32 943732736
+  %25 = s_mov_b32 931135488
+  %26 = s_mov_b32 943732736
   %27 = v_perm_b32 %26, %25, %24
   %28 = v_and_b32_lit %27, 65535
   %29 = v_cmp_lt_u32_src1_inline %18 {rhs = 4}
@@ -2551,8 +2551,8 @@ low.func.def target(@target) abi(hal_kernel) @vector_extf_splat_not_inf_f8e5m2_t
   %22 = v_add_u32_src0_inline %21, 1
   %23 = v_lshlrev_b32_src0_inline %22, 8
   %24 = v_or_b32 %21, %23
-  %25 = v_mov_b32 931135488
-  %26 = v_mov_b32 943732736
+  %25 = s_mov_b32 931135488
+  %26 = s_mov_b32 943732736
   %27 = v_perm_b32 %26, %25, %24
   %28 = v_and_b32_lit %27, 65535
   %29 = v_cmp_lt_u32_src1_inline %18 {rhs = 4}
