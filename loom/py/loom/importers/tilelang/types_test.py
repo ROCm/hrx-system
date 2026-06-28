@@ -51,6 +51,13 @@ def test_preserves_tilelang_float8_storage_format_as_schema() -> None:
     converter = TileLangTypeConverter()
 
     assert (
+        str(converter.view_type(Buffer("float8_e4m3fn", (16,))).element_type)
+        == "f8E4M3"
+    )
+    e4m3fn_schema = converter.buffer_storage_schema(Buffer("float8_e4m3fn", (16,)))
+    assert e4m3fn_schema is not None
+    assert e4m3fn_schema.name == "fp8_e4m3fn"
+    assert (
         str(converter.view_type(Buffer("float8_e4m3fnuz", (16,))).element_type)
         == "f8E4M3"
     )
