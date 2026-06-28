@@ -38,6 +38,10 @@ typedef struct id4_ideogram4_generation_plan_t id4_ideogram4_generation_plan_t;
 typedef struct id4_ideogram4_generation_bundle_t
     id4_ideogram4_generation_bundle_t;
 
+// Opaque prepared generation phase bundle assembled from one generation bundle.
+typedef struct id4_ideogram4_generation_phase_bundle_t
+    id4_ideogram4_generation_phase_bundle_t;
+
 // Opaque asynchronous full-generation execution handle.
 typedef struct id4_ideogram4_generation_execution_t
     id4_ideogram4_generation_execution_t;
@@ -237,6 +241,56 @@ typedef struct id4_ideogram4_generation_issue_options_t {
   id4_pipeline_diagnostics_sink_t* diagnostics_sink;
 } id4_ideogram4_generation_issue_options_t;
 
+// Options for beginning one phase-driven full-generation execution.
+typedef struct id4_ideogram4_generation_begin_options_t {
+  // Size of this structure for versioning.
+  iree_host_size_t structure_size;
+  // Extension structure chain; must be NULL for now.
+  const void* next;
+  // Parsed request matching the prepared generation bundle shape.
+  const id4_ideogram4_request_t* request;
+  // Tokenizer used to lower the request's Qwen prompt into Qwen inputs.
+  const iree_tokenizer_t* tokenizer;
+  // Tokenizer flags used while encoding the Qwen prompt text.
+  iree_tokenizer_encode_flags_t tokenizer_flags;
+  // Semaphores that generation begin waits on before request uploads.
+  iree_hal_semaphore_list_t wait_semaphore_list;
+  // Semaphores signaled after request uploads are queued.
+  iree_hal_semaphore_list_t signal_semaphore_list;
+  // Diagnostics sink for begin events.
+  id4_pipeline_diagnostics_sink_t* diagnostics_sink;
+} id4_ideogram4_generation_begin_options_t;
+
+// Options for preparing one high-level generation phase bundle.
+typedef struct id4_ideogram4_generation_phase_prepare_options_t {
+  // Size of this structure for versioning.
+  iree_host_size_t structure_size;
+  // Extension structure chain; must be NULL for now.
+  const void* next;
+  // Single high-level generation phase to prepare.
+  id4_ideogram4_generation_residency_phase_mask_t phase_mask;
+  // Semaphores that phase preparation waits on.
+  iree_hal_semaphore_list_t wait_semaphore_list;
+  // Semaphores signaled after phase preparation is ready for issue.
+  iree_hal_semaphore_list_t signal_semaphore_list;
+  // Diagnostics sink for prepare events.
+  id4_pipeline_diagnostics_sink_t* diagnostics_sink;
+} id4_ideogram4_generation_phase_prepare_options_t;
+
+// Options for issuing one prepared high-level generation phase.
+typedef struct id4_ideogram4_generation_phase_issue_options_t {
+  // Size of this structure for versioning.
+  iree_host_size_t structure_size;
+  // Extension structure chain; must be NULL for now.
+  const void* next;
+  // Semaphores that phase issue waits on before queueing phase work.
+  iree_hal_semaphore_list_t wait_semaphore_list;
+  // Semaphores signaled after the phase completes.
+  iree_hal_semaphore_list_t signal_semaphore_list;
+  // Diagnostics sink for issue events.
+  id4_pipeline_diagnostics_sink_t* diagnostics_sink;
+} id4_ideogram4_generation_phase_issue_options_t;
+
 // Options for issuing one asynchronous Qwen3-VL conditioning execution.
 typedef struct id4_ideogram4_qwen_issue_options_t {
   // Size of this structure for versioning.
@@ -357,6 +411,32 @@ iree_status_t id4_ideogram4_session_issue_generation(
     id4_ideogram4_session_t* session, id4_ideogram4_generation_bundle_t* bundle,
     const id4_ideogram4_generation_issue_options_t* options,
     id4_ideogram4_generation_execution_t** out_execution);
+
+// Begins one asynchronous phase-driven full-generation execution.
+//
+// Generation bundles have mutable boundary binding tables and must not be
+// issued concurrently. The returned execution handle retains |bundle| until it
+// is released.
+iree_status_t id4_ideogram4_session_begin_generation(
+    id4_ideogram4_session_t* session, id4_ideogram4_generation_bundle_t* bundle,
+    const id4_ideogram4_generation_begin_options_t* options,
+    id4_ideogram4_generation_execution_t** out_execution);
+
+// Prepares one high-level phase bundle from |bundle|.
+iree_status_t id4_ideogram4_generation_bundle_prepare_phase(
+    id4_ideogram4_generation_bundle_t* bundle,
+    const id4_ideogram4_generation_phase_prepare_options_t* options,
+    id4_ideogram4_generation_phase_bundle_t** out_phase_bundle);
+
+// Issues one prepared high-level phase against |execution|.
+iree_status_t id4_ideogram4_generation_execution_issue_phase(
+    id4_ideogram4_generation_execution_t* execution,
+    id4_ideogram4_generation_phase_bundle_t* phase_bundle,
+    const id4_ideogram4_generation_phase_issue_options_t* options);
+
+// Releases |phase_bundle| after all queued work using it has completed.
+iree_status_t id4_ideogram4_generation_phase_bundle_release(
+    id4_ideogram4_generation_phase_bundle_t* phase_bundle);
 
 // Releases |execution| from the caller after its completion signal is reached.
 void id4_ideogram4_generation_execution_release(

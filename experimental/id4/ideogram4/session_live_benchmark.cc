@@ -32,6 +32,8 @@ IREE_FLAG(string, dit_feed_forward_implementation, "pytorch_parity",
 IREE_FLAG(string, generation_residency, "issue_phases",
           "Generation stage-bundle residency: issue_phases or "
           "selected_phases or all_stage_bundles.");
+IREE_FLAG(string, generation_issue_mode, "full",
+          "Generation issue mode: full or phases.");
 IREE_FLAG(string, generation_resident_phases, "",
           "Comma-separated generation phases retained when "
           "--generation_residency=selected_phases: conditioning, denoise, "
@@ -98,6 +100,11 @@ struct GenerationBenchmarkPlanStatistics {
     // Statistics for this coarse stage plan.
     id4_pipeline_plan_statistics_t statistics;
   } stages[8];
+};
+
+enum class GenerationIssueMode {
+  kFull,
+  kPhases,
 };
 
 static const GenerationPrompt kShortPrompt = {
@@ -173,6 +180,8 @@ struct LiveGenerationBenchmarkContext {
   // Generation stage-bundle residency selected by benchmark flags.
   id4_ideogram4_generation_residency_mode_t generation_residency_mode =
       ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_INVALID;
+  // Generation issue mode selected by benchmark flags.
+  GenerationIssueMode generation_issue_mode = GenerationIssueMode::kFull;
   // Generation residency phases selected by benchmark flags.
   id4_ideogram4_generation_residency_phase_mask_t
       generation_resident_phase_mask =
@@ -345,6 +354,32 @@ static iree_string_view_t GenerationResidencyModeName(
     default:
       return IREE_SV("invalid");
   }
+}
+
+static iree_status_t ParseGenerationIssueMode(
+    GenerationIssueMode* out_issue_mode) {
+  IREE_ASSERT_ARGUMENT(out_issue_mode);
+  iree_string_view_t value = iree_make_cstring_view(FLAG_generation_issue_mode);
+  if (iree_string_view_equal(value, IREE_SV("full"))) {
+    *out_issue_mode = GenerationIssueMode::kFull;
+    return iree_ok_status();
+  }
+  if (iree_string_view_equal(value, IREE_SV("phases"))) {
+    *out_issue_mode = GenerationIssueMode::kPhases;
+    return iree_ok_status();
+  }
+  return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                          "--generation_issue_mode must be full or phases");
+}
+
+static iree_string_view_t GenerationIssueModeName(GenerationIssueMode mode) {
+  switch (mode) {
+    case GenerationIssueMode::kFull:
+      return IREE_SV("full");
+    case GenerationIssueMode::kPhases:
+      return IREE_SV("phases");
+  }
+  return IREE_SV("unknown");
 }
 
 static iree_status_t ParseGenerationResidentPhaseMask(
@@ -685,6 +720,8 @@ static iree_status_t CreateLiveGenerationBenchmarkContext(
       ParseDitParameterFormat(&out_context->dit_parameter_format));
   IREE_RETURN_IF_ERROR(
       ParseGenerationResidencyMode(&out_context->generation_residency_mode));
+  IREE_RETURN_IF_ERROR(
+      ParseGenerationIssueMode(&out_context->generation_issue_mode));
   IREE_RETURN_IF_ERROR(ParseGenerationResidentPhaseMask(
       &out_context->generation_resident_phase_mask));
   IREE_RETURN_IF_ERROR(CreateLoadedLiveSession(
@@ -753,36 +790,166 @@ static iree_status_t PrepareGenerationBundle(
                                                   &prepare_options, out_bundle);
 }
 
+static iree_status_t WaitForSemaphore(iree_hal_semaphore_t* semaphore,
+                                      uint64_t payload_value) {
+  id4::test::SemaphoreListStorage wait;
+  wait.semaphore = semaphore;
+  wait.payload_value = payload_value;
+  return iree_hal_semaphore_list_wait(wait.list(), iree_infinite_timeout(),
+                                      IREE_ASYNC_WAIT_FLAG_NONE);
+}
+
+static iree_status_t PrepareGenerationPhaseBundle(
+    id4_ideogram4_generation_bundle_t* bundle,
+    id4_ideogram4_generation_residency_phase_mask_t phase_mask,
+    id4_pipeline_diagnostics_sink_t* diagnostics_sink,
+    iree_hal_semaphore_t* wait_semaphore, uint64_t wait_value,
+    iree_hal_semaphore_t* signal_semaphore, uint64_t signal_value,
+    id4_ideogram4_generation_phase_bundle_t** out_phase_bundle) {
+  id4::test::SemaphoreListStorage wait;
+  wait.semaphore = wait_semaphore;
+  wait.payload_value = wait_value;
+  id4::test::SemaphoreListStorage signal;
+  signal.semaphore = signal_semaphore;
+  signal.payload_value = signal_value;
+
+  id4_ideogram4_generation_phase_prepare_options_t prepare_options;
+  std::memset(&prepare_options, 0, sizeof(prepare_options));
+  prepare_options.structure_size = sizeof(prepare_options);
+  prepare_options.phase_mask = phase_mask;
+  prepare_options.wait_semaphore_list = wait.list();
+  prepare_options.signal_semaphore_list = signal.list();
+  prepare_options.diagnostics_sink = diagnostics_sink;
+  return id4_ideogram4_generation_bundle_prepare_phase(bundle, &prepare_options,
+                                                       out_phase_bundle);
+}
+
+static iree_status_t IssueGenerationPhase(
+    id4_ideogram4_generation_execution_t* execution,
+    id4_ideogram4_generation_phase_bundle_t* phase_bundle,
+    id4_pipeline_diagnostics_sink_t* diagnostics_sink,
+    iree_hal_semaphore_t* wait_semaphore, uint64_t wait_value,
+    iree_hal_semaphore_t* signal_semaphore, uint64_t signal_value) {
+  id4::test::SemaphoreListStorage wait;
+  wait.semaphore = wait_semaphore;
+  wait.payload_value = wait_value;
+  id4::test::SemaphoreListStorage signal;
+  signal.semaphore = signal_semaphore;
+  signal.payload_value = signal_value;
+
+  id4_ideogram4_generation_phase_issue_options_t issue_options;
+  std::memset(&issue_options, 0, sizeof(issue_options));
+  issue_options.structure_size = sizeof(issue_options);
+  issue_options.wait_semaphore_list = wait.list();
+  issue_options.signal_semaphore_list = signal.list();
+  issue_options.diagnostics_sink = diagnostics_sink;
+  return id4_ideogram4_generation_execution_issue_phase(execution, phase_bundle,
+                                                        &issue_options);
+}
+
 static iree_status_t IssueGenerationBundle(
     const LiveGenerationBenchmarkContext& context,
     id4_ideogram4_generation_bundle_t* bundle, const ParsedRequest& request,
     id4_pipeline_diagnostics_sink_t* diagnostics_sink,
-    iree_hal_semaphore_t* prepare_semaphore, uint64_t prepare_value,
-    iree_hal_semaphore_t* completion_semaphore, uint64_t completion_value,
+    iree_hal_semaphore_t* prepare_semaphore, uint64_t* prepare_value,
+    iree_hal_semaphore_t* completion_semaphore, uint64_t* completion_value,
     id4_ideogram4_generation_execution_t** out_execution) {
   IREE_ASSERT_ARGUMENT(bundle);
   IREE_ASSERT_ARGUMENT(diagnostics_sink);
   IREE_ASSERT_ARGUMENT(out_execution);
   *out_execution = nullptr;
 
-  id4::test::SemaphoreListStorage prepare_wait;
-  prepare_wait.semaphore = prepare_semaphore;
-  prepare_wait.payload_value = prepare_value;
-  id4::test::SemaphoreListStorage completion_signal;
-  completion_signal.semaphore = completion_semaphore;
-  completion_signal.payload_value = completion_value;
+  if (context.generation_issue_mode == GenerationIssueMode::kFull) {
+    id4::test::SemaphoreListStorage prepare_wait;
+    prepare_wait.semaphore = prepare_semaphore;
+    prepare_wait.payload_value = *prepare_value;
+    id4::test::SemaphoreListStorage completion_signal;
+    completion_signal.semaphore = completion_semaphore;
+    completion_signal.payload_value = ++*completion_value;
 
-  id4_ideogram4_generation_issue_options_t issue_options;
-  std::memset(&issue_options, 0, sizeof(issue_options));
-  issue_options.structure_size = sizeof(issue_options);
-  issue_options.request = &request.request;
-  issue_options.tokenizer = context.tokenizer.get();
-  issue_options.tokenizer_flags = IREE_TOKENIZER_ENCODE_FLAG_NONE;
-  issue_options.wait_semaphore_list = prepare_wait.list();
-  issue_options.signal_semaphore_list = completion_signal.list();
-  issue_options.diagnostics_sink = diagnostics_sink;
-  return id4_ideogram4_session_issue_generation(context.session.get(), bundle,
-                                                &issue_options, out_execution);
+    id4_ideogram4_generation_issue_options_t issue_options;
+    std::memset(&issue_options, 0, sizeof(issue_options));
+    issue_options.structure_size = sizeof(issue_options);
+    issue_options.request = &request.request;
+    issue_options.tokenizer = context.tokenizer.get();
+    issue_options.tokenizer_flags = IREE_TOKENIZER_ENCODE_FLAG_NONE;
+    issue_options.wait_semaphore_list = prepare_wait.list();
+    issue_options.signal_semaphore_list = completion_signal.list();
+    issue_options.diagnostics_sink = diagnostics_sink;
+    return id4_ideogram4_session_issue_generation(
+        context.session.get(), bundle, &issue_options, out_execution);
+  }
+
+  id4::test::SemaphoreListStorage begin_wait;
+  begin_wait.semaphore = prepare_semaphore;
+  begin_wait.payload_value = *prepare_value;
+  id4::test::SemaphoreListStorage begin_signal;
+  begin_signal.semaphore = prepare_semaphore;
+  begin_signal.payload_value = ++*prepare_value;
+
+  id4_ideogram4_generation_begin_options_t begin_options;
+  std::memset(&begin_options, 0, sizeof(begin_options));
+  begin_options.structure_size = sizeof(begin_options);
+  begin_options.request = &request.request;
+  begin_options.tokenizer = context.tokenizer.get();
+  begin_options.tokenizer_flags = IREE_TOKENIZER_ENCODE_FLAG_NONE;
+  begin_options.wait_semaphore_list = begin_wait.list();
+  begin_options.signal_semaphore_list = begin_signal.list();
+  begin_options.diagnostics_sink = diagnostics_sink;
+  IREE_RETURN_IF_ERROR(id4_ideogram4_session_begin_generation(
+      context.session.get(), bundle, &begin_options, out_execution));
+
+  id4_ideogram4_generation_phase_bundle_t* conditioning_phase = nullptr;
+  id4_ideogram4_generation_phase_bundle_t* denoise_phase = nullptr;
+  id4_ideogram4_generation_phase_bundle_t* decode_phase = nullptr;
+
+  iree_status_t status = PrepareGenerationPhaseBundle(
+      bundle, ID4_IDEOGRAM4_GENERATION_RESIDENCY_PHASE_CONDITIONING,
+      diagnostics_sink, prepare_semaphore, *prepare_value, prepare_semaphore,
+      ++*prepare_value, &conditioning_phase);
+  if (iree_status_is_ok(status)) {
+    status = IssueGenerationPhase(
+        *out_execution, conditioning_phase, diagnostics_sink, prepare_semaphore,
+        *prepare_value, completion_semaphore, ++*completion_value);
+  }
+  if (iree_status_is_ok(status)) {
+    status = WaitForSemaphore(completion_semaphore, *completion_value);
+  }
+  status = iree_status_join(
+      status,
+      id4_ideogram4_generation_phase_bundle_release(conditioning_phase));
+
+  if (iree_status_is_ok(status)) {
+    status = PrepareGenerationPhaseBundle(
+        bundle, ID4_IDEOGRAM4_GENERATION_RESIDENCY_PHASE_DENOISE,
+        diagnostics_sink, completion_semaphore, *completion_value,
+        prepare_semaphore, ++*prepare_value, &denoise_phase);
+  }
+  if (iree_status_is_ok(status)) {
+    status = IssueGenerationPhase(
+        *out_execution, denoise_phase, diagnostics_sink, prepare_semaphore,
+        *prepare_value, completion_semaphore, ++*completion_value);
+  }
+  if (iree_status_is_ok(status)) {
+    status = WaitForSemaphore(completion_semaphore, *completion_value);
+  }
+  status = iree_status_join(
+      status, id4_ideogram4_generation_phase_bundle_release(denoise_phase));
+
+  if (iree_status_is_ok(status)) {
+    status = PrepareGenerationPhaseBundle(
+        bundle, ID4_IDEOGRAM4_GENERATION_RESIDENCY_PHASE_DECODE,
+        diagnostics_sink, completion_semaphore, *completion_value,
+        prepare_semaphore, ++*prepare_value, &decode_phase);
+  }
+  if (iree_status_is_ok(status)) {
+    status = IssueGenerationPhase(
+        *out_execution, decode_phase, diagnostics_sink, prepare_semaphore,
+        *prepare_value, completion_semaphore, ++*completion_value);
+  }
+  status = iree_status_join(
+      status, id4_ideogram4_generation_phase_bundle_release(decode_phase));
+  return status;
 }
 
 static iree_status_t AppendGenerationBenchmarkStageLabels(
@@ -821,13 +988,15 @@ static iree_status_t SetGenerationBenchmarkLabel(
       DitFeedForwardImplementationName(summary.dit_feed_forward_implementation);
   const iree_string_view_t residency_mode =
       GenerationResidencyModeName(context.generation_residency_mode);
+  const iree_string_view_t issue_mode =
+      GenerationIssueModeName(context.generation_issue_mode);
   iree_string_builder_t label_builder;
   iree_string_builder_initialize(iree_allocator_system(), &label_builder);
   iree_status_t status = iree_string_builder_append_format(
       &label_builder,
       "tokens=%" PRIu32 " latent=%" PRIu64 "x%" PRIu64 " steps=%" PRIu32
       " image=%" PRIu64 "x%" PRIu64
-      " residency=%.*s resident_phase_mask=0x%08x"
+      " residency=%.*s issue=%.*s resident_phase_mask=0x%08x"
       " params=%.*s activation=%.*s attention=%.*s ff=%.*s"
       " param_total=%" PRIu64 "MiB param_largest=%" PRIu64
       "MiB"
@@ -838,6 +1007,7 @@ static iree_status_t SetGenerationBenchmarkLabel(
       summary.diffusion_latent_shape.dims[1], summary.denoise_step_count,
       summary.decoded_image_shape.dims[0], summary.decoded_image_shape.dims[1],
       static_cast<int>(residency_mode.size), residency_mode.data,
+      static_cast<int>(issue_mode.size), issue_mode.data,
       context.generation_resident_phase_mask,
       static_cast<int>(parameter_format.size), parameter_format.data,
       static_cast<int>(activation_format.size), activation_format.data,
@@ -956,13 +1126,12 @@ static iree_status_t RunGenerationEndToEndBenchmark(
           &profiling);
     }
 
-    ++completion_value;
     GenerationExecutionRef execution;
     if (iree_status_is_ok(status)) {
       status = IssueGenerationBundle(context, bundle.get(), request,
                                      &diagnostics_sink, prepare_semaphore.get(),
-                                     prepare_value, completion_semaphore.get(),
-                                     completion_value, execution.out());
+                                     &prepare_value, completion_semaphore.get(),
+                                     &completion_value, execution.out());
     }
     if (iree_status_is_ok(status)) {
       id4::test::SemaphoreListStorage completion_wait;
