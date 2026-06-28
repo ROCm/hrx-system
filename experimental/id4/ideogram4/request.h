@@ -131,6 +131,8 @@ typedef struct id4_ideogram4_qwen_lowering_options_t {
   iree_tokenizer_encode_flags_t tokenizer_flags;
   // Maximum token count accepted by the caller's planned request shape.
   uint32_t max_token_count;
+  // Vocabulary row count accepted by the caller's token embedding table.
+  uint32_t vocab_size;
 } id4_ideogram4_qwen_lowering_options_t;
 
 // Options controlling request-to-DiT metadata lowering.

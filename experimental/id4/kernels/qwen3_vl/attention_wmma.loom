@@ -338,6 +338,26 @@ check.case public @id4_qwen3_vl_attention_wmma_qk_qwen_full_tile_zero_case {
   check.return
 }
 
+check.case public @id4_qwen3_vl_attention_wmma_qk_short_prompt_zero_case {
+  %query = check.generate.fill value(0.0) : tensor<32x4096xbf16>
+  %key = check.generate.fill value(0.0) : tensor<32x1024xbf16>
+  %scores = check.generate.fill value(1.0) : tensor<32x32x32xf32>
+  %expected = check.generate.fill value(0.0) : tensor<32x32x32xf32>
+  func.call @id4_qwen3_vl_attention_qk_scores_bf16_f32_wmma(%query, %key, %scores) : (tensor<32x4096xbf16>, tensor<32x1024xbf16>, tensor<32x32x32xf32>)
+  check.expect.close actual(%scores) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<32x32x32xf32>
+  check.return
+}
+
+check.case public @id4_qwen3_vl_attention_wmma_qk_short_prompt_ones_case {
+  %query = check.generate.fill value(1.0) : tensor<32x4096xbf16>
+  %key = check.generate.fill value(1.0) : tensor<32x1024xbf16>
+  %scores = check.generate.fill value(0.0) : tensor<32x32x32xf32>
+  %expected = check.generate.fill value(11.313708498984761) : tensor<32x32x32xf32>
+  func.call @id4_qwen3_vl_attention_qk_scores_bf16_f32_wmma(%query, %key, %scores) : (tensor<32x4096xbf16>, tensor<32x1024xbf16>, tensor<32x32x32xf32>)
+  check.expect.close actual(%scores) expected(%expected) atol(0.0001) rtol(0.0) nan(same) : tensor<32x32x32xf32>
+  check.return
+}
+
 check.case public @id4_qwen3_vl_attention_wmma_softmax_bf16_qwen_full_tile_uniform_case {
   %scores = check.generate.fill value(0.0) : tensor<32x480x480xf32>
   %attention_mask = check.generate.fill value(0.0) : tensor<480x480xf32>
@@ -345,6 +365,26 @@ check.case public @id4_qwen3_vl_attention_wmma_softmax_bf16_qwen_full_tile_unifo
   %expected = check.generate.fill value(0.002083333333333333) : tensor<32x480x480xbf16>
   func.call @id4_qwen3_vl_attention_softmax_mask_bf16(%scores, %attention_mask, %probabilities) : (tensor<32x480x480xf32>, tensor<480x480xf32>, tensor<32x480x480xbf16>)
   check.expect.close actual(%probabilities) expected(%expected) atol(1.0000000000000001e-05) rtol(0.0) nan(same) : tensor<32x480x480xbf16>
+  check.return
+}
+
+check.case public @id4_qwen3_vl_attention_wmma_pv_bf16_short_prompt_zero_case {
+  %probabilities = check.generate.fill value(0.0) : tensor<32x32x32xbf16>
+  %value = check.generate.fill value(2.0) : tensor<1024x32xbf16>
+  %output = check.generate.fill value(1.0) : tensor<32x4096xbf16>
+  %expected = check.generate.fill value(0.0) : tensor<32x4096xbf16>
+  func.call @id4_qwen3_vl_attention_pv_bf16_bf16_wmma(%probabilities, %value, %output) : (tensor<32x32x32xbf16>, tensor<1024x32xbf16>, tensor<32x4096xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<32x4096xbf16>
+  check.return
+}
+
+check.case public @id4_qwen3_vl_attention_wmma_pv_bf16_short_prompt_uniform_case {
+  %probabilities = check.generate.fill value(0.03125) : tensor<32x32x32xbf16>
+  %value = check.generate.fill value(2.0) : tensor<1024x32xbf16>
+  %output = check.generate.fill value(0.0) : tensor<32x4096xbf16>
+  %expected = check.generate.fill value(2.0) : tensor<32x4096xbf16>
+  func.call @id4_qwen3_vl_attention_pv_bf16_bf16_wmma(%probabilities, %value, %output) : (tensor<32x32x32xbf16>, tensor<1024x32xbf16>, tensor<32x4096xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<32x4096xbf16>
   check.return
 }
 
@@ -370,6 +410,14 @@ check.benchmark<@id4_qwen3_vl_attention_wmma_pv_bf16_uniform_case> @id4_qwen3_vl
 
 check.benchmark<@id4_qwen3_vl_attention_wmma_qk_qwen_full_tile_zero_case> @id4_qwen3_vl_attention_wmma_qk_qwen_full_tile_zero
 
+check.benchmark<@id4_qwen3_vl_attention_wmma_qk_short_prompt_zero_case> @id4_qwen3_vl_attention_wmma_qk_short_prompt_zero
+
+check.benchmark<@id4_qwen3_vl_attention_wmma_qk_short_prompt_ones_case> @id4_qwen3_vl_attention_wmma_qk_short_prompt_ones
+
 check.benchmark<@id4_qwen3_vl_attention_wmma_softmax_bf16_qwen_full_tile_uniform_case> @id4_qwen3_vl_attention_wmma_softmax_bf16_qwen_full_tile_uniform
+
+check.benchmark<@id4_qwen3_vl_attention_wmma_pv_bf16_short_prompt_zero_case> @id4_qwen3_vl_attention_wmma_pv_bf16_short_prompt_zero
+
+check.benchmark<@id4_qwen3_vl_attention_wmma_pv_bf16_short_prompt_uniform_case> @id4_qwen3_vl_attention_wmma_pv_bf16_short_prompt_uniform
 
 check.benchmark<@id4_qwen3_vl_attention_wmma_pv_bf16_qwen_full_tile_uniform_case> @id4_qwen3_vl_attention_wmma_pv_bf16_qwen_full_tile_uniform

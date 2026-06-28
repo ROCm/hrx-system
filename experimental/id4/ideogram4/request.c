@@ -136,6 +136,10 @@ static iree_status_t id4_ideogram4_request_validate_lowering_options(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "Qwen request lowering max token count is zero");
   }
+  if (options->vocab_size == 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "Qwen request lowering vocab size is zero");
+  }
   return iree_ok_status();
 }
 
@@ -551,6 +555,17 @@ static iree_status_t id4_ideogram4_request_encode_qwen_tokens(
                               "Ideogram 4 request token count %" PRIhsz
                               " exceeds uint32 range",
                               token_count);
+  }
+  for (iree_host_size_t i = 0; i < token_count && iree_status_is_ok(status);
+       ++i) {
+    const iree_tokenizer_token_id_t token_id = token_storage[i];
+    if (token_id < 0 || (uint32_t)token_id >= options->vocab_size) {
+      status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "Ideogram 4 request token at index %" PRIhsz
+                                " has id %" PRId32
+                                " outside Qwen vocab size %" PRIu32,
+                                i, token_id, options->vocab_size);
+    }
   }
   if (iree_status_is_ok(status)) {
     *out_token_storage = token_storage;

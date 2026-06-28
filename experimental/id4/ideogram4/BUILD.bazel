@@ -61,6 +61,7 @@ iree_runtime_cc_test(
         "//runtime/src/iree/testing:gtest_main",
         "//runtime/src/iree/tokenizer/format/huggingface:tokenizer_json",
         "//runtime/src/iree/tokenizer/testdata:streaming_testdata",
+        "//runtime/src/iree/tokenizer/vocab",
     ],
 )
 

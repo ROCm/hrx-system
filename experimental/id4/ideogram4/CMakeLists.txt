@@ -64,6 +64,7 @@ iree_cc_test(
     iree::testing::gtest_main
     iree::tokenizer::format::huggingface::tokenizer_json
     iree::tokenizer::testdata::streaming_testdata
+    iree::tokenizer::vocab
 )
 
 iree_cc_test(

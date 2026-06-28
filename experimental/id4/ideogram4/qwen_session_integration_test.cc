@@ -6,6 +6,7 @@
 
 #include <cstring>
 #include <string>
+#include <vector>
 
 #include "experimental/id4/ideogram4/session.h"
 #include "experimental/id4/stages/hal_integration_util.h"
@@ -26,6 +27,8 @@ IREE_FLAG(string, id4_request_json_file, "",
           "request lowering.");
 IREE_FLAG(string, id4_fixture_dir, "",
           "Directory containing the Qwen expected-condition fixture.");
+IREE_FLAG_LIST(string, id4_diagnostic_tap,
+               "Additional Qwen diagnostic tap names to capture.");
 
 namespace {
 
@@ -229,6 +232,8 @@ static iree_status_t CountRequestTokens(const id4_ideogram4_request_t* request,
   lowering_options.tokenizer_flags = IREE_TOKENIZER_ENCODE_FLAG_NONE;
   lowering_options.max_token_count =
       id4_qwen3_vl_program_ideogram4_model_config()->max_token_count;
+  lowering_options.vocab_size =
+      id4_qwen3_vl_program_ideogram4_model_config()->vocab_size;
   return id4_ideogram4_request_count_qwen_tokens(
       &lowering_options, iree_allocator_system(), out_token_count);
 }
@@ -267,6 +272,17 @@ static iree_status_t IssueQwenRequest(
   issue_options.device_index = 0;
   issue_options.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
   issue_options.command_buffer_mode = context.command_buffer_mode;
+  const iree_flag_string_list_t diagnostic_tap_flags =
+      FLAG_id4_diagnostic_tap_list();
+  std::vector<iree_string_view_t> diagnostic_tap_names;
+  diagnostic_tap_names.reserve(diagnostic_tap_flags.count);
+  for (iree_host_size_t i = 0; i < diagnostic_tap_flags.count; ++i) {
+    diagnostic_tap_names.push_back(diagnostic_tap_flags.values[i]);
+  }
+  issue_options.diagnostic_tap_names = (iree_string_view_list_t){
+      diagnostic_tap_names.size(),
+      diagnostic_tap_names.data(),
+  };
   issue_options.wait_semaphore_list = iree_hal_semaphore_list_empty();
   issue_options.signal_semaphore_list = completion_signal.list();
   issue_options.diagnostics_sink = diagnostics_sink;

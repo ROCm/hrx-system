@@ -15,6 +15,7 @@
 #include "iree/testing/status_matchers.h"
 #include "iree/tokenizer/format/huggingface/tokenizer_json.h"
 #include "iree/tokenizer/testdata/streaming_testdata.h"
+#include "iree/tokenizer/vocab/vocab.h"
 
 namespace {
 
@@ -74,6 +75,11 @@ static TokenizerPtr LoadTokenizer() {
   IREE_CHECK_OK(iree_tokenizer_from_huggingface_json(
       GetEmbeddedTokenizerJson(), iree_allocator_system(), &tokenizer));
   return TokenizerPtr(tokenizer);
+}
+
+static uint32_t TokenizerVocabSize(const iree_tokenizer_t* tokenizer) {
+  return (uint32_t)iree_tokenizer_vocab_capacity(
+      iree_tokenizer_vocab(tokenizer));
 }
 
 static size_t DitPositionEmbeddingOffset(
@@ -254,6 +260,7 @@ TEST(Ideogram4RequestTest, LowersPromptToQwenInputTensors) {
   options.request = &request.value;
   options.tokenizer_flags = IREE_TOKENIZER_ENCODE_FLAG_NONE;
   options.max_token_count = 128;
+  options.vocab_size = TokenizerVocabSize(tokenizer.get());
 
   ScopedQwenInputs inputs;
   IREE_ASSERT_OK(id4_ideogram4_request_lower_qwen_inputs(
@@ -291,9 +298,32 @@ TEST(Ideogram4RequestTest, RejectsTokenOverflow) {
   options.request = &request.value;
   options.tokenizer_flags = IREE_TOKENIZER_ENCODE_FLAG_NONE;
   options.max_token_count = 1;
+  options.vocab_size = TokenizerVocabSize(tokenizer.get());
 
   ScopedQwenInputs inputs;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
+                        id4_ideogram4_request_lower_qwen_inputs(
+                            &options, iree_allocator_system(), &inputs.value));
+}
+
+TEST(Ideogram4RequestTest, RejectsTokenIdOutsideModelVocab) {
+  TokenizerPtr tokenizer = LoadTokenizer();
+  ScopedRequest request;
+  IREE_ASSERT_OK(id4_ideogram4_request_parse_json(
+      IREE_SV("{\"prompt\":\"hello world\"}"), iree_allocator_system(),
+      &request.value));
+
+  id4_ideogram4_qwen_lowering_options_t options;
+  memset(&options, 0, sizeof(options));
+  options.structure_size = sizeof(options);
+  options.tokenizer = tokenizer.get();
+  options.request = &request.value;
+  options.tokenizer_flags = IREE_TOKENIZER_ENCODE_FLAG_NONE;
+  options.max_token_count = 128;
+  options.vocab_size = 1;
+
+  ScopedQwenInputs inputs;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         id4_ideogram4_request_lower_qwen_inputs(
                             &options, iree_allocator_system(), &inputs.value));
 }

@@ -1181,6 +1181,7 @@ static iree_status_t id4_ideogram4_plan_generation_stages(
   qwen_lowering_options.request = options->request;
   qwen_lowering_options.tokenizer_flags = options->tokenizer_flags;
   qwen_lowering_options.max_token_count = session->qwen_model.max_token_count;
+  qwen_lowering_options.vocab_size = session->qwen_model.vocab_size;
   IREE_RETURN_IF_ERROR(id4_ideogram4_request_count_qwen_tokens(
       &qwen_lowering_options, session->host_allocator, &token_count));
 
@@ -3233,6 +3234,7 @@ static iree_status_t id4_ideogram4_generation_begin_execution(
     qwen_lowering_options.request = request;
     qwen_lowering_options.tokenizer_flags = tokenizer_flags;
     qwen_lowering_options.max_token_count = session->qwen_model.max_token_count;
+    qwen_lowering_options.vocab_size = session->qwen_model.vocab_size;
     status = id4_ideogram4_request_lower_qwen_inputs(&qwen_lowering_options,
                                                      execution->host_allocator,
                                                      &execution->qwen_inputs);
@@ -3878,6 +3880,7 @@ iree_status_t id4_ideogram4_session_issue_qwen(
     lowering_options.request = options->request;
     lowering_options.tokenizer_flags = options->tokenizer_flags;
     lowering_options.max_token_count = session->qwen_model.max_token_count;
+    lowering_options.vocab_size = session->qwen_model.vocab_size;
     status = id4_ideogram4_request_lower_qwen_inputs(
         &lowering_options, session->host_allocator, &inputs);
   }

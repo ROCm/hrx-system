@@ -4867,6 +4867,34 @@ _KERNEL_CASES = [
         "target_name": "qwen3_vl_attention_wmma_qk_qwen_full_tile_zero",
     },
     {
+        "actual_case": "@id4_qwen3_vl_attention_wmma_qk_short_prompt_zero_case",
+        "benchmark": "@id4_qwen3_vl_attention_wmma_qk_short_prompt_zero",
+        "configs": [
+            "--config=id4.qwen3_vl.attention_wmma.token_count=19",
+            "--config=id4.qwen3_vl.attention_wmma.dispatch_token_count=32",
+            "--config=id4.qwen3_vl.attention_wmma.hidden_size=4096",
+            "--config=id4.qwen3_vl.attention_wmma.attention_head_count=32",
+            "--config=id4.qwen3_vl.attention_wmma.key_value_head_count=8",
+            "--config=id4.qwen3_vl.attention_wmma.head_size=128",
+        ],
+        "source": "qwen3_vl/attention_wmma.loom",
+        "target_name": "qwen3_vl_attention_wmma_qk_short_prompt_zero",
+    },
+    {
+        "actual_case": "@id4_qwen3_vl_attention_wmma_qk_short_prompt_ones_case",
+        "benchmark": "@id4_qwen3_vl_attention_wmma_qk_short_prompt_ones",
+        "configs": [
+            "--config=id4.qwen3_vl.attention_wmma.token_count=19",
+            "--config=id4.qwen3_vl.attention_wmma.dispatch_token_count=32",
+            "--config=id4.qwen3_vl.attention_wmma.hidden_size=4096",
+            "--config=id4.qwen3_vl.attention_wmma.attention_head_count=32",
+            "--config=id4.qwen3_vl.attention_wmma.key_value_head_count=8",
+            "--config=id4.qwen3_vl.attention_wmma.head_size=128",
+        ],
+        "source": "qwen3_vl/attention_wmma.loom",
+        "target_name": "qwen3_vl_attention_wmma_qk_short_prompt_ones",
+    },
+    {
         "actual_case": "@id4_qwen3_vl_attention_wmma_softmax_bf16_qwen_full_tile_uniform_case",
         "benchmark": "@id4_qwen3_vl_attention_wmma_softmax_bf16_qwen_full_tile_uniform",
         "configs": [
@@ -4893,6 +4921,34 @@ _KERNEL_CASES = [
         ],
         "source": "qwen3_vl/attention_wmma.loom",
         "target_name": "qwen3_vl_attention_wmma_pv_bf16_qwen_full_tile_uniform",
+    },
+    {
+        "actual_case": "@id4_qwen3_vl_attention_wmma_pv_bf16_short_prompt_zero_case",
+        "benchmark": "@id4_qwen3_vl_attention_wmma_pv_bf16_short_prompt_zero",
+        "configs": [
+            "--config=id4.qwen3_vl.attention_wmma.token_count=19",
+            "--config=id4.qwen3_vl.attention_wmma.dispatch_token_count=32",
+            "--config=id4.qwen3_vl.attention_wmma.hidden_size=4096",
+            "--config=id4.qwen3_vl.attention_wmma.attention_head_count=32",
+            "--config=id4.qwen3_vl.attention_wmma.key_value_head_count=8",
+            "--config=id4.qwen3_vl.attention_wmma.head_size=128",
+        ],
+        "source": "qwen3_vl/attention_wmma.loom",
+        "target_name": "qwen3_vl_attention_wmma_pv_bf16_short_prompt_zero",
+    },
+    {
+        "actual_case": "@id4_qwen3_vl_attention_wmma_pv_bf16_short_prompt_uniform_case",
+        "benchmark": "@id4_qwen3_vl_attention_wmma_pv_bf16_short_prompt_uniform",
+        "configs": [
+            "--config=id4.qwen3_vl.attention_wmma.token_count=19",
+            "--config=id4.qwen3_vl.attention_wmma.dispatch_token_count=32",
+            "--config=id4.qwen3_vl.attention_wmma.hidden_size=4096",
+            "--config=id4.qwen3_vl.attention_wmma.attention_head_count=32",
+            "--config=id4.qwen3_vl.attention_wmma.key_value_head_count=8",
+            "--config=id4.qwen3_vl.attention_wmma.head_size=128",
+        ],
+        "source": "qwen3_vl/attention_wmma.loom",
+        "target_name": "qwen3_vl_attention_wmma_pv_bf16_short_prompt_uniform",
     },
     {
         "actual_case": "@id4_qwen3_vl_linear_input_pack_f32_bf16_small_case",
@@ -5604,6 +5660,16 @@ _KERNEL_CASES = [
         "target_name": "qwen3_vl_residual_add_f32_qwen_slice",
     },
     {
+        "actual_case": "@id4_qwen3_vl_zero_tail_bf16_all_case",
+        "benchmark": "@id4_qwen3_vl_zero_tail_bf16_all",
+        "configs": [
+            "--config=id4.qwen3_vl.zero_tail.element_count=0",
+            "--config=id4.qwen3_vl.zero_tail.dispatch_element_count=8",
+        ],
+        "source": "qwen3_vl/zero_tail.loom",
+        "target_name": "qwen3_vl_zero_tail_bf16_all",
+    },
+    {
         "actual_case": "@id4_qwen3_vl_linear_bf16_f32_small_case",
         "benchmark": "@id4_qwen3_vl_linear_bf16_f32_small",
         "configs": [
@@ -5731,6 +5797,7 @@ _KERNEL_SOURCES = [
     "qwen3_vl/selected_hidden_pack_f32.loom",
     "qwen3_vl/silu_gate_f32.loom",
     "qwen3_vl/token_embedding.loom",
+    "qwen3_vl/zero_tail.loom",
     "sampler/cfg_denoise_f32.loom",
     "sampler/euler_step_f32.loom",
     "sampler/noise_f32.loom",
