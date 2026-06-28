@@ -837,6 +837,62 @@ kernel.def @vector_extf_scaled_f8e5m2_to_bf16_store() {
 
 // ====
 
+func.def @vector_extf_splat_finite_f8e4m3_to_bf16_store(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<1xf8E4M3, #dense>
+  %output_view = buffer.view %output[%base] : buffer -> view<2xbf16, #dense>
+  %raw = view.load %input_view[0] : view<1xf8E4M3, #dense> -> f8E4M3
+  %finite = scalar.assume %raw [finite(%raw)] : f8E4M3
+  %packed = vector.splat %finite : vector<2xf8E4M3>
+  %value = vector.extf %packed : vector<2xf8E4M3> to vector<2xbf16>
+  vector.store %value, %output_view[0] : vector<2xbf16>, view<2xbf16, #dense>
+  func.return
+}
+
+// ====
+
+func.def @vector_extf_splat_finite_f8e5m2_to_bf16_store(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<1xf8E5M2, #dense>
+  %output_view = buffer.view %output[%base] : buffer -> view<2xbf16, #dense>
+  %raw = view.load %input_view[0] : view<1xf8E5M2, #dense> -> f8E5M2
+  %finite = scalar.assume %raw [finite(%raw)] : f8E5M2
+  %packed = vector.splat %finite : vector<2xf8E5M2>
+  %value = vector.extf %packed : vector<2xf8E5M2> to vector<2xbf16>
+  vector.store %value, %output_view[0] : vector<2xbf16>, view<2xbf16, #dense>
+  func.return
+}
+
+// ====
+
+func.def @vector_extf_splat_not_nan_f8e5m2_to_bf16_store(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<1xf8E5M2, #dense>
+  %output_view = buffer.view %output[%base] : buffer -> view<2xbf16, #dense>
+  %raw = view.load %input_view[0] : view<1xf8E5M2, #dense> -> f8E5M2
+  %not_nan = scalar.assume %raw [not_nan(%raw)] : f8E5M2
+  %packed = vector.splat %not_nan : vector<2xf8E5M2>
+  %value = vector.extf %packed : vector<2xf8E5M2> to vector<2xbf16>
+  vector.store %value, %output_view[0] : vector<2xbf16>, view<2xbf16, #dense>
+  func.return
+}
+
+// ====
+
+func.def @vector_extf_splat_not_inf_f8e5m2_to_bf16_store(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<1xf8E5M2, #dense>
+  %output_view = buffer.view %output[%base] : buffer -> view<2xbf16, #dense>
+  %raw = view.load %input_view[0] : view<1xf8E5M2, #dense> -> f8E5M2
+  %not_inf = scalar.assume %raw [not_inf(%raw)] : f8E5M2
+  %packed = vector.splat %not_inf : vector<2xf8E5M2>
+  %value = vector.extf %packed : vector<2xf8E5M2> to vector<2xbf16>
+  vector.store %value, %output_view[0] : vector<2xbf16>, view<2xbf16, #dense>
+  func.return
+}
+
+// ====
+
 func.def @vector_uitofp_i32x2(%input: vector<2xi32>) -> (vector<2xf32>) {
   %converted = vector.uitofp %input : vector<2xi32> to vector<2xf32>
   func.return %converted : vector<2xf32>

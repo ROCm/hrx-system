@@ -65,12 +65,19 @@ func.def @offset_constant_requires_index_dialect() -> (offset) {
 
 // ====
 
-// scalar.assume constrains integer payload values; address-domain facts use
+// scalar.assume constrains scalar payload values; address-domain facts use
 // index.assume.
 func.def @assume_rejects_index_payload(%x: index) -> (i64) {
-  // ERROR@+1: TYPE/003 "values[0]" "index" "integer"
+  // ERROR@+1: TYPE/004 "values[0]" "index" "integer or floating-point scalar; use index.assume"
   %r = scalar.assume %x [] : i64
   func.return %r : i64
+}
+
+// ====
+
+func.def @assume_accepts_float_payload(%x: f32) -> (f32) {
+  %r = scalar.assume %x [finite(%x)] : f32
+  func.return %r : f32
 }
 
 // ====

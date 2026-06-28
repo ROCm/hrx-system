@@ -1882,7 +1882,7 @@ iree_status_t loom_scalar_bitfield_extracts_facts(
     const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts);
 
-// LOOM_OP_SCALAR_ASSUME: Identity with predicate constraints on integer payload results. Use index.assume for index or offset values.
+// LOOM_OP_SCALAR_ASSUME: Identity with predicate constraints on scalar payload results. Use index.assume for index or offset values.
 // %n2 = scalar.assume %n [mul(%n, 16)] : i64
 LOOM_DEFINE_ISA(loom_scalar_assume_isa, LOOM_OP_SCALAR_ASSUME)
 LOOM_DEFINE_VARIADIC_OPERANDS(loom_scalar_assume_values, 0)

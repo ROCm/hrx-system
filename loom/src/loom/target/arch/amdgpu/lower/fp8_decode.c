@@ -476,9 +476,14 @@ static iree_status_t loom_amdgpu_emit_fp8_subnormal_bf16_bits_byte_tables(
 iree_status_t loom_amdgpu_emit_fp8_to_bf16_lane(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_amdgpu_fp8_decode_plan_t* plan, loom_value_id_t low_byte,
-    loom_type_t vgpr_type, loom_type_t mask_type, loom_value_id_t* out_lane) {
+    loom_amdgpu_fp8_decode_value_flags_t value_flags, loom_type_t vgpr_type,
+    loom_type_t mask_type, loom_value_id_t* out_lane) {
   *out_lane = LOOM_VALUE_ID_INVALID;
   const loom_scalar_type_fp8_format_t* format = &plan->format;
+  const bool value_not_nan =
+      iree_any_bit_set(value_flags, LOOM_AMDGPU_FP8_DECODE_VALUE_FLAG_NOT_NAN);
+  const bool value_not_inf =
+      iree_any_bit_set(value_flags, LOOM_AMDGPU_FP8_DECODE_VALUE_FLAG_NOT_INF);
 
   loom_value_id_t low_sign_bits = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_binary_immediate(
@@ -527,13 +532,22 @@ iree_status_t loom_amdgpu_emit_fp8_to_bf16_lane(
       context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_OR_B32, low_sign_bits,
       low_finite_payload, vgpr_type, &low_finite_bits));
 
-  loom_value_id_t low_quiet_nan = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_const_u32(
-      context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_MOV_B32, 0x7FC0,
-      vgpr_type, &low_quiet_nan));
+  if (value_not_nan && value_not_inf) {
+    *out_lane = low_finite_bits;
+    return iree_ok_status();
+  }
 
   if (format->special_policy ==
       LOOM_SCALAR_TYPE_FP8_SPECIAL_POLICY_FINITE_NAN) {
+    if (value_not_nan) {
+      *out_lane = low_finite_bits;
+      return iree_ok_status();
+    }
+
+    loom_value_id_t low_quiet_nan = LOOM_VALUE_ID_INVALID;
+    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_const_u32(
+        context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_MOV_B32, 0x7FC0,
+        vgpr_type, &low_quiet_nan));
     loom_value_id_t low_is_nan = LOOM_VALUE_ID_INVALID;
     IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fp8_decode_cmp_u32_lit(
         context, source_op, plan, LOOM_AMDGPU_DESCRIPTOR_REF_V_CMP_EQ_I32,
@@ -543,6 +557,40 @@ iree_status_t loom_amdgpu_emit_fp8_to_bf16_lane(
         vgpr_type, out_lane);
   }
 
+  if (value_not_inf) {
+    loom_value_id_t low_quiet_nan = LOOM_VALUE_ID_INVALID;
+    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_const_u32(
+        context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_MOV_B32, 0x7FC0,
+        vgpr_type, &low_quiet_nan));
+    loom_value_id_t low_is_top_exponent = LOOM_VALUE_ID_INVALID;
+    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fp8_decode_cmp_u32_lit(
+        context, source_op, plan, LOOM_AMDGPU_DESCRIPTOR_REF_V_CMP_UGE_U32,
+        low_source_no_sign, UINT32_C(0x7C), vgpr_type, mask_type,
+        &low_is_top_exponent));
+    return loom_amdgpu_emit_fp8_decode_select_b32(
+        context, source_op, low_finite_bits, low_quiet_nan, low_is_top_exponent,
+        vgpr_type, out_lane);
+  }
+
+  if (value_not_nan) {
+    loom_value_id_t low_infinity_bits = LOOM_VALUE_ID_INVALID;
+    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_binary_immediate(
+        context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_OR_B32_LIT,
+        low_sign_bits, UINT32_C(0x7F80), vgpr_type, &low_infinity_bits));
+    loom_value_id_t low_is_infinity = LOOM_VALUE_ID_INVALID;
+    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fp8_decode_cmp_u32_lit(
+        context, source_op, plan, LOOM_AMDGPU_DESCRIPTOR_REF_V_CMP_EQ_I32,
+        low_source_no_sign, UINT32_C(0x7C), vgpr_type, mask_type,
+        &low_is_infinity));
+    return loom_amdgpu_emit_fp8_decode_select_b32(
+        context, source_op, low_finite_bits, low_infinity_bits, low_is_infinity,
+        vgpr_type, out_lane);
+  }
+
+  loom_value_id_t low_quiet_nan = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_const_u32(
+      context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_MOV_B32, 0x7FC0,
+      vgpr_type, &low_quiet_nan));
   loom_value_id_t low_infinity_bits = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_binary_immediate(
       context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_OR_B32_LIT,
