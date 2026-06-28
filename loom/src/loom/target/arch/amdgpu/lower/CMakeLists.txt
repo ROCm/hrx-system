@@ -243,6 +243,7 @@ loom_cc_library(
     loom::target::registers
     loom::util::fact_table
     loom::util::math
+    loom::util::numeric_format
   PUBLIC
 )
 endif()
