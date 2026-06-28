@@ -170,6 +170,16 @@ typedef struct id4_pipeline_plan_statistics_t {
   iree_device_size_t parameter_slab_byte_length;
   // Largest single parameter slab byte length.
   iree_device_size_t largest_parameter_slab_byte_length;
+  // Total provider source bytes consumed by parameter load steps.
+  iree_device_size_t parameter_source_byte_length;
+  // Provider source bytes consumed by direct parameter gathers.
+  iree_device_size_t parameter_direct_source_byte_length;
+  // Provider source bytes consumed by encoded parameter load steps.
+  iree_device_size_t parameter_encoded_source_byte_length;
+  // Number of direct parameter gather load steps.
+  iree_host_size_t parameter_gather_load_step_count;
+  // Number of encoded parameter load steps.
+  iree_host_size_t parameter_encode_load_step_count;
   // Total bytes across all constant slabs.
   iree_device_size_t constant_slab_byte_length;
   // Total reserved bytes across all non-parameter memory slabs.

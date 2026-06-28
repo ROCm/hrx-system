@@ -69,15 +69,25 @@ TEST(PlanTest, ReportsAggregateStatistics) {
           storage_params, /*byte_length=*/512, /*alignment=*/16,
           /*request_count=*/1, /*requests=*/&parameter_requests[1]),
   };
+  const id4_pipeline_parameter_load_source_t encoded_sources[] = {
+      id4_pipeline_parameter_load_source(
+          IREE_SV("model.fp8"), IREE_SV("layers.1.weight"),
+          ID4_PIPELINE_TENSOR_DTYPE_F8_E4M3, {/*.rank=*/2, /*.dims=*/{16, 16}},
+          /*byte_length=*/256),
+      id4_pipeline_parameter_load_source(
+          IREE_SV("model.fp8"), IREE_SV("layers.1.weight_scale"),
+          ID4_PIPELINE_TENSOR_DTYPE_F32, {/*.rank=*/1, /*.dims=*/{16}},
+          /*byte_length=*/64),
+  };
   const id4_pipeline_parameter_load_step_t parameter_load_steps[] = {
       id4_pipeline_parameter_gather_load_step(
           IREE_SV("gather.layers.0.weight"), IREE_SV("model"),
           /*target_slab_index=*/0, /*request_offset=*/0,
           /*request_count=*/1),
-      id4_pipeline_parameter_gather_load_step(
-          IREE_SV("gather.layers.1.weight"), IREE_SV("model"),
-          /*target_slab_index=*/1, /*request_offset=*/0,
-          /*request_count=*/1),
+      id4_pipeline_parameter_encode_fp8_e4m3_scaled_to_bf16_load_step(
+          IREE_SV("encode.layers.1.weight"),
+          /*source_count=*/IREE_ARRAYSIZE(encoded_sources), encoded_sources,
+          /*target_slab_index=*/1, /*request_offset=*/0),
   };
   const id4_pipeline_constant_slab_plan_t constant_slab = {
       // Human-readable slab name.
@@ -221,6 +231,11 @@ TEST(PlanTest, ReportsAggregateStatistics) {
       id4_pipeline_plan_statistics(plan_owner.get());
   EXPECT_EQ(statistics.parameter_slab_byte_length, 640u);
   EXPECT_EQ(statistics.largest_parameter_slab_byte_length, 512u);
+  EXPECT_EQ(statistics.parameter_source_byte_length, 448u);
+  EXPECT_EQ(statistics.parameter_direct_source_byte_length, 128u);
+  EXPECT_EQ(statistics.parameter_encoded_source_byte_length, 320u);
+  EXPECT_EQ(statistics.parameter_gather_load_step_count, 1u);
+  EXPECT_EQ(statistics.parameter_encode_load_step_count, 1u);
   EXPECT_EQ(statistics.constant_slab_byte_length, 64u);
   EXPECT_EQ(statistics.memory_slab_byte_length, 1024u);
   EXPECT_EQ(statistics.memory_slab_high_water_mark, 768u);

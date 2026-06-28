@@ -255,14 +255,15 @@ static void SetDitBenchmarkLabel(iree_benchmark_state_t* benchmark_state,
   const uint64_t latent_width = context.request.latent_shape.dims[0];
   const uint64_t latent_height = context.request.latent_shape.dims[1];
   const uint64_t latent_token_count = latent_width * latent_height;
-  char label[512];
+  char label[768];
   std::snprintf(
       label, sizeof(label),
       "branch=%.*s params=%.*s attention=%.*s ff=%.*s text_tokens=%" PRIu32
       " latent_tokens=%" PRIu64 " latent=%" PRIu64 "x%" PRIu64
       " param_total=%" PRIu64 "MiB param_largest=%" PRIu64
-      "MiB local_hw=%" PRIu64 "MiB boundary=%" PRIu64 "MiB kernels=%" PRIhsz
-      " dispatches=%" PRIhsz,
+      "MiB param_source=%" PRIu64 "MiB param_encoded_source=%" PRIu64
+      "MiB param_encode_steps=%" PRIhsz " local_hw=%" PRIu64
+      "MiB boundary=%" PRIu64 "MiB kernels=%" PRIhsz " dispatches=%" PRIhsz,
       static_cast<int>(branch_name.size), branch_name.data,
       static_cast<int>(parameter_format.size), parameter_format.data,
       static_cast<int>(attention_implementation.size),
@@ -272,6 +273,9 @@ static void SetDitBenchmarkLabel(iree_benchmark_state_t* benchmark_state,
       latent_token_count, latent_width, latent_height,
       CeilMiB(statistics.parameter_slab_byte_length),
       CeilMiB(statistics.largest_parameter_slab_byte_length),
+      CeilMiB(statistics.parameter_source_byte_length),
+      CeilMiB(statistics.parameter_encoded_source_byte_length),
+      statistics.parameter_encode_load_step_count,
       CeilMiB(statistics.memory_slab_high_water_mark),
       CeilMiB(statistics.boundary_tensor_byte_length), statistics.kernel_count,
       statistics.dispatch_count);

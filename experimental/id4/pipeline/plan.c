@@ -1373,6 +1373,28 @@ const id4_pipeline_diagnostic_tap_plan_t* id4_pipeline_plan_diagnostic_tap_at(
   return &plan->diagnostic_taps[index];
 }
 
+static iree_device_size_t id4_pipeline_plan_direct_load_step_source_length(
+    const id4_pipeline_plan_t* plan,
+    const id4_pipeline_parameter_load_step_t* step) {
+  const id4_pipeline_parameter_slab_plan_t* slab =
+      &plan->parameter_slabs[step->target_slab_index];
+  iree_device_size_t byte_length = 0;
+  const iree_host_size_t end = step->request_offset + step->request_count;
+  for (iree_host_size_t i = step->request_offset; i < end; ++i) {
+    byte_length += slab->requests[i].span.length;
+  }
+  return byte_length;
+}
+
+static iree_device_size_t id4_pipeline_plan_encoded_load_step_source_length(
+    const id4_pipeline_parameter_load_step_t* step) {
+  iree_device_size_t byte_length = 0;
+  for (iree_host_size_t i = 0; i < step->source_count; ++i) {
+    byte_length += step->sources[i].byte_length;
+  }
+  return byte_length;
+}
+
 id4_pipeline_plan_statistics_t id4_pipeline_plan_statistics(
     const id4_pipeline_plan_t* plan) {
   id4_pipeline_plan_statistics_t statistics;
@@ -1384,6 +1406,30 @@ id4_pipeline_plan_statistics_t id4_pipeline_plan_statistics(
     statistics.parameter_slab_byte_length += slab->byte_length;
     if (slab->byte_length > statistics.largest_parameter_slab_byte_length) {
       statistics.largest_parameter_slab_byte_length = slab->byte_length;
+    }
+  }
+  for (iree_host_size_t i = 0; i < plan->parameter_load_step_count; ++i) {
+    const id4_pipeline_parameter_load_step_t* step =
+        &plan->parameter_load_steps[i];
+    switch (step->kind) {
+      case ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_GATHER: {
+        const iree_device_size_t byte_length =
+            id4_pipeline_plan_direct_load_step_source_length(plan, step);
+        statistics.parameter_direct_source_byte_length += byte_length;
+        statistics.parameter_source_byte_length += byte_length;
+        ++statistics.parameter_gather_load_step_count;
+        break;
+      }
+      case ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_ENCODE_FP8_E4M3_SCALED_TO_BF16: {
+        const iree_device_size_t byte_length =
+            id4_pipeline_plan_encoded_load_step_source_length(step);
+        statistics.parameter_encoded_source_byte_length += byte_length;
+        statistics.parameter_source_byte_length += byte_length;
+        ++statistics.parameter_encode_load_step_count;
+        break;
+      }
+      default:
+        break;
     }
   }
   for (iree_host_size_t i = 0; i < plan->constant_slab_count; ++i) {
@@ -1807,6 +1853,8 @@ iree_status_t id4_pipeline_plan_format_json(const id4_pipeline_plan_t* plan,
                                             iree_string_builder_t* builder) {
   IREE_ASSERT_ARGUMENT(plan);
   IREE_ASSERT_ARGUMENT(builder);
+  const id4_pipeline_plan_statistics_t statistics =
+      id4_pipeline_plan_statistics(plan);
   IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "{"));
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_cstring(builder, "\"stage\":"));
@@ -1815,9 +1863,41 @@ iree_status_t id4_pipeline_plan_format_json(const id4_pipeline_plan_t* plan,
   IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
       builder,
       ",\"device_group\":{\"device_count\":%" PRIhsz
-      ",\"topology_fingerprint\":\"%08x\"},\"placements\":[",
+      ",\"topology_fingerprint\":\"%08x\"}",
       iree_hal_device_group_device_count(plan->device_group),
       id4_pipeline_plan_calculate_topology_fingerprint(plan)));
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+      builder,
+      ",\"statistics\":{\"parameter_slab_byte_length\":%" PRIu64
+      ",\"largest_parameter_slab_byte_length\":%" PRIu64
+      ",\"parameter_source_byte_length\":%" PRIu64
+      ",\"parameter_direct_source_byte_length\":%" PRIu64
+      ",\"parameter_encoded_source_byte_length\":%" PRIu64
+      ",\"parameter_gather_load_step_count\":%" PRIhsz
+      ",\"parameter_encode_load_step_count\":%" PRIhsz
+      ",\"constant_slab_byte_length\":%" PRIu64
+      ",\"memory_slab_byte_length\":%" PRIu64
+      ",\"memory_slab_high_water_mark\":%" PRIu64
+      ",\"boundary_tensor_byte_length\":%" PRIu64
+      ",\"diagnostic_tap_byte_length\":%" PRIu64 ",\"kernel_count\":%" PRIhsz
+      ",\"region_count\":%" PRIhsz ",\"operation_count\":%" PRIhsz
+      ",\"dispatch_count\":%" PRIhsz "}",
+      (uint64_t)statistics.parameter_slab_byte_length,
+      (uint64_t)statistics.largest_parameter_slab_byte_length,
+      (uint64_t)statistics.parameter_source_byte_length,
+      (uint64_t)statistics.parameter_direct_source_byte_length,
+      (uint64_t)statistics.parameter_encoded_source_byte_length,
+      statistics.parameter_gather_load_step_count,
+      statistics.parameter_encode_load_step_count,
+      (uint64_t)statistics.constant_slab_byte_length,
+      (uint64_t)statistics.memory_slab_byte_length,
+      (uint64_t)statistics.memory_slab_high_water_mark,
+      (uint64_t)statistics.boundary_tensor_byte_length,
+      (uint64_t)statistics.diagnostic_tap_byte_length, statistics.kernel_count,
+      statistics.region_count, statistics.operation_count,
+      statistics.dispatch_count));
+  IREE_RETURN_IF_ERROR(
+      iree_string_builder_append_cstring(builder, ",\"placements\":["));
   for (iree_host_size_t i = 0; i < plan->placement_count; ++i) {
     const id4_pipeline_device_placement_t* placement = &plan->placements[i];
     if (i != 0) {
