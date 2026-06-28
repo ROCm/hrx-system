@@ -9,6 +9,7 @@
 enum {
   ID4_IDEOGRAM4_DIT_ATTENTION_WMMA_TOKEN_BLOCK = 16,
   ID4_IDEOGRAM4_DIT_BLOCKED_ATTENTION_QUERY_TOKEN_COUNT = 512,
+  ID4_IDEOGRAM4_DIT_ONLINE_ATTENTION_QUERY_TOKEN_COUNT = 1024,
   ID4_IDEOGRAM4_DIT_COMPACT_RHS_TILE_INPUT_BLOCK = 16,
   ID4_IDEOGRAM4_DIT_COMPACT_RHS_TILE_OUTPUT_BLOCK = 64,
 };
@@ -494,9 +495,9 @@ static iree_status_t id4_ideogram4_dit_program_dispatch_online_wmma_attention(
   for (uint32_t query_block_offset = 0;
        query_block_offset < bf16_token_capacity;
        query_block_offset +=
-       ID4_IDEOGRAM4_DIT_BLOCKED_ATTENTION_QUERY_TOKEN_COUNT) {
+       ID4_IDEOGRAM4_DIT_ONLINE_ATTENTION_QUERY_TOKEN_COUNT) {
     const uint32_t query_block_token_count = id4_ideogram4_dit_program_min_u32(
-        ID4_IDEOGRAM4_DIT_BLOCKED_ATTENTION_QUERY_TOKEN_COUNT,
+        ID4_IDEOGRAM4_DIT_ONLINE_ATTENTION_QUERY_TOKEN_COUNT,
         bf16_token_capacity - query_block_offset);
     char suffix_buffer[ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
     char dispatch_name_buffer[ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
