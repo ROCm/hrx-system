@@ -23,7 +23,7 @@ IREE_FLAG(string, dit_parameter_format, "fp8_e4m3",
           "DiT parameter format: bf16 or fp8_e4m3.");
 IREE_FLAG(string, dit_activation_format, "bf16_linear_input",
           "DiT activation format: bf16_linear_input or f32_canonical.");
-IREE_FLAG(string, dit_attention_implementation, "materialized_wmma",
+IREE_FLAG(string, dit_attention_implementation, "blocked_wmma",
           "DiT attention implementation: streaming, materialized_wmma, or "
           "blocked_wmma.");
 IREE_FLAG(string, dit_feed_forward_implementation, "pytorch_parity",
@@ -237,7 +237,7 @@ static id4_ideogram4_generation_plan_policy_t MakeGenerationPolicy() {
   std::memset(&policy, 0, sizeof(policy));
   policy.structure_size = sizeof(policy);
   policy.dit_attention_implementation =
-      ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_MATERIALIZED_WMMA;
+      ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_BLOCKED_WMMA;
   policy.dit_feed_forward_implementation =
       ID4_IDEOGRAM4_DIT_FEED_FORWARD_IMPLEMENTATION_PYTORCH_PARITY;
   policy.vae_tiling.mode = ID4_VAE_TILING_MODE_DISABLED;

@@ -30,7 +30,7 @@ IREE_FLAG(string, id4_plan_output_dir, "",
           "Optional directory receiving benchmark DiT stage plan JSON files.");
 IREE_FLAG(string, dit_parameter_format, "fp8_e4m3",
           "DiT parameter format: bf16 or fp8_e4m3.");
-IREE_FLAG(string, dit_attention_implementation, "materialized_wmma",
+IREE_FLAG(string, dit_attention_implementation, "blocked_wmma",
           "DiT attention implementation: streaming, materialized_wmma, or "
           "blocked_wmma.");
 IREE_FLAG(string, dit_feed_forward_implementation, "pytorch_parity",
@@ -88,7 +88,7 @@ struct DitBenchmarkContext {
       ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_INVALID;
   // Attention implementation selected for plan and issue benchmarks.
   id4_ideogram4_dit_attention_implementation_t attention_implementation =
-      ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_MATERIALIZED_WMMA;
+      ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_BLOCKED_WMMA;
   // Feed-forward implementation selected for plan and issue benchmarks.
   id4_ideogram4_dit_feed_forward_implementation_t feed_forward_implementation =
       ID4_IDEOGRAM4_DIT_FEED_FORWARD_IMPLEMENTATION_PYTORCH_PARITY;
