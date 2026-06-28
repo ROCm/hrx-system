@@ -69,9 +69,13 @@ struct GenerationPrompt {
 
 struct GenerationBenchmarkPlanStatistics {
   // Total parameter slab bytes across coarse stage plans.
-  iree_device_size_t parameter_slab_byte_length;
-  // Total local slab high-water bytes across coarse stage plans.
-  iree_device_size_t local_slab_high_water_mark;
+  iree_device_size_t total_parameter_slab_byte_length;
+  // Largest individual parameter slab bytes across coarse stage plans.
+  iree_device_size_t largest_parameter_slab_byte_length;
+  // Sum of local slab high-water bytes across coarse stage plans.
+  iree_device_size_t total_local_slab_high_water_mark;
+  // Largest local slab high-water bytes across coarse stage plans.
+  iree_device_size_t largest_local_slab_high_water_mark;
   // Total boundary tensor bytes across coarse stage plans.
   iree_device_size_t boundary_tensor_byte_length;
   // Total planned kernel specializations across coarse stage plans.
@@ -305,10 +309,20 @@ static iree_status_t AccumulateGenerationBenchmarkPlanStatistics(
         plan, i, &stage_key, &stage_plan));
     id4_pipeline_plan_statistics_t stage_statistics =
         id4_pipeline_plan_statistics(stage_plan);
-    out_statistics->parameter_slab_byte_length +=
+    out_statistics->total_parameter_slab_byte_length +=
         stage_statistics.parameter_slab_byte_length;
-    out_statistics->local_slab_high_water_mark +=
+    if (stage_statistics.largest_parameter_slab_byte_length >
+        out_statistics->largest_parameter_slab_byte_length) {
+      out_statistics->largest_parameter_slab_byte_length =
+          stage_statistics.largest_parameter_slab_byte_length;
+    }
+    out_statistics->total_local_slab_high_water_mark +=
         stage_statistics.memory_slab_high_water_mark;
+    if (stage_statistics.memory_slab_high_water_mark >
+        out_statistics->largest_local_slab_high_water_mark) {
+      out_statistics->largest_local_slab_high_water_mark =
+          stage_statistics.memory_slab_high_water_mark;
+    }
     out_statistics->boundary_tensor_byte_length +=
         stage_statistics.boundary_tensor_byte_length;
     out_statistics->kernel_count += stage_statistics.kernel_count;
@@ -679,8 +693,11 @@ static void SetGenerationBenchmarkLabel(
       "tokens=%" PRIu32 " latent=%" PRIu64 "x%" PRIu64 " steps=%" PRIu32
       " image=%" PRIu64 "x%" PRIu64
       " params=%.*s activation=%.*s attention=%.*s ff=%.*s"
-      " plan_param=%" PRIu64 "MiB local_hw=%" PRIu64 "MiB boundary=%" PRIu64
-      "MiB kernels=%" PRIhsz " dispatches=%" PRIhsz,
+      " param_total=%" PRIu64 "MiB param_largest=%" PRIu64
+      "MiB"
+      " local_hw_total=%" PRIu64 "MiB local_hw_largest=%" PRIu64
+      "MiB"
+      " boundary=%" PRIu64 "MiB kernels=%" PRIhsz " dispatches=%" PRIhsz,
       summary.qwen_token_count, summary.diffusion_latent_shape.dims[0],
       summary.diffusion_latent_shape.dims[1], summary.denoise_step_count,
       summary.decoded_image_shape.dims[0], summary.decoded_image_shape.dims[1],
@@ -690,8 +707,10 @@ static void SetGenerationBenchmarkLabel(
       attention_implementation.data,
       static_cast<int>(feed_forward_implementation.size),
       feed_forward_implementation.data,
-      CeilMiB(statistics.parameter_slab_byte_length),
-      CeilMiB(statistics.local_slab_high_water_mark),
+      CeilMiB(statistics.total_parameter_slab_byte_length),
+      CeilMiB(statistics.largest_parameter_slab_byte_length),
+      CeilMiB(statistics.total_local_slab_high_water_mark),
+      CeilMiB(statistics.largest_local_slab_high_water_mark),
       CeilMiB(statistics.boundary_tensor_byte_length), statistics.kernel_count,
       statistics.dispatch_count);
   iree_benchmark_set_label(benchmark_state, label);
