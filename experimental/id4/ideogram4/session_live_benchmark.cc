@@ -6,10 +6,12 @@
 
 #include <cstdio>
 #include <cstring>
+#include <string>
 
 #include "experimental/id4/ideogram4/session.h"
 #include "experimental/id4/stages/hal_integration_util.h"
 #include "experimental/id4/stages/ideogram4_dit_parameters.h"
+#include "experimental/id4/tooling/filesystem.h"
 #include "experimental/id4/tooling/runtime.h"
 #include "iree/base/tooling/flags.h"
 #include "iree/io/file_contents.h"
@@ -19,6 +21,14 @@
 
 IREE_FLAG(string, id4_tokenizer, "",
           "Hugging Face tokenizer JSON used by live generation benchmarks.");
+IREE_FLAG(string, id4_request_json, "",
+          "Full JSON prompt/configuration payload for the custom generation "
+          "benchmark.");
+IREE_FLAG(string, id4_request_json_file, "",
+          "File containing the JSON prompt/configuration payload for the "
+          "custom generation benchmark.");
+IREE_FLAG(string, id4_plan_output_dir, "",
+          "Optional directory receiving generation plan JSON files.");
 IREE_FLAG(string, dit_parameter_format, "fp8_e4m3",
           "DiT parameter format: bf16 or fp8_e4m3.");
 IREE_FLAG(string, dit_activation_format, "bf16_linear_input",
@@ -74,6 +84,8 @@ static constexpr char kStructuredPrompt128[] =
     "\"denoise_steps\":1,\"seed\":20260625,\"guidance_scale\":3.5}}";
 
 struct GenerationPrompt {
+  // Stable benchmark label and plan dump stem for this prompt bucket.
+  iree_string_view_t label;
   // Full generation request JSON passed through the production parser.
   iree_string_view_t json;
 };
@@ -141,19 +153,48 @@ enum class GenerationIssueMode {
   kPhases,
 };
 
+enum class CustomRequestSource {
+  // No custom request source was provided.
+  kNone,
+  // The request JSON is stored directly in --id4_request_json.
+  kInlineJson,
+  // The request JSON is stored in the file named by --id4_request_json_file.
+  kFile,
+};
+
+enum class PromptBenchmarkDisposition {
+  // The benchmark row has enough configuration to execute.
+  kRun,
+  // The benchmark row is intentionally inactive for this invocation.
+  kSkip,
+};
+
 static const GenerationPrompt kShortPrompt = {
+    // Stable short prompt bucket label.
+    IREE_SV("short128"),
     // Request JSON for the short prompt bucket.
     iree_make_cstring_view(kShortPrompt128),
 };
 
 static const GenerationPrompt kMediumPrompt = {
+    // Stable medium prompt bucket label.
+    IREE_SV("medium128"),
     // Request JSON for the medium prompt bucket.
     iree_make_cstring_view(kMediumPrompt128),
 };
 
 static const GenerationPrompt kStructuredPrompt = {
+    // Stable structured prompt bucket label.
+    IREE_SV("structured128"),
     // Request JSON for the structured prompt bucket.
     iree_make_cstring_view(kStructuredPrompt128),
+};
+
+static const GenerationPrompt kCustomPrompt = {
+    // Stable custom prompt bucket label.
+    IREE_SV("custom"),
+    // Empty JSON selects --id4_request_json or --id4_request_json_file.
+    iree_string_view_empty(),
 };
 
 using GenerationPlanRef =
@@ -556,6 +597,133 @@ static iree_status_t ParseRequest(iree_string_view_t json,
       json, iree_allocator_system(), &out_request->request));
   out_request->initialized = true;
   return iree_ok_status();
+}
+
+static iree_status_t SelectCustomRequestSource(
+    CustomRequestSource* out_source) {
+  IREE_ASSERT_ARGUMENT(out_source);
+  *out_source = CustomRequestSource::kNone;
+  const iree_string_view_t inline_json =
+      iree_make_cstring_view(FLAG_id4_request_json);
+  const iree_string_view_t file_path =
+      iree_make_cstring_view(FLAG_id4_request_json_file);
+  const bool has_inline_json = !iree_string_view_is_empty(inline_json);
+  const bool has_file_path = !iree_string_view_is_empty(file_path);
+  if (has_inline_json && has_file_path) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "custom generation benchmark requires exactly one of "
+        "--id4_request_json or --id4_request_json_file");
+  }
+  if (has_inline_json) {
+    *out_source = CustomRequestSource::kInlineJson;
+  } else if (has_file_path) {
+    *out_source = CustomRequestSource::kFile;
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t LoadCustomRequestJson(std::string* out_json) {
+  IREE_ASSERT_ARGUMENT(out_json);
+  out_json->clear();
+
+  CustomRequestSource source = CustomRequestSource::kNone;
+  IREE_RETURN_IF_ERROR(SelectCustomRequestSource(&source));
+  if (source == CustomRequestSource::kNone) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "custom generation benchmark requires exactly one of "
+        "--id4_request_json or --id4_request_json_file");
+  }
+  if (source == CustomRequestSource::kInlineJson) {
+    const iree_string_view_t inline_json =
+        iree_make_cstring_view(FLAG_id4_request_json);
+    out_json->assign(inline_json.data, inline_json.size);
+    return iree_ok_status();
+  }
+
+  const iree_string_view_t file_path =
+      iree_make_cstring_view(FLAG_id4_request_json_file);
+  iree_io_file_contents_t* file_contents = nullptr;
+  iree_status_t status =
+      iree_io_file_contents_map(file_path, IREE_IO_FILE_ACCESS_READ,
+                                iree_allocator_system(), &file_contents);
+  if (iree_status_is_ok(status)) {
+    out_json->assign(
+        reinterpret_cast<const char*>(file_contents->const_buffer.data),
+        file_contents->const_buffer.data_length);
+  }
+  iree_io_file_contents_free(file_contents);
+  return status;
+}
+
+static iree_status_t ValidatePromptBenchmarkConfiguration(
+    iree_benchmark_state_t* benchmark_state, const GenerationPrompt& prompt,
+    PromptBenchmarkDisposition* out_disposition) {
+  IREE_ASSERT_ARGUMENT(out_disposition);
+  *out_disposition = PromptBenchmarkDisposition::kRun;
+  if (!iree_string_view_is_empty(prompt.json)) return iree_ok_status();
+
+  CustomRequestSource source = CustomRequestSource::kNone;
+  IREE_RETURN_IF_ERROR(SelectCustomRequestSource(&source));
+  if (source == CustomRequestSource::kNone) {
+    iree_benchmark_skip(benchmark_state,
+                        "custom benchmark requires --id4_request_json or "
+                        "--id4_request_json_file");
+    *out_disposition = PromptBenchmarkDisposition::kSkip;
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t ParsePromptRequest(const GenerationPrompt& prompt,
+                                        ParsedRequest* out_request) {
+  IREE_ASSERT_ARGUMENT(out_request);
+  if (!iree_string_view_is_empty(prompt.json)) {
+    return ParseRequest(prompt.json, out_request);
+  }
+
+  std::string json;
+  IREE_RETURN_IF_ERROR(LoadCustomRequestJson(&json));
+  return ParseRequest(iree_make_string_view(json.data(), json.size()),
+                      out_request);
+}
+
+static iree_status_t WriteGenerationPlanJsonIfRequested(
+    iree_string_view_t prompt_label,
+    const id4_ideogram4_generation_plan_t* plan) {
+  IREE_ASSERT_ARGUMENT(plan);
+  const iree_string_view_t output_directory =
+      iree_make_cstring_view(FLAG_id4_plan_output_dir);
+  if (iree_string_view_is_empty(output_directory)) return iree_ok_status();
+
+  iree_string_builder_t file_name_builder;
+  iree_string_builder_initialize(iree_allocator_system(), &file_name_builder);
+  iree_string_builder_t json_builder;
+  iree_string_builder_initialize(iree_allocator_system(), &json_builder);
+  iree_string_view_t output_path = iree_string_view_empty();
+
+  iree_status_t status = iree_string_builder_append_format(
+      &file_name_builder, "%.*s.json", static_cast<int>(prompt_label.size),
+      prompt_label.data);
+  if (iree_status_is_ok(status)) {
+    status = id4_tooling_format_child_path(
+        output_directory, iree_string_builder_view(&file_name_builder),
+        iree_allocator_system(), &output_path);
+  }
+  if (iree_status_is_ok(status)) {
+    status = id4_ideogram4_generation_plan_format_json(plan, &json_builder);
+  }
+  if (iree_status_is_ok(status)) {
+    iree_string_view_t json = iree_string_builder_view(&json_builder);
+    status = iree_io_file_contents_write(
+        output_path, iree_make_const_byte_span(json.data, json.size),
+        iree_allocator_system());
+  }
+
+  id4_tooling_free_path(&output_path, iree_allocator_system());
+  iree_string_builder_deinitialize(&json_builder);
+  iree_string_builder_deinitialize(&file_name_builder);
+  return status;
 }
 
 static iree_status_t LoadTokenizerFromFlag(iree_tokenizer_t** out_tokenizer) {
@@ -1131,6 +1299,7 @@ static iree_status_t AppendGenerationBenchmarkStageLabels(
 static iree_status_t SetGenerationBenchmarkLabel(
     iree_benchmark_state_t* benchmark_state,
     const LiveGenerationBenchmarkContext& context,
+    iree_string_view_t prompt_label,
     const id4_ideogram4_generation_plan_summary_t& summary,
     const GenerationBenchmarkPlanStatistics& statistics,
     const GenerationBenchmarkTimingStatistics& timing,
@@ -1154,8 +1323,8 @@ static iree_status_t SetGenerationBenchmarkLabel(
   iree_string_builder_initialize(iree_allocator_system(), &label_builder);
   iree_status_t status = iree_string_builder_append_format(
       &label_builder,
-      "tokens=%" PRIu32 " latent=%" PRIu64 "x%" PRIu64 " steps=%" PRIu32
-      " image=%" PRIu64 "x%" PRIu64
+      "prompt=%.*s tokens=%" PRIu32 " latent=%" PRIu64 "x%" PRIu64
+      " steps=%" PRIu32 " image=%" PRIu64 "x%" PRIu64
       " residency=%.*s issue=%.*s resident_phase_mask=0x%08x"
       " params=%.*s activation=%.*s weights=%.*s attention=%.*s ff=%.*s"
       " param_total=%" PRIu64 "MiB param_largest=%" PRIu64
@@ -1163,6 +1332,7 @@ static iree_status_t SetGenerationBenchmarkLabel(
       " local_hw_total=%" PRIu64 "MiB local_hw_largest=%" PRIu64
       "MiB"
       " boundary=%" PRIu64 "MiB kernels=%" PRIhsz " dispatches=%" PRIhsz,
+      static_cast<int>(prompt_label.size), prompt_label.data,
       summary.qwen_token_count, summary.diffusion_latent_shape.dims[0],
       summary.diffusion_latent_shape.dims[1], summary.denoise_step_count,
       summary.decoded_image_shape.dims[0], summary.decoded_image_shape.dims[1],
@@ -1203,12 +1373,19 @@ static iree_status_t RunGenerationEndToEndBenchmark(
     iree_benchmark_state_t* benchmark_state) {
   const GenerationPrompt* prompt =
       static_cast<const GenerationPrompt*>(benchmark_def->user_data);
+  PromptBenchmarkDisposition benchmark_disposition =
+      PromptBenchmarkDisposition::kRun;
+  IREE_RETURN_IF_ERROR(ValidatePromptBenchmarkConfiguration(
+      benchmark_state, *prompt, &benchmark_disposition));
+  if (benchmark_disposition == PromptBenchmarkDisposition::kSkip) {
+    return iree_ok_status();
+  }
 
   LiveGenerationBenchmarkContext context;
   IREE_RETURN_IF_ERROR(CreateLiveGenerationBenchmarkContext(&context));
 
   ParsedRequest request;
-  IREE_RETURN_IF_ERROR(ParseRequest(prompt->json, &request));
+  IREE_RETURN_IF_ERROR(ParsePromptRequest(*prompt, &request));
 
   id4_pipeline_diagnostics_sink_t diagnostics_sink;
   id4_pipeline_diagnostics_sink_initialize_ignore(&diagnostics_sink);
@@ -1234,6 +1411,7 @@ static iree_status_t RunGenerationEndToEndBenchmark(
   std::memset(&last_statistics, 0, sizeof(last_statistics));
   GenerationBenchmarkTimingStatistics timing_total;
   std::memset(&timing_total, 0, sizeof(timing_total));
+  bool plan_json_written = false;
   const iree_hal_command_buffer_mode_t profiled_dispatch_metadata_mode =
       IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_PROFILE_METADATA |
       IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_DISPATCH_METADATA;
@@ -1275,6 +1453,12 @@ static iree_status_t RunGenerationEndToEndBenchmark(
       last_statistics = statistics;
     }
     iteration_timing.plan_ns += iree_time_now() - phase_start_time_ns;
+    if (iree_status_is_ok(status) && !plan_json_written) {
+      iree_benchmark_pause_timing(benchmark_state);
+      status = WriteGenerationPlanJsonIfRequested(prompt->label, plan.get());
+      iree_benchmark_resume_timing(benchmark_state);
+      plan_json_written = iree_status_is_ok(status);
+    }
 
     ++prepare_value;
     GenerationBundleRef bundle;
@@ -1338,8 +1522,8 @@ static iree_status_t RunGenerationEndToEndBenchmark(
   }
   IREE_RETURN_IF_ERROR(status);
   IREE_RETURN_IF_ERROR(SetGenerationBenchmarkLabel(
-      benchmark_state, context, last_summary, last_statistics, timing_total,
-      iteration_count));
+      benchmark_state, context, prompt->label, last_summary, last_statistics,
+      timing_total, iteration_count));
   iree_benchmark_set_items_processed(
       benchmark_state, static_cast<int64_t>(iteration_count * token_count));
   return iree_ok_status();
@@ -1374,5 +1558,10 @@ static const iree_benchmark_def_t*
         IREE_ATTRIBUTE_UNUSED = RegisterGenerationBenchmark(
             IREE_SV("BM_Ideogram4SessionGenerationEndToEnd/structured128"),
             &kStructuredPrompt);
+static const iree_benchmark_def_t*
+    BM_Ideogram4SessionGenerationEndToEndCustom_registration
+        IREE_ATTRIBUTE_UNUSED = RegisterGenerationBenchmark(
+            IREE_SV("BM_Ideogram4SessionGenerationEndToEnd/custom"),
+            &kCustomPrompt);
 
 }  // namespace

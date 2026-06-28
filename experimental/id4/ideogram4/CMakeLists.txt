@@ -112,6 +112,7 @@ iree_cc_binary_benchmark(
     iree::base::tooling::flags
     iree::experimental::id4::stages::hal_integration_util
     iree::experimental::id4::stages::ideogram4_dit_parameters
+    iree::experimental::id4::tooling::filesystem
     iree::experimental::id4::tooling::runtime
     iree::hal
     iree::io::file_handle

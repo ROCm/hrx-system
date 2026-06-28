@@ -102,6 +102,7 @@ iree_runtime_cc_benchmark(
         ":session",
         "//experimental/id4/stages:hal_integration_util",
         "//experimental/id4/stages:ideogram4_dit_parameters",
+        "//experimental/id4/tooling:filesystem",
         "//experimental/id4/tooling:runtime",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/tooling:flags",
