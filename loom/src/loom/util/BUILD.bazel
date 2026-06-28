@@ -82,9 +82,21 @@ loom_cc_library(
 
 loom_cc_library(
     name = "numeric_format",
+    srcs = ["numeric_format.c"],
     hdrs = ["numeric_format.h"],
     deps = [
+        ":math",
         "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "numeric_format_test",
+    srcs = ["numeric_format_test.cc"],
+    deps = [
+        ":numeric_format",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 

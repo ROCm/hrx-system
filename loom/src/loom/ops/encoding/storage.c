@@ -15,6 +15,7 @@
 #include "loom/ops/encoding/params.h"
 #include "loom/ops/encoding/roles.h"
 #include "loom/util/fact_table.h"
+#include "loom/util/numeric_format.h"
 
 static iree_string_view_t loom_encoding_physical_storage_name(void) {
   return IREE_SV("physical_storage");
@@ -686,10 +687,8 @@ bool loom_encoding_query_type_storage_content_facts(
     out_facts->flags |= LOOM_VALUE_FACT_NOT_NAN | LOOM_VALUE_FACT_NOT_INF |
                         LOOM_VALUE_FACT_FINITE;
   }
-  if (iree_any_bit_set(storage_schema.encoded_operand.element_format,
-                       LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3FN |
-                           LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3FNUZ |
-                           LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E5M2FNUZ)) {
+  if (loom_numeric_format_is_finite_only(
+          storage_schema.encoded_operand.element_format)) {
     out_facts->flags |= LOOM_VALUE_FACT_NOT_INF;
   }
   if (iree_any_bit_set(storage_schema.encoded_operand.rounding_policy,

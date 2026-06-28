@@ -15,6 +15,10 @@
 
 #include "iree/base/api.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 // Numeric format bit values use macros because C enums cannot portably
 // represent values wider than int.
 typedef uint64_t loom_value_fact_numeric_format_bits_t;
@@ -94,5 +98,104 @@ typedef uint64_t loom_value_fact_numeric_format_bits_t;
    LOOM_VALUE_FACT_NUMERIC_FORMAT_QUANT_I4)
 
 typedef uint64_t loom_value_fact_numeric_format_flags_t;
+
+typedef enum loom_numeric_format_kind_e {
+  // Unknown or uninitialized numeric format.
+  LOOM_NUMERIC_FORMAT_KIND_UNKNOWN = 0,
+  // Signed integer payload.
+  LOOM_NUMERIC_FORMAT_KIND_SIGNED_INTEGER = 1,
+  // Unsigned integer payload.
+  LOOM_NUMERIC_FORMAT_KIND_UNSIGNED_INTEGER = 2,
+  // Floating-point payload.
+  LOOM_NUMERIC_FORMAT_KIND_FLOAT = 3,
+  // Quantized signed integer payload.
+  LOOM_NUMERIC_FORMAT_KIND_QUANTIZED_SIGNED_INTEGER = 4,
+  // Codebook lookup index payload.
+  LOOM_NUMERIC_FORMAT_KIND_CODEBOOK_INDEX = 5,
+  // Ternary payload.
+  LOOM_NUMERIC_FORMAT_KIND_TERNARY = 6,
+  // Sign-only payload.
+  LOOM_NUMERIC_FORMAT_KIND_SIGN_BIT = 7,
+} loom_numeric_format_kind_t;
+
+typedef enum loom_numeric_float_family_e {
+  // Not a floating-point format.
+  LOOM_NUMERIC_FLOAT_FAMILY_NONE = 0,
+  // IEEE-like binary floating-point format.
+  LOOM_NUMERIC_FLOAT_FAMILY_IEEE = 1,
+  // BF16/bfloat-style floating-point format.
+  LOOM_NUMERIC_FLOAT_FAMILY_BFLOAT = 2,
+  // FP8 E4M3-style floating-point format.
+  LOOM_NUMERIC_FLOAT_FAMILY_FP8 = 3,
+  // BF8/E5M2-style floating-point format.
+  LOOM_NUMERIC_FLOAT_FAMILY_BF8 = 4,
+  // FP8 E8M0 exponent-only floating-point format.
+  LOOM_NUMERIC_FLOAT_FAMILY_F8_E8M0 = 5,
+  // FP6-style floating-point format.
+  LOOM_NUMERIC_FLOAT_FAMILY_FP6 = 6,
+  // BF6-style floating-point format.
+  LOOM_NUMERIC_FLOAT_FAMILY_BF6 = 7,
+  // FP4-style floating-point format.
+  LOOM_NUMERIC_FLOAT_FAMILY_FP4 = 8,
+} loom_numeric_float_family_t;
+
+typedef enum loom_numeric_format_flag_bits_e {
+  // The format encodes a sign bit.
+  LOOM_NUMERIC_FORMAT_FLAG_SIGNED = 1u << 0,
+  // The format has at least one NaN encoding.
+  LOOM_NUMERIC_FORMAT_FLAG_HAS_NAN = 1u << 1,
+  // The format has at least one infinity encoding.
+  LOOM_NUMERIC_FORMAT_FLAG_HAS_INFINITY = 1u << 2,
+  // The format has no infinity encodings.
+  LOOM_NUMERIC_FORMAT_FLAG_FINITE_ONLY = 1u << 3,
+  // The format does not encode negative zero.
+  LOOM_NUMERIC_FORMAT_FLAG_UNSIGNED_ZERO = 1u << 4,
+  // Matrix/packed-dot contracts need payload format selector facts for this
+  // encoded element format.
+  LOOM_NUMERIC_FORMAT_FLAG_ENCODED_PAYLOAD_SELECTOR = 1u << 5,
+} loom_numeric_format_flag_bits_t;
+
+// Bitset of loom_numeric_format_flag_bits_t values.
+typedef uint32_t loom_numeric_format_flags_t;
+
+typedef struct loom_numeric_format_info_t {
+  // Single-bit numeric-format fact represented by this row.
+  loom_value_fact_numeric_format_flags_t format;
+
+  // Broad semantic payload category.
+  loom_numeric_format_kind_t kind;
+
+  // Floating-point family, or NONE for non-floating-point formats.
+  loom_numeric_float_family_t float_family;
+
+  // Encoded payload bit count.
+  uint8_t storage_bit_count;
+
+  // Encoded exponent bit count for floating-point formats.
+  uint8_t exponent_bit_count;
+
+  // Encoded mantissa bit count for floating-point formats.
+  uint8_t mantissa_bit_count;
+
+  // Special-value and contract behavior flags.
+  loom_numeric_format_flags_t flags;
+} loom_numeric_format_info_t;
+
+// Returns metadata for a single numeric-format fact bit.
+bool loom_numeric_format_info(loom_value_fact_numeric_format_flags_t format,
+                              const loom_numeric_format_info_t** out_info);
+
+// Returns true when the format is a single known finite-only format.
+bool loom_numeric_format_is_finite_only(
+    loom_value_fact_numeric_format_flags_t format);
+
+// Returns true when encoded matrix/dot payloads need selector facts for this
+// format.
+bool loom_numeric_format_needs_encoded_payload_selector(
+    loom_value_fact_numeric_format_flags_t format);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif  // LOOM_UTIL_NUMERIC_FORMAT_H_

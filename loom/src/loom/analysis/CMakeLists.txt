@@ -390,6 +390,7 @@ loom_cc_library(
     iree::base
     loom::ops::encoding
     loom::util::fact_table
+    loom::util::numeric_format
   PUBLIC
 )
 

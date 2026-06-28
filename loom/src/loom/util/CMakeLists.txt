@@ -95,9 +95,23 @@ loom_cc_library(
     numeric_format
   HDRS
     "numeric_format.h"
+  SRCS
+    "numeric_format.c"
   DEPS
+    ::math
     iree::base
   PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    numeric_format_test
+  SRCS
+    "numeric_format_test.cc"
+  DEPS
+    ::numeric_format
+    iree::testing::gtest
+    iree::testing::gtest_main
 )
 
 loom_cc_test(
