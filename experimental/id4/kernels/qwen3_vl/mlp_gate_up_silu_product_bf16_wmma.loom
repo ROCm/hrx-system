@@ -66,10 +66,22 @@ kernel.def target(@id4_gfx1100) export("id4_qwen3_vl_mlp_gate_up_silu_product_bf
     %next3 = vector.mma %lhs, %up_rhs1, %acc3 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
     scf.yield %next0, %next1, %next2, %next3 : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>
   }
-  %gate0_silu = vector.siluf %gate0 : vector<8xf32>
-  %gate1_silu = vector.siluf %gate1 : vector<8xf32>
-  %product0 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %gate0_silu, %up0 : vector<8xf32>
-  %product1 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %gate1_silu, %up1 : vector<8xf32>
+  %gate0_bf16 = vector.fptrunc %gate0 : vector<8xf32> to vector<8xbf16>
+  %gate1_bf16 = vector.fptrunc %gate1 : vector<8xf32> to vector<8xbf16>
+  %gate0_rounded = vector.extf %gate0_bf16 : vector<8xbf16> to vector<8xf32>
+  %gate1_rounded = vector.extf %gate1_bf16 : vector<8xbf16> to vector<8xf32>
+  %up0_bf16 = vector.fptrunc %up0 : vector<8xf32> to vector<8xbf16>
+  %up1_bf16 = vector.fptrunc %up1 : vector<8xf32> to vector<8xbf16>
+  %up0_rounded = vector.extf %up0_bf16 : vector<8xbf16> to vector<8xf32>
+  %up1_rounded = vector.extf %up1_bf16 : vector<8xbf16> to vector<8xf32>
+  %gate0_silu = vector.siluf %gate0_rounded : vector<8xf32>
+  %gate1_silu = vector.siluf %gate1_rounded : vector<8xf32>
+  %gate0_silu_bf16 = vector.fptrunc %gate0_silu : vector<8xf32> to vector<8xbf16>
+  %gate1_silu_bf16 = vector.fptrunc %gate1_silu : vector<8xf32> to vector<8xbf16>
+  %gate0_silu_rounded = vector.extf %gate0_silu_bf16 : vector<8xbf16> to vector<8xf32>
+  %gate1_silu_rounded = vector.extf %gate1_silu_bf16 : vector<8xbf16> to vector<8xf32>
+  %product0 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %gate0_silu_rounded, %up0_rounded : vector<8xf32>
+  %product1 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %gate1_silu_rounded, %up1_rounded : vector<8xf32>
   vector.fragment.store<result> %product0, %output_view[%token_origin, %row_origin0] shape [%m, %n] : vector<8xf32>, view<[%dispatch_token_count]x[%intermediate_size]xbf16, #dense>
   vector.fragment.store<result> %product1, %output_view[%token_origin, %row_origin1] shape [%m, %n] : vector<8xf32>, view<[%dispatch_token_count]x[%intermediate_size]xbf16, #dense>
   kernel.return
@@ -145,14 +157,38 @@ kernel.def target(@id4_gfx1100) export("id4_qwen3_vl_mlp_gate_up_silu_product_bf
     %next31 = vector.mma %lhs1, %up_rhs1, %acc31 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
     scf.yield %next00, %next01, %next10, %next11, %next20, %next21, %next30, %next31 : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>
   }
-  %gate00_silu = vector.siluf %gate00 : vector<8xf32>
-  %gate01_silu = vector.siluf %gate01 : vector<8xf32>
-  %gate10_silu = vector.siluf %gate10 : vector<8xf32>
-  %gate11_silu = vector.siluf %gate11 : vector<8xf32>
-  %product00 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %gate00_silu, %up00 : vector<8xf32>
-  %product01 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %gate01_silu, %up01 : vector<8xf32>
-  %product10 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %gate10_silu, %up10 : vector<8xf32>
-  %product11 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %gate11_silu, %up11 : vector<8xf32>
+  %gate00_bf16 = vector.fptrunc %gate00 : vector<8xf32> to vector<8xbf16>
+  %gate01_bf16 = vector.fptrunc %gate01 : vector<8xf32> to vector<8xbf16>
+  %gate10_bf16 = vector.fptrunc %gate10 : vector<8xf32> to vector<8xbf16>
+  %gate11_bf16 = vector.fptrunc %gate11 : vector<8xf32> to vector<8xbf16>
+  %gate00_rounded = vector.extf %gate00_bf16 : vector<8xbf16> to vector<8xf32>
+  %gate01_rounded = vector.extf %gate01_bf16 : vector<8xbf16> to vector<8xf32>
+  %gate10_rounded = vector.extf %gate10_bf16 : vector<8xbf16> to vector<8xf32>
+  %gate11_rounded = vector.extf %gate11_bf16 : vector<8xbf16> to vector<8xf32>
+  %up00_bf16 = vector.fptrunc %up00 : vector<8xf32> to vector<8xbf16>
+  %up01_bf16 = vector.fptrunc %up01 : vector<8xf32> to vector<8xbf16>
+  %up10_bf16 = vector.fptrunc %up10 : vector<8xf32> to vector<8xbf16>
+  %up11_bf16 = vector.fptrunc %up11 : vector<8xf32> to vector<8xbf16>
+  %up00_rounded = vector.extf %up00_bf16 : vector<8xbf16> to vector<8xf32>
+  %up01_rounded = vector.extf %up01_bf16 : vector<8xbf16> to vector<8xf32>
+  %up10_rounded = vector.extf %up10_bf16 : vector<8xbf16> to vector<8xf32>
+  %up11_rounded = vector.extf %up11_bf16 : vector<8xbf16> to vector<8xf32>
+  %gate00_silu = vector.siluf %gate00_rounded : vector<8xf32>
+  %gate01_silu = vector.siluf %gate01_rounded : vector<8xf32>
+  %gate10_silu = vector.siluf %gate10_rounded : vector<8xf32>
+  %gate11_silu = vector.siluf %gate11_rounded : vector<8xf32>
+  %gate00_silu_bf16 = vector.fptrunc %gate00_silu : vector<8xf32> to vector<8xbf16>
+  %gate01_silu_bf16 = vector.fptrunc %gate01_silu : vector<8xf32> to vector<8xbf16>
+  %gate10_silu_bf16 = vector.fptrunc %gate10_silu : vector<8xf32> to vector<8xbf16>
+  %gate11_silu_bf16 = vector.fptrunc %gate11_silu : vector<8xf32> to vector<8xbf16>
+  %gate00_silu_rounded = vector.extf %gate00_silu_bf16 : vector<8xbf16> to vector<8xf32>
+  %gate01_silu_rounded = vector.extf %gate01_silu_bf16 : vector<8xbf16> to vector<8xf32>
+  %gate10_silu_rounded = vector.extf %gate10_silu_bf16 : vector<8xbf16> to vector<8xf32>
+  %gate11_silu_rounded = vector.extf %gate11_silu_bf16 : vector<8xbf16> to vector<8xf32>
+  %product00 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %gate00_silu_rounded, %up00_rounded : vector<8xf32>
+  %product01 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %gate01_silu_rounded, %up01_rounded : vector<8xf32>
+  %product10 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %gate10_silu_rounded, %up10_rounded : vector<8xf32>
+  %product11 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %gate11_silu_rounded, %up11_rounded : vector<8xf32>
   vector.fragment.store<result> %product00, %output_view[%token_origin0, %row_origin0] shape [%m, %n] : vector<8xf32>, view<[%dispatch_token_count]x[%intermediate_size]xbf16, #dense>
   vector.fragment.store<result> %product01, %output_view[%token_origin0, %row_origin1] shape [%m, %n] : vector<8xf32>, view<[%dispatch_token_count]x[%intermediate_size]xbf16, #dense>
   vector.fragment.store<result> %product10, %output_view[%token_origin1, %row_origin0] shape [%m, %n] : vector<8xf32>, view<[%dispatch_token_count]x[%intermediate_size]xbf16, #dense>
