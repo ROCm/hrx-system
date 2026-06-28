@@ -2430,6 +2430,20 @@ static iree_status_t loom_vector_unary_summary_facts(
                                                   &result_facts[0]);
 }
 
+static iree_status_t loom_vector_predicate_summary_facts(
+    loom_fact_context_t* context, const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts, loom_vector_unary_transfer_fn_t fn) {
+  loom_value_facts_t element = loom_value_facts_unknown();
+  fn(&operand_facts[0], &element);
+  if (loom_value_facts_is_exact(element) &&
+      !loom_value_facts_is_float(element)) {
+    return loom_value_facts_make_uniform_element(context, element,
+                                                 &result_facts[0]);
+  }
+  return loom_vector_unary_summary_facts(context, operand_facts, result_facts,
+                                         fn);
+}
+
 static void loom_vector_bit_count_element_facts(const loom_value_facts_t* input,
                                                 int32_t bitwidth,
                                                 loom_vector_bit_count_fn_t fn,
@@ -2816,10 +2830,32 @@ LOOM_VECTOR_FLOAT_UNARY_FACTS(loom_vector_roundf_facts, round)
 LOOM_VECTOR_FLOAT_UNARY_FACTS(loom_vector_roundevenf_facts,
                               loom_vector_roundeven_f64)
 LOOM_VECTOR_FLOAT_UNARY_FACTS(loom_vector_truncf_facts, trunc)
-LOOM_VECTOR_UNARY_FACTS(loom_vector_isnanf_facts, loom_vector_isnanf_transfer)
-LOOM_VECTOR_UNARY_FACTS(loom_vector_isinff_facts, loom_vector_isinff_transfer)
-LOOM_VECTOR_UNARY_FACTS(loom_vector_isfinitef_facts,
-                        loom_vector_isfinitef_transfer)
+iree_status_t loom_vector_isnanf_facts(loom_fact_context_t* context,
+                                       const loom_module_t* module,
+                                       const loom_op_t* op,
+                                       const loom_value_facts_t* operand_facts,
+                                       loom_value_facts_t* result_facts) {
+  return loom_vector_predicate_summary_facts(
+      context, operand_facts, result_facts, loom_vector_isnanf_transfer);
+}
+
+iree_status_t loom_vector_isinff_facts(loom_fact_context_t* context,
+                                       const loom_module_t* module,
+                                       const loom_op_t* op,
+                                       const loom_value_facts_t* operand_facts,
+                                       loom_value_facts_t* result_facts) {
+  return loom_vector_predicate_summary_facts(
+      context, operand_facts, result_facts, loom_vector_isinff_transfer);
+}
+
+iree_status_t loom_vector_isfinitef_facts(
+    loom_fact_context_t* context, const loom_module_t* module,
+    const loom_op_t* op, const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts) {
+  return loom_vector_predicate_summary_facts(
+      context, operand_facts, result_facts, loom_vector_isfinitef_transfer);
+}
+
 LOOM_VECTOR_UNARY_FACTS(loom_vector_signf_facts, loom_vector_signf_transfer)
 LOOM_VECTOR_UNARY_FACTS(loom_vector_signi_facts, loom_vector_signi_transfer)
 LOOM_VECTOR_UNARY_FACTS(loom_vector_extf_facts,
