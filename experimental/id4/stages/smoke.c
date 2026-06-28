@@ -760,6 +760,7 @@ static iree_status_t id4_smoke_stage_prepare(
   load_options.kernel_library = options->kernel_library;
   load_options.kernel_cache = stage->kernel_cache;
   load_options.executable_cache = stage->base.services.executable_cache;
+  load_options.command_buffer_mode = options->command_buffer_mode;
   load_options.diagnostic_artifact_flags =
       ID4_PIPELINE_KERNEL_DIAGNOSTIC_ARTIFACT_FLAG_COMPILE_REPORT_JSON |
       ID4_PIPELINE_KERNEL_DIAGNOSTIC_ARTIFACT_FLAG_EMIT_MANIFEST_JSON;

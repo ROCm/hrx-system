@@ -423,6 +423,8 @@ iree_status_t id4_pipeline_program_stage_prepare(
     load_options.kernel_library = options->stage_options->kernel_library;
     load_options.kernel_cache = options->kernel_cache;
     load_options.executable_cache = options->executable_cache;
+    load_options.command_buffer_mode =
+        options->stage_options->command_buffer_mode;
     load_options.diagnostic_artifact_flags =
         ID4_PIPELINE_KERNEL_DIAGNOSTIC_ARTIFACT_FLAG_COMPILE_REPORT_JSON |
         ID4_PIPELINE_KERNEL_DIAGNOSTIC_ARTIFACT_FLAG_EMIT_MANIFEST_JSON;

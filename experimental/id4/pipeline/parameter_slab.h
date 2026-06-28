@@ -266,6 +266,8 @@ typedef struct id4_pipeline_parameter_slab_set_load_options_t {
   id4_pipeline_kernel_cache_t* kernel_cache;
   // HAL executable cache used by encoded load steps.
   iree_hal_executable_cache_t* executable_cache;
+  // HAL command-buffer mode used by prepare-time encoder dispatches.
+  iree_hal_command_buffer_mode_t command_buffer_mode;
   // Diagnostic artifact classes requested while JITing encoder kernels.
   id4_pipeline_kernel_diagnostic_artifact_flags_t diagnostic_artifact_flags;
   // Semaphores that all parameter loading waits on.

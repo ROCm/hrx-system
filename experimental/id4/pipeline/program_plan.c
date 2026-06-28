@@ -375,6 +375,21 @@ static void id4_pipeline_program_plan_build_parameter_load_steps(
     iree_host_size_t* out_load_step_count) {
   *out_load_step_count = 0;
   if (parameter_count == 0) return;
+
+  for (iree_host_size_t i = 0; i < parameter_count; ++i) {
+    const id4_pipeline_program_plan_parameter_load_record_t* record =
+        &load_records[i];
+    if (record->encoding == ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_DIRECT) {
+      continue;
+    }
+    load_steps[*out_load_step_count] =
+        id4_pipeline_parameter_encode_fp8_e4m3_scaled_to_bf16_load_step(
+            IREE_SV("parameters.encode_fp8_e4m3_scaled_to_bf16"),
+            record->source_count, record->sources,
+            /*target_slab_index=*/0, /*request_offset=*/i);
+    ++*out_load_step_count;
+  }
+
   bool gather_run_active = false;
   iree_host_size_t gather_run_start = 0;
   iree_string_view_t gather_run_scope = iree_string_view_empty();
@@ -407,12 +422,6 @@ static void id4_pipeline_program_plan_build_parameter_load_steps(
       ++*out_load_step_count;
       gather_run_active = false;
     }
-    load_steps[*out_load_step_count] =
-        id4_pipeline_parameter_encode_fp8_e4m3_scaled_to_bf16_load_step(
-            IREE_SV("parameters.encode_fp8_e4m3_scaled_to_bf16"),
-            record->source_count, record->sources,
-            /*target_slab_index=*/0, /*request_offset=*/i);
-    ++*out_load_step_count;
   }
   if (gather_run_active) {
     load_steps[*out_load_step_count] = id4_pipeline_parameter_gather_load_step(
