@@ -575,7 +575,7 @@ static iree_status_t loom_amdgpu_table_lookup_emit_index_compare(
   loom_value_id_t operands[2] = {index_lane, ordinal_lane};
   iree_host_size_t operand_count = 2;
   if (plan->compare_src1_inline_descriptor.descriptor != NULL &&
-      ordinal <= 64) {
+      ordinal <= LOOM_AMDGPU_SOURCE_INLINE_U32_MAX) {
     descriptor = &plan->compare_src1_inline_descriptor;
     operand_count = 1;
     IREE_RETURN_IF_ERROR(

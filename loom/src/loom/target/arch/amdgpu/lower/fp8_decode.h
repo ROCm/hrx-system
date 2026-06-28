@@ -45,6 +45,12 @@ typedef struct loom_amdgpu_fp8_decode_plan_t {
       [LOOM_AMDGPU_FP8_BF16_BYTE_TABLE_WORD_COUNT];
   // Unsigned VGPR bitfield extract descriptor used to isolate packed bytes.
   loom_low_lower_resolved_descriptor_t bfe_u32_descriptor;
+  // Optional signed equality compare descriptor with an inline RHS operand.
+  loom_low_lower_resolved_descriptor_t compare_eq_i32_src1_inline_descriptor;
+  // Optional unsigned-greater-equal compare descriptor with inline RHS operand.
+  loom_low_lower_resolved_descriptor_t compare_uge_u32_src1_inline_descriptor;
+  // Optional unsigned-less-than compare descriptor with an inline RHS operand.
+  loom_low_lower_resolved_descriptor_t compare_ult_u32_src1_inline_descriptor;
   // Packed low-16-bit pair descriptor used to combine BF16 lanes.
   loom_low_lower_resolved_descriptor_t pack_u16_descriptor;
   // Byte permute descriptor used to select tiny FP8 subnormal BF16 tables.
