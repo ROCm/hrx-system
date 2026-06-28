@@ -11,6 +11,17 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
+from loom.target.arch.amdgpu.isa_xml import (
+    AmdgpuIsaFactSource,
+    AmdgpuIsaFunctionalGroup,
+    AmdgpuIsaInstruction,
+    AmdgpuIsaInstructionEncoding,
+    AmdgpuIsaInstructionFlags,
+    AmdgpuIsaOperand,
+)
+
 from .alu import *
 from .atomic import *
 from .cdna import *
@@ -1712,12 +1723,82 @@ def _gfx12_core_overlay_descriptors(
 
 
 def _gfx1250_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
-    return _rdna4_core_overlays()
+    return (
+        *_rdna4_core_overlays(),
+        _v_cvt_pk_bf16_f32_overlay(),
+    )
+
+
+def _gfx1250_spec_with_supplemental_instruction_facts(
+    spec: AmdgpuIsaFactSource,
+) -> AmdgpuIsaFactSource:
+    if "V_CVT_PK_BF16_F32" in spec.instruction_map(include_aliases=True):
+        return spec
+
+    # The pinned RDNA4 ISA XML lacks this gfx125x instruction even though the
+    # ROCm LLVM assembler accepts it. Keep the supplemental fact narrow to
+    # gfx125x and let normal overlay materialization validate the descriptor.
+    instruction = AmdgpuIsaInstruction(
+        name="V_CVT_PK_BF16_F32",
+        aliases=(),
+        flags=AmdgpuIsaInstructionFlags(
+            is_branch=False,
+            is_conditional_branch=False,
+            is_indirect_branch=False,
+            is_program_terminator=False,
+            is_immediately_executed=False,
+        ),
+        encodings=(
+            AmdgpuIsaInstructionEncoding(
+                encoding_name="ENC_VOP3",
+                condition_name="default",
+                opcode=877,
+                operands=(
+                    AmdgpuIsaOperand(
+                        order=1,
+                        field_name="VDST",
+                        data_format_name="FMT_NUM_PK2_BF16",
+                        operand_type="OPR_VGPR",
+                        size_bits=32,
+                        is_input=False,
+                        is_output=True,
+                        is_implicit=False,
+                        is_binary_microcode_required=True,
+                    ),
+                    AmdgpuIsaOperand(
+                        order=2,
+                        field_name="SRC0",
+                        data_format_name="FMT_NUM_F32",
+                        operand_type="OPR_SRC",
+                        size_bits=32,
+                        is_input=True,
+                        is_output=False,
+                        is_implicit=False,
+                        is_binary_microcode_required=True,
+                    ),
+                    AmdgpuIsaOperand(
+                        order=3,
+                        field_name="SRC1",
+                        data_format_name="FMT_NUM_F32",
+                        operand_type="OPR_SRC",
+                        size_bits=32,
+                        is_input=True,
+                        is_output=False,
+                        is_implicit=False,
+                        is_binary_microcode_required=True,
+                    ),
+                ),
+            ),
+        ),
+        functional_groups=(AmdgpuIsaFunctionalGroup("VALU", ("NOT_ASSIGNED",)),),
+    )
+    return replace(spec, instructions=(*spec.instructions, instruction))
 
 
 def _gfx1250_core_overlay_descriptors(
     spec: AmdgpuIsaFactSource,
 ) -> tuple[Descriptor, ...]:
+    spec = _gfx1250_spec_with_supplemental_instruction_facts(spec)
     return _with_execution_mask_state_reads(
         materialize_amdgpu_descriptor_overlays(spec, _gfx1250_core_overlays())
     )
