@@ -27,6 +27,31 @@
 
 #define ID4_PIPELINE_KERNEL_CACHE_ROOT_SYMBOL_CAPACITY 256
 
+typedef struct id4_pipeline_kernel_cache_entry_t {
+  // HAL executable cache used to prepare the retained executable.
+  iree_hal_executable_cache_t* executable_cache;
+  // Queue affinity the retained executable may be dispatched on.
+  iree_hal_queue_affinity_t queue_affinity;
+  // HAL executable caching mode used during preparation.
+  iree_hal_executable_caching_mode_t caching_mode;
+  // Diagnostic artifact request included in the compiled executable payload.
+  id4_pipeline_kernel_diagnostic_artifact_flags_t diagnostic_artifact_flags;
+  // Source identifier used in Loom diagnostics and cache metadata.
+  iree_string_view_t source_identifier;
+  // Textual Loom source contents used to produce the retained executable.
+  iree_const_byte_span_t source_contents;
+  // Runtime module path passed to the Loom compile invocation.
+  iree_string_view_t module_path;
+  // Exported Loom function selected as the link root.
+  iree_string_view_t function_name;
+  // Number of copied Loom config bindings.
+  iree_host_size_t config_binding_count;
+  // Copied Loom config bindings that define the specialization.
+  id4_pipeline_kernel_config_binding_t* config_bindings;
+  // Prepared executable retained by this cache entry.
+  id4_pipeline_kernel_executable_t* executable;
+} id4_pipeline_kernel_cache_entry_t;
+
 struct id4_pipeline_kernel_cache_t {
   // Reference count for shared kernel cache ownership.
   iree_atomic_ref_count_t ref_count;
@@ -48,6 +73,12 @@ struct id4_pipeline_kernel_cache_t {
   loomc_compiler_t* compiler;
   // Prepared source-to-target-low pass program shared by invocations.
   loomc_pass_program_t* pass_program;
+  // Number of retained prepared-executable cache entries.
+  iree_host_size_t entry_count;
+  // Allocated cache-entry capacity.
+  iree_host_size_t entry_capacity;
+  // Retained prepared-executable cache entries.
+  id4_pipeline_kernel_cache_entry_t* entries;
 };
 
 struct id4_pipeline_kernel_executable_t {
@@ -125,6 +156,154 @@ static void id4_pipeline_kernel_cache_free_bytes(
   if (!value) return;
   iree_allocator_free(host_allocator, (void*)value->data);
   memset(value, 0, sizeof(*value));
+}
+
+static bool id4_pipeline_kernel_cache_byte_spans_equal(
+    iree_const_byte_span_t lhs, iree_const_byte_span_t rhs) {
+  if (lhs.data_length != rhs.data_length) return false;
+  if (lhs.data_length == 0) return true;
+  return memcmp(lhs.data, rhs.data, lhs.data_length) == 0;
+}
+
+static bool id4_pipeline_kernel_cache_config_bindings_equal(
+    iree_host_size_t lhs_count, const id4_pipeline_kernel_config_binding_t* lhs,
+    iree_host_size_t rhs_count,
+    const id4_pipeline_kernel_config_binding_t* rhs) {
+  if (lhs_count != rhs_count) return false;
+  for (iree_host_size_t i = 0; i < lhs_count; ++i) {
+    if (!iree_string_view_equal(lhs[i].key, rhs[i].key) ||
+        !iree_string_view_equal(lhs[i].value, rhs[i].value)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+static void id4_pipeline_kernel_cache_entry_deinitialize(
+    id4_pipeline_kernel_cache_entry_t* entry, iree_allocator_t host_allocator) {
+  if (!entry) return;
+  id4_pipeline_kernel_executable_release(entry->executable);
+  iree_hal_executable_cache_release(entry->executable_cache);
+  if (entry->config_bindings) {
+    for (iree_host_size_t i = 0; i < entry->config_binding_count; ++i) {
+      id4_pipeline_kernel_cache_free_string(&entry->config_bindings[i].key,
+                                            host_allocator);
+      id4_pipeline_kernel_cache_free_string(&entry->config_bindings[i].value,
+                                            host_allocator);
+    }
+  }
+  iree_allocator_free(host_allocator, entry->config_bindings);
+  id4_pipeline_kernel_cache_free_string(&entry->function_name, host_allocator);
+  id4_pipeline_kernel_cache_free_string(&entry->module_path, host_allocator);
+  id4_pipeline_kernel_cache_free_bytes(&entry->source_contents, host_allocator);
+  id4_pipeline_kernel_cache_free_string(&entry->source_identifier,
+                                        host_allocator);
+  memset(entry, 0, sizeof(*entry));
+}
+
+static iree_status_t id4_pipeline_kernel_cache_entry_initialize(
+    const id4_pipeline_kernel_cache_prepare_options_t* options,
+    id4_pipeline_kernel_executable_t* executable,
+    iree_allocator_t host_allocator,
+    id4_pipeline_kernel_cache_entry_t* out_entry) {
+  memset(out_entry, 0, sizeof(*out_entry));
+  out_entry->executable_cache = options->executable_cache;
+  iree_hal_executable_cache_retain(out_entry->executable_cache);
+  out_entry->queue_affinity = options->queue_affinity;
+  out_entry->caching_mode = options->caching_mode;
+  out_entry->diagnostic_artifact_flags = options->diagnostic_artifact_flags;
+
+  iree_status_t status = id4_pipeline_kernel_cache_copy_string(
+      options->source_identifier, host_allocator,
+      &out_entry->source_identifier);
+  if (iree_status_is_ok(status)) {
+    status = id4_pipeline_kernel_cache_copy_bytes(
+        options->source_contents, host_allocator, &out_entry->source_contents);
+  }
+  if (iree_status_is_ok(status)) {
+    status = id4_pipeline_kernel_cache_copy_string(
+        options->module_path, host_allocator, &out_entry->module_path);
+  }
+  if (iree_status_is_ok(status)) {
+    status = id4_pipeline_kernel_cache_copy_string(
+        options->function_name, host_allocator, &out_entry->function_name);
+  }
+  out_entry->config_binding_count = options->config_binding_count;
+  if (iree_status_is_ok(status) && options->config_binding_count != 0) {
+    status = iree_allocator_malloc_array(host_allocator,
+                                         options->config_binding_count,
+                                         sizeof(out_entry->config_bindings[0]),
+                                         (void**)&out_entry->config_bindings);
+  }
+  if (iree_status_is_ok(status) && options->config_binding_count != 0) {
+    memset(
+        out_entry->config_bindings, 0,
+        options->config_binding_count * sizeof(out_entry->config_bindings[0]));
+    for (iree_host_size_t i = 0;
+         i < options->config_binding_count && iree_status_is_ok(status); ++i) {
+      status = id4_pipeline_kernel_cache_copy_string(
+          options->config_bindings[i].key, host_allocator,
+          &out_entry->config_bindings[i].key);
+      if (iree_status_is_ok(status)) {
+        status = id4_pipeline_kernel_cache_copy_string(
+            options->config_bindings[i].value, host_allocator,
+            &out_entry->config_bindings[i].value);
+      }
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    out_entry->executable = executable;
+    id4_pipeline_kernel_executable_retain(out_entry->executable);
+  } else {
+    id4_pipeline_kernel_cache_entry_deinitialize(out_entry, host_allocator);
+  }
+  return status;
+}
+
+static bool id4_pipeline_kernel_cache_entry_matches(
+    const id4_pipeline_kernel_cache_entry_t* entry,
+    const id4_pipeline_kernel_cache_prepare_options_t* options) {
+  return entry->executable_cache == options->executable_cache &&
+         entry->queue_affinity == options->queue_affinity &&
+         entry->caching_mode == options->caching_mode &&
+         entry->diagnostic_artifact_flags ==
+             options->diagnostic_artifact_flags &&
+         iree_string_view_equal(entry->source_identifier,
+                                options->source_identifier) &&
+         id4_pipeline_kernel_cache_byte_spans_equal(entry->source_contents,
+                                                    options->source_contents) &&
+         iree_string_view_equal(entry->module_path, options->module_path) &&
+         iree_string_view_equal(entry->function_name, options->function_name) &&
+         id4_pipeline_kernel_cache_config_bindings_equal(
+             entry->config_binding_count, entry->config_bindings,
+             options->config_binding_count, options->config_bindings);
+}
+
+static id4_pipeline_kernel_cache_entry_t* id4_pipeline_kernel_cache_lookup(
+    id4_pipeline_kernel_cache_t* kernel_cache,
+    const id4_pipeline_kernel_cache_prepare_options_t* options) {
+  for (iree_host_size_t i = 0; i < kernel_cache->entry_count; ++i) {
+    id4_pipeline_kernel_cache_entry_t* entry = &kernel_cache->entries[i];
+    if (id4_pipeline_kernel_cache_entry_matches(entry, options)) return entry;
+  }
+  return NULL;
+}
+
+static iree_status_t id4_pipeline_kernel_cache_store_entry(
+    id4_pipeline_kernel_cache_t* kernel_cache,
+    const id4_pipeline_kernel_cache_prepare_options_t* options,
+    id4_pipeline_kernel_executable_t* executable) {
+  if (kernel_cache->entry_count == kernel_cache->entry_capacity) {
+    IREE_RETURN_IF_ERROR(iree_allocator_grow_array(
+        kernel_cache->host_allocator, 8, sizeof(kernel_cache->entries[0]),
+        &kernel_cache->entry_capacity, (void**)&kernel_cache->entries));
+  }
+  id4_pipeline_kernel_cache_entry_t* entry =
+      &kernel_cache->entries[kernel_cache->entry_count];
+  IREE_RETURN_IF_ERROR(id4_pipeline_kernel_cache_entry_initialize(
+      options, executable, kernel_cache->host_allocator, entry));
+  ++kernel_cache->entry_count;
+  return iree_ok_status();
 }
 
 static iree_status_t id4_pipeline_kernel_cache_validate_create_options(
@@ -436,6 +615,49 @@ static iree_status_t id4_pipeline_kernel_cache_make_dispatch_config(
   return iree_ok_status();
 }
 
+static iree_status_t id4_pipeline_kernel_cache_emit_cache_hit(
+    id4_pipeline_kernel_cache_t* kernel_cache,
+    const id4_pipeline_kernel_cache_prepare_options_t* options,
+    const id4_pipeline_kernel_cache_entry_t* entry) {
+  const id4_pipeline_kernel_artifact_t* primary_artifact =
+      id4_pipeline_kernel_executable_artifact_at(
+          entry->executable, entry->executable->primary_artifact_index);
+  id4_pipeline_kernel_diagnostic_t kernel = {
+      // Kernel-cache phase associated with the event.
+      .phase = IREE_SV("cache_hit"),
+      // Source identifier borrowed from the prepare options.
+      .source_identifier = options->source_identifier,
+      // Module path borrowed from the prepare options.
+      .module_path = options->module_path,
+      // Target processor owned by the cache.
+      .target_processor = kernel_cache->target_processor,
+      // Loom primary artifact format retained by the cached executable.
+      .loom_artifact_format = primary_artifact ? primary_artifact->format
+                                               : iree_string_view_empty(),
+      // HAL executable format retained by the cached executable.
+      .hal_executable_format = entry->executable->hal_executable_format,
+      // Number of config bindings supplied to the invocation.
+      .config_binding_count = options->config_binding_count,
+      // Primary artifact byte length retained by the cached executable.
+      .artifact_byte_length =
+          primary_artifact ? primary_artifact->contents.data_length : 0,
+      // Inferred executable byte length retained by the cached executable.
+      .inferred_executable_byte_length =
+          entry->executable->inferred_executable_byte_length,
+      // This event is not diagnostic-specific.
+      .diagnostic_index = IREE_HOST_SIZE_MAX,
+      // This event is not diagnostic-specific.
+      .diagnostic_severity = -1,
+      // Queue affinity selected for executable preparation.
+      .queue_affinity = options->queue_affinity,
+      // HAL caching mode selected for executable preparation.
+      .caching_mode = options->caching_mode,
+  };
+  return id4_pipeline_kernel_cache_emit_event(
+      options->diagnostics_sink, IREE_SV("kernel_cache.prepare.cache_hit"),
+      IREE_SV("reused prepared HAL executable"), &kernel);
+}
+
 static iree_status_t id4_pipeline_kernel_executable_create(
     iree_string_view_t hal_executable_format,
     iree_host_size_t inferred_executable_byte_length,
@@ -554,6 +776,11 @@ static iree_status_t id4_pipeline_kernel_cache_root_symbol(
 static void id4_pipeline_kernel_cache_destroy(
     id4_pipeline_kernel_cache_t* kernel_cache) {
   iree_allocator_t host_allocator = kernel_cache->host_allocator;
+  for (iree_host_size_t i = 0; i < kernel_cache->entry_count; ++i) {
+    id4_pipeline_kernel_cache_entry_deinitialize(&kernel_cache->entries[i],
+                                                 host_allocator);
+  }
+  iree_allocator_free(host_allocator, kernel_cache->entries);
   loomc_pass_program_release(kernel_cache->pass_program);
   loomc_compiler_release(kernel_cache->compiler);
   loomc_linker_release(kernel_cache->linker);
@@ -732,6 +959,20 @@ iree_status_t id4_pipeline_kernel_cache_prepare_executable(
   IREE_RETURN_IF_ERROR(
       id4_pipeline_kernel_cache_validate_prepare_options(options));
 
+  id4_pipeline_kernel_cache_entry_t* cache_entry =
+      id4_pipeline_kernel_cache_lookup(kernel_cache, options);
+  if (cache_entry) {
+    id4_pipeline_kernel_executable_retain(cache_entry->executable);
+    iree_status_t status = id4_pipeline_kernel_cache_emit_cache_hit(
+        kernel_cache, options, cache_entry);
+    if (iree_status_is_ok(status)) {
+      *out_executable = cache_entry->executable;
+    } else {
+      id4_pipeline_kernel_executable_release(cache_entry->executable);
+    }
+    return status;
+  }
+
   loomc_config_binding_t* config_bindings = NULL;
   loomc_workspace_t* workspace = NULL;
   loomc_source_t* source = NULL;
@@ -744,6 +985,7 @@ iree_status_t id4_pipeline_kernel_cache_prepare_executable(
   loomc_result_t* compile_result = NULL;
   loomc_result_t* emit_result = NULL;
   iree_hal_executable_t* hal_executable = NULL;
+  id4_pipeline_kernel_executable_t* prepared_executable = NULL;
   iree_hal_dispatch_config_t dispatch_config;
   memset(&dispatch_config, 0, sizeof(dispatch_config));
   iree_status_t status = iree_ok_status();
@@ -1122,7 +1364,7 @@ iree_status_t id4_pipeline_kernel_cache_prepare_executable(
     status = id4_pipeline_kernel_executable_create(
         hal_executable_format, inferred_executable_byte_length, hal_executable,
         dispatch_config, compile_result, emit_result, primary_artifact,
-        kernel_cache->host_allocator, out_executable);
+        kernel_cache->host_allocator, &prepared_executable);
   }
   if (iree_status_is_ok(status)) {
     id4_pipeline_kernel_diagnostic_t kernel = {
@@ -1158,7 +1400,16 @@ iree_status_t id4_pipeline_kernel_cache_prepare_executable(
         options->diagnostics_sink, IREE_SV("kernel_cache.prepare"),
         IREE_SV("prepared HAL executable"), &kernel);
   }
+  if (iree_status_is_ok(status)) {
+    status = id4_pipeline_kernel_cache_store_entry(kernel_cache, options,
+                                                   prepared_executable);
+  }
+  if (iree_status_is_ok(status)) {
+    *out_executable = prepared_executable;
+    prepared_executable = NULL;
+  }
 
+  id4_pipeline_kernel_executable_release(prepared_executable);
   iree_hal_executable_release(hal_executable);
   loomc_result_release(emit_result);
   loomc_result_release(compile_result);

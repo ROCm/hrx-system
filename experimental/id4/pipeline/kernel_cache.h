@@ -126,7 +126,12 @@ void id4_pipeline_kernel_cache_release(
 iree_string_view_t id4_pipeline_kernel_cache_target_processor(
     const id4_pipeline_kernel_cache_t* kernel_cache);
 
-// Compiles, emits, and prepares one kernel executable.
+// Returns a retained executable for one exact kernel specialization.
+//
+// Compiles, emits, prepares, and caches the executable on miss. Reuses a
+// retained executable when the target, HAL cache, source, function, config
+// bindings, queue affinity, caching mode, and diagnostic artifact request all
+// match a prior prepare call.
 iree_status_t id4_pipeline_kernel_cache_prepare_executable(
     id4_pipeline_kernel_cache_t* kernel_cache,
     const id4_pipeline_kernel_cache_prepare_options_t* options,
