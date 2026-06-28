@@ -65,18 +65,28 @@ bool loom_amdgpu_fp8_to_f32_descriptor_refs(
       .lane = LOOM_AMDGPU_DESCRIPTOR_REF_NONE,
       .pair = LOOM_AMDGPU_DESCRIPTOR_REF_NONE,
   };
-  switch (source_element_type) {
-    case LOOM_SCALAR_TYPE_F8E4M3:
-      out_refs->lane = LOOM_AMDGPU_DESCRIPTOR_REF_V_CVT_F32_FP8;
-      out_refs->pair = LOOM_AMDGPU_DESCRIPTOR_REF_V_CVT_PK_F32_FP8;
-      return true;
-    case LOOM_SCALAR_TYPE_F8E5M2:
-      out_refs->lane = LOOM_AMDGPU_DESCRIPTOR_REF_V_CVT_F32_BF8;
-      out_refs->pair = LOOM_AMDGPU_DESCRIPTOR_REF_V_CVT_PK_F32_BF8;
-      return true;
-    default:
-      return false;
+  if (source_element_type >= LOOM_SCALAR_TYPE_COUNT_) {
+    return false;
   }
+  static const loom_amdgpu_fp8_to_f32_descriptor_refs_t
+      kLoomAmdgpuFp8ToF32DescriptorRefs[LOOM_SCALAR_TYPE_COUNT_] = {
+#define LOOM_AMDGPU_FP8_TO_F32_DESCRIPTOR_REF_ROW(source_type, lane_ref, \
+                                                  pair_ref)              \
+  [source_type] = {                                                      \
+    .lane = lane_ref,                                                    \
+    .pair = pair_ref,                                                    \
+  }
+#include "loom/target/arch/amdgpu/lower/fp8_to_f32_descriptor_ref_rows.inl"
+#undef LOOM_AMDGPU_FP8_TO_F32_DESCRIPTOR_REF_ROW
+      };
+  const loom_amdgpu_fp8_to_f32_descriptor_refs_t* refs =
+      &kLoomAmdgpuFp8ToF32DescriptorRefs[source_element_type];
+  if (refs->lane == LOOM_AMDGPU_DESCRIPTOR_REF_NONE ||
+      refs->pair == LOOM_AMDGPU_DESCRIPTOR_REF_NONE) {
+    return false;
+  }
+  *out_refs = *refs;
+  return true;
 }
 
 static const loom_low_lower_resolved_descriptor_t*
@@ -400,66 +410,16 @@ typedef struct loom_amdgpu_fp8_decode_plan_descriptor_row_t {
   loom_amdgpu_fp8_decode_plan_flags_t present_flag;
 } loom_amdgpu_fp8_decode_plan_descriptor_row_t;
 
-#define LOOM_AMDGPU_FP8_DECODE_PLAN_DESCRIPTOR_ROW(descriptor, field, flag) \
-  {                                                                         \
-      .descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_##descriptor,            \
-      .descriptor_offset = offsetof(loom_amdgpu_fp8_decode_plan_t, field),  \
-      .present_flag = flag,                                                 \
+#define LOOM_AMDGPU_FP8_DECODE_PLAN_DESCRIPTOR_ROW(ref, field, flag)       \
+  {                                                                        \
+      .descriptor_ref = ref,                                               \
+      .descriptor_offset = offsetof(loom_amdgpu_fp8_decode_plan_t, field), \
+      .present_flag = flag,                                                \
   }
 
 static const loom_amdgpu_fp8_decode_plan_descriptor_row_t
     kLoomAmdgpuFp8DecodePlanDescriptorRows[] = {
-        LOOM_AMDGPU_FP8_DECODE_PLAN_DESCRIPTOR_ROW(
-            V_BFE_U32_OFFSET_WIDTH_INLINE, bfe_u32_descriptor,
-            LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_BFE_U32),
-        LOOM_AMDGPU_FP8_DECODE_PLAN_DESCRIPTOR_ROW(
-            V_CMP_EQ_I32_SRC1_INLINE, compare_eq_i32_src1_inline_descriptor,
-            LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_NONE),
-        LOOM_AMDGPU_FP8_DECODE_PLAN_DESCRIPTOR_ROW(
-            V_CMP_NE_I32_SRC1_INLINE, compare_ne_i32_src1_inline_descriptor,
-            LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_CMP_NE_I32_SRC1_INLINE),
-        LOOM_AMDGPU_FP8_DECODE_PLAN_DESCRIPTOR_ROW(
-            S_CMP_LG_U64, compare_lg_u64_descriptor,
-            LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_CMP_LG_U64),
-        LOOM_AMDGPU_FP8_DECODE_PLAN_DESCRIPTOR_ROW(
-            V_CMP_UGE_U32_SRC1_INLINE, compare_uge_u32_src1_inline_descriptor,
-            LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_NONE),
-        LOOM_AMDGPU_FP8_DECODE_PLAN_DESCRIPTOR_ROW(
-            V_CMP_ULT_U32_SRC1_INLINE, compare_ult_u32_src1_inline_descriptor,
-            LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_NONE),
-        LOOM_AMDGPU_FP8_DECODE_PLAN_DESCRIPTOR_ROW(
-            V_CVT_PK_U16_U32, pack_u16_descriptor,
-            LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_PACK_U16),
-        LOOM_AMDGPU_FP8_DECODE_PLAN_DESCRIPTOR_ROW(
-            V_PERM_B32, perm_b32_descriptor,
-            LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_PERM_B32),
-        LOOM_AMDGPU_FP8_DECODE_PLAN_DESCRIPTOR_ROW(
-            V_CVT_PK_BF16_F32, native_bf16_pack_descriptor,
-            LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_NATIVE_BF16_PACK),
-        LOOM_AMDGPU_FP8_DECODE_PLAN_DESCRIPTOR_ROW(
-            V_ADD3_U32_SRC2_LIT, add3_src2_literal_descriptor,
-            LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_ADD3_SRC2_LITERAL),
-        LOOM_AMDGPU_FP8_DECODE_PLAN_DESCRIPTOR_ROW(
-            V_LSHL_ADD_U32_SHIFT_IMM, lshl_add_u32_shift_imm_descriptor,
-            LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_LSHL_ADD_U32_SHIFT_IMM),
-        LOOM_AMDGPU_FP8_DECODE_PLAN_DESCRIPTOR_ROW(
-            V_PERM_B32_SRC2_LIT, perm_b32_src2_literal_descriptor,
-            LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_PERM_B32_SRC2_LITERAL),
-        LOOM_AMDGPU_FP8_DECODE_PLAN_DESCRIPTOR_ROW(
-            V_PK_MIN_U16, pk_min_u16_descriptor,
-            LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_PK_MIN_U16),
-        LOOM_AMDGPU_FP8_DECODE_PLAN_DESCRIPTOR_ROW(
-            V_PK_MUL_LO_U16, pk_mul_lo_u16_descriptor,
-            LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_PK_MUL_LO_U16),
-        LOOM_AMDGPU_FP8_DECODE_PLAN_DESCRIPTOR_ROW(
-            V_PK_ADD_U16, pk_add_u16_descriptor,
-            LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_PK_ADD_U16),
-        LOOM_AMDGPU_FP8_DECODE_PLAN_DESCRIPTOR_ROW(
-            V_PK_ASHRREV_I16, pk_ashrrev_i16_descriptor,
-            LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_PK_ASHRREV_I16),
-        LOOM_AMDGPU_FP8_DECODE_PLAN_DESCRIPTOR_ROW(
-            V_BFI_B32_SRC0_LIT, bfi_b32_src0_literal_descriptor,
-            LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_BFI_B32_SRC0_LITERAL),
+#include "loom/target/arch/amdgpu/lower/fp8_decode_plan_descriptor_rows.inl"
 };
 
 #undef LOOM_AMDGPU_FP8_DECODE_PLAN_DESCRIPTOR_ROW

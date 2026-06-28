@@ -11,6 +11,17 @@ iree_add_all_subdirs()
 
 iree_py_library(
   NAME
+    validation
+  SRCS
+    "__init__.py"
+    "validation.py"
+  DEPS
+    loom::py::loom::target::low_descriptors
+    loom::py::loom::target::arch::amdgpu::descriptors
+)
+
+iree_py_library(
+  NAME
     arithmetic_candidates
   MAIN
     "amdgpu_arithmetic_candidates.py"

@@ -16,4 +16,33 @@ iree_py_library(
     "__init__.py"
 )
 
+iree_py_library(
+  NAME
+    narrow_float_tables
+  MAIN
+    "amdgpu_narrow_float_tables.py"
+  SRCS
+    "__init__.py"
+    "amdgpu_narrow_float_tables.py"
+  DEPS
+    loom::py::loom::core
+    loom::py::loom::gen::support::support
+    loom::py::loom::gen::target::arch::amdgpu::lower::candidates::validation
+    loom::py::loom::target::arch::amdgpu::descriptors
+)
+
+iree_py_test(
+  NAME
+    narrow_float_tables_test
+  SRCS
+    "../../../../../tools/pytest_style_runner.py"
+  ARGS
+    "loom.gen.target.arch.amdgpu.lower.amdgpu_narrow_float_tables_test"
+  DEPS
+    loom::py::loom::gen::target::arch::amdgpu::lower::narrow_float_tables
+  PACKAGE_DIRS
+    "${PROJECT_SOURCE_DIR}/loom/py"
+    "${PROJECT_BINARY_DIR}/loom/py"
+)
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###
