@@ -1,9 +1,15 @@
 config.decl @id4.ideogram4.prelude_image.token_count : %value: index where [range(%value, 1, 65536)]
+
 config.decl @id4.ideogram4.prelude_image.output_token_count : %value: index where [range(%value, 1, 131072)]
+
 config.decl @id4.ideogram4.prelude_image.output_token_offset : %value: index where [range(%value, 0, 65536)]
+
 config.decl @id4.ideogram4.prelude_image.image_width : %value: index where [range(%value, 1, 4096)]
+
 config.decl @id4.ideogram4.prelude_image.image_height : %value: index where [range(%value, 1, 4096)]
+
 config.decl @id4.ideogram4.prelude_image.input_channel_count : %value: index where [range(%value, 4, 1024)]
+
 config.decl @id4.ideogram4.prelude_image.hidden_size : %value: index where [range(%value, 1, 65536)]
 
 func.def inline @id4_ideogram4_prelude_image_bf16_f32_dot4(%input_values: vector<4xf32>, %weight_values: vector<4xbf16>) -> (f32) {
@@ -64,7 +70,6 @@ kernel.def export("id4_ideogram4_prelude_image_bf16_f32") @id4_ideogram4_prelude
   %source_token_w_offset = index.mul %source_token_w, %image_height : index
   %source_token = index.add %source_token_w_offset, %source_token_h : index
   %zero_f32 = scalar.constant 0.0 : f32
-
   %image_tokens_noalias, %weight_noalias, %bias_noalias, %image_indicator_noalias, %indicator_embedding_noalias, %output_noalias = buffer.assume.noalias %image_tokens, %weight, %bias, %image_indicator, %indicator_embedding, %output : buffer, buffer, buffer, buffer, buffer, buffer
   %image_tokens_global = buffer.assume.memory_space<global> %image_tokens_noalias : buffer
   %weight_global = buffer.assume.memory_space<global> %weight_noalias : buffer
@@ -78,7 +83,6 @@ kernel.def export("id4_ideogram4_prelude_image_bf16_f32") @id4_ideogram4_prelude
   %image_indicator_view = buffer.view %image_indicator_global[%base] : buffer -> view<[%output_token_count]xi32, #dense>
   %indicator_embedding_view = buffer.view %indicator_embedding_global[%base] : buffer -> view<2x[%hidden_size]xbf16, #dense>
   %output_view = buffer.view %output_global[%base] : buffer -> view<[%hidden_size]x[%output_token_count]xf32, #dense>
-
   %lane_dot = scf.for %input_channel = [%input_base to %input_channel_count step %vector_step](%acc = %zero_f32 : f32) -> (f32) {
     %input_channel1 = index.add %input_channel, %one : index
     %input_channel2 = index.add %input_channel, %two : index
@@ -120,8 +124,12 @@ kernel.def export("id4_ideogram4_prelude_image_bf16_f32") @id4_ideogram4_prelude
     %indicator_embedding_bf16 = view.load %indicator_embedding_view[%indicator_index, %hidden] : view<2x[%hidden_size]xbf16, #dense> -> bf16
     %indicator_embedding_f32 = scalar.extf %indicator_embedding_bf16 : bf16 to f32
     %with_bias = scalar.addf<reassoc|nnan|ninf|nsz> %dot, %bias_f32 : f32
-    %value = scalar.addf<reassoc|nnan|ninf|nsz> %with_bias, %indicator_embedding_f32 : f32
-    view.store %value, %output_view[%hidden, %output_token] : f32, view<[%hidden_size]x[%output_token_count]xf32, #dense>
+    %with_bias_bf16 = scalar.fptrunc %with_bias : f32 to bf16
+    %with_bias_value = scalar.extf %with_bias_bf16 : bf16 to f32
+    %value = scalar.addf<reassoc|nnan|ninf|nsz> %with_bias_value, %indicator_embedding_f32 : f32
+    %value_bf16 = scalar.fptrunc %value : f32 to bf16
+    %value_rounded = scalar.extf %value_bf16 : bf16 to f32
+    view.store %value_rounded, %output_view[%hidden, %output_token] : f32, view<[%hidden_size]x[%output_token_count]xf32, #dense>
   }
   kernel.return
 }
@@ -133,7 +141,7 @@ check.case public @id4_ideogram4_prelude_image_bf16_f32_small_case {
   %image_indicator = check.generate.fill value(1) : tensor<2xi32>
   %indicator_embedding = check.generate.fill value(3.0) : tensor<2x2xbf16>
   %output = check.generate.fill value(0.0) : tensor<2x2xf32>
-  %expected = check.generate.fill value(9.03125) : tensor<2x2xf32>
+  %expected = check.generate.fill value(9.0) : tensor<2x2xf32>
   func.call @id4_ideogram4_prelude_image_bf16_f32(%image_tokens, %weight, %bias, %image_indicator, %indicator_embedding, %output) : (tensor<2x4xf32>, tensor<2x4xbf16>, tensor<2xbf16>, tensor<2xi32>, tensor<2x2xbf16>, tensor<2x2xf32>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2x2xf32>
   check.return
@@ -166,5 +174,7 @@ check.case public @id4_ideogram4_prelude_image_bf16_f32_patchified_channel_case 
 }
 
 check.benchmark<@id4_ideogram4_prelude_image_bf16_f32_small_case> @id4_ideogram4_prelude_image_bf16_f32_small
+
 check.benchmark<@id4_ideogram4_prelude_image_bf16_f32_uncond_slice_case> @id4_ideogram4_prelude_image_bf16_f32_uncond_slice
+
 check.benchmark<@id4_ideogram4_prelude_image_bf16_f32_patchified_channel_case> @id4_ideogram4_prelude_image_bf16_f32_patchified_channel

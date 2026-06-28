@@ -1,8 +1,11 @@
 amdgpu.target<gfx1100> @id4_gfx1100
 
 config.decl @id4.ideogram4.mlp_gate_up_silu_product_wmma.token_count : %value: index where [range(%value, 16, 131072)]
+
 config.decl @id4.ideogram4.mlp_gate_up_silu_product_wmma.dispatch_token_count : %value: index where [range(%value, 16, 131072), mul(%value, 16)]
+
 config.decl @id4.ideogram4.mlp_gate_up_silu_product_wmma.input_size : %value: index where [range(%value, 16, 131072), mul(%value, 16)]
+
 config.decl @id4.ideogram4.mlp_gate_up_silu_product_wmma.intermediate_size : %value: index where [range(%value, 32, 65536), mul(%value, 32)]
 
 kernel.def target(@id4_gfx1100) export("id4_ideogram4_mlp_gate_up_silu_product_bf16_wmma") @id4_ideogram4_mlp_gate_up_silu_product_bf16_wmma() {
@@ -35,7 +38,6 @@ kernel.def target(@id4_gfx1100) export("id4_ideogram4_mlp_gate_up_silu_product_b
   %k = index.constant 16 : index
   %weight_layout = encoding.layout.strided [1, %input_size] : encoding<layout>
   %zero_acc = vector.constant 0.0 : vector<8xf32>
-
   %input_noalias, %gate_weight_noalias, %up_weight_noalias, %output_noalias = buffer.assume.noalias %input_bf16, %gate_weight, %up_weight, %output : buffer, buffer, buffer, buffer
   %input_global = buffer.assume.memory_space<global> %input_noalias : buffer
   %gate_weight_global = buffer.assume.memory_space<global> %gate_weight_noalias : buffer
@@ -49,7 +51,6 @@ kernel.def target(@id4_gfx1100) export("id4_ideogram4_mlp_gate_up_silu_product_b
   %gate_weight_view = buffer.view %gate_weight_aligned[%base] : buffer -> view<[%input_size]x[%intermediate_size]xbf16, %weight_layout>
   %up_weight_view = buffer.view %up_weight_aligned[%base] : buffer -> view<[%input_size]x[%intermediate_size]xbf16, %weight_layout>
   %output_view = buffer.view %output_aligned[%base] : buffer -> view<[%token_count]x[%intermediate_size]xbf16, #dense>
-
   %init0 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
   %init1 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
   %init2 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
@@ -67,15 +68,22 @@ kernel.def target(@id4_gfx1100) export("id4_ideogram4_mlp_gate_up_silu_product_b
     %next3 = vector.mma %lhs, %up_rhs1, %acc3 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
     scf.yield %next0, %next1, %next2, %next3 : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>
   }
-
   %gate0_bf16 = vector.fptrunc %gate0 : vector<8xf32> to vector<8xbf16>
   %gate1_bf16 = vector.fptrunc %gate1 : vector<8xf32> to vector<8xbf16>
   %gate0_rounded = vector.extf %gate0_bf16 : vector<8xbf16> to vector<8xf32>
   %gate1_rounded = vector.extf %gate1_bf16 : vector<8xbf16> to vector<8xf32>
+  %up0_bf16 = vector.fptrunc %up0 : vector<8xf32> to vector<8xbf16>
+  %up1_bf16 = vector.fptrunc %up1 : vector<8xf32> to vector<8xbf16>
+  %up0_rounded = vector.extf %up0_bf16 : vector<8xbf16> to vector<8xf32>
+  %up1_rounded = vector.extf %up1_bf16 : vector<8xbf16> to vector<8xf32>
   %gate0_silu = vector.siluf %gate0_rounded : vector<8xf32>
   %gate1_silu = vector.siluf %gate1_rounded : vector<8xf32>
-  %product0 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %gate0_silu, %up0 : vector<8xf32>
-  %product1 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %gate1_silu, %up1 : vector<8xf32>
+  %gate0_silu_bf16 = vector.fptrunc %gate0_silu : vector<8xf32> to vector<8xbf16>
+  %gate1_silu_bf16 = vector.fptrunc %gate1_silu : vector<8xf32> to vector<8xbf16>
+  %gate0_silu_rounded = vector.extf %gate0_silu_bf16 : vector<8xbf16> to vector<8xf32>
+  %gate1_silu_rounded = vector.extf %gate1_silu_bf16 : vector<8xbf16> to vector<8xf32>
+  %product0 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %gate0_silu_rounded, %up0_rounded : vector<8xf32>
+  %product1 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %gate1_silu_rounded, %up1_rounded : vector<8xf32>
   vector.fragment.store<result> %product0, %output_view[%token_origin, %row_origin0] shape [%m, %n] : vector<8xf32>, view<[%token_count]x[%intermediate_size]xbf16, #dense>
   vector.fragment.store<result> %product1, %output_view[%token_origin, %row_origin1] shape [%m, %n] : vector<8xf32>, view<[%token_count]x[%intermediate_size]xbf16, #dense>
   kernel.return
@@ -104,4 +112,5 @@ check.case public @id4_ideogram4_mlp_gate_up_silu_product_bf16_wmma_uncond_1024_
 }
 
 check.benchmark<@id4_ideogram4_mlp_gate_up_silu_product_bf16_wmma_small_case> @id4_ideogram4_mlp_gate_up_silu_product_bf16_wmma_small
+
 check.benchmark<@id4_ideogram4_mlp_gate_up_silu_product_bf16_wmma_uncond_1024_shape_case> @id4_ideogram4_mlp_gate_up_silu_product_bf16_wmma_uncond_1024_shape

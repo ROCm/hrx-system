@@ -25,7 +25,6 @@ kernel.def export("id4_ideogram4_silu_product_bf16") @id4_ideogram4_silu_product
   %element_count = config.get @id4.ideogram4.silu_product_bf16.element_count : index
   %element_index = index.madd %workgroup, %workgroup_size_x, %lane : index
   %in_bounds = index.cmp ult, %element_index, %element_count : index
-
   %gate_noalias, %up_noalias, %output_noalias = buffer.assume.noalias %gate, %up, %output : buffer, buffer, buffer
   %gate_global = buffer.assume.memory_space<global> %gate_noalias : buffer
   %up_global = buffer.assume.memory_space<global> %up_noalias : buffer
@@ -33,7 +32,6 @@ kernel.def export("id4_ideogram4_silu_product_bf16") @id4_ideogram4_silu_product
   %gate_view = buffer.view %gate_global[%base] : buffer -> view<[%token_capacity]x[%intermediate_size]xbf16, #dense>
   %up_view = buffer.view %up_global[%base] : buffer -> view<[%token_capacity]x[%intermediate_size]xbf16, #dense>
   %output_view = buffer.view %output_global[%base] : buffer -> view<[%token_capacity]x[%intermediate_size]xbf16, #dense>
-
   scf.if %in_bounds {
     %token = index.div %element_index, %intermediate_size : index
     %channel = index.rem %element_index, %intermediate_size : index
@@ -42,7 +40,9 @@ kernel.def export("id4_ideogram4_silu_product_bf16") @id4_ideogram4_silu_product
     %gate_value = scalar.extf %gate_bf16 : bf16 to f32
     %up_value = scalar.extf %up_bf16 : bf16 to f32
     %gate_silu = scalar.siluf %gate_value : f32
-    %value = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %gate_silu, %up_value : f32
+    %gate_silu_bf16 = scalar.fptrunc %gate_silu : f32 to bf16
+    %gate_silu_value = scalar.extf %gate_silu_bf16 : bf16 to f32
+    %value = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %gate_silu_value, %up_value : f32
     %rounded = scalar.fptrunc %value : f32 to bf16
     view.store %rounded, %output_view[%token, %channel] : bf16, view<[%token_capacity]x[%intermediate_size]xbf16, #dense>
   }

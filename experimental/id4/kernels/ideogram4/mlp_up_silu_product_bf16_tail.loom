@@ -1,7 +1,11 @@
 config.decl @id4.ideogram4.mlp_up_silu_product_tail.token_count : %value: index where [range(%value, 1, 131072)]
+
 config.decl @id4.ideogram4.mlp_up_silu_product_tail.token_offset : %value: index where [range(%value, 0, 131071)]
+
 config.decl @id4.ideogram4.mlp_up_silu_product_tail.dispatch_token_count : %value: index where [range(%value, 1, 16)]
+
 config.decl @id4.ideogram4.mlp_up_silu_product_tail.input_size : %value: index where [range(%value, 1, 131072)]
+
 config.decl @id4.ideogram4.mlp_up_silu_product_tail.intermediate_size : %value: index where [range(%value, 1, 65536)]
 
 kernel.def export("id4_ideogram4_mlp_up_silu_product_bf16_tail") @id4_ideogram4_mlp_up_silu_product_bf16_tail() {
@@ -39,7 +43,6 @@ kernel.def export("id4_ideogram4_mlp_up_silu_product_bf16_tail") @id4_ideogram4_
   %dispatch_token = index.add %base_dispatch_token, %local_token : index
   %token = index.add %token_base_offset, %dispatch_token : index
   %zero_f32 = scalar.constant 0.0 : f32
-
   %input_noalias, %up_weight_noalias, %gate_noalias, %output_noalias = buffer.assume.noalias %input_bf16, %up_weight, %gate, %output : buffer, buffer, buffer, buffer
   %input_global = buffer.assume.memory_space<global> %input_noalias : buffer
   %up_weight_global = buffer.assume.memory_space<global> %up_weight_noalias : buffer
@@ -49,7 +52,6 @@ kernel.def export("id4_ideogram4_mlp_up_silu_product_bf16_tail") @id4_ideogram4_
   %up_weight_view = buffer.view %up_weight_global[%base] : buffer -> view<[%intermediate_size]x[%input_size]xbf16, #dense>
   %gate_view = buffer.view %gate_global[%base] : buffer -> view<[%token_count]x[%intermediate_size]xbf16, #dense>
   %output_view = buffer.view %output_global[%base] : buffer -> view<[%token_count]x[%intermediate_size]xbf16, #dense>
-
   %dispatch_token_valid = index.cmp ult, %dispatch_token, %dispatch_token_count : index
   %token_valid = index.cmp ult, %token, %token_count : index
   %row_valid = index.cmp ult, %row, %intermediate_size : index
@@ -68,7 +70,11 @@ kernel.def export("id4_ideogram4_mlp_up_silu_product_bf16_tail") @id4_ideogram4_
     %gate_bf16_value = view.load %gate_view[%token, %row] : view<[%token_count]x[%intermediate_size]xbf16, #dense> -> bf16
     %gate_value = scalar.extf %gate_bf16_value : bf16 to f32
     %gate_silu = scalar.siluf %gate_value : f32
-    %value = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %gate_silu, %up : f32
+    %gate_silu_bf16 = scalar.fptrunc %gate_silu : f32 to bf16
+    %gate_silu_value = scalar.extf %gate_silu_bf16 : bf16 to f32
+    %up_bf16 = scalar.fptrunc %up : f32 to bf16
+    %up_value = scalar.extf %up_bf16 : bf16 to f32
+    %value = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %gate_silu_value, %up_value : f32
     %rounded = scalar.fptrunc %value : f32 to bf16
     view.store %rounded, %output_view[%token, %row] : bf16, view<[%token_count]x[%intermediate_size]xbf16, #dense>
   }

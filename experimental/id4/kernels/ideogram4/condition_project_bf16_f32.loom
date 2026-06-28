@@ -1,6 +1,9 @@
 config.decl @id4.ideogram4.condition_project.text_token_count : %value: index where [range(%value, 1, 65536)]
+
 config.decl @id4.ideogram4.condition_project.total_token_count : %value: index where [range(%value, 1, 131072)]
+
 config.decl @id4.ideogram4.condition_project.feature_count : %value: index where [range(%value, 4, 131072)]
+
 config.decl @id4.ideogram4.condition_project.hidden_size : %value: index where [range(%value, 1, 65536)]
 
 kernel.def export("id4_ideogram4_condition_project_bf16_f32") @id4_ideogram4_condition_project_bf16_f32() {
@@ -40,7 +43,6 @@ kernel.def export("id4_ideogram4_condition_project_bf16_f32") @id4_ideogram4_con
   %output_row = index.add %base_row, %local_row : index
   %text_token = index.add %base_text_token, %local_token : index
   %zero_f32 = scalar.constant 0.0 : f32
-
   %input_noalias, %weight_noalias, %bias_noalias, %image_indicator_noalias, %indicator_embedding_noalias, %output_noalias = buffer.assume.noalias %input, %weight, %bias, %image_indicator, %indicator_embedding, %output : buffer, buffer, buffer, buffer, buffer, buffer
   %input_global = buffer.assume.memory_space<global> %input_noalias : buffer
   %weight_global = buffer.assume.memory_space<global> %weight_noalias : buffer
@@ -54,12 +56,10 @@ kernel.def export("id4_ideogram4_condition_project_bf16_f32") @id4_ideogram4_con
   %image_indicator_view = buffer.view %image_indicator_global[%base] : buffer -> view<[%total_token_count]xi32, #dense>
   %indicator_embedding_view = buffer.view %indicator_embedding_global[%base] : buffer -> view<2x[%hidden_size]xbf16, #dense>
   %output_view = buffer.view %output_global[%base] : buffer -> view<[%hidden_size]x[%total_token_count]xf32, #dense>
-
   %scratch_weight = buffer.alloca %scratch_bytes {base_alignment = 16, memory_space = workgroup} : buffer
   %scratch_input = buffer.alloca %scratch_bytes {base_alignment = 16, memory_space = workgroup} : buffer
   %scratch_weight_view = buffer.view %scratch_weight[%base] : buffer -> view<1024xf32, #dense>
   %scratch_input_view = buffer.view %scratch_input[%base] : buffer -> view<1024xf32, #dense>
-
   %dot = scf.for %k_base = [%zero to %feature_count step %k_block](%acc = %zero_f32 : f32) -> (f32) {
     scf.for %linear = [%lane to %scratch_tile_elements step %workgroup_size_x] {
       %weight_k_offset = index.rem %linear, %k_block : index
@@ -77,7 +77,6 @@ kernel.def export("id4_ideogram4_condition_project_bf16_f32") @id4_ideogram4_con
         scf.yield %zero_f32 : f32
       }
       view.store %weight_value, %scratch_weight_view[%linear] : f32, view<1024xf32, #dense>
-
       %input_token_offset = index.rem %linear, %token_block : index
       %input_k_offset = index.div %linear, %token_block : index
       %input_text_token = index.add %base_text_token, %input_token_offset : index
@@ -95,9 +94,7 @@ kernel.def export("id4_ideogram4_condition_project_bf16_f32") @id4_ideogram4_con
       }
       view.store %input_value, %scratch_input_view[%linear] : f32, view<1024xf32, #dense>
     }
-
     kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
-
     %block_dot = scf.for %k_offset = [%zero to %k_block step %one](%block_acc = %acc : f32) -> (f32) {
       %weight_scratch_row_base = index.mul %local_row, %k_block : index
       %weight_scratch_index = index.add %weight_scratch_row_base, %k_offset : index
@@ -109,11 +106,9 @@ kernel.def export("id4_ideogram4_condition_project_bf16_f32") @id4_ideogram4_con
       %next = scalar.addf<reassoc|nnan|ninf|nsz> %block_acc, %product : f32
       scf.yield %next : f32
     }
-
     kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
     scf.yield %block_dot : f32
   }
-
   %token_valid = index.cmp ult, %text_token, %text_token_count : index
   %row_valid = index.cmp ult, %output_row, %hidden_size : index
   %valid_output = scalar.andi %token_valid, %row_valid : i1
@@ -125,8 +120,12 @@ kernel.def export("id4_ideogram4_condition_project_bf16_f32") @id4_ideogram4_con
     %indicator_embedding_bf16 = view.load %indicator_embedding_view[%indicator_index, %output_row] : view<2x[%hidden_size]xbf16, #dense> -> bf16
     %indicator_embedding_f32 = scalar.extf %indicator_embedding_bf16 : bf16 to f32
     %with_bias = scalar.addf<reassoc|nnan|ninf|nsz> %dot, %bias_f32 : f32
-    %value = scalar.addf<reassoc|nnan|ninf|nsz> %with_bias, %indicator_embedding_f32 : f32
-    view.store %value, %output_view[%output_row, %text_token] : f32, view<[%hidden_size]x[%total_token_count]xf32, #dense>
+    %with_bias_bf16 = scalar.fptrunc %with_bias : f32 to bf16
+    %with_bias_value = scalar.extf %with_bias_bf16 : bf16 to f32
+    %value = scalar.addf<reassoc|nnan|ninf|nsz> %with_bias_value, %indicator_embedding_f32 : f32
+    %value_bf16 = scalar.fptrunc %value : f32 to bf16
+    %value_rounded = scalar.extf %value_bf16 : bf16 to f32
+    view.store %value_rounded, %output_view[%output_row, %text_token] : f32, view<[%hidden_size]x[%total_token_count]xf32, #dense>
   }
   kernel.return
 }
@@ -138,7 +137,7 @@ check.case public @id4_ideogram4_condition_project_bf16_f32_small_case {
   %image_indicator = check.generate.fill value(0) : tensor<1xi32>
   %indicator_embedding = check.generate.fill value(3.0) : tensor<2x2xbf16>
   %output = check.generate.fill value(0.0) : tensor<2x1xf32>
-  %expected = check.generate.iota offset(15.078125) step(16.125) : tensor<2x1xf32>
+  %expected = check.generate.iota offset(15.0625) step(16.1875) : tensor<2x1xf32>
   func.call @id4_ideogram4_condition_project_bf16_f32(%input, %weight, %bias, %image_indicator, %indicator_embedding, %output) : (tensor<4x1xf32>, tensor<2x4xbf16>, tensor<2xbf16>, tensor<1xi32>, tensor<2x2xbf16>, tensor<2x1xf32>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2x1xf32>
   check.return
@@ -158,4 +157,5 @@ check.case public @id4_ideogram4_condition_project_bf16_f32_ideogram_slice_case 
 }
 
 check.benchmark<@id4_ideogram4_condition_project_bf16_f32_small_case> @id4_ideogram4_condition_project_bf16_f32_small
+
 check.benchmark<@id4_ideogram4_condition_project_bf16_f32_ideogram_slice_case> @id4_ideogram4_condition_project_bf16_f32_ideogram_slice

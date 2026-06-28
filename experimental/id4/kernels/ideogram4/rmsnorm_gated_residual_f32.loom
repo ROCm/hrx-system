@@ -1,4 +1,5 @@
 config.decl @id4.ideogram4.rmsnorm_gated_residual.token_count : %value: index where [range(%value, 1, 131072)]
+
 config.decl @id4.ideogram4.rmsnorm_gated_residual.hidden_size : %value: index where [range(%value, 1, 65536)]
 
 kernel.def export("id4_ideogram4_rmsnorm_gated_residual_f32") @id4_ideogram4_rmsnorm_gated_residual_f32() {
@@ -14,10 +15,9 @@ kernel.def export("id4_ideogram4_rmsnorm_gated_residual_f32") @id4_ideogram4_rms
   %token_count = config.get @id4.ideogram4.rmsnorm_gated_residual.token_count : index
   %hidden_size = config.get @id4.ideogram4.rmsnorm_gated_residual.hidden_size : index
   %zero_f32 = scalar.constant 0.0 : f32
-  %epsilon = scalar.constant 0.00001 : f32
+  %epsilon = scalar.constant 1.0000000000000001e-05 : f32
   %hidden_size_i32 = index.cast %hidden_size : index to i32
   %hidden_size_f32 = scalar.sitofp %hidden_size_i32 : i32 to f32
-
   %input_noalias, %weight_noalias, %gate_noalias, %residual_noalias, %output_noalias = buffer.assume.noalias %input, %weight, %gate, %residual, %output : buffer, buffer, buffer, buffer, buffer
   %input_global = buffer.assume.memory_space<global> %input_noalias : buffer
   %weight_global = buffer.assume.memory_space<global> %weight_noalias : buffer
@@ -29,7 +29,6 @@ kernel.def export("id4_ideogram4_rmsnorm_gated_residual_f32") @id4_ideogram4_rms
   %gate_view = buffer.view %gate_global[%base] : buffer -> view<[%hidden_size]xf32, #dense>
   %residual_view = buffer.view %residual_global[%base] : buffer -> view<[%hidden_size]x[%token_count]xf32, #dense>
   %output_view = buffer.view %output_global[%base] : buffer -> view<[%hidden_size]x[%token_count]xf32, #dense>
-
   %lane_square_sum = scf.for %hidden = [%lane to %hidden_size step %workgroup_size_x](%acc = %zero_f32 : f32) -> (f32) {
     %value = view.load %input_view[%hidden, %token] : view<[%hidden_size]x[%token_count]xf32, #dense> -> f32
     %square = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %value, %value : f32
@@ -40,7 +39,6 @@ kernel.def export("id4_ideogram4_rmsnorm_gated_residual_f32") @id4_ideogram4_rms
   %mean_square = scalar.divf<nnan|ninf|nsz|arcp> %square_sum, %hidden_size_f32 : f32
   %mean_square_epsilon = scalar.addf<nnan|ninf|nsz> %mean_square, %epsilon : f32
   %row_scale = scalar.rsqrtf<nnan|ninf|nsz|afn> %mean_square_epsilon : f32
-
   scf.for %hidden = [%lane to %hidden_size step %workgroup_size_x] {
     %value = view.load %input_view[%hidden, %token] : view<[%hidden_size]x[%token_count]xf32, #dense> -> f32
     %weight_bf16 = view.load %weight_view[%hidden] : view<[%hidden_size]xbf16, #dense> -> bf16
@@ -69,10 +67,9 @@ kernel.def export("id4_ideogram4_rmsnorm_gated_residual_input_bf16") @id4_ideogr
   %token_count = config.get @id4.ideogram4.rmsnorm_gated_residual.token_count : index
   %hidden_size = config.get @id4.ideogram4.rmsnorm_gated_residual.hidden_size : index
   %zero_f32 = scalar.constant 0.0 : f32
-  %epsilon = scalar.constant 0.00001 : f32
+  %epsilon = scalar.constant 1.0000000000000001e-05 : f32
   %hidden_size_i32 = index.cast %hidden_size : index to i32
   %hidden_size_f32 = scalar.sitofp %hidden_size_i32 : i32 to f32
-
   %input_noalias, %weight_noalias, %gate_noalias, %residual_noalias, %output_noalias = buffer.assume.noalias %input, %weight, %gate, %residual, %output : buffer, buffer, buffer, buffer, buffer
   %input_global = buffer.assume.memory_space<global> %input_noalias : buffer
   %weight_global = buffer.assume.memory_space<global> %weight_noalias : buffer
@@ -84,7 +81,6 @@ kernel.def export("id4_ideogram4_rmsnorm_gated_residual_input_bf16") @id4_ideogr
   %gate_view = buffer.view %gate_global[%base] : buffer -> view<[%hidden_size]xf32, #dense>
   %residual_view = buffer.view %residual_global[%base] : buffer -> view<[%hidden_size]x[%token_count]xf32, #dense>
   %output_view = buffer.view %output_global[%base] : buffer -> view<[%hidden_size]x[%token_count]xf32, #dense>
-
   %lane_square_sum = scf.for %hidden = [%lane to %hidden_size step %workgroup_size_x](%acc = %zero_f32 : f32) -> (f32) {
     %value_bf16 = view.load %input_view[%token, %hidden] : view<[%token_count]x[%hidden_size]xbf16, #dense> -> bf16
     %value = scalar.extf %value_bf16 : bf16 to f32
@@ -96,7 +92,6 @@ kernel.def export("id4_ideogram4_rmsnorm_gated_residual_input_bf16") @id4_ideogr
   %mean_square = scalar.divf<nnan|ninf|nsz|arcp> %square_sum, %hidden_size_f32 : f32
   %mean_square_epsilon = scalar.addf<nnan|ninf|nsz> %mean_square, %epsilon : f32
   %row_scale = scalar.rsqrtf<nnan|ninf|nsz|afn> %mean_square_epsilon : f32
-
   scf.for %hidden = [%lane to %hidden_size step %workgroup_size_x] {
     %value_bf16 = view.load %input_view[%token, %hidden] : view<[%token_count]x[%hidden_size]xbf16, #dense> -> bf16
     %value = scalar.extf %value_bf16 : bf16 to f32
@@ -106,9 +101,19 @@ kernel.def export("id4_ideogram4_rmsnorm_gated_residual_input_bf16") @id4_ideogr
     %residual_value = view.load %residual_view[%hidden, %token] : view<[%hidden_size]x[%token_count]xf32, #dense> -> f32
     %normalized = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %value, %row_scale : f32
     %weighted = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %normalized, %weight_value : f32
-    %gated = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %weighted, %gate_value : f32
-    %output_value = scalar.addf<reassoc|nnan|ninf|nsz> %residual_value, %gated : f32
-    view.store %output_value, %output_view[%hidden, %token] : f32, view<[%hidden_size]x[%token_count]xf32, #dense>
+    %weighted_bf16 = scalar.fptrunc %weighted : f32 to bf16
+    %weighted_value = scalar.extf %weighted_bf16 : bf16 to f32
+    %gate_bf16 = scalar.fptrunc %gate_value : f32 to bf16
+    %gate_rounded = scalar.extf %gate_bf16 : bf16 to f32
+    %gated = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %weighted_value, %gate_rounded : f32
+    %gated_bf16 = scalar.fptrunc %gated : f32 to bf16
+    %gated_value = scalar.extf %gated_bf16 : bf16 to f32
+    %residual_bf16 = scalar.fptrunc %residual_value : f32 to bf16
+    %residual_rounded = scalar.extf %residual_bf16 : bf16 to f32
+    %output_value = scalar.addf<reassoc|nnan|ninf|nsz> %residual_rounded, %gated_value : f32
+    %output_bf16 = scalar.fptrunc %output_value : f32 to bf16
+    %output_rounded = scalar.extf %output_bf16 : bf16 to f32
+    view.store %output_rounded, %output_view[%hidden, %token] : f32, view<[%hidden_size]x[%token_count]xf32, #dense>
   }
   kernel.return
 }
@@ -121,7 +126,7 @@ check.case public @id4_ideogram4_rmsnorm_gated_residual_f32_small_case {
   %output = check.generate.fill value(0.0) : tensor<4x1xf32>
   %expected = check.generate.fill value(13.0) : tensor<4x1xf32>
   func.call @id4_ideogram4_rmsnorm_gated_residual_f32(%input, %weight, %gate, %residual, %output) : (tensor<4x1xf32>, tensor<4xbf16>, tensor<4xf32>, tensor<4x1xf32>, tensor<4x1xf32>)
-  check.expect.close actual(%output) expected(%expected) atol(0.00001) rtol(0.00001) nan(same) : tensor<4x1xf32>
+  check.expect.close actual(%output) expected(%expected) atol(1.0000000000000001e-05) rtol(1.0000000000000001e-05) nan(same) : tensor<4x1xf32>
   check.return
 }
 
@@ -133,7 +138,7 @@ check.case public @id4_ideogram4_rmsnorm_gated_residual_f32_ideogram_shape_case 
   %output = check.generate.fill value(0.0) : tensor<4608x2xf32>
   %expected = check.generate.fill value(8.0) : tensor<4608x2xf32>
   func.call @id4_ideogram4_rmsnorm_gated_residual_f32(%input, %weight, %gate, %residual, %output) : (tensor<4608x2xf32>, tensor<4608xbf16>, tensor<4608xf32>, tensor<4608x2xf32>, tensor<4608x2xf32>)
-  check.expect.close actual(%output) expected(%expected) atol(0.00001) rtol(0.00001) nan(same) : tensor<4608x2xf32>
+  check.expect.close actual(%output) expected(%expected) atol(1.0000000000000001e-05) rtol(1.0000000000000001e-05) nan(same) : tensor<4608x2xf32>
   check.return
 }
 
@@ -145,7 +150,7 @@ check.case public @id4_ideogram4_rmsnorm_gated_residual_input_bf16_small_case {
   %output = check.generate.fill value(0.0) : tensor<4x1xf32>
   %expected = check.generate.fill value(13.0) : tensor<4x1xf32>
   func.call @id4_ideogram4_rmsnorm_gated_residual_input_bf16(%input, %weight, %gate, %residual, %output) : (tensor<1x4xbf16>, tensor<4xbf16>, tensor<4xf32>, tensor<4x1xf32>, tensor<4x1xf32>)
-  check.expect.close actual(%output) expected(%expected) atol(0.00001) rtol(0.00001) nan(same) : tensor<4x1xf32>
+  check.expect.close actual(%output) expected(%expected) atol(1.0000000000000001e-05) rtol(1.0000000000000001e-05) nan(same) : tensor<4x1xf32>
   check.return
 }
 
@@ -157,11 +162,14 @@ check.case public @id4_ideogram4_rmsnorm_gated_residual_input_bf16_ideogram_shap
   %output = check.generate.fill value(0.0) : tensor<4608x2xf32>
   %expected = check.generate.fill value(8.0) : tensor<4608x2xf32>
   func.call @id4_ideogram4_rmsnorm_gated_residual_input_bf16(%input, %weight, %gate, %residual, %output) : (tensor<2x4608xbf16>, tensor<4608xbf16>, tensor<4608xf32>, tensor<4608x2xf32>, tensor<4608x2xf32>)
-  check.expect.close actual(%output) expected(%expected) atol(0.00001) rtol(0.00001) nan(same) : tensor<4608x2xf32>
+  check.expect.close actual(%output) expected(%expected) atol(1.0000000000000001e-05) rtol(1.0000000000000001e-05) nan(same) : tensor<4608x2xf32>
   check.return
 }
 
 check.benchmark<@id4_ideogram4_rmsnorm_gated_residual_f32_small_case> @id4_ideogram4_rmsnorm_gated_residual_f32_small
+
 check.benchmark<@id4_ideogram4_rmsnorm_gated_residual_f32_ideogram_shape_case> @id4_ideogram4_rmsnorm_gated_residual_f32_ideogram_shape
+
 check.benchmark<@id4_ideogram4_rmsnorm_gated_residual_input_bf16_small_case> @id4_ideogram4_rmsnorm_gated_residual_input_bf16_small
+
 check.benchmark<@id4_ideogram4_rmsnorm_gated_residual_input_bf16_ideogram_shape_case> @id4_ideogram4_rmsnorm_gated_residual_input_bf16_ideogram_shape
