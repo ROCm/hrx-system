@@ -229,9 +229,15 @@ static iree_string_view_t FeedForwardImplementationName(
   }
 }
 
+static uint64_t CeilMiB(iree_device_size_t byte_length) {
+  static constexpr iree_device_size_t kMiB = 1024ull * 1024ull;
+  return (uint64_t)((byte_length + kMiB - 1) / kMiB);
+}
+
 static void SetDitBenchmarkLabel(iree_benchmark_state_t* benchmark_state,
                                  const DitBenchmarkContext& context,
-                                 DitBenchmarkBranch branch) {
+                                 DitBenchmarkBranch branch,
+                                 id4_pipeline_plan_statistics_t statistics) {
   const iree_string_view_t branch_name = BranchName(branch);
   const iree_string_view_t parameter_format =
       id4_ideogram4_dit_parameter_format_name(context.parameter_format);
@@ -242,18 +248,26 @@ static void SetDitBenchmarkLabel(iree_benchmark_state_t* benchmark_state,
   const uint64_t latent_width = context.request.latent_shape.dims[0];
   const uint64_t latent_height = context.request.latent_shape.dims[1];
   const uint64_t latent_token_count = latent_width * latent_height;
-  char label[256];
+  char label[512];
   std::snprintf(
       label, sizeof(label),
       "branch=%.*s params=%.*s attention=%.*s ff=%.*s text_tokens=%" PRIu32
-      " latent_tokens=%" PRIu64 " latent=%" PRIu64 "x%" PRIu64,
+      " latent_tokens=%" PRIu64 " latent=%" PRIu64 "x%" PRIu64
+      " param_total=%" PRIu64 "MiB param_largest=%" PRIu64
+      "MiB local_hw=%" PRIu64 "MiB boundary=%" PRIu64 "MiB kernels=%" PRIhsz
+      " dispatches=%" PRIhsz,
       static_cast<int>(branch_name.size), branch_name.data,
       static_cast<int>(parameter_format.size), parameter_format.data,
       static_cast<int>(attention_implementation.size),
       attention_implementation.data,
       static_cast<int>(feed_forward_implementation.size),
       feed_forward_implementation.data, context.request.text_token_count,
-      latent_token_count, latent_width, latent_height);
+      latent_token_count, latent_width, latent_height,
+      CeilMiB(statistics.parameter_slab_byte_length),
+      CeilMiB(statistics.largest_parameter_slab_byte_length),
+      CeilMiB(statistics.memory_slab_high_water_mark),
+      CeilMiB(statistics.boundary_tensor_byte_length), statistics.kernel_count,
+      statistics.dispatch_count);
   iree_benchmark_set_label(benchmark_state, label);
 }
 
@@ -696,6 +710,8 @@ static iree_status_t RunPlanBenchmark(iree_benchmark_state_t* benchmark_state,
   id4::test::OwningRef<id4_pipeline_plan_t, id4_pipeline_plan_release>
       warm_plan;
   IREE_RETURN_IF_ERROR(CreateDitPlan(&context, warm_plan.out()));
+  const id4_pipeline_plan_statistics_t statistics =
+      id4_pipeline_plan_statistics(warm_plan.get());
   IREE_RETURN_IF_ERROR(WritePlanJsonIfRequested(branch, warm_plan.get()));
   warm_plan.reset();
 
@@ -712,7 +728,7 @@ static iree_status_t RunPlanBenchmark(iree_benchmark_state_t* benchmark_state,
       static_cast<int64_t>(iteration_count *
                            context.request.latent_shape.dims[0] *
                            context.request.latent_shape.dims[1]));
-  SetDitBenchmarkLabel(benchmark_state, context, branch);
+  SetDitBenchmarkLabel(benchmark_state, context, branch, statistics);
   return iree_ok_status();
 }
 
@@ -735,6 +751,8 @@ static iree_status_t RunPrepareBenchmark(
 
   id4::test::OwningRef<id4_pipeline_plan_t, id4_pipeline_plan_release> plan;
   IREE_RETURN_IF_ERROR(CreateDitPlan(&context, plan.out()));
+  const id4_pipeline_plan_statistics_t statistics =
+      id4_pipeline_plan_statistics(plan.get());
   IREE_RETURN_IF_ERROR(WritePlanJsonIfRequested(branch, plan.get()));
 
   id4::test::OwningRef<iree_hal_semaphore_t, iree_hal_semaphore_release>
@@ -771,7 +789,7 @@ static iree_status_t RunPrepareBenchmark(
       static_cast<int64_t>(iteration_count *
                            context.request.latent_shape.dims[0] *
                            context.request.latent_shape.dims[1]));
-  SetDitBenchmarkLabel(benchmark_state, context, branch);
+  SetDitBenchmarkLabel(benchmark_state, context, branch, statistics);
   return iree_ok_status();
 }
 
@@ -796,6 +814,8 @@ static iree_status_t RunIssueBenchmark(iree_benchmark_state_t* benchmark_state,
 
   id4::test::OwningRef<id4_pipeline_plan_t, id4_pipeline_plan_release> plan;
   IREE_RETURN_IF_ERROR(CreateDitPlan(&context, plan.out()));
+  const id4_pipeline_plan_statistics_t statistics =
+      id4_pipeline_plan_statistics(plan.get());
   IREE_RETURN_IF_ERROR(WritePlanJsonIfRequested(branch, plan.get()));
 
   id4::test::OwningRef<iree_hal_semaphore_t, iree_hal_semaphore_release>
@@ -880,7 +900,7 @@ static iree_status_t RunIssueBenchmark(iree_benchmark_state_t* benchmark_state,
       static_cast<int64_t>(iteration_count *
                            context.request.latent_shape.dims[0] *
                            context.request.latent_shape.dims[1]));
-  SetDitBenchmarkLabel(benchmark_state, context, branch);
+  SetDitBenchmarkLabel(benchmark_state, context, branch, statistics);
   return iree_ok_status();
 }
 
