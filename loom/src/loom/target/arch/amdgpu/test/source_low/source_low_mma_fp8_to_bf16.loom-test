@@ -28,7 +28,7 @@ kernel.def target(@target) @gfx942_fp8_rhs_bf16_mfma_fragment_memory() {
 low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx942_fp8_rhs_bf16_mfma_fragment_memory() asm<amdgpu.cdna3.core> {
   %18 = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %lhs_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
-  %rhs_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %rhs_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %out_view = resource<hal_binding> {index = 2, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
   %22 = v_and_b32_src0_inline %18, 15
   %23 = v_lshrrev_b32_src0_inline %18, 4
@@ -126,7 +126,7 @@ kernel.def target(@target) @gfx942_fp8_rhs_bf16_physical_storage_mfma_fragment_m
 low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx942_fp8_rhs_bf16_physical_storage_mfma_fragment_memory() asm<amdgpu.cdna3.core> {
   %20 = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %lhs_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
-  %rhs_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %rhs_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %out_view = resource<hal_binding> {index = 2, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
   %24 = v_and_b32_src0_inline %20, 15
   %25 = v_lshrrev_b32_src0_inline %20, 4
@@ -222,7 +222,7 @@ kernel.def target(@target) @gfx1200_fp8_rhs_bf16_wmma_fragment_memory() {
 low.kernel.def target(@target) workgroup_size(32, 1, 1) @gfx1200_fp8_rhs_bf16_wmma_fragment_memory() asm<amdgpu.rdna4.core> {
   %18 = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %lhs_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
-  %rhs_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %rhs_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %out_view = resource<hal_binding> {index = 2, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
   %22 = v_and_b32_src0_inline %18, 15
   %23 = v_lshrrev_b32_src0_inline %18, 4
@@ -343,7 +343,7 @@ kernel.def target(@target) @gfx1250_fp8_rhs_bf16_wmma_fragment_memory() {
 low.kernel.def target(@target) workgroup_size(32, 1, 1) @gfx1250_fp8_rhs_bf16_wmma_fragment_memory() asm<amdgpu.rdna4.gfx125x.core> {
   %18 = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %lhs_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
-  %rhs_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %rhs_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
   %out_view = resource<hal_binding> {index = 2, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
   %22 = v_and_b32_src0_inline %18, 15
   %23 = v_lshrrev_b32_src0_inline %18, 4
@@ -454,7 +454,7 @@ kernel.def target(@target) @gfx950_fp8_rhs_bf16_mfma_fragment_memory() {
 low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx950_fp8_rhs_bf16_mfma_fragment_memory() asm<amdgpu.cdna4.core> {
   %18 = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %lhs_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
-  %rhs_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %rhs_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
   %out_view = resource<hal_binding> {index = 2, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
   %22 = v_and_b32_src0_inline %18, 15
   %23 = v_lshrrev_b32_src0_inline %18, 4

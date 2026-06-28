@@ -10,7 +10,6 @@
 
 #include "loom/ir/context.h"
 #include "loom/ops/buffer/ops.h"
-#include "loom/ops/encoding/storage.h"
 #include "loom/ops/kernel/ops.h"
 #include "loom/target/arch/amdgpu/hal/kernel_abi.h"
 #include "loom/target/arch/amdgpu/lower/constants.h"
@@ -46,55 +45,15 @@ static uint32_t loom_amdgpu_hal_binding_index(loom_low_lower_context_t* context,
 typedef struct loom_amdgpu_buffer_argument_extent_t {
   // Module containing the source function being inspected.
   const loom_module_t* module;
+  // Source function facts used to resolve SSA layout and view footprint facts.
+  const loom_value_fact_table_t* fact_table;
   // True once a buffer.view derived from the source argument is found.
   bool found_view;
-  // True when a derived view has no exact static dense byte extent.
+  // True when a derived view has no exact byte range.
   bool found_unbounded_view;
   // Maximum byte extent required by all statically boundable derived views.
   int64_t extent;
 } loom_amdgpu_buffer_argument_extent_t;
-
-static bool loom_amdgpu_view_static_dense_byte_extent(
-    const loom_module_t* module, loom_type_t view_type,
-    int64_t* out_byte_extent) {
-  *out_byte_extent = 0;
-  if (!loom_type_is_view(view_type)) {
-    return false;
-  }
-
-  loom_value_facts_t stride_storage[LOOM_ENCODING_ADDRESS_LAYOUT_MAX_RANK] = {
-      0};
-  loom_value_fact_address_layout_t layout = {0};
-  if (!loom_encoding_query_type_address_layout(
-          /*context=*/NULL, module, view_type, stride_storage,
-          IREE_ARRAYSIZE(stride_storage), &layout) ||
-      layout.kind != LOOM_VALUE_FACT_ADDRESS_LAYOUT_DENSE) {
-    return false;
-  }
-
-  const int32_t element_bit_count =
-      loom_scalar_type_bitwidth(loom_type_element_type(view_type));
-  if (element_bit_count <= 0 || (element_bit_count % 8) != 0) {
-    return false;
-  }
-
-  int64_t element_count = 1;
-  const uint8_t rank = loom_type_rank(view_type);
-  for (uint8_t i = 0; i < rank; ++i) {
-    if (loom_type_dim_is_dynamic_at(view_type, i)) {
-      return false;
-    }
-    const int64_t dim_size = loom_type_dim_static_size_at(view_type, i);
-    if (dim_size < 0 ||
-        !iree_checked_mul_i64(element_count, dim_size, &element_count)) {
-      return false;
-    }
-  }
-
-  const int64_t element_byte_count = element_bit_count / 8;
-  return iree_checked_mul_i64(element_count, element_byte_count,
-                              out_byte_extent);
-}
 
 static void loom_amdgpu_buffer_argument_extent_include_view(
     loom_amdgpu_buffer_argument_extent_t* state,
@@ -106,15 +65,16 @@ static void loom_amdgpu_buffer_argument_extent_include_view(
   int64_t base_byte_offset = 0;
   int64_t view_byte_extent = 0;
   int64_t extent = 0;
-  if (!loom_amdgpu_module_value_as_exact_index_constant(
-          state->module, loom_buffer_view_byte_offset(buffer_view_op),
-          &base_byte_offset) ||
+  loom_value_fact_view_reference_t view_reference = {0};
+  loom_value_facts_t view_facts = loom_value_fact_table_lookup(
+      state->fact_table, loom_buffer_view_result(buffer_view_op));
+  if (!loom_value_facts_query_view_reference(&state->fact_table->context,
+                                             view_facts, &view_reference) ||
+      !loom_value_facts_as_exact_i64(view_reference.base_byte_offset,
+                                     &base_byte_offset) ||
       base_byte_offset < 0 ||
-      !loom_amdgpu_view_static_dense_byte_extent(
-          state->module,
-          loom_module_value_type(state->module,
-                                 loom_buffer_view_result(buffer_view_op)),
-          &view_byte_extent) ||
+      !loom_value_facts_as_exact_i64(view_reference.footprint_byte_length,
+                                     &view_byte_extent) ||
       !iree_checked_add_i64(base_byte_offset, view_byte_extent, &extent)) {
     state->found_unbounded_view = true;
     return;
@@ -151,7 +111,11 @@ static bool loom_amdgpu_source_buffer_argument_extent(
   const loom_module_t* module = loom_low_lower_context_module(context);
   loom_amdgpu_buffer_argument_extent_t state = {
       .module = module,
+      .fact_table = loom_low_lower_context_fact_table(context),
   };
+  if (!state.fact_table) {
+    return false;
+  }
   loom_amdgpu_buffer_argument_extent_include_uses(&state, source_argument_id);
   if (!state.found_view || state.found_unbounded_view) {
     return false;
