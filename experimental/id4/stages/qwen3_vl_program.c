@@ -21,6 +21,8 @@ enum {
   ID4_QWEN3_VL_LINEAR_WMMA_INPUT_BLOCK = 16,
   ID4_QWEN3_VL_LINEAR_WMMA_OUTPUT_ROW_BLOCK_M32 = 32,
   ID4_QWEN3_VL_LINEAR_WMMA_OUTPUT_ROW_BLOCK_M64 = 64,
+  ID4_QWEN3_VL_LINEAR_WMMA_M32N64_MIN_TOKEN_COUNT = 1024,
+  ID4_QWEN3_VL_LINEAR_WMMA_M32N64_MAX_OUTPUT_SIZE = 4096,
   ID4_QWEN3_VL_CONDITION_BLOCK_ELEMENT_COUNT = 2048,
   ID4_QWEN3_VL_CONFIG_VALUE_BUFFER_CAPACITY = 16,
   ID4_QWEN3_VL_MAX_KERNEL_CONFIG_BINDING_COUNT = 8,
@@ -646,6 +648,16 @@ static const id4_qwen3_vl_program_linear_wmma_tile_t
 };
 
 static const id4_qwen3_vl_program_linear_wmma_tile_t
+    id4_qwen3_vl_program_linear_wmma_m32n64_tile = {
+        // Number of token rows covered by one WMMA dispatch tile.
+        .token_block = ID4_QWEN3_VL_LINEAR_WMMA_TOKEN_BLOCK_M32,
+        // Number of output rows covered by one WMMA dispatch tile.
+        .output_row_block = ID4_QWEN3_VL_LINEAR_WMMA_OUTPUT_ROW_BLOCK_M64,
+        // Kernel kind implementing this tile shape.
+        .kernel_kind = ID4_QWEN3_VL_KERNEL_LINEAR_BF16_BF16_WMMA_M32N64,
+};
+
+static const id4_qwen3_vl_program_linear_wmma_tile_t
     id4_qwen3_vl_program_linear_wmma_m16n64_tile = {
         // Number of token rows covered by one WMMA dispatch tile.
         .token_block = ID4_QWEN3_VL_LINEAR_WMMA_TOKEN_BLOCK_M16,
@@ -665,9 +677,19 @@ id4_qwen3_vl_program_select_linear_wmma_tile(uint32_t token_count,
   const uint32_t m32_remainder =
       token_count % ID4_QWEN3_VL_LINEAR_WMMA_TOKEN_BLOCK_M32;
   if (token_count >= ID4_QWEN3_VL_LINEAR_WMMA_TOKEN_BLOCK_M32 &&
-      m32_remainder < ID4_QWEN3_VL_LINEAR_WMMA_TOKEN_BLOCK_M16 &&
-      (output_size %
-       id4_qwen3_vl_program_linear_wmma_m32n32_tile.output_row_block) == 0) {
+      m32_remainder < ID4_QWEN3_VL_LINEAR_WMMA_TOKEN_BLOCK_M16) {
+    // The wider output tile has higher register pressure; keep it for long
+    // token spans where lower dispatch count dominates.
+    if (token_count >= ID4_QWEN3_VL_LINEAR_WMMA_M32N64_MIN_TOKEN_COUNT &&
+        output_size <= ID4_QWEN3_VL_LINEAR_WMMA_M32N64_MAX_OUTPUT_SIZE &&
+        (output_size %
+         id4_qwen3_vl_program_linear_wmma_m32n64_tile.output_row_block) == 0) {
+      return &id4_qwen3_vl_program_linear_wmma_m32n64_tile;
+    }
+    if ((output_size %
+         id4_qwen3_vl_program_linear_wmma_m32n32_tile.output_row_block) != 0) {
+      return NULL;
+    }
     return &id4_qwen3_vl_program_linear_wmma_m32n32_tile;
   }
   if (token_count >= ID4_QWEN3_VL_LINEAR_WMMA_TOKEN_BLOCK_M16 &&
