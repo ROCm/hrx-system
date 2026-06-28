@@ -3171,8 +3171,9 @@ loom_amdgpu_emit_fragment_memory_fp8_to_packed_bf16_register(
         context, source_op, decode_plan, low_source, packet_register_count,
         byte_index, vgpr_type, &low_elements[element_index]));
     IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fp8_to_bf16_lane(
-        context, source_op, decode_plan, low_elements[element_index], vgpr_type,
-        mask_type, &low_elements[element_index]));
+        context, source_op, decode_plan, low_elements[element_index],
+        LOOM_AMDGPU_FP8_DECODE_VALUE_FLAG_NONE, vgpr_type, mask_type,
+        &low_elements[element_index]));
   }
 
   return loom_amdgpu_emit_packed_bf16_pair(context, source_op, decode_plan,

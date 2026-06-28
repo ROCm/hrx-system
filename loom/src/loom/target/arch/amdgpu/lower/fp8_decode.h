@@ -31,6 +31,15 @@ typedef enum loom_amdgpu_fp8_decode_plan_flag_bits_e {
 } loom_amdgpu_fp8_decode_plan_flag_bits_t;
 typedef uint32_t loom_amdgpu_fp8_decode_plan_flags_t;
 
+// Per-value facts that can simplify the generated special-value decode path.
+// These describe the actual value being decoded, not the full source FP8 type.
+typedef enum loom_amdgpu_fp8_decode_value_flag_bits_e {
+  LOOM_AMDGPU_FP8_DECODE_VALUE_FLAG_NONE = 0u,
+  LOOM_AMDGPU_FP8_DECODE_VALUE_FLAG_NOT_NAN = 1u << 0,
+  LOOM_AMDGPU_FP8_DECODE_VALUE_FLAG_NOT_INF = 1u << 1,
+} loom_amdgpu_fp8_decode_value_flag_bits_t;
+typedef uint32_t loom_amdgpu_fp8_decode_value_flags_t;
+
 enum {
   LOOM_AMDGPU_FP8_BF16_BYTE_COUNT = 2u,
   LOOM_AMDGPU_FP8_BF16_BYTE_TABLE_WORD_COUNT = 2u,
@@ -90,7 +99,8 @@ iree_status_t loom_amdgpu_select_fp8_decode_plan(
 iree_status_t loom_amdgpu_emit_fp8_to_bf16_lane(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_amdgpu_fp8_decode_plan_t* plan, loom_value_id_t low_byte,
-    loom_type_t vgpr_type, loom_type_t mask_type, loom_value_id_t* out_lane);
+    loom_amdgpu_fp8_decode_value_flags_t value_flags, loom_type_t vgpr_type,
+    loom_type_t mask_type, loom_value_id_t* out_lane);
 
 // Emits one packed VGPR containing two BF16 bit payloads.
 iree_status_t loom_amdgpu_emit_packed_bf16_pair(

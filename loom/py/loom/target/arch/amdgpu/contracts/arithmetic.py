@@ -11,6 +11,7 @@ from __future__ import annotations
 from loom.dialect.index import ALL_INDEX_OPS
 from loom.dialect.index import defs as index
 from loom.dialect.scalar import ALL_SCALAR_OPS
+from loom.dialect.scalar import analysis as scalar_analysis
 from loom.dialect.scalar import arithmetic as scalar_arithmetic
 from loom.dialect.scalar import conversion as scalar_conversion
 from loom.dialect.scalar import math as scalar_math
@@ -175,6 +176,11 @@ _VEC_F64_STATIC = Vector(
     minimum_static_elements=1,
     maximum_static_elements="(LOOM_AMDGPU_MAX_SCALARIZED_32BIT_LANES / 2u)",
 )
+_VEC_I1_STATIC = Vector(
+    "i1",
+    minimum_static_elements=1,
+    maximum_static_elements="LOOM_AMDGPU_MAX_SCALARIZED_32BIT_LANES",
+)
 _VEC_F16_PACKED_STORAGE = Vector(
     "f16",
     minimum_lanes=1,
@@ -215,6 +221,7 @@ _VEC_F8E5M2_PACKED = Vector(
     minimum_lanes=1,
     maximum_lanes="LOOM_AMDGPU_MAX_PACKED_I8_LANES",
 )
+_I1 = Scalar("i1")
 _I8 = Scalar("i8")
 _I16 = Scalar("i16")
 _I32 = Scalar("i32")
@@ -264,6 +271,11 @@ _VEC_F64_DIAGNOSTIC = GuardDiagnostic(
     subject_role="type",
     subject_name="vector<f64>",
     constraint_key="amdgpu.arithmetic.vector_f64",
+)
+_VEC_I1_DIAGNOSTIC = GuardDiagnostic(
+    subject_role="type",
+    subject_name="vector<i1>",
+    constraint_key="amdgpu.arithmetic.vector_i1",
 )
 _VEC_F16_PACKED_DIAGNOSTIC = GuardDiagnostic(
     subject_role="type",
@@ -390,6 +402,11 @@ _RESULT_VGPR_DIAGNOSTIC = GuardDiagnostic(
     subject_name="vgpr",
     constraint_key="amdgpu.arithmetic.result_vgpr",
 )
+_I1_DIAGNOSTIC = GuardDiagnostic(
+    subject_role="type",
+    subject_name="i1",
+    constraint_key="amdgpu.arithmetic.i1",
+)
 _LITERAL_EXACT_DIAGNOSTIC = GuardDiagnostic(
     subject_role="literal",
     subject_name="i64",
@@ -455,6 +472,8 @@ def _type_diagnostic(type_pattern: TypePattern) -> GuardDiagnostic:
         return _VEC_I64_DIAGNOSTIC
     if type_pattern == _VEC_F64_STATIC:
         return _VEC_F64_DIAGNOSTIC
+    if type_pattern == _VEC_I1_STATIC:
+        return _VEC_I1_DIAGNOSTIC
     if type_pattern in (_VEC_F16_PACKED, _VEC_F16_PACKED_STORAGE):
         return _VEC_F16_PACKED_DIAGNOSTIC
     if type_pattern == _VEC_BF16_PACKED_STORAGE:
@@ -485,6 +504,8 @@ def _type_diagnostic(type_pattern: TypePattern) -> GuardDiagnostic:
         return _F64_DIAGNOSTIC
     if type_pattern == _INDEX:
         return _INDEX_DIAGNOSTIC
+    if type_pattern == _I1:
+        return _I1_DIAGNOSTIC
     raise ValueError(f"unknown AMDGPU arithmetic type pattern: {type_pattern!r}")
 
 
@@ -519,6 +540,38 @@ def _bitcast_alias_rule(
             _value_type("input", input_type),
             _value_type("result", result_type),
         ),
+    )
+
+
+def _scalar_assume_alias_rule(type_pattern: TypePattern) -> ValueAliasRule:
+    return ValueAliasRule(
+        source_op=scalar_analysis.scalar_assume,
+        source=ValueRef.operand("values"),
+        result=ValueRef.result("results"),
+        guards=(
+            Guard.operand_segment_count("values", 1),
+            _value_type("values", type_pattern),
+            _value_type("results", type_pattern),
+        ),
+    )
+
+
+def _scalar_assume_alias_rules() -> tuple[ValueAliasRule, ...]:
+    return tuple(
+        _scalar_assume_alias_rule(type_pattern)
+        for type_pattern in (
+            _I1,
+            _I8,
+            _I16,
+            _I32,
+            _I64,
+            _F8E4M3,
+            _F8E5M2,
+            _F16,
+            _BF16,
+            _F32,
+            _F64,
+        )
     )
 
 
@@ -843,6 +896,35 @@ def _vector_extract_recipe_rules() -> tuple[RecipeRule, ...]:
     return tuple(
         _vector_extract_recipe_rule(source_type, result_type)
         for source_type, result_type in (*full_width_pairs, *packed_scalar_pairs)
+    )
+
+
+def _vector_splat_recipe_rule(
+    scalar_type: TypePattern,
+    result_type: TypePattern,
+) -> RecipeRule:
+    return RecipeRule(
+        source_op=vector.vector_splat,
+        guards=(
+            _value_type("scalar", scalar_type),
+            _value_type("result", result_type),
+        ),
+    )
+
+
+def _vector_splat_recipe_rules() -> tuple[RecipeRule, ...]:
+    return (
+        _vector_splat_recipe_rule(_I1, _VEC_I1_STATIC),
+        _vector_splat_recipe_rule(_I32, _VEC_I32_STATIC),
+        _vector_splat_recipe_rule(_F32, _VEC_F32_STATIC),
+        _vector_splat_recipe_rule(_I64, _VEC_I64_STATIC),
+        _vector_splat_recipe_rule(_F64, _VEC_F64_STATIC),
+        _vector_splat_recipe_rule(_F16, _VEC_F16_PACKED_STORAGE),
+        _vector_splat_recipe_rule(_BF16, _VEC_BF16_PACKED_STORAGE),
+        _vector_splat_recipe_rule(_I16, _VEC_I16_PACKED_STORAGE),
+        _vector_splat_recipe_rule(_I8, _VEC_I8_PACKED),
+        _vector_splat_recipe_rule(_F8E4M3, _VEC_F8E4M3_PACKED),
+        _vector_splat_recipe_rule(_F8E5M2, _VEC_F8E5M2_PACKED),
     )
 
 
@@ -3639,6 +3721,7 @@ def _rules() -> tuple[ContractCase, ...]:
             _index_madd_rule(),
         )
     )
+    rules.extend((*_vector_splat_recipe_rules(), *_scalar_assume_alias_rules()))
     return tuple(rules)
 
 
