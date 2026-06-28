@@ -25,6 +25,84 @@ def load_smoke_test_module():
     return module
 
 
+def minimal_generation_plan() -> dict:
+    return {
+        "kind": "ideogram4_generation",
+        "summary": {
+            "qwen_token_count": 37,
+            "qwen_token_capacity": 64,
+            "image_token_count": 64,
+            "conditioned_dit_token_count": 101,
+            "conditioned_dit_token_capacity": 128,
+            "unconditioned_dit_token_count": 64,
+            "unconditioned_dit_token_capacity": 64,
+            "denoise_step_count": 1,
+            "diffusion_latent_shape": {
+                "rank": 4,
+                "dims": [8, 8, 128, 1],
+            },
+            "decoded_image_shape": {
+                "rank": 4,
+                "dims": [128, 128, 3, 1],
+            },
+            "dit_activation_format": 2,
+            "dit_weight_execution_format": 1,
+            "dit_attention_implementation": 4,
+            "dit_feed_forward_implementation": 2,
+            "vae_tiling": {
+                "mode": 1,
+                "tile_size_x": 0,
+                "tile_size_y": 0,
+                "relative_size_x": 0,
+                "relative_size_y": 0,
+                "overlap": 0,
+                "memory_budget": 0,
+            },
+        },
+        "residency": {
+            "total_stage_parameter_byte_length": 1234,
+            "phase_parameter_high_water_mark": 1024,
+            "largest_stage_parameter_byte_length": 1024,
+            "total_stage_boundary_byte_length": 256,
+            "phases": [
+                {
+                    "name": "conditioning",
+                    "stage_keys": ["qwen"],
+                    "repeated_per_denoise_step": False,
+                    "parameter_byte_length": 1024,
+                    "largest_stage_parameter_byte_length": 1024,
+                    "constant_byte_length": 0,
+                    "local_slab_byte_length": 512,
+                    "local_high_water_mark": 384,
+                    "stage_boundary_byte_length": 128,
+                }
+            ],
+        },
+        "stages": {
+            "qwen": {
+                "statistics": {
+                    "parameter_slab_byte_length": 1024,
+                    "largest_parameter_slab_byte_length": 1024,
+                    "parameter_source_byte_length": 1024,
+                    "parameter_direct_source_byte_length": 1024,
+                    "parameter_encoded_source_byte_length": 0,
+                    "parameter_gather_load_step_count": 1,
+                    "parameter_encode_load_step_count": 0,
+                    "constant_slab_byte_length": 0,
+                    "memory_slab_byte_length": 512,
+                    "memory_slab_high_water_mark": 384,
+                    "boundary_tensor_byte_length": 128,
+                    "diagnostic_tap_byte_length": 0,
+                    "kernel_count": 35,
+                    "region_count": 1,
+                    "operation_count": 1571,
+                    "dispatch_count": 1062,
+                }
+            }
+        },
+    }
+
+
 class Id4SmokeTestTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -248,6 +326,39 @@ class Id4SmokeTestTest(unittest.TestCase):
             self.assertEqual(metrics.minimum_channel_value, 0)
             self.assertEqual(metrics.maximum_channel_value, 255)
 
+    def test_generation_plan_metrics_capture_dynamic_shape_and_memory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "plan.json"
+            path.write_text(json.dumps(minimal_generation_plan()), encoding="utf-8")
+
+            metrics = self.smoke_test.read_generation_plan_metrics(path)
+
+            self.assertEqual(metrics["summary"]["qwen_token_count"], 37)
+            self.assertEqual(metrics["summary"]["qwen_token_capacity"], 64)
+            self.assertEqual(metrics["summary"]["conditioned_dit_token_count"], 101)
+            self.assertEqual(
+                metrics["summary"]["diffusion_latent_shape"]["dims"],
+                [8, 8, 128, 1],
+            )
+            self.assertEqual(
+                metrics["residency"]["phase_parameter_high_water_mark"], 1024
+            )
+            self.assertEqual(metrics["residency"]["phases"][0]["stage_keys"], ["qwen"])
+            self.assertEqual(
+                metrics["stages"]["qwen"]["memory_slab_high_water_mark"], 384
+            )
+            self.assertEqual(metrics["stages"]["qwen"]["dispatch_count"], 1062)
+
+    def test_generation_plan_shape_rank_must_match_dimensions(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "plan.json"
+            plan = minimal_generation_plan()
+            plan["summary"]["decoded_image_shape"]["rank"] = 3
+            path.write_text(json.dumps(plan), encoding="utf-8")
+
+            with self.assertRaisesRegex(self.smoke_test.SmokeTestError, "rank"):
+                self.smoke_test.read_generation_plan_metrics(path)
+
     def test_uniform_ppm_fails_validation(self):
         request = {
             "generation": {
@@ -277,6 +388,7 @@ class Id4SmokeTestTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             fake_id4 = root / "fake_id4.py"
+            plan_payload = json.dumps(minimal_generation_plan())
             fake_id4.write_text(
                 "\n".join(
                     [
@@ -284,11 +396,17 @@ class Id4SmokeTestTest(unittest.TestCase):
                         "from pathlib import Path",
                         "import sys",
                         "output = None",
+                        "plan = None",
                         "for arg in sys.argv[1:]:",
                         "    if arg.startswith('--output='):",
                         "        output = Path(arg.split('=', 1)[1])",
+                        "    if arg.startswith('--dump_plan='):",
+                        "        plan = Path(arg.split('=', 1)[1])",
                         "if output is None:",
                         "    raise SystemExit(2)",
+                        "if plan is None:",
+                        "    raise SystemExit(2)",
+                        f"plan.write_text({plan_payload!r}, encoding='utf-8')",
                         "output.write_bytes(b'P6\\n16 16\\n255\\n' + bytes([128]) * 16 * 16 * 3)",
                     ]
                 ),
@@ -318,6 +436,7 @@ class Id4SmokeTestTest(unittest.TestCase):
                 summary = json.load(file)
             self.assertEqual(summary["state"], "failed")
             self.assertIn("dynamic range", summary["validation_error"])
+            self.assertEqual(summary["plan_metrics"]["summary"]["qwen_token_count"], 37)
             self.assertEqual(summary["image_metrics"]["width"], 16)
 
 

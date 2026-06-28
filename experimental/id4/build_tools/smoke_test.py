@@ -103,6 +103,57 @@ class ImageMetrics:
         }
 
 
+PLAN_SUMMARY_INTEGER_FIELDS = (
+    "qwen_token_count",
+    "qwen_token_capacity",
+    "image_token_count",
+    "conditioned_dit_token_count",
+    "conditioned_dit_token_capacity",
+    "unconditioned_dit_token_count",
+    "unconditioned_dit_token_capacity",
+    "denoise_step_count",
+    "dit_activation_format",
+    "dit_weight_execution_format",
+    "dit_attention_implementation",
+    "dit_feed_forward_implementation",
+)
+
+PLAN_RESIDENCY_INTEGER_FIELDS = (
+    "total_stage_parameter_byte_length",
+    "phase_parameter_high_water_mark",
+    "largest_stage_parameter_byte_length",
+    "total_stage_boundary_byte_length",
+)
+
+PLAN_PHASE_INTEGER_FIELDS = (
+    "parameter_byte_length",
+    "largest_stage_parameter_byte_length",
+    "constant_byte_length",
+    "local_slab_byte_length",
+    "local_high_water_mark",
+    "stage_boundary_byte_length",
+)
+
+PLAN_STAGE_STATISTIC_FIELDS = (
+    "parameter_slab_byte_length",
+    "largest_parameter_slab_byte_length",
+    "parameter_source_byte_length",
+    "parameter_direct_source_byte_length",
+    "parameter_encoded_source_byte_length",
+    "parameter_gather_load_step_count",
+    "parameter_encode_load_step_count",
+    "constant_slab_byte_length",
+    "memory_slab_byte_length",
+    "memory_slab_high_water_mark",
+    "boundary_tensor_byte_length",
+    "diagnostic_tap_byte_length",
+    "kernel_count",
+    "region_count",
+    "operation_count",
+    "dispatch_count",
+)
+
+
 def parse_arguments(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output_dir", required=True, help="Artifact directory.")
@@ -210,6 +261,135 @@ def write_compact_json(path: Path, payload: dict[str, Any]) -> None:
     with path.open("w", encoding="utf-8") as file:
         json.dump(payload, file, separators=(",", ":"))
         file.write("\n")
+
+
+def _require_object(value: Any, context: str) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise SmokeTestError(f"{context} must be a JSON object")
+    return value
+
+
+def _require_list(value: Any, context: str) -> list[Any]:
+    if not isinstance(value, list):
+        raise SmokeTestError(f"{context} must be a JSON array")
+    return value
+
+
+def _require_string(value: Any, context: str) -> str:
+    if not isinstance(value, str):
+        raise SmokeTestError(f"{context} must be a string")
+    return value
+
+
+def _require_bool(value: Any, context: str) -> bool:
+    if not isinstance(value, bool):
+        raise SmokeTestError(f"{context} must be a boolean")
+    return value
+
+
+def _require_int(value: Any, context: str) -> int:
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise SmokeTestError(f"{context} must be an integer")
+    return value
+
+
+def _copy_integer_fields(
+    value: dict[str, Any], field_names: tuple[str, ...], context: str
+) -> dict[str, int]:
+    return {
+        field_name: _require_int(value.get(field_name), f"{context}.{field_name}")
+        for field_name in field_names
+    }
+
+
+def _summarize_shape(value: Any, context: str) -> dict[str, Any]:
+    shape = _require_object(value, context)
+    rank = _require_int(shape.get("rank"), f"{context}.rank")
+    dims = [
+        _require_int(dim, f"{context}.dims[{index}]")
+        for index, dim in enumerate(_require_list(shape.get("dims"), f"{context}.dims"))
+    ]
+    if rank != len(dims):
+        raise SmokeTestError(
+            f"{context}.rank is {rank}, but {context}.dims has {len(dims)} entries"
+        )
+    return {
+        "rank": rank,
+        "dims": dims,
+    }
+
+
+def _summarize_generation_plan(plan: dict[str, Any]) -> dict[str, Any]:
+    if plan.get("kind") != "ideogram4_generation":
+        raise SmokeTestError("plan.kind must be ideogram4_generation")
+
+    summary = _require_object(plan.get("summary"), "plan.summary")
+    plan_summary: dict[str, Any] = _copy_integer_fields(
+        summary, PLAN_SUMMARY_INTEGER_FIELDS, "plan.summary"
+    )
+    plan_summary["diffusion_latent_shape"] = _summarize_shape(
+        summary.get("diffusion_latent_shape"), "plan.summary.diffusion_latent_shape"
+    )
+    plan_summary["decoded_image_shape"] = _summarize_shape(
+        summary.get("decoded_image_shape"), "plan.summary.decoded_image_shape"
+    )
+    plan_summary["vae_tiling"] = _require_object(
+        summary.get("vae_tiling"), "plan.summary.vae_tiling"
+    )
+
+    residency = _require_object(plan.get("residency"), "plan.residency")
+    plan_residency: dict[str, Any] = _copy_integer_fields(
+        residency, PLAN_RESIDENCY_INTEGER_FIELDS, "plan.residency"
+    )
+    plan_residency["phases"] = []
+    for phase_index, phase in enumerate(
+        _require_list(residency.get("phases"), "plan.residency.phases")
+    ):
+        phase_context = f"plan.residency.phases[{phase_index}]"
+        phase_object = _require_object(phase, phase_context)
+        phase_summary: dict[str, Any] = {
+            "name": _require_string(phase_object.get("name"), f"{phase_context}.name"),
+            "stage_keys": [
+                _require_string(stage_key, f"{phase_context}.stage_keys[{index}]")
+                for index, stage_key in enumerate(
+                    _require_list(
+                        phase_object.get("stage_keys"), f"{phase_context}.stage_keys"
+                    )
+                )
+            ],
+            "repeated_per_denoise_step": _require_bool(
+                phase_object.get("repeated_per_denoise_step"),
+                f"{phase_context}.repeated_per_denoise_step",
+            ),
+        }
+        phase_summary.update(
+            _copy_integer_fields(phase_object, PLAN_PHASE_INTEGER_FIELDS, phase_context)
+        )
+        plan_residency["phases"].append(phase_summary)
+
+    stages = _require_object(plan.get("stages"), "plan.stages")
+    stage_summaries: dict[str, dict[str, int]] = {}
+    for stage_key, stage in sorted(stages.items()):
+        stage_context = f"plan.stages.{stage_key}"
+        stage_object = _require_object(stage, stage_context)
+        statistics = _require_object(
+            stage_object.get("statistics"), f"{stage_context}.statistics"
+        )
+        stage_summaries[stage_key] = _copy_integer_fields(
+            statistics, PLAN_STAGE_STATISTIC_FIELDS, f"{stage_context}.statistics"
+        )
+
+    return {
+        "summary": plan_summary,
+        "residency": plan_residency,
+        "stages": stage_summaries,
+    }
+
+
+def read_generation_plan_metrics(path: Path) -> dict[str, Any]:
+    with path.open(encoding="utf-8") as file:
+        plan = json.load(file)
+    return _summarize_generation_plan(_require_object(plan, "plan"))
 
 
 def require_empty_output_dir(path: Path) -> None:
@@ -385,6 +565,9 @@ def run_smoke(args: argparse.Namespace) -> dict[str, Any]:
     }
     if completed.returncode == 0:
         try:
+            summary["plan_metrics"] = read_generation_plan_metrics(
+                artifact_dir / "plan.json"
+            )
             metrics = read_ppm_metrics(artifact_dir / "image.ppm")
             summary["image_metrics"] = metrics.to_json()
             validate_image(metrics, request)
