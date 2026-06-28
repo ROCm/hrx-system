@@ -6,6 +6,7 @@
 
 #include "loom/target/arch/amdgpu/lower/narrow_float/fp8.h"
 
+#include <stddef.h>
 #include <string.h>
 
 #include "loom/ir/attribute.h"
@@ -390,160 +391,126 @@ static void loom_amdgpu_initialize_fp8_decode_format(
   }
 }
 
-iree_status_t loom_amdgpu_select_fp8_decode_plan(
+typedef struct loom_amdgpu_fp8_decode_plan_descriptor_row_t {
+  // Descriptor ref to probe in the active target descriptor set.
+  loom_amdgpu_descriptor_ref_t descriptor_ref;
+  // Byte offset of the resolved descriptor field in the decode plan.
+  size_t descriptor_offset;
+  // Plan flag raised when the descriptor ref is present.
+  loom_amdgpu_fp8_decode_plan_flags_t present_flag;
+} loom_amdgpu_fp8_decode_plan_descriptor_row_t;
+
+#define LOOM_AMDGPU_FP8_DECODE_PLAN_DESCRIPTOR_ROW(descriptor, field, flag) \
+  {                                                                         \
+      .descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_##descriptor,            \
+      .descriptor_offset = offsetof(loom_amdgpu_fp8_decode_plan_t, field),  \
+      .present_flag = flag,                                                 \
+  }
+
+static const loom_amdgpu_fp8_decode_plan_descriptor_row_t
+    kLoomAmdgpuFp8DecodePlanDescriptorRows[] = {
+        LOOM_AMDGPU_FP8_DECODE_PLAN_DESCRIPTOR_ROW(
+            V_BFE_U32_OFFSET_WIDTH_INLINE, bfe_u32_descriptor,
+            LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_BFE_U32),
+        LOOM_AMDGPU_FP8_DECODE_PLAN_DESCRIPTOR_ROW(
+            V_CMP_EQ_I32_SRC1_INLINE, compare_eq_i32_src1_inline_descriptor,
+            LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_NONE),
+        LOOM_AMDGPU_FP8_DECODE_PLAN_DESCRIPTOR_ROW(
+            V_CMP_NE_I32_SRC1_INLINE, compare_ne_i32_src1_inline_descriptor,
+            LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_CMP_NE_I32_SRC1_INLINE),
+        LOOM_AMDGPU_FP8_DECODE_PLAN_DESCRIPTOR_ROW(
+            S_CMP_LG_U64, compare_lg_u64_descriptor,
+            LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_CMP_LG_U64),
+        LOOM_AMDGPU_FP8_DECODE_PLAN_DESCRIPTOR_ROW(
+            V_CMP_UGE_U32_SRC1_INLINE, compare_uge_u32_src1_inline_descriptor,
+            LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_NONE),
+        LOOM_AMDGPU_FP8_DECODE_PLAN_DESCRIPTOR_ROW(
+            V_CMP_ULT_U32_SRC1_INLINE, compare_ult_u32_src1_inline_descriptor,
+            LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_NONE),
+        LOOM_AMDGPU_FP8_DECODE_PLAN_DESCRIPTOR_ROW(
+            V_CVT_PK_U16_U32, pack_u16_descriptor,
+            LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_PACK_U16),
+        LOOM_AMDGPU_FP8_DECODE_PLAN_DESCRIPTOR_ROW(
+            V_PERM_B32, perm_b32_descriptor,
+            LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_PERM_B32),
+        LOOM_AMDGPU_FP8_DECODE_PLAN_DESCRIPTOR_ROW(
+            V_CVT_PK_BF16_F32, native_bf16_pack_descriptor,
+            LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_NATIVE_BF16_PACK),
+        LOOM_AMDGPU_FP8_DECODE_PLAN_DESCRIPTOR_ROW(
+            V_ADD3_U32_SRC2_LIT, add3_src2_literal_descriptor,
+            LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_ADD3_SRC2_LITERAL),
+        LOOM_AMDGPU_FP8_DECODE_PLAN_DESCRIPTOR_ROW(
+            V_LSHL_ADD_U32_SHIFT_IMM, lshl_add_u32_shift_imm_descriptor,
+            LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_LSHL_ADD_U32_SHIFT_IMM),
+        LOOM_AMDGPU_FP8_DECODE_PLAN_DESCRIPTOR_ROW(
+            V_PERM_B32_SRC2_LIT, perm_b32_src2_literal_descriptor,
+            LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_PERM_B32_SRC2_LITERAL),
+        LOOM_AMDGPU_FP8_DECODE_PLAN_DESCRIPTOR_ROW(
+            V_PK_MIN_U16, pk_min_u16_descriptor,
+            LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_PK_MIN_U16),
+        LOOM_AMDGPU_FP8_DECODE_PLAN_DESCRIPTOR_ROW(
+            V_PK_MUL_LO_U16, pk_mul_lo_u16_descriptor,
+            LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_PK_MUL_LO_U16),
+        LOOM_AMDGPU_FP8_DECODE_PLAN_DESCRIPTOR_ROW(
+            V_PK_ADD_U16, pk_add_u16_descriptor,
+            LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_PK_ADD_U16),
+        LOOM_AMDGPU_FP8_DECODE_PLAN_DESCRIPTOR_ROW(
+            V_PK_ASHRREV_I16, pk_ashrrev_i16_descriptor,
+            LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_PK_ASHRREV_I16),
+        LOOM_AMDGPU_FP8_DECODE_PLAN_DESCRIPTOR_ROW(
+            V_BFI_B32_SRC0_LIT, bfi_b32_src0_literal_descriptor,
+            LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_BFI_B32_SRC0_LITERAL),
+};
+
+#undef LOOM_AMDGPU_FP8_DECODE_PLAN_DESCRIPTOR_ROW
+
+static iree_status_t loom_amdgpu_resolve_fp8_decode_plan_descriptor(
+    loom_low_lower_context_t* context,
+    const loom_amdgpu_fp8_decode_plan_descriptor_row_t* row,
+    loom_amdgpu_fp8_decode_plan_t* plan) {
+  uint8_t* plan_bytes = (uint8_t*)plan;
+  loom_low_lower_resolved_descriptor_t* descriptor =
+      (loom_low_lower_resolved_descriptor_t*)(plan_bytes +
+                                              row->descriptor_offset);
+  bool has_descriptor = false;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_descriptor_ref_if_present(
+      context, row->descriptor_ref, descriptor, &has_descriptor));
+  if (has_descriptor) {
+    plan->flags |= row->present_flag;
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_amdgpu_resolve_fp8_decode_plan_descriptors(
     loom_low_lower_context_t* context, loom_scalar_type_t element_type,
-    loom_amdgpu_fp8_decode_plan_t* out_plan) {
-  memset(out_plan, 0, sizeof(*out_plan));
-
-  bool has_bfe_u32 = false;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_descriptor_ref_if_present(
-      context, LOOM_AMDGPU_DESCRIPTOR_REF_V_BFE_U32_OFFSET_WIDTH_INLINE,
-      &out_plan->bfe_u32_descriptor, &has_bfe_u32));
-  if (has_bfe_u32) {
-    out_plan->flags |= LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_BFE_U32;
-  }
-
-  bool has_compare_eq_i32_src1_inline = false;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_descriptor_ref_if_present(
-      context, LOOM_AMDGPU_DESCRIPTOR_REF_V_CMP_EQ_I32_SRC1_INLINE,
-      &out_plan->compare_eq_i32_src1_inline_descriptor,
-      &has_compare_eq_i32_src1_inline));
-  (void)has_compare_eq_i32_src1_inline;
-
-  bool has_compare_ne_i32_src1_inline = false;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_descriptor_ref_if_present(
-      context, LOOM_AMDGPU_DESCRIPTOR_REF_V_CMP_NE_I32_SRC1_INLINE,
-      &out_plan->compare_ne_i32_src1_inline_descriptor,
-      &has_compare_ne_i32_src1_inline));
-  if (has_compare_ne_i32_src1_inline) {
-    out_plan->flags |=
-        LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_CMP_NE_I32_SRC1_INLINE;
-  }
-
-  bool has_compare_lg_u64 = false;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_descriptor_ref_if_present(
-      context, LOOM_AMDGPU_DESCRIPTOR_REF_S_CMP_LG_U64,
-      &out_plan->compare_lg_u64_descriptor, &has_compare_lg_u64));
-  if (has_compare_lg_u64) {
-    out_plan->flags |= LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_CMP_LG_U64;
-  }
-
-  bool has_compare_uge_u32_src1_inline = false;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_descriptor_ref_if_present(
-      context, LOOM_AMDGPU_DESCRIPTOR_REF_V_CMP_UGE_U32_SRC1_INLINE,
-      &out_plan->compare_uge_u32_src1_inline_descriptor,
-      &has_compare_uge_u32_src1_inline));
-  (void)has_compare_uge_u32_src1_inline;
-
-  bool has_compare_ult_u32_src1_inline = false;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_descriptor_ref_if_present(
-      context, LOOM_AMDGPU_DESCRIPTOR_REF_V_CMP_ULT_U32_SRC1_INLINE,
-      &out_plan->compare_ult_u32_src1_inline_descriptor,
-      &has_compare_ult_u32_src1_inline));
-  (void)has_compare_ult_u32_src1_inline;
-
-  bool has_pack_u16 = false;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_descriptor_ref_if_present(
-      context, LOOM_AMDGPU_DESCRIPTOR_REF_V_CVT_PK_U16_U32,
-      &out_plan->pack_u16_descriptor, &has_pack_u16));
-  if (has_pack_u16) {
-    out_plan->flags |= LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_PACK_U16;
-  }
-
-  bool has_perm_b32 = false;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_descriptor_ref_if_present(
-      context, LOOM_AMDGPU_DESCRIPTOR_REF_V_PERM_B32,
-      &out_plan->perm_b32_descriptor, &has_perm_b32));
-  if (has_perm_b32) {
-    out_plan->flags |= LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_PERM_B32;
+    loom_amdgpu_fp8_decode_plan_t* plan) {
+  for (iree_host_size_t i = 0;
+       i < IREE_ARRAYSIZE(kLoomAmdgpuFp8DecodePlanDescriptorRows); ++i) {
+    IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_fp8_decode_plan_descriptor(
+        context, &kLoomAmdgpuFp8DecodePlanDescriptorRows[i], plan));
   }
 
   loom_amdgpu_fp8_to_f32_descriptor_refs_t native_refs = {0};
   if (loom_amdgpu_fp8_to_f32_descriptor_refs(element_type, &native_refs)) {
-    bool has_native_pair = false;
-    IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_descriptor_ref_if_present(
-        context, native_refs.pair, &out_plan->native_f32_pair_descriptor,
-        &has_native_pair));
-    if (has_native_pair) {
-      out_plan->flags |= LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_NATIVE_F32_PAIR;
-    }
+    const loom_amdgpu_fp8_decode_plan_descriptor_row_t native_pair_row = {
+        .descriptor_ref = native_refs.pair,
+        .descriptor_offset =
+            offsetof(loom_amdgpu_fp8_decode_plan_t, native_f32_pair_descriptor),
+        .present_flag = LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_NATIVE_F32_PAIR,
+    };
+    IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_fp8_decode_plan_descriptor(
+        context, &native_pair_row, plan));
   }
 
-  bool has_native_bf16_pack = false;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_descriptor_ref_if_present(
-      context, LOOM_AMDGPU_DESCRIPTOR_REF_V_CVT_PK_BF16_F32,
-      &out_plan->native_bf16_pack_descriptor, &has_native_bf16_pack));
-  if (has_native_bf16_pack) {
-    out_plan->flags |= LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_NATIVE_BF16_PACK;
-  }
+  return iree_ok_status();
+}
 
-  bool has_add3_src2_literal = false;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_descriptor_ref_if_present(
-      context, LOOM_AMDGPU_DESCRIPTOR_REF_V_ADD3_U32_SRC2_LIT,
-      &out_plan->add3_src2_literal_descriptor, &has_add3_src2_literal));
-  if (has_add3_src2_literal) {
-    out_plan->flags |= LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_ADD3_SRC2_LITERAL;
-  }
-
-  bool has_lshl_add_u32_shift_imm = false;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_descriptor_ref_if_present(
-      context, LOOM_AMDGPU_DESCRIPTOR_REF_V_LSHL_ADD_U32_SHIFT_IMM,
-      &out_plan->lshl_add_u32_shift_imm_descriptor,
-      &has_lshl_add_u32_shift_imm));
-  if (has_lshl_add_u32_shift_imm) {
-    out_plan->flags |=
-        LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_LSHL_ADD_U32_SHIFT_IMM;
-  }
-
-  bool has_perm_b32_src2_literal = false;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_descriptor_ref_if_present(
-      context, LOOM_AMDGPU_DESCRIPTOR_REF_V_PERM_B32_SRC2_LIT,
-      &out_plan->perm_b32_src2_literal_descriptor, &has_perm_b32_src2_literal));
-  if (has_perm_b32_src2_literal) {
-    out_plan->flags |=
-        LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_PERM_B32_SRC2_LITERAL;
-  }
-
-  bool has_pk_min_u16 = false;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_descriptor_ref_if_present(
-      context, LOOM_AMDGPU_DESCRIPTOR_REF_V_PK_MIN_U16,
-      &out_plan->pk_min_u16_descriptor, &has_pk_min_u16));
-  if (has_pk_min_u16) {
-    out_plan->flags |= LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_PK_MIN_U16;
-  }
-
-  bool has_pk_mul_lo_u16 = false;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_descriptor_ref_if_present(
-      context, LOOM_AMDGPU_DESCRIPTOR_REF_V_PK_MUL_LO_U16,
-      &out_plan->pk_mul_lo_u16_descriptor, &has_pk_mul_lo_u16));
-  if (has_pk_mul_lo_u16) {
-    out_plan->flags |= LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_PK_MUL_LO_U16;
-  }
-
-  bool has_pk_add_u16 = false;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_descriptor_ref_if_present(
-      context, LOOM_AMDGPU_DESCRIPTOR_REF_V_PK_ADD_U16,
-      &out_plan->pk_add_u16_descriptor, &has_pk_add_u16));
-  if (has_pk_add_u16) {
-    out_plan->flags |= LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_PK_ADD_U16;
-  }
-
-  bool has_pk_ashrrev_i16 = false;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_descriptor_ref_if_present(
-      context, LOOM_AMDGPU_DESCRIPTOR_REF_V_PK_ASHRREV_I16,
-      &out_plan->pk_ashrrev_i16_descriptor, &has_pk_ashrrev_i16));
-  if (has_pk_ashrrev_i16) {
-    out_plan->flags |= LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_PK_ASHRREV_I16;
-  }
-
-  bool has_bfi_b32_src0_literal = false;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_descriptor_ref_if_present(
-      context, LOOM_AMDGPU_DESCRIPTOR_REF_V_BFI_B32_SRC0_LIT,
-      &out_plan->bfi_b32_src0_literal_descriptor, &has_bfi_b32_src0_literal));
-  if (has_bfi_b32_src0_literal) {
-    out_plan->flags |=
-        LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_BFI_B32_SRC0_LITERAL;
-  }
+iree_status_t loom_amdgpu_select_fp8_decode_plan(
+    loom_low_lower_context_t* context, loom_scalar_type_t element_type,
+    loom_amdgpu_fp8_decode_plan_t* out_plan) {
+  memset(out_plan, 0, sizeof(*out_plan));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_fp8_decode_plan_descriptors(
+      context, element_type, out_plan));
 
   loom_amdgpu_initialize_fp8_decode_format(element_type, out_plan);
   return iree_ok_status();
