@@ -9,7 +9,6 @@
 enum {
   ID4_IDEOGRAM4_DIT_ATTENTION_WMMA_TOKEN_BLOCK = 16,
   ID4_IDEOGRAM4_DIT_BLOCKED_ATTENTION_QUERY_TOKEN_COUNT = 512,
-  ID4_IDEOGRAM4_DIT_BF16_TOKEN_CAPACITY_BLOCK = 128,
 };
 
 typedef struct id4_ideogram4_dit_program_linear_parameter_t {
@@ -524,15 +523,9 @@ iree_status_t id4_ideogram4_dit_program_author_transformer_block(
         "Ideogram4 DiT PyTorch feed-forward parity requires BF16 linear-input "
         "activations");
   }
-  if (total_token_count >
-      UINT32_MAX - (ID4_IDEOGRAM4_DIT_BF16_TOKEN_CAPACITY_BLOCK - 1)) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "Ideogram4 DiT token capacity overflow");
-  }
-  const uint32_t bf16_token_capacity =
-      ((total_token_count + ID4_IDEOGRAM4_DIT_BF16_TOKEN_CAPACITY_BLOCK - 1) /
-       ID4_IDEOGRAM4_DIT_BF16_TOKEN_CAPACITY_BLOCK) *
-      ID4_IDEOGRAM4_DIT_BF16_TOKEN_CAPACITY_BLOCK;
+  uint32_t bf16_token_capacity = 0;
+  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_calculate_bf16_token_capacity(
+      total_token_count, &bf16_token_capacity));
   uint64_t modulation_output_size64 = 0;
   if (!id4_ideogram4_dit_program_checked_mul_u64(hidden_size, 4,
                                                  &modulation_output_size64) ||

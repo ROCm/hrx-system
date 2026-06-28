@@ -7,6 +7,7 @@
 #include "experimental/id4/ideogram4/session.h"
 
 #include <cstring>
+#include <limits>
 #include <memory>
 
 #include "experimental/id4/stages/qwen3_vl_program.h"
@@ -206,6 +207,27 @@ static void ExpectGenerationStageBoundaryContract(
                                      summary.diffusion_latent_shape.dims[1];
   const uint64_t conditioned_token_count =
       summary.qwen_token_count + image_token_count;
+  ASSERT_LE(image_token_count, std::numeric_limits<uint32_t>::max());
+  ASSERT_LE(conditioned_token_count, std::numeric_limits<uint32_t>::max());
+  EXPECT_EQ(summary.image_token_count, (uint32_t)image_token_count);
+  EXPECT_EQ(summary.conditioned_dit_token_count,
+            (uint32_t)conditioned_token_count);
+  EXPECT_EQ(summary.unconditioned_dit_token_count, (uint32_t)image_token_count);
+  uint32_t qwen_token_capacity = 0;
+  IREE_ASSERT_OK(id4_qwen3_vl_program_calculate_bf16_token_capacity(
+      summary.qwen_token_count, &qwen_token_capacity));
+  EXPECT_EQ(summary.qwen_token_capacity, qwen_token_capacity);
+  uint32_t conditioned_dit_token_capacity = 0;
+  IREE_ASSERT_OK(id4_ideogram4_dit_program_calculate_bf16_token_capacity(
+      summary.conditioned_dit_token_count, &conditioned_dit_token_capacity));
+  EXPECT_EQ(summary.conditioned_dit_token_capacity,
+            conditioned_dit_token_capacity);
+  uint32_t unconditioned_dit_token_capacity = 0;
+  IREE_ASSERT_OK(id4_ideogram4_dit_program_calculate_bf16_token_capacity(
+      summary.unconditioned_dit_token_count,
+      &unconditioned_dit_token_capacity));
+  EXPECT_EQ(summary.unconditioned_dit_token_capacity,
+            unconditioned_dit_token_capacity);
   const uint64_t attention_head_size =
       dit_model->hidden_size / dit_model->attention_head_count;
   const id4_pipeline_tensor_shape_t latent_shape =
@@ -588,6 +610,10 @@ TEST_F(SessionTest, PlansGenerationFromDynamicPromptLength) {
   EXPECT_NE(iree_string_view_find(json, IREE_SV("\"ideogram4_generation\""), 0),
             IREE_STRING_VIEW_NPOS);
   EXPECT_NE(iree_string_view_find(json, IREE_SV("\"residency\""), 0),
+            IREE_STRING_VIEW_NPOS);
+  EXPECT_NE(iree_string_view_find(json, IREE_SV("\"image_token_count\""), 0),
+            IREE_STRING_VIEW_NPOS);
+  EXPECT_NE(iree_string_view_find(json, IREE_SV("\"qwen_token_capacity\""), 0),
             IREE_STRING_VIEW_NPOS);
   EXPECT_NE(iree_string_view_find(
                 json, IREE_SV("\"phase_parameter_high_water_mark\""), 0),

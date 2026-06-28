@@ -135,6 +135,18 @@ typedef struct id4_ideogram4_generation_plan_options_t {
 typedef struct id4_ideogram4_generation_plan_summary_t {
   // Qwen prompt token positions used by conditioned DiT planning.
   uint32_t qwen_token_count;
+  // BF16 packed token capacity used by Qwen linear kernels.
+  uint32_t qwen_token_capacity;
+  // Diffusion image token positions derived from the latent image grid.
+  uint32_t image_token_count;
+  // Combined text and image token positions used by conditioned DiT planning.
+  uint32_t conditioned_dit_token_count;
+  // BF16 packed token capacity used by conditioned DiT transformer blocks.
+  uint32_t conditioned_dit_token_capacity;
+  // Image-only token positions used by unconditioned DiT planning.
+  uint32_t unconditioned_dit_token_count;
+  // BF16 packed token capacity used by unconditioned DiT transformer blocks.
+  uint32_t unconditioned_dit_token_capacity;
   // Number of denoise steps requested for the generation.
   uint32_t denoise_step_count;
   // Diffusion latent tensor shape shared by DiT, sampler, and decode stages.

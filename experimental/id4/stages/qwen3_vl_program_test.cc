@@ -61,6 +61,33 @@ static id4_qwen3_vl_program_options_t MakeProgramOptions(uint32_t layer_count) {
   return options;
 }
 
+TEST(Qwen3VLProgramTest, CalculatesBf16TokenCapacity) {
+  uint32_t token_capacity = 0;
+  IREE_ASSERT_OK(
+      id4_qwen3_vl_program_calculate_bf16_token_capacity(1, &token_capacity));
+  EXPECT_EQ(token_capacity, 16u);
+  IREE_ASSERT_OK(
+      id4_qwen3_vl_program_calculate_bf16_token_capacity(16, &token_capacity));
+  EXPECT_EQ(token_capacity, 16u);
+  IREE_ASSERT_OK(
+      id4_qwen3_vl_program_calculate_bf16_token_capacity(17, &token_capacity));
+  EXPECT_EQ(token_capacity, 32u);
+  IREE_ASSERT_OK(
+      id4_qwen3_vl_program_calculate_bf16_token_capacity(33, &token_capacity));
+  EXPECT_EQ(token_capacity, 64u);
+}
+
+TEST(Qwen3VLProgramTest, RejectsInvalidBf16TokenCapacityInputs) {
+  uint32_t token_capacity = 99;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      id4_qwen3_vl_program_calculate_bf16_token_capacity(0, &token_capacity));
+  EXPECT_EQ(token_capacity, 0u);
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      id4_qwen3_vl_program_calculate_bf16_token_capacity(1, nullptr));
+}
+
 class ProgramBuilderScope {
  public:
   ProgramBuilderScope() {

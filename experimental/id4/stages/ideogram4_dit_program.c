@@ -556,9 +556,14 @@ bool id4_ideogram4_dit_program_has_diagnostic_tap(
   return false;
 }
 
-static iree_status_t id4_ideogram4_dit_program_image_token_count(
+iree_status_t id4_ideogram4_dit_program_image_token_count(
     id4_ideogram4_dit_model_config_t model,
     id4_pipeline_program_shape_t latent_shape, uint32_t* out_token_count) {
+  if (!out_token_count) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "Ideogram4 DiT image token count output is "
+                            "required");
+  }
   *out_token_count = 0;
   if (latent_shape.rank != 4) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -588,6 +593,29 @@ static iree_status_t id4_ideogram4_dit_program_image_token_count(
         token_count, ID4_IDEOGRAM4_DIT_PRELUDE_IMAGE_MAX_TOKEN_COUNT);
   }
   *out_token_count = (uint32_t)token_count;
+  return iree_ok_status();
+}
+
+iree_status_t id4_ideogram4_dit_program_calculate_bf16_token_capacity(
+    uint32_t total_token_count, uint32_t* out_token_capacity) {
+  if (!out_token_capacity) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "Ideogram4 DiT token capacity output is required");
+  }
+  *out_token_capacity = 0;
+  if (total_token_count == 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "Ideogram4 DiT token count must be non-zero");
+  }
+  if (total_token_count >
+      UINT32_MAX - (ID4_IDEOGRAM4_DIT_BF16_TOKEN_CAPACITY_BLOCK - 1)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "Ideogram4 DiT token capacity overflow");
+  }
+  *out_token_capacity =
+      ((total_token_count + ID4_IDEOGRAM4_DIT_BF16_TOKEN_CAPACITY_BLOCK - 1) /
+       ID4_IDEOGRAM4_DIT_BF16_TOKEN_CAPACITY_BLOCK) *
+      ID4_IDEOGRAM4_DIT_BF16_TOKEN_CAPACITY_BLOCK;
   return iree_ok_status();
 }
 

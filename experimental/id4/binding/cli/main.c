@@ -815,10 +815,18 @@ static iree_status_t id4_cli_run_generation_dry_run(
     status = id4_ideogram4_generation_plan_summary(generation_plan, &summary);
     if (iree_status_is_ok(status)) {
       fprintf(stdout,
-              "Ideogram 4 generation plan: tokens=%" PRIu32 " latent=%" PRIu64
-              "x%" PRIu64 "x%" PRIu64 " image=%" PRIu64 "x%" PRIu64
-              " steps=%" PRIu32 "\n",
-              summary.qwen_token_count, summary.diffusion_latent_shape.dims[0],
+              "Ideogram 4 generation plan: qwen_tokens=%" PRIu32
+              " qwen_capacity=%" PRIu32 " image_tokens=%" PRIu32
+              " dit_cond_tokens=%" PRIu32 " dit_cond_capacity=%" PRIu32
+              " dit_uncond_tokens=%" PRIu32 " dit_uncond_capacity=%" PRIu32
+              " latent=%" PRIu64 "x%" PRIu64 "x%" PRIu64 " image=%" PRIu64
+              "x%" PRIu64 " steps=%" PRIu32 "\n",
+              summary.qwen_token_count, summary.qwen_token_capacity,
+              summary.image_token_count, summary.conditioned_dit_token_count,
+              summary.conditioned_dit_token_capacity,
+              summary.unconditioned_dit_token_count,
+              summary.unconditioned_dit_token_capacity,
+              summary.diffusion_latent_shape.dims[0],
               summary.diffusion_latent_shape.dims[1],
               summary.diffusion_latent_shape.dims[2],
               summary.decoded_image_shape.dims[0],
@@ -1125,9 +1133,11 @@ static iree_status_t id4_cli_run_generation(iree_allocator_t host_allocator) {
   }
   if (iree_status_is_ok(status)) {
     fprintf(stdout,
-            "Ideogram 4 generation complete: tokens=%" PRIu32 " image=%" PRIu64
-            "x%" PRIu64 " output=%s\n",
-            summary.qwen_token_count, summary.decoded_image_shape.dims[0],
+            "Ideogram 4 generation complete: qwen_tokens=%" PRIu32
+            " image_tokens=%" PRIu32 " image=%" PRIu64 "x%" PRIu64
+            " output=%s\n",
+            summary.qwen_token_count, summary.image_token_count,
+            summary.decoded_image_shape.dims[0],
             summary.decoded_image_shape.dims[1], FLAG_output);
   }
 

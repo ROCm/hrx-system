@@ -76,6 +76,53 @@ static id4_ideogram4_dit_model_config_t MakeModelConfig() {
   };
 }
 
+TEST(Ideogram4DitProgramTest, CalculatesImageTokenCount) {
+  uint32_t token_count = 0;
+  IREE_ASSERT_OK(id4_ideogram4_dit_program_image_token_count(
+      MakeModelConfig(), id4_pipeline_program_make_shape_rank4(8, 4, 4, 1),
+      &token_count));
+  EXPECT_EQ(token_count, 32u);
+}
+
+TEST(Ideogram4DitProgramTest, RejectsInvalidImageTokenCountInputs) {
+  uint32_t token_count = 99;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      id4_ideogram4_dit_program_image_token_count(
+          MakeModelConfig(), id4_pipeline_program_make_shape_rank4(8, 4, 5, 1),
+          &token_count));
+  EXPECT_EQ(token_count, 0u);
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      id4_ideogram4_dit_program_image_token_count(
+          MakeModelConfig(), id4_pipeline_program_make_shape_rank4(8, 4, 4, 1),
+          nullptr));
+}
+
+TEST(Ideogram4DitProgramTest, CalculatesBf16TokenCapacity) {
+  uint32_t token_capacity = 0;
+  IREE_ASSERT_OK(id4_ideogram4_dit_program_calculate_bf16_token_capacity(
+      1, &token_capacity));
+  EXPECT_EQ(token_capacity, 128u);
+  IREE_ASSERT_OK(id4_ideogram4_dit_program_calculate_bf16_token_capacity(
+      128, &token_capacity));
+  EXPECT_EQ(token_capacity, 128u);
+  IREE_ASSERT_OK(id4_ideogram4_dit_program_calculate_bf16_token_capacity(
+      129, &token_capacity));
+  EXPECT_EQ(token_capacity, 256u);
+}
+
+TEST(Ideogram4DitProgramTest, RejectsInvalidBf16TokenCapacityInputs) {
+  uint32_t token_capacity = 99;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        id4_ideogram4_dit_program_calculate_bf16_token_capacity(
+                            0, &token_capacity));
+  EXPECT_EQ(token_capacity, 0u);
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      id4_ideogram4_dit_program_calculate_bf16_token_capacity(1, nullptr));
+}
+
 static id4_ideogram4_dit_program_options_t MakeProgramOptions(
     id4_pipeline_program_shape_t latent_shape) {
   id4_ideogram4_dit_program_options_t options = {

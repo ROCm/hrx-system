@@ -1185,11 +1185,30 @@ static iree_status_t id4_ideogram4_plan_generation_stages(
   IREE_RETURN_IF_ERROR(id4_ideogram4_request_count_qwen_tokens(
       &qwen_lowering_options, session->host_allocator, &token_count));
 
-  plan->summary.qwen_token_count = token_count;
-  plan->summary.denoise_step_count =
-      options->request->generation.denoise_step_count;
   plan->summary.diffusion_latent_shape =
       id4_ideogram4_generation_request_diffusion_latent_shape(options->request);
+  plan->summary.qwen_token_count = token_count;
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_calculate_bf16_token_capacity(
+      token_count, &plan->summary.qwen_token_capacity));
+  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_image_token_count(
+      session->dit_model, plan->summary.diffusion_latent_shape,
+      &plan->summary.image_token_count));
+  if (plan->summary.image_token_count > UINT32_MAX - token_count) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "Ideogram4 generation conditioned token count "
+                            "overflow");
+  }
+  plan->summary.conditioned_dit_token_count =
+      token_count + plan->summary.image_token_count;
+  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_calculate_bf16_token_capacity(
+      plan->summary.conditioned_dit_token_count,
+      &plan->summary.conditioned_dit_token_capacity));
+  plan->summary.unconditioned_dit_token_count = plan->summary.image_token_count;
+  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_calculate_bf16_token_capacity(
+      plan->summary.unconditioned_dit_token_count,
+      &plan->summary.unconditioned_dit_token_capacity));
+  plan->summary.denoise_step_count =
+      options->request->generation.denoise_step_count;
   plan->summary.decoded_image_shape =
       id4_ideogram4_generation_decoded_image_shape(
           session->decode_model, plan->summary.diffusion_latent_shape);
@@ -1545,9 +1564,20 @@ iree_status_t id4_ideogram4_generation_plan_format_json(
       "{\"kind\":\"ideogram4_generation\",\"summary\":{\"qwen_token_count\":"));
   IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
       builder,
-      "%" PRIu32 ",\"denoise_step_count\":%" PRIu32
-      ",\"diffusion_latent_shape\":",
-      plan->summary.qwen_token_count, plan->summary.denoise_step_count));
+      "%" PRIu32 ",\"qwen_token_capacity\":%" PRIu32
+      ",\"image_token_count\":%" PRIu32
+      ",\"conditioned_dit_token_count\":%" PRIu32
+      ",\"conditioned_dit_token_capacity\":%" PRIu32
+      ",\"unconditioned_dit_token_count\":%" PRIu32
+      ",\"unconditioned_dit_token_capacity\":%" PRIu32
+      ",\"denoise_step_count\":%" PRIu32 ",\"diffusion_latent_shape\":",
+      plan->summary.qwen_token_count, plan->summary.qwen_token_capacity,
+      plan->summary.image_token_count,
+      plan->summary.conditioned_dit_token_count,
+      plan->summary.conditioned_dit_token_capacity,
+      plan->summary.unconditioned_dit_token_count,
+      plan->summary.unconditioned_dit_token_capacity,
+      plan->summary.denoise_step_count));
   IREE_RETURN_IF_ERROR(id4_ideogram4_generation_plan_append_shape_json(
       builder, plan->summary.diffusion_latent_shape));
   IREE_RETURN_IF_ERROR(

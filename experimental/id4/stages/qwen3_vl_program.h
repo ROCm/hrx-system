@@ -48,6 +48,10 @@ typedef struct id4_qwen3_vl_request_config_t {
   uint32_t token_count;
 } id4_qwen3_vl_request_config_t;
 
+// Calculates the BF16 packed token capacity used by Qwen3-VL linear kernels.
+iree_status_t id4_qwen3_vl_program_calculate_bf16_token_capacity(
+    uint32_t token_count, uint32_t* out_token_capacity);
+
 // Options for authoring a Qwen3-VL forward semantic program.
 typedef struct id4_qwen3_vl_program_options_t {
   // Size of this structure for versioning.

@@ -1350,7 +1350,10 @@ static iree_status_t SetGenerationBenchmarkLabel(
   iree_string_builder_initialize(iree_allocator_system(), &label_builder);
   iree_status_t status = iree_string_builder_append_format(
       &label_builder,
-      "prompt=%.*s tokens=%" PRIu32 " latent=%" PRIu64 "x%" PRIu64
+      "prompt=%.*s qwen_tokens=%" PRIu32 " qwen_capacity=%" PRIu32
+      " image_tokens=%" PRIu32 " dit_cond_tokens=%" PRIu32
+      " dit_cond_capacity=%" PRIu32 " dit_uncond_tokens=%" PRIu32
+      " dit_uncond_capacity=%" PRIu32 " latent=%" PRIu64 "x%" PRIu64
       " steps=%" PRIu32 " image=%" PRIu64 "x%" PRIu64
       " residency=%.*s issue=%.*s resident_phase_mask=0x%08x"
       " params=%.*s activation=%.*s weights=%.*s attention=%.*s ff=%.*s"
@@ -1363,7 +1366,12 @@ static iree_status_t SetGenerationBenchmarkLabel(
       "MiB"
       " boundary=%" PRIu64 "MiB kernels=%" PRIhsz " dispatches=%" PRIhsz,
       static_cast<int>(prompt_label.size), prompt_label.data,
-      summary.qwen_token_count, summary.diffusion_latent_shape.dims[0],
+      summary.qwen_token_count, summary.qwen_token_capacity,
+      summary.image_token_count, summary.conditioned_dit_token_count,
+      summary.conditioned_dit_token_capacity,
+      summary.unconditioned_dit_token_count,
+      summary.unconditioned_dit_token_capacity,
+      summary.diffusion_latent_shape.dims[0],
       summary.diffusion_latent_shape.dims[1], summary.denoise_step_count,
       summary.decoded_image_shape.dims[0], summary.decoded_image_shape.dims[1],
       static_cast<int>(residency_mode.size), residency_mode.data,

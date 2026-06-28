@@ -22,6 +22,9 @@ extern "C" {
 // Current combined text+image prelude flattened token-count limit.
 #define ID4_IDEOGRAM4_DIT_PRELUDE_MAX_TOKEN_COUNT 131072u
 
+// BF16 packed activation token-capacity alignment used by transformer blocks.
+#define ID4_IDEOGRAM4_DIT_BF16_TOKEN_CAPACITY_BLOCK 128u
+
 // Maximum formatted DiT parameter key or tensor diagnostic name byte length.
 #define ID4_IDEOGRAM4_DIT_PROGRAM_FORMAT_BUFFER_CAPACITY 192
 
@@ -128,6 +131,15 @@ typedef struct id4_ideogram4_dit_request_config_t {
   // Number of imported Qwen condition token positions.
   uint32_t text_token_count;
 } id4_ideogram4_dit_request_config_t;
+
+// Calculates the flattened image-token count for an Ideogram 4 latent tensor.
+iree_status_t id4_ideogram4_dit_program_image_token_count(
+    id4_ideogram4_dit_model_config_t model,
+    id4_pipeline_program_shape_t latent_shape, uint32_t* out_token_count);
+
+// Calculates the BF16 packed token capacity used by DiT transformer blocks.
+iree_status_t id4_ideogram4_dit_program_calculate_bf16_token_capacity(
+    uint32_t total_token_count, uint32_t* out_token_capacity);
 
 // Exact-source rule for one logical DiT parameter key.
 typedef struct id4_ideogram4_dit_parameter_source_rule_t {
