@@ -503,6 +503,18 @@ test_fact_power_of_two = Op(
     examples=["%p2 = test.fact_power_of_two %x : index -> i1"],
 )
 
+test_fact_finite = Op(
+    "test.fact_finite",
+    group=test_ops,
+    doc="Returns 1 if the input is provably finite, 0 otherwise.",
+    operands=[Operand("value", ANY)],
+    results=[Result("result", I1)],
+    traits=[PURE],
+    facts="loom_test_fact_finite_facts",
+    format=[Ref("value"), COLON, TypeOf("value"), ARROW, ResultType("result")],
+    examples=["%finite = test.fact_finite %x : f32 -> i1"],
+)
+
 test_fact_uniform = Op(
     "test.fact_uniform",
     group=test_ops,
@@ -2454,4 +2466,5 @@ ALL_TEST_OPS: tuple[Op, ...] = (
     test_segmented,
     test_template_param_symbol,
     test_template_param_symbol_flags,
+    test_fact_finite,
 )

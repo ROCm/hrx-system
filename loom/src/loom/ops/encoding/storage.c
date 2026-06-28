@@ -613,6 +613,28 @@ bool loom_encoding_query_type_storage_schema(
   return loom_encoding_value_storage_schema(context, facts, out_schema);
 }
 
+bool loom_encoding_query_type_storage_content_facts(
+    const loom_fact_context_t* context, const loom_module_t* module,
+    loom_type_t type, loom_value_facts_t* out_facts) {
+  if (!out_facts) return false;
+  *out_facts = loom_value_facts_unknown();
+  if (!loom_scalar_type_is_float(loom_type_element_type(type))) {
+    return false;
+  }
+  loom_value_fact_storage_schema_t storage_schema = {0};
+  if (!loom_encoding_query_type_storage_schema(context, module, type,
+                                               &storage_schema)) {
+    return false;
+  }
+  if (!iree_any_bit_set(storage_schema.encoded_operand.rounding_policy,
+                        LOOM_VALUE_FACT_ROUNDING_POLICY_FINITE_ONLY)) {
+    return false;
+  }
+  out_facts->flags |= LOOM_VALUE_FACT_NOT_NAN | LOOM_VALUE_FACT_NOT_INF |
+                      LOOM_VALUE_FACT_FINITE;
+  return true;
+}
+
 static iree_status_t loom_encoding_emit(iree_diagnostic_emitter_t emitter,
                                         const loom_op_t* op,
                                         const loom_error_def_t* error,

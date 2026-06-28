@@ -666,8 +666,33 @@ iree_status_t loom_vector_fragment_load_facts(
       fact.static_schema_encoding_id = storage_schema.static_spec_encoding_id;
     }
   }
-  return loom_vector_fragment_fact_make_value_facts(context, fact,
-                                                    &result_facts[0]);
+  IREE_RETURN_IF_ERROR(loom_vector_fragment_fact_make_value_facts(
+      context, fact, &result_facts[0]));
+  loom_value_facts_t content_facts = {0};
+  if (loom_encoding_query_type_storage_content_facts(
+          context, module, loom_module_value_type(module, view_value_id),
+          &content_facts)) {
+    result_facts[0].flags |= content_facts.flags;
+  }
+  return iree_ok_status();
+}
+
+iree_status_t loom_vector_load_facts(loom_fact_context_t* context,
+                                     const loom_module_t* module,
+                                     const loom_op_t* op,
+                                     const loom_value_facts_t* operand_facts,
+                                     loom_value_facts_t* result_facts) {
+  (void)operand_facts;
+  loom_type_t view_type =
+      loom_module_value_type(module, loom_vector_load_view(op));
+  loom_value_facts_t element_facts = {0};
+  if (!loom_encoding_query_type_storage_content_facts(
+          context, module, view_type, &element_facts)) {
+    result_facts[0] = loom_value_facts_unknown();
+    return iree_ok_status();
+  }
+  return loom_value_facts_make_uniform_element(context, element_facts,
+                                               &result_facts[0]);
 }
 
 static bool loom_vector_integer_element_bitwidth(loom_type_t type,

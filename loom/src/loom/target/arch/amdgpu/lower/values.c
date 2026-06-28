@@ -5406,19 +5406,6 @@ static bool loom_amdgpu_vector_fp8_storage_lane_facts(
 }
 
 static loom_amdgpu_fp8_decode_value_flags_t
-loom_amdgpu_fp8_decode_value_flags_from_facts(loom_value_facts_t facts) {
-  loom_amdgpu_fp8_decode_value_flags_t flags =
-      LOOM_AMDGPU_FP8_DECODE_VALUE_FLAG_NONE;
-  if (loom_value_facts_is_not_nan(facts)) {
-    flags |= LOOM_AMDGPU_FP8_DECODE_VALUE_FLAG_NOT_NAN;
-  }
-  if (loom_value_facts_is_not_inf(facts)) {
-    flags |= LOOM_AMDGPU_FP8_DECODE_VALUE_FLAG_NOT_INF;
-  }
-  return flags;
-}
-
-static loom_amdgpu_fp8_decode_value_flags_t
 loom_amdgpu_vector_fp8_decode_value_flags(
     loom_low_lower_context_t* context,
     const loom_amdgpu_vector_16bit_float_conversion_plan_t* plan,

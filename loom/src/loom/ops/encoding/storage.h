@@ -79,6 +79,14 @@ bool loom_encoding_query_type_storage_schema(
     const loom_fact_context_t* context, const loom_module_t* module,
     loom_type_t type, loom_value_fact_storage_schema_t* out_schema);
 
+// Queries scalar content facts implied by a shaped type's storage schema. This
+// only returns true when the schema carries a target-independent content
+// contract, such as finite-only payloads. Element formats alone do not imply
+// content facts.
+bool loom_encoding_query_type_storage_content_facts(
+    const loom_fact_context_t* context, const loom_module_t* module,
+    loom_type_t type, loom_value_facts_t* out_facts);
+
 #ifdef __cplusplus
 }
 #endif
