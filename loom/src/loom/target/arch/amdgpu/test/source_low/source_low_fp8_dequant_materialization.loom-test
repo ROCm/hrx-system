@@ -2226,6 +2226,49 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx1100_finite_flush_su
 // ====
 
 amdgpu.target<gfx1100> @target
+kernel.def target(@target) @gfx1100_finite_flush_subnormal_storage_f8e4m3_middle_pair_to_bf16_store() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %lane = kernel.workitem.id<x> : index
+  %input_layout = encoding.layout.strided [4, 1] : encoding<layout>
+  %input_schema = encoding.define #matrix_operand<element_format=f8e4m3fn, payload_elements=4, payload_registers=1, rounding=finite_flush_subnormal> : encoding<schema>
+  %input_storage = encoding.define #physical_storage {layout = %input_layout : encoding<layout>, schema = %input_schema : encoding<schema>} : encoding<storage>
+  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E4M3, %input_storage>
+  %output_view = buffer.view %output[%base] : buffer -> view<64x2xbf16, #dense>
+  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E4M3, %input_storage> -> vector<4xf8E4M3>
+  %middle = vector.slice %packed[1] : vector<4xf8E4M3> -> vector<2xf8E4M3>
+  %decoded = vector.extf %middle : vector<2xf8E4M3> to vector<2xbf16>
+  vector.store %decoded, %output_view[%lane, 0] : vector<2xbf16>, view<64x2xbf16, #dense>
+  kernel.return
+}
+
+// ----
+low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx1100_finite_flush_subnormal_storage_f8e4m3_middle_pair_to_bf16_store() asm<amdgpu.rdna3.core> {
+  %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
+  %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
+  %22 = v_lshlrev_b32_src0_inline %lane, 2
+  %packed = global_load_b32_saddr %22, %input_view
+  %24 = v_mov_b32 0
+  %25 = v_perm_b32_src2_lit %packed, %24, 393221
+  %26 = v_and_b32_lit %25, 8323199
+  %27 = v_mov_b32 1006648320
+  %28 = v_lshl_add_u32_shift_imm %26, %27, 4
+  %29 = v_mov_b32 65537
+  %30 = v_pk_min_u16 %26, %29
+  %31 = v_pk_mul_lo_u16 %28, %30
+  %32 = v_lshlrev_b32_src0_inline %25, 8
+  %decoded = v_bfi_b32_src0_lit %32, %31, 2147516416
+  global_store_b32_saddr %22, %decoded, %output_view
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
 kernel.def target(@target) @gfx1100_finite_flush_subnormal_storage_f8e5m2_x8_to_bf16_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index

@@ -16,12 +16,19 @@
 
 enum {
   LOOM_AMDGPU_FP8_DECODE_BF16_BYTE_PAIR_LOW_SELECTOR = 0x00050004u,
+  LOOM_AMDGPU_FP8_DECODE_BF16_BYTE_PAIR_MIDDLE_SELECTOR = 0x00060005u,
   LOOM_AMDGPU_FP8_DECODE_BF16_BYTE_PAIR_HIGH_SELECTOR = 0x00070006u,
   LOOM_AMDGPU_FP8_DECODE_BF16_PAIR_NO_SIGN_MASK = 0x007F007Fu,
   LOOM_AMDGPU_FP8_DECODE_BF16_PAIR_SIGN_MASK = 0x00800080u,
   LOOM_AMDGPU_FP8_DECODE_BF16_PAIR_SIGN_INSERT_MASK = 0x80008000u,
   LOOM_AMDGPU_FP8_DECODE_BF16_SIGN_INSERT_MASK = 0x00008000u,
   LOOM_AMDGPU_FP8_DECODE_BF16_PAIR_ONE_MASK = 0x00010001u,
+};
+
+static const uint32_t kLoomAmdgpuFp8DecodeBf16BytePairSelectors[] = {
+    LOOM_AMDGPU_FP8_DECODE_BF16_BYTE_PAIR_LOW_SELECTOR,
+    LOOM_AMDGPU_FP8_DECODE_BF16_BYTE_PAIR_MIDDLE_SELECTOR,
+    LOOM_AMDGPU_FP8_DECODE_BF16_BYTE_PAIR_HIGH_SELECTOR,
 };
 
 loom_amdgpu_fp8_decode_value_flags_t
@@ -727,7 +734,7 @@ iree_status_t loom_amdgpu_try_emit_fp8_pair_to_packed_bf16(
   *out_selected = false;
 
   if (!loom_amdgpu_can_emit_fp8_pair_to_packed_bf16(plan, value_flags) ||
-      (byte_offset != 0 && byte_offset != 2)) {
+      byte_offset > 2) {
     return iree_ok_status();
   }
 
@@ -739,8 +746,7 @@ iree_status_t loom_amdgpu_try_emit_fp8_pair_to_packed_bf16(
       &low_zero));
   loom_value_id_t low_expanded_pair = LOOM_VALUE_ID_INVALID;
   const uint32_t selector =
-      byte_offset == 0 ? LOOM_AMDGPU_FP8_DECODE_BF16_BYTE_PAIR_LOW_SELECTOR
-                       : LOOM_AMDGPU_FP8_DECODE_BF16_BYTE_PAIR_HIGH_SELECTOR;
+      kLoomAmdgpuFp8DecodeBf16BytePairSelectors[byte_offset];
   IREE_RETURN_IF_ERROR(loom_amdgpu_emit_resolved_vgpr_binary_immediate(
       context, source_op, &plan->perm_b32_src2_literal_descriptor,
       low_source_register, low_zero, selector, vgpr_type, &low_expanded_pair));
