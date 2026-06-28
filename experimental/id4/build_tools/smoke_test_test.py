@@ -126,11 +126,98 @@ class Id4SmokeTestTest(unittest.TestCase):
         self.assertIn("--dump_plan=artifacts/plan.json", command)
         self.assertIn("--dump_diagnostics=artifacts/diagnostics", command)
         self.assertIn("--profile_output=artifacts/profile.txt", command)
-        self.assertIn("--dit_attention_implementation=materialized_wmma", command)
+        self.assertIn("--dit_weight_execution_format=bf16_resident", command)
+        self.assertIn("--dit_attention_implementation=online_wmma", command)
+        self.assertIn("--dit_feed_forward_implementation=pytorch_parity", command)
+        self.assertIn("--vae_tiling_mode=memory_budget", command)
+        self.assertIn("--vae_memory_budget=536870912", command)
+        self.assertIn("--vae_overlap=0.5", command)
         self.assertIn("--device=amdgpu", command)
         self.assertIn("--parameters=qwen=qwen.safetensors", command)
         self.assertIn("--parameters=vae=vae.safetensors", command)
         self.assertEqual(command[-1], "--list_devices=false")
+
+    def test_build_id4_command_routes_selected_policy(self):
+        args = self.smoke_test.parse_arguments(
+            [
+                "--output_dir=out",
+                "--id4_binary=bin/id4",
+                "--device=amdgpu",
+                "--tokenizer=tokenizer.json",
+                "--parameters=qwen=qwen.safetensors",
+                "--dit_weight_execution_format=fp8_direct",
+                "--dit_attention_implementation=blocked_wmma",
+                "--dit_feed_forward_implementation=fused_product",
+            ]
+        )
+
+        command = self.smoke_test.build_id4_command(args, Path("artifacts"))
+
+        self.assertIn("--dit_weight_execution_format=fp8_direct", command)
+        self.assertIn("--dit_attention_implementation=blocked_wmma", command)
+        self.assertIn("--dit_feed_forward_implementation=fused_product", command)
+
+    def test_build_id4_command_omits_disabled_vae_detail_flags(self):
+        args = self.smoke_test.parse_arguments(
+            [
+                "--output_dir=out",
+                "--id4_binary=bin/id4",
+                "--device=amdgpu",
+                "--tokenizer=tokenizer.json",
+                "--parameters=qwen=qwen.safetensors",
+                "--vae_tiling_mode=disabled",
+            ]
+        )
+
+        command = self.smoke_test.build_id4_command(args, Path("artifacts"))
+
+        self.assertIn("--vae_tiling_mode=disabled", command)
+        self.assertNotIn("--vae_memory_budget=536870912", command)
+        self.assertNotIn("--vae_overlap=0.5", command)
+
+    def test_build_id4_command_routes_explicit_vae_tiling_policy(self):
+        args = self.smoke_test.parse_arguments(
+            [
+                "--output_dir=out",
+                "--id4_binary=bin/id4",
+                "--device=amdgpu",
+                "--tokenizer=tokenizer.json",
+                "--parameters=qwen=qwen.safetensors",
+                "--vae_tiling_mode=explicit_tile_size",
+                "--vae_tile_size_x=32",
+                "--vae_tile_size_y=24",
+                "--vae_overlap=0.25",
+            ]
+        )
+
+        command = self.smoke_test.build_id4_command(args, Path("artifacts"))
+
+        self.assertIn("--vae_tiling_mode=explicit_tile_size", command)
+        self.assertIn("--vae_tile_size_x=32", command)
+        self.assertIn("--vae_tile_size_y=24", command)
+        self.assertIn("--vae_overlap=0.25", command)
+
+    def test_build_id4_command_routes_relative_vae_tiling_policy(self):
+        args = self.smoke_test.parse_arguments(
+            [
+                "--output_dir=out",
+                "--id4_binary=bin/id4",
+                "--device=amdgpu",
+                "--tokenizer=tokenizer.json",
+                "--parameters=qwen=qwen.safetensors",
+                "--vae_tiling_mode=relative_tile_size",
+                "--vae_relative_size_x=0.5",
+                "--vae_relative_size_y=0.25",
+                "--vae_overlap=0.125",
+            ]
+        )
+
+        command = self.smoke_test.build_id4_command(args, Path("artifacts"))
+
+        self.assertIn("--vae_tiling_mode=relative_tile_size", command)
+        self.assertIn("--vae_relative_size_x=0.5", command)
+        self.assertIn("--vae_relative_size_y=0.25", command)
+        self.assertIn("--vae_overlap=0.125", command)
 
     def test_ppm_metrics_preserve_binary_payload(self):
         with tempfile.TemporaryDirectory() as directory:

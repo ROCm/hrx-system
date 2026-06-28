@@ -130,11 +130,34 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
         choices=("f32_canonical", "bf16_linear_input"),
     )
     parser.add_argument(
-        "--dit_attention_implementation",
-        default="materialized_wmma",
-        choices=("streaming", "materialized_wmma"),
+        "--dit_weight_execution_format",
+        default="bf16_resident",
+        choices=("bf16_resident", "fp8_direct"),
     )
-    parser.add_argument("--vae_tiling_mode", default="memory_budget")
+    parser.add_argument(
+        "--dit_attention_implementation",
+        default="online_wmma",
+        choices=("streaming", "materialized_wmma", "blocked_wmma", "online_wmma"),
+    )
+    parser.add_argument(
+        "--dit_feed_forward_implementation",
+        default="pytorch_parity",
+        choices=("fused_product", "pytorch_parity"),
+    )
+    parser.add_argument(
+        "--vae_tiling_mode",
+        default="memory_budget",
+        choices=(
+            "disabled",
+            "explicit_tile_size",
+            "relative_tile_size",
+            "memory_budget",
+        ),
+    )
+    parser.add_argument("--vae_tile_size_x", type=int, default=0)
+    parser.add_argument("--vae_tile_size_y", type=int, default=0)
+    parser.add_argument("--vae_relative_size_x", type=float, default=0.0)
+    parser.add_argument("--vae_relative_size_y", type=float, default=0.0)
     parser.add_argument("--vae_memory_budget", type=int, default=536870912)
     parser.add_argument("--vae_overlap", type=float, default=0.5)
     parser.add_argument("--extra_id4_arg", action="append", default=[])
@@ -203,14 +226,37 @@ def build_id4_command(args: argparse.Namespace, artifact_dir: Path) -> list[str]
         f"--output={artifact_dir / 'image.ppm'}",
         f"--dit_parameter_format={args.dit_parameter_format}",
         f"--dit_activation_format={args.dit_activation_format}",
+        f"--dit_weight_execution_format={args.dit_weight_execution_format}",
         f"--dit_attention_implementation={args.dit_attention_implementation}",
+        f"--dit_feed_forward_implementation={args.dit_feed_forward_implementation}",
         f"--vae_tiling_mode={args.vae_tiling_mode}",
-        f"--vae_memory_budget={args.vae_memory_budget}",
-        f"--vae_overlap={args.vae_overlap}",
         f"--dump_plan={artifact_dir / 'plan.json'}",
         f"--dump_diagnostics={artifact_dir / 'diagnostics'}",
         f"--profile_output={artifact_dir / 'profile.txt'}",
     ]
+    if args.vae_tiling_mode == "explicit_tile_size":
+        command.extend(
+            [
+                f"--vae_tile_size_x={args.vae_tile_size_x}",
+                f"--vae_tile_size_y={args.vae_tile_size_y}",
+                f"--vae_overlap={args.vae_overlap}",
+            ]
+        )
+    elif args.vae_tiling_mode == "relative_tile_size":
+        command.extend(
+            [
+                f"--vae_relative_size_x={args.vae_relative_size_x}",
+                f"--vae_relative_size_y={args.vae_relative_size_y}",
+                f"--vae_overlap={args.vae_overlap}",
+            ]
+        )
+    elif args.vae_tiling_mode == "memory_budget":
+        command.extend(
+            [
+                f"--vae_memory_budget={args.vae_memory_budget}",
+                f"--vae_overlap={args.vae_overlap}",
+            ]
+        )
     for device in args.device:
         command.append(f"--device={device}")
     for parameter in args.parameters:
