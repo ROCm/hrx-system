@@ -4,17 +4,30 @@ config.decl @id4.qwen3_vl.condition.token_count : %value: index where [range(%va
 
 kernel.def export("id4_qwen3_vl_condition_apply_token_weights_f32") @id4_qwen3_vl_condition_apply_token_weights_f32() {
   %unit = index.constant 1 : index
+  %block_element_count = index.constant 2048 : index
   %workgroup_size_x = index.constant 256 : index
-  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
+  %hidden_row_count = config.get @id4.qwen3_vl.condition.hidden_row_count : index
+  %token_count = config.get @id4.qwen3_vl.condition.token_count : index
+  %element_count = index.mul %hidden_row_count, %token_count : index
+  %rounding = index.sub %block_element_count, %unit : index
+  %rounded = index.add %element_count, %rounding : index
+  %partial_count = index.div %rounded, %block_element_count : index
+  kernel.launch.config workgroups(%partial_count, %unit, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
 } launch(%selected_hidden_states: buffer, %token_weights: buffer, %condition: buffer, %stats: buffer) {
   %base = index.constant 0 : offset
   %zero = index.constant 0 : index
   %one = index.constant 1 : index
+  %partial_ordinal = kernel.workgroup.id<x> : index
   %lane = kernel.workitem.id<x> : index
   %hidden_row_count = config.get @id4.qwen3_vl.condition.hidden_row_count : index
   %token_count = config.get @id4.qwen3_vl.condition.token_count : index
   %workgroup_size_x = index.constant 256 : index
+  %block_element_count = index.constant 2048 : index
   %element_count = index.mul %hidden_row_count, %token_count : index
+  %rounding = index.sub %block_element_count, %one : index
+  %rounded = index.add %element_count, %rounding : index
+  %partial_count = index.div %rounded, %block_element_count : index
+  %block_origin = index.mul %partial_ordinal, %block_element_count : index
   %zero_f32 = scalar.constant 0.0 : f32
   %selected_noalias, %token_weights_noalias, %condition_noalias, %stats_noalias = buffer.assume.noalias %selected_hidden_states, %token_weights, %condition, %stats : buffer, buffer, buffer, buffer
   %selected_global = buffer.assume.memory_space<global> %selected_noalias : buffer
@@ -24,30 +37,69 @@ kernel.def export("id4_qwen3_vl_condition_apply_token_weights_f32") @id4_qwen3_v
   %selected_view = buffer.view %selected_global[%base] : buffer -> view<[%hidden_row_count]x[%token_count]xf32, #dense>
   %token_weights_view = buffer.view %token_weights_global[%base] : buffer -> view<[%token_count]xf32, #dense>
   %condition_view = buffer.view %condition_global[%base] : buffer -> view<[%hidden_row_count]x[%token_count]xf32, #dense>
-  %stats_view = buffer.view %stats_global[%base] : buffer -> view<2xf32, #dense>
-  %original_lane_sum = scf.for %element_index = [%lane to %element_count step %workgroup_size_x](%acc = %zero_f32 : f32) -> (f32) {
-    %row = index.div %element_index, %token_count : index
-    %column = index.rem %element_index, %token_count : index
-    %value = view.load %selected_view[%row, %column] : view<[%hidden_row_count]x[%token_count]xf32, #dense> -> f32
-    %next = scalar.addf<reassoc|nnan|ninf|nsz> %acc, %value : f32
-    scf.yield %next : f32
-  }
-  %weighted_lane_sum = scf.for %element_index = [%lane to %element_count step %workgroup_size_x](%acc = %zero_f32 : f32) -> (f32) {
-    %row = index.div %element_index, %token_count : index
-    %column = index.rem %element_index, %token_count : index
-    %value = view.load %selected_view[%row, %column] : view<[%hidden_row_count]x[%token_count]xf32, #dense> -> f32
-    %weight = view.load %token_weights_view[%column] : view<[%token_count]xf32, #dense> -> f32
-    %weighted = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %value, %weight : f32
-    view.store %weighted, %condition_view[%row, %column] : f32, view<[%hidden_row_count]x[%token_count]xf32, #dense>
-    %next = scalar.addf<reassoc|nnan|ninf|nsz> %acc, %weighted : f32
-    scf.yield %next : f32
+  %stats_view = buffer.view %stats_global[%base] : buffer -> view<[%partial_count]x2xf32, #dense>
+  %original_lane_sum, %weighted_lane_sum = scf.for %block_offset = [%lane to %block_element_count step %workgroup_size_x](%original_acc = %zero_f32 : f32, %weighted_acc = %zero_f32 : f32) -> (f32, f32) {
+    %element_index = index.add %block_origin, %block_offset : index
+    %in_bounds = index.cmp ult, %element_index, %element_count : index
+    %next_original, %next_weighted = scf.if %in_bounds -> (f32, f32) {
+      %row = index.div %element_index, %token_count : index
+      %column = index.rem %element_index, %token_count : index
+      %value = view.load %selected_view[%row, %column] : view<[%hidden_row_count]x[%token_count]xf32, #dense> -> f32
+      %weight = view.load %token_weights_view[%column] : view<[%token_count]xf32, #dense> -> f32
+      %weighted = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %value, %weight : f32
+      view.store %weighted, %condition_view[%row, %column] : f32, view<[%hidden_row_count]x[%token_count]xf32, #dense>
+      %original_next = scalar.addf<reassoc|nnan|ninf|nsz> %original_acc, %value : f32
+      %weighted_next = scalar.addf<reassoc|nnan|ninf|nsz> %weighted_acc, %weighted : f32
+      scf.yield %original_next, %weighted_next : f32, f32
+    } else {
+      scf.yield %original_acc, %weighted_acc : f32, f32
+    }
+    scf.yield %next_original, %next_weighted : f32, f32
   }
   %original_sum = kernel.workgroup.reduce<addf> %original_lane_sum : f32
   %weighted_sum = kernel.workgroup.reduce<addf> %weighted_lane_sum : f32
   %is_lane0 = index.cmp eq, %lane, %zero : index
   scf.if %is_lane0 {
-    view.store %original_sum, %stats_view[%zero] : f32, view<2xf32, #dense>
-    view.store %weighted_sum, %stats_view[%one] : f32, view<2xf32, #dense>
+    view.store %original_sum, %stats_view[%partial_ordinal, %zero] : f32, view<[%partial_count]x2xf32, #dense>
+    view.store %weighted_sum, %stats_view[%partial_ordinal, %one] : f32, view<[%partial_count]x2xf32, #dense>
+  }
+  kernel.return
+}
+
+kernel.def export("id4_qwen3_vl_condition_reduce_token_weight_stats_f32") @id4_qwen3_vl_condition_reduce_token_weight_stats_f32() {
+  %unit = index.constant 1 : index
+  %workgroup_size_x = index.constant 256 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
+} launch(%stats: buffer) {
+  %base = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %lane = kernel.workitem.id<x> : index
+  %hidden_row_count = config.get @id4.qwen3_vl.condition.hidden_row_count : index
+  %token_count = config.get @id4.qwen3_vl.condition.token_count : index
+  %workgroup_size_x = index.constant 256 : index
+  %block_element_count = index.constant 2048 : index
+  %element_count = index.mul %hidden_row_count, %token_count : index
+  %rounding = index.sub %block_element_count, %one : index
+  %rounded = index.add %element_count, %rounding : index
+  %partial_count = index.div %rounded, %block_element_count : index
+  %zero_f32 = scalar.constant 0.0 : f32
+  %stats_noalias = buffer.assume.noalias %stats : buffer
+  %stats_global = buffer.assume.memory_space<global> %stats_noalias : buffer
+  %stats_view = buffer.view %stats_global[%base] : buffer -> view<[%partial_count]x2xf32, #dense>
+  %original_lane_sum, %weighted_lane_sum = scf.for %partial_index = [%lane to %partial_count step %workgroup_size_x](%original_acc = %zero_f32 : f32, %weighted_acc = %zero_f32 : f32) -> (f32, f32) {
+    %original_partial = view.load %stats_view[%partial_index, %zero] : view<[%partial_count]x2xf32, #dense> -> f32
+    %weighted_partial = view.load %stats_view[%partial_index, %one] : view<[%partial_count]x2xf32, #dense> -> f32
+    %original_next = scalar.addf<reassoc|nnan|ninf|nsz> %original_acc, %original_partial : f32
+    %weighted_next = scalar.addf<reassoc|nnan|ninf|nsz> %weighted_acc, %weighted_partial : f32
+    scf.yield %original_next, %weighted_next : f32, f32
+  }
+  %original_sum = kernel.workgroup.reduce<addf> %original_lane_sum : f32
+  %weighted_sum = kernel.workgroup.reduce<addf> %weighted_lane_sum : f32
+  %is_lane0 = index.cmp eq, %lane, %zero : index
+  scf.if %is_lane0 {
+    view.store %original_sum, %stats_view[%zero, %zero] : f32, view<[%partial_count]x2xf32, #dense>
+    view.store %weighted_sum, %stats_view[%zero, %one] : f32, view<[%partial_count]x2xf32, #dense>
   }
   kernel.return
 }
@@ -73,17 +125,21 @@ kernel.def export("id4_qwen3_vl_condition_normalize_token_weights_f32") @id4_qwe
   %hidden_row_count = config.get @id4.qwen3_vl.condition.hidden_row_count : index
   %token_count = config.get @id4.qwen3_vl.condition.token_count : index
   %workgroup_size_x = index.constant 256 : index
+  %block_element_count = index.constant 2048 : index
   %element_count = index.mul %hidden_row_count, %token_count : index
+  %partial_rounding = index.sub %block_element_count, %one : index
+  %partial_rounded = index.add %element_count, %partial_rounding : index
+  %partial_count = index.div %partial_rounded, %block_element_count : index
   %element_index = index.madd %workgroup, %workgroup_size_x, %lane : index
   %in_bounds = index.cmp ult, %element_index, %element_count : index
   %condition_noalias, %stats_noalias = buffer.assume.noalias %condition, %stats : buffer, buffer
   %condition_global = buffer.assume.memory_space<global> %condition_noalias : buffer
   %stats_global = buffer.assume.memory_space<global> %stats_noalias : buffer
   %condition_view = buffer.view %condition_global[%base] : buffer -> view<[%hidden_row_count]x[%token_count]xf32, #dense>
-  %stats_view = buffer.view %stats_global[%base] : buffer -> view<2xf32, #dense>
+  %stats_view = buffer.view %stats_global[%base] : buffer -> view<[%partial_count]x2xf32, #dense>
   scf.if %in_bounds {
-    %original_sum = view.load %stats_view[%zero] : view<2xf32, #dense> -> f32
-    %weighted_sum = view.load %stats_view[%one] : view<2xf32, #dense> -> f32
+    %original_sum = view.load %stats_view[%zero, %zero] : view<[%partial_count]x2xf32, #dense> -> f32
+    %weighted_sum = view.load %stats_view[%zero, %one] : view<[%partial_count]x2xf32, #dense> -> f32
     %original_finite = scalar.cmpf ord, %original_sum, %original_sum : f32
     %weighted_finite = scalar.cmpf ord, %weighted_sum, %weighted_sum : f32
     %weighted_nonzero = scalar.cmpf one, %weighted_sum, %zero_f32 : f32
@@ -116,10 +172,11 @@ check.case public @id4_qwen3_vl_condition_forward_f32_small_case {
   %selected_hidden_states = check.generate.fill value(1.0) : tensor<1x4xf32>
   %token_weights = check.generate.iota offset(0.5) step(0.5) : tensor<4xf32>
   %condition = check.generate.fill value(0.0) : tensor<1x4xf32>
-  %stats = check.generate.fill value(0.0) : tensor<2xf32>
+  %stats = check.generate.fill value(0.0) : tensor<1x2xf32>
   %expected = check.generate.iota offset(0.40000000000000001) step(0.40000000000000001) : tensor<1x4xf32>
-  func.call @id4_qwen3_vl_condition_apply_token_weights_f32(%selected_hidden_states, %token_weights, %condition, %stats) : (tensor<1x4xf32>, tensor<4xf32>, tensor<1x4xf32>, tensor<2xf32>)
-  func.call @id4_qwen3_vl_condition_normalize_token_weights_f32(%condition, %stats) : (tensor<1x4xf32>, tensor<2xf32>)
+  func.call @id4_qwen3_vl_condition_apply_token_weights_f32(%selected_hidden_states, %token_weights, %condition, %stats) : (tensor<1x4xf32>, tensor<4xf32>, tensor<1x4xf32>, tensor<1x2xf32>)
+  func.call @id4_qwen3_vl_condition_reduce_token_weight_stats_f32(%stats) : (tensor<1x2xf32>)
+  func.call @id4_qwen3_vl_condition_normalize_token_weights_f32(%condition, %stats) : (tensor<1x4xf32>, tensor<1x2xf32>)
   check.expect.close actual(%condition) expected(%expected) atol(0.0001) rtol(0.0001) nan(same) : tensor<1x4xf32>
   check.return
 }
@@ -128,10 +185,24 @@ check.case public @id4_qwen3_vl_condition_forward_f32_fixture_slice_case {
   %selected_hidden_states = check.generate.iota offset(1.0) step(1.0) : tensor<32x64xf32>
   %token_weights = check.generate.fill value(1.0) : tensor<64xf32>
   %condition = check.generate.fill value(0.0) : tensor<32x64xf32>
-  %stats = check.generate.fill value(0.0) : tensor<2xf32>
-  func.call @id4_qwen3_vl_condition_apply_token_weights_f32(%selected_hidden_states, %token_weights, %condition, %stats) : (tensor<32x64xf32>, tensor<64xf32>, tensor<32x64xf32>, tensor<2xf32>)
-  func.call @id4_qwen3_vl_condition_normalize_token_weights_f32(%condition, %stats) : (tensor<32x64xf32>, tensor<2xf32>)
+  %stats = check.generate.fill value(0.0) : tensor<1x2xf32>
+  func.call @id4_qwen3_vl_condition_apply_token_weights_f32(%selected_hidden_states, %token_weights, %condition, %stats) : (tensor<32x64xf32>, tensor<64xf32>, tensor<32x64xf32>, tensor<1x2xf32>)
+  func.call @id4_qwen3_vl_condition_reduce_token_weight_stats_f32(%stats) : (tensor<1x2xf32>)
+  func.call @id4_qwen3_vl_condition_normalize_token_weights_f32(%condition, %stats) : (tensor<32x64xf32>, tensor<1x2xf32>)
   check.expect.close actual(%condition) expected(%selected_hidden_states) atol(0.0) rtol(0.0) nan(same) : tensor<32x64xf32>
+  check.return
+}
+
+check.case public @id4_qwen3_vl_condition_forward_f32_multi_partial_case {
+  %selected_hidden_states = check.generate.fill value(1.0) : tensor<1x4098xf32>
+  %token_weights = check.generate.iota offset(1.0) step(1.0) : tensor<4098xf32>
+  %condition = check.generate.fill value(0.0) : tensor<1x4098xf32>
+  %stats = check.generate.fill value(0.0) : tensor<3x2xf32>
+  %expected = check.generate.iota offset(0.0004879238838741156) step(0.0004879238838741156) : tensor<1x4098xf32>
+  func.call @id4_qwen3_vl_condition_apply_token_weights_f32(%selected_hidden_states, %token_weights, %condition, %stats) : (tensor<1x4098xf32>, tensor<4098xf32>, tensor<1x4098xf32>, tensor<3x2xf32>)
+  func.call @id4_qwen3_vl_condition_reduce_token_weight_stats_f32(%stats) : (tensor<3x2xf32>)
+  func.call @id4_qwen3_vl_condition_normalize_token_weights_f32(%condition, %stats) : (tensor<1x4098xf32>, tensor<3x2xf32>)
+  check.expect.close actual(%condition) expected(%expected) atol(0.0001) rtol(0.0001) nan(same) : tensor<1x4098xf32>
   check.return
 }
 
@@ -139,9 +210,10 @@ check.case public @id4_qwen3_vl_condition_forward_f32_id4_text451_case {
   %selected_hidden_states = check.generate.iota offset(1.0) step(0.0001) : tensor<53248x451xf32>
   %token_weights = check.generate.fill value(1.0) : tensor<451xf32>
   %condition = check.generate.fill value(0.0) : tensor<53248x451xf32>
-  %stats = check.generate.fill value(0.0) : tensor<2xf32>
-  func.call @id4_qwen3_vl_condition_apply_token_weights_f32(%selected_hidden_states, %token_weights, %condition, %stats) : (tensor<53248x451xf32>, tensor<451xf32>, tensor<53248x451xf32>, tensor<2xf32>)
-  func.call @id4_qwen3_vl_condition_normalize_token_weights_f32(%condition, %stats) : (tensor<53248x451xf32>, tensor<2xf32>)
+  %stats = check.generate.fill value(0.0) : tensor<11726x2xf32>
+  func.call @id4_qwen3_vl_condition_apply_token_weights_f32(%selected_hidden_states, %token_weights, %condition, %stats) : (tensor<53248x451xf32>, tensor<451xf32>, tensor<53248x451xf32>, tensor<11726x2xf32>)
+  func.call @id4_qwen3_vl_condition_reduce_token_weight_stats_f32(%stats) : (tensor<11726x2xf32>)
+  func.call @id4_qwen3_vl_condition_normalize_token_weights_f32(%condition, %stats) : (tensor<53248x451xf32>, tensor<11726x2xf32>)
   check.expect.close actual(%condition) expected(%selected_hidden_states) atol(0.0) rtol(0.0) nan(same) : tensor<53248x451xf32>
   check.return
 }
@@ -149,5 +221,7 @@ check.case public @id4_qwen3_vl_condition_forward_f32_id4_text451_case {
 check.benchmark<@id4_qwen3_vl_condition_forward_f32_small_case> @id4_qwen3_vl_condition_forward_f32_small
 
 check.benchmark<@id4_qwen3_vl_condition_forward_f32_fixture_slice_case> @id4_qwen3_vl_condition_forward_f32_fixture_slice
+
+check.benchmark<@id4_qwen3_vl_condition_forward_f32_multi_partial_case> @id4_qwen3_vl_condition_forward_f32_multi_partial
 
 check.benchmark<@id4_qwen3_vl_condition_forward_f32_id4_text451_case> @id4_qwen3_vl_condition_forward_f32_id4_text451

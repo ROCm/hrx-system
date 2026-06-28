@@ -5372,6 +5372,16 @@ _KERNEL_CASES = [
         "target_name": "qwen3_vl_condition_f32_fixture_slice",
     },
     {
+        "actual_case": "@id4_qwen3_vl_condition_forward_f32_multi_partial_case",
+        "benchmark": "@id4_qwen3_vl_condition_forward_f32_multi_partial",
+        "configs": [
+            "--config=id4.qwen3_vl.condition.hidden_row_count=1",
+            "--config=id4.qwen3_vl.condition.token_count=4098",
+        ],
+        "source": "qwen3_vl/condition.loom",
+        "target_name": "qwen3_vl_condition_f32_multi_partial",
+    },
+    {
         "actual_case": "@id4_qwen3_vl_condition_forward_f32_id4_text451_case",
         "benchmark": "@id4_qwen3_vl_condition_forward_f32_id4_text451",
         "configs": [

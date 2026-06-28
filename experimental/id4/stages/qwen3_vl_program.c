@@ -21,6 +21,7 @@ enum {
   ID4_QWEN3_VL_LINEAR_WMMA_INPUT_BLOCK = 16,
   ID4_QWEN3_VL_LINEAR_WMMA_OUTPUT_ROW_BLOCK_M32 = 32,
   ID4_QWEN3_VL_LINEAR_WMMA_OUTPUT_ROW_BLOCK_M64 = 64,
+  ID4_QWEN3_VL_CONDITION_BLOCK_ELEMENT_COUNT = 2048,
   ID4_QWEN3_VL_CONFIG_VALUE_BUFFER_CAPACITY = 16,
   ID4_QWEN3_VL_MAX_KERNEL_CONFIG_BINDING_COUNT = 8,
 };
@@ -101,6 +102,25 @@ static bool id4_qwen3_vl_program_checked_mul_u32(uint32_t lhs, uint32_t rhs,
   if (lhs != 0 && rhs > UINT32_MAX / lhs) return false;
   *out_result = lhs * rhs;
   return true;
+}
+
+static uint32_t id4_qwen3_vl_program_ceil_div_u32(uint32_t numerator,
+                                                  uint32_t denominator) {
+  return numerator / denominator + (numerator % denominator != 0);
+}
+
+static iree_status_t id4_qwen3_vl_program_make_condition_partial_count(
+    uint32_t hidden_row_count, uint32_t token_count,
+    uint32_t* out_partial_count) {
+  uint32_t element_count = 0;
+  if (!id4_qwen3_vl_program_checked_mul_u32(hidden_row_count, token_count,
+                                            &element_count)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "Qwen3-VL condition element count overflow");
+  }
+  *out_partial_count = id4_qwen3_vl_program_ceil_div_u32(
+      element_count, ID4_QWEN3_VL_CONDITION_BLOCK_ELEMENT_COUNT);
+  return iree_ok_status();
 }
 
 static uint32_t id4_qwen3_vl_program_query_width(
@@ -354,7 +374,7 @@ typedef enum id4_qwen3_vl_tensor_kind_e {
   ID4_QWEN3_VL_TENSOR_SELECTED_HIDDEN_STATES = 24,
   // Token-weighted condition output.
   ID4_QWEN3_VL_TENSOR_CONDITION = 25,
-  // Two-scalar condition normalization statistics buffer.
+  // Partial condition normalization statistics buffer.
   ID4_QWEN3_VL_TENSOR_CONDITION_STATS = 26,
   // Final decoder RMSNorm output.
   ID4_QWEN3_VL_TENSOR_FINAL_NORM = 27,
@@ -381,12 +401,14 @@ typedef enum id4_qwen3_vl_operation_kind_e {
   ID4_QWEN3_VL_OPERATION_SELECTED_HIDDEN_PACK = 7,
   // Condition token-weight application operation.
   ID4_QWEN3_VL_OPERATION_CONDITION_APPLY_TOKEN_WEIGHTS = 8,
+  // Condition token-weight statistics reduction operation.
+  ID4_QWEN3_VL_OPERATION_CONDITION_REDUCE_TOKEN_WEIGHT_STATS = 9,
   // Condition token-weight normalization operation.
-  ID4_QWEN3_VL_OPERATION_CONDITION_NORMALIZE_TOKEN_WEIGHTS = 9,
+  ID4_QWEN3_VL_OPERATION_CONDITION_NORMALIZE_TOKEN_WEIGHTS = 10,
   // Execution barrier operation.
-  ID4_QWEN3_VL_OPERATION_BARRIER = 10,
+  ID4_QWEN3_VL_OPERATION_BARRIER = 11,
   // Diagnostic tap operation.
-  ID4_QWEN3_VL_OPERATION_TAP = 11,
+  ID4_QWEN3_VL_OPERATION_TAP = 12,
 } id4_qwen3_vl_operation_kind_t;
 
 typedef enum id4_qwen3_vl_operation_site_e {
@@ -464,16 +486,20 @@ typedef enum id4_qwen3_vl_operation_site_e {
   ID4_QWEN3_VL_OPERATION_SITE_CONDITION_APPLY_TOKEN_WEIGHTS = 35,
   // Barrier after condition token-weight application.
   ID4_QWEN3_VL_OPERATION_SITE_AFTER_CONDITION_APPLY_TOKEN_WEIGHTS = 36,
+  // Global condition token-weight statistics reduction site.
+  ID4_QWEN3_VL_OPERATION_SITE_CONDITION_REDUCE_TOKEN_WEIGHT_STATS = 37,
+  // Barrier after condition token-weight statistics reduction.
+  ID4_QWEN3_VL_OPERATION_SITE_AFTER_CONDITION_REDUCE_TOKEN_WEIGHT_STATS = 38,
   // Global condition token-weight normalization site.
-  ID4_QWEN3_VL_OPERATION_SITE_CONDITION_NORMALIZE_TOKEN_WEIGHTS = 37,
+  ID4_QWEN3_VL_OPERATION_SITE_CONDITION_NORMALIZE_TOKEN_WEIGHTS = 39,
   // Barrier after the exported condition tensor is complete.
-  ID4_QWEN3_VL_OPERATION_SITE_AFTER_CONDITION = 38,
+  ID4_QWEN3_VL_OPERATION_SITE_AFTER_CONDITION = 40,
   // Final decoder RMSNorm site.
-  ID4_QWEN3_VL_OPERATION_SITE_FINAL_NORM = 39,
+  ID4_QWEN3_VL_OPERATION_SITE_FINAL_NORM = 41,
   // Barrier after final decoder RMSNorm.
-  ID4_QWEN3_VL_OPERATION_SITE_AFTER_FINAL_NORM = 40,
+  ID4_QWEN3_VL_OPERATION_SITE_AFTER_FINAL_NORM = 42,
   // Forward output diagnostic site.
-  ID4_QWEN3_VL_OPERATION_SITE_OUTPUT = 41,
+  ID4_QWEN3_VL_OPERATION_SITE_OUTPUT = 43,
 } id4_qwen3_vl_operation_site_t;
 
 typedef enum id4_qwen3_vl_kernel_kind_e {
@@ -499,24 +525,26 @@ typedef enum id4_qwen3_vl_kernel_kind_e {
   ID4_QWEN3_VL_KERNEL_SELECTED_HIDDEN_PACK = 9,
   // Condition token-weight application kernel.
   ID4_QWEN3_VL_KERNEL_CONDITION_APPLY_TOKEN_WEIGHTS = 10,
+  // Condition token-weight statistics reduction kernel.
+  ID4_QWEN3_VL_KERNEL_CONDITION_REDUCE_TOKEN_WEIGHT_STATS = 11,
   // Condition token-weight normalization kernel.
-  ID4_QWEN3_VL_KERNEL_CONDITION_NORMALIZE_TOKEN_WEIGHTS = 11,
+  ID4_QWEN3_VL_KERNEL_CONDITION_NORMALIZE_TOKEN_WEIGHTS = 12,
   // Dense BF16 activation/weight WMMA linear kernel for 16-token tiles.
-  ID4_QWEN3_VL_KERNEL_LINEAR_BF16_BF16_WMMA_M16N64 = 12,
+  ID4_QWEN3_VL_KERNEL_LINEAR_BF16_BF16_WMMA_M16N64 = 13,
   // Dense BF16 activation/weight WMMA linear kernel for 32x32 tiles.
-  ID4_QWEN3_VL_KERNEL_LINEAR_BF16_BF16_WMMA_M32N32 = 13,
+  ID4_QWEN3_VL_KERNEL_LINEAR_BF16_BF16_WMMA_M32N32 = 14,
   // Dense BF16 activation/weight WMMA linear kernel for 32x64 tiles.
-  ID4_QWEN3_VL_KERNEL_LINEAR_BF16_BF16_WMMA_M32N64 = 14,
+  ID4_QWEN3_VL_KERNEL_LINEAR_BF16_BF16_WMMA_M32N64 = 15,
   // Dense BF16 activation/weight scalar linear tail kernel.
-  ID4_QWEN3_VL_KERNEL_LINEAR_BF16_BF16_TAIL = 15,
+  ID4_QWEN3_VL_KERNEL_LINEAR_BF16_BF16_TAIL = 16,
   // BF16 activation transpose pack kernel.
-  ID4_QWEN3_VL_KERNEL_LINEAR_INPUT_PACK_TRANSPOSE_BF16_BF16 = 16,
+  ID4_QWEN3_VL_KERNEL_LINEAR_INPUT_PACK_TRANSPOSE_BF16_BF16 = 17,
   // Materialized QK score WMMA kernel.
-  ID4_QWEN3_VL_KERNEL_ATTENTION_QK_SCORES_WMMA = 17,
+  ID4_QWEN3_VL_KERNEL_ATTENTION_QK_SCORES_WMMA = 18,
   // Masked BF16 softmax kernel for WMMA attention.
-  ID4_QWEN3_VL_KERNEL_ATTENTION_SOFTMAX_MASK_BF16 = 18,
+  ID4_QWEN3_VL_KERNEL_ATTENTION_SOFTMAX_MASK_BF16 = 19,
   // Materialized PV WMMA kernel.
-  ID4_QWEN3_VL_KERNEL_ATTENTION_PV_WMMA = 19,
+  ID4_QWEN3_VL_KERNEL_ATTENTION_PV_WMMA = 20,
 } id4_qwen3_vl_kernel_kind_t;
 
 typedef enum id4_qwen3_vl_config_key_e {
@@ -846,6 +874,10 @@ static const id4_qwen3_vl_program_operation_site_entry_t
             {false, IREE_SVL("condition.apply_token_weights")},
         [ID4_QWEN3_VL_OPERATION_SITE_AFTER_CONDITION_APPLY_TOKEN_WEIGHTS] =
             {false, IREE_SVL("after_condition_apply_token_weights")},
+        [ID4_QWEN3_VL_OPERATION_SITE_CONDITION_REDUCE_TOKEN_WEIGHT_STATS] =
+            {false, IREE_SVL("condition.reduce_token_weight_stats")},
+        [ID4_QWEN3_VL_OPERATION_SITE_AFTER_CONDITION_REDUCE_TOKEN_WEIGHT_STATS] =
+            {false, IREE_SVL("after_condition_reduce_token_weight_stats")},
         [ID4_QWEN3_VL_OPERATION_SITE_CONDITION_NORMALIZE_TOKEN_WEIGHTS] =
             {false, IREE_SVL("condition.normalize_token_weights")},
         [ID4_QWEN3_VL_OPERATION_SITE_AFTER_CONDITION] =
@@ -871,6 +903,8 @@ static const id4_qwen3_vl_program_operation_kind_entry_t
                                                          IREE_SVL("pack")},
         [ID4_QWEN3_VL_OPERATION_CONDITION_APPLY_TOKEN_WEIGHTS] =
             {true, IREE_SVL("apply_token_weights")},
+        [ID4_QWEN3_VL_OPERATION_CONDITION_REDUCE_TOKEN_WEIGHT_STATS] =
+            {true, IREE_SVL("reduce_token_weight_stats")},
         [ID4_QWEN3_VL_OPERATION_CONDITION_NORMALIZE_TOKEN_WEIGHTS] =
             {true, IREE_SVL("normalize_token_weights")},
         [ID4_QWEN3_VL_OPERATION_BARRIER] = {true, IREE_SVL("barrier")},
@@ -911,6 +945,9 @@ static const id4_pipeline_kernel_ref_t
         [ID4_QWEN3_VL_KERNEL_CONDITION_APPLY_TOKEN_WEIGHTS] =
             {IREE_SVL("qwen3_vl/condition"),
              IREE_SVL("id4_qwen3_vl_condition_apply_token_weights_f32")},
+        [ID4_QWEN3_VL_KERNEL_CONDITION_REDUCE_TOKEN_WEIGHT_STATS] =
+            {IREE_SVL("qwen3_vl/condition"),
+             IREE_SVL("id4_qwen3_vl_condition_reduce_token_weight_stats_f32")},
         [ID4_QWEN3_VL_KERNEL_CONDITION_NORMALIZE_TOKEN_WEIGHTS] =
             {IREE_SVL("qwen3_vl/condition"),
              IREE_SVL("id4_qwen3_vl_condition_normalize_token_weights_f32")},
@@ -1036,6 +1073,13 @@ static const iree_string_view_t id4_qwen3_vl_program_config_keys
                              "index"),
             },
         [ID4_QWEN3_VL_KERNEL_CONDITION_APPLY_TOKEN_WEIGHTS] =
+            {
+                [ID4_QWEN3_VL_CONFIG_TOKEN_COUNT] =
+                    IREE_SVL("id4.qwen3_vl.condition.token_count"),
+                [ID4_QWEN3_VL_CONFIG_HIDDEN_ROW_COUNT] =
+                    IREE_SVL("id4.qwen3_vl.condition.hidden_row_count"),
+            },
+        [ID4_QWEN3_VL_KERNEL_CONDITION_REDUCE_TOKEN_WEIGHT_STATS] =
             {
                 [ID4_QWEN3_VL_CONFIG_TOKEN_COUNT] =
                     IREE_SVL("id4.qwen3_vl.condition.token_count"),
@@ -2323,18 +2367,21 @@ static iree_status_t id4_qwen3_vl_program_author_condition(
   const uint32_t token_count = options->request.token_count;
   const uint32_t hidden_row_count =
       id4_qwen3_vl_program_selected_hidden_row_count(&options->model);
+  uint32_t stats_row_count = 0;
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_make_condition_partial_count(
+      hidden_row_count, token_count, &stats_row_count));
   id4_pipeline_program_tensor_t stats = id4_pipeline_program_tensor_invalid();
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_acquire_tensor(
       builder, ID4_QWEN3_VL_TENSOR_CONDITION_STATS, UINT32_MAX,
-      ID4_PIPELINE_PROGRAM_DTYPE_F32, id4_pipeline_program_make_shape_rank1(2),
-      &stats));
+      ID4_PIPELINE_PROGRAM_DTYPE_F32,
+      id4_pipeline_program_make_shape_rank2(stats_row_count, 2), &stats));
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_import_tensor(
       builder, ID4_QWEN3_VL_TENSOR_OUTPUT, /*flags=*/0,
       ID4_PIPELINE_PROGRAM_DTYPE_F32,
       id4_pipeline_program_make_shape_rank2(hidden_row_count, token_count),
       out_condition));
 
-  const id4_qwen3_vl_program_config_value_t apply_config_values[] = {
+  const id4_qwen3_vl_program_config_value_t condition_config_values[] = {
       {ID4_QWEN3_VL_CONFIG_HIDDEN_ROW_COUNT, hidden_row_count},
       {ID4_QWEN3_VL_CONFIG_TOKEN_COUNT, token_count},
   };
@@ -2344,7 +2391,7 @@ static iree_status_t id4_qwen3_vl_program_author_condition(
       apply_config_bindings[ID4_QWEN3_VL_MAX_KERNEL_CONFIG_BINDING_COUNT];
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_make_config_bindings(
       ID4_QWEN3_VL_KERNEL_CONDITION_APPLY_TOKEN_WEIGHTS,
-      IREE_ARRAYSIZE(apply_config_values), apply_config_values,
+      IREE_ARRAYSIZE(condition_config_values), condition_config_values,
       apply_value_buffers, apply_config_bindings));
   id4_pipeline_program_dispatch_binding_t apply_bindings[] = {
       id4_pipeline_program_read(selected_hidden_states),
@@ -2356,23 +2403,41 @@ static iree_status_t id4_qwen3_vl_program_author_condition(
       builder, ID4_QWEN3_VL_OPERATION_CONDITION_APPLY_TOKEN_WEIGHTS, UINT32_MAX,
       ID4_QWEN3_VL_OPERATION_SITE_CONDITION_APPLY_TOKEN_WEIGHTS,
       ID4_QWEN3_VL_KERNEL_CONDITION_APPLY_TOKEN_WEIGHTS,
-      IREE_ARRAYSIZE(apply_config_values), apply_config_bindings,
+      IREE_ARRAYSIZE(condition_config_values), apply_config_bindings,
       IREE_ARRAYSIZE(apply_bindings), apply_bindings));
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_barrier(
       builder, UINT32_MAX,
       ID4_QWEN3_VL_OPERATION_SITE_AFTER_CONDITION_APPLY_TOKEN_WEIGHTS));
 
-  const id4_qwen3_vl_program_config_value_t normalize_config_values[] = {
-      {ID4_QWEN3_VL_CONFIG_HIDDEN_ROW_COUNT, hidden_row_count},
-      {ID4_QWEN3_VL_CONFIG_TOKEN_COUNT, token_count},
+  char reduce_value_buffers[ID4_QWEN3_VL_MAX_KERNEL_CONFIG_BINDING_COUNT]
+                           [ID4_QWEN3_VL_CONFIG_VALUE_BUFFER_CAPACITY];
+  id4_pipeline_kernel_config_binding_t
+      reduce_config_bindings[ID4_QWEN3_VL_MAX_KERNEL_CONFIG_BINDING_COUNT];
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_make_config_bindings(
+      ID4_QWEN3_VL_KERNEL_CONDITION_REDUCE_TOKEN_WEIGHT_STATS,
+      IREE_ARRAYSIZE(condition_config_values), condition_config_values,
+      reduce_value_buffers, reduce_config_bindings));
+  id4_pipeline_program_dispatch_binding_t reduce_bindings[] = {
+      id4_pipeline_program_read_write(stats),
   };
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_dispatch(
+      builder, ID4_QWEN3_VL_OPERATION_CONDITION_REDUCE_TOKEN_WEIGHT_STATS,
+      UINT32_MAX,
+      ID4_QWEN3_VL_OPERATION_SITE_CONDITION_REDUCE_TOKEN_WEIGHT_STATS,
+      ID4_QWEN3_VL_KERNEL_CONDITION_REDUCE_TOKEN_WEIGHT_STATS,
+      IREE_ARRAYSIZE(condition_config_values), reduce_config_bindings,
+      IREE_ARRAYSIZE(reduce_bindings), reduce_bindings));
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_barrier(
+      builder, UINT32_MAX,
+      ID4_QWEN3_VL_OPERATION_SITE_AFTER_CONDITION_REDUCE_TOKEN_WEIGHT_STATS));
+
   char normalize_value_buffers[ID4_QWEN3_VL_MAX_KERNEL_CONFIG_BINDING_COUNT]
                               [ID4_QWEN3_VL_CONFIG_VALUE_BUFFER_CAPACITY];
   id4_pipeline_kernel_config_binding_t
       normalize_config_bindings[ID4_QWEN3_VL_MAX_KERNEL_CONFIG_BINDING_COUNT];
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_make_config_bindings(
       ID4_QWEN3_VL_KERNEL_CONDITION_NORMALIZE_TOKEN_WEIGHTS,
-      IREE_ARRAYSIZE(normalize_config_values), normalize_config_values,
+      IREE_ARRAYSIZE(condition_config_values), condition_config_values,
       normalize_value_buffers, normalize_config_bindings));
   id4_pipeline_program_dispatch_binding_t normalize_bindings[] = {
       id4_pipeline_program_read_write(*out_condition),
@@ -2382,7 +2447,7 @@ static iree_status_t id4_qwen3_vl_program_author_condition(
       builder, ID4_QWEN3_VL_OPERATION_CONDITION_NORMALIZE_TOKEN_WEIGHTS,
       UINT32_MAX, ID4_QWEN3_VL_OPERATION_SITE_CONDITION_NORMALIZE_TOKEN_WEIGHTS,
       ID4_QWEN3_VL_KERNEL_CONDITION_NORMALIZE_TOKEN_WEIGHTS,
-      IREE_ARRAYSIZE(normalize_config_values), normalize_config_bindings,
+      IREE_ARRAYSIZE(condition_config_values), normalize_config_bindings,
       IREE_ARRAYSIZE(normalize_bindings), normalize_bindings));
   return id4_qwen3_vl_program_barrier(
       builder, UINT32_MAX, ID4_QWEN3_VL_OPERATION_SITE_AFTER_CONDITION);
