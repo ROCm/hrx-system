@@ -2138,14 +2138,8 @@ TEST(MatrixContractTest, ProcessorAliasesExposeNativeFp8MatrixFeatures) {
     uint32_t wave_size;
   };
   static const Case cases[] = {
-      {IREE_SV("gfx940"), "mfma.f32.16x16x32.fp8.fp8", 64},
-      {IREE_SV("gfx941"), "mfma.f32.16x16x32.fp8.fp8", 64},
       {IREE_SV("gfx942"), "mfma.f32.16x16x32.fp8.fp8", 64},
-      {IREE_SV("gfx9-4-generic"), "mfma.f32.16x16x32.fp8.fp8", 64},
-      {IREE_SV("gfx940"), "smfmac.f32.16x16x64.fp8.fp8", 64},
-      {IREE_SV("gfx941"), "smfmac.f32.16x16x64.fp8.fp8", 64},
       {IREE_SV("gfx942"), "smfmac.f32.16x16x64.fp8.fp8", 64},
-      {IREE_SV("gfx9-4-generic"), "smfmac.f32.16x16x64.fp8.fp8", 64},
       {IREE_SV("gfx950"), "mfma.scale.f32.16x16x128.f8f6f4", 64},
       {IREE_SV("gfx950"), "smfmac.f32.16x16x128.fp8.fp8", 64},
       {IREE_SV("gfx1200"), "wmma.f32.16x16x16.fp8.fp8", 32},
@@ -2214,10 +2208,20 @@ TEST(MatrixContractTest, ProcessorFeatureBitsRejectUnknownProcessor) {
 }
 
 TEST(MatrixContractTest, ProcessorFeatureBitsRejectMissingMatrixProfile) {
-  loom_amdgpu_matrix_feature_bits_t feature_bits = 0;
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
-                        loom_amdgpu_matrix_feature_bits_from_processor(
-                            IREE_SV("gfx900"), &feature_bits));
+  static const iree_string_view_t cases[] = {
+      IREE_SV("gfx900"),
+      IREE_SV("gfx940"),
+      IREE_SV("gfx941"),
+      IREE_SV("gfx9-4-generic"),
+  };
+  for (iree_string_view_t processor_name : cases) {
+    loom_amdgpu_matrix_feature_bits_t feature_bits = 0;
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
+                          loom_amdgpu_matrix_feature_bits_from_processor(
+                              processor_name, &feature_bits))
+        << ToString(processor_name);
+    EXPECT_EQ(feature_bits, 0u) << ToString(processor_name);
+  }
 }
 
 TEST(MatrixContractTest, ProcessorFeatureBitsUseTargetInfoAliases) {

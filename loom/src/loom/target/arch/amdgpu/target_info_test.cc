@@ -210,6 +210,26 @@ TEST(AmdgpuTargetInfoTest, LooksUpGfx950Processor) {
           LOOM_AMDGPU_PROCESSOR_SCHEDULING_SDWA_DST_SEL_WAIT_STATES);
 }
 
+TEST(AmdgpuTargetInfoTest, Gfx94xMatrixProfileMatchesProcessorSupport) {
+  struct Case {
+    iree_string_view_t processor_name;
+    loom_amdgpu_matrix_feature_profile_t expected_matrix_profile;
+  };
+  static const Case cases[] = {
+      {IREE_SV("gfx940"), LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_NONE},
+      {IREE_SV("gfx941"), LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_NONE},
+      {IREE_SV("gfx942"), LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX940},
+  };
+  for (const Case& c : cases) {
+    const loom_amdgpu_processor_info_t* processor = nullptr;
+    IREE_ASSERT_OK(
+        loom_amdgpu_target_info_lookup_processor(c.processor_name, &processor));
+    ASSERT_NE(processor, nullptr);
+    EXPECT_EQ(processor->features.matrix, c.expected_matrix_profile)
+        << std::string(c.processor_name.data, c.processor_name.size);
+  }
+}
+
 TEST(AmdgpuTargetInfoTest, WavefrontSizeSupportMatchesGfxFamilies) {
   struct Case {
     iree_string_view_t processor_name;
@@ -362,7 +382,7 @@ TEST(AmdgpuTargetInfoTest, LooksUpGfx94GenericSchedulingFacts) {
   EXPECT_EQ(processor->descriptor_set.ordinal,
             LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_NONE);
   EXPECT_EQ(processor->features.matrix,
-            LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX940);
+            LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_NONE);
   ExpectSchedulingBits(
       processor,
       LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_TRANS_USE_WAIT_STATES |

@@ -401,6 +401,8 @@ def rdna3_processor_info(
 def cdna3_processor_info(
     processor: str,
     elf_machine_flags: int,
+    *,
+    matrix_feature_profile: str = AMDGPU_MATRIX_FEATURE_PROFILE_NONE,
 ) -> AmdgpuProcessorInfo:
     return processor_info(
         processor,
@@ -408,7 +410,7 @@ def cdna3_processor_info(
         descriptor_set_key="amdgpu.cdna3.core",
         elf_feature_flags=AMDGPU_ELF_FEATURE_XNACK_SRAMECC_ANY_V4,
         kernel_descriptor=AMDGPU_KERNEL_DESCRIPTOR_INFO_CDNA_GFX9,
-        matrix_feature_profile=AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX940,
+        matrix_feature_profile=matrix_feature_profile,
         scheduling_bits=AMDGPU_PROCESSOR_SCHEDULING_CDNA_FIXED_WAIT_STATES,
     )
 
@@ -529,7 +531,11 @@ AMDGPU_PROCESSOR_INFOS: tuple[AmdgpuProcessorInfo, ...] = (
     processor_info("gfx90c", 0x032, elf_feature_flags=AMDGPU_ELF_FEATURE_XNACK_ANY_V4),
     cdna3_processor_info("gfx940", 0x040),
     cdna3_processor_info("gfx941", 0x04B),
-    cdna3_processor_info("gfx942", 0x04C),
+    cdna3_processor_info(
+        "gfx942",
+        0x04C,
+        matrix_feature_profile=AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX940,
+    ),
     processor_info(
         "gfx950",
         0x04F,
@@ -690,7 +696,6 @@ AMDGPU_PROCESSOR_INFOS: tuple[AmdgpuProcessorInfo, ...] = (
         0x05F,
         elf_feature_flags=AMDGPU_ELF_FEATURE_XNACK_SRAMECC_ANY_V4
         | AMDGPU_ELF_FEATURE_GENERIC_VERSION_1_V6,
-        matrix_feature_profile=AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX940,
         scheduling_bits=AMDGPU_PROCESSOR_SCHEDULING_CDNA_FIXED_WAIT_STATES,
     ),
     processor_info(
