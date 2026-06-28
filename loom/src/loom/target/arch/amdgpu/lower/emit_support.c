@@ -1186,6 +1186,29 @@ iree_status_t loom_amdgpu_emit_vgpr_shift(
       context, source_op, descriptor_ref, value, shift, lane_type, out_value);
 }
 
+iree_status_t loom_amdgpu_emit_resolved_vgpr_lshl_add_u32(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_low_lower_resolved_descriptor_t* descriptor,
+    loom_value_id_t value, loom_value_id_t addend, uint32_t shift,
+    loom_type_t lane_type, loom_value_id_t* out_value) {
+  IREE_ASSERT(descriptor->descriptor != NULL);
+  *out_value = LOOM_VALUE_ID_INVALID;
+  loom_named_attr_t attrs[1] = {0};
+  iree_host_size_t attr_count = 0;
+  IREE_RETURN_IF_ERROR(
+      loom_amdgpu_append_i64_attr(context, IREE_SV("shift"), shift, attrs,
+                                  IREE_ARRAYSIZE(attrs), &attr_count));
+  const loom_value_id_t operands[] = {value, addend};
+  loom_op_t* low_op = NULL;
+  IREE_RETURN_IF_ERROR(loom_low_lower_emit_resolved_descriptor_op(
+      context, descriptor, operands, IREE_ARRAYSIZE(operands),
+      loom_make_named_attr_slice(attrs, attr_count), &lane_type, 1,
+      /*tied_results=*/NULL, /*tied_result_count=*/0, source_op->location,
+      &low_op));
+  *out_value = loom_value_slice_get(loom_low_op_results(low_op), 0);
+  return iree_ok_status();
+}
+
 iree_status_t loom_amdgpu_try_emit_vgpr_lshl_add_u32(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_value_id_t value, loom_value_id_t addend, uint32_t shift,
@@ -1205,19 +1228,9 @@ iree_status_t loom_amdgpu_try_emit_vgpr_lshl_add_u32(
     return iree_ok_status();
   }
 
-  loom_named_attr_t attrs[1] = {0};
-  iree_host_size_t attr_count = 0;
-  IREE_RETURN_IF_ERROR(
-      loom_amdgpu_append_i64_attr(context, IREE_SV("shift"), shift, attrs,
-                                  IREE_ARRAYSIZE(attrs), &attr_count));
-  const loom_value_id_t operands[] = {value, addend};
-  loom_op_t* low_op = NULL;
-  IREE_RETURN_IF_ERROR(loom_low_lower_emit_resolved_descriptor_op(
-      context, &descriptor, operands, IREE_ARRAYSIZE(operands),
-      loom_make_named_attr_slice(attrs, attr_count), &lane_type, 1,
-      /*tied_results=*/NULL, /*tied_result_count=*/0, source_op->location,
-      &low_op));
-  *out_value = loom_value_slice_get(loom_low_op_results(low_op), 0);
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_resolved_vgpr_lshl_add_u32(
+      context, source_op, &descriptor, value, addend, shift, lane_type,
+      out_value));
   *out_selected = true;
   return iree_ok_status();
 }

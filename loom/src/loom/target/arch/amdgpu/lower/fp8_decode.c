@@ -315,8 +315,47 @@ iree_status_t loom_amdgpu_select_fp8_decode_plan(
     out_plan->flags |= LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_ADD3_SRC2_LITERAL;
   }
 
+  bool has_lshl_add_u32_shift_imm = false;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_descriptor_ref_if_present(
+      context, LOOM_AMDGPU_DESCRIPTOR_REF_V_LSHL_ADD_U32_SHIFT_IMM,
+      &out_plan->lshl_add_u32_shift_imm_descriptor,
+      &has_lshl_add_u32_shift_imm));
+  if (has_lshl_add_u32_shift_imm) {
+    out_plan->flags |=
+        LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_LSHL_ADD_U32_SHIFT_IMM;
+  }
+
   loom_amdgpu_initialize_fp8_decode_format(element_type, out_plan);
   return iree_ok_status();
+}
+
+static iree_status_t loom_amdgpu_emit_fp8_normal_bf16_payload(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_amdgpu_fp8_decode_plan_t* plan,
+    loom_value_id_t low_source_no_sign, loom_type_t vgpr_type,
+    loom_value_id_t* out_payload) {
+  const loom_scalar_type_fp8_format_t* format = &plan->format;
+  const uint32_t payload_shift = 7u - format->mantissa_bits;
+  const uint32_t exponent_bias = (127u - format->exponent_bias) << 7;
+  if (iree_any_bit_set(
+          plan->flags,
+          LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_LSHL_ADD_U32_SHIFT_IMM)) {
+    loom_value_id_t low_exponent_bias = LOOM_VALUE_ID_INVALID;
+    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_const_u32(
+        context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_MOV_B32, exponent_bias,
+        vgpr_type, &low_exponent_bias));
+    return loom_amdgpu_emit_resolved_vgpr_lshl_add_u32(
+        context, source_op, &plan->lshl_add_u32_shift_imm_descriptor,
+        low_source_no_sign, low_exponent_bias, payload_shift, vgpr_type,
+        out_payload);
+  }
+
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_shift(
+      context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_LSHLREV_B32_LIT,
+      payload_shift, low_source_no_sign, vgpr_type, out_payload));
+  return loom_amdgpu_emit_vgpr_binary_immediate(
+      context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_ADD_U32_LIT,
+      *out_payload, exponent_bias, vgpr_type, out_payload);
 }
 
 static iree_status_t loom_amdgpu_emit_fp8_decode_perm_b32(
@@ -455,13 +494,8 @@ iree_status_t loom_amdgpu_emit_fp8_to_bf16_lane(
       UINT32_C(0x7F), vgpr_type, &low_source_no_sign));
 
   loom_value_id_t low_normal_payload = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_shift(
-      context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_LSHLREV_B32_LIT,
-      7u - format->mantissa_bits, low_source_no_sign, vgpr_type,
-      &low_normal_payload));
-  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_binary_immediate(
-      context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_ADD_U32_LIT,
-      low_normal_payload, (127u - format->exponent_bias) << 7, vgpr_type,
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fp8_normal_bf16_payload(
+      context, source_op, plan, low_source_no_sign, vgpr_type,
       &low_normal_payload));
 
   loom_value_id_t low_subnormal_payload = LOOM_VALUE_ID_INVALID;

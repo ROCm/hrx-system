@@ -1363,8 +1363,8 @@ low.kernel.def target(@target) workgroup_size(32, 1, 1) @fp8_rhs_bf16_wmmar3_fra
   %33 = v_and_b32_lit %32, 128
   %34 = v_lshlrev_b32_src0_inline %33, 8
   %35 = v_and_b32_lit %32, 127
-  %36 = v_lshlrev_b32_src0_inline %35, 4
-  %37 = v_add_u32_lit %36, 15360
+  %36 = v_mov_b32 15360
+  %37 = v_lshl_add_u32_shift_imm %35, %36, 4
   %38 = v_mov_b32 3229614080
   %39 = v_mov_b32 1614815232
   %40 = v_perm_b32 %39, %38, %35
@@ -1384,8 +1384,7 @@ low.kernel.def target(@target) workgroup_size(32, 1, 1) @fp8_rhs_bf16_wmmar3_fra
   %55 = v_and_b32_lit %54, 128
   %56 = v_lshlrev_b32_src0_inline %55, 8
   %57 = v_and_b32_lit %54, 127
-  %58 = v_lshlrev_b32_src0_inline %57, 4
-  %59 = v_add_u32_lit %58, 15360
+  %59 = v_lshl_add_u32_shift_imm %57, %36, 4
   %62 = v_perm_b32 %39, %38, %57
   %65 = v_perm_b32 %42, %41, %57
   %66 = v_lshlrev_b32_src0_inline %65, 8
@@ -1400,8 +1399,7 @@ low.kernel.def target(@target) workgroup_size(32, 1, 1) @fp8_rhs_bf16_wmmar3_fra
   %78 = v_and_b32_lit %77, 128
   %79 = v_lshlrev_b32_src0_inline %78, 8
   %80 = v_and_b32_lit %77, 127
-  %81 = v_lshlrev_b32_src0_inline %80, 4
-  %82 = v_add_u32_lit %81, 15360
+  %82 = v_lshl_add_u32_shift_imm %80, %36, 4
   %85 = v_perm_b32 %39, %38, %80
   %88 = v_perm_b32 %42, %41, %80
   %89 = v_lshlrev_b32_src0_inline %88, 8
@@ -1415,8 +1413,7 @@ low.kernel.def target(@target) workgroup_size(32, 1, 1) @fp8_rhs_bf16_wmmar3_fra
   %100 = v_and_b32_lit %99, 128
   %101 = v_lshlrev_b32_src0_inline %100, 8
   %102 = v_and_b32_lit %99, 127
-  %103 = v_lshlrev_b32_src0_inline %102, 4
-  %104 = v_add_u32_lit %103, 15360
+  %104 = v_lshl_add_u32_shift_imm %102, %36, 4
   %107 = v_perm_b32 %39, %38, %102
   %110 = v_perm_b32 %42, %41, %102
   %111 = v_lshlrev_b32_src0_inline %110, 8
@@ -1431,8 +1428,7 @@ low.kernel.def target(@target) workgroup_size(32, 1, 1) @fp8_rhs_bf16_wmmar3_fra
   %122 = v_and_b32_lit %121, 128
   %123 = v_lshlrev_b32_src0_inline %122, 8
   %124 = v_and_b32_lit %121, 127
-  %125 = v_lshlrev_b32_src0_inline %124, 4
-  %126 = v_add_u32_lit %125, 15360
+  %126 = v_lshl_add_u32_shift_imm %124, %36, 4
   %129 = v_perm_b32 %39, %38, %124
   %132 = v_perm_b32 %42, %41, %124
   %133 = v_lshlrev_b32_src0_inline %132, 8
@@ -1446,8 +1442,7 @@ low.kernel.def target(@target) workgroup_size(32, 1, 1) @fp8_rhs_bf16_wmmar3_fra
   %144 = v_and_b32_lit %143, 128
   %145 = v_lshlrev_b32_src0_inline %144, 8
   %146 = v_and_b32_lit %143, 127
-  %147 = v_lshlrev_b32_src0_inline %146, 4
-  %148 = v_add_u32_lit %147, 15360
+  %148 = v_lshl_add_u32_shift_imm %146, %36, 4
   %151 = v_perm_b32 %39, %38, %146
   %154 = v_perm_b32 %42, %41, %146
   %155 = v_lshlrev_b32_src0_inline %154, 8
@@ -1462,8 +1457,7 @@ low.kernel.def target(@target) workgroup_size(32, 1, 1) @fp8_rhs_bf16_wmmar3_fra
   %167 = v_and_b32_lit %166, 128
   %168 = v_lshlrev_b32_src0_inline %167, 8
   %169 = v_and_b32_lit %166, 127
-  %170 = v_lshlrev_b32_src0_inline %169, 4
-  %171 = v_add_u32_lit %170, 15360
+  %171 = v_lshl_add_u32_shift_imm %169, %36, 4
   %174 = v_perm_b32 %39, %38, %169
   %177 = v_perm_b32 %42, %41, %169
   %178 = v_lshlrev_b32_src0_inline %177, 8
@@ -1477,8 +1471,7 @@ low.kernel.def target(@target) workgroup_size(32, 1, 1) @fp8_rhs_bf16_wmmar3_fra
   %189 = v_and_b32_lit %188, 128
   %190 = v_lshlrev_b32_src0_inline %189, 8
   %191 = v_and_b32_lit %188, 127
-  %192 = v_lshlrev_b32_src0_inline %191, 4
-  %193 = v_add_u32_lit %192, 15360
+  %193 = v_lshl_add_u32_shift_imm %191, %36, 4
   %196 = v_perm_b32 %39, %38, %191
   %199 = v_perm_b32 %42, %41, %191
   %200 = v_lshlrev_b32_src0_inline %199, 8
@@ -1493,8 +1486,7 @@ low.kernel.def target(@target) workgroup_size(32, 1, 1) @fp8_rhs_bf16_wmmar3_fra
   %211 = v_and_b32_lit %210, 128
   %212 = v_lshlrev_b32_src0_inline %211, 8
   %213 = v_and_b32_lit %210, 127
-  %214 = v_lshlrev_b32_src0_inline %213, 4
-  %215 = v_add_u32_lit %214, 15360
+  %215 = v_lshl_add_u32_shift_imm %213, %36, 4
   %218 = v_perm_b32 %39, %38, %213
   %221 = v_perm_b32 %42, %41, %213
   %222 = v_lshlrev_b32_src0_inline %221, 8
@@ -1508,8 +1500,7 @@ low.kernel.def target(@target) workgroup_size(32, 1, 1) @fp8_rhs_bf16_wmmar3_fra
   %233 = v_and_b32_lit %232, 128
   %234 = v_lshlrev_b32_src0_inline %233, 8
   %235 = v_and_b32_lit %232, 127
-  %236 = v_lshlrev_b32_src0_inline %235, 4
-  %237 = v_add_u32_lit %236, 15360
+  %237 = v_lshl_add_u32_shift_imm %235, %36, 4
   %240 = v_perm_b32 %39, %38, %235
   %243 = v_perm_b32 %42, %41, %235
   %244 = v_lshlrev_b32_src0_inline %243, 8
@@ -1524,8 +1515,7 @@ low.kernel.def target(@target) workgroup_size(32, 1, 1) @fp8_rhs_bf16_wmmar3_fra
   %256 = v_and_b32_lit %255, 128
   %257 = v_lshlrev_b32_src0_inline %256, 8
   %258 = v_and_b32_lit %255, 127
-  %259 = v_lshlrev_b32_src0_inline %258, 4
-  %260 = v_add_u32_lit %259, 15360
+  %260 = v_lshl_add_u32_shift_imm %258, %36, 4
   %263 = v_perm_b32 %39, %38, %258
   %266 = v_perm_b32 %42, %41, %258
   %267 = v_lshlrev_b32_src0_inline %266, 8
@@ -1539,8 +1529,7 @@ low.kernel.def target(@target) workgroup_size(32, 1, 1) @fp8_rhs_bf16_wmmar3_fra
   %278 = v_and_b32_lit %277, 128
   %279 = v_lshlrev_b32_src0_inline %278, 8
   %280 = v_and_b32_lit %277, 127
-  %281 = v_lshlrev_b32_src0_inline %280, 4
-  %282 = v_add_u32_lit %281, 15360
+  %282 = v_lshl_add_u32_shift_imm %280, %36, 4
   %285 = v_perm_b32 %39, %38, %280
   %288 = v_perm_b32 %42, %41, %280
   %289 = v_lshlrev_b32_src0_inline %288, 8
@@ -1555,8 +1544,7 @@ low.kernel.def target(@target) workgroup_size(32, 1, 1) @fp8_rhs_bf16_wmmar3_fra
   %300 = v_and_b32_lit %299, 128
   %301 = v_lshlrev_b32_src0_inline %300, 8
   %302 = v_and_b32_lit %299, 127
-  %303 = v_lshlrev_b32_src0_inline %302, 4
-  %304 = v_add_u32_lit %303, 15360
+  %304 = v_lshl_add_u32_shift_imm %302, %36, 4
   %307 = v_perm_b32 %39, %38, %302
   %310 = v_perm_b32 %42, %41, %302
   %311 = v_lshlrev_b32_src0_inline %310, 8
@@ -1570,8 +1558,7 @@ low.kernel.def target(@target) workgroup_size(32, 1, 1) @fp8_rhs_bf16_wmmar3_fra
   %322 = v_and_b32_lit %321, 128
   %323 = v_lshlrev_b32_src0_inline %322, 8
   %324 = v_and_b32_lit %321, 127
-  %325 = v_lshlrev_b32_src0_inline %324, 4
-  %326 = v_add_u32_lit %325, 15360
+  %326 = v_lshl_add_u32_shift_imm %324, %36, 4
   %329 = v_perm_b32 %39, %38, %324
   %332 = v_perm_b32 %42, %41, %324
   %333 = v_lshlrev_b32_src0_inline %332, 8
@@ -1586,8 +1573,7 @@ low.kernel.def target(@target) workgroup_size(32, 1, 1) @fp8_rhs_bf16_wmmar3_fra
   %345 = v_and_b32_lit %344, 128
   %346 = v_lshlrev_b32_src0_inline %345, 8
   %347 = v_and_b32_lit %344, 127
-  %348 = v_lshlrev_b32_src0_inline %347, 4
-  %349 = v_add_u32_lit %348, 15360
+  %349 = v_lshl_add_u32_shift_imm %347, %36, 4
   %352 = v_perm_b32 %39, %38, %347
   %355 = v_perm_b32 %42, %41, %347
   %356 = v_lshlrev_b32_src0_inline %355, 8
@@ -1601,8 +1587,7 @@ low.kernel.def target(@target) workgroup_size(32, 1, 1) @fp8_rhs_bf16_wmmar3_fra
   %367 = v_and_b32_lit %366, 128
   %368 = v_lshlrev_b32_src0_inline %367, 8
   %369 = v_and_b32_lit %366, 127
-  %370 = v_lshlrev_b32_src0_inline %369, 4
-  %371 = v_add_u32_lit %370, 15360
+  %371 = v_lshl_add_u32_shift_imm %369, %36, 4
   %374 = v_perm_b32 %39, %38, %369
   %377 = v_perm_b32 %42, %41, %369
   %378 = v_lshlrev_b32_src0_inline %377, 8
@@ -1681,8 +1666,8 @@ low.kernel.def target(@target) workgroup_size(32, 1, 1) @fp8e5m2_rhs_bf16_wmmar3
   %33 = v_and_b32_lit %32, 128
   %34 = v_lshlrev_b32_src0_inline %33, 8
   %35 = v_and_b32_lit %32, 127
-  %36 = v_lshlrev_b32_src0_inline %35, 5
-  %37 = v_add_u32_lit %36, 14336
+  %36 = v_mov_b32 14336
+  %37 = v_lshl_add_u32_shift_imm %35, %36, 5
   %38 = v_lshlrev_b32_src0_inline %35, 1
   %39 = v_add_u32_src0_inline %38, 1
   %40 = v_lshlrev_b32_src0_inline %39, 8
@@ -1705,8 +1690,7 @@ low.kernel.def target(@target) workgroup_size(32, 1, 1) @fp8e5m2_rhs_bf16_wmmar3
   %59 = v_and_b32_lit %58, 128
   %60 = v_lshlrev_b32_src0_inline %59, 8
   %61 = v_and_b32_lit %58, 127
-  %62 = v_lshlrev_b32_src0_inline %61, 5
-  %63 = v_add_u32_lit %62, 14336
+  %63 = v_lshl_add_u32_shift_imm %61, %36, 5
   %64 = v_lshlrev_b32_src0_inline %61, 1
   %65 = v_add_u32_src0_inline %64, 1
   %66 = v_lshlrev_b32_src0_inline %65, 8
@@ -1726,8 +1710,7 @@ low.kernel.def target(@target) workgroup_size(32, 1, 1) @fp8e5m2_rhs_bf16_wmmar3
   %86 = v_and_b32_lit %85, 128
   %87 = v_lshlrev_b32_src0_inline %86, 8
   %88 = v_and_b32_lit %85, 127
-  %89 = v_lshlrev_b32_src0_inline %88, 5
-  %90 = v_add_u32_lit %89, 14336
+  %90 = v_lshl_add_u32_shift_imm %88, %36, 5
   %91 = v_lshlrev_b32_src0_inline %88, 1
   %92 = v_add_u32_src0_inline %91, 1
   %93 = v_lshlrev_b32_src0_inline %92, 8
@@ -1746,8 +1729,7 @@ low.kernel.def target(@target) workgroup_size(32, 1, 1) @fp8e5m2_rhs_bf16_wmmar3
   %112 = v_and_b32_lit %111, 128
   %113 = v_lshlrev_b32_src0_inline %112, 8
   %114 = v_and_b32_lit %111, 127
-  %115 = v_lshlrev_b32_src0_inline %114, 5
-  %116 = v_add_u32_lit %115, 14336
+  %116 = v_lshl_add_u32_shift_imm %114, %36, 5
   %117 = v_lshlrev_b32_src0_inline %114, 1
   %118 = v_add_u32_src0_inline %117, 1
   %119 = v_lshlrev_b32_src0_inline %118, 8
@@ -1767,8 +1749,7 @@ low.kernel.def target(@target) workgroup_size(32, 1, 1) @fp8e5m2_rhs_bf16_wmmar3
   %138 = v_and_b32_lit %137, 128
   %139 = v_lshlrev_b32_src0_inline %138, 8
   %140 = v_and_b32_lit %137, 127
-  %141 = v_lshlrev_b32_src0_inline %140, 5
-  %142 = v_add_u32_lit %141, 14336
+  %142 = v_lshl_add_u32_shift_imm %140, %36, 5
   %143 = v_lshlrev_b32_src0_inline %140, 1
   %144 = v_add_u32_src0_inline %143, 1
   %145 = v_lshlrev_b32_src0_inline %144, 8
@@ -1787,8 +1768,7 @@ low.kernel.def target(@target) workgroup_size(32, 1, 1) @fp8e5m2_rhs_bf16_wmmar3
   %164 = v_and_b32_lit %163, 128
   %165 = v_lshlrev_b32_src0_inline %164, 8
   %166 = v_and_b32_lit %163, 127
-  %167 = v_lshlrev_b32_src0_inline %166, 5
-  %168 = v_add_u32_lit %167, 14336
+  %168 = v_lshl_add_u32_shift_imm %166, %36, 5
   %169 = v_lshlrev_b32_src0_inline %166, 1
   %170 = v_add_u32_src0_inline %169, 1
   %171 = v_lshlrev_b32_src0_inline %170, 8
@@ -1808,8 +1788,7 @@ low.kernel.def target(@target) workgroup_size(32, 1, 1) @fp8e5m2_rhs_bf16_wmmar3
   %191 = v_and_b32_lit %190, 128
   %192 = v_lshlrev_b32_src0_inline %191, 8
   %193 = v_and_b32_lit %190, 127
-  %194 = v_lshlrev_b32_src0_inline %193, 5
-  %195 = v_add_u32_lit %194, 14336
+  %195 = v_lshl_add_u32_shift_imm %193, %36, 5
   %196 = v_lshlrev_b32_src0_inline %193, 1
   %197 = v_add_u32_src0_inline %196, 1
   %198 = v_lshlrev_b32_src0_inline %197, 8
@@ -1828,8 +1807,7 @@ low.kernel.def target(@target) workgroup_size(32, 1, 1) @fp8e5m2_rhs_bf16_wmmar3
   %217 = v_and_b32_lit %216, 128
   %218 = v_lshlrev_b32_src0_inline %217, 8
   %219 = v_and_b32_lit %216, 127
-  %220 = v_lshlrev_b32_src0_inline %219, 5
-  %221 = v_add_u32_lit %220, 14336
+  %221 = v_lshl_add_u32_shift_imm %219, %36, 5
   %222 = v_lshlrev_b32_src0_inline %219, 1
   %223 = v_add_u32_src0_inline %222, 1
   %224 = v_lshlrev_b32_src0_inline %223, 8
@@ -1849,8 +1827,7 @@ low.kernel.def target(@target) workgroup_size(32, 1, 1) @fp8e5m2_rhs_bf16_wmmar3
   %243 = v_and_b32_lit %242, 128
   %244 = v_lshlrev_b32_src0_inline %243, 8
   %245 = v_and_b32_lit %242, 127
-  %246 = v_lshlrev_b32_src0_inline %245, 5
-  %247 = v_add_u32_lit %246, 14336
+  %247 = v_lshl_add_u32_shift_imm %245, %36, 5
   %248 = v_lshlrev_b32_src0_inline %245, 1
   %249 = v_add_u32_src0_inline %248, 1
   %250 = v_lshlrev_b32_src0_inline %249, 8
@@ -1869,8 +1846,7 @@ low.kernel.def target(@target) workgroup_size(32, 1, 1) @fp8e5m2_rhs_bf16_wmmar3
   %269 = v_and_b32_lit %268, 128
   %270 = v_lshlrev_b32_src0_inline %269, 8
   %271 = v_and_b32_lit %268, 127
-  %272 = v_lshlrev_b32_src0_inline %271, 5
-  %273 = v_add_u32_lit %272, 14336
+  %273 = v_lshl_add_u32_shift_imm %271, %36, 5
   %274 = v_lshlrev_b32_src0_inline %271, 1
   %275 = v_add_u32_src0_inline %274, 1
   %276 = v_lshlrev_b32_src0_inline %275, 8
@@ -1890,8 +1866,7 @@ low.kernel.def target(@target) workgroup_size(32, 1, 1) @fp8e5m2_rhs_bf16_wmmar3
   %296 = v_and_b32_lit %295, 128
   %297 = v_lshlrev_b32_src0_inline %296, 8
   %298 = v_and_b32_lit %295, 127
-  %299 = v_lshlrev_b32_src0_inline %298, 5
-  %300 = v_add_u32_lit %299, 14336
+  %300 = v_lshl_add_u32_shift_imm %298, %36, 5
   %301 = v_lshlrev_b32_src0_inline %298, 1
   %302 = v_add_u32_src0_inline %301, 1
   %303 = v_lshlrev_b32_src0_inline %302, 8
@@ -1910,8 +1885,7 @@ low.kernel.def target(@target) workgroup_size(32, 1, 1) @fp8e5m2_rhs_bf16_wmmar3
   %322 = v_and_b32_lit %321, 128
   %323 = v_lshlrev_b32_src0_inline %322, 8
   %324 = v_and_b32_lit %321, 127
-  %325 = v_lshlrev_b32_src0_inline %324, 5
-  %326 = v_add_u32_lit %325, 14336
+  %326 = v_lshl_add_u32_shift_imm %324, %36, 5
   %327 = v_lshlrev_b32_src0_inline %324, 1
   %328 = v_add_u32_src0_inline %327, 1
   %329 = v_lshlrev_b32_src0_inline %328, 8
@@ -1931,8 +1905,7 @@ low.kernel.def target(@target) workgroup_size(32, 1, 1) @fp8e5m2_rhs_bf16_wmmar3
   %348 = v_and_b32_lit %347, 128
   %349 = v_lshlrev_b32_src0_inline %348, 8
   %350 = v_and_b32_lit %347, 127
-  %351 = v_lshlrev_b32_src0_inline %350, 5
-  %352 = v_add_u32_lit %351, 14336
+  %352 = v_lshl_add_u32_shift_imm %350, %36, 5
   %353 = v_lshlrev_b32_src0_inline %350, 1
   %354 = v_add_u32_src0_inline %353, 1
   %355 = v_lshlrev_b32_src0_inline %354, 8
@@ -1951,8 +1924,7 @@ low.kernel.def target(@target) workgroup_size(32, 1, 1) @fp8e5m2_rhs_bf16_wmmar3
   %374 = v_and_b32_lit %373, 128
   %375 = v_lshlrev_b32_src0_inline %374, 8
   %376 = v_and_b32_lit %373, 127
-  %377 = v_lshlrev_b32_src0_inline %376, 5
-  %378 = v_add_u32_lit %377, 14336
+  %378 = v_lshl_add_u32_shift_imm %376, %36, 5
   %379 = v_lshlrev_b32_src0_inline %376, 1
   %380 = v_add_u32_src0_inline %379, 1
   %381 = v_lshlrev_b32_src0_inline %380, 8
@@ -1972,8 +1944,7 @@ low.kernel.def target(@target) workgroup_size(32, 1, 1) @fp8e5m2_rhs_bf16_wmmar3
   %401 = v_and_b32_lit %400, 128
   %402 = v_lshlrev_b32_src0_inline %401, 8
   %403 = v_and_b32_lit %400, 127
-  %404 = v_lshlrev_b32_src0_inline %403, 5
-  %405 = v_add_u32_lit %404, 14336
+  %405 = v_lshl_add_u32_shift_imm %403, %36, 5
   %406 = v_lshlrev_b32_src0_inline %403, 1
   %407 = v_add_u32_src0_inline %406, 1
   %408 = v_lshlrev_b32_src0_inline %407, 8
@@ -1992,8 +1963,7 @@ low.kernel.def target(@target) workgroup_size(32, 1, 1) @fp8e5m2_rhs_bf16_wmmar3
   %427 = v_and_b32_lit %426, 128
   %428 = v_lshlrev_b32_src0_inline %427, 8
   %429 = v_and_b32_lit %426, 127
-  %430 = v_lshlrev_b32_src0_inline %429, 5
-  %431 = v_add_u32_lit %430, 14336
+  %431 = v_lshl_add_u32_shift_imm %429, %36, 5
   %432 = v_lshlrev_b32_src0_inline %429, 1
   %433 = v_add_u32_src0_inline %432, 1
   %434 = v_lshlrev_b32_src0_inline %433, 8
