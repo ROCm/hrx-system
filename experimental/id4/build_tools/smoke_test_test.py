@@ -125,6 +125,8 @@ class Id4SmokeTestTest(unittest.TestCase):
         self.assertIn("--output=artifacts/image.ppm", command)
         self.assertIn("--dump_plan=artifacts/plan.json", command)
         self.assertIn("--dump_diagnostics=artifacts/diagnostics", command)
+        self.assertIn("--profile_output=artifacts/profile.txt", command)
+        self.assertIn("--dit_attention_implementation=materialized_wmma", command)
         self.assertIn("--device=amdgpu", command)
         self.assertIn("--parameters=qwen=qwen.safetensors", command)
         self.assertIn("--parameters=vae=vae.safetensors", command)

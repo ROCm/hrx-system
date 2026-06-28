@@ -127,7 +127,12 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--dit_activation_format",
         default="bf16_linear_input",
-        choices=("f32", "bf16_linear_input"),
+        choices=("f32_canonical", "bf16_linear_input"),
+    )
+    parser.add_argument(
+        "--dit_attention_implementation",
+        default="materialized_wmma",
+        choices=("streaming", "materialized_wmma"),
     )
     parser.add_argument("--vae_tiling_mode", default="memory_budget")
     parser.add_argument("--vae_memory_budget", type=int, default=536870912)
@@ -198,11 +203,13 @@ def build_id4_command(args: argparse.Namespace, artifact_dir: Path) -> list[str]
         f"--output={artifact_dir / 'image.ppm'}",
         f"--dit_parameter_format={args.dit_parameter_format}",
         f"--dit_activation_format={args.dit_activation_format}",
+        f"--dit_attention_implementation={args.dit_attention_implementation}",
         f"--vae_tiling_mode={args.vae_tiling_mode}",
         f"--vae_memory_budget={args.vae_memory_budget}",
         f"--vae_overlap={args.vae_overlap}",
         f"--dump_plan={artifact_dir / 'plan.json'}",
         f"--dump_diagnostics={artifact_dir / 'diagnostics'}",
+        f"--profile_output={artifact_dir / 'profile.txt'}",
     ]
     for device in args.device:
         command.append(f"--device={device}")
@@ -325,6 +332,7 @@ def run_smoke(args: argparse.Namespace) -> dict[str, Any]:
             "image": str(artifact_dir / "image.ppm"),
             "plan": str(artifact_dir / "plan.json"),
             "diagnostics": str(artifact_dir / "diagnostics"),
+            "profile": str(artifact_dir / "profile.txt"),
             "stdout": str(artifact_dir / "stdout.txt"),
             "stderr": str(artifact_dir / "stderr.txt"),
         },
