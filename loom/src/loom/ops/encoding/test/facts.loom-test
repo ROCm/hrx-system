@@ -221,6 +221,23 @@ func.def @named_fp8_schema_summary() -> (i64, i64, i64, i64) {
 
 // ====
 
+// Matrix operand schemas can state combined finite and subnormal-flushing
+// storage policy facts with one text symbol.
+func.def @matrix_operand_finite_flush_subnormal_summary() -> (i64, i64) {
+  %schema = encoding.define #matrix_operand<element_format=f8e4m3, payload_elements=16, payload_registers=4, rounding=finite_flush_subnormal> : encoding<schema>
+  %format = test.fact_encoding_matrix_field %schema["element_format"] : encoding<schema> -> i64
+  %rounding = test.fact_encoding_matrix_field %schema["rounding"] : encoding<schema> -> i64
+  func.return %format, %rounding : i64, i64
+}
+// ----
+func.def @matrix_operand_finite_flush_subnormal_summary() -> (i64, i64) {
+  %format = scalar.constant 8388608 : i64
+  %rounding = scalar.constant 4608 : i64
+  func.return %format, %rounding : i64, i64
+}
+
+// ====
+
 // Dynamic physical-storage composition carries nested schema facts along with
 // layout facts, giving consumers one encoding value to query.
 func.def @physical_storage_matrix_schema_summary() -> (i64, i64, i64, i64) {
