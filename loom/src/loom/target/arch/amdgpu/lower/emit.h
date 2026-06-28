@@ -337,6 +337,8 @@ typedef enum loom_amdgpu_bf16_pack_descriptor_flag_bits_e {
   LOOM_AMDGPU_BF16_PACK_DESCRIPTOR_FLAG_HAS_NATIVE = 1u << 0,
   // Integer low-16-bit pair packing descriptor is available.
   LOOM_AMDGPU_BF16_PACK_DESCRIPTOR_FLAG_HAS_PACK_U16 = 1u << 1,
+  // Integer three-input add descriptor with a source-2 literal is available.
+  LOOM_AMDGPU_BF16_PACK_DESCRIPTOR_FLAG_HAS_ADD3_SRC2_LITERAL = 1u << 2,
 } loom_amdgpu_bf16_pack_descriptor_flag_bits_t;
 typedef uint32_t loom_amdgpu_bf16_pack_descriptor_flags_t;
 
@@ -347,6 +349,8 @@ typedef struct loom_amdgpu_bf16_pack_descriptors_t {
   loom_low_lower_resolved_descriptor_t native_descriptor;
   // Integer low-16-bit pair packing descriptor.
   loom_low_lower_resolved_descriptor_t pack_u16_descriptor;
+  // Integer three-input add descriptor with a source-2 literal.
+  loom_low_lower_resolved_descriptor_t add3_src2_literal_descriptor;
 } loom_amdgpu_bf16_pack_descriptors_t;
 
 // Emits round-to-nearest-even conversion from two f32 lanes to one packed BF16
