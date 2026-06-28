@@ -158,6 +158,19 @@ typedef struct id4_ideogram4_generation_parameter_providers_t {
   iree_io_parameter_provider_t* vae;
 } id4_ideogram4_generation_parameter_providers_t;
 
+// Generation-stage bundle residency policy.
+typedef uint32_t id4_ideogram4_generation_residency_mode_t;
+
+// Generation-stage bundle residency policy values.
+typedef enum id4_ideogram4_generation_residency_mode_e {
+  // Invalid residency mode.
+  ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_INVALID = 0,
+  // Prepare heavy stage bundles at issue-time phase boundaries.
+  ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_ISSUE_PHASES = 1,
+  // Prepare and retain every coarse stage bundle in the generation bundle.
+  ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_ALL_STAGE_BUNDLES = 2,
+} id4_ideogram4_generation_residency_mode_e;
+
 // Options for preparing reusable generation state from one generation plan.
 typedef struct id4_ideogram4_generation_prepare_options_t {
   // Size of this structure for versioning.
@@ -168,6 +181,8 @@ typedef struct id4_ideogram4_generation_prepare_options_t {
   id4_ideogram4_generation_parameter_providers_t parameter_providers;
   // Kernel library used to resolve planned Loom module paths.
   id4_pipeline_kernel_library_t* kernel_library;
+  // Stage-bundle residency policy selected for this prepared generation.
+  id4_ideogram4_generation_residency_mode_t residency_mode;
   // HAL command-buffer mode used when preparing reusable regions.
   iree_hal_command_buffer_mode_t command_buffer_mode;
   // Semaphores that generation preparation waits on.
@@ -292,12 +307,12 @@ iree_status_t id4_ideogram4_generation_plan_format_json(
     const id4_ideogram4_generation_plan_t* plan,
     iree_string_builder_t* builder);
 
-// Prepares reusable generation boundary state for |plan|.
+// Prepares reusable generation state for |plan|.
 //
-// Heavy stage bundles and their parameter slabs are phase-resident: they are
-// prepared during issue when enough memory is available, submitted to the HAL,
-// and then released from host ownership after the queue captures their
-// resources.
+// |options->residency_mode| selects whether heavy stage bundles are prepared at
+// issue-time phase boundaries or all retained by the prepared generation
+// bundle. All-stage-bundle residency removes issue-time parameter loading but
+// requires enough device memory for every coarse stage bundle to stay resident.
 iree_status_t id4_ideogram4_session_prepare_generation(
     id4_ideogram4_session_t* session,
     const id4_ideogram4_generation_plan_t* plan,

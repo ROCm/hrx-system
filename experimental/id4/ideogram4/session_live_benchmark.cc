@@ -29,6 +29,9 @@ IREE_FLAG(string, dit_attention_implementation, "materialized_wmma",
 IREE_FLAG(string, dit_feed_forward_implementation, "pytorch_parity",
           "DiT feed-forward implementation: fused_product or "
           "pytorch_parity.");
+IREE_FLAG(string, generation_residency, "issue_phases",
+          "Generation stage-bundle residency: issue_phases or "
+          "all_stage_bundles.");
 IREE_FLAG(string, dit_conditioned_fp8_scope, "dit_cond_fp8",
           "Conditioned DiT FP8 e4m3 source parameter scope.");
 IREE_FLAG(string, dit_unconditioned_fp8_scope, "dit_uncond_fp8",
@@ -163,6 +166,9 @@ struct LiveGenerationBenchmarkContext {
   // DiT parameter source policy selected by benchmark flags.
   id4_ideogram4_dit_parameter_format_t dit_parameter_format =
       ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_INVALID;
+  // Generation stage-bundle residency selected by benchmark flags.
+  id4_ideogram4_generation_residency_mode_t generation_residency_mode =
+      ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_INVALID;
   // Provider containing Qwen3-VL text encoder weights.
   ParameterProviderRef qwen_parameter_provider;
   // Provider containing conditioned Ideogram 4 DiT weights.
@@ -292,6 +298,35 @@ static iree_string_view_t DitFeedForwardImplementationName(
       return IREE_SV("fused_product");
     case ID4_IDEOGRAM4_DIT_FEED_FORWARD_IMPLEMENTATION_PYTORCH_PARITY:
       return IREE_SV("pytorch_parity");
+    default:
+      return IREE_SV("invalid");
+  }
+}
+
+static iree_status_t ParseGenerationResidencyMode(
+    id4_ideogram4_generation_residency_mode_t* out_mode) {
+  IREE_ASSERT_ARGUMENT(out_mode);
+  iree_string_view_t value = iree_make_cstring_view(FLAG_generation_residency);
+  if (iree_string_view_equal(value, IREE_SV("issue_phases"))) {
+    *out_mode = ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_ISSUE_PHASES;
+    return iree_ok_status();
+  }
+  if (iree_string_view_equal(value, IREE_SV("all_stage_bundles"))) {
+    *out_mode = ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_ALL_STAGE_BUNDLES;
+    return iree_ok_status();
+  }
+  return iree_make_status(
+      IREE_STATUS_INVALID_ARGUMENT,
+      "--generation_residency must be issue_phases or all_stage_bundles");
+}
+
+static iree_string_view_t GenerationResidencyModeName(
+    id4_ideogram4_generation_residency_mode_t mode) {
+  switch (mode) {
+    case ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_ISSUE_PHASES:
+      return IREE_SV("issue_phases");
+    case ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_ALL_STAGE_BUNDLES:
+      return IREE_SV("all_stage_bundles");
     default:
       return IREE_SV("invalid");
   }
@@ -597,6 +632,8 @@ static iree_status_t CreateLiveGenerationBenchmarkContext(
       iree_allocator_system(), out_context->kernel_library.out()));
   IREE_RETURN_IF_ERROR(
       ParseDitParameterFormat(&out_context->dit_parameter_format));
+  IREE_RETURN_IF_ERROR(
+      ParseGenerationResidencyMode(&out_context->generation_residency_mode));
   IREE_RETURN_IF_ERROR(CreateLoadedLiveSession(
       &out_context->runtime_context, out_context->dit_parameter_format,
       out_context->session.out()));
@@ -652,6 +689,7 @@ static iree_status_t PrepareGenerationBundle(
   prepare_options.parameter_providers =
       LiveGenerationParameterProviders(context);
   prepare_options.kernel_library = context.kernel_library.get();
+  prepare_options.residency_mode = context.generation_residency_mode;
   prepare_options.command_buffer_mode =
       context.runtime_context.command_buffer_mode;
   prepare_options.wait_semaphore_list = iree_hal_semaphore_list_empty();
@@ -727,13 +765,15 @@ static iree_status_t SetGenerationBenchmarkLabel(
       DitAttentionImplementationName(summary.dit_attention_implementation);
   const iree_string_view_t feed_forward_implementation =
       DitFeedForwardImplementationName(summary.dit_feed_forward_implementation);
+  const iree_string_view_t residency_mode =
+      GenerationResidencyModeName(context.generation_residency_mode);
   iree_string_builder_t label_builder;
   iree_string_builder_initialize(iree_allocator_system(), &label_builder);
   iree_status_t status = iree_string_builder_append_format(
       &label_builder,
       "tokens=%" PRIu32 " latent=%" PRIu64 "x%" PRIu64 " steps=%" PRIu32
       " image=%" PRIu64 "x%" PRIu64
-      " residency=phase params=%.*s activation=%.*s attention=%.*s ff=%.*s"
+      " residency=%.*s params=%.*s activation=%.*s attention=%.*s ff=%.*s"
       " param_total=%" PRIu64 "MiB param_largest=%" PRIu64
       "MiB"
       " local_hw_total=%" PRIu64 "MiB local_hw_largest=%" PRIu64
@@ -742,6 +782,7 @@ static iree_status_t SetGenerationBenchmarkLabel(
       summary.qwen_token_count, summary.diffusion_latent_shape.dims[0],
       summary.diffusion_latent_shape.dims[1], summary.denoise_step_count,
       summary.decoded_image_shape.dims[0], summary.decoded_image_shape.dims[1],
+      static_cast<int>(residency_mode.size), residency_mode.data,
       static_cast<int>(parameter_format.size), parameter_format.data,
       static_cast<int>(activation_format.size), activation_format.data,
       static_cast<int>(attention_implementation.size),

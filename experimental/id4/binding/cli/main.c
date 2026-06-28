@@ -976,6 +976,8 @@ static iree_status_t id4_cli_run_generation(iree_allocator_t host_allocator) {
     prepare_options.structure_size = sizeof(prepare_options);
     prepare_options.parameter_providers = parameter_providers;
     prepare_options.kernel_library = kernel_library;
+    prepare_options.residency_mode =
+        ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_ISSUE_PHASES;
     prepare_options.command_buffer_mode =
         id4_cli_generation_command_buffer_mode(
             runtime_context.command_buffer_mode);
