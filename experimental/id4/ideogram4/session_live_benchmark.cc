@@ -31,7 +31,11 @@ IREE_FLAG(string, dit_feed_forward_implementation, "pytorch_parity",
           "pytorch_parity.");
 IREE_FLAG(string, generation_residency, "issue_phases",
           "Generation stage-bundle residency: issue_phases or "
-          "all_stage_bundles.");
+          "selected_phases or all_stage_bundles.");
+IREE_FLAG(string, generation_resident_phases, "",
+          "Comma-separated generation phases retained when "
+          "--generation_residency=selected_phases: conditioning, denoise, "
+          "decode, or all.");
 IREE_FLAG(string, dit_conditioned_fp8_scope, "dit_cond_fp8",
           "Conditioned DiT FP8 e4m3 source parameter scope.");
 IREE_FLAG(string, dit_unconditioned_fp8_scope, "dit_uncond_fp8",
@@ -169,6 +173,10 @@ struct LiveGenerationBenchmarkContext {
   // Generation stage-bundle residency selected by benchmark flags.
   id4_ideogram4_generation_residency_mode_t generation_residency_mode =
       ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_INVALID;
+  // Generation residency phases selected by benchmark flags.
+  id4_ideogram4_generation_residency_phase_mask_t
+      generation_resident_phase_mask =
+          ID4_IDEOGRAM4_GENERATION_RESIDENCY_PHASE_NONE;
   // Provider containing Qwen3-VL text encoder weights.
   ParameterProviderRef qwen_parameter_provider;
   // Provider containing conditioned Ideogram 4 DiT weights.
@@ -311,13 +319,18 @@ static iree_status_t ParseGenerationResidencyMode(
     *out_mode = ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_ISSUE_PHASES;
     return iree_ok_status();
   }
+  if (iree_string_view_equal(value, IREE_SV("selected_phases"))) {
+    *out_mode = ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_SELECTED_PHASES;
+    return iree_ok_status();
+  }
   if (iree_string_view_equal(value, IREE_SV("all_stage_bundles"))) {
     *out_mode = ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_ALL_STAGE_BUNDLES;
     return iree_ok_status();
   }
   return iree_make_status(
       IREE_STATUS_INVALID_ARGUMENT,
-      "--generation_residency must be issue_phases or all_stage_bundles");
+      "--generation_residency must be issue_phases, selected_phases, or "
+      "all_stage_bundles");
 }
 
 static iree_string_view_t GenerationResidencyModeName(
@@ -325,11 +338,49 @@ static iree_string_view_t GenerationResidencyModeName(
   switch (mode) {
     case ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_ISSUE_PHASES:
       return IREE_SV("issue_phases");
+    case ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_SELECTED_PHASES:
+      return IREE_SV("selected_phases");
     case ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_ALL_STAGE_BUNDLES:
       return IREE_SV("all_stage_bundles");
     default:
       return IREE_SV("invalid");
   }
+}
+
+static iree_status_t ParseGenerationResidentPhaseMask(
+    id4_ideogram4_generation_residency_phase_mask_t* out_phase_mask) {
+  IREE_ASSERT_ARGUMENT(out_phase_mask);
+  *out_phase_mask = ID4_IDEOGRAM4_GENERATION_RESIDENCY_PHASE_NONE;
+  iree_string_view_t remaining = iree_string_view_trim(
+      iree_make_cstring_view(FLAG_generation_resident_phases));
+  if (iree_string_view_is_empty(remaining)) return iree_ok_status();
+
+  while (!iree_string_view_is_empty(remaining)) {
+    iree_string_view_t phase_name = iree_string_view_empty();
+    iree_string_view_split(remaining, ',', &phase_name, &remaining);
+    phase_name = iree_string_view_trim(phase_name);
+    if (iree_string_view_is_empty(phase_name)) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "--generation_resident_phases contains an empty phase name");
+    }
+    if (iree_string_view_equal(phase_name, IREE_SV("all"))) {
+      *out_phase_mask |= ID4_IDEOGRAM4_GENERATION_RESIDENCY_PHASE_ALL;
+    } else if (iree_string_view_equal(phase_name, IREE_SV("conditioning"))) {
+      *out_phase_mask |= ID4_IDEOGRAM4_GENERATION_RESIDENCY_PHASE_CONDITIONING;
+    } else if (iree_string_view_equal(phase_name, IREE_SV("denoise"))) {
+      *out_phase_mask |= ID4_IDEOGRAM4_GENERATION_RESIDENCY_PHASE_DENOISE;
+    } else if (iree_string_view_equal(phase_name, IREE_SV("decode"))) {
+      *out_phase_mask |= ID4_IDEOGRAM4_GENERATION_RESIDENCY_PHASE_DECODE;
+    } else {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "unknown --generation_resident_phases value '%.*s'",
+          (int)phase_name.size, phase_name.data);
+    }
+    remaining = iree_string_view_trim(remaining);
+  }
+  return iree_ok_status();
 }
 
 static uint64_t CeilMiB(iree_device_size_t byte_length) {
@@ -634,6 +685,8 @@ static iree_status_t CreateLiveGenerationBenchmarkContext(
       ParseDitParameterFormat(&out_context->dit_parameter_format));
   IREE_RETURN_IF_ERROR(
       ParseGenerationResidencyMode(&out_context->generation_residency_mode));
+  IREE_RETURN_IF_ERROR(ParseGenerationResidentPhaseMask(
+      &out_context->generation_resident_phase_mask));
   IREE_RETURN_IF_ERROR(CreateLoadedLiveSession(
       &out_context->runtime_context, out_context->dit_parameter_format,
       out_context->session.out()));
@@ -690,6 +743,7 @@ static iree_status_t PrepareGenerationBundle(
       LiveGenerationParameterProviders(context);
   prepare_options.kernel_library = context.kernel_library.get();
   prepare_options.residency_mode = context.generation_residency_mode;
+  prepare_options.resident_phase_mask = context.generation_resident_phase_mask;
   prepare_options.command_buffer_mode =
       context.runtime_context.command_buffer_mode;
   prepare_options.wait_semaphore_list = iree_hal_semaphore_list_empty();
@@ -773,7 +827,8 @@ static iree_status_t SetGenerationBenchmarkLabel(
       &label_builder,
       "tokens=%" PRIu32 " latent=%" PRIu64 "x%" PRIu64 " steps=%" PRIu32
       " image=%" PRIu64 "x%" PRIu64
-      " residency=%.*s params=%.*s activation=%.*s attention=%.*s ff=%.*s"
+      " residency=%.*s resident_phase_mask=0x%08x"
+      " params=%.*s activation=%.*s attention=%.*s ff=%.*s"
       " param_total=%" PRIu64 "MiB param_largest=%" PRIu64
       "MiB"
       " local_hw_total=%" PRIu64 "MiB local_hw_largest=%" PRIu64
@@ -783,6 +838,7 @@ static iree_status_t SetGenerationBenchmarkLabel(
       summary.diffusion_latent_shape.dims[1], summary.denoise_step_count,
       summary.decoded_image_shape.dims[0], summary.decoded_image_shape.dims[1],
       static_cast<int>(residency_mode.size), residency_mode.data,
+      context.generation_resident_phase_mask,
       static_cast<int>(parameter_format.size), parameter_format.data,
       static_cast<int>(activation_format.size), activation_format.data,
       static_cast<int>(attention_implementation.size),

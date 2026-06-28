@@ -167,9 +167,31 @@ typedef enum id4_ideogram4_generation_residency_mode_e {
   ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_INVALID = 0,
   // Prepare heavy stage bundles at issue-time phase boundaries.
   ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_ISSUE_PHASES = 1,
+  // Prepare and retain selected residency phases during generation preparation.
+  ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_SELECTED_PHASES = 2,
   // Prepare and retain every coarse stage bundle in the generation bundle.
-  ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_ALL_STAGE_BUNDLES = 2,
+  ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_ALL_STAGE_BUNDLES = 3,
 } id4_ideogram4_generation_residency_mode_e;
+
+// Bitmask selecting high-level generation residency phases.
+typedef uint32_t id4_ideogram4_generation_residency_phase_mask_t;
+
+// High-level generation residency phases that may retain stage bundles.
+typedef enum id4_ideogram4_generation_residency_phase_bit_e {
+  // No generation residency phase selected.
+  ID4_IDEOGRAM4_GENERATION_RESIDENCY_PHASE_NONE = 0u,
+  // Prompt conditioning and initial latent-noise generation phase.
+  ID4_IDEOGRAM4_GENERATION_RESIDENCY_PHASE_CONDITIONING = 1u << 0,
+  // Repeated DiT branch and sampler denoise-step phase.
+  ID4_IDEOGRAM4_GENERATION_RESIDENCY_PHASE_DENOISE = 1u << 1,
+  // Final latent-to-image decode phase.
+  ID4_IDEOGRAM4_GENERATION_RESIDENCY_PHASE_DECODE = 1u << 2,
+  // Every high-level generation residency phase.
+  ID4_IDEOGRAM4_GENERATION_RESIDENCY_PHASE_ALL =
+      ID4_IDEOGRAM4_GENERATION_RESIDENCY_PHASE_CONDITIONING |
+      ID4_IDEOGRAM4_GENERATION_RESIDENCY_PHASE_DENOISE |
+      ID4_IDEOGRAM4_GENERATION_RESIDENCY_PHASE_DECODE,
+} id4_ideogram4_generation_residency_phase_bit_t;
 
 // Options for preparing reusable generation state from one generation plan.
 typedef struct id4_ideogram4_generation_prepare_options_t {
@@ -183,6 +205,8 @@ typedef struct id4_ideogram4_generation_prepare_options_t {
   id4_pipeline_kernel_library_t* kernel_library;
   // Stage-bundle residency policy selected for this prepared generation.
   id4_ideogram4_generation_residency_mode_t residency_mode;
+  // Residency phases retained when |residency_mode| selects phases.
+  id4_ideogram4_generation_residency_phase_mask_t resident_phase_mask;
   // HAL command-buffer mode used when preparing reusable regions.
   iree_hal_command_buffer_mode_t command_buffer_mode;
   // Semaphores that generation preparation waits on.
@@ -310,9 +334,10 @@ iree_status_t id4_ideogram4_generation_plan_format_json(
 // Prepares reusable generation state for |plan|.
 //
 // |options->residency_mode| selects whether heavy stage bundles are prepared at
-// issue-time phase boundaries or all retained by the prepared generation
-// bundle. All-stage-bundle residency removes issue-time parameter loading but
-// requires enough device memory for every coarse stage bundle to stay resident.
+// issue-time phase boundaries, retained by selected high-level generation
+// phases, or all retained by the prepared generation bundle. Resident phases
+// remove issue-time parameter loading for their coarse stage bundles but
+// require enough device memory for the selected phase bundles to stay resident.
 iree_status_t id4_ideogram4_session_prepare_generation(
     id4_ideogram4_session_t* session,
     const id4_ideogram4_generation_plan_t* plan,

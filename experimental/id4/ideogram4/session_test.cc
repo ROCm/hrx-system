@@ -44,6 +44,27 @@ struct ScopedRequest {
   id4_ideogram4_request_t value = {};
 };
 
+struct ScopedSemaphoreList {
+  explicit ScopedSemaphoreList(iree_hal_device_t* device) {
+    IREE_CHECK_OK(iree_hal_semaphore_create(device, IREE_HAL_QUEUE_AFFINITY_ANY,
+                                            0, IREE_HAL_SEMAPHORE_FLAG_NONE,
+                                            &semaphore));
+  }
+
+  ~ScopedSemaphoreList() { iree_hal_semaphore_release(semaphore); }
+
+  iree_hal_semaphore_list_t list() {
+    return (iree_hal_semaphore_list_t){
+        /*.count=*/1,
+        /*.semaphores=*/&semaphore,
+        /*.payload_values=*/&payload_value,
+    };
+  }
+
+  iree_hal_semaphore_t* semaphore = nullptr;
+  uint64_t payload_value = 1;
+};
+
 struct SessionDeleter {
   void operator()(id4_ideogram4_session_t* session) const {
     id4_ideogram4_session_release(session);
@@ -716,22 +737,12 @@ TEST_F(SessionTest, PrepareGenerationRequiresResidencyMode) {
 
   iree_hal_device_t* device =
       iree_hal_device_group_device_at(device_group_, /*index=*/0);
-  iree_hal_semaphore_t* semaphore = nullptr;
-  IREE_ASSERT_OK(iree_hal_semaphore_create(device, IREE_HAL_QUEUE_AFFINITY_ANY,
-                                           0, IREE_HAL_SEMAPHORE_FLAG_NONE,
-                                           &semaphore));
-  iree_hal_semaphore_t* signal_semaphores[] = {semaphore};
-  uint64_t signal_payload_values[] = {1};
-  iree_hal_semaphore_list_t signal_list = {
-      /*.count=*/1,
-      /*.semaphores=*/signal_semaphores,
-      /*.payload_values=*/signal_payload_values,
-  };
+  ScopedSemaphoreList signal_list(device);
 
   id4_ideogram4_generation_prepare_options_t prepare_options;
   std::memset(&prepare_options, 0, sizeof(prepare_options));
   prepare_options.structure_size = sizeof(prepare_options);
-  prepare_options.signal_semaphore_list = signal_list;
+  prepare_options.signal_semaphore_list = signal_list.list();
 
   id4_ideogram4_generation_bundle_t* bundle = nullptr;
   IREE_EXPECT_STATUS_IS(
@@ -739,8 +750,93 @@ TEST_F(SessionTest, PrepareGenerationRequiresResidencyMode) {
       id4_ideogram4_session_prepare_generation(session.get(), plan.get(),
                                                &prepare_options, &bundle));
   EXPECT_EQ(bundle, nullptr);
+}
 
-  iree_hal_semaphore_release(semaphore);
+TEST_F(SessionTest, PrepareGenerationIssuePhasesRejectResidentPhaseMask) {
+  TokenizerPtr tokenizer = LoadTokenizer();
+  ScopedRequest request;
+  IREE_ASSERT_OK(id4_ideogram4_request_parse_json(
+      ShortFullRequestJson(), iree_allocator_system(), &request.value));
+  SessionPtr session = CreateLoadedSession();
+  GenerationPlanPtr plan =
+      PlanGeneration(session.get(), tokenizer.get(), &request.value);
+
+  iree_hal_device_t* device =
+      iree_hal_device_group_device_at(device_group_, /*index=*/0);
+  ScopedSemaphoreList signal_list(device);
+
+  id4_ideogram4_generation_prepare_options_t prepare_options;
+  std::memset(&prepare_options, 0, sizeof(prepare_options));
+  prepare_options.structure_size = sizeof(prepare_options);
+  prepare_options.residency_mode =
+      ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_ISSUE_PHASES;
+  prepare_options.resident_phase_mask =
+      ID4_IDEOGRAM4_GENERATION_RESIDENCY_PHASE_DENOISE;
+  prepare_options.signal_semaphore_list = signal_list.list();
+
+  id4_ideogram4_generation_bundle_t* bundle = nullptr;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      id4_ideogram4_session_prepare_generation(session.get(), plan.get(),
+                                               &prepare_options, &bundle));
+  EXPECT_EQ(bundle, nullptr);
+}
+
+TEST_F(SessionTest, PrepareGenerationSelectedPhasesRequirePhaseMask) {
+  TokenizerPtr tokenizer = LoadTokenizer();
+  ScopedRequest request;
+  IREE_ASSERT_OK(id4_ideogram4_request_parse_json(
+      ShortFullRequestJson(), iree_allocator_system(), &request.value));
+  SessionPtr session = CreateLoadedSession();
+  GenerationPlanPtr plan =
+      PlanGeneration(session.get(), tokenizer.get(), &request.value);
+
+  iree_hal_device_t* device =
+      iree_hal_device_group_device_at(device_group_, /*index=*/0);
+  ScopedSemaphoreList signal_list(device);
+
+  id4_ideogram4_generation_prepare_options_t prepare_options;
+  std::memset(&prepare_options, 0, sizeof(prepare_options));
+  prepare_options.structure_size = sizeof(prepare_options);
+  prepare_options.residency_mode =
+      ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_SELECTED_PHASES;
+  prepare_options.signal_semaphore_list = signal_list.list();
+
+  id4_ideogram4_generation_bundle_t* bundle = nullptr;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      id4_ideogram4_session_prepare_generation(session.get(), plan.get(),
+                                               &prepare_options, &bundle));
+  EXPECT_EQ(bundle, nullptr);
+}
+
+TEST_F(SessionTest, PrepareGenerationSelectedPhasesRejectUnknownPhaseMask) {
+  TokenizerPtr tokenizer = LoadTokenizer();
+  ScopedRequest request;
+  IREE_ASSERT_OK(id4_ideogram4_request_parse_json(
+      ShortFullRequestJson(), iree_allocator_system(), &request.value));
+  SessionPtr session = CreateLoadedSession();
+  GenerationPlanPtr plan =
+      PlanGeneration(session.get(), tokenizer.get(), &request.value);
+
+  iree_hal_device_t* device =
+      iree_hal_device_group_device_at(device_group_, /*index=*/0);
+  ScopedSemaphoreList signal_list(device);
+
+  id4_ideogram4_generation_prepare_options_t prepare_options;
+  std::memset(&prepare_options, 0, sizeof(prepare_options));
+  prepare_options.structure_size = sizeof(prepare_options);
+  prepare_options.residency_mode =
+      ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_SELECTED_PHASES;
+  prepare_options.resident_phase_mask = 1u << 12;
+  prepare_options.signal_semaphore_list = signal_list.list();
+
+  id4_ideogram4_generation_bundle_t* bundle = nullptr;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      id4_ideogram4_session_prepare_generation(session.get(), plan.get(),
+                                               &prepare_options, &bundle));
+  EXPECT_EQ(bundle, nullptr);
 }
 
 TEST_F(SessionTest, PrepareGenerationRequiresParameterProviders) {
@@ -754,24 +850,14 @@ TEST_F(SessionTest, PrepareGenerationRequiresParameterProviders) {
 
   iree_hal_device_t* device =
       iree_hal_device_group_device_at(device_group_, /*index=*/0);
-  iree_hal_semaphore_t* semaphore = nullptr;
-  IREE_ASSERT_OK(iree_hal_semaphore_create(device, IREE_HAL_QUEUE_AFFINITY_ANY,
-                                           0, IREE_HAL_SEMAPHORE_FLAG_NONE,
-                                           &semaphore));
-  iree_hal_semaphore_t* signal_semaphores[] = {semaphore};
-  uint64_t signal_payload_values[] = {1};
-  iree_hal_semaphore_list_t signal_list = {
-      /*.count=*/1,
-      /*.semaphores=*/signal_semaphores,
-      /*.payload_values=*/signal_payload_values,
-  };
+  ScopedSemaphoreList signal_list(device);
 
   id4_ideogram4_generation_prepare_options_t prepare_options;
   std::memset(&prepare_options, 0, sizeof(prepare_options));
   prepare_options.structure_size = sizeof(prepare_options);
   prepare_options.residency_mode =
       ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_ISSUE_PHASES;
-  prepare_options.signal_semaphore_list = signal_list;
+  prepare_options.signal_semaphore_list = signal_list.list();
 
   id4_ideogram4_generation_bundle_t* bundle = nullptr;
   IREE_EXPECT_STATUS_IS(
@@ -779,8 +865,6 @@ TEST_F(SessionTest, PrepareGenerationRequiresParameterProviders) {
       id4_ideogram4_session_prepare_generation(session.get(), plan.get(),
                                                &prepare_options, &bundle));
   EXPECT_EQ(bundle, nullptr);
-
-  iree_hal_semaphore_release(semaphore);
 }
 
 }  // namespace
