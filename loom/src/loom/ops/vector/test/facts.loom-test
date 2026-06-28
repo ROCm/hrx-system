@@ -1257,6 +1257,37 @@ func.def @finite_only_storage_vector_load_content(%buffer: buffer) -> (i1) {
 
 // Finite-number FP8 storage schemas publish no-infinity facts through
 // vector.load while preserving NaN uncertainty.
+func.def @fn_fp8_storage_vector_load_content(%buffer: buffer) -> (i1, i1) {
+  %offset = index.constant 0 : offset
+  %layout = encoding.layout.dense : encoding<layout>
+  %schema = encoding.define #fp8_e4m3fn : encoding<schema>
+  %storage = encoding.define #physical_storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
+  %view = buffer.view %buffer[%offset] : buffer -> view<16xf8E4M3, %storage>
+  %value = vector.load %view[0] : view<16xf8E4M3, %storage> -> vector<4xf8E4M3>
+  %inf = vector.isinff %value : vector<4xf8E4M3> -> vector<4xi1>
+  %finite = vector.isfinitef %value : vector<4xf8E4M3> -> vector<4xi1>
+  %inf_lane = vector.extract %inf[0] : vector<4xi1> -> i1
+  %finite_lane = vector.extract %finite[0] : vector<4xi1> -> i1
+  func.return %inf_lane, %finite_lane : i1, i1
+}
+// ----
+func.def @fn_fp8_storage_vector_load_content(%buffer: buffer) -> (i1, i1) {
+  %offset = index.constant 0 : offset
+  %layout = encoding.layout.dense : encoding<layout>
+  %schema = encoding.define #fp8_e4m3fn : encoding<schema>
+  %storage = encoding.define #physical_storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
+  %view = buffer.view %buffer[%offset] : buffer -> view<16xf8E4M3, %storage>
+  %value = vector.load %view[0] : view<16xf8E4M3, %storage> -> vector<4xf8E4M3>
+  %finite = vector.isfinitef %value : vector<4xf8E4M3> -> vector<4xi1>
+  %inf_lane = scalar.constant false : i1
+  %finite_lane = vector.extract %finite[0] : vector<4xi1> -> i1
+  func.return %inf_lane, %finite_lane : i1, i1
+}
+
+// ====
+
+// Finite-number unsigned-zero FP8 storage schemas publish no-infinity facts
+// through vector.load while preserving NaN uncertainty.
 func.def @fnuz_fp8_storage_vector_load_content(%buffer: buffer) -> (i1, i1) {
   %offset = index.constant 0 : offset
   %layout = encoding.layout.dense : encoding<layout>
