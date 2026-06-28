@@ -184,6 +184,50 @@ def _dispatch_events(profile_records: list[dict[str, Any]]) -> list[dict[str, An
     return events
 
 
+def _profile_event_sort_key(event: dict[str, Any]) -> tuple[int, int]:
+    return (
+        _require_int(event.get("command_index"), "command_index"),
+        _require_int(event.get("event_id"), "event_id"),
+    )
+
+
+def _profile_group_sort_key(group: dict[str, Any]) -> tuple[int, int, int, int]:
+    events = _require_list(group["events"], "events")
+    first_event = _require_dict(events[0], "events[]")
+    return (
+        _require_int(first_event.get("event_id"), "event_id"),
+        _require_int(group["submission_id"], "submission_id"),
+        _require_int(group["command_buffer_id"], "command_buffer_id"),
+        len(events),
+    )
+
+
+def _profile_event_groups(
+    profile_events: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    groups_by_key: dict[tuple[int, int], list[dict[str, Any]]] = defaultdict(list)
+    for event in profile_events:
+        submission_id = _require_int(event.get("submission_id"), "submission_id")
+        command_buffer_id = _require_int(
+            event.get("command_buffer_id"), "command_buffer_id"
+        )
+        groups_by_key[(submission_id, command_buffer_id)].append(event)
+
+    groups = []
+    for (submission_id, command_buffer_id), events in groups_by_key.items():
+        events.sort(key=_profile_event_sort_key)
+        groups.append(
+            {
+                "submission_id": submission_id,
+                "command_buffer_id": command_buffer_id,
+                "events": events,
+                "matched": False,
+            }
+        )
+    groups.sort(key=_profile_group_sort_key)
+    return groups
+
+
 def _generation_stages(plan: dict[str, Any]) -> dict[str, dict[str, Any]]:
     stages = _require_dict(plan.get("stages"), "stages")
     return {
@@ -325,6 +369,63 @@ def _join_row(
         "valid": valid,
         "duration_ns": duration_ns,
     }
+
+
+def _plan_dispatch_matches_event(
+    dispatch_ordinal: int,
+    plan_dispatch: dict[str, Any],
+    profile_event: dict[str, Any],
+) -> bool:
+    try:
+        plan_function = _require_string(
+            plan_dispatch.get("function_name"),
+            f"program.dispatches[{dispatch_ordinal}].function_name",
+        )
+        profile_function = _require_string(
+            profile_event.get("key"),
+            f"profile.dispatch_events[{dispatch_ordinal}].key",
+        )
+        if plan_function != profile_function:
+            return False
+        _launch_geometry(dispatch_ordinal, plan_dispatch, profile_event)
+    except DispatchProfileJoinError:
+        return False
+    return True
+
+
+def _stage_plan_matches_profile_group(
+    plan: dict[str, Any], profile_events: list[dict[str, Any]]
+) -> bool:
+    plan_dispatches = _program_dispatches(plan)
+    if len(plan_dispatches) != len(profile_events):
+        return False
+    for dispatch_ordinal, (plan_dispatch, profile_event) in enumerate(
+        zip(plan_dispatches, profile_events)
+    ):
+        if not _plan_dispatch_matches_event(
+            dispatch_ordinal, plan_dispatch, profile_event
+        ):
+            return False
+    return True
+
+
+def _find_generation_profile_group(
+    stage_key: str,
+    stage_plan: dict[str, Any],
+    profile_groups: list[dict[str, Any]],
+) -> dict[str, Any]:
+    for group in profile_groups:
+        if group["matched"]:
+            continue
+        events = [_require_dict(event, "events[]") for event in group["events"]]
+        if _stage_plan_matches_profile_group(stage_plan, events):
+            group["matched"] = True
+            return group
+    dispatch_count = len(_program_dispatches(stage_plan))
+    raise DispatchProfileJoinError(
+        f"no unmatched profile command buffer matched generation stage "
+        f"{stage_key} with {dispatch_count} dispatches"
+    )
 
 
 def _accumulate_kernel_aggregate(
@@ -518,6 +619,60 @@ def _aggregate_generation_kernels(rows: list[dict[str, Any]]) -> list[dict[str, 
     return records
 
 
+def _profile_only_rows(profile_events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    rows = []
+    for event in profile_events:
+        valid = _require_bool(event.get("valid"), "profile.valid")
+        duration_ns = event.get("duration_ns")
+        if valid:
+            duration_ns = _require_int(duration_ns, "profile.duration_ns")
+        else:
+            duration_ns = None
+        rows.append(
+            {
+                "stage": "profile_only",
+                "stage_key": "profile_only",
+                "profile_event_id": _require_int(event.get("event_id"), "event_id"),
+                "submission_id": _require_int(
+                    event.get("submission_id"), "submission_id"
+                ),
+                "command_buffer_id": _require_int(
+                    event.get("command_buffer_id"), "command_buffer_id"
+                ),
+                "command_index": _require_int(
+                    event.get("command_index"), "command_index"
+                ),
+                "function_name": _require_string(event.get("key"), "profile.key"),
+                "workgroup_count": list(
+                    _u32_triplet(event.get("workgroup_count"), "workgroup_count")
+                ),
+                "workgroup_size": list(
+                    _u32_triplet(event.get("workgroup_size"), "workgroup_size")
+                ),
+                "valid": valid,
+                "duration_ns": duration_ns,
+            }
+        )
+    return rows
+
+
+def _aggregate_profile_only_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    aggregates: dict[str, KernelAggregate] = defaultdict(KernelAggregate)
+    for row in rows:
+        function_name = _require_string(row["function_name"], "function_name")
+        _accumulate_kernel_aggregate(aggregates[function_name], row)
+    records = []
+    for function_name, aggregate in aggregates.items():
+        records.append(
+            {
+                "function_name": function_name,
+                **_kernel_aggregate_duration_fields(aggregate),
+            }
+        )
+    records.sort(key=lambda row: (-row["total_duration_ns"], row["function_name"]))
+    return records
+
+
 def join_generation_dispatch_profile(
     plan: dict[str, Any],
     profile_records: list[dict[str, Any]],
@@ -527,18 +682,18 @@ def join_generation_dispatch_profile(
     if plan.get("kind") != "ideogram4_generation":
         raise DispatchProfileJoinError("plan kind must be ideogram4_generation")
     profile_events = _dispatch_events(profile_records)
+    profile_groups = _profile_event_groups(profile_events)
     stages = _generation_stages(plan)
     sequence = _generation_issue_sequence(plan)
 
-    event_offset = 0
     flattened_rows = []
     stage_invocations = []
     for invocation_ordinal, (stage_key, denoise_step_index) in enumerate(sequence):
-        stage_report = _join_stage_dispatches(
-            stages[stage_key], profile_events, event_offset
+        profile_group = _find_generation_profile_group(
+            stage_key, stages[stage_key], profile_groups
         )
-        event_offset = _require_int(
-            stage_report["next_event_offset"], "next_event_offset"
+        stage_report = _join_stage_dispatches(
+            stages[stage_key], profile_group["events"]
         )
         invocation_rows = []
         for row in stage_report["dispatches"]:
@@ -547,6 +702,10 @@ def join_generation_dispatch_profile(
             generation_row["stage_invocation_ordinal"] = invocation_ordinal
             generation_row["generation_dispatch_ordinal"] = len(flattened_rows)
             generation_row["denoise_step_index"] = denoise_step_index
+            generation_row["profile_submission_id"] = profile_group["submission_id"]
+            generation_row["profile_command_buffer_id"] = profile_group[
+                "command_buffer_id"
+            ]
             invocation_rows.append(generation_row)
             flattened_rows.append(generation_row)
         stage_summary = _summary_for_rows(invocation_rows)
@@ -556,7 +715,8 @@ def join_generation_dispatch_profile(
                 "stage": stage_report["stage"],
                 "stage_invocation_ordinal": invocation_ordinal,
                 "denoise_step_index": denoise_step_index,
-                "event_offset": stage_report["event_offset"],
+                "profile_submission_id": profile_group["submission_id"],
+                "profile_command_buffer_id": profile_group["command_buffer_id"],
                 "summary": stage_summary,
                 "region": stage_report["region"],
                 "by_kernel": _aggregate_rows(invocation_rows),
@@ -564,17 +724,19 @@ def join_generation_dispatch_profile(
             }
         )
 
-    if event_offset != len(profile_events):
-        raise DispatchProfileJoinError(
-            f"generation issue profile consumed {event_offset} dispatch_event rows, "
-            f"but profile contains {len(profile_events)} rows"
-        )
+    unmatched_events = []
+    for group in profile_groups:
+        if not group["matched"]:
+            unmatched_events.extend(group["events"])
+    unmatched_rows = _profile_only_rows(unmatched_events)
 
     return {
         "schema_version": 1,
         "kind": "ideogram4_generation_dispatch_profile",
         "summary": {
             **_summary_for_rows(flattened_rows),
+            "profile_dispatch_count": len(profile_events),
+            "unmatched_dispatch_count": len(unmatched_rows),
             "stage_invocation_count": len(stage_invocations),
             "denoise_step_count": _require_int(
                 _require_dict(plan.get("summary"), "summary").get("denoise_step_count"),
@@ -583,8 +745,10 @@ def join_generation_dispatch_profile(
         },
         "by_stage": _aggregate_generation_stages(stage_invocations),
         "by_kernel": _aggregate_generation_kernels(flattened_rows),
+        "unmatched_by_kernel": _aggregate_profile_only_rows(unmatched_rows),
         "stage_invocations": stage_invocations,
         "dispatches": flattened_rows,
+        "unmatched_dispatches": unmatched_rows,
     }
 
 

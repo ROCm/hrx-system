@@ -193,12 +193,14 @@ def _profile_event(
     function_name: str,
     duration_ns: int,
     command_index: int,
+    submission_id: int = 20,
+    command_buffer_id: int = 30,
 ) -> dict[str, object]:
     return {
         "type": "dispatch_event",
         "event_id": event_id,
-        "submission_id": 100 + event_id,
-        "command_buffer_id": 200 + event_id,
+        "submission_id": submission_id,
+        "command_buffer_id": command_buffer_id,
         "command_index": command_index,
         "key": function_name,
         "workgroup_count": [1, 1, 1],
@@ -209,23 +211,21 @@ def _profile_event(
 
 
 def _generation_profile() -> list[dict[str, object]]:
-    functions = [
-        "qwen.forward",
-        "noise.forward",
-        "dit.prelude",
-        "dit.forward",
-        "dit.forward",
-        "sampler.step",
-        "dit.prelude",
-        "dit.forward",
-        "dit.forward",
-        "sampler.step",
-        "decode.forward",
+    rows = [
+        (1, "noise.forward", 100, 0, 10, 2),
+        (2, "qwen.forward", 200, 0, 20, 1),
+        (3, "prepare.encode", 50, 0, 30, 0),
+        (4, "dit.prelude", 300, 0, 40, 4),
+        (5, "dit.forward", 400, 1, 40, 4),
+        (6, "dit.forward", 500, 0, 50, 5),
+        (7, "sampler.step", 600, 0, 60, 3),
+        (8, "dit.prelude", 700, 0, 41, 4),
+        (9, "dit.forward", 800, 1, 41, 4),
+        (10, "dit.forward", 900, 0, 51, 5),
+        (11, "sampler.step", 1000, 0, 61, 3),
+        (12, "decode.forward", 1100, 0, 70, 6),
     ]
-    return [
-        _profile_event(i + 1, function_name, (i + 1) * 100, i)
-        for i, function_name in enumerate(functions)
-    ]
+    return [_profile_event(*row) for row in rows]
 
 
 def _find_row(
@@ -288,6 +288,8 @@ class DispatchProfileJoinTest(unittest.TestCase):
         self.assertEqual(report["summary"]["denoise_step_count"], 2)
         self.assertEqual(report["summary"]["stage_invocation_count"], 9)
         self.assertEqual(report["summary"]["dispatch_count"], 11)
+        self.assertEqual(report["summary"]["profile_dispatch_count"], 12)
+        self.assertEqual(report["summary"]["unmatched_dispatch_count"], 1)
         self.assertEqual(report["summary"]["total_duration_ns"], 6600)
         dit_conditioned = _find_row(report["by_stage"], "stage_key", "dit_conditioned")
         self.assertEqual(dit_conditioned["invocation_count"], 2)
@@ -301,7 +303,10 @@ class DispatchProfileJoinTest(unittest.TestCase):
         self.assertEqual(report["stage_invocations"][2]["denoise_step_index"], 0)
         self.assertEqual(report["stage_invocations"][5]["stage_key"], "dit_conditioned")
         self.assertEqual(report["stage_invocations"][5]["denoise_step_index"], 1)
-        self.assertEqual(report["dispatches"][0]["generation_dispatch_ordinal"], 0)
+        self.assertEqual(report["stage_invocations"][0]["profile_command_buffer_id"], 1)
+        self.assertEqual(
+            report["unmatched_dispatches"][0]["function_name"], "prepare.encode"
+        )
         self.assertEqual(report["dispatches"][3]["stage_key"], "dit_conditioned")
         self.assertEqual(report["dispatches"][4]["stage_key"], "dit_unconditioned")
         dit_forward = _find_kernel_row(
@@ -309,13 +314,13 @@ class DispatchProfileJoinTest(unittest.TestCase):
         )
         self.assertEqual(dit_forward["total_duration_ns"], 1200)
 
-    def test_rejects_generation_profile_with_extra_dispatch_rows(self) -> None:
+    def test_rejects_generation_profile_without_stage_group(self) -> None:
         profile = _generation_profile()
-        profile.insert(2, _profile_event(99, "prepare.encode", 50, 99))
+        profile[1] = _profile_event(99, "prepare.encode", 50, 0, 20, 1)
 
         with self.assertRaisesRegex(
             dispatch_profile_join.DispatchProfileJoinError,
-            "function mismatch",
+            "no unmatched profile command buffer matched generation stage qwen",
         ):
             dispatch_profile_join.join_profile(_generation_plan(), profile)
 
