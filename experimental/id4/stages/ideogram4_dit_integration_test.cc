@@ -54,6 +54,13 @@ using ParameterProviderRef =
     id4::test::OwningRef<iree_io_parameter_provider_t,
                          iree_io_parameter_provider_release>;
 
+typedef struct DitBranchParameterScopes {
+  // BF16-expanded parameter scope for the selected branch.
+  iree_string_view_t bf16;
+  // FP8 e4m3 parameter scope for the selected branch.
+  iree_string_view_t fp8_e4m3;
+} DitBranchParameterScopes;
+
 static iree_status_t ParseDitParameterFormat(
     id4_ideogram4_dit_parameter_format_t* out_format) {
   iree_status_t status = id4_ideogram4_dit_parameter_format_parse(
@@ -62,22 +69,35 @@ static iree_status_t ParseDitParameterFormat(
   return iree_status_annotate(status, IREE_SV("--dit_parameter_format"));
 }
 
-static iree_string_view_t Fp8ParameterScopeForRequest(
-    const id4_ideogram4_dit_request_config_t& request) {
+static iree_status_t DitBranchParameterScopesForRequest(
+    const id4_ideogram4_dit_request_config_t& request,
+    DitBranchParameterScopes* out_scopes) {
+  IREE_ASSERT_ARGUMENT(out_scopes);
+  std::memset(out_scopes, 0, sizeof(*out_scopes));
   switch (request.conditioning_mode) {
     case ID4_IDEOGRAM4_DIT_CONDITIONING_MODE_CONDITIONED:
-      return iree_make_cstring_view(FLAG_dit_conditioned_fp8_scope);
+      out_scopes->bf16 = IREE_SV("dit_cond");
+      out_scopes->fp8_e4m3 =
+          iree_make_cstring_view(FLAG_dit_conditioned_fp8_scope);
+      return iree_ok_status();
     case ID4_IDEOGRAM4_DIT_CONDITIONING_MODE_UNCONDITIONED:
-      return iree_make_cstring_view(FLAG_dit_unconditioned_fp8_scope);
+      out_scopes->bf16 = IREE_SV("dit_uncond");
+      out_scopes->fp8_e4m3 =
+          iree_make_cstring_view(FLAG_dit_unconditioned_fp8_scope);
+      return iree_ok_status();
     default:
-      return iree_string_view_empty();
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "DiT conditioning mode %" PRIu32
+                              " has no parameter scopes",
+                              (uint32_t)request.conditioning_mode);
   }
 }
 
 static iree_status_t CreateIdeogram4DitStage(
     const id4::test::LiveStageContext& context,
     id4_ideogram4_dit_parameter_format_t parameter_format,
-    iree_string_view_t fp8_parameter_scope, id4_pipeline_stage_t** out_stage) {
+    DitBranchParameterScopes parameter_scopes,
+    id4_pipeline_stage_t** out_stage) {
   IREE_ASSERT_ARGUMENT(out_stage);
   *out_stage = nullptr;
 
@@ -90,13 +110,14 @@ static iree_status_t CreateIdeogram4DitStage(
   id4_ideogram4_dit_parameter_source_rule_list_t source_rules;
   IREE_RETURN_IF_ERROR(id4_ideogram4_dit_parameter_source_rule_list_initialize(
       parameter_format, *id4_ideogram4_dit_program_ideogram4_model_config(),
-      fp8_parameter_scope, iree_allocator_system(), &source_rules));
+      parameter_scopes.fp8_e4m3, iree_allocator_system(), &source_rules));
 
   id4_ideogram4_dit_stage_create_options_t create_options;
   std::memset(&create_options, 0, sizeof(create_options));
   create_options.structure_size = sizeof(create_options);
   create_options.services = services;
   create_options.kernel_cache = context.kernel_cache.get();
+  create_options.parameter_scope = parameter_scopes.bf16;
   create_options.model = *id4_ideogram4_dit_program_ideogram4_model_config();
   create_options.parameter_source_rule_count = source_rules.count;
   create_options.parameter_source_rules = source_rules.values;
@@ -282,12 +303,12 @@ static iree_status_t WritePlanJsonIfRequested(const id4_pipeline_plan_t* plan) {
 
 static iree_status_t CreateDitParameterProviderFromFlags(
     id4_ideogram4_dit_parameter_format_t parameter_format,
-    iree_string_view_t fp8_parameter_scope,
+    DitBranchParameterScopes parameter_scopes,
     iree_io_parameter_provider_t** out_provider) {
   IREE_ASSERT_ARGUMENT(out_provider);
   *out_provider = nullptr;
   if (parameter_format == ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_BF16) {
-    return id4::test::CreateParameterProviderFromFlags(iree_string_view_empty(),
+    return id4::test::CreateParameterProviderFromFlags(parameter_scopes.bf16,
                                                        out_provider);
   }
 
@@ -296,13 +317,13 @@ static iree_status_t CreateDitParameterProviderFromFlags(
   id4_tooling_parameter_provider_request_t requests[] = {
       {
           // BF16-expanded parameter scope.
-          .scope = iree_string_view_empty(),
+          .scope = parameter_scopes.bf16,
           // BF16-expanded provider output.
           .out_provider = bf16_provider.out(),
       },
       {
           // FP8 e4m3 source parameter scope.
-          .scope = fp8_parameter_scope,
+          .scope = parameter_scopes.fp8_e4m3,
           // FP8 e4m3 source provider output.
           .out_provider = fp8_provider.out(),
       },
@@ -313,13 +334,13 @@ static iree_status_t CreateDitParameterProviderFromFlags(
   const id4_tooling_parameter_provider_set_entry_t entries[] = {
       {
           // BF16-expanded parameter scope.
-          .scope = iree_string_view_empty(),
+          .scope = parameter_scopes.bf16,
           // BF16-expanded provider.
           .provider = bf16_provider.get(),
       },
       {
           // FP8 e4m3 source parameter scope.
-          .scope = fp8_parameter_scope,
+          .scope = parameter_scopes.fp8_e4m3,
           // FP8 e4m3 source provider.
           .provider = fp8_provider.get(),
       },
@@ -1005,8 +1026,22 @@ static iree_status_t CompareBindingWithPytorchOracle(
 }
 
 static PytorchOracleTolerance PytorchOracleToleranceForBoundary(
-    iree_string_view_t boundary_name) {
+    iree_string_view_t boundary_name,
+    const id4_ideogram4_dit_request_config_t& request) {
   (void)boundary_name;
+  if (request.conditioning_mode ==
+      ID4_IDEOGRAM4_DIT_CONDITIONING_MODE_UNCONDITIONED) {
+    return PytorchOracleTolerance{
+        // Mean absolute error limit for image-only BF16-activation velocity.
+        /*.mean_absolute_error=*/0.012,
+        // P99 absolute error limit for BF16-activation exported velocity.
+        /*.p99_absolute_error=*/0.040,
+        // Maximum absolute error limit for exported velocity.
+        /*.max_absolute_error=*/0.125,
+        // Exported velocity uses an absolute gate.
+        /*.max_relative_error=*/0.0,
+    };
+  }
   return PytorchOracleTolerance{
       // Mean absolute error limit for BF16-activation exported velocity.
       /*.mean_absolute_error=*/0.008,
@@ -1020,7 +1055,8 @@ static PytorchOracleTolerance PytorchOracleToleranceForBoundary(
 }
 
 static PytorchOracleTolerance PytorchOracleToleranceForTap(
-    iree_string_view_t tap_name) {
+    iree_string_view_t tap_name,
+    const id4_ideogram4_dit_request_config_t& request) {
   if (iree_string_view_ends_with(tap_name, IREE_SV(".ffn.hidden"))) {
     return PytorchOracleTolerance{
         // Mean absolute error limit for BF16 taps with target-specific
@@ -1046,7 +1082,34 @@ static PytorchOracleTolerance PytorchOracleToleranceForTap(
         /*.max_relative_error=*/0.200,
     };
   }
+  if (iree_string_view_find(tap_name, IREE_SV(".layers."), 0) !=
+          IREE_STRING_VIEW_NPOS &&
+      iree_string_view_ends_with(tap_name, IREE_SV(".hidden"))) {
+    return PytorchOracleTolerance{
+        // Mean absolute error limit for accumulated BF16 layer hidden states.
+        /*.mean_absolute_error=*/0.004,
+        // P99 absolute error limit for accumulated BF16 layer hidden states.
+        /*.p99_absolute_error=*/0.016,
+        // Rare high-magnitude BF16 matmul outliers can accumulate by mid-layer.
+        /*.max_absolute_error=*/1.000,
+        // Relative gate for rare accumulated hidden-state outliers.
+        /*.max_relative_error=*/0.050,
+    };
+  }
   if (iree_string_view_ends_with(tap_name, IREE_SV("final.projected"))) {
+    if (request.conditioning_mode ==
+        ID4_IDEOGRAM4_DIT_CONDITIONING_MODE_UNCONDITIONED) {
+      return PytorchOracleTolerance{
+          // Mean absolute error limit for image-only final BF16 projection.
+          /*.mean_absolute_error=*/0.012,
+          // P99 absolute error limit after all BF16 transformer blocks.
+          /*.p99_absolute_error=*/0.040,
+          // Maximum absolute error limit for final projected logits.
+          /*.max_absolute_error=*/0.250,
+          // Relative limit for final projected logits.
+          /*.max_relative_error=*/0.020,
+      };
+    }
     return PytorchOracleTolerance{
         // Mean absolute error limit after all BF16 transformer blocks.
         /*.mean_absolute_error=*/0.008,
@@ -1059,6 +1122,19 @@ static PytorchOracleTolerance PytorchOracleToleranceForTap(
     };
   }
   if (iree_string_view_ends_with(tap_name, IREE_SV("final.normalized"))) {
+    if (request.conditioning_mode ==
+        ID4_IDEOGRAM4_DIT_CONDITIONING_MODE_UNCONDITIONED) {
+      return PytorchOracleTolerance{
+          // Mean absolute error limit for image-only final BF16 hidden state.
+          /*.mean_absolute_error=*/0.012,
+          // P99 absolute error limit for image-only final BF16 hidden state.
+          /*.p99_absolute_error=*/0.064,
+          // Maximum absolute error limit for final normalized hidden state.
+          /*.max_absolute_error=*/1.500,
+          // Relative gate for rare accumulated BF16 activation outliers.
+          /*.max_relative_error=*/0.450,
+      };
+    }
     return PytorchOracleTolerance{
         // Mean absolute error limit for final BF16 normalized hidden state.
         /*.mean_absolute_error=*/0.008,
@@ -1102,7 +1178,7 @@ static iree_status_t ComparePytorchOracleOutputBoundary(
   return CompareBindingWithPytorchOracle(
       device, queue_affinity, &binding, wait_list, &boundary->layout, request,
       iree_make_string_view(oracle_path.data(), oracle_path.size()),
-      PytorchOracleToleranceForBoundary(IREE_SV("velocity")));
+      PytorchOracleToleranceForBoundary(IREE_SV("velocity"), request));
 }
 
 static iree_status_t ComparePytorchOracleDiagnosticTaps(
@@ -1126,7 +1202,7 @@ static iree_status_t ComparePytorchOracleDiagnosticTaps(
     IREE_RETURN_IF_ERROR(CompareBindingWithPytorchOracle(
         device, queue_affinity, &binding, wait_list, &diagnostic_tap->layout,
         request, iree_make_string_view(oracle_path.data(), oracle_path.size()),
-        PytorchOracleToleranceForTap(diagnostic_tap->name)));
+        PytorchOracleToleranceForTap(diagnostic_tap->name, request)));
   }
   return iree_ok_status();
 }
@@ -1253,7 +1329,9 @@ static void RunDitFixture(const DitFixtureRunOptions& options) {
   id4_ideogram4_dit_parameter_format_t parameter_format =
       ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_INVALID;
   IREE_ASSERT_OK(ParseDitParameterFormat(&parameter_format));
-  iree_string_view_t fp8_parameter_scope = Fp8ParameterScopeForRequest(request);
+  DitBranchParameterScopes parameter_scopes;
+  IREE_ASSERT_OK(
+      DitBranchParameterScopesForRequest(request, &parameter_scopes));
 
   id4::test::LiveStageContext context;
   IREE_ASSERT_OK(id4::test::CreateLiveStageContextFromFlags(&context));
@@ -1265,11 +1343,11 @@ static void RunDitFixture(const DitFixtureRunOptions& options) {
                        iree_io_parameter_provider_release>
       parameter_provider;
   IREE_ASSERT_OK(CreateDitParameterProviderFromFlags(
-      parameter_format, fp8_parameter_scope, parameter_provider.out()));
+      parameter_format, parameter_scopes, parameter_provider.out()));
 
   id4::test::OwningRef<id4_pipeline_stage_t, id4_pipeline_stage_release> stage;
   IREE_ASSERT_OK(CreateIdeogram4DitStage(context, parameter_format,
-                                         fp8_parameter_scope, stage.out()));
+                                         parameter_scopes, stage.out()));
 
   id4::test::StageDiagnostics diagnostics = {};
   id4_pipeline_diagnostics_sink_t diagnostics_sink =
@@ -1499,7 +1577,10 @@ TEST(Ideogram4DitStageIntegration, PrepareAndIssueForwardPreludeFixture) {
   });
 }
 
-TEST(Ideogram4DitStageIntegration, PrepareAndIssueBf16LinearInputFixture) {
+static void RunBf16LinearInputFixture(iree_string_view_t input_stage,
+                                      iree_string_view_t expected_tap_prefix,
+                                      iree_string_view_t expected_output_name,
+                                      iree_string_view_t capture_run_id) {
   RunDitFixture(DitFixtureRunOptions{
       .activation_format =
           ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT,
@@ -1507,12 +1588,27 @@ TEST(Ideogram4DitStageIntegration, PrepareAndIssueBf16LinearInputFixture) {
           ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_STREAMING,
       .feed_forward_implementation =
           ID4_IDEOGRAM4_DIT_FEED_FORWARD_IMPLEMENTATION_PYTORCH_PARITY,
-      .input_stage = IREE_SV("ideogram4.cond.input"),
-      .expected_tap_prefix = IREE_SV("ideogram4.cond."),
-      .expected_output_name = IREE_SV("ideogram4.cond.output.velocity"),
-      .capture_run_id = IREE_SV("ideogram4_dit_bf16_linear_input_integration"),
+      .input_stage = input_stage,
+      .expected_tap_prefix = expected_tap_prefix,
+      .expected_output_name = expected_output_name,
+      .capture_run_id = capture_run_id,
       .flags = ID4_DIT_FIXTURE_RUN_FLAG_COMPARE_OUTPUT_BOUNDARY,
   });
+}
+
+TEST(Ideogram4DitStageIntegration, PrepareAndIssueBf16LinearInputFixture) {
+  RunBf16LinearInputFixture(
+      IREE_SV("ideogram4.cond.input"), IREE_SV("ideogram4.cond."),
+      IREE_SV("ideogram4.cond.output.velocity"),
+      IREE_SV("ideogram4_dit_bf16_linear_input_integration"));
+}
+
+TEST(Ideogram4DitStageIntegration,
+     PrepareAndIssueBf16LinearInputUnconditionedFixture) {
+  RunBf16LinearInputFixture(
+      IREE_SV("ideogram4.uncond.input"), IREE_SV("ideogram4.uncond."),
+      IREE_SV("ideogram4.uncond.output.velocity"),
+      IREE_SV("ideogram4_dit_bf16_linear_input_unconditioned_integration"));
 }
 
 TEST(Ideogram4DitStageIntegration,
