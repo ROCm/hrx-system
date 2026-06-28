@@ -5644,12 +5644,6 @@ static iree_status_t loom_amdgpu_try_lower_vector_fp8_pair_to_packed_bf16(
       register_index, source_lane_type, &source_register));
   IREE_RETURN_IF_ERROR(loom_amdgpu_materialize_full_low_vgpr_b32(
       context, source_op, source_register, &source_register));
-  if (byte_offset == 1u) {
-    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_shift(
-        context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_LSHRREV_B32_LIT, 8u,
-        source_register, result_lane_type, &source_register));
-    byte_offset = 0u;
-  }
 
   return loom_amdgpu_try_emit_fp8_pair_to_packed_bf16(
       context, source_op, decode_plan, source_register, byte_offset,

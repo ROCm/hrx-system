@@ -15,6 +15,7 @@
 // vector lanes.
 
 #include <math.h>
+#include <stdint.h>
 #include <string.h>
 
 #include "loom/ir/attribute.h"
@@ -2072,10 +2073,7 @@ iree_status_t loom_vector_slice_facts(loom_fact_context_t* context,
       loom_module_value_type(module, loom_vector_slice_source(op));
   loom_type_t result_type =
       loom_module_value_type(module, loom_vector_slice_result(op));
-  iree_host_size_t result_lane_count = 0;
-  if (!loom_vector_type_static_lane_count(result_type, &result_lane_count) ||
-      result_lane_count > LOOM_VALUE_FACT_SMALL_STATIC_LANE_LIMIT ||
-      loom_type_rank(source_type) != loom_type_rank(result_type)) {
+  if (loom_type_rank(source_type) != loom_type_rank(result_type)) {
     return loom_vector_make_unknown_facts(result_facts);
   }
 
@@ -2087,6 +2085,40 @@ iree_status_t loom_vector_slice_facts(loom_fact_context_t* context,
     if (static_offsets.i64_array[axis] == INT64_MIN) {
       return loom_vector_make_unknown_facts(result_facts);
     }
+  }
+  const loom_value_id_t source = loom_vector_slice_source(op);
+  const loom_value_id_t result = loom_vector_slice_result(op);
+  if (rank == 1 && static_offsets.i64_array[0] >= 0 &&
+      static_offsets.i64_array[0] <= UINT32_MAX) {
+    loom_value_fact_static_lane_origin_t source_origin = {
+        .source_value_id = source,
+        .source_lane_offset = 0,
+        .source_lane_stride = 1,
+    };
+    loom_value_fact_static_lane_origin_t existing_origin = {0};
+    if (loom_value_fact_table_query_static_lane_origin(
+            context->table, module, source, &existing_origin)) {
+      source_origin = existing_origin;
+    }
+    const uint64_t source_lane_offset =
+        (uint64_t)source_origin.source_lane_offset +
+        (uint64_t)(uint32_t)static_offsets.i64_array[0] *
+            (uint64_t)source_origin.source_lane_stride;
+    if (source_lane_offset <= UINT32_MAX) {
+      IREE_RETURN_IF_ERROR(loom_value_fact_table_define_static_lane_origin(
+          context->table, result,
+          (loom_value_fact_static_lane_origin_t){
+              .source_value_id = source_origin.source_value_id,
+              .source_lane_offset = (uint32_t)source_lane_offset,
+              .source_lane_stride = source_origin.source_lane_stride,
+          }));
+    }
+  }
+
+  iree_host_size_t result_lane_count = 0;
+  if (!loom_vector_type_static_lane_count(result_type, &result_lane_count) ||
+      result_lane_count > LOOM_VALUE_FACT_SMALL_STATIC_LANE_LIMIT) {
+    return loom_vector_make_unknown_facts(result_facts);
   }
 
   loom_value_facts_t lanes[LOOM_VALUE_FACT_SMALL_STATIC_LANE_LIMIT] = {{0}};
