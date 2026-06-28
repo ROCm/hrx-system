@@ -4,6 +4,8 @@
 // See https://llvm.org/licenses/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include <cinttypes>
+#include <cstdio>
 #include <cstring>
 #include <limits>
 
@@ -80,6 +82,9 @@ struct DitBenchmarkContext {
   id4::test::FixtureTensorSet fixture_tensors;
   // Dynamic request dimensions inferred from the fixture.
   id4_ideogram4_dit_request_config_t request = {};
+  // DiT parameter source policy selected by benchmark flags.
+  id4_ideogram4_dit_parameter_format_t parameter_format =
+      ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_INVALID;
   // Attention implementation selected for plan and issue benchmarks.
   id4_ideogram4_dit_attention_implementation_t attention_implementation =
       ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_STREAMING;
@@ -124,6 +129,16 @@ static DitBenchmarkBranchConfig BranchConfig(DitBenchmarkBranch branch) {
   return DitBenchmarkBranchConfig{};
 }
 
+static iree_string_view_t BranchName(DitBenchmarkBranch branch) {
+  switch (branch) {
+    case DitBenchmarkBranch::kConditioned:
+      return IREE_SV("conditioned");
+    case DitBenchmarkBranch::kUnconditioned:
+      return IREE_SV("unconditioned");
+  }
+  return IREE_SV("invalid");
+}
+
 static iree_string_view_t BranchPlanFileName(DitBenchmarkBranch branch) {
   switch (branch) {
     case DitBenchmarkBranch::kConditioned:
@@ -161,6 +176,18 @@ static iree_status_t ParseDitAttentionImplementation(
       "--dit_attention_implementation must be streaming or materialized_wmma");
 }
 
+static iree_string_view_t AttentionImplementationName(
+    id4_ideogram4_dit_attention_implementation_t implementation) {
+  switch (implementation) {
+    case ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_STREAMING:
+      return IREE_SV("streaming");
+    case ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_MATERIALIZED_WMMA:
+      return IREE_SV("materialized_wmma");
+    default:
+      return IREE_SV("invalid");
+  }
+}
+
 static iree_status_t ParseDitFeedForwardImplementation(
     id4_ideogram4_dit_feed_forward_implementation_t* out_implementation) {
   IREE_ASSERT_ARGUMENT(out_implementation);
@@ -179,6 +206,46 @@ static iree_status_t ParseDitFeedForwardImplementation(
   return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                           "--dit_feed_forward_implementation must be "
                           "fused_product or pytorch_parity");
+}
+
+static iree_string_view_t FeedForwardImplementationName(
+    id4_ideogram4_dit_feed_forward_implementation_t implementation) {
+  switch (implementation) {
+    case ID4_IDEOGRAM4_DIT_FEED_FORWARD_IMPLEMENTATION_FUSED_PRODUCT:
+      return IREE_SV("fused_product");
+    case ID4_IDEOGRAM4_DIT_FEED_FORWARD_IMPLEMENTATION_PYTORCH_PARITY:
+      return IREE_SV("pytorch_parity");
+    default:
+      return IREE_SV("invalid");
+  }
+}
+
+static void SetDitBenchmarkLabel(iree_benchmark_state_t* benchmark_state,
+                                 const DitBenchmarkContext& context,
+                                 DitBenchmarkBranch branch) {
+  const iree_string_view_t branch_name = BranchName(branch);
+  const iree_string_view_t parameter_format =
+      id4_ideogram4_dit_parameter_format_name(context.parameter_format);
+  const iree_string_view_t attention_implementation =
+      AttentionImplementationName(context.attention_implementation);
+  const iree_string_view_t feed_forward_implementation =
+      FeedForwardImplementationName(context.feed_forward_implementation);
+  const uint64_t latent_width = context.request.latent_shape.dims[0];
+  const uint64_t latent_height = context.request.latent_shape.dims[1];
+  const uint64_t latent_token_count = latent_width * latent_height;
+  char label[256];
+  std::snprintf(
+      label, sizeof(label),
+      "branch=%.*s params=%.*s attention=%.*s ff=%.*s text_tokens=%" PRIu32
+      " latent_tokens=%" PRIu64 " latent=%" PRIu64 "x%" PRIu64,
+      static_cast<int>(branch_name.size), branch_name.data,
+      static_cast<int>(parameter_format.size), parameter_format.data,
+      static_cast<int>(attention_implementation.size),
+      attention_implementation.data,
+      static_cast<int>(feed_forward_implementation.size),
+      feed_forward_implementation.data, context.request.text_token_count,
+      latent_token_count, latent_width, latent_height);
+  iree_benchmark_set_label(benchmark_state, label);
 }
 
 static iree_status_t WritePlanJsonIfRequested(DitBenchmarkBranch branch,
@@ -330,9 +397,7 @@ static iree_status_t CreateLoadedDitStageContext(
     DitBenchmarkBranch branch, DitBenchmarkContext* out_context) {
   IREE_ASSERT_ARGUMENT(out_context);
   const DitBenchmarkBranchConfig branch_config = BranchConfig(branch);
-  id4_ideogram4_dit_parameter_format_t parameter_format =
-      ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_INVALID;
-  IREE_RETURN_IF_ERROR(ParseDitParameterFormat(&parameter_format));
+  IREE_RETURN_IF_ERROR(ParseDitParameterFormat(&out_context->parameter_format));
   out_context->diagnostics_sink =
       id4::test::DiagnosticsSink(&out_context->diagnostics);
   IREE_RETURN_IF_ERROR(
@@ -344,7 +409,7 @@ static iree_status_t CreateLoadedDitStageContext(
   IREE_RETURN_IF_ERROR(
       LoadFixtureAndConfigureRequest(out_context, branch_config));
   IREE_RETURN_IF_ERROR(CreateDitStage(out_context->live, branch_config,
-                                      parameter_format,
+                                      out_context->parameter_format,
                                       out_context->stage.out()));
 
   id4_pipeline_stage_load_options_t load_options;
@@ -360,10 +425,7 @@ static iree_status_t AttachDitPreparationInputs(DitBenchmarkBranch branch,
   const DitBenchmarkBranchConfig branch_config = BranchConfig(branch);
   IREE_RETURN_IF_ERROR(
       id4::test::CreateEmbeddedKernelLibrary(context->kernel_library.out()));
-  id4_ideogram4_dit_parameter_format_t parameter_format =
-      ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_INVALID;
-  IREE_RETURN_IF_ERROR(ParseDitParameterFormat(&parameter_format));
-  if (parameter_format == ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_BF16) {
+  if (context->parameter_format == ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_BF16) {
     return id4::test::CreateParameterProviderFromFlags(
         branch_config.parameter_scope, context->parameter_provider.out());
   }
@@ -635,6 +697,7 @@ static iree_status_t RunPlanBenchmark(iree_benchmark_state_t* benchmark_state,
       static_cast<int64_t>(iteration_count *
                            context.request.latent_shape.dims[0] *
                            context.request.latent_shape.dims[1]));
+  SetDitBenchmarkLabel(benchmark_state, context, branch);
   return iree_ok_status();
 }
 
@@ -693,6 +756,7 @@ static iree_status_t RunPrepareBenchmark(
       static_cast<int64_t>(iteration_count *
                            context.request.latent_shape.dims[0] *
                            context.request.latent_shape.dims[1]));
+  SetDitBenchmarkLabel(benchmark_state, context, branch);
   return iree_ok_status();
 }
 
@@ -801,6 +865,7 @@ static iree_status_t RunIssueBenchmark(iree_benchmark_state_t* benchmark_state,
       static_cast<int64_t>(iteration_count *
                            context.request.latent_shape.dims[0] *
                            context.request.latent_shape.dims[1]));
+  SetDitBenchmarkLabel(benchmark_state, context, branch);
   return iree_ok_status();
 }
 
