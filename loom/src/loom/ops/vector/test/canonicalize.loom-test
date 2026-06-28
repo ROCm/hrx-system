@@ -1,5 +1,91 @@
 // RUN: pass canonicalize
 
+// Extension chains collapse to the final width.
+func.def @float_extension_chain(%x: vector<4xf8E4M3>) -> (vector<4xf32>) {
+  %bf16 = vector.extf %x : vector<4xf8E4M3> to vector<4xbf16>
+  %f32 = vector.extf %bf16 : vector<4xbf16> to vector<4xf32>
+  func.return %f32 : vector<4xf32>
+}
+// ----
+func.def @float_extension_chain(%x: vector<4xf8E4M3>) -> (vector<4xf32>) {
+  %f32 = vector.extf %x : vector<4xf8E4M3> to vector<4xf32>
+  func.return %f32 : vector<4xf32>
+}
+
+// ====
+
+// Truncating an exact extension collapses to the direct resize.
+func.def @float_trunc_after_extension(%x: vector<4xf8E4M3>) -> (vector<4xbf16>) {
+  %f32 = vector.extf %x : vector<4xf8E4M3> to vector<4xf32>
+  %bf16 = vector.fptrunc %f32 : vector<4xf32> to vector<4xbf16>
+  func.return %bf16 : vector<4xbf16>
+}
+// ----
+func.def @float_trunc_after_extension(%x: vector<4xf8E4M3>) -> (vector<4xbf16>) {
+  %bf16 = vector.extf %x : vector<4xf8E4M3> to vector<4xbf16>
+  func.return %bf16 : vector<4xbf16>
+}
+
+// ====
+
+// Truncating an extension back to the original type returns the source.
+func.def @float_resize_roundtrip(%x: vector<4xf16>) -> (vector<4xf16>) {
+  %f32 = vector.extf %x : vector<4xf16> to vector<4xf32>
+  %f16 = vector.fptrunc %f32 : vector<4xf32> to vector<4xf16>
+  func.return %f16 : vector<4xf16>
+}
+// ----
+func.def @float_resize_roundtrip(%x: vector<4xf16>) -> (vector<4xf16>) {
+  func.return %x : vector<4xf16>
+}
+
+// ====
+
+// Casting a splat casts the scalar once and then splats the result.
+func.def @float_extf_splat(%x: bf16) -> (vector<4xf32>) {
+  %splat = vector.splat %x : vector<4xbf16>
+  %wide = vector.extf %splat : vector<4xbf16> to vector<4xf32>
+  func.return %wide : vector<4xf32>
+}
+// ----
+func.def @float_extf_splat(%x: bf16) -> (vector<4xf32>) {
+  %4 = scalar.extf %x : bf16 to f32
+  %wide = vector.splat %4 : vector<4xf32>
+  func.return %wide : vector<4xf32>
+}
+
+// ====
+
+func.def @float_fptrunc_splat(%x: f32) -> (vector<4xbf16>) {
+  %splat = vector.splat %x : vector<4xf32>
+  %narrow = vector.fptrunc %splat : vector<4xf32> to vector<4xbf16>
+  func.return %narrow : vector<4xbf16>
+}
+// ----
+func.def @float_fptrunc_splat(%x: f32) -> (vector<4xbf16>) {
+  %4 = scalar.fptrunc %x : f32 to bf16
+  %narrow = vector.splat %4 : vector<4xbf16>
+  func.return %narrow : vector<4xbf16>
+}
+
+// ====
+
+// Floating-point truncation chains must not collapse: double rounding can be
+// observably different from one direct truncation.
+func.def @float_truncation_chain_preserves_rounding(%x: vector<4xf64>) -> (vector<4xf16>) {
+  %f32 = vector.fptrunc %x : vector<4xf64> to vector<4xf32>
+  %f16 = vector.fptrunc %f32 : vector<4xf32> to vector<4xf16>
+  func.return %f16 : vector<4xf16>
+}
+// ----
+func.def @float_truncation_chain_preserves_rounding(%x: vector<4xf64>) -> (vector<4xf16>) {
+  %f32 = vector.fptrunc %x : vector<4xf64> to vector<4xf32>
+  %f16 = vector.fptrunc %f32 : vector<4xf32> to vector<4xf16>
+  func.return %f16 : vector<4xf16>
+}
+
+// ====
+
 // Zero-lane construction produces the empty aggregate even when the source
 // scalar is poison: no vector lane observes the operand.
 func.def @empty_splat_ignores_poison() -> (vector<0xf32>) {
