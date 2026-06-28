@@ -452,6 +452,50 @@ static bool loom_encoding_static_ggml_q8_0_schema(
   return true;
 }
 
+typedef struct loom_encoding_named_fp8_schema_t {
+  iree_string_view_t name;
+  loom_value_fact_numeric_format_flags_t element_format;
+} loom_encoding_named_fp8_schema_t;
+
+static const loom_encoding_named_fp8_schema_t kLoomEncodingNamedFp8Schemas[] = {
+    {IREE_SVL("ieee_fp8_e4m3"), LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3},
+    {IREE_SVL("fp8_e4m3fn"), LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3FN},
+    {IREE_SVL("fp8_e4m3fnuz"), LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3FNUZ},
+    {IREE_SVL("fp8_e5m2fnuz"), LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E5M2FNUZ},
+};
+
+static const loom_encoding_named_fp8_schema_t*
+loom_encoding_find_named_fp8_schema(const loom_module_t* module,
+                                    const loom_encoding_t* encoding) {
+  if (!encoding) return NULL;
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(kLoomEncodingNamedFp8Schemas);
+       ++i) {
+    const loom_encoding_named_fp8_schema_t* entry =
+        &kLoomEncodingNamedFp8Schemas[i];
+    if (loom_encoding_string_id_equal(module, encoding->name_id, entry->name)) {
+      return entry;
+    }
+  }
+  return NULL;
+}
+
+static bool loom_encoding_static_named_fp8_schema(
+    const loom_module_t* module, uint16_t encoding_id,
+    const loom_encoding_t* encoding,
+    loom_value_fact_storage_schema_t* out_schema) {
+  const loom_encoding_named_fp8_schema_t* schema =
+      loom_encoding_find_named_fp8_schema(module, encoding);
+  if (!schema) return false;
+
+  out_schema->static_spec_encoding_id = encoding_id;
+  out_schema->encoded_operand = (loom_value_fact_encoded_operand_schema_t){
+      .element_format = schema->element_format,
+      .payload_packing = LOOM_VALUE_FACT_PAYLOAD_PACKING_DENSE_LANES,
+      .payload_element_count = 1,
+  };
+  return true;
+}
+
 static bool loom_encoding_query_static_address_layout_rec(
     const loom_module_t* module, uint16_t encoding_id, uint8_t depth,
     loom_value_facts_t* stride_storage, iree_host_size_t stride_capacity,
@@ -524,6 +568,10 @@ static bool loom_encoding_query_static_storage_schema_rec(
                                loom_encoding_ggml_q8_0_name())) {
     return loom_encoding_static_ggml_q8_0_schema(module, encoding_id, encoding,
                                                  out_schema);
+  }
+  if (loom_encoding_static_named_fp8_schema(module, encoding_id, encoding,
+                                            out_schema)) {
+    return true;
   }
   return true;
 }
@@ -626,13 +674,20 @@ bool loom_encoding_query_type_storage_content_facts(
                                                &storage_schema)) {
     return false;
   }
-  if (!iree_any_bit_set(storage_schema.encoded_operand.rounding_policy,
-                        LOOM_VALUE_FACT_ROUNDING_POLICY_FINITE_ONLY)) {
-    return false;
+  if (iree_any_bit_set(storage_schema.encoded_operand.rounding_policy,
+                       LOOM_VALUE_FACT_ROUNDING_POLICY_FINITE_ONLY)) {
+    out_facts->flags |= LOOM_VALUE_FACT_NOT_NAN | LOOM_VALUE_FACT_NOT_INF |
+                        LOOM_VALUE_FACT_FINITE;
+    return true;
   }
-  out_facts->flags |= LOOM_VALUE_FACT_NOT_NAN | LOOM_VALUE_FACT_NOT_INF |
-                      LOOM_VALUE_FACT_FINITE;
-  return true;
+  if (iree_any_bit_set(storage_schema.encoded_operand.element_format,
+                       LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3FN |
+                           LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3FNUZ |
+                           LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E5M2FNUZ)) {
+    out_facts->flags |= LOOM_VALUE_FACT_NOT_INF;
+    return true;
+  }
+  return false;
 }
 
 static iree_status_t loom_encoding_emit(iree_diagnostic_emitter_t emitter,
