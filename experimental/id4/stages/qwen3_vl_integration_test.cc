@@ -52,6 +52,25 @@ static iree_status_t CreateQwen3VlStage(
                                    out_stage);
 }
 
+static iree_status_t FindDiagnosticTapPlan(
+    const id4_pipeline_plan_t* plan, iree_string_view_t name,
+    const id4_pipeline_diagnostic_tap_plan_t** out_diagnostic_tap) {
+  *out_diagnostic_tap = nullptr;
+  const iree_host_size_t diagnostic_tap_count =
+      id4_pipeline_plan_diagnostic_tap_count(plan);
+  for (iree_host_size_t i = 0; i < diagnostic_tap_count; ++i) {
+    const id4_pipeline_diagnostic_tap_plan_t* diagnostic_tap =
+        id4_pipeline_plan_diagnostic_tap_at(plan, i);
+    if (diagnostic_tap && iree_string_view_equal(diagnostic_tap->name, name)) {
+      *out_diagnostic_tap = diagnostic_tap;
+      return iree_ok_status();
+    }
+  }
+  return iree_make_status(IREE_STATUS_NOT_FOUND,
+                          "diagnostic tap `%.*s` not found",
+                          static_cast<int>(name.size), name.data);
+}
+
 TEST(Qwen3VlStageIntegration, PrepareAndIssueForwardWithDenseParameters) {
   id4::test::LiveStageContext context;
   IREE_ASSERT_OK(id4::test::CreateLiveStageContextFromFlags(&context));
@@ -85,6 +104,11 @@ TEST(Qwen3VlStageIntegration, PrepareAndIssueForwardWithDenseParameters) {
       fixture_tensors.FindTensor(IREE_SV("expected"), IREE_SV("condition"));
   ASSERT_NE(expected_condition, nullptr)
       << "fixture must provide the expected Qwen condition tensor";
+  const id4::test::FixtureTensor* expected_selected_hidden_states =
+      fixture_tensors.FindTensor(IREE_SV("metadata"),
+                                 IREE_SV("selected_hidden_states"));
+  ASSERT_NE(expected_selected_hidden_states, nullptr)
+      << "fixture must provide the expected Qwen selected-hidden tensor";
 
   id4::test::StageDiagnostics diagnostics = {};
   id4_pipeline_diagnostics_sink_t diagnostics_sink =
@@ -263,6 +287,24 @@ TEST(Qwen3VlStageIntegration, PrepareAndIssueForwardWithDenseParameters) {
   IREE_ASSERT_OK(id4::test::CompareF32BindingWithFixtureTensor(
       context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, &condition_binding,
       capture_wait.list(), *expected_condition));
+
+  const id4_pipeline_diagnostic_tap_plan_t* selected_hidden_tap = nullptr;
+  IREE_ASSERT_OK(FindDiagnosticTapPlan(
+      plan.get(), IREE_SV("selected_hidden_states"), &selected_hidden_tap));
+  iree_hal_buffer_binding_t selected_hidden_binding = {};
+  IREE_ASSERT_OK(id4::test::FindDiagnosticTapBinding(
+      plan.get(), diagnostic_tap_bindings, IREE_SV("selected_hidden_states"),
+      &selected_hidden_binding));
+  id4::test::FixtureTensor selected_hidden_comparison =
+      *expected_selected_hidden_states;
+  if (selected_hidden_comparison.tolerance.mode ==
+      id4::test::FixtureToleranceMode::kNone) {
+    selected_hidden_comparison.tolerance = expected_condition->tolerance;
+  }
+  IREE_ASSERT_OK(id4::test::CompareBindingWithFixtureTensor(
+      context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY,
+      &selected_hidden_binding, capture_wait.list(),
+      &selected_hidden_tap->layout, selected_hidden_comparison));
 }
 
 }  // namespace
