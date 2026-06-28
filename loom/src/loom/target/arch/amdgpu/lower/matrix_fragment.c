@@ -3086,13 +3086,79 @@ static iree_status_t loom_amdgpu_emit_fragment_memory_fp8_source_byte(
 }
 
 static iree_status_t
+loom_amdgpu_emit_fragment_memory_native_fp8_to_packed_bf16_register(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_value_id_t low_source, uint16_t packet_register_count,
+    uint16_t result_register_index,
+    const loom_amdgpu_fp8_decode_plan_t* decode_plan,
+    loom_type_t native_f32_pair_type,
+    const loom_amdgpu_bf16_pack_descriptors_t* bf16_pack_descriptors,
+    loom_type_t vgpr_type, loom_value_id_t* out_low_packet) {
+  *out_low_packet = LOOM_VALUE_ID_INVALID;
+
+  const uint16_t byte_index =
+      result_register_index * LOOM_AMDGPU_FRAGMENT_PACKED_B16_ELEMENT_COUNT;
+  const uint16_t source_register_index = byte_index / 4u;
+  if (source_register_index >= packet_register_count) {
+    IREE_ASSERT_UNREACHABLE("selected AMDGPU FP8 fragment packet");
+    IREE_BUILTIN_UNREACHABLE();
+  }
+
+  loom_value_id_t source_register = low_source;
+  if (packet_register_count != 1) {
+    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_low_slice(
+        context, source_op, low_source, source_register_index, vgpr_type,
+        &source_register));
+  }
+  IREE_RETURN_IF_ERROR(loom_amdgpu_materialize_full_low_vgpr_b32(
+      context, source_op, source_register, &source_register));
+
+  const uint16_t bit_offset = (byte_index & 3u) * 8u;
+  if (bit_offset != 0) {
+    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_shift(
+        context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_LSHRREV_B32_LIT,
+        bit_offset, source_register, vgpr_type, &source_register));
+  }
+
+  const loom_value_id_t operands[] = {source_register};
+  loom_op_t* convert_op = NULL;
+  IREE_RETURN_IF_ERROR(loom_low_lower_emit_resolved_descriptor_op(
+      context, &decode_plan->native_f32_pair_descriptor, operands,
+      IREE_ARRAYSIZE(operands), loom_named_attr_slice_empty(),
+      &native_f32_pair_type, 1, /*tied_results=*/NULL,
+      /*tied_result_count=*/0, source_op->location, &convert_op));
+  const loom_value_id_t converted_pair =
+      loom_value_slice_get(loom_low_op_results(convert_op), 0);
+  loom_value_id_t low_lane = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_low_slice(
+      context, source_op, converted_pair, 0, vgpr_type, &low_lane));
+  loom_value_id_t high_lane = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_low_slice(
+      context, source_op, converted_pair, 1, vgpr_type, &high_lane));
+  return loom_amdgpu_emit_f32_pair_to_packed_bf16_with_descriptors(
+      context, source_op, bf16_pack_descriptors, low_lane, high_lane, vgpr_type,
+      out_low_packet);
+}
+
+static iree_status_t
 loom_amdgpu_emit_fragment_memory_fp8_to_packed_bf16_register(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_amdgpu_fragment_memory_plan_t* plan, loom_value_id_t low_source,
     uint16_t packet_register_count, uint16_t result_register_index,
-    const loom_amdgpu_fp8_decode_plan_t* decode_plan, loom_type_t vgpr_type,
-    loom_type_t mask_type, loom_value_id_t* out_low_packet) {
+    const loom_amdgpu_fp8_decode_plan_t* decode_plan,
+    loom_type_t native_f32_pair_type,
+    const loom_amdgpu_bf16_pack_descriptors_t* bf16_pack_descriptors,
+    loom_type_t vgpr_type, loom_type_t mask_type,
+    loom_value_id_t* out_low_packet) {
   *out_low_packet = LOOM_VALUE_ID_INVALID;
+  if (iree_any_bit_set(decode_plan->flags,
+                       LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_NATIVE_F32_PAIR)) {
+    return loom_amdgpu_emit_fragment_memory_native_fp8_to_packed_bf16_register(
+        context, source_op, low_source, packet_register_count,
+        result_register_index, decode_plan, native_f32_pair_type,
+        bf16_pack_descriptors, vgpr_type, out_low_packet);
+  }
+
   loom_value_id_t low_elements[LOOM_AMDGPU_FRAGMENT_PACKED_B16_ELEMENT_COUNT] =
       {0};
   for (uint16_t element_index = 0;
@@ -3152,6 +3218,27 @@ loom_amdgpu_emit_fragment_memory_fp8_to_packed_bf16_load_packet(
   loom_amdgpu_fp8_decode_plan_t decode_plan;
   IREE_RETURN_IF_ERROR(loom_amdgpu_select_fp8_decode_plan(
       context, plan->view_element_type, &decode_plan));
+  loom_type_t native_f32_pair_type = loom_type_none();
+  loom_amdgpu_bf16_pack_descriptors_t bf16_pack_descriptors = {0};
+  if (iree_any_bit_set(decode_plan.flags,
+                       LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_NATIVE_F32_PAIR)) {
+    IREE_RETURN_IF_ERROR(
+        loom_amdgpu_make_vgpr_range_type(context, 2, &native_f32_pair_type));
+    bf16_pack_descriptors = (loom_amdgpu_bf16_pack_descriptors_t){
+        .flags =
+            (iree_any_bit_set(
+                 decode_plan.flags,
+                 LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_NATIVE_BF16_PACK)
+                 ? LOOM_AMDGPU_BF16_PACK_DESCRIPTOR_FLAG_HAS_NATIVE
+                 : LOOM_AMDGPU_BF16_PACK_DESCRIPTOR_FLAG_NONE) |
+            (iree_any_bit_set(decode_plan.flags,
+                              LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_PACK_U16)
+                 ? LOOM_AMDGPU_BF16_PACK_DESCRIPTOR_FLAG_HAS_PACK_U16
+                 : LOOM_AMDGPU_BF16_PACK_DESCRIPTOR_FLAG_NONE),
+        .native_descriptor = decode_plan.native_bf16_pack_descriptor,
+        .pack_u16_descriptor = decode_plan.pack_u16_descriptor,
+    };
+  }
 
   loom_value_id_t low_result_registers[LOOM_AMDGPU_MAX_PACKED_32BIT_REGISTERS] =
       {0};
@@ -3162,7 +3249,7 @@ loom_amdgpu_emit_fragment_memory_fp8_to_packed_bf16_load_packet(
         loom_amdgpu_emit_fragment_memory_fp8_to_packed_bf16_register(
             context, source_op, plan, low_source_packet,
             packet->packet_register_count, result_register_index, &decode_plan,
-            vgpr_type, mask_type,
+            native_f32_pair_type, &bf16_pack_descriptors, vgpr_type, mask_type,
             &low_result_registers[result_register_index]));
   }
   if (packet->result_register_count == 1) {

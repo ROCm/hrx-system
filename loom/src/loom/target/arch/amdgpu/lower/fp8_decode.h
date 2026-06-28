@@ -24,6 +24,8 @@ typedef enum loom_amdgpu_fp8_decode_plan_flag_bits_e {
   LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_BFE_U32 = 1u << 0,
   LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_PACK_U16 = 1u << 1,
   LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_PERM_B32 = 1u << 2,
+  LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_NATIVE_F32_PAIR = 1u << 3,
+  LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_NATIVE_BF16_PACK = 1u << 4,
 } loom_amdgpu_fp8_decode_plan_flag_bits_t;
 typedef uint32_t loom_amdgpu_fp8_decode_plan_flags_t;
 
@@ -31,6 +33,13 @@ enum {
   LOOM_AMDGPU_FP8_BF16_BYTE_COUNT = 2u,
   LOOM_AMDGPU_FP8_BF16_BYTE_TABLE_WORD_COUNT = 2u,
 };
+
+typedef struct loom_amdgpu_fp8_to_f32_descriptor_refs_t {
+  // Scalar FP8-to-F32 conversion descriptor.
+  loom_amdgpu_descriptor_ref_t lane;
+  // Packed pair FP8-to-F32 conversion descriptor.
+  loom_amdgpu_descriptor_ref_t pair;
+} loom_amdgpu_fp8_to_f32_descriptor_refs_t;
 
 typedef struct loom_amdgpu_fp8_decode_plan_t {
   // Available native packet helpers selected from the active descriptor set.
@@ -55,7 +64,16 @@ typedef struct loom_amdgpu_fp8_decode_plan_t {
   loom_low_lower_resolved_descriptor_t pack_u16_descriptor;
   // Byte permute descriptor used to select tiny FP8 subnormal BF16 tables.
   loom_low_lower_resolved_descriptor_t perm_b32_descriptor;
+  // Native packed-pair FP8-to-F32 conversion descriptor.
+  loom_low_lower_resolved_descriptor_t native_f32_pair_descriptor;
+  // Native F32-pair-to-BF16-pair conversion descriptor.
+  loom_low_lower_resolved_descriptor_t native_bf16_pack_descriptor;
 } loom_amdgpu_fp8_decode_plan_t;
+
+// Returns the native FP8-to-F32 conversion descriptor refs for |element_type|.
+bool loom_amdgpu_fp8_to_f32_descriptor_refs(
+    loom_scalar_type_t source_element_type,
+    loom_amdgpu_fp8_to_f32_descriptor_refs_t* out_refs);
 
 // Selects descriptor helpers and initializes format tables for |element_type|.
 iree_status_t loom_amdgpu_select_fp8_decode_plan(
