@@ -4,10 +4,16 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// Shared AMDGPU FP8 payload decode helpers.
+// AMDGPU narrow floating-point payload lowering for FP8/BF8 formats.
+//
+// This shard owns AMDGPU packet materialization for FP8/BF8 payloads across
+// scalar, vector, and matrix-fragment users. Target-independent numeric-format
+// semantics live in the generic scalar type and value-fact layers. Descriptor
+// availability and architecture feature rows should come from AMDGPU generated
+// target tables; this file exposes the selected FP8/BF8 recipe machinery.
 
-#ifndef LOOM_TARGET_ARCH_AMDGPU_LOWER_FP8_DECODE_H_
-#define LOOM_TARGET_ARCH_AMDGPU_LOWER_FP8_DECODE_H_
+#ifndef LOOM_TARGET_ARCH_AMDGPU_LOWER_NARROW_FLOAT_FP8_H_
+#define LOOM_TARGET_ARCH_AMDGPU_LOWER_NARROW_FLOAT_FP8_H_
 
 #include <stdint.h>
 
@@ -35,6 +41,8 @@ typedef enum loom_amdgpu_fp8_decode_plan_flag_bits_e {
   LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_BFI_B32_SRC0_LITERAL = 1u << 10,
   LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_PK_ADD_U16 = 1u << 11,
   LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_PK_ASHRREV_I16 = 1u << 12,
+  LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_CMP_NE_I32_SRC1_INLINE = 1u << 13,
+  LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_CMP_LG_U64 = 1u << 14,
 } loom_amdgpu_fp8_decode_plan_flag_bits_t;
 typedef uint32_t loom_amdgpu_fp8_decode_plan_flags_t;
 
@@ -97,6 +105,10 @@ typedef struct loom_amdgpu_fp8_decode_plan_t {
   loom_low_lower_resolved_descriptor_t bfe_u32_descriptor;
   // Optional signed equality compare descriptor with an inline RHS operand.
   loom_low_lower_resolved_descriptor_t compare_eq_i32_src1_inline_descriptor;
+  // Optional signed not-equal compare descriptor with an inline RHS operand.
+  loom_low_lower_resolved_descriptor_t compare_ne_i32_src1_inline_descriptor;
+  // Optional unsigned 64-bit not-equal scalar compare descriptor.
+  loom_low_lower_resolved_descriptor_t compare_lg_u64_descriptor;
   // Optional unsigned-greater-equal compare descriptor with inline RHS operand.
   loom_low_lower_resolved_descriptor_t compare_uge_u32_src1_inline_descriptor;
   // Optional unsigned-less-than compare descriptor with an inline RHS operand.
@@ -182,7 +194,8 @@ iree_status_t loom_amdgpu_try_emit_fp8_pair_to_packed_bf16(
     const loom_amdgpu_fp8_decode_plan_t* plan,
     loom_value_id_t low_source_register, uint32_t byte_offset,
     loom_amdgpu_fp8_decode_value_flags_t value_flags, loom_type_t vgpr_type,
-    loom_type_t sgpr_type, loom_value_id_t* out_low_packet, bool* out_selected);
+    loom_type_t sgpr_type, loom_type_t mask_type,
+    loom_value_id_t* out_low_packet, bool* out_selected);
 
 // Emits one packed VGPR containing two BF16 bit payloads.
 iree_status_t loom_amdgpu_emit_packed_bf16_pair(
@@ -195,4 +208,4 @@ iree_status_t loom_amdgpu_emit_packed_bf16_pair(
 }  // extern "C"
 #endif
 
-#endif  // LOOM_TARGET_ARCH_AMDGPU_LOWER_FP8_DECODE_H_
+#endif  // LOOM_TARGET_ARCH_AMDGPU_LOWER_NARROW_FLOAT_FP8_H_

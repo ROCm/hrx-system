@@ -2956,6 +2956,21 @@ static iree_status_t loom_low_lower_emit_descriptor_matrix_plan(
   }
 }
 
+static uint64_t loom_low_lower_count_low_body_ops(
+    const loom_low_lower_context_t* context) {
+  uint64_t op_count = 0;
+  loom_region_t* low_body = loom_low_lower_low_body(context);
+  IREE_ASSERT(low_body != NULL);
+  if (low_body == NULL) {
+    return 0;
+  }
+  for (uint16_t block_index = 0; block_index < low_body->block_count;
+       ++block_index) {
+    op_count += loom_region_block(low_body, block_index)->op_count;
+  }
+  return op_count;
+}
+
 static iree_status_t loom_low_lower_emit_selected_plan(
     loom_low_lower_context_t* context, const loom_op_t* source_op) {
   IREE_ASSERT_LT(context->lowering.selected_plan_emit_index,
@@ -2970,11 +2985,9 @@ static iree_status_t loom_low_lower_emit_selected_plan(
   }
   const bool report_allocator_provided =
       !iree_allocator_is_null(context->options->report_allocator);
-  loom_block_t* insertion_block = context->builder.ip.block;
-  uint32_t before_op_count = 0;
+  uint64_t before_op_count = 0;
   if (report_allocator_provided) {
-    IREE_ASSERT(insertion_block != NULL);
-    before_op_count = insertion_block->op_count;
+    before_op_count = loom_low_lower_count_low_body_ops(context);
   }
   if (selected_plan.kind == LOOM_LOW_LOWER_SELECTED_PLAN_RULE) {
     IREE_ASSERT(selected_plan.rule_set != NULL);
@@ -2997,10 +3010,12 @@ static iree_status_t loom_low_lower_emit_selected_plan(
                                     source_op, selected_plan.plan));
   }
   if (report_allocator_provided) {
-    const uint32_t after_op_count = insertion_block->op_count;
+    const uint64_t after_op_count = loom_low_lower_count_low_body_ops(context);
     IREE_ASSERT_GE(after_op_count, before_op_count);
+    const uint64_t emitted_op_count = after_op_count - before_op_count;
+    IREE_ASSERT_LE(emitted_op_count, UINT32_MAX);
     IREE_RETURN_IF_ERROR(loom_low_lower_record_report_row(
-        context, &selected_plan, after_op_count - before_op_count));
+        context, &selected_plan, (uint32_t)emitted_op_count));
   }
   return iree_ok_status();
 }
