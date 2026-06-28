@@ -15,6 +15,7 @@
 #include "loom/target/arch/amdgpu/matrix/contract.h"
 #include "loom/target/arch/amdgpu/matrix/projection.h"
 #include "loom/target/arch/amdgpu/target_id/target_id.h"
+#include "loom/util/numeric_format.h"
 
 typedef struct loom_amdgpu_matrix_target_facts_t {
   // Generic vector.mma adapter options for this AMDGPU target.
@@ -293,25 +294,31 @@ static iree_status_t loom_amdgpu_matrix_contract_query_reject_descriptor(
 static bool loom_amdgpu_matrix_format_selector_from_encoded_format(
     loom_value_fact_numeric_format_flags_t format, int64_t* out_value) {
   *out_value = 0;
-  switch (format) {
-    case LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3:
-    case LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3FN:
-    case LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3FNUZ:
+  const loom_numeric_format_info_t* info = NULL;
+  if (!loom_numeric_format_info(format, &info)) {
+    return false;
+  }
+  switch (info->float_family) {
+    case LOOM_NUMERIC_FLOAT_FAMILY_FP8:
       *out_value = LOOM_AMDGPU_MATRIX_FORMAT_SELECTOR_FP8;
       return true;
-    case LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E5M2:
-    case LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E5M2FNUZ:
-    case LOOM_VALUE_FACT_NUMERIC_FORMAT_BF8:
+    case LOOM_NUMERIC_FLOAT_FAMILY_BF8:
       *out_value = LOOM_AMDGPU_MATRIX_FORMAT_SELECTOR_BF8;
       return true;
-    case LOOM_VALUE_FACT_NUMERIC_FORMAT_F6_E2M3:
-      *out_value = LOOM_AMDGPU_MATRIX_FORMAT_SELECTOR_FP6;
-      return true;
-    case LOOM_VALUE_FACT_NUMERIC_FORMAT_F6_E3M2:
-    case LOOM_VALUE_FACT_NUMERIC_FORMAT_BF6:
+    case LOOM_NUMERIC_FLOAT_FAMILY_FP6:
+      if (info->exponent_bit_count == 2 && info->mantissa_bit_count == 3) {
+        *out_value = LOOM_AMDGPU_MATRIX_FORMAT_SELECTOR_FP6;
+        return true;
+      }
+      if (info->exponent_bit_count == 3 && info->mantissa_bit_count == 2) {
+        *out_value = LOOM_AMDGPU_MATRIX_FORMAT_SELECTOR_BF6;
+        return true;
+      }
+      return false;
+    case LOOM_NUMERIC_FLOAT_FAMILY_BF6:
       *out_value = LOOM_AMDGPU_MATRIX_FORMAT_SELECTOR_BF6;
       return true;
-    case LOOM_VALUE_FACT_NUMERIC_FORMAT_F4_E2M1:
+    case LOOM_NUMERIC_FLOAT_FAMILY_FP4:
       *out_value = LOOM_AMDGPU_MATRIX_FORMAT_SELECTOR_FP4;
       return true;
     default:
@@ -322,13 +329,15 @@ static bool loom_amdgpu_matrix_format_selector_from_encoded_format(
 static bool loom_amdgpu_matrix_scale_format_selector_from_encoded_format(
     loom_value_fact_numeric_format_flags_t format, int64_t* out_value) {
   *out_value = 0;
-  switch (format) {
-    case LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E8M0:
+  const loom_numeric_format_info_t* info = NULL;
+  if (!loom_numeric_format_info(format, &info)) {
+    return false;
+  }
+  switch (info->float_family) {
+    case LOOM_NUMERIC_FLOAT_FAMILY_F8_E8M0:
       *out_value = LOOM_AMDGPU_MATRIX_SCALE_FORMAT_SELECTOR_E8M0;
       return true;
-    case LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3:
-    case LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3FN:
-    case LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3FNUZ:
+    case LOOM_NUMERIC_FLOAT_FAMILY_FP8:
       *out_value = LOOM_AMDGPU_MATRIX_SCALE_FORMAT_SELECTOR_FP8_E4M3;
       return true;
     default:
