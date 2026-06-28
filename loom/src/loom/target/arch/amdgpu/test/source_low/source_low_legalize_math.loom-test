@@ -629,21 +629,18 @@ low.func.def target(@target) abi(hal_kernel) @vector_bf16_add_widen_round(%lhs: 
   %33 = v_add_f32 %16, %23
   %37 = v_lshrrev_b32_src0_inline %27, 16
   %38 = v_and_b32_src0_inline %37, 1
-  %39 = v_add_u32_lit %38, 32767
-  %40 = v_add_u32 %27, %39
-  %41 = v_lshrrev_b32_src0_inline %40, 16
-  %42 = v_lshrrev_b32_src0_inline %30, 16
-  %43 = v_and_b32_src0_inline %42, 1
-  %44 = v_add_u32_lit %43, 32767
-  %45 = v_add_u32 %30, %44
-  %46 = v_lshrrev_b32_src0_inline %45, 16
-  %47 = v_cvt_pk_u16_u32 %41, %46
-  %49 = v_lshrrev_b32_src0_inline %33, 16
-  %50 = v_and_b32_src0_inline %49, 1
-  %51 = v_add_u32_lit %50, 32767
-  %52 = v_add_u32 %33, %51
-  %53 = v_lshrrev_b32_src0_inline %52, 16
-  %result = concat(%47, %53) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %39 = v_add3_u32_src2_lit %27, %38, 32767
+  %40 = v_lshrrev_b32_src0_inline %39, 16
+  %41 = v_lshrrev_b32_src0_inline %30, 16
+  %42 = v_and_b32_src0_inline %41, 1
+  %43 = v_add3_u32_src2_lit %30, %42, 32767
+  %44 = v_lshrrev_b32_src0_inline %43, 16
+  %45 = v_cvt_pk_u16_u32 %40, %44
+  %47 = v_lshrrev_b32_src0_inline %33, 16
+  %48 = v_and_b32_src0_inline %47, 1
+  %49 = v_add3_u32_src2_lit %33, %48, 32767
+  %50 = v_lshrrev_b32_src0_inline %49, 16
+  %result = concat(%45, %50) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
   return %result
 }
 
@@ -672,21 +669,18 @@ low.func.def target(@target) abi(hal_kernel) @vector_bf16_mul_widen_round(%lhs: 
   %33 = v_mul_f32 %16, %23
   %37 = v_lshrrev_b32_src0_inline %27, 16
   %38 = v_and_b32_src0_inline %37, 1
-  %39 = v_add_u32_lit %38, 32767
-  %40 = v_add_u32 %27, %39
-  %41 = v_lshrrev_b32_src0_inline %40, 16
-  %42 = v_lshrrev_b32_src0_inline %30, 16
-  %43 = v_and_b32_src0_inline %42, 1
-  %44 = v_add_u32_lit %43, 32767
-  %45 = v_add_u32 %30, %44
-  %46 = v_lshrrev_b32_src0_inline %45, 16
-  %47 = v_cvt_pk_u16_u32 %41, %46
-  %49 = v_lshrrev_b32_src0_inline %33, 16
-  %50 = v_and_b32_src0_inline %49, 1
-  %51 = v_add_u32_lit %50, 32767
-  %52 = v_add_u32 %33, %51
-  %53 = v_lshrrev_b32_src0_inline %52, 16
-  %result = concat(%47, %53) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %39 = v_add3_u32_src2_lit %27, %38, 32767
+  %40 = v_lshrrev_b32_src0_inline %39, 16
+  %41 = v_lshrrev_b32_src0_inline %30, 16
+  %42 = v_and_b32_src0_inline %41, 1
+  %43 = v_add3_u32_src2_lit %30, %42, 32767
+  %44 = v_lshrrev_b32_src0_inline %43, 16
+  %45 = v_cvt_pk_u16_u32 %40, %44
+  %47 = v_lshrrev_b32_src0_inline %33, 16
+  %48 = v_and_b32_src0_inline %47, 1
+  %49 = v_add3_u32_src2_lit %33, %48, 32767
+  %50 = v_lshrrev_b32_src0_inline %49, 16
+  %result = concat(%45, %50) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
   return %result
 }
 
@@ -835,15 +829,13 @@ low.func.def target(@target) abi(hal_kernel) @vector_bf16_mul_widen_round_source
   %22 = v_mul_f32 %12, %15
   %26 = v_lshrrev_b32_src0_inline %19, 16
   %27 = v_and_b32_src0_inline %26, 1
-  %28 = v_add_u32_lit %27, 32767
-  %29 = v_add_u32 %19, %28
-  %30 = v_lshrrev_b32_src0_inline %29, 16
-  %31 = v_lshrrev_b32_src0_inline %22, 16
-  %32 = v_and_b32_src0_inline %31, 1
-  %33 = v_add_u32_lit %32, 32767
-  %34 = v_add_u32 %22, %33
-  %35 = v_lshrrev_b32_src0_inline %34, 16
-  %result = v_cvt_pk_u16_u32 %30, %35
+  %28 = v_add3_u32_src2_lit %19, %27, 32767
+  %29 = v_lshrrev_b32_src0_inline %28, 16
+  %30 = v_lshrrev_b32_src0_inline %22, 16
+  %31 = v_and_b32_src0_inline %30, 1
+  %32 = v_add3_u32_src2_lit %22, %31, 32767
+  %33 = v_lshrrev_b32_src0_inline %32, 16
+  %result = v_cvt_pk_u16_u32 %29, %33
   return %result
 }
 

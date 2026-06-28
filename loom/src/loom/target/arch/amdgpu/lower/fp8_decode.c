@@ -307,6 +307,14 @@ iree_status_t loom_amdgpu_select_fp8_decode_plan(
     out_plan->flags |= LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_NATIVE_BF16_PACK;
   }
 
+  bool has_add3_src2_literal = false;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_descriptor_ref_if_present(
+      context, LOOM_AMDGPU_DESCRIPTOR_REF_V_ADD3_U32_SRC2_LIT,
+      &out_plan->add3_src2_literal_descriptor, &has_add3_src2_literal));
+  if (has_add3_src2_literal) {
+    out_plan->flags |= LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_ADD3_SRC2_LITERAL;
+  }
+
   loom_amdgpu_initialize_fp8_decode_format(element_type, out_plan);
   return iree_ok_status();
 }

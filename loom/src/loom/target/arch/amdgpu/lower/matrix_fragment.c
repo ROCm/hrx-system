@@ -3234,9 +3234,16 @@ loom_amdgpu_emit_fragment_memory_fp8_to_packed_bf16_load_packet(
             (iree_any_bit_set(decode_plan.flags,
                               LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_PACK_U16)
                  ? LOOM_AMDGPU_BF16_PACK_DESCRIPTOR_FLAG_HAS_PACK_U16
+                 : LOOM_AMDGPU_BF16_PACK_DESCRIPTOR_FLAG_NONE) |
+            (iree_any_bit_set(
+                 decode_plan.flags,
+                 LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_ADD3_SRC2_LITERAL)
+                 ? LOOM_AMDGPU_BF16_PACK_DESCRIPTOR_FLAG_HAS_ADD3_SRC2_LITERAL
                  : LOOM_AMDGPU_BF16_PACK_DESCRIPTOR_FLAG_NONE),
         .native_descriptor = decode_plan.native_bf16_pack_descriptor,
         .pack_u16_descriptor = decode_plan.pack_u16_descriptor,
+        .add3_src2_literal_descriptor =
+            decode_plan.add3_src2_literal_descriptor,
     };
   }
 

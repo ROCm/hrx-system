@@ -743,6 +743,78 @@ def _v_add_u32_literal_overlay(instruction_name: str) -> AmdgpuDescriptorOverlay
     )
 
 
+def _v_add3_u32_overlay(
+    *,
+    include_literal_forms: bool = True,
+) -> AmdgpuDescriptorOverlay:
+    operand_forms: tuple[OperandForm, ...] = ()
+    if include_literal_forms:
+        operand_forms = (
+            _literal_operand_form(
+                replacement_descriptor="amdgpu.v_add3_u32.src0_lit",
+                source_operand="a",
+            ),
+            _literal_operand_form(
+                replacement_descriptor="amdgpu.v_add3_u32.src1_lit",
+                source_operand="b",
+            ),
+            _literal_operand_form(
+                replacement_descriptor="amdgpu.v_add3_u32.src2_lit",
+                source_operand="c",
+            ),
+        )
+    return AmdgpuDescriptorOverlay(
+        descriptor_key="amdgpu.v_add3_u32",
+        instruction_name="V_ADD3_U32",
+        mnemonic="v_add3_u32",
+        encoding_name="ENC_VOP3",
+        semantic_tag="integer.add3.u32",
+        schedule_class=_SCHEDULE_VALU,
+        operands=(
+            AmdgpuOperandOverlay("VDST", _vgpr_result()),
+            AmdgpuOperandOverlay("SRC0", _sgpr_vgpr_operand("a")),
+            AmdgpuOperandOverlay("SRC1", _sgpr_vgpr_operand("b")),
+            AmdgpuOperandOverlay("SRC2", _sgpr_vgpr_operand("c")),
+        ),
+        operand_forms=operand_forms,
+        flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    )
+
+
+def _v_add3_u32_literal_overlay(literal_source: str) -> AmdgpuDescriptorOverlay:
+    source_fields = {
+        "src0": ("SRC0", "a", _sgpr_vgpr_operand("a")),
+        "src1": ("SRC1", "b", _sgpr_vgpr_operand("b")),
+        "src2": ("SRC2", "c", _sgpr_vgpr_operand("c")),
+    }
+    literal_field = source_fields[literal_source][0]
+    operands = [AmdgpuOperandOverlay("VDST", _vgpr_result())]
+    asm_operands = []
+    for source_name, (xml_field, field_name, operand) in source_fields.items():
+        if source_name == literal_source:
+            continue
+        asm_operands.append(field_name)
+        operands.append(AmdgpuOperandOverlay(xml_field, operand))
+    return AmdgpuDescriptorOverlay(
+        descriptor_key=f"amdgpu.v_add3_u32.{literal_source}_lit",
+        instruction_name="V_ADD3_U32",
+        mnemonic=f"v_add3_u32_{literal_source}_lit",
+        encoding_name="ENC_VOP3",
+        encoding_format_id=AMDGPU_ENCODING_FORMAT_VOP3_LITERAL,
+        semantic_tag="integer.add3.u32",
+        schedule_class=_SCHEDULE_VALU,
+        operands=tuple(operands),
+        asm_forms=_asm(
+            results=("dst",),
+            operands=tuple(asm_operands),
+            immediates=("imm32",),
+        ),
+        immediates=(_LITERAL_U32_IMMEDIATE,),
+        fixed_encoding_fields=((literal_field, _predefined("SRC_LITERAL", "OPR_SRC")),),
+        flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    )
+
+
 def _v_add_co_u32_overlay() -> AmdgpuDescriptorOverlay:
     return AmdgpuDescriptorOverlay(
         descriptor_key="amdgpu.v_add_co_u32",
@@ -4878,6 +4950,8 @@ __all__ = (
     "_s_xor_b64_overlay",
     "_v_add_co_ci_u32_overlay",
     "_v_add_co_u32_overlay",
+    "_v_add3_u32_literal_overlay",
+    "_v_add3_u32_overlay",
     "_v_add_f16_overlay",
     "_v_add_f32_literal_overlay",
     "_v_add_f32_overlay",
