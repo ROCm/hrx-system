@@ -14,6 +14,19 @@
 #include "loom/target/arch/amdgpu/lower/emit.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
 
+loom_amdgpu_fp8_decode_value_flags_t
+loom_amdgpu_fp8_decode_value_flags_from_facts(loom_value_facts_t facts) {
+  loom_amdgpu_fp8_decode_value_flags_t flags =
+      LOOM_AMDGPU_FP8_DECODE_VALUE_FLAG_NONE;
+  if (loom_value_facts_is_not_nan(facts)) {
+    flags |= LOOM_AMDGPU_FP8_DECODE_VALUE_FLAG_NOT_NAN;
+  }
+  if (loom_value_facts_is_not_inf(facts)) {
+    flags |= LOOM_AMDGPU_FP8_DECODE_VALUE_FLAG_NOT_INF;
+  }
+  return flags;
+}
+
 bool loom_amdgpu_fp8_to_f32_descriptor_refs(
     loom_scalar_type_t source_element_type,
     loom_amdgpu_fp8_to_f32_descriptor_refs_t* out_refs) {

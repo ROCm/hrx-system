@@ -3146,6 +3146,7 @@ loom_amdgpu_emit_fragment_memory_fp8_to_packed_bf16_register(
     const loom_amdgpu_fragment_memory_plan_t* plan, loom_value_id_t low_source,
     uint16_t packet_register_count, uint16_t result_register_index,
     const loom_amdgpu_fp8_decode_plan_t* decode_plan,
+    loom_amdgpu_fp8_decode_value_flags_t decode_value_flags,
     loom_type_t native_f32_pair_type,
     const loom_amdgpu_bf16_pack_descriptors_t* bf16_pack_descriptors,
     loom_type_t vgpr_type, loom_type_t mask_type,
@@ -3172,7 +3173,7 @@ loom_amdgpu_emit_fragment_memory_fp8_to_packed_bf16_register(
         byte_index, vgpr_type, &low_elements[element_index]));
     IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fp8_to_bf16_lane(
         context, source_op, decode_plan, low_elements[element_index],
-        LOOM_AMDGPU_FP8_DECODE_VALUE_FLAG_NONE, vgpr_type, mask_type,
+        decode_value_flags, vgpr_type, mask_type,
         &low_elements[element_index]));
   }
 
@@ -3219,6 +3220,16 @@ loom_amdgpu_emit_fragment_memory_fp8_to_packed_bf16_load_packet(
   loom_amdgpu_fp8_decode_plan_t decode_plan;
   IREE_RETURN_IF_ERROR(loom_amdgpu_select_fp8_decode_plan(
       context, plan->view_element_type, &decode_plan));
+  loom_amdgpu_fp8_decode_value_flags_t decode_value_flags =
+      LOOM_AMDGPU_FP8_DECODE_VALUE_FLAG_NONE;
+  const loom_value_fact_table_t* fact_table =
+      loom_low_lower_context_fact_table(context);
+  if (fact_table != NULL) {
+    const loom_value_facts_t source_facts = loom_value_fact_table_lookup(
+        fact_table, loom_vector_fragment_load_result(source_op));
+    decode_value_flags =
+        loom_amdgpu_fp8_decode_value_flags_from_facts(source_facts);
+  }
   loom_type_t native_f32_pair_type = loom_type_none();
   loom_amdgpu_bf16_pack_descriptors_t bf16_pack_descriptors = {0};
   if (iree_any_bit_set(decode_plan.flags,
@@ -3257,7 +3268,8 @@ loom_amdgpu_emit_fragment_memory_fp8_to_packed_bf16_load_packet(
         loom_amdgpu_emit_fragment_memory_fp8_to_packed_bf16_register(
             context, source_op, plan, low_source_packet,
             packet->packet_register_count, result_register_index, &decode_plan,
-            native_f32_pair_type, &bf16_pack_descriptors, vgpr_type, mask_type,
+            decode_value_flags, native_f32_pair_type, &bf16_pack_descriptors,
+            vgpr_type, mask_type,
             &low_result_registers[result_register_index]));
   }
   if (packet->result_register_count == 1) {

@@ -1505,6 +1505,7 @@ vector_load = Op(
     effects=[Reads("view")],
     interfaces=[_memory_access_interface()],
     verify="loom_vector_load_verify",
+    facts="loom_vector_load_facts",
     format=[
         Ref("view"),
         IndexList("indices", "static_indices"),

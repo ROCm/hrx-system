@@ -12,6 +12,7 @@
 #include <stdint.h>
 
 #include "loom/codegen/low/lower/lower.h"
+#include "loom/ir/facts.h"
 #include "loom/ir/scalar_type.h"
 #include "loom/target/arch/amdgpu/lower/plan.h"
 
@@ -39,6 +40,10 @@ typedef enum loom_amdgpu_fp8_decode_value_flag_bits_e {
   LOOM_AMDGPU_FP8_DECODE_VALUE_FLAG_NOT_INF = 1u << 1,
 } loom_amdgpu_fp8_decode_value_flag_bits_t;
 typedef uint32_t loom_amdgpu_fp8_decode_value_flags_t;
+
+// Maps target-independent value facts into FP8 decode simplification flags.
+loom_amdgpu_fp8_decode_value_flags_t
+loom_amdgpu_fp8_decode_value_flags_from_facts(loom_value_facts_t facts);
 
 enum {
   LOOM_AMDGPU_FP8_BF16_BYTE_COUNT = 2u,

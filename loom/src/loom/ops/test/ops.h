@@ -122,7 +122,8 @@ enum {
   LOOM_OP_TEST_SEGMENTED = LOOM_OP_KIND(LOOM_DIALECT_TEST, 99),
   LOOM_OP_TEST_TEMPLATE_PARAM_SYMBOL = LOOM_OP_KIND(LOOM_DIALECT_TEST, 100),
   LOOM_OP_TEST_TEMPLATE_PARAM_SYMBOL_FLAGS = LOOM_OP_KIND(LOOM_DIALECT_TEST, 101),
-  LOOM_OP_TEST_COUNT_ = 102,
+  LOOM_OP_TEST_FACT_FINITE = LOOM_OP_KIND(LOOM_DIALECT_TEST, 102),
+  LOOM_OP_TEST_COUNT_ = 103,
 };
 
 // Synthetic flags for TemplateParamFlags parser/printer coverage.
@@ -1894,6 +1895,23 @@ iree_status_t loom_test_template_param_symbol_flags_build(
     uint8_t instance_flags,
     loom_location_id_t location,
     loom_op_t** out_op);
+
+// LOOM_OP_TEST_FACT_FINITE: Returns 1 if the input is provably finite, 0 otherwise.
+// %finite = test.fact_finite %x : f32 -> i1
+LOOM_DEFINE_ISA(loom_test_fact_finite_isa, LOOM_OP_TEST_FACT_FINITE)
+LOOM_DEFINE_OPERAND(loom_test_fact_finite_value, 0)
+LOOM_DEFINE_RESULT(loom_test_fact_finite_result, 0)
+iree_status_t loom_test_fact_finite_build(
+    loom_builder_t* builder,
+    loom_may_consume loom_value_id_t value,
+    loom_type_t result_type,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+iree_status_t loom_test_fact_finite_facts(
+    loom_fact_context_t* context,
+    const loom_module_t* module, const loom_op_t* op,
+    const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts);
 
 // Returns the vtable array for the test dialect.
 const loom_op_vtable_t* const* loom_test_dialect_vtables(

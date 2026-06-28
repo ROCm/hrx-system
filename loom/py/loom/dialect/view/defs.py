@@ -240,6 +240,7 @@ view_load = Op(
     effects=[Reads("view")],
     interfaces=[_memory_access_interface()],
     verify="loom_view_load_verify",
+    facts="loom_view_load_facts",
     format=[
         Ref("view"),
         IndexList("indices", "static_indices"),
