@@ -14,6 +14,27 @@
 #include "loom/target/arch/amdgpu/lower/emit.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
 
+bool loom_amdgpu_fp8_to_f32_descriptor_refs(
+    loom_scalar_type_t source_element_type,
+    loom_amdgpu_fp8_to_f32_descriptor_refs_t* out_refs) {
+  *out_refs = (loom_amdgpu_fp8_to_f32_descriptor_refs_t){
+      .lane = LOOM_AMDGPU_DESCRIPTOR_REF_NONE,
+      .pair = LOOM_AMDGPU_DESCRIPTOR_REF_NONE,
+  };
+  switch (source_element_type) {
+    case LOOM_SCALAR_TYPE_F8E4M3:
+      out_refs->lane = LOOM_AMDGPU_DESCRIPTOR_REF_V_CVT_F32_FP8;
+      out_refs->pair = LOOM_AMDGPU_DESCRIPTOR_REF_V_CVT_PK_F32_FP8;
+      return true;
+    case LOOM_SCALAR_TYPE_F8E5M2:
+      out_refs->lane = LOOM_AMDGPU_DESCRIPTOR_REF_V_CVT_F32_BF8;
+      out_refs->pair = LOOM_AMDGPU_DESCRIPTOR_REF_V_CVT_PK_F32_BF8;
+      return true;
+    default:
+      return false;
+  }
+}
+
 static const loom_low_lower_resolved_descriptor_t*
 loom_amdgpu_fp8_decode_cmp_src1_inline_descriptor(
     const loom_amdgpu_fp8_decode_plan_t* plan,
@@ -265,6 +286,25 @@ iree_status_t loom_amdgpu_select_fp8_decode_plan(
       &out_plan->perm_b32_descriptor, &has_perm_b32));
   if (has_perm_b32) {
     out_plan->flags |= LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_PERM_B32;
+  }
+
+  loom_amdgpu_fp8_to_f32_descriptor_refs_t native_refs = {0};
+  if (loom_amdgpu_fp8_to_f32_descriptor_refs(element_type, &native_refs)) {
+    bool has_native_pair = false;
+    IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_descriptor_ref_if_present(
+        context, native_refs.pair, &out_plan->native_f32_pair_descriptor,
+        &has_native_pair));
+    if (has_native_pair) {
+      out_plan->flags |= LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_NATIVE_F32_PAIR;
+    }
+  }
+
+  bool has_native_bf16_pack = false;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_descriptor_ref_if_present(
+      context, LOOM_AMDGPU_DESCRIPTOR_REF_V_CVT_PK_BF16_F32,
+      &out_plan->native_bf16_pack_descriptor, &has_native_bf16_pack));
+  if (has_native_bf16_pack) {
+    out_plan->flags |= LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_NATIVE_BF16_PACK;
   }
 
   loom_amdgpu_initialize_fp8_decode_format(element_type, out_plan);
