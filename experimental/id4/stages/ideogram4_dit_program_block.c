@@ -229,6 +229,20 @@ static iree_status_t id4_ideogram4_dit_program_format_blocked_attention_name(
       name_buffer_capacity, out_name);
 }
 
+static iree_status_t id4_ideogram4_dit_program_format_online_attention_name(
+    iree_string_view_t branch_name, uint32_t layer_ordinal,
+    uint32_t query_block_offset, char* suffix_buffer,
+    iree_host_size_t suffix_buffer_capacity, char* name_buffer,
+    iree_host_size_t name_buffer_capacity, iree_string_view_t* out_name) {
+  iree_string_view_t block_suffix = iree_string_view_empty();
+  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_format(
+      suffix_buffer, suffix_buffer_capacity, &block_suffix,
+      "attention.online.q%" PRIu32, query_block_offset));
+  return id4_ideogram4_dit_program_format_branch_layer_name(
+      branch_name, layer_ordinal, block_suffix, name_buffer,
+      name_buffer_capacity, out_name);
+}
+
 static iree_status_t id4_ideogram4_dit_program_dispatch_blocked_wmma_attention(
     id4_pipeline_program_builder_t* builder, iree_string_view_t branch_name,
     uint32_t layer_ordinal, uint32_t total_token_count,
@@ -353,6 +367,37 @@ static iree_status_t id4_ideogram4_dit_program_dispatch_blocked_wmma_attention(
   return iree_ok_status();
 }
 
+static iree_status_t id4_ideogram4_dit_program_dispatch_online_wmma_attention(
+    id4_pipeline_program_builder_t* builder, iree_string_view_t branch_name,
+    uint32_t layer_ordinal, uint32_t total_token_count,
+    uint32_t bf16_token_capacity, uint32_t attention_head_count,
+    uint32_t head_size, id4_pipeline_program_tensor_t rotated_query,
+    id4_pipeline_program_tensor_t rotated_key,
+    id4_pipeline_program_tensor_t value,
+    id4_pipeline_program_tensor_t attention_context) {
+  for (uint32_t query_block_offset = 0;
+       query_block_offset < bf16_token_capacity;
+       query_block_offset +=
+       ID4_IDEOGRAM4_DIT_BLOCKED_ATTENTION_QUERY_TOKEN_COUNT) {
+    const uint32_t query_block_token_count = id4_ideogram4_dit_program_min_u32(
+        ID4_IDEOGRAM4_DIT_BLOCKED_ATTENTION_QUERY_TOKEN_COUNT,
+        bf16_token_capacity - query_block_offset);
+    char suffix_buffer[ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
+    char dispatch_name_buffer[ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
+    iree_string_view_t dispatch_name = iree_string_view_empty();
+    IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_format_online_attention_name(
+        branch_name, layer_ordinal, query_block_offset, suffix_buffer,
+        IREE_ARRAYSIZE(suffix_buffer), dispatch_name_buffer,
+        IREE_ARRAYSIZE(dispatch_name_buffer), &dispatch_name));
+    IREE_RETURN_IF_ERROR(
+        id4_ideogram4_dit_program_dispatch_attention_online_bf16_bf16_wmma(
+            builder, dispatch_name, total_token_count, bf16_token_capacity,
+            query_block_offset, query_block_token_count, attention_head_count,
+            head_size, rotated_query, rotated_key, value, attention_context));
+  }
+  return iree_ok_status();
+}
+
 iree_status_t id4_ideogram4_dit_program_author_transformer_block(
     const id4_ideogram4_dit_program_block_options_t* options,
     id4_pipeline_program_tensor_t* out_hidden) {
@@ -404,8 +449,11 @@ iree_status_t id4_ideogram4_dit_program_author_transformer_block(
   const bool blocked_wmma_attention =
       attention_implementation ==
       ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_BLOCKED_WMMA;
-  const bool wmma_attention =
-      materialized_wmma_attention || blocked_wmma_attention;
+  const bool online_wmma_attention =
+      attention_implementation ==
+      ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_ONLINE_WMMA;
+  const bool wmma_attention = materialized_wmma_attention ||
+                              blocked_wmma_attention || online_wmma_attention;
   const bool bf16_linear_input_attention = !f32_canonical_activations;
   const bool pytorch_parity_feed_forward =
       feed_forward_implementation ==
@@ -414,6 +462,7 @@ iree_status_t id4_ideogram4_dit_program_author_transformer_block(
     case ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_STREAMING:
     case ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_MATERIALIZED_WMMA:
     case ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_BLOCKED_WMMA:
+    case ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_ONLINE_WMMA:
       break;
     default:
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -968,6 +1017,12 @@ iree_status_t id4_ideogram4_dit_program_author_transformer_block(
   } else if (blocked_wmma_attention) {
     IREE_RETURN_IF_ERROR(
         id4_ideogram4_dit_program_dispatch_blocked_wmma_attention(
+            builder, branch_name, layer_ordinal, total_token_count,
+            bf16_token_capacity, attention_head_count, head_size, rotated_query,
+            rotated_key, value, attention_context));
+  } else if (online_wmma_attention) {
+    IREE_RETURN_IF_ERROR(
+        id4_ideogram4_dit_program_dispatch_online_wmma_attention(
             builder, branch_name, layer_ordinal, total_token_count,
             bf16_token_capacity, attention_head_count, head_size, rotated_query,
             rotated_key, value, attention_context));

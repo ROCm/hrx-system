@@ -277,6 +277,7 @@ id4_ideogram4_dit_program_validate_attention_implementation(
     case ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_STREAMING:
     case ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_MATERIALIZED_WMMA:
     case ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_BLOCKED_WMMA:
+    case ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_ONLINE_WMMA:
       return iree_ok_status();
     default:
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -2760,6 +2761,72 @@ id4_ideogram4_dit_program_dispatch_attention_blocked_pv_bf16_bf16_wmma(
       valid_token_count, padded_token_count, query_block_offset,
       query_block_token_count, attention_head_count, head_size,
       IREE_ARRAYSIZE(bindings), bindings);
+}
+
+iree_status_t
+id4_ideogram4_dit_program_dispatch_attention_online_bf16_bf16_wmma(
+    id4_pipeline_program_builder_t* builder, iree_string_view_t name,
+    uint32_t valid_token_count, uint32_t padded_token_count,
+    uint32_t query_block_offset, uint32_t query_block_token_count,
+    uint32_t attention_head_count, uint32_t head_size,
+    id4_pipeline_program_tensor_t query, id4_pipeline_program_tensor_t key,
+    id4_pipeline_program_tensor_t value, id4_pipeline_program_tensor_t output) {
+  if (head_size != 256) {
+    return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                            "Ideogram4 online WMMA attention head size %" PRIu32
+                            " is not supported",
+                            head_size);
+  }
+  iree_device_size_t hidden_size = 0;
+  iree_device_size_t row_byte_length = 0;
+  iree_device_size_t output_offset = 0;
+  iree_device_size_t output_length = 0;
+  if (!iree_device_size_checked_mul((iree_device_size_t)attention_head_count,
+                                    (iree_device_size_t)head_size,
+                                    &hidden_size) ||
+      !iree_device_size_checked_mul(hidden_size,
+                                    id4_pipeline_program_dtype_byte_length(
+                                        ID4_PIPELINE_PROGRAM_DTYPE_BF16),
+                                    &row_byte_length) ||
+      !iree_device_size_checked_mul((iree_device_size_t)query_block_offset,
+                                    row_byte_length, &output_offset) ||
+      !iree_device_size_checked_mul((iree_device_size_t)query_block_token_count,
+                                    row_byte_length, &output_length)) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "Ideogram4 online WMMA attention output write range overflow");
+  }
+  const id4_ideogram4_dit_program_config_value_t config_values[] = {
+      {IREE_SV("id4.ideogram4.attention_online_wmma.valid_token_count"),
+       valid_token_count},
+      {IREE_SV("id4.ideogram4.attention_online_wmma.padded_token_count"),
+       padded_token_count},
+      {IREE_SV("id4.ideogram4.attention_online_wmma.query_block_offset"),
+       query_block_offset},
+      {IREE_SV("id4.ideogram4.attention_online_wmma.query_block_token_count"),
+       query_block_token_count},
+      {IREE_SV("id4.ideogram4.attention_online_wmma.attention_head_count"),
+       attention_head_count},
+      {IREE_SV("id4.ideogram4.attention_online_wmma.head_size"), head_size},
+  };
+  char value_buffers[ID4_IDEOGRAM4_DIT_MAX_KERNEL_CONFIG_BINDING_COUNT]
+                    [ID4_IDEOGRAM4_DIT_CONFIG_VALUE_BUFFER_CAPACITY];
+  id4_pipeline_kernel_config_binding_t
+      config_bindings[ID4_IDEOGRAM4_DIT_MAX_KERNEL_CONFIG_BINDING_COUNT];
+  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_make_config_bindings(
+      IREE_ARRAYSIZE(config_values), config_values, value_buffers,
+      config_bindings));
+  id4_pipeline_program_dispatch_binding_t bindings[] = {
+      id4_pipeline_program_read(query),
+      id4_pipeline_program_read(key),
+      id4_pipeline_program_read(value),
+      id4_pipeline_program_write_range(output, output_offset, output_length),
+  };
+  return id4_ideogram4_dit_program_dispatch_loom(
+      builder, name, IREE_SV("ideogram4/attention_online_bf16_wmma"),
+      IREE_SV("id4_ideogram4_attention_online_chunk128_bf16_bf16_wmma"),
+      IREE_ARRAYSIZE(config_values), config_bindings, IREE_ARRAYSIZE(bindings),
+      bindings);
 }
 
 static iree_status_t id4_ideogram4_dit_program_dispatch_timestep_embedding(

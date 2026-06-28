@@ -386,6 +386,15 @@ id4_ideogram4_dit_program_dispatch_attention_blocked_pv_bf16_bf16_wmma(
     id4_pipeline_program_tensor_t probabilities,
     id4_pipeline_program_tensor_t value, id4_pipeline_program_tensor_t output);
 
+iree_status_t
+id4_ideogram4_dit_program_dispatch_attention_online_bf16_bf16_wmma(
+    id4_pipeline_program_builder_t* builder, iree_string_view_t name,
+    uint32_t valid_token_count, uint32_t padded_token_count,
+    uint32_t query_block_offset, uint32_t query_block_token_count,
+    uint32_t attention_head_count, uint32_t head_size,
+    id4_pipeline_program_tensor_t query, id4_pipeline_program_tensor_t key,
+    id4_pipeline_program_tensor_t value, id4_pipeline_program_tensor_t output);
+
 iree_status_t id4_ideogram4_dit_program_dense_f32(
     id4_pipeline_program_builder_t* builder,
     const id4_ideogram4_dit_program_dense_options_t* options,
