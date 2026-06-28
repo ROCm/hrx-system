@@ -141,6 +141,7 @@ class DispatchProfileJoinTest(unittest.TestCase):
         self.assertEqual(first["command_index"], 0)
         self.assertEqual(first["region_operation_ordinal"], 0)
         self.assertEqual(first["name"], "test.first")
+        self.assertEqual(first["launch_geometry_source"], "plan+profile")
         self.assertEqual(first["bindings"][0]["shape"], [128])
         second = report["dispatches"][1]
         self.assertEqual(second["dispatch_ordinal"], 1)
@@ -153,6 +154,23 @@ class DispatchProfileJoinTest(unittest.TestCase):
         self.assertEqual(report["by_kernel"][0]["p90_duration_ns"], 1000)
         self.assertEqual(report["by_kernel"][0]["p99_duration_ns"], 1000)
         self.assertEqual(report["by_kernel"][0]["max_duration_ns"], 1000)
+
+    def test_uses_profile_launch_geometry_when_plan_omits_it(self) -> None:
+        plan = _plan()
+        for dispatch in plan["program"]["dispatches"]:
+            del dispatch["workgroup_count"]
+            del dispatch["workgroup_size"]
+
+        report = dispatch_profile_join.join_dispatch_profile(plan, _profile())
+
+        first = report["dispatches"][0]
+        self.assertEqual(first["workgroup_count"], [4, 1, 1])
+        self.assertEqual(first["workgroup_size"], [64, 1, 1])
+        self.assertEqual(first["launch_geometry_source"], "profile")
+        second = report["dispatches"][1]
+        self.assertEqual(second["workgroup_count"], [2, 1, 1])
+        self.assertEqual(second["workgroup_size"], [128, 1, 1])
+        self.assertEqual(second["launch_geometry_source"], "profile")
 
     def test_rejects_dispatch_count_mismatch(self) -> None:
         profile = _profile()[:1]
@@ -184,6 +202,16 @@ class DispatchProfileJoinTest(unittest.TestCase):
             "workgroup_count mismatch",
         ):
             dispatch_profile_join.join_dispatch_profile(_plan(), profile)
+
+    def test_rejects_partial_plan_launch_geometry(self) -> None:
+        plan = _plan()
+        del plan["program"]["dispatches"][0]["workgroup_size"]
+
+        with self.assertRaisesRegex(
+            dispatch_profile_join.DispatchProfileJoinError,
+            "must contain both workgroup_count and workgroup_size, or neither",
+        ):
+            dispatch_profile_join.join_dispatch_profile(plan, _profile())
 
 
 if __name__ == "__main__":

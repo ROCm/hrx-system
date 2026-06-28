@@ -115,6 +115,51 @@ def _u32_triplet(value: Any, field_name: str) -> tuple[int, int, int]:
     return triplet
 
 
+def _launch_geometry(
+    dispatch_ordinal: int,
+    plan_dispatch: dict[str, Any],
+    profile_event: dict[str, Any],
+) -> tuple[tuple[int, int, int], tuple[int, int, int], str]:
+    event_count = _u32_triplet(
+        profile_event.get("workgroup_count"),
+        f"profile.dispatch_events[{dispatch_ordinal}].workgroup_count",
+    )
+    event_size = _u32_triplet(
+        profile_event.get("workgroup_size"),
+        f"profile.dispatch_events[{dispatch_ordinal}].workgroup_size",
+    )
+
+    plan_has_count = "workgroup_count" in plan_dispatch
+    plan_has_size = "workgroup_size" in plan_dispatch
+    if plan_has_count != plan_has_size:
+        raise DispatchProfileJoinError(
+            f"program.dispatches[{dispatch_ordinal}] must contain both "
+            "workgroup_count and workgroup_size, or neither"
+        )
+    if not plan_has_count:
+        return event_count, event_size, "profile"
+
+    plan_count = _u32_triplet(
+        plan_dispatch.get("workgroup_count"),
+        f"program.dispatches[{dispatch_ordinal}].workgroup_count",
+    )
+    if plan_count != event_count:
+        raise DispatchProfileJoinError(
+            f"dispatch {dispatch_ordinal} workgroup_count mismatch: "
+            f"plan {plan_count}, profile {event_count}"
+        )
+    plan_size = _u32_triplet(
+        plan_dispatch.get("workgroup_size"),
+        f"program.dispatches[{dispatch_ordinal}].workgroup_size",
+    )
+    if plan_size != event_size:
+        raise DispatchProfileJoinError(
+            f"dispatch {dispatch_ordinal} workgroup_size mismatch: "
+            f"plan {plan_size}, profile {event_size}"
+        )
+    return plan_count, plan_size, "plan+profile"
+
+
 def _dispatch_events(profile_records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     events = []
     for record in profile_records:
@@ -150,39 +195,6 @@ def _region(plan: dict[str, Any]) -> dict[str, Any]:
     return _require_dict(regions[0], "regions[0]")
 
 
-def _check_launch_geometry(
-    dispatch_ordinal: int,
-    plan_dispatch: dict[str, Any],
-    profile_event: dict[str, Any],
-) -> None:
-    plan_count = _u32_triplet(
-        plan_dispatch.get("workgroup_count"),
-        f"program.dispatches[{dispatch_ordinal}].workgroup_count",
-    )
-    event_count = _u32_triplet(
-        profile_event.get("workgroup_count"),
-        f"profile.dispatch_events[{dispatch_ordinal}].workgroup_count",
-    )
-    if plan_count != event_count:
-        raise DispatchProfileJoinError(
-            f"dispatch {dispatch_ordinal} workgroup_count mismatch: "
-            f"plan {plan_count}, profile {event_count}"
-        )
-    plan_size = _u32_triplet(
-        plan_dispatch.get("workgroup_size"),
-        f"program.dispatches[{dispatch_ordinal}].workgroup_size",
-    )
-    event_size = _u32_triplet(
-        profile_event.get("workgroup_size"),
-        f"profile.dispatch_events[{dispatch_ordinal}].workgroup_size",
-    )
-    if plan_size != event_size:
-        raise DispatchProfileJoinError(
-            f"dispatch {dispatch_ordinal} workgroup_size mismatch: "
-            f"plan {plan_size}, profile {event_size}"
-        )
-
-
 def _join_row(
     stage_name: str,
     region_row: dict[str, Any],
@@ -212,7 +224,9 @@ def _join_row(
             f"dispatch {dispatch_ordinal} function mismatch: "
             f"plan {plan_function}, profile {profile_function}"
         )
-    _check_launch_geometry(dispatch_ordinal, plan_dispatch, profile_event)
+    workgroup_count, workgroup_size, launch_geometry_source = _launch_geometry(
+        dispatch_ordinal, plan_dispatch, profile_event
+    )
 
     valid = _require_bool(profile_event.get("valid"), "profile.valid")
     duration_ns = profile_event.get("duration_ns")
@@ -249,12 +263,9 @@ def _join_row(
         "name": _require_string(plan_dispatch.get("name"), "dispatch.name"),
         "module_path": _require_string(plan_dispatch.get("module_path"), "module_path"),
         "function_name": plan_function,
-        "workgroup_count": list(
-            _u32_triplet(plan_dispatch.get("workgroup_count"), "workgroup_count")
-        ),
-        "workgroup_size": list(
-            _u32_triplet(plan_dispatch.get("workgroup_size"), "workgroup_size")
-        ),
+        "workgroup_count": list(workgroup_count),
+        "workgroup_size": list(workgroup_size),
+        "launch_geometry_source": launch_geometry_source,
         "config_bindings": _require_list(
             plan_dispatch.get("config_bindings"), "config_bindings"
         ),
