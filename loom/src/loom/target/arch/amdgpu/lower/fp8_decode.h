@@ -51,6 +51,15 @@ typedef uint32_t loom_amdgpu_fp8_decode_value_flags_t;
 loom_amdgpu_fp8_decode_value_flags_t
 loom_amdgpu_fp8_decode_value_flags_from_facts(loom_value_facts_t facts);
 
+typedef enum loom_amdgpu_fp8_packed_bf16_missing_requirement_bits_e {
+  LOOM_AMDGPU_FP8_PACKED_BF16_MISSING_REQUIREMENT_NONE = 0u,
+  LOOM_AMDGPU_FP8_PACKED_BF16_MISSING_REQUIREMENT_PERMUTE_PACKET = 1u << 0,
+  LOOM_AMDGPU_FP8_PACKED_BF16_MISSING_REQUIREMENT_VALUE_FINITE = 1u << 1,
+  LOOM_AMDGPU_FP8_PACKED_BF16_MISSING_REQUIREMENT_VALUE_NOT_SUBNORMAL = 1u << 2,
+  LOOM_AMDGPU_FP8_PACKED_BF16_MISSING_REQUIREMENT_ZERO_REPAIR_PACKETS = 1u << 3,
+} loom_amdgpu_fp8_packed_bf16_missing_requirement_bits_t;
+typedef uint32_t loom_amdgpu_fp8_packed_bf16_missing_requirements_t;
+
 enum {
   LOOM_AMDGPU_FP8_BF16_BYTE_COUNT = 2u,
   LOOM_AMDGPU_FP8_BF16_BYTE_TABLE_WORD_COUNT = 2u,
@@ -113,6 +122,13 @@ bool loom_amdgpu_fp8_to_f32_descriptor_refs(
 iree_status_t loom_amdgpu_select_fp8_decode_plan(
     loom_low_lower_context_t* context, loom_scalar_type_t element_type,
     loom_amdgpu_fp8_decode_plan_t* out_plan);
+
+// Returns the target packet and value-fact requirements missing from the
+// packed FP8-to-BF16 pair decode path.
+loom_amdgpu_fp8_packed_bf16_missing_requirements_t
+loom_amdgpu_fp8_pair_to_packed_bf16_missing_requirements(
+    const loom_amdgpu_fp8_decode_plan_t* plan,
+    loom_amdgpu_fp8_decode_value_flags_t value_flags);
 
 // Emits one 16-bit BF16 bit payload from an unsigned FP8 byte payload.
 iree_status_t loom_amdgpu_emit_fp8_to_bf16_lane(
