@@ -95,6 +95,16 @@ struct GenerationBenchmarkPlanStatistics {
   iree_device_size_t total_parameter_slab_byte_length;
   // Largest individual parameter slab bytes across coarse stage plans.
   iree_device_size_t largest_parameter_slab_byte_length;
+  // Total provider source bytes consumed by parameter loading.
+  iree_device_size_t parameter_source_byte_length;
+  // Provider source bytes consumed by direct parameter gathers.
+  iree_device_size_t parameter_direct_source_byte_length;
+  // Provider source bytes consumed by encoded parameter load steps.
+  iree_device_size_t parameter_encoded_source_byte_length;
+  // Number of direct parameter gather load steps.
+  iree_host_size_t parameter_gather_load_step_count;
+  // Number of encoded parameter load steps.
+  iree_host_size_t parameter_encode_load_step_count;
   // Sum of local slab high-water bytes across coarse stage plans.
   iree_device_size_t total_local_slab_high_water_mark;
   // Largest local slab high-water bytes across coarse stage plans.
@@ -570,6 +580,16 @@ static iree_status_t AccumulateGenerationBenchmarkPlanStatistics(
     out_statistics->stages[i].statistics = stage_statistics;
     out_statistics->total_parameter_slab_byte_length +=
         stage_statistics.parameter_slab_byte_length;
+    out_statistics->parameter_source_byte_length +=
+        stage_statistics.parameter_source_byte_length;
+    out_statistics->parameter_direct_source_byte_length +=
+        stage_statistics.parameter_direct_source_byte_length;
+    out_statistics->parameter_encoded_source_byte_length +=
+        stage_statistics.parameter_encoded_source_byte_length;
+    out_statistics->parameter_gather_load_step_count +=
+        stage_statistics.parameter_gather_load_step_count;
+    out_statistics->parameter_encode_load_step_count +=
+        stage_statistics.parameter_encode_load_step_count;
     if (stage_statistics.largest_parameter_slab_byte_length >
         out_statistics->largest_parameter_slab_byte_length) {
       out_statistics->largest_parameter_slab_byte_length =
@@ -1284,11 +1304,18 @@ static iree_status_t AppendGenerationBenchmarkStageLabels(
         statistics.stages[i].statistics;
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
         builder,
-        " stage.%.*s[param=%" PRIu64 "MiB,local_hw=%" PRIu64
+        " stage.%.*s[param=%" PRIu64 "MiB,src=%" PRIu64
+        "MiB,src_direct=%" PRIu64 "MiB,src_encoded=%" PRIu64
+        "MiB,loads=%" PRIhsz "/%" PRIhsz ",local_hw=%" PRIu64
         "MiB,boundary=%" PRIu64 "MiB,kernels=%" PRIhsz ",dispatches=%" PRIhsz
         "]",
         static_cast<int>(key.size), key.data,
         CeilMiB(stage.parameter_slab_byte_length),
+        CeilMiB(stage.parameter_source_byte_length),
+        CeilMiB(stage.parameter_direct_source_byte_length),
+        CeilMiB(stage.parameter_encoded_source_byte_length),
+        stage.parameter_gather_load_step_count,
+        stage.parameter_encode_load_step_count,
         CeilMiB(stage.memory_slab_high_water_mark),
         CeilMiB(stage.boundary_tensor_byte_length), stage.kernel_count,
         stage.dispatch_count));
@@ -1328,7 +1355,10 @@ static iree_status_t SetGenerationBenchmarkLabel(
       " residency=%.*s issue=%.*s resident_phase_mask=0x%08x"
       " params=%.*s activation=%.*s weights=%.*s attention=%.*s ff=%.*s"
       " param_total=%" PRIu64 "MiB param_largest=%" PRIu64
-      "MiB"
+      "MiB param_source=%" PRIu64 "MiB param_source_direct=%" PRIu64
+      "MiB param_source_encoded=%" PRIu64 "MiB param_load_steps[gather=%" PRIhsz
+      ",encode=%" PRIhsz
+      "]"
       " local_hw_total=%" PRIu64 "MiB local_hw_largest=%" PRIu64
       "MiB"
       " boundary=%" PRIu64 "MiB kernels=%" PRIhsz " dispatches=%" PRIhsz,
@@ -1349,6 +1379,11 @@ static iree_status_t SetGenerationBenchmarkLabel(
       feed_forward_implementation.data,
       CeilMiB(statistics.total_parameter_slab_byte_length),
       CeilMiB(statistics.largest_parameter_slab_byte_length),
+      CeilMiB(statistics.parameter_source_byte_length),
+      CeilMiB(statistics.parameter_direct_source_byte_length),
+      CeilMiB(statistics.parameter_encoded_source_byte_length),
+      statistics.parameter_gather_load_step_count,
+      statistics.parameter_encode_load_step_count,
       CeilMiB(statistics.total_local_slab_high_water_mark),
       CeilMiB(statistics.largest_local_slab_high_water_mark),
       CeilMiB(statistics.boundary_tensor_byte_length), statistics.kernel_count,
