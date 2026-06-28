@@ -102,6 +102,38 @@ struct GenerationBenchmarkPlanStatistics {
   } stages[8];
 };
 
+struct GenerationPhaseBenchmarkTimingStatistics {
+  // Host-observed phase bundle preparation duration.
+  iree_duration_t prepare_ns;
+  // Host-observed phase issue submission duration.
+  iree_duration_t issue_ns;
+  // Host-observed wait for phase completion before release.
+  iree_duration_t completion_wait_ns;
+  // Host-observed phase bundle release duration.
+  iree_duration_t release_ns;
+};
+
+struct GenerationBenchmarkTimingStatistics {
+  // Host-observed generation planning duration.
+  iree_duration_t plan_ns;
+  // Host-observed generation bundle preparation duration.
+  iree_duration_t prepare_ns;
+  // Host-observed full generation issue submission duration.
+  iree_duration_t issue_ns;
+  // Host-observed phase-driven generation begin duration.
+  iree_duration_t begin_ns;
+  // Host-observed conditioning phase timings.
+  GenerationPhaseBenchmarkTimingStatistics conditioning;
+  // Host-observed denoise phase timings.
+  GenerationPhaseBenchmarkTimingStatistics denoise;
+  // Host-observed decode phase timings.
+  GenerationPhaseBenchmarkTimingStatistics decode;
+  // Host-observed final completion wait duration.
+  iree_duration_t final_wait_ns;
+  // Host-observed whole benchmark iteration duration.
+  iree_duration_t total_ns;
+};
+
 enum class GenerationIssueMode {
   kFull,
   kPhases,
@@ -421,6 +453,35 @@ static iree_status_t ParseGenerationResidentPhaseMask(
 static uint64_t CeilMiB(iree_device_size_t byte_length) {
   static constexpr iree_device_size_t kMiB = 1024ull * 1024ull;
   return (uint64_t)((byte_length + kMiB - 1) / kMiB);
+}
+
+static double AverageMilliseconds(iree_duration_t total_ns,
+                                  uint64_t iteration_count) {
+  if (iteration_count == 0) return 0.0;
+  return static_cast<double>(total_ns) /
+         (static_cast<double>(iteration_count) * 1000.0 * 1000.0);
+}
+
+static void AddPhaseTiming(
+    GenerationPhaseBenchmarkTimingStatistics* target,
+    const GenerationPhaseBenchmarkTimingStatistics& add) {
+  target->prepare_ns += add.prepare_ns;
+  target->issue_ns += add.issue_ns;
+  target->completion_wait_ns += add.completion_wait_ns;
+  target->release_ns += add.release_ns;
+}
+
+static void AddTiming(GenerationBenchmarkTimingStatistics* target,
+                      const GenerationBenchmarkTimingStatistics& add) {
+  target->plan_ns += add.plan_ns;
+  target->prepare_ns += add.prepare_ns;
+  target->issue_ns += add.issue_ns;
+  target->begin_ns += add.begin_ns;
+  AddPhaseTiming(&target->conditioning, add.conditioning);
+  AddPhaseTiming(&target->denoise, add.denoise);
+  AddPhaseTiming(&target->decode, add.decode);
+  target->final_wait_ns += add.final_wait_ns;
+  target->total_ns += add.total_ns;
 }
 
 static iree_status_t AccumulateGenerationBenchmarkPlanStatistics(
@@ -853,9 +914,11 @@ static iree_status_t IssueGenerationBundle(
     id4_pipeline_diagnostics_sink_t* diagnostics_sink,
     iree_hal_semaphore_t* prepare_semaphore, uint64_t* prepare_value,
     iree_hal_semaphore_t* completion_semaphore, uint64_t* completion_value,
+    GenerationBenchmarkTimingStatistics* timing,
     id4_ideogram4_generation_execution_t** out_execution) {
   IREE_ASSERT_ARGUMENT(bundle);
   IREE_ASSERT_ARGUMENT(diagnostics_sink);
+  IREE_ASSERT_ARGUMENT(timing);
   IREE_ASSERT_ARGUMENT(out_execution);
   *out_execution = nullptr;
 
@@ -876,8 +939,11 @@ static iree_status_t IssueGenerationBundle(
     issue_options.wait_semaphore_list = prepare_wait.list();
     issue_options.signal_semaphore_list = completion_signal.list();
     issue_options.diagnostics_sink = diagnostics_sink;
-    return id4_ideogram4_session_issue_generation(
+    const iree_time_t issue_start_time_ns = iree_time_now();
+    iree_status_t status = id4_ideogram4_session_issue_generation(
         context.session.get(), bundle, &issue_options, out_execution);
+    timing->issue_ns += iree_time_now() - issue_start_time_ns;
+    return status;
   }
 
   id4::test::SemaphoreListStorage begin_wait;
@@ -896,60 +962,130 @@ static iree_status_t IssueGenerationBundle(
   begin_options.wait_semaphore_list = begin_wait.list();
   begin_options.signal_semaphore_list = begin_signal.list();
   begin_options.diagnostics_sink = diagnostics_sink;
-  IREE_RETURN_IF_ERROR(id4_ideogram4_session_begin_generation(
-      context.session.get(), bundle, &begin_options, out_execution));
+  iree_time_t phase_start_time_ns = iree_time_now();
+  iree_status_t status = id4_ideogram4_session_begin_generation(
+      context.session.get(), bundle, &begin_options, out_execution);
+  timing->begin_ns += iree_time_now() - phase_start_time_ns;
+  IREE_RETURN_IF_ERROR(status);
 
   id4_ideogram4_generation_phase_bundle_t* conditioning_phase = nullptr;
   id4_ideogram4_generation_phase_bundle_t* denoise_phase = nullptr;
   id4_ideogram4_generation_phase_bundle_t* decode_phase = nullptr;
 
-  iree_status_t status = PrepareGenerationPhaseBundle(
+  phase_start_time_ns = iree_time_now();
+  status = PrepareGenerationPhaseBundle(
       bundle, ID4_IDEOGRAM4_GENERATION_RESIDENCY_PHASE_CONDITIONING,
       diagnostics_sink, prepare_semaphore, *prepare_value, prepare_semaphore,
       ++*prepare_value, &conditioning_phase);
+  timing->conditioning.prepare_ns += iree_time_now() - phase_start_time_ns;
   if (iree_status_is_ok(status)) {
+    phase_start_time_ns = iree_time_now();
     status = IssueGenerationPhase(
         *out_execution, conditioning_phase, diagnostics_sink, prepare_semaphore,
         *prepare_value, completion_semaphore, ++*completion_value);
+    timing->conditioning.issue_ns += iree_time_now() - phase_start_time_ns;
   }
   if (iree_status_is_ok(status)) {
+    phase_start_time_ns = iree_time_now();
     status = WaitForSemaphore(completion_semaphore, *completion_value);
+    timing->conditioning.completion_wait_ns +=
+        iree_time_now() - phase_start_time_ns;
   }
+  phase_start_time_ns = iree_time_now();
   status = iree_status_join(
       status,
       id4_ideogram4_generation_phase_bundle_release(conditioning_phase));
+  timing->conditioning.release_ns += iree_time_now() - phase_start_time_ns;
 
   if (iree_status_is_ok(status)) {
+    phase_start_time_ns = iree_time_now();
     status = PrepareGenerationPhaseBundle(
         bundle, ID4_IDEOGRAM4_GENERATION_RESIDENCY_PHASE_DENOISE,
         diagnostics_sink, completion_semaphore, *completion_value,
         prepare_semaphore, ++*prepare_value, &denoise_phase);
+    timing->denoise.prepare_ns += iree_time_now() - phase_start_time_ns;
   }
   if (iree_status_is_ok(status)) {
+    phase_start_time_ns = iree_time_now();
     status = IssueGenerationPhase(
         *out_execution, denoise_phase, diagnostics_sink, prepare_semaphore,
         *prepare_value, completion_semaphore, ++*completion_value);
+    timing->denoise.issue_ns += iree_time_now() - phase_start_time_ns;
   }
   if (iree_status_is_ok(status)) {
+    phase_start_time_ns = iree_time_now();
     status = WaitForSemaphore(completion_semaphore, *completion_value);
+    timing->denoise.completion_wait_ns += iree_time_now() - phase_start_time_ns;
   }
+  phase_start_time_ns = iree_time_now();
   status = iree_status_join(
       status, id4_ideogram4_generation_phase_bundle_release(denoise_phase));
+  timing->denoise.release_ns += iree_time_now() - phase_start_time_ns;
 
   if (iree_status_is_ok(status)) {
+    phase_start_time_ns = iree_time_now();
     status = PrepareGenerationPhaseBundle(
         bundle, ID4_IDEOGRAM4_GENERATION_RESIDENCY_PHASE_DECODE,
         diagnostics_sink, completion_semaphore, *completion_value,
         prepare_semaphore, ++*prepare_value, &decode_phase);
+    timing->decode.prepare_ns += iree_time_now() - phase_start_time_ns;
   }
   if (iree_status_is_ok(status)) {
+    phase_start_time_ns = iree_time_now();
     status = IssueGenerationPhase(
         *out_execution, decode_phase, diagnostics_sink, prepare_semaphore,
         *prepare_value, completion_semaphore, ++*completion_value);
+    timing->decode.issue_ns += iree_time_now() - phase_start_time_ns;
   }
+  if (iree_status_is_ok(status)) {
+    phase_start_time_ns = iree_time_now();
+    status = WaitForSemaphore(completion_semaphore, *completion_value);
+    timing->decode.completion_wait_ns += iree_time_now() - phase_start_time_ns;
+  }
+  phase_start_time_ns = iree_time_now();
   status = iree_status_join(
       status, id4_ideogram4_generation_phase_bundle_release(decode_phase));
+  timing->decode.release_ns += iree_time_now() - phase_start_time_ns;
   return status;
+}
+
+static iree_status_t AppendGenerationBenchmarkPhaseTimingLabel(
+    iree_string_builder_t* builder, iree_string_view_t phase_name,
+    const GenerationPhaseBenchmarkTimingStatistics& timing,
+    uint64_t iteration_count) {
+  return iree_string_builder_append_format(
+      builder, " phase.%.*s_ms[prepare=%.3f,issue=%.3f,wait=%.3f,release=%.3f]",
+      static_cast<int>(phase_name.size), phase_name.data,
+      AverageMilliseconds(timing.prepare_ns, iteration_count),
+      AverageMilliseconds(timing.issue_ns, iteration_count),
+      AverageMilliseconds(timing.completion_wait_ns, iteration_count),
+      AverageMilliseconds(timing.release_ns, iteration_count));
+}
+
+static iree_status_t AppendGenerationBenchmarkTimingLabel(
+    iree_string_builder_t* builder,
+    const LiveGenerationBenchmarkContext& context,
+    const GenerationBenchmarkTimingStatistics& timing,
+    uint64_t iteration_count) {
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+      builder,
+      " timing_ms[plan=%.3f,prepare=%.3f,issue=%.3f,begin=%.3f,final_wait=%.3f,"
+      "total=%.3f]",
+      AverageMilliseconds(timing.plan_ns, iteration_count),
+      AverageMilliseconds(timing.prepare_ns, iteration_count),
+      AverageMilliseconds(timing.issue_ns, iteration_count),
+      AverageMilliseconds(timing.begin_ns, iteration_count),
+      AverageMilliseconds(timing.final_wait_ns, iteration_count),
+      AverageMilliseconds(timing.total_ns, iteration_count)));
+  if (context.generation_issue_mode != GenerationIssueMode::kPhases) {
+    return iree_ok_status();
+  }
+  IREE_RETURN_IF_ERROR(AppendGenerationBenchmarkPhaseTimingLabel(
+      builder, IREE_SV("conditioning"), timing.conditioning, iteration_count));
+  IREE_RETURN_IF_ERROR(AppendGenerationBenchmarkPhaseTimingLabel(
+      builder, IREE_SV("denoise"), timing.denoise, iteration_count));
+  return AppendGenerationBenchmarkPhaseTimingLabel(
+      builder, IREE_SV("decode"), timing.decode, iteration_count);
 }
 
 static iree_status_t AppendGenerationBenchmarkStageLabels(
@@ -977,7 +1113,9 @@ static iree_status_t SetGenerationBenchmarkLabel(
     iree_benchmark_state_t* benchmark_state,
     const LiveGenerationBenchmarkContext& context,
     const id4_ideogram4_generation_plan_summary_t& summary,
-    const GenerationBenchmarkPlanStatistics& statistics) {
+    const GenerationBenchmarkPlanStatistics& statistics,
+    const GenerationBenchmarkTimingStatistics& timing,
+    uint64_t iteration_count) {
   const iree_string_view_t parameter_format =
       id4_ideogram4_dit_parameter_format_name(context.dit_parameter_format);
   const iree_string_view_t activation_format =
@@ -1025,6 +1163,10 @@ static iree_status_t SetGenerationBenchmarkLabel(
     status = AppendGenerationBenchmarkStageLabels(&label_builder, statistics);
   }
   if (iree_status_is_ok(status)) {
+    status = AppendGenerationBenchmarkTimingLabel(&label_builder, context,
+                                                  timing, iteration_count);
+  }
+  if (iree_status_is_ok(status)) {
     iree_benchmark_set_label(benchmark_state,
                              iree_string_builder_buffer(&label_builder));
   }
@@ -1066,6 +1208,8 @@ static iree_status_t RunGenerationEndToEndBenchmark(
   std::memset(&last_summary, 0, sizeof(last_summary));
   GenerationBenchmarkPlanStatistics last_statistics;
   std::memset(&last_statistics, 0, sizeof(last_statistics));
+  GenerationBenchmarkTimingStatistics timing_total;
+  std::memset(&timing_total, 0, sizeof(timing_total));
   const iree_hal_command_buffer_mode_t profiled_dispatch_metadata_mode =
       IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_PROFILE_METADATA |
       IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_DISPATCH_METADATA;
@@ -1082,7 +1226,12 @@ static iree_status_t RunGenerationEndToEndBenchmark(
   }
   while (iree_status_is_ok(status) &&
          iree_benchmark_keep_running(benchmark_state, 1)) {
+    GenerationBenchmarkTimingStatistics iteration_timing;
+    std::memset(&iteration_timing, 0, sizeof(iteration_timing));
+    const iree_time_t iteration_start_time_ns = iree_time_now();
+
     GenerationPlanRef plan;
+    iree_time_t phase_start_time_ns = iree_time_now();
     status =
         CreateGenerationPlan(context, request, &diagnostics_sink, plan.out());
     id4_ideogram4_generation_plan_summary_t summary;
@@ -1101,13 +1250,16 @@ static iree_status_t RunGenerationEndToEndBenchmark(
     if (iree_status_is_ok(status)) {
       last_statistics = statistics;
     }
+    iteration_timing.plan_ns += iree_time_now() - phase_start_time_ns;
 
     ++prepare_value;
     GenerationBundleRef bundle;
     if (iree_status_is_ok(status)) {
+      phase_start_time_ns = iree_time_now();
       status = PrepareGenerationBundle(context, plan.get(), &diagnostics_sink,
                                        prepare_semaphore.get(), prepare_value,
                                        bundle.out());
+      iteration_timing.prepare_ns += iree_time_now() - phase_start_time_ns;
     }
 
     const bool profile_this_execution =
@@ -1128,20 +1280,24 @@ static iree_status_t RunGenerationEndToEndBenchmark(
 
     GenerationExecutionRef execution;
     if (iree_status_is_ok(status)) {
-      status = IssueGenerationBundle(context, bundle.get(), request,
-                                     &diagnostics_sink, prepare_semaphore.get(),
-                                     &prepare_value, completion_semaphore.get(),
-                                     &completion_value, execution.out());
+      status = IssueGenerationBundle(
+          context, bundle.get(), request, &diagnostics_sink,
+          prepare_semaphore.get(), &prepare_value, completion_semaphore.get(),
+          &completion_value, &iteration_timing, execution.out());
     }
     if (iree_status_is_ok(status)) {
       id4::test::SemaphoreListStorage completion_wait;
       completion_wait.semaphore = completion_semaphore.get();
       completion_wait.payload_value = completion_value;
+      phase_start_time_ns = iree_time_now();
       status = iree_hal_semaphore_list_wait(completion_wait.list(),
                                             iree_infinite_timeout(),
                                             IREE_ASYNC_WAIT_FLAG_NONE);
+      iteration_timing.final_wait_ns += iree_time_now() - phase_start_time_ns;
     }
     if (iree_status_is_ok(status)) {
+      iteration_timing.total_ns += iree_time_now() - iteration_start_time_ns;
+      AddTiming(&timing_total, iteration_timing);
       iree_optimization_barrier(execution.get());
       ++iteration_count;
     }
@@ -1158,7 +1314,8 @@ static iree_status_t RunGenerationEndToEndBenchmark(
   }
   IREE_RETURN_IF_ERROR(status);
   IREE_RETURN_IF_ERROR(SetGenerationBenchmarkLabel(
-      benchmark_state, context, last_summary, last_statistics));
+      benchmark_state, context, last_summary, last_statistics, timing_total,
+      iteration_count));
   iree_benchmark_set_items_processed(
       benchmark_state, static_cast<int64_t>(iteration_count * token_count));
   return iree_ok_status();
