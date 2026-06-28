@@ -121,9 +121,12 @@ static uint32_t id4_qwen3_vl_program_selected_hidden_row_count(
 static iree_status_t id4_qwen3_vl_program_bf16_token_capacity(
     const id4_qwen3_vl_program_options_t* options,
     uint32_t* out_token_capacity) {
+  const iree_host_size_t alignment =
+      options->request.token_count > ID4_QWEN3_VL_LINEAR_WMMA_TOKEN_BLOCK_M16
+          ? ID4_QWEN3_VL_LINEAR_WMMA_TOKEN_BLOCK_M32
+          : ID4_QWEN3_VL_LINEAR_WMMA_TOKEN_BLOCK_M16;
   iree_host_size_t token_capacity = 0;
-  if (!iree_host_size_checked_align(options->request.token_count,
-                                    ID4_QWEN3_VL_LINEAR_WMMA_TOKEN_BLOCK_M16,
+  if (!iree_host_size_checked_align(options->request.token_count, alignment,
                                     &token_capacity) ||
       token_capacity > UINT32_MAX) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
