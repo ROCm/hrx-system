@@ -68,8 +68,14 @@ loom_value_facts_t loom_value_facts_exact_float(loom_scalar_type_t scalar_type,
   if (!loom_float_type_is_supported(scalar_type)) {
     return loom_value_facts_unknown();
   }
-  return loom_value_facts_exact_rounded_float(
-      loom_float_round_to_type(scalar_type, value));
+  const double rounded_value = loom_float_round_to_type(scalar_type, value);
+  loom_value_facts_t facts =
+      loom_value_facts_exact_rounded_float(rounded_value);
+  if (scalar_type == LOOM_SCALAR_TYPE_F64 &&
+      fpclassify(rounded_value) != FP_SUBNORMAL) {
+    facts.flags |= LOOM_VALUE_FACT_NOT_SUBNORMAL;
+  }
+  return facts;
 }
 
 loom_value_facts_t loom_value_facts_known_nan(void) {

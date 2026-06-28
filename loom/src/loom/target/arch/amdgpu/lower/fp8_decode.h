@@ -38,6 +38,7 @@ typedef enum loom_amdgpu_fp8_decode_value_flag_bits_e {
   LOOM_AMDGPU_FP8_DECODE_VALUE_FLAG_NONE = 0u,
   LOOM_AMDGPU_FP8_DECODE_VALUE_FLAG_NOT_NAN = 1u << 0,
   LOOM_AMDGPU_FP8_DECODE_VALUE_FLAG_NOT_INF = 1u << 1,
+  LOOM_AMDGPU_FP8_DECODE_VALUE_FLAG_NOT_SUBNORMAL = 1u << 2,
 } loom_amdgpu_fp8_decode_value_flag_bits_t;
 typedef uint32_t loom_amdgpu_fp8_decode_value_flags_t;
 

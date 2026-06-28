@@ -120,6 +120,7 @@ TEST(FactsExactF64, Pi) {
   EXPECT_TRUE(loom_value_facts_is_float(f));
   EXPECT_TRUE(loom_value_facts_is_not_nan(f));
   EXPECT_TRUE(loom_value_facts_is_finite(f));
+  EXPECT_TRUE(loom_value_facts_is_not_subnormal(f));
   double value = 0.0;
   ASSERT_TRUE(loom_value_facts_as_exact_float(LOOM_SCALAR_TYPE_F64, f, &value));
   EXPECT_DOUBLE_EQ(value, 3.14159265358979);
@@ -132,9 +133,23 @@ TEST(FactsExactF64, Zero) {
   EXPECT_TRUE(loom_value_facts_is_float(f));
   EXPECT_TRUE(loom_value_facts_is_not_nan(f));
   EXPECT_TRUE(loom_value_facts_is_finite(f));
+  EXPECT_TRUE(loom_value_facts_is_not_subnormal(f));
   double value = 1.0;
   ASSERT_TRUE(loom_value_facts_as_exact_float(LOOM_SCALAR_TYPE_F64, f, &value));
   EXPECT_DOUBLE_EQ(value, 0.0);
+}
+
+TEST(FactsExactF64, Subnormal) {
+  loom_value_facts_t f = loom_value_facts_exact_float(
+      LOOM_SCALAR_TYPE_F64, std::numeric_limits<double>::denorm_min());
+  EXPECT_TRUE(loom_value_facts_is_exact(f));
+  EXPECT_TRUE(loom_value_facts_is_float(f));
+  EXPECT_TRUE(loom_value_facts_is_not_nan(f));
+  EXPECT_TRUE(loom_value_facts_is_finite(f));
+  EXPECT_FALSE(loom_value_facts_is_not_subnormal(f));
+  double value = 0.0;
+  ASSERT_TRUE(loom_value_facts_as_exact_float(LOOM_SCALAR_TYPE_F64, f, &value));
+  EXPECT_DOUBLE_EQ(value, std::numeric_limits<double>::denorm_min());
 }
 
 TEST(FactsExactF64, NaN) {
