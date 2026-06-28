@@ -251,6 +251,20 @@ iree_runtime_cc_library(
     ],
 )
 
+iree_runtime_cc_library(
+    name = "ideogram4_dit_test_util",
+    testonly = True,
+    srcs = ["ideogram4_dit_test_util.cc"],
+    hdrs = ["ideogram4_dit_test_util.h"],
+    deps = [
+        ":hal_integration_util",
+        ":ideogram4_dit_program",
+        "//experimental/id4/pipeline:plan",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+    ],
+)
+
 iree_runtime_cc_test(
     name = "hal_integration_util_test",
     srcs = ["hal_integration_util_test.cc"],
@@ -404,6 +418,7 @@ iree_runtime_cc_test(
         ":hal_integration_util",
         ":ideogram4_dit",
         ":ideogram4_dit_parameters",
+        ":ideogram4_dit_test_util",
         "//experimental/id4/pipeline:plan",
         "//experimental/id4/pipeline:stage",
         "//experimental/id4/tooling:capture",
@@ -592,6 +607,7 @@ iree_runtime_cc_benchmark(
         ":hal_integration_util",
         ":ideogram4_dit",
         ":ideogram4_dit_parameters",
+        ":ideogram4_dit_test_util",
         "//experimental/id4/pipeline:plan",
         "//experimental/id4/pipeline:stage",
         "//experimental/id4/tooling:filesystem",

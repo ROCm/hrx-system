@@ -16,6 +16,7 @@
 #include "experimental/id4/stages/hal_integration_util.h"
 #include "experimental/id4/stages/ideogram4_dit.h"
 #include "experimental/id4/stages/ideogram4_dit_parameters.h"
+#include "experimental/id4/stages/ideogram4_dit_test_util.h"
 #include "experimental/id4/tooling/capture.h"
 #include "experimental/id4/tooling/runtime.h"
 #include "iree/base/tooling/flags.h"
@@ -139,19 +140,6 @@ static iree_status_t FindFixtureTensor(
                           static_cast<int>(role.size), role.data);
 }
 
-static iree_status_t FindFixtureTensor(
-    const id4::test::FixtureTensorSet& fixture_tensors, iree_string_view_t role,
-    iree_string_view_t stage, iree_string_view_t name,
-    const id4::test::FixtureTensor** out_tensor) {
-  *out_tensor = fixture_tensors.FindTensor(role, stage, name);
-  if (*out_tensor) return iree_ok_status();
-  return iree_make_status(
-      IREE_STATUS_NOT_FOUND,
-      "fixture tensor `%.*s` with role `%.*s` and stage `%.*s` not found",
-      static_cast<int>(name.size), name.data, static_cast<int>(role.size),
-      role.data, static_cast<int>(stage.size), stage.data);
-}
-
 static iree_string_view_t FixtureTensorName(
     const id4::test::FixtureTensor& tensor) {
   return iree_make_string_view(tensor.name.data(), tensor.name.size());
@@ -160,28 +148,6 @@ static iree_string_view_t FixtureTensorName(
 static iree_string_view_t FixtureTensorRole(
     const id4::test::FixtureTensor& tensor) {
   return iree_make_string_view(tensor.role.data(), tensor.role.size());
-}
-
-static iree_string_view_t FixtureTensorStage(
-    const id4::test::FixtureTensor& tensor) {
-  return iree_make_string_view(tensor.stage.data(), tensor.stage.size());
-}
-
-static bool TensorShapeEquals(id4_pipeline_tensor_shape_t lhs,
-                              id4_pipeline_tensor_shape_t rhs) {
-  if (lhs.rank != rhs.rank) return false;
-  for (uint32_t i = 0; i < lhs.rank; ++i) {
-    if (lhs.dims[i] != rhs.dims[i]) return false;
-  }
-  return true;
-}
-
-static iree_string_view_t FixtureNameForBoundary(
-    const id4_pipeline_boundary_tensor_plan_t* boundary) {
-  if (iree_string_view_equal(boundary->layout.name, IREE_SV("condition"))) {
-    return IREE_SV("context");
-  }
-  return boundary->layout.name;
 }
 
 static bool ExpectedTapMatchesRequestExtent(
@@ -234,54 +200,6 @@ static iree_status_t FindBoundaryPlan(
   return iree_make_status(IREE_STATUS_NOT_FOUND,
                           "boundary tensor `%.*s` not found",
                           static_cast<int>(name.size), name.data);
-}
-
-static iree_status_t MakeProgramShape(
-    id4_pipeline_tensor_shape_t tensor_shape,
-    id4_pipeline_program_shape_t* out_program_shape) {
-  if (tensor_shape.rank > IREE_ARRAYSIZE(out_program_shape->dims)) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "fixture tensor rank %u exceeds program max rank",
-                            tensor_shape.rank);
-  }
-  std::memset(out_program_shape, 0, sizeof(*out_program_shape));
-  out_program_shape->rank = tensor_shape.rank;
-  for (uint32_t i = 0; i < tensor_shape.rank; ++i) {
-    out_program_shape->dims[i] = tensor_shape.dims[i];
-  }
-  return iree_ok_status();
-}
-
-static iree_status_t ConfigureRequestFromFixture(
-    const id4::test::FixtureTensorSet& fixture_tensors,
-    iree_string_view_t input_stage,
-    id4_ideogram4_dit_request_config_t* out_request) {
-  std::memset(out_request, 0, sizeof(*out_request));
-
-  const id4::test::FixtureTensor* latent = nullptr;
-  IREE_RETURN_IF_ERROR(FindFixtureTensor(fixture_tensors, IREE_SV("input"),
-                                         input_stage, IREE_SV("x"), &latent));
-  IREE_RETURN_IF_ERROR(
-      MakeProgramShape(latent->shape, &out_request->latent_shape));
-
-  const id4::test::FixtureTensor* context = fixture_tensors.FindTensor(
-      IREE_SV("input"), input_stage, IREE_SV("context"));
-  if (!context) {
-    out_request->conditioning_mode =
-        ID4_IDEOGRAM4_DIT_CONDITIONING_MODE_UNCONDITIONED;
-    return iree_ok_status();
-  }
-  if (context->shape.rank != 2 ||
-      context->shape.dims[1] >
-          static_cast<uint64_t>(std::numeric_limits<uint32_t>::max())) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "context fixture tensor must be rank-2 with uint32 token count");
-  }
-  out_request->conditioning_mode =
-      ID4_IDEOGRAM4_DIT_CONDITIONING_MODE_CONDITIONED;
-  out_request->text_token_count = static_cast<uint32_t>(context->shape.dims[1]);
-  return iree_ok_status();
 }
 
 static iree_status_t WritePlanJsonIfRequested(const id4_pipeline_plan_t* plan) {
@@ -395,55 +313,6 @@ static iree_status_t CompareExpectedDiagnosticTaps(
   if (expected_count == 0) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "DiT fixture contains no expected tensors");
-  }
-  return iree_ok_status();
-}
-
-static iree_status_t QueueUpdateInitializedBoundariesFromFixture(
-    iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
-    const id4_pipeline_plan_t* plan,
-    const id4::test::BufferBindingSet& boundary_bindings,
-    const id4::test::FixtureTensorSet& fixture_tensors,
-    iree_string_view_t input_stage, iree_hal_semaphore_t* update_semaphore,
-    uint64_t* inout_update_value) {
-  for (iree_host_size_t i = 0; i < boundary_bindings.count; ++i) {
-    const id4_pipeline_boundary_tensor_plan_t* boundary =
-        id4_pipeline_plan_boundary_tensor_at(plan, i);
-    if (!boundary ||
-        !iree_all_bits_set(boundary->flags,
-                           ID4_PIPELINE_BOUNDARY_TENSOR_FLAG_INITIALIZED)) {
-      continue;
-    }
-    const id4::test::FixtureTensor* fixture_tensor = nullptr;
-    IREE_RETURN_IF_ERROR(
-        FindFixtureTensor(fixture_tensors, IREE_SV("input"), input_stage,
-                          FixtureNameForBoundary(boundary), &fixture_tensor));
-    if (fixture_tensor->dtype != boundary->layout.dtype) {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "fixture tensor `%.*s/%.*s` dtype does not match boundary `%.*s`",
-          static_cast<int>(FixtureTensorStage(*fixture_tensor).size),
-          FixtureTensorStage(*fixture_tensor).data,
-          static_cast<int>(FixtureTensorName(*fixture_tensor).size),
-          FixtureTensorName(*fixture_tensor).data,
-          static_cast<int>(boundary->layout.name.size),
-          boundary->layout.name.data);
-    }
-    if (!TensorShapeEquals(fixture_tensor->shape, boundary->layout.shape)) {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "fixture tensor `%.*s/%.*s` shape does not match boundary `%.*s`",
-          static_cast<int>(FixtureTensorStage(*fixture_tensor).size),
-          FixtureTensorStage(*fixture_tensor).data,
-          static_cast<int>(FixtureTensorName(*fixture_tensor).size),
-          FixtureTensorName(*fixture_tensor).data,
-          static_cast<int>(boundary->layout.name.size),
-          boundary->layout.name.data);
-    }
-    IREE_RETURN_IF_ERROR(id4::test::QueueReadBindingFromHostAllocation(
-        device, queue_affinity, &boundary_bindings.bindings[i],
-        fixture_tensor->payload.data(), fixture_tensor->payload.size(),
-        update_semaphore, inout_update_value));
   }
   return iree_ok_status();
 }
@@ -1301,14 +1170,10 @@ typedef struct DitFixtureRunOptions {
   id4_ideogram4_dit_attention_implementation_t attention_implementation;
   // Feed-forward implementation requested from the DiT stage planner.
   id4_ideogram4_dit_feed_forward_implementation_t feed_forward_implementation;
-  // Fixture input stage used to initialize imported boundary tensors.
-  iree_string_view_t input_stage;
-  // Expected diagnostic tap name prefix selected from the fixture.
-  iree_string_view_t expected_tap_prefix;
+  // Conditioned or unconditioned DiT branch selected for this run.
+  id4::test::Ideogram4DitBranch branch;
   // Additional diagnostic tap names requested by this run.
   iree_string_view_list_t diagnostic_tap_names;
-  // Expected fixture tensor compared against the exported velocity boundary.
-  iree_string_view_t expected_output_name;
   // Integration-run capture identifier used when --id4_capture_dir is set.
   iree_string_view_t capture_run_id;
   // Fixture run behavior selected by DitFixtureRunFlagBits.
@@ -1325,9 +1190,11 @@ static void RunDitFixture(const DitFixtureRunOptions& options) {
   IREE_ASSERT_OK(
       id4::test::LoadFixtureTensors(fixture_directory, &fixture_tensors));
 
+  const id4::test::Ideogram4DitBranchConfig branch =
+      id4::test::Ideogram4DitBranchConfigFor(options.branch);
   id4_ideogram4_dit_request_config_t request;
-  IREE_ASSERT_OK(ConfigureRequestFromFixture(fixture_tensors,
-                                             options.input_stage, &request));
+  IREE_ASSERT_OK(id4::test::Ideogram4DitConfigureRequestFromFixture(
+      fixture_tensors, branch, &request));
   id4_ideogram4_dit_parameter_format_t parameter_format =
       ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_INVALID;
   IREE_ASSERT_OK(ParseDitParameterFormat(&parameter_format));
@@ -1377,7 +1244,7 @@ static void RunDitFixture(const DitFixtureRunOptions& options) {
       if (iree_string_view_equal(FixtureTensorRole(tensor),
                                  IREE_SV("expected")) &&
           iree_string_view_starts_with(FixtureTensorName(tensor),
-                                       options.expected_tap_prefix) &&
+                                       branch.diagnostic_tap_prefix) &&
           ExpectedTapMatchesRequestExtent(tensor, request)) {
         diagnostic_tap_names.push_back(FixtureTensorName(tensor));
       }
@@ -1453,10 +1320,11 @@ static void RunDitFixture(const DitFixtureRunOptions& options) {
       context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, 0,
       IREE_HAL_SEMAPHORE_FLAG_DEFAULT, update_semaphore.out()));
   uint64_t update_value = 0;
-  IREE_ASSERT_OK(QueueUpdateInitializedBoundariesFromFixture(
-      context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, plan.get(),
-      boundary_bindings, fixture_tensors, options.input_stage,
-      update_semaphore.get(), &update_value));
+  IREE_ASSERT_OK(
+      id4::test::Ideogram4DitQueueInitializedBoundaryTensorsFromFixture(
+          context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, plan.get(),
+          boundary_bindings, fixture_tensors, branch, update_semaphore.get(),
+          &update_value));
   IREE_ASSERT_OK(id4::test::QueueFillBoundaryTensors(
       context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, plan.get(),
       boundary_bindings, ID4_PIPELINE_BOUNDARY_TENSOR_FLAG_EXPORTED,
@@ -1535,7 +1403,7 @@ static void RunDitFixture(const DitFixtureRunOptions& options) {
     IREE_ASSERT_OK(CompareExpectedDiagnosticTaps(
         context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, plan.get(),
         diagnostic_tap_bindings, fixture_tensors, request,
-        options.expected_tap_prefix, read_wait.list()));
+        branch.diagnostic_tap_prefix, read_wait.list()));
   }
   iree_string_view_t pytorch_oracle_directory =
       iree_make_cstring_view(FLAG_id4_pytorch_oracle_dir);
@@ -1555,7 +1423,7 @@ static void RunDitFixture(const DitFixtureRunOptions& options) {
                  ID4_DIT_FIXTURE_RUN_FLAG_COMPARE_OUTPUT_BOUNDARY)) {
     IREE_ASSERT_OK(CompareExpectedOutputBoundary(
         context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, plan.get(),
-        boundary_bindings, fixture_tensors, options.expected_output_name,
+        boundary_bindings, fixture_tensors, branch.expected_velocity_name,
         read_wait.list()));
   }
   IREE_ASSERT_OK(VerifyExportedBoundariesWereWritten(
@@ -1572,9 +1440,7 @@ TEST(Ideogram4DitStageIntegration, PrepareAndIssueForwardPreludeFixture) {
           ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_STREAMING,
       .feed_forward_implementation =
           ID4_IDEOGRAM4_DIT_FEED_FORWARD_IMPLEMENTATION_FUSED_PRODUCT,
-      .input_stage = IREE_SV("ideogram4.cond.input"),
-      .expected_tap_prefix = IREE_SV("ideogram4.cond."),
-      .expected_output_name = IREE_SV("ideogram4.cond.output.velocity"),
+      .branch = id4::test::Ideogram4DitBranch::kConditioned,
       .capture_run_id = IREE_SV("ideogram4_dit_forward_integration"),
       .flags = ID4_DIT_FIXTURE_RUN_FLAG_CAPTURE_EXPECTED_TAPS |
                ID4_DIT_FIXTURE_RUN_FLAG_COMPARE_EXPECTED_TAPS |
@@ -1582,9 +1448,7 @@ TEST(Ideogram4DitStageIntegration, PrepareAndIssueForwardPreludeFixture) {
   });
 }
 
-static void RunBf16LinearInputFixture(iree_string_view_t input_stage,
-                                      iree_string_view_t expected_tap_prefix,
-                                      iree_string_view_t expected_output_name,
+static void RunBf16LinearInputFixture(id4::test::Ideogram4DitBranch branch,
                                       iree_string_view_t capture_run_id) {
   RunDitFixture(DitFixtureRunOptions{
       .activation_format =
@@ -1595,9 +1459,7 @@ static void RunBf16LinearInputFixture(iree_string_view_t input_stage,
           ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_STREAMING,
       .feed_forward_implementation =
           ID4_IDEOGRAM4_DIT_FEED_FORWARD_IMPLEMENTATION_PYTORCH_PARITY,
-      .input_stage = input_stage,
-      .expected_tap_prefix = expected_tap_prefix,
-      .expected_output_name = expected_output_name,
+      .branch = branch,
       .capture_run_id = capture_run_id,
       .flags = ID4_DIT_FIXTURE_RUN_FLAG_COMPARE_OUTPUT_BOUNDARY,
   });
@@ -1605,16 +1467,14 @@ static void RunBf16LinearInputFixture(iree_string_view_t input_stage,
 
 TEST(Ideogram4DitStageIntegration, PrepareAndIssueBf16LinearInputFixture) {
   RunBf16LinearInputFixture(
-      IREE_SV("ideogram4.cond.input"), IREE_SV("ideogram4.cond."),
-      IREE_SV("ideogram4.cond.output.velocity"),
+      id4::test::Ideogram4DitBranch::kConditioned,
       IREE_SV("ideogram4_dit_bf16_linear_input_integration"));
 }
 
 TEST(Ideogram4DitStageIntegration,
      PrepareAndIssueBf16LinearInputUnconditionedFixture) {
   RunBf16LinearInputFixture(
-      IREE_SV("ideogram4.uncond.input"), IREE_SV("ideogram4.uncond."),
-      IREE_SV("ideogram4.uncond.output.velocity"),
+      id4::test::Ideogram4DitBranch::kUnconditioned,
       IREE_SV("ideogram4_dit_bf16_linear_input_unconditioned_integration"));
 }
 
@@ -1633,14 +1493,12 @@ TEST(Ideogram4DitStageIntegration,
           ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_MATERIALIZED_WMMA,
       .feed_forward_implementation =
           ID4_IDEOGRAM4_DIT_FEED_FORWARD_IMPLEMENTATION_PYTORCH_PARITY,
-      .input_stage = IREE_SV("ideogram4.cond.input"),
-      .expected_tap_prefix = iree_string_view_empty(),
+      .branch = id4::test::Ideogram4DitBranch::kConditioned,
       .diagnostic_tap_names =
           {
               IREE_ARRAYSIZE(diagnostic_tap_names),
               diagnostic_tap_names,
           },
-      .expected_output_name = iree_string_view_empty(),
       .capture_run_id =
           IREE_SV("ideogram4_dit_materialized_wmma_attention_integration"),
       .flags = ID4_DIT_FIXTURE_RUN_FLAG_VERIFY_DIAGNOSTIC_TAPS_WRITTEN,
@@ -1661,14 +1519,12 @@ TEST(Ideogram4DitStageIntegration, PrepareAndIssueBlockedWmmaAttentionFixture) {
           ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_BLOCKED_WMMA,
       .feed_forward_implementation =
           ID4_IDEOGRAM4_DIT_FEED_FORWARD_IMPLEMENTATION_PYTORCH_PARITY,
-      .input_stage = IREE_SV("ideogram4.cond.input"),
-      .expected_tap_prefix = iree_string_view_empty(),
+      .branch = id4::test::Ideogram4DitBranch::kConditioned,
       .diagnostic_tap_names =
           {
               IREE_ARRAYSIZE(diagnostic_tap_names),
               diagnostic_tap_names,
           },
-      .expected_output_name = iree_string_view_empty(),
       .capture_run_id =
           IREE_SV("ideogram4_dit_blocked_wmma_attention_integration"),
       .flags = ID4_DIT_FIXTURE_RUN_FLAG_VERIFY_DIAGNOSTIC_TAPS_WRITTEN,
@@ -1689,16 +1545,41 @@ TEST(Ideogram4DitStageIntegration, PrepareAndIssueOnlineWmmaAttentionFixture) {
           ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_ONLINE_WMMA,
       .feed_forward_implementation =
           ID4_IDEOGRAM4_DIT_FEED_FORWARD_IMPLEMENTATION_PYTORCH_PARITY,
-      .input_stage = IREE_SV("ideogram4.cond.input"),
-      .expected_tap_prefix = iree_string_view_empty(),
+      .branch = id4::test::Ideogram4DitBranch::kConditioned,
       .diagnostic_tap_names =
           {
               IREE_ARRAYSIZE(diagnostic_tap_names),
               diagnostic_tap_names,
           },
-      .expected_output_name = iree_string_view_empty(),
       .capture_run_id =
           IREE_SV("ideogram4_dit_online_wmma_attention_integration"),
+      .flags = ID4_DIT_FIXTURE_RUN_FLAG_VERIFY_DIAGNOSTIC_TAPS_WRITTEN,
+  });
+}
+
+TEST(Ideogram4DitStageIntegration,
+     PrepareAndIssueOnlineWmmaAttentionUnconditionedFixture) {
+  const iree_string_view_t diagnostic_tap_names[] = {
+      IREE_SV("ideogram4.uncond.layers.0.attention.context"),
+      IREE_SV("ideogram4.uncond.layers.0.attention.output"),
+  };
+  RunDitFixture(DitFixtureRunOptions{
+      .activation_format =
+          ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT,
+      .weight_execution_format =
+          ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_BF16_RESIDENT,
+      .attention_implementation =
+          ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_ONLINE_WMMA,
+      .feed_forward_implementation =
+          ID4_IDEOGRAM4_DIT_FEED_FORWARD_IMPLEMENTATION_PYTORCH_PARITY,
+      .branch = id4::test::Ideogram4DitBranch::kUnconditioned,
+      .diagnostic_tap_names =
+          {
+              IREE_ARRAYSIZE(diagnostic_tap_names),
+              diagnostic_tap_names,
+          },
+      .capture_run_id =
+          IREE_SV("ideogram4_dit_online_wmma_attention_unconditioned"),
       .flags = ID4_DIT_FIXTURE_RUN_FLAG_VERIFY_DIAGNOSTIC_TAPS_WRITTEN,
   });
 }

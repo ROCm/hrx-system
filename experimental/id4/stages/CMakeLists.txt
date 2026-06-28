@@ -289,6 +289,23 @@ iree_cc_library(
   PUBLIC
 )
 
+iree_cc_library(
+  NAME
+    ideogram4_dit_test_util
+  HDRS
+    "ideogram4_dit_test_util.h"
+  SRCS
+    "ideogram4_dit_test_util.cc"
+  DEPS
+    ::hal_integration_util
+    ::ideogram4_dit_program
+    iree::base
+    iree::experimental::id4::pipeline::plan
+    iree::hal
+  TESTONLY
+  PUBLIC
+)
+
 iree_cc_test(
   NAME
     hal_integration_util_test
@@ -450,6 +467,7 @@ iree_cc_test(
     ::hal_integration_util
     ::ideogram4_dit
     ::ideogram4_dit_parameters
+    ::ideogram4_dit_test_util
     iree::base
     iree::base::tooling::flags
     iree::experimental::id4::pipeline::plan
@@ -643,6 +661,7 @@ iree_cc_binary_benchmark(
     ::hal_integration_util
     ::ideogram4_dit
     ::ideogram4_dit_parameters
+    ::ideogram4_dit_test_util
     iree::base
     iree::base::tooling::flags
     iree::experimental::id4::pipeline::plan

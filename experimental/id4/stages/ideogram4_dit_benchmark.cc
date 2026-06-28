@@ -7,13 +7,13 @@
 #include <cinttypes>
 #include <cstdio>
 #include <cstring>
-#include <limits>
 
 #include "experimental/id4/pipeline/plan.h"
 #include "experimental/id4/pipeline/stage.h"
 #include "experimental/id4/stages/hal_integration_util.h"
 #include "experimental/id4/stages/ideogram4_dit.h"
 #include "experimental/id4/stages/ideogram4_dit_parameters.h"
+#include "experimental/id4/stages/ideogram4_dit_test_util.h"
 #include "experimental/id4/tooling/filesystem.h"
 #include "experimental/id4/tooling/runtime.h"
 #include "iree/base/tooling/flags.h"
@@ -45,29 +45,11 @@ IREE_FLAG(string, dit_unconditioned_fp8_scope, "dit_uncond_fp8",
 
 namespace {
 
-enum class DitBenchmarkBranch {
-  // Conditioned DiT branch using text condition tokens.
-  kConditioned,
-  // Unconditioned DiT branch using image tokens only.
-  kUnconditioned,
-};
-
 enum class DitBenchmarkIssueMode {
   // Include submission and completion wait in the timed region.
   kEndToEnd,
   // Time submission only and pause timing around completion waits.
   kSubmitOnly,
-};
-
-struct DitBenchmarkBranchConfig {
-  // Parameter scope expected by the stage and --parameters flag.
-  iree_string_view_t parameter_scope;
-  // FP8 e4m3 source parameter scope used by the FP8 source policy.
-  iree_string_view_t fp8_parameter_scope;
-  // Fixture stage containing boundary input tensors.
-  iree_string_view_t fixture_stage;
-  // Dynamic conditioning mode used when planning the DiT request.
-  id4_ideogram4_dit_conditioning_mode_t conditioning_mode;
 };
 
 struct DitBenchmarkContext {
@@ -103,54 +85,13 @@ struct DitBenchmarkContext {
   id4_pipeline_diagnostics_sink_t diagnostics_sink = {};
 };
 
-static DitBenchmarkBranchConfig BranchConfig(DitBenchmarkBranch branch) {
+static iree_string_view_t BranchFp8ParameterScope(
+    id4::test::Ideogram4DitBranch branch) {
   switch (branch) {
-    case DitBenchmarkBranch::kConditioned:
-      return DitBenchmarkBranchConfig{
-          // Conditioned DiT parameter scope.
-          /*.parameter_scope=*/IREE_SV("dit_cond"),
-          // Conditioned DiT FP8 e4m3 source parameter scope.
-          /*.fp8_parameter_scope=*/
-          iree_make_cstring_view(FLAG_dit_conditioned_fp8_scope),
-          // Fixture stage carrying conditioned DiT inputs.
-          /*.fixture_stage=*/IREE_SV("ideogram4.cond.input"),
-          // Conditioned request consumes Qwen context tokens.
-          /*.conditioning_mode=*/
-          ID4_IDEOGRAM4_DIT_CONDITIONING_MODE_CONDITIONED,
-      };
-    case DitBenchmarkBranch::kUnconditioned:
-      return DitBenchmarkBranchConfig{
-          // Unconditioned DiT parameter scope.
-          /*.parameter_scope=*/IREE_SV("dit_uncond"),
-          // Unconditioned DiT FP8 e4m3 source parameter scope.
-          /*.fp8_parameter_scope=*/
-          iree_make_cstring_view(FLAG_dit_unconditioned_fp8_scope),
-          // Fixture stage carrying unconditioned DiT inputs.
-          /*.fixture_stage=*/IREE_SV("ideogram4.uncond.input"),
-          // Unconditioned request consumes image tokens only.
-          /*.conditioning_mode=*/
-          ID4_IDEOGRAM4_DIT_CONDITIONING_MODE_UNCONDITIONED,
-      };
-  }
-  return DitBenchmarkBranchConfig{};
-}
-
-static iree_string_view_t BranchName(DitBenchmarkBranch branch) {
-  switch (branch) {
-    case DitBenchmarkBranch::kConditioned:
-      return IREE_SV("conditioned");
-    case DitBenchmarkBranch::kUnconditioned:
-      return IREE_SV("unconditioned");
-  }
-  return IREE_SV("invalid");
-}
-
-static iree_string_view_t BranchPlanFileName(DitBenchmarkBranch branch) {
-  switch (branch) {
-    case DitBenchmarkBranch::kConditioned:
-      return IREE_SV("cond.json");
-    case DitBenchmarkBranch::kUnconditioned:
-      return IREE_SV("uncond.json");
+    case id4::test::Ideogram4DitBranch::kConditioned:
+      return iree_make_cstring_view(FLAG_dit_conditioned_fp8_scope);
+    case id4::test::Ideogram4DitBranch::kUnconditioned:
+      return iree_make_cstring_view(FLAG_dit_unconditioned_fp8_scope);
   }
   return iree_string_view_empty();
 }
@@ -256,9 +197,10 @@ static uint64_t CeilMiB(iree_device_size_t byte_length) {
 
 static void SetDitBenchmarkLabel(iree_benchmark_state_t* benchmark_state,
                                  const DitBenchmarkContext& context,
-                                 DitBenchmarkBranch branch,
+                                 id4::test::Ideogram4DitBranch branch,
                                  id4_pipeline_plan_statistics_t statistics) {
-  const iree_string_view_t branch_name = BranchName(branch);
+  const iree_string_view_t branch_name =
+      id4::test::Ideogram4DitBranchName(branch);
   const iree_string_view_t parameter_format =
       id4_ideogram4_dit_parameter_format_name(context.parameter_format);
   const iree_string_view_t weight_execution_format =
@@ -300,8 +242,8 @@ static void SetDitBenchmarkLabel(iree_benchmark_state_t* benchmark_state,
   iree_benchmark_set_label(benchmark_state, label);
 }
 
-static iree_status_t WritePlanJsonIfRequested(DitBenchmarkBranch branch,
-                                              const id4_pipeline_plan_t* plan) {
+static iree_status_t WritePlanJsonIfRequested(
+    id4::test::Ideogram4DitBranch branch, const id4_pipeline_plan_t* plan) {
   iree_string_view_t output_dir =
       iree_make_cstring_view(FLAG_id4_plan_output_dir);
   if (iree_string_view_is_empty(output_dir)) return iree_ok_status();
@@ -314,7 +256,8 @@ static iree_status_t WritePlanJsonIfRequested(DitBenchmarkBranch branch,
   iree_string_view_t path = iree_string_view_empty();
   if (iree_status_is_ok(status)) {
     status = id4_tooling_format_child_path(
-        output_dir, BranchPlanFileName(branch), iree_allocator_system(), &path);
+        output_dir, id4::test::Ideogram4DitBranchPlanFileName(branch),
+        iree_allocator_system(), &path);
   }
   if (iree_status_is_ok(status)) {
     iree_string_view_t json = iree_string_builder_view(&builder);
@@ -327,78 +270,9 @@ static iree_status_t WritePlanJsonIfRequested(DitBenchmarkBranch branch,
   return status;
 }
 
-static iree_status_t FindFixtureTensor(
-    const id4::test::FixtureTensorSet& fixture_tensors, iree_string_view_t role,
-    iree_string_view_t stage, iree_string_view_t name,
-    const id4::test::FixtureTensor** out_tensor) {
-  *out_tensor = fixture_tensors.FindTensor(role, stage, name);
-  if (*out_tensor) return iree_ok_status();
-  return iree_make_status(
-      IREE_STATUS_NOT_FOUND, "fixture tensor `%.*s/%.*s/%.*s` not found",
-      static_cast<int>(role.size), role.data, static_cast<int>(stage.size),
-      stage.data, static_cast<int>(name.size), name.data);
-}
-
-static bool TensorShapeEquals(id4_pipeline_tensor_shape_t lhs,
-                              id4_pipeline_tensor_shape_t rhs) {
-  if (lhs.rank != rhs.rank) return false;
-  for (uint32_t i = 0; i < lhs.rank; ++i) {
-    if (lhs.dims[i] != rhs.dims[i]) return false;
-  }
-  return true;
-}
-
-static iree_status_t MakeProgramShape(
-    id4_pipeline_tensor_shape_t tensor_shape,
-    id4_pipeline_program_shape_t* out_program_shape) {
-  if (tensor_shape.rank > IREE_ARRAYSIZE(out_program_shape->dims)) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "fixture tensor rank %u exceeds program max rank",
-                            tensor_shape.rank);
-  }
-  std::memset(out_program_shape, 0, sizeof(*out_program_shape));
-  out_program_shape->rank = tensor_shape.rank;
-  for (uint32_t i = 0; i < tensor_shape.rank; ++i) {
-    out_program_shape->dims[i] = tensor_shape.dims[i];
-  }
-  return iree_ok_status();
-}
-
-static iree_status_t ConfigureRequestFromFixture(
-    const id4::test::FixtureTensorSet& fixture_tensors,
-    DitBenchmarkBranchConfig branch,
-    id4_ideogram4_dit_request_config_t* out_request) {
-  std::memset(out_request, 0, sizeof(*out_request));
-
-  const id4::test::FixtureTensor* latent = nullptr;
-  IREE_RETURN_IF_ERROR(FindFixtureTensor(fixture_tensors, IREE_SV("input"),
-                                         branch.fixture_stage, IREE_SV("x"),
-                                         &latent));
-  IREE_RETURN_IF_ERROR(
-      MakeProgramShape(latent->shape, &out_request->latent_shape));
-  out_request->conditioning_mode = branch.conditioning_mode;
-
-  if (branch.conditioning_mode ==
-      ID4_IDEOGRAM4_DIT_CONDITIONING_MODE_CONDITIONED) {
-    const id4::test::FixtureTensor* condition = nullptr;
-    IREE_RETURN_IF_ERROR(FindFixtureTensor(fixture_tensors, IREE_SV("input"),
-                                           branch.fixture_stage,
-                                           IREE_SV("context"), &condition));
-    if (condition->shape.rank != 2 ||
-        condition->shape.dims[1] >
-            static_cast<uint64_t>(std::numeric_limits<uint32_t>::max())) {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "condition fixture tensor must be rank-2 with uint32 token count");
-    }
-    out_request->text_token_count =
-        static_cast<uint32_t>(condition->shape.dims[1]);
-  }
-  return iree_ok_status();
-}
-
 static iree_status_t CreateDitStage(const id4::test::LiveStageContext& live,
-                                    DitBenchmarkBranchConfig branch,
+                                    id4::test::Ideogram4DitBranch selected,
+                                    id4::test::Ideogram4DitBranchConfig branch,
                                     id4_ideogram4_dit_parameter_format_t format,
                                     id4_pipeline_stage_t** out_stage) {
   IREE_ASSERT_ARGUMENT(out_stage);
@@ -413,7 +287,8 @@ static iree_status_t CreateDitStage(const id4::test::LiveStageContext& live,
   id4_ideogram4_dit_parameter_source_rule_list_t source_rules;
   IREE_RETURN_IF_ERROR(id4_ideogram4_dit_parameter_source_rule_list_initialize(
       format, *id4_ideogram4_dit_program_ideogram4_model_config(),
-      branch.fp8_parameter_scope, iree_allocator_system(), &source_rules));
+      BranchFp8ParameterScope(selected), iree_allocator_system(),
+      &source_rules));
 
   id4_ideogram4_dit_stage_create_options_t create_options;
   std::memset(&create_options, 0, sizeof(create_options));
@@ -432,7 +307,7 @@ static iree_status_t CreateDitStage(const id4::test::LiveStageContext& live,
 }
 
 static iree_status_t LoadFixtureAndConfigureRequest(
-    DitBenchmarkContext* context, DitBenchmarkBranchConfig branch) {
+    DitBenchmarkContext* context, id4::test::Ideogram4DitBranchConfig branch) {
   const iree_string_view_t fixture_directory =
       iree_make_cstring_view(FLAG_id4_fixture_dir);
   if (iree_string_view_is_empty(fixture_directory)) {
@@ -441,14 +316,15 @@ static iree_status_t LoadFixtureAndConfigureRequest(
   }
   IREE_RETURN_IF_ERROR(id4::test::LoadFixtureTensors(
       fixture_directory, &context->fixture_tensors));
-  return ConfigureRequestFromFixture(context->fixture_tensors, branch,
-                                     &context->request);
+  return id4::test::Ideogram4DitConfigureRequestFromFixture(
+      context->fixture_tensors, branch, &context->request);
 }
 
 static iree_status_t CreateLoadedDitStageContext(
-    DitBenchmarkBranch branch, DitBenchmarkContext* out_context) {
+    id4::test::Ideogram4DitBranch branch, DitBenchmarkContext* out_context) {
   IREE_ASSERT_ARGUMENT(out_context);
-  const DitBenchmarkBranchConfig branch_config = BranchConfig(branch);
+  const id4::test::Ideogram4DitBranchConfig branch_config =
+      id4::test::Ideogram4DitBranchConfigFor(branch);
   IREE_RETURN_IF_ERROR(ParseDitParameterFormat(&out_context->parameter_format));
   IREE_RETURN_IF_ERROR(
       ParseDitWeightExecutionFormat(&out_context->weight_execution_format));
@@ -462,7 +338,7 @@ static iree_status_t CreateLoadedDitStageContext(
       id4::test::CreateLiveStageContextFromFlags(&out_context->live));
   IREE_RETURN_IF_ERROR(
       LoadFixtureAndConfigureRequest(out_context, branch_config));
-  IREE_RETURN_IF_ERROR(CreateDitStage(out_context->live, branch_config,
+  IREE_RETURN_IF_ERROR(CreateDitStage(out_context->live, branch, branch_config,
                                       out_context->parameter_format,
                                       out_context->stage.out()));
 
@@ -473,10 +349,13 @@ static iree_status_t CreateLoadedDitStageContext(
   return id4_pipeline_stage_load(out_context->stage.get(), &load_options);
 }
 
-static iree_status_t AttachDitPreparationInputs(DitBenchmarkBranch branch,
-                                                DitBenchmarkContext* context) {
+static iree_status_t AttachDitPreparationInputs(
+    id4::test::Ideogram4DitBranch branch, DitBenchmarkContext* context) {
   IREE_ASSERT_ARGUMENT(context);
-  const DitBenchmarkBranchConfig branch_config = BranchConfig(branch);
+  const id4::test::Ideogram4DitBranchConfig branch_config =
+      id4::test::Ideogram4DitBranchConfigFor(branch);
+  const iree_string_view_t fp8_parameter_scope =
+      BranchFp8ParameterScope(branch);
   IREE_RETURN_IF_ERROR(
       id4::test::CreateEmbeddedKernelLibrary(context->kernel_library.out()));
   if (context->parameter_format == ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_BF16) {
@@ -499,7 +378,7 @@ static iree_status_t AttachDitPreparationInputs(DitBenchmarkBranch branch,
       },
       {
           // FP8 e4m3 source parameter scope.
-          .scope = branch_config.fp8_parameter_scope,
+          .scope = fp8_parameter_scope,
           // FP8 e4m3 source provider output.
           .out_provider = fp8_provider.out(),
       },
@@ -516,7 +395,7 @@ static iree_status_t AttachDitPreparationInputs(DitBenchmarkBranch branch,
       },
       {
           // FP8 e4m3 source parameter scope.
-          .scope = branch_config.fp8_parameter_scope,
+          .scope = fp8_parameter_scope,
           // FP8 e4m3 source provider.
           .provider = fp8_provider.get(),
       },
@@ -527,7 +406,7 @@ static iree_status_t AttachDitPreparationInputs(DitBenchmarkBranch branch,
 }
 
 static iree_status_t CreateLoadedDitBenchmarkContext(
-    DitBenchmarkBranch branch, DitBenchmarkContext* out_context) {
+    id4::test::Ideogram4DitBranch branch, DitBenchmarkContext* out_context) {
   IREE_RETURN_IF_ERROR(CreateLoadedDitStageContext(branch, out_context));
   return AttachDitPreparationInputs(branch, out_context);
 }
@@ -586,106 +465,6 @@ static iree_status_t PrepareDitBundle(DitBenchmarkContext* context,
                                     &prepare_options, out_bundle);
 }
 
-static iree_status_t FindBoundaryPlan(
-    const id4_pipeline_plan_t* plan, iree_string_view_t name,
-    const id4_pipeline_boundary_tensor_plan_t** out_boundary) {
-  for (iree_host_size_t i = 0;
-       i < id4_pipeline_plan_boundary_tensor_count(plan); ++i) {
-    const id4_pipeline_boundary_tensor_plan_t* boundary =
-        id4_pipeline_plan_boundary_tensor_at(plan, i);
-    if (boundary && iree_string_view_equal(boundary->layout.name, name)) {
-      *out_boundary = boundary;
-      return iree_ok_status();
-    }
-  }
-  return iree_make_status(IREE_STATUS_NOT_FOUND,
-                          "boundary tensor `%.*s` not found",
-                          static_cast<int>(name.size), name.data);
-}
-
-static iree_status_t QueueUpdateBoundaryFromFixture(
-    iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
-    const id4_pipeline_plan_t* plan,
-    const id4::test::BufferBindingSet& binding_set,
-    iree_string_view_t boundary_name, const id4::test::FixtureTensor& tensor,
-    iree_hal_semaphore_t* update_semaphore, uint64_t* inout_update_value) {
-  const id4_pipeline_boundary_tensor_plan_t* boundary = nullptr;
-  IREE_RETURN_IF_ERROR(FindBoundaryPlan(plan, boundary_name, &boundary));
-  if (tensor.dtype != boundary->layout.dtype) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "fixture tensor `%s/%s` dtype does not match boundary `%.*s` dtype",
-        tensor.stage.c_str(), tensor.name.c_str(),
-        static_cast<int>(boundary_name.size), boundary_name.data);
-  }
-  if (!TensorShapeEquals(tensor.shape, boundary->layout.shape)) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "fixture tensor `%s/%s` shape does not match boundary `%.*s` shape",
-        tensor.stage.c_str(), tensor.name.c_str(),
-        static_cast<int>(boundary_name.size), boundary_name.data);
-  }
-
-  iree_hal_buffer_binding_t binding = {};
-  IREE_RETURN_IF_ERROR(id4::test::FindBoundaryBinding(plan, binding_set,
-                                                      boundary_name, &binding));
-  return id4::test::QueueReadBindingFromHostAllocation(
-      device, queue_affinity, &binding, tensor.payload.data(),
-      tensor.payload.size(), update_semaphore, inout_update_value);
-}
-
-static iree_status_t QueueUpdateBoundaryFromFixture(
-    iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
-    const id4_pipeline_plan_t* plan,
-    const id4::test::BufferBindingSet& binding_set,
-    const id4::test::FixtureTensorSet& fixture_tensors,
-    iree_string_view_t fixture_stage, iree_string_view_t boundary_name,
-    iree_string_view_t fixture_name, iree_hal_semaphore_t* update_semaphore,
-    uint64_t* inout_update_value) {
-  const id4::test::FixtureTensor* tensor = nullptr;
-  IREE_RETURN_IF_ERROR(FindFixtureTensor(fixture_tensors, IREE_SV("input"),
-                                         fixture_stage, fixture_name, &tensor));
-  return QueueUpdateBoundaryFromFixture(device, queue_affinity, plan,
-                                        binding_set, boundary_name, *tensor,
-                                        update_semaphore, inout_update_value);
-}
-
-static iree_status_t QueueUpdateBranchInputsFromFixture(
-    DitBenchmarkBranch branch, DitBenchmarkContext* context,
-    const id4_pipeline_plan_t* plan,
-    const id4::test::BufferBindingSet& boundary_bindings,
-    iree_hal_semaphore_t* update_semaphore, uint64_t* inout_update_value) {
-  const DitBenchmarkBranchConfig branch_config = BranchConfig(branch);
-  IREE_RETURN_IF_ERROR(QueueUpdateBoundaryFromFixture(
-      context->live.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, plan,
-      boundary_bindings, context->fixture_tensors, branch_config.fixture_stage,
-      IREE_SV("x"), IREE_SV("x"), update_semaphore, inout_update_value));
-  IREE_RETURN_IF_ERROR(QueueUpdateBoundaryFromFixture(
-      context->live.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, plan,
-      boundary_bindings, context->fixture_tensors, branch_config.fixture_stage,
-      IREE_SV("timestep"), IREE_SV("timestep"), update_semaphore,
-      inout_update_value));
-  IREE_RETURN_IF_ERROR(QueueUpdateBoundaryFromFixture(
-      context->live.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, plan,
-      boundary_bindings, context->fixture_tensors, branch_config.fixture_stage,
-      IREE_SV("image_indicator"), IREE_SV("image_indicator"), update_semaphore,
-      inout_update_value));
-  IREE_RETURN_IF_ERROR(QueueUpdateBoundaryFromFixture(
-      context->live.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, plan,
-      boundary_bindings, context->fixture_tensors, branch_config.fixture_stage,
-      IREE_SV("position_embedding"), IREE_SV("position_embedding"),
-      update_semaphore, inout_update_value));
-  if (branch_config.conditioning_mode ==
-      ID4_IDEOGRAM4_DIT_CONDITIONING_MODE_CONDITIONED) {
-    IREE_RETURN_IF_ERROR(QueueUpdateBoundaryFromFixture(
-        context->live.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, plan,
-        boundary_bindings, context->fixture_tensors,
-        branch_config.fixture_stage, IREE_SV("condition"), IREE_SV("context"),
-        update_semaphore, inout_update_value));
-  }
-  return iree_ok_status();
-}
-
 static iree_status_t IssueDitBundle(
     DitBenchmarkContext* context, id4_pipeline_bundle_t* bundle,
     const id4::test::BufferBindingSet& boundary_bindings,
@@ -735,7 +514,7 @@ static const iree_benchmark_def_t* RegisterDitBenchmark(
                                IREE_BENCHMARK_UNIT_##time_unit)
 
 static iree_status_t RunPlanBenchmark(iree_benchmark_state_t* benchmark_state,
-                                      DitBenchmarkBranch branch) {
+                                      id4::test::Ideogram4DitBranch branch) {
   DitBenchmarkContext context;
   IREE_RETURN_IF_ERROR(CreateLoadedDitStageContext(branch, &context));
 
@@ -765,19 +544,22 @@ static iree_status_t RunPlanBenchmark(iree_benchmark_state_t* benchmark_state,
 }
 
 IREE_BENCHMARK_FN(BM_Ideogram4DitStagePlanConditionedFixture) {
-  return RunPlanBenchmark(benchmark_state, DitBenchmarkBranch::kConditioned);
+  return RunPlanBenchmark(benchmark_state,
+                          id4::test::Ideogram4DitBranch::kConditioned);
 }
 ID4_DIT_BENCHMARK_REGISTER(BM_Ideogram4DitStagePlanConditionedFixture,
                            MICROSECOND);
 
 IREE_BENCHMARK_FN(BM_Ideogram4DitStagePlanUnconditionedFixture) {
-  return RunPlanBenchmark(benchmark_state, DitBenchmarkBranch::kUnconditioned);
+  return RunPlanBenchmark(benchmark_state,
+                          id4::test::Ideogram4DitBranch::kUnconditioned);
 }
 ID4_DIT_BENCHMARK_REGISTER(BM_Ideogram4DitStagePlanUnconditionedFixture,
                            MICROSECOND);
 
 static iree_status_t RunPrepareBenchmark(
-    iree_benchmark_state_t* benchmark_state, DitBenchmarkBranch branch) {
+    iree_benchmark_state_t* benchmark_state,
+    id4::test::Ideogram4DitBranch branch) {
   DitBenchmarkContext context;
   IREE_RETURN_IF_ERROR(CreateLoadedDitBenchmarkContext(branch, &context));
 
@@ -826,20 +608,21 @@ static iree_status_t RunPrepareBenchmark(
 }
 
 IREE_BENCHMARK_FN(BM_Ideogram4DitStagePrepareConditionedFixture) {
-  return RunPrepareBenchmark(benchmark_state, DitBenchmarkBranch::kConditioned);
+  return RunPrepareBenchmark(benchmark_state,
+                             id4::test::Ideogram4DitBranch::kConditioned);
 }
 ID4_DIT_BENCHMARK_REGISTER(BM_Ideogram4DitStagePrepareConditionedFixture,
                            MILLISECOND);
 
 IREE_BENCHMARK_FN(BM_Ideogram4DitStagePrepareUnconditionedFixture) {
   return RunPrepareBenchmark(benchmark_state,
-                             DitBenchmarkBranch::kUnconditioned);
+                             id4::test::Ideogram4DitBranch::kUnconditioned);
 }
 ID4_DIT_BENCHMARK_REGISTER(BM_Ideogram4DitStagePrepareUnconditionedFixture,
                            MILLISECOND);
 
 static iree_status_t RunIssueBenchmark(iree_benchmark_state_t* benchmark_state,
-                                       DitBenchmarkBranch branch,
+                                       id4::test::Ideogram4DitBranch branch,
                                        DitBenchmarkIssueMode issue_mode) {
   DitBenchmarkContext context;
   IREE_RETURN_IF_ERROR(CreateLoadedDitBenchmarkContext(branch, &context));
@@ -873,9 +656,12 @@ static iree_status_t RunIssueBenchmark(iree_benchmark_state_t* benchmark_state,
       context.live.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, 0,
       IREE_HAL_SEMAPHORE_FLAG_DEFAULT, update_semaphore.out()));
   uint64_t update_value = 0;
-  IREE_RETURN_IF_ERROR(QueueUpdateBranchInputsFromFixture(
-      branch, &context, plan.get(), boundary_bindings, update_semaphore.get(),
-      &update_value));
+  IREE_RETURN_IF_ERROR(
+      id4::test::Ideogram4DitQueueInitializedBoundaryTensorsFromFixture(
+          context.live.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, plan.get(),
+          boundary_bindings, context.fixture_tensors,
+          id4::test::Ideogram4DitBranchConfigFor(branch),
+          update_semaphore.get(), &update_value));
   const uint32_t sentinel_pattern = 0xA5A5A5A5u;
   IREE_RETURN_IF_ERROR(id4::test::QueueFillBoundaryTensors(
       context.live.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, plan.get(),
@@ -937,28 +723,32 @@ static iree_status_t RunIssueBenchmark(iree_benchmark_state_t* benchmark_state,
 }
 
 IREE_BENCHMARK_FN(BM_Ideogram4DitStageIssueConditionedSubmitOnly) {
-  return RunIssueBenchmark(benchmark_state, DitBenchmarkBranch::kConditioned,
+  return RunIssueBenchmark(benchmark_state,
+                           id4::test::Ideogram4DitBranch::kConditioned,
                            DitBenchmarkIssueMode::kSubmitOnly);
 }
 ID4_DIT_BENCHMARK_REGISTER(BM_Ideogram4DitStageIssueConditionedSubmitOnly,
                            MICROSECOND);
 
 IREE_BENCHMARK_FN(BM_Ideogram4DitStageIssueConditionedEndToEnd) {
-  return RunIssueBenchmark(benchmark_state, DitBenchmarkBranch::kConditioned,
+  return RunIssueBenchmark(benchmark_state,
+                           id4::test::Ideogram4DitBranch::kConditioned,
                            DitBenchmarkIssueMode::kEndToEnd);
 }
 ID4_DIT_BENCHMARK_REGISTER(BM_Ideogram4DitStageIssueConditionedEndToEnd,
                            MILLISECOND);
 
 IREE_BENCHMARK_FN(BM_Ideogram4DitStageIssueUnconditionedSubmitOnly) {
-  return RunIssueBenchmark(benchmark_state, DitBenchmarkBranch::kUnconditioned,
+  return RunIssueBenchmark(benchmark_state,
+                           id4::test::Ideogram4DitBranch::kUnconditioned,
                            DitBenchmarkIssueMode::kSubmitOnly);
 }
 ID4_DIT_BENCHMARK_REGISTER(BM_Ideogram4DitStageIssueUnconditionedSubmitOnly,
                            MICROSECOND);
 
 IREE_BENCHMARK_FN(BM_Ideogram4DitStageIssueUnconditionedEndToEnd) {
-  return RunIssueBenchmark(benchmark_state, DitBenchmarkBranch::kUnconditioned,
+  return RunIssueBenchmark(benchmark_state,
+                           id4::test::Ideogram4DitBranch::kUnconditioned,
                            DitBenchmarkIssueMode::kEndToEnd);
 }
 ID4_DIT_BENCHMARK_REGISTER(BM_Ideogram4DitStageIssueUnconditionedEndToEnd,
