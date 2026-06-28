@@ -396,8 +396,8 @@ static_assert(sizeof(loom_value_fact_encoded_operand_schema_t) == 64,
 
 // Summary of a storage-schema encoding.
 typedef struct loom_value_fact_storage_schema_t {
-  // One-based static schema encoding ID when known. Zero means no exact nested
-  // storage schema is known.
+  // One-based static schema encoding ID when a complete static schema is known.
+  // Zero means no exact nested storage schema replacement is known.
   uint16_t static_spec_encoding_id;
 
   // Target-independent encoded operand facts.
@@ -431,8 +431,8 @@ typedef struct loom_value_fact_encoding_summary_t {
   // Known semantic role from the value type or encoding family.
   loom_encoding_role_t role;
 
-  // One-based static encoding spec ID when the value came from
-  // encoding.define. Zero means no exact static spec is known.
+  // One-based static encoding spec ID when a complete static encoding is known.
+  // Zero means no exact static replacement is known.
   uint16_t static_spec_encoding_id;
 
   // Address-layout facts when this encoding directly is a layout or composes a

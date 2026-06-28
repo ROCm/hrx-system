@@ -249,6 +249,31 @@ func.def @physical_storage_resolves_layout(%buffer: buffer) -> (i64) {
 
 // ====
 
+// Dynamic physical-storage parameters carry layout/schema semantics through
+// their SSA encoding value; canonicalization must not replace them with a bare
+// static #physical_storage family shell.
+func.def @dynamic_physical_storage_encoding_remains_ssa(%buffer: buffer, %i: index) -> (f8E4M3) {
+  %offset = index.constant 0 : offset
+  %layout = encoding.layout.strided [1] : encoding<layout>
+  %schema = encoding.define #matrix_operand<element_format=f8e4m3, payload_elements=1, payload_registers=1, rounding=finite_only> : encoding<schema>
+  %storage = encoding.define #physical_storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
+  %view = buffer.view %buffer[%offset] : buffer -> view<4xf8E4M3, %storage>
+  %value = view.load %view[%i] : view<4xf8E4M3, %storage> -> f8E4M3
+  func.return %value : f8E4M3
+}
+// ----
+func.def @dynamic_physical_storage_encoding_remains_ssa(%buffer: buffer, %i: index) -> (f8E4M3) {
+  %offset = index.constant 0 : offset
+  %layout = encoding.layout.strided [1] : encoding<layout>
+  %schema = encoding.define #matrix_operand<element_format=f8e4m3, payload_elements=1, payload_registers=1, rounding=finite_only> : encoding<schema>
+  %storage = encoding.define #physical_storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
+  %view = buffer.view %buffer[%offset] : buffer -> view<4xf8E4M3, %storage>
+  %value = view.load %view[%i] : view<4xf8E4M3, %storage> -> f8E4M3
+  func.return %value : f8E4M3
+}
+
+// ====
+
 // Static shaped-type layouts are layout facts too; they should not require a
 // local SSA layout op just to recover dense footprints.
 func.def @static_dense_type_layout_facts(%buffer: buffer) -> (i64) {
