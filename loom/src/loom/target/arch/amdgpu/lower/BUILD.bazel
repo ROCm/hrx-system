@@ -33,6 +33,8 @@ _AMDGPU_LOWER_TABLE_VISIBILITY = (
 
 _AMDGPU_MEMORY_CANDIDATE_GENERATOR = "//loom/py/loom/gen/target/arch/amdgpu/lower/candidates:memory_candidates"
 
+_AMDGPU_NARROW_FLOAT_TABLE_GENERATOR = "//loom/py/loom/gen/target/arch/amdgpu/lower:narrow_float_tables"
+
 _AMDGPU_TARGET_INFO_GENERATOR = "//loom/py/loom/gen/target/arch/amdgpu:target_info"
 
 loom_cc_library(
@@ -85,6 +87,20 @@ loom_generated_textual_header(
     generator = _AMDGPU_TARGET_INFO_GENERATOR,
     output = "memory_cache_policy_temporal_th.inl",
     output_flag = "--cache-policy-temporal-th",
+)
+
+loom_generated_textual_header(
+    name = "fp8_decode_plan_descriptor_rows_gen",
+    generator = _AMDGPU_NARROW_FLOAT_TABLE_GENERATOR,
+    output = "fp8_decode_plan_descriptor_rows.inl",
+    output_flag = "--fp8-decode-plan-descriptor-rows",
+)
+
+loom_generated_textual_header(
+    name = "fp8_to_f32_descriptor_ref_rows_gen",
+    generator = _AMDGPU_NARROW_FLOAT_TABLE_GENERATOR,
+    output = "fp8_to_f32_descriptor_ref_rows.inl",
+    output_flag = "--fp8-to-f32-descriptor-ref-rows",
 )
 
 loom_cc_library(
@@ -183,6 +199,8 @@ loom_cc_library(
         "workgroup.h",
     ],
     textual_hdrs = [
+        ":fp8_decode_plan_descriptor_rows.inl",
+        ":fp8_to_f32_descriptor_ref_rows.inl",
         ":memory_cache_policy_encoding_rows.inl",
         ":memory_cache_policy_temporal_th.inl",
         ":memory_descriptor_candidate_ranges.inl",
