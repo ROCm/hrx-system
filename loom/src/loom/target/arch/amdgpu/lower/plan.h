@@ -1044,6 +1044,14 @@ typedef enum loom_amdgpu_fragment_memory_packet_flag_bits_e {
   LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_PACKED_BF16_DECODE = 1u << 2,
   // FP8 load payloads require full per-lane BF16 software decode.
   LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_FULL_BF16_DECODE = 1u << 3,
+  // Full FP8 decode was selected because value facts do not prove finiteness.
+  LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_MISSING_VALUE_FINITE = 1u << 4,
+  // Full FP8 decode was selected because value facts do not prove non-subnormal
+  // values.
+  LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_MISSING_VALUE_NOT_SUBNORMAL =
+      1u << 5,
+  // Full FP8 decode was selected because target packets are unavailable.
+  LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_MISSING_TARGET_PACKETS = 1u << 6,
 } loom_amdgpu_fragment_memory_packet_flag_bits_t;
 
 // Bitset of loom_amdgpu_fragment_memory_packet_flag_bits_t values.

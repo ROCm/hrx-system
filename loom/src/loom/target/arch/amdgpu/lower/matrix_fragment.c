@@ -2753,6 +2753,26 @@ static iree_string_view_t loom_amdgpu_fragment_memory_packet_fallback_reason(
     if (iree_any_bit_set(
             packet->flags,
             LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_FULL_BF16_DECODE)) {
+      const bool missing_value_finite = iree_any_bit_set(
+          packet->flags,
+          LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_MISSING_VALUE_FINITE);
+      const bool missing_value_not_subnormal = iree_any_bit_set(
+          packet->flags,
+          LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_MISSING_VALUE_NOT_SUBNORMAL);
+      if (missing_value_finite && missing_value_not_subnormal) {
+        return IREE_SV("fp8_full_bf16_decode_missing_finite_not_subnormal");
+      }
+      if (missing_value_finite) {
+        return IREE_SV("fp8_full_bf16_decode_missing_finite");
+      }
+      if (missing_value_not_subnormal) {
+        return IREE_SV("fp8_full_bf16_decode_missing_not_subnormal");
+      }
+      if (iree_any_bit_set(
+              packet->flags,
+              LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_MISSING_TARGET_PACKETS)) {
+        return IREE_SV("fp8_full_bf16_decode_missing_target_packets");
+      }
       return IREE_SV("fp8_full_bf16_decode");
     }
     return iree_string_view_empty();
@@ -2829,11 +2849,36 @@ loom_amdgpu_fragment_memory_fp8_decode_packet_flags(
                        LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_NATIVE_F32_PAIR)) {
     return LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_NATIVE_F32_PAIR;
   }
-  if (loom_amdgpu_can_emit_fp8_pair_to_packed_bf16(decode_plan,
-                                                   decode_value_flags)) {
+  const loom_amdgpu_fp8_packed_bf16_missing_requirements_t
+      missing_requirements =
+          loom_amdgpu_fp8_pair_to_packed_bf16_missing_requirements(
+              decode_plan, decode_value_flags);
+  if (missing_requirements ==
+      LOOM_AMDGPU_FP8_PACKED_BF16_MISSING_REQUIREMENT_NONE) {
     return LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_PACKED_BF16_DECODE;
   }
-  return LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_FULL_BF16_DECODE;
+  loom_amdgpu_fragment_memory_packet_flags_t packet_flags =
+      LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_FULL_BF16_DECODE;
+  if (iree_any_bit_set(
+          missing_requirements,
+          LOOM_AMDGPU_FP8_PACKED_BF16_MISSING_REQUIREMENT_VALUE_FINITE)) {
+    packet_flags |=
+        LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_MISSING_VALUE_FINITE;
+  }
+  if (iree_any_bit_set(
+          missing_requirements,
+          LOOM_AMDGPU_FP8_PACKED_BF16_MISSING_REQUIREMENT_VALUE_NOT_SUBNORMAL)) {
+    packet_flags |=
+        LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_MISSING_VALUE_NOT_SUBNORMAL;
+  }
+  const loom_amdgpu_fp8_packed_bf16_missing_requirements_t target_requirements =
+      LOOM_AMDGPU_FP8_PACKED_BF16_MISSING_REQUIREMENT_PERMUTE_PACKET |
+      LOOM_AMDGPU_FP8_PACKED_BF16_MISSING_REQUIREMENT_ZERO_REPAIR_PACKETS;
+  if (iree_any_bit_set(missing_requirements, target_requirements)) {
+    packet_flags |=
+        LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_MISSING_TARGET_PACKETS;
+  }
+  return packet_flags;
 }
 
 static iree_status_t loom_amdgpu_fragment_memory_packet_resource(

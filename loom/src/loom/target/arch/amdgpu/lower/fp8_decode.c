@@ -803,29 +803,50 @@ iree_status_t loom_amdgpu_try_emit_fp8_pair_to_packed_bf16(
 bool loom_amdgpu_can_emit_fp8_pair_to_packed_bf16(
     const loom_amdgpu_fp8_decode_plan_t* plan,
     loom_amdgpu_fp8_decode_value_flags_t value_flags) {
+  return loom_amdgpu_fp8_pair_to_packed_bf16_missing_requirements(
+             plan, value_flags) ==
+         LOOM_AMDGPU_FP8_PACKED_BF16_MISSING_REQUIREMENT_NONE;
+}
+
+loom_amdgpu_fp8_packed_bf16_missing_requirements_t
+loom_amdgpu_fp8_pair_to_packed_bf16_missing_requirements(
+    const loom_amdgpu_fp8_decode_plan_t* plan,
+    loom_amdgpu_fp8_decode_value_flags_t value_flags) {
+  loom_amdgpu_fp8_packed_bf16_missing_requirements_t missing_requirements =
+      LOOM_AMDGPU_FP8_PACKED_BF16_MISSING_REQUIREMENT_NONE;
   const loom_amdgpu_fp8_decode_plan_flags_t required_plan_flags =
       LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_PERM_B32_SRC2_LITERAL;
   if (!iree_all_bits_set(plan->flags, required_plan_flags)) {
-    return false;
+    missing_requirements |=
+        LOOM_AMDGPU_FP8_PACKED_BF16_MISSING_REQUIREMENT_PERMUTE_PACKET;
   }
 
   const loom_amdgpu_fp8_decode_value_flags_t required_value_flags =
       LOOM_AMDGPU_FP8_DECODE_VALUE_FLAG_NOT_NAN |
-      LOOM_AMDGPU_FP8_DECODE_VALUE_FLAG_NOT_INF |
-      LOOM_AMDGPU_FP8_DECODE_VALUE_FLAG_NOT_SUBNORMAL;
+      LOOM_AMDGPU_FP8_DECODE_VALUE_FLAG_NOT_INF;
   if (!iree_all_bits_set(value_flags, required_value_flags)) {
-    return false;
+    missing_requirements |=
+        LOOM_AMDGPU_FP8_PACKED_BF16_MISSING_REQUIREMENT_VALUE_FINITE;
+  }
+  if (!iree_all_bits_set(value_flags,
+                         LOOM_AMDGPU_FP8_DECODE_VALUE_FLAG_NOT_SUBNORMAL)) {
+    missing_requirements |=
+        LOOM_AMDGPU_FP8_PACKED_BF16_MISSING_REQUIREMENT_VALUE_NOT_SUBNORMAL;
   }
 
   if (iree_any_bit_set(value_flags,
                        LOOM_AMDGPU_FP8_DECODE_VALUE_FLAG_NON_ZERO)) {
-    return true;
+    return missing_requirements;
   }
 
   const loom_amdgpu_fp8_decode_plan_flags_t required_zero_repair_flags =
       LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_PK_MIN_U16 |
       LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_PK_MUL_LO_U16;
-  return iree_all_bits_set(plan->flags, required_zero_repair_flags);
+  if (!iree_all_bits_set(plan->flags, required_zero_repair_flags)) {
+    missing_requirements |=
+        LOOM_AMDGPU_FP8_PACKED_BF16_MISSING_REQUIREMENT_ZERO_REPAIR_PACKETS;
+  }
+  return missing_requirements;
 }
 
 iree_status_t loom_amdgpu_emit_fp8_to_bf16_lane(
