@@ -67,6 +67,19 @@ struct GenerationPrompt {
   iree_string_view_t json;
 };
 
+struct GenerationBenchmarkPlanStatistics {
+  // Total parameter slab bytes across coarse stage plans.
+  iree_device_size_t parameter_slab_byte_length;
+  // Total local slab high-water bytes across coarse stage plans.
+  iree_device_size_t local_slab_high_water_mark;
+  // Total boundary tensor bytes across coarse stage plans.
+  iree_device_size_t boundary_tensor_byte_length;
+  // Total planned kernel specializations across coarse stage plans.
+  iree_host_size_t kernel_count;
+  // Total planned dispatches across coarse stage plans.
+  iree_host_size_t dispatch_count;
+};
+
 static const GenerationPrompt kShortPrompt = {
     // Request JSON for the short prompt bucket.
     iree_make_cstring_view(kShortPrompt128),
@@ -269,6 +282,39 @@ static iree_string_view_t DitFeedForwardImplementationName(
     default:
       return IREE_SV("invalid");
   }
+}
+
+static uint64_t CeilMiB(iree_device_size_t byte_length) {
+  static constexpr iree_device_size_t kMiB = 1024ull * 1024ull;
+  return (uint64_t)((byte_length + kMiB - 1) / kMiB);
+}
+
+static iree_status_t AccumulateGenerationBenchmarkPlanStatistics(
+    const id4_ideogram4_generation_plan_t* plan,
+    GenerationBenchmarkPlanStatistics* out_statistics) {
+  IREE_ASSERT_ARGUMENT(plan);
+  IREE_ASSERT_ARGUMENT(out_statistics);
+  std::memset(out_statistics, 0, sizeof(*out_statistics));
+
+  const iree_host_size_t stage_count =
+      id4_ideogram4_generation_plan_stage_count(plan);
+  for (iree_host_size_t i = 0; i < stage_count; ++i) {
+    iree_string_view_t stage_key = iree_string_view_empty();
+    const id4_pipeline_plan_t* stage_plan = nullptr;
+    IREE_RETURN_IF_ERROR(id4_ideogram4_generation_plan_stage_at(
+        plan, i, &stage_key, &stage_plan));
+    id4_pipeline_plan_statistics_t stage_statistics =
+        id4_pipeline_plan_statistics(stage_plan);
+    out_statistics->parameter_slab_byte_length +=
+        stage_statistics.parameter_slab_byte_length;
+    out_statistics->local_slab_high_water_mark +=
+        stage_statistics.memory_slab_high_water_mark;
+    out_statistics->boundary_tensor_byte_length +=
+        stage_statistics.boundary_tensor_byte_length;
+    out_statistics->kernel_count += stage_statistics.kernel_count;
+    out_statistics->dispatch_count += stage_statistics.dispatch_count;
+  }
+  return iree_ok_status();
 }
 
 static iree_status_t ParseRequest(iree_string_view_t json,
@@ -617,7 +663,8 @@ static iree_status_t IssueGenerationBundle(
 static void SetGenerationBenchmarkLabel(
     iree_benchmark_state_t* benchmark_state,
     const LiveGenerationBenchmarkContext& context,
-    const id4_ideogram4_generation_plan_summary_t& summary) {
+    const id4_ideogram4_generation_plan_summary_t& summary,
+    const GenerationBenchmarkPlanStatistics& statistics) {
   const iree_string_view_t parameter_format =
       id4_ideogram4_dit_parameter_format_name(context.dit_parameter_format);
   const iree_string_view_t activation_format =
@@ -626,12 +673,14 @@ static void SetGenerationBenchmarkLabel(
       DitAttentionImplementationName(summary.dit_attention_implementation);
   const iree_string_view_t feed_forward_implementation =
       DitFeedForwardImplementationName(summary.dit_feed_forward_implementation);
-  char label[256];
+  char label[512];
   std::snprintf(
       label, sizeof(label),
       "tokens=%" PRIu32 " latent=%" PRIu64 "x%" PRIu64 " steps=%" PRIu32
       " image=%" PRIu64 "x%" PRIu64
-      " params=%.*s activation=%.*s attention=%.*s ff=%.*s",
+      " params=%.*s activation=%.*s attention=%.*s ff=%.*s"
+      " plan_param=%" PRIu64 "MiB local_hw=%" PRIu64 "MiB boundary=%" PRIu64
+      "MiB kernels=%" PRIhsz " dispatches=%" PRIhsz,
       summary.qwen_token_count, summary.diffusion_latent_shape.dims[0],
       summary.diffusion_latent_shape.dims[1], summary.denoise_step_count,
       summary.decoded_image_shape.dims[0], summary.decoded_image_shape.dims[1],
@@ -640,7 +689,11 @@ static void SetGenerationBenchmarkLabel(
       static_cast<int>(attention_implementation.size),
       attention_implementation.data,
       static_cast<int>(feed_forward_implementation.size),
-      feed_forward_implementation.data);
+      feed_forward_implementation.data,
+      CeilMiB(statistics.parameter_slab_byte_length),
+      CeilMiB(statistics.local_slab_high_water_mark),
+      CeilMiB(statistics.boundary_tensor_byte_length), statistics.kernel_count,
+      statistics.dispatch_count);
   iree_benchmark_set_label(benchmark_state, label);
 }
 
@@ -676,6 +729,8 @@ static iree_status_t RunGenerationEndToEndBenchmark(
   uint32_t token_count = 0;
   id4_ideogram4_generation_plan_summary_t last_summary;
   std::memset(&last_summary, 0, sizeof(last_summary));
+  GenerationBenchmarkPlanStatistics last_statistics;
+  std::memset(&last_statistics, 0, sizeof(last_statistics));
   iree_hal_profiling_from_flags_t* profiling = nullptr;
   iree_status_t status = iree_hal_begin_device_group_profiling_from_flags(
       context.runtime_context.device_group, iree_allocator_system(),
@@ -692,6 +747,14 @@ static iree_status_t RunGenerationEndToEndBenchmark(
     if (iree_status_is_ok(status)) {
       token_count = summary.qwen_token_count;
       last_summary = summary;
+    }
+    GenerationBenchmarkPlanStatistics statistics;
+    if (iree_status_is_ok(status)) {
+      status =
+          AccumulateGenerationBenchmarkPlanStatistics(plan.get(), &statistics);
+    }
+    if (iree_status_is_ok(status)) {
+      last_statistics = statistics;
     }
 
     ++prepare_value;
@@ -726,7 +789,8 @@ static iree_status_t RunGenerationEndToEndBenchmark(
   status =
       iree_status_join(status, iree_hal_end_profiling_from_flags(profiling));
   IREE_RETURN_IF_ERROR(status);
-  SetGenerationBenchmarkLabel(benchmark_state, context, last_summary);
+  SetGenerationBenchmarkLabel(benchmark_state, context, last_summary,
+                              last_statistics);
   iree_benchmark_set_items_processed(
       benchmark_state, static_cast<int64_t>(iteration_count * token_count));
   return iree_ok_status();

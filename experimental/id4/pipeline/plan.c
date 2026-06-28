@@ -1373,6 +1373,47 @@ const id4_pipeline_diagnostic_tap_plan_t* id4_pipeline_plan_diagnostic_tap_at(
   return &plan->diagnostic_taps[index];
 }
 
+id4_pipeline_plan_statistics_t id4_pipeline_plan_statistics(
+    const id4_pipeline_plan_t* plan) {
+  id4_pipeline_plan_statistics_t statistics;
+  memset(&statistics, 0, sizeof(statistics));
+  if (!plan) return statistics;
+
+  for (iree_host_size_t i = 0; i < plan->parameter_slab_count; ++i) {
+    const id4_pipeline_parameter_slab_plan_t* slab = &plan->parameter_slabs[i];
+    statistics.parameter_slab_byte_length += slab->byte_length;
+    if (slab->byte_length > statistics.largest_parameter_slab_byte_length) {
+      statistics.largest_parameter_slab_byte_length = slab->byte_length;
+    }
+  }
+  for (iree_host_size_t i = 0; i < plan->constant_slab_count; ++i) {
+    const id4_pipeline_constant_slab_plan_t* slab = &plan->constant_slabs[i];
+    statistics.constant_slab_byte_length += slab->byte_length;
+  }
+  for (iree_host_size_t i = 0; i < plan->memory_slab_count; ++i) {
+    const id4_pipeline_memory_slab_plan_t* slab = &plan->memory_slabs[i];
+    statistics.memory_slab_byte_length += slab->byte_length;
+    statistics.memory_slab_high_water_mark += slab->high_water_mark;
+  }
+  for (iree_host_size_t i = 0; i < plan->boundary_tensor_count; ++i) {
+    const id4_pipeline_boundary_tensor_plan_t* boundary =
+        &plan->boundary_tensors[i];
+    statistics.boundary_tensor_byte_length += boundary->layout.byte_length;
+  }
+  for (iree_host_size_t i = 0; i < plan->diagnostic_tap_count; ++i) {
+    const id4_pipeline_diagnostic_tap_plan_t* tap = &plan->diagnostic_taps[i];
+    statistics.diagnostic_tap_byte_length += tap->layout.byte_length;
+  }
+  statistics.kernel_count = plan->kernel_count;
+  statistics.region_count = plan->region_count;
+  for (iree_host_size_t i = 0; i < plan->region_count; ++i) {
+    const id4_pipeline_region_plan_t* region = &plan->regions[i];
+    statistics.operation_count += region->statistics.operation_count;
+    statistics.dispatch_count += region->statistics.dispatch_count;
+  }
+  return statistics;
+}
+
 iree_status_t id4_pipeline_plan_load_parameter_slabs(
     const id4_pipeline_plan_t* plan,
     const id4_pipeline_parameter_slab_set_load_options_t* options,

@@ -164,6 +164,32 @@ typedef struct id4_pipeline_diagnostic_tap_plan_t {
   id4_pipeline_tensor_layout_t layout;
 } id4_pipeline_diagnostic_tap_plan_t;
 
+// Aggregate plan statistics derived from retained plan metadata.
+typedef struct id4_pipeline_plan_statistics_t {
+  // Total bytes across all parameter slabs.
+  iree_device_size_t parameter_slab_byte_length;
+  // Largest single parameter slab byte length.
+  iree_device_size_t largest_parameter_slab_byte_length;
+  // Total bytes across all constant slabs.
+  iree_device_size_t constant_slab_byte_length;
+  // Total reserved bytes across all non-parameter memory slabs.
+  iree_device_size_t memory_slab_byte_length;
+  // Total peak live bytes across all non-parameter memory slabs.
+  iree_device_size_t memory_slab_high_water_mark;
+  // Total bytes across all stage boundary tensors.
+  iree_device_size_t boundary_tensor_byte_length;
+  // Total bytes across all diagnostic tap tensors.
+  iree_device_size_t diagnostic_tap_byte_length;
+  // Number of planned kernel specializations.
+  iree_host_size_t kernel_count;
+  // Number of planned executable regions.
+  iree_host_size_t region_count;
+  // Total planned operations across all regions.
+  iree_host_size_t operation_count;
+  // Total planned dispatches across all regions.
+  iree_host_size_t dispatch_count;
+} id4_pipeline_plan_statistics_t;
+
 // Options for creating an inspectable plan.
 typedef struct id4_pipeline_plan_create_options_t {
   // Size of this structure for versioning.
@@ -311,6 +337,10 @@ iree_host_size_t id4_pipeline_plan_diagnostic_tap_count(
 // Returns diagnostic tap |index| or NULL when out of range.
 const id4_pipeline_diagnostic_tap_plan_t* id4_pipeline_plan_diagnostic_tap_at(
     const id4_pipeline_plan_t* plan, iree_host_size_t index);
+
+// Returns aggregate statistics derived from |plan| metadata.
+id4_pipeline_plan_statistics_t id4_pipeline_plan_statistics(
+    const id4_pipeline_plan_t* plan);
 
 // Loads all planned parameter slabs using |options|.
 iree_status_t id4_pipeline_plan_load_parameter_slabs(

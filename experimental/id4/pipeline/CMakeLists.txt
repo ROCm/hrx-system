@@ -303,6 +303,20 @@ iree_cc_test(
 
 iree_cc_test(
   NAME
+    plan_test
+  SRCS
+    "plan_test.cc"
+  DEPS
+    ::plan
+    iree::base
+    iree::experimental::id4::stages::test_util
+    iree::hal
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_test(
+  NAME
     program_plan_test
   SRCS
     "program_plan_test.cc"

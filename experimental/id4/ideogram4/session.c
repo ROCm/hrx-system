@@ -1231,67 +1231,6 @@ iree_status_t id4_ideogram4_generation_plan_stage_at(
   return iree_ok_status();
 }
 
-static iree_device_size_t id4_ideogram4_generation_plan_parameter_bytes(
-    const id4_pipeline_plan_t* plan,
-    iree_device_size_t* out_largest_slab_byte_length) {
-  iree_device_size_t total_byte_length = 0;
-  iree_device_size_t largest_slab_byte_length = 0;
-  const iree_host_size_t slab_count =
-      id4_pipeline_plan_parameter_slab_count(plan);
-  for (iree_host_size_t i = 0; i < slab_count; ++i) {
-    const id4_pipeline_parameter_slab_plan_t* slab =
-        id4_pipeline_plan_parameter_slab_at(plan, i);
-    if (!slab) continue;
-    total_byte_length += slab->byte_length;
-    if (slab->byte_length > largest_slab_byte_length) {
-      largest_slab_byte_length = slab->byte_length;
-    }
-  }
-  *out_largest_slab_byte_length = largest_slab_byte_length;
-  return total_byte_length;
-}
-
-static iree_device_size_t id4_ideogram4_generation_plan_constant_bytes(
-    const id4_pipeline_plan_t* plan) {
-  iree_device_size_t total_byte_length = 0;
-  const iree_host_size_t slab_count =
-      id4_pipeline_plan_constant_slab_count(plan);
-  for (iree_host_size_t i = 0; i < slab_count; ++i) {
-    const id4_pipeline_constant_slab_plan_t* slab =
-        id4_pipeline_plan_constant_slab_at(plan, i);
-    if (!slab) continue;
-    total_byte_length += slab->byte_length;
-  }
-  return total_byte_length;
-}
-
-static void id4_ideogram4_generation_plan_accumulate_local_bytes(
-    const id4_pipeline_plan_t* plan, iree_device_size_t* io_slab_byte_length,
-    iree_device_size_t* io_high_water_mark) {
-  const iree_host_size_t slab_count = id4_pipeline_plan_memory_slab_count(plan);
-  for (iree_host_size_t i = 0; i < slab_count; ++i) {
-    const id4_pipeline_memory_slab_plan_t* slab =
-        id4_pipeline_plan_memory_slab_at(plan, i);
-    if (!slab) continue;
-    *io_slab_byte_length += slab->byte_length;
-    *io_high_water_mark += slab->high_water_mark;
-  }
-}
-
-static iree_device_size_t id4_ideogram4_generation_plan_boundary_bytes(
-    const id4_pipeline_plan_t* plan) {
-  iree_device_size_t total_byte_length = 0;
-  const iree_host_size_t boundary_count =
-      id4_pipeline_plan_boundary_tensor_count(plan);
-  for (iree_host_size_t i = 0; i < boundary_count; ++i) {
-    const id4_pipeline_boundary_tensor_plan_t* boundary =
-        id4_pipeline_plan_boundary_tensor_at(plan, i);
-    if (!boundary) continue;
-    total_byte_length += boundary->layout.byte_length;
-  }
-  return total_byte_length;
-}
-
 static iree_status_t id4_ideogram4_generation_residency_statistics_accumulate(
     const id4_ideogram4_generation_plan_t* plan,
     const id4_ideogram4_generation_residency_phase_t* phase,
@@ -1309,22 +1248,23 @@ static iree_status_t id4_ideogram4_generation_residency_statistics_accumulate(
           (int)phase->name.size, phase->name.data,
           descriptor ? descriptor->key : "<unknown>");
     }
-    iree_device_size_t largest_stage_slab_byte_length = 0;
+    id4_pipeline_plan_statistics_t stage_statistics =
+        id4_pipeline_plan_statistics(stage_plan);
     io_statistics->parameter_byte_length +=
-        id4_ideogram4_generation_plan_parameter_bytes(
-            stage_plan, &largest_stage_slab_byte_length);
-    if (largest_stage_slab_byte_length >
+        stage_statistics.parameter_slab_byte_length;
+    if (stage_statistics.largest_parameter_slab_byte_length >
         io_statistics->largest_stage_parameter_byte_length) {
       io_statistics->largest_stage_parameter_byte_length =
-          largest_stage_slab_byte_length;
+          stage_statistics.largest_parameter_slab_byte_length;
     }
     io_statistics->constant_byte_length +=
-        id4_ideogram4_generation_plan_constant_bytes(stage_plan);
-    id4_ideogram4_generation_plan_accumulate_local_bytes(
-        stage_plan, &io_statistics->local_slab_byte_length,
-        &io_statistics->local_high_water_mark);
+        stage_statistics.constant_slab_byte_length;
+    io_statistics->local_slab_byte_length +=
+        stage_statistics.memory_slab_byte_length;
+    io_statistics->local_high_water_mark +=
+        stage_statistics.memory_slab_high_water_mark;
     io_statistics->stage_boundary_byte_length +=
-        id4_ideogram4_generation_plan_boundary_bytes(stage_plan);
+        stage_statistics.boundary_tensor_byte_length;
   }
   return iree_ok_status();
 }
