@@ -19,7 +19,8 @@ enum {
   ID4_QWEN3_VL_LINEAR_WMMA_TOKEN_BLOCK_M16 = 16,
   ID4_QWEN3_VL_LINEAR_WMMA_TOKEN_BLOCK_M32 = 32,
   ID4_QWEN3_VL_LINEAR_WMMA_INPUT_BLOCK = 16,
-  ID4_QWEN3_VL_LINEAR_WMMA_OUTPUT_ROW_BLOCK = 64,
+  ID4_QWEN3_VL_LINEAR_WMMA_OUTPUT_ROW_BLOCK_M32 = 32,
+  ID4_QWEN3_VL_LINEAR_WMMA_OUTPUT_ROW_BLOCK_M64 = 64,
   ID4_QWEN3_VL_CONFIG_VALUE_BUFFER_CAPACITY = 16,
   ID4_QWEN3_VL_MAX_KERNEL_CONFIG_BINDING_COUNT = 8,
 };
@@ -485,10 +486,12 @@ typedef enum id4_qwen3_vl_kernel_kind_e {
   ID4_QWEN3_VL_KERNEL_CONDITION_NORMALIZE_TOKEN_WEIGHTS = 11,
   // Dense BF16 activation/weight WMMA linear kernel for 16-token tiles.
   ID4_QWEN3_VL_KERNEL_LINEAR_BF16_BF16_WMMA_M16N64 = 12,
-  // Dense BF16 activation/weight WMMA linear kernel for 32-token tiles.
-  ID4_QWEN3_VL_KERNEL_LINEAR_BF16_BF16_WMMA_M32N64 = 13,
+  // Dense BF16 activation/weight WMMA linear kernel for 32x32 tiles.
+  ID4_QWEN3_VL_KERNEL_LINEAR_BF16_BF16_WMMA_M32N32 = 13,
+  // Dense BF16 activation/weight WMMA linear kernel for 32x64 tiles.
+  ID4_QWEN3_VL_KERNEL_LINEAR_BF16_BF16_WMMA_M32N64 = 14,
   // Dense BF16 activation/weight scalar linear tail kernel.
-  ID4_QWEN3_VL_KERNEL_LINEAR_BF16_BF16_TAIL = 14,
+  ID4_QWEN3_VL_KERNEL_LINEAR_BF16_BF16_TAIL = 15,
 } id4_qwen3_vl_kernel_kind_t;
 
 typedef enum id4_qwen3_vl_config_key_e {
@@ -572,22 +575,28 @@ typedef struct id4_qwen3_vl_program_config_value_t {
 typedef struct id4_qwen3_vl_program_linear_wmma_tile_t {
   // Number of token rows covered by one WMMA dispatch tile.
   uint32_t token_block;
+  // Number of output rows covered by one WMMA dispatch tile.
+  uint32_t output_row_block;
   // Kernel kind implementing this tile shape.
   id4_qwen3_vl_kernel_kind_t kernel_kind;
 } id4_qwen3_vl_program_linear_wmma_tile_t;
 
 static const id4_qwen3_vl_program_linear_wmma_tile_t
-    id4_qwen3_vl_program_linear_wmma_m32n64_tile = {
+    id4_qwen3_vl_program_linear_wmma_m32n32_tile = {
         // Number of token rows covered by one WMMA dispatch tile.
         .token_block = ID4_QWEN3_VL_LINEAR_WMMA_TOKEN_BLOCK_M32,
+        // Number of output rows covered by one WMMA dispatch tile.
+        .output_row_block = ID4_QWEN3_VL_LINEAR_WMMA_OUTPUT_ROW_BLOCK_M32,
         // Kernel kind implementing this tile shape.
-        .kernel_kind = ID4_QWEN3_VL_KERNEL_LINEAR_BF16_BF16_WMMA_M32N64,
+        .kernel_kind = ID4_QWEN3_VL_KERNEL_LINEAR_BF16_BF16_WMMA_M32N32,
 };
 
 static const id4_qwen3_vl_program_linear_wmma_tile_t
     id4_qwen3_vl_program_linear_wmma_m16n64_tile = {
         // Number of token rows covered by one WMMA dispatch tile.
         .token_block = ID4_QWEN3_VL_LINEAR_WMMA_TOKEN_BLOCK_M16,
+        // Number of output rows covered by one WMMA dispatch tile.
+        .output_row_block = ID4_QWEN3_VL_LINEAR_WMMA_OUTPUT_ROW_BLOCK_M64,
         // Kernel kind implementing this tile shape.
         .kernel_kind = ID4_QWEN3_VL_KERNEL_LINEAR_BF16_BF16_WMMA_M16N64,
 };
@@ -596,17 +605,20 @@ static const id4_qwen3_vl_program_linear_wmma_tile_t*
 id4_qwen3_vl_program_select_linear_wmma_tile(uint32_t token_count,
                                              uint32_t input_size,
                                              uint32_t output_size) {
-  if ((input_size % ID4_QWEN3_VL_LINEAR_WMMA_INPUT_BLOCK) != 0 ||
-      (output_size % ID4_QWEN3_VL_LINEAR_WMMA_OUTPUT_ROW_BLOCK) != 0) {
+  if ((input_size % ID4_QWEN3_VL_LINEAR_WMMA_INPUT_BLOCK) != 0) {
     return NULL;
   }
   const uint32_t m32_remainder =
       token_count % ID4_QWEN3_VL_LINEAR_WMMA_TOKEN_BLOCK_M32;
   if (token_count >= ID4_QWEN3_VL_LINEAR_WMMA_TOKEN_BLOCK_M32 &&
-      m32_remainder < ID4_QWEN3_VL_LINEAR_WMMA_TOKEN_BLOCK_M16) {
-    return &id4_qwen3_vl_program_linear_wmma_m32n64_tile;
+      m32_remainder < ID4_QWEN3_VL_LINEAR_WMMA_TOKEN_BLOCK_M16 &&
+      (output_size %
+       id4_qwen3_vl_program_linear_wmma_m32n32_tile.output_row_block) == 0) {
+    return &id4_qwen3_vl_program_linear_wmma_m32n32_tile;
   }
-  if (token_count >= ID4_QWEN3_VL_LINEAR_WMMA_TOKEN_BLOCK_M16) {
+  if (token_count >= ID4_QWEN3_VL_LINEAR_WMMA_TOKEN_BLOCK_M16 &&
+      (output_size %
+       id4_qwen3_vl_program_linear_wmma_m16n64_tile.output_row_block) == 0) {
     return &id4_qwen3_vl_program_linear_wmma_m16n64_tile;
   }
   return NULL;
@@ -877,6 +889,9 @@ static const id4_pipeline_kernel_ref_t
         [ID4_QWEN3_VL_KERNEL_LINEAR_BF16_BF16_WMMA_M16N64] =
             {IREE_SVL("qwen3_vl/linear_bf16_f32_wmma"),
              IREE_SVL("id4_qwen3_vl_linear_bf16_bf16_wmma_m16n64")},
+        [ID4_QWEN3_VL_KERNEL_LINEAR_BF16_BF16_WMMA_M32N32] =
+            {IREE_SVL("qwen3_vl/linear_bf16_f32_wmma"),
+             IREE_SVL("id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32")},
         [ID4_QWEN3_VL_KERNEL_LINEAR_BF16_BF16_WMMA_M32N64] =
             {IREE_SVL("qwen3_vl/linear_bf16_f32_wmma"),
              IREE_SVL("id4_qwen3_vl_linear_bf16_bf16_wmma_m32n64")},
@@ -995,6 +1010,15 @@ static const iree_string_view_t id4_qwen3_vl_program_config_keys
                     IREE_SVL("id4.qwen3_vl.condition.hidden_row_count"),
             },
         [ID4_QWEN3_VL_KERNEL_LINEAR_BF16_BF16_WMMA_M16N64] =
+            {
+                [ID4_QWEN3_VL_CONFIG_DISPATCH_TOKEN_COUNT] =
+                    IREE_SVL("id4.qwen3_vl.linear_wmma.dispatch_token_count"),
+                [ID4_QWEN3_VL_CONFIG_INPUT_SIZE] =
+                    IREE_SVL("id4.qwen3_vl.linear_wmma.input_size"),
+                [ID4_QWEN3_VL_CONFIG_OUTPUT_SIZE] =
+                    IREE_SVL("id4.qwen3_vl.linear_wmma.output_size"),
+            },
+        [ID4_QWEN3_VL_KERNEL_LINEAR_BF16_BF16_WMMA_M32N32] =
             {
                 [ID4_QWEN3_VL_CONFIG_DISPATCH_TOKEN_COUNT] =
                     IREE_SVL("id4.qwen3_vl.linear_wmma.dispatch_token_count"),
