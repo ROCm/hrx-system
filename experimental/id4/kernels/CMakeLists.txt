@@ -6570,6 +6570,7 @@ iree_native_test(
     "--dry-run"
     "--output-format=jsonl"
     "--config=id4.ideogram4.modulated_rmsnorm.token_count=1"
+    "--config=id4.ideogram4.modulated_rmsnorm.token_capacity=1"
     "--config=id4.ideogram4.modulated_rmsnorm.hidden_size=4"
   SRC
     loom::tools::iree-benchmark-loom
@@ -6586,6 +6587,7 @@ iree_native_test(
     "--dry-run"
     "--output-format=jsonl"
     "--config=id4.ideogram4.modulated_rmsnorm.token_count=2"
+    "--config=id4.ideogram4.modulated_rmsnorm.token_capacity=2"
     "--config=id4.ideogram4.modulated_rmsnorm.hidden_size=4608"
   SRC
     loom::tools::iree-benchmark-loom
@@ -6602,6 +6604,7 @@ iree_native_test(
     "--dry-run"
     "--output-format=jsonl"
     "--config=id4.ideogram4.modulated_rmsnorm.token_count=1"
+    "--config=id4.ideogram4.modulated_rmsnorm.token_capacity=1"
     "--config=id4.ideogram4.modulated_rmsnorm.hidden_size=4"
   SRC
     loom::tools::iree-benchmark-loom
@@ -6618,7 +6621,25 @@ iree_native_test(
     "--dry-run"
     "--output-format=jsonl"
     "--config=id4.ideogram4.modulated_rmsnorm.token_count=2"
+    "--config=id4.ideogram4.modulated_rmsnorm.token_capacity=2"
     "--config=id4.ideogram4.modulated_rmsnorm.hidden_size=4608"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
+    "ideogram4_modulated_rmsnorm_linear_input_bf16_padded_zero_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/modulated_rmsnorm_f32.loom}}"
+    "--benchmark=@id4_ideogram4_modulated_rmsnorm_linear_input_bf16_padded_zero"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.ideogram4.modulated_rmsnorm.token_count=1"
+    "--config=id4.ideogram4.modulated_rmsnorm.token_capacity=2"
+    "--config=id4.ideogram4.modulated_rmsnorm.hidden_size=4"
   SRC
     loom::tools::iree-benchmark-loom
   LABELS
@@ -16516,6 +16537,7 @@ iree_native_test(
     "--case=@id4_ideogram4_modulated_rmsnorm_f32_small_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.modulated_rmsnorm.token_count=1"
+    "--config=id4.ideogram4.modulated_rmsnorm.token_capacity=1"
     "--config=id4.ideogram4.modulated_rmsnorm.hidden_size=4"
   SRC
     loom::tools::iree-test-loom
@@ -16536,6 +16558,7 @@ iree_native_test(
     "--case=@id4_ideogram4_modulated_rmsnorm_f32_ideogram_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.modulated_rmsnorm.token_count=2"
+    "--config=id4.ideogram4.modulated_rmsnorm.token_capacity=2"
     "--config=id4.ideogram4.modulated_rmsnorm.hidden_size=4608"
   SRC
     loom::tools::iree-test-loom
@@ -16556,6 +16579,7 @@ iree_native_test(
     "--case=@id4_ideogram4_modulated_rmsnorm_linear_input_bf16_small_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.modulated_rmsnorm.token_count=1"
+    "--config=id4.ideogram4.modulated_rmsnorm.token_capacity=1"
     "--config=id4.ideogram4.modulated_rmsnorm.hidden_size=4"
   SRC
     loom::tools::iree-test-loom
@@ -16576,7 +16600,29 @@ iree_native_test(
     "--case=@id4_ideogram4_modulated_rmsnorm_linear_input_bf16_ideogram_shape_case"
     "--device=amdgpu://0"
     "--config=id4.ideogram4.modulated_rmsnorm.token_count=2"
+    "--config=id4.ideogram4.modulated_rmsnorm.token_capacity=2"
     "--config=id4.ideogram4.modulated_rmsnorm.hidden_size=4608"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
+    "ideogram4_modulated_rmsnorm_linear_input_bf16_padded_zero_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/modulated_rmsnorm_f32.loom}}"
+    "--case=@id4_ideogram4_modulated_rmsnorm_linear_input_bf16_padded_zero_case"
+    "--device=amdgpu://0"
+    "--config=id4.ideogram4.modulated_rmsnorm.token_count=1"
+    "--config=id4.ideogram4.modulated_rmsnorm.token_capacity=2"
+    "--config=id4.ideogram4.modulated_rmsnorm.hidden_size=4"
   SRC
     loom::tools::iree-test-loom
   LABELS

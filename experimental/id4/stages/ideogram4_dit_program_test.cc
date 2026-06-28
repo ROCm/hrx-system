@@ -15,6 +15,7 @@
 namespace {
 
 static constexpr iree_host_size_t kProgramBuilderBlockSize = 16 * 1024;
+static constexpr uint32_t kSmallLatentBf16TokenCapacity = 128;
 
 class ProgramBuilderScope {
  public:
@@ -606,14 +607,17 @@ TEST(Ideogram4DitProgram, AuthorsMaterializedWmmaAttentionIntermediates) {
   EXPECT_TRUE(ProgramHasTensorWithShape(
       program, ID4_PIPELINE_PROGRAM_DTYPE_F32,
       id4_pipeline_program_make_shape_rank3(options.model.attention_head_count,
-                                            32, 32)));
+                                            kSmallLatentBf16TokenCapacity,
+                                            kSmallLatentBf16TokenCapacity)));
   EXPECT_TRUE(ProgramHasTensorWithShape(
       program, ID4_PIPELINE_PROGRAM_DTYPE_BF16,
       id4_pipeline_program_make_shape_rank3(options.model.attention_head_count,
-                                            32, 32)));
+                                            kSmallLatentBf16TokenCapacity,
+                                            kSmallLatentBf16TokenCapacity)));
   EXPECT_TRUE(ProgramHasTensorWithShape(
       program, ID4_PIPELINE_PROGRAM_DTYPE_BF16,
-      id4_pipeline_program_make_shape_rank2(32, options.model.hidden_size)));
+      id4_pipeline_program_make_shape_rank2(kSmallLatentBf16TokenCapacity,
+                                            options.model.hidden_size)));
 
   id4_pipeline_program_release(program);
 }
@@ -632,11 +636,13 @@ TEST(Ideogram4DitProgram, AuthorsStreamingBf16AttentionContextAsLinearInput) {
   EXPECT_TRUE(ProgramHasTensor(
       program, IREE_SV("ideogram4.uncond.layers.0.attention.context"),
       ID4_PIPELINE_PROGRAM_DTYPE_BF16,
-      id4_pipeline_program_make_shape_rank2(32, options.model.hidden_size)));
+      id4_pipeline_program_make_shape_rank2(kSmallLatentBf16TokenCapacity,
+                                            options.model.hidden_size)));
   EXPECT_FALSE(ProgramHasTensor(
       program, IREE_SV("ideogram4.uncond.layers.0.attention.context"),
       ID4_PIPELINE_PROGRAM_DTYPE_F32,
-      id4_pipeline_program_make_shape_rank2(options.model.hidden_size, 32)));
+      id4_pipeline_program_make_shape_rank2(options.model.hidden_size,
+                                            kSmallLatentBf16TokenCapacity)));
 
   id4_pipeline_program_release(program);
 }
@@ -727,7 +733,7 @@ TEST(Ideogram4DitProgram, AuthorsPyTorchParityFeedForwardIntermediates) {
 
   id4_pipeline_program_t* program = CreateForwardProgram(&options);
   const id4_pipeline_program_shape_t projection_shape =
-      id4_pipeline_program_make_shape_rank2(32,
+      id4_pipeline_program_make_shape_rank2(kSmallLatentBf16TokenCapacity,
                                             options.model.intermediate_size);
   EXPECT_TRUE(ProgramHasTensor(
       program, IREE_SV("ideogram4.uncond.layers.0.ffn.w1_projection.output"),
@@ -761,7 +767,8 @@ TEST(Ideogram4DitProgram, TapsBf16BlockBoundariesWithoutChangingStorage) {
 
   id4_pipeline_program_t* program = CreateForwardProgram(&options);
   const id4_pipeline_program_shape_t internal_shape =
-      id4_pipeline_program_make_shape_rank2(32, options.model.hidden_size);
+      id4_pipeline_program_make_shape_rank2(kSmallLatentBf16TokenCapacity,
+                                            options.model.hidden_size);
   const id4_pipeline_program_shape_t tap_shape =
       id4_pipeline_program_make_shape_rank2(options.model.hidden_size, 2);
   EXPECT_TRUE(ProgramHasTensor(

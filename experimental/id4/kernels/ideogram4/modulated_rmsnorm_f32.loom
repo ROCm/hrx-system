@@ -1,5 +1,7 @@
 config.decl @id4.ideogram4.modulated_rmsnorm.token_count : %value: index where [range(%value, 1, 131072)]
 
+config.decl @id4.ideogram4.modulated_rmsnorm.token_capacity : %value: index where [range(%value, 1, 131072)]
+
 config.decl @id4.ideogram4.modulated_rmsnorm.hidden_size : %value: index where [range(%value, 1, 65536)]
 
 kernel.def export("id4_ideogram4_modulated_rmsnorm_f32") @id4_ideogram4_modulated_rmsnorm_f32() {
@@ -54,16 +56,19 @@ kernel.def export("id4_ideogram4_modulated_rmsnorm_f32") @id4_ideogram4_modulate
 kernel.def export("id4_ideogram4_modulated_rmsnorm_linear_input_bf16") @id4_ideogram4_modulated_rmsnorm_linear_input_bf16() {
   %unit = index.constant 1 : index
   %workgroup_size_x = index.constant 256 : index
-  %token_count = config.get @id4.ideogram4.modulated_rmsnorm.token_count : index
-  kernel.launch.config workgroups(%token_count, %unit, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
+  %token_capacity = config.get @id4.ideogram4.modulated_rmsnorm.token_capacity : index
+  kernel.launch.config workgroups(%token_capacity, %unit, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
 } launch(%input: buffer, %weight: buffer, %scale: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %workgroup_size_x = index.constant 256 : index
   %token = kernel.workgroup.id<x> : index
   %lane = kernel.workitem.id<x> : index
   %token_count = config.get @id4.ideogram4.modulated_rmsnorm.token_count : index
+  %token_capacity = config.get @id4.ideogram4.modulated_rmsnorm.token_capacity : index
   %hidden_size = config.get @id4.ideogram4.modulated_rmsnorm.hidden_size : index
+  %token_valid = index.cmp ult, %token, %token_count : index
   %zero_f32 = scalar.constant 0.0 : f32
+  %zero_bf16 = scalar.fptrunc %zero_f32 : f32 to bf16
   %epsilon = scalar.constant 1.0000000000000001e-05 : f32
   %hidden_size_i32 = index.cast %hidden_size : index to i32
   %hidden_size_f32 = scalar.sitofp %hidden_size_i32 : i32 to f32
@@ -75,31 +80,41 @@ kernel.def export("id4_ideogram4_modulated_rmsnorm_linear_input_bf16") @id4_ideo
   %input_view = buffer.view %input_global[%base] : buffer -> view<[%hidden_size]x[%token_count]xf32, #dense>
   %weight_view = buffer.view %weight_global[%base] : buffer -> view<[%hidden_size]xbf16, #dense>
   %scale_view = buffer.view %scale_global[%base] : buffer -> view<[%hidden_size]xf32, #dense>
-  %output_view = buffer.view %output_global[%base] : buffer -> view<[%token_count]x[%hidden_size]xbf16, #dense>
-  %lane_square_sum = scf.for %hidden = [%lane to %hidden_size step %workgroup_size_x](%acc = %zero_f32 : f32) -> (f32) {
-    %value = view.load %input_view[%hidden, %token] : view<[%hidden_size]x[%token_count]xf32, #dense> -> f32
-    %square = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %value, %value : f32
-    %next = scalar.addf<reassoc|nnan|ninf|nsz> %acc, %square : f32
-    scf.yield %next : f32
+  %output_view = buffer.view %output_global[%base] : buffer -> view<[%token_capacity]x[%hidden_size]xbf16, #dense>
+  %lane_square_sum = scf.if %token_valid -> (f32) {
+    %sum = scf.for %hidden = [%lane to %hidden_size step %workgroup_size_x](%acc = %zero_f32 : f32) -> (f32) {
+      %value = view.load %input_view[%hidden, %token] : view<[%hidden_size]x[%token_count]xf32, #dense> -> f32
+      %square = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %value, %value : f32
+      %next = scalar.addf<reassoc|nnan|ninf|nsz> %acc, %square : f32
+      scf.yield %next : f32
+    }
+    scf.yield %sum : f32
+  } else {
+    scf.yield %zero_f32 : f32
   }
   %square_sum = kernel.workgroup.reduce<addf> %lane_square_sum : f32
   %mean_square = scalar.divf<nnan|ninf|nsz|arcp> %square_sum, %hidden_size_f32 : f32
   %mean_square_epsilon = scalar.addf<nnan|ninf|nsz> %mean_square, %epsilon : f32
   %row_scale = scalar.rsqrtf %mean_square_epsilon : f32
   scf.for %hidden = [%lane to %hidden_size step %workgroup_size_x] {
-    %value = view.load %input_view[%hidden, %token] : view<[%hidden_size]x[%token_count]xf32, #dense> -> f32
-    %weight_bf16 = view.load %weight_view[%hidden] : view<[%hidden_size]xbf16, #dense> -> bf16
-    %weight_value = scalar.extf %weight_bf16 : bf16 to f32
-    %modulation = view.load %scale_view[%hidden] : view<[%hidden_size]xf32, #dense> -> f32
-    %normalized = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %value, %row_scale : f32
-    %weighted = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %normalized, %weight_value : f32
-    %weighted_bf16 = scalar.fptrunc %weighted : f32 to bf16
-    %weighted_value = scalar.extf %weighted_bf16 : bf16 to f32
-    %modulation_bf16 = scalar.fptrunc %modulation : f32 to bf16
-    %modulation_value = scalar.extf %modulation_bf16 : bf16 to f32
-    %modulated = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %weighted_value, %modulation_value : f32
-    %rounded = scalar.fptrunc %modulated : f32 to bf16
-    view.store %rounded, %output_view[%token, %hidden] : bf16, view<[%token_count]x[%hidden_size]xbf16, #dense>
+    %rounded = scf.if %token_valid -> (bf16) {
+      %value = view.load %input_view[%hidden, %token] : view<[%hidden_size]x[%token_count]xf32, #dense> -> f32
+      %weight_bf16 = view.load %weight_view[%hidden] : view<[%hidden_size]xbf16, #dense> -> bf16
+      %weight_value = scalar.extf %weight_bf16 : bf16 to f32
+      %modulation = view.load %scale_view[%hidden] : view<[%hidden_size]xf32, #dense> -> f32
+      %normalized = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %value, %row_scale : f32
+      %weighted = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %normalized, %weight_value : f32
+      %weighted_bf16 = scalar.fptrunc %weighted : f32 to bf16
+      %weighted_value = scalar.extf %weighted_bf16 : bf16 to f32
+      %modulation_bf16 = scalar.fptrunc %modulation : f32 to bf16
+      %modulation_value = scalar.extf %modulation_bf16 : bf16 to f32
+      %modulated = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %weighted_value, %modulation_value : f32
+      %value_bf16 = scalar.fptrunc %modulated : f32 to bf16
+      scf.yield %value_bf16 : bf16
+    } else {
+      scf.yield %zero_bf16 : bf16
+    }
+    view.store %rounded, %output_view[%token, %hidden] : bf16, view<[%token_capacity]x[%hidden_size]xbf16, #dense>
   }
   kernel.return
 }
@@ -148,6 +163,17 @@ check.case public @id4_ideogram4_modulated_rmsnorm_linear_input_bf16_ideogram_sh
   check.return
 }
 
+check.case public @id4_ideogram4_modulated_rmsnorm_linear_input_bf16_padded_zero_case {
+  %input = check.generate.fill value(0.0) : tensor<4x1xf32>
+  %weight = check.generate.fill value(1.0) : tensor<4xbf16>
+  %scale = check.generate.fill value(2.0) : tensor<4xf32>
+  %output = check.generate.fill value(9.0) : tensor<2x4xbf16>
+  %expected = check.generate.fill value(0.0) : tensor<2x4xbf16>
+  func.call @id4_ideogram4_modulated_rmsnorm_linear_input_bf16(%input, %weight, %scale, %output) : (tensor<4x1xf32>, tensor<4xbf16>, tensor<4xf32>, tensor<2x4xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2x4xbf16>
+  check.return
+}
+
 check.benchmark<@id4_ideogram4_modulated_rmsnorm_f32_small_case> @id4_ideogram4_modulated_rmsnorm_f32_small
 
 check.benchmark<@id4_ideogram4_modulated_rmsnorm_f32_ideogram_shape_case> @id4_ideogram4_modulated_rmsnorm_f32_ideogram_shape
@@ -155,3 +181,5 @@ check.benchmark<@id4_ideogram4_modulated_rmsnorm_f32_ideogram_shape_case> @id4_i
 check.benchmark<@id4_ideogram4_modulated_rmsnorm_linear_input_bf16_small_case> @id4_ideogram4_modulated_rmsnorm_linear_input_bf16_small
 
 check.benchmark<@id4_ideogram4_modulated_rmsnorm_linear_input_bf16_ideogram_shape_case> @id4_ideogram4_modulated_rmsnorm_linear_input_bf16_ideogram_shape
+
+check.benchmark<@id4_ideogram4_modulated_rmsnorm_linear_input_bf16_padded_zero_case> @id4_ideogram4_modulated_rmsnorm_linear_input_bf16_padded_zero

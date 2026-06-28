@@ -1423,11 +1423,25 @@ iree_status_t id4_ideogram4_dit_program_dispatch_modulated_rmsnorm(
 iree_status_t
 id4_ideogram4_dit_program_dispatch_modulated_rmsnorm_linear_input_bf16(
     id4_pipeline_program_builder_t* builder, iree_string_view_t name,
-    uint32_t token_count, uint32_t hidden_size,
+    uint32_t token_count, uint32_t token_capacity, uint32_t hidden_size,
     id4_pipeline_program_tensor_t input, id4_pipeline_program_tensor_t weight,
     id4_pipeline_program_tensor_t scale, id4_pipeline_program_tensor_t output) {
+  if (token_count == 0) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "Ideogram4 modulated RMSNorm BF16 pack token count must be nonzero");
+  }
+  if (token_capacity < token_count) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "Ideogram4 modulated RMSNorm BF16 pack token capacity %" PRIu32
+        " is smaller than token count %" PRIu32,
+        token_capacity, token_count);
+  }
   const id4_ideogram4_dit_program_config_value_t config_values[] = {
       {IREE_SV("id4.ideogram4.modulated_rmsnorm.token_count"), token_count},
+      {IREE_SV("id4.ideogram4.modulated_rmsnorm.token_capacity"),
+       token_capacity},
       {IREE_SV("id4.ideogram4.modulated_rmsnorm.hidden_size"), hidden_size},
   };
   char value_buffers[ID4_IDEOGRAM4_DIT_MAX_KERNEL_CONFIG_BINDING_COUNT]

@@ -9,7 +9,7 @@
 enum {
   ID4_IDEOGRAM4_DIT_ATTENTION_WMMA_TOKEN_BLOCK = 16,
   ID4_IDEOGRAM4_DIT_BLOCKED_ATTENTION_QUERY_TOKEN_COUNT = 512,
-  ID4_IDEOGRAM4_DIT_BF16_TOKEN_CAPACITY_BLOCK = 32,
+  ID4_IDEOGRAM4_DIT_BF16_TOKEN_CAPACITY_BLOCK = 128,
 };
 
 typedef struct id4_ideogram4_dit_program_linear_parameter_t {
@@ -740,8 +740,8 @@ iree_status_t id4_ideogram4_dit_program_author_transformer_block(
     IREE_RETURN_IF_ERROR(
         id4_ideogram4_dit_program_dispatch_modulated_rmsnorm_linear_input_bf16(
             builder, attention_input_dispatch_name, total_token_count,
-            hidden_size, hidden_input, attention_norm1_weight, scale_msa,
-            attention_input));
+            bf16_token_capacity, hidden_size, hidden_input,
+            attention_norm1_weight, scale_msa, attention_input));
   }
 
   char after_attention_input_name_buffer
@@ -1320,8 +1320,9 @@ iree_status_t id4_ideogram4_dit_program_author_transformer_block(
         &ffn_input));
     IREE_RETURN_IF_ERROR(
         id4_ideogram4_dit_program_dispatch_modulated_rmsnorm_linear_input_bf16(
-            builder, ffn_input_dispatch_name, total_token_count, hidden_size,
-            post_attention_hidden, ffn_norm1_weight, scale_mlp, ffn_input));
+            builder, ffn_input_dispatch_name, total_token_count,
+            bf16_token_capacity, hidden_size, post_attention_hidden,
+            ffn_norm1_weight, scale_mlp, ffn_input));
   }
 
   char after_ffn_input_name_buffer[ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];

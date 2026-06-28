@@ -4434,6 +4434,7 @@ _KERNEL_CASES = [
         "benchmark": "@id4_ideogram4_modulated_rmsnorm_f32_small",
         "configs": [
             "--config=id4.ideogram4.modulated_rmsnorm.token_count=1",
+            "--config=id4.ideogram4.modulated_rmsnorm.token_capacity=1",
             "--config=id4.ideogram4.modulated_rmsnorm.hidden_size=4",
         ],
         "source": "ideogram4/modulated_rmsnorm_f32.loom",
@@ -4444,6 +4445,7 @@ _KERNEL_CASES = [
         "benchmark": "@id4_ideogram4_modulated_rmsnorm_f32_ideogram_shape",
         "configs": [
             "--config=id4.ideogram4.modulated_rmsnorm.token_count=2",
+            "--config=id4.ideogram4.modulated_rmsnorm.token_capacity=2",
             "--config=id4.ideogram4.modulated_rmsnorm.hidden_size=4608",
         ],
         "source": "ideogram4/modulated_rmsnorm_f32.loom",
@@ -4454,6 +4456,7 @@ _KERNEL_CASES = [
         "benchmark": "@id4_ideogram4_modulated_rmsnorm_linear_input_bf16_small",
         "configs": [
             "--config=id4.ideogram4.modulated_rmsnorm.token_count=1",
+            "--config=id4.ideogram4.modulated_rmsnorm.token_capacity=1",
             "--config=id4.ideogram4.modulated_rmsnorm.hidden_size=4",
         ],
         "source": "ideogram4/modulated_rmsnorm_f32.loom",
@@ -4464,10 +4467,22 @@ _KERNEL_CASES = [
         "benchmark": "@id4_ideogram4_modulated_rmsnorm_linear_input_bf16_ideogram_shape",
         "configs": [
             "--config=id4.ideogram4.modulated_rmsnorm.token_count=2",
+            "--config=id4.ideogram4.modulated_rmsnorm.token_capacity=2",
             "--config=id4.ideogram4.modulated_rmsnorm.hidden_size=4608",
         ],
         "source": "ideogram4/modulated_rmsnorm_f32.loom",
         "target_name": "ideogram4_modulated_rmsnorm_linear_input_bf16_ideogram_shape",
+    },
+    {
+        "actual_case": "@id4_ideogram4_modulated_rmsnorm_linear_input_bf16_padded_zero_case",
+        "benchmark": "@id4_ideogram4_modulated_rmsnorm_linear_input_bf16_padded_zero",
+        "configs": [
+            "--config=id4.ideogram4.modulated_rmsnorm.token_count=1",
+            "--config=id4.ideogram4.modulated_rmsnorm.token_capacity=2",
+            "--config=id4.ideogram4.modulated_rmsnorm.hidden_size=4",
+        ],
+        "source": "ideogram4/modulated_rmsnorm_f32.loom",
+        "target_name": "ideogram4_modulated_rmsnorm_linear_input_bf16_padded_zero",
     },
     {
         "actual_case": "@id4_ideogram4_rmsnorm_gated_residual_f32_small_case",
