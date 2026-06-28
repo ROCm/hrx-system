@@ -98,6 +98,8 @@ typedef struct id4_ideogram4_generation_plan_policy_t {
   const void* next;
   // Activation storage format selected for DiT intermediates.
   id4_ideogram4_dit_activation_format_t dit_activation_format;
+  // Execution storage strategy selected for DiT linear weights.
+  id4_ideogram4_dit_weight_execution_format_t dit_weight_execution_format;
   // Attention implementation selected for DiT transformer blocks.
   id4_ideogram4_dit_attention_implementation_t dit_attention_implementation;
   // Feed-forward implementation selected for DiT transformer blocks.
@@ -141,6 +143,8 @@ typedef struct id4_ideogram4_generation_plan_summary_t {
   id4_pipeline_program_shape_t decoded_image_shape;
   // DiT activation storage format selected by the plan.
   id4_ideogram4_dit_activation_format_t dit_activation_format;
+  // DiT linear weight execution strategy selected by the plan.
+  id4_ideogram4_dit_weight_execution_format_t dit_weight_execution_format;
   // DiT attention implementation selected by the plan.
   id4_ideogram4_dit_attention_implementation_t dit_attention_implementation;
   // DiT feed-forward implementation selected by the plan.

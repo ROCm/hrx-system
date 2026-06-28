@@ -230,6 +230,8 @@ static iree_status_t PlanDitStage(
   dit_options.request = request;
   dit_options.activation_format =
       ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT;
+  dit_options.weight_execution_format =
+      ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_BF16_RESIDENT;
   dit_options.attention_implementation =
       ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_STREAMING;
   dit_options.feed_forward_implementation =

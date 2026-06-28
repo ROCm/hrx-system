@@ -36,6 +36,8 @@ IREE_FLAG(string, dit_parameter_format, "fp8_e4m3",
           "DiT parameter format: bf16 or fp8_e4m3.");
 IREE_FLAG(string, dit_activation_format, "bf16_linear_input",
           "DiT activation format: bf16_linear_input or f32_canonical.");
+IREE_FLAG(string, dit_weight_execution_format, "bf16_resident",
+          "DiT weight execution format: bf16_resident or fp8_direct.");
 IREE_FLAG(string, dit_attention_implementation, "blocked_wmma",
           "DiT attention implementation: streaming, materialized_wmma, "
           "blocked_wmma, or online_wmma.");
@@ -175,6 +177,14 @@ static iree_status_t id4_cli_parse_dit_activation_format(
   return iree_make_status(
       IREE_STATUS_INVALID_ARGUMENT,
       "--dit_activation_format must be bf16_linear_input or f32_canonical");
+}
+
+static iree_status_t id4_cli_parse_dit_weight_execution_format(
+    id4_ideogram4_dit_weight_execution_format_t* out_format) {
+  iree_status_t status = id4_ideogram4_dit_weight_execution_format_parse(
+      iree_make_cstring_view(FLAG_dit_weight_execution_format), out_format);
+  if (iree_status_is_ok(status)) return status;
+  return iree_status_annotate(status, IREE_SV("--dit_weight_execution_format"));
 }
 
 static iree_status_t id4_cli_parse_dit_attention_implementation(
@@ -570,6 +580,8 @@ static iree_status_t id4_cli_make_generation_plan_policy(
   policy.structure_size = sizeof(policy);
   IREE_RETURN_IF_ERROR(
       id4_cli_parse_dit_activation_format(&policy.dit_activation_format));
+  IREE_RETURN_IF_ERROR(id4_cli_parse_dit_weight_execution_format(
+      &policy.dit_weight_execution_format));
   IREE_RETURN_IF_ERROR(id4_cli_parse_dit_attention_implementation(
       &policy.dit_attention_implementation));
   IREE_RETURN_IF_ERROR(id4_cli_parse_dit_feed_forward_implementation(

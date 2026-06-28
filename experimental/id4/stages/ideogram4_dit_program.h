@@ -80,6 +80,25 @@ typedef enum id4_ideogram4_dit_parameter_storage_e {
   ID4_IDEOGRAM4_DIT_PARAMETER_STORAGE_FP8_E4M3_SCALED = 2,
 } id4_ideogram4_dit_parameter_storage_t;
 
+// Execution storage strategy selected for DiT linear weights.
+typedef enum id4_ideogram4_dit_weight_execution_format_e {
+  // Invalid weight execution format.
+  ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_INVALID = 0,
+  // Prepare FP8 sources into persistent BF16 execution tensors.
+  ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_BF16_RESIDENT = 1,
+  // Bind compact FP8 weights and row scales directly to compute kernels.
+  ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_FP8_DIRECT = 2,
+} id4_ideogram4_dit_weight_execution_format_t;
+
+// Parses a DiT linear weight execution format name.
+iree_status_t id4_ideogram4_dit_weight_execution_format_parse(
+    iree_string_view_t value,
+    id4_ideogram4_dit_weight_execution_format_t* out_format);
+
+// Returns the stable DiT linear weight execution format name.
+iree_string_view_t id4_ideogram4_dit_weight_execution_format_name(
+    id4_ideogram4_dit_weight_execution_format_t format);
+
 // Ideogram4 DiT model dimensions used when authoring the forward program.
 typedef struct id4_ideogram4_dit_model_config_t {
   // Number of transformer blocks in the DiT.
@@ -145,6 +164,8 @@ typedef struct id4_ideogram4_dit_program_options_t {
   id4_ideogram4_dit_request_config_t request;
   // Activation storage format for internal linear-input producers.
   id4_ideogram4_dit_activation_format_t activation_format;
+  // Execution storage strategy selected for linear weights.
+  id4_ideogram4_dit_weight_execution_format_t weight_execution_format;
   // Attention implementation selected for transformer blocks.
   id4_ideogram4_dit_attention_implementation_t attention_implementation;
   // Feed-forward implementation selected for transformer blocks.

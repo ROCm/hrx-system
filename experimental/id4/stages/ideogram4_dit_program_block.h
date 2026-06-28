@@ -35,6 +35,8 @@ typedef struct id4_ideogram4_dit_program_dense_options_t {
   id4_ideogram4_dit_parameter_sources_t parameter_sources;
   // Parameter key prefix that owns ".weight" and ".bias" tensors.
   iree_string_view_t parameter_prefix;
+  // Execution storage strategy selected for dense weights.
+  id4_ideogram4_dit_weight_execution_format_t weight_execution_format;
   // Dense input vector.
   id4_pipeline_program_tensor_t input;
   // Dense input channel count.
@@ -72,6 +74,8 @@ typedef struct id4_ideogram4_dit_program_block_options_t {
   id4_pipeline_program_tensor_t position_embedding;
   // Activation storage format for internal linear-input producers.
   id4_ideogram4_dit_activation_format_t activation_format;
+  // Execution storage strategy selected for block linear weights.
+  id4_ideogram4_dit_weight_execution_format_t weight_execution_format;
   // Attention implementation selected for this transformer block.
   id4_ideogram4_dit_attention_implementation_t attention_implementation;
   // Feed-forward implementation selected for this transformer block.
@@ -106,6 +110,12 @@ iree_status_t id4_ideogram4_dit_program_parameter_fp8_e4m3_scaled_to_bf16(
     id4_pipeline_program_builder_t* builder, iree_string_view_t source_scope,
     iree_string_view_t weight_key, uint32_t input_size, uint32_t output_size,
     id4_pipeline_program_tensor_t* out_tensor);
+
+iree_status_t id4_ideogram4_dit_program_parameter_fp8_e4m3_scaled(
+    id4_pipeline_program_builder_t* builder, iree_string_view_t source_scope,
+    iree_string_view_t weight_key, uint32_t input_size, uint32_t output_size,
+    id4_pipeline_program_tensor_t* out_weight,
+    id4_pipeline_program_tensor_t* out_scale);
 
 iree_status_t id4_ideogram4_dit_program_parameter_source_resolve(
     id4_ideogram4_dit_parameter_sources_t sources, iree_string_view_t key,

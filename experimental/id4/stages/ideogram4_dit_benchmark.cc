@@ -30,6 +30,8 @@ IREE_FLAG(string, id4_plan_output_dir, "",
           "Optional directory receiving benchmark DiT stage plan JSON files.");
 IREE_FLAG(string, dit_parameter_format, "fp8_e4m3",
           "DiT parameter format: bf16 or fp8_e4m3.");
+IREE_FLAG(string, dit_weight_execution_format, "bf16_resident",
+          "DiT weight execution format: bf16_resident or fp8_direct.");
 IREE_FLAG(string, dit_attention_implementation, "blocked_wmma",
           "DiT attention implementation: streaming, materialized_wmma, "
           "blocked_wmma, or online_wmma.");
@@ -86,6 +88,9 @@ struct DitBenchmarkContext {
   // DiT parameter source policy selected by benchmark flags.
   id4_ideogram4_dit_parameter_format_t parameter_format =
       ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_INVALID;
+  // DiT linear weight execution strategy selected by benchmark flags.
+  id4_ideogram4_dit_weight_execution_format_t weight_execution_format =
+      ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_INVALID;
   // Attention implementation selected for plan and issue benchmarks.
   id4_ideogram4_dit_attention_implementation_t attention_implementation =
       ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_BLOCKED_WMMA;
@@ -156,6 +161,14 @@ static iree_status_t ParseDitParameterFormat(
       iree_make_cstring_view(FLAG_dit_parameter_format), out_format);
   if (iree_status_is_ok(status)) return status;
   return iree_status_annotate(status, IREE_SV("--dit_parameter_format"));
+}
+
+static iree_status_t ParseDitWeightExecutionFormat(
+    id4_ideogram4_dit_weight_execution_format_t* out_format) {
+  iree_status_t status = id4_ideogram4_dit_weight_execution_format_parse(
+      iree_make_cstring_view(FLAG_dit_weight_execution_format), out_format);
+  if (iree_status_is_ok(status)) return status;
+  return iree_status_annotate(status, IREE_SV("--dit_weight_execution_format"));
 }
 
 static iree_status_t ParseDitAttentionImplementation(
@@ -248,6 +261,9 @@ static void SetDitBenchmarkLabel(iree_benchmark_state_t* benchmark_state,
   const iree_string_view_t branch_name = BranchName(branch);
   const iree_string_view_t parameter_format =
       id4_ideogram4_dit_parameter_format_name(context.parameter_format);
+  const iree_string_view_t weight_execution_format =
+      id4_ideogram4_dit_weight_execution_format_name(
+          context.weight_execution_format);
   const iree_string_view_t attention_implementation =
       AttentionImplementationName(context.attention_implementation);
   const iree_string_view_t feed_forward_implementation =
@@ -258,14 +274,16 @@ static void SetDitBenchmarkLabel(iree_benchmark_state_t* benchmark_state,
   char label[768];
   std::snprintf(
       label, sizeof(label),
-      "branch=%.*s params=%.*s attention=%.*s ff=%.*s text_tokens=%" PRIu32
-      " latent_tokens=%" PRIu64 " latent=%" PRIu64 "x%" PRIu64
-      " param_total=%" PRIu64 "MiB param_largest=%" PRIu64
+      "branch=%.*s params=%.*s weights=%.*s attention=%.*s ff=%.*s "
+      "text_tokens=%" PRIu32 " latent_tokens=%" PRIu64 " latent=%" PRIu64
+      "x%" PRIu64 " param_total=%" PRIu64 "MiB param_largest=%" PRIu64
       "MiB param_source=%" PRIu64 "MiB param_encoded_source=%" PRIu64
       "MiB param_encode_steps=%" PRIhsz " local_hw=%" PRIu64
       "MiB boundary=%" PRIu64 "MiB kernels=%" PRIhsz " dispatches=%" PRIhsz,
       static_cast<int>(branch_name.size), branch_name.data,
       static_cast<int>(parameter_format.size), parameter_format.data,
+      static_cast<int>(weight_execution_format.size),
+      weight_execution_format.data,
       static_cast<int>(attention_implementation.size),
       attention_implementation.data,
       static_cast<int>(feed_forward_implementation.size),
@@ -432,6 +450,8 @@ static iree_status_t CreateLoadedDitStageContext(
   IREE_ASSERT_ARGUMENT(out_context);
   const DitBenchmarkBranchConfig branch_config = BranchConfig(branch);
   IREE_RETURN_IF_ERROR(ParseDitParameterFormat(&out_context->parameter_format));
+  IREE_RETURN_IF_ERROR(
+      ParseDitWeightExecutionFormat(&out_context->weight_execution_format));
   out_context->diagnostics_sink =
       id4::test::DiagnosticsSink(&out_context->diagnostics);
   IREE_RETURN_IF_ERROR(
@@ -524,6 +544,7 @@ static iree_status_t CreateDitPlan(DitBenchmarkContext* context,
   dit_options.request = context->request;
   dit_options.activation_format =
       ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT;
+  dit_options.weight_execution_format = context->weight_execution_format;
   dit_options.attention_implementation = context->attention_implementation;
   dit_options.feed_forward_implementation =
       context->feed_forward_implementation;

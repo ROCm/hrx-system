@@ -205,6 +205,8 @@ TEST(Ideogram4DitStage, PlansPreludeSliceFromRequestConfig) {
       ID4_IDEOGRAM4_DIT_CONDITIONING_MODE_UNCONDITIONED;
   dit_options.activation_format =
       ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_F32_CANONICAL;
+  dit_options.weight_execution_format =
+      ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_BF16_RESIDENT;
   dit_options.attention_implementation =
       ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_STREAMING;
   dit_options.feed_forward_implementation =
@@ -328,6 +330,8 @@ TEST(Ideogram4DitStage, PlansConditionedPreludeSliceFromRequestConfig) {
   dit_options.request.text_token_count = 3;
   dit_options.activation_format =
       ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_F32_CANONICAL;
+  dit_options.weight_execution_format =
+      ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_BF16_RESIDENT;
   dit_options.attention_implementation =
       ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_STREAMING;
   dit_options.feed_forward_implementation =
@@ -436,6 +440,8 @@ TEST(Ideogram4DitStage, PlansMaterializedWmmaAttention) {
       ID4_IDEOGRAM4_DIT_CONDITIONING_MODE_UNCONDITIONED;
   dit_options.activation_format =
       ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT;
+  dit_options.weight_execution_format =
+      ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_BF16_RESIDENT;
   dit_options.attention_implementation =
       ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_MATERIALIZED_WMMA;
   dit_options.feed_forward_implementation =
@@ -483,6 +489,8 @@ TEST(Ideogram4DitStage, PlansPyTorchParityMlpDiagnosticTaps) {
       ID4_IDEOGRAM4_DIT_CONDITIONING_MODE_UNCONDITIONED;
   dit_options.activation_format =
       ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT;
+  dit_options.weight_execution_format =
+      ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_BF16_RESIDENT;
   dit_options.attention_implementation =
       ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_MATERIALIZED_WMMA;
   dit_options.feed_forward_implementation =
@@ -684,6 +692,8 @@ TEST(Ideogram4DitStage, PlansOfficialFp8SourcesAsBf16ExecutionParameters) {
     dit_options.request = request_case.request;
     dit_options.activation_format =
         ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT;
+    dit_options.weight_execution_format =
+        ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_BF16_RESIDENT;
     dit_options.attention_implementation =
         request_case.attention_implementation;
     dit_options.feed_forward_implementation =
@@ -762,6 +772,8 @@ TEST(Ideogram4DitStage, RejectsInvalidRequestShape) {
       ID4_IDEOGRAM4_DIT_CONDITIONING_MODE_UNCONDITIONED;
   dit_options.activation_format =
       ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT;
+  dit_options.weight_execution_format =
+      ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_BF16_RESIDENT;
   dit_options.attention_implementation =
       ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_STREAMING;
   dit_options.feed_forward_implementation =

@@ -23,6 +23,8 @@ IREE_FLAG(string, dit_parameter_format, "fp8_e4m3",
           "DiT parameter format: bf16 or fp8_e4m3.");
 IREE_FLAG(string, dit_activation_format, "bf16_linear_input",
           "DiT activation format: bf16_linear_input or f32_canonical.");
+IREE_FLAG(string, dit_weight_execution_format, "bf16_resident",
+          "DiT weight execution format: bf16_resident or fp8_direct.");
 IREE_FLAG(string, dit_attention_implementation, "blocked_wmma",
           "DiT attention implementation: streaming, materialized_wmma, "
           "blocked_wmma, or online_wmma.");
@@ -250,6 +252,14 @@ static iree_status_t ParseDitParameterFormat(
       iree_make_cstring_view(FLAG_dit_parameter_format), out_format);
   if (iree_status_is_ok(status)) return status;
   return iree_status_annotate(status, IREE_SV("--dit_parameter_format"));
+}
+
+static iree_status_t ParseDitWeightExecutionFormat(
+    id4_ideogram4_dit_weight_execution_format_t* out_format) {
+  iree_status_t status = id4_ideogram4_dit_weight_execution_format_parse(
+      iree_make_cstring_view(FLAG_dit_weight_execution_format), out_format);
+  if (iree_status_is_ok(status)) return status;
+  return iree_status_annotate(status, IREE_SV("--dit_weight_execution_format"));
 }
 
 static iree_status_t ParseDitActivationFormat(
@@ -815,6 +825,8 @@ static iree_status_t CreateGenerationPlan(
   plan_options.policy = MakeGenerationPolicy();
   IREE_RETURN_IF_ERROR(
       ParseDitActivationFormat(&plan_options.policy.dit_activation_format));
+  IREE_RETURN_IF_ERROR(ParseDitWeightExecutionFormat(
+      &plan_options.policy.dit_weight_execution_format));
   IREE_RETURN_IF_ERROR(ParseDitAttentionImplementation(
       &plan_options.policy.dit_attention_implementation));
   IREE_RETURN_IF_ERROR(ParseDitFeedForwardImplementation(
@@ -1127,6 +1139,9 @@ static iree_status_t SetGenerationBenchmarkLabel(
       id4_ideogram4_dit_parameter_format_name(context.dit_parameter_format);
   const iree_string_view_t activation_format =
       DitActivationFormatName(summary.dit_activation_format);
+  const iree_string_view_t weight_execution_format =
+      id4_ideogram4_dit_weight_execution_format_name(
+          summary.dit_weight_execution_format);
   const iree_string_view_t attention_implementation =
       DitAttentionImplementationName(summary.dit_attention_implementation);
   const iree_string_view_t feed_forward_implementation =
@@ -1142,7 +1157,7 @@ static iree_status_t SetGenerationBenchmarkLabel(
       "tokens=%" PRIu32 " latent=%" PRIu64 "x%" PRIu64 " steps=%" PRIu32
       " image=%" PRIu64 "x%" PRIu64
       " residency=%.*s issue=%.*s resident_phase_mask=0x%08x"
-      " params=%.*s activation=%.*s attention=%.*s ff=%.*s"
+      " params=%.*s activation=%.*s weights=%.*s attention=%.*s ff=%.*s"
       " param_total=%" PRIu64 "MiB param_largest=%" PRIu64
       "MiB"
       " local_hw_total=%" PRIu64 "MiB local_hw_largest=%" PRIu64
@@ -1156,6 +1171,8 @@ static iree_status_t SetGenerationBenchmarkLabel(
       context.generation_resident_phase_mask,
       static_cast<int>(parameter_format.size), parameter_format.data,
       static_cast<int>(activation_format.size), activation_format.data,
+      static_cast<int>(weight_execution_format.size),
+      weight_execution_format.data,
       static_cast<int>(attention_implementation.size),
       attention_implementation.data,
       static_cast<int>(feed_forward_implementation.size),

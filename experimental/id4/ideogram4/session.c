@@ -971,6 +971,17 @@ static iree_status_t id4_ideogram4_validate_generation_policy(
           "Ideogram 4 generation DiT activation format %" PRIu32 " is invalid",
           (uint32_t)policy.dit_activation_format);
   }
+  switch (policy.dit_weight_execution_format) {
+    case ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_BF16_RESIDENT:
+    case ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_FP8_DIRECT:
+      break;
+    default:
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "Ideogram 4 generation DiT weight execution format %" PRIu32
+          " is invalid",
+          (uint32_t)policy.dit_weight_execution_format);
+  }
   switch (policy.dit_attention_implementation) {
     case ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_STREAMING:
     case ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_MATERIALIZED_WMMA:
@@ -1109,6 +1120,8 @@ static iree_status_t id4_ideogram4_plan_generation_dit(
   dit_options.request.conditioning_mode = conditioning_mode;
   dit_options.request.text_token_count = text_token_count;
   dit_options.activation_format = options->policy.dit_activation_format;
+  dit_options.weight_execution_format =
+      options->policy.dit_weight_execution_format;
   dit_options.attention_implementation =
       options->policy.dit_attention_implementation;
   dit_options.feed_forward_implementation =
@@ -1180,6 +1193,8 @@ static iree_status_t id4_ideogram4_plan_generation_stages(
       id4_ideogram4_generation_decoded_image_shape(
           session->decode_model, plan->summary.diffusion_latent_shape);
   plan->summary.dit_activation_format = options->policy.dit_activation_format;
+  plan->summary.dit_weight_execution_format =
+      options->policy.dit_weight_execution_format;
   plan->summary.dit_attention_implementation =
       options->policy.dit_attention_implementation;
   plan->summary.dit_feed_forward_implementation =
@@ -1540,9 +1555,11 @@ iree_status_t id4_ideogram4_generation_plan_format_json(
       builder, plan->summary.decoded_image_shape));
   IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
       builder,
-      ",\"dit_activation_format\":%u,\"dit_attention_implementation\":%u,"
+      ",\"dit_activation_format\":%u,\"dit_weight_execution_format\":%u,"
+      "\"dit_attention_implementation\":%u,"
       "\"dit_feed_forward_implementation\":%u,\"vae_tiling\":",
       (uint32_t)plan->summary.dit_activation_format,
+      (uint32_t)plan->summary.dit_weight_execution_format,
       (uint32_t)plan->summary.dit_attention_implementation,
       (uint32_t)plan->summary.dit_feed_forward_implementation));
   IREE_RETURN_IF_ERROR(id4_ideogram4_generation_plan_append_tiling_json(

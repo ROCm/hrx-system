@@ -95,6 +95,8 @@ static id4_ideogram4_generation_plan_policy_t MakeGenerationPolicy() {
   policy.structure_size = sizeof(policy);
   policy.dit_activation_format =
       ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT;
+  policy.dit_weight_execution_format =
+      ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_BF16_RESIDENT;
   policy.dit_attention_implementation =
       ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_BLOCKED_WMMA;
   policy.dit_feed_forward_implementation =
@@ -568,6 +570,8 @@ TEST_F(SessionTest, PlansGenerationFromDynamicPromptLength) {
   EXPECT_EQ(long_summary.decoded_image_shape.dims[3], 1u);
   EXPECT_EQ(long_summary.dit_activation_format,
             ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT);
+  EXPECT_EQ(long_summary.dit_weight_execution_format,
+            ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_BF16_RESIDENT);
   EXPECT_EQ(long_summary.dit_attention_implementation,
             ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_BLOCKED_WMMA);
   EXPECT_EQ(long_summary.dit_feed_forward_implementation,
@@ -660,6 +664,8 @@ TEST_F(SessionTest, PlansFp8E4m3DitSources) {
       id4_ideogram4_generation_plan_summary(plan_owner.get(), &summary));
   EXPECT_EQ(summary.dit_activation_format,
             ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT);
+  EXPECT_EQ(summary.dit_weight_execution_format,
+            ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_BF16_RESIDENT);
   EXPECT_EQ(summary.dit_attention_implementation,
             ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_BLOCKED_WMMA);
   EXPECT_EQ(summary.dit_feed_forward_implementation,

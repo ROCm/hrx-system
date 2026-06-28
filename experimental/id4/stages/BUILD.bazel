@@ -383,6 +383,7 @@ iree_runtime_cc_test(
     name = "ideogram4_dit_program_test",
     srcs = ["ideogram4_dit_program_test.cc"],
     deps = [
+        ":ideogram4_dit_parameters",
         ":ideogram4_dit_program",
         "//experimental/id4/pipeline:program",
         "//runtime/src/iree/base",

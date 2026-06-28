@@ -432,6 +432,7 @@ iree_cc_test(
   SRCS
     "ideogram4_dit_program_test.cc"
   DEPS
+    ::ideogram4_dit_parameters
     ::ideogram4_dit_program
     iree::base
     iree::base::internal::arena

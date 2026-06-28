@@ -186,6 +186,20 @@ static iree_status_t id4_ideogram4_dit_stage_validate_activation_format(
   }
 }
 
+static iree_status_t id4_ideogram4_dit_stage_validate_weight_execution_format(
+    id4_ideogram4_dit_weight_execution_format_t weight_execution_format) {
+  switch (weight_execution_format) {
+    case ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_BF16_RESIDENT:
+    case ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_FP8_DIRECT:
+      return iree_ok_status();
+    default:
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "Ideogram4 DiT weight execution format %" PRIu32
+                              " is invalid",
+                              (uint32_t)weight_execution_format);
+  }
+}
+
 static iree_status_t id4_ideogram4_dit_stage_validate_attention_implementation(
     id4_ideogram4_dit_attention_implementation_t attention_implementation) {
   switch (attention_implementation) {
@@ -422,6 +436,8 @@ static iree_status_t id4_ideogram4_dit_stage_author_program(
     program_options.model = stage->model;
     program_options.request = dit_options->request;
     program_options.activation_format = dit_options->activation_format;
+    program_options.weight_execution_format =
+        dit_options->weight_execution_format;
     program_options.attention_implementation =
         dit_options->attention_implementation;
     program_options.feed_forward_implementation =
@@ -467,6 +483,8 @@ static iree_status_t id4_ideogram4_dit_stage_parse_plan_extension(
       &stage->model, dit_options->request));
   IREE_RETURN_IF_ERROR(id4_ideogram4_dit_stage_validate_activation_format(
       dit_options->activation_format));
+  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_stage_validate_weight_execution_format(
+      dit_options->weight_execution_format));
   IREE_RETURN_IF_ERROR(
       id4_ideogram4_dit_stage_validate_attention_implementation(
           dit_options->attention_implementation));

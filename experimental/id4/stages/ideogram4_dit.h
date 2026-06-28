@@ -50,6 +50,8 @@ typedef struct id4_ideogram4_dit_stage_plan_options_t {
   id4_ideogram4_dit_request_config_t request;
   // Activation storage format for internal linear-input producers.
   id4_ideogram4_dit_activation_format_t activation_format;
+  // Execution storage strategy selected for linear weights.
+  id4_ideogram4_dit_weight_execution_format_t weight_execution_format;
   // Attention implementation selected for internal transformer blocks.
   id4_ideogram4_dit_attention_implementation_t attention_implementation;
   // Feed-forward implementation selected for internal transformer blocks.

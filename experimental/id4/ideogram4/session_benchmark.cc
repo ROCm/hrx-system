@@ -37,6 +37,8 @@ static id4_ideogram4_generation_plan_policy_t MakeGenerationPolicy() {
   policy.structure_size = sizeof(policy);
   policy.dit_activation_format =
       ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT;
+  policy.dit_weight_execution_format =
+      ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_BF16_RESIDENT;
   policy.dit_attention_implementation =
       ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_BLOCKED_WMMA;
   policy.dit_feed_forward_implementation =

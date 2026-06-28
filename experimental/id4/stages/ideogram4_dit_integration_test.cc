@@ -1295,6 +1295,8 @@ typedef enum DitFixtureRunFlagBits {
 typedef struct DitFixtureRunOptions {
   // Activation format requested from the DiT stage planner.
   id4_ideogram4_dit_activation_format_t activation_format;
+  // Linear weight execution strategy requested from the DiT stage planner.
+  id4_ideogram4_dit_weight_execution_format_t weight_execution_format;
   // Attention implementation requested from the DiT stage planner.
   id4_ideogram4_dit_attention_implementation_t attention_implementation;
   // Feed-forward implementation requested from the DiT stage planner.
@@ -1364,6 +1366,7 @@ static void RunDitFixture(const DitFixtureRunOptions& options) {
   dit_options.structure_size = sizeof(dit_options);
   dit_options.request = request;
   dit_options.activation_format = options.activation_format;
+  dit_options.weight_execution_format = options.weight_execution_format;
   dit_options.attention_implementation = options.attention_implementation;
   dit_options.feed_forward_implementation = options.feed_forward_implementation;
 
@@ -1563,6 +1566,8 @@ static void RunDitFixture(const DitFixtureRunOptions& options) {
 TEST(Ideogram4DitStageIntegration, PrepareAndIssueForwardPreludeFixture) {
   RunDitFixture(DitFixtureRunOptions{
       .activation_format = ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_F32_CANONICAL,
+      .weight_execution_format =
+          ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_BF16_RESIDENT,
       .attention_implementation =
           ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_STREAMING,
       .feed_forward_implementation =
@@ -1584,6 +1589,8 @@ static void RunBf16LinearInputFixture(iree_string_view_t input_stage,
   RunDitFixture(DitFixtureRunOptions{
       .activation_format =
           ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT,
+      .weight_execution_format =
+          ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_BF16_RESIDENT,
       .attention_implementation =
           ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_STREAMING,
       .feed_forward_implementation =
@@ -1620,6 +1627,8 @@ TEST(Ideogram4DitStageIntegration,
   RunDitFixture(DitFixtureRunOptions{
       .activation_format =
           ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT,
+      .weight_execution_format =
+          ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_BF16_RESIDENT,
       .attention_implementation =
           ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_MATERIALIZED_WMMA,
       .feed_forward_implementation =
@@ -1646,6 +1655,8 @@ TEST(Ideogram4DitStageIntegration, PrepareAndIssueBlockedWmmaAttentionFixture) {
   RunDitFixture(DitFixtureRunOptions{
       .activation_format =
           ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT,
+      .weight_execution_format =
+          ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_BF16_RESIDENT,
       .attention_implementation =
           ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_BLOCKED_WMMA,
       .feed_forward_implementation =
@@ -1672,6 +1683,8 @@ TEST(Ideogram4DitStageIntegration, PrepareAndIssueOnlineWmmaAttentionFixture) {
   RunDitFixture(DitFixtureRunOptions{
       .activation_format =
           ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT,
+      .weight_execution_format =
+          ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_BF16_RESIDENT,
       .attention_implementation =
           ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_ONLINE_WMMA,
       .feed_forward_implementation =
