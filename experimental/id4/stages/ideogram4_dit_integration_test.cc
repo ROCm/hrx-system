@@ -32,7 +32,7 @@ IREE_FLAG(
 IREE_FLAG(string, id4_plan_output, "",
           "Path that receives the planned ID4 DiT stage JSON before "
           "preparation.");
-IREE_FLAG(string, dit_parameter_format, "bf16",
+IREE_FLAG(string, dit_parameter_format, "fp8_e4m3",
           "DiT parameter format: bf16 or fp8_e4m3.");
 IREE_FLAG(string, dit_conditioned_fp8_scope, "dit_cond_fp8",
           "Conditioned DiT FP8 e4m3 source parameter scope.");

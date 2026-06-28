@@ -32,7 +32,7 @@ IREE_FLAG(string, prompt_json, "",
 IREE_FLAG(string, prompt_json_file, "",
           "Path to a JSON prompt/configuration payload for one generation.");
 IREE_FLAG(string, output, "", "Output image path.");
-IREE_FLAG(string, dit_parameter_format, "bf16",
+IREE_FLAG(string, dit_parameter_format, "fp8_e4m3",
           "DiT parameter format: bf16 or fp8_e4m3.");
 IREE_FLAG(string, dit_activation_format, "bf16_linear_input",
           "DiT activation format: bf16_linear_input or f32_canonical.");

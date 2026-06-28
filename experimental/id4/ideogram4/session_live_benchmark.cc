@@ -19,7 +19,7 @@
 
 IREE_FLAG(string, id4_tokenizer, "",
           "Hugging Face tokenizer JSON used by live generation benchmarks.");
-IREE_FLAG(string, dit_parameter_format, "bf16",
+IREE_FLAG(string, dit_parameter_format, "fp8_e4m3",
           "DiT parameter format: bf16 or fp8_e4m3.");
 IREE_FLAG(string, dit_activation_format, "bf16_linear_input",
           "DiT activation format: bf16_linear_input or f32_canonical.");

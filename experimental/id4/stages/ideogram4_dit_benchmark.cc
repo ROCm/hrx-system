@@ -26,7 +26,7 @@ IREE_FLAG(
     "Directory containing a full or DiT-only Ideogram4 fixture manifest.");
 IREE_FLAG(string, id4_plan_output_dir, "",
           "Optional directory receiving benchmark DiT stage plan JSON files.");
-IREE_FLAG(string, dit_parameter_format, "bf16",
+IREE_FLAG(string, dit_parameter_format, "fp8_e4m3",
           "DiT parameter format: bf16 or fp8_e4m3.");
 IREE_FLAG(string, dit_attention_implementation, "streaming",
           "DiT attention implementation: streaming or materialized_wmma.");

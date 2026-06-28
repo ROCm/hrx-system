@@ -329,6 +329,7 @@ iree_cc_test(
     "ideogram4_dit_test.cc"
   DEPS
     ::ideogram4_dit
+    ::ideogram4_dit_parameters
     ::test_util
     iree::base
     iree::experimental::id4::pipeline::plan
