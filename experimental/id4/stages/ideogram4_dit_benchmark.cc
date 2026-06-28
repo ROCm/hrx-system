@@ -684,6 +684,12 @@ static iree_status_t RunPlanBenchmark(iree_benchmark_state_t* benchmark_state,
   DitBenchmarkContext context;
   IREE_RETURN_IF_ERROR(CreateLoadedDitStageContext(branch, &context));
 
+  id4::test::OwningRef<id4_pipeline_plan_t, id4_pipeline_plan_release>
+      warm_plan;
+  IREE_RETURN_IF_ERROR(CreateDitPlan(&context, warm_plan.out()));
+  IREE_RETURN_IF_ERROR(WritePlanJsonIfRequested(branch, warm_plan.get()));
+  warm_plan.reset();
+
   uint64_t iteration_count = 0;
   while (iree_benchmark_keep_running(benchmark_state, 1)) {
     id4_pipeline_plan_t* plan = nullptr;
