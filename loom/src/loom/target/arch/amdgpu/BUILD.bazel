@@ -178,6 +178,7 @@ loom_cc_library(
     hdrs = ["math_policy.h"],
     deps = [
         "//loom/src/loom/target:math_policy",
+        "//loom/src/loom/target/arch/amdgpu/lower:kinds",
         "//runtime/src/iree/base",
     ],
 )
@@ -211,6 +212,7 @@ loom_cc_library(
     hdrs = ["legalization.h"],
     deps = [
         "//loom/src/loom/analysis:symbolic_expr",
+        "//loom/src/loom/codegen/low:descriptors",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/index",
         "//loom/src/loom/ops/kernel",

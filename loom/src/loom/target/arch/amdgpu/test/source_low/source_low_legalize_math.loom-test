@@ -849,13 +849,27 @@ func.def target(@target) @vector_bf16_mul_native_pack_gfx1250(%lhs: vector<2xbf1
 
 // ----
 low.func.def target(@target) abi(hal_kernel) @vector_bf16_mul_native_pack_gfx1250(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna4.gfx125x.core> {
-  %11 = v_lshlrev_b32_src0_inline %lhs, 16
-  %12 = v_and_b32_lit %lhs, 4294901760
-  %14 = v_lshlrev_b32_src0_inline %rhs, 16
-  %15 = v_and_b32_lit %rhs, 4294901760
-  %19 = v_mul_f32 %11, %14
-  %22 = v_mul_f32 %12, %15
-  %result = v_cvt_pk_bf16_f32 %19, %22
+  %result = v_pk_mul_bf16 %lhs, %rhs
+  return %result
+}
+
+// ====
+
+amdgpu.target<gfx1250> @target
+func.def target(@target) @vector_bf16_mul_wide_native_pack_gfx1250(%lhs: vector<4xbf16>, %rhs: vector<4xbf16>) -> (vector<4xbf16>) {
+  %result = vector.mulf %lhs, %rhs : vector<4xbf16>
+  func.return %result : vector<4xbf16>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @vector_bf16_mul_wide_native_pack_gfx1250(%lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm<amdgpu.rdna4.gfx125x.core> {
+  %14 = slice %lhs[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %15 = slice %rhs[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %16 = v_pk_mul_bf16 %14, %15
+  %17 = slice %lhs[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %18 = slice %rhs[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %19 = v_pk_mul_bf16 %17, %18
+  %result = concat(%16, %19) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
   return %result
 }
 
@@ -870,6 +884,28 @@ func.def target(@target) @vector_bf16_fma_native_pk_gfx1250(%a: vector<2xbf16>, 
 // ----
 low.func.def target(@target) abi(hal_kernel) @vector_bf16_fma_native_pk_gfx1250(%a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %c: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna4.gfx125x.core> {
   %result = v_pk_fma_bf16 %a, %b, %c
+  return %result
+}
+
+// ====
+
+amdgpu.target<gfx1250> @target
+func.def target(@target) @vector_bf16_fma_wide_native_pk_gfx1250(%a: vector<4xbf16>, %b: vector<4xbf16>, %c: vector<4xbf16>) -> (vector<4xbf16>) {
+  %result = vector.fmaf %a, %b, %c : vector<4xbf16>
+  func.return %result : vector<4xbf16>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @vector_bf16_fma_wide_native_pk_gfx1250(%a: reg<amdgpu.vgpr x2>, %b: reg<amdgpu.vgpr x2>, %c: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm<amdgpu.rdna4.gfx125x.core> {
+  %18 = slice %a[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %19 = slice %b[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %20 = slice %c[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %21 = v_pk_fma_bf16 %18, %19, %20
+  %22 = slice %a[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %23 = slice %b[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %24 = slice %c[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %25 = v_pk_fma_bf16 %22, %23, %24
+  %result = concat(%21, %25) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
   return %result
 }
 

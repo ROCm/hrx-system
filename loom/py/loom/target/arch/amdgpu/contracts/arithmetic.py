@@ -88,6 +88,7 @@ _DESCRIPTOR_KEYS = (
     "amdgpu.v_cvt_f16_f32",
     "amdgpu.v_pk_fmac_f16",
     "amdgpu.v_pk_fma_f16",
+    "amdgpu.v_pk_mul_bf16",
     "amdgpu.v_pk_fma_bf16",
     "amdgpu.v_pk_add_u16",
     "amdgpu.v_pk_sub_i16",
@@ -197,6 +198,7 @@ _VEC_BF16_PACKED_STORAGE = Vector(
     minimum_lanes=1,
     maximum_lanes="LOOM_AMDGPU_MAX_PACKED_16BIT_FLOAT_LANES",
 )
+_VEC_BF16_PACKED_REGISTER = Vector("bf16", lanes=2)
 _VEC_I16_PACKED_STORAGE = Vector(
     "i16",
     minimum_lanes=1,
@@ -477,7 +479,7 @@ def _type_diagnostic(type_pattern: TypePattern) -> GuardDiagnostic:
         return _VEC_I1_DIAGNOSTIC
     if type_pattern in (_VEC_F16_PACKED, _VEC_F16_PACKED_STORAGE):
         return _VEC_F16_PACKED_DIAGNOSTIC
-    if type_pattern == _VEC_BF16_PACKED_STORAGE:
+    if type_pattern in (_VEC_BF16_PACKED_STORAGE, _VEC_BF16_PACKED_REGISTER):
         return _VEC_BF16_PACKED_DIAGNOSTIC
     if type_pattern in (_VEC_I16_PACKED, _VEC_I16_PACKED_STORAGE):
         return _VEC_I16_PACKED_DIAGNOSTIC
@@ -3008,7 +3010,7 @@ def _packed_bf16_vector_fma_rule() -> DescriptorRule:
         source_op=vector.vector_fmaf,
         descriptor=descriptor,
         guards=(
-            *_typed_guards(("a", "b", "c", "result"), _VEC_BF16_PACKED_STORAGE),
+            *_typed_guards(("a", "b", "c", "result"), _VEC_BF16_PACKED_REGISTER),
             Guard.value_static_dim0_multiple(
                 "result",
                 2,
@@ -3023,6 +3025,34 @@ def _packed_bf16_vector_fma_rule() -> DescriptorRule:
                     "a": ValueRef.operand("a"),
                     "b": ValueRef.operand("b"),
                     "c": ValueRef.operand("c"),
+                },
+                results={"dst": ValueRef.result("result")},
+                form=DescriptorEmitForm.OP,
+            ),
+        ),
+    )
+
+
+def _packed_bf16_vector_mul_rule() -> DescriptorRule:
+    descriptor = _descriptor("amdgpu.v_pk_mul_bf16")
+    return DescriptorRule(
+        source_op=vector.vector_mulf,
+        descriptor=descriptor,
+        guards=(
+            *_typed_guards(("lhs", "rhs", "result"), _VEC_BF16_PACKED_REGISTER),
+            Guard.value_static_dim0_multiple(
+                "result",
+                2,
+                diagnostic=_VEC_BF16_PACKED_DIAGNOSTIC,
+            ),
+            Guard.descriptor_available(descriptor),
+        ),
+        emit=(
+            EmitDescriptorOp(
+                descriptor=descriptor,
+                operands={
+                    "lhs": ValueRef.operand("lhs"),
+                    "rhs": ValueRef.operand("rhs"),
                 },
                 results={"dst": ValueRef.result("result")},
                 form=DescriptorEmitForm.OP,
@@ -3175,6 +3205,7 @@ def _f32_vector_sub_literal_rules() -> tuple[DescriptorRule, ...]:
 
 def _rules() -> tuple[ContractCase, ...]:
     rules: list[ContractCase] = []
+    rules.append(_packed_bf16_vector_mul_rule())
     for source_op, descriptor_key in (
         (vector.vector_addf, "amdgpu.v_add_f32.lit"),
         (vector.vector_mulf, "amdgpu.v_mul_f32.lit"),
