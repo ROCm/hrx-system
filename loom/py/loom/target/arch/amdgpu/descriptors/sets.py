@@ -1735,73 +1735,128 @@ def _gfx1250_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
     return (
         *_rdna4_core_overlays(),
         _v_cvt_pk_bf16_f32_overlay(),
+        _v_pk_mul_bf16_overlay(),
+        _v_pk_fma_bf16_overlay(),
     )
+
+
+_GFX1250_SUPPLEMENTAL_INSTRUCTION_FLAGS = AmdgpuIsaInstructionFlags(
+    is_branch=False,
+    is_conditional_branch=False,
+    is_indirect_branch=False,
+    is_program_terminator=False,
+    is_immediately_executed=False,
+)
+
+
+def _gfx1250_supplemental_vop3_source(
+    order: int,
+    field_name: str,
+    data_format_name: str,
+) -> AmdgpuIsaOperand:
+    return AmdgpuIsaOperand(
+        order=order,
+        field_name=field_name,
+        data_format_name=data_format_name,
+        operand_type="OPR_SRC",
+        size_bits=32,
+        is_input=True,
+        is_output=False,
+        is_implicit=False,
+        is_binary_microcode_required=True,
+    )
+
+
+def _gfx1250_supplemental_vop3_result(
+    data_format_name: str,
+) -> AmdgpuIsaOperand:
+    return AmdgpuIsaOperand(
+        order=1,
+        field_name="VDST",
+        data_format_name=data_format_name,
+        operand_type="OPR_VGPR",
+        size_bits=32,
+        is_input=False,
+        is_output=True,
+        is_implicit=False,
+        is_binary_microcode_required=True,
+    )
+
+
+def _gfx1250_supplemental_instruction(
+    *,
+    name: str,
+    encoding_name: str,
+    opcode: int,
+    operands: tuple[AmdgpuIsaOperand, ...],
+) -> AmdgpuIsaInstruction:
+    return AmdgpuIsaInstruction(
+        name=name,
+        aliases=(),
+        flags=_GFX1250_SUPPLEMENTAL_INSTRUCTION_FLAGS,
+        encodings=(
+            AmdgpuIsaInstructionEncoding(
+                encoding_name=encoding_name,
+                condition_name="default",
+                opcode=opcode,
+                operands=operands,
+            ),
+        ),
+        functional_groups=(AmdgpuIsaFunctionalGroup("VALU", ("NOT_ASSIGNED",)),),
+    )
+
+
+_GFX1250_SUPPLEMENTAL_INSTRUCTIONS = (
+    _gfx1250_supplemental_instruction(
+        name="V_CVT_PK_BF16_F32",
+        encoding_name="ENC_VOP3",
+        opcode=877,
+        operands=(
+            _gfx1250_supplemental_vop3_result("FMT_NUM_PK2_BF16"),
+            _gfx1250_supplemental_vop3_source(2, "SRC0", "FMT_NUM_F32"),
+            _gfx1250_supplemental_vop3_source(3, "SRC1", "FMT_NUM_F32"),
+        ),
+    ),
+    _gfx1250_supplemental_instruction(
+        name="V_PK_MUL_BF16",
+        encoding_name="ENC_VOP3P",
+        opcode=0x2A,
+        operands=(
+            _gfx1250_supplemental_vop3_result("FMT_NUM_PK2_BF16"),
+            _gfx1250_supplemental_vop3_source(2, "SRC0", "FMT_NUM_PK2_BF16"),
+            _gfx1250_supplemental_vop3_source(3, "SRC1", "FMT_NUM_PK2_BF16"),
+        ),
+    ),
+    _gfx1250_supplemental_instruction(
+        name="V_PK_FMA_BF16",
+        encoding_name="ENC_VOP3P",
+        opcode=0x11,
+        operands=(
+            _gfx1250_supplemental_vop3_result("FMT_NUM_PK2_BF16"),
+            _gfx1250_supplemental_vop3_source(2, "SRC0", "FMT_NUM_PK2_BF16"),
+            _gfx1250_supplemental_vop3_source(3, "SRC1", "FMT_NUM_PK2_BF16"),
+            _gfx1250_supplemental_vop3_source(4, "SRC2", "FMT_NUM_PK2_BF16"),
+        ),
+    ),
+)
 
 
 def _gfx1250_spec_with_supplemental_instruction_facts(
     spec: AmdgpuIsaFactSource,
 ) -> AmdgpuIsaFactSource:
-    if "V_CVT_PK_BF16_F32" in spec.instruction_map(include_aliases=True):
+    existing_instruction_names = spec.instruction_map(include_aliases=True)
+    supplemental_instructions = tuple(
+        instruction
+        for instruction in _GFX1250_SUPPLEMENTAL_INSTRUCTIONS
+        if instruction.name not in existing_instruction_names
+    )
+    if not supplemental_instructions:
         return spec
 
-    # The pinned RDNA4 ISA XML lacks this gfx125x instruction even though the
-    # ROCm LLVM assembler accepts it. Keep the supplemental fact narrow to
-    # gfx125x and let normal overlay materialization validate the descriptor.
-    instruction = AmdgpuIsaInstruction(
-        name="V_CVT_PK_BF16_F32",
-        aliases=(),
-        flags=AmdgpuIsaInstructionFlags(
-            is_branch=False,
-            is_conditional_branch=False,
-            is_indirect_branch=False,
-            is_program_terminator=False,
-            is_immediately_executed=False,
-        ),
-        encodings=(
-            AmdgpuIsaInstructionEncoding(
-                encoding_name="ENC_VOP3",
-                condition_name="default",
-                opcode=877,
-                operands=(
-                    AmdgpuIsaOperand(
-                        order=1,
-                        field_name="VDST",
-                        data_format_name="FMT_NUM_PK2_BF16",
-                        operand_type="OPR_VGPR",
-                        size_bits=32,
-                        is_input=False,
-                        is_output=True,
-                        is_implicit=False,
-                        is_binary_microcode_required=True,
-                    ),
-                    AmdgpuIsaOperand(
-                        order=2,
-                        field_name="SRC0",
-                        data_format_name="FMT_NUM_F32",
-                        operand_type="OPR_SRC",
-                        size_bits=32,
-                        is_input=True,
-                        is_output=False,
-                        is_implicit=False,
-                        is_binary_microcode_required=True,
-                    ),
-                    AmdgpuIsaOperand(
-                        order=3,
-                        field_name="SRC1",
-                        data_format_name="FMT_NUM_F32",
-                        operand_type="OPR_SRC",
-                        size_bits=32,
-                        is_input=True,
-                        is_output=False,
-                        is_implicit=False,
-                        is_binary_microcode_required=True,
-                    ),
-                ),
-            ),
-        ),
-        functional_groups=(AmdgpuIsaFunctionalGroup("VALU", ("NOT_ASSIGNED",)),),
-    )
-    return replace(spec, instructions=(*spec.instructions, instruction))
+    # The pinned RDNA4 ISA XML lacks these gfx125x instructions even though the
+    # ROCm LLVM assembler accepts them. Keep the supplemental facts narrow to
+    # gfx125x and let normal overlay materialization validate each descriptor.
+    return replace(spec, instructions=(*spec.instructions, *supplemental_instructions))
 
 
 def _gfx1250_core_overlay_descriptors(

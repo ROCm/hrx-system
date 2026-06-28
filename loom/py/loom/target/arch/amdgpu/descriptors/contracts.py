@@ -90,6 +90,7 @@ _AMDGPU_CONTRACT_DESCRIPTOR_OVERLAY_BUILDERS: dict[
     "amdgpu.v_fmamk_f32": _v_fmamk_f32_overlay,
     "amdgpu.v_pk_fmac_f16": _v_pk_fmac_f16_overlay,
     "amdgpu.v_pk_fma_f16": _v_pk_fma_f16_overlay,
+    "amdgpu.v_pk_fma_bf16": _v_pk_fma_bf16_overlay,
     **_contract_overlay_builders_from_overlays(_v_pk_fma_f16_literal_overlays()),
     **_contract_overlay_builders_from_overlays(_v_pk_i16_binary_overlays()),
     "amdgpu.v_pk_mad_i16": _v_pk_mad_i16_overlay,

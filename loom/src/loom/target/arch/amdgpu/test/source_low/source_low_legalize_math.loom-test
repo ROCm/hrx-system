@@ -841,6 +841,40 @@ low.func.def target(@target) abi(hal_kernel) @vector_bf16_mul_widen_round_source
 
 // ====
 
+amdgpu.target<gfx1250> @target
+func.def target(@target) @vector_bf16_mul_native_pack_gfx1250(%lhs: vector<2xbf16>, %rhs: vector<2xbf16>) -> (vector<2xbf16>) {
+  %result = vector.mulf %lhs, %rhs : vector<2xbf16>
+  func.return %result : vector<2xbf16>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @vector_bf16_mul_native_pack_gfx1250(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna4.gfx125x.core> {
+  %11 = v_lshlrev_b32_src0_inline %lhs, 16
+  %12 = v_and_b32_lit %lhs, 4294901760
+  %14 = v_lshlrev_b32_src0_inline %rhs, 16
+  %15 = v_and_b32_lit %rhs, 4294901760
+  %19 = v_mul_f32 %11, %14
+  %22 = v_mul_f32 %12, %15
+  %result = v_cvt_pk_bf16_f32 %19, %22
+  return %result
+}
+
+// ====
+
+amdgpu.target<gfx1250> @target
+func.def target(@target) @vector_bf16_fma_native_pk_gfx1250(%a: vector<2xbf16>, %b: vector<2xbf16>, %c: vector<2xbf16>) -> (vector<2xbf16>) {
+  %result = vector.fmaf %a, %b, %c : vector<2xbf16>
+  func.return %result : vector<2xbf16>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @vector_bf16_fma_native_pk_gfx1250(%a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %c: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna4.gfx125x.core> {
+  %result = v_pk_fma_bf16 %a, %b, %c
+  return %result
+}
+
+// ====
+
 amdgpu.target<gfx1100> @target
 func.def target(@target) @scalar_log_afn(%input: f32) -> (f32) {
   %result = scalar.logf<afn> %input : f32

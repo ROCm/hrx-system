@@ -88,6 +88,7 @@ _DESCRIPTOR_KEYS = (
     "amdgpu.v_cvt_f16_f32",
     "amdgpu.v_pk_fmac_f16",
     "amdgpu.v_pk_fma_f16",
+    "amdgpu.v_pk_fma_bf16",
     "amdgpu.v_pk_add_u16",
     "amdgpu.v_pk_sub_i16",
     "amdgpu.v_pk_mul_lo_u16",
@@ -3001,6 +3002,35 @@ def _packed_f16_vector_fma_rules() -> tuple[DescriptorRule, ...]:
     )
 
 
+def _packed_bf16_vector_fma_rule() -> DescriptorRule:
+    descriptor = _descriptor("amdgpu.v_pk_fma_bf16")
+    return DescriptorRule(
+        source_op=vector.vector_fmaf,
+        descriptor=descriptor,
+        guards=(
+            *_typed_guards(("a", "b", "c", "result"), _VEC_BF16_PACKED_STORAGE),
+            Guard.value_static_dim0_multiple(
+                "result",
+                2,
+                diagnostic=_VEC_BF16_PACKED_DIAGNOSTIC,
+            ),
+            Guard.descriptor_available(descriptor),
+        ),
+        emit=(
+            EmitDescriptorOp(
+                descriptor=descriptor,
+                operands={
+                    "a": ValueRef.operand("a"),
+                    "b": ValueRef.operand("b"),
+                    "c": ValueRef.operand("c"),
+                },
+                results={"dst": ValueRef.result("result")},
+                form=DescriptorEmitForm.OP,
+            ),
+        ),
+    )
+
+
 def _packed_i16_vector_fmai_rule(descriptor_key: str) -> DescriptorRule:
     descriptor = _descriptor(descriptor_key)
     return DescriptorRule(
@@ -3190,6 +3220,7 @@ def _rules() -> tuple[ContractCase, ...]:
             ),
             _packed_f32_vector_fma_rule(),
             *_packed_f16_vector_fma_rules(),
+            _packed_bf16_vector_fma_rule(),
             *_packed_i16_vector_fmai_rules(),
             *_vector_extract_recipe_rules(),
             *_vector_16bit_float_conversion_recipe_rules(),

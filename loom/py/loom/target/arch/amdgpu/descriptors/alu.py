@@ -3631,6 +3631,24 @@ def _v_pk_fma_f16_literal_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
     )
 
 
+def _v_pk_mul_bf16_overlay() -> AmdgpuDescriptorOverlay:
+    return _v_pk_binary_overlay(
+        descriptor_key="amdgpu.v_pk_mul_bf16",
+        instruction_name="V_PK_MUL_BF16",
+        mnemonic="v_pk_mul_bf16",
+        semantic_tag="float.mul.pk2.bf16",
+    )
+
+
+def _v_pk_fma_bf16_overlay() -> AmdgpuDescriptorOverlay:
+    return _v_pk_ternary_overlay(
+        descriptor_key="amdgpu.v_pk_fma_bf16",
+        instruction_name="V_PK_FMA_BF16",
+        mnemonic="v_pk_fma_bf16",
+        semantic_tag="float.fma.pk2.bf16",
+    )
+
+
 def _v_pk_add_u16_overlay() -> AmdgpuDescriptorOverlay:
     return _v_pk_binary_overlay(
         descriptor_key="amdgpu.v_pk_add_u16",
@@ -5036,6 +5054,8 @@ __all__ = (
     "_v_pk_ashrrev_i16_overlay",
     "_v_pk_fma_f16_overlay",
     "_v_pk_fma_f16_literal_overlays",
+    "_v_pk_fma_bf16_overlay",
+    "_v_pk_mul_bf16_overlay",
     "_v_pk_add_u16_overlay",
     "_v_pk_lshlrev_b16_overlay",
     "_v_pk_lshrrev_b16_overlay",

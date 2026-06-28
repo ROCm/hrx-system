@@ -1754,6 +1754,47 @@ def test_packed_fma_mad_descriptors_pin_lane_container_widths() -> None:
         assert "amdgpu.v_pk_fma_f32" not in descriptors
 
 
+def test_gfx1250_packed_bf16_descriptors_are_arch_scoped() -> None:
+    unsupported_descriptor_sets = (
+        _gfx940_core_overlays(),
+        _gfx950_core_overlays(),
+        _gfx11_core_overlays(),
+        _gfx12_core_overlays(),
+    )
+    for descriptor_set in unsupported_descriptor_sets:
+        descriptors = {
+            descriptor.descriptor_key: descriptor for descriptor in descriptor_set
+        }
+        assert "amdgpu.v_pk_mul_bf16" not in descriptors
+        assert "amdgpu.v_pk_fma_bf16" not in descriptors
+
+    descriptors = {
+        descriptor.descriptor_key: descriptor for descriptor in _gfx1250_core_overlays()
+    }
+    binary_descriptor = descriptors["amdgpu.v_pk_mul_bf16"]
+    assert binary_descriptor.encoding_name == "ENC_VOP3P"
+    assert tuple(operand.xml_field_name for operand in binary_descriptor.operands) == (
+        "VDST",
+        "SRC0",
+        "SRC1",
+    )
+    assert tuple(
+        operand.descriptor_operand.unit_count for operand in binary_descriptor.operands
+    ) == (1, 1, 1)
+
+    fma_descriptor = descriptors["amdgpu.v_pk_fma_bf16"]
+    assert fma_descriptor.encoding_name == "ENC_VOP3P"
+    assert tuple(operand.xml_field_name for operand in fma_descriptor.operands) == (
+        "VDST",
+        "SRC0",
+        "SRC1",
+        "SRC2",
+    )
+    assert tuple(
+        operand.descriptor_operand.unit_count for operand in fma_descriptor.operands
+    ) == (1, 1, 1, 1)
+
+
 def test_packed_i16_binary_descriptors_pin_lane_container_widths() -> None:
     packed_keys = (
         "amdgpu.v_pk_add_u16",
