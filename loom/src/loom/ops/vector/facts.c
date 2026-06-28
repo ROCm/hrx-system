@@ -2479,6 +2479,21 @@ static iree_status_t loom_vector_float_unary_summary_facts(
                                                   &result_facts[0]);
 }
 
+static iree_status_t loom_vector_float_classify_summary_facts(
+    loom_fact_context_t* context, loom_scalar_type_t scalar_type,
+    const loom_value_facts_t* operand_facts, loom_value_facts_t* result_facts,
+    loom_vector_float_unary_fact_transfer_fn_t transfer_fn) {
+  loom_value_facts_t element = loom_value_facts_unknown();
+  transfer_fn(scalar_type, &operand_facts[0], NULL, &element);
+  if (loom_value_facts_is_exact(element) &&
+      !loom_value_facts_is_float(element)) {
+    return loom_value_facts_make_uniform_element(context, element,
+                                                 &result_facts[0]);
+  }
+  return loom_vector_float_unary_summary_facts(
+      context, scalar_type, operand_facts, result_facts, transfer_fn, NULL);
+}
+
 typedef struct loom_vector_float_unary_math_transfer_t {
   loom_float_unary_f32_fn_t f32_fn;
   loom_float_unary_f64_fn_t f64_fn;
@@ -2961,9 +2976,9 @@ static loom_scalar_type_t loom_vector_first_operand_element_type(
                      const loom_module_t* module, const loom_op_t* op, \
                      const loom_value_facts_t* operand_facts,          \
                      loom_value_facts_t* result_facts) {               \
-    return loom_vector_float_unary_summary_facts(                      \
+    return loom_vector_float_classify_summary_facts(                   \
         context, loom_vector_first_operand_element_type(module, op),   \
-        operand_facts, result_facts, transfer_fn, NULL);               \
+        operand_facts, result_facts, transfer_fn);                     \
   }
 
 LOOM_VECTOR_FLOAT_CLASSIFY_FACTS(loom_vector_isnanf_facts,
