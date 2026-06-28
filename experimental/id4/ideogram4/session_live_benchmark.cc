@@ -133,6 +133,9 @@ struct LiveGenerationBenchmarkContext {
   bool runtime_context_initialized = false;
   // Embedded Loom source library used by generation preparation.
   id4::test::KernelLibraryRef kernel_library;
+  // DiT parameter source policy selected by benchmark flags.
+  id4_ideogram4_dit_parameter_format_t dit_parameter_format =
+      ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_INVALID;
   // Provider containing Qwen3-VL text encoder weights.
   ParameterProviderRef qwen_parameter_provider;
   // Provider containing conditioned Ideogram 4 DiT weights.
@@ -184,6 +187,18 @@ static iree_status_t ParseDitActivationFormat(
       "--dit_activation_format must be bf16_linear_input or f32_canonical");
 }
 
+static iree_string_view_t DitActivationFormatName(
+    id4_ideogram4_dit_activation_format_t format) {
+  switch (format) {
+    case ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_F32_CANONICAL:
+      return IREE_SV("f32_canonical");
+    case ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT:
+      return IREE_SV("bf16_linear_input");
+    default:
+      return IREE_SV("invalid");
+  }
+}
+
 static iree_status_t ParseDitAttentionImplementation(
     id4_ideogram4_dit_attention_implementation_t* out_implementation) {
   IREE_ASSERT_ARGUMENT(out_implementation);
@@ -201,6 +216,18 @@ static iree_status_t ParseDitAttentionImplementation(
   return iree_make_status(
       IREE_STATUS_INVALID_ARGUMENT,
       "--dit_attention_implementation must be streaming or materialized_wmma");
+}
+
+static iree_string_view_t DitAttentionImplementationName(
+    id4_ideogram4_dit_attention_implementation_t implementation) {
+  switch (implementation) {
+    case ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_STREAMING:
+      return IREE_SV("streaming");
+    case ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_MATERIALIZED_WMMA:
+      return IREE_SV("materialized_wmma");
+    default:
+      return IREE_SV("invalid");
+  }
 }
 
 static iree_status_t ParseDitFeedForwardImplementation(
@@ -221,6 +248,18 @@ static iree_status_t ParseDitFeedForwardImplementation(
   return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                           "--dit_feed_forward_implementation must be "
                           "fused_product or pytorch_parity");
+}
+
+static iree_string_view_t DitFeedForwardImplementationName(
+    id4_ideogram4_dit_feed_forward_implementation_t implementation) {
+  switch (implementation) {
+    case ID4_IDEOGRAM4_DIT_FEED_FORWARD_IMPLEMENTATION_FUSED_PRODUCT:
+      return IREE_SV("fused_product");
+    case ID4_IDEOGRAM4_DIT_FEED_FORWARD_IMPLEMENTATION_PYTORCH_PARITY:
+      return IREE_SV("pytorch_parity");
+    default:
+      return IREE_SV("invalid");
+  }
 }
 
 static iree_status_t ParseRequest(iree_string_view_t json,
@@ -273,6 +312,7 @@ LiveGenerationParameterProviders(
 
 static iree_status_t CreateLoadedLiveSession(
     const id4_tooling_runtime_context_t* runtime_context,
+    id4_ideogram4_dit_parameter_format_t dit_parameter_format,
     id4_ideogram4_session_t** out_session) {
   IREE_ASSERT_ARGUMENT(runtime_context);
   IREE_ASSERT_ARGUMENT(out_session);
@@ -288,8 +328,7 @@ static iree_status_t CreateLoadedLiveSession(
   create_options.parameter_scopes.dit_conditioned = IREE_SV("dit_cond");
   create_options.parameter_scopes.dit_unconditioned = IREE_SV("dit_uncond");
   create_options.parameter_scopes.vae = IREE_SV("vae");
-  IREE_RETURN_IF_ERROR(
-      ParseDitParameterFormat(&create_options.dit_parameter_format));
+  create_options.dit_parameter_format = dit_parameter_format;
   switch (create_options.dit_parameter_format) {
     case ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_BF16:
       break;
@@ -329,10 +368,8 @@ static iree_status_t CreateLoadedLiveSession(
 static iree_status_t CreateParameterProviders(
     LiveGenerationBenchmarkContext* context) {
   IREE_ASSERT_ARGUMENT(context);
-  id4_ideogram4_dit_parameter_format_t dit_parameter_format =
-      ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_INVALID;
-  IREE_RETURN_IF_ERROR(ParseDitParameterFormat(&dit_parameter_format));
-  if (dit_parameter_format == ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_BF16) {
+  if (context->dit_parameter_format ==
+      ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_BF16) {
     id4_tooling_parameter_provider_request_t requests[] = {
         {
             // Qwen3-VL text encoder parameter scope.
@@ -470,8 +507,11 @@ static iree_status_t CreateLiveGenerationBenchmarkContext(
 
   IREE_RETURN_IF_ERROR(id4_tooling_create_embedded_kernel_library(
       iree_allocator_system(), out_context->kernel_library.out()));
-  IREE_RETURN_IF_ERROR(CreateLoadedLiveSession(&out_context->runtime_context,
-                                               out_context->session.out()));
+  IREE_RETURN_IF_ERROR(
+      ParseDitParameterFormat(&out_context->dit_parameter_format));
+  IREE_RETURN_IF_ERROR(CreateLoadedLiveSession(
+      &out_context->runtime_context, out_context->dit_parameter_format,
+      out_context->session.out()));
   return CreateParameterProviders(out_context);
 }
 
@@ -565,6 +605,36 @@ static iree_status_t IssueGenerationBundle(
                                                 &issue_options, out_execution);
 }
 
+static void SetGenerationBenchmarkLabel(
+    iree_benchmark_state_t* benchmark_state,
+    const LiveGenerationBenchmarkContext& context,
+    const id4_ideogram4_generation_plan_summary_t& summary) {
+  const iree_string_view_t parameter_format =
+      id4_ideogram4_dit_parameter_format_name(context.dit_parameter_format);
+  const iree_string_view_t activation_format =
+      DitActivationFormatName(summary.dit_activation_format);
+  const iree_string_view_t attention_implementation =
+      DitAttentionImplementationName(summary.dit_attention_implementation);
+  const iree_string_view_t feed_forward_implementation =
+      DitFeedForwardImplementationName(summary.dit_feed_forward_implementation);
+  char label[256];
+  std::snprintf(
+      label, sizeof(label),
+      "tokens=%" PRIu32 " latent=%" PRIu64 "x%" PRIu64 " steps=%" PRIu32
+      " image=%" PRIu64 "x%" PRIu64
+      " params=%.*s activation=%.*s attention=%.*s ff=%.*s",
+      summary.qwen_token_count, summary.diffusion_latent_shape.dims[0],
+      summary.diffusion_latent_shape.dims[1], summary.denoise_step_count,
+      summary.decoded_image_shape.dims[0], summary.decoded_image_shape.dims[1],
+      static_cast<int>(parameter_format.size), parameter_format.data,
+      static_cast<int>(activation_format.size), activation_format.data,
+      static_cast<int>(attention_implementation.size),
+      attention_implementation.data,
+      static_cast<int>(feed_forward_implementation.size),
+      feed_forward_implementation.data);
+  iree_benchmark_set_label(benchmark_state, label);
+}
+
 static iree_status_t RunGenerationEndToEndBenchmark(
     const iree_benchmark_def_t* benchmark_def,
     iree_benchmark_state_t* benchmark_state) {
@@ -647,17 +717,7 @@ static iree_status_t RunGenerationEndToEndBenchmark(
   status =
       iree_status_join(status, iree_hal_end_profiling_from_flags(profiling));
   IREE_RETURN_IF_ERROR(status);
-  char label[160];
-  std::snprintf(label, sizeof(label),
-                "tokens=%" PRIu32 " latent=%" PRIu64 "x%" PRIu64
-                " steps=%" PRIu32 " image=%" PRIu64 "x%" PRIu64,
-                last_summary.qwen_token_count,
-                last_summary.diffusion_latent_shape.dims[0],
-                last_summary.diffusion_latent_shape.dims[1],
-                last_summary.denoise_step_count,
-                last_summary.decoded_image_shape.dims[0],
-                last_summary.decoded_image_shape.dims[1]);
-  iree_benchmark_set_label(benchmark_state, label);
+  SetGenerationBenchmarkLabel(benchmark_state, context, last_summary);
   iree_benchmark_set_items_processed(
       benchmark_state, static_cast<int64_t>(iteration_count * token_count));
   return iree_ok_status();
