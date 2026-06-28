@@ -2131,6 +2131,49 @@ TEST(MatrixContractTest, ProcessorFeatureBitsGateAvailability) {
                                                        gfx1250_features, 32));
 }
 
+TEST(MatrixContractTest, ProcessorAliasesExposeNativeFp8MatrixFeatures) {
+  struct Case {
+    iree_string_view_t processor_name;
+    const char* descriptor_name;
+    uint32_t wave_size;
+  };
+  static const Case cases[] = {
+      {IREE_SV("gfx940"), "mfma.f32.16x16x32.fp8.fp8", 64},
+      {IREE_SV("gfx941"), "mfma.f32.16x16x32.fp8.fp8", 64},
+      {IREE_SV("gfx942"), "mfma.f32.16x16x32.fp8.fp8", 64},
+      {IREE_SV("gfx9-4-generic"), "mfma.f32.16x16x32.fp8.fp8", 64},
+      {IREE_SV("gfx940"), "smfmac.f32.16x16x64.fp8.fp8", 64},
+      {IREE_SV("gfx941"), "smfmac.f32.16x16x64.fp8.fp8", 64},
+      {IREE_SV("gfx942"), "smfmac.f32.16x16x64.fp8.fp8", 64},
+      {IREE_SV("gfx9-4-generic"), "smfmac.f32.16x16x64.fp8.fp8", 64},
+      {IREE_SV("gfx950"), "mfma.scale.f32.16x16x128.f8f6f4", 64},
+      {IREE_SV("gfx950"), "smfmac.f32.16x16x128.fp8.fp8", 64},
+      {IREE_SV("gfx1200"), "wmma.f32.16x16x16.fp8.fp8", 32},
+      {IREE_SV("gfx1201"), "wmma.f32.16x16x16.fp8.fp8", 32},
+      {IREE_SV("gfx12-generic"), "wmma.f32.16x16x16.fp8.fp8", 32},
+      {IREE_SV("gfx1200"), "swmmac.f32.16x16x32.fp8.bf8", 32},
+      {IREE_SV("gfx1201"), "swmmac.f32.16x16x32.fp8.bf8", 32},
+      {IREE_SV("gfx12-generic"), "swmmac.f32.16x16x32.fp8.bf8", 32},
+      {IREE_SV("gfx1250"), "wmma.f32.16x16x128.f8f6f4", 32},
+      {IREE_SV("gfx1251"), "wmma.f32.16x16x128.f8f6f4", 32},
+      {IREE_SV("gfx12-5-generic"), "wmma.f32.16x16x128.f8f6f4", 32},
+      {IREE_SV("gfx1250"), "wmma.scale.f32.16x16x128.f8f6f4", 32},
+      {IREE_SV("gfx1251"), "wmma.scale.f32.16x16x128.f8f6f4", 32},
+      {IREE_SV("gfx12-5-generic"), "wmma.scale.f32.16x16x128.f8f6f4", 32},
+  };
+  for (const Case& c : cases) {
+    loom_amdgpu_matrix_feature_bits_t feature_bits = 0;
+    IREE_ASSERT_OK(loom_amdgpu_matrix_feature_bits_from_processor(
+        c.processor_name, &feature_bits));
+    const loom_amdgpu_matrix_contract_descriptor_t* descriptor =
+        FindDescriptor(c.descriptor_name);
+    ASSERT_NE(descriptor, nullptr) << c.descriptor_name;
+    EXPECT_TRUE(loom_amdgpu_matrix_contract_is_available(
+        descriptor, feature_bits, c.wave_size))
+        << ToString(c.processor_name) << " " << c.descriptor_name;
+  }
+}
+
 TEST(MatrixContractTest, ScaleFeatureDoesNotGateUnscaledDescriptors) {
   const loom_amdgpu_matrix_contract_descriptor_t* unscaled_mfma =
       FindDescriptor("mfma.f32.16x16x32.f16");
