@@ -19,6 +19,12 @@
 
 typedef struct loom_value_fact_table_t loom_value_fact_table_t;
 
+enum {
+  // Maximum unsigned integer payload encodable by the AMDGPU source inline
+  // immediate form.
+  LOOM_AMDGPU_SOURCE_INLINE_U32_MAX = 64u,
+};
+
 #ifdef __cplusplus
 extern "C" {
 #endif
