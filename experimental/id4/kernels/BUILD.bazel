@@ -4202,6 +4202,30 @@ _KERNEL_CASES = [
         "target_name": "ideogram4_silu_product_f32_ideogram_shape",
     },
     {
+        "actual_case": "@id4_ideogram4_silu_product_bf16_small_case",
+        "benchmark": "@id4_ideogram4_silu_product_bf16_small",
+        "configs": [
+            "--config=id4.ideogram4.silu_product_bf16.token_count=2",
+            "--config=id4.ideogram4.silu_product_bf16.token_capacity=2",
+            "--config=id4.ideogram4.silu_product_bf16.intermediate_size=3",
+            "--config=id4.ideogram4.silu_product_bf16.element_count=6",
+        ],
+        "source": "ideogram4/silu_product_bf16.loom",
+        "target_name": "ideogram4_silu_product_bf16_small",
+    },
+    {
+        "actual_case": "@id4_ideogram4_silu_product_bf16_padded_case",
+        "benchmark": "@id4_ideogram4_silu_product_bf16_padded",
+        "configs": [
+            "--config=id4.ideogram4.silu_product_bf16.token_count=2",
+            "--config=id4.ideogram4.silu_product_bf16.token_capacity=4",
+            "--config=id4.ideogram4.silu_product_bf16.intermediate_size=3",
+            "--config=id4.ideogram4.silu_product_bf16.element_count=6",
+        ],
+        "source": "ideogram4/silu_product_bf16.loom",
+        "target_name": "ideogram4_silu_product_bf16_padded",
+    },
+    {
         "actual_case": "@id4_ideogram4_timestep_embedding_f32_zero_case",
         "benchmark": "@id4_ideogram4_timestep_embedding_f32_zero",
         "configs": [
@@ -5133,6 +5157,7 @@ _KERNEL_SOURCES = [
     "ideogram4/rmsnorm_gated_residual_f32.loom",
     "ideogram4/rotary_apply_f32.loom",
     "ideogram4/silu_f32.loom",
+    "ideogram4/silu_product_bf16.loom",
     "ideogram4/silu_product_f32.loom",
     "ideogram4/timestep_embedding_f32.loom",
     "ideogram4/unpatchify_scale_f32.loom",

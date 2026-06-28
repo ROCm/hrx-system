@@ -64,6 +64,7 @@ add_custom_command(OUTPUT loom_sources.stamp
     "ideogram4/rmsnorm_gated_residual_f32.loom"
     "ideogram4/rotary_apply_f32.loom"
     "ideogram4/silu_f32.loom"
+    "ideogram4/silu_product_bf16.loom"
     "ideogram4/silu_product_f32.loom"
     "ideogram4/timestep_embedding_f32.loom"
     "ideogram4/unpatchify_scale_f32.loom"
@@ -175,6 +176,7 @@ iree_c_embed_data(
     "ideogram4/rmsnorm_gated_residual_f32.loom"
     "ideogram4/rotary_apply_f32.loom"
     "ideogram4/silu_f32.loom"
+    "ideogram4/silu_product_bf16.loom"
     "ideogram4/silu_product_f32.loom"
     "ideogram4/timestep_embedding_f32.loom"
     "ideogram4/unpatchify_scale_f32.loom"
@@ -6213,6 +6215,42 @@ iree_native_test(
     "--output-format=jsonl"
     "--config=id4.ideogram4.silu_product.token_count=2"
     "--config=id4.ideogram4.silu_product.intermediate_size=12288"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
+    "ideogram4_silu_product_bf16_small_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/silu_product_bf16.loom}}"
+    "--benchmark=@id4_ideogram4_silu_product_bf16_small"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.ideogram4.silu_product_bf16.token_count=2"
+    "--config=id4.ideogram4.silu_product_bf16.token_capacity=2"
+    "--config=id4.ideogram4.silu_product_bf16.intermediate_size=3"
+    "--config=id4.ideogram4.silu_product_bf16.element_count=6"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
+    "ideogram4_silu_product_bf16_padded_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/silu_product_bf16.loom}}"
+    "--benchmark=@id4_ideogram4_silu_product_bf16_padded"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.ideogram4.silu_product_bf16.token_count=2"
+    "--config=id4.ideogram4.silu_product_bf16.token_capacity=4"
+    "--config=id4.ideogram4.silu_product_bf16.intermediate_size=3"
+    "--config=id4.ideogram4.silu_product_bf16.element_count=6"
   SRC
     loom::tools::iree-benchmark-loom
   LABELS
@@ -14760,6 +14798,50 @@ iree_native_test(
     "--device=amdgpu://0"
     "--config=id4.ideogram4.silu_product.token_count=2"
     "--config=id4.ideogram4.silu_product.intermediate_size=12288"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
+    "ideogram4_silu_product_bf16_small_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/silu_product_bf16.loom}}"
+    "--case=@id4_ideogram4_silu_product_bf16_small_case"
+    "--device=amdgpu://0"
+    "--config=id4.ideogram4.silu_product_bf16.token_count=2"
+    "--config=id4.ideogram4.silu_product_bf16.token_capacity=2"
+    "--config=id4.ideogram4.silu_product_bf16.intermediate_size=3"
+    "--config=id4.ideogram4.silu_product_bf16.element_count=6"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
+    "ideogram4_silu_product_bf16_padded_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/silu_product_bf16.loom}}"
+    "--case=@id4_ideogram4_silu_product_bf16_padded_case"
+    "--device=amdgpu://0"
+    "--config=id4.ideogram4.silu_product_bf16.token_count=2"
+    "--config=id4.ideogram4.silu_product_bf16.token_capacity=4"
+    "--config=id4.ideogram4.silu_product_bf16.intermediate_size=3"
+    "--config=id4.ideogram4.silu_product_bf16.element_count=6"
   SRC
     loom::tools::iree-test-loom
   LABELS

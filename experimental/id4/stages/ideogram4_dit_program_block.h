@@ -178,6 +178,12 @@ id4_ideogram4_dit_program_dispatch_mlp_gate_up_silu_linear_input_bf16(
     id4_pipeline_program_tensor_t up_weight,
     id4_pipeline_program_tensor_t output);
 
+iree_status_t id4_ideogram4_dit_program_dispatch_silu_product_bf16(
+    id4_pipeline_program_builder_t* builder, iree_string_view_t name,
+    uint32_t token_count, uint32_t token_capacity, uint32_t intermediate_size,
+    id4_pipeline_program_tensor_t gate, id4_pipeline_program_tensor_t up,
+    id4_pipeline_program_tensor_t output);
+
 iree_status_t
 id4_ideogram4_dit_program_dispatch_mlp_up_silu_product_packed_bf16(
     id4_pipeline_program_builder_t* builder, iree_string_view_t name,

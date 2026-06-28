@@ -71,6 +71,17 @@ static bool ShapeEquals(id4_pipeline_tensor_shape_t actual,
   return true;
 }
 
+static const id4_pipeline_diagnostic_tap_plan_t* FindDiagnosticTap(
+    const id4_pipeline_plan_t* plan, iree_string_view_t name) {
+  for (iree_host_size_t i = 0; i < id4_pipeline_plan_diagnostic_tap_count(plan);
+       ++i) {
+    const id4_pipeline_diagnostic_tap_plan_t* tap =
+        id4_pipeline_plan_diagnostic_tap_at(plan, i);
+    if (tap && iree_string_view_equal(tap->name, name)) return tap;
+  }
+  return nullptr;
+}
+
 static const id4_pipeline_parameter_request_t* FindParameterSlabRequest(
     const id4_pipeline_plan_t* plan, iree_string_view_t key) {
   for (iree_host_size_t i = 0; i < id4_pipeline_plan_parameter_slab_count(plan);
@@ -436,6 +447,109 @@ TEST(Ideogram4DitStage, PlansMaterializedWmmaAttention) {
   IREE_ASSERT_OK(id4_pipeline_stage_plan(stage, &plan_options, &plan));
   EXPECT_GT(id4_pipeline_plan_memory_slab_count(plan), 0u);
   EXPECT_GT(id4_pipeline_plan_kernel_count(plan), 0u);
+
+  id4_pipeline_plan_release(plan);
+  id4_pipeline_stage_release(stage);
+  iree_hal_device_group_release(device_group);
+}
+
+TEST(Ideogram4DitStage, PlansPyTorchParityMlpDiagnosticTaps) {
+  iree_hal_device_group_t* device_group =
+      id4::test::CreateLocalSyncDeviceGroup();
+  id4_ideogram4_dit_model_config_t model = MakeModelConfig();
+  id4_pipeline_stage_t* stage = CreateStage(device_group, model);
+
+  id4_pipeline_diagnostics_sink_t diagnostics_sink;
+  id4_pipeline_diagnostics_sink_initialize_ignore(&diagnostics_sink);
+
+  id4_pipeline_stage_load_options_t load_options;
+  memset(&load_options, 0, sizeof(load_options));
+  load_options.structure_size = sizeof(load_options);
+  load_options.diagnostics_sink = &diagnostics_sink;
+  IREE_ASSERT_OK(id4_pipeline_stage_load(stage, &load_options));
+
+  id4_ideogram4_dit_stage_plan_options_t dit_options;
+  memset(&dit_options, 0, sizeof(dit_options));
+  dit_options.structure_size = sizeof(dit_options);
+  dit_options.request.latent_shape =
+      id4_pipeline_program_make_shape_rank4(1, 2, 4, 1);
+  dit_options.request.conditioning_mode =
+      ID4_IDEOGRAM4_DIT_CONDITIONING_MODE_UNCONDITIONED;
+  dit_options.activation_format =
+      ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT;
+  dit_options.attention_implementation =
+      ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_MATERIALIZED_WMMA;
+
+  const iree_string_view_t diagnostic_tap_names[] = {
+      IREE_SV("ideogram4.uncond.layers.0.ffn.input"),
+      IREE_SV("ideogram4.uncond.layers.0.ffn.w1_projection.output"),
+      IREE_SV("ideogram4.uncond.layers.0.ffn.w3_projection.output"),
+      IREE_SV("ideogram4.uncond.layers.0.ffn.hidden"),
+      IREE_SV("ideogram4.uncond.layers.0.ffn.output"),
+  };
+  id4_pipeline_stage_plan_options_t plan_options;
+  memset(&plan_options, 0, sizeof(plan_options));
+  plan_options.structure_size = sizeof(plan_options);
+  plan_options.next = &dit_options;
+  plan_options.flags = ID4_PIPELINE_STAGE_PLAN_FLAG_CAPTURE_DIAGNOSTIC_TAPS;
+  plan_options.diagnostic_tap_names = (iree_string_view_list_t){
+      IREE_ARRAYSIZE(diagnostic_tap_names),
+      diagnostic_tap_names,
+  };
+  plan_options.device_index = 0;
+  plan_options.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
+  plan_options.diagnostics_sink = &diagnostics_sink;
+
+  id4_pipeline_plan_t* plan = nullptr;
+  IREE_ASSERT_OK(id4_pipeline_stage_plan(stage, &plan_options, &plan));
+  EXPECT_EQ(id4_pipeline_plan_diagnostic_tap_count(plan),
+            IREE_ARRAYSIZE(diagnostic_tap_names));
+
+  const uint32_t token_count = 2;
+  const struct {
+    // Semantic diagnostic tap requested from the DiT program.
+    iree_string_view_t name;
+    // Logical tensor shape exposed for PyTorch comparison.
+    id4_pipeline_program_shape_t shape;
+  } expected_taps[] = {
+      {
+          /*.name=*/IREE_SV("ideogram4.uncond.layers.0.ffn.input"),
+          /*.shape=*/
+          id4_pipeline_program_make_shape_rank2(model.hidden_size, token_count),
+      },
+      {
+          /*.name=*/
+          IREE_SV("ideogram4.uncond.layers.0.ffn.w1_projection.output"),
+          /*.shape=*/
+          id4_pipeline_program_make_shape_rank2(model.intermediate_size,
+                                                token_count),
+      },
+      {
+          /*.name=*/
+          IREE_SV("ideogram4.uncond.layers.0.ffn.w3_projection.output"),
+          /*.shape=*/
+          id4_pipeline_program_make_shape_rank2(model.intermediate_size,
+                                                token_count),
+      },
+      {
+          /*.name=*/IREE_SV("ideogram4.uncond.layers.0.ffn.hidden"),
+          /*.shape=*/
+          id4_pipeline_program_make_shape_rank2(model.intermediate_size,
+                                                token_count),
+      },
+      {
+          /*.name=*/IREE_SV("ideogram4.uncond.layers.0.ffn.output"),
+          /*.shape=*/
+          id4_pipeline_program_make_shape_rank2(model.hidden_size, token_count),
+      },
+  };
+  for (const auto& expected_tap : expected_taps) {
+    const id4_pipeline_diagnostic_tap_plan_t* tap =
+        FindDiagnosticTap(plan, expected_tap.name);
+    ASSERT_NE(tap, nullptr);
+    EXPECT_EQ(tap->layout.dtype, ID4_PIPELINE_TENSOR_DTYPE_F32);
+    EXPECT_TRUE(ShapeEquals(tap->layout.shape, expected_tap.shape));
+  }
 
   id4_pipeline_plan_release(plan);
   id4_pipeline_stage_release(stage);

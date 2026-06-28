@@ -1313,6 +1313,56 @@ id4_ideogram4_dit_program_dispatch_mlp_gate_up_silu_linear_input_bf16(
       bindings);
 }
 
+iree_status_t id4_ideogram4_dit_program_dispatch_silu_product_bf16(
+    id4_pipeline_program_builder_t* builder, iree_string_view_t name,
+    uint32_t token_count, uint32_t token_capacity, uint32_t intermediate_size,
+    id4_pipeline_program_tensor_t gate, id4_pipeline_program_tensor_t up,
+    id4_pipeline_program_tensor_t output) {
+  if (token_count == 0) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "Ideogram4 SiLU/product token count must be nonzero");
+  }
+  if (token_capacity < token_count) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "Ideogram4 SiLU/product token capacity %" PRIu32
+                            " is smaller than token count %" PRIu32,
+                            token_capacity, token_count);
+  }
+  uint64_t element_count64 = 0;
+  if (!id4_ideogram4_dit_program_checked_mul_u64(token_count, intermediate_size,
+                                                 &element_count64) ||
+      element_count64 > UINT32_MAX) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "Ideogram4 SiLU/product element count overflow");
+  }
+  const id4_ideogram4_dit_program_config_value_t config_values[] = {
+      {IREE_SV("id4.ideogram4.silu_product_bf16.token_count"), token_count},
+      {IREE_SV("id4.ideogram4.silu_product_bf16.token_capacity"),
+       token_capacity},
+      {IREE_SV("id4.ideogram4.silu_product_bf16.intermediate_size"),
+       intermediate_size},
+      {IREE_SV("id4.ideogram4.silu_product_bf16.element_count"),
+       (uint32_t)element_count64},
+  };
+  char value_buffers[ID4_IDEOGRAM4_DIT_MAX_KERNEL_CONFIG_BINDING_COUNT]
+                    [ID4_IDEOGRAM4_DIT_CONFIG_VALUE_BUFFER_CAPACITY];
+  id4_pipeline_kernel_config_binding_t
+      config_bindings[ID4_IDEOGRAM4_DIT_MAX_KERNEL_CONFIG_BINDING_COUNT];
+  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_make_config_bindings(
+      IREE_ARRAYSIZE(config_values), config_values, value_buffers,
+      config_bindings));
+  id4_pipeline_program_dispatch_binding_t bindings[] = {
+      id4_pipeline_program_read(gate),
+      id4_pipeline_program_read(up),
+      id4_pipeline_program_write(output),
+  };
+  return id4_ideogram4_dit_program_dispatch_loom(
+      builder, name, IREE_SV("ideogram4/silu_product_bf16"),
+      IREE_SV("id4_ideogram4_silu_product_bf16"), IREE_ARRAYSIZE(config_values),
+      config_bindings, IREE_ARRAYSIZE(bindings), bindings);
+}
+
 iree_status_t
 id4_ideogram4_dit_program_dispatch_mlp_up_silu_product_packed_bf16(
     id4_pipeline_program_builder_t* builder, iree_string_view_t name,

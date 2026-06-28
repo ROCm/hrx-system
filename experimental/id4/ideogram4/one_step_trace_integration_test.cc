@@ -436,7 +436,7 @@ static iree_status_t PlanDitStage(
   dit_options.structure_size = sizeof(dit_options);
   dit_options.request = request;
   dit_options.activation_format =
-      ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_F32_CANONICAL;
+      ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT;
   dit_options.attention_implementation =
       ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_STREAMING;
 
@@ -752,6 +752,8 @@ TEST(Ideogram4OneStepTraceIntegration,
       IREE_SV("ideogram4.cond.layers.0.attention.output"),
       IREE_SV("ideogram4.cond.layers.0.post_attention_hidden"),
       IREE_SV("ideogram4.cond.layers.0.ffn.input"),
+      IREE_SV("ideogram4.cond.layers.0.ffn.w1_projection.output"),
+      IREE_SV("ideogram4.cond.layers.0.ffn.w3_projection.output"),
       IREE_SV("ideogram4.cond.layers.0.ffn.hidden"),
       IREE_SV("ideogram4.cond.layers.0.ffn.output"),
       IREE_SV("ideogram4.cond.layers.0.hidden"),
