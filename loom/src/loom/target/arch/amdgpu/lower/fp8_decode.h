@@ -29,6 +29,9 @@ typedef enum loom_amdgpu_fp8_decode_plan_flag_bits_e {
   LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_NATIVE_BF16_PACK = 1u << 4,
   LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_ADD3_SRC2_LITERAL = 1u << 5,
   LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_LSHL_ADD_U32_SHIFT_IMM = 1u << 6,
+  LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_PERM_B32_SRC2_LITERAL = 1u << 7,
+  LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_PK_MIN_U16 = 1u << 8,
+  LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_PK_MUL_LO_U16 = 1u << 9,
 } loom_amdgpu_fp8_decode_plan_flag_bits_t;
 typedef uint32_t loom_amdgpu_fp8_decode_plan_flags_t;
 
@@ -82,6 +85,8 @@ typedef struct loom_amdgpu_fp8_decode_plan_t {
   loom_low_lower_resolved_descriptor_t pack_u16_descriptor;
   // Byte permute descriptor used to select tiny FP8 subnormal BF16 tables.
   loom_low_lower_resolved_descriptor_t perm_b32_descriptor;
+  // Byte permute descriptor with an immediate selector operand.
+  loom_low_lower_resolved_descriptor_t perm_b32_src2_literal_descriptor;
   // Native packed-pair FP8-to-F32 conversion descriptor.
   loom_low_lower_resolved_descriptor_t native_f32_pair_descriptor;
   // Native F32-pair-to-BF16-pair conversion descriptor.
@@ -90,6 +95,10 @@ typedef struct loom_amdgpu_fp8_decode_plan_t {
   loom_low_lower_resolved_descriptor_t add3_src2_literal_descriptor;
   // Integer left-shift-add descriptor with an immediate shift.
   loom_low_lower_resolved_descriptor_t lshl_add_u32_shift_imm_descriptor;
+  // Packed unsigned 16-bit min descriptor.
+  loom_low_lower_resolved_descriptor_t pk_min_u16_descriptor;
+  // Packed unsigned 16-bit low-multiply descriptor.
+  loom_low_lower_resolved_descriptor_t pk_mul_lo_u16_descriptor;
 } loom_amdgpu_fp8_decode_plan_t;
 
 // Returns the native FP8-to-F32 conversion descriptor refs for |element_type|.
@@ -117,6 +126,23 @@ iree_status_t loom_amdgpu_try_emit_fp8_not_subnormal_to_f32_lane(
     const loom_amdgpu_fp8_decode_plan_t* plan, loom_value_id_t low_byte,
     loom_amdgpu_fp8_decode_value_flags_t value_flags, loom_type_t vgpr_type,
     loom_type_t mask_type, loom_value_id_t* out_lane, bool* out_selected);
+
+// Returns true when the target packets and value facts can use the packed BF16
+// pair decode path without per-lane special-value repair.
+bool loom_amdgpu_can_emit_fp8_pair_to_packed_bf16(
+    const loom_amdgpu_fp8_decode_plan_t* plan,
+    loom_amdgpu_fp8_decode_value_flags_t value_flags);
+
+// Emits one packed VGPR containing two BF16 bit payloads from an adjacent FP8
+// byte pair when target packets and facts make the packed path profitable.
+// Returns |out_selected| false without emitting anything when the target lacks
+// the required packets or the facts require per-lane special-value repair.
+iree_status_t loom_amdgpu_try_emit_fp8_pair_to_packed_bf16(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_amdgpu_fp8_decode_plan_t* plan,
+    loom_value_id_t low_source_register, uint32_t byte_offset,
+    loom_amdgpu_fp8_decode_value_flags_t value_flags, loom_type_t vgpr_type,
+    loom_value_id_t* out_low_packet, bool* out_selected);
 
 // Emits one packed VGPR containing two BF16 bit payloads.
 iree_status_t loom_amdgpu_emit_packed_bf16_pair(

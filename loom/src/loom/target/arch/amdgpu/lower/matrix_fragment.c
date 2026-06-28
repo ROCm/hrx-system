@@ -3160,6 +3160,35 @@ loom_amdgpu_emit_fragment_memory_fp8_to_packed_bf16_register(
         bf16_pack_descriptors, vgpr_type, out_low_packet);
   }
 
+  if (loom_amdgpu_can_emit_fp8_pair_to_packed_bf16(decode_plan,
+                                                   decode_value_flags)) {
+    const uint16_t byte_index =
+        result_register_index * LOOM_AMDGPU_FRAGMENT_PACKED_B16_ELEMENT_COUNT;
+    const uint16_t source_register_index = byte_index / 4u;
+    if (source_register_index >= packet_register_count) {
+      IREE_ASSERT_UNREACHABLE("selected AMDGPU FP8 fragment packet");
+      IREE_BUILTIN_UNREACHABLE();
+    }
+
+    loom_value_id_t low_source_register = low_source;
+    if (packet_register_count != 1) {
+      IREE_RETURN_IF_ERROR(loom_amdgpu_emit_low_slice(
+          context, source_op, low_source, source_register_index, vgpr_type,
+          &low_source_register));
+    }
+    IREE_RETURN_IF_ERROR(loom_amdgpu_materialize_full_low_vgpr_b32(
+        context, source_op, low_source_register, &low_source_register));
+
+    bool selected_packed_decode = false;
+    IREE_RETURN_IF_ERROR(loom_amdgpu_try_emit_fp8_pair_to_packed_bf16(
+        context, source_op, decode_plan, low_source_register, byte_index & 3u,
+        decode_value_flags, vgpr_type, out_low_packet,
+        &selected_packed_decode));
+    if (selected_packed_decode) {
+      return iree_ok_status();
+    }
+  }
+
   loom_value_id_t low_elements[LOOM_AMDGPU_FRAGMENT_PACKED_B16_ELEMENT_COUNT] =
       {0};
   for (uint16_t element_index = 0;
