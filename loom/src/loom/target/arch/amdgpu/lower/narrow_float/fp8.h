@@ -139,6 +139,13 @@ typedef struct loom_amdgpu_fp8_decode_plan_t {
   loom_low_lower_resolved_descriptor_t bfi_b32_src0_literal_descriptor;
 } loom_amdgpu_fp8_decode_plan_t;
 
+typedef struct loom_amdgpu_fp8_packed_bf16_pair_source_t {
+  // Source register containing the selected adjacent FP8 byte pair.
+  loom_value_id_t source_register;
+  // First FP8 byte offset within source_register.
+  uint32_t byte_offset;
+} loom_amdgpu_fp8_packed_bf16_pair_source_t;
+
 // Returns the native FP8-to-F32 conversion descriptor refs for |element_type|.
 bool loom_amdgpu_fp8_to_f32_descriptor_refs(
     loom_scalar_type_t source_element_type,
@@ -196,6 +203,18 @@ iree_status_t loom_amdgpu_try_emit_fp8_pair_to_packed_bf16(
     loom_amdgpu_fp8_decode_value_flags_t value_flags, loom_type_t vgpr_type,
     loom_type_t sgpr_type, loom_type_t mask_type,
     loom_value_id_t* out_low_packet, bool* out_selected);
+
+// Emits packed BF16 registers for adjacent FP8 byte-pair sources. Exact rare
+// subnormal repair is batched across all pairs so the hot path branches once
+// per packet instead of once per pair.
+iree_status_t loom_amdgpu_try_emit_fp8_pairs_to_packed_bf16(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_amdgpu_fp8_decode_plan_t* plan,
+    const loom_amdgpu_fp8_packed_bf16_pair_source_t* pair_sources,
+    iree_host_size_t pair_count,
+    loom_amdgpu_fp8_decode_value_flags_t value_flags, loom_type_t vgpr_type,
+    loom_type_t sgpr_type, loom_type_t mask_type,
+    loom_value_id_t* out_low_packets, bool* out_selected);
 
 // Emits one packed VGPR containing two BF16 bit payloads.
 iree_status_t loom_amdgpu_emit_packed_bf16_pair(
