@@ -31,14 +31,24 @@ struct QwenBenchmarkShape {
   uint32_t token_count;
 };
 
-static constexpr QwenBenchmarkShape kQwenSmoke64Shape = {
-    // Historical reduced Qwen smoke token count.
+static constexpr QwenBenchmarkShape kQwenToken64Shape = {
+    // Short prompt-class token count.
     64,
 };
 
-static constexpr QwenBenchmarkShape kQwenIdeogram4Text451Shape = {
-    // Token count from the full structured city-walk request.
-    451,
+static constexpr QwenBenchmarkShape kQwenToken256Shape = {
+    // Medium prompt-class token count.
+    256,
+};
+
+static constexpr QwenBenchmarkShape kQwenToken512Shape = {
+    // Long structured prompt-class token count.
+    512,
+};
+
+static constexpr QwenBenchmarkShape kQwenToken1024Shape = {
+    // Extended prompt-class token count near the large linear tile threshold.
+    1024,
 };
 
 enum class QwenIssueTimingMode {
@@ -298,10 +308,14 @@ IREE_BENCHMARK_FN(BM_Qwen3VlStagePlan) {
       static_cast<int64_t>(iteration_count * shape.token_count));
   return iree_ok_status();
 }
-ID4_QWEN_BENCHMARK_REGISTER(BM_Qwen3VlStagePlan, kQwenSmoke64Shape, "smoke64",
+ID4_QWEN_BENCHMARK_REGISTER(BM_Qwen3VlStagePlan, kQwenToken64Shape, "token64",
                             MICROSECOND);
-ID4_QWEN_BENCHMARK_REGISTER(BM_Qwen3VlStagePlan, kQwenIdeogram4Text451Shape,
-                            "id4_text451", MICROSECOND);
+ID4_QWEN_BENCHMARK_REGISTER(BM_Qwen3VlStagePlan, kQwenToken256Shape, "token256",
+                            MICROSECOND);
+ID4_QWEN_BENCHMARK_REGISTER(BM_Qwen3VlStagePlan, kQwenToken512Shape, "token512",
+                            MICROSECOND);
+ID4_QWEN_BENCHMARK_REGISTER(BM_Qwen3VlStagePlan, kQwenToken1024Shape,
+                            "token1024", MICROSECOND);
 
 IREE_BENCHMARK_FN(BM_Qwen3VlStagePlanFixture) {
   QwenBenchmarkContext context;
@@ -366,10 +380,13 @@ IREE_BENCHMARK_FN(BM_Qwen3VlStagePrepareCachedKernels) {
   return iree_ok_status();
 }
 ID4_QWEN_BENCHMARK_REGISTER(BM_Qwen3VlStagePrepareCachedKernels,
-                            kQwenSmoke64Shape, "smoke64", MILLISECOND);
+                            kQwenToken64Shape, "token64", MILLISECOND);
 ID4_QWEN_BENCHMARK_REGISTER(BM_Qwen3VlStagePrepareCachedKernels,
-                            kQwenIdeogram4Text451Shape, "id4_text451",
-                            MILLISECOND);
+                            kQwenToken256Shape, "token256", MILLISECOND);
+ID4_QWEN_BENCHMARK_REGISTER(BM_Qwen3VlStagePrepareCachedKernels,
+                            kQwenToken512Shape, "token512", MILLISECOND);
+ID4_QWEN_BENCHMARK_REGISTER(BM_Qwen3VlStagePrepareCachedKernels,
+                            kQwenToken1024Shape, "token1024", MILLISECOND);
 
 IREE_BENCHMARK_FN(BM_Qwen3VlStagePrepareFixtureCachedKernels) {
   QwenBenchmarkContext context;

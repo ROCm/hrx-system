@@ -40,7 +40,7 @@ static id4_ideogram4_generation_plan_policy_t MakeGenerationPolicy() {
   policy.dit_weight_execution_format =
       ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_BF16_RESIDENT;
   policy.dit_attention_implementation =
-      ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_BLOCKED_WMMA;
+      ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_ONLINE_WMMA;
   policy.dit_feed_forward_implementation =
       ID4_IDEOGRAM4_DIT_FEED_FORWARD_IMPLEMENTATION_PYTORCH_PARITY;
   policy.vae_tiling.mode = ID4_VAE_TILING_MODE_DISABLED;

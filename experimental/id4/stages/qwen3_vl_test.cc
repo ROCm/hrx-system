@@ -155,7 +155,7 @@ TEST(Qwen3VlStage, PlansIdeogram4ForwardBoundaryContract) {
   load_options.diagnostics_sink = &diagnostics_sink;
   IREE_ASSERT_OK(id4_pipeline_stage_load(stage, &load_options));
 
-  constexpr uint32_t kTokenCounts[] = {64, 451};
+  constexpr uint32_t kTokenCounts[] = {64, 512};
   for (uint32_t token_count : kTokenCounts) {
     id4_qwen3_vl_stage_plan_options_t qwen_options;
     memset(&qwen_options, 0, sizeof(qwen_options));
