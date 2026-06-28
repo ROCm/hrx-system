@@ -34,11 +34,14 @@ def _rules_for_source_op(
     compiled: CompiledLowerRuleSet,
     source_op: Op,
 ) -> tuple[LowerRule, ...]:
+    rules: list[LowerRule] = []
     for span in compiled.spans:
         if span.source_op is source_op:
             rule_end = span.rule_start + span.rule_count
-            return compiled.rules[span.rule_start : rule_end]
-    raise AssertionError(f"no lower-rule span for {source_op.name}")
+            rules.extend(compiled.rules[span.rule_start : rule_end])
+    if not rules:
+        raise AssertionError(f"no lower-rule span for {source_op.name}")
+    return tuple(rules)
 
 
 def _rule_descriptor_keys(
@@ -164,6 +167,15 @@ def test_packed_i16_arithmetic_rules_try_native_pk_ops_before_word_ops() -> None
     for source_op, packed_descriptor in shift_cases:
         positions = _descriptor_sequence_positions(compiled, source_op)
         assert positions[(packed_descriptor,)] == 0
+
+
+def test_packed_bf16_arithmetic_rules_publish_native_pk_fma_ops() -> None:
+    compiled = _compiled_arithmetic_rules()
+
+    fma_positions = _descriptor_sequence_positions(compiled, vector.vector_fmaf)
+    assert (
+        fma_positions[("amdgpu.v_pk_fma_bf16",)] < fma_positions[("amdgpu.v_fma_f32",)]
+    )
 
 
 def test_vector_extract_rules_publish_contract_only_shape_rows() -> None:
