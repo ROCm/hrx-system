@@ -2,6 +2,8 @@ amdgpu.target<gfx1100> @id4_gfx1100
 
 config.decl @id4.ideogram4.linear_fp8_wmma.token_count : %value: index where [range(%value, 32, 131072)]
 
+config.decl @id4.ideogram4.linear_fp8_wmma.token_offset : %value: index where [range(%value, 0, 131071)]
+
 config.decl @id4.ideogram4.linear_fp8_wmma.dispatch_token_count : %value: index where [range(%value, 32, 131072), mul(%value, 32)]
 
 config.decl @id4.ideogram4.linear_fp8_wmma.input_size : %value: index where [range(%value, 16, 131072), mul(%value, 16)]
@@ -27,10 +29,12 @@ kernel.def target(@id4_gfx1100) export("id4_ideogram4_linear_fp8_bf16_wmma") @id
   %row_pair = kernel.workgroup.id<y> : index
   %lane = kernel.workitem.id<x> : index
   %token_count = config.get @id4.ideogram4.linear_fp8_wmma.token_count : index
+  %token_offset = config.get @id4.ideogram4.linear_fp8_wmma.token_offset : index
   %input_size = config.get @id4.ideogram4.linear_fp8_wmma.input_size : index
   %output_size = config.get @id4.ideogram4.linear_fp8_wmma.output_size : index
   %k_tile_count = index.div %input_size, %sixteen : index
-  %token_origin0 = index.mul %token_tile, %thirty_two : index
+  %dispatch_token_origin = index.mul %token_tile, %thirty_two : index
+  %token_origin0 = index.add %token_offset, %dispatch_token_origin : index
   %token_origin1 = index.add %token_origin0, %sixteen : index
   %row_origin0 = index.mul %row_pair, %thirty_two : index
   %row_origin1 = index.add %row_origin0, %sixteen : index

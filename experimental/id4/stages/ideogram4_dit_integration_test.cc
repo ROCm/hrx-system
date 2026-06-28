@@ -1558,6 +1558,33 @@ TEST(Ideogram4DitStageIntegration, PrepareAndIssueOnlineWmmaAttentionFixture) {
 }
 
 TEST(Ideogram4DitStageIntegration,
+     PrepareAndIssueOnlineWmmaAttentionFp8DirectFixture) {
+  const iree_string_view_t diagnostic_tap_names[] = {
+      IREE_SV("ideogram4.cond.layers.0.attention.context"),
+      IREE_SV("ideogram4.cond.layers.0.attention.output"),
+  };
+  RunDitFixture(DitFixtureRunOptions{
+      .activation_format =
+          ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT,
+      .weight_execution_format =
+          ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_FP8_DIRECT,
+      .attention_implementation =
+          ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_ONLINE_WMMA,
+      .feed_forward_implementation =
+          ID4_IDEOGRAM4_DIT_FEED_FORWARD_IMPLEMENTATION_PYTORCH_PARITY,
+      .branch = id4::test::Ideogram4DitBranch::kConditioned,
+      .diagnostic_tap_names =
+          {
+              IREE_ARRAYSIZE(diagnostic_tap_names),
+              diagnostic_tap_names,
+          },
+      .capture_run_id =
+          IREE_SV("ideogram4_dit_online_wmma_attention_fp8_direct"),
+      .flags = ID4_DIT_FIXTURE_RUN_FLAG_VERIFY_DIAGNOSTIC_TAPS_WRITTEN,
+  });
+}
+
+TEST(Ideogram4DitStageIntegration,
      PrepareAndIssueOnlineWmmaAttentionUnconditionedFixture) {
   const iree_string_view_t diagnostic_tap_names[] = {
       IREE_SV("ideogram4.uncond.layers.0.attention.context"),
