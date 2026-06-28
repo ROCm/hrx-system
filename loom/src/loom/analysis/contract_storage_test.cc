@@ -141,6 +141,13 @@ TEST(ContractStorageTest, MapsEncodedFloat8FormatsToMatrixNumerics) {
   EXPECT_EQ(numeric_type, LOOM_CONTRACT_NUMERIC_BF8);
 }
 
+TEST(ContractStorageTest, RejectsEncodedTf32WithoutContractNumeric) {
+  loom_contract_numeric_type_t numeric_type = LOOM_CONTRACT_NUMERIC_UNKNOWN;
+  EXPECT_FALSE(loom_contract_numeric_type_from_encoded_format(
+      LOOM_VALUE_FACT_NUMERIC_FORMAT_TF32, &numeric_type));
+  EXPECT_EQ(numeric_type, LOOM_CONTRACT_NUMERIC_UNKNOWN);
+}
+
 TEST(ContractStorageTest, RejectsUnknownMatrixFormat) {
   loom_value_fact_storage_schema_t schema = {};
 

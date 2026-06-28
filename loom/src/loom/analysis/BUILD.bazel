@@ -335,6 +335,7 @@ loom_cc_library(
         ":contract",
         "//loom/src/loom/ops/encoding",
         "//loom/src/loom/util:fact_table",
+        "//loom/src/loom/util:numeric_format",
         "//runtime/src/iree/base",
     ],
 )

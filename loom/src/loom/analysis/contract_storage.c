@@ -21,65 +21,100 @@ bool loom_contract_numeric_type_from_encoded_format(
     loom_value_fact_numeric_format_flags_t format,
     loom_contract_numeric_type_t* out_numeric_type) {
   *out_numeric_type = LOOM_CONTRACT_NUMERIC_UNKNOWN;
-  switch (format) {
-    case LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3:
-    case LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3FN:
-    case LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3FNUZ:
-      *out_numeric_type = LOOM_CONTRACT_NUMERIC_FP8;
-      return true;
-    case LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E5M2:
-    case LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E5M2FNUZ:
-    case LOOM_VALUE_FACT_NUMERIC_FORMAT_BF8:
-      *out_numeric_type = LOOM_CONTRACT_NUMERIC_BF8;
-      return true;
-    case LOOM_VALUE_FACT_NUMERIC_FORMAT_F6_E3M2:
-    case LOOM_VALUE_FACT_NUMERIC_FORMAT_F6_E2M3:
-      *out_numeric_type = LOOM_CONTRACT_NUMERIC_FP6;
-      return true;
-    case LOOM_VALUE_FACT_NUMERIC_FORMAT_BF6:
-      *out_numeric_type = LOOM_CONTRACT_NUMERIC_BF6;
-      return true;
-    case LOOM_VALUE_FACT_NUMERIC_FORMAT_F4_E2M1:
-      *out_numeric_type = LOOM_CONTRACT_NUMERIC_FP4;
-      return true;
-    case LOOM_VALUE_FACT_NUMERIC_FORMAT_I4:
-      *out_numeric_type = LOOM_CONTRACT_NUMERIC_I4;
-      return true;
-    case LOOM_VALUE_FACT_NUMERIC_FORMAT_U4:
-      *out_numeric_type = LOOM_CONTRACT_NUMERIC_U4;
-      return true;
-    case LOOM_VALUE_FACT_NUMERIC_FORMAT_I8:
-    case LOOM_VALUE_FACT_NUMERIC_FORMAT_QUANT_I8:
-      *out_numeric_type = LOOM_CONTRACT_NUMERIC_I8;
-      return true;
-    case LOOM_VALUE_FACT_NUMERIC_FORMAT_U8:
-      *out_numeric_type = LOOM_CONTRACT_NUMERIC_U8;
-      return true;
-    case LOOM_VALUE_FACT_NUMERIC_FORMAT_I16:
-      *out_numeric_type = LOOM_CONTRACT_NUMERIC_I16;
-      return true;
-    case LOOM_VALUE_FACT_NUMERIC_FORMAT_U16:
-      *out_numeric_type = LOOM_CONTRACT_NUMERIC_U16;
-      return true;
-    case LOOM_VALUE_FACT_NUMERIC_FORMAT_I32:
-      *out_numeric_type = LOOM_CONTRACT_NUMERIC_I32;
-      return true;
-    case LOOM_VALUE_FACT_NUMERIC_FORMAT_U32:
-      *out_numeric_type = LOOM_CONTRACT_NUMERIC_U32;
-      return true;
-    case LOOM_VALUE_FACT_NUMERIC_FORMAT_F16:
-      *out_numeric_type = LOOM_CONTRACT_NUMERIC_F16;
-      return true;
-    case LOOM_VALUE_FACT_NUMERIC_FORMAT_BF16:
-      *out_numeric_type = LOOM_CONTRACT_NUMERIC_BF16;
-      return true;
-    case LOOM_VALUE_FACT_NUMERIC_FORMAT_F32:
-      *out_numeric_type = LOOM_CONTRACT_NUMERIC_F32;
-      return true;
-    case LOOM_VALUE_FACT_NUMERIC_FORMAT_F64:
-      *out_numeric_type = LOOM_CONTRACT_NUMERIC_F64;
-      return true;
-    case LOOM_VALUE_FACT_NUMERIC_FORMAT_UNKNOWN:
+  const loom_numeric_format_info_t* info = NULL;
+  if (!loom_numeric_format_info(format, &info)) {
+    return false;
+  }
+  switch (info->kind) {
+    case LOOM_NUMERIC_FORMAT_KIND_SIGNED_INTEGER:
+      switch (info->storage_bit_count) {
+        case 4:
+          *out_numeric_type = LOOM_CONTRACT_NUMERIC_I4;
+          return true;
+        case 8:
+          *out_numeric_type = LOOM_CONTRACT_NUMERIC_I8;
+          return true;
+        case 16:
+          *out_numeric_type = LOOM_CONTRACT_NUMERIC_I16;
+          return true;
+        case 32:
+          *out_numeric_type = LOOM_CONTRACT_NUMERIC_I32;
+          return true;
+        default:
+          return false;
+      }
+    case LOOM_NUMERIC_FORMAT_KIND_UNSIGNED_INTEGER:
+      switch (info->storage_bit_count) {
+        case 4:
+          *out_numeric_type = LOOM_CONTRACT_NUMERIC_U4;
+          return true;
+        case 8:
+          *out_numeric_type = LOOM_CONTRACT_NUMERIC_U8;
+          return true;
+        case 16:
+          *out_numeric_type = LOOM_CONTRACT_NUMERIC_U16;
+          return true;
+        case 32:
+          *out_numeric_type = LOOM_CONTRACT_NUMERIC_U32;
+          return true;
+        default:
+          return false;
+      }
+    case LOOM_NUMERIC_FORMAT_KIND_QUANTIZED_SIGNED_INTEGER:
+      if (info->storage_bit_count == 8) {
+        *out_numeric_type = LOOM_CONTRACT_NUMERIC_I8;
+        return true;
+      }
+      return false;
+    case LOOM_NUMERIC_FORMAT_KIND_FLOAT:
+      switch (info->float_family) {
+        case LOOM_NUMERIC_FLOAT_FAMILY_IEEE:
+          switch (info->storage_bit_count) {
+            case 16:
+              if (info->exponent_bit_count == 5 &&
+                  info->mantissa_bit_count == 10) {
+                *out_numeric_type = LOOM_CONTRACT_NUMERIC_F16;
+                return true;
+              }
+              return false;
+            case 32:
+              if (info->exponent_bit_count == 8 &&
+                  info->mantissa_bit_count == 23) {
+                *out_numeric_type = LOOM_CONTRACT_NUMERIC_F32;
+                return true;
+              }
+              return false;
+            case 64:
+              if (info->exponent_bit_count == 11 &&
+                  info->mantissa_bit_count == 52) {
+                *out_numeric_type = LOOM_CONTRACT_NUMERIC_F64;
+                return true;
+              }
+              return false;
+            default:
+              return false;
+          }
+        case LOOM_NUMERIC_FLOAT_FAMILY_BFLOAT:
+          *out_numeric_type = LOOM_CONTRACT_NUMERIC_BF16;
+          return true;
+        case LOOM_NUMERIC_FLOAT_FAMILY_FP8:
+          *out_numeric_type = LOOM_CONTRACT_NUMERIC_FP8;
+          return true;
+        case LOOM_NUMERIC_FLOAT_FAMILY_BF8:
+          *out_numeric_type = LOOM_CONTRACT_NUMERIC_BF8;
+          return true;
+        case LOOM_NUMERIC_FLOAT_FAMILY_FP6:
+          *out_numeric_type = LOOM_CONTRACT_NUMERIC_FP6;
+          return true;
+        case LOOM_NUMERIC_FLOAT_FAMILY_BF6:
+          *out_numeric_type = LOOM_CONTRACT_NUMERIC_BF6;
+          return true;
+        case LOOM_NUMERIC_FLOAT_FAMILY_FP4:
+          *out_numeric_type = LOOM_CONTRACT_NUMERIC_FP4;
+          return true;
+        default:
+          return false;
+      }
     default:
       return false;
   }
@@ -111,18 +146,7 @@ bool loom_contract_scale_kind_from_storage_schema(
 
 static bool loom_contract_encoded_format_requires_selector(
     loom_value_fact_numeric_format_flags_t format) {
-  const loom_value_fact_numeric_format_flags_t selector_formats =
-      LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3 |
-      LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E5M2 |
-      LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3FN |
-      LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3FNUZ |
-      LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E5M2FNUZ |
-      LOOM_VALUE_FACT_NUMERIC_FORMAT_BF8 |
-      LOOM_VALUE_FACT_NUMERIC_FORMAT_F6_E3M2 |
-      LOOM_VALUE_FACT_NUMERIC_FORMAT_F6_E2M3 |
-      LOOM_VALUE_FACT_NUMERIC_FORMAT_BF6 |
-      LOOM_VALUE_FACT_NUMERIC_FORMAT_F4_E2M1;
-  return iree_any_bit_set(format, selector_formats);
+  return loom_numeric_format_needs_encoded_payload_selector(format);
 }
 
 loom_contract_auxiliary_operand_flags_t
