@@ -218,6 +218,19 @@ TEST_F(AmdgpuHalArtifactProviderTest, SelectTargetKeyBuildsOfflineTarget) {
 }
 
 TEST_F(AmdgpuHalArtifactProviderTest,
+       SelectTargetKeyRejectsKnownProcessorsWithoutHsacoEmission) {
+  for (iree_string_view_t processor : {IREE_SV("gfx940"), IREE_SV("gfx941")}) {
+    loom_run_hal_device_target_t target = {};
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_UNAVAILABLE,
+                          loom_amdgpu_hal_artifact_provider.select_target_key(
+                              &loom_amdgpu_hal_artifact_provider, processor,
+                              iree_allocator_system(), &target));
+    EXPECT_EQ(target.data, nullptr);
+    EXPECT_EQ(target.target_bundle, nullptr);
+  }
+}
+
+TEST_F(AmdgpuHalArtifactProviderTest,
        SelectDeviceTargetPrefersExactDeviceTarget) {
   iree_hal_device_spec_t* device_spec = nullptr;
   IREE_ASSERT_OK(CreateAmdgpuExecutableDeviceSpec(

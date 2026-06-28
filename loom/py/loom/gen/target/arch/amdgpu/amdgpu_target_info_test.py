@@ -17,6 +17,7 @@ from loom.target.arch.amdgpu.target_info import (
     AMDGPU_KERNEL_DESCRIPTOR_ABI_FLAG_ARCHITECTED_FLAT_SCRATCH,
     AMDGPU_KERNEL_DESCRIPTOR_ABI_FLAG_PACKED_WORKITEM_ID,
     AMDGPU_KERNEL_DESCRIPTOR_PROFILE_GFX11,
+    AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION,
     AMDGPU_PROCESSOR_SCHEDULING_DELAY_ALU,
     AMDGPU_WAVEFRONT_SIZE_FLAG_32,
     AmdgpuDescriptorSetInfo,
@@ -103,6 +104,7 @@ def test_memory_cache_policy_rejects_incomplete_temporal_th_table() -> None:
 
 def test_target_info_flag_expressions_validate_known_bits() -> None:
     assert amdgpu_target_info._descriptor_set_info_flags_expr(AMDGPU_DESCRIPTOR_SET_INFO_FLAG_DESCRIPTOR_PACKET_ENCODING) == "LOOM_AMDGPU_DESCRIPTOR_SET_INFO_FLAG_DESCRIPTOR_PACKET_ENCODING"
+    assert amdgpu_target_info._processor_info_flags_expr(AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION) == "LOOM_AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION"
     assert amdgpu_target_info._wavefront_size_flags_expr(AMDGPU_WAVEFRONT_SIZE_FLAG_32) == "LOOM_AMDGPU_WAVEFRONT_SIZE_FLAG_32"
     assert amdgpu_target_info._kernel_descriptor_abi_flags_expr(AMDGPU_KERNEL_DESCRIPTOR_ABI_FLAG_PACKED_WORKITEM_ID) == "LOOM_AMDGPU_KERNEL_DESCRIPTOR_ABI_FLAG_PACKED_WORKITEM_ID"
     assert amdgpu_target_info._processor_scheduling_bits_expr(AMDGPU_PROCESSOR_SCHEDULING_DELAY_ALU) == "LOOM_AMDGPU_PROCESSOR_SCHEDULING_DELAY_ALU"
@@ -111,6 +113,8 @@ def test_target_info_flag_expressions_validate_known_bits() -> None:
 def test_target_info_flag_expressions_reject_unknown_bits() -> None:
     with _raises_value_error("unknown AMDGPU descriptor-set info flags"):
         amdgpu_target_info._descriptor_set_info_flags_expr(1 << 63)
+    with _raises_value_error("unknown AMDGPU processor info flags"):
+        amdgpu_target_info._processor_info_flags_expr(1 << 31)
     with _raises_value_error("unknown AMDGPU wavefront-size flags"):
         amdgpu_target_info._wavefront_size_flags_expr(1 << 31)
     with _raises_value_error("unknown AMDGPU kernel descriptor ABI flags"):
@@ -171,4 +175,31 @@ def test_profiled_kernel_descriptor_requires_vgpr_granules() -> None:
     )
 
     with _raises_value_error("descriptor profile but no VGPR encoding granules"):
+        amdgpu_target_info._validate_processors((processor,), (_descriptor_set_info(),))
+
+
+def test_hsaco_emission_support_requires_descriptor_set() -> None:
+    processor = processor_info(
+        "gfx-test",
+        0x001,
+        flags=AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION,
+        kernel_descriptor=AmdgpuProcessorKernelDescriptorInfo(
+            profile=AMDGPU_KERNEL_DESCRIPTOR_PROFILE_GFX11,
+            vgpr_granules=AmdgpuKernelDescriptorVgprGranules(wave32=8, wave64=4),
+        ),
+    )
+
+    with _raises_value_error("HSACO emission support but no descriptor set"):
+        amdgpu_target_info._validate_processors((processor,), (_descriptor_set_info(),))
+
+
+def test_hsaco_emission_support_requires_kernel_descriptor_profile() -> None:
+    processor = processor_info(
+        "gfx-test",
+        0x001,
+        flags=AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION,
+        descriptor_set_key="amdgpu.test.core",
+    )
+
+    with _raises_value_error("HSACO emission support but no kernel descriptor profile"):
         amdgpu_target_info._validate_processors((processor,), (_descriptor_set_info(),))

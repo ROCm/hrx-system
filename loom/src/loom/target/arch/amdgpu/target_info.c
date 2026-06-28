@@ -48,29 +48,6 @@ const loom_amdgpu_processor_info_t* loom_amdgpu_target_info_find_processor(
   return NULL;
 }
 
-iree_status_t loom_amdgpu_target_info_processor_supports_hsaco(
-    const loom_amdgpu_processor_info_t* processor, bool* out_supported) {
-  IREE_ASSERT_ARGUMENT(out_supported);
-  *out_supported = false;
-  if (processor == NULL || iree_string_view_is_empty(processor->name) ||
-      iree_string_view_is_empty(processor->descriptor_set.key) ||
-      processor->descriptor_set.ordinal ==
-          LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_NONE ||
-      processor->elf.machine_flags == 0 ||
-      processor->kernel_descriptor.profile ==
-          LOOM_AMDGPU_KERNEL_DESCRIPTOR_PROFILE_NONE) {
-    return iree_ok_status();
-  }
-
-  const loom_amdgpu_descriptor_set_info_t* descriptor_set = NULL;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_target_info_lookup_descriptor_set_by_ordinal(
-      processor->descriptor_set.ordinal, &descriptor_set));
-  *out_supported = loom_amdgpu_descriptor_set_info_has_flags(
-      descriptor_set,
-      LOOM_AMDGPU_DESCRIPTOR_SET_INFO_FLAG_DESCRIPTOR_PACKET_ENCODING);
-  return iree_ok_status();
-}
-
 iree_host_size_t loom_amdgpu_target_info_descriptor_set_count(void) {
   return loom_amdgpu_target_info_descriptor_set_info_count;
 }

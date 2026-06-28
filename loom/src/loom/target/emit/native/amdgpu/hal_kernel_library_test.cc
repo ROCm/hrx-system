@@ -603,10 +603,7 @@ TEST_F(AmdgpuHalKernelLibraryTest, EmitsEveryLinkedSupportedProcessor) {
     const loom_amdgpu_processor_info_t* processor =
         loom_amdgpu_target_info_processor_at(i);
     ASSERT_NE(processor, nullptr);
-    bool hsaco_supported = false;
-    IREE_ASSERT_OK(loom_amdgpu_target_info_processor_supports_hsaco(
-        processor, &hsaco_supported));
-    if (!hsaco_supported) {
+    if (!loom_amdgpu_processor_supports_hsaco(processor)) {
       continue;
     }
     if (!IsProcessorDescriptorSetLinked(processor)) {
@@ -754,10 +751,8 @@ TEST_F(AmdgpuHalKernelLibraryTest, CapturesTargetSpecificKernelDirectives) {
         loom_amdgpu_target_info_find_processor(
             iree_make_cstring_view(processor_name));
     ASSERT_NE(processor, nullptr) << processor_name;
-    bool hsaco_supported = false;
-    IREE_ASSERT_OK(loom_amdgpu_target_info_processor_supports_hsaco(
-        processor, &hsaco_supported));
-    if (!hsaco_supported || !IsProcessorDescriptorSetLinked(processor)) {
+    if (!loom_amdgpu_processor_supports_hsaco(processor) ||
+        !IsProcessorDescriptorSetLinked(processor)) {
       continue;
     }
 

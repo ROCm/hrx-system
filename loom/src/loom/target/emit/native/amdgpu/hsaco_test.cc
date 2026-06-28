@@ -778,10 +778,7 @@ TEST(AmdgpuHsacoTest, WritesSupportedProcessorCodeObjectFlags) {
     const loom_amdgpu_processor_info_t* processor =
         loom_amdgpu_target_info_processor_at(i);
     ASSERT_NE(processor, nullptr);
-    bool hsaco_supported = false;
-    IREE_ASSERT_OK(loom_amdgpu_target_info_processor_supports_hsaco(
-        processor, &hsaco_supported));
-    if (!hsaco_supported) {
+    if (!loom_amdgpu_processor_supports_hsaco(processor)) {
       continue;
     }
     ++supported_count;

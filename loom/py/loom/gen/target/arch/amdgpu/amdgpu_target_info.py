@@ -64,6 +64,8 @@ from loom.target.arch.amdgpu.target_info import (  # noqa: E402
     AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX11,
     AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX12,
     AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX1250,
+    AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION,
+    AMDGPU_PROCESSOR_INFO_KNOWN_FLAGS,
     AMDGPU_PROCESSOR_SCHEDULING_DELAY_ALU,
     AMDGPU_PROCESSOR_SCHEDULING_KNOWN_BITS,
     AMDGPU_PROCESSOR_SCHEDULING_SDWA_DST_SEL_WAIT_STATES,
@@ -156,6 +158,13 @@ _DESCRIPTOR_SET_INFO_FLAG_EXPRS = (
     (
         AMDGPU_DESCRIPTOR_SET_INFO_FLAG_DESCRIPTOR_PACKET_ENCODING,
         "LOOM_AMDGPU_DESCRIPTOR_SET_INFO_FLAG_DESCRIPTOR_PACKET_ENCODING",
+    ),
+)
+
+_PROCESSOR_INFO_FLAG_EXPRS = (
+    (
+        AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION,
+        "LOOM_AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION",
     ),
 )
 
@@ -441,6 +450,16 @@ def _descriptor_set_info_flags_expr(flags: int) -> str:
     )
 
 
+def _processor_info_flags_expr(flags: int) -> str:
+    return _flag_bits_expr(
+        flags,
+        known_bits=AMDGPU_PROCESSOR_INFO_KNOWN_FLAGS,
+        rows=_PROCESSOR_INFO_FLAG_EXPRS,
+        zero_expr="UINT32_C(0)",
+        description="processor info",
+    )
+
+
 def _wavefront_size_flags_expr(flags: int) -> str:
     return _flag_bits_expr(
         flags,
@@ -634,6 +653,9 @@ def _validate_processors(
             raise ValueError(f"AMDGPU ELF feature flags for {info.processor} must fit u32")
         if info.elf.feature_flags & 0x0FF:
             raise ValueError(f"AMDGPU ELF feature flags for {info.processor} must not overlap EF_AMDGPU_MACH")
+        if info.flags < 0 or info.flags > 0xFFFFFFFF:
+            raise ValueError(f"AMDGPU processor info flags for {info.processor} must fit u32")
+        _processor_info_flags_expr(info.flags)
         if info.wavefront.default_size not in (32, 64):
             raise ValueError(f"AMDGPU default wavefront size for {info.processor} must be 32 or 64")
         supported_wavefront_sizes = _supported_wavefront_sizes(info)
@@ -655,6 +677,13 @@ def _validate_processors(
                 raise ValueError(f"AMDGPU processor {info.processor} has descriptor profile but no VGPR encoding granules")
             if info.elf.machine_flags == 0:
                 raise ValueError(f"AMDGPU processor {info.processor} has a kernel descriptor profile but no ELF machine flags")
+        if info.flags & AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION:
+            if not info.descriptor_set.key:
+                raise ValueError(f"AMDGPU processor {info.processor} has HSACO emission support but no descriptor set")
+            if profile == AMDGPU_KERNEL_DESCRIPTOR_PROFILE_NONE:
+                raise ValueError(f"AMDGPU processor {info.processor} has HSACO emission support but no kernel descriptor profile")
+            if info.elf.machine_flags == 0:
+                raise ValueError(f"AMDGPU processor {info.processor} has HSACO emission support but no ELF machine flags")
         if info.features.scheduling < 0 or info.features.scheduling > 0xFFFFFFFF:
             raise ValueError(f"AMDGPU scheduling bits for {info.processor} must fit u32")
         _processor_scheduling_bits_expr(info.features.scheduling)
@@ -783,6 +812,7 @@ def _emit_descriptor_set_rows(rows: Sequence[_AmdgpuDescriptorSetRow]) -> list[s
 
 def _emit_processor_rows(processors: Sequence[AmdgpuProcessorInfo]) -> list[str]:
     processor_width = max(len(_c_string_arg(info.processor)) for info in processors)
+    flags_width = max(len(_processor_info_flags_expr(info.flags)) for info in processors)
     descriptor_set_width = max(len(_c_string_arg(info.descriptor_set.key)) for info in processors)
     ordinal_width = len("UINT16_C(65535)")
     machine_flags_width = len("0x000")
@@ -795,9 +825,10 @@ def _emit_processor_rows(processors: Sequence[AmdgpuProcessorInfo]) -> list[str]
     scheduling_width = max(len(_processor_scheduling_bits_expr(info.features.scheduling)) for info in processors)
     register_granule_width = 1
     lines = [
-        "#define LOOM_AMDGPU_PROCESSOR_INFO(processor_, descriptor_set_key_, descriptor_set_ordinal_, elf_machine_flags_, elf_feature_flags_, default_wavefront_size_, supported_wavefront_sizes_, kd_profile_, kd_flags_, matrix_profile_, scheduling_bits_, vgpr_granule_wave32_, vgpr_granule_wave64_) \\",
+        "#define LOOM_AMDGPU_PROCESSOR_INFO(processor_, flags_, descriptor_set_key_, descriptor_set_ordinal_, elf_machine_flags_, elf_feature_flags_, default_wavefront_size_, supported_wavefront_sizes_, kd_profile_, kd_flags_, matrix_profile_, scheduling_bits_, vgpr_granule_wave32_, vgpr_granule_wave64_) \\",
         "  { \\",
         "    .name = IREE_SVL(processor_), \\",
+        "    .flags = flags_, \\",
         "    .descriptor_set = { \\",
         "      .key = IREE_SVL(descriptor_set_key_), \\",
         "      .ordinal = descriptor_set_ordinal_, \\",
@@ -825,12 +856,13 @@ def _emit_processor_rows(processors: Sequence[AmdgpuProcessorInfo]) -> list[str]
         "  }",
         "",
         "const loom_amdgpu_processor_info_t loom_amdgpu_target_info_processor_infos[] = {",
-        "  // processor descriptor_set_key    ordinal         mach  feat wave wave_flags kernel_profile                              kd_flags matrix_profile                             sched vgpr32 vgpr64",
+        "  // processor flags descriptor_set_key    ordinal         mach  feat wave wave_flags kernel_profile                              kd_flags matrix_profile                             sched vgpr32 vgpr64",
     ]
     lines.extend(
         (
             "  LOOM_AMDGPU_PROCESSOR_INFO("
             f"{_padded_arg(_c_string_arg(info.processor), processor_width)}"
+            f"{_padded_arg(_processor_info_flags_expr(info.flags), flags_width)}"
             f"{_padded_arg(_c_string_arg(info.descriptor_set.key), descriptor_set_width)}"
             f"{_padded_arg(_u16_expr(amdgpu_descriptor_set_ordinal(info.descriptor_set.key)) if info.descriptor_set.key else 'LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_NONE', ordinal_width)}"
             f"{_padded_arg(f'0x{info.elf.machine_flags:03x}', machine_flags_width)}"

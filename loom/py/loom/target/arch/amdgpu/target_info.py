@@ -36,6 +36,9 @@ AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX11 = "wmma_gfx11"
 AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX12 = "wmma_gfx12"
 AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX1250 = "wmma_gfx1250"
 
+AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION = 1 << 0
+AMDGPU_PROCESSOR_INFO_KNOWN_FLAGS = AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION
+
 AMDGPU_BUFFER_RESOURCE_CACHE_SWIZZLE_NONE = "none"
 AMDGPU_BUFFER_RESOURCE_CACHE_SWIZZLE_STRIDE14_ENABLE_BIT = "stride14_enable_bit"
 
@@ -223,6 +226,7 @@ class AmdgpuProcessorFeatureInfo:
 @dataclass(frozen=True, slots=True)
 class AmdgpuProcessorInfo:
     processor: str
+    flags: int
     descriptor_set: AmdgpuProcessorDescriptorSetInfo
     elf: AmdgpuProcessorElfInfo
     wavefront: AmdgpuProcessorWavefrontInfo
@@ -362,9 +366,11 @@ def processor_info(
     ),
     matrix_feature_profile: str = AMDGPU_MATRIX_FEATURE_PROFILE_NONE,
     scheduling_bits: int = 0,
+    flags: int = 0,
 ) -> AmdgpuProcessorInfo:
     return AmdgpuProcessorInfo(
         processor=processor,
+        flags=flags,
         descriptor_set=AmdgpuProcessorDescriptorSetInfo(key=descriptor_set_key),
         elf=AmdgpuProcessorElfInfo(
             machine_flags=elf_machine_flags,
@@ -389,6 +395,7 @@ def rdna3_processor_info(
     return processor_info(
         processor=processor,
         elf_machine_flags=elf_machine_flags,
+        flags=AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION,
         descriptor_set_key="amdgpu.rdna3.core",
         elf_feature_flags=elf_feature_flags,
         default_wavefront_size=32,
@@ -402,11 +409,13 @@ def cdna3_processor_info(
     processor: str,
     elf_machine_flags: int,
     *,
+    flags: int = 0,
     matrix_feature_profile: str = AMDGPU_MATRIX_FEATURE_PROFILE_NONE,
 ) -> AmdgpuProcessorInfo:
     return processor_info(
         processor,
         elf_machine_flags,
+        flags=flags,
         descriptor_set_key="amdgpu.cdna3.core",
         elf_feature_flags=AMDGPU_ELF_FEATURE_XNACK_SRAMECC_ANY_V4,
         kernel_descriptor=AMDGPU_KERNEL_DESCRIPTOR_INFO_CDNA_GFX9,
@@ -420,6 +429,7 @@ def gfx117x_processor_info(
 ) -> AmdgpuProcessorInfo:
     return processor_info(
         processor=processor,
+        flags=AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION,
         descriptor_set_key="amdgpu.rdna3_5.core",
         elf_machine_flags=elf_machine_flags,
         default_wavefront_size=32,
@@ -535,10 +545,12 @@ AMDGPU_PROCESSOR_INFOS: tuple[AmdgpuProcessorInfo, ...] = (
         "gfx942",
         0x04C,
         matrix_feature_profile=AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX940,
+        flags=AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION,
     ),
     processor_info(
         "gfx950",
         0x04F,
+        flags=AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION,
         descriptor_set_key="amdgpu.cdna4.core",
         elf_feature_flags=AMDGPU_ELF_FEATURE_XNACK_SRAMECC_ANY_V4,
         kernel_descriptor=AMDGPU_KERNEL_DESCRIPTOR_INFO_CDNA_GFX9,
@@ -605,6 +617,7 @@ AMDGPU_PROCESSOR_INFOS: tuple[AmdgpuProcessorInfo, ...] = (
     gfx117x_processor_info("gfx1172", 0x05C),
     processor_info(
         "gfx1200",
+        flags=AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION,
         descriptor_set_key="amdgpu.rdna4.core",
         elf_machine_flags=0x048,
         default_wavefront_size=32,
@@ -617,6 +630,7 @@ AMDGPU_PROCESSOR_INFOS: tuple[AmdgpuProcessorInfo, ...] = (
     ),
     processor_info(
         "gfx1201",
+        flags=AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION,
         descriptor_set_key="amdgpu.rdna4.core",
         elf_machine_flags=0x04E,
         default_wavefront_size=32,
@@ -629,6 +643,7 @@ AMDGPU_PROCESSOR_INFOS: tuple[AmdgpuProcessorInfo, ...] = (
     ),
     processor_info(
         "gfx1250",
+        flags=AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION,
         descriptor_set_key="amdgpu.rdna4.gfx125x.core",
         elf_machine_flags=0x049,
         elf_feature_flags=AMDGPU_ELF_FEATURE_XNACK_SRAMECC_ANY_V4,
@@ -639,6 +654,7 @@ AMDGPU_PROCESSOR_INFOS: tuple[AmdgpuProcessorInfo, ...] = (
     ),
     processor_info(
         "gfx1251",
+        flags=AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION,
         descriptor_set_key="amdgpu.rdna4.gfx125x.core",
         elf_machine_flags=0x05A,
         elf_feature_flags=AMDGPU_ELF_FEATURE_XNACK_SRAMECC_ANY_V4,
@@ -681,6 +697,7 @@ AMDGPU_PROCESSOR_INFOS: tuple[AmdgpuProcessorInfo, ...] = (
     processor_info(
         "gfx12-generic",
         0x059,
+        flags=AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION,
         descriptor_set_key="amdgpu.rdna4.core",
         elf_feature_flags=AMDGPU_ELF_FEATURE_GENERIC_VERSION_1_V6,
         default_wavefront_size=32,
@@ -701,6 +718,7 @@ AMDGPU_PROCESSOR_INFOS: tuple[AmdgpuProcessorInfo, ...] = (
     processor_info(
         "gfx12-5-generic",
         0x05B,
+        flags=AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION,
         descriptor_set_key="amdgpu.rdna4.gfx125x.core",
         elf_feature_flags=AMDGPU_ELF_FEATURE_GENERIC_VERSION_1_V6,
         default_wavefront_size=32,
