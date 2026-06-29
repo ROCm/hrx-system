@@ -11,6 +11,7 @@
 #include "loom/ir/scalar_type.h"
 #include "loom/ops/index/ops.h"
 #include "loom/ops/scalar/ops.h"
+#include "loom/ops/vector/ops.h"
 
 //===----------------------------------------------------------------------===//
 // Schema support
@@ -643,4 +644,121 @@ iree_status_t loom_vector_to_scalar_build_encoded_matrix_lane(
       state, operand, row, column, ordinal, &scale_index));
   return loom_vector_to_scalar_encoded_apply_affine(
       state, operand, scale_index, result_type, decoded, out_lane);
+}
+
+//===----------------------------------------------------------------------===//
+// Standalone vector.decode
+//===----------------------------------------------------------------------===//
+
+static uint32_t loom_vector_to_scalar_decode_operand(
+    loom_vector_to_scalar_state_t* state,
+    loom_vector_to_scalar_encoded_matrix_operand_t* out_operand,
+    loom_type_t* out_raw_lane_type) {
+  if (!loom_vector_decode_isa(state->op)) {
+    return LOOM_CONTRACT_REJECTION_INVALID_REQUEST;
+  }
+  if (!state->rewriter->fact_table) {
+    return LOOM_CONTRACT_REJECTION_SCHEMA;
+  }
+
+  const loom_value_id_t payload = loom_vector_decode_payload(state->op);
+  loom_type_t payload_type =
+      loom_module_value_type(state->rewriter->module, payload);
+  loom_type_t result_type = state->vector_type;
+  if (!loom_type_is_vector(payload_type) || !loom_type_is_vector(result_type)) {
+    return LOOM_CONTRACT_REJECTION_SHAPE;
+  }
+
+  const uint8_t rank = loom_type_rank(result_type);
+  if ((rank != 1 && rank != 2) ||
+      !loom_type_shape_equals(payload_type, result_type)) {
+    return LOOM_CONTRACT_REJECTION_SHAPE;
+  }
+
+  loom_value_fact_encoding_summary_t summary = {0};
+  if (!loom_value_facts_query_encoding_summary(
+          &state->rewriter->fact_table->context,
+          loom_rewriter_value_facts(state->rewriter,
+                                    loom_vector_decode_schema(state->op)),
+          &summary)) {
+    return LOOM_CONTRACT_REJECTION_SCHEMA;
+  }
+
+  loom_vector_encoding_auxiliary_view_t auxiliary = {0};
+  if (!loom_vector_encoding_auxiliary_view_resolve(
+          state->rewriter->module, loom_vector_decode_auxiliary(state->op),
+          loom_vector_decode_auxiliary_names(state->op), &auxiliary, NULL)) {
+    return LOOM_CONTRACT_REJECTION_AUXILIARY_OPERAND;
+  }
+
+  *out_operand = (loom_vector_to_scalar_encoded_matrix_operand_t){
+      .schema = summary.storage_schema.encoded_operand,
+      .auxiliary = auxiliary,
+      .rows = rank == 1
+                  ? loom_vector_to_scalar_static_term(1)
+                  : loom_vector_to_scalar_dim_bound_term(state, result_type, 0),
+      .columns = loom_vector_to_scalar_dim_bound_term(state, result_type,
+                                                      (uint8_t)(rank - 1)),
+  };
+  *out_raw_lane_type = loom_vector_to_scalar_lane_type(payload_type);
+  return loom_vector_to_scalar_encoded_matrix_operand_rejection_bits(
+      state, out_operand, *out_raw_lane_type, state->result_scalar_type);
+}
+
+uint32_t loom_vector_to_scalar_decode_rejection_bits(
+    loom_vector_to_scalar_state_t* state) {
+  loom_vector_to_scalar_encoded_matrix_operand_t operand = {0};
+  loom_type_t raw_lane_type = {0};
+  return loom_vector_to_scalar_decode_operand(state, &operand, &raw_lane_type);
+}
+
+static iree_status_t loom_vector_to_scalar_decode_coordinates(
+    loom_vector_to_scalar_state_t* state,
+    loom_vector_to_scalar_index_list_t indices,
+    loom_vector_to_scalar_index_term_t ordinal,
+    loom_vector_to_scalar_index_term_t* out_row,
+    loom_vector_to_scalar_index_term_t* out_column) {
+  switch (indices.rank) {
+    case 1:
+      *out_row = loom_vector_to_scalar_static_term(0);
+      *out_column = ordinal;
+      return iree_ok_status();
+    case 2:
+      *out_row = loom_vector_to_scalar_lane_term(state, indices, 0);
+      *out_column = loom_vector_to_scalar_lane_term(state, indices, 1);
+      return iree_ok_status();
+    default:
+      return iree_make_status(IREE_STATUS_INTERNAL,
+                              "unsupported vector.decode rank reached scalar "
+                              "reference builder");
+  }
+}
+
+iree_status_t loom_vector_to_scalar_build_decode_lane(
+    loom_vector_to_scalar_state_t* state,
+    loom_vector_to_scalar_index_list_t indices, loom_value_id_t* out_lane) {
+  loom_vector_to_scalar_encoded_matrix_operand_t operand = {0};
+  loom_type_t raw_lane_type = {0};
+  if (loom_vector_to_scalar_decode_operand(state, &operand, &raw_lane_type) !=
+      LOOM_CONTRACT_REJECTION_NONE) {
+    return iree_make_status(IREE_STATUS_INTERNAL,
+                            "unsupported vector.decode reached scalar "
+                            "reference builder");
+  }
+
+  const loom_value_id_t payload = loom_vector_decode_payload(state->op);
+  loom_value_id_t raw_lane = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_vector_to_scalar_materialize_lane(
+      state, payload, indices, &raw_lane));
+
+  loom_vector_to_scalar_index_term_t ordinal = {0};
+  IREE_RETURN_IF_ERROR(loom_vector_to_scalar_linear_ordinal_term(
+      state, state->vector_type, indices, &ordinal));
+  loom_vector_to_scalar_index_term_t row = {0};
+  loom_vector_to_scalar_index_term_t column = {0};
+  IREE_RETURN_IF_ERROR(loom_vector_to_scalar_decode_coordinates(
+      state, indices, ordinal, &row, &column));
+  return loom_vector_to_scalar_build_encoded_matrix_lane(
+      state, &operand, raw_lane, raw_lane_type, state->result_scalar_type, row,
+      column, ordinal, out_lane);
 }

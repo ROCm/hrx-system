@@ -23,6 +23,7 @@
 #include "loom/transforms/vector/to_scalar_aggregates.h"
 #include "loom/transforms/vector/to_scalar_core.h"
 #include "loom/transforms/vector/to_scalar_descriptors.h"
+#include "loom/transforms/vector/to_scalar_encoding.h"
 #include "loom/transforms/vector/to_scalar_lanes.h"
 #include "loom/transforms/vector/to_scalar_memory.h"
 #include "loom/transforms/vector/to_scalar_mma.h"
@@ -679,6 +680,11 @@ static iree_status_t loom_vector_to_scalar_lower_descriptor_op(
   loom_vector_to_scalar_state_t state = {0};
   IREE_RETURN_IF_ERROR(loom_vector_to_scalar_prepare_state(
       pass, rewriter, op, descriptor, 0, &state));
+  if (descriptor->lane_kind == LOOM_VECTOR_TO_SCALAR_LANE_DECODE &&
+      loom_vector_to_scalar_decode_rejection_bits(&state) !=
+          LOOM_CONTRACT_REJECTION_NONE) {
+    return iree_ok_status();
+  }
   if (descriptor->lane_kind == LOOM_VECTOR_TO_SCALAR_LANE_TRANSFORM) {
     IREE_RETURN_IF_ERROR(loom_vector_to_scalar_validate_transform(&state));
     if (loom_pass_has_error_diagnostics(pass)) {
