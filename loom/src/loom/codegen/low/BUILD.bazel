@@ -532,6 +532,7 @@ loom_cc_test(
     srcs = ["source_memory_plan_test.cc"],
     deps = [
         ":source_memory_plan",
+        "//loom/src/loom/analysis:view_regions",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/buffer",
         "//loom/src/loom/ops/cfg",

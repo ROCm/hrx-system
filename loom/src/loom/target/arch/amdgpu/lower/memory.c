@@ -313,6 +313,17 @@ static bool loom_amdgpu_memory_dynamic_term_can_materialize_vaddr(
   return true;
 }
 
+static bool loom_amdgpu_memory_access_dynamic_view_base_can_materialize_soffset(
+    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
+    const loom_view_region_table_t* view_regions,
+    const loom_low_source_memory_access_plan_t* source) {
+  return source->dynamic_view_base_term_count != 0 &&
+         source->dynamic_view_base_value_id != LOOM_VALUE_ID_INVALID &&
+         loom_amdgpu_memory_dynamic_index_can_materialize_u32_soffset(
+             module, fact_table, view_regions,
+             source->dynamic_view_base_value_id);
+}
+
 typedef struct loom_amdgpu_memory_dynamic_term_materialization_t {
   // Term requires materializing scaled address arithmetic.
   bool needs_scaled_materialization;
@@ -376,7 +387,12 @@ static void loom_amdgpu_mark_source_memory_plan_dynamic_storage_demands(
 void loom_amdgpu_mark_source_memory_plan_storage_demands(
     loom_low_lower_context_t* context,
     const loom_low_source_memory_access_plan_t* source) {
-  loom_low_lower_require_source_value_storage(context, source->view_value_id);
+  loom_low_lower_require_source_value_storage(
+      context, loom_low_source_memory_access_base_view_value_id(source));
+  if (source->dynamic_view_base_value_id != LOOM_VALUE_ID_INVALID) {
+    loom_low_lower_require_source_value_storage(
+        context, source->dynamic_view_base_value_id);
+  }
   loom_amdgpu_mark_source_memory_plan_dynamic_storage_demands(context, source);
 }
 
@@ -465,6 +481,9 @@ bool loom_amdgpu_memory_access_select_dynamic_term_kinds(
     const loom_view_region_table_t* view_regions,
     loom_amdgpu_memory_access_t* access,
     loom_amdgpu_memory_access_diagnostic_t* diagnostic) {
+  const bool materialized_dynamic_view_base_can_soffset =
+      loom_amdgpu_memory_access_dynamic_view_base_can_materialize_soffset(
+          module, fact_table, view_regions, &access->source);
   for (uint8_t term_index = 0; term_index < access->source.dynamic_term_count;
        ++term_index) {
     const loom_low_source_memory_dynamic_term_t* term =
@@ -473,6 +492,12 @@ bool loom_amdgpu_memory_access_select_dynamic_term_kinds(
       diagnostic->rejection_bits |=
           LOOM_AMDGPU_MEMORY_ACCESS_REJECTION_DYNAMIC_STRIDE;
       return false;
+    }
+    if (term_index < access->source.dynamic_view_base_term_count &&
+        materialized_dynamic_view_base_can_soffset) {
+      access->dynamic_term_kinds[term_index] =
+          LOOM_AMDGPU_MEMORY_DYNAMIC_INDEX_SOFFSET;
+      continue;
     }
     const loom_amdgpu_memory_dynamic_term_materialization_t materialization = {
         .needs_scaled_materialization =

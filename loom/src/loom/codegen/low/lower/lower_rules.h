@@ -181,6 +181,8 @@ struct loom_low_lower_rule_match_context_t {
   loom_low_lower_rule_match_descriptor_ref_callback_t descriptor_ref;
   // Optional dense source value facts used by fact-backed guard rows.
   const loom_value_fact_table_t* fact_table;
+  // Optional precomputed view summaries used by source-memory guard rows.
+  const loom_view_region_table_t* view_regions;
   // Optional symbolic proof context used as a cold fallback for fact-backed
   // guard rows whose scalar intervals are inconclusive.
   loom_symbolic_expr_context_t* symbolic_expr_context;

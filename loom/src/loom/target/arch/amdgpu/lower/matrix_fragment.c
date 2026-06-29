@@ -208,6 +208,8 @@ typedef struct loom_amdgpu_fragment_memory_environment_t {
   const loom_module_t* module;
   // Source facts available for shape, view, and address reasoning.
   const loom_value_fact_table_t* fact_table;
+  // Precomputed source view summaries available for address planning.
+  const loom_view_region_table_t* view_regions;
   // Target bundle selected for this source-to-low attempt.
   const loom_target_bundle_t* bundle;
   // Low descriptor set selected by the target bundle.
@@ -1420,11 +1422,12 @@ static bool loom_amdgpu_fragment_memory_analyze(
                           loom_dim_pack_static(1), /*encoding_id=*/0);
   loom_low_source_memory_access_plan_t source_access = {0};
   loom_low_source_memory_access_diagnostic_t source_diagnostic = {0};
-  if (!loom_low_source_memory_access_plan_build_indexed(
-          environment->module, environment->fact_table, source_operation_kind,
-          source->view, source->dynamic_indices, source->static_indices,
-          scalar_vector_type, (loom_vector_memory_cache_policy_t){0},
-          &source_access, &source_diagnostic)) {
+  if (!loom_low_source_memory_access_plan_build_indexed_with_view_regions(
+          environment->module, environment->fact_table,
+          environment->view_regions, source_operation_kind, source->view,
+          source->dynamic_indices, source->static_indices, scalar_vector_type,
+          (loom_vector_memory_cache_policy_t){0}, &source_access,
+          &source_diagnostic)) {
     return loom_amdgpu_fragment_memory_reject(
         diagnostic, loom_low_source_memory_access_rejection_key(
                         source_diagnostic.rejection_bits));
@@ -2241,6 +2244,7 @@ loom_amdgpu_fragment_memory_feature_bits_from_target_ref(
 
 iree_status_t loom_amdgpu_analyze_vector_fragment_memory_plan(
     const loom_module_t* module, const loom_value_fact_table_t* fact_table,
+    const loom_view_region_table_t* view_regions,
     const loom_target_bundle_t* bundle,
     const loom_low_descriptor_set_t* descriptor_set,
     loom_symbol_ref_t target_ref, loom_func_like_t source_function,
@@ -2252,6 +2256,7 @@ iree_status_t loom_amdgpu_analyze_vector_fragment_memory_plan(
   const loom_amdgpu_fragment_memory_environment_t environment = {
       .module = module,
       .fact_table = fact_table,
+      .view_regions = view_regions,
       .bundle = bundle,
       .descriptor_set = descriptor_set,
       .feature_bits = loom_amdgpu_fragment_memory_feature_bits_from_target_ref(
@@ -2282,8 +2287,11 @@ static iree_status_t loom_amdgpu_fragment_memory_select(
     loom_amdgpu_memory_operation_kind_t operation_kind,
     loom_amdgpu_fragment_memory_plan_t* out_plan, bool* out_selected) {
   const loom_module_t* module = loom_low_lower_context_module(context);
+  const loom_view_region_table_t* view_regions = NULL;
+  IREE_RETURN_IF_ERROR(
+      loom_low_lower_context_view_regions(context, &view_regions));
   return loom_amdgpu_analyze_vector_fragment_memory_plan(
-      module, loom_low_lower_context_fact_table(context),
+      module, loom_low_lower_context_fact_table(context), view_regions,
       loom_low_lower_context_bundle(context),
       loom_low_lower_context_descriptor_set(context),
       loom_low_lower_context_target_ref(context),
@@ -2328,9 +2336,13 @@ iree_status_t loom_amdgpu_low_legality_verify_vector_fragment_memory(
   }
 
   const loom_module_t* module = loom_target_low_legality_module(context);
+  const loom_view_region_table_t* view_regions = NULL;
+  IREE_RETURN_IF_ERROR(
+      loom_target_low_legality_view_regions(context, &view_regions));
   const loom_amdgpu_fragment_memory_environment_t environment = {
       .module = module,
       .fact_table = loom_target_low_legality_fact_table(context),
+      .view_regions = view_regions,
       .bundle = bundle,
       .descriptor_set = loom_target_low_legality_descriptor_set(context),
       .feature_bits = loom_amdgpu_fragment_memory_feature_bits_from_target_ref(
@@ -3961,7 +3973,9 @@ iree_status_t loom_amdgpu_lower_vector_fragment_load(
   loom_value_id_t low_soffset = LOOM_VALUE_ID_INVALID;
   if (plan->source.memory_space != LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP) {
     IREE_RETURN_IF_ERROR(loom_low_lower_lookup_value(
-        context, plan->source.view_value_id, &low_resource));
+        context,
+        loom_low_source_memory_access_base_view_value_id(&plan->source),
+        &low_resource));
     IREE_RETURN_IF_ERROR(loom_amdgpu_fragment_memory_packet_resource(
         context, source_op, plan, low_resource, &low_packet_resource,
         &low_soffset));
@@ -4065,7 +4079,9 @@ iree_status_t loom_amdgpu_lower_vector_fragment_store(
   loom_value_id_t low_soffset = LOOM_VALUE_ID_INVALID;
   if (plan->source.memory_space != LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP) {
     IREE_RETURN_IF_ERROR(loom_low_lower_lookup_value(
-        context, plan->source.view_value_id, &low_resource));
+        context,
+        loom_low_source_memory_access_base_view_value_id(&plan->source),
+        &low_resource));
     IREE_RETURN_IF_ERROR(loom_amdgpu_fragment_memory_packet_resource(
         context, source_op, plan, low_resource, &low_packet_resource,
         &low_soffset));
@@ -4243,8 +4259,9 @@ void loom_amdgpu_mark_fragment_memory_plan_storage_demands(
     const loom_amdgpu_fragment_memory_plan_t* plan) {
   (void)source_op;
   if (plan->source.memory_space != LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP) {
-    loom_low_lower_require_source_value_storage(context,
-                                                plan->source.view_value_id);
+    loom_low_lower_require_source_value_storage(
+        context,
+        loom_low_source_memory_access_base_view_value_id(&plan->source));
   }
   for (uint8_t i = 0; i < plan->source.dynamic_term_count; ++i) {
     if (loom_amdgpu_fragment_memory_uses_dynamic_view_base_value(plan, i)) {

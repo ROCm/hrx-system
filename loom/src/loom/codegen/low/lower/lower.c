@@ -499,6 +499,11 @@ static bool loom_low_lower_emit_uses_source_memory_plan(
 static void loom_low_lower_mark_source_memory_access_storage_demands(
     loom_low_lower_context_t* context,
     const loom_low_source_memory_access_plan_t* access) {
+  if (loom_low_source_memory_access_dynamic_offset_has_materialized_view_base(
+          access)) {
+    loom_low_lower_mark_value_storage_required(
+        context, access->dynamic_view_base_value_id);
+  }
   for (uint8_t term_ordinal = 0; term_ordinal < access->dynamic_term_count;
        ++term_ordinal) {
     const loom_low_source_memory_dynamic_term_t* term =
@@ -541,9 +546,13 @@ static void loom_low_lower_mark_rule_storage_demands(
       continue;
     }
     if (!source_memory_access_built) {
+      const loom_view_region_table_t* view_regions =
+          context->lowering.view_regions_analyzed
+              ? &context->lowering.view_regions
+              : NULL;
       loom_low_source_memory_access_diagnostic_t diagnostic = {0};
-      if (!loom_low_source_memory_access_plan_build(
-              context->module, context->lowering.fact_table,
+      if (!loom_low_source_memory_access_plan_build_with_view_regions(
+              context->module, context->lowering.fact_table, view_regions,
               selected_plan->source_op, &source_memory_access, &diagnostic)) {
         IREE_ASSERT_UNREACHABLE("selected source memory must still plan");
         IREE_BUILTIN_UNREACHABLE();
