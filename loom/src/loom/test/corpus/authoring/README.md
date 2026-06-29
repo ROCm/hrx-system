@@ -434,15 +434,16 @@ When a logical coordinate selects a packed byte window, `index.scale` is the
 explicit boundary: it multiplies an `index` coordinate by an `offset` byte
 stride and produces the `offset` value expected by `buffer.view`.
 
-FP8 checkpoint storage should carry the content contract on the view storage
-schema. A raw `f8E4M3` view means every IEEE special case remains possible, and
-`#fp8_e4m3fn` only proves that infinity is not representable; NaN payloads are
-still uncertain. Model weights that have been validated finite should use a
-physical storage schema with `rounding=finite_only` so loads and fragments
-publish no-NaN facts while still preserving exact zero and subnormal behavior.
-Formats that also flush or forbid subnormal payloads can use
-`finite_flush_subnormal`, but that is a stronger numeric contract than ordinary
-finite FP8 weights.
+FP8 checkpoint storage should carry both the payload dialect and the content
+contract on the view storage schema. A plain `f8E4M3` view only carries the
+scalar FP8 type facts; NaN, zero, and subnormal payloads remain possible unless
+storage says more. The schema `element_format` records the payload dialect, such
+as `f8e4m3` for IEEE-style E4M3 or `f8e4m3fn` for finite-NaN checkpoint formats.
+Model weights that have been validated finite should also set
+`rounding=finite_only` so loads and fragments publish no-NaN facts while still
+preserving exact zero and subnormal behavior. Formats that also flush or forbid
+subnormal payloads can use `finite_flush_subnormal`, but that is a stronger
+numeric contract than ordinary finite FP8 weights.
 
 ```loom
 %weight_layout = encoding.layout.strided [1, %input_size] : encoding<layout>
