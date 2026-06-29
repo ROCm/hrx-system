@@ -44,10 +44,12 @@ typedef struct loom_amdgpu_bf16_pack_descriptors_t {
   loom_low_lower_resolved_descriptor_t add3_src2_literal_descriptor;
 } loom_amdgpu_bf16_pack_descriptors_t;
 
-// Resolves optional BF16 pack packet helpers for the active descriptor set.
-iree_status_t loom_amdgpu_resolve_bf16_pack_descriptors(
+// Returns optional BF16 pack packet helpers for the active descriptor set. The
+// returned descriptor set is function-local target lowering state and remains
+// valid until the current loom_low_lower_function call returns.
+iree_status_t loom_amdgpu_get_bf16_pack_descriptors(
     loom_low_lower_context_t* context,
-    loom_amdgpu_bf16_pack_descriptors_t* out_descriptors);
+    const loom_amdgpu_bf16_pack_descriptors_t** out_descriptors);
 
 // Emits round-to-nearest-even conversion from one f32 lane to one BF16 lane.
 // The result is held in the low 16 bits of a one-unit VGPR.

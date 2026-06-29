@@ -4195,9 +4195,9 @@ iree_status_t loom_amdgpu_lower_vector_fragment_store(
   if (plan->payload_form ==
       LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_STORE_NARROW_F32_TO_BF16) {
     loom_type_t mask_type = loom_type_none();
-    loom_amdgpu_bf16_pack_descriptors_t bf16_pack_descriptors = {0};
-    IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_bf16_pack_descriptors(
-        context, &bf16_pack_descriptors));
+    const loom_amdgpu_bf16_pack_descriptors_t* bf16_pack_descriptors = NULL;
+    IREE_RETURN_IF_ERROR(
+        loom_amdgpu_get_bf16_pack_descriptors(context, &bf16_pack_descriptors));
     const bool has_crosslane_packed_b16_store =
         loom_amdgpu_fragment_memory_plan_has_packet_flags(
             plan,
@@ -4267,7 +4267,7 @@ iree_status_t loom_amdgpu_lower_vector_fragment_store(
         IREE_RETURN_IF_ERROR(
             loom_amdgpu_emit_fragment_memory_crosslane_packed_b16_prepare_store(
                 context, source_op, layout, plan, packet, &crosslane_descriptor,
-                &bf16_pack_descriptors, &base_accumulator,
+                bf16_pack_descriptors, &base_accumulator,
                 low_paired_lane_byte_offset, low_payload, low_resource,
                 vgpr_type, &pending_stores[pending_store_count++]));
         continue;
@@ -4282,7 +4282,7 @@ iree_status_t loom_amdgpu_lower_vector_fragment_store(
 
       loom_value_id_t low_payload_packet = LOOM_VALUE_ID_INVALID;
       IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fragment_memory_packed_16bit_packet(
-          context, source_op, plan, low_payload, &bf16_pack_descriptors,
+          context, source_op, plan, low_payload, bf16_pack_descriptors,
           packet->register_index, packet->result_register_count,
           packet->packet_register_count, vgpr_type, &low_payload_packet));
       loom_amdgpu_fragment_memory_address_t address;
