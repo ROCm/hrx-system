@@ -3529,8 +3529,7 @@ loom_amdgpu_try_emit_fragment_memory_fp8_to_packed_bf16_packet(
     const loom_amdgpu_fp8_decode_plan_t* decode_plan,
     loom_amdgpu_fp8_decode_value_flags_t decode_value_flags,
     loom_type_t vgpr_type, loom_type_t sgpr_type, loom_type_t mask_type,
-    loom_value_id_t* out_low_result_registers, bool* out_selected) {
-  *out_selected = false;
+    loom_value_id_t* out_low_result_registers) {
   if (packet_register_count == 0 ||
       packet_register_count > LOOM_AMDGPU_MAX_PACKED_32BIT_REGISTERS ||
       result_register_count == 0 ||
@@ -3577,7 +3576,6 @@ loom_amdgpu_try_emit_fragment_memory_fp8_to_packed_bf16_packet(
       context, source_op, decode_plan, pair_sources, result_register_count,
       decode_value_flags, vgpr_type, sgpr_type, mask_type,
       out_low_result_registers));
-  *out_selected = true;
   return iree_ok_status();
 }
 
@@ -3681,9 +3679,10 @@ loom_amdgpu_emit_fragment_memory_fp8_to_packed_bf16_load_packet(
         &low_identity_scale));
   }
 
-  loom_value_id_t low_result_registers[LOOM_AMDGPU_MAX_PACKED_32BIT_REGISTERS] =
-      {0};
-  bool selected_batched_decode = false;
+  loom_value_id_t low_result_registers[LOOM_AMDGPU_MAX_PACKED_32BIT_REGISTERS];
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(low_result_registers); ++i) {
+    low_result_registers[i] = LOOM_VALUE_ID_INVALID;
+  }
   if (!has_identity_scalef32_bf16_descriptor && !has_native_f32_pair) {
     IREE_RETURN_IF_ERROR(
         loom_amdgpu_try_emit_fragment_memory_fp8_to_packed_bf16_packet(
@@ -3691,9 +3690,9 @@ loom_amdgpu_emit_fragment_memory_fp8_to_packed_bf16_load_packet(
             report_packet.packet_register_count,
             report_packet.result_register_count, decode_plan,
             decode_value_flags, vgpr_type, sgpr_type, mask_type,
-            low_result_registers, &selected_batched_decode));
+            low_result_registers));
   }
-  if (!selected_batched_decode) {
+  if (low_result_registers[0] == LOOM_VALUE_ID_INVALID) {
     for (uint16_t result_register_index = 0;
          result_register_index < report_packet.result_register_count;
          ++result_register_index) {
