@@ -89,30 +89,34 @@ loom_amdgpu_fp8_decode_value_flags_from_facts(loom_value_facts_t facts) {
   return flags;
 }
 
-bool loom_amdgpu_fp8_to_f32_descriptor_refs(
+bool loom_amdgpu_fp8_native_descriptor_refs(
     loom_scalar_type_t source_element_type,
-    loom_amdgpu_fp8_to_f32_descriptor_refs_t* out_refs) {
-  *out_refs = (loom_amdgpu_fp8_to_f32_descriptor_refs_t){
+    loom_scalar_type_t result_element_type,
+    loom_amdgpu_fp8_native_descriptor_refs_t* out_refs) {
+  *out_refs = (loom_amdgpu_fp8_native_descriptor_refs_t){
       .lane = LOOM_AMDGPU_DESCRIPTOR_REF_NONE,
       .pair = LOOM_AMDGPU_DESCRIPTOR_REF_NONE,
   };
-  if (source_element_type >= LOOM_SCALAR_TYPE_COUNT_) {
+  if (source_element_type >= LOOM_SCALAR_TYPE_COUNT_ ||
+      result_element_type >= LOOM_SCALAR_TYPE_COUNT_) {
     return false;
   }
-  static const loom_amdgpu_fp8_to_f32_descriptor_refs_t
-      kLoomAmdgpuFp8ToF32DescriptorRefs[LOOM_SCALAR_TYPE_COUNT_] = {
-#define LOOM_AMDGPU_FP8_TO_F32_DESCRIPTOR_REF_ROW(source_type, lane_ref, \
-                                                  pair_ref)              \
-  [source_type] = {                                                      \
-    .lane = lane_ref,                                                    \
-    .pair = pair_ref,                                                    \
+  static const loom_amdgpu_fp8_native_descriptor_refs_t
+      kLoomAmdgpuFp8NativeDescriptorRefs[LOOM_SCALAR_TYPE_COUNT_]
+                                        [LOOM_SCALAR_TYPE_COUNT_] = {
+#define LOOM_AMDGPU_FP8_NATIVE_DESCRIPTOR_REF_ROW(source_type, result_type, \
+                                                  lane_ref, pair_ref)       \
+  [source_type][result_type] = {                                            \
+    .lane = lane_ref,                                                       \
+    .pair = pair_ref,                                                       \
   }
-#include "loom/target/arch/amdgpu/lower/fp8_to_f32_descriptor_ref_rows.inl"
-#undef LOOM_AMDGPU_FP8_TO_F32_DESCRIPTOR_REF_ROW
-      };
-  const loom_amdgpu_fp8_to_f32_descriptor_refs_t* refs =
-      &kLoomAmdgpuFp8ToF32DescriptorRefs[source_element_type];
-  if (refs->lane == LOOM_AMDGPU_DESCRIPTOR_REF_NONE ||
+#include "loom/target/arch/amdgpu/lower/fp8_native_descriptor_ref_rows.inl"
+#undef LOOM_AMDGPU_FP8_NATIVE_DESCRIPTOR_REF_ROW
+                                        };
+  const loom_amdgpu_fp8_native_descriptor_refs_t* refs =
+      &kLoomAmdgpuFp8NativeDescriptorRefs[source_element_type]
+                                         [result_element_type];
+  if (refs->lane == LOOM_AMDGPU_DESCRIPTOR_REF_NONE &&
       refs->pair == LOOM_AMDGPU_DESCRIPTOR_REF_NONE) {
     return false;
   }
@@ -513,8 +517,9 @@ static iree_status_t loom_amdgpu_resolve_fp8_decode_plan_descriptors(
         context, &kLoomAmdgpuFp8DecodePlanDescriptorRows[i], plan));
   }
 
-  loom_amdgpu_fp8_to_f32_descriptor_refs_t native_refs = {0};
-  if (loom_amdgpu_fp8_to_f32_descriptor_refs(element_type, &native_refs)) {
+  loom_amdgpu_fp8_native_descriptor_refs_t native_refs = {0};
+  if (loom_amdgpu_fp8_native_descriptor_refs(element_type, LOOM_SCALAR_TYPE_F32,
+                                             &native_refs)) {
     const loom_amdgpu_fp8_decode_plan_descriptor_row_t native_pair_row = {
         .descriptor_ref = native_refs.pair,
         .descriptor_offset =

@@ -984,6 +984,16 @@ def _vector_16bit_float_conversion_recipe_rules() -> tuple[RecipeRule, ...]:
             _VEC_BF16_PACKED_STORAGE,
         ),
         _vector_16bit_float_conversion_recipe_rule(
+            vector.vector_extf,
+            _VEC_F8E4M3_PACKED,
+            _VEC_F16_PACKED_STORAGE,
+        ),
+        _vector_16bit_float_conversion_recipe_rule(
+            vector.vector_extf,
+            _VEC_F8E5M2_PACKED,
+            _VEC_F16_PACKED_STORAGE,
+        ),
+        _vector_16bit_float_conversion_recipe_rule(
             vector.vector_fptrunc,
             _VEC_F32_STATIC,
             _VEC_F16_PACKED_STORAGE,

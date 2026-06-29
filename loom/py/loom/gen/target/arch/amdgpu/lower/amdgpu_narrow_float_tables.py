@@ -42,9 +42,10 @@ class _Fp8DecodePlanDescriptorRow:
 
 
 @dataclass(frozen=True)
-class _Fp8ToF32DescriptorRefRow:
+class _Fp8NativeDescriptorRefRow:
     source_type: ScalarTypeKind
-    lane_descriptor_key: str
+    result_type: ScalarTypeKind
+    lane_descriptor_key: str | None
     pair_descriptor_key: str
 
 
@@ -148,16 +149,30 @@ _FP8_DECODE_PLAN_DESCRIPTOR_ROWS = (
     ),
 )
 
-_FP8_TO_F32_DESCRIPTOR_REF_ROWS = (
-    _Fp8ToF32DescriptorRefRow(
+_FP8_NATIVE_DESCRIPTOR_REF_ROWS = (
+    _Fp8NativeDescriptorRefRow(
         ScalarTypeKind.F8E4M3,
+        ScalarTypeKind.F32,
         "amdgpu.v_cvt_f32_fp8",
         "amdgpu.v_cvt_pk_f32_fp8",
     ),
-    _Fp8ToF32DescriptorRefRow(
+    _Fp8NativeDescriptorRefRow(
         ScalarTypeKind.F8E5M2,
+        ScalarTypeKind.F32,
         "amdgpu.v_cvt_f32_bf8",
         "amdgpu.v_cvt_pk_f32_bf8",
+    ),
+    _Fp8NativeDescriptorRefRow(
+        ScalarTypeKind.F8E4M3,
+        ScalarTypeKind.F16,
+        None,
+        "amdgpu.v_cvt_pk_f16_fp8",
+    ),
+    _Fp8NativeDescriptorRefRow(
+        ScalarTypeKind.F8E5M2,
+        ScalarTypeKind.F16,
+        None,
+        "amdgpu.v_cvt_pk_f16_bf8",
     ),
 )
 
@@ -230,24 +245,29 @@ def _fp8_decode_plan_descriptor_initializer(
     )
 
 
-def _fp8_to_f32_descriptor_ref_initializer(
-    row: _Fp8ToF32DescriptorRefRow,
+def _fp8_native_descriptor_ref_initializer(
+    row: _Fp8NativeDescriptorRefRow,
     descriptor_ref_key_set: set[str] | None = None,
 ) -> str:
-    lane_descriptor_ref = required_descriptor_ref_constant_name(
-        "AMDGPU FP8 to F32 descriptor table",
-        row.lane_descriptor_key,
-        descriptor_ref_key_set,
+    lane_descriptor_ref = (
+        "LOOM_AMDGPU_DESCRIPTOR_REF_NONE"
+        if row.lane_descriptor_key is None
+        else required_descriptor_ref_constant_name(
+            "AMDGPU FP8 native conversion descriptor table",
+            row.lane_descriptor_key,
+            descriptor_ref_key_set,
+        )
     )
     pair_descriptor_ref = required_descriptor_ref_constant_name(
-        "AMDGPU FP8 to F32 descriptor table",
+        "AMDGPU FP8 native conversion descriptor table",
         row.pair_descriptor_key,
         descriptor_ref_key_set,
     )
     return "\n".join(
         [
-            "LOOM_AMDGPU_FP8_TO_F32_DESCRIPTOR_REF_ROW(",
+            "LOOM_AMDGPU_FP8_NATIVE_DESCRIPTOR_REF_ROW(",
             f"    {_scalar_type_constant_name(row.source_type)},",
+            f"    {_scalar_type_constant_name(row.result_type)},",
             f"    {lane_descriptor_ref}, {pair_descriptor_ref}),",
         ]
     )
@@ -288,8 +308,8 @@ def _emit_fp8_decode_plan_descriptor_rows(
     )
 
 
-def _emit_fp8_to_f32_descriptor_ref_rows(
-    rows: Sequence[_Fp8ToF32DescriptorRefRow] = _FP8_TO_F32_DESCRIPTOR_REF_ROWS,
+def _emit_fp8_native_descriptor_ref_rows(
+    rows: Sequence[_Fp8NativeDescriptorRefRow] = _FP8_NATIVE_DESCRIPTOR_REF_ROWS,
     descriptor_ref_key_set: set[str] | None = None,
 ) -> str:
     known_refs = descriptor_ref_key_set if descriptor_ref_key_set is not None else set(amdgpu_descriptor_ref_keys())
@@ -297,7 +317,7 @@ def _emit_fp8_to_f32_descriptor_ref_rows(
         "\n".join(
             [
                 *_generated_header(),
-                *(_fp8_to_f32_descriptor_ref_initializer(row, known_refs) for row in rows),
+                *(_fp8_native_descriptor_ref_initializer(row, known_refs) for row in rows),
             ]
         )
         + "\n"
@@ -333,9 +353,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="Generated FP8 decode-plan descriptor row fragment path.",
     )
     parser.add_argument(
-        "--fp8-to-f32-descriptor-ref-rows",
+        "--fp8-native-descriptor-ref-rows",
         type=Path,
-        help="Generated FP8/BF8 to F32 descriptor row fragment path.",
+        help="Generated native unscaled FP8/BF8 descriptor row fragment path.",
     )
     parser.add_argument(
         "--fp8-scalef32-descriptor-ref-rows",
@@ -344,17 +364,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    if args.fp8_decode_plan_descriptor_rows is None and args.fp8_to_f32_descriptor_ref_rows is None and args.fp8_scalef32_descriptor_ref_rows is None:
+    if args.fp8_decode_plan_descriptor_rows is None and args.fp8_native_descriptor_ref_rows is None and args.fp8_scalef32_descriptor_ref_rows is None:
         parser.error("at least one output path is required")
     if args.fp8_decode_plan_descriptor_rows is not None:
         _write_output(
             args.fp8_decode_plan_descriptor_rows,
             _emit_fp8_decode_plan_descriptor_rows(),
         )
-    if args.fp8_to_f32_descriptor_ref_rows is not None:
+    if args.fp8_native_descriptor_ref_rows is not None:
         _write_output(
-            args.fp8_to_f32_descriptor_ref_rows,
-            _emit_fp8_to_f32_descriptor_ref_rows(),
+            args.fp8_native_descriptor_ref_rows,
+            _emit_fp8_native_descriptor_ref_rows(),
         )
     if args.fp8_scalef32_descriptor_ref_rows is not None:
         _write_output(

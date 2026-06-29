@@ -1742,6 +1742,7 @@ def _gfx12_core_overlay_descriptors(
 def _gfx1250_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
     return (
         *_rdna4_core_overlays(),
+        *_v_cvt_pk_f16_packed8_overlays(),
         _v_cvt_pk_bf16_f32_overlay(),
         _v_pk_add_bf16_overlay(),
         _v_pk_mul_bf16_overlay(),
@@ -1756,6 +1757,39 @@ _GFX1250_SUPPLEMENTAL_INSTRUCTION_FLAGS = AmdgpuIsaInstructionFlags(
     is_program_terminator=False,
     is_immediately_executed=False,
 )
+
+
+def _gfx1250_supplemental_vop1_source(
+    field_name: str,
+    data_format_name: str,
+) -> AmdgpuIsaOperand:
+    return AmdgpuIsaOperand(
+        order=2,
+        field_name=field_name,
+        data_format_name=data_format_name,
+        operand_type="OPR_SRC",
+        size_bits=32,
+        is_input=True,
+        is_output=False,
+        is_implicit=False,
+        is_binary_microcode_required=True,
+    )
+
+
+def _gfx1250_supplemental_vop1_result(
+    data_format_name: str,
+) -> AmdgpuIsaOperand:
+    return AmdgpuIsaOperand(
+        order=1,
+        field_name="VDST",
+        data_format_name=data_format_name,
+        operand_type="OPR_VGPR",
+        size_bits=32,
+        is_input=False,
+        is_output=True,
+        is_implicit=False,
+        is_binary_microcode_required=True,
+    )
 
 
 def _gfx1250_supplemental_vop3_source(
@@ -1816,6 +1850,24 @@ def _gfx1250_supplemental_instruction(
 
 
 _GFX1250_SUPPLEMENTAL_INSTRUCTIONS = (
+    _gfx1250_supplemental_instruction(
+        name="V_CVT_PK_F16_FP8",
+        encoding_name="ENC_VOP1",
+        opcode=0xEB,
+        operands=(
+            _gfx1250_supplemental_vop1_result("FMT_NUM_PK2_F16"),
+            _gfx1250_supplemental_vop1_source("SRC0", "FMT_NUM_UINT"),
+        ),
+    ),
+    _gfx1250_supplemental_instruction(
+        name="V_CVT_PK_F16_BF8",
+        encoding_name="ENC_VOP1",
+        opcode=0xED,
+        operands=(
+            _gfx1250_supplemental_vop1_result("FMT_NUM_PK2_F16"),
+            _gfx1250_supplemental_vop1_source("SRC0", "FMT_NUM_UINT"),
+        ),
+    ),
     _gfx1250_supplemental_instruction(
         name="V_CVT_PK_BF16_F32",
         encoding_name="ENC_VOP3",

@@ -4200,6 +4200,22 @@ def _v_cvt_pk_f32_packed8_overlay(source_type: str) -> AmdgpuDescriptorOverlay:
     )
 
 
+def _v_cvt_pk_f16_packed8_overlay(source_type: str) -> AmdgpuDescriptorOverlay:
+    return AmdgpuDescriptorOverlay(
+        descriptor_key=f"amdgpu.v_cvt_pk_f16_{source_type}",
+        instruction_name=f"V_CVT_PK_F16_{source_type.upper()}",
+        mnemonic=f"v_cvt_pk_f16_{source_type}",
+        encoding_name="ENC_VOP1",
+        semantic_tag=f"convert.float.{source_type}x2.f16x2",
+        schedule_class=_SCHEDULE_VALU,
+        operands=(
+            AmdgpuOperandOverlay("VDST", _vgpr_result()),
+            AmdgpuOperandOverlay("SRC0", _sgpr_vgpr_operand("input")),
+        ),
+        flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    )
+
+
 _SCALEF32_PK_PACKED8_ROWS = (
     ("fp8", "f16", 1),
     ("bf8", "f16", 1),
@@ -4241,6 +4257,13 @@ def _v_cvt_f32_packed8_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
         _v_cvt_f32_packed8_overlay("bf8"),
         _v_cvt_pk_f32_packed8_overlay("fp8"),
         _v_cvt_pk_f32_packed8_overlay("bf8"),
+    )
+
+
+def _v_cvt_pk_f16_packed8_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
+    return (
+        _v_cvt_pk_f16_packed8_overlay("fp8"),
+        _v_cvt_pk_f16_packed8_overlay("bf8"),
     )
 
 
@@ -5072,6 +5095,7 @@ __all__ = (
     "_v_cvt_f32_u32_overlay",
     "_v_cvt_i32_f32_overlay",
     "_v_cvt_pk_bf16_f32_overlay",
+    "_v_cvt_pk_f16_packed8_overlays",
     "_v_cvt_pk_u16_u32_overlay",
     "_v_cvt_scalef32_pk_packed8_overlays",
     "_v_cvt_u32_f32_overlay",

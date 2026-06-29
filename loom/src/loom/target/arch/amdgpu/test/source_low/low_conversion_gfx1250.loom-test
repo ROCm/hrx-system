@@ -1,7 +1,9 @@
-// RUN: emit amdgpu-assembly @gfx1250_native_packed_bf16_ops
+// RUN: emit amdgpu-assembly @gfx1250_native_packed_float_ops
 
 amdgpu.target<gfx1250> @target
-low.func.def target(@target) @gfx1250_native_packed_bf16_ops(%low: reg<amdgpu.vgpr>, %high: reg<amdgpu.vgpr>, %scale: reg<amdgpu.vgpr>) asm<amdgpu.rdna4.gfx125x.core> {
+low.func.def target(@target) @gfx1250_native_packed_float_ops(%low: reg<amdgpu.vgpr>, %high: reg<amdgpu.vgpr>, %scale: reg<amdgpu.vgpr>) asm<amdgpu.rdna4.gfx125x.core> {
+  %f16_fp8 = v_cvt_pk_f16_fp8 %low
+  %f16_bf8 = v_cvt_pk_f16_bf8 %high
   %packed = v_cvt_pk_bf16_f32 %low, %high
   %sum = v_pk_add_bf16 %packed, %scale
   %product = v_pk_mul_bf16 %sum, %scale
@@ -10,8 +12,10 @@ low.func.def target(@target) @gfx1250_native_packed_bf16_ops(%low: reg<amdgpu.vg
 }
 
 // ----
+  v_cvt_pk_f16_fp8 v3, v0
   v_cvt_pk_bf16_f32 v0, v0, v1
-  s_delay_alu instid0(VALU_DEP_1)
+  v_cvt_pk_f16_bf8 v1, v1
+  s_delay_alu instid0(VALU_DEP_2)
   v_pk_add_bf16 v1, v0, v2
   s_delay_alu instid0(VALU_DEP_1)
   v_pk_mul_bf16 v1, v1, v2
