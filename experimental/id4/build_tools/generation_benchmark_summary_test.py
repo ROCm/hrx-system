@@ -24,7 +24,7 @@ TEST_BENCHMARK_LABEL = (
     "dit_fp8_source_cache_miss=direct_on_pressure "
     "dit_fp8_source_cache_budget=8192MiB "
     "dit_fp8_source_cache[entries=622,cached=8192MiB,peak=8192MiB,"
-    "fills=622,reuse=622,direct=440,evicted=0] "
+    "fills=0,reuse=622,direct=220,evicted=0] "
     "params=fp8_e4m3 activation=bf16_linear_input weights=bf16_resident "
     "attention=online_wmma ff=fused_product param_total=49460MiB "
     "param_largest=17699MiB param_source=32015MiB "
@@ -348,7 +348,9 @@ class GenerationBenchmarkSummaryTest(unittest.TestCase):
                 row["dit_fp8_source_cache_miss_mode"], "direct_on_pressure"
             )
             self.assertEqual(row["dit_fp8_source_cache_budget_mib"], 8192)
-            self.assertEqual(row["dit_fp8_source_cache_direct_miss_count"], 440)
+            self.assertEqual(row["dit_fp8_source_cache_fill_count"], 0)
+            self.assertEqual(row["dit_fp8_source_cache_reuse_count"], 622)
+            self.assertEqual(row["dit_fp8_source_cache_direct_miss_count"], 220)
             self.assertEqual(row["runtime_parameter_total_mib"], 49460)
             self.assertEqual(row["runtime_parameter_source_encoded_mib"], 27848)
             self.assertEqual(row["runtime_parameter_gather_load_step_count"], 322)

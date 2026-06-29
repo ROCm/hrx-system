@@ -754,6 +754,39 @@ static iree_status_t AccumulateGenerationBenchmarkSourceCacheStatistics(
       out_statistics);
 }
 
+static iree_status_t SubtractSourceCacheCounter(iree_host_size_t current,
+                                                iree_host_size_t baseline,
+                                                iree_string_view_t counter_name,
+                                                iree_host_size_t* out_delta) {
+  if (current < baseline) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "source cache counter %.*s decreased from %" PRIhsz " to %" PRIhsz,
+        (int)counter_name.size, counter_name.data, baseline, current);
+  }
+  *out_delta = current - baseline;
+  return iree_ok_status();
+}
+
+static iree_status_t CalculateSourceCacheIntervalStatistics(
+    const GenerationBenchmarkSourceCacheStatistics& baseline,
+    const GenerationBenchmarkSourceCacheStatistics& current,
+    GenerationBenchmarkSourceCacheStatistics* out_interval) {
+  *out_interval = current;
+  IREE_RETURN_IF_ERROR(SubtractSourceCacheCounter(
+      current.source_gather_count, baseline.source_gather_count,
+      IREE_SV("source_gather_count"), &out_interval->source_gather_count));
+  IREE_RETURN_IF_ERROR(SubtractSourceCacheCounter(
+      current.cache_reuse_count, baseline.cache_reuse_count,
+      IREE_SV("cache_reuse_count"), &out_interval->cache_reuse_count));
+  IREE_RETURN_IF_ERROR(SubtractSourceCacheCounter(
+      current.direct_miss_count, baseline.direct_miss_count,
+      IREE_SV("direct_miss_count"), &out_interval->direct_miss_count));
+  return SubtractSourceCacheCounter(
+      current.evicted_entry_count, baseline.evicted_entry_count,
+      IREE_SV("evicted_entry_count"), &out_interval->evicted_entry_count);
+}
+
 static iree_status_t AccumulateGenerationBenchmarkPlanStatistics(
     const id4_ideogram4_generation_plan_t* plan,
     GenerationBenchmarkPlanStatistics* out_statistics) {
@@ -1645,6 +1678,7 @@ static iree_status_t SetGenerationBenchmarkLabel(
     const id4_ideogram4_generation_plan_summary_t& summary,
     const GenerationBenchmarkPlanStatistics& statistics,
     const id4_ideogram4_generation_resource_statistics_t& resource_statistics,
+    const GenerationBenchmarkSourceCacheStatistics& source_cache_statistics,
     const GenerationBenchmarkTimingStatistics& timing,
     uint64_t iteration_count) {
   const iree_string_view_t parameter_format =
@@ -1664,9 +1698,6 @@ static iree_status_t SetGenerationBenchmarkLabel(
       GenerationIssueModeName(context.generation_issue_mode);
   const iree_string_view_t source_cache_miss_mode =
       SourceCacheMissModeName(context.dit_fp8_source_cache_miss_mode);
-  GenerationBenchmarkSourceCacheStatistics source_cache_statistics;
-  IREE_RETURN_IF_ERROR(AccumulateGenerationBenchmarkSourceCacheStatistics(
-      context, &source_cache_statistics));
   const bool stage_serial_issue =
       context.generation_issue_mode == GenerationIssueMode::kStageSerial;
   const iree_device_size_t selected_logical_peak_byte_length =
@@ -1831,6 +1862,11 @@ static iree_status_t RunGenerationEndToEndBenchmark(
         context.runtime_context.device_group, iree_allocator_system(),
         &profiling);
   }
+  GenerationBenchmarkSourceCacheStatistics source_cache_baseline;
+  if (iree_status_is_ok(status)) {
+    status = AccumulateGenerationBenchmarkSourceCacheStatistics(
+        context, &source_cache_baseline);
+  }
   while (iree_status_is_ok(status) &&
          iree_benchmark_keep_running(benchmark_state, 1)) {
     GenerationBenchmarkTimingStatistics iteration_timing;
@@ -1934,10 +1970,16 @@ static iree_status_t RunGenerationEndToEndBenchmark(
         iree_status_join(status, iree_hal_end_profiling_from_flags(profiling));
   }
   IREE_RETURN_IF_ERROR(status);
+  GenerationBenchmarkSourceCacheStatistics source_cache_current;
+  IREE_RETURN_IF_ERROR(AccumulateGenerationBenchmarkSourceCacheStatistics(
+      context, &source_cache_current));
+  GenerationBenchmarkSourceCacheStatistics source_cache_interval;
+  IREE_RETURN_IF_ERROR(CalculateSourceCacheIntervalStatistics(
+      source_cache_baseline, source_cache_current, &source_cache_interval));
   IREE_RETURN_IF_ERROR(SetGenerationBenchmarkLabel(
       benchmark_state, context, IREE_SV("end_to_end"), prompt->label,
-      last_summary, last_statistics, last_resource_statistics, timing_total,
-      iteration_count));
+      last_summary, last_statistics, last_resource_statistics,
+      source_cache_interval, timing_total, iteration_count));
   iree_benchmark_set_items_processed(
       benchmark_state, static_cast<int64_t>(iteration_count * token_count));
   return iree_ok_status();
@@ -2022,6 +2064,11 @@ static iree_status_t RunGenerationIssuePreparedBenchmark(
       context, bundle.get(), request, &diagnostics_sink,
       prepare_semaphore.get(), &prepare_value, completion_semaphore.get(),
       &completion_value);
+  GenerationBenchmarkSourceCacheStatistics source_cache_baseline;
+  if (iree_status_is_ok(status)) {
+    status = AccumulateGenerationBenchmarkSourceCacheStatistics(
+        context, &source_cache_baseline);
+  }
   if (iree_status_is_ok(status) && !capture_execution_profile) {
     status = iree_hal_begin_device_group_profiling_from_flags(
         context.runtime_context.device_group, iree_allocator_system(),
@@ -2076,9 +2123,16 @@ static iree_status_t RunGenerationIssuePreparedBenchmark(
         iree_status_join(status, iree_hal_end_profiling_from_flags(profiling));
   }
   IREE_RETURN_IF_ERROR(status);
+  GenerationBenchmarkSourceCacheStatistics source_cache_current;
+  IREE_RETURN_IF_ERROR(AccumulateGenerationBenchmarkSourceCacheStatistics(
+      context, &source_cache_current));
+  GenerationBenchmarkSourceCacheStatistics source_cache_interval;
+  IREE_RETURN_IF_ERROR(CalculateSourceCacheIntervalStatistics(
+      source_cache_baseline, source_cache_current, &source_cache_interval));
   IREE_RETURN_IF_ERROR(SetGenerationBenchmarkLabel(
       benchmark_state, context, IREE_SV("prepared_issue"), prompt->label,
-      summary, statistics, resource_statistics, timing_total, iteration_count));
+      summary, statistics, resource_statistics, source_cache_interval,
+      timing_total, iteration_count));
   iree_benchmark_set_items_processed(
       benchmark_state,
       static_cast<int64_t>(iteration_count * summary.qwen_token_count));
