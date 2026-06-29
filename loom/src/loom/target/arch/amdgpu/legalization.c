@@ -1378,9 +1378,10 @@ static iree_status_t loom_amdgpu_fragment_store_plan_can_join_group(
   }
   bool selected = false;
   IREE_RETURN_IF_ERROR(loom_amdgpu_analyze_vector_fragment_memory_plan(
-      context->module, context->fact_table, context->bundle,
-      context->descriptor_set, context->target_ref, context->function, op,
-      LOOM_AMDGPU_MEMORY_OPERATION_STORE, out_plan, &selected));
+      context->module, context->fact_table, context->view_regions,
+      context->bundle, context->descriptor_set, context->target_ref,
+      context->function, op, LOOM_AMDGPU_MEMORY_OPERATION_STORE, out_plan,
+      &selected));
   if (!selected ||
       !loom_amdgpu_fragment_epilogue_plan_needs_physical_loop(out_plan) ||
       out_plan->view_rank != 2 || out_plan->layout_kind != layout_kind ||
@@ -1549,9 +1550,10 @@ static iree_status_t loom_amdgpu_legalize_result_fragment_store_epilogue_loop(
   loom_amdgpu_fragment_memory_plan_t plan = {0};
   bool selected = false;
   IREE_RETURN_IF_ERROR(loom_amdgpu_analyze_vector_fragment_memory_plan(
-      context->module, context->fact_table, context->bundle,
-      context->descriptor_set, context->target_ref, context->function, op,
-      LOOM_AMDGPU_MEMORY_OPERATION_STORE, &plan, &selected));
+      context->module, context->fact_table, context->view_regions,
+      context->bundle, context->descriptor_set, context->target_ref,
+      context->function, op, LOOM_AMDGPU_MEMORY_OPERATION_STORE, &plan,
+      &selected));
   if (!selected ||
       !loom_amdgpu_fragment_epilogue_plan_needs_physical_loop(&plan) ||
       plan.view_rank != 2) {

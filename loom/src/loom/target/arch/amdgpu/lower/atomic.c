@@ -1424,7 +1424,8 @@ iree_status_t loom_amdgpu_lower_atomic(loom_low_lower_context_t* context,
                                        const loom_amdgpu_atomic_plan_t* plan) {
   loom_value_id_t low_resource = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_low_lower_lookup_value(
-      context, plan->source.view_value_id, &low_resource));
+      context, loom_low_source_memory_access_base_view_value_id(&plan->source),
+      &low_resource));
 
   loom_amdgpu_memory_access_t access = {
       .source = plan->source,

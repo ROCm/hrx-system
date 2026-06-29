@@ -681,9 +681,14 @@ static bool loom_amdgpu_source_access_view_range_facts(
     return false;
   }
 
-  *out_static_base = has_dynamic_view_base
-                         ? source_access->static_view_base_byte_offset
-                         : static_base;
+  if (has_dynamic_view_base) {
+    *out_static_base =
+        source_access->dynamic_view_base_value_id != LOOM_VALUE_ID_INVALID
+            ? 0
+            : source_access->static_view_base_byte_offset;
+  } else {
+    *out_static_base = static_base;
+  }
   *out_range_facts = range_facts;
   return true;
 }
@@ -748,6 +753,23 @@ loom_amdgpu_source_access_dynamic_view_base_term_can_emit_u32(
   return iree_ok_status();
 }
 
+static iree_status_t
+loom_amdgpu_source_access_dynamic_view_base_value_can_emit_u32(
+    loom_low_lower_context_t* context,
+    const loom_low_source_memory_access_plan_t* source_access,
+    bool* out_can_emit) {
+  *out_can_emit = false;
+  if (source_access->dynamic_view_base_value_id == LOOM_VALUE_ID_INVALID) {
+    return iree_ok_status();
+  }
+
+  loom_value_id_t low_base = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_low_lower_lookup_value(
+      context, source_access->dynamic_view_base_value_id, &low_base));
+  return loom_amdgpu_low_value_is_register_class_count(
+      context, low_base, LOOM_AMDGPU_REG_CLASS_ID_SGPR, 1, out_can_emit);
+}
+
 static iree_status_t loom_amdgpu_source_access_dynamic_view_base_can_emit_u32(
     loom_low_lower_context_t* context,
     const loom_low_source_memory_access_plan_t* source_access,
@@ -759,6 +781,12 @@ static iree_status_t loom_amdgpu_source_access_dynamic_view_base_can_emit_u32(
   }
   IREE_ASSERT_LE(source_access->dynamic_view_base_term_count,
                  source_access->dynamic_term_count);
+  IREE_RETURN_IF_ERROR(
+      loom_amdgpu_source_access_dynamic_view_base_value_can_emit_u32(
+          context, source_access, out_can_emit));
+  if (*out_can_emit) {
+    return iree_ok_status();
+  }
 
   for (uint8_t i = 0; i < source_access->dynamic_view_base_term_count; ++i) {
     bool can_emit = false;
@@ -786,6 +814,17 @@ static iree_status_t loom_amdgpu_emit_source_access_dynamic_view_base_u32(
   IREE_RETURN_IF_ERROR(loom_amdgpu_source_access_dynamic_view_base_can_emit_u32(
       context, source_access, &can_emit));
   if (!can_emit) {
+    return iree_ok_status();
+  }
+
+  bool value_can_emit = false;
+  IREE_RETURN_IF_ERROR(
+      loom_amdgpu_source_access_dynamic_view_base_value_can_emit_u32(
+          context, source_access, &value_can_emit));
+  if (value_can_emit) {
+    IREE_RETURN_IF_ERROR(loom_low_lower_lookup_value(
+        context, source_access->dynamic_view_base_value_id, out_low_base));
+    *out_emitted = true;
     return iree_ok_status();
   }
 

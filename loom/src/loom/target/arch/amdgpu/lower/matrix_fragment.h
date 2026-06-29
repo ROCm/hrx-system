@@ -17,10 +17,13 @@
 extern "C" {
 #endif
 
+typedef struct loom_view_region_table_t loom_view_region_table_t;
+
 // Selects the AMDGPU matrix-fragment memory plan for a source op without
 // requiring a low-lowering context.
 iree_status_t loom_amdgpu_analyze_vector_fragment_memory_plan(
     const loom_module_t* module, const loom_value_fact_table_t* fact_table,
+    const loom_view_region_table_t* view_regions,
     const loom_target_bundle_t* bundle,
     const loom_low_descriptor_set_t* descriptor_set,
     loom_symbol_ref_t target_ref, loom_func_like_t source_function,

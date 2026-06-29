@@ -371,6 +371,7 @@ iree_status_t loom_low_lower_query_target_contract(
       .can_materialize = options->can_materialize,
       .descriptor_ref = options->descriptor_ref,
       .fact_table = environment->fact_table,
+      .view_regions = environment->view_regions,
       .symbolic_expr_context = expression_context_ptr,
       .flags = LOOM_LOW_LOWER_RULE_MATCH_FLAG_CONTRACT_ONLY,
   };
