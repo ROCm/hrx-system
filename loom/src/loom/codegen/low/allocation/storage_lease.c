@@ -439,15 +439,83 @@ static bool loom_low_allocation_storage_release_policy_allows_record(
 static bool loom_low_allocation_storage_lease_scan_conflicts(
     const loom_low_allocation_storage_lease_state_t* state,
     const loom_low_descriptor_set_t* descriptor_set,
-    const loom_low_allocation_assignment_t* candidate) {
+    const loom_liveness_analysis_t* liveness,
+    const loom_low_allocation_assignment_t* candidate,
+    const loom_value_id_t* ignored_value_ids, uint16_t ignored_value_count,
+    loom_low_allocation_storage_release_policy_t policy) {
   const iree_host_size_t record_count = state->lease_table->record_count;
   for (iree_host_size_t i = 0; i < record_count; ++i) {
     if (state->instance_written[i] == 0) {
       continue;
     }
+    const loom_low_allocation_storage_lease_t* lease = &state->instances[i];
+    if (loom_low_allocation_storage_lease_value_is_ignored(
+            lease, ignored_value_ids, ignored_value_count)) {
+      continue;
+    }
     if (loom_low_allocation_storage_lease_instance_conflicts(
-            descriptor_set, &state->instances[i], candidate)) {
+            descriptor_set, lease, candidate)) {
+      const loom_low_storage_lease_record_t* record =
+          &state->lease_table->records[i];
+      if (policy != LOOM_LOW_ALLOCATION_STORAGE_RELEASE_FORBIDDEN &&
+          loom_low_allocation_storage_release_policy_allows_record(policy,
+                                                                   record) &&
+          loom_low_allocation_storage_lease_can_release_before(
+              state, liveness, lease, candidate)) {
+        continue;
+      }
       return true;
+    }
+  }
+  return false;
+}
+
+static bool loom_low_allocation_storage_lease_index_conflicts(
+    const loom_low_allocation_storage_lease_state_t* state,
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_liveness_analysis_t* liveness,
+    const loom_low_allocation_assignment_t* candidate,
+    const loom_value_id_t* ignored_value_ids, uint16_t ignored_value_count,
+    loom_low_allocation_storage_release_policy_t policy) {
+  const uint32_t storage_key = loom_low_reg_class_storage_key(
+      descriptor_set, candidate->descriptor_reg_class_id);
+  for (uint32_t unit_offset = 0; unit_offset < candidate->location_count;
+       ++unit_offset) {
+    if (candidate->location_base > UINT32_MAX - unit_offset) {
+      break;
+    }
+    const uint32_t location = candidate->location_base + unit_offset;
+    const uint32_t bucket_index =
+        loom_low_allocation_storage_lease_unit_bucket_index(
+            &state->units, candidate->location_kind, storage_key, location);
+    uint32_t entry_index = state->units.bucket_heads[bucket_index];
+    while (entry_index != UINT32_MAX) {
+      const loom_low_allocation_storage_lease_unit_entry_t* entry =
+          &state->units.entries[entry_index];
+      const loom_low_allocation_storage_lease_t* lease =
+          &state->instances[entry->storage_lease_index];
+      if (loom_low_allocation_storage_lease_value_is_ignored(
+              lease, ignored_value_ids, ignored_value_count)) {
+        entry_index = entry->next_entry;
+        continue;
+      }
+      if (entry->location_kind == candidate->location_kind &&
+          entry->storage_key == storage_key && entry->location == location &&
+          loom_low_allocation_storage_lease_instance_conflicts(
+              descriptor_set, lease, candidate)) {
+        const loom_low_storage_lease_record_t* record =
+            &state->lease_table->records[entry->storage_lease_index];
+        if (policy != LOOM_LOW_ALLOCATION_STORAGE_RELEASE_FORBIDDEN &&
+            loom_low_allocation_storage_release_policy_allows_record(policy,
+                                                                     record) &&
+            loom_low_allocation_storage_lease_can_release_before(
+                state, liveness, lease, candidate)) {
+          entry_index = entry->next_entry;
+          continue;
+        }
+        return true;
+      }
+      entry_index = entry->next_entry;
     }
   }
   return false;
@@ -551,76 +619,18 @@ bool loom_low_allocation_storage_lease_state_conflicts(
   if (state->lease_table == NULL || state->lease_table->record_count == 0) {
     return false;
   }
-  if (policy != LOOM_LOW_ALLOCATION_STORAGE_RELEASE_FORBIDDEN) {
-    const iree_host_size_t record_count = state->lease_table->record_count;
-    for (iree_host_size_t i = 0; i < record_count; ++i) {
-      if (state->instance_written[i] == 0) {
-        continue;
-      }
-      const loom_low_allocation_storage_lease_t* lease = &state->instances[i];
-      if (loom_low_allocation_storage_lease_value_is_ignored(
-              lease, ignored_value_ids, ignored_value_count)) {
-        continue;
-      }
-      if (!loom_low_allocation_storage_lease_instance_conflicts(
-              descriptor_set, lease, candidate)) {
-        continue;
-      }
-      const loom_low_storage_lease_record_t* record =
-          &state->lease_table->records[i];
-      if (!loom_low_allocation_storage_release_policy_allows_record(policy,
-                                                                    record)) {
-        return true;
-      }
-      if (!loom_low_allocation_storage_lease_can_release_before(
-              state, liveness, lease, candidate)) {
-        return true;
-      }
-    }
-    return false;
-  }
   if (!loom_low_allocation_location_kind_is_register_like(
           candidate->location_kind)) {
     return false;
   }
   if (!loom_low_allocation_storage_lease_unit_index_is_enabled(&state->units)) {
     return loom_low_allocation_storage_lease_scan_conflicts(
-        state, descriptor_set, candidate);
+        state, descriptor_set, liveness, candidate, ignored_value_ids,
+        ignored_value_count, policy);
   }
-  const uint32_t storage_key = loom_low_reg_class_storage_key(
-      descriptor_set, candidate->descriptor_reg_class_id);
-  for (uint32_t unit_offset = 0; unit_offset < candidate->location_count;
-       ++unit_offset) {
-    if (candidate->location_base > UINT32_MAX - unit_offset) {
-      break;
-    }
-    const uint32_t location = candidate->location_base + unit_offset;
-    const uint32_t bucket_index =
-        loom_low_allocation_storage_lease_unit_bucket_index(
-            &state->units, candidate->location_kind, storage_key, location);
-    uint32_t entry_index = state->units.bucket_heads[bucket_index];
-    while (entry_index != UINT32_MAX) {
-      const loom_low_allocation_storage_lease_unit_entry_t* entry =
-          &state->units.entries[entry_index];
-      const loom_low_allocation_storage_lease_t* lease =
-          &state->instances[entry->storage_lease_index];
-      if (loom_low_allocation_storage_lease_value_is_ignored(
-              lease, ignored_value_ids, ignored_value_count)) {
-        entry_index = entry->next_entry;
-        continue;
-      }
-      if (entry->location_kind == candidate->location_kind &&
-          entry->storage_key == storage_key && entry->location == location &&
-          lease->release_action_index ==
-              LOOM_LOW_STORAGE_RELEASE_ACTION_INDEX_NONE &&
-          lease->end_point > candidate->start_point &&
-          lease->start_point < candidate->end_point) {
-        return true;
-      }
-      entry_index = entry->next_entry;
-    }
-  }
-  return false;
+  return loom_low_allocation_storage_lease_index_conflicts(
+      state, descriptor_set, liveness, candidate, ignored_value_ids,
+      ignored_value_count, policy);
 }
 
 bool loom_low_allocation_storage_lease_state_value_has_records(
