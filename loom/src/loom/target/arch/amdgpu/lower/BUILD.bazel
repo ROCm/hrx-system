@@ -103,6 +103,13 @@ loom_generated_textual_header(
     output_flag = "--fp8-to-f32-descriptor-ref-rows",
 )
 
+loom_generated_textual_header(
+    name = "fp8_scalef32_descriptor_ref_rows_gen",
+    generator = _AMDGPU_NARROW_FLOAT_TABLE_GENERATOR,
+    output = "fp8_scalef32_descriptor_ref_rows.inl",
+    output_flag = "--fp8-scalef32-descriptor-ref-rows",
+)
+
 loom_cc_library(
     name = "lower",
     srcs = [
@@ -200,6 +207,7 @@ loom_cc_library(
     ],
     textual_hdrs = [
         ":fp8_decode_plan_descriptor_rows.inl",
+        ":fp8_scalef32_descriptor_ref_rows.inl",
         ":fp8_to_f32_descriptor_ref_rows.inl",
         ":memory_cache_policy_encoding_rows.inl",
         ":memory_cache_policy_temporal_th.inl",

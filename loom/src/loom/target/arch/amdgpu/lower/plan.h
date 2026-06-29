@@ -70,6 +70,8 @@ typedef struct loom_amdgpu_vector_16bit_float_conversion_plan_t {
   loom_value_id_t storage_source;
   // Value carrying logical lane content facts for FP8 simplification.
   loom_value_id_t content_fact_source;
+  // Optional F32 scale vector for scaled vector.decode operations.
+  loom_value_id_t scale_source;
   // Conversion operation selected for the source/result type pair.
   loom_amdgpu_vector_16bit_float_conversion_kind_t kind;
   // Source scalar element type.

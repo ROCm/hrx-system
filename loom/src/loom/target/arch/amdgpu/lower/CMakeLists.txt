@@ -113,6 +113,19 @@ loom_generated_textual_header(
 endif()
 
 if(LOOM_TARGET_ARCH_AMDGPU)
+loom_generated_textual_header(
+  NAME
+    fp8_scalef32_descriptor_ref_rows_gen
+  GENERATOR
+    loom::py::loom::gen::target::arch::amdgpu::lower::narrow_float_tables
+  OUTPUT
+    "fp8_scalef32_descriptor_ref_rows.inl"
+  OUTPUT_FLAG
+    "--fp8-scalef32-descriptor-ref-rows"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU)
 loom_cc_library(
   NAME
     lower
@@ -160,6 +173,7 @@ loom_cc_library(
     "workgroup.h"
   TEXTUAL_HDRS
     "fp8_decode_plan_descriptor_rows.inl"
+    "fp8_scalef32_descriptor_ref_rows.inl"
     "fp8_to_f32_descriptor_ref_rows.inl"
     "memory_cache_policy_encoding_rows.inl"
     "memory_cache_policy_temporal_th.inl"
