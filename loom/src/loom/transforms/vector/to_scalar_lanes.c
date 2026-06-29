@@ -6,6 +6,7 @@
 
 #include "loom/transforms/vector/to_scalar_lanes.h"
 
+#include "loom/analysis/contract.h"
 #include "loom/ir/module.h"
 #include "loom/ir/scalar_type.h"
 #include "loom/ops/index/ops.h"
@@ -14,6 +15,7 @@
 #include "loom/ops/scalar/ops.h"
 #include "loom/ops/scf/ops.h"
 #include "loom/ops/vector/ops.h"
+#include "loom/transforms/vector/to_scalar_encoding.h"
 #include "loom/transforms/vector/to_scalar_memory.h"
 #include "loom/transforms/vector/to_scalar_mma.h"
 #include "loom/transforms/vector/to_scalar_quantized.h"
@@ -713,6 +715,7 @@ static const loom_vector_to_scalar_lane_lowerer_t
         loom_vector_to_scalar_build_bitunpacks_lane,
         loom_vector_to_scalar_build_table_lookup_lane,
         loom_vector_to_scalar_build_table_quantize_lane,
+        loom_vector_to_scalar_build_decode_lane,
         loom_vector_to_scalar_build_transform_lane,
         loom_vector_to_scalar_build_load_lane,
         loom_vector_to_scalar_build_masked_load_lane,
@@ -913,6 +916,11 @@ iree_status_t loom_vector_to_scalar_try_materialize_def_lane(
       .matrix_fragment_layout = state->matrix_fragment_layout,
       .location = def_op->location,
   };
+  if (descriptor->lane_kind == LOOM_VECTOR_TO_SCALAR_LANE_DECODE &&
+      loom_vector_to_scalar_decode_rejection_bits(&def_state) !=
+          LOOM_CONTRACT_REJECTION_NONE) {
+    return iree_ok_status();
+  }
   IREE_RETURN_IF_ERROR(
       loom_vector_to_scalar_build_lane(&def_state, indices, out_lane));
   *out_materialized = true;
