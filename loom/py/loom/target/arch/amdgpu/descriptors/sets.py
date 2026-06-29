@@ -1735,6 +1735,7 @@ def _gfx1250_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
     return (
         *_rdna4_core_overlays(),
         _v_cvt_pk_bf16_f32_overlay(),
+        _v_pk_add_bf16_overlay(),
         _v_pk_mul_bf16_overlay(),
         _v_pk_fma_bf16_overlay(),
     )
@@ -1815,6 +1816,16 @@ _GFX1250_SUPPLEMENTAL_INSTRUCTIONS = (
             _gfx1250_supplemental_vop3_result("FMT_NUM_PK2_BF16"),
             _gfx1250_supplemental_vop3_source(2, "SRC0", "FMT_NUM_F32"),
             _gfx1250_supplemental_vop3_source(3, "SRC1", "FMT_NUM_F32"),
+        ),
+    ),
+    _gfx1250_supplemental_instruction(
+        name="V_PK_ADD_BF16",
+        encoding_name="ENC_VOP3P",
+        opcode=0x23,
+        operands=(
+            _gfx1250_supplemental_vop3_result("FMT_NUM_PK2_BF16"),
+            _gfx1250_supplemental_vop3_source(2, "SRC0", "FMT_NUM_PK2_BF16"),
+            _gfx1250_supplemental_vop3_source(3, "SRC1", "FMT_NUM_PK2_BF16"),
         ),
     ),
     _gfx1250_supplemental_instruction(

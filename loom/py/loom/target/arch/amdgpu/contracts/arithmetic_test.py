@@ -172,6 +172,11 @@ def test_packed_i16_arithmetic_rules_try_native_pk_ops_before_word_ops() -> None
 def test_packed_bf16_arithmetic_rules_publish_native_pk_ops() -> None:
     compiled = _compiled_arithmetic_rules()
 
+    add_positions = _descriptor_sequence_positions(compiled, vector.vector_addf)
+    assert (
+        add_positions[("amdgpu.v_pk_add_bf16",)] < add_positions[("amdgpu.v_add_f32",)]
+    )
+
     mul_positions = _descriptor_sequence_positions(compiled, vector.vector_mulf)
     assert (
         mul_positions[("amdgpu.v_pk_mul_bf16",)] < mul_positions[("amdgpu.v_mul_f32",)]

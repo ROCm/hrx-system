@@ -646,6 +646,40 @@ low.func.def target(@target) abi(hal_kernel) @vector_bf16_add_widen_round(%lhs: 
 
 // ====
 
+amdgpu.target<gfx1250> @target
+func.def target(@target) @vector_bf16_add_native_pack_gfx1250(%lhs: vector<2xbf16>, %rhs: vector<2xbf16>) -> (vector<2xbf16>) {
+  %result = vector.addf %lhs, %rhs : vector<2xbf16>
+  func.return %result : vector<2xbf16>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @vector_bf16_add_native_pack_gfx1250(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna4.gfx125x.core> {
+  %result = v_pk_add_bf16 %lhs, %rhs
+  return %result
+}
+
+// ====
+
+amdgpu.target<gfx1250> @target
+func.def target(@target) @vector_bf16_add_wide_native_pack_gfx1250(%lhs: vector<4xbf16>, %rhs: vector<4xbf16>) -> (vector<4xbf16>) {
+  %result = vector.addf %lhs, %rhs : vector<4xbf16>
+  func.return %result : vector<4xbf16>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @vector_bf16_add_wide_native_pack_gfx1250(%lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm<amdgpu.rdna4.gfx125x.core> {
+  %14 = slice %lhs[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %15 = slice %rhs[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %16 = v_pk_add_bf16 %14, %15
+  %17 = slice %lhs[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %18 = slice %rhs[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %19 = v_pk_add_bf16 %17, %18
+  %result = concat(%16, %19) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  return %result
+}
+
+// ====
+
 amdgpu.target<gfx1100> @target
 func.def target(@target) @vector_bf16_mul_widen_round(%lhs: vector<3xbf16>, %rhs: vector<3xbf16>) -> (vector<3xbf16>) {
   %result = vector.mulf %lhs, %rhs : vector<3xbf16>

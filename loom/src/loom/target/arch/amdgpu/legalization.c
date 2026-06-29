@@ -411,6 +411,10 @@ typedef struct loom_amdgpu_packed_bf16_arithmetic_rule_t {
 static const loom_amdgpu_packed_bf16_arithmetic_rule_t
     kLoomAmdgpuPackedBf16ArithmeticRules[] = {
         {
+            .op_kind = LOOM_OP_VECTOR_ADDF,
+            .descriptor_key = IREE_SVL("amdgpu.v_pk_add_bf16"),
+        },
+        {
             .op_kind = LOOM_OP_VECTOR_MULF,
             .descriptor_key = IREE_SVL("amdgpu.v_pk_mul_bf16"),
         },
@@ -1686,6 +1690,10 @@ static const loom_target_legalizer_entry_t kAmdgpuLegalizerEntries[] = {
     {
         .root_kind = LOOM_OP_VECTOR_REDUCE,
         .legalize = loom_amdgpu_legalize_oversized_vector_reduce,
+    },
+    {
+        .root_kind = LOOM_OP_VECTOR_ADDF,
+        .legalize = loom_amdgpu_legalize_packed_bf16_vector_arithmetic,
     },
     {
         .root_kind = LOOM_OP_VECTOR_MULF,
