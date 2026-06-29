@@ -251,6 +251,7 @@ static iree_hal_buffer_params_t MakeTransferBufferParams() {
 
 static iree_status_t CreateParameterCacheProvider(
     CountingSourceProvider* source, iree_device_size_t maximum_cached_bytes,
+    id4_pipeline_parameter_cache_miss_mode_t miss_mode,
     ParameterProviderRef* out_cache_provider) {
   id4_pipeline_parameter_cache_provider_options_t options = {};
   options.structure_size = sizeof(options);
@@ -260,6 +261,7 @@ static iree_status_t CreateParameterCacheProvider(
   options.cache_params.usage = IREE_HAL_BUFFER_USAGE_TRANSFER;
   options.cache_params.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
   options.maximum_cached_byte_length = maximum_cached_bytes;
+  options.miss_mode = miss_mode;
   return id4_pipeline_parameter_cache_provider_create(
       &options, iree_allocator_system(), out_cache_provider->out());
 }
@@ -346,7 +348,7 @@ static void ExpectCacheStatistics(
     iree_device_size_t cached_byte_length,
     iree_device_size_t peak_cached_byte_length,
     iree_host_size_t source_gather_count, iree_host_size_t cache_reuse_count,
-    iree_host_size_t evicted_entry_count,
+    iree_host_size_t direct_miss_count, iree_host_size_t evicted_entry_count,
     iree_device_size_t maximum_cached_byte_length = 0) {
   id4_pipeline_parameter_cache_provider_statistics_t statistics = {};
   IREE_ASSERT_OK(id4_pipeline_parameter_cache_provider_query_statistics(
@@ -357,6 +359,7 @@ static void ExpectCacheStatistics(
   EXPECT_EQ(statistics.maximum_cached_byte_length, maximum_cached_byte_length);
   EXPECT_EQ(statistics.source_gather_count, source_gather_count);
   EXPECT_EQ(statistics.cache_reuse_count, cache_reuse_count);
+  EXPECT_EQ(statistics.direct_miss_count, direct_miss_count);
   EXPECT_EQ(statistics.evicted_entry_count, evicted_entry_count);
 }
 
@@ -377,12 +380,14 @@ TEST(ParameterCacheProviderTest, ReusesExactSourceSpanAcrossTargetOffsets) {
 
   ParameterProviderRef cache_provider;
   IREE_ASSERT_OK(CreateParameterCacheProvider(
-      source, /*maximum_cached_bytes=*/0, &cache_provider));
+      source, /*maximum_cached_bytes=*/0,
+      ID4_PIPELINE_PARAMETER_CACHE_MISS_MODE_RETAIN, &cache_provider));
   ExpectCacheStatistics(cache_provider.get(), /*entry_count=*/0,
                         /*cached_byte_length=*/0,
                         /*peak_cached_byte_length=*/0,
                         /*source_gather_count=*/0,
                         /*cache_reuse_count=*/0,
+                        /*direct_miss_count=*/0,
                         /*evicted_entry_count=*/0);
 
   HalBufferRef target_buffer;
@@ -399,6 +404,7 @@ TEST(ParameterCacheProviderTest, ReusesExactSourceSpanAcrossTargetOffsets) {
                         /*peak_cached_byte_length=*/8,
                         /*source_gather_count=*/1,
                         /*cache_reuse_count=*/0,
+                        /*direct_miss_count=*/0,
                         /*evicted_entry_count=*/0);
   uint8_t first_readback[8] = {};
   IREE_ASSERT_OK(iree_hal_buffer_map_read(target_buffer.get(),
@@ -416,6 +422,7 @@ TEST(ParameterCacheProviderTest, ReusesExactSourceSpanAcrossTargetOffsets) {
                         /*peak_cached_byte_length=*/8,
                         /*source_gather_count=*/1,
                         /*cache_reuse_count=*/1,
+                        /*direct_miss_count=*/0,
                         /*evicted_entry_count=*/0);
   uint8_t second_readback[8] = {};
   IREE_ASSERT_OK(iree_hal_buffer_map_read(target_buffer.get(),
@@ -434,6 +441,7 @@ TEST(ParameterCacheProviderTest, ReusesExactSourceSpanAcrossTargetOffsets) {
                         /*peak_cached_byte_length=*/16,
                         /*source_gather_count=*/2,
                         /*cache_reuse_count=*/1,
+                        /*direct_miss_count=*/0,
                         /*evicted_entry_count=*/0);
 
   IREE_ASSERT_OK(iree_io_parameter_provider_notify(
@@ -444,6 +452,7 @@ TEST(ParameterCacheProviderTest, ReusesExactSourceSpanAcrossTargetOffsets) {
                         /*peak_cached_byte_length=*/16,
                         /*source_gather_count=*/2,
                         /*cache_reuse_count=*/1,
+                        /*direct_miss_count=*/0,
                         /*evicted_entry_count=*/2);
   GatherAndWait(cache_provider.get(), device, target_buffer.get(),
                 MakeSpan(/*parameter_offset=*/4, /*buffer_offset=*/24,
@@ -454,6 +463,7 @@ TEST(ParameterCacheProviderTest, ReusesExactSourceSpanAcrossTargetOffsets) {
                         /*peak_cached_byte_length=*/16,
                         /*source_gather_count=*/3,
                         /*cache_reuse_count=*/1,
+                        /*direct_miss_count=*/0,
                         /*evicted_entry_count=*/2);
 }
 
@@ -474,12 +484,14 @@ TEST(ParameterCacheProviderTest, EvictsOldestEntriesToHonorBudget) {
 
   ParameterProviderRef cache_provider;
   IREE_ASSERT_OK(CreateParameterCacheProvider(
-      source, /*maximum_cached_bytes=*/12, &cache_provider));
+      source, /*maximum_cached_bytes=*/12,
+      ID4_PIPELINE_PARAMETER_CACHE_MISS_MODE_RETAIN, &cache_provider));
   ExpectCacheStatistics(cache_provider.get(), /*entry_count=*/0,
                         /*cached_byte_length=*/0,
                         /*peak_cached_byte_length=*/0,
                         /*source_gather_count=*/0,
                         /*cache_reuse_count=*/0,
+                        /*direct_miss_count=*/0,
                         /*evicted_entry_count=*/0,
                         /*maximum_cached_byte_length=*/12);
 
@@ -496,6 +508,7 @@ TEST(ParameterCacheProviderTest, EvictsOldestEntriesToHonorBudget) {
                         /*peak_cached_byte_length=*/8,
                         /*source_gather_count=*/1,
                         /*cache_reuse_count=*/0,
+                        /*direct_miss_count=*/0,
                         /*evicted_entry_count=*/0,
                         /*maximum_cached_byte_length=*/12);
 
@@ -507,6 +520,7 @@ TEST(ParameterCacheProviderTest, EvictsOldestEntriesToHonorBudget) {
                         /*peak_cached_byte_length=*/8,
                         /*source_gather_count=*/2,
                         /*cache_reuse_count=*/0,
+                        /*direct_miss_count=*/0,
                         /*evicted_entry_count=*/1,
                         /*maximum_cached_byte_length=*/12);
 
@@ -518,6 +532,7 @@ TEST(ParameterCacheProviderTest, EvictsOldestEntriesToHonorBudget) {
                         /*peak_cached_byte_length=*/8,
                         /*source_gather_count=*/3,
                         /*cache_reuse_count=*/0,
+                        /*direct_miss_count=*/0,
                         /*evicted_entry_count=*/2,
                         /*maximum_cached_byte_length=*/12);
   EXPECT_EQ(source->gather_count, 3u);
@@ -543,7 +558,8 @@ TEST(ParameterCacheProviderTest, RejectsSpanLargerThanBudget) {
 
   ParameterProviderRef cache_provider;
   IREE_ASSERT_OK(CreateParameterCacheProvider(
-      source, /*maximum_cached_bytes=*/4, &cache_provider));
+      source, /*maximum_cached_bytes=*/4,
+      ID4_PIPELINE_PARAMETER_CACHE_MISS_MODE_RETAIN, &cache_provider));
 
   HalBufferRef target_buffer;
   IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
@@ -561,8 +577,87 @@ TEST(ParameterCacheProviderTest, RejectsSpanLargerThanBudget) {
                         /*peak_cached_byte_length=*/0,
                         /*source_gather_count=*/0,
                         /*cache_reuse_count=*/0,
+                        /*direct_miss_count=*/0,
                         /*evicted_entry_count=*/0,
                         /*maximum_cached_byte_length=*/4);
+}
+
+TEST(ParameterCacheProviderTest, GathersDirectlyOnBudgetPressure) {
+  HalDeviceGroupRef device_group;
+  IREE_ASSERT_OK(CreateLocalSyncDeviceGroup(device_group.out()));
+  iree_hal_device_t* device =
+      iree_hal_device_group_device_at(device_group.get(), /*device_index=*/0);
+
+  uint8_t source_data[32] = {};
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(source_data); ++i) {
+    source_data[i] = static_cast<uint8_t>(i + 1);
+  }
+  CountingSourceProvider* source =
+      CreateCountingSourceProvider(source_data, sizeof(source_data));
+  ParameterProviderRef source_ref;
+  source_ref.reset(&source->base);
+
+  ParameterProviderRef cache_provider;
+  IREE_ASSERT_OK(CreateParameterCacheProvider(
+      source, /*maximum_cached_bytes=*/12,
+      ID4_PIPELINE_PARAMETER_CACHE_MISS_MODE_DIRECT_ON_PRESSURE,
+      &cache_provider));
+
+  HalBufferRef target_buffer;
+  IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
+      iree_hal_device_allocator(device), MakeTransferBufferParams(),
+      /*allocation_size=*/32, target_buffer.out()));
+
+  GatherAndWait(cache_provider.get(), device, target_buffer.get(),
+                MakeSpan(/*parameter_offset=*/0, /*buffer_offset=*/0,
+                         /*length=*/8));
+  ExpectCacheStatistics(cache_provider.get(), /*entry_count=*/1,
+                        /*cached_byte_length=*/8,
+                        /*peak_cached_byte_length=*/8,
+                        /*source_gather_count=*/1,
+                        /*cache_reuse_count=*/0,
+                        /*direct_miss_count=*/0,
+                        /*evicted_entry_count=*/0,
+                        /*maximum_cached_byte_length=*/12);
+
+  GatherAndWait(cache_provider.get(), device, target_buffer.get(),
+                MakeSpan(/*parameter_offset=*/8, /*buffer_offset=*/8,
+                         /*length=*/8));
+  ExpectCacheStatistics(cache_provider.get(), /*entry_count=*/1,
+                        /*cached_byte_length=*/8,
+                        /*peak_cached_byte_length=*/8,
+                        /*source_gather_count=*/1,
+                        /*cache_reuse_count=*/0,
+                        /*direct_miss_count=*/1,
+                        /*evicted_entry_count=*/0,
+                        /*maximum_cached_byte_length=*/12);
+
+  GatherAndWait(cache_provider.get(), device, target_buffer.get(),
+                MakeSpan(/*parameter_offset=*/0, /*buffer_offset=*/16,
+                         /*length=*/8));
+  ExpectCacheStatistics(cache_provider.get(), /*entry_count=*/1,
+                        /*cached_byte_length=*/8,
+                        /*peak_cached_byte_length=*/8,
+                        /*source_gather_count=*/1,
+                        /*cache_reuse_count=*/1,
+                        /*direct_miss_count=*/1,
+                        /*evicted_entry_count=*/0,
+                        /*maximum_cached_byte_length=*/12);
+  EXPECT_EQ(source->gather_count, 2u);
+
+  uint8_t direct_readback[8] = {};
+  IREE_ASSERT_OK(iree_hal_buffer_map_read(target_buffer.get(),
+                                          /*source_offset=*/8, direct_readback,
+                                          sizeof(direct_readback)));
+  EXPECT_EQ(
+      std::memcmp(direct_readback, source_data + 8, sizeof(direct_readback)),
+      0);
+  uint8_t cached_readback[8] = {};
+  IREE_ASSERT_OK(iree_hal_buffer_map_read(target_buffer.get(),
+                                          /*source_offset=*/16, cached_readback,
+                                          sizeof(cached_readback)));
+  EXPECT_EQ(std::memcmp(cached_readback, source_data, sizeof(cached_readback)),
+            0);
 }
 
 TEST(ParameterCacheProviderTest, RejectsMutableScatter) {
@@ -579,7 +674,8 @@ TEST(ParameterCacheProviderTest, RejectsMutableScatter) {
 
   ParameterProviderRef cache_provider;
   IREE_ASSERT_OK(CreateParameterCacheProvider(
-      source, /*maximum_cached_bytes=*/0, &cache_provider));
+      source, /*maximum_cached_bytes=*/0,
+      ID4_PIPELINE_PARAMETER_CACHE_MISS_MODE_RETAIN, &cache_provider));
 
   HalBufferRef source_buffer;
   IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(

@@ -63,6 +63,8 @@ IREE_FLAG(
 IREE_FLAG(int64_t, dit_fp8_source_cache_budget_mib, 0,
           "Maximum MiB cached by each DiT FP8 source-resident parameter "
           "provider, or zero for unbounded caching.");
+IREE_FLAG(string, dit_fp8_source_cache_miss_mode, "retain",
+          "DiT FP8 source cache miss mode: retain or direct_on_pressure.");
 
 namespace {
 
@@ -180,6 +182,8 @@ struct GenerationBenchmarkSourceCacheStatistics {
   iree_host_size_t source_gather_count;
   // Number of caller gather requests served from existing cache entries.
   iree_host_size_t cache_reuse_count;
+  // Number of caller gather requests served directly under budget pressure.
+  iree_host_size_t direct_miss_count;
   // Number of cache entries evicted by budget pressure or notifications.
   iree_host_size_t evicted_entry_count;
 };
@@ -308,6 +312,9 @@ struct LiveGenerationBenchmarkContext {
   DitFp8SourceResidency dit_fp8_source_residency = kDitFp8SourceResidencyNone;
   // Maximum bytes cached by each retained DiT FP8 source provider.
   iree_device_size_t dit_fp8_source_cache_budget_byte_length = 0;
+  // Miss mode used by retained DiT FP8 source providers.
+  id4_pipeline_parameter_cache_miss_mode_t dit_fp8_source_cache_miss_mode =
+      ID4_PIPELINE_PARAMETER_CACHE_MISS_MODE_INVALID;
   // Generation stage-bundle residency selected by benchmark flags.
   id4_ideogram4_generation_residency_mode_t generation_residency_mode =
       ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_INVALID;
@@ -413,6 +420,25 @@ static iree_status_t ParseDitFp8SourceCacheBudget(
                             "--dit_fp8_source_cache_budget_mib is too large");
   }
   return iree_ok_status();
+}
+
+static iree_status_t ParseDitFp8SourceCacheMissMode(
+    id4_pipeline_parameter_cache_miss_mode_t* out_miss_mode) {
+  IREE_ASSERT_ARGUMENT(out_miss_mode);
+  iree_string_view_t mode =
+      iree_make_cstring_view(FLAG_dit_fp8_source_cache_miss_mode);
+  if (iree_string_view_equal(mode, IREE_SV("retain"))) {
+    *out_miss_mode = ID4_PIPELINE_PARAMETER_CACHE_MISS_MODE_RETAIN;
+    return iree_ok_status();
+  }
+  if (iree_string_view_equal(mode, IREE_SV("direct_on_pressure"))) {
+    *out_miss_mode = ID4_PIPELINE_PARAMETER_CACHE_MISS_MODE_DIRECT_ON_PRESSURE;
+    return iree_ok_status();
+  }
+  return iree_make_status(
+      IREE_STATUS_INVALID_ARGUMENT,
+      "unknown --dit_fp8_source_cache_miss_mode value '%.*s'",
+      static_cast<int>(mode.size), mode.data);
 }
 
 static iree_status_t ParseDitWeightExecutionFormat(
@@ -592,6 +618,18 @@ static iree_string_view_t GenerationIssueModeName(GenerationIssueMode mode) {
   return IREE_SV("unknown");
 }
 
+static iree_string_view_t SourceCacheMissModeName(
+    id4_pipeline_parameter_cache_miss_mode_t mode) {
+  switch (mode) {
+    case ID4_PIPELINE_PARAMETER_CACHE_MISS_MODE_RETAIN:
+      return IREE_SV("retain");
+    case ID4_PIPELINE_PARAMETER_CACHE_MISS_MODE_DIRECT_ON_PRESSURE:
+      return IREE_SV("direct_on_pressure");
+    default:
+      return IREE_SV("invalid");
+  }
+}
+
 static iree_status_t ParseGenerationResidentStageMask(
     id4_ideogram4_generation_resident_stage_mask_t* out_stage_mask) {
   IREE_ASSERT_ARGUMENT(out_stage_mask);
@@ -681,6 +719,7 @@ static void AddSourceCacheStatistics(
   target->maximum_cached_byte_length += add.maximum_cached_byte_length;
   target->source_gather_count += add.source_gather_count;
   target->cache_reuse_count += add.cache_reuse_count;
+  target->direct_miss_count += add.direct_miss_count;
   target->evicted_entry_count += add.evicted_entry_count;
 }
 
@@ -997,6 +1036,7 @@ static iree_status_t CreateLoadedLiveSession(
 
 static iree_status_t MakeSourceResidentParameterProvider(
     ParameterProviderRef* provider, iree_device_size_t maximum_cached_bytes,
+    id4_pipeline_parameter_cache_miss_mode_t miss_mode,
     ParameterProviderRef* out_cache_provider) {
   IREE_ASSERT_ARGUMENT(provider);
   if (!provider->get()) {
@@ -1014,6 +1054,7 @@ static iree_status_t MakeSourceResidentParameterProvider(
   options.cache_params.usage = IREE_HAL_BUFFER_USAGE_TRANSFER;
   options.cache_params.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
   options.maximum_cached_byte_length = maximum_cached_bytes;
+  options.miss_mode = miss_mode;
 
   iree_io_parameter_provider_t* cached_provider = nullptr;
   IREE_RETURN_IF_ERROR(id4_pipeline_parameter_cache_provider_create(
@@ -1120,12 +1161,14 @@ static iree_status_t CreateParameterProviders(
       0) {
     IREE_RETURN_IF_ERROR(MakeSourceResidentParameterProvider(
         &conditioned_fp8, context->dit_fp8_source_cache_budget_byte_length,
+        context->dit_fp8_source_cache_miss_mode,
         &context->conditioned_dit_fp8_source_cache_provider));
   }
   if ((context->dit_fp8_source_residency &
        kDitFp8SourceResidencyUnconditioned) != 0) {
     IREE_RETURN_IF_ERROR(MakeSourceResidentParameterProvider(
         &unconditioned_fp8, context->dit_fp8_source_cache_budget_byte_length,
+        context->dit_fp8_source_cache_miss_mode,
         &context->unconditioned_dit_fp8_source_cache_provider));
   }
 
@@ -1191,6 +1234,8 @@ static iree_status_t CreateLiveGenerationBenchmarkContext(
       ParseDitFp8SourceResidency(&out_context->dit_fp8_source_residency));
   IREE_RETURN_IF_ERROR(ParseDitFp8SourceCacheBudget(
       &out_context->dit_fp8_source_cache_budget_byte_length));
+  IREE_RETURN_IF_ERROR(ParseDitFp8SourceCacheMissMode(
+      &out_context->dit_fp8_source_cache_miss_mode));
   IREE_RETURN_IF_ERROR(
       ParseGenerationResidencyMode(&out_context->generation_residency_mode));
   IREE_RETURN_IF_ERROR(
@@ -1590,6 +1635,8 @@ static iree_status_t SetGenerationBenchmarkLabel(
       GenerationResidencyModeName(context.generation_residency_mode);
   const iree_string_view_t issue_mode =
       GenerationIssueModeName(context.generation_issue_mode);
+  const iree_string_view_t source_cache_miss_mode =
+      SourceCacheMissModeName(context.dit_fp8_source_cache_miss_mode);
   GenerationBenchmarkSourceCacheStatistics source_cache_statistics;
   IREE_RETURN_IF_ERROR(AccumulateGenerationBenchmarkSourceCacheStatistics(
       context, &source_cache_statistics));
@@ -1604,11 +1651,12 @@ static iree_status_t SetGenerationBenchmarkLabel(
       " steps=%" PRIu32 " image=%" PRIu64 "x%" PRIu64
       " residency=%.*s issue=%.*s resident_stage_mask=0x%08x"
       " dit_fp8_source_residency=0x%08x"
+      " dit_fp8_source_cache_miss=%.*s"
       " dit_fp8_source_cache_budget=%" PRIu64
       "MiB"
       " dit_fp8_source_cache[entries=%" PRIhsz ",cached=%" PRIu64
       "MiB,peak=%" PRIu64 "MiB,fills=%" PRIhsz ",reuse=%" PRIhsz
-      ",evicted=%" PRIhsz
+      ",direct=%" PRIhsz ",evicted=%" PRIhsz
       "]"
       " params=%.*s activation=%.*s weights=%.*s attention=%.*s ff=%.*s"
       " param_total=%" PRIu64 "MiB param_largest=%" PRIu64
@@ -1632,12 +1680,15 @@ static iree_status_t SetGenerationBenchmarkLabel(
       static_cast<int>(residency_mode.size), residency_mode.data,
       static_cast<int>(issue_mode.size), issue_mode.data,
       context.generation_resident_stage_mask, context.dit_fp8_source_residency,
+      static_cast<int>(source_cache_miss_mode.size),
+      source_cache_miss_mode.data,
       CeilMiB(source_cache_statistics.maximum_cached_byte_length),
       source_cache_statistics.entry_count,
       CeilMiB(source_cache_statistics.cached_byte_length),
       CeilMiB(source_cache_statistics.peak_cached_byte_length),
       source_cache_statistics.source_gather_count,
       source_cache_statistics.cache_reuse_count,
+      source_cache_statistics.direct_miss_count,
       source_cache_statistics.evicted_entry_count,
       static_cast<int>(parameter_format.size), parameter_format.data,
       static_cast<int>(activation_format.size), activation_format.data,

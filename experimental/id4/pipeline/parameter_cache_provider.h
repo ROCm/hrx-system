@@ -15,6 +15,16 @@
 extern "C" {
 #endif  // __cplusplus
 
+// Policy for cache misses.
+typedef enum id4_pipeline_parameter_cache_miss_mode_e {
+  // Invalid miss mode.
+  ID4_PIPELINE_PARAMETER_CACHE_MISS_MODE_INVALID = 0,
+  // Cache every miss before copying into the caller's target buffer.
+  ID4_PIPELINE_PARAMETER_CACHE_MISS_MODE_RETAIN = 1,
+  // Gather directly into the caller target when retaining would exceed budget.
+  ID4_PIPELINE_PARAMETER_CACHE_MISS_MODE_DIRECT_ON_PRESSURE = 2,
+} id4_pipeline_parameter_cache_miss_mode_t;
+
 // Creation options for a source-resident parameter cache provider.
 typedef struct id4_pipeline_parameter_cache_provider_options_t {
   // Size of this structure in bytes for ABI compatibility.
@@ -27,6 +37,8 @@ typedef struct id4_pipeline_parameter_cache_provider_options_t {
   iree_hal_buffer_params_t cache_params;
   // Maximum live cached source bytes, or zero for unbounded cache growth.
   iree_device_size_t maximum_cached_byte_length;
+  // Miss policy controlling how uncached source spans are served.
+  id4_pipeline_parameter_cache_miss_mode_t miss_mode;
 } id4_pipeline_parameter_cache_provider_options_t;
 
 // Snapshot of source-resident parameter cache provider state.
@@ -43,6 +55,8 @@ typedef struct id4_pipeline_parameter_cache_provider_statistics_t {
   iree_host_size_t source_gather_count;
   // Number of caller gather requests served from an existing cache entry.
   iree_host_size_t cache_reuse_count;
+  // Number of caller gather requests served directly under budget pressure.
+  iree_host_size_t direct_miss_count;
   // Number of cache entries evicted by budget pressure or notifications.
   iree_host_size_t evicted_entry_count;
 } id4_pipeline_parameter_cache_provider_statistics_t;
@@ -58,9 +72,13 @@ typedef struct id4_pipeline_parameter_cache_provider_statistics_t {
 //
 // The cache is read-only. Query and load requests are delegated to the upstream
 // provider; scatter requests fail because writes would require cache
-// invalidation. If a maximum cached byte length is configured, the provider
-// evicts oldest entries before inserting a new entry that would exceed the
-// budget. SUSPEND and LOW_MEMORY notifications drop all cached entries after
+// invalidation. If a maximum cached byte length is configured, the miss mode
+// controls how pressure is handled. RETAIN evicts oldest entries before
+// inserting a new cached source buffer and fails when one span is larger than
+// the budget. DIRECT_ON_PRESSURE delegates pressure misses directly to the
+// upstream provider with the caller's target buffer and preserves the final
+// signal by waiting on the delegated gather before signaling the caller.
+// SUSPEND and LOW_MEMORY notifications drop all cached entries after
 // forwarding the notification upstream.
 iree_status_t id4_pipeline_parameter_cache_provider_create(
     const id4_pipeline_parameter_cache_provider_options_t* options,

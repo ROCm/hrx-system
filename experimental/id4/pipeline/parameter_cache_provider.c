@@ -43,6 +43,8 @@ typedef struct id4_pipeline_parameter_cache_provider_t {
   iree_hal_buffer_params_t cache_params;
   // Maximum live cached source bytes, or zero for unbounded cache growth.
   iree_device_size_t maximum_cached_byte_length;
+  // Miss policy controlling how uncached source spans are served.
+  id4_pipeline_parameter_cache_miss_mode_t miss_mode;
   // Guards |entries| and entry metadata mutation.
   iree_slim_mutex_t mutex;
   // Number of live cache entries.
@@ -57,6 +59,8 @@ typedef struct id4_pipeline_parameter_cache_provider_t {
   iree_host_size_t source_gather_count;
   // Number of caller gather requests served from existing cache entries.
   iree_host_size_t cache_reuse_count;
+  // Number of caller gather requests served directly under budget pressure.
+  iree_host_size_t direct_miss_count;
   // Number of cache entries evicted by budget pressure or notifications.
   iree_host_size_t evicted_entry_count;
   // Source-resident exact-span cache entries.
@@ -71,7 +75,7 @@ typedef struct id4_pipeline_parameter_cache_request_t {
 } id4_pipeline_parameter_cache_request_t;
 
 typedef struct id4_pipeline_parameter_cache_ready_entry_t {
-  // Cache buffer retained for recording the copy command.
+  // Cache buffer retained for recording a copy command, or NULL for direct.
   iree_hal_buffer_t* buffer;
   // Semaphore retained for the copy submission wait list.
   iree_hal_semaphore_t* ready_semaphore;
@@ -269,6 +273,25 @@ static bool id4_pipeline_parameter_cache_try_retain_ready_entry(
   return entry_index != IREE_HOST_SIZE_MAX;
 }
 
+static bool id4_pipeline_parameter_cache_should_gather_direct(
+    id4_pipeline_parameter_cache_provider_t* provider,
+    iree_device_size_t length) {
+  bool should_gather_direct = false;
+  iree_slim_mutex_lock(&provider->mutex);
+  if (provider->miss_mode ==
+          ID4_PIPELINE_PARAMETER_CACHE_MISS_MODE_DIRECT_ON_PRESSURE &&
+      provider->maximum_cached_byte_length != 0) {
+    iree_device_size_t required_byte_length = 0;
+    should_gather_direct =
+        length > provider->maximum_cached_byte_length ||
+        !iree_device_size_checked_add(provider->cached_byte_length, length,
+                                      &required_byte_length) ||
+        required_byte_length > provider->maximum_cached_byte_length;
+  }
+  iree_slim_mutex_unlock(&provider->mutex);
+  return should_gather_direct;
+}
+
 static iree_status_t id4_pipeline_parameter_cache_single_enumerator(
     void* user_data, iree_host_size_t i, iree_string_view_t* out_key,
     iree_io_parameter_span_t* out_span) {
@@ -365,6 +388,51 @@ static iree_status_t id4_pipeline_parameter_cache_fill_entry(
   return status;
 }
 
+static iree_status_t id4_pipeline_parameter_cache_gather_direct(
+    id4_pipeline_parameter_cache_provider_t* provider,
+    iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    iree_string_view_t source_scope, iree_string_view_t key,
+    iree_io_parameter_span_t span, iree_hal_buffer_t* target_buffer,
+    id4_pipeline_parameter_cache_ready_entry_t* out_ready_entry) {
+  memset(out_ready_entry, 0, sizeof(*out_ready_entry));
+
+  iree_hal_semaphore_t* ready_semaphore = NULL;
+  iree_status_t status = iree_hal_semaphore_create(
+      device, queue_affinity,
+      /*initial_value=*/0, IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &ready_semaphore);
+  uint64_t ready_payload_value = 1;
+  if (iree_status_is_ok(status)) {
+    id4_pipeline_parameter_cache_single_enumerator_t enumerator_state = {
+        .key = key,
+        .span = span,
+    };
+    iree_io_parameter_enumerator_t enumerator = {
+        .fn = id4_pipeline_parameter_cache_single_enumerator,
+        .user_data = &enumerator_state,
+    };
+    iree_hal_semaphore_t* ready_semaphore_ptr = ready_semaphore;
+    iree_hal_semaphore_list_t signal_list = {
+        .count = 1,
+        .semaphores = &ready_semaphore_ptr,
+        .payload_values = &ready_payload_value,
+    };
+    status = iree_io_parameter_provider_gather(
+        provider->source_provider, device, queue_affinity, wait_semaphore_list,
+        signal_list, source_scope, target_buffer, /*count=*/1, enumerator);
+  }
+  if (iree_status_is_ok(status)) {
+    iree_slim_mutex_lock(&provider->mutex);
+    ++provider->direct_miss_count;
+    iree_slim_mutex_unlock(&provider->mutex);
+    out_ready_entry->ready_semaphore = ready_semaphore;
+    out_ready_entry->ready_payload_value = ready_payload_value;
+  } else {
+    iree_hal_semaphore_release(ready_semaphore);
+  }
+  return status;
+}
+
 static iree_status_t id4_pipeline_parameter_cache_insert_or_retain_entry(
     id4_pipeline_parameter_cache_provider_t* provider,
     iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
@@ -436,13 +504,19 @@ static iree_status_t id4_pipeline_parameter_cache_get_ready_entry(
     iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
     const iree_hal_semaphore_list_t wait_semaphore_list,
     iree_string_view_t source_scope, iree_string_view_t key,
-    iree_io_parameter_span_t span,
+    iree_io_parameter_span_t span, iree_hal_buffer_t* target_buffer,
     id4_pipeline_parameter_cache_ready_entry_t* out_ready_entry) {
   memset(out_ready_entry, 0, sizeof(*out_ready_entry));
   if (id4_pipeline_parameter_cache_try_retain_ready_entry(
           provider, device, queue_affinity, source_scope, key,
           span.parameter_offset, span.length, out_ready_entry)) {
     return iree_ok_status();
+  }
+  if (id4_pipeline_parameter_cache_should_gather_direct(provider,
+                                                        span.length)) {
+    return id4_pipeline_parameter_cache_gather_direct(
+        provider, device, queue_affinity, wait_semaphore_list, source_scope,
+        key, span, target_buffer, out_ready_entry);
   }
   IREE_RETURN_IF_ERROR(
       id4_pipeline_parameter_cache_validate_budget(provider, span.length));
@@ -571,6 +645,7 @@ static iree_status_t id4_pipeline_parameter_cache_record_copies(
   }
   for (iree_host_size_t i = 0; i < request_count && iree_status_is_ok(status);
        ++i) {
+    if (!ready_entries[i].buffer) continue;
     status = iree_hal_command_buffer_copy_buffer(
         command_buffer,
         iree_hal_make_buffer_ref(ready_entries[i].buffer, /*offset=*/0,
@@ -672,7 +747,7 @@ static iree_status_t id4_pipeline_parameter_cache_provider_gather(
   for (iree_host_size_t i = 0; i < count && iree_status_is_ok(status); ++i) {
     status = id4_pipeline_parameter_cache_get_ready_entry(
         provider, device, queue_affinity, wait_semaphore_list, source_scope,
-        requests[i].key, requests[i].span, &ready_entries[i]);
+        requests[i].key, requests[i].span, target_buffer, &ready_entries[i]);
     if (iree_status_is_ok(status)) {
       ready_entry_count = i + 1;
     }
@@ -794,6 +869,14 @@ static iree_status_t id4_pipeline_parameter_cache_provider_validate_options(
                             "parameter cache provider cache usage must include "
                             "transfer source and target");
   }
+  switch (options->miss_mode) {
+    case ID4_PIPELINE_PARAMETER_CACHE_MISS_MODE_RETAIN:
+    case ID4_PIPELINE_PARAMETER_CACHE_MISS_MODE_DIRECT_ON_PRESSURE:
+      break;
+    default:
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "parameter cache provider miss mode is invalid");
+  }
   return iree_ok_status();
 }
 
@@ -815,6 +898,7 @@ iree_status_t id4_pipeline_parameter_cache_provider_create(
   provider->host_allocator = host_allocator;
   provider->cache_params = options->cache_params;
   provider->maximum_cached_byte_length = options->maximum_cached_byte_length;
+  provider->miss_mode = options->miss_mode;
   iree_slim_mutex_initialize(&provider->mutex);
   iree_io_parameter_provider_retain(options->source_provider);
   provider->source_provider = options->source_provider;
@@ -840,6 +924,7 @@ iree_status_t id4_pipeline_parameter_cache_provider_query_statistics(
       provider->maximum_cached_byte_length;
   out_statistics->source_gather_count = provider->source_gather_count;
   out_statistics->cache_reuse_count = provider->cache_reuse_count;
+  out_statistics->direct_miss_count = provider->direct_miss_count;
   out_statistics->evicted_entry_count = provider->evicted_entry_count;
   iree_slim_mutex_unlock(&provider->mutex);
   return iree_ok_status();
