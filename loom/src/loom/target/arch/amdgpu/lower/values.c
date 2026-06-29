@@ -6033,11 +6033,8 @@ static iree_status_t loom_amdgpu_emit_vector_fp8_to_f32_lanes(
     const loom_amdgpu_vector_16bit_float_conversion_plan_t* plan,
     loom_value_id_t low_source, loom_type_t source_lane_type,
     loom_type_t result_lane_type, loom_value_id_t* lanes) {
-  if (loom_amdgpu_vector_16bit_float_conversion_plan_has_scale(plan)) {
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
-        "scaled FP8 conversion must lower through the scaled packet path");
-  }
+  IREE_ASSERT_FALSE(
+      loom_amdgpu_vector_16bit_float_conversion_plan_has_scale(plan));
 
   loom_type_t mask_type = loom_type_none();
   loom_type_t sgpr_type = loom_type_none();
