@@ -906,7 +906,7 @@ static const id4_qwen3_vl_program_mlp_gate_up_silu_product_wmma_tile_t
         .compact_rhs_kernel_kind =
             ID4_QWEN3_VL_KERNEL_MLP_GATE_UP_SILU_PRODUCT_BF16_WMMA_M32N32_COMPACT_RHS,
         // Minimum token capacity required before compact RHS is selected.
-        .compact_rhs_min_token_count = 1024,
+        .compact_rhs_min_token_count = ID4_QWEN3_VL_LINEAR_WMMA_TOKEN_BLOCK_M32,
 };
 
 static const id4_qwen3_vl_program_mlp_gate_up_silu_product_wmma_tile_t
