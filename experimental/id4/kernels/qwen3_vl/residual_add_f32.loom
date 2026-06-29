@@ -81,6 +81,69 @@ kernel.def export("id4_qwen3_vl_residual_add_bf16") @id4_qwen3_vl_residual_add_b
   kernel.return
 }
 
+kernel.def export("id4_qwen3_vl_residual_add_rmsnorm_bf16") @id4_qwen3_vl_residual_add_rmsnorm_bf16() {
+  %unit = index.constant 1 : index
+  %workgroup_size_x = index.constant 256 : index
+  %token_count = config.get @id4.qwen3_vl.residual_add.token_count : index
+  kernel.launch.config workgroups(%token_count, %unit, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
+} launch(%lhs: buffer, %rhs: buffer, %weight: buffer, %residual_output: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %workgroup_size_x = index.constant 256 : index
+  %row = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %hidden_size = config.get @id4.qwen3_vl.residual_add.hidden_size : index
+  %zero_f32 = scalar.constant 0.0 : f32
+  %epsilon = scalar.constant 9.9999999999999995e-07 : f32
+  %hidden_size_i32 = index.cast %hidden_size : index to i32
+  %hidden_size_f32 = scalar.sitofp %hidden_size_i32 : i32 to f32
+  %lhs_noalias, %rhs_noalias, %weight_noalias, %residual_output_noalias, %output_noalias = buffer.assume.noalias %lhs, %rhs, %weight, %residual_output, %output : buffer, buffer, buffer, buffer, buffer
+  %lhs_global = buffer.assume.memory_space<global> %lhs_noalias : buffer
+  %rhs_global = buffer.assume.memory_space<global> %rhs_noalias : buffer
+  %weight_global = buffer.assume.memory_space<global> %weight_noalias : buffer
+  %residual_output_global = buffer.assume.memory_space<global> %residual_output_noalias : buffer
+  %output_global = buffer.assume.memory_space<global> %output_noalias : buffer
+  %token_count = config.get @id4.qwen3_vl.residual_add.token_count : index
+  %lhs_view = buffer.view %lhs_global[%base] : buffer -> view<[%token_count]x[%hidden_size]xbf16, #dense>
+  %rhs_view = buffer.view %rhs_global[%base] : buffer -> view<[%token_count]x[%hidden_size]xbf16, #dense>
+  %weight_view = buffer.view %weight_global[%base] : buffer -> view<[%hidden_size]xbf16, #dense>
+  %residual_output_view = buffer.view %residual_output_global[%base] : buffer -> view<[%token_count]x[%hidden_size]xbf16, #dense>
+  %output_view = buffer.view %output_global[%base] : buffer -> view<[%token_count]x[%hidden_size]xbf16, #dense>
+  %lane_square_sum = scf.for %column = [%lane to %hidden_size step %workgroup_size_x](%acc = %zero_f32 : f32) -> (f32) {
+    %lhs_bf16 = view.load %lhs_view[%row, %column] : view<[%token_count]x[%hidden_size]xbf16, #dense> -> bf16
+    %rhs_bf16 = view.load %rhs_view[%row, %column] : view<[%token_count]x[%hidden_size]xbf16, #dense> -> bf16
+    %lhs_value = scalar.extf %lhs_bf16 : bf16 to f32
+    %rhs_value = scalar.extf %rhs_bf16 : bf16 to f32
+    %sum = scalar.addf<reassoc|nnan|ninf|nsz> %lhs_value, %rhs_value : f32
+    %sum_bf16 = scalar.fptrunc %sum : f32 to bf16
+    view.store %sum_bf16, %residual_output_view[%row, %column] : bf16, view<[%token_count]x[%hidden_size]xbf16, #dense>
+    %value = scalar.extf %sum_bf16 : bf16 to f32
+    %square = scalar.mulf %value, %value : f32
+    %next = scalar.addf %acc, %square : f32
+    scf.yield %next : f32
+  }
+  %square_sum = kernel.workgroup.reduce<addf> %lane_square_sum : f32
+  %mean_square = scalar.divf %square_sum, %hidden_size_f32 : f32
+  %mean_square_epsilon = scalar.addf %mean_square, %epsilon : f32
+  %row_scale = scalar.rsqrtf %mean_square_epsilon : f32
+  scf.for %column = [%lane to %hidden_size step %workgroup_size_x] {
+    %lhs_bf16 = view.load %lhs_view[%row, %column] : view<[%token_count]x[%hidden_size]xbf16, #dense> -> bf16
+    %rhs_bf16 = view.load %rhs_view[%row, %column] : view<[%token_count]x[%hidden_size]xbf16, #dense> -> bf16
+    %weight_bf16 = view.load %weight_view[%column] : view<[%hidden_size]xbf16, #dense> -> bf16
+    %lhs_value = scalar.extf %lhs_bf16 : bf16 to f32
+    %rhs_value = scalar.extf %rhs_bf16 : bf16 to f32
+    %weight_value = scalar.extf %weight_bf16 : bf16 to f32
+    %sum = scalar.addf<reassoc|nnan|ninf|nsz> %lhs_value, %rhs_value : f32
+    %sum_bf16 = scalar.fptrunc %sum : f32 to bf16
+    %value = scalar.extf %sum_bf16 : bf16 to f32
+    %normalized = scalar.mulf %value, %row_scale : f32
+    %weighted = scalar.mulf %normalized, %weight_value : f32
+    %rounded = scalar.fptrunc %weighted : f32 to bf16
+    view.store %rounded, %output_view[%row, %column] : bf16, view<[%token_count]x[%hidden_size]xbf16, #dense>
+  }
+  kernel.return
+}
+
 check.case public @id4_qwen3_vl_residual_add_f32_small_case {
   %lhs = check.generate.iota offset(1.0) step(1.0) : tensor<2x3xf32>
   %rhs = check.generate.fill value(10.0) : tensor<2x3xf32>
@@ -101,6 +164,20 @@ check.case public @id4_qwen3_vl_residual_add_bf16_small_case {
   check.return
 }
 
+check.case public @id4_qwen3_vl_residual_add_rmsnorm_bf16_small_case {
+  %lhs = check.generate.fill value(1.0) : tensor<1x4xbf16>
+  %rhs = check.generate.fill value(1.0) : tensor<1x4xbf16>
+  %weight = check.generate.iota offset(0.5) step(0.5) : tensor<4xbf16>
+  %residual_output = check.generate.fill value(0.0) : tensor<1x4xbf16>
+  %output = check.generate.fill value(0.0) : tensor<1x4xbf16>
+  %expected_residual = check.generate.fill value(2.0) : tensor<1x4xbf16>
+  %expected = check.generate.iota offset(0.5) step(0.5) : tensor<1x4xbf16>
+  func.call @id4_qwen3_vl_residual_add_rmsnorm_bf16(%lhs, %rhs, %weight, %residual_output, %output) : (tensor<1x4xbf16>, tensor<1x4xbf16>, tensor<4xbf16>, tensor<1x4xbf16>, tensor<1x4xbf16>)
+  check.expect.close actual(%residual_output) expected(%expected_residual) atol(0.0) rtol(0.0) nan(same) : tensor<1x4xbf16>
+  check.expect.close actual(%output) expected(%expected) atol(1.0000000000000001e-05) rtol(1.0000000000000001e-05) nan(same) : tensor<1x4xbf16>
+  check.return
+}
+
 check.case public @id4_qwen3_vl_residual_add_f32_qwen_slice_case {
   %lhs = check.generate.fill value(1.0) : tensor<64x4096xf32>
   %rhs = check.generate.fill value(2.0) : tensor<64x4096xf32>
@@ -114,5 +191,7 @@ check.case public @id4_qwen3_vl_residual_add_f32_qwen_slice_case {
 check.benchmark<@id4_qwen3_vl_residual_add_f32_small_case> @id4_qwen3_vl_residual_add_f32_small
 
 check.benchmark<@id4_qwen3_vl_residual_add_bf16_small_case> @id4_qwen3_vl_residual_add_bf16_small
+
+check.benchmark<@id4_qwen3_vl_residual_add_rmsnorm_bf16_small_case> @id4_qwen3_vl_residual_add_rmsnorm_bf16_small
 
 check.benchmark<@id4_qwen3_vl_residual_add_f32_qwen_slice_case> @id4_qwen3_vl_residual_add_f32_qwen_slice

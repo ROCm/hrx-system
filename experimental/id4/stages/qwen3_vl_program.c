@@ -645,6 +645,8 @@ typedef enum id4_qwen3_vl_kernel_kind_e {
   ID4_QWEN3_VL_KERNEL_MLP_GATE_UP_SILU_PRODUCT_BF16_WMMA_M32N32 = 25,
   // BF16 tensor tail zeroing kernel.
   ID4_QWEN3_VL_KERNEL_ZERO_TAIL_BF16 = 26,
+  // Fused residual add followed by RMSNorm kernel.
+  ID4_QWEN3_VL_KERNEL_RESIDUAL_ADD_RMSNORM = 27,
 } id4_qwen3_vl_kernel_kind_t;
 
 typedef enum id4_qwen3_vl_config_key_e {
@@ -685,7 +687,7 @@ enum {
   ID4_QWEN3_VL_TENSOR_KIND_COUNT = ID4_QWEN3_VL_TENSOR_OUTPUT + 1,
   ID4_QWEN3_VL_OPERATION_KIND_COUNT = ID4_QWEN3_VL_OPERATION_TAP + 1,
   ID4_QWEN3_VL_OPERATION_SITE_COUNT = ID4_QWEN3_VL_OPERATION_SITE_OUTPUT + 1,
-  ID4_QWEN3_VL_KERNEL_KIND_COUNT = ID4_QWEN3_VL_KERNEL_ZERO_TAIL_BF16 + 1,
+  ID4_QWEN3_VL_KERNEL_KIND_COUNT = ID4_QWEN3_VL_KERNEL_RESIDUAL_ADD_RMSNORM + 1,
   ID4_QWEN3_VL_CONFIG_KEY_COUNT =
       ID4_QWEN3_VL_CONFIG_DISPATCH_ELEMENT_COUNT + 1,
 };
@@ -1190,6 +1192,9 @@ static const id4_pipeline_kernel_ref_t
         [ID4_QWEN3_VL_KERNEL_ZERO_TAIL_BF16] =
             {IREE_SVL("qwen3_vl/zero_tail"),
              IREE_SVL("id4_qwen3_vl_zero_tail_bf16")},
+        [ID4_QWEN3_VL_KERNEL_RESIDUAL_ADD_RMSNORM] =
+            {IREE_SVL("qwen3_vl/residual_add_f32"),
+             IREE_SVL("id4_qwen3_vl_residual_add_rmsnorm_bf16")},
 };
 
 static const iree_string_view_t id4_qwen3_vl_program_config_keys
@@ -1465,6 +1470,13 @@ static const iree_string_view_t id4_qwen3_vl_program_config_keys
                     IREE_SVL("id4.qwen3_vl.zero_tail.element_count"),
                 [ID4_QWEN3_VL_CONFIG_DISPATCH_ELEMENT_COUNT] =
                     IREE_SVL("id4.qwen3_vl.zero_tail.dispatch_element_count"),
+            },
+        [ID4_QWEN3_VL_KERNEL_RESIDUAL_ADD_RMSNORM] =
+            {
+                [ID4_QWEN3_VL_CONFIG_TOKEN_COUNT] =
+                    IREE_SVL("id4.qwen3_vl.residual_add.token_count"),
+                [ID4_QWEN3_VL_CONFIG_HIDDEN_SIZE] =
+                    IREE_SVL("id4.qwen3_vl.residual_add.hidden_size"),
             },
 };
 
@@ -2848,6 +2860,58 @@ static iree_status_t id4_qwen3_vl_program_author_residual_add(
       config_bindings, IREE_ARRAYSIZE(bindings), bindings);
 }
 
+static iree_status_t id4_qwen3_vl_program_author_residual_add_rmsnorm(
+    const id4_qwen3_vl_program_options_t* options,
+    id4_pipeline_program_builder_t* builder, uint32_t layer_ordinal,
+    id4_qwen3_vl_operation_site_t site,
+    id4_qwen3_vl_parameter_kind_t parameter_kind,
+    id4_qwen3_vl_tensor_kind_t residual_output_kind,
+    id4_qwen3_vl_tensor_kind_t output_kind, id4_pipeline_program_tensor_t lhs,
+    id4_pipeline_program_tensor_t rhs,
+    id4_pipeline_program_tensor_t* out_residual_output,
+    id4_pipeline_program_tensor_t* out_output) {
+  const uint32_t hidden_size = options->model.hidden_size;
+  uint32_t token_capacity = 0;
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_calculate_bf16_token_capacity(
+      options->request.token_count, &token_capacity));
+  id4_pipeline_program_tensor_t weight = id4_pipeline_program_tensor_invalid();
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_parameter(
+      builder, options->parameter_scope, parameter_kind, layer_ordinal,
+      ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+      id4_pipeline_program_make_shape_rank1(hidden_size), &weight));
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_acquire_tensor(
+      builder, residual_output_kind, layer_ordinal,
+      ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+      id4_pipeline_program_make_shape_rank2(token_capacity, hidden_size),
+      out_residual_output));
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_acquire_tensor(
+      builder, output_kind, layer_ordinal, ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+      id4_pipeline_program_make_shape_rank2(token_capacity, hidden_size),
+      out_output));
+  const id4_qwen3_vl_program_config_value_t config_values[] = {
+      {ID4_QWEN3_VL_CONFIG_TOKEN_COUNT, token_capacity},
+      {ID4_QWEN3_VL_CONFIG_HIDDEN_SIZE, hidden_size},
+  };
+  char value_buffers[ID4_QWEN3_VL_MAX_KERNEL_CONFIG_BINDING_COUNT]
+                    [ID4_QWEN3_VL_CONFIG_VALUE_BUFFER_CAPACITY];
+  id4_pipeline_kernel_config_binding_t
+      config_bindings[ID4_QWEN3_VL_MAX_KERNEL_CONFIG_BINDING_COUNT];
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_make_config_bindings(
+      ID4_QWEN3_VL_KERNEL_RESIDUAL_ADD_RMSNORM, IREE_ARRAYSIZE(config_values),
+      config_values, value_buffers, config_bindings));
+  id4_pipeline_program_dispatch_binding_t bindings[] = {
+      id4_pipeline_program_read(lhs),
+      id4_pipeline_program_read(rhs),
+      id4_pipeline_program_read(weight),
+      id4_pipeline_program_write(*out_residual_output),
+      id4_pipeline_program_write(*out_output),
+  };
+  return id4_qwen3_vl_program_dispatch(
+      builder, ID4_QWEN3_VL_OPERATION_RMSNORM, layer_ordinal, site,
+      ID4_QWEN3_VL_KERNEL_RESIDUAL_ADD_RMSNORM, IREE_ARRAYSIZE(config_values),
+      config_bindings, IREE_ARRAYSIZE(bindings), bindings);
+}
+
 static iree_status_t id4_qwen3_vl_program_author_selected_hidden_pack(
     const id4_qwen3_vl_program_options_t* options,
     id4_pipeline_program_builder_t* builder, uint32_t layer_ordinal,
@@ -3141,28 +3205,21 @@ static iree_status_t id4_qwen3_vl_program_author_layer(
 
   id4_pipeline_program_tensor_t after_attention =
       id4_pipeline_program_tensor_invalid();
-  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_author_residual_add(
-      options, builder, layer_ordinal,
-      ID4_QWEN3_VL_OPERATION_SITE_SELF_ATTENTION, input, attention_output,
-      ID4_QWEN3_VL_TENSOR_LAYER_AFTER_ATTENTION, &after_attention));
-  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_barrier(
-      builder, layer_ordinal,
-      ID4_QWEN3_VL_OPERATION_SITE_AFTER_ATTENTION_RESIDUAL));
-  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_tap_tensor(
-      builder, ID4_QWEN3_VL_TENSOR_LAYER_AFTER_ATTENTION, layer_ordinal,
-      after_attention));
-
   id4_pipeline_program_tensor_t post_attention_norm =
       id4_pipeline_program_tensor_invalid();
-  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_author_rmsnorm(
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_author_residual_add_rmsnorm(
       options, builder, layer_ordinal,
       ID4_QWEN3_VL_OPERATION_SITE_POST_ATTENTION_LAYERNORM,
       ID4_QWEN3_VL_PARAMETER_LAYER_POST_ATTENTION_NORM,
-      ID4_QWEN3_VL_TENSOR_LAYER_POST_ATTENTION_NORM, after_attention,
-      &post_attention_norm));
+      ID4_QWEN3_VL_TENSOR_LAYER_AFTER_ATTENTION,
+      ID4_QWEN3_VL_TENSOR_LAYER_POST_ATTENTION_NORM, input, attention_output,
+      &after_attention, &post_attention_norm));
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_barrier(
       builder, layer_ordinal,
       ID4_QWEN3_VL_OPERATION_SITE_AFTER_POST_ATTENTION_LAYERNORM));
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_tap_tensor(
+      builder, ID4_QWEN3_VL_TENSOR_LAYER_AFTER_ATTENTION, layer_ordinal,
+      after_attention));
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_tap_tensor(
       builder, ID4_QWEN3_VL_TENSOR_LAYER_POST_ATTENTION_NORM, layer_ordinal,
       post_attention_norm));
