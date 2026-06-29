@@ -1028,22 +1028,18 @@ typedef struct loom_amdgpu_fp8_packed_bf16_pair_state_t {
   loom_value_id_t source_no_sign;
   // BF16 payload produced by the fast normal-value expansion.
   loom_value_id_t normal_payload;
-  // Packed condition bits selecting zero/subnormal payload repair.
-  loom_value_id_t repair_condition;
 } loom_amdgpu_fp8_packed_bf16_pair_state_t;
 
 static iree_status_t loom_amdgpu_emit_fp8_packed_bf16_pair_state(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_amdgpu_fp8_decode_plan_t* plan,
     const loom_amdgpu_fp8_packed_bf16_pair_source_t* pair_source,
-    loom_value_id_t low_zero, bool needs_repair_condition,
-    loom_type_t vgpr_type, loom_type_t sgpr_type,
+    loom_value_id_t low_zero, loom_type_t vgpr_type,
     loom_amdgpu_fp8_packed_bf16_pair_state_t* out_state) {
   *out_state = (loom_amdgpu_fp8_packed_bf16_pair_state_t){
       .expanded_pair = LOOM_VALUE_ID_INVALID,
       .source_no_sign = LOOM_VALUE_ID_INVALID,
       .normal_payload = LOOM_VALUE_ID_INVALID,
-      .repair_condition = LOOM_VALUE_ID_INVALID,
   };
 
   const uint32_t selector =
@@ -1061,14 +1057,7 @@ static iree_status_t loom_amdgpu_emit_fp8_packed_bf16_pair_state(
   IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fp8_normal_packed_bf16_payload(
       context, source_op, plan, out_state->source_no_sign, vgpr_type,
       &out_state->normal_payload));
-
-  if (!needs_repair_condition) {
-    return iree_ok_status();
-  }
-  return loom_amdgpu_emit_fp8_packed_bf16_pair_lt_condition(
-      context, source_op, plan, out_state->source_no_sign,
-      LOOM_AMDGPU_FP8_DECODE_BF16_PAIR_E4M3_SUBNORMAL_BIAS, vgpr_type,
-      sgpr_type, &out_state->repair_condition);
+  return iree_ok_status();
 }
 
 static iree_status_t loom_amdgpu_emit_fp8_packed_bf16_pair_sign(
@@ -1149,6 +1138,55 @@ static iree_status_t loom_amdgpu_emit_fp8_packed_bf16_pair_nan_repair(
       out_packet);
 }
 
+static iree_status_t loom_amdgpu_emit_fp8_packed_bf16_subnormal_condition(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_amdgpu_fp8_decode_plan_t* plan,
+    loom_value_id_t low_source_no_sign, loom_type_t vgpr_type,
+    loom_type_t sgpr_type, loom_value_id_t* out_condition) {
+  return loom_amdgpu_emit_fp8_packed_bf16_pair_lt_condition(
+      context, source_op, plan, low_source_no_sign,
+      LOOM_AMDGPU_FP8_DECODE_BF16_PAIR_E4M3_SUBNORMAL_BIAS, vgpr_type,
+      sgpr_type, out_condition);
+}
+
+static iree_status_t
+loom_amdgpu_emit_fp8_packed_bf16_combined_subnormal_condition(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_amdgpu_fp8_decode_plan_t* plan,
+    const loom_amdgpu_fp8_packed_bf16_pair_state_t* pair_states,
+    iree_host_size_t pair_count, loom_type_t vgpr_type, loom_type_t sgpr_type,
+    loom_value_id_t* out_condition) {
+  *out_condition = LOOM_VALUE_ID_INVALID;
+  if (pair_count > 1 &&
+      iree_any_bit_set(plan->flags,
+                       LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_PK_MIN_U16)) {
+    loom_value_id_t low_min_source_no_sign = pair_states[0].source_no_sign;
+    for (iree_host_size_t i = 1; i < pair_count; ++i) {
+      IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fp8_decode_resolved_vgpr_binary(
+          context, source_op, &plan->pk_min_u16_descriptor,
+          low_min_source_no_sign, pair_states[i].source_no_sign, vgpr_type,
+          &low_min_source_no_sign));
+    }
+    loom_value_id_t low_condition = LOOM_VALUE_ID_INVALID;
+    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fp8_packed_bf16_subnormal_condition(
+        context, source_op, plan, low_min_source_no_sign, vgpr_type, sgpr_type,
+        &low_condition));
+    return loom_amdgpu_emit_fp8_packed_bf16_split_condition(
+        context, source_op, &low_condition, 1, vgpr_type, out_condition);
+  }
+
+  loom_value_id_t repair_conditions[LOOM_AMDGPU_MAX_PACKED_32BIT_REGISTERS] = {
+      0};
+  for (iree_host_size_t i = 0; i < pair_count; ++i) {
+    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fp8_packed_bf16_subnormal_condition(
+        context, source_op, plan, pair_states[i].source_no_sign, vgpr_type,
+        sgpr_type, &repair_conditions[i]));
+  }
+  return loom_amdgpu_emit_fp8_packed_bf16_split_condition(
+      context, source_op, repair_conditions, pair_count, vgpr_type,
+      out_condition);
+}
+
 static iree_status_t loom_amdgpu_emit_fp8_packed_bf16_repair_group_if(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_amdgpu_fp8_decode_plan_t* plan,
@@ -1173,10 +1211,14 @@ static iree_status_t loom_amdgpu_emit_fp8_packed_bf16_repair_group_if(
         loom_amdgpu_emit_fp8_subnormal_packed_bf16_bits_from_byte_tables(
             context, source_op, plan, &subnormal_tables,
             pair_states[i].source_no_sign, vgpr_type, &low_subnormal_payload));
+    loom_value_id_t low_repair_condition = LOOM_VALUE_ID_INVALID;
+    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fp8_packed_bf16_subnormal_condition(
+        context, source_op, plan, pair_states[i].source_no_sign, vgpr_type,
+        sgpr_type, &low_repair_condition));
     loom_value_id_t low_repair_mask = LOOM_VALUE_ID_INVALID;
     IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fp8_packed_bf16_mask_from_condition(
-        context, source_op, plan, pair_states[i].repair_condition, vgpr_type,
-        sgpr_type, &low_repair_mask));
+        context, source_op, plan, low_repair_condition, vgpr_type, sgpr_type,
+        &low_repair_mask));
     IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fp8_packed_bf16_pair_select(
         context, source_op, pair_states[i].normal_payload,
         low_subnormal_payload, low_repair_mask, vgpr_type,
@@ -1334,8 +1376,8 @@ iree_status_t loom_amdgpu_try_emit_fp8_pairs_to_packed_bf16(
       pair_states[LOOM_AMDGPU_MAX_PACKED_32BIT_REGISTERS] = {0};
   for (iree_host_size_t i = 0; i < pair_count; ++i) {
     IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fp8_packed_bf16_pair_state(
-        context, source_op, plan, &pair_sources[i], low_zero,
-        needs_repair_condition, vgpr_type, sgpr_type, &pair_states[i]));
+        context, source_op, plan, &pair_sources[i], low_zero, vgpr_type,
+        &pair_states[i]));
   }
 
   loom_value_id_t finite_payloads[LOOM_AMDGPU_MAX_PACKED_32BIT_REGISTERS] = {0};
@@ -1349,15 +1391,11 @@ iree_status_t loom_amdgpu_try_emit_fp8_pairs_to_packed_bf16(
                 sgpr_type, &finite_payloads[i]));
       }
     } else if (use_repair_split) {
-      loom_value_id_t
-          repair_conditions[LOOM_AMDGPU_MAX_PACKED_32BIT_REGISTERS] = {0};
-      for (iree_host_size_t i = 0; i < pair_count; ++i) {
-        repair_conditions[i] = pair_states[i].repair_condition;
-      }
       loom_value_id_t low_combined_repair_condition = LOOM_VALUE_ID_INVALID;
-      IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fp8_packed_bf16_split_condition(
-          context, source_op, repair_conditions, pair_count, vgpr_type,
-          &low_combined_repair_condition));
+      IREE_RETURN_IF_ERROR(
+          loom_amdgpu_emit_fp8_packed_bf16_combined_subnormal_condition(
+              context, source_op, plan, pair_states, pair_count, vgpr_type,
+              sgpr_type, &low_combined_repair_condition));
       IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fp8_packed_bf16_repair_group_if(
           context, source_op, plan, pair_states, pair_count,
           low_combined_repair_condition, vgpr_type, sgpr_type, mask_type,
@@ -1374,11 +1412,16 @@ iree_status_t loom_amdgpu_try_emit_fp8_pairs_to_packed_bf16(
                 context, source_op, plan, &subnormal_tables,
                 pair_states[i].source_no_sign, vgpr_type,
                 &low_subnormal_payload));
+        loom_value_id_t low_repair_condition = LOOM_VALUE_ID_INVALID;
+        IREE_RETURN_IF_ERROR(
+            loom_amdgpu_emit_fp8_packed_bf16_subnormal_condition(
+                context, source_op, plan, pair_states[i].source_no_sign,
+                vgpr_type, sgpr_type, &low_repair_condition));
         loom_value_id_t low_repair_mask = LOOM_VALUE_ID_INVALID;
         IREE_RETURN_IF_ERROR(
             loom_amdgpu_emit_fp8_packed_bf16_mask_from_condition(
-                context, source_op, plan, pair_states[i].repair_condition,
-                vgpr_type, sgpr_type, &low_repair_mask));
+                context, source_op, plan, low_repair_condition, vgpr_type,
+                sgpr_type, &low_repair_mask));
         IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fp8_packed_bf16_pair_select(
             context, source_op, pair_states[i].normal_payload,
             low_subnormal_payload, low_repair_mask, vgpr_type,
