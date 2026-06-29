@@ -264,6 +264,7 @@ def _cdna_core_overlays(
     ],
     include_v_dot2_f32_bf16: bool,
     include_v_cvt_pk_bf16_f32: bool,
+    include_v_cvt_scalef32_pk_packed8: bool,
     include_ds_transpose_reads: bool,
     matrix_overlays: tuple[AmdgpuDescriptorOverlay, ...],
 ) -> tuple[AmdgpuDescriptorOverlay, ...]:
@@ -346,6 +347,11 @@ def _cdna_core_overlays(
         _v_cvt_f32_f16_overlay(),
         _v_cvt_f16_f32_overlay(),
         *_v_cvt_f32_packed8_overlays(),
+        *(
+            _v_cvt_scalef32_pk_packed8_overlays()
+            if include_v_cvt_scalef32_pk_packed8
+            else ()
+        ),
         _v_cvt_pk_u16_u32_overlay(),
         *((_v_cvt_pk_bf16_f32_overlay(),) if include_v_cvt_pk_bf16_f32 else ()),
         _v_cvt_f32_i32_overlay(),
@@ -818,6 +824,7 @@ def _gfx940_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
         buffer_load_lds_variants=_BUFFER_LOAD_LDS_CDNA3_VARIANTS,
         include_v_dot2_f32_bf16=False,
         include_v_cvt_pk_bf16_f32=False,
+        include_v_cvt_scalef32_pk_packed8=False,
         include_ds_transpose_reads=False,
         matrix_overlays=(*_cdna3_mfma_overlays(), *_cdna3_smfmac_overlays()),
     )
@@ -829,6 +836,7 @@ def _gfx950_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
         buffer_load_lds_variants=_BUFFER_LOAD_LDS_GFX950_VARIANTS,
         include_v_dot2_f32_bf16=True,
         include_v_cvt_pk_bf16_f32=True,
+        include_v_cvt_scalef32_pk_packed8=True,
         include_ds_transpose_reads=True,
         matrix_overlays=(*_cdna4_mfma_overlays(), *_cdna4_smfmac_overlays()),
     )
