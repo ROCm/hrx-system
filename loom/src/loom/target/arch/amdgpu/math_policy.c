@@ -11,7 +11,7 @@
 typedef uint32_t loom_amdgpu_math_policy_flags_t;
 enum loom_amdgpu_math_policy_flag_bits_e {
   LOOM_AMDGPU_MATH_POLICY_FLAG_NONE = 0u,
-  LOOM_AMDGPU_MATH_POLICY_FLAG_NATIVE_PACKED_BF16_MULF = 1u << 0,
+  LOOM_AMDGPU_MATH_POLICY_FLAG_NATIVE_PACKED_BF16_BINARY = 1u << 0,
 };
 
 typedef struct loom_amdgpu_math_policy_payload_t {
@@ -84,13 +84,14 @@ static bool loom_amdgpu_math_query_is_packed_bf16_vector(
          (lane_count % 2) == 0;
 }
 
-static bool loom_amdgpu_math_policy_has_native_packed_bf16_mulf(
+static bool loom_amdgpu_math_policy_has_native_packed_bf16_binary(
     const loom_target_math_policy_t* policy,
     const loom_target_math_query_t* query) {
   return iree_all_bits_set(
              loom_amdgpu_math_policy_flags(policy),
-             LOOM_AMDGPU_MATH_POLICY_FLAG_NATIVE_PACKED_BF16_MULF) &&
-         query->math_op == LOOM_TARGET_MATH_OP_MULF &&
+             LOOM_AMDGPU_MATH_POLICY_FLAG_NATIVE_PACKED_BF16_BINARY) &&
+         (query->math_op == LOOM_TARGET_MATH_OP_ADDF ||
+          query->math_op == LOOM_TARGET_MATH_OP_MULF) &&
          loom_amdgpu_math_query_is_packed_bf16_vector(query);
 }
 
@@ -116,7 +117,8 @@ static void loom_amdgpu_math_policy_query(
   if (query->math_op == LOOM_TARGET_MATH_OP_ADDF ||
       query->math_op == LOOM_TARGET_MATH_OP_MULF) {
     if (query->element_type == LOOM_SCALAR_TYPE_BF16) {
-      if (loom_amdgpu_math_policy_has_native_packed_bf16_mulf(policy, query)) {
+      if (loom_amdgpu_math_policy_has_native_packed_bf16_binary(policy,
+                                                                query)) {
         *out_decision =
             loom_amdgpu_math_keep(IREE_SV("math.op.native_pk_bf16"));
         return;
@@ -245,7 +247,7 @@ static const loom_target_math_policy_t kAmdgpuMathPolicy = {
 };
 
 static const loom_amdgpu_math_policy_payload_t kAmdgpuGfx125xMathPayload = {
-    .flags = LOOM_AMDGPU_MATH_POLICY_FLAG_NATIVE_PACKED_BF16_MULF,
+    .flags = LOOM_AMDGPU_MATH_POLICY_FLAG_NATIVE_PACKED_BF16_BINARY,
 };
 
 static const loom_target_math_policy_t kAmdgpuGfx125xMathPolicy = {

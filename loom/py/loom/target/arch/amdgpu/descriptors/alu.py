@@ -3640,6 +3640,15 @@ def _v_pk_mul_bf16_overlay() -> AmdgpuDescriptorOverlay:
     )
 
 
+def _v_pk_add_bf16_overlay() -> AmdgpuDescriptorOverlay:
+    return _v_pk_binary_overlay(
+        descriptor_key="amdgpu.v_pk_add_bf16",
+        instruction_name="V_PK_ADD_BF16",
+        mnemonic="v_pk_add_bf16",
+        semantic_tag="float.add.pk2.bf16",
+    )
+
+
 def _v_pk_fma_bf16_overlay() -> AmdgpuDescriptorOverlay:
     return _v_pk_ternary_overlay(
         descriptor_key="amdgpu.v_pk_fma_bf16",
@@ -5052,6 +5061,7 @@ __all__ = (
     "_v_fmamk_f16_overlay",
     "_v_fmamk_f32_overlay",
     "_v_pk_ashrrev_i16_overlay",
+    "_v_pk_add_bf16_overlay",
     "_v_pk_fma_f16_overlay",
     "_v_pk_fma_f16_literal_overlays",
     "_v_pk_fma_bf16_overlay",

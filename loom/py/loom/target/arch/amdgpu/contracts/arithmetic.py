@@ -88,6 +88,7 @@ _DESCRIPTOR_KEYS = (
     "amdgpu.v_cvt_f16_f32",
     "amdgpu.v_pk_fmac_f16",
     "amdgpu.v_pk_fma_f16",
+    "amdgpu.v_pk_add_bf16",
     "amdgpu.v_pk_mul_bf16",
     "amdgpu.v_pk_fma_bf16",
     "amdgpu.v_pk_add_u16",
@@ -3033,10 +3034,10 @@ def _packed_bf16_vector_fma_rule() -> DescriptorRule:
     )
 
 
-def _packed_bf16_vector_mul_rule() -> DescriptorRule:
-    descriptor = _descriptor("amdgpu.v_pk_mul_bf16")
+def _packed_bf16_binary_rule(source_op: Op, descriptor_key: str) -> DescriptorRule:
+    descriptor = _descriptor(descriptor_key)
     return DescriptorRule(
-        source_op=vector.vector_mulf,
+        source_op=source_op,
         descriptor=descriptor,
         guards=(
             *_typed_guards(("lhs", "rhs", "result"), _VEC_BF16_PACKED_REGISTER),
@@ -3205,7 +3206,12 @@ def _f32_vector_sub_literal_rules() -> tuple[DescriptorRule, ...]:
 
 def _rules() -> tuple[ContractCase, ...]:
     rules: list[ContractCase] = []
-    rules.append(_packed_bf16_vector_mul_rule())
+    rules.extend(
+        (
+            _packed_bf16_binary_rule(vector.vector_addf, "amdgpu.v_pk_add_bf16"),
+            _packed_bf16_binary_rule(vector.vector_mulf, "amdgpu.v_pk_mul_bf16"),
+        )
+    )
     for source_op, descriptor_key in (
         (vector.vector_addf, "amdgpu.v_add_f32.lit"),
         (vector.vector_mulf, "amdgpu.v_mul_f32.lit"),

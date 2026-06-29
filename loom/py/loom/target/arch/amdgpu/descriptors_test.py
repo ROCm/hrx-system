@@ -1765,22 +1765,27 @@ def test_gfx1250_packed_bf16_descriptors_are_arch_scoped() -> None:
         descriptors = {
             descriptor.descriptor_key: descriptor for descriptor in descriptor_set
         }
+        assert "amdgpu.v_pk_add_bf16" not in descriptors
         assert "amdgpu.v_pk_mul_bf16" not in descriptors
         assert "amdgpu.v_pk_fma_bf16" not in descriptors
 
     descriptors = {
         descriptor.descriptor_key: descriptor for descriptor in _gfx1250_core_overlays()
     }
-    binary_descriptor = descriptors["amdgpu.v_pk_mul_bf16"]
-    assert binary_descriptor.encoding_name == "ENC_VOP3P"
-    assert tuple(operand.xml_field_name for operand in binary_descriptor.operands) == (
-        "VDST",
-        "SRC0",
-        "SRC1",
-    )
-    assert tuple(
-        operand.descriptor_operand.unit_count for operand in binary_descriptor.operands
-    ) == (1, 1, 1)
+    for descriptor_key in ("amdgpu.v_pk_add_bf16", "amdgpu.v_pk_mul_bf16"):
+        binary_descriptor = descriptors[descriptor_key]
+        assert binary_descriptor.encoding_name == "ENC_VOP3P"
+        assert tuple(
+            operand.xml_field_name for operand in binary_descriptor.operands
+        ) == (
+            "VDST",
+            "SRC0",
+            "SRC1",
+        )
+        assert tuple(
+            operand.descriptor_operand.unit_count
+            for operand in binary_descriptor.operands
+        ) == (1, 1, 1)
 
     fma_descriptor = descriptors["amdgpu.v_pk_fma_bf16"]
     assert fma_descriptor.encoding_name == "ENC_VOP3P"
