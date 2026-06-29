@@ -123,6 +123,11 @@ _FP8_DECODE_PLAN_DESCRIPTOR_ROWS = (
         "LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_PERM_B32_SRC2_LITERAL",
     ),
     _Fp8DecodePlanDescriptorRow(
+        "amdgpu.v_perm_b32.src1_zero_src2_lit",
+        "perm_b32_src1_zero_src2_literal_descriptor",
+        "LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_PERM_B32_SRC1_ZERO_SRC2_LIT",
+    ),
+    _Fp8DecodePlanDescriptorRow(
         "amdgpu.v_pk_min_u16",
         "pk_min_u16_descriptor",
         "LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_PK_MIN_U16",

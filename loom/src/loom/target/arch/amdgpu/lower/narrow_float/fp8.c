@@ -1206,10 +1206,20 @@ static iree_status_t loom_amdgpu_emit_fp8_packed_bf16_pair_state(
 
   const uint32_t selector =
       kLoomAmdgpuFp8DecodeBf16BytePairSelectors[pair_source->byte_offset];
-  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_resolved_vgpr_binary_immediate(
-      context, source_op, &plan->perm_b32_src2_literal_descriptor,
-      pair_source->source_register, low_zero, selector, vgpr_type,
-      &out_state->expanded_pair));
+  if (iree_any_bit_set(
+          plan->flags,
+          LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_PERM_B32_SRC1_ZERO_SRC2_LIT)) {
+    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_resolved_vgpr_unary_immediate(
+        context, source_op, &plan->perm_b32_src1_zero_src2_literal_descriptor,
+        pair_source->source_register, selector, vgpr_type,
+        &out_state->expanded_pair));
+  } else {
+    IREE_ASSERT_NE(low_zero, LOOM_VALUE_ID_INVALID);
+    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_resolved_vgpr_binary_immediate(
+        context, source_op, &plan->perm_b32_src2_literal_descriptor,
+        pair_source->source_register, low_zero, selector, vgpr_type,
+        &out_state->expanded_pair));
+  }
 
   IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_binary_immediate(
       context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_AND_B32_LIT,
@@ -2170,11 +2180,16 @@ iree_status_t loom_amdgpu_try_emit_fp8_pairs_to_packed_bf16(
       (use_repair_split || use_nan_repair_split ||
        use_top_exponent_repair_split) &&
       !loom_amdgpu_fp8_decode_plan_has_inline_sgpr64_zero_compare(plan);
+  const bool needs_vgpr_zero = !iree_any_bit_set(
+      plan->flags,
+      LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_PERM_B32_SRC1_ZERO_SRC2_LIT);
 
   loom_value_id_t low_zero = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_const_u32(
-      context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_MOV_B32, 0, vgpr_type,
-      &low_zero));
+  if (needs_vgpr_zero) {
+    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_const_u32(
+        context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_MOV_B32, 0, vgpr_type,
+        &low_zero));
+  }
   loom_value_id_t low_one_mask = LOOM_VALUE_ID_INVALID;
   if (needs_branchless_zero_repair) {
     IREE_RETURN_IF_ERROR(loom_amdgpu_emit_const_u32(

@@ -45,6 +45,7 @@ typedef enum loom_amdgpu_fp8_decode_plan_flag_bits_e {
   LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_CMP_LG_U64 = 1u << 14,
   LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_PK_MAX_U16 = 1u << 15,
   LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_CMP_LG_U64_SRC1_INLINE = 1u << 16,
+  LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_PERM_B32_SRC1_ZERO_SRC2_LIT = 1u << 17,
 } loom_amdgpu_fp8_decode_plan_flag_bits_t;
 typedef uint32_t loom_amdgpu_fp8_decode_plan_flags_t;
 
@@ -124,6 +125,9 @@ typedef struct loom_amdgpu_fp8_decode_plan_t {
   loom_low_lower_resolved_descriptor_t perm_b32_descriptor;
   // Byte permute descriptor with an immediate selector operand.
   loom_low_lower_resolved_descriptor_t perm_b32_src2_literal_descriptor;
+  // Byte permute descriptor with zero SRC1 and an immediate selector operand.
+  loom_low_lower_resolved_descriptor_t
+      perm_b32_src1_zero_src2_literal_descriptor;
   // Native packed-pair FP8-to-F32 conversion descriptor.
   loom_low_lower_resolved_descriptor_t native_f32_pair_descriptor;
   // Native F32-pair-to-BF16-pair conversion descriptor.
