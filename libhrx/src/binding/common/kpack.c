@@ -592,6 +592,10 @@ static iree_status_t kpack_decompress_none(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "kpack blob entry missing offset/size");
   }
+  if (size == 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "kpack blob entry has zero size");
+  }
   if (offset < KPACK_ARCHIVE_HEADER_SIZE ||
       offset > archive->archive.data_length ||
       size > archive->archive.data_length - offset) {

@@ -647,6 +647,19 @@ TEST(KpackArchive, TocOffsetOutOfRange) {
       StatusIs(iree::StatusCode::kInvalidArgument));
 }
 
+TEST(KpackArchive, ZeroSizeBlobRejected) {
+  auto bytes = KpackBuilder(false).Add("a#0", "gfx900", {}).Build();
+  iree_hal_streaming_kpack_archive_t archive;
+  IREE_ASSERT_OK(iree_hal_streaming_kpack_archive_open(
+      iree_make_const_byte_span(bytes.data(), bytes.size()), &archive));
+  void* out = nullptr;
+  iree_host_size_t out_size = 0;
+  EXPECT_THAT(iree::Status(iree_hal_streaming_kpack_archive_get_kernel(
+                  &archive, IREE_SV("a#0"), IREE_SV("gfx900"),
+                  iree_allocator_system(), &out, &out_size)),
+              StatusIs(iree::StatusCode::kInvalidArgument));
+}
+
 #if defined(HRX_ENABLE_ZSTD)
 TEST(KpackArchive, ZstdGetKernelRoundTrips) {
   std::vector<uint8_t> k1;
