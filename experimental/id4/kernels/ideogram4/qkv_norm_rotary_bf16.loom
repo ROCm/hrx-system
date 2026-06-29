@@ -51,21 +51,18 @@ kernel.def export("id4_ideogram4_qkv_norm_rotary_bf16") @id4_ideogram4_qkv_norm_
   %rotated_query_view = buffer.view %rotated_query_global[%base] : buffer -> view<[%token_count]x[%hidden_size]xbf16, #dense>
   %rotated_key_view = buffer.view %rotated_key_global[%base] : buffer -> view<[%token_count]x[%hidden_size]xbf16, #dense>
   %value_view = buffer.view %value_global[%base] : buffer -> view<[%token_count]x[%hidden_size]xbf16, #dense>
-  %query_lane_square_sum = scf.for %head_channel = [%lane to %head_size step %workgroup_size_x](%acc = %zero_f32 : f32) -> (f32) {
+  %query_lane_square_sum, %key_lane_square_sum = scf.for %head_channel = [%lane to %head_size step %workgroup_size_x](%query_acc = %zero_f32 : f32, %key_acc = %zero_f32 : f32) -> (f32, f32) {
     %channel = index.add %head_base, %head_channel : index
-    %query_value_bf16 = view.load %qkv_view[%token, %channel] : view<[%token_count]x[%qkv_size]xbf16, #dense> -> bf16
-    %query_value = scalar.extf %query_value_bf16 : bf16 to f32
-    %query_square = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %query_value, %query_value : f32
-    %next = scalar.addf<reassoc|nnan|ninf|nsz> %acc, %query_square : f32
-    scf.yield %next : f32
-  }
-  %key_lane_square_sum = scf.for %head_channel = [%lane to %head_size step %workgroup_size_x](%acc = %zero_f32 : f32) -> (f32) {
     %key_row = index.add %key_base, %head_channel : index
+    %query_value_bf16 = view.load %qkv_view[%token, %channel] : view<[%token_count]x[%qkv_size]xbf16, #dense> -> bf16
     %key_value_bf16 = view.load %qkv_view[%token, %key_row] : view<[%token_count]x[%qkv_size]xbf16, #dense> -> bf16
+    %query_value = scalar.extf %query_value_bf16 : bf16 to f32
     %key_value = scalar.extf %key_value_bf16 : bf16 to f32
+    %query_square = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %query_value, %query_value : f32
     %key_square = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %key_value, %key_value : f32
-    %next = scalar.addf<reassoc|nnan|ninf|nsz> %acc, %key_square : f32
-    scf.yield %next : f32
+    %next_query = scalar.addf<reassoc|nnan|ninf|nsz> %query_acc, %query_square : f32
+    %next_key = scalar.addf<reassoc|nnan|ninf|nsz> %key_acc, %key_square : f32
+    scf.yield %next_query, %next_key : f32, f32
   }
   %query_square_sum = kernel.workgroup.reduce<addf> %query_lane_square_sum : f32
   %key_square_sum = kernel.workgroup.reduce<addf> %key_lane_square_sum : f32
@@ -191,21 +188,18 @@ kernel.def export("id4_ideogram4_qkv_norm_rotary_bf16_packed_value") @id4_ideogr
   %rotated_query_view = buffer.view %rotated_query_global[%base] : buffer -> view<[%value_token_stride]x[%hidden_size]xbf16, #dense>
   %rotated_key_view = buffer.view %rotated_key_global[%base] : buffer -> view<[%value_token_stride]x[%hidden_size]xbf16, #dense>
   %value_view = buffer.view %value_global[%base] : buffer -> view<[%value_token_stride]x[%hidden_size]xbf16, %value_layout>
-  %query_lane_square_sum = scf.for %head_channel = [%lane to %head_size step %workgroup_size_x](%acc = %zero_f32 : f32) -> (f32) {
+  %query_lane_square_sum, %key_lane_square_sum = scf.for %head_channel = [%lane to %head_size step %workgroup_size_x](%query_acc = %zero_f32 : f32, %key_acc = %zero_f32 : f32) -> (f32, f32) {
     %channel = index.add %head_base, %head_channel : index
-    %query_value_bf16 = view.load %qkv_view[%token, %channel] : view<[%token_count]x[%qkv_size]xbf16, #dense> -> bf16
-    %query_value = scalar.extf %query_value_bf16 : bf16 to f32
-    %query_square = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %query_value, %query_value : f32
-    %next = scalar.addf<reassoc|nnan|ninf|nsz> %acc, %query_square : f32
-    scf.yield %next : f32
-  }
-  %key_lane_square_sum = scf.for %head_channel = [%lane to %head_size step %workgroup_size_x](%acc = %zero_f32 : f32) -> (f32) {
     %key_row = index.add %key_base, %head_channel : index
+    %query_value_bf16 = view.load %qkv_view[%token, %channel] : view<[%token_count]x[%qkv_size]xbf16, #dense> -> bf16
     %key_value_bf16 = view.load %qkv_view[%token, %key_row] : view<[%token_count]x[%qkv_size]xbf16, #dense> -> bf16
+    %query_value = scalar.extf %query_value_bf16 : bf16 to f32
     %key_value = scalar.extf %key_value_bf16 : bf16 to f32
+    %query_square = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %query_value, %query_value : f32
     %key_square = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %key_value, %key_value : f32
-    %next = scalar.addf<reassoc|nnan|ninf|nsz> %acc, %key_square : f32
-    scf.yield %next : f32
+    %next_query = scalar.addf<reassoc|nnan|ninf|nsz> %query_acc, %query_square : f32
+    %next_key = scalar.addf<reassoc|nnan|ninf|nsz> %key_acc, %key_square : f32
+    scf.yield %next_query, %next_key : f32, f32
   }
   %query_square_sum = kernel.workgroup.reduce<addf> %query_lane_square_sum : f32
   %key_square_sum = kernel.workgroup.reduce<addf> %key_lane_square_sum : f32

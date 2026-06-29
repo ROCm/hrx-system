@@ -7289,6 +7289,7 @@ iree_native_test(
     "--config=id4.ideogram4.qkv_norm_rotary.token_count=1"
     "--config=id4.ideogram4.qkv_norm_rotary.attention_head_count=1"
     "--config=id4.ideogram4.qkv_norm_rotary.head_size=2"
+    "--config=id4.ideogram4.qkv_norm_rotary.value_token_stride=1"
   SRC
     loom::tools::iree-benchmark-loom
   LABELS
@@ -7306,6 +7307,7 @@ iree_native_test(
     "--config=id4.ideogram4.qkv_norm_rotary.token_count=2"
     "--config=id4.ideogram4.qkv_norm_rotary.attention_head_count=18"
     "--config=id4.ideogram4.qkv_norm_rotary.head_size=256"
+    "--config=id4.ideogram4.qkv_norm_rotary.value_token_stride=2"
   SRC
     loom::tools::iree-benchmark-loom
   LABELS
@@ -17912,6 +17914,7 @@ iree_native_test(
     "--config=id4.ideogram4.qkv_norm_rotary.token_count=1"
     "--config=id4.ideogram4.qkv_norm_rotary.attention_head_count=1"
     "--config=id4.ideogram4.qkv_norm_rotary.head_size=2"
+    "--config=id4.ideogram4.qkv_norm_rotary.value_token_stride=1"
   SRC
     loom::tools::iree-test-loom
   LABELS
@@ -17933,6 +17936,7 @@ iree_native_test(
     "--config=id4.ideogram4.qkv_norm_rotary.token_count=2"
     "--config=id4.ideogram4.qkv_norm_rotary.attention_head_count=18"
     "--config=id4.ideogram4.qkv_norm_rotary.head_size=256"
+    "--config=id4.ideogram4.qkv_norm_rotary.value_token_stride=2"
   SRC
     loom::tools::iree-test-loom
   LABELS
