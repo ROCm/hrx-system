@@ -1059,8 +1059,10 @@ typedef enum loom_amdgpu_fragment_memory_packet_flag_bits_e {
   LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_REPAIR_ZERO = 1u << 8,
   // Packed FP8-to-BF16 decode repairs subnormal payloads with table packets.
   LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_REPAIR_SUBNORMAL = 1u << 9,
-  // Packed FP8-to-BF16 decode repairs finite-NAN payloads after expansion.
+  // Packed FP8-to-BF16 decode repairs NaN payloads after expansion.
   LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_REPAIR_NAN = 1u << 10,
+  // Packed FP8-to-BF16 decode repairs infinity payloads after expansion.
+  LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_REPAIR_INF = 1u << 11,
 } loom_amdgpu_fragment_memory_packet_flag_bits_t;
 
 // Bitset of loom_amdgpu_fragment_memory_packet_flag_bits_t values.
