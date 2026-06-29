@@ -1349,6 +1349,288 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx1100_direct_decode_s
 // ====
 
 amdgpu.target<gfx1100> @target
+kernel.def target(@target) @gfx1100_direct_decode_scalef32_identity_finite_f8e4m3_x8_to_bf16_store() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %lane = kernel.workitem.id<x> : index
+  %one = scalar.constant 1.0 : f32
+  %schema = encoding.define #matrix_operand<affine=scale_only, element_format=f8e4m3fn, payload_elements=8, payload_packing=dense_lanes, payload_registers=0, rounding=finite_only, scale_format=f32, scale_group_elements=8, scale_operands=1, scale_topology=block_1d> : encoding<schema>
+  %input_view = buffer.view %input[%base] : buffer -> view<64x8xf8E4M3, #dense>
+  %output_view = buffer.view %output[%base] : buffer -> view<64x8xbf16, #dense>
+  %payload = vector.load %input_view[%lane, 0] : view<64x8xf8E4M3, #dense> -> vector<8xf8E4M3>
+  %scale_vector = vector.splat %one : vector<1xf32>
+  %decoded = vector.decode %payload using %schema {scale = %scale_vector : vector<1xf32>} : vector<8xf8E4M3>, encoding<schema> -> vector<8xbf16>
+  vector.store %decoded, %output_view[%lane, 0] : vector<8xbf16>, view<64x8xbf16, #dense>
+  kernel.return
+}
+
+// ----
+low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx1100_direct_decode_scalef32_identity_finite_f8e4m3_x8_to_bf16_store() asm<amdgpu.rdna3.core> {
+  %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
+  %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
+  %28 = v_lshlrev_b32_src0_inline %lane, 3
+  %payload = global_load_b64_saddr %28, %input_view
+  %31 = slice %payload[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %32 = slice %payload[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %33 = v_mov_b32 1006648320
+  %34 = v_perm_b32_src1_zero_src2_lit %31, 327684
+  %35 = v_and_b32_lit %34, 8323199
+  %36 = v_lshlrev_b32_src0_inline %34, 8
+  %37 = v_lshl_add_u32_shift_imm %35, %33, 4
+  %38 = v_perm_b32_src1_zero_src2_lit %31, 458758
+  %39 = v_and_b32_lit %38, 8323199
+  %40 = v_lshlrev_b32_src0_inline %38, 8
+  %41 = v_lshl_add_u32_shift_imm %39, %33, 4
+  %42 = v_perm_b32_src1_zero_src2_lit %32, 327684
+  %43 = v_and_b32_lit %42, 8323199
+  %44 = v_lshlrev_b32_src0_inline %42, 8
+  %45 = v_lshl_add_u32_shift_imm %43, %33, 4
+  %46 = v_perm_b32_src1_zero_src2_lit %32, 458758
+  %47 = v_and_b32_lit %46, 8323199
+  %48 = v_lshlrev_b32_src0_inline %46, 8
+  %49 = v_lshl_add_u32_shift_imm %47, %33, 4
+  %50 = v_pk_min_u16 %35, %39
+  %51 = v_pk_min_u16 %50, %43
+  %52 = v_pk_min_u16 %51, %47
+  %53 = s_mov_b32 4294508536
+  %54 = v_pk_add_u16 %52, %53
+  %55 = v_and_b32_lit %54, 2147516416
+  %56 = v_cmp_ne_i32_src1_inline %55 {rhs = 0}
+  %57 = s_cmp_lg_u64_src1_inline %56 {rhs = 0}
+  low.cond_br %57, ^_bb1, ^_bb2 : reg<amdgpu.scc>
+^_bb1:
+  %62 = s_mov_b32 3229614080
+  %63 = s_mov_b32 1614815232
+  %64 = s_mov_b32 993737472
+  %65 = s_mov_b32 1010580540
+  %67 = s_mov_b32 983055
+  %68 = v_perm_b32 %63, %62, %35
+  %69 = v_perm_b32 %65, %64, %35
+  %70 = v_lshl_add_u32_shift_imm %69, %68, 8
+  %71 = v_pk_add_u16 %35, %53
+  %72 = v_pk_ashrrev_i16 %67, %71
+  %73 = v_xor_b32 %37, %70
+  %74 = v_and_b32 %73, %72
+  %75 = v_xor_b32 %37, %74
+  %76 = v_perm_b32 %63, %62, %39
+  %77 = v_perm_b32 %65, %64, %39
+  %78 = v_lshl_add_u32_shift_imm %77, %76, 8
+  %79 = v_pk_add_u16 %39, %53
+  %80 = v_pk_ashrrev_i16 %67, %79
+  %81 = v_xor_b32 %41, %78
+  %82 = v_and_b32 %81, %80
+  %83 = v_xor_b32 %41, %82
+  %84 = v_perm_b32 %63, %62, %43
+  %85 = v_perm_b32 %65, %64, %43
+  %86 = v_lshl_add_u32_shift_imm %85, %84, 8
+  %87 = v_pk_add_u16 %43, %53
+  %88 = v_pk_ashrrev_i16 %67, %87
+  %89 = v_xor_b32 %45, %86
+  %90 = v_and_b32 %89, %88
+  %91 = v_xor_b32 %45, %90
+  %92 = v_perm_b32 %63, %62, %47
+  %93 = v_perm_b32 %65, %64, %47
+  %94 = v_lshl_add_u32_shift_imm %93, %92, 8
+  %95 = v_pk_add_u16 %47, %53
+  %96 = v_pk_ashrrev_i16 %67, %95
+  %97 = v_xor_b32 %49, %94
+  %98 = v_and_b32 %97, %96
+  %99 = v_xor_b32 %49, %98
+  low.br ^_bb3(%75: reg<amdgpu.vgpr>, %83: reg<amdgpu.vgpr>, %91: reg<amdgpu.vgpr>, %99: reg<amdgpu.vgpr>)
+^_bb2:
+  low.br ^_bb3(%37: reg<amdgpu.vgpr>, %41: reg<amdgpu.vgpr>, %45: reg<amdgpu.vgpr>, %49: reg<amdgpu.vgpr>)
+^_bb3(%58: reg<amdgpu.vgpr>, %59: reg<amdgpu.vgpr>, %60: reg<amdgpu.vgpr>, %61: reg<amdgpu.vgpr>):
+  %100 = v_bfi_b32_src0_lit %36, %58, 2147516416
+  %101 = v_bfi_b32_src0_lit %40, %59, 2147516416
+  %102 = v_bfi_b32_src0_lit %44, %60, 2147516416
+  %103 = v_bfi_b32_src0_lit %48, %61, 2147516416
+  %decoded = concat(%100, %101, %102, %103) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  %105 = v_lshlrev_b32_src0_inline %lane, 4
+  global_store_b128_saddr %105, %decoded, %output_view
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+kernel.def target(@target) @gfx1100_direct_decode_scalef32_identity_finite_f8e4m3_x4_to_f16_store() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %lane = kernel.workitem.id<x> : index
+  %one = scalar.constant 1.0 : f32
+  %schema = encoding.define #matrix_operand<affine=scale_only, element_format=f8e4m3fn, payload_elements=4, payload_packing=dense_lanes, payload_registers=0, rounding=finite_only, scale_format=f32, scale_group_elements=4, scale_operands=1, scale_topology=block_1d> : encoding<schema>
+  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E4M3, #dense>
+  %output_view = buffer.view %output[%base] : buffer -> view<64x4xf16, #dense>
+  %payload = vector.load %input_view[%lane, 0] : view<64x4xf8E4M3, #dense> -> vector<4xf8E4M3>
+  %scale_vector = vector.splat %one : vector<1xf32>
+  %decoded = vector.decode %payload using %schema {scale = %scale_vector : vector<1xf32>} : vector<4xf8E4M3>, encoding<schema> -> vector<4xf16>
+  vector.store %decoded, %output_view[%lane, 0] : vector<4xf16>, view<64x4xf16, #dense>
+  kernel.return
+}
+
+// ----
+low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx1100_direct_decode_scalef32_identity_finite_f8e4m3_x4_to_f16_store() asm<amdgpu.rdna3.core> {
+  %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
+  %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
+  %28 = v_lshlrev_b32_src0_inline %lane, 2
+  %payload = global_load_b32_saddr %28, %input_view
+  %31 = v_mov_b32 1006648320
+  %32 = v_perm_b32_src1_zero_src2_lit %payload, 327684
+  %33 = v_and_b32_lit %32, 8323199
+  %34 = v_lshlrev_b32_src0_inline %32, 8
+  %35 = v_lshl_add_u32_shift_imm %33, %31, 4
+  %36 = v_perm_b32_src1_zero_src2_lit %payload, 458758
+  %37 = v_and_b32_lit %36, 8323199
+  %38 = v_lshlrev_b32_src0_inline %36, 8
+  %39 = v_lshl_add_u32_shift_imm %37, %31, 4
+  %40 = v_pk_min_u16 %33, %37
+  %41 = s_mov_b32 4294508536
+  %42 = v_pk_add_u16 %40, %41
+  %43 = v_and_b32_lit %42, 2147516416
+  %44 = v_cmp_ne_i32_src1_inline %43 {rhs = 0}
+  %45 = s_cmp_lg_u64_src1_inline %44 {rhs = 0}
+  low.cond_br %45, ^_bb1, ^_bb2 : reg<amdgpu.scc>
+^_bb1:
+  %48 = s_mov_b32 3229614080
+  %49 = s_mov_b32 1614815232
+  %50 = s_mov_b32 993737472
+  %51 = s_mov_b32 1010580540
+  %53 = s_mov_b32 983055
+  %54 = v_perm_b32 %49, %48, %33
+  %55 = v_perm_b32 %51, %50, %33
+  %56 = v_lshl_add_u32_shift_imm %55, %54, 8
+  %57 = v_pk_add_u16 %33, %41
+  %58 = v_pk_ashrrev_i16 %53, %57
+  %59 = v_xor_b32 %35, %56
+  %60 = v_and_b32 %59, %58
+  %61 = v_xor_b32 %35, %60
+  %62 = v_perm_b32 %49, %48, %37
+  %63 = v_perm_b32 %51, %50, %37
+  %64 = v_lshl_add_u32_shift_imm %63, %62, 8
+  %65 = v_pk_add_u16 %37, %41
+  %66 = v_pk_ashrrev_i16 %53, %65
+  %67 = v_xor_b32 %39, %64
+  %68 = v_and_b32 %67, %66
+  %69 = v_xor_b32 %39, %68
+  low.br ^_bb3(%61: reg<amdgpu.vgpr>, %69: reg<amdgpu.vgpr>)
+^_bb2:
+  low.br ^_bb3(%35: reg<amdgpu.vgpr>, %39: reg<amdgpu.vgpr>)
+^_bb3(%46: reg<amdgpu.vgpr>, %47: reg<amdgpu.vgpr>):
+  %70 = v_bfi_b32_src0_lit %34, %46, 2147516416
+  %71 = v_bfi_b32_src0_lit %38, %47, 2147516416
+  %72 = v_lshlrev_b32_src0_inline %70, 16
+  %73 = v_and_b32_lit %70, 4294901760
+  %74 = v_lshlrev_b32_src0_inline %71, 16
+  %75 = v_and_b32_lit %71, 4294901760
+  %76 = v_cvt_f16_f32 %72
+  %77 = v_bfe_u32_offset_0_width_16_low16 %76
+  %78 = v_cvt_f16_f32 %73
+  %79 = v_bfe_u32_offset_0_width_16_low16 %78
+  %80 = v_lshl_add_u32_shift_imm %79, %77, 16
+  %81 = v_cvt_f16_f32 %74
+  %82 = v_bfe_u32_offset_0_width_16_low16 %81
+  %83 = v_cvt_f16_f32 %75
+  %84 = v_bfe_u32_offset_0_width_16_low16 %83
+  %85 = v_lshl_add_u32_shift_imm %84, %82, 16
+  %decoded = concat(%80, %85) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %87 = v_lshlrev_b32_src0_inline %lane, 3
+  global_store_b64_saddr %87, %decoded, %output_view
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+kernel.def target(@target) @gfx1100_direct_decode_scalef32_identity_finite_f8e4m3_x4_to_f32_store() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %lane = kernel.workitem.id<x> : index
+  %one = scalar.constant 1.0 : f32
+  %schema = encoding.define #matrix_operand<affine=scale_only, element_format=f8e4m3fn, payload_elements=4, payload_packing=dense_lanes, payload_registers=0, rounding=finite_only, scale_format=f32, scale_group_elements=4, scale_operands=1, scale_topology=block_1d> : encoding<schema>
+  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E4M3, #dense>
+  %output_view = buffer.view %output[%base] : buffer -> view<64x4xf32, #dense>
+  %payload = vector.load %input_view[%lane, 0] : view<64x4xf8E4M3, #dense> -> vector<4xf8E4M3>
+  %scale_vector = vector.splat %one : vector<1xf32>
+  %decoded = vector.decode %payload using %schema {scale = %scale_vector : vector<1xf32>} : vector<4xf8E4M3>, encoding<schema> -> vector<4xf32>
+  vector.store %decoded, %output_view[%lane, 0] : vector<4xf32>, view<64x4xf32, #dense>
+  kernel.return
+}
+
+// ----
+low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx1100_direct_decode_scalef32_identity_finite_f8e4m3_x4_to_f32_store() asm<amdgpu.rdna3.core> {
+  %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
+  %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
+  %28 = v_lshlrev_b32_src0_inline %lane, 2
+  %payload = global_load_b32_saddr %28, %input_view
+  %31 = v_mov_b32 1006648320
+  %32 = v_perm_b32_src1_zero_src2_lit %payload, 327684
+  %33 = v_and_b32_lit %32, 8323199
+  %34 = v_lshlrev_b32_src0_inline %32, 8
+  %35 = v_lshl_add_u32_shift_imm %33, %31, 4
+  %36 = v_perm_b32_src1_zero_src2_lit %payload, 458758
+  %37 = v_and_b32_lit %36, 8323199
+  %38 = v_lshlrev_b32_src0_inline %36, 8
+  %39 = v_lshl_add_u32_shift_imm %37, %31, 4
+  %40 = v_pk_min_u16 %33, %37
+  %41 = s_mov_b32 4294508536
+  %42 = v_pk_add_u16 %40, %41
+  %43 = v_and_b32_lit %42, 2147516416
+  %44 = v_cmp_ne_i32_src1_inline %43 {rhs = 0}
+  %45 = s_cmp_lg_u64_src1_inline %44 {rhs = 0}
+  low.cond_br %45, ^_bb1, ^_bb2 : reg<amdgpu.scc>
+^_bb1:
+  %48 = s_mov_b32 3229614080
+  %49 = s_mov_b32 1614815232
+  %50 = s_mov_b32 993737472
+  %51 = s_mov_b32 1010580540
+  %53 = s_mov_b32 983055
+  %54 = v_perm_b32 %49, %48, %33
+  %55 = v_perm_b32 %51, %50, %33
+  %56 = v_lshl_add_u32_shift_imm %55, %54, 8
+  %57 = v_pk_add_u16 %33, %41
+  %58 = v_pk_ashrrev_i16 %53, %57
+  %59 = v_xor_b32 %35, %56
+  %60 = v_and_b32 %59, %58
+  %61 = v_xor_b32 %35, %60
+  %62 = v_perm_b32 %49, %48, %37
+  %63 = v_perm_b32 %51, %50, %37
+  %64 = v_lshl_add_u32_shift_imm %63, %62, 8
+  %65 = v_pk_add_u16 %37, %41
+  %66 = v_pk_ashrrev_i16 %53, %65
+  %67 = v_xor_b32 %39, %64
+  %68 = v_and_b32 %67, %66
+  %69 = v_xor_b32 %39, %68
+  low.br ^_bb3(%61: reg<amdgpu.vgpr>, %69: reg<amdgpu.vgpr>)
+^_bb2:
+  low.br ^_bb3(%35: reg<amdgpu.vgpr>, %39: reg<amdgpu.vgpr>)
+^_bb3(%46: reg<amdgpu.vgpr>, %47: reg<amdgpu.vgpr>):
+  %70 = v_bfi_b32_src0_lit %34, %46, 2147516416
+  %71 = v_bfi_b32_src0_lit %38, %47, 2147516416
+  %72 = v_lshlrev_b32_src0_inline %70, 16
+  %73 = v_and_b32_lit %70, 4294901760
+  %74 = v_lshlrev_b32_src0_inline %71, 16
+  %75 = v_and_b32_lit %71, 4294901760
+  %decoded = concat(%72, %73, %74, %75) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  %77 = v_lshlrev_b32_src0_inline %lane, 4
+  global_store_b128_saddr %77, %decoded, %output_view
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
 kernel.def target(@target) @gfx1100_direct_decode_scalef32_finite_f8e4m3_x4_to_bf16_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
