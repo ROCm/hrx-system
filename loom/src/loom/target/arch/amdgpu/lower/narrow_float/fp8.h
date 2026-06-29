@@ -155,6 +155,13 @@ bool loom_amdgpu_fp8_to_f32_descriptor_refs(
     loom_scalar_type_t source_element_type,
     loom_amdgpu_fp8_to_f32_descriptor_refs_t* out_refs);
 
+// Returns the native scaled FP8/BF8 conversion descriptor ref for the source
+// and result element type pair.
+bool loom_amdgpu_fp8_scalef32_descriptor_ref(
+    loom_scalar_type_t source_element_type,
+    loom_scalar_type_t result_element_type,
+    loom_amdgpu_descriptor_ref_t* out_ref);
+
 // Selects descriptor helpers and initializes format tables for |element_type|.
 iree_status_t loom_amdgpu_select_fp8_decode_plan(
     loom_low_lower_context_t* context, loom_scalar_type_t element_type,

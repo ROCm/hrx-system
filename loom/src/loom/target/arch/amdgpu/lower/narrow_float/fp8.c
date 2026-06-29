@@ -120,6 +120,34 @@ bool loom_amdgpu_fp8_to_f32_descriptor_refs(
   return true;
 }
 
+bool loom_amdgpu_fp8_scalef32_descriptor_ref(
+    loom_scalar_type_t source_element_type,
+    loom_scalar_type_t result_element_type,
+    loom_amdgpu_descriptor_ref_t* out_ref) {
+  *out_ref = LOOM_AMDGPU_DESCRIPTOR_REF_NONE;
+  if (source_element_type >= LOOM_SCALAR_TYPE_COUNT_ ||
+      result_element_type >= LOOM_SCALAR_TYPE_COUNT_) {
+    return false;
+  }
+  static const loom_amdgpu_descriptor_ref_t
+      kLoomAmdgpuFp8ScaleF32DescriptorRefs[LOOM_SCALAR_TYPE_COUNT_]
+                                          [LOOM_SCALAR_TYPE_COUNT_] = {
+#define LOOM_AMDGPU_FP8_SCALEF32_DESCRIPTOR_REF_ROW(source_type, result_type, \
+                                                    ref)                      \
+  [source_type][result_type] = ref
+#include "loom/target/arch/amdgpu/lower/fp8_scalef32_descriptor_ref_rows.inl"
+#undef LOOM_AMDGPU_FP8_SCALEF32_DESCRIPTOR_REF_ROW
+                                          };
+  const loom_amdgpu_descriptor_ref_t descriptor_ref =
+      kLoomAmdgpuFp8ScaleF32DescriptorRefs[source_element_type]
+                                          [result_element_type];
+  if (descriptor_ref == LOOM_AMDGPU_DESCRIPTOR_REF_NONE) {
+    return false;
+  }
+  *out_ref = descriptor_ref;
+  return true;
+}
+
 static const loom_low_lower_resolved_descriptor_t*
 loom_amdgpu_fp8_decode_cmp_src1_inline_descriptor(
     const loom_amdgpu_fp8_decode_plan_t* plan,
