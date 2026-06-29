@@ -812,6 +812,19 @@ static iree_status_t AccumulateGenerationBenchmarkPlanStatistics(
   return iree_ok_status();
 }
 
+static iree_status_t QueryGenerationBenchmarkResourceStatistics(
+    const LiveGenerationBenchmarkContext& context,
+    const id4_ideogram4_generation_plan_t* plan,
+    id4_ideogram4_generation_resource_statistics_t* out_statistics) {
+  id4_ideogram4_generation_resource_statistics_options_t options;
+  std::memset(&options, 0, sizeof(options));
+  options.structure_size = sizeof(options);
+  options.residency_mode = context.generation_residency_mode;
+  options.resident_stage_mask = context.generation_resident_stage_mask;
+  return id4_ideogram4_generation_plan_resource_statistics(plan, &options,
+                                                           out_statistics);
+}
+
 static iree_status_t ParseRequest(iree_string_view_t json,
                                   ParsedRequest* out_request) {
   IREE_ASSERT_ARGUMENT(out_request);
@@ -1631,6 +1644,7 @@ static iree_status_t SetGenerationBenchmarkLabel(
     iree_string_view_t benchmark_scope, iree_string_view_t prompt_label,
     const id4_ideogram4_generation_plan_summary_t& summary,
     const GenerationBenchmarkPlanStatistics& statistics,
+    const id4_ideogram4_generation_resource_statistics_t& resource_statistics,
     const GenerationBenchmarkTimingStatistics& timing,
     uint64_t iteration_count) {
   const iree_string_view_t parameter_format =
@@ -1653,6 +1667,15 @@ static iree_status_t SetGenerationBenchmarkLabel(
   GenerationBenchmarkSourceCacheStatistics source_cache_statistics;
   IREE_RETURN_IF_ERROR(AccumulateGenerationBenchmarkSourceCacheStatistics(
       context, &source_cache_statistics));
+  const bool stage_serial_issue =
+      context.generation_issue_mode == GenerationIssueMode::kStageSerial;
+  const iree_device_size_t selected_logical_peak_byte_length =
+      stage_serial_issue
+          ? resource_statistics.stage_serial_total_peak_byte_length
+          : resource_statistics.phase_concurrent_total_peak_byte_length;
+  const iree_device_size_t selected_with_source_peak_byte_length =
+      selected_logical_peak_byte_length +
+      source_cache_statistics.peak_cached_byte_length;
   iree_string_builder_t label_builder;
   iree_string_builder_initialize(iree_allocator_system(), &label_builder);
   iree_status_t status = iree_string_builder_append_format(
@@ -1679,7 +1702,11 @@ static iree_status_t SetGenerationBenchmarkLabel(
       "]"
       " local_hw_total=%" PRIu64 "MiB local_hw_largest=%" PRIu64
       "MiB"
-      " boundary=%" PRIu64 "MiB kernels=%" PRIhsz " dispatches=%" PRIhsz,
+      " boundary=%" PRIu64 "MiB kernels=%" PRIhsz " dispatches=%" PRIhsz
+      " logical_live[boundary=%" PRIu64 "MiB,taps=%" PRIu64
+      "MiB,resident=%" PRIu64 "MiB,phase_peak=%" PRIu64
+      "MiB,stage_serial_peak=%" PRIu64 "MiB,selected_peak=%" PRIu64
+      "MiB,selected_with_source_cache_peak=%" PRIu64 "MiB]",
       static_cast<int>(benchmark_scope.size), benchmark_scope.data,
       static_cast<int>(prompt_label.size), prompt_label.data,
       summary.qwen_token_count, summary.qwen_token_capacity,
@@ -1721,7 +1748,14 @@ static iree_status_t SetGenerationBenchmarkLabel(
       CeilMiB(statistics.total_local_slab_high_water_mark),
       CeilMiB(statistics.largest_local_slab_high_water_mark),
       CeilMiB(statistics.boundary_tensor_byte_length), statistics.kernel_count,
-      statistics.dispatch_count);
+      statistics.dispatch_count,
+      CeilMiB(resource_statistics.boundary_buffer_byte_length),
+      CeilMiB(resource_statistics.diagnostic_tap_buffer_byte_length),
+      CeilMiB(resource_statistics.resident_stage_bundle_byte_length),
+      CeilMiB(resource_statistics.phase_concurrent_total_peak_byte_length),
+      CeilMiB(resource_statistics.stage_serial_total_peak_byte_length),
+      CeilMiB(selected_logical_peak_byte_length),
+      CeilMiB(selected_with_source_peak_byte_length));
   if (iree_status_is_ok(status)) {
     status = AppendGenerationBenchmarkStageLabels(&label_builder, statistics);
   }
@@ -1778,6 +1812,8 @@ static iree_status_t RunGenerationEndToEndBenchmark(
   std::memset(&last_summary, 0, sizeof(last_summary));
   GenerationBenchmarkPlanStatistics last_statistics;
   std::memset(&last_statistics, 0, sizeof(last_statistics));
+  id4_ideogram4_generation_resource_statistics_t last_resource_statistics;
+  std::memset(&last_resource_statistics, 0, sizeof(last_resource_statistics));
   GenerationBenchmarkTimingStatistics timing_total;
   std::memset(&timing_total, 0, sizeof(timing_total));
   bool plan_json_written = false;
@@ -1820,6 +1856,14 @@ static iree_status_t RunGenerationEndToEndBenchmark(
     }
     if (iree_status_is_ok(status)) {
       last_statistics = statistics;
+    }
+    id4_ideogram4_generation_resource_statistics_t resource_statistics;
+    if (iree_status_is_ok(status)) {
+      status = QueryGenerationBenchmarkResourceStatistics(context, plan.get(),
+                                                          &resource_statistics);
+    }
+    if (iree_status_is_ok(status)) {
+      last_resource_statistics = resource_statistics;
     }
     iteration_timing.plan_ns += iree_time_now() - phase_start_time_ns;
     if (iree_status_is_ok(status) && !plan_json_written) {
@@ -1892,7 +1936,8 @@ static iree_status_t RunGenerationEndToEndBenchmark(
   IREE_RETURN_IF_ERROR(status);
   IREE_RETURN_IF_ERROR(SetGenerationBenchmarkLabel(
       benchmark_state, context, IREE_SV("end_to_end"), prompt->label,
-      last_summary, last_statistics, timing_total, iteration_count));
+      last_summary, last_statistics, last_resource_statistics, timing_total,
+      iteration_count));
   iree_benchmark_set_items_processed(
       benchmark_state, static_cast<int64_t>(iteration_count * token_count));
   return iree_ok_status();
@@ -1946,6 +1991,9 @@ static iree_status_t RunGenerationIssuePreparedBenchmark(
   GenerationBenchmarkPlanStatistics statistics;
   IREE_RETURN_IF_ERROR(
       AccumulateGenerationBenchmarkPlanStatistics(plan.get(), &statistics));
+  id4_ideogram4_generation_resource_statistics_t resource_statistics;
+  IREE_RETURN_IF_ERROR(QueryGenerationBenchmarkResourceStatistics(
+      context, plan.get(), &resource_statistics));
 
   IREE_RETURN_IF_ERROR(
       WriteGenerationPlanJsonIfRequested(prompt->label, plan.get()));
@@ -2030,7 +2078,7 @@ static iree_status_t RunGenerationIssuePreparedBenchmark(
   IREE_RETURN_IF_ERROR(status);
   IREE_RETURN_IF_ERROR(SetGenerationBenchmarkLabel(
       benchmark_state, context, IREE_SV("prepared_issue"), prompt->label,
-      summary, statistics, timing_total, iteration_count));
+      summary, statistics, resource_statistics, timing_total, iteration_count));
   iree_benchmark_set_items_processed(
       benchmark_state,
       static_cast<int64_t>(iteration_count * summary.qwen_token_count));

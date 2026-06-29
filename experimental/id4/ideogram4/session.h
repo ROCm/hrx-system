@@ -266,6 +266,55 @@ typedef enum id4_ideogram4_generation_resident_stage_bit_e {
       ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_DECODE,
 } id4_ideogram4_generation_resident_stage_bit_t;
 
+// Options for estimating generation resource lifetimes.
+typedef struct id4_ideogram4_generation_resource_statistics_options_t {
+  // Size of this structure for versioning.
+  iree_host_size_t structure_size;
+  // Extension structure chain; must be NULL for now.
+  const void* next;
+  // Stage-bundle residency policy being evaluated.
+  id4_ideogram4_generation_residency_mode_t residency_mode;
+  // Stage-bundle mask used when |residency_mode| selects explicit stages.
+  id4_ideogram4_generation_resident_stage_mask_t resident_stage_mask;
+} id4_ideogram4_generation_resource_statistics_options_t;
+
+// Logical resource lifetime statistics derived from a generation plan.
+//
+// These counters describe ID4-owned resources whose lifetimes are explicit in
+// the generation schedule: boundary buffers, diagnostic tap buffers, prepared
+// stage parameter/constant slabs, and queued local slab high-water marks. They
+// intentionally exclude HAL allocator pool overhead and external parameter
+// provider caches; callers that enable source-resident providers should add
+// those provider statistics separately.
+typedef struct id4_ideogram4_generation_resource_statistics_t {
+  // Generation boundary buffers retained after planned aliases are applied.
+  iree_device_size_t boundary_buffer_byte_length;
+  // Diagnostic tap buffers retained by the generation bundle.
+  iree_device_size_t diagnostic_tap_buffer_byte_length;
+  // Resident prepared-stage parameter slab bytes from the selected policy.
+  iree_device_size_t resident_stage_parameter_byte_length;
+  // Resident prepared-stage constant slab bytes from the selected policy.
+  iree_device_size_t resident_stage_constant_byte_length;
+  // Resident prepared-stage parameter plus constant slab bytes.
+  iree_device_size_t resident_stage_bundle_byte_length;
+  // Largest phase-concurrent parameter slab live set.
+  iree_device_size_t phase_concurrent_parameter_peak_byte_length;
+  // Largest phase-concurrent constant slab live set.
+  iree_device_size_t phase_concurrent_constant_peak_byte_length;
+  // Largest phase-concurrent local slab high-water live set.
+  iree_device_size_t phase_concurrent_local_peak_byte_length;
+  // Largest phase-concurrent total live set excluding external source caches.
+  iree_device_size_t phase_concurrent_total_peak_byte_length;
+  // Largest stage-serial parameter slab live set.
+  iree_device_size_t stage_serial_parameter_peak_byte_length;
+  // Largest stage-serial constant slab live set.
+  iree_device_size_t stage_serial_constant_peak_byte_length;
+  // Largest stage-serial local slab high-water live set.
+  iree_device_size_t stage_serial_local_peak_byte_length;
+  // Largest stage-serial total live set excluding external source caches.
+  iree_device_size_t stage_serial_total_peak_byte_length;
+} id4_ideogram4_generation_resource_statistics_t;
+
 // Options for preparing reusable generation state from one generation plan.
 typedef struct id4_ideogram4_generation_prepare_options_t {
   // Size of this structure for versioning.
@@ -456,6 +505,12 @@ iree_status_t id4_ideogram4_generation_plan_stage_at(
     const id4_ideogram4_generation_plan_t* plan, iree_host_size_t index,
     iree_string_view_t* out_stage_key,
     const id4_pipeline_plan_t** out_stage_plan);
+
+// Estimates logical resource lifetime peaks for |plan| and |options|.
+iree_status_t id4_ideogram4_generation_plan_resource_statistics(
+    const id4_ideogram4_generation_plan_t* plan,
+    const id4_ideogram4_generation_resource_statistics_options_t* options,
+    id4_ideogram4_generation_resource_statistics_t* out_statistics);
 
 // Appends an inspectable generation-plan JSON object to |builder|.
 iree_status_t id4_ideogram4_generation_plan_format_json(
