@@ -289,6 +289,7 @@ iree_cc_test(
     ::parameter_slab
     ::plan
     iree::base
+    iree::base::internal
     iree::base::tooling::flags
     iree::experimental::id4::tooling::runtime
     iree::hal

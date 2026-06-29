@@ -254,6 +254,7 @@ iree_runtime_cc_test(
         ":plan",
         "//experimental/id4/tooling:runtime",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/tooling:flags",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/io:parameter_index",

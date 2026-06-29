@@ -27,8 +27,8 @@ kernel.def export("id4_parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile") @id4_
   %scale_global = buffer.assume.memory_space<global> %scale_noalias : buffer
   %target_global = buffer.assume.memory_space<global> %target_noalias : buffer
   %dense = encoding.layout.dense : encoding<layout>
-  %fp8_e4m3fn = encoding.define #fp8_e4m3fn : encoding<schema>
-  %fp8_storage = encoding.define #physical_storage {layout = %dense : encoding<layout>, schema = %fp8_e4m3fn : encoding<schema>} : encoding<storage>
+  %fp8_storage_schema = encoding.define #matrix_operand<element_format=f8e4m3, payload_elements=8, payload_registers=2, rounding=finite_only> : encoding<schema>
+  %fp8_storage = encoding.define #physical_storage {layout = %dense : encoding<layout>, schema = %fp8_storage_schema : encoding<schema>} : encoding<storage>
   %weight_view = buffer.view %weight_global[%base] : buffer -> view<[%output_size]x[%input_size]xf8E4M3, %fp8_storage>
   %scale_view = buffer.view %scale_global[%base] : buffer -> view<[%output_size]xf32, #dense>
   %target_view = buffer.view %target_global[%base] : buffer -> view<[%element_count]xbf16, #dense>
@@ -74,6 +74,16 @@ check.case public @id4_parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_max_fin
   check.return
 }
 
+check.case public @id4_parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_top_exponent_case {
+  %weight = check.generate.fill value(-320.0) : tensor<16x16xf8E4M3>
+  %scale = check.generate.fill value(1.0) : tensor<16xf32>
+  %target = check.generate.fill value(0.0) : tensor<256xbf16>
+  %expected = check.generate.fill value(-320.0) : tensor<256xbf16>
+  func.call @id4_parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile(%weight, %scale, %target) : (tensor<16x16xf8E4M3>, tensor<16xf32>, tensor<256xbf16>)
+  check.expect.close actual(%target) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<256xbf16>
+  check.return
+}
+
 check.case public @id4_parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_qkv_shape_case {
   %weight = check.generate.fill value(0.0) : tensor<13824x4608xf8E4M3>
   %scale = check.generate.fill value(1.0) : tensor<13824xf32>
@@ -97,6 +107,8 @@ check.case public @id4_parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_mlp_up_
 check.benchmark<@id4_parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_small_case> @id4_parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_small
 
 check.benchmark<@id4_parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_max_finite_case> @id4_parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_max_finite
+
+check.benchmark<@id4_parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_top_exponent_case> @id4_parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_top_exponent
 
 check.benchmark<@id4_parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_qkv_shape_case> @id4_parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_qkv_shape
 

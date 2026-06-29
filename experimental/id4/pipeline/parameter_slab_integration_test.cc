@@ -5,7 +5,9 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
+#include <iomanip>
 
 #include "experimental/id4/pipeline/diagnostics.h"
 #include "experimental/id4/pipeline/kernel_cache.h"
@@ -13,6 +15,7 @@
 #include "experimental/id4/pipeline/parameter_slab.h"
 #include "experimental/id4/pipeline/plan.h"
 #include "experimental/id4/tooling/runtime.h"
+#include "iree/base/internal/math.h"
 #include "iree/base/tooling/flags.h"
 #include "iree/io/parameter_index.h"
 #include "iree/io/parameter_index_provider.h"
@@ -20,6 +23,21 @@
 #include "iree/testing/status_matchers.h"
 
 namespace {
+
+constexpr iree_host_size_t kCompactRhsTileElementCount = 16 * 16;
+constexpr iree_host_size_t kCompactRhsTileByteLength =
+    kCompactRhsTileElementCount * sizeof(uint16_t);
+constexpr iree_host_size_t kFp8RawSweepTileCount = 64;
+
+static uint8_t FiniteNonzeroFp8SweepByte(iree_host_size_t ordinal) {
+  const uint8_t value = static_cast<uint8_t>(ordinal);
+  if ((value & 0x7Fu) == 0) {
+    return value == 0 ? 0x01 : 0x81;
+  }
+  if (value == 0x7Fu) return 0x7E;
+  if (value == 0xFFu) return 0xFE;
+  return value;
+}
 
 template <typename T, void (*Release)(T*)>
 class OwningRef {
@@ -118,9 +136,28 @@ static iree_status_t CreateParameterSourceProvider(
   IREE_RETURN_IF_ERROR(
       AddSplatParameter(index.get(), IREE_SV("weight.fp8_tile"), /*length=*/256,
                         iree_make_const_byte_span(&fp8_one, sizeof(fp8_one))));
+  char fp8_sweep_key_storage[kFp8RawSweepTileCount][64];
+  for (iree_host_size_t i = 0; i < kFp8RawSweepTileCount; ++i) {
+    std::snprintf(fp8_sweep_key_storage[i], sizeof(fp8_sweep_key_storage[i]),
+                  "weight.fp8_sweep_tile%02" PRIhsz, i);
+    uint8_t fp8_sweep_pattern[4];
+    for (iree_host_size_t j = 0; j < IREE_ARRAYSIZE(fp8_sweep_pattern); ++j) {
+      fp8_sweep_pattern[j] =
+          FiniteNonzeroFp8SweepByte(i * IREE_ARRAYSIZE(fp8_sweep_pattern) + j);
+    }
+    IREE_RETURN_IF_ERROR(AddSplatParameter(
+        index.get(), iree_make_cstring_view(fp8_sweep_key_storage[i]),
+        /*length=*/256,
+        iree_make_const_byte_span(fp8_sweep_pattern,
+                                  sizeof(fp8_sweep_pattern))));
+  }
   IREE_RETURN_IF_ERROR(AddSplatParameter(
       index.get(), IREE_SV("weight.fp8_tile_scale"), /*length=*/64,
       iree_make_const_byte_span(&f32_two, sizeof(f32_two))));
+  const uint32_t f32_one = 0x3F800000u;
+  IREE_RETURN_IF_ERROR(AddSplatParameter(
+      index.get(), IREE_SV("weight.fp8_sweep_tile_scale"), /*length=*/64,
+      iree_make_const_byte_span(&f32_one, sizeof(f32_one))));
 
   return iree_io_parameter_index_provider_create(
       IREE_SV("parameters"), index.get(),
@@ -204,6 +241,22 @@ static iree_hal_semaphore_list_t MakeOneSemaphoreList(
   list.semaphores = semaphore;
   list.payload_values = payload_value;
   return list;
+}
+
+static void ExpectDecodedFp8Pattern(const uint16_t* encoded_weight,
+                                    iree_host_size_t element_offset,
+                                    const uint8_t* pattern,
+                                    iree_host_size_t pattern_length) {
+  for (iree_host_size_t i = 0; i < 256; ++i) {
+    const uint8_t fp8_bits = pattern[i % pattern_length];
+    const uint16_t expected_bits =
+        iree_math_f32_to_bf16(iree_math_f8e4m3fn_to_f32(fp8_bits));
+    ASSERT_EQ(encoded_weight[element_offset + i], expected_bits)
+        << "element_offset=" << element_offset << " i=" << i << " fp8_bits=0x"
+        << std::hex << static_cast<uint32_t>(fp8_bits) << " actual=0x"
+        << encoded_weight[element_offset + i] << " expected=0x"
+        << expected_bits;
+  }
 }
 
 static void RunCompactLinearRhsTileEncoding(
@@ -445,24 +498,38 @@ static void RunCompactLinearRhsTileEncoding(
   placement.device_index = 0;
   placement.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
 
-  id4_pipeline_parameter_request_t target_requests[] = {
-      id4_pipeline_parameter_request(
-          IREE_SV("weight.bf16_tile"),
-          id4_pipeline_parameter_span(/*parameter_offset=*/0,
-                                      /*buffer_offset=*/0, /*length=*/512)),
-      id4_pipeline_parameter_request(
-          IREE_SV("weight.fp8_tile"),
-          id4_pipeline_parameter_span(/*parameter_offset=*/0,
-                                      /*buffer_offset=*/512, /*length=*/512)),
-  };
+  constexpr iree_host_size_t kTargetRequestCount = 2 + kFp8RawSweepTileCount;
+  id4_pipeline_parameter_request_t target_requests[kTargetRequestCount];
+  target_requests[0] = id4_pipeline_parameter_request(
+      IREE_SV("weight.bf16_tile"),
+      id4_pipeline_parameter_span(/*parameter_offset=*/0,
+                                  /*buffer_offset=*/0,
+                                  /*length=*/kCompactRhsTileByteLength));
+  target_requests[1] = id4_pipeline_parameter_request(
+      IREE_SV("weight.fp8_tile"),
+      id4_pipeline_parameter_span(/*parameter_offset=*/0,
+                                  /*buffer_offset=*/
+                                  kCompactRhsTileByteLength,
+                                  /*length=*/kCompactRhsTileByteLength));
+  char fp8_sweep_key_storage[kFp8RawSweepTileCount][64];
+  for (iree_host_size_t i = 0; i < kFp8RawSweepTileCount; ++i) {
+    std::snprintf(fp8_sweep_key_storage[i], sizeof(fp8_sweep_key_storage[i]),
+                  "weight.fp8_sweep_tile%02" PRIhsz, i);
+    target_requests[2 + i] = id4_pipeline_parameter_request(
+        iree_make_cstring_view(fp8_sweep_key_storage[i]),
+        id4_pipeline_parameter_span(
+            /*parameter_offset=*/0,
+            /*buffer_offset=*/(2 + i) * kCompactRhsTileByteLength,
+            /*length=*/kCompactRhsTileByteLength));
+  }
   id4_pipeline_parameter_slab_plan_t slab =
       id4_pipeline_make_device_local_parameter_slab_plan(
           IREE_SV("execution"), /*placement_id=*/0, /*binding_slot=*/0,
           IREE_HAL_QUEUE_AFFINITY_ANY,
           IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE |
               IREE_HAL_BUFFER_USAGE_TRANSFER_SOURCE,
-          /*byte_length=*/1024, /*alignment=*/16,
-          IREE_ARRAYSIZE(target_requests), target_requests);
+          /*byte_length=*/kTargetRequestCount * kCompactRhsTileByteLength,
+          /*alignment=*/16, kTargetRequestCount, target_requests);
 
   id4_pipeline_tensor_shape_t weight_shape;
   std::memset(&weight_shape, 0, sizeof(weight_shape));
@@ -489,16 +556,37 @@ static void RunCompactLinearRhsTileEncoding(
           ID4_PIPELINE_TENSOR_DTYPE_F32, scale_shape,
           /*byte_length=*/64),
   };
-  id4_pipeline_parameter_load_step_t load_steps[] = {
-      id4_pipeline_parameter_encode_bf16_linear_rhs_tile_load_step(
-          IREE_SV("parameters.encode_bf16_tile"), IREE_ARRAYSIZE(bf16_sources),
-          bf16_sources,
-          /*target_slab_index=*/0, /*request_offset=*/0),
+  id4_pipeline_parameter_load_source_t fp8_sweep_sources[kFp8RawSweepTileCount]
+                                                        [2];
+  char fp8_sweep_step_name_storage[kFp8RawSweepTileCount][80];
+  id4_pipeline_parameter_load_step_t load_steps[kTargetRequestCount];
+  load_steps[0] = id4_pipeline_parameter_encode_bf16_linear_rhs_tile_load_step(
+      IREE_SV("parameters.encode_bf16_tile"), IREE_ARRAYSIZE(bf16_sources),
+      bf16_sources,
+      /*target_slab_index=*/0, /*request_offset=*/0);
+  load_steps[1] =
       id4_pipeline_parameter_encode_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_load_step(
           IREE_SV("parameters.encode_fp8_tile"), IREE_ARRAYSIZE(fp8_sources),
           fp8_sources,
-          /*target_slab_index=*/0, /*request_offset=*/1),
-  };
+          /*target_slab_index=*/0, /*request_offset=*/1);
+  for (iree_host_size_t i = 0; i < kFp8RawSweepTileCount; ++i) {
+    fp8_sweep_sources[i][0] = id4_pipeline_parameter_load_source(
+        IREE_SV("parameters"), iree_make_cstring_view(fp8_sweep_key_storage[i]),
+        ID4_PIPELINE_TENSOR_DTYPE_F8_E4M3, weight_shape,
+        /*byte_length=*/256);
+    fp8_sweep_sources[i][1] = id4_pipeline_parameter_load_source(
+        IREE_SV("parameters"), IREE_SV("weight.fp8_sweep_tile_scale"),
+        ID4_PIPELINE_TENSOR_DTYPE_F32, scale_shape,
+        /*byte_length=*/64);
+    std::snprintf(fp8_sweep_step_name_storage[i],
+                  sizeof(fp8_sweep_step_name_storage[i]),
+                  "parameters.encode_fp8_sweep_tile%02" PRIhsz, i);
+    load_steps[2 + i] =
+        id4_pipeline_parameter_encode_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_load_step(
+            iree_make_cstring_view(fp8_sweep_step_name_storage[i]),
+            IREE_ARRAYSIZE(fp8_sweep_sources[i]), fp8_sweep_sources[i],
+            /*target_slab_index=*/0, /*request_offset=*/2 + i);
+  }
 
   id4_pipeline_plan_create_options_t plan_options;
   std::memset(&plan_options, 0, sizeof(plan_options));
@@ -510,7 +598,7 @@ static void RunCompactLinearRhsTileEncoding(
   plan_options.placements = &placement;
   plan_options.parameter_slab_count = 1;
   plan_options.parameter_slabs = &slab;
-  plan_options.parameter_load_step_count = IREE_ARRAYSIZE(load_steps);
+  plan_options.parameter_load_step_count = kTargetRequestCount;
   plan_options.parameter_load_steps = load_steps;
   OwningRef<id4_pipeline_plan_t, id4_pipeline_plan_release> plan;
   IREE_ASSERT_OK(id4_pipeline_plan_create(&plan_options,
@@ -545,17 +633,30 @@ static void RunCompactLinearRhsTileEncoding(
       prepare_semaphore.get(), prepare_signal_value, iree_infinite_timeout(),
       IREE_ASYNC_WAIT_FLAG_NONE));
 
-  uint16_t encoded_weight[512] = {};
+  constexpr iree_host_size_t kEncodedElementCount =
+      kTargetRequestCount * kCompactRhsTileElementCount;
+  uint16_t encoded_weight[kEncodedElementCount] = {};
   IREE_ASSERT_OK(iree_hal_device_transfer_d2h(
       id4_tooling_runtime_context_primary_device(&context->value),
       id4_pipeline_parameter_slab_set_buffer_at(slab_set.get(), 0),
       /*source_offset=*/0, encoded_weight, sizeof(encoded_weight),
       IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT, iree_infinite_timeout()));
-  for (iree_host_size_t i = 0; i < 256; ++i) {
+  for (iree_host_size_t i = 0; i < kCompactRhsTileElementCount; ++i) {
     EXPECT_EQ(encoded_weight[i], 0x3F80u);
   }
-  for (iree_host_size_t i = 256; i < IREE_ARRAYSIZE(encoded_weight); ++i) {
+  for (iree_host_size_t i = kCompactRhsTileElementCount;
+       i < 2 * kCompactRhsTileElementCount; ++i) {
     EXPECT_EQ(encoded_weight[i], 0x4000u);
+  }
+  for (iree_host_size_t i = 0; i < kFp8RawSweepTileCount; ++i) {
+    uint8_t fp8_sweep_pattern[4];
+    for (iree_host_size_t j = 0; j < IREE_ARRAYSIZE(fp8_sweep_pattern); ++j) {
+      fp8_sweep_pattern[j] =
+          FiniteNonzeroFp8SweepByte(i * IREE_ARRAYSIZE(fp8_sweep_pattern) + j);
+    }
+    ExpectDecodedFp8Pattern(
+        encoded_weight, (2 + i) * kCompactRhsTileElementCount,
+        fp8_sweep_pattern, IREE_ARRAYSIZE(fp8_sweep_pattern));
   }
 }
 
