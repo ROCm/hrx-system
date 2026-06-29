@@ -6151,25 +6151,18 @@ static iree_status_t loom_amdgpu_emit_vector_fp8_to_f32_lanes(
   loom_type_t sgpr_type = loom_type_none();
   const loom_amdgpu_vector_extract_plan_t extract_plan =
       loom_amdgpu_vector_fp8_extract_plan(plan);
-  loom_amdgpu_fp8_native_descriptor_refs_t descriptor_refs = {0};
-  const bool has_descriptor_refs = loom_amdgpu_fp8_native_descriptor_refs(
-      plan->source_element_type, LOOM_SCALAR_TYPE_F32, &descriptor_refs);
-
-  loom_low_lower_resolved_descriptor_t native_pair_descriptor = {0};
-  bool native_pair_present = false;
-  if (has_descriptor_refs) {
-    IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_descriptor_ref_if_present(
-        context, descriptor_refs.pair, &native_pair_descriptor,
-        &native_pair_present));
-  }
-
-  loom_low_lower_resolved_descriptor_t native_lane_descriptor = {0};
-  bool native_lane_present = false;
-  if (has_descriptor_refs) {
-    IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_descriptor_ref_if_present(
-        context, descriptor_refs.lane, &native_lane_descriptor,
-        &native_lane_present));
-  }
+  const loom_amdgpu_fp8_native_descriptors_t* native_descriptors = NULL;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_get_fp8_native_descriptors(
+      context, plan->source_element_type, LOOM_SCALAR_TYPE_F32,
+      &native_descriptors));
+  const bool native_pair_present =
+      native_descriptors != NULL &&
+      iree_any_bit_set(native_descriptors->flags,
+                       LOOM_AMDGPU_FP8_NATIVE_DESCRIPTOR_FLAG_HAS_PAIR);
+  const bool native_lane_present =
+      native_descriptors != NULL &&
+      iree_any_bit_set(native_descriptors->flags,
+                       LOOM_AMDGPU_FP8_NATIVE_DESCRIPTOR_FLAG_HAS_LANE);
 
   loom_type_t result_pair_type = loom_type_none();
   if (native_pair_present) {
@@ -6199,9 +6192,9 @@ static iree_status_t loom_amdgpu_emit_vector_fp8_to_f32_lanes(
                                          LOOM_VALUE_ID_INVALID};
       bool selected_native = false;
       IREE_RETURN_IF_ERROR(loom_amdgpu_try_lower_vector_fp8_pair_to_f32_native(
-          context, source_op, plan, &native_pair_descriptor, low_source,
-          source_lane_type, result_lane_type, result_pair_type, i, native_lanes,
-          &selected_native));
+          context, source_op, plan, &native_descriptors->pair_descriptor,
+          low_source, source_lane_type, result_lane_type, result_pair_type, i,
+          native_lanes, &selected_native));
       if (selected_native) {
         lanes[i] = native_lanes[0];
         lanes[i + 1u] = native_lanes[1];
@@ -6212,8 +6205,9 @@ static iree_status_t loom_amdgpu_emit_vector_fp8_to_f32_lanes(
 
     if (native_lane_present) {
       IREE_RETURN_IF_ERROR(loom_amdgpu_lower_vector_fp8_to_f32_native_lane(
-          context, source_op, plan, &extract_plan, &native_lane_descriptor,
-          low_source, source_lane_type, result_lane_type, i, &lanes[i]));
+          context, source_op, plan, &extract_plan,
+          &native_descriptors->lane_descriptor, low_source, source_lane_type,
+          result_lane_type, i, &lanes[i]));
       ++i;
       continue;
     }
@@ -6444,25 +6438,18 @@ static iree_status_t loom_amdgpu_lower_vector_fp8_to_packed_bf16(
 
   const loom_amdgpu_vector_extract_plan_t extract_plan =
       loom_amdgpu_vector_fp8_extract_plan(plan);
-  loom_amdgpu_fp8_native_descriptor_refs_t descriptor_refs = {0};
-  const bool has_descriptor_refs = loom_amdgpu_fp8_native_descriptor_refs(
-      plan->source_element_type, LOOM_SCALAR_TYPE_F32, &descriptor_refs);
-
-  loom_low_lower_resolved_descriptor_t native_pair_descriptor = {0};
-  bool native_pair_present = false;
-  if (has_descriptor_refs) {
-    IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_descriptor_ref_if_present(
-        context, descriptor_refs.pair, &native_pair_descriptor,
-        &native_pair_present));
-  }
-
-  loom_low_lower_resolved_descriptor_t native_lane_descriptor = {0};
-  bool native_lane_present = false;
-  if (has_descriptor_refs) {
-    IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_descriptor_ref_if_present(
-        context, descriptor_refs.lane, &native_lane_descriptor,
-        &native_lane_present));
-  }
+  const loom_amdgpu_fp8_native_descriptors_t* native_descriptors = NULL;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_get_fp8_native_descriptors(
+      context, plan->source_element_type, LOOM_SCALAR_TYPE_F32,
+      &native_descriptors));
+  const bool native_pair_present =
+      native_descriptors != NULL &&
+      iree_any_bit_set(native_descriptors->flags,
+                       LOOM_AMDGPU_FP8_NATIVE_DESCRIPTOR_FLAG_HAS_PAIR);
+  const bool native_lane_present =
+      native_descriptors != NULL &&
+      iree_any_bit_set(native_descriptors->flags,
+                       LOOM_AMDGPU_FP8_NATIVE_DESCRIPTOR_FLAG_HAS_LANE);
 
   loom_type_t result_pair_type = loom_type_none();
   if (native_pair_present) {
@@ -6514,9 +6501,9 @@ static iree_status_t loom_amdgpu_lower_vector_fp8_to_packed_bf16(
                                          LOOM_VALUE_ID_INVALID};
       bool selected_native = false;
       IREE_RETURN_IF_ERROR(loom_amdgpu_try_lower_vector_fp8_pair_to_f32_native(
-          context, source_op, plan, &native_pair_descriptor, low_source,
-          source_lane_type, result_lane_type, result_pair_type, lane_base,
-          native_lanes, &selected_native));
+          context, source_op, plan, &native_descriptors->pair_descriptor,
+          low_source, source_lane_type, result_lane_type, result_pair_type,
+          lane_base, native_lanes, &selected_native));
       if (selected_native) {
         IREE_RETURN_IF_ERROR(
             loom_amdgpu_emit_f32_pair_to_packed_bf16_with_descriptors(
@@ -6539,9 +6526,9 @@ static iree_status_t loom_amdgpu_lower_vector_fp8_to_packed_bf16(
           continue;
         }
         IREE_RETURN_IF_ERROR(loom_amdgpu_lower_vector_fp8_to_f32_native_lane(
-            context, source_op, plan, &extract_plan, &native_lane_descriptor,
-            low_source, source_lane_type, result_lane_type, lane_index,
-            &f32_lanes[register_lane]));
+            context, source_op, plan, &extract_plan,
+            &native_descriptors->lane_descriptor, low_source, source_lane_type,
+            result_lane_type, lane_index, &f32_lanes[register_lane]));
       }
       IREE_RETURN_IF_ERROR(
           loom_amdgpu_emit_f32_pair_to_packed_bf16_with_descriptors(
@@ -6597,18 +6584,14 @@ static iree_status_t loom_amdgpu_lower_vector_fp8_to_packed_f16(
     const loom_amdgpu_vector_16bit_float_conversion_plan_t* plan,
     loom_value_id_t low_source, loom_type_t source_lane_type,
     loom_type_t result_lane_type) {
-  loom_amdgpu_fp8_native_descriptor_refs_t descriptor_refs = {0};
-  const bool has_descriptor_refs = loom_amdgpu_fp8_native_descriptor_refs(
-      plan->source_element_type, LOOM_SCALAR_TYPE_F16, &descriptor_refs);
-
-  loom_low_lower_resolved_descriptor_t native_pair_descriptor = {0};
-  bool native_pair_present = false;
-  if (has_descriptor_refs &&
-      descriptor_refs.pair != LOOM_AMDGPU_DESCRIPTOR_REF_NONE) {
-    IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_descriptor_ref_if_present(
-        context, descriptor_refs.pair, &native_pair_descriptor,
-        &native_pair_present));
-  }
+  const loom_amdgpu_fp8_native_descriptors_t* native_descriptors = NULL;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_get_fp8_native_descriptors(
+      context, plan->source_element_type, LOOM_SCALAR_TYPE_F16,
+      &native_descriptors));
+  const bool native_pair_present =
+      native_descriptors != NULL &&
+      iree_any_bit_set(native_descriptors->flags,
+                       LOOM_AMDGPU_FP8_NATIVE_DESCRIPTOR_FLAG_HAS_PAIR);
 
   if (native_pair_present &&
       loom_amdgpu_vector_fp8_all_pairs_have_adjacent_storage(plan)) {
@@ -6618,9 +6601,10 @@ static iree_status_t loom_amdgpu_lower_vector_fp8_to_packed_f16(
       bool selected = false;
       IREE_RETURN_IF_ERROR(
           loom_amdgpu_try_lower_vector_fp8_pair_to_packed_16bit_native(
-              context, source_op, plan, &native_pair_descriptor, low_source,
-              source_lane_type, result_lane_type, register_index * 2u,
-              &packed_registers[register_index], &selected));
+              context, source_op, plan, &native_descriptors->pair_descriptor,
+              low_source, source_lane_type, result_lane_type,
+              register_index * 2u, &packed_registers[register_index],
+              &selected));
       if (!selected) {
         IREE_ASSERT_UNREACHABLE("selected pair storage was prevalidated");
         IREE_BUILTIN_UNREACHABLE();
