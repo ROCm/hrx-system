@@ -188,6 +188,54 @@ check.case public @id4_ideogram4_linear_bf16_bf16_wmma_compact_rhs_tile_m128n128
 
 check.benchmark<@id4_ideogram4_linear_bf16_bf16_wmma_compact_rhs_tile_m128n128_4wave_quadrant_zero_case> @id4_ideogram4_linear_bf16_bf16_wmma_compact_rhs_tile_m128n128_4wave_quadrant_zero
 
+check.case public @id4_ideogram4_linear_bf16_bf16_wmma_compact_rhs_tile_m128n128_4wave_quadrant_short_qkv_128_shape_case {
+  %input = check.generate.fill value(1.0) : tensor<128x4608xbf16>
+  %weight = check.generate.fill value(0.0) : tensor<63700992xbf16>
+  %output = check.generate.fill value(1.0) : tensor<128x13824xbf16>
+  %expected = check.generate.fill value(0.0) : tensor<128x13824xbf16>
+  func.call @id4_ideogram4_linear_bf16_bf16_wmma_compact_rhs_tile_m128n128_4wave_quadrant(%input, %weight, %output) : (tensor<128x4608xbf16>, tensor<63700992xbf16>, tensor<128x13824xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<128x13824xbf16>
+  check.return
+}
+
+check.benchmark<@id4_ideogram4_linear_bf16_bf16_wmma_compact_rhs_tile_m128n128_4wave_quadrant_short_qkv_128_shape_case> @id4_ideogram4_linear_bf16_bf16_wmma_compact_rhs_tile_m128n128_4wave_quadrant_short_qkv_128_shape
+
+check.case public @id4_ideogram4_linear_bf16_bf16_wmma_compact_rhs_tile_m128n128_4wave_quadrant_short_hidden_128_shape_case {
+  %input = check.generate.fill value(1.0) : tensor<128x4608xbf16>
+  %weight = check.generate.fill value(0.0) : tensor<21233664xbf16>
+  %output = check.generate.fill value(1.0) : tensor<128x4608xbf16>
+  %expected = check.generate.fill value(0.0) : tensor<128x4608xbf16>
+  func.call @id4_ideogram4_linear_bf16_bf16_wmma_compact_rhs_tile_m128n128_4wave_quadrant(%input, %weight, %output) : (tensor<128x4608xbf16>, tensor<21233664xbf16>, tensor<128x4608xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<128x4608xbf16>
+  check.return
+}
+
+check.benchmark<@id4_ideogram4_linear_bf16_bf16_wmma_compact_rhs_tile_m128n128_4wave_quadrant_short_hidden_128_shape_case> @id4_ideogram4_linear_bf16_bf16_wmma_compact_rhs_tile_m128n128_4wave_quadrant_short_hidden_128_shape
+
+check.case public @id4_ideogram4_linear_bf16_bf16_wmma_compact_rhs_tile_m128n128_4wave_quadrant_short_mlp_up_128_shape_case {
+  %input = check.generate.fill value(1.0) : tensor<128x4608xbf16>
+  %weight = check.generate.fill value(0.0) : tensor<56623104xbf16>
+  %output = check.generate.fill value(1.0) : tensor<128x12288xbf16>
+  %expected = check.generate.fill value(0.0) : tensor<128x12288xbf16>
+  func.call @id4_ideogram4_linear_bf16_bf16_wmma_compact_rhs_tile_m128n128_4wave_quadrant(%input, %weight, %output) : (tensor<128x4608xbf16>, tensor<56623104xbf16>, tensor<128x12288xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<128x12288xbf16>
+  check.return
+}
+
+check.benchmark<@id4_ideogram4_linear_bf16_bf16_wmma_compact_rhs_tile_m128n128_4wave_quadrant_short_mlp_up_128_shape_case> @id4_ideogram4_linear_bf16_bf16_wmma_compact_rhs_tile_m128n128_4wave_quadrant_short_mlp_up_128_shape
+
+check.case public @id4_ideogram4_linear_bf16_bf16_wmma_compact_rhs_tile_m128n128_4wave_quadrant_short_mlp_down_128_shape_case {
+  %input = check.generate.fill value(1.0) : tensor<128x12288xbf16>
+  %weight = check.generate.fill value(0.0) : tensor<56623104xbf16>
+  %output = check.generate.fill value(1.0) : tensor<128x4608xbf16>
+  %expected = check.generate.fill value(0.0) : tensor<128x4608xbf16>
+  func.call @id4_ideogram4_linear_bf16_bf16_wmma_compact_rhs_tile_m128n128_4wave_quadrant(%input, %weight, %output) : (tensor<128x12288xbf16>, tensor<56623104xbf16>, tensor<128x4608xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<128x4608xbf16>
+  check.return
+}
+
+check.benchmark<@id4_ideogram4_linear_bf16_bf16_wmma_compact_rhs_tile_m128n128_4wave_quadrant_short_mlp_down_128_shape_case> @id4_ideogram4_linear_bf16_bf16_wmma_compact_rhs_tile_m128n128_4wave_quadrant_short_mlp_down_128_shape
+
 check.case public @id4_ideogram4_linear_bf16_bf16_wmma_compact_rhs_tile_m128n128_4wave_quadrant_uncond_qkv_1024_shape_case {
   %input = check.generate.fill value(1.0) : tensor<4096x4608xbf16>
   %weight = check.generate.fill value(0.0) : tensor<63700992xbf16>

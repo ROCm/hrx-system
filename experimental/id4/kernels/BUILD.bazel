@@ -4157,6 +4157,54 @@ _KERNEL_CASES = [
         "target_name": "ideogram4_linear_bf16_bf16_wmma_compact_rhs_tile_m128n128_4wave_quadrant_zero",
     },
     {
+        "actual_case": "@id4_ideogram4_linear_bf16_bf16_wmma_compact_rhs_tile_m128n128_4wave_quadrant_short_qkv_128_shape_case",
+        "benchmark": "@id4_ideogram4_linear_bf16_bf16_wmma_compact_rhs_tile_m128n128_4wave_quadrant_short_qkv_128_shape",
+        "configs": [
+            "--config=id4.ideogram4.linear_wmma.token_count=128",
+            "--config=id4.ideogram4.linear_wmma.dispatch_token_count=128",
+            "--config=id4.ideogram4.linear_wmma.input_size=4608",
+            "--config=id4.ideogram4.linear_wmma.output_size=13824",
+        ],
+        "source": "ideogram4/linear_bf16_bf16_wmma_compact_rhs_tile_m128n128_4wave_quadrant.loom",
+        "target_name": "ideogram4_linear_bf16_bf16_wmma_compact_rhs_tile_m128n128_4wave_quadrant_short_qkv_128_shape",
+    },
+    {
+        "actual_case": "@id4_ideogram4_linear_bf16_bf16_wmma_compact_rhs_tile_m128n128_4wave_quadrant_short_hidden_128_shape_case",
+        "benchmark": "@id4_ideogram4_linear_bf16_bf16_wmma_compact_rhs_tile_m128n128_4wave_quadrant_short_hidden_128_shape",
+        "configs": [
+            "--config=id4.ideogram4.linear_wmma.token_count=128",
+            "--config=id4.ideogram4.linear_wmma.dispatch_token_count=128",
+            "--config=id4.ideogram4.linear_wmma.input_size=4608",
+            "--config=id4.ideogram4.linear_wmma.output_size=4608",
+        ],
+        "source": "ideogram4/linear_bf16_bf16_wmma_compact_rhs_tile_m128n128_4wave_quadrant.loom",
+        "target_name": "ideogram4_linear_bf16_bf16_wmma_compact_rhs_tile_m128n128_4wave_quadrant_short_hidden_128_shape",
+    },
+    {
+        "actual_case": "@id4_ideogram4_linear_bf16_bf16_wmma_compact_rhs_tile_m128n128_4wave_quadrant_short_mlp_up_128_shape_case",
+        "benchmark": "@id4_ideogram4_linear_bf16_bf16_wmma_compact_rhs_tile_m128n128_4wave_quadrant_short_mlp_up_128_shape",
+        "configs": [
+            "--config=id4.ideogram4.linear_wmma.token_count=128",
+            "--config=id4.ideogram4.linear_wmma.dispatch_token_count=128",
+            "--config=id4.ideogram4.linear_wmma.input_size=4608",
+            "--config=id4.ideogram4.linear_wmma.output_size=12288",
+        ],
+        "source": "ideogram4/linear_bf16_bf16_wmma_compact_rhs_tile_m128n128_4wave_quadrant.loom",
+        "target_name": "ideogram4_linear_bf16_bf16_wmma_compact_rhs_tile_m128n128_4wave_quadrant_short_mlp_up_128_shape",
+    },
+    {
+        "actual_case": "@id4_ideogram4_linear_bf16_bf16_wmma_compact_rhs_tile_m128n128_4wave_quadrant_short_mlp_down_128_shape_case",
+        "benchmark": "@id4_ideogram4_linear_bf16_bf16_wmma_compact_rhs_tile_m128n128_4wave_quadrant_short_mlp_down_128_shape",
+        "configs": [
+            "--config=id4.ideogram4.linear_wmma.token_count=128",
+            "--config=id4.ideogram4.linear_wmma.dispatch_token_count=128",
+            "--config=id4.ideogram4.linear_wmma.input_size=12288",
+            "--config=id4.ideogram4.linear_wmma.output_size=4608",
+        ],
+        "source": "ideogram4/linear_bf16_bf16_wmma_compact_rhs_tile_m128n128_4wave_quadrant.loom",
+        "target_name": "ideogram4_linear_bf16_bf16_wmma_compact_rhs_tile_m128n128_4wave_quadrant_short_mlp_down_128_shape",
+    },
+    {
         "actual_case": "@id4_ideogram4_linear_bf16_bf16_wmma_compact_rhs_tile_m128n128_4wave_quadrant_uncond_qkv_1024_shape_case",
         "benchmark": "@id4_ideogram4_linear_bf16_bf16_wmma_compact_rhs_tile_m128n128_4wave_quadrant_uncond_qkv_1024_shape",
         "configs": [
