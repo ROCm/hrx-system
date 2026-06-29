@@ -35,7 +35,7 @@ IREE_FLAG(string, dit_weight_execution_format, "bf16_resident",
 IREE_FLAG(string, dit_attention_implementation, "online_wmma",
           "DiT attention implementation: streaming, materialized_wmma, "
           "blocked_wmma, or online_wmma.");
-IREE_FLAG(string, dit_feed_forward_implementation, "pytorch_parity",
+IREE_FLAG(string, dit_feed_forward_implementation, "fused_product",
           "DiT feed-forward implementation: fused_product or "
           "pytorch_parity.");
 IREE_FLAG(string, dit_conditioned_fp8_scope, "dit_cond_fp8",
@@ -78,7 +78,7 @@ struct DitBenchmarkContext {
       ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_ONLINE_WMMA;
   // Feed-forward implementation selected for plan and issue benchmarks.
   id4_ideogram4_dit_feed_forward_implementation_t feed_forward_implementation =
-      ID4_IDEOGRAM4_DIT_FEED_FORWARD_IMPLEMENTATION_PYTORCH_PARITY;
+      ID4_IDEOGRAM4_DIT_FEED_FORWARD_IMPLEMENTATION_FUSED_PRODUCT;
   // Diagnostic event counters collected by lifecycle calls.
   id4::test::StageDiagnostics diagnostics = {};
   // Diagnostics sink passed to stage lifecycle calls.
