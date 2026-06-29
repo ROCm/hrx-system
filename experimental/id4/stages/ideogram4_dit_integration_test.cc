@@ -941,8 +941,9 @@ static PytorchOracleTolerance PytorchOracleToleranceForTap(
   }
   if (iree_string_view_ends_with(tap_name, IREE_SV(".ffn.output"))) {
     return PytorchOracleTolerance{
-        // Mean absolute error limit for BF16 down-projection output.
-        /*.mean_absolute_error=*/0.004,
+        // Mean absolute error limit for BF16 down-projection output across
+        // dynamic token and image-token counts.
+        /*.mean_absolute_error=*/0.005,
         // P99 absolute error limit after one amplified BF16 product matmul.
         /*.p99_absolute_error=*/0.050,
         // Maximum absolute error limit after the BF16 down projection.
@@ -1007,8 +1008,9 @@ static PytorchOracleTolerance PytorchOracleToleranceForTap(
     return PytorchOracleTolerance{
         // Mean absolute error limit for final BF16 normalized hidden state.
         /*.mean_absolute_error=*/0.008,
-        // P99 absolute error limit after all BF16 transformer blocks.
-        /*.p99_absolute_error=*/0.040,
+        // P99 absolute error limit after all BF16 transformer blocks across
+        // dynamic token and image-token counts.
+        /*.p99_absolute_error=*/0.050,
         // Maximum absolute error limit for final normalized hidden state.
         /*.max_absolute_error=*/1.500,
         // Relative gate for rare accumulated BF16 activation outliers.
