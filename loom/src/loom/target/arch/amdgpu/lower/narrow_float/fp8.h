@@ -46,6 +46,7 @@ typedef enum loom_amdgpu_fp8_decode_plan_flag_bits_e {
   LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_PK_MAX_U16 = 1u << 15,
   LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_CMP_LG_U64_SRC1_INLINE = 1u << 16,
   LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_PERM_B32_SRC1_ZERO_SRC2_LIT = 1u << 17,
+  LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_BFI_B32 = 1u << 18,
 } loom_amdgpu_fp8_decode_plan_flag_bits_t;
 typedef uint32_t loom_amdgpu_fp8_decode_plan_flags_t;
 
@@ -164,6 +165,8 @@ typedef struct loom_amdgpu_fp8_decode_plan_t {
   loom_low_lower_resolved_descriptor_t pk_max_u16_descriptor;
   // Packed signed 16-bit arithmetic-right-shift descriptor.
   loom_low_lower_resolved_descriptor_t pk_ashrrev_i16_descriptor;
+  // Bitfield insert descriptor with all operands in registers.
+  loom_low_lower_resolved_descriptor_t bfi_b32_descriptor;
   // Bitfield insert descriptor with an inline mask operand.
   loom_low_lower_resolved_descriptor_t bfi_b32_src0_literal_descriptor;
 } loom_amdgpu_fp8_decode_plan_t;

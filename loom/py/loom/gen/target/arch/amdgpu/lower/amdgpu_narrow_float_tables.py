@@ -153,6 +153,11 @@ _FP8_DECODE_PLAN_DESCRIPTOR_ROWS = (
         "LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_PK_ASHRREV_I16",
     ),
     _Fp8DecodePlanDescriptorRow(
+        "amdgpu.v_bfi_b32",
+        "bfi_b32_descriptor",
+        "LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_BFI_B32",
+    ),
+    _Fp8DecodePlanDescriptorRow(
         "amdgpu.v_bfi_b32.src0_lit",
         "bfi_b32_src0_literal_descriptor",
         "LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_BFI_B32_SRC0_LITERAL",
