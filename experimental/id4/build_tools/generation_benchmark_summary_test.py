@@ -149,6 +149,10 @@ class GenerationBenchmarkSummaryTest(unittest.TestCase):
             self.assertEqual(summary["rows"][0]["real_time_ms"], 12.5)
             self.assertEqual(summary["rows"][0]["qwen_token_count"], 19)
             self.assertEqual(summary["rows"][0]["conditioned_dit_token_count"], 83)
+            self.assertEqual(summary["rows"][0]["dit_activation_format"], 2)
+            self.assertEqual(summary["rows"][0]["dit_weight_execution_format"], 1)
+            self.assertEqual(summary["rows"][0]["dit_attention_implementation"], 4)
+            self.assertEqual(summary["rows"][0]["dit_feed_forward_implementation"], 2)
             self.assertEqual(summary["rows"][0]["dispatch_count"], 1168)
             self.assertEqual(summary["rows"][0]["local_high_water_mark"], 512)
 

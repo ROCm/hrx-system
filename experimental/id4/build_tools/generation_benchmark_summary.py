@@ -113,6 +113,16 @@ def summarize_generation_benchmark(
                     "unconditioned_dit_token_capacity"
                 ],
                 "denoise_step_count": plan_summary["denoise_step_count"],
+                "dit_activation_format": plan_summary["dit_activation_format"],
+                "dit_weight_execution_format": plan_summary[
+                    "dit_weight_execution_format"
+                ],
+                "dit_attention_implementation": plan_summary[
+                    "dit_attention_implementation"
+                ],
+                "dit_feed_forward_implementation": plan_summary[
+                    "dit_feed_forward_implementation"
+                ],
                 "parameter_byte_length": residency["total_stage_parameter_byte_length"],
                 "phase_parameter_high_water_mark": residency[
                     "phase_parameter_high_water_mark"
