@@ -241,12 +241,15 @@ static iree_status_t loom_amdgpu_emit_fp8_apply_special_values(
     loom_value_id_t low_is_nan = LOOM_VALUE_ID_INVALID;
     IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fp8_decode_cmp_u32_lit(
         context, source_op, plan, LOOM_AMDGPU_DESCRIPTOR_REF_V_CMP_EQ_I32,
-        low_source_no_sign, UINT32_C(0x7F), vgpr_type, mask_type, &low_is_nan));
+        low_source_no_sign, loom_amdgpu_fp8_decode_finite_nan_no_sign(format),
+        vgpr_type, mask_type, &low_is_nan));
     return loom_amdgpu_emit_fp8_decode_select_b32(
         context, source_op, low_finite_bits, low_quiet_nan, low_is_nan,
         vgpr_type, out_lane);
   }
 
+  const uint32_t top_exponent_no_sign =
+      loom_amdgpu_fp8_decode_top_exponent_no_sign(format);
   if (value_not_inf) {
     loom_value_id_t low_quiet_nan = LOOM_VALUE_ID_INVALID;
     IREE_RETURN_IF_ERROR(loom_amdgpu_emit_const_u32(
@@ -255,7 +258,7 @@ static iree_status_t loom_amdgpu_emit_fp8_apply_special_values(
     loom_value_id_t low_is_top_exponent = LOOM_VALUE_ID_INVALID;
     IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fp8_decode_cmp_u32_lit(
         context, source_op, plan, LOOM_AMDGPU_DESCRIPTOR_REF_V_CMP_UGE_U32,
-        low_source_no_sign, UINT32_C(0x7C), vgpr_type, mask_type,
+        low_source_no_sign, top_exponent_no_sign, vgpr_type, mask_type,
         &low_is_top_exponent));
     return loom_amdgpu_emit_fp8_decode_select_b32(
         context, source_op, low_finite_bits, low_quiet_nan, low_is_top_exponent,
@@ -270,7 +273,7 @@ static iree_status_t loom_amdgpu_emit_fp8_apply_special_values(
     loom_value_id_t low_is_infinity = LOOM_VALUE_ID_INVALID;
     IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fp8_decode_cmp_u32_lit(
         context, source_op, plan, LOOM_AMDGPU_DESCRIPTOR_REF_V_CMP_EQ_I32,
-        low_source_no_sign, UINT32_C(0x7C), vgpr_type, mask_type,
+        low_source_no_sign, top_exponent_no_sign, vgpr_type, mask_type,
         &low_is_infinity));
     return loom_amdgpu_emit_fp8_decode_select_b32(
         context, source_op, low_finite_bits, low_infinity_bits, low_is_infinity,
@@ -288,7 +291,7 @@ static iree_status_t loom_amdgpu_emit_fp8_apply_special_values(
   loom_value_id_t low_is_infinity = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fp8_decode_cmp_u32_lit(
       context, source_op, plan, LOOM_AMDGPU_DESCRIPTOR_REF_V_CMP_EQ_I32,
-      low_source_no_sign, UINT32_C(0x7C), vgpr_type, mask_type,
+      low_source_no_sign, top_exponent_no_sign, vgpr_type, mask_type,
       &low_is_infinity));
   loom_value_id_t low_top_bits = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fp8_decode_select_b32(
@@ -297,7 +300,7 @@ static iree_status_t loom_amdgpu_emit_fp8_apply_special_values(
   loom_value_id_t low_is_top_exponent = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fp8_decode_cmp_u32_lit(
       context, source_op, plan, LOOM_AMDGPU_DESCRIPTOR_REF_V_CMP_UGE_U32,
-      low_source_no_sign, UINT32_C(0x7C), vgpr_type, mask_type,
+      low_source_no_sign, top_exponent_no_sign, vgpr_type, mask_type,
       &low_is_top_exponent));
   return loom_amdgpu_emit_fp8_decode_select_b32(
       context, source_op, low_finite_bits, low_top_bits, low_is_top_exponent,
