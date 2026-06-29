@@ -2322,9 +2322,8 @@ static iree_status_t loom_amdgpu_emit_fragment_memory_packed_16bit_lane(
   *out_lane = LOOM_VALUE_ID_INVALID;
   const uint16_t source_register_index = lane_index / 2u;
   if (source_register_index >= payload_register_count) {
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "AMDGPU narrowed fragment store lane exceeds payload register count");
+    IREE_ASSERT_UNREACHABLE("selected AMDGPU fragment packed b16 lane");
+    IREE_BUILTIN_UNREACHABLE();
   }
 
   loom_value_id_t source_register = low_payload;
