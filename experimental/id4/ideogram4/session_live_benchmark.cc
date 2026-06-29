@@ -60,6 +60,9 @@ IREE_FLAG(
     string, dit_fp8_source_residency, "disabled",
     "Comma-separated DiT FP8 source providers kept resident after their "
     "first gather: disabled, dit_conditioned, dit_unconditioned, or all.");
+IREE_FLAG(int64_t, dit_fp8_source_cache_budget_mib, 0,
+          "Maximum MiB cached by each DiT FP8 source-resident parameter "
+          "provider, or zero for unbounded caching.");
 
 namespace {
 
@@ -171,11 +174,13 @@ struct GenerationBenchmarkSourceCacheStatistics {
   iree_device_size_t cached_byte_length;
   // Sum of provider peak source-resident cache byte lengths.
   iree_device_size_t peak_cached_byte_length;
+  // Sum of configured provider maximum cached byte lengths.
+  iree_device_size_t maximum_cached_byte_length;
   // Number of upstream gather submissions issued to fill cache entries.
   iree_host_size_t source_gather_count;
   // Number of caller gather requests served from existing cache entries.
   iree_host_size_t cache_reuse_count;
-  // Number of cache entries evicted by provider notifications.
+  // Number of cache entries evicted by budget pressure or notifications.
   iree_host_size_t evicted_entry_count;
 };
 
@@ -301,6 +306,8 @@ struct LiveGenerationBenchmarkContext {
       ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_INVALID;
   // FP8 source provider residency selected by benchmark flags.
   DitFp8SourceResidency dit_fp8_source_residency = kDitFp8SourceResidencyNone;
+  // Maximum bytes cached by each retained DiT FP8 source provider.
+  iree_device_size_t dit_fp8_source_cache_budget_byte_length = 0;
   // Generation stage-bundle residency selected by benchmark flags.
   id4_ideogram4_generation_residency_mode_t generation_residency_mode =
       ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_INVALID;
@@ -386,6 +393,24 @@ static iree_status_t ParseDitFp8SourceResidency(
                               static_cast<int>(provider_name.size),
                               provider_name.data);
     }
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t ParseDitFp8SourceCacheBudget(
+    iree_device_size_t* out_budget_byte_length) {
+  IREE_ASSERT_ARGUMENT(out_budget_byte_length);
+  *out_budget_byte_length = 0;
+  if (FLAG_dit_fp8_source_cache_budget_mib < 0) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "--dit_fp8_source_cache_budget_mib must be non-negative");
+  }
+  if (!iree_device_size_checked_mul(
+          static_cast<iree_device_size_t>(FLAG_dit_fp8_source_cache_budget_mib),
+          1024u * 1024u, out_budget_byte_length)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "--dit_fp8_source_cache_budget_mib is too large");
   }
   return iree_ok_status();
 }
@@ -653,6 +678,7 @@ static void AddSourceCacheStatistics(
   target->entry_count += add.entry_count;
   target->cached_byte_length += add.cached_byte_length;
   target->peak_cached_byte_length += add.peak_cached_byte_length;
+  target->maximum_cached_byte_length += add.maximum_cached_byte_length;
   target->source_gather_count += add.source_gather_count;
   target->cache_reuse_count += add.cache_reuse_count;
   target->evicted_entry_count += add.evicted_entry_count;
@@ -970,7 +996,8 @@ static iree_status_t CreateLoadedLiveSession(
 }
 
 static iree_status_t MakeSourceResidentParameterProvider(
-    ParameterProviderRef* provider, ParameterProviderRef* out_cache_provider) {
+    ParameterProviderRef* provider, iree_device_size_t maximum_cached_bytes,
+    ParameterProviderRef* out_cache_provider) {
   IREE_ASSERT_ARGUMENT(provider);
   if (!provider->get()) {
     return iree_make_status(
@@ -986,6 +1013,7 @@ static iree_status_t MakeSourceResidentParameterProvider(
   options.cache_params.access = IREE_HAL_MEMORY_ACCESS_ALL;
   options.cache_params.usage = IREE_HAL_BUFFER_USAGE_TRANSFER;
   options.cache_params.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
+  options.maximum_cached_byte_length = maximum_cached_bytes;
 
   iree_io_parameter_provider_t* cached_provider = nullptr;
   IREE_RETURN_IF_ERROR(id4_pipeline_parameter_cache_provider_create(
@@ -1091,12 +1119,13 @@ static iree_status_t CreateParameterProviders(
   if ((context->dit_fp8_source_residency & kDitFp8SourceResidencyConditioned) !=
       0) {
     IREE_RETURN_IF_ERROR(MakeSourceResidentParameterProvider(
-        &conditioned_fp8, &context->conditioned_dit_fp8_source_cache_provider));
+        &conditioned_fp8, context->dit_fp8_source_cache_budget_byte_length,
+        &context->conditioned_dit_fp8_source_cache_provider));
   }
   if ((context->dit_fp8_source_residency &
        kDitFp8SourceResidencyUnconditioned) != 0) {
     IREE_RETURN_IF_ERROR(MakeSourceResidentParameterProvider(
-        &unconditioned_fp8,
+        &unconditioned_fp8, context->dit_fp8_source_cache_budget_byte_length,
         &context->unconditioned_dit_fp8_source_cache_provider));
   }
 
@@ -1160,6 +1189,8 @@ static iree_status_t CreateLiveGenerationBenchmarkContext(
       ParseDitParameterFormat(&out_context->dit_parameter_format));
   IREE_RETURN_IF_ERROR(
       ParseDitFp8SourceResidency(&out_context->dit_fp8_source_residency));
+  IREE_RETURN_IF_ERROR(ParseDitFp8SourceCacheBudget(
+      &out_context->dit_fp8_source_cache_budget_byte_length));
   IREE_RETURN_IF_ERROR(
       ParseGenerationResidencyMode(&out_context->generation_residency_mode));
   IREE_RETURN_IF_ERROR(
@@ -1573,6 +1604,8 @@ static iree_status_t SetGenerationBenchmarkLabel(
       " steps=%" PRIu32 " image=%" PRIu64 "x%" PRIu64
       " residency=%.*s issue=%.*s resident_stage_mask=0x%08x"
       " dit_fp8_source_residency=0x%08x"
+      " dit_fp8_source_cache_budget=%" PRIu64
+      "MiB"
       " dit_fp8_source_cache[entries=%" PRIhsz ",cached=%" PRIu64
       "MiB,peak=%" PRIu64 "MiB,fills=%" PRIhsz ",reuse=%" PRIhsz
       ",evicted=%" PRIhsz
@@ -1599,6 +1632,7 @@ static iree_status_t SetGenerationBenchmarkLabel(
       static_cast<int>(residency_mode.size), residency_mode.data,
       static_cast<int>(issue_mode.size), issue_mode.data,
       context.generation_resident_stage_mask, context.dit_fp8_source_residency,
+      CeilMiB(source_cache_statistics.maximum_cached_byte_length),
       source_cache_statistics.entry_count,
       CeilMiB(source_cache_statistics.cached_byte_length),
       CeilMiB(source_cache_statistics.peak_cached_byte_length),

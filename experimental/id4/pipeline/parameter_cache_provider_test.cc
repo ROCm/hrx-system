@@ -249,6 +249,21 @@ static iree_hal_buffer_params_t MakeTransferBufferParams() {
   return params;
 }
 
+static iree_status_t CreateParameterCacheProvider(
+    CountingSourceProvider* source, iree_device_size_t maximum_cached_bytes,
+    ParameterProviderRef* out_cache_provider) {
+  id4_pipeline_parameter_cache_provider_options_t options = {};
+  options.structure_size = sizeof(options);
+  options.source_provider = &source->base;
+  options.cache_params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
+  options.cache_params.access = IREE_HAL_MEMORY_ACCESS_ALL;
+  options.cache_params.usage = IREE_HAL_BUFFER_USAGE_TRANSFER;
+  options.cache_params.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
+  options.maximum_cached_byte_length = maximum_cached_bytes;
+  return id4_pipeline_parameter_cache_provider_create(
+      &options, iree_allocator_system(), out_cache_provider->out());
+}
+
 static iree_io_parameter_span_t MakeSpan(uint64_t parameter_offset,
                                          iree_device_size_t buffer_offset,
                                          iree_device_size_t length) {
@@ -288,16 +303,16 @@ static iree_io_parameter_enumerator_t MakeSingleRequestEnumerator(
   return enumerator;
 }
 
-static void GatherAndWait(iree_io_parameter_provider_t* provider,
-                          iree_hal_device_t* device,
-                          iree_hal_buffer_t* target_buffer,
-                          iree_io_parameter_span_t span) {
+static iree_status_t GatherAndWaitStatus(iree_io_parameter_provider_t* provider,
+                                         iree_hal_device_t* device,
+                                         iree_hal_buffer_t* target_buffer,
+                                         iree_io_parameter_span_t span) {
   SingleRequestEnumerator request = {
       /*.key=*/IREE_SV("weight"),
       /*.span=*/span,
   };
   HalSemaphoreRef done_semaphore;
-  IREE_ASSERT_OK(iree_hal_semaphore_create(
+  IREE_RETURN_IF_ERROR(iree_hal_semaphore_create(
       device, IREE_HAL_QUEUE_AFFINITY_ANY, /*initial_value=*/0,
       IREE_HAL_SEMAPHORE_FLAG_DEFAULT, done_semaphore.out()));
   iree_hal_semaphore_t* done_semaphore_ptr = done_semaphore.get();
@@ -307,28 +322,39 @@ static void GatherAndWait(iree_io_parameter_provider_t* provider,
       /*.semaphores=*/&done_semaphore_ptr,
       /*.payload_values=*/&done_payload_value,
   };
-  IREE_ASSERT_OK(iree_io_parameter_provider_gather(
+  iree_status_t status = iree_io_parameter_provider_gather(
       provider, device, IREE_HAL_QUEUE_AFFINITY_ANY,
       iree_hal_semaphore_list_empty(), signal_list, IREE_SV("scope"),
-      target_buffer, /*count=*/1, MakeSingleRequestEnumerator(&request)));
-  IREE_ASSERT_OK(iree_hal_device_wait_semaphores(
-      device, IREE_ASYNC_WAIT_MODE_ALL, signal_list, iree_infinite_timeout(),
-      IREE_ASYNC_WAIT_FLAG_NONE));
+      target_buffer, /*count=*/1, MakeSingleRequestEnumerator(&request));
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_device_wait_semaphores(
+        device, IREE_ASYNC_WAIT_MODE_ALL, signal_list, iree_infinite_timeout(),
+        IREE_ASYNC_WAIT_FLAG_NONE);
+  }
+  return status;
 }
 
-static void ExpectCacheStatistics(iree_io_parameter_provider_t* provider,
-                                  iree_host_size_t entry_count,
-                                  iree_device_size_t cached_byte_length,
-                                  iree_device_size_t peak_cached_byte_length,
-                                  iree_host_size_t source_gather_count,
-                                  iree_host_size_t cache_reuse_count,
-                                  iree_host_size_t evicted_entry_count) {
+static void GatherAndWait(iree_io_parameter_provider_t* provider,
+                          iree_hal_device_t* device,
+                          iree_hal_buffer_t* target_buffer,
+                          iree_io_parameter_span_t span) {
+  IREE_ASSERT_OK(GatherAndWaitStatus(provider, device, target_buffer, span));
+}
+
+static void ExpectCacheStatistics(
+    iree_io_parameter_provider_t* provider, iree_host_size_t entry_count,
+    iree_device_size_t cached_byte_length,
+    iree_device_size_t peak_cached_byte_length,
+    iree_host_size_t source_gather_count, iree_host_size_t cache_reuse_count,
+    iree_host_size_t evicted_entry_count,
+    iree_device_size_t maximum_cached_byte_length = 0) {
   id4_pipeline_parameter_cache_provider_statistics_t statistics = {};
   IREE_ASSERT_OK(id4_pipeline_parameter_cache_provider_query_statistics(
       provider, &statistics));
   EXPECT_EQ(statistics.entry_count, entry_count);
   EXPECT_EQ(statistics.cached_byte_length, cached_byte_length);
   EXPECT_EQ(statistics.peak_cached_byte_length, peak_cached_byte_length);
+  EXPECT_EQ(statistics.maximum_cached_byte_length, maximum_cached_byte_length);
   EXPECT_EQ(statistics.source_gather_count, source_gather_count);
   EXPECT_EQ(statistics.cache_reuse_count, cache_reuse_count);
   EXPECT_EQ(statistics.evicted_entry_count, evicted_entry_count);
@@ -349,16 +375,9 @@ TEST(ParameterCacheProviderTest, ReusesExactSourceSpanAcrossTargetOffsets) {
   ParameterProviderRef source_ref;
   source_ref.reset(&source->base);
 
-  id4_pipeline_parameter_cache_provider_options_t options = {};
-  options.structure_size = sizeof(options);
-  options.source_provider = &source->base;
-  options.cache_params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
-  options.cache_params.access = IREE_HAL_MEMORY_ACCESS_ALL;
-  options.cache_params.usage = IREE_HAL_BUFFER_USAGE_TRANSFER;
-  options.cache_params.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
   ParameterProviderRef cache_provider;
-  IREE_ASSERT_OK(id4_pipeline_parameter_cache_provider_create(
-      &options, iree_allocator_system(), cache_provider.out()));
+  IREE_ASSERT_OK(CreateParameterCacheProvider(
+      source, /*maximum_cached_bytes=*/0, &cache_provider));
   ExpectCacheStatistics(cache_provider.get(), /*entry_count=*/0,
                         /*cached_byte_length=*/0,
                         /*peak_cached_byte_length=*/0,
@@ -438,6 +457,114 @@ TEST(ParameterCacheProviderTest, ReusesExactSourceSpanAcrossTargetOffsets) {
                         /*evicted_entry_count=*/2);
 }
 
+TEST(ParameterCacheProviderTest, EvictsOldestEntriesToHonorBudget) {
+  HalDeviceGroupRef device_group;
+  IREE_ASSERT_OK(CreateLocalSyncDeviceGroup(device_group.out()));
+  iree_hal_device_t* device =
+      iree_hal_device_group_device_at(device_group.get(), /*device_index=*/0);
+
+  uint8_t source_data[32] = {};
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(source_data); ++i) {
+    source_data[i] = static_cast<uint8_t>(i + 1);
+  }
+  CountingSourceProvider* source =
+      CreateCountingSourceProvider(source_data, sizeof(source_data));
+  ParameterProviderRef source_ref;
+  source_ref.reset(&source->base);
+
+  ParameterProviderRef cache_provider;
+  IREE_ASSERT_OK(CreateParameterCacheProvider(
+      source, /*maximum_cached_bytes=*/12, &cache_provider));
+  ExpectCacheStatistics(cache_provider.get(), /*entry_count=*/0,
+                        /*cached_byte_length=*/0,
+                        /*peak_cached_byte_length=*/0,
+                        /*source_gather_count=*/0,
+                        /*cache_reuse_count=*/0,
+                        /*evicted_entry_count=*/0,
+                        /*maximum_cached_byte_length=*/12);
+
+  HalBufferRef target_buffer;
+  IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
+      iree_hal_device_allocator(device), MakeTransferBufferParams(),
+      /*allocation_size=*/32, target_buffer.out()));
+
+  GatherAndWait(cache_provider.get(), device, target_buffer.get(),
+                MakeSpan(/*parameter_offset=*/0, /*buffer_offset=*/0,
+                         /*length=*/8));
+  ExpectCacheStatistics(cache_provider.get(), /*entry_count=*/1,
+                        /*cached_byte_length=*/8,
+                        /*peak_cached_byte_length=*/8,
+                        /*source_gather_count=*/1,
+                        /*cache_reuse_count=*/0,
+                        /*evicted_entry_count=*/0,
+                        /*maximum_cached_byte_length=*/12);
+
+  GatherAndWait(cache_provider.get(), device, target_buffer.get(),
+                MakeSpan(/*parameter_offset=*/8, /*buffer_offset=*/8,
+                         /*length=*/8));
+  ExpectCacheStatistics(cache_provider.get(), /*entry_count=*/1,
+                        /*cached_byte_length=*/8,
+                        /*peak_cached_byte_length=*/8,
+                        /*source_gather_count=*/2,
+                        /*cache_reuse_count=*/0,
+                        /*evicted_entry_count=*/1,
+                        /*maximum_cached_byte_length=*/12);
+
+  GatherAndWait(cache_provider.get(), device, target_buffer.get(),
+                MakeSpan(/*parameter_offset=*/0, /*buffer_offset=*/16,
+                         /*length=*/8));
+  ExpectCacheStatistics(cache_provider.get(), /*entry_count=*/1,
+                        /*cached_byte_length=*/8,
+                        /*peak_cached_byte_length=*/8,
+                        /*source_gather_count=*/3,
+                        /*cache_reuse_count=*/0,
+                        /*evicted_entry_count=*/2,
+                        /*maximum_cached_byte_length=*/12);
+  EXPECT_EQ(source->gather_count, 3u);
+
+  uint8_t readback[8] = {};
+  IREE_ASSERT_OK(iree_hal_buffer_map_read(target_buffer.get(),
+                                          /*source_offset=*/16, readback,
+                                          sizeof(readback)));
+  EXPECT_EQ(std::memcmp(readback, source_data, sizeof(readback)), 0);
+}
+
+TEST(ParameterCacheProviderTest, RejectsSpanLargerThanBudget) {
+  HalDeviceGroupRef device_group;
+  IREE_ASSERT_OK(CreateLocalSyncDeviceGroup(device_group.out()));
+  iree_hal_device_t* device =
+      iree_hal_device_group_device_at(device_group.get(), /*device_index=*/0);
+
+  uint8_t source_data[32] = {};
+  CountingSourceProvider* source =
+      CreateCountingSourceProvider(source_data, sizeof(source_data));
+  ParameterProviderRef source_ref;
+  source_ref.reset(&source->base);
+
+  ParameterProviderRef cache_provider;
+  IREE_ASSERT_OK(CreateParameterCacheProvider(
+      source, /*maximum_cached_bytes=*/4, &cache_provider));
+
+  HalBufferRef target_buffer;
+  IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
+      iree_hal_device_allocator(device), MakeTransferBufferParams(),
+      /*allocation_size=*/8, target_buffer.out()));
+
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_RESOURCE_EXHAUSTED,
+      GatherAndWaitStatus(cache_provider.get(), device, target_buffer.get(),
+                          MakeSpan(/*parameter_offset=*/0,
+                                   /*buffer_offset=*/0, /*length=*/8)));
+  EXPECT_EQ(source->gather_count, 0u);
+  ExpectCacheStatistics(cache_provider.get(), /*entry_count=*/0,
+                        /*cached_byte_length=*/0,
+                        /*peak_cached_byte_length=*/0,
+                        /*source_gather_count=*/0,
+                        /*cache_reuse_count=*/0,
+                        /*evicted_entry_count=*/0,
+                        /*maximum_cached_byte_length=*/4);
+}
+
 TEST(ParameterCacheProviderTest, RejectsMutableScatter) {
   HalDeviceGroupRef device_group;
   IREE_ASSERT_OK(CreateLocalSyncDeviceGroup(device_group.out()));
@@ -450,16 +577,9 @@ TEST(ParameterCacheProviderTest, RejectsMutableScatter) {
   ParameterProviderRef source_ref;
   source_ref.reset(&source->base);
 
-  id4_pipeline_parameter_cache_provider_options_t options = {};
-  options.structure_size = sizeof(options);
-  options.source_provider = &source->base;
-  options.cache_params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
-  options.cache_params.access = IREE_HAL_MEMORY_ACCESS_ALL;
-  options.cache_params.usage = IREE_HAL_BUFFER_USAGE_TRANSFER;
-  options.cache_params.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
   ParameterProviderRef cache_provider;
-  IREE_ASSERT_OK(id4_pipeline_parameter_cache_provider_create(
-      &options, iree_allocator_system(), cache_provider.out()));
+  IREE_ASSERT_OK(CreateParameterCacheProvider(
+      source, /*maximum_cached_bytes=*/0, &cache_provider));
 
   HalBufferRef source_buffer;
   IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(

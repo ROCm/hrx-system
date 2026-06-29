@@ -55,6 +55,9 @@ IREE_FLAG(
     string, dit_fp8_source_residency, "disabled",
     "Comma-separated DiT FP8 source providers kept resident after their "
     "first gather: disabled, dit_conditioned, dit_unconditioned, or all.");
+IREE_FLAG(int64_t, dit_fp8_source_cache_budget_mib, 0,
+          "Maximum MiB cached by each DiT FP8 source-resident parameter "
+          "provider, or zero for unbounded caching.");
 IREE_FLAG(string, vae_tiling_mode, "disabled",
           "VAE tiling mode: disabled, explicit_tile_size, relative_tile_size, "
           "or memory_budget.");
@@ -240,6 +243,24 @@ static iree_status_t id4_cli_parse_dit_fp8_source_residency(
                               "unknown --dit_fp8_source_residency value '%.*s'",
                               (int)provider_name.size, provider_name.data);
     }
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t id4_cli_parse_dit_fp8_source_cache_budget(
+    iree_device_size_t* out_budget_byte_length) {
+  IREE_ASSERT_ARGUMENT(out_budget_byte_length);
+  *out_budget_byte_length = 0;
+  if (FLAG_dit_fp8_source_cache_budget_mib < 0) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "--dit_fp8_source_cache_budget_mib must be non-negative");
+  }
+  if (!iree_device_size_checked_mul(
+          (iree_device_size_t)FLAG_dit_fp8_source_cache_budget_mib,
+          1024u * 1024u, out_budget_byte_length)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "--dit_fp8_source_cache_budget_mib is too large");
   }
   return iree_ok_status();
 }
@@ -1383,7 +1404,7 @@ static void id4_cli_release_parameter_providers(
 
 static iree_status_t id4_cli_make_source_resident_parameter_provider(
     iree_io_parameter_provider_t** inout_provider,
-    iree_allocator_t host_allocator) {
+    iree_device_size_t maximum_cached_bytes, iree_allocator_t host_allocator) {
   IREE_ASSERT_ARGUMENT(inout_provider);
   if (!*inout_provider) {
     return iree_make_status(
@@ -1399,6 +1420,7 @@ static iree_status_t id4_cli_make_source_resident_parameter_provider(
   options.cache_params.access = IREE_HAL_MEMORY_ACCESS_ALL;
   options.cache_params.usage = IREE_HAL_BUFFER_USAGE_TRANSFER;
   options.cache_params.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
+  options.maximum_cached_byte_length = maximum_cached_bytes;
 
   iree_io_parameter_provider_t* cached_provider = NULL;
   IREE_RETURN_IF_ERROR(id4_pipeline_parameter_cache_provider_create(
@@ -1420,6 +1442,9 @@ static iree_status_t id4_cli_create_parameter_providers(
       ID4_CLI_DIT_FP8_SOURCE_RESIDENCY_NONE;
   IREE_RETURN_IF_ERROR(
       id4_cli_parse_dit_fp8_source_residency(&fp8_source_residency));
+  iree_device_size_t fp8_source_cache_budget_byte_length = 0;
+  IREE_RETURN_IF_ERROR(id4_cli_parse_dit_fp8_source_cache_budget(
+      &fp8_source_cache_budget_byte_length));
 
   iree_status_t status = iree_ok_status();
   if (dit_parameter_format == ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_BF16) {
@@ -1509,13 +1534,15 @@ static iree_status_t id4_cli_create_parameter_providers(
         iree_any_bit_set(fp8_source_residency,
                          ID4_CLI_DIT_FP8_SOURCE_RESIDENCY_CONDITIONED)) {
       status = id4_cli_make_source_resident_parameter_provider(
-          &dit_conditioned_fp8, host_allocator);
+          &dit_conditioned_fp8, fp8_source_cache_budget_byte_length,
+          host_allocator);
     }
     if (iree_status_is_ok(status) &&
         iree_any_bit_set(fp8_source_residency,
                          ID4_CLI_DIT_FP8_SOURCE_RESIDENCY_UNCONDITIONED)) {
       status = id4_cli_make_source_resident_parameter_provider(
-          &dit_unconditioned_fp8, host_allocator);
+          &dit_unconditioned_fp8, fp8_source_cache_budget_byte_length,
+          host_allocator);
     }
     if (iree_status_is_ok(status)) {
       const id4_tooling_parameter_provider_set_entry_t entries[] = {

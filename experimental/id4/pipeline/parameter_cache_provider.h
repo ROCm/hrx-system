@@ -25,6 +25,8 @@ typedef struct id4_pipeline_parameter_cache_provider_options_t {
   iree_io_parameter_provider_t* source_provider;
   // Buffer parameters used for device-local source cache entries.
   iree_hal_buffer_params_t cache_params;
+  // Maximum live cached source bytes, or zero for unbounded cache growth.
+  iree_device_size_t maximum_cached_byte_length;
 } id4_pipeline_parameter_cache_provider_options_t;
 
 // Snapshot of source-resident parameter cache provider state.
@@ -35,11 +37,13 @@ typedef struct id4_pipeline_parameter_cache_provider_statistics_t {
   iree_device_size_t cached_byte_length;
   // Largest observed value of |cached_byte_length|.
   iree_device_size_t peak_cached_byte_length;
+  // Configured maximum live cached source bytes, or zero when unbounded.
+  iree_device_size_t maximum_cached_byte_length;
   // Number of upstream gather calls issued to fill cache entries.
   iree_host_size_t source_gather_count;
   // Number of caller gather requests served from an existing cache entry.
   iree_host_size_t cache_reuse_count;
-  // Number of cache entries evicted by provider notifications.
+  // Number of cache entries evicted by budget pressure or notifications.
   iree_host_size_t evicted_entry_count;
 } id4_pipeline_parameter_cache_provider_statistics_t;
 
@@ -54,8 +58,10 @@ typedef struct id4_pipeline_parameter_cache_provider_statistics_t {
 //
 // The cache is read-only. Query and load requests are delegated to the upstream
 // provider; scatter requests fail because writes would require cache
-// invalidation. SUSPEND and LOW_MEMORY notifications drop all cached entries
-// after forwarding the notification upstream.
+// invalidation. If a maximum cached byte length is configured, the provider
+// evicts oldest entries before inserting a new entry that would exceed the
+// budget. SUSPEND and LOW_MEMORY notifications drop all cached entries after
+// forwarding the notification upstream.
 iree_status_t id4_pipeline_parameter_cache_provider_create(
     const id4_pipeline_parameter_cache_provider_options_t* options,
     iree_allocator_t host_allocator,

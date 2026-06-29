@@ -41,6 +41,8 @@ typedef struct id4_pipeline_parameter_cache_provider_t {
   iree_io_parameter_provider_t* source_provider;
   // Buffer parameters used for source cache allocations.
   iree_hal_buffer_params_t cache_params;
+  // Maximum live cached source bytes, or zero for unbounded cache growth.
+  iree_device_size_t maximum_cached_byte_length;
   // Guards |entries| and entry metadata mutation.
   iree_slim_mutex_t mutex;
   // Number of live cache entries.
@@ -55,7 +57,7 @@ typedef struct id4_pipeline_parameter_cache_provider_t {
   iree_host_size_t source_gather_count;
   // Number of caller gather requests served from existing cache entries.
   iree_host_size_t cache_reuse_count;
-  // Number of cache entries evicted by provider notifications.
+  // Number of cache entries evicted by budget pressure or notifications.
   iree_host_size_t evicted_entry_count;
   // Source-resident exact-span cache entries.
   id4_pipeline_parameter_cache_entry_t* entries;
@@ -133,6 +135,26 @@ static void id4_pipeline_parameter_cache_entry_deinitialize(
   memset(entry, 0, sizeof(*entry));
 }
 
+static void id4_pipeline_parameter_cache_evict_oldest_entry_locked(
+    id4_pipeline_parameter_cache_provider_t* provider) {
+  if (provider->entry_count == 0) return;
+  const iree_device_size_t evicted_length = provider->entries[0].length;
+  id4_pipeline_parameter_cache_entry_deinitialize(provider,
+                                                  &provider->entries[0]);
+  const iree_host_size_t remaining_count = provider->entry_count - 1;
+  if (remaining_count > 0) {
+    memmove(&provider->entries[0], &provider->entries[1],
+            remaining_count * sizeof(provider->entries[0]));
+  }
+  --provider->entry_count;
+  if (evicted_length > provider->cached_byte_length) {
+    provider->cached_byte_length = 0;
+  } else {
+    provider->cached_byte_length -= evicted_length;
+  }
+  ++provider->evicted_entry_count;
+}
+
 static void id4_pipeline_parameter_cache_provider_evict_all(
     id4_pipeline_parameter_cache_provider_t* provider) {
   iree_slim_mutex_lock(&provider->mutex);
@@ -144,6 +166,39 @@ static void id4_pipeline_parameter_cache_provider_evict_all(
   provider->entry_count = 0;
   provider->cached_byte_length = 0;
   iree_slim_mutex_unlock(&provider->mutex);
+}
+
+static iree_status_t id4_pipeline_parameter_cache_validate_budget(
+    id4_pipeline_parameter_cache_provider_t* provider,
+    iree_device_size_t length) {
+  if (provider->maximum_cached_byte_length == 0) return iree_ok_status();
+  if (length <= provider->maximum_cached_byte_length) return iree_ok_status();
+  return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                          "parameter cache request length %" PRIu64
+                          " exceeds configured cache budget %" PRIu64,
+                          length, provider->maximum_cached_byte_length);
+}
+
+static iree_status_t id4_pipeline_parameter_cache_evict_until_available_locked(
+    id4_pipeline_parameter_cache_provider_t* provider,
+    iree_device_size_t length) {
+  IREE_RETURN_IF_ERROR(
+      id4_pipeline_parameter_cache_validate_budget(provider, length));
+  if (provider->maximum_cached_byte_length == 0) return iree_ok_status();
+  iree_device_size_t required_byte_length = 0;
+  if (!iree_device_size_checked_add(provider->cached_byte_length, length,
+                                    &required_byte_length)) {
+    required_byte_length = IREE_DEVICE_SIZE_MAX;
+  }
+  while (provider->entry_count > 0 &&
+         required_byte_length > provider->maximum_cached_byte_length) {
+    id4_pipeline_parameter_cache_evict_oldest_entry_locked(provider);
+    if (!iree_device_size_checked_add(provider->cached_byte_length, length,
+                                      &required_byte_length)) {
+      required_byte_length = IREE_DEVICE_SIZE_MAX;
+    }
+  }
+  return iree_ok_status();
 }
 
 static void id4_pipeline_parameter_cache_ready_entries_release(
@@ -336,6 +391,18 @@ static iree_status_t id4_pipeline_parameter_cache_insert_or_retain_entry(
           (void**)&provider->entries);
     }
     if (iree_status_is_ok(status)) {
+      status = id4_pipeline_parameter_cache_evict_until_available_locked(
+          provider, length);
+    }
+    iree_device_size_t next_cached_byte_length = 0;
+    if (iree_status_is_ok(status)) {
+      if (!iree_device_size_checked_add(provider->cached_byte_length, length,
+                                        &next_cached_byte_length)) {
+        status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                                  "parameter cache byte accounting overflow");
+      }
+    }
+    if (iree_status_is_ok(status)) {
       id4_pipeline_parameter_cache_entry_t* entry =
           &provider->entries[provider->entry_count++];
       memset(entry, 0, sizeof(*entry));
@@ -349,7 +416,7 @@ static iree_status_t id4_pipeline_parameter_cache_insert_or_retain_entry(
       entry->buffer = *inout_buffer;
       entry->ready_semaphore = *inout_ready_semaphore;
       entry->ready_payload_value = ready_payload_value;
-      provider->cached_byte_length += length;
+      provider->cached_byte_length = next_cached_byte_length;
       if (provider->cached_byte_length > provider->peak_cached_byte_length) {
         provider->peak_cached_byte_length = provider->cached_byte_length;
       }
@@ -377,6 +444,8 @@ static iree_status_t id4_pipeline_parameter_cache_get_ready_entry(
           span.parameter_offset, span.length, out_ready_entry)) {
     return iree_ok_status();
   }
+  IREE_RETURN_IF_ERROR(
+      id4_pipeline_parameter_cache_validate_budget(provider, span.length));
 
   iree_string_view_t cached_source_scope = iree_string_view_empty();
   iree_string_view_t cached_key = iree_string_view_empty();
@@ -745,6 +814,7 @@ iree_status_t id4_pipeline_parameter_cache_provider_create(
   provider->base.vtable = &id4_pipeline_parameter_cache_provider_vtable;
   provider->host_allocator = host_allocator;
   provider->cache_params = options->cache_params;
+  provider->maximum_cached_byte_length = options->maximum_cached_byte_length;
   iree_slim_mutex_initialize(&provider->mutex);
   iree_io_parameter_provider_retain(options->source_provider);
   provider->source_provider = options->source_provider;
@@ -766,6 +836,8 @@ iree_status_t id4_pipeline_parameter_cache_provider_query_statistics(
   out_statistics->entry_count = provider->entry_count;
   out_statistics->cached_byte_length = provider->cached_byte_length;
   out_statistics->peak_cached_byte_length = provider->peak_cached_byte_length;
+  out_statistics->maximum_cached_byte_length =
+      provider->maximum_cached_byte_length;
   out_statistics->source_gather_count = provider->source_gather_count;
   out_statistics->cache_reuse_count = provider->cache_reuse_count;
   out_statistics->evicted_entry_count = provider->evicted_entry_count;
