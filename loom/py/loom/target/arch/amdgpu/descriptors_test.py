@@ -1753,18 +1753,18 @@ def test_scalar_domain_fma_descriptors_pin_sgpr_contracts() -> None:
 
 def test_packed_fma_mad_descriptors_pin_lane_container_widths() -> None:
     descriptor_sets = (
-        _gfx940_core_overlays(),
-        _gfx950_core_overlays(),
-        _gfx11_core_overlays(),
-        _gfx12_core_overlays(),
-        _gfx1250_core_overlays(),
+        (_gfx940_core_overlays(), "OP_SEL_HI"),
+        (_gfx950_core_overlays(), "OP_SEL_HI"),
+        (_gfx11_core_overlays(), "OP_SEL_HI"),
+        (_gfx12_core_overlays(), "OPSEL_HI"),
+        (_gfx1250_core_overlays(), "OPSEL_HI"),
     )
     expected_32_bit_keys = (
         "amdgpu.v_pk_fma_f16",
         "amdgpu.v_pk_mad_i16",
         "amdgpu.v_pk_mad_u16",
     )
-    for descriptor_set in descriptor_sets:
+    for descriptor_set, op_sel_hi_field in descriptor_sets:
         descriptors = {
             descriptor.descriptor_key: descriptor for descriptor in descriptor_set
         }
@@ -1780,6 +1780,7 @@ def test_packed_fma_mad_descriptors_pin_lane_container_widths() -> None:
             assert tuple(
                 operand.descriptor_operand.unit_count for operand in descriptor.operands
             ) == (1, 1, 1, 1)
+            assert descriptor.fixed_encoding_fields == ((op_sel_hi_field, 0x7),)
 
     cdna_descriptor_sets = (_gfx940_core_overlays(), _gfx950_core_overlays())
     for descriptor_set in cdna_descriptor_sets:
@@ -1791,6 +1792,7 @@ def test_packed_fma_mad_descriptors_pin_lane_container_widths() -> None:
         assert tuple(
             operand.descriptor_operand.unit_count for operand in descriptor.operands
         ) == (2, 2, 2, 2)
+        assert descriptor.fixed_encoding_fields == (("OP_SEL_HI", 0x7),)
 
     rdna_descriptor_sets = (
         _gfx11_core_overlays(),
@@ -1836,6 +1838,7 @@ def test_gfx1250_packed_bf16_descriptors_are_arch_scoped() -> None:
             operand.descriptor_operand.unit_count
             for operand in binary_descriptor.operands
         ) == (1, 1, 1)
+        assert binary_descriptor.fixed_encoding_fields == (("OPSEL_HI", 0x3),)
 
     fma_descriptor = descriptors["amdgpu.v_pk_fma_bf16"]
     assert fma_descriptor.encoding_name == "ENC_VOP3P"
@@ -1848,6 +1851,7 @@ def test_gfx1250_packed_bf16_descriptors_are_arch_scoped() -> None:
     assert tuple(
         operand.descriptor_operand.unit_count for operand in fma_descriptor.operands
     ) == (1, 1, 1, 1)
+    assert fma_descriptor.fixed_encoding_fields == (("OPSEL_HI", 0x7),)
 
 
 def test_packed_i16_binary_descriptors_pin_lane_container_widths() -> None:
@@ -1863,12 +1867,12 @@ def test_packed_i16_binary_descriptors_pin_lane_container_widths() -> None:
         "amdgpu.v_pk_lshrrev_b16",
         "amdgpu.v_pk_ashrrev_i16",
     )
-    for descriptor_set in (
-        _gfx940_core_overlays(),
-        _gfx950_core_overlays(),
-        _gfx11_core_overlays(),
-        _gfx12_core_overlays(),
-        _gfx1250_core_overlays(),
+    for descriptor_set, op_sel_hi_field in (
+        (_gfx940_core_overlays(), "OP_SEL_HI"),
+        (_gfx950_core_overlays(), "OP_SEL_HI"),
+        (_gfx11_core_overlays(), "OP_SEL_HI"),
+        (_gfx12_core_overlays(), "OPSEL_HI"),
+        (_gfx1250_core_overlays(), "OPSEL_HI"),
     ):
         descriptors = {
             descriptor.descriptor_key: descriptor for descriptor in descriptor_set
@@ -1884,6 +1888,7 @@ def test_packed_i16_binary_descriptors_pin_lane_container_widths() -> None:
             assert tuple(
                 operand.descriptor_operand.unit_count for operand in descriptor.operands
             ) == (1, 1, 1)
+            assert descriptor.fixed_encoding_fields == ((op_sel_hi_field, 0x3),)
 
 
 def test_packed_fma_mad_rdna_literal_forms_cover_source_positions() -> None:
@@ -1897,10 +1902,10 @@ def test_packed_fma_mad_rdna_literal_forms_cover_source_positions() -> None:
         "amdgpu.v_pk_mad_i16",
         "amdgpu.v_pk_mad_u16",
     )
-    for descriptor_set in (
-        _gfx11_core_overlays(),
-        _gfx12_core_overlays(),
-        _gfx1250_core_overlays(),
+    for descriptor_set, op_sel_hi_field in (
+        (_gfx11_core_overlays(), "OP_SEL_HI"),
+        (_gfx12_core_overlays(), "OPSEL_HI"),
+        (_gfx1250_core_overlays(), "OPSEL_HI"),
     ):
         descriptors = {
             descriptor.descriptor_key: descriptor for descriptor in descriptor_set
@@ -1938,7 +1943,11 @@ def test_packed_fma_mad_rdna_literal_forms_cover_source_positions() -> None:
                 assert tuple(
                     immediate.field_name for immediate in literal_descriptor.immediates
                 ) == ("imm32",)
-                fixed_field, fixed_value = literal_descriptor.fixed_encoding_fields[0]
+                assert literal_descriptor.fixed_encoding_fields[0] == (
+                    op_sel_hi_field,
+                    0x7,
+                )
+                fixed_field, fixed_value = literal_descriptor.fixed_encoding_fields[1]
                 assert fixed_field == literal_field
                 assert isinstance(fixed_value, AmdgpuOperandPredefinedValueRef)
                 assert fixed_value.value_name == "SRC_LITERAL"

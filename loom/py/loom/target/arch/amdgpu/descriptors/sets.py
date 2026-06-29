@@ -1428,13 +1428,18 @@ def _rdna4_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
         *_rdna_scalar_domain_fma_overlays(),
         *_rdna_scalar_fma_overlays(),
         _v_pk_fmac_f16_overlay(),
-        _v_pk_fma_f16_overlay(include_literal_forms=True),
-        *_v_pk_fma_f16_literal_overlays(),
-        *_v_pk_i16_binary_overlays(),
-        _v_pk_mad_i16_overlay(include_literal_forms=True),
-        *_v_pk_mad_i16_literal_overlays(),
-        _v_pk_mad_u16_overlay(include_literal_forms=True),
-        *_v_pk_mad_u16_literal_overlays(),
+        *_v_pk_with_op_sel_hi_field(
+            (
+                _v_pk_fma_f16_overlay(include_literal_forms=True),
+                *_v_pk_fma_f16_literal_overlays(),
+                *_v_pk_i16_binary_overlays(),
+                _v_pk_mad_i16_overlay(include_literal_forms=True),
+                *_v_pk_mad_i16_literal_overlays(),
+                _v_pk_mad_u16_overlay(include_literal_forms=True),
+                *_v_pk_mad_u16_literal_overlays(),
+            ),
+            "OPSEL_HI",
+        ),
         *_v_fma_mix_f32_overlays(),
         *_v_fma_mixlo_f16_overlays(),
         *_v_fma_mixhi_f16_overlays(),
@@ -1744,9 +1749,14 @@ def _gfx1250_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
         *_rdna4_core_overlays(),
         *_v_cvt_pk_f16_packed8_overlays(),
         _v_cvt_pk_bf16_f32_overlay(),
-        _v_pk_add_bf16_overlay(),
-        _v_pk_mul_bf16_overlay(),
-        _v_pk_fma_bf16_overlay(),
+        *_v_pk_with_op_sel_hi_field(
+            (
+                _v_pk_add_bf16_overlay(),
+                _v_pk_mul_bf16_overlay(),
+                _v_pk_fma_bf16_overlay(),
+            ),
+            "OPSEL_HI",
+        ),
     )
 
 
