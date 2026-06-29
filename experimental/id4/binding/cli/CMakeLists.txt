@@ -16,6 +16,7 @@ iree_cc_binary(
     "main.c"
   DEPS
     iree::base
+    iree::base::internal
     iree::base::tooling::flags
     iree::experimental::id4::ideogram4::request
     iree::experimental::id4::ideogram4::session

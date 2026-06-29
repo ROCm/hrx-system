@@ -209,7 +209,7 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
     )
     parser.add_argument(
         "--dit_feed_forward_implementation",
-        default="fused_product",
+        default="pytorch_parity",
         choices=("fused_product", "pytorch_parity"),
     )
     parser.add_argument(

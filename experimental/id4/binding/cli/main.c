@@ -5,6 +5,7 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 #include <errno.h>
+#include <math.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -18,6 +19,7 @@
 #include "experimental/id4/tooling/readback.h"
 #include "experimental/id4/tooling/runtime.h"
 #include "iree/base/api.h"
+#include "iree/base/internal/math.h"
 #include "iree/base/time.h"
 #include "iree/base/tooling/flags.h"
 #include "iree/hal/api.h"
@@ -79,6 +81,12 @@ IREE_FLAG(string, dump_plan, "",
           "Path to write the structured pipeline plan JSON.");
 IREE_FLAG(string, dump_diagnostics, "",
           "Directory for loomc, HAL, tensor, and stage diagnostics.");
+IREE_FLAG(string, dump_result_summary, "",
+          "Path to write final latent and decoded image F32 summary JSON.");
+IREE_FLAG_LIST(
+    string, diagnostic_tap,
+    "Stage-qualified diagnostic tap to capture as <stage>:<tap>. Repeat to "
+    "capture multiple taps.");
 IREE_FLAG(string, profile_output, "",
           "Path to write queue and dispatch-level profiling data.");
 
@@ -434,6 +442,11 @@ static iree_status_t id4_cli_validate_dry_run_flags(void) {
         IREE_STATUS_INVALID_ARGUMENT,
         "--profile_output requires generation execution; omit --dry_run");
   }
+  if (strlen(FLAG_dump_result_summary) != 0) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "--dump_result_summary requires generation execution; omit --dry_run");
+  }
   if (strlen(FLAG_output) != 0) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
@@ -542,6 +555,381 @@ static iree_status_t id4_cli_write_generation_plan(
         host_allocator);
   }
   iree_string_builder_deinitialize(&builder);
+  return status;
+}
+
+static id4_pipeline_tensor_shape_t id4_cli_convert_program_shape(
+    id4_pipeline_program_shape_t shape) {
+  id4_pipeline_tensor_shape_t tensor_shape;
+  memset(&tensor_shape, 0, sizeof(tensor_shape));
+  tensor_shape.rank = shape.rank;
+  memcpy(tensor_shape.dims, shape.dims, sizeof(tensor_shape.dims));
+  return tensor_shape;
+}
+
+static iree_status_t id4_cli_append_json_string(iree_string_builder_t* builder,
+                                                iree_string_view_t value) {
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "\""));
+  for (iree_host_size_t i = 0; i < value.size; ++i) {
+    switch (value.data[i]) {
+      case '\\': {
+        IREE_RETURN_IF_ERROR(
+            iree_string_builder_append_cstring(builder, "\\\\"));
+        break;
+      }
+      case '"': {
+        IREE_RETURN_IF_ERROR(
+            iree_string_builder_append_cstring(builder, "\\\""));
+        break;
+      }
+      case '\n': {
+        IREE_RETURN_IF_ERROR(
+            iree_string_builder_append_cstring(builder, "\\n"));
+        break;
+      }
+      default: {
+        IREE_RETURN_IF_ERROR(iree_string_builder_append_string(
+            builder, iree_make_string_view(value.data + i, 1)));
+        break;
+      }
+    }
+  }
+  return iree_string_builder_append_cstring(builder, "\"");
+}
+
+static iree_status_t id4_cli_append_shape_json(
+    iree_string_builder_t* builder, id4_pipeline_tensor_shape_t shape) {
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+      builder, "{\"rank\":%" PRIu32 ",\"dims\":[", shape.rank));
+  for (uint32_t i = 0; i < shape.rank; ++i) {
+    if (i != 0) {
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, ","));
+    }
+    IREE_RETURN_IF_ERROR(
+        iree_string_builder_append_format(builder, "%" PRIu64, shape.dims[i]));
+  }
+  return iree_string_builder_append_cstring(builder, "]}");
+}
+
+static uint16_t id4_cli_load_u16(const uint8_t* bytes) {
+  uint16_t value = 0;
+  memcpy(&value, bytes, sizeof(value));
+  return value;
+}
+
+static float id4_cli_load_f32(const uint8_t* bytes) {
+  float value = 0.0f;
+  memcpy(&value, bytes, sizeof(value));
+  return value;
+}
+
+static iree_status_t id4_cli_load_tensor_element_as_f32(
+    id4_pipeline_tensor_dtype_t dtype, const uint8_t* bytes,
+    iree_host_size_t index, float* out_value) {
+  const iree_device_size_t dtype_byte_length =
+      id4_pipeline_tensor_dtype_byte_length(dtype);
+  if (dtype_byte_length == 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "tensor summary dtype is invalid");
+  }
+  if (index > IREE_HOST_SIZE_MAX / dtype_byte_length) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "tensor summary byte offset overflow");
+  }
+  const iree_host_size_t byte_offset =
+      index * (iree_host_size_t)dtype_byte_length;
+  switch (dtype) {
+    case ID4_PIPELINE_TENSOR_DTYPE_F32:
+      *out_value = id4_cli_load_f32(bytes + byte_offset);
+      return iree_ok_status();
+    case ID4_PIPELINE_TENSOR_DTYPE_BF16:
+      *out_value = iree_math_bf16_to_f32(id4_cli_load_u16(bytes + byte_offset));
+      return iree_ok_status();
+    default: {
+      iree_string_view_t dtype_name = id4_pipeline_tensor_dtype_format(dtype);
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "tensor summary dtype `%.*s` cannot be summarized as F32",
+          (int)dtype_name.size, dtype_name.data);
+    }
+  }
+}
+
+static iree_status_t id4_cli_append_tensor_summary_json(
+    iree_string_builder_t* builder, iree_string_view_t key,
+    const id4_pipeline_tensor_layout_t* layout, iree_const_byte_span_t bytes) {
+  const iree_device_size_t dtype_byte_length =
+      id4_pipeline_tensor_dtype_byte_length(layout->dtype);
+  if (dtype_byte_length == 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "tensor summary `%.*s` has invalid dtype",
+                            (int)key.size, key.data);
+  }
+  if (bytes.data_length % dtype_byte_length != 0) {
+    iree_string_view_t dtype_name =
+        id4_pipeline_tensor_dtype_format(layout->dtype);
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "tensor summary `%.*s` byte length %" PRIhsz
+                            " is not a multiple of dtype `%.*s` size %" PRIu64,
+                            (int)key.size, key.data, bytes.data_length,
+                            (int)dtype_name.size, dtype_name.data,
+                            (uint64_t)dtype_byte_length);
+  }
+  const iree_host_size_t element_count =
+      bytes.data_length / (iree_host_size_t)dtype_byte_length;
+  iree_host_size_t finite_count = 0;
+  iree_host_size_t nan_count = 0;
+  iree_host_size_t infinity_count = 0;
+  iree_host_size_t first_nonfinite_index = IREE_HOST_SIZE_MAX;
+  float finite_min = 0.0f;
+  float finite_max = 0.0f;
+  double finite_sum = 0.0;
+  for (iree_host_size_t i = 0; i < element_count; ++i) {
+    float value = 0.0f;
+    IREE_RETURN_IF_ERROR(id4_cli_load_tensor_element_as_f32(
+        layout->dtype, bytes.data, i, &value));
+    if (isfinite(value)) {
+      if (finite_count == 0) {
+        finite_min = value;
+        finite_max = value;
+      } else {
+        if (value < finite_min) finite_min = value;
+        if (value > finite_max) finite_max = value;
+      }
+      finite_sum += (double)value;
+      ++finite_count;
+    } else {
+      if (first_nonfinite_index == IREE_HOST_SIZE_MAX) {
+        first_nonfinite_index = i;
+      }
+      if (isnan(value)) {
+        ++nan_count;
+      } else {
+        ++infinity_count;
+      }
+    }
+  }
+
+  IREE_RETURN_IF_ERROR(id4_cli_append_json_string(builder, key));
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, ":{"));
+  IREE_RETURN_IF_ERROR(
+      iree_string_builder_append_cstring(builder, "\"dtype\":"));
+  IREE_RETURN_IF_ERROR(id4_cli_append_json_string(
+      builder, id4_pipeline_tensor_dtype_format(layout->dtype)));
+  IREE_RETURN_IF_ERROR(
+      iree_string_builder_append_cstring(builder, ",\"shape\":"));
+  IREE_RETURN_IF_ERROR(id4_cli_append_shape_json(builder, layout->shape));
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+      builder,
+      ",\"byte_length\":%" PRIhsz ",\"element_count\":%" PRIhsz
+      ",\"finite_count\":%" PRIhsz ",\"nan_count\":%" PRIhsz
+      ",\"infinity_count\":%" PRIhsz,
+      bytes.data_length, element_count, finite_count, nan_count,
+      infinity_count));
+  if (first_nonfinite_index == IREE_HOST_SIZE_MAX) {
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(
+        builder, ",\"first_nonfinite_index\":null"));
+  } else {
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+        builder, ",\"first_nonfinite_index\":%" PRIhsz, first_nonfinite_index));
+  }
+  if (finite_count == 0) {
+    return iree_string_builder_append_cstring(
+        builder,
+        ",\"finite_min\":null,\"finite_max\":null,\"finite_mean\":null}");
+  }
+  return iree_string_builder_append_format(
+      builder,
+      ",\"finite_min\":%.9g,\"finite_max\":%.9g,\"finite_mean\":%.17g}",
+      finite_min, finite_max, finite_sum / (double)finite_count);
+}
+
+typedef struct id4_cli_result_tensor_summary_t {
+  // Stable JSON key used for this tensor summary.
+  iree_string_view_t key;
+  // Logical tensor layout represented by |bytes|.
+  id4_pipeline_tensor_layout_t layout;
+  // Host readback bytes for this tensor.
+  iree_const_byte_span_t bytes;
+} id4_cli_result_tensor_summary_t;
+
+static iree_status_t id4_cli_write_result_summary(
+    iree_string_view_t output_path, iree_host_size_t tensor_count,
+    const id4_cli_result_tensor_summary_t* tensors,
+    iree_allocator_t host_allocator) {
+  if (iree_string_view_is_empty(output_path)) return iree_ok_status();
+
+  iree_string_builder_t builder;
+  iree_string_builder_initialize(host_allocator, &builder);
+  iree_status_t status = iree_string_builder_append_cstring(&builder, "{");
+  for (iree_host_size_t i = 0; i < tensor_count && iree_status_is_ok(status);
+       ++i) {
+    if (i != 0) {
+      status = iree_string_builder_append_cstring(&builder, ",");
+    }
+    if (iree_status_is_ok(status)) {
+      status = id4_cli_append_tensor_summary_json(
+          &builder, tensors[i].key, &tensors[i].layout, tensors[i].bytes);
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_string_builder_append_cstring(&builder, "}\n");
+  }
+  if (iree_status_is_ok(status)) {
+    iree_string_view_t json = iree_string_builder_view(&builder);
+    status = iree_io_file_contents_write(
+        output_path, iree_make_const_byte_span(json.data, json.size),
+        host_allocator);
+  }
+  iree_string_builder_deinitialize(&builder);
+  return status;
+}
+
+typedef struct id4_cli_diagnostic_tap_request_t {
+  // Stable summary key preserving the caller's stage-qualified tap spelling.
+  iree_string_view_t summary_key;
+  // Stable generation stage key owning the requested tap.
+  iree_string_view_t stage_key;
+  // Diagnostic tap name inside the owning stage.
+  iree_string_view_t tap_name;
+} id4_cli_diagnostic_tap_request_t;
+
+typedef struct id4_cli_generation_diagnostic_taps_t {
+  // Number of parsed stage-qualified tap requests.
+  iree_host_size_t request_count;
+  // Parsed tap requests in flag order.
+  id4_cli_diagnostic_tap_request_t* requests;
+  // Number of stage groups supplied to generation planning.
+  iree_host_size_t list_count;
+  // Stage-grouped tap selections supplied to generation planning.
+  id4_ideogram4_generation_stage_diagnostic_tap_list_t* lists;
+  // Contiguous tap-name storage referenced by |lists|.
+  iree_string_view_t* grouped_tap_names;
+} id4_cli_generation_diagnostic_taps_t;
+
+static void id4_cli_generation_diagnostic_taps_deinitialize(
+    id4_cli_generation_diagnostic_taps_t* taps,
+    iree_allocator_t host_allocator) {
+  if (!taps) return;
+  iree_allocator_free(host_allocator, taps->grouped_tap_names);
+  iree_allocator_free(host_allocator, taps->lists);
+  iree_allocator_free(host_allocator, taps->requests);
+  memset(taps, 0, sizeof(*taps));
+}
+
+static iree_status_t id4_cli_parse_diagnostic_tap_value(
+    iree_string_view_t value, id4_cli_diagnostic_tap_request_t* out_request) {
+  memset(out_request, 0, sizeof(*out_request));
+  value = iree_string_view_trim(value);
+  const iree_host_size_t delimiter =
+      iree_string_view_find(value, IREE_SV(":"), 0);
+  if (delimiter == IREE_STRING_VIEW_NPOS) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "--diagnostic_tap value `%.*s` must be stage-qualified as "
+        "<stage>:<tap>",
+        (int)value.size, value.data);
+  }
+  iree_string_view_t stage_key =
+      iree_string_view_trim(iree_string_view_substr(value, 0, delimiter));
+  iree_string_view_t tap_name = iree_string_view_trim(
+      iree_string_view_substr(value, delimiter + 1, IREE_STRING_VIEW_NPOS));
+  if (iree_string_view_is_empty(stage_key) ||
+      iree_string_view_is_empty(tap_name)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "--diagnostic_tap value `%.*s` must contain non-empty stage and tap "
+        "names",
+        (int)value.size, value.data);
+  }
+  out_request->summary_key = value;
+  out_request->stage_key = stage_key;
+  out_request->tap_name = tap_name;
+  return iree_ok_status();
+}
+
+static bool id4_cli_diagnostic_tap_request_matches_stage(
+    const id4_cli_diagnostic_tap_request_t* request,
+    iree_string_view_t stage_key) {
+  return iree_string_view_equal(request->stage_key, stage_key);
+}
+
+static iree_status_t id4_cli_parse_diagnostic_taps(
+    iree_allocator_t host_allocator,
+    id4_cli_generation_diagnostic_taps_t* out_taps) {
+  memset(out_taps, 0, sizeof(*out_taps));
+  const iree_flag_string_list_t flags = FLAG_diagnostic_tap_list();
+  if (flags.count == 0) return iree_ok_status();
+
+  id4_cli_generation_diagnostic_taps_t taps;
+  memset(&taps, 0, sizeof(taps));
+  iree_status_t status = iree_allocator_malloc_array(
+      host_allocator, flags.count, sizeof(taps.requests[0]),
+      (void**)&taps.requests);
+  if (iree_status_is_ok(status)) {
+    status =
+        iree_allocator_malloc_array(host_allocator, flags.count,
+                                    sizeof(taps.lists[0]), (void**)&taps.lists);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_allocator_malloc_array(host_allocator, flags.count,
+                                         sizeof(taps.grouped_tap_names[0]),
+                                         (void**)&taps.grouped_tap_names);
+  }
+  for (iree_host_size_t i = 0; i < flags.count && iree_status_is_ok(status);
+       ++i) {
+    status =
+        id4_cli_parse_diagnostic_tap_value(flags.values[i], &taps.requests[i]);
+    if (!iree_status_is_ok(status)) break;
+    for (iree_host_size_t j = 0; j < i; ++j) {
+      if (iree_string_view_equal(taps.requests[i].stage_key,
+                                 taps.requests[j].stage_key) &&
+          iree_string_view_equal(taps.requests[i].tap_name,
+                                 taps.requests[j].tap_name)) {
+        status = iree_make_status(
+            IREE_STATUS_ALREADY_EXISTS,
+            "--diagnostic_tap contains duplicate request `%.*s`",
+            (int)taps.requests[i].summary_key.size,
+            taps.requests[i].summary_key.data);
+        break;
+      }
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    taps.request_count = flags.count;
+    iree_host_size_t grouped_tap_offset = 0;
+    for (iree_host_size_t i = 0; i < taps.request_count; ++i) {
+      bool first_stage_request = true;
+      for (iree_host_size_t j = 0; j < i; ++j) {
+        if (id4_cli_diagnostic_tap_request_matches_stage(
+                &taps.requests[j], taps.requests[i].stage_key)) {
+          first_stage_request = false;
+          break;
+        }
+      }
+      if (!first_stage_request) continue;
+
+      iree_host_size_t stage_tap_count = 0;
+      for (iree_host_size_t j = i; j < taps.request_count; ++j) {
+        if (id4_cli_diagnostic_tap_request_matches_stage(
+                &taps.requests[j], taps.requests[i].stage_key)) {
+          taps.grouped_tap_names[grouped_tap_offset + stage_tap_count] =
+              taps.requests[j].tap_name;
+          ++stage_tap_count;
+        }
+      }
+      taps.lists[taps.list_count].stage_key = taps.requests[i].stage_key;
+      taps.lists[taps.list_count].tap_names = (iree_string_view_list_t){
+          stage_tap_count, &taps.grouped_tap_names[grouped_tap_offset]};
+      ++taps.list_count;
+      grouped_tap_offset += stage_tap_count;
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    *out_taps = taps;
+  } else {
+    id4_cli_generation_diagnostic_taps_deinitialize(&taps, host_allocator);
+  }
   return status;
 }
 
@@ -807,15 +1195,6 @@ static iree_status_t id4_cli_create_parameter_providers(
   return status;
 }
 
-static id4_pipeline_tensor_shape_t id4_cli_convert_program_shape(
-    id4_pipeline_program_shape_t shape) {
-  id4_pipeline_tensor_shape_t tensor_shape;
-  memset(&tensor_shape, 0, sizeof(tensor_shape));
-  tensor_shape.rank = shape.rank;
-  memcpy(tensor_shape.dims, shape.dims, sizeof(tensor_shape.dims));
-  return tensor_shape;
-}
-
 static iree_status_t id4_cli_run_generation_dry_run(
     iree_allocator_t host_allocator) {
   id4_ideogram4_request_t request;
@@ -831,10 +1210,15 @@ static iree_status_t id4_cli_run_generation_dry_run(
   bool diagnostics_file_sink_initialized = false;
   id4_pipeline_diagnostics_sink_t diagnostics_sink;
   id4_pipeline_diagnostics_sink_initialize_ignore(&diagnostics_sink);
+  id4_cli_generation_diagnostic_taps_t diagnostic_taps;
+  memset(&diagnostic_taps, 0, sizeof(diagnostic_taps));
 
   iree_status_t status = id4_cli_validate_dry_run_flags();
   if (iree_status_is_ok(status)) {
     status = id4_cli_parse_request(host_allocator, &request);
+  }
+  if (iree_status_is_ok(status)) {
+    status = id4_cli_parse_diagnostic_taps(host_allocator, &diagnostic_taps);
   }
   if (iree_status_is_ok(status)) {
     status = id4_cli_initialize_diagnostics_sink(
@@ -868,6 +1252,8 @@ static iree_status_t id4_cli_run_generation_dry_run(
     status = id4_cli_make_generation_plan_policy(&plan_options.policy);
     plan_options.device_index = 0;
     plan_options.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
+    plan_options.stage_diagnostic_tap_list_count = diagnostic_taps.list_count;
+    plan_options.stage_diagnostic_tap_lists = diagnostic_taps.lists;
     plan_options.diagnostics_sink = &diagnostics_sink;
     if (iree_status_is_ok(status)) {
       status = id4_ideogram4_session_plan_generation(session, &plan_options,
@@ -914,6 +1300,8 @@ static iree_status_t id4_cli_run_generation_dry_run(
         status,
         id4_tooling_diagnostics_file_sink_deinitialize(&diagnostics_file_sink));
   }
+  id4_cli_generation_diagnostic_taps_deinitialize(&diagnostic_taps,
+                                                  host_allocator);
   iree_tokenizer_free(tokenizer);
   id4_ideogram4_request_deinitialize(&request, host_allocator);
   return status;
@@ -967,6 +1355,19 @@ static iree_status_t id4_cli_run_generation(iree_allocator_t host_allocator) {
   bool generation_was_issued = false;
   id4_tooling_host_bytes_t decoded_image_bytes;
   memset(&decoded_image_bytes, 0, sizeof(decoded_image_bytes));
+  id4_tooling_host_bytes_t conditioned_velocity_bytes;
+  memset(&conditioned_velocity_bytes, 0, sizeof(conditioned_velocity_bytes));
+  id4_tooling_host_bytes_t unconditioned_velocity_bytes;
+  memset(&unconditioned_velocity_bytes, 0,
+         sizeof(unconditioned_velocity_bytes));
+  id4_tooling_host_bytes_t denoised_latent_bytes;
+  memset(&denoised_latent_bytes, 0, sizeof(denoised_latent_bytes));
+  id4_tooling_host_bytes_t final_latent_bytes;
+  memset(&final_latent_bytes, 0, sizeof(final_latent_bytes));
+  id4_cli_generation_diagnostic_taps_t diagnostic_taps;
+  memset(&diagnostic_taps, 0, sizeof(diagnostic_taps));
+  id4_tooling_host_bytes_t* diagnostic_tap_bytes = NULL;
+  id4_cli_result_tensor_summary_t* result_summary_tensors = NULL;
   id4_tooling_diagnostics_file_sink_t diagnostics_file_sink;
   memset(&diagnostics_file_sink, 0, sizeof(diagnostics_file_sink));
   bool diagnostics_file_sink_initialized = false;
@@ -979,6 +1380,9 @@ static iree_status_t id4_cli_run_generation(iree_allocator_t host_allocator) {
   iree_status_t status = id4_cli_validate_execution_flags();
   if (iree_status_is_ok(status)) {
     status = id4_cli_parse_request(host_allocator, &request);
+  }
+  if (iree_status_is_ok(status)) {
+    status = id4_cli_parse_diagnostic_taps(host_allocator, &diagnostic_taps);
   }
   if (iree_status_is_ok(status)) {
     status = id4_cli_initialize_diagnostics_sink(
@@ -1041,6 +1445,8 @@ static iree_status_t id4_cli_run_generation(iree_allocator_t host_allocator) {
     status = id4_cli_make_generation_plan_policy(&plan_options.policy);
     plan_options.device_index = 0;
     plan_options.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
+    plan_options.stage_diagnostic_tap_list_count = diagnostic_taps.list_count;
+    plan_options.stage_diagnostic_tap_lists = diagnostic_taps.lists;
     plan_options.diagnostics_sink = &diagnostics_sink;
     if (iree_status_is_ok(status)) {
       status = id4_ideogram4_session_plan_generation(session, &plan_options,
@@ -1176,6 +1582,162 @@ static iree_status_t id4_cli_run_generation(iree_allocator_t host_allocator) {
       status = id4_tooling_readback_buffer_binding(&readback_options,
                                                    &decoded_image_bytes);
     }
+    if (iree_status_is_ok(status) && strlen(FLAG_dump_result_summary) != 0) {
+      readback_options.binding = result.conditioned_velocity_binding;
+      status = id4_tooling_readback_buffer_binding(&readback_options,
+                                                   &conditioned_velocity_bytes);
+    }
+    if (iree_status_is_ok(status) && strlen(FLAG_dump_result_summary) != 0) {
+      readback_options.binding = result.unconditioned_velocity_binding;
+      status = id4_tooling_readback_buffer_binding(
+          &readback_options, &unconditioned_velocity_bytes);
+    }
+    if (iree_status_is_ok(status) && strlen(FLAG_dump_result_summary) != 0) {
+      readback_options.binding = result.denoised_latent_binding;
+      status = id4_tooling_readback_buffer_binding(&readback_options,
+                                                   &denoised_latent_bytes);
+    }
+    if (iree_status_is_ok(status) && strlen(FLAG_dump_result_summary) != 0) {
+      readback_options.binding = result.final_latent_binding;
+      status = id4_tooling_readback_buffer_binding(&readback_options,
+                                                   &final_latent_bytes);
+    }
+    if (iree_status_is_ok(status) && strlen(FLAG_dump_result_summary) != 0) {
+      if (diagnostic_taps.request_count != 0) {
+        status = iree_allocator_malloc_array(
+            host_allocator, diagnostic_taps.request_count,
+            sizeof(diagnostic_tap_bytes[0]), (void**)&diagnostic_tap_bytes);
+        if (iree_status_is_ok(status)) {
+          memset(
+              diagnostic_tap_bytes, 0,
+              diagnostic_taps.request_count * sizeof(diagnostic_tap_bytes[0]));
+        }
+      }
+    }
+    for (iree_host_size_t i = 0;
+         strlen(FLAG_dump_result_summary) != 0 &&
+         i < diagnostic_taps.request_count && iree_status_is_ok(status);
+         ++i) {
+      const id4_pipeline_tensor_layout_t* tap_layout = NULL;
+      iree_hal_buffer_binding_t tap_binding;
+      status = id4_ideogram4_generation_execution_find_diagnostic_tap(
+          execution, diagnostic_taps.requests[i].stage_key,
+          diagnostic_taps.requests[i].tap_name, &tap_layout, &tap_binding);
+      if (iree_status_is_ok(status)) {
+        readback_options.binding = tap_binding;
+        status = id4_tooling_readback_buffer_binding(&readback_options,
+                                                     &diagnostic_tap_bytes[i]);
+      }
+    }
+    if (iree_status_is_ok(status) && strlen(FLAG_dump_result_summary) != 0) {
+      id4_pipeline_tensor_shape_t latent_shape =
+          id4_cli_convert_program_shape(summary.diffusion_latent_shape);
+      id4_pipeline_tensor_shape_t image_shape =
+          id4_cli_convert_program_shape(summary.decoded_image_shape);
+      iree_host_size_t result_summary_tensor_count = 0;
+      if (!iree_host_size_checked_add(5, diagnostic_taps.request_count,
+                                      &result_summary_tensor_count)) {
+        status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                  "result summary tensor count overflow");
+      }
+      if (iree_status_is_ok(status)) {
+        status = iree_allocator_malloc_array(
+            host_allocator, result_summary_tensor_count,
+            sizeof(result_summary_tensors[0]), (void**)&result_summary_tensors);
+      }
+      if (iree_status_is_ok(status)) {
+        result_summary_tensors[0] = (id4_cli_result_tensor_summary_t){
+            .key = IREE_SV("conditioned_velocity"),
+            .layout =
+                {
+                    .name = IREE_SV("conditioned_velocity"),
+                    .dtype = ID4_PIPELINE_TENSOR_DTYPE_F32,
+                    .shape = latent_shape,
+                    .byte_length = conditioned_velocity_bytes.length,
+                    .alignment = 0,
+                },
+            .bytes =
+                iree_make_const_byte_span(conditioned_velocity_bytes.data,
+                                          conditioned_velocity_bytes.length),
+        };
+        result_summary_tensors[1] = (id4_cli_result_tensor_summary_t){
+            .key = IREE_SV("unconditioned_velocity"),
+            .layout =
+                {
+                    .name = IREE_SV("unconditioned_velocity"),
+                    .dtype = ID4_PIPELINE_TENSOR_DTYPE_F32,
+                    .shape = latent_shape,
+                    .byte_length = unconditioned_velocity_bytes.length,
+                    .alignment = 0,
+                },
+            .bytes =
+                iree_make_const_byte_span(unconditioned_velocity_bytes.data,
+                                          unconditioned_velocity_bytes.length),
+        };
+        result_summary_tensors[2] = (id4_cli_result_tensor_summary_t){
+            .key = IREE_SV("denoised_latent"),
+            .layout =
+                {
+                    .name = IREE_SV("denoised_latent"),
+                    .dtype = ID4_PIPELINE_TENSOR_DTYPE_F32,
+                    .shape = latent_shape,
+                    .byte_length = denoised_latent_bytes.length,
+                    .alignment = 0,
+                },
+            .bytes = iree_make_const_byte_span(denoised_latent_bytes.data,
+                                               denoised_latent_bytes.length),
+        };
+        result_summary_tensors[3] = (id4_cli_result_tensor_summary_t){
+            .key = IREE_SV("final_latent"),
+            .layout =
+                {
+                    .name = IREE_SV("final_latent"),
+                    .dtype = ID4_PIPELINE_TENSOR_DTYPE_F32,
+                    .shape = latent_shape,
+                    .byte_length = final_latent_bytes.length,
+                    .alignment = 0,
+                },
+            .bytes = iree_make_const_byte_span(final_latent_bytes.data,
+                                               final_latent_bytes.length),
+        };
+        result_summary_tensors[4] = (id4_cli_result_tensor_summary_t){
+            .key = IREE_SV("decoded_image"),
+            .layout =
+                {
+                    .name = IREE_SV("decoded_image"),
+                    .dtype = ID4_PIPELINE_TENSOR_DTYPE_F32,
+                    .shape = image_shape,
+                    .byte_length = decoded_image_bytes.length,
+                    .alignment = 0,
+                },
+            .bytes = iree_make_const_byte_span(decoded_image_bytes.data,
+                                               decoded_image_bytes.length),
+        };
+      }
+      for (iree_host_size_t i = 0;
+           i < diagnostic_taps.request_count && iree_status_is_ok(status);
+           ++i) {
+        const id4_pipeline_tensor_layout_t* tap_layout = NULL;
+        iree_hal_buffer_binding_t tap_binding;
+        status = id4_ideogram4_generation_execution_find_diagnostic_tap(
+            execution, diagnostic_taps.requests[i].stage_key,
+            diagnostic_taps.requests[i].tap_name, &tap_layout, &tap_binding);
+        if (iree_status_is_ok(status)) {
+          result_summary_tensors[5 + i] = (id4_cli_result_tensor_summary_t){
+              .key = diagnostic_taps.requests[i].summary_key,
+              .layout = *tap_layout,
+              .bytes = iree_make_const_byte_span(
+                  diagnostic_tap_bytes[i].data, diagnostic_tap_bytes[i].length),
+          };
+        }
+      }
+      if (iree_status_is_ok(status)) {
+        status = id4_cli_write_result_summary(
+            iree_make_cstring_view(FLAG_dump_result_summary),
+            result_summary_tensor_count, result_summary_tensors,
+            host_allocator);
+      }
+    }
     if (iree_status_is_ok(status)) {
       status = id4_cli_emit_timing(&diagnostics_sink, IREE_SV("cli.readback"),
                                    IREE_SV("read back decoded image"),
@@ -1217,6 +1779,20 @@ static iree_status_t id4_cli_run_generation(iree_allocator_t host_allocator) {
             summary.decoded_image_shape.dims[1], FLAG_output);
   }
 
+  for (iree_host_size_t i = 0; i < diagnostic_taps.request_count; ++i) {
+    if (diagnostic_tap_bytes) {
+      id4_tooling_host_bytes_deinitialize(&diagnostic_tap_bytes[i],
+                                          host_allocator);
+    }
+  }
+  iree_allocator_free(host_allocator, result_summary_tensors);
+  iree_allocator_free(host_allocator, diagnostic_tap_bytes);
+  id4_tooling_host_bytes_deinitialize(&final_latent_bytes, host_allocator);
+  id4_tooling_host_bytes_deinitialize(&denoised_latent_bytes, host_allocator);
+  id4_tooling_host_bytes_deinitialize(&unconditioned_velocity_bytes,
+                                      host_allocator);
+  id4_tooling_host_bytes_deinitialize(&conditioned_velocity_bytes,
+                                      host_allocator);
   id4_tooling_host_bytes_deinitialize(&decoded_image_bytes, host_allocator);
   id4_ideogram4_generation_execution_release(execution);
   id4_ideogram4_generation_bundle_release(generation_bundle);
@@ -1235,6 +1811,8 @@ static iree_status_t id4_cli_run_generation(iree_allocator_t host_allocator) {
         status,
         id4_tooling_diagnostics_file_sink_deinitialize(&diagnostics_file_sink));
   }
+  id4_cli_generation_diagnostic_taps_deinitialize(&diagnostic_taps,
+                                                  host_allocator);
   iree_tokenizer_free(tokenizer);
   id4_ideogram4_request_deinitialize(&request, host_allocator);
   return status;

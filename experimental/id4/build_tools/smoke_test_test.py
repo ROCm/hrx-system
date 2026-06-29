@@ -206,7 +206,7 @@ class Id4SmokeTestTest(unittest.TestCase):
         self.assertIn("--profile_output=artifacts/profile.txt", command)
         self.assertIn("--dit_weight_execution_format=bf16_resident", command)
         self.assertIn("--dit_attention_implementation=online_wmma", command)
-        self.assertIn("--dit_feed_forward_implementation=fused_product", command)
+        self.assertIn("--dit_feed_forward_implementation=pytorch_parity", command)
         self.assertIn("--vae_tiling_mode=memory_budget", command)
         self.assertIn("--vae_memory_budget=536870912", command)
         self.assertIn("--vae_overlap=0.5", command)

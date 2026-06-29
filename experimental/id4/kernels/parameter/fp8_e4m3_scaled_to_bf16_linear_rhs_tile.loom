@@ -26,7 +26,10 @@ kernel.def export("id4_parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile") @id4_
   %weight_global = buffer.assume.memory_space<global> %weight_noalias : buffer
   %scale_global = buffer.assume.memory_space<global> %scale_noalias : buffer
   %target_global = buffer.assume.memory_space<global> %target_noalias : buffer
-  %weight_view = buffer.view %weight_global[%base] : buffer -> view<[%output_size]x[%input_size]xf8E4M3, #dense>
+  %dense = encoding.layout.dense : encoding<layout>
+  %fp8_e4m3fn = encoding.define #fp8_e4m3fn : encoding<schema>
+  %fp8_storage = encoding.define #physical_storage {layout = %dense : encoding<layout>, schema = %fp8_e4m3fn : encoding<schema>} : encoding<storage>
+  %weight_view = buffer.view %weight_global[%base] : buffer -> view<[%output_size]x[%input_size]xf8E4M3, %fp8_storage>
   %scale_view = buffer.view %scale_global[%base] : buffer -> view<[%output_size]xf32, #dense>
   %target_view = buffer.view %target_global[%base] : buffer -> view<[%element_count]xbf16, #dense>
   %input_tile_count = index.div %input_size, %sixteen : index
@@ -41,11 +44,11 @@ kernel.def export("id4_parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile") @id4_
   %row_offset = index.mul %output_lane, %sixteen : index
   %tile_element = index.add %row_offset, %segment_offset : index
   %target_index = index.add %tile_offset, %tile_element : index
-  %weight_fp8 = vector.load %weight_view[%output_row, %input] : view<[%output_size]x[%input_size]xf8E4M3, #dense> -> vector<8xf8E4M3>
+  %weight_fp8 = vector.load %weight_view[%output_row, %input] : view<[%output_size]x[%input_size]xf8E4M3, %fp8_storage> -> vector<8xf8E4M3>
   %weight_f32 = vector.extf %weight_fp8 : vector<8xf8E4M3> to vector<8xf32>
   %scale_f32 = view.load %scale_view[%output_row] : view<[%output_size]xf32, #dense> -> f32
   %scale_values = vector.splat %scale_f32 : vector<8xf32>
-  %scaled = vector.mulf<reassoc|nnan|ninf|nsz|contract> %weight_f32, %scale_values : vector<8xf32>
+  %scaled = vector.mulf<reassoc|nsz|contract> %weight_f32, %scale_values : vector<8xf32>
   %rounded = vector.fptrunc %scaled : vector<8xf32> to vector<8xbf16>
   vector.store %rounded, %target_view[%target_index] : vector<8xbf16>, view<[%element_count]xbf16, #dense>
   kernel.return
@@ -56,6 +59,16 @@ check.case public @id4_parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_small_c
   %scale = check.generate.fill value(2.0) : tensor<16xf32>
   %target = check.generate.fill value(0.0) : tensor<256xbf16>
   %expected = check.generate.fill value(2.0) : tensor<256xbf16>
+  func.call @id4_parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile(%weight, %scale, %target) : (tensor<16x16xf8E4M3>, tensor<16xf32>, tensor<256xbf16>)
+  check.expect.close actual(%target) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<256xbf16>
+  check.return
+}
+
+check.case public @id4_parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_max_finite_case {
+  %weight = check.generate.fill value(448.0) : tensor<16x16xf8E4M3>
+  %scale = check.generate.fill value(1.0) : tensor<16xf32>
+  %target = check.generate.fill value(0.0) : tensor<256xbf16>
+  %expected = check.generate.fill value(448.0) : tensor<256xbf16>
   func.call @id4_parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile(%weight, %scale, %target) : (tensor<16x16xf8E4M3>, tensor<16xf32>, tensor<256xbf16>)
   check.expect.close actual(%target) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<256xbf16>
   check.return
@@ -82,6 +95,8 @@ check.case public @id4_parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_mlp_up_
 }
 
 check.benchmark<@id4_parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_small_case> @id4_parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_small
+
+check.benchmark<@id4_parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_max_finite_case> @id4_parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_max_finite
 
 check.benchmark<@id4_parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_qkv_shape_case> @id4_parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_qkv_shape
 

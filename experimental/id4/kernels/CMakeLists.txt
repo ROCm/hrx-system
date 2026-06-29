@@ -458,6 +458,22 @@ iree_native_test(
 
 iree_native_test(
   NAME
+    "parameter_fp8_e4m3_scaled_to_bf16_max_finite_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/parameter/fp8_e4m3_scaled_to_bf16.loom}}"
+    "--benchmark=@id4_parameter_fp8_e4m3_scaled_to_bf16_max_finite"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.parameter.fp8_e4m3_scaled_to_bf16.output_size=2"
+    "--config=id4.parameter.fp8_e4m3_scaled_to_bf16.input_size=4"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
     "parameter_fp8_e4m3_scaled_to_bf16_qkv_shape_plan_test"
   ARGS
     "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/parameter/fp8_e4m3_scaled_to_bf16.loom}}"
@@ -494,6 +510,22 @@ iree_native_test(
   ARGS
     "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/parameter/fp8_e4m3_scaled_to_bf16_linear_rhs_tile.loom}}"
     "--benchmark=@id4_parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_small"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.parameter.fp8_e4m3_scaled_to_bf16_linear_rhs_tile.output_size=16"
+    "--config=id4.parameter.fp8_e4m3_scaled_to_bf16_linear_rhs_tile.input_size=16"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
+    "parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_max_finite_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/parameter/fp8_e4m3_scaled_to_bf16_linear_rhs_tile.loom}}"
+    "--benchmark=@id4_parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_max_finite"
     "--dry-run"
     "--output-format=jsonl"
     "--config=id4.parameter.fp8_e4m3_scaled_to_bf16_linear_rhs_tile.output_size=16"
@@ -11164,6 +11196,26 @@ endif()
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
 iree_native_test(
   NAME
+    "parameter_fp8_e4m3_scaled_to_bf16_max_finite_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/parameter/fp8_e4m3_scaled_to_bf16.loom}}"
+    "--case=@id4_parameter_fp8_e4m3_scaled_to_bf16_max_finite_case"
+    "--device=amdgpu://0"
+    "--config=id4.parameter.fp8_e4m3_scaled_to_bf16.output_size=2"
+    "--config=id4.parameter.fp8_e4m3_scaled_to_bf16.input_size=4"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
     "parameter_fp8_e4m3_scaled_to_bf16_qkv_shape_hal_test"
   ARGS
     "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/parameter/fp8_e4m3_scaled_to_bf16.loom}}"
@@ -11208,6 +11260,26 @@ iree_native_test(
   ARGS
     "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/parameter/fp8_e4m3_scaled_to_bf16_linear_rhs_tile.loom}}"
     "--case=@id4_parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_small_case"
+    "--device=amdgpu://0"
+    "--config=id4.parameter.fp8_e4m3_scaled_to_bf16_linear_rhs_tile.output_size=16"
+    "--config=id4.parameter.fp8_e4m3_scaled_to_bf16_linear_rhs_tile.input_size=16"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
+    "parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_max_finite_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/parameter/fp8_e4m3_scaled_to_bf16_linear_rhs_tile.loom}}"
+    "--case=@id4_parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_max_finite_case"
     "--device=amdgpu://0"
     "--config=id4.parameter.fp8_e4m3_scaled_to_bf16_linear_rhs_tile.output_size=16"
     "--config=id4.parameter.fp8_e4m3_scaled_to_bf16_linear_rhs_tile.input_size=16"

@@ -109,6 +109,14 @@ typedef struct id4_ideogram4_generation_plan_policy_t {
   id4_vae_tiling_config_t vae_tiling;
 } id4_ideogram4_generation_plan_policy_t;
 
+// Diagnostic taps requested from one coarse generation stage.
+typedef struct id4_ideogram4_generation_stage_diagnostic_tap_list_t {
+  // Stable stage key from generation-plan JSON.
+  iree_string_view_t stage_key;
+  // Caller-owned diagnostic tap names requested from the stage.
+  iree_string_view_list_t tap_names;
+} id4_ideogram4_generation_stage_diagnostic_tap_list_t;
+
 // Options for creating a session-owned generation plan from one prompt.
 typedef struct id4_ideogram4_generation_plan_options_t {
   // Size of this structure for versioning.
@@ -127,6 +135,11 @@ typedef struct id4_ideogram4_generation_plan_options_t {
   iree_host_size_t device_index;
   // Queue affinity used by every stage plan.
   iree_hal_queue_affinity_t queue_affinity;
+  // Number of stage-qualified diagnostic tap lists.
+  iree_host_size_t stage_diagnostic_tap_list_count;
+  // Caller-owned diagnostic tap selections grouped by generation stage key.
+  const id4_ideogram4_generation_stage_diagnostic_tap_list_t*
+      stage_diagnostic_tap_lists;
   // Diagnostics sink for plan events.
   id4_pipeline_diagnostics_sink_t* diagnostics_sink;
 } id4_ideogram4_generation_plan_options_t;
@@ -349,10 +362,16 @@ typedef struct id4_ideogram4_qwen_result_t {
 
 // Result bindings produced by one full-generation execution.
 typedef struct id4_ideogram4_generation_result_t {
+  // Conditioned DiT velocity binding retained by the execution handle.
+  iree_hal_buffer_binding_t conditioned_velocity_binding;
+  // Unconditioned DiT velocity binding retained by the execution handle.
+  iree_hal_buffer_binding_t unconditioned_velocity_binding;
+  // CFG denoised latent binding retained by the execution handle.
+  iree_hal_buffer_binding_t denoised_latent_binding;
+  // Final Euler latent binding retained by the execution handle.
+  iree_hal_buffer_binding_t final_latent_binding;
   // Final decoded RGB image binding owned by the execution handle.
   iree_hal_buffer_binding_t decoded_image_binding;
-  // Final diffusion latent binding retained by the execution handle.
-  iree_hal_buffer_binding_t final_latent_binding;
 } id4_ideogram4_generation_result_t;
 
 // Creates an Ideogram 4 model session.
@@ -462,6 +481,17 @@ void id4_ideogram4_generation_execution_release(
 iree_status_t id4_ideogram4_generation_execution_result(
     const id4_ideogram4_generation_execution_t* execution,
     id4_ideogram4_generation_result_t* out_result);
+
+// Finds a captured diagnostic tap retained by |execution|.
+//
+// |out_layout| receives a borrowed tensor layout valid until |execution| is
+// released. |out_binding| receives the issue-time buffer binding retained by
+// the prepared generation bundle.
+iree_status_t id4_ideogram4_generation_execution_find_diagnostic_tap(
+    const id4_ideogram4_generation_execution_t* execution,
+    iree_string_view_t stage_key, iree_string_view_t tap_name,
+    const id4_pipeline_tensor_layout_t** out_layout,
+    iree_hal_buffer_binding_t* out_binding);
 
 // Issues one asynchronous Qwen3-VL conditioning execution.
 iree_status_t id4_ideogram4_session_issue_qwen(

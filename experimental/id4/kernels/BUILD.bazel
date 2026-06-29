@@ -110,6 +110,16 @@ _KERNEL_CASES = [
         "target_name": "parameter_fp8_e4m3_scaled_to_bf16_small",
     },
     {
+        "actual_case": "@id4_parameter_fp8_e4m3_scaled_to_bf16_max_finite_case",
+        "benchmark": "@id4_parameter_fp8_e4m3_scaled_to_bf16_max_finite",
+        "configs": [
+            "--config=id4.parameter.fp8_e4m3_scaled_to_bf16.output_size=2",
+            "--config=id4.parameter.fp8_e4m3_scaled_to_bf16.input_size=4",
+        ],
+        "source": "parameter/fp8_e4m3_scaled_to_bf16.loom",
+        "target_name": "parameter_fp8_e4m3_scaled_to_bf16_max_finite",
+    },
+    {
         "actual_case": "@id4_parameter_fp8_e4m3_scaled_to_bf16_qkv_shape_case",
         "benchmark": "@id4_parameter_fp8_e4m3_scaled_to_bf16_qkv_shape",
         "configs": [
@@ -138,6 +148,16 @@ _KERNEL_CASES = [
         ],
         "source": "parameter/fp8_e4m3_scaled_to_bf16_linear_rhs_tile.loom",
         "target_name": "parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_small",
+    },
+    {
+        "actual_case": "@id4_parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_max_finite_case",
+        "benchmark": "@id4_parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_max_finite",
+        "configs": [
+            "--config=id4.parameter.fp8_e4m3_scaled_to_bf16_linear_rhs_tile.output_size=16",
+            "--config=id4.parameter.fp8_e4m3_scaled_to_bf16_linear_rhs_tile.input_size=16",
+        ],
+        "source": "parameter/fp8_e4m3_scaled_to_bf16_linear_rhs_tile.loom",
+        "target_name": "parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_max_finite",
     },
     {
         "actual_case": "@id4_parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_qkv_shape_case",

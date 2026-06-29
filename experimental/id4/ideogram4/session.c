@@ -235,6 +235,33 @@ static const id4_ideogram4_generation_stage_descriptor_t
         },
 };
 
+static const id4_ideogram4_generation_stage_descriptor_t*
+id4_ideogram4_generation_stage_descriptor(
+    id4_ideogram4_generation_stage_ordinal_t ordinal) {
+  for (iree_host_size_t i = 0;
+       i < IREE_ARRAYSIZE(id4_ideogram4_generation_stage_descriptors); ++i) {
+    const id4_ideogram4_generation_stage_descriptor_t* descriptor =
+        &id4_ideogram4_generation_stage_descriptors[i];
+    if (descriptor->ordinal == ordinal) return descriptor;
+  }
+  return NULL;
+}
+
+static const id4_ideogram4_generation_stage_descriptor_t*
+id4_ideogram4_generation_stage_descriptor_for_key(
+    iree_string_view_t stage_key) {
+  for (iree_host_size_t i = 0;
+       i < IREE_ARRAYSIZE(id4_ideogram4_generation_stage_descriptors); ++i) {
+    const id4_ideogram4_generation_stage_descriptor_t* descriptor =
+        &id4_ideogram4_generation_stage_descriptors[i];
+    if (iree_string_view_equal(iree_make_cstring_view(descriptor->key),
+                               stage_key)) {
+      return descriptor;
+    }
+  }
+  return NULL;
+}
+
 static const id4_ideogram4_generation_residency_phase_t
     id4_ideogram4_generation_residency_phases[] = {
         {
@@ -338,10 +365,17 @@ struct id4_ideogram4_generation_execution_t {
   uint64_t qwen_upload_payload_value;
   // Upload payload value for sampler seed input.
   uint64_t seed_upload_payload_value;
-  // Final decoded image binding retained from the decode stage.
-  iree_hal_buffer_binding_t decoded_image_binding;
+  // Conditioned DiT velocity binding retained from the conditioned DiT stage.
+  iree_hal_buffer_binding_t conditioned_velocity_binding;
+  // Unconditioned DiT velocity binding retained from the unconditioned DiT
+  // stage.
+  iree_hal_buffer_binding_t unconditioned_velocity_binding;
+  // CFG denoised latent binding retained from the sampler stage.
+  iree_hal_buffer_binding_t denoised_latent_binding;
   // Final diffusion latent binding retained from the sampler stage.
   iree_hal_buffer_binding_t final_latent_binding;
+  // Final decoded image binding retained from the decode stage.
+  iree_hal_buffer_binding_t decoded_image_binding;
 };
 
 static const id4_ideogram4_generation_boundary_alias_t
@@ -456,6 +490,57 @@ static iree_status_t id4_ideogram4_validate_diagnostic_tap_names(
     if (iree_string_view_is_empty(names.values[i])) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "diagnostic tap name %" PRIhsz " is empty", i);
+    }
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t
+id4_ideogram4_validate_generation_stage_diagnostic_tap_lists(
+    iree_host_size_t list_count,
+    const id4_ideogram4_generation_stage_diagnostic_tap_list_t* lists) {
+  if (list_count == 0) {
+    if (lists) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "generation diagnostic tap list array requires at least one entry");
+    }
+    return iree_ok_status();
+  }
+  if (!lists) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "generation diagnostic tap list array is required");
+  }
+  for (iree_host_size_t i = 0; i < list_count; ++i) {
+    if (iree_string_view_is_empty(lists[i].stage_key)) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "generation diagnostic tap list %" PRIhsz
+                              " has an empty stage key",
+                              i);
+    }
+    if (!id4_ideogram4_generation_stage_descriptor_for_key(
+            lists[i].stage_key)) {
+      return iree_make_status(IREE_STATUS_NOT_FOUND,
+                              "generation diagnostic tap list %" PRIhsz
+                              " references unknown stage `%.*s`",
+                              i, (int)lists[i].stage_key.size,
+                              lists[i].stage_key.data);
+    }
+    if (lists[i].tap_names.count == 0) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "generation diagnostic tap list for stage `%.*s` is empty",
+          (int)lists[i].stage_key.size, lists[i].stage_key.data);
+    }
+    IREE_RETURN_IF_ERROR(
+        id4_ideogram4_validate_diagnostic_tap_names(lists[i].tap_names));
+    for (iree_host_size_t j = i + 1; j < list_count; ++j) {
+      if (iree_string_view_equal(lists[i].stage_key, lists[j].stage_key)) {
+        return iree_make_status(
+            IREE_STATUS_ALREADY_EXISTS,
+            "generation diagnostic tap list contains duplicate stage `%.*s`",
+            (int)lists[i].stage_key.size, lists[i].stage_key.data);
+      }
     }
   }
   return iree_ok_status();
@@ -1061,6 +1146,10 @@ static iree_status_t id4_ideogram4_validate_generation_plan_options(
       id4_ideogram4_validate_generation_request(session, options->request));
   IREE_RETURN_IF_ERROR(
       id4_ideogram4_validate_generation_policy(options->policy));
+  IREE_RETURN_IF_ERROR(
+      id4_ideogram4_validate_generation_stage_diagnostic_tap_lists(
+          options->stage_diagnostic_tap_list_count,
+          options->stage_diagnostic_tap_lists));
   IREE_RETURN_IF_ERROR(id4_pipeline_diagnostics_validate_sink(
       options->diagnostics_sink, IREE_SV("Ideogram 4 generation plan")));
   return iree_ok_status();
@@ -1081,16 +1170,44 @@ static iree_status_t id4_ideogram4_generation_plan_allocate(
   return iree_ok_status();
 }
 
+static iree_string_view_list_t
+id4_ideogram4_generation_stage_diagnostic_tap_names(
+    const id4_ideogram4_generation_plan_options_t* options,
+    id4_ideogram4_generation_stage_ordinal_t stage_ordinal) {
+  const id4_ideogram4_generation_stage_descriptor_t* descriptor =
+      id4_ideogram4_generation_stage_descriptor(stage_ordinal);
+  if (!descriptor) return iree_string_view_list_empty();
+  iree_string_view_t stage_key = iree_make_cstring_view(descriptor->key);
+  for (iree_host_size_t i = 0; i < options->stage_diagnostic_tap_list_count;
+       ++i) {
+    const id4_ideogram4_generation_stage_diagnostic_tap_list_t* list =
+        &options->stage_diagnostic_tap_lists[i];
+    if (iree_string_view_equal(list->stage_key, stage_key)) {
+      return list->tap_names;
+    }
+  }
+  return iree_string_view_list_empty();
+}
+
 static iree_status_t id4_ideogram4_plan_stage(
+    id4_ideogram4_generation_stage_ordinal_t stage_ordinal,
     id4_pipeline_stage_t* stage, const void* stage_options,
     const id4_ideogram4_generation_plan_options_t* options,
     id4_pipeline_plan_t** out_plan) {
+  iree_string_view_list_t diagnostic_tap_names =
+      id4_ideogram4_generation_stage_diagnostic_tap_names(options,
+                                                          stage_ordinal);
   id4_pipeline_stage_plan_options_t plan_options;
   memset(&plan_options, 0, sizeof(plan_options));
   plan_options.structure_size = sizeof(plan_options);
   plan_options.next = stage_options;
+  plan_options.flags =
+      diagnostic_tap_names.count == 0
+          ? 0
+          : ID4_PIPELINE_STAGE_PLAN_FLAG_CAPTURE_DIAGNOSTIC_TAPS;
   plan_options.device_index = options->device_index;
   plan_options.queue_affinity = options->queue_affinity;
+  plan_options.diagnostic_tap_names = diagnostic_tap_names;
   plan_options.diagnostics_sink = options->diagnostics_sink;
   return id4_pipeline_stage_plan(stage, &plan_options, out_plan);
 }
@@ -1103,7 +1220,8 @@ static iree_status_t id4_ideogram4_plan_generation_qwen(
   memset(&qwen_options, 0, sizeof(qwen_options));
   qwen_options.structure_size = sizeof(qwen_options);
   qwen_options.request.token_count = token_count;
-  return id4_ideogram4_plan_stage(session->qwen_stage, &qwen_options, options,
+  return id4_ideogram4_plan_stage(ID4_IDEOGRAM4_GENERATION_STAGE_QWEN,
+                                  session->qwen_stage, &qwen_options, options,
                                   out_plan);
 }
 
@@ -1126,7 +1244,11 @@ static iree_status_t id4_ideogram4_plan_generation_dit(
       options->policy.dit_attention_implementation;
   dit_options.feed_forward_implementation =
       options->policy.dit_feed_forward_implementation;
-  return id4_ideogram4_plan_stage(stage, &dit_options, options, out_plan);
+  return id4_ideogram4_plan_stage(
+      conditioning_mode == ID4_IDEOGRAM4_DIT_CONDITIONING_MODE_CONDITIONED
+          ? ID4_IDEOGRAM4_GENERATION_STAGE_DIT_CONDITIONED
+          : ID4_IDEOGRAM4_GENERATION_STAGE_DIT_UNCONDITIONED,
+      stage, &dit_options, options, out_plan);
 }
 
 static iree_status_t id4_ideogram4_plan_generation_sampler_noise(
@@ -1138,7 +1260,8 @@ static iree_status_t id4_ideogram4_plan_generation_sampler_noise(
   sampler_options.structure_size = sizeof(sampler_options);
   sampler_options.request.latent_shape =
       id4_ideogram4_generation_request_diffusion_latent_shape(options->request);
-  return id4_ideogram4_plan_stage(session->sampler_noise_stage,
+  return id4_ideogram4_plan_stage(ID4_IDEOGRAM4_GENERATION_STAGE_NOISE,
+                                  session->sampler_noise_stage,
                                   &sampler_options, options, out_plan);
 }
 
@@ -1151,7 +1274,8 @@ static iree_status_t id4_ideogram4_plan_generation_sampler_denoise(
   sampler_options.structure_size = sizeof(sampler_options);
   sampler_options.request.latent_shape =
       id4_ideogram4_generation_request_diffusion_latent_shape(options->request);
-  return id4_ideogram4_plan_stage(session->sampler_denoise_stage,
+  return id4_ideogram4_plan_stage(ID4_IDEOGRAM4_GENERATION_STAGE_SAMPLER,
+                                  session->sampler_denoise_stage,
                                   &sampler_options, options, out_plan);
 }
 
@@ -1165,7 +1289,8 @@ static iree_status_t id4_ideogram4_plan_generation_decode(
   decode_options.request.diffusion_latent_shape =
       id4_ideogram4_generation_request_diffusion_latent_shape(options->request);
   decode_options.request.vae_tiling = options->policy.vae_tiling;
-  return id4_ideogram4_plan_stage(session->decode_stage, &decode_options,
+  return id4_ideogram4_plan_stage(ID4_IDEOGRAM4_GENERATION_STAGE_DECODE,
+                                  session->decode_stage, &decode_options,
                                   options, out_plan);
 }
 
@@ -1328,18 +1453,6 @@ static iree_status_t id4_ideogram4_generation_plan_append_tiling_json(
       (uint32_t)tiling.mode, tiling.tile_size_x, tiling.tile_size_y,
       (double)tiling.relative_size_x, (double)tiling.relative_size_y,
       (double)tiling.overlap, (uint64_t)tiling.memory_budget);
-}
-
-static const id4_ideogram4_generation_stage_descriptor_t*
-id4_ideogram4_generation_stage_descriptor(
-    id4_ideogram4_generation_stage_ordinal_t ordinal) {
-  for (iree_host_size_t i = 0;
-       i < IREE_ARRAYSIZE(id4_ideogram4_generation_stage_descriptors); ++i) {
-    const id4_ideogram4_generation_stage_descriptor_t* descriptor =
-        &id4_ideogram4_generation_stage_descriptors[i];
-    if (descriptor->ordinal == ordinal) return descriptor;
-  }
-  return NULL;
 }
 
 static const id4_pipeline_plan_t* id4_ideogram4_generation_stage_plan(
@@ -3234,15 +3347,34 @@ static iree_status_t id4_ideogram4_generation_issue_decode(
 static iree_status_t id4_ideogram4_generation_find_outputs(
     id4_ideogram4_generation_execution_t* execution) {
   IREE_RETURN_IF_ERROR(id4_pipeline_find_boundary_binding(
-      execution->bundle->stages[ID4_IDEOGRAM4_GENERATION_STAGE_DECODE].plan,
-      &execution->bundle->stages[ID4_IDEOGRAM4_GENERATION_STAGE_DECODE]
+      execution->bundle->stages[ID4_IDEOGRAM4_GENERATION_STAGE_DIT_CONDITIONED]
+          .plan,
+      &execution->bundle->stages[ID4_IDEOGRAM4_GENERATION_STAGE_DIT_CONDITIONED]
            .boundary_bindings,
-      IREE_SV("media.image.decoded"), &execution->decoded_image_binding));
-  return id4_pipeline_find_boundary_binding(
+      IREE_SV("velocity"), &execution->conditioned_velocity_binding));
+  IREE_RETURN_IF_ERROR(id4_pipeline_find_boundary_binding(
+      execution->bundle
+          ->stages[ID4_IDEOGRAM4_GENERATION_STAGE_DIT_UNCONDITIONED]
+          .plan,
+      &execution->bundle
+           ->stages[ID4_IDEOGRAM4_GENERATION_STAGE_DIT_UNCONDITIONED]
+           .boundary_bindings,
+      IREE_SV("velocity"), &execution->unconditioned_velocity_binding));
+  IREE_RETURN_IF_ERROR(id4_pipeline_find_boundary_binding(
       execution->bundle->stages[ID4_IDEOGRAM4_GENERATION_STAGE_SAMPLER].plan,
       &execution->bundle->stages[ID4_IDEOGRAM4_GENERATION_STAGE_SAMPLER]
            .boundary_bindings,
-      IREE_SV("x_next"), &execution->final_latent_binding);
+      IREE_SV("denoised"), &execution->denoised_latent_binding));
+  IREE_RETURN_IF_ERROR(id4_pipeline_find_boundary_binding(
+      execution->bundle->stages[ID4_IDEOGRAM4_GENERATION_STAGE_SAMPLER].plan,
+      &execution->bundle->stages[ID4_IDEOGRAM4_GENERATION_STAGE_SAMPLER]
+           .boundary_bindings,
+      IREE_SV("x_next"), &execution->final_latent_binding));
+  return id4_pipeline_find_boundary_binding(
+      execution->bundle->stages[ID4_IDEOGRAM4_GENERATION_STAGE_DECODE].plan,
+      &execution->bundle->stages[ID4_IDEOGRAM4_GENERATION_STAGE_DECODE]
+           .boundary_bindings,
+      IREE_SV("media.image.decoded"), &execution->decoded_image_binding);
 }
 
 static iree_status_t id4_ideogram4_generation_begin_execution(
@@ -3662,8 +3794,66 @@ iree_status_t id4_ideogram4_generation_execution_result(
         IREE_STATUS_INVALID_ARGUMENT,
         "Ideogram 4 generation execution and result output are required");
   }
-  out_result->decoded_image_binding = execution->decoded_image_binding;
+  out_result->conditioned_velocity_binding =
+      execution->conditioned_velocity_binding;
+  out_result->unconditioned_velocity_binding =
+      execution->unconditioned_velocity_binding;
+  out_result->denoised_latent_binding = execution->denoised_latent_binding;
   out_result->final_latent_binding = execution->final_latent_binding;
+  out_result->decoded_image_binding = execution->decoded_image_binding;
+  return iree_ok_status();
+}
+
+static iree_status_t id4_ideogram4_generation_find_diagnostic_tap_plan(
+    const id4_pipeline_plan_t* plan, iree_string_view_t tap_name,
+    const id4_pipeline_diagnostic_tap_plan_t** out_tap) {
+  *out_tap = NULL;
+  const iree_host_size_t tap_count =
+      id4_pipeline_plan_diagnostic_tap_count(plan);
+  for (iree_host_size_t i = 0; i < tap_count; ++i) {
+    const id4_pipeline_diagnostic_tap_plan_t* tap =
+        id4_pipeline_plan_diagnostic_tap_at(plan, i);
+    if (tap && iree_string_view_equal(tap->name, tap_name)) {
+      *out_tap = tap;
+      return iree_ok_status();
+    }
+  }
+  iree_string_view_t stage_name = id4_pipeline_plan_stage_name(plan);
+  return iree_make_status(
+      IREE_STATUS_NOT_FOUND,
+      "Ideogram 4 generation stage %.*s has no diagnostic tap `%.*s`",
+      (int)stage_name.size, stage_name.data, (int)tap_name.size, tap_name.data);
+}
+
+iree_status_t id4_ideogram4_generation_execution_find_diagnostic_tap(
+    const id4_ideogram4_generation_execution_t* execution,
+    iree_string_view_t stage_key, iree_string_view_t tap_name,
+    const id4_pipeline_tensor_layout_t** out_layout,
+    iree_hal_buffer_binding_t* out_binding) {
+  if (!execution || iree_string_view_is_empty(stage_key) ||
+      iree_string_view_is_empty(tap_name) || !out_layout || !out_binding) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "Ideogram 4 generation diagnostic tap lookup requires execution, "
+        "stage key, tap name, layout output, and binding output");
+  }
+  *out_layout = NULL;
+  memset(out_binding, 0, sizeof(*out_binding));
+  const id4_ideogram4_generation_stage_descriptor_t* descriptor =
+      id4_ideogram4_generation_stage_descriptor_for_key(stage_key);
+  if (!descriptor) {
+    return iree_make_status(IREE_STATUS_NOT_FOUND,
+                            "Ideogram 4 generation has no stage `%.*s`",
+                            (int)stage_key.size, stage_key.data);
+  }
+  const id4_ideogram4_generation_stage_slot_t* slot =
+      &execution->bundle->stages[descriptor->ordinal];
+  const id4_pipeline_diagnostic_tap_plan_t* tap = NULL;
+  IREE_RETURN_IF_ERROR(id4_ideogram4_generation_find_diagnostic_tap_plan(
+      slot->plan, tap_name, &tap));
+  IREE_RETURN_IF_ERROR(id4_pipeline_find_diagnostic_tap_binding(
+      slot->plan, &slot->diagnostic_tap_bindings, tap_name, out_binding));
+  *out_layout = &tap->layout;
   return iree_ok_status();
 }
 
