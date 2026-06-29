@@ -2856,7 +2856,6 @@ static iree_status_t id4_ideogram4_generation_bundle_prepare_resident_stages(
     id4_ideogram4_generation_bundle_t* bundle,
     const id4_ideogram4_generation_prepare_options_t* options) {
   iree_status_t status = iree_ok_status();
-  iree_hal_semaphore_list_t stage_wait_list = options->wait_semaphore_list;
   for (iree_host_size_t i = 0;
        i < IREE_ARRAYSIZE(id4_ideogram4_generation_stage_descriptors) &&
        iree_status_is_ok(status);
@@ -2871,16 +2870,9 @@ static iree_status_t id4_ideogram4_generation_bundle_prepare_resident_stages(
         descriptor->ordinal;
     if (bundle->resident_stage_bundles[stage_ordinal]) continue;
     status = id4_ideogram4_generation_prepare_stage_bundle(
-        bundle, stage_ordinal, stage_wait_list, options->diagnostics_sink,
+        bundle, stage_ordinal, options->wait_semaphore_list,
+        options->diagnostics_sink,
         &bundle->resident_stage_bundles[stage_ordinal]);
-    if (iree_status_is_ok(status)) {
-      iree_hal_semaphore_list_t readiness_list =
-          id4_pipeline_bundle_readiness_semaphore_list(
-              bundle->resident_stage_bundles[stage_ordinal]);
-      if (readiness_list.count != 0) {
-        stage_wait_list = readiness_list;
-      }
-    }
   }
   if (iree_status_is_ok(status)) {
     status = id4_ideogram4_generation_bundle_signal_resident_bundles_prepared(
@@ -2989,22 +2981,13 @@ static iree_status_t id4_ideogram4_generation_prepare_phase_bundle(
                             phase_mask);
   }
   iree_status_t status = iree_ok_status();
-  iree_hal_semaphore_list_t stage_wait_list = wait_semaphore_list;
   for (iree_host_size_t i = 0;
        i < phase->stage_count && iree_status_is_ok(status); ++i) {
     const id4_ideogram4_generation_stage_ordinal_t stage_ordinal =
         phase->stage_ordinals[i];
     status = id4_ideogram4_generation_acquire_stage_bundle_ref(
-        bundle, stage_ordinal, stage_wait_list, diagnostics_sink,
+        bundle, stage_ordinal, wait_semaphore_list, diagnostics_sink,
         &out_phase_bundle->stage_bundle_refs[stage_ordinal]);
-    if (iree_status_is_ok(status)) {
-      iree_hal_semaphore_list_t readiness_list =
-          id4_pipeline_bundle_readiness_semaphore_list(
-              out_phase_bundle->stage_bundle_refs[stage_ordinal].bundle);
-      if (readiness_list.count != 0) {
-        stage_wait_list = readiness_list;
-      }
-    }
   }
   if (!iree_status_is_ok(status)) {
     status = iree_status_join(
