@@ -5810,17 +5810,6 @@ static iree_status_t loom_amdgpu_lookup_vector_scalef32_source(
       context, source_op, *out_low_scale, out_low_scale);
 }
 
-static iree_status_t
-loom_amdgpu_resolve_vector_fp8_scalef32_descriptor_if_present(
-    loom_low_lower_context_t* context,
-    const loom_amdgpu_vector_16bit_float_conversion_plan_t* plan,
-    loom_low_lower_resolved_descriptor_t* out_descriptor,
-    bool* out_is_present) {
-  return loom_amdgpu_resolve_fp8_scalef32_descriptor_if_present(
-      context, plan->source_element_type, plan->result_element_type,
-      out_descriptor, out_is_present);
-}
-
 static iree_status_t loom_amdgpu_emit_f32_mul(loom_low_lower_context_t* context,
                                               const loom_op_t* source_op,
                                               loom_value_id_t lhs,
@@ -5920,12 +5909,11 @@ loom_amdgpu_try_lower_vector_fp8_identity_scalef32_to_packed_16bit_native(
     bool* out_selected) {
   *out_selected = false;
 
-  loom_low_lower_resolved_descriptor_t descriptor = {0};
-  bool descriptor_is_present = false;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_fp8_scalef32_descriptor_if_present(
+  const loom_low_lower_resolved_descriptor_t* descriptor = NULL;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_get_fp8_scalef32_descriptor(
       context, plan->source_element_type, plan->result_element_type,
-      &descriptor, &descriptor_is_present));
-  if (!descriptor_is_present ||
+      &descriptor));
+  if (descriptor == NULL ||
       !loom_amdgpu_vector_fp8_all_pairs_have_adjacent_storage(plan)) {
     return iree_ok_status();
   }
@@ -5939,7 +5927,7 @@ loom_amdgpu_try_lower_vector_fp8_identity_scalef32_to_packed_16bit_native(
        register_index < plan->result_register_count; ++register_index) {
     bool selected = false;
     IREE_RETURN_IF_ERROR(loom_amdgpu_try_lower_vector_fp8_scalef32_pair_native(
-        context, source_op, plan, &descriptor, low_source, low_scale_one,
+        context, source_op, plan, descriptor, low_source, low_scale_one,
         source_lane_type, result_lane_type, register_index * 2u,
         &out_low_packets[register_index], &selected));
     if (!selected) {
@@ -6281,13 +6269,12 @@ static iree_status_t loom_amdgpu_lower_vector_fp8_scalef32_to_f32(
   IREE_RETURN_IF_ERROR(loom_amdgpu_lookup_vector_scalef32_source(
       context, source_op, plan, &low_scale));
 
-  loom_low_lower_resolved_descriptor_t descriptor = {0};
-  bool descriptor_is_present = false;
-  IREE_RETURN_IF_ERROR(
-      loom_amdgpu_resolve_vector_fp8_scalef32_descriptor_if_present(
-          context, plan, &descriptor, &descriptor_is_present));
+  const loom_low_lower_resolved_descriptor_t* descriptor = NULL;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_get_fp8_scalef32_descriptor(
+      context, plan->source_element_type, plan->result_element_type,
+      &descriptor));
 
-  if (descriptor_is_present &&
+  if (descriptor != NULL &&
       loom_amdgpu_vector_fp8_all_pairs_have_adjacent_storage(plan)) {
     loom_type_t result_pair_type = loom_type_none();
     IREE_RETURN_IF_ERROR(
@@ -6300,7 +6287,7 @@ static iree_status_t loom_amdgpu_lower_vector_fp8_scalef32_to_f32(
       bool selected = false;
       IREE_RETURN_IF_ERROR(
           loom_amdgpu_try_lower_vector_fp8_scalef32_pair_native(
-              context, source_op, plan, &descriptor, low_source, low_scale,
+              context, source_op, plan, descriptor, low_source, low_scale,
               source_lane_type, result_pair_type, lane_index, &converted_pair,
               &selected));
       if (!selected) {
@@ -6353,14 +6340,13 @@ static iree_status_t loom_amdgpu_lower_vector_fp8_scalef32_to_packed_16bit(
   IREE_RETURN_IF_ERROR(loom_amdgpu_lookup_vector_scalef32_source(
       context, source_op, plan, &low_scale));
 
-  loom_low_lower_resolved_descriptor_t descriptor = {0};
-  bool descriptor_is_present = false;
-  IREE_RETURN_IF_ERROR(
-      loom_amdgpu_resolve_vector_fp8_scalef32_descriptor_if_present(
-          context, plan, &descriptor, &descriptor_is_present));
+  const loom_low_lower_resolved_descriptor_t* descriptor = NULL;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_get_fp8_scalef32_descriptor(
+      context, plan->source_element_type, plan->result_element_type,
+      &descriptor));
 
   loom_value_id_t packed_registers[LOOM_AMDGPU_MAX_PACKED_16BIT_FLOAT_LANES];
-  if (descriptor_is_present &&
+  if (descriptor != NULL &&
       loom_amdgpu_vector_fp8_all_pairs_have_adjacent_storage(plan)) {
     for (uint32_t register_index = 0;
          register_index < plan->result_register_count; ++register_index) {
@@ -6368,7 +6354,7 @@ static iree_status_t loom_amdgpu_lower_vector_fp8_scalef32_to_packed_16bit(
       bool selected = false;
       IREE_RETURN_IF_ERROR(
           loom_amdgpu_try_lower_vector_fp8_scalef32_pair_native(
-              context, source_op, plan, &descriptor, low_source, low_scale,
+              context, source_op, plan, descriptor, low_source, low_scale,
               source_lane_type, result_lane_type, lane_index,
               &packed_registers[register_index], &selected));
       if (!selected) {
