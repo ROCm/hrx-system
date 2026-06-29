@@ -20,7 +20,6 @@ enum {
   ID4_QWEN3_VL_LINEAR_WMMA_TOKEN_BLOCK_M32 = 32,
   ID4_QWEN3_VL_LINEAR_WMMA_TOKEN_BLOCK_M48 = 48,
   ID4_QWEN3_VL_LINEAR_WMMA_TOKEN_BLOCK_M64 = 64,
-  ID4_QWEN3_VL_LINEAR_WMMA_TOKEN_BLOCK_M96 = 96,
   ID4_QWEN3_VL_LINEAR_WMMA_INPUT_BLOCK = 16,
   ID4_QWEN3_VL_LINEAR_WMMA_OUTPUT_ROW_BLOCK_M32 = 32,
   ID4_QWEN3_VL_LINEAR_WMMA_OUTPUT_ROW_BLOCK_M64 = 64,
@@ -629,8 +628,8 @@ typedef enum id4_qwen3_vl_kernel_kind_e {
   ID4_QWEN3_VL_KERNEL_LINEAR_BF16_BF16_WMMA_M64N64 = 16,
   // Dense BF16 activation/weight WMMA linear kernel for 48x32 tiles.
   ID4_QWEN3_VL_KERNEL_LINEAR_BF16_BF16_WMMA_M48N32 = 17,
-  // Dense BF16 activation/weight WMMA linear kernel for 96x32 tiles.
-  ID4_QWEN3_VL_KERNEL_LINEAR_BF16_BF16_WMMA_M96N32 = 18,
+  // Dense BF16 activation/weight 32x64 WMMA linear kernel with packed output.
+  ID4_QWEN3_VL_KERNEL_LINEAR_BF16_BF16_WMMA_M32N64_TRANSPOSE_OUTPUT = 18,
   // Dense BF16 activation/weight scalar linear tail kernel.
   ID4_QWEN3_VL_KERNEL_LINEAR_BF16_BF16_TAIL = 19,
   // BF16 activation transpose pack kernel.
@@ -788,16 +787,6 @@ static const id4_qwen3_vl_program_linear_wmma_tile_t
 };
 
 static const id4_qwen3_vl_program_linear_wmma_tile_t
-    id4_qwen3_vl_program_linear_wmma_m96n32_tile = {
-        // Number of token rows covered by one WMMA dispatch tile.
-        .token_block = ID4_QWEN3_VL_LINEAR_WMMA_TOKEN_BLOCK_M96,
-        // Number of output rows covered by one WMMA dispatch tile.
-        .output_row_block = ID4_QWEN3_VL_LINEAR_WMMA_OUTPUT_ROW_BLOCK_M32,
-        // Kernel kind implementing this tile shape.
-        .kernel_kind = ID4_QWEN3_VL_KERNEL_LINEAR_BF16_BF16_WMMA_M96N32,
-};
-
-static const id4_qwen3_vl_program_linear_wmma_tile_t
     id4_qwen3_vl_program_linear_wmma_m16n64_tile = {
         // Number of token rows covered by one WMMA dispatch tile.
         .token_block = ID4_QWEN3_VL_LINEAR_WMMA_TOKEN_BLOCK_M16,
@@ -839,14 +828,6 @@ id4_qwen3_vl_program_select_linear_wmma_tile(uint32_t token_count,
       (output_size %
        id4_qwen3_vl_program_linear_wmma_m64n64_tile.output_row_block) == 0) {
     return &id4_qwen3_vl_program_linear_wmma_m64n64_tile;
-  }
-  if ((token_count %
-       id4_qwen3_vl_program_linear_wmma_m96n32_tile.token_block) == 0 &&
-      token_count < ID4_QWEN3_VL_LINEAR_WMMA_M64N64_MIN_TOKEN_COUNT &&
-      (output_size %
-       id4_qwen3_vl_program_linear_wmma_m96n32_tile.output_row_block) == 0 &&
-      output_size >= ID4_QWEN3_VL_LINEAR_WMMA_M64N64_MIN_OUTPUT_SIZE) {
-    return &id4_qwen3_vl_program_linear_wmma_m96n32_tile;
   }
   if ((token_count %
        id4_qwen3_vl_program_linear_wmma_m48n32_tile.token_block) == 0 &&
@@ -1181,9 +1162,10 @@ static const id4_pipeline_kernel_ref_t
         [ID4_QWEN3_VL_KERNEL_LINEAR_BF16_BF16_WMMA_M48N32] =
             {IREE_SVL("qwen3_vl/linear_bf16_f32_wmma"),
              IREE_SVL("id4_qwen3_vl_linear_bf16_bf16_wmma_m48n32")},
-        [ID4_QWEN3_VL_KERNEL_LINEAR_BF16_BF16_WMMA_M96N32] =
+        [ID4_QWEN3_VL_KERNEL_LINEAR_BF16_BF16_WMMA_M32N64_TRANSPOSE_OUTPUT] =
             {IREE_SVL("qwen3_vl/linear_bf16_f32_wmma"),
-             IREE_SVL("id4_qwen3_vl_linear_bf16_bf16_wmma_m96n32")},
+             IREE_SVL("id4_qwen3_vl_linear_bf16_bf16_wmma_m32n64_"
+                      "transpose_output")},
         [ID4_QWEN3_VL_KERNEL_LINEAR_BF16_BF16_TAIL] =
             {IREE_SVL("qwen3_vl/linear_bf16_bf16_tail"),
              IREE_SVL("id4_qwen3_vl_linear_bf16_bf16_tail")},
@@ -1376,7 +1358,7 @@ static const iree_string_view_t id4_qwen3_vl_program_config_keys
                 [ID4_QWEN3_VL_CONFIG_OUTPUT_SIZE] =
                     IREE_SVL("id4.qwen3_vl.linear_wmma.output_size"),
             },
-        [ID4_QWEN3_VL_KERNEL_LINEAR_BF16_BF16_WMMA_M96N32] =
+        [ID4_QWEN3_VL_KERNEL_LINEAR_BF16_BF16_WMMA_M32N64_TRANSPOSE_OUTPUT] =
             {
                 [ID4_QWEN3_VL_CONFIG_DISPATCH_TOKEN_COUNT] =
                     IREE_SVL("id4.qwen3_vl.linear_wmma.dispatch_token_count"),
@@ -2264,6 +2246,87 @@ static iree_status_t id4_qwen3_vl_program_author_linear(
       builder, output_kind, layer_ordinal, *out_output, &output_coverage);
 }
 
+static bool id4_qwen3_vl_program_can_author_value_projection_packed(
+    const id4_qwen3_vl_program_options_t* options, uint32_t token_capacity) {
+  const id4_qwen3_vl_program_linear_wmma_tile_t* wmma_tile =
+      id4_qwen3_vl_program_select_linear_wmma_tile(
+          token_capacity, options->model.hidden_size,
+          id4_qwen3_vl_program_key_value_width(&options->model));
+  return wmma_tile &&
+         wmma_tile->kernel_kind ==
+             ID4_QWEN3_VL_KERNEL_LINEAR_BF16_BF16_WMMA_M32N64 &&
+         (token_capacity % wmma_tile->token_block) == 0;
+}
+
+static iree_status_t id4_qwen3_vl_program_author_value_projection_packed(
+    const id4_qwen3_vl_program_options_t* options,
+    id4_pipeline_program_builder_t* builder, uint32_t layer_ordinal,
+    id4_pipeline_program_tensor_t input,
+    id4_pipeline_program_tensor_t* out_packed_value) {
+  const uint32_t hidden_size = options->model.hidden_size;
+  const uint32_t key_value_width =
+      id4_qwen3_vl_program_key_value_width(&options->model);
+  uint32_t token_capacity = 0;
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_calculate_bf16_token_capacity(
+      options->request.token_count, &token_capacity));
+  if (!id4_qwen3_vl_program_can_author_value_projection_packed(
+          options, token_capacity)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "Qwen3-VL packed value projection requires the 32x64 WMMA tile");
+  }
+
+  id4_pipeline_program_tensor_t weight = id4_pipeline_program_tensor_invalid();
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_parameter(
+      builder, options->parameter_scope,
+      ID4_QWEN3_VL_PARAMETER_LAYER_V_PROJECTION, layer_ordinal,
+      ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+      id4_pipeline_program_make_shape_rank2(key_value_width, hidden_size),
+      &weight));
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_acquire_tensor(
+      builder, ID4_QWEN3_VL_TENSOR_LAYER_V_PACKED, layer_ordinal,
+      ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+      id4_pipeline_program_make_shape_rank2(key_value_width, token_capacity),
+      out_packed_value));
+
+  char operation_name_buffer[ID4_QWEN3_VL_FORMAT_BUFFER_CAPACITY];
+  iree_string_view_t operation_name = iree_string_view_empty();
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_format_operation_name(
+      ID4_QWEN3_VL_OPERATION_LINEAR, layer_ordinal,
+      ID4_QWEN3_VL_OPERATION_SITE_SELF_ATTENTION_V_PROJECTION,
+      operation_name_buffer, IREE_ARRAYSIZE(operation_name_buffer),
+      &operation_name));
+  char packed_name_buffer[ID4_QWEN3_VL_FORMAT_BUFFER_CAPACITY];
+  iree_string_view_t packed_name = iree_string_view_empty();
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_format_child_name(
+      operation_name, IREE_SV("wmma_packed"), packed_name_buffer,
+      IREE_ARRAYSIZE(packed_name_buffer), &packed_name));
+
+  const id4_qwen3_vl_program_config_value_t config_values[] = {
+      {ID4_QWEN3_VL_CONFIG_DISPATCH_TOKEN_COUNT, token_capacity},
+      {ID4_QWEN3_VL_CONFIG_INPUT_SIZE, hidden_size},
+      {ID4_QWEN3_VL_CONFIG_OUTPUT_SIZE, key_value_width},
+  };
+  char value_buffers[ID4_QWEN3_VL_MAX_KERNEL_CONFIG_BINDING_COUNT]
+                    [ID4_QWEN3_VL_CONFIG_VALUE_BUFFER_CAPACITY];
+  id4_pipeline_kernel_config_binding_t
+      config_bindings[ID4_QWEN3_VL_MAX_KERNEL_CONFIG_BINDING_COUNT];
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_make_config_bindings(
+      ID4_QWEN3_VL_KERNEL_LINEAR_BF16_BF16_WMMA_M32N64_TRANSPOSE_OUTPUT,
+      IREE_ARRAYSIZE(config_values), config_values, value_buffers,
+      config_bindings));
+  id4_pipeline_program_dispatch_binding_t bindings[] = {
+      id4_pipeline_program_read(input),
+      id4_pipeline_program_read(weight),
+      id4_pipeline_program_write(*out_packed_value),
+  };
+  return id4_qwen3_vl_program_dispatch_named(
+      builder, packed_name,
+      ID4_QWEN3_VL_KERNEL_LINEAR_BF16_BF16_WMMA_M32N64_TRANSPOSE_OUTPUT,
+      IREE_ARRAYSIZE(config_values), config_bindings, IREE_ARRAYSIZE(bindings),
+      bindings);
+}
+
 static iree_status_t id4_qwen3_vl_program_author_rotary(
     const id4_qwen3_vl_program_options_t* options,
     id4_pipeline_program_builder_t* builder, uint32_t layer_ordinal,
@@ -2480,18 +2543,16 @@ static iree_status_t id4_qwen3_vl_program_dispatch_value_pack(
       bindings);
 }
 
-static iree_status_t id4_qwen3_vl_program_author_attention_wmma(
+static iree_status_t id4_qwen3_vl_program_author_attention_wmma_packed_value(
     const id4_qwen3_vl_program_options_t* options,
     id4_pipeline_program_builder_t* builder, uint32_t layer_ordinal,
     id4_pipeline_program_tensor_t query, id4_pipeline_program_tensor_t key,
-    id4_pipeline_program_tensor_t value,
+    id4_pipeline_program_tensor_t packed_value,
     id4_pipeline_program_tensor_t attention_mask,
     id4_pipeline_program_tensor_t* out_context) {
   const uint32_t token_count = options->request.token_count;
   const uint32_t hidden_size = options->model.hidden_size;
   const uint32_t attention_head_count = options->model.attention_head_count;
-  const uint32_t key_value_width =
-      id4_qwen3_vl_program_key_value_width(&options->model);
   uint32_t token_capacity = 0;
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_calculate_bf16_token_capacity(
       options->request.token_count, &token_capacity));
@@ -2510,13 +2571,6 @@ static iree_status_t id4_qwen3_vl_program_author_attention_wmma(
       id4_pipeline_program_make_shape_rank3(attention_head_count,
                                             token_capacity, token_capacity),
       &probabilities));
-  id4_pipeline_program_tensor_t packed_value =
-      id4_pipeline_program_tensor_invalid();
-  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_acquire_tensor(
-      builder, ID4_QWEN3_VL_TENSOR_LAYER_V_PACKED, layer_ordinal,
-      ID4_PIPELINE_PROGRAM_DTYPE_BF16,
-      id4_pipeline_program_make_shape_rank2(key_value_width, token_capacity),
-      &packed_value));
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_acquire_tensor(
       builder, ID4_QWEN3_VL_TENSOR_LAYER_ATTENTION_CONTEXT, layer_ordinal,
       ID4_PIPELINE_PROGRAM_DTYPE_BF16,
@@ -2542,8 +2596,6 @@ static iree_status_t id4_qwen3_vl_program_author_attention_wmma(
       ID4_QWEN3_VL_KERNEL_ATTENTION_QK_SCORES_WMMA,
       IREE_ARRAYSIZE(attention_config_values), attention_config_values,
       IREE_ARRAYSIZE(score_bindings), score_bindings));
-  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_dispatch_value_pack(
-      options, builder, layer_ordinal, value, packed_value));
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_barrier(
       builder, layer_ordinal,
       ID4_QWEN3_VL_OPERATION_SITE_AFTER_ATTENTION_SCORES));
@@ -2576,6 +2628,32 @@ static iree_status_t id4_qwen3_vl_program_author_attention_wmma(
   return id4_qwen3_vl_program_tap_tensor(
       builder, ID4_QWEN3_VL_TENSOR_LAYER_ATTENTION_CONTEXT, layer_ordinal,
       *out_context);
+}
+
+static iree_status_t id4_qwen3_vl_program_author_attention_wmma(
+    const id4_qwen3_vl_program_options_t* options,
+    id4_pipeline_program_builder_t* builder, uint32_t layer_ordinal,
+    id4_pipeline_program_tensor_t query, id4_pipeline_program_tensor_t key,
+    id4_pipeline_program_tensor_t value,
+    id4_pipeline_program_tensor_t attention_mask,
+    id4_pipeline_program_tensor_t* out_context) {
+  const uint32_t key_value_width =
+      id4_qwen3_vl_program_key_value_width(&options->model);
+  uint32_t token_capacity = 0;
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_calculate_bf16_token_capacity(
+      options->request.token_count, &token_capacity));
+  id4_pipeline_program_tensor_t packed_value =
+      id4_pipeline_program_tensor_invalid();
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_acquire_tensor(
+      builder, ID4_QWEN3_VL_TENSOR_LAYER_V_PACKED, layer_ordinal,
+      ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+      id4_pipeline_program_make_shape_rank2(key_value_width, token_capacity),
+      &packed_value));
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_dispatch_value_pack(
+      options, builder, layer_ordinal, value, packed_value));
+  return id4_qwen3_vl_program_author_attention_wmma_packed_value(
+      options, builder, layer_ordinal, query, key, packed_value, attention_mask,
+      out_context);
 }
 
 static iree_status_t id4_qwen3_vl_program_attention_uses_materialized(
@@ -2910,6 +2988,9 @@ static iree_status_t id4_qwen3_vl_program_author_layer(
       id4_qwen3_vl_program_query_width(&options->model);
   const uint32_t key_value_width =
       id4_qwen3_vl_program_key_value_width(&options->model);
+  uint32_t token_capacity = 0;
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_calculate_bf16_token_capacity(
+      options->request.token_count, &token_capacity));
   uint32_t query_row_count = 0;
   if (!id4_qwen3_vl_program_checked_mul_u32(options->request.token_count,
                                             options->model.attention_head_count,
@@ -2950,12 +3031,30 @@ static iree_status_t id4_qwen3_vl_program_author_layer(
       ID4_QWEN3_VL_OPERATION_SITE_SELF_ATTENTION_K_PROJECTION,
       ID4_QWEN3_VL_PARAMETER_LAYER_K_PROJECTION, ID4_QWEN3_VL_TENSOR_LAYER_K,
       input_norm, hidden_size, key_value_width, &key));
+
+  bool uses_materialized_attention = false;
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_attention_uses_materialized(
+      options, layer_ordinal, &uses_materialized_attention));
+  bool has_value_tap = false;
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_has_diagnostic_tap(
+      options, ID4_QWEN3_VL_TENSOR_LAYER_V, layer_ordinal, &has_value_tap));
+  const bool uses_packed_value_projection =
+      !uses_materialized_attention && !has_value_tap &&
+      id4_qwen3_vl_program_can_author_value_projection_packed(options,
+                                                              token_capacity);
   id4_pipeline_program_tensor_t value = id4_pipeline_program_tensor_invalid();
-  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_author_linear(
-      options, builder, layer_ordinal,
-      ID4_QWEN3_VL_OPERATION_SITE_SELF_ATTENTION_V_PROJECTION,
-      ID4_QWEN3_VL_PARAMETER_LAYER_V_PROJECTION, ID4_QWEN3_VL_TENSOR_LAYER_V,
-      input_norm, hidden_size, key_value_width, &value));
+  id4_pipeline_program_tensor_t packed_value =
+      id4_pipeline_program_tensor_invalid();
+  if (uses_packed_value_projection) {
+    IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_author_value_projection_packed(
+        options, builder, layer_ordinal, input_norm, &packed_value));
+  } else {
+    IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_author_linear(
+        options, builder, layer_ordinal,
+        ID4_QWEN3_VL_OPERATION_SITE_SELF_ATTENTION_V_PROJECTION,
+        ID4_QWEN3_VL_PARAMETER_LAYER_V_PROJECTION, ID4_QWEN3_VL_TENSOR_LAYER_V,
+        input_norm, hidden_size, key_value_width, &value));
+  }
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_barrier(
       builder, layer_ordinal,
       ID4_QWEN3_VL_OPERATION_SITE_AFTER_QKV_PROJECTION));
@@ -2963,8 +3062,10 @@ static iree_status_t id4_qwen3_vl_program_author_layer(
       builder, ID4_QWEN3_VL_TENSOR_LAYER_Q, layer_ordinal, query));
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_tap_tensor(
       builder, ID4_QWEN3_VL_TENSOR_LAYER_K, layer_ordinal, key));
-  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_tap_tensor(
-      builder, ID4_QWEN3_VL_TENSOR_LAYER_V, layer_ordinal, value));
+  if (!uses_packed_value_projection) {
+    IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_tap_tensor(
+        builder, ID4_QWEN3_VL_TENSOR_LAYER_V, layer_ordinal, value));
+  }
 
   id4_pipeline_program_tensor_t query_norm =
       id4_pipeline_program_tensor_invalid();
@@ -3011,9 +3112,16 @@ static iree_status_t id4_qwen3_vl_program_author_layer(
       builder, ID4_QWEN3_VL_TENSOR_LAYER_K_ROTARY, layer_ordinal, key_rotary));
 
   id4_pipeline_program_tensor_t context = id4_pipeline_program_tensor_invalid();
-  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_author_attention(
-      options, builder, layer_ordinal, query_rotary, key_rotary, value,
-      attention_mask, &context));
+  if (uses_packed_value_projection) {
+    IREE_RETURN_IF_ERROR(
+        id4_qwen3_vl_program_author_attention_wmma_packed_value(
+            options, builder, layer_ordinal, query_rotary, key_rotary,
+            packed_value, attention_mask, &context));
+  } else {
+    IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_author_attention(
+        options, builder, layer_ordinal, query_rotary, key_rotary, value,
+        attention_mask, &context));
+  }
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_barrier(
       builder, layer_ordinal, ID4_QWEN3_VL_OPERATION_SITE_AFTER_ATTENTION));
 
