@@ -1081,6 +1081,63 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx1250_vector_extf_dir
 // ====
 
 amdgpu.target<gfx1250> @target
+kernel.def target(@target) @gfx1250_vector_extf_direct_f8e4m3_x3_to_f16_load_store() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %lane = kernel.workitem.id<x> : index
+  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E4M3, #dense>
+  %output_view = buffer.view %output[%base] : buffer -> view<64x3xf16, #dense>
+  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E4M3, #dense> -> vector<4xf8E4M3>
+  %payload = vector.slice %packed[0] : vector<4xf8E4M3> -> vector<3xf8E4M3>
+  %value = vector.extf %payload : vector<3xf8E4M3> to vector<3xf16>
+  vector.store %value, %output_view[%lane, 0] : vector<3xf16>, view<64x3xf16, #dense>
+  kernel.return
+}
+
+// ----
+low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx1250_vector_extf_direct_f8e4m3_x3_to_f16_load_store() asm<amdgpu.rdna4.gfx125x.core> {
+  %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
+  %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 384} : reg<amdgpu.sgpr x2>
+  %23 = v_lshlrev_b32_src0_inline %lane, 2
+  %packed = global_load_b32_saddr %23, %input_view
+  %25 = v_cvt_pk_f16_fp8 %packed
+  %26 = v_lshrrev_b32_src0_inline %packed, 16
+  %27 = v_and_b32_lit %26, 128
+  %28 = v_lshlrev_b32_src0_inline %27, 8
+  %29 = v_and_b32_lit %26, 127
+  %30 = v_mov_b32 15360
+  %31 = v_lshl_add_u32_shift_imm %29, %30, 4
+  %32 = s_mov_b32 3229614080
+  %33 = s_mov_b32 1614815232
+  %34 = v_perm_b32 %33, %32, %29
+  %35 = s_mov_b32 993737472
+  %36 = s_mov_b32 1010580540
+  %37 = v_perm_b32 %36, %35, %29
+  %38 = v_lshl_add_u32_shift_imm %37, %34, 8
+  %39 = v_cmp_lt_u32_src1_inline %29 {rhs = 8}
+  %40 = v_cndmask_b32 %31, %38, %39
+  %41 = v_or_b32 %28, %40
+  %42 = v_mov_b32 32704
+  %43 = v_mov_b32 127
+  %44 = v_cmp_eq_i32 %29, %43
+  %45 = v_cndmask_b32 %41, %42, %44
+  %46 = v_lshlrev_b32_src0_inline %45, 16
+  %47 = v_cvt_f16_f32 %46
+  %48 = v_bfe_u32_offset_0_width_16_low16 %47
+  %51 = v_mov_b32 6
+  %52 = v_mul_lo_u32 %lane, %51
+  global_store_b32_saddr %52, %25, %output_view
+  global_store_short_saddr %52, %48, %output_view {offset = 4}
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1250> @target
 kernel.def target(@target) @gfx1250_vector_extf_direct_f8e5m2_to_f16_load_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
