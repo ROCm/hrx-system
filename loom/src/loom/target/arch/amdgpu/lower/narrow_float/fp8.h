@@ -44,6 +44,7 @@ typedef enum loom_amdgpu_fp8_decode_plan_flag_bits_e {
   LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_CMP_NE_I32_SRC1_INLINE = 1u << 13,
   LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_CMP_LG_U64 = 1u << 14,
   LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_PK_MAX_U16 = 1u << 15,
+  LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_CMP_LG_U64_SRC1_INLINE = 1u << 16,
 } loom_amdgpu_fp8_decode_plan_flag_bits_t;
 typedef uint32_t loom_amdgpu_fp8_decode_plan_flags_t;
 
@@ -111,6 +112,8 @@ typedef struct loom_amdgpu_fp8_decode_plan_t {
   loom_low_lower_resolved_descriptor_t compare_ne_i32_src1_inline_descriptor;
   // Optional unsigned 64-bit not-equal scalar compare descriptor.
   loom_low_lower_resolved_descriptor_t compare_lg_u64_descriptor;
+  // Optional unsigned 64-bit not-equal compare with an inline RHS operand.
+  loom_low_lower_resolved_descriptor_t compare_lg_u64_src1_inline_descriptor;
   // Optional unsigned-greater-equal compare descriptor with inline RHS operand.
   loom_low_lower_resolved_descriptor_t compare_uge_u32_src1_inline_descriptor;
   // Optional unsigned-less-than compare descriptor with an inline RHS operand.

@@ -78,6 +78,11 @@ _FP8_DECODE_PLAN_DESCRIPTOR_ROWS = (
         "LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_CMP_LG_U64",
     ),
     _Fp8DecodePlanDescriptorRow(
+        "amdgpu.s_cmp_lg_u64.src1_inline",
+        "compare_lg_u64_src1_inline_descriptor",
+        "LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_CMP_LG_U64_SRC1_INLINE",
+    ),
+    _Fp8DecodePlanDescriptorRow(
         "amdgpu.v_cmp_uge_u32.src1_inline",
         "compare_uge_u32_src1_inline_descriptor",
         "LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_NONE",
