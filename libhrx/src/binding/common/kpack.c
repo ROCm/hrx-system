@@ -131,7 +131,7 @@ static bool kpack_mp_read_value(kpack_mp_reader_t* r, kpack_mp_value_t* out) {
   }
   if (b >= 0xa0 && b <= 0xbf) {  // fixstr
     len = b & 0x1f;
-    if (r->p + len > r->end) return false;
+    if (len > (uint64_t)(r->end - r->p)) return false;
     out->type = KPACK_MP_STR;
     out->u = len;
     out->data = r->p;
@@ -151,7 +151,7 @@ static bool kpack_mp_read_value(kpack_mp_reader_t* r, kpack_mp_value_t* out) {
     case 0xc5:  // bin16
     case 0xc6:  // bin32
       if (!kpack_mp_read_be(r, 1 << (b - 0xc4), &len)) return false;
-      if (r->p + len > r->end) return false;
+      if (len > (uint64_t)(r->end - r->p)) return false;
       out->type = KPACK_MP_BIN;
       out->u = len;
       out->data = r->p;
@@ -161,7 +161,7 @@ static bool kpack_mp_read_value(kpack_mp_reader_t* r, kpack_mp_value_t* out) {
     case 0xc8:  // ext16
     case 0xc9:  // ext32
       if (!kpack_mp_read_be(r, 1 << (b - 0xc7), &len)) return false;
-      if (r->p + len + 1 > r->end) return false;  // +1 type byte
+      if (len + 1 > (uint64_t)(r->end - r->p)) return false;  // +1 type byte
       out->type = KPACK_MP_EXT;
       out->u = len;
       r->p += len + 1;
@@ -203,7 +203,7 @@ static bool kpack_mp_read_value(kpack_mp_reader_t* r, kpack_mp_value_t* out) {
     case 0xd7:  // fixext8
     case 0xd8:  // fixext16
       len = (uint64_t)1 << (b - 0xd4);
-      if (r->p + len + 1 > r->end) return false;  // +1 type byte
+      if (len + 1 > (uint64_t)(r->end - r->p)) return false;  // +1 type byte
       out->type = KPACK_MP_EXT;
       out->u = len;
       r->p += len + 1;
@@ -212,7 +212,7 @@ static bool kpack_mp_read_value(kpack_mp_reader_t* r, kpack_mp_value_t* out) {
     case 0xda:  // str16
     case 0xdb:  // str32
       if (!kpack_mp_read_be(r, 1 << (b - 0xd9), &len)) return false;
-      if (r->p + len > r->end) return false;
+      if (len > (uint64_t)(r->end - r->p)) return false;
       out->type = KPACK_MP_STR;
       out->u = len;
       out->data = r->p;
