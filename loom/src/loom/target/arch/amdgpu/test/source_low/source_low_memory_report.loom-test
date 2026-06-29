@@ -331,7 +331,7 @@ kernel.def target(@target) @report_fp8_fragment_finite_only_storage_full_decode(
   %n = index.constant 16 : index
   %k = index.constant 16 : index
   %input_layout = encoding.layout.strided [1, 16] : encoding<layout>
-  %input_schema = encoding.define #matrix_operand<element_format=f8e4m3fn, payload_elements=16, payload_registers=4, rounding=finite_only> : encoding<schema>
+  %input_schema = encoding.define #fp8_e4m3fn<rounding=finite_only> : encoding<schema>
   %input_storage = encoding.define #physical_storage {layout = %input_layout : encoding<layout>, schema = %input_schema : encoding<schema>} : encoding<storage>
   %input_view = buffer.view %input[%zero] : buffer -> view<16x16xf8E4M3, %input_storage>
   %output_view = buffer.view %output[%zero] : buffer -> view<16xbf16, #dense>
