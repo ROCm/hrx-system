@@ -649,6 +649,8 @@ typedef enum id4_qwen3_vl_kernel_kind_e {
   ID4_QWEN3_VL_KERNEL_RESIDUAL_ADD_RMSNORM = 27,
   // Fused BF16 WMMA linear projection followed by residual add.
   ID4_QWEN3_VL_KERNEL_LINEAR_RESIDUAL_BF16_BF16_WMMA_M32N32 = 28,
+  // Fused head RMSNorm followed by rotary embedding.
+  ID4_QWEN3_VL_KERNEL_RMSNORM_ROTARY = 29,
 } id4_qwen3_vl_kernel_kind_t;
 
 typedef enum id4_qwen3_vl_config_key_e {
@@ -666,22 +668,24 @@ typedef enum id4_qwen3_vl_config_key_e {
   ID4_QWEN3_VL_CONFIG_ATTENTION_HEAD_COUNT = 5,
   // Key/value attention head count config key.
   ID4_QWEN3_VL_CONFIG_KEY_VALUE_HEAD_COUNT = 6,
+  // Generic attention head count config key for head-local kernels.
+  ID4_QWEN3_VL_CONFIG_HEAD_COUNT = 7,
   // Per-head channel count config key.
-  ID4_QWEN3_VL_CONFIG_HEAD_SIZE = 7,
+  ID4_QWEN3_VL_CONFIG_HEAD_SIZE = 8,
   // Vocabulary row count config key.
-  ID4_QWEN3_VL_CONFIG_VOCAB_SIZE = 8,
+  ID4_QWEN3_VL_CONFIG_VOCAB_SIZE = 9,
   // Selected hidden-state row count config key.
-  ID4_QWEN3_VL_CONFIG_HIDDEN_ROW_COUNT = 9,
+  ID4_QWEN3_VL_CONFIG_HIDDEN_ROW_COUNT = 10,
   // Selected-layer output slot config key.
-  ID4_QWEN3_VL_CONFIG_SELECTED_LAYER_INDEX = 10,
+  ID4_QWEN3_VL_CONFIG_SELECTED_LAYER_INDEX = 11,
   // Number of token rows handled by one dispatch.
-  ID4_QWEN3_VL_CONFIG_DISPATCH_TOKEN_COUNT = 11,
+  ID4_QWEN3_VL_CONFIG_DISPATCH_TOKEN_COUNT = 12,
   // First logical token row handled by a partial dispatch.
-  ID4_QWEN3_VL_CONFIG_TOKEN_START = 12,
+  ID4_QWEN3_VL_CONFIG_TOKEN_START = 13,
   // Number of valid elements in an input tensor.
-  ID4_QWEN3_VL_CONFIG_ELEMENT_COUNT = 13,
+  ID4_QWEN3_VL_CONFIG_ELEMENT_COUNT = 14,
   // Total number of elements covered by a padded dispatch tensor.
-  ID4_QWEN3_VL_CONFIG_DISPATCH_ELEMENT_COUNT = 14,
+  ID4_QWEN3_VL_CONFIG_DISPATCH_ELEMENT_COUNT = 15,
 } id4_qwen3_vl_config_key_t;
 
 enum {
@@ -689,8 +693,7 @@ enum {
   ID4_QWEN3_VL_TENSOR_KIND_COUNT = ID4_QWEN3_VL_TENSOR_OUTPUT + 1,
   ID4_QWEN3_VL_OPERATION_KIND_COUNT = ID4_QWEN3_VL_OPERATION_TAP + 1,
   ID4_QWEN3_VL_OPERATION_SITE_COUNT = ID4_QWEN3_VL_OPERATION_SITE_OUTPUT + 1,
-  ID4_QWEN3_VL_KERNEL_KIND_COUNT =
-      ID4_QWEN3_VL_KERNEL_LINEAR_RESIDUAL_BF16_BF16_WMMA_M32N32 + 1,
+  ID4_QWEN3_VL_KERNEL_KIND_COUNT = ID4_QWEN3_VL_KERNEL_RMSNORM_ROTARY + 1,
   ID4_QWEN3_VL_CONFIG_KEY_COUNT =
       ID4_QWEN3_VL_CONFIG_DISPATCH_ELEMENT_COUNT + 1,
 };
@@ -1201,6 +1204,9 @@ static const id4_pipeline_kernel_ref_t
         [ID4_QWEN3_VL_KERNEL_LINEAR_RESIDUAL_BF16_BF16_WMMA_M32N32] =
             {IREE_SVL("qwen3_vl/linear_residual_bf16_wmma"),
              IREE_SVL("id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m32n32")},
+        [ID4_QWEN3_VL_KERNEL_RMSNORM_ROTARY] =
+            {IREE_SVL("qwen3_vl/rmsnorm_rotary"),
+             IREE_SVL("id4_qwen3_vl_rmsnorm_rotary_bf16")},
 };
 
 static const iree_string_view_t id4_qwen3_vl_program_config_keys
@@ -1494,6 +1500,15 @@ static const iree_string_view_t id4_qwen3_vl_program_config_keys
                     IREE_SVL("id4.qwen3_vl.linear_residual_wmma.input_size"),
                 [ID4_QWEN3_VL_CONFIG_OUTPUT_SIZE] =
                     IREE_SVL("id4.qwen3_vl.linear_residual_wmma.output_size"),
+            },
+        [ID4_QWEN3_VL_KERNEL_RMSNORM_ROTARY] =
+            {
+                [ID4_QWEN3_VL_CONFIG_TOKEN_COUNT] =
+                    IREE_SVL("id4.qwen3_vl.rmsnorm_rotary.token_count"),
+                [ID4_QWEN3_VL_CONFIG_HEAD_COUNT] =
+                    IREE_SVL("id4.qwen3_vl.rmsnorm_rotary.head_count"),
+                [ID4_QWEN3_VL_CONFIG_HEAD_SIZE] =
+                    IREE_SVL("id4.qwen3_vl.rmsnorm_rotary.head_size"),
             },
 };
 
@@ -2394,6 +2409,63 @@ static iree_status_t id4_qwen3_vl_program_author_rotary(
       config_bindings, IREE_ARRAYSIZE(bindings), bindings);
 }
 
+static iree_status_t id4_qwen3_vl_program_author_rmsnorm_rotary(
+    const id4_qwen3_vl_program_options_t* options,
+    id4_pipeline_program_builder_t* builder, uint32_t layer_ordinal,
+    id4_qwen3_vl_operation_site_t site,
+    id4_qwen3_vl_parameter_kind_t parameter_kind,
+    id4_qwen3_vl_tensor_kind_t output_kind, id4_pipeline_program_tensor_t input,
+    uint32_t head_count, id4_pipeline_program_tensor_t* out_output) {
+  uint32_t token_capacity = 0;
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_calculate_bf16_token_capacity(
+      options->request.token_count, &token_capacity));
+  if ((options->model.head_size % 2) != 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "Qwen3-VL fused RMSNorm rotary head size must be "
+                            "even");
+  }
+  uint32_t output_width = 0;
+  if (!id4_qwen3_vl_program_checked_mul_u32(
+          head_count, options->model.head_size, &output_width)) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "Qwen3-VL fused RMSNorm rotary output width overflow");
+  }
+
+  id4_pipeline_program_tensor_t weight = id4_pipeline_program_tensor_invalid();
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_parameter(
+      builder, options->parameter_scope, parameter_kind, layer_ordinal,
+      ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+      id4_pipeline_program_make_shape_rank1(options->model.head_size),
+      &weight));
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_acquire_tensor(
+      builder, output_kind, layer_ordinal, ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+      id4_pipeline_program_make_shape_rank2(token_capacity, output_width),
+      out_output));
+
+  const id4_qwen3_vl_program_config_value_t config_values[] = {
+      {ID4_QWEN3_VL_CONFIG_TOKEN_COUNT, token_capacity},
+      {ID4_QWEN3_VL_CONFIG_HEAD_COUNT, head_count},
+      {ID4_QWEN3_VL_CONFIG_HEAD_SIZE, options->model.head_size},
+  };
+  char value_buffers[ID4_QWEN3_VL_MAX_KERNEL_CONFIG_BINDING_COUNT]
+                    [ID4_QWEN3_VL_CONFIG_VALUE_BUFFER_CAPACITY];
+  id4_pipeline_kernel_config_binding_t
+      config_bindings[ID4_QWEN3_VL_MAX_KERNEL_CONFIG_BINDING_COUNT];
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_make_config_bindings(
+      ID4_QWEN3_VL_KERNEL_RMSNORM_ROTARY, IREE_ARRAYSIZE(config_values),
+      config_values, value_buffers, config_bindings));
+  id4_pipeline_program_dispatch_binding_t bindings[] = {
+      id4_pipeline_program_read(input),
+      id4_pipeline_program_read(weight),
+      id4_pipeline_program_write(*out_output),
+  };
+  return id4_qwen3_vl_program_dispatch(
+      builder, ID4_QWEN3_VL_OPERATION_ROTARY, layer_ordinal, site,
+      ID4_QWEN3_VL_KERNEL_RMSNORM_ROTARY, IREE_ARRAYSIZE(config_values),
+      config_bindings, IREE_ARRAYSIZE(bindings), bindings);
+}
+
 static iree_status_t id4_qwen3_vl_program_dispatch_attention(
     id4_pipeline_program_builder_t* builder, uint32_t layer_ordinal,
     id4_qwen3_vl_operation_site_t site, id4_qwen3_vl_kernel_kind_t kernel_kind,
@@ -3217,41 +3289,84 @@ static iree_status_t id4_qwen3_vl_program_author_layer(
         builder, ID4_QWEN3_VL_TENSOR_LAYER_V, layer_ordinal, value));
   }
 
-  id4_pipeline_program_tensor_t query_norm =
-      id4_pipeline_program_tensor_invalid();
-  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_author_rmsnorm_rows(
-      options, builder, layer_ordinal,
-      ID4_QWEN3_VL_OPERATION_SITE_SELF_ATTENTION_Q_NORM,
-      ID4_QWEN3_VL_PARAMETER_LAYER_Q_NORM, ID4_QWEN3_VL_TENSOR_LAYER_Q_NORM,
-      query, query_row_count, options->model.head_size, query_width,
-      &query_norm));
-  id4_pipeline_program_tensor_t key_norm =
-      id4_pipeline_program_tensor_invalid();
-  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_author_rmsnorm_rows(
-      options, builder, layer_ordinal,
-      ID4_QWEN3_VL_OPERATION_SITE_SELF_ATTENTION_K_NORM,
-      ID4_QWEN3_VL_PARAMETER_LAYER_K_NORM, ID4_QWEN3_VL_TENSOR_LAYER_K_NORM,
-      key, key_row_count, options->model.head_size, key_value_width,
-      &key_norm));
-  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_barrier(
-      builder, layer_ordinal, ID4_QWEN3_VL_OPERATION_SITE_AFTER_QK_NORM));
-  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_tap_tensor(
-      builder, ID4_QWEN3_VL_TENSOR_LAYER_Q_NORM, layer_ordinal, query_norm));
-  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_tap_tensor(
-      builder, ID4_QWEN3_VL_TENSOR_LAYER_K_NORM, layer_ordinal, key_norm));
-
   id4_pipeline_program_tensor_t query_rotary =
       id4_pipeline_program_tensor_invalid();
-  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_author_rotary(
-      options, builder, layer_ordinal,
-      ID4_QWEN3_VL_OPERATION_SITE_SELF_ATTENTION_Q, query_norm, query_width,
-      ID4_QWEN3_VL_TENSOR_LAYER_Q_ROTARY, &query_rotary));
   id4_pipeline_program_tensor_t key_rotary =
       id4_pipeline_program_tensor_invalid();
-  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_author_rotary(
-      options, builder, layer_ordinal,
-      ID4_QWEN3_VL_OPERATION_SITE_SELF_ATTENTION_K, key_norm, key_value_width,
-      ID4_QWEN3_VL_TENSOR_LAYER_K_ROTARY, &key_rotary));
+  bool has_query_norm_tap = false;
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_has_diagnostic_tap(
+      options, ID4_QWEN3_VL_TENSOR_LAYER_Q_NORM, layer_ordinal,
+      &has_query_norm_tap));
+  bool has_key_norm_tap = false;
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_has_diagnostic_tap(
+      options, ID4_QWEN3_VL_TENSOR_LAYER_K_NORM, layer_ordinal,
+      &has_key_norm_tap));
+  if (has_query_norm_tap || has_key_norm_tap) {
+    id4_pipeline_program_tensor_t query_norm =
+        id4_pipeline_program_tensor_invalid();
+    if (has_query_norm_tap) {
+      IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_author_rmsnorm_rows(
+          options, builder, layer_ordinal,
+          ID4_QWEN3_VL_OPERATION_SITE_SELF_ATTENTION_Q_NORM,
+          ID4_QWEN3_VL_PARAMETER_LAYER_Q_NORM, ID4_QWEN3_VL_TENSOR_LAYER_Q_NORM,
+          query, query_row_count, options->model.head_size, query_width,
+          &query_norm));
+    }
+    id4_pipeline_program_tensor_t key_norm =
+        id4_pipeline_program_tensor_invalid();
+    if (has_key_norm_tap) {
+      IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_author_rmsnorm_rows(
+          options, builder, layer_ordinal,
+          ID4_QWEN3_VL_OPERATION_SITE_SELF_ATTENTION_K_NORM,
+          ID4_QWEN3_VL_PARAMETER_LAYER_K_NORM, ID4_QWEN3_VL_TENSOR_LAYER_K_NORM,
+          key, key_row_count, options->model.head_size, key_value_width,
+          &key_norm));
+    }
+    IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_barrier(
+        builder, layer_ordinal, ID4_QWEN3_VL_OPERATION_SITE_AFTER_QK_NORM));
+    if (has_query_norm_tap) {
+      IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_tap_tensor(
+          builder, ID4_QWEN3_VL_TENSOR_LAYER_Q_NORM, layer_ordinal,
+          query_norm));
+      IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_author_rotary(
+          options, builder, layer_ordinal,
+          ID4_QWEN3_VL_OPERATION_SITE_SELF_ATTENTION_Q, query_norm, query_width,
+          ID4_QWEN3_VL_TENSOR_LAYER_Q_ROTARY, &query_rotary));
+    } else {
+      IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_author_rmsnorm_rotary(
+          options, builder, layer_ordinal,
+          ID4_QWEN3_VL_OPERATION_SITE_SELF_ATTENTION_Q,
+          ID4_QWEN3_VL_PARAMETER_LAYER_Q_NORM,
+          ID4_QWEN3_VL_TENSOR_LAYER_Q_ROTARY, query,
+          options->model.attention_head_count, &query_rotary));
+    }
+    if (has_key_norm_tap) {
+      IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_tap_tensor(
+          builder, ID4_QWEN3_VL_TENSOR_LAYER_K_NORM, layer_ordinal, key_norm));
+      IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_author_rotary(
+          options, builder, layer_ordinal,
+          ID4_QWEN3_VL_OPERATION_SITE_SELF_ATTENTION_K, key_norm,
+          key_value_width, ID4_QWEN3_VL_TENSOR_LAYER_K_ROTARY, &key_rotary));
+    } else {
+      IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_author_rmsnorm_rotary(
+          options, builder, layer_ordinal,
+          ID4_QWEN3_VL_OPERATION_SITE_SELF_ATTENTION_K,
+          ID4_QWEN3_VL_PARAMETER_LAYER_K_NORM,
+          ID4_QWEN3_VL_TENSOR_LAYER_K_ROTARY, key,
+          options->model.key_value_head_count, &key_rotary));
+    }
+  } else {
+    IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_author_rmsnorm_rotary(
+        options, builder, layer_ordinal,
+        ID4_QWEN3_VL_OPERATION_SITE_SELF_ATTENTION_Q,
+        ID4_QWEN3_VL_PARAMETER_LAYER_Q_NORM, ID4_QWEN3_VL_TENSOR_LAYER_Q_ROTARY,
+        query, options->model.attention_head_count, &query_rotary));
+    IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_author_rmsnorm_rotary(
+        options, builder, layer_ordinal,
+        ID4_QWEN3_VL_OPERATION_SITE_SELF_ATTENTION_K,
+        ID4_QWEN3_VL_PARAMETER_LAYER_K_NORM, ID4_QWEN3_VL_TENSOR_LAYER_K_ROTARY,
+        key, options->model.key_value_head_count, &key_rotary));
+  }
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_barrier(
       builder, layer_ordinal,
       ID4_QWEN3_VL_OPERATION_SITE_AFTER_ROTARY_EMBEDDING));

@@ -6700,6 +6700,17 @@ _KERNEL_CASES = [
         "target_name": "qwen3_vl_rotary_embedding_f32_qwen_slice",
     },
     {
+        "actual_case": "@id4_qwen3_vl_rmsnorm_rotary_bf16_identity_case",
+        "benchmark": "@id4_qwen3_vl_rmsnorm_rotary_bf16_identity",
+        "configs": [
+            "--config=id4.qwen3_vl.rmsnorm_rotary.token_count=1",
+            "--config=id4.qwen3_vl.rmsnorm_rotary.head_count=1",
+            "--config=id4.qwen3_vl.rmsnorm_rotary.head_size=4",
+        ],
+        "source": "qwen3_vl/rmsnorm_rotary.loom",
+        "target_name": "qwen3_vl_rmsnorm_rotary_bf16_identity",
+    },
+    {
         "actual_case": "@id4_qwen3_vl_silu_gate_f32_small_case",
         "benchmark": "@id4_qwen3_vl_silu_gate_f32_small",
         "configs": [
@@ -6926,6 +6937,7 @@ _KERNEL_SOURCES = [
     "qwen3_vl/residual_add_f32.loom",
     "qwen3_vl/rotary_embedding.loom",
     "qwen3_vl/rmsnorm.loom",
+    "qwen3_vl/rmsnorm_rotary.loom",
     "qwen3_vl/selected_hidden_pack_f32.loom",
     "qwen3_vl/silu_gate_f32.loom",
     "qwen3_vl/token_embedding.loom",

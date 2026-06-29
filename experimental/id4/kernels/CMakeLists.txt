@@ -99,6 +99,7 @@ add_custom_command(OUTPUT loom_sources.stamp
     "qwen3_vl/mlp_gate_up_silu_product_bf16_wmma.loom"
     "qwen3_vl/residual_add_f32.loom"
     "qwen3_vl/rmsnorm.loom"
+    "qwen3_vl/rmsnorm_rotary.loom"
     "qwen3_vl/rotary_embedding.loom"
     "qwen3_vl/selected_hidden_pack_f32.loom"
     "qwen3_vl/silu_gate_f32.loom"
@@ -232,6 +233,7 @@ iree_c_embed_data(
     "qwen3_vl/mlp_gate_up_silu_product_bf16_wmma.loom"
     "qwen3_vl/residual_add_f32.loom"
     "qwen3_vl/rmsnorm.loom"
+    "qwen3_vl/rmsnorm_rotary.loom"
     "qwen3_vl/rotary_embedding.loom"
     "qwen3_vl/selected_hidden_pack_f32.loom"
     "qwen3_vl/silu_gate_f32.loom"
@@ -10033,6 +10035,23 @@ iree_native_test(
     "--config=id4.qwen3_vl.rotary.token_count=64"
     "--config=id4.qwen3_vl.rotary.output_size=4096"
     "--config=id4.qwen3_vl.rotary.head_size=128"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
+    "qwen3_vl_rmsnorm_rotary_bf16_identity_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/rmsnorm_rotary.loom}}"
+    "--benchmark=@id4_qwen3_vl_rmsnorm_rotary_bf16_identity"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.qwen3_vl.rmsnorm_rotary.token_count=1"
+    "--config=id4.qwen3_vl.rmsnorm_rotary.head_count=1"
+    "--config=id4.qwen3_vl.rmsnorm_rotary.head_size=4"
   SRC
     loom::tools::iree-benchmark-loom
   LABELS
@@ -22088,6 +22107,27 @@ iree_native_test(
     "--config=id4.qwen3_vl.rotary.token_count=64"
     "--config=id4.qwen3_vl.rotary.output_size=4096"
     "--config=id4.qwen3_vl.rotary.head_size=128"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
+    "qwen3_vl_rmsnorm_rotary_bf16_identity_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/rmsnorm_rotary.loom}}"
+    "--case=@id4_qwen3_vl_rmsnorm_rotary_bf16_identity_case"
+    "--device=amdgpu://0"
+    "--config=id4.qwen3_vl.rmsnorm_rotary.token_count=1"
+    "--config=id4.qwen3_vl.rmsnorm_rotary.head_count=1"
+    "--config=id4.qwen3_vl.rmsnorm_rotary.head_size=4"
   SRC
     loom::tools::iree-test-loom
   LABELS
