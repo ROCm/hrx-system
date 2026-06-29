@@ -3503,7 +3503,7 @@ loom_amdgpu_try_emit_fragment_memory_fp8_to_packed_bf16_packet(
     source_registers[source_register_index] = source_register;
   }
 
-  loom_amdgpu_fp8_packed_bf16_pair_source_t
+  loom_amdgpu_fp8_packed_u16_pair_source_t
       pair_sources[LOOM_AMDGPU_MAX_PACKED_32BIT_REGISTERS] = {0};
   for (uint16_t result_register_index = 0;
        result_register_index < result_register_count; ++result_register_index) {
@@ -3515,7 +3515,7 @@ loom_amdgpu_try_emit_fragment_memory_fp8_to_packed_bf16_packet(
       IREE_BUILTIN_UNREACHABLE();
     }
     pair_sources[result_register_index] =
-        (loom_amdgpu_fp8_packed_bf16_pair_source_t){
+        (loom_amdgpu_fp8_packed_u16_pair_source_t){
             .source_register = source_registers[source_register_index],
             .byte_offset = byte_index & 3u,
         };

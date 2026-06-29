@@ -150,12 +150,12 @@ typedef struct loom_amdgpu_fp8_decode_plan_t {
   loom_low_lower_resolved_descriptor_t bfi_b32_src0_literal_descriptor;
 } loom_amdgpu_fp8_decode_plan_t;
 
-typedef struct loom_amdgpu_fp8_packed_bf16_pair_source_t {
+typedef struct loom_amdgpu_fp8_packed_u16_pair_source_t {
   // Source register containing the selected adjacent FP8 byte pair.
   loom_value_id_t source_register;
   // First FP8 byte offset within source_register.
   uint32_t byte_offset;
-} loom_amdgpu_fp8_packed_bf16_pair_source_t;
+} loom_amdgpu_fp8_packed_u16_pair_source_t;
 
 // Returns the native unscaled FP8/BF8 conversion descriptor refs for the source
 // and result element type pair.
@@ -230,11 +230,28 @@ iree_status_t loom_amdgpu_try_emit_fp8_pair_to_packed_bf16(
 iree_status_t loom_amdgpu_try_emit_fp8_pairs_to_packed_bf16(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_amdgpu_fp8_decode_plan_t* plan,
-    const loom_amdgpu_fp8_packed_bf16_pair_source_t* pair_sources,
+    const loom_amdgpu_fp8_packed_u16_pair_source_t* pair_sources,
     iree_host_size_t pair_count,
     loom_amdgpu_fp8_decode_value_flags_t value_flags, loom_type_t vgpr_type,
     loom_type_t sgpr_type, loom_type_t mask_type,
     loom_value_id_t* out_low_packets, bool* out_selected);
+
+// Returns true when the target packets and value facts can use the packed
+// finite FP8-to-F16 pair decode path without exact special-value repair.
+bool loom_amdgpu_can_emit_fp8_pair_to_packed_f16_finite(
+    const loom_amdgpu_fp8_decode_plan_t* plan,
+    loom_amdgpu_fp8_decode_value_flags_t value_flags);
+
+// Emits one packed VGPR containing two F16 bit payloads from an adjacent FP8
+// byte pair when value facts prove finite non-subnormal storage. Returns
+// |out_selected| false without emitting anything when the target lacks the
+// required packets or the value facts require exact special-value repair.
+iree_status_t loom_amdgpu_try_emit_fp8_pair_to_packed_f16_finite(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_amdgpu_fp8_decode_plan_t* plan,
+    loom_value_id_t low_source_register, uint32_t byte_offset,
+    loom_amdgpu_fp8_decode_value_flags_t value_flags, loom_type_t vgpr_type,
+    loom_type_t sgpr_type, loom_value_id_t* out_low_packet, bool* out_selected);
 
 // Emits one packed VGPR containing two BF16 bit payloads.
 iree_status_t loom_amdgpu_emit_packed_bf16_pair(
