@@ -1092,54 +1092,6 @@ static iree_status_t PrepareGenerationPhaseBundle(
                                                        out_phase_bundle);
 }
 
-static iree_status_t WarmSelectedResidentPhase(
-    const LiveGenerationBenchmarkContext& context,
-    id4_ideogram4_generation_bundle_t* bundle,
-    id4_ideogram4_generation_residency_phase_mask_t phase_mask,
-    id4_pipeline_diagnostics_sink_t* diagnostics_sink,
-    iree_hal_semaphore_t* prepare_semaphore, uint64_t* prepare_value) {
-  IREE_ASSERT_ARGUMENT(bundle);
-  IREE_ASSERT_ARGUMENT(diagnostics_sink);
-  IREE_ASSERT_ARGUMENT(prepare_value);
-  if (context.generation_residency_mode !=
-          ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_SELECTED_PHASES ||
-      !iree_any_bit_set(context.generation_resident_phase_mask, phase_mask)) {
-    return iree_ok_status();
-  }
-
-  id4_ideogram4_generation_phase_bundle_t* phase_bundle = NULL;
-  const uint64_t signal_value = *prepare_value + 1;
-  iree_status_t status = PrepareGenerationPhaseBundle(
-      bundle, phase_mask, diagnostics_sink, prepare_semaphore, *prepare_value,
-      prepare_semaphore, signal_value, &phase_bundle);
-  if (iree_status_is_ok(status)) {
-    *prepare_value = signal_value;
-  }
-  return iree_status_join(
-      status, id4_ideogram4_generation_phase_bundle_release(phase_bundle));
-}
-
-static iree_status_t WarmSelectedResidentPhases(
-    const LiveGenerationBenchmarkContext& context,
-    id4_ideogram4_generation_bundle_t* bundle,
-    id4_pipeline_diagnostics_sink_t* diagnostics_sink,
-    iree_hal_semaphore_t* prepare_semaphore, uint64_t* prepare_value) {
-  IREE_RETURN_IF_ERROR(WarmSelectedResidentPhase(
-      context, bundle, ID4_IDEOGRAM4_GENERATION_RESIDENCY_PHASE_CONDITIONING,
-      diagnostics_sink, prepare_semaphore, prepare_value));
-  IREE_RETURN_IF_ERROR(WarmSelectedResidentPhase(
-      context, bundle, ID4_IDEOGRAM4_GENERATION_RESIDENCY_PHASE_DENOISE,
-      diagnostics_sink, prepare_semaphore, prepare_value));
-  IREE_RETURN_IF_ERROR(WarmSelectedResidentPhase(
-      context, bundle, ID4_IDEOGRAM4_GENERATION_RESIDENCY_PHASE_DECODE,
-      diagnostics_sink, prepare_semaphore, prepare_value));
-  if (context.generation_residency_mode !=
-      ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_SELECTED_PHASES) {
-    return iree_ok_status();
-  }
-  return WaitForSemaphore(prepare_semaphore, *prepare_value);
-}
-
 static iree_status_t IssueGenerationPhase(
     id4_ideogram4_generation_execution_t* execution,
     id4_ideogram4_generation_phase_bundle_t* phase_bundle,
@@ -1302,6 +1254,37 @@ static iree_status_t IssueGenerationBundle(
       status, id4_ideogram4_generation_phase_bundle_release(decode_phase));
   timing->decode.release_ns += iree_time_now() - phase_start_time_ns;
   return status;
+}
+
+static iree_status_t WarmSelectedResidentGeneration(
+    const LiveGenerationBenchmarkContext& context,
+    id4_ideogram4_generation_bundle_t* bundle, const ParsedRequest& request,
+    id4_pipeline_diagnostics_sink_t* diagnostics_sink,
+    iree_hal_semaphore_t* prepare_semaphore, uint64_t* prepare_value,
+    iree_hal_semaphore_t* completion_semaphore, uint64_t* completion_value) {
+  IREE_ASSERT_ARGUMENT(bundle);
+  IREE_ASSERT_ARGUMENT(diagnostics_sink);
+  IREE_ASSERT_ARGUMENT(prepare_value);
+  IREE_ASSERT_ARGUMENT(completion_value);
+  if (context.generation_residency_mode !=
+      ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_SELECTED_PHASES) {
+    return iree_ok_status();
+  }
+
+  GenerationBenchmarkTimingStatistics warmup_timing;
+  std::memset(&warmup_timing, 0, sizeof(warmup_timing));
+  GenerationExecutionRef execution;
+  const uint64_t initial_completion_value = *completion_value;
+  IREE_RETURN_IF_ERROR(IssueGenerationBundle(
+      context, bundle, request, diagnostics_sink, prepare_semaphore,
+      prepare_value, completion_semaphore, completion_value, &warmup_timing,
+      execution.out()));
+  if (*completion_value == initial_completion_value) {
+    return iree_make_status(IREE_STATUS_INTERNAL,
+                            "selected-resident warmup did not queue "
+                            "generation completion");
+  }
+  return WaitForSemaphore(completion_semaphore, *completion_value);
 }
 
 static iree_status_t AppendGenerationBenchmarkPhaseTimingLabel(
@@ -1681,9 +1664,6 @@ static iree_status_t RunGenerationIssuePreparedBenchmark(
       prepare_value, bundle.out()));
   IREE_RETURN_IF_ERROR(
       WaitForSemaphore(prepare_semaphore.get(), prepare_value));
-  IREE_RETURN_IF_ERROR(
-      WarmSelectedResidentPhases(context, bundle.get(), &diagnostics_sink,
-                                 prepare_semaphore.get(), &prepare_value));
 
   uint64_t iteration_count = 0;
   GenerationBenchmarkTimingStatistics timing_total;
@@ -1696,8 +1676,11 @@ static iree_status_t RunGenerationIssuePreparedBenchmark(
                         profiled_dispatch_metadata_mode);
   bool execution_profile_captured = false;
   iree_hal_profiling_from_flags_t* profiling = nullptr;
-  iree_status_t status = iree_ok_status();
-  if (!capture_execution_profile) {
+  iree_status_t status = WarmSelectedResidentGeneration(
+      context, bundle.get(), request, &diagnostics_sink,
+      prepare_semaphore.get(), &prepare_value, completion_semaphore.get(),
+      &completion_value);
+  if (iree_status_is_ok(status) && !capture_execution_profile) {
     status = iree_hal_begin_device_group_profiling_from_flags(
         context.runtime_context.device_group, iree_allocator_system(),
         &profiling);
@@ -1746,7 +1729,7 @@ static iree_status_t RunGenerationIssuePreparedBenchmark(
       execution_profile_captured = true;
     }
   }
-  if (!capture_execution_profile) {
+  if (profiling) {
     status =
         iree_status_join(status, iree_hal_end_profiling_from_flags(profiling));
   }
