@@ -359,6 +359,62 @@ class Id4SmokeTestTest(unittest.TestCase):
             with self.assertRaisesRegex(self.smoke_test.SmokeTestError, "rank"):
                 self.smoke_test.read_generation_plan_metrics(path)
 
+    def test_profile_metrics_rank_dispatch_and_queue_rows(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "profile.txt"
+            path.write_text(
+                "\n".join(
+                    [
+                        "IREE HAL device statistics:",
+                        (
+                            "  host_queue p=0 q=0 copy  count=2 total=- "
+                            "avg=- invalid=2 operations=2 payload=64B"
+                        ),
+                        (
+                            "  device_queue p=0 q=0 copy  count=2 "
+                            "total=100 ticks avg=50 ticks operations=2 "
+                            "payload=64B"
+                        ),
+                        (
+                            "  device_queue p=0 q=0 execute  count=1 "
+                            "total=300 ticks avg=300 ticks operations=4"
+                        ),
+                        (
+                            "  device_queue p=0 q=0 barrier  count=1 "
+                            "total=5 ticks avg=5 ticks"
+                        ),
+                        "  dispatch kernel_b  count=3 total=900 ticks avg=300 ticks",
+                        "  dispatch kernel_a  count=1 total=100 ticks avg=100 ticks",
+                        "  dispatch kernel_b  count=2 total=600 ticks avg=300 ticks",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            metrics = self.smoke_test.read_profile_metrics(path)
+
+            self.assertEqual(metrics["dispatches"]["row_count"], 3)
+            self.assertEqual(metrics["dispatches"]["function_count"], 2)
+            self.assertEqual(metrics["dispatches"]["total_count"], 6)
+            self.assertEqual(
+                metrics["dispatches"]["top_by_total_ticks"][0],
+                {
+                    "name": "kernel_b",
+                    "count": 5,
+                    "total_ticks": 1500,
+                    "average_ticks": 300,
+                },
+            )
+            self.assertEqual(metrics["queue_operations"]["row_count"], 4)
+            self.assertEqual(metrics["queue_operations"]["timed_row_count"], 3)
+            self.assertEqual(metrics["queue_operations"]["invalid_row_count"], 1)
+            self.assertEqual(
+                metrics["queue_operations"]["top_by_total_ticks"][0]["operation"],
+                "execute",
+            )
+            self.assertEqual(metrics["queue_operations"]["operation_count"], 7)
+            self.assertEqual(metrics["unknown_timed_row_count"], 0)
+
     def test_uniform_ppm_fails_validation(self):
         request = {
             "generation": {
@@ -397,16 +453,25 @@ class Id4SmokeTestTest(unittest.TestCase):
                         "import sys",
                         "output = None",
                         "plan = None",
+                        "profile = None",
                         "for arg in sys.argv[1:]:",
                         "    if arg.startswith('--output='):",
                         "        output = Path(arg.split('=', 1)[1])",
                         "    if arg.startswith('--dump_plan='):",
                         "        plan = Path(arg.split('=', 1)[1])",
+                        "    if arg.startswith('--profile_output='):",
+                        "        profile = Path(arg.split('=', 1)[1])",
                         "if output is None:",
                         "    raise SystemExit(2)",
                         "if plan is None:",
                         "    raise SystemExit(2)",
+                        "if profile is None:",
+                        "    raise SystemExit(2)",
                         f"plan.write_text({plan_payload!r}, encoding='utf-8')",
+                        (
+                            "profile.write_text('  dispatch fake_kernel  count=1 "
+                            "total=1 ticks avg=1 ticks\\n', encoding='utf-8')"
+                        ),
                         "output.write_bytes(b'P6\\n16 16\\n255\\n' + bytes([128]) * 16 * 16 * 3)",
                     ]
                 ),
@@ -437,6 +502,7 @@ class Id4SmokeTestTest(unittest.TestCase):
             self.assertEqual(summary["state"], "failed")
             self.assertIn("dynamic range", summary["validation_error"])
             self.assertEqual(summary["plan_metrics"]["summary"]["qwen_token_count"], 37)
+            self.assertEqual(summary["profile_metrics"]["dispatches"]["total_count"], 1)
             self.assertEqual(summary["image_metrics"]["width"], 16)
 
 

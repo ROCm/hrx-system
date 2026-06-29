@@ -13,6 +13,7 @@ import argparse
 import json
 import math
 import os
+import re
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -151,6 +152,22 @@ PLAN_STAGE_STATISTIC_FIELDS = (
     "region_count",
     "operation_count",
     "dispatch_count",
+)
+
+PROFILE_TOP_ROW_COUNT = 20
+
+PROFILE_DISPATCH_RE = re.compile(
+    r"^\s*dispatch\s+(?P<name>\S+)\s+count=(?P<count>\d+)\s+"
+    r"total=(?P<total>\d+)\s+ticks\s+avg=(?P<average>\d+)\s+ticks\s*$"
+)
+
+PROFILE_QUEUE_RE = re.compile(
+    r"^\s*(?P<family>host_queue|device_queue)\s+p=(?P<device>\d+)\s+"
+    r"q=(?P<queue>\d+)\s+(?P<operation>\w+)\s+count=(?P<count>\d+)\s+"
+    r"total=(?P<total>-|\d+)(?:\s+ticks)?\s+avg=(?P<average>-|\d+)"
+    r"(?:\s+ticks)?(?:\s+invalid=(?P<invalid>\d+))?"
+    r"(?:\s+operations=(?P<operations>\d+))?"
+    r"(?:\s+payload=(?P<payload>\d+)B)?\s*$"
 )
 
 
@@ -392,6 +409,112 @@ def read_generation_plan_metrics(path: Path) -> dict[str, Any]:
     return _summarize_generation_plan(_require_object(plan, "plan"))
 
 
+def _integer_match_group(match: re.Match[str], name: str) -> int:
+    return int(match.group(name))
+
+
+def _profile_sort_key(row: dict[str, Any]) -> tuple[int, int, str]:
+    return (
+        -int(row["total_ticks"]),
+        -int(row["count"]),
+        str(row.get("name", row.get("operation", ""))),
+    )
+
+
+def _profile_top_rows(rows: dict[Any, dict[str, Any]]) -> list[dict[str, Any]]:
+    ranked_rows = sorted(rows.values(), key=_profile_sort_key)
+    return ranked_rows[:PROFILE_TOP_ROW_COUNT]
+
+
+def read_profile_metrics(path: Path) -> dict[str, Any]:
+    dispatch_rows: dict[str, dict[str, Any]] = {}
+    queue_rows: dict[tuple[str, int, int, str], dict[str, Any]] = {}
+    dispatch_row_count = 0
+    queue_row_count = 0
+    invalid_queue_row_count = 0
+    unknown_timed_row_count = 0
+
+    with path.open(encoding="utf-8") as file:
+        for line in file:
+            dispatch_match = PROFILE_DISPATCH_RE.match(line)
+            if dispatch_match:
+                dispatch_row_count += 1
+                name = dispatch_match.group("name")
+                count = _integer_match_group(dispatch_match, "count")
+                total_ticks = _integer_match_group(dispatch_match, "total")
+                row = dispatch_rows.setdefault(
+                    name,
+                    {
+                        "name": name,
+                        "count": 0,
+                        "total_ticks": 0,
+                        "average_ticks": 0,
+                    },
+                )
+                row["count"] += count
+                row["total_ticks"] += total_ticks
+                row["average_ticks"] = row["total_ticks"] // row["count"]
+                continue
+
+            queue_match = PROFILE_QUEUE_RE.match(line)
+            if queue_match:
+                queue_row_count += 1
+                if queue_match.group("total") == "-":
+                    invalid_queue_row_count += 1
+                    continue
+                family = queue_match.group("family")
+                device = _integer_match_group(queue_match, "device")
+                queue = _integer_match_group(queue_match, "queue")
+                operation = queue_match.group("operation")
+                count = _integer_match_group(queue_match, "count")
+                total_ticks = _integer_match_group(queue_match, "total")
+                operations_match = queue_match.group("operations")
+                operations = int(operations_match) if operations_match else count
+                payload = queue_match.group("payload")
+                row = queue_rows.setdefault(
+                    (family, device, queue, operation),
+                    {
+                        "family": family,
+                        "device": device,
+                        "queue": queue,
+                        "operation": operation,
+                        "count": 0,
+                        "operation_count": 0,
+                        "payload_bytes": 0,
+                        "total_ticks": 0,
+                        "average_ticks": 0,
+                    },
+                )
+                row["count"] += count
+                row["operation_count"] += operations
+                row["payload_bytes"] += int(payload) if payload else 0
+                row["total_ticks"] += total_ticks
+                row["average_ticks"] = row["total_ticks"] // row["count"]
+                continue
+
+            if " total=" in line and " ticks" in line:
+                unknown_timed_row_count += 1
+
+    return {
+        "dispatches": {
+            "row_count": dispatch_row_count,
+            "function_count": len(dispatch_rows),
+            "total_count": sum(row["count"] for row in dispatch_rows.values()),
+            "top_by_total_ticks": _profile_top_rows(dispatch_rows),
+        },
+        "queue_operations": {
+            "row_count": queue_row_count,
+            "timed_row_count": queue_row_count - invalid_queue_row_count,
+            "invalid_row_count": invalid_queue_row_count,
+            "operation_count": sum(
+                row["operation_count"] for row in queue_rows.values()
+            ),
+            "top_by_total_ticks": _profile_top_rows(queue_rows),
+        },
+        "unknown_timed_row_count": unknown_timed_row_count,
+    }
+
+
 def require_empty_output_dir(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
     if any(path.iterdir()):
@@ -567,6 +690,9 @@ def run_smoke(args: argparse.Namespace) -> dict[str, Any]:
         try:
             summary["plan_metrics"] = read_generation_plan_metrics(
                 artifact_dir / "plan.json"
+            )
+            summary["profile_metrics"] = read_profile_metrics(
+                artifact_dir / "profile.txt"
             )
             metrics = read_ppm_metrics(artifact_dir / "image.ppm")
             summary["image_metrics"] = metrics.to_json()
