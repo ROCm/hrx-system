@@ -42,6 +42,12 @@ enum {
   LOOM_AMDGPU_FRAGMENT_PACKED_B16_ELEMENT_COUNT = 2,
   LOOM_AMDGPU_FRAGMENT_PACKED_B16_ELEMENT_BIT_COUNT = 16,
   LOOM_AMDGPU_FRAGMENT_FP8_PACKED_BF16_REPAIR_REASON_COUNT = 16,
+  LOOM_AMDGPU_FRAGMENT_FP8_REPAIR_PACKET_FLAG_SHIFT = 8,
+  LOOM_AMDGPU_FRAGMENT_FP8_REPAIR_PACKET_FLAGS =
+      LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_REPAIR_ZERO |
+      LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_REPAIR_SUBNORMAL |
+      LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_REPAIR_NAN |
+      LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_REPAIR_INF,
 };
 
 static const uint16_t kLoomAmdgpuFragmentMemoryPacketCandidates[] = {4, 3, 2,
@@ -49,6 +55,24 @@ static const uint16_t kLoomAmdgpuFragmentMemoryPacketCandidates[] = {4, 3, 2,
 
 static const uint16_t kLoomAmdgpuFragmentMemoryNarrowedStoreCandidates[] = {
     8, 6, 4, 2, 1};
+
+static_assert(LOOM_AMDGPU_FP8_PACKED_BF16_REPAIR_ZERO ==
+                  (LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_REPAIR_ZERO >>
+                   LOOM_AMDGPU_FRAGMENT_FP8_REPAIR_PACKET_FLAG_SHIFT),
+              "FP8 zero repair packet flags mirror repair bits");
+static_assert(
+    LOOM_AMDGPU_FP8_PACKED_BF16_REPAIR_SUBNORMAL ==
+        (LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_REPAIR_SUBNORMAL >>
+         LOOM_AMDGPU_FRAGMENT_FP8_REPAIR_PACKET_FLAG_SHIFT),
+    "FP8 subnormal repair packet flags mirror repair bits");
+static_assert(LOOM_AMDGPU_FP8_PACKED_BF16_REPAIR_NAN ==
+                  (LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_REPAIR_NAN >>
+                   LOOM_AMDGPU_FRAGMENT_FP8_REPAIR_PACKET_FLAG_SHIFT),
+              "FP8 NaN repair packet flags mirror repair bits");
+static_assert(LOOM_AMDGPU_FP8_PACKED_BF16_REPAIR_INF ==
+                  (LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_REPAIR_INF >>
+                   LOOM_AMDGPU_FRAGMENT_FP8_REPAIR_PACKET_FLAG_SHIFT),
+              "FP8 infinity repair packet flags mirror repair bits");
 
 static const iree_string_view_t kLoomAmdgpuFragmentFp8PackedBf16RepairReasons
     [LOOM_AMDGPU_FRAGMENT_FP8_PACKED_BF16_REPAIR_REASON_COUNT] = {
@@ -2833,31 +2857,29 @@ static uint32_t loom_amdgpu_fragment_memory_packet_dynamic_stride_bytes(
   return lane_mod_stride != 0 ? lane_mod_stride : lane_div_stride;
 }
 
+static loom_amdgpu_fp8_packed_bf16_repairs_t
+loom_amdgpu_fragment_memory_packet_fp8_repairs(
+    loom_amdgpu_fragment_memory_packet_flags_t packet_flags) {
+  const loom_amdgpu_fragment_memory_packet_flags_t repair_packet_flags =
+      packet_flags & LOOM_AMDGPU_FRAGMENT_FP8_REPAIR_PACKET_FLAGS;
+  const uint32_t repairs =
+      repair_packet_flags >> LOOM_AMDGPU_FRAGMENT_FP8_REPAIR_PACKET_FLAG_SHIFT;
+  return (loom_amdgpu_fp8_packed_bf16_repairs_t)repairs;
+}
+
+static loom_amdgpu_fragment_memory_packet_flags_t
+loom_amdgpu_fragment_memory_fp8_repair_packet_flags(
+    loom_amdgpu_fp8_packed_bf16_repairs_t repairs) {
+  return ((loom_amdgpu_fragment_memory_packet_flags_t)repairs
+          << LOOM_AMDGPU_FRAGMENT_FP8_REPAIR_PACKET_FLAG_SHIFT) &
+         LOOM_AMDGPU_FRAGMENT_FP8_REPAIR_PACKET_FLAGS;
+}
+
 static iree_string_view_t
 loom_amdgpu_fragment_memory_fp8_packed_decode_fallback_reason(
     loom_amdgpu_fragment_memory_packet_flags_t packet_flags) {
-  loom_amdgpu_fp8_packed_bf16_repairs_t repairs =
-      LOOM_AMDGPU_FP8_PACKED_BF16_REPAIR_NONE;
-  if (iree_any_bit_set(
-          packet_flags,
-          LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_REPAIR_ZERO)) {
-    repairs |= LOOM_AMDGPU_FP8_PACKED_BF16_REPAIR_ZERO;
-  }
-  if (iree_any_bit_set(
-          packet_flags,
-          LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_REPAIR_SUBNORMAL)) {
-    repairs |= LOOM_AMDGPU_FP8_PACKED_BF16_REPAIR_SUBNORMAL;
-  }
-  if (iree_any_bit_set(
-          packet_flags,
-          LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_REPAIR_NAN)) {
-    repairs |= LOOM_AMDGPU_FP8_PACKED_BF16_REPAIR_NAN;
-  }
-  if (iree_any_bit_set(
-          packet_flags,
-          LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_REPAIR_INF)) {
-    repairs |= LOOM_AMDGPU_FP8_PACKED_BF16_REPAIR_INF;
-  }
+  const loom_amdgpu_fp8_packed_bf16_repairs_t repairs =
+      loom_amdgpu_fragment_memory_packet_fp8_repairs(packet_flags);
   return kLoomAmdgpuFragmentFp8PackedBf16RepairReasons[repairs];
 }
 
@@ -2998,26 +3020,11 @@ loom_amdgpu_fragment_memory_fp8_decode_packet_flags(
               decode_plan, decode_value_flags);
   if (missing_requirements ==
       LOOM_AMDGPU_FP8_PACKED_BF16_MISSING_REQUIREMENT_NONE) {
-    loom_amdgpu_fragment_memory_packet_flags_t packet_flags =
-        LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_PACKED_BF16_DECODE;
     const loom_amdgpu_fp8_packed_bf16_repairs_t repairs =
         loom_amdgpu_fp8_pair_to_packed_bf16_repairs(decode_plan,
                                                     decode_value_flags);
-    if (iree_any_bit_set(repairs, LOOM_AMDGPU_FP8_PACKED_BF16_REPAIR_ZERO)) {
-      packet_flags |= LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_REPAIR_ZERO;
-    }
-    if (iree_any_bit_set(repairs,
-                         LOOM_AMDGPU_FP8_PACKED_BF16_REPAIR_SUBNORMAL)) {
-      packet_flags |=
-          LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_REPAIR_SUBNORMAL;
-    }
-    if (iree_any_bit_set(repairs, LOOM_AMDGPU_FP8_PACKED_BF16_REPAIR_NAN)) {
-      packet_flags |= LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_REPAIR_NAN;
-    }
-    if (iree_any_bit_set(repairs, LOOM_AMDGPU_FP8_PACKED_BF16_REPAIR_INF)) {
-      packet_flags |= LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_REPAIR_INF;
-    }
-    return packet_flags;
+    return LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_PACKED_BF16_DECODE |
+           loom_amdgpu_fragment_memory_fp8_repair_packet_flags(repairs);
   }
   loom_amdgpu_fragment_memory_packet_flags_t packet_flags =
       LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_FULL_BF16_DECODE;
