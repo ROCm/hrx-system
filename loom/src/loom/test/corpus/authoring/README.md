@@ -30,6 +30,7 @@ belong to `iree-benchmark-loom` flags or embedding APIs.
 | Local unroll intent | `ffn_gate_up_swiglu_q6q8.loom` keeps block/part loops structured and marks the tiny trip-count loops with `unroll`. |
 | Logical indexing | The examples use index/view math for logical rows, blocks, lanes, byte positions, and dense tensor coordinates. |
 | Dynamic case parameters | `mlp_down_projection_residual_bf16.loom` names `rows` on a `check.param.choice` and threads it through shapes, launch geometry, and the kernel ABI. |
+| Finite FP8 checkpoint storage | `fp8_finite_storage_decode.loom` puts `rounding=finite_only` on physical storage and materializes rows into F32 and BF16 destinations. |
 | Benchmark slices | `mlp_down_projection_residual_bf16.loom` has an anonymous full sweep plus named decode/full rows with assignment dictionaries. |
 | HIP C++ porting motifs | `hip/README.md` maps HIP/CUDA kernel habits to Loom source spellings, proof commands, diagnostics, and authoring-level report workflows. |
 | Packed field contracts | `hip/packed_field_contracts.loom` shows q2/q3/q4/q5/q6-style fields as explicit storage/decode/repack contracts instead of fake scalar element types. |
