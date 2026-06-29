@@ -9,6 +9,7 @@
 #include <string>
 
 #include "experimental/id4/ideogram4/session.h"
+#include "experimental/id4/pipeline/parameter_cache_provider.h"
 #include "experimental/id4/stages/hal_integration_util.h"
 #include "experimental/id4/stages/ideogram4_dit_parameters.h"
 #include "experimental/id4/tooling/filesystem.h"
@@ -55,6 +56,10 @@ IREE_FLAG(string, dit_conditioned_fp8_scope, "dit_cond_fp8",
           "Conditioned DiT FP8 e4m3 source parameter scope.");
 IREE_FLAG(string, dit_unconditioned_fp8_scope, "dit_uncond_fp8",
           "Unconditioned DiT FP8 e4m3 source parameter scope.");
+IREE_FLAG(
+    string, dit_fp8_source_residency, "disabled",
+    "Comma-separated DiT FP8 source providers kept resident after their "
+    "first gather: disabled, dit_conditioned, dit_unconditioned, or all.");
 
 namespace {
 
@@ -159,6 +164,21 @@ struct GenerationBenchmarkTimingStatistics {
   iree_duration_t total_ns;
 };
 
+struct GenerationBenchmarkSourceCacheStatistics {
+  // Number of source-resident exact spans currently cached.
+  iree_host_size_t entry_count;
+  // Sum of live source-resident cache buffer byte lengths.
+  iree_device_size_t cached_byte_length;
+  // Sum of provider peak source-resident cache byte lengths.
+  iree_device_size_t peak_cached_byte_length;
+  // Number of upstream gather submissions issued to fill cache entries.
+  iree_host_size_t source_gather_count;
+  // Number of caller gather requests served from existing cache entries.
+  iree_host_size_t cache_reuse_count;
+  // Number of cache entries evicted by provider notifications.
+  iree_host_size_t evicted_entry_count;
+};
+
 enum class GenerationIssueMode {
   kFull,
   kPhases,
@@ -179,6 +199,20 @@ enum class PromptBenchmarkDisposition {
   // The benchmark row is intentionally inactive for this invocation.
   kSkip,
 };
+
+enum DitFp8SourceResidencyBits : uint32_t {
+  // No FP8 source provider is cached after first gather.
+  kDitFp8SourceResidencyNone = 0u,
+  // Conditioned DiT FP8 source bytes stay resident after first gather.
+  kDitFp8SourceResidencyConditioned = 1u << 0,
+  // Unconditioned DiT FP8 source bytes stay resident after first gather.
+  kDitFp8SourceResidencyUnconditioned = 1u << 1,
+  // All DiT FP8 source providers stay resident after first gather.
+  kDitFp8SourceResidencyAll =
+      kDitFp8SourceResidencyConditioned | kDitFp8SourceResidencyUnconditioned,
+};
+
+using DitFp8SourceResidency = uint32_t;
 
 static const GenerationPrompt kShortPrompt = {
     // Stable short prompt bucket label.
@@ -244,6 +278,8 @@ struct LiveGenerationBenchmarkContext {
   ~LiveGenerationBenchmarkContext() {
     session.reset();
     vae_parameter_provider.reset();
+    unconditioned_dit_fp8_source_cache_provider.reset();
+    conditioned_dit_fp8_source_cache_provider.reset();
     unconditioned_dit_parameter_provider.reset();
     conditioned_dit_parameter_provider.reset();
     qwen_parameter_provider.reset();
@@ -263,6 +299,8 @@ struct LiveGenerationBenchmarkContext {
   // DiT parameter source policy selected by benchmark flags.
   id4_ideogram4_dit_parameter_format_t dit_parameter_format =
       ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_INVALID;
+  // FP8 source provider residency selected by benchmark flags.
+  DitFp8SourceResidency dit_fp8_source_residency = kDitFp8SourceResidencyNone;
   // Generation stage-bundle residency selected by benchmark flags.
   id4_ideogram4_generation_residency_mode_t generation_residency_mode =
       ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_INVALID;
@@ -278,6 +316,10 @@ struct LiveGenerationBenchmarkContext {
   ParameterProviderRef conditioned_dit_parameter_provider;
   // Provider containing unconditioned Ideogram 4 DiT weights.
   ParameterProviderRef unconditioned_dit_parameter_provider;
+  // Optional cache wrapper around the conditioned DiT FP8 source provider.
+  ParameterProviderRef conditioned_dit_fp8_source_cache_provider;
+  // Optional cache wrapper around the unconditioned DiT FP8 source provider.
+  ParameterProviderRef unconditioned_dit_fp8_source_cache_provider;
   // Provider containing VAE decode weights.
   ParameterProviderRef vae_parameter_provider;
   // Loaded Ideogram 4 session under benchmark.
@@ -304,6 +346,48 @@ static iree_status_t ParseDitParameterFormat(
       iree_make_cstring_view(FLAG_dit_parameter_format), out_format);
   if (iree_status_is_ok(status)) return status;
   return iree_status_annotate(status, IREE_SV("--dit_parameter_format"));
+}
+
+static iree_status_t ParseDitFp8SourceResidency(
+    DitFp8SourceResidency* out_residency) {
+  IREE_ASSERT_ARGUMENT(out_residency);
+  *out_residency = kDitFp8SourceResidencyNone;
+  iree_string_view_t remaining = iree_string_view_trim(
+      iree_make_cstring_view(FLAG_dit_fp8_source_residency));
+  while (!iree_string_view_is_empty(remaining)) {
+    iree_string_view_t provider_name = iree_string_view_empty();
+    iree_string_view_split(remaining, ',', &provider_name, &remaining);
+    provider_name = iree_string_view_trim(provider_name);
+    if (iree_string_view_is_empty(provider_name)) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "--dit_fp8_source_residency contains an empty provider name");
+    }
+    if (iree_string_view_equal(provider_name, IREE_SV("disabled"))) {
+      if (*out_residency != kDitFp8SourceResidencyNone ||
+          !iree_string_view_is_empty(iree_string_view_trim(remaining))) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "--dit_fp8_source_residency=disabled cannot be "
+                                "combined with other providers");
+      }
+      return iree_ok_status();
+    }
+    if (iree_string_view_equal(provider_name, IREE_SV("all"))) {
+      *out_residency |= kDitFp8SourceResidencyAll;
+    } else if (iree_string_view_equal(provider_name,
+                                      IREE_SV("dit_conditioned"))) {
+      *out_residency |= kDitFp8SourceResidencyConditioned;
+    } else if (iree_string_view_equal(provider_name,
+                                      IREE_SV("dit_unconditioned"))) {
+      *out_residency |= kDitFp8SourceResidencyUnconditioned;
+    } else {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "unknown --dit_fp8_source_residency value '%.*s'",
+                              static_cast<int>(provider_name.size),
+                              provider_name.data);
+    }
+  }
+  return iree_ok_status();
 }
 
 static iree_status_t ParseDitWeightExecutionFormat(
@@ -561,6 +645,40 @@ static void AddTiming(GenerationBenchmarkTimingStatistics* target,
   AddPhaseTiming(&target->decode, add.decode);
   target->final_wait_ns += add.final_wait_ns;
   target->total_ns += add.total_ns;
+}
+
+static void AddSourceCacheStatistics(
+    GenerationBenchmarkSourceCacheStatistics* target,
+    const id4_pipeline_parameter_cache_provider_statistics_t& add) {
+  target->entry_count += add.entry_count;
+  target->cached_byte_length += add.cached_byte_length;
+  target->peak_cached_byte_length += add.peak_cached_byte_length;
+  target->source_gather_count += add.source_gather_count;
+  target->cache_reuse_count += add.cache_reuse_count;
+  target->evicted_entry_count += add.evicted_entry_count;
+}
+
+static iree_status_t AccumulateSourceCacheStatistics(
+    iree_io_parameter_provider_t* provider,
+    GenerationBenchmarkSourceCacheStatistics* target) {
+  if (!provider) return iree_ok_status();
+
+  id4_pipeline_parameter_cache_provider_statistics_t statistics;
+  IREE_RETURN_IF_ERROR(id4_pipeline_parameter_cache_provider_query_statistics(
+      provider, &statistics));
+  AddSourceCacheStatistics(target, statistics);
+  return iree_ok_status();
+}
+
+static iree_status_t AccumulateGenerationBenchmarkSourceCacheStatistics(
+    const LiveGenerationBenchmarkContext& context,
+    GenerationBenchmarkSourceCacheStatistics* out_statistics) {
+  std::memset(out_statistics, 0, sizeof(*out_statistics));
+  IREE_RETURN_IF_ERROR(AccumulateSourceCacheStatistics(
+      context.conditioned_dit_fp8_source_cache_provider.get(), out_statistics));
+  return AccumulateSourceCacheStatistics(
+      context.unconditioned_dit_fp8_source_cache_provider.get(),
+      out_statistics);
 }
 
 static iree_status_t AccumulateGenerationBenchmarkPlanStatistics(
@@ -851,11 +969,45 @@ static iree_status_t CreateLoadedLiveSession(
   return status;
 }
 
+static iree_status_t MakeSourceResidentParameterProvider(
+    ParameterProviderRef* provider, ParameterProviderRef* out_cache_provider) {
+  IREE_ASSERT_ARGUMENT(provider);
+  if (!provider->get()) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "source-resident parameter provider source is required");
+  }
+
+  id4_pipeline_parameter_cache_provider_options_t options;
+  std::memset(&options, 0, sizeof(options));
+  options.structure_size = sizeof(options);
+  options.source_provider = provider->get();
+  options.cache_params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
+  options.cache_params.access = IREE_HAL_MEMORY_ACCESS_ALL;
+  options.cache_params.usage = IREE_HAL_BUFFER_USAGE_TRANSFER;
+  options.cache_params.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
+
+  iree_io_parameter_provider_t* cached_provider = nullptr;
+  IREE_RETURN_IF_ERROR(id4_pipeline_parameter_cache_provider_create(
+      &options, iree_allocator_system(), &cached_provider));
+  if (out_cache_provider) {
+    iree_io_parameter_provider_retain(cached_provider);
+    out_cache_provider->reset(cached_provider);
+  }
+  provider->reset(cached_provider);
+  return iree_ok_status();
+}
+
 static iree_status_t CreateParameterProviders(
     LiveGenerationBenchmarkContext* context) {
   IREE_ASSERT_ARGUMENT(context);
   if (context->dit_parameter_format ==
       ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_BF16) {
+    if (context->dit_fp8_source_residency != kDitFp8SourceResidencyNone) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "--dit_fp8_source_residency requires "
+                              "--dit_parameter_format=fp8_e4m3");
+    }
     id4_tooling_parameter_provider_request_t requests[] = {
         {
             // Qwen3-VL text encoder parameter scope.
@@ -936,6 +1088,17 @@ static iree_status_t CreateParameterProviders(
   };
   IREE_RETURN_IF_ERROR(id4_tooling_create_parameter_providers_from_flags(
       IREE_ARRAYSIZE(requests), requests, iree_allocator_system()));
+  if ((context->dit_fp8_source_residency & kDitFp8SourceResidencyConditioned) !=
+      0) {
+    IREE_RETURN_IF_ERROR(MakeSourceResidentParameterProvider(
+        &conditioned_fp8, &context->conditioned_dit_fp8_source_cache_provider));
+  }
+  if ((context->dit_fp8_source_residency &
+       kDitFp8SourceResidencyUnconditioned) != 0) {
+    IREE_RETURN_IF_ERROR(MakeSourceResidentParameterProvider(
+        &unconditioned_fp8,
+        &context->unconditioned_dit_fp8_source_cache_provider));
+  }
 
   const id4_tooling_parameter_provider_set_entry_t conditioned_entries[] = {
       {
@@ -995,6 +1158,8 @@ static iree_status_t CreateLiveGenerationBenchmarkContext(
       iree_allocator_system(), out_context->kernel_library.out()));
   IREE_RETURN_IF_ERROR(
       ParseDitParameterFormat(&out_context->dit_parameter_format));
+  IREE_RETURN_IF_ERROR(
+      ParseDitFp8SourceResidency(&out_context->dit_fp8_source_residency));
   IREE_RETURN_IF_ERROR(
       ParseGenerationResidencyMode(&out_context->generation_residency_mode));
   IREE_RETURN_IF_ERROR(
@@ -1388,6 +1553,9 @@ static iree_status_t SetGenerationBenchmarkLabel(
       GenerationResidencyModeName(context.generation_residency_mode);
   const iree_string_view_t issue_mode =
       GenerationIssueModeName(context.generation_issue_mode);
+  GenerationBenchmarkSourceCacheStatistics source_cache_statistics;
+  IREE_RETURN_IF_ERROR(AccumulateGenerationBenchmarkSourceCacheStatistics(
+      context, &source_cache_statistics));
   iree_string_builder_t label_builder;
   iree_string_builder_initialize(iree_allocator_system(), &label_builder);
   iree_status_t status = iree_string_builder_append_format(
@@ -1398,6 +1566,11 @@ static iree_status_t SetGenerationBenchmarkLabel(
       " dit_uncond_capacity=%" PRIu32 " latent=%" PRIu64 "x%" PRIu64
       " steps=%" PRIu32 " image=%" PRIu64 "x%" PRIu64
       " residency=%.*s issue=%.*s resident_stage_mask=0x%08x"
+      " dit_fp8_source_residency=0x%08x"
+      " dit_fp8_source_cache[entries=%" PRIhsz ",cached=%" PRIu64
+      "MiB,peak=%" PRIu64 "MiB,fills=%" PRIhsz ",reuse=%" PRIhsz
+      ",evicted=%" PRIhsz
+      "]"
       " params=%.*s activation=%.*s weights=%.*s attention=%.*s ff=%.*s"
       " param_total=%" PRIu64 "MiB param_largest=%" PRIu64
       "MiB param_source=%" PRIu64 "MiB param_source_direct=%" PRIu64
@@ -1419,7 +1592,13 @@ static iree_status_t SetGenerationBenchmarkLabel(
       summary.decoded_image_shape.dims[0], summary.decoded_image_shape.dims[1],
       static_cast<int>(residency_mode.size), residency_mode.data,
       static_cast<int>(issue_mode.size), issue_mode.data,
-      context.generation_resident_stage_mask,
+      context.generation_resident_stage_mask, context.dit_fp8_source_residency,
+      source_cache_statistics.entry_count,
+      CeilMiB(source_cache_statistics.cached_byte_length),
+      CeilMiB(source_cache_statistics.peak_cached_byte_length),
+      source_cache_statistics.source_gather_count,
+      source_cache_statistics.cache_reuse_count,
+      source_cache_statistics.evicted_entry_count,
       static_cast<int>(parameter_format.size), parameter_format.data,
       static_cast<int>(activation_format.size), activation_format.data,
       static_cast<int>(weight_execution_format.size),

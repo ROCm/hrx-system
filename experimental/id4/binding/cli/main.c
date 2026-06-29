@@ -13,6 +13,7 @@
 
 #include "experimental/id4/ideogram4/session.h"
 #include "experimental/id4/pipeline/diagnostics.h"
+#include "experimental/id4/pipeline/parameter_cache_provider.h"
 #include "experimental/id4/stages/ideogram4_dit_parameters.h"
 #include "experimental/id4/tooling/diagnostics.h"
 #include "experimental/id4/tooling/image.h"
@@ -50,6 +51,10 @@ IREE_FLAG(string, dit_conditioned_fp8_scope, "dit_cond_fp8",
           "Conditioned DiT FP8 e4m3 source parameter scope.");
 IREE_FLAG(string, dit_unconditioned_fp8_scope, "dit_uncond_fp8",
           "Unconditioned DiT FP8 e4m3 source parameter scope.");
+IREE_FLAG(
+    string, dit_fp8_source_residency, "disabled",
+    "Comma-separated DiT FP8 source providers kept resident after their "
+    "first gather: disabled, dit_conditioned, dit_unconditioned, or all.");
 IREE_FLAG(string, vae_tiling_mode, "disabled",
           "VAE tiling mode: disabled, explicit_tile_size, relative_tile_size, "
           "or memory_budget.");
@@ -99,6 +104,17 @@ typedef enum id4_cli_generation_issue_mode_e {
   // Issue generation through explicit conditioning, denoise, and decode phases.
   ID4_CLI_GENERATION_ISSUE_MODE_PHASES = 1,
 } id4_cli_generation_issue_mode_t;
+
+typedef enum id4_cli_dit_fp8_source_residency_bits_e {
+  ID4_CLI_DIT_FP8_SOURCE_RESIDENCY_NONE = 0u,
+  ID4_CLI_DIT_FP8_SOURCE_RESIDENCY_CONDITIONED = 1u << 0,
+  ID4_CLI_DIT_FP8_SOURCE_RESIDENCY_UNCONDITIONED = 1u << 1,
+  ID4_CLI_DIT_FP8_SOURCE_RESIDENCY_ALL =
+      ID4_CLI_DIT_FP8_SOURCE_RESIDENCY_CONDITIONED |
+      ID4_CLI_DIT_FP8_SOURCE_RESIDENCY_UNCONDITIONED,
+} id4_cli_dit_fp8_source_residency_bits_t;
+
+typedef uint32_t id4_cli_dit_fp8_source_residency_t;
 
 static iree_status_t id4_cli_load_tokenizer(iree_string_view_t tokenizer_path,
                                             iree_allocator_t host_allocator,
@@ -185,6 +201,47 @@ static iree_status_t id4_cli_parse_dit_parameter_format(
       iree_make_cstring_view(FLAG_dit_parameter_format), out_format);
   if (iree_status_is_ok(status)) return status;
   return iree_status_annotate(status, IREE_SV("--dit_parameter_format"));
+}
+
+static iree_status_t id4_cli_parse_dit_fp8_source_residency(
+    id4_cli_dit_fp8_source_residency_t* out_residency) {
+  IREE_ASSERT_ARGUMENT(out_residency);
+  *out_residency = ID4_CLI_DIT_FP8_SOURCE_RESIDENCY_NONE;
+  iree_string_view_t remaining = iree_string_view_trim(
+      iree_make_cstring_view(FLAG_dit_fp8_source_residency));
+  while (!iree_string_view_is_empty(remaining)) {
+    iree_string_view_t provider_name = iree_string_view_empty();
+    iree_string_view_split(remaining, ',', &provider_name, &remaining);
+    provider_name = iree_string_view_trim(provider_name);
+    if (iree_string_view_is_empty(provider_name)) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "--dit_fp8_source_residency contains an empty provider name");
+    }
+    if (iree_string_view_equal(provider_name, IREE_SV("disabled"))) {
+      if (*out_residency != ID4_CLI_DIT_FP8_SOURCE_RESIDENCY_NONE ||
+          !iree_string_view_is_empty(iree_string_view_trim(remaining))) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "--dit_fp8_source_residency=disabled cannot be "
+                                "combined with other providers");
+      }
+      return iree_ok_status();
+    }
+    if (iree_string_view_equal(provider_name, IREE_SV("all"))) {
+      *out_residency |= ID4_CLI_DIT_FP8_SOURCE_RESIDENCY_ALL;
+    } else if (iree_string_view_equal(provider_name,
+                                      IREE_SV("dit_conditioned"))) {
+      *out_residency |= ID4_CLI_DIT_FP8_SOURCE_RESIDENCY_CONDITIONED;
+    } else if (iree_string_view_equal(provider_name,
+                                      IREE_SV("dit_unconditioned"))) {
+      *out_residency |= ID4_CLI_DIT_FP8_SOURCE_RESIDENCY_UNCONDITIONED;
+    } else {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "unknown --dit_fp8_source_residency value '%.*s'",
+                              (int)provider_name.size, provider_name.data);
+    }
+  }
+  return iree_ok_status();
 }
 
 static iree_status_t id4_cli_parse_dit_activation_format(
@@ -1324,6 +1381,33 @@ static void id4_cli_release_parameter_providers(
   memset(providers, 0, sizeof(*providers));
 }
 
+static iree_status_t id4_cli_make_source_resident_parameter_provider(
+    iree_io_parameter_provider_t** inout_provider,
+    iree_allocator_t host_allocator) {
+  IREE_ASSERT_ARGUMENT(inout_provider);
+  if (!*inout_provider) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "source-resident parameter provider source is required");
+  }
+
+  id4_pipeline_parameter_cache_provider_options_t options;
+  memset(&options, 0, sizeof(options));
+  options.structure_size = sizeof(options);
+  options.source_provider = *inout_provider;
+  options.cache_params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
+  options.cache_params.access = IREE_HAL_MEMORY_ACCESS_ALL;
+  options.cache_params.usage = IREE_HAL_BUFFER_USAGE_TRANSFER;
+  options.cache_params.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
+
+  iree_io_parameter_provider_t* cached_provider = NULL;
+  IREE_RETURN_IF_ERROR(id4_pipeline_parameter_cache_provider_create(
+      &options, host_allocator, &cached_provider));
+  iree_io_parameter_provider_release(*inout_provider);
+  *inout_provider = cached_provider;
+  return iree_ok_status();
+}
+
 static iree_status_t id4_cli_create_parameter_providers(
     iree_allocator_t host_allocator,
     id4_ideogram4_generation_parameter_providers_t* out_providers) {
@@ -1332,9 +1416,18 @@ static iree_status_t id4_cli_create_parameter_providers(
       ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_INVALID;
   IREE_RETURN_IF_ERROR(
       id4_cli_parse_dit_parameter_format(&dit_parameter_format));
+  id4_cli_dit_fp8_source_residency_t fp8_source_residency =
+      ID4_CLI_DIT_FP8_SOURCE_RESIDENCY_NONE;
+  IREE_RETURN_IF_ERROR(
+      id4_cli_parse_dit_fp8_source_residency(&fp8_source_residency));
 
   iree_status_t status = iree_ok_status();
   if (dit_parameter_format == ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_BF16) {
+    if (fp8_source_residency != ID4_CLI_DIT_FP8_SOURCE_RESIDENCY_NONE) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "--dit_fp8_source_residency requires "
+                              "--dit_parameter_format=fp8_e4m3");
+    }
     id4_tooling_parameter_provider_request_t requests[] = {
         {
             // Qwen3-VL text encoder parameter scope.
@@ -1412,6 +1505,18 @@ static iree_status_t id4_cli_create_parameter_providers(
     };
     status = id4_tooling_create_parameter_providers_from_flags(
         IREE_ARRAYSIZE(requests), requests, host_allocator);
+    if (iree_status_is_ok(status) &&
+        iree_any_bit_set(fp8_source_residency,
+                         ID4_CLI_DIT_FP8_SOURCE_RESIDENCY_CONDITIONED)) {
+      status = id4_cli_make_source_resident_parameter_provider(
+          &dit_conditioned_fp8, host_allocator);
+    }
+    if (iree_status_is_ok(status) &&
+        iree_any_bit_set(fp8_source_residency,
+                         ID4_CLI_DIT_FP8_SOURCE_RESIDENCY_UNCONDITIONED)) {
+      status = id4_cli_make_source_resident_parameter_provider(
+          &dit_unconditioned_fp8, host_allocator);
+    }
     if (iree_status_is_ok(status)) {
       const id4_tooling_parameter_provider_set_entry_t entries[] = {
           {

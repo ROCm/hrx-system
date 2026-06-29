@@ -100,6 +100,7 @@ iree_runtime_cc_benchmark(
     srcs = ["session_live_benchmark.cc"],
     deps = [
         ":session",
+        "//experimental/id4/pipeline:parameter_cache_provider",
         "//experimental/id4/stages:hal_integration_util",
         "//experimental/id4/stages:ideogram4_dit_parameters",
         "//experimental/id4/tooling:filesystem",

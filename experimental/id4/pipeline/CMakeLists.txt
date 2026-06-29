@@ -86,6 +86,21 @@ iree_cc_library(
 
 iree_cc_library(
   NAME
+    parameter_cache_provider
+  HDRS
+    "parameter_cache_provider.h"
+  SRCS
+    "parameter_cache_provider.c"
+  DEPS
+    iree::base
+    iree::base::threading
+    iree::hal
+    iree::io::parameter_provider
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
     plan
   HDRS
     "plan.h"
@@ -273,6 +288,22 @@ iree_cc_test(
     ::parameter_slab
     iree::base
     iree::hal
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_test(
+  NAME
+    parameter_cache_provider_test
+  SRCS
+    "parameter_cache_provider_test.cc"
+  DEPS
+    ::parameter_cache_provider
+    iree::async
+    iree::async::util::proactor_pool
+    iree::base
+    iree::hal
+    iree::hal::drivers::local_sync::sync_driver
     iree::testing::gtest
     iree::testing::gtest_main
 )
