@@ -1816,7 +1816,8 @@ static iree_status_t iree_hal_amdgpu_executable_initialize_export_infos(
         metadata_export->max_workgroup_size != 0) {
       const uint64_t fixed_workgroup_size =
           (uint64_t)metadata_export->workgroup_size[0] *
-          metadata_export->workgroup_size[1] * metadata_export->workgroup_size[2];
+          metadata_export->workgroup_size[1] *
+          metadata_export->workgroup_size[2];
       if (IREE_UNLIKELY(fixed_workgroup_size > max_workgroup_size)) {
         return iree_make_status(
             IREE_STATUS_INVALID_ARGUMENT,

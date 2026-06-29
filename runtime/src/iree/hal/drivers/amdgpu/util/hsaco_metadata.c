@@ -1018,11 +1018,12 @@ static iree_status_t iree_hal_amdgpu_hsaco_metadata_parse_kernel(
         return iree_hal_amdgpu_hsaco_metadata_duplicate_field_status(key);
       }
       uint32_t uniform_workgroup_size = 0;
-      IREE_RETURN_IF_ERROR(iree_hal_amdgpu_msgpack_read_uint32(
-          reader, &uniform_workgroup_size));
+      IREE_RETURN_IF_ERROR(
+          iree_hal_amdgpu_msgpack_read_uint32(reader, &uniform_workgroup_size));
       if (uniform_workgroup_size > 1) {
-        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                "AMDGPU uniform_work_group_size must be 0 or 1");
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "AMDGPU uniform_work_group_size must be 0 or 1");
       }
       out_kernel->uniform_workgroup_size = uniform_workgroup_size != 0;
       fields.has_uniform_workgroup_size = true;
