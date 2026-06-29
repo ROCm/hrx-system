@@ -6171,6 +6171,28 @@ _KERNEL_CASES = [
         "target_name": "qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m32n32_qwen_shape",
     },
     {
+        "actual_case": "@id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_qwen_shape_288_case",
+        "benchmark": "@id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_qwen_shape_288",
+        "configs": [
+            "--config=id4.qwen3_vl.mlp_gate_up_silu_product_wmma.dispatch_token_count=288",
+            "--config=id4.qwen3_vl.mlp_gate_up_silu_product_wmma.input_size=4096",
+            "--config=id4.qwen3_vl.mlp_gate_up_silu_product_wmma.intermediate_size=12288",
+        ],
+        "source": "qwen3_vl/mlp_gate_up_silu_product_bf16_wmma.loom",
+        "target_name": "qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_qwen_shape_288",
+    },
+    {
+        "actual_case": "@id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m32n32_qwen_shape_288_case",
+        "benchmark": "@id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m32n32_qwen_shape_288",
+        "configs": [
+            "--config=id4.qwen3_vl.mlp_gate_up_silu_product_wmma.dispatch_token_count=288",
+            "--config=id4.qwen3_vl.mlp_gate_up_silu_product_wmma.input_size=4096",
+            "--config=id4.qwen3_vl.mlp_gate_up_silu_product_wmma.intermediate_size=12288",
+        ],
+        "source": "qwen3_vl/mlp_gate_up_silu_product_bf16_wmma.loom",
+        "target_name": "qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m32n32_qwen_shape_288",
+    },
+    {
         "actual_case": "@id4_qwen3_vl_token_embedding_bf16_f32_small_case",
         "benchmark": "@id4_qwen3_vl_token_embedding_bf16_f32_small",
         "configs": [
@@ -6424,6 +6446,16 @@ _KERNEL_CASES = [
         ],
         "source": "qwen3_vl/silu_gate_f32.loom",
         "target_name": "qwen3_vl_silu_gate_f32_qwen_slice",
+    },
+    {
+        "actual_case": "@id4_qwen3_vl_silu_gate_bf16_qwen_shape_288_case",
+        "benchmark": "@id4_qwen3_vl_silu_gate_bf16_qwen_shape_288",
+        "configs": [
+            "--config=id4.qwen3_vl.silu_gate.token_count=288",
+            "--config=id4.qwen3_vl.silu_gate.intermediate_size=12288",
+        ],
+        "source": "qwen3_vl/silu_gate_f32.loom",
+        "target_name": "qwen3_vl_silu_gate_bf16_qwen_shape_288",
     },
     {
         "actual_case": "@id4_qwen3_vl_residual_add_f32_small_case",
