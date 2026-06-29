@@ -13,6 +13,72 @@ from pathlib import Path
 
 import generation_benchmark_summary
 
+MIB = 1024 * 1024
+
+TEST_BENCHMARK_LABEL = (
+    "scope=prepared_issue prompt=short128 qwen_tokens=19 qwen_capacity=32 "
+    "image_tokens=64 dit_cond_tokens=83 dit_cond_capacity=128 "
+    "dit_uncond_tokens=64 dit_uncond_capacity=128 latent=8x8 steps=1 "
+    "image=128x128 residency=issue_phases issue=stage_serial "
+    "resident_stage_mask=0x00000000 dit_fp8_source_residency=0x00000003 "
+    "dit_fp8_source_cache_miss=direct_on_pressure "
+    "dit_fp8_source_cache_budget=8192MiB "
+    "dit_fp8_source_cache[entries=622,cached=8192MiB,peak=8192MiB,"
+    "fills=622,reuse=622,direct=440,evicted=0] "
+    "params=fp8_e4m3 activation=bf16_linear_input weights=bf16_resident "
+    "attention=online_wmma ff=fused_product param_total=49460MiB "
+    "param_largest=17699MiB param_source=32015MiB "
+    "param_source_direct=4168MiB param_source_encoded=27848MiB "
+    "param_load_steps[gather=322,encode=529] local_hw_total=41MiB "
+    "local_hw_largest=20MiB boundary=9MiB kernels=119 dispatches=1507 "
+    "logical_live[boundary=5MiB,taps=0MiB,resident=0MiB,"
+    "phase_peak=34951MiB,stage_serial_peak=17712MiB,"
+    "selected_peak=17712MiB,selected_with_source_cache_peak=25904MiB] "
+    "stage.qwen[param=14436MiB,src=14436MiB,src_direct=4068MiB,"
+    "src_encoded=10368MiB,loads=36/108,local_hw=4MiB,boundary=4MiB,"
+    "kernels=28,dispatches=485] "
+    "stage.decode[param=95MiB,src=95MiB,src_direct=95MiB,"
+    "src_encoded=0MiB,loads=1/0,local_hw=20MiB,boundary=1MiB,"
+    "kernels=37,dispatches=106] "
+    "timing_ms[plan=0.000,prepare=0.000,issue=3477.614,begin=0.000,"
+    "final_wait=150.049,total=3627.663]"
+)
+
+
+def stage_statistics(
+    *,
+    parameter_mib: int,
+    source_mib: int,
+    source_direct_mib: int,
+    source_encoded_mib: int,
+    gather_loads: int,
+    encode_loads: int,
+    local_high_water_mib: int,
+    boundary_mib: int,
+    kernels: int,
+    dispatches: int,
+) -> dict:
+    return {
+        "statistics": {
+            "parameter_slab_byte_length": parameter_mib * MIB,
+            "largest_parameter_slab_byte_length": parameter_mib * MIB,
+            "parameter_source_byte_length": source_mib * MIB,
+            "parameter_direct_source_byte_length": source_direct_mib * MIB,
+            "parameter_encoded_source_byte_length": source_encoded_mib * MIB,
+            "parameter_gather_load_step_count": gather_loads,
+            "parameter_encode_load_step_count": encode_loads,
+            "constant_slab_byte_length": 0,
+            "memory_slab_byte_length": local_high_water_mib * MIB,
+            "memory_slab_high_water_mark": local_high_water_mib * MIB,
+            "boundary_tensor_byte_length": boundary_mib * MIB,
+            "diagnostic_tap_byte_length": 0,
+            "kernel_count": kernels,
+            "region_count": 1,
+            "operation_count": dispatches,
+            "dispatch_count": dispatches,
+        }
+    }
+
 
 def minimal_generation_plan(qwen_token_count: int) -> dict:
     return {
@@ -112,6 +178,89 @@ def minimal_generation_plan(qwen_token_count: int) -> dict:
     }
 
 
+def live_label_generation_plan() -> dict:
+    plan = minimal_generation_plan(19)
+    plan["residency"]["total_stage_parameter_byte_length"] = 49460 * MIB
+    plan["residency"]["phase_parameter_high_water_mark"] = 34951 * MIB
+    plan["residency"]["largest_stage_parameter_byte_length"] = 17699 * MIB
+    plan["residency"]["total_stage_boundary_byte_length"] = 9 * MIB
+    plan["stages"] = {
+        "sampler_noise": stage_statistics(
+            parameter_mib=0,
+            source_mib=0,
+            source_direct_mib=0,
+            source_encoded_mib=0,
+            gather_loads=0,
+            encode_loads=0,
+            local_high_water_mib=0,
+            boundary_mib=1,
+            kernels=1,
+            dispatches=1,
+        ),
+        "qwen": stage_statistics(
+            parameter_mib=14436,
+            source_mib=14436,
+            source_direct_mib=4068,
+            source_encoded_mib=10368,
+            gather_loads=36,
+            encode_loads=108,
+            local_high_water_mib=4,
+            boundary_mib=4,
+            kernels=28,
+            dispatches=485,
+        ),
+        "dit_conditioned": stage_statistics(
+            parameter_mib=17699,
+            source_mib=8860,
+            source_direct_mib=3,
+            source_encoded_mib=8857,
+            gather_loads=143,
+            encode_loads=211,
+            local_high_water_mib=9,
+            boundary_mib=5,
+            kernels=27,
+            dispatches=458,
+        ),
+        "dit_unconditioned": stage_statistics(
+            parameter_mib=17231,
+            source_mib=8626,
+            source_direct_mib=3,
+            source_encoded_mib=8623,
+            gather_loads=142,
+            encode_loads=210,
+            local_high_water_mib=9,
+            boundary_mib=1,
+            kernels=24,
+            dispatches=455,
+        ),
+        "sampler_denoise": stage_statistics(
+            parameter_mib=0,
+            source_mib=0,
+            source_direct_mib=0,
+            source_encoded_mib=0,
+            gather_loads=0,
+            encode_loads=0,
+            local_high_water_mib=1,
+            boundary_mib=1,
+            kernels=2,
+            dispatches=2,
+        ),
+        "decode": stage_statistics(
+            parameter_mib=95,
+            source_mib=95,
+            source_direct_mib=95,
+            source_encoded_mib=0,
+            gather_loads=1,
+            encode_loads=0,
+            local_high_water_mib=20,
+            boundary_mib=1,
+            kernels=37,
+            dispatches=106,
+        ),
+    }
+    return plan
+
+
 class GenerationBenchmarkSummaryTest(unittest.TestCase):
     def test_summarize_generation_benchmark_joins_rows_to_plans(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -155,6 +304,136 @@ class GenerationBenchmarkSummaryTest(unittest.TestCase):
             self.assertEqual(summary["rows"][0]["dit_feed_forward_implementation"], 2)
             self.assertEqual(summary["rows"][0]["dispatch_count"], 1168)
             self.assertEqual(summary["rows"][0]["local_high_water_mark"], 512)
+
+    def test_summarize_generation_benchmark_parses_live_label_telemetry(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plan_dir = root / "plans"
+            plan_dir.mkdir()
+            (plan_dir / "short128.json").write_text(
+                json.dumps(live_label_generation_plan()), encoding="utf-8"
+            )
+            benchmark_path = root / "benchmark.json"
+            benchmark_path.write_text(
+                json.dumps(
+                    {
+                        "benchmarks": [
+                            {
+                                "name": (
+                                    "BM_Ideogram4SessionGenerationIssuePrepared/"
+                                    "short128/real_time"
+                                ),
+                                "real_time": 3627.692699432373,
+                                "cpu_time": 10.391671999999907,
+                                "iterations": 1,
+                                "label": TEST_BENCHMARK_LABEL,
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            summary = generation_benchmark_summary.summarize_generation_benchmark(
+                benchmark_path, plan_dir
+            )
+
+            row = summary["rows"][0]
+            self.assertEqual(row["benchmark_scope"], "prepared_issue")
+            self.assertEqual(row["prompt_label"], "short128")
+            self.assertEqual(row["generation_issue_mode"], "stage_serial")
+            self.assertEqual(row["generation_residency"], "issue_phases")
+            self.assertEqual(row["dit_fp8_source_residency_mask"], 3)
+            self.assertEqual(
+                row["dit_fp8_source_cache_miss_mode"], "direct_on_pressure"
+            )
+            self.assertEqual(row["dit_fp8_source_cache_budget_mib"], 8192)
+            self.assertEqual(row["dit_fp8_source_cache_direct_miss_count"], 440)
+            self.assertEqual(row["runtime_parameter_total_mib"], 49460)
+            self.assertEqual(row["runtime_parameter_source_encoded_mib"], 27848)
+            self.assertEqual(row["runtime_parameter_gather_load_step_count"], 322)
+            self.assertEqual(row["runtime_dispatch_count"], 1507)
+            self.assertEqual(row["logical_live_phase_peak_mib"], 34951)
+            self.assertEqual(row["logical_live_stage_serial_peak_mib"], 17712)
+            self.assertEqual(
+                row["logical_live_selected_with_source_cache_peak_mib"], 25904
+            )
+            self.assertEqual(row["runtime_stages"]["qwen"]["source_encoded_mib"], 10368)
+            self.assertEqual(row["runtime_stages"]["decode"]["dispatch_count"], 106)
+            self.assertAlmostEqual(row["timing_issue_ms"], 3477.614)
+            self.assertAlmostEqual(row["timing_final_wait_ms"], 150.049)
+
+    def test_summarize_generation_benchmark_rejects_malformed_live_label(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plan_dir = root / "plans"
+            plan_dir.mkdir()
+            (plan_dir / "short128.json").write_text(
+                json.dumps(minimal_generation_plan(19)), encoding="utf-8"
+            )
+            benchmark_path = root / "benchmark.json"
+            benchmark_path.write_text(
+                json.dumps(
+                    {
+                        "benchmarks": [
+                            {
+                                "name": (
+                                    "BM_Ideogram4SessionGenerationIssuePrepared/"
+                                    "short128/real_time"
+                                ),
+                                "real_time": 1.0,
+                                "cpu_time": 1.0,
+                                "iterations": 1,
+                                "label": "scope=prepared_issue",
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with self.assertRaises(
+                generation_benchmark_summary.GenerationBenchmarkSummaryError
+            ):
+                generation_benchmark_summary.summarize_generation_benchmark(
+                    benchmark_path, plan_dir
+                )
+
+    def test_summarize_generation_benchmark_rejects_stale_plan_join(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plan_dir = root / "plans"
+            plan_dir.mkdir()
+            (plan_dir / "short128.json").write_text(
+                json.dumps(minimal_generation_plan(19)), encoding="utf-8"
+            )
+            benchmark_path = root / "benchmark.json"
+            benchmark_path.write_text(
+                json.dumps(
+                    {
+                        "benchmarks": [
+                            {
+                                "name": (
+                                    "BM_Ideogram4SessionGenerationIssuePrepared/"
+                                    "short128/real_time"
+                                ),
+                                "real_time": 1.0,
+                                "cpu_time": 1.0,
+                                "iterations": 1,
+                                "label": TEST_BENCHMARK_LABEL,
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with self.assertRaises(
+                generation_benchmark_summary.GenerationBenchmarkSummaryError
+            ):
+                generation_benchmark_summary.summarize_generation_benchmark(
+                    benchmark_path, plan_dir
+                )
 
     def test_summarize_generation_benchmark_requires_matching_plan(self):
         with tempfile.TemporaryDirectory() as directory:

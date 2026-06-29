@@ -257,6 +257,22 @@ class Id4SmokeTestTest(unittest.TestCase):
         self.assertIn("--generation_issue_mode=phases", command)
         self.assertIn("--generation_resident_stage_bundles=dit_conditioned", command)
 
+    def test_build_id4_command_routes_stage_serial_issue_mode(self):
+        args = self.smoke_test.parse_arguments(
+            [
+                "--output_dir=out",
+                "--id4_binary=bin/id4",
+                "--device=amdgpu",
+                "--tokenizer=tokenizer.json",
+                "--parameters=qwen=qwen.safetensors",
+                "--generation_issue_mode=stage_serial",
+            ]
+        )
+
+        command = self.smoke_test.build_id4_command(args, Path("artifacts"))
+
+        self.assertIn("--generation_issue_mode=stage_serial", command)
+
     def test_build_id4_command_omits_disabled_vae_detail_flags(self):
         args = self.smoke_test.parse_arguments(
             [

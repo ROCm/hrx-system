@@ -224,7 +224,7 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--generation_issue_mode",
         default="full",
-        choices=("full", "phases"),
+        choices=("full", "phases", "stage_serial"),
     )
     parser.add_argument(
         "--generation_resident_stage_bundles",
