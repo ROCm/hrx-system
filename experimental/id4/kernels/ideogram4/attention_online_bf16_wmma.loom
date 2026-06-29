@@ -27,6 +27,7 @@ kernel.def target(@id4_gfx1100) export("id4_ideogram4_attention_online_bf16_bf16
   %zero = index.constant 0 : index
   %one = index.constant 1 : index
   %eight = index.constant 8 : index
+  %fifteen = index.constant 15 : index
   %sixteen = index.constant 16 : index
   %thirty_two = index.constant 32 : index
   %forty_eight = index.constant 48 : index
@@ -51,7 +52,8 @@ kernel.def target(@id4_gfx1100) export("id4_ideogram4_attention_online_bf16_bf16
   %value_base = index.add %head_base, %zero : index
   %local_query_origin = index.mul %query_tile, %sixteen : index
   %query_origin = index.add %query_block_offset, %local_query_origin : index
-  %key_tile_count = index.div %padded_token_count, %sixteen : index
+  %valid_token_count_rounded = index.add %valid_token_count, %fifteen : index
+  %key_tile_count = index.div %valid_token_count_rounded, %sixteen : index
   %zero_f32 = scalar.constant 0.0 : f32
   %negative_large = scalar.constant -1000000000.0 : f32
   %zero_acc = vector.constant 0.0 : vector<8xf32>
@@ -387,6 +389,17 @@ check.case public @id4_ideogram4_attention_online_bf16_bf16_wmma_small_case {
   check.return
 }
 
+check.case public @id4_ideogram4_attention_online_bf16_bf16_wmma_padded_key_tail_case {
+  %query = check.generate.fill value(1.0) : tensor<32x512xbf16>
+  %key = check.generate.fill value(1.0) : tensor<32x512xbf16>
+  %value = check.generate.fill value(2.0) : tensor<32x512xbf16>
+  %output = check.generate.fill value(0.0) : tensor<32x512xbf16>
+  %expected = check.generate.fill value(2.0) : tensor<32x512xbf16>
+  func.call @id4_ideogram4_attention_online_bf16_bf16_wmma(%query, %key, %value, %output) : (tensor<32x512xbf16>, tensor<32x512xbf16>, tensor<32x512xbf16>, tensor<32x512xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<32x512xbf16>
+  check.return
+}
+
 check.case public @id4_ideogram4_attention_online_bf16_bf16_wmma_zero_1024_shape_case {
   %query = check.generate.fill value(0.0) : tensor<4096x4608xbf16>
   %key = check.generate.fill value(0.0) : tensor<4096x4608xbf16>
@@ -398,6 +411,21 @@ check.case public @id4_ideogram4_attention_online_bf16_bf16_wmma_zero_1024_shape
   check.return
 }
 
+check.case public @id4_ideogram4_attention_online_bf16_bf16_wmma_cond_q0_1024_shape_case {
+  %query = check.generate.fill value(0.0) : tensor<4480x4608xbf16>
+  %key = check.generate.fill value(0.0) : tensor<4480x4608xbf16>
+  %value = check.generate.fill value(0.0) : tensor<4480x4608xbf16>
+  %output = check.generate.fill value(0.0) : tensor<4480x4608xbf16>
+  %expected = check.generate.fill value(0.0) : tensor<4480x4608xbf16>
+  func.call @id4_ideogram4_attention_online_bf16_bf16_wmma(%query, %key, %value, %output) : (tensor<4480x4608xbf16>, tensor<4480x4608xbf16>, tensor<4480x4608xbf16>, tensor<4480x4608xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<4480x4608xbf16>
+  check.return
+}
+
 check.benchmark<@id4_ideogram4_attention_online_bf16_bf16_wmma_small_case> @id4_ideogram4_attention_online_bf16_bf16_wmma_small
 
+check.benchmark<@id4_ideogram4_attention_online_bf16_bf16_wmma_padded_key_tail_case> @id4_ideogram4_attention_online_bf16_bf16_wmma_padded_key_tail
+
 check.benchmark<@id4_ideogram4_attention_online_bf16_bf16_wmma_zero_1024_shape_case> @id4_ideogram4_attention_online_bf16_bf16_wmma_zero_1024_shape
+
+check.benchmark<@id4_ideogram4_attention_online_bf16_bf16_wmma_cond_q0_1024_shape_case> @id4_ideogram4_attention_online_bf16_bf16_wmma_cond_q0_1024_shape
