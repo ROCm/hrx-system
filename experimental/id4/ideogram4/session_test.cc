@@ -784,7 +784,7 @@ TEST_F(SessionTest, PrepareGenerationRequiresResidencyMode) {
   EXPECT_EQ(bundle, nullptr);
 }
 
-TEST_F(SessionTest, PrepareGenerationIssuePhasesRejectResidentPhaseMask) {
+TEST_F(SessionTest, PrepareGenerationIssuePhasesRejectResidentStageMask) {
   TokenizerPtr tokenizer = LoadTokenizer();
   ScopedRequest request;
   IREE_ASSERT_OK(id4_ideogram4_request_parse_json(
@@ -802,8 +802,8 @@ TEST_F(SessionTest, PrepareGenerationIssuePhasesRejectResidentPhaseMask) {
   prepare_options.structure_size = sizeof(prepare_options);
   prepare_options.residency_mode =
       ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_ISSUE_PHASES;
-  prepare_options.resident_phase_mask =
-      ID4_IDEOGRAM4_GENERATION_RESIDENCY_PHASE_DENOISE;
+  prepare_options.resident_stage_mask =
+      ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_DECODE;
   prepare_options.signal_semaphore_list = signal_list.list();
 
   id4_ideogram4_generation_bundle_t* bundle = nullptr;
@@ -814,7 +814,7 @@ TEST_F(SessionTest, PrepareGenerationIssuePhasesRejectResidentPhaseMask) {
   EXPECT_EQ(bundle, nullptr);
 }
 
-TEST_F(SessionTest, PrepareGenerationSelectedPhasesRequirePhaseMask) {
+TEST_F(SessionTest, PrepareGenerationSelectedStageBundlesRequireStageMask) {
   TokenizerPtr tokenizer = LoadTokenizer();
   ScopedRequest request;
   IREE_ASSERT_OK(id4_ideogram4_request_parse_json(
@@ -831,7 +831,7 @@ TEST_F(SessionTest, PrepareGenerationSelectedPhasesRequirePhaseMask) {
   std::memset(&prepare_options, 0, sizeof(prepare_options));
   prepare_options.structure_size = sizeof(prepare_options);
   prepare_options.residency_mode =
-      ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_SELECTED_PHASES;
+      ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_SELECTED_STAGE_BUNDLES;
   prepare_options.signal_semaphore_list = signal_list.list();
 
   id4_ideogram4_generation_bundle_t* bundle = nullptr;
@@ -842,7 +842,8 @@ TEST_F(SessionTest, PrepareGenerationSelectedPhasesRequirePhaseMask) {
   EXPECT_EQ(bundle, nullptr);
 }
 
-TEST_F(SessionTest, PrepareGenerationSelectedPhasesRejectUnknownPhaseMask) {
+TEST_F(SessionTest,
+       PrepareGenerationSelectedStageBundlesRejectUnknownStageMask) {
   TokenizerPtr tokenizer = LoadTokenizer();
   ScopedRequest request;
   IREE_ASSERT_OK(id4_ideogram4_request_parse_json(
@@ -859,8 +860,8 @@ TEST_F(SessionTest, PrepareGenerationSelectedPhasesRejectUnknownPhaseMask) {
   std::memset(&prepare_options, 0, sizeof(prepare_options));
   prepare_options.structure_size = sizeof(prepare_options);
   prepare_options.residency_mode =
-      ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_SELECTED_PHASES;
-  prepare_options.resident_phase_mask = 1u << 12;
+      ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_SELECTED_STAGE_BUNDLES;
+  prepare_options.resident_stage_mask = 1u << 12;
   prepare_options.signal_semaphore_list = signal_list.list();
 
   id4_ideogram4_generation_bundle_t* bundle = nullptr;

@@ -43,13 +43,14 @@ IREE_FLAG(string, dit_feed_forward_implementation, "pytorch_parity",
           "pytorch_parity.");
 IREE_FLAG(string, generation_residency, "issue_phases",
           "Generation stage-bundle residency: issue_phases or "
-          "selected_phases or all_stage_bundles.");
+          "selected_stage_bundles or all_stage_bundles.");
 IREE_FLAG(string, generation_issue_mode, "full",
           "Generation issue mode: full or phases.");
-IREE_FLAG(string, generation_resident_phases, "",
-          "Comma-separated generation phases retained when "
-          "--generation_residency=selected_phases: conditioning, denoise, "
-          "decode, or all.");
+IREE_FLAG(string, generation_resident_stage_bundles, "",
+          "Comma-separated generation stage bundles retained when "
+          "--generation_residency=selected_stage_bundles: qwen, "
+          "sampler_noise, dit_conditioned, dit_unconditioned, "
+          "sampler_denoise, decode, or all.");
 IREE_FLAG(string, dit_conditioned_fp8_scope, "dit_cond_fp8",
           "Conditioned DiT FP8 e4m3 source parameter scope.");
 IREE_FLAG(string, dit_unconditioned_fp8_scope, "dit_uncond_fp8",
@@ -267,10 +268,10 @@ struct LiveGenerationBenchmarkContext {
       ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_INVALID;
   // Generation issue mode selected by benchmark flags.
   GenerationIssueMode generation_issue_mode = GenerationIssueMode::kFull;
-  // Generation residency phases selected by benchmark flags.
-  id4_ideogram4_generation_residency_phase_mask_t
-      generation_resident_phase_mask =
-          ID4_IDEOGRAM4_GENERATION_RESIDENCY_PHASE_NONE;
+  // Generation stage bundles selected by benchmark flags.
+  id4_ideogram4_generation_resident_stage_mask_t
+      generation_resident_stage_mask =
+          ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_NONE;
   // Provider containing Qwen3-VL text encoder weights.
   ParameterProviderRef qwen_parameter_provider;
   // Provider containing conditioned Ideogram 4 DiT weights.
@@ -428,8 +429,8 @@ static iree_status_t ParseGenerationResidencyMode(
     *out_mode = ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_ISSUE_PHASES;
     return iree_ok_status();
   }
-  if (iree_string_view_equal(value, IREE_SV("selected_phases"))) {
-    *out_mode = ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_SELECTED_PHASES;
+  if (iree_string_view_equal(value, IREE_SV("selected_stage_bundles"))) {
+    *out_mode = ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_SELECTED_STAGE_BUNDLES;
     return iree_ok_status();
   }
   if (iree_string_view_equal(value, IREE_SV("all_stage_bundles"))) {
@@ -438,8 +439,8 @@ static iree_status_t ParseGenerationResidencyMode(
   }
   return iree_make_status(
       IREE_STATUS_INVALID_ARGUMENT,
-      "--generation_residency must be issue_phases, selected_phases, or "
-      "all_stage_bundles");
+      "--generation_residency must be issue_phases, selected_stage_bundles, "
+      "or all_stage_bundles");
 }
 
 static iree_string_view_t GenerationResidencyModeName(
@@ -447,8 +448,8 @@ static iree_string_view_t GenerationResidencyModeName(
   switch (mode) {
     case ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_ISSUE_PHASES:
       return IREE_SV("issue_phases");
-    case ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_SELECTED_PHASES:
-      return IREE_SV("selected_phases");
+    case ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_SELECTED_STAGE_BUNDLES:
+      return IREE_SV("selected_stage_bundles");
     case ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_ALL_STAGE_BUNDLES:
       return IREE_SV("all_stage_bundles");
     default:
@@ -482,36 +483,46 @@ static iree_string_view_t GenerationIssueModeName(GenerationIssueMode mode) {
   return IREE_SV("unknown");
 }
 
-static iree_status_t ParseGenerationResidentPhaseMask(
-    id4_ideogram4_generation_residency_phase_mask_t* out_phase_mask) {
-  IREE_ASSERT_ARGUMENT(out_phase_mask);
-  *out_phase_mask = ID4_IDEOGRAM4_GENERATION_RESIDENCY_PHASE_NONE;
+static iree_status_t ParseGenerationResidentStageMask(
+    id4_ideogram4_generation_resident_stage_mask_t* out_stage_mask) {
+  IREE_ASSERT_ARGUMENT(out_stage_mask);
+  *out_stage_mask = ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_NONE;
   iree_string_view_t remaining = iree_string_view_trim(
-      iree_make_cstring_view(FLAG_generation_resident_phases));
+      iree_make_cstring_view(FLAG_generation_resident_stage_bundles));
   if (iree_string_view_is_empty(remaining)) return iree_ok_status();
 
   while (!iree_string_view_is_empty(remaining)) {
-    iree_string_view_t phase_name = iree_string_view_empty();
-    iree_string_view_split(remaining, ',', &phase_name, &remaining);
-    phase_name = iree_string_view_trim(phase_name);
-    if (iree_string_view_is_empty(phase_name)) {
+    iree_string_view_t stage_name = iree_string_view_empty();
+    iree_string_view_split(remaining, ',', &stage_name, &remaining);
+    stage_name = iree_string_view_trim(stage_name);
+    if (iree_string_view_is_empty(stage_name)) {
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
-          "--generation_resident_phases contains an empty phase name");
+          "--generation_resident_stage_bundles contains an empty stage name");
     }
-    if (iree_string_view_equal(phase_name, IREE_SV("all"))) {
-      *out_phase_mask |= ID4_IDEOGRAM4_GENERATION_RESIDENCY_PHASE_ALL;
-    } else if (iree_string_view_equal(phase_name, IREE_SV("conditioning"))) {
-      *out_phase_mask |= ID4_IDEOGRAM4_GENERATION_RESIDENCY_PHASE_CONDITIONING;
-    } else if (iree_string_view_equal(phase_name, IREE_SV("denoise"))) {
-      *out_phase_mask |= ID4_IDEOGRAM4_GENERATION_RESIDENCY_PHASE_DENOISE;
-    } else if (iree_string_view_equal(phase_name, IREE_SV("decode"))) {
-      *out_phase_mask |= ID4_IDEOGRAM4_GENERATION_RESIDENCY_PHASE_DECODE;
+    if (iree_string_view_equal(stage_name, IREE_SV("all"))) {
+      *out_stage_mask |= ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_ALL;
+    } else if (iree_string_view_equal(stage_name, IREE_SV("qwen"))) {
+      *out_stage_mask |= ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_QWEN;
+    } else if (iree_string_view_equal(stage_name, IREE_SV("sampler_noise"))) {
+      *out_stage_mask |= ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_SAMPLER_NOISE;
+    } else if (iree_string_view_equal(stage_name, IREE_SV("dit_conditioned"))) {
+      *out_stage_mask |=
+          ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_DIT_CONDITIONED;
+    } else if (iree_string_view_equal(stage_name,
+                                      IREE_SV("dit_unconditioned"))) {
+      *out_stage_mask |=
+          ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_DIT_UNCONDITIONED;
+    } else if (iree_string_view_equal(stage_name, IREE_SV("sampler_denoise"))) {
+      *out_stage_mask |=
+          ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_SAMPLER_DENOISE;
+    } else if (iree_string_view_equal(stage_name, IREE_SV("decode"))) {
+      *out_stage_mask |= ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_DECODE;
     } else {
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
-          "unknown --generation_resident_phases value '%.*s'",
-          (int)phase_name.size, phase_name.data);
+          "unknown --generation_resident_stage_bundles value '%.*s'",
+          (int)stage_name.size, stage_name.data);
     }
     remaining = iree_string_view_trim(remaining);
   }
@@ -988,8 +999,8 @@ static iree_status_t CreateLiveGenerationBenchmarkContext(
       ParseGenerationResidencyMode(&out_context->generation_residency_mode));
   IREE_RETURN_IF_ERROR(
       ParseGenerationIssueMode(&out_context->generation_issue_mode));
-  IREE_RETURN_IF_ERROR(ParseGenerationResidentPhaseMask(
-      &out_context->generation_resident_phase_mask));
+  IREE_RETURN_IF_ERROR(ParseGenerationResidentStageMask(
+      &out_context->generation_resident_stage_mask));
   IREE_RETURN_IF_ERROR(CreateLoadedLiveSession(
       &out_context->runtime_context, out_context->dit_parameter_format,
       out_context->session.out()));
@@ -1048,7 +1059,7 @@ static iree_status_t PrepareGenerationBundle(
       LiveGenerationParameterProviders(context);
   prepare_options.kernel_library = context.kernel_library.get();
   prepare_options.residency_mode = context.generation_residency_mode;
-  prepare_options.resident_phase_mask = context.generation_resident_phase_mask;
+  prepare_options.resident_stage_mask = context.generation_resident_stage_mask;
   prepare_options.command_buffer_mode =
       context.runtime_context.command_buffer_mode;
   prepare_options.wait_semaphore_list = iree_hal_semaphore_list_empty();
@@ -1069,7 +1080,7 @@ static iree_status_t WaitForSemaphore(iree_hal_semaphore_t* semaphore,
 
 static iree_status_t PrepareGenerationPhaseBundle(
     id4_ideogram4_generation_bundle_t* bundle,
-    id4_ideogram4_generation_residency_phase_mask_t phase_mask,
+    id4_ideogram4_generation_phase_mask_t phase_mask,
     id4_pipeline_diagnostics_sink_t* diagnostics_sink,
     iree_hal_semaphore_t* wait_semaphore, uint64_t wait_value,
     iree_hal_semaphore_t* signal_semaphore, uint64_t signal_value,
@@ -1181,9 +1192,9 @@ static iree_status_t IssueGenerationBundle(
 
   phase_start_time_ns = iree_time_now();
   status = PrepareGenerationPhaseBundle(
-      bundle, ID4_IDEOGRAM4_GENERATION_RESIDENCY_PHASE_CONDITIONING,
-      diagnostics_sink, prepare_semaphore, *prepare_value, prepare_semaphore,
-      ++*prepare_value, &conditioning_phase);
+      bundle, ID4_IDEOGRAM4_GENERATION_PHASE_CONDITIONING, diagnostics_sink,
+      prepare_semaphore, *prepare_value, prepare_semaphore, ++*prepare_value,
+      &conditioning_phase);
   timing->conditioning.prepare_ns += iree_time_now() - phase_start_time_ns;
   if (iree_status_is_ok(status)) {
     phase_start_time_ns = iree_time_now();
@@ -1207,9 +1218,9 @@ static iree_status_t IssueGenerationBundle(
   if (iree_status_is_ok(status)) {
     phase_start_time_ns = iree_time_now();
     status = PrepareGenerationPhaseBundle(
-        bundle, ID4_IDEOGRAM4_GENERATION_RESIDENCY_PHASE_DENOISE,
-        diagnostics_sink, completion_semaphore, *completion_value,
-        prepare_semaphore, ++*prepare_value, &denoise_phase);
+        bundle, ID4_IDEOGRAM4_GENERATION_PHASE_DENOISE, diagnostics_sink,
+        completion_semaphore, *completion_value, prepare_semaphore,
+        ++*prepare_value, &denoise_phase);
     timing->denoise.prepare_ns += iree_time_now() - phase_start_time_ns;
   }
   if (iree_status_is_ok(status)) {
@@ -1232,9 +1243,9 @@ static iree_status_t IssueGenerationBundle(
   if (iree_status_is_ok(status)) {
     phase_start_time_ns = iree_time_now();
     status = PrepareGenerationPhaseBundle(
-        bundle, ID4_IDEOGRAM4_GENERATION_RESIDENCY_PHASE_DECODE,
-        diagnostics_sink, completion_semaphore, *completion_value,
-        prepare_semaphore, ++*prepare_value, &decode_phase);
+        bundle, ID4_IDEOGRAM4_GENERATION_PHASE_DECODE, diagnostics_sink,
+        completion_semaphore, *completion_value, prepare_semaphore,
+        ++*prepare_value, &decode_phase);
     timing->decode.prepare_ns += iree_time_now() - phase_start_time_ns;
   }
   if (iree_status_is_ok(status)) {
@@ -1267,7 +1278,7 @@ static iree_status_t WarmSelectedResidentGeneration(
   IREE_ASSERT_ARGUMENT(prepare_value);
   IREE_ASSERT_ARGUMENT(completion_value);
   if (context.generation_residency_mode !=
-      ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_SELECTED_PHASES) {
+      ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_SELECTED_STAGE_BUNDLES) {
     return iree_ok_status();
   }
 
@@ -1386,7 +1397,7 @@ static iree_status_t SetGenerationBenchmarkLabel(
       " dit_cond_capacity=%" PRIu32 " dit_uncond_tokens=%" PRIu32
       " dit_uncond_capacity=%" PRIu32 " latent=%" PRIu64 "x%" PRIu64
       " steps=%" PRIu32 " image=%" PRIu64 "x%" PRIu64
-      " residency=%.*s issue=%.*s resident_phase_mask=0x%08x"
+      " residency=%.*s issue=%.*s resident_stage_mask=0x%08x"
       " params=%.*s activation=%.*s weights=%.*s attention=%.*s ff=%.*s"
       " param_total=%" PRIu64 "MiB param_largest=%" PRIu64
       "MiB param_source=%" PRIu64 "MiB param_source_direct=%" PRIu64
@@ -1408,7 +1419,7 @@ static iree_status_t SetGenerationBenchmarkLabel(
       summary.decoded_image_shape.dims[0], summary.decoded_image_shape.dims[1],
       static_cast<int>(residency_mode.size), residency_mode.data,
       static_cast<int>(issue_mode.size), issue_mode.data,
-      context.generation_resident_phase_mask,
+      context.generation_resident_stage_mask,
       static_cast<int>(parameter_format.size), parameter_format.data,
       static_cast<int>(activation_format.size), activation_format.data,
       static_cast<int>(weight_execution_format.size),

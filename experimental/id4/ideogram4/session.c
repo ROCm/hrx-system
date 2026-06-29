@@ -106,6 +106,8 @@ typedef struct id4_ideogram4_generation_stage_descriptor_t {
   id4_ideogram4_generation_stage_ordinal_t ordinal;
   // Stable generation-plan JSON key for the stage.
   const char* key;
+  // Stage-bundle residency bit associated with this stage.
+  id4_ideogram4_generation_resident_stage_mask_t resident_stage_bit;
 } id4_ideogram4_generation_stage_descriptor_t;
 
 typedef struct id4_ideogram4_generation_stage_slot_t {
@@ -134,7 +136,7 @@ struct id4_ideogram4_generation_phase_bundle_t {
   // Prepared generation bundle retained by public phase bundles.
   id4_ideogram4_generation_bundle_t* generation_bundle;
   // High-level generation phase represented by this bundle.
-  id4_ideogram4_generation_residency_phase_mask_t phase_mask;
+  id4_ideogram4_generation_phase_mask_t phase_mask;
   // Stage bundle references required while this phase is issued.
   id4_ideogram4_generation_stage_bundle_ref_t
       stage_bundle_refs[ID4_IDEOGRAM4_GENERATION_STAGE_COUNT];
@@ -151,25 +153,25 @@ typedef struct id4_ideogram4_generation_boundary_alias_t {
   iree_string_view_t target_name;
 } id4_ideogram4_generation_boundary_alias_t;
 
-typedef uint32_t id4_ideogram4_generation_residency_phase_flags_t;
+typedef uint32_t id4_ideogram4_generation_phase_flags_t;
 
-typedef enum id4_ideogram4_generation_residency_phase_flag_bits_e {
+typedef enum id4_ideogram4_generation_phase_flag_bits_e {
   // Phase is issued once for every denoise step.
-  ID4_IDEOGRAM4_GENERATION_RESIDENCY_PHASE_REPEATED_PER_DENOISE_STEP = 1u << 0,
-} id4_ideogram4_generation_residency_phase_flag_bits_t;
+  ID4_IDEOGRAM4_GENERATION_PHASE_REPEATED_PER_DENOISE_STEP = 1u << 0,
+} id4_ideogram4_generation_phase_flag_bits_t;
 
-typedef struct id4_ideogram4_generation_residency_phase_t {
+typedef struct id4_ideogram4_generation_phase_descriptor_t {
   // Human-readable phase name for diagnostics and plan dumps.
   iree_string_view_t name;
   // Public phase mask bit represented by this descriptor.
-  id4_ideogram4_generation_residency_phase_mask_t phase_mask;
+  id4_ideogram4_generation_phase_mask_t phase_mask;
   // Phase behavior flags.
-  id4_ideogram4_generation_residency_phase_flags_t flags;
+  id4_ideogram4_generation_phase_flags_t flags;
   // Number of stage ordinals in |stage_ordinals|.
   iree_host_size_t stage_count;
-  // Stage ordinals whose stage bundles may be co-resident in this phase.
+  // Stage ordinals issued by this phase.
   id4_ideogram4_generation_stage_ordinal_t stage_ordinals[3];
-} id4_ideogram4_generation_residency_phase_t;
+} id4_ideogram4_generation_phase_descriptor_t;
 
 typedef struct id4_ideogram4_generation_residency_statistics_t {
   // Sum of final parameter slab bytes across included stages.
@@ -207,31 +209,42 @@ static const id4_ideogram4_generation_stage_descriptor_t
             // Initial latent noise stage.
             .ordinal = ID4_IDEOGRAM4_GENERATION_STAGE_NOISE,
             .key = "sampler_noise",
+            .resident_stage_bit =
+                ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_SAMPLER_NOISE,
         },
         {
             // Qwen text conditioning stage.
             .ordinal = ID4_IDEOGRAM4_GENERATION_STAGE_QWEN,
             .key = "qwen",
+            .resident_stage_bit = ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_QWEN,
         },
         {
             // Conditioned DiT denoise branch stage.
             .ordinal = ID4_IDEOGRAM4_GENERATION_STAGE_DIT_CONDITIONED,
             .key = "dit_conditioned",
+            .resident_stage_bit =
+                ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_DIT_CONDITIONED,
         },
         {
             // Unconditioned DiT denoise branch stage.
             .ordinal = ID4_IDEOGRAM4_GENERATION_STAGE_DIT_UNCONDITIONED,
             .key = "dit_unconditioned",
+            .resident_stage_bit =
+                ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_DIT_UNCONDITIONED,
         },
         {
             // CFG sampler denoise-step stage.
             .ordinal = ID4_IDEOGRAM4_GENERATION_STAGE_SAMPLER,
             .key = "sampler_denoise",
+            .resident_stage_bit =
+                ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_SAMPLER_DENOISE,
         },
         {
             // VAE-backed latent decode stage.
             .ordinal = ID4_IDEOGRAM4_GENERATION_STAGE_DECODE,
             .key = "decode",
+            .resident_stage_bit =
+                ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_DECODE,
         },
 };
 
@@ -262,12 +275,12 @@ id4_ideogram4_generation_stage_descriptor_for_key(
   return NULL;
 }
 
-static const id4_ideogram4_generation_residency_phase_t
-    id4_ideogram4_generation_residency_phases[] = {
+static const id4_ideogram4_generation_phase_descriptor_t
+    id4_ideogram4_generation_phase_descriptors[] = {
         {
             // Phase that produces prompt conditioning and initial latent noise.
             .name = IREE_SVL("conditioning"),
-            .phase_mask = ID4_IDEOGRAM4_GENERATION_RESIDENCY_PHASE_CONDITIONING,
+            .phase_mask = ID4_IDEOGRAM4_GENERATION_PHASE_CONDITIONING,
             .flags = 0,
             .stage_count = 2,
             .stage_ordinals =
@@ -279,9 +292,8 @@ static const id4_ideogram4_generation_residency_phase_t
         {
             // Phase that repeats the conditioned/unconditioned DiT branches.
             .name = IREE_SVL("denoise"),
-            .phase_mask = ID4_IDEOGRAM4_GENERATION_RESIDENCY_PHASE_DENOISE,
-            .flags =
-                ID4_IDEOGRAM4_GENERATION_RESIDENCY_PHASE_REPEATED_PER_DENOISE_STEP,
+            .phase_mask = ID4_IDEOGRAM4_GENERATION_PHASE_DENOISE,
+            .flags = ID4_IDEOGRAM4_GENERATION_PHASE_REPEATED_PER_DENOISE_STEP,
             .stage_count = 3,
             .stage_ordinals =
                 {
@@ -293,7 +305,7 @@ static const id4_ideogram4_generation_residency_phase_t
         {
             // Phase that decodes the final latent into an image.
             .name = IREE_SVL("decode"),
-            .phase_mask = ID4_IDEOGRAM4_GENERATION_RESIDENCY_PHASE_DECODE,
+            .phase_mask = ID4_IDEOGRAM4_GENERATION_PHASE_DECODE,
             .flags = 0,
             .stage_count = 1,
             .stage_ordinals =
@@ -324,9 +336,9 @@ struct id4_ideogram4_generation_bundle_t {
   iree_hal_command_buffer_mode_t command_buffer_mode;
   // Stage-bundle residency policy selected during generation preparation.
   id4_ideogram4_generation_residency_mode_t residency_mode;
-  // High-level residency phases retained by this generation bundle.
-  id4_ideogram4_generation_residency_phase_mask_t resident_phase_mask;
-  // Prepared coarse stage bundles retained by selected resident phases.
+  // Coarse stage bundles retained by this generation bundle.
+  id4_ideogram4_generation_resident_stage_mask_t resident_stage_mask;
+  // Prepared coarse stage bundles retained by selected stage-bundle residency.
   id4_pipeline_bundle_t*
       resident_stage_bundles[ID4_IDEOGRAM4_GENERATION_STAGE_COUNT];
   // Coarse stage slots owned by this generation bundle.
@@ -546,15 +558,28 @@ id4_ideogram4_validate_generation_stage_diagnostic_tap_lists(
   return iree_ok_status();
 }
 
-static iree_status_t id4_ideogram4_validate_generation_residency_phase_mask(
-    id4_ideogram4_generation_residency_phase_mask_t resident_phase_mask) {
-  const id4_ideogram4_generation_residency_phase_mask_t unknown_phase_mask =
-      resident_phase_mask & ~ID4_IDEOGRAM4_GENERATION_RESIDENCY_PHASE_ALL;
+static iree_status_t id4_ideogram4_validate_generation_phase_mask(
+    id4_ideogram4_generation_phase_mask_t phase_mask) {
+  const id4_ideogram4_generation_phase_mask_t unknown_phase_mask =
+      phase_mask & ~ID4_IDEOGRAM4_GENERATION_PHASE_ALL;
   if (unknown_phase_mask != 0) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "Ideogram 4 generation residency phase mask 0x%x "
+                            "Ideogram 4 generation phase mask 0x%x "
                             "contains unknown phase bits 0x%x",
-                            resident_phase_mask, unknown_phase_mask);
+                            phase_mask, unknown_phase_mask);
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t id4_ideogram4_validate_generation_resident_stage_mask(
+    id4_ideogram4_generation_resident_stage_mask_t resident_stage_mask) {
+  const id4_ideogram4_generation_resident_stage_mask_t unknown_stage_mask =
+      resident_stage_mask & ~ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_ALL;
+  if (unknown_stage_mask != 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "Ideogram 4 generation resident stage mask 0x%x "
+                            "contains unknown stage bits 0x%x",
+                            resident_stage_mask, unknown_stage_mask);
   }
   return iree_ok_status();
 }
@@ -562,35 +587,32 @@ static iree_status_t id4_ideogram4_validate_generation_residency_phase_mask(
 static iree_status_t
 id4_ideogram4_validate_generation_prepare_residency_options(
     id4_ideogram4_generation_residency_mode_t mode,
-    id4_ideogram4_generation_residency_phase_mask_t resident_phase_mask) {
-  IREE_RETURN_IF_ERROR(id4_ideogram4_validate_generation_residency_phase_mask(
-      resident_phase_mask));
+    id4_ideogram4_generation_resident_stage_mask_t resident_stage_mask) {
+  IREE_RETURN_IF_ERROR(id4_ideogram4_validate_generation_resident_stage_mask(
+      resident_stage_mask));
   switch (mode) {
     case ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_ISSUE_PHASES:
-      if (resident_phase_mask !=
-          ID4_IDEOGRAM4_GENERATION_RESIDENCY_PHASE_NONE) {
+      if (resident_stage_mask != ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_NONE) {
         return iree_make_status(
             IREE_STATUS_INVALID_ARGUMENT,
             "Ideogram 4 issue-phase residency mode must not select resident "
-            "phases");
+            "stage bundles");
       }
       return iree_ok_status();
-    case ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_SELECTED_PHASES:
-      if (resident_phase_mask ==
-          ID4_IDEOGRAM4_GENERATION_RESIDENCY_PHASE_NONE) {
+    case ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_SELECTED_STAGE_BUNDLES:
+      if (resident_stage_mask == ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_NONE) {
         return iree_make_status(
             IREE_STATUS_INVALID_ARGUMENT,
-            "Ideogram 4 selected-phase residency mode requires at least one "
-            "resident phase");
+            "Ideogram 4 selected-stage-bundle residency mode requires at "
+            "least one resident stage bundle");
       }
       return iree_ok_status();
     case ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_ALL_STAGE_BUNDLES:
-      if (resident_phase_mask !=
-          ID4_IDEOGRAM4_GENERATION_RESIDENCY_PHASE_NONE) {
+      if (resident_stage_mask != ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_NONE) {
         return iree_make_status(
             IREE_STATUS_INVALID_ARGUMENT,
             "Ideogram 4 all-stage-bundle residency mode derives resident "
-            "phases and must not receive an explicit phase mask");
+            "stage bundles and must not receive an explicit stage mask");
       }
       return iree_ok_status();
     default:
@@ -603,34 +625,32 @@ id4_ideogram4_validate_generation_prepare_residency_options(
 
 static iree_status_t id4_ideogram4_validate_generation_bundle_residency(
     id4_ideogram4_generation_residency_mode_t mode,
-    id4_ideogram4_generation_residency_phase_mask_t resident_phase_mask) {
-  IREE_RETURN_IF_ERROR(id4_ideogram4_validate_generation_residency_phase_mask(
-      resident_phase_mask));
+    id4_ideogram4_generation_resident_stage_mask_t resident_stage_mask) {
+  IREE_RETURN_IF_ERROR(id4_ideogram4_validate_generation_resident_stage_mask(
+      resident_stage_mask));
   switch (mode) {
     case ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_ISSUE_PHASES:
-      if (resident_phase_mask !=
-          ID4_IDEOGRAM4_GENERATION_RESIDENCY_PHASE_NONE) {
+      if (resident_stage_mask != ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_NONE) {
         return iree_make_status(
             IREE_STATUS_INVALID_ARGUMENT,
             "Ideogram 4 issue-phase generation bundle must not retain "
-            "resident phases");
+            "resident stage bundles");
       }
       return iree_ok_status();
-    case ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_SELECTED_PHASES:
-      if (resident_phase_mask ==
-          ID4_IDEOGRAM4_GENERATION_RESIDENCY_PHASE_NONE) {
+    case ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_SELECTED_STAGE_BUNDLES:
+      if (resident_stage_mask == ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_NONE) {
         return iree_make_status(
             IREE_STATUS_INVALID_ARGUMENT,
-            "Ideogram 4 selected-phase generation bundle requires at least "
-            "one resident phase");
+            "Ideogram 4 selected-stage-bundle generation bundle requires at "
+            "least one resident stage bundle");
       }
       return iree_ok_status();
     case ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_ALL_STAGE_BUNDLES:
-      if (resident_phase_mask != ID4_IDEOGRAM4_GENERATION_RESIDENCY_PHASE_ALL) {
+      if (resident_stage_mask != ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_ALL) {
         return iree_make_status(
             IREE_STATUS_INVALID_ARGUMENT,
             "Ideogram 4 all-stage-bundle generation bundle must retain every "
-            "generation phase");
+            "stage bundle");
       }
       return iree_ok_status();
     default:
@@ -1513,7 +1533,7 @@ iree_status_t id4_ideogram4_generation_plan_stage_at(
 
 static iree_status_t id4_ideogram4_generation_residency_statistics_accumulate(
     const id4_ideogram4_generation_plan_t* plan,
-    const id4_ideogram4_generation_residency_phase_t* phase,
+    const id4_ideogram4_generation_phase_descriptor_t* phase,
     id4_ideogram4_generation_residency_statistics_t* io_statistics) {
   for (iree_host_size_t i = 0; i < phase->stage_count; ++i) {
     const id4_pipeline_plan_t* stage_plan =
@@ -1523,7 +1543,7 @@ static iree_status_t id4_ideogram4_generation_residency_statistics_accumulate(
           id4_ideogram4_generation_stage_descriptor(phase->stage_ordinals[i]);
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
-          "Ideogram 4 generation residency phase %.*s references missing "
+          "Ideogram 4 generation phase %.*s references missing "
           "stage %s",
           (int)phase->name.size, phase->name.data,
           descriptor ? descriptor->key : "<unknown>");
@@ -1562,9 +1582,9 @@ static iree_status_t id4_ideogram4_generation_plan_append_stage_key_json(
   return iree_string_builder_append_format(builder, "\"%s\"", descriptor->key);
 }
 
-static iree_status_t id4_ideogram4_generation_plan_append_residency_phase_json(
+static iree_status_t id4_ideogram4_generation_plan_append_phase_json(
     const id4_ideogram4_generation_plan_t* plan, iree_string_builder_t* builder,
-    const id4_ideogram4_generation_residency_phase_t* phase) {
+    const id4_ideogram4_generation_phase_descriptor_t* phase) {
   id4_ideogram4_generation_residency_statistics_t statistics;
   memset(&statistics, 0, sizeof(statistics));
   IREE_RETURN_IF_ERROR(id4_ideogram4_generation_residency_statistics_accumulate(
@@ -1582,8 +1602,7 @@ static iree_status_t id4_ideogram4_generation_plan_append_residency_phase_json(
         builder, phase->stage_ordinals[i]));
   }
   const bool repeated_per_denoise_step = iree_any_bit_set(
-      phase->flags,
-      ID4_IDEOGRAM4_GENERATION_RESIDENCY_PHASE_REPEATED_PER_DENOISE_STEP);
+      phase->flags, ID4_IDEOGRAM4_GENERATION_PHASE_REPEATED_PER_DENOISE_STEP);
   return iree_string_builder_append_format(
       builder,
       "],\"repeated_per_denoise_step\":%s"
@@ -1608,21 +1627,21 @@ static iree_status_t id4_ideogram4_generation_plan_append_residency_json(
   id4_ideogram4_generation_residency_statistics_t total_statistics;
   memset(&total_statistics, 0, sizeof(total_statistics));
   for (iree_host_size_t i = 0;
-       i < IREE_ARRAYSIZE(id4_ideogram4_generation_residency_phases); ++i) {
+       i < IREE_ARRAYSIZE(id4_ideogram4_generation_phase_descriptors); ++i) {
     IREE_RETURN_IF_ERROR(
         id4_ideogram4_generation_residency_statistics_accumulate(
-            plan, &id4_ideogram4_generation_residency_phases[i],
+            plan, &id4_ideogram4_generation_phase_descriptors[i],
             &total_statistics));
   }
 
   iree_device_size_t parameter_high_water_mark = 0;
   for (iree_host_size_t i = 0;
-       i < IREE_ARRAYSIZE(id4_ideogram4_generation_residency_phases); ++i) {
+       i < IREE_ARRAYSIZE(id4_ideogram4_generation_phase_descriptors); ++i) {
     id4_ideogram4_generation_residency_statistics_t phase_statistics;
     memset(&phase_statistics, 0, sizeof(phase_statistics));
     IREE_RETURN_IF_ERROR(
         id4_ideogram4_generation_residency_statistics_accumulate(
-            plan, &id4_ideogram4_generation_residency_phases[i],
+            plan, &id4_ideogram4_generation_phase_descriptors[i],
             &phase_statistics));
     if (phase_statistics.parameter_byte_length > parameter_high_water_mark) {
       parameter_high_water_mark = phase_statistics.parameter_byte_length;
@@ -1640,13 +1659,12 @@ static iree_status_t id4_ideogram4_generation_plan_append_residency_json(
       (uint64_t)total_statistics.largest_stage_parameter_byte_length,
       (uint64_t)total_statistics.stage_boundary_byte_length));
   for (iree_host_size_t i = 0;
-       i < IREE_ARRAYSIZE(id4_ideogram4_generation_residency_phases); ++i) {
+       i < IREE_ARRAYSIZE(id4_ideogram4_generation_phase_descriptors); ++i) {
     if (i != 0) {
       IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, ","));
     }
-    IREE_RETURN_IF_ERROR(
-        id4_ideogram4_generation_plan_append_residency_phase_json(
-            plan, builder, &id4_ideogram4_generation_residency_phases[i]));
+    IREE_RETURN_IF_ERROR(id4_ideogram4_generation_plan_append_phase_json(
+        plan, builder, &id4_ideogram4_generation_phase_descriptors[i]));
   }
   return iree_string_builder_append_cstring(builder, "]}");
 }
@@ -1781,7 +1799,7 @@ static iree_status_t id4_ideogram4_validate_generation_prepare_options(
   }
   IREE_RETURN_IF_ERROR(
       id4_ideogram4_validate_generation_prepare_residency_options(
-          options->residency_mode, options->resident_phase_mask));
+          options->residency_mode, options->resident_stage_mask));
   IREE_RETURN_IF_ERROR(id4_ideogram4_validate_semaphore_list(
       options->wait_semaphore_list, IREE_SV("Ideogram 4 generation prepare "
                                             "wait")));
@@ -1860,11 +1878,10 @@ static void id4_ideogram4_generation_bundle_capture_prepare_resources(
   bundle->residency_mode = options->residency_mode;
   switch (options->residency_mode) {
     case ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_ALL_STAGE_BUNDLES:
-      bundle->resident_phase_mask =
-          ID4_IDEOGRAM4_GENERATION_RESIDENCY_PHASE_ALL;
+      bundle->resident_stage_mask = ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_ALL;
       break;
     default:
-      bundle->resident_phase_mask = options->resident_phase_mask;
+      bundle->resident_stage_mask = options->resident_stage_mask;
       break;
   }
 }
@@ -2183,7 +2200,7 @@ static iree_status_t id4_ideogram4_validate_generation_issue_options(
         "Ideogram 4 generation bundle was prepared by a different session");
   }
   IREE_RETURN_IF_ERROR(id4_ideogram4_validate_generation_bundle_residency(
-      bundle->residency_mode, bundle->resident_phase_mask));
+      bundle->residency_mode, bundle->resident_stage_mask));
   if (!options) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "Ideogram 4 generation issue options are required");
@@ -2266,7 +2283,7 @@ static iree_status_t id4_ideogram4_validate_generation_begin_options(
         "Ideogram 4 generation bundle was prepared by a different session");
   }
   IREE_RETURN_IF_ERROR(id4_ideogram4_validate_generation_bundle_residency(
-      bundle->residency_mode, bundle->resident_phase_mask));
+      bundle->residency_mode, bundle->resident_stage_mask));
   if (!options) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "Ideogram 4 generation begin options are required");
@@ -2326,11 +2343,11 @@ static iree_status_t id4_ideogram4_validate_generation_begin_options(
 }
 
 static iree_status_t id4_ideogram4_validate_single_generation_phase_mask(
-    id4_ideogram4_generation_residency_phase_mask_t phase_mask) {
+    id4_ideogram4_generation_phase_mask_t phase_mask) {
   switch (phase_mask) {
-    case ID4_IDEOGRAM4_GENERATION_RESIDENCY_PHASE_CONDITIONING:
-    case ID4_IDEOGRAM4_GENERATION_RESIDENCY_PHASE_DENOISE:
-    case ID4_IDEOGRAM4_GENERATION_RESIDENCY_PHASE_DECODE:
+    case ID4_IDEOGRAM4_GENERATION_PHASE_CONDITIONING:
+    case ID4_IDEOGRAM4_GENERATION_PHASE_DENOISE:
+    case ID4_IDEOGRAM4_GENERATION_PHASE_DECODE:
       return iree_ok_status();
     default:
       return iree_make_status(
@@ -2349,7 +2366,7 @@ static iree_status_t id4_ideogram4_validate_generation_phase_prepare_options(
                             "Ideogram 4 generation bundle is required");
   }
   IREE_RETURN_IF_ERROR(id4_ideogram4_validate_generation_bundle_residency(
-      bundle->residency_mode, bundle->resident_phase_mask));
+      bundle->residency_mode, bundle->resident_stage_mask));
   if (!options) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
@@ -2643,7 +2660,7 @@ static iree_status_t id4_ideogram4_generation_release_stage_bundle_refs(
 }
 
 static void id4_ideogram4_generation_phase_bundle_initialize(
-    id4_ideogram4_generation_residency_phase_mask_t phase_mask,
+    id4_ideogram4_generation_phase_mask_t phase_mask,
     id4_ideogram4_generation_phase_bundle_t* out_phase_bundle) {
   memset(out_phase_bundle->stage_bundle_refs, 0,
          sizeof(out_phase_bundle->stage_bundle_refs));
@@ -2654,17 +2671,17 @@ static iree_status_t id4_ideogram4_generation_phase_bundle_deinitialize(
     id4_ideogram4_generation_phase_bundle_t* phase_bundle) {
   iree_status_t status = id4_ideogram4_generation_release_stage_bundle_refs(
       phase_bundle->stage_bundle_refs);
-  phase_bundle->phase_mask = ID4_IDEOGRAM4_GENERATION_RESIDENCY_PHASE_NONE;
+  phase_bundle->phase_mask = ID4_IDEOGRAM4_GENERATION_PHASE_NONE;
   return status;
 }
 
-static const id4_ideogram4_generation_residency_phase_t*
-id4_ideogram4_generation_residency_phase_for_mask(
-    id4_ideogram4_generation_residency_phase_mask_t phase_mask) {
+static const id4_ideogram4_generation_phase_descriptor_t*
+id4_ideogram4_generation_phase_descriptor_for_mask(
+    id4_ideogram4_generation_phase_mask_t phase_mask) {
   for (iree_host_size_t i = 0;
-       i < IREE_ARRAYSIZE(id4_ideogram4_generation_residency_phases); ++i) {
-    const id4_ideogram4_generation_residency_phase_t* phase =
-        &id4_ideogram4_generation_residency_phases[i];
+       i < IREE_ARRAYSIZE(id4_ideogram4_generation_phase_descriptors); ++i) {
+    const id4_ideogram4_generation_phase_descriptor_t* phase =
+        &id4_ideogram4_generation_phase_descriptors[i];
     if (phase->phase_mask == phase_mask) return phase;
   }
   return NULL;
@@ -2826,61 +2843,42 @@ id4_ideogram4_generation_bundle_signal_resident_bundles_prepared(
       options->signal_semaphore_list, IREE_HAL_EXECUTE_FLAG_NONE);
 }
 
-static bool id4_ideogram4_generation_phase_contains_stage(
-    const id4_ideogram4_generation_residency_phase_t* phase,
-    id4_ideogram4_generation_stage_ordinal_t stage_ordinal) {
-  for (iree_host_size_t i = 0; i < phase->stage_count; ++i) {
-    if (phase->stage_ordinals[i] == stage_ordinal) return true;
-  }
-  return false;
-}
-
 static bool id4_ideogram4_generation_bundle_stage_is_resident(
     const id4_ideogram4_generation_bundle_t* bundle,
     id4_ideogram4_generation_stage_ordinal_t stage_ordinal) {
-  for (iree_host_size_t i = 0;
-       i < IREE_ARRAYSIZE(id4_ideogram4_generation_residency_phases); ++i) {
-    const id4_ideogram4_generation_residency_phase_t* phase =
-        &id4_ideogram4_generation_residency_phases[i];
-    if (!iree_any_bit_set(bundle->resident_phase_mask, phase->phase_mask)) {
-      continue;
-    }
-    if (id4_ideogram4_generation_phase_contains_stage(phase, stage_ordinal)) {
-      return true;
-    }
-  }
-  return false;
+  const id4_ideogram4_generation_stage_descriptor_t* descriptor =
+      id4_ideogram4_generation_stage_descriptor(stage_ordinal);
+  return descriptor && iree_any_bit_set(bundle->resident_stage_mask,
+                                        descriptor->resident_stage_bit);
 }
 
-static iree_status_t id4_ideogram4_generation_bundle_prepare_resident_phases(
+static iree_status_t id4_ideogram4_generation_bundle_prepare_resident_stages(
     id4_ideogram4_generation_bundle_t* bundle,
     const id4_ideogram4_generation_prepare_options_t* options) {
   iree_status_t status = iree_ok_status();
   iree_hal_semaphore_list_t stage_wait_list = options->wait_semaphore_list;
   for (iree_host_size_t i = 0;
-       i < IREE_ARRAYSIZE(id4_ideogram4_generation_residency_phases) &&
+       i < IREE_ARRAYSIZE(id4_ideogram4_generation_stage_descriptors) &&
        iree_status_is_ok(status);
        ++i) {
-    const id4_ideogram4_generation_residency_phase_t* phase =
-        &id4_ideogram4_generation_residency_phases[i];
-    if (!iree_any_bit_set(bundle->resident_phase_mask, phase->phase_mask)) {
+    const id4_ideogram4_generation_stage_descriptor_t* descriptor =
+        &id4_ideogram4_generation_stage_descriptors[i];
+    if (!iree_any_bit_set(bundle->resident_stage_mask,
+                          descriptor->resident_stage_bit)) {
       continue;
     }
-    for (iree_host_size_t j = 0;
-         j < phase->stage_count && iree_status_is_ok(status); ++j) {
-      const id4_ideogram4_generation_stage_ordinal_t stage_ordinal =
-          phase->stage_ordinals[j];
-      if (bundle->resident_stage_bundles[stage_ordinal]) continue;
-      status = id4_ideogram4_generation_prepare_stage_bundle(
-          bundle, stage_ordinal, stage_wait_list, options->diagnostics_sink,
-          &bundle->resident_stage_bundles[stage_ordinal]);
-      if (iree_status_is_ok(status)) {
-        iree_hal_semaphore_list_t readiness_list =
-            id4_pipeline_bundle_readiness_semaphore_list(
-                bundle->resident_stage_bundles[stage_ordinal]);
-        if (readiness_list.count != 0) {
-          stage_wait_list = readiness_list;
-        }
+    const id4_ideogram4_generation_stage_ordinal_t stage_ordinal =
+        descriptor->ordinal;
+    if (bundle->resident_stage_bundles[stage_ordinal]) continue;
+    status = id4_ideogram4_generation_prepare_stage_bundle(
+        bundle, stage_ordinal, stage_wait_list, options->diagnostics_sink,
+        &bundle->resident_stage_bundles[stage_ordinal]);
+    if (iree_status_is_ok(status)) {
+      iree_hal_semaphore_list_t readiness_list =
+          id4_pipeline_bundle_readiness_semaphore_list(
+              bundle->resident_stage_bundles[stage_ordinal]);
+      if (readiness_list.count != 0) {
+        stage_wait_list = readiness_list;
       }
     }
   }
@@ -2922,12 +2920,12 @@ iree_status_t id4_ideogram4_session_prepare_generation(
         status =
             id4_ideogram4_generation_bundle_signal_prepared(bundle, options);
         break;
-      case ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_SELECTED_PHASES:
+      case ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_SELECTED_STAGE_BUNDLES:
         status =
             id4_ideogram4_generation_bundle_signal_prepared(bundle, options);
         break;
       case ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_ALL_STAGE_BUNDLES:
-        status = id4_ideogram4_generation_bundle_prepare_resident_phases(
+        status = id4_ideogram4_generation_bundle_prepare_resident_stages(
             bundle, options);
         break;
       default:
@@ -2976,14 +2974,14 @@ static iree_status_t id4_ideogram4_generation_acquire_stage_bundle_ref(
 
 static iree_status_t id4_ideogram4_generation_prepare_phase_bundle(
     id4_ideogram4_generation_bundle_t* bundle,
-    id4_ideogram4_generation_residency_phase_mask_t phase_mask,
+    id4_ideogram4_generation_phase_mask_t phase_mask,
     iree_hal_semaphore_list_t wait_semaphore_list,
     id4_pipeline_diagnostics_sink_t* diagnostics_sink,
     id4_ideogram4_generation_phase_bundle_t* out_phase_bundle) {
   id4_ideogram4_generation_phase_bundle_initialize(phase_mask,
                                                    out_phase_bundle);
-  const id4_ideogram4_generation_residency_phase_t* phase =
-      id4_ideogram4_generation_residency_phase_for_mask(phase_mask);
+  const id4_ideogram4_generation_phase_descriptor_t* phase =
+      id4_ideogram4_generation_phase_descriptor_for_mask(phase_mask);
   if (!phase) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "Ideogram 4 generation phase mask 0x%x does not "
@@ -3159,7 +3157,7 @@ static iree_status_t id4_ideogram4_generation_chain_upload_after_sampler(
 
 static iree_status_t id4_ideogram4_generation_chain_phase_issue_wait(
     id4_ideogram4_generation_execution_t* execution,
-    id4_ideogram4_generation_residency_phase_mask_t phase_mask,
+    id4_ideogram4_generation_phase_mask_t phase_mask,
     iree_hal_semaphore_list_t phase_wait_list) {
   if (phase_wait_list.count == 0) return iree_ok_status();
   iree_host_size_t wait_count_capacity = 0;
@@ -3193,7 +3191,7 @@ static iree_status_t id4_ideogram4_generation_chain_phase_issue_wait(
       execution->bundle->device, execution->bundle->queue_affinity, wait_list,
       signal_list, IREE_HAL_EXECUTE_FLAG_NONE));
   execution->upload_payload_value = signal_payload_value;
-  if (phase_mask == ID4_IDEOGRAM4_GENERATION_RESIDENCY_PHASE_CONDITIONING) {
+  if (phase_mask == ID4_IDEOGRAM4_GENERATION_PHASE_CONDITIONING) {
     execution->qwen_upload_payload_value = signal_payload_value;
     execution->seed_upload_payload_value = signal_payload_value;
   }
@@ -3654,7 +3652,7 @@ iree_status_t id4_ideogram4_generation_execution_issue_phase(
       execution, phase_bundle->phase_mask, options->wait_semaphore_list);
   if (!iree_status_is_ok(status)) return status;
   switch (phase_bundle->phase_mask) {
-    case ID4_IDEOGRAM4_GENERATION_RESIDENCY_PHASE_CONDITIONING:
+    case ID4_IDEOGRAM4_GENERATION_PHASE_CONDITIONING:
       status = id4_ideogram4_generation_issue_conditioning_phase(
           execution, phase_bundle, options->diagnostics_sink);
       if (iree_status_is_ok(status)) {
@@ -3662,7 +3660,7 @@ iree_status_t id4_ideogram4_generation_execution_issue_phase(
             execution, options->signal_semaphore_list);
       }
       return status;
-    case ID4_IDEOGRAM4_GENERATION_RESIDENCY_PHASE_DENOISE:
+    case ID4_IDEOGRAM4_GENERATION_PHASE_DENOISE:
       status = id4_ideogram4_generation_issue_denoise_phase(
           execution, phase_bundle, options->diagnostics_sink);
       if (iree_status_is_ok(status)) {
@@ -3670,7 +3668,7 @@ iree_status_t id4_ideogram4_generation_execution_issue_phase(
             execution, options->signal_semaphore_list);
       }
       return status;
-    case ID4_IDEOGRAM4_GENERATION_RESIDENCY_PHASE_DECODE:
+    case ID4_IDEOGRAM4_GENERATION_PHASE_DECODE:
       return id4_ideogram4_generation_issue_decode_phase(
           execution, phase_bundle, options->signal_semaphore_list,
           options->diagnostics_sink);
@@ -3695,14 +3693,13 @@ iree_status_t id4_ideogram4_session_issue_generation(
   id4_ideogram4_generation_execution_t* execution = NULL;
   id4_ideogram4_generation_phase_bundle_t conditioning_phase = {0};
   id4_ideogram4_generation_phase_bundle_initialize(
-      ID4_IDEOGRAM4_GENERATION_RESIDENCY_PHASE_CONDITIONING,
-      &conditioning_phase);
+      ID4_IDEOGRAM4_GENERATION_PHASE_CONDITIONING, &conditioning_phase);
   id4_ideogram4_generation_phase_bundle_t denoise_phase = {0};
   id4_ideogram4_generation_phase_bundle_initialize(
-      ID4_IDEOGRAM4_GENERATION_RESIDENCY_PHASE_DENOISE, &denoise_phase);
+      ID4_IDEOGRAM4_GENERATION_PHASE_DENOISE, &denoise_phase);
   id4_ideogram4_generation_phase_bundle_t decode_phase = {0};
   id4_ideogram4_generation_phase_bundle_initialize(
-      ID4_IDEOGRAM4_GENERATION_RESIDENCY_PHASE_DECODE, &decode_phase);
+      ID4_IDEOGRAM4_GENERATION_PHASE_DECODE, &decode_phase);
 
   iree_status_t status = id4_ideogram4_generation_begin_execution(
       session, bundle, options->request, options->tokenizer,
@@ -3710,7 +3707,7 @@ iree_status_t id4_ideogram4_session_issue_generation(
       iree_hal_semaphore_list_empty(), &execution);
   if (iree_status_is_ok(status)) {
     status = id4_ideogram4_generation_prepare_phase_bundle(
-        bundle, ID4_IDEOGRAM4_GENERATION_RESIDENCY_PHASE_CONDITIONING,
+        bundle, ID4_IDEOGRAM4_GENERATION_PHASE_CONDITIONING,
         iree_hal_semaphore_list_empty(), options->diagnostics_sink,
         &conditioning_phase);
   }
@@ -3726,7 +3723,7 @@ iree_status_t id4_ideogram4_session_issue_generation(
   }
   if (iree_status_is_ok(status)) {
     status = id4_ideogram4_generation_prepare_phase_bundle(
-        bundle, ID4_IDEOGRAM4_GENERATION_RESIDENCY_PHASE_DENOISE,
+        bundle, ID4_IDEOGRAM4_GENERATION_PHASE_DENOISE,
         iree_hal_semaphore_list_empty(), options->diagnostics_sink,
         &denoise_phase);
   }
@@ -3739,7 +3736,7 @@ iree_status_t id4_ideogram4_session_issue_generation(
       id4_ideogram4_generation_phase_bundle_deinitialize(&denoise_phase));
   if (iree_status_is_ok(status)) {
     status = id4_ideogram4_generation_prepare_phase_bundle(
-        bundle, ID4_IDEOGRAM4_GENERATION_RESIDENCY_PHASE_DECODE,
+        bundle, ID4_IDEOGRAM4_GENERATION_PHASE_DECODE,
         iree_hal_semaphore_list_empty(), options->diagnostics_sink,
         &decode_phase);
   }

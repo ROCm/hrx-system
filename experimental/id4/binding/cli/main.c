@@ -71,12 +71,13 @@ IREE_FLAG(bool, dry_run, false,
           "Plan a full generation request and exit without loading parameters "
           "or issuing device work.");
 IREE_FLAG(string, generation_residency, "issue_phases",
-          "Generation residency mode: issue_phases, selected_phases, or "
-          "all_stage_bundles.");
-IREE_FLAG(string, generation_resident_phases, "",
-          "Comma-separated phases retained by "
-          "--generation_residency=selected_phases: conditioning, denoise, "
-          "decode, or all.");
+          "Generation residency mode: issue_phases, "
+          "selected_stage_bundles, or all_stage_bundles.");
+IREE_FLAG(string, generation_resident_stage_bundles, "",
+          "Comma-separated stage bundles retained by "
+          "--generation_residency=selected_stage_bundles: qwen, "
+          "sampler_noise, dit_conditioned, dit_unconditioned, "
+          "sampler_denoise, decode, or all.");
 IREE_FLAG(string, dump_plan, "",
           "Path to write the structured pipeline plan JSON.");
 IREE_FLAG(string, dump_diagnostics, "",
@@ -380,8 +381,8 @@ static iree_status_t id4_cli_parse_generation_residency_mode(
     *out_mode = ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_ISSUE_PHASES;
     return iree_ok_status();
   }
-  if (iree_string_view_equal(value, IREE_SV("selected_phases"))) {
-    *out_mode = ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_SELECTED_PHASES;
+  if (iree_string_view_equal(value, IREE_SV("selected_stage_bundles"))) {
+    *out_mode = ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_SELECTED_STAGE_BUNDLES;
     return iree_ok_status();
   }
   if (iree_string_view_equal(value, IREE_SV("all_stage_bundles"))) {
@@ -390,38 +391,48 @@ static iree_status_t id4_cli_parse_generation_residency_mode(
   }
   return iree_make_status(
       IREE_STATUS_INVALID_ARGUMENT,
-      "--generation_residency must be issue_phases, selected_phases, or "
-      "all_stage_bundles");
+      "--generation_residency must be issue_phases, selected_stage_bundles, "
+      "or all_stage_bundles");
 }
 
-static iree_status_t id4_cli_parse_generation_resident_phase_mask(
-    id4_ideogram4_generation_residency_phase_mask_t* out_phase_mask) {
-  IREE_ASSERT_ARGUMENT(out_phase_mask);
-  *out_phase_mask = ID4_IDEOGRAM4_GENERATION_RESIDENCY_PHASE_NONE;
+static iree_status_t id4_cli_parse_generation_resident_stage_mask(
+    id4_ideogram4_generation_resident_stage_mask_t* out_stage_mask) {
+  IREE_ASSERT_ARGUMENT(out_stage_mask);
+  *out_stage_mask = ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_NONE;
   iree_string_view_t remaining = iree_string_view_trim(
-      iree_make_cstring_view(FLAG_generation_resident_phases));
+      iree_make_cstring_view(FLAG_generation_resident_stage_bundles));
   while (!iree_string_view_is_empty(remaining)) {
-    iree_string_view_t phase_name = iree_string_view_empty();
-    iree_string_view_split(remaining, ',', &phase_name, &remaining);
-    phase_name = iree_string_view_trim(phase_name);
-    if (iree_string_view_is_empty(phase_name)) {
+    iree_string_view_t stage_name = iree_string_view_empty();
+    iree_string_view_split(remaining, ',', &stage_name, &remaining);
+    stage_name = iree_string_view_trim(stage_name);
+    if (iree_string_view_is_empty(stage_name)) {
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
-          "--generation_resident_phases contains an empty phase name");
+          "--generation_resident_stage_bundles contains an empty stage name");
     }
-    if (iree_string_view_equal(phase_name, IREE_SV("all"))) {
-      *out_phase_mask |= ID4_IDEOGRAM4_GENERATION_RESIDENCY_PHASE_ALL;
-    } else if (iree_string_view_equal(phase_name, IREE_SV("conditioning"))) {
-      *out_phase_mask |= ID4_IDEOGRAM4_GENERATION_RESIDENCY_PHASE_CONDITIONING;
-    } else if (iree_string_view_equal(phase_name, IREE_SV("denoise"))) {
-      *out_phase_mask |= ID4_IDEOGRAM4_GENERATION_RESIDENCY_PHASE_DENOISE;
-    } else if (iree_string_view_equal(phase_name, IREE_SV("decode"))) {
-      *out_phase_mask |= ID4_IDEOGRAM4_GENERATION_RESIDENCY_PHASE_DECODE;
+    if (iree_string_view_equal(stage_name, IREE_SV("all"))) {
+      *out_stage_mask |= ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_ALL;
+    } else if (iree_string_view_equal(stage_name, IREE_SV("qwen"))) {
+      *out_stage_mask |= ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_QWEN;
+    } else if (iree_string_view_equal(stage_name, IREE_SV("sampler_noise"))) {
+      *out_stage_mask |= ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_SAMPLER_NOISE;
+    } else if (iree_string_view_equal(stage_name, IREE_SV("dit_conditioned"))) {
+      *out_stage_mask |=
+          ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_DIT_CONDITIONED;
+    } else if (iree_string_view_equal(stage_name,
+                                      IREE_SV("dit_unconditioned"))) {
+      *out_stage_mask |=
+          ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_DIT_UNCONDITIONED;
+    } else if (iree_string_view_equal(stage_name, IREE_SV("sampler_denoise"))) {
+      *out_stage_mask |=
+          ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_SAMPLER_DENOISE;
+    } else if (iree_string_view_equal(stage_name, IREE_SV("decode"))) {
+      *out_stage_mask |= ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_DECODE;
     } else {
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
-          "unknown --generation_resident_phases value '%.*s'",
-          (int)phase_name.size, phase_name.data);
+          "unknown --generation_resident_stage_bundles value '%.*s'",
+          (int)stage_name.size, stage_name.data);
     }
     remaining = iree_string_view_trim(remaining);
   }
@@ -453,11 +464,11 @@ static iree_status_t id4_cli_validate_dry_run_flags(void) {
         "--output requires generation execution; omit --dry_run");
   }
   if (strcmp(FLAG_generation_residency, "issue_phases") != 0 ||
-      strlen(FLAG_generation_resident_phases) != 0) {
+      strlen(FLAG_generation_resident_stage_bundles) != 0) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
-        "--generation_residency and --generation_resident_phases require "
-        "generation execution; omit --dry_run");
+        "--generation_residency and --generation_resident_stage_bundles "
+        "require generation execution; omit --dry_run");
   }
   return iree_ok_status();
 }
@@ -1491,8 +1502,8 @@ static iree_status_t id4_cli_run_generation(iree_allocator_t host_allocator) {
     status = id4_cli_parse_generation_residency_mode(
         &prepare_options.residency_mode);
     if (iree_status_is_ok(status)) {
-      status = id4_cli_parse_generation_resident_phase_mask(
-          &prepare_options.resident_phase_mask);
+      status = id4_cli_parse_generation_resident_stage_mask(
+          &prepare_options.resident_stage_mask);
     }
     prepare_options.command_buffer_mode =
         id4_cli_generation_command_buffer_mode(
