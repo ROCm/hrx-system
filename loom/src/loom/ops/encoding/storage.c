@@ -460,6 +460,7 @@ typedef struct loom_encoding_named_fp8_schema_t {
 
 static const loom_encoding_named_fp8_schema_t kLoomEncodingNamedFp8Schemas[] = {
     {IREE_SVL("ieee_fp8_e4m3"), LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3},
+    {IREE_SVL("ieee_fp8_e5m2"), LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E5M2},
     {IREE_SVL("fp8_e4m3fn"), LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3FN},
     {IREE_SVL("fp8_e4m3fnuz"), LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3FNUZ},
     {IREE_SVL("fp8_e5m2fnuz"), LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E5M2FNUZ},
