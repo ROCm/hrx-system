@@ -1147,11 +1147,11 @@ static const id4_pipeline_kernel_ref_t
             {IREE_SVL("qwen3_vl/residual_add_f32"),
              IREE_SVL("id4_qwen3_vl_residual_add_bf16")},
         [ID4_QWEN3_VL_KERNEL_SELECTED_HIDDEN_PACK] =
-            {IREE_SVL("qwen3_vl/selected_hidden_pack_f32"),
-             IREE_SVL("id4_qwen3_vl_selected_hidden_pack_bf16_f32")},
+            {IREE_SVL("qwen3_vl/selected_hidden_pack"),
+             IREE_SVL("id4_qwen3_vl_selected_hidden_pack_bf16_bf16")},
         [ID4_QWEN3_VL_KERNEL_CONDITION_APPLY_TOKEN_WEIGHTS] =
             {IREE_SVL("qwen3_vl/condition"),
-             IREE_SVL("id4_qwen3_vl_condition_apply_token_weights_f32")},
+             IREE_SVL("id4_qwen3_vl_condition_apply_token_weights_bf16_f32")},
         [ID4_QWEN3_VL_KERNEL_CONDITION_REDUCE_TOKEN_WEIGHT_STATS] =
             {IREE_SVL("qwen3_vl/condition"),
              IREE_SVL("id4_qwen3_vl_condition_reduce_token_weight_stats_f32")},
@@ -3584,7 +3584,7 @@ iree_status_t id4_qwen3_vl_program_author_forward(
       id4_pipeline_program_tensor_invalid();
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_acquire_tensor(
       builder, ID4_QWEN3_VL_TENSOR_SELECTED_HIDDEN_STATES, UINT32_MAX,
-      ID4_PIPELINE_PROGRAM_DTYPE_F32,
+      ID4_PIPELINE_PROGRAM_DTYPE_BF16,
       id4_pipeline_program_make_shape_rank2(selected_hidden_row_count,
                                             options->request.token_count),
       &selected_hidden_states));

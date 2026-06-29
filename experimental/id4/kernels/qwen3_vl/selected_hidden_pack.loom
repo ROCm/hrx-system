@@ -1,0 +1,78 @@
+config.decl @id4.qwen3_vl.selected_hidden_pack.token_count : %value: index where [range(%value, 1, 65536)]
+
+config.decl @id4.qwen3_vl.selected_hidden_pack.hidden_size : %value: index where [range(%value, 1, 65536)]
+
+config.decl @id4.qwen3_vl.selected_hidden_pack.hidden_row_count : %value: index where [range(%value, 1, 1048576)]
+
+config.decl @id4.qwen3_vl.selected_hidden_pack.selected_layer_index : %value: index where [range(%value, 0, 1024)]
+
+kernel.def export("id4_qwen3_vl_selected_hidden_pack_bf16_bf16") @id4_qwen3_vl_selected_hidden_pack_bf16_bf16() {
+  %unit = index.constant 1 : index
+  %workgroup_size_x = index.constant 256 : index
+  %token_count = config.get @id4.qwen3_vl.selected_hidden_pack.token_count : index
+  %hidden_size = config.get @id4.qwen3_vl.selected_hidden_pack.hidden_size : index
+  %element_count = index.mul %token_count, %hidden_size : index
+  %rounding = index.sub %workgroup_size_x, %unit : index
+  %rounded = index.add %element_count, %rounding : index
+  %workgroups_x = index.div %rounded, %workgroup_size_x : index
+  kernel.launch.config workgroups(%workgroups_x, %unit, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
+} launch(%hidden_states: buffer, %selected_hidden_states: buffer) {
+  %base = index.constant 0 : offset
+  %workgroup = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %workgroup_size_x = index.constant 256 : index
+  %token_count = config.get @id4.qwen3_vl.selected_hidden_pack.token_count : index
+  %hidden_size = config.get @id4.qwen3_vl.selected_hidden_pack.hidden_size : index
+  %hidden_row_count = config.get @id4.qwen3_vl.selected_hidden_pack.hidden_row_count : index
+  %selected_layer_index = config.get @id4.qwen3_vl.selected_hidden_pack.selected_layer_index : index
+  %element_count = index.mul %token_count, %hidden_size : index
+  %element_index = index.madd %workgroup, %workgroup_size_x, %lane : index
+  %in_bounds = index.cmp ult, %element_index, %element_count : index
+  %hidden_noalias, %selected_noalias = buffer.assume.noalias %hidden_states, %selected_hidden_states : buffer, buffer
+  %hidden_global = buffer.assume.memory_space<global> %hidden_noalias : buffer
+  %selected_global = buffer.assume.memory_space<global> %selected_noalias : buffer
+  %hidden_view = buffer.view %hidden_global[%base] : buffer -> view<[%token_count]x[%hidden_size]xbf16, #dense>
+  %selected_view = buffer.view %selected_global[%base] : buffer -> view<[%hidden_row_count]x[%token_count]xbf16, #dense>
+  scf.if %in_bounds {
+    %token = index.div %element_index, %hidden_size : index
+    %channel = index.rem %element_index, %hidden_size : index
+    %layer_base = index.mul %selected_layer_index, %hidden_size : index
+    %row = index.add %layer_base, %channel : index
+    %value = view.load %hidden_view[%token, %channel] : view<[%token_count]x[%hidden_size]xbf16, #dense> -> bf16
+    view.store %value, %selected_view[%row, %token] : bf16, view<[%hidden_row_count]x[%token_count]xbf16, #dense>
+  }
+  kernel.return
+}
+
+check.case public @id4_qwen3_vl_selected_hidden_pack_bf16_bf16_small_case {
+  %hidden_states = check.generate.iota offset(1.0) step(1.0) : tensor<4x1xbf16>
+  %selected_hidden_states = check.generate.fill value(0.0) : tensor<1x4xbf16>
+  %expected = check.generate.iota offset(1.0) step(1.0) : tensor<1x4xbf16>
+  func.call @id4_qwen3_vl_selected_hidden_pack_bf16_bf16(%hidden_states, %selected_hidden_states) : (tensor<4x1xbf16>, tensor<1x4xbf16>)
+  check.expect.close actual(%selected_hidden_states) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<1x4xbf16>
+  check.return
+}
+
+check.case public @id4_qwen3_vl_selected_hidden_pack_bf16_bf16_layer_major_case {
+  %hidden_states = check.generate.fill value(1.0) : tensor<2x3xbf16>
+  %selected_hidden_states = check.generate.fill value(0.0) : tensor<3x2xbf16>
+  %expected = check.generate.fill value(1.0) : tensor<3x2xbf16>
+  func.call @id4_qwen3_vl_selected_hidden_pack_bf16_bf16(%hidden_states, %selected_hidden_states) : (tensor<2x3xbf16>, tensor<3x2xbf16>)
+  check.expect.close actual(%selected_hidden_states) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<3x2xbf16>
+  check.return
+}
+
+check.case public @id4_qwen3_vl_selected_hidden_pack_bf16_bf16_id4_text451_case {
+  %hidden_states = check.generate.fill value(0.0) : tensor<451x4096xbf16>
+  %selected_hidden_states = check.generate.fill value(0.0) : tensor<53248x451xbf16>
+  %expected = check.generate.fill value(0.0) : tensor<53248x451xbf16>
+  func.call @id4_qwen3_vl_selected_hidden_pack_bf16_bf16(%hidden_states, %selected_hidden_states) : (tensor<451x4096xbf16>, tensor<53248x451xbf16>)
+  check.expect.close actual(%selected_hidden_states) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<53248x451xbf16>
+  check.return
+}
+
+check.benchmark<@id4_qwen3_vl_selected_hidden_pack_bf16_bf16_small_case> @id4_qwen3_vl_selected_hidden_pack_bf16_bf16_small
+
+check.benchmark<@id4_qwen3_vl_selected_hidden_pack_bf16_bf16_layer_major_case> @id4_qwen3_vl_selected_hidden_pack_bf16_bf16_layer_major
+
+check.benchmark<@id4_qwen3_vl_selected_hidden_pack_bf16_bf16_id4_text451_case> @id4_qwen3_vl_selected_hidden_pack_bf16_bf16_id4_text451
