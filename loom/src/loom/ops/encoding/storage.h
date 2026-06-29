@@ -79,6 +79,14 @@ bool loom_encoding_query_type_storage_schema(
     const loom_fact_context_t* context, const loom_module_t* module,
     loom_type_t type, loom_value_fact_storage_schema_t* out_schema);
 
+// Queries scalar content facts implied by an encoded storage schema. This is
+// the storage-schema half of loom_encoding_query_type_storage_content_facts()
+// for operations such as vector.decode that carry an explicit schema witness
+// instead of a shaped memory type encoding.
+bool loom_encoding_query_storage_schema_content_facts(
+    const loom_value_fact_storage_schema_t* storage_schema,
+    loom_scalar_type_t element_type, loom_value_facts_t* out_facts);
+
 // Queries scalar content facts implied by a shaped type's storage schema. This
 // only returns true when the schema carries a target-independent content
 // contract, such as finite-only payloads, subnormal flushing, or finite-number
