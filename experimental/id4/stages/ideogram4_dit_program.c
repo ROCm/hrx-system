@@ -2232,13 +2232,13 @@ iree_status_t id4_ideogram4_dit_program_dispatch_linear_packed_bf16_bf16(
       ID4_IDEOGRAM4_DIT_PROGRAM_LINEAR_OUTPUT_LAYOUT_BF16_PACKED, body, tail);
 }
 
-iree_status_t
-id4_ideogram4_dit_program_dispatch_linear_packed_bf16_bf16_compact_rhs_tile(
+static iree_status_t
+id4_ideogram4_dit_program_dispatch_linear_packed_bf16_bf16_compact_rhs_tile_body(
     id4_pipeline_program_builder_t* builder, iree_string_view_t name,
     uint32_t token_count, uint32_t token_capacity, uint32_t input_size,
     uint32_t output_size, id4_pipeline_program_tensor_t input,
-    id4_pipeline_program_tensor_t weight,
-    id4_pipeline_program_tensor_t output) {
+    id4_pipeline_program_tensor_t weight, id4_pipeline_program_tensor_t output,
+    id4_ideogram4_dit_program_linear_body_t body) {
   if ((token_capacity %
        ID4_IDEOGRAM4_DIT_LINEAR_BF16_BF16_TWO_WAVE_TOKEN_BLOCK) != 0) {
     return iree_make_status(
@@ -2257,6 +2257,24 @@ id4_ideogram4_dit_program_dispatch_linear_packed_bf16_bf16_compact_rhs_tile(
         output_size,
         ID4_IDEOGRAM4_DIT_LINEAR_BF16_BF16_COMPACT_OUTPUT_ROW_BLOCK);
   }
+  const id4_ideogram4_dit_program_linear_tail_t tail = {
+      .dispatch_token_count_limit = 1,
+      .module_path = iree_string_view_empty(),
+      .function_name = iree_string_view_empty(),
+  };
+  return id4_ideogram4_dit_program_dispatch_linear_packed_bf16(
+      builder, name, token_count, token_capacity, input_size, output_size,
+      input, weight, output,
+      ID4_IDEOGRAM4_DIT_PROGRAM_LINEAR_OUTPUT_LAYOUT_BF16_PACKED, body, tail);
+}
+
+iree_status_t
+id4_ideogram4_dit_program_dispatch_linear_packed_bf16_bf16_compact_rhs_tile(
+    id4_pipeline_program_builder_t* builder, iree_string_view_t name,
+    uint32_t token_count, uint32_t token_capacity, uint32_t input_size,
+    uint32_t output_size, id4_pipeline_program_tensor_t input,
+    id4_pipeline_program_tensor_t weight,
+    id4_pipeline_program_tensor_t output) {
   const id4_ideogram4_dit_program_linear_body_t body = {
       .token_block = ID4_IDEOGRAM4_DIT_LINEAR_BF16_BF16_TWO_WAVE_TOKEN_BLOCK,
       .output_row_block =
@@ -2267,15 +2285,33 @@ id4_ideogram4_dit_program_dispatch_linear_packed_bf16_bf16_compact_rhs_tile(
       .function_name = IREE_SV("id4_ideogram4_linear_bf16_bf16_wmma_compact_"
                                "rhs_tile_m128n128_4wave_quadrant"),
   };
-  const id4_ideogram4_dit_program_linear_tail_t tail = {
-      .dispatch_token_count_limit = 1,
-      .module_path = iree_string_view_empty(),
-      .function_name = iree_string_view_empty(),
-  };
-  return id4_ideogram4_dit_program_dispatch_linear_packed_bf16(
+  return id4_ideogram4_dit_program_dispatch_linear_packed_bf16_bf16_compact_rhs_tile_body(
       builder, name, token_count, token_capacity, input_size, output_size,
-      input, weight, output,
-      ID4_IDEOGRAM4_DIT_PROGRAM_LINEAR_OUTPUT_LAYOUT_BF16_PACKED, body, tail);
+      input, weight, output, body);
+}
+
+iree_status_t
+id4_ideogram4_dit_program_dispatch_linear_packed_bf16_bf16_compact_rhs_tile_workgroup_staged(
+    id4_pipeline_program_builder_t* builder, iree_string_view_t name,
+    uint32_t token_count, uint32_t token_capacity, uint32_t input_size,
+    uint32_t output_size, id4_pipeline_program_tensor_t input,
+    id4_pipeline_program_tensor_t weight,
+    id4_pipeline_program_tensor_t output) {
+  const id4_ideogram4_dit_program_linear_body_t body = {
+      .token_block = ID4_IDEOGRAM4_DIT_LINEAR_BF16_BF16_TWO_WAVE_TOKEN_BLOCK,
+      .output_row_block =
+          ID4_IDEOGRAM4_DIT_LINEAR_BF16_BF16_COMPACT_OUTPUT_ROW_BLOCK,
+      .module_path =
+          IREE_SV("ideogram4/"
+                  "linear_bf16_bf16_wmma_compact_rhs_tile_m128n128_4wave_"
+                  "workgroup_staged"),
+      .function_name =
+          IREE_SV("id4_ideogram4_linear_bf16_bf16_wmma_compact_rhs_tile_"
+                  "m128n128_4wave_workgroup_staged"),
+  };
+  return id4_ideogram4_dit_program_dispatch_linear_packed_bf16_bf16_compact_rhs_tile_body(
+      builder, name, token_count, token_capacity, input_size, output_size,
+      input, weight, output, body);
 }
 
 iree_status_t id4_ideogram4_dit_program_dispatch_linear_packed_fp8_bf16(

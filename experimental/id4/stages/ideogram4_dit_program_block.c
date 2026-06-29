@@ -12,6 +12,7 @@ enum {
   ID4_IDEOGRAM4_DIT_ONLINE_ATTENTION_QUERY_TOKEN_COUNT = 4096,
   ID4_IDEOGRAM4_DIT_COMPACT_RHS_TILE_INPUT_BLOCK = 16,
   ID4_IDEOGRAM4_DIT_COMPACT_RHS_TILE_OUTPUT_BLOCK = 128,
+  ID4_IDEOGRAM4_DIT_WORKGROUP_STAGED_LINEAR_TOKEN_CAPACITY_MIN = 4096,
 };
 
 typedef enum id4_ideogram4_dit_program_linear_weight_layout_e {
@@ -312,6 +313,27 @@ static iree_status_t id4_ideogram4_dit_program_dispatch_linear_parameter_bf16(
                               " is not supported",
                               (uint32_t)parameter.storage);
   }
+}
+
+static iree_status_t
+id4_ideogram4_dit_program_dispatch_feed_forward_down_parameter_bf16(
+    id4_pipeline_program_builder_t* builder, iree_string_view_t name,
+    uint32_t token_count, uint32_t token_capacity, uint32_t input_size,
+    uint32_t output_size, id4_pipeline_program_tensor_t input,
+    id4_ideogram4_dit_program_linear_parameter_t parameter,
+    id4_pipeline_program_tensor_t output) {
+  if (parameter.storage == ID4_IDEOGRAM4_DIT_PARAMETER_STORAGE_BF16 &&
+      parameter.layout ==
+          ID4_IDEOGRAM4_DIT_PROGRAM_LINEAR_WEIGHT_LAYOUT_COMPACT_RHS_TILE &&
+      token_capacity >=
+          ID4_IDEOGRAM4_DIT_WORKGROUP_STAGED_LINEAR_TOKEN_CAPACITY_MIN) {
+    return id4_ideogram4_dit_program_dispatch_linear_packed_bf16_bf16_compact_rhs_tile_workgroup_staged(
+        builder, name, token_count, token_capacity, input_size, output_size,
+        input, parameter.weight, output);
+  }
+  return id4_ideogram4_dit_program_dispatch_linear_parameter_bf16(
+      builder, name, token_count, token_capacity, input_size, output_size,
+      input, parameter, output);
 }
 
 static iree_status_t
@@ -1730,7 +1752,7 @@ iree_status_t id4_ideogram4_dit_program_author_transformer_block(
               feed_forward_w2_parameter, mlp_output));
     } else {
       IREE_RETURN_IF_ERROR(
-          id4_ideogram4_dit_program_dispatch_linear_parameter_bf16(
+          id4_ideogram4_dit_program_dispatch_feed_forward_down_parameter_bf16(
               builder, mlp_output_dispatch_name, total_token_count,
               bf16_token_capacity, intermediate_size, hidden_size, mlp_hidden,
               feed_forward_w2_parameter, mlp_output));
