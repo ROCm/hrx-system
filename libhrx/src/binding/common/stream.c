@@ -1011,10 +1011,9 @@ static iree_status_t iree_hal_streaming_pack_raw_argument_list(
                             ? parameters->direct_arg_bytes
                             : parameters->constant_bytes;
   if (*out_constants_size == 0) return iree_ok_status();
-  if (!out_constants ||
-      (!parameter_list &&
-       (parameters->buffer_size > 0 || parameters->binding_count > 0 ||
-        parameters->copy_count > 0))) {
+  if (!out_constants || (!parameter_list && (parameters->buffer_size > 0 ||
+                                             parameters->binding_count > 0 ||
+                                             parameters->copy_count > 0))) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "raw kernel arguments require parameter storage");
   }
@@ -1061,8 +1060,8 @@ static iree_status_t iree_hal_streaming_pack_raw_argument_list(
 static bool iree_hal_streaming_parameter_info_is_empty(
     const iree_hal_streaming_parameter_info_t* parameters) {
   return parameters->buffer_size == 0 && parameters->constant_bytes == 0 &&
-         parameters->direct_arg_bytes == 0 &&
-         parameters->binding_count == 0 && parameters->copy_count == 0;
+         parameters->direct_arg_bytes == 0 && parameters->binding_count == 0 &&
+         parameters->copy_count == 0;
 }
 
 iree_status_t iree_hal_streaming_launch_kernel(

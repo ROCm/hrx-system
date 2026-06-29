@@ -1038,10 +1038,9 @@ static iree_status_t iree_hal_streaming_pack_raw_argument_list(
   if (*out_constants_size == 0) {
     return iree_ok_status();
   }
-  if (!out_constants ||
-      (!parameter_list &&
-       (parameters->buffer_size > 0 || parameters->binding_count > 0 ||
-        parameters->copy_count > 0))) {
+  if (!out_constants || (!parameter_list && (parameters->buffer_size > 0 ||
+                                             parameters->binding_count > 0 ||
+                                             parameters->copy_count > 0))) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "raw kernel arguments require parameter storage");
   }
@@ -1088,8 +1087,8 @@ static iree_status_t iree_hal_streaming_pack_raw_argument_list(
 static bool iree_hal_streaming_parameter_info_is_empty(
     const iree_hal_streaming_parameter_info_t* parameters) {
   return parameters->buffer_size == 0 && parameters->constant_bytes == 0 &&
-         parameters->direct_arg_bytes == 0 &&
-         parameters->binding_count == 0 && parameters->copy_count == 0;
+         parameters->direct_arg_bytes == 0 && parameters->binding_count == 0 &&
+         parameters->copy_count == 0;
 }
 
 iree_status_t iree_hal_streaming_graph_add_kernel_node(
@@ -1192,10 +1191,10 @@ iree_status_t iree_hal_streaming_graph_add_kernel_node(
       iree_make_const_byte_span(constants, symbol->parameters.constant_bytes);
   attrs->constants_capacity = constants_capacity;
   attrs->bindings.count = symbol->parameters.binding_count;
-  attrs->bindings.values = symbol->parameters.binding_count
-                               ? (iree_hal_buffer_ref_t*)(extra_data +
-                                                          constants_size)
-                               : NULL;
+  attrs->bindings.values =
+      symbol->parameters.binding_count
+          ? (iree_hal_buffer_ref_t*)(extra_data + constants_size)
+          : NULL;
   attrs->binding_capacity = symbol->parameters.binding_count;
   iree_status_t unpack_status = iree_ok_status();
   if (is_pre_packed && params->buffer) {
@@ -1223,8 +1222,7 @@ iree_status_t iree_hal_streaming_graph_add_kernel_node(
       memset(constants, 0, constants_capacity);
       iree_host_size_t captured_size = 0;
       unpack_status = iree_hal_streaming_pack_raw_argument_list(
-          &symbol->parameters, (void**)params->buffer,
-          constants,
+          &symbol->parameters, (void**)params->buffer, constants,
           &captured_size);
       attrs->constants = iree_make_const_byte_span(constants, captured_size);
       attrs->bindings = iree_hal_buffer_ref_list_empty();
@@ -1380,8 +1378,8 @@ iree_status_t iree_hal_streaming_graph_set_kernel_node_params(
     bindings = iree_hal_buffer_ref_list_empty();
   } else {
     unpack_status = iree_hal_streaming_unpack_parameters(
-        node->graph->context, &symbol->parameters, params->buffer,
-        constants, &bindings);
+        node->graph->context, &symbol->parameters, params->buffer, constants,
+        &bindings);
     if (iree_status_code(unpack_status) == IREE_STATUS_NOT_FOUND) {
       iree_status_ignore(unpack_status);
       const iree_host_size_t captured_size =

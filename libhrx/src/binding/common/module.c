@@ -305,7 +305,8 @@ static iree_status_t iree_hal_streaming_module_extract_metadata(
         current_ops + symbol_op_counts[i].copy_count;
     uint16_t copy_count = 0;
     uint16_t resolve_count = 0;
-    for (uint16_t j = 0; iree_status_is_ok(status) && j < parameter_count; ++j) {
+    for (uint16_t j = 0; iree_status_is_ok(status) && j < parameter_count;
+         ++j) {
       const iree_hal_executable_export_parameter_t* parameter =
           &parameters[parameter_base + j];
       const bool is_binding_parameter =
