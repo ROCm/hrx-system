@@ -1092,6 +1092,54 @@ static iree_status_t PrepareGenerationPhaseBundle(
                                                        out_phase_bundle);
 }
 
+static iree_status_t WarmSelectedResidentPhase(
+    const LiveGenerationBenchmarkContext& context,
+    id4_ideogram4_generation_bundle_t* bundle,
+    id4_ideogram4_generation_residency_phase_mask_t phase_mask,
+    id4_pipeline_diagnostics_sink_t* diagnostics_sink,
+    iree_hal_semaphore_t* prepare_semaphore, uint64_t* prepare_value) {
+  IREE_ASSERT_ARGUMENT(bundle);
+  IREE_ASSERT_ARGUMENT(diagnostics_sink);
+  IREE_ASSERT_ARGUMENT(prepare_value);
+  if (context.generation_residency_mode !=
+          ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_SELECTED_PHASES ||
+      !iree_any_bit_set(context.generation_resident_phase_mask, phase_mask)) {
+    return iree_ok_status();
+  }
+
+  id4_ideogram4_generation_phase_bundle_t* phase_bundle = NULL;
+  const uint64_t signal_value = *prepare_value + 1;
+  iree_status_t status = PrepareGenerationPhaseBundle(
+      bundle, phase_mask, diagnostics_sink, prepare_semaphore, *prepare_value,
+      prepare_semaphore, signal_value, &phase_bundle);
+  if (iree_status_is_ok(status)) {
+    *prepare_value = signal_value;
+  }
+  return iree_status_join(
+      status, id4_ideogram4_generation_phase_bundle_release(phase_bundle));
+}
+
+static iree_status_t WarmSelectedResidentPhases(
+    const LiveGenerationBenchmarkContext& context,
+    id4_ideogram4_generation_bundle_t* bundle,
+    id4_pipeline_diagnostics_sink_t* diagnostics_sink,
+    iree_hal_semaphore_t* prepare_semaphore, uint64_t* prepare_value) {
+  IREE_RETURN_IF_ERROR(WarmSelectedResidentPhase(
+      context, bundle, ID4_IDEOGRAM4_GENERATION_RESIDENCY_PHASE_CONDITIONING,
+      diagnostics_sink, prepare_semaphore, prepare_value));
+  IREE_RETURN_IF_ERROR(WarmSelectedResidentPhase(
+      context, bundle, ID4_IDEOGRAM4_GENERATION_RESIDENCY_PHASE_DENOISE,
+      diagnostics_sink, prepare_semaphore, prepare_value));
+  IREE_RETURN_IF_ERROR(WarmSelectedResidentPhase(
+      context, bundle, ID4_IDEOGRAM4_GENERATION_RESIDENCY_PHASE_DECODE,
+      diagnostics_sink, prepare_semaphore, prepare_value));
+  if (context.generation_residency_mode !=
+      ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_SELECTED_PHASES) {
+    return iree_ok_status();
+  }
+  return WaitForSemaphore(prepare_semaphore, *prepare_value);
+}
+
 static iree_status_t IssueGenerationPhase(
     id4_ideogram4_generation_execution_t* execution,
     id4_ideogram4_generation_phase_bundle_t* phase_bundle,
@@ -1326,7 +1374,7 @@ static iree_status_t AppendGenerationBenchmarkStageLabels(
 static iree_status_t SetGenerationBenchmarkLabel(
     iree_benchmark_state_t* benchmark_state,
     const LiveGenerationBenchmarkContext& context,
-    iree_string_view_t prompt_label,
+    iree_string_view_t benchmark_scope, iree_string_view_t prompt_label,
     const id4_ideogram4_generation_plan_summary_t& summary,
     const GenerationBenchmarkPlanStatistics& statistics,
     const GenerationBenchmarkTimingStatistics& timing,
@@ -1350,7 +1398,7 @@ static iree_status_t SetGenerationBenchmarkLabel(
   iree_string_builder_initialize(iree_allocator_system(), &label_builder);
   iree_status_t status = iree_string_builder_append_format(
       &label_builder,
-      "prompt=%.*s qwen_tokens=%" PRIu32 " qwen_capacity=%" PRIu32
+      "scope=%.*s prompt=%.*s qwen_tokens=%" PRIu32 " qwen_capacity=%" PRIu32
       " image_tokens=%" PRIu32 " dit_cond_tokens=%" PRIu32
       " dit_cond_capacity=%" PRIu32 " dit_uncond_tokens=%" PRIu32
       " dit_uncond_capacity=%" PRIu32 " latent=%" PRIu64 "x%" PRIu64
@@ -1365,6 +1413,7 @@ static iree_status_t SetGenerationBenchmarkLabel(
       " local_hw_total=%" PRIu64 "MiB local_hw_largest=%" PRIu64
       "MiB"
       " boundary=%" PRIu64 "MiB kernels=%" PRIhsz " dispatches=%" PRIhsz,
+      static_cast<int>(benchmark_scope.size), benchmark_scope.data,
       static_cast<int>(prompt_label.size), prompt_label.data,
       summary.qwen_token_count, summary.qwen_token_capacity,
       summary.image_token_count, summary.conditioned_dit_token_count,
@@ -1565,8 +1614,8 @@ static iree_status_t RunGenerationEndToEndBenchmark(
   }
   IREE_RETURN_IF_ERROR(status);
   IREE_RETURN_IF_ERROR(SetGenerationBenchmarkLabel(
-      benchmark_state, context, prompt->label, last_summary, last_statistics,
-      timing_total, iteration_count));
+      benchmark_state, context, IREE_SV("end_to_end"), prompt->label,
+      last_summary, last_statistics, timing_total, iteration_count));
   iree_benchmark_set_items_processed(
       benchmark_state, static_cast<int64_t>(iteration_count * token_count));
   return iree_ok_status();
@@ -1576,10 +1625,159 @@ IREE_BENCHMARK_FN(BM_Ideogram4SessionGenerationEndToEnd) {
   return RunGenerationEndToEndBenchmark(benchmark_def, benchmark_state);
 }
 
+static iree_status_t RunGenerationIssuePreparedBenchmark(
+    const iree_benchmark_def_t* benchmark_def,
+    iree_benchmark_state_t* benchmark_state) {
+  const GenerationPrompt* prompt =
+      static_cast<const GenerationPrompt*>(benchmark_def->user_data);
+  PromptBenchmarkDisposition benchmark_disposition =
+      PromptBenchmarkDisposition::kRun;
+  IREE_RETURN_IF_ERROR(ValidatePromptBenchmarkConfiguration(
+      benchmark_state, *prompt, &benchmark_disposition));
+  if (benchmark_disposition == PromptBenchmarkDisposition::kSkip) {
+    return iree_ok_status();
+  }
+
+  LiveGenerationBenchmarkContext context;
+  IREE_RETURN_IF_ERROR(CreateLiveGenerationBenchmarkContext(&context));
+
+  ParsedRequest request;
+  IREE_RETURN_IF_ERROR(ParsePromptRequest(*prompt, &request));
+
+  id4_pipeline_diagnostics_sink_t diagnostics_sink;
+  id4_pipeline_diagnostics_sink_initialize_ignore(&diagnostics_sink);
+
+  iree_hal_device_t* device =
+      id4_tooling_runtime_context_primary_device(&context.runtime_context);
+  HalSemaphoreRef prepare_semaphore;
+  IREE_RETURN_IF_ERROR(iree_hal_semaphore_create(
+      device, IREE_HAL_QUEUE_AFFINITY_ANY, 0, IREE_HAL_SEMAPHORE_FLAG_DEFAULT,
+      prepare_semaphore.out()));
+  HalSemaphoreRef completion_semaphore;
+  IREE_RETURN_IF_ERROR(iree_hal_semaphore_create(
+      device, IREE_HAL_QUEUE_AFFINITY_ANY, 0, IREE_HAL_SEMAPHORE_FLAG_DEFAULT,
+      completion_semaphore.out()));
+
+  GenerationPlanRef plan;
+  IREE_RETURN_IF_ERROR(
+      CreateGenerationPlan(context, request, &diagnostics_sink, plan.out()));
+
+  id4_ideogram4_generation_plan_summary_t summary;
+  IREE_RETURN_IF_ERROR(
+      id4_ideogram4_generation_plan_summary(plan.get(), &summary));
+
+  GenerationBenchmarkPlanStatistics statistics;
+  IREE_RETURN_IF_ERROR(
+      AccumulateGenerationBenchmarkPlanStatistics(plan.get(), &statistics));
+
+  IREE_RETURN_IF_ERROR(
+      WriteGenerationPlanJsonIfRequested(prompt->label, plan.get()));
+
+  uint64_t prepare_value = 1;
+  uint64_t completion_value = 0;
+  GenerationBundleRef bundle;
+  IREE_RETURN_IF_ERROR(PrepareGenerationBundle(
+      context, plan.get(), &diagnostics_sink, prepare_semaphore.get(),
+      prepare_value, bundle.out()));
+  IREE_RETURN_IF_ERROR(
+      WaitForSemaphore(prepare_semaphore.get(), prepare_value));
+  IREE_RETURN_IF_ERROR(
+      WarmSelectedResidentPhases(context, bundle.get(), &diagnostics_sink,
+                                 prepare_semaphore.get(), &prepare_value));
+
+  uint64_t iteration_count = 0;
+  GenerationBenchmarkTimingStatistics timing_total;
+  std::memset(&timing_total, 0, sizeof(timing_total));
+  const iree_hal_command_buffer_mode_t profiled_dispatch_metadata_mode =
+      IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_PROFILE_METADATA |
+      IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_DISPATCH_METADATA;
+  const bool capture_execution_profile =
+      iree_all_bits_set(context.runtime_context.command_buffer_mode,
+                        profiled_dispatch_metadata_mode);
+  bool execution_profile_captured = false;
+  iree_hal_profiling_from_flags_t* profiling = nullptr;
+  iree_status_t status = iree_ok_status();
+  if (!capture_execution_profile) {
+    status = iree_hal_begin_device_group_profiling_from_flags(
+        context.runtime_context.device_group, iree_allocator_system(),
+        &profiling);
+  }
+  while (iree_status_is_ok(status) &&
+         iree_benchmark_keep_running(benchmark_state, 1)) {
+    GenerationBenchmarkTimingStatistics iteration_timing;
+    std::memset(&iteration_timing, 0, sizeof(iteration_timing));
+    const iree_time_t iteration_start_time_ns = iree_time_now();
+
+    const bool profile_this_execution =
+        capture_execution_profile && !execution_profile_captured;
+    if (profile_this_execution) {
+      status = iree_hal_begin_device_group_profiling_from_flags(
+          context.runtime_context.device_group, iree_allocator_system(),
+          &profiling);
+    }
+
+    GenerationExecutionRef execution;
+    if (iree_status_is_ok(status)) {
+      status = IssueGenerationBundle(
+          context, bundle.get(), request, &diagnostics_sink,
+          prepare_semaphore.get(), &prepare_value, completion_semaphore.get(),
+          &completion_value, &iteration_timing, execution.out());
+    }
+    if (iree_status_is_ok(status)) {
+      id4::test::SemaphoreListStorage completion_wait;
+      completion_wait.semaphore = completion_semaphore.get();
+      completion_wait.payload_value = completion_value;
+      const iree_time_t phase_start_time_ns = iree_time_now();
+      status = iree_hal_semaphore_list_wait(completion_wait.list(),
+                                            iree_infinite_timeout(),
+                                            IREE_ASYNC_WAIT_FLAG_NONE);
+      iteration_timing.final_wait_ns += iree_time_now() - phase_start_time_ns;
+    }
+    if (iree_status_is_ok(status)) {
+      iteration_timing.total_ns += iree_time_now() - iteration_start_time_ns;
+      AddTiming(&timing_total, iteration_timing);
+      iree_optimization_barrier(execution.get());
+      ++iteration_count;
+    }
+    if (profile_this_execution) {
+      status = iree_status_join(status,
+                                iree_hal_end_profiling_from_flags(profiling));
+      profiling = nullptr;
+      execution_profile_captured = true;
+    }
+  }
+  if (!capture_execution_profile) {
+    status =
+        iree_status_join(status, iree_hal_end_profiling_from_flags(profiling));
+  }
+  IREE_RETURN_IF_ERROR(status);
+  IREE_RETURN_IF_ERROR(SetGenerationBenchmarkLabel(
+      benchmark_state, context, IREE_SV("prepared_issue"), prompt->label,
+      summary, statistics, timing_total, iteration_count));
+  iree_benchmark_set_items_processed(
+      benchmark_state,
+      static_cast<int64_t>(iteration_count * summary.qwen_token_count));
+  return iree_ok_status();
+}
+
+IREE_BENCHMARK_FN(BM_Ideogram4SessionGenerationIssuePrepared) {
+  return RunGenerationIssuePreparedBenchmark(benchmark_def, benchmark_state);
+}
+
 static const iree_benchmark_def_t* RegisterGenerationBenchmark(
     iree_string_view_t name, const GenerationPrompt* prompt) {
   iree_benchmark_def_t* benchmark =
       iree_make_function_benchmark(BM_Ideogram4SessionGenerationEndToEnd);
+  benchmark->flags = IREE_BENCHMARK_FLAG_USE_REAL_TIME;
+  benchmark->time_unit = IREE_BENCHMARK_UNIT_MILLISECOND;
+  benchmark->user_data = prompt;
+  return iree_benchmark_register(name, benchmark);
+}
+
+static const iree_benchmark_def_t* RegisterPreparedIssueGenerationBenchmark(
+    iree_string_view_t name, const GenerationPrompt* prompt) {
+  iree_benchmark_def_t* benchmark =
+      iree_make_function_benchmark(BM_Ideogram4SessionGenerationIssuePrepared);
   benchmark->flags = IREE_BENCHMARK_FLAG_USE_REAL_TIME;
   benchmark->time_unit = IREE_BENCHMARK_UNIT_MILLISECOND;
   benchmark->user_data = prompt;
@@ -1605,6 +1803,27 @@ static const iree_benchmark_def_t*
     BM_Ideogram4SessionGenerationEndToEndCustom_registration
         IREE_ATTRIBUTE_UNUSED = RegisterGenerationBenchmark(
             IREE_SV("BM_Ideogram4SessionGenerationEndToEnd/custom"),
+            &kCustomPrompt);
+
+static const iree_benchmark_def_t*
+    BM_Ideogram4SessionGenerationIssuePreparedShort128_registration
+        IREE_ATTRIBUTE_UNUSED = RegisterPreparedIssueGenerationBenchmark(
+            IREE_SV("BM_Ideogram4SessionGenerationIssuePrepared/short128"),
+            &kShortPrompt);
+static const iree_benchmark_def_t*
+    BM_Ideogram4SessionGenerationIssuePreparedMedium128_registration
+        IREE_ATTRIBUTE_UNUSED = RegisterPreparedIssueGenerationBenchmark(
+            IREE_SV("BM_Ideogram4SessionGenerationIssuePrepared/medium128"),
+            &kMediumPrompt);
+static const iree_benchmark_def_t*
+    BM_Ideogram4SessionGenerationIssuePreparedStructured128_registration
+        IREE_ATTRIBUTE_UNUSED = RegisterPreparedIssueGenerationBenchmark(
+            IREE_SV("BM_Ideogram4SessionGenerationIssuePrepared/structured128"),
+            &kStructuredPrompt);
+static const iree_benchmark_def_t*
+    BM_Ideogram4SessionGenerationIssuePreparedCustom_registration
+        IREE_ATTRIBUTE_UNUSED = RegisterPreparedIssueGenerationBenchmark(
+            IREE_SV("BM_Ideogram4SessionGenerationIssuePrepared/custom"),
             &kCustomPrompt);
 
 }  // namespace
