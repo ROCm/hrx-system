@@ -433,6 +433,23 @@ When a logical coordinate selects a packed byte window, `index.scale` is the
 explicit boundary: it multiplies an `index` coordinate by an `offset` byte
 stride and produces the `offset` value expected by `buffer.view`.
 
+FP8 checkpoint storage should carry the content contract on the view storage
+schema. A raw `f8E4M3` view means every IEEE special case remains possible, and
+`#fp8_e4m3fn` only proves that infinity is not representable; NaN payloads are
+still uncertain. Model weights that have been validated finite should use a
+physical storage schema with `rounding=finite_only` so loads and fragments
+publish no-NaN facts while still preserving exact zero and subnormal behavior.
+Formats that also flush or forbid subnormal payloads can use
+`finite_flush_subnormal`, but that is a stronger numeric contract than ordinary
+finite FP8 weights.
+
+```loom
+%weight_layout = encoding.layout.strided [1, %input_size] : encoding<layout>
+%weight_schema = encoding.define #matrix_operand<element_format=f8e4m3fn, payload_elements=16, payload_registers=4, rounding=finite_only> : encoding<schema>
+%weight_storage = encoding.define #physical_storage {layout = %weight_layout : encoding<layout>, schema = %weight_schema : encoding<schema>} : encoding<storage>
+%weight_view = buffer.view %weight_buffer[%base] : buffer -> view<[%input_size]x[%output_size]xf8E4M3, %weight_storage>
+```
+
 The authoring source linter keeps this reference surface aligned with those
 rules. It rejects redundant kernel-buffer memory-space assumes, sentinel-sized
 views, late `index.cast` byte-address conversions, and ggml-style `nb*` byte
