@@ -1898,6 +1898,29 @@ def _v_bfi_b32_src0_literal_overlay() -> AmdgpuDescriptorOverlay:
     )
 
 
+def _v_bfi_b32_overlay() -> AmdgpuDescriptorOverlay:
+    return AmdgpuDescriptorOverlay(
+        descriptor_key="amdgpu.v_bfi_b32",
+        instruction_name="V_BFI_B32",
+        mnemonic="v_bfi_b32",
+        encoding_name="ENC_VOP3",
+        semantic_tag="integer.bitfield.insert.u32",
+        schedule_class=_SCHEDULE_VALU,
+        operands=(
+            AmdgpuOperandOverlay("VDST", _vgpr_result()),
+            AmdgpuOperandOverlay("SRC0", _sgpr_vgpr_operand("mask")),
+            AmdgpuOperandOverlay("SRC1", _sgpr_vgpr_operand("insert")),
+            AmdgpuOperandOverlay("SRC2", _sgpr_vgpr_operand("base")),
+        ),
+        asm_forms=_asm(
+            mnemonic="v_bfi_b32",
+            results=("dst",),
+            operands=("mask", "insert", "base"),
+        ),
+        flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    )
+
+
 def _v_perm_b32_overlay() -> AmdgpuDescriptorOverlay:
     return AmdgpuDescriptorOverlay(
         descriptor_key="amdgpu.v_perm_b32",
@@ -2116,6 +2139,7 @@ def _integer_bitwise_shift_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
         _v_bfe_offset_width_inline_overlay(is_signed=False),
         _v_bfe_offset_width_inline_overlay(is_signed=True),
         _v_bfe_u32_offset_0_width_16_low16_overlay(),
+        _v_bfi_b32_overlay(),
         _v_bfi_b32_src0_literal_overlay(),
         _v_lshrrev_b32_overlay(),
         _v_lshrrev_b32_src0_inline_overlay(),
