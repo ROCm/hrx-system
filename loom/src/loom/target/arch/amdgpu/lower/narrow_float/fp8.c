@@ -745,35 +745,27 @@ static iree_status_t loom_amdgpu_emit_fp8_normal_bf16_payload(
 static iree_status_t loom_amdgpu_emit_fp8_normal_packed_bf16_payload(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_amdgpu_fp8_decode_plan_t* plan,
-    loom_value_id_t low_source_no_sign_pair, loom_type_t vgpr_type,
+    loom_value_id_t low_source_no_sign_pair,
+    loom_value_id_t low_packed_exponent_bias, loom_type_t vgpr_type,
     loom_value_id_t* out_payload) {
   const loom_scalar_type_fp8_format_t* format = &plan->format;
   const uint32_t payload_shift = 7u - format->mantissa_bits;
-  const uint32_t exponent_bias = (127u - format->exponent_bias) << 7;
-  const uint32_t packed_exponent_bias = exponent_bias | (exponent_bias << 16);
+  IREE_ASSERT_NE(low_packed_exponent_bias, LOOM_VALUE_ID_INVALID);
   if (iree_any_bit_set(
           plan->flags,
           LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_LSHL_ADD_U32_SHIFT_IMM)) {
-    loom_value_id_t low_exponent_bias = LOOM_VALUE_ID_INVALID;
-    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_const_u32(
-        context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_MOV_B32,
-        packed_exponent_bias, vgpr_type, &low_exponent_bias));
     return loom_amdgpu_emit_resolved_vgpr_lshl_add_u32(
         context, source_op, &plan->lshl_add_u32_shift_imm_descriptor,
-        low_source_no_sign_pair, low_exponent_bias, payload_shift, vgpr_type,
-        out_payload);
+        low_source_no_sign_pair, low_packed_exponent_bias, payload_shift,
+        vgpr_type, out_payload);
   }
 
   IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_shift(
       context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_LSHLREV_B32_LIT,
       payload_shift, low_source_no_sign_pair, vgpr_type, out_payload));
-  loom_value_id_t low_exponent_bias = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_const_u32(
-      context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_MOV_B32,
-      packed_exponent_bias, vgpr_type, &low_exponent_bias));
   return loom_amdgpu_emit_vgpr_binary(
       context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_ADD_U32, *out_payload,
-      low_exponent_bias, vgpr_type, out_payload);
+      low_packed_exponent_bias, vgpr_type, out_payload);
 }
 
 static iree_status_t loom_amdgpu_emit_fp8_normal_packed_f16_payload(
@@ -1482,7 +1474,8 @@ static iree_status_t loom_amdgpu_emit_fp8_packed_bf16_pair_state(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_amdgpu_fp8_decode_plan_t* plan,
     const loom_amdgpu_fp8_packed_u16_pair_source_t* pair_source,
-    loom_value_id_t low_zero, loom_type_t vgpr_type,
+    loom_value_id_t low_zero, loom_value_id_t low_packed_exponent_bias,
+    loom_type_t vgpr_type,
     loom_amdgpu_fp8_packed_bf16_pair_state_t* out_state) {
   *out_state = (loom_amdgpu_fp8_packed_bf16_pair_state_t){
       .base = {0},
@@ -1494,8 +1487,8 @@ static iree_status_t loom_amdgpu_emit_fp8_packed_bf16_pair_state(
       &out_state->base));
 
   IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fp8_normal_packed_bf16_payload(
-      context, source_op, plan, out_state->base.source_no_sign, vgpr_type,
-      &out_state->normal_payload));
+      context, source_op, plan, out_state->base.source_no_sign,
+      low_packed_exponent_bias, vgpr_type, &out_state->normal_payload));
   return iree_ok_status();
 }
 
@@ -2525,13 +2518,19 @@ iree_status_t loom_amdgpu_try_emit_fp8_pairs_to_packed_bf16(
     IREE_RETURN_IF_ERROR(loom_amdgpu_emit_sgpr64_constant_u64(
         context, source_op, 0, &low_zero_sgpr64));
   }
+  const uint32_t exponent_bias = (127u - plan->format.exponent_bias) << 7;
+  const uint32_t packed_exponent_bias = exponent_bias | (exponent_bias << 16);
+  loom_value_id_t low_packed_exponent_bias = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_const_u32(
+      context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_MOV_B32,
+      packed_exponent_bias, vgpr_type, &low_packed_exponent_bias));
 
   loom_amdgpu_fp8_packed_bf16_pair_state_t
       pair_states[LOOM_AMDGPU_MAX_PACKED_32BIT_REGISTERS] = {0};
   for (iree_host_size_t i = 0; i < pair_count; ++i) {
     IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fp8_packed_bf16_pair_state(
-        context, source_op, plan, &pair_sources[i], low_zero, vgpr_type,
-        &pair_states[i]));
+        context, source_op, plan, &pair_sources[i], low_zero,
+        low_packed_exponent_bias, vgpr_type, &pair_states[i]));
   }
 
   loom_value_id_t finite_payloads[LOOM_AMDGPU_MAX_PACKED_32BIT_REGISTERS] = {0};
