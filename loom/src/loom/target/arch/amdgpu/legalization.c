@@ -86,8 +86,8 @@ static iree_status_t loom_amdgpu_legalize_vector_decode(
       .action = LOOM_TARGET_LEGALIZER_ACTION_NO_COMMENT,
   };
   if (loom_amdgpu_legalizer_descriptor_set_is_amdgpu(context->descriptor_set) &&
-      loom_amdgpu_vector_decode_can_lower_as_direct_fp8_conversion(
-          context->module, context->fact_table, context->descriptor_set, op)) {
+      loom_amdgpu_vector_decode_can_lower_as_fp8_conversion(
+          context->module, context->fact_table, op)) {
     *out_result = (loom_target_legalizer_result_t){
         .action = LOOM_TARGET_LEGALIZER_ACTION_DEFER,
     };
