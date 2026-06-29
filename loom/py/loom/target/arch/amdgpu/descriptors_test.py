@@ -51,6 +51,7 @@ from loom.target.arch.amdgpu.descriptors import (
     AMDGPU_ENCODING_FORMAT_SOP2_LITERAL,
     AMDGPU_ENCODING_FORMAT_VOP1,
     AMDGPU_ENCODING_FORMAT_VOP2,
+    AMDGPU_ENCODING_FORMAT_VOP3_LITERAL,
     AMDGPU_ENCODING_FORMAT_VOP3P_LITERAL,
     AMDGPU_MEMORY_DESCRIPTOR_CATEGORY,
     AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_DELAY_ALU,
@@ -1353,6 +1354,55 @@ def test_vop2_f32_uses_inline_then_literal_operand_forms() -> None:
             f"{descriptor_key}.src0_inline",
             f"{descriptor_key}.lit",
         )
+
+
+def test_v_perm_b32_literal_forms_cover_selector_and_zero_source() -> None:
+    descriptors = {
+        descriptor.descriptor_key: descriptor for descriptor in _gfx11_core_overlays()
+    }
+
+    descriptor = descriptors["amdgpu.v_perm_b32"]
+    assert tuple(form.replacement_descriptor for form in descriptor.operand_forms) == (
+        "amdgpu.v_perm_b32.src2_lit",
+    )
+
+    selector_literal = descriptors["amdgpu.v_perm_b32.src2_lit"]
+    assert selector_literal.encoding_name == "ENC_VOP3"
+    assert selector_literal.encoding_format_id == AMDGPU_ENCODING_FORMAT_VOP3_LITERAL
+    assert tuple(operand.xml_field_name for operand in selector_literal.operands) == (
+        "VDST",
+        "SRC0",
+        "SRC1",
+    )
+    assert tuple(immediate.field_name for immediate in selector_literal.immediates) == (
+        "imm32",
+    )
+    src2_field, src2_value = selector_literal.fixed_encoding_fields[0]
+    assert src2_field == "SRC2"
+    assert isinstance(src2_value, AmdgpuOperandPredefinedValueRef)
+    assert src2_value.value_name == "SRC_LITERAL"
+
+    zero_selector_literal = descriptors["amdgpu.v_perm_b32.src1_zero_src2_lit"]
+    assert zero_selector_literal.encoding_name == "ENC_VOP3"
+    assert (
+        zero_selector_literal.encoding_format_id == AMDGPU_ENCODING_FORMAT_VOP3_LITERAL
+    )
+    assert tuple(
+        operand.xml_field_name for operand in zero_selector_literal.operands
+    ) == ("VDST", "SRC0")
+    assert tuple(
+        immediate.field_name for immediate in zero_selector_literal.immediates
+    ) == ("imm32",)
+    src1_field, src1_value = zero_selector_literal.fixed_encoding_fields[0]
+    assert src1_field == "SRC1"
+    assert isinstance(src1_value, AmdgpuOperandPredefinedValueRef)
+    assert src1_value.value_name == "0"
+    assert src1_value.operand_type == "OPR_SRC"
+    src2_field, src2_value = zero_selector_literal.fixed_encoding_fields[1]
+    assert src2_field == "SRC2"
+    assert isinstance(src2_value, AmdgpuOperandPredefinedValueRef)
+    assert src2_value.value_name == "SRC_LITERAL"
+    assert src2_value.operand_type == "OPR_SRC"
 
 
 def test_sop2_bfe_literal_forms_fix_control_to_literal_source() -> None:

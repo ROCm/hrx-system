@@ -264,7 +264,7 @@ kernel.def target(@target) @report_fp8_fragment_full_decode() {
 
 // ----
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
-COMPILE-REPORT: source_low selected_ops=8 emitted_ops=223 rows=8
+COMPILE-REPORT: source_low selected_ops=8 emitted_ops=222 rows=8
 COMPILE-REPORT: source_low_memory rows=3
 COMPILE-REPORT: source_low[0] function=report_fp8_fragment_full_decode source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
 COMPILE-REPORT: source_low[1] function=report_fp8_fragment_full_decode source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
@@ -272,7 +272,7 @@ COMPILE-REPORT: source_low[2] function=report_fp8_fragment_full_decode source_op
 COMPILE-REPORT: source_low[3] function=report_fp8_fragment_full_decode source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
 COMPILE-REPORT: source_low[4] function=report_fp8_fragment_full_decode source_op=buffer.view selection=rule rule_set=1 rule=0 descriptor=0 emitted_ops=0
 COMPILE-REPORT: source_low[5] function=report_fp8_fragment_full_decode source_op=buffer.view selection=rule rule_set=1 rule=0 descriptor=0 emitted_ops=0
-COMPILE-REPORT: source_low[6] function=report_fp8_fragment_full_decode source_op=vector.fragment.load selection=plan plan=3603 descriptor=0 emitted_ops=217
+COMPILE-REPORT: source_low[6] function=report_fp8_fragment_full_decode source_op=vector.fragment.load selection=plan plan=3603 descriptor=0 emitted_ops=216
 COMPILE-REPORT: source_low[7] function=report_fp8_fragment_full_decode source_op=vector.store selection=plan plan=3606 descriptor=0 emitted_ops=6
 COMPILE-REPORT: source_low_memory[0] function=report_fp8_fragment_full_decode source_op=vector.fragment.load memory_space=global operation=load packet=amdgpu.global_load_b128_saddr address_form=global_saddr dynamic_term_kind=vaddr fallback_reason=fp8_packed_bf16_decode_repair_subnormal_nan static_offset_bytes=0 element_bytes=1 vector_lanes=16 dynamic_stride_bytes=16 vector_lane_stride_bytes=1 bank_stride_words=0 bank_conflict_degree=0 bank_conflict_kind=-
 COMPILE-REPORT: source_low_memory[1] function=report_fp8_fragment_full_decode source_op=vector.store memory_space=global operation=store packet=amdgpu.global_store_b128_saddr address_form=global_saddr dynamic_term_kind=none fallback_reason=- static_offset_bytes=0 element_bytes=2 vector_lanes=8 dynamic_stride_bytes=0 vector_lane_stride_bytes=2 bank_stride_words=0 bank_conflict_degree=0 bank_conflict_kind=-
@@ -303,7 +303,7 @@ kernel.def target(@target) @report_fp8_fragment_finite_nan_storage_full_decode()
 
 // ----
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
-COMPILE-REPORT: source_low selected_ops=8 emitted_ops=223 rows=8
+COMPILE-REPORT: source_low selected_ops=8 emitted_ops=222 rows=8
 COMPILE-REPORT: source_low_memory rows=3
 COMPILE-REPORT: source_low[0] function=report_fp8_fragment_finite_nan_storage_full_decode source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
 COMPILE-REPORT: source_low[1] function=report_fp8_fragment_finite_nan_storage_full_decode source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
@@ -311,7 +311,7 @@ COMPILE-REPORT: source_low[2] function=report_fp8_fragment_finite_nan_storage_fu
 COMPILE-REPORT: source_low[3] function=report_fp8_fragment_finite_nan_storage_full_decode source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
 COMPILE-REPORT: source_low[4] function=report_fp8_fragment_finite_nan_storage_full_decode source_op=buffer.view selection=rule rule_set=1 rule=0 descriptor=0 emitted_ops=0
 COMPILE-REPORT: source_low[5] function=report_fp8_fragment_finite_nan_storage_full_decode source_op=buffer.view selection=rule rule_set=1 rule=0 descriptor=0 emitted_ops=0
-COMPILE-REPORT: source_low[6] function=report_fp8_fragment_finite_nan_storage_full_decode source_op=vector.fragment.load selection=plan plan=3603 descriptor=0 emitted_ops=217
+COMPILE-REPORT: source_low[6] function=report_fp8_fragment_finite_nan_storage_full_decode source_op=vector.fragment.load selection=plan plan=3603 descriptor=0 emitted_ops=216
 COMPILE-REPORT: source_low[7] function=report_fp8_fragment_finite_nan_storage_full_decode source_op=vector.store selection=plan plan=3606 descriptor=0 emitted_ops=6
 COMPILE-REPORT: source_low_memory[0] function=report_fp8_fragment_finite_nan_storage_full_decode source_op=vector.fragment.load memory_space=global operation=load packet=amdgpu.global_load_b128_saddr address_form=global_saddr dynamic_term_kind=vaddr fallback_reason=fp8_packed_bf16_decode_repair_subnormal_nan static_offset_bytes=0 element_bytes=1 vector_lanes=16 dynamic_stride_bytes=16 vector_lane_stride_bytes=1 bank_stride_words=0 bank_conflict_degree=0 bank_conflict_kind=-
 COMPILE-REPORT: source_low_memory[1] function=report_fp8_fragment_finite_nan_storage_full_decode source_op=vector.store memory_space=global operation=store packet=amdgpu.global_store_b128_saddr address_form=global_saddr dynamic_term_kind=none fallback_reason=- static_offset_bytes=0 element_bytes=2 vector_lanes=8 dynamic_stride_bytes=0 vector_lane_stride_bytes=2 bank_stride_words=0 bank_conflict_degree=0 bank_conflict_kind=-
@@ -342,7 +342,7 @@ kernel.def target(@target) @report_fp8_fragment_finite_only_storage_full_decode(
 
 // ----
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
-COMPILE-REPORT: source_low selected_ops=8 emitted_ops=157 rows=8
+COMPILE-REPORT: source_low selected_ops=8 emitted_ops=156 rows=8
 COMPILE-REPORT: source_low_memory rows=3
 COMPILE-REPORT: source_low[0] function=report_fp8_fragment_finite_only_storage_full_decode source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
 COMPILE-REPORT: source_low[1] function=report_fp8_fragment_finite_only_storage_full_decode source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
@@ -350,7 +350,7 @@ COMPILE-REPORT: source_low[2] function=report_fp8_fragment_finite_only_storage_f
 COMPILE-REPORT: source_low[3] function=report_fp8_fragment_finite_only_storage_full_decode source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
 COMPILE-REPORT: source_low[4] function=report_fp8_fragment_finite_only_storage_full_decode source_op=buffer.view selection=rule rule_set=1 rule=0 descriptor=0 emitted_ops=0
 COMPILE-REPORT: source_low[5] function=report_fp8_fragment_finite_only_storage_full_decode source_op=buffer.view selection=rule rule_set=1 rule=0 descriptor=0 emitted_ops=0
-COMPILE-REPORT: source_low[6] function=report_fp8_fragment_finite_only_storage_full_decode source_op=vector.fragment.load selection=plan plan=3603 descriptor=0 emitted_ops=151
+COMPILE-REPORT: source_low[6] function=report_fp8_fragment_finite_only_storage_full_decode source_op=vector.fragment.load selection=plan plan=3603 descriptor=0 emitted_ops=150
 COMPILE-REPORT: source_low[7] function=report_fp8_fragment_finite_only_storage_full_decode source_op=vector.store selection=plan plan=3606 descriptor=0 emitted_ops=6
 COMPILE-REPORT: source_low_memory[0] function=report_fp8_fragment_finite_only_storage_full_decode source_op=vector.fragment.load memory_space=global operation=load packet=amdgpu.global_load_b128_saddr address_form=global_saddr dynamic_term_kind=vaddr fallback_reason=fp8_packed_bf16_decode_repair_subnormal static_offset_bytes=0 element_bytes=1 vector_lanes=16 dynamic_stride_bytes=16 vector_lane_stride_bytes=1 bank_stride_words=0 bank_conflict_degree=0 bank_conflict_kind=-
 COMPILE-REPORT: source_low_memory[1] function=report_fp8_fragment_finite_only_storage_full_decode source_op=vector.store memory_space=global operation=store packet=amdgpu.global_store_b128_saddr address_form=global_saddr dynamic_term_kind=none fallback_reason=- static_offset_bytes=0 element_bytes=2 vector_lanes=8 dynamic_stride_bytes=0 vector_lane_stride_bytes=2 bank_stride_words=0 bank_conflict_degree=0 bank_conflict_kind=-
@@ -381,7 +381,7 @@ kernel.def target(@target) @report_fp8_fragment_finite_packed_decode() {
 
 // ----
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
-COMPILE-REPORT: source_low selected_ops=8 emitted_ops=81 rows=8
+COMPILE-REPORT: source_low selected_ops=8 emitted_ops=80 rows=8
 COMPILE-REPORT: source_low_memory rows=3
 COMPILE-REPORT: source_low[0] function=report_fp8_fragment_finite_packed_decode source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
 COMPILE-REPORT: source_low[1] function=report_fp8_fragment_finite_packed_decode source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
@@ -389,7 +389,7 @@ COMPILE-REPORT: source_low[2] function=report_fp8_fragment_finite_packed_decode 
 COMPILE-REPORT: source_low[3] function=report_fp8_fragment_finite_packed_decode source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
 COMPILE-REPORT: source_low[4] function=report_fp8_fragment_finite_packed_decode source_op=buffer.view selection=rule rule_set=1 rule=0 descriptor=0 emitted_ops=0
 COMPILE-REPORT: source_low[5] function=report_fp8_fragment_finite_packed_decode source_op=buffer.view selection=rule rule_set=1 rule=0 descriptor=0 emitted_ops=0
-COMPILE-REPORT: source_low[6] function=report_fp8_fragment_finite_packed_decode source_op=vector.fragment.load selection=plan plan=3603 descriptor=0 emitted_ops=75
+COMPILE-REPORT: source_low[6] function=report_fp8_fragment_finite_packed_decode source_op=vector.fragment.load selection=plan plan=3603 descriptor=0 emitted_ops=74
 COMPILE-REPORT: source_low[7] function=report_fp8_fragment_finite_packed_decode source_op=vector.store selection=plan plan=3606 descriptor=0 emitted_ops=6
 COMPILE-REPORT: source_low_memory[0] function=report_fp8_fragment_finite_packed_decode source_op=vector.fragment.load memory_space=global operation=load packet=amdgpu.global_load_b128_saddr address_form=global_saddr dynamic_term_kind=vaddr fallback_reason=fp8_packed_bf16_decode_repair_zero static_offset_bytes=0 element_bytes=1 vector_lanes=16 dynamic_stride_bytes=16 vector_lane_stride_bytes=1 bank_stride_words=0 bank_conflict_degree=0 bank_conflict_kind=-
 COMPILE-REPORT: source_low_memory[1] function=report_fp8_fragment_finite_packed_decode source_op=vector.store memory_space=global operation=store packet=amdgpu.global_store_b128_saddr address_form=global_saddr dynamic_term_kind=none fallback_reason=- static_offset_bytes=0 element_bytes=2 vector_lanes=8 dynamic_stride_bytes=0 vector_lane_stride_bytes=2 bank_stride_words=0 bank_conflict_degree=0 bank_conflict_kind=-
@@ -418,7 +418,7 @@ kernel.def target(@target) @report_bf8_fragment_full_decode() {
 
 // ----
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
-COMPILE-REPORT: source_low selected_ops=8 emitted_ops=269 rows=8
+COMPILE-REPORT: source_low selected_ops=8 emitted_ops=268 rows=8
 COMPILE-REPORT: source_low_memory rows=3
 COMPILE-REPORT: source_low[0] function=report_bf8_fragment_full_decode source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
 COMPILE-REPORT: source_low[1] function=report_bf8_fragment_full_decode source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
@@ -426,7 +426,7 @@ COMPILE-REPORT: source_low[2] function=report_bf8_fragment_full_decode source_op
 COMPILE-REPORT: source_low[3] function=report_bf8_fragment_full_decode source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
 COMPILE-REPORT: source_low[4] function=report_bf8_fragment_full_decode source_op=buffer.view selection=rule rule_set=1 rule=0 descriptor=0 emitted_ops=0
 COMPILE-REPORT: source_low[5] function=report_bf8_fragment_full_decode source_op=buffer.view selection=rule rule_set=1 rule=0 descriptor=0 emitted_ops=0
-COMPILE-REPORT: source_low[6] function=report_bf8_fragment_full_decode source_op=vector.fragment.load selection=plan plan=3603 descriptor=0 emitted_ops=263
+COMPILE-REPORT: source_low[6] function=report_bf8_fragment_full_decode source_op=vector.fragment.load selection=plan plan=3603 descriptor=0 emitted_ops=262
 COMPILE-REPORT: source_low[7] function=report_bf8_fragment_full_decode source_op=vector.store selection=plan plan=3606 descriptor=0 emitted_ops=6
 COMPILE-REPORT: source_low_memory[0] function=report_bf8_fragment_full_decode source_op=vector.fragment.load memory_space=global operation=load packet=amdgpu.global_load_b128_saddr address_form=global_saddr dynamic_term_kind=vaddr fallback_reason=fp8_packed_bf16_decode_repair_subnormal_inf_nan static_offset_bytes=0 element_bytes=1 vector_lanes=16 dynamic_stride_bytes=16 vector_lane_stride_bytes=1 bank_stride_words=0 bank_conflict_degree=0 bank_conflict_kind=-
 COMPILE-REPORT: source_low_memory[1] function=report_bf8_fragment_full_decode source_op=vector.store memory_space=global operation=store packet=amdgpu.global_store_b128_saddr address_form=global_saddr dynamic_term_kind=none fallback_reason=- static_offset_bytes=0 element_bytes=2 vector_lanes=8 dynamic_stride_bytes=0 vector_lane_stride_bytes=2 bank_stride_words=0 bank_conflict_degree=0 bank_conflict_kind=-
@@ -457,7 +457,7 @@ kernel.def target(@target) @report_bf8_fragment_finite_only_decode() {
 
 // ----
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
-COMPILE-REPORT: source_low selected_ops=8 emitted_ops=157 rows=8
+COMPILE-REPORT: source_low selected_ops=8 emitted_ops=156 rows=8
 COMPILE-REPORT: source_low_memory rows=3
 COMPILE-REPORT: source_low[0] function=report_bf8_fragment_finite_only_decode source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
 COMPILE-REPORT: source_low[1] function=report_bf8_fragment_finite_only_decode source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
@@ -465,7 +465,7 @@ COMPILE-REPORT: source_low[2] function=report_bf8_fragment_finite_only_decode so
 COMPILE-REPORT: source_low[3] function=report_bf8_fragment_finite_only_decode source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
 COMPILE-REPORT: source_low[4] function=report_bf8_fragment_finite_only_decode source_op=buffer.view selection=rule rule_set=1 rule=0 descriptor=0 emitted_ops=0
 COMPILE-REPORT: source_low[5] function=report_bf8_fragment_finite_only_decode source_op=buffer.view selection=rule rule_set=1 rule=0 descriptor=0 emitted_ops=0
-COMPILE-REPORT: source_low[6] function=report_bf8_fragment_finite_only_decode source_op=vector.fragment.load selection=plan plan=3603 descriptor=0 emitted_ops=151
+COMPILE-REPORT: source_low[6] function=report_bf8_fragment_finite_only_decode source_op=vector.fragment.load selection=plan plan=3603 descriptor=0 emitted_ops=150
 COMPILE-REPORT: source_low[7] function=report_bf8_fragment_finite_only_decode source_op=vector.store selection=plan plan=3606 descriptor=0 emitted_ops=6
 COMPILE-REPORT: source_low_memory[0] function=report_bf8_fragment_finite_only_decode source_op=vector.fragment.load memory_space=global operation=load packet=amdgpu.global_load_b128_saddr address_form=global_saddr dynamic_term_kind=vaddr fallback_reason=fp8_packed_bf16_decode_repair_subnormal static_offset_bytes=0 element_bytes=1 vector_lanes=16 dynamic_stride_bytes=16 vector_lane_stride_bytes=1 bank_stride_words=0 bank_conflict_degree=0 bank_conflict_kind=-
 COMPILE-REPORT: source_low_memory[1] function=report_bf8_fragment_finite_only_decode source_op=vector.store memory_space=global operation=store packet=amdgpu.global_store_b128_saddr address_form=global_saddr dynamic_term_kind=none fallback_reason=- static_offset_bytes=0 element_bytes=2 vector_lanes=8 dynamic_stride_bytes=0 vector_lane_stride_bytes=2 bank_stride_words=0 bank_conflict_degree=0 bank_conflict_kind=-
@@ -496,7 +496,7 @@ kernel.def target(@target) @report_bf8_fragment_finite_packed_decode() {
 
 // ----
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
-COMPILE-REPORT: source_low selected_ops=8 emitted_ops=81 rows=8
+COMPILE-REPORT: source_low selected_ops=8 emitted_ops=80 rows=8
 COMPILE-REPORT: source_low_memory rows=3
 COMPILE-REPORT: source_low[0] function=report_bf8_fragment_finite_packed_decode source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
 COMPILE-REPORT: source_low[1] function=report_bf8_fragment_finite_packed_decode source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
@@ -504,7 +504,7 @@ COMPILE-REPORT: source_low[2] function=report_bf8_fragment_finite_packed_decode 
 COMPILE-REPORT: source_low[3] function=report_bf8_fragment_finite_packed_decode source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
 COMPILE-REPORT: source_low[4] function=report_bf8_fragment_finite_packed_decode source_op=buffer.view selection=rule rule_set=1 rule=0 descriptor=0 emitted_ops=0
 COMPILE-REPORT: source_low[5] function=report_bf8_fragment_finite_packed_decode source_op=buffer.view selection=rule rule_set=1 rule=0 descriptor=0 emitted_ops=0
-COMPILE-REPORT: source_low[6] function=report_bf8_fragment_finite_packed_decode source_op=vector.fragment.load selection=plan plan=3603 descriptor=0 emitted_ops=75
+COMPILE-REPORT: source_low[6] function=report_bf8_fragment_finite_packed_decode source_op=vector.fragment.load selection=plan plan=3603 descriptor=0 emitted_ops=74
 COMPILE-REPORT: source_low[7] function=report_bf8_fragment_finite_packed_decode source_op=vector.store selection=plan plan=3606 descriptor=0 emitted_ops=6
 COMPILE-REPORT: source_low_memory[0] function=report_bf8_fragment_finite_packed_decode source_op=vector.fragment.load memory_space=global operation=load packet=amdgpu.global_load_b128_saddr address_form=global_saddr dynamic_term_kind=vaddr fallback_reason=fp8_packed_bf16_decode_repair_zero static_offset_bytes=0 element_bytes=1 vector_lanes=16 dynamic_stride_bytes=16 vector_lane_stride_bytes=1 bank_stride_words=0 bank_conflict_degree=0 bank_conflict_kind=-
 COMPILE-REPORT: source_low_memory[1] function=report_bf8_fragment_finite_packed_decode source_op=vector.store memory_space=global operation=store packet=amdgpu.global_store_b128_saddr address_form=global_saddr dynamic_term_kind=none fallback_reason=- static_offset_bytes=0 element_bytes=2 vector_lanes=8 dynamic_stride_bytes=0 vector_lane_stride_bytes=2 bank_stride_words=0 bank_conflict_degree=0 bank_conflict_kind=-

@@ -2731,12 +2731,12 @@ enum {
 };
 
 typedef struct loom_amdgpu_source_immediate_suffix_t {
-  // Canonical low mnemonic suffix identifying the omitted source operand.
+  // Canonical low mnemonic suffix component identifying a source operand.
   const char* suffix;
-  // Number of descriptor immediates supplied by this alias suffix.
-  uint8_t immediate_count;
-  // Native source operand positions occupied by each descriptor immediate.
-  uint8_t immediate_source_indices[LOOM_AMDGPU_SOURCE_IMMEDIATE_SLOT_CAPACITY];
+  // Native source operand position named by the suffix component.
+  uint8_t source_index;
+  // True when the suffix component is backed by a descriptor immediate.
+  bool supplies_immediate;
 } loom_amdgpu_source_immediate_suffix_t;
 
 static bool loom_amdgpu_match_source_immediate_asm_form(
@@ -2746,48 +2746,153 @@ static bool loom_amdgpu_match_source_immediate_asm_form(
         [LOOM_AMDGPU_SOURCE_IMMEDIATE_SLOT_CAPACITY]) {
   static const loom_amdgpu_source_immediate_suffix_t
       kSourceImmediateSuffixes[] = {
-          {.suffix = "_src0_lit_src1_inline",
-           .immediate_count = 2,
-           .immediate_source_indices = {0, 1}},
-          {.suffix = "_src1_lit_src0_inline",
-           .immediate_count = 2,
-           .immediate_source_indices = {1, 0}},
           {.suffix = "_src0_lit",
-           .immediate_count = 1,
-           .immediate_source_indices = {0}},
+           .source_index = 0,
+           .supplies_immediate = true},
           {.suffix = "_src1_lit",
-           .immediate_count = 1,
-           .immediate_source_indices = {1}},
+           .source_index = 1,
+           .supplies_immediate = true},
           {.suffix = "_src2_lit",
-           .immediate_count = 1,
-           .immediate_source_indices = {2}},
+           .source_index = 2,
+           .supplies_immediate = true},
           {.suffix = "_src0_inline",
-           .immediate_count = 1,
-           .immediate_source_indices = {0}},
+           .source_index = 0,
+           .supplies_immediate = true},
           {.suffix = "_src1_inline",
-           .immediate_count = 1,
-           .immediate_source_indices = {1}},
+           .source_index = 1,
+           .supplies_immediate = true},
           {.suffix = "_src2_inline",
-           .immediate_count = 1,
-           .immediate_source_indices = {2}},
+           .source_index = 2,
+           .supplies_immediate = true},
+          {.suffix = "_src0_zero", .source_index = 0},
+          {.suffix = "_src1_zero", .source_index = 1},
+          {.suffix = "_src2_zero", .source_index = 2},
       };
-  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(kSourceImmediateSuffixes);
-       ++i) {
-    iree_string_view_t base_mnemonic = canonical_mnemonic;
-    if (iree_string_view_consume_suffix(
-            &base_mnemonic,
-            iree_make_cstring_view(kSourceImmediateSuffixes[i].suffix))) {
-      *out_base_mnemonic = base_mnemonic;
-      *out_immediate_count = kSourceImmediateSuffixes[i].immediate_count;
-      for (uint8_t j = 0; j < kSourceImmediateSuffixes[i].immediate_count;
-           ++j) {
-        out_immediate_source_indices[j] =
-            kSourceImmediateSuffixes[i].immediate_source_indices[j];
+  iree_string_view_t base_mnemonic = canonical_mnemonic;
+  uint8_t reversed_immediate_source_indices
+      [LOOM_AMDGPU_SOURCE_IMMEDIATE_SLOT_CAPACITY] = {0};
+  uint8_t immediate_count = 0;
+  bool matched_any_suffix = false;
+  while (true) {
+    bool matched_suffix = false;
+    for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(kSourceImmediateSuffixes);
+         ++i) {
+      iree_string_view_t next_base_mnemonic = base_mnemonic;
+      if (!iree_string_view_consume_suffix(
+              &next_base_mnemonic,
+              iree_make_cstring_view(kSourceImmediateSuffixes[i].suffix))) {
+        continue;
       }
-      return true;
+      if (kSourceImmediateSuffixes[i].supplies_immediate) {
+        if (immediate_count ==
+            IREE_ARRAYSIZE(reversed_immediate_source_indices)) {
+          return false;
+        }
+        reversed_immediate_source_indices[immediate_count++] =
+            kSourceImmediateSuffixes[i].source_index;
+      }
+      base_mnemonic = next_base_mnemonic;
+      matched_any_suffix = true;
+      matched_suffix = true;
+      break;
+    }
+    if (!matched_suffix) {
+      break;
     }
   }
-  return false;
+  if (!matched_any_suffix) {
+    return false;
+  }
+  *out_base_mnemonic = base_mnemonic;
+  *out_immediate_count = immediate_count;
+  for (uint8_t i = 0; i < immediate_count; ++i) {
+    out_immediate_source_indices[i] =
+        reversed_immediate_source_indices[immediate_count - 1 - i];
+  }
+  return true;
+}
+
+static iree_status_t loom_amdgpu_source_immediate_unsupported_shape(
+    const loom_native_assembly_packet_context_t* context) {
+  iree_string_view_t key = iree_string_view_empty();
+  IREE_RETURN_IF_ERROR(loom_amdgpu_descriptor_key(context, &key));
+  return iree_make_status(
+      IREE_STATUS_FAILED_PRECONDITION,
+      "AMDGPU assembly source-immediate descriptor '%.*s' has unsupported "
+      "shape",
+      (int)key.size, key.data);
+}
+
+static bool loom_amdgpu_source_encoding_field_index(uint16_t encoding_field_id,
+                                                    uint8_t* out_source_index) {
+  switch (encoding_field_id) {
+    case LOOM_AMDGPU_ENCODING_FIELD_SRC0:
+    case LOOM_AMDGPU_ENCODING_FIELD_SSRC0:
+    case LOOM_AMDGPU_ENCODING_FIELD_VSRC0:
+      *out_source_index = 0;
+      return true;
+    case LOOM_AMDGPU_ENCODING_FIELD_SRC1:
+    case LOOM_AMDGPU_ENCODING_FIELD_SSRC1:
+    case LOOM_AMDGPU_ENCODING_FIELD_VSRC1:
+      *out_source_index = 1;
+      return true;
+    case LOOM_AMDGPU_ENCODING_FIELD_SRC2:
+    case LOOM_AMDGPU_ENCODING_FIELD_VSRC2:
+      *out_source_index = 2;
+      return true;
+    default:
+      return false;
+  }
+}
+
+typedef enum loom_amdgpu_source_immediate_slot_kind_e {
+  LOOM_AMDGPU_SOURCE_IMMEDIATE_SLOT_EMPTY = 0,
+  LOOM_AMDGPU_SOURCE_IMMEDIATE_SLOT_OPERAND = 1,
+  LOOM_AMDGPU_SOURCE_IMMEDIATE_SLOT_IMMEDIATE = 2,
+  LOOM_AMDGPU_SOURCE_IMMEDIATE_SLOT_FIXED = 3,
+} loom_amdgpu_source_immediate_slot_kind_t;
+
+typedef struct loom_amdgpu_source_immediate_slot_t {
+  // Source value kind occupying this native source position.
+  loom_amdgpu_source_immediate_slot_kind_t kind;
+  // Packet operand index, descriptor immediate index, or fixed source selector.
+  uint16_t value;
+} loom_amdgpu_source_immediate_slot_t;
+
+static iree_status_t loom_amdgpu_occupy_source_immediate_slot(
+    const loom_native_assembly_packet_context_t* context,
+    loom_amdgpu_source_immediate_slot_t* slots, uint8_t source_index,
+    loom_amdgpu_source_immediate_slot_kind_t kind, uint16_t value) {
+  if (source_index >= LOOM_AMDGPU_SOURCE_IMMEDIATE_SLOT_CAPACITY ||
+      slots[source_index].kind != LOOM_AMDGPU_SOURCE_IMMEDIATE_SLOT_EMPTY) {
+    return loom_amdgpu_source_immediate_unsupported_shape(context);
+  }
+  slots[source_index].kind = kind;
+  slots[source_index].value = value;
+  return iree_ok_status();
+}
+
+static iree_status_t loom_amdgpu_append_fixed_source_selector(
+    const loom_native_assembly_packet_context_t* context,
+    const loom_amdgpu_encoding_table_t* table, uint16_t source_selector) {
+  if (table != NULL && source_selector >= table->scalar_inline_u32_zero &&
+      source_selector <
+          table->scalar_inline_u32_zero + table->scalar_inline_u32_count) {
+    return iree_string_builder_append_format(
+        context->builder, "%" PRIu32,
+        (uint32_t)(source_selector - table->scalar_inline_u32_zero));
+  }
+  if (table != NULL) {
+    for (uint16_t i = 0; i < table->inline_f32_source_count; ++i) {
+      const loom_amdgpu_encoding_inline_f32_source_t* source =
+          &table->inline_f32_sources[i];
+      if (source->source == source_selector) {
+        return iree_string_builder_append_format(context->builder, "%" PRIu32,
+                                                 source->bit_pattern);
+      }
+    }
+  }
+  return loom_amdgpu_source_immediate_unsupported_shape(context);
 }
 
 static iree_status_t loom_amdgpu_append_source_immediate_asm_form_packet(
@@ -2795,57 +2900,128 @@ static iree_status_t loom_amdgpu_append_source_immediate_asm_form_packet(
     iree_string_view_t base_mnemonic, uint8_t immediate_count,
     const uint8_t
         immediate_source_indices[LOOM_AMDGPU_SOURCE_IMMEDIATE_SLOT_CAPACITY]) {
-  const iree_host_size_t explicit_operand_count =
-      loom_amdgpu_explicit_packet_operand_count(context);
-  const iree_host_size_t source_count =
-      explicit_operand_count + immediate_count;
-  uint8_t
-      immediate_index_by_source[LOOM_AMDGPU_SOURCE_IMMEDIATE_SLOT_CAPACITY] = {
-          UINT8_MAX, UINT8_MAX, UINT8_MAX};
-  bool source_uses_immediate[LOOM_AMDGPU_SOURCE_IMMEDIATE_SLOT_CAPACITY] = {
-      false, false, false};
-  if (context->packet->descriptor->result_count != 1 || source_count == 0 ||
-      source_count > IREE_ARRAYSIZE(immediate_index_by_source) ||
-      context->packet->descriptor->immediate_count != immediate_count) {
-    iree_string_view_t key = iree_string_view_empty();
-    IREE_RETURN_IF_ERROR(loom_amdgpu_descriptor_key(context, &key));
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "AMDGPU assembly source-immediate descriptor '%.*s' has unsupported "
-        "shape",
-        (int)key.size, key.data);
+  const loom_low_descriptor_t* descriptor = context->packet->descriptor;
+  const loom_low_descriptor_set_t* descriptor_set =
+      context->schedule->target.descriptor_set;
+  loom_amdgpu_source_immediate_slot_t
+      slots[LOOM_AMDGPU_SOURCE_IMMEDIATE_SLOT_CAPACITY] = {0};
+  if (descriptor->result_count != 1 ||
+      descriptor->immediate_count != immediate_count) {
+    return loom_amdgpu_source_immediate_unsupported_shape(context);
   }
   for (uint8_t immediate_index = 0; immediate_index < immediate_count;
        ++immediate_index) {
-    const uint8_t source_index = immediate_source_indices[immediate_index];
-    if (source_index >= source_count || source_uses_immediate[source_index]) {
-      iree_string_view_t key = iree_string_view_empty();
-      IREE_RETURN_IF_ERROR(loom_amdgpu_descriptor_key(context, &key));
-      return iree_make_status(
-          IREE_STATUS_FAILED_PRECONDITION,
-          "AMDGPU assembly source-immediate descriptor '%.*s' has unsupported "
-          "shape",
-          (int)key.size, key.data);
+    IREE_RETURN_IF_ERROR(loom_amdgpu_occupy_source_immediate_slot(
+        context, slots, immediate_source_indices[immediate_index],
+        LOOM_AMDGPU_SOURCE_IMMEDIATE_SLOT_IMMEDIATE, immediate_index));
+  }
+
+  const loom_low_operand_t* operands =
+      &descriptor_set->operands[descriptor->operand_start];
+  uint16_t packet_operand_index = 0;
+  for (uint16_t descriptor_operand_index = descriptor->result_count;
+       descriptor_operand_index < descriptor->operand_count;
+       ++descriptor_operand_index) {
+    const loom_low_operand_t* operand = &operands[descriptor_operand_index];
+    if (iree_any_bit_set(operand->flags, LOOM_LOW_OPERAND_FLAG_IMPLICIT) ||
+        !loom_low_operand_role_is_packet_operand(operand->role)) {
+      continue;
     }
-    source_uses_immediate[source_index] = true;
-    immediate_index_by_source[source_index] = immediate_index;
+    uint8_t source_index = 0;
+    if (!loom_amdgpu_source_encoding_field_index(operand->encoding_field_id,
+                                                 &source_index)) {
+      return loom_amdgpu_source_immediate_unsupported_shape(context);
+    }
+    IREE_RETURN_IF_ERROR(loom_amdgpu_occupy_source_immediate_slot(
+        context, slots, source_index, LOOM_AMDGPU_SOURCE_IMMEDIATE_SLOT_OPERAND,
+        packet_operand_index));
+    ++packet_operand_index;
+  }
+
+  const loom_amdgpu_encoding_table_t* encoding_table =
+      loom_amdgpu_encoding_table_for_descriptor_set_ordinal(
+          descriptor_set->descriptor_set_ordinal);
+  if (descriptor->encoding_field_value_start >
+          descriptor_set->encoding_field_value_count ||
+      descriptor->encoding_field_value_count >
+          descriptor_set->encoding_field_value_count -
+              descriptor->encoding_field_value_start) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "AMDGPU assembly descriptor encoding field range is out of range");
+  }
+  for (uint16_t i = 0; i < descriptor->encoding_field_value_count; ++i) {
+    const loom_low_encoding_field_value_t* field_value =
+        &descriptor_set
+             ->encoding_field_values[descriptor->encoding_field_value_start +
+                                     i];
+    uint8_t source_index = 0;
+    if (!loom_amdgpu_source_encoding_field_index(field_value->encoding_field_id,
+                                                 &source_index)) {
+      continue;
+    }
+    if (field_value->value > UINT16_MAX || encoding_table == NULL) {
+      return loom_amdgpu_source_immediate_unsupported_shape(context);
+    }
+    const uint16_t source_selector = (uint16_t)field_value->value;
+    if (source_selector == encoding_table->source_literal) {
+      if (slots[source_index].kind ==
+          LOOM_AMDGPU_SOURCE_IMMEDIATE_SLOT_IMMEDIATE) {
+        continue;
+      }
+      return loom_amdgpu_source_immediate_unsupported_shape(context);
+    }
+    IREE_RETURN_IF_ERROR(loom_amdgpu_occupy_source_immediate_slot(
+        context, slots, source_index, LOOM_AMDGPU_SOURCE_IMMEDIATE_SLOT_FIXED,
+        source_selector));
+  }
+
+  iree_host_size_t source_count = 0;
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(slots); ++i) {
+    if (slots[i].kind != LOOM_AMDGPU_SOURCE_IMMEDIATE_SLOT_EMPTY) {
+      source_count = i + 1;
+    }
+  }
+  if (source_count == 0) {
+    return loom_amdgpu_source_immediate_unsupported_shape(context);
+  }
+  for (iree_host_size_t source_index = 0; source_index < source_count;
+       ++source_index) {
+    if (slots[source_index].kind == LOOM_AMDGPU_SOURCE_IMMEDIATE_SLOT_EMPTY) {
+      return loom_amdgpu_source_immediate_unsupported_shape(context);
+    }
   }
 
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_string(context->builder, base_mnemonic));
-  IREE_RETURN_IF_ERROR(
-      iree_string_builder_append_cstring(context->builder, " "));
-  IREE_RETURN_IF_ERROR(loom_amdgpu_append_result(context, 0));
-  iree_host_size_t operand_index = 0;
+  bool in_list = false;
+  if (!iree_any_bit_set(operands[0].flags, LOOM_LOW_OPERAND_FLAG_IMPLICIT)) {
+    IREE_RETURN_IF_ERROR(
+        loom_amdgpu_append_asm_form_separator(context, &in_list));
+    IREE_RETURN_IF_ERROR(loom_amdgpu_append_result(context, 0));
+  }
   for (iree_host_size_t source_index = 0; source_index < source_count;
        ++source_index) {
-    IREE_RETURN_IF_ERROR(loom_amdgpu_append_comma(context));
-    if (source_uses_immediate[source_index]) {
-      IREE_RETURN_IF_ERROR(loom_amdgpu_append_packet_immediate_i64(
-          context, immediate_index_by_source[source_index]));
-    } else {
-      IREE_RETURN_IF_ERROR(loom_amdgpu_append_operand(context, operand_index));
-      ++operand_index;
+    IREE_RETURN_IF_ERROR(
+        loom_amdgpu_append_asm_form_separator(context, &in_list));
+    switch (slots[source_index].kind) {
+      case LOOM_AMDGPU_SOURCE_IMMEDIATE_SLOT_OPERAND: {
+        IREE_RETURN_IF_ERROR(
+            loom_amdgpu_append_operand(context, slots[source_index].value));
+        break;
+      }
+      case LOOM_AMDGPU_SOURCE_IMMEDIATE_SLOT_IMMEDIATE: {
+        IREE_RETURN_IF_ERROR(loom_amdgpu_append_packet_immediate_i64(
+            context, slots[source_index].value));
+        break;
+      }
+      case LOOM_AMDGPU_SOURCE_IMMEDIATE_SLOT_FIXED: {
+        IREE_RETURN_IF_ERROR(loom_amdgpu_append_fixed_source_selector(
+            context, encoding_table, slots[source_index].value));
+        break;
+      }
+      default:
+        return loom_amdgpu_source_immediate_unsupported_shape(context);
     }
   }
   return iree_ok_status();
