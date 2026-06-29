@@ -8,6 +8,18 @@ func.def @vector_sitofp_i32x2(%input: vector<2xi32>, %scale: vector<2xf32>) -> (
 
 // ====
 
+func.def @vector_decode_splat_f8_scale(%input: buffer, %base: offset, %scale: vector<1xf32>) -> (vector<2xf32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %input_view = buffer.view %input[%base] : buffer -> view<1xf8E4M3, %layout>
+  %raw = view.load %input_view[0] : view<1xf8E4M3, %layout> -> f8E4M3
+  %payload = vector.splat %raw : vector<2xf8E4M3>
+  %schema = encoding.define #matrix_operand<affine=scale_only, element_format=f8e4m3, payload_elements=2, payload_packing=dense_lanes, payload_registers=0, scale_format=f32, scale_group_elements=2, scale_operands=1, scale_topology=block_1d> : encoding<schema>
+  %decoded = vector.decode %payload using %schema {scale = %scale : vector<1xf32>} : vector<2xf8E4M3>, encoding<schema> -> vector<2xf32>
+  func.return %decoded : vector<2xf32>
+}
+
+// ====
+
 func.def @vector_sitofp_i8x4(%input: vector<4xi8>) -> (vector<4xf32>) {
   %converted = vector.sitofp %input : vector<4xi8> to vector<4xf32>
   func.return %converted : vector<4xf32>

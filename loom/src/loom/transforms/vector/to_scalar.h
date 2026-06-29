@@ -64,6 +64,17 @@ iree_status_t loom_vector_descriptor_to_scalar_rewrite_op(
     loom_pass_t* pass, loom_rewriter_t* rewriter, loom_op_t* op,
     bool* out_rewritten);
 
+// Rewrites one vector.decode op using scalar reference semantics.
+iree_status_t loom_vector_decode_to_scalar_rewrite_op(loom_pass_t* pass,
+                                                      loom_rewriter_t* rewriter,
+                                                      loom_op_t* op,
+                                                      bool* out_rewritten);
+
+// Returns target-independent rejection flags explaining why the scalar
+// reference lowering would refuse one vector.decode op.
+uint32_t loom_vector_decode_to_scalar_reference_rejection_bits(
+    loom_pass_t* pass, loom_rewriter_t* rewriter, loom_op_t* op);
+
 // Rewrites one vector.mma op using scalar reference semantics. Dense logical
 // fragments lower directly; target-shaped physical fragments require options
 // that provide the selected matrix-fragment layout and permit subgroup
