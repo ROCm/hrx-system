@@ -915,10 +915,13 @@ iree_status_t iree_hal_streaming_kpack_discover_binary_path(
   }
   uintptr_t target = (uintptr_t)address_in_binary;
   char line[KPACK_PATH_MAX + 256];
-  iree_status_t status = iree_make_status(
-      IREE_STATUS_NOT_FOUND,
-      "kpack_discover_binary_path: address %p not in any file mapping",
-      address_in_binary);
+  // Defer building the not-found status until the scan finds no containing
+  // mapping. It carries a formatted (heap-allocated) message and the branches
+  // below overwrite |status|, so allocating it eagerly here would leak it
+  // whenever a mapping is found. Track whether any file mapping matched
+  // instead.
+  bool matched = false;
+  iree_status_t status = iree_ok_status();
   while (fgets(line, sizeof(line), maps)) {
     // Format: "<low>-<high> <perms> <offset> <dev> <inode> <path>".
     char* dash = strchr(line, '-');
@@ -928,6 +931,7 @@ iree_status_t iree_hal_streaming_kpack_discover_binary_path(
     if (endp != dash) continue;
     uintptr_t high = (uintptr_t)strtoull(dash + 1, &endp, 16);
     if (target < low || target >= high) continue;
+    matched = true;
 
     // endp points just past the high address, at the space before perms.
     char* cursor = endp;
@@ -969,6 +973,12 @@ iree_status_t iree_hal_streaming_kpack_discover_binary_path(
     break;
   }
   fclose(maps);
+  if (!matched) {
+    status = iree_make_status(
+        IREE_STATUS_NOT_FOUND,
+        "kpack_discover_binary_path: address %p not in any file mapping",
+        address_in_binary);
+  }
   return status;
 #else
   (void)out_offset;
