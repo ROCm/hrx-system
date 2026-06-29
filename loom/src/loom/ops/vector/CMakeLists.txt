@@ -84,6 +84,7 @@ loom_generated_cc_library(
     loom::rewrite::type_propagation
     loom::util::fact_table
     loom::util::math
+    loom::util::numeric_format
     loom::util::stable_id
 )
 

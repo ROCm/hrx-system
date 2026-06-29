@@ -28,6 +28,7 @@
 #include "loom/ops/vector/ops.h"
 #include "loom/util/fact_table.h"
 #include "loom/util/math.h"
+#include "loom/util/numeric_format.h"
 
 #define LOOM_VECTOR_FACT_STATIC_LOOP_LIMIT 1024
 
@@ -580,6 +581,53 @@ static bool loom_vector_fragment_load_preserves_view_element_type(
              loom_type_element_type(result_type);
 }
 
+static bool loom_vector_fragment_load_preserves_target_fragment_storage_schema(
+    const loom_module_t* module, const loom_op_t* op,
+    loom_value_fact_storage_schema_t storage_schema) {
+  const loom_value_fact_encoded_operand_schema_t operand =
+      storage_schema.encoded_operand;
+  if (loom_value_fact_encoded_operand_schema_is_unknown(operand) ||
+      !iree_any_bit_set(operand.payload_packing,
+                        LOOM_VALUE_FACT_PAYLOAD_PACKING_TARGET_FRAGMENT) ||
+      operand.payload_register_count == 0 ||
+      operand.payload_element_count == 0) {
+    return false;
+  }
+
+  const loom_numeric_format_info_t* element_format = NULL;
+  if (!loom_numeric_format_info(operand.element_format, &element_format) ||
+      element_format->storage_bit_count == 0) {
+    return false;
+  }
+
+  loom_type_t view_type =
+      loom_module_value_type(module, loom_vector_fragment_load_view(op));
+  loom_type_t result_type =
+      loom_module_value_type(module, loom_vector_fragment_load_result(op));
+  if (!loom_type_is_view(view_type) || !loom_type_is_vector(result_type) ||
+      !loom_type_is_all_static(result_type)) {
+    return false;
+  }
+  const int32_t view_element_bit_count =
+      loom_scalar_type_bitwidth(loom_type_element_type(view_type));
+  if (view_element_bit_count != element_format->storage_bit_count) {
+    return false;
+  }
+
+  uint64_t result_element_count = 0;
+  if (!loom_type_static_element_count(result_type, &result_element_count)) {
+    return false;
+  }
+  const int32_t result_element_bit_count =
+      loom_scalar_type_bitwidth(loom_type_element_type(result_type));
+  if (result_element_bit_count <= 0 ||
+      result_element_count > UINT64_MAX / (uint64_t)result_element_bit_count) {
+    return false;
+  }
+  return result_element_count * (uint64_t)result_element_bit_count ==
+         (uint64_t)operand.payload_register_count * 32ull;
+}
+
 iree_status_t loom_vector_fragment_facts(
     loom_fact_context_t* context, const loom_module_t* module,
     const loom_op_t* op, const loom_value_facts_t* operand_facts,
@@ -666,12 +714,14 @@ iree_status_t loom_vector_fragment_load_facts(
 
   const loom_value_id_t view_value_id = loom_vector_fragment_load_view(op);
   loom_value_fact_storage_schema_t storage_schema = {0};
-  if (loom_vector_fragment_load_preserves_view_element_type(module, op) &&
-      loom_encoding_query_type_storage_schema(
+  if (loom_encoding_query_type_storage_schema(
           context, module, loom_module_value_type(module, view_value_id),
           &storage_schema) &&
       !loom_value_fact_encoded_operand_schema_is_unknown(
-          storage_schema.encoded_operand)) {
+          storage_schema.encoded_operand) &&
+      (loom_vector_fragment_load_preserves_view_element_type(module, op) ||
+       loom_vector_fragment_load_preserves_target_fragment_storage_schema(
+           module, op, storage_schema))) {
     fact.flags |= LOOM_VECTOR_FRAGMENT_FACT_FLAG_HAS_SCHEMA;
     fact.encoded_operand = storage_schema.encoded_operand;
     if (storage_schema.static_spec_encoding_id != 0) {
