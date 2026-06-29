@@ -209,8 +209,25 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
     )
     parser.add_argument(
         "--dit_feed_forward_implementation",
-        default="pytorch_parity",
+        default="fused_product",
         choices=("fused_product", "pytorch_parity"),
+    )
+    parser.add_argument(
+        "--generation_residency",
+        default="issue_phases",
+        choices=(
+            "issue_phases",
+            "selected_stage_bundles",
+            "all_stage_bundles",
+        ),
+    )
+    parser.add_argument(
+        "--generation_resident_stage_bundles",
+        default="",
+        help=(
+            "Comma-separated stage bundles retained by "
+            "--generation_residency=selected_stage_bundles."
+        ),
     )
     parser.add_argument(
         "--vae_tiling_mode",
@@ -532,11 +549,17 @@ def build_id4_command(args: argparse.Namespace, artifact_dir: Path) -> list[str]
         f"--dit_weight_execution_format={args.dit_weight_execution_format}",
         f"--dit_attention_implementation={args.dit_attention_implementation}",
         f"--dit_feed_forward_implementation={args.dit_feed_forward_implementation}",
+        f"--generation_residency={args.generation_residency}",
         f"--vae_tiling_mode={args.vae_tiling_mode}",
         f"--dump_plan={artifact_dir / 'plan.json'}",
         f"--dump_diagnostics={artifact_dir / 'diagnostics'}",
         f"--profile_output={artifact_dir / 'profile.txt'}",
     ]
+    if args.generation_resident_stage_bundles:
+        command.append(
+            "--generation_resident_stage_bundles="
+            f"{args.generation_resident_stage_bundles}"
+        )
     if args.vae_tiling_mode == "explicit_tile_size":
         command.extend(
             [
