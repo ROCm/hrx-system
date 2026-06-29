@@ -4379,6 +4379,30 @@ _KERNEL_CASES = [
         "target_name": "ideogram4_linear_input_unpack_bf16_f32_uncond_hidden_1024_shape",
     },
     {
+        "actual_case": "@id4_ideogram4_linear_input_unpack_f32_f32_single_token_case",
+        "benchmark": "@id4_ideogram4_linear_input_unpack_f32_f32_single_token",
+        "configs": [
+            "--config=id4.ideogram4.linear_input_unpack.token_count=1",
+            "--config=id4.ideogram4.linear_input_unpack.token_capacity=1",
+            "--config=id4.ideogram4.linear_input_unpack.input_size=4",
+            "--config=id4.ideogram4.linear_input_unpack.element_count=4",
+        ],
+        "source": "ideogram4/linear_input_unpack_bf16_f32.loom",
+        "target_name": "ideogram4_linear_input_unpack_f32_f32_single_token",
+    },
+    {
+        "actual_case": "@id4_ideogram4_linear_input_unpack_f32_f32_uncond_hidden_1024_shape_case",
+        "benchmark": "@id4_ideogram4_linear_input_unpack_f32_f32_uncond_hidden_1024_shape",
+        "configs": [
+            "--config=id4.ideogram4.linear_input_unpack.token_count=4096",
+            "--config=id4.ideogram4.linear_input_unpack.token_capacity=4096",
+            "--config=id4.ideogram4.linear_input_unpack.input_size=4608",
+            "--config=id4.ideogram4.linear_input_unpack.element_count=18874368",
+        ],
+        "source": "ideogram4/linear_input_unpack_bf16_f32.loom",
+        "target_name": "ideogram4_linear_input_unpack_f32_f32_uncond_hidden_1024_shape",
+    },
+    {
         "actual_case": "@id4_ideogram4_mlp_gate_up_silu_f32_small_case",
         "benchmark": "@id4_ideogram4_mlp_gate_up_silu_f32_small",
         "configs": [
@@ -4730,6 +4754,26 @@ _KERNEL_CASES = [
         "target_name": "ideogram4_modulated_layernorm_bf16_ideogram_shape",
     },
     {
+        "actual_case": "@id4_ideogram4_modulated_layernorm_bf16_input_token_major_small_case",
+        "benchmark": "@id4_ideogram4_modulated_layernorm_bf16_input_token_major_small",
+        "configs": [
+            "--config=id4.ideogram4.modulated_layernorm_bf16.token_count=1",
+            "--config=id4.ideogram4.modulated_layernorm_bf16.hidden_size=4",
+        ],
+        "source": "ideogram4/modulated_layernorm_bf16.loom",
+        "target_name": "ideogram4_modulated_layernorm_bf16_input_token_major_small",
+    },
+    {
+        "actual_case": "@id4_ideogram4_modulated_layernorm_bf16_input_token_major_ideogram_shape_case",
+        "benchmark": "@id4_ideogram4_modulated_layernorm_bf16_input_token_major_ideogram_shape",
+        "configs": [
+            "--config=id4.ideogram4.modulated_layernorm_bf16.token_count=2",
+            "--config=id4.ideogram4.modulated_layernorm_bf16.hidden_size=4608",
+        ],
+        "source": "ideogram4/modulated_layernorm_bf16.loom",
+        "target_name": "ideogram4_modulated_layernorm_bf16_input_token_major_ideogram_shape",
+    },
+    {
         "actual_case": "@id4_ideogram4_modulated_layernorm_image_bf16_small_case",
         "benchmark": "@id4_ideogram4_modulated_layernorm_image_bf16_small",
         "configs": [
@@ -4752,6 +4796,30 @@ _KERNEL_CASES = [
         ],
         "source": "ideogram4/modulated_layernorm_image_bf16.loom",
         "target_name": "ideogram4_modulated_layernorm_image_bf16_ideogram_shape",
+    },
+    {
+        "actual_case": "@id4_ideogram4_modulated_layernorm_image_bf16_input_token_major_small_case",
+        "benchmark": "@id4_ideogram4_modulated_layernorm_image_bf16_input_token_major_small",
+        "configs": [
+            "--config=id4.ideogram4.modulated_layernorm_image_bf16.token_count=3",
+            "--config=id4.ideogram4.modulated_layernorm_image_bf16.token_offset=1",
+            "--config=id4.ideogram4.modulated_layernorm_image_bf16.dispatch_token_count=2",
+            "--config=id4.ideogram4.modulated_layernorm_image_bf16.hidden_size=4",
+        ],
+        "source": "ideogram4/modulated_layernorm_image_bf16.loom",
+        "target_name": "ideogram4_modulated_layernorm_image_bf16_input_token_major_small",
+    },
+    {
+        "actual_case": "@id4_ideogram4_modulated_layernorm_image_bf16_input_token_major_ideogram_shape_case",
+        "benchmark": "@id4_ideogram4_modulated_layernorm_image_bf16_input_token_major_ideogram_shape",
+        "configs": [
+            "--config=id4.ideogram4.modulated_layernorm_image_bf16.token_count=4547",
+            "--config=id4.ideogram4.modulated_layernorm_image_bf16.token_offset=451",
+            "--config=id4.ideogram4.modulated_layernorm_image_bf16.dispatch_token_count=4096",
+            "--config=id4.ideogram4.modulated_layernorm_image_bf16.hidden_size=4608",
+        ],
+        "source": "ideogram4/modulated_layernorm_image_bf16.loom",
+        "target_name": "ideogram4_modulated_layernorm_image_bf16_input_token_major_ideogram_shape",
     },
     {
         "actual_case": "@id4_ideogram4_modulated_rmsnorm_f32_small_case",
@@ -4809,6 +4877,28 @@ _KERNEL_CASES = [
         "target_name": "ideogram4_modulated_rmsnorm_linear_input_bf16_padded_zero",
     },
     {
+        "actual_case": "@id4_ideogram4_modulated_rmsnorm_token_major_linear_input_bf16_small_case",
+        "benchmark": "@id4_ideogram4_modulated_rmsnorm_token_major_linear_input_bf16_small",
+        "configs": [
+            "--config=id4.ideogram4.modulated_rmsnorm.token_count=1",
+            "--config=id4.ideogram4.modulated_rmsnorm.token_capacity=1",
+            "--config=id4.ideogram4.modulated_rmsnorm.hidden_size=4",
+        ],
+        "source": "ideogram4/modulated_rmsnorm_f32.loom",
+        "target_name": "ideogram4_modulated_rmsnorm_token_major_linear_input_bf16_small",
+    },
+    {
+        "actual_case": "@id4_ideogram4_modulated_rmsnorm_token_major_linear_input_bf16_ideogram_shape_case",
+        "benchmark": "@id4_ideogram4_modulated_rmsnorm_token_major_linear_input_bf16_ideogram_shape",
+        "configs": [
+            "--config=id4.ideogram4.modulated_rmsnorm.token_count=2",
+            "--config=id4.ideogram4.modulated_rmsnorm.token_capacity=2",
+            "--config=id4.ideogram4.modulated_rmsnorm.hidden_size=4608",
+        ],
+        "source": "ideogram4/modulated_rmsnorm_f32.loom",
+        "target_name": "ideogram4_modulated_rmsnorm_token_major_linear_input_bf16_ideogram_shape",
+    },
+    {
         "actual_case": "@id4_ideogram4_rmsnorm_gated_residual_f32_small_case",
         "benchmark": "@id4_ideogram4_rmsnorm_gated_residual_f32_small",
         "configs": [
@@ -4847,6 +4937,26 @@ _KERNEL_CASES = [
         ],
         "source": "ideogram4/rmsnorm_gated_residual_f32.loom",
         "target_name": "ideogram4_rmsnorm_gated_residual_input_bf16_ideogram_shape",
+    },
+    {
+        "actual_case": "@id4_ideogram4_rmsnorm_gated_residual_input_bf16_token_major_small_case",
+        "benchmark": "@id4_ideogram4_rmsnorm_gated_residual_input_bf16_token_major_small",
+        "configs": [
+            "--config=id4.ideogram4.rmsnorm_gated_residual.token_count=1",
+            "--config=id4.ideogram4.rmsnorm_gated_residual.hidden_size=4",
+        ],
+        "source": "ideogram4/rmsnorm_gated_residual_f32.loom",
+        "target_name": "ideogram4_rmsnorm_gated_residual_input_bf16_token_major_small",
+    },
+    {
+        "actual_case": "@id4_ideogram4_rmsnorm_gated_residual_input_bf16_token_major_ideogram_shape_case",
+        "benchmark": "@id4_ideogram4_rmsnorm_gated_residual_input_bf16_token_major_ideogram_shape",
+        "configs": [
+            "--config=id4.ideogram4.rmsnorm_gated_residual.token_count=2",
+            "--config=id4.ideogram4.rmsnorm_gated_residual.hidden_size=4608",
+        ],
+        "source": "ideogram4/rmsnorm_gated_residual_f32.loom",
+        "target_name": "ideogram4_rmsnorm_gated_residual_input_bf16_token_major_ideogram_shape",
     },
     {
         "actual_case": "@id4_ideogram4_qkv_split_f32_small_case",

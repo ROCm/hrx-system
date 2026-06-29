@@ -153,6 +153,11 @@ iree_status_t id4_ideogram4_dit_program_tap_linear_input_bf16_as_f32(
     uint32_t token_count, uint32_t token_capacity, uint32_t input_size,
     id4_pipeline_program_tensor_t packed_input);
 
+iree_status_t id4_ideogram4_dit_program_tap_token_major_f32_as_f32(
+    id4_pipeline_program_builder_t* builder, iree_string_view_t name,
+    uint32_t token_count, uint32_t input_size,
+    id4_pipeline_program_tensor_t token_major_input);
+
 iree_status_t id4_ideogram4_dit_program_tap_bf16_as_f32(
     id4_pipeline_program_builder_t* builder, iree_string_view_t name,
     id4_pipeline_program_shape_t shape, id4_pipeline_program_tensor_t input);
@@ -182,7 +187,7 @@ iree_status_t id4_ideogram4_dit_program_dispatch_modulated_rmsnorm(
     id4_pipeline_program_tensor_t scale, id4_pipeline_program_tensor_t output);
 
 iree_status_t
-id4_ideogram4_dit_program_dispatch_modulated_rmsnorm_linear_input_bf16(
+id4_ideogram4_dit_program_dispatch_modulated_rmsnorm_token_major_linear_input_bf16(
     id4_pipeline_program_builder_t* builder, iree_string_view_t name,
     uint32_t token_count, uint32_t token_capacity, uint32_t hidden_size,
     id4_pipeline_program_tensor_t input, id4_pipeline_program_tensor_t weight,
@@ -196,7 +201,7 @@ iree_status_t id4_ideogram4_dit_program_dispatch_rmsnorm_gated_residual(
     id4_pipeline_program_tensor_t output);
 
 iree_status_t
-id4_ideogram4_dit_program_dispatch_rmsnorm_gated_residual_input_bf16(
+id4_ideogram4_dit_program_dispatch_rmsnorm_gated_residual_input_bf16_token_major(
     id4_pipeline_program_builder_t* builder, iree_string_view_t name,
     uint32_t token_count, uint32_t hidden_size,
     id4_pipeline_program_tensor_t input, id4_pipeline_program_tensor_t weight,
@@ -307,6 +312,11 @@ iree_status_t id4_ideogram4_dit_program_dispatch_linear_fp8_f32(
 iree_status_t id4_ideogram4_dit_program_dispatch_linear_input_unpack_bf16_f32(
     id4_pipeline_program_builder_t* builder, iree_string_view_t name,
     uint32_t token_count, uint32_t token_capacity, uint32_t input_size,
+    id4_pipeline_program_tensor_t input, id4_pipeline_program_tensor_t output);
+
+iree_status_t id4_ideogram4_dit_program_dispatch_linear_input_unpack_f32_f32(
+    id4_pipeline_program_builder_t* builder, iree_string_view_t name,
+    uint32_t token_count, uint32_t input_size,
     id4_pipeline_program_tensor_t input, id4_pipeline_program_tensor_t output);
 
 iree_status_t id4_ideogram4_dit_program_dispatch_qkv_split(

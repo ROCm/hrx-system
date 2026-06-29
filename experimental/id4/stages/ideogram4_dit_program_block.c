@@ -213,6 +213,40 @@ iree_status_t id4_ideogram4_dit_program_tap_linear_input_bf16_as_f32(
   return id4_ideogram4_dit_program_tap(builder, name, canonical_tensor);
 }
 
+iree_status_t id4_ideogram4_dit_program_tap_token_major_f32_as_f32(
+    id4_pipeline_program_builder_t* builder, iree_string_view_t name,
+    uint32_t token_count, uint32_t input_size,
+    id4_pipeline_program_tensor_t token_major_input) {
+  char canonical_tensor_name_buffer[ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
+  char dispatch_name_buffer[ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
+  char barrier_name_buffer[ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
+  iree_string_view_t canonical_tensor_name = iree_string_view_empty();
+  iree_string_view_t dispatch_name = iree_string_view_empty();
+  iree_string_view_t barrier_name = iree_string_view_empty();
+  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_format_child_name(
+      name, IREE_SV("canonical"), canonical_tensor_name_buffer,
+      IREE_ARRAYSIZE(canonical_tensor_name_buffer), &canonical_tensor_name));
+  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_format_child_name(
+      name, IREE_SV("unpack"), dispatch_name_buffer,
+      IREE_ARRAYSIZE(dispatch_name_buffer), &dispatch_name));
+  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_format_child_name(
+      name, IREE_SV("after_unpack"), barrier_name_buffer,
+      IREE_ARRAYSIZE(barrier_name_buffer), &barrier_name));
+  id4_pipeline_program_tensor_t canonical_tensor =
+      id4_pipeline_program_tensor_invalid();
+  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_acquire_tensor(
+      builder, canonical_tensor_name, ID4_PIPELINE_PROGRAM_DTYPE_F32,
+      id4_pipeline_program_make_shape_rank2(input_size, token_count),
+      &canonical_tensor));
+  IREE_RETURN_IF_ERROR(
+      id4_ideogram4_dit_program_dispatch_linear_input_unpack_f32_f32(
+          builder, dispatch_name, token_count, input_size, token_major_input,
+          canonical_tensor));
+  IREE_RETURN_IF_ERROR(
+      id4_ideogram4_dit_program_barrier(builder, barrier_name));
+  return id4_ideogram4_dit_program_tap(builder, name, canonical_tensor);
+}
+
 static iree_status_t id4_ideogram4_dit_program_dispatch_linear_parameter_f32(
     id4_pipeline_program_builder_t* builder, iree_string_view_t name,
     uint32_t token_count, uint32_t input_size, uint32_t output_size,
@@ -617,6 +651,13 @@ iree_status_t id4_ideogram4_dit_program_author_transformer_block(
   uint32_t bf16_token_capacity = 0;
   IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_calculate_bf16_token_capacity(
       total_token_count, &bf16_token_capacity));
+  const id4_pipeline_program_shape_t canonical_hidden_shape =
+      id4_pipeline_program_make_shape_rank2(hidden_size, total_token_count);
+  const id4_pipeline_program_shape_t token_major_hidden_shape =
+      id4_pipeline_program_make_shape_rank2(total_token_count, hidden_size);
+  const id4_pipeline_program_shape_t resident_hidden_shape =
+      f32_canonical_activations ? canonical_hidden_shape
+                                : token_major_hidden_shape;
   uint64_t modulation_output_size64 = 0;
   if (!id4_ideogram4_dit_program_checked_mul_u64(hidden_size, 4,
                                                  &modulation_output_size64) ||
@@ -811,8 +852,7 @@ iree_status_t id4_ideogram4_dit_program_author_transformer_block(
   if (attention_input_as_f32) {
     IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_acquire_tensor(
         builder, attention_input_name, ID4_PIPELINE_PROGRAM_DTYPE_F32,
-        id4_pipeline_program_make_shape_rank2(hidden_size, total_token_count),
-        &attention_input));
+        canonical_hidden_shape, &attention_input));
     IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_dispatch_modulated_rmsnorm(
         builder, attention_input_dispatch_name, total_token_count, hidden_size,
         hidden_input, attention_norm1_weight, scale_msa, attention_input));
@@ -822,7 +862,7 @@ iree_status_t id4_ideogram4_dit_program_author_transformer_block(
         id4_pipeline_program_make_shape_rank2(bf16_token_capacity, hidden_size),
         &attention_input));
     IREE_RETURN_IF_ERROR(
-        id4_ideogram4_dit_program_dispatch_modulated_rmsnorm_linear_input_bf16(
+        id4_ideogram4_dit_program_dispatch_modulated_rmsnorm_token_major_linear_input_bf16(
             builder, attention_input_dispatch_name, total_token_count,
             bf16_token_capacity, hidden_size, hidden_input,
             attention_norm1_weight, scale_msa, attention_input));
@@ -1274,8 +1314,7 @@ iree_status_t id4_ideogram4_dit_program_author_transformer_block(
       id4_pipeline_program_tensor_invalid();
   IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_acquire_tensor(
       builder, post_attention_hidden_name, ID4_PIPELINE_PROGRAM_DTYPE_F32,
-      id4_pipeline_program_make_shape_rank2(hidden_size, total_token_count),
-      &post_attention_hidden));
+      resident_hidden_shape, &post_attention_hidden));
   if (attention_output_as_f32) {
     IREE_RETURN_IF_ERROR(
         id4_ideogram4_dit_program_dispatch_rmsnorm_gated_residual(
@@ -1284,7 +1323,7 @@ iree_status_t id4_ideogram4_dit_program_author_transformer_block(
             hidden_input, post_attention_hidden));
   } else {
     IREE_RETURN_IF_ERROR(
-        id4_ideogram4_dit_program_dispatch_rmsnorm_gated_residual_input_bf16(
+        id4_ideogram4_dit_program_dispatch_rmsnorm_gated_residual_input_bf16_token_major(
             builder, attention_residual_dispatch_name, total_token_count,
             hidden_size, attention_output, attention_norm2_weight, gate_msa,
             hidden_input, post_attention_hidden));
@@ -1300,8 +1339,15 @@ iree_status_t id4_ideogram4_dit_program_author_transformer_block(
       &after_attention_residual_name));
   IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_barrier(
       builder, after_attention_residual_name));
-  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_tap(
-      builder, post_attention_hidden_name, post_attention_hidden));
+  if (f32_canonical_activations) {
+    IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_tap(
+        builder, post_attention_hidden_name, post_attention_hidden));
+  } else if (id4_ideogram4_dit_program_has_diagnostic_tap(
+                 diagnostic_tap_names, post_attention_hidden_name)) {
+    IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_tap_token_major_f32_as_f32(
+        builder, post_attention_hidden_name, total_token_count, hidden_size,
+        post_attention_hidden));
+  }
 
   char ffn_input_name_buffer[ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
   char ffn_input_dispatch_name_buffer[ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
@@ -1383,8 +1429,7 @@ iree_status_t id4_ideogram4_dit_program_author_transformer_block(
   if (capture_ffn_input_as_f32) {
     IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_acquire_tensor(
         builder, ffn_input_name, ID4_PIPELINE_PROGRAM_DTYPE_F32,
-        id4_pipeline_program_make_shape_rank2(hidden_size, total_token_count),
-        &ffn_input));
+        canonical_hidden_shape, &ffn_input));
     IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_dispatch_modulated_rmsnorm(
         builder, ffn_input_dispatch_name, total_token_count, hidden_size,
         post_attention_hidden, ffn_norm1_weight, scale_mlp, ffn_input));
@@ -1394,7 +1439,7 @@ iree_status_t id4_ideogram4_dit_program_author_transformer_block(
         id4_pipeline_program_make_shape_rank2(bf16_token_capacity, hidden_size),
         &ffn_input));
     IREE_RETURN_IF_ERROR(
-        id4_ideogram4_dit_program_dispatch_modulated_rmsnorm_linear_input_bf16(
+        id4_ideogram4_dit_program_dispatch_modulated_rmsnorm_token_major_linear_input_bf16(
             builder, ffn_input_dispatch_name, total_token_count,
             bf16_token_capacity, hidden_size, post_attention_hidden,
             ffn_norm1_weight, scale_mlp, ffn_input));
@@ -1732,8 +1777,7 @@ iree_status_t id4_ideogram4_dit_program_author_transformer_block(
       id4_pipeline_program_tensor_invalid();
   IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_acquire_tensor(
       builder, layer_output_name, ID4_PIPELINE_PROGRAM_DTYPE_F32,
-      id4_pipeline_program_make_shape_rank2(hidden_size, total_token_count),
-      &layer_output));
+      resident_hidden_shape, &layer_output));
   if (mlp_output_as_f32) {
     IREE_RETURN_IF_ERROR(
         id4_ideogram4_dit_program_dispatch_rmsnorm_gated_residual(
@@ -1742,7 +1786,7 @@ iree_status_t id4_ideogram4_dit_program_author_transformer_block(
             layer_output));
   } else {
     IREE_RETURN_IF_ERROR(
-        id4_ideogram4_dit_program_dispatch_rmsnorm_gated_residual_input_bf16(
+        id4_ideogram4_dit_program_dispatch_rmsnorm_gated_residual_input_bf16_token_major(
             builder, mlp_residual_dispatch_name, total_token_count, hidden_size,
             mlp_output, ffn_norm2_weight, gate_mlp, post_attention_hidden,
             layer_output));
@@ -1756,8 +1800,15 @@ iree_status_t id4_ideogram4_dit_program_author_transformer_block(
       &after_layer_name));
   IREE_RETURN_IF_ERROR(
       id4_ideogram4_dit_program_barrier(builder, after_layer_name));
-  IREE_RETURN_IF_ERROR(
-      id4_ideogram4_dit_program_tap(builder, layer_output_name, layer_output));
+  if (f32_canonical_activations) {
+    IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_tap(
+        builder, layer_output_name, layer_output));
+  } else if (id4_ideogram4_dit_program_has_diagnostic_tap(diagnostic_tap_names,
+                                                          layer_output_name)) {
+    IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_tap_token_major_f32_as_f32(
+        builder, layer_output_name, total_token_count, hidden_size,
+        layer_output));
+  }
   *out_hidden = layer_output;
   return iree_ok_status();
 }
