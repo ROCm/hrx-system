@@ -226,6 +226,17 @@ typedef enum id4_ideogram4_generation_phase_bit_e {
       ID4_IDEOGRAM4_GENERATION_PHASE_DECODE,
 } id4_ideogram4_generation_phase_bit_t;
 
+// Full-generation issue scheduling policy.
+typedef enum id4_ideogram4_generation_issue_policy_e {
+  // Prepares and issues high-level generation phases, preserving branch
+  // concurrency inside each phase.
+  ID4_IDEOGRAM4_GENERATION_ISSUE_POLICY_PHASE_CONCURRENT = 0,
+  // Prepares and issues heavyweight stages serially, waiting at semantic
+  // boundaries so stage-owned parameter slabs can be released before the next
+  // heavyweight stage is prepared.
+  ID4_IDEOGRAM4_GENERATION_ISSUE_POLICY_STAGE_SERIAL = 1,
+} id4_ideogram4_generation_issue_policy_t;
+
 // Bitmask selecting coarse stage bundles retained across generation issues.
 typedef uint32_t id4_ideogram4_generation_resident_stage_mask_t;
 
@@ -291,6 +302,8 @@ typedef struct id4_ideogram4_generation_issue_options_t {
   const iree_tokenizer_t* tokenizer;
   // Tokenizer flags used while encoding the Qwen prompt text.
   iree_tokenizer_encode_flags_t tokenizer_flags;
+  // Policy controlling how the full generation is submitted.
+  id4_ideogram4_generation_issue_policy_t issue_policy;
   // Semaphores that request uploads and generation execution wait on.
   iree_hal_semaphore_list_t wait_semaphore_list;
   // Semaphores signaled when the final decoded image is ready.

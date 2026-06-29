@@ -84,7 +84,7 @@ IREE_FLAG(string, generation_residency, "issue_phases",
           "Generation residency mode: issue_phases, "
           "selected_stage_bundles, or all_stage_bundles.");
 IREE_FLAG(string, generation_issue_mode, "full",
-          "Generation issue mode: full or phases.");
+          "Generation issue mode: full, phases, or stage_serial.");
 IREE_FLAG(string, generation_resident_stage_bundles, "",
           "Comma-separated stage bundles retained by "
           "--generation_residency=selected_stage_bundles: qwen, "
@@ -108,6 +108,8 @@ typedef enum id4_cli_generation_issue_mode_e {
   ID4_CLI_GENERATION_ISSUE_MODE_FULL = 0,
   // Issue generation through explicit conditioning, denoise, and decode phases.
   ID4_CLI_GENERATION_ISSUE_MODE_PHASES = 1,
+  // Issue the whole generation by serializing heavyweight stage submission.
+  ID4_CLI_GENERATION_ISSUE_MODE_STAGE_SERIAL = 2,
 } id4_cli_generation_issue_mode_t;
 
 typedef enum id4_cli_dit_fp8_source_residency_bits_e {
@@ -515,8 +517,13 @@ static iree_status_t id4_cli_parse_generation_issue_mode(
     *out_mode = ID4_CLI_GENERATION_ISSUE_MODE_PHASES;
     return iree_ok_status();
   }
+  if (iree_string_view_equal(value, IREE_SV("stage_serial"))) {
+    *out_mode = ID4_CLI_GENERATION_ISSUE_MODE_STAGE_SERIAL;
+    return iree_ok_status();
+  }
   return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                          "--generation_issue_mode must be full or phases");
+                          "--generation_issue_mode must be full, phases, or "
+                          "stage_serial");
 }
 
 static iree_status_t id4_cli_parse_generation_resident_stage_mask(
@@ -1252,6 +1259,7 @@ static iree_status_t id4_cli_prepare_issue_release_generation_phase(
 static iree_status_t id4_cli_issue_generation_full(
     id4_ideogram4_session_t* session, id4_ideogram4_generation_bundle_t* bundle,
     const id4_ideogram4_request_t* request, iree_tokenizer_t* tokenizer,
+    id4_ideogram4_generation_issue_policy_t issue_policy,
     iree_hal_semaphore_list_t prepare_wait_list,
     iree_hal_semaphore_list_t completion_signal_list,
     id4_pipeline_diagnostics_sink_t* diagnostics_sink,
@@ -1262,6 +1270,7 @@ static iree_status_t id4_cli_issue_generation_full(
   issue_options.request = request;
   issue_options.tokenizer = tokenizer;
   issue_options.tokenizer_flags = IREE_TOKENIZER_ENCODE_FLAG_NONE;
+  issue_options.issue_policy = issue_policy;
   issue_options.wait_semaphore_list = prepare_wait_list;
   issue_options.signal_semaphore_list = completion_signal_list;
   issue_options.diagnostics_sink = diagnostics_sink;
@@ -1957,6 +1966,16 @@ static iree_status_t id4_cli_run_generation(iree_allocator_t host_allocator) {
         ++completion_payload_storage;
         status = id4_cli_issue_generation_full(
             session, generation_bundle, &request, tokenizer,
+            ID4_IDEOGRAM4_GENERATION_ISSUE_POLICY_PHASE_CONCURRENT,
+            prepare_signal_list, completion_list, &diagnostics_sink,
+            &execution);
+        break;
+      }
+      case ID4_CLI_GENERATION_ISSUE_MODE_STAGE_SERIAL: {
+        ++completion_payload_storage;
+        status = id4_cli_issue_generation_full(
+            session, generation_bundle, &request, tokenizer,
+            ID4_IDEOGRAM4_GENERATION_ISSUE_POLICY_STAGE_SERIAL,
             prepare_signal_list, completion_list, &diagnostics_sink,
             &execution);
         break;

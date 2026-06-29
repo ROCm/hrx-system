@@ -46,7 +46,7 @@ IREE_FLAG(string, generation_residency, "issue_phases",
           "Generation stage-bundle residency: issue_phases or "
           "selected_stage_bundles or all_stage_bundles.");
 IREE_FLAG(string, generation_issue_mode, "full",
-          "Generation issue mode: full or phases.");
+          "Generation issue mode: full, phases, or stage_serial.");
 IREE_FLAG(string, generation_resident_stage_bundles, "",
           "Comma-separated generation stage bundles retained when "
           "--generation_residency=selected_stage_bundles: qwen, "
@@ -191,6 +191,7 @@ struct GenerationBenchmarkSourceCacheStatistics {
 enum class GenerationIssueMode {
   kFull,
   kPhases,
+  kStageSerial,
 };
 
 enum class CustomRequestSource {
@@ -604,8 +605,13 @@ static iree_status_t ParseGenerationIssueMode(
     *out_issue_mode = GenerationIssueMode::kPhases;
     return iree_ok_status();
   }
+  if (iree_string_view_equal(value, IREE_SV("stage_serial"))) {
+    *out_issue_mode = GenerationIssueMode::kStageSerial;
+    return iree_ok_status();
+  }
   return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                          "--generation_issue_mode must be full or phases");
+                          "--generation_issue_mode must be full, phases, or "
+                          "stage_serial");
 }
 
 static iree_string_view_t GenerationIssueModeName(GenerationIssueMode mode) {
@@ -614,6 +620,8 @@ static iree_string_view_t GenerationIssueModeName(GenerationIssueMode mode) {
       return IREE_SV("full");
     case GenerationIssueMode::kPhases:
       return IREE_SV("phases");
+    case GenerationIssueMode::kStageSerial:
+      return IREE_SV("stage_serial");
   }
   return IREE_SV("unknown");
 }
@@ -1381,7 +1389,8 @@ static iree_status_t IssueGenerationBundle(
   IREE_ASSERT_ARGUMENT(out_execution);
   *out_execution = nullptr;
 
-  if (context.generation_issue_mode == GenerationIssueMode::kFull) {
+  if (context.generation_issue_mode == GenerationIssueMode::kFull ||
+      context.generation_issue_mode == GenerationIssueMode::kStageSerial) {
     id4::test::SemaphoreListStorage prepare_wait;
     prepare_wait.semaphore = prepare_semaphore;
     prepare_wait.payload_value = *prepare_value;
@@ -1395,6 +1404,10 @@ static iree_status_t IssueGenerationBundle(
     issue_options.request = &request.request;
     issue_options.tokenizer = context.tokenizer.get();
     issue_options.tokenizer_flags = IREE_TOKENIZER_ENCODE_FLAG_NONE;
+    issue_options.issue_policy =
+        context.generation_issue_mode == GenerationIssueMode::kStageSerial
+            ? ID4_IDEOGRAM4_GENERATION_ISSUE_POLICY_STAGE_SERIAL
+            : ID4_IDEOGRAM4_GENERATION_ISSUE_POLICY_PHASE_CONCURRENT;
     issue_options.wait_semaphore_list = prepare_wait.list();
     issue_options.signal_semaphore_list = completion_signal.list();
     issue_options.diagnostics_sink = diagnostics_sink;
