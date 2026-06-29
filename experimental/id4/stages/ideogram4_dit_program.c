@@ -1894,12 +1894,14 @@ id4_ideogram4_dit_program_dispatch_mlp_up_silu_product_packed_bf16_compact_rhs_t
         " is smaller than token count %" PRIu32,
         token_capacity, token_count);
   }
-  if ((token_capacity % ID4_IDEOGRAM4_DIT_LINEAR_WMMA_TOKEN_BLOCK) != 0) {
+  if ((token_capacity %
+       ID4_IDEOGRAM4_DIT_LINEAR_BF16_BF16_TWO_WAVE_TOKEN_BLOCK) != 0) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "Ideogram4 compact RHS MLP up/product token capacity %" PRIu32
         " must be a multiple of %u",
-        token_capacity, ID4_IDEOGRAM4_DIT_LINEAR_WMMA_TOKEN_BLOCK);
+        token_capacity,
+        ID4_IDEOGRAM4_DIT_LINEAR_BF16_BF16_TWO_WAVE_TOKEN_BLOCK);
   }
   if ((input_size % ID4_IDEOGRAM4_DIT_LINEAR_TOKEN_BLOCK) != 0) {
     return iree_make_status(
@@ -1918,16 +1920,16 @@ id4_ideogram4_dit_program_dispatch_mlp_up_silu_product_packed_bf16_compact_rhs_t
         ID4_IDEOGRAM4_DIT_LINEAR_BF16_BF16_COMPACT_OUTPUT_ROW_BLOCK);
   }
   const id4_ideogram4_dit_program_config_value_t config_values[] = {
-      {IREE_SV("id4.ideogram4.mlp_up_silu_product_compact_rhs_wmma."
+      {IREE_SV("id4.ideogram4.mlp_up_silu_product_compact_rhs_m128n128_wmma."
                "token_count"),
        token_capacity},
-      {IREE_SV("id4.ideogram4.mlp_up_silu_product_compact_rhs_wmma."
+      {IREE_SV("id4.ideogram4.mlp_up_silu_product_compact_rhs_m128n128_wmma."
                "dispatch_token_count"),
        token_capacity},
-      {IREE_SV("id4.ideogram4.mlp_up_silu_product_compact_rhs_wmma."
+      {IREE_SV("id4.ideogram4.mlp_up_silu_product_compact_rhs_m128n128_wmma."
                "input_size"),
        input_size},
-      {IREE_SV("id4.ideogram4.mlp_up_silu_product_compact_rhs_wmma."
+      {IREE_SV("id4.ideogram4.mlp_up_silu_product_compact_rhs_m128n128_wmma."
                "intermediate_size"),
        intermediate_size},
   };
@@ -1946,8 +1948,11 @@ id4_ideogram4_dit_program_dispatch_mlp_up_silu_product_packed_bf16_compact_rhs_t
   };
   return id4_ideogram4_dit_program_dispatch_loom(
       builder, name,
-      IREE_SV("ideogram4/mlp_up_silu_product_bf16_wmma_compact_rhs_tile"),
-      IREE_SV("id4_ideogram4_mlp_up_silu_product_bf16_wmma_compact_rhs_tile"),
+      IREE_SV("ideogram4/"
+              "mlp_up_silu_product_bf16_wmma_compact_rhs_tile_m128n128_"
+              "4wave_quadrant"),
+      IREE_SV("id4_ideogram4_mlp_up_silu_product_bf16_wmma_compact_rhs_tile_"
+              "m128n128_4wave_quadrant"),
       IREE_ARRAYSIZE(config_values), config_bindings, IREE_ARRAYSIZE(bindings),
       bindings);
 }

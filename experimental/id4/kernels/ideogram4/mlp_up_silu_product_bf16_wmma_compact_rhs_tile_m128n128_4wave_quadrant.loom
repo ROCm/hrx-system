@@ -1,0 +1,395 @@
+amdgpu.target<gfx1100> @id4_gfx1100
+
+config.decl @id4.ideogram4.mlp_up_silu_product_compact_rhs_m128n128_wmma.token_count : %value: index where [range(%value, 16, 131072)]
+
+config.decl @id4.ideogram4.mlp_up_silu_product_compact_rhs_m128n128_wmma.dispatch_token_count : %value: index where [range(%value, 128, 131072), mul(%value, 128)]
+
+config.decl @id4.ideogram4.mlp_up_silu_product_compact_rhs_m128n128_wmma.input_size : %value: index where [range(%value, 16, 131072), mul(%value, 16)]
+
+config.decl @id4.ideogram4.mlp_up_silu_product_compact_rhs_m128n128_wmma.intermediate_size : %value: index where [range(%value, 128, 65536), mul(%value, 128)]
+
+kernel.def target(@id4_gfx1100) export("id4_ideogram4_mlp_up_silu_product_bf16_wmma_compact_rhs_tile_m128n128_4wave_quadrant") @id4_ideogram4_mlp_up_silu_product_bf16_wmma_compact_rhs_tile_m128n128_4wave_quadrant() {
+  %unit = index.constant 1 : index
+  %sixty_four = index.constant 64 : index
+  %one_twenty_eight = index.constant 128 : index
+  %workgroup_size_x = index.constant 128 : index
+  %dispatch_token_count = config.get @id4.ideogram4.mlp_up_silu_product_compact_rhs_m128n128_wmma.dispatch_token_count : index
+  %intermediate_size = config.get @id4.ideogram4.mlp_up_silu_product_compact_rhs_m128n128_wmma.intermediate_size : index
+  %token_tile_count = index.div %dispatch_token_count, %one_twenty_eight : index
+  %row_tile_count = index.div %intermediate_size, %one_twenty_eight : index
+  kernel.launch.config workgroups(%token_tile_count, %row_tile_count, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
+} launch(%input_bf16: buffer, %up_weight: buffer, %gate: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %two = index.constant 2 : index
+  %eight = index.constant 8 : index
+  %sixteen = index.constant 16 : index
+  %thirty_two = index.constant 32 : index
+  %forty_eight = index.constant 48 : index
+  %sixty_four = index.constant 64 : index
+  %one_twenty_eight = index.constant 128 : index
+  %two_fifty_six = index.constant 256 : index
+  %token_tile = kernel.workgroup.id<x> : index
+  %row_tile = kernel.workgroup.id<y> : index
+  %subgroup_id = kernel.subgroup.id : index
+  %lane = kernel.subgroup.lane.id : index
+  %token_count = config.get @id4.ideogram4.mlp_up_silu_product_compact_rhs_m128n128_wmma.token_count : index
+  %input_size = config.get @id4.ideogram4.mlp_up_silu_product_compact_rhs_m128n128_wmma.input_size : index
+  %intermediate_size = config.get @id4.ideogram4.mlp_up_silu_product_compact_rhs_m128n128_wmma.intermediate_size : index
+  %k_tile_count = index.div %input_size, %sixteen : index
+  %output_tile_count = index.div %intermediate_size, %sixteen : index
+  %packed_tile_count = index.mul %output_tile_count, %k_tile_count : index
+  %packed_element_count = index.mul %packed_tile_count, %two_fifty_six : index
+  %token_base = index.mul %token_tile, %one_twenty_eight : index
+  %row_tile_base = index.mul %row_tile, %one_twenty_eight : index
+  %token_quadrant = index.rem %subgroup_id, %two : index
+  %row_quadrant = index.div %subgroup_id, %two : index
+  %token_wave_offset = index.mul %token_quadrant, %sixty_four : index
+  %row_wave_offset = index.mul %row_quadrant, %sixty_four : index
+  %row_base = index.add %row_tile_base, %row_wave_offset : index
+  %token_origin0 = index.add %token_base, %token_wave_offset : index
+  %token_origin1 = index.add %token_origin0, %sixteen : index
+  %token_origin2 = index.add %token_origin0, %thirty_two : index
+  %token_origin3 = index.add %token_origin0, %forty_eight : index
+  %row_origin0 = index.add %row_base, %zero : index
+  %row_origin1 = index.add %row_origin0, %sixteen : index
+  %row_origin2 = index.add %row_origin1, %sixteen : index
+  %row_origin3 = index.add %row_origin2, %sixteen : index
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 16 : index
+  %packed_weight_layout = encoding.layout.strided [1, %sixteen] : encoding<layout>
+  %zero_acc = vector.constant 0.0 : vector<8xf32>
+  %input_noalias, %up_weight_noalias, %gate_noalias, %output_noalias = buffer.assume.noalias %input_bf16, %up_weight, %gate, %output : buffer, buffer, buffer, buffer
+  %input_global = buffer.assume.memory_space<global> %input_noalias : buffer
+  %up_weight_global = buffer.assume.memory_space<global> %up_weight_noalias : buffer
+  %gate_global = buffer.assume.memory_space<global> %gate_noalias : buffer
+  %output_global = buffer.assume.memory_space<global> %output_noalias : buffer
+  %input_aligned = buffer.assume.alignment %input_global {minimum_alignment = 16} : buffer
+  %up_weight_aligned = buffer.assume.alignment %up_weight_global {minimum_alignment = 16} : buffer
+  %gate_aligned = buffer.assume.alignment %gate_global {minimum_alignment = 16} : buffer
+  %output_aligned = buffer.assume.alignment %output_global {minimum_alignment = 16} : buffer
+  %input_view = buffer.view %input_aligned[%base] : buffer -> view<[%token_count]x[%input_size]xbf16, #dense>
+  %packed_weight_view = buffer.view %up_weight_aligned[%base] : buffer -> view<[%packed_element_count]x16xbf16, %packed_weight_layout>
+  %gate_view = buffer.view %gate_aligned[%base] : buffer -> view<[%token_count]x[%intermediate_size]xbf16, #dense>
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<[%token_count]x[%intermediate_size]xbf16, #dense>
+  %init00 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
+  %init01 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
+  %init02 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
+  %init03 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
+  %init10 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
+  %init11 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
+  %init12 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
+  %init13 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
+  %init20 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
+  %init21 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
+  %init22 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
+  %init23 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
+  %init30 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
+  %init31 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
+  %init32 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
+  %init33 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
+  %lhs_first0 = vector.fragment.load<lhs> %input_view[%token_origin0, %zero] shape [%m, %k] : view<[%token_count]x[%input_size]xbf16, #dense> -> vector<16xbf16>
+  %lhs_first1 = vector.fragment.load<lhs> %input_view[%token_origin1, %zero] shape [%m, %k] : view<[%token_count]x[%input_size]xbf16, #dense> -> vector<16xbf16>
+  %lhs_first2 = vector.fragment.load<lhs> %input_view[%token_origin2, %zero] shape [%m, %k] : view<[%token_count]x[%input_size]xbf16, #dense> -> vector<16xbf16>
+  %lhs_first3 = vector.fragment.load<lhs> %input_view[%token_origin3, %zero] shape [%m, %k] : view<[%token_count]x[%input_size]xbf16, #dense> -> vector<16xbf16>
+  %row_tile0 = index.div %row_origin0, %sixteen : index
+  %row_tile1 = index.div %row_origin1, %sixteen : index
+  %row_tile2 = index.div %row_origin2, %sixteen : index
+  %row_tile3 = index.div %row_origin3, %sixteen : index
+  %rhs_tile0 = index.mul %row_tile0, %k_tile_count : index
+  %rhs_tile1 = index.mul %row_tile1, %k_tile_count : index
+  %rhs_tile2 = index.mul %row_tile2, %k_tile_count : index
+  %rhs_tile3 = index.mul %row_tile3, %k_tile_count : index
+  %rhs_row0 = index.mul %rhs_tile0, %two_fifty_six : index
+  %rhs_row1 = index.mul %rhs_tile1, %two_fifty_six : index
+  %rhs_row2 = index.mul %rhs_tile2, %two_fifty_six : index
+  %rhs_row3 = index.mul %rhs_tile3, %two_fifty_six : index
+  %rhs_first0 = vector.fragment.load<rhs> %packed_weight_view[%rhs_row0, %zero] shape [%k, %n] : view<[%packed_element_count]x16xbf16, %packed_weight_layout> -> vector<16xbf16>
+  %rhs_first1 = vector.fragment.load<rhs> %packed_weight_view[%rhs_row1, %zero] shape [%k, %n] : view<[%packed_element_count]x16xbf16, %packed_weight_layout> -> vector<16xbf16>
+  %rhs_first2 = vector.fragment.load<rhs> %packed_weight_view[%rhs_row2, %zero] shape [%k, %n] : view<[%packed_element_count]x16xbf16, %packed_weight_layout> -> vector<16xbf16>
+  %rhs_first3 = vector.fragment.load<rhs> %packed_weight_view[%rhs_row3, %zero] shape [%k, %n] : view<[%packed_element_count]x16xbf16, %packed_weight_layout> -> vector<16xbf16>
+  %first00 = vector.mma %lhs_first0, %rhs_first0, %init00 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  %first01 = vector.mma %lhs_first0, %rhs_first1, %init01 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  %first02 = vector.mma %lhs_first0, %rhs_first2, %init02 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  %first03 = vector.mma %lhs_first0, %rhs_first3, %init03 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  %first10 = vector.mma %lhs_first1, %rhs_first0, %init10 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  %first11 = vector.mma %lhs_first1, %rhs_first1, %init11 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  %first12 = vector.mma %lhs_first1, %rhs_first2, %init12 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  %first13 = vector.mma %lhs_first1, %rhs_first3, %init13 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  %first20 = vector.mma %lhs_first2, %rhs_first0, %init20 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  %first21 = vector.mma %lhs_first2, %rhs_first1, %init21 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  %first22 = vector.mma %lhs_first2, %rhs_first2, %init22 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  %first23 = vector.mma %lhs_first2, %rhs_first3, %init23 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  %first30 = vector.mma %lhs_first3, %rhs_first0, %init30 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  %first31 = vector.mma %lhs_first3, %rhs_first1, %init31 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  %first32 = vector.mma %lhs_first3, %rhs_first2, %init32 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  %first33 = vector.mma %lhs_first3, %rhs_first3, %init33 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  %result00, %result01, %result02, %result03, %result10, %result11, %result12, %result13, %result20, %result21, %result22, %result23, %result30, %result31, %result32, %result33 = scf.for %k_tile = [%one to %k_tile_count step %one](%acc00 = %first00 : vector<8xf32>, %acc01 = %first01 : vector<8xf32>, %acc02 = %first02 : vector<8xf32>, %acc03 = %first03 : vector<8xf32>, %acc10 = %first10 : vector<8xf32>, %acc11 = %first11 : vector<8xf32>, %acc12 = %first12 : vector<8xf32>, %acc13 = %first13 : vector<8xf32>, %acc20 = %first20 : vector<8xf32>, %acc21 = %first21 : vector<8xf32>, %acc22 = %first22 : vector<8xf32>, %acc23 = %first23 : vector<8xf32>, %acc30 = %first30 : vector<8xf32>, %acc31 = %first31 : vector<8xf32>, %acc32 = %first32 : vector<8xf32>, %acc33 = %first33 : vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
+    %k_origin = index.mul %k_tile, %sixteen : index
+    %lhs0 = vector.fragment.load<lhs> %input_view[%token_origin0, %k_origin] shape [%m, %k] : view<[%token_count]x[%input_size]xbf16, #dense> -> vector<16xbf16>
+    %lhs1 = vector.fragment.load<lhs> %input_view[%token_origin1, %k_origin] shape [%m, %k] : view<[%token_count]x[%input_size]xbf16, #dense> -> vector<16xbf16>
+    %lhs2 = vector.fragment.load<lhs> %input_view[%token_origin2, %k_origin] shape [%m, %k] : view<[%token_count]x[%input_size]xbf16, #dense> -> vector<16xbf16>
+    %lhs3 = vector.fragment.load<lhs> %input_view[%token_origin3, %k_origin] shape [%m, %k] : view<[%token_count]x[%input_size]xbf16, #dense> -> vector<16xbf16>
+    %rhs_loop_tile0 = index.madd %row_tile0, %k_tile_count, %k_tile : index
+    %rhs_loop_tile1 = index.madd %row_tile1, %k_tile_count, %k_tile : index
+    %rhs_loop_tile2 = index.madd %row_tile2, %k_tile_count, %k_tile : index
+    %rhs_loop_tile3 = index.madd %row_tile3, %k_tile_count, %k_tile : index
+    %rhs_loop_row0 = index.mul %rhs_loop_tile0, %two_fifty_six : index
+    %rhs_loop_row1 = index.mul %rhs_loop_tile1, %two_fifty_six : index
+    %rhs_loop_row2 = index.mul %rhs_loop_tile2, %two_fifty_six : index
+    %rhs_loop_row3 = index.mul %rhs_loop_tile3, %two_fifty_six : index
+    %rhs0 = vector.fragment.load<rhs> %packed_weight_view[%rhs_loop_row0, %zero] shape [%k, %n] : view<[%packed_element_count]x16xbf16, %packed_weight_layout> -> vector<16xbf16>
+    %rhs1 = vector.fragment.load<rhs> %packed_weight_view[%rhs_loop_row1, %zero] shape [%k, %n] : view<[%packed_element_count]x16xbf16, %packed_weight_layout> -> vector<16xbf16>
+    %rhs2 = vector.fragment.load<rhs> %packed_weight_view[%rhs_loop_row2, %zero] shape [%k, %n] : view<[%packed_element_count]x16xbf16, %packed_weight_layout> -> vector<16xbf16>
+    %rhs3 = vector.fragment.load<rhs> %packed_weight_view[%rhs_loop_row3, %zero] shape [%k, %n] : view<[%packed_element_count]x16xbf16, %packed_weight_layout> -> vector<16xbf16>
+    %next00 = vector.mma %lhs0, %rhs0, %acc00 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next01 = vector.mma %lhs0, %rhs1, %acc01 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next02 = vector.mma %lhs0, %rhs2, %acc02 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next03 = vector.mma %lhs0, %rhs3, %acc03 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next10 = vector.mma %lhs1, %rhs0, %acc10 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next11 = vector.mma %lhs1, %rhs1, %acc11 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next12 = vector.mma %lhs1, %rhs2, %acc12 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next13 = vector.mma %lhs1, %rhs3, %acc13 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next20 = vector.mma %lhs2, %rhs0, %acc20 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next21 = vector.mma %lhs2, %rhs1, %acc21 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next22 = vector.mma %lhs2, %rhs2, %acc22 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next23 = vector.mma %lhs2, %rhs3, %acc23 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next30 = vector.mma %lhs3, %rhs0, %acc30 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next31 = vector.mma %lhs3, %rhs1, %acc31 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next32 = vector.mma %lhs3, %rhs2, %acc32 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next33 = vector.mma %lhs3, %rhs3, %acc33 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    scf.yield %next00, %next01, %next02, %next03, %next10, %next11, %next12, %next13, %next20, %next21, %next22, %next23, %next30, %next31, %next32, %next33 : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>
+  }
+  %lane_column = index.rem %lane, %sixteen : index
+  %lane_group = index.div %lane, %sixteen : index
+  %column0 = index.add %row_origin0, %lane_column : index
+  %column1 = index.add %row_origin1, %lane_column : index
+  %column2 = index.add %row_origin2, %lane_column : index
+  %column3 = index.add %row_origin3, %lane_column : index
+  scf.for %register_index = [%zero to %eight step %one] {
+    %register_token_base = index.mul %register_index, %two : index
+    %local_token = index.add %register_token_base, %lane_group : index
+    %token0 = index.add %token_origin0, %local_token : index
+    %token1 = index.add %token_origin1, %local_token : index
+    %token2 = index.add %token_origin2, %local_token : index
+    %token3 = index.add %token_origin3, %local_token : index
+    %up_value00 = vector.extract %result00[%register_index] : vector<8xf32> -> f32
+    %gate_bf16_value00 = view.load %gate_view[%token0, %column0] : view<[%token_count]x[%intermediate_size]xbf16, #dense> -> bf16
+    %gate_value00 = scalar.extf %gate_bf16_value00 : bf16 to f32
+    %gate_silu00 = scalar.siluf %gate_value00 : f32
+    %gate_silu_bf16_00 = scalar.fptrunc %gate_silu00 : f32 to bf16
+    %gate_silu_value00 = scalar.extf %gate_silu_bf16_00 : bf16 to f32
+    %up_bf16_00 = scalar.fptrunc %up_value00 : f32 to bf16
+    %up_rounded00 = scalar.extf %up_bf16_00 : bf16 to f32
+    %value00 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %gate_silu_value00, %up_rounded00 : f32
+    %rounded00 = scalar.fptrunc %value00 : f32 to bf16
+    view.store %rounded00, %output_view[%token0, %column0] : bf16, view<[%token_count]x[%intermediate_size]xbf16, #dense>
+    %up_value01 = vector.extract %result01[%register_index] : vector<8xf32> -> f32
+    %gate_bf16_value01 = view.load %gate_view[%token0, %column1] : view<[%token_count]x[%intermediate_size]xbf16, #dense> -> bf16
+    %gate_value01 = scalar.extf %gate_bf16_value01 : bf16 to f32
+    %gate_silu01 = scalar.siluf %gate_value01 : f32
+    %gate_silu_bf16_01 = scalar.fptrunc %gate_silu01 : f32 to bf16
+    %gate_silu_value01 = scalar.extf %gate_silu_bf16_01 : bf16 to f32
+    %up_bf16_01 = scalar.fptrunc %up_value01 : f32 to bf16
+    %up_rounded01 = scalar.extf %up_bf16_01 : bf16 to f32
+    %value01 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %gate_silu_value01, %up_rounded01 : f32
+    %rounded01 = scalar.fptrunc %value01 : f32 to bf16
+    view.store %rounded01, %output_view[%token0, %column1] : bf16, view<[%token_count]x[%intermediate_size]xbf16, #dense>
+    %up_value02 = vector.extract %result02[%register_index] : vector<8xf32> -> f32
+    %gate_bf16_value02 = view.load %gate_view[%token0, %column2] : view<[%token_count]x[%intermediate_size]xbf16, #dense> -> bf16
+    %gate_value02 = scalar.extf %gate_bf16_value02 : bf16 to f32
+    %gate_silu02 = scalar.siluf %gate_value02 : f32
+    %gate_silu_bf16_02 = scalar.fptrunc %gate_silu02 : f32 to bf16
+    %gate_silu_value02 = scalar.extf %gate_silu_bf16_02 : bf16 to f32
+    %up_bf16_02 = scalar.fptrunc %up_value02 : f32 to bf16
+    %up_rounded02 = scalar.extf %up_bf16_02 : bf16 to f32
+    %value02 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %gate_silu_value02, %up_rounded02 : f32
+    %rounded02 = scalar.fptrunc %value02 : f32 to bf16
+    view.store %rounded02, %output_view[%token0, %column2] : bf16, view<[%token_count]x[%intermediate_size]xbf16, #dense>
+    %up_value03 = vector.extract %result03[%register_index] : vector<8xf32> -> f32
+    %gate_bf16_value03 = view.load %gate_view[%token0, %column3] : view<[%token_count]x[%intermediate_size]xbf16, #dense> -> bf16
+    %gate_value03 = scalar.extf %gate_bf16_value03 : bf16 to f32
+    %gate_silu03 = scalar.siluf %gate_value03 : f32
+    %gate_silu_bf16_03 = scalar.fptrunc %gate_silu03 : f32 to bf16
+    %gate_silu_value03 = scalar.extf %gate_silu_bf16_03 : bf16 to f32
+    %up_bf16_03 = scalar.fptrunc %up_value03 : f32 to bf16
+    %up_rounded03 = scalar.extf %up_bf16_03 : bf16 to f32
+    %value03 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %gate_silu_value03, %up_rounded03 : f32
+    %rounded03 = scalar.fptrunc %value03 : f32 to bf16
+    view.store %rounded03, %output_view[%token0, %column3] : bf16, view<[%token_count]x[%intermediate_size]xbf16, #dense>
+    %up_value10 = vector.extract %result10[%register_index] : vector<8xf32> -> f32
+    %gate_bf16_value10 = view.load %gate_view[%token1, %column0] : view<[%token_count]x[%intermediate_size]xbf16, #dense> -> bf16
+    %gate_value10 = scalar.extf %gate_bf16_value10 : bf16 to f32
+    %gate_silu10 = scalar.siluf %gate_value10 : f32
+    %gate_silu_bf16_10 = scalar.fptrunc %gate_silu10 : f32 to bf16
+    %gate_silu_value10 = scalar.extf %gate_silu_bf16_10 : bf16 to f32
+    %up_bf16_10 = scalar.fptrunc %up_value10 : f32 to bf16
+    %up_rounded10 = scalar.extf %up_bf16_10 : bf16 to f32
+    %value10 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %gate_silu_value10, %up_rounded10 : f32
+    %rounded10 = scalar.fptrunc %value10 : f32 to bf16
+    view.store %rounded10, %output_view[%token1, %column0] : bf16, view<[%token_count]x[%intermediate_size]xbf16, #dense>
+    %up_value11 = vector.extract %result11[%register_index] : vector<8xf32> -> f32
+    %gate_bf16_value11 = view.load %gate_view[%token1, %column1] : view<[%token_count]x[%intermediate_size]xbf16, #dense> -> bf16
+    %gate_value11 = scalar.extf %gate_bf16_value11 : bf16 to f32
+    %gate_silu11 = scalar.siluf %gate_value11 : f32
+    %gate_silu_bf16_11 = scalar.fptrunc %gate_silu11 : f32 to bf16
+    %gate_silu_value11 = scalar.extf %gate_silu_bf16_11 : bf16 to f32
+    %up_bf16_11 = scalar.fptrunc %up_value11 : f32 to bf16
+    %up_rounded11 = scalar.extf %up_bf16_11 : bf16 to f32
+    %value11 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %gate_silu_value11, %up_rounded11 : f32
+    %rounded11 = scalar.fptrunc %value11 : f32 to bf16
+    view.store %rounded11, %output_view[%token1, %column1] : bf16, view<[%token_count]x[%intermediate_size]xbf16, #dense>
+    %up_value12 = vector.extract %result12[%register_index] : vector<8xf32> -> f32
+    %gate_bf16_value12 = view.load %gate_view[%token1, %column2] : view<[%token_count]x[%intermediate_size]xbf16, #dense> -> bf16
+    %gate_value12 = scalar.extf %gate_bf16_value12 : bf16 to f32
+    %gate_silu12 = scalar.siluf %gate_value12 : f32
+    %gate_silu_bf16_12 = scalar.fptrunc %gate_silu12 : f32 to bf16
+    %gate_silu_value12 = scalar.extf %gate_silu_bf16_12 : bf16 to f32
+    %up_bf16_12 = scalar.fptrunc %up_value12 : f32 to bf16
+    %up_rounded12 = scalar.extf %up_bf16_12 : bf16 to f32
+    %value12 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %gate_silu_value12, %up_rounded12 : f32
+    %rounded12 = scalar.fptrunc %value12 : f32 to bf16
+    view.store %rounded12, %output_view[%token1, %column2] : bf16, view<[%token_count]x[%intermediate_size]xbf16, #dense>
+    %up_value13 = vector.extract %result13[%register_index] : vector<8xf32> -> f32
+    %gate_bf16_value13 = view.load %gate_view[%token1, %column3] : view<[%token_count]x[%intermediate_size]xbf16, #dense> -> bf16
+    %gate_value13 = scalar.extf %gate_bf16_value13 : bf16 to f32
+    %gate_silu13 = scalar.siluf %gate_value13 : f32
+    %gate_silu_bf16_13 = scalar.fptrunc %gate_silu13 : f32 to bf16
+    %gate_silu_value13 = scalar.extf %gate_silu_bf16_13 : bf16 to f32
+    %up_bf16_13 = scalar.fptrunc %up_value13 : f32 to bf16
+    %up_rounded13 = scalar.extf %up_bf16_13 : bf16 to f32
+    %value13 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %gate_silu_value13, %up_rounded13 : f32
+    %rounded13 = scalar.fptrunc %value13 : f32 to bf16
+    view.store %rounded13, %output_view[%token1, %column3] : bf16, view<[%token_count]x[%intermediate_size]xbf16, #dense>
+    %up_value20 = vector.extract %result20[%register_index] : vector<8xf32> -> f32
+    %gate_bf16_value20 = view.load %gate_view[%token2, %column0] : view<[%token_count]x[%intermediate_size]xbf16, #dense> -> bf16
+    %gate_value20 = scalar.extf %gate_bf16_value20 : bf16 to f32
+    %gate_silu20 = scalar.siluf %gate_value20 : f32
+    %gate_silu_bf16_20 = scalar.fptrunc %gate_silu20 : f32 to bf16
+    %gate_silu_value20 = scalar.extf %gate_silu_bf16_20 : bf16 to f32
+    %up_bf16_20 = scalar.fptrunc %up_value20 : f32 to bf16
+    %up_rounded20 = scalar.extf %up_bf16_20 : bf16 to f32
+    %value20 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %gate_silu_value20, %up_rounded20 : f32
+    %rounded20 = scalar.fptrunc %value20 : f32 to bf16
+    view.store %rounded20, %output_view[%token2, %column0] : bf16, view<[%token_count]x[%intermediate_size]xbf16, #dense>
+    %up_value21 = vector.extract %result21[%register_index] : vector<8xf32> -> f32
+    %gate_bf16_value21 = view.load %gate_view[%token2, %column1] : view<[%token_count]x[%intermediate_size]xbf16, #dense> -> bf16
+    %gate_value21 = scalar.extf %gate_bf16_value21 : bf16 to f32
+    %gate_silu21 = scalar.siluf %gate_value21 : f32
+    %gate_silu_bf16_21 = scalar.fptrunc %gate_silu21 : f32 to bf16
+    %gate_silu_value21 = scalar.extf %gate_silu_bf16_21 : bf16 to f32
+    %up_bf16_21 = scalar.fptrunc %up_value21 : f32 to bf16
+    %up_rounded21 = scalar.extf %up_bf16_21 : bf16 to f32
+    %value21 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %gate_silu_value21, %up_rounded21 : f32
+    %rounded21 = scalar.fptrunc %value21 : f32 to bf16
+    view.store %rounded21, %output_view[%token2, %column1] : bf16, view<[%token_count]x[%intermediate_size]xbf16, #dense>
+    %up_value22 = vector.extract %result22[%register_index] : vector<8xf32> -> f32
+    %gate_bf16_value22 = view.load %gate_view[%token2, %column2] : view<[%token_count]x[%intermediate_size]xbf16, #dense> -> bf16
+    %gate_value22 = scalar.extf %gate_bf16_value22 : bf16 to f32
+    %gate_silu22 = scalar.siluf %gate_value22 : f32
+    %gate_silu_bf16_22 = scalar.fptrunc %gate_silu22 : f32 to bf16
+    %gate_silu_value22 = scalar.extf %gate_silu_bf16_22 : bf16 to f32
+    %up_bf16_22 = scalar.fptrunc %up_value22 : f32 to bf16
+    %up_rounded22 = scalar.extf %up_bf16_22 : bf16 to f32
+    %value22 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %gate_silu_value22, %up_rounded22 : f32
+    %rounded22 = scalar.fptrunc %value22 : f32 to bf16
+    view.store %rounded22, %output_view[%token2, %column2] : bf16, view<[%token_count]x[%intermediate_size]xbf16, #dense>
+    %up_value23 = vector.extract %result23[%register_index] : vector<8xf32> -> f32
+    %gate_bf16_value23 = view.load %gate_view[%token2, %column3] : view<[%token_count]x[%intermediate_size]xbf16, #dense> -> bf16
+    %gate_value23 = scalar.extf %gate_bf16_value23 : bf16 to f32
+    %gate_silu23 = scalar.siluf %gate_value23 : f32
+    %gate_silu_bf16_23 = scalar.fptrunc %gate_silu23 : f32 to bf16
+    %gate_silu_value23 = scalar.extf %gate_silu_bf16_23 : bf16 to f32
+    %up_bf16_23 = scalar.fptrunc %up_value23 : f32 to bf16
+    %up_rounded23 = scalar.extf %up_bf16_23 : bf16 to f32
+    %value23 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %gate_silu_value23, %up_rounded23 : f32
+    %rounded23 = scalar.fptrunc %value23 : f32 to bf16
+    view.store %rounded23, %output_view[%token2, %column3] : bf16, view<[%token_count]x[%intermediate_size]xbf16, #dense>
+    %up_value30 = vector.extract %result30[%register_index] : vector<8xf32> -> f32
+    %gate_bf16_value30 = view.load %gate_view[%token3, %column0] : view<[%token_count]x[%intermediate_size]xbf16, #dense> -> bf16
+    %gate_value30 = scalar.extf %gate_bf16_value30 : bf16 to f32
+    %gate_silu30 = scalar.siluf %gate_value30 : f32
+    %gate_silu_bf16_30 = scalar.fptrunc %gate_silu30 : f32 to bf16
+    %gate_silu_value30 = scalar.extf %gate_silu_bf16_30 : bf16 to f32
+    %up_bf16_30 = scalar.fptrunc %up_value30 : f32 to bf16
+    %up_rounded30 = scalar.extf %up_bf16_30 : bf16 to f32
+    %value30 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %gate_silu_value30, %up_rounded30 : f32
+    %rounded30 = scalar.fptrunc %value30 : f32 to bf16
+    view.store %rounded30, %output_view[%token3, %column0] : bf16, view<[%token_count]x[%intermediate_size]xbf16, #dense>
+    %up_value31 = vector.extract %result31[%register_index] : vector<8xf32> -> f32
+    %gate_bf16_value31 = view.load %gate_view[%token3, %column1] : view<[%token_count]x[%intermediate_size]xbf16, #dense> -> bf16
+    %gate_value31 = scalar.extf %gate_bf16_value31 : bf16 to f32
+    %gate_silu31 = scalar.siluf %gate_value31 : f32
+    %gate_silu_bf16_31 = scalar.fptrunc %gate_silu31 : f32 to bf16
+    %gate_silu_value31 = scalar.extf %gate_silu_bf16_31 : bf16 to f32
+    %up_bf16_31 = scalar.fptrunc %up_value31 : f32 to bf16
+    %up_rounded31 = scalar.extf %up_bf16_31 : bf16 to f32
+    %value31 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %gate_silu_value31, %up_rounded31 : f32
+    %rounded31 = scalar.fptrunc %value31 : f32 to bf16
+    view.store %rounded31, %output_view[%token3, %column1] : bf16, view<[%token_count]x[%intermediate_size]xbf16, #dense>
+    %up_value32 = vector.extract %result32[%register_index] : vector<8xf32> -> f32
+    %gate_bf16_value32 = view.load %gate_view[%token3, %column2] : view<[%token_count]x[%intermediate_size]xbf16, #dense> -> bf16
+    %gate_value32 = scalar.extf %gate_bf16_value32 : bf16 to f32
+    %gate_silu32 = scalar.siluf %gate_value32 : f32
+    %gate_silu_bf16_32 = scalar.fptrunc %gate_silu32 : f32 to bf16
+    %gate_silu_value32 = scalar.extf %gate_silu_bf16_32 : bf16 to f32
+    %up_bf16_32 = scalar.fptrunc %up_value32 : f32 to bf16
+    %up_rounded32 = scalar.extf %up_bf16_32 : bf16 to f32
+    %value32 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %gate_silu_value32, %up_rounded32 : f32
+    %rounded32 = scalar.fptrunc %value32 : f32 to bf16
+    view.store %rounded32, %output_view[%token3, %column2] : bf16, view<[%token_count]x[%intermediate_size]xbf16, #dense>
+    %up_value33 = vector.extract %result33[%register_index] : vector<8xf32> -> f32
+    %gate_bf16_value33 = view.load %gate_view[%token3, %column3] : view<[%token_count]x[%intermediate_size]xbf16, #dense> -> bf16
+    %gate_value33 = scalar.extf %gate_bf16_value33 : bf16 to f32
+    %gate_silu33 = scalar.siluf %gate_value33 : f32
+    %gate_silu_bf16_33 = scalar.fptrunc %gate_silu33 : f32 to bf16
+    %gate_silu_value33 = scalar.extf %gate_silu_bf16_33 : bf16 to f32
+    %up_bf16_33 = scalar.fptrunc %up_value33 : f32 to bf16
+    %up_rounded33 = scalar.extf %up_bf16_33 : bf16 to f32
+    %value33 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %gate_silu_value33, %up_rounded33 : f32
+    %rounded33 = scalar.fptrunc %value33 : f32 to bf16
+    view.store %rounded33, %output_view[%token3, %column3] : bf16, view<[%token_count]x[%intermediate_size]xbf16, #dense>
+  }
+  kernel.return
+}
+
+check.case public @id4_ideogram4_mlp_up_silu_product_bf16_wmma_compact_rhs_tile_m128n128_4wave_quadrant_small_case {
+  %input = check.generate.fill value(1.0) : tensor<128x16xbf16>
+  %up_weight = check.generate.fill value(2.0) : tensor<2048xbf16>
+  %gate = check.generate.fill value(1.0) : tensor<128x128xbf16>
+  %output = check.generate.fill value(0.0) : tensor<128x128xbf16>
+  %expected = check.generate.fill value(23.393874516160157) : tensor<128x128xbf16>
+  func.call @id4_ideogram4_mlp_up_silu_product_bf16_wmma_compact_rhs_tile_m128n128_4wave_quadrant(%input, %up_weight, %gate, %output) : (tensor<128x16xbf16>, tensor<2048xbf16>, tensor<128x128xbf16>, tensor<128x128xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.20000000000000001) rtol(0.01) nan(same) : tensor<128x128xbf16>
+  check.return
+}
+
+check.benchmark<@id4_ideogram4_mlp_up_silu_product_bf16_wmma_compact_rhs_tile_m128n128_4wave_quadrant_small_case> @id4_ideogram4_mlp_up_silu_product_bf16_wmma_compact_rhs_tile_m128n128_4wave_quadrant_small
+
+check.case public @id4_ideogram4_mlp_up_silu_product_bf16_wmma_compact_rhs_tile_m128n128_4wave_quadrant_uncond_1024_shape_case {
+  %input = check.generate.fill value(1.0) : tensor<4096x4608xbf16>
+  %up_weight = check.generate.fill value(0.0) : tensor<56623104xbf16>
+  %gate = check.generate.fill value(1.0) : tensor<4096x12288xbf16>
+  %output = check.generate.fill value(1.0) : tensor<4096x12288xbf16>
+  %expected = check.generate.fill value(0.0) : tensor<4096x12288xbf16>
+  func.call @id4_ideogram4_mlp_up_silu_product_bf16_wmma_compact_rhs_tile_m128n128_4wave_quadrant(%input, %up_weight, %gate, %output) : (tensor<4096x4608xbf16>, tensor<56623104xbf16>, tensor<4096x12288xbf16>, tensor<4096x12288xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<4096x12288xbf16>
+  check.return
+}
+
+check.benchmark<@id4_ideogram4_mlp_up_silu_product_bf16_wmma_compact_rhs_tile_m128n128_4wave_quadrant_uncond_1024_shape_case> @id4_ideogram4_mlp_up_silu_product_bf16_wmma_compact_rhs_tile_m128n128_4wave_quadrant_uncond_1024_shape
+
+check.case public @id4_ideogram4_mlp_up_silu_product_bf16_wmma_compact_rhs_tile_m128n128_4wave_quadrant_cond_1024_shape_case {
+  %input = check.generate.fill value(1.0) : tensor<4608x4608xbf16>
+  %up_weight = check.generate.fill value(0.0) : tensor<56623104xbf16>
+  %gate = check.generate.fill value(1.0) : tensor<4608x12288xbf16>
+  %output = check.generate.fill value(1.0) : tensor<4608x12288xbf16>
+  %expected = check.generate.fill value(0.0) : tensor<4608x12288xbf16>
+  func.call @id4_ideogram4_mlp_up_silu_product_bf16_wmma_compact_rhs_tile_m128n128_4wave_quadrant(%input, %up_weight, %gate, %output) : (tensor<4608x4608xbf16>, tensor<56623104xbf16>, tensor<4608x12288xbf16>, tensor<4608x12288xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<4608x12288xbf16>
+  check.return
+}
+
+check.benchmark<@id4_ideogram4_mlp_up_silu_product_bf16_wmma_compact_rhs_tile_m128n128_4wave_quadrant_cond_1024_shape_case> @id4_ideogram4_mlp_up_silu_product_bf16_wmma_compact_rhs_tile_m128n128_4wave_quadrant_cond_1024_shape
