@@ -173,12 +173,13 @@ bool loom_amdgpu_fp8_scalef32_descriptor_ref(
     loom_scalar_type_t result_element_type,
     loom_amdgpu_descriptor_ref_t* out_ref);
 
-// Resolves the native scaled FP8/BF8 conversion descriptor for the source and
-// result element type pair, when the active target exposes one.
-iree_status_t loom_amdgpu_resolve_fp8_scalef32_descriptor_if_present(
+// Returns the native scaled FP8/BF8 conversion descriptor for the source and
+// result element type pair, when the active target exposes one. The descriptor
+// pointer remains valid until the current loom_low_lower_function call returns.
+iree_status_t loom_amdgpu_get_fp8_scalef32_descriptor(
     loom_low_lower_context_t* context, loom_scalar_type_t source_element_type,
     loom_scalar_type_t result_element_type,
-    loom_low_lower_resolved_descriptor_t* out_descriptor, bool* out_is_present);
+    const loom_low_lower_resolved_descriptor_t** out_descriptor);
 
 // Returns descriptor helpers and format tables for |element_type|. The plan is
 // function-local target lowering state and remains valid until the current
