@@ -250,9 +250,8 @@ iree_status_t iree_hal_streaming_device_primary_context_state(
 
   iree_slim_mutex_lock(&device->primary_context_mutex);
   if (out_flags) {
-    *out_flags =
-        device->primary_context ? device->primary_context->flags
-                                : device->primary_context_flags;
+    *out_flags = device->primary_context ? device->primary_context->flags
+                                         : device->primary_context_flags;
   }
   if (out_active) {
     *out_active = device->primary_context != NULL;
