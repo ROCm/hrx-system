@@ -5766,8 +5766,10 @@ static iree_status_t loom_amdgpu_lower_vector_fp8_to_packed_bf16(
   }
 
   loom_amdgpu_bf16_pack_descriptors_t bf16_pack_descriptors = {0};
-  IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_bf16_pack_descriptors(
-      context, &bf16_pack_descriptors));
+  if (native_pair_present || native_lane_present) {
+    IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_bf16_pack_descriptors(
+        context, &bf16_pack_descriptors));
+  }
 
   loom_amdgpu_vector_fp8_decode_value_flag_cache_t value_flag_cache;
   loom_amdgpu_vector_fp8_decode_value_flag_cache_initialize(context, plan,
