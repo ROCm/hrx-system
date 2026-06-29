@@ -242,10 +242,10 @@ check.case public @id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m32n32_zero_c
 
 check.case public @id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_qwen_shape_case {
   %input = check.generate.fill value(1.0) : tensor<480x4096xbf16>
-  %gate_weight = check.generate.fill value(0.0) : tensor<12288x4096xbf16>
-  %up_weight = check.generate.fill value(7.0) : tensor<12288x4096xbf16>
+  %gate_weight = check.generate.fill value(1.0) : tensor<12288x4096xbf16>
+  %up_weight = check.generate.fill value(2.0) : tensor<12288x4096xbf16>
   %output = check.generate.fill value(1.0) : tensor<480x12288xbf16>
-  %expected = check.generate.fill value(0.0) : tensor<480x12288xbf16>
+  %expected = check.generate.fill value(33554432.0) : tensor<480x12288xbf16>
   func.call @id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma(%input, %gate_weight, %up_weight, %output) : (tensor<480x4096xbf16>, tensor<12288x4096xbf16>, tensor<12288x4096xbf16>, tensor<480x12288xbf16>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<480x12288xbf16>
   check.return
@@ -253,10 +253,10 @@ check.case public @id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_qwen_shape_ca
 
 check.case public @id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m32n32_qwen_shape_case {
   %input = check.generate.fill value(1.0) : tensor<480x4096xbf16>
-  %gate_weight = check.generate.fill value(0.0) : tensor<12288x4096xbf16>
-  %up_weight = check.generate.fill value(7.0) : tensor<12288x4096xbf16>
+  %gate_weight = check.generate.fill value(1.0) : tensor<12288x4096xbf16>
+  %up_weight = check.generate.fill value(2.0) : tensor<12288x4096xbf16>
   %output = check.generate.fill value(1.0) : tensor<480x12288xbf16>
-  %expected = check.generate.fill value(0.0) : tensor<480x12288xbf16>
+  %expected = check.generate.fill value(33554432.0) : tensor<480x12288xbf16>
   func.call @id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m32n32(%input, %gate_weight, %up_weight, %output) : (tensor<480x4096xbf16>, tensor<12288x4096xbf16>, tensor<12288x4096xbf16>, tensor<480x12288xbf16>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<480x12288xbf16>
   check.return
@@ -264,10 +264,10 @@ check.case public @id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m32n32_qwen_s
 
 check.case public @id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m32n32_qwen_shape_1024_case {
   %input = check.generate.fill value(1.0) : tensor<1024x4096xbf16>
-  %gate_weight = check.generate.fill value(0.0) : tensor<12288x4096xbf16>
-  %up_weight = check.generate.fill value(7.0) : tensor<12288x4096xbf16>
+  %gate_weight = check.generate.fill value(1.0) : tensor<12288x4096xbf16>
+  %up_weight = check.generate.fill value(2.0) : tensor<12288x4096xbf16>
   %output = check.generate.fill value(1.0) : tensor<1024x12288xbf16>
-  %expected = check.generate.fill value(0.0) : tensor<1024x12288xbf16>
+  %expected = check.generate.fill value(33554432.0) : tensor<1024x12288xbf16>
   func.call @id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m32n32(%input, %gate_weight, %up_weight, %output) : (tensor<1024x4096xbf16>, tensor<12288x4096xbf16>, tensor<12288x4096xbf16>, tensor<1024x12288xbf16>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<1024x12288xbf16>
   check.return
@@ -275,10 +275,10 @@ check.case public @id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m32n32_qwen_s
 
 check.case public @id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_short_prompt_shape_case {
   %input = check.generate.fill value(1.0) : tensor<32x4096xbf16>
-  %gate_weight = check.generate.fill value(0.0) : tensor<12288x4096xbf16>
-  %up_weight = check.generate.fill value(7.0) : tensor<12288x4096xbf16>
+  %gate_weight = check.generate.fill value(1.0) : tensor<12288x4096xbf16>
+  %up_weight = check.generate.fill value(2.0) : tensor<12288x4096xbf16>
   %output = check.generate.fill value(1.0) : tensor<32x12288xbf16>
-  %expected = check.generate.fill value(0.0) : tensor<32x12288xbf16>
+  %expected = check.generate.fill value(33554432.0) : tensor<32x12288xbf16>
   func.call @id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma(%input, %gate_weight, %up_weight, %output) : (tensor<32x4096xbf16>, tensor<12288x4096xbf16>, tensor<12288x4096xbf16>, tensor<32x12288xbf16>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<32x12288xbf16>
   check.return
@@ -286,10 +286,10 @@ check.case public @id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_short_prompt_
 
 check.case public @id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m32n32_short_prompt_shape_case {
   %input = check.generate.fill value(1.0) : tensor<32x4096xbf16>
-  %gate_weight = check.generate.fill value(0.0) : tensor<12288x4096xbf16>
-  %up_weight = check.generate.fill value(7.0) : tensor<12288x4096xbf16>
+  %gate_weight = check.generate.fill value(1.0) : tensor<12288x4096xbf16>
+  %up_weight = check.generate.fill value(2.0) : tensor<12288x4096xbf16>
   %output = check.generate.fill value(1.0) : tensor<32x12288xbf16>
-  %expected = check.generate.fill value(0.0) : tensor<32x12288xbf16>
+  %expected = check.generate.fill value(33554432.0) : tensor<32x12288xbf16>
   func.call @id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m32n32(%input, %gate_weight, %up_weight, %output) : (tensor<32x4096xbf16>, tensor<12288x4096xbf16>, tensor<12288x4096xbf16>, tensor<32x12288xbf16>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<32x12288xbf16>
   check.return
@@ -297,10 +297,10 @@ check.case public @id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m32n32_short_
 
 check.case public @id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_qwen_shape_288_case {
   %input = check.generate.fill value(1.0) : tensor<288x4096xbf16>
-  %gate_weight = check.generate.fill value(0.0) : tensor<12288x4096xbf16>
-  %up_weight = check.generate.fill value(7.0) : tensor<12288x4096xbf16>
+  %gate_weight = check.generate.fill value(1.0) : tensor<12288x4096xbf16>
+  %up_weight = check.generate.fill value(2.0) : tensor<12288x4096xbf16>
   %output = check.generate.fill value(1.0) : tensor<288x12288xbf16>
-  %expected = check.generate.fill value(0.0) : tensor<288x12288xbf16>
+  %expected = check.generate.fill value(33554432.0) : tensor<288x12288xbf16>
   func.call @id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma(%input, %gate_weight, %up_weight, %output) : (tensor<288x4096xbf16>, tensor<12288x4096xbf16>, tensor<12288x4096xbf16>, tensor<288x12288xbf16>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<288x12288xbf16>
   check.return
@@ -308,10 +308,10 @@ check.case public @id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_qwen_shape_28
 
 check.case public @id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m32n32_qwen_shape_288_case {
   %input = check.generate.fill value(1.0) : tensor<288x4096xbf16>
-  %gate_weight = check.generate.fill value(0.0) : tensor<12288x4096xbf16>
-  %up_weight = check.generate.fill value(7.0) : tensor<12288x4096xbf16>
+  %gate_weight = check.generate.fill value(1.0) : tensor<12288x4096xbf16>
+  %up_weight = check.generate.fill value(2.0) : tensor<12288x4096xbf16>
   %output = check.generate.fill value(1.0) : tensor<288x12288xbf16>
-  %expected = check.generate.fill value(0.0) : tensor<288x12288xbf16>
+  %expected = check.generate.fill value(33554432.0) : tensor<288x12288xbf16>
   func.call @id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m32n32(%input, %gate_weight, %up_weight, %output) : (tensor<288x4096xbf16>, tensor<12288x4096xbf16>, tensor<12288x4096xbf16>, tensor<288x12288xbf16>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<288x12288xbf16>
   check.return
