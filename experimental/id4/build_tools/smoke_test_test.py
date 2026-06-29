@@ -208,6 +208,7 @@ class Id4SmokeTestTest(unittest.TestCase):
         self.assertIn("--dit_attention_implementation=online_wmma", command)
         self.assertIn("--dit_feed_forward_implementation=fused_product", command)
         self.assertIn("--generation_residency=issue_phases", command)
+        self.assertIn("--generation_issue_mode=full", command)
         self.assertIn("--vae_tiling_mode=memory_budget", command)
         self.assertIn("--vae_memory_budget=536870912", command)
         self.assertIn("--vae_overlap=0.5", command)
@@ -245,6 +246,7 @@ class Id4SmokeTestTest(unittest.TestCase):
                 "--tokenizer=tokenizer.json",
                 "--parameters=qwen=qwen.safetensors",
                 "--generation_residency=selected_stage_bundles",
+                "--generation_issue_mode=phases",
                 "--generation_resident_stage_bundles=dit_conditioned",
             ]
         )
@@ -252,6 +254,7 @@ class Id4SmokeTestTest(unittest.TestCase):
         command = self.smoke_test.build_id4_command(args, Path("artifacts"))
 
         self.assertIn("--generation_residency=selected_stage_bundles", command)
+        self.assertIn("--generation_issue_mode=phases", command)
         self.assertIn("--generation_resident_stage_bundles=dit_conditioned", command)
 
     def test_build_id4_command_omits_disabled_vae_detail_flags(self):

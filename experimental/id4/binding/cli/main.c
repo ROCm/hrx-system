@@ -73,6 +73,8 @@ IREE_FLAG(bool, dry_run, false,
 IREE_FLAG(string, generation_residency, "issue_phases",
           "Generation residency mode: issue_phases, "
           "selected_stage_bundles, or all_stage_bundles.");
+IREE_FLAG(string, generation_issue_mode, "full",
+          "Generation issue mode: full or phases.");
 IREE_FLAG(string, generation_resident_stage_bundles, "",
           "Comma-separated stage bundles retained by "
           "--generation_residency=selected_stage_bundles: qwen, "
@@ -90,6 +92,13 @@ IREE_FLAG_LIST(
     "capture multiple taps.");
 IREE_FLAG(string, profile_output, "",
           "Path to write queue and dispatch-level profiling data.");
+
+typedef enum id4_cli_generation_issue_mode_e {
+  // Issue the whole generation through the monolithic convenience API.
+  ID4_CLI_GENERATION_ISSUE_MODE_FULL = 0,
+  // Issue generation through explicit conditioning, denoise, and decode phases.
+  ID4_CLI_GENERATION_ISSUE_MODE_PHASES = 1,
+} id4_cli_generation_issue_mode_t;
 
 static iree_status_t id4_cli_load_tokenizer(iree_string_view_t tokenizer_path,
                                             iree_allocator_t host_allocator,
@@ -395,6 +404,22 @@ static iree_status_t id4_cli_parse_generation_residency_mode(
       "or all_stage_bundles");
 }
 
+static iree_status_t id4_cli_parse_generation_issue_mode(
+    id4_cli_generation_issue_mode_t* out_mode) {
+  IREE_ASSERT_ARGUMENT(out_mode);
+  iree_string_view_t value = iree_make_cstring_view(FLAG_generation_issue_mode);
+  if (iree_string_view_equal(value, IREE_SV("full"))) {
+    *out_mode = ID4_CLI_GENERATION_ISSUE_MODE_FULL;
+    return iree_ok_status();
+  }
+  if (iree_string_view_equal(value, IREE_SV("phases"))) {
+    *out_mode = ID4_CLI_GENERATION_ISSUE_MODE_PHASES;
+    return iree_ok_status();
+  }
+  return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                          "--generation_issue_mode must be full or phases");
+}
+
 static iree_status_t id4_cli_parse_generation_resident_stage_mask(
     id4_ideogram4_generation_resident_stage_mask_t* out_stage_mask) {
   IREE_ASSERT_ARGUMENT(out_stage_mask);
@@ -469,6 +494,12 @@ static iree_status_t id4_cli_validate_dry_run_flags(void) {
         IREE_STATUS_INVALID_ARGUMENT,
         "--generation_residency and --generation_resident_stage_bundles "
         "require generation execution; omit --dry_run");
+  }
+  if (strcmp(FLAG_generation_issue_mode, "full") != 0) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "--generation_issue_mode requires generation execution; omit "
+        "--dry_run");
   }
   return iree_ok_status();
 }
@@ -991,6 +1022,230 @@ static iree_hal_semaphore_list_t id4_cli_single_semaphore_list(
   return list;
 }
 
+static iree_status_t id4_cli_wait_for_semaphore(iree_hal_semaphore_t* semaphore,
+                                                uint64_t payload_value) {
+  iree_hal_semaphore_t* semaphore_storage = semaphore;
+  uint64_t payload_storage = payload_value;
+  iree_hal_semaphore_list_t wait_list = {
+      // One semaphore edge to observe before continuing.
+      .count = 1,
+      // Stack-backed semaphore handle.
+      .semaphores = &semaphore_storage,
+      // Stack-backed payload value.
+      .payload_values = &payload_storage,
+  };
+  return iree_hal_semaphore_list_wait(wait_list, iree_infinite_timeout(),
+                                      IREE_ASYNC_WAIT_FLAG_NONE);
+}
+
+static iree_status_t id4_cli_prepare_generation_phase_bundle(
+    id4_ideogram4_generation_bundle_t* bundle,
+    id4_ideogram4_generation_phase_mask_t phase_mask,
+    iree_hal_semaphore_t* wait_semaphore, uint64_t wait_payload_value,
+    iree_hal_semaphore_t* signal_semaphore, uint64_t signal_payload_value,
+    id4_pipeline_diagnostics_sink_t* diagnostics_sink,
+    id4_ideogram4_generation_phase_bundle_t** out_phase_bundle) {
+  iree_hal_semaphore_t* wait_semaphore_storage = NULL;
+  uint64_t wait_payload_storage = 0;
+  iree_hal_semaphore_t* signal_semaphore_storage = NULL;
+  uint64_t signal_payload_storage = 0;
+  iree_hal_semaphore_list_t wait_list = id4_cli_single_semaphore_list(
+      &wait_semaphore_storage, &wait_payload_storage, wait_semaphore,
+      wait_payload_value);
+  iree_hal_semaphore_list_t signal_list = id4_cli_single_semaphore_list(
+      &signal_semaphore_storage, &signal_payload_storage, signal_semaphore,
+      signal_payload_value);
+
+  id4_ideogram4_generation_phase_prepare_options_t prepare_options;
+  memset(&prepare_options, 0, sizeof(prepare_options));
+  prepare_options.structure_size = sizeof(prepare_options);
+  prepare_options.phase_mask = phase_mask;
+  prepare_options.wait_semaphore_list = wait_list;
+  prepare_options.signal_semaphore_list = signal_list;
+  prepare_options.diagnostics_sink = diagnostics_sink;
+  return id4_ideogram4_generation_bundle_prepare_phase(bundle, &prepare_options,
+                                                       out_phase_bundle);
+}
+
+static iree_status_t id4_cli_issue_generation_phase(
+    id4_ideogram4_generation_execution_t* execution,
+    id4_ideogram4_generation_phase_bundle_t* phase_bundle,
+    iree_hal_semaphore_t* wait_semaphore, uint64_t wait_payload_value,
+    iree_hal_semaphore_t* signal_semaphore, uint64_t signal_payload_value,
+    id4_pipeline_diagnostics_sink_t* diagnostics_sink) {
+  iree_hal_semaphore_t* wait_semaphore_storage = NULL;
+  uint64_t wait_payload_storage = 0;
+  iree_hal_semaphore_t* signal_semaphore_storage = NULL;
+  uint64_t signal_payload_storage = 0;
+  iree_hal_semaphore_list_t wait_list = id4_cli_single_semaphore_list(
+      &wait_semaphore_storage, &wait_payload_storage, wait_semaphore,
+      wait_payload_value);
+  iree_hal_semaphore_list_t signal_list = id4_cli_single_semaphore_list(
+      &signal_semaphore_storage, &signal_payload_storage, signal_semaphore,
+      signal_payload_value);
+
+  id4_ideogram4_generation_phase_issue_options_t issue_options;
+  memset(&issue_options, 0, sizeof(issue_options));
+  issue_options.structure_size = sizeof(issue_options);
+  issue_options.wait_semaphore_list = wait_list;
+  issue_options.signal_semaphore_list = signal_list;
+  issue_options.diagnostics_sink = diagnostics_sink;
+  return id4_ideogram4_generation_execution_issue_phase(execution, phase_bundle,
+                                                        &issue_options);
+}
+
+static iree_status_t id4_cli_prepare_issue_release_generation_phase(
+    id4_ideogram4_generation_bundle_t* bundle,
+    id4_ideogram4_generation_execution_t* execution,
+    id4_ideogram4_generation_phase_mask_t phase_mask,
+    iree_string_view_t prepare_event_name, iree_string_view_t issue_event_name,
+    iree_string_view_t wait_event_name, iree_string_view_t release_event_name,
+    iree_hal_semaphore_t* phase_wait_semaphore,
+    uint64_t phase_wait_payload_value, iree_hal_semaphore_t* prepare_semaphore,
+    uint64_t* inout_prepare_payload_value,
+    iree_hal_semaphore_t* completion_semaphore,
+    uint64_t* inout_completion_payload_value,
+    id4_pipeline_diagnostics_sink_t* diagnostics_sink) {
+  id4_ideogram4_generation_phase_bundle_t* phase_bundle = NULL;
+  iree_time_t phase_start_time_ns = iree_time_now();
+  iree_status_t status = id4_cli_prepare_generation_phase_bundle(
+      bundle, phase_mask, phase_wait_semaphore, phase_wait_payload_value,
+      prepare_semaphore, ++*inout_prepare_payload_value, diagnostics_sink,
+      &phase_bundle);
+  if (iree_status_is_ok(status)) {
+    status = id4_cli_emit_timing(diagnostics_sink, prepare_event_name,
+                                 IREE_SV("prepared generation phase"),
+                                 phase_start_time_ns, iree_time_now());
+  }
+  if (iree_status_is_ok(status)) {
+    phase_start_time_ns = iree_time_now();
+    status = id4_cli_issue_generation_phase(
+        execution, phase_bundle, prepare_semaphore,
+        *inout_prepare_payload_value, completion_semaphore,
+        ++*inout_completion_payload_value, diagnostics_sink);
+    if (iree_status_is_ok(status)) {
+      status = id4_cli_emit_timing(diagnostics_sink, issue_event_name,
+                                   IREE_SV("issued generation phase"),
+                                   phase_start_time_ns, iree_time_now());
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    phase_start_time_ns = iree_time_now();
+    status = id4_cli_wait_for_semaphore(completion_semaphore,
+                                        *inout_completion_payload_value);
+    if (iree_status_is_ok(status)) {
+      status = id4_cli_emit_timing(diagnostics_sink, wait_event_name,
+                                   IREE_SV("waited for generation phase"),
+                                   phase_start_time_ns, iree_time_now());
+    }
+  }
+  phase_start_time_ns = iree_time_now();
+  status = iree_status_join(
+      status, id4_ideogram4_generation_phase_bundle_release(phase_bundle));
+  if (iree_status_is_ok(status)) {
+    status = id4_cli_emit_timing(diagnostics_sink, release_event_name,
+                                 IREE_SV("released generation phase"),
+                                 phase_start_time_ns, iree_time_now());
+  }
+  return status;
+}
+
+static iree_status_t id4_cli_issue_generation_full(
+    id4_ideogram4_session_t* session, id4_ideogram4_generation_bundle_t* bundle,
+    const id4_ideogram4_request_t* request, iree_tokenizer_t* tokenizer,
+    iree_hal_semaphore_list_t prepare_wait_list,
+    iree_hal_semaphore_list_t completion_signal_list,
+    id4_pipeline_diagnostics_sink_t* diagnostics_sink,
+    id4_ideogram4_generation_execution_t** out_execution) {
+  id4_ideogram4_generation_issue_options_t issue_options;
+  memset(&issue_options, 0, sizeof(issue_options));
+  issue_options.structure_size = sizeof(issue_options);
+  issue_options.request = request;
+  issue_options.tokenizer = tokenizer;
+  issue_options.tokenizer_flags = IREE_TOKENIZER_ENCODE_FLAG_NONE;
+  issue_options.wait_semaphore_list = prepare_wait_list;
+  issue_options.signal_semaphore_list = completion_signal_list;
+  issue_options.diagnostics_sink = diagnostics_sink;
+  return id4_ideogram4_session_issue_generation(session, bundle, &issue_options,
+                                                out_execution);
+}
+
+static iree_status_t id4_cli_issue_generation_phases(
+    id4_ideogram4_session_t* session, id4_ideogram4_generation_bundle_t* bundle,
+    const id4_ideogram4_request_t* request, iree_tokenizer_t* tokenizer,
+    iree_hal_semaphore_t* prepare_semaphore,
+    uint64_t* inout_prepare_payload_value,
+    iree_hal_semaphore_t* completion_semaphore,
+    uint64_t* inout_completion_payload_value,
+    id4_pipeline_diagnostics_sink_t* diagnostics_sink,
+    id4_ideogram4_generation_execution_t** out_execution) {
+  *out_execution = NULL;
+  iree_hal_semaphore_t* begin_wait_semaphore_storage = NULL;
+  uint64_t begin_wait_payload_storage = 0;
+  iree_hal_semaphore_t* begin_signal_semaphore_storage = NULL;
+  uint64_t begin_signal_payload_storage = 0;
+  iree_hal_semaphore_list_t begin_wait_list = id4_cli_single_semaphore_list(
+      &begin_wait_semaphore_storage, &begin_wait_payload_storage,
+      prepare_semaphore, *inout_prepare_payload_value);
+  iree_hal_semaphore_list_t begin_signal_list = id4_cli_single_semaphore_list(
+      &begin_signal_semaphore_storage, &begin_signal_payload_storage,
+      prepare_semaphore, ++*inout_prepare_payload_value);
+
+  id4_ideogram4_generation_begin_options_t begin_options;
+  memset(&begin_options, 0, sizeof(begin_options));
+  begin_options.structure_size = sizeof(begin_options);
+  begin_options.request = request;
+  begin_options.tokenizer = tokenizer;
+  begin_options.tokenizer_flags = IREE_TOKENIZER_ENCODE_FLAG_NONE;
+  begin_options.wait_semaphore_list = begin_wait_list;
+  begin_options.signal_semaphore_list = begin_signal_list;
+  begin_options.diagnostics_sink = diagnostics_sink;
+
+  id4_ideogram4_generation_execution_t* execution = NULL;
+  iree_time_t phase_start_time_ns = iree_time_now();
+  iree_status_t status = id4_ideogram4_session_begin_generation(
+      session, bundle, &begin_options, &execution);
+  if (iree_status_is_ok(status)) {
+    status =
+        id4_cli_emit_timing(diagnostics_sink, IREE_SV("cli.begin_generation"),
+                            IREE_SV("began phase-driven generation"),
+                            phase_start_time_ns, iree_time_now());
+  }
+  if (iree_status_is_ok(status)) {
+    status = id4_cli_prepare_issue_release_generation_phase(
+        bundle, execution, ID4_IDEOGRAM4_GENERATION_PHASE_CONDITIONING,
+        IREE_SV("cli.prepare_conditioning"), IREE_SV("cli.issue_conditioning"),
+        IREE_SV("cli.wait_conditioning"), IREE_SV("cli.release_conditioning"),
+        prepare_semaphore, *inout_prepare_payload_value, prepare_semaphore,
+        inout_prepare_payload_value, completion_semaphore,
+        inout_completion_payload_value, diagnostics_sink);
+  }
+  if (iree_status_is_ok(status)) {
+    status = id4_cli_prepare_issue_release_generation_phase(
+        bundle, execution, ID4_IDEOGRAM4_GENERATION_PHASE_DENOISE,
+        IREE_SV("cli.prepare_denoise"), IREE_SV("cli.issue_denoise"),
+        IREE_SV("cli.wait_denoise"), IREE_SV("cli.release_denoise"),
+        completion_semaphore, *inout_completion_payload_value,
+        prepare_semaphore, inout_prepare_payload_value, completion_semaphore,
+        inout_completion_payload_value, diagnostics_sink);
+  }
+  if (iree_status_is_ok(status)) {
+    status = id4_cli_prepare_issue_release_generation_phase(
+        bundle, execution, ID4_IDEOGRAM4_GENERATION_PHASE_DECODE,
+        IREE_SV("cli.prepare_decode"), IREE_SV("cli.issue_decode"),
+        IREE_SV("cli.wait_decode"), IREE_SV("cli.release_decode"),
+        completion_semaphore, *inout_completion_payload_value,
+        prepare_semaphore, inout_prepare_payload_value, completion_semaphore,
+        inout_completion_payload_value, diagnostics_sink);
+  }
+  if (iree_status_is_ok(status)) {
+    *out_execution = execution;
+  } else {
+    id4_ideogram4_generation_execution_release(execution);
+  }
+  return status;
+}
+
 static iree_status_t id4_cli_create_loaded_session(
     id4_tooling_runtime_context_t* runtime_context,
     id4_pipeline_diagnostics_sink_t* diagnostics_sink,
@@ -1386,9 +1641,14 @@ static iree_status_t id4_cli_run_generation(iree_allocator_t host_allocator) {
   id4_pipeline_diagnostics_sink_initialize_ignore(&diagnostics_sink);
   iree_hal_profile_statistics_sink_t* profile_statistics_sink = NULL;
   bool profile_started = false;
+  id4_cli_generation_issue_mode_t generation_issue_mode =
+      ID4_CLI_GENERATION_ISSUE_MODE_FULL;
   const iree_time_t generation_start_time_ns = iree_time_now();
 
   iree_status_t status = id4_cli_validate_execution_flags();
+  if (iree_status_is_ok(status)) {
+    status = id4_cli_parse_generation_issue_mode(&generation_issue_mode);
+  }
   if (iree_status_is_ok(status)) {
     status = id4_cli_parse_request(host_allocator, &request);
   }
@@ -1486,14 +1746,15 @@ static iree_status_t id4_cli_run_generation(iree_allocator_t host_allocator) {
         device, host_allocator, &profile_statistics_sink, &profile_started);
   }
   iree_hal_semaphore_t* prepare_semaphore_storage = NULL;
-  uint64_t prepare_payload_storage = 1;
+  uint64_t prepare_signal_payload_storage = 1;
+  uint64_t prepare_payload_storage = prepare_signal_payload_storage;
   iree_hal_semaphore_list_t prepare_signal_list =
       iree_hal_semaphore_list_empty();
   if (iree_status_is_ok(status)) {
     const iree_time_t phase_start_time_ns = iree_time_now();
     prepare_signal_list = id4_cli_single_semaphore_list(
-        &prepare_semaphore_storage, &prepare_payload_storage, prepare_semaphore,
-        prepare_payload_storage);
+        &prepare_semaphore_storage, &prepare_signal_payload_storage,
+        prepare_semaphore, prepare_signal_payload_storage);
     id4_ideogram4_generation_prepare_options_t prepare_options;
     memset(&prepare_options, 0, sizeof(prepare_options));
     prepare_options.structure_size = sizeof(prepare_options);
@@ -1524,24 +1785,35 @@ static iree_status_t id4_cli_run_generation(iree_allocator_t host_allocator) {
     }
   }
   iree_hal_semaphore_t* completion_semaphore_storage = NULL;
-  uint64_t completion_payload_storage = 1;
+  uint64_t completion_payload_storage = 0;
   iree_hal_semaphore_list_t completion_list = iree_hal_semaphore_list_empty();
   if (iree_status_is_ok(status)) {
     const iree_time_t phase_start_time_ns = iree_time_now();
     completion_list = id4_cli_single_semaphore_list(
         &completion_semaphore_storage, &completion_payload_storage,
         completion_semaphore, completion_payload_storage);
-    id4_ideogram4_generation_issue_options_t issue_options;
-    memset(&issue_options, 0, sizeof(issue_options));
-    issue_options.structure_size = sizeof(issue_options);
-    issue_options.request = &request;
-    issue_options.tokenizer = tokenizer;
-    issue_options.tokenizer_flags = IREE_TOKENIZER_ENCODE_FLAG_NONE;
-    issue_options.wait_semaphore_list = prepare_signal_list;
-    issue_options.signal_semaphore_list = completion_list;
-    issue_options.diagnostics_sink = &diagnostics_sink;
-    status = id4_ideogram4_session_issue_generation(session, generation_bundle,
-                                                    &issue_options, &execution);
+    switch (generation_issue_mode) {
+      case ID4_CLI_GENERATION_ISSUE_MODE_FULL: {
+        ++completion_payload_storage;
+        status = id4_cli_issue_generation_full(
+            session, generation_bundle, &request, tokenizer,
+            prepare_signal_list, completion_list, &diagnostics_sink,
+            &execution);
+        break;
+      }
+      case ID4_CLI_GENERATION_ISSUE_MODE_PHASES: {
+        status = id4_cli_issue_generation_phases(
+            session, generation_bundle, &request, tokenizer, prepare_semaphore,
+            &prepare_payload_storage, completion_semaphore,
+            &completion_payload_storage, &diagnostics_sink, &execution);
+        break;
+      }
+      default: {
+        status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                  "generation issue mode is invalid");
+        break;
+      }
+    }
     generation_was_issued = iree_status_is_ok(status);
     if (iree_status_is_ok(status)) {
       status = id4_cli_emit_timing(&diagnostics_sink,

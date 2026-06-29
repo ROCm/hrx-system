@@ -222,6 +222,11 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--generation_issue_mode",
+        default="full",
+        choices=("full", "phases"),
+    )
+    parser.add_argument(
         "--generation_resident_stage_bundles",
         default="",
         help=(
@@ -550,6 +555,7 @@ def build_id4_command(args: argparse.Namespace, artifact_dir: Path) -> list[str]
         f"--dit_attention_implementation={args.dit_attention_implementation}",
         f"--dit_feed_forward_implementation={args.dit_feed_forward_implementation}",
         f"--generation_residency={args.generation_residency}",
+        f"--generation_issue_mode={args.generation_issue_mode}",
         f"--vae_tiling_mode={args.vae_tiling_mode}",
         f"--dump_plan={artifact_dir / 'plan.json'}",
         f"--dump_diagnostics={artifact_dir / 'diagnostics'}",

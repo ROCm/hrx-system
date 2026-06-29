@@ -36,6 +36,7 @@ py_binary(
 py_binary(
     name = "smoke_test",
     srcs = ["smoke_test.py"],
+    data = ["//experimental/id4/binding/cli:id4"],
 )
 
 py_binary(
