@@ -46,12 +46,12 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx1100_scaled_f8e4m3_x
 ^_bb1:
   %48 = s_mov_b32 3229614080
   %49 = s_mov_b32 1614815232
-  %50 = v_perm_b32 %49, %48, %36
-  %51 = s_mov_b32 993737472
-  %52 = s_mov_b32 1010580540
-  %53 = v_perm_b32 %52, %51, %36
+  %50 = s_mov_b32 993737472
+  %51 = s_mov_b32 1010580540
+  %52 = v_perm_b32 %49, %48, %36
+  %53 = v_perm_b32 %51, %50, %36
   %54 = v_lshlrev_b32_src0_inline %53, 8
-  %55 = v_or_b32 %50, %54
+  %55 = v_or_b32 %52, %54
   %56 = s_mov_b32 983055
   %57 = v_pk_ashrrev_i16 %56, %40
   %58 = v_xor_b32 %38, %55
@@ -86,12 +86,12 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx1100_scaled_f8e4m3_x
 ^_bb4:
   %89 = s_mov_b32 3229614080
   %90 = s_mov_b32 1614815232
-  %91 = v_perm_b32 %90, %89, %77
-  %92 = s_mov_b32 993737472
-  %93 = s_mov_b32 1010580540
-  %94 = v_perm_b32 %93, %92, %77
+  %91 = s_mov_b32 993737472
+  %92 = s_mov_b32 1010580540
+  %93 = v_perm_b32 %90, %89, %77
+  %94 = v_perm_b32 %92, %91, %77
   %95 = v_lshlrev_b32_src0_inline %94, 8
-  %96 = v_or_b32 %91, %95
+  %96 = v_or_b32 %93, %95
   %98 = v_pk_ashrrev_i16 %66, %81
   %99 = v_xor_b32 %79, %96
   %100 = v_and_b32 %99, %98
@@ -123,12 +123,12 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx1100_scaled_f8e4m3_x
 ^_bb7:
   %130 = s_mov_b32 3229614080
   %131 = s_mov_b32 1614815232
-  %132 = v_perm_b32 %131, %130, %118
-  %133 = s_mov_b32 993737472
-  %134 = s_mov_b32 1010580540
-  %135 = v_perm_b32 %134, %133, %118
+  %132 = s_mov_b32 993737472
+  %133 = s_mov_b32 1010580540
+  %134 = v_perm_b32 %131, %130, %118
+  %135 = v_perm_b32 %133, %132, %118
   %136 = v_lshlrev_b32_src0_inline %135, 8
-  %137 = v_or_b32 %132, %136
+  %137 = v_or_b32 %134, %136
   %139 = v_pk_ashrrev_i16 %66, %122
   %140 = v_xor_b32 %120, %137
   %141 = v_and_b32 %140, %139
@@ -159,12 +159,12 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx1100_scaled_f8e4m3_x
 ^_bb10:
   %171 = s_mov_b32 3229614080
   %172 = s_mov_b32 1614815232
-  %173 = v_perm_b32 %172, %171, %159
-  %174 = s_mov_b32 993737472
-  %175 = s_mov_b32 1010580540
-  %176 = v_perm_b32 %175, %174, %159
+  %173 = s_mov_b32 993737472
+  %174 = s_mov_b32 1010580540
+  %175 = v_perm_b32 %172, %171, %159
+  %176 = v_perm_b32 %174, %173, %159
   %177 = v_lshlrev_b32_src0_inline %176, 8
-  %178 = v_or_b32 %173, %177
+  %178 = v_or_b32 %175, %177
   %180 = v_pk_ashrrev_i16 %66, %163
   %181 = v_xor_b32 %161, %178
   %182 = v_and_b32 %181, %180
@@ -286,12 +286,12 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx1100_finite_storage_
 ^_bb1:
   %45 = s_mov_b32 3229614080
   %46 = s_mov_b32 1614815232
-  %47 = v_perm_b32 %46, %45, %33
-  %48 = s_mov_b32 993737472
-  %49 = s_mov_b32 1010580540
-  %50 = v_perm_b32 %49, %48, %33
+  %47 = s_mov_b32 993737472
+  %48 = s_mov_b32 1010580540
+  %49 = v_perm_b32 %46, %45, %33
+  %50 = v_perm_b32 %48, %47, %33
   %51 = v_lshlrev_b32_src0_inline %50, 8
-  %52 = v_or_b32 %47, %51
+  %52 = v_or_b32 %49, %51
   %53 = s_mov_b32 983055
   %54 = v_pk_ashrrev_i16 %53, %37
   %55 = v_xor_b32 %35, %52
@@ -317,12 +317,12 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx1100_finite_storage_
 ^_bb4:
   %77 = s_mov_b32 3229614080
   %78 = s_mov_b32 1614815232
-  %79 = v_perm_b32 %78, %77, %65
-  %80 = s_mov_b32 993737472
-  %81 = s_mov_b32 1010580540
-  %82 = v_perm_b32 %81, %80, %65
+  %79 = s_mov_b32 993737472
+  %80 = s_mov_b32 1010580540
+  %81 = v_perm_b32 %78, %77, %65
+  %82 = v_perm_b32 %80, %79, %65
   %83 = v_lshlrev_b32_src0_inline %82, 8
-  %84 = v_or_b32 %79, %83
+  %84 = v_or_b32 %81, %83
   %85 = s_mov_b32 983055
   %86 = v_pk_ashrrev_i16 %85, %69
   %87 = v_xor_b32 %67, %84
@@ -349,12 +349,12 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx1100_finite_storage_
 ^_bb7:
   %109 = s_mov_b32 3229614080
   %110 = s_mov_b32 1614815232
-  %111 = v_perm_b32 %110, %109, %97
-  %112 = s_mov_b32 993737472
-  %113 = s_mov_b32 1010580540
-  %114 = v_perm_b32 %113, %112, %97
+  %111 = s_mov_b32 993737472
+  %112 = s_mov_b32 1010580540
+  %113 = v_perm_b32 %110, %109, %97
+  %114 = v_perm_b32 %112, %111, %97
   %115 = v_lshlrev_b32_src0_inline %114, 8
-  %116 = v_or_b32 %111, %115
+  %116 = v_or_b32 %113, %115
   %117 = s_mov_b32 983055
   %118 = v_pk_ashrrev_i16 %117, %101
   %119 = v_xor_b32 %99, %116
@@ -380,12 +380,12 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx1100_finite_storage_
 ^_bb10:
   %141 = s_mov_b32 3229614080
   %142 = s_mov_b32 1614815232
-  %143 = v_perm_b32 %142, %141, %129
-  %144 = s_mov_b32 993737472
-  %145 = s_mov_b32 1010580540
-  %146 = v_perm_b32 %145, %144, %129
+  %143 = s_mov_b32 993737472
+  %144 = s_mov_b32 1010580540
+  %145 = v_perm_b32 %142, %141, %129
+  %146 = v_perm_b32 %144, %143, %129
   %147 = v_lshlrev_b32_src0_inline %146, 8
-  %148 = v_or_b32 %143, %147
+  %148 = v_or_b32 %145, %147
   %149 = s_mov_b32 983055
   %150 = v_pk_ashrrev_i16 %149, %133
   %151 = v_xor_b32 %131, %148
