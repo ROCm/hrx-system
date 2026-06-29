@@ -40,6 +40,14 @@ TEST(FactsUnknown, NoFlagsSet) {
   EXPECT_FALSE(loom_value_facts_is_boolean(f));
 }
 
+TEST(FactsFloatPredicates, FiniteImpliesNotNanAndNotInf) {
+  loom_value_facts_t f = loom_value_facts_unknown();
+  f.flags = LOOM_VALUE_FACT_FLOAT | LOOM_VALUE_FACT_FINITE;
+  EXPECT_TRUE(loom_value_facts_is_finite(f));
+  EXPECT_TRUE(loom_value_facts_is_not_nan(f));
+  EXPECT_TRUE(loom_value_facts_is_not_inf(f));
+}
+
 TEST(FactsExactI64, Zero) {
   loom_value_facts_t f = loom_value_facts_exact_i64(0);
   EXPECT_TRUE(loom_value_facts_is_exact(f));
