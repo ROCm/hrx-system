@@ -210,6 +210,8 @@ loom_cc_library(
     "memory_legality.c"
     "narrow_float/bf16.c"
     "narrow_float/fp8.c"
+    "narrow_float/fp8_descriptors.c"
+    "narrow_float/fp8_plan.c"
     "preamble.c"
     "prefetch.c"
     "registry.c"
