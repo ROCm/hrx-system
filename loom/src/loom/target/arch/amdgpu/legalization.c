@@ -20,6 +20,7 @@
 #include "loom/ops/vector/ops.h"
 #include "loom/target/arch/amdgpu/lower/kinds.h"
 #include "loom/target/arch/amdgpu/lower/matrix_fragment.h"
+#include "loom/target/arch/amdgpu/lower/values.h"
 #include "loom/target/arch/amdgpu/matrix/contract.h"
 #include "loom/target/arch/amdgpu/target_info_defs.h"
 #include "loom/transforms/vector/to_scalar.h"
@@ -73,6 +74,24 @@ static iree_status_t loom_amdgpu_retain_native_vector_op(
   *out_result = (loom_target_legalizer_result_t){
       .action = LOOM_TARGET_LEGALIZER_ACTION_DEFER,
   };
+  return iree_ok_status();
+}
+
+static iree_status_t loom_amdgpu_legalize_vector_decode(
+    const loom_target_legalizer_entry_t* entry,
+    loom_target_legalization_context_t* context, loom_op_t* op,
+    loom_target_legalizer_result_t* out_result) {
+  (void)entry;
+  *out_result = (loom_target_legalizer_result_t){
+      .action = LOOM_TARGET_LEGALIZER_ACTION_NO_COMMENT,
+  };
+  if (loom_amdgpu_legalizer_descriptor_set_is_amdgpu(context->descriptor_set) &&
+      loom_amdgpu_vector_decode_can_lower_as_direct_fp8_conversion(
+          context->module, context->fact_table, op)) {
+    *out_result = (loom_target_legalizer_result_t){
+        .action = LOOM_TARGET_LEGALIZER_ACTION_DEFER,
+    };
+  }
   return iree_ok_status();
 }
 
@@ -1746,6 +1765,10 @@ static const loom_target_legalizer_entry_t kAmdgpuLegalizerEntries[] = {
     {
         .root_kind = LOOM_OP_VECTOR_DOT4F8,
         .legalize = loom_amdgpu_retain_native_vector_op,
+    },
+    {
+        .root_kind = LOOM_OP_VECTOR_DECODE,
+        .legalize = loom_amdgpu_legalize_vector_decode,
     },
     {
         .root_kind = LOOM_OP_KERNEL_SUBGROUP_MATCH_ANY,
