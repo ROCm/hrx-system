@@ -3588,6 +3588,7 @@ def _v_pk_ternary_overlay(
             AmdgpuOperandOverlay("SRC2", _sgpr_vgpr_operand("c", units=units)),
         ),
         operand_forms=operand_forms,
+        fixed_encoding_fields=(("OP_SEL_HI", 0x7),),
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     )
 
@@ -3614,8 +3615,32 @@ def _v_pk_binary_overlay(
             AmdgpuOperandOverlay("SRC0", _sgpr_vgpr_operand(lhs_name, units=units)),
             AmdgpuOperandOverlay("SRC1", _sgpr_vgpr_operand(rhs_name, units=units)),
         ),
+        fixed_encoding_fields=(("OP_SEL_HI", 0x3),),
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     )
+
+
+def _v_pk_with_op_sel_hi_field(
+    overlays: tuple[AmdgpuDescriptorOverlay, ...], op_sel_hi_field: str
+) -> tuple[AmdgpuDescriptorOverlay, ...]:
+    rewritten_overlays = []
+    for overlay in overlays:
+        replaced_field = False
+        fixed_encoding_fields = []
+        for field, value in overlay.fixed_encoding_fields:
+            if field == "OP_SEL_HI":
+                fixed_encoding_fields.append((op_sel_hi_field, value))
+                replaced_field = True
+            else:
+                fixed_encoding_fields.append((field, value))
+        if not replaced_field:
+            raise ValueError(
+                f"packed overlay '{overlay.descriptor_key}' has no OP_SEL_HI field"
+            )
+        rewritten_overlays.append(
+            replace(overlay, fixed_encoding_fields=tuple(fixed_encoding_fields))
+        )
+    return tuple(rewritten_overlays)
 
 
 _V_PK_TERNARY_SOURCES = (
@@ -3669,7 +3694,10 @@ def _v_pk_ternary_literal_overlay(
             immediates=("imm32",),
         ),
         immediates=(_LITERAL_U32_IMMEDIATE,),
-        fixed_encoding_fields=((literal_field, _predefined("SRC_LITERAL", "OPR_SRC")),),
+        fixed_encoding_fields=(
+            ("OP_SEL_HI", 0x7),
+            (literal_field, _predefined("SRC_LITERAL", "OPR_SRC")),
+        ),
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     )
 
@@ -5237,6 +5265,7 @@ __all__ = (
     "_v_pk_sub_i16_overlay",
     "_v_pk_binary_overlay",
     "_v_pk_ternary_overlay",
+    "_v_pk_with_op_sel_hi_field",
     "_v_perm_b32_overlay",
     "_v_perm_b32_src2_literal_overlay",
     "_v_perm_b32_src1_zero_src2_literal_overlay",
