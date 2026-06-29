@@ -554,9 +554,6 @@ static void iree_hal_streaming_module_destroy(
   IREE_TRACE_ZONE_BEGIN(z0);
   iree_allocator_t host_allocator = module->host_allocator;
 
-  // Release file mapping if present.
-  iree_io_file_mapping_release(module->file_mapping);
-
   // Release symbol metadata.
   iree_allocator_free(module->host_allocator, module->symbols);
 
@@ -584,6 +581,10 @@ static void iree_hal_streaming_module_destroy(
 
   // Drop fat-binary / offload-bundle unpacking buffers.
   iree_hal_streaming_fat_binary_extract_reset(&module->fat_extract);
+
+  // Drop mapped module images after executable refs owned by the module. The
+  // executable may alias file-backed data when loaded with ALIAS_PROVIDED_DATA.
+  iree_io_file_mapping_release(module->file_mapping);
 
   // Release executable cache.
   iree_hal_executable_cache_release(module->cache);

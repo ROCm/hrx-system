@@ -2101,7 +2101,21 @@ CUDAAPI CUresult cuModuleLoadFatBinary(CUmodule* module, const void* fatCubin) {
 
 CUDAAPI CUresult cuModuleUnload(CUmodule hmod) {
   IREE_TRACE_ZONE_BEGIN(z0);
-  iree_hal_streaming_module_release((iree_hal_streaming_module_t*)hmod);
+  if (!hmod) {
+    IREE_TRACE_ZONE_END(z0);
+    return CUDA_ERROR_INVALID_HANDLE;
+  }
+
+  iree_hal_streaming_module_t* module = (iree_hal_streaming_module_t*)hmod;
+  iree_status_t status =
+      iree_hal_streaming_context_synchronize(module->context);
+  if (!iree_status_is_ok(status)) {
+    CUresult result = iree_status_to_cu_result(status);
+    IREE_TRACE_ZONE_END(z0);
+    return result;
+  }
+
+  iree_hal_streaming_module_release(module);
   IREE_TRACE_ZONE_END(z0);
   return CUDA_SUCCESS;
 }
@@ -3313,12 +3327,19 @@ CUDAAPI CUresult cuGraphExecUpdate(CUgraphExec hGraphExec, CUgraph hGraph,
       (iree_hal_streaming_graph_exec_t*)hGraphExec;
   iree_hal_streaming_graph_t* graph = (iree_hal_streaming_graph_t*)hGraph;
 
-  iree_status_t status = iree_hal_streaming_graph_exec_update(exec, graph);
-  if (!iree_status_is_ok(status) && hErrorNode_out) {
-    *hErrorNode_out = NULL;  // We don't track specific error nodes yet.
+  iree_hal_streaming_graph_node_t* error_node = NULL;
+  iree_hal_streaming_graph_exec_update_result_t update_result =
+      IREE_HAL_STREAMING_GRAPH_EXEC_UPDATE_ERROR;
+  iree_status_t status = iree_hal_streaming_graph_exec_update(
+      exec, graph, &error_node, &update_result);
+  if (hErrorNode_out) {
+    *hErrorNode_out = (CUgraphNode)error_node;
   }
 
-  CUresult result = iree_status_to_cu_result(status);
+  CUresult result = iree_status_is_ok(status)
+                        ? CUDA_SUCCESS
+                        : CUDA_ERROR_GRAPH_EXEC_UPDATE_FAILURE;
+  if (!iree_status_is_ok(status)) iree_status_ignore(status);
   IREE_TRACE_ZONE_END(z0);
   return result;
 }

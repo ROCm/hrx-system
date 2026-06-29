@@ -37,6 +37,9 @@ static iree_thread_local iree_hal_streaming_context_stack_t
 
 static void iree_hal_streaming_context_destroy(
     iree_hal_streaming_context_t* context);
+static iree_status_t iree_hal_streaming_context_synchronize_streams(
+    iree_hal_streaming_context_t* context, bool include_non_blocking_streams,
+    bool flush_before_wait);
 
 iree_status_t iree_hal_streaming_context_create(
     iree_hal_streaming_device_t* device_entry,
@@ -62,6 +65,7 @@ iree_status_t iree_hal_streaming_context_create(
   context->flags = flags;
   context->default_stream = NULL;
   context->next_stream_id = 1;
+  context->next_capture_id = 1;
   context->peer_contexts = NULL;
   context->peer_count = 0;
   context->peer_capacity = 0;
@@ -633,6 +637,23 @@ iree_status_t iree_hal_streaming_context_register_stream(
   return status;
 }
 
+iree_status_t iree_hal_streaming_context_allocate_capture_id(
+    iree_hal_streaming_context_t* context, unsigned long long* out_capture_id) {
+  IREE_ASSERT_ARGUMENT(context);
+  IREE_ASSERT_ARGUMENT(out_capture_id);
+  *out_capture_id = 0;
+
+  iree_slim_mutex_lock(&context->stream_list_mutex);
+  if (context->next_capture_id == 0) {
+    iree_slim_mutex_unlock(&context->stream_list_mutex);
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "stream capture identifier space exhausted");
+  }
+  *out_capture_id = context->next_capture_id++;
+  iree_slim_mutex_unlock(&context->stream_list_mutex);
+  return iree_ok_status();
+}
+
 void iree_hal_streaming_context_unregister_stream(
     iree_hal_streaming_context_t* context,
     iree_hal_streaming_stream_t* stream) {
@@ -662,6 +683,26 @@ void iree_hal_streaming_context_unregister_stream(
   }
 
   IREE_TRACE_ZONE_END(z0);
+}
+
+bool iree_hal_streaming_context_has_peer_contexts(
+    iree_hal_streaming_context_t* context) {
+  iree_hal_streaming_device_registry_t* device_registry =
+      iree_hal_streaming_device_registry();
+  if (!device_registry) return false;
+
+  bool has_peer = false;
+  iree_slim_mutex_lock(&device_registry->context_list.mutex);
+  for (iree_hal_streaming_context_t* candidate =
+           device_registry->context_list.head;
+       candidate; candidate = candidate->context_list_entry.next) {
+    if (candidate != context) {
+      has_peer = true;
+      break;
+    }
+  }
+  iree_slim_mutex_unlock(&device_registry->context_list.mutex);
+  return has_peer;
 }
 
 // Takes a retained snapshot of the current stream list so callers can wait or
@@ -721,33 +762,113 @@ static void iree_hal_streaming_context_release_stream_snapshot(
 iree_status_t iree_hal_streaming_context_wait_idle(
     iree_hal_streaming_context_t* context, iree_timeout_t timeout) {
   IREE_ASSERT_ARGUMENT(context);
+  (void)timeout;
+  return iree_hal_streaming_context_synchronize_streams(
+      context, /*include_non_blocking_streams=*/true,
+      /*flush_before_wait=*/true);
+}
+
+iree_status_t iree_hal_streaming_context_flush(
+    iree_hal_streaming_context_t* context) {
+  IREE_ASSERT_ARGUMENT(context);
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  iree_hal_streaming_stream_t** temp_streams = NULL;
+  iree_hal_streaming_stream_t** streams = NULL;
   iree_host_size_t count = 0;
-  iree_status_t status = iree_hal_streaming_context_snapshot_streams(
-      context, &temp_streams, &count);
+  iree_status_t status =
+      iree_hal_streaming_context_snapshot_streams(context, &streams, &count);
+
+  for (iree_host_size_t i = 0; i < count && iree_status_is_ok(status); ++i) {
+    if (streams[i]) {
+      status = iree_hal_streaming_stream_flush(streams[i]);
+    }
+  }
+
+  iree_hal_streaming_context_release_stream_snapshot(context, streams, count);
   if (!iree_status_is_ok(status)) {
     IREE_TRACE_ZONE_END(z0);
     return status;
   }
 
-  // Synchronize all streams. Bail on the first failure.
-  for (iree_host_size_t i = 0; iree_status_is_ok(status) && i < count; ++i) {
-    status = iree_hal_streaming_stream_synchronize(temp_streams[i]);
+  if (context->default_stream) {
+    status = iree_hal_streaming_stream_flush(context->default_stream);
   }
 
-  iree_hal_streaming_context_release_stream_snapshot(context, temp_streams,
-                                                     count);
+  IREE_TRACE_ZONE_END(z0);
+  return status;
+}
+
+iree_status_t iree_hal_streaming_context_flush_all(void) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+
+  iree_hal_streaming_device_registry_t* device_registry =
+      iree_hal_streaming_device_registry();
+  if (!device_registry) {
+    IREE_TRACE_ZONE_END(z0);
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "HAL stream layer not initialized");
+  }
+
+  iree_hal_streaming_context_t** contexts = NULL;
+  iree_host_size_t context_capacity = 0;
+  iree_host_size_t context_count = 0;
+  iree_status_t status = iree_ok_status();
+
+  iree_slim_mutex_lock(&device_registry->context_list.mutex);
+  for (iree_hal_streaming_context_t* context =
+           device_registry->context_list.head;
+       context; context = context->context_list_entry.next) {
+    ++context_capacity;
+  }
+  if (context_capacity > 0) {
+    iree_host_size_t contexts_size = 0;
+    if (IREE_UNLIKELY(!iree_host_size_checked_mul(
+            context_capacity, sizeof(contexts[0]), &contexts_size))) {
+      status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                                "context snapshot size overflow");
+    } else {
+      status = iree_allocator_malloc(device_registry->host_allocator,
+                                     contexts_size, (void**)&contexts);
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    iree_host_size_t index = 0;
+    for (iree_hal_streaming_context_t* context =
+             device_registry->context_list.head;
+         context; context = context->context_list_entry.next) {
+      contexts[index++] = context;
+      iree_hal_streaming_context_retain(context);
+    }
+    context_count = index;
+  }
+  iree_slim_mutex_unlock(&device_registry->context_list.mutex);
+
+  for (iree_host_size_t i = 0; i < context_count && iree_status_is_ok(status);
+       ++i) {
+    status = iree_hal_streaming_context_flush(contexts[i]);
+  }
+
+  for (iree_host_size_t i = 0; i < context_count; ++i) {
+    iree_hal_streaming_context_release(contexts[i]);
+  }
+  if (contexts) {
+    iree_allocator_free(device_registry->host_allocator, contexts);
+  }
 
   IREE_TRACE_ZONE_END(z0);
   return status;
 }
 
 static iree_status_t iree_hal_streaming_context_synchronize_streams(
-    iree_hal_streaming_context_t* context, bool include_non_blocking_streams) {
+    iree_hal_streaming_context_t* context, bool include_non_blocking_streams,
+    bool flush_before_wait) {
   IREE_ASSERT_ARGUMENT(context);
   IREE_TRACE_ZONE_BEGIN(z0);
+
+  if (flush_before_wait) {
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_hal_streaming_context_flush(context));
+  }
 
   iree_hal_streaming_stream_t** streams_copy = NULL;
   iree_host_size_t count = 0;
@@ -769,7 +890,7 @@ static iree_status_t iree_hal_streaming_context_synchronize_streams(
         (stream->flags & IREE_HAL_STREAMING_STREAM_FLAG_NON_BLOCKING)) {
       continue;
     }
-    status = iree_hal_streaming_stream_synchronize(stream);
+    status = iree_hal_streaming_stream_synchronize_flushed(stream);
   }
 
   iree_hal_streaming_context_release_stream_snapshot(context, streams_copy,
@@ -784,7 +905,8 @@ static iree_status_t iree_hal_streaming_context_synchronize_streams(
   // The legacy default stream always participates in its own ordering.
   if (context->default_stream) {
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, iree_hal_streaming_stream_synchronize(context->default_stream));
+        z0,
+        iree_hal_streaming_stream_synchronize_flushed(context->default_stream));
   }
 
   IREE_TRACE_ZONE_END(z0);
@@ -794,13 +916,140 @@ static iree_status_t iree_hal_streaming_context_synchronize_streams(
 iree_status_t iree_hal_streaming_context_synchronize(
     iree_hal_streaming_context_t* context) {
   return iree_hal_streaming_context_synchronize_streams(
-      context, /*include_non_blocking_streams=*/true);
+      context, /*include_non_blocking_streams=*/true,
+      /*flush_before_wait=*/true);
 }
 
 iree_status_t iree_hal_streaming_context_synchronize_legacy_default(
     iree_hal_streaming_context_t* context) {
   return iree_hal_streaming_context_synchronize_streams(
-      context, /*include_non_blocking_streams=*/false);
+      context, /*include_non_blocking_streams=*/false,
+      /*flush_before_wait=*/true);
+}
+
+iree_status_t iree_hal_streaming_context_synchronize_all(void) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+
+  iree_hal_streaming_device_registry_t* device_registry =
+      iree_hal_streaming_device_registry();
+  if (!device_registry) {
+    IREE_TRACE_ZONE_END(z0);
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "HAL stream layer not initialized");
+  }
+
+  iree_hal_streaming_context_t** contexts = NULL;
+  iree_host_size_t context_capacity = 0;
+  iree_host_size_t context_count = 0;
+  iree_status_t status = iree_ok_status();
+
+  iree_slim_mutex_lock(&device_registry->context_list.mutex);
+  for (iree_hal_streaming_context_t* context =
+           device_registry->context_list.head;
+       context; context = context->context_list_entry.next) {
+    ++context_capacity;
+  }
+  if (context_capacity > 0) {
+    iree_host_size_t contexts_size = 0;
+    if (IREE_UNLIKELY(!iree_host_size_checked_mul(
+            context_capacity, sizeof(contexts[0]), &contexts_size))) {
+      status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                                "context snapshot size overflow");
+    } else {
+      status = iree_allocator_malloc(device_registry->host_allocator,
+                                     contexts_size, (void**)&contexts);
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    iree_host_size_t index = 0;
+    for (iree_hal_streaming_context_t* context =
+             device_registry->context_list.head;
+         context; context = context->context_list_entry.next) {
+      contexts[index++] = context;
+      iree_hal_streaming_context_retain(context);
+    }
+    context_count = index;
+  }
+  iree_slim_mutex_unlock(&device_registry->context_list.mutex);
+
+  for (iree_host_size_t i = 0; iree_status_is_ok(status) && i < context_count;
+       ++i) {
+    status = iree_hal_streaming_context_flush(contexts[i]);
+  }
+  for (iree_host_size_t i = 0; iree_status_is_ok(status) && i < context_count;
+       ++i) {
+    status = iree_hal_streaming_context_synchronize_streams(
+        contexts[i], /*include_non_blocking_streams=*/true,
+        /*flush_before_wait=*/false);
+  }
+
+  for (iree_host_size_t i = 0; i < context_count; ++i) {
+    iree_hal_streaming_context_release(contexts[i]);
+  }
+  if (contexts) {
+    iree_allocator_free(device_registry->host_allocator, contexts);
+  }
+
+  IREE_TRACE_ZONE_END(z0);
+  return status;
+}
+
+iree_status_t iree_hal_streaming_context_synchronize_blocking_streams(
+    iree_hal_streaming_context_t* context,
+    iree_hal_streaming_stream_t* except_stream) {
+  IREE_ASSERT_ARGUMENT(context);
+  IREE_TRACE_ZONE_BEGIN(z0);
+
+  iree_hal_streaming_stream_t** streams_copy = NULL;
+  iree_host_size_t count = 0;
+  iree_status_t status = iree_hal_streaming_context_snapshot_streams(
+      context, &streams_copy, &count);
+  if (!iree_status_is_ok(status)) {
+    IREE_TRACE_ZONE_END(z0);
+    return status;
+  }
+
+  for (iree_host_size_t i = 0; i < count && iree_status_is_ok(status); ++i) {
+    iree_hal_streaming_stream_t* stream = streams_copy[i];
+    if (!stream || stream == except_stream ||
+        stream == context->default_stream ||
+        iree_any_bit_set(stream->flags,
+                         IREE_HAL_STREAMING_STREAM_FLAG_NON_BLOCKING) ||
+        stream->capture_status != IREE_HAL_STREAMING_CAPTURE_STATUS_NONE) {
+      continue;
+    }
+    status = iree_hal_streaming_stream_synchronize(stream);
+  }
+
+  iree_hal_streaming_context_release_stream_snapshot(context, streams_copy,
+                                                     count);
+  IREE_TRACE_ZONE_END(z0);
+  return status;
+}
+
+iree_status_t iree_hal_streaming_context_query(
+    iree_hal_streaming_context_t* context, int* status) {
+  IREE_ASSERT_ARGUMENT(context);
+  IREE_ASSERT_ARGUMENT(status);
+  *status = 0;
+
+  iree_hal_streaming_stream_t** streams_copy = NULL;
+  iree_host_size_t count = 0;
+  iree_status_t query_status = iree_hal_streaming_context_snapshot_streams(
+      context, &streams_copy, &count);
+  for (iree_host_size_t i = 0; i < count && iree_status_is_ok(query_status);
+       ++i) {
+    int stream_status = 0;
+    query_status =
+        iree_hal_streaming_stream_query(streams_copy[i], &stream_status);
+    if (iree_status_is_ok(query_status) && stream_status != 0) {
+      *status = 1;
+      break;
+    }
+  }
+  iree_hal_streaming_context_release_stream_snapshot(context, streams_copy,
+                                                     count);
+  return query_status;
 }
 
 iree_status_t iree_hal_streaming_context_wait_all_submitted(

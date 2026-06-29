@@ -3,13 +3,13 @@
 //
 // Streaming-layer fat-binary / offload-bundle unpacker.
 //
-// AMDGPU HAL accepts raw AMD HSACO ELF images, nothing fancier. Anything the
-// HIP / CUDA compiler toolchain produces wrapped around those ELFs —
-// fat-binary wrappers, Clang offload bundles, and CCOB (compressed Clang
-// offload bundles, zstd-compressed) — is unwrapped here, at the streaming
-// layer, and only matching raw ELF data plus explicit target metadata is
-// forwarded down to the HAL. This keeps the HAL minimal and lets the streaming
-// layer be the single source of truth for "what formats does HIP/CUDA hand us".
+// AMDGPU HAL accepts raw AMD HSACO ELF images, nothing fancier. Toolchain
+// containers around those ELFs — fat-binary wrappers, Clang offload bundles,
+// and CCOB (compressed Clang offload bundles, zstd-compressed) — are unwrapped
+// here, at the streaming layer, and only matching raw ELF data plus explicit
+// target metadata is forwarded down to the HAL. This keeps the HAL minimal and
+// lets the streaming layer be the single source of truth for accepted module
+// container formats.
 
 #ifndef IREE_HAL_STREAMING_FAT_BINARY_H_
 #define IREE_HAL_STREAMING_FAT_BINARY_H_
