@@ -1273,6 +1273,8 @@ static const iree_string_view_t id4_qwen3_vl_program_config_keys
             {
                 [ID4_QWEN3_VL_CONFIG_TOKEN_COUNT] =
                     IREE_SVL("id4.qwen3_vl.attention.token_count"),
+                [ID4_QWEN3_VL_CONFIG_DISPATCH_TOKEN_COUNT] =
+                    IREE_SVL("id4.qwen3_vl.attention.dispatch_token_count"),
                 [ID4_QWEN3_VL_CONFIG_HIDDEN_SIZE] =
                     IREE_SVL("id4.qwen3_vl.attention.hidden_size"),
                 [ID4_QWEN3_VL_CONFIG_ATTENTION_HEAD_COUNT] =
@@ -2354,10 +2356,6 @@ static iree_status_t id4_qwen3_vl_program_author_attention_materialized(
       ID4_PIPELINE_PROGRAM_DTYPE_BF16,
       id4_pipeline_program_make_shape_rank2(token_capacity, hidden_size),
       out_context));
-  id4_qwen3_vl_program_bf16_coverage_t context_coverage;
-  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_bf16_coverage(
-      "materialized attention context", token_count, hidden_size,
-      token_capacity, hidden_size, &context_coverage));
 
   const id4_pipeline_program_dispatch_binding_t score_bindings[] = {
       id4_pipeline_program_read(query),
@@ -2408,10 +2406,11 @@ static iree_status_t id4_qwen3_vl_program_author_attention_materialized(
   id4_pipeline_program_dispatch_binding_t pv_bindings[] = {
       id4_pipeline_program_read(probabilities),
       id4_pipeline_program_read(value),
-      id4_qwen3_vl_program_bf16_logical_write(*out_context, &context_coverage),
+      id4_pipeline_program_write(*out_context),
   };
   const id4_qwen3_vl_program_config_value_t pv_config_values[] = {
       {ID4_QWEN3_VL_CONFIG_TOKEN_COUNT, token_count},
+      {ID4_QWEN3_VL_CONFIG_DISPATCH_TOKEN_COUNT, token_capacity},
       {ID4_QWEN3_VL_CONFIG_HIDDEN_SIZE, hidden_size},
       {ID4_QWEN3_VL_CONFIG_ATTENTION_HEAD_COUNT, attention_head_count},
       {ID4_QWEN3_VL_CONFIG_KEY_VALUE_HEAD_COUNT,
@@ -2422,9 +2421,6 @@ static iree_status_t id4_qwen3_vl_program_author_attention_materialized(
       builder, layer_ordinal, ID4_QWEN3_VL_OPERATION_SITE_SELF_ATTENTION,
       ID4_QWEN3_VL_KERNEL_ATTENTION_PV, IREE_ARRAYSIZE(pv_config_values),
       pv_config_values, IREE_ARRAYSIZE(pv_bindings), pv_bindings));
-  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_zero_bf16_tail(
-      builder, ID4_QWEN3_VL_TENSOR_LAYER_ATTENTION_CONTEXT, layer_ordinal,
-      *out_context, &context_coverage));
   return id4_qwen3_vl_program_tap_tensor(
       builder, ID4_QWEN3_VL_TENSOR_LAYER_ATTENTION_CONTEXT, layer_ordinal,
       *out_context);

@@ -1,5 +1,7 @@
 config.decl @id4.qwen3_vl.attention.token_count : %value: index where [range(%value, 1, 4096)]
 
+config.decl @id4.qwen3_vl.attention.dispatch_token_count : %value: index where [range(%value, 1, 4096)]
+
 config.decl @id4.qwen3_vl.attention.hidden_size : %value: index where [range(%value, 1, 65536)]
 
 config.decl @id4.qwen3_vl.attention.attention_head_count : %value: index where [range(%value, 1, 1024)]
@@ -271,49 +273,64 @@ kernel.def export("id4_qwen3_vl_attention_softmax_bf16") @id4_qwen3_vl_attention
 kernel.def export("id4_qwen3_vl_attention_pv_bf16") @id4_qwen3_vl_attention_pv_bf16() {
   %unit = index.constant 1 : index
   %workgroup_size_x = index.constant 256 : index
-  %token_count = config.get @id4.qwen3_vl.attention.token_count : index
-  %attention_head_count = config.get @id4.qwen3_vl.attention.attention_head_count : index
-  kernel.launch.config workgroups(%token_count, %attention_head_count, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
+  %dispatch_token_count = config.get @id4.qwen3_vl.attention.dispatch_token_count : index
+  %hidden_size = config.get @id4.qwen3_vl.attention.hidden_size : index
+  %element_count = index.mul %dispatch_token_count, %hidden_size : index
+  %rounding = index.sub %workgroup_size_x, %unit : index
+  %rounded = index.add %element_count, %rounding : index
+  %workgroups_x = index.div %rounded, %workgroup_size_x : index
+  kernel.launch.config workgroups(%workgroups_x, %unit, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
 } launch(%probabilities: buffer, %value: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %zero = index.constant 0 : index
   %one = index.constant 1 : index
-  %query_token = kernel.workgroup.id<x> : index
-  %query_head = kernel.workgroup.id<y> : index
+  %workgroup = kernel.workgroup.id<x> : index
   %lane = kernel.workitem.id<x> : index
+  %zero_bf16 = scalar.constant 0.0 : bf16
   %zero_f32 = scalar.constant 0.0 : f32
+  %workgroup_size_x = index.constant 256 : index
   %token_count = config.get @id4.qwen3_vl.attention.token_count : index
+  %dispatch_token_count = config.get @id4.qwen3_vl.attention.dispatch_token_count : index
   %hidden_size = config.get @id4.qwen3_vl.attention.hidden_size : index
   %attention_head_count = config.get @id4.qwen3_vl.attention.attention_head_count : index
   %key_value_head_count = config.get @id4.qwen3_vl.attention.key_value_head_count : index
   %head_size = config.get @id4.qwen3_vl.attention.head_size : index
   %query_heads_per_key = index.div %attention_head_count, %key_value_head_count : index
   %key_value_width = index.mul %key_value_head_count, %head_size : index
-  %lane_has_channel = index.cmp ult, %lane, %head_size : index
-  %query_head_base = index.mul %query_head, %head_size : index
-  %output_channel = index.add %query_head_base, %lane : index
+  %element_count = index.mul %dispatch_token_count, %hidden_size : index
+  %element_index = index.madd %workgroup, %workgroup_size_x, %lane : index
+  %in_bounds = index.cmp ult, %element_index, %element_count : index
+  %query_token = index.div %element_index, %hidden_size : index
+  %output_channel = index.rem %element_index, %hidden_size : index
+  %query_head = index.div %output_channel, %head_size : index
+  %channel_in_head = index.rem %output_channel, %head_size : index
   %key_value_head = index.div %query_head, %query_heads_per_key : index
   %key_value_head_base = index.mul %key_value_head, %head_size : index
-  %value_channel = index.add %key_value_head_base, %lane : index
+  %value_channel = index.add %key_value_head_base, %channel_in_head : index
   %probabilities_noalias, %value_noalias, %output_noalias = buffer.assume.noalias %probabilities, %value, %output : buffer, buffer, buffer
   %probabilities_global = buffer.assume.memory_space<global> %probabilities_noalias : buffer
   %value_global = buffer.assume.memory_space<global> %value_noalias : buffer
   %output_global = buffer.assume.memory_space<global> %output_noalias : buffer
   %probabilities_view = buffer.view %probabilities_global[%base] : buffer -> view<[%attention_head_count]x[%token_count]x[%token_count]xbf16, #dense>
   %value_view = buffer.view %value_global[%base] : buffer -> view<[%token_count]x[%key_value_width]xbf16, #dense>
-  %output_view = buffer.view %output_global[%base] : buffer -> view<[%token_count]x[%hidden_size]xbf16, #dense>
-  scf.if %lane_has_channel {
-    %weighted_value_sum = scf.for %key_token = [%zero to %token_count step %one](%value_acc = %zero_f32 : f32) -> (f32) {
-      %probability_bf16 = view.load %probabilities_view[%query_head, %query_token, %key_token] : view<[%attention_head_count]x[%token_count]x[%token_count]xbf16, #dense> -> bf16
-      %value_component_bf16 = view.load %value_view[%key_token, %value_channel] : view<[%token_count]x[%key_value_width]xbf16, #dense> -> bf16
-      %probability = scalar.extf %probability_bf16 : bf16 to f32
-      %value_component = scalar.extf %value_component_bf16 : bf16 to f32
-      %weighted_component = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %probability, %value_component : f32
-      %next_value = scalar.addf<reassoc|nnan|ninf|nsz> %value_acc, %weighted_component : f32
-      scf.yield %next_value : f32
+  %output_view = buffer.view %output_global[%base] : buffer -> view<[%dispatch_token_count]x[%hidden_size]xbf16, #dense>
+  scf.if %in_bounds {
+    %query_in_range = index.cmp ult, %query_token, %token_count : index
+    scf.if %query_in_range {
+      %weighted_value_sum = scf.for %key_token = [%zero to %token_count step %one](%value_acc = %zero_f32 : f32) -> (f32) {
+        %probability_bf16 = view.load %probabilities_view[%query_head, %query_token, %key_token] : view<[%attention_head_count]x[%token_count]x[%token_count]xbf16, #dense> -> bf16
+        %value_component_bf16 = view.load %value_view[%key_token, %value_channel] : view<[%token_count]x[%key_value_width]xbf16, #dense> -> bf16
+        %probability = scalar.extf %probability_bf16 : bf16 to f32
+        %value_component = scalar.extf %value_component_bf16 : bf16 to f32
+        %weighted_component = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %probability, %value_component : f32
+        %next_value = scalar.addf<reassoc|nnan|ninf|nsz> %value_acc, %weighted_component : f32
+        scf.yield %next_value : f32
+      }
+      %output_bf16 = scalar.fptrunc %weighted_value_sum : f32 to bf16
+      view.store %output_bf16, %output_view[%query_token, %output_channel] : bf16, view<[%dispatch_token_count]x[%hidden_size]xbf16, #dense>
+    } else {
+      view.store %zero_bf16, %output_view[%query_token, %output_channel] : bf16, view<[%dispatch_token_count]x[%hidden_size]xbf16, #dense>
     }
-    %output_bf16 = scalar.fptrunc %weighted_value_sum : f32 to bf16
-    view.store %output_bf16, %output_view[%query_token, %output_channel] : bf16, view<[%token_count]x[%hidden_size]xbf16, #dense>
   }
   kernel.return
 }
@@ -412,6 +429,16 @@ check.case public @id4_qwen3_vl_attention_materialized_bf16_grouped_query_case {
   check.return
 }
 
+check.case public @id4_qwen3_vl_attention_materialized_bf16_padded_context_case {
+  %probabilities = check.generate.fill value(0.0) : tensor<1x2x2xbf16>
+  %value = check.generate.fill value(7.0) : tensor<2x1xbf16>
+  %output = check.generate.fill value(1.0) : tensor<4x1xbf16>
+  %expected = check.generate.fill value(0.0) : tensor<4x1xbf16>
+  func.call @id4_qwen3_vl_attention_pv_bf16(%probabilities, %value, %output) : (tensor<1x2x2xbf16>, tensor<2x1xbf16>, tensor<4x1xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<4x1xbf16>
+  check.return
+}
+
 check.case public @id4_qwen3_vl_attention_materialized_f32_qwen_slice_case {
   %query = check.generate.fill value(0.0) : tensor<64x4096xf32>
   %key = check.generate.fill value(0.0) : tensor<64x1024xf32>
@@ -439,5 +466,7 @@ check.benchmark<@id4_qwen3_vl_attention_materialized_bf16_uniform_softmax_case> 
 check.benchmark<@id4_qwen3_vl_attention_materialized_f32_grouped_query_case> @id4_qwen3_vl_attention_materialized_f32_grouped_query
 
 check.benchmark<@id4_qwen3_vl_attention_materialized_bf16_grouped_query_case> @id4_qwen3_vl_attention_materialized_bf16_grouped_query
+
+check.benchmark<@id4_qwen3_vl_attention_materialized_bf16_padded_context_case> @id4_qwen3_vl_attention_materialized_bf16_padded_context
 
 check.benchmark<@id4_qwen3_vl_attention_materialized_f32_qwen_slice_case> @id4_qwen3_vl_attention_materialized_f32_qwen_slice
