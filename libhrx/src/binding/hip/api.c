@@ -12268,8 +12268,7 @@ static hipError_t iree_hip_query_pointer_metadata(
   out_metadata->kind = IREE_HIP_POINTER_METADATA_INVALID;
 
   hipError_t lookup_result = iree_hip_lookup_streaming_range_with_owner(
-      context, ptr, 1, &out_metadata->owner_context,
-      &out_metadata->buffer_ref);
+      context, ptr, 1, &out_metadata->owner_context, &out_metadata->buffer_ref);
   if (lookup_result == hipSuccess) {
     out_metadata->kind = IREE_HIP_POINTER_METADATA_BUFFER;
     out_metadata->memory_type =
@@ -13302,8 +13301,7 @@ static iree_once_flag iree_hip_live_graph_mutex_once = IREE_ONCE_FLAG_INIT;
 static iree_slim_mutex_t iree_hip_live_graph_mutex;
 static iree_hip_live_graph_entry_t* iree_hip_live_graph_head = NULL;
 
-static iree_once_flag iree_hip_live_graph_exec_mutex_once =
-    IREE_ONCE_FLAG_INIT;
+static iree_once_flag iree_hip_live_graph_exec_mutex_once = IREE_ONCE_FLAG_INIT;
 static iree_slim_mutex_t iree_hip_live_graph_exec_mutex;
 static iree_hip_live_graph_exec_entry_t* iree_hip_live_graph_exec_head = NULL;
 
@@ -13407,8 +13405,7 @@ static bool iree_hip_live_graph_exec_register(hipGraphExec_t graph_exec) {
 
 static bool iree_hip_live_graph_exec_unregister(hipGraphExec_t graph_exec) {
   iree_hip_live_graph_exec_lock();
-  iree_hip_live_graph_exec_entry_t** current =
-      &iree_hip_live_graph_exec_head;
+  iree_hip_live_graph_exec_entry_t** current = &iree_hip_live_graph_exec_head;
   while (*current) {
     if ((*current)->graph_exec == graph_exec) {
       iree_hip_live_graph_exec_entry_t* entry = *current;
@@ -18222,8 +18219,8 @@ HIPAPI hipError_t hipGraphExecMemcpyNodeSetParams(hipGraphExec_t graphExec,
                                                           callback_data);
       *callback_data = old_callback_data;
     } else {
-      iree_hip_graph_release_memcpy_callback_context_refs(
-          stream_node->graph, &old_callback_data);
+      iree_hip_graph_release_memcpy_callback_context_refs(stream_node->graph,
+                                                          &old_callback_data);
     }
     iree_hal_streaming_graph_exec_release(exec);
     return result;
@@ -19301,8 +19298,8 @@ static hipError_t iree_hip_graph_set_host_memcpy_callback_params(
   if (result != hipSuccess) return result;
   if (kind != hipMemcpyDeviceToDevice) {
     if (!out_old_callback_data) {
-      iree_hip_graph_release_memcpy_callback_context_refs(
-          node->graph, &old_callback_data);
+      iree_hip_graph_release_memcpy_callback_context_refs(node->graph,
+                                                          &old_callback_data);
     }
     return hipSuccess;
   }

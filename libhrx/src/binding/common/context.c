@@ -905,8 +905,8 @@ static iree_status_t iree_hal_streaming_context_synchronize_streams(
   // The legacy default stream always participates in its own ordering.
   if (context->default_stream) {
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, iree_hal_streaming_stream_synchronize_flushed(
-                context->default_stream));
+        z0,
+        iree_hal_streaming_stream_synchronize_flushed(context->default_stream));
   }
 
   IREE_TRACE_ZONE_END(z0);

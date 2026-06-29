@@ -1491,8 +1491,7 @@ static iree_status_t iree_hal_streaming_graph_record_partition(
     uint32_t node_start_index, uint32_t node_count,
     const uint32_t* node_index_map, uint8_t stream_id,
     iree_hal_streaming_graph_edge_t* additional_edges,
-    bool preserve_sorted_order,
-    iree_hal_command_buffer_t* command_buffer) {
+    bool preserve_sorted_order, iree_hal_command_buffer_t* command_buffer) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
   // Begin recording command buffer.
@@ -2240,13 +2239,14 @@ iree_status_t iree_hal_streaming_graph_exec_launch(
     iree_slim_mutex_unlock(&exec->mutex);
 
     iree_status_t wait_status = iree_hal_semaphore_wait(
-        active_stream->timeline_semaphore, active_value, iree_infinite_timeout(),
-        IREE_ASYNC_WAIT_FLAG_NONE);
+        active_stream->timeline_semaphore, active_value,
+        iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE);
 
     iree_slim_mutex_lock(&exec->mutex);
     if (exec->graph_memory_active_launch_stream == active_stream &&
         exec->graph_memory_active_launch_value == active_value) {
-      iree_hal_streaming_stream_release(exec->graph_memory_active_launch_stream);
+      iree_hal_streaming_stream_release(
+          exec->graph_memory_active_launch_stream);
       exec->graph_memory_active_launch_stream = NULL;
       exec->graph_memory_active_launch_value = 0;
     }

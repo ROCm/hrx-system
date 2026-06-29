@@ -469,7 +469,6 @@ static iree_status_t iree_hal_streaming_stream_synchronize_impl(
   uint64_t timing_query_ns = 0;
   uint64_t timing_wait_ns = 0;
 
-  int status = 0;
   uint64_t timing_step_ns = timing_enabled ? hrx_launch_timing_now_ns() : 0;
   if (flush_context) {
     // HIP launches are logically submitted work even when HRX batches command
@@ -490,20 +489,16 @@ static iree_status_t iree_hal_streaming_stream_synchronize_impl(
       iree_hal_semaphore_query(stream->timeline_semaphore, &current_value);
   if (iree_status_is_unavailable(query_status)) {
     iree_status_ignore(query_status);
-    status = 1;
+    query_status = iree_ok_status();
   } else if (iree_status_is_ok(query_status)) {
     if (current_value >= stream->pending_value) {
-      status = 0;
       stream->completed_value = current_value;
-    } else {
-      status = 1;
     }
   }
   if (timing_enabled) {
     timing_query_ns += hrx_launch_timing_now_ns() - timing_step_ns;
   }
   IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, query_status);
-  (void)status;
 
   // Wait for timeline semaphore to reach pending value.
   if (stream->pending_value > stream->completed_value) {
@@ -540,13 +535,13 @@ static iree_status_t iree_hal_streaming_stream_synchronize_impl(
 iree_status_t iree_hal_streaming_stream_synchronize(
     iree_hal_streaming_stream_t* stream) {
   return iree_hal_streaming_stream_synchronize_impl(stream,
-                                                   /*flush_context=*/true);
+                                                    /*flush_context=*/true);
 }
 
 iree_status_t iree_hal_streaming_stream_synchronize_flushed(
     iree_hal_streaming_stream_t* stream) {
   return iree_hal_streaming_stream_synchronize_impl(stream,
-                                                   /*flush_context=*/false);
+                                                    /*flush_context=*/false);
 }
 
 iree_status_t iree_hal_streaming_stream_wait_submitted(
