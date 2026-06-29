@@ -4,47 +4,37 @@ config.decl @id4.parameter.bf16_linear_rhs_tile.input_size : %value: index where
 
 kernel.def export("id4_parameter_bf16_linear_rhs_tile") @id4_parameter_bf16_linear_rhs_tile() {
   %unit = index.constant 1 : index
-  %workgroup_size_x = index.constant 256 : index
+  %workgroup_size_x = index.constant 16 : index
   %output_size = config.get @id4.parameter.bf16_linear_rhs_tile.output_size : index
   %input_size = config.get @id4.parameter.bf16_linear_rhs_tile.input_size : index
-  %element_count = index.mul %output_size, %input_size : index
-  %rounding = index.sub %workgroup_size_x, %unit : index
-  %rounded = index.add %element_count, %rounding : index
-  %workgroups_x = index.div %rounded, %workgroup_size_x : index
-  kernel.launch.config workgroups(%workgroups_x, %unit, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
+  %sixteen = index.constant 16 : index
+  %input_tile_count = index.div %input_size, %sixteen : index
+  %output_tile_count = index.div %output_size, %sixteen : index
+  kernel.launch.config workgroups(%input_tile_count, %output_tile_count, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
 } launch(%source: buffer, %target: buffer) {
   %base = index.constant 0 : offset
   %sixteen = index.constant 16 : index
-  %two_fifty_six = index.constant 256 : index
-  %workgroup = kernel.workgroup.id<x> : index
+  %input_tile = kernel.workgroup.id<x> : index
+  %output_tile = kernel.workgroup.id<y> : index
   %lane = kernel.workitem.id<x> : index
-  %workgroup_size_x = index.constant 256 : index
   %output_size = config.get @id4.parameter.bf16_linear_rhs_tile.output_size : index
   %input_size = config.get @id4.parameter.bf16_linear_rhs_tile.input_size : index
   %element_count = index.mul %output_size, %input_size : index
-  %element_index = index.madd %workgroup, %workgroup_size_x, %lane : index
-  %in_bounds = index.cmp ult, %element_index, %element_count : index
   %source_noalias, %target_noalias = buffer.assume.noalias %source, %target : buffer, buffer
   %source_global = buffer.assume.memory_space<global> %source_noalias : buffer
   %target_global = buffer.assume.memory_space<global> %target_noalias : buffer
   %source_view = buffer.view %source_global[%base] : buffer -> view<[%output_size]x[%input_size]xbf16, #dense>
   %target_view = buffer.view %target_global[%base] : buffer -> view<[%element_count]xbf16, #dense>
-  scf.if %in_bounds {
-    %input = index.rem %element_index, %input_size : index
-    %output_row = index.div %element_index, %input_size : index
-    %input_tile = index.div %input, %sixteen : index
-    %output_tile = index.div %output_row, %sixteen : index
-    %input_lane = index.rem %input, %sixteen : index
-    %output_lane = index.rem %output_row, %sixteen : index
-    %k_tile_count = index.div %input_size, %sixteen : index
-    %tile = index.madd %output_tile, %k_tile_count, %input_tile : index
-    %tile_offset = index.mul %tile, %two_fifty_six : index
-    %output_lane_offset = index.mul %output_lane, %sixteen : index
-    %tile_element = index.add %output_lane_offset, %input_lane : index
-    %target_index = index.add %tile_offset, %tile_element : index
-    %value = view.load %source_view[%output_row, %input] : view<[%output_size]x[%input_size]xbf16, #dense> -> bf16
-    view.store %value, %target_view[%target_index] : bf16, view<[%element_count]xbf16, #dense>
-  }
+  %input_tile_count = index.div %input_size, %sixteen : index
+  %input = index.mul %input_tile, %sixteen : index
+  %output_row = index.madd %output_tile, %sixteen, %lane : index
+  %tile = index.madd %output_tile, %input_tile_count, %input_tile : index
+  %tile_element_count = index.constant 256 : index
+  %tile_offset = index.mul %tile, %tile_element_count : index
+  %lane_offset = index.mul %lane, %sixteen : index
+  %target_index = index.add %tile_offset, %lane_offset : index
+  %values = vector.load %source_view[%output_row, %input] : view<[%output_size]x[%input_size]xbf16, #dense> -> vector<16xbf16>
+  vector.store %values, %target_view[%target_index] : vector<16xbf16>, view<[%element_count]xbf16, #dense>
   kernel.return
 }
 

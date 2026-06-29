@@ -4,26 +4,24 @@ config.decl @id4.parameter.fp8_e4m3_scaled_to_bf16_linear_rhs_tile.input_size : 
 
 kernel.def export("id4_parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile") @id4_parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile() {
   %unit = index.constant 1 : index
-  %workgroup_size_x = index.constant 256 : index
+  %workgroup_size_x = index.constant 32 : index
   %output_size = config.get @id4.parameter.fp8_e4m3_scaled_to_bf16_linear_rhs_tile.output_size : index
   %input_size = config.get @id4.parameter.fp8_e4m3_scaled_to_bf16_linear_rhs_tile.input_size : index
-  %element_count = index.mul %output_size, %input_size : index
-  %rounding = index.sub %workgroup_size_x, %unit : index
-  %rounded = index.add %element_count, %rounding : index
-  %workgroups_x = index.div %rounded, %workgroup_size_x : index
-  kernel.launch.config workgroups(%workgroups_x, %unit, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
+  %sixteen = index.constant 16 : index
+  %input_tile_count = index.div %input_size, %sixteen : index
+  %output_tile_count = index.div %output_size, %sixteen : index
+  kernel.launch.config workgroups(%input_tile_count, %output_tile_count, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
 } launch(%weight: buffer, %scale: buffer, %target: buffer) {
   %base = index.constant 0 : offset
+  %two = index.constant 2 : index
+  %eight = index.constant 8 : index
   %sixteen = index.constant 16 : index
-  %two_fifty_six = index.constant 256 : index
-  %workgroup = kernel.workgroup.id<x> : index
+  %input_tile = kernel.workgroup.id<x> : index
+  %output_tile = kernel.workgroup.id<y> : index
   %lane = kernel.workitem.id<x> : index
-  %workgroup_size_x = index.constant 256 : index
   %output_size = config.get @id4.parameter.fp8_e4m3_scaled_to_bf16_linear_rhs_tile.output_size : index
   %input_size = config.get @id4.parameter.fp8_e4m3_scaled_to_bf16_linear_rhs_tile.input_size : index
   %element_count = index.mul %output_size, %input_size : index
-  %element_index = index.madd %workgroup, %workgroup_size_x, %lane : index
-  %in_bounds = index.cmp ult, %element_index, %element_count : index
   %weight_noalias, %scale_noalias, %target_noalias = buffer.assume.noalias %weight, %scale, %target : buffer, buffer, buffer
   %weight_global = buffer.assume.memory_space<global> %weight_noalias : buffer
   %scale_global = buffer.assume.memory_space<global> %scale_noalias : buffer
@@ -31,26 +29,25 @@ kernel.def export("id4_parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile") @id4_
   %weight_view = buffer.view %weight_global[%base] : buffer -> view<[%output_size]x[%input_size]xf8E4M3, #dense>
   %scale_view = buffer.view %scale_global[%base] : buffer -> view<[%output_size]xf32, #dense>
   %target_view = buffer.view %target_global[%base] : buffer -> view<[%element_count]xbf16, #dense>
-  scf.if %in_bounds {
-    %input = index.rem %element_index, %input_size : index
-    %output_row = index.div %element_index, %input_size : index
-    %input_tile = index.div %input, %sixteen : index
-    %output_tile = index.div %output_row, %sixteen : index
-    %input_lane = index.rem %input, %sixteen : index
-    %output_lane = index.rem %output_row, %sixteen : index
-    %k_tile_count = index.div %input_size, %sixteen : index
-    %tile = index.madd %output_tile, %k_tile_count, %input_tile : index
-    %tile_offset = index.mul %tile, %two_fifty_six : index
-    %output_lane_offset = index.mul %output_lane, %sixteen : index
-    %tile_element = index.add %output_lane_offset, %input_lane : index
-    %target_index = index.add %tile_offset, %tile_element : index
-    %weight_fp8 = view.load %weight_view[%output_row, %input] : view<[%output_size]x[%input_size]xf8E4M3, #dense> -> f8E4M3
-    %weight_f32 = scalar.extf %weight_fp8 : f8E4M3 to f32
-    %scale_f32 = view.load %scale_view[%output_row] : view<[%output_size]xf32, #dense> -> f32
-    %scaled = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %weight_f32, %scale_f32 : f32
-    %rounded = scalar.fptrunc %scaled : f32 to bf16
-    view.store %rounded, %target_view[%target_index] : bf16, view<[%element_count]xbf16, #dense>
-  }
+  %input_tile_count = index.div %input_size, %sixteen : index
+  %segment = index.rem %lane, %two : index
+  %output_lane = index.div %lane, %two : index
+  %segment_offset = index.mul %segment, %eight : index
+  %input = index.madd %input_tile, %sixteen, %segment_offset : index
+  %output_row = index.madd %output_tile, %sixteen, %output_lane : index
+  %tile = index.madd %output_tile, %input_tile_count, %input_tile : index
+  %tile_element_count = index.constant 256 : index
+  %tile_offset = index.mul %tile, %tile_element_count : index
+  %row_offset = index.mul %output_lane, %sixteen : index
+  %tile_element = index.add %row_offset, %segment_offset : index
+  %target_index = index.add %tile_offset, %tile_element : index
+  %weight_fp8 = vector.load %weight_view[%output_row, %input] : view<[%output_size]x[%input_size]xf8E4M3, #dense> -> vector<8xf8E4M3>
+  %weight_f32 = vector.extf %weight_fp8 : vector<8xf8E4M3> to vector<8xf32>
+  %scale_f32 = view.load %scale_view[%output_row] : view<[%output_size]xf32, #dense> -> f32
+  %scale_values = vector.splat %scale_f32 : vector<8xf32>
+  %scaled = vector.mulf<reassoc|nnan|ninf|nsz|contract> %weight_f32, %scale_values : vector<8xf32>
+  %rounded = vector.fptrunc %scaled : vector<8xf32> to vector<8xbf16>
+  vector.store %rounded, %target_view[%target_index] : vector<8xbf16>, view<[%element_count]xbf16, #dense>
   kernel.return
 }
 
