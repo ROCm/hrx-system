@@ -85,12 +85,12 @@ enum {
   LOOM_AMDGPU_FP8_BF16_BYTE_TABLE_WORD_COUNT = 2u,
 };
 
-typedef struct loom_amdgpu_fp8_to_f32_descriptor_refs_t {
-  // Scalar FP8-to-F32 conversion descriptor.
+typedef struct loom_amdgpu_fp8_native_descriptor_refs_t {
+  // Scalar native conversion descriptor, when the target exposes one.
   loom_amdgpu_descriptor_ref_t lane;
-  // Packed pair FP8-to-F32 conversion descriptor.
+  // Packed pair native conversion descriptor.
   loom_amdgpu_descriptor_ref_t pair;
-} loom_amdgpu_fp8_to_f32_descriptor_refs_t;
+} loom_amdgpu_fp8_native_descriptor_refs_t;
 
 typedef struct loom_amdgpu_fp8_decode_plan_t {
   // Available native packet helpers selected from the active descriptor set.
@@ -150,10 +150,12 @@ typedef struct loom_amdgpu_fp8_packed_bf16_pair_source_t {
   uint32_t byte_offset;
 } loom_amdgpu_fp8_packed_bf16_pair_source_t;
 
-// Returns the native FP8-to-F32 conversion descriptor refs for |element_type|.
-bool loom_amdgpu_fp8_to_f32_descriptor_refs(
+// Returns the native unscaled FP8/BF8 conversion descriptor refs for the source
+// and result element type pair.
+bool loom_amdgpu_fp8_native_descriptor_refs(
     loom_scalar_type_t source_element_type,
-    loom_amdgpu_fp8_to_f32_descriptor_refs_t* out_refs);
+    loom_scalar_type_t result_element_type,
+    loom_amdgpu_fp8_native_descriptor_refs_t* out_refs);
 
 // Returns the native scaled FP8/BF8 conversion descriptor ref for the source
 // and result element type pair.
