@@ -5904,6 +5904,17 @@ _KERNEL_CASES = [
         "target_name": "qwen3_vl_linear_bf16_bf16_wmma_m32n32_compact_rhs_transpose_output_small",
     },
     {
+        "actual_case": "@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32_compact_rhs_qwen_projection_shape_32_case",
+        "benchmark": "@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32_compact_rhs_qwen_projection_shape_32",
+        "configs": [
+            "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=32",
+            "--config=id4.qwen3_vl.linear_wmma.input_size=4096",
+            "--config=id4.qwen3_vl.linear_wmma.output_size=4096",
+        ],
+        "source": "qwen3_vl/linear_bf16_bf16_wmma_m32n32_compact_rhs.loom",
+        "target_name": "qwen3_vl_linear_bf16_bf16_wmma_m32n32_compact_rhs_qwen_projection_shape_32",
+    },
+    {
         "actual_case": "@id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m32n32_small_case",
         "benchmark": "@id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m32n32_small",
         "configs": [

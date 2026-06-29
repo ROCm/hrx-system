@@ -173,6 +173,16 @@ check.case public @id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32_compact_rhs_transpo
   check.return
 }
 
+check.case public @id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32_compact_rhs_qwen_projection_shape_32_case {
+  %input = check.generate.fill value(0.0078125) : tensor<32x4096xbf16>
+  %weight = check.generate.fill value(0.5) : tensor<16777216xbf16>
+  %output = check.generate.fill value(0.0) : tensor<32x4096xbf16>
+  %expected = check.generate.fill value(16.0) : tensor<32x4096xbf16>
+  func.call @id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32_compact_rhs(%input, %weight, %output) : (tensor<32x4096xbf16>, tensor<16777216xbf16>, tensor<32x4096xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<32x4096xbf16>
+  check.return
+}
+
 check.case public @id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32_compact_rhs_qwen_kv_shape_288_case {
   %input = check.generate.fill value(0.0078125) : tensor<288x4096xbf16>
   %weight = check.generate.fill value(0.5) : tensor<4194304xbf16>
@@ -196,6 +206,8 @@ check.case public @id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32_compact_rhs_transpo
 check.benchmark<@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32_compact_rhs_small_case> @id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32_compact_rhs_small
 
 check.benchmark<@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32_compact_rhs_transpose_output_small_case> @id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32_compact_rhs_transpose_output_small
+
+check.benchmark<@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32_compact_rhs_qwen_projection_shape_32_case> @id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32_compact_rhs_qwen_projection_shape_32
 
 check.benchmark<@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32_compact_rhs_qwen_kv_shape_288_case> @id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32_compact_rhs_qwen_kv_shape_288
 
