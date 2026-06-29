@@ -1612,6 +1612,16 @@ static iree_status_t loom_amdgpu_emit_fp8_packed_bf16_inf_repair_packets(
     const loom_value_id_t* no_inf_packets, iree_host_size_t pair_count,
     loom_type_t vgpr_type, loom_type_t sgpr_type,
     loom_value_id_t* out_packets) {
+  loom_value_id_t low_eq_zero_bias = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_const_u32(
+      context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_S_MOV_B32,
+      LOOM_AMDGPU_FP8_DECODE_BF16_PAIR_EQ_ZERO_BIAS, sgpr_type,
+      &low_eq_zero_bias));
+  loom_value_id_t low_mask_shift = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_const_u32(
+      context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_S_MOV_B32,
+      LOOM_AMDGPU_FP8_DECODE_BF16_PAIR_ASHR_15_MASK, sgpr_type,
+      &low_mask_shift));
   loom_value_id_t low_infinity_payload = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_amdgpu_emit_const_u32(
       context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_MOV_B32,
@@ -1624,10 +1634,16 @@ static iree_status_t loom_amdgpu_emit_fp8_packed_bf16_inf_repair_packets(
     IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fp8_packed_bf16_pair_sign(
         context, source_op, plan, &pair_states[i], low_infinity_payload,
         vgpr_type, &low_infinity_packet));
+    loom_value_id_t low_inf_condition = LOOM_VALUE_ID_INVALID;
+    IREE_RETURN_IF_ERROR(
+        loom_amdgpu_emit_fp8_packed_bf16_pair_eq_condition_with_bias(
+            context, source_op, plan, pair_states[i].source_no_sign,
+            infinity_no_sign, low_eq_zero_bias, vgpr_type, &low_inf_condition));
     loom_value_id_t low_inf_mask = LOOM_VALUE_ID_INVALID;
-    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fp8_packed_bf16_pair_eq_mask(
-        context, source_op, plan, pair_states[i].source_no_sign,
-        infinity_no_sign, vgpr_type, sgpr_type, &low_inf_mask));
+    IREE_RETURN_IF_ERROR(
+        loom_amdgpu_emit_fp8_packed_bf16_mask_from_condition_with_shift(
+            context, source_op, plan, low_inf_condition, low_mask_shift,
+            vgpr_type, &low_inf_mask));
     IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fp8_packed_bf16_pair_select(
         context, source_op, no_inf_packets[i], low_infinity_packet,
         low_inf_mask, vgpr_type, &out_packets[i]));
