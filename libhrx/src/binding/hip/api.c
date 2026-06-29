@@ -16648,6 +16648,9 @@ HIPAPI hipError_t hipGraphAddMemAllocNode(hipGraphNode_t* pGraphNode,
     iree_status_ignore(iree_hal_streaming_graph_destroy_node(node));
     HIP_RETURN_ERROR(pool_result);
   }
+  // This graph-memory implementation allocates backing storage when the graph
+  // template is built. Graph exec launch serialization prevents concurrent
+  // launches from sharing the same backing allocation.
   hipError_t alloc_result = iree_hip_malloc_from_pool(
       stream_graph->context, pool, params->bytesize, &params->dptr);
   if (alloc_result != hipSuccess) {
@@ -16819,24 +16822,7 @@ HIPAPI hipError_t hipGraphAddBatchMemOpNode(hipGraphNode_t* pGraphNode,
   if (!iree_hip_graph_handle_is_live(graph)) {
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
-  const hrx_hip_batch_mem_op_node_params_t* params =
-      (const hrx_hip_batch_mem_op_node_params_t*)nodeParams;
-  iree_host_size_t param_array_size = 0;
-  hipError_t validate_result = iree_hip_graph_validate_batch_mem_op_node_params(
-      params, &param_array_size);
-  if (validate_result != hipSuccess) {
-    HIP_RETURN_ERROR(validate_result);
-  }
-
-  iree_hal_streaming_graph_node_t* node = NULL;
-  HIP_RETURN_STATUS(
-      iree_hal_streaming_graph_add_batch_mem_op_node(
-          (iree_hal_streaming_graph_t*)graph,
-          (iree_hal_streaming_graph_node_t**)pDependencies, numDependencies,
-          params, sizeof(*params), params->paramArray, param_array_size, &node),
-      hipErrorInvalidValue);
-  *pGraphNode = (hipGraphNode_t)node;
-  return hipSuccess;
+  HIP_RETURN_ERROR(hipErrorNotSupported);
 }
 
 HIPAPI hipError_t hipGraphBatchMemOpNodeGetParams(hipGraphNode_t node,

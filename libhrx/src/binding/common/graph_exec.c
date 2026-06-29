@@ -197,6 +197,11 @@ typedef struct iree_hal_streaming_graph_exec_t {
   // True if this exec contributes to graph memory-node instantiation limits.
   bool uses_graph_memory_nodes;
 
+  // Stream retained while the most recent graph-memory launch is in flight.
+  iree_hal_streaming_stream_t* graph_memory_active_launch_stream;
+  // Timeline value signaled by |graph_memory_active_launch_stream|.
+  uint64_t graph_memory_active_launch_value;
+
   unsigned long long flags;
 
   // Mutex needed for launch/update.
@@ -648,6 +653,8 @@ iree_status_t iree_hal_streaming_graph_exec_create(
   exec->has_unfreed_graph_alloc_nodes = false;
   exec->launch_count = 0;
   exec->uses_graph_memory_nodes = graph->has_graph_memory_nodes;
+  exec->graph_memory_active_launch_stream = NULL;
+  exec->graph_memory_active_launch_value = 0;
   if (exec->uses_graph_memory_nodes) {
     ++graph->active_graph_memory_exec_count;
   }
@@ -694,6 +701,9 @@ static void iree_hal_streaming_graph_exec_destroy(
     IREE_ASSERT(exec->graph->active_graph_memory_exec_count > 0);
     --exec->graph->active_graph_memory_exec_count;
   }
+  iree_hal_streaming_stream_release(exec->graph_memory_active_launch_stream);
+  exec->graph_memory_active_launch_stream = NULL;
+  exec->graph_memory_active_launch_value = 0;
 
   iree_allocator_free(exec->host_allocator, exec->node_disabled_states);
 
@@ -1481,6 +1491,7 @@ static iree_status_t iree_hal_streaming_graph_record_partition(
     uint32_t node_start_index, uint32_t node_count,
     const uint32_t* node_index_map, uint8_t stream_id,
     iree_hal_streaming_graph_edge_t* additional_edges,
+    bool preserve_sorted_order,
     iree_hal_command_buffer_t* command_buffer) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
@@ -1499,10 +1510,10 @@ static iree_status_t iree_hal_streaming_graph_record_partition(
 
   // Record nodes assigned to this stream.
   //
-  // Preserve sorted command order inside each stream. HIP graph dependency
-  // edges define the minimum ordering, but this implementation relies on the
-  // sorted node order for deterministic command buffers and for resource
-  // lifetime ordering around graph memory nodes.
+  // HIP graph dependency edges define the minimum ordering. Graph memory nodes
+  // are currently represented by graph-template allocations rather than
+  // per-launch stream-ordered allocations, so executables containing them keep
+  // sorted command order as a conservative lifetime boundary.
   //
   // We use a small linear scan set to make the test for hazards faster: we have
   // the original unsorted node indices of dependencies but not the sorted ones
@@ -1522,7 +1533,6 @@ static iree_status_t iree_hal_streaming_graph_record_partition(
       const bool has_dependency_hazard =
           iree_hal_streaming_graph_node_has_recorded_dependency_hazard(
               node, additional_edges, node_index_map, &barrier_index_set);
-      const bool preserve_sorted_order = true;
       if (preserve_sorted_order || has_dependency_hazard) {
         IREE_RETURN_AND_END_ZONE_IF_ERROR(
             z0, iree_hal_command_buffer_execution_barrier(
@@ -1764,7 +1774,8 @@ iree_status_t iree_hal_streaming_graph_exec_instantiate_from_template(
             z0, iree_hal_streaming_graph_record_partition(
                     exec, schedule.sorted_nodes, partition->start_index,
                     partition->count, schedule.node_index_map, s,
-                    additional_edges, ptrs.attrs->execute.command_buffer));
+                    additional_edges, exec->uses_graph_memory_nodes,
+                    ptrs.attrs->execute.command_buffer));
 
         // Set up semaphore indices.
         if (wait_semaphore_count > 0) {
@@ -2217,6 +2228,41 @@ iree_status_t iree_hal_streaming_graph_exec_launch(
         "graph contains live allocation nodes from a previous launch");
   }
 
+  // Graph memory nodes allocate backing storage at template construction time
+  // in this implementation. Serializing launches that can touch that backing
+  // prevents two launches from concurrently sharing one graph allocation.
+  while (exec->uses_graph_memory_nodes &&
+         exec->graph_memory_active_launch_stream) {
+    iree_hal_streaming_stream_t* active_stream =
+        exec->graph_memory_active_launch_stream;
+    const uint64_t active_value = exec->graph_memory_active_launch_value;
+    iree_hal_streaming_stream_retain(active_stream);
+    iree_slim_mutex_unlock(&exec->mutex);
+
+    iree_status_t wait_status = iree_hal_semaphore_wait(
+        active_stream->timeline_semaphore, active_value, iree_infinite_timeout(),
+        IREE_ASYNC_WAIT_FLAG_NONE);
+
+    iree_slim_mutex_lock(&exec->mutex);
+    if (exec->graph_memory_active_launch_stream == active_stream &&
+        exec->graph_memory_active_launch_value == active_value) {
+      iree_hal_streaming_stream_release(exec->graph_memory_active_launch_stream);
+      exec->graph_memory_active_launch_stream = NULL;
+      exec->graph_memory_active_launch_value = 0;
+    }
+    iree_hal_streaming_stream_release(active_stream);
+    if (!iree_status_is_ok(wait_status)) {
+      iree_slim_mutex_unlock(&exec->mutex);
+      IREE_TRACE_ZONE_END(z0);
+      return wait_status;
+    }
+    if (exec->is_destroyed) {
+      iree_slim_mutex_unlock(&exec->mutex);
+      IREE_TRACE_ZONE_END(z0);
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT);
+    }
+  }
+
   iree_slim_mutex_lock(&stream->mutex);
 
   // Reserve the next stream timeline value while holding the stream lock so
@@ -2248,6 +2294,13 @@ iree_status_t iree_hal_streaming_graph_exec_launch(
   if (iree_status_is_ok(status)) {
     stream->pending_value = stream_signal_value;
     stream->submitted_value = stream_signal_value;
+    if (exec->uses_graph_memory_nodes) {
+      iree_hal_streaming_stream_release(
+          exec->graph_memory_active_launch_stream);
+      iree_hal_streaming_stream_retain(stream);
+      exec->graph_memory_active_launch_stream = stream;
+      exec->graph_memory_active_launch_value = stream_signal_value;
+    }
     ++exec->launch_count;
   }
 

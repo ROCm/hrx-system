@@ -458,8 +458,8 @@ iree_status_t iree_hal_streaming_stream_query(
   return iree_ok_status();
 }
 
-iree_status_t iree_hal_streaming_stream_synchronize(
-    iree_hal_streaming_stream_t* stream) {
+static iree_status_t iree_hal_streaming_stream_synchronize_impl(
+    iree_hal_streaming_stream_t* stream, bool flush_context) {
   IREE_ASSERT_ARGUMENT(stream);
   IREE_TRACE_ZONE_BEGIN(z0);
   const int timing_enabled = hrx_launch_timing_enabled();
@@ -471,25 +471,34 @@ iree_status_t iree_hal_streaming_stream_synchronize(
 
   int status = 0;
   uint64_t timing_step_ns = timing_enabled ? hrx_launch_timing_now_ns() : 0;
-  // HIP launches are logically submitted work even when HRX batches command
-  // buffer recording. Before waiting on one stream, submit other pending
-  // streams so cross-stream or cross-device spin/wait kernels can make forward
-  // progress.
-  iree_status_t flush_all_status = iree_hal_streaming_context_flush_all();
-  if (timing_enabled) {
-    timing_flush_ns += hrx_launch_timing_now_ns() - timing_step_ns;
+  if (flush_context) {
+    // HIP launches are logically submitted work even when HRX batches command
+    // buffer recording. Before waiting on a stream, submit all pending work in
+    // the same context so stream-ordered dependencies and device-side waits can
+    // make forward progress without repeatedly flushing unrelated contexts.
+    iree_status_t flush_status =
+        iree_hal_streaming_context_flush(stream->context);
+    if (timing_enabled) {
+      timing_flush_ns += hrx_launch_timing_now_ns() - timing_step_ns;
+    }
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, flush_status);
   }
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, flush_all_status);
 
   timing_step_ns = timing_enabled ? hrx_launch_timing_now_ns() : 0;
-  iree_status_t flush_status = iree_hal_streaming_stream_flush(stream);
-  if (timing_enabled) {
-    timing_flush_ns += hrx_launch_timing_now_ns() - timing_step_ns;
+  uint64_t current_value = 0;
+  iree_status_t query_status =
+      iree_hal_semaphore_query(stream->timeline_semaphore, &current_value);
+  if (iree_status_is_unavailable(query_status)) {
+    iree_status_ignore(query_status);
+    status = 1;
+  } else if (iree_status_is_ok(query_status)) {
+    if (current_value >= stream->pending_value) {
+      status = 0;
+      stream->completed_value = current_value;
+    } else {
+      status = 1;
+    }
   }
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, flush_status);
-
-  timing_step_ns = timing_enabled ? hrx_launch_timing_now_ns() : 0;
-  iree_status_t query_status = iree_hal_streaming_stream_query(stream, &status);
   if (timing_enabled) {
     timing_query_ns += hrx_launch_timing_now_ns() - timing_step_ns;
   }
@@ -526,6 +535,18 @@ iree_status_t iree_hal_streaming_stream_synchronize(
   }
   IREE_TRACE_ZONE_END(z0);
   return iree_ok_status();
+}
+
+iree_status_t iree_hal_streaming_stream_synchronize(
+    iree_hal_streaming_stream_t* stream) {
+  return iree_hal_streaming_stream_synchronize_impl(stream,
+                                                   /*flush_context=*/true);
+}
+
+iree_status_t iree_hal_streaming_stream_synchronize_flushed(
+    iree_hal_streaming_stream_t* stream) {
+  return iree_hal_streaming_stream_synchronize_impl(stream,
+                                                   /*flush_context=*/false);
 }
 
 iree_status_t iree_hal_streaming_stream_wait_submitted(
@@ -775,6 +796,9 @@ static iree_status_t iree_hal_streaming_lookup_kernel_buffer_ref(
     if (!iree_status_is_ok(status)) return status;
   } else {
     iree_status_ignore(status);
+    if (!iree_hal_streaming_context_has_peer_contexts(context)) {
+      return iree_status_from_code(IREE_STATUS_NOT_FOUND);
+    }
     status = iree_hal_streaming_memory_lookup_range_across_contexts(
         (iree_hal_streaming_deviceptr_t)(uintptr_t)device_ptr, 1,
         &owner_context, &stream_ref);

@@ -37,6 +37,9 @@ static iree_thread_local iree_hal_streaming_context_stack_t
 
 static void iree_hal_streaming_context_destroy(
     iree_hal_streaming_context_t* context);
+static iree_status_t iree_hal_streaming_context_synchronize_streams(
+    iree_hal_streaming_context_t* context, bool include_non_blocking_streams,
+    bool flush_before_wait);
 
 iree_status_t iree_hal_streaming_context_create(
     iree_hal_streaming_device_t* device_entry,
@@ -682,6 +685,26 @@ void iree_hal_streaming_context_unregister_stream(
   IREE_TRACE_ZONE_END(z0);
 }
 
+bool iree_hal_streaming_context_has_peer_contexts(
+    iree_hal_streaming_context_t* context) {
+  iree_hal_streaming_device_registry_t* device_registry =
+      iree_hal_streaming_device_registry();
+  if (!device_registry) return false;
+
+  bool has_peer = false;
+  iree_slim_mutex_lock(&device_registry->context_list.mutex);
+  for (iree_hal_streaming_context_t* candidate =
+           device_registry->context_list.head;
+       candidate; candidate = candidate->context_list_entry.next) {
+    if (candidate != context) {
+      has_peer = true;
+      break;
+    }
+  }
+  iree_slim_mutex_unlock(&device_registry->context_list.mutex);
+  return has_peer;
+}
+
 // Takes a retained snapshot of the current stream list so callers can wait or
 // synchronize without holding the list mutex across potentially blocking work.
 static iree_status_t iree_hal_streaming_context_snapshot_streams(
@@ -739,27 +762,10 @@ static void iree_hal_streaming_context_release_stream_snapshot(
 iree_status_t iree_hal_streaming_context_wait_idle(
     iree_hal_streaming_context_t* context, iree_timeout_t timeout) {
   IREE_ASSERT_ARGUMENT(context);
-  IREE_TRACE_ZONE_BEGIN(z0);
-
-  iree_hal_streaming_stream_t** temp_streams = NULL;
-  iree_host_size_t count = 0;
-  iree_status_t status = iree_hal_streaming_context_snapshot_streams(
-      context, &temp_streams, &count);
-  if (!iree_status_is_ok(status)) {
-    IREE_TRACE_ZONE_END(z0);
-    return status;
-  }
-
-  // Synchronize all streams. Bail on the first failure.
-  for (iree_host_size_t i = 0; iree_status_is_ok(status) && i < count; ++i) {
-    status = iree_hal_streaming_stream_synchronize(temp_streams[i]);
-  }
-
-  iree_hal_streaming_context_release_stream_snapshot(context, temp_streams,
-                                                     count);
-
-  IREE_TRACE_ZONE_END(z0);
-  return status;
+  (void)timeout;
+  return iree_hal_streaming_context_synchronize_streams(
+      context, /*include_non_blocking_streams=*/true,
+      /*flush_before_wait=*/true);
 }
 
 iree_status_t iree_hal_streaming_context_flush(
@@ -854,9 +860,15 @@ iree_status_t iree_hal_streaming_context_flush_all(void) {
 }
 
 static iree_status_t iree_hal_streaming_context_synchronize_streams(
-    iree_hal_streaming_context_t* context, bool include_non_blocking_streams) {
+    iree_hal_streaming_context_t* context, bool include_non_blocking_streams,
+    bool flush_before_wait) {
   IREE_ASSERT_ARGUMENT(context);
   IREE_TRACE_ZONE_BEGIN(z0);
+
+  if (flush_before_wait) {
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_hal_streaming_context_flush(context));
+  }
 
   iree_hal_streaming_stream_t** streams_copy = NULL;
   iree_host_size_t count = 0;
@@ -878,7 +890,7 @@ static iree_status_t iree_hal_streaming_context_synchronize_streams(
         (stream->flags & IREE_HAL_STREAMING_STREAM_FLAG_NON_BLOCKING)) {
       continue;
     }
-    status = iree_hal_streaming_stream_synchronize(stream);
+    status = iree_hal_streaming_stream_synchronize_flushed(stream);
   }
 
   iree_hal_streaming_context_release_stream_snapshot(context, streams_copy,
@@ -893,7 +905,8 @@ static iree_status_t iree_hal_streaming_context_synchronize_streams(
   // The legacy default stream always participates in its own ordering.
   if (context->default_stream) {
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, iree_hal_streaming_stream_synchronize(context->default_stream));
+        z0, iree_hal_streaming_stream_synchronize_flushed(
+                context->default_stream));
   }
 
   IREE_TRACE_ZONE_END(z0);
@@ -903,13 +916,15 @@ static iree_status_t iree_hal_streaming_context_synchronize_streams(
 iree_status_t iree_hal_streaming_context_synchronize(
     iree_hal_streaming_context_t* context) {
   return iree_hal_streaming_context_synchronize_streams(
-      context, /*include_non_blocking_streams=*/true);
+      context, /*include_non_blocking_streams=*/true,
+      /*flush_before_wait=*/true);
 }
 
 iree_status_t iree_hal_streaming_context_synchronize_legacy_default(
     iree_hal_streaming_context_t* context) {
   return iree_hal_streaming_context_synchronize_streams(
-      context, /*include_non_blocking_streams=*/false);
+      context, /*include_non_blocking_streams=*/false,
+      /*flush_before_wait=*/true);
 }
 
 iree_status_t iree_hal_streaming_context_synchronize_all(void) {
@@ -959,7 +974,13 @@ iree_status_t iree_hal_streaming_context_synchronize_all(void) {
 
   for (iree_host_size_t i = 0; iree_status_is_ok(status) && i < context_count;
        ++i) {
-    status = iree_hal_streaming_context_synchronize(contexts[i]);
+    status = iree_hal_streaming_context_flush(contexts[i]);
+  }
+  for (iree_host_size_t i = 0; iree_status_is_ok(status) && i < context_count;
+       ++i) {
+    status = iree_hal_streaming_context_synchronize_streams(
+        contexts[i], /*include_non_blocking_streams=*/true,
+        /*flush_before_wait=*/false);
   }
 
   for (iree_host_size_t i = 0; i < context_count; ++i) {

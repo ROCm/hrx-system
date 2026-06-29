@@ -1459,6 +1459,10 @@ void iree_hal_streaming_context_unregister_stream(
 iree_status_t iree_hal_streaming_context_allocate_capture_id(
     iree_hal_streaming_context_t* context, unsigned long long* out_capture_id);
 
+// Returns true when another context is present in the global context list.
+bool iree_hal_streaming_context_has_peer_contexts(
+    iree_hal_streaming_context_t* context);
+
 // Waits for all streams in the context to become idle.
 // Synchronization: all streams in context (blocking wait).
 iree_status_t iree_hal_streaming_context_wait_idle(
@@ -1594,6 +1598,9 @@ iree_status_t iree_hal_streaming_stream_query(
 
 // Synchronization: stream (blocks until stream idle).
 iree_status_t iree_hal_streaming_stream_synchronize(
+    iree_hal_streaming_stream_t* stream);
+// Synchronizes stream work that the caller has already flushed/submitted.
+iree_status_t iree_hal_streaming_stream_synchronize_flushed(
     iree_hal_streaming_stream_t* stream);
 
 // Wait for already-submitted work on this stream to complete.
