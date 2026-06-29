@@ -371,6 +371,24 @@ TEST_F(FactTableTest, UniformElementExtensionRoundTrips) {
   EXPECT_EQ(uniform.element.range_lo, 42);
 }
 
+TEST_F(FactTableTest, UniformElementPreservesFloatPredicateFacts) {
+  loom_value_fact_table_t table = {0};
+  IREE_ASSERT_OK(loom_value_fact_table_initialize(&table, &arena_, 0));
+
+  loom_value_facts_t element = loom_value_facts_unknown();
+  element.flags |= LOOM_VALUE_FACT_FLOAT_PREDICATE_MASK;
+
+  loom_value_facts_t facts = loom_value_facts_unknown();
+  IREE_ASSERT_OK(
+      loom_value_facts_make_uniform_element(&table.context, element, &facts));
+
+  EXPECT_TRUE(loom_value_facts_is_float(facts));
+  EXPECT_TRUE(loom_value_facts_is_not_nan(facts));
+  EXPECT_TRUE(loom_value_facts_is_not_inf(facts));
+  EXPECT_TRUE(loom_value_facts_is_finite(facts));
+  EXPECT_TRUE(loom_value_facts_is_not_subnormal(facts));
+}
+
 TEST_F(FactTableTest, IdenticalExtensionsInternToSameId) {
   loom_value_fact_table_t table = {0};
   IREE_ASSERT_OK(loom_value_fact_table_initialize(&table, &arena_, 0));

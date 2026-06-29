@@ -923,7 +923,9 @@ iree_status_t loom_value_facts_make_uniform_element(
   loom_value_fact_extension_entry_t entry = {0};
   entry.kind = LOOM_VALUE_FACT_EXTENSION_UNIFORM_ELEMENT;
   entry.payload.uniform_element.element = element;
-  return loom_value_facts_make_extension(context, &entry, out);
+  IREE_RETURN_IF_ERROR(loom_value_facts_make_extension(context, &entry, out));
+  out->flags |= element.flags & LOOM_VALUE_FACT_FLOAT_PREDICATE_MASK;
+  return iree_ok_status();
 }
 
 bool loom_value_facts_query_uniform_element(

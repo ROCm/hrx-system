@@ -126,6 +126,12 @@ typedef uint32_t loom_value_fact_flags_t;
    LOOM_VALUE_FACT_TOPOLOGY_WORKGROUP_Z |                                      \
    LOOM_VALUE_FACT_TOPOLOGY_SUBGROUP_LANE)
 
+// Floating-point semantic predicate facts. These may describe scalar values or
+// shaped floating values when the predicate is known for every lane.
+#define LOOM_VALUE_FACT_FLOAT_PREDICATE_MASK                                   \
+  (LOOM_VALUE_FACT_FLOAT | LOOM_VALUE_FACT_NOT_NAN | LOOM_VALUE_FACT_NOT_INF | \
+   LOOM_VALUE_FACT_FINITE | LOOM_VALUE_FACT_NOT_SUBNORMAL)
+
 // Context-local extension payload ID. Zero means the fact has no extension.
 typedef uint32_t loom_value_fact_extension_id_t;
 #define LOOM_VALUE_FACT_EXTENSION_ID_NONE ((loom_value_fact_extension_id_t)0)

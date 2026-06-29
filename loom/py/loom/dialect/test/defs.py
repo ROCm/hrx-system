@@ -515,6 +515,18 @@ test_fact_finite = Op(
     examples=["%finite = test.fact_finite %x : f32 -> i1"],
 )
 
+test_fact_not_subnormal = Op(
+    "test.fact_not_subnormal",
+    group=test_ops,
+    doc="Returns 1 if the input is provably not subnormal, 0 otherwise.",
+    operands=[Operand("value", ANY)],
+    results=[Result("result", I1)],
+    traits=[PURE],
+    facts="loom_test_fact_not_subnormal_facts",
+    format=[Ref("value"), COLON, TypeOf("value"), ARROW, ResultType("result")],
+    examples=["%not_subnormal = test.fact_not_subnormal %x : f32 -> i1"],
+)
+
 test_fact_uniform = Op(
     "test.fact_uniform",
     group=test_ops,
@@ -2467,4 +2479,5 @@ ALL_TEST_OPS: tuple[Op, ...] = (
     test_template_param_symbol,
     test_template_param_symbol_flags,
     test_fact_finite,
+    test_fact_not_subnormal,
 )
