@@ -6051,22 +6051,9 @@ static iree_status_t loom_amdgpu_try_lower_vector_fp8_pairs_to_packed_f16(
   IREE_RETURN_IF_ERROR(loom_amdgpu_materialize_vector_fp8_pair_sources(
       context, source_op, plan, pair_storage, pair_count, low_source,
       source_lane_type, pair_sources));
-  for (uint32_t register_index = 0; register_index < pair_count;
-       ++register_index) {
-    bool selected = false;
-    IREE_RETURN_IF_ERROR(loom_amdgpu_try_emit_fp8_pair_to_packed_f16_finite(
-        context, source_op, *decode_plan,
-        pair_sources[register_index].source_register,
-        pair_sources[register_index].byte_offset, value_flags, result_lane_type,
-        *sgpr_type, &out_low_packets[register_index], &selected));
-    if (!selected) {
-      IREE_ASSERT_UNREACHABLE("selected pair storage was prevalidated");
-      IREE_BUILTIN_UNREACHABLE();
-    }
-  }
-
-  *out_selected = true;
-  return iree_ok_status();
+  return loom_amdgpu_try_emit_fp8_pairs_to_packed_f16_finite(
+      context, source_op, *decode_plan, pair_sources, pair_count, value_flags,
+      result_lane_type, *sgpr_type, out_low_packets, out_selected);
 }
 
 static iree_status_t loom_amdgpu_try_lower_vector_fp8_pairs_to_f32(

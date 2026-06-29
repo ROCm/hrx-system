@@ -289,6 +289,17 @@ iree_status_t loom_amdgpu_try_emit_fp8_pair_to_packed_f16_finite(
     loom_amdgpu_fp8_decode_value_flags_t value_flags, loom_type_t vgpr_type,
     loom_type_t sgpr_type, loom_value_id_t* out_low_packet, bool* out_selected);
 
+// Emits packed F16 registers for adjacent FP8 byte-pair sources when value
+// facts prove finite non-subnormal storage.
+iree_status_t loom_amdgpu_try_emit_fp8_pairs_to_packed_f16_finite(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_amdgpu_fp8_decode_plan_t* plan,
+    const loom_amdgpu_fp8_packed_u16_pair_source_t* pair_sources,
+    iree_host_size_t pair_count,
+    loom_amdgpu_fp8_decode_value_flags_t value_flags, loom_type_t vgpr_type,
+    loom_type_t sgpr_type, loom_value_id_t* out_low_packets,
+    bool* out_selected);
+
 // Emits one packed VGPR containing two BF16 bit payloads.
 iree_status_t loom_amdgpu_emit_packed_bf16_pair(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
