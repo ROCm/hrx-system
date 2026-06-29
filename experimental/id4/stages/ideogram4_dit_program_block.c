@@ -577,6 +577,9 @@ iree_status_t id4_ideogram4_dit_program_author_transformer_block(
   const bool pytorch_parity_feed_forward =
       feed_forward_implementation ==
       ID4_IDEOGRAM4_DIT_FEED_FORWARD_IMPLEMENTATION_PYTORCH_PARITY;
+  const bool bf16_resident_weight_execution =
+      weight_execution_format ==
+      ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_BF16_RESIDENT;
   switch (attention_implementation) {
     case ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_STREAMING:
     case ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_MATERIALIZED_WMMA:
@@ -1419,14 +1422,14 @@ iree_status_t id4_ideogram4_dit_program_author_transformer_block(
                                             total_token_count);
   const id4_ideogram4_dit_program_linear_weight_layout_t
       feed_forward_w1_w3_weight_layout =
-          pytorch_parity_feed_forward
+          bf16_resident_weight_execution
               ? id4_ideogram4_dit_program_select_bf16_resident_linear_weight_layout(
                     activation_format, bf16_token_capacity, hidden_size,
                     intermediate_size)
               : ID4_IDEOGRAM4_DIT_PROGRAM_LINEAR_WEIGHT_LAYOUT_DENSE;
   const id4_ideogram4_dit_program_linear_weight_layout_t
       feed_forward_w2_weight_layout =
-          pytorch_parity_feed_forward
+          bf16_resident_weight_execution
               ? id4_ideogram4_dit_program_select_bf16_resident_linear_weight_layout(
                     activation_format, bf16_token_capacity, intermediate_size,
                     hidden_size)
@@ -1541,10 +1544,10 @@ iree_status_t id4_ideogram4_dit_program_author_transformer_block(
                                                 intermediate_size),
           &mlp_gate));
       IREE_RETURN_IF_ERROR(
-          id4_ideogram4_dit_program_dispatch_linear_packed_bf16_bf16(
+          id4_ideogram4_dit_program_dispatch_linear_parameter_bf16(
               builder, mlp_gate_dispatch_name, total_token_count,
               bf16_token_capacity, hidden_size, intermediate_size, ffn_input,
-              feed_forward_w1_parameter.weight, mlp_gate));
+              feed_forward_w1_parameter, mlp_gate));
 
       char after_mlp_gate_name_buffer[ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
       iree_string_view_t after_mlp_gate_name = iree_string_view_empty();
@@ -1555,11 +1558,32 @@ iree_status_t id4_ideogram4_dit_program_author_transformer_block(
       IREE_RETURN_IF_ERROR(
           id4_ideogram4_dit_program_barrier(builder, after_mlp_gate_name));
 
-      IREE_RETURN_IF_ERROR(
-          id4_ideogram4_dit_program_dispatch_mlp_up_silu_product_packed_bf16(
-              builder, mlp_hidden_dispatch_name, total_token_count,
-              bf16_token_capacity, hidden_size, intermediate_size, ffn_input,
-              feed_forward_w3_parameter.weight, mlp_gate, mlp_hidden));
+      switch (feed_forward_w3_parameter.layout) {
+        case ID4_IDEOGRAM4_DIT_PROGRAM_LINEAR_WEIGHT_LAYOUT_DENSE: {
+          IREE_RETURN_IF_ERROR(
+              id4_ideogram4_dit_program_dispatch_mlp_up_silu_product_packed_bf16(
+                  builder, mlp_hidden_dispatch_name, total_token_count,
+                  bf16_token_capacity, hidden_size, intermediate_size,
+                  ffn_input, feed_forward_w3_parameter.weight, mlp_gate,
+                  mlp_hidden));
+          break;
+        }
+        case ID4_IDEOGRAM4_DIT_PROGRAM_LINEAR_WEIGHT_LAYOUT_COMPACT_RHS_TILE: {
+          IREE_RETURN_IF_ERROR(
+              id4_ideogram4_dit_program_dispatch_mlp_up_silu_product_packed_bf16_compact_rhs_tile(
+                  builder, mlp_hidden_dispatch_name, total_token_count,
+                  bf16_token_capacity, hidden_size, intermediate_size,
+                  ffn_input, feed_forward_w3_parameter.weight, mlp_gate,
+                  mlp_hidden));
+          break;
+        }
+        default:
+          return iree_make_status(
+              IREE_STATUS_UNIMPLEMENTED,
+              "Ideogram4 DiT BF16 feed-forward up/product weight layout "
+              "%" PRIu32 " is not supported",
+              (uint32_t)feed_forward_w3_parameter.layout);
+      }
     } else if (feed_forward_w1_parameter.storage ==
                    ID4_IDEOGRAM4_DIT_PARAMETER_STORAGE_FP8_E4M3_SCALED &&
                feed_forward_w3_parameter.storage ==
