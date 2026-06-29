@@ -708,6 +708,28 @@ iree_status_t loom_vector_load_facts(loom_fact_context_t* context,
                                                &result_facts[0]);
 }
 
+iree_status_t loom_vector_decode_facts(loom_fact_context_t* context,
+                                       const loom_module_t* module,
+                                       const loom_op_t* op,
+                                       const loom_value_facts_t* operand_facts,
+                                       loom_value_facts_t* result_facts) {
+  loom_value_fact_encoding_summary_t summary = {0};
+  if (!loom_value_facts_query_encoding_summary(context, operand_facts[1],
+                                               &summary)) {
+    return loom_vector_make_unknown_facts(result_facts);
+  }
+  const loom_type_t result_type =
+      loom_module_value_type(module, loom_vector_decode_result(op));
+  loom_value_facts_t element_facts = {0};
+  if (!loom_encoding_query_storage_schema_content_facts(
+          &summary.storage_schema, loom_type_element_type(result_type),
+          &element_facts)) {
+    return loom_vector_make_unknown_facts(result_facts);
+  }
+  return loom_value_facts_make_uniform_element(context, element_facts,
+                                               &result_facts[0]);
+}
+
 static bool loom_vector_integer_element_bitwidth(loom_type_t type,
                                                  int32_t* out_bitwidth) {
   if (!loom_type_is_shaped(type) && !loom_type_is_scalar(type)) return false;

@@ -322,6 +322,24 @@ func.def @scalarizes_block_scaled_f8_decode(%payload: vector<4xf8E4M3>, %scale: 
 
 // ====
 
+func.def @scalarizes_content_policy_f8_decode(%payload: vector<2xf8E4M3>) -> (vector<2xbf16>) {
+  %schema = encoding.define #matrix_operand<element_format=f8e4m3, payload_packing=dense_lanes, payload_elements=2, payload_registers=0, rounding=finite_flush_subnormal> : encoding<schema>
+  %decoded = vector.decode %payload using %schema : vector<2xf8E4M3>, encoding<schema> -> vector<2xbf16>
+  func.return %decoded : vector<2xbf16>
+}
+
+// ----
+func.def @scalarizes_content_policy_f8_decode(%payload: vector<2xf8E4M3>) -> (vector<2xbf16>) {
+  %4 = vector.extract %payload[0] : vector<2xf8E4M3> -> f8E4M3
+  %5 = scalar.extf %4 : f8E4M3 to bf16
+  %6 = vector.extract %payload[1] : vector<2xf8E4M3> -> f8E4M3
+  %7 = scalar.extf %6 : f8E4M3 to bf16
+  %decoded = vector.from_elements %5, %7 : vector<2xbf16>
+  func.return %decoded : vector<2xbf16>
+}
+
+// ====
+
 func.def @scalarizes_row_scaled_f8_decode(%payload: vector<2x2xf8E4M3>, %scale: vector<2xf32>) -> (vector<2x2xf32>) {
   %schema = encoding.define #matrix_operand<element_format=f8e4m3, payload_packing=dense_lanes, payload_elements=4, payload_registers=0, scale_format=f32, scale_group_elements=1, scale_operands=1, scale_topology=row, affine=scale_only> : encoding<schema>
   %decoded = vector.decode %payload using %schema {scale = %scale : vector<2xf32>} : vector<2x2xf8E4M3>, encoding<schema> -> vector<2x2xf32>

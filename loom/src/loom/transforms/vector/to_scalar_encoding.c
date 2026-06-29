@@ -21,10 +21,15 @@ static bool loom_vector_to_scalar_flags_are_single_or_none(uint64_t flags) {
   return flags == 0 || (flags & (flags - 1)) == 0;
 }
 
-static bool loom_vector_to_scalar_flags_are_supported(uint64_t flags,
-                                                      uint64_t supported) {
+static bool loom_vector_to_scalar_one_of_flags_are_supported(
+    uint64_t flags, uint64_t supported) {
   return (flags & ~supported) == 0 &&
          loom_vector_to_scalar_flags_are_single_or_none(flags);
+}
+
+static bool loom_vector_to_scalar_bitset_flags_are_supported(
+    uint64_t flags, uint64_t supported) {
+  return (flags & ~supported) == 0;
 }
 
 static bool loom_vector_to_scalar_numeric_format_to_scalar_type(
@@ -131,7 +136,7 @@ static bool loom_vector_to_scalar_encoded_schema_is_supported(
   if (schema.payload_packing != LOOM_VALUE_FACT_PAYLOAD_PACKING_DENSE_LANES) {
     return false;
   }
-  if (!loom_vector_to_scalar_flags_are_supported(
+  if (!loom_vector_to_scalar_one_of_flags_are_supported(
           schema.element_format,
           LOOM_VALUE_FACT_NUMERIC_FORMAT_F64 |
               LOOM_VALUE_FACT_NUMERIC_FORMAT_F32 |
@@ -153,7 +158,7 @@ static bool loom_vector_to_scalar_encoded_schema_is_supported(
               LOOM_VALUE_FACT_NUMERIC_FORMAT_CODEBOOK_INDEX)) {
     return false;
   }
-  if (!loom_vector_to_scalar_flags_are_supported(
+  if (!loom_vector_to_scalar_one_of_flags_are_supported(
           schema.scale_format, LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE |
                                    LOOM_VALUE_FACT_NUMERIC_FORMAT_F32 |
                                    LOOM_VALUE_FACT_NUMERIC_FORMAT_F16 |
@@ -166,7 +171,7 @@ static bool loom_vector_to_scalar_encoded_schema_is_supported(
   if (schema.secondary_scale_format != LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE) {
     return false;
   }
-  if (!loom_vector_to_scalar_flags_are_supported(
+  if (!loom_vector_to_scalar_one_of_flags_are_supported(
           schema.scale_topology,
           LOOM_VALUE_FACT_SCALE_TOPOLOGY_NONE |
               LOOM_VALUE_FACT_SCALE_TOPOLOGY_TENSOR_GLOBAL |
@@ -176,7 +181,7 @@ static bool loom_vector_to_scalar_encoded_schema_is_supported(
               LOOM_VALUE_FACT_SCALE_TOPOLOGY_BLOCK_1D)) {
     return false;
   }
-  if (!loom_vector_to_scalar_flags_are_supported(
+  if (!loom_vector_to_scalar_one_of_flags_are_supported(
           schema.affine_policy,
           LOOM_VALUE_FACT_AFFINE_POLICY_NONE |
               LOOM_VALUE_FACT_AFFINE_POLICY_SCALE_ONLY |
@@ -185,12 +190,13 @@ static bool loom_vector_to_scalar_encoded_schema_is_supported(
               LOOM_VALUE_FACT_AFFINE_POLICY_SCALE_PLUS_ZERO_POINT)) {
     return false;
   }
-  if (schema.rounding_policy != LOOM_VALUE_FACT_ROUNDING_POLICY_NONE ||
+  if (!loom_vector_to_scalar_bitset_flags_are_supported(
+          schema.rounding_policy, LOOM_VALUE_FACT_ROUNDING_POLICY_ALL) ||
       schema.sparsity_policy != LOOM_VALUE_FACT_SPARSITY_POLICY_NONE ||
       schema.scale_operand_count > 1) {
     return false;
   }
-  if (!loom_vector_to_scalar_flags_are_supported(
+  if (!loom_vector_to_scalar_one_of_flags_are_supported(
           schema.codebook_policy,
           LOOM_VALUE_FACT_CODEBOOK_POLICY_NONE |
               LOOM_VALUE_FACT_CODEBOOK_POLICY_DYNAMIC_TABLE_OPERAND)) {

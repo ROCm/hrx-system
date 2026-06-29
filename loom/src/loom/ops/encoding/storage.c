@@ -663,12 +663,11 @@ bool loom_encoding_query_type_storage_schema(
   return loom_encoding_value_storage_schema(context, facts, out_schema);
 }
 
-bool loom_encoding_query_type_storage_content_facts(
-    const loom_fact_context_t* context, const loom_module_t* module,
-    loom_type_t type, loom_value_facts_t* out_facts) {
+bool loom_encoding_query_storage_schema_content_facts(
+    const loom_value_fact_storage_schema_t* storage_schema,
+    loom_scalar_type_t element_type, loom_value_facts_t* out_facts) {
   if (!out_facts) return false;
   *out_facts = loom_value_facts_unknown();
-  const loom_scalar_type_t element_type = loom_type_element_type(type);
   if (!loom_scalar_type_is_float(element_type)) {
     return false;
   }
@@ -678,25 +677,39 @@ bool loom_encoding_query_type_storage_content_facts(
           LOOM_SCALAR_TYPE_FP8_SPECIAL_POLICY_FINITE_NAN) {
     out_facts->flags |= LOOM_VALUE_FACT_NOT_INF;
   }
-  loom_value_fact_storage_schema_t storage_schema = {0};
-  if (!loom_encoding_query_type_storage_schema(context, module, type,
-                                               &storage_schema)) {
+  if (!storage_schema) {
     return out_facts->flags != 0;
   }
-  if (iree_any_bit_set(storage_schema.encoded_operand.rounding_policy,
+  if (iree_any_bit_set(storage_schema->encoded_operand.rounding_policy,
                        LOOM_VALUE_FACT_ROUNDING_POLICY_FINITE_ONLY)) {
     out_facts->flags |= LOOM_VALUE_FACT_NOT_NAN | LOOM_VALUE_FACT_NOT_INF |
                         LOOM_VALUE_FACT_FINITE;
   }
   if (loom_numeric_format_is_finite_only(
-          storage_schema.encoded_operand.element_format)) {
+          storage_schema->encoded_operand.element_format)) {
     out_facts->flags |= LOOM_VALUE_FACT_NOT_INF;
   }
-  if (iree_any_bit_set(storage_schema.encoded_operand.rounding_policy,
+  if (iree_any_bit_set(storage_schema->encoded_operand.rounding_policy,
                        LOOM_VALUE_FACT_ROUNDING_POLICY_FLUSH_SUBNORMAL)) {
     out_facts->flags |= LOOM_VALUE_FACT_NOT_SUBNORMAL;
   }
   return out_facts->flags != 0;
+}
+
+bool loom_encoding_query_type_storage_content_facts(
+    const loom_fact_context_t* context, const loom_module_t* module,
+    loom_type_t type, loom_value_facts_t* out_facts) {
+  if (!out_facts) return false;
+  *out_facts = loom_value_facts_unknown();
+  const loom_scalar_type_t element_type = loom_type_element_type(type);
+  loom_value_fact_storage_schema_t storage_schema = {0};
+  if (!loom_encoding_query_type_storage_schema(context, module, type,
+                                               &storage_schema)) {
+    return loom_encoding_query_storage_schema_content_facts(NULL, element_type,
+                                                            out_facts);
+  }
+  return loom_encoding_query_storage_schema_content_facts(
+      &storage_schema, element_type, out_facts);
 }
 
 static iree_status_t loom_encoding_emit(iree_diagnostic_emitter_t emitter,

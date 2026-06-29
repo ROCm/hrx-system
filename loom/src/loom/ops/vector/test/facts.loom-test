@@ -1389,3 +1389,20 @@ func.def @finite_only_storage_fragment_load_content(%buffer: buffer) -> (i1) {
   %finite = scalar.constant true : i1
   func.return %finite : i1
 }
+
+// ====
+
+// Explicit decodes carry the same finite-only content facts as encoded storage.
+func.def @finite_only_vector_decode_content(%payload: vector<2xf8E4M3>) -> (i1) {
+  %schema = encoding.define #matrix_operand<element_format=f8e4m3, payload_elements=2, payload_registers=0, rounding=finite_only> : encoding<schema>
+  %decoded = vector.decode %payload using %schema : vector<2xf8E4M3>, encoding<schema> -> vector<2xbf16>
+  %lane = vector.extract %decoded[0] : vector<2xbf16> -> bf16
+  %finite = test.fact_finite %lane : bf16 -> i1
+  func.return %finite : i1
+}
+
+// ----
+func.def @finite_only_vector_decode_content(%payload: vector<2xf8E4M3>) -> (i1) {
+  %finite = scalar.constant true : i1
+  func.return %finite : i1
+}
