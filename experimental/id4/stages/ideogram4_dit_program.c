@@ -1264,7 +1264,8 @@ static iree_status_t
 id4_ideogram4_dit_program_dispatch_condition_project_packed(
     id4_pipeline_program_builder_t* builder, uint32_t text_token_count,
     uint32_t total_token_count, uint32_t llm_feature_count,
-    uint32_t hidden_size, id4_pipeline_program_tensor_t packed_condition,
+    uint32_t hidden_size, iree_string_view_list_t diagnostic_tap_names,
+    id4_pipeline_program_tensor_t packed_condition,
     id4_ideogram4_dit_program_linear_parameter_t projection,
     id4_pipeline_program_tensor_t bias,
     id4_pipeline_program_tensor_t image_indicator,
@@ -1285,11 +1286,15 @@ id4_ideogram4_dit_program_dispatch_condition_project_packed(
   }
   const uint32_t post_element_count = (uint32_t)post_element_count64;
 
+  const iree_string_view_t projected_condition_name =
+      IREE_SV("ideogram4.cond.prelude.llm_cond_proj.raw");
+  const bool tap_projected_condition =
+      id4_ideogram4_dit_program_has_diagnostic_tap(diagnostic_tap_names,
+                                                   projected_condition_name);
   id4_pipeline_program_tensor_t projected_condition =
       id4_pipeline_program_tensor_invalid();
   IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_acquire_tensor(
-      builder, IREE_SV("ideogram4.cond.prelude.llm_cond_proj.raw"),
-      ID4_PIPELINE_PROGRAM_DTYPE_F32,
+      builder, projected_condition_name, ID4_PIPELINE_PROGRAM_DTYPE_F32,
       id4_pipeline_program_make_shape_rank2(hidden_size,
                                             padded_text_token_count),
       &projected_condition));
@@ -1366,6 +1371,10 @@ id4_ideogram4_dit_program_dispatch_condition_project_packed(
   }
   IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_barrier(
       builder, IREE_SV("ideogram4.cond.prelude.after_llm_cond_proj_wmma")));
+  if (tap_projected_condition) {
+    IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_tap(
+        builder, projected_condition_name, projected_condition));
+  }
 
   const id4_ideogram4_dit_program_config_value_t post_config_values[] = {
       {IREE_SV("id4.ideogram4.condition_project_bias.text_token_count"),
@@ -1404,7 +1413,8 @@ id4_ideogram4_dit_program_dispatch_condition_project_packed(
 static iree_status_t id4_ideogram4_dit_program_dispatch_condition_project(
     id4_pipeline_program_builder_t* builder, uint32_t text_token_count,
     uint32_t total_token_count, uint32_t llm_feature_count,
-    uint32_t hidden_size, id4_pipeline_program_tensor_t condition,
+    uint32_t hidden_size, iree_string_view_list_t diagnostic_tap_names,
+    id4_pipeline_program_tensor_t condition,
     id4_ideogram4_dit_program_linear_parameter_t projection,
     id4_pipeline_program_tensor_t bias,
     id4_pipeline_program_tensor_t image_indicator,
@@ -1463,8 +1473,8 @@ static iree_status_t id4_ideogram4_dit_program_dispatch_condition_project(
       builder, IREE_SV("ideogram4.cond.prelude.after_llm_cond_pack")));
   return id4_ideogram4_dit_program_dispatch_condition_project_packed(
       builder, text_token_count, total_token_count, llm_feature_count,
-      hidden_size, packed_condition, projection, bias, image_indicator,
-      image_indicator_embedding, output);
+      hidden_size, diagnostic_tap_names, packed_condition, projection, bias,
+      image_indicator, image_indicator_embedding, output);
 }
 
 iree_status_t id4_ideogram4_dit_program_dispatch_adaln_split(
@@ -4713,9 +4723,9 @@ iree_status_t id4_ideogram4_dit_program_author_forward(
           condition_norm));
       IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_dispatch_condition_project(
           builder, text_token_count, total_token_count, llm_feature_count,
-          hidden_size, condition_norm, llm_cond_proj, llm_cond_proj_bias,
-          image_indicator, image_indicator_embedding,
-          prelude_hidden_producer_output));
+          hidden_size, options->diagnostic_tap_names, condition_norm,
+          llm_cond_proj, llm_cond_proj_bias, image_indicator,
+          image_indicator_embedding, prelude_hidden_producer_output));
     } else {
       id4_pipeline_program_tensor_t packed_condition =
           id4_pipeline_program_tensor_invalid();
@@ -4739,9 +4749,9 @@ iree_status_t id4_ideogram4_dit_program_author_forward(
       IREE_RETURN_IF_ERROR(
           id4_ideogram4_dit_program_dispatch_condition_project_packed(
               builder, text_token_count, total_token_count, llm_feature_count,
-              hidden_size, packed_condition, llm_cond_proj, llm_cond_proj_bias,
-              image_indicator, image_indicator_embedding,
-              prelude_hidden_producer_output));
+              hidden_size, options->diagnostic_tap_names, packed_condition,
+              llm_cond_proj, llm_cond_proj_bias, image_indicator,
+              image_indicator_embedding, prelude_hidden_producer_output));
     }
     IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_barrier(
         builder, IREE_SV("ideogram4.cond.prelude.after_llm_cond_proj")));
