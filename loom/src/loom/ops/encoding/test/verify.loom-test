@@ -98,6 +98,8 @@ func.def @physical_storage_static_params() {
 
 func.def @physical_storage_fp8_fnuz_params() {
   %layout = encoding.layout.dense : encoding<layout>
+  %ieee_schema = encoding.define #ieee_fp8_e5m2 : encoding<schema>
+  %storage0 = encoding.define #physical_storage {layout = %layout : encoding<layout>, schema = %ieee_schema : encoding<schema>} : encoding<storage>
   %schema = encoding.define #fp8_e4m3fnuz : encoding<schema>
   %storage = encoding.define #physical_storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
   %storage2 = encoding.define #physical_storage<layout=#dense, schema=#fp8_e5m2fnuz> : encoding<storage>

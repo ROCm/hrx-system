@@ -1454,6 +1454,11 @@ static const loom_encoding_vtable_t loom_encoding_ieee_fp8_e4m3_vtable = {
     .role = LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
 };
 
+static const loom_encoding_vtable_t loom_encoding_ieee_fp8_e5m2_vtable = {
+    .name = IREE_SVL("ieee_fp8_e5m2"),
+    .role = LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
+};
+
 static const loom_encoding_vtable_t loom_encoding_fp8_e4m3fn_vtable = {
     .name = IREE_SVL("fp8_e4m3fn"),
     .role = LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
@@ -1504,6 +1509,7 @@ static const loom_encoding_vtable_t* const loom_encoding_builtin_vtables[] = {
     &loom_encoding_ggml_iq_grid_vtable,
     &loom_encoding_loom_fp4_table_vtable,
     &loom_encoding_ieee_fp8_e4m3_vtable,
+    &loom_encoding_ieee_fp8_e5m2_vtable,
     &loom_encoding_fp8_e4m3fn_vtable,
     &loom_encoding_fp8_e4m3fnuz_vtable,
     &loom_encoding_fp8_e5m2fnuz_vtable,
