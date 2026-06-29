@@ -753,31 +753,46 @@ static iree_status_t loom_amdgpu_emit_fp8_subnormal_bf16_bits_byte_tables(
   return iree_ok_status();
 }
 
+typedef struct loom_amdgpu_fp8_subnormal_bf16_byte_table_values_t {
+  // SGPR table words indexed by output byte and packed word.
+  loom_value_id_t words[LOOM_AMDGPU_FP8_BF16_BYTE_COUNT]
+                       [LOOM_AMDGPU_FP8_BF16_BYTE_TABLE_WORD_COUNT];
+} loom_amdgpu_fp8_subnormal_bf16_byte_table_values_t;
+
+static iree_status_t loom_amdgpu_emit_fp8_subnormal_bf16_byte_table_values(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_amdgpu_fp8_decode_plan_t* plan, loom_type_t sgpr_type,
+    loom_amdgpu_fp8_subnormal_bf16_byte_table_values_t* out_tables) {
+  *out_tables = (loom_amdgpu_fp8_subnormal_bf16_byte_table_values_t){0};
+  for (uint32_t byte_index = 0; byte_index < LOOM_AMDGPU_FP8_BF16_BYTE_COUNT;
+       ++byte_index) {
+    for (uint32_t word_index = 0;
+         word_index < LOOM_AMDGPU_FP8_BF16_BYTE_TABLE_WORD_COUNT;
+         ++word_index) {
+      IREE_RETURN_IF_ERROR(loom_amdgpu_emit_const_u32(
+          context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_S_MOV_B32,
+          plan->subnormal_bf16_byte_table_words[byte_index][word_index],
+          sgpr_type, &out_tables->words[byte_index][word_index]));
+    }
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t
-loom_amdgpu_emit_fp8_subnormal_packed_bf16_bits_byte_tables(
+loom_amdgpu_emit_fp8_subnormal_packed_bf16_bits_from_byte_tables(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_amdgpu_fp8_decode_plan_t* plan,
+    const loom_amdgpu_fp8_subnormal_bf16_byte_table_values_t* tables,
     loom_value_id_t low_source_no_sign_pair, loom_type_t vgpr_type,
-    loom_type_t sgpr_type, loom_value_id_t* out_bf16_bits) {
+    loom_value_id_t* out_bf16_bits) {
   *out_bf16_bits = LOOM_VALUE_ID_INVALID;
   loom_value_id_t low_payload_bytes[LOOM_AMDGPU_FP8_BF16_BYTE_COUNT] = {0};
   for (uint32_t byte_index = 0; byte_index < LOOM_AMDGPU_FP8_BF16_BYTE_COUNT;
        ++byte_index) {
-    loom_value_id_t low_table_lo = LOOM_VALUE_ID_INVALID;
-    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_const_u32(
-        context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_S_MOV_B32,
-        plan->subnormal_bf16_byte_table_words[byte_index][0], sgpr_type,
-        &low_table_lo));
-    loom_value_id_t low_table_hi = LOOM_VALUE_ID_INVALID;
-    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_const_u32(
-        context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_S_MOV_B32,
-        plan->subnormal_bf16_byte_table_words[byte_index][1], sgpr_type,
-        &low_table_hi));
-
     IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fp8_decode_perm_b32(
-        context, source_op, &plan->perm_b32_descriptor, low_table_hi,
-        low_table_lo, low_source_no_sign_pair, vgpr_type,
-        &low_payload_bytes[byte_index]));
+        context, source_op, &plan->perm_b32_descriptor,
+        tables->words[byte_index][1], tables->words[byte_index][0],
+        low_source_no_sign_pair, vgpr_type, &low_payload_bytes[byte_index]));
   }
 
   IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_shift(
@@ -1149,12 +1164,15 @@ static iree_status_t loom_amdgpu_emit_fp8_packed_bf16_repair_group_if(
 
   loom_value_id_t repair_payloads[LOOM_AMDGPU_MAX_PACKED_32BIT_REGISTERS] = {0};
   loom_builder_set_block(builder, split.repair_block);
+  loom_amdgpu_fp8_subnormal_bf16_byte_table_values_t subnormal_tables;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fp8_subnormal_bf16_byte_table_values(
+      context, source_op, plan, sgpr_type, &subnormal_tables));
   for (iree_host_size_t i = 0; i < pair_count; ++i) {
     loom_value_id_t low_subnormal_payload = LOOM_VALUE_ID_INVALID;
     IREE_RETURN_IF_ERROR(
-        loom_amdgpu_emit_fp8_subnormal_packed_bf16_bits_byte_tables(
-            context, source_op, plan, pair_states[i].source_no_sign, vgpr_type,
-            sgpr_type, &low_subnormal_payload));
+        loom_amdgpu_emit_fp8_subnormal_packed_bf16_bits_from_byte_tables(
+            context, source_op, plan, &subnormal_tables,
+            pair_states[i].source_no_sign, vgpr_type, &low_subnormal_payload));
     loom_value_id_t low_repair_mask = LOOM_VALUE_ID_INVALID;
     IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fp8_packed_bf16_mask_from_condition(
         context, source_op, plan, pair_states[i].repair_condition, vgpr_type,
@@ -1345,12 +1363,17 @@ iree_status_t loom_amdgpu_try_emit_fp8_pairs_to_packed_bf16(
           low_combined_repair_condition, vgpr_type, sgpr_type, mask_type,
           finite_payloads));
     } else {
+      loom_amdgpu_fp8_subnormal_bf16_byte_table_values_t subnormal_tables;
+      IREE_RETURN_IF_ERROR(
+          loom_amdgpu_emit_fp8_subnormal_bf16_byte_table_values(
+              context, source_op, plan, sgpr_type, &subnormal_tables));
       for (iree_host_size_t i = 0; i < pair_count; ++i) {
         loom_value_id_t low_subnormal_payload = LOOM_VALUE_ID_INVALID;
         IREE_RETURN_IF_ERROR(
-            loom_amdgpu_emit_fp8_subnormal_packed_bf16_bits_byte_tables(
-                context, source_op, plan, pair_states[i].source_no_sign,
-                vgpr_type, sgpr_type, &low_subnormal_payload));
+            loom_amdgpu_emit_fp8_subnormal_packed_bf16_bits_from_byte_tables(
+                context, source_op, plan, &subnormal_tables,
+                pair_states[i].source_no_sign, vgpr_type,
+                &low_subnormal_payload));
         loom_value_id_t low_repair_mask = LOOM_VALUE_ID_INVALID;
         IREE_RETURN_IF_ERROR(
             loom_amdgpu_emit_fp8_packed_bf16_mask_from_condition(
