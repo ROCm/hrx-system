@@ -85,6 +85,8 @@ typedef uint32_t loom_amdgpu_fp8_packed_bf16_repairs_t;
 enum {
   LOOM_AMDGPU_FP8_BF16_BYTE_COUNT = 2u,
   LOOM_AMDGPU_FP8_BF16_BYTE_TABLE_WORD_COUNT = 2u,
+  // Raw f32 bit pattern for the identity scale used with scale-f32 packets.
+  LOOM_AMDGPU_FP8_F32_IDENTITY_SCALE_BITS = 0x3F800000u,
 };
 
 typedef struct loom_amdgpu_fp8_native_descriptor_refs_t {
@@ -170,6 +172,13 @@ bool loom_amdgpu_fp8_scalef32_descriptor_ref(
     loom_scalar_type_t source_element_type,
     loom_scalar_type_t result_element_type,
     loom_amdgpu_descriptor_ref_t* out_ref);
+
+// Resolves the native scaled FP8/BF8 conversion descriptor for the source and
+// result element type pair, when the active target exposes one.
+iree_status_t loom_amdgpu_resolve_fp8_scalef32_descriptor_if_present(
+    loom_low_lower_context_t* context, loom_scalar_type_t source_element_type,
+    loom_scalar_type_t result_element_type,
+    loom_low_lower_resolved_descriptor_t* out_descriptor, bool* out_is_present);
 
 // Selects descriptor helpers and initializes format tables for |element_type|.
 iree_status_t loom_amdgpu_select_fp8_decode_plan(

@@ -152,6 +152,22 @@ bool loom_amdgpu_fp8_scalef32_descriptor_ref(
   return true;
 }
 
+iree_status_t loom_amdgpu_resolve_fp8_scalef32_descriptor_if_present(
+    loom_low_lower_context_t* context, loom_scalar_type_t source_element_type,
+    loom_scalar_type_t result_element_type,
+    loom_low_lower_resolved_descriptor_t* out_descriptor,
+    bool* out_is_present) {
+  *out_descriptor = (loom_low_lower_resolved_descriptor_t){0};
+  *out_is_present = false;
+  loom_amdgpu_descriptor_ref_t descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_NONE;
+  if (!loom_amdgpu_fp8_scalef32_descriptor_ref(
+          source_element_type, result_element_type, &descriptor_ref)) {
+    return iree_ok_status();
+  }
+  return loom_amdgpu_resolve_descriptor_ref_if_present(
+      context, descriptor_ref, out_descriptor, out_is_present);
+}
+
 static const loom_low_lower_resolved_descriptor_t*
 loom_amdgpu_fp8_decode_cmp_src1_inline_descriptor(
     const loom_amdgpu_fp8_decode_plan_t* plan,
