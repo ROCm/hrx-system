@@ -89,39 +89,112 @@ loom_amdgpu_fp8_decode_value_flags_from_facts(loom_value_facts_t facts) {
   return flags;
 }
 
-bool loom_amdgpu_fp8_native_descriptor_refs(
+typedef struct loom_amdgpu_fp8_native_descriptor_ref_row_t {
+  // Encoded FP8/BF8 source scalar type.
+  loom_scalar_type_t source_element_type;
+  // Decoded result scalar type.
+  loom_scalar_type_t result_element_type;
+  // Native unscaled descriptor refs for the type pair.
+  loom_amdgpu_fp8_native_descriptor_refs_t refs;
+} loom_amdgpu_fp8_native_descriptor_ref_row_t;
+
+static const loom_amdgpu_fp8_native_descriptor_ref_row_t
+    kLoomAmdgpuFp8NativeDescriptorRefRows[] = {
+#define LOOM_AMDGPU_FP8_NATIVE_DESCRIPTOR_REF_ROW(source_type, result_type, \
+                                                  lane_ref, pair_ref)       \
+  {                                                                         \
+    source_type, result_type, { lane_ref, pair_ref }                        \
+  }
+#include "loom/target/arch/amdgpu/lower/fp8_native_descriptor_ref_rows.inl"
+#undef LOOM_AMDGPU_FP8_NATIVE_DESCRIPTOR_REF_ROW
+};
+static_assert(IREE_ARRAYSIZE(kLoomAmdgpuFp8NativeDescriptorRefRows) <= 64,
+              "native descriptor cache stores row state in one u64 bitset");
+
+static bool loom_amdgpu_fp8_native_descriptor_ref_row(
     loom_scalar_type_t source_element_type,
-    loom_scalar_type_t result_element_type,
+    loom_scalar_type_t result_element_type, size_t* out_row_index,
     loom_amdgpu_fp8_native_descriptor_refs_t* out_refs) {
+  *out_row_index = 0;
   *out_refs = (loom_amdgpu_fp8_native_descriptor_refs_t){
       .lane = LOOM_AMDGPU_DESCRIPTOR_REF_NONE,
       .pair = LOOM_AMDGPU_DESCRIPTOR_REF_NONE,
   };
-  if (source_element_type >= LOOM_SCALAR_TYPE_COUNT_ ||
-      result_element_type >= LOOM_SCALAR_TYPE_COUNT_) {
-    return false;
+  for (size_t i = 0; i < IREE_ARRAYSIZE(kLoomAmdgpuFp8NativeDescriptorRefRows);
+       ++i) {
+    const loom_amdgpu_fp8_native_descriptor_ref_row_t* row =
+        &kLoomAmdgpuFp8NativeDescriptorRefRows[i];
+    if (row->source_element_type == source_element_type &&
+        row->result_element_type == result_element_type) {
+      *out_row_index = i;
+      *out_refs = row->refs;
+      return true;
+    }
   }
-  static const loom_amdgpu_fp8_native_descriptor_refs_t
-      kLoomAmdgpuFp8NativeDescriptorRefs[LOOM_SCALAR_TYPE_COUNT_]
-                                        [LOOM_SCALAR_TYPE_COUNT_] = {
-#define LOOM_AMDGPU_FP8_NATIVE_DESCRIPTOR_REF_ROW(source_type, result_type, \
-                                                  lane_ref, pair_ref)       \
-  [source_type][result_type] = {                                            \
-    .lane = lane_ref,                                                       \
-    .pair = pair_ref,                                                       \
+  return false;
+}
+
+bool loom_amdgpu_fp8_native_descriptor_refs(
+    loom_scalar_type_t source_element_type,
+    loom_scalar_type_t result_element_type,
+    loom_amdgpu_fp8_native_descriptor_refs_t* out_refs) {
+  size_t row_index = 0;
+  return loom_amdgpu_fp8_native_descriptor_ref_row(
+      source_element_type, result_element_type, &row_index, out_refs);
+}
+
+typedef struct loom_amdgpu_fp8_native_descriptor_cache_t {
+  // Generated-row bits whose descriptor availability has been resolved.
+  uint64_t initialized_row_bits;
+  // Function-local resolved descriptors keyed by generated row index.
+  loom_amdgpu_fp8_native_descriptors_t
+      descriptors[IREE_ARRAYSIZE(kLoomAmdgpuFp8NativeDescriptorRefRows)];
+} loom_amdgpu_fp8_native_descriptor_cache_t;
+
+static int loom_amdgpu_fp8_native_descriptor_cache_state_key;
+
+iree_status_t loom_amdgpu_get_fp8_native_descriptors(
+    loom_low_lower_context_t* context, loom_scalar_type_t source_element_type,
+    loom_scalar_type_t result_element_type,
+    const loom_amdgpu_fp8_native_descriptors_t** out_descriptors) {
+  *out_descriptors = NULL;
+  size_t row_index = 0;
+  loom_amdgpu_fp8_native_descriptor_refs_t descriptor_refs = {0};
+  if (!loom_amdgpu_fp8_native_descriptor_ref_row(
+          source_element_type, result_element_type, &row_index,
+          &descriptor_refs)) {
+    return iree_ok_status();
   }
-#include "loom/target/arch/amdgpu/lower/fp8_native_descriptor_ref_rows.inl"
-#undef LOOM_AMDGPU_FP8_NATIVE_DESCRIPTOR_REF_ROW
-                                        };
-  const loom_amdgpu_fp8_native_descriptor_refs_t* refs =
-      &kLoomAmdgpuFp8NativeDescriptorRefs[source_element_type]
-                                         [result_element_type];
-  if (refs->lane == LOOM_AMDGPU_DESCRIPTOR_REF_NONE &&
-      refs->pair == LOOM_AMDGPU_DESCRIPTOR_REF_NONE) {
-    return false;
+  loom_amdgpu_fp8_native_descriptor_cache_t* cache = NULL;
+  IREE_RETURN_IF_ERROR(loom_low_lower_get_or_allocate_target_state(
+      context, &loom_amdgpu_fp8_native_descriptor_cache_state_key,
+      sizeof(*cache), (void**)&cache));
+  const uint64_t row_bit = UINT64_C(1) << row_index;
+  if ((cache->initialized_row_bits & row_bit) == 0) {
+    loom_amdgpu_fp8_native_descriptors_t* descriptors =
+        &cache->descriptors[row_index];
+    if (descriptor_refs.lane != LOOM_AMDGPU_DESCRIPTOR_REF_NONE) {
+      bool descriptor_is_present = false;
+      IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_descriptor_ref_if_present(
+          context, descriptor_refs.lane, &descriptors->lane_descriptor,
+          &descriptor_is_present));
+      if (descriptor_is_present) {
+        descriptors->flags |= LOOM_AMDGPU_FP8_NATIVE_DESCRIPTOR_FLAG_HAS_LANE;
+      }
+    }
+    if (descriptor_refs.pair != LOOM_AMDGPU_DESCRIPTOR_REF_NONE) {
+      bool descriptor_is_present = false;
+      IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_descriptor_ref_if_present(
+          context, descriptor_refs.pair, &descriptors->pair_descriptor,
+          &descriptor_is_present));
+      if (descriptor_is_present) {
+        descriptors->flags |= LOOM_AMDGPU_FP8_NATIVE_DESCRIPTOR_FLAG_HAS_PAIR;
+      }
+    }
+    cache->initialized_row_bits |= row_bit;
   }
-  *out_refs = *refs;
-  return true;
+  *out_descriptors = &cache->descriptors[row_index];
+  return iree_ok_status();
 }
 
 typedef struct loom_amdgpu_fp8_scalef32_descriptor_ref_row_t {

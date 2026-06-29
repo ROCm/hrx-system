@@ -96,6 +96,22 @@ typedef struct loom_amdgpu_fp8_native_descriptor_refs_t {
   loom_amdgpu_descriptor_ref_t pair;
 } loom_amdgpu_fp8_native_descriptor_refs_t;
 
+typedef enum loom_amdgpu_fp8_native_descriptor_flag_bits_e {
+  LOOM_AMDGPU_FP8_NATIVE_DESCRIPTOR_FLAG_NONE = 0u,
+  LOOM_AMDGPU_FP8_NATIVE_DESCRIPTOR_FLAG_HAS_LANE = 1u << 0,
+  LOOM_AMDGPU_FP8_NATIVE_DESCRIPTOR_FLAG_HAS_PAIR = 1u << 1,
+} loom_amdgpu_fp8_native_descriptor_flag_bits_t;
+typedef uint32_t loom_amdgpu_fp8_native_descriptor_flags_t;
+
+typedef struct loom_amdgpu_fp8_native_descriptors_t {
+  // Native packet descriptors available in the active descriptor set.
+  loom_amdgpu_fp8_native_descriptor_flags_t flags;
+  // Scalar native conversion descriptor, when flags include HAS_LANE.
+  loom_low_lower_resolved_descriptor_t lane_descriptor;
+  // Packed pair native conversion descriptor, when flags include HAS_PAIR.
+  loom_low_lower_resolved_descriptor_t pair_descriptor;
+} loom_amdgpu_fp8_native_descriptors_t;
+
 typedef struct loom_amdgpu_fp8_decode_plan_t {
   // Available native packet helpers selected from the active descriptor set.
   loom_amdgpu_fp8_decode_plan_flags_t flags;
@@ -165,6 +181,14 @@ bool loom_amdgpu_fp8_native_descriptor_refs(
     loom_scalar_type_t source_element_type,
     loom_scalar_type_t result_element_type,
     loom_amdgpu_fp8_native_descriptor_refs_t* out_refs);
+
+// Returns native unscaled FP8/BF8 conversion descriptors for the source and
+// result element type pair. The descriptor pointer remains valid until the
+// current loom_low_lower_function call returns.
+iree_status_t loom_amdgpu_get_fp8_native_descriptors(
+    loom_low_lower_context_t* context, loom_scalar_type_t source_element_type,
+    loom_scalar_type_t result_element_type,
+    const loom_amdgpu_fp8_native_descriptors_t** out_descriptors);
 
 // Returns the native scaled FP8/BF8 conversion descriptor ref for the source
 // and result element type pair.
