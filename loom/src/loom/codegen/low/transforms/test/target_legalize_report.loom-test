@@ -17,6 +17,22 @@ COMPILE-REPORT: target_legalization[0] function=records_reduce_axes_reference_re
 
 test.target<low_core> @test_target
 
+func.def target(@test_target) @records_decode_reference_rewrite(%payload: vector<2xf8E4M3>, %scale: vector<1xf32>) -> (vector<2xf32>) {
+  %schema = encoding.define #matrix_operand<affine=scale_only, element_format=f8e4m3, payload_elements=2, payload_packing=dense_lanes, payload_registers=0, scale_format=f32, scale_group_elements=2, scale_operands=1, scale_topology=block_1d> : encoding<schema>
+  %decoded = vector.decode %payload using %schema {scale = %scale : vector<1xf32>} : vector<2xf8E4M3>, encoding<schema> -> vector<2xf32>
+  func.return %decoded : vector<2xf32>
+}
+
+// ----
+COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
+COMPILE-REPORT: target_legalization legal=0 rewritten=1 target_rewritten=0 reference_rewritten=1 deferred=0 invalid_ir=0 unsupported=0 unhandled=0 rows=1
+COMPILE-REPORT: target_legalization[0] function=records_decode_reference_rewrite source_op=vector.decode mode=eager policy=prefer-native action=rewritten outcome=reference-fallback contract=unhandled legalizer=vector strategy=reference bundle=test_target config=test_target binding=65535 case=65535 rule_set=65535 rule=65535 diagnostic=65535 descriptor=18446744073709551615 source_rejections=0x00000000 source_rejection_detail=0 target_rejections=0x00000000 missing_features=0x00000000 missing_facts=0x00000000 created_ops=9 erased_ops=1
+
+// ====
+// RUN: pass-report target-legalize
+
+test.target<low_core> @test_target
+
 func.def target(@test_target) @reports_vector_store_deferred_to_later_phase(%out_buffer: buffer, %value: vector<4xf32>) {
   %base = index.constant 0 : offset
   %origin = index.constant 0 : index
