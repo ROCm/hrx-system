@@ -262,6 +262,17 @@ check.case public @id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m32n32_qwen_s
   check.return
 }
 
+check.case public @id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m32n32_qwen_shape_1024_case {
+  %input = check.generate.fill value(1.0) : tensor<1024x4096xbf16>
+  %gate_weight = check.generate.fill value(0.0) : tensor<12288x4096xbf16>
+  %up_weight = check.generate.fill value(7.0) : tensor<12288x4096xbf16>
+  %output = check.generate.fill value(1.0) : tensor<1024x12288xbf16>
+  %expected = check.generate.fill value(0.0) : tensor<1024x12288xbf16>
+  func.call @id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m32n32(%input, %gate_weight, %up_weight, %output) : (tensor<1024x4096xbf16>, tensor<12288x4096xbf16>, tensor<12288x4096xbf16>, tensor<1024x12288xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<1024x12288xbf16>
+  check.return
+}
+
 check.case public @id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_short_prompt_shape_case {
   %input = check.generate.fill value(1.0) : tensor<32x4096xbf16>
   %gate_weight = check.generate.fill value(0.0) : tensor<12288x4096xbf16>
@@ -317,6 +328,8 @@ check.benchmark<@id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m32n32_zero_cas
 check.benchmark<@id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_qwen_shape_case> @id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_qwen_shape
 
 check.benchmark<@id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m32n32_qwen_shape_case> @id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m32n32_qwen_shape
+
+check.benchmark<@id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m32n32_qwen_shape_1024_case> @id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m32n32_qwen_shape_1024
 
 check.benchmark<@id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_short_prompt_shape_case> @id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_short_prompt_shape
 

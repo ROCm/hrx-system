@@ -665,6 +665,9 @@ typedef enum id4_qwen3_vl_kernel_kind_e {
   ID4_QWEN3_VL_KERNEL_LINEAR_RESIDUAL_BF16_BF16_WMMA_M64N64 = 34,
   // Fused head RMSNorm followed by rotary embedding.
   ID4_QWEN3_VL_KERNEL_RMSNORM_ROTARY = 35,
+  // Compact RHS fused MLP gate/up/SwiGLU WMMA kernel for 32-token tiles.
+  ID4_QWEN3_VL_KERNEL_MLP_GATE_UP_SILU_PRODUCT_BF16_WMMA_M32N32_COMPACT_RHS =
+      36,
 } id4_qwen3_vl_kernel_kind_t;
 
 typedef enum id4_qwen3_vl_config_key_e {
@@ -707,7 +710,9 @@ enum {
   ID4_QWEN3_VL_TENSOR_KIND_COUNT = ID4_QWEN3_VL_TENSOR_OUTPUT + 1,
   ID4_QWEN3_VL_OPERATION_KIND_COUNT = ID4_QWEN3_VL_OPERATION_TAP + 1,
   ID4_QWEN3_VL_OPERATION_SITE_COUNT = ID4_QWEN3_VL_OPERATION_SITE_OUTPUT + 1,
-  ID4_QWEN3_VL_KERNEL_KIND_COUNT = ID4_QWEN3_VL_KERNEL_RMSNORM_ROTARY + 1,
+  ID4_QWEN3_VL_KERNEL_KIND_COUNT =
+      ID4_QWEN3_VL_KERNEL_MLP_GATE_UP_SILU_PRODUCT_BF16_WMMA_M32N32_COMPACT_RHS +
+      1,
   ID4_QWEN3_VL_CONFIG_KEY_COUNT =
       ID4_QWEN3_VL_CONFIG_DISPATCH_ELEMENT_COUNT + 1,
 };
@@ -774,8 +779,12 @@ typedef struct id4_qwen3_vl_program_linear_wmma_tile_t {
 typedef struct id4_qwen3_vl_program_mlp_gate_up_silu_product_wmma_tile_t {
   // Number of token rows covered by one WMMA dispatch tile.
   uint32_t token_block;
-  // Kernel kind implementing this fused MLP tile shape.
-  id4_qwen3_vl_kernel_kind_t kernel_kind;
+  // Kernel consuming direct row-major gate and up weights.
+  id4_qwen3_vl_kernel_kind_t direct_kernel_kind;
+  // Kernel consuming compact RHS gate and up weight tiles.
+  id4_qwen3_vl_kernel_kind_t compact_rhs_kernel_kind;
+  // Minimum token capacity required before compact RHS is selected.
+  uint32_t compact_rhs_min_token_count;
 } id4_qwen3_vl_program_mlp_gate_up_silu_product_wmma_tile_t;
 
 typedef struct id4_qwen3_vl_program_linear_kernel_selection_t {
@@ -889,18 +898,28 @@ static const id4_qwen3_vl_program_mlp_gate_up_silu_product_wmma_tile_t
     id4_qwen3_vl_program_mlp_gate_up_silu_product_wmma_m32n32_tile = {
         // Number of token rows covered by one WMMA dispatch tile.
         .token_block = ID4_QWEN3_VL_LINEAR_WMMA_TOKEN_BLOCK_M32,
-        // Kernel kind implementing this fused MLP tile shape.
-        .kernel_kind =
+        // Kernel consuming direct row-major gate and up weights.
+        .direct_kernel_kind =
             ID4_QWEN3_VL_KERNEL_MLP_GATE_UP_SILU_PRODUCT_BF16_WMMA_M32N32,
+        // Kernel consuming compact RHS gate and up weight tiles.
+        .compact_rhs_kernel_kind =
+            ID4_QWEN3_VL_KERNEL_MLP_GATE_UP_SILU_PRODUCT_BF16_WMMA_M32N32_COMPACT_RHS,
+        // Minimum token capacity required before compact RHS is selected.
+        .compact_rhs_min_token_count = 1024,
 };
 
 static const id4_qwen3_vl_program_mlp_gate_up_silu_product_wmma_tile_t
     id4_qwen3_vl_program_mlp_gate_up_silu_product_wmma_m16n32_tile = {
         // Number of token rows covered by one WMMA dispatch tile.
         .token_block = ID4_QWEN3_VL_LINEAR_WMMA_TOKEN_BLOCK_M16,
-        // Kernel kind implementing this fused MLP tile shape.
-        .kernel_kind =
+        // Kernel consuming direct row-major gate and up weights.
+        .direct_kernel_kind =
             ID4_QWEN3_VL_KERNEL_MLP_GATE_UP_SILU_PRODUCT_BF16_WMMA_M16N32,
+        // No compact RHS consumer is selected for this tile shape.
+        .compact_rhs_kernel_kind =
+            (id4_qwen3_vl_kernel_kind_t)ID4_QWEN3_VL_KERNEL_KIND_COUNT,
+        // Minimum token capacity required before compact RHS is selected.
+        .compact_rhs_min_token_count = UINT32_MAX,
 };
 
 static const id4_qwen3_vl_program_linear_wmma_tile_t
@@ -1363,6 +1382,11 @@ static const id4_pipeline_kernel_ref_t
             {IREE_SVL("qwen3_vl/mlp_gate_up_silu_product_bf16_wmma"),
              IREE_SVL(
                  "id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_m32n32")},
+        [ID4_QWEN3_VL_KERNEL_MLP_GATE_UP_SILU_PRODUCT_BF16_WMMA_M32N32_COMPACT_RHS] =
+            {IREE_SVL(
+                 "qwen3_vl/mlp_gate_up_silu_product_bf16_wmma_compact_rhs"),
+             IREE_SVL("id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_"
+                      "m32n32_compact_rhs")},
         [ID4_QWEN3_VL_KERNEL_ZERO_TAIL_BF16] =
             {IREE_SVL("qwen3_vl/zero_tail"),
              IREE_SVL("id4_qwen3_vl_zero_tail_bf16")},
@@ -1681,6 +1705,18 @@ static const iree_string_view_t id4_qwen3_vl_program_config_keys
                              "intermediate_size"),
             },
         [ID4_QWEN3_VL_KERNEL_MLP_GATE_UP_SILU_PRODUCT_BF16_WMMA_M32N32] =
+            {
+                [ID4_QWEN3_VL_CONFIG_DISPATCH_TOKEN_COUNT] =
+                    IREE_SVL("id4.qwen3_vl.mlp_gate_up_silu_product_wmma."
+                             "dispatch_token_count"),
+                [ID4_QWEN3_VL_CONFIG_INPUT_SIZE] =
+                    IREE_SVL("id4.qwen3_vl.mlp_gate_up_silu_product_wmma."
+                             "input_size"),
+                [ID4_QWEN3_VL_CONFIG_INTERMEDIATE_SIZE] =
+                    IREE_SVL("id4.qwen3_vl.mlp_gate_up_silu_product_wmma."
+                             "intermediate_size"),
+            },
+        [ID4_QWEN3_VL_KERNEL_MLP_GATE_UP_SILU_PRODUCT_BF16_WMMA_M32N32_COMPACT_RHS] =
             {
                 [ID4_QWEN3_VL_CONFIG_DISPATCH_TOKEN_COUNT] =
                     IREE_SVL("id4.qwen3_vl.mlp_gate_up_silu_product_wmma."
@@ -3156,23 +3192,30 @@ static iree_status_t id4_qwen3_vl_program_author_mlp_gate_up_silu_product(
                             " must be a multiple of tile size %" PRIu32,
                             token_capacity, wmma_tile->token_block);
   }
+  const bool uses_compact_rhs =
+      wmma_tile->compact_rhs_kernel_kind !=
+          (id4_qwen3_vl_kernel_kind_t)ID4_QWEN3_VL_KERNEL_KIND_COUNT &&
+      token_capacity >= wmma_tile->compact_rhs_min_token_count;
+  const id4_qwen3_vl_kernel_kind_t kernel_kind =
+      uses_compact_rhs ? wmma_tile->compact_rhs_kernel_kind
+                       : wmma_tile->direct_kernel_kind;
+  const id4_pipeline_program_parameter_encoding_t weight_encoding =
+      uses_compact_rhs
+          ? ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_BF16_LINEAR_RHS_TILE
+          : ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_DIRECT;
 
   id4_pipeline_program_tensor_t gate_weight =
       id4_pipeline_program_tensor_invalid();
-  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_parameter(
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_parameter_bf16_linear_weight(
       builder, options->parameter_scope,
-      ID4_QWEN3_VL_PARAMETER_LAYER_GATE_PROJECTION, layer_ordinal,
-      ID4_PIPELINE_PROGRAM_DTYPE_BF16,
-      id4_pipeline_program_make_shape_rank2(intermediate_size, hidden_size),
-      &gate_weight));
+      ID4_QWEN3_VL_PARAMETER_LAYER_GATE_PROJECTION, layer_ordinal, hidden_size,
+      intermediate_size, weight_encoding, &gate_weight));
   id4_pipeline_program_tensor_t up_weight =
       id4_pipeline_program_tensor_invalid();
-  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_parameter(
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_parameter_bf16_linear_weight(
       builder, options->parameter_scope,
-      ID4_QWEN3_VL_PARAMETER_LAYER_UP_PROJECTION, layer_ordinal,
-      ID4_PIPELINE_PROGRAM_DTYPE_BF16,
-      id4_pipeline_program_make_shape_rank2(intermediate_size, hidden_size),
-      &up_weight));
+      ID4_QWEN3_VL_PARAMETER_LAYER_UP_PROJECTION, layer_ordinal, hidden_size,
+      intermediate_size, weight_encoding, &up_weight));
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_acquire_tensor(
       builder, ID4_QWEN3_VL_TENSOR_LAYER_MLP_ACTIVATION, layer_ordinal,
       ID4_PIPELINE_PROGRAM_DTYPE_BF16,
@@ -3189,8 +3232,8 @@ static iree_status_t id4_qwen3_vl_program_author_mlp_gate_up_silu_product(
   id4_pipeline_kernel_config_binding_t
       config_bindings[ID4_QWEN3_VL_MAX_KERNEL_CONFIG_BINDING_COUNT];
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_make_config_bindings(
-      wmma_tile->kernel_kind, IREE_ARRAYSIZE(config_values), config_values,
-      value_buffers, config_bindings));
+      kernel_kind, IREE_ARRAYSIZE(config_values), config_values, value_buffers,
+      config_bindings));
   id4_pipeline_program_dispatch_binding_t bindings[] = {
       id4_pipeline_program_read(input),
       id4_pipeline_program_read(gate_weight),
@@ -3199,7 +3242,7 @@ static iree_status_t id4_qwen3_vl_program_author_mlp_gate_up_silu_product(
   };
   return id4_qwen3_vl_program_dispatch(
       builder, ID4_QWEN3_VL_OPERATION_SILU_GATE, layer_ordinal,
-      ID4_QWEN3_VL_OPERATION_SITE_MLP, wmma_tile->kernel_kind,
+      ID4_QWEN3_VL_OPERATION_SITE_MLP, kernel_kind,
       IREE_ARRAYSIZE(config_values), config_bindings, IREE_ARRAYSIZE(bindings),
       bindings);
 }
