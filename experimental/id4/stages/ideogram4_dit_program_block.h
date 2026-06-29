@@ -172,6 +172,13 @@ iree_status_t id4_ideogram4_dit_program_dense_bf16(
     const id4_ideogram4_dit_program_dense_options_t* options,
     id4_pipeline_program_tensor_t* out_output);
 
+// Authors a dense vector projection that preserves BF16 output rounding while
+// storing the rounded value in an F32 tensor for an immediate F32 consumer.
+iree_status_t id4_ideogram4_dit_program_dense_bf16_rounded_f32(
+    id4_pipeline_program_builder_t* builder,
+    const id4_ideogram4_dit_program_dense_options_t* options,
+    id4_pipeline_program_tensor_t* out_output);
+
 iree_status_t id4_ideogram4_dit_program_dispatch_adaln_split(
     id4_pipeline_program_builder_t* builder, iree_string_view_t name,
     uint32_t hidden_size, id4_pipeline_program_tensor_t raw_modulation,

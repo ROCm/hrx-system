@@ -866,6 +866,39 @@ _KERNEL_CASES = [
         "target_name": "ideogram4_dense_bias_bf16_bf16_adaln_shape",
     },
     {
+        "actual_case": "@id4_ideogram4_dense_bias_bf16_bf16_rounded_f32_identity_case",
+        "benchmark": "@id4_ideogram4_dense_bias_bf16_bf16_rounded_f32_identity",
+        "configs": [
+            "--config=id4.ideogram4.dense_bias_bf16.input_size=4",
+            "--config=id4.ideogram4.dense_bias_bf16.output_size=2",
+            "--config=id4.ideogram4.dense_bias_bf16.activation_kind=0",
+        ],
+        "source": "ideogram4/dense_bias_bf16_bf16.loom",
+        "target_name": "ideogram4_dense_bias_bf16_bf16_rounded_f32_identity",
+    },
+    {
+        "actual_case": "@id4_ideogram4_dense_bias_bf16_bf16_rounded_f32_silu_case",
+        "benchmark": "@id4_ideogram4_dense_bias_bf16_bf16_rounded_f32_silu",
+        "configs": [
+            "--config=id4.ideogram4.dense_bias_bf16.input_size=4",
+            "--config=id4.ideogram4.dense_bias_bf16.output_size=2",
+            "--config=id4.ideogram4.dense_bias_bf16.activation_kind=1",
+        ],
+        "source": "ideogram4/dense_bias_bf16_bf16.loom",
+        "target_name": "ideogram4_dense_bias_bf16_bf16_rounded_f32_silu",
+    },
+    {
+        "actual_case": "@id4_ideogram4_dense_bias_bf16_bf16_rounded_f32_adaln_modulation_shape_case",
+        "benchmark": "@id4_ideogram4_dense_bias_bf16_bf16_rounded_f32_adaln_modulation_shape",
+        "configs": [
+            "--config=id4.ideogram4.dense_bias_bf16.input_size=512",
+            "--config=id4.ideogram4.dense_bias_bf16.output_size=18432",
+            "--config=id4.ideogram4.dense_bias_bf16.activation_kind=0",
+        ],
+        "source": "ideogram4/dense_bias_bf16_bf16.loom",
+        "target_name": "ideogram4_dense_bias_bf16_bf16_rounded_f32_adaln_modulation_shape",
+    },
+    {
         "actual_case": "@id4_ideogram4_dense_bias_bf16_f32_identity_case",
         "benchmark": "@id4_ideogram4_dense_bias_bf16_f32_identity",
         "configs": [

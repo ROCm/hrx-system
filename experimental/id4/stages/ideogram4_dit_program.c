@@ -4111,6 +4111,94 @@ iree_status_t id4_ideogram4_dit_program_dense_bf16(
   }
 }
 
+iree_status_t id4_ideogram4_dit_program_dense_bf16_rounded_f32(
+    id4_pipeline_program_builder_t* builder,
+    const id4_ideogram4_dit_program_dense_options_t* options,
+    id4_pipeline_program_tensor_t* out_output) {
+  if ((options->input_size % 4) != 0) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "Ideogram4 DiT rounded-F32 dense input size must be a multiple of 4");
+  }
+  if (options->output_size == 0) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "Ideogram4 DiT rounded-F32 dense output size must be nonzero");
+  }
+  if (options->activation_kind != ID4_IDEOGRAM4_DIT_ACTIVATION_IDENTITY &&
+      options->activation_kind != ID4_IDEOGRAM4_DIT_ACTIVATION_SILU) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "Ideogram4 DiT rounded-F32 dense activation kind %" PRIu32
+        " is invalid",
+        options->activation_kind);
+  }
+
+  char weight_key_buffer[ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
+  char bias_key_buffer[ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
+  iree_string_view_t weight_key = iree_string_view_empty();
+  iree_string_view_t bias_key = iree_string_view_empty();
+  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_format(
+      weight_key_buffer, IREE_ARRAYSIZE(weight_key_buffer), &weight_key,
+      "%.*s.weight", (int)options->parameter_prefix.size,
+      options->parameter_prefix.data));
+  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_format(
+      bias_key_buffer, IREE_ARRAYSIZE(bias_key_buffer), &bias_key, "%.*s.bias",
+      (int)options->parameter_prefix.size, options->parameter_prefix.data));
+
+  id4_ideogram4_dit_program_linear_parameter_t weight = {
+      .storage = ID4_IDEOGRAM4_DIT_PARAMETER_STORAGE_INVALID,
+      .weight = id4_pipeline_program_tensor_invalid(),
+      .scale = id4_pipeline_program_tensor_invalid(),
+  };
+  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_linear_parameter(
+      builder, options->parameter_sources, weight_key, options->input_size,
+      options->output_size, options->weight_execution_format, &weight));
+  if (weight.storage != ID4_IDEOGRAM4_DIT_PARAMETER_STORAGE_BF16) {
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "Ideogram4 DiT rounded-F32 dense parameter `%.*s` storage %" PRIu32
+        " is not supported",
+        (int)weight_key.size, weight_key.data, (uint32_t)weight.storage);
+  }
+
+  id4_pipeline_program_tensor_t bias = id4_pipeline_program_tensor_invalid();
+  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_parameter_bf16(
+      builder, options->parameter_sources, bias_key,
+      id4_pipeline_program_make_shape_rank1(options->output_size), &bias));
+  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_acquire_tensor(
+      builder, options->output_name, ID4_PIPELINE_PROGRAM_DTYPE_F32,
+      id4_pipeline_program_make_shape_rank1(options->output_size), out_output));
+
+  const id4_ideogram4_dit_program_config_value_t config_values[] = {
+      {IREE_SV("id4.ideogram4.dense_bias_bf16.input_size"),
+       options->input_size},
+      {IREE_SV("id4.ideogram4.dense_bias_bf16.output_size"),
+       options->output_size},
+      {IREE_SV("id4.ideogram4.dense_bias_bf16.activation_kind"),
+       options->activation_kind},
+  };
+  char value_buffers[ID4_IDEOGRAM4_DIT_MAX_KERNEL_CONFIG_BINDING_COUNT]
+                    [ID4_IDEOGRAM4_DIT_CONFIG_VALUE_BUFFER_CAPACITY];
+  id4_pipeline_kernel_config_binding_t
+      config_bindings[ID4_IDEOGRAM4_DIT_MAX_KERNEL_CONFIG_BINDING_COUNT];
+  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_make_config_bindings(
+      IREE_ARRAYSIZE(config_values), config_values, value_buffers,
+      config_bindings));
+  id4_pipeline_program_dispatch_binding_t bindings[] = {
+      id4_pipeline_program_read(options->input),
+      id4_pipeline_program_read(weight.weight),
+      id4_pipeline_program_read(bias),
+      id4_pipeline_program_write(*out_output),
+  };
+  return id4_ideogram4_dit_program_dispatch_loom(
+      builder, options->operation_name,
+      IREE_SV("ideogram4/dense_bias_bf16_bf16"),
+      IREE_SV("id4_ideogram4_dense_bias_bf16_bf16_rounded_f32"),
+      IREE_ARRAYSIZE(config_values), config_bindings, IREE_ARRAYSIZE(bindings),
+      bindings);
+}
+
 static iree_status_t id4_ideogram4_dit_program_author_final_output(
     const id4_ideogram4_dit_program_options_t* options,
     id4_pipeline_program_builder_t* builder, iree_string_view_t branch_name,
