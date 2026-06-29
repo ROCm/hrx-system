@@ -2810,6 +2810,9 @@ iree_status_t id4_ideogram4_session_prepare_generation(
             id4_ideogram4_generation_bundle_signal_prepared(bundle, options);
         break;
       case ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_SELECTED_PHASES:
+        status =
+            id4_ideogram4_generation_bundle_signal_prepared(bundle, options);
+        break;
       case ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_ALL_STAGE_BUNDLES:
         status = id4_ideogram4_generation_bundle_prepare_resident_phases(
             bundle, options);
@@ -2841,17 +2844,13 @@ static iree_status_t id4_ideogram4_generation_acquire_stage_bundle_ref(
   memset(out_stage_bundle_ref, 0, sizeof(*out_stage_bundle_ref));
   if (id4_ideogram4_generation_bundle_stage_is_resident(bundle,
                                                         stage_ordinal)) {
-    id4_pipeline_bundle_t* stage_bundle =
-        bundle->resident_stage_bundles[stage_ordinal];
-    if (!stage_bundle) {
-      const id4_ideogram4_generation_stage_descriptor_t* descriptor =
-          id4_ideogram4_generation_stage_descriptor(stage_ordinal);
-      return iree_make_status(
-          IREE_STATUS_FAILED_PRECONDITION,
-          "Ideogram 4 generation resident stage bundle %s is missing",
-          descriptor->key);
+    if (!bundle->resident_stage_bundles[stage_ordinal]) {
+      IREE_RETURN_IF_ERROR(id4_ideogram4_generation_prepare_stage_bundle(
+          bundle, stage_ordinal, wait_semaphore_list, diagnostics_sink,
+          &bundle->resident_stage_bundles[stage_ordinal]));
     }
-    out_stage_bundle_ref->bundle = stage_bundle;
+    out_stage_bundle_ref->bundle =
+        bundle->resident_stage_bundles[stage_ordinal];
     out_stage_bundle_ref->owns_bundle = false;
     return iree_ok_status();
   }

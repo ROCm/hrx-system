@@ -187,7 +187,7 @@ typedef enum id4_ideogram4_generation_residency_mode_e {
   ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_INVALID = 0,
   // Prepare heavy stage bundles at issue-time phase boundaries.
   ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_ISSUE_PHASES = 1,
-  // Prepare and retain selected residency phases during generation preparation.
+  // Retain selected residency phases after their first phase preparation.
   ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_SELECTED_PHASES = 2,
   // Prepare and retain every coarse stage bundle in the generation bundle.
   ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_ALL_STAGE_BUNDLES = 3,
@@ -404,10 +404,10 @@ iree_status_t id4_ideogram4_generation_plan_format_json(
 // Prepares reusable generation state for |plan|.
 //
 // |options->residency_mode| selects whether heavy stage bundles are prepared at
-// issue-time phase boundaries, retained by selected high-level generation
-// phases, or all retained by the prepared generation bundle. Resident phases
-// remove issue-time parameter loading for their coarse stage bundles but
-// require enough device memory for the selected phase bundles to stay resident.
+// issue-time phase boundaries, lazily retained by selected high-level
+// generation phases, or all retained by the prepared generation bundle.
+// Selected resident phases remove repeated parameter loading after their first
+// phase preparation while allowing earlier phases to release memory first.
 iree_status_t id4_ideogram4_session_prepare_generation(
     id4_ideogram4_session_t* session,
     const id4_ideogram4_generation_plan_t* plan,
