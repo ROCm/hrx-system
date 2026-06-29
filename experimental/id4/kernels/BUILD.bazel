@@ -3652,6 +3652,58 @@ _KERNEL_CASES = [
         "target_name": "ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_small",
     },
     {
+        "actual_case": "@id4_ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_short_qkv_128_shape_case",
+        "benchmark": "@id4_ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_short_qkv_128_shape",
+        "configs": [
+            "--config=id4.ideogram4.linear_fp8_wmma.token_count=128",
+            "--config=id4.ideogram4.linear_fp8_wmma.token_offset=0",
+            "--config=id4.ideogram4.linear_fp8_wmma.dispatch_token_count=128",
+            "--config=id4.ideogram4.linear_fp8_wmma.input_size=4608",
+            "--config=id4.ideogram4.linear_fp8_wmma.output_size=13824",
+        ],
+        "source": "ideogram4/linear_fp8_bf16_wmma_m128n64_2wave.loom",
+        "target_name": "ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_short_qkv_128_shape",
+    },
+    {
+        "actual_case": "@id4_ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_short_hidden_128_shape_case",
+        "benchmark": "@id4_ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_short_hidden_128_shape",
+        "configs": [
+            "--config=id4.ideogram4.linear_fp8_wmma.token_count=128",
+            "--config=id4.ideogram4.linear_fp8_wmma.token_offset=0",
+            "--config=id4.ideogram4.linear_fp8_wmma.dispatch_token_count=128",
+            "--config=id4.ideogram4.linear_fp8_wmma.input_size=4608",
+            "--config=id4.ideogram4.linear_fp8_wmma.output_size=4608",
+        ],
+        "source": "ideogram4/linear_fp8_bf16_wmma_m128n64_2wave.loom",
+        "target_name": "ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_short_hidden_128_shape",
+    },
+    {
+        "actual_case": "@id4_ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_short_mlp_up_128_shape_case",
+        "benchmark": "@id4_ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_short_mlp_up_128_shape",
+        "configs": [
+            "--config=id4.ideogram4.linear_fp8_wmma.token_count=128",
+            "--config=id4.ideogram4.linear_fp8_wmma.token_offset=0",
+            "--config=id4.ideogram4.linear_fp8_wmma.dispatch_token_count=128",
+            "--config=id4.ideogram4.linear_fp8_wmma.input_size=4608",
+            "--config=id4.ideogram4.linear_fp8_wmma.output_size=12288",
+        ],
+        "source": "ideogram4/linear_fp8_bf16_wmma_m128n64_2wave.loom",
+        "target_name": "ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_short_mlp_up_128_shape",
+    },
+    {
+        "actual_case": "@id4_ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_short_mlp_down_128_shape_case",
+        "benchmark": "@id4_ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_short_mlp_down_128_shape",
+        "configs": [
+            "--config=id4.ideogram4.linear_fp8_wmma.token_count=128",
+            "--config=id4.ideogram4.linear_fp8_wmma.token_offset=0",
+            "--config=id4.ideogram4.linear_fp8_wmma.dispatch_token_count=128",
+            "--config=id4.ideogram4.linear_fp8_wmma.input_size=12288",
+            "--config=id4.ideogram4.linear_fp8_wmma.output_size=4608",
+        ],
+        "source": "ideogram4/linear_fp8_bf16_wmma_m128n64_2wave.loom",
+        "target_name": "ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_short_mlp_down_128_shape",
+    },
+    {
         "actual_case": "@id4_ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_uncond_qkv_1024_shape_case",
         "benchmark": "@id4_ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_uncond_qkv_1024_shape",
         "configs": [
