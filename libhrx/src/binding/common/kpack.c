@@ -737,6 +737,11 @@ iree_status_t iree_hal_streaming_kpack_archive_get_kernel(
     return kpack_decompress_none(archive, ordinal, host_allocator, out_kernel,
                                  out_kernel_size);
   }
+  if (archive->compression !=
+      IREE_HAL_STREAMING_KPACK_COMPRESSION_ZSTD_PER_KERNEL) {
+    return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                            "kpack unsupported compression scheme");
+  }
   if (original_size == 0) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
