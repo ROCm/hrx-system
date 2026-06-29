@@ -1155,22 +1155,22 @@ static const id4_pipeline_kernel_ref_t
             {IREE_SVL("qwen3_vl/condition"),
              IREE_SVL("id4_qwen3_vl_condition_normalize_token_weights_f32")},
         [ID4_QWEN3_VL_KERNEL_LINEAR_BF16_BF16_WMMA_M16N64] =
-            {IREE_SVL("qwen3_vl/linear_bf16_f32_wmma"),
+            {IREE_SVL("qwen3_vl/linear_bf16_bf16_wmma_m16n64"),
              IREE_SVL("id4_qwen3_vl_linear_bf16_bf16_wmma_m16n64")},
         [ID4_QWEN3_VL_KERNEL_LINEAR_BF16_BF16_WMMA_M32N32] =
-            {IREE_SVL("qwen3_vl/linear_bf16_f32_wmma"),
+            {IREE_SVL("qwen3_vl/linear_bf16_bf16_wmma_m32n32"),
              IREE_SVL("id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32")},
         [ID4_QWEN3_VL_KERNEL_LINEAR_BF16_BF16_WMMA_M32N64] =
-            {IREE_SVL("qwen3_vl/linear_bf16_f32_wmma"),
+            {IREE_SVL("qwen3_vl/linear_bf16_bf16_wmma_m32n64"),
              IREE_SVL("id4_qwen3_vl_linear_bf16_bf16_wmma_m32n64")},
         [ID4_QWEN3_VL_KERNEL_LINEAR_BF16_BF16_WMMA_M64N64] =
-            {IREE_SVL("qwen3_vl/linear_bf16_f32_wmma"),
+            {IREE_SVL("qwen3_vl/linear_bf16_bf16_wmma_m64n64"),
              IREE_SVL("id4_qwen3_vl_linear_bf16_bf16_wmma_m64n64")},
         [ID4_QWEN3_VL_KERNEL_LINEAR_BF16_BF16_WMMA_M48N32] =
-            {IREE_SVL("qwen3_vl/linear_bf16_f32_wmma"),
+            {IREE_SVL("qwen3_vl/linear_bf16_bf16_wmma_m48n32"),
              IREE_SVL("id4_qwen3_vl_linear_bf16_bf16_wmma_m48n32")},
         [ID4_QWEN3_VL_KERNEL_LINEAR_BF16_BF16_WMMA_M32N64_TRANSPOSE_OUTPUT] =
-            {IREE_SVL("qwen3_vl/linear_bf16_f32_wmma"),
+            {IREE_SVL("qwen3_vl/linear_bf16_bf16_wmma_m32n64"),
              IREE_SVL("id4_qwen3_vl_linear_bf16_bf16_wmma_m32n64_"
                       "transpose_output")},
         [ID4_QWEN3_VL_KERNEL_LINEAR_BF16_BF16_TAIL] =

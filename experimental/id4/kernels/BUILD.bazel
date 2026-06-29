@@ -5836,7 +5836,7 @@ _KERNEL_CASES = [
             "--config=id4.qwen3_vl.linear_wmma.input_size=16",
             "--config=id4.qwen3_vl.linear_wmma.output_size=32",
         ],
-        "source": "qwen3_vl/linear_bf16_f32_wmma.loom",
+        "source": "qwen3_vl/linear_bf16_f32_wmma_m32n32.loom",
         "target_name": "qwen3_vl_linear_bf16_f32_wmma_m32n32_small",
     },
     {
@@ -5847,7 +5847,7 @@ _KERNEL_CASES = [
             "--config=id4.qwen3_vl.linear_wmma.input_size=16",
             "--config=id4.qwen3_vl.linear_wmma.output_size=32",
         ],
-        "source": "qwen3_vl/linear_bf16_f32_wmma.loom",
+        "source": "qwen3_vl/linear_bf16_bf16_wmma_m32n32.loom",
         "target_name": "qwen3_vl_linear_bf16_bf16_wmma_m32n32_small",
     },
     {
@@ -5870,7 +5870,7 @@ _KERNEL_CASES = [
             "--config=id4.qwen3_vl.linear_wmma.input_size=16",
             "--config=id4.qwen3_vl.linear_wmma.output_size=64",
         ],
-        "source": "qwen3_vl/linear_bf16_f32_wmma.loom",
+        "source": "qwen3_vl/linear_bf16_f32_wmma_m32n64.loom",
         "target_name": "qwen3_vl_linear_bf16_f32_wmma_m32n64_small",
     },
     {
@@ -5881,7 +5881,7 @@ _KERNEL_CASES = [
             "--config=id4.qwen3_vl.linear_wmma.input_size=16",
             "--config=id4.qwen3_vl.linear_wmma.output_size=64",
         ],
-        "source": "qwen3_vl/linear_bf16_f32_wmma.loom",
+        "source": "qwen3_vl/linear_bf16_bf16_wmma_m32n64.loom",
         "target_name": "qwen3_vl_linear_bf16_bf16_wmma_m32n64_small",
     },
     {
@@ -5892,7 +5892,7 @@ _KERNEL_CASES = [
             "--config=id4.qwen3_vl.linear_wmma.input_size=16",
             "--config=id4.qwen3_vl.linear_wmma.output_size=64",
         ],
-        "source": "qwen3_vl/linear_bf16_f32_wmma.loom",
+        "source": "qwen3_vl/linear_bf16_bf16_wmma_m32n64.loom",
         "target_name": "qwen3_vl_linear_bf16_bf16_wmma_m32n64_transpose_output_small",
     },
     {
@@ -5903,7 +5903,7 @@ _KERNEL_CASES = [
             "--config=id4.qwen3_vl.linear_wmma.input_size=16",
             "--config=id4.qwen3_vl.linear_wmma.output_size=64",
         ],
-        "source": "qwen3_vl/linear_bf16_f32_wmma.loom",
+        "source": "qwen3_vl/linear_bf16_bf16_wmma_m16n64.loom",
         "target_name": "qwen3_vl_linear_bf16_bf16_wmma_m16n64_small",
     },
     {
@@ -5914,8 +5914,52 @@ _KERNEL_CASES = [
             "--config=id4.qwen3_vl.linear_wmma.input_size=4096",
             "--config=id4.qwen3_vl.linear_wmma.output_size=4096",
         ],
-        "source": "qwen3_vl/linear_bf16_f32_wmma.loom",
+        "source": "qwen3_vl/linear_bf16_bf16_wmma_m16n64.loom",
         "target_name": "qwen3_vl_linear_bf16_bf16_wmma_m16n64_short_prompt_shape",
+    },
+    {
+        "actual_case": "@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32_qwen_projection_shape_32_case",
+        "benchmark": "@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32_qwen_projection_shape_32",
+        "configs": [
+            "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=32",
+            "--config=id4.qwen3_vl.linear_wmma.input_size=4096",
+            "--config=id4.qwen3_vl.linear_wmma.output_size=4096",
+        ],
+        "source": "qwen3_vl/linear_bf16_bf16_wmma_m32n32.loom",
+        "target_name": "qwen3_vl_linear_bf16_bf16_wmma_m32n32_qwen_projection_shape_32",
+    },
+    {
+        "actual_case": "@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32_qwen_kv_shape_32_case",
+        "benchmark": "@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32_qwen_kv_shape_32",
+        "configs": [
+            "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=32",
+            "--config=id4.qwen3_vl.linear_wmma.input_size=4096",
+            "--config=id4.qwen3_vl.linear_wmma.output_size=1024",
+        ],
+        "source": "qwen3_vl/linear_bf16_bf16_wmma_m32n32.loom",
+        "target_name": "qwen3_vl_linear_bf16_bf16_wmma_m32n32_qwen_kv_shape_32",
+    },
+    {
+        "actual_case": "@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32_qwen_mlp_up_shape_32_case",
+        "benchmark": "@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32_qwen_mlp_up_shape_32",
+        "configs": [
+            "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=32",
+            "--config=id4.qwen3_vl.linear_wmma.input_size=4096",
+            "--config=id4.qwen3_vl.linear_wmma.output_size=12288",
+        ],
+        "source": "qwen3_vl/linear_bf16_bf16_wmma_m32n32.loom",
+        "target_name": "qwen3_vl_linear_bf16_bf16_wmma_m32n32_qwen_mlp_up_shape_32",
+    },
+    {
+        "actual_case": "@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32_qwen_mlp_down_shape_32_case",
+        "benchmark": "@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n32_qwen_mlp_down_shape_32",
+        "configs": [
+            "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=32",
+            "--config=id4.qwen3_vl.linear_wmma.input_size=12288",
+            "--config=id4.qwen3_vl.linear_wmma.output_size=4096",
+        ],
+        "source": "qwen3_vl/linear_bf16_bf16_wmma_m32n32.loom",
+        "target_name": "qwen3_vl_linear_bf16_bf16_wmma_m32n32_qwen_mlp_down_shape_32",
     },
     {
         "actual_case": "@id4_qwen3_vl_linear_bf16_bf16_wmma_m64n64_small_case",
@@ -5925,7 +5969,7 @@ _KERNEL_CASES = [
             "--config=id4.qwen3_vl.linear_wmma.input_size=16",
             "--config=id4.qwen3_vl.linear_wmma.output_size=64",
         ],
-        "source": "qwen3_vl/linear_bf16_f32_wmma.loom",
+        "source": "qwen3_vl/linear_bf16_bf16_wmma_m64n64.loom",
         "target_name": "qwen3_vl_linear_bf16_bf16_wmma_m64n64_small",
     },
     {
@@ -5936,7 +5980,7 @@ _KERNEL_CASES = [
             "--config=id4.qwen3_vl.linear_wmma.input_size=4096",
             "--config=id4.qwen3_vl.linear_wmma.output_size=4096",
         ],
-        "source": "qwen3_vl/linear_bf16_f32_wmma.loom",
+        "source": "qwen3_vl/linear_bf16_bf16_wmma_m64n64.loom",
         "target_name": "qwen3_vl_linear_bf16_bf16_wmma_m64n64_qwen_projection_shape",
     },
     {
@@ -5947,7 +5991,7 @@ _KERNEL_CASES = [
             "--config=id4.qwen3_vl.linear_wmma.input_size=4096",
             "--config=id4.qwen3_vl.linear_wmma.output_size=1024",
         ],
-        "source": "qwen3_vl/linear_bf16_f32_wmma.loom",
+        "source": "qwen3_vl/linear_bf16_bf16_wmma_m64n64.loom",
         "target_name": "qwen3_vl_linear_bf16_bf16_wmma_m64n64_qwen_kv_shape",
     },
     {
@@ -5958,7 +6002,7 @@ _KERNEL_CASES = [
             "--config=id4.qwen3_vl.linear_wmma.input_size=4096",
             "--config=id4.qwen3_vl.linear_wmma.output_size=12288",
         ],
-        "source": "qwen3_vl/linear_bf16_f32_wmma.loom",
+        "source": "qwen3_vl/linear_bf16_bf16_wmma_m64n64.loom",
         "target_name": "qwen3_vl_linear_bf16_bf16_wmma_m64n64_qwen_mlp_up_shape",
     },
     {
@@ -5969,7 +6013,7 @@ _KERNEL_CASES = [
             "--config=id4.qwen3_vl.linear_wmma.input_size=12288",
             "--config=id4.qwen3_vl.linear_wmma.output_size=4096",
         ],
-        "source": "qwen3_vl/linear_bf16_f32_wmma.loom",
+        "source": "qwen3_vl/linear_bf16_bf16_wmma_m64n64.loom",
         "target_name": "qwen3_vl_linear_bf16_bf16_wmma_m64n64_qwen_mlp_down_shape",
     },
     {
@@ -5980,7 +6024,7 @@ _KERNEL_CASES = [
             "--config=id4.qwen3_vl.linear_wmma.input_size=4096",
             "--config=id4.qwen3_vl.linear_wmma.output_size=4096",
         ],
-        "source": "qwen3_vl/linear_bf16_f32_wmma.loom",
+        "source": "qwen3_vl/linear_bf16_bf16_wmma_m64n64.loom",
         "target_name": "qwen3_vl_linear_bf16_bf16_wmma_m64n64_qwen_projection_shape_1024",
     },
     {
@@ -5991,7 +6035,7 @@ _KERNEL_CASES = [
             "--config=id4.qwen3_vl.linear_wmma.input_size=4096",
             "--config=id4.qwen3_vl.linear_wmma.output_size=12288",
         ],
-        "source": "qwen3_vl/linear_bf16_f32_wmma.loom",
+        "source": "qwen3_vl/linear_bf16_bf16_wmma_m64n64.loom",
         "target_name": "qwen3_vl_linear_bf16_bf16_wmma_m64n64_qwen_mlp_up_shape_1024",
     },
     {
@@ -6002,7 +6046,7 @@ _KERNEL_CASES = [
             "--config=id4.qwen3_vl.linear_wmma.input_size=12288",
             "--config=id4.qwen3_vl.linear_wmma.output_size=4096",
         ],
-        "source": "qwen3_vl/linear_bf16_f32_wmma.loom",
+        "source": "qwen3_vl/linear_bf16_bf16_wmma_m64n64.loom",
         "target_name": "qwen3_vl_linear_bf16_bf16_wmma_m64n64_qwen_mlp_down_shape_1024",
     },
     {
@@ -6013,7 +6057,7 @@ _KERNEL_CASES = [
             "--config=id4.qwen3_vl.linear_wmma.input_size=16",
             "--config=id4.qwen3_vl.linear_wmma.output_size=32",
         ],
-        "source": "qwen3_vl/linear_bf16_f32_wmma.loom",
+        "source": "qwen3_vl/linear_bf16_bf16_wmma_m48n32.loom",
         "target_name": "qwen3_vl_linear_bf16_bf16_wmma_m48n32_small",
     },
     {
@@ -6024,7 +6068,7 @@ _KERNEL_CASES = [
             "--config=id4.qwen3_vl.linear_wmma.input_size=4096",
             "--config=id4.qwen3_vl.linear_wmma.output_size=4096",
         ],
-        "source": "qwen3_vl/linear_bf16_f32_wmma.loom",
+        "source": "qwen3_vl/linear_bf16_bf16_wmma_m32n32.loom",
         "target_name": "qwen3_vl_linear_bf16_bf16_wmma_m32n32_qwen_projection_shape",
     },
     {
@@ -6035,7 +6079,7 @@ _KERNEL_CASES = [
             "--config=id4.qwen3_vl.linear_wmma.input_size=4096",
             "--config=id4.qwen3_vl.linear_wmma.output_size=1024",
         ],
-        "source": "qwen3_vl/linear_bf16_f32_wmma.loom",
+        "source": "qwen3_vl/linear_bf16_bf16_wmma_m32n32.loom",
         "target_name": "qwen3_vl_linear_bf16_bf16_wmma_m32n32_qwen_kv_shape",
     },
     {
@@ -6046,7 +6090,7 @@ _KERNEL_CASES = [
             "--config=id4.qwen3_vl.linear_wmma.input_size=4096",
             "--config=id4.qwen3_vl.linear_wmma.output_size=12288",
         ],
-        "source": "qwen3_vl/linear_bf16_f32_wmma.loom",
+        "source": "qwen3_vl/linear_bf16_bf16_wmma_m32n32.loom",
         "target_name": "qwen3_vl_linear_bf16_bf16_wmma_m32n32_qwen_mlp_up_shape",
     },
     {
@@ -6057,7 +6101,7 @@ _KERNEL_CASES = [
             "--config=id4.qwen3_vl.linear_wmma.input_size=12288",
             "--config=id4.qwen3_vl.linear_wmma.output_size=4096",
         ],
-        "source": "qwen3_vl/linear_bf16_f32_wmma.loom",
+        "source": "qwen3_vl/linear_bf16_bf16_wmma_m32n32.loom",
         "target_name": "qwen3_vl_linear_bf16_bf16_wmma_m32n32_qwen_mlp_down_shape",
     },
     {
@@ -6068,7 +6112,7 @@ _KERNEL_CASES = [
             "--config=id4.qwen3_vl.linear_wmma.input_size=4096",
             "--config=id4.qwen3_vl.linear_wmma.output_size=4096",
         ],
-        "source": "qwen3_vl/linear_bf16_f32_wmma.loom",
+        "source": "qwen3_vl/linear_bf16_bf16_wmma_m48n32.loom",
         "target_name": "qwen3_vl_linear_bf16_bf16_wmma_m48n32_qwen_projection_shape",
     },
     {
@@ -6079,7 +6123,7 @@ _KERNEL_CASES = [
             "--config=id4.qwen3_vl.linear_wmma.input_size=4096",
             "--config=id4.qwen3_vl.linear_wmma.output_size=1024",
         ],
-        "source": "qwen3_vl/linear_bf16_f32_wmma.loom",
+        "source": "qwen3_vl/linear_bf16_bf16_wmma_m48n32.loom",
         "target_name": "qwen3_vl_linear_bf16_bf16_wmma_m48n32_qwen_kv_shape",
     },
     {
@@ -6090,7 +6134,7 @@ _KERNEL_CASES = [
             "--config=id4.qwen3_vl.linear_wmma.input_size=4096",
             "--config=id4.qwen3_vl.linear_wmma.output_size=12288",
         ],
-        "source": "qwen3_vl/linear_bf16_f32_wmma.loom",
+        "source": "qwen3_vl/linear_bf16_bf16_wmma_m48n32.loom",
         "target_name": "qwen3_vl_linear_bf16_bf16_wmma_m48n32_qwen_mlp_up_shape",
     },
     {
@@ -6101,7 +6145,7 @@ _KERNEL_CASES = [
             "--config=id4.qwen3_vl.linear_wmma.input_size=12288",
             "--config=id4.qwen3_vl.linear_wmma.output_size=4096",
         ],
-        "source": "qwen3_vl/linear_bf16_f32_wmma.loom",
+        "source": "qwen3_vl/linear_bf16_bf16_wmma_m48n32.loom",
         "target_name": "qwen3_vl_linear_bf16_bf16_wmma_m48n32_qwen_mlp_down_shape",
     },
     {
@@ -6112,7 +6156,7 @@ _KERNEL_CASES = [
             "--config=id4.qwen3_vl.linear_wmma.input_size=4096",
             "--config=id4.qwen3_vl.linear_wmma.output_size=4096",
         ],
-        "source": "qwen3_vl/linear_bf16_f32_wmma.loom",
+        "source": "qwen3_vl/linear_bf16_bf16_wmma_m32n32.loom",
         "target_name": "qwen3_vl_linear_bf16_bf16_wmma_m32n32_qwen_projection_shape_288",
     },
     {
@@ -6123,7 +6167,7 @@ _KERNEL_CASES = [
             "--config=id4.qwen3_vl.linear_wmma.input_size=4096",
             "--config=id4.qwen3_vl.linear_wmma.output_size=1024",
         ],
-        "source": "qwen3_vl/linear_bf16_f32_wmma.loom",
+        "source": "qwen3_vl/linear_bf16_bf16_wmma_m32n32.loom",
         "target_name": "qwen3_vl_linear_bf16_bf16_wmma_m32n32_qwen_kv_shape_288",
     },
     {
@@ -6134,7 +6178,7 @@ _KERNEL_CASES = [
             "--config=id4.qwen3_vl.linear_wmma.input_size=4096",
             "--config=id4.qwen3_vl.linear_wmma.output_size=12288",
         ],
-        "source": "qwen3_vl/linear_bf16_f32_wmma.loom",
+        "source": "qwen3_vl/linear_bf16_bf16_wmma_m32n32.loom",
         "target_name": "qwen3_vl_linear_bf16_bf16_wmma_m32n32_qwen_mlp_up_shape_288",
     },
     {
@@ -6145,7 +6189,7 @@ _KERNEL_CASES = [
             "--config=id4.qwen3_vl.linear_wmma.input_size=12288",
             "--config=id4.qwen3_vl.linear_wmma.output_size=4096",
         ],
-        "source": "qwen3_vl/linear_bf16_f32_wmma.loom",
+        "source": "qwen3_vl/linear_bf16_bf16_wmma_m32n32.loom",
         "target_name": "qwen3_vl_linear_bf16_bf16_wmma_m32n32_qwen_mlp_down_shape_288",
     },
     {
@@ -6156,7 +6200,7 @@ _KERNEL_CASES = [
             "--config=id4.qwen3_vl.linear_wmma.input_size=4096",
             "--config=id4.qwen3_vl.linear_wmma.output_size=4096",
         ],
-        "source": "qwen3_vl/linear_bf16_f32_wmma.loom",
+        "source": "qwen3_vl/linear_bf16_bf16_wmma_m48n32.loom",
         "target_name": "qwen3_vl_linear_bf16_bf16_wmma_m48n32_qwen_projection_shape_288",
     },
     {
@@ -6167,7 +6211,7 @@ _KERNEL_CASES = [
             "--config=id4.qwen3_vl.linear_wmma.input_size=4096",
             "--config=id4.qwen3_vl.linear_wmma.output_size=1024",
         ],
-        "source": "qwen3_vl/linear_bf16_f32_wmma.loom",
+        "source": "qwen3_vl/linear_bf16_bf16_wmma_m48n32.loom",
         "target_name": "qwen3_vl_linear_bf16_bf16_wmma_m48n32_qwen_kv_shape_288",
     },
     {
@@ -6178,7 +6222,7 @@ _KERNEL_CASES = [
             "--config=id4.qwen3_vl.linear_wmma.input_size=4096",
             "--config=id4.qwen3_vl.linear_wmma.output_size=12288",
         ],
-        "source": "qwen3_vl/linear_bf16_f32_wmma.loom",
+        "source": "qwen3_vl/linear_bf16_bf16_wmma_m48n32.loom",
         "target_name": "qwen3_vl_linear_bf16_bf16_wmma_m48n32_qwen_mlp_up_shape_288",
     },
     {
@@ -6189,7 +6233,7 @@ _KERNEL_CASES = [
             "--config=id4.qwen3_vl.linear_wmma.input_size=12288",
             "--config=id4.qwen3_vl.linear_wmma.output_size=4096",
         ],
-        "source": "qwen3_vl/linear_bf16_f32_wmma.loom",
+        "source": "qwen3_vl/linear_bf16_bf16_wmma_m48n32.loom",
         "target_name": "qwen3_vl_linear_bf16_bf16_wmma_m48n32_qwen_mlp_down_shape_288",
     },
     {
@@ -6200,7 +6244,7 @@ _KERNEL_CASES = [
             "--config=id4.qwen3_vl.linear_wmma.input_size=4096",
             "--config=id4.qwen3_vl.linear_wmma.output_size=4096",
         ],
-        "source": "qwen3_vl/linear_bf16_f32_wmma.loom",
+        "source": "qwen3_vl/linear_bf16_bf16_wmma_m32n32.loom",
         "target_name": "qwen3_vl_linear_bf16_bf16_wmma_m32n32_qwen_projection_shape_512",
     },
     {
@@ -6211,7 +6255,7 @@ _KERNEL_CASES = [
             "--config=id4.qwen3_vl.linear_wmma.input_size=4096",
             "--config=id4.qwen3_vl.linear_wmma.output_size=1024",
         ],
-        "source": "qwen3_vl/linear_bf16_f32_wmma.loom",
+        "source": "qwen3_vl/linear_bf16_bf16_wmma_m32n32.loom",
         "target_name": "qwen3_vl_linear_bf16_bf16_wmma_m32n32_qwen_kv_shape_512",
     },
     {
@@ -6222,7 +6266,7 @@ _KERNEL_CASES = [
             "--config=id4.qwen3_vl.linear_wmma.input_size=4096",
             "--config=id4.qwen3_vl.linear_wmma.output_size=12288",
         ],
-        "source": "qwen3_vl/linear_bf16_f32_wmma.loom",
+        "source": "qwen3_vl/linear_bf16_bf16_wmma_m32n32.loom",
         "target_name": "qwen3_vl_linear_bf16_bf16_wmma_m32n32_qwen_mlp_up_shape_512",
     },
     {
@@ -6233,7 +6277,7 @@ _KERNEL_CASES = [
             "--config=id4.qwen3_vl.linear_wmma.input_size=12288",
             "--config=id4.qwen3_vl.linear_wmma.output_size=4096",
         ],
-        "source": "qwen3_vl/linear_bf16_f32_wmma.loom",
+        "source": "qwen3_vl/linear_bf16_bf16_wmma_m32n32.loom",
         "target_name": "qwen3_vl_linear_bf16_bf16_wmma_m32n32_qwen_mlp_down_shape_512",
     },
     {
@@ -6244,7 +6288,7 @@ _KERNEL_CASES = [
             "--config=id4.qwen3_vl.linear_wmma.input_size=4096",
             "--config=id4.qwen3_vl.linear_wmma.output_size=4096",
         ],
-        "source": "qwen3_vl/linear_bf16_f32_wmma.loom",
+        "source": "qwen3_vl/linear_bf16_bf16_wmma_m32n64.loom",
         "target_name": "qwen3_vl_linear_bf16_bf16_wmma_m32n64_qwen_projection_shape",
     },
     {
@@ -6255,7 +6299,7 @@ _KERNEL_CASES = [
             "--config=id4.qwen3_vl.linear_wmma.input_size=4096",
             "--config=id4.qwen3_vl.linear_wmma.output_size=1024",
         ],
-        "source": "qwen3_vl/linear_bf16_f32_wmma.loom",
+        "source": "qwen3_vl/linear_bf16_bf16_wmma_m32n64.loom",
         "target_name": "qwen3_vl_linear_bf16_bf16_wmma_m32n64_qwen_kv_shape",
     },
     {
@@ -6266,7 +6310,7 @@ _KERNEL_CASES = [
             "--config=id4.qwen3_vl.linear_wmma.input_size=4096",
             "--config=id4.qwen3_vl.linear_wmma.output_size=1024",
         ],
-        "source": "qwen3_vl/linear_bf16_f32_wmma.loom",
+        "source": "qwen3_vl/linear_bf16_bf16_wmma_m32n64.loom",
         "target_name": "qwen3_vl_linear_bf16_bf16_wmma_m32n64_transpose_output_qwen_value_shape",
     },
     {
@@ -6277,7 +6321,7 @@ _KERNEL_CASES = [
             "--config=id4.qwen3_vl.linear_wmma.input_size=4096",
             "--config=id4.qwen3_vl.linear_wmma.output_size=1024",
         ],
-        "source": "qwen3_vl/linear_bf16_f32_wmma.loom",
+        "source": "qwen3_vl/linear_bf16_bf16_wmma_m32n64.loom",
         "target_name": "qwen3_vl_linear_bf16_bf16_wmma_m32n64_qwen_kv_shape_1024",
     },
     {
@@ -6288,7 +6332,7 @@ _KERNEL_CASES = [
             "--config=id4.qwen3_vl.linear_wmma.input_size=4096",
             "--config=id4.qwen3_vl.linear_wmma.output_size=4096",
         ],
-        "source": "qwen3_vl/linear_bf16_f32_wmma.loom",
+        "source": "qwen3_vl/linear_bf16_bf16_wmma_m32n64.loom",
         "target_name": "qwen3_vl_linear_bf16_bf16_wmma_m32n64_qwen_projection_shape_1024",
     },
     {
@@ -6299,7 +6343,7 @@ _KERNEL_CASES = [
             "--config=id4.qwen3_vl.linear_wmma.input_size=4096",
             "--config=id4.qwen3_vl.linear_wmma.output_size=12288",
         ],
-        "source": "qwen3_vl/linear_bf16_f32_wmma.loom",
+        "source": "qwen3_vl/linear_bf16_bf16_wmma_m32n64.loom",
         "target_name": "qwen3_vl_linear_bf16_bf16_wmma_m32n64_qwen_mlp_up_shape_1024",
     },
     {
@@ -6310,7 +6354,7 @@ _KERNEL_CASES = [
             "--config=id4.qwen3_vl.linear_wmma.input_size=12288",
             "--config=id4.qwen3_vl.linear_wmma.output_size=4096",
         ],
-        "source": "qwen3_vl/linear_bf16_f32_wmma.loom",
+        "source": "qwen3_vl/linear_bf16_bf16_wmma_m32n64.loom",
         "target_name": "qwen3_vl_linear_bf16_bf16_wmma_m32n64_qwen_mlp_down_shape_1024",
     },
     {
@@ -6321,7 +6365,7 @@ _KERNEL_CASES = [
             "--config=id4.qwen3_vl.linear_wmma.input_size=4096",
             "--config=id4.qwen3_vl.linear_wmma.output_size=12288",
         ],
-        "source": "qwen3_vl/linear_bf16_f32_wmma.loom",
+        "source": "qwen3_vl/linear_bf16_bf16_wmma_m32n64.loom",
         "target_name": "qwen3_vl_linear_bf16_bf16_wmma_m32n64_qwen_mlp_up_shape",
     },
     {
@@ -6332,7 +6376,7 @@ _KERNEL_CASES = [
             "--config=id4.qwen3_vl.linear_wmma.input_size=12288",
             "--config=id4.qwen3_vl.linear_wmma.output_size=4096",
         ],
-        "source": "qwen3_vl/linear_bf16_f32_wmma.loom",
+        "source": "qwen3_vl/linear_bf16_bf16_wmma_m32n64.loom",
         "target_name": "qwen3_vl_linear_bf16_bf16_wmma_m32n64_qwen_mlp_down_shape",
     },
     {
@@ -6343,7 +6387,7 @@ _KERNEL_CASES = [
             "--config=id4.qwen3_vl.linear_wmma.input_size=4096",
             "--config=id4.qwen3_vl.linear_wmma.output_size=4096",
         ],
-        "source": "qwen3_vl/linear_bf16_f32_wmma.loom",
+        "source": "qwen3_vl/linear_bf16_bf16_wmma_m32n64.loom",
         "target_name": "qwen3_vl_linear_bf16_bf16_wmma_m32n64_qwen_projection_shape_288",
     },
     {
@@ -6354,7 +6398,7 @@ _KERNEL_CASES = [
             "--config=id4.qwen3_vl.linear_wmma.input_size=4096",
             "--config=id4.qwen3_vl.linear_wmma.output_size=1024",
         ],
-        "source": "qwen3_vl/linear_bf16_f32_wmma.loom",
+        "source": "qwen3_vl/linear_bf16_bf16_wmma_m32n64.loom",
         "target_name": "qwen3_vl_linear_bf16_bf16_wmma_m32n64_qwen_kv_shape_288",
     },
     {
@@ -6365,7 +6409,7 @@ _KERNEL_CASES = [
             "--config=id4.qwen3_vl.linear_wmma.input_size=4096",
             "--config=id4.qwen3_vl.linear_wmma.output_size=12288",
         ],
-        "source": "qwen3_vl/linear_bf16_f32_wmma.loom",
+        "source": "qwen3_vl/linear_bf16_bf16_wmma_m32n64.loom",
         "target_name": "qwen3_vl_linear_bf16_bf16_wmma_m32n64_qwen_mlp_up_shape_288",
     },
     {
@@ -6376,7 +6420,7 @@ _KERNEL_CASES = [
             "--config=id4.qwen3_vl.linear_wmma.input_size=12288",
             "--config=id4.qwen3_vl.linear_wmma.output_size=4096",
         ],
-        "source": "qwen3_vl/linear_bf16_f32_wmma.loom",
+        "source": "qwen3_vl/linear_bf16_bf16_wmma_m32n64.loom",
         "target_name": "qwen3_vl_linear_bf16_bf16_wmma_m32n64_qwen_mlp_down_shape_288",
     },
     {
@@ -6398,7 +6442,7 @@ _KERNEL_CASES = [
             "--config=id4.qwen3_vl.linear_wmma.input_size=16",
             "--config=id4.qwen3_vl.linear_wmma.output_size=32",
         ],
-        "source": "qwen3_vl/linear_bf16_f32_wmma.loom",
+        "source": "qwen3_vl/linear_bf16_f32_wmma_m32n32.loom",
         "target_name": "qwen3_vl_linear_bf16_f32_wmma_m32n32_zero",
     },
     {
@@ -6409,7 +6453,7 @@ _KERNEL_CASES = [
             "--config=id4.qwen3_vl.linear_wmma.input_size=16",
             "--config=id4.qwen3_vl.linear_wmma.output_size=64",
         ],
-        "source": "qwen3_vl/linear_bf16_f32_wmma.loom",
+        "source": "qwen3_vl/linear_bf16_f32_wmma_m32n64.loom",
         "target_name": "qwen3_vl_linear_bf16_f32_wmma_m32n64_zero",
     },
     {
@@ -6442,7 +6486,7 @@ _KERNEL_CASES = [
             "--config=id4.qwen3_vl.linear_wmma.input_size=4096",
             "--config=id4.qwen3_vl.linear_wmma.output_size=4096",
         ],
-        "source": "qwen3_vl/linear_bf16_f32_wmma.loom",
+        "source": "qwen3_vl/linear_bf16_f32_wmma_m32n32.loom",
         "target_name": "qwen3_vl_linear_bf16_f32_wmma_m32n32_qwen_projection_shape",
     },
     {
@@ -6453,7 +6497,7 @@ _KERNEL_CASES = [
             "--config=id4.qwen3_vl.linear_wmma.input_size=4096",
             "--config=id4.qwen3_vl.linear_wmma.output_size=4096",
         ],
-        "source": "qwen3_vl/linear_bf16_f32_wmma.loom",
+        "source": "qwen3_vl/linear_bf16_f32_wmma_m32n64.loom",
         "target_name": "qwen3_vl_linear_bf16_f32_wmma_m32n64_qwen_projection_shape",
     },
     {
@@ -6464,7 +6508,7 @@ _KERNEL_CASES = [
             "--config=id4.qwen3_vl.linear_wmma.input_size=4096",
             "--config=id4.qwen3_vl.linear_wmma.output_size=12288",
         ],
-        "source": "qwen3_vl/linear_bf16_f32_wmma.loom",
+        "source": "qwen3_vl/linear_bf16_f32_wmma_m32n32.loom",
         "target_name": "qwen3_vl_linear_bf16_f32_wmma_m32n32_qwen_mlp_up_shape",
     },
     {
@@ -6475,7 +6519,7 @@ _KERNEL_CASES = [
             "--config=id4.qwen3_vl.linear_wmma.input_size=4096",
             "--config=id4.qwen3_vl.linear_wmma.output_size=12288",
         ],
-        "source": "qwen3_vl/linear_bf16_f32_wmma.loom",
+        "source": "qwen3_vl/linear_bf16_f32_wmma_m32n64.loom",
         "target_name": "qwen3_vl_linear_bf16_f32_wmma_m32n64_qwen_mlp_up_shape",
     },
     {
@@ -6486,7 +6530,7 @@ _KERNEL_CASES = [
             "--config=id4.qwen3_vl.linear_wmma.input_size=12288",
             "--config=id4.qwen3_vl.linear_wmma.output_size=4096",
         ],
-        "source": "qwen3_vl/linear_bf16_f32_wmma.loom",
+        "source": "qwen3_vl/linear_bf16_f32_wmma_m32n32.loom",
         "target_name": "qwen3_vl_linear_bf16_f32_wmma_m32n32_qwen_mlp_down_shape",
     },
     {
@@ -6497,7 +6541,7 @@ _KERNEL_CASES = [
             "--config=id4.qwen3_vl.linear_wmma.input_size=12288",
             "--config=id4.qwen3_vl.linear_wmma.output_size=4096",
         ],
-        "source": "qwen3_vl/linear_bf16_f32_wmma.loom",
+        "source": "qwen3_vl/linear_bf16_f32_wmma_m32n64.loom",
         "target_name": "qwen3_vl_linear_bf16_f32_wmma_m32n64_qwen_mlp_down_shape",
     },
     {
@@ -7080,7 +7124,14 @@ _KERNEL_SOURCES = [
     "qwen3_vl/attention_wmma.loom",
     "qwen3_vl/condition.loom",
     "qwen3_vl/linear_bf16_bf16_tail.loom",
+    "qwen3_vl/linear_bf16_bf16_wmma_m16n64.loom",
+    "qwen3_vl/linear_bf16_bf16_wmma_m32n32.loom",
+    "qwen3_vl/linear_bf16_bf16_wmma_m32n64.loom",
+    "qwen3_vl/linear_bf16_bf16_wmma_m48n32.loom",
+    "qwen3_vl/linear_bf16_bf16_wmma_m64n64.loom",
     "qwen3_vl/linear_bf16_f32_wmma.loom",
+    "qwen3_vl/linear_bf16_f32_wmma_m32n32.loom",
+    "qwen3_vl/linear_bf16_f32_wmma_m32n64.loom",
     "qwen3_vl/linear_bf16_f32.loom",
     "qwen3_vl/linear_input_pack_f32_bf16.loom",
     "qwen3_vl/linear_residual_bf16_wmma.loom",
