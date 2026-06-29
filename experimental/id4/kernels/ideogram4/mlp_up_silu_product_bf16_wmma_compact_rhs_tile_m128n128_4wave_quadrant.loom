@@ -23,7 +23,6 @@ kernel.def target(@id4_gfx1100) export("id4_ideogram4_mlp_up_silu_product_bf16_w
   %zero = index.constant 0 : index
   %one = index.constant 1 : index
   %two = index.constant 2 : index
-  %eight = index.constant 8 : index
   %sixteen = index.constant 16 : index
   %thirty_two = index.constant 32 : index
   %forty_eight = index.constant 48 : index
@@ -33,7 +32,6 @@ kernel.def target(@id4_gfx1100) export("id4_ideogram4_mlp_up_silu_product_bf16_w
   %token_tile = kernel.workgroup.id<x> : index
   %row_tile = kernel.workgroup.id<y> : index
   %subgroup_id = kernel.subgroup.id : index
-  %lane = kernel.subgroup.lane.id : index
   %token_count = config.get @id4.ideogram4.mlp_up_silu_product_compact_rhs_m128n128_wmma.token_count : index
   %input_size = config.get @id4.ideogram4.mlp_up_silu_product_compact_rhs_m128n128_wmma.input_size : index
   %intermediate_size = config.get @id4.ideogram4.mlp_up_silu_product_compact_rhs_m128n128_wmma.intermediate_size : index
@@ -162,196 +160,150 @@ kernel.def target(@id4_gfx1100) export("id4_ideogram4_mlp_up_silu_product_bf16_w
     %next33 = vector.mma %lhs3, %rhs3, %acc33 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
     scf.yield %next00, %next01, %next02, %next03, %next10, %next11, %next12, %next13, %next20, %next21, %next22, %next23, %next30, %next31, %next32, %next33 : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>
   }
-  %lane_column = index.rem %lane, %sixteen : index
-  %lane_group = index.div %lane, %sixteen : index
-  %column0 = index.add %row_origin0, %lane_column : index
-  %column1 = index.add %row_origin1, %lane_column : index
-  %column2 = index.add %row_origin2, %lane_column : index
-  %column3 = index.add %row_origin3, %lane_column : index
-  scf.for %register_index = [%zero to %eight step %one] {
-    %register_token_base = index.mul %register_index, %two : index
-    %local_token = index.add %register_token_base, %lane_group : index
-    %token0 = index.add %token_origin0, %local_token : index
-    %token1 = index.add %token_origin1, %local_token : index
-    %token2 = index.add %token_origin2, %local_token : index
-    %token3 = index.add %token_origin3, %local_token : index
-    %up_value00 = vector.extract %result00[%register_index] : vector<8xf32> -> f32
-    %gate_bf16_value00 = view.load %gate_view[%token0, %column0] : view<[%token_count]x[%intermediate_size]xbf16, #dense> -> bf16
-    %gate_value00 = scalar.extf %gate_bf16_value00 : bf16 to f32
-    %gate_silu00 = scalar.siluf %gate_value00 : f32
-    %gate_silu_bf16_00 = scalar.fptrunc %gate_silu00 : f32 to bf16
-    %gate_silu_value00 = scalar.extf %gate_silu_bf16_00 : bf16 to f32
-    %up_bf16_00 = scalar.fptrunc %up_value00 : f32 to bf16
-    %up_rounded00 = scalar.extf %up_bf16_00 : bf16 to f32
-    %value00 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %gate_silu_value00, %up_rounded00 : f32
-    %rounded00 = scalar.fptrunc %value00 : f32 to bf16
-    view.store %rounded00, %output_view[%token0, %column0] : bf16, view<[%token_count]x[%intermediate_size]xbf16, #dense>
-    %up_value01 = vector.extract %result01[%register_index] : vector<8xf32> -> f32
-    %gate_bf16_value01 = view.load %gate_view[%token0, %column1] : view<[%token_count]x[%intermediate_size]xbf16, #dense> -> bf16
-    %gate_value01 = scalar.extf %gate_bf16_value01 : bf16 to f32
-    %gate_silu01 = scalar.siluf %gate_value01 : f32
-    %gate_silu_bf16_01 = scalar.fptrunc %gate_silu01 : f32 to bf16
-    %gate_silu_value01 = scalar.extf %gate_silu_bf16_01 : bf16 to f32
-    %up_bf16_01 = scalar.fptrunc %up_value01 : f32 to bf16
-    %up_rounded01 = scalar.extf %up_bf16_01 : bf16 to f32
-    %value01 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %gate_silu_value01, %up_rounded01 : f32
-    %rounded01 = scalar.fptrunc %value01 : f32 to bf16
-    view.store %rounded01, %output_view[%token0, %column1] : bf16, view<[%token_count]x[%intermediate_size]xbf16, #dense>
-    %up_value02 = vector.extract %result02[%register_index] : vector<8xf32> -> f32
-    %gate_bf16_value02 = view.load %gate_view[%token0, %column2] : view<[%token_count]x[%intermediate_size]xbf16, #dense> -> bf16
-    %gate_value02 = scalar.extf %gate_bf16_value02 : bf16 to f32
-    %gate_silu02 = scalar.siluf %gate_value02 : f32
-    %gate_silu_bf16_02 = scalar.fptrunc %gate_silu02 : f32 to bf16
-    %gate_silu_value02 = scalar.extf %gate_silu_bf16_02 : bf16 to f32
-    %up_bf16_02 = scalar.fptrunc %up_value02 : f32 to bf16
-    %up_rounded02 = scalar.extf %up_bf16_02 : bf16 to f32
-    %value02 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %gate_silu_value02, %up_rounded02 : f32
-    %rounded02 = scalar.fptrunc %value02 : f32 to bf16
-    view.store %rounded02, %output_view[%token0, %column2] : bf16, view<[%token_count]x[%intermediate_size]xbf16, #dense>
-    %up_value03 = vector.extract %result03[%register_index] : vector<8xf32> -> f32
-    %gate_bf16_value03 = view.load %gate_view[%token0, %column3] : view<[%token_count]x[%intermediate_size]xbf16, #dense> -> bf16
-    %gate_value03 = scalar.extf %gate_bf16_value03 : bf16 to f32
-    %gate_silu03 = scalar.siluf %gate_value03 : f32
-    %gate_silu_bf16_03 = scalar.fptrunc %gate_silu03 : f32 to bf16
-    %gate_silu_value03 = scalar.extf %gate_silu_bf16_03 : bf16 to f32
-    %up_bf16_03 = scalar.fptrunc %up_value03 : f32 to bf16
-    %up_rounded03 = scalar.extf %up_bf16_03 : bf16 to f32
-    %value03 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %gate_silu_value03, %up_rounded03 : f32
-    %rounded03 = scalar.fptrunc %value03 : f32 to bf16
-    view.store %rounded03, %output_view[%token0, %column3] : bf16, view<[%token_count]x[%intermediate_size]xbf16, #dense>
-    %up_value10 = vector.extract %result10[%register_index] : vector<8xf32> -> f32
-    %gate_bf16_value10 = view.load %gate_view[%token1, %column0] : view<[%token_count]x[%intermediate_size]xbf16, #dense> -> bf16
-    %gate_value10 = scalar.extf %gate_bf16_value10 : bf16 to f32
-    %gate_silu10 = scalar.siluf %gate_value10 : f32
-    %gate_silu_bf16_10 = scalar.fptrunc %gate_silu10 : f32 to bf16
-    %gate_silu_value10 = scalar.extf %gate_silu_bf16_10 : bf16 to f32
-    %up_bf16_10 = scalar.fptrunc %up_value10 : f32 to bf16
-    %up_rounded10 = scalar.extf %up_bf16_10 : bf16 to f32
-    %value10 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %gate_silu_value10, %up_rounded10 : f32
-    %rounded10 = scalar.fptrunc %value10 : f32 to bf16
-    view.store %rounded10, %output_view[%token1, %column0] : bf16, view<[%token_count]x[%intermediate_size]xbf16, #dense>
-    %up_value11 = vector.extract %result11[%register_index] : vector<8xf32> -> f32
-    %gate_bf16_value11 = view.load %gate_view[%token1, %column1] : view<[%token_count]x[%intermediate_size]xbf16, #dense> -> bf16
-    %gate_value11 = scalar.extf %gate_bf16_value11 : bf16 to f32
-    %gate_silu11 = scalar.siluf %gate_value11 : f32
-    %gate_silu_bf16_11 = scalar.fptrunc %gate_silu11 : f32 to bf16
-    %gate_silu_value11 = scalar.extf %gate_silu_bf16_11 : bf16 to f32
-    %up_bf16_11 = scalar.fptrunc %up_value11 : f32 to bf16
-    %up_rounded11 = scalar.extf %up_bf16_11 : bf16 to f32
-    %value11 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %gate_silu_value11, %up_rounded11 : f32
-    %rounded11 = scalar.fptrunc %value11 : f32 to bf16
-    view.store %rounded11, %output_view[%token1, %column1] : bf16, view<[%token_count]x[%intermediate_size]xbf16, #dense>
-    %up_value12 = vector.extract %result12[%register_index] : vector<8xf32> -> f32
-    %gate_bf16_value12 = view.load %gate_view[%token1, %column2] : view<[%token_count]x[%intermediate_size]xbf16, #dense> -> bf16
-    %gate_value12 = scalar.extf %gate_bf16_value12 : bf16 to f32
-    %gate_silu12 = scalar.siluf %gate_value12 : f32
-    %gate_silu_bf16_12 = scalar.fptrunc %gate_silu12 : f32 to bf16
-    %gate_silu_value12 = scalar.extf %gate_silu_bf16_12 : bf16 to f32
-    %up_bf16_12 = scalar.fptrunc %up_value12 : f32 to bf16
-    %up_rounded12 = scalar.extf %up_bf16_12 : bf16 to f32
-    %value12 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %gate_silu_value12, %up_rounded12 : f32
-    %rounded12 = scalar.fptrunc %value12 : f32 to bf16
-    view.store %rounded12, %output_view[%token1, %column2] : bf16, view<[%token_count]x[%intermediate_size]xbf16, #dense>
-    %up_value13 = vector.extract %result13[%register_index] : vector<8xf32> -> f32
-    %gate_bf16_value13 = view.load %gate_view[%token1, %column3] : view<[%token_count]x[%intermediate_size]xbf16, #dense> -> bf16
-    %gate_value13 = scalar.extf %gate_bf16_value13 : bf16 to f32
-    %gate_silu13 = scalar.siluf %gate_value13 : f32
-    %gate_silu_bf16_13 = scalar.fptrunc %gate_silu13 : f32 to bf16
-    %gate_silu_value13 = scalar.extf %gate_silu_bf16_13 : bf16 to f32
-    %up_bf16_13 = scalar.fptrunc %up_value13 : f32 to bf16
-    %up_rounded13 = scalar.extf %up_bf16_13 : bf16 to f32
-    %value13 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %gate_silu_value13, %up_rounded13 : f32
-    %rounded13 = scalar.fptrunc %value13 : f32 to bf16
-    view.store %rounded13, %output_view[%token1, %column3] : bf16, view<[%token_count]x[%intermediate_size]xbf16, #dense>
-    %up_value20 = vector.extract %result20[%register_index] : vector<8xf32> -> f32
-    %gate_bf16_value20 = view.load %gate_view[%token2, %column0] : view<[%token_count]x[%intermediate_size]xbf16, #dense> -> bf16
-    %gate_value20 = scalar.extf %gate_bf16_value20 : bf16 to f32
-    %gate_silu20 = scalar.siluf %gate_value20 : f32
-    %gate_silu_bf16_20 = scalar.fptrunc %gate_silu20 : f32 to bf16
-    %gate_silu_value20 = scalar.extf %gate_silu_bf16_20 : bf16 to f32
-    %up_bf16_20 = scalar.fptrunc %up_value20 : f32 to bf16
-    %up_rounded20 = scalar.extf %up_bf16_20 : bf16 to f32
-    %value20 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %gate_silu_value20, %up_rounded20 : f32
-    %rounded20 = scalar.fptrunc %value20 : f32 to bf16
-    view.store %rounded20, %output_view[%token2, %column0] : bf16, view<[%token_count]x[%intermediate_size]xbf16, #dense>
-    %up_value21 = vector.extract %result21[%register_index] : vector<8xf32> -> f32
-    %gate_bf16_value21 = view.load %gate_view[%token2, %column1] : view<[%token_count]x[%intermediate_size]xbf16, #dense> -> bf16
-    %gate_value21 = scalar.extf %gate_bf16_value21 : bf16 to f32
-    %gate_silu21 = scalar.siluf %gate_value21 : f32
-    %gate_silu_bf16_21 = scalar.fptrunc %gate_silu21 : f32 to bf16
-    %gate_silu_value21 = scalar.extf %gate_silu_bf16_21 : bf16 to f32
-    %up_bf16_21 = scalar.fptrunc %up_value21 : f32 to bf16
-    %up_rounded21 = scalar.extf %up_bf16_21 : bf16 to f32
-    %value21 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %gate_silu_value21, %up_rounded21 : f32
-    %rounded21 = scalar.fptrunc %value21 : f32 to bf16
-    view.store %rounded21, %output_view[%token2, %column1] : bf16, view<[%token_count]x[%intermediate_size]xbf16, #dense>
-    %up_value22 = vector.extract %result22[%register_index] : vector<8xf32> -> f32
-    %gate_bf16_value22 = view.load %gate_view[%token2, %column2] : view<[%token_count]x[%intermediate_size]xbf16, #dense> -> bf16
-    %gate_value22 = scalar.extf %gate_bf16_value22 : bf16 to f32
-    %gate_silu22 = scalar.siluf %gate_value22 : f32
-    %gate_silu_bf16_22 = scalar.fptrunc %gate_silu22 : f32 to bf16
-    %gate_silu_value22 = scalar.extf %gate_silu_bf16_22 : bf16 to f32
-    %up_bf16_22 = scalar.fptrunc %up_value22 : f32 to bf16
-    %up_rounded22 = scalar.extf %up_bf16_22 : bf16 to f32
-    %value22 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %gate_silu_value22, %up_rounded22 : f32
-    %rounded22 = scalar.fptrunc %value22 : f32 to bf16
-    view.store %rounded22, %output_view[%token2, %column2] : bf16, view<[%token_count]x[%intermediate_size]xbf16, #dense>
-    %up_value23 = vector.extract %result23[%register_index] : vector<8xf32> -> f32
-    %gate_bf16_value23 = view.load %gate_view[%token2, %column3] : view<[%token_count]x[%intermediate_size]xbf16, #dense> -> bf16
-    %gate_value23 = scalar.extf %gate_bf16_value23 : bf16 to f32
-    %gate_silu23 = scalar.siluf %gate_value23 : f32
-    %gate_silu_bf16_23 = scalar.fptrunc %gate_silu23 : f32 to bf16
-    %gate_silu_value23 = scalar.extf %gate_silu_bf16_23 : bf16 to f32
-    %up_bf16_23 = scalar.fptrunc %up_value23 : f32 to bf16
-    %up_rounded23 = scalar.extf %up_bf16_23 : bf16 to f32
-    %value23 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %gate_silu_value23, %up_rounded23 : f32
-    %rounded23 = scalar.fptrunc %value23 : f32 to bf16
-    view.store %rounded23, %output_view[%token2, %column3] : bf16, view<[%token_count]x[%intermediate_size]xbf16, #dense>
-    %up_value30 = vector.extract %result30[%register_index] : vector<8xf32> -> f32
-    %gate_bf16_value30 = view.load %gate_view[%token3, %column0] : view<[%token_count]x[%intermediate_size]xbf16, #dense> -> bf16
-    %gate_value30 = scalar.extf %gate_bf16_value30 : bf16 to f32
-    %gate_silu30 = scalar.siluf %gate_value30 : f32
-    %gate_silu_bf16_30 = scalar.fptrunc %gate_silu30 : f32 to bf16
-    %gate_silu_value30 = scalar.extf %gate_silu_bf16_30 : bf16 to f32
-    %up_bf16_30 = scalar.fptrunc %up_value30 : f32 to bf16
-    %up_rounded30 = scalar.extf %up_bf16_30 : bf16 to f32
-    %value30 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %gate_silu_value30, %up_rounded30 : f32
-    %rounded30 = scalar.fptrunc %value30 : f32 to bf16
-    view.store %rounded30, %output_view[%token3, %column0] : bf16, view<[%token_count]x[%intermediate_size]xbf16, #dense>
-    %up_value31 = vector.extract %result31[%register_index] : vector<8xf32> -> f32
-    %gate_bf16_value31 = view.load %gate_view[%token3, %column1] : view<[%token_count]x[%intermediate_size]xbf16, #dense> -> bf16
-    %gate_value31 = scalar.extf %gate_bf16_value31 : bf16 to f32
-    %gate_silu31 = scalar.siluf %gate_value31 : f32
-    %gate_silu_bf16_31 = scalar.fptrunc %gate_silu31 : f32 to bf16
-    %gate_silu_value31 = scalar.extf %gate_silu_bf16_31 : bf16 to f32
-    %up_bf16_31 = scalar.fptrunc %up_value31 : f32 to bf16
-    %up_rounded31 = scalar.extf %up_bf16_31 : bf16 to f32
-    %value31 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %gate_silu_value31, %up_rounded31 : f32
-    %rounded31 = scalar.fptrunc %value31 : f32 to bf16
-    view.store %rounded31, %output_view[%token3, %column1] : bf16, view<[%token_count]x[%intermediate_size]xbf16, #dense>
-    %up_value32 = vector.extract %result32[%register_index] : vector<8xf32> -> f32
-    %gate_bf16_value32 = view.load %gate_view[%token3, %column2] : view<[%token_count]x[%intermediate_size]xbf16, #dense> -> bf16
-    %gate_value32 = scalar.extf %gate_bf16_value32 : bf16 to f32
-    %gate_silu32 = scalar.siluf %gate_value32 : f32
-    %gate_silu_bf16_32 = scalar.fptrunc %gate_silu32 : f32 to bf16
-    %gate_silu_value32 = scalar.extf %gate_silu_bf16_32 : bf16 to f32
-    %up_bf16_32 = scalar.fptrunc %up_value32 : f32 to bf16
-    %up_rounded32 = scalar.extf %up_bf16_32 : bf16 to f32
-    %value32 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %gate_silu_value32, %up_rounded32 : f32
-    %rounded32 = scalar.fptrunc %value32 : f32 to bf16
-    view.store %rounded32, %output_view[%token3, %column2] : bf16, view<[%token_count]x[%intermediate_size]xbf16, #dense>
-    %up_value33 = vector.extract %result33[%register_index] : vector<8xf32> -> f32
-    %gate_bf16_value33 = view.load %gate_view[%token3, %column3] : view<[%token_count]x[%intermediate_size]xbf16, #dense> -> bf16
-    %gate_value33 = scalar.extf %gate_bf16_value33 : bf16 to f32
-    %gate_silu33 = scalar.siluf %gate_value33 : f32
-    %gate_silu_bf16_33 = scalar.fptrunc %gate_silu33 : f32 to bf16
-    %gate_silu_value33 = scalar.extf %gate_silu_bf16_33 : bf16 to f32
-    %up_bf16_33 = scalar.fptrunc %up_value33 : f32 to bf16
-    %up_rounded33 = scalar.extf %up_bf16_33 : bf16 to f32
-    %value33 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %gate_silu_value33, %up_rounded33 : f32
-    %rounded33 = scalar.fptrunc %value33 : f32 to bf16
-    view.store %rounded33, %output_view[%token3, %column3] : bf16, view<[%token_count]x[%intermediate_size]xbf16, #dense>
-  }
+  %gate00_bf16 = vector.fragment.load<result> %gate_view[%token_origin0, %row_origin0] shape [%m, %n] : view<[%token_count]x[%intermediate_size]xbf16, #dense> -> vector<8xbf16>
+  %gate01_bf16 = vector.fragment.load<result> %gate_view[%token_origin0, %row_origin1] shape [%m, %n] : view<[%token_count]x[%intermediate_size]xbf16, #dense> -> vector<8xbf16>
+  %gate02_bf16 = vector.fragment.load<result> %gate_view[%token_origin0, %row_origin2] shape [%m, %n] : view<[%token_count]x[%intermediate_size]xbf16, #dense> -> vector<8xbf16>
+  %gate03_bf16 = vector.fragment.load<result> %gate_view[%token_origin0, %row_origin3] shape [%m, %n] : view<[%token_count]x[%intermediate_size]xbf16, #dense> -> vector<8xbf16>
+  %gate10_bf16 = vector.fragment.load<result> %gate_view[%token_origin1, %row_origin0] shape [%m, %n] : view<[%token_count]x[%intermediate_size]xbf16, #dense> -> vector<8xbf16>
+  %gate11_bf16 = vector.fragment.load<result> %gate_view[%token_origin1, %row_origin1] shape [%m, %n] : view<[%token_count]x[%intermediate_size]xbf16, #dense> -> vector<8xbf16>
+  %gate12_bf16 = vector.fragment.load<result> %gate_view[%token_origin1, %row_origin2] shape [%m, %n] : view<[%token_count]x[%intermediate_size]xbf16, #dense> -> vector<8xbf16>
+  %gate13_bf16 = vector.fragment.load<result> %gate_view[%token_origin1, %row_origin3] shape [%m, %n] : view<[%token_count]x[%intermediate_size]xbf16, #dense> -> vector<8xbf16>
+  %gate20_bf16 = vector.fragment.load<result> %gate_view[%token_origin2, %row_origin0] shape [%m, %n] : view<[%token_count]x[%intermediate_size]xbf16, #dense> -> vector<8xbf16>
+  %gate21_bf16 = vector.fragment.load<result> %gate_view[%token_origin2, %row_origin1] shape [%m, %n] : view<[%token_count]x[%intermediate_size]xbf16, #dense> -> vector<8xbf16>
+  %gate22_bf16 = vector.fragment.load<result> %gate_view[%token_origin2, %row_origin2] shape [%m, %n] : view<[%token_count]x[%intermediate_size]xbf16, #dense> -> vector<8xbf16>
+  %gate23_bf16 = vector.fragment.load<result> %gate_view[%token_origin2, %row_origin3] shape [%m, %n] : view<[%token_count]x[%intermediate_size]xbf16, #dense> -> vector<8xbf16>
+  %gate30_bf16 = vector.fragment.load<result> %gate_view[%token_origin3, %row_origin0] shape [%m, %n] : view<[%token_count]x[%intermediate_size]xbf16, #dense> -> vector<8xbf16>
+  %gate31_bf16 = vector.fragment.load<result> %gate_view[%token_origin3, %row_origin1] shape [%m, %n] : view<[%token_count]x[%intermediate_size]xbf16, #dense> -> vector<8xbf16>
+  %gate32_bf16 = vector.fragment.load<result> %gate_view[%token_origin3, %row_origin2] shape [%m, %n] : view<[%token_count]x[%intermediate_size]xbf16, #dense> -> vector<8xbf16>
+  %gate33_bf16 = vector.fragment.load<result> %gate_view[%token_origin3, %row_origin3] shape [%m, %n] : view<[%token_count]x[%intermediate_size]xbf16, #dense> -> vector<8xbf16>
+  %gate00 = vector.extf %gate00_bf16 : vector<8xbf16> to vector<8xf32>
+  %gate01 = vector.extf %gate01_bf16 : vector<8xbf16> to vector<8xf32>
+  %gate02 = vector.extf %gate02_bf16 : vector<8xbf16> to vector<8xf32>
+  %gate03 = vector.extf %gate03_bf16 : vector<8xbf16> to vector<8xf32>
+  %gate10 = vector.extf %gate10_bf16 : vector<8xbf16> to vector<8xf32>
+  %gate11 = vector.extf %gate11_bf16 : vector<8xbf16> to vector<8xf32>
+  %gate12 = vector.extf %gate12_bf16 : vector<8xbf16> to vector<8xf32>
+  %gate13 = vector.extf %gate13_bf16 : vector<8xbf16> to vector<8xf32>
+  %gate20 = vector.extf %gate20_bf16 : vector<8xbf16> to vector<8xf32>
+  %gate21 = vector.extf %gate21_bf16 : vector<8xbf16> to vector<8xf32>
+  %gate22 = vector.extf %gate22_bf16 : vector<8xbf16> to vector<8xf32>
+  %gate23 = vector.extf %gate23_bf16 : vector<8xbf16> to vector<8xf32>
+  %gate30 = vector.extf %gate30_bf16 : vector<8xbf16> to vector<8xf32>
+  %gate31 = vector.extf %gate31_bf16 : vector<8xbf16> to vector<8xf32>
+  %gate32 = vector.extf %gate32_bf16 : vector<8xbf16> to vector<8xf32>
+  %gate33 = vector.extf %gate33_bf16 : vector<8xbf16> to vector<8xf32>
+  %up00_bf16 = vector.fptrunc %result00 : vector<8xf32> to vector<8xbf16>
+  %up01_bf16 = vector.fptrunc %result01 : vector<8xf32> to vector<8xbf16>
+  %up02_bf16 = vector.fptrunc %result02 : vector<8xf32> to vector<8xbf16>
+  %up03_bf16 = vector.fptrunc %result03 : vector<8xf32> to vector<8xbf16>
+  %up10_bf16 = vector.fptrunc %result10 : vector<8xf32> to vector<8xbf16>
+  %up11_bf16 = vector.fptrunc %result11 : vector<8xf32> to vector<8xbf16>
+  %up12_bf16 = vector.fptrunc %result12 : vector<8xf32> to vector<8xbf16>
+  %up13_bf16 = vector.fptrunc %result13 : vector<8xf32> to vector<8xbf16>
+  %up20_bf16 = vector.fptrunc %result20 : vector<8xf32> to vector<8xbf16>
+  %up21_bf16 = vector.fptrunc %result21 : vector<8xf32> to vector<8xbf16>
+  %up22_bf16 = vector.fptrunc %result22 : vector<8xf32> to vector<8xbf16>
+  %up23_bf16 = vector.fptrunc %result23 : vector<8xf32> to vector<8xbf16>
+  %up30_bf16 = vector.fptrunc %result30 : vector<8xf32> to vector<8xbf16>
+  %up31_bf16 = vector.fptrunc %result31 : vector<8xf32> to vector<8xbf16>
+  %up32_bf16 = vector.fptrunc %result32 : vector<8xf32> to vector<8xbf16>
+  %up33_bf16 = vector.fptrunc %result33 : vector<8xf32> to vector<8xbf16>
+  %up00 = vector.extf %up00_bf16 : vector<8xbf16> to vector<8xf32>
+  %up01 = vector.extf %up01_bf16 : vector<8xbf16> to vector<8xf32>
+  %up02 = vector.extf %up02_bf16 : vector<8xbf16> to vector<8xf32>
+  %up03 = vector.extf %up03_bf16 : vector<8xbf16> to vector<8xf32>
+  %up10 = vector.extf %up10_bf16 : vector<8xbf16> to vector<8xf32>
+  %up11 = vector.extf %up11_bf16 : vector<8xbf16> to vector<8xf32>
+  %up12 = vector.extf %up12_bf16 : vector<8xbf16> to vector<8xf32>
+  %up13 = vector.extf %up13_bf16 : vector<8xbf16> to vector<8xf32>
+  %up20 = vector.extf %up20_bf16 : vector<8xbf16> to vector<8xf32>
+  %up21 = vector.extf %up21_bf16 : vector<8xbf16> to vector<8xf32>
+  %up22 = vector.extf %up22_bf16 : vector<8xbf16> to vector<8xf32>
+  %up23 = vector.extf %up23_bf16 : vector<8xbf16> to vector<8xf32>
+  %up30 = vector.extf %up30_bf16 : vector<8xbf16> to vector<8xf32>
+  %up31 = vector.extf %up31_bf16 : vector<8xbf16> to vector<8xf32>
+  %up32 = vector.extf %up32_bf16 : vector<8xbf16> to vector<8xf32>
+  %up33 = vector.extf %up33_bf16 : vector<8xbf16> to vector<8xf32>
+  %gate_silu00 = vector.siluf %gate00 : vector<8xf32>
+  %gate_silu01 = vector.siluf %gate01 : vector<8xf32>
+  %gate_silu02 = vector.siluf %gate02 : vector<8xf32>
+  %gate_silu03 = vector.siluf %gate03 : vector<8xf32>
+  %gate_silu10 = vector.siluf %gate10 : vector<8xf32>
+  %gate_silu11 = vector.siluf %gate11 : vector<8xf32>
+  %gate_silu12 = vector.siluf %gate12 : vector<8xf32>
+  %gate_silu13 = vector.siluf %gate13 : vector<8xf32>
+  %gate_silu20 = vector.siluf %gate20 : vector<8xf32>
+  %gate_silu21 = vector.siluf %gate21 : vector<8xf32>
+  %gate_silu22 = vector.siluf %gate22 : vector<8xf32>
+  %gate_silu23 = vector.siluf %gate23 : vector<8xf32>
+  %gate_silu30 = vector.siluf %gate30 : vector<8xf32>
+  %gate_silu31 = vector.siluf %gate31 : vector<8xf32>
+  %gate_silu32 = vector.siluf %gate32 : vector<8xf32>
+  %gate_silu33 = vector.siluf %gate33 : vector<8xf32>
+  %gate_silu00_bf16 = vector.fptrunc %gate_silu00 : vector<8xf32> to vector<8xbf16>
+  %gate_silu01_bf16 = vector.fptrunc %gate_silu01 : vector<8xf32> to vector<8xbf16>
+  %gate_silu02_bf16 = vector.fptrunc %gate_silu02 : vector<8xf32> to vector<8xbf16>
+  %gate_silu03_bf16 = vector.fptrunc %gate_silu03 : vector<8xf32> to vector<8xbf16>
+  %gate_silu10_bf16 = vector.fptrunc %gate_silu10 : vector<8xf32> to vector<8xbf16>
+  %gate_silu11_bf16 = vector.fptrunc %gate_silu11 : vector<8xf32> to vector<8xbf16>
+  %gate_silu12_bf16 = vector.fptrunc %gate_silu12 : vector<8xf32> to vector<8xbf16>
+  %gate_silu13_bf16 = vector.fptrunc %gate_silu13 : vector<8xf32> to vector<8xbf16>
+  %gate_silu20_bf16 = vector.fptrunc %gate_silu20 : vector<8xf32> to vector<8xbf16>
+  %gate_silu21_bf16 = vector.fptrunc %gate_silu21 : vector<8xf32> to vector<8xbf16>
+  %gate_silu22_bf16 = vector.fptrunc %gate_silu22 : vector<8xf32> to vector<8xbf16>
+  %gate_silu23_bf16 = vector.fptrunc %gate_silu23 : vector<8xf32> to vector<8xbf16>
+  %gate_silu30_bf16 = vector.fptrunc %gate_silu30 : vector<8xf32> to vector<8xbf16>
+  %gate_silu31_bf16 = vector.fptrunc %gate_silu31 : vector<8xf32> to vector<8xbf16>
+  %gate_silu32_bf16 = vector.fptrunc %gate_silu32 : vector<8xf32> to vector<8xbf16>
+  %gate_silu33_bf16 = vector.fptrunc %gate_silu33 : vector<8xf32> to vector<8xbf16>
+  %gate_silu00_rounded = vector.extf %gate_silu00_bf16 : vector<8xbf16> to vector<8xf32>
+  %gate_silu01_rounded = vector.extf %gate_silu01_bf16 : vector<8xbf16> to vector<8xf32>
+  %gate_silu02_rounded = vector.extf %gate_silu02_bf16 : vector<8xbf16> to vector<8xf32>
+  %gate_silu03_rounded = vector.extf %gate_silu03_bf16 : vector<8xbf16> to vector<8xf32>
+  %gate_silu10_rounded = vector.extf %gate_silu10_bf16 : vector<8xbf16> to vector<8xf32>
+  %gate_silu11_rounded = vector.extf %gate_silu11_bf16 : vector<8xbf16> to vector<8xf32>
+  %gate_silu12_rounded = vector.extf %gate_silu12_bf16 : vector<8xbf16> to vector<8xf32>
+  %gate_silu13_rounded = vector.extf %gate_silu13_bf16 : vector<8xbf16> to vector<8xf32>
+  %gate_silu20_rounded = vector.extf %gate_silu20_bf16 : vector<8xbf16> to vector<8xf32>
+  %gate_silu21_rounded = vector.extf %gate_silu21_bf16 : vector<8xbf16> to vector<8xf32>
+  %gate_silu22_rounded = vector.extf %gate_silu22_bf16 : vector<8xbf16> to vector<8xf32>
+  %gate_silu23_rounded = vector.extf %gate_silu23_bf16 : vector<8xbf16> to vector<8xf32>
+  %gate_silu30_rounded = vector.extf %gate_silu30_bf16 : vector<8xbf16> to vector<8xf32>
+  %gate_silu31_rounded = vector.extf %gate_silu31_bf16 : vector<8xbf16> to vector<8xf32>
+  %gate_silu32_rounded = vector.extf %gate_silu32_bf16 : vector<8xbf16> to vector<8xf32>
+  %gate_silu33_rounded = vector.extf %gate_silu33_bf16 : vector<8xbf16> to vector<8xf32>
+  %product00 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %gate_silu00_rounded, %up00 : vector<8xf32>
+  %product01 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %gate_silu01_rounded, %up01 : vector<8xf32>
+  %product02 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %gate_silu02_rounded, %up02 : vector<8xf32>
+  %product03 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %gate_silu03_rounded, %up03 : vector<8xf32>
+  %product10 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %gate_silu10_rounded, %up10 : vector<8xf32>
+  %product11 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %gate_silu11_rounded, %up11 : vector<8xf32>
+  %product12 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %gate_silu12_rounded, %up12 : vector<8xf32>
+  %product13 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %gate_silu13_rounded, %up13 : vector<8xf32>
+  %product20 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %gate_silu20_rounded, %up20 : vector<8xf32>
+  %product21 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %gate_silu21_rounded, %up21 : vector<8xf32>
+  %product22 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %gate_silu22_rounded, %up22 : vector<8xf32>
+  %product23 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %gate_silu23_rounded, %up23 : vector<8xf32>
+  %product30 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %gate_silu30_rounded, %up30 : vector<8xf32>
+  %product31 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %gate_silu31_rounded, %up31 : vector<8xf32>
+  %product32 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %gate_silu32_rounded, %up32 : vector<8xf32>
+  %product33 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %gate_silu33_rounded, %up33 : vector<8xf32>
+  vector.fragment.store<result> %product00, %output_view[%token_origin0, %row_origin0] shape [%m, %n] : vector<8xf32>, view<[%token_count]x[%intermediate_size]xbf16, #dense>
+  vector.fragment.store<result> %product01, %output_view[%token_origin0, %row_origin1] shape [%m, %n] : vector<8xf32>, view<[%token_count]x[%intermediate_size]xbf16, #dense>
+  vector.fragment.store<result> %product02, %output_view[%token_origin0, %row_origin2] shape [%m, %n] : vector<8xf32>, view<[%token_count]x[%intermediate_size]xbf16, #dense>
+  vector.fragment.store<result> %product03, %output_view[%token_origin0, %row_origin3] shape [%m, %n] : vector<8xf32>, view<[%token_count]x[%intermediate_size]xbf16, #dense>
+  vector.fragment.store<result> %product10, %output_view[%token_origin1, %row_origin0] shape [%m, %n] : vector<8xf32>, view<[%token_count]x[%intermediate_size]xbf16, #dense>
+  vector.fragment.store<result> %product11, %output_view[%token_origin1, %row_origin1] shape [%m, %n] : vector<8xf32>, view<[%token_count]x[%intermediate_size]xbf16, #dense>
+  vector.fragment.store<result> %product12, %output_view[%token_origin1, %row_origin2] shape [%m, %n] : vector<8xf32>, view<[%token_count]x[%intermediate_size]xbf16, #dense>
+  vector.fragment.store<result> %product13, %output_view[%token_origin1, %row_origin3] shape [%m, %n] : vector<8xf32>, view<[%token_count]x[%intermediate_size]xbf16, #dense>
+  vector.fragment.store<result> %product20, %output_view[%token_origin2, %row_origin0] shape [%m, %n] : vector<8xf32>, view<[%token_count]x[%intermediate_size]xbf16, #dense>
+  vector.fragment.store<result> %product21, %output_view[%token_origin2, %row_origin1] shape [%m, %n] : vector<8xf32>, view<[%token_count]x[%intermediate_size]xbf16, #dense>
+  vector.fragment.store<result> %product22, %output_view[%token_origin2, %row_origin2] shape [%m, %n] : vector<8xf32>, view<[%token_count]x[%intermediate_size]xbf16, #dense>
+  vector.fragment.store<result> %product23, %output_view[%token_origin2, %row_origin3] shape [%m, %n] : vector<8xf32>, view<[%token_count]x[%intermediate_size]xbf16, #dense>
+  vector.fragment.store<result> %product30, %output_view[%token_origin3, %row_origin0] shape [%m, %n] : vector<8xf32>, view<[%token_count]x[%intermediate_size]xbf16, #dense>
+  vector.fragment.store<result> %product31, %output_view[%token_origin3, %row_origin1] shape [%m, %n] : vector<8xf32>, view<[%token_count]x[%intermediate_size]xbf16, #dense>
+  vector.fragment.store<result> %product32, %output_view[%token_origin3, %row_origin2] shape [%m, %n] : vector<8xf32>, view<[%token_count]x[%intermediate_size]xbf16, #dense>
+  vector.fragment.store<result> %product33, %output_view[%token_origin3, %row_origin3] shape [%m, %n] : vector<8xf32>, view<[%token_count]x[%intermediate_size]xbf16, #dense>
   kernel.return
 }
 
