@@ -1358,6 +1358,24 @@ static bool loom_vector_memory_footprint_describe_view_op(
   return true;
 }
 
+static bool loom_vector_memory_footprint_describe_fragment_type(
+    const loom_module_t* module, loom_value_id_t view, loom_value_id_t rows,
+    loom_value_id_t columns, loom_type_t* out_type) {
+  if (view == LOOM_VALUE_ID_INVALID || view >= module->values.count) {
+    return false;
+  }
+  const loom_type_t view_type = loom_module_value_type(module, view);
+  if (!loom_type_is_view(view_type) || loom_type_rank(view_type) < 2 ||
+      rows == LOOM_VALUE_ID_INVALID || columns == LOOM_VALUE_ID_INVALID) {
+    return false;
+  }
+  *out_type = loom_type_shaped_2d(
+      LOOM_TYPE_VECTOR, loom_type_element_type(view_type),
+      loom_dim_pack_dynamic(rows), loom_dim_pack_dynamic(columns),
+      /*encoding_id=*/0);
+  return true;
+}
+
 static bool loom_vector_memory_footprint_describe_op(
     loom_vector_memory_footprint_state_t* state, const loom_op_t* op,
     loom_vector_memory_footprint_access_t* out_access) {
@@ -1368,6 +1386,31 @@ static bool loom_vector_memory_footprint_describe_op(
       .offsets = LOOM_VALUE_ID_INVALID,
   };
   switch (op->kind) {
+    case LOOM_OP_VECTOR_FRAGMENT_LOAD:
+      out_access->view = loom_vector_fragment_load_view(op);
+      if (!loom_vector_memory_footprint_describe_fragment_type(
+              state->module, out_access->view,
+              loom_vector_fragment_load_rows(op),
+              loom_vector_fragment_load_columns(op),
+              &out_access->vector_type)) {
+        return false;
+      }
+      out_access->static_indices = loom_vector_fragment_load_static_indices(op);
+      out_access->dynamic_indices = loom_vector_fragment_load_indices(op);
+      return true;
+    case LOOM_OP_VECTOR_FRAGMENT_STORE:
+      out_access->view = loom_vector_fragment_store_view(op);
+      if (!loom_vector_memory_footprint_describe_fragment_type(
+              state->module, out_access->view,
+              loom_vector_fragment_store_rows(op),
+              loom_vector_fragment_store_columns(op),
+              &out_access->vector_type)) {
+        return false;
+      }
+      out_access->static_indices =
+          loom_vector_fragment_store_static_indices(op);
+      out_access->dynamic_indices = loom_vector_fragment_store_indices(op);
+      return true;
     case LOOM_OP_VECTOR_LOAD:
       out_access->view = loom_vector_load_view(op);
       out_access->vector_type =

@@ -246,6 +246,21 @@ func.def target(@target) @dynamic_view_base_b128_alignment_rejected(%input: buff
 
 amdgpu.target<gfx1100> @target
 
+func.def target(@target) @fragment_store_tail_footprint_rejected(%output: buffer, %value: vector<8xf32>) {
+  %zero = index.constant 0 : offset
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %output_global = buffer.assume.memory_space<global> %output : buffer
+  %output_view = buffer.view %output_global[%zero] : buffer -> view<17x32xf32, #dense>
+  // ERROR@+1: SUBRANGE/010 {op_name="vector.fragment.store", view_axis="0", vector_axis="0", vector_extent="16", view_bound="17", required_origin_upper_bound="1", constraint_key="vector_footprint.full_vector_upper_bound"}
+  vector.fragment.store<result> %value, %output_view[16, 0] shape [%m, %n] : vector<8xf32>, view<17x32xf32, #dense>
+  func.return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+
 func.def target(@target) @oversized_f32x64_store_rejected(%output: buffer, %value: vector<64xf32>) {
   %zero = index.constant 0 : offset
   %output_global = buffer.assume.memory_space<global> %output : buffer
