@@ -1432,7 +1432,14 @@ static iree_status_t IssueGenerationBundle(
   return status;
 }
 
-static iree_status_t WarmSelectedResidentGeneration(
+static bool RequiresPreparedGenerationWarmup(
+    const LiveGenerationBenchmarkContext& context) {
+  return context.generation_residency_mode ==
+             ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_SELECTED_STAGE_BUNDLES ||
+         context.dit_fp8_source_residency != kDitFp8SourceResidencyNone;
+}
+
+static iree_status_t WarmPreparedGenerationState(
     const LiveGenerationBenchmarkContext& context,
     id4_ideogram4_generation_bundle_t* bundle, const ParsedRequest& request,
     id4_pipeline_diagnostics_sink_t* diagnostics_sink,
@@ -1442,8 +1449,7 @@ static iree_status_t WarmSelectedResidentGeneration(
   IREE_ASSERT_ARGUMENT(diagnostics_sink);
   IREE_ASSERT_ARGUMENT(prepare_value);
   IREE_ASSERT_ARGUMENT(completion_value);
-  if (context.generation_residency_mode !=
-      ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_SELECTED_STAGE_BUNDLES) {
+  if (!RequiresPreparedGenerationWarmup(context)) {
     return iree_ok_status();
   }
 
@@ -1457,7 +1463,7 @@ static iree_status_t WarmSelectedResidentGeneration(
       execution.out()));
   if (*completion_value == initial_completion_value) {
     return iree_make_status(IREE_STATUS_INTERNAL,
-                            "selected-resident warmup did not queue "
+                            "prepared-generation warmup did not queue "
                             "generation completion");
   }
   return WaitForSemaphore(completion_semaphore, *completion_value);
@@ -1866,7 +1872,7 @@ static iree_status_t RunGenerationIssuePreparedBenchmark(
                         profiled_dispatch_metadata_mode);
   bool execution_profile_captured = false;
   iree_hal_profiling_from_flags_t* profiling = nullptr;
-  iree_status_t status = WarmSelectedResidentGeneration(
+  iree_status_t status = WarmPreparedGenerationState(
       context, bundle.get(), request, &diagnostics_sink,
       prepare_semaphore.get(), &prepare_value, completion_semaphore.get(),
       &completion_value);
