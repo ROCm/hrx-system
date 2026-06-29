@@ -75,6 +75,7 @@ typedef enum loom_amdgpu_fp8_packed_bf16_repair_bits_e {
   LOOM_AMDGPU_FP8_PACKED_BF16_REPAIR_ZERO = 1u << 0,
   LOOM_AMDGPU_FP8_PACKED_BF16_REPAIR_SUBNORMAL = 1u << 1,
   LOOM_AMDGPU_FP8_PACKED_BF16_REPAIR_NAN = 1u << 2,
+  LOOM_AMDGPU_FP8_PACKED_BF16_REPAIR_INF = 1u << 3,
 } loom_amdgpu_fp8_packed_bf16_repair_bits_t;
 typedef uint32_t loom_amdgpu_fp8_packed_bf16_repairs_t;
 
