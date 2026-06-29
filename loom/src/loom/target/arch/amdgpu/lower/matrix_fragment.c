@@ -3598,8 +3598,8 @@ loom_amdgpu_emit_fragment_memory_fp8_to_packed_bf16_load_packet(
   *out_low_packet = LOOM_VALUE_ID_INVALID;
   loom_amdgpu_fragment_memory_packet_plan_t report_packet = *packet;
   loom_amdgpu_fragment_memory_address_t address;
-  loom_amdgpu_fp8_decode_plan_t decode_plan;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_select_fp8_decode_plan(
+  const loom_amdgpu_fp8_decode_plan_t* decode_plan = NULL;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_get_fp8_decode_plan(
       context, plan->view_element_type, &decode_plan));
   loom_low_lower_resolved_descriptor_t scalef32_bf16_descriptor = {0};
   bool has_identity_scalef32_bf16_descriptor = false;
@@ -3617,7 +3617,7 @@ loom_amdgpu_emit_fragment_memory_fp8_to_packed_bf16_load_packet(
         loom_amdgpu_fp8_decode_value_flags_from_facts(source_facts);
   }
   report_packet.flags |= loom_amdgpu_fragment_memory_fp8_decode_packet_flags(
-      &decode_plan, has_identity_scalef32_bf16_descriptor, decode_value_flags);
+      decode_plan, has_identity_scalef32_bf16_descriptor, decode_value_flags);
 
   IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fragment_memory_vaddr(
       context, source_op, layout, plan, report_packet.register_index,
@@ -3646,7 +3646,7 @@ loom_amdgpu_emit_fragment_memory_fp8_to_packed_bf16_load_packet(
   loom_type_t native_f32_pair_type = loom_type_none();
   loom_amdgpu_bf16_pack_descriptors_t bf16_pack_descriptors = {0};
   const bool has_native_f32_pair = iree_any_bit_set(
-      decode_plan.flags, LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_NATIVE_F32_PAIR);
+      decode_plan->flags, LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_NATIVE_F32_PAIR);
   if (!has_identity_scalef32_bf16_descriptor) {
     if (has_native_f32_pair) {
       IREE_RETURN_IF_ERROR(
@@ -3654,23 +3654,23 @@ loom_amdgpu_emit_fragment_memory_fp8_to_packed_bf16_load_packet(
       bf16_pack_descriptors = (loom_amdgpu_bf16_pack_descriptors_t){
           .flags =
               (iree_any_bit_set(
-                   decode_plan.flags,
+                   decode_plan->flags,
                    LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_NATIVE_BF16_PACK)
                    ? LOOM_AMDGPU_BF16_PACK_DESCRIPTOR_FLAG_HAS_NATIVE
                    : LOOM_AMDGPU_BF16_PACK_DESCRIPTOR_FLAG_NONE) |
-              (iree_any_bit_set(decode_plan.flags,
+              (iree_any_bit_set(decode_plan->flags,
                                 LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_PACK_U16)
                    ? LOOM_AMDGPU_BF16_PACK_DESCRIPTOR_FLAG_HAS_PACK_U16
                    : LOOM_AMDGPU_BF16_PACK_DESCRIPTOR_FLAG_NONE) |
               (iree_any_bit_set(
-                   decode_plan.flags,
+                   decode_plan->flags,
                    LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_ADD3_SRC2_LITERAL)
                    ? LOOM_AMDGPU_BF16_PACK_DESCRIPTOR_FLAG_HAS_ADD3_SRC2_LITERAL
                    : LOOM_AMDGPU_BF16_PACK_DESCRIPTOR_FLAG_NONE),
-          .native_descriptor = decode_plan.native_bf16_pack_descriptor,
-          .pack_u16_descriptor = decode_plan.pack_u16_descriptor,
+          .native_descriptor = decode_plan->native_bf16_pack_descriptor,
+          .pack_u16_descriptor = decode_plan->pack_u16_descriptor,
           .add3_src2_literal_descriptor =
-              decode_plan.add3_src2_literal_descriptor,
+              decode_plan->add3_src2_literal_descriptor,
       };
     } else {
       IREE_RETURN_IF_ERROR(loom_amdgpu_make_sgpr_type(context, &sgpr_type));
@@ -3692,7 +3692,7 @@ loom_amdgpu_emit_fragment_memory_fp8_to_packed_bf16_load_packet(
         loom_amdgpu_try_emit_fragment_memory_fp8_to_packed_bf16_packet(
             context, source_op, low_source_packet,
             report_packet.packet_register_count,
-            report_packet.result_register_count, &decode_plan,
+            report_packet.result_register_count, decode_plan,
             decode_value_flags, vgpr_type, sgpr_type, mask_type,
             low_result_registers, &selected_batched_decode));
   }
@@ -3704,7 +3704,7 @@ loom_amdgpu_emit_fragment_memory_fp8_to_packed_bf16_load_packet(
           loom_amdgpu_emit_fragment_memory_fp8_to_packed_bf16_register(
               context, source_op, plan, low_source_packet,
               report_packet.packet_register_count, result_register_index,
-              &decode_plan, decode_value_flags,
+              decode_plan, decode_value_flags,
               (has_identity_scalef32_bf16_descriptor ? &scalef32_bf16_descriptor
                                                      : NULL),
               low_identity_scale, native_f32_pair_type, &bf16_pack_descriptors,

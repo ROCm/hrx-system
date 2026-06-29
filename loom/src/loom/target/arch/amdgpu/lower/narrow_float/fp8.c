@@ -549,14 +549,43 @@ static iree_status_t loom_amdgpu_resolve_fp8_decode_plan_descriptors(
   return iree_ok_status();
 }
 
-iree_status_t loom_amdgpu_select_fp8_decode_plan(
+static iree_status_t loom_amdgpu_initialize_fp8_decode_plan(
     loom_low_lower_context_t* context, loom_scalar_type_t element_type,
-    loom_amdgpu_fp8_decode_plan_t* out_plan) {
-  memset(out_plan, 0, sizeof(*out_plan));
+    loom_amdgpu_fp8_decode_plan_t* plan) {
+  memset(plan, 0, sizeof(*plan));
   IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_fp8_decode_plan_descriptors(
-      context, element_type, out_plan));
+      context, element_type, plan));
 
-  loom_amdgpu_initialize_fp8_decode_format(element_type, out_plan);
+  loom_amdgpu_initialize_fp8_decode_format(element_type, plan);
+  return iree_ok_status();
+}
+
+typedef struct loom_amdgpu_fp8_decode_plan_cache_t {
+  // Scalar-type bits whose plan entries have been initialized.
+  uint32_t initialized_type_bits;
+  // Function-local decode plans keyed by loom_scalar_type_t.
+  loom_amdgpu_fp8_decode_plan_t plans[LOOM_SCALAR_TYPE_COUNT_];
+} loom_amdgpu_fp8_decode_plan_cache_t;
+
+static int loom_amdgpu_fp8_decode_plan_cache_state_key;
+
+iree_status_t loom_amdgpu_get_fp8_decode_plan(
+    loom_low_lower_context_t* context, loom_scalar_type_t element_type,
+    const loom_amdgpu_fp8_decode_plan_t** out_plan) {
+  IREE_ASSERT_LE(LOOM_SCALAR_TYPE_COUNT_, 32);
+  IREE_ASSERT_LT(element_type, LOOM_SCALAR_TYPE_COUNT_);
+  *out_plan = NULL;
+  loom_amdgpu_fp8_decode_plan_cache_t* cache = NULL;
+  IREE_RETURN_IF_ERROR(loom_low_lower_get_or_allocate_target_state(
+      context, &loom_amdgpu_fp8_decode_plan_cache_state_key, sizeof(*cache),
+      (void**)&cache));
+  const uint32_t type_bit = UINT32_C(1) << element_type;
+  if ((cache->initialized_type_bits & type_bit) == 0) {
+    IREE_RETURN_IF_ERROR(loom_amdgpu_initialize_fp8_decode_plan(
+        context, element_type, &cache->plans[element_type]));
+    cache->initialized_type_bits |= type_bit;
+  }
+  *out_plan = &cache->plans[element_type];
   return iree_ok_status();
 }
 
