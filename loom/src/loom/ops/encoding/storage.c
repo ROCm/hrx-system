@@ -489,10 +489,19 @@ static bool loom_encoding_static_named_fp8_schema(
       loom_encoding_find_named_fp8_schema(module, encoding);
   if (!schema) return false;
 
+  uint64_t rounding_policy_value = 0;
+  if (!loom_encoding_static_symbol_param_or_default(
+          module, encoding, loom_encoding_rounding_param_name(),
+          LOOM_ENCODING_MATRIX_OPERAND_SYMBOL_SET_ROUNDING_POLICY,
+          LOOM_VALUE_FACT_ROUNDING_POLICY_NONE, &rounding_policy_value)) {
+    return true;
+  }
+
   out_schema->static_spec_encoding_id = encoding_id;
   out_schema->encoded_operand = (loom_value_fact_encoded_operand_schema_t){
       .element_format = schema->element_format,
       .payload_packing = LOOM_VALUE_FACT_PAYLOAD_PACKING_DENSE_LANES,
+      .rounding_policy = (uint32_t)rounding_policy_value,
       .payload_element_count = 1,
   };
   return true;

@@ -108,6 +108,37 @@ func.def @physical_storage_fp8_fnuz_params() {
 
 // ====
 
+func.def @named_fp8_schema_rounding_params() {
+  %schema = encoding.define #fp8_e4m3fn<rounding=finite_only, storage_bits=8> : encoding<schema>
+  func.return
+}
+
+// ====
+
+func.def @named_fp8_schema_unsupported_param() {
+  // ERROR@+1: ENCODING/008 "fp8_e4m3fn" "payload_elements"
+  %schema = encoding.define #fp8_e4m3fn<payload_elements=16> : encoding<schema>
+  func.return
+}
+
+// ====
+
+func.def @named_fp8_schema_bad_rounding() {
+  // ERROR@+1: ENCODING/013 "fp8_e4m3fn" "rounding" "wat"
+  %schema = encoding.define #fp8_e4m3fn<rounding=wat> : encoding<schema>
+  func.return
+}
+
+// ====
+
+func.def @named_fp8_schema_bad_storage_bits() {
+  // ERROR@+1: STRUCTURE/014 "storage_bits"
+  %schema = encoding.define #ieee_fp8_e4m3<storage_bits=16> : encoding<schema>
+  func.return
+}
+
+// ====
+
 func.def @matrix_operand_fp8_fnuz_formats() {
   %e4m3 = encoding.define #matrix_operand<element_format=f8e4m3fnuz, payload_elements=8, payload_registers=2> : encoding<schema>
   %e5m2 = encoding.define #matrix_operand<element_format=f8e5m2fnuz, payload_elements=8, payload_registers=2> : encoding<schema>
