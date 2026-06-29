@@ -3232,6 +3232,31 @@ static iree_status_t loom_amdgpu_emit_fragment_memory_cmp_u32_lit(
     uint32_t immediate, loom_type_t vgpr_type, loom_type_t mask_type,
     loom_value_id_t* out_mask) {
   *out_mask = LOOM_VALUE_ID_INVALID;
+  loom_low_lower_resolved_descriptor_t src1_inline_descriptor = {0};
+  bool src1_inline_descriptor_present = false;
+  if (descriptor_ref == LOOM_AMDGPU_DESCRIPTOR_REF_V_CMP_EQ_I32 &&
+      immediate <= LOOM_AMDGPU_SOURCE_INLINE_U32_MAX) {
+    IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_descriptor_ref_if_present(
+        context, LOOM_AMDGPU_DESCRIPTOR_REF_V_CMP_EQ_I32_SRC1_INLINE,
+        &src1_inline_descriptor, &src1_inline_descriptor_present));
+  }
+  if (src1_inline_descriptor_present) {
+    loom_named_attr_t attrs[1] = {0};
+    iree_host_size_t attr_count = 0;
+    IREE_RETURN_IF_ERROR(
+        loom_amdgpu_append_i64_attr(context, IREE_SV("rhs"), immediate, attrs,
+                                    IREE_ARRAYSIZE(attrs), &attr_count));
+    const loom_value_id_t operands[] = {low_value};
+    loom_op_t* compare_op = NULL;
+    IREE_RETURN_IF_ERROR(loom_low_lower_emit_resolved_descriptor_op(
+        context, &src1_inline_descriptor, operands, IREE_ARRAYSIZE(operands),
+        loom_make_named_attr_slice(attrs, attr_count), &mask_type, 1,
+        /*tied_results=*/NULL, /*tied_result_count=*/0, source_op->location,
+        &compare_op));
+    *out_mask = loom_value_slice_get(loom_low_op_results(compare_op), 0);
+    return iree_ok_status();
+  }
+
   loom_value_id_t low_immediate = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_amdgpu_emit_const_u32(
       context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_MOV_B32, immediate,
