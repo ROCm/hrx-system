@@ -5832,6 +5832,39 @@ _KERNEL_CASES = [
         "target_name": "qwen3_vl_linear_bf16_bf16_wmma_m64n64_qwen_mlp_down_shape",
     },
     {
+        "actual_case": "@id4_qwen3_vl_linear_bf16_bf16_wmma_m64n64_qwen_projection_shape_1024_case",
+        "benchmark": "@id4_qwen3_vl_linear_bf16_bf16_wmma_m64n64_qwen_projection_shape_1024",
+        "configs": [
+            "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=1024",
+            "--config=id4.qwen3_vl.linear_wmma.input_size=4096",
+            "--config=id4.qwen3_vl.linear_wmma.output_size=4096",
+        ],
+        "source": "qwen3_vl/linear_bf16_f32_wmma.loom",
+        "target_name": "qwen3_vl_linear_bf16_bf16_wmma_m64n64_qwen_projection_shape_1024",
+    },
+    {
+        "actual_case": "@id4_qwen3_vl_linear_bf16_bf16_wmma_m64n64_qwen_mlp_up_shape_1024_case",
+        "benchmark": "@id4_qwen3_vl_linear_bf16_bf16_wmma_m64n64_qwen_mlp_up_shape_1024",
+        "configs": [
+            "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=1024",
+            "--config=id4.qwen3_vl.linear_wmma.input_size=4096",
+            "--config=id4.qwen3_vl.linear_wmma.output_size=12288",
+        ],
+        "source": "qwen3_vl/linear_bf16_f32_wmma.loom",
+        "target_name": "qwen3_vl_linear_bf16_bf16_wmma_m64n64_qwen_mlp_up_shape_1024",
+    },
+    {
+        "actual_case": "@id4_qwen3_vl_linear_bf16_bf16_wmma_m64n64_qwen_mlp_down_shape_1024_case",
+        "benchmark": "@id4_qwen3_vl_linear_bf16_bf16_wmma_m64n64_qwen_mlp_down_shape_1024",
+        "configs": [
+            "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=1024",
+            "--config=id4.qwen3_vl.linear_wmma.input_size=12288",
+            "--config=id4.qwen3_vl.linear_wmma.output_size=4096",
+        ],
+        "source": "qwen3_vl/linear_bf16_f32_wmma.loom",
+        "target_name": "qwen3_vl_linear_bf16_bf16_wmma_m64n64_qwen_mlp_down_shape_1024",
+    },
+    {
         "actual_case": "@id4_qwen3_vl_linear_bf16_bf16_wmma_m48n32_small_case",
         "benchmark": "@id4_qwen3_vl_linear_bf16_bf16_wmma_m48n32_small",
         "configs": [
@@ -6094,6 +6127,17 @@ _KERNEL_CASES = [
         ],
         "source": "qwen3_vl/linear_bf16_f32_wmma.loom",
         "target_name": "qwen3_vl_linear_bf16_bf16_wmma_m32n64_transpose_output_qwen_value_shape",
+    },
+    {
+        "actual_case": "@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n64_qwen_kv_shape_1024_case",
+        "benchmark": "@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n64_qwen_kv_shape_1024",
+        "configs": [
+            "--config=id4.qwen3_vl.linear_wmma.dispatch_token_count=1024",
+            "--config=id4.qwen3_vl.linear_wmma.input_size=4096",
+            "--config=id4.qwen3_vl.linear_wmma.output_size=1024",
+        ],
+        "source": "qwen3_vl/linear_bf16_f32_wmma.loom",
+        "target_name": "qwen3_vl_linear_bf16_bf16_wmma_m32n64_qwen_kv_shape_1024",
     },
     {
         "actual_case": "@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n64_qwen_mlp_up_shape_case",

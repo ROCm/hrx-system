@@ -1026,6 +1026,36 @@ check.case public @id4_qwen3_vl_linear_bf16_bf16_wmma_m64n64_qwen_mlp_down_shape
   check.return
 }
 
+check.case public @id4_qwen3_vl_linear_bf16_bf16_wmma_m64n64_qwen_projection_shape_1024_case {
+  %input = check.generate.fill value(1.0) : tensor<1024x4096xbf16>
+  %weight = check.generate.fill value(0.0) : tensor<4096x4096xbf16>
+  %output = check.generate.fill value(1.0) : tensor<1024x4096xbf16>
+  %expected = check.generate.fill value(0.0) : tensor<1024x4096xbf16>
+  func.call @id4_qwen3_vl_linear_bf16_bf16_wmma_m64n64(%input, %weight, %output) : (tensor<1024x4096xbf16>, tensor<4096x4096xbf16>, tensor<1024x4096xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<1024x4096xbf16>
+  check.return
+}
+
+check.case public @id4_qwen3_vl_linear_bf16_bf16_wmma_m64n64_qwen_mlp_up_shape_1024_case {
+  %input = check.generate.fill value(1.0) : tensor<1024x4096xbf16>
+  %weight = check.generate.fill value(0.0) : tensor<12288x4096xbf16>
+  %output = check.generate.fill value(1.0) : tensor<1024x12288xbf16>
+  %expected = check.generate.fill value(0.0) : tensor<1024x12288xbf16>
+  func.call @id4_qwen3_vl_linear_bf16_bf16_wmma_m64n64(%input, %weight, %output) : (tensor<1024x4096xbf16>, tensor<12288x4096xbf16>, tensor<1024x12288xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<1024x12288xbf16>
+  check.return
+}
+
+check.case public @id4_qwen3_vl_linear_bf16_bf16_wmma_m64n64_qwen_mlp_down_shape_1024_case {
+  %input = check.generate.fill value(1.0) : tensor<1024x12288xbf16>
+  %weight = check.generate.fill value(0.0) : tensor<4096x12288xbf16>
+  %output = check.generate.fill value(1.0) : tensor<1024x4096xbf16>
+  %expected = check.generate.fill value(0.0) : tensor<1024x4096xbf16>
+  func.call @id4_qwen3_vl_linear_bf16_bf16_wmma_m64n64(%input, %weight, %output) : (tensor<1024x12288xbf16>, tensor<4096x12288xbf16>, tensor<1024x4096xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<1024x4096xbf16>
+  check.return
+}
+
 check.case public @id4_qwen3_vl_linear_bf16_bf16_wmma_m32n64_qwen_projection_shape_case {
   %input = check.generate.fill value(1.0) : tensor<480x4096xbf16>
   %weight = check.generate.fill value(0.0) : tensor<4096x4096xbf16>
@@ -1052,6 +1082,16 @@ check.case public @id4_qwen3_vl_linear_bf16_bf16_wmma_m32n64_transpose_output_qw
   %output = check.generate.fill value(1.0) : tensor<1024x1024xbf16>
   %expected = check.generate.fill value(0.0) : tensor<1024x1024xbf16>
   func.call @id4_qwen3_vl_linear_bf16_bf16_wmma_m32n64_transpose_output(%input, %weight, %output) : (tensor<1024x4096xbf16>, tensor<1024x4096xbf16>, tensor<1024x1024xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<1024x1024xbf16>
+  check.return
+}
+
+check.case public @id4_qwen3_vl_linear_bf16_bf16_wmma_m32n64_qwen_kv_shape_1024_case {
+  %input = check.generate.fill value(1.0) : tensor<1024x4096xbf16>
+  %weight = check.generate.fill value(0.0) : tensor<1024x4096xbf16>
+  %output = check.generate.fill value(1.0) : tensor<1024x1024xbf16>
+  %expected = check.generate.fill value(0.0) : tensor<1024x1024xbf16>
+  func.call @id4_qwen3_vl_linear_bf16_bf16_wmma_m32n64(%input, %weight, %output) : (tensor<1024x4096xbf16>, tensor<1024x4096xbf16>, tensor<1024x1024xbf16>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<1024x1024xbf16>
   check.return
 }
@@ -1294,11 +1334,19 @@ check.benchmark<@id4_qwen3_vl_linear_bf16_bf16_wmma_m64n64_qwen_mlp_up_shape_cas
 
 check.benchmark<@id4_qwen3_vl_linear_bf16_bf16_wmma_m64n64_qwen_mlp_down_shape_case> @id4_qwen3_vl_linear_bf16_bf16_wmma_m64n64_qwen_mlp_down_shape
 
+check.benchmark<@id4_qwen3_vl_linear_bf16_bf16_wmma_m64n64_qwen_projection_shape_1024_case> @id4_qwen3_vl_linear_bf16_bf16_wmma_m64n64_qwen_projection_shape_1024
+
+check.benchmark<@id4_qwen3_vl_linear_bf16_bf16_wmma_m64n64_qwen_mlp_up_shape_1024_case> @id4_qwen3_vl_linear_bf16_bf16_wmma_m64n64_qwen_mlp_up_shape_1024
+
+check.benchmark<@id4_qwen3_vl_linear_bf16_bf16_wmma_m64n64_qwen_mlp_down_shape_1024_case> @id4_qwen3_vl_linear_bf16_bf16_wmma_m64n64_qwen_mlp_down_shape_1024
+
 check.benchmark<@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n64_qwen_projection_shape_case> @id4_qwen3_vl_linear_bf16_bf16_wmma_m32n64_qwen_projection_shape
 
 check.benchmark<@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n64_qwen_kv_shape_case> @id4_qwen3_vl_linear_bf16_bf16_wmma_m32n64_qwen_kv_shape
 
 check.benchmark<@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n64_transpose_output_qwen_value_shape_case> @id4_qwen3_vl_linear_bf16_bf16_wmma_m32n64_transpose_output_qwen_value_shape
+
+check.benchmark<@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n64_qwen_kv_shape_1024_case> @id4_qwen3_vl_linear_bf16_bf16_wmma_m32n64_qwen_kv_shape_1024
 
 check.benchmark<@id4_qwen3_vl_linear_bf16_bf16_wmma_m32n64_qwen_mlp_up_shape_case> @id4_qwen3_vl_linear_bf16_bf16_wmma_m32n64_qwen_mlp_up_shape
 
