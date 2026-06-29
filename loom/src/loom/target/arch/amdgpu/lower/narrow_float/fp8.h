@@ -180,10 +180,12 @@ iree_status_t loom_amdgpu_resolve_fp8_scalef32_descriptor_if_present(
     loom_scalar_type_t result_element_type,
     loom_low_lower_resolved_descriptor_t* out_descriptor, bool* out_is_present);
 
-// Selects descriptor helpers and initializes format tables for |element_type|.
-iree_status_t loom_amdgpu_select_fp8_decode_plan(
+// Returns descriptor helpers and format tables for |element_type|. The plan is
+// function-local target lowering state and remains valid until the current
+// loom_low_lower_function call returns.
+iree_status_t loom_amdgpu_get_fp8_decode_plan(
     loom_low_lower_context_t* context, loom_scalar_type_t element_type,
-    loom_amdgpu_fp8_decode_plan_t* out_plan);
+    const loom_amdgpu_fp8_decode_plan_t** out_plan);
 
 // Returns the target packet and value-fact requirements missing from the
 // packed FP8-to-BF16 pair decode path.
