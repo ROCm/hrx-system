@@ -76,38 +76,63 @@ iree_status_t loom_amdgpu_emit_f32_to_bf16_lane_with_descriptors(
       rounded, lane_type, out_lane);
 }
 
-iree_status_t loom_amdgpu_resolve_bf16_pack_descriptors(
+static iree_status_t loom_amdgpu_initialize_bf16_pack_descriptors(
     loom_low_lower_context_t* context,
-    loom_amdgpu_bf16_pack_descriptors_t* out_descriptors) {
-  *out_descriptors = (loom_amdgpu_bf16_pack_descriptors_t){0};
+    loom_amdgpu_bf16_pack_descriptors_t* descriptors) {
+  *descriptors = (loom_amdgpu_bf16_pack_descriptors_t){0};
 
   bool has_native_descriptor = false;
   IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_descriptor_ref_if_present(
       context, LOOM_AMDGPU_DESCRIPTOR_REF_V_CVT_PK_BF16_F32,
-      &out_descriptors->native_descriptor, &has_native_descriptor));
+      &descriptors->native_descriptor, &has_native_descriptor));
   if (has_native_descriptor) {
-    out_descriptors->flags |= LOOM_AMDGPU_BF16_PACK_DESCRIPTOR_FLAG_HAS_NATIVE;
+    descriptors->flags |= LOOM_AMDGPU_BF16_PACK_DESCRIPTOR_FLAG_HAS_NATIVE;
   }
 
   bool has_pack_u16_descriptor = false;
   IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_descriptor_ref_if_present(
       context, LOOM_AMDGPU_DESCRIPTOR_REF_V_CVT_PK_U16_U32,
-      &out_descriptors->pack_u16_descriptor, &has_pack_u16_descriptor));
+      &descriptors->pack_u16_descriptor, &has_pack_u16_descriptor));
   if (has_pack_u16_descriptor) {
-    out_descriptors->flags |=
-        LOOM_AMDGPU_BF16_PACK_DESCRIPTOR_FLAG_HAS_PACK_U16;
+    descriptors->flags |= LOOM_AMDGPU_BF16_PACK_DESCRIPTOR_FLAG_HAS_PACK_U16;
   }
 
   bool has_add3_src2_literal_descriptor = false;
   IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_descriptor_ref_if_present(
       context, LOOM_AMDGPU_DESCRIPTOR_REF_V_ADD3_U32_SRC2_LIT,
-      &out_descriptors->add3_src2_literal_descriptor,
+      &descriptors->add3_src2_literal_descriptor,
       &has_add3_src2_literal_descriptor));
   if (has_add3_src2_literal_descriptor) {
-    out_descriptors->flags |=
+    descriptors->flags |=
         LOOM_AMDGPU_BF16_PACK_DESCRIPTOR_FLAG_HAS_ADD3_SRC2_LITERAL;
   }
 
+  return iree_ok_status();
+}
+
+typedef struct loom_amdgpu_bf16_pack_descriptor_cache_t {
+  // Non-zero once descriptors has been initialized for this lowering context.
+  uint32_t initialized;
+  // Function-local BF16 pack descriptor set.
+  loom_amdgpu_bf16_pack_descriptors_t descriptors;
+} loom_amdgpu_bf16_pack_descriptor_cache_t;
+
+static int loom_amdgpu_bf16_pack_descriptor_cache_state_key;
+
+iree_status_t loom_amdgpu_get_bf16_pack_descriptors(
+    loom_low_lower_context_t* context,
+    const loom_amdgpu_bf16_pack_descriptors_t** out_descriptors) {
+  *out_descriptors = NULL;
+  loom_amdgpu_bf16_pack_descriptor_cache_t* cache = NULL;
+  IREE_RETURN_IF_ERROR(loom_low_lower_get_or_allocate_target_state(
+      context, &loom_amdgpu_bf16_pack_descriptor_cache_state_key,
+      sizeof(*cache), (void**)&cache));
+  if (cache->initialized == 0) {
+    IREE_RETURN_IF_ERROR(loom_amdgpu_initialize_bf16_pack_descriptors(
+        context, &cache->descriptors));
+    cache->initialized = 1;
+  }
+  *out_descriptors = &cache->descriptors;
   return iree_ok_status();
 }
 
@@ -115,11 +140,11 @@ iree_status_t loom_amdgpu_emit_f32_to_bf16_lane(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_value_id_t source_lane, loom_type_t lane_type,
     loom_value_id_t* out_lane) {
-  loom_amdgpu_bf16_pack_descriptors_t descriptors = {0};
+  const loom_amdgpu_bf16_pack_descriptors_t* descriptors = NULL;
   IREE_RETURN_IF_ERROR(
-      loom_amdgpu_resolve_bf16_pack_descriptors(context, &descriptors));
+      loom_amdgpu_get_bf16_pack_descriptors(context, &descriptors));
   return loom_amdgpu_emit_f32_to_bf16_lane_with_descriptors(
-      context, source_op, &descriptors, source_lane, lane_type, out_lane);
+      context, source_op, descriptors, source_lane, lane_type, out_lane);
 }
 
 static iree_status_t loom_amdgpu_emit_bf16_pack_descriptor(
@@ -194,10 +219,10 @@ iree_status_t loom_amdgpu_emit_f32_pair_to_packed_bf16(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_value_id_t low_source_lane, loom_value_id_t high_source_lane,
     loom_type_t lane_type, loom_value_id_t* out_packed) {
-  loom_amdgpu_bf16_pack_descriptors_t descriptors = {0};
+  const loom_amdgpu_bf16_pack_descriptors_t* descriptors = NULL;
   IREE_RETURN_IF_ERROR(
-      loom_amdgpu_resolve_bf16_pack_descriptors(context, &descriptors));
+      loom_amdgpu_get_bf16_pack_descriptors(context, &descriptors));
   return loom_amdgpu_emit_f32_pair_to_packed_bf16_with_descriptors(
-      context, source_op, &descriptors, low_source_lane, high_source_lane,
+      context, source_op, descriptors, low_source_lane, high_source_lane,
       lane_type, out_packed);
 }
