@@ -4200,12 +4200,53 @@ def _v_cvt_pk_f32_packed8_overlay(source_type: str) -> AmdgpuDescriptorOverlay:
     )
 
 
+_SCALEF32_PK_PACKED8_ROWS = (
+    ("fp8", "f16", 1),
+    ("bf8", "f16", 1),
+    ("fp8", "bf16", 1),
+    ("bf8", "bf16", 1),
+    ("fp8", "f32", 2),
+    ("bf8", "f32", 2),
+)
+
+
+def _v_cvt_scalef32_pk_packed8_overlay(
+    source_type: str, target_type: str, result_units: int
+) -> AmdgpuDescriptorOverlay:
+    return AmdgpuDescriptorOverlay(
+        descriptor_key=f"amdgpu.v_cvt_scalef32_pk_{target_type}_{source_type}",
+        instruction_name=(
+            f"V_CVT_SCALEF32_PK_{target_type.upper()}_{source_type.upper()}"
+        ),
+        mnemonic=f"v_cvt_scalef32_pk_{target_type}_{source_type}",
+        encoding_name="ENC_VOP3",
+        semantic_tag=f"convert.scale.float.{source_type}x2.{target_type}x2",
+        schedule_class=_SCHEDULE_VALU,
+        operands=(
+            AmdgpuOperandOverlay("VDST", _vgpr_result(units=result_units)),
+            AmdgpuOperandOverlay(
+                "SRC0",
+                _sgpr_vgpr_operand("input"),
+                size_exception_reason=_PACKED8_SOURCE_SIZE_REASON,
+            ),
+            AmdgpuOperandOverlay("SRC1", _sgpr_vgpr_operand("scale")),
+        ),
+        flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    )
+
+
 def _v_cvt_f32_packed8_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
     return (
         _v_cvt_f32_packed8_overlay("fp8"),
         _v_cvt_f32_packed8_overlay("bf8"),
         _v_cvt_pk_f32_packed8_overlay("fp8"),
         _v_cvt_pk_f32_packed8_overlay("bf8"),
+    )
+
+
+def _v_cvt_scalef32_pk_packed8_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
+    return tuple(
+        _v_cvt_scalef32_pk_packed8_overlay(*row) for row in _SCALEF32_PK_PACKED8_ROWS
     )
 
 
@@ -5032,6 +5073,7 @@ __all__ = (
     "_v_cvt_i32_f32_overlay",
     "_v_cvt_pk_bf16_f32_overlay",
     "_v_cvt_pk_u16_u32_overlay",
+    "_v_cvt_scalef32_pk_packed8_overlays",
     "_v_cvt_u32_f32_overlay",
     "_v_ceil_f32_overlay",
     "_v_div_fixup_f32_overlay",
