@@ -29,7 +29,6 @@ enum {
   ID4_QWEN3_VL_LINEAR_WMMA_M64N64_MIN_TOKEN_COUNT = 512,
   ID4_QWEN3_VL_LINEAR_WMMA_M64N64_MIN_OUTPUT_SIZE = 4096,
   ID4_QWEN3_VL_ATTENTION_WMMA_MIN_TOKEN_COUNT = 256,
-  ID4_QWEN3_VL_MLP_GATE_UP_SILU_PRODUCT_WMMA_MIN_TOKEN_COUNT = 4097,
   ID4_QWEN3_VL_CONDITION_BLOCK_ELEMENT_COUNT = 2048,
   ID4_QWEN3_VL_CONFIG_VALUE_BUFFER_CAPACITY = 16,
   ID4_QWEN3_VL_MAX_KERNEL_CONFIG_BINDING_COUNT = 8,
@@ -3177,10 +3176,7 @@ static iree_status_t id4_qwen3_vl_program_author_layer(
   uint32_t mlp_token_capacity = 0;
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_calculate_bf16_token_capacity(
       options->request.token_count, &mlp_token_capacity));
-  const bool uses_fused_mlp =
-      !requires_materialized_mlp_projections &&
-      mlp_token_capacity >=
-          ID4_QWEN3_VL_MLP_GATE_UP_SILU_PRODUCT_WMMA_MIN_TOKEN_COUNT;
+  const bool uses_fused_mlp = !requires_materialized_mlp_projections;
   if (!uses_fused_mlp) {
     id4_pipeline_program_tensor_t gate = id4_pipeline_program_tensor_invalid();
     IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_author_linear(
