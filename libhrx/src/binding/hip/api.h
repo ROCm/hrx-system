@@ -57,19 +57,19 @@ typedef enum hipArray_Format {
 } hipArray_Format;
 
 typedef struct HIP_ARRAY_DESCRIPTOR {
-  size_t Width;                 // Logical array width in elements.
-  size_t Height;                // Logical array height in elements.
-  hipArray_Format Format;       // Element format for each channel.
-  unsigned int NumChannels;     // Number of packed channels per element.
+  size_t Width;              // Logical array width in elements.
+  size_t Height;             // Logical array height in elements.
+  hipArray_Format Format;    // Element format for each channel.
+  unsigned int NumChannels;  // Number of packed channels per element.
 } HIP_ARRAY_DESCRIPTOR;
 
 typedef struct HIP_ARRAY3D_DESCRIPTOR {
-  size_t Width;                 // Logical array width in elements.
-  size_t Height;                // Logical array height in elements.
-  size_t Depth;                 // Logical array depth in elements.
-  hipArray_Format Format;       // Element format for each channel.
-  unsigned int NumChannels;     // Number of packed channels per element.
-  unsigned int Flags;           // Creation flags.
+  size_t Width;              // Logical array width in elements.
+  size_t Height;             // Logical array height in elements.
+  size_t Depth;              // Logical array depth in elements.
+  hipArray_Format Format;    // Element format for each channel.
+  unsigned int NumChannels;  // Number of packed channels per element.
+  unsigned int Flags;        // Creation flags.
 } HIP_ARRAY3D_DESCRIPTOR;
 
 // Dimension type.

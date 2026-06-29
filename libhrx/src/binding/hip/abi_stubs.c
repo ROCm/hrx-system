@@ -350,18 +350,18 @@ static hipError_t hrx_hip_mipmapped_array_level_size(
   hipError_t result =
       hrx_hip_array3d_descriptor_element_size(descriptor, &element_size);
   if (result != hipSuccess) return result;
-  const size_t width = hrx_hip_mipmapped_level_dimension(descriptor->Width, level);
+  const size_t width =
+      hrx_hip_mipmapped_level_dimension(descriptor->Width, level);
   const size_t height = hrx_hip_mipmapped_level_dimension(
       descriptor->Height ? descriptor->Height : 1, level);
   const size_t depth = hrx_hip_mipmapped_level_dimension(
       descriptor->Depth ? descriptor->Depth : 1, level);
   size_t row_size = 0;
   size_t slice_size = 0;
-  if (IREE_UNLIKELY(!iree_host_size_checked_mul(width, element_size,
-                                                &row_size) ||
-                    !iree_host_size_checked_mul(row_size, height,
-                                                &slice_size) ||
-                    !iree_host_size_checked_mul(slice_size, depth, out_size))) {
+  if (IREE_UNLIKELY(
+          !iree_host_size_checked_mul(width, element_size, &row_size) ||
+          !iree_host_size_checked_mul(row_size, height, &slice_size) ||
+          !iree_host_size_checked_mul(slice_size, depth, out_size))) {
     return hipErrorInvalidValue;
   }
   return hipSuccess;
@@ -1381,8 +1381,8 @@ static hipError_t hrx_hip_channel_desc_element_size(
   return hipSuccess;
 }
 
-static hipError_t hrx_hip_batch_array_element_size(
-    const hipMemcpy3DBatchOp* op, size_t* out_element_size) {
+static hipError_t hrx_hip_batch_array_element_size(const hipMemcpy3DBatchOp* op,
+                                                   size_t* out_element_size) {
   if (!op || !out_element_size) return hipErrorInvalidValue;
   *out_element_size = 1;
   hipArray_const_t array = NULL;
@@ -1398,14 +1398,16 @@ static hipError_t hrx_hip_batch_array_element_size(
   return hrx_hip_channel_desc_element_size(&desc, out_element_size);
 }
 
-static hipError_t hrx_hip_batch_set_operand(
-    const hipMemcpy3DOperand* operand, bool source, const hipExtent* extent,
-    size_t element_size, hipMemcpy3DParms* params) {
+static hipError_t hrx_hip_batch_set_operand(const hipMemcpy3DOperand* operand,
+                                            bool source,
+                                            const hipExtent* extent,
+                                            size_t element_size,
+                                            hipMemcpy3DParms* params) {
   if (!operand || !extent || !params) return hipErrorInvalidValue;
   switch (operand->type) {
     case hipMemcpyOperandTypePointer: {
-      if (!operand->op.ptr.ptr &&
-          extent->width != 0 && extent->height != 0 && extent->depth != 0) {
+      if (!operand->op.ptr.ptr && extent->width != 0 && extent->height != 0 &&
+          extent->depth != 0) {
         return hipErrorInvalidValue;
       }
       const size_t row_length =
@@ -1430,8 +1432,8 @@ static hipError_t hrx_hip_batch_set_operand(
       return hipSuccess;
     }
     case hipMemcpyOperandTypeArray:
-      if (!operand->op.array.array &&
-          extent->width != 0 && extent->height != 0 && extent->depth != 0) {
+      if (!operand->op.array.array && extent->width != 0 &&
+          extent->height != 0 && extent->depth != 0) {
         return hipErrorInvalidValue;
       }
       if (source) {
@@ -1468,9 +1470,8 @@ static hipError_t hrx_hip_batch_make_3d_params(const hipMemcpy3DBatchOp* op,
   size_t element_size = 1;
   hipError_t result = hrx_hip_batch_array_element_size(op, &element_size);
   if (result != hipSuccess) return result;
-  result =
-      hrx_hip_batch_set_operand(&op->src, true, &op->extent, element_size,
-                                params);
+  result = hrx_hip_batch_set_operand(&op->src, true, &op->extent, element_size,
+                                     params);
   if (result != hipSuccess) return result;
   return hrx_hip_batch_set_operand(&op->dst, false, &op->extent, element_size,
                                    params);
@@ -1646,16 +1647,16 @@ HIPAPI hipError_t hipMipmappedArrayCreate(
   size_t memory_size = 0;
   for (unsigned int level = 0; level < numMipmapLevels; ++level) {
     HIP_ARRAY3D_DESCRIPTOR level_descriptor = *pMipmappedArrayDesc;
-    level_descriptor.Width = hrx_hip_mipmapped_level_dimension(
-        pMipmappedArrayDesc->Width, level);
-    level_descriptor.Height = hrx_hip_mipmapped_level_dimension(
-        pMipmappedArrayDesc->Height, level);
-    level_descriptor.Depth = hrx_hip_mipmapped_level_dimension(
-        pMipmappedArrayDesc->Depth, level);
+    level_descriptor.Width =
+        hrx_hip_mipmapped_level_dimension(pMipmappedArrayDesc->Width, level);
+    level_descriptor.Height =
+        hrx_hip_mipmapped_level_dimension(pMipmappedArrayDesc->Height, level);
+    level_descriptor.Depth =
+        hrx_hip_mipmapped_level_dimension(pMipmappedArrayDesc->Depth, level);
 
     size_t level_size = 0;
-    result = hrx_hip_mipmapped_array_level_size(&level_descriptor, 0,
-                                                &level_size);
+    result =
+        hrx_hip_mipmapped_array_level_size(&level_descriptor, 0, &level_size);
     if (result == hipSuccess) {
       result = hipArray3DCreate(&level_arrays[level], &level_descriptor);
     }
@@ -1715,17 +1716,16 @@ HIPAPI hipError_t hipMipmappedArrayGetMemoryRequirements(
   return hipSuccess;
 }
 
-HIPAPI hipError_t hipMipmappedArrayDestroy(
-    hipMipmappedArray_t hMipmappedArray) {
+HIPAPI hipError_t
+hipMipmappedArrayDestroy(hipMipmappedArray_t hMipmappedArray) {
   return hrx_hip_destroy_mipmapped_array(hMipmappedArray);
 }
 
-HIPAPI hipError_t hipMipmappedArrayGetLevel(
-    hipArray_t* pLevelArray, hipMipmappedArray_t hMipMappedArray,
-    unsigned int level) {
-  return hipGetMipmappedArrayLevel(pLevelArray,
-                                   (hipMipmappedArray_const_t)hMipMappedArray,
-                                   level);
+HIPAPI hipError_t hipMipmappedArrayGetLevel(hipArray_t* pLevelArray,
+                                            hipMipmappedArray_t hMipMappedArray,
+                                            unsigned int level) {
+  return hipGetMipmappedArrayLevel(
+      pLevelArray, (hipMipmappedArray_const_t)hMipMappedArray, level);
 }
 
 HIPAPI hipError_t hipModuleGetFunctionCount(unsigned int* count,
