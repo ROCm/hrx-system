@@ -2188,6 +2188,7 @@ static bool loom_amdgpu_fragment_memory_plan_push_packet(
     return false;
   }
   plan->packets[plan->packet_count++] = *packet;
+  plan->packet_flags |= packet->flags;
   return true;
 }
 
@@ -2197,6 +2198,7 @@ static bool loom_amdgpu_fragment_memory_plan_packets(
     loom_amdgpu_fragment_memory_plan_t* plan,
     loom_amdgpu_fragment_memory_diagnostic_t* diagnostic) {
   plan->packet_count = 0;
+  plan->packet_flags = 0;
   const loom_amdgpu_matrix_fragment_role_layout_t* role_layout =
       loom_amdgpu_matrix_fragment_role_layout(layout, plan->role);
   const bool scalar_b16_packets =
@@ -2989,17 +2991,6 @@ static iree_string_view_t loom_amdgpu_fragment_memory_packet_fallback_reason(
     }
   }
   return iree_string_view_empty();
-}
-
-static bool loom_amdgpu_fragment_memory_plan_has_packet_flags(
-    const loom_amdgpu_fragment_memory_plan_t* plan,
-    loom_amdgpu_fragment_memory_packet_flags_t flags) {
-  for (uint16_t i = 0; i < plan->packet_count; ++i) {
-    if (iree_all_bits_set(plan->packets[i].flags, flags)) {
-      return true;
-    }
-  }
-  return false;
 }
 
 static loom_amdgpu_fragment_memory_packet_flags_t
@@ -4204,14 +4195,12 @@ iree_status_t loom_amdgpu_lower_vector_fragment_store(
     const loom_amdgpu_bf16_pack_descriptors_t* bf16_pack_descriptors = NULL;
     IREE_RETURN_IF_ERROR(
         loom_amdgpu_get_bf16_pack_descriptors(context, &bf16_pack_descriptors));
-    const bool has_crosslane_packed_b16_store =
-        loom_amdgpu_fragment_memory_plan_has_packet_flags(
-            plan,
-            LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_CROSSLANE_PACKED_B16_STORE);
-    const bool has_dpp_crosslane_packed_b16_store =
-        loom_amdgpu_fragment_memory_plan_has_packet_flags(
-            plan,
-            LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_CROSSLANE_PACKED_B16_STORE_DPP);
+    const bool has_crosslane_packed_b16_store = iree_any_bit_set(
+        plan->packet_flags,
+        LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_CROSSLANE_PACKED_B16_STORE);
+    const bool has_dpp_crosslane_packed_b16_store = iree_any_bit_set(
+        plan->packet_flags,
+        LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_CROSSLANE_PACKED_B16_STORE_DPP);
     if (has_crosslane_packed_b16_store) {
       IREE_RETURN_IF_ERROR(
           loom_amdgpu_make_sgpr_range_type(context, 2, &mask_type));
