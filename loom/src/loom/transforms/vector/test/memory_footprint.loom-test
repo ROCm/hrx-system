@@ -18,6 +18,53 @@ func.def @static_dense_store_in_bounds(%buffer: buffer, %base: offset, %value: v
 
 // ====
 
+func.def @fragment_load_in_bounds(%buffer: buffer, %base: offset) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %view = buffer.view %buffer[%base] : buffer -> view<16x16xf32, %layout>
+  %loaded = vector.fragment.load<init> %view[0, 0] shape [%m, %n] : view<16x16xf32, %layout> -> vector<8xf32>
+  test.use %loaded : vector<8xf32>
+  func.return
+}
+
+// ====
+
+func.def @fragment_store_in_bounds(%buffer: buffer, %base: offset, %value: vector<8xf32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %view = buffer.view %buffer[%base] : buffer -> view<16x16xf32, %layout>
+  vector.fragment.store<result> %value, %view[0, 0] shape [%m, %n] : vector<8xf32>, view<16x16xf32, %layout>
+  func.return
+}
+
+// ====
+
+func.def @fragment_store_rejects_row_tail_overlap(%buffer: buffer, %base: offset, %value: vector<8xf32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %view = buffer.view %buffer[%base] : buffer -> view<17x32xf32, %layout>
+  // ERROR@+1: SUBRANGE/010 {op_name="vector.fragment.store", view_axis="0", vector_axis="0", vector_extent="16", view_bound="17", required_origin_upper_bound="1", constraint_key="vector_footprint.full_vector_upper_bound"}
+  vector.fragment.store<result> %value, %view[16, 0] shape [%m, %n] : vector<8xf32>, view<17x32xf32, %layout>
+  func.return
+}
+
+// ====
+
+func.def @fragment_store_rejects_column_tail_overlap(%buffer: buffer, %base: offset, %value: vector<8xf32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %view = buffer.view %buffer[%base] : buffer -> view<32x32xf32, %layout>
+  // ERROR@+1: SUBRANGE/010 {op_name="vector.fragment.store", view_axis="1", vector_axis="1", vector_extent="16", view_bound="32", required_origin_upper_bound="16", constraint_key="vector_footprint.full_vector_upper_bound"}
+  vector.fragment.store<result> %value, %view[0, 17] shape [%m, %n] : vector<8xf32>, view<32x32xf32, %layout>
+  func.return
+}
+
+// ====
+
 func.def @static_dense_load_out_of_bounds(%buffer: buffer, %base: offset) {
   %layout = encoding.layout.dense : encoding<layout>
   %view = buffer.view %buffer[%base] : buffer -> view<8xf32, %layout>
