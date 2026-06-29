@@ -668,6 +668,8 @@ typedef enum id4_qwen3_vl_kernel_kind_e {
   // Compact RHS fused MLP gate/up/SwiGLU WMMA kernel for 32-token tiles.
   ID4_QWEN3_VL_KERNEL_MLP_GATE_UP_SILU_PRODUCT_BF16_WMMA_M32N32_COMPACT_RHS =
       36,
+  // Compact RHS fused BF16 WMMA linear projection followed by residual add.
+  ID4_QWEN3_VL_KERNEL_LINEAR_RESIDUAL_BF16_BF16_WMMA_M64N64_COMPACT_RHS = 37,
 } id4_qwen3_vl_kernel_kind_t;
 
 typedef enum id4_qwen3_vl_config_key_e {
@@ -711,8 +713,7 @@ enum {
   ID4_QWEN3_VL_OPERATION_KIND_COUNT = ID4_QWEN3_VL_OPERATION_TAP + 1,
   ID4_QWEN3_VL_OPERATION_SITE_COUNT = ID4_QWEN3_VL_OPERATION_SITE_OUTPUT + 1,
   ID4_QWEN3_VL_KERNEL_KIND_COUNT =
-      ID4_QWEN3_VL_KERNEL_MLP_GATE_UP_SILU_PRODUCT_BF16_WMMA_M32N32_COMPACT_RHS +
-      1,
+      ID4_QWEN3_VL_KERNEL_LINEAR_RESIDUAL_BF16_BF16_WMMA_M64N64_COMPACT_RHS + 1,
   ID4_QWEN3_VL_CONFIG_KEY_COUNT =
       ID4_QWEN3_VL_CONFIG_DISPATCH_ELEMENT_COUNT + 1,
 };
@@ -954,7 +955,7 @@ static const id4_qwen3_vl_program_linear_wmma_tile_t
                 .direct_output_kernel_kind =
                     ID4_QWEN3_VL_KERNEL_LINEAR_RESIDUAL_BF16_BF16_WMMA_M64N64,
                 .compact_rhs_output_kernel_kind =
-                    (id4_qwen3_vl_kernel_kind_t)ID4_QWEN3_VL_KERNEL_KIND_COUNT,
+                    ID4_QWEN3_VL_KERNEL_LINEAR_RESIDUAL_BF16_BF16_WMMA_M64N64_COMPACT_RHS,
                 .direct_transposed_output_kernel_kind =
                     (id4_qwen3_vl_kernel_kind_t)ID4_QWEN3_VL_KERNEL_KIND_COUNT,
                 .compact_rhs_transposed_output_kernel_kind =
@@ -1399,6 +1400,10 @@ static const id4_pipeline_kernel_ref_t
         [ID4_QWEN3_VL_KERNEL_LINEAR_RESIDUAL_BF16_BF16_WMMA_M64N64] =
             {IREE_SVL("qwen3_vl/linear_residual_bf16_wmma"),
              IREE_SVL("id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m64n64")},
+        [ID4_QWEN3_VL_KERNEL_LINEAR_RESIDUAL_BF16_BF16_WMMA_M64N64_COMPACT_RHS] =
+            {IREE_SVL("qwen3_vl/linear_residual_bf16_wmma_compact_rhs"),
+             IREE_SVL("id4_qwen3_vl_linear_residual_bf16_bf16_wmma_m64n64_"
+                      "compact_rhs")},
         [ID4_QWEN3_VL_KERNEL_RMSNORM_ROTARY] =
             {IREE_SVL("qwen3_vl/rmsnorm_rotary"),
              IREE_SVL("id4_qwen3_vl_rmsnorm_rotary_bf16")},
@@ -1754,6 +1759,17 @@ static const iree_string_view_t id4_qwen3_vl_program_config_keys
                     IREE_SVL("id4.qwen3_vl.linear_residual_wmma.output_size"),
             },
         [ID4_QWEN3_VL_KERNEL_LINEAR_RESIDUAL_BF16_BF16_WMMA_M64N64] =
+            {
+                [ID4_QWEN3_VL_CONFIG_TOKEN_COUNT] =
+                    IREE_SVL("id4.qwen3_vl.linear_residual_wmma.token_count"),
+                [ID4_QWEN3_VL_CONFIG_DISPATCH_TOKEN_COUNT] = IREE_SVL(
+                    "id4.qwen3_vl.linear_residual_wmma.dispatch_token_count"),
+                [ID4_QWEN3_VL_CONFIG_INPUT_SIZE] =
+                    IREE_SVL("id4.qwen3_vl.linear_residual_wmma.input_size"),
+                [ID4_QWEN3_VL_CONFIG_OUTPUT_SIZE] =
+                    IREE_SVL("id4.qwen3_vl.linear_residual_wmma.output_size"),
+            },
+        [ID4_QWEN3_VL_KERNEL_LINEAR_RESIDUAL_BF16_BF16_WMMA_M64N64_COMPACT_RHS] =
             {
                 [ID4_QWEN3_VL_CONFIG_TOKEN_COUNT] =
                     IREE_SVL("id4.qwen3_vl.linear_residual_wmma.token_count"),
@@ -3311,13 +3327,21 @@ static iree_status_t id4_qwen3_vl_program_author_mlp_down_residual(
         "Qwen3-VL fused MLP down residual requires a supported WMMA tile");
   }
 
+  const bool uses_compact_rhs =
+      wmma_tile->kernels.compact_rhs_output_kernel_kind !=
+      (id4_qwen3_vl_kernel_kind_t)ID4_QWEN3_VL_KERNEL_KIND_COUNT;
+  const id4_qwen3_vl_kernel_kind_t kernel_kind =
+      uses_compact_rhs ? wmma_tile->kernels.compact_rhs_output_kernel_kind
+                       : wmma_tile->kernels.direct_output_kernel_kind;
+  const id4_pipeline_program_parameter_encoding_t weight_encoding =
+      uses_compact_rhs
+          ? ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_BF16_LINEAR_RHS_TILE
+          : ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_DIRECT;
   id4_pipeline_program_tensor_t weight = id4_pipeline_program_tensor_invalid();
-  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_parameter(
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_parameter_bf16_linear_weight(
       builder, options->parameter_scope,
       ID4_QWEN3_VL_PARAMETER_LAYER_DOWN_PROJECTION, layer_ordinal,
-      ID4_PIPELINE_PROGRAM_DTYPE_BF16,
-      id4_pipeline_program_make_shape_rank2(hidden_size, intermediate_size),
-      &weight));
+      intermediate_size, hidden_size, weight_encoding, &weight));
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_acquire_tensor(
       builder, ID4_QWEN3_VL_TENSOR_LAYER_OUTPUT, layer_ordinal,
       ID4_PIPELINE_PROGRAM_DTYPE_BF16,
@@ -3334,8 +3358,6 @@ static iree_status_t id4_qwen3_vl_program_author_mlp_down_residual(
                     [ID4_QWEN3_VL_CONFIG_VALUE_BUFFER_CAPACITY];
   id4_pipeline_kernel_config_binding_t
       config_bindings[ID4_QWEN3_VL_MAX_KERNEL_CONFIG_BINDING_COUNT];
-  const id4_qwen3_vl_kernel_kind_t kernel_kind =
-      wmma_tile->kernels.direct_output_kernel_kind;
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_make_config_bindings(
       kernel_kind, IREE_ARRAYSIZE(config_values), config_values, value_buffers,
       config_bindings));
