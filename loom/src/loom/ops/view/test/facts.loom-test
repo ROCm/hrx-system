@@ -489,6 +489,34 @@ func.def @fnuz_fp8_storage_view_load_content(%buffer: buffer) -> (i1, i1) {
 
 // ====
 
+// Raw IEEE E5M2 storage publishes its numeric format, but carries no finite
+// content guarantee.
+func.def @ieee_e5m2_storage_view_load_content_is_unknown(%buffer: buffer) -> (i1, i1) {
+  %offset = index.constant 0 : offset
+  %layout = encoding.layout.dense : encoding<layout>
+  %schema = encoding.define #ieee_fp8_e5m2 : encoding<schema>
+  %storage = encoding.define #physical_storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
+  %view = buffer.view %buffer[%offset] : buffer -> view<4xf8E5M2, %storage>
+  %value = view.load %view[0] : view<4xf8E5M2, %storage> -> f8E5M2
+  %inf = scalar.isinff %value : f8E5M2
+  %finite = scalar.isfinitef %value : f8E5M2
+  func.return %inf, %finite : i1, i1
+}
+// ----
+func.def @ieee_e5m2_storage_view_load_content_is_unknown(%buffer: buffer) -> (i1, i1) {
+  %offset = index.constant 0 : offset
+  %layout = encoding.layout.dense : encoding<layout>
+  %schema = encoding.define #ieee_fp8_e5m2 : encoding<schema>
+  %storage = encoding.define #physical_storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
+  %view = buffer.view %buffer[%offset] : buffer -> view<4xf8E5M2, %storage>
+  %value = view.load %view[0] : view<4xf8E5M2, %storage> -> f8E5M2
+  %inf = scalar.isinff %value : f8E5M2
+  %finite = scalar.isfinitef %value : f8E5M2
+  func.return %inf, %finite : i1, i1
+}
+
+// ====
+
 // Bare FP8 element types are still conservative without a content schema.
 func.def @bare_fp8_view_load_content_is_unknown(%buffer: buffer) -> (i1) {
   %offset = index.constant 0 : offset
