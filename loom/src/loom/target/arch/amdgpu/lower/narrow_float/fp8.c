@@ -897,15 +897,11 @@ static iree_status_t loom_amdgpu_emit_fp8_packed_bf16_pair_select(
 static iree_status_t loom_amdgpu_emit_fp8_decode_sgpr64_nonzero_scc(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_amdgpu_fp8_decode_plan_t* plan, loom_value_id_t low_value,
-    loom_value_id_t* out_scc) {
+    loom_value_id_t low_zero_sgpr64, loom_value_id_t* out_scc) {
   *out_scc = LOOM_VALUE_ID_INVALID;
-  loom_value_id_t low_zero = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(
-      loom_amdgpu_emit_sgpr64_constant_u64(context, source_op, 0, &low_zero));
-
   loom_type_t scc_type = loom_type_none();
   IREE_RETURN_IF_ERROR(loom_amdgpu_make_scc_type(context, &scc_type));
-  const loom_value_id_t operands[] = {low_value, low_zero};
+  const loom_value_id_t operands[] = {low_value, low_zero_sgpr64};
   loom_op_t* compare_op = NULL;
   IREE_RETURN_IF_ERROR(loom_low_lower_emit_resolved_descriptor_op(
       context, &plan->compare_lg_u64_descriptor, operands,
@@ -932,6 +928,7 @@ static iree_status_t loom_amdgpu_emit_fp8_packed_bf16_repair_split(
     const loom_amdgpu_fp8_decode_plan_t* plan,
     loom_value_id_t low_combined_condition, iree_host_size_t pair_count,
     loom_type_t vgpr_type, loom_type_t mask_type,
+    loom_value_id_t low_zero_sgpr64,
     loom_amdgpu_fp8_packed_bf16_repair_split_t* out_split) {
   *out_split = (loom_amdgpu_fp8_packed_bf16_repair_split_t){0};
   loom_value_id_t low_has_condition_lanes = LOOM_VALUE_ID_INVALID;
@@ -941,15 +938,11 @@ static iree_status_t loom_amdgpu_emit_fp8_packed_bf16_repair_split(
       &low_has_condition_lanes));
 
   loom_builder_t* builder = loom_low_lower_context_builder(context);
-  if (builder->ip.before_op != NULL) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "AMDGPU FP8 decode split must be built at the end of a low block");
-  }
+  IREE_ASSERT(builder->ip.before_op == NULL);
 
   loom_value_id_t low_has_condition_scc = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fp8_decode_sgpr64_nonzero_scc(
-      context, source_op, plan, low_has_condition_lanes,
+      context, source_op, plan, low_has_condition_lanes, low_zero_sgpr64,
       &low_has_condition_scc));
 
   loom_block_t* hot_block = builder->ip.block;
@@ -1230,11 +1223,11 @@ static iree_status_t loom_amdgpu_emit_fp8_packed_bf16_repair_group_if(
     const loom_amdgpu_fp8_packed_bf16_pair_state_t* pair_states,
     iree_host_size_t pair_count, loom_value_id_t low_combined_repair_condition,
     loom_type_t vgpr_type, loom_type_t sgpr_type, loom_type_t mask_type,
-    loom_value_id_t* out_finite_payloads) {
+    loom_value_id_t low_zero_sgpr64, loom_value_id_t* out_finite_payloads) {
   loom_amdgpu_fp8_packed_bf16_repair_split_t split = {0};
   IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fp8_packed_bf16_repair_split(
       context, source_op, plan, low_combined_repair_condition, pair_count,
-      vgpr_type, mask_type, &split));
+      vgpr_type, mask_type, low_zero_sgpr64, &split));
   loom_builder_t* builder = loom_low_lower_context_builder(context);
 
   loom_value_id_t repair_payloads[LOOM_AMDGPU_MAX_PACKED_32BIT_REGISTERS] = {0};
@@ -1289,7 +1282,7 @@ static iree_status_t loom_amdgpu_emit_fp8_packed_bf16_nan_group_if(
     const loom_amdgpu_fp8_packed_bf16_pair_state_t* pair_states,
     const loom_value_id_t* no_nan_packets, iree_host_size_t pair_count,
     loom_type_t vgpr_type, loom_type_t sgpr_type, loom_type_t mask_type,
-    loom_value_id_t* out_packets) {
+    loom_value_id_t low_zero_sgpr64, loom_value_id_t* out_packets) {
   loom_value_id_t nan_conditions[LOOM_AMDGPU_MAX_PACKED_32BIT_REGISTERS] = {0};
   bool has_hot_nan_conditions = false;
   loom_value_id_t low_combined_nan_condition = LOOM_VALUE_ID_INVALID;
@@ -1314,7 +1307,7 @@ static iree_status_t loom_amdgpu_emit_fp8_packed_bf16_nan_group_if(
   loom_amdgpu_fp8_packed_bf16_repair_split_t split = {0};
   IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fp8_packed_bf16_repair_split(
       context, source_op, plan, low_combined_nan_condition, pair_count,
-      vgpr_type, mask_type, &split));
+      vgpr_type, mask_type, low_zero_sgpr64, &split));
   loom_builder_t* builder = loom_low_lower_context_builder(context);
 
   loom_value_id_t repair_packets[LOOM_AMDGPU_MAX_PACKED_32BIT_REGISTERS] = {0};
@@ -1423,6 +1416,11 @@ iree_status_t loom_amdgpu_try_emit_fp8_pairs_to_packed_bf16(
   IREE_RETURN_IF_ERROR(loom_amdgpu_emit_const_u32(
       context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_MOV_B32, 0, vgpr_type,
       &low_zero));
+  loom_value_id_t low_zero_sgpr64 = LOOM_VALUE_ID_INVALID;
+  if (use_repair_split || use_nan_repair_split) {
+    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_sgpr64_constant_u64(
+        context, source_op, 0, &low_zero_sgpr64));
+  }
 
   loom_amdgpu_fp8_packed_bf16_pair_state_t
       pair_states[LOOM_AMDGPU_MAX_PACKED_32BIT_REGISTERS] = {0};
@@ -1451,7 +1449,7 @@ iree_status_t loom_amdgpu_try_emit_fp8_pairs_to_packed_bf16(
       IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fp8_packed_bf16_repair_group_if(
           context, source_op, plan, pair_states, pair_count,
           low_combined_repair_condition, vgpr_type, sgpr_type, mask_type,
-          finite_payloads));
+          low_zero_sgpr64, finite_payloads));
     } else {
       loom_amdgpu_fp8_subnormal_bf16_byte_table_values_t subnormal_tables;
       IREE_RETURN_IF_ERROR(
@@ -1503,7 +1501,7 @@ iree_status_t loom_amdgpu_try_emit_fp8_pairs_to_packed_bf16(
   if (use_nan_repair_split) {
     IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fp8_packed_bf16_nan_group_if(
         context, source_op, plan, pair_states, no_nan_packets, pair_count,
-        vgpr_type, sgpr_type, mask_type, out_low_packets));
+        vgpr_type, sgpr_type, mask_type, low_zero_sgpr64, out_low_packets));
   } else if (needs_nan_repair) {
     for (iree_host_size_t i = 0; i < pair_count; ++i) {
       loom_value_id_t low_nan_mask = LOOM_VALUE_ID_INVALID;
