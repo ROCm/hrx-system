@@ -319,10 +319,11 @@ The loader treats BF16 and FP8 model artifacts as parameter sources. It
 extracts tensor metadata, validates required tensors, uploads weight data into
 device-visible slabs, and produces typed model tables used by the scheduler.
 
-The first quality reference configuration uses:
+The active reference configuration uses:
 
-- main Ideogram 4 diffusion weights expanded to dense BF16;
-- unconditional Ideogram 4 diffusion weights expanded to dense BF16;
+- official conditioned and unconditioned Ideogram 4 FP8 diffusion files as
+  complete branch parameter providers, with FP8 linears, F32 row scales, and
+  BF16 non-linear tensors consumed from the same artifacts;
 - Qwen3-VL-8B-Instruct text encoder weights in dense BF16 or F16 form;
 - FLUX-family KL VAE weights compatible with the reference pipeline;
 - optional LoRA adapters.
@@ -331,12 +332,12 @@ Weights should land in one or more long-lived weight slabs. Command buffers
 bind those slabs and use per-dispatch binding references with byte offsets for
 individual tensors.
 
-Weight loaders should preserve enough metadata for later compressed-weight
-paths. For FP8 sources this includes the element format, per-tensor or
-per-channel scale tensors, scale application order, and the exact BF16
-expansion rule used by the reference. BF16 execution consumes the expanded
-view; FP8 execution consumes the compact view plus scale metadata while
-producing outputs compared against the same BF16 goldens.
+Weight loaders should preserve enough metadata for compressed-weight paths. For
+FP8 sources this includes the element format, per-tensor or per-channel scale
+tensors, scale application order, and the exact BF16 expansion rule used by the
+reference. BF16 execution consumes prepared BF16 views derived from the FP8
+files; FP8 execution consumes the compact view plus scale metadata while
+producing outputs compared against the same semantic goldens.
 
 ### Loom Embedding
 

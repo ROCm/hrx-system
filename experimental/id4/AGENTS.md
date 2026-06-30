@@ -121,6 +121,11 @@ FP8-weight execution on gfx942 are follow-on target specializations behind the
 same semantic fixtures. Later gfx12-class FP8 paths should fit behind the same
 operation boundary.
 
+Official FP8 DiT safetensors are complete branch parameter providers: linear
+weights are FP8 e4m3 with F32 row scales, while non-linear weights, biases, and
+normalization tensors remain present as BF16. Do not require the BF16-expanded
+DiT files in FP8 mode unless a deliberate split-provider experiment needs them.
+
 FP8 work should preserve the exact expansion rule, scale metadata, and numeric
 comparison story used by the BF16 reference. A tolerance change needs a named
 mechanism such as dtype conversion, scale application order, accumulation type,
