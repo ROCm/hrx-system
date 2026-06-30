@@ -6,7 +6,7 @@ config.decl @id4.ideogram4.attention_online_wmma.padded_token_count : %value: in
 
 config.decl @id4.ideogram4.attention_online_wmma.query_block_offset : %value: index where [range(%value, 0, 131071), mul(%value, 16)]
 
-config.decl @id4.ideogram4.attention_online_wmma.query_block_token_count : %value: index where [range(%value, 16, 4096), mul(%value, 16)]
+config.decl @id4.ideogram4.attention_online_wmma.query_block_token_count : %value: index where [range(%value, 16, 8192), mul(%value, 16)]
 
 config.decl @id4.ideogram4.attention_online_wmma.attention_head_count : %value: index where [range(%value, 1, 1024)]
 
