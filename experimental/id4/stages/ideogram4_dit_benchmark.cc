@@ -31,7 +31,8 @@ IREE_FLAG(string, id4_plan_output_dir, "",
 IREE_FLAG(string, dit_parameter_format, "fp8_e4m3",
           "DiT parameter format: bf16 or fp8_e4m3.");
 IREE_FLAG(string, dit_weight_execution_format, "bf16_resident",
-          "DiT weight execution format: bf16_resident or fp8_direct.");
+          "DiT weight execution format: bf16_resident, fp8_direct, or "
+          "fp8_direct_feed_forward_bf16_resident.");
 IREE_FLAG(string, dit_attention_implementation, "online_wmma",
           "DiT attention implementation: streaming, materialized_wmma, "
           "blocked_wmma, or online_wmma.");

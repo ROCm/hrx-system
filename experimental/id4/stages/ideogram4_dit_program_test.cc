@@ -755,6 +755,58 @@ TEST(Ideogram4DitProgram, AuthorsDirectFp8ProjectionParameterContract) {
       &rules, iree_allocator_system());
 }
 
+TEST(Ideogram4DitProgram,
+     AuthorsDirectFp8WithFeedForwardBf16ExecutionParameterContract) {
+  id4_pipeline_program_shape_t latent_shape =
+      id4_pipeline_program_make_shape_rank4(1, 2, 4, 1);
+  id4_ideogram4_dit_program_options_t options =
+      MakeProgramOptions(latent_shape);
+  options.activation_format =
+      ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT;
+  options.weight_execution_format =
+      ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_FP8_DIRECT_FEED_FORWARD_BF16_RESIDENT;
+  id4_ideogram4_dit_parameter_source_rule_list_t rules;
+  IREE_ASSERT_OK(id4_ideogram4_dit_parameter_source_rule_list_initialize(
+      ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_FP8_E4M3, options.model,
+      IREE_SV("fp8"), iree_allocator_system(), &rules));
+  options.parameter_sources.rule_count = rules.count;
+  options.parameter_sources.rules = rules.values;
+
+  id4_pipeline_program_t* program = CreateForwardProgram(&options);
+  const uint32_t qkv_size = options.model.hidden_size * 3;
+  EXPECT_TRUE(
+      ProgramHasParameter(program, IREE_SV("layers.0.attention.qkv.weight"),
+                          IREE_SV("fp8"), ID4_PIPELINE_PROGRAM_DTYPE_F8_E4M3,
+                          id4_pipeline_program_make_shape_rank2(
+                              qkv_size, options.model.hidden_size)));
+  EXPECT_TRUE(ProgramHasParameter(
+      program, IREE_SV("layers.0.attention.qkv.weight_scale"), IREE_SV("fp8"),
+      ID4_PIPELINE_PROGRAM_DTYPE_F32,
+      id4_pipeline_program_make_shape_rank1(qkv_size)));
+  EXPECT_TRUE(ProgramHasFp8ScaledBf16ExecutionParameter(
+      program, IREE_SV("layers.0.feed_forward.w1.weight"),
+      IREE_SV("layers.0.feed_forward.w1.weight_scale"), IREE_SV("fp8"),
+      id4_pipeline_program_make_shape_rank2(options.model.intermediate_size,
+                                            options.model.hidden_size),
+      id4_pipeline_program_make_shape_rank1(options.model.intermediate_size)));
+  EXPECT_TRUE(ProgramHasFp8ScaledBf16ExecutionParameter(
+      program, IREE_SV("layers.0.feed_forward.w3.weight"),
+      IREE_SV("layers.0.feed_forward.w3.weight_scale"), IREE_SV("fp8"),
+      id4_pipeline_program_make_shape_rank2(options.model.intermediate_size,
+                                            options.model.hidden_size),
+      id4_pipeline_program_make_shape_rank1(options.model.intermediate_size)));
+  EXPECT_TRUE(ProgramHasFp8ScaledBf16ExecutionParameter(
+      program, IREE_SV("layers.0.feed_forward.w2.weight"),
+      IREE_SV("layers.0.feed_forward.w2.weight_scale"), IREE_SV("fp8"),
+      id4_pipeline_program_make_shape_rank2(options.model.hidden_size,
+                                            options.model.intermediate_size),
+      id4_pipeline_program_make_shape_rank1(options.model.hidden_size)));
+
+  id4_pipeline_program_release(program);
+  id4_ideogram4_dit_parameter_source_rule_list_deinitialize(
+      &rules, iree_allocator_system());
+}
+
 TEST(Ideogram4DitProgram, AuthorsMaterializedWmmaAttentionIntermediates) {
   id4_pipeline_program_shape_t latent_shape =
       id4_pipeline_program_make_shape_rank4(1, 2, 4, 1);

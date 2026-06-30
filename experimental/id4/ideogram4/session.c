@@ -1080,6 +1080,7 @@ static iree_status_t id4_ideogram4_validate_generation_policy(
   switch (policy.dit_weight_execution_format) {
     case ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_BF16_RESIDENT:
     case ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_FP8_DIRECT:
+    case ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_FP8_DIRECT_FEED_FORWARD_BF16_RESIDENT:
       break;
     default:
       return iree_make_status(

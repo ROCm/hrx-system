@@ -91,6 +91,10 @@ typedef enum id4_ideogram4_dit_weight_execution_format_e {
   ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_BF16_RESIDENT = 1,
   // Bind compact FP8 weights and row scales directly to compute kernels.
   ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_FP8_DIRECT = 2,
+  // Bind most compact FP8 weights directly, but prepare transformer
+  // feed-forward weights into persistent BF16 execution tensors.
+  ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_FP8_DIRECT_FEED_FORWARD_BF16_RESIDENT =
+      3,
 } id4_ideogram4_dit_weight_execution_format_t;
 
 // Parses a DiT linear weight execution format name.

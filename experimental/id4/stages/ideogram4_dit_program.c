@@ -100,9 +100,16 @@ iree_status_t id4_ideogram4_dit_weight_execution_format_parse(
     *out_format = ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_FP8_DIRECT;
     return iree_ok_status();
   }
+  if (iree_string_view_equal(
+          value, IREE_SV("fp8_direct_feed_forward_bf16_resident"))) {
+    *out_format =
+        ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_FP8_DIRECT_FEED_FORWARD_BF16_RESIDENT;
+    return iree_ok_status();
+  }
   return iree_make_status(
       IREE_STATUS_INVALID_ARGUMENT,
-      "DiT weight execution format must be bf16_resident or fp8_direct");
+      "DiT weight execution format must be bf16_resident, fp8_direct, or "
+      "fp8_direct_feed_forward_bf16_resident");
 }
 
 iree_string_view_t id4_ideogram4_dit_weight_execution_format_name(
@@ -112,8 +119,24 @@ iree_string_view_t id4_ideogram4_dit_weight_execution_format_name(
       return IREE_SV("bf16_resident");
     case ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_FP8_DIRECT:
       return IREE_SV("fp8_direct");
+    case ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_FP8_DIRECT_FEED_FORWARD_BF16_RESIDENT:
+      return IREE_SV("fp8_direct_feed_forward_bf16_resident");
     default:
       return IREE_SV("invalid");
+  }
+}
+
+static id4_ideogram4_dit_weight_execution_format_t
+id4_ideogram4_dit_program_generic_linear_weight_execution_format(
+    id4_ideogram4_dit_weight_execution_format_t weight_execution_format) {
+  switch (weight_execution_format) {
+    case ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_BF16_RESIDENT:
+      return ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_BF16_RESIDENT;
+    case ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_FP8_DIRECT:
+    case ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_FP8_DIRECT_FEED_FORWARD_BF16_RESIDENT:
+      return ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_FP8_DIRECT;
+    default:
+      return ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_INVALID;
   }
 }
 
@@ -436,6 +459,7 @@ static iree_status_t id4_ideogram4_dit_program_validate_weight_execution_format(
   switch (weight_execution_format) {
     case ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_BF16_RESIDENT:
     case ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_FP8_DIRECT:
+    case ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_FP8_DIRECT_FEED_FORWARD_BF16_RESIDENT:
       return iree_ok_status();
     default:
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -984,6 +1008,10 @@ static iree_status_t id4_ideogram4_dit_program_linear_parameter(
     uint32_t input_size, uint32_t output_size,
     id4_ideogram4_dit_weight_execution_format_t weight_execution_format,
     id4_ideogram4_dit_program_linear_parameter_t* out_parameter) {
+  const id4_ideogram4_dit_weight_execution_format_t
+      linear_weight_execution_format =
+          id4_ideogram4_dit_program_generic_linear_weight_execution_format(
+              weight_execution_format);
   *out_parameter = (id4_ideogram4_dit_program_linear_parameter_t){
       .storage = ID4_IDEOGRAM4_DIT_PARAMETER_STORAGE_INVALID,
       .weight = id4_pipeline_program_tensor_invalid(),
@@ -1012,7 +1040,7 @@ static iree_status_t id4_ideogram4_dit_program_linear_parameter(
       break;
     }
     case ID4_IDEOGRAM4_DIT_PARAMETER_STORAGE_FP8_E4M3_SCALED: {
-      switch (weight_execution_format) {
+      switch (linear_weight_execution_format) {
         case ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_BF16_RESIDENT: {
           IREE_RETURN_IF_ERROR(
               id4_ideogram4_dit_program_parameter_fp8_e4m3_scaled_to_bf16(
