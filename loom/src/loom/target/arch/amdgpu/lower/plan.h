@@ -921,6 +921,8 @@ typedef struct loom_amdgpu_subgroup_vote_any_plan_t {
   loom_low_lower_resolved_descriptor_t zero_descriptor;
   // Subgroup-uniform i1 source result receiving SCC.
   loom_value_id_t result;
+  // Exact subgroup width selected by the active target bundle.
+  uint32_t wavefront_size;
 } loom_amdgpu_subgroup_vote_any_plan_t;
 
 typedef struct loom_amdgpu_subgroup_vote_all_plan_t {
@@ -932,6 +934,8 @@ typedef struct loom_amdgpu_subgroup_vote_all_plan_t {
   loom_low_lower_resolved_descriptor_t exec_read_descriptor;
   // Subgroup-uniform i1 source result receiving SCC.
   loom_value_id_t result;
+  // Exact subgroup width selected by the active target bundle.
+  uint32_t wavefront_size;
 } loom_amdgpu_subgroup_vote_all_plan_t;
 
 typedef enum loom_amdgpu_vector_slice_kind_e {
