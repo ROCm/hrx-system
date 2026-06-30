@@ -159,6 +159,8 @@ typedef struct id4_pipeline_parameter_load_step_t {
   iree_host_size_t request_offset;
   // Number of requests consumed from the target slab request table.
   iree_host_size_t request_count;
+  // Optional request ordinals for non-contiguous direct gather steps.
+  const iree_host_size_t* request_indices;
 } id4_pipeline_parameter_load_step_t;
 
 // Returns a direct provider-gather load step into a final parameter slab.
@@ -177,6 +179,26 @@ id4_pipeline_parameter_gather_load_step(iree_string_view_t name,
   step.target_slab_index = target_slab_index;
   step.request_offset = request_offset;
   step.request_count = request_count;
+  step.request_indices = NULL;
+  return step;
+}
+
+// Returns a direct provider-gather load step over explicit request ordinals.
+static inline id4_pipeline_parameter_load_step_t
+id4_pipeline_parameter_indexed_gather_load_step(
+    iree_string_view_t name, iree_string_view_t source_scope,
+    iree_host_size_t target_slab_index, iree_host_size_t request_count,
+    const iree_host_size_t* request_indices) {
+  id4_pipeline_parameter_load_step_t step;
+  step.name = name;
+  step.kind = ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_GATHER;
+  step.source_scope = source_scope;
+  step.source_count = 0;
+  step.sources = NULL;
+  step.target_slab_index = target_slab_index;
+  step.request_offset = 0;
+  step.request_count = request_count;
+  step.request_indices = request_indices;
   return step;
 }
 
@@ -196,6 +218,7 @@ id4_pipeline_parameter_encode_fp8_e4m3_scaled_to_bf16_load_step(
   step.target_slab_index = target_slab_index;
   step.request_offset = request_offset;
   step.request_count = 1;
+  step.request_indices = NULL;
   return step;
 }
 
@@ -214,6 +237,7 @@ id4_pipeline_parameter_encode_bf16_linear_rhs_tile_load_step(
   step.target_slab_index = target_slab_index;
   step.request_offset = request_offset;
   step.request_count = 1;
+  step.request_indices = NULL;
   return step;
 }
 
@@ -233,6 +257,7 @@ id4_pipeline_parameter_encode_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_load_step(
   step.target_slab_index = target_slab_index;
   step.request_offset = request_offset;
   step.request_count = 1;
+  step.request_indices = NULL;
   return step;
 }
 
@@ -279,6 +304,8 @@ typedef struct id4_pipeline_parameter_slab_enumerator_state_t {
   iree_host_size_t request_offset;
   // Number of requests visible to the enumerator.
   iree_host_size_t request_count;
+  // Optional explicit request ordinals visible to the enumerator.
+  const iree_host_size_t* request_indices;
 } id4_pipeline_parameter_slab_enumerator_state_t;
 
 // Resolved parameter slab load work for one planned slab.

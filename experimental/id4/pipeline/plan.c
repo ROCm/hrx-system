@@ -215,6 +215,8 @@ static void id4_pipeline_plan_destroy(id4_pipeline_plan_t* plan) {
     id4_pipeline_plan_release_parameter_load_sources(
         plan->parameter_load_steps[i].source_count,
         plan->parameter_load_steps[i].sources, host_allocator);
+    iree_allocator_free(host_allocator,
+                        (void*)plan->parameter_load_steps[i].request_indices);
   }
   iree_allocator_free(host_allocator, plan->parameter_load_steps);
   for (iree_host_size_t i = 0; i < plan->parameter_slab_count; ++i) {
@@ -365,6 +367,15 @@ static iree_status_t id4_pipeline_plan_copy_parameter_load_steps(
     IREE_RETURN_IF_ERROR(id4_pipeline_plan_copy_parameter_load_sources(
         source->source_count, source->sources, plan->host_allocator,
         &target->sources));
+    if (source->request_indices) {
+      iree_host_size_t* request_indices = NULL;
+      IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
+          plan->host_allocator, target->request_count,
+          sizeof(request_indices[0]), (void**)&request_indices));
+      memcpy(request_indices, source->request_indices,
+             target->request_count * sizeof(request_indices[0]));
+      target->request_indices = request_indices;
+    }
   }
   return iree_ok_status();
 }
@@ -1379,9 +1390,11 @@ static iree_device_size_t id4_pipeline_plan_direct_load_step_source_length(
   const id4_pipeline_parameter_slab_plan_t* slab =
       &plan->parameter_slabs[step->target_slab_index];
   iree_device_size_t byte_length = 0;
-  const iree_host_size_t end = step->request_offset + step->request_count;
-  for (iree_host_size_t i = step->request_offset; i < end; ++i) {
-    byte_length += slab->requests[i].span.length;
+  for (iree_host_size_t i = 0; i < step->request_count; ++i) {
+    const iree_host_size_t request_index = step->request_indices
+                                               ? step->request_indices[i]
+                                               : step->request_offset + i;
+    byte_length += slab->requests[request_index].span.length;
   }
   return byte_length;
 }
@@ -1995,6 +2008,19 @@ iree_status_t id4_pipeline_plan_format_json(const id4_pipeline_plan_t* plan,
           iree_string_builder_append_cstring(builder, ",\"sources\":"));
       IREE_RETURN_IF_ERROR(id4_pipeline_plan_append_parameter_load_sources_json(
           builder, step->source_count, step->sources));
+    }
+    if (step->request_indices) {
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(
+          builder, ",\"request_indices\":["));
+      for (iree_host_size_t j = 0; j < step->request_count; ++j) {
+        if (j != 0) {
+          IREE_RETURN_IF_ERROR(
+              iree_string_builder_append_cstring(builder, ","));
+        }
+        IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+            builder, "%" PRIhsz, step->request_indices[j]));
+      }
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "]"));
     }
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
         builder,

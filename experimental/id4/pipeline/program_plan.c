@@ -372,6 +372,7 @@ static void id4_pipeline_program_plan_build_parameter_load_steps(
     iree_host_size_t parameter_count,
     const id4_pipeline_program_plan_parameter_load_record_t* load_records,
     id4_pipeline_parameter_load_step_t* load_steps,
+    iree_host_size_t* direct_request_indices,
     iree_host_size_t* out_load_step_count) {
   *out_load_step_count = 0;
   if (parameter_count == 0) return;
@@ -410,44 +411,59 @@ static void id4_pipeline_program_plan_build_parameter_load_steps(
     ++*out_load_step_count;
   }
 
-  bool gather_run_active = false;
-  iree_host_size_t gather_run_start = 0;
-  iree_string_view_t gather_run_scope = iree_string_view_empty();
+  iree_host_size_t direct_request_index_count = 0;
   for (iree_host_size_t i = 0; i < parameter_count; ++i) {
     const id4_pipeline_program_plan_parameter_load_record_t* record =
         &load_records[i];
-    if (record->encoding == ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_DIRECT) {
-      if (gather_run_active &&
-          iree_string_view_equal(record->source_scope, gather_run_scope)) {
-        continue;
-      }
-      if (gather_run_active) {
-        load_steps[*out_load_step_count] =
-            id4_pipeline_parameter_gather_load_step(
-                IREE_SV("parameters.gather"), gather_run_scope,
-                /*target_slab_index=*/0, gather_run_start,
-                i - gather_run_start);
-        ++*out_load_step_count;
-      }
-      gather_run_active = true;
-      gather_run_start = i;
-      gather_run_scope = record->source_scope;
+    if (record->encoding != ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_DIRECT) {
       continue;
     }
-    if (gather_run_active) {
-      load_steps[*out_load_step_count] =
-          id4_pipeline_parameter_gather_load_step(
-              IREE_SV("parameters.gather"), gather_run_scope,
-              /*target_slab_index=*/0, gather_run_start, i - gather_run_start);
-      ++*out_load_step_count;
-      gather_run_active = false;
+    bool source_scope_already_planned = false;
+    for (iree_host_size_t j = 0; j < i; ++j) {
+      const id4_pipeline_program_plan_parameter_load_record_t* previous =
+          &load_records[j];
+      if (previous->encoding ==
+              ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_DIRECT &&
+          iree_string_view_equal(previous->source_scope,
+                                 record->source_scope)) {
+        source_scope_already_planned = true;
+        break;
+      }
     }
-  }
-  if (gather_run_active) {
+    if (source_scope_already_planned) {
+      continue;
+    }
+
+    const iree_host_size_t request_index_start = direct_request_index_count;
+    for (iree_host_size_t j = i; j < parameter_count; ++j) {
+      const id4_pipeline_program_plan_parameter_load_record_t* candidate =
+          &load_records[j];
+      if (candidate->encoding ==
+              ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_DIRECT &&
+          iree_string_view_equal(candidate->source_scope,
+                                 record->source_scope)) {
+        direct_request_indices[direct_request_index_count++] = j;
+      }
+    }
+
     load_steps[*out_load_step_count] = id4_pipeline_parameter_gather_load_step(
-        IREE_SV("parameters.gather"), gather_run_scope,
-        /*target_slab_index=*/0, gather_run_start,
-        parameter_count - gather_run_start);
+        IREE_SV("parameters.gather"), record->source_scope,
+        /*target_slab_index=*/0, direct_request_indices[request_index_start],
+        direct_request_index_count - request_index_start);
+    for (iree_host_size_t j = request_index_start;
+         j < direct_request_index_count; ++j) {
+      const iree_host_size_t expected_request_index =
+          direct_request_indices[request_index_start] + j - request_index_start;
+      if (direct_request_indices[j] != expected_request_index) {
+        load_steps[*out_load_step_count] =
+            id4_pipeline_parameter_indexed_gather_load_step(
+                IREE_SV("parameters.gather"), record->source_scope,
+                /*target_slab_index=*/0,
+                direct_request_index_count - request_index_start,
+                &direct_request_indices[request_index_start]);
+        break;
+      }
+    }
     ++*out_load_step_count;
   }
 }
@@ -1117,6 +1133,7 @@ iree_status_t id4_pipeline_program_create_plan(
       NULL;
   id4_pipeline_parameter_load_source_t* parameter_load_sources = NULL;
   id4_pipeline_parameter_load_step_t* parameter_load_steps = NULL;
+  iree_host_size_t* parameter_load_step_request_indices = NULL;
   id4_pipeline_constant_request_t* constant_requests = NULL;
   id4_pipeline_boundary_tensor_plan_t* boundary_tensors = NULL;
   id4_pipeline_kernel_plan_t* kernels = NULL;
@@ -1150,6 +1167,12 @@ iree_status_t id4_pipeline_program_create_plan(
                                          sizeof(parameter_load_steps[0]),
                                          (void**)&parameter_load_steps);
   }
+  if (iree_status_is_ok(status) && counts.parameter_count != 0) {
+    status = iree_allocator_malloc_array(
+        host_allocator, counts.parameter_count,
+        sizeof(parameter_load_step_request_indices[0]),
+        (void**)&parameter_load_step_request_indices);
+  }
   if (iree_status_is_ok(status) && counts.constant_count != 0) {
     status = iree_allocator_malloc_array(host_allocator, counts.constant_count,
                                          sizeof(constant_requests[0]),
@@ -1178,7 +1201,7 @@ iree_status_t id4_pipeline_program_create_plan(
   if (iree_status_is_ok(status) && counts.parameter_count != 0) {
     id4_pipeline_program_plan_build_parameter_load_steps(
         counts.parameter_count, parameter_load_records, parameter_load_steps,
-        &parameter_load_step_count);
+        parameter_load_step_request_indices, &parameter_load_step_count);
   }
 
   iree_device_size_t constant_slab_byte_length = 0;
@@ -1343,6 +1366,7 @@ iree_status_t id4_pipeline_program_create_plan(
   iree_allocator_free(host_allocator, kernels);
   iree_allocator_free(host_allocator, boundary_tensors);
   iree_allocator_free(host_allocator, constant_requests);
+  iree_allocator_free(host_allocator, parameter_load_step_request_indices);
   iree_allocator_free(host_allocator, parameter_load_steps);
   iree_allocator_free(host_allocator, parameter_load_sources);
   iree_allocator_free(host_allocator, parameter_load_records);

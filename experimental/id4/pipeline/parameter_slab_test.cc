@@ -110,6 +110,40 @@ TEST(PipelineParameterSlab, ValidateLoadStepRange) {
                             &step, /*slab_count=*/1, &slab));
 }
 
+TEST(PipelineParameterSlab, ValidateIndexedGatherLoadStepRange) {
+  id4_pipeline_parameter_request_t requests[] = {
+      id4_pipeline_parameter_request(
+          IREE_SV("weight.0"),
+          id4_pipeline_parameter_span(/*parameter_offset=*/0,
+                                      /*buffer_offset=*/0, /*length=*/16)),
+      id4_pipeline_parameter_request(
+          IREE_SV("weight.1"),
+          id4_pipeline_parameter_span(/*parameter_offset=*/0,
+                                      /*buffer_offset=*/16, /*length=*/16)),
+  };
+  id4_pipeline_parameter_slab_plan_t slab =
+      id4_pipeline_make_device_local_parameter_slab_plan(
+          IREE_SV("scope"), /*placement_id=*/0, /*binding_slot=*/1,
+          IREE_HAL_QUEUE_AFFINITY_ANY,
+          IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE_READ, /*byte_length=*/32,
+          /*alignment=*/16, IREE_ARRAYSIZE(requests), requests);
+
+  const iree_host_size_t request_indices[] = {1, 0};
+  id4_pipeline_parameter_load_step_t step =
+      id4_pipeline_parameter_indexed_gather_load_step(
+          IREE_SV("parameters.gather.indexed"), IREE_SV("scope"),
+          /*target_slab_index=*/0, IREE_ARRAYSIZE(request_indices),
+          request_indices);
+  IREE_EXPECT_OK(id4_pipeline_parameter_load_step_validate(
+      &step, /*slab_count=*/1, &slab));
+
+  const iree_host_size_t bad_request_indices[] = {1, 2};
+  step.request_indices = bad_request_indices;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
+                        id4_pipeline_parameter_load_step_validate(
+                            &step, /*slab_count=*/1, &slab));
+}
+
 TEST(PipelineParameterSlab, ValidatesFp8ScaledEncodeLoadStep) {
   id4_pipeline_parameter_request_t requests[] = {
       id4_pipeline_parameter_request(
@@ -198,6 +232,56 @@ TEST(PipelineParameterSlab, EnumeratorCoversSelectedRequestRange) {
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_OUT_OF_RANGE,
       enumerator.fn(enumerator.user_data, /*i=*/1, &key, &span));
+}
+
+TEST(PipelineParameterSlab, EnumeratorCoversExplicitRequestIndices) {
+  id4_pipeline_parameter_request_t requests[] = {
+      id4_pipeline_parameter_request(
+          IREE_SV("weight.0"),
+          id4_pipeline_parameter_span(/*parameter_offset=*/0,
+                                      /*buffer_offset=*/0, /*length=*/16)),
+      id4_pipeline_parameter_request(
+          IREE_SV("weight.1"),
+          id4_pipeline_parameter_span(/*parameter_offset=*/8,
+                                      /*buffer_offset=*/16, /*length=*/32)),
+  };
+  id4_pipeline_parameter_slab_plan_t slab =
+      id4_pipeline_make_device_local_parameter_slab_plan(
+          IREE_SV("scope"), /*placement_id=*/0, /*binding_slot=*/1,
+          IREE_HAL_QUEUE_AFFINITY_ANY,
+          IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE_READ, /*byte_length=*/48,
+          /*alignment=*/16, IREE_ARRAYSIZE(requests), requests);
+  const iree_host_size_t request_indices[] = {1, 0};
+  id4_pipeline_parameter_slab_enumerator_state_t state = {
+      // Slab containing the full request table.
+      /*.slab=*/&slab,
+      // Contiguous offset ignored when explicit request indices are present.
+      /*.request_offset=*/0,
+      // Number of selected requests.
+      /*.request_count=*/IREE_ARRAYSIZE(request_indices),
+      // Explicit selected request ordinals.
+      /*.request_indices=*/request_indices,
+  };
+  iree_io_parameter_enumerator_t enumerator =
+      id4_pipeline_parameter_slab_enumerator(&state);
+
+  iree_string_view_t key = iree_string_view_empty();
+  iree_io_parameter_span_t span;
+  IREE_EXPECT_OK(enumerator.fn(enumerator.user_data, /*i=*/0, &key, &span));
+  EXPECT_TRUE(iree_string_view_equal(key, IREE_SV("weight.1")));
+  EXPECT_EQ(span.parameter_offset, 8u);
+  EXPECT_EQ(span.buffer_offset, 16u);
+  EXPECT_EQ(span.length, 32u);
+
+  IREE_EXPECT_OK(enumerator.fn(enumerator.user_data, /*i=*/1, &key, &span));
+  EXPECT_TRUE(iree_string_view_equal(key, IREE_SV("weight.0")));
+  EXPECT_EQ(span.parameter_offset, 0u);
+  EXPECT_EQ(span.buffer_offset, 0u);
+  EXPECT_EQ(span.length, 16u);
+
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_OUT_OF_RANGE,
+      enumerator.fn(enumerator.user_data, /*i=*/2, &key, &span));
 }
 
 }  // namespace

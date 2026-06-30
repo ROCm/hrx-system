@@ -127,6 +127,12 @@ static iree_status_t id4_pipeline_parameter_load_step_validate_header(
       }
       break;
     case ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_ENCODE_FP8_E4M3_SCALED_TO_BF16:
+      if (step->request_indices) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "parameter encode load step '%.*s' must not have request indices",
+            (int)step->name.size, step->name.data);
+      }
       if (step->request_count != 1) {
         return iree_make_status(
             IREE_STATUS_INVALID_ARGUMENT,
@@ -142,6 +148,13 @@ static iree_status_t id4_pipeline_parameter_load_step_validate_header(
       }
       break;
     case ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_ENCODE_BF16_LINEAR_RHS_TILE:
+      if (step->request_indices) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "parameter BF16 RHS tile encode load step '%.*s' must not have "
+            "request indices",
+            (int)step->name.size, step->name.data);
+      }
       if (step->request_count != 1) {
         return iree_make_status(
             IREE_STATUS_INVALID_ARGUMENT,
@@ -158,6 +171,13 @@ static iree_status_t id4_pipeline_parameter_load_step_validate_header(
       }
       break;
     case ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_ENCODE_FP8_E4M3_SCALED_TO_BF16_LINEAR_RHS_TILE:
+      if (step->request_indices) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "parameter FP8 RHS tile encode load step '%.*s' must not have "
+            "request indices",
+            (int)step->name.size, step->name.data);
+      }
       if (step->request_count != 1) {
         return iree_make_status(
             IREE_STATUS_INVALID_ARGUMENT,
@@ -348,6 +368,19 @@ static iree_status_t id4_pipeline_parameter_load_step_validate_sources(
 static iree_status_t id4_pipeline_parameter_load_step_validate_request_range(
     const id4_pipeline_parameter_load_step_t* step,
     iree_host_size_t target_request_count) {
+  if (step->request_indices) {
+    for (iree_host_size_t i = 0; i < step->request_count; ++i) {
+      if (step->request_indices[i] >= target_request_count) {
+        return iree_make_status(
+            IREE_STATUS_OUT_OF_RANGE,
+            "parameter load step '%.*s' request index %" PRIhsz
+            " exceeds target slab request count %" PRIhsz,
+            (int)step->name.size, step->name.data, step->request_indices[i],
+            target_request_count);
+      }
+    }
+    return iree_ok_status();
+  }
   if (step->request_offset > target_request_count ||
       step->request_count > target_request_count - step->request_offset) {
     return iree_make_status(
@@ -446,7 +479,9 @@ iree_status_t id4_pipeline_parameter_slab_enumerate(
                             " is outside enumerated request count %" PRIhsz,
                             i, state->request_count);
   }
-  const iree_host_size_t request_index = state->request_offset + i;
+  const iree_host_size_t request_index = state->request_indices
+                                             ? state->request_indices[i]
+                                             : state->request_offset + i;
   if (request_index >= state->slab->request_count) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "parameter request index %" PRIhsz
@@ -1463,10 +1498,13 @@ static iree_status_t id4_pipeline_parameter_slab_submit_gather(
       IREE_SV("loading parameter slab"), step->source_scope, IREE_HOST_SIZE_MAX,
       options->diagnostics_sink));
   for (iree_host_size_t j = 0; j < step->request_count; ++j) {
+    const iree_host_size_t request_index = step->request_indices
+                                               ? step->request_indices[j]
+                                               : step->request_offset + j;
     IREE_RETURN_IF_ERROR(id4_pipeline_parameter_slab_emit_diagnostic(
         load, stage_name, IREE_SV("parameter_slab.gather"),
         IREE_SV("gathering parameter request"), step->source_scope,
-        step->request_offset + j, options->diagnostics_sink));
+        request_index, options->diagnostics_sink));
   }
   id4_pipeline_parameter_slab_enumerator_state_t enumerator_state = {
       // Slab plan supplying request keys and spans.
@@ -1475,6 +1513,8 @@ static iree_status_t id4_pipeline_parameter_slab_submit_gather(
       .request_offset = step->request_offset,
       // Number of requests loaded by this step.
       .request_count = step->request_count,
+      // Explicit request ordinals for non-contiguous gather steps.
+      .request_indices = step->request_indices,
   };
   iree_io_parameter_enumerator_t enumerator =
       id4_pipeline_parameter_slab_enumerator(&enumerator_state);
