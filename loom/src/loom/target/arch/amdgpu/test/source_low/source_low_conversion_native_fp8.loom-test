@@ -896,21 +896,21 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx1200_vector_extf_dir
   %26 = v_cvt_pk_f32_fp8 %packed
   %27 = slice %26[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %28 = slice %26[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %29 = v_lshrrev_b32_src0_inline %packed, 16
-  %30 = v_cvt_pk_f32_fp8 %29
-  %31 = slice %30[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %32 = slice %30[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %33 = v_cvt_f16_f32 %27
-  %34 = v_bfe_u32_offset_0_width_16_low16 %33
-  %35 = v_cvt_f16_f32 %28
-  %36 = v_bfe_u32_offset_0_width_16_low16 %35
-  %37 = v_lshl_add_u32_shift_imm %36, %34, 16
-  %38 = v_cvt_f16_f32 %31
+  %29 = v_cvt_f16_f32 %27
+  %30 = v_bfe_u32_offset_0_width_16_low16 %29
+  %31 = v_cvt_f16_f32 %28
+  %32 = v_bfe_u32_offset_0_width_16_low16 %31
+  %33 = v_lshl_add_u32_shift_imm %32, %30, 16
+  %34 = v_lshrrev_b32_src0_inline %packed, 16
+  %35 = v_cvt_pk_f32_fp8 %34
+  %36 = slice %35[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %37 = slice %35[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %38 = v_cvt_f16_f32 %36
   %39 = v_bfe_u32_offset_0_width_16_low16 %38
-  %40 = v_cvt_f16_f32 %32
+  %40 = v_cvt_f16_f32 %37
   %41 = v_bfe_u32_offset_0_width_16_low16 %40
   %42 = v_lshl_add_u32_shift_imm %41, %39, 16
-  %value = concat(%37, %42) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %value = concat(%33, %42) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
   %44 = v_lshlrev_b32_src0_inline %lane, 3
   global_store_b64_saddr %44, %value, %output_view
   return
@@ -944,21 +944,21 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx1200_vector_extf_dir
   %26 = v_cvt_pk_f32_bf8 %packed
   %27 = slice %26[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %28 = slice %26[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %29 = v_lshrrev_b32_src0_inline %packed, 16
-  %30 = v_cvt_pk_f32_bf8 %29
-  %31 = slice %30[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %32 = slice %30[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %33 = v_cvt_f16_f32 %27
-  %34 = v_bfe_u32_offset_0_width_16_low16 %33
-  %35 = v_cvt_f16_f32 %28
-  %36 = v_bfe_u32_offset_0_width_16_low16 %35
-  %37 = v_lshl_add_u32_shift_imm %36, %34, 16
-  %38 = v_cvt_f16_f32 %31
+  %29 = v_cvt_f16_f32 %27
+  %30 = v_bfe_u32_offset_0_width_16_low16 %29
+  %31 = v_cvt_f16_f32 %28
+  %32 = v_bfe_u32_offset_0_width_16_low16 %31
+  %33 = v_lshl_add_u32_shift_imm %32, %30, 16
+  %34 = v_lshrrev_b32_src0_inline %packed, 16
+  %35 = v_cvt_pk_f32_bf8 %34
+  %36 = slice %35[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %37 = slice %35[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %38 = v_cvt_f16_f32 %36
   %39 = v_bfe_u32_offset_0_width_16_low16 %38
-  %40 = v_cvt_f16_f32 %32
+  %40 = v_cvt_f16_f32 %37
   %41 = v_bfe_u32_offset_0_width_16_low16 %40
   %42 = v_lshl_add_u32_shift_imm %41, %39, 16
-  %value = concat(%37, %42) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %value = concat(%33, %42) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
   %44 = v_lshlrev_b32_src0_inline %lane, 3
   global_store_b64_saddr %44, %value, %output_view
   return
@@ -1106,31 +1106,14 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx1250_vector_extf_dir
   %packed = global_load_b32_saddr %23, %input_view
   %25 = v_cvt_pk_f16_fp8 %packed
   %26 = v_lshrrev_b32_src0_inline %packed, 16
-  %27 = v_and_b32_lit %26, 128
-  %28 = v_lshlrev_b32_src0_inline %27, 8
-  %29 = v_and_b32_lit %26, 127
-  %30 = v_lshl_add_u32_shift_imm_src2_lit %29 {shift = 4, imm32 = 15360}
-  %31 = s_mov_b32 3229614080
-  %32 = s_mov_b32 1614815232
-  %33 = v_perm_b32 %32, %31, %29
-  %34 = s_mov_b32 993737472
-  %35 = s_mov_b32 1010580540
-  %36 = v_perm_b32 %35, %34, %29
-  %37 = v_lshl_add_u32_shift_imm %36, %33, 8
-  %38 = v_cmp_lt_u32_src1_inline %29 {rhs = 8}
-  %39 = v_cndmask_b32 %30, %37, %38
-  %40 = v_or_b32 %28, %39
-  %41 = v_mov_b32 32704
-  %42 = v_mov_b32 127
-  %43 = v_cmp_eq_i32 %29, %42
-  %44 = v_cndmask_b32 %40, %41, %43
-  %45 = v_lshlrev_b32_src0_inline %44, 16
-  %46 = v_cvt_f16_f32 %45
-  %47 = v_bfe_u32_offset_0_width_16_low16 %46
-  %50 = v_mov_b32 6
-  %51 = v_mul_lo_u32 %lane, %50
-  global_store_b32_saddr %51, %25, %output_view
-  global_store_short_saddr %51, %47, %output_view {offset = 4}
+  %27 = v_cvt_pk_f32_fp8 %26
+  %28 = slice %27[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %29 = v_cvt_f16_f32 %28
+  %30 = v_bfe_u32_offset_0_width_16_low16 %29
+  %33 = v_mov_b32 6
+  %34 = v_mul_lo_u32 %lane, %33
+  global_store_b32_saddr %34, %25, %output_view
+  global_store_short_saddr %34, %30, %output_view {offset = 4}
   return
 }
 
