@@ -3704,6 +3704,32 @@ _KERNEL_CASES = [
         "target_name": "ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_structured128_hidden_shape",
     },
     {
+        "actual_case": "@id4_ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_structured128_mlp_up_shape_case",
+        "benchmark": "@id4_ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_structured128_mlp_up_shape",
+        "configs": [
+            "--config=id4.ideogram4.linear_fp8_wmma.token_count=256",
+            "--config=id4.ideogram4.linear_fp8_wmma.token_offset=0",
+            "--config=id4.ideogram4.linear_fp8_wmma.dispatch_token_count=256",
+            "--config=id4.ideogram4.linear_fp8_wmma.input_size=4608",
+            "--config=id4.ideogram4.linear_fp8_wmma.output_size=12288",
+        ],
+        "source": "ideogram4/linear_fp8_bf16_wmma_m128n64_2wave.loom",
+        "target_name": "ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_structured128_mlp_up_shape",
+    },
+    {
+        "actual_case": "@id4_ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_structured128_mlp_down_shape_case",
+        "benchmark": "@id4_ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_structured128_mlp_down_shape",
+        "configs": [
+            "--config=id4.ideogram4.linear_fp8_wmma.token_count=256",
+            "--config=id4.ideogram4.linear_fp8_wmma.token_offset=0",
+            "--config=id4.ideogram4.linear_fp8_wmma.dispatch_token_count=256",
+            "--config=id4.ideogram4.linear_fp8_wmma.input_size=12288",
+            "--config=id4.ideogram4.linear_fp8_wmma.output_size=4608",
+        ],
+        "source": "ideogram4/linear_fp8_bf16_wmma_m128n64_2wave.loom",
+        "target_name": "ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_structured128_mlp_down_shape",
+    },
+    {
         "actual_case": "@id4_ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_short_mlp_up_128_shape_case",
         "benchmark": "@id4_ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_short_mlp_up_128_shape",
         "configs": [
@@ -5436,6 +5462,18 @@ _KERNEL_CASES = [
         ],
         "source": "ideogram4/silu_product_bf16.loom",
         "target_name": "ideogram4_silu_product_bf16_padded",
+    },
+    {
+        "actual_case": "@id4_ideogram4_silu_product_bf16_structured128_mlp_shape_case",
+        "benchmark": "@id4_ideogram4_silu_product_bf16_structured128_mlp_shape",
+        "configs": [
+            "--config=id4.ideogram4.silu_product_bf16.token_count=256",
+            "--config=id4.ideogram4.silu_product_bf16.token_capacity=256",
+            "--config=id4.ideogram4.silu_product_bf16.intermediate_size=12288",
+            "--config=id4.ideogram4.silu_product_bf16.element_count=3145728",
+        ],
+        "source": "ideogram4/silu_product_bf16.loom",
+        "target_name": "ideogram4_silu_product_bf16_structured128_mlp_shape",
     },
     {
         "actual_case": "@id4_ideogram4_timestep_embedding_f32_zero_case",

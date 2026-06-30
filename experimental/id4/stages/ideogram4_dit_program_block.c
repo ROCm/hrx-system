@@ -1589,7 +1589,11 @@ iree_status_t id4_ideogram4_dit_program_author_transformer_block(
         id4_pipeline_program_make_shape_rank2(bf16_token_capacity,
                                               intermediate_size),
         &mlp_hidden));
-    if (materialize_feed_forward_projections) {
+    if (materialize_feed_forward_projections ||
+        (feed_forward_w1_parameter.storage ==
+             ID4_IDEOGRAM4_DIT_PARAMETER_STORAGE_FP8_E4M3_SCALED &&
+         feed_forward_w3_parameter.storage ==
+             ID4_IDEOGRAM4_DIT_PARAMETER_STORAGE_FP8_E4M3_SCALED)) {
       id4_pipeline_program_tensor_t mlp_gate =
           id4_pipeline_program_tensor_invalid();
       IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_acquire_tensor(
@@ -1695,17 +1699,6 @@ iree_status_t id4_ideogram4_dit_program_author_transformer_block(
               "%" PRIu32 " is not supported",
               (uint32_t)feed_forward_w3_parameter.layout);
       }
-    } else if (feed_forward_w1_parameter.storage ==
-                   ID4_IDEOGRAM4_DIT_PARAMETER_STORAGE_FP8_E4M3_SCALED &&
-               feed_forward_w3_parameter.storage ==
-                   ID4_IDEOGRAM4_DIT_PARAMETER_STORAGE_FP8_E4M3_SCALED) {
-      IREE_RETURN_IF_ERROR(
-          id4_ideogram4_dit_program_dispatch_mlp_gate_up_silu_product_packed_fp8_bf16(
-              builder, mlp_hidden_dispatch_name, total_token_count,
-              bf16_token_capacity, hidden_size, intermediate_size, ffn_input,
-              feed_forward_w1_parameter.weight, feed_forward_w1_parameter.scale,
-              feed_forward_w3_parameter.weight, feed_forward_w3_parameter.scale,
-              mlp_hidden));
     } else {
       return iree_make_status(
           IREE_STATUS_UNIMPLEMENTED,

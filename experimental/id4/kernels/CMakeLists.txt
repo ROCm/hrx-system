@@ -5551,6 +5551,44 @@ iree_native_test(
 
 iree_native_test(
   NAME
+    "ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_structured128_mlp_up_shape_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_fp8_bf16_wmma_m128n64_2wave.loom}}"
+    "--benchmark=@id4_ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_structured128_mlp_up_shape"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.ideogram4.linear_fp8_wmma.token_count=256"
+    "--config=id4.ideogram4.linear_fp8_wmma.token_offset=0"
+    "--config=id4.ideogram4.linear_fp8_wmma.dispatch_token_count=256"
+    "--config=id4.ideogram4.linear_fp8_wmma.input_size=4608"
+    "--config=id4.ideogram4.linear_fp8_wmma.output_size=12288"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
+    "ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_structured128_mlp_down_shape_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_fp8_bf16_wmma_m128n64_2wave.loom}}"
+    "--benchmark=@id4_ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_structured128_mlp_down_shape"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.ideogram4.linear_fp8_wmma.token_count=256"
+    "--config=id4.ideogram4.linear_fp8_wmma.token_offset=0"
+    "--config=id4.ideogram4.linear_fp8_wmma.dispatch_token_count=256"
+    "--config=id4.ideogram4.linear_fp8_wmma.input_size=12288"
+    "--config=id4.ideogram4.linear_fp8_wmma.output_size=4608"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
     "ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_short_mlp_up_128_shape_plan_test"
   ARGS
     "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_fp8_bf16_wmma_m128n64_2wave.loom}}"
@@ -8141,6 +8179,24 @@ iree_native_test(
     "--config=id4.ideogram4.silu_product_bf16.token_capacity=4"
     "--config=id4.ideogram4.silu_product_bf16.intermediate_size=3"
     "--config=id4.ideogram4.silu_product_bf16.element_count=6"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
+    "ideogram4_silu_product_bf16_structured128_mlp_shape_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/silu_product_bf16.loom}}"
+    "--benchmark=@id4_ideogram4_silu_product_bf16_structured128_mlp_shape"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.ideogram4.silu_product_bf16.token_count=256"
+    "--config=id4.ideogram4.silu_product_bf16.token_capacity=256"
+    "--config=id4.ideogram4.silu_product_bf16.intermediate_size=12288"
+    "--config=id4.ideogram4.silu_product_bf16.element_count=3145728"
   SRC
     loom::tools::iree-benchmark-loom
   LABELS
@@ -17691,6 +17747,52 @@ endif()
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
 iree_native_test(
   NAME
+    "ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_structured128_mlp_up_shape_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_fp8_bf16_wmma_m128n64_2wave.loom}}"
+    "--case=@id4_ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_structured128_mlp_up_shape_case"
+    "--device=amdgpu://0"
+    "--config=id4.ideogram4.linear_fp8_wmma.token_count=256"
+    "--config=id4.ideogram4.linear_fp8_wmma.token_offset=0"
+    "--config=id4.ideogram4.linear_fp8_wmma.dispatch_token_count=256"
+    "--config=id4.ideogram4.linear_fp8_wmma.input_size=4608"
+    "--config=id4.ideogram4.linear_fp8_wmma.output_size=12288"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
+    "ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_structured128_mlp_down_shape_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_fp8_bf16_wmma_m128n64_2wave.loom}}"
+    "--case=@id4_ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_structured128_mlp_down_shape_case"
+    "--device=amdgpu://0"
+    "--config=id4.ideogram4.linear_fp8_wmma.token_count=256"
+    "--config=id4.ideogram4.linear_fp8_wmma.token_offset=0"
+    "--config=id4.ideogram4.linear_fp8_wmma.dispatch_token_count=256"
+    "--config=id4.ideogram4.linear_fp8_wmma.input_size=12288"
+    "--config=id4.ideogram4.linear_fp8_wmma.output_size=4608"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
     "ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_short_mlp_up_128_shape_hal_test"
   ARGS
     "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/linear_fp8_bf16_wmma_m128n64_2wave.loom}}"
@@ -20864,6 +20966,28 @@ iree_native_test(
     "--config=id4.ideogram4.silu_product_bf16.token_capacity=4"
     "--config=id4.ideogram4.silu_product_bf16.intermediate_size=3"
     "--config=id4.ideogram4.silu_product_bf16.element_count=6"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
+    "ideogram4_silu_product_bf16_structured128_mlp_shape_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/ideogram4/silu_product_bf16.loom}}"
+    "--case=@id4_ideogram4_silu_product_bf16_structured128_mlp_shape_case"
+    "--device=amdgpu://0"
+    "--config=id4.ideogram4.silu_product_bf16.token_count=256"
+    "--config=id4.ideogram4.silu_product_bf16.token_capacity=256"
+    "--config=id4.ideogram4.silu_product_bf16.intermediate_size=12288"
+    "--config=id4.ideogram4.silu_product_bf16.element_count=3145728"
   SRC
     loom::tools::iree-test-loom
   LABELS
