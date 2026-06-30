@@ -110,7 +110,6 @@ iree_cc_binary_benchmark(
     ::session
     iree::base
     iree::base::tooling::flags
-    iree::experimental::id4::pipeline::parameter_cache_provider
     iree::experimental::id4::stages::hal_integration_util
     iree::experimental::id4::stages::ideogram4_dit_parameters
     iree::experimental::id4::tooling::filesystem

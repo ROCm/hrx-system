@@ -20,11 +20,7 @@ TEST_BENCHMARK_LABEL = (
     "image_tokens=64 dit_cond_tokens=83 dit_cond_capacity=128 "
     "dit_uncond_tokens=64 dit_uncond_capacity=128 latent=8x8 steps=1 "
     "image=128x128 residency=issue_phases issue=stage_serial "
-    "resident_stage_mask=0x00000000 dit_fp8_source_residency=0x00000003 "
-    "dit_fp8_source_cache_miss=direct_on_pressure "
-    "dit_fp8_source_cache_budget=8192MiB "
-    "dit_fp8_source_cache[entries=622,cached=8192MiB,peak=8192MiB,"
-    "fills=0,reuse=622,direct=220,evicted=0] "
+    "resident_stage_mask=0x00000000 "
     "params=fp8_e4m3 activation=bf16_linear_input weights=bf16_resident "
     "attention=online_wmma ff=fused_product param_total=49460MiB "
     "param_largest=17699MiB param_source=32015MiB "
@@ -33,7 +29,7 @@ TEST_BENCHMARK_LABEL = (
     "local_hw_largest=20MiB boundary=9MiB kernels=119 dispatches=1507 "
     "logical_live[boundary=5MiB,taps=0MiB,resident=0MiB,"
     "phase_peak=34951MiB,stage_serial_peak=17712MiB,"
-    "selected_peak=17712MiB,selected_with_source_cache_peak=25904MiB] "
+    "selected_peak=17712MiB] "
     "stage.qwen[param=14436MiB,src=14436MiB,src_direct=4068MiB,"
     "src_encoded=10368MiB,loads=36/108,local_hw=4MiB,boundary=4MiB,"
     "kernels=28,dispatches=485] "
@@ -343,23 +339,13 @@ class GenerationBenchmarkSummaryTest(unittest.TestCase):
             self.assertEqual(row["prompt_label"], "short128")
             self.assertEqual(row["generation_issue_mode"], "stage_serial")
             self.assertEqual(row["generation_residency"], "issue_phases")
-            self.assertEqual(row["dit_fp8_source_residency_mask"], 3)
-            self.assertEqual(
-                row["dit_fp8_source_cache_miss_mode"], "direct_on_pressure"
-            )
-            self.assertEqual(row["dit_fp8_source_cache_budget_mib"], 8192)
-            self.assertEqual(row["dit_fp8_source_cache_fill_count"], 0)
-            self.assertEqual(row["dit_fp8_source_cache_reuse_count"], 622)
-            self.assertEqual(row["dit_fp8_source_cache_direct_miss_count"], 220)
             self.assertEqual(row["runtime_parameter_total_mib"], 49460)
             self.assertEqual(row["runtime_parameter_source_encoded_mib"], 27848)
             self.assertEqual(row["runtime_parameter_gather_load_step_count"], 322)
             self.assertEqual(row["runtime_dispatch_count"], 1507)
             self.assertEqual(row["logical_live_phase_peak_mib"], 34951)
             self.assertEqual(row["logical_live_stage_serial_peak_mib"], 17712)
-            self.assertEqual(
-                row["logical_live_selected_with_source_cache_peak_mib"], 25904
-            )
+            self.assertEqual(row["logical_live_selected_peak_mib"], 17712)
             self.assertEqual(row["runtime_stages"]["qwen"]["source_encoded_mib"], 10368)
             self.assertEqual(row["runtime_stages"]["decode"]["dispatch_count"], 106)
             self.assertAlmostEqual(row["timing_issue_ms"], 3477.614)

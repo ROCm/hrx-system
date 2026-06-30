@@ -23,15 +23,6 @@ class GenerationBenchmarkSummaryError(ValueError):
     """Raised when benchmark summary inputs are missing or malformed."""
 
 
-_LABEL_SOURCE_CACHE_PATTERN = re.compile(
-    r"\bdit_fp8_source_cache\[entries=(?P<entries>[0-9]+),"
-    r"cached=(?P<cached>[0-9]+)MiB,"
-    r"peak=(?P<peak>[0-9]+)MiB,"
-    r"fills=(?P<fills>[0-9]+),"
-    r"reuse=(?P<reuse>[0-9]+),"
-    r"direct=(?P<direct>[0-9]+),"
-    r"evicted=(?P<evicted>[0-9]+)\]"
-)
 _LABEL_LOAD_STEPS_PATTERN = re.compile(
     r"\bparam_load_steps\[gather=(?P<gather>[0-9]+),"
     r"encode=(?P<encode>[0-9]+)\]"
@@ -42,9 +33,7 @@ _LABEL_LOGICAL_LIVE_PATTERN = re.compile(
     r"resident=(?P<resident>[0-9]+)MiB,"
     r"phase_peak=(?P<phase_peak>[0-9]+)MiB,"
     r"stage_serial_peak=(?P<stage_serial_peak>[0-9]+)MiB,"
-    r"selected_peak=(?P<selected_peak>[0-9]+)MiB,"
-    r"selected_with_source_cache_peak="
-    r"(?P<selected_with_source_cache_peak>[0-9]+)MiB\]"
+    r"selected_peak=(?P<selected_peak>[0-9]+)MiB\]"
 )
 _LABEL_STAGE_PATTERN = re.compile(
     r"\bstage\.(?P<name>[A-Za-z0-9_]+)\["
@@ -160,9 +149,6 @@ def _require_equal(actual: Any, expected: Any, context: str) -> None:
 
 
 def _parse_generation_benchmark_label(label: str, context: str) -> dict[str, Any]:
-    source_cache_match = _require_match(
-        _LABEL_SOURCE_CACHE_PATTERN, label, f"{context}.label"
-    )
     load_steps_match = _require_match(
         _LABEL_LOAD_STEPS_PATTERN, label, f"{context}.label"
     )
@@ -219,36 +205,6 @@ def _parse_generation_benchmark_label(label: str, context: str) -> dict[str, Any
         "generation_resident_stage_mask": _label_hex(
             label, "resident_stage_mask", f"{context}.label"
         ),
-        "dit_fp8_source_residency_mask": _label_hex(
-            label, "dit_fp8_source_residency", f"{context}.label"
-        ),
-        "dit_fp8_source_cache_miss_mode": _label_token(
-            label, "dit_fp8_source_cache_miss", f"{context}.label"
-        ),
-        "dit_fp8_source_cache_budget_mib": _label_mib(
-            label, "dit_fp8_source_cache_budget", f"{context}.label"
-        ),
-        "dit_fp8_source_cache_entry_count": _match_unsigned_group(
-            source_cache_match, "entries", f"{context}.label"
-        ),
-        "dit_fp8_source_cache_cached_mib": _match_unsigned_group(
-            source_cache_match, "cached", f"{context}.label"
-        ),
-        "dit_fp8_source_cache_peak_mib": _match_unsigned_group(
-            source_cache_match, "peak", f"{context}.label"
-        ),
-        "dit_fp8_source_cache_fill_count": _match_unsigned_group(
-            source_cache_match, "fills", f"{context}.label"
-        ),
-        "dit_fp8_source_cache_reuse_count": _match_unsigned_group(
-            source_cache_match, "reuse", f"{context}.label"
-        ),
-        "dit_fp8_source_cache_direct_miss_count": _match_unsigned_group(
-            source_cache_match, "direct", f"{context}.label"
-        ),
-        "dit_fp8_source_cache_evicted_count": _match_unsigned_group(
-            source_cache_match, "evicted", f"{context}.label"
-        ),
         "runtime_parameter_total_mib": _label_mib(
             label, "param_total", f"{context}.label"
         ),
@@ -298,9 +254,6 @@ def _parse_generation_benchmark_label(label: str, context: str) -> dict[str, Any
         ),
         "logical_live_selected_peak_mib": _match_unsigned_group(
             logical_live_match, "selected_peak", f"{context}.label"
-        ),
-        "logical_live_selected_with_source_cache_peak_mib": _match_unsigned_group(
-            logical_live_match, "selected_with_source_cache_peak", f"{context}.label"
         ),
         "timing_plan_ms": _match_float_group(timing_match, "plan", f"{context}.label"),
         "timing_prepare_ms": _match_float_group(

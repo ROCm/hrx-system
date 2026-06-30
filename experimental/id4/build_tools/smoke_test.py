@@ -241,20 +241,6 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
-        "--dit_fp8_source_residency",
-        default="disabled",
-        help=(
-            "Comma-separated DiT FP8 source providers kept resident after "
-            "their first gather."
-        ),
-    )
-    parser.add_argument("--dit_fp8_source_cache_budget_mib", type=int, default=0)
-    parser.add_argument(
-        "--dit_fp8_source_cache_miss_mode",
-        default="retain",
-        choices=("retain", "direct_on_pressure"),
-    )
-    parser.add_argument(
         "--vae_tiling_mode",
         default="memory_budget",
         choices=(
@@ -576,9 +562,6 @@ def build_id4_command(args: argparse.Namespace, artifact_dir: Path) -> list[str]
         f"--dit_feed_forward_implementation={args.dit_feed_forward_implementation}",
         f"--generation_residency={args.generation_residency}",
         f"--generation_issue_mode={args.generation_issue_mode}",
-        f"--dit_fp8_source_residency={args.dit_fp8_source_residency}",
-        f"--dit_fp8_source_cache_budget_mib={args.dit_fp8_source_cache_budget_mib}",
-        f"--dit_fp8_source_cache_miss_mode={args.dit_fp8_source_cache_miss_mode}",
         f"--vae_tiling_mode={args.vae_tiling_mode}",
         f"--dump_plan={artifact_dir / 'plan.json'}",
         f"--dump_diagnostics={artifact_dir / 'diagnostics'}",

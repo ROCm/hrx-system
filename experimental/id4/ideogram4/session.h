@@ -284,8 +284,7 @@ typedef struct id4_ideogram4_generation_resource_statistics_options_t {
 // the generation schedule: boundary buffers, diagnostic tap buffers, prepared
 // stage parameter/constant slabs, and queued local slab high-water marks. They
 // intentionally exclude HAL allocator pool overhead and external parameter
-// provider caches; callers that enable source-resident providers should add
-// those provider statistics separately.
+// storage.
 typedef struct id4_ideogram4_generation_resource_statistics_t {
   // Generation boundary buffers retained after planned aliases are applied.
   iree_device_size_t boundary_buffer_byte_length;
