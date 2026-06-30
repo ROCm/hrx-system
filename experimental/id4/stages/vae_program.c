@@ -2696,7 +2696,14 @@ static iree_status_t id4_vae_program_author_upsample_conv3x3_bias(
     IREE_RETURN_IF_ERROR(id4_vae_program_build_upsample_conv3x3_bias_configs(
         input_width, input_height, channel_count, batch_count, output_width,
         output_height, output_element_count, &config_list));
-    const bool use_wmma_oc64 = channel_count >= 64 && channel_count % 64 == 0;
+    const uint64_t output_spatial_element_count =
+        (uint64_t)output_width * output_height * batch_count;
+    // OC32 has lower register pressure and wins on the smallest active VAE
+    // upsample tile; OC64 wins once the output tile reaches 64x64.
+    const bool use_small_spatial_wmma =
+        output_spatial_element_count <= 32ull * 32ull;
+    const bool use_wmma_oc64 = !use_small_spatial_wmma && channel_count >= 64 &&
+                               channel_count % 64 == 0;
 
     iree_string_view_t packed_weight_key = iree_string_view_empty();
     id4_pipeline_program_shape_t weight_shape;

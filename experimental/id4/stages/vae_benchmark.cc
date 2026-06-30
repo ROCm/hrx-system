@@ -29,6 +29,10 @@ static constexpr uint32_t kFlux2LatentHeight = 64;
 static constexpr uint32_t kFlux2LatentChannelCount = 128;
 static constexpr uint32_t kFlux2LatentBatchCount = 1;
 static constexpr uint64_t kFlux2DecodedElementCount = 1024ull * 1024ull * 3ull;
+static constexpr uint32_t kFlux2SmallLatentWidth = 8;
+static constexpr uint32_t kFlux2SmallLatentHeight = 8;
+static constexpr uint64_t kFlux2SmallDecodedElementCount =
+    128ull * 128ull * 3ull;
 static constexpr uint32_t kFlux2TileLatentWidth = 32;
 static constexpr uint32_t kFlux2TileLatentHeight = 32;
 static constexpr uint64_t kFlux2TileDecodedElementCount =
@@ -147,6 +151,21 @@ static constexpr VaeBenchmarkShape kFlux2Bf16FullImageShape = {
     /*.activation_format=*/ID4_VAE_ACTIVATION_FORMAT_BF16_CONV_INPUT,
     // Plan dump file name.
     /*.plan_file_name=*/"decode_bf16_full_frame.json",
+};
+
+static constexpr VaeBenchmarkShape kFlux2Bf16SmallImageShape = {
+    // Small bringup image latent width.
+    /*.latent_width=*/kFlux2SmallLatentWidth,
+    // Small bringup image latent height.
+    /*.latent_height=*/kFlux2SmallLatentHeight,
+    // Small 128x128 RGB output element count.
+    /*.decoded_element_count=*/kFlux2SmallDecodedElementCount,
+    // Full-frame VAE decode with no spatial tiling.
+    /*.tiling=*/DisabledTiling(),
+    // BF16 prelude activation and post-quant storage.
+    /*.activation_format=*/ID4_VAE_ACTIVATION_FORMAT_BF16_CONV_INPUT,
+    // Plan dump file name.
+    /*.plan_file_name=*/"decode_bf16_small_frame.json",
 };
 
 static constexpr VaeBenchmarkShape kFlux2Bf16TiledFullImageShape = {
@@ -589,6 +608,11 @@ IREE_BENCHMARK_FN(BM_VaeStageIssueBf16EndToEnd) {
   return RunVaeStageIssueEndToEnd(benchmark_state, kFlux2Bf16FullImageShape);
 }
 ID4_VAE_BENCHMARK_REGISTER(BM_VaeStageIssueBf16EndToEnd, MILLISECOND);
+
+IREE_BENCHMARK_FN(BM_VaeStageIssueBf16SmallImageEndToEnd) {
+  return RunVaeStageIssueEndToEnd(benchmark_state, kFlux2Bf16SmallImageShape);
+}
+ID4_VAE_BENCHMARK_REGISTER(BM_VaeStageIssueBf16SmallImageEndToEnd, MILLISECOND);
 
 IREE_BENCHMARK_FN(BM_VaeStageIssueBf16TiledEndToEnd) {
   return RunVaeStageIssueEndToEnd(benchmark_state,
