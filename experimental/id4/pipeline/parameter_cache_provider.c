@@ -57,12 +57,20 @@ typedef struct id4_pipeline_parameter_cache_provider_t {
   iree_device_size_t peak_cached_byte_length;
   // Number of upstream gather calls issued to fill cache entries.
   iree_host_size_t source_gather_count;
+  // Number of upstream source bytes gathered to fill cache entries.
+  iree_device_size_t source_gather_byte_length;
   // Number of caller gather requests served from existing cache entries.
   iree_host_size_t cache_reuse_count;
+  // Number of caller source bytes served from existing cache entries.
+  iree_device_size_t cache_reuse_byte_length;
   // Number of caller gather requests served directly under budget pressure.
   iree_host_size_t direct_miss_count;
+  // Number of caller source bytes served directly under budget pressure.
+  iree_device_size_t direct_miss_byte_length;
   // Number of cache entries evicted by budget pressure or notifications.
   iree_host_size_t evicted_entry_count;
+  // Number of cached source bytes evicted by budget pressure or notifications.
+  iree_device_size_t evicted_byte_length;
   // Source-resident exact-span cache entries.
   id4_pipeline_parameter_cache_entry_t* entries;
 } id4_pipeline_parameter_cache_provider_t;
@@ -157,12 +165,14 @@ static void id4_pipeline_parameter_cache_evict_oldest_entry_locked(
     provider->cached_byte_length -= evicted_length;
   }
   ++provider->evicted_entry_count;
+  provider->evicted_byte_length += evicted_length;
 }
 
 static void id4_pipeline_parameter_cache_provider_evict_all(
     id4_pipeline_parameter_cache_provider_t* provider) {
   iree_slim_mutex_lock(&provider->mutex);
   provider->evicted_entry_count += provider->entry_count;
+  provider->evicted_byte_length += provider->cached_byte_length;
   for (iree_host_size_t i = 0; i < provider->entry_count; ++i) {
     id4_pipeline_parameter_cache_entry_deinitialize(provider,
                                                     &provider->entries[i]);
@@ -266,6 +276,7 @@ static bool id4_pipeline_parameter_cache_try_retain_ready_entry(
           length);
   if (entry_index != IREE_HOST_SIZE_MAX) {
     ++provider->cache_reuse_count;
+    provider->cache_reuse_byte_length += length;
     id4_pipeline_parameter_cache_retain_ready_entry(
         &provider->entries[entry_index], out_ready_entry);
   }
@@ -371,6 +382,7 @@ static iree_status_t id4_pipeline_parameter_cache_fill_entry(
     if (iree_status_is_ok(status)) {
       iree_slim_mutex_lock(&provider->mutex);
       ++provider->source_gather_count;
+      provider->source_gather_byte_length += length;
       iree_slim_mutex_unlock(&provider->mutex);
     }
   }
@@ -424,6 +436,7 @@ static iree_status_t id4_pipeline_parameter_cache_gather_direct(
   if (iree_status_is_ok(status)) {
     iree_slim_mutex_lock(&provider->mutex);
     ++provider->direct_miss_count;
+    provider->direct_miss_byte_length += span.length;
     iree_slim_mutex_unlock(&provider->mutex);
     out_ready_entry->ready_semaphore = ready_semaphore;
     out_ready_entry->ready_payload_value = ready_payload_value;
@@ -449,6 +462,7 @@ static iree_status_t id4_pipeline_parameter_cache_insert_or_retain_entry(
           parameter_offset, length);
   if (existing_index != IREE_HOST_SIZE_MAX) {
     ++provider->cache_reuse_count;
+    provider->cache_reuse_byte_length += length;
     id4_pipeline_parameter_cache_retain_ready_entry(
         &provider->entries[existing_index], out_ready_entry);
   } else {
@@ -923,9 +937,14 @@ iree_status_t id4_pipeline_parameter_cache_provider_query_statistics(
   out_statistics->maximum_cached_byte_length =
       provider->maximum_cached_byte_length;
   out_statistics->source_gather_count = provider->source_gather_count;
+  out_statistics->source_gather_byte_length =
+      provider->source_gather_byte_length;
   out_statistics->cache_reuse_count = provider->cache_reuse_count;
+  out_statistics->cache_reuse_byte_length = provider->cache_reuse_byte_length;
   out_statistics->direct_miss_count = provider->direct_miss_count;
+  out_statistics->direct_miss_byte_length = provider->direct_miss_byte_length;
   out_statistics->evicted_entry_count = provider->evicted_entry_count;
+  out_statistics->evicted_byte_length = provider->evicted_byte_length;
   iree_slim_mutex_unlock(&provider->mutex);
   return iree_ok_status();
 }

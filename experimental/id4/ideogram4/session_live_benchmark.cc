@@ -180,12 +180,20 @@ struct GenerationBenchmarkSourceCacheStatistics {
   iree_device_size_t maximum_cached_byte_length;
   // Number of upstream gather submissions issued to fill cache entries.
   iree_host_size_t source_gather_count;
+  // Number of upstream source bytes gathered to fill cache entries.
+  iree_device_size_t source_gather_byte_length;
   // Number of caller gather requests served from existing cache entries.
   iree_host_size_t cache_reuse_count;
+  // Number of caller source bytes served from existing cache entries.
+  iree_device_size_t cache_reuse_byte_length;
   // Number of caller gather requests served directly under budget pressure.
   iree_host_size_t direct_miss_count;
+  // Number of caller source bytes served directly under budget pressure.
+  iree_device_size_t direct_miss_byte_length;
   // Number of cache entries evicted by budget pressure or notifications.
   iree_host_size_t evicted_entry_count;
+  // Number of cached source bytes evicted by budget pressure or notifications.
+  iree_device_size_t evicted_byte_length;
 };
 
 enum class GenerationIssueMode {
@@ -726,9 +734,13 @@ static void AddSourceCacheStatistics(
   target->peak_cached_byte_length += add.peak_cached_byte_length;
   target->maximum_cached_byte_length += add.maximum_cached_byte_length;
   target->source_gather_count += add.source_gather_count;
+  target->source_gather_byte_length += add.source_gather_byte_length;
   target->cache_reuse_count += add.cache_reuse_count;
+  target->cache_reuse_byte_length += add.cache_reuse_byte_length;
   target->direct_miss_count += add.direct_miss_count;
+  target->direct_miss_byte_length += add.direct_miss_byte_length;
   target->evicted_entry_count += add.evicted_entry_count;
+  target->evicted_byte_length += add.evicted_byte_length;
 }
 
 static iree_status_t AccumulateSourceCacheStatistics(
@@ -768,6 +780,20 @@ static iree_status_t SubtractSourceCacheCounter(iree_host_size_t current,
   return iree_ok_status();
 }
 
+static iree_status_t SubtractSourceCacheByteLength(
+    iree_device_size_t current, iree_device_size_t baseline,
+    iree_string_view_t counter_name, iree_device_size_t* out_delta) {
+  if (current < baseline) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "source cache byte counter %.*s decreased from %" PRIu64 " to %" PRIu64,
+        static_cast<int>(counter_name.size), counter_name.data, baseline,
+        current);
+  }
+  *out_delta = current - baseline;
+  return iree_ok_status();
+}
+
 static iree_status_t CalculateSourceCacheIntervalStatistics(
     const GenerationBenchmarkSourceCacheStatistics& baseline,
     const GenerationBenchmarkSourceCacheStatistics& current,
@@ -776,15 +802,30 @@ static iree_status_t CalculateSourceCacheIntervalStatistics(
   IREE_RETURN_IF_ERROR(SubtractSourceCacheCounter(
       current.source_gather_count, baseline.source_gather_count,
       IREE_SV("source_gather_count"), &out_interval->source_gather_count));
+  IREE_RETURN_IF_ERROR(SubtractSourceCacheByteLength(
+      current.source_gather_byte_length, baseline.source_gather_byte_length,
+      IREE_SV("source_gather_byte_length"),
+      &out_interval->source_gather_byte_length));
   IREE_RETURN_IF_ERROR(SubtractSourceCacheCounter(
       current.cache_reuse_count, baseline.cache_reuse_count,
       IREE_SV("cache_reuse_count"), &out_interval->cache_reuse_count));
+  IREE_RETURN_IF_ERROR(SubtractSourceCacheByteLength(
+      current.cache_reuse_byte_length, baseline.cache_reuse_byte_length,
+      IREE_SV("cache_reuse_byte_length"),
+      &out_interval->cache_reuse_byte_length));
   IREE_RETURN_IF_ERROR(SubtractSourceCacheCounter(
       current.direct_miss_count, baseline.direct_miss_count,
       IREE_SV("direct_miss_count"), &out_interval->direct_miss_count));
-  return SubtractSourceCacheCounter(
+  IREE_RETURN_IF_ERROR(SubtractSourceCacheByteLength(
+      current.direct_miss_byte_length, baseline.direct_miss_byte_length,
+      IREE_SV("direct_miss_byte_length"),
+      &out_interval->direct_miss_byte_length));
+  IREE_RETURN_IF_ERROR(SubtractSourceCacheCounter(
       current.evicted_entry_count, baseline.evicted_entry_count,
-      IREE_SV("evicted_entry_count"), &out_interval->evicted_entry_count);
+      IREE_SV("evicted_entry_count"), &out_interval->evicted_entry_count));
+  return SubtractSourceCacheByteLength(
+      current.evicted_byte_length, baseline.evicted_byte_length,
+      IREE_SV("evicted_byte_length"), &out_interval->evicted_byte_length);
 }
 
 static iree_status_t AccumulateGenerationBenchmarkPlanStatistics(
@@ -1726,8 +1767,10 @@ static iree_status_t SetGenerationBenchmarkLabel(
       " dit_fp8_source_cache_budget=%" PRIu64
       "MiB"
       " dit_fp8_source_cache[entries=%" PRIhsz ",cached=%" PRIu64
-      "MiB,peak=%" PRIu64 "MiB,fills=%" PRIhsz ",reuse=%" PRIhsz
-      ",direct=%" PRIhsz ",evicted=%" PRIhsz
+      "MiB,peak=%" PRIu64 "MiB,fills=%" PRIhsz "/%" PRIu64 "MiB,reuse=%" PRIhsz
+      "/%" PRIu64 "MiB,direct=%" PRIhsz "/%" PRIu64 "MiB,evicted=%" PRIhsz
+      "/%" PRIu64
+      "MiB"
       "]"
       " params=%.*s activation=%.*s weights=%.*s attention=%.*s ff=%.*s"
       " param_total=%" PRIu64 "MiB param_largest=%" PRIu64
@@ -1762,9 +1805,13 @@ static iree_status_t SetGenerationBenchmarkLabel(
       CeilMiB(source_cache_statistics.cached_byte_length),
       CeilMiB(source_cache_statistics.peak_cached_byte_length),
       source_cache_statistics.source_gather_count,
+      CeilMiB(source_cache_statistics.source_gather_byte_length),
       source_cache_statistics.cache_reuse_count,
+      CeilMiB(source_cache_statistics.cache_reuse_byte_length),
       source_cache_statistics.direct_miss_count,
+      CeilMiB(source_cache_statistics.direct_miss_byte_length),
       source_cache_statistics.evicted_entry_count,
+      CeilMiB(source_cache_statistics.evicted_byte_length),
       static_cast<int>(parameter_format.size), parameter_format.data,
       static_cast<int>(activation_format.size), activation_format.data,
       static_cast<int>(weight_execution_format.size),

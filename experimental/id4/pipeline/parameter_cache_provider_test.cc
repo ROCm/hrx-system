@@ -349,7 +349,8 @@ static void ExpectCacheStatistics(
     iree_device_size_t peak_cached_byte_length,
     iree_host_size_t source_gather_count, iree_host_size_t cache_reuse_count,
     iree_host_size_t direct_miss_count, iree_host_size_t evicted_entry_count,
-    iree_device_size_t maximum_cached_byte_length = 0) {
+    iree_device_size_t maximum_cached_byte_length = 0,
+    iree_device_size_t operation_byte_length = 8) {
   id4_pipeline_parameter_cache_provider_statistics_t statistics = {};
   IREE_ASSERT_OK(id4_pipeline_parameter_cache_provider_query_statistics(
       provider, &statistics));
@@ -358,9 +359,17 @@ static void ExpectCacheStatistics(
   EXPECT_EQ(statistics.peak_cached_byte_length, peak_cached_byte_length);
   EXPECT_EQ(statistics.maximum_cached_byte_length, maximum_cached_byte_length);
   EXPECT_EQ(statistics.source_gather_count, source_gather_count);
+  EXPECT_EQ(statistics.source_gather_byte_length,
+            source_gather_count * operation_byte_length);
   EXPECT_EQ(statistics.cache_reuse_count, cache_reuse_count);
+  EXPECT_EQ(statistics.cache_reuse_byte_length,
+            cache_reuse_count * operation_byte_length);
   EXPECT_EQ(statistics.direct_miss_count, direct_miss_count);
+  EXPECT_EQ(statistics.direct_miss_byte_length,
+            direct_miss_count * operation_byte_length);
   EXPECT_EQ(statistics.evicted_entry_count, evicted_entry_count);
+  EXPECT_EQ(statistics.evicted_byte_length,
+            evicted_entry_count * operation_byte_length);
 }
 
 TEST(ParameterCacheProviderTest, ReusesExactSourceSpanAcrossTargetOffsets) {

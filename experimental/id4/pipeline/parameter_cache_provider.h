@@ -53,12 +53,20 @@ typedef struct id4_pipeline_parameter_cache_provider_statistics_t {
   iree_device_size_t maximum_cached_byte_length;
   // Number of upstream gather calls issued to fill cache entries.
   iree_host_size_t source_gather_count;
+  // Number of upstream source bytes gathered to fill cache entries.
+  iree_device_size_t source_gather_byte_length;
   // Number of caller gather requests served from an existing cache entry.
   iree_host_size_t cache_reuse_count;
+  // Number of caller source bytes served from existing cache entries.
+  iree_device_size_t cache_reuse_byte_length;
   // Number of caller gather requests served directly under budget pressure.
   iree_host_size_t direct_miss_count;
+  // Number of caller source bytes served directly under budget pressure.
+  iree_device_size_t direct_miss_byte_length;
   // Number of cache entries evicted by budget pressure or notifications.
   iree_host_size_t evicted_entry_count;
+  // Number of cached source bytes evicted by budget pressure or notifications.
+  iree_device_size_t evicted_byte_length;
 } id4_pipeline_parameter_cache_provider_statistics_t;
 
 // Wraps |source_provider| with an exact-span device cache for gather requests.
