@@ -2251,6 +2251,27 @@ low.func.def target(@gfx11_target) @gfx11_vop3_cmp_f32_inline_sources_assembly(%
 
 // ====
 
+// RUN: emit amdgpu-assembly @gfx11_scalar_compare_i32_source1_inline waits=none
+amdgpu.target<gfx1100> @gfx11_target
+low.func.def target(@gfx11_target) @gfx11_scalar_compare_i32_source1_inline(%value: reg<amdgpu.sgpr>) asm<amdgpu.rdna3.core> {
+  %active = s_cmp_lg_i32_src1_inline %value {rhs = 0}
+  low.cond_br %active, ^then, ^exit : reg<amdgpu.scc>
+^then:
+  return
+^exit:
+  return
+}
+
+// ----
+  s_cmp_lg_i32 s0, 0
+  s_cbranch_scc0 .Lbb2
+.Lbb1:
+  s_endpgm
+.Lbb2:
+  s_endpgm
+
+// ====
+
 // RUN: emit amdgpu-assembly @gfx11_scalar_compare_u64_source1_inline waits=none
 amdgpu.target<gfx1100> @gfx11_target
 low.func.def target(@gfx11_target) @gfx11_scalar_compare_u64_source1_inline(%mask: reg<amdgpu.sgpr x2>) asm<amdgpu.rdna3.core> {
