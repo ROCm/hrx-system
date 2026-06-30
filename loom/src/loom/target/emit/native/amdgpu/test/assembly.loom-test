@@ -1789,6 +1789,7 @@ low.func.def target(@gfx11_target) @gfx11_block_entry_wait_preserves_later_load(
 // ----
   buffer_load_dword v2, v0, s[4:7], s2 offen offset:0
   s_cmp_lt_i32 s0, s1
+  s_delay_alu instid0(SALU_CYCLE_1)
   s_cbranch_scc0 .Lbb3
 .Lbb1:
   s_waitcnt vmcnt(0) lgkmcnt(63)
@@ -2068,10 +2069,10 @@ low.func.def target(@gfx11_target) @gfx11_scc_selects_with_interleaved_producers
   s_cmp_lt_i32 s0, s1
   s_cselect_b32 s0, s4, s5
   s_cmp_lt_i32 s2, s3
-  s_cselect_b32 s1, s4, s5
   v_mov_b32_copy v1, s0
   buffer_store_dword v1, v0, s[8:11], s6 offen offset:0
-  v_mov_b32_copy v1, s1
+  s_cselect_b32 s0, s4, s5
+  v_mov_b32_copy v1, s0
   buffer_store_dword v1, v0, s[8:11], s6 offen offset:4
   s_endpgm
 
@@ -2899,6 +2900,7 @@ low.func.def target(@gfx_target) @gfx11_smem_wait_drains_cross_block_peer(%kerna
   s_waitcnt vmcnt(63) lgkmcnt(0)
   s_add_u32 s0, s6, s3
   s_cmp_lt_i32 s3, s4
+  s_delay_alu instid0(SALU_CYCLE_1)
   s_cbranch_scc0 .Lbb2
 .Lbb1:
   s_add_u32 s1, s5, s4
@@ -3249,6 +3251,7 @@ low.func.def target(@gfx_target) @wait_cross_block(%resource: reg<amdgpu.sgpr x4
 // ----
   buffer_load_dword v1, v0, s[4:7], s2 offen offset:0
   s_cmp_lt_i32 s0, s1
+  s_delay_alu instid0(SALU_CYCLE_1)
   s_cbranch_scc0 .Lbb2
 .Lbb1:
   s_waitcnt vmcnt(0) lgkmcnt(63)
@@ -3282,6 +3285,7 @@ low.func.def target(@gfx_target) @wait_branch_arg_after_prior_wait(%resource: re
   v_add_u32 v0, v2, v0
   buffer_load_b128 v[4:7], v1, s[4:7], s2 offen offset:16
   s_cmp_lt_i32 s0, s1
+  s_delay_alu instid0(SALU_CYCLE_1)
   s_cbranch_scc0 .Lbb3
 .Lbb1:
   s_waitcnt vmcnt(0) lgkmcnt(63)
@@ -3310,6 +3314,7 @@ low.func.def target(@gfx_target) @wait_cross_block_descriptor_used_twice(%kernar
 // ----
   s_load_dwordx2 s[6:7], s[0:1], s2 offset:0
   s_cmp_lt_i32 s3, s4
+  s_delay_alu instid0(SALU_CYCLE_1)
   s_cbranch_scc0 .Lbb2
 .Lbb1:
   s_waitcnt vmcnt(63) lgkmcnt(0)

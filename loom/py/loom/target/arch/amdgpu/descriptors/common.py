@@ -152,6 +152,7 @@ _RESOURCE_SWMMAC = "amdgpu.swmmac"
 _RESOURCE_CONTROL = "amdgpu.control"
 
 _SCHEDULE_SALU = "amdgpu.salu"
+_SCHEDULE_SALU_COMPARE = "amdgpu.salu.compare"
 _SCHEDULE_VALU = "amdgpu.valu"
 _SCHEDULE_TRANS = "amdgpu.trans"
 _SCHEDULE_PACKED_DOT = "amdgpu.dot.packed"
@@ -705,6 +706,13 @@ def _common_scalar_vector_memory_schedule_classes(
             _SCHEDULE_SALU,
             latency_kind=LatencyKind.ESTIMATE,
             latency_cycles=1,
+            issue_uses=(IssueUse(_RESOURCE_SALU, cycles=1, units=1),),
+            model_quality=ModelQuality.ESTIMATED,
+        ),
+        ScheduleClass(
+            _SCHEDULE_SALU_COMPARE,
+            latency_kind=LatencyKind.ESTIMATE,
+            latency_cycles=2,
             issue_uses=(IssueUse(_RESOURCE_SALU, cycles=1, units=1),),
             model_quality=ModelQuality.ESTIMATED,
         ),
@@ -2900,6 +2908,7 @@ __all__ = (
     "_SCHEDULE_MODE_CONTROL",
     "_SCHEDULE_PACKED_DOT",
     "_SCHEDULE_SALU",
+    "_SCHEDULE_SALU_COMPARE",
     "_SCHEDULE_SMEM_LOAD",
     "_SCHEDULE_SMEM_STORE",
     "_SCHEDULE_SWMMAC",
