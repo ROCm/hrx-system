@@ -261,6 +261,61 @@ func.def target(@target) @fragment_store_tail_footprint_rejected(%output: buffer
 
 amdgpu.target<gfx1100> @target
 
+kernel.def target(@target) @fragment_store_launch_subgroup_footprint() {
+  %unit = index.constant 1 : index
+  %workgroup_count = index.constant 64 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%workgroup_count, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%output: buffer) {
+  %zero_offset = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %four = index.constant 4 : index
+  %six = index.constant 6 : index
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %workgroup = kernel.workgroup.id<x> : index
+  %subgroup = kernel.subgroup.id : index
+  %workgroup_base = index.shli %workgroup, %six : index
+  %subgroup_base = index.shli %subgroup, %four : index
+  %row = index.add %workgroup_base, %subgroup_base : index
+  %output_global = buffer.assume.memory_space<global> %output : buffer
+  %output_view = buffer.view %output_global[%zero_offset] : buffer -> view<4096x16xf32, #dense>
+  %value = vector.constant 0.0 : vector<8xf32>
+  vector.fragment.store<result> %value, %output_view[%row, %zero] shape [%m, %n] : vector<8xf32>, view<4096x16xf32, #dense>
+  kernel.return
+}
+
+// ----
+low.kernel.def target(@target) workgroup_size(64, 1, 1) @fragment_store_launch_subgroup_footprint() asm<amdgpu.rdna3.core> {
+  %workgroup = live_in<amdgpu.workgroup_id.x> : reg<amdgpu.sgpr>
+  %19 = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 262144} : reg<amdgpu.sgpr x2>
+  %six = s_mov_b32 6
+  %subgroup = v_lshrrev_b32_src0_inline %19, 5
+  %workgroup_base = s_lshl_b32 %workgroup, %six
+  %subgroup_base = v_lshlrev_b32_lit %subgroup, 4
+  %25 = v_mov_b32_copy %workgroup_base
+  %row = v_add_u32 %25, %subgroup_base
+  %27 = v_mov_b32 0
+  %36 = v_and_b32_src0_inline %19, 31
+  %39 = v_lshlrev_b32_src0_inline %row, 6
+  %40 = v_lshlrev_b32_src0_inline %36, 2
+  %41 = v_add_u32 %39, %40
+  global_store_b32_saddr %41, %27, %output_view
+  global_store_b32_saddr %41, %27, %output_view {offset = 128}
+  global_store_b32_saddr %41, %27, %output_view {offset = 256}
+  global_store_b32_saddr %41, %27, %output_view {offset = 384}
+  global_store_b32_saddr %41, %27, %output_view {offset = 512}
+  global_store_b32_saddr %41, %27, %output_view {offset = 640}
+  global_store_b32_saddr %41, %27, %output_view {offset = 768}
+  global_store_b32_saddr %41, %27, %output_view {offset = 896}
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+
 func.def target(@target) @oversized_f32x64_store_rejected(%output: buffer, %value: vector<64xf32>) {
   %zero = index.constant 0 : offset
   %output_global = buffer.assume.memory_space<global> %output : buffer

@@ -51,10 +51,16 @@ loom_cc_library(
   SRCS
     "selection.c"
   DEPS
+    ::function_contract
     ::types
     iree::base
     iree::base::internal::arena
+    loom::analysis::symbol_facts
+    loom::error::emitter
     loom::ir
+    loom::ops::func_symbol_facts
+    loom::ops::op_defs
+    loom::ops::target
     loom::pass::environment
     loom::pass::types
   PUBLIC
