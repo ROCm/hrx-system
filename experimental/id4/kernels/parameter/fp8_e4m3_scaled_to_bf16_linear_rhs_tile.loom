@@ -4,7 +4,7 @@ config.decl @id4.parameter.fp8_e4m3_scaled_to_bf16_linear_rhs_tile.input_size : 
 
 kernel.def export("id4_parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile") @id4_parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile() {
   %unit = index.constant 1 : index
-  %workgroup_size_x = index.constant 256 : index
+  %workgroup_size_x = index.constant 16 : index
   %output_size = config.get @id4.parameter.fp8_e4m3_scaled_to_bf16_linear_rhs_tile.output_size : index
   %input_size = config.get @id4.parameter.fp8_e4m3_scaled_to_bf16_linear_rhs_tile.input_size : index
   %sixteen = index.constant 16 : index
@@ -31,20 +31,20 @@ kernel.def export("id4_parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile") @id4_
   %scale_view = buffer.view %scale_global[%base] : buffer -> view<[%output_size]xf32, #dense>
   %target_view = buffer.view %target_global[%base] : buffer -> view<[%element_count]xbf16, #dense>
   %input_tile_count = index.div %input_size, %sixteen : index
-  %input_lane = index.rem %lane, %sixteen : index
-  %output_lane = index.div %lane, %sixteen : index
-  %input = index.madd %input_tile, %sixteen, %input_lane : index
-  %output_row = index.madd %output_tile, %sixteen, %output_lane : index
+  %input = index.mul %input_tile, %sixteen : index
+  %output_row = index.madd %output_tile, %sixteen, %lane : index
   %tile = index.madd %output_tile, %input_tile_count, %input_tile : index
   %tile_element_count = index.constant 256 : index
   %tile_offset = index.mul %tile, %tile_element_count : index
-  %target_index = index.add %tile_offset, %lane : index
-  %weight_fp8 = view.load %weight_view[%output_row, %input] : view<[%output_size]x[%input_size]xf8E4M3, %fp8_storage> -> f8E4M3
-  %weight_f32 = scalar.extf %weight_fp8 : f8E4M3 to f32
+  %lane_offset = index.mul %lane, %sixteen : index
+  %target_index = index.add %tile_offset, %lane_offset : index
+  %weight_fp8 = vector.load %weight_view[%output_row, %input] : view<[%output_size]x[%input_size]xf8E4M3, %fp8_storage> -> vector<16xf8E4M3>
+  %weight_f32 = vector.extf %weight_fp8 : vector<16xf8E4M3> to vector<16xf32>
   %scale_f32 = view.load %scale_view[%output_row] : view<[%output_size]xf32, #dense> -> f32
-  %scaled = scalar.mulf<reassoc|nsz|contract> %weight_f32, %scale_f32 : f32
-  %rounded = scalar.fptrunc %scaled : f32 to bf16
-  view.store %rounded, %target_view[%target_index] : bf16, view<[%element_count]xbf16, #dense>
+  %scale_vector = vector.splat %scale_f32 : vector<16xf32>
+  %scaled = vector.mulf<reassoc|nsz|contract> %weight_f32, %scale_vector : vector<16xf32>
+  %rounded = vector.fptrunc %scaled : vector<16xf32> to vector<16xbf16>
+  vector.store %rounded, %target_view[%target_index] : vector<16xbf16>, view<[%element_count]xbf16, #dense>
   kernel.return
 }
 
