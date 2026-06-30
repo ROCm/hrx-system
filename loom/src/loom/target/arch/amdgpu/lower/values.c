@@ -4915,9 +4915,9 @@ static iree_status_t loom_amdgpu_lower_vector_from_packed_integer_elements(
         context, LOOM_AMDGPU_DESCRIPTOR_REF_V_MOV_B32, &descriptor,
         &imm32_attr_name_id, &descriptor_present));
     if (!descriptor_present) {
-      return iree_make_status(IREE_STATUS_INTERNAL,
-                              "AMDGPU packed integer vector constant lowering "
-                              "requires v_mov_b32");
+      IREE_ASSERT_UNREACHABLE(
+          "AMDGPU packed integer vector constant lowering requires v_mov_b32");
+      IREE_BUILTIN_UNREACHABLE();
     }
     return loom_amdgpu_bind_register_u32_lane_constants(
         context, source_op, plan->result, &descriptor, imm32_attr_name_id,
@@ -7226,9 +7226,9 @@ static iree_status_t loom_amdgpu_extract_low_32_bits_as_vgpr(
   const loom_type_t source_lane_type =
       loom_amdgpu_low_register_lane_type(module, low_source_pair);
   if (loom_type_kind(source_lane_type) == LOOM_TYPE_NONE) {
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
+    IREE_ASSERT_UNREACHABLE(
         "AMDGPU scalar source lowered to a non-register type");
+    IREE_BUILTIN_UNREACHABLE();
   }
   loom_value_id_t low_source_lane = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_amdgpu_emit_low_slice(
@@ -7723,9 +7723,7 @@ iree_status_t loom_amdgpu_lower_structural_value_op(
       if (plan.target_data == NULL) {
         IREE_ASSERT_UNREACHABLE(
             "AMDGPU fact-only vector atomic offset reached emission");
-        return iree_make_status(
-            IREE_STATUS_INTERNAL,
-            "AMDGPU fact-only vector atomic offset reached emission");
+        IREE_BUILTIN_UNREACHABLE();
       }
       return loom_amdgpu_lower_vector_iota(
           context, source_op,
@@ -7735,9 +7733,7 @@ iree_status_t loom_amdgpu_lower_structural_value_op(
       if (plan.target_data == NULL) {
         IREE_ASSERT_UNREACHABLE(
             "AMDGPU fact-only vector atomic offset reached emission");
-        return iree_make_status(
-            IREE_STATUS_INTERNAL,
-            "AMDGPU fact-only vector atomic offset reached emission");
+        IREE_BUILTIN_UNREACHABLE();
       }
       return loom_amdgpu_lower_vector_from_elements(
           context, source_op,
