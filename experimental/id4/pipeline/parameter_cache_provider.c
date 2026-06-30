@@ -26,6 +26,8 @@ typedef struct id4_pipeline_parameter_cache_entry_t {
   iree_hal_queue_affinity_t queue_affinity;
   // Device-local cache buffer containing the exact source span.
   iree_hal_buffer_t* buffer;
+  // Byte offset within |buffer| where the cached source span begins.
+  iree_device_size_t buffer_offset;
   // Timeline semaphore signaled when |buffer| is ready to copy.
   iree_hal_semaphore_t* ready_semaphore;
   // Payload value on |ready_semaphore| that marks |buffer| ready.
@@ -85,6 +87,8 @@ typedef struct id4_pipeline_parameter_cache_request_t {
 typedef struct id4_pipeline_parameter_cache_ready_entry_t {
   // Cache buffer retained for recording a copy command, or NULL for direct.
   iree_hal_buffer_t* buffer;
+  // Byte offset within |buffer| where the cached source span begins.
+  iree_device_size_t buffer_offset;
   // Semaphore retained for the copy submission wait list.
   iree_hal_semaphore_t* ready_semaphore;
   // Payload value paired with |ready_semaphore|.
@@ -268,6 +272,7 @@ static void id4_pipeline_parameter_cache_retain_ready_entry(
   iree_hal_buffer_retain(entry->buffer);
   iree_hal_semaphore_retain(entry->ready_semaphore);
   out_ready_entry->buffer = entry->buffer;
+  out_ready_entry->buffer_offset = entry->buffer_offset;
   out_ready_entry->ready_semaphore = entry->ready_semaphore;
   out_ready_entry->ready_payload_value = entry->ready_payload_value;
 }
@@ -350,11 +355,13 @@ static iree_status_t id4_pipeline_parameter_cache_fill_entry(
     iree_string_view_t source_scope, iree_string_view_t key,
     uint64_t parameter_offset, iree_device_size_t length,
     iree_string_view_t* out_source_scope, iree_string_view_t* out_key,
-    iree_hal_buffer_t** out_buffer, iree_hal_semaphore_t** out_ready_semaphore,
+    iree_hal_buffer_t** out_buffer, iree_device_size_t* out_buffer_offset,
+    iree_hal_semaphore_t** out_ready_semaphore,
     uint64_t* out_ready_payload_value) {
   *out_source_scope = iree_string_view_empty();
   *out_key = iree_string_view_empty();
   *out_buffer = NULL;
+  *out_buffer_offset = 0;
   *out_ready_semaphore = NULL;
   *out_ready_payload_value = 1;
 
@@ -414,6 +421,7 @@ static iree_status_t id4_pipeline_parameter_cache_fill_entry(
 
   if (iree_status_is_ok(status)) {
     *out_buffer = buffer;
+    *out_buffer_offset = 0;
     *out_ready_semaphore = ready_semaphore;
   } else {
     iree_hal_semaphore_release(ready_semaphore);
@@ -515,7 +523,7 @@ static iree_status_t id4_pipeline_parameter_cache_insert_or_retain_entry(
     iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
     uint64_t parameter_offset, iree_device_size_t length,
     iree_string_view_t* inout_source_scope, iree_string_view_t* inout_key,
-    iree_hal_buffer_t** inout_buffer,
+    iree_hal_buffer_t** inout_buffer, iree_device_size_t buffer_offset,
     iree_hal_semaphore_t** inout_ready_semaphore, uint64_t ready_payload_value,
     id4_pipeline_parameter_cache_ready_entry_t* out_ready_entry) {
   iree_status_t status = iree_ok_status();
@@ -560,6 +568,7 @@ static iree_status_t id4_pipeline_parameter_cache_insert_or_retain_entry(
       entry->device = device;
       entry->queue_affinity = queue_affinity;
       entry->buffer = *inout_buffer;
+      entry->buffer_offset = buffer_offset;
       entry->ready_semaphore = *inout_ready_semaphore;
       entry->ready_payload_value = ready_payload_value;
       provider->cached_byte_length = next_cached_byte_length;
@@ -603,17 +612,19 @@ static iree_status_t id4_pipeline_parameter_cache_get_ready_entry(
   iree_string_view_t cached_source_scope = iree_string_view_empty();
   iree_string_view_t cached_key = iree_string_view_empty();
   iree_hal_buffer_t* cached_buffer = NULL;
+  iree_device_size_t cached_buffer_offset = 0;
   iree_hal_semaphore_t* ready_semaphore = NULL;
   uint64_t ready_payload_value = 0;
   iree_status_t status = id4_pipeline_parameter_cache_fill_entry(
       provider, device, queue_affinity, wait_semaphore_list, source_scope, key,
       span.parameter_offset, span.length, &cached_source_scope, &cached_key,
-      &cached_buffer, &ready_semaphore, &ready_payload_value);
+      &cached_buffer, &cached_buffer_offset, &ready_semaphore,
+      &ready_payload_value);
   if (iree_status_is_ok(status)) {
     status = id4_pipeline_parameter_cache_insert_or_retain_entry(
         provider, device, queue_affinity, span.parameter_offset, span.length,
-        &cached_source_scope, &cached_key, &cached_buffer, &ready_semaphore,
-        ready_payload_value, out_ready_entry);
+        &cached_source_scope, &cached_key, &cached_buffer, cached_buffer_offset,
+        &ready_semaphore, ready_payload_value, out_ready_entry);
   }
 
   iree_hal_semaphore_release(ready_semaphore);
@@ -727,7 +738,8 @@ static iree_status_t id4_pipeline_parameter_cache_record_copies(
     if (!ready_entries[i].buffer) continue;
     status = iree_hal_command_buffer_copy_buffer(
         command_buffer,
-        iree_hal_make_buffer_ref(ready_entries[i].buffer, /*offset=*/0,
+        iree_hal_make_buffer_ref(ready_entries[i].buffer,
+                                 ready_entries[i].buffer_offset,
                                  requests[i].span.length),
         iree_hal_make_buffer_ref(target_buffer, requests[i].span.buffer_offset,
                                  requests[i].span.length),
