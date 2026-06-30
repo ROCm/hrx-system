@@ -86,6 +86,8 @@ typedef struct loom_amdgpu_vector_16bit_float_conversion_plan_t {
   uint32_t storage_lane_offset;
   // Logical lane stride through storage_source for adjacent result lanes.
   uint32_t storage_lane_stride;
+  // Number of scalar lanes proven available in storage_source.
+  uint32_t storage_lane_count;
   // Number of 32-bit registers occupied by storage_source.
   uint32_t storage_register_count;
   // Number of 32-bit result registers occupied by the result vector.
