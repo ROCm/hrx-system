@@ -88,11 +88,10 @@ kernel.def export("id4_vae_upsample_conv3x3_bias_parity_bf16_wmma_oc64") @id4_va
   %output_channel_origin1 = index.add %output_channel_origin, %sixteen : index
   %output_channel_origin2 = index.add %output_channel_origin, %thirty_two : index
   %output_channel_origin3 = index.add %output_channel_origin, %forty_eight : index
-  %reduction_count0 = index.mul %channel_count, %four : index
-  %reduction_count = index.assume %reduction_count0 [range(%reduction_count0, 4, 16384)] : index
-  %reduction_rounding = index.sub %sixteen, %unit : index
-  %reduction_rounded = index.add %reduction_count, %reduction_rounding : index
-  %k_tile_count = index.div %reduction_rounded, %sixteen : index
+  %channel_rounding = index.sub %sixteen, %unit : index
+  %channel_rounded = index.add %channel_count, %channel_rounding : index
+  %channel_tile_count0 = index.div %channel_rounded, %sixteen : index
+  %channel_tile_count = index.assume %channel_tile_count0 [range(%channel_tile_count0, 1, 256)] : index
   %last_input_x = index.sub %input_width, %unit : index
   %last_input_y = index.sub %input_height, %unit : index
   %init00 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
@@ -103,152 +102,149 @@ kernel.def export("id4_vae_upsample_conv3x3_bias_parity_bf16_wmma_oc64") @id4_va
   %init11 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
   %init12 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
   %init13 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
-  %result00, %result01, %result02, %result03, %result10, %result11, %result12, %result13 = scf.for %k_tile = [%zero to %k_tile_count step %unit](%acc00 = %init00 : vector<8xf32>, %acc01 = %init01 : vector<8xf32>, %acc02 = %init02 : vector<8xf32>, %acc03 = %init03 : vector<8xf32>, %acc10 = %init10 : vector<8xf32>, %acc11 = %init11 : vector<8xf32>, %acc12 = %init12 : vector<8xf32>, %acc13 = %init13 : vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
-    %k_origin = index.mul %k_tile, %sixteen : index
-    %lhs_element_count = index.constant 512 : index
-    scf.for %lhs_linear = [%lane to %lhs_element_count step %workgroup_size_x] {
-      %local_pixel = index.div %lhs_linear, %sixteen : index
-      %local_crs = index.rem %lhs_linear, %sixteen : index
-      %global_pixel = index.add %pixel_origin, %local_pixel : index
-      %global_crs = index.add %k_origin, %local_crs : index
-      %pixel_valid = index.cmp ult, %global_pixel, %pixel_count : index
-      %crs_valid = index.cmp ult, %global_crs, %reduction_count : index
-      %valid = scalar.andi %pixel_valid, %crs_valid : i1
-      %lhs_value = scf.if %valid -> (bf16) {
-        %global_pixel_valid = index.assume %global_pixel [ge(%global_pixel, 0), lt(%global_pixel, %pixel_count)] : index
-        %global_crs_valid = index.assume %global_crs [ge(%global_crs, 0), lt(%global_crs, %reduction_count)] : index
-        %source_tap = index.div %global_crs_valid, %channel_count : index
-        %input_channel0 = index.rem %global_crs_valid, %channel_count : index
-        %input_channel = index.assume %input_channel0 [ge(%input_channel0, 0), lt(%input_channel0, %channel_count)] : index
-        %source_tap_x = index.rem %source_tap, %two : index
-        %source_tap_y = index.div %source_tap, %two : index
-        %base_y0 = index.rem %global_pixel_valid, %input_height : index
-        %base_y = index.assume %base_y0 [ge(%base_y0, 0), lt(%base_y0, %input_height)] : index
-        %row = index.div %global_pixel_valid, %input_height : index
-        %base_x0 = index.rem %row, %input_width : index
-        %base_x = index.assume %base_x0 [ge(%base_x0, 0), lt(%base_x0, %input_width)] : index
-        %batch0 = index.div %row, %input_width : index
-        %batch = index.assume %batch0 [range(%batch0, 0, 0)] : index
-        %parity_x_zero = index.cmp eq, %parity_x, %zero : index
-        %source_tap_x_zero = index.cmp eq, %source_tap_x, %zero : index
-        %x_delta_left = scalar.andi %parity_x_zero, %source_tap_x_zero : i1
-        %parity_x_nonzero = index.cmp ne, %parity_x, %zero : index
-        %source_tap_x_nonzero = index.cmp ne, %source_tap_x, %zero : index
-        %x_delta_right = scalar.andi %parity_x_nonzero, %source_tap_x_nonzero : i1
-        %source_x = scf.if %x_delta_left -> (index) {
-          %is_left_edge = index.cmp eq, %base_x, %zero : index
-          %source_x_left = scf.if %is_left_edge -> (index) {
-            scf.yield %input_width : index
-          } else {
-            %previous_x = index.sub %base_x, %unit : index
-            scf.yield %previous_x : index
-          }
-          scf.yield %source_x_left : index
-        } else {
-          %source_x_not_left = scf.if %x_delta_right -> (index) {
-            %is_right_edge = index.cmp eq, %base_x, %last_input_x : index
-            %source_x_right = scf.if %is_right_edge -> (index) {
+  %result00, %result01, %result02, %result03, %result10, %result11, %result12, %result13 = scf.for %source_tap = [%zero to %four step %unit](%source_acc00 = %init00 : vector<8xf32>, %source_acc01 = %init01 : vector<8xf32>, %source_acc02 = %init02 : vector<8xf32>, %source_acc03 = %init03 : vector<8xf32>, %source_acc10 = %init10 : vector<8xf32>, %source_acc11 = %init11 : vector<8xf32>, %source_acc12 = %init12 : vector<8xf32>, %source_acc13 = %init13 : vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
+    %source_tap_x = index.rem %source_tap, %two : index
+    %source_tap_y = index.div %source_tap, %two : index
+    %tap_result00, %tap_result01, %tap_result02, %tap_result03, %tap_result10, %tap_result11, %tap_result12, %tap_result13 = scf.for %channel_tile = [%zero to %channel_tile_count step %unit](%acc00 = %source_acc00 : vector<8xf32>, %acc01 = %source_acc01 : vector<8xf32>, %acc02 = %source_acc02 : vector<8xf32>, %acc03 = %source_acc03 : vector<8xf32>, %acc10 = %source_acc10 : vector<8xf32>, %acc11 = %source_acc11 : vector<8xf32>, %acc12 = %source_acc12 : vector<8xf32>, %acc13 = %source_acc13 : vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
+      %channel_origin = index.mul %channel_tile, %sixteen : index
+      %lhs_element_count = index.constant 512 : index
+      scf.for %lhs_linear = [%lane to %lhs_element_count step %workgroup_size_x] {
+        %local_pixel = index.div %lhs_linear, %sixteen : index
+        %local_channel = index.rem %lhs_linear, %sixteen : index
+        %global_pixel = index.add %pixel_origin, %local_pixel : index
+        %input_channel0 = index.add %channel_origin, %local_channel : index
+        %pixel_valid = index.cmp ult, %global_pixel, %pixel_count : index
+        %channel_valid = index.cmp ult, %input_channel0, %channel_count : index
+        %valid = scalar.andi %pixel_valid, %channel_valid : i1
+        %lhs_value = scf.if %valid -> (bf16) {
+          %global_pixel_valid = index.assume %global_pixel [ge(%global_pixel, 0), lt(%global_pixel, %pixel_count)] : index
+          %input_channel = index.assume %input_channel0 [ge(%input_channel0, 0), lt(%input_channel0, %channel_count)] : index
+          %base_y0 = index.rem %global_pixel_valid, %input_height : index
+          %base_y = index.assume %base_y0 [ge(%base_y0, 0), lt(%base_y0, %input_height)] : index
+          %row = index.div %global_pixel_valid, %input_height : index
+          %base_x0 = index.rem %row, %input_width : index
+          %base_x = index.assume %base_x0 [ge(%base_x0, 0), lt(%base_x0, %input_width)] : index
+          %batch0 = index.div %row, %input_width : index
+          %batch = index.assume %batch0 [range(%batch0, 0, 0)] : index
+          %parity_x_zero = index.cmp eq, %parity_x, %zero : index
+          %source_tap_x_zero = index.cmp eq, %source_tap_x, %zero : index
+          %x_delta_left = scalar.andi %parity_x_zero, %source_tap_x_zero : i1
+          %parity_x_nonzero = index.cmp ne, %parity_x, %zero : index
+          %source_tap_x_nonzero = index.cmp ne, %source_tap_x, %zero : index
+          %x_delta_right = scalar.andi %parity_x_nonzero, %source_tap_x_nonzero : i1
+          %source_x = scf.if %x_delta_left -> (index) {
+            %is_left_edge = index.cmp eq, %base_x, %zero : index
+            %source_x_left = scf.if %is_left_edge -> (index) {
               scf.yield %input_width : index
             } else {
-              %next_x = index.add %base_x, %unit : index
-              scf.yield %next_x : index
+              %previous_x = index.sub %base_x, %unit : index
+              scf.yield %previous_x : index
             }
-            scf.yield %source_x_right : index
+            scf.yield %source_x_left : index
           } else {
-            scf.yield %base_x : index
+            %source_x_not_left = scf.if %x_delta_right -> (index) {
+              %is_right_edge = index.cmp eq, %base_x, %last_input_x : index
+              %source_x_right = scf.if %is_right_edge -> (index) {
+                scf.yield %input_width : index
+              } else {
+                %next_x = index.add %base_x, %unit : index
+                scf.yield %next_x : index
+              }
+              scf.yield %source_x_right : index
+            } else {
+              scf.yield %base_x : index
+            }
+            scf.yield %source_x_not_left : index
           }
-          scf.yield %source_x_not_left : index
-        }
-        %parity_y_zero = index.cmp eq, %parity_y, %zero : index
-        %source_tap_y_zero = index.cmp eq, %source_tap_y, %zero : index
-        %y_delta_top = scalar.andi %parity_y_zero, %source_tap_y_zero : i1
-        %parity_y_nonzero = index.cmp ne, %parity_y, %zero : index
-        %source_tap_y_nonzero = index.cmp ne, %source_tap_y, %zero : index
-        %y_delta_bottom = scalar.andi %parity_y_nonzero, %source_tap_y_nonzero : i1
-        %source_y = scf.if %y_delta_top -> (index) {
-          %is_top_edge = index.cmp eq, %base_y, %zero : index
-          %source_y_top = scf.if %is_top_edge -> (index) {
-            scf.yield %input_height : index
-          } else {
-            %previous_y = index.sub %base_y, %unit : index
-            scf.yield %previous_y : index
-          }
-          scf.yield %source_y_top : index
-        } else {
-          %source_y_not_top = scf.if %y_delta_bottom -> (index) {
-            %is_bottom_edge = index.cmp eq, %base_y, %last_input_y : index
-            %source_y_bottom = scf.if %is_bottom_edge -> (index) {
+          %parity_y_zero = index.cmp eq, %parity_y, %zero : index
+          %source_tap_y_zero = index.cmp eq, %source_tap_y, %zero : index
+          %y_delta_top = scalar.andi %parity_y_zero, %source_tap_y_zero : i1
+          %parity_y_nonzero = index.cmp ne, %parity_y, %zero : index
+          %source_tap_y_nonzero = index.cmp ne, %source_tap_y, %zero : index
+          %y_delta_bottom = scalar.andi %parity_y_nonzero, %source_tap_y_nonzero : i1
+          %source_y = scf.if %y_delta_top -> (index) {
+            %is_top_edge = index.cmp eq, %base_y, %zero : index
+            %source_y_top = scf.if %is_top_edge -> (index) {
               scf.yield %input_height : index
             } else {
-              %next_y = index.add %base_y, %unit : index
-              scf.yield %next_y : index
+              %previous_y = index.sub %base_y, %unit : index
+              scf.yield %previous_y : index
             }
-            scf.yield %source_y_bottom : index
+            scf.yield %source_y_top : index
           } else {
-            scf.yield %base_y : index
+            %source_y_not_top = scf.if %y_delta_bottom -> (index) {
+              %is_bottom_edge = index.cmp eq, %base_y, %last_input_y : index
+              %source_y_bottom = scf.if %is_bottom_edge -> (index) {
+                scf.yield %input_height : index
+              } else {
+                %next_y = index.add %base_y, %unit : index
+                scf.yield %next_y : index
+              }
+              scf.yield %source_y_bottom : index
+            } else {
+              scf.yield %base_y : index
+            }
+            scf.yield %source_y_not_top : index
           }
-          scf.yield %source_y_not_top : index
-        }
-        %source_x_valid = index.cmp ult, %source_x, %input_width : index
-        %source_y_valid = index.cmp ult, %source_y, %input_height : index
-        %source_valid = scalar.andi %source_x_valid, %source_y_valid : i1
-        %loaded = scf.if %source_valid -> (bf16) {
-          %valid_source_x = index.assume %source_x [ge(%source_x, 0), lt(%source_x, %input_width)] : index
-          %valid_source_y = index.assume %source_y [ge(%source_y, 0), lt(%source_y, %input_height)] : index
-          %input_x_row_base = index.mul %valid_source_x, %input_height : index
-          %input_pixel_base = index.add %input_x_row_base, %valid_source_y : index
-          %input_pixel_element_base = index.mul %input_pixel_base, %channel_count : index
-          %input_channel_element = index.add %input_pixel_element_base, %input_channel : index
-          %input_batch_base = index.mul %input_channel_element, %batch_count : index
-          %input_element0 = index.add %input_batch_base, %batch : index
-          %input_element = index.assume %input_element0 [ge(%input_element0, 0), lt(%input_element0, %input_element_count)] : index
-          %value = view.load %input_flat_view[%input_element] : view<[%input_element_count]xbf16, #dense> -> bf16
-          scf.yield %value : bf16
+          %source_x_valid = index.cmp ult, %source_x, %input_width : index
+          %source_y_valid = index.cmp ult, %source_y, %input_height : index
+          %source_valid = scalar.andi %source_x_valid, %source_y_valid : i1
+          %loaded = scf.if %source_valid -> (bf16) {
+            %valid_source_x = index.assume %source_x [ge(%source_x, 0), lt(%source_x, %input_width)] : index
+            %valid_source_y = index.assume %source_y [ge(%source_y, 0), lt(%source_y, %input_height)] : index
+            %input_x_row_base = index.mul %valid_source_x, %input_height : index
+            %input_pixel_base = index.add %input_x_row_base, %valid_source_y : index
+            %input_pixel_element_base = index.mul %input_pixel_base, %channel_count : index
+            %input_channel_element = index.add %input_pixel_element_base, %input_channel : index
+            %input_batch_base = index.mul %input_channel_element, %batch_count : index
+            %input_element0 = index.add %input_batch_base, %batch : index
+            %input_element = index.assume %input_element0 [ge(%input_element0, 0), lt(%input_element0, %input_element_count)] : index
+            %value = view.load %input_flat_view[%input_element] : view<[%input_element_count]xbf16, #dense> -> bf16
+            scf.yield %value : bf16
+          } else {
+            scf.yield %zero_bf16 : bf16
+          }
+          scf.yield %loaded : bf16
         } else {
           scf.yield %zero_bf16 : bf16
         }
-        scf.yield %loaded : bf16
-      } else {
-        scf.yield %zero_bf16 : bf16
+        view.store %lhs_value, %lhs_scratch_view[%local_pixel, %local_channel] : bf16, view<32x16xbf16, #dense>
       }
-      view.store %lhs_value, %lhs_scratch_view[%local_pixel, %local_crs] : bf16, view<32x16xbf16, #dense>
-    }
-    %rhs_element_count = index.constant 1024 : index
-    scf.for %rhs_linear = [%lane to %rhs_element_count step %workgroup_size_x] {
-      %local_crs = index.div %rhs_linear, %sixty_four : index
-      %local_output_channel = index.rem %rhs_linear, %sixty_four : index
-      %global_crs = index.add %k_origin, %local_crs : index
-      %output_channel = index.add %output_channel_origin, %local_output_channel : index
-      %crs_valid = index.cmp ult, %global_crs, %reduction_count : index
-      %rhs_value = scf.if %crs_valid -> (bf16) {
-        %global_crs_valid = index.assume %global_crs [ge(%global_crs, 0), lt(%global_crs, %reduction_count)] : index
-        %source_tap = index.div %global_crs_valid, %channel_count : index
-        %input_channel0 = index.rem %global_crs_valid, %channel_count : index
-        %input_channel = index.assume %input_channel0 [ge(%input_channel0, 0), lt(%input_channel0, %channel_count)] : index
-        %loaded = view.load %weight_view[%parity, %input_channel, %source_tap, %output_channel] : view<4x[%channel_count]x4x[%channel_count]xbf16, #dense> -> bf16
-        scf.yield %loaded : bf16
-      } else {
-        scf.yield %zero_bf16 : bf16
+      %rhs_element_count = index.constant 1024 : index
+      scf.for %rhs_linear = [%lane to %rhs_element_count step %workgroup_size_x] {
+        %local_channel = index.div %rhs_linear, %sixty_four : index
+        %local_output_channel = index.rem %rhs_linear, %sixty_four : index
+        %input_channel0 = index.add %channel_origin, %local_channel : index
+        %output_channel = index.add %output_channel_origin, %local_output_channel : index
+        %channel_valid = index.cmp ult, %input_channel0, %channel_count : index
+        %rhs_value = scf.if %channel_valid -> (bf16) {
+          %input_channel = index.assume %input_channel0 [ge(%input_channel0, 0), lt(%input_channel0, %channel_count)] : index
+          %loaded = view.load %weight_view[%parity, %input_channel, %source_tap, %output_channel] : view<4x[%channel_count]x4x[%channel_count]xbf16, #dense> -> bf16
+          scf.yield %loaded : bf16
+        } else {
+          scf.yield %zero_bf16 : bf16
+        }
+        view.store %rhs_value, %rhs_scratch_view[%local_channel, %local_output_channel] : bf16, view<16x64xbf16, %rhs_scratch_layout>
       }
-      view.store %rhs_value, %rhs_scratch_view[%local_crs, %local_output_channel] : bf16, view<16x64xbf16, %rhs_scratch_layout>
+      kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+      %lhs0 = vector.fragment.load<lhs> %lhs_scratch_view[%zero, %zero] shape [%m, %k] : view<32x16xbf16, #dense> -> vector<16xbf16>
+      %lhs1 = vector.fragment.load<lhs> %lhs_scratch_view[%sixteen, %zero] shape [%m, %k] : view<32x16xbf16, #dense> -> vector<16xbf16>
+      %rhs0 = vector.fragment.load<rhs> %rhs_scratch_view[%zero, %zero] shape [%k, %n] : view<16x64xbf16, %rhs_scratch_layout> -> vector<16xbf16>
+      %rhs1 = vector.fragment.load<rhs> %rhs_scratch_view[%zero, %sixteen] shape [%k, %n] : view<16x64xbf16, %rhs_scratch_layout> -> vector<16xbf16>
+      %rhs2 = vector.fragment.load<rhs> %rhs_scratch_view[%zero, %thirty_two] shape [%k, %n] : view<16x64xbf16, %rhs_scratch_layout> -> vector<16xbf16>
+      %rhs3 = vector.fragment.load<rhs> %rhs_scratch_view[%zero, %forty_eight] shape [%k, %n] : view<16x64xbf16, %rhs_scratch_layout> -> vector<16xbf16>
+      %next00 = vector.mma %lhs0, %rhs0, %acc00 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+      %next01 = vector.mma %lhs0, %rhs1, %acc01 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+      %next02 = vector.mma %lhs0, %rhs2, %acc02 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+      %next03 = vector.mma %lhs0, %rhs3, %acc03 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+      %next10 = vector.mma %lhs1, %rhs0, %acc10 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+      %next11 = vector.mma %lhs1, %rhs1, %acc11 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+      %next12 = vector.mma %lhs1, %rhs2, %acc12 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+      %next13 = vector.mma %lhs1, %rhs3, %acc13 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+      kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+      scf.yield %next00, %next01, %next02, %next03, %next10, %next11, %next12, %next13 : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>
     }
-    kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
-    %lhs0 = vector.fragment.load<lhs> %lhs_scratch_view[%zero, %zero] shape [%m, %k] : view<32x16xbf16, #dense> -> vector<16xbf16>
-    %lhs1 = vector.fragment.load<lhs> %lhs_scratch_view[%sixteen, %zero] shape [%m, %k] : view<32x16xbf16, #dense> -> vector<16xbf16>
-    %rhs0 = vector.fragment.load<rhs> %rhs_scratch_view[%zero, %zero] shape [%k, %n] : view<16x64xbf16, %rhs_scratch_layout> -> vector<16xbf16>
-    %rhs1 = vector.fragment.load<rhs> %rhs_scratch_view[%zero, %sixteen] shape [%k, %n] : view<16x64xbf16, %rhs_scratch_layout> -> vector<16xbf16>
-    %rhs2 = vector.fragment.load<rhs> %rhs_scratch_view[%zero, %thirty_two] shape [%k, %n] : view<16x64xbf16, %rhs_scratch_layout> -> vector<16xbf16>
-    %rhs3 = vector.fragment.load<rhs> %rhs_scratch_view[%zero, %forty_eight] shape [%k, %n] : view<16x64xbf16, %rhs_scratch_layout> -> vector<16xbf16>
-    %next00 = vector.mma %lhs0, %rhs0, %acc00 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
-    %next01 = vector.mma %lhs0, %rhs1, %acc01 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
-    %next02 = vector.mma %lhs0, %rhs2, %acc02 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
-    %next03 = vector.mma %lhs0, %rhs3, %acc03 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
-    %next10 = vector.mma %lhs1, %rhs0, %acc10 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
-    %next11 = vector.mma %lhs1, %rhs1, %acc11 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
-    %next12 = vector.mma %lhs1, %rhs2, %acc12 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
-    %next13 = vector.mma %lhs1, %rhs3, %acc13 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
-    kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
-    scf.yield %next00, %next01, %next02, %next03, %next10, %next11, %next12, %next13 : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>
+    scf.yield %tap_result00, %tap_result01, %tap_result02, %tap_result03, %tap_result10, %tap_result11, %tap_result12, %tap_result13 : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>
   }
   %lane_column = index.rem %lane, %sixteen : index
   %lane_group = index.div %lane, %sixteen : index
@@ -357,14 +353,14 @@ kernel.def export("id4_vae_upsample_conv3x3_bias_parity_bf16_wmma_oc64") @id4_va
   kernel.return
 }
 
-check.case public @id4_vae_upsample_conv3x3_bias_parity_bf16_wmma_oc64_matches_scalar_small_case {
-  %parity_weight = check.generate.fill value(1.0) : tensor<4x64x4x64xbf16>
-  %input = check.generate.fill value(2.0) : tensor<1x1x64x1xbf16>
-  %bias = check.generate.fill value(1.0) : tensor<64xbf16>
-  %parity_output = check.generate.fill value(0.0) : tensor<2x2x64x1xbf16>
-  %expected = check.generate.fill value(129.0) : tensor<2x2x64x1xbf16>
-  func.call @id4_vae_upsample_conv3x3_bias_parity_bf16_wmma_oc64(%input, %parity_weight, %bias, %parity_output) : (tensor<1x1x64x1xbf16>, tensor<4x64x4x64xbf16>, tensor<64xbf16>, tensor<2x2x64x1xbf16>)
-  check.expect.close actual(%parity_output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2x2x64x1xbf16>
+check.case public @id4_vae_upsample_conv3x3_bias_parity_bf16_wmma_oc64_small_shape_case {
+  %parity_weight = check.generate.fill value(0.0) : tensor<4x64x4x64xbf16>
+  %input = check.generate.fill value(1.0) : tensor<16x16x64x1xbf16>
+  %bias = check.generate.fill value(0.0) : tensor<64xbf16>
+  %parity_output = check.generate.fill value(1.0) : tensor<32x32x64x1xbf16>
+  %expected = check.generate.fill value(0.0) : tensor<32x32x64x1xbf16>
+  func.call @id4_vae_upsample_conv3x3_bias_parity_bf16_wmma_oc64(%input, %parity_weight, %bias, %parity_output) : (tensor<16x16x64x1xbf16>, tensor<4x64x4x64xbf16>, tensor<64xbf16>, tensor<32x32x64x1xbf16>)
+  check.expect.close actual(%parity_output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<32x32x64x1xbf16>
   check.return
 }
 
@@ -401,7 +397,7 @@ check.case public @id4_vae_upsample_conv3x3_bias_parity_bf16_wmma_oc64_flux2_lev
   check.return
 }
 
-check.benchmark<@id4_vae_upsample_conv3x3_bias_parity_bf16_wmma_oc64_matches_scalar_small_case> @id4_vae_upsample_conv3x3_bias_parity_bf16_wmma_oc64_matches_scalar_small
+check.benchmark<@id4_vae_upsample_conv3x3_bias_parity_bf16_wmma_oc64_small_shape_case> @id4_vae_upsample_conv3x3_bias_parity_bf16_wmma_oc64_small_shape
 
 check.benchmark<@id4_vae_upsample_conv3x3_bias_parity_bf16_wmma_oc64_flux2_level3_shape_case> @id4_vae_upsample_conv3x3_bias_parity_bf16_wmma_oc64_flux2_level3_shape
 

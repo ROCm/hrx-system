@@ -5285,19 +5285,19 @@ iree_native_test(
 
 iree_native_test(
   NAME
-    "vae_upsample_conv3x3_bias_parity_bf16_wmma_oc64_matches_scalar_small_plan_test"
+    "vae_upsample_conv3x3_bias_parity_bf16_wmma_oc64_small_shape_plan_test"
   ARGS
     "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/upsample_conv3x3_bias_parity_bf16.loom}}"
-    "--benchmark=@id4_vae_upsample_conv3x3_bias_parity_bf16_wmma_oc64_matches_scalar_small"
+    "--benchmark=@id4_vae_upsample_conv3x3_bias_parity_bf16_wmma_oc64_small_shape"
     "--dry-run"
     "--output-format=jsonl"
-    "--config=id4.vae.upsample_conv3x3_bias_parity.input_width=1"
-    "--config=id4.vae.upsample_conv3x3_bias_parity.input_height=1"
+    "--config=id4.vae.upsample_conv3x3_bias_parity.input_width=16"
+    "--config=id4.vae.upsample_conv3x3_bias_parity.input_height=16"
     "--config=id4.vae.upsample_conv3x3_bias_parity.channel_count=64"
     "--config=id4.vae.upsample_conv3x3_bias_parity.batch_count=1"
-    "--config=id4.vae.upsample_conv3x3_bias_parity.output_width=2"
-    "--config=id4.vae.upsample_conv3x3_bias_parity.output_height=2"
-    "--config=id4.vae.upsample_conv3x3_bias_parity.output_element_count=256"
+    "--config=id4.vae.upsample_conv3x3_bias_parity.output_width=32"
+    "--config=id4.vae.upsample_conv3x3_bias_parity.output_height=32"
+    "--config=id4.vae.upsample_conv3x3_bias_parity.output_element_count=65536"
   SRC
     loom::tools::iree-benchmark-loom
   LABELS
@@ -18207,18 +18207,18 @@ endif()
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
 iree_native_test(
   NAME
-    "vae_upsample_conv3x3_bias_parity_bf16_wmma_oc64_matches_scalar_small_hal_test"
+    "vae_upsample_conv3x3_bias_parity_bf16_wmma_oc64_small_shape_hal_test"
   ARGS
     "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/upsample_conv3x3_bias_parity_bf16.loom}}"
-    "--case=@id4_vae_upsample_conv3x3_bias_parity_bf16_wmma_oc64_matches_scalar_small_case"
+    "--case=@id4_vae_upsample_conv3x3_bias_parity_bf16_wmma_oc64_small_shape_case"
     "--device=amdgpu://0"
-    "--config=id4.vae.upsample_conv3x3_bias_parity.input_width=1"
-    "--config=id4.vae.upsample_conv3x3_bias_parity.input_height=1"
+    "--config=id4.vae.upsample_conv3x3_bias_parity.input_width=16"
+    "--config=id4.vae.upsample_conv3x3_bias_parity.input_height=16"
     "--config=id4.vae.upsample_conv3x3_bias_parity.channel_count=64"
     "--config=id4.vae.upsample_conv3x3_bias_parity.batch_count=1"
-    "--config=id4.vae.upsample_conv3x3_bias_parity.output_width=2"
-    "--config=id4.vae.upsample_conv3x3_bias_parity.output_height=2"
-    "--config=id4.vae.upsample_conv3x3_bias_parity.output_element_count=256"
+    "--config=id4.vae.upsample_conv3x3_bias_parity.output_width=32"
+    "--config=id4.vae.upsample_conv3x3_bias_parity.output_height=32"
+    "--config=id4.vae.upsample_conv3x3_bias_parity.output_element_count=65536"
   SRC
     loom::tools::iree-test-loom
   LABELS
