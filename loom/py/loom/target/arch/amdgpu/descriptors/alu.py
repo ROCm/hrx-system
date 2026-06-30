@@ -1823,8 +1823,51 @@ def _v_lshl_add_u32_shift_immediate_overlay() -> AmdgpuDescriptorOverlay:
             operands=("value", "addend"),
             immediates=("shift",),
         ),
+        operand_forms=(
+            _literal_operand_form(
+                replacement_descriptor="amdgpu.v_lshl_add_u32.shift_imm.src2_lit",
+                source_operand="addend",
+            ),
+        ),
         immediate_fields=("SRC1",),
         immediates=(_source_inline_u32_immediate("shift"),),
+        flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    )
+
+
+def _v_lshl_add_u32_shift_immediate_src2_literal_overlay() -> AmdgpuDescriptorOverlay:
+    return AmdgpuDescriptorOverlay(
+        descriptor_key="amdgpu.v_lshl_add_u32.shift_imm.src2_lit",
+        instruction_name="V_LSHL_ADD_U32",
+        mnemonic="v_lshl_add_u32_shift_imm_src2_lit",
+        encoding_name="ENC_VOP3",
+        encoding_format_id=AMDGPU_ENCODING_FORMAT_VOP3_LITERAL,
+        semantic_tag="integer.shl.add.u32",
+        schedule_class=_SCHEDULE_VALU,
+        operands=(
+            AmdgpuOperandOverlay("VDST", _vgpr_result()),
+            AmdgpuOperandOverlay("SRC0", _sgpr_vgpr_operand("value")),
+        ),
+        asm_forms=_asm(
+            mnemonic="v_lshl_add_u32_shift_imm_src2_lit",
+            native_assembly_mnemonic="v_lshl_add_u32",
+            results=("dst",),
+            operands=("value",),
+            immediates=("shift", "imm32"),
+            named_immediates=True,
+            native_assembly_values=(
+                _native_result("dst"),
+                _native_operand("value"),
+                _native_i64_immediate("shift"),
+                _native_unsigned_hex_immediate("imm32", 32),
+            ),
+        ),
+        immediate_fields=("SRC1",),
+        immediates=(
+            _source_inline_u32_immediate("shift"),
+            _LITERAL_U32_IMMEDIATE,
+        ),
+        fixed_encoding_fields=(("SRC2", _predefined("SRC_LITERAL", "OPR_SRC")),),
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     )
 
@@ -2184,6 +2227,7 @@ def _integer_bitwise_shift_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
         _v_lshlrev_b32_vop3_immediate_overlay(),
         _v_lshlrev_b64_overlay(),
         _v_lshl_add_u32_shift_immediate_overlay(),
+        _v_lshl_add_u32_shift_immediate_src2_literal_overlay(),
         _v_bfe_offset_width_inline_overlay(is_signed=False),
         _v_bfe_offset_width_inline_overlay(is_signed=True),
         _v_bfe_u32_offset_0_width_16_low16_overlay(),
@@ -5343,6 +5387,7 @@ __all__ = (
     "_v_perm_b32_src1_zero_src2_literal_overlay",
     "_v_permlanex16_b32_src12_inline_overlay",
     "_v_lshl_add_u32_shift_immediate_overlay",
+    "_v_lshl_add_u32_shift_immediate_src2_literal_overlay",
     "_v_lshlrev_b32_literal_overlay",
     "_v_lshlrev_b32_overlay",
     "_v_lshlrev_b32_src0_16_low16_overlay",

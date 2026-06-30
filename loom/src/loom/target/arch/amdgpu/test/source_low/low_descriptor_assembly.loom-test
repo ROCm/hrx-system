@@ -1,0 +1,13 @@
+// RUN: emit amdgpu-assembly @vop3_lshl_add_shift_src2_literal
+
+amdgpu.target<gfx1100> @target
+low.func.def target(@target) @vop3_lshl_add_shift_src2_literal(%addr: reg<amdgpu.vgpr>, %value: reg<amdgpu.vgpr>, %output: reg<amdgpu.sgpr x2>) asm<amdgpu.rdna3.core> {
+  %result = v_lshl_add_u32_shift_imm_src2_lit %value {shift = 4, imm32 = 1006648320}
+  global_store_b32_saddr %addr, %result, %output
+  return
+}
+
+// ----
+  v_lshl_add_u32 v0, v0, 4, 0x3c003c00
+  global_store_b32 v1, v0, s[0:1] offset:0
+  s_endpgm

@@ -47,6 +47,8 @@ typedef enum loom_amdgpu_fp8_decode_plan_flag_bits_e {
   LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_CMP_LG_U64_SRC1_INLINE = 1u << 16,
   LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_PERM_B32_SRC1_ZERO_SRC2_LIT = 1u << 17,
   LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_BFI_B32 = 1u << 18,
+  LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_LSHL_ADD_U32_SHIFT_IMM_SRC2_LITERAL =
+      1u << 19,
 } loom_amdgpu_fp8_decode_plan_flag_bits_t;
 typedef uint32_t loom_amdgpu_fp8_decode_plan_flags_t;
 
@@ -155,6 +157,10 @@ typedef struct loom_amdgpu_fp8_decode_plan_t {
   loom_low_lower_resolved_descriptor_t add3_src2_literal_descriptor;
   // Integer left-shift-add descriptor with an immediate shift.
   loom_low_lower_resolved_descriptor_t lshl_add_u32_shift_imm_descriptor;
+  // Integer left-shift-add descriptor with immediate shift and source-2
+  // literal.
+  loom_low_lower_resolved_descriptor_t
+      lshl_add_u32_shift_imm_src2_literal_descriptor;
   // Packed unsigned 16-bit min descriptor.
   loom_low_lower_resolved_descriptor_t pk_min_u16_descriptor;
   // Packed unsigned 16-bit low-multiply descriptor.

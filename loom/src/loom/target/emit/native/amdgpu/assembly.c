@@ -3346,6 +3346,11 @@ static iree_status_t loom_amdgpu_try_append_canonical_asm_form_dispatch_packet(
   const loom_low_asm_form_t* canonical_form = NULL;
   IREE_RETURN_IF_ERROR(
       loom_amdgpu_lookup_canonical_asm_form(context, &canonical_form));
+  if (canonical_form->native_assembly_value_count > 0) {
+    // Explicit native values are the terminal canonical spelling. Leave them
+    // to the final canonical fallback after route-specific dispatchers run.
+    return iree_ok_status();
+  }
   iree_string_view_t canonical_mnemonic = iree_string_view_empty();
   IREE_RETURN_IF_ERROR(loom_native_assembly_descriptor_string(
       context->schedule->target.descriptor_set,
