@@ -1722,9 +1722,9 @@ static iree_status_t loom_amdgpu_fragment_memory_low_register_kind(
     return iree_ok_status();
   }
 
-  return iree_make_status(
-      IREE_STATUS_INTERNAL,
+  IREE_ASSERT_UNREACHABLE(
       "AMDGPU fragment memory address selected a non-scalar register");
+  IREE_BUILTIN_UNREACHABLE();
 }
 
 static iree_status_t loom_amdgpu_emit_fragment_memory_add_address_term(
