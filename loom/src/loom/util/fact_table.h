@@ -127,6 +127,15 @@ typedef struct loom_value_fact_static_lane_origin_t {
   uint32_t source_lane_stride;
 } loom_value_fact_static_lane_origin_t;
 
+// Uniform scalar scale applied lanewise to one aggregate value. Result lane N
+// is source lane N multiplied by scale_value_id.
+typedef struct loom_value_fact_uniform_scale_origin_t {
+  // Aggregate source value containing the unscaled lanes.
+  loom_value_id_t source_value_id;
+  // Scalar value uniformly multiplied into each result lane.
+  loom_value_id_t scale_value_id;
+} loom_value_fact_uniform_scale_origin_t;
+
 // Vector value is a prefix mask produced by vector.mask.range.
 typedef struct loom_value_fact_vector_prefix_mask_t {
   // Facts for the first tested coordinate.
@@ -658,6 +667,21 @@ struct loom_value_fact_table_t {
     iree_host_size_t touched_capacity;
   } static_lane_origins;
 
+  // Uniform scalar-scale origins keyed by aggregate value ID. An entry with
+  // source_value_id == LOOM_VALUE_ID_INVALID has no known scaled origin.
+  struct {
+    // Dense origin entries indexed by aggregate value ID.
+    loom_value_fact_uniform_scale_origin_t* entries;
+    // Allocated origin entry count.
+    iree_host_size_t capacity;
+    // Aggregate value IDs with origins defined in the current populated scope.
+    loom_value_id_t* touched_values;
+    // Number of populated entries in touched_values.
+    iree_host_size_t touched_count;
+    // Allocated touched_values entry count.
+    iree_host_size_t touched_capacity;
+  } uniform_scale_origins;
+
   // Reusable scratch buffers for fact inference calls. Allocated on first use,
   // grown only when an op needs more slots. Never shrinks. Old buffers are
   // abandoned in the arena and freed in bulk with the arena.
@@ -751,6 +775,21 @@ iree_status_t loom_value_fact_table_define_static_lane_origin(
 bool loom_value_fact_table_query_static_lane_origin(
     const loom_value_fact_table_t* table, const loom_module_t* module,
     loom_value_id_t value_id, loom_value_fact_static_lane_origin_t* out_origin);
+
+// Defines a value as the lanewise multiplication of |origin.source_value_id|
+// and scalar |origin.scale_value_id|. The relation is a materialization proof
+// and is validated by the query API against the current module value types.
+iree_status_t loom_value_fact_table_define_uniform_scale_origin(
+    loom_value_fact_table_t* table, loom_value_id_t value_id,
+    loom_value_fact_uniform_scale_origin_t origin);
+
+// Returns true when |value_id| has a known uniform scalar-scale origin. The
+// query validates that the result/source are same-typed vectors and the scale
+// is a same-element scalar.
+bool loom_value_fact_table_query_uniform_scale_origin(
+    const loom_value_fact_table_t* table, const loom_module_t* module,
+    loom_value_id_t value_id,
+    loom_value_fact_uniform_scale_origin_t* out_origin);
 
 // Clones |facts| from |source| into |target|, re-interning any context-local
 // extension payloads in the target table. The returned facts are valid for
