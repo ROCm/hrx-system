@@ -1109,6 +1109,22 @@ typedef enum loom_amdgpu_fragment_memory_payload_form_e {
   LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_STORE_EXTEND_F16_TO_F32 = 4,
 } loom_amdgpu_fragment_memory_payload_form_t;
 
+typedef enum loom_amdgpu_fragment_memory_epilogue_strategy_e {
+  // No special result-fragment store epilogue strategy is selected.
+  LOOM_AMDGPU_FRAGMENT_MEMORY_EPILOGUE_STRATEGY_NONE = 0,
+  // Each f32 result-fragment register is narrowed and stored separately.
+  LOOM_AMDGPU_FRAGMENT_MEMORY_EPILOGUE_STRATEGY_SCALAR_B16_STORE = 1,
+  // Same-lane adjacent f32 result-fragment registers are packed into b32
+  // stores.
+  LOOM_AMDGPU_FRAGMENT_MEMORY_EPILOGUE_STRATEGY_PACKED_B16_STORE = 2,
+  // Adjacent-lane f32 result-fragment registers are exchanged with DS bpermute
+  // and packed into b32 stores.
+  LOOM_AMDGPU_FRAGMENT_MEMORY_EPILOGUE_STRATEGY_DS_PACKED_B16_STORE = 3,
+  // Adjacent-lane f32 result-fragment registers are exchanged with DPP and
+  // packed into b32 stores.
+  LOOM_AMDGPU_FRAGMENT_MEMORY_EPILOGUE_STRATEGY_DPP_PACKED_B16_STORE = 4,
+} loom_amdgpu_fragment_memory_epilogue_strategy_t;
+
 typedef struct loom_amdgpu_fragment_memory_plan_t {
   // Direction of the fragment memory movement.
   loom_amdgpu_memory_operation_kind_t operation_kind;
@@ -1143,6 +1159,9 @@ typedef struct loom_amdgpu_fragment_memory_plan_t {
   loom_amdgpu_fragment_memory_packet_flags_t packet_flags;
   // Payload storage form selected for the fragment movement.
   loom_amdgpu_fragment_memory_payload_form_t payload_form;
+  // Result-fragment store epilogue strategy selected from layout and packet
+  // facts.
+  loom_amdgpu_fragment_memory_epilogue_strategy_t epilogue_strategy;
   // Optional f32 fragment source to round directly for narrowed stores.
   loom_value_id_t narrowed_result_round_source;
   // Optional scalar scale applied before narrowed f32-to-bf16 stores.
