@@ -178,7 +178,9 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--device", action="append", required=True)
     parser.add_argument("--tokenizer", required=True)
     parser.add_argument("--parameters", action="append", required=True)
-    parser.add_argument("--request_json", help="Full request JSON to run.")
+    parser.add_argument(
+        "--request_json_file", help="Path to a full request JSON object to run."
+    )
     parser.add_argument("--latent_width", type=int, default=8)
     parser.add_argument("--latent_height", type=int, default=8)
     parser.add_argument("--denoise_steps", type=int, default=20)
@@ -200,7 +202,11 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--dit_weight_execution_format",
         default="bf16_resident",
-        choices=("bf16_resident", "fp8_direct"),
+        choices=(
+            "bf16_resident",
+            "fp8_direct",
+            "fp8_direct_feed_forward_bf16_resident",
+        ),
     )
     parser.add_argument(
         "--dit_attention_implementation",
@@ -223,7 +229,7 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
     )
     parser.add_argument(
         "--generation_issue_mode",
-        default="full",
+        default="phases",
         choices=("full", "phases", "stage_serial"),
     )
     parser.add_argument(
@@ -237,7 +243,10 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--dit_fp8_source_residency",
         default="disabled",
-        choices=("disabled", "dit_conditioned", "dit_unconditioned", "all"),
+        help=(
+            "Comma-separated DiT FP8 source providers kept resident after "
+            "their first gather."
+        ),
     )
     parser.add_argument("--dit_fp8_source_cache_budget_mib", type=int, default=0)
     parser.add_argument(
@@ -267,10 +276,10 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
 
 def validate_request_payload(request: dict[str, Any]) -> None:
     if "prompt" not in request:
-        raise SmokeTestError("request_json must contain a prompt payload")
+        raise SmokeTestError("request_json_file must contain a prompt payload")
     generation = request.get("generation")
     if not isinstance(generation, dict):
-        raise SmokeTestError("request_json must contain generation metadata")
+        raise SmokeTestError("request_json_file must contain generation metadata")
     for field_name in (
         "latent_width",
         "latent_height",
@@ -280,17 +289,17 @@ def validate_request_payload(request: dict[str, Any]) -> None:
     ):
         if field_name not in generation:
             raise SmokeTestError(
-                f"request_json generation metadata is missing {field_name}"
+                f"request_json_file generation metadata is missing {field_name}"
             )
 
 
 def load_request(args: argparse.Namespace) -> dict[str, Any]:
-    if args.request_json:
-        path = Path(args.request_json)
+    if args.request_json_file:
+        path = Path(args.request_json_file)
         with path.open(encoding="utf-8") as file:
             request = json.load(file)
         if not isinstance(request, dict):
-            raise SmokeTestError("request_json must contain a JSON object")
+            raise SmokeTestError("request_json_file must contain a JSON object")
         validate_request_payload(request)
         return request
     request = {

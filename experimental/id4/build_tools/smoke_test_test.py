@@ -142,7 +142,7 @@ class Id4SmokeTestTest(unittest.TestCase):
                     "--device=amdgpu",
                     "--tokenizer=tokenizer.json",
                     "--parameters=qwen=qwen.safetensors",
-                    f"--request_json={request_path}",
+                    f"--request_json_file={request_path}",
                 ]
             )
 
@@ -174,7 +174,7 @@ class Id4SmokeTestTest(unittest.TestCase):
                     "--device=amdgpu",
                     "--tokenizer=tokenizer.json",
                     "--parameters=qwen=qwen.safetensors",
-                    f"--request_json={request_path}",
+                    f"--request_json_file={request_path}",
                 ]
             )
 
@@ -208,7 +208,7 @@ class Id4SmokeTestTest(unittest.TestCase):
         self.assertIn("--dit_attention_implementation=online_wmma", command)
         self.assertIn("--dit_feed_forward_implementation=fused_product", command)
         self.assertIn("--generation_residency=issue_phases", command)
-        self.assertIn("--generation_issue_mode=full", command)
+        self.assertIn("--generation_issue_mode=phases", command)
         self.assertIn("--dit_fp8_source_residency=disabled", command)
         self.assertIn("--dit_fp8_source_cache_budget_mib=0", command)
         self.assertIn("--dit_fp8_source_cache_miss_mode=retain", command)
@@ -228,7 +228,7 @@ class Id4SmokeTestTest(unittest.TestCase):
                 "--device=amdgpu",
                 "--tokenizer=tokenizer.json",
                 "--parameters=qwen=qwen.safetensors",
-                "--dit_weight_execution_format=fp8_direct",
+                "--dit_weight_execution_format=fp8_direct_feed_forward_bf16_resident",
                 "--dit_attention_implementation=blocked_wmma",
                 "--dit_feed_forward_implementation=fused_product",
             ]
@@ -236,7 +236,10 @@ class Id4SmokeTestTest(unittest.TestCase):
 
         command = self.smoke_test.build_id4_command(args, Path("artifacts"))
 
-        self.assertIn("--dit_weight_execution_format=fp8_direct", command)
+        self.assertIn(
+            "--dit_weight_execution_format=fp8_direct_feed_forward_bf16_resident",
+            command,
+        )
         self.assertIn("--dit_attention_implementation=blocked_wmma", command)
         self.assertIn("--dit_feed_forward_implementation=fused_product", command)
 
@@ -271,7 +274,7 @@ class Id4SmokeTestTest(unittest.TestCase):
                 "--generation_residency=selected_stage_bundles",
                 "--generation_issue_mode=stage_serial",
                 "--generation_resident_stage_bundles=qwen",
-                "--dit_fp8_source_residency=all",
+                "--dit_fp8_source_residency=dit_conditioned,dit_unconditioned",
                 "--dit_fp8_source_cache_budget_mib=6144",
                 "--dit_fp8_source_cache_miss_mode=direct_on_pressure",
             ]
@@ -282,7 +285,10 @@ class Id4SmokeTestTest(unittest.TestCase):
         self.assertIn("--generation_residency=selected_stage_bundles", command)
         self.assertIn("--generation_issue_mode=stage_serial", command)
         self.assertIn("--generation_resident_stage_bundles=qwen", command)
-        self.assertIn("--dit_fp8_source_residency=all", command)
+        self.assertIn(
+            "--dit_fp8_source_residency=dit_conditioned,dit_unconditioned",
+            command,
+        )
         self.assertIn("--dit_fp8_source_cache_budget_mib=6144", command)
         self.assertIn("--dit_fp8_source_cache_miss_mode=direct_on_pressure", command)
 
