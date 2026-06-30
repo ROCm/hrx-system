@@ -118,11 +118,11 @@ add_custom_command(OUTPUT loom_sources.stamp
     "qwen3_vl/selected_hidden_pack.loom"
     "qwen3_vl/silu_gate_f32.loom"
     "qwen3_vl/token_embedding.loom"
-    "qwen3_vl/zero_tail.loom"
     "sampler/cfg_denoise_f32.loom"
     "sampler/euler_step_f32.loom"
     "sampler/noise_f32.loom"
     "smoke_configured.loom"
+    "tensor/zero_tail_bf16.loom"
     "vae/conv1x1_bias_bf16_wmma.loom"
     "vae/conv1x1_bias_f32.loom"
     "vae/conv3x3_bias_bf16.loom"
@@ -266,11 +266,11 @@ iree_c_embed_data(
     "qwen3_vl/selected_hidden_pack.loom"
     "qwen3_vl/silu_gate_f32.loom"
     "qwen3_vl/token_embedding.loom"
-    "qwen3_vl/zero_tail.loom"
     "sampler/cfg_denoise_f32.loom"
     "sampler/euler_step_f32.loom"
     "sampler/noise_f32.loom"
     "smoke_configured.loom"
+    "tensor/zero_tail_bf16.loom"
     "vae/conv1x1_bias_bf16_wmma.loom"
     "vae/conv1x1_bias_f32.loom"
     "vae/conv3x3_bias_bf16.loom"
@@ -11255,14 +11255,14 @@ iree_native_test(
 
 iree_native_test(
   NAME
-    "qwen3_vl_zero_tail_bf16_all_plan_test"
+    "tensor_zero_tail_bf16_all_plan_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/zero_tail.loom}}"
-    "--benchmark=@id4_qwen3_vl_zero_tail_bf16_all"
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/tensor/zero_tail_bf16.loom}}"
+    "--benchmark=@id4_tensor_zero_tail_bf16_all"
     "--dry-run"
     "--output-format=jsonl"
-    "--config=id4.qwen3_vl.zero_tail.element_count=0"
-    "--config=id4.qwen3_vl.zero_tail.dispatch_element_count=8"
+    "--config=id4.tensor.zero_tail.element_count=0"
+    "--config=id4.tensor.zero_tail.dispatch_element_count=8"
   SRC
     loom::tools::iree-benchmark-loom
   LABELS
@@ -24647,13 +24647,13 @@ endif()
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
 iree_native_test(
   NAME
-    "qwen3_vl_zero_tail_bf16_all_hal_test"
+    "tensor_zero_tail_bf16_all_hal_test"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/zero_tail.loom}}"
-    "--case=@id4_qwen3_vl_zero_tail_bf16_all_case"
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/tensor/zero_tail_bf16.loom}}"
+    "--case=@id4_tensor_zero_tail_bf16_all_case"
     "--device=amdgpu://0"
-    "--config=id4.qwen3_vl.zero_tail.element_count=0"
-    "--config=id4.qwen3_vl.zero_tail.dispatch_element_count=8"
+    "--config=id4.tensor.zero_tail.element_count=0"
+    "--config=id4.tensor.zero_tail.dispatch_element_count=8"
   SRC
     loom::tools::iree-test-loom
   LABELS

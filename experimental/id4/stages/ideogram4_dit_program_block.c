@@ -372,6 +372,11 @@ static uint32_t id4_ideogram4_dit_program_min_u32(uint32_t lhs, uint32_t rhs) {
   return lhs < rhs ? lhs : rhs;
 }
 
+static uint32_t id4_ideogram4_dit_program_round_up_u32(uint32_t value,
+                                                       uint32_t alignment) {
+  return ((value + alignment - 1) / alignment) * alignment;
+}
+
 static id4_ideogram4_dit_program_linear_weight_layout_t
 id4_ideogram4_dit_program_select_bf16_resident_linear_weight_layout(
     id4_ideogram4_dit_activation_format_t activation_format,
@@ -548,13 +553,17 @@ static iree_status_t id4_ideogram4_dit_program_dispatch_online_wmma_attention(
     id4_pipeline_program_tensor_t rotated_key,
     id4_pipeline_program_tensor_t value,
     id4_pipeline_program_tensor_t attention_context) {
+  const uint32_t query_token_capacity = id4_ideogram4_dit_program_min_u32(
+      id4_ideogram4_dit_program_round_up_u32(
+          total_token_count, ID4_IDEOGRAM4_DIT_ATTENTION_WMMA_TOKEN_BLOCK),
+      bf16_token_capacity);
   for (uint32_t query_block_offset = 0;
-       query_block_offset < bf16_token_capacity;
+       query_block_offset < query_token_capacity;
        query_block_offset +=
        ID4_IDEOGRAM4_DIT_ONLINE_ATTENTION_QUERY_TOKEN_COUNT) {
     const uint32_t query_block_token_count = id4_ideogram4_dit_program_min_u32(
         ID4_IDEOGRAM4_DIT_ONLINE_ATTENTION_QUERY_TOKEN_COUNT,
-        bf16_token_capacity - query_block_offset);
+        query_token_capacity - query_block_offset);
     char suffix_buffer[ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
     char dispatch_name_buffer[ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
     iree_string_view_t dispatch_name = iree_string_view_empty();
@@ -567,6 +576,32 @@ static iree_status_t id4_ideogram4_dit_program_dispatch_online_wmma_attention(
             builder, dispatch_name, total_token_count, bf16_token_capacity,
             query_block_offset, query_block_token_count, attention_head_count,
             head_size, rotated_query, rotated_key, value, attention_context));
+  }
+  if (query_token_capacity < bf16_token_capacity) {
+    uint64_t hidden_size = 0;
+    uint64_t logical_element_count = 0;
+    uint64_t dispatch_element_count = 0;
+    if (!id4_ideogram4_dit_program_checked_mul_u64(attention_head_count,
+                                                   head_size, &hidden_size) ||
+        !id4_ideogram4_dit_program_checked_mul_u64(
+            query_token_capacity, hidden_size, &logical_element_count) ||
+        !id4_ideogram4_dit_program_checked_mul_u64(
+            bf16_token_capacity, hidden_size, &dispatch_element_count) ||
+        logical_element_count > UINT32_MAX ||
+        dispatch_element_count > UINT32_MAX) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "Ideogram4 online WMMA attention tail element "
+                              "range overflow");
+    }
+    char zero_tail_name_buffer[ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
+    iree_string_view_t zero_tail_name = iree_string_view_empty();
+    IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_format_branch_layer_name(
+        branch_name, layer_ordinal, IREE_SV("attention.online.zero_tail"),
+        zero_tail_name_buffer, IREE_ARRAYSIZE(zero_tail_name_buffer),
+        &zero_tail_name));
+    IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_dispatch_zero_tail_bf16(
+        builder, zero_tail_name, (uint32_t)logical_element_count,
+        (uint32_t)dispatch_element_count, attention_context));
   }
   return iree_ok_status();
 }

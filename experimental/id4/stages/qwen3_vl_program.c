@@ -1396,8 +1396,8 @@ static const id4_pipeline_kernel_ref_t
              IREE_SVL("id4_qwen3_vl_mlp_gate_up_silu_product_bf16_wmma_"
                       "m32n32_compact_rhs")},
         [ID4_QWEN3_VL_KERNEL_ZERO_TAIL_BF16] =
-            {IREE_SVL("qwen3_vl/zero_tail"),
-             IREE_SVL("id4_qwen3_vl_zero_tail_bf16")},
+            {IREE_SVL("tensor/zero_tail_bf16"),
+             IREE_SVL("id4_tensor_zero_tail_bf16")},
         [ID4_QWEN3_VL_KERNEL_RESIDUAL_ADD_RMSNORM] =
             {IREE_SVL("qwen3_vl/residual_add_f32"),
              IREE_SVL("id4_qwen3_vl_residual_add_rmsnorm_bf16")},
@@ -1756,9 +1756,9 @@ static const iree_string_view_t id4_qwen3_vl_program_config_keys
         [ID4_QWEN3_VL_KERNEL_ZERO_TAIL_BF16] =
             {
                 [ID4_QWEN3_VL_CONFIG_ELEMENT_COUNT] =
-                    IREE_SVL("id4.qwen3_vl.zero_tail.element_count"),
+                    IREE_SVL("id4.tensor.zero_tail.element_count"),
                 [ID4_QWEN3_VL_CONFIG_DISPATCH_ELEMENT_COUNT] =
-                    IREE_SVL("id4.qwen3_vl.zero_tail.dispatch_element_count"),
+                    IREE_SVL("id4.tensor.zero_tail.dispatch_element_count"),
             },
         [ID4_QWEN3_VL_KERNEL_RESIDUAL_ADD_RMSNORM] =
             {
