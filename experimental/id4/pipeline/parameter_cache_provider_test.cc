@@ -60,6 +60,8 @@ typedef struct CountingSourceProvider {
   iree_host_size_t data_length = 0;
   // Number of upstream gather calls observed.
   iree_host_size_t gather_count = 0;
+  // Number of source spans served by upstream gather calls.
+  iree_host_size_t gather_request_count = 0;
   // Number of upstream notify calls observed.
   iree_host_size_t notify_count = 0;
 } CountingSourceProvider;
@@ -118,28 +120,55 @@ static iree_status_t CountingSourceProviderGather(
     return iree_make_status(IREE_STATUS_NOT_FOUND,
                             "counting source provider scope not found");
   }
-  if (count != 1) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "counting source provider expects one request");
+
+  iree_hal_command_buffer_t* command_buffer = nullptr;
+  iree_status_t status = iree_hal_command_buffer_create(
+      device, IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
+      IREE_HAL_COMMAND_CATEGORY_TRANSFER, queue_affinity,
+      /*binding_capacity=*/0, &command_buffer);
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_command_buffer_begin(command_buffer);
   }
-  iree_string_view_t key = iree_string_view_empty();
-  iree_io_parameter_span_t span = {};
-  IREE_RETURN_IF_ERROR(
-      enumerator.fn(enumerator.user_data, /*i=*/0, &key, &span));
-  if (!iree_string_view_equal(key, IREE_SV("weight"))) {
-    return iree_make_status(IREE_STATUS_NOT_FOUND,
-                            "counting source provider key not found");
+  for (iree_host_size_t i = 0; i < count && iree_status_is_ok(status); ++i) {
+    iree_string_view_t key = iree_string_view_empty();
+    iree_io_parameter_span_t span = {};
+    status = enumerator.fn(enumerator.user_data, i, &key, &span);
+    if (iree_status_is_ok(status) &&
+        !iree_string_view_equal(key, IREE_SV("weight"))) {
+      status = iree_make_status(IREE_STATUS_NOT_FOUND,
+                                "counting source provider key not found");
+    }
+    if (iree_status_is_ok(status) &&
+        (span.parameter_offset > source->data_length ||
+         span.length > source->data_length - span.parameter_offset)) {
+      status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                "counting source provider span is out of "
+                                "range");
+    }
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_command_buffer_update_buffer(
+          command_buffer, source->data,
+          static_cast<iree_host_size_t>(span.parameter_offset),
+          iree_hal_make_buffer_ref(target_buffer, span.buffer_offset,
+                                   span.length),
+          IREE_HAL_UPDATE_FLAG_NONE);
+    }
   }
-  if (span.parameter_offset > source->data_length ||
-      span.length > source->data_length - span.parameter_offset) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "counting source provider span is out of range");
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_command_buffer_end(command_buffer);
   }
-  ++source->gather_count;
-  return iree_hal_device_queue_update(
-      device, queue_affinity, wait_semaphore_list, signal_semaphore_list,
-      source->data + span.parameter_offset, /*source_offset=*/0, target_buffer,
-      span.buffer_offset, span.length, IREE_HAL_UPDATE_FLAG_NONE);
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_device_queue_execute(
+        device, queue_affinity, wait_semaphore_list, signal_semaphore_list,
+        command_buffer, iree_hal_buffer_binding_table_empty(),
+        IREE_HAL_EXECUTE_FLAG_NONE);
+  }
+  iree_hal_command_buffer_release(command_buffer);
+  if (iree_status_is_ok(status)) {
+    ++source->gather_count;
+    source->gather_request_count += count;
+  }
+  return status;
 }
 
 static iree_status_t CountingSourceProviderScatter(
@@ -283,6 +312,15 @@ typedef struct SingleRequestEnumerator {
   iree_io_parameter_span_t span;
 } SingleRequestEnumerator;
 
+typedef struct MultiRequestEnumerator {
+  // Source key returned for each span.
+  iree_string_view_t key;
+  // Number of spans returned to the provider.
+  iree_host_size_t span_count;
+  // Spans returned to the provider.
+  const iree_io_parameter_span_t* spans;
+} MultiRequestEnumerator;
+
 static iree_status_t EnumerateSingleRequest(
     void* user_data, iree_host_size_t i, iree_string_view_t* out_key,
     iree_io_parameter_span_t* out_span) {
@@ -296,10 +334,32 @@ static iree_status_t EnumerateSingleRequest(
   return iree_ok_status();
 }
 
+static iree_status_t EnumerateMultiRequest(void* user_data, iree_host_size_t i,
+                                           iree_string_view_t* out_key,
+                                           iree_io_parameter_span_t* out_span) {
+  auto* state = static_cast<MultiRequestEnumerator*>(user_data);
+  if (i >= state->span_count) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "multi request index is out of range");
+  }
+  *out_key = state->key;
+  *out_span = state->spans[i];
+  return iree_ok_status();
+}
+
 static iree_io_parameter_enumerator_t MakeSingleRequestEnumerator(
     SingleRequestEnumerator* state) {
   iree_io_parameter_enumerator_t enumerator = {
       /*.fn=*/EnumerateSingleRequest,
+      /*.user_data=*/state,
+  };
+  return enumerator;
+}
+
+static iree_io_parameter_enumerator_t MakeMultiRequestEnumerator(
+    MultiRequestEnumerator* state) {
+  iree_io_parameter_enumerator_t enumerator = {
+      /*.fn=*/EnumerateMultiRequest,
       /*.user_data=*/state,
   };
   return enumerator;
@@ -336,11 +396,52 @@ static iree_status_t GatherAndWaitStatus(iree_io_parameter_provider_t* provider,
   return status;
 }
 
+static iree_status_t GatherAndWaitManyStatus(
+    iree_io_parameter_provider_t* provider, iree_hal_device_t* device,
+    iree_hal_buffer_t* target_buffer, iree_host_size_t span_count,
+    const iree_io_parameter_span_t* spans) {
+  MultiRequestEnumerator request = {
+      /*.key=*/IREE_SV("weight"),
+      /*.span_count=*/span_count,
+      /*.spans=*/spans,
+  };
+  HalSemaphoreRef done_semaphore;
+  IREE_RETURN_IF_ERROR(iree_hal_semaphore_create(
+      device, IREE_HAL_QUEUE_AFFINITY_ANY, /*initial_value=*/0,
+      IREE_HAL_SEMAPHORE_FLAG_DEFAULT, done_semaphore.out()));
+  iree_hal_semaphore_t* done_semaphore_ptr = done_semaphore.get();
+  uint64_t done_payload_value = 1;
+  iree_hal_semaphore_list_t signal_list = {
+      /*.count=*/1,
+      /*.semaphores=*/&done_semaphore_ptr,
+      /*.payload_values=*/&done_payload_value,
+  };
+  iree_status_t status = iree_io_parameter_provider_gather(
+      provider, device, IREE_HAL_QUEUE_AFFINITY_ANY,
+      iree_hal_semaphore_list_empty(), signal_list, IREE_SV("scope"),
+      target_buffer, span_count, MakeMultiRequestEnumerator(&request));
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_device_wait_semaphores(
+        device, IREE_ASYNC_WAIT_MODE_ALL, signal_list, iree_infinite_timeout(),
+        IREE_ASYNC_WAIT_FLAG_NONE);
+  }
+  return status;
+}
+
 static void GatherAndWait(iree_io_parameter_provider_t* provider,
                           iree_hal_device_t* device,
                           iree_hal_buffer_t* target_buffer,
                           iree_io_parameter_span_t span) {
   IREE_ASSERT_OK(GatherAndWaitStatus(provider, device, target_buffer, span));
+}
+
+static void GatherAndWaitMany(iree_io_parameter_provider_t* provider,
+                              iree_hal_device_t* device,
+                              iree_hal_buffer_t* target_buffer,
+                              iree_host_size_t span_count,
+                              const iree_io_parameter_span_t* spans) {
+  IREE_ASSERT_OK(GatherAndWaitManyStatus(provider, device, target_buffer,
+                                         span_count, spans));
 }
 
 static void ExpectCacheStatistics(
@@ -666,6 +767,79 @@ TEST(ParameterCacheProviderTest, GathersDirectlyOnBudgetPressure) {
                                           /*source_offset=*/16, cached_readback,
                                           sizeof(cached_readback)));
   EXPECT_EQ(std::memcmp(cached_readback, source_data, sizeof(cached_readback)),
+            0);
+}
+
+TEST(ParameterCacheProviderTest, BatchesDirectPressureMisses) {
+  HalDeviceGroupRef device_group;
+  IREE_ASSERT_OK(CreateLocalSyncDeviceGroup(device_group.out()));
+  iree_hal_device_t* device =
+      iree_hal_device_group_device_at(device_group.get(), /*device_index=*/0);
+
+  uint8_t source_data[32] = {};
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(source_data); ++i) {
+    source_data[i] = static_cast<uint8_t>(i + 1);
+  }
+  CountingSourceProvider* source =
+      CreateCountingSourceProvider(source_data, sizeof(source_data));
+  ParameterProviderRef source_ref;
+  source_ref.reset(&source->base);
+
+  ParameterProviderRef cache_provider;
+  IREE_ASSERT_OK(CreateParameterCacheProvider(
+      source, /*maximum_cached_bytes=*/8,
+      ID4_PIPELINE_PARAMETER_CACHE_MISS_MODE_DIRECT_ON_PRESSURE,
+      &cache_provider));
+
+  HalBufferRef target_buffer;
+  IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
+      iree_hal_device_allocator(device), MakeTransferBufferParams(),
+      /*allocation_size=*/32, target_buffer.out()));
+
+  GatherAndWait(cache_provider.get(), device, target_buffer.get(),
+                MakeSpan(/*parameter_offset=*/0, /*buffer_offset=*/0,
+                         /*length=*/8));
+  EXPECT_EQ(source->gather_count, 1u);
+  EXPECT_EQ(source->gather_request_count, 1u);
+  ExpectCacheStatistics(cache_provider.get(), /*entry_count=*/1,
+                        /*cached_byte_length=*/8,
+                        /*peak_cached_byte_length=*/8,
+                        /*source_gather_count=*/1,
+                        /*cache_reuse_count=*/0,
+                        /*direct_miss_count=*/0,
+                        /*evicted_entry_count=*/0,
+                        /*maximum_cached_byte_length=*/8);
+
+  iree_io_parameter_span_t direct_spans[] = {
+      MakeSpan(/*parameter_offset=*/8, /*buffer_offset=*/8, /*length=*/8),
+      MakeSpan(/*parameter_offset=*/16, /*buffer_offset=*/16, /*length=*/8),
+  };
+  GatherAndWaitMany(cache_provider.get(), device, target_buffer.get(),
+                    IREE_ARRAYSIZE(direct_spans), direct_spans);
+  EXPECT_EQ(source->gather_count, 2u);
+  EXPECT_EQ(source->gather_request_count, 3u);
+  ExpectCacheStatistics(cache_provider.get(), /*entry_count=*/1,
+                        /*cached_byte_length=*/8,
+                        /*peak_cached_byte_length=*/8,
+                        /*source_gather_count=*/1,
+                        /*cache_reuse_count=*/0,
+                        /*direct_miss_count=*/2,
+                        /*evicted_entry_count=*/0,
+                        /*maximum_cached_byte_length=*/8);
+
+  uint8_t first_direct_readback[8] = {};
+  IREE_ASSERT_OK(iree_hal_buffer_map_read(
+      target_buffer.get(), /*source_offset=*/8, first_direct_readback,
+      sizeof(first_direct_readback)));
+  EXPECT_EQ(std::memcmp(first_direct_readback, source_data + 8,
+                        sizeof(first_direct_readback)),
+            0);
+  uint8_t second_direct_readback[8] = {};
+  IREE_ASSERT_OK(iree_hal_buffer_map_read(
+      target_buffer.get(), /*source_offset=*/16, second_direct_readback,
+      sizeof(second_direct_readback)));
+  EXPECT_EQ(std::memcmp(second_direct_readback, source_data + 16,
+                        sizeof(second_direct_readback)),
             0);
 }
 

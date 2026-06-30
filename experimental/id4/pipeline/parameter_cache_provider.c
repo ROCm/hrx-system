@@ -98,6 +98,15 @@ typedef struct id4_pipeline_parameter_cache_single_enumerator_t {
   iree_io_parameter_span_t span;
 } id4_pipeline_parameter_cache_single_enumerator_t;
 
+typedef struct id4_pipeline_parameter_cache_batch_enumerator_t {
+  // Number of direct source requests in |request_indices|.
+  iree_host_size_t request_count;
+  // Full request list from the caller gather.
+  const id4_pipeline_parameter_cache_request_t* requests;
+  // Indices into |requests| that should be gathered directly.
+  const iree_host_size_t* request_indices;
+} id4_pipeline_parameter_cache_batch_enumerator_t;
+
 static iree_status_t id4_pipeline_parameter_cache_validate_options_size(
     iree_host_size_t actual_size, iree_host_size_t expected_size,
     iree_string_view_t options_name) {
@@ -318,6 +327,22 @@ static iree_status_t id4_pipeline_parameter_cache_single_enumerator(
   return iree_ok_status();
 }
 
+static iree_status_t id4_pipeline_parameter_cache_batch_enumerator(
+    void* user_data, iree_host_size_t i, iree_string_view_t* out_key,
+    iree_io_parameter_span_t* out_span) {
+  id4_pipeline_parameter_cache_batch_enumerator_t* state =
+      (id4_pipeline_parameter_cache_batch_enumerator_t*)user_data;
+  if (i >= state->request_count) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "batch cache fill enumerator index %" PRIhsz " is out of range", i);
+  }
+  const iree_host_size_t request_index = state->request_indices[i];
+  *out_key = state->requests[request_index].key;
+  *out_span = state->requests[request_index].span;
+  return iree_ok_status();
+}
+
 static iree_status_t id4_pipeline_parameter_cache_fill_entry(
     id4_pipeline_parameter_cache_provider_t* provider,
     iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
@@ -400,14 +425,61 @@ static iree_status_t id4_pipeline_parameter_cache_fill_entry(
   return status;
 }
 
-static iree_status_t id4_pipeline_parameter_cache_gather_direct(
+static iree_status_t id4_pipeline_parameter_cache_issue_direct_gather(
     id4_pipeline_parameter_cache_provider_t* provider,
     iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
     const iree_hal_semaphore_list_t wait_semaphore_list,
-    iree_string_view_t source_scope, iree_string_view_t key,
-    iree_io_parameter_span_t span, iree_hal_buffer_t* target_buffer,
-    id4_pipeline_parameter_cache_ready_entry_t* out_ready_entry) {
-  memset(out_ready_entry, 0, sizeof(*out_ready_entry));
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_string_view_t source_scope, iree_hal_buffer_t* target_buffer,
+    iree_host_size_t direct_request_count,
+    const id4_pipeline_parameter_cache_request_t* requests,
+    const iree_host_size_t* direct_request_indices) {
+  if (direct_request_count == 0) return iree_ok_status();
+
+  iree_device_size_t direct_byte_length = 0;
+  for (iree_host_size_t i = 0; i < direct_request_count; ++i) {
+    const iree_host_size_t request_index = direct_request_indices[i];
+    if (!iree_device_size_checked_add(direct_byte_length,
+                                      requests[request_index].span.length,
+                                      &direct_byte_length)) {
+      return iree_make_status(
+          IREE_STATUS_RESOURCE_EXHAUSTED,
+          "parameter cache direct byte accounting overflow");
+    }
+  }
+
+  id4_pipeline_parameter_cache_batch_enumerator_t enumerator_state = {
+      .request_count = direct_request_count,
+      .requests = requests,
+      .request_indices = direct_request_indices,
+  };
+  iree_io_parameter_enumerator_t enumerator = {
+      .fn = id4_pipeline_parameter_cache_batch_enumerator,
+      .user_data = &enumerator_state,
+  };
+  iree_status_t status = iree_io_parameter_provider_gather(
+      provider->source_provider, device, queue_affinity, wait_semaphore_list,
+      signal_semaphore_list, source_scope, target_buffer, direct_request_count,
+      enumerator);
+  if (iree_status_is_ok(status)) {
+    iree_slim_mutex_lock(&provider->mutex);
+    provider->direct_miss_count += direct_request_count;
+    provider->direct_miss_byte_length += direct_byte_length;
+    iree_slim_mutex_unlock(&provider->mutex);
+  }
+  return status;
+}
+
+static iree_status_t id4_pipeline_parameter_cache_gather_direct_batch(
+    id4_pipeline_parameter_cache_provider_t* provider,
+    iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    iree_string_view_t source_scope, iree_hal_buffer_t* target_buffer,
+    iree_host_size_t direct_request_count,
+    const id4_pipeline_parameter_cache_request_t* requests,
+    const iree_host_size_t* direct_request_indices,
+    id4_pipeline_parameter_cache_ready_entry_t* ready_entries) {
+  if (direct_request_count == 0) return iree_ok_status();
 
   iree_hal_semaphore_t* ready_semaphore = NULL;
   iree_status_t status = iree_hal_semaphore_create(
@@ -415,34 +487,26 @@ static iree_status_t id4_pipeline_parameter_cache_gather_direct(
       /*initial_value=*/0, IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &ready_semaphore);
   uint64_t ready_payload_value = 1;
   if (iree_status_is_ok(status)) {
-    id4_pipeline_parameter_cache_single_enumerator_t enumerator_state = {
-        .key = key,
-        .span = span,
-    };
-    iree_io_parameter_enumerator_t enumerator = {
-        .fn = id4_pipeline_parameter_cache_single_enumerator,
-        .user_data = &enumerator_state,
-    };
     iree_hal_semaphore_t* ready_semaphore_ptr = ready_semaphore;
     iree_hal_semaphore_list_t signal_list = {
         .count = 1,
         .semaphores = &ready_semaphore_ptr,
         .payload_values = &ready_payload_value,
     };
-    status = iree_io_parameter_provider_gather(
-        provider->source_provider, device, queue_affinity, wait_semaphore_list,
-        signal_list, source_scope, target_buffer, /*count=*/1, enumerator);
+    status = id4_pipeline_parameter_cache_issue_direct_gather(
+        provider, device, queue_affinity, wait_semaphore_list, signal_list,
+        source_scope, target_buffer, direct_request_count, requests,
+        direct_request_indices);
   }
   if (iree_status_is_ok(status)) {
-    iree_slim_mutex_lock(&provider->mutex);
-    ++provider->direct_miss_count;
-    provider->direct_miss_byte_length += span.length;
-    iree_slim_mutex_unlock(&provider->mutex);
-    out_ready_entry->ready_semaphore = ready_semaphore;
-    out_ready_entry->ready_payload_value = ready_payload_value;
-  } else {
-    iree_hal_semaphore_release(ready_semaphore);
+    for (iree_host_size_t i = 0; i < direct_request_count; ++i) {
+      const iree_host_size_t request_index = direct_request_indices[i];
+      iree_hal_semaphore_retain(ready_semaphore);
+      ready_entries[request_index].ready_semaphore = ready_semaphore;
+      ready_entries[request_index].ready_payload_value = ready_payload_value;
+    }
   }
+  iree_hal_semaphore_release(ready_semaphore);
   return status;
 }
 
@@ -518,9 +582,11 @@ static iree_status_t id4_pipeline_parameter_cache_get_ready_entry(
     iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
     const iree_hal_semaphore_list_t wait_semaphore_list,
     iree_string_view_t source_scope, iree_string_view_t key,
-    iree_io_parameter_span_t span, iree_hal_buffer_t* target_buffer,
-    id4_pipeline_parameter_cache_ready_entry_t* out_ready_entry) {
+    iree_io_parameter_span_t span,
+    id4_pipeline_parameter_cache_ready_entry_t* out_ready_entry,
+    bool* out_needs_direct_gather) {
   memset(out_ready_entry, 0, sizeof(*out_ready_entry));
+  *out_needs_direct_gather = false;
   if (id4_pipeline_parameter_cache_try_retain_ready_entry(
           provider, device, queue_affinity, source_scope, key,
           span.parameter_offset, span.length, out_ready_entry)) {
@@ -528,9 +594,8 @@ static iree_status_t id4_pipeline_parameter_cache_get_ready_entry(
   }
   if (id4_pipeline_parameter_cache_should_gather_direct(provider,
                                                         span.length)) {
-    return id4_pipeline_parameter_cache_gather_direct(
-        provider, device, queue_affinity, wait_semaphore_list, source_scope,
-        key, span, target_buffer, out_ready_entry);
+    *out_needs_direct_gather = true;
+    return iree_ok_status();
   }
   IREE_RETURN_IF_ERROR(
       id4_pipeline_parameter_cache_validate_budget(provider, span.length));
@@ -757,18 +822,42 @@ static iree_status_t id4_pipeline_parameter_cache_provider_gather(
                                          sizeof(ready_entries[0]),
                                          (void**)&ready_entries);
   }
+  iree_host_size_t* direct_request_indices = NULL;
+  if (iree_status_is_ok(status)) {
+    status = iree_allocator_malloc_array(provider->host_allocator, count,
+                                         sizeof(direct_request_indices[0]),
+                                         (void**)&direct_request_indices);
+  }
+  iree_host_size_t direct_request_count = 0;
   iree_host_size_t ready_entry_count = 0;
   for (iree_host_size_t i = 0; i < count && iree_status_is_ok(status); ++i) {
+    bool needs_direct_gather = false;
     status = id4_pipeline_parameter_cache_get_ready_entry(
         provider, device, queue_affinity, wait_semaphore_list, source_scope,
-        requests[i].key, requests[i].span, target_buffer, &ready_entries[i]);
+        requests[i].key, requests[i].span, &ready_entries[i],
+        &needs_direct_gather);
     if (iree_status_is_ok(status)) {
+      if (needs_direct_gather) {
+        direct_request_indices[direct_request_count++] = i;
+      }
       ready_entry_count = i + 1;
     }
   }
+  const bool all_requests_direct = count != 0 && direct_request_count == count;
+  if (iree_status_is_ok(status) && all_requests_direct) {
+    status = id4_pipeline_parameter_cache_issue_direct_gather(
+        provider, device, queue_affinity, wait_semaphore_list,
+        signal_semaphore_list, source_scope, target_buffer,
+        direct_request_count, requests, direct_request_indices);
+  } else if (iree_status_is_ok(status)) {
+    status = id4_pipeline_parameter_cache_gather_direct_batch(
+        provider, device, queue_affinity, wait_semaphore_list, source_scope,
+        target_buffer, direct_request_count, requests, direct_request_indices,
+        ready_entries);
+  }
 
   iree_hal_command_buffer_t* command_buffer = NULL;
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && !all_requests_direct) {
     status = id4_pipeline_parameter_cache_record_copies(
         device, queue_affinity, count, requests, ready_entries, target_buffer,
         &command_buffer);
@@ -776,12 +865,12 @@ static iree_status_t id4_pipeline_parameter_cache_provider_gather(
 
   iree_hal_semaphore_list_t target_wait_list;
   memset(&target_wait_list, 0, sizeof(target_wait_list));
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && !all_requests_direct) {
     status = id4_pipeline_parameter_cache_make_wait_list(
         wait_semaphore_list, count, ready_entries, provider->host_allocator,
         &target_wait_list);
   }
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && !all_requests_direct) {
     status = iree_hal_device_queue_execute(
         device, queue_affinity, target_wait_list, signal_semaphore_list,
         command_buffer, iree_hal_buffer_binding_table_empty(),
@@ -793,6 +882,7 @@ static iree_status_t id4_pipeline_parameter_cache_provider_gather(
   iree_hal_command_buffer_release(command_buffer);
   id4_pipeline_parameter_cache_ready_entries_release(ready_entry_count,
                                                      ready_entries);
+  iree_allocator_free(provider->host_allocator, direct_request_indices);
   iree_allocator_free(provider->host_allocator, ready_entries);
   iree_allocator_free(provider->host_allocator, requests);
   return status;
