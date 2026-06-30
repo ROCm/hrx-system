@@ -11,6 +11,7 @@
 #include "loom/ops/low/ops.h"
 #include "loom/target/arch/amdgpu/lower/constants.h"
 #include "loom/target/arch/amdgpu/lower/emit.h"
+#include "loom/target/arch/amdgpu/lower/topology.h"
 #include "loom/target/arch/amdgpu/lower/types.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
 
@@ -971,10 +972,20 @@ static iree_status_t loom_amdgpu_emit_fp8_packed_bf16_repair_split(
   loom_builder_t* builder = loom_low_lower_context_builder(context);
   IREE_ASSERT(builder->ip.before_op == NULL);
 
+  uint32_t wavefront_size = 0;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_target_wavefront_size(
+      loom_low_lower_context_bundle(context), &wavefront_size));
+
   loom_value_id_t low_has_condition_scc = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fp8_decode_sgpr64_nonzero_scc(
-      context, source_op, plan, low_has_condition_lanes, low_zero_sgpr64,
-      &low_has_condition_scc));
+  if (wavefront_size == 32) {
+    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_lane_mask_nonzero_scc(
+        context, source_op, low_has_condition_lanes, wavefront_size,
+        &low_has_condition_scc));
+  } else {
+    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fp8_decode_sgpr64_nonzero_scc(
+        context, source_op, plan, low_has_condition_lanes, low_zero_sgpr64,
+        &low_has_condition_scc));
+  }
 
   loom_block_t* hot_block = builder->ip.block;
   loom_region_t* low_region = hot_block->parent_region;
@@ -1448,8 +1459,15 @@ loom_amdgpu_emit_fp8_packed_bf16_combined_non_normal_condition(
       context, source_op, plan, low_max_shifted,
       upper_repair_threshold - subnormal_threshold, vgpr_type, sgpr_type,
       &low_condition));
+  const loom_value_id_t repair_conditions[] = {
+      // The threshold bias already marks subnormal lanes with the high bit.
+      low_max_shifted,
+      // Upper-end repairs are detected in the normal biased range.
+      low_condition,
+  };
   return loom_amdgpu_emit_fp8_packed_bf16_split_condition(
-      context, source_op, &low_condition, 1, vgpr_type, out_condition);
+      context, source_op, repair_conditions, IREE_ARRAYSIZE(repair_conditions),
+      vgpr_type, out_condition);
 }
 
 static iree_status_t
