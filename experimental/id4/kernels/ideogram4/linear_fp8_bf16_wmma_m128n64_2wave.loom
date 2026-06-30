@@ -217,6 +217,28 @@ check.case public @id4_ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_short_hidden
   check.return
 }
 
+check.case public @id4_ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_structured128_qkv_shape_case {
+  %input = check.generate.fill value(1.0) : tensor<256x4608xbf16>
+  %weight = check.generate.fill value(0.0) : tensor<13824x4608xf8E4M3>
+  %scale = check.generate.fill value(1.0) : tensor<13824xf32>
+  %output = check.generate.fill value(1.0) : tensor<256x13824xbf16>
+  %expected = check.generate.fill value(0.0) : tensor<256x13824xbf16>
+  func.call @id4_ideogram4_linear_fp8_bf16_wmma_m128n64_2wave(%input, %weight, %scale, %output) : (tensor<256x4608xbf16>, tensor<13824x4608xf8E4M3>, tensor<13824xf32>, tensor<256x13824xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<256x13824xbf16>
+  check.return
+}
+
+check.case public @id4_ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_structured128_hidden_shape_case {
+  %input = check.generate.fill value(1.0) : tensor<256x4608xbf16>
+  %weight = check.generate.fill value(0.0) : tensor<4608x4608xf8E4M3>
+  %scale = check.generate.fill value(1.0) : tensor<4608xf32>
+  %output = check.generate.fill value(1.0) : tensor<256x4608xbf16>
+  %expected = check.generate.fill value(0.0) : tensor<256x4608xbf16>
+  func.call @id4_ideogram4_linear_fp8_bf16_wmma_m128n64_2wave(%input, %weight, %scale, %output) : (tensor<256x4608xbf16>, tensor<4608x4608xf8E4M3>, tensor<4608xf32>, tensor<256x4608xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<256x4608xbf16>
+  check.return
+}
+
 check.case public @id4_ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_short_mlp_up_128_shape_case {
   %input = check.generate.fill value(1.0) : tensor<128x4608xbf16>
   %weight = check.generate.fill value(0.0) : tensor<12288x4608xf8E4M3>
@@ -255,6 +277,10 @@ check.benchmark<@id4_ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_small_case> @i
 check.benchmark<@id4_ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_short_qkv_128_shape_case> @id4_ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_short_qkv_128_shape
 
 check.benchmark<@id4_ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_short_hidden_128_shape_case> @id4_ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_short_hidden_128_shape
+
+check.benchmark<@id4_ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_structured128_qkv_shape_case> @id4_ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_structured128_qkv_shape
+
+check.benchmark<@id4_ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_structured128_hidden_shape_case> @id4_ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_structured128_hidden_shape
 
 check.benchmark<@id4_ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_short_mlp_up_128_shape_case> @id4_ideogram4_linear_fp8_bf16_wmma_m128n64_2wave_short_mlp_up_128_shape
 
