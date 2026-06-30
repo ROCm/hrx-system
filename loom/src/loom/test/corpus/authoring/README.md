@@ -30,7 +30,7 @@ belong to `iree-benchmark-loom` flags or embedding APIs.
 | Local unroll intent | `ffn_gate_up_swiglu_q6q8.loom` keeps block/part loops structured and marks the tiny trip-count loops with `unroll`. |
 | Logical indexing | The examples use index/view math for logical rows, blocks, lanes, byte positions, and dense tensor coordinates. |
 | Dynamic case parameters | `mlp_down_projection_residual_bf16.loom` names `rows` on a `check.param.choice` and threads it through shapes, launch geometry, and the kernel ABI. |
-| Finite FP8 checkpoint storage | `fp8_finite_storage_decode.loom` puts `rounding=finite_only` on physical storage and materializes rows into F32 and BF16 destinations. |
+| Finite FP8/BF8 checkpoint storage | `fp8_finite_storage_decode.loom` puts `rounding=finite_only` on physical storage and materializes E4M3/BF8 rows into F32 and BF16 destinations, including scale-only BF16 decode. |
 | Benchmark slices | `mlp_down_projection_residual_bf16.loom` has an anonymous full sweep plus named decode/full rows with assignment dictionaries. |
 | HIP C++ porting motifs | `hip/README.md` maps HIP/CUDA kernel habits to Loom source spellings, proof commands, diagnostics, and authoring-level report workflows. |
 | Packed field contracts | `hip/packed_field_contracts.loom` shows q2/q3/q4/q5/q6-style fields as explicit storage/decode/repack contracts instead of fake scalar element types. |
@@ -435,19 +435,20 @@ explicit boundary: it multiplies an `index` coordinate by an `offset` byte
 stride and produces the `offset` value expected by `buffer.view`.
 
 FP8 checkpoint storage should carry both the payload dialect and the content
-contract on the view storage schema. A plain `f8E4M3` view only carries the
-scalar FP8 type facts; NaN, zero, and subnormal payloads remain possible unless
-storage says more. The schema `element_format` records the payload dialect, such
-as `f8e4m3` for IEEE-style E4M3 or `f8e4m3fn` for finite-NaN checkpoint formats.
-Model weights that have been validated finite should also set
-`rounding=finite_only` so loads and fragments publish no-NaN facts while still
-preserving exact zero and subnormal behavior. Formats that also flush or forbid
-subnormal payloads can use `finite_flush_subnormal`, but that is a stronger
-numeric contract than ordinary finite FP8 weights.
+contract on the view storage schema. A plain `f8E4M3` or `f8E5M2` view only
+carries the scalar FP8 type facts; NaN, zero, and subnormal payloads remain
+possible unless storage says more, and IEEE-style `f8E5M2` can also represent
+infinity. The schema `element_format` records the payload dialect, such as
+`f8e4m3`, `f8e4m3fn`, or `f8e5m2`. Model weights that have been validated finite
+should also set `rounding=finite_only` so loads and fragments publish
+no-NaN/no-infinity facts while still preserving exact zero and subnormal
+behavior. Formats that also flush or forbid subnormal payloads can use
+`finite_flush_subnormal`, but that is a stronger numeric contract than ordinary
+finite FP8 weights.
 
 ```loom
 %weight_layout = encoding.layout.strided [1, %input_size] : encoding<layout>
-%weight_schema = encoding.define #matrix_operand<element_format=f8e4m3fn, payload_elements=16, payload_registers=4, rounding=finite_only> : encoding<schema>
+%weight_schema = encoding.define #matrix_operand<element_format=f8e4m3, payload_elements=16, payload_registers=4, rounding=finite_only> : encoding<schema>
 %weight_storage = encoding.define #physical_storage {layout = %weight_layout : encoding<layout>, schema = %weight_schema : encoding<schema>} : encoding<storage>
 %weight_view = buffer.view %weight_buffer[%base] : buffer -> view<[%input_size]x[%output_size]xf8E4M3, %weight_storage>
 ```
