@@ -6681,9 +6681,14 @@ static iree_status_t loom_amdgpu_lower_vector_fp8_to_packed_bf16(
                                                     lane_index),
           result_lane_type, sgpr_type, mask_type, &lanes[register_lane]));
     }
-    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_packed_bf16_pair(
-        context, source_op, decode_plan, lanes[0], lanes[1], result_lane_type,
-        &packed_registers[register_index]));
+    const loom_low_lower_resolved_descriptor_t* pack_u16_descriptor =
+        iree_any_bit_set(decode_plan->flags,
+                         LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_PACK_U16)
+            ? &decode_plan->pack_u16_descriptor
+            : NULL;
+    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_packed_bf16_lane_pair(
+        context, source_op, pack_u16_descriptor, lanes[0], lanes[1],
+        result_lane_type, &packed_registers[register_index]));
   }
 
   return loom_amdgpu_bind_low_register_range(context, source_op, plan->result,

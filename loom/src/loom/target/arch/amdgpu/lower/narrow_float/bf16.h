@@ -81,6 +81,15 @@ iree_status_t loom_amdgpu_emit_f32_pair_to_packed_bf16_with_descriptors(
     loom_value_id_t low_source_lane, loom_value_id_t high_source_lane,
     loom_type_t lane_type, loom_value_id_t* out_packed);
 
+// Emits one packed VGPR containing two already-rounded BF16 bit payloads. The
+// low source becomes the low 16 bits of the result. |pack_u16_descriptor| may
+// be NULL, in which case the helper falls back to shift/or packing.
+iree_status_t loom_amdgpu_emit_packed_bf16_lane_pair(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_low_lower_resolved_descriptor_t* pack_u16_descriptor,
+    loom_value_id_t low_lane, loom_value_id_t high_lane, loom_type_t lane_type,
+    loom_value_id_t* out_packed);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif

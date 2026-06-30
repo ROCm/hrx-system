@@ -310,13 +310,6 @@ iree_status_t loom_amdgpu_emit_fp8_pairs_to_packed_f16_finite(
     loom_amdgpu_fp8_decode_value_flags_t value_flags, loom_type_t vgpr_type,
     loom_type_t sgpr_type, loom_value_id_t* out_low_packets);
 
-// Emits one packed VGPR containing two BF16 bit payloads.
-iree_status_t loom_amdgpu_emit_packed_bf16_pair(
-    loom_low_lower_context_t* context, const loom_op_t* source_op,
-    const loom_amdgpu_fp8_decode_plan_t* plan, loom_value_id_t low_element,
-    loom_value_id_t high_element, loom_type_t vgpr_type,
-    loom_value_id_t* out_low_packet);
-
 #ifdef __cplusplus
 }  // extern "C"
 #endif
