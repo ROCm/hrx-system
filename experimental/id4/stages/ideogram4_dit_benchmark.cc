@@ -97,6 +97,20 @@ static iree_string_view_t BranchFp8ParameterScope(
   return iree_string_view_empty();
 }
 
+static iree_string_view_t BranchParameterScope(
+    id4::test::Ideogram4DitBranch branch,
+    id4::test::Ideogram4DitBranchConfig branch_config,
+    id4_ideogram4_dit_parameter_format_t format) {
+  switch (format) {
+    case ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_BF16:
+      return branch_config.parameter_scope;
+    case ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_FP8_E4M3:
+      return BranchFp8ParameterScope(branch);
+    default:
+      return iree_string_view_empty();
+  }
+}
+
 static iree_status_t ParseDitParameterFormat(
     id4_ideogram4_dit_parameter_format_t* out_format) {
   iree_status_t status = id4_ideogram4_dit_parameter_format_parse(
@@ -296,7 +310,8 @@ static iree_status_t CreateDitStage(const id4::test::LiveStageContext& live,
   create_options.structure_size = sizeof(create_options);
   create_options.services = services;
   create_options.kernel_cache = live.kernel_cache.get();
-  create_options.parameter_scope = branch.parameter_scope;
+  create_options.parameter_scope =
+      BranchParameterScope(selected, branch, format);
   create_options.parameter_source_rule_count = source_rules.count;
   create_options.parameter_source_rules = source_rules.values;
   create_options.model = *id4_ideogram4_dit_program_ideogram4_model_config();
@@ -363,47 +378,8 @@ static iree_status_t AttachDitPreparationInputs(
     return id4::test::CreateParameterProviderFromFlags(
         branch_config.parameter_scope, context->parameter_provider.out());
   }
-
-  id4::test::OwningRef<iree_io_parameter_provider_t,
-                       iree_io_parameter_provider_release>
-      bf16_provider;
-  id4::test::OwningRef<iree_io_parameter_provider_t,
-                       iree_io_parameter_provider_release>
-      fp8_provider;
-  id4_tooling_parameter_provider_request_t requests[] = {
-      {
-          // BF16-expanded parameter scope.
-          .scope = branch_config.parameter_scope,
-          // BF16-expanded provider output.
-          .out_provider = bf16_provider.out(),
-      },
-      {
-          // FP8 e4m3 source parameter scope.
-          .scope = fp8_parameter_scope,
-          // FP8 e4m3 source provider output.
-          .out_provider = fp8_provider.out(),
-      },
-  };
-  IREE_RETURN_IF_ERROR(id4_tooling_create_parameter_providers_from_flags(
-      IREE_ARRAYSIZE(requests), requests, iree_allocator_system()));
-
-  const id4_tooling_parameter_provider_set_entry_t entries[] = {
-      {
-          // BF16-expanded parameter scope.
-          .scope = branch_config.parameter_scope,
-          // BF16-expanded provider.
-          .provider = bf16_provider.get(),
-      },
-      {
-          // FP8 e4m3 source parameter scope.
-          .scope = fp8_parameter_scope,
-          // FP8 e4m3 source provider.
-          .provider = fp8_provider.get(),
-      },
-  };
-  return id4_tooling_create_parameter_provider_set(
-      IREE_ARRAYSIZE(entries), entries, iree_allocator_system(),
-      context->parameter_provider.out());
+  return id4::test::CreateParameterProviderFromFlags(
+      fp8_parameter_scope, context->parameter_provider.out());
 }
 
 static iree_status_t CreateLoadedDitBenchmarkContext(
