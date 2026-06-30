@@ -701,9 +701,11 @@ iree_status_t loom_run_hal_testbench_actual_provider_compile(
     loom_run_hal_testbench_record_compile_rejection(
         provider, IREE_SV("compile"), IREE_SV("unresolved_workgroup_count"),
         IREE_SV("HAL actual invocation requires a statically resolved "
-                "workgroup count after sample constants are applied; use "
-                "--sample-compilation=per_sample or make launch geometry "
-                "static for once-compiled candidates"));
+                "workgroup count after config bindings and sample constants "
+                "are applied; bind launch config values, use "
+                "--sample-compilation=per_sample when launch geometry depends "
+                "on benchmark samples, or make launch geometry static for "
+                "once-compiled candidates"));
     return iree_ok_status();
   }
   provider->invocation_options.workgroup_count[0] = workgroup_count.x;
