@@ -2306,6 +2306,47 @@ static bool loom_amdgpu_fragment_memory_plan_push_packet(
   return true;
 }
 
+static loom_amdgpu_fragment_memory_epilogue_strategy_t
+loom_amdgpu_fragment_memory_plan_epilogue_strategy(
+    const loom_amdgpu_fragment_memory_plan_t* plan) {
+  if (plan->payload_form !=
+      LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_STORE_NARROW_F32_TO_BF16) {
+    return LOOM_AMDGPU_FRAGMENT_MEMORY_EPILOGUE_STRATEGY_NONE;
+  }
+  if (iree_any_bit_set(
+          plan->packet_flags,
+          LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_CROSSLANE_PACKED_B16_STORE)) {
+    return iree_any_bit_set(
+               plan->packet_flags,
+               LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_CROSSLANE_PACKED_B16_STORE_DPP)
+               ? LOOM_AMDGPU_FRAGMENT_MEMORY_EPILOGUE_STRATEGY_DPP_PACKED_B16_STORE
+               : LOOM_AMDGPU_FRAGMENT_MEMORY_EPILOGUE_STRATEGY_DS_PACKED_B16_STORE;
+  }
+  for (uint16_t i = 0; i < plan->packet_count; ++i) {
+    if (plan->packets[i].result_register_count > 1) {
+      return LOOM_AMDGPU_FRAGMENT_MEMORY_EPILOGUE_STRATEGY_PACKED_B16_STORE;
+    }
+  }
+  return plan->packet_count != 0
+             ? LOOM_AMDGPU_FRAGMENT_MEMORY_EPILOGUE_STRATEGY_SCALAR_B16_STORE
+             : LOOM_AMDGPU_FRAGMENT_MEMORY_EPILOGUE_STRATEGY_NONE;
+}
+
+static bool
+loom_amdgpu_fragment_memory_epilogue_strategy_is_crosslane_packed_b16(
+    loom_amdgpu_fragment_memory_epilogue_strategy_t strategy) {
+  return strategy ==
+             LOOM_AMDGPU_FRAGMENT_MEMORY_EPILOGUE_STRATEGY_DS_PACKED_B16_STORE ||
+         strategy ==
+             LOOM_AMDGPU_FRAGMENT_MEMORY_EPILOGUE_STRATEGY_DPP_PACKED_B16_STORE;
+}
+
+static bool loom_amdgpu_fragment_memory_epilogue_strategy_uses_dpp(
+    loom_amdgpu_fragment_memory_epilogue_strategy_t strategy) {
+  return strategy ==
+         LOOM_AMDGPU_FRAGMENT_MEMORY_EPILOGUE_STRATEGY_DPP_PACKED_B16_STORE;
+}
+
 static bool loom_amdgpu_fragment_memory_plan_packets(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_amdgpu_matrix_fragment_layout_t* layout,
@@ -2365,6 +2406,8 @@ static bool loom_amdgpu_fragment_memory_plan_packets(
     return loom_amdgpu_fragment_memory_reject(
         diagnostic, IREE_SV("fragment_memory.packet"));
   }
+  plan->epilogue_strategy =
+      loom_amdgpu_fragment_memory_plan_epilogue_strategy(plan);
   return true;
 }
 
@@ -3086,9 +3129,8 @@ static iree_string_view_t loom_amdgpu_fragment_memory_packet_fallback_reason(
   if (iree_all_bits_set(
           packet->flags,
           LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_CROSSLANE_PACKED_B16_STORE)) {
-    if (iree_all_bits_set(
-            packet->flags,
-            LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_CROSSLANE_PACKED_B16_STORE_DPP)) {
+    if (loom_amdgpu_fragment_memory_epilogue_strategy_uses_dpp(
+            plan->epilogue_strategy)) {
       return IREE_SV("dpp_packed_bf16_store");
     }
     return IREE_SV("ds_bpermute_packed_bf16_store");
@@ -4368,12 +4410,12 @@ iree_status_t loom_amdgpu_lower_vector_fragment_store(
     const loom_amdgpu_bf16_pack_descriptors_t* bf16_pack_descriptors = NULL;
     IREE_RETURN_IF_ERROR(
         loom_amdgpu_get_bf16_pack_descriptors(context, &bf16_pack_descriptors));
-    const bool has_crosslane_packed_b16_store = iree_any_bit_set(
-        plan->packet_flags,
-        LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_CROSSLANE_PACKED_B16_STORE);
-    const bool has_dpp_crosslane_packed_b16_store = iree_any_bit_set(
-        plan->packet_flags,
-        LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_CROSSLANE_PACKED_B16_STORE_DPP);
+    const bool has_crosslane_packed_b16_store =
+        loom_amdgpu_fragment_memory_epilogue_strategy_is_crosslane_packed_b16(
+            plan->epilogue_strategy);
+    const bool has_dpp_crosslane_packed_b16_store =
+        loom_amdgpu_fragment_memory_epilogue_strategy_uses_dpp(
+            plan->epilogue_strategy);
     if (has_crosslane_packed_b16_store) {
       IREE_RETURN_IF_ERROR(
           loom_amdgpu_make_sgpr_range_type(context, 2, &mask_type));
