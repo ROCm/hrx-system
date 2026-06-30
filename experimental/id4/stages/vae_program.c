@@ -48,6 +48,8 @@ typedef enum id4_vae_program_conv3x3_weight_layout_e {
   ID4_VAE_PROGRAM_CONV3X3_WEIGHT_LAYOUT_SOURCE = 0,
   // Packed consumer layout: ICxKYxKXxOC.
   ID4_VAE_PROGRAM_CONV3X3_WEIGHT_LAYOUT_PACKED_IC_KY_KX_OC,
+  // Parity-packed upsample layout: ParityxICxTapxOC.
+  ID4_VAE_PROGRAM_CONV3X3_WEIGHT_LAYOUT_PACKED_UPSAMPLE_PARITY_IC_TAP_OC,
 } id4_vae_program_conv3x3_weight_layout_t;
 
 static const float id4_vae_flux2_latent_mean[128] = {
@@ -731,6 +733,11 @@ static iree_status_t id4_vae_program_resolve_conv3x3_weight(
           input_channel_count, 3, 3, output_channel_count);
       return id4_vae_parameter_format_packed_conv3x3_weight_key(
           source_key, key_storage, key_storage_capacity, out_key);
+    case ID4_VAE_PROGRAM_CONV3X3_WEIGHT_LAYOUT_PACKED_UPSAMPLE_PARITY_IC_TAP_OC:
+      *out_shape = id4_pipeline_program_make_shape_rank4(
+          4, input_channel_count, 4, output_channel_count);
+      return id4_vae_parameter_format_packed_upsample_conv3x3_weight_key(
+          source_key, key_storage, key_storage_capacity, out_key);
     default:
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "VAE conv3x3 weight layout %d is invalid",
@@ -1016,6 +1023,42 @@ static iree_status_t id4_vae_program_build_upsample_conv3x3_bias_configs(
   return id4_vae_program_config_list_add_u64(
       out_config_list,
       IREE_SV("id4.vae.upsample_conv3x3_bias.output_element_count"),
+      output_element_count);
+}
+
+static iree_status_t id4_vae_program_build_upsample_conv3x3_bias_parity_configs(
+    uint32_t input_width, uint32_t input_height, uint32_t channel_count,
+    uint32_t batch_count, uint32_t output_width, uint32_t output_height,
+    uint64_t output_element_count,
+    id4_vae_program_config_list_t* out_config_list) {
+  memset(out_config_list, 0, sizeof(*out_config_list));
+  IREE_RETURN_IF_ERROR(id4_vae_program_config_list_add_u64(
+      out_config_list,
+      IREE_SV("id4.vae.upsample_conv3x3_bias_parity.input_width"),
+      input_width));
+  IREE_RETURN_IF_ERROR(id4_vae_program_config_list_add_u64(
+      out_config_list,
+      IREE_SV("id4.vae.upsample_conv3x3_bias_parity.input_height"),
+      input_height));
+  IREE_RETURN_IF_ERROR(id4_vae_program_config_list_add_u64(
+      out_config_list,
+      IREE_SV("id4.vae.upsample_conv3x3_bias_parity.channel_count"),
+      channel_count));
+  IREE_RETURN_IF_ERROR(id4_vae_program_config_list_add_u64(
+      out_config_list,
+      IREE_SV("id4.vae.upsample_conv3x3_bias_parity.batch_count"),
+      batch_count));
+  IREE_RETURN_IF_ERROR(id4_vae_program_config_list_add_u64(
+      out_config_list,
+      IREE_SV("id4.vae.upsample_conv3x3_bias_parity.output_width"),
+      output_width));
+  IREE_RETURN_IF_ERROR(id4_vae_program_config_list_add_u64(
+      out_config_list,
+      IREE_SV("id4.vae.upsample_conv3x3_bias_parity.output_height"),
+      output_height));
+  return id4_vae_program_config_list_add_u64(
+      out_config_list,
+      IREE_SV("id4.vae.upsample_conv3x3_bias_parity.output_element_count"),
       output_element_count);
 }
 
@@ -2700,25 +2743,37 @@ static iree_status_t id4_vae_program_author_upsample_conv3x3_bias(
                                               channel_count, batch_count),
         &output));
 
-    id4_vae_program_config_list_t config_list;
-    IREE_RETURN_IF_ERROR(id4_vae_program_build_upsample_conv3x3_bias_configs(
-        input_width, input_height, channel_count, batch_count, output_width,
-        output_height, output_element_count, &config_list));
     const uint64_t output_spatial_element_count =
         (uint64_t)output_width * output_height * batch_count;
     // OC32 has lower register pressure and wins on the smallest active VAE
-    // upsample tile; OC64 wins once the output tile reaches 64x64.
+    // upsample tile. Larger OC64 shapes use a parity-packed upsample kernel
+    // that collapses the 3x3 nearest-upsample taps into four source taps.
     const bool use_small_spatial_wmma =
         output_spatial_element_count <= 32ull * 32ull;
-    const bool use_wmma_oc64 = !use_small_spatial_wmma && channel_count >= 64 &&
-                               channel_count % 64 == 0;
+    const bool use_parity_wmma = !use_small_spatial_wmma &&
+                                 channel_count >= 64 && channel_count % 64 == 0;
+
+    id4_vae_program_config_list_t config_list;
+    if (use_parity_wmma) {
+      IREE_RETURN_IF_ERROR(
+          id4_vae_program_build_upsample_conv3x3_bias_parity_configs(
+              input_width, input_height, channel_count, batch_count,
+              output_width, output_height, output_element_count, &config_list));
+    } else {
+      IREE_RETURN_IF_ERROR(id4_vae_program_build_upsample_conv3x3_bias_configs(
+          input_width, input_height, channel_count, batch_count, output_width,
+          output_height, output_element_count, &config_list));
+    }
 
     iree_string_view_t packed_weight_key = iree_string_view_empty();
     id4_pipeline_program_shape_t weight_shape;
     char packed_weight_key_storage[ID4_VAE_PROGRAM_NAME_BUFFER_CAPACITY];
+    const id4_vae_program_conv3x3_weight_layout_t weight_layout =
+        use_parity_wmma
+            ? ID4_VAE_PROGRAM_CONV3X3_WEIGHT_LAYOUT_PACKED_UPSAMPLE_PARITY_IC_TAP_OC
+            : ID4_VAE_PROGRAM_CONV3X3_WEIGHT_LAYOUT_PACKED_IC_KY_KX_OC;
     IREE_RETURN_IF_ERROR(id4_vae_program_resolve_conv3x3_weight(
-        weight_key, channel_count, channel_count,
-        ID4_VAE_PROGRAM_CONV3X3_WEIGHT_LAYOUT_PACKED_IC_KY_KX_OC,
+        weight_key, channel_count, channel_count, weight_layout,
         packed_weight_key_storage, sizeof(packed_weight_key_storage),
         &packed_weight_key, &weight_shape));
     iree_string_view_t resolved_weight_key = iree_string_view_empty();
@@ -2753,10 +2808,10 @@ static iree_status_t id4_vae_program_author_upsample_conv3x3_bias(
     memset(&dispatch_options, 0, sizeof(dispatch_options));
     dispatch_options.structure_size = sizeof(dispatch_options);
     dispatch_options.name = dispatch_name;
-    if (use_wmma_oc64) {
+    if (use_parity_wmma) {
       dispatch_options.kernel = id4_pipeline_make_kernel_ref(
-          IREE_SV("vae/upsample_conv3x3_bias_bf16"),
-          IREE_SV("id4_vae_upsample_conv3x3_bias_bf16_wmma_oc64"));
+          IREE_SV("vae/upsample_conv3x3_bias_parity_bf16"),
+          IREE_SV("id4_vae_upsample_conv3x3_bias_parity_bf16_wmma_oc64"));
     } else {
       dispatch_options.kernel = id4_pipeline_make_kernel_ref(
           IREE_SV("vae/upsample_conv3x3_bias_bf16"),
