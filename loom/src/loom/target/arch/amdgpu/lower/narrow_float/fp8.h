@@ -49,6 +49,7 @@ typedef enum loom_amdgpu_fp8_decode_plan_flag_bits_e {
   LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_BFI_B32 = 1u << 18,
   LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_LSHL_ADD_U32_SHIFT_IMM_SRC2_LITERAL =
       1u << 19,
+  LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_PK_LSHLREV_B16 = 1u << 20,
 } loom_amdgpu_fp8_decode_plan_flag_bits_t;
 typedef uint32_t loom_amdgpu_fp8_decode_plan_flags_t;
 
@@ -73,6 +74,7 @@ typedef enum loom_amdgpu_fp8_packed_bf16_missing_requirement_bits_e {
   LOOM_AMDGPU_FP8_PACKED_BF16_MISSING_REQUIREMENT_VALUE_FINITE = 1u << 1,
   LOOM_AMDGPU_FP8_PACKED_BF16_MISSING_REQUIREMENT_VALUE_NOT_SUBNORMAL = 1u << 2,
   LOOM_AMDGPU_FP8_PACKED_BF16_MISSING_REQUIREMENT_ZERO_REPAIR_PACKETS = 1u << 3,
+  LOOM_AMDGPU_FP8_PACKED_BF16_MISSING_REQUIREMENT_PACKED_SHIFT_PACKET = 1u << 4,
 } loom_amdgpu_fp8_packed_bf16_missing_requirement_bits_t;
 typedef uint32_t loom_amdgpu_fp8_packed_bf16_missing_requirements_t;
 
@@ -167,6 +169,8 @@ typedef struct loom_amdgpu_fp8_decode_plan_t {
   loom_low_lower_resolved_descriptor_t pk_mul_lo_u16_descriptor;
   // Packed unsigned 16-bit add descriptor.
   loom_low_lower_resolved_descriptor_t pk_add_u16_descriptor;
+  // Packed 16-bit left-shift descriptor.
+  loom_low_lower_resolved_descriptor_t pk_lshlrev_b16_descriptor;
   // Packed unsigned 16-bit max descriptor.
   loom_low_lower_resolved_descriptor_t pk_max_u16_descriptor;
   // Packed signed 16-bit arithmetic-right-shift descriptor.
