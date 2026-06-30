@@ -30,12 +30,66 @@ enum {
   LOOM_AMDGPU_FP8_DECODE_BF16_PAIR_EQ_ZERO_BIAS = 0xFFFFFFFFu,
   LOOM_AMDGPU_FP8_DECODE_BF16_PAIR_INFINITY_BITS = 0x7F807F80u,
   LOOM_AMDGPU_FP8_DECODE_BF16_PAIR_QUIET_NAN_BITS = 0x7FC07FC0u,
+  LOOM_AMDGPU_FP8_PACKED_BF16_REPAIR_REASON_COUNT = 16u,
 };
 
 static const uint32_t kLoomAmdgpuFp8DecodeBf16BytePairSelectors[] = {
     LOOM_AMDGPU_FP8_DECODE_BF16_BYTE_PAIR_LOW_SELECTOR,
     LOOM_AMDGPU_FP8_DECODE_BF16_BYTE_PAIR_MIDDLE_SELECTOR,
     LOOM_AMDGPU_FP8_DECODE_BF16_BYTE_PAIR_HIGH_SELECTOR,
+};
+
+static const iree_string_view_t kLoomAmdgpuFp8PackedBf16RepairReasons
+    [LOOM_AMDGPU_FP8_PACKED_BF16_REPAIR_REASON_COUNT] = {
+        [LOOM_AMDGPU_FP8_PACKED_BF16_REPAIR_NONE] =
+            IREE_SVL("fp8_packed_bf16_decode"),
+        [LOOM_AMDGPU_FP8_PACKED_BF16_REPAIR_ZERO] =
+            IREE_SVL("fp8_packed_bf16_decode_repair_zero"),
+        [LOOM_AMDGPU_FP8_PACKED_BF16_REPAIR_SUBNORMAL] =
+            IREE_SVL("fp8_packed_bf16_decode_repair_subnormal"),
+        [LOOM_AMDGPU_FP8_PACKED_BF16_REPAIR_ZERO |
+         LOOM_AMDGPU_FP8_PACKED_BF16_REPAIR_SUBNORMAL] =
+            IREE_SVL("fp8_packed_bf16_decode_repair_zero_subnormal"),
+        [LOOM_AMDGPU_FP8_PACKED_BF16_REPAIR_NAN] =
+            IREE_SVL("fp8_packed_bf16_decode_repair_nan"),
+        [LOOM_AMDGPU_FP8_PACKED_BF16_REPAIR_ZERO |
+         LOOM_AMDGPU_FP8_PACKED_BF16_REPAIR_NAN] =
+            IREE_SVL("fp8_packed_bf16_decode_repair_zero_nan"),
+        [LOOM_AMDGPU_FP8_PACKED_BF16_REPAIR_SUBNORMAL |
+         LOOM_AMDGPU_FP8_PACKED_BF16_REPAIR_NAN] =
+            IREE_SVL("fp8_packed_bf16_decode_repair_subnormal_nan"),
+        [LOOM_AMDGPU_FP8_PACKED_BF16_REPAIR_ZERO |
+         LOOM_AMDGPU_FP8_PACKED_BF16_REPAIR_SUBNORMAL |
+         LOOM_AMDGPU_FP8_PACKED_BF16_REPAIR_NAN] =
+            IREE_SVL("fp8_packed_bf16_decode_repair_zero_subnormal_nan"),
+        [LOOM_AMDGPU_FP8_PACKED_BF16_REPAIR_INF] =
+            IREE_SVL("fp8_packed_bf16_decode_repair_inf"),
+        [LOOM_AMDGPU_FP8_PACKED_BF16_REPAIR_ZERO |
+         LOOM_AMDGPU_FP8_PACKED_BF16_REPAIR_INF] =
+            IREE_SVL("fp8_packed_bf16_decode_repair_zero_inf"),
+        [LOOM_AMDGPU_FP8_PACKED_BF16_REPAIR_SUBNORMAL |
+         LOOM_AMDGPU_FP8_PACKED_BF16_REPAIR_INF] =
+            IREE_SVL("fp8_packed_bf16_decode_repair_subnormal_inf"),
+        [LOOM_AMDGPU_FP8_PACKED_BF16_REPAIR_ZERO |
+         LOOM_AMDGPU_FP8_PACKED_BF16_REPAIR_SUBNORMAL |
+         LOOM_AMDGPU_FP8_PACKED_BF16_REPAIR_INF] =
+            IREE_SVL("fp8_packed_bf16_decode_repair_zero_subnormal_inf"),
+        [LOOM_AMDGPU_FP8_PACKED_BF16_REPAIR_NAN |
+         LOOM_AMDGPU_FP8_PACKED_BF16_REPAIR_INF] =
+            IREE_SVL("fp8_packed_bf16_decode_repair_inf_nan"),
+        [LOOM_AMDGPU_FP8_PACKED_BF16_REPAIR_ZERO |
+         LOOM_AMDGPU_FP8_PACKED_BF16_REPAIR_NAN |
+         LOOM_AMDGPU_FP8_PACKED_BF16_REPAIR_INF] =
+            IREE_SVL("fp8_packed_bf16_decode_repair_zero_inf_nan"),
+        [LOOM_AMDGPU_FP8_PACKED_BF16_REPAIR_SUBNORMAL |
+         LOOM_AMDGPU_FP8_PACKED_BF16_REPAIR_NAN |
+         LOOM_AMDGPU_FP8_PACKED_BF16_REPAIR_INF] =
+            IREE_SVL("fp8_packed_bf16_decode_repair_subnormal_inf_nan"),
+        [LOOM_AMDGPU_FP8_PACKED_BF16_REPAIR_ZERO |
+         LOOM_AMDGPU_FP8_PACKED_BF16_REPAIR_SUBNORMAL |
+         LOOM_AMDGPU_FP8_PACKED_BF16_REPAIR_NAN |
+         LOOM_AMDGPU_FP8_PACKED_BF16_REPAIR_INF] =
+            IREE_SVL("fp8_packed_bf16_decode_repair_zero_subnormal_inf_nan"),
 };
 
 static uint32_t loom_amdgpu_fp8_decode_packed_u16(uint32_t value) {
@@ -2627,6 +2681,16 @@ loom_amdgpu_fp8_pair_to_packed_bf16_repairs(
     repairs |= LOOM_AMDGPU_FP8_PACKED_BF16_REPAIR_ZERO;
   }
   return repairs;
+}
+
+iree_string_view_t loom_amdgpu_fp8_packed_bf16_repair_reason_key(
+    loom_amdgpu_fp8_packed_bf16_repairs_t repairs) {
+  IREE_ASSERT_LT(repairs,
+                 IREE_ARRAYSIZE(kLoomAmdgpuFp8PackedBf16RepairReasons));
+  if (repairs >= IREE_ARRAYSIZE(kLoomAmdgpuFp8PackedBf16RepairReasons)) {
+    return IREE_SV("fp8_packed_bf16_decode_invalid_repair");
+  }
+  return kLoomAmdgpuFp8PackedBf16RepairReasons[repairs];
 }
 
 loom_amdgpu_fp8_packed_bf16_missing_requirements_t
