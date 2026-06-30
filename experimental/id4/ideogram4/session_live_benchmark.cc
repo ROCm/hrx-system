@@ -970,9 +970,13 @@ static iree_status_t WriteGenerationPlanJsonIfRequested(
   iree_string_builder_initialize(iree_allocator_system(), &json_builder);
   iree_string_view_t output_path = iree_string_view_empty();
 
-  iree_status_t status = iree_string_builder_append_format(
-      &file_name_builder, "%.*s.json", static_cast<int>(prompt_label.size),
-      prompt_label.data);
+  iree_status_t status =
+      id4_tooling_ensure_directory(output_directory, iree_allocator_system());
+  if (iree_status_is_ok(status)) {
+    status = iree_string_builder_append_format(
+        &file_name_builder, "%.*s.json", static_cast<int>(prompt_label.size),
+        prompt_label.data);
+  }
   if (iree_status_is_ok(status)) {
     status = id4_tooling_format_child_path(
         output_directory, iree_string_builder_view(&file_name_builder),
