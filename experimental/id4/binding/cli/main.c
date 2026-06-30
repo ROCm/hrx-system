@@ -36,9 +36,8 @@ IREE_FLAG(string, prompt_json_file, "",
           "Path to a JSON prompt/configuration payload for one generation.");
 IREE_FLAG(string, output, "", "Output image path.");
 IREE_FLAG(string, dit_parameter_format, "fp8_e4m3",
-          "DiT parameter format: bf16 or fp8_e4m3. fp8_e4m3 currently requires "
-          "--parameters=dit_cond=..., --parameters=dit_uncond=..., and the FP8 "
-          "source scopes below.");
+          "DiT parameter format: bf16 or fp8_e4m3. fp8_e4m3 uses the FP8 "
+          "scopes below as the branch parameter providers.");
 IREE_FLAG(string, dit_activation_format, "bf16_linear_input",
           "DiT activation format: bf16_linear_input or f32_canonical.");
 IREE_FLAG(string, dit_weight_execution_format, "bf16_resident",
@@ -51,17 +50,15 @@ IREE_FLAG(string, dit_feed_forward_implementation, "fused_product",
           "DiT feed-forward implementation: fused_product or "
           "pytorch_parity.");
 IREE_FLAG(string, dit_conditioned_fp8_scope, "dit_cond_fp8",
-          "Conditioned DiT FP8 e4m3 source parameter scope used alongside "
-          "the normal dit_cond scope.");
+          "Conditioned DiT FP8 e4m3 branch parameter scope.");
 IREE_FLAG(string, dit_unconditioned_fp8_scope, "dit_uncond_fp8",
-          "Unconditioned DiT FP8 e4m3 source parameter scope used alongside "
-          "the normal dit_uncond scope.");
+          "Unconditioned DiT FP8 e4m3 branch parameter scope.");
 IREE_FLAG(
     string, dit_fp8_source_residency, "disabled",
-    "Comma-separated DiT FP8 source providers kept resident after their "
+    "Comma-separated DiT FP8 branch providers kept resident after their "
     "first gather: disabled, dit_conditioned, dit_unconditioned, or all.");
 IREE_FLAG(int64_t, dit_fp8_source_cache_budget_mib, 0,
-          "Maximum MiB cached by each DiT FP8 source-resident parameter "
+          "Maximum MiB cached by each DiT FP8 branch-resident parameter "
           "provider, or zero for unbounded caching.");
 IREE_FLAG(string, dit_fp8_source_cache_miss_mode, "retain",
           "DiT FP8 source cache miss mode: retain or direct_on_pressure.");
@@ -1372,20 +1369,30 @@ static iree_status_t id4_cli_create_loaded_session(
       id4_tooling_runtime_context_stage_services(runtime_context);
   session_options.kernel_cache = runtime_context->kernel_cache;
   session_options.parameter_scopes.qwen = IREE_SV("qwen");
-  session_options.parameter_scopes.dit_conditioned = IREE_SV("dit_cond");
-  session_options.parameter_scopes.dit_unconditioned = IREE_SV("dit_uncond");
   session_options.parameter_scopes.vae = IREE_SV("vae");
   IREE_RETURN_IF_ERROR(id4_cli_parse_dit_parameter_format(
       &session_options.dit_parameter_format));
   switch (session_options.dit_parameter_format) {
     case ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_BF16:
+      session_options.parameter_scopes.dit_conditioned = IREE_SV("dit_cond");
+      session_options.parameter_scopes.dit_unconditioned =
+          IREE_SV("dit_uncond");
       break;
-    case ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_FP8_E4M3:
-      session_options.parameter_scopes.dit_conditioned_fp8 =
+    case ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_FP8_E4M3: {
+      const iree_string_view_t dit_conditioned_fp8_scope =
           iree_make_cstring_view(FLAG_dit_conditioned_fp8_scope);
-      session_options.parameter_scopes.dit_unconditioned_fp8 =
+      const iree_string_view_t dit_unconditioned_fp8_scope =
           iree_make_cstring_view(FLAG_dit_unconditioned_fp8_scope);
+      session_options.parameter_scopes.dit_conditioned =
+          dit_conditioned_fp8_scope;
+      session_options.parameter_scopes.dit_conditioned_fp8 =
+          dit_conditioned_fp8_scope;
+      session_options.parameter_scopes.dit_unconditioned =
+          dit_unconditioned_fp8_scope;
+      session_options.parameter_scopes.dit_unconditioned_fp8 =
+          dit_unconditioned_fp8_scope;
       break;
+    }
     default:
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "invalid DiT parameter format %" PRIu32,
@@ -1524,10 +1531,6 @@ static iree_status_t id4_cli_create_parameter_providers(
     status = id4_tooling_create_parameter_providers_from_flags(
         IREE_ARRAYSIZE(requests), requests, host_allocator);
   } else {
-    iree_io_parameter_provider_t* dit_conditioned_bf16 = NULL;
-    iree_io_parameter_provider_t* dit_conditioned_fp8 = NULL;
-    iree_io_parameter_provider_t* dit_unconditioned_bf16 = NULL;
-    iree_io_parameter_provider_t* dit_unconditioned_fp8 = NULL;
     const iree_string_view_t dit_conditioned_fp8_scope =
         iree_make_cstring_view(FLAG_dit_conditioned_fp8_scope);
     const iree_string_view_t dit_unconditioned_fp8_scope =
@@ -1540,28 +1543,16 @@ static iree_status_t id4_cli_create_parameter_providers(
             .out_provider = &out_providers->qwen,
         },
         {
-            // Conditioned DiT BF16 parameter scope.
-            .scope = IREE_SV("dit_cond"),
-            // Conditioned DiT BF16 provider output.
-            .out_provider = &dit_conditioned_bf16,
-        },
-        {
-            // Conditioned DiT FP8 e4m3 source parameter scope.
+            // Conditioned DiT FP8 e4m3 parameter scope.
             .scope = dit_conditioned_fp8_scope,
-            // Conditioned DiT FP8 e4m3 source provider output.
-            .out_provider = &dit_conditioned_fp8,
+            // Conditioned DiT FP8 e4m3 provider output.
+            .out_provider = &out_providers->dit_conditioned,
         },
         {
-            // Unconditioned DiT BF16 parameter scope.
-            .scope = IREE_SV("dit_uncond"),
-            // Unconditioned DiT BF16 provider output.
-            .out_provider = &dit_unconditioned_bf16,
-        },
-        {
-            // Unconditioned DiT FP8 e4m3 source parameter scope.
+            // Unconditioned DiT FP8 e4m3 parameter scope.
             .scope = dit_unconditioned_fp8_scope,
-            // Unconditioned DiT FP8 e4m3 source provider output.
-            .out_provider = &dit_unconditioned_fp8,
+            // Unconditioned DiT FP8 e4m3 provider output.
+            .out_provider = &out_providers->dit_unconditioned,
         },
         {
             // VAE parameter scope.
@@ -1576,58 +1567,17 @@ static iree_status_t id4_cli_create_parameter_providers(
         iree_any_bit_set(fp8_source_residency,
                          ID4_CLI_DIT_FP8_SOURCE_RESIDENCY_CONDITIONED)) {
       status = id4_cli_make_source_resident_parameter_provider(
-          &dit_conditioned_fp8, fp8_source_cache_budget_byte_length,
+          &out_providers->dit_conditioned, fp8_source_cache_budget_byte_length,
           fp8_source_cache_miss_mode, host_allocator);
     }
     if (iree_status_is_ok(status) &&
         iree_any_bit_set(fp8_source_residency,
                          ID4_CLI_DIT_FP8_SOURCE_RESIDENCY_UNCONDITIONED)) {
       status = id4_cli_make_source_resident_parameter_provider(
-          &dit_unconditioned_fp8, fp8_source_cache_budget_byte_length,
-          fp8_source_cache_miss_mode, host_allocator);
+          &out_providers->dit_unconditioned,
+          fp8_source_cache_budget_byte_length, fp8_source_cache_miss_mode,
+          host_allocator);
     }
-    if (iree_status_is_ok(status)) {
-      const id4_tooling_parameter_provider_set_entry_t entries[] = {
-          {
-              // Conditioned DiT BF16 parameter scope.
-              .scope = IREE_SV("dit_cond"),
-              // Conditioned DiT BF16 provider.
-              .provider = dit_conditioned_bf16,
-          },
-          {
-              // Conditioned DiT FP8 e4m3 source parameter scope.
-              .scope = dit_conditioned_fp8_scope,
-              // Conditioned DiT FP8 e4m3 source provider.
-              .provider = dit_conditioned_fp8,
-          },
-      };
-      status = id4_tooling_create_parameter_provider_set(
-          IREE_ARRAYSIZE(entries), entries, host_allocator,
-          &out_providers->dit_conditioned);
-    }
-    if (iree_status_is_ok(status)) {
-      const id4_tooling_parameter_provider_set_entry_t entries[] = {
-          {
-              // Unconditioned DiT BF16 parameter scope.
-              .scope = IREE_SV("dit_uncond"),
-              // Unconditioned DiT BF16 provider.
-              .provider = dit_unconditioned_bf16,
-          },
-          {
-              // Unconditioned DiT FP8 e4m3 source parameter scope.
-              .scope = dit_unconditioned_fp8_scope,
-              // Unconditioned DiT FP8 e4m3 source provider.
-              .provider = dit_unconditioned_fp8,
-          },
-      };
-      status = id4_tooling_create_parameter_provider_set(
-          IREE_ARRAYSIZE(entries), entries, host_allocator,
-          &out_providers->dit_unconditioned);
-    }
-    iree_io_parameter_provider_release(dit_unconditioned_fp8);
-    iree_io_parameter_provider_release(dit_unconditioned_bf16);
-    iree_io_parameter_provider_release(dit_conditioned_fp8);
-    iree_io_parameter_provider_release(dit_conditioned_bf16);
   }
   if (!iree_status_is_ok(status)) {
     id4_cli_release_parameter_providers(out_providers);

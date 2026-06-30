@@ -52,11 +52,11 @@ typedef struct id4_ideogram4_session_parameter_scopes_t {
   iree_string_view_t qwen;
   // Scope containing conditioned Ideogram 4 DiT weights.
   iree_string_view_t dit_conditioned;
-  // Scope containing conditioned FP8 e4m3 Ideogram 4 DiT source weights.
+  // Scope containing conditioned FP8 e4m3 Ideogram 4 DiT weights.
   iree_string_view_t dit_conditioned_fp8;
   // Scope containing unconditioned Ideogram 4 DiT weights.
   iree_string_view_t dit_unconditioned;
-  // Scope containing unconditioned FP8 e4m3 Ideogram 4 DiT source weights.
+  // Scope containing unconditioned FP8 e4m3 Ideogram 4 DiT weights.
   iree_string_view_t dit_unconditioned_fp8;
   // Scope containing VAE weights.
   iree_string_view_t vae;

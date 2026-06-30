@@ -756,9 +756,9 @@ TEST_F(SessionTest, PlansFp8E4m3DitSources) {
       ShortFullRequestJson(), iree_allocator_system(), &request.value));
 
   id4_ideogram4_session_create_options_t create_options = CreateOptions();
-  create_options.parameter_scopes.dit_conditioned = IREE_SV("dit_cond");
+  create_options.parameter_scopes.dit_conditioned = IREE_SV("dit_cond_fp8");
   create_options.parameter_scopes.dit_conditioned_fp8 = IREE_SV("dit_cond_fp8");
-  create_options.parameter_scopes.dit_unconditioned = IREE_SV("dit_uncond");
+  create_options.parameter_scopes.dit_unconditioned = IREE_SV("dit_uncond_fp8");
   create_options.parameter_scopes.dit_unconditioned_fp8 =
       IREE_SV("dit_uncond_fp8");
   create_options.dit_parameter_format =
