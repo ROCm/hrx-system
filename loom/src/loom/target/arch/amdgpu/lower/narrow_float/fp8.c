@@ -2687,9 +2687,6 @@ iree_string_view_t loom_amdgpu_fp8_packed_bf16_repair_reason_key(
     loom_amdgpu_fp8_packed_bf16_repairs_t repairs) {
   IREE_ASSERT_LT(repairs,
                  IREE_ARRAYSIZE(kLoomAmdgpuFp8PackedBf16RepairReasons));
-  if (repairs >= IREE_ARRAYSIZE(kLoomAmdgpuFp8PackedBf16RepairReasons)) {
-    return IREE_SV("fp8_packed_bf16_decode_invalid_repair");
-  }
   return kLoomAmdgpuFp8PackedBf16RepairReasons[repairs];
 }
 
