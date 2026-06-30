@@ -1360,6 +1360,107 @@ check.case public @id4_vae_conv3x3_bias_add_bf16_wmma_oc64_flux2_mid_block_shape
   check.return
 }
 
+check.case public @id4_vae_conv3x3_bias_bf16_wmma_flux2_mid_block_shape_case {
+  %input = check.generate.fill value(1.0) : tensor<128x128x512x1xbf16>
+  %weight = check.generate.fill value(0.0) : tensor<512x3x3x512xbf16>
+  %bias = check.generate.fill value(0.0) : tensor<512xbf16>
+  %output = check.generate.fill value(1.0) : tensor<128x128x512x1xbf16>
+  %expected = check.generate.fill value(0.0) : tensor<128x128x512x1xbf16>
+  func.call @id4_vae_conv3x3_bias_bf16_wmma(%input, %weight, %bias, %output) : (tensor<128x128x512x1xbf16>, tensor<512x3x3x512xbf16>, tensor<512xbf16>, tensor<128x128x512x1xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<128x128x512x1xbf16>
+  check.return
+}
+
+check.case public @id4_vae_conv3x3_bias_bf16_wmma_flux2_128_decode_16x16_512x512_shape_case {
+  %input = check.generate.fill value(1.0) : tensor<16x16x512x1xbf16>
+  %weight = check.generate.fill value(0.0) : tensor<512x3x3x512xbf16>
+  %bias = check.generate.fill value(0.0) : tensor<512xbf16>
+  %output = check.generate.fill value(1.0) : tensor<16x16x512x1xbf16>
+  %expected = check.generate.fill value(0.0) : tensor<16x16x512x1xbf16>
+  func.call @id4_vae_conv3x3_bias_bf16_wmma(%input, %weight, %bias, %output) : (tensor<16x16x512x1xbf16>, tensor<512x3x3x512xbf16>, tensor<512xbf16>, tensor<16x16x512x1xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<16x16x512x1xbf16>
+  check.return
+}
+
+check.case public @id4_vae_conv3x3_bias_bf16_wmma_flux2_128_decode_32x32_512x512_shape_case {
+  %input = check.generate.fill value(1.0) : tensor<32x32x512x1xbf16>
+  %weight = check.generate.fill value(0.0) : tensor<512x3x3x512xbf16>
+  %bias = check.generate.fill value(0.0) : tensor<512xbf16>
+  %output = check.generate.fill value(1.0) : tensor<32x32x512x1xbf16>
+  %expected = check.generate.fill value(0.0) : tensor<32x32x512x1xbf16>
+  func.call @id4_vae_conv3x3_bias_bf16_wmma(%input, %weight, %bias, %output) : (tensor<32x32x512x1xbf16>, tensor<512x3x3x512xbf16>, tensor<512xbf16>, tensor<32x32x512x1xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<32x32x512x1xbf16>
+  check.return
+}
+
+check.case public @id4_vae_conv3x3_bias_bf16_wmma_flux2_128_decode_64x64_512x256_shape_case {
+  %input = check.generate.fill value(1.0) : tensor<64x64x512x1xbf16>
+  %weight = check.generate.fill value(0.0) : tensor<512x3x3x256xbf16>
+  %bias = check.generate.fill value(0.0) : tensor<256xbf16>
+  %output = check.generate.fill value(1.0) : tensor<64x64x256x1xbf16>
+  %expected = check.generate.fill value(0.0) : tensor<64x64x256x1xbf16>
+  func.call @id4_vae_conv3x3_bias_bf16_wmma(%input, %weight, %bias, %output) : (tensor<64x64x512x1xbf16>, tensor<512x3x3x256xbf16>, tensor<256xbf16>, tensor<64x64x256x1xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<64x64x256x1xbf16>
+  check.return
+}
+
+check.case public @id4_vae_conv3x3_bias_bf16_wmma_oc64_flux2_128_decode_16x16_512x512_shape_case {
+  %input = check.generate.fill value(1.0) : tensor<16x16x512x1xbf16>
+  %weight = check.generate.fill value(0.0) : tensor<512x3x3x512xbf16>
+  %bias = check.generate.fill value(0.0) : tensor<512xbf16>
+  %output = check.generate.fill value(1.0) : tensor<16x16x512x1xbf16>
+  %expected = check.generate.fill value(0.0) : tensor<16x16x512x1xbf16>
+  func.call @id4_vae_conv3x3_bias_bf16_wmma_oc64(%input, %weight, %bias, %output) : (tensor<16x16x512x1xbf16>, tensor<512x3x3x512xbf16>, tensor<512xbf16>, tensor<16x16x512x1xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<16x16x512x1xbf16>
+  check.return
+}
+
+check.case public @id4_vae_conv3x3_bias_bf16_wmma_oc64_flux2_128_decode_32x32_512x512_shape_case {
+  %input = check.generate.fill value(1.0) : tensor<32x32x512x1xbf16>
+  %weight = check.generate.fill value(0.0) : tensor<512x3x3x512xbf16>
+  %bias = check.generate.fill value(0.0) : tensor<512xbf16>
+  %output = check.generate.fill value(1.0) : tensor<32x32x512x1xbf16>
+  %expected = check.generate.fill value(0.0) : tensor<32x32x512x1xbf16>
+  func.call @id4_vae_conv3x3_bias_bf16_wmma_oc64(%input, %weight, %bias, %output) : (tensor<32x32x512x1xbf16>, tensor<512x3x3x512xbf16>, tensor<512xbf16>, tensor<32x32x512x1xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<32x32x512x1xbf16>
+  check.return
+}
+
+check.case public @id4_vae_conv3x3_bias_bf16_wmma_oc64_flux2_128_decode_64x64_512x256_shape_case {
+  %input = check.generate.fill value(1.0) : tensor<64x64x512x1xbf16>
+  %weight = check.generate.fill value(0.0) : tensor<512x3x3x256xbf16>
+  %bias = check.generate.fill value(0.0) : tensor<256xbf16>
+  %output = check.generate.fill value(1.0) : tensor<64x64x256x1xbf16>
+  %expected = check.generate.fill value(0.0) : tensor<64x64x256x1xbf16>
+  func.call @id4_vae_conv3x3_bias_bf16_wmma_oc64(%input, %weight, %bias, %output) : (tensor<64x64x512x1xbf16>, tensor<512x3x3x256xbf16>, tensor<256xbf16>, tensor<64x64x256x1xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<64x64x256x1xbf16>
+  check.return
+}
+
+check.case public @id4_vae_conv3x3_bias_add_bf16_wmma_oc64_flux2_128_decode_16x16_512x512_shape_case {
+  %input = check.generate.fill value(1.0) : tensor<16x16x512x1xbf16>
+  %weight = check.generate.fill value(0.0) : tensor<512x3x3x512xbf16>
+  %bias = check.generate.fill value(0.0) : tensor<512xbf16>
+  %shortcut = check.generate.fill value(3.0) : tensor<16x16x512x1xbf16>
+  %output = check.generate.fill value(0.0) : tensor<16x16x512x1xbf16>
+  %expected = check.generate.fill value(3.0) : tensor<16x16x512x1xbf16>
+  func.call @id4_vae_conv3x3_bias_add_bf16_wmma_oc64(%input, %weight, %bias, %shortcut, %output) : (tensor<16x16x512x1xbf16>, tensor<512x3x3x512xbf16>, tensor<512xbf16>, tensor<16x16x512x1xbf16>, tensor<16x16x512x1xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<16x16x512x1xbf16>
+  check.return
+}
+
+check.case public @id4_vae_conv3x3_bias_add_bf16_wmma_oc64_flux2_128_decode_32x32_512x512_shape_case {
+  %input = check.generate.fill value(1.0) : tensor<32x32x512x1xbf16>
+  %weight = check.generate.fill value(0.0) : tensor<512x3x3x512xbf16>
+  %bias = check.generate.fill value(0.0) : tensor<512xbf16>
+  %shortcut = check.generate.fill value(3.0) : tensor<32x32x512x1xbf16>
+  %output = check.generate.fill value(0.0) : tensor<32x32x512x1xbf16>
+  %expected = check.generate.fill value(3.0) : tensor<32x32x512x1xbf16>
+  func.call @id4_vae_conv3x3_bias_add_bf16_wmma_oc64(%input, %weight, %bias, %shortcut, %output) : (tensor<32x32x512x1xbf16>, tensor<512x3x3x512xbf16>, tensor<512xbf16>, tensor<32x32x512x1xbf16>, tensor<32x32x512x1xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<32x32x512x1xbf16>
+  check.return
+}
+
 check.case public @id4_vae_conv3x3_bias_bf16_wmma_matches_scalar_flux2_conv_in_shape_case {
   %input = check.generate.iota offset(-1.0) step(3.814697265625e-06) : tensor<128x128x32x1xbf16>
   %weight = check.generate.iota offset(-0.0625) step(9.5367431640625e-07) : tensor<32x3x3x512xbf16>
@@ -1407,5 +1508,23 @@ check.benchmark<@id4_vae_conv3x3_bias_bf16_wmma_oc64_flux2_conv_in_shape_case> @
 check.benchmark<@id4_vae_conv3x3_bias_bf16_wmma_oc64_flux2_mid_block_shape_case> @id4_vae_conv3x3_bias_bf16_wmma_oc64_flux2_mid_block_shape
 
 check.benchmark<@id4_vae_conv3x3_bias_add_bf16_wmma_oc64_flux2_mid_block_shape_case> @id4_vae_conv3x3_bias_add_bf16_wmma_oc64_flux2_mid_block_shape
+
+check.benchmark<@id4_vae_conv3x3_bias_bf16_wmma_flux2_mid_block_shape_case> @id4_vae_conv3x3_bias_bf16_wmma_flux2_mid_block_shape
+
+check.benchmark<@id4_vae_conv3x3_bias_bf16_wmma_flux2_128_decode_16x16_512x512_shape_case> @id4_vae_conv3x3_bias_bf16_wmma_flux2_128_decode_16x16_512x512_shape
+
+check.benchmark<@id4_vae_conv3x3_bias_bf16_wmma_flux2_128_decode_32x32_512x512_shape_case> @id4_vae_conv3x3_bias_bf16_wmma_flux2_128_decode_32x32_512x512_shape
+
+check.benchmark<@id4_vae_conv3x3_bias_bf16_wmma_flux2_128_decode_64x64_512x256_shape_case> @id4_vae_conv3x3_bias_bf16_wmma_flux2_128_decode_64x64_512x256_shape
+
+check.benchmark<@id4_vae_conv3x3_bias_bf16_wmma_oc64_flux2_128_decode_16x16_512x512_shape_case> @id4_vae_conv3x3_bias_bf16_wmma_oc64_flux2_128_decode_16x16_512x512_shape
+
+check.benchmark<@id4_vae_conv3x3_bias_bf16_wmma_oc64_flux2_128_decode_32x32_512x512_shape_case> @id4_vae_conv3x3_bias_bf16_wmma_oc64_flux2_128_decode_32x32_512x512_shape
+
+check.benchmark<@id4_vae_conv3x3_bias_bf16_wmma_oc64_flux2_128_decode_64x64_512x256_shape_case> @id4_vae_conv3x3_bias_bf16_wmma_oc64_flux2_128_decode_64x64_512x256_shape
+
+check.benchmark<@id4_vae_conv3x3_bias_add_bf16_wmma_oc64_flux2_128_decode_16x16_512x512_shape_case> @id4_vae_conv3x3_bias_add_bf16_wmma_oc64_flux2_128_decode_16x16_512x512_shape
+
+check.benchmark<@id4_vae_conv3x3_bias_add_bf16_wmma_oc64_flux2_128_decode_32x32_512x512_shape_case> @id4_vae_conv3x3_bias_add_bf16_wmma_oc64_flux2_128_decode_32x32_512x512_shape
 
 check.benchmark<@id4_vae_conv3x3_bias_bf16_wmma_matches_scalar_flux2_conv_in_shape_case> @id4_vae_conv3x3_bias_bf16_wmma_matches_scalar_flux2_conv_in_shape

@@ -1454,10 +1454,15 @@ static iree_status_t id4_vae_program_author_conv3x3_bias_bf16(
   IREE_RETURN_IF_ERROR(id4_vae_program_build_conv3x3_bias_configs(
       width, height, input_channel_count, output_channel_count, batch_count,
       output_element_count, &config_list));
-  const bool use_wmma_oc64 =
-      output_channel_count >= 64 && output_channel_count % 64 == 0;
   const bool use_wmma =
       output_channel_count >= 32 && output_channel_count % 32 == 0;
+  const uint64_t spatial_element_count = (uint64_t)width * height * batch_count;
+  // The OC32 WMMA path has lower register pressure and wins on small VAE
+  // decode tiles; OC64 remains faster for the full mid-block tile.
+  const bool use_small_spatial_wmma = spatial_element_count <= 64ull * 64ull;
+  const bool use_wmma_oc64 = !use_small_spatial_wmma &&
+                             output_channel_count >= 64 &&
+                             output_channel_count % 64 == 0;
   if (!use_wmma) {
     IREE_RETURN_IF_ERROR(id4_vae_program_add_conv3x3_bias_output_tile_configs(
         output_channel_count, 16, output_element_count, &config_list));
