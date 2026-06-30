@@ -1143,6 +1143,8 @@ typedef struct loom_amdgpu_fragment_memory_plan_t {
   loom_amdgpu_fragment_memory_payload_form_t payload_form;
   // Optional f32 fragment source to round directly for narrowed stores.
   loom_value_id_t narrowed_result_round_source;
+  // Optional scalar scale applied before narrowed f32-to-bf16 stores.
+  loom_value_id_t narrowed_result_scale_source;
 } loom_amdgpu_fragment_memory_plan_t;
 
 #define LOOM_AMDGPU_EXPLICIT_PACKET_IMMEDIATE_CAPACITY 4

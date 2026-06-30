@@ -2877,8 +2877,43 @@ LOOM_VECTOR_FLOAT_BINARY_FACTS(loom_vector_addf_facts, loom_vector_add_f32,
                                loom_vector_add_f64)
 LOOM_VECTOR_FLOAT_BINARY_FACTS(loom_vector_subf_facts, loom_vector_sub_f32,
                                loom_vector_sub_f64)
-LOOM_VECTOR_FLOAT_BINARY_FACTS(loom_vector_mulf_facts, loom_vector_mul_f32,
-                               loom_vector_mul_f64)
+
+static iree_status_t loom_vector_try_define_uniform_scale_origin(
+    loom_fact_context_t* context, const loom_module_t* module,
+    loom_value_id_t result, loom_value_id_t source, loom_value_id_t scale) {
+  if (context == NULL || context->table == NULL || module == NULL) {
+    return iree_ok_status();
+  }
+  loom_value_id_t scalar_scale = LOOM_VALUE_ID_INVALID;
+  if (!loom_value_fact_table_query_uniform_element_origin(
+          context->table, module, scale, &scalar_scale)) {
+    return iree_ok_status();
+  }
+  return loom_value_fact_table_define_uniform_scale_origin(
+      context->table, result,
+      (loom_value_fact_uniform_scale_origin_t){
+          .source_value_id = source,
+          .scale_value_id = scalar_scale,
+      });
+}
+
+iree_status_t loom_vector_mulf_facts(loom_fact_context_t* context,
+                                     const loom_module_t* module,
+                                     const loom_op_t* op,
+                                     const loom_value_facts_t* operand_facts,
+                                     loom_value_facts_t* result_facts) {
+  IREE_RETURN_IF_ERROR(loom_vector_float_binary_math_summary_facts(
+      context, loom_vector_result_element_type(module, op), operand_facts,
+      result_facts, loom_vector_mul_f32, loom_vector_mul_f64));
+  const loom_value_id_t lhs = loom_vector_mulf_lhs(op);
+  const loom_value_id_t rhs = loom_vector_mulf_rhs(op);
+  const loom_value_id_t result = loom_vector_mulf_result(op);
+  IREE_RETURN_IF_ERROR(loom_vector_try_define_uniform_scale_origin(
+      context, module, result, lhs, rhs));
+  return loom_vector_try_define_uniform_scale_origin(context, module, result,
+                                                     rhs, lhs);
+}
+
 LOOM_VECTOR_FLOAT_BINARY_FACTS(loom_vector_divf_facts, loom_vector_div_f32,
                                loom_vector_div_f64)
 LOOM_VECTOR_FLOAT_BINARY_FACTS(loom_vector_remf_facts, fmodf, fmod)
