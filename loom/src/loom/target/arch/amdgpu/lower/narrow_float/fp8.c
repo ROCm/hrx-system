@@ -2912,31 +2912,3 @@ iree_status_t loom_amdgpu_try_emit_fp8_not_subnormal_to_f32_lane(
       /*infinity_magnitude_bits=*/0x7F800000, vgpr_type, mask_type, out_lane));
   return iree_ok_status();
 }
-
-iree_status_t loom_amdgpu_emit_packed_bf16_pair(
-    loom_low_lower_context_t* context, const loom_op_t* source_op,
-    const loom_amdgpu_fp8_decode_plan_t* plan, loom_value_id_t low_element,
-    loom_value_id_t high_element, loom_type_t vgpr_type,
-    loom_value_id_t* out_low_packet) {
-  *out_low_packet = LOOM_VALUE_ID_INVALID;
-  if (iree_any_bit_set(plan->flags,
-                       LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_PACK_U16)) {
-    const loom_value_id_t operands[] = {low_element, high_element};
-    loom_op_t* low_op = NULL;
-    IREE_RETURN_IF_ERROR(loom_low_lower_emit_resolved_descriptor_op(
-        context, &plan->pack_u16_descriptor, operands, IREE_ARRAYSIZE(operands),
-        loom_named_attr_slice_empty(), &vgpr_type, 1,
-        /*tied_results=*/NULL, /*tied_result_count=*/0, source_op->location,
-        &low_op));
-    *out_low_packet = loom_value_slice_get(loom_low_op_results(low_op), 0);
-    return iree_ok_status();
-  }
-
-  loom_value_id_t high_bits = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_shift(
-      context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_LSHLREV_B32_LIT, 16,
-      high_element, vgpr_type, &high_bits));
-  return loom_amdgpu_emit_vgpr_binary(
-      context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_OR_B32, low_element,
-      high_bits, vgpr_type, out_low_packet);
-}
