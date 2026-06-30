@@ -182,6 +182,8 @@ typedef struct loom_amdgpu_fp8_packed_u16_pair_source_t {
   loom_value_id_t source_register;
   // First FP8 byte offset within source_register.
   uint32_t byte_offset;
+  // Number of live result lanes consumed from the source pair.
+  uint32_t live_lane_count;
 } loom_amdgpu_fp8_packed_u16_pair_source_t;
 
 // Returns the native unscaled FP8/BF8 conversion descriptor refs for the source

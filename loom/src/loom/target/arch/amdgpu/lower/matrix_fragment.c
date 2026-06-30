@@ -3703,6 +3703,7 @@ loom_amdgpu_try_emit_fragment_memory_fp8_to_packed_bf16_packet(
         (loom_amdgpu_fp8_packed_u16_pair_source_t){
             .source_register = source_registers[source_register_index],
             .byte_offset = byte_index & 3u,
+            .live_lane_count = 2u,
         };
   }
 
