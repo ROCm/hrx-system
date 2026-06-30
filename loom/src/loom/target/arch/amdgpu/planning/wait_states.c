@@ -189,6 +189,8 @@ typedef struct loom_amdgpu_wait_state_builder_t {
   loom_amdgpu_wait_state_sgpr_t* sgprs;
   // Number of entries in |sgprs|.
   iree_host_size_t sgpr_count;
+  // Recent ALU producer state for the physical SCC condition register.
+  loom_amdgpu_delay_alu_info_t scc_delay_alu;
   // Output wait-state rows.
   loom_amdgpu_wait_state_t* states;
   // Number of populated output wait-state rows.
@@ -301,6 +303,15 @@ static bool loom_amdgpu_wait_state_assignment_is_physical_sgpr(
   }
   return loom_low_allocation_assignment_is_physical_register_class(
       assignment, LOOM_AMDGPU_REG_CLASS_ID_SGPR);
+}
+
+static bool loom_amdgpu_wait_state_assignment_is_physical_scc(
+    const loom_low_allocation_assignment_t* assignment) {
+  if (assignment == NULL) {
+    return false;
+  }
+  return loom_low_allocation_assignment_is_physical_register_class(
+      assignment, LOOM_AMDGPU_REG_CLASS_ID_SCC);
 }
 
 static bool loom_amdgpu_wait_state_assignments_match(
@@ -658,6 +669,16 @@ static loom_amdgpu_delay_alu_type_t loom_amdgpu_wait_state_delay_alu_type(
     return LOOM_AMDGPU_DELAY_ALU_TYPE_SALU;
   }
   return LOOM_AMDGPU_DELAY_ALU_TYPE_OTHER;
+}
+
+static loom_amdgpu_delay_alu_type_t
+loom_amdgpu_wait_state_structural_delay_alu_type(
+    const loom_amdgpu_wait_state_builder_t* builder, const loom_op_t* op) {
+  if (!builder->has_delay_alu) {
+    return LOOM_AMDGPU_DELAY_ALU_TYPE_OTHER;
+  }
+  return loom_low_cond_br_isa(op) ? LOOM_AMDGPU_DELAY_ALU_TYPE_SALU
+                                  : LOOM_AMDGPU_DELAY_ALU_TYPE_OTHER;
 }
 
 static uint16_t loom_amdgpu_wait_state_descriptor_latency_cycles(
@@ -1401,6 +1422,7 @@ static void loom_amdgpu_wait_state_delay_alu_clear_all(
   for (iree_host_size_t i = 0; i < builder->sgpr_count; ++i) {
     builder->sgprs[i].delay_alu = (loom_amdgpu_delay_alu_info_t){0};
   }
+  builder->scc_delay_alu = (loom_amdgpu_delay_alu_info_t){0};
 }
 
 static void loom_amdgpu_wait_state_delay_alu_advance_counters(
@@ -1428,6 +1450,12 @@ static void loom_amdgpu_wait_state_delay_alu_match_assignment(
     const loom_low_allocation_assignment_t* assignment,
     loom_amdgpu_delay_alu_info_t* info) {
   if (assignment == NULL) {
+    return;
+  }
+  if (loom_amdgpu_wait_state_assignment_is_physical_scc(assignment)) {
+    loom_amdgpu_wait_state_delay_alu_merge_info(builder, info,
+                                                &builder->scc_delay_alu);
+    builder->scc_delay_alu = (loom_amdgpu_delay_alu_info_t){0};
     return;
   }
   uint64_t end = 0;
@@ -1488,6 +1516,10 @@ static void loom_amdgpu_wait_state_delay_alu_record_assignment(
   const loom_amdgpu_delay_alu_info_t info =
       loom_amdgpu_wait_state_delay_alu_make_info(builder, type, latency_cycles,
                                                  producer_node);
+  if (loom_amdgpu_wait_state_assignment_is_physical_scc(assignment)) {
+    builder->scc_delay_alu = info;
+    return;
+  }
   uint64_t end = 0;
   if (!loom_low_allocation_assignment_location_exclusive_end(assignment,
                                                              &end)) {
@@ -1851,9 +1883,13 @@ static iree_status_t loom_amdgpu_wait_state_apply_packet(
       loom_amdgpu_wait_state_descriptor_uses_vector_memory(builder,
                                                            packet->descriptor);
   const loom_amdgpu_delay_alu_type_t delay_alu_type =
-      loom_amdgpu_wait_state_delay_alu_type(builder, packet->descriptor);
+      packet->descriptor != NULL
+          ? loom_amdgpu_wait_state_delay_alu_type(builder, packet->descriptor)
+          : loom_amdgpu_wait_state_structural_delay_alu_type(builder,
+                                                             packet->node->op);
   const uint16_t delay_alu_latency_cycles =
-      delay_alu_type == LOOM_AMDGPU_DELAY_ALU_TYPE_OTHER
+      delay_alu_type == LOOM_AMDGPU_DELAY_ALU_TYPE_OTHER ||
+              packet->descriptor == NULL
           ? 0
           : loom_amdgpu_wait_state_delay_alu_latency_cycles(
                 delay_alu_type,

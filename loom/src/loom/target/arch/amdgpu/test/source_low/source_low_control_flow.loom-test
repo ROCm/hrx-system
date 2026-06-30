@@ -285,6 +285,7 @@ low.func.def target(@target) @uniform_branch_condition_combined_with_lane_mask_a
   s_mov_b32 s7, 1
   s_cselect_b32 s10, s7, s6
   s_cmp_lt_i32 s0, s1
+  s_delay_alu instid0(SALU_CYCLE_1)
   s_cselect_b32 s0, s7, s6
   s_and_b32 s0, s10, s0
   s_cmp_lg_i32 s0, s6
@@ -293,6 +294,7 @@ low.func.def target(@target) @uniform_branch_condition_combined_with_lane_mask_a
   s_cselect_b32 s11, s11, s6
   s_and_b64 s[8:9], s[8:9], s[10:11]
   s_cmp_lg_i32 s0, s6
+  s_delay_alu instid0(SALU_CYCLE_1)
   s_cbranch_scc0 .Lbb2
 .Lbb1:
   s_branch .Lbb3

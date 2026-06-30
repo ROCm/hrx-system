@@ -32,10 +32,12 @@ from loom.target.arch.amdgpu.descriptors import (
     _REG_PART_VGPR_HIGH16,
     _REG_PART_VGPR_LOW16,
     _REG_VCC,
+    _RESOURCE_SALU,
     _RESOURCE_VALU,
     _SCHEDULE_MODE_CONTROL,
     _SCHEDULE_PACKED_DOT,
     _SCHEDULE_SALU,
+    _SCHEDULE_SALU_COMPARE,
     _SCHEDULE_SMEM_STORE,
     _SCHEDULE_VALU,
     _SCHEDULE_VMEM_LOAD,
@@ -281,6 +283,38 @@ def test_packed_dot_schedule_class_models_valu_latency() -> None:
         assert tuple(schedule_class.issue_uses) == (
             IssueUse(_RESOURCE_VALU, cycles=1, units=1),
         )
+
+
+def test_scalar_compare_schedule_class_models_scc_branch_latency() -> None:
+    for descriptor_set in _amdgpu_core_descriptor_set_bases():
+        schedule_classes = {
+            schedule_class.name: schedule_class
+            for schedule_class in descriptor_set.schedule_classes
+        }
+
+        schedule_class = schedule_classes[_SCHEDULE_SALU_COMPARE]
+        assert schedule_class.latency_kind is LatencyKind.ESTIMATE
+        assert schedule_class.latency_cycles == 2
+        assert tuple(schedule_class.issue_uses) == (
+            IssueUse(_RESOURCE_SALU, cycles=1, units=1),
+        )
+
+
+def test_scalar_compare_descriptors_use_scc_branch_schedule_class() -> None:
+    for descriptor_set in (
+        _gfx940_core_overlays(),
+        _gfx950_core_overlays(),
+        _gfx11_core_overlays(),
+        _gfx117x_core_overlays(),
+        _gfx12_core_overlays(),
+        _gfx1250_core_overlays(),
+    ):
+        descriptors = {
+            descriptor.descriptor_key: descriptor for descriptor in descriptor_set
+        }
+        for descriptor_key, descriptor in descriptors.items():
+            if descriptor_key.startswith("amdgpu.s_cmp_"):
+                assert descriptor.schedule_class == _SCHEDULE_SALU_COMPARE
 
 
 def test_packed_dot_descriptors_use_packed_dot_schedule_class() -> None:

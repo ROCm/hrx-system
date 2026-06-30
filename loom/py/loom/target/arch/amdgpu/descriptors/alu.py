@@ -548,7 +548,7 @@ def _s_cmp_i32_overlay(
         mnemonic=mnemonic,
         encoding_name="ENC_SOPC",
         semantic_tag=semantic_tag,
-        schedule_class=_SCHEDULE_SALU,
+        schedule_class=_SCHEDULE_SALU_COMPARE,
         operands=(
             AmdgpuOperandOverlay("SSRC0", _sgpr_operand("lhs")),
             AmdgpuOperandOverlay("SSRC1", _sgpr_operand("rhs")),
@@ -573,7 +573,7 @@ def _s_cmp_u64_overlay(
         mnemonic=mnemonic,
         encoding_name="ENC_SOPC",
         semantic_tag=semantic_tag,
-        schedule_class=_SCHEDULE_SALU,
+        schedule_class=_SCHEDULE_SALU_COMPARE,
         operands=(
             AmdgpuOperandOverlay("SSRC0", _sgpr_operand("lhs", units=2)),
             AmdgpuOperandOverlay("SSRC1", _sgpr_operand("rhs", units=2)),
@@ -605,7 +605,7 @@ def _s_cmp_u64_src1_inline_overlay(
         mnemonic=mnemonic,
         encoding_name="ENC_SOPC",
         semantic_tag=semantic_tag,
-        schedule_class=_SCHEDULE_SALU,
+        schedule_class=_SCHEDULE_SALU_COMPARE,
         operands=(AmdgpuOperandOverlay("SSRC0", _sgpr_operand("lhs", units=2)),),
         implicit_operands=(_scc_output(_scc_result()),),
         asm_forms=_asm(
