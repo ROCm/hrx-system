@@ -217,12 +217,12 @@ low.func.def target(@target) abi(hal_kernel) @uniform_branch_condition_combined_
   %31 = s_cselect_b32 %30, %zero, %x_lower
   %32 = s_cselect_b32 %30, %zero, %x_upper
   %x_ok = s_and_b32 %31, %32
-  %35 = s_cmp_lg_i32 %x_ok, %zero
-  %36 = s_mov_b64_exec_read
-  %37 = slice %36[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %38 = slice %36[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %39 = s_cselect_b32 %37, %zero, %35
-  %40 = s_cselect_b32 %38, %zero, %35
+  %34 = s_cmp_lg_i32_src1_inline %x_ok {rhs = 0}
+  %35 = s_mov_b64_exec_read
+  %36 = slice %35[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %37 = slice %35[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %39 = s_cselect_b32 %36, %zero, %34
+  %40 = s_cselect_b32 %37, %zero, %34
   %41 = concat(%39, %40) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
   %combined = s_and_b64 %lane_ok, %41
   %44 = s_cmp_lg_i32 %x_ok, %zero

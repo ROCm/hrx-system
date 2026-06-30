@@ -541,7 +541,17 @@ def _s_cmp_i32_overlay(
     instruction_name: str,
     mnemonic: str,
     semantic_tag: str,
+    src1_inline_descriptor_key: str | None = None,
 ) -> AmdgpuDescriptorOverlay:
+    operand_forms: tuple[OperandForm, ...] = ()
+    if src1_inline_descriptor_key is not None:
+        operand_forms = (
+            _literal_operand_form(
+                replacement_descriptor=src1_inline_descriptor_key,
+                source_operand="rhs",
+                immediate_field="rhs",
+            ),
+        )
     return AmdgpuDescriptorOverlay(
         descriptor_key=descriptor_key,
         instruction_name=instruction_name,
@@ -555,6 +565,37 @@ def _s_cmp_i32_overlay(
         ),
         implicit_operands=(_scc_output(_scc_result()),),
         asm_forms=_asm(results=("scc",), operands=("lhs", "rhs")),
+        operand_forms=operand_forms,
+        constraints=(Constraint(ConstraintKind.REMATERIALIZABLE, 0),),
+        flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    )
+
+
+def _s_cmp_i32_src1_inline_overlay(
+    *,
+    descriptor_key: str,
+    instruction_name: str,
+    mnemonic: str,
+    semantic_tag: str,
+) -> AmdgpuDescriptorOverlay:
+    return AmdgpuDescriptorOverlay(
+        descriptor_key=f"{descriptor_key}.src1_inline",
+        instruction_name=instruction_name,
+        mnemonic=mnemonic,
+        encoding_name="ENC_SOPC",
+        semantic_tag=semantic_tag,
+        schedule_class=_SCHEDULE_SALU_COMPARE,
+        operands=(AmdgpuOperandOverlay("SSRC0", _sgpr_operand("lhs")),),
+        implicit_operands=(_scc_output(_scc_result()),),
+        asm_forms=_asm(
+            mnemonic=f"{mnemonic}_src1_inline",
+            results=("scc",),
+            operands=("lhs",),
+            immediates=("rhs",),
+            named_immediates=True,
+        ),
+        immediate_fields=("SSRC1",),
+        immediates=(replace(_SOURCE_INLINE_U32_IMMEDIATE, field_name="rhs"),),
         constraints=(Constraint(ConstraintKind.REMATERIALIZABLE, 0),),
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     )
@@ -1302,6 +1343,13 @@ def _s_cmp_i32_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
             semantic_tag="integer.compare.eq.i32",
         ),
         _s_cmp_i32_overlay(
+            descriptor_key="amdgpu.s_cmp_lg_i32",
+            instruction_name="S_CMP_LG_I32",
+            mnemonic="s_cmp_lg_i32",
+            semantic_tag="integer.compare.ne.i32",
+            src1_inline_descriptor_key="amdgpu.s_cmp_lg_i32.src1_inline",
+        ),
+        _s_cmp_i32_src1_inline_overlay(
             descriptor_key="amdgpu.s_cmp_lg_i32",
             instruction_name="S_CMP_LG_I32",
             mnemonic="s_cmp_lg_i32",
