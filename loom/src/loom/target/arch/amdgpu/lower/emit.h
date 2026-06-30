@@ -251,6 +251,25 @@ iree_status_t loom_amdgpu_emit_sgpr64_constant_u64(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     uint64_t value, loom_value_id_t* out_low_wide_value);
 
+// Emits SCC true when any active lane in an EXEC-width SGPRx2 lane mask is set.
+//
+// Wave64 compares the full SGPR pair. Wave32 VOPC producers define the low
+// half and may leave the high half unspecified, so this compares only the
+// defined low half.
+iree_status_t loom_amdgpu_emit_lane_mask_nonzero_scc(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_value_id_t low_mask, uint32_t wavefront_size,
+    loom_value_id_t* out_low_scc);
+
+// Emits SCC true when two EXEC-width SGPRx2 lane masks are equal.
+//
+// Wave64 compares the full SGPR pairs. Wave32 compares the defined low halves
+// and ignores unspecified high halves.
+iree_status_t loom_amdgpu_emit_lane_mask_equal_scc(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_value_id_t low_lhs, loom_value_id_t low_rhs, uint32_t wavefront_size,
+    loom_value_id_t* out_low_scc);
+
 // Emits an SGPR x2 add using the target carry-chain instructions.
 iree_status_t loom_amdgpu_emit_sgpr64_add(loom_low_lower_context_t* context,
                                           const loom_op_t* source_op,
