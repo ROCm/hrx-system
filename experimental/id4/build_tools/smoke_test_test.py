@@ -209,6 +209,9 @@ class Id4SmokeTestTest(unittest.TestCase):
         self.assertIn("--dit_feed_forward_implementation=fused_product", command)
         self.assertIn("--generation_residency=issue_phases", command)
         self.assertIn("--generation_issue_mode=full", command)
+        self.assertIn("--dit_fp8_source_residency=disabled", command)
+        self.assertIn("--dit_fp8_source_cache_budget_mib=0", command)
+        self.assertIn("--dit_fp8_source_cache_miss_mode=retain", command)
         self.assertIn("--vae_tiling_mode=memory_budget", command)
         self.assertIn("--vae_memory_budget=536870912", command)
         self.assertIn("--vae_overlap=0.5", command)
@@ -256,6 +259,32 @@ class Id4SmokeTestTest(unittest.TestCase):
         self.assertIn("--generation_residency=selected_stage_bundles", command)
         self.assertIn("--generation_issue_mode=phases", command)
         self.assertIn("--generation_resident_stage_bundles=dit_conditioned", command)
+
+    def test_build_id4_command_routes_fp8_source_cache_policy(self):
+        args = self.smoke_test.parse_arguments(
+            [
+                "--output_dir=out",
+                "--id4_binary=bin/id4",
+                "--device=amdgpu",
+                "--tokenizer=tokenizer.json",
+                "--parameters=qwen=qwen.safetensors",
+                "--generation_residency=selected_stage_bundles",
+                "--generation_issue_mode=stage_serial",
+                "--generation_resident_stage_bundles=qwen",
+                "--dit_fp8_source_residency=all",
+                "--dit_fp8_source_cache_budget_mib=6144",
+                "--dit_fp8_source_cache_miss_mode=direct_on_pressure",
+            ]
+        )
+
+        command = self.smoke_test.build_id4_command(args, Path("artifacts"))
+
+        self.assertIn("--generation_residency=selected_stage_bundles", command)
+        self.assertIn("--generation_issue_mode=stage_serial", command)
+        self.assertIn("--generation_resident_stage_bundles=qwen", command)
+        self.assertIn("--dit_fp8_source_residency=all", command)
+        self.assertIn("--dit_fp8_source_cache_budget_mib=6144", command)
+        self.assertIn("--dit_fp8_source_cache_miss_mode=direct_on_pressure", command)
 
     def test_build_id4_command_routes_stage_serial_issue_mode(self):
         args = self.smoke_test.parse_arguments(
