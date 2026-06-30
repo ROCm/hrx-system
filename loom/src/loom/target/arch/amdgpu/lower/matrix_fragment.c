@@ -3204,6 +3204,7 @@ loom_amdgpu_fragment_memory_fp8_decode_packet_flags(
   }
   const loom_amdgpu_fp8_packed_bf16_missing_requirements_t target_requirements =
       LOOM_AMDGPU_FP8_PACKED_BF16_MISSING_REQUIREMENT_PERMUTE_PACKET |
+      LOOM_AMDGPU_FP8_PACKED_BF16_MISSING_REQUIREMENT_PACKED_SHIFT_PACKET |
       LOOM_AMDGPU_FP8_PACKED_BF16_MISSING_REQUIREMENT_ZERO_REPAIR_PACKETS;
   if (iree_any_bit_set(missing_requirements, target_requirements)) {
     packet_flags |=
