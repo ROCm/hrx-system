@@ -62,6 +62,9 @@ _AMDGPU_CONTRACT_DESCRIPTOR_OVERLAY_BUILDERS: dict[
     "amdgpu.v_mad_u32_u24.src0_lit": lambda: _v_mad_u32_u24_literal_overlay("src0"),
     "amdgpu.v_mad_u32_u24.src1_lit": lambda: _v_mad_u32_u24_literal_overlay("src1"),
     "amdgpu.v_mad_u32_u24.src2_lit": lambda: _v_mad_u32_u24_literal_overlay("src2"),
+    "amdgpu.v_lshl_add_u32.shift_imm.src2_lit": (
+        _v_lshl_add_u32_shift_immediate_src2_literal_overlay
+    ),
     "amdgpu.v_min_i32": _v_min_i32_overlay,
     "amdgpu.v_max_i32": _v_max_i32_overlay,
     "amdgpu.v_min_u32": _v_min_u32_overlay,

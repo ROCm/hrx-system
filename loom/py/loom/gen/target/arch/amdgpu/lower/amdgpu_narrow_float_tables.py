@@ -118,6 +118,11 @@ _FP8_DECODE_PLAN_DESCRIPTOR_ROWS = (
         "LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_LSHL_ADD_U32_SHIFT_IMM",
     ),
     _Fp8DecodePlanDescriptorRow(
+        "amdgpu.v_lshl_add_u32.shift_imm.src2_lit",
+        "lshl_add_u32_shift_imm_src2_literal_descriptor",
+        "LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_LSHL_ADD_U32_SHIFT_IMM_SRC2_LITERAL",
+    ),
+    _Fp8DecodePlanDescriptorRow(
         "amdgpu.v_perm_b32.src2_lit",
         "perm_b32_src2_literal_descriptor",
         "LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_PERM_B32_SRC2_LITERAL",
