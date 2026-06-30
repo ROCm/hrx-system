@@ -36,7 +36,9 @@ IREE_FLAG(string, prompt_json_file, "",
           "Path to a JSON prompt/configuration payload for one generation.");
 IREE_FLAG(string, output, "", "Output image path.");
 IREE_FLAG(string, dit_parameter_format, "fp8_e4m3",
-          "DiT parameter format: bf16 or fp8_e4m3.");
+          "DiT parameter format: bf16 or fp8_e4m3. fp8_e4m3 currently requires "
+          "--parameters=dit_cond=..., --parameters=dit_uncond=..., and the FP8 "
+          "source scopes below.");
 IREE_FLAG(string, dit_activation_format, "bf16_linear_input",
           "DiT activation format: bf16_linear_input or f32_canonical.");
 IREE_FLAG(string, dit_weight_execution_format, "bf16_resident",
@@ -49,9 +51,11 @@ IREE_FLAG(string, dit_feed_forward_implementation, "fused_product",
           "DiT feed-forward implementation: fused_product or "
           "pytorch_parity.");
 IREE_FLAG(string, dit_conditioned_fp8_scope, "dit_cond_fp8",
-          "Conditioned DiT FP8 e4m3 source parameter scope.");
+          "Conditioned DiT FP8 e4m3 source parameter scope used alongside "
+          "the normal dit_cond scope.");
 IREE_FLAG(string, dit_unconditioned_fp8_scope, "dit_uncond_fp8",
-          "Unconditioned DiT FP8 e4m3 source parameter scope.");
+          "Unconditioned DiT FP8 e4m3 source parameter scope used alongside "
+          "the normal dit_uncond scope.");
 IREE_FLAG(
     string, dit_fp8_source_residency, "disabled",
     "Comma-separated DiT FP8 source providers kept resident after their "

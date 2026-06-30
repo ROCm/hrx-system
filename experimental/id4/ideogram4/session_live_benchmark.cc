@@ -31,7 +31,9 @@ IREE_FLAG(string, id4_request_json_file, "",
 IREE_FLAG(string, id4_plan_output_dir, "",
           "Optional directory receiving generation plan JSON files.");
 IREE_FLAG(string, dit_parameter_format, "fp8_e4m3",
-          "DiT parameter format: bf16 or fp8_e4m3.");
+          "DiT parameter format: bf16 or fp8_e4m3. fp8_e4m3 currently requires "
+          "--parameters=dit_cond=..., --parameters=dit_uncond=..., and the FP8 "
+          "source scopes below.");
 IREE_FLAG(string, dit_activation_format, "bf16_linear_input",
           "DiT activation format: bf16_linear_input or f32_canonical.");
 IREE_FLAG(string, dit_weight_execution_format, "bf16_resident",
@@ -54,9 +56,11 @@ IREE_FLAG(string, generation_resident_stage_bundles, "",
           "sampler_noise, dit_conditioned, dit_unconditioned, "
           "sampler_denoise, decode, or all.");
 IREE_FLAG(string, dit_conditioned_fp8_scope, "dit_cond_fp8",
-          "Conditioned DiT FP8 e4m3 source parameter scope.");
+          "Conditioned DiT FP8 e4m3 source parameter scope used alongside "
+          "the normal dit_cond scope.");
 IREE_FLAG(string, dit_unconditioned_fp8_scope, "dit_uncond_fp8",
-          "Unconditioned DiT FP8 e4m3 source parameter scope.");
+          "Unconditioned DiT FP8 e4m3 source parameter scope used alongside "
+          "the normal dit_uncond scope.");
 IREE_FLAG(
     string, dit_fp8_source_residency, "disabled",
     "Comma-separated DiT FP8 source providers kept resident after their "
