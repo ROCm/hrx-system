@@ -1,7 +1,11 @@
 config.decl @id4.ideogram4.linear_fp8.token_count : %value: index where [range(%value, 1, 131072)]
+
 config.decl @id4.ideogram4.linear_fp8.token_offset : %value: index where [range(%value, 0, 131071)]
+
 config.decl @id4.ideogram4.linear_fp8.dispatch_token_count : %value: index where [range(%value, 1, 131072)]
+
 config.decl @id4.ideogram4.linear_fp8.input_size : %value: index where [range(%value, 1, 131072)]
+
 config.decl @id4.ideogram4.linear_fp8.output_size : %value: index where [range(%value, 1, 131072)]
 
 kernel.def export("id4_ideogram4_linear_fp8_f32") @id4_ideogram4_linear_fp8_f32() {
@@ -43,22 +47,22 @@ kernel.def export("id4_ideogram4_linear_fp8_f32") @id4_ideogram4_linear_fp8_f32(
   %dispatch_token = index.add %base_dispatch_token, %local_token : index
   %token = index.add %token_base_offset, %dispatch_token : index
   %zero_f32 = scalar.constant 0.0 : f32
-
+  %dense_layout = encoding.define #dense : encoding<layout>
+  %fp8_storage_schema = encoding.define #matrix_operand<element_format=f8e4m3, payload_elements=1, payload_registers=1, rounding=finite_only> : encoding<schema>
+  %fp8_storage = encoding.define #physical_storage {layout = %dense_layout : encoding<layout>, schema = %fp8_storage_schema : encoding<schema>} : encoding<storage>
   %input_noalias, %weight_noalias, %scale_noalias, %output_noalias = buffer.assume.noalias %input, %weight, %scale, %output : buffer, buffer, buffer, buffer
   %input_global = buffer.assume.memory_space<global> %input_noalias : buffer
   %weight_global = buffer.assume.memory_space<global> %weight_noalias : buffer
   %scale_global = buffer.assume.memory_space<global> %scale_noalias : buffer
   %output_global = buffer.assume.memory_space<global> %output_noalias : buffer
   %input_view = buffer.view %input_global[%base] : buffer -> view<[%input_size]x[%token_count]xf32, #dense>
-  %weight_view = buffer.view %weight_global[%base] : buffer -> view<[%output_size]x[%input_size]xf8E4M3, #dense>
+  %weight_view = buffer.view %weight_global[%base] : buffer -> view<[%output_size]x[%input_size]xf8E4M3, %fp8_storage>
   %scale_view = buffer.view %scale_global[%base] : buffer -> view<[%output_size]xf32, #dense>
   %output_view = buffer.view %output_global[%base] : buffer -> view<[%output_size]x[%token_count]xf32, #dense>
-
   %scratch_weight = buffer.alloca %scratch_bytes {base_alignment = 16, memory_space = workgroup} : buffer
   %scratch_input = buffer.alloca %scratch_bytes {base_alignment = 16, memory_space = workgroup} : buffer
   %scratch_weight_view = buffer.view %scratch_weight[%base] : buffer -> view<2048xf32, #dense>
   %scratch_input_view = buffer.view %scratch_input[%base] : buffer -> view<2048xf32, #dense>
-
   %dot = scf.for %k_base = [%zero to %input_size step %k_block](%acc = %zero_f32 : f32) -> (f32) {
     scf.for %linear = [%lane to %scratch_tile_elements step %workgroup_size_x] {
       %weight_k_offset = index.rem %linear, %k_block : index
@@ -69,7 +73,7 @@ kernel.def export("id4_ideogram4_linear_fp8_f32") @id4_ideogram4_linear_fp8_f32(
       %weight_k_valid = index.cmp ult, %weight_k, %input_size : index
       %weight_valid = scalar.andi %weight_row_valid, %weight_k_valid : i1
       %weight_value = scf.if %weight_valid -> (f32) {
-        %weight_fp8 = view.load %weight_view[%weight_row, %weight_k] : view<[%output_size]x[%input_size]xf8E4M3, #dense> -> f8E4M3
+        %weight_fp8 = view.load %weight_view[%weight_row, %weight_k] : view<[%output_size]x[%input_size]xf8E4M3, %fp8_storage> -> f8E4M3
         %weight_f32 = scalar.extf %weight_fp8 : f8E4M3 to f32
         %scale_f32 = view.load %scale_view[%weight_row] : view<[%output_size]xf32, #dense> -> f32
         %scaled_f32 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %weight_f32, %scale_f32 : f32
@@ -78,7 +82,6 @@ kernel.def export("id4_ideogram4_linear_fp8_f32") @id4_ideogram4_linear_fp8_f32(
         scf.yield %zero_f32 : f32
       }
       view.store %weight_value, %scratch_weight_view[%linear] : f32, view<2048xf32, #dense>
-
       %input_token_offset = index.rem %linear, %token_block : index
       %input_k_offset = index.div %linear, %token_block : index
       %input_dispatch_token = index.add %base_dispatch_token, %input_token_offset : index
@@ -97,9 +100,7 @@ kernel.def export("id4_ideogram4_linear_fp8_f32") @id4_ideogram4_linear_fp8_f32(
       }
       view.store %input_value, %scratch_input_view[%linear] : f32, view<2048xf32, #dense>
     }
-
     kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
-
     %block_dot = scf.for %k_offset = [%zero to %k_block step %one](%block_acc = %acc : f32) -> (f32) {
       %weight_scratch_row_base = index.mul %local_row, %k_block : index
       %weight_scratch_index = index.add %weight_scratch_row_base, %k_offset : index
@@ -111,11 +112,9 @@ kernel.def export("id4_ideogram4_linear_fp8_f32") @id4_ideogram4_linear_fp8_f32(
       %next = scalar.addf<reassoc|nnan|ninf|nsz> %block_acc, %product : f32
       scf.yield %next : f32
     }
-
     kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
     scf.yield %block_dot : f32
   }
-
   %dispatch_token_valid = index.cmp ult, %dispatch_token, %dispatch_token_count : index
   %token_valid = index.cmp ult, %token, %token_count : index
   %row_valid = index.cmp ult, %output_row, %output_size : index
@@ -183,7 +182,11 @@ check.case public @id4_ideogram4_linear_fp8_f32_cond_mlp_down_1024_shape_case {
 }
 
 check.benchmark<@id4_ideogram4_linear_fp8_f32_small_case> @id4_ideogram4_linear_fp8_f32_small
+
 check.benchmark<@id4_ideogram4_linear_fp8_f32_qkv_shape_case> @id4_ideogram4_linear_fp8_f32_qkv_shape
+
 check.benchmark<@id4_ideogram4_linear_fp8_f32_cond_qkv_1024_shape_case> @id4_ideogram4_linear_fp8_f32_cond_qkv_1024_shape
+
 check.benchmark<@id4_ideogram4_linear_fp8_f32_cond_hidden_1024_shape_case> @id4_ideogram4_linear_fp8_f32_cond_hidden_1024_shape
+
 check.benchmark<@id4_ideogram4_linear_fp8_f32_cond_mlp_down_1024_shape_case> @id4_ideogram4_linear_fp8_f32_cond_mlp_down_1024_shape

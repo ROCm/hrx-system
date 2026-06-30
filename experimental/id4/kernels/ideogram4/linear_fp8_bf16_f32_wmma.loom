@@ -39,6 +39,8 @@ kernel.def target(@id4_gfx1100) export("id4_ideogram4_linear_fp8_bf16_f32_wmma")
   %n = index.constant 16 : index
   %k = index.constant 16 : index
   %weight_layout = encoding.layout.strided [1, %input_size] : encoding<layout>
+  %fp8_storage_schema = encoding.define #matrix_operand<element_format=f8e4m3, payload_elements=1, payload_registers=1, rounding=finite_only> : encoding<schema>
+  %fp8_storage = encoding.define #physical_storage {layout = %weight_layout : encoding<layout>, schema = %fp8_storage_schema : encoding<schema>} : encoding<storage>
   %output_layout = encoding.layout.strided [1, %token_count] : encoding<layout>
   %zero_acc = vector.constant 0.0 : vector<8xf32>
   %input_noalias, %weight_noalias, %scale_noalias, %output_noalias = buffer.assume.noalias %input_bf16, %weight, %scale, %output : buffer, buffer, buffer, buffer
@@ -51,7 +53,7 @@ kernel.def target(@id4_gfx1100) export("id4_ideogram4_linear_fp8_bf16_f32_wmma")
   %scale_aligned = buffer.assume.alignment %scale_global {minimum_alignment = 16} : buffer
   %output_aligned = buffer.assume.alignment %output_global {minimum_alignment = 16} : buffer
   %input_view = buffer.view %input_aligned[%base] : buffer -> view<[%token_count]x[%input_size]xbf16, #dense>
-  %weight_view = buffer.view %weight_aligned[%base] : buffer -> view<[%input_size]x[%output_size]xf8E4M3, %weight_layout>
+  %weight_view = buffer.view %weight_aligned[%base] : buffer -> view<[%input_size]x[%output_size]xf8E4M3, %fp8_storage>
   %scale_view = buffer.view %scale_aligned[%base] : buffer -> view<[%output_size]xf32, #dense>
   %output_view = buffer.view %output_aligned[%base] : buffer -> view<[%token_count]x[%output_size]xf32, %output_layout>
   %init0 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
@@ -59,8 +61,8 @@ kernel.def target(@id4_gfx1100) export("id4_ideogram4_linear_fp8_bf16_f32_wmma")
   %result0, %result1 = scf.for %k_tile = [%zero to %k_tile_count step %one](%acc0 = %init0 : vector<8xf32>, %acc1 = %init1 : vector<8xf32>) -> (vector<8xf32>, vector<8xf32>) {
     %k_origin = index.mul %k_tile, %sixteen : index
     %lhs = vector.fragment.load<lhs> %input_view[%token_origin, %k_origin] shape [%m, %k] : view<[%token_count]x[%input_size]xbf16, #dense> -> vector<16xbf16>
-    %rhs0 = vector.fragment.load<rhs> %weight_view[%k_origin, %row_origin0] shape [%k, %n] : view<[%input_size]x[%output_size]xf8E4M3, %weight_layout> -> vector<16xbf16>
-    %rhs1 = vector.fragment.load<rhs> %weight_view[%k_origin, %row_origin1] shape [%k, %n] : view<[%input_size]x[%output_size]xf8E4M3, %weight_layout> -> vector<16xbf16>
+    %rhs0 = vector.fragment.load<rhs> %weight_view[%k_origin, %row_origin0] shape [%k, %n] : view<[%input_size]x[%output_size]xf8E4M3, %fp8_storage> -> vector<16xbf16>
+    %rhs1 = vector.fragment.load<rhs> %weight_view[%k_origin, %row_origin1] shape [%k, %n] : view<[%input_size]x[%output_size]xf8E4M3, %fp8_storage> -> vector<16xbf16>
     %next0 = vector.mma %lhs, %rhs0, %acc0 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
     %next1 = vector.mma %lhs, %rhs1, %acc1 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
     scf.yield %next0, %next1 : vector<8xf32>, vector<8xf32>

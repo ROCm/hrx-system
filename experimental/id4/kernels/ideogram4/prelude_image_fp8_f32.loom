@@ -86,6 +86,9 @@ kernel.def export("id4_ideogram4_prelude_image_fp8_f32") @id4_ideogram4_prelude_
   %source_token_w_offset = index.mul %source_token_w, %image_height : index
   %source_token = index.add %source_token_w_offset, %source_token_h : index
   %zero_f32 = scalar.constant 0.0 : f32
+  %dense_layout = encoding.define #dense : encoding<layout>
+  %fp8_storage_schema = encoding.define #matrix_operand<element_format=f8e4m3, payload_elements=1, payload_registers=1, rounding=finite_only> : encoding<schema>
+  %fp8_storage = encoding.define #physical_storage {layout = %dense_layout : encoding<layout>, schema = %fp8_storage_schema : encoding<schema>} : encoding<storage>
   %image_tokens_noalias, %weight_noalias, %scale_noalias, %bias_noalias, %image_indicator_noalias, %indicator_embedding_noalias, %output_noalias = buffer.assume.noalias %image_tokens, %weight, %scale, %bias, %image_indicator, %indicator_embedding, %output : buffer, buffer, buffer, buffer, buffer, buffer, buffer
   %image_tokens_global = buffer.assume.memory_space<global> %image_tokens_noalias : buffer
   %weight_global = buffer.assume.memory_space<global> %weight_noalias : buffer
@@ -95,7 +98,7 @@ kernel.def export("id4_ideogram4_prelude_image_fp8_f32") @id4_ideogram4_prelude_
   %indicator_embedding_global = buffer.assume.memory_space<global> %indicator_embedding_noalias : buffer
   %output_global = buffer.assume.memory_space<global> %output_noalias : buffer
   %image_tokens_view = buffer.view %image_tokens_global[%base] : buffer -> view<[%token_count]x[%input_channel_count]xf32, #dense>
-  %weight_view = buffer.view %weight_global[%base] : buffer -> view<[%hidden_size]x[%input_channel_count]xf8E4M3, #dense>
+  %weight_view = buffer.view %weight_global[%base] : buffer -> view<[%hidden_size]x[%input_channel_count]xf8E4M3, %fp8_storage>
   %scale_view = buffer.view %scale_global[%base] : buffer -> view<[%hidden_size]xf32, #dense>
   %bias_view = buffer.view %bias_global[%base] : buffer -> view<[%hidden_size]xbf16, #dense>
   %image_indicator_view = buffer.view %image_indicator_global[%base] : buffer -> view<[%output_token_count]xi32, #dense>
@@ -127,10 +130,10 @@ kernel.def export("id4_ideogram4_prelude_image_fp8_f32") @id4_ideogram4_prelude_
     %input_values02 = vector.insert %rounded_input1 into %input_values01[1] : f32, vector<4xf32>
     %input_values03 = vector.insert %rounded_input2 into %input_values02[2] : f32, vector<4xf32>
     %input_values = vector.insert %rounded_input3 into %input_values03[3] : f32, vector<4xf32>
-    %weight0 = view.load %weight_view[%hidden, %input_channel] : view<[%hidden_size]x[%input_channel_count]xf8E4M3, #dense> -> f8E4M3
-    %weight1 = view.load %weight_view[%hidden, %input_channel1] : view<[%hidden_size]x[%input_channel_count]xf8E4M3, #dense> -> f8E4M3
-    %weight2 = view.load %weight_view[%hidden, %input_channel2] : view<[%hidden_size]x[%input_channel_count]xf8E4M3, #dense> -> f8E4M3
-    %weight3 = view.load %weight_view[%hidden, %input_channel3] : view<[%hidden_size]x[%input_channel_count]xf8E4M3, #dense> -> f8E4M3
+    %weight0 = view.load %weight_view[%hidden, %input_channel] : view<[%hidden_size]x[%input_channel_count]xf8E4M3, %fp8_storage> -> f8E4M3
+    %weight1 = view.load %weight_view[%hidden, %input_channel1] : view<[%hidden_size]x[%input_channel_count]xf8E4M3, %fp8_storage> -> f8E4M3
+    %weight2 = view.load %weight_view[%hidden, %input_channel2] : view<[%hidden_size]x[%input_channel_count]xf8E4M3, %fp8_storage> -> f8E4M3
+    %weight3 = view.load %weight_view[%hidden, %input_channel3] : view<[%hidden_size]x[%input_channel_count]xf8E4M3, %fp8_storage> -> f8E4M3
     %partial = func.call @id4_ideogram4_prelude_image_fp8_f32_dot4(%input_values, %weight0, %weight1, %weight2, %weight3, %scale_value) : (vector<4xf32>, f8E4M3, f8E4M3, f8E4M3, f8E4M3, f32) -> (f32)
     %next = scalar.addf<reassoc|nnan|ninf|nsz> %acc, %partial : f32
     scf.yield %next : f32

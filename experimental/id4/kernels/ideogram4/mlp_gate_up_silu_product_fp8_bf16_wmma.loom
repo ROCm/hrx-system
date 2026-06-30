@@ -40,6 +40,8 @@ kernel.def target(@id4_gfx1100) export("id4_ideogram4_mlp_gate_up_silu_product_f
   %n = index.constant 16 : index
   %k = index.constant 16 : index
   %weight_layout = encoding.layout.strided [1, %input_size] : encoding<layout>
+  %fp8_storage_schema = encoding.define #matrix_operand<element_format=f8e4m3, payload_elements=1, payload_registers=1, rounding=finite_only> : encoding<schema>
+  %fp8_storage = encoding.define #physical_storage {layout = %weight_layout : encoding<layout>, schema = %fp8_storage_schema : encoding<schema>} : encoding<storage>
   %zero_acc = vector.constant 0.0 : vector<8xf32>
   %input_noalias, %gate_weight_noalias, %gate_scale_noalias, %up_weight_noalias, %up_scale_noalias, %output_noalias = buffer.assume.noalias %input, %gate_weight, %gate_scale, %up_weight, %up_scale, %output : buffer, buffer, buffer, buffer, buffer, buffer
   %input_global = buffer.assume.memory_space<global> %input_noalias : buffer
@@ -55,9 +57,9 @@ kernel.def target(@id4_gfx1100) export("id4_ideogram4_mlp_gate_up_silu_product_f
   %up_scale_aligned = buffer.assume.alignment %up_scale_global {minimum_alignment = 16} : buffer
   %output_aligned = buffer.assume.alignment %output_global {minimum_alignment = 16} : buffer
   %input_view = buffer.view %input_aligned[%base] : buffer -> view<[%token_capacity]x[%input_size]xbf16, #dense>
-  %gate_weight_view = buffer.view %gate_weight_aligned[%base] : buffer -> view<[%input_size]x[%intermediate_size]xf8E4M3, %weight_layout>
+  %gate_weight_view = buffer.view %gate_weight_aligned[%base] : buffer -> view<[%input_size]x[%intermediate_size]xf8E4M3, %fp8_storage>
   %gate_scale_view = buffer.view %gate_scale_aligned[%base] : buffer -> view<[%intermediate_size]xf32, #dense>
-  %up_weight_view = buffer.view %up_weight_aligned[%base] : buffer -> view<[%input_size]x[%intermediate_size]xf8E4M3, %weight_layout>
+  %up_weight_view = buffer.view %up_weight_aligned[%base] : buffer -> view<[%input_size]x[%intermediate_size]xf8E4M3, %fp8_storage>
   %up_scale_view = buffer.view %up_scale_aligned[%base] : buffer -> view<[%intermediate_size]xf32, #dense>
   %output_view = buffer.view %output_aligned[%base] : buffer -> view<[%token_capacity]x[%intermediate_size]xbf16, #dense>
   %init00 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
@@ -68,10 +70,10 @@ kernel.def target(@id4_gfx1100) export("id4_ideogram4_mlp_gate_up_silu_product_f
     %k_origin = index.mul %k_tile, %sixteen : index
     %lhs0 = vector.fragment.load<lhs> %input_view[%token_origin0, %k_origin] shape [%m, %k] : view<[%token_capacity]x[%input_size]xbf16, #dense> -> vector<16xbf16>
     %lhs1 = vector.fragment.load<lhs> %input_view[%token_origin1, %k_origin] shape [%m, %k] : view<[%token_capacity]x[%input_size]xbf16, #dense> -> vector<16xbf16>
-    %gate_rhs0 = vector.fragment.load<rhs> %gate_weight_view[%k_origin, %row_origin0] shape [%k, %n] : view<[%input_size]x[%intermediate_size]xf8E4M3, %weight_layout> -> vector<16xbf16>
-    %gate_rhs1 = vector.fragment.load<rhs> %gate_weight_view[%k_origin, %row_origin1] shape [%k, %n] : view<[%input_size]x[%intermediate_size]xf8E4M3, %weight_layout> -> vector<16xbf16>
-    %up_rhs0 = vector.fragment.load<rhs> %up_weight_view[%k_origin, %row_origin0] shape [%k, %n] : view<[%input_size]x[%intermediate_size]xf8E4M3, %weight_layout> -> vector<16xbf16>
-    %up_rhs1 = vector.fragment.load<rhs> %up_weight_view[%k_origin, %row_origin1] shape [%k, %n] : view<[%input_size]x[%intermediate_size]xf8E4M3, %weight_layout> -> vector<16xbf16>
+    %gate_rhs0 = vector.fragment.load<rhs> %gate_weight_view[%k_origin, %row_origin0] shape [%k, %n] : view<[%input_size]x[%intermediate_size]xf8E4M3, %fp8_storage> -> vector<16xbf16>
+    %gate_rhs1 = vector.fragment.load<rhs> %gate_weight_view[%k_origin, %row_origin1] shape [%k, %n] : view<[%input_size]x[%intermediate_size]xf8E4M3, %fp8_storage> -> vector<16xbf16>
+    %up_rhs0 = vector.fragment.load<rhs> %up_weight_view[%k_origin, %row_origin0] shape [%k, %n] : view<[%input_size]x[%intermediate_size]xf8E4M3, %fp8_storage> -> vector<16xbf16>
+    %up_rhs1 = vector.fragment.load<rhs> %up_weight_view[%k_origin, %row_origin1] shape [%k, %n] : view<[%input_size]x[%intermediate_size]xf8E4M3, %fp8_storage> -> vector<16xbf16>
     %next_gate00 = vector.mma %lhs0, %gate_rhs0, %gate_acc00 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
     %next_gate01 = vector.mma %lhs0, %gate_rhs1, %gate_acc01 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
     %next_gate10 = vector.mma %lhs1, %gate_rhs0, %gate_acc10 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
