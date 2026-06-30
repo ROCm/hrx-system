@@ -308,7 +308,7 @@ check.case @dynamic_workgroups_case {
   EXPECT_TRUE(iree_string_view_equal(provider.compile_failure_kind,
                                      IREE_SV("unresolved_workgroup_count")));
   EXPECT_TRUE(iree_string_view_find(provider.compile_failure_message,
-                                    IREE_SV("--sample-compilation=per_sample"),
+                                    IREE_SV("bind launch config values"),
                                     0) != IREE_STRING_VIEW_NPOS);
 
   loom_run_hal_testbench_actual_provider_deinitialize(&provider);
