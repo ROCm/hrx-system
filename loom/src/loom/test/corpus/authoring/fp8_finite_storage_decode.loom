@@ -179,6 +179,17 @@ check.case public @fp8_finite_storage_decode_bf16_case {
   check.return
 }
 
+check.case public @fp8_finite_storage_zero_decode_bf16_case {
+  // Zero is finite but still needs exact repair in the packed BF16 decode path.
+  %row_count = check.param.choice values([1, 65]) name("row_count") : index
+  %input = check.generate.fill value(0.0) : tensor<[%row_count]x4xf8E4M3>
+  %output = check.generate.fill value(1.0) : tensor<[%row_count]x4xbf16>
+  %expected = check.generate.fill value(0.0) : tensor<[%row_count]x4xbf16>
+  func.call @fp8_finite_storage_decode_bf16(%row_count, %input, %output) : (index, tensor<[%row_count]x4xf8E4M3>, tensor<[%row_count]x4xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<[%row_count]x4xbf16>
+  check.return
+}
+
 check.case public @fp8_finite_storage_scale_decode_bf16_case {
   // Cover a single row and a tail row crossing the 64-workitem boundary.
   %row_count = check.param.choice values([1, 65]) name("row_count") : index
@@ -219,6 +230,7 @@ check.benchmark<@fp8_finite_storage_decode_case> @fp8_finite_storage_decode_tail
 check.benchmark<@fp8_finite_storage_decode_bf16_case>
 check.benchmark<@fp8_finite_storage_decode_bf16_case> @fp8_finite_storage_decode_bf16_single {row_count = 1}
 check.benchmark<@fp8_finite_storage_decode_bf16_case> @fp8_finite_storage_decode_bf16_tail {row_count = 65}
+check.benchmark<@fp8_finite_storage_zero_decode_bf16_case>
 check.benchmark<@fp8_finite_storage_scale_decode_bf16_case>
 check.benchmark<@fp8_finite_storage_scale_decode_bf16_case> @fp8_finite_storage_scale_decode_bf16_single {row_count = 1}
 check.benchmark<@fp8_finite_storage_scale_decode_bf16_case> @fp8_finite_storage_scale_decode_bf16_tail {row_count = 65}
