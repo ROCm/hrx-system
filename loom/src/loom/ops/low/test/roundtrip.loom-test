@@ -2,7 +2,7 @@
 
 test.target<low_core> @test_target
 
-low.kernel.def target(@test_target) export("entry") linkage(dso_local) workgroup_size(16, 4, 1) @entry(%buffer: reg<test.ptr>) {
+low.kernel.def target(@test_target) export("entry") linkage(dso_local) workgroup_size(16, 4, 1) workgroup_count(8, 2, 1) @entry(%buffer: reg<test.ptr>) {
   low.return
 }
 

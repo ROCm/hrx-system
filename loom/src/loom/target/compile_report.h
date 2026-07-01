@@ -73,6 +73,8 @@ enum {
   LOOM_TARGET_COMPILE_REPORT_DETAIL_WAIT_PLAN = 1u << 18,
   // Target capability rows were recorded or counted.
   LOOM_TARGET_COMPILE_REPORT_DETAIL_TARGET_CAPABILITY_ROWS = 1u << 19,
+  // Static launch workload facts were recorded.
+  LOOM_TARGET_COMPILE_REPORT_DETAIL_WORKLOAD = 1u << 20,
 };
 
 typedef enum loom_target_compile_report_move_cause_e {
@@ -457,6 +459,39 @@ typedef struct loom_target_compile_report_wait_plan_t {
   uint64_t max_full_drain_outstanding_before;
 } loom_target_compile_report_wait_plan_t;
 
+typedef uint32_t loom_target_compile_report_workload_flags_t;
+enum {
+  // No static workload facts were recorded.
+  LOOM_TARGET_COMPILE_REPORT_WORKLOAD_NONE = 0u,
+  // |workgroup_size| is populated.
+  LOOM_TARGET_COMPILE_REPORT_WORKLOAD_WORKGROUP_SIZE = 1u << 0,
+  // |workgroup_count| is populated.
+  LOOM_TARGET_COMPILE_REPORT_WORKLOAD_WORKGROUP_COUNT = 1u << 1,
+  // |flat_workgroup_size| is populated.
+  LOOM_TARGET_COMPILE_REPORT_WORKLOAD_FLAT_WORKGROUP_SIZE = 1u << 2,
+  // |dispatch_workgroup_count| is populated.
+  LOOM_TARGET_COMPILE_REPORT_WORKLOAD_DISPATCH_WORKGROUP_COUNT = 1u << 3,
+  // |dispatch_workitem_count| is populated.
+  LOOM_TARGET_COMPILE_REPORT_WORKLOAD_DISPATCH_WORKITEM_COUNT = 1u << 4,
+};
+
+// Static launch workload facts proven for a compiled entry or shared by every
+// entry in a report.
+typedef struct loom_target_compile_report_workload_t {
+  // Workload fields populated in this record.
+  loom_target_compile_report_workload_flags_t flags;
+  // Static local workgroup size.
+  loom_target_workgroup_size_t workgroup_size;
+  // Static dispatch workgroup count.
+  loom_target_dispatch_workgroup_count_t workgroup_count;
+  // Product of workgroup_size x/y/z.
+  uint64_t flat_workgroup_size;
+  // Product of workgroup_count x/y/z.
+  uint64_t dispatch_workgroup_count;
+  // Product of flat workgroup size and dispatch workgroup count.
+  uint64_t dispatch_workitem_count;
+} loom_target_compile_report_workload_t;
+
 // One emitted artifact entry summary in a compile report.
 typedef struct loom_target_compile_report_entry_t {
   // Target artifact function symbol emitted for this entry.
@@ -533,6 +568,8 @@ typedef struct loom_target_compile_report_entry_t {
   loom_target_compile_report_target_resources_t target_resources;
   // Target wait-counter planning summary.
   loom_target_compile_report_wait_plan_t wait_plan;
+  // Static launch workload facts for this entry.
+  loom_target_compile_report_workload_t workload;
   // Number of detailed register-pressure rows copied for this entry.
   iree_host_size_t pressure_row_count;
   // Number of detailed pressure-origin rows copied for this entry.
@@ -1196,6 +1233,8 @@ typedef struct loom_target_compile_report_t {
   loom_target_compile_report_target_resources_t target_resources;
   // Target wait-counter planning summary.
   loom_target_compile_report_wait_plan_t wait_plan;
+  // Static launch workload facts shared by all entries in this report.
+  loom_target_compile_report_workload_t workload;
   // Owned emitted artifact entry summary rows.
   loom_target_compile_report_row_list_t entry_rows;
   // Owned register-class pressure summaries used by target resources.
@@ -1332,6 +1371,11 @@ iree_status_t loom_target_compile_report_record_pressure_summary(
 void loom_target_compile_report_record_wait_plan(
     loom_target_compile_report_t* report,
     const loom_target_compile_report_wait_plan_t* wait_plan);
+
+// Records static launch workload facts in |report|.
+void loom_target_compile_report_record_workload(
+    loom_target_compile_report_t* report,
+    const loom_target_compile_report_workload_t* workload);
 
 // Records one emitted artifact entry and copies its detailed pressure and spill
 // rows into |report|. String views remain borrowed from |entry_report|'s

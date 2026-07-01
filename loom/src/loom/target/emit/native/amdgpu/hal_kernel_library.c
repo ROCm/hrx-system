@@ -877,6 +877,10 @@ static iree_status_t loom_amdgpu_hal_kernel_library_build_kernel_contribution(
       .storage_lease_provider = &storage_lease_provider,
       .emitter = loom_target_entry_emitter(diagnostic_emitter),
   };
+  if (report != NULL) {
+    loom_target_compile_report_record_low_kernel_workload(
+        report, plan->low_function_op);
+  }
   loom_amdgpu_native_preflight_t preflight = {0};
   loom_amdgpu_hal_kernel_library_spill_lowering_context_t
       spill_lowering_context = {

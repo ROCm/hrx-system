@@ -263,7 +263,7 @@ kernel.def target(@hal_target) @spirv_dynamic_builtin_storage_buffer_i32() {
 }
 
 // ----
-low.kernel.def target(@hal_target) workgroup_size(1, 2, 1) @spirv_dynamic_builtin_storage_buffer_i32() asm<spirv.logical.core> {
+low.kernel.def target(@hal_target) workgroup_size(1, 2, 1) workgroup_count(4, 1, 3) @spirv_dynamic_builtin_storage_buffer_i32() asm<spirv.logical.core> {
   %input_aligned = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
   %output_aligned = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
   %workgroup_x = OpLoadBuiltin.workgroup_id.x

@@ -238,6 +238,9 @@ _KERNEL_COMMON_ATTRS = [
     AttrDef("workgroup_size_x", ATTR_TYPE_I64, optional=True),
     AttrDef("workgroup_size_y", ATTR_TYPE_I64, optional=True),
     AttrDef("workgroup_size_z", ATTR_TYPE_I64, optional=True),
+    AttrDef("workgroup_count_x", ATTR_TYPE_I64, optional=True),
+    AttrDef("workgroup_count_y", ATTR_TYPE_I64, optional=True),
+    AttrDef("workgroup_count_z", ATTR_TYPE_I64, optional=True),
     AttrDef("allocation", "enum", enum_def=LowAllocationMode, optional=True),
     AttrDef("schedule", "enum", enum_def=LowScheduleMode, optional=True),
     AttrDef("predicates", "predicate_list", optional=True),
@@ -348,6 +351,24 @@ _KERNEL_WORKGROUP_SIZE_FORMAT: list[FormatElement] = [
             RPAREN,
         ],
         anchor="workgroup_size_x",
+    ),
+]
+
+_KERNEL_WORKGROUP_COUNT_FORMAT: list[FormatElement] = [
+    OptionalGroup(
+        [
+            kw("workgroup_count"),
+            GLUE,
+            LPAREN,
+            Attr("workgroup_count_x"),
+            COMMA,
+            Attr("workgroup_count_y"),
+            COMMA,
+            Attr("workgroup_count_z"),
+            GLUE,
+            RPAREN,
+        ],
+        anchor="workgroup_count_x",
     ),
 ]
 
@@ -492,6 +513,7 @@ low_kernel_def = Op(
         *_KERNEL_ABI_LAYOUT_FORMAT,
         *_KERNEL_EXPORT_FORMAT,
         *_KERNEL_WORKGROUP_SIZE_FORMAT,
+        *_KERNEL_WORKGROUP_COUNT_FORMAT,
         *_KERNEL_SIGNATURE_FORMAT,
         Region("body", syntax="low.asm.optional"),
     ],

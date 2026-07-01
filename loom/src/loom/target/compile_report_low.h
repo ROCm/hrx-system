@@ -36,6 +36,10 @@ iree_status_t loom_target_compile_report_record_low_lowering(
     loom_target_compile_report_t* report,
     const loom_low_lower_result_t* lower_result);
 
+// Records workload facts preserved on one target-low kernel function.
+void loom_target_compile_report_record_low_kernel_workload(
+    loom_target_compile_report_t* report, const loom_op_t* low_function_op);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif

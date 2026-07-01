@@ -41,7 +41,7 @@ kernel.def target(@target) @exact_workgroup_count_uses_facts() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(3, 5, 1) @exact_workgroup_count_uses_facts() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(3, 5, 1) workgroup_count(2, 3, 1) @exact_workgroup_count_uses_facts() asm<amdgpu.rdna3.core> {
   %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
   %result = v_mov_b32 6
   %17 = v_mov_b32 0

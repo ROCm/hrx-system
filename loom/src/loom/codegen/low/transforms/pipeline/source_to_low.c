@@ -375,8 +375,7 @@ iree_status_t loom_low_source_to_low_run(loom_pass_t* pass,
     status = loom_low_lower_function(module, selection->func, &lower_options,
                                      &lower_result);
     loom_pass_value_fact_owner_invalidate(pass->value_facts);
-    if (iree_status_is_ok(status) &&
-        !iree_allocator_is_null(source_low_report_allocator)) {
+    if (iree_status_is_ok(status) && compile_report != NULL) {
       status = loom_target_compile_report_record_low_lowering(compile_report,
                                                               &lower_result);
     }

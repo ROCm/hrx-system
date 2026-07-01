@@ -35,7 +35,7 @@ kernel.def target(@target) @prefetch_workgroup_id() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @prefetch_workgroup_id() asm<llvmir.generic.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1025, 1, 1) @prefetch_workgroup_id() asm<llvmir.generic.core> {
   return
 }
 

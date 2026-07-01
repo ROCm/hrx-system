@@ -414,6 +414,47 @@ static iree_status_t loom_target_compile_report_append_string_field(
                                            (int)value.size, value.data);
 }
 
+static iree_status_t loom_target_compile_report_append_workload_fields(
+    iree_string_builder_t* builder,
+    const loom_target_compile_report_workload_t* workload) {
+  if (iree_any_bit_set(workload->flags,
+                       LOOM_TARGET_COMPILE_REPORT_WORKLOAD_WORKGROUP_SIZE)) {
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+        builder, " workgroup_size=%" PRIu32 "x%" PRIu32 "x%" PRIu32,
+        workload->workgroup_size.x, workload->workgroup_size.y,
+        workload->workgroup_size.z));
+  }
+  if (iree_any_bit_set(
+          workload->flags,
+          LOOM_TARGET_COMPILE_REPORT_WORKLOAD_FLAT_WORKGROUP_SIZE)) {
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+        builder, " flat_workgroup_size=%" PRIu64,
+        workload->flat_workgroup_size));
+  }
+  if (iree_any_bit_set(workload->flags,
+                       LOOM_TARGET_COMPILE_REPORT_WORKLOAD_WORKGROUP_COUNT)) {
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+        builder, " workgroup_count=%" PRIu32 "x%" PRIu32 "x%" PRIu32,
+        workload->workgroup_count.x, workload->workgroup_count.y,
+        workload->workgroup_count.z));
+  }
+  if (iree_any_bit_set(
+          workload->flags,
+          LOOM_TARGET_COMPILE_REPORT_WORKLOAD_DISPATCH_WORKGROUP_COUNT)) {
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+        builder, " dispatch_workgroup_count=%" PRIu64,
+        workload->dispatch_workgroup_count));
+  }
+  if (iree_any_bit_set(
+          workload->flags,
+          LOOM_TARGET_COMPILE_REPORT_WORKLOAD_DISPATCH_WORKITEM_COUNT)) {
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+        builder, " dispatch_workitem_count=%" PRIu64,
+        workload->dispatch_workitem_count));
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_target_compile_report_format_summary(
     const loom_target_compile_report_t* report,
     const loom_target_compile_report_format_options_t* options,
@@ -460,6 +501,16 @@ static iree_status_t loom_target_compile_report_format_summary(
         report->schedule_hazard_gap_count, report->schedule_model_summary_count,
         report->register_pressure_summary_count,
         report->register_pressure_peak_live_units));
+  }
+
+  if (iree_any_bit_set(report->detail_flags,
+                       LOOM_TARGET_COMPILE_REPORT_DETAIL_WORKLOAD)) {
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_string(
+        builder, IREE_SV("COMPILE-REPORT: workload")));
+    IREE_RETURN_IF_ERROR(loom_target_compile_report_append_workload_fields(
+        builder, &report->workload));
+    IREE_RETURN_IF_ERROR(
+        iree_string_builder_append_string(builder, IREE_SV("\n")));
   }
 
   if (iree_any_bit_set(
@@ -852,6 +903,11 @@ static iree_status_t loom_target_compile_report_format_entry_rows(
             resources->resident_subgroups_per_simd,
             resources->max_subgroups_per_simd, resources->occupancy_percent,
             (int)limiting_resource.size, limiting_resource.data));
+      }
+      if (iree_any_bit_set(row->detail_flags,
+                           LOOM_TARGET_COMPILE_REPORT_DETAIL_WORKLOAD)) {
+        IREE_RETURN_IF_ERROR(loom_target_compile_report_append_workload_fields(
+            builder, &row->workload));
       }
       IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
           builder,
@@ -2478,6 +2534,63 @@ static iree_status_t loom_target_compile_report_format_target_resources_json(
   return loom_output_stream_write_cstring(stream, "}");
 }
 
+static iree_status_t loom_target_compile_report_format_dimension3_json(
+    uint32_t x, uint32_t y, uint32_t z, uint64_t flat, bool include_flat,
+    loom_output_stream_t* stream) {
+  bool first_field = true;
+  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "{"));
+  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u32_field(
+      stream, &first_field, "x", x));
+  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u32_field(
+      stream, &first_field, "y", y));
+  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u32_field(
+      stream, &first_field, "z", z));
+  if (include_flat) {
+    IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
+        stream, &first_field, "flat", flat));
+  }
+  return loom_output_stream_write_cstring(stream, "}");
+}
+
+static iree_status_t loom_target_compile_report_format_workload_json(
+    const loom_target_compile_report_workload_t* workload,
+    loom_output_stream_t* stream) {
+  bool first_field = true;
+  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "{"));
+  if (iree_any_bit_set(workload->flags,
+                       LOOM_TARGET_COMPILE_REPORT_WORKLOAD_WORKGROUP_SIZE)) {
+    IREE_RETURN_IF_ERROR(loom_target_compile_report_json_begin_field(
+        stream, &first_field, "workgroup_size"));
+    IREE_RETURN_IF_ERROR(loom_target_compile_report_format_dimension3_json(
+        workload->workgroup_size.x, workload->workgroup_size.y,
+        workload->workgroup_size.z, workload->flat_workgroup_size,
+        iree_any_bit_set(
+            workload->flags,
+            LOOM_TARGET_COMPILE_REPORT_WORKLOAD_FLAT_WORKGROUP_SIZE),
+        stream));
+  }
+  if (iree_any_bit_set(workload->flags,
+                       LOOM_TARGET_COMPILE_REPORT_WORKLOAD_WORKGROUP_COUNT)) {
+    IREE_RETURN_IF_ERROR(loom_target_compile_report_json_begin_field(
+        stream, &first_field, "workgroup_count"));
+    IREE_RETURN_IF_ERROR(loom_target_compile_report_format_dimension3_json(
+        workload->workgroup_count.x, workload->workgroup_count.y,
+        workload->workgroup_count.z, workload->dispatch_workgroup_count,
+        iree_any_bit_set(
+            workload->flags,
+            LOOM_TARGET_COMPILE_REPORT_WORKLOAD_DISPATCH_WORKGROUP_COUNT),
+        stream));
+  }
+  if (iree_any_bit_set(
+          workload->flags,
+          LOOM_TARGET_COMPILE_REPORT_WORKLOAD_DISPATCH_WORKITEM_COUNT)) {
+    IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
+        stream, &first_field, "dispatch_workitem_count",
+        workload->dispatch_workitem_count));
+  }
+  return loom_output_stream_write_cstring(stream, "}");
+}
+
 static iree_status_t loom_target_compile_report_format_entry_json(
     const loom_target_compile_report_entry_t* row, iree_host_size_t row_index,
     loom_target_compile_report_format_mode_t mode,
@@ -2575,6 +2688,13 @@ static iree_status_t loom_target_compile_report_format_entry_json(
         stream, &first_field, "wait_plan"));
     IREE_RETURN_IF_ERROR(loom_target_compile_report_format_wait_plan_json(
         &row->wait_plan, stream));
+  }
+  if (iree_any_bit_set(row->detail_flags,
+                       LOOM_TARGET_COMPILE_REPORT_DETAIL_WORKLOAD)) {
+    IREE_RETURN_IF_ERROR(loom_target_compile_report_json_begin_field(
+        stream, &first_field, "workload"));
+    IREE_RETURN_IF_ERROR(loom_target_compile_report_format_workload_json(
+        &row->workload, stream));
   }
   IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
       stream, &first_field, "instruction_count",
@@ -3834,6 +3954,13 @@ iree_status_t loom_target_compile_report_format_json(
         stream, &first_field, "schedule"));
     IREE_RETURN_IF_ERROR(
         loom_target_compile_report_format_schedule_json(report, stream));
+  }
+  if (iree_any_bit_set(report->detail_flags,
+                       LOOM_TARGET_COMPILE_REPORT_DETAIL_WORKLOAD)) {
+    IREE_RETURN_IF_ERROR(loom_target_compile_report_json_begin_field(
+        stream, &first_field, "workload"));
+    IREE_RETURN_IF_ERROR(loom_target_compile_report_format_workload_json(
+        &report->workload, stream));
   }
   if (iree_any_bit_set(
           report->detail_flags,

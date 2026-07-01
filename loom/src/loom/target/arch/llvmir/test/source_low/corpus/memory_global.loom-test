@@ -491,7 +491,7 @@ kernel.def target(@target) @i32_readonly_uniform_smem() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @i32_readonly_uniform_smem() asm<llvmir.generic.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(16, 1, 1) @i32_readonly_uniform_smem() asm<llvmir.generic.core> {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
   %workgroup = kernel.workgroup_id.x
@@ -531,7 +531,7 @@ kernel.def target(@target) @f32x4_readonly_uniform_smem_copy() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @f32x4_readonly_uniform_smem_copy() asm<llvmir.generic.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(16, 1, 1) @f32x4_readonly_uniform_smem_copy() asm<llvmir.generic.core> {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
   %workgroup = kernel.workgroup_id.x
@@ -573,7 +573,7 @@ kernel.def target(@target) @f32x8_readonly_uniform_smem_copy() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @f32x8_readonly_uniform_smem_copy() asm<llvmir.generic.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(16, 1, 1) @f32x8_readonly_uniform_smem_copy() asm<llvmir.generic.core> {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
   %workgroup = kernel.workgroup_id.x
@@ -608,7 +608,7 @@ kernel.def target(@target) @i32_workgroup_global_saddr() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @i32_workgroup_global_saddr() asm<llvmir.generic.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(16, 1, 1) @i32_workgroup_global_saddr() asm<llvmir.generic.core> {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
   %workgroup = kernel.workgroup_id.x
@@ -679,7 +679,7 @@ kernel.def target(@target) @i32_dynamic_leading_dim_global_saddr() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(32, 1, 1) @i32_dynamic_leading_dim_global_saddr(%columns_i32: reg<llvmir.i32>) asm<llvmir.generic.core> {
+low.kernel.def target(@target) workgroup_size(32, 1, 1) workgroup_count(2, 1, 1) @i32_dynamic_leading_dim_global_saddr(%columns_i32: reg<llvmir.i32>) asm<llvmir.generic.core> {
   %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %workgroup = kernel.workgroup_id.x
   %column = kernel.workitem_id.x
@@ -718,7 +718,7 @@ kernel.def target(@target) @i32_readonly_uniform_smem_non_power_two_stride() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @i32_readonly_uniform_smem_non_power_two_stride() asm<llvmir.generic.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(2, 1, 1) @i32_readonly_uniform_smem_non_power_two_stride() asm<llvmir.generic.core> {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
   %workgroup = kernel.workgroup_id.x
@@ -760,7 +760,7 @@ kernel.def target(@target) @i32_readonly_uniform_smem_scalar_branch() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @i32_readonly_uniform_smem_scalar_branch() asm<llvmir.generic.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(16, 1, 1) @i32_readonly_uniform_smem_scalar_branch() asm<llvmir.generic.core> {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
   %workgroup = kernel.workgroup_id.x
