@@ -925,6 +925,35 @@ ERR_AMDGPU_040 = ErrorDef(
     ),
 )
 
+# ERR_AMDGPU_041: AMDGPU fragment repack strategy is unsupported.
+ERR_AMDGPU_041 = ErrorDef(
+    domain=ErrorDomain.AMDGPU,
+    code=41,
+    severity=Severity.ERROR,
+    summary="AMDGPU fragment repack strategy is unsupported.",
+    message=(
+        "AMDGPU target '{target_key}' export '{export_name}' config "
+        "'{config_key}' rejected fragment repack '{op_name}' in "
+        "'@{function_name}': source role {source_role_key} with type "
+        "{source_type} cannot produce result role {result_role_key} with type "
+        "{result_type} using strategy '{strategy_key}' for reason "
+        "'{reason_key}'"
+    ),
+    params=(
+        *_TARGET_CONTEXT_PARAMS,
+        ErrorParam("source_role_key", ParamKind.STRING),
+        ErrorParam("result_role_key", ParamKind.STRING),
+        ErrorParam("source_type", ParamKind.TYPE),
+        ErrorParam("result_type", ParamKind.TYPE),
+        ErrorParam("strategy_key", ParamKind.STRING),
+        ErrorParam("reason_key", ParamKind.STRING),
+    ),
+    fix_hint=(
+        "Use memory-backed fragment store/load until the target reports a "
+        "native fragment repack strategy for this role and type transition"
+    ),
+)
+
 ALL_AMDGPU_ERRORS = (
     ERR_AMDGPU_001,
     ERR_AMDGPU_003,
@@ -965,4 +994,5 @@ ALL_AMDGPU_ERRORS = (
     ERR_AMDGPU_038,
     ERR_AMDGPU_039,
     ERR_AMDGPU_040,
+    ERR_AMDGPU_041,
 )

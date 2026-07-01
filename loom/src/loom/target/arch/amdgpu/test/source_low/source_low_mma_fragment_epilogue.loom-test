@@ -514,6 +514,23 @@ low.kernel.def target(@target) workgroup_size(32, 1, 1) @bf16_result_fragment_ep
 // ====
 
 amdgpu.target<gfx1100> @target
+
+func.def target(@target) @result_fragment_repack_alias(%payload: vector<8xf32>) -> (vector<8xf32>) {
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %fragment = vector.fragment<result> %payload shape [%m, %n] : vector<8xf32>
+  %repacked = vector.fragment.repack<result> %fragment shape [%m, %n] : vector<8xf32> -> vector<8xf32>
+  func.return %repacked : vector<8xf32>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @result_fragment_repack_alias(%repacked: reg<amdgpu.vgpr x8>) -> (reg<amdgpu.vgpr x8>) asm<amdgpu.rdna3.core> {
+  return %repacked
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
 kernel.def target(@target) @bf16_wmmar3_dual_result_product_bf16_epilogue() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 32 : index
