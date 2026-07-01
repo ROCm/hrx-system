@@ -47,6 +47,7 @@ def minimal_generation_plan() -> dict:
             },
             "dit_activation_format": 2,
             "dit_weight_execution_format": 1,
+            "qwen_weight_execution_strategy": 3,
             "dit_attention_implementation": 4,
             "dit_feed_forward_implementation": 2,
             "vae_tiling": {
@@ -458,6 +459,7 @@ class Id4SmokeTestTest(unittest.TestCase):
             self.assertEqual(metrics["summary"]["qwen_token_count"], 37)
             self.assertEqual(metrics["summary"]["qwen_token_capacity"], 64)
             self.assertEqual(metrics["summary"]["conditioned_dit_token_count"], 101)
+            self.assertEqual(metrics["summary"]["qwen_weight_execution_strategy"], 3)
             self.assertEqual(
                 metrics["summary"]["diffusion_latent_shape"]["dims"],
                 [8, 8, 128, 1],

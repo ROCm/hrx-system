@@ -151,6 +151,7 @@ PLAN_SUMMARY_INTEGER_FIELDS = (
     "denoise_step_count",
     "dit_activation_format",
     "dit_weight_execution_format",
+    "qwen_weight_execution_strategy",
     "dit_attention_implementation",
     "dit_feed_forward_implementation",
 )

@@ -19,23 +19,32 @@ TEST_BENCHMARK_LABEL = (
     "scope=prepared_issue prompt=short128 qwen_tokens=19 qwen_capacity=32 "
     "image_tokens=64 dit_cond_tokens=83 dit_cond_capacity=128 "
     "dit_uncond_tokens=64 dit_uncond_capacity=128 latent=8x8 steps=1 "
-    "image=128x128 residency=issue_phases issue=stage_serial "
-    "resident_stage_mask=0x00000000 "
-    "params=fp8_e4m3 activation=bf16_linear_input weights=bf16_resident "
-    "attention=online_wmma ff=fused_product param_total=49460MiB "
-    "param_largest=17699MiB param_source=32015MiB "
-    "param_source_direct=4168MiB param_source_encoded=27848MiB "
-    "param_load_steps[gather=322,encode=529] local_hw_total=41MiB "
+    "image=128x128 residency_request=memory_budgeted "
+    "residency=selected_stage_bundles issue=stage_serial "
+    "prefetch_regions=1 resident_stage_mask=0x00000003 "
+    "residency_budget=35840MiB params=fp8_e4m3 "
+    "activation=bf16_linear_input weights=bf16_resident "
+    "qwen_weights=hybrid_compact_rhs attention=online_wmma "
+    "ff=fused_product param_total=49460MiB "
+    "param_largest=17699MiB param_source=32017MiB "
+    "param_source_direct=4169MiB param_source_encoded=27848MiB "
+    "param_load_steps[gather=322,encode=529] "
+    "param_load_groups[total=851,gather=322,encode=529] "
+    "local_hw_total=43MiB "
     "local_hw_largest=20MiB boundary=9MiB kernels=119 dispatches=1507 "
     "logical_live[boundary=5MiB,taps=0MiB,resident=0MiB,"
     "phase_peak=34951MiB,stage_serial_peak=17712MiB,"
     "selected_peak=17712MiB] "
+    "prefetch_groups[count=142,avg_regions=1.00,max_regions=1] "
+    "issue_encode_window[count=2,staging=1081MiB,max=576MiB,"
+    "source=18991MiB,target=27597MiB,chunks=72,batches=72,"
+    "dispatches=318] "
     "stage.qwen[param=14436MiB,src=14436MiB,src_direct=4068MiB,"
-    "src_encoded=10368MiB,loads=36/108,local_hw=4MiB,boundary=4MiB,"
-    "kernels=28,dispatches=485] "
+    "src_encoded=10368MiB,load_steps=36/108,load_groups=36/108,"
+    "local_hw=4MiB,boundary=4MiB,kernels=28,dispatches=485] "
     "stage.decode[param=95MiB,src=95MiB,src_direct=95MiB,"
-    "src_encoded=0MiB,loads=1/0,local_hw=20MiB,boundary=1MiB,"
-    "kernels=37,dispatches=106] "
+    "src_encoded=0MiB,load_steps=1/0,load_groups=1/0,local_hw=20MiB,"
+    "boundary=1MiB,kernels=37,dispatches=106] "
     "timing_ms[plan=0.000,prepare=0.000,issue=3477.614,begin=0.000,"
     "final_wait=150.049,total=3627.663]"
 )
@@ -103,6 +112,7 @@ def minimal_generation_plan(qwen_token_count: int) -> dict:
             },
             "dit_activation_format": 2,
             "dit_weight_execution_format": 1,
+            "qwen_weight_execution_strategy": 3,
             "dit_attention_implementation": 4,
             "dit_feed_forward_implementation": 2,
             "vae_tiling": {
@@ -311,6 +321,7 @@ class GenerationBenchmarkSummaryTest(unittest.TestCase):
             self.assertEqual(summary["rows"][0]["conditioned_dit_token_count"], 83)
             self.assertEqual(summary["rows"][0]["dit_activation_format"], 2)
             self.assertEqual(summary["rows"][0]["dit_weight_execution_format"], 1)
+            self.assertEqual(summary["rows"][0]["qwen_weight_execution_strategy"], 3)
             self.assertEqual(summary["rows"][0]["dit_attention_implementation"], 4)
             self.assertEqual(summary["rows"][0]["dit_feed_forward_implementation"], 2)
             self.assertEqual(summary["rows"][0]["dispatch_count"], 1168)
@@ -353,15 +364,33 @@ class GenerationBenchmarkSummaryTest(unittest.TestCase):
             self.assertEqual(row["benchmark_scope"], "prepared_issue")
             self.assertEqual(row["prompt_label"], "short128")
             self.assertEqual(row["generation_issue_mode"], "stage_serial")
-            self.assertEqual(row["generation_residency"], "issue_phases")
+            self.assertEqual(row["generation_residency_request"], "memory_budgeted")
+            self.assertEqual(row["generation_residency"], "selected_stage_bundles")
+            self.assertEqual(row["parameter_load_prefetch_region_distance"], 1)
+            self.assertEqual(row["generation_residency_budget_mib"], 35840)
+            self.assertEqual(
+                row["runtime_qwen_weight_execution_strategy"], "hybrid_compact_rhs"
+            )
             self.assertEqual(row["runtime_parameter_total_mib"], 49460)
             self.assertEqual(row["runtime_parameter_source_encoded_mib"], 27848)
             self.assertEqual(row["runtime_parameter_gather_load_step_count"], 322)
+            self.assertEqual(row["runtime_parameter_load_group_count"], 851)
+            self.assertEqual(row["runtime_parameter_gather_load_group_count"], 322)
+            self.assertEqual(row["runtime_parameter_encode_load_group_count"], 529)
             self.assertEqual(row["runtime_dispatch_count"], 1507)
             self.assertEqual(row["logical_live_phase_peak_mib"], 34951)
             self.assertEqual(row["logical_live_stage_serial_peak_mib"], 17712)
             self.assertEqual(row["logical_live_selected_peak_mib"], 17712)
+            self.assertEqual(row["prefetch_group_submit_count"], 142)
+            self.assertAlmostEqual(row["prefetch_group_average_region_distance"], 1.0)
+            self.assertEqual(row["prefetch_group_max_region_distance"], 1)
+            self.assertEqual(row["issue_encode_window_count"], 2)
+            self.assertEqual(row["issue_encode_window_staging_mib"], 1081)
+            self.assertEqual(row["issue_encode_window_dispatch_count"], 318)
             self.assertEqual(row["runtime_stages"]["qwen"]["source_encoded_mib"], 10368)
+            self.assertEqual(
+                row["runtime_stages"]["qwen"]["parameter_gather_load_group_count"], 36
+            )
             self.assertEqual(row["runtime_stages"]["decode"]["dispatch_count"], 106)
             self.assertAlmostEqual(row["timing_issue_ms"], 3477.614)
             self.assertAlmostEqual(row["timing_final_wait_ms"], 150.049)
