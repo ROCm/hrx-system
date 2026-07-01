@@ -1001,13 +1001,6 @@ static iree_status_t id4_pipeline_program_prepared_make_binding_table(
     iree_hal_buffer_t* const* memory_slab_buffers,
     iree_hal_buffer_binding_t* bindings,
     iree_hal_buffer_binding_table_t* out_binding_table) {
-  if (region_index > UINT32_MAX) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "program issue region index %" PRIhsz
-                            " exceeds uint32_t",
-                            region_index);
-  }
-  const uint32_t region_id = (uint32_t)region_index;
   const id4_pipeline_plan_t* plan = id4_pipeline_bundle_plan(bundle);
   const id4_pipeline_region_plan_t* region =
       id4_pipeline_plan_region_at(plan, region_index);
@@ -1126,7 +1119,7 @@ static iree_status_t id4_pipeline_program_prepared_make_binding_table(
   for (iree_host_size_t i = 0; i < diagnostic_tap_count; ++i) {
     const id4_pipeline_diagnostic_tap_plan_t* tap =
         id4_pipeline_plan_diagnostic_tap_at(plan, i);
-    if (!tap || tap->region_id != region_id) continue;
+    if (!tap) continue;
     bindings[tap->binding_slot] = options->diagnostic_tap_bindings[i];
   }
 

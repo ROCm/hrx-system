@@ -1361,7 +1361,7 @@ static iree_status_t id4_pipeline_program_plan_validate_diagnostic_tap_slots(
   if (!id4_pipeline_program_plan_captures_diagnostic_taps(options)) {
     return iree_ok_status();
   }
-  for (iree_host_size_t i = 0; i < counts.tap_count; ++i) {
+  for (iree_host_size_t i = 0; i < options->diagnostic_tap_names.count; ++i) {
     if (i > UINT32_MAX ||
         options->diagnostic_tap_binding_slot_base > UINT32_MAX - (uint32_t)i) {
       return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
@@ -1454,7 +1454,7 @@ static iree_status_t id4_pipeline_program_plan_validate_shared_slot(
   if (!id4_pipeline_program_plan_captures_diagnostic_taps(options)) {
     return iree_ok_status();
   }
-  for (iree_host_size_t i = 0; i < counts.tap_count; ++i) {
+  for (iree_host_size_t i = 0; i < options->diagnostic_tap_names.count; ++i) {
     if (i > UINT32_MAX ||
         options->diagnostic_tap_binding_slot_base > UINT32_MAX - (uint32_t)i) {
       return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
@@ -1573,6 +1573,8 @@ static iree_status_t id4_pipeline_program_plan_build_kernels(
 static iree_status_t id4_pipeline_program_plan_build_taps(
     const id4_pipeline_program_plan_options_t* options,
     id4_pipeline_program_plan_counts_t counts,
+    iree_host_size_t region_range_count,
+    const id4_pipeline_program_plan_region_range_t* region_ranges,
     id4_pipeline_diagnostic_tap_plan_t* taps) {
   if (!id4_pipeline_program_plan_captures_diagnostic_taps(options) ||
       counts.tap_count == 0) {
@@ -1580,63 +1582,80 @@ static iree_status_t id4_pipeline_program_plan_build_taps(
   }
 
   iree_host_size_t tap_index = 0;
-  iree_host_size_t region_operation_count = 0;
-  const iree_host_size_t operation_count =
-      id4_pipeline_program_operation_count(options->program);
-  for (iree_host_size_t i = 0; i < operation_count; ++i) {
-    const id4_pipeline_program_op_t* op =
-        id4_pipeline_program_operation_at(options->program, i);
-    if (!op) continue;
-    switch (op->kind) {
-      case ID4_PIPELINE_PROGRAM_OP_KIND_DISPATCH_LOOM:
-      case ID4_PIPELINE_PROGRAM_OP_KIND_BARRIER:
-        ++region_operation_count;
-        break;
-      case ID4_PIPELINE_PROGRAM_OP_KIND_TAP: {
-        if (!id4_pipeline_program_plan_tap_name_requested(
-                options, op->payload.tap.name)) {
+  for (iree_host_size_t region_index = 0; region_index < region_range_count;
+       ++region_index) {
+    if (region_index > UINT32_MAX) {
+      return iree_make_status(
+          IREE_STATUS_OUT_OF_RANGE,
+          "program region index %" PRIhsz " exceeds uint32_t", region_index);
+    }
+    const id4_pipeline_program_plan_region_range_t* range =
+        &region_ranges[region_index];
+    const iree_host_size_t operation_limit =
+        range->source_operation_offset + range->source_operation_count;
+    iree_host_size_t region_operation_count = 0;
+    for (iree_host_size_t i = range->source_operation_offset;
+         i < operation_limit; ++i) {
+      const id4_pipeline_program_op_t* op =
+          id4_pipeline_program_operation_at(options->program, i);
+      if (!op) continue;
+      switch (op->kind) {
+        case ID4_PIPELINE_PROGRAM_OP_KIND_DISPATCH_LOOM:
+        case ID4_PIPELINE_PROGRAM_OP_KIND_BARRIER:
+          ++region_operation_count;
+          break;
+        case ID4_PIPELINE_PROGRAM_OP_KIND_TAP: {
+          if (!id4_pipeline_program_plan_tap_name_requested(
+                  options, op->payload.tap.name)) {
+            break;
+          }
+          if (region_operation_count == 0) {
+            return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                                    "program tap %.*s has no preceding "
+                                    "executable region operation",
+                                    (int)op->payload.tap.name.size,
+                                    op->payload.tap.name.data);
+          }
+          const id4_pipeline_program_tensor_record_t* tensor =
+              id4_pipeline_program_tensor_at(options->program,
+                                             op->payload.tap.tensor.ordinal);
+          if (!tensor) {
+            return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                    "program tap tensor %u is missing",
+                                    op->payload.tap.tensor.ordinal);
+          }
+          taps[tap_index].name = op->payload.tap.name;
+          taps[tap_index].region_id = (uint32_t)region_index;
+          taps[tap_index].placement_id = options->region_placement_id;
+          taps[tap_index].binding_slot =
+              options->diagnostic_tap_binding_slot_base + (uint32_t)tap_index;
+          taps[tap_index].after_operation_ordinal = region_operation_count - 1;
+          taps[tap_index].target_name = tensor->name;
+          taps[tap_index].layout = (id4_pipeline_tensor_layout_t){
+              // Stable capture record name.
+              .name = op->payload.tap.name,
+              // Captured tensor element type.
+              .dtype = id4_pipeline_program_region_convert_dtype(tensor->dtype),
+              // Captured tensor shape.
+              .shape = id4_pipeline_program_plan_convert_shape(tensor->shape),
+              // Dense captured tensor byte length.
+              .byte_length = tensor->byte_length,
+              // Tap bindings are standalone issue-time buffers.
+              .alignment = 0,
+          };
+          ++tap_index;
           break;
         }
-        if (region_operation_count == 0) {
-          return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                                  "program tap %.*s has no preceding "
-                                  "executable region operation",
-                                  (int)op->payload.tap.name.size,
-                                  op->payload.tap.name.data);
-        }
-        const id4_pipeline_program_tensor_record_t* tensor =
-            id4_pipeline_program_tensor_at(options->program,
-                                           op->payload.tap.tensor.ordinal);
-        if (!tensor) {
-          return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                                  "program tap tensor %u is missing",
-                                  op->payload.tap.tensor.ordinal);
-        }
-        taps[tap_index].name = op->payload.tap.name;
-        taps[tap_index].region_id = 0;
-        taps[tap_index].placement_id = options->region_placement_id;
-        taps[tap_index].binding_slot =
-            options->diagnostic_tap_binding_slot_base + (uint32_t)tap_index;
-        taps[tap_index].after_operation_ordinal = region_operation_count - 1;
-        taps[tap_index].target_name = tensor->name;
-        taps[tap_index].layout = (id4_pipeline_tensor_layout_t){
-            // Stable capture record name.
-            .name = op->payload.tap.name,
-            // Captured tensor element type.
-            .dtype = id4_pipeline_program_region_convert_dtype(tensor->dtype),
-            // Captured tensor shape.
-            .shape = id4_pipeline_program_plan_convert_shape(tensor->shape),
-            // Dense captured tensor byte length.
-            .byte_length = tensor->byte_length,
-            // Tap bindings are standalone issue-time buffers.
-            .alignment = 0,
-        };
-        ++tap_index;
-        break;
+        default:
+          break;
       }
-      default:
-        break;
     }
+  }
+  if (tap_index != options->diagnostic_tap_names.count) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "program planned %" PRIhsz
+                            " diagnostic taps but expected %" PRIhsz,
+                            tap_index, options->diagnostic_tap_names.count);
   }
   return iree_ok_status();
 }
@@ -2035,12 +2054,6 @@ iree_status_t id4_pipeline_program_create_plan(
                                 "executable region ranges");
     }
   }
-  if (iree_status_is_ok(status) && region_range_count > 1 &&
-      planned_tap_count != 0) {
-    status = iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                              "diagnostic tap capture across multiple program "
-                              "regions is not implemented");
-  }
   if (iree_status_is_ok(status) && counts.parameter_count != 0) {
     status = iree_allocator_malloc_array(host_allocator, counts.parameter_count,
                                          sizeof(parameter_requests[0]),
@@ -2233,7 +2246,8 @@ iree_status_t id4_pipeline_program_create_plan(
   }
 
   if (iree_status_is_ok(status)) {
-    status = id4_pipeline_program_plan_build_taps(options, counts, taps);
+    status = id4_pipeline_program_plan_build_taps(
+        options, counts, region_range_count, region_ranges, taps);
   }
 
   if (iree_status_is_ok(status) && shared_tensor_records) {

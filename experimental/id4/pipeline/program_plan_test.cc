@@ -394,6 +394,100 @@ static id4_pipeline_program_t* CreateRegionCutProgram(
   return program;
 }
 
+static id4_pipeline_program_t* CreateRegionCutTapProgram() {
+  ProgramBuilderScope builder_scope;
+  id4_pipeline_program_builder_t* builder = builder_scope.builder();
+
+  id4_pipeline_program_tensor_t input = id4_pipeline_program_tensor_invalid();
+  id4_pipeline_program_import_tensor_options_t input_options = {
+      /*.structure_size=*/sizeof(input_options),
+      /*.next=*/nullptr,
+      /*.flags=*/ID4_PIPELINE_PROGRAM_IMPORT_TENSOR_FLAG_INITIALIZED,
+      /*.name=*/IREE_SV("hidden_states.input"),
+      /*.dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_F32,
+      /*.shape=*/id4_pipeline_program_make_shape_rank2(1, 4),
+  };
+  IREE_CHECK_OK(
+      id4_pipeline_program_import_tensor(builder, &input_options, &input));
+
+  id4_pipeline_program_tensor_t output = id4_pipeline_program_tensor_invalid();
+  id4_pipeline_program_import_tensor_options_t output_options = {
+      /*.structure_size=*/sizeof(output_options),
+      /*.next=*/nullptr,
+      /*.flags=*/0,
+      /*.name=*/IREE_SV("hidden_states.output"),
+      /*.dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_F32,
+      /*.shape=*/id4_pipeline_program_make_shape_rank2(1, 4),
+  };
+  IREE_CHECK_OK(
+      id4_pipeline_program_import_tensor(builder, &output_options, &output));
+
+  id4_pipeline_program_dispatch_binding_t first_bindings[] = {
+      id4_pipeline_program_read(input),
+      id4_pipeline_program_write(output),
+  };
+  id4_pipeline_program_dispatch_loom_options_t first_dispatch_options = {
+      /*.structure_size=*/sizeof(first_dispatch_options),
+      /*.next=*/nullptr,
+      /*.name=*/IREE_SV("entry.copy"),
+      /*.kernel=*/
+      id4_pipeline_make_kernel_ref(IREE_SV("test/copy"), IREE_SV("copy")),
+      /*.config_binding_count=*/0,
+      /*.config_bindings=*/nullptr,
+      /*.binding_count=*/IREE_ARRAYSIZE(first_bindings),
+      /*.bindings=*/first_bindings,
+  };
+  IREE_CHECK_OK(
+      id4_pipeline_program_dispatch_loom(builder, &first_dispatch_options));
+
+  id4_pipeline_program_tap_options_t first_tap_options = {
+      /*.structure_size=*/sizeof(first_tap_options),
+      /*.next=*/nullptr,
+      /*.name=*/IREE_SV("entry.copy.output"),
+      /*.tensor=*/output,
+  };
+  IREE_CHECK_OK(id4_pipeline_program_tap(builder, &first_tap_options));
+
+  id4_pipeline_program_region_cut_options_t cut_options = {
+      /*.structure_size=*/sizeof(cut_options),
+      /*.next=*/nullptr,
+      /*.name=*/IREE_SV("entry.after_copy"),
+  };
+  IREE_CHECK_OK(id4_pipeline_program_region_cut(builder, &cut_options));
+
+  id4_pipeline_program_dispatch_binding_t second_bindings[] = {
+      id4_pipeline_program_read_write(output),
+  };
+  id4_pipeline_program_dispatch_loom_options_t second_dispatch_options = {
+      /*.structure_size=*/sizeof(second_dispatch_options),
+      /*.next=*/nullptr,
+      /*.name=*/IREE_SV("entry.finalize"),
+      /*.kernel=*/
+      id4_pipeline_make_kernel_ref(IREE_SV("test/finalize"),
+                                   IREE_SV("finalize")),
+      /*.config_binding_count=*/0,
+      /*.config_bindings=*/nullptr,
+      /*.binding_count=*/IREE_ARRAYSIZE(second_bindings),
+      /*.bindings=*/second_bindings,
+  };
+  IREE_CHECK_OK(
+      id4_pipeline_program_dispatch_loom(builder, &second_dispatch_options));
+
+  id4_pipeline_program_tap_options_t second_tap_options = {
+      /*.structure_size=*/sizeof(second_tap_options),
+      /*.next=*/nullptr,
+      /*.name=*/IREE_SV("entry.final.output"),
+      /*.tensor=*/output,
+  };
+  IREE_CHECK_OK(id4_pipeline_program_tap(builder, &second_tap_options));
+
+  id4_pipeline_program_t* program = nullptr;
+  IREE_CHECK_OK(id4_pipeline_program_builder_seal(
+      builder, iree_allocator_system(), &program));
+  builder_scope.DestroyBuilder();
+  return program;
+}
+
 static id4_pipeline_program_t* CreateRegionCutSharedAcquireProgram() {
   ProgramBuilderScope builder_scope;
   id4_pipeline_program_builder_t* builder = builder_scope.builder();
@@ -1153,6 +1247,57 @@ TEST(PipelineProgramPlan, PlansRegionRangesFromCuts) {
   EXPECT_EQ(second_region->source_operation_count, 1u);
   EXPECT_EQ(second_region->statistics.dispatch_count, 1u);
   EXPECT_EQ(id4_pipeline_plan_memory_slab_count(plan), 0u);
+
+  id4_pipeline_plan_release(plan);
+  iree_hal_device_group_release(device_group);
+  id4_pipeline_program_release(program);
+}
+
+TEST(PipelineProgramPlan, AssignsDiagnosticTapsToTheirRegions) {
+  id4_pipeline_program_t* program = CreateRegionCutTapProgram();
+  iree_hal_device_group_t* device_group = CreateLocalSyncDeviceGroup();
+  id4_pipeline_device_placement_t placement = {
+      /*.role=*/IREE_SV("default"),
+      /*.device_index=*/0,
+      /*.queue_affinity=*/IREE_HAL_QUEUE_AFFINITY_ANY,
+  };
+  id4_pipeline_diagnostics_sink_t diagnostics_sink;
+  id4_pipeline_diagnostics_sink_initialize_ignore(&diagnostics_sink);
+  id4_pipeline_program_plan_options_t options =
+      MakePlanOptions(program, device_group, &placement, &diagnostics_sink);
+  options.region_binding_capacity = 8;
+  options.region_local_binding_slot = 6;
+  options.region_shared_binding_slot = 7;
+  const iree_string_view_t diagnostic_tap_names[] = {
+      IREE_SV("entry.copy.output"),
+      IREE_SV("entry.final.output"),
+  };
+  options.flags = ID4_PIPELINE_PROGRAM_PLAN_FLAG_CAPTURE_DIAGNOSTIC_TAPS;
+  options.diagnostic_tap_names = (iree_string_view_list_t){
+      IREE_ARRAYSIZE(diagnostic_tap_names),
+      diagnostic_tap_names,
+  };
+
+  id4_pipeline_plan_t* plan = nullptr;
+  IREE_ASSERT_OK(id4_pipeline_program_create_plan(
+      &options, iree_allocator_system(), &plan));
+
+  ASSERT_EQ(id4_pipeline_plan_region_count(plan), 2u);
+  ASSERT_EQ(id4_pipeline_plan_diagnostic_tap_count(plan), 2u);
+  const id4_pipeline_diagnostic_tap_plan_t* first_tap =
+      id4_pipeline_plan_diagnostic_tap_at(plan, 0);
+  ASSERT_NE(first_tap, nullptr);
+  ExpectStringViewEqual(first_tap->name, IREE_SV("entry.copy.output"));
+  EXPECT_EQ(first_tap->region_id, 0u);
+  EXPECT_EQ(first_tap->binding_slot, 3u);
+  EXPECT_EQ(first_tap->after_operation_ordinal, 0u);
+  const id4_pipeline_diagnostic_tap_plan_t* second_tap =
+      id4_pipeline_plan_diagnostic_tap_at(plan, 1);
+  ASSERT_NE(second_tap, nullptr);
+  ExpectStringViewEqual(second_tap->name, IREE_SV("entry.final.output"));
+  EXPECT_EQ(second_tap->region_id, 1u);
+  EXPECT_EQ(second_tap->binding_slot, 4u);
+  EXPECT_EQ(second_tap->after_operation_ordinal, 0u);
 
   id4_pipeline_plan_release(plan);
   iree_hal_device_group_release(device_group);

@@ -144,7 +144,14 @@ static iree_status_t CreateTwoScopeParameterProvider(
       IREE_ARRAYSIZE(entries), entries, iree_allocator_system(), out_provider);
 }
 
-static id4_pipeline_program_t* CreateTwoRegionAddProgram() {
+typedef uint32_t id4_pipeline_test_program_flags_t;
+
+enum id4_pipeline_test_program_flag_bits_t {
+  ID4_PIPELINE_TEST_PROGRAM_FLAG_AUTHOR_DIAGNOSTIC_TAPS = 1u << 0,
+};
+
+static id4_pipeline_program_t* CreateTwoRegionAddProgram(
+    id4_pipeline_test_program_flags_t flags) {
   ProgramBuilderScope builder_scope;
   id4_pipeline_program_builder_t* builder = builder_scope.builder();
   const id4_pipeline_program_shape_t shape =
@@ -219,6 +226,17 @@ static id4_pipeline_program_t* CreateTwoRegionAddProgram() {
   IREE_CHECK_OK(
       id4_pipeline_program_dispatch_loom(builder, &first_dispatch_options));
 
+  if (iree_all_bits_set(
+          flags, ID4_PIPELINE_TEST_PROGRAM_FLAG_AUTHOR_DIAGNOSTIC_TAPS)) {
+    id4_pipeline_program_tap_options_t tap_options = {
+        /*.structure_size=*/sizeof(tap_options),
+        /*.next=*/nullptr,
+        /*.name=*/IREE_SV("add.first.hidden"),
+        /*.tensor=*/hidden,
+    };
+    IREE_CHECK_OK(id4_pipeline_program_tap(builder, &tap_options));
+  }
+
   id4_pipeline_program_region_cut_options_t cut_options = {
       /*.structure_size=*/sizeof(cut_options),
       /*.next=*/nullptr,
@@ -280,6 +298,17 @@ static id4_pipeline_program_t* CreateTwoRegionAddProgram() {
   IREE_CHECK_OK(
       id4_pipeline_program_dispatch_loom(builder, &second_dispatch_options));
 
+  if (iree_all_bits_set(
+          flags, ID4_PIPELINE_TEST_PROGRAM_FLAG_AUTHOR_DIAGNOSTIC_TAPS)) {
+    id4_pipeline_program_tap_options_t tap_options = {
+        /*.structure_size=*/sizeof(tap_options),
+        /*.next=*/nullptr,
+        /*.name=*/IREE_SV("add.second.output"),
+        /*.tensor=*/output,
+    };
+    IREE_CHECK_OK(id4_pipeline_program_tap(builder, &tap_options));
+  }
+
   id4_pipeline_program_export_options_t export_options = {
       /*.structure_size=*/sizeof(export_options),
       /*.next=*/nullptr,
@@ -318,7 +347,23 @@ static iree_hal_semaphore_list_t OneSemaphoreList(
   };
 }
 
-TEST(ProgramStageIntegration, IssuesMultiRegionProgramWithParameterGroups) {
+static void ExpectFloatValues(iree_hal_device_t* device,
+                              iree_hal_buffer_t* buffer,
+                              const float expected_values[4]) {
+  float values[4] = {};
+  IREE_ASSERT_OK(iree_hal_device_transfer_d2h(
+      device, buffer, /*source_offset=*/0, values, sizeof(values),
+      IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT, iree_infinite_timeout()));
+  EXPECT_FLOAT_EQ(values[0], expected_values[0]);
+  EXPECT_FLOAT_EQ(values[1], expected_values[1]);
+  EXPECT_FLOAT_EQ(values[2], expected_values[2]);
+  EXPECT_FLOAT_EQ(values[3], expected_values[3]);
+}
+
+static void RunTwoRegionAddProgram(id4_pipeline_test_program_flags_t flags) {
+  const bool captures_diagnostic_taps = iree_all_bits_set(
+      flags, ID4_PIPELINE_TEST_PROGRAM_FLAG_AUTHOR_DIAGNOSTIC_TAPS);
+
   RuntimeContext context;
   id4_tooling_runtime_context_options_t context_options;
   std::memset(&context_options, 0, sizeof(context_options));
@@ -340,7 +385,7 @@ TEST(ProgramStageIntegration, IssuesMultiRegionProgramWithParameterGroups) {
       parameter_provider;
   IREE_ASSERT_OK(CreateTwoScopeParameterProvider(parameter_provider.out()));
   OwningRef<id4_pipeline_program_t, id4_pipeline_program_release> program;
-  program.reset(CreateTwoRegionAddProgram());
+  program.reset(CreateTwoRegionAddProgram(flags));
 
   id4_pipeline_stage_plan_options_t stage_plan_options;
   std::memset(&stage_plan_options, 0, sizeof(stage_plan_options));
@@ -348,6 +393,18 @@ TEST(ProgramStageIntegration, IssuesMultiRegionProgramWithParameterGroups) {
   stage_plan_options.device_index = 0;
   stage_plan_options.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
   stage_plan_options.diagnostics_sink = &diagnostics_sink;
+  const iree_string_view_t diagnostic_tap_names[] = {
+      IREE_SV("add.first.hidden"),
+      IREE_SV("add.second.output"),
+  };
+  if (captures_diagnostic_taps) {
+    stage_plan_options.flags =
+        ID4_PIPELINE_STAGE_PLAN_FLAG_CAPTURE_DIAGNOSTIC_TAPS;
+    stage_plan_options.diagnostic_tap_names = iree_string_view_list_t{
+        /*.count=*/IREE_ARRAYSIZE(diagnostic_tap_names),
+        /*.values=*/diagnostic_tap_names,
+    };
+  }
   id4_pipeline_program_stage_plan_options_t plan_options;
   std::memset(&plan_options, 0, sizeof(plan_options));
   plan_options.structure_size = sizeof(plan_options);
@@ -418,6 +475,20 @@ TEST(ProgramStageIntegration, IssuesMultiRegionProgramWithParameterGroups) {
           IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET |
           IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE,
       /*byte_length=*/4 * sizeof(float), output_buffer.out()));
+  OwningRef<iree_hal_buffer_t, iree_hal_buffer_release> first_tap_buffer;
+  OwningRef<iree_hal_buffer_t, iree_hal_buffer_release> second_tap_buffer;
+  if (captures_diagnostic_taps) {
+    IREE_ASSERT_OK(AllocateDeviceBuffer(
+        device,
+        IREE_HAL_BUFFER_USAGE_TRANSFER_SOURCE |
+            IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET,
+        /*byte_length=*/4 * sizeof(float), first_tap_buffer.out()));
+    IREE_ASSERT_OK(AllocateDeviceBuffer(
+        device,
+        IREE_HAL_BUFFER_USAGE_TRANSFER_SOURCE |
+            IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET,
+        /*byte_length=*/4 * sizeof(float), second_tap_buffer.out()));
+  }
 
   static const float input_values[] = {1.0f, 2.0f, 3.0f, 4.0f};
   IREE_ASSERT_OK(iree_hal_device_transfer_h2d(
@@ -437,6 +508,18 @@ TEST(ProgramStageIntegration, IssuesMultiRegionProgramWithParameterGroups) {
           /*.length=*/sizeof(input_values),
       },
   };
+  iree_hal_buffer_binding_t diagnostic_tap_bindings[] = {
+      {
+          /*.buffer=*/first_tap_buffer.get(),
+          /*.offset=*/0,
+          /*.length=*/sizeof(input_values),
+      },
+      {
+          /*.buffer=*/second_tap_buffer.get(),
+          /*.offset=*/0,
+          /*.length=*/sizeof(input_values),
+      },
+  };
 
   OwningRef<iree_hal_semaphore_t, iree_hal_semaphore_release> issue_semaphore;
   IREE_ASSERT_OK(iree_hal_semaphore_create(
@@ -452,6 +535,11 @@ TEST(ProgramStageIntegration, IssuesMultiRegionProgramWithParameterGroups) {
   issue_options.structure_size = sizeof(issue_options);
   issue_options.boundary_binding_count = IREE_ARRAYSIZE(boundary_bindings);
   issue_options.boundary_bindings = boundary_bindings;
+  if (captures_diagnostic_taps) {
+    issue_options.diagnostic_tap_binding_count =
+        IREE_ARRAYSIZE(diagnostic_tap_bindings);
+    issue_options.diagnostic_tap_bindings = diagnostic_tap_bindings;
+  }
   issue_options.wait_semaphore_list = iree_hal_semaphore_list_empty();
   issue_options.signal_semaphore_list = issue_signal_list;
   issue_options.diagnostics_sink = &diagnostics_sink;
@@ -464,15 +552,21 @@ TEST(ProgramStageIntegration, IssuesMultiRegionProgramWithParameterGroups) {
       prepare_semaphore.get(), prepare_signal_value, iree_infinite_timeout(),
       IREE_ASYNC_WAIT_FLAG_NONE));
 
-  float output_values[4] = {};
-  IREE_ASSERT_OK(iree_hal_device_transfer_d2h(
-      device, output_buffer.get(), /*source_offset=*/0, output_values,
-      sizeof(output_values), IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT,
-      iree_infinite_timeout()));
-  EXPECT_FLOAT_EQ(output_values[0], 111.0f);
-  EXPECT_FLOAT_EQ(output_values[1], 112.0f);
-  EXPECT_FLOAT_EQ(output_values[2], 113.0f);
-  EXPECT_FLOAT_EQ(output_values[3], 114.0f);
+  const float expected_output[] = {111.0f, 112.0f, 113.0f, 114.0f};
+  ExpectFloatValues(device, output_buffer.get(), expected_output);
+  if (captures_diagnostic_taps) {
+    const float expected_first_tap[] = {11.0f, 12.0f, 13.0f, 14.0f};
+    ExpectFloatValues(device, first_tap_buffer.get(), expected_first_tap);
+    ExpectFloatValues(device, second_tap_buffer.get(), expected_output);
+  }
+}
+
+TEST(ProgramStageIntegration, IssuesMultiRegionProgramWithParameterGroups) {
+  RunTwoRegionAddProgram(/*flags=*/0);
+}
+
+TEST(ProgramStageIntegration, IssuesMultiRegionProgramWithDiagnosticTaps) {
+  RunTwoRegionAddProgram(ID4_PIPELINE_TEST_PROGRAM_FLAG_AUTHOR_DIAGNOSTIC_TAPS);
 }
 
 }  // namespace
