@@ -2151,6 +2151,36 @@ TEST(CompileReportFormatTest, FormatsJsonSummaryWithoutDetailRows) {
   loom_target_compile_report_record_artifact_size(&report, 256);
   IREE_ASSERT_OK(loom_target_compile_report_record_pressure_row(
       &report, &pressure_rows[0]));
+  const loom_target_compile_report_schedule_band_summary_row_t
+      schedule_band_summary = {
+          /*.function_name=*/IREE_SVL("summary_only"),
+          /*.block_name=*/IREE_SVL("^entry"),
+          /*.block_index=*/0,
+          /*.first_packet_index=*/5,
+          /*.band_count=*/2,
+          /*.node_count=*/3,
+          /*.max_band_node_count=*/2,
+          /*.origin_kind=*/LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_MATRIX,
+          /*.origin_operation_name=*/IREE_SVL("low.op<amdgpu.wmma>"),
+          /*.semantic_tag=*/IREE_SVL("matrix.wmma.f32"),
+          /*.sample_value_name=*/IREE_SVL("%acc"),
+          /*.static_instruction_mix=*/
+          {
+              /*.descriptor_count=*/2,
+              /*.unknown_count=*/{},
+              /*.scalar_alu_count=*/{},
+              /*.vector_alu_count=*/{},
+              /*.matrix_count=*/2,
+              /*.mfma_count=*/{},
+              /*.smfmac_count=*/{},
+              /*.wmma_count=*/2,
+              /*.swmmac_count=*/{},
+          },
+          /*.result_value_count=*/1,
+          /*.result_unit_count=*/8,
+      };
+  IREE_ASSERT_OK(loom_target_compile_report_record_schedule_band_summary_row(
+      &report, &schedule_band_summary));
 
   iree_string_builder_t builder;
   iree_string_builder_initialize(iree_allocator_system(), &builder);
@@ -2178,6 +2208,20 @@ TEST(CompileReportFormatTest, FormatsJsonSummaryWithoutDetailRows) {
             IREE_STRING_VIEW_NPOS);
   EXPECT_EQ(iree_string_view_find(
                 output, IREE_SV("\"pressure_rows\":{\"count\":1,\"rows\""), 0),
+            IREE_STRING_VIEW_NPOS);
+  EXPECT_NE(iree_string_view_find(
+                output, IREE_SV("\"schedule_band_rows\":{\"count\":0}"), 0),
+            IREE_STRING_VIEW_NPOS);
+  EXPECT_NE(iree_string_view_find(
+                output,
+                IREE_SV("\"schedule_band_summary_rows\":{\"count\":1,"
+                        "\"rows\":["),
+                0),
+            IREE_STRING_VIEW_NPOS);
+  EXPECT_NE(iree_string_view_find(
+                output, IREE_SV("\"semantic_tag\":\"matrix.wmma.f32\""), 0),
+            IREE_STRING_VIEW_NPOS);
+  EXPECT_NE(iree_string_view_find(output, IREE_SV("\"wmma_count\":2"), 0),
             IREE_STRING_VIEW_NPOS);
 
   iree_string_builder_deinitialize(&builder);
