@@ -501,6 +501,30 @@ static iree_status_t id4_pipeline_plan_copy_memory_slabs(
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "memory slab %" PRIhsz " name is required", i);
     }
+    switch (source->scope) {
+      case ID4_PIPELINE_MEMORY_SLAB_SCOPE_REGION_LOCAL:
+        if ((iree_host_size_t)source->region_id >= plan->region_count) {
+          return iree_make_status(
+              IREE_STATUS_OUT_OF_RANGE,
+              "memory slab %.*s region id %u exceeds region count %" PRIhsz,
+              (int)source->name.size, source->name.data, source->region_id,
+              plan->region_count);
+        }
+        break;
+      case ID4_PIPELINE_MEMORY_SLAB_SCOPE_PLAN_SHARED:
+        if (source->region_id != 0) {
+          return iree_make_status(
+              IREE_STATUS_INVALID_ARGUMENT,
+              "plan-shared memory slab %.*s must have region id 0",
+              (int)source->name.size, source->name.data);
+        }
+        break;
+      default:
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "memory slab %.*s scope %u is invalid",
+                                (int)source->name.size, source->name.data,
+                                (uint32_t)source->scope);
+    }
     IREE_RETURN_IF_ERROR(id4_pipeline_plan_validate_placement_id(
         plan, source->placement_id, IREE_SV("memory slab")));
     if (source->byte_length == 0) {
@@ -522,6 +546,8 @@ static iree_status_t id4_pipeline_plan_copy_memory_slabs(
                               (int)source->name.size, source->name.data);
     }
     id4_pipeline_memory_slab_plan_t* target = &plan->memory_slabs[i];
+    target->scope = source->scope;
+    target->region_id = source->region_id;
     target->placement_id = source->placement_id;
     target->binding_slot = source->binding_slot;
     target->params = source->params;
@@ -769,6 +795,71 @@ static iree_status_t id4_pipeline_plan_validate_region_binding_slot(
   return iree_ok_status();
 }
 
+static bool id4_pipeline_plan_memory_slab_visible_to_region(
+    const id4_pipeline_memory_slab_plan_t* slab, uint32_t region_id) {
+  switch (slab->scope) {
+    case ID4_PIPELINE_MEMORY_SLAB_SCOPE_REGION_LOCAL:
+      return slab->region_id == region_id;
+    case ID4_PIPELINE_MEMORY_SLAB_SCOPE_PLAN_SHARED:
+      return true;
+    default:
+      return false;
+  }
+}
+
+static iree_status_t id4_pipeline_plan_validate_memory_slab_region_binding(
+    const id4_pipeline_plan_t* plan,
+    const id4_pipeline_memory_slab_plan_t* slab, uint32_t region_id) {
+  if ((iree_host_size_t)region_id >= plan->region_count) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "memory slab %.*s region id %u exceeds region "
+                            "count %" PRIhsz,
+                            (int)slab->name.size, slab->name.data, region_id,
+                            plan->region_count);
+  }
+  const id4_pipeline_region_plan_t* region = &plan->regions[region_id];
+  if (slab->binding_slot >= region->binding_capacity) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "memory slab %.*s binding slot %u exceeds region "
+                            "binding capacity %" PRIhsz,
+                            (int)slab->name.size, slab->name.data,
+                            slab->binding_slot, region->binding_capacity);
+  }
+  switch (slab->scope) {
+    case ID4_PIPELINE_MEMORY_SLAB_SCOPE_REGION_LOCAL:
+      if (slab->binding_slot != region->local_binding_slot) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "region-local memory slab %.*s binding slot %u must match region "
+            "%u local binding slot %u",
+            (int)slab->name.size, slab->name.data, slab->binding_slot,
+            region_id, region->local_binding_slot);
+      }
+      if (slab->placement_id != region->placement_id) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "region-local memory slab %.*s placement %u does not match region "
+            "%u placement %u",
+            (int)slab->name.size, slab->name.data, slab->placement_id,
+            region_id, region->placement_id);
+      }
+      return iree_ok_status();
+    case ID4_PIPELINE_MEMORY_SLAB_SCOPE_PLAN_SHARED:
+      if (slab->binding_slot == region->local_binding_slot) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "plan-shared memory slab %.*s binding slot must not match region "
+            "%u local binding slot",
+            (int)slab->name.size, slab->name.data, region_id);
+      }
+      return iree_ok_status();
+    default:
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT, "memory slab %.*s scope %u is invalid",
+          (int)slab->name.size, slab->name.data, (uint32_t)slab->scope);
+  }
+}
+
 static iree_status_t id4_pipeline_plan_validate_storage_binding_slots(
     const id4_pipeline_plan_t* plan) {
   if (plan->region_count == 0) return iree_ok_status();
@@ -810,20 +901,26 @@ static iree_status_t id4_pipeline_plan_validate_storage_binding_slots(
     }
     for (iree_host_size_t i = 0; i < plan->memory_slab_count; ++i) {
       const id4_pipeline_memory_slab_plan_t* slab = &plan->memory_slabs[i];
-      if (slab->binding_slot >= plan->regions[region_index].binding_capacity) {
-        return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                                "memory slab %.*s binding slot %u exceeds "
-                                "region binding capacity %" PRIhsz,
-                                (int)slab->name.size, slab->name.data,
-                                slab->binding_slot,
-                                plan->regions[region_index].binding_capacity);
+      if (!id4_pipeline_plan_memory_slab_visible_to_region(slab, region_id)) {
+        continue;
       }
+      IREE_RETURN_IF_ERROR(
+          id4_pipeline_plan_validate_memory_slab_region_binding(plan, slab,
+                                                                region_id));
       for (iree_host_size_t j = i + 1; j < plan->memory_slab_count; ++j) {
-        if (slab->binding_slot == plan->memory_slabs[j].binding_slot) {
+        const id4_pipeline_memory_slab_plan_t* other_slab =
+            &plan->memory_slabs[j];
+        if (!id4_pipeline_plan_memory_slab_visible_to_region(other_slab,
+                                                             region_id)) {
+          continue;
+        }
+        if (slab->binding_slot == other_slab->binding_slot) {
           return iree_make_status(
               IREE_STATUS_ALREADY_EXISTS,
-              "memory slab %.*s binding slot %u is already planned",
-              (int)slab->name.size, slab->name.data, slab->binding_slot);
+              "memory slab %.*s binding slot %u is already planned in region "
+              "%u",
+              (int)slab->name.size, slab->name.data, slab->binding_slot,
+              region_id);
         }
       }
       for (iree_host_size_t j = 0; j < plan->parameter_slab_count; ++j) {
@@ -950,7 +1047,11 @@ static bool id4_pipeline_plan_boundary_binding_conflicts(
     if (plan->constant_slabs[i].binding_slot == binding_slot) return true;
   }
   for (iree_host_size_t i = 0; i < plan->memory_slab_count; ++i) {
-    if (plan->memory_slabs[i].binding_slot == binding_slot) return true;
+    const id4_pipeline_memory_slab_plan_t* slab = &plan->memory_slabs[i];
+    if (id4_pipeline_plan_memory_slab_visible_to_region(slab, region_id) &&
+        slab->binding_slot == binding_slot) {
+      return true;
+    }
   }
   for (iree_host_size_t i = 0; i < plan->boundary_tensor_count; ++i) {
     const id4_pipeline_boundary_tensor_plan_t* tensor =
@@ -1216,13 +1317,13 @@ iree_status_t id4_pipeline_plan_create(
     status = id4_pipeline_plan_copy_constant_slabs(plan, options);
   }
   if (iree_status_is_ok(status)) {
-    status = id4_pipeline_plan_copy_memory_slabs(plan, options);
-  }
-  if (iree_status_is_ok(status)) {
     status = id4_pipeline_plan_copy_kernels(plan, options);
   }
   if (iree_status_is_ok(status)) {
     status = id4_pipeline_plan_copy_regions(plan, options);
+  }
+  if (iree_status_is_ok(status)) {
+    status = id4_pipeline_plan_copy_memory_slabs(plan, options);
   }
   if (iree_status_is_ok(status)) {
     status = id4_pipeline_plan_validate_storage_binding_slots(plan);
@@ -1599,6 +1700,18 @@ static iree_status_t id4_pipeline_plan_append_buffer_params_json(
       ",\"queue_affinity\":%" PRIu64 ",\"min_alignment\":%" PRIu64 "}",
       (uint64_t)params.type, (uint64_t)params.access, (uint64_t)params.usage,
       (uint64_t)params.queue_affinity, (uint64_t)params.min_alignment);
+}
+
+static iree_string_view_t id4_pipeline_memory_slab_scope_format(
+    id4_pipeline_memory_slab_scope_t scope) {
+  switch (scope) {
+    case ID4_PIPELINE_MEMORY_SLAB_SCOPE_REGION_LOCAL:
+      return IREE_SV("region_local");
+    case ID4_PIPELINE_MEMORY_SLAB_SCOPE_PLAN_SHARED:
+      return IREE_SV("plan_shared");
+    default:
+      return IREE_SV("invalid");
+  }
 }
 
 static iree_status_t id4_pipeline_plan_append_parameter_load_step_kind_json(
@@ -2123,9 +2236,15 @@ iree_status_t id4_pipeline_plan_format_json(const id4_pipeline_plan_t* plan,
         builder, "{\"id\":%" PRIhsz ",\"name\":", i));
     IREE_RETURN_IF_ERROR(
         id4_pipeline_plan_append_json_string(builder, slab->name));
+    IREE_RETURN_IF_ERROR(
+        iree_string_builder_append_cstring(builder, ",\"scope\":"));
+    IREE_RETURN_IF_ERROR(id4_pipeline_plan_append_json_string(
+        builder, id4_pipeline_memory_slab_scope_format(slab->scope)));
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-        builder, ",\"placement_id\":%u,\"binding_slot\":%u,\"params\":",
-        slab->placement_id, slab->binding_slot));
+        builder,
+        ",\"region_id\":%u,\"placement_id\":%u,\"binding_slot\":%u,"
+        "\"params\":",
+        slab->region_id, slab->placement_id, slab->binding_slot));
     IREE_RETURN_IF_ERROR(
         id4_pipeline_plan_append_buffer_params_json(builder, slab->params));
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(

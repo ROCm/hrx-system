@@ -1002,6 +1002,8 @@ TEST(PipelineProgramPlan, ReleasesLocalTensorsAtLastUse) {
   const id4_pipeline_memory_slab_plan_t* slab =
       id4_pipeline_plan_memory_slab_at(plan, 0);
   ASSERT_NE(slab, nullptr);
+  EXPECT_EQ(slab->scope, ID4_PIPELINE_MEMORY_SLAB_SCOPE_REGION_LOCAL);
+  EXPECT_EQ(slab->region_id, 0u);
   EXPECT_EQ(slab->byte_length, 32u);
   EXPECT_EQ(slab->high_water_mark, 32u);
 

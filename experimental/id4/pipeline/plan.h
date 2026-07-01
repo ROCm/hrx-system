@@ -50,10 +50,24 @@ typedef enum id4_pipeline_boundary_tensor_flag_bits_e {
   ID4_PIPELINE_BOUNDARY_TENSOR_FLAG_INITIALIZED = 1u << 2,
 } id4_pipeline_boundary_tensor_flag_bits_t;
 
+// Planned memory slab visibility scope.
+typedef enum id4_pipeline_memory_slab_scope_e {
+  // Invalid memory slab scope.
+  ID4_PIPELINE_MEMORY_SLAB_SCOPE_INVALID = 0,
+  // Slab is visible only to one executable region.
+  ID4_PIPELINE_MEMORY_SLAB_SCOPE_REGION_LOCAL = 1,
+  // Slab is visible to every executable region in the plan.
+  ID4_PIPELINE_MEMORY_SLAB_SCOPE_PLAN_SHARED = 2,
+} id4_pipeline_memory_slab_scope_t;
+
 // Planned memory slab outside of parameter slab storage.
 typedef struct id4_pipeline_memory_slab_plan_t {
   // Human-readable slab name for diagnostics.
   iree_string_view_t name;
+  // Visibility and lifetime scope for this slab.
+  id4_pipeline_memory_slab_scope_t scope;
+  // Owning region when scope is REGION_LOCAL; zero for PLAN_SHARED.
+  uint32_t region_id;
   // Plan-local placement identifier.
   uint32_t placement_id;
   // Issue-time binding-table slot used by this slab.

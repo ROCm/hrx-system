@@ -420,6 +420,8 @@ static iree_status_t id4_smoke_stage_create_plan(
   id4_pipeline_memory_slab_plan_t memory_slab;
   memset(&memory_slab, 0, sizeof(memory_slab));
   memory_slab.name = IREE_SV("smoke.local");
+  memory_slab.scope = ID4_PIPELINE_MEMORY_SLAB_SCOPE_REGION_LOCAL;
+  memory_slab.region_id = 0;
   memory_slab.placement_id = 0;
   memory_slab.binding_slot = ID4_SMOKE_STAGE_LOCAL_BINDING_SLOT;
   memory_slab.params = local_slab_params;

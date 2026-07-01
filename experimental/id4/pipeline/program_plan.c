@@ -1308,6 +1308,10 @@ iree_status_t id4_pipeline_program_create_plan(
     local_slab = (id4_pipeline_memory_slab_plan_t){
         // Human-readable local slab name.
         .name = local_slab_name,
+        // Local transient slab is scoped to the single executable region.
+        .scope = ID4_PIPELINE_MEMORY_SLAB_SCOPE_REGION_LOCAL,
+        // Semantic programs currently lower into one executable region.
+        .region_id = 0,
         // Local transient slab follows the executable region placement.
         .placement_id = options->region_placement_id,
         // Binding-table slot reserved for the local transient slab.
