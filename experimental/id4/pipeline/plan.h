@@ -176,6 +176,10 @@ typedef struct id4_pipeline_region_plan_t {
   iree_host_size_t local_lifetime_count;
   // Local tensor lifetime records owned by the containing plan.
   const id4_pipeline_region_local_lifetime_t* local_lifetimes;
+  // Number of parameter load readiness groups read by this region.
+  iree_host_size_t parameter_load_group_count;
+  // Parameter load readiness group ordinals required before this region runs.
+  const iree_host_size_t* parameter_load_groups;
 } id4_pipeline_region_plan_t;
 
 // Planned diagnostics tap.
@@ -345,6 +349,15 @@ iree_host_size_t id4_pipeline_plan_parameter_load_step_count(
 const id4_pipeline_parameter_load_step_t*
 id4_pipeline_plan_parameter_load_step_at(const id4_pipeline_plan_t* plan,
                                          iree_host_size_t index);
+
+// Returns the number of parameter load readiness groups in |plan|.
+iree_status_t id4_pipeline_plan_parameter_load_group_count(
+    const id4_pipeline_plan_t* plan, iree_host_size_t* out_count);
+
+// Returns parameter load readiness group |index| represented by |plan|.
+iree_status_t id4_pipeline_plan_parameter_load_group_at(
+    const id4_pipeline_plan_t* plan, iree_host_size_t index,
+    id4_pipeline_parameter_load_group_t* out_group);
 
 // Returns the number of constant slabs in |plan|.
 iree_host_size_t id4_pipeline_plan_constant_slab_count(

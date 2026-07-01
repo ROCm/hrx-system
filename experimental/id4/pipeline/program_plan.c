@@ -806,6 +806,245 @@ static void id4_pipeline_program_plan_build_parameter_load_steps(
   }
 }
 
+static iree_status_t
+id4_pipeline_program_plan_build_parameter_request_indices_by_tensor(
+    const id4_pipeline_program_plan_options_t* options,
+    id4_pipeline_program_plan_counts_t counts,
+    iree_host_size_t* request_indices_by_tensor) {
+  const iree_host_size_t tensor_count =
+      id4_pipeline_program_tensor_count(options->program);
+  for (iree_host_size_t i = 0; i < tensor_count; ++i) {
+    request_indices_by_tensor[i] = IREE_HOST_SIZE_MAX;
+  }
+
+  iree_host_size_t request_index = 0;
+  const iree_host_size_t operation_count =
+      id4_pipeline_program_operation_count(options->program);
+  for (iree_host_size_t i = 0; i < operation_count; ++i) {
+    const id4_pipeline_program_op_t* op =
+        id4_pipeline_program_operation_at(options->program, i);
+    if (!op || op->kind != ID4_PIPELINE_PROGRAM_OP_KIND_PARAMETER) continue;
+    const uint32_t tensor_ordinal = op->payload.parameter.tensor.ordinal;
+    if ((iree_host_size_t)tensor_ordinal >= tensor_count) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "program parameter tensor %u is missing",
+                              tensor_ordinal);
+    }
+    if (request_indices_by_tensor[tensor_ordinal] != IREE_HOST_SIZE_MAX) {
+      return iree_make_status(
+          IREE_STATUS_ALREADY_EXISTS,
+          "program parameter tensor %u has multiple request ordinals",
+          tensor_ordinal);
+    }
+    request_indices_by_tensor[tensor_ordinal] = request_index++;
+  }
+  if (request_index != counts.parameter_count) {
+    return iree_make_status(
+        IREE_STATUS_INTERNAL,
+        "program parameter request count %" PRIhsz
+        " does not match counted parameter operations %" PRIhsz,
+        request_index, counts.parameter_count);
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t id4_pipeline_program_plan_assign_request_load_group(
+    iree_host_size_t parameter_count, iree_host_size_t request_index,
+    iree_host_size_t group_index, iree_host_size_t* request_load_groups) {
+  if (request_index >= parameter_count) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "parameter load step request index %" PRIhsz
+                            " exceeds parameter request count %" PRIhsz,
+                            request_index, parameter_count);
+  }
+  if (request_load_groups[request_index] != IREE_HOST_SIZE_MAX) {
+    return iree_make_status(IREE_STATUS_ALREADY_EXISTS,
+                            "parameter request %" PRIhsz
+                            " is assigned to multiple load groups",
+                            request_index);
+  }
+  request_load_groups[request_index] = group_index;
+  return iree_ok_status();
+}
+
+static iree_status_t
+id4_pipeline_program_plan_build_parameter_request_load_groups(
+    iree_host_size_t parameter_count, iree_host_size_t load_step_count,
+    const id4_pipeline_parameter_load_step_t* load_steps,
+    iree_host_size_t* request_load_groups,
+    iree_host_size_t* out_load_group_count) {
+  *out_load_group_count = 0;
+  for (iree_host_size_t i = 0; i < parameter_count; ++i) {
+    request_load_groups[i] = IREE_HOST_SIZE_MAX;
+  }
+
+  IREE_RETURN_IF_ERROR(id4_pipeline_parameter_load_group_count(
+      load_step_count, load_steps, out_load_group_count));
+  for (iree_host_size_t group_index = 0; group_index < *out_load_group_count;
+       ++group_index) {
+    id4_pipeline_parameter_load_group_t group;
+    IREE_RETURN_IF_ERROR(id4_pipeline_parameter_load_group_at(
+        load_step_count, load_steps, group_index, &group));
+    for (iree_host_size_t step_ordinal = 0; step_ordinal < group.step_count;
+         ++step_ordinal) {
+      const id4_pipeline_parameter_load_step_t* step =
+          &load_steps[group.step_offset + step_ordinal];
+      for (iree_host_size_t request_ordinal = 0;
+           request_ordinal < step->request_count; ++request_ordinal) {
+        const iree_host_size_t request_index =
+            step->request_indices ? step->request_indices[request_ordinal]
+                                  : step->request_offset + request_ordinal;
+        IREE_RETURN_IF_ERROR(
+            id4_pipeline_program_plan_assign_request_load_group(
+                parameter_count, request_index, group_index,
+                request_load_groups));
+      }
+    }
+  }
+  for (iree_host_size_t i = 0; i < parameter_count; ++i) {
+    if (request_load_groups[i] == IREE_HOST_SIZE_MAX) {
+      return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                              "parameter request %" PRIhsz " has no load group",
+                              i);
+    }
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t id4_pipeline_program_plan_mark_parameter_tensor_read(
+    const id4_pipeline_program_plan_options_t* options,
+    id4_pipeline_program_tensor_t tensor,
+    const iree_host_size_t* parameter_request_indices_by_tensor,
+    const iree_host_size_t* parameter_load_groups_by_request,
+    iree_host_size_t parameter_load_group_count,
+    bool* parameter_load_group_used) {
+  const iree_host_size_t tensor_count =
+      id4_pipeline_program_tensor_count(options->program);
+  if ((iree_host_size_t)tensor.ordinal >= tensor_count) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "program tensor %u is missing", tensor.ordinal);
+  }
+  const iree_host_size_t request_index =
+      parameter_request_indices_by_tensor[tensor.ordinal];
+  if (request_index == IREE_HOST_SIZE_MAX) return iree_ok_status();
+
+  const iree_host_size_t group_index =
+      parameter_load_groups_by_request[request_index];
+  if (group_index >= parameter_load_group_count) {
+    return iree_make_status(IREE_STATUS_INTERNAL,
+                            "parameter request %" PRIhsz " load group %" PRIhsz
+                            " exceeds load group count %" PRIhsz,
+                            request_index, group_index,
+                            parameter_load_group_count);
+  }
+  parameter_load_group_used[group_index] = true;
+  return iree_ok_status();
+}
+
+static iree_status_t id4_pipeline_program_plan_mark_parameter_reads_for_op(
+    const id4_pipeline_program_plan_options_t* options,
+    const id4_pipeline_program_op_t* op,
+    const iree_host_size_t* parameter_request_indices_by_tensor,
+    const iree_host_size_t* parameter_load_groups_by_request,
+    iree_host_size_t parameter_load_group_count,
+    bool* parameter_load_group_used) {
+  if (!op) return iree_ok_status();
+  switch (op->kind) {
+    case ID4_PIPELINE_PROGRAM_OP_KIND_DISPATCH_LOOM:
+      for (iree_host_size_t i = 0; i < op->payload.dispatch_loom.binding_count;
+           ++i) {
+        const id4_pipeline_program_dispatch_binding_t* binding =
+            &op->payload.dispatch_loom.bindings[i];
+        if (!iree_any_bit_set(binding->access,
+                              ID4_PIPELINE_PROGRAM_TENSOR_ACCESS_READ)) {
+          continue;
+        }
+        IREE_RETURN_IF_ERROR(
+            id4_pipeline_program_plan_mark_parameter_tensor_read(
+                options, binding->tensor, parameter_request_indices_by_tensor,
+                parameter_load_groups_by_request, parameter_load_group_count,
+                parameter_load_group_used));
+      }
+      return iree_ok_status();
+    case ID4_PIPELINE_PROGRAM_OP_KIND_TAP:
+      if (!id4_pipeline_program_plan_tap_name_requested(options,
+                                                        op->payload.tap.name)) {
+        return iree_ok_status();
+      }
+      return id4_pipeline_program_plan_mark_parameter_tensor_read(
+          options, op->payload.tap.tensor, parameter_request_indices_by_tensor,
+          parameter_load_groups_by_request, parameter_load_group_count,
+          parameter_load_group_used);
+    default:
+      return iree_ok_status();
+  }
+}
+
+static iree_status_t
+id4_pipeline_program_plan_build_region_parameter_load_groups(
+    const id4_pipeline_program_plan_options_t* options,
+    iree_host_size_t range_count,
+    const id4_pipeline_program_plan_region_range_t* ranges,
+    const iree_host_size_t* parameter_request_indices_by_tensor,
+    const iree_host_size_t* parameter_load_groups_by_request,
+    iree_host_size_t parameter_load_group_count,
+    iree_host_size_t* region_parameter_load_group_counts,
+    iree_host_size_t** region_parameter_load_groups,
+    iree_allocator_t host_allocator) {
+  if (parameter_load_group_count == 0 || range_count == 0) {
+    return iree_ok_status();
+  }
+
+  bool* parameter_load_group_used = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_allocator_malloc_array(host_allocator, parameter_load_group_count,
+                                  sizeof(parameter_load_group_used[0]),
+                                  (void**)&parameter_load_group_used));
+
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t region_index = 0;
+       region_index < range_count && iree_status_is_ok(status);
+       ++region_index) {
+    memset(parameter_load_group_used, 0,
+           parameter_load_group_count * sizeof(parameter_load_group_used[0]));
+    const id4_pipeline_program_plan_region_range_t* range =
+        &ranges[region_index];
+    const iree_host_size_t operation_limit =
+        range->source_operation_offset + range->source_operation_count;
+    for (iree_host_size_t operation_index = range->source_operation_offset;
+         operation_index < operation_limit && iree_status_is_ok(status);
+         ++operation_index) {
+      const id4_pipeline_program_op_t* op =
+          id4_pipeline_program_operation_at(options->program, operation_index);
+      status = id4_pipeline_program_plan_mark_parameter_reads_for_op(
+          options, op, parameter_request_indices_by_tensor,
+          parameter_load_groups_by_request, parameter_load_group_count,
+          parameter_load_group_used);
+    }
+    if (!iree_status_is_ok(status)) break;
+
+    iree_host_size_t group_count = 0;
+    for (iree_host_size_t i = 0; i < parameter_load_group_count; ++i) {
+      if (parameter_load_group_used[i]) ++group_count;
+    }
+    region_parameter_load_group_counts[region_index] = group_count;
+    if (group_count == 0) continue;
+
+    iree_host_size_t* groups = NULL;
+    status = iree_allocator_malloc_array(host_allocator, group_count,
+                                         sizeof(groups[0]), (void**)&groups);
+    if (!iree_status_is_ok(status)) break;
+    region_parameter_load_groups[region_index] = groups;
+    for (iree_host_size_t i = 0, group_ordinal = 0;
+         i < parameter_load_group_count; ++i) {
+      if (parameter_load_group_used[i]) groups[group_ordinal++] = i;
+    }
+  }
+
+  iree_allocator_free(host_allocator, parameter_load_group_used);
+  return status;
+}
+
 static iree_status_t id4_pipeline_program_plan_build_constant_requests(
     const id4_pipeline_program_plan_options_t* options,
     id4_pipeline_program_plan_counts_t counts,
@@ -1593,6 +1832,8 @@ iree_status_t id4_pipeline_program_create_plan(
   id4_pipeline_parameter_load_source_t* parameter_load_sources = NULL;
   id4_pipeline_parameter_load_step_t* parameter_load_steps = NULL;
   iree_host_size_t* parameter_load_step_request_indices = NULL;
+  iree_host_size_t* parameter_request_indices_by_tensor = NULL;
+  iree_host_size_t* parameter_load_groups_by_request = NULL;
   id4_pipeline_constant_request_t* constant_requests = NULL;
   id4_pipeline_boundary_tensor_plan_t* boundary_tensors = NULL;
   id4_pipeline_kernel_plan_t* kernels = NULL;
@@ -1604,11 +1845,14 @@ iree_status_t id4_pipeline_program_create_plan(
   id4_pipeline_region_statistics_t* region_statistics = NULL;
   iree_host_size_t* region_local_lifetime_counts = NULL;
   id4_pipeline_region_local_lifetime_t** region_local_lifetimes = NULL;
+  iree_host_size_t* region_parameter_load_group_counts = NULL;
+  iree_host_size_t** region_parameter_load_groups = NULL;
   id4_pipeline_region_plan_t* regions = NULL;
   id4_pipeline_memory_slab_plan_t* memory_slabs = NULL;
   iree_string_view_t shared_slab_name = iree_string_view_empty();
   iree_string_view_t* local_slab_names = NULL;
   iree_host_size_t parameter_load_step_count = 0;
+  iree_host_size_t parameter_load_group_count = 0;
   iree_host_size_t region_range_count = 0;
   iree_host_size_t shared_tensor_count = 0;
   iree_device_size_t shared_slab_byte_length = 0;
@@ -1667,6 +1911,18 @@ iree_status_t id4_pipeline_program_create_plan(
         sizeof(parameter_load_step_request_indices[0]),
         (void**)&parameter_load_step_request_indices);
   }
+  if (iree_status_is_ok(status) && counts.parameter_count != 0) {
+    status = iree_allocator_malloc_array(
+        host_allocator, id4_pipeline_program_tensor_count(options->program),
+        sizeof(parameter_request_indices_by_tensor[0]),
+        (void**)&parameter_request_indices_by_tensor);
+  }
+  if (iree_status_is_ok(status) && counts.parameter_count != 0) {
+    status =
+        iree_allocator_malloc_array(host_allocator, counts.parameter_count,
+                                    sizeof(parameter_load_groups_by_request[0]),
+                                    (void**)&parameter_load_groups_by_request);
+  }
   if (iree_status_is_ok(status) && counts.constant_count != 0) {
     status = iree_allocator_malloc_array(host_allocator, counts.constant_count,
                                          sizeof(constant_requests[0]),
@@ -1720,6 +1976,22 @@ iree_status_t id4_pipeline_program_create_plan(
   if (iree_status_is_ok(status) && region_range_count != 0) {
     memset(region_local_lifetimes, 0,
            region_range_count * sizeof(region_local_lifetimes[0]));
+    status = iree_allocator_malloc_array(
+        host_allocator, region_range_count,
+        sizeof(region_parameter_load_group_counts[0]),
+        (void**)&region_parameter_load_group_counts);
+  }
+  if (iree_status_is_ok(status) && region_range_count != 0) {
+    memset(region_parameter_load_group_counts, 0,
+           region_range_count * sizeof(region_parameter_load_group_counts[0]));
+    status =
+        iree_allocator_malloc_array(host_allocator, region_range_count,
+                                    sizeof(region_parameter_load_groups[0]),
+                                    (void**)&region_parameter_load_groups);
+  }
+  if (iree_status_is_ok(status) && region_range_count != 0) {
+    memset(region_parameter_load_groups, 0,
+           region_range_count * sizeof(region_parameter_load_groups[0]));
     status = iree_allocator_malloc_array(host_allocator, region_range_count,
                                          sizeof(regions[0]), (void**)&regions);
   }
@@ -1750,6 +2022,24 @@ iree_status_t id4_pipeline_program_create_plan(
     id4_pipeline_program_plan_build_parameter_load_steps(
         counts.parameter_count, parameter_load_records, parameter_load_steps,
         parameter_load_step_request_indices, &parameter_load_step_count);
+  }
+  if (iree_status_is_ok(status) && counts.parameter_count != 0) {
+    status =
+        id4_pipeline_program_plan_build_parameter_request_indices_by_tensor(
+            options, counts, parameter_request_indices_by_tensor);
+  }
+  if (iree_status_is_ok(status) && counts.parameter_count != 0) {
+    status = id4_pipeline_program_plan_build_parameter_request_load_groups(
+        counts.parameter_count, parameter_load_step_count, parameter_load_steps,
+        parameter_load_groups_by_request, &parameter_load_group_count);
+  }
+  if (iree_status_is_ok(status) && counts.parameter_count != 0 &&
+      region_range_count != 0) {
+    status = id4_pipeline_program_plan_build_region_parameter_load_groups(
+        options, region_range_count, region_ranges,
+        parameter_request_indices_by_tensor, parameter_load_groups_by_request,
+        parameter_load_group_count, region_parameter_load_group_counts,
+        region_parameter_load_groups, host_allocator);
   }
 
   iree_device_size_t constant_slab_byte_length = 0;
@@ -1893,6 +2183,12 @@ iree_status_t id4_pipeline_program_create_plan(
       region->statistics = region_statistics[i];
       region->local_lifetime_count = region_local_lifetime_counts[i];
       region->local_lifetimes = region_local_lifetimes[i];
+      region->parameter_load_group_count =
+          region_parameter_load_group_counts
+              ? region_parameter_load_group_counts[i]
+              : 0;
+      region->parameter_load_groups =
+          region_parameter_load_groups ? region_parameter_load_groups[i] : NULL;
       if (region_statistics[i].local_slab_byte_length == 0) continue;
 
       status = id4_pipeline_program_plan_make_local_slab_name(
@@ -1965,6 +2261,9 @@ iree_status_t id4_pipeline_program_create_plan(
     if (local_slab_names) {
       iree_allocator_free(host_allocator, (void*)local_slab_names[i].data);
     }
+    if (region_parameter_load_groups) {
+      iree_allocator_free(host_allocator, region_parameter_load_groups[i]);
+    }
     if (region_local_lifetime_counts && region_local_lifetimes) {
       id4_pipeline_region_local_lifetime_list_release(
           region_local_lifetime_counts[i], region_local_lifetimes[i],
@@ -1976,6 +2275,8 @@ iree_status_t id4_pipeline_program_create_plan(
   iree_allocator_free(host_allocator, local_slab_names);
   iree_allocator_free(host_allocator, memory_slabs);
   iree_allocator_free(host_allocator, regions);
+  iree_allocator_free(host_allocator, region_parameter_load_groups);
+  iree_allocator_free(host_allocator, region_parameter_load_group_counts);
   iree_allocator_free(host_allocator, region_local_lifetimes);
   iree_allocator_free(host_allocator, region_local_lifetime_counts);
   iree_allocator_free(host_allocator, region_statistics);
@@ -1986,6 +2287,8 @@ iree_status_t id4_pipeline_program_create_plan(
   iree_allocator_free(host_allocator, kernels);
   iree_allocator_free(host_allocator, boundary_tensors);
   iree_allocator_free(host_allocator, constant_requests);
+  iree_allocator_free(host_allocator, parameter_load_groups_by_request);
+  iree_allocator_free(host_allocator, parameter_request_indices_by_tensor);
   iree_allocator_free(host_allocator, parameter_load_step_request_indices);
   iree_allocator_free(host_allocator, parameter_load_steps);
   iree_allocator_free(host_allocator, parameter_load_sources);

@@ -28,6 +28,62 @@ static void ExpectFinds(iree_string_view_t value, iree_string_view_t needle) {
       << "expected to find: " << std::string(needle.data, needle.size);
 }
 
+static iree_host_size_t FindParameterRequestIndex(
+    const id4_pipeline_plan_t* plan, iree_string_view_t key) {
+  if (id4_pipeline_plan_parameter_slab_count(plan) != 1u) {
+    ADD_FAILURE() << "expected one parameter slab";
+    return IREE_HOST_SIZE_MAX;
+  }
+  const id4_pipeline_parameter_slab_plan_t* slab =
+      id4_pipeline_plan_parameter_slab_at(plan, 0);
+  if (!slab) {
+    ADD_FAILURE() << "parameter slab not found";
+    return IREE_HOST_SIZE_MAX;
+  }
+  for (iree_host_size_t i = 0; i < slab->request_count; ++i) {
+    if (iree_string_view_equal(slab->requests[i].key, key)) return i;
+  }
+  ADD_FAILURE() << "parameter request not found";
+  return IREE_HOST_SIZE_MAX;
+}
+
+static iree_host_size_t FindParameterLoadGroupForRequest(
+    const id4_pipeline_plan_t* plan, iree_host_size_t request_index) {
+  iree_host_size_t load_group_count = 0;
+  IREE_CHECK_OK(
+      id4_pipeline_plan_parameter_load_group_count(plan, &load_group_count));
+  for (iree_host_size_t group_index = 0; group_index < load_group_count;
+       ++group_index) {
+    id4_pipeline_parameter_load_group_t group;
+    IREE_CHECK_OK(
+        id4_pipeline_plan_parameter_load_group_at(plan, group_index, &group));
+    for (iree_host_size_t step_index = 0; step_index < group.step_count;
+         ++step_index) {
+      const id4_pipeline_parameter_load_step_t* step =
+          id4_pipeline_plan_parameter_load_step_at(
+              plan, group.step_offset + step_index);
+      if (!step) {
+        ADD_FAILURE() << "parameter load step not found";
+        return IREE_HOST_SIZE_MAX;
+      }
+      for (iree_host_size_t i = 0; i < step->request_count; ++i) {
+        const iree_host_size_t candidate_index = step->request_indices
+                                                     ? step->request_indices[i]
+                                                     : step->request_offset + i;
+        if (candidate_index == request_index) return group_index;
+      }
+    }
+  }
+  ADD_FAILURE() << "parameter load group not found";
+  return IREE_HOST_SIZE_MAX;
+}
+
+static iree_host_size_t FindParameterLoadGroupForKey(
+    const id4_pipeline_plan_t* plan, iree_string_view_t key) {
+  return FindParameterLoadGroupForRequest(plan,
+                                          FindParameterRequestIndex(plan, key));
+}
+
 class ProgramBuilderScope {
  public:
   ProgramBuilderScope() {
@@ -637,6 +693,136 @@ static id4_pipeline_program_t* CreateInterleavedParameterSourceProgram() {
   return program;
 }
 
+static id4_pipeline_program_t* CreateRegionParameterDependencyProgram() {
+  ProgramBuilderScope builder_scope;
+  id4_pipeline_program_builder_t* builder = builder_scope.builder();
+
+  id4_pipeline_program_tensor_t input = id4_pipeline_program_tensor_invalid();
+  id4_pipeline_program_import_tensor_options_t input_options = {
+      /*.structure_size=*/sizeof(input_options),
+      /*.next=*/nullptr,
+      /*.flags=*/ID4_PIPELINE_PROGRAM_IMPORT_TENSOR_FLAG_INITIALIZED,
+      /*.name=*/IREE_SV("hidden_states.input"),
+      /*.dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_F32,
+      /*.shape=*/id4_pipeline_program_make_shape_rank2(1, 4),
+  };
+  IREE_CHECK_OK(
+      id4_pipeline_program_import_tensor(builder, &input_options, &input));
+
+  id4_pipeline_program_tensor_t output = id4_pipeline_program_tensor_invalid();
+  id4_pipeline_program_import_tensor_options_t output_options = {
+      /*.structure_size=*/sizeof(output_options),
+      /*.next=*/nullptr,
+      /*.flags=*/0,
+      /*.name=*/IREE_SV("hidden_states.output"),
+      /*.dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_F32,
+      /*.shape=*/id4_pipeline_program_make_shape_rank2(1, 4),
+  };
+  IREE_CHECK_OK(
+      id4_pipeline_program_import_tensor(builder, &output_options, &output));
+
+  const id4_pipeline_program_parameter_source_t direct_sources[] = {
+      {
+          /*.source_scope=*/IREE_SV("model"),
+          /*.key=*/IREE_SV("model.layers.0.attn.q.weight"),
+          /*.dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+          /*.shape=*/id4_pipeline_program_make_shape_rank2(4, 4),
+      },
+  };
+  id4_pipeline_program_parameter_options_t direct_options = {
+      /*.structure_size=*/sizeof(direct_options),
+      /*.next=*/nullptr,
+      /*.encoding=*/ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_DIRECT,
+      /*.source_count=*/IREE_ARRAYSIZE(direct_sources),
+      /*.sources=*/direct_sources,
+      /*.key=*/IREE_SV("model.layers.0.attn.q.weight"),
+      /*.dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+      /*.shape=*/id4_pipeline_program_make_shape_rank2(4, 4),
+  };
+  id4_pipeline_program_tensor_t direct = id4_pipeline_program_tensor_invalid();
+  IREE_CHECK_OK(
+      id4_pipeline_program_parameter(builder, &direct_options, &direct));
+
+  const id4_pipeline_program_parameter_source_t encoded_sources[] = {
+      {
+          /*.source_scope=*/IREE_SV("fp8"),
+          /*.key=*/IREE_SV("model.layers.0.mlp.w1.weight"),
+          /*.dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_F8_E4M3,
+          /*.shape=*/id4_pipeline_program_make_shape_rank2(4, 4),
+      },
+      {
+          /*.source_scope=*/IREE_SV("fp8"),
+          /*.key=*/IREE_SV("model.layers.0.mlp.w1.weight_scale"),
+          /*.dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_F32,
+          /*.shape=*/id4_pipeline_program_make_shape_rank1(4),
+      },
+  };
+  id4_pipeline_program_parameter_options_t encoded_options = {
+      /*.structure_size=*/sizeof(encoded_options),
+      /*.next=*/nullptr,
+      /*.encoding=*/
+      ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_FP8_E4M3_SCALED_TO_BF16,
+      /*.source_count=*/IREE_ARRAYSIZE(encoded_sources),
+      /*.sources=*/encoded_sources,
+      /*.key=*/IREE_SV("model.layers.0.mlp.w1.weight"),
+      /*.dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+      /*.shape=*/id4_pipeline_program_make_shape_rank2(4, 4),
+  };
+  id4_pipeline_program_tensor_t encoded = id4_pipeline_program_tensor_invalid();
+  IREE_CHECK_OK(
+      id4_pipeline_program_parameter(builder, &encoded_options, &encoded));
+
+  id4_pipeline_program_dispatch_binding_t first_bindings[] = {
+      id4_pipeline_program_read(input),
+      id4_pipeline_program_read(direct),
+      id4_pipeline_program_write(output),
+  };
+  id4_pipeline_program_dispatch_loom_options_t first_dispatch_options = {
+      /*.structure_size=*/sizeof(first_dispatch_options),
+      /*.next=*/nullptr,
+      /*.name=*/IREE_SV("entry.direct"),
+      /*.kernel=*/
+      id4_pipeline_make_kernel_ref(IREE_SV("test/direct"), IREE_SV("direct")),
+      /*.config_binding_count=*/0,
+      /*.config_bindings=*/nullptr,
+      /*.binding_count=*/IREE_ARRAYSIZE(first_bindings),
+      /*.bindings=*/first_bindings,
+  };
+  IREE_CHECK_OK(
+      id4_pipeline_program_dispatch_loom(builder, &first_dispatch_options));
+
+  id4_pipeline_program_region_cut_options_t cut_options = {
+      /*.structure_size=*/sizeof(cut_options),
+      /*.next=*/nullptr,
+      /*.name=*/IREE_SV("entry.after_direct"),
+  };
+  IREE_CHECK_OK(id4_pipeline_program_region_cut(builder, &cut_options));
+
+  id4_pipeline_program_dispatch_binding_t second_bindings[] = {
+      id4_pipeline_program_read_write(output),
+      id4_pipeline_program_read(encoded),
+  };
+  id4_pipeline_program_dispatch_loom_options_t second_dispatch_options = {
+      /*.structure_size=*/sizeof(second_dispatch_options),
+      /*.next=*/nullptr,
+      /*.name=*/IREE_SV("entry.encoded"),
+      /*.kernel=*/
+      id4_pipeline_make_kernel_ref(IREE_SV("test/encoded"), IREE_SV("encoded")),
+      /*.config_binding_count=*/0,
+      /*.config_bindings=*/nullptr,
+      /*.binding_count=*/IREE_ARRAYSIZE(second_bindings),
+      /*.bindings=*/second_bindings,
+  };
+  IREE_CHECK_OK(
+      id4_pipeline_program_dispatch_loom(builder, &second_dispatch_options));
+
+  id4_pipeline_program_t* program = nullptr;
+  IREE_CHECK_OK(id4_pipeline_program_builder_seal(
+      builder, iree_allocator_system(), &program));
+  builder_scope.DestroyBuilder();
+  return program;
+}
+
 static id4_pipeline_program_plan_options_t MakePlanOptions(
     const id4_pipeline_program_t* program,
     iree_hal_device_group_t* device_group,
@@ -1108,6 +1294,54 @@ TEST(PipelineProgramPlan, GroupsDirectParameterLoadsBySourceScope) {
   IREE_ASSERT_OK(id4_pipeline_plan_format_json(plan, &builder));
   iree_string_view_t json = iree_string_builder_view(&builder);
   ExpectFinds(json, IREE_SV("\"request_indices\":[0,2]"));
+  iree_string_builder_deinitialize(&builder);
+
+  id4_pipeline_plan_release(plan);
+  iree_hal_device_group_release(device_group);
+  id4_pipeline_program_release(program);
+}
+
+TEST(PipelineProgramPlan, AttributesParameterLoadGroupsToRegions) {
+  id4_pipeline_program_t* program = CreateRegionParameterDependencyProgram();
+  iree_hal_device_group_t* device_group = CreateLocalSyncDeviceGroup();
+  id4_pipeline_device_placement_t placement = {
+      /*.role=*/IREE_SV("default"),
+      /*.device_index=*/0,
+      /*.queue_affinity=*/IREE_HAL_QUEUE_AFFINITY_ANY,
+  };
+  id4_pipeline_diagnostics_sink_t diagnostics_sink;
+  id4_pipeline_diagnostics_sink_initialize_ignore(&diagnostics_sink);
+  id4_pipeline_program_plan_options_t options =
+      MakePlanOptions(program, device_group, &placement, &diagnostics_sink);
+
+  id4_pipeline_plan_t* plan = nullptr;
+  IREE_ASSERT_OK(id4_pipeline_program_create_plan(
+      &options, iree_allocator_system(), &plan));
+
+  const iree_host_size_t direct_group = FindParameterLoadGroupForKey(
+      plan, IREE_SV("model.layers.0.attn.q.weight"));
+  const iree_host_size_t encoded_group = FindParameterLoadGroupForKey(
+      plan, IREE_SV("model.layers.0.mlp.w1.weight"));
+  ASSERT_NE(direct_group, encoded_group);
+
+  ASSERT_EQ(id4_pipeline_plan_region_count(plan), 2u);
+  const id4_pipeline_region_plan_t* first_region =
+      id4_pipeline_plan_region_at(plan, 0);
+  ASSERT_NE(first_region, nullptr);
+  ASSERT_EQ(first_region->parameter_load_group_count, 1u);
+  EXPECT_EQ(first_region->parameter_load_groups[0], direct_group);
+
+  const id4_pipeline_region_plan_t* second_region =
+      id4_pipeline_plan_region_at(plan, 1);
+  ASSERT_NE(second_region, nullptr);
+  ASSERT_EQ(second_region->parameter_load_group_count, 1u);
+  EXPECT_EQ(second_region->parameter_load_groups[0], encoded_group);
+
+  iree_string_builder_t builder;
+  iree_string_builder_initialize(iree_allocator_system(), &builder);
+  IREE_ASSERT_OK(id4_pipeline_plan_format_json(plan, &builder));
+  iree_string_view_t json = iree_string_builder_view(&builder);
+  ExpectFinds(json, IREE_SV("\"parameter_load_groups\":["));
   iree_string_builder_deinitialize(&builder);
 
   id4_pipeline_plan_release(plan);

@@ -174,6 +174,7 @@ static void id4_pipeline_plan_destroy(id4_pipeline_plan_t* plan) {
       id4_pipeline_string_release(lifetimes[j].name, host_allocator);
     }
     iree_allocator_free(host_allocator, lifetimes);
+    iree_allocator_free(host_allocator, (void*)region->parameter_load_groups);
     id4_pipeline_string_release(region->name, host_allocator);
   }
   iree_allocator_free(host_allocator, plan->regions);
@@ -665,6 +666,11 @@ static iree_status_t id4_pipeline_plan_copy_regions(
       plan->host_allocator, plan->region_count, sizeof(plan->regions[0]),
       (void**)&plan->regions));
   memset(plan->regions, 0, plan->region_count * sizeof(plan->regions[0]));
+
+  iree_host_size_t parameter_load_group_count = 0;
+  IREE_RETURN_IF_ERROR(id4_pipeline_parameter_load_group_count(
+      plan->parameter_load_step_count, plan->parameter_load_steps,
+      &parameter_load_group_count));
   for (iree_host_size_t i = 0; i < plan->region_count; ++i) {
     const id4_pipeline_region_plan_t* source = &options->regions[i];
     if (iree_string_view_is_empty(source->name)) {
@@ -736,6 +742,29 @@ static iree_status_t id4_pipeline_plan_copy_regions(
                               source->local_lifetime_count,
                               source->statistics.local_acquire_count);
     }
+    if (source->parameter_load_group_count != 0 &&
+        !source->parameter_load_groups) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "region %.*s parameter load group array is required",
+          (int)source->name.size, source->name.data);
+    }
+    for (iree_host_size_t j = 0; j < source->parameter_load_group_count; ++j) {
+      const iree_host_size_t group_index = source->parameter_load_groups[j];
+      if (group_index >= parameter_load_group_count) {
+        return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                "region %.*s parameter load group %" PRIhsz
+                                " exceeds parameter load group count %" PRIhsz,
+                                (int)source->name.size, source->name.data,
+                                group_index, parameter_load_group_count);
+      }
+      if (j != 0 && source->parameter_load_groups[j - 1] >= group_index) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "region %.*s parameter load groups must be strictly increasing",
+            (int)source->name.size, source->name.data);
+      }
+    }
     id4_pipeline_region_plan_t* target = &plan->regions[i];
     target->source_operation_offset = source->source_operation_offset;
     target->source_operation_count = source->source_operation_count;
@@ -746,6 +775,17 @@ static iree_status_t id4_pipeline_plan_copy_regions(
     target->statistics = source->statistics;
     IREE_RETURN_IF_ERROR(id4_pipeline_string_clone(
         source->name, plan->host_allocator, &target->name));
+    target->parameter_load_group_count = source->parameter_load_group_count;
+    if (target->parameter_load_group_count != 0) {
+      iree_host_size_t* parameter_load_groups = NULL;
+      IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
+          plan->host_allocator, target->parameter_load_group_count,
+          sizeof(parameter_load_groups[0]), (void**)&parameter_load_groups));
+      memcpy(parameter_load_groups, source->parameter_load_groups,
+             target->parameter_load_group_count *
+                 sizeof(parameter_load_groups[0]));
+      target->parameter_load_groups = parameter_load_groups;
+    }
     target->local_lifetime_count = source->local_lifetime_count;
     if (target->local_lifetime_count == 0) continue;
     id4_pipeline_region_local_lifetime_t* lifetimes = NULL;
@@ -1587,6 +1627,30 @@ id4_pipeline_plan_parameter_load_step_at(const id4_pipeline_plan_t* plan,
   return &plan->parameter_load_steps[index];
 }
 
+iree_status_t id4_pipeline_plan_parameter_load_group_count(
+    const id4_pipeline_plan_t* plan, iree_host_size_t* out_count) {
+  IREE_ASSERT_ARGUMENT(out_count);
+  *out_count = 0;
+  if (!plan) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "plan is required");
+  }
+  return id4_pipeline_parameter_load_group_count(
+      plan->parameter_load_step_count, plan->parameter_load_steps, out_count);
+}
+
+iree_status_t id4_pipeline_plan_parameter_load_group_at(
+    const id4_pipeline_plan_t* plan, iree_host_size_t index,
+    id4_pipeline_parameter_load_group_t* out_group) {
+  IREE_ASSERT_ARGUMENT(out_group);
+  memset(out_group, 0, sizeof(*out_group));
+  if (!plan) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "plan is required");
+  }
+  return id4_pipeline_parameter_load_group_at(plan->parameter_load_step_count,
+                                              plan->parameter_load_steps, index,
+                                              out_group);
+}
+
 iree_host_size_t id4_pipeline_plan_constant_slab_count(
     const id4_pipeline_plan_t* plan) {
   return plan ? plan->constant_slab_count : 0;
@@ -2002,6 +2066,20 @@ static iree_status_t id4_pipeline_plan_append_u32_array3_json(
     iree_string_builder_t* builder, const uint32_t values[3]) {
   return iree_string_builder_append_format(builder, "[%u,%u,%u]", values[0],
                                            values[1], values[2]);
+}
+
+static iree_status_t id4_pipeline_plan_append_host_size_array_json(
+    iree_string_builder_t* builder, iree_host_size_t count,
+    const iree_host_size_t* values) {
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "["));
+  for (iree_host_size_t i = 0; i < count; ++i) {
+    if (i != 0) {
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, ","));
+    }
+    IREE_RETURN_IF_ERROR(
+        iree_string_builder_append_format(builder, "%" PRIhsz, values[i]));
+  }
+  return iree_string_builder_append_cstring(builder, "]");
 }
 
 static iree_string_view_t id4_pipeline_plan_program_dtype_format(
@@ -2547,6 +2625,11 @@ iree_status_t id4_pipeline_plan_format_json(const id4_pipeline_plan_t* plan,
         region->local_binding_slot, (uint64_t)region->local_tensor_alignment));
     IREE_RETURN_IF_ERROR(id4_pipeline_plan_append_region_statistics_json(
         builder, region->statistics));
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(
+        builder, ",\"parameter_load_groups\":"));
+    IREE_RETURN_IF_ERROR(id4_pipeline_plan_append_host_size_array_json(
+        builder, region->parameter_load_group_count,
+        region->parameter_load_groups));
     IREE_RETURN_IF_ERROR(
         iree_string_builder_append_cstring(builder, ",\"local_lifetimes\":["));
     for (iree_host_size_t j = 0; j < region->local_lifetime_count; ++j) {
