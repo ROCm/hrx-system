@@ -265,6 +265,32 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_test(
+    name = "program_stage_integration_test",
+    srcs = ["program_stage_integration_test.cc"],
+    tags = [
+        "manual",
+        "requires-gpu",
+    ],
+    deps = [
+        ":diagnostics",
+        ":kernel_cache",
+        ":kernel_library",
+        ":parameter_slab",
+        ":plan",
+        ":program_stage",
+        "//experimental/id4/tooling:runtime",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/base/tooling:flags",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/io:parameter_index",
+        "//runtime/src/iree/io:parameter_index_provider",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
     name = "plan_test",
     srcs = ["plan_test.cc"],
     deps = [

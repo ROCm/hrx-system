@@ -304,6 +304,32 @@ iree_cc_test(
 
 iree_cc_test(
   NAME
+    program_stage_integration_test
+  SRCS
+    "program_stage_integration_test.cc"
+  DEPS
+    ::diagnostics
+    ::kernel_cache
+    ::kernel_library
+    ::parameter_slab
+    ::plan
+    ::program_stage
+    iree::base
+    iree::base::internal::arena
+    iree::base::tooling::flags
+    iree::experimental::id4::tooling::runtime
+    iree::hal
+    iree::io::parameter_index
+    iree::io::parameter_index_provider
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "manual"
+    "requires-gpu"
+)
+
+iree_cc_test(
+  NAME
     plan_test
   SRCS
     "plan_test.cc"

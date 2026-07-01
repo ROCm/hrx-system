@@ -1664,11 +1664,18 @@ static iree_status_t id4_pipeline_prepared_region_validate_issue_options(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "prepared region final signal is required");
   }
-  if (options->binding_table.count != prepared_region->binding_capacity) {
+  const bool local_slot_is_trailing = prepared_region->local_binding_slot + 1 ==
+                                      prepared_region->binding_capacity;
+  const iree_host_size_t expected_binding_count =
+      prepared_region->statistics.local_slab_byte_length == 0 &&
+              local_slot_is_trailing
+          ? prepared_region->local_binding_slot
+          : prepared_region->binding_capacity;
+  if (options->binding_table.count != expected_binding_count) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "prepared region expected %" PRIhsz " bindings but got %" PRIhsz,
-        prepared_region->binding_capacity, options->binding_table.count);
+        expected_binding_count, options->binding_table.count);
   }
   if (options->binding_table.count != 0 && !options->binding_table.bindings) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,

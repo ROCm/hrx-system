@@ -1130,9 +1130,15 @@ static iree_status_t id4_pipeline_program_prepared_make_binding_table(
     bindings[tap->binding_slot] = options->diagnostic_tap_bindings[i];
   }
 
+  const bool local_slot_is_trailing =
+      region->local_binding_slot + 1 == region->binding_capacity;
+  const iree_host_size_t binding_count =
+      region->statistics.local_slab_byte_length == 0 && local_slot_is_trailing
+          ? region->local_binding_slot
+          : region->binding_capacity;
   *out_binding_table = (iree_hal_buffer_binding_table_t){
       // Exact issue-time binding count expected by the prepared region.
-      .count = region->binding_capacity,
+      .count = binding_count,
       // Stack-local full binding table for this issue call.
       .bindings = bindings,
   };
