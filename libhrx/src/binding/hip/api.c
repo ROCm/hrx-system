@@ -11123,6 +11123,9 @@ HIPAPI hipError_t hipModuleLaunchKernel(
     HIP_RETURN_ERROR(init_result);
   }
 
+  // Untag the function pointer if it was tagged by hipModuleGetFunction.
+  iree_hal_streaming_symbol_t* symbol = iree_hal_streaming_symbol_untag(f);
+
   // Extract params pointer and size from HIP's parameter format.
   void* params_ptr = NULL;
   size_t params_size = 0;
@@ -11141,17 +11144,26 @@ HIPAPI hipError_t hipModuleLaunchKernel(
         params_size = *(size_t*)extra[i + 1];
       }
     }
-    // The extra format provides a pre-packed buffer in the kernel's native ABI.
-    // Mark it as pre-packed so the streaming layer passes it through directly.
-    dispatch_flags |= IREE_HAL_STREAMING_DISPATCH_FLAG_PRE_PACKED;
+    // The extra buffer is laid out in the kernel's native kernarg ABI. When the
+    // kernel has reflected pointer-binding metadata, that buffer holds HIP
+    // device pointers that must be resolved to HAL bindings - the exact same
+    // resolution the static hipLaunchKernelGGL path performs. Marking it
+    // pre-packed would instead pass those raw pointers straight through
+    // (CUSTOM_DIRECT_ARGUMENTS), skipping both pointer resolution and the
+    // HSACO-driven hidden-kernarg synthesis, so the kernel would write through
+    // unresolved pointers and its output would never reach the caller's buffer.
+    // Only pass the buffer through verbatim for kernels WITHOUT binding metadata
+    // (opaque/native kernels such as hipBLASLt), where it is already a complete
+    // native kernarg pack. Kernels with bindings fall through to the streaming
+    // layer's metadata unpack path (dispatch flags NONE).
+    if (!symbol || symbol->parameters.binding_count == 0) {
+      dispatch_flags |= IREE_HAL_STREAMING_DISPATCH_FLAG_PRE_PACKED;
+    }
   } else if (kernelParams) {
     // kernelParams is an array of pointers to the actual parameters.
     params_ptr = kernelParams;
     dispatch_flags |= IREE_HAL_STREAMING_DISPATCH_FLAG_ARGS_ARRAY;
   }
-
-  // Untag the function pointer if it was tagged by hipModuleGetFunction.
-  iree_hal_streaming_symbol_t* symbol = iree_hal_streaming_symbol_untag(f);
 
   const iree_hal_streaming_dispatch_params_t params = {
       .grid_dim = {gridDimX, gridDimY, gridDimZ},
@@ -14055,6 +14067,21 @@ HIPAPI hipError_t hipGraphAddKernelNode(hipGraphNode_t* pGraphNode,
           ? (iree_hal_streaming_graph_node_t**)pDependencies
           : NULL;
 
+  // Resolve the kernel symbol first so the extra-buffer handling below can key
+  // off its reflected parameter metadata.
+  iree_hal_streaming_symbol_t* symbol = NULL;
+  hipError_t symbol_result = iree_hip_resolve_function_symbol(
+      stream_graph->context, params->func, &symbol);
+  if (symbol_result != hipSuccess) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(symbol_result);
+  }
+  if (!params->kernelParams && !params->extra &&
+      !iree_hip_symbol_accepts_empty_kernel_params(symbol)) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+
   // Create dispatch params from kernel node params.
   // Extract params pointer from HIP's parameter format.
   void* params_ptr = NULL;
@@ -14074,7 +14101,15 @@ HIPAPI hipError_t hipGraphAddKernelNode(hipGraphNode_t* pGraphNode,
         params_size = *(size_t*)params->extra[i + 1];
       }
     }
-    dispatch_flags |= IREE_HAL_STREAMING_DISPATCH_FLAG_PRE_PACKED;
+    // Same reasoning as hipModuleLaunchKernel: the extra buffer is in the
+    // kernel's native kernarg ABI, but for kernels with reflected pointer
+    // bindings it still holds HIP device pointers that must be resolved to HAL
+    // bindings. Only pass it through pre-packed for kernels WITHOUT binding
+    // metadata (opaque/native kernels); metadata kernels fall through to the
+    // graph node's metadata unpack path so their pointers resolve.
+    if (!symbol || symbol->parameters.binding_count == 0) {
+      dispatch_flags |= IREE_HAL_STREAMING_DISPATCH_FLAG_PRE_PACKED;
+    }
   } else if (params->kernelParams) {
     // kernelParams is an array of pointers to the actual parameters.
     params_ptr = params->kernelParams;
@@ -14089,19 +14124,6 @@ HIPAPI hipError_t hipGraphAddKernelNode(hipGraphNode_t* pGraphNode,
       .buffer_size = params_size,
       .flags = dispatch_flags,
   };
-
-  iree_hal_streaming_symbol_t* symbol = NULL;
-  hipError_t symbol_result = iree_hip_resolve_function_symbol(
-      stream_graph->context, params->func, &symbol);
-  if (symbol_result != hipSuccess) {
-    IREE_TRACE_ZONE_END(z0);
-    HIP_RETURN_ERROR(symbol_result);
-  }
-  if (!params->kernelParams && !params->extra &&
-      !iree_hip_symbol_accepts_empty_kernel_params(symbol)) {
-    IREE_TRACE_ZONE_END(z0);
-    HIP_RETURN_ERROR(hipErrorInvalidValue);
-  }
 
   // Add kernel node to graph.
   iree_hal_streaming_graph_node_t* node = NULL;
@@ -18606,6 +18628,20 @@ HIPAPI hipError_t hipGraphKernelNodeSetParams(hipGraphNode_t node,
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
   const hipKernelNodeParams* params = (const hipKernelNodeParams*)pNodeParams;
+
+  // Resolve the kernel symbol first so the extra-buffer handling below can key
+  // off its reflected parameter metadata.
+  iree_hal_streaming_symbol_t* symbol = NULL;
+  hipError_t result = iree_hip_resolve_function_symbol(
+      stream_node->graph->context, params->func, &symbol);
+  if (result != hipSuccess) {
+    HIP_RETURN_ERROR(result);
+  }
+  if (!params->kernelParams && !params->extra &&
+      !iree_hip_symbol_accepts_empty_kernel_params(symbol)) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+
   void* params_ptr = NULL;
   size_t params_size = 0;
   iree_hal_streaming_dispatch_flags_t dispatch_flags =
@@ -18618,7 +18654,12 @@ HIPAPI hipError_t hipGraphKernelNodeSetParams(hipGraphNode_t node,
         params_size = *(size_t*)params->extra[i + 1];
       }
     }
-    dispatch_flags |= IREE_HAL_STREAMING_DISPATCH_FLAG_PRE_PACKED;
+    // Same reasoning as hipModuleLaunchKernel / hipGraphAddKernelNode: only pass
+    // the extra buffer through pre-packed for kernels WITHOUT binding metadata;
+    // metadata kernels must be unpacked so their device pointers resolve.
+    if (!symbol || symbol->parameters.binding_count == 0) {
+      dispatch_flags |= IREE_HAL_STREAMING_DISPATCH_FLAG_PRE_PACKED;
+    }
   } else if (params->kernelParams) {
     params_ptr = params->kernelParams;
     dispatch_flags |= IREE_HAL_STREAMING_DISPATCH_FLAG_ARGS_ARRAY;
@@ -18632,17 +18673,6 @@ HIPAPI hipError_t hipGraphKernelNodeSetParams(hipGraphNode_t node,
       .buffer_size = params_size,
       .flags = dispatch_flags,
   };
-
-  iree_hal_streaming_symbol_t* symbol = NULL;
-  hipError_t result = iree_hip_resolve_function_symbol(
-      stream_node->graph->context, params->func, &symbol);
-  if (result != hipSuccess) {
-    HIP_RETURN_ERROR(result);
-  }
-  if (!params->kernelParams && !params->extra &&
-      !iree_hip_symbol_accepts_empty_kernel_params(symbol)) {
-    HIP_RETURN_ERROR(hipErrorInvalidValue);
-  }
   HIP_RETURN_STATUS(iree_hal_streaming_graph_set_kernel_node_params(
                         stream_node, symbol, &dispatch_params),
                     hipErrorInvalidValue);
