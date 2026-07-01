@@ -122,6 +122,124 @@ kernel.def export("id4_vae_pack_upsample_conv3x3_weight_f32_bf16") @id4_vae_pack
   kernel.return
 }
 
+kernel.def export("id4_vae_pack_upsample_conv3x3_weight_rhs_f32_bf16") @id4_vae_pack_upsample_conv3x3_weight_rhs_f32_bf16() {
+  %unit = index.constant 1 : index
+  %workgroup_size_x = index.constant 256 : index
+  %element_count = config.get @id4.vae.pack_upsample_conv3x3_weight.element_count : index
+  %rounding = index.sub %workgroup_size_x, %unit : index
+  %rounded = index.add %element_count, %rounding : index
+  %workgroups_x = index.div %rounded, %workgroup_size_x : index
+  kernel.launch.config workgroups(%workgroups_x, %unit, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
+} launch(%source: buffer, %target: buffer) {
+  %base = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %unit = index.constant 1 : index
+  %two = index.constant 2 : index
+  %three = index.constant 3 : index
+  %four = index.constant 4 : index
+  %workgroup = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %workgroup_size_x = index.constant 256 : index
+  %input_channel_count = config.get @id4.vae.pack_upsample_conv3x3_weight.input_channel_count : index
+  %output_channel_count = config.get @id4.vae.pack_upsample_conv3x3_weight.output_channel_count : index
+  %element_count = config.get @id4.vae.pack_upsample_conv3x3_weight.element_count : index
+  %element_index = index.madd %workgroup, %workgroup_size_x, %lane : index
+  %in_bounds = index.cmp ult, %element_index, %element_count : index
+  %zero_f32 = scalar.constant 0.0 : f32
+  %source_noalias, %target_noalias = buffer.assume.noalias %source, %target : buffer, buffer
+  %source_global = buffer.assume.memory_space<global> %source_noalias : buffer
+  %target_global = buffer.assume.memory_space<global> %target_noalias : buffer
+  %source_view = buffer.view %source_global[%base] : buffer -> view<[%output_channel_count]x[%input_channel_count]x3x3xf32, #dense>
+  %target_view = buffer.view %target_global[%base] : buffer -> view<4x4x[%output_channel_count]x[%input_channel_count]xbf16, #dense>
+  scf.if %in_bounds {
+    %input_channel = index.rem %element_index, %input_channel_count : index
+    %packed_row0 = index.div %element_index, %input_channel_count : index
+    %output_channel = index.rem %packed_row0, %output_channel_count : index
+    %packed_row1 = index.div %packed_row0, %output_channel_count : index
+    %source_tap = index.rem %packed_row1, %four : index
+    %parity = index.div %packed_row1, %four : index
+    %parity_x = index.rem %parity, %two : index
+    %parity_y = index.div %parity, %two : index
+    %source_tap_x = index.rem %source_tap, %two : index
+    %source_tap_y = index.div %source_tap, %two : index
+    %parity_x_zero = index.cmp eq, %parity_x, %zero : index
+    %source_tap_x_zero = index.cmp eq, %source_tap_x, %zero : index
+    %kernel_x_begin = scf.if %parity_x_zero -> (index) {
+      %begin = scf.if %source_tap_x_zero -> (index) {
+        scf.yield %zero : index
+      } else {
+        scf.yield %unit : index
+      }
+      scf.yield %begin : index
+    } else {
+      %begin = scf.if %source_tap_x_zero -> (index) {
+        scf.yield %zero : index
+      } else {
+        scf.yield %two : index
+      }
+      scf.yield %begin : index
+    }
+    %kernel_x_end = scf.if %parity_x_zero -> (index) {
+      %end = scf.if %source_tap_x_zero -> (index) {
+        scf.yield %unit : index
+      } else {
+        scf.yield %three : index
+      }
+      scf.yield %end : index
+    } else {
+      %end = scf.if %source_tap_x_zero -> (index) {
+        scf.yield %two : index
+      } else {
+        scf.yield %three : index
+      }
+      scf.yield %end : index
+    }
+    %parity_y_zero = index.cmp eq, %parity_y, %zero : index
+    %source_tap_y_zero = index.cmp eq, %source_tap_y, %zero : index
+    %kernel_y_begin = scf.if %parity_y_zero -> (index) {
+      %begin = scf.if %source_tap_y_zero -> (index) {
+        scf.yield %zero : index
+      } else {
+        scf.yield %unit : index
+      }
+      scf.yield %begin : index
+    } else {
+      %begin = scf.if %source_tap_y_zero -> (index) {
+        scf.yield %zero : index
+      } else {
+        scf.yield %two : index
+      }
+      scf.yield %begin : index
+    }
+    %kernel_y_end = scf.if %parity_y_zero -> (index) {
+      %end = scf.if %source_tap_y_zero -> (index) {
+        scf.yield %unit : index
+      } else {
+        scf.yield %three : index
+      }
+      scf.yield %end : index
+    } else {
+      %end = scf.if %source_tap_y_zero -> (index) {
+        scf.yield %two : index
+      } else {
+        scf.yield %three : index
+      }
+      scf.yield %end : index
+    }
+    %sum_y = scf.for %kernel_y = [%kernel_y_begin to %kernel_y_end step %unit](%acc_y = %zero_f32 : f32) -> (f32) {
+      %sum_x = scf.for %kernel_x = [%kernel_x_begin to %kernel_x_end step %unit](%acc_x = %acc_y : f32) -> (f32) {
+        %value = view.load %source_view[%output_channel, %input_channel, %kernel_y, %kernel_x] : view<[%output_channel_count]x[%input_channel_count]x3x3xf32, #dense> -> f32
+        %next = scalar.addf<reassoc|nnan|ninf|nsz> %acc_x, %value : f32
+        scf.yield %next : f32
+      }
+      scf.yield %sum_x : f32
+    }
+    %rounded = scalar.fptrunc %sum_y : f32 to bf16
+    view.store %rounded, %target_view[%parity, %source_tap, %output_channel, %input_channel] : bf16, view<4x4x[%output_channel_count]x[%input_channel_count]xbf16, #dense>
+  }
+  kernel.return
+}
+
 check.case public @id4_vae_pack_upsample_conv3x3_weight_f32_bf16_zero_small_case {
   %source = check.generate.fill value(0.0) : tensor<1x1x3x3xf32>
   %target = check.generate.fill value(1.0) : tensor<4x1x4x1xbf16>
@@ -140,6 +258,28 @@ check.case public @id4_vae_pack_upsample_conv3x3_weight_f32_bf16_flux2_level3_sh
   check.return
 }
 
+check.case public @id4_vae_pack_upsample_conv3x3_weight_rhs_f32_bf16_zero_small_case {
+  %source = check.generate.fill value(0.0) : tensor<1x1x3x3xf32>
+  %target = check.generate.fill value(1.0) : tensor<4x4x1x1xbf16>
+  %expected = check.generate.fill value(0.0) : tensor<4x4x1x1xbf16>
+  func.call @id4_vae_pack_upsample_conv3x3_weight_rhs_f32_bf16(%source, %target) : (tensor<1x1x3x3xf32>, tensor<4x4x1x1xbf16>)
+  check.expect.close actual(%target) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<4x4x1x1xbf16>
+  check.return
+}
+
+check.case public @id4_vae_pack_upsample_conv3x3_weight_rhs_f32_bf16_flux2_level3_shape_case {
+  %source = check.generate.fill value(0.0) : tensor<512x512x3x3xf32>
+  %target = check.generate.fill value(1.0) : tensor<4x4x512x512xbf16>
+  %expected = check.generate.fill value(0.0) : tensor<4x4x512x512xbf16>
+  func.call @id4_vae_pack_upsample_conv3x3_weight_rhs_f32_bf16(%source, %target) : (tensor<512x512x3x3xf32>, tensor<4x4x512x512xbf16>)
+  check.expect.close actual(%target) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<4x4x512x512xbf16>
+  check.return
+}
+
 check.benchmark<@id4_vae_pack_upsample_conv3x3_weight_f32_bf16_zero_small_case> @id4_vae_pack_upsample_conv3x3_weight_f32_bf16_zero_small
 
 check.benchmark<@id4_vae_pack_upsample_conv3x3_weight_f32_bf16_flux2_level3_shape_case> @id4_vae_pack_upsample_conv3x3_weight_f32_bf16_flux2_level3_shape
+
+check.benchmark<@id4_vae_pack_upsample_conv3x3_weight_rhs_f32_bf16_zero_small_case> @id4_vae_pack_upsample_conv3x3_weight_rhs_f32_bf16_zero_small
+
+check.benchmark<@id4_vae_pack_upsample_conv3x3_weight_rhs_f32_bf16_flux2_level3_shape_case> @id4_vae_pack_upsample_conv3x3_weight_rhs_f32_bf16_flux2_level3_shape

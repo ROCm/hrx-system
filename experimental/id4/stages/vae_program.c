@@ -52,6 +52,8 @@ typedef enum id4_vae_program_conv3x3_weight_layout_e {
   ID4_VAE_PROGRAM_CONV3X3_WEIGHT_LAYOUT_PACKED_OC_KY_KX_IC,
   // Parity-packed upsample layout: ParityxICxTapxOC.
   ID4_VAE_PROGRAM_CONV3X3_WEIGHT_LAYOUT_PACKED_UPSAMPLE_PARITY_IC_TAP_OC,
+  // Parity-packed upsample layout: ParityxTapxOCxIC.
+  ID4_VAE_PROGRAM_CONV3X3_WEIGHT_LAYOUT_PACKED_UPSAMPLE_PARITY_TAP_OC_IC,
 } id4_vae_program_conv3x3_weight_layout_t;
 
 static const float id4_vae_flux2_latent_mean[128] = {
@@ -744,6 +746,11 @@ static iree_status_t id4_vae_program_resolve_conv3x3_weight(
       *out_shape = id4_pipeline_program_make_shape_rank4(
           4, input_channel_count, 4, output_channel_count);
       return id4_vae_parameter_format_packed_upsample_conv3x3_weight_key(
+          source_key, key_storage, key_storage_capacity, out_key);
+    case ID4_VAE_PROGRAM_CONV3X3_WEIGHT_LAYOUT_PACKED_UPSAMPLE_PARITY_TAP_OC_IC:
+      *out_shape = id4_pipeline_program_make_shape_rank4(
+          4, 4, output_channel_count, input_channel_count);
+      return id4_vae_parameter_format_rhs_packed_upsample_conv3x3_weight_key(
           source_key, key_storage, key_storage_capacity, out_key);
     default:
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -3008,7 +3015,7 @@ static iree_status_t id4_vae_program_author_upsample_conv3x3_bias(
     char packed_weight_key_storage[ID4_VAE_PROGRAM_NAME_BUFFER_CAPACITY];
     const id4_vae_program_conv3x3_weight_layout_t weight_layout =
         use_parity_wmma
-            ? ID4_VAE_PROGRAM_CONV3X3_WEIGHT_LAYOUT_PACKED_UPSAMPLE_PARITY_IC_TAP_OC
+            ? ID4_VAE_PROGRAM_CONV3X3_WEIGHT_LAYOUT_PACKED_UPSAMPLE_PARITY_TAP_OC_IC
             : ID4_VAE_PROGRAM_CONV3X3_WEIGHT_LAYOUT_PACKED_IC_KY_KX_OC;
     IREE_RETURN_IF_ERROR(id4_vae_program_resolve_conv3x3_weight(
         weight_key, channel_count, channel_count, weight_layout,

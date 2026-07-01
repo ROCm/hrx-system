@@ -2417,6 +2417,28 @@ _KERNEL_CASES = [
         "target_name": "vae_pack_upsample_conv3x3_weight_f32_bf16_flux2_level3_shape",
     },
     {
+        "actual_case": "@id4_vae_pack_upsample_conv3x3_weight_rhs_f32_bf16_zero_small_case",
+        "benchmark": "@id4_vae_pack_upsample_conv3x3_weight_rhs_f32_bf16_zero_small",
+        "configs": [
+            "--config=id4.vae.pack_upsample_conv3x3_weight.input_channel_count=1",
+            "--config=id4.vae.pack_upsample_conv3x3_weight.output_channel_count=1",
+            "--config=id4.vae.pack_upsample_conv3x3_weight.element_count=16",
+        ],
+        "source": "vae/pack_upsample_conv3x3_weight_f32_bf16.loom",
+        "target_name": "vae_pack_upsample_conv3x3_weight_rhs_f32_bf16_zero_small",
+    },
+    {
+        "actual_case": "@id4_vae_pack_upsample_conv3x3_weight_rhs_f32_bf16_flux2_level3_shape_case",
+        "benchmark": "@id4_vae_pack_upsample_conv3x3_weight_rhs_f32_bf16_flux2_level3_shape",
+        "configs": [
+            "--config=id4.vae.pack_upsample_conv3x3_weight.input_channel_count=512",
+            "--config=id4.vae.pack_upsample_conv3x3_weight.output_channel_count=512",
+            "--config=id4.vae.pack_upsample_conv3x3_weight.element_count=4194304",
+        ],
+        "source": "vae/pack_upsample_conv3x3_weight_f32_bf16.loom",
+        "target_name": "vae_pack_upsample_conv3x3_weight_rhs_f32_bf16_flux2_level3_shape",
+    },
+    {
         "actual_case": "@id4_vae_group_norm_f32_small_case",
         "benchmark": "@id4_vae_group_norm_f32_small",
         "configs": [

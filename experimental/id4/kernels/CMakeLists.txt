@@ -3844,6 +3844,40 @@ iree_native_test(
 
 iree_native_test(
   NAME
+    "vae_pack_upsample_conv3x3_weight_rhs_f32_bf16_zero_small_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/pack_upsample_conv3x3_weight_f32_bf16.loom}}"
+    "--benchmark=@id4_vae_pack_upsample_conv3x3_weight_rhs_f32_bf16_zero_small"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.vae.pack_upsample_conv3x3_weight.input_channel_count=1"
+    "--config=id4.vae.pack_upsample_conv3x3_weight.output_channel_count=1"
+    "--config=id4.vae.pack_upsample_conv3x3_weight.element_count=16"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
+    "vae_pack_upsample_conv3x3_weight_rhs_f32_bf16_flux2_level3_shape_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/pack_upsample_conv3x3_weight_f32_bf16.loom}}"
+    "--benchmark=@id4_vae_pack_upsample_conv3x3_weight_rhs_f32_bf16_flux2_level3_shape"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.vae.pack_upsample_conv3x3_weight.input_channel_count=512"
+    "--config=id4.vae.pack_upsample_conv3x3_weight.output_channel_count=512"
+    "--config=id4.vae.pack_upsample_conv3x3_weight.element_count=4194304"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
     "vae_group_norm_f32_small_plan_test"
   ARGS
     "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_f32.loom}}"
@@ -16752,6 +16786,48 @@ iree_native_test(
   ARGS
     "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/pack_upsample_conv3x3_weight_f32_bf16.loom}}"
     "--case=@id4_vae_pack_upsample_conv3x3_weight_f32_bf16_flux2_level3_shape_case"
+    "--device=amdgpu://0"
+    "--config=id4.vae.pack_upsample_conv3x3_weight.input_channel_count=512"
+    "--config=id4.vae.pack_upsample_conv3x3_weight.output_channel_count=512"
+    "--config=id4.vae.pack_upsample_conv3x3_weight.element_count=4194304"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
+    "vae_pack_upsample_conv3x3_weight_rhs_f32_bf16_zero_small_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/pack_upsample_conv3x3_weight_f32_bf16.loom}}"
+    "--case=@id4_vae_pack_upsample_conv3x3_weight_rhs_f32_bf16_zero_small_case"
+    "--device=amdgpu://0"
+    "--config=id4.vae.pack_upsample_conv3x3_weight.input_channel_count=1"
+    "--config=id4.vae.pack_upsample_conv3x3_weight.output_channel_count=1"
+    "--config=id4.vae.pack_upsample_conv3x3_weight.element_count=16"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
+    "vae_pack_upsample_conv3x3_weight_rhs_f32_bf16_flux2_level3_shape_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/pack_upsample_conv3x3_weight_f32_bf16.loom}}"
+    "--case=@id4_vae_pack_upsample_conv3x3_weight_rhs_f32_bf16_flux2_level3_shape_case"
     "--device=amdgpu://0"
     "--config=id4.vae.pack_upsample_conv3x3_weight.input_channel_count=512"
     "--config=id4.vae.pack_upsample_conv3x3_weight.output_channel_count=512"

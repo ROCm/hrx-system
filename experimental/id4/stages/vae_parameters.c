@@ -24,6 +24,9 @@ static const iree_string_view_t id4_vae_parameter_rhs_packed_conv3x3_suffix =
 static const iree_string_view_t
     id4_vae_parameter_packed_upsample_conv3x3_suffix =
         IREE_SVL(".packed_upsample_parity_ic_tap_oc");
+static const iree_string_view_t
+    id4_vae_parameter_rhs_packed_upsample_conv3x3_suffix =
+        IREE_SVL(".packed_upsample_parity_tap_oc_ic");
 static const iree_string_view_t id4_vae_parameter_bf16_suffix =
     IREE_SVL(".bf16");
 
@@ -40,6 +43,8 @@ typedef enum id4_vae_parameter_transform_kind_e {
   ID4_VAE_PARAMETER_TRANSFORM_KIND_PACK_UPSAMPLE_CONV3X3_F32_BF16 = 4,
   // Reorders F32 conv3x3 weights into RHS-fragment-friendly BF16 storage.
   ID4_VAE_PARAMETER_TRANSFORM_KIND_PACK_CONV3X3_RHS_F32_BF16 = 5,
+  // Collapses F32 upsample conv3x3 weights into RHS-friendly BF16 storage.
+  ID4_VAE_PARAMETER_TRANSFORM_KIND_PACK_UPSAMPLE_CONV3X3_RHS_F32_BF16 = 6,
 } id4_vae_parameter_transform_kind_t;
 
 typedef struct id4_vae_parameter_mapping_t {
@@ -234,6 +239,43 @@ bool id4_vae_parameter_parse_packed_upsample_conv3x3_weight_key(
   return true;
 }
 
+iree_status_t id4_vae_parameter_format_rhs_packed_upsample_conv3x3_weight_key(
+    iree_string_view_t source_key, char* buffer,
+    iree_host_size_t buffer_capacity, iree_string_view_t* out_key) {
+  IREE_ASSERT_ARGUMENT(buffer);
+  IREE_ASSERT_ARGUMENT(out_key);
+  int length =
+      snprintf(buffer, buffer_capacity, "%.*s%.*s", (int)source_key.size,
+               source_key.data,
+               (int)id4_vae_parameter_rhs_packed_upsample_conv3x3_suffix.size,
+               id4_vae_parameter_rhs_packed_upsample_conv3x3_suffix.data);
+  if (length < 0 || (iree_host_size_t)length >= buffer_capacity) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "failed to format VAE RHS-packed upsample parameter key");
+  }
+  *out_key = iree_make_string_view(buffer, (iree_host_size_t)length);
+  return iree_ok_status();
+}
+
+bool id4_vae_parameter_parse_rhs_packed_upsample_conv3x3_weight_key(
+    iree_string_view_t key, iree_string_view_t* out_source_key) {
+  if (out_source_key) *out_source_key = iree_string_view_empty();
+  const iree_host_size_t suffix_position = iree_string_view_find(
+      key, id4_vae_parameter_rhs_packed_upsample_conv3x3_suffix, 0);
+  if (suffix_position == IREE_STRING_VIEW_NPOS ||
+      suffix_position +
+              id4_vae_parameter_rhs_packed_upsample_conv3x3_suffix.size !=
+          key.size) {
+    return false;
+  }
+  if (suffix_position == 0) return false;
+  if (out_source_key) {
+    *out_source_key = iree_string_view_substr(key, 0, suffix_position);
+  }
+  return true;
+}
+
 iree_status_t id4_vae_parameter_format_bf16_key(
     iree_string_view_t source_key, char* buffer,
     iree_host_size_t buffer_capacity, iree_string_view_t* out_key) {
@@ -391,6 +433,22 @@ static bool id4_vae_parameter_is_packed_upsample_conv3x3_bf16_tensor(
       packed_key, out_source_key);
 }
 
+static bool id4_vae_parameter_is_rhs_packed_upsample_conv3x3_bf16_tensor(
+    const id4_pipeline_program_tensor_record_t* tensor,
+    iree_string_view_t* out_source_key) {
+  if (!tensor || tensor->dtype != ID4_PIPELINE_PROGRAM_DTYPE_BF16 ||
+      tensor->shape.rank != 4 || tensor->shape.dims[0] != 4 ||
+      tensor->shape.dims[1] != 4) {
+    return false;
+  }
+  iree_string_view_t packed_key = iree_string_view_empty();
+  if (!id4_vae_parameter_parse_bf16_key(tensor->name, &packed_key)) {
+    return false;
+  }
+  return id4_vae_parameter_parse_rhs_packed_upsample_conv3x3_weight_key(
+      packed_key, out_source_key);
+}
+
 static iree_status_t id4_vae_parameter_count_mappings(
     const id4_pipeline_plan_t* plan, iree_host_size_t* out_mapping_count) {
   *out_mapping_count = 0;
@@ -406,7 +464,9 @@ static iree_status_t id4_vae_parameter_count_mappings(
         id4_pipeline_program_tensor_at(program,
                                        op->payload.parameter.tensor.ordinal);
     iree_string_view_t source_key = iree_string_view_empty();
-    if (id4_vae_parameter_is_packed_upsample_conv3x3_bf16_tensor(tensor,
+    if (id4_vae_parameter_is_rhs_packed_upsample_conv3x3_bf16_tensor(
+            tensor, &source_key) ||
+        id4_vae_parameter_is_packed_upsample_conv3x3_bf16_tensor(tensor,
                                                                  &source_key) ||
         id4_vae_parameter_is_rhs_packed_conv3x3_bf16_tensor(tensor,
                                                             &source_key) ||
@@ -629,6 +689,75 @@ id4_vae_parameter_populate_packed_upsample_conv3x3_bf16_mapping(
   return iree_ok_status();
 }
 
+static iree_status_t
+id4_vae_parameter_populate_rhs_packed_upsample_conv3x3_bf16_mapping(
+    const id4_pipeline_program_tensor_record_t* tensor,
+    iree_string_view_t source_key, id4_vae_parameter_mapping_t* out_mapping) {
+  uint64_t element_count = 0;
+  IREE_RETURN_IF_ERROR(
+      id4_pipeline_program_shape_element_count(tensor->shape, &element_count));
+  if (tensor->shape.dims[2] > UINT32_MAX ||
+      tensor->shape.dims[3] > UINT32_MAX) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "VAE RHS-packed BF16 upsample conv3x3 parameter %.*s channel count "
+        "is out of range",
+        (int)tensor->name.size, tensor->name.data);
+  }
+  if (tensor->shape.dims[2] == 0 || tensor->shape.dims[3] == 0) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "VAE RHS-packed BF16 upsample conv3x3 parameter %.*s channel count "
+        "must be non-zero",
+        (int)tensor->name.size, tensor->name.data);
+  }
+  if (element_count > UINT32_MAX) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "VAE RHS-packed BF16 upsample conv3x3 parameter %.*s element count "
+        "is out of range",
+        (int)tensor->name.size, tensor->name.data);
+  }
+  if (tensor->shape.dims[2] >
+      UINT64_MAX / tensor->shape.dims[3] / 3ull / 3ull) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "VAE RHS-packed BF16 upsample conv3x3 parameter %.*s source element "
+        "count is out of range",
+        (int)tensor->name.size, tensor->name.data);
+  }
+  const uint64_t source_element_count =
+      tensor->shape.dims[2] * tensor->shape.dims[3] * 3ull * 3ull;
+  if (source_element_count > IREE_DEVICE_SIZE_MAX / sizeof(float)) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "VAE RHS-packed BF16 upsample conv3x3 parameter %.*s source byte "
+        "length is out of range",
+        (int)tensor->name.size, tensor->name.data);
+  }
+  *out_mapping = (id4_vae_parameter_mapping_t){
+      // Virtual RHS-packed BF16 upsample parameter key from the plan.
+      .virtual_key = tensor->name,
+      // Original F32 source key in the wrapped provider.
+      .source_key = source_key,
+      // Transform used to materialize the virtual parameter.
+      .transform_kind =
+          ID4_VAE_PARAMETER_TRANSFORM_KIND_PACK_UPSAMPLE_CONV3X3_RHS_F32_BF16,
+      // Dense F32 source byte length.
+      .source_byte_length =
+          (iree_device_size_t)source_element_count * sizeof(float),
+      // Dense BF16 target byte length.
+      .target_byte_length = tensor->byte_length,
+      // Scalar target element count.
+      .element_count = element_count,
+      // Input channel dimension in parityxTapxOCxIC layout.
+      .input_channel_count = (uint32_t)tensor->shape.dims[3],
+      // Output channel dimension in parityxTapxOCxIC layout.
+      .output_channel_count = (uint32_t)tensor->shape.dims[2],
+  };
+  return iree_ok_status();
+}
+
 static iree_status_t id4_vae_parameter_populate_mappings(
     const id4_pipeline_plan_t* plan, id4_vae_parameter_mapping_t* mappings) {
   const id4_pipeline_program_t* program =
@@ -644,6 +773,13 @@ static iree_status_t id4_vae_parameter_populate_mappings(
         id4_pipeline_program_tensor_at(program,
                                        op->payload.parameter.tensor.ordinal);
     iree_string_view_t source_key = iree_string_view_empty();
+    if (id4_vae_parameter_is_rhs_packed_upsample_conv3x3_bf16_tensor(
+            tensor, &source_key)) {
+      IREE_RETURN_IF_ERROR(
+          id4_vae_parameter_populate_rhs_packed_upsample_conv3x3_bf16_mapping(
+              tensor, source_key, &mappings[mapping_index++]));
+      continue;
+    }
     if (id4_vae_parameter_is_packed_upsample_conv3x3_bf16_tensor(tensor,
                                                                  &source_key)) {
       IREE_RETURN_IF_ERROR(
@@ -758,6 +894,7 @@ static iree_status_t id4_vae_parameter_pack_config_keys(
           IREE_SV("id4.vae.pack_conv3x3_weight.element_count");
       return iree_ok_status();
     case ID4_VAE_PARAMETER_TRANSFORM_KIND_PACK_UPSAMPLE_CONV3X3_F32_BF16:
+    case ID4_VAE_PARAMETER_TRANSFORM_KIND_PACK_UPSAMPLE_CONV3X3_RHS_F32_BF16:
       *out_input_channel_count_key =
           IREE_SV("id4.vae.pack_upsample_conv3x3_weight.input_channel_count");
       *out_output_channel_count_key =
@@ -861,6 +998,11 @@ static iree_status_t id4_vae_parameter_pack_kernel_ref(
       *out_kernel = id4_pipeline_make_kernel_ref(
           IREE_SV("vae/pack_upsample_conv3x3_weight_f32_bf16"),
           IREE_SV("id4_vae_pack_upsample_conv3x3_weight_f32_bf16"));
+      return iree_ok_status();
+    case ID4_VAE_PARAMETER_TRANSFORM_KIND_PACK_UPSAMPLE_CONV3X3_RHS_F32_BF16:
+      *out_kernel = id4_pipeline_make_kernel_ref(
+          IREE_SV("vae/pack_upsample_conv3x3_weight_f32_bf16"),
+          IREE_SV("id4_vae_pack_upsample_conv3x3_weight_rhs_f32_bf16"));
       return iree_ok_status();
     default:
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -981,6 +1123,7 @@ static iree_status_t id4_vae_parameter_prepare_transform_executable(
     case ID4_VAE_PARAMETER_TRANSFORM_KIND_PACK_CONV3X3_F32_BF16:
     case ID4_VAE_PARAMETER_TRANSFORM_KIND_PACK_CONV3X3_RHS_F32_BF16:
     case ID4_VAE_PARAMETER_TRANSFORM_KIND_PACK_UPSAMPLE_CONV3X3_F32_BF16:
+    case ID4_VAE_PARAMETER_TRANSFORM_KIND_PACK_UPSAMPLE_CONV3X3_RHS_F32_BF16:
       return id4_vae_parameter_prepare_pack_executable(
           provider, queue_affinity, mapping, out_executable, out_function);
     case ID4_VAE_PARAMETER_TRANSFORM_KIND_CAST_F32_BF16:

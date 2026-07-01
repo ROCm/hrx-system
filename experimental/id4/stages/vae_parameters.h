@@ -67,6 +67,16 @@ iree_status_t id4_vae_parameter_format_packed_upsample_conv3x3_weight_key(
 bool id4_vae_parameter_parse_packed_upsample_conv3x3_weight_key(
     iree_string_view_t key, iree_string_view_t* out_source_key);
 
+// Formats the virtual key for parity-packed upsample 3x3 convolution weights
+// arranged for direct RHS fragment loads.
+iree_status_t id4_vae_parameter_format_rhs_packed_upsample_conv3x3_weight_key(
+    iree_string_view_t source_key, char* buffer,
+    iree_host_size_t buffer_capacity, iree_string_view_t* out_key);
+
+// Parses an RHS-packed upsample 3x3 virtual key and returns the source key.
+bool id4_vae_parameter_parse_rhs_packed_upsample_conv3x3_weight_key(
+    iree_string_view_t key, iree_string_view_t* out_source_key);
+
 // Formats the virtual key for a dense F32 parameter materialized as BF16.
 iree_status_t id4_vae_parameter_format_bf16_key(
     iree_string_view_t source_key, char* buffer,
