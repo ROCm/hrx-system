@@ -62,7 +62,7 @@ static bool loom_low_allocation_spill_plan_use_is_removed_block_arg_edge(
          loom_use_operand_index(use) == arg_index;
 }
 
-static uint32_t loom_low_allocation_spill_plan_reload_count(
+static uint32_t loom_low_allocation_spill_plan_value_reload_count(
     const loom_value_t* value) {
   if (!loom_value_is_block_arg(value)) {
     return value->use_count;
@@ -81,7 +81,7 @@ static uint32_t loom_low_allocation_spill_plan_reload_count(
   return reload_count;
 }
 
-static iree_status_t loom_low_allocation_spill_plan_store_count(
+static iree_status_t loom_low_allocation_spill_plan_value_store_count(
     const loom_module_t* module, loom_region_t* body, loom_value_id_t value_id,
     const loom_value_t* value, uint32_t reload_count,
     uint32_t* out_store_count) {
@@ -141,6 +141,31 @@ static iree_status_t loom_low_allocation_spill_plan_store_count(
   return iree_ok_status();
 }
 
+iree_status_t loom_low_allocation_spill_plan_traffic(
+    const loom_module_t* module, loom_region_t* body, loom_value_id_t value_id,
+    loom_low_allocation_spill_plan_traffic_t* out_traffic) {
+  IREE_ASSERT_ARGUMENT(module);
+  IREE_ASSERT_ARGUMENT(body);
+  IREE_ASSERT_ARGUMENT(out_traffic);
+  *out_traffic = (loom_low_allocation_spill_plan_traffic_t){0};
+  if (value_id >= module->values.count) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "cannot plan spill for out-of-range value %u",
+                            (unsigned)value_id);
+  }
+  const loom_value_t* value = loom_module_value(module, value_id);
+  const uint32_t reload_count =
+      loom_low_allocation_spill_plan_value_reload_count(value);
+  uint32_t store_count = 0;
+  IREE_RETURN_IF_ERROR(loom_low_allocation_spill_plan_value_store_count(
+      module, body, value_id, value, reload_count, &store_count));
+  *out_traffic = (loom_low_allocation_spill_plan_traffic_t){
+      .store_count = store_count,
+      .reload_count = reload_count,
+  };
+  return iree_ok_status();
+}
+
 iree_status_t loom_low_allocation_spill_plan_record(
     const loom_module_t* module, loom_region_t* body,
     const loom_low_allocation_assignment_t* assignment,
@@ -163,11 +188,9 @@ iree_status_t loom_low_allocation_spill_plan_record(
                             "cannot plan spill for out-of-range value %u",
                             (unsigned)assignment->value_id);
   }
-  const loom_value_t* value = loom_module_value(module, assignment->value_id);
-  uint32_t reload_count = loom_low_allocation_spill_plan_reload_count(value);
-  uint32_t store_count = 0;
-  IREE_RETURN_IF_ERROR(loom_low_allocation_spill_plan_store_count(
-      module, body, assignment->value_id, value, reload_count, &store_count));
+  loom_low_allocation_spill_plan_traffic_t traffic = {0};
+  IREE_RETURN_IF_ERROR(loom_low_allocation_spill_plan_traffic(
+      module, body, assignment->value_id, &traffic));
   spill_plans[(*inout_spill_plan_count)++] = (loom_low_allocation_spill_plan_t){
       .value_id = assignment->value_id,
       .assignment_index = assignment_index,
@@ -175,8 +198,8 @@ iree_status_t loom_low_allocation_spill_plan_record(
       .slot_space = spill_slot_space,
       .byte_size = byte_size,
       .byte_alignment = byte_alignment,
-      .store_count = store_count,
-      .reload_count = reload_count,
+      .store_count = traffic.store_count,
+      .reload_count = traffic.reload_count,
   };
   return iree_ok_status();
 }
