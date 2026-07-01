@@ -604,6 +604,46 @@ def test_generate_builders_use_explicit_flags_for_optional_symbol_refs() -> None
     assert "loom_op_attrs(*out_op)[0] = loom_attr_symbol(target);" in builders_c
 
 
+def test_generate_builders_define_mixed_fixed_results() -> None:
+    op = Op(
+        "test.mixed_results",
+        group=Dialect("test"),
+        results=[
+            Result("payload", ANY),
+            Result("valid", TypeConstraint.I1),
+        ],
+        format=[],
+    )
+
+    builders_c = generate_builders_c("test", [op])
+
+    assert "loom_type_t result_type" in builders_c
+    assert "loom_type_t result_types_storage[2] = {" in builders_c
+    assert "result_type," in builders_c
+    assert "loom_type_scalar(LOOM_SCALAR_TYPE_I1)," in builders_c
+    assert "builder, result_types_storage, 2," in builders_c
+
+
+def test_generate_builders_keep_array_for_multiple_dynamic_fixed_results() -> None:
+    op = Op(
+        "test.dynamic_results",
+        group=Dialect("test"),
+        results=[
+            Result("lhs", ANY),
+            Result("rhs", INTEGER),
+        ],
+        format=[ResultTypeList("lhs", parens=False)],
+    )
+
+    ops_h = generate_ops_h("test", 0, [op])
+    builders_c = generate_builders_c("test", [op])
+
+    assert "const loom_type_t* result_types" in ops_h
+    assert "const loom_type_t* result_types" in builders_c
+    assert "builder, result_types, 2," in builders_c
+    assert "result_types_storage" not in builders_c
+
+
 def test_generate_tables_uses_template_param_for_symbol_attrs() -> None:
     op = Op(
         "test.targeted",
