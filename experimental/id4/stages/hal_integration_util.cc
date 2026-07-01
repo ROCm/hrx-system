@@ -902,6 +902,26 @@ static iree_status_t CaptureDiagnostics(
   if (event->kind == ID4_PIPELINE_DIAGNOSTIC_EVENT_KIND_KERNEL) {
     ++diagnostics->kernel_event_count;
   }
+  if (event->timing && event->parameter_load &&
+      iree_string_view_equal(event->key,
+                             IREE_SV("parameter_slab.load_group.submit"))) {
+    const iree_duration_t duration_ns = event->timing->duration_ns;
+    ++diagnostics->parameter_load_group_submit_count;
+    diagnostics->parameter_load_group_submit_duration_ns += duration_ns;
+    diagnostics->parameter_load_group_submit_max_duration_ns = iree_max(
+        diagnostics->parameter_load_group_submit_max_duration_ns, duration_ns);
+    if (iree_string_view_equal(event->parameter_load->load_group_kind,
+                               IREE_SV("gather"))) {
+      ++diagnostics->parameter_load_group_submit_gather_count;
+      diagnostics->parameter_load_group_submit_gather_duration_ns +=
+          duration_ns;
+    } else if (iree_string_view_equal(event->parameter_load->load_group_kind,
+                                      IREE_SV("encode"))) {
+      ++diagnostics->parameter_load_group_submit_encode_count;
+      diagnostics->parameter_load_group_submit_encode_duration_ns +=
+          duration_ns;
+    }
+  }
   return iree_ok_status();
 }
 

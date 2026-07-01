@@ -202,6 +202,20 @@ typedef struct StageDiagnostics {
   iree_host_size_t event_count;
   // Number of kernel diagnostic events observed.
   iree_host_size_t kernel_event_count;
+  // Number of parameter load group submit timing events observed.
+  iree_host_size_t parameter_load_group_submit_count;
+  // Number of direct gather load group submit timing events observed.
+  iree_host_size_t parameter_load_group_submit_gather_count;
+  // Number of encoded load group submit timing events observed.
+  iree_host_size_t parameter_load_group_submit_encode_count;
+  // Total host-observed duration for load group submit timing events.
+  iree_duration_t parameter_load_group_submit_duration_ns;
+  // Total host-observed duration for direct gather group submit events.
+  iree_duration_t parameter_load_group_submit_gather_duration_ns;
+  // Total host-observed duration for encoded load group submit events.
+  iree_duration_t parameter_load_group_submit_encode_duration_ns;
+  // Maximum host-observed duration for one load group submit event.
+  iree_duration_t parameter_load_group_submit_max_duration_ns;
 } StageDiagnostics;
 
 // Returns a diagnostics sink that counts lifecycle and kernel events.

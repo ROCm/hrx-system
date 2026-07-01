@@ -277,15 +277,22 @@ static uint64_t CeilMiB(iree_device_size_t byte_length) {
   return (uint64_t)((byte_length + kMiB - 1) / kMiB);
 }
 
+static double AverageMilliseconds(iree_duration_t duration_ns,
+                                  uint64_t iteration_count) {
+  if (iteration_count == 0) return 0.0;
+  return (double)duration_ns / (double)iteration_count / 1000000.0;
+}
+
 static void SetQwenBenchmarkLabel(
     iree_benchmark_state_t* benchmark_state, uint32_t token_count,
-    const id4_pipeline_plan_statistics_t& statistics) {
+    const id4_pipeline_plan_statistics_t& statistics,
+    const id4::test::StageDiagnostics& diagnostics, uint64_t iteration_count) {
   id4_qwen3_vl_weight_execution_strategy_t weight_execution_strategy =
       ID4_QWEN3_VL_WEIGHT_EXECUTION_STRATEGY_INVALID;
   IREE_CHECK_OK(ParseQwenWeightExecutionStrategy(&weight_execution_strategy));
   iree_string_view_t weight_execution_strategy_name =
       id4_qwen3_vl_weight_execution_strategy_name(weight_execution_strategy);
-  char label[768];
+  char label[1024];
   std::snprintf(
       label, sizeof(label),
       "tokens=%" PRIu32 " weights=%.*s param_total=%" PRIu64
@@ -294,7 +301,10 @@ static void SetQwenBenchmarkLabel(
       "MiB param_load_steps[gather=%" PRIhsz ",encode=%" PRIhsz
       "] param_load_groups[total=%" PRIhsz ",gather=%" PRIhsz ",encode=%" PRIhsz
       "] local_hw=%" PRIu64 "MiB boundary=%" PRIu64 "MiB kernels=%" PRIhsz
-      " dispatches=%" PRIhsz,
+      " dispatches=%" PRIhsz
+      " load_group_submit_ms[all=%.3f,gather=%.3f,encode=%.3f,max=%.3f]"
+      " load_group_submit_count[total=%" PRIhsz ",gather=%" PRIhsz
+      ",encode=%" PRIhsz "]",
       token_count, static_cast<int>(weight_execution_strategy_name.size),
       weight_execution_strategy_name.data,
       CeilMiB(statistics.parameter_slab_byte_length),
@@ -309,7 +319,20 @@ static void SetQwenBenchmarkLabel(
       statistics.parameter_encode_load_group_count,
       CeilMiB(statistics.memory_slab_high_water_mark),
       CeilMiB(statistics.boundary_tensor_byte_length), statistics.kernel_count,
-      statistics.dispatch_count);
+      statistics.dispatch_count,
+      AverageMilliseconds(diagnostics.parameter_load_group_submit_duration_ns,
+                          iteration_count),
+      AverageMilliseconds(
+          diagnostics.parameter_load_group_submit_gather_duration_ns,
+          iteration_count),
+      AverageMilliseconds(
+          diagnostics.parameter_load_group_submit_encode_duration_ns,
+          iteration_count),
+      (double)diagnostics.parameter_load_group_submit_max_duration_ns /
+          1000000.0,
+      diagnostics.parameter_load_group_submit_count,
+      diagnostics.parameter_load_group_submit_gather_count,
+      diagnostics.parameter_load_group_submit_encode_count);
   iree_benchmark_set_label(benchmark_state, label);
 }
 
@@ -520,6 +543,7 @@ IREE_BENCHMARK_FN(BM_Qwen3VlStagePrepareCachedKernels) {
   IREE_RETURN_IF_ERROR(
       WaitForSemaphore(prepare_semaphore.get(), prepare_value));
   warm_bundle.reset();
+  context.diagnostics = {};
 
   uint64_t iteration_count = 0;
   while (iree_benchmark_keep_running(benchmark_state, 1)) {
@@ -537,7 +561,8 @@ IREE_BENCHMARK_FN(BM_Qwen3VlStagePrepareCachedKernels) {
   iree_benchmark_set_items_processed(
       benchmark_state,
       static_cast<int64_t>(iteration_count * shape.token_count));
-  SetQwenBenchmarkLabel(benchmark_state, shape.token_count, statistics);
+  SetQwenBenchmarkLabel(benchmark_state, shape.token_count, statistics,
+                        context.diagnostics, iteration_count);
   return iree_ok_status();
 }
 ID4_QWEN_BENCHMARK_REGISTER(BM_Qwen3VlStagePrepareCachedKernels,
@@ -577,6 +602,7 @@ IREE_BENCHMARK_FN(BM_Qwen3VlStagePrepareFixtureCachedKernels) {
   IREE_RETURN_IF_ERROR(
       WaitForSemaphore(prepare_semaphore.get(), prepare_value));
   warm_bundle.reset();
+  context.diagnostics = {};
 
   uint64_t iteration_count = 0;
   while (iree_benchmark_keep_running(benchmark_state, 1)) {
@@ -595,7 +621,7 @@ IREE_BENCHMARK_FN(BM_Qwen3VlStagePrepareFixtureCachedKernels) {
       benchmark_state,
       static_cast<int64_t>(iteration_count * context.request.token_count));
   SetQwenBenchmarkLabel(benchmark_state, context.request.token_count,
-                        statistics);
+                        statistics, context.diagnostics, iteration_count);
   return iree_ok_status();
 }
 
@@ -649,6 +675,7 @@ static iree_status_t RunIssueBenchmarkWithPreparedContext(
     IREE_RETURN_IF_ERROR(
         WaitForSemaphore(update_semaphore.get(), update_value));
   }
+  context->diagnostics = {};
 
   id4::test::OwningRef<iree_hal_semaphore_t, iree_hal_semaphore_release>
       issue_semaphore;
@@ -694,7 +721,7 @@ static iree_status_t RunIssueBenchmarkWithPreparedContext(
       benchmark_state,
       static_cast<int64_t>(iteration_count * context->request.token_count));
   SetQwenBenchmarkLabel(benchmark_state, context->request.token_count,
-                        statistics);
+                        statistics, context->diagnostics, iteration_count);
   return iree_ok_status();
 }
 
@@ -770,6 +797,7 @@ static iree_status_t RunPrepareIssueBenchmarkWithContext(
     IREE_RETURN_IF_ERROR(WaitForSemaphore(issue_semaphore.get(), signal_value));
     warm_bundle.reset();
   }
+  context->diagnostics = {};
 
   uint64_t iteration_count = 0;
   bool wrote_initial_plan_json = false;
@@ -818,7 +846,7 @@ static iree_status_t RunPrepareIssueBenchmarkWithContext(
       benchmark_state,
       static_cast<int64_t>(iteration_count * context->request.token_count));
   SetQwenBenchmarkLabel(benchmark_state, context->request.token_count,
-                        statistics);
+                        statistics, context->diagnostics, iteration_count);
   return iree_ok_status();
 }
 
