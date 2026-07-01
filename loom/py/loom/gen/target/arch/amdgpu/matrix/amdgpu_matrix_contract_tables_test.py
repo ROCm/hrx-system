@@ -92,6 +92,12 @@ def test_generation_resolves_gfx1250_supplemental_matrix_descriptors() -> None:
     assert ".low_descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_V_WMMA_SCALE16_F32_32X16X128_F4" in scaled_f4
 
 
+def test_generation_emits_gfx950_implicit_scale_format_masks() -> None:
+    initializer = _contract_initializer(_contract("mfma.scale.f32.16x16x128.f8f6f4"))
+
+    assert (".implicit_scale_format_selector_bits = (loom_amdgpu_matrix_scale_format_selector_bits_t)((1u << LOOM_AMDGPU_MATRIX_SCALE_FORMAT_SELECTOR_E8M0))") in initializer
+
+
 def test_generation_emits_source_requirement_flags() -> None:
     initializer = _contract_initializer(_contract("swmmac.f32.16x16x32.f16"))
 
@@ -216,3 +222,35 @@ def test_generation_rejects_ambiguous_shape_matched_descriptor_keys() -> None:
         assert "ambiguously matches descriptor key(s) amdgpu.first, amdgpu.second" in message
     else:
         raise AssertionError("expected ambiguous descriptor resolution to fail")
+
+
+def test_generation_rejects_selector_and_implicit_scale_format_overlap() -> None:
+    contract = replace(
+        _contract("wmma.scale.f32.16x16x128.f8f6f4"),
+        implicit_scale_formats=("e8m0",),
+    )
+
+    try:
+        _contract_initializer(contract)
+    except ValueError as exc:
+        message = str(exc)
+        assert "AMDGPU matrix contract 'wmma.scale.f32.16x16x128.f8f6f4'" in message
+        assert "scale-format selector operands and implicit scale formats" in message
+    else:
+        raise AssertionError("expected selector/implicit scale validation to fail")
+
+
+def test_generation_rejects_scaled_contract_without_scale_format_policy() -> None:
+    contract = replace(
+        _contract("mfma.scale.f32.16x16x128.f8f6f4"),
+        implicit_scale_formats=(),
+    )
+
+    try:
+        _contract_initializer(contract)
+    except ValueError as exc:
+        message = str(exc)
+        assert "AMDGPU matrix contract 'mfma.scale.f32.16x16x128.f8f6f4'" in message
+        assert "selector operands or implicit scale formats" in message
+    else:
+        raise AssertionError("expected scale format policy validation to fail")

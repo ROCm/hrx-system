@@ -101,6 +101,11 @@ _SCALE_KIND_C_NAMES = {
     "scale16": "LOOM_AMDGPU_MATRIX_SCALE_16",
 }
 
+_SCALE_FORMAT_C_NAMES = {
+    "e8m0": "LOOM_AMDGPU_MATRIX_SCALE_FORMAT_SELECTOR_E8M0",
+    "fp8_e4m3": "LOOM_AMDGPU_MATRIX_SCALE_FORMAT_SELECTOR_FP8_E4M3",
+}
+
 _FLAG_C_NAMES = {
     "sparse": "LOOM_AMDGPU_MATRIX_CONTRACT_FLAG_SPARSE",
     "scaled": "LOOM_AMDGPU_MATRIX_CONTRACT_FLAG_SCALED",
@@ -196,6 +201,19 @@ def _c_bitset(
     if not values:
         return "0"
     return " | ".join(c_names[value] for value in values)
+
+
+def _c_selector_bitset(
+    values: Sequence[str],
+    c_names: Mapping[str, str],
+    *,
+    field_name: str,
+    contract: AmdgpuMatrixContract,
+) -> str:
+    _validate_known_values(values, c_names, field_name=field_name, contract=contract)
+    if not values:
+        return "0"
+    return "(loom_amdgpu_matrix_scale_format_selector_bits_t)(" + " | ".join(f"(1u << {c_names[value]})" for value in values) + ")"
 
 
 def _contract_semantic_tag(contract: AmdgpuMatrixContract) -> str:
@@ -402,6 +420,18 @@ def _contract_initializer(
         field_name="source requirement",
         contract=contract,
     )
+    _validate_known_values(
+        contract.implicit_scale_formats,
+        _SCALE_FORMAT_C_NAMES,
+        field_name="implicit scale format",
+        contract=contract,
+    )
+    if contract.implicit_scale_formats and "scale_formats" in contract.flags:
+        raise ValueError(f"AMDGPU matrix contract '{contract.name}' cannot have both scale-format selector operands and implicit scale formats")
+    if contract.implicit_scale_formats and contract.scale_kind == "none":
+        raise ValueError(f"AMDGPU matrix contract '{contract.name}' cannot have implicit scale formats without scale operands")
+    if contract.scale_kind != "none" and "scale_formats" not in contract.flags and not contract.implicit_scale_formats:
+        raise ValueError(f"AMDGPU matrix contract '{contract.name}' with scale operands must have selector operands or implicit scale formats")
     descriptor_key = _resolve_contract_descriptor_key(
         contract,
         keys_by_semantic_tag=keys_by_semantic_tag,
@@ -426,6 +456,12 @@ def _contract_initializer(
     fragment_layout = _FRAGMENT_LAYOUT_C_NAMES.get(contract.fragment_layout)
     if fragment_layout is None:
         raise ValueError(f"AMDGPU matrix contract '{contract.name}' has unknown fragment layout '{contract.fragment_layout}'")
+    implicit_scale_format_selector_bits = _c_selector_bitset(
+        contract.implicit_scale_formats,
+        _SCALE_FORMAT_C_NAMES,
+        field_name="implicit scale format",
+        contract=contract,
+    )
     result_row_count, result_column_count, reduction_count = contract.tile_shape
     return "\n".join(
         [
@@ -448,6 +484,7 @@ def _contract_initializer(
             f"    .accumulator_payload = {_payload_initializer(contract.accumulator)},",
             f"    .result_payload = {_payload_initializer(contract.result)},",
             f"    .scale_kind = {scale_kind},",
+            f"    .implicit_scale_format_selector_bits = {implicit_scale_format_selector_bits},",
             f"    .fragment_layout_kind = {fragment_layout},",
             "},",
         ]

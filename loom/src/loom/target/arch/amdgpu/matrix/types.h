@@ -154,6 +154,9 @@ typedef enum loom_amdgpu_matrix_scale_format_selector_e {
   LOOM_AMDGPU_MATRIX_SCALE_FORMAT_SELECTOR_FP8_E4M3 = 2,
 } loom_amdgpu_matrix_scale_format_selector_t;
 
+// Bitset of loom_amdgpu_matrix_scale_format_selector_t values.
+typedef uint8_t loom_amdgpu_matrix_scale_format_selector_bits_t;
+
 typedef enum loom_amdgpu_matrix_fragment_coordinate_flag_bits_e {
   // Coordinate carries an M/result-row value.
   LOOM_AMDGPU_MATRIX_FRAGMENT_COORDINATE_ROW =
@@ -325,6 +328,11 @@ typedef struct loom_amdgpu_matrix_contract_descriptor_t {
   loom_amdgpu_matrix_payload_shape_t result_payload;
   // Explicit scale operand kind.
   loom_amdgpu_matrix_scale_kind_t scale_kind;
+  // Fixed scale-format selector bits accepted when the descriptor ABI has no
+  // scale-format selector immediates. Zero means unconstrained or selector
+  // driven.
+  loom_amdgpu_matrix_scale_format_selector_bits_t
+      implicit_scale_format_selector_bits;
   // Target-owned fragment lane/register layout kind.
   loom_amdgpu_matrix_fragment_layout_kind_t fragment_layout_kind;
 } loom_amdgpu_matrix_contract_descriptor_t;
@@ -371,11 +379,13 @@ enum loom_amdgpu_matrix_contract_rejection_bits_e {
   LOOM_AMDGPU_MATRIX_CONTRACT_REJECTION_MISSING_OPSEL = 1u << 17,
   // A candidate required scale-format selectors that were unavailable.
   LOOM_AMDGPU_MATRIX_CONTRACT_REJECTION_MISSING_SCALE_FORMATS = 1u << 18,
+  // A candidate has fixed scale-format semantics that do not match the source.
+  LOOM_AMDGPU_MATRIX_CONTRACT_REJECTION_SCALE_FORMAT = 1u << 19,
   // The request required target flags that the remaining candidates do not
   // carry.
-  LOOM_AMDGPU_MATRIX_CONTRACT_REJECTION_REQUIRED_FLAGS = 1u << 19,
+  LOOM_AMDGPU_MATRIX_CONTRACT_REJECTION_REQUIRED_FLAGS = 1u << 20,
   // The request itself was invalid or absent.
-  LOOM_AMDGPU_MATRIX_CONTRACT_REJECTION_INVALID_REQUEST = 1u << 20,
+  LOOM_AMDGPU_MATRIX_CONTRACT_REJECTION_INVALID_REQUEST = 1u << 21,
 };
 
 // Bitset of loom_amdgpu_matrix_contract_rejection_bits_e values.
@@ -397,6 +407,12 @@ typedef struct loom_amdgpu_matrix_contract_match_request_t {
   loom_amdgpu_matrix_payload_shape_t result_payload;
   // Required scale operand kind.
   loom_amdgpu_matrix_scale_kind_t scale_kind;
+  // LHS scale-format selector bit proven by the source schema, or zero.
+  loom_amdgpu_matrix_scale_format_selector_bits_t
+      lhs_scale_format_selector_bits;
+  // RHS scale-format selector bit proven by the source schema, or zero.
+  loom_amdgpu_matrix_scale_format_selector_bits_t
+      rhs_scale_format_selector_bits;
   // Processor feature bits available to the target.
   loom_amdgpu_matrix_feature_bits_t feature_bits;
   // Concrete wave size selected for the target. Use 0 when not yet selected.
@@ -423,6 +439,8 @@ typedef struct loom_amdgpu_matrix_contract_match_diagnostic_t {
   iree_host_size_t scale_candidate_count;
   // Number of scale-compatible descriptors that matched flag requirements.
   iree_host_size_t flag_candidate_count;
+  // Number of flag-compatible descriptors that matched scale-format facts.
+  iree_host_size_t scale_format_candidate_count;
   // Number of flag-compatible descriptors available for the target features.
   iree_host_size_t feature_candidate_count;
   // Number of feature-compatible descriptors legal for the selected wave size.

@@ -39,6 +39,7 @@ class AmdgpuMatrixContract:
     semantic_tag: str | None = None
     fragment_layout: str | None = None
     source_requirements: tuple[str, ...] = ()
+    implicit_scale_formats: tuple[str, ...] = ()
 
 
 def payload(
@@ -602,6 +603,7 @@ AMDGPU_MATRIX_CONTRACTS: tuple[AmdgpuMatrixContract, ...] = (
         family="mfma",
         features=("mfma_gfx950", "mfma_gfx950_scale_f8f6f4"),
         flags=("scaled", "matrix_formats", "zero_scale_fallback"),
+        implicit_scale_formats=("e8m0",),
         tile_shape=(16, 16, 128),
         lhs=payload("f8f6f4", 8, 32),
         rhs=payload("f8f6f4", 8, 32),
@@ -614,6 +616,7 @@ AMDGPU_MATRIX_CONTRACTS: tuple[AmdgpuMatrixContract, ...] = (
         family="mfma",
         features=("mfma_gfx950", "mfma_gfx950_scale_f8f6f4"),
         flags=("scaled", "matrix_formats", "zero_scale_fallback"),
+        implicit_scale_formats=("e8m0",),
         tile_shape=(32, 32, 64),
         lhs=payload("f8f6f4", 8, 32),
         rhs=payload("f8f6f4", 8, 32),

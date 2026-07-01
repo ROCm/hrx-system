@@ -520,6 +520,25 @@ iree_string_view_t loom_amdgpu_matrix_scale_kind_name(
   return kAmdgpuMatrixScaleKindNames[scale_kind];
 }
 
+bool loom_amdgpu_matrix_scale_format_selector_from_numeric_format(
+    loom_value_fact_numeric_format_flags_t format, int64_t* out_value) {
+  *out_value = 0;
+  const loom_numeric_format_info_t* info = NULL;
+  if (!loom_numeric_format_info(format, &info)) {
+    return false;
+  }
+  switch (info->float_family) {
+    case LOOM_NUMERIC_FLOAT_FAMILY_F8_E8M0:
+      *out_value = LOOM_AMDGPU_MATRIX_SCALE_FORMAT_SELECTOR_E8M0;
+      return true;
+    case LOOM_NUMERIC_FLOAT_FAMILY_FP8:
+      *out_value = LOOM_AMDGPU_MATRIX_SCALE_FORMAT_SELECTOR_FP8_E4M3;
+      return true;
+    default:
+      return false;
+  }
+}
+
 const loom_amdgpu_matrix_fragment_layout_t*
 loom_amdgpu_matrix_fragment_layout_for_kind(
     loom_amdgpu_matrix_fragment_layout_kind_t kind) {
@@ -776,6 +795,32 @@ loom_amdgpu_matrix_contract_flag_rejection_bits(
   return rejection_bits;
 }
 
+static bool loom_amdgpu_matrix_contract_scale_format_matches(
+    loom_amdgpu_matrix_scale_format_selector_bits_t request_bits,
+    loom_amdgpu_matrix_scale_format_selector_bits_t descriptor_bits) {
+  return request_bits == 0 || descriptor_bits == 0 ||
+         iree_all_bits_set(descriptor_bits, request_bits);
+}
+
+static loom_amdgpu_matrix_contract_rejection_bits_t
+loom_amdgpu_matrix_contract_scale_format_rejection_bits(
+    const loom_amdgpu_matrix_contract_descriptor_t* descriptor,
+    const loom_amdgpu_matrix_contract_match_request_t* request) {
+  if (iree_any_bit_set(descriptor->flags,
+                       LOOM_AMDGPU_MATRIX_CONTRACT_FLAG_SCALE_FORMATS)) {
+    return LOOM_AMDGPU_MATRIX_CONTRACT_REJECTION_NONE;
+  }
+  if (loom_amdgpu_matrix_contract_scale_format_matches(
+          request->lhs_scale_format_selector_bits,
+          descriptor->implicit_scale_format_selector_bits) &&
+      loom_amdgpu_matrix_contract_scale_format_matches(
+          request->rhs_scale_format_selector_bits,
+          descriptor->implicit_scale_format_selector_bits)) {
+    return LOOM_AMDGPU_MATRIX_CONTRACT_REJECTION_NONE;
+  }
+  return LOOM_AMDGPU_MATRIX_CONTRACT_REJECTION_SCALE_FORMAT;
+}
+
 const loom_amdgpu_matrix_contract_descriptor_t*
 loom_amdgpu_matrix_contract_select(
     const loom_amdgpu_matrix_contract_match_request_t* request,
@@ -793,6 +838,8 @@ loom_amdgpu_matrix_contract_select(
   loom_amdgpu_matrix_contract_rejection_bits_t payload_rejection_bits =
       LOOM_AMDGPU_MATRIX_CONTRACT_REJECTION_NONE;
   loom_amdgpu_matrix_contract_rejection_bits_t flag_rejection_bits =
+      LOOM_AMDGPU_MATRIX_CONTRACT_REJECTION_NONE;
+  loom_amdgpu_matrix_contract_rejection_bits_t scale_format_rejection_bits =
       LOOM_AMDGPU_MATRIX_CONTRACT_REJECTION_NONE;
   for (iree_host_size_t i = 0; i < kLoomAmdgpuMatrixContractDescriptorCount;
        ++i) {
@@ -829,6 +876,15 @@ loom_amdgpu_matrix_contract_select(
     }
     ++diagnostic.flag_candidate_count;
 
+    const loom_amdgpu_matrix_contract_rejection_bits_t scale_format_rejection =
+        loom_amdgpu_matrix_contract_scale_format_rejection_bits(descriptor,
+                                                                request);
+    if (scale_format_rejection != LOOM_AMDGPU_MATRIX_CONTRACT_REJECTION_NONE) {
+      scale_format_rejection_bits |= scale_format_rejection;
+      continue;
+    }
+    ++diagnostic.scale_format_candidate_count;
+
     if ((request->feature_bits & descriptor->required_feature_bits) !=
         descriptor->required_feature_bits) {
       continue;
@@ -857,6 +913,8 @@ loom_amdgpu_matrix_contract_select(
         LOOM_AMDGPU_MATRIX_CONTRACT_REJECTION_SCALE_KIND;
   } else if (diagnostic.flag_candidate_count == 0) {
     diagnostic.rejection_bits = flag_rejection_bits;
+  } else if (diagnostic.scale_format_candidate_count == 0) {
+    diagnostic.rejection_bits = scale_format_rejection_bits;
   } else if (diagnostic.feature_candidate_count == 0) {
     diagnostic.rejection_bits = LOOM_AMDGPU_MATRIX_CONTRACT_REJECTION_FEATURES;
   } else if (diagnostic.wave_candidate_count == 0) {

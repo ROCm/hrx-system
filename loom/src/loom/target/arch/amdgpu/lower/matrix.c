@@ -145,6 +145,10 @@ static iree_string_view_t loom_amdgpu_matrix_contract_rejection_key(
     return IREE_SV("scale_kind");
   }
   if (iree_any_bit_set(match_bits,
+                       LOOM_AMDGPU_MATRIX_CONTRACT_REJECTION_SCALE_FORMAT)) {
+    return IREE_SV("scale_format");
+  }
+  if (iree_any_bit_set(match_bits,
                        LOOM_AMDGPU_MATRIX_CONTRACT_REJECTION_FEATURES)) {
     return IREE_SV("processor_features");
   }
@@ -326,25 +330,6 @@ static bool loom_amdgpu_matrix_format_selector_from_encoded_format(
   }
 }
 
-static bool loom_amdgpu_matrix_scale_format_selector_from_encoded_format(
-    loom_value_fact_numeric_format_flags_t format, int64_t* out_value) {
-  *out_value = 0;
-  const loom_numeric_format_info_t* info = NULL;
-  if (!loom_numeric_format_info(format, &info)) {
-    return false;
-  }
-  switch (info->float_family) {
-    case LOOM_NUMERIC_FLOAT_FAMILY_F8_E8M0:
-      *out_value = LOOM_AMDGPU_MATRIX_SCALE_FORMAT_SELECTOR_E8M0;
-      return true;
-    case LOOM_NUMERIC_FLOAT_FAMILY_FP8:
-      *out_value = LOOM_AMDGPU_MATRIX_SCALE_FORMAT_SELECTOR_FP8_E4M3;
-      return true;
-    default:
-      return false;
-  }
-}
-
 static iree_status_t loom_amdgpu_matrix_format_selector_attr(
     const loom_contract_operand_t* operand, iree_string_view_t field_name,
     int64_t* out_value) {
@@ -366,7 +351,7 @@ static iree_status_t loom_amdgpu_matrix_scale_format_selector_attr(
     int64_t* out_value) {
   const loom_value_fact_numeric_format_flags_t format =
       operand->encoded.target_schema.encoded_operand.scale_format;
-  if (!loom_amdgpu_matrix_scale_format_selector_from_encoded_format(
+  if (!loom_amdgpu_matrix_scale_format_selector_from_numeric_format(
           format, out_value)) {
     return iree_make_status(
         IREE_STATUS_INTERNAL,

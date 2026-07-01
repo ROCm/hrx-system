@@ -240,9 +240,6 @@ loom_contract_required_capability_flags_from_storage_schema(
                        LOOM_CONTRACT_AUXILIARY_OPERAND_SCALE)) {
     flags |= LOOM_CONTRACT_CAPABILITY_SCALE_OPERANDS;
   }
-  if (operand.scale_format != 0 || operand.secondary_scale_format != 0) {
-    flags |= LOOM_CONTRACT_CAPABILITY_SCALE_FORMAT_SELECTORS;
-  }
   if (iree_any_bit_set(operand.sparsity_policy,
                        LOOM_VALUE_FACT_SPARSITY_POLICY_ALL)) {
     flags |= LOOM_CONTRACT_CAPABILITY_SPARSE_METADATA;

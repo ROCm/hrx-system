@@ -180,6 +180,29 @@ static bool loom_amdgpu_matrix_scale_from_contract(
   return loom_amdgpu_matrix_scale_from_generic(lhs_scale_kind, out_scale_kind);
 }
 
+static bool loom_amdgpu_matrix_scale_format_selector_bits_from_contract(
+    const loom_contract_operand_t* operand,
+    loom_amdgpu_matrix_scale_format_selector_bits_t* out_bits) {
+  *out_bits = 0;
+  const loom_value_fact_encoded_operand_schema_t encoded_operand =
+      operand->encoded.target_schema.encoded_operand;
+  if (encoded_operand.secondary_scale_format !=
+      LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE) {
+    return false;
+  }
+  if (encoded_operand.scale_format == LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE) {
+    return true;
+  }
+  int64_t selector = 0;
+  if (!loom_amdgpu_matrix_scale_format_selector_from_numeric_format(
+          encoded_operand.scale_format, &selector) ||
+      selector < 0 || selector >= 8) {
+    return false;
+  }
+  *out_bits = (loom_amdgpu_matrix_scale_format_selector_bits_t)(1u << selector);
+  return true;
+}
+
 static bool loom_amdgpu_matrix_contract_fail(
     loom_contract_rejection_bits_t rejection_bits,
     loom_contract_diagnostic_t* out_diagnostic) {
@@ -240,6 +263,13 @@ bool loom_amdgpu_matrix_contract_match_request_from_contract(
   }
   if (!loom_amdgpu_matrix_scale_from_contract(contract_request,
                                               &request.scale_kind)) {
+    return loom_amdgpu_matrix_contract_fail(LOOM_CONTRACT_REJECTION_CAPABILITY,
+                                            out_diagnostic);
+  }
+  if (!loom_amdgpu_matrix_scale_format_selector_bits_from_contract(
+          &contract_request->lhs, &request.lhs_scale_format_selector_bits) ||
+      !loom_amdgpu_matrix_scale_format_selector_bits_from_contract(
+          &contract_request->rhs, &request.rhs_scale_format_selector_bits)) {
     return loom_amdgpu_matrix_contract_fail(LOOM_CONTRACT_REJECTION_CAPABILITY,
                                             out_diagnostic);
   }
