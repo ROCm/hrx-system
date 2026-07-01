@@ -1628,6 +1628,10 @@ iree_status_t loom_target_compile_report_record_entry_report(
         &report->schedule_band_rows, &entry_report->schedule_band_rows,
         sizeof(loom_target_compile_report_schedule_band_row_t),
         report->allocator));
+  }
+  if (iree_any_bit_set(
+          entry_report->detail_flags,
+          LOOM_TARGET_COMPILE_REPORT_DETAIL_SCHEDULE_BAND_SUMMARY_ROWS)) {
     IREE_RETURN_IF_ERROR(loom_target_compile_report_append_rows(
         &report->schedule_band_summary_rows,
         &entry_report->schedule_band_summary_rows,
@@ -1768,7 +1772,8 @@ iree_status_t loom_target_compile_report_record_schedule_band_row(
 iree_status_t loom_target_compile_report_record_schedule_band_summary_row(
     loom_target_compile_report_t* report,
     const loom_target_compile_report_schedule_band_summary_row_t* row) {
-  report->detail_flags |= LOOM_TARGET_COMPILE_REPORT_DETAIL_SCHEDULE_BAND_ROWS;
+  report->detail_flags |=
+      LOOM_TARGET_COMPILE_REPORT_DETAIL_SCHEDULE_BAND_SUMMARY_ROWS;
   return loom_target_compile_report_row_list_append(
       &report->schedule_band_summary_rows, sizeof(*row), report->allocator,
       row);
