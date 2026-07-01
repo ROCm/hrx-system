@@ -1962,10 +1962,21 @@ static iree_host_size_t id4_pipeline_plan_find_load_group_first_region(
   return IREE_HOST_SIZE_MAX;
 }
 
+iree_status_t id4_pipeline_plan_create_parameter_slab_issue_context(
+    const id4_pipeline_plan_t* plan,
+    id4_pipeline_parameter_slab_set_t* slab_set,
+    iree_allocator_t host_allocator,
+    id4_pipeline_parameter_slab_issue_context_t** out_context) {
+  IREE_ASSERT_ARGUMENT(plan);
+  return id4_pipeline_parameter_slab_issue_context_create(
+      slab_set, plan->parameter_load_step_count, plan->parameter_load_steps,
+      host_allocator, out_context);
+}
+
 iree_status_t id4_pipeline_plan_submit_parameter_load_group(
     const id4_pipeline_plan_t* plan,
-    id4_pipeline_parameter_slab_set_t* slab_set, iree_host_size_t group_index,
-    iree_host_size_t submit_region_id,
+    id4_pipeline_parameter_slab_issue_context_t* context,
+    iree_host_size_t group_index, iree_host_size_t submit_region_id,
     id4_pipeline_diagnostics_sink_t* diagnostics_sink) {
   IREE_ASSERT_ARGUMENT(plan);
   id4_pipeline_parameter_load_group_context_t group_context = {
@@ -1977,8 +1988,8 @@ iree_status_t id4_pipeline_plan_submit_parameter_load_group(
       // Region currently submitting the load group.
       .submit_region_id = submit_region_id,
   };
-  return id4_pipeline_parameter_slab_set_submit_load_group(
-      slab_set, plan->parameter_load_step_count, plan->parameter_load_steps,
+  return id4_pipeline_parameter_slab_issue_context_submit_load_group(
+      context, plan->parameter_load_step_count, plan->parameter_load_steps,
       group_context, plan->stage_name, diagnostics_sink);
 }
 

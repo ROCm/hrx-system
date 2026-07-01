@@ -403,6 +403,10 @@ typedef struct id4_pipeline_parameter_slab_set_load_options_t {
 typedef struct id4_pipeline_parameter_slab_set_t
     id4_pipeline_parameter_slab_set_t;
 
+// Issue-local context for deferred parameter load submissions.
+typedef struct id4_pipeline_parameter_slab_issue_context_t
+    id4_pipeline_parameter_slab_issue_context_t;
+
 // Validates that a parameter slab references valid placements and byte ranges.
 iree_status_t id4_pipeline_parameter_slab_validate(
     const id4_pipeline_parameter_slab_plan_t* slab,
@@ -456,10 +460,29 @@ iree_status_t id4_pipeline_parameter_slab_set_prepare(
     iree_string_view_t stage_name, iree_allocator_t host_allocator,
     id4_pipeline_parameter_slab_set_t** out_slab_set);
 
-// Submits planned parameter load group |group_index|, signaling its retained
-// readiness edge when the final slab bytes are populated.
-iree_status_t id4_pipeline_parameter_slab_set_submit_load_group(
+// Creates an issue-local context for deferred parameter load submissions.
+iree_status_t id4_pipeline_parameter_slab_issue_context_create(
     id4_pipeline_parameter_slab_set_t* slab_set,
+    iree_host_size_t load_step_count,
+    const id4_pipeline_parameter_load_step_t* load_steps,
+    iree_allocator_t host_allocator,
+    id4_pipeline_parameter_slab_issue_context_t** out_context);
+
+// Submits any issue-local transient cleanup and returns cleanup readiness
+// edges.
+iree_status_t id4_pipeline_parameter_slab_issue_context_finish(
+    id4_pipeline_parameter_slab_issue_context_t* context,
+    iree_hal_semaphore_list_t* out_cleanup_wait_list);
+
+// Releases an issue-local deferred loading context.
+void id4_pipeline_parameter_slab_issue_context_release(
+    id4_pipeline_parameter_slab_issue_context_t* context);
+
+// Submits planned parameter load group |group_index| through |context|,
+// signaling its retained readiness edge when the final slab bytes are
+// populated.
+iree_status_t id4_pipeline_parameter_slab_issue_context_submit_load_group(
+    id4_pipeline_parameter_slab_issue_context_t* context,
     iree_host_size_t load_step_count,
     const id4_pipeline_parameter_load_step_t* load_steps,
     id4_pipeline_parameter_load_group_context_t group_context,

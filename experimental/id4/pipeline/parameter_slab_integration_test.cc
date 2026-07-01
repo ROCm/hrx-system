@@ -674,6 +674,70 @@ static void RunCompactLinearRhsTileEncoding(
         encoded_weight, (2 + i) * kCompactRhsTileElementCount,
         fp8_sweep_pattern, IREE_ARRAYSIZE(fp8_sweep_pattern));
   }
+
+  id4_pipeline_parameter_slab_set_load_options_t deferred_load_options =
+      load_options;
+  deferred_load_options.signal_semaphore_list = iree_hal_semaphore_list_empty();
+  OwningRef<id4_pipeline_parameter_slab_set_t,
+            id4_pipeline_parameter_slab_set_release>
+      deferred_slab_set;
+  IREE_ASSERT_OK(id4_pipeline_plan_prepare_parameter_slabs(
+      plan.get(), &deferred_load_options, iree_allocator_system(),
+      deferred_slab_set.out()));
+  ASSERT_EQ(
+      id4_pipeline_parameter_slab_set_load_group_count(deferred_slab_set.get()),
+      1u);
+
+  OwningRef<id4_pipeline_parameter_slab_issue_context_t,
+            id4_pipeline_parameter_slab_issue_context_release>
+      issue_context;
+  IREE_ASSERT_OK(id4_pipeline_plan_create_parameter_slab_issue_context(
+      plan.get(), deferred_slab_set.get(), iree_allocator_system(),
+      issue_context.out()));
+  IREE_ASSERT_OK(id4_pipeline_plan_submit_parameter_load_group(
+      plan.get(), issue_context.get(), /*group_index=*/0,
+      /*submit_region_id=*/0, diagnostics_sink));
+  iree_hal_semaphore_list_t cleanup_wait_list = iree_hal_semaphore_list_empty();
+  IREE_ASSERT_OK(id4_pipeline_parameter_slab_issue_context_finish(
+      issue_context.get(), &cleanup_wait_list));
+
+  iree_hal_semaphore_t* group_ready_semaphore = nullptr;
+  uint64_t group_ready_value = 0;
+  IREE_ASSERT_OK(id4_pipeline_parameter_slab_set_load_group_ready_at(
+      deferred_slab_set.get(), /*index=*/0, &group_ready_semaphore,
+      &group_ready_value));
+  IREE_ASSERT_OK(iree_hal_semaphore_wait(
+      group_ready_semaphore, group_ready_value, iree_infinite_timeout(),
+      IREE_ASYNC_WAIT_FLAG_NONE));
+  for (iree_host_size_t i = 0; i < cleanup_wait_list.count; ++i) {
+    IREE_ASSERT_OK(iree_hal_semaphore_wait(
+        cleanup_wait_list.semaphores[i], cleanup_wait_list.payload_values[i],
+        iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
+  }
+
+  std::memset(encoded_weight, 0, sizeof(encoded_weight));
+  IREE_ASSERT_OK(iree_hal_device_transfer_d2h(
+      id4_tooling_runtime_context_primary_device(&context->value),
+      id4_pipeline_parameter_slab_set_buffer_at(deferred_slab_set.get(), 0),
+      /*source_offset=*/0, encoded_weight, sizeof(encoded_weight),
+      IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT, iree_infinite_timeout()));
+  for (iree_host_size_t i = 0; i < kCompactRhsTileElementCount; ++i) {
+    EXPECT_EQ(encoded_weight[i], 0x3F80u);
+  }
+  for (iree_host_size_t i = kCompactRhsTileElementCount;
+       i < 2 * kCompactRhsTileElementCount; ++i) {
+    EXPECT_EQ(encoded_weight[i], 0x4000u);
+  }
+  for (iree_host_size_t i = 0; i < kFp8RawSweepTileCount; ++i) {
+    uint8_t fp8_sweep_pattern[4];
+    for (iree_host_size_t j = 0; j < IREE_ARRAYSIZE(fp8_sweep_pattern); ++j) {
+      fp8_sweep_pattern[j] =
+          FiniteNonzeroFp8SweepByte(i * IREE_ARRAYSIZE(fp8_sweep_pattern) + j);
+    }
+    ExpectDecodedFp8Pattern(
+        encoded_weight, (2 + i) * kCompactRhsTileElementCount,
+        fp8_sweep_pattern, IREE_ARRAYSIZE(fp8_sweep_pattern));
+  }
 }
 
 }  // namespace

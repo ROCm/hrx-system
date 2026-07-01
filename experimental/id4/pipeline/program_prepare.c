@@ -998,15 +998,15 @@ static iree_status_t
 id4_pipeline_program_prepared_submit_region_parameter_load_groups(
     const id4_pipeline_plan_t* plan, iree_host_size_t region_id,
     const id4_pipeline_region_plan_t* region,
-    id4_pipeline_parameter_slab_set_t* parameter_slabs,
+    id4_pipeline_parameter_slab_issue_context_t* parameter_issue_context,
     id4_pipeline_diagnostics_sink_t* diagnostics_sink) {
   IREE_ASSERT_ARGUMENT(plan);
   IREE_ASSERT_ARGUMENT(region);
-  IREE_ASSERT_ARGUMENT(parameter_slabs);
+  IREE_ASSERT_ARGUMENT(parameter_issue_context);
   for (iree_host_size_t i = 0; i < region->parameter_load_group_count; ++i) {
     IREE_RETURN_IF_ERROR(id4_pipeline_plan_submit_parameter_load_group(
-        plan, parameter_slabs, region->parameter_load_groups[i], region_id,
-        diagnostics_sink));
+        plan, parameter_issue_context, region->parameter_load_groups[i],
+        region_id, diagnostics_sink));
   }
   return iree_ok_status();
 }
@@ -1627,8 +1627,11 @@ iree_status_t id4_pipeline_program_prepared_issue(
         max_region_wait_count * sizeof(region_wait_payload_values[0]));
   }
 
+  iree_status_t status = iree_ok_status();
   iree_hal_semaphore_t* shared_completion_semaphore = NULL;
   uint64_t shared_completion_payload_value = 1;
+  iree_hal_semaphore_t* shared_cleanup_semaphore = NULL;
+  uint64_t shared_cleanup_payload_value = 1;
   if (shared_slab_count != 0) {
     const id4_pipeline_memory_slab_plan_t* first_shared_slab =
         id4_pipeline_plan_memory_slab_at(prepared->plan,
@@ -1636,17 +1639,60 @@ iree_status_t id4_pipeline_program_prepared_issue(
     iree_hal_device_t* shared_slab_device = NULL;
     iree_hal_queue_affinity_t shared_slab_queue_affinity =
         IREE_HAL_QUEUE_AFFINITY_ANY;
-    IREE_RETURN_IF_ERROR(id4_pipeline_program_prepared_shared_slab_device(
+    status = id4_pipeline_program_prepared_shared_slab_device(
         prepared, first_shared_slab, &shared_slab_device,
-        &shared_slab_queue_affinity));
-    IREE_RETURN_IF_ERROR(iree_hal_semaphore_create(
-        shared_slab_device, shared_slab_queue_affinity, /*initial_value=*/0,
-        IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &shared_completion_semaphore));
+        &shared_slab_queue_affinity);
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_semaphore_create(
+          shared_slab_device, shared_slab_queue_affinity, /*initial_value=*/0,
+          IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &shared_completion_semaphore);
+    }
+    if (iree_status_is_ok(status) && uses_deferred_parameter_loads) {
+      status = iree_hal_semaphore_create(
+          shared_slab_device, shared_slab_queue_affinity, /*initial_value=*/0,
+          IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &shared_cleanup_semaphore);
+    }
   }
 
-  iree_status_t status = id4_pipeline_program_prepared_create_internal_signals(
-      prepared, internal_signal_count, internal_semaphores,
-      internal_payload_values);
+  iree_hal_semaphore_t* execution_completion_semaphore = NULL;
+  uint64_t execution_completion_payload_value = 1;
+  if (uses_deferred_parameter_loads && shared_slab_count == 0) {
+    const id4_pipeline_region_plan_t* last_region =
+        id4_pipeline_plan_region_at(prepared->plan, prepared->region_count - 1);
+    if (!last_region) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "program final region is missing");
+    }
+    const id4_pipeline_device_placement_t* placement =
+        id4_pipeline_plan_placement_at(prepared->plan,
+                                       last_region->placement_id);
+    if (!placement) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "program final region placement is missing");
+    }
+    iree_hal_device_t* device = iree_hal_device_group_device_at(
+        id4_pipeline_plan_device_group(prepared->plan),
+        placement->device_index);
+    if (!device) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "program final region device is required");
+    }
+    IREE_RETURN_IF_ERROR(iree_hal_semaphore_create(
+        device, placement->queue_affinity, /*initial_value=*/0,
+        IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &execution_completion_semaphore));
+  }
+
+  id4_pipeline_parameter_slab_issue_context_t* parameter_issue_context = NULL;
+  if (iree_status_is_ok(status) && uses_deferred_parameter_loads) {
+    status = id4_pipeline_plan_create_parameter_slab_issue_context(
+        prepared->plan, parameter_slabs, prepared->host_allocator,
+        &parameter_issue_context);
+  }
+  if (iree_status_is_ok(status)) {
+    status = id4_pipeline_program_prepared_create_internal_signals(
+        prepared, internal_signal_count, internal_semaphores,
+        internal_payload_values);
+  }
   iree_host_size_t shared_alloca_submitted_count = 0;
   if (iree_status_is_ok(status) && shared_slab_count != 0) {
     status = id4_pipeline_program_prepared_issue_shared_allocas(
@@ -1692,7 +1738,7 @@ iree_status_t id4_pipeline_program_prepared_issue(
     if (uses_deferred_parameter_loads) {
       status =
           id4_pipeline_program_prepared_submit_region_parameter_load_groups(
-              prepared->plan, i, region, parameter_slabs,
+              prepared->plan, i, region, parameter_issue_context,
               options->diagnostics_sink);
       if (!iree_status_is_ok(status)) break;
     }
@@ -1715,6 +1761,9 @@ iree_status_t id4_pipeline_program_prepared_issue(
     } else if (shared_slab_count != 0) {
       region_signal_list = id4_pipeline_program_one_semaphore_list(
           &shared_completion_semaphore, &shared_completion_payload_value);
+    } else if (uses_deferred_parameter_loads) {
+      region_signal_list = id4_pipeline_program_one_semaphore_list(
+          &execution_completion_semaphore, &execution_completion_payload_value);
     }
 
     iree_hal_buffer_binding_table_t binding_table =
@@ -1741,18 +1790,116 @@ iree_status_t id4_pipeline_program_prepared_issue(
       } else if (shared_slab_count != 0) {
         cleanup_wait_semaphore = shared_completion_semaphore;
         cleanup_wait_payload_value = shared_completion_payload_value;
+      } else if (uses_deferred_parameter_loads) {
+        cleanup_wait_semaphore = execution_completion_semaphore;
+        cleanup_wait_payload_value = execution_completion_payload_value;
       }
     }
   }
 
+  iree_hal_semaphore_list_t parameter_cleanup_wait_list =
+      iree_hal_semaphore_list_empty();
+  bool parameter_issue_context_finish_attempted = false;
+  bool shared_dealloca_attempted = false;
   if (iree_status_is_ok(status) && shared_slab_count != 0) {
     iree_hal_semaphore_list_t shared_completion_wait_list =
         id4_pipeline_program_one_semaphore_list(
             &shared_completion_semaphore, &shared_completion_payload_value);
+    iree_hal_semaphore_list_t shared_dealloca_signal_list =
+        options->signal_semaphore_list;
+    if (uses_deferred_parameter_loads) {
+      shared_dealloca_signal_list = id4_pipeline_program_one_semaphore_list(
+          &shared_cleanup_semaphore, &shared_cleanup_payload_value);
+    }
+    shared_dealloca_attempted = true;
     status = id4_pipeline_program_prepared_dealloca_shared_slabs(
-        prepared, shared_completion_wait_list, options->signal_semaphore_list,
+        prepared, shared_completion_wait_list, shared_dealloca_signal_list,
         shared_slab_count, shared_slab_indices, memory_slab_buffers);
-  } else if (!iree_status_is_ok(status) && shared_alloca_submitted_count != 0) {
+  }
+  if (iree_status_is_ok(status) && uses_deferred_parameter_loads) {
+    parameter_issue_context_finish_attempted = true;
+    status = id4_pipeline_parameter_slab_issue_context_finish(
+        parameter_issue_context, &parameter_cleanup_wait_list);
+  }
+  if (iree_status_is_ok(status) && uses_deferred_parameter_loads) {
+    iree_hal_device_t* final_device = NULL;
+    iree_hal_queue_affinity_t final_queue_affinity =
+        IREE_HAL_QUEUE_AFFINITY_ANY;
+    iree_hal_semaphore_t* execution_wait_semaphore = NULL;
+    uint64_t execution_wait_payload_value = 0;
+    if (shared_slab_count != 0) {
+      const id4_pipeline_memory_slab_plan_t* first_shared_slab =
+          id4_pipeline_plan_memory_slab_at(prepared->plan,
+                                           shared_slab_indices[0]);
+      status = id4_pipeline_program_prepared_shared_slab_device(
+          prepared, first_shared_slab, &final_device, &final_queue_affinity);
+      execution_wait_semaphore = shared_cleanup_semaphore;
+      execution_wait_payload_value = shared_cleanup_payload_value;
+    } else {
+      const id4_pipeline_region_plan_t* last_region =
+          id4_pipeline_plan_region_at(prepared->plan,
+                                      prepared->region_count - 1);
+      if (!last_region) {
+        status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                  "program final region is missing");
+      } else {
+        const id4_pipeline_device_placement_t* placement =
+            id4_pipeline_plan_placement_at(prepared->plan,
+                                           last_region->placement_id);
+        if (!placement) {
+          status =
+              iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                               "program final region placement is missing");
+        } else {
+          final_device = iree_hal_device_group_device_at(
+              id4_pipeline_plan_device_group(prepared->plan),
+              placement->device_index);
+          final_queue_affinity = placement->queue_affinity;
+          execution_wait_semaphore = execution_completion_semaphore;
+          execution_wait_payload_value = execution_completion_payload_value;
+        }
+      }
+    }
+    if (iree_status_is_ok(status) && !final_device) {
+      status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "program final signal device is required");
+    }
+    if (iree_status_is_ok(status)) {
+      iree_host_size_t final_wait_count = 0;
+      if (!iree_host_size_checked_add(1, parameter_cleanup_wait_list.count,
+                                      &final_wait_count)) {
+        status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                  "program final wait list count overflows");
+      } else {
+        iree_hal_semaphore_t** final_wait_semaphores =
+            (iree_hal_semaphore_t**)iree_alloca(
+                final_wait_count * sizeof(final_wait_semaphores[0]));
+        uint64_t* final_wait_payload_values = (uint64_t*)iree_alloca(
+            final_wait_count * sizeof(final_wait_payload_values[0]));
+        final_wait_semaphores[0] = execution_wait_semaphore;
+        final_wait_payload_values[0] = execution_wait_payload_value;
+        for (iree_host_size_t i = 0; i < parameter_cleanup_wait_list.count;
+             ++i) {
+          final_wait_semaphores[i + 1] =
+              parameter_cleanup_wait_list.semaphores[i];
+          final_wait_payload_values[i + 1] =
+              parameter_cleanup_wait_list.payload_values[i];
+        }
+        iree_hal_semaphore_list_t final_wait_list = {
+            // Completion and issue-local cleanup edges.
+            .count = final_wait_count,
+            // Semaphores that must complete before the caller signal.
+            .semaphores = final_wait_semaphores,
+            // Payload values paired with final_wait_semaphores.
+            .payload_values = final_wait_payload_values,
+        };
+        status = iree_hal_device_queue_barrier(
+            final_device, final_queue_affinity, final_wait_list,
+            options->signal_semaphore_list, IREE_HAL_EXECUTE_FLAG_NONE);
+      }
+    }
+  } else if (!iree_status_is_ok(status) && shared_alloca_submitted_count != 0 &&
+             !shared_dealloca_attempted) {
     iree_hal_semaphore_list_t cleanup_wait_list =
         iree_hal_semaphore_list_empty();
     if (region_submitted && cleanup_wait_semaphore) {
@@ -1775,6 +1922,15 @@ iree_status_t id4_pipeline_program_prepared_issue(
             memory_slab_buffers);
     status = iree_status_join(status, cleanup_status);
   }
+  if (!iree_status_is_ok(status) && parameter_issue_context &&
+      !parameter_issue_context_finish_attempted) {
+    iree_hal_semaphore_list_t cleanup_wait_list =
+        iree_hal_semaphore_list_empty();
+    iree_status_t cleanup_status =
+        id4_pipeline_parameter_slab_issue_context_finish(
+            parameter_issue_context, &cleanup_wait_list);
+    status = iree_status_join(status, cleanup_status);
+  }
 
   for (iree_host_size_t i = 0; i < memory_slab_count; ++i) {
     iree_hal_buffer_release(memory_slab_buffers[i]);
@@ -1783,6 +1939,9 @@ iree_status_t id4_pipeline_program_prepared_issue(
     iree_hal_semaphore_release(shared_alloca_semaphores[i]);
   }
   iree_hal_semaphore_release(shared_completion_semaphore);
+  iree_hal_semaphore_release(shared_cleanup_semaphore);
+  iree_hal_semaphore_release(execution_completion_semaphore);
+  id4_pipeline_parameter_slab_issue_context_release(parameter_issue_context);
   id4_pipeline_program_release_internal_signals(internal_signal_count,
                                                 internal_semaphores);
   return status;

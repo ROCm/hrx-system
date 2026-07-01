@@ -1683,8 +1683,276 @@ static void id4_pipeline_parameter_release_staging_slot_semaphores(
   }
 }
 
+typedef struct id4_pipeline_parameter_encode_issue_window_t {
+  // True when this target slab has at least one encoded load group.
+  bool planned;
+  // True when queue_alloca has been submitted for staging_buffer.
+  bool alloca_submitted;
+  // Byte length required by one staging slot across all encoded groups.
+  iree_device_size_t staging_slot_byte_length;
+  // Byte length allocated for all staging slots.
+  iree_device_size_t staging_total_byte_length;
+  // Number of encoded groups planned for this target slab.
+  iree_host_size_t encoded_group_count;
+  // Number of staging chunks planned across all encoded groups.
+  iree_host_size_t staging_chunk_count;
+  // Number of provider source tensors staged across all encoded groups.
+  iree_host_size_t logical_source_count;
+  // Number of provider gather batches planned across all encoded groups.
+  iree_host_size_t source_gather_batch_count;
+  // Total provider source bytes gathered through this window.
+  iree_device_size_t source_byte_length;
+  // Total final slab bytes populated by encoder dispatches.
+  iree_device_size_t target_byte_length;
+  // Number of encoder dispatches planned across all encoded groups.
+  iree_host_size_t encoder_dispatch_count;
+  // Shared staging buffer allocated for this issue context.
+  iree_hal_buffer_t* staging_buffer;
+  // Semaphore signaled when queue_alloca completes.
+  iree_hal_semaphore_t* staging_ready_semaphore;
+  // Payload value signaled on staging_ready_semaphore.
+  uint64_t staging_ready_payload_value;
+  // Semaphore signaled when queue_dealloca completes.
+  iree_hal_semaphore_t* cleanup_semaphore;
+  // Payload value signaled on cleanup_semaphore.
+  uint64_t cleanup_payload_value;
+  // Number of waits protecting the currently submitted staging contents.
+  iree_host_size_t cleanup_wait_count;
+  // Semaphores that staging dealloca must wait on.
+  iree_hal_semaphore_t* cleanup_wait_semaphores
+      [ID4_PIPELINE_PARAMETER_ENCODER_CLEANUP_WAIT_CAPACITY];
+  // Payload values paired with cleanup_wait_semaphores.
+  uint64_t cleanup_wait_payload_values
+      [ID4_PIPELINE_PARAMETER_ENCODER_CLEANUP_WAIT_CAPACITY];
+} id4_pipeline_parameter_encode_issue_window_t;
+
+struct id4_pipeline_parameter_slab_issue_context_t {
+  // Allocator used for context storage.
+  iree_allocator_t host_allocator;
+  // Deferred slab set retained while issue-local loads may be submitted.
+  id4_pipeline_parameter_slab_set_t* slab_set;
+  // Number of per-target staging windows.
+  iree_host_size_t window_count;
+  // Per-target issue-local staging windows.
+  id4_pipeline_parameter_encode_issue_window_t* windows;
+  // Number of cleanup edges produced by finish.
+  iree_host_size_t cleanup_count;
+  // Cleanup semaphores borrowed from windows after finish.
+  iree_hal_semaphore_t** cleanup_semaphores;
+  // Payload values paired with cleanup_semaphores.
+  uint64_t* cleanup_payload_values;
+  // True once finish has been called.
+  bool finished;
+};
+
+static iree_status_t id4_pipeline_parameter_encode_window_record_statistics(
+    const id4_pipeline_parameter_slab_load_t* load,
+    const id4_pipeline_parameter_load_step_t* steps, iree_host_size_t count,
+    iree_device_size_t chunk_byte_capacity,
+    id4_pipeline_parameter_encode_issue_window_t* window) {
+  id4_pipeline_parameter_encode_run_statistics_t statistics;
+  IREE_RETURN_IF_ERROR(id4_pipeline_parameter_encode_run_collect_statistics(
+      load, steps, count, chunk_byte_capacity, &statistics));
+  window->planned = true;
+  window->staging_slot_byte_length = iree_max(
+      window->staging_slot_byte_length, statistics.staging_slot_byte_length);
+  IREE_RETURN_IF_ERROR(id4_pipeline_parameter_add_host_size(
+      1, &window->encoded_group_count, "encoded group"));
+  IREE_RETURN_IF_ERROR(id4_pipeline_parameter_add_host_size(
+      statistics.staging_chunk_count, &window->staging_chunk_count,
+      "staging chunk"));
+  IREE_RETURN_IF_ERROR(id4_pipeline_parameter_add_host_size(
+      statistics.logical_source_count, &window->logical_source_count,
+      "logical source"));
+  IREE_RETURN_IF_ERROR(id4_pipeline_parameter_add_host_size(
+      statistics.source_gather_batch_count, &window->source_gather_batch_count,
+      "source gather batch"));
+  IREE_RETURN_IF_ERROR(id4_pipeline_parameter_add_device_size(
+      statistics.source_byte_length, &window->source_byte_length, "source"));
+  IREE_RETURN_IF_ERROR(id4_pipeline_parameter_add_device_size(
+      statistics.target_byte_length, &window->target_byte_length, "target"));
+  IREE_RETURN_IF_ERROR(id4_pipeline_parameter_add_host_size(
+      statistics.encoder_dispatch_count, &window->encoder_dispatch_count,
+      "encoder dispatch"));
+  return iree_ok_status();
+}
+
+static iree_status_t id4_pipeline_parameter_encode_window_finalize_plan(
+    id4_pipeline_parameter_encode_issue_window_t* window) {
+  if (!window->planned) return iree_ok_status();
+  if (!iree_device_size_checked_mul(
+          window->staging_slot_byte_length,
+          ID4_PIPELINE_PARAMETER_ENCODER_STAGING_SLOT_COUNT,
+          &window->staging_total_byte_length)) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "parameter encoder issue staging allocation byte length overflows");
+  }
+  return iree_ok_status();
+}
+
+static iree_hal_semaphore_list_t
+id4_pipeline_parameter_encode_window_cleanup_wait_list(
+    id4_pipeline_parameter_encode_issue_window_t* window) {
+  return id4_pipeline_parameter_many_semaphore_list(
+      window->cleanup_wait_count, window->cleanup_wait_semaphores,
+      window->cleanup_wait_payload_values);
+}
+
+static iree_status_t id4_pipeline_parameter_encode_window_set_cleanup_waits(
+    id4_pipeline_parameter_encode_issue_window_t* window,
+    iree_hal_semaphore_list_t wait_list) {
+  if (wait_list.count > ID4_PIPELINE_PARAMETER_ENCODER_CLEANUP_WAIT_CAPACITY) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "parameter encoder cleanup wait count %" PRIhsz " exceeds capacity %d",
+        wait_list.count, ID4_PIPELINE_PARAMETER_ENCODER_CLEANUP_WAIT_CAPACITY);
+  }
+  iree_hal_semaphore_list_retain(wait_list);
+  iree_hal_semaphore_list_release(
+      id4_pipeline_parameter_encode_window_cleanup_wait_list(window));
+  window->cleanup_wait_count = wait_list.count;
+  for (iree_host_size_t i = 0; i < wait_list.count; ++i) {
+    window->cleanup_wait_semaphores[i] = wait_list.semaphores[i];
+    window->cleanup_wait_payload_values[i] = wait_list.payload_values[i];
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t id4_pipeline_parameter_slab_emit_issue_window_diagnostic(
+    const id4_pipeline_parameter_slab_load_t* load,
+    iree_string_view_t stage_name,
+    id4_pipeline_parameter_load_group_context_t group_context,
+    const id4_pipeline_parameter_encode_issue_window_t* window,
+    id4_pipeline_diagnostics_sink_t* diagnostics_sink) {
+  id4_pipeline_parameter_slab_diagnostic_t parameter_slab =
+      id4_pipeline_parameter_slab_make_diagnostic(load, load->slab->scope,
+                                                  IREE_HOST_SIZE_MAX);
+  id4_pipeline_parameter_load_diagnostic_t parameter_load = {
+      // Plan-local slab index populated through the issue window.
+      .slab_index = load->slab_index,
+      // First load group that allocated this issue window.
+      .load_group_index = group_context.group_index,
+      // Submission strategy represented by the issue window.
+      .load_group_kind = id4_pipeline_parameter_load_group_kind_name(
+          ID4_PIPELINE_PARAMETER_LOAD_GROUP_KIND_ENCODE),
+      // First planned region that consumes the allocating group.
+      .first_consumer_region_id = group_context.first_consumer_region_id,
+      // Region that allocated the window.
+      .submit_region_id = group_context.submit_region_id,
+      // Issue windows can cover non-contiguous load groups.
+      .load_step_offset = IREE_HOST_SIZE_MAX,
+      // Number of encoded groups sharing this window.
+      .load_step_count = window->encoded_group_count,
+      // Number of staging slots allocated by the window.
+      .staging_slot_count = ID4_PIPELINE_PARAMETER_ENCODER_STAGING_SLOT_COUNT,
+      // Byte length of one staging slot.
+      .staging_slot_byte_length = window->staging_slot_byte_length,
+      // Total byte length of all staging slots.
+      .staging_total_byte_length = window->staging_total_byte_length,
+      // Number of chunks planned for this window.
+      .staging_chunk_count = window->staging_chunk_count,
+      // Number of logical source tensors staged by this window.
+      .logical_source_count = window->logical_source_count,
+      // Number of provider gather batches staged by this window.
+      .source_gather_batch_count = window->source_gather_batch_count,
+      // Total source bytes gathered through this window.
+      .source_byte_length = window->source_byte_length,
+      // Total target bytes populated through this window.
+      .target_byte_length = window->target_byte_length,
+      // Total encoder dispatches using this window.
+      .encoder_dispatch_count = window->encoder_dispatch_count,
+  };
+  id4_pipeline_diagnostic_event_t event = {
+      // Event kind for parameter slab diagnostics.
+      .kind = ID4_PIPELINE_DIAGNOSTIC_EVENT_KIND_PARAMETER_SLAB,
+      // Stage name associated with the issue window.
+      .stage_name = stage_name,
+      // Stable parameter load event key.
+      .key = IREE_SV("parameter_slab.issue_encode_window"),
+      // Short event summary.
+      .message = IREE_SV("allocated issue-local encoder staging window"),
+      // Structured slab payload.
+      .parameter_slab = &parameter_slab,
+      // Structured parameter loading payload.
+      .parameter_load = &parameter_load,
+  };
+  return id4_pipeline_diagnostics_emit(diagnostics_sink, &event);
+}
+
+static iree_status_t id4_pipeline_parameter_encode_window_allocate(
+    const id4_pipeline_parameter_slab_load_t* load,
+    id4_pipeline_parameter_load_group_context_t group_context,
+    iree_string_view_t stage_name, iree_hal_semaphore_list_t wait_list,
+    id4_pipeline_diagnostics_sink_t* diagnostics_sink,
+    id4_pipeline_parameter_encode_issue_window_t* window,
+    bool* out_allocated_now) {
+  *out_allocated_now = false;
+  if (window->alloca_submitted) return iree_ok_status();
+  if (!window->planned || window->staging_total_byte_length == 0) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "parameter encoder issue window was not planned");
+  }
+
+  IREE_RETURN_IF_ERROR(id4_pipeline_parameter_create_semaphore(
+      load->device, load->queue_affinity, &window->staging_ready_semaphore));
+  window->staging_ready_payload_value = 1;
+
+  iree_hal_buffer_params_t staging_params = {0};
+  staging_params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
+  staging_params.access = IREE_HAL_MEMORY_ACCESS_ALL;
+  staging_params.usage = IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET |
+                         IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE;
+  staging_params.queue_affinity = load->queue_affinity;
+  staging_params.min_alignment = 16;
+
+  iree_hal_semaphore_t* staging_ready_semaphore =
+      window->staging_ready_semaphore;
+  uint64_t staging_ready_payload_value = window->staging_ready_payload_value;
+  iree_hal_semaphore_list_t staging_ready_signal_list =
+      id4_pipeline_parameter_one_semaphore_list(&staging_ready_semaphore,
+                                                &staging_ready_payload_value);
+  IREE_RETURN_IF_ERROR(iree_hal_device_queue_alloca(
+      load->device, load->queue_affinity, wait_list, staging_ready_signal_list,
+      /*pool=*/NULL, staging_params, window->staging_total_byte_length,
+      IREE_HAL_ALLOCA_FLAG_NONE, &window->staging_buffer));
+  window->alloca_submitted = true;
+  *out_allocated_now = true;
+
+  iree_hal_semaphore_list_t cleanup_wait_list =
+      id4_pipeline_parameter_one_semaphore_list(
+          &window->staging_ready_semaphore,
+          &window->staging_ready_payload_value);
+  IREE_RETURN_IF_ERROR(id4_pipeline_parameter_encode_window_set_cleanup_waits(
+      window, cleanup_wait_list));
+  return id4_pipeline_parameter_slab_emit_issue_window_diagnostic(
+      load, stage_name, group_context, window, diagnostics_sink);
+}
+
+static void id4_pipeline_parameter_slab_issue_context_destroy(
+    id4_pipeline_parameter_slab_issue_context_t* context) {
+  iree_allocator_t host_allocator = context->host_allocator;
+  if (context->windows) {
+    for (iree_host_size_t i = 0; i < context->window_count; ++i) {
+      id4_pipeline_parameter_encode_issue_window_t* window =
+          &context->windows[i];
+      iree_hal_semaphore_list_release(
+          id4_pipeline_parameter_encode_window_cleanup_wait_list(window));
+      iree_hal_buffer_release(window->staging_buffer);
+      iree_hal_semaphore_release(window->cleanup_semaphore);
+      iree_hal_semaphore_release(window->staging_ready_semaphore);
+    }
+  }
+  iree_allocator_free(host_allocator, context->cleanup_payload_values);
+  iree_allocator_free(host_allocator, context->cleanup_semaphores);
+  iree_allocator_free(host_allocator, context->windows);
+  id4_pipeline_parameter_slab_set_release(context->slab_set);
+  iree_allocator_free(host_allocator, context);
+}
+
 static iree_status_t id4_pipeline_parameter_slab_submit_encode_run(
     const id4_pipeline_parameter_slab_set_load_options_t* options,
+    id4_pipeline_parameter_slab_issue_context_t* issue_context,
     const id4_pipeline_parameter_slab_load_t* load, iree_host_size_t step_count,
     const id4_pipeline_parameter_load_step_t* steps,
     id4_pipeline_parameter_load_group_context_t group_context,
@@ -1713,6 +1981,27 @@ static iree_status_t id4_pipeline_parameter_slab_submit_encode_run(
           load, stage_name, group_context, load_step_offset, step_count,
           staging_byte_length, &statistics, options->diagnostics_sink));
 
+  const bool uses_issue_window = issue_context != NULL;
+  id4_pipeline_parameter_encode_issue_window_t* issue_window = NULL;
+  bool issue_window_allocated_now = false;
+  if (uses_issue_window) {
+    if (load->slab_index >= issue_context->window_count) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "parameter encoder target slab %" PRIhsz
+                              " outside issue window count %" PRIhsz,
+                              load->slab_index, issue_context->window_count);
+    }
+    issue_window = &issue_context->windows[load->slab_index];
+    if (staging_slot_byte_length > issue_window->staging_slot_byte_length) {
+      return iree_make_status(
+          IREE_STATUS_OUT_OF_RANGE,
+          "parameter encoder group requires %" PRIu64
+          " staging bytes per slot, exceeding planned issue window %" PRIu64,
+          (uint64_t)staging_slot_byte_length,
+          (uint64_t)issue_window->staging_slot_byte_length);
+    }
+  }
+
   iree_hal_semaphore_t* run_semaphore = NULL;
   id4_pipeline_parameter_prepared_encoder_t* prepared_encoders = NULL;
   iree_host_size_t prepared_encoder_count = 0;
@@ -1726,7 +2015,7 @@ static iree_status_t id4_pipeline_parameter_slab_submit_encode_run(
   if (iree_status_is_ok(status)) {
     memset(prepared_encoders, 0, step_count * sizeof(prepared_encoders[0]));
   }
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && !uses_issue_window) {
     status = id4_pipeline_parameter_create_semaphore(
         load->device, load->queue_affinity, &run_semaphore);
   }
@@ -1734,7 +2023,7 @@ static iree_status_t id4_pipeline_parameter_slab_submit_encode_run(
     status = id4_pipeline_parameter_create_staging_slot_semaphores(
         load->device, load->queue_affinity, slots);
   }
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && !uses_issue_window) {
     status = id4_pipeline_parameter_create_semaphore(
         load->device, load->queue_affinity, &cleanup_semaphore);
   }
@@ -1762,7 +2051,15 @@ static iree_status_t id4_pipeline_parameter_slab_submit_encode_run(
   uint64_t cleanup_wait_payload_values
       [ID4_PIPELINE_PARAMETER_ENCODER_CLEANUP_WAIT_CAPACITY] = {0};
   iree_host_size_t cleanup_wait_count = 0;
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && uses_issue_window) {
+    status = id4_pipeline_parameter_encode_window_allocate(
+        load, group_context, stage_name, wait_semaphore_list,
+        options->diagnostics_sink, issue_window, &issue_window_allocated_now);
+    if (iree_status_is_ok(status)) {
+      staging_buffer = issue_window->staging_buffer;
+      staging_alloca_submitted = issue_window->alloca_submitted;
+    }
+  } else if (iree_status_is_ok(status)) {
     status = iree_hal_device_queue_alloca(
         load->device, load->queue_affinity, wait_semaphore_list,
         staging_ready_signal_list,
@@ -1814,16 +2111,28 @@ static iree_status_t id4_pipeline_parameter_slab_submit_encode_run(
     }
     iree_hal_semaphore_t* source_wait_semaphore = NULL;
     uint64_t source_wait_payload_value = 0;
+    iree_hal_semaphore_list_t source_wait_list =
+        iree_hal_semaphore_list_empty();
     if (slot_state->encode_payload_value == 0) {
-      source_wait_semaphore = run_semaphore;
-      source_wait_payload_value = staging_ready_payload_value;
+      if (uses_issue_window && !issue_window_allocated_now) {
+        source_wait_list = wait_semaphore_list;
+      } else if (uses_issue_window) {
+        source_wait_semaphore = issue_window->staging_ready_semaphore;
+        source_wait_payload_value = issue_window->staging_ready_payload_value;
+        source_wait_list = id4_pipeline_parameter_one_semaphore_list(
+            &source_wait_semaphore, &source_wait_payload_value);
+      } else {
+        source_wait_semaphore = run_semaphore;
+        source_wait_payload_value = staging_ready_payload_value;
+        source_wait_list = id4_pipeline_parameter_one_semaphore_list(
+            &source_wait_semaphore, &source_wait_payload_value);
+      }
     } else {
       source_wait_semaphore = slot_state->encode_semaphore;
       source_wait_payload_value = slot_state->encode_payload_value;
+      source_wait_list = id4_pipeline_parameter_one_semaphore_list(
+          &source_wait_semaphore, &source_wait_payload_value);
     }
-    iree_hal_semaphore_list_t source_wait_list =
-        id4_pipeline_parameter_one_semaphore_list(&source_wait_semaphore,
-                                                  &source_wait_payload_value);
     id4_pipeline_parameter_encode_chunk_source_t
         grouped_sources[ID4_PIPELINE_PARAMETER_ENCODER_CHUNK_SOURCE_CAPACITY] =
             {0};
@@ -1965,34 +2274,61 @@ static iree_status_t id4_pipeline_parameter_slab_submit_encode_run(
     cleanup_wait_count = id4_pipeline_parameter_encode_cleanup_waits_flatten(
         slots, cleanup_wait_semaphores, cleanup_wait_payload_values);
     if (cleanup_wait_count == 0) {
-      cleanup_wait_semaphores[0] = run_semaphore;
-      cleanup_wait_payload_values[0] = staging_ready_payload_value;
+      if (uses_issue_window) {
+        cleanup_wait_semaphores[0] = issue_window->staging_ready_semaphore;
+        cleanup_wait_payload_values[0] =
+            issue_window->staging_ready_payload_value;
+      } else {
+        cleanup_wait_semaphores[0] = run_semaphore;
+        cleanup_wait_payload_values[0] = staging_ready_payload_value;
+      }
       cleanup_wait_count = 1;
     }
     iree_hal_semaphore_list_t run_complete_wait_list =
         id4_pipeline_parameter_encode_cleanup_wait_list(
             cleanup_wait_count, cleanup_wait_semaphores,
             cleanup_wait_payload_values);
-    status = iree_hal_device_queue_dealloca(
-        load->device, load->queue_affinity, run_complete_wait_list,
-        signal_semaphore_list, staging_buffer, IREE_HAL_DEALLOCA_FLAG_NONE);
-  } else if (staging_alloca_submitted && staging_buffer) {
+    if (uses_issue_window) {
+      status = iree_hal_device_queue_barrier(
+          load->device, load->queue_affinity, run_complete_wait_list,
+          signal_semaphore_list, IREE_HAL_EXECUTE_FLAG_NONE);
+      if (iree_status_is_ok(status)) {
+        status = id4_pipeline_parameter_encode_window_set_cleanup_waits(
+            issue_window, signal_semaphore_list);
+      }
+    } else {
+      status = iree_hal_device_queue_dealloca(
+          load->device, load->queue_affinity, run_complete_wait_list,
+          signal_semaphore_list, staging_buffer, IREE_HAL_DEALLOCA_FLAG_NONE);
+    }
+  } else if (staging_buffer &&
+             (staging_alloca_submitted || uses_issue_window)) {
     iree_hal_semaphore_list_t cleanup_wait_list =
         id4_pipeline_parameter_encode_cleanup_wait_list(
             cleanup_wait_count, cleanup_wait_semaphores,
             cleanup_wait_payload_values);
-    iree_status_t cleanup_status = iree_hal_device_queue_dealloca(
-        load->device, load->queue_affinity, cleanup_wait_list,
-        cleanup_signal_list, staging_buffer, IREE_HAL_DEALLOCA_FLAG_NONE);
-    if (iree_status_is_ok(cleanup_status)) {
-      cleanup_status = iree_hal_semaphore_wait(
-          cleanup_semaphore, cleanup_payload_value, iree_infinite_timeout(),
-          IREE_ASYNC_WAIT_FLAG_NONE);
+    iree_status_t cleanup_status = iree_ok_status();
+    if (uses_issue_window) {
+      if (cleanup_wait_count != 0) {
+        cleanup_status = id4_pipeline_parameter_encode_window_set_cleanup_waits(
+            issue_window, cleanup_wait_list);
+      }
+    } else {
+      cleanup_status = iree_hal_device_queue_dealloca(
+          load->device, load->queue_affinity, cleanup_wait_list,
+          cleanup_signal_list, staging_buffer, IREE_HAL_DEALLOCA_FLAG_NONE);
+      if (iree_status_is_ok(cleanup_status)) {
+        cleanup_status = iree_hal_semaphore_wait(
+            cleanup_semaphore, cleanup_payload_value, iree_infinite_timeout(),
+            IREE_ASYNC_WAIT_FLAG_NONE);
+      }
     }
     status = iree_status_join(status, cleanup_status);
   }
 
-  iree_hal_buffer_release(staging_buffer);
+  if (!uses_issue_window) {
+    iree_hal_buffer_release(staging_buffer);
+  }
   iree_hal_semaphore_release(cleanup_semaphore);
   id4_pipeline_parameter_release_staging_slot_semaphores(slots);
   iree_hal_semaphore_release(run_semaphore);
@@ -2306,6 +2642,7 @@ iree_status_t id4_pipeline_parameter_load_group_at(
 
 static iree_status_t id4_pipeline_parameter_slab_submit_load_group(
     const id4_pipeline_parameter_slab_set_load_options_t* options,
+    id4_pipeline_parameter_slab_issue_context_t* issue_context,
     const id4_pipeline_parameter_slab_load_t* loads,
     const id4_pipeline_parameter_load_step_t* load_steps,
     id4_pipeline_parameter_load_group_context_t group_context,
@@ -2323,9 +2660,10 @@ static iree_status_t id4_pipeline_parameter_slab_submit_load_group(
   const iree_time_t start_time_ns = iree_time_now();
   if (id4_pipeline_parameter_load_group_is_encode(group)) {
     status = id4_pipeline_parameter_slab_submit_encode_run(
-        options, load, group.step_count, step, group_context, group.step_offset,
-        stage_name, slab_set->buffers[step->target_slab_index],
-        wait_semaphore_list, signal_semaphore_list, host_allocator);
+        options, issue_context, load, group.step_count, step, group_context,
+        group.step_offset, stage_name,
+        slab_set->buffers[step->target_slab_index], wait_semaphore_list,
+        signal_semaphore_list, host_allocator);
   } else {
     status = id4_pipeline_parameter_slab_submit_gather(
         options, load, step, stage_name, group_context, group,
@@ -2468,9 +2806,9 @@ static iree_status_t id4_pipeline_parameter_slab_set_submit_eager_load_groups(
         .submit_region_id = IREE_HOST_SIZE_MAX,
     };
     return id4_pipeline_parameter_slab_submit_load_group(
-        options, loads, load_steps, group_context, group, stage_name, slab_set,
-        options->wait_semaphore_list, options->signal_semaphore_list,
-        host_allocator);
+        options, /*issue_context=*/NULL, loads, load_steps, group_context,
+        group, stage_name, slab_set, options->wait_semaphore_list,
+        options->signal_semaphore_list, host_allocator);
   }
 
   iree_hal_semaphore_t** completion_semaphores = NULL;
@@ -2515,8 +2853,9 @@ static iree_status_t id4_pipeline_parameter_slab_set_submit_eager_load_groups(
         .submit_region_id = IREE_HOST_SIZE_MAX,
     };
     status = id4_pipeline_parameter_slab_submit_load_group(
-        options, loads, load_steps, group_context, group, stage_name, slab_set,
-        group_wait_list, group_signal_list, host_allocator);
+        options, /*issue_context=*/NULL, loads, load_steps, group_context,
+        group, stage_name, slab_set, group_wait_list, group_signal_list,
+        host_allocator);
     if (iree_status_is_ok(status)) {
       if (id4_pipeline_parameter_load_group_is_encode(group)) {
         encode_wait_semaphore = group_signal_semaphore;
@@ -2708,13 +3047,14 @@ id4_pipeline_parameter_slab_set_submit_options(
   return options;
 }
 
-iree_status_t id4_pipeline_parameter_slab_set_submit_load_group(
+iree_status_t id4_pipeline_parameter_slab_issue_context_create(
     id4_pipeline_parameter_slab_set_t* slab_set,
     iree_host_size_t load_step_count,
     const id4_pipeline_parameter_load_step_t* load_steps,
-    id4_pipeline_parameter_load_group_context_t group_context,
-    iree_string_view_t stage_name,
-    id4_pipeline_diagnostics_sink_t* diagnostics_sink) {
+    iree_allocator_t host_allocator,
+    id4_pipeline_parameter_slab_issue_context_t** out_context) {
+  IREE_ASSERT_ARGUMENT(out_context);
+  *out_context = NULL;
   if (!slab_set) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "parameter slab set is required");
@@ -2723,6 +3063,162 @@ iree_status_t id4_pipeline_parameter_slab_set_submit_load_group(
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "parameter slab set has no retained load context");
   }
+  if (load_step_count != 0 && !load_steps) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "parameter load step array is required");
+  }
+
+  id4_pipeline_parameter_slab_issue_context_t* context = NULL;
+  iree_status_t status =
+      iree_allocator_malloc(host_allocator, sizeof(*context), (void**)&context);
+  if (iree_status_is_ok(status)) {
+    memset(context, 0, sizeof(*context));
+    context->host_allocator = host_allocator;
+    context->slab_set = slab_set;
+    id4_pipeline_parameter_slab_set_retain(context->slab_set);
+    context->window_count = slab_set->load_count;
+  }
+  if (iree_status_is_ok(status) && context->window_count != 0) {
+    status = iree_allocator_malloc_array(host_allocator, context->window_count,
+                                         sizeof(context->windows[0]),
+                                         (void**)&context->windows);
+    if (iree_status_is_ok(status)) {
+      memset(context->windows, 0,
+             context->window_count * sizeof(context->windows[0]));
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    for (iree_host_size_t step_index = 0;
+         step_index < load_step_count && iree_status_is_ok(status);) {
+      const id4_pipeline_parameter_load_group_t group =
+          id4_pipeline_parameter_load_group_from_steps(
+              step_index, load_step_count, load_steps);
+      if (id4_pipeline_parameter_load_group_is_encode(group)) {
+        if (group.target_slab_index >= context->window_count) {
+          status =
+              iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                               "parameter load group target slab %" PRIhsz
+                               " outside issue window count %" PRIhsz,
+                               group.target_slab_index, context->window_count);
+          break;
+        }
+        const id4_pipeline_parameter_slab_load_t* load =
+            &slab_set->loads[group.target_slab_index];
+        status = id4_pipeline_parameter_encode_window_record_statistics(
+            load, &load_steps[group.step_offset], group.step_count,
+            slab_set->encoder_staging_chunk_byte_capacity,
+            &context->windows[group.target_slab_index]);
+      }
+      step_index += group.step_count;
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    for (iree_host_size_t i = 0;
+         i < context->window_count && iree_status_is_ok(status); ++i) {
+      status = id4_pipeline_parameter_encode_window_finalize_plan(
+          &context->windows[i]);
+    }
+  }
+  if (iree_status_is_ok(status) && context->window_count != 0) {
+    status = iree_allocator_malloc_array(host_allocator, context->window_count,
+                                         sizeof(context->cleanup_semaphores[0]),
+                                         (void**)&context->cleanup_semaphores);
+    if (iree_status_is_ok(status)) {
+      status = iree_allocator_malloc_array(
+          host_allocator, context->window_count,
+          sizeof(context->cleanup_payload_values[0]),
+          (void**)&context->cleanup_payload_values);
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    *out_context = context;
+  } else if (context) {
+    id4_pipeline_parameter_slab_issue_context_destroy(context);
+  }
+  return status;
+}
+
+iree_status_t id4_pipeline_parameter_slab_issue_context_finish(
+    id4_pipeline_parameter_slab_issue_context_t* context,
+    iree_hal_semaphore_list_t* out_cleanup_wait_list) {
+  IREE_ASSERT_ARGUMENT(context);
+  IREE_ASSERT_ARGUMENT(out_cleanup_wait_list);
+  *out_cleanup_wait_list = iree_hal_semaphore_list_empty();
+  if (context->finished) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "parameter slab issue context is already finished");
+  }
+
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0;
+       i < context->window_count && iree_status_is_ok(status); ++i) {
+    id4_pipeline_parameter_encode_issue_window_t* window = &context->windows[i];
+    if (!window->alloca_submitted) continue;
+
+    const id4_pipeline_parameter_slab_load_t* load =
+        &context->slab_set->loads[i];
+    status = id4_pipeline_parameter_create_semaphore(
+        load->device, load->queue_affinity, &window->cleanup_semaphore);
+    if (!iree_status_is_ok(status)) break;
+
+    window->cleanup_payload_value = 1;
+    iree_hal_semaphore_t* cleanup_semaphore = window->cleanup_semaphore;
+    uint64_t cleanup_payload_value = window->cleanup_payload_value;
+    iree_hal_semaphore_list_t cleanup_signal_list =
+        id4_pipeline_parameter_one_semaphore_list(&cleanup_semaphore,
+                                                  &cleanup_payload_value);
+    status = iree_hal_device_queue_dealloca(
+        load->device, load->queue_affinity,
+        id4_pipeline_parameter_encode_window_cleanup_wait_list(window),
+        cleanup_signal_list, window->staging_buffer,
+        IREE_HAL_DEALLOCA_FLAG_NONE);
+    if (iree_status_is_ok(status)) {
+      context->cleanup_semaphores[context->cleanup_count] =
+          window->cleanup_semaphore;
+      context->cleanup_payload_values[context->cleanup_count] =
+          window->cleanup_payload_value;
+      ++context->cleanup_count;
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    context->finished = true;
+    *out_cleanup_wait_list = (iree_hal_semaphore_list_t){
+        // Number of issue-local staging cleanup edges.
+        .count = context->cleanup_count,
+        // Cleanup semaphores borrowed from the issue context.
+        .semaphores =
+            context->cleanup_count == 0 ? NULL : context->cleanup_semaphores,
+        // Cleanup payload values paired with cleanup semaphores.
+        .payload_values = context->cleanup_count == 0
+                              ? NULL
+                              : context->cleanup_payload_values,
+    };
+  }
+  return status;
+}
+
+void id4_pipeline_parameter_slab_issue_context_release(
+    id4_pipeline_parameter_slab_issue_context_t* context) {
+  if (!context) return;
+  id4_pipeline_parameter_slab_issue_context_destroy(context);
+}
+
+iree_status_t id4_pipeline_parameter_slab_issue_context_submit_load_group(
+    id4_pipeline_parameter_slab_issue_context_t* context,
+    iree_host_size_t load_step_count,
+    const id4_pipeline_parameter_load_step_t* load_steps,
+    id4_pipeline_parameter_load_group_context_t group_context,
+    iree_string_view_t stage_name,
+    id4_pipeline_diagnostics_sink_t* diagnostics_sink) {
+  if (!context) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "parameter slab issue context is required");
+  }
+  if (context->finished) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "parameter slab issue context is already finished");
+  }
+  id4_pipeline_parameter_slab_set_t* slab_set = context->slab_set;
   if (group_context.group_index >= slab_set->load_group_count) {
     return iree_make_status(
         IREE_STATUS_OUT_OF_RANGE,
@@ -2768,8 +3264,9 @@ iree_status_t id4_pipeline_parameter_slab_set_submit_load_group(
       id4_pipeline_parameter_one_semaphore_list(&signal_semaphore,
                                                 &signal_payload_value);
   IREE_RETURN_IF_ERROR(id4_pipeline_parameter_slab_submit_load_group(
-      &submit_options, slab_set->loads, load_steps, group_context, group,
-      stage_name, slab_set, wait_list, signal_list, slab_set->host_allocator));
+      &submit_options, context, slab_set->loads, load_steps, group_context,
+      group, stage_name, slab_set, wait_list, signal_list,
+      slab_set->host_allocator));
   slab_set->load_group_submitted[group_context.group_index] = true;
   if (id4_pipeline_parameter_load_group_is_encode(group)) {
     slab_set->encode_tail_semaphore = signal_semaphore;

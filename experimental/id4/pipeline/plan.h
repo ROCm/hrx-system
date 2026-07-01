@@ -434,11 +434,18 @@ iree_status_t id4_pipeline_plan_prepare_parameter_slabs(
     iree_allocator_t host_allocator,
     id4_pipeline_parameter_slab_set_t** out_slab_set);
 
-// Submits parameter load group |group_index| from |plan| into |slab_set|.
+// Creates an issue-local context for deferred parameter loads in |plan|.
+iree_status_t id4_pipeline_plan_create_parameter_slab_issue_context(
+    const id4_pipeline_plan_t* plan,
+    id4_pipeline_parameter_slab_set_t* slab_set,
+    iree_allocator_t host_allocator,
+    id4_pipeline_parameter_slab_issue_context_t** out_context);
+
+// Submits parameter load group |group_index| from |plan| through |context|.
 iree_status_t id4_pipeline_plan_submit_parameter_load_group(
     const id4_pipeline_plan_t* plan,
-    id4_pipeline_parameter_slab_set_t* slab_set, iree_host_size_t group_index,
-    iree_host_size_t submit_region_id,
+    id4_pipeline_parameter_slab_issue_context_t* context,
+    iree_host_size_t group_index, iree_host_size_t submit_region_id,
     id4_pipeline_diagnostics_sink_t* diagnostics_sink);
 
 // Appends deterministic JSON describing the plan.
