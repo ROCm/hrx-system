@@ -1174,6 +1174,16 @@ static bool loom_low_schedule_candidate_has_better_pair_affinity(
   return lhs.pair_affinity_score > rhs.pair_affinity_score;
 }
 
+static bool loom_low_schedule_candidate_threatens_pressure_cliff(
+    loom_low_schedule_candidate_score_t score) {
+  if (score.pressure_cliff_penalty != 0) {
+    return true;
+  }
+  return score.units_until_pressure_cliff !=
+             LOOM_LOW_SCHEDULE_PRESSURE_CLIFF_NONE &&
+         score.units_until_pressure_cliff <= score.produced_live_units;
+}
+
 static bool loom_low_schedule_candidate_score_less(
     const loom_low_schedule_build_state_t* state,
     loom_low_schedule_candidate_score_t lhs,
@@ -1183,6 +1193,11 @@ static bool loom_low_schedule_candidate_score_less(
   if (state->options->strategy == LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL) {
     if (lhs.pressure_cliff_penalty != rhs.pressure_cliff_penalty) {
       return lhs.pressure_cliff_penalty < rhs.pressure_cliff_penalty;
+    }
+    if (pressure_order != 0 &&
+        (loom_low_schedule_candidate_threatens_pressure_cliff(lhs) ||
+         loom_low_schedule_candidate_threatens_pressure_cliff(rhs))) {
+      return pressure_order < 0;
     }
     if (lhs.effective_stall_cycles != rhs.effective_stall_cycles) {
       return lhs.effective_stall_cycles < rhs.effective_stall_cycles;
