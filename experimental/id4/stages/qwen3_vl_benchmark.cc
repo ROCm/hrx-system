@@ -25,7 +25,7 @@ IREE_FLAG(string, id4_fixture_dir, "",
           "Directory containing a Qwen3-VL fixture manifest.");
 IREE_FLAG(string, id4_plan_output_dir, "",
           "Optional directory receiving benchmark Qwen3-VL stage plan JSON.");
-IREE_FLAG(string, qwen_weight_execution_strategy, "row_major",
+IREE_FLAG(string, qwen_weight_execution_strategy, "hybrid_compact_rhs",
           "Qwen3-VL weight execution strategy: row_major, compact_rhs, or "
           "hybrid_compact_rhs.");
 

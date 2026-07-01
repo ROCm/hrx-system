@@ -42,7 +42,7 @@ IREE_FLAG(string, dit_activation_format, "bf16_linear_input",
 IREE_FLAG(string, dit_weight_execution_format, "bf16_resident",
           "DiT weight execution format: bf16_resident, fp8_direct, or "
           "fp8_direct_feed_forward_bf16_resident.");
-IREE_FLAG(string, qwen_weight_execution_strategy, "row_major",
+IREE_FLAG(string, qwen_weight_execution_strategy, "hybrid_compact_rhs",
           "Qwen3-VL weight execution strategy: row_major, compact_rhs, or "
           "hybrid_compact_rhs.");
 IREE_FLAG(string, dit_attention_implementation, "online_wmma",

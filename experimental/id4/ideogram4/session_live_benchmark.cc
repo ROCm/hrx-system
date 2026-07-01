@@ -37,7 +37,7 @@ IREE_FLAG(string, dit_activation_format, "bf16_linear_input",
 IREE_FLAG(string, dit_weight_execution_format, "bf16_resident",
           "DiT weight execution format: bf16_resident, fp8_direct, or "
           "fp8_direct_feed_forward_bf16_resident.");
-IREE_FLAG(string, qwen_weight_execution_strategy, "row_major",
+IREE_FLAG(string, qwen_weight_execution_strategy, "hybrid_compact_rhs",
           "Qwen3-VL weight execution strategy: row_major, compact_rhs, or "
           "hybrid_compact_rhs.");
 IREE_FLAG(string, dit_attention_implementation, "online_wmma",
@@ -297,7 +297,7 @@ static id4_ideogram4_generation_plan_policy_t MakeGenerationPolicy() {
   std::memset(&policy, 0, sizeof(policy));
   policy.structure_size = sizeof(policy);
   policy.qwen_weight_execution_strategy =
-      ID4_QWEN3_VL_WEIGHT_EXECUTION_STRATEGY_ROW_MAJOR;
+      ID4_QWEN3_VL_WEIGHT_EXECUTION_STRATEGY_HYBRID_COMPACT_RHS;
   policy.dit_attention_implementation =
       ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_ONLINE_WMMA;
   policy.dit_feed_forward_implementation =
