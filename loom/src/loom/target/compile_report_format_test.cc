@@ -136,27 +136,50 @@ TEST(CompileReportFormatTest, MergesSourceLowMemorySummariesFromEntries) {
               report.source_low_memory_root_summaries.head));
   const loom_target_compile_report_source_low_memory_root_summary_t*
       root_summary = &root_summaries[0];
-  EXPECT_EQ(root_summary->packet_count, 2u);
-  EXPECT_EQ(root_summary->load_packet_count, 1u);
-  EXPECT_EQ(root_summary->store_packet_count, 1u);
-  EXPECT_EQ(root_summary->source_byte_count, 12u);
-  EXPECT_EQ(root_summary->read_byte_count, 8u);
-  EXPECT_EQ(root_summary->write_byte_count, 4u);
-  EXPECT_EQ(root_summary->issued_read_byte_count, 8u);
-  EXPECT_EQ(root_summary->issued_write_byte_count, 4u);
-  EXPECT_EQ(root_summary->interval_envelope.packet_count, 2u);
-  EXPECT_EQ(root_summary->interval_envelope.envelope_byte_count, 12u);
-  EXPECT_EQ(root_summary->interval_envelope.exact_static_packet_count, 0u);
-  EXPECT_EQ(root_summary->interval_envelope.unique_byte_count, 0u);
-  EXPECT_EQ(root_summary->read_interval_envelope.packet_count, 1u);
-  EXPECT_EQ(root_summary->read_interval_envelope.envelope_byte_count, 8u);
-  EXPECT_EQ(root_summary->read_interval_envelope.exact_static_packet_count, 0u);
-  EXPECT_EQ(root_summary->read_interval_envelope.unique_byte_count, 0u);
-  EXPECT_EQ(root_summary->write_interval_envelope.packet_count, 1u);
-  EXPECT_EQ(root_summary->write_interval_envelope.envelope_byte_count, 4u);
-  EXPECT_EQ(root_summary->write_interval_envelope.exact_static_packet_count,
+  const loom_target_compile_report_source_low_memory_summary_t*
+      root_memory_summary = &root_summary->summary;
+  EXPECT_EQ(root_memory_summary->packet_count, 2u);
+  EXPECT_EQ(root_memory_summary->load_packet_count, 1u);
+  EXPECT_EQ(root_memory_summary->store_packet_count, 1u);
+  EXPECT_EQ(root_memory_summary->source_byte_count, 12u);
+  EXPECT_EQ(root_memory_summary->read_byte_count, 8u);
+  EXPECT_EQ(root_memory_summary->write_byte_count, 4u);
+  EXPECT_EQ(root_memory_summary->issued_read_byte_count, 8u);
+  EXPECT_EQ(root_memory_summary->issued_write_byte_count, 4u);
+  EXPECT_EQ(root_memory_summary->interval_envelope.packet_count, 2u);
+  EXPECT_EQ(root_memory_summary->interval_envelope.envelope_byte_count, 12u);
+  EXPECT_EQ(root_memory_summary->interval_envelope.exact_static_packet_count,
             0u);
-  EXPECT_EQ(root_summary->write_interval_envelope.unique_byte_count, 0u);
+  EXPECT_EQ(root_memory_summary->interval_envelope.unique_byte_count, 0u);
+  EXPECT_EQ(root_memory_summary->read_interval_envelope.packet_count, 1u);
+  EXPECT_EQ(root_memory_summary->read_interval_envelope.envelope_byte_count,
+            8u);
+  EXPECT_EQ(
+      root_memory_summary->read_interval_envelope.exact_static_packet_count,
+      0u);
+  EXPECT_EQ(root_memory_summary->read_interval_envelope.unique_byte_count, 0u);
+  EXPECT_EQ(root_memory_summary->write_interval_envelope.packet_count, 1u);
+  EXPECT_EQ(root_memory_summary->write_interval_envelope.envelope_byte_count,
+            4u);
+  EXPECT_EQ(
+      root_memory_summary->write_interval_envelope.exact_static_packet_count,
+      0u);
+  EXPECT_EQ(root_memory_summary->write_interval_envelope.unique_byte_count, 0u);
+
+  ASSERT_EQ(report.source_low_memory_argument_summaries.count, 1u);
+  ASSERT_NE(report.source_low_memory_argument_summaries.head, nullptr);
+  const loom_target_compile_report_source_low_memory_argument_summary_t*
+      argument_summary = static_cast<
+          const loom_target_compile_report_source_low_memory_argument_summary_t*>(
+          loom_target_compile_report_vec_const_rows(
+              report.source_low_memory_argument_summaries.head));
+  EXPECT_TRUE(iree_string_view_equal(argument_summary->function_name,
+                                     IREE_SVL("kernel")));
+  EXPECT_EQ(argument_summary->source_root_argument_index, 1u);
+  EXPECT_TRUE(iree_string_view_equal(argument_summary->memory_space,
+                                     IREE_SVL("workgroup")));
+  EXPECT_EQ(argument_summary->summary.packet_count, 2u);
+  EXPECT_EQ(argument_summary->summary.source_byte_count, 12u);
 
   loom_target_compile_report_deinitialize(&report);
 }
@@ -219,19 +242,40 @@ TEST(CompileReportFormatTest, MergesOverlappingSourceLowMemoryIntervals) {
           const loom_target_compile_report_source_low_memory_root_summary_t*>(
           loom_target_compile_report_vec_const_rows(
               report.source_low_memory_root_summaries.head));
-  EXPECT_EQ(root_summary->interval_envelope.packet_count, 3u);
-  EXPECT_EQ(root_summary->interval_envelope.exact_static_packet_count, 3u);
-  EXPECT_EQ(root_summary->interval_envelope.envelope_byte_count, 12u);
-  EXPECT_EQ(root_summary->interval_envelope.unique_byte_count, 12u);
-  EXPECT_EQ(root_summary->read_interval_envelope.packet_count, 2u);
-  EXPECT_EQ(root_summary->read_interval_envelope.exact_static_packet_count, 2u);
-  EXPECT_EQ(root_summary->read_interval_envelope.envelope_byte_count, 12u);
-  EXPECT_EQ(root_summary->read_interval_envelope.unique_byte_count, 12u);
-  EXPECT_EQ(root_summary->write_interval_envelope.packet_count, 1u);
-  EXPECT_EQ(root_summary->write_interval_envelope.exact_static_packet_count,
-            1u);
-  EXPECT_EQ(root_summary->write_interval_envelope.envelope_byte_count, 8u);
-  EXPECT_EQ(root_summary->write_interval_envelope.unique_byte_count, 8u);
+  const loom_target_compile_report_source_low_memory_summary_t*
+      root_memory_summary = &root_summary->summary;
+  EXPECT_EQ(root_memory_summary->interval_envelope.packet_count, 3u);
+  EXPECT_EQ(root_memory_summary->interval_envelope.exact_static_packet_count,
+            3u);
+  EXPECT_EQ(root_memory_summary->interval_envelope.envelope_byte_count, 12u);
+  EXPECT_EQ(root_memory_summary->interval_envelope.unique_byte_count, 12u);
+  EXPECT_EQ(root_memory_summary->read_interval_envelope.packet_count, 2u);
+  EXPECT_EQ(
+      root_memory_summary->read_interval_envelope.exact_static_packet_count,
+      2u);
+  EXPECT_EQ(root_memory_summary->read_interval_envelope.envelope_byte_count,
+            12u);
+  EXPECT_EQ(root_memory_summary->read_interval_envelope.unique_byte_count, 12u);
+  EXPECT_EQ(root_memory_summary->write_interval_envelope.packet_count, 1u);
+  EXPECT_EQ(
+      root_memory_summary->write_interval_envelope.exact_static_packet_count,
+      1u);
+  EXPECT_EQ(root_memory_summary->write_interval_envelope.envelope_byte_count,
+            8u);
+  EXPECT_EQ(root_memory_summary->write_interval_envelope.unique_byte_count, 8u);
+
+  ASSERT_EQ(report.source_low_memory_argument_summaries.count, 1u);
+  ASSERT_NE(report.source_low_memory_argument_summaries.head, nullptr);
+  const loom_target_compile_report_source_low_memory_argument_summary_t*
+      argument_summary = static_cast<
+          const loom_target_compile_report_source_low_memory_argument_summary_t*>(
+          loom_target_compile_report_vec_const_rows(
+              report.source_low_memory_argument_summaries.head));
+  EXPECT_EQ(argument_summary->summary.interval_envelope.packet_count, 3u);
+  EXPECT_EQ(
+      argument_summary->summary.interval_envelope.exact_static_packet_count,
+      3u);
+  EXPECT_EQ(argument_summary->summary.interval_envelope.unique_byte_count, 12u);
 
   loom_target_compile_report_deinitialize(&report);
 }
@@ -1415,7 +1459,8 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
             IREE_STRING_VIEW_NPOS);
   EXPECT_NE(iree_string_view_find(
                 output,
-                IREE_SV("source_low_memory packets=1 loads=1 stores=0 "
+                IREE_SV("source_low_memory roots=1 arguments=1 packets=1 "
+                        "loads=1 stores=0 "
                         "scalar_packets=0 "
                         "vector_packets=1 source_lanes=2 source_bytes=8 "
                         "read_bytes=8 write_bytes=0 "
@@ -1424,13 +1469,28 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
                         "issued_write_unknown_widths=0 "
                         "contiguous_vector_packets=0 "
                         "strided_vector_packets=1 "
-                        "unknown_stride_vector_packets=0 roots=1"),
+                        "unknown_stride_vector_packets=0"),
                 0),
             IREE_STRING_VIEW_NPOS);
   EXPECT_NE(iree_string_view_find(
                 output,
                 IREE_SV("source_low_memory_root[0] function=branchy "
                         "source_root=lhs source_root_argument_index=0 "
+                        "memory_space=workgroup packets=1 loads=1 stores=0 "
+                        "scalar_packets=0 vector_packets=1 source_lanes=2 "
+                        "source_bytes=8 read_bytes=8 write_bytes=0 "
+                        "issued_read_bytes=8 issued_write_bytes=0 "
+                        "issued_read_unknown_widths=0 "
+                        "issued_write_unknown_widths=0 "
+                        "contiguous_vector_packets=0 "
+                        "strided_vector_packets=1 "
+                        "unknown_stride_vector_packets=0"),
+                0),
+            IREE_STRING_VIEW_NPOS);
+  EXPECT_NE(iree_string_view_find(
+                output,
+                IREE_SV("source_low_memory_argument[0] function=branchy "
+                        "source_root_argument_index=0 "
                         "memory_space=workgroup packets=1 loads=1 stores=0 "
                         "scalar_packets=0 vector_packets=1 source_lanes=2 "
                         "source_bytes=8 read_bytes=8 write_bytes=0 "
@@ -1909,6 +1969,22 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
                         "\"unknown_stride_vector_packet_count\":0,"
                         "\"root_count\":1,\"roots\":[{\"index\":0,"
                         "\"function\":\"branchy\",\"source_root\":\"lhs\","
+                        "\"source_root_argument_index\":0,"
+                        "\"memory_space\":\"workgroup\",\"packet_count\":1,"
+                        "\"load_packet_count\":1,\"store_packet_count\":0,"
+                        "\"scalar_packet_count\":0,"
+                        "\"vector_packet_count\":1,"
+                        "\"source_lane_count\":2,\"source_byte_count\":8,"
+                        "\"read_byte_count\":8,\"write_byte_count\":0,"
+                        "\"issued_read_byte_count\":8,"
+                        "\"issued_write_byte_count\":0,"
+                        "\"issued_read_unknown_width_count\":0,"
+                        "\"issued_write_unknown_width_count\":0,"
+                        "\"contiguous_vector_packet_count\":0,"
+                        "\"strided_vector_packet_count\":1,"
+                        "\"unknown_stride_vector_packet_count\":0}],"
+                        "\"argument_count\":1,\"arguments\":[{\"index\":0,"
+                        "\"function\":\"branchy\","
                         "\"source_root_argument_index\":0,"
                         "\"memory_space\":\"workgroup\",\"packet_count\":1,"
                         "\"load_packet_count\":1,\"store_packet_count\":0,"
