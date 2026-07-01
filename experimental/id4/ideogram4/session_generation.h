@@ -63,6 +63,10 @@ iree_status_t id4_ideogram4_validate_generation_request(
 iree_status_t id4_ideogram4_validate_generation_phase_mask(
     id4_ideogram4_generation_phase_mask_t phase_mask);
 
+// Validates that a phase mask identifies exactly one public generation phase.
+iree_status_t id4_ideogram4_validate_single_generation_phase_mask(
+    id4_ideogram4_generation_phase_mask_t phase_mask);
+
 // Validates a public generation resident-stage mask.
 iree_status_t id4_ideogram4_validate_generation_resident_stage_mask(
     id4_ideogram4_generation_resident_stage_mask_t resident_stage_mask);

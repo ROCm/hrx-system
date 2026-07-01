@@ -34,6 +34,8 @@ iree_cc_library(
     "session_generation.h"
     "session_lifecycle.c"
     "session_plan.c"
+    "session_prepare.c"
+    "session_prepare.h"
     "session_qwen.c"
     "session_state.h"
     "session_support.c"

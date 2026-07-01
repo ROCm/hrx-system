@@ -281,6 +281,22 @@ iree_status_t id4_ideogram4_validate_generation_phase_mask(
   return iree_ok_status();
 }
 
+iree_status_t id4_ideogram4_validate_single_generation_phase_mask(
+    id4_ideogram4_generation_phase_mask_t phase_mask) {
+  switch (phase_mask) {
+    case ID4_IDEOGRAM4_GENERATION_PHASE_CONDITIONING:
+    case ID4_IDEOGRAM4_GENERATION_PHASE_DENOISE:
+    case ID4_IDEOGRAM4_GENERATION_PHASE_DECODE:
+      return iree_ok_status();
+    default:
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "Ideogram 4 generation phase mask 0x%x does not identify one "
+          "generation phase",
+          phase_mask);
+  }
+}
+
 iree_status_t id4_ideogram4_validate_generation_resident_stage_mask(
     id4_ideogram4_generation_resident_stage_mask_t resident_stage_mask) {
   const id4_ideogram4_generation_resident_stage_mask_t unknown_stage_mask =
