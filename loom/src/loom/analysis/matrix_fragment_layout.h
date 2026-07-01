@@ -148,6 +148,14 @@ bool loom_matrix_fragment_coordinate_from_role_layout(
     uint16_t register_index, uint16_t element_index,
     loom_matrix_fragment_coordinate_t* out_coordinate);
 
+// Returns true when every even/odd lane pair selected by lane xor 1 carries
+// adjacent columns for each payload register in |role|. This is the reusable
+// contract used by packed epilogues that let one lane store two horizontally
+// adjacent logical elements.
+bool loom_matrix_fragment_role_has_contiguous_lane_xor1_columns(
+    const loom_matrix_fragment_layout_t* layout,
+    loom_contract_operand_role_t role);
+
 // Counts physical lane/register elements that carry |coordinate| for |role|.
 // Some target fragment layouts intentionally replicate input operands across
 // lanes; callers that need a canonical owner can request occurrence zero from

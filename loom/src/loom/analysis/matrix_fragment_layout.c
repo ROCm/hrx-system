@@ -217,6 +217,43 @@ bool loom_matrix_fragment_coordinate_from_role_layout(
   }
 }
 
+bool loom_matrix_fragment_role_has_contiguous_lane_xor1_columns(
+    const loom_matrix_fragment_layout_t* layout,
+    loom_contract_operand_role_t role) {
+  if (layout == NULL) {
+    return false;
+  }
+  const loom_matrix_fragment_role_layout_t* role_layout =
+      loom_matrix_fragment_role_layout(layout, role);
+  if (role_layout == NULL || layout->wave_size == 0 ||
+      (layout->wave_size & 1u) != 0 ||
+      role_layout->elements_per_register != 1 ||
+      role_layout->coordinate_flags !=
+          (LOOM_MATRIX_FRAGMENT_COORDINATE_ROW |
+           LOOM_MATRIX_FRAGMENT_COORDINATE_COLUMN)) {
+    return false;
+  }
+
+  for (uint16_t register_index = 0;
+       register_index < role_layout->register_count; ++register_index) {
+    for (uint16_t lane = 0; lane < layout->wave_size; lane += 2) {
+      loom_matrix_fragment_coordinate_t coordinate = {0};
+      loom_matrix_fragment_coordinate_t paired_coordinate = {0};
+      if (!loom_matrix_fragment_coordinate_from_role_layout(
+              layout, role_layout, lane, register_index, /*element_index=*/0,
+              &coordinate) ||
+          !loom_matrix_fragment_coordinate_from_role_layout(
+              layout, role_layout, (uint16_t)(lane ^ 1u), register_index,
+              /*element_index=*/0, &paired_coordinate) ||
+          coordinate.row != paired_coordinate.row ||
+          paired_coordinate.column != coordinate.column + 1u) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
 bool loom_matrix_fragment_physical_element_count(
     const loom_matrix_fragment_layout_t* layout,
     loom_contract_operand_role_t role,
