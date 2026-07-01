@@ -320,6 +320,32 @@ typedef struct id4_ideogram4_generation_resource_statistics_t {
   iree_device_size_t stage_serial_total_peak_byte_length;
 } id4_ideogram4_generation_resource_statistics_t;
 
+// Options for selecting a resident-stage policy from a generation plan.
+typedef struct id4_ideogram4_generation_residency_select_options_t {
+  // Size of this structure for versioning.
+  iree_host_size_t structure_size;
+  // Extension structure chain; must be NULL for now.
+  const void* next;
+  // Issue policy whose live-memory peak must fit the budget.
+  id4_ideogram4_generation_issue_policy_t issue_policy;
+  // Candidate coarse stage bundles the selector may retain.
+  id4_ideogram4_generation_resident_stage_mask_t candidate_stage_mask;
+  // Maximum logical live bytes allowed by the selected policy.
+  iree_device_size_t memory_budget_byte_length;
+} id4_ideogram4_generation_residency_select_options_t;
+
+// Selected resident-stage policy and its resource estimate.
+typedef struct id4_ideogram4_generation_residency_selection_t {
+  // Residency mode to pass to generation preparation.
+  id4_ideogram4_generation_residency_mode_t residency_mode;
+  // Resident stage mask to pass to generation preparation.
+  id4_ideogram4_generation_resident_stage_mask_t resident_stage_mask;
+  // Logical live bytes for the selected issue policy.
+  iree_device_size_t selected_peak_byte_length;
+  // Resource statistics for the selected residency policy.
+  id4_ideogram4_generation_resource_statistics_t resource_statistics;
+} id4_ideogram4_generation_residency_selection_t;
+
 // Options for preparing reusable generation state from one generation plan.
 typedef struct id4_ideogram4_generation_prepare_options_t {
   // Size of this structure for versioning.
@@ -530,6 +556,12 @@ iree_status_t id4_ideogram4_generation_plan_resource_statistics(
     const id4_ideogram4_generation_plan_t* plan,
     const id4_ideogram4_generation_resource_statistics_options_t* options,
     id4_ideogram4_generation_resource_statistics_t* out_statistics);
+
+// Selects the highest-value resident-stage policy that fits a memory budget.
+iree_status_t id4_ideogram4_generation_plan_select_residency(
+    const id4_ideogram4_generation_plan_t* plan,
+    const id4_ideogram4_generation_residency_select_options_t* options,
+    id4_ideogram4_generation_residency_selection_t* out_selection);
 
 // Appends an inspectable generation-plan JSON object to |builder|.
 iree_status_t id4_ideogram4_generation_plan_format_json(

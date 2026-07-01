@@ -77,12 +77,16 @@ IREE_FLAG(bool, dry_run, false,
           "or issuing device work.");
 IREE_FLAG(string, generation_residency, "issue_phases",
           "Generation residency mode: issue_phases, "
-          "selected_stage_bundles, or all_stage_bundles.");
+          "selected_stage_bundles, all_stage_bundles, or memory_budgeted.");
+IREE_FLAG(int64_t, generation_residency_budget, 0,
+          "Logical live byte budget for "
+          "--generation_residency=memory_budgeted.");
 IREE_FLAG(string, generation_issue_mode, "full",
           "Generation issue mode: full, phases, or stage_serial.");
 IREE_FLAG(string, generation_resident_stage_bundles, "",
-          "Comma-separated stage bundles retained by "
-          "--generation_residency=selected_stage_bundles: qwen, "
+          "Comma-separated stage bundles retained or considered by "
+          "--generation_residency=selected_stage_bundles or "
+          "memory_budgeted: qwen, "
           "sampler_noise, dit_conditioned, dit_unconditioned, "
           "sampler_denoise, decode, or all.");
 IREE_FLAG(string, dump_plan, "",
@@ -106,6 +110,17 @@ typedef enum id4_cli_generation_issue_mode_e {
   // Issue the whole generation by serializing heavyweight stage submission.
   ID4_CLI_GENERATION_ISSUE_MODE_STAGE_SERIAL = 2,
 } id4_cli_generation_issue_mode_t;
+
+typedef enum id4_cli_generation_residency_request_mode_e {
+  // Prepare stage bundles at issue-time phase boundaries.
+  ID4_CLI_GENERATION_RESIDENCY_REQUEST_ISSUE_PHASES = 0,
+  // Retain exactly the user-selected coarse stage bundles.
+  ID4_CLI_GENERATION_RESIDENCY_REQUEST_SELECTED_STAGE_BUNDLES = 1,
+  // Retain every coarse stage bundle.
+  ID4_CLI_GENERATION_RESIDENCY_REQUEST_ALL_STAGE_BUNDLES = 2,
+  // Select retained stage bundles from candidates under a memory budget.
+  ID4_CLI_GENERATION_RESIDENCY_REQUEST_MEMORY_BUDGETED = 3,
+} id4_cli_generation_residency_request_mode_t;
 
 static iree_status_t id4_cli_load_tokenizer(iree_string_view_t tokenizer_path,
                                             iree_allocator_t host_allocator,
@@ -399,26 +414,30 @@ static iree_status_t id4_cli_parse_vae_tiling_config(
       "relative_tile_size, or memory_budget");
 }
 
-static iree_status_t id4_cli_parse_generation_residency_mode(
-    id4_ideogram4_generation_residency_mode_t* out_mode) {
+static iree_status_t id4_cli_parse_generation_residency_request_mode(
+    id4_cli_generation_residency_request_mode_t* out_mode) {
   IREE_ASSERT_ARGUMENT(out_mode);
   iree_string_view_t value = iree_make_cstring_view(FLAG_generation_residency);
   if (iree_string_view_equal(value, IREE_SV("issue_phases"))) {
-    *out_mode = ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_ISSUE_PHASES;
+    *out_mode = ID4_CLI_GENERATION_RESIDENCY_REQUEST_ISSUE_PHASES;
     return iree_ok_status();
   }
   if (iree_string_view_equal(value, IREE_SV("selected_stage_bundles"))) {
-    *out_mode = ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_SELECTED_STAGE_BUNDLES;
+    *out_mode = ID4_CLI_GENERATION_RESIDENCY_REQUEST_SELECTED_STAGE_BUNDLES;
     return iree_ok_status();
   }
   if (iree_string_view_equal(value, IREE_SV("all_stage_bundles"))) {
-    *out_mode = ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_ALL_STAGE_BUNDLES;
+    *out_mode = ID4_CLI_GENERATION_RESIDENCY_REQUEST_ALL_STAGE_BUNDLES;
+    return iree_ok_status();
+  }
+  if (iree_string_view_equal(value, IREE_SV("memory_budgeted"))) {
+    *out_mode = ID4_CLI_GENERATION_RESIDENCY_REQUEST_MEMORY_BUDGETED;
     return iree_ok_status();
   }
   return iree_make_status(
       IREE_STATUS_INVALID_ARGUMENT,
       "--generation_residency must be issue_phases, selected_stage_bundles, "
-      "or all_stage_bundles");
+      "all_stage_bundles, or memory_budgeted");
 }
 
 static iree_status_t id4_cli_parse_generation_issue_mode(
@@ -440,6 +459,13 @@ static iree_status_t id4_cli_parse_generation_issue_mode(
   return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                           "--generation_issue_mode must be full, phases, or "
                           "stage_serial");
+}
+
+static id4_ideogram4_generation_issue_policy_t id4_cli_generation_issue_policy(
+    id4_cli_generation_issue_mode_t issue_mode) {
+  return issue_mode == ID4_CLI_GENERATION_ISSUE_MODE_STAGE_SERIAL
+             ? ID4_IDEOGRAM4_GENERATION_ISSUE_POLICY_STAGE_SERIAL
+             : ID4_IDEOGRAM4_GENERATION_ISSUE_POLICY_PHASE_CONCURRENT;
 }
 
 static iree_status_t id4_cli_parse_generation_resident_stage_mask(
@@ -486,6 +512,73 @@ static iree_status_t id4_cli_parse_generation_resident_stage_mask(
   return iree_ok_status();
 }
 
+static iree_status_t id4_cli_resolve_generation_residency(
+    const id4_ideogram4_generation_plan_t* generation_plan,
+    id4_cli_generation_issue_mode_t issue_mode,
+    id4_cli_generation_residency_request_mode_t request_mode,
+    id4_ideogram4_generation_resident_stage_mask_t requested_stage_mask,
+    id4_ideogram4_generation_residency_mode_t* out_residency_mode,
+    id4_ideogram4_generation_resident_stage_mask_t* out_resident_stage_mask) {
+  IREE_ASSERT_ARGUMENT(generation_plan);
+  IREE_ASSERT_ARGUMENT(out_residency_mode);
+  IREE_ASSERT_ARGUMENT(out_resident_stage_mask);
+  *out_residency_mode = ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_INVALID;
+  *out_resident_stage_mask = ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_NONE;
+
+  if (request_mode != ID4_CLI_GENERATION_RESIDENCY_REQUEST_MEMORY_BUDGETED &&
+      FLAG_generation_residency_budget != 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "--generation_residency_budget requires "
+                            "--generation_residency=memory_budgeted");
+  }
+
+  switch (request_mode) {
+    case ID4_CLI_GENERATION_RESIDENCY_REQUEST_ISSUE_PHASES:
+      *out_residency_mode =
+          ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_ISSUE_PHASES;
+      *out_resident_stage_mask = requested_stage_mask;
+      return iree_ok_status();
+    case ID4_CLI_GENERATION_RESIDENCY_REQUEST_SELECTED_STAGE_BUNDLES:
+      *out_residency_mode =
+          ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_SELECTED_STAGE_BUNDLES;
+      *out_resident_stage_mask = requested_stage_mask;
+      return iree_ok_status();
+    case ID4_CLI_GENERATION_RESIDENCY_REQUEST_ALL_STAGE_BUNDLES:
+      *out_residency_mode =
+          ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_ALL_STAGE_BUNDLES;
+      *out_resident_stage_mask = requested_stage_mask;
+      return iree_ok_status();
+    case ID4_CLI_GENERATION_RESIDENCY_REQUEST_MEMORY_BUDGETED: {
+      if (requested_stage_mask ==
+          ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_NONE) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "--generation_resident_stage_bundles must list candidate stages "
+            "for --generation_residency=memory_budgeted");
+      }
+      iree_device_size_t memory_budget = 0;
+      IREE_RETURN_IF_ERROR(id4_cli_parse_positive_i64_flag(
+          FLAG_generation_residency_budget,
+          IREE_SV("--generation_residency_budget"), &memory_budget));
+      id4_ideogram4_generation_residency_select_options_t select_options;
+      memset(&select_options, 0, sizeof(select_options));
+      select_options.structure_size = sizeof(select_options);
+      select_options.issue_policy = id4_cli_generation_issue_policy(issue_mode);
+      select_options.candidate_stage_mask = requested_stage_mask;
+      select_options.memory_budget_byte_length = memory_budget;
+      id4_ideogram4_generation_residency_selection_t selection;
+      IREE_RETURN_IF_ERROR(id4_ideogram4_generation_plan_select_residency(
+          generation_plan, &select_options, &selection));
+      *out_residency_mode = selection.residency_mode;
+      *out_resident_stage_mask = selection.resident_stage_mask;
+      return iree_ok_status();
+    }
+    default:
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "generation residency request mode is invalid");
+  }
+}
+
 static iree_status_t id4_cli_validate_execution_flags(void) {
   if (strlen(FLAG_output) == 0) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -516,6 +609,11 @@ static iree_status_t id4_cli_validate_dry_run_flags(void) {
         IREE_STATUS_INVALID_ARGUMENT,
         "--generation_residency and --generation_resident_stage_bundles "
         "require generation execution; omit --dry_run");
+  }
+  if (FLAG_generation_residency_budget != 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "--generation_residency_budget requires "
+                            "generation execution; omit --dry_run");
   }
   if (strcmp(FLAG_generation_issue_mode, "full") != 0) {
     return iree_make_status(
@@ -1622,11 +1720,17 @@ static iree_status_t id4_cli_run_generation(iree_allocator_t host_allocator) {
   bool profile_started = false;
   id4_cli_generation_issue_mode_t generation_issue_mode =
       ID4_CLI_GENERATION_ISSUE_MODE_FULL;
+  id4_cli_generation_residency_request_mode_t generation_residency_mode =
+      ID4_CLI_GENERATION_RESIDENCY_REQUEST_ISSUE_PHASES;
   const iree_time_t generation_start_time_ns = iree_time_now();
 
   iree_status_t status = id4_cli_validate_execution_flags();
   if (iree_status_is_ok(status)) {
     status = id4_cli_parse_generation_issue_mode(&generation_issue_mode);
+  }
+  if (iree_status_is_ok(status)) {
+    status = id4_cli_parse_generation_residency_request_mode(
+        &generation_residency_mode);
   }
   if (iree_status_is_ok(status)) {
     status = id4_cli_parse_request(host_allocator, &request);
@@ -1739,10 +1843,16 @@ static iree_status_t id4_cli_run_generation(iree_allocator_t host_allocator) {
     prepare_options.structure_size = sizeof(prepare_options);
     prepare_options.parameter_providers = parameter_providers;
     prepare_options.kernel_library = kernel_library;
-    status = id4_cli_parse_generation_residency_mode(
-        &prepare_options.residency_mode);
+    id4_ideogram4_generation_resident_stage_mask_t requested_stage_mask =
+        ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_NONE;
     if (iree_status_is_ok(status)) {
-      status = id4_cli_parse_generation_resident_stage_mask(
+      status =
+          id4_cli_parse_generation_resident_stage_mask(&requested_stage_mask);
+    }
+    if (iree_status_is_ok(status)) {
+      status = id4_cli_resolve_generation_residency(
+          generation_plan, generation_issue_mode, generation_residency_mode,
+          requested_stage_mask, &prepare_options.residency_mode,
           &prepare_options.resident_stage_mask);
     }
     prepare_options.command_buffer_mode =
@@ -1776,7 +1886,7 @@ static iree_status_t id4_cli_run_generation(iree_allocator_t host_allocator) {
         ++completion_payload_storage;
         status = id4_cli_issue_generation_full(
             session, generation_bundle, &request, tokenizer,
-            ID4_IDEOGRAM4_GENERATION_ISSUE_POLICY_PHASE_CONCURRENT,
+            id4_cli_generation_issue_policy(generation_issue_mode),
             prepare_signal_list, completion_list, &diagnostics_sink,
             &execution);
         break;
@@ -1785,7 +1895,7 @@ static iree_status_t id4_cli_run_generation(iree_allocator_t host_allocator) {
         ++completion_payload_storage;
         status = id4_cli_issue_generation_full(
             session, generation_bundle, &request, tokenizer,
-            ID4_IDEOGRAM4_GENERATION_ISSUE_POLICY_STAGE_SERIAL,
+            id4_cli_generation_issue_policy(generation_issue_mode),
             prepare_signal_list, completion_list, &diagnostics_sink,
             &execution);
         break;

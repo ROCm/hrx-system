@@ -211,6 +211,23 @@ EstimateGenerationResources(
   return statistics;
 }
 
+static id4_ideogram4_generation_residency_selection_t SelectGenerationResidency(
+    const id4_ideogram4_generation_plan_t* plan,
+    id4_ideogram4_generation_issue_policy_t issue_policy,
+    id4_ideogram4_generation_resident_stage_mask_t candidate_stage_mask,
+    iree_device_size_t memory_budget_byte_length) {
+  id4_ideogram4_generation_residency_select_options_t options;
+  std::memset(&options, 0, sizeof(options));
+  options.structure_size = sizeof(options);
+  options.issue_policy = issue_policy;
+  options.candidate_stage_mask = candidate_stage_mask;
+  options.memory_budget_byte_length = memory_budget_byte_length;
+  id4_ideogram4_generation_residency_selection_t selection;
+  IREE_CHECK_OK(id4_ideogram4_generation_plan_select_residency(plan, &options,
+                                                               &selection));
+  return selection;
+}
+
 static void ExpectBoundaryLayout(const id4_pipeline_plan_t* plan,
                                  iree_string_view_t name,
                                  id4_pipeline_tensor_dtype_t dtype,
@@ -751,6 +768,71 @@ TEST_F(SessionTest, ResourceStatisticsRejectInvalidResidencyPolicy) {
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         id4_ideogram4_generation_plan_resource_statistics(
                             plan.get(), &options, &statistics));
+}
+
+TEST_F(SessionTest, SelectsGenerationResidencyWithinBudget) {
+  TokenizerPtr tokenizer = LoadTokenizer();
+  ScopedRequest request;
+  IREE_ASSERT_OK(id4_ideogram4_request_parse_json(
+      ShortFullRequestJson(), iree_allocator_system(), &request.value));
+
+  SessionPtr session = CreateLoadedSession();
+  GenerationPlanPtr plan =
+      PlanGeneration(session.get(), tokenizer.get(), &request.value);
+
+  id4_ideogram4_generation_resource_statistics_t conditioned_statistics =
+      EstimateGenerationResources(
+          plan.get(),
+          ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_SELECTED_STAGE_BUNDLES,
+          ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_DIT_CONDITIONED);
+  const id4_ideogram4_generation_resident_stage_mask_t candidates =
+      ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_QWEN |
+      ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_DIT_CONDITIONED |
+      ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_DIT_UNCONDITIONED;
+
+  id4_ideogram4_generation_residency_selection_t selection =
+      SelectGenerationResidency(
+          plan.get(), ID4_IDEOGRAM4_GENERATION_ISSUE_POLICY_STAGE_SERIAL,
+          candidates,
+          conditioned_statistics.stage_serial_total_peak_byte_length);
+
+  EXPECT_EQ(selection.residency_mode,
+            ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_SELECTED_STAGE_BUNDLES);
+  EXPECT_EQ(selection.resident_stage_mask,
+            ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_DIT_CONDITIONED);
+  EXPECT_LE(selection.selected_peak_byte_length,
+            conditioned_statistics.stage_serial_total_peak_byte_length);
+  EXPECT_EQ(selection.selected_peak_byte_length,
+            selection.resource_statistics.stage_serial_total_peak_byte_length);
+}
+
+TEST_F(SessionTest, ResidencySelectionRejectsImpossibleBudget) {
+  TokenizerPtr tokenizer = LoadTokenizer();
+  ScopedRequest request;
+  IREE_ASSERT_OK(id4_ideogram4_request_parse_json(
+      ShortFullRequestJson(), iree_allocator_system(), &request.value));
+
+  SessionPtr session = CreateLoadedSession();
+  GenerationPlanPtr plan =
+      PlanGeneration(session.get(), tokenizer.get(), &request.value);
+
+  id4_ideogram4_generation_resource_statistics_t issue_phase_statistics =
+      EstimateGenerationResources(
+          plan.get(), ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_ISSUE_PHASES,
+          ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_NONE);
+  ASSERT_GT(issue_phase_statistics.stage_serial_total_peak_byte_length, 0u);
+
+  id4_ideogram4_generation_residency_select_options_t options;
+  std::memset(&options, 0, sizeof(options));
+  options.structure_size = sizeof(options);
+  options.issue_policy = ID4_IDEOGRAM4_GENERATION_ISSUE_POLICY_STAGE_SERIAL;
+  options.candidate_stage_mask = ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_ALL;
+  options.memory_budget_byte_length =
+      issue_phase_statistics.stage_serial_total_peak_byte_length - 1;
+  id4_ideogram4_generation_residency_selection_t selection;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
+                        id4_ideogram4_generation_plan_select_residency(
+                            plan.get(), &options, &selection));
 }
 
 TEST_F(SessionTest, PlansFp8E4m3DitSources) {
