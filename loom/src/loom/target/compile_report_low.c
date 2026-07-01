@@ -1450,6 +1450,7 @@ iree_status_t loom_target_compile_report_record_low_lowering(
         .memory_space = source_row->memory_space,
         .operation_kind = source_row->operation_kind,
         .packet_key = source_row->packet_key,
+        .strategy_key = source_row->strategy_key,
         .address_form = source_row->address_form,
         .dynamic_term_kind = source_row->dynamic_term_kind,
         .fallback_reason = source_row->fallback_reason,

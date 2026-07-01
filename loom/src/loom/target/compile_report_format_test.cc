@@ -352,6 +352,7 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
               /*.memory_space=*/IREE_SVL("workgroup"),
               /*.operation_kind=*/IREE_SVL("load"),
               /*.packet_key=*/IREE_SVL("amdgpu.ds_read2_b32"),
+              /*.strategy_key=*/IREE_SVL("ds_2addr_bank_report"),
               /*.address_form=*/IREE_SVL("ds_2addr"),
               /*.dynamic_term_kind=*/IREE_SVL("vaddr"),
               /*.fallback_reason=*/IREE_SVL("cross_wave_workgroup"),
@@ -861,6 +862,7 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
                 IREE_SV("source_low_memory[0] function=branchy "
                         "source_op=vector.load memory_space=workgroup "
                         "operation=load packet=amdgpu.ds_read2_b32 "
+                        "strategy=ds_2addr_bank_report "
                         "address_form=ds_2addr dynamic_term_kind=vaddr "
                         "fallback_reason=cross_wave_workgroup "
                         "static_offset_bytes=0 element_bytes=4 vector_lanes=2 "
@@ -1241,6 +1243,7 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
                         "\"source_op_kind\":43,\"memory_space\":\"workgroup\","
                         "\"operation\":\"load\",\"packet\":"
                         "\"amdgpu.ds_read2_b32\","
+                        "\"strategy\":\"ds_2addr_bank_report\","
                         "\"address_form\":\"ds_2addr\","
                         "\"dynamic_term_kind\":\"vaddr\","
                         "\"fallback_reason\":\"cross_wave_workgroup\","

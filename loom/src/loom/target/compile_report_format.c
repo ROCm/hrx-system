@@ -1522,6 +1522,8 @@ static iree_status_t loom_target_compile_report_format_source_low_memory_rows(
           loom_target_compile_report_non_empty(row->operation_kind);
       const iree_string_view_t packet_key =
           loom_target_compile_report_non_empty(row->packet_key);
+      const iree_string_view_t strategy_key =
+          loom_target_compile_report_non_empty(row->strategy_key);
       const iree_string_view_t address_form =
           loom_target_compile_report_non_empty(row->address_form);
       const iree_string_view_t dynamic_term_kind =
@@ -1534,23 +1536,32 @@ static iree_status_t loom_target_compile_report_format_source_low_memory_rows(
           builder,
           "COMPILE-REPORT: source_low_memory[%" PRIhsz
           "] function=%.*s source_op=%.*s memory_space=%.*s operation=%.*s "
-          "packet=%.*s address_form=%.*s dynamic_term_kind=%.*s "
+          "packet=%.*s",
+          row_index, (int)function_name.size, function_name.data,
+          (int)source_op_name.size, source_op_name.data, (int)memory_space.size,
+          memory_space.data, (int)operation_kind.size, operation_kind.data,
+          (int)packet_key.size, packet_key.data));
+      if (!iree_string_view_is_empty(row->strategy_key)) {
+        IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+            builder, " strategy=%.*s", (int)strategy_key.size,
+            strategy_key.data));
+      }
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+          builder,
+          " address_form=%.*s dynamic_term_kind=%.*s "
           "fallback_reason=%.*s static_offset_bytes=%" PRId64
           " element_bytes=%u "
           "vector_lanes=%u dynamic_stride_bytes=%u "
           "vector_lane_stride_bytes=%u bank_stride_words=%u "
           "bank_conflict_degree=%u bank_conflict_kind=%.*s\n",
-          row_index, (int)function_name.size, function_name.data,
-          (int)source_op_name.size, source_op_name.data, (int)memory_space.size,
-          memory_space.data, (int)operation_kind.size, operation_kind.data,
-          (int)packet_key.size, packet_key.data, (int)address_form.size,
-          address_form.data, (int)dynamic_term_kind.size,
-          dynamic_term_kind.data, (int)fallback_reason.size,
-          fallback_reason.data, row->static_offset_bytes,
-          row->element_byte_count, row->vector_lane_count,
-          row->dynamic_stride_bytes, row->vector_lane_stride_bytes,
-          row->bank_stride_words, row->bank_conflict_degree,
-          (int)bank_conflict_kind.size, bank_conflict_kind.data));
+          (int)address_form.size, address_form.data,
+          (int)dynamic_term_kind.size, dynamic_term_kind.data,
+          (int)fallback_reason.size, fallback_reason.data,
+          row->static_offset_bytes, row->element_byte_count,
+          row->vector_lane_count, row->dynamic_stride_bytes,
+          row->vector_lane_stride_bytes, row->bank_stride_words,
+          row->bank_conflict_degree, (int)bank_conflict_kind.size,
+          bank_conflict_kind.data));
     }
   }
   return iree_ok_status();
@@ -3164,6 +3175,9 @@ loom_target_compile_report_format_source_low_memory_row_json(
   IREE_RETURN_IF_ERROR(
       loom_target_compile_report_json_write_optional_string_field(
           stream, &first_field, "packet", row->packet_key));
+  IREE_RETURN_IF_ERROR(
+      loom_target_compile_report_json_write_optional_string_field(
+          stream, &first_field, "strategy", row->strategy_key));
   IREE_RETURN_IF_ERROR(
       loom_target_compile_report_json_write_optional_string_field(
           stream, &first_field, "address_form", row->address_form));

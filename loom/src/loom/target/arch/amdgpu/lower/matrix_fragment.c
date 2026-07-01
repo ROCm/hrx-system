@@ -3050,16 +3050,14 @@ loom_amdgpu_fragment_memory_fp8_repair_packet_flags(
 }
 
 static iree_string_view_t
-loom_amdgpu_fragment_memory_fp8_packed_decode_fallback_reason(
+loom_amdgpu_fragment_memory_fp8_packed_decode_strategy_key(
     loom_amdgpu_fragment_memory_packet_flags_t packet_flags) {
   const loom_amdgpu_fp8_packed_bf16_repairs_t repairs =
       loom_amdgpu_fragment_memory_packet_fp8_repairs(packet_flags);
   return loom_amdgpu_fp8_packed_bf16_repair_reason_key(repairs);
 }
 
-static iree_string_view_t loom_amdgpu_fragment_memory_packet_fallback_reason(
-    const loom_low_descriptor_set_t* descriptor_set,
-    const loom_amdgpu_matrix_fragment_layout_t* layout,
+static iree_string_view_t loom_amdgpu_fragment_memory_packet_strategy_key(
     const loom_amdgpu_fragment_memory_plan_t* plan,
     const loom_amdgpu_fragment_memory_packet_plan_t* packet) {
   if (plan->payload_form ==
@@ -3077,8 +3075,61 @@ static iree_string_view_t loom_amdgpu_fragment_memory_packet_fallback_reason(
     if (iree_any_bit_set(
             packet->flags,
             LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_PACKED_BF16_DECODE)) {
-      return loom_amdgpu_fragment_memory_fp8_packed_decode_fallback_reason(
+      return loom_amdgpu_fragment_memory_fp8_packed_decode_strategy_key(
           packet->flags);
+    }
+    if (iree_any_bit_set(
+            packet->flags,
+            LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_FULL_BF16_DECODE)) {
+      return IREE_SV("fp8_full_bf16_decode");
+    }
+    return iree_string_view_empty();
+  }
+
+  if (plan->payload_form !=
+      LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_STORE_NARROW_F32_TO_BF16) {
+    return iree_string_view_empty();
+  }
+  if (iree_all_bits_set(
+          packet->flags,
+          LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_CROSSLANE_PACKED_B16_STORE)) {
+    if (loom_amdgpu_fragment_memory_epilogue_strategy_uses_dpp(
+            plan->epilogue_strategy)) {
+      return IREE_SV("dpp_packed_bf16_store");
+    }
+    return IREE_SV("ds_bpermute_packed_bf16_store");
+  }
+  if (packet->result_register_count > 1) {
+    return IREE_SV("packed_bf16_store");
+  }
+  if (plan->epilogue_strategy ==
+      LOOM_AMDGPU_FRAGMENT_MEMORY_EPILOGUE_STRATEGY_SCALAR_B16_STORE) {
+    return IREE_SV("scalar_bf16_store");
+  }
+  return iree_string_view_empty();
+}
+
+static iree_string_view_t loom_amdgpu_fragment_memory_packet_fallback_reason(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_amdgpu_matrix_fragment_layout_t* layout,
+    const loom_amdgpu_fragment_memory_plan_t* plan,
+    const loom_amdgpu_fragment_memory_packet_plan_t* packet) {
+  if (plan->payload_form ==
+      LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_LOAD_FP8_TO_BF16) {
+    if (iree_any_bit_set(
+            packet->flags,
+            LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_IDENTITY_SCALEF32_BF16_PAIR)) {
+      return iree_string_view_empty();
+    }
+    if (iree_any_bit_set(
+            packet->flags,
+            LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_NATIVE_F32_PAIR)) {
+      return iree_string_view_empty();
+    }
+    if (iree_any_bit_set(
+            packet->flags,
+            LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_PACKED_BF16_DECODE)) {
+      return iree_string_view_empty();
     }
     if (iree_any_bit_set(
             packet->flags,
@@ -3090,20 +3141,20 @@ static iree_string_view_t loom_amdgpu_fragment_memory_packet_fallback_reason(
           packet->flags,
           LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_MISSING_VALUE_NOT_SUBNORMAL);
       if (missing_value_finite && missing_value_not_subnormal) {
-        return IREE_SV("fp8_full_bf16_decode_missing_finite_not_subnormal");
+        return IREE_SV("missing_finite_not_subnormal");
       }
       if (missing_value_finite) {
-        return IREE_SV("fp8_full_bf16_decode_missing_finite");
+        return IREE_SV("missing_finite");
       }
       if (missing_value_not_subnormal) {
-        return IREE_SV("fp8_full_bf16_decode_missing_not_subnormal");
+        return IREE_SV("missing_not_subnormal");
       }
       if (iree_any_bit_set(
               packet->flags,
               LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_MISSING_TARGET_PACKETS)) {
-        return IREE_SV("fp8_full_bf16_decode_missing_target_packets");
+        return IREE_SV("missing_target_packets");
       }
-      return IREE_SV("fp8_full_bf16_decode");
+      return iree_string_view_empty();
     }
     return iree_string_view_empty();
   }
@@ -3129,11 +3180,7 @@ static iree_string_view_t loom_amdgpu_fragment_memory_packet_fallback_reason(
   if (iree_all_bits_set(
           packet->flags,
           LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_CROSSLANE_PACKED_B16_STORE)) {
-    if (loom_amdgpu_fragment_memory_epilogue_strategy_uses_dpp(
-            plan->epilogue_strategy)) {
-      return IREE_SV("dpp_packed_bf16_store");
-    }
-    return IREE_SV("ds_bpermute_packed_bf16_store");
+    return iree_string_view_empty();
   }
   const uint16_t remaining = plan->register_count - packet->register_index;
   for (iree_host_size_t i = 0;
@@ -3279,6 +3326,8 @@ static iree_status_t loom_amdgpu_record_fragment_memory_packet(
       .memory_space = loom_amdgpu_memory_space_name(plan->source.memory_space),
       .operation_kind = loom_amdgpu_memory_operation_name(plan->operation_kind),
       .packet_key = packet_key,
+      .strategy_key =
+          loom_amdgpu_fragment_memory_packet_strategy_key(plan, packet),
       .address_form = loom_amdgpu_fragment_memory_report_address_form(plan),
       .dynamic_term_kind = IREE_SV("vaddr"),
       .fallback_reason = loom_amdgpu_fragment_memory_packet_fallback_reason(
