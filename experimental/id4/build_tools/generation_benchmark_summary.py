@@ -285,6 +285,30 @@ def _parse_generation_benchmark_label(label: str, context: str) -> dict[str, Any
         "generation_residency_budget_mib": _label_mib(
             label, "residency_budget", f"{context}.label"
         ),
+        "runtime_qwen_token_count": _label_unsigned(
+            label, "qwen_tokens", f"{context}.label"
+        ),
+        "runtime_qwen_token_capacity": _label_unsigned(
+            label, "qwen_capacity", f"{context}.label"
+        ),
+        "runtime_image_token_count": _label_unsigned(
+            label, "image_tokens", f"{context}.label"
+        ),
+        "runtime_conditioned_dit_token_count": _label_unsigned(
+            label, "dit_cond_tokens", f"{context}.label"
+        ),
+        "runtime_conditioned_dit_token_capacity": _label_unsigned(
+            label, "dit_cond_capacity", f"{context}.label"
+        ),
+        "runtime_unconditioned_dit_token_count": _label_unsigned(
+            label, "dit_uncond_tokens", f"{context}.label"
+        ),
+        "runtime_unconditioned_dit_token_capacity": _label_unsigned(
+            label, "dit_uncond_capacity", f"{context}.label"
+        ),
+        "runtime_denoise_step_count": _label_unsigned(
+            label, "steps", f"{context}.label"
+        ),
         "runtime_qwen_weight_execution_strategy": _label_token(
             label, "qwen_weights", f"{context}.label"
         ),
@@ -470,6 +494,46 @@ def _validate_label_plan_join(
         label_metrics["prompt_label"],
         row["bucket"],
         f"{context}.label.prompt",
+    )
+    _require_equal(
+        label_metrics["runtime_qwen_token_count"],
+        row["qwen_token_count"],
+        f"{context}.label.qwen_tokens",
+    )
+    _require_equal(
+        label_metrics["runtime_qwen_token_capacity"],
+        row["qwen_token_capacity"],
+        f"{context}.label.qwen_capacity",
+    )
+    _require_equal(
+        label_metrics["runtime_image_token_count"],
+        row["image_token_count"],
+        f"{context}.label.image_tokens",
+    )
+    _require_equal(
+        label_metrics["runtime_conditioned_dit_token_count"],
+        row["conditioned_dit_token_count"],
+        f"{context}.label.dit_cond_tokens",
+    )
+    _require_equal(
+        label_metrics["runtime_conditioned_dit_token_capacity"],
+        row["conditioned_dit_token_capacity"],
+        f"{context}.label.dit_cond_capacity",
+    )
+    _require_equal(
+        label_metrics["runtime_unconditioned_dit_token_count"],
+        row["unconditioned_dit_token_count"],
+        f"{context}.label.dit_uncond_tokens",
+    )
+    _require_equal(
+        label_metrics["runtime_unconditioned_dit_token_capacity"],
+        row["unconditioned_dit_token_capacity"],
+        f"{context}.label.dit_uncond_capacity",
+    )
+    _require_equal(
+        label_metrics["runtime_denoise_step_count"],
+        row["denoise_step_count"],
+        f"{context}.label.steps",
     )
     _require_equal(
         label_metrics["runtime_parameter_total_mib"],
@@ -669,6 +733,55 @@ def summarize_generation_benchmark(
     }
 
 
+_MARKDOWN_COLUMNS = (
+    ("bucket", "bucket"),
+    ("qwen tokens", "qwen_token_count"),
+    ("qwen cap", "qwen_token_capacity"),
+    ("cond tokens", "conditioned_dit_token_count"),
+    ("cond cap", "conditioned_dit_token_capacity"),
+    ("real ms", "real_time_ms"),
+    ("issue ms", "timing_issue_ms"),
+    ("final wait ms", "timing_final_wait_ms"),
+    ("direct MiB", "runtime_parameter_source_direct_mib"),
+    ("encoded MiB", "runtime_parameter_source_encoded_mib"),
+    ("issue windows", "issue_encode_window_count"),
+    ("issue encodes", "issue_encode_window_dispatch_count"),
+    ("staging MiB", "issue_encode_window_staging_mib"),
+    ("max staging MiB", "issue_encode_window_staging_max_mib"),
+    ("dispatches", "runtime_dispatch_count"),
+)
+
+
+def _markdown_cell(value: Any) -> str:
+    if value is None:
+        return "-"
+    if isinstance(value, float):
+        return f"{value:.3f}"
+    return str(value)
+
+
+def format_generation_benchmark_markdown(summary: dict[str, Any]) -> str:
+    rows = _require_list(summary.get("rows"), "rows")
+    lines = [
+        "| " + " | ".join(header for header, _ in _MARKDOWN_COLUMNS) + " |",
+        "| "
+        + " | ".join(
+            "---" if column == "bucket" else "---:" for _, column in _MARKDOWN_COLUMNS
+        )
+        + " |",
+    ]
+    for row_index, row_value in enumerate(rows):
+        row = _require_object(row_value, f"rows[{row_index}]")
+        lines.append(
+            "| "
+            + " | ".join(
+                _markdown_cell(row.get(column)) for _, column in _MARKDOWN_COLUMNS
+            )
+            + " |"
+        )
+    return "\n".join(lines) + "\n"
+
+
 def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -686,7 +799,15 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument(
         "--output",
         type=Path,
-        help="Output JSON path. Defaults to stdout.",
+        help="Output path. Defaults to stdout.",
+    )
+    parser.add_argument(
+        "--format",
+        choices=("json", "markdown"),
+        default="json",
+        help=(
+            "Output format. JSON preserves all fields; markdown emits a compact table."
+        ),
     )
     return parser.parse_args()
 
@@ -698,12 +819,14 @@ def main() -> int:
     except (OSError, GenerationBenchmarkSummaryError, smoke_test.SmokeTestError) as exc:
         print(f"generation_benchmark_summary: {exc}", file=sys.stderr)
         return 1
-    if args.output:
-        with args.output.open("w", encoding="utf-8") as file:
-            json.dump(summary, file, indent=2)
-            file.write("\n")
+    if args.format == "json":
+        text = json.dumps(summary, indent=2) + "\n"
     else:
-        print(json.dumps(summary, indent=2))
+        text = format_generation_benchmark_markdown(summary)
+    if args.output:
+        args.output.write_text(text, encoding="utf-8")
+    else:
+        print(text, end="")
     return 0
 
 

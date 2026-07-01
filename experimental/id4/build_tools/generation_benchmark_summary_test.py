@@ -103,7 +103,7 @@ def minimal_generation_plan(qwen_token_count: int) -> dict:
         "kind": "ideogram4_generation",
         "summary": {
             "qwen_token_count": qwen_token_count,
-            "qwen_token_capacity": 64,
+            "qwen_token_capacity": 32,
             "image_token_count": 64,
             "conditioned_dit_token_count": qwen_token_count + 64,
             "conditioned_dit_token_capacity": 128,
@@ -376,6 +376,10 @@ class GenerationBenchmarkSummaryTest(unittest.TestCase):
             self.assertEqual(row["generation_residency"], "selected_stage_bundles")
             self.assertEqual(row["parameter_load_prefetch_region_distance"], 1)
             self.assertEqual(row["generation_residency_budget_mib"], 35840)
+            self.assertEqual(row["runtime_qwen_token_count"], 19)
+            self.assertEqual(row["runtime_qwen_token_capacity"], 32)
+            self.assertEqual(row["runtime_conditioned_dit_token_count"], 83)
+            self.assertEqual(row["runtime_conditioned_dit_token_capacity"], 128)
             self.assertEqual(
                 row["runtime_qwen_weight_execution_strategy"], "hybrid_compact_rhs"
             )
@@ -423,6 +427,49 @@ class GenerationBenchmarkSummaryTest(unittest.TestCase):
             self.assertEqual(row["runtime_stages"]["decode"]["dispatch_count"], 106)
             self.assertAlmostEqual(row["timing_issue_ms"], 3477.614)
             self.assertAlmostEqual(row["timing_final_wait_ms"], 150.049)
+
+    def test_format_generation_benchmark_markdown_emits_comparison_table(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plan_dir = root / "plans"
+            plan_dir.mkdir()
+            (plan_dir / "short128.json").write_text(
+                json.dumps(live_label_generation_plan()), encoding="utf-8"
+            )
+            benchmark_path = root / "benchmark.json"
+            benchmark_path.write_text(
+                json.dumps(
+                    {
+                        "benchmarks": [
+                            {
+                                "name": (
+                                    "BM_Ideogram4SessionGenerationIssuePrepared/"
+                                    "short128/real_time"
+                                ),
+                                "real_time": 3627.692699432373,
+                                "cpu_time": 10.391671999999907,
+                                "iterations": 1,
+                                "label": TEST_BENCHMARK_LABEL,
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            summary = generation_benchmark_summary.summarize_generation_benchmark(
+                benchmark_path, plan_dir
+            )
+            table = generation_benchmark_summary.format_generation_benchmark_markdown(
+                summary
+            )
+
+            self.assertIn("| bucket | qwen tokens |", table)
+            self.assertIn(
+                "| short128 | 19 | 32 | 83 | 128 | 3627.693 | 3477.614 | "
+                "150.049 | 4169 | 27848 | 2 | 318 | 1081 | 576 | 1507 |",
+                table,
+            )
 
     def test_summarize_generation_benchmark_rejects_malformed_live_label(self):
         with tempfile.TemporaryDirectory() as directory:
