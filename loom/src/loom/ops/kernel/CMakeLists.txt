@@ -45,6 +45,7 @@ loom_generated_cc_library(
     loom::ops::scf
     loom::ops::view
     loom::rewrite::rewriter
+    loom::target::capability_facts
     loom::target::types
     loom::util::fact_table
     loom::util::math

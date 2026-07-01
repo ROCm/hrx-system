@@ -45,6 +45,33 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
+    capability_facts
+  HDRS
+    "capability_facts.h"
+  SRCS
+    "capability_facts.c"
+  DEPS
+    ::types
+    iree::base
+    loom::util::fact_table
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    capability_facts_test
+  SRCS
+    "capability_facts_test.cc"
+  DEPS
+    ::capability_facts
+    ::types
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::util::fact_table
+)
+
+loom_cc_library(
+  NAME
     selection
   HDRS
     "selection.h"
