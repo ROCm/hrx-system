@@ -276,6 +276,9 @@ static iree_status_t loom_amdgpu_record_memory_packet_report(
 
   const loom_low_descriptor_set_t* descriptor_set =
       loom_low_lower_context_descriptor_set(context);
+  const loom_low_descriptor_memory_effect_summary_t issued =
+      loom_low_descriptor_memory_effect_summary(descriptor_set,
+                                                packet->access.descriptor);
   const iree_string_view_t packet_key = loom_low_descriptor_set_string(
       descriptor_set, packet->access.descriptor->key_string_offset);
   const loom_amdgpu_memory_operation_kind_t operation_kind =
@@ -316,6 +319,10 @@ static iree_status_t loom_amdgpu_record_memory_packet_report(
       .static_offset_bytes = source->static_byte_offset,
       .element_byte_count = source->element_byte_count,
       .vector_lane_count = source->vector_lane_count,
+      .issued_read_byte_count = issued.read_byte_count,
+      .issued_write_byte_count = issued.write_byte_count,
+      .issued_read_unknown_width_count = issued.read_unknown_width_count,
+      .issued_write_unknown_width_count = issued.write_unknown_width_count,
       .dynamic_stride_bytes =
           loom_amdgpu_memory_report_dynamic_stride_bytes(source),
       .vector_lane_stride_bytes = loom_amdgpu_memory_report_positive_u32(

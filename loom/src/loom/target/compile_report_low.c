@@ -2205,6 +2205,12 @@ iree_status_t loom_target_compile_report_record_low_lowering(
         .static_offset_bytes = source_row->static_offset_bytes,
         .element_byte_count = source_row->element_byte_count,
         .vector_lane_count = source_row->vector_lane_count,
+        .issued_read_byte_count = source_row->issued_read_byte_count,
+        .issued_write_byte_count = source_row->issued_write_byte_count,
+        .issued_read_unknown_width_count =
+            source_row->issued_read_unknown_width_count,
+        .issued_write_unknown_width_count =
+            source_row->issued_write_unknown_width_count,
         .dynamic_stride_bytes = source_row->dynamic_stride_bytes,
         .vector_lane_stride_bytes = source_row->vector_lane_stride_bytes,
         .bank_stride_words = source_row->bank_stride_words,

@@ -417,6 +417,14 @@ typedef struct loom_low_lower_memory_report_row_t {
   uint32_t element_byte_count;
   // Number of source vector lanes moved by this packet.
   uint32_t vector_lane_count;
+  // Byte count read by the emitted target packet effect.
+  uint32_t issued_read_byte_count;
+  // Byte count written by the emitted target packet effect.
+  uint32_t issued_write_byte_count;
+  // Number of read effects without a known byte-aligned target width.
+  uint16_t issued_read_unknown_width_count;
+  // Number of write effects without a known byte-aligned target width.
+  uint16_t issued_write_unknown_width_count;
   // Byte stride between adjacent dynamic workitem terms, or zero when unknown.
   uint32_t dynamic_stride_bytes;
   // Byte stride between adjacent source vector lanes.

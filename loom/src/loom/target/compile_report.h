@@ -987,6 +987,14 @@ typedef struct loom_target_compile_report_source_low_memory_row_t {
   uint32_t element_byte_count;
   // Number of source vector lanes moved by this packet.
   uint32_t vector_lane_count;
+  // Byte count read by the emitted target packet effect.
+  uint32_t issued_read_byte_count;
+  // Byte count written by the emitted target packet effect.
+  uint32_t issued_write_byte_count;
+  // Number of read effects without a known byte-aligned target width.
+  uint16_t issued_read_unknown_width_count;
+  // Number of write effects without a known byte-aligned target width.
+  uint16_t issued_write_unknown_width_count;
   // Byte stride between adjacent dynamic workitem terms, or zero when unknown.
   uint32_t dynamic_stride_bytes;
   // Byte stride between adjacent source vector lanes.
@@ -1037,6 +1045,14 @@ typedef struct loom_target_compile_report_source_low_memory_summary_t {
   uint64_t read_byte_count;
   // Logical source bytes written by store packets.
   uint64_t write_byte_count;
+  // Target packet bytes read by emitted load effects with known widths.
+  uint64_t issued_read_byte_count;
+  // Target packet bytes written by emitted store effects with known widths.
+  uint64_t issued_write_byte_count;
+  // Number of emitted read effects without known byte-aligned widths.
+  uint64_t issued_read_unknown_width_count;
+  // Number of emitted write effects without known byte-aligned widths.
+  uint64_t issued_write_unknown_width_count;
   // Number of vector packets whose source lanes are element-contiguous.
   uint64_t contiguous_vector_packet_count;
   // Number of vector packets with a known non-contiguous source lane stride.
@@ -1073,6 +1089,14 @@ typedef struct loom_target_compile_report_source_low_memory_root_summary_t {
   uint64_t read_byte_count;
   // Logical source bytes written by store packets.
   uint64_t write_byte_count;
+  // Target packet bytes read by emitted load effects with known widths.
+  uint64_t issued_read_byte_count;
+  // Target packet bytes written by emitted store effects with known widths.
+  uint64_t issued_write_byte_count;
+  // Number of emitted read effects without known byte-aligned widths.
+  uint64_t issued_read_unknown_width_count;
+  // Number of emitted write effects without known byte-aligned widths.
+  uint64_t issued_write_unknown_width_count;
   // Number of vector packets whose source lanes are element-contiguous.
   uint64_t contiguous_vector_packet_count;
   // Number of vector packets with a known non-contiguous source lane stride.

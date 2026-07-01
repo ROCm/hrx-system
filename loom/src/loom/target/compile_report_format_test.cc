@@ -394,6 +394,10 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
               /*.static_offset_bytes=*/0,
               /*.element_byte_count=*/4,
               /*.vector_lane_count=*/2,
+              /*.issued_read_byte_count=*/8,
+              /*.issued_write_byte_count=*/0,
+              /*.issued_read_unknown_width_count=*/0,
+              /*.issued_write_unknown_width_count=*/0,
               /*.dynamic_stride_bytes=*/32,
               /*.vector_lane_stride_bytes=*/8,
               /*.bank_stride_words=*/8,
@@ -1057,6 +1061,9 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
                         "scalar_packets=0 "
                         "vector_packets=1 source_lanes=2 source_bytes=8 "
                         "read_bytes=8 write_bytes=0 "
+                        "issued_read_bytes=8 issued_write_bytes=0 "
+                        "issued_read_unknown_widths=0 "
+                        "issued_write_unknown_widths=0 "
                         "contiguous_vector_packets=0 "
                         "strided_vector_packets=1 "
                         "unknown_stride_vector_packets=0 roots=1"),
@@ -1069,6 +1076,9 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
                         "memory_space=workgroup packets=1 loads=1 stores=0 "
                         "scalar_packets=0 vector_packets=1 source_lanes=2 "
                         "source_bytes=8 read_bytes=8 write_bytes=0 "
+                        "issued_read_bytes=8 issued_write_bytes=0 "
+                        "issued_read_unknown_widths=0 "
+                        "issued_write_unknown_widths=0 "
                         "contiguous_vector_packets=0 "
                         "strided_vector_packets=1 "
                         "unknown_stride_vector_packets=0"),
@@ -1098,6 +1108,9 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
                         "address_form=ds_2addr dynamic_term_kind=vaddr "
                         "fallback_reason=cross_wave_workgroup "
                         "static_offset_bytes=0 element_bytes=4 vector_lanes=2 "
+                        "issued_read_bytes=8 issued_write_bytes=0 "
+                        "issued_read_unknown_widths=0 "
+                        "issued_write_unknown_widths=0 "
                         "dynamic_stride_bytes=32 "
                         "vector_lane_stride_bytes=8 bank_stride_words=8 "
                         "bank_conflict_degree=8 "
@@ -1529,6 +1542,10 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
                         "\"source_lane_count\":2,"
                         "\"source_byte_count\":8,"
                         "\"read_byte_count\":8,\"write_byte_count\":0,"
+                        "\"issued_read_byte_count\":8,"
+                        "\"issued_write_byte_count\":0,"
+                        "\"issued_read_unknown_width_count\":0,"
+                        "\"issued_write_unknown_width_count\":0,"
                         "\"contiguous_vector_packet_count\":0,"
                         "\"strided_vector_packet_count\":1,"
                         "\"unknown_stride_vector_packet_count\":0,"
@@ -1541,6 +1558,10 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
                         "\"vector_packet_count\":1,"
                         "\"source_lane_count\":2,\"source_byte_count\":8,"
                         "\"read_byte_count\":8,\"write_byte_count\":0,"
+                        "\"issued_read_byte_count\":8,"
+                        "\"issued_write_byte_count\":0,"
+                        "\"issued_read_unknown_width_count\":0,"
+                        "\"issued_write_unknown_width_count\":0,"
                         "\"contiguous_vector_packet_count\":0,"
                         "\"strided_vector_packet_count\":1,"
                         "\"unknown_stride_vector_packet_count\":0}]}"),
@@ -1570,6 +1591,10 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
                         "\"fallback_reason\":\"cross_wave_workgroup\","
                         "\"static_offset_bytes\":0,"
                         "\"element_bytes\":4,\"vector_lanes\":2,"
+                        "\"issued_read_byte_count\":8,"
+                        "\"issued_write_byte_count\":0,"
+                        "\"issued_read_unknown_width_count\":0,"
+                        "\"issued_write_unknown_width_count\":0,"
                         "\"dynamic_stride_bytes\":32,"
                         "\"vector_lane_stride_bytes\":8,"
                         "\"bank_stride_words\":8,"

@@ -908,14 +908,21 @@ static iree_status_t loom_target_compile_report_format_summary(
           " stores=%" PRIu64 " scalar_packets=%" PRIu64
           " vector_packets=%" PRIu64 " source_lanes=%" PRIu64
           " source_bytes=%" PRIu64 " read_bytes=%" PRIu64
-          " write_bytes=%" PRIu64 " contiguous_vector_packets=%" PRIu64
+          " write_bytes=%" PRIu64 " issued_read_bytes=%" PRIu64
+          " issued_write_bytes=%" PRIu64 " issued_read_unknown_widths=%" PRIu64
+          " issued_write_unknown_widths=%" PRIu64
+          " contiguous_vector_packets=%" PRIu64
           " strided_vector_packets=%" PRIu64
           " unknown_stride_vector_packets=%" PRIu64 " roots=%" PRIhsz "\n",
           summary->packet_count, summary->load_packet_count,
           summary->store_packet_count, summary->scalar_packet_count,
           summary->vector_packet_count, summary->source_lane_count,
           summary->source_byte_count, summary->read_byte_count,
-          summary->write_byte_count, summary->contiguous_vector_packet_count,
+          summary->write_byte_count, summary->issued_read_byte_count,
+          summary->issued_write_byte_count,
+          summary->issued_read_unknown_width_count,
+          summary->issued_write_unknown_width_count,
+          summary->contiguous_vector_packet_count,
           summary->strided_vector_packet_count,
           summary->unknown_stride_vector_packet_count,
           report->source_low_memory_root_summaries.count));
@@ -1952,14 +1959,18 @@ static iree_status_t loom_target_compile_report_format_source_low_memory_rows(
           " address_form=%.*s dynamic_term_kind=%.*s "
           "fallback_reason=%.*s static_offset_bytes=%" PRId64
           " element_bytes=%u "
-          "vector_lanes=%u dynamic_stride_bytes=%u "
+          "vector_lanes=%u issued_read_bytes=%u issued_write_bytes=%u "
+          "issued_read_unknown_widths=%u issued_write_unknown_widths=%u "
+          "dynamic_stride_bytes=%u "
           "vector_lane_stride_bytes=%u bank_stride_words=%u "
           "bank_conflict_degree=%u bank_conflict_kind=%.*s\n",
           (int)address_form.size, address_form.data,
           (int)dynamic_term_kind.size, dynamic_term_kind.data,
           (int)fallback_reason.size, fallback_reason.data,
           row->static_offset_bytes, row->element_byte_count,
-          row->vector_lane_count, row->dynamic_stride_bytes,
+          row->vector_lane_count, row->issued_read_byte_count,
+          row->issued_write_byte_count, row->issued_read_unknown_width_count,
+          row->issued_write_unknown_width_count, row->dynamic_stride_bytes,
           row->vector_lane_stride_bytes, row->bank_stride_words,
           row->bank_conflict_degree, (int)bank_conflict_kind.size,
           bank_conflict_kind.data));
@@ -2005,15 +2016,20 @@ loom_target_compile_report_format_source_low_memory_root_summaries(
           " stores=%" PRIu64 " scalar_packets=%" PRIu64
           " vector_packets=%" PRIu64 " source_lanes=%" PRIu64
           " source_bytes=%" PRIu64 " read_bytes=%" PRIu64
-          " write_bytes=%" PRIu64 " contiguous_vector_packets=%" PRIu64
+          " write_bytes=%" PRIu64 " issued_read_bytes=%" PRIu64
+          " issued_write_bytes=%" PRIu64 " issued_read_unknown_widths=%" PRIu64
+          " issued_write_unknown_widths=%" PRIu64
+          " contiguous_vector_packets=%" PRIu64
           " strided_vector_packets=%" PRIu64
           " unknown_stride_vector_packets=%" PRIu64 "\n",
           (int)memory_space.size, memory_space.data, row->packet_count,
           row->load_packet_count, row->store_packet_count,
           row->scalar_packet_count, row->vector_packet_count,
           row->source_lane_count, row->source_byte_count, row->read_byte_count,
-          row->write_byte_count, row->contiguous_vector_packet_count,
-          row->strided_vector_packet_count,
+          row->write_byte_count, row->issued_read_byte_count,
+          row->issued_write_byte_count, row->issued_read_unknown_width_count,
+          row->issued_write_unknown_width_count,
+          row->contiguous_vector_packet_count, row->strided_vector_packet_count,
           row->unknown_stride_vector_packet_count));
     }
   }
@@ -3980,6 +3996,18 @@ loom_target_compile_report_format_source_low_memory_row_json(
   IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u32_field(
       stream, &first_field, "vector_lanes", row->vector_lane_count));
   IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u32_field(
+      stream, &first_field, "issued_read_byte_count",
+      row->issued_read_byte_count));
+  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u32_field(
+      stream, &first_field, "issued_write_byte_count",
+      row->issued_write_byte_count));
+  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u32_field(
+      stream, &first_field, "issued_read_unknown_width_count",
+      row->issued_read_unknown_width_count));
+  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u32_field(
+      stream, &first_field, "issued_write_unknown_width_count",
+      row->issued_write_unknown_width_count));
+  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u32_field(
       stream, &first_field, "dynamic_stride_bytes", row->dynamic_stride_bytes));
   IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u32_field(
       stream, &first_field, "vector_lane_stride_bytes",
@@ -4038,6 +4066,18 @@ loom_target_compile_report_format_source_low_memory_root_summary_json(
   IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
       stream, &first_field, "write_byte_count", row->write_byte_count));
   IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
+      stream, &first_field, "issued_read_byte_count",
+      row->issued_read_byte_count));
+  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
+      stream, &first_field, "issued_write_byte_count",
+      row->issued_write_byte_count));
+  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
+      stream, &first_field, "issued_read_unknown_width_count",
+      row->issued_read_unknown_width_count));
+  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
+      stream, &first_field, "issued_write_unknown_width_count",
+      row->issued_write_unknown_width_count));
+  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
       stream, &first_field, "contiguous_vector_packet_count",
       row->contiguous_vector_packet_count));
   IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
@@ -4076,6 +4116,18 @@ loom_target_compile_report_format_source_low_memory_summary_json(
       stream, &first_field, "read_byte_count", summary->read_byte_count));
   IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
       stream, &first_field, "write_byte_count", summary->write_byte_count));
+  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
+      stream, &first_field, "issued_read_byte_count",
+      summary->issued_read_byte_count));
+  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
+      stream, &first_field, "issued_write_byte_count",
+      summary->issued_write_byte_count));
+  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
+      stream, &first_field, "issued_read_unknown_width_count",
+      summary->issued_read_unknown_width_count));
+  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
+      stream, &first_field, "issued_write_unknown_width_count",
+      summary->issued_write_unknown_width_count));
   IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
       stream, &first_field, "contiguous_vector_packet_count",
       summary->contiguous_vector_packet_count));
