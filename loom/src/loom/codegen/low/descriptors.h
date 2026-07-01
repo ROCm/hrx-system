@@ -534,6 +534,18 @@ typedef struct loom_low_effect_t {
   uint16_t width_bits;
 } loom_low_effect_t;
 
+// Summary of descriptor memory effect widths.
+typedef struct loom_low_descriptor_memory_effect_summary_t {
+  // Byte width of descriptor read effects with byte-aligned known widths.
+  uint32_t read_byte_count;
+  // Byte width of descriptor write effects with byte-aligned known widths.
+  uint32_t write_byte_count;
+  // Number of descriptor read effects without known byte-aligned widths.
+  uint16_t read_unknown_width_count;
+  // Number of descriptor write effects without known byte-aligned widths.
+  uint16_t write_unknown_width_count;
+} loom_low_descriptor_memory_effect_summary_t;
+
 typedef struct loom_low_descriptor_storage_lease_t {
   // Target-visible lease kind.
   loom_low_storage_lease_kind_t kind;
@@ -1021,6 +1033,12 @@ bool loom_low_descriptor_set_lookup_register_class(
 const loom_low_descriptor_t* loom_low_descriptor_set_descriptor_at(
     const loom_low_descriptor_set_t* descriptor_set,
     uint32_t descriptor_ordinal);
+
+// Summarizes byte-aligned memory effect widths for |descriptor|.
+loom_low_descriptor_memory_effect_summary_t
+loom_low_descriptor_memory_effect_summary(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_low_descriptor_t* descriptor);
 
 // Returns the descriptor-set-local ordinal for |descriptor|, or
 // LOOM_LOW_DESCRIPTOR_ORDINAL_NONE when |descriptor| is not a row in

@@ -240,6 +240,40 @@ const loom_low_descriptor_t* loom_low_descriptor_set_descriptor_at(
   return &descriptor_set->descriptors[descriptor_ordinal];
 }
 
+loom_low_descriptor_memory_effect_summary_t
+loom_low_descriptor_memory_effect_summary(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_low_descriptor_t* descriptor) {
+  IREE_ASSERT_ARGUMENT(descriptor_set);
+  loom_low_descriptor_memory_effect_summary_t summary = {0};
+  if (descriptor == NULL) {
+    return summary;
+  }
+  for (uint16_t i = 0; i < descriptor->effect_count; ++i) {
+    const uint32_t effect_index = descriptor->effect_start + i;
+    IREE_ASSERT(effect_index < descriptor_set->effect_count);
+    const loom_low_effect_t* effect = &descriptor_set->effects[effect_index];
+    if (effect->kind != LOOM_LOW_EFFECT_KIND_READ &&
+        effect->kind != LOOM_LOW_EFFECT_KIND_WRITE) {
+      continue;
+    }
+    if (effect->width_bits == 0 || (effect->width_bits % 8u) != 0) {
+      if (effect->kind == LOOM_LOW_EFFECT_KIND_READ) {
+        ++summary.read_unknown_width_count;
+      } else {
+        ++summary.write_unknown_width_count;
+      }
+      continue;
+    }
+    if (effect->kind == LOOM_LOW_EFFECT_KIND_READ) {
+      summary.read_byte_count += effect->width_bits / 8u;
+    } else {
+      summary.write_byte_count += effect->width_bits / 8u;
+    }
+  }
+  return summary;
+}
+
 uint32_t loom_low_descriptor_set_descriptor_ordinal(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_descriptor_t* descriptor) {

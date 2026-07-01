@@ -3802,6 +3802,8 @@ static iree_status_t loom_amdgpu_record_fragment_memory_packet(
   const loom_low_descriptor_t* descriptor =
       loom_amdgpu_descriptor_ref_descriptor(descriptor_set,
                                             packet->descriptor_ref);
+  const loom_low_descriptor_memory_effect_summary_t issued =
+      loom_low_descriptor_memory_effect_summary(descriptor_set, descriptor);
   iree_string_view_t packet_key = iree_string_view_empty();
   if (descriptor != NULL) {
     packet_key = loom_low_descriptor_set_string(descriptor_set,
@@ -3832,6 +3834,10 @@ static iree_status_t loom_amdgpu_record_fragment_memory_packet(
       .static_offset_bytes = static_offset_bytes,
       .element_byte_count = plan->element_byte_count,
       .vector_lane_count = vector_lane_count,
+      .issued_read_byte_count = issued.read_byte_count,
+      .issued_write_byte_count = issued.write_byte_count,
+      .issued_read_unknown_width_count = issued.read_unknown_width_count,
+      .issued_write_unknown_width_count = issued.write_unknown_width_count,
       .dynamic_stride_bytes =
           loom_amdgpu_fragment_memory_packet_dynamic_stride_bytes(layout, plan,
                                                                   packet),

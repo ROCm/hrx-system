@@ -1386,6 +1386,12 @@ static void loom_target_compile_report_accumulate_source_low_memory_summary(
     ++summary->store_packet_count;
     summary->write_byte_count += source_byte_count;
   }
+  summary->issued_read_byte_count += row->issued_read_byte_count;
+  summary->issued_write_byte_count += row->issued_write_byte_count;
+  summary->issued_read_unknown_width_count +=
+      row->issued_read_unknown_width_count;
+  summary->issued_write_unknown_width_count +=
+      row->issued_write_unknown_width_count;
   if (lane_count == 1) {
     ++summary->scalar_packet_count;
   } else if (lane_count > 1) {
@@ -1416,6 +1422,12 @@ loom_target_compile_report_accumulate_source_low_memory_root_summary(
     ++summary->store_packet_count;
     summary->write_byte_count += source_byte_count;
   }
+  summary->issued_read_byte_count += row->issued_read_byte_count;
+  summary->issued_write_byte_count += row->issued_write_byte_count;
+  summary->issued_read_unknown_width_count +=
+      row->issued_read_unknown_width_count;
+  summary->issued_write_unknown_width_count +=
+      row->issued_write_unknown_width_count;
   if (lane_count == 1) {
     ++summary->scalar_packet_count;
   } else if (lane_count > 1) {
