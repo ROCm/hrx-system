@@ -694,9 +694,22 @@ bool loom_encoding_query_storage_schema_content_facts(
     out_facts->flags |= LOOM_VALUE_FACT_NOT_NAN | LOOM_VALUE_FACT_NOT_INF |
                         LOOM_VALUE_FACT_FINITE;
   }
-  if (loom_numeric_format_is_finite_only(
-          storage_schema->encoded_operand.element_format)) {
-    out_facts->flags |= LOOM_VALUE_FACT_NOT_INF;
+  const loom_numeric_format_info_t* element_format_info = NULL;
+  if (loom_numeric_format_info(storage_schema->encoded_operand.element_format,
+                               &element_format_info) &&
+      element_format_info->kind == LOOM_NUMERIC_FORMAT_KIND_FLOAT) {
+    if (!iree_any_bit_set(element_format_info->flags,
+                          LOOM_NUMERIC_FORMAT_FLAG_HAS_NAN)) {
+      out_facts->flags |= LOOM_VALUE_FACT_NOT_NAN;
+    }
+    if (!iree_any_bit_set(element_format_info->flags,
+                          LOOM_NUMERIC_FORMAT_FLAG_HAS_INFINITY)) {
+      out_facts->flags |= LOOM_VALUE_FACT_NOT_INF;
+    }
+    if (loom_value_facts_is_not_nan(*out_facts) &&
+        loom_value_facts_is_not_inf(*out_facts)) {
+      out_facts->flags |= LOOM_VALUE_FACT_FINITE;
+    }
   }
   if (iree_any_bit_set(storage_schema->encoded_operand.rounding_policy,
                        LOOM_VALUE_FACT_ROUNDING_POLICY_FLUSH_SUBNORMAL)) {
