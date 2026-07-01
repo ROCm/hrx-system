@@ -1000,6 +1000,11 @@ static iree_status_t id4_pipeline_program_plan_dry_run_region(
         .structure_size = sizeof(lower_options),
         // Semantic program being planned.
         .program = options->program,
+        // Dry-run emits the current single-region full program interval.
+        .source_operation_offset = 0,
+        // Dry-run emits the current single-region full program interval.
+        .source_operation_count =
+            id4_pipeline_program_operation_count(options->program),
         // Dry-run region builder.
         .builder = builder,
         // Diagnostic tap lowering policy.

@@ -79,6 +79,10 @@ typedef struct id4_pipeline_program_region_lower_options_t {
   const void* next;
   // Immutable semantic program to lower.
   const id4_pipeline_program_t* program;
+  // First source-program operation ordinal to emit into the region.
+  iree_host_size_t source_operation_offset;
+  // Number of source-program operations to emit into the region.
+  iree_host_size_t source_operation_count;
   // Region builder receiving lowered operations.
   id4_pipeline_region_builder_t* builder;
   // Diagnostic tap lowering mode.

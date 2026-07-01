@@ -294,6 +294,19 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_test(
+    name = "program_region_test",
+    srcs = ["program_region_test.cc"],
+    deps = [
+        ":program_region",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
     name = "program_test",
     srcs = ["program_test.cc"],
     deps = [

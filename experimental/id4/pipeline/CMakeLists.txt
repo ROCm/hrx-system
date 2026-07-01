@@ -335,6 +335,20 @@ iree_cc_test(
 
 iree_cc_test(
   NAME
+    program_region_test
+  SRCS
+    "program_region_test.cc"
+  DEPS
+    ::program_region
+    iree::base
+    iree::base::internal::arena
+    iree::hal
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_test(
+  NAME
     program_test
   SRCS
     "program_test.cc"

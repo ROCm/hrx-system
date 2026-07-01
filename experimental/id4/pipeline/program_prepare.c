@@ -688,6 +688,8 @@ static iree_status_t id4_pipeline_program_prepare_record_region(
     memset(&lower_options, 0, sizeof(lower_options));
     lower_options.structure_size = sizeof(lower_options);
     lower_options.program = options->program;
+    lower_options.source_operation_offset = region->source_operation_offset;
+    lower_options.source_operation_count = region->source_operation_count;
     lower_options.builder = builder;
     lower_options.tap_mode = diagnostic_tap_count == 0
                                  ? ID4_PIPELINE_PROGRAM_REGION_TAP_MODE_IGNORE

@@ -60,6 +60,28 @@ static iree_status_t id4_pipeline_program_region_validate_options(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "program region program is required");
   }
+  const iree_host_size_t operation_count =
+      id4_pipeline_program_operation_count(options->program);
+  if (options->source_operation_count == 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "program region source operation count is zero");
+  }
+  if (options->source_operation_offset > operation_count) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "program region source operation offset %" PRIhsz
+                            " exceeds operation count %" PRIhsz,
+                            options->source_operation_offset, operation_count);
+  }
+  if (options->source_operation_count >
+      operation_count - options->source_operation_offset) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "program region source operation range [%" PRIhsz ", %" PRIhsz
+        ") exceeds operation count %" PRIhsz,
+        options->source_operation_offset,
+        options->source_operation_offset + options->source_operation_count,
+        operation_count);
+  }
   if (!options->builder) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "program region builder is required");
@@ -132,14 +154,16 @@ static bool id4_pipeline_program_region_captures_tap(
 }
 
 static id4_pipeline_program_region_counts_t
-id4_pipeline_program_region_count_ops(const id4_pipeline_program_t* program) {
+id4_pipeline_program_region_count_ops(
+    const id4_pipeline_program_region_lower_options_t* options) {
   id4_pipeline_program_region_counts_t counts;
   memset(&counts, 0, sizeof(counts));
-  const iree_host_size_t operation_count =
-      id4_pipeline_program_operation_count(program);
-  for (iree_host_size_t i = 0; i < operation_count; ++i) {
+  const iree_host_size_t operation_limit =
+      options->source_operation_offset + options->source_operation_count;
+  for (iree_host_size_t i = options->source_operation_offset;
+       i < operation_limit; ++i) {
     const id4_pipeline_program_op_t* op =
-        id4_pipeline_program_operation_at(program, i);
+        id4_pipeline_program_operation_at(options->program, i);
     if (!op || op->kind != ID4_PIPELINE_PROGRAM_OP_KIND_DISPATCH_LOOM) {
       continue;
     }
@@ -148,6 +172,157 @@ id4_pipeline_program_region_count_ops(const id4_pipeline_program_t* program) {
                  op->payload.dispatch_loom.binding_count);
   }
   return counts;
+}
+
+static bool id4_pipeline_program_region_operation_uses_tensor(
+    const id4_pipeline_program_region_lower_options_t* options,
+    const id4_pipeline_program_op_t* op, id4_pipeline_program_tensor_t tensor) {
+  if (!op) return false;
+  switch (op->kind) {
+    case ID4_PIPELINE_PROGRAM_OP_KIND_DISPATCH_LOOM:
+      for (iree_host_size_t i = 0; i < op->payload.dispatch_loom.binding_count;
+           ++i) {
+        if (op->payload.dispatch_loom.bindings[i].tensor.ordinal ==
+            tensor.ordinal) {
+          return true;
+        }
+      }
+      return false;
+    case ID4_PIPELINE_PROGRAM_OP_KIND_TAP:
+      return id4_pipeline_program_region_captures_tap(options,
+                                                      op->payload.tap.name) &&
+             op->payload.tap.tensor.ordinal == tensor.ordinal;
+    case ID4_PIPELINE_PROGRAM_OP_KIND_EXPORT:
+      return op->payload.export_value.tensor.ordinal == tensor.ordinal;
+    default:
+      return false;
+  }
+}
+
+static iree_status_t id4_pipeline_program_region_lookup_local_producer(
+    const id4_pipeline_program_region_lower_options_t* options,
+    id4_pipeline_program_tensor_t tensor,
+    const id4_pipeline_program_op_t** out_producer) {
+  *out_producer = NULL;
+  const id4_pipeline_program_tensor_record_t* record =
+      id4_pipeline_program_tensor_at(options->program, tensor.ordinal);
+  if (!record) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "program tensor %u is missing", tensor.ordinal);
+  }
+  const id4_pipeline_program_op_t* producer = id4_pipeline_program_operation_at(
+      options->program, record->producer_operation_ordinal);
+  if (!producer) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "program tensor %u producer operation %" PRIhsz
+                            " is missing",
+                            tensor.ordinal, record->producer_operation_ordinal);
+  }
+  if (producer->kind == ID4_PIPELINE_PROGRAM_OP_KIND_ACQUIRE) {
+    *out_producer = producer;
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t id4_pipeline_program_region_validate_local_tensor_range(
+    const id4_pipeline_program_region_lower_options_t* options,
+    id4_pipeline_program_tensor_t tensor) {
+  const id4_pipeline_program_op_t* producer = NULL;
+  IREE_RETURN_IF_ERROR(id4_pipeline_program_region_lookup_local_producer(
+      options, tensor, &producer));
+  if (!producer) return iree_ok_status();
+
+  const iree_host_size_t operation_offset = options->source_operation_offset;
+  const iree_host_size_t operation_limit =
+      options->source_operation_offset + options->source_operation_count;
+  const iree_host_size_t producer_ordinal = producer->ordinal;
+  if (producer_ordinal < operation_offset) {
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "program tensor %u is a local transient produced before source "
+        "operation range [%" PRIhsz ", %" PRIhsz
+        ") and requires shared transient lowering",
+        tensor.ordinal, operation_offset, operation_limit);
+  }
+  if (producer_ordinal >= operation_limit) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "program tensor %u is produced after source operation range [%" PRIhsz
+        ", %" PRIhsz ")",
+        tensor.ordinal, operation_offset, operation_limit);
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t id4_pipeline_program_region_validate_local_residency(
+    const id4_pipeline_program_region_lower_options_t* options) {
+  const iree_host_size_t operation_limit =
+      options->source_operation_offset + options->source_operation_count;
+  for (iree_host_size_t i = options->source_operation_offset;
+       i < operation_limit; ++i) {
+    const id4_pipeline_program_op_t* op =
+        id4_pipeline_program_operation_at(options->program, i);
+    if (!op) continue;
+    switch (op->kind) {
+      case ID4_PIPELINE_PROGRAM_OP_KIND_DISPATCH_LOOM:
+        for (iree_host_size_t j = 0;
+             j < op->payload.dispatch_loom.binding_count; ++j) {
+          IREE_RETURN_IF_ERROR(
+              id4_pipeline_program_region_validate_local_tensor_range(
+                  options, op->payload.dispatch_loom.bindings[j].tensor));
+        }
+        break;
+      case ID4_PIPELINE_PROGRAM_OP_KIND_TAP:
+        if (id4_pipeline_program_region_captures_tap(options,
+                                                     op->payload.tap.name)) {
+          IREE_RETURN_IF_ERROR(
+              id4_pipeline_program_region_validate_local_tensor_range(
+                  options, op->payload.tap.tensor));
+        }
+        break;
+      case ID4_PIPELINE_PROGRAM_OP_KIND_EXPORT: {
+        IREE_RETURN_IF_ERROR(
+            id4_pipeline_program_region_validate_local_tensor_range(
+                options, op->payload.export_value.tensor));
+        break;
+      }
+      default:
+        break;
+    }
+  }
+
+  const iree_host_size_t tensor_count =
+      id4_pipeline_program_tensor_count(options->program);
+  const iree_host_size_t operation_count =
+      id4_pipeline_program_operation_count(options->program);
+  for (iree_host_size_t tensor_index = 0; tensor_index < tensor_count;
+       ++tensor_index) {
+    id4_pipeline_program_tensor_t tensor = {
+        // Program-local tensor ordinal.
+        .ordinal = (uint32_t)tensor_index,
+    };
+    const id4_pipeline_program_op_t* producer = NULL;
+    IREE_RETURN_IF_ERROR(id4_pipeline_program_region_lookup_local_producer(
+        options, tensor, &producer));
+    if (!producer || producer->ordinal < options->source_operation_offset ||
+        producer->ordinal >= operation_limit) {
+      continue;
+    }
+    for (iree_host_size_t i = operation_limit; i < operation_count; ++i) {
+      const id4_pipeline_program_op_t* op =
+          id4_pipeline_program_operation_at(options->program, i);
+      if (id4_pipeline_program_region_operation_uses_tensor(options, op,
+                                                            tensor)) {
+        return iree_make_status(
+            IREE_STATUS_UNIMPLEMENTED,
+            "program tensor %u is a local transient used after source "
+            "operation range [%" PRIhsz ", %" PRIhsz
+            ") and requires shared transient lowering",
+            tensor.ordinal, options->source_operation_offset, operation_limit);
+      }
+    }
+  }
+  return iree_ok_status();
 }
 
 static iree_status_t id4_pipeline_program_region_note_tensor_last_use(
@@ -171,9 +346,10 @@ static iree_status_t id4_pipeline_program_region_build_liveness(
     local_tensor_bits[i] = 0;
   }
 
-  const iree_host_size_t operation_count =
-      id4_pipeline_program_operation_count(options->program);
-  for (iree_host_size_t i = 0; i < operation_count; ++i) {
+  const iree_host_size_t operation_limit =
+      options->source_operation_offset + options->source_operation_count;
+  for (iree_host_size_t i = options->source_operation_offset;
+       i < operation_limit; ++i) {
     const id4_pipeline_program_op_t* op =
         id4_pipeline_program_operation_at(options->program, i);
     if (!op) continue;
@@ -761,7 +937,7 @@ iree_status_t id4_pipeline_program_region_lower(
   IREE_RETURN_IF_ERROR(id4_pipeline_program_region_validate_options(options));
 
   id4_pipeline_program_region_counts_t counts =
-      id4_pipeline_program_region_count_ops(options->program);
+      id4_pipeline_program_region_count_ops(options);
   id4_pipeline_tensor_t* tensor_map = NULL;
   id4_pipeline_region_dispatch_binding_t* dispatch_bindings = NULL;
   iree_host_size_t* last_use_ordinals = NULL;
@@ -794,6 +970,9 @@ iree_status_t id4_pipeline_program_region_lower(
   if (iree_status_is_ok(status)) {
     memset(released_tensor_bits, 0,
            tensor_count * sizeof(released_tensor_bits[0]));
+    status = id4_pipeline_program_region_validate_local_residency(options);
+  }
+  if (iree_status_is_ok(status)) {
     status = id4_pipeline_program_region_build_liveness(
         options, tensor_count, last_use_ordinals, local_tensor_bits);
   }
@@ -827,6 +1006,9 @@ iree_status_t id4_pipeline_program_region_lower(
   iree_host_size_t constant_ordinal = 0;
   iree_host_size_t dispatch_ordinal = 0;
   iree_host_size_t tap_ordinal = 0;
+  const iree_host_size_t operation_offset = options->source_operation_offset;
+  const iree_host_size_t operation_limit =
+      options->source_operation_offset + options->source_operation_count;
   const iree_host_size_t operation_count =
       id4_pipeline_program_operation_count(options->program);
   for (iree_host_size_t i = 0; i < operation_count && iree_status_is_ok(status);
@@ -834,6 +1016,7 @@ iree_status_t id4_pipeline_program_region_lower(
     const id4_pipeline_program_op_t* op =
         id4_pipeline_program_operation_at(options->program, i);
     if (!op) continue;
+    const bool emit_operation = i >= operation_offset && i < operation_limit;
     switch (op->kind) {
       case ID4_PIPELINE_PROGRAM_OP_KIND_IMPORT:
         status = id4_pipeline_program_region_lower_import(
@@ -848,28 +1031,42 @@ iree_status_t id4_pipeline_program_region_lower(
             &context, &op->payload.constant, constant_ordinal++);
         break;
       case ID4_PIPELINE_PROGRAM_OP_KIND_ACQUIRE:
-        status = id4_pipeline_program_region_lower_acquire(
-            &context, &op->payload.acquire);
+        if (emit_operation) {
+          status = id4_pipeline_program_region_lower_acquire(
+              &context, &op->payload.acquire);
+        }
         break;
       case ID4_PIPELINE_PROGRAM_OP_KIND_DISPATCH_LOOM:
-        status = id4_pipeline_program_region_lower_dispatch(
-            &context, &op->payload.dispatch_loom, dispatch_ordinal++);
+        if (emit_operation) {
+          status = id4_pipeline_program_region_lower_dispatch(
+              &context, &op->payload.dispatch_loom, dispatch_ordinal);
+        }
+        ++dispatch_ordinal;
         break;
       case ID4_PIPELINE_PROGRAM_OP_KIND_BARRIER:
-        status = id4_pipeline_program_region_lower_barrier(&context);
+        if (emit_operation) {
+          status = id4_pipeline_program_region_lower_barrier(&context);
+        }
         break;
       case ID4_PIPELINE_PROGRAM_OP_KIND_REGION_CUT:
-        status = iree_make_status(
-            IREE_STATUS_UNIMPLEMENTED,
-            "program region cut %.*s requires multi-region lowering",
-            (int)op->payload.region_cut.name.size,
-            op->payload.region_cut.name.data);
+        if (emit_operation) {
+          status = iree_make_status(
+              IREE_STATUS_INVALID_ARGUMENT,
+              "program region cut %.*s cannot be emitted inside source "
+              "operation range [%" PRIhsz ", %" PRIhsz ")",
+              (int)op->payload.region_cut.name.size,
+              op->payload.region_cut.name.data, operation_offset,
+              operation_limit);
+        }
         break;
       case ID4_PIPELINE_PROGRAM_OP_KIND_TAP:
         if (id4_pipeline_program_region_captures_tap(options,
                                                      op->payload.tap.name)) {
-          status = id4_pipeline_program_region_lower_tap(
-              &context, &op->payload.tap, tap_ordinal++);
+          if (emit_operation) {
+            status = id4_pipeline_program_region_lower_tap(
+                &context, &op->payload.tap, tap_ordinal);
+          }
+          ++tap_ordinal;
         }
         break;
       case ID4_PIPELINE_PROGRAM_OP_KIND_EXPORT:
@@ -880,9 +1077,10 @@ iree_status_t id4_pipeline_program_region_lower(
                                   (int)op->kind);
         break;
     }
-    if (iree_status_is_ok(status)) {
+    if (iree_status_is_ok(status) && emit_operation) {
       status = id4_pipeline_program_region_release_last_uses(&context, op);
     }
+    if (i + 1 >= operation_limit) break;
   }
 
   iree_allocator_free(host_allocator, released_tensor_bits);
