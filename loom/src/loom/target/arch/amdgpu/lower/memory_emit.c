@@ -10,6 +10,7 @@
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/cache.h"
+#include "loom/ops/encoding/matrix_operand.h"
 #include "loom/ops/encoding/storage.h"
 #include "loom/ops/low/ops.h"
 #include "loom/ops/vector/ops.h"
@@ -191,6 +192,80 @@ static uint32_t loom_amdgpu_memory_report_dynamic_stride_bytes(
              : 0;
 }
 
+static iree_string_view_t loom_amdgpu_memory_report_storage_symbol(
+    loom_encoding_matrix_operand_symbol_set_t symbol_set, uint64_t value,
+    uint64_t omitted_value) {
+  if (value == omitted_value) {
+    return iree_string_view_empty();
+  }
+  iree_string_view_t symbol = iree_string_view_empty();
+  if (!loom_encoding_matrix_operand_lookup_value(symbol_set, value, &symbol)) {
+    return iree_string_view_empty();
+  }
+  return symbol;
+}
+
+static void loom_amdgpu_memory_report_row_set_storage_schema(
+    const loom_value_fact_storage_schema_t* schema,
+    loom_low_lower_memory_report_row_t* row) {
+  if (schema == NULL || loom_value_fact_encoded_operand_schema_is_unknown(
+                            schema->encoded_operand)) {
+    return;
+  }
+  const loom_value_fact_encoded_operand_schema_t encoded =
+      schema->encoded_operand;
+  row->storage_element_format = loom_amdgpu_memory_report_storage_symbol(
+      LOOM_ENCODING_MATRIX_OPERAND_SYMBOL_SET_NUMERIC_FORMAT,
+      encoded.element_format, LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE);
+  row->storage_scale_format = loom_amdgpu_memory_report_storage_symbol(
+      LOOM_ENCODING_MATRIX_OPERAND_SYMBOL_SET_NUMERIC_FORMAT,
+      encoded.scale_format, LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE);
+  row->storage_secondary_scale_format =
+      loom_amdgpu_memory_report_storage_symbol(
+          LOOM_ENCODING_MATRIX_OPERAND_SYMBOL_SET_NUMERIC_FORMAT,
+          encoded.secondary_scale_format, LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE);
+  row->storage_payload_packing = loom_amdgpu_memory_report_storage_symbol(
+      LOOM_ENCODING_MATRIX_OPERAND_SYMBOL_SET_PAYLOAD_PACKING,
+      encoded.payload_packing, LOOM_VALUE_FACT_PAYLOAD_PACKING_UNKNOWN);
+  row->storage_scale_topology = loom_amdgpu_memory_report_storage_symbol(
+      LOOM_ENCODING_MATRIX_OPERAND_SYMBOL_SET_SCALE_TOPOLOGY,
+      encoded.scale_topology, LOOM_VALUE_FACT_SCALE_TOPOLOGY_NONE);
+  row->storage_affine_policy = loom_amdgpu_memory_report_storage_symbol(
+      LOOM_ENCODING_MATRIX_OPERAND_SYMBOL_SET_AFFINE_POLICY,
+      encoded.affine_policy, LOOM_VALUE_FACT_AFFINE_POLICY_NONE);
+  row->storage_rounding_policy = loom_amdgpu_memory_report_storage_symbol(
+      LOOM_ENCODING_MATRIX_OPERAND_SYMBOL_SET_ROUNDING_POLICY,
+      encoded.rounding_policy, LOOM_VALUE_FACT_ROUNDING_POLICY_NONE);
+  row->storage_codebook_policy = loom_amdgpu_memory_report_storage_symbol(
+      LOOM_ENCODING_MATRIX_OPERAND_SYMBOL_SET_CODEBOOK_POLICY,
+      encoded.codebook_policy, LOOM_VALUE_FACT_CODEBOOK_POLICY_NONE);
+  row->storage_sparsity_policy = loom_amdgpu_memory_report_storage_symbol(
+      LOOM_ENCODING_MATRIX_OPERAND_SYMBOL_SET_SPARSITY_POLICY,
+      encoded.sparsity_policy, LOOM_VALUE_FACT_SPARSITY_POLICY_NONE);
+}
+
+void loom_amdgpu_memory_report_row_populate_storage_schema(
+    loom_low_lower_context_t* context,
+    const loom_low_source_memory_access_plan_t* source,
+    loom_low_lower_memory_report_row_t* row) {
+  if (!loom_low_lower_context_wants_report_rows(context) ||
+      source->view_value_id == LOOM_VALUE_ID_INVALID) {
+    return;
+  }
+  const loom_module_t* module = loom_low_lower_context_module(context);
+  const loom_type_t view_type =
+      loom_module_value_type(module, source->view_value_id);
+  const loom_value_fact_table_t* fact_table =
+      loom_low_lower_context_fact_table(context);
+  const loom_fact_context_t* fact_context =
+      fact_table != NULL ? &fact_table->context : NULL;
+  loom_value_fact_storage_schema_t storage_schema = {0};
+  if (loom_encoding_query_type_storage_schema(fact_context, module, view_type,
+                                              &storage_schema)) {
+    loom_amdgpu_memory_report_row_set_storage_schema(&storage_schema, row);
+  }
+}
+
 static iree_status_t loom_amdgpu_record_memory_packet_report(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_amdgpu_memory_packet_plan_t* packet) {
@@ -221,7 +296,7 @@ static iree_status_t loom_amdgpu_record_memory_packet_report(
     bank_conflict_kind =
         loom_amdgpu_memory_bank_conflict_kind_key(bank_summary.kind);
   }
-  const loom_low_lower_memory_report_row_t row = {
+  loom_low_lower_memory_report_row_t row = {
       .function_name = loom_low_lower_context_function_name(context),
       .source_op_name =
           loom_op_name(loom_low_lower_context_module(context), source_op),
@@ -247,6 +322,7 @@ static iree_status_t loom_amdgpu_record_memory_packet_report(
       .bank_conflict_degree = bank_summary.conflict_degree,
       .bank_conflict_kind = bank_conflict_kind,
   };
+  loom_amdgpu_memory_report_row_populate_storage_schema(context, source, &row);
   return loom_low_lower_record_memory_report_row(context, &row);
 }
 

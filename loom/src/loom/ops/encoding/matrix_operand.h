@@ -36,6 +36,13 @@ bool loom_encoding_matrix_operand_lookup_symbol(
     loom_encoding_matrix_operand_symbol_set_t symbol_set,
     iree_string_view_t symbol, uint64_t* out_value);
 
+// Resolves one target-independent bitfield value back to its authored
+// #matrix_operand spelling. Returns false when |value| has no exact spelling in
+// |symbol_set|.
+bool loom_encoding_matrix_operand_lookup_value(
+    loom_encoding_matrix_operand_symbol_set_t symbol_set, uint64_t value,
+    iree_string_view_t* out_symbol);
+
 // Returns a compact diagnostic spelling of the symbols accepted by
 // loom_encoding_matrix_operand_lookup_symbol().
 iree_string_view_t loom_encoding_matrix_operand_expected_symbols(

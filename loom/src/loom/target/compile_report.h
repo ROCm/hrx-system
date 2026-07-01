@@ -995,6 +995,24 @@ typedef struct loom_target_compile_report_source_low_memory_row_t {
   uint32_t bank_conflict_degree;
   // Stable target-owned bank-conflict classification key.
   iree_string_view_t bank_conflict_kind;
+  // Logical storage element format recovered from source encoding facts.
+  iree_string_view_t storage_element_format;
+  // Primary scale format recovered from source encoding facts.
+  iree_string_view_t storage_scale_format;
+  // Secondary scale format recovered from source encoding facts.
+  iree_string_view_t storage_secondary_scale_format;
+  // Physical payload packing recovered from source encoding facts.
+  iree_string_view_t storage_payload_packing;
+  // Scale topology recovered from source encoding facts.
+  iree_string_view_t storage_scale_topology;
+  // Affine payload interpretation recovered from source encoding facts.
+  iree_string_view_t storage_affine_policy;
+  // Rounding or finite-policy contract recovered from source encoding facts.
+  iree_string_view_t storage_rounding_policy;
+  // Codebook ownership contract recovered from source encoding facts.
+  iree_string_view_t storage_codebook_policy;
+  // Sparse metadata contract recovered from source encoding facts.
+  iree_string_view_t storage_sparsity_policy;
 } loom_target_compile_report_source_low_memory_row_t;
 
 // Summary of emitted source-memory packet shape.

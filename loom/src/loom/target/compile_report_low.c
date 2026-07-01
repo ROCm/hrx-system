@@ -2209,6 +2209,16 @@ iree_status_t loom_target_compile_report_record_low_lowering(
         .bank_stride_words = source_row->bank_stride_words,
         .bank_conflict_degree = source_row->bank_conflict_degree,
         .bank_conflict_kind = source_row->bank_conflict_kind,
+        .storage_element_format = source_row->storage_element_format,
+        .storage_scale_format = source_row->storage_scale_format,
+        .storage_secondary_scale_format =
+            source_row->storage_secondary_scale_format,
+        .storage_payload_packing = source_row->storage_payload_packing,
+        .storage_scale_topology = source_row->storage_scale_topology,
+        .storage_affine_policy = source_row->storage_affine_policy,
+        .storage_rounding_policy = source_row->storage_rounding_policy,
+        .storage_codebook_policy = source_row->storage_codebook_policy,
+        .storage_sparsity_policy = source_row->storage_sparsity_policy,
     };
     IREE_RETURN_IF_ERROR(
         loom_target_compile_report_record_source_low_memory_row(report, &row));
