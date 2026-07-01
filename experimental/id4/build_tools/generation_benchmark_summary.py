@@ -77,6 +77,13 @@ _LABEL_TIMING_PATTERN = re.compile(
     r"final_wait=(?P<final_wait>[0-9]+(?:\.[0-9]+)?),"
     r"total=(?P<total>[0-9]+(?:\.[0-9]+)?)\]"
 )
+_LABEL_PHASE_TIMING_PATTERN = re.compile(
+    r"\bphase\.(?P<name>[A-Za-z0-9_]+)_ms\["
+    r"prepare=(?P<prepare>[0-9]+(?:\.[0-9]+)?),"
+    r"issue=(?P<issue>[0-9]+(?:\.[0-9]+)?),"
+    r"wait=(?P<wait>[0-9]+(?:\.[0-9]+)?),"
+    r"release=(?P<release>[0-9]+(?:\.[0-9]+)?)\]"
+)
 _LABEL_PREFETCH_GROUPS_PATTERN = re.compile(
     r"\bprefetch_groups\[count=(?P<count>[0-9]+),"
     r"avg_regions=(?P<average>[0-9]+(?:\.[0-9]+)?),"
@@ -336,6 +343,33 @@ def _parse_generation_benchmark_label(label: str, context: str) -> dict[str, Any
             f"{context}.label must contain at least one stage.*[...] group"
         )
 
+    phase_timings: dict[str, dict[str, float]] = {}
+    phase_prepare_ms = 0.0
+    phase_issue_ms = 0.0
+    phase_wait_ms = 0.0
+    phase_release_ms = 0.0
+    for phase_match in _LABEL_PHASE_TIMING_PATTERN.finditer(label):
+        phase_name = phase_match.group("name")
+        phase_timing = {
+            "prepare_ms": _match_float_group(
+                phase_match, "prepare", f"{context}.label.phase.{phase_name}"
+            ),
+            "issue_ms": _match_float_group(
+                phase_match, "issue", f"{context}.label.phase.{phase_name}"
+            ),
+            "wait_ms": _match_float_group(
+                phase_match, "wait", f"{context}.label.phase.{phase_name}"
+            ),
+            "release_ms": _match_float_group(
+                phase_match, "release", f"{context}.label.phase.{phase_name}"
+            ),
+        }
+        phase_timings[phase_name] = phase_timing
+        phase_prepare_ms += phase_timing["prepare_ms"]
+        phase_issue_ms += phase_timing["issue_ms"]
+        phase_wait_ms += phase_timing["wait_ms"]
+        phase_release_ms += phase_timing["release_ms"]
+
     return {
         "benchmark_scope": _label_token(label, "scope", f"{context}.label"),
         "prompt_label": _label_token(label, "prompt", f"{context}.label"),
@@ -587,6 +621,11 @@ def _parse_generation_benchmark_label(label: str, context: str) -> dict[str, Any
         "timing_total_ms": _match_float_group(
             timing_match, "total", f"{context}.label"
         ),
+        "phase_timings": phase_timings,
+        "phase_prepare_ms": phase_prepare_ms if phase_timings else None,
+        "phase_issue_ms": phase_issue_ms if phase_timings else None,
+        "phase_wait_ms": phase_wait_ms if phase_timings else None,
+        "phase_release_ms": phase_release_ms if phase_timings else None,
         "runtime_stages": runtime_stages,
     }
 
@@ -868,6 +907,10 @@ _MARKDOWN_COLUMNS = (
     ("real ms", "real_time_ms"),
     ("issue ms", "timing_issue_ms"),
     ("final wait ms", "timing_final_wait_ms"),
+    ("phase prepare ms", "phase_prepare_ms"),
+    ("phase issue ms", "phase_issue_ms"),
+    ("phase wait ms", "phase_wait_ms"),
+    ("phase release ms", "phase_release_ms"),
     ("direct MiB", "runtime_parameter_source_direct_mib"),
     ("encoded MiB", "runtime_parameter_source_encoded_mib"),
     ("fp8 bf16 src MiB", "runtime_parameter_load_fp8_bf16_source_mib"),

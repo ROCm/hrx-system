@@ -561,6 +561,62 @@ class GenerationBenchmarkSummaryTest(unittest.TestCase):
             self.assertAlmostEqual(row["timing_issue_ms"], 3477.614)
             self.assertAlmostEqual(row["timing_final_wait_ms"], 150.049)
 
+    def test_summarize_generation_benchmark_parses_phase_timing_telemetry(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plan_dir = root / "plans"
+            plan_dir.mkdir()
+            (plan_dir / "short128.json").write_text(
+                json.dumps(live_label_generation_plan()), encoding="utf-8"
+            )
+            benchmark_path = root / "benchmark.json"
+            phase_label = (
+                TEST_BENCHMARK_LABEL.replace("issue=stage_serial", "issue=phases")
+                + " phase.conditioning_ms[prepare=1.500,issue=2.250,"
+                "wait=3.750,release=0.500]"
+                + " phase.denoise_ms[prepare=4.000,issue=5.000,"
+                "wait=6.000,release=0.250]"
+            )
+            benchmark_path.write_text(
+                json.dumps(
+                    {
+                        "benchmarks": [
+                            {
+                                "name": (
+                                    "BM_Ideogram4SessionGenerationIssuePrepared/"
+                                    "short128/real_time"
+                                ),
+                                "real_time": 3627.692699432373,
+                                "cpu_time": 10.391671999999907,
+                                "iterations": 1,
+                                "label": phase_label,
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            summary = generation_benchmark_summary.summarize_generation_benchmark(
+                benchmark_path, plan_dir
+            )
+
+            row = summary["rows"][0]
+            self.assertEqual(row["generation_issue_mode"], "phases")
+            self.assertAlmostEqual(row["phase_prepare_ms"], 5.5)
+            self.assertAlmostEqual(row["phase_issue_ms"], 7.25)
+            self.assertAlmostEqual(row["phase_wait_ms"], 9.75)
+            self.assertAlmostEqual(row["phase_release_ms"], 0.75)
+            self.assertEqual(
+                row["phase_timings"]["conditioning"],
+                {
+                    "prepare_ms": 1.5,
+                    "issue_ms": 2.25,
+                    "wait_ms": 3.75,
+                    "release_ms": 0.5,
+                },
+            )
+
     def test_format_generation_benchmark_markdown_emits_comparison_table(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -600,8 +656,9 @@ class GenerationBenchmarkSummaryTest(unittest.TestCase):
             self.assertIn("| bucket | residency | resident mask |", table)
             self.assertIn(
                 "| short128 | selected_stage_bundles | 3 | 17712 | 19 | 32 | "
-                "83 | 128 | 3627.693 | 3477.614 | 150.049 | 4169 | 27848 | "
-                "17480 | 34924 | 10368 | 0 | 2 | 318 | 1081 | 576 | 1507 |",
+                "83 | 128 | 3627.693 | 3477.614 | 150.049 | - | - | - | "
+                "- | 4169 | 27848 | 17480 | 34924 | 10368 | 0 | 2 | 318 | "
+                "1081 | 576 | 1507 |",
                 table,
             )
 
