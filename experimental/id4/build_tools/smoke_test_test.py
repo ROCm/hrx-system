@@ -209,6 +209,7 @@ class Id4SmokeTestTest(unittest.TestCase):
         self.assertIn("--dit_feed_forward_implementation=fused_product", command)
         self.assertIn("--generation_residency=issue_phases", command)
         self.assertIn("--generation_issue_mode=phases", command)
+        self.assertIn("--parameter_load_prefetch_region_distance=0", command)
         self.assertIn("--vae_tiling_mode=memory_budget", command)
         self.assertIn("--vae_memory_budget=536870912", command)
         self.assertIn("--vae_overlap=0.5", command)
@@ -275,6 +276,34 @@ class Id4SmokeTestTest(unittest.TestCase):
         command = self.smoke_test.build_id4_command(args, Path("artifacts"))
 
         self.assertIn("--generation_issue_mode=stage_serial", command)
+
+    def test_build_id4_command_routes_parameter_prefetch_distance(self):
+        args = self.smoke_test.parse_arguments(
+            [
+                "--output_dir=out",
+                "--id4_binary=bin/id4",
+                "--device=amdgpu",
+                "--tokenizer=tokenizer.json",
+                "--parameters=qwen=qwen.safetensors",
+                "--parameter_load_prefetch_region_distance=2",
+            ]
+        )
+
+        command = self.smoke_test.build_id4_command(args, Path("artifacts"))
+
+        self.assertIn("--parameter_load_prefetch_region_distance=2", command)
+
+    def test_parameter_prefetch_distance_must_be_non_negative(self):
+        with self.assertRaises(SystemExit):
+            self.smoke_test.parse_arguments(
+                [
+                    "--output_dir=out",
+                    "--device=amdgpu",
+                    "--tokenizer=tokenizer.json",
+                    "--parameters=qwen=qwen.safetensors",
+                    "--parameter_load_prefetch_region_distance=-1",
+                ]
+            )
 
     def test_build_id4_command_omits_disabled_vae_detail_flags(self):
         args = self.smoke_test.parse_arguments(

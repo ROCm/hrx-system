@@ -78,6 +78,20 @@ class SmokeTestError(RuntimeError):
     """Raised when the smoke run or artifact validation fails."""
 
 
+def non_negative_integer(value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            f"expected a non-negative integer, got {value!r}"
+        ) from exc
+    if parsed < 0:
+        raise argparse.ArgumentTypeError(
+            f"expected a non-negative integer, got {value!r}"
+        )
+    return parsed
+
+
 @dataclass(frozen=True)
 class ImageMetrics:
     width: int
@@ -231,6 +245,15 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
         "--generation_issue_mode",
         default="phases",
         choices=("full", "phases", "stage_serial"),
+    )
+    parser.add_argument(
+        "--parameter_load_prefetch_region_distance",
+        type=non_negative_integer,
+        default=0,
+        help=(
+            "Number of plan regions ahead of execution to prefetch parameter "
+            "load groups."
+        ),
     )
     parser.add_argument(
         "--generation_resident_stage_bundles",
@@ -562,6 +585,8 @@ def build_id4_command(args: argparse.Namespace, artifact_dir: Path) -> list[str]
         f"--dit_feed_forward_implementation={args.dit_feed_forward_implementation}",
         f"--generation_residency={args.generation_residency}",
         f"--generation_issue_mode={args.generation_issue_mode}",
+        "--parameter_load_prefetch_region_distance="
+        f"{args.parameter_load_prefetch_region_distance}",
         f"--vae_tiling_mode={args.vae_tiling_mode}",
         f"--dump_plan={artifact_dir / 'plan.json'}",
         f"--dump_diagnostics={artifact_dir / 'diagnostics'}",
