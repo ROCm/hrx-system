@@ -1295,6 +1295,56 @@ vector_fragment = Op(
     ],
 )
 
+vector_fragment_repack = Op(
+    "vector.fragment.repack",
+    group=vector_ops,
+    phase=OpPhase.EXECUTABLE,
+    doc=(
+        "Repack a native matrix-fragment payload to another fragment role "
+        "without going through memory. The source value must carry fragment "
+        "facts naming its current role and shape; the target role interprets "
+        "the result vector lanes and payload registers. The logical shape "
+        "operands are shared by both roles, so result row/column payloads can "
+        "become lhs row/reduction or rhs reduction/column payloads for "
+        "attention-style fragment reuse. When the source and result element "
+        "types differ, the op also represents a fragment-shaped numeric "
+        "conversion that target lowering must select explicitly or reject with "
+        "target diagnostics."
+    ),
+    operands=[
+        Operand("source", VECTOR, doc="Native source matrix fragment payload."),
+        Operand("rows", INDEX, doc="Logical matrix row count for the fragment tile."),
+        Operand(
+            "columns",
+            INDEX,
+            doc="Logical matrix column or reduction count for the fragment tile.",
+        ),
+    ],
+    results=[Result("result", VECTOR, doc="Native target matrix fragment payload.")],
+    attrs=[
+        AttrDef("role", ATTR_TYPE_ENUM, enum_def=VectorFragmentRole),
+    ],
+    facts="loom_vector_fragment_repack_facts",
+    traits=[PURE, REFINABLE_RESULT_TYPE_REFS],
+    format=[
+        TemplateParam("role"),
+        Ref("source"),
+        kw("shape"),
+        LBRACKET,
+        Ref("rows"),
+        COMMA,
+        Ref("columns"),
+        RBRACKET,
+        COLON,
+        TypeOf("source"),
+        ARROW,
+        ResultType("result"),
+    ],
+    examples=[
+        "%lhs = vector.fragment.repack<lhs> %acc shape [%m, %k] : vector<8xf32> -> vector<16xbf16>",
+    ],
+)
+
 
 # ============================================================================
 # Memory
@@ -4200,6 +4250,7 @@ VECTOR_ENCODING_OPS: tuple[Op, ...] = (
     vector_decode,
     vector_encode,
     vector_fragment,
+    vector_fragment_repack,
 )
 
 VECTOR_OP_CATEGORY_GROUPS: tuple[tuple[OpCategory, tuple[Op, ...]], ...] = (

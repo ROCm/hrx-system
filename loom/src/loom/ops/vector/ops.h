@@ -172,7 +172,8 @@ enum {
   LOOM_OP_VECTOR_DECODE = LOOM_OP_KIND(LOOM_DIALECT_VECTOR, 147),
   LOOM_OP_VECTOR_ENCODE = LOOM_OP_KIND(LOOM_DIALECT_VECTOR, 148),
   LOOM_OP_VECTOR_FRAGMENT = LOOM_OP_KIND(LOOM_DIALECT_VECTOR, 149),
-  LOOM_OP_VECTOR_COUNT_ = 150,
+  LOOM_OP_VECTOR_FRAGMENT_REPACK = LOOM_OP_KIND(LOOM_DIALECT_VECTOR, 150),
+  LOOM_OP_VECTOR_COUNT_ = 151,
 };
 
 // IEEE 754 fast-math relaxation flags for float operations.
@@ -3290,6 +3291,29 @@ iree_status_t loom_vector_fragment_facts(
 iree_status_t loom_vector_fragment_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
+
+// LOOM_OP_VECTOR_FRAGMENT_REPACK: Repack a native matrix-fragment payload to another fragment role without going through memory. The source value must carry fragment facts naming its current role and shape; the target role interprets the result vector lanes and payload registers. The logical shape operands are shared by both roles, so result row/column payloads can become lhs row/reduction or rhs reduction/column payloads for attention-style fragment reuse. When the source and result element types differ, the op also represents a fragment-shaped numeric conversion that target lowering must select explicitly or reject with target diagnostics.
+// %lhs = vector.fragment.repack<lhs> %acc shape [%m, %k] : vector<8xf32> -> vector<16xbf16>
+LOOM_DEFINE_ISA(loom_vector_fragment_repack_isa, LOOM_OP_VECTOR_FRAGMENT_REPACK)
+LOOM_DEFINE_OPERAND(loom_vector_fragment_repack_source, 0)
+LOOM_DEFINE_OPERAND(loom_vector_fragment_repack_rows, 1)
+LOOM_DEFINE_OPERAND(loom_vector_fragment_repack_columns, 2)
+LOOM_DEFINE_RESULT(loom_vector_fragment_repack_result, 0)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_vector_fragment_repack_role, 0, loom_vector_role_t)
+iree_status_t loom_vector_fragment_repack_build(
+    loom_builder_t* builder,
+    loom_vector_role_t role,
+    loom_may_consume loom_value_id_t source,
+    loom_may_consume loom_value_id_t rows,
+    loom_may_consume loom_value_id_t columns,
+    loom_type_t result_type,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+iree_status_t loom_vector_fragment_repack_facts(
+    loom_fact_context_t* context,
+    const loom_module_t* module, const loom_op_t* op,
+    const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts);
 
 // Returns the vtable array for the vector dialect.
 const loom_op_vtable_t* const* loom_vector_dialect_vtables(

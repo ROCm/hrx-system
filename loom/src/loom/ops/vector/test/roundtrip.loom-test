@@ -455,8 +455,9 @@ func.def @matrix_fragments(%lhs: vector<6xi32>, %rhs: vector<6xi32>, %acc: vecto
   %rhs_fragment = vector.fragment<rhs> %rhs shape [%k, %n] using {scale = %scale : vector<1xf16>, schema = %schema : encoding<schema>} where [mul(%k, 32)] : vector<6xi32>
   %init_fragment = vector.fragment<init> %acc shape [%m, %n] : vector<8xf32>
   %result_fragment = vector.fragment<result> %acc shape [%m, %n] where [mul(%n, 16)] : vector<8xf32>
+  %lhs_repacked = vector.fragment.repack<lhs> %result_fragment shape [%m, %n] : vector<8xf32> -> vector<16xbf16>
   %result = vector.mma %lhs_fragment, %rhs_fragment, %init_fragment : vector<6xi32>, vector<6xi32>, vector<8xf32>
-  test.use %lhs_fragment, %rhs_fragment, %init_fragment, %result_fragment, %result : vector<6xi32>, vector<6xi32>, vector<8xf32>, vector<8xf32>, vector<8xf32>
+  test.use %lhs_fragment, %rhs_fragment, %init_fragment, %result_fragment, %lhs_repacked, %result : vector<6xi32>, vector<6xi32>, vector<8xf32>, vector<8xf32>, vector<16xbf16>, vector<8xf32>
   func.return
 }
 
