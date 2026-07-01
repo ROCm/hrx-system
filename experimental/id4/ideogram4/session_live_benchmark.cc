@@ -54,6 +54,9 @@ IREE_FLAG(int64_t, generation_residency_budget, 0,
           "--generation_residency=memory_budgeted.");
 IREE_FLAG(string, generation_issue_mode, "full",
           "Generation issue mode: full, phases, or stage_serial.");
+IREE_FLAG(int64_t, parameter_load_prefetch_region_distance, 0,
+          "Number of future stage regions whose deferred parameter load groups "
+          "may be submitted before the current region.");
 IREE_FLAG(string, generation_resident_stage_bundles, "",
           "Comma-separated generation stage bundles retained or considered by "
           "--generation_residency=selected_stage_bundles or memory_budgeted: "
@@ -302,6 +305,8 @@ struct LiveGenerationBenchmarkContext {
   iree_device_size_t generation_residency_budget_byte_length = 0;
   // Generation issue mode selected by benchmark flags.
   GenerationIssueMode generation_issue_mode = GenerationIssueMode::kFull;
+  // Deferred parameter load lookahead selected by benchmark flags.
+  iree_host_size_t parameter_load_prefetch_region_distance = 0;
   // Generation stage bundles selected or considered by benchmark flags.
   id4_ideogram4_generation_resident_stage_mask_t
       generation_resident_stage_mask =
@@ -555,6 +560,25 @@ static iree_string_view_t GenerationIssueModeName(GenerationIssueMode mode) {
   return IREE_SV("unknown");
 }
 
+static iree_status_t ParseParameterLoadPrefetchRegionDistance(
+    iree_host_size_t* out_distance) {
+  IREE_ASSERT_ARGUMENT(out_distance);
+  if (FLAG_parameter_load_prefetch_region_distance < 0) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "--parameter_load_prefetch_region_distance must be non-negative");
+  }
+  if ((uint64_t)FLAG_parameter_load_prefetch_region_distance >
+      IREE_HOST_SIZE_MAX) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "--parameter_load_prefetch_region_distance exceeds host size range");
+  }
+  *out_distance =
+      (iree_host_size_t)FLAG_parameter_load_prefetch_region_distance;
+  return iree_ok_status();
+}
+
 static id4_ideogram4_generation_issue_policy_t GenerationIssuePolicy(
     GenerationIssueMode issue_mode) {
   return issue_mode == GenerationIssueMode::kStageSerial
@@ -696,6 +720,12 @@ static double AverageMilliseconds(iree_duration_t total_ns,
   if (iteration_count == 0) return 0.0;
   return static_cast<double>(total_ns) /
          (static_cast<double>(iteration_count) * 1000.0 * 1000.0);
+}
+
+static double AverageRegionDistance(iree_host_size_t distance_sum,
+                                    iree_host_size_t count) {
+  if (count == 0) return 0.0;
+  return static_cast<double>(distance_sum) / static_cast<double>(count);
 }
 
 static void AddPhaseTiming(
@@ -1149,6 +1179,8 @@ static iree_status_t CreateLiveGenerationBenchmarkContext(
   }
   IREE_RETURN_IF_ERROR(
       ParseGenerationIssueMode(&out_context->generation_issue_mode));
+  IREE_RETURN_IF_ERROR(ParseParameterLoadPrefetchRegionDistance(
+      &out_context->parameter_load_prefetch_region_distance));
   IREE_RETURN_IF_ERROR(ParseGenerationResidentStageMask(
       &out_context->generation_resident_stage_mask));
   IREE_RETURN_IF_ERROR(CreateLoadedLiveSession(
@@ -1260,6 +1292,7 @@ static iree_status_t IssueGenerationPhase(
     id4_ideogram4_generation_execution_t* execution,
     id4_ideogram4_generation_phase_bundle_t* phase_bundle,
     id4_pipeline_diagnostics_sink_t* diagnostics_sink,
+    iree_host_size_t parameter_load_prefetch_region_distance,
     iree_hal_semaphore_t* wait_semaphore, uint64_t wait_value,
     iree_hal_semaphore_t* signal_semaphore, uint64_t signal_value) {
   id4::test::SemaphoreListStorage wait;
@@ -1273,6 +1306,8 @@ static iree_status_t IssueGenerationPhase(
   std::memset(&issue_options, 0, sizeof(issue_options));
   issue_options.structure_size = sizeof(issue_options);
   issue_options.wait_semaphore_list = wait.list();
+  issue_options.parameter_load_prefetch_region_distance =
+      parameter_load_prefetch_region_distance;
   issue_options.signal_semaphore_list = signal.list();
   issue_options.diagnostics_sink = diagnostics_sink;
   return id4_ideogram4_generation_execution_issue_phase(execution, phase_bundle,
@@ -1312,6 +1347,8 @@ static iree_status_t IssueGenerationBundle(
         context.generation_issue_mode == GenerationIssueMode::kStageSerial
             ? ID4_IDEOGRAM4_GENERATION_ISSUE_POLICY_STAGE_SERIAL
             : ID4_IDEOGRAM4_GENERATION_ISSUE_POLICY_PHASE_CONCURRENT;
+    issue_options.parameter_load_prefetch_region_distance =
+        context.parameter_load_prefetch_region_distance;
     issue_options.wait_semaphore_list = prepare_wait.list();
     issue_options.signal_semaphore_list = completion_signal.list();
     issue_options.diagnostics_sink = diagnostics_sink;
@@ -1357,7 +1394,8 @@ static iree_status_t IssueGenerationBundle(
   if (iree_status_is_ok(status)) {
     phase_start_time_ns = iree_time_now();
     status = IssueGenerationPhase(
-        *out_execution, conditioning_phase, diagnostics_sink, prepare_semaphore,
+        *out_execution, conditioning_phase, diagnostics_sink,
+        context.parameter_load_prefetch_region_distance, prepare_semaphore,
         *prepare_value, completion_semaphore, ++*completion_value);
     timing->conditioning.issue_ns += iree_time_now() - phase_start_time_ns;
   }
@@ -1384,7 +1422,8 @@ static iree_status_t IssueGenerationBundle(
   if (iree_status_is_ok(status)) {
     phase_start_time_ns = iree_time_now();
     status = IssueGenerationPhase(
-        *out_execution, denoise_phase, diagnostics_sink, prepare_semaphore,
+        *out_execution, denoise_phase, diagnostics_sink,
+        context.parameter_load_prefetch_region_distance, prepare_semaphore,
         *prepare_value, completion_semaphore, ++*completion_value);
     timing->denoise.issue_ns += iree_time_now() - phase_start_time_ns;
   }
@@ -1409,7 +1448,8 @@ static iree_status_t IssueGenerationBundle(
   if (iree_status_is_ok(status)) {
     phase_start_time_ns = iree_time_now();
     status = IssueGenerationPhase(
-        *out_execution, decode_phase, diagnostics_sink, prepare_semaphore,
+        *out_execution, decode_phase, diagnostics_sink,
+        context.parameter_load_prefetch_region_distance, prepare_semaphore,
         *prepare_value, completion_semaphore, ++*completion_value);
     timing->decode.issue_ns += iree_time_now() - phase_start_time_ns;
   }
@@ -1579,6 +1619,7 @@ static iree_status_t SetGenerationBenchmarkLabel(
       " dit_uncond_capacity=%" PRIu32 " latent=%" PRIu64 "x%" PRIu64
       " steps=%" PRIu32 " image=%" PRIu64 "x%" PRIu64
       " residency_request=%.*s residency=%.*s issue=%.*s"
+      " prefetch_regions=%" PRIhsz
       " resident_stage_mask=0x%08x residency_budget=%" PRIu64
       "MiB"
       " params=%.*s activation=%.*s weights=%.*s qwen_weights=%.*s"
@@ -1597,6 +1638,8 @@ static iree_status_t SetGenerationBenchmarkLabel(
       "MiB,resident=%" PRIu64 "MiB,phase_peak=%" PRIu64
       "MiB,stage_serial_peak=%" PRIu64 "MiB,selected_peak=%" PRIu64
       "MiB]"
+      " prefetch_groups[count=%" PRIhsz ",avg_regions=%.2f,max_regions=%" PRIhsz
+      "]"
       " issue_encode_window[count=%" PRIhsz ",staging=%" PRIu64
       "MiB,max=%" PRIu64 "MiB,source=%" PRIu64 "MiB,target=%" PRIu64
       "MiB,chunks=%" PRIhsz ",batches=%" PRIhsz ",dispatches=%" PRIhsz "]",
@@ -1613,6 +1656,7 @@ static iree_status_t SetGenerationBenchmarkLabel(
       static_cast<int>(residency_request.size), residency_request.data,
       static_cast<int>(residency_mode.size), residency_mode.data,
       static_cast<int>(issue_mode.size), issue_mode.data,
+      context.parameter_load_prefetch_region_distance,
       residency.resident_stage_mask,
       CeilMiB(context.generation_residency_budget_byte_length),
       static_cast<int>(parameter_format.size), parameter_format.data,
@@ -1645,6 +1689,11 @@ static iree_status_t SetGenerationBenchmarkLabel(
       CeilMiB(resource_statistics.phase_concurrent_total_peak_byte_length),
       CeilMiB(resource_statistics.stage_serial_total_peak_byte_length),
       CeilMiB(selected_logical_peak_byte_length),
+      diagnostics.parameter_load_group_prefetch_submit_count,
+      AverageRegionDistance(
+          diagnostics.parameter_load_group_prefetch_region_distance_sum,
+          diagnostics.parameter_load_group_prefetch_submit_count),
+      diagnostics.parameter_load_group_prefetch_region_distance_max,
       diagnostics.parameter_issue_encode_window_count,
       CeilMiB(
           diagnostics.parameter_issue_encode_window_staging_total_byte_length),

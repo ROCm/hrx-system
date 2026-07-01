@@ -352,6 +352,8 @@ struct id4_ideogram4_generation_execution_t {
   iree_allocator_t host_allocator;
   // Prepared generation bundle retained while queued work may use it.
   id4_ideogram4_generation_bundle_t* bundle;
+  // Deferred parameter load lookahead selected for stage issues.
+  iree_host_size_t parameter_load_prefetch_region_distance;
   // Lowered Qwen prompt inputs used by the conditioning phase.
   id4_ideogram4_qwen_inputs_t qwen_inputs;
   // Lowered DiT conditioning and guidance inputs used by the denoise phase.
@@ -3856,6 +3858,14 @@ static iree_status_t id4_ideogram4_generation_issue_stage(
       slot->diagnostic_tap_bindings.count;
   issue_options.diagnostic_tap_bindings =
       slot->diagnostic_tap_bindings.bindings;
+  id4_pipeline_parameter_slab_set_t* parameter_slabs =
+      id4_pipeline_bundle_parameter_slabs(stage_bundle);
+  if (parameter_slabs &&
+      id4_pipeline_parameter_slab_set_has_deferred_load_context(
+          parameter_slabs)) {
+    issue_options.parameter_load_prefetch_region_distance =
+        execution->parameter_load_prefetch_region_distance;
+  }
   issue_options.wait_semaphore_list = wait_semaphore_list;
   issue_options.signal_semaphore_list = signal_list;
   issue_options.diagnostics_sink = diagnostics_sink;
@@ -4489,6 +4499,8 @@ iree_status_t id4_ideogram4_generation_execution_issue_phase(
     const id4_ideogram4_generation_phase_issue_options_t* options) {
   IREE_RETURN_IF_ERROR(id4_ideogram4_validate_generation_phase_issue_options(
       execution, phase_bundle, options));
+  execution->parameter_load_prefetch_region_distance =
+      options->parameter_load_prefetch_region_distance;
   iree_status_t status = id4_ideogram4_generation_chain_phase_issue_wait(
       execution, phase_bundle->phase_mask, options->wait_semaphore_list);
   if (!iree_status_is_ok(status)) return status;
@@ -4539,6 +4551,10 @@ iree_status_t id4_ideogram4_session_issue_generation(
         options->tokenizer_flags, options->wait_semaphore_list,
         iree_hal_semaphore_list_empty(), &execution);
     if (iree_status_is_ok(status)) {
+      execution->parameter_load_prefetch_region_distance =
+          options->parameter_load_prefetch_region_distance;
+    }
+    if (iree_status_is_ok(status)) {
       status = id4_ideogram4_generation_issue_stage_serial(
           execution, options->signal_semaphore_list,
           options->kernel_diagnostic_artifact_flags, options->diagnostics_sink);
@@ -4565,6 +4581,10 @@ iree_status_t id4_ideogram4_session_issue_generation(
       session, bundle, options->request, options->tokenizer,
       options->tokenizer_flags, options->wait_semaphore_list,
       iree_hal_semaphore_list_empty(), &execution);
+  if (iree_status_is_ok(status)) {
+    execution->parameter_load_prefetch_region_distance =
+        options->parameter_load_prefetch_region_distance;
+  }
   if (iree_status_is_ok(status)) {
     status = id4_ideogram4_generation_prepare_phase_bundle(
         bundle, ID4_IDEOGRAM4_GENERATION_PHASE_CONDITIONING,

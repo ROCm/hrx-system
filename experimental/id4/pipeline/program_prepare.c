@@ -996,7 +996,7 @@ static iree_status_t id4_pipeline_program_prepared_make_region_wait_list(
 
 static iree_status_t
 id4_pipeline_program_prepared_submit_region_parameter_load_groups(
-    const id4_pipeline_plan_t* plan, iree_host_size_t region_id,
+    const id4_pipeline_plan_t* plan, iree_host_size_t submit_region_id,
     const id4_pipeline_region_plan_t* region,
     id4_pipeline_parameter_slab_issue_context_t* parameter_issue_context,
     id4_pipeline_diagnostics_sink_t* diagnostics_sink) {
@@ -1006,7 +1006,46 @@ id4_pipeline_program_prepared_submit_region_parameter_load_groups(
   for (iree_host_size_t i = 0; i < region->parameter_load_group_count; ++i) {
     IREE_RETURN_IF_ERROR(id4_pipeline_plan_submit_parameter_load_group(
         plan, parameter_issue_context, region->parameter_load_groups[i],
-        region_id, diagnostics_sink));
+        submit_region_id, diagnostics_sink));
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t
+id4_pipeline_program_prepared_submit_region_parameter_load_window(
+    const id4_pipeline_plan_t* plan, iree_host_size_t current_region_id,
+    iree_host_size_t region_count, iree_host_size_t prefetch_region_distance,
+    id4_pipeline_parameter_slab_issue_context_t* parameter_issue_context,
+    id4_pipeline_diagnostics_sink_t* diagnostics_sink) {
+  IREE_ASSERT_ARGUMENT(plan);
+  IREE_ASSERT_ARGUMENT(parameter_issue_context);
+  if (region_count == 0) return iree_ok_status();
+  if (current_region_id >= region_count) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "program issue current region %" PRIhsz
+                            " is outside region count %" PRIhsz,
+                            current_region_id, region_count);
+  }
+
+  const iree_host_size_t remaining_region_count =
+      region_count - current_region_id - 1;
+  const iree_host_size_t lookahead_region_count =
+      iree_min(prefetch_region_distance, remaining_region_count);
+  const iree_host_size_t last_region_id =
+      current_region_id + lookahead_region_count;
+  for (iree_host_size_t region_id = current_region_id;
+       region_id <= last_region_id; ++region_id) {
+    const id4_pipeline_region_plan_t* region =
+        id4_pipeline_plan_region_at(plan, region_id);
+    if (!region) {
+      return iree_make_status(
+          IREE_STATUS_OUT_OF_RANGE,
+          "program issue region plan %" PRIhsz " is missing", region_id);
+    }
+    IREE_RETURN_IF_ERROR(
+        id4_pipeline_program_prepared_submit_region_parameter_load_groups(
+            plan, current_region_id, region, parameter_issue_context,
+            diagnostics_sink));
   }
   return iree_ok_status();
 }
@@ -1737,9 +1776,10 @@ iree_status_t id4_pipeline_program_prepared_issue(
     }
     if (uses_deferred_parameter_loads) {
       status =
-          id4_pipeline_program_prepared_submit_region_parameter_load_groups(
-              prepared->plan, i, region, parameter_issue_context,
-              options->diagnostics_sink);
+          id4_pipeline_program_prepared_submit_region_parameter_load_window(
+              prepared->plan, i, prepared->region_count,
+              options->parameter_load_prefetch_region_distance,
+              parameter_issue_context, options->diagnostics_sink);
       if (!iree_status_is_ok(status)) break;
     }
     iree_hal_semaphore_list_t region_wait_list =

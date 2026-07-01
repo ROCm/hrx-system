@@ -124,6 +124,9 @@ typedef struct id4_pipeline_stage_issue_options_t {
   iree_host_size_t diagnostic_tap_binding_count;
   // Caller-owned diagnostic tap bindings in plan diagnostic tap order.
   const iree_hal_buffer_binding_t* diagnostic_tap_bindings;
+  // Number of future regions whose deferred parameter load groups may be
+  // submitted before the current region is issued.
+  iree_host_size_t parameter_load_prefetch_region_distance;
   // Semaphores that execution waits on.
   iree_hal_semaphore_list_t wait_semaphore_list;
   // Semaphores signaled when execution completes.

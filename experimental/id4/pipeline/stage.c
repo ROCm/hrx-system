@@ -332,6 +332,17 @@ static iree_status_t id4_pipeline_validate_issue_options(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "issue final signal is required");
   }
+  if (options->parameter_load_prefetch_region_distance != 0) {
+    id4_pipeline_parameter_slab_set_t* parameter_slabs =
+        id4_pipeline_bundle_parameter_slabs(bundle);
+    if (!parameter_slabs ||
+        !id4_pipeline_parameter_slab_set_has_deferred_load_context(
+            parameter_slabs)) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "issue parameter load prefetch requires deferred parameter loads");
+    }
+  }
   IREE_RETURN_IF_ERROR(id4_pipeline_validate_issue_boundary_bindings(
       id4_pipeline_bundle_plan(bundle), options));
   IREE_RETURN_IF_ERROR(id4_pipeline_validate_issue_diagnostic_tap_bindings(

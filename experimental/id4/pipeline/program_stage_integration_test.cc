@@ -5,6 +5,7 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 #include <cstring>
+#include <vector>
 
 #include "experimental/id4/pipeline/program_stage.h"
 #include "experimental/id4/tooling/runtime.h"
@@ -164,7 +165,34 @@ typedef uint32_t id4_pipeline_test_program_flags_t;
 enum id4_pipeline_test_program_flag_bits_t {
   ID4_PIPELINE_TEST_PROGRAM_FLAG_AUTHOR_DIAGNOSTIC_TAPS = 1u << 0,
   ID4_PIPELINE_TEST_PROGRAM_FLAG_DEFER_PARAMETER_LOADS = 1u << 1,
+  ID4_PIPELINE_TEST_PROGRAM_FLAG_PREFETCH_DEFERRED_PARAMETER_LOADS = 1u << 2,
 };
+
+typedef struct id4_pipeline_test_program_diagnostics_t {
+  // Parameter load events emitted for load-group submissions.
+  std::vector<id4_pipeline_parameter_load_diagnostic_t>
+      parameter_load_submissions;
+} id4_pipeline_test_program_diagnostics_t;
+
+static iree_status_t CaptureProgramDiagnostics(
+    void* user_data, const id4_pipeline_diagnostic_event_t* event) {
+  auto* diagnostics =
+      static_cast<id4_pipeline_test_program_diagnostics_t*>(user_data);
+  if (event->parameter_load &&
+      iree_string_view_equal(event->key,
+                             IREE_SV("parameter_slab.load_group.submit"))) {
+    diagnostics->parameter_load_submissions.push_back(*event->parameter_load);
+  }
+  return iree_ok_status();
+}
+
+static id4_pipeline_diagnostics_sink_t ProgramDiagnosticsSink(
+    id4_pipeline_test_program_diagnostics_t* diagnostics) {
+  return id4_pipeline_diagnostics_sink_t{
+      /*.emit=*/CaptureProgramDiagnostics,
+      /*.user_data=*/diagnostics,
+  };
+}
 
 static id4_pipeline_program_t* CreateTwoRegionAddProgram(
     id4_pipeline_test_program_flags_t flags) {
@@ -381,11 +409,14 @@ static void RunTwoRegionAddProgram(id4_pipeline_test_program_flags_t flags) {
       flags, ID4_PIPELINE_TEST_PROGRAM_FLAG_AUTHOR_DIAGNOSTIC_TAPS);
   const bool defers_parameter_loads = iree_all_bits_set(
       flags, ID4_PIPELINE_TEST_PROGRAM_FLAG_DEFER_PARAMETER_LOADS);
+  const bool prefetches_deferred_parameter_loads = iree_all_bits_set(
+      flags, ID4_PIPELINE_TEST_PROGRAM_FLAG_PREFETCH_DEFERRED_PARAMETER_LOADS);
 
   RuntimeContext& context = SharedRuntimeContext();
 
-  id4_pipeline_diagnostics_sink_t diagnostics_sink;
-  id4_pipeline_diagnostics_sink_initialize_ignore(&diagnostics_sink);
+  id4_pipeline_test_program_diagnostics_t diagnostics = {};
+  id4_pipeline_diagnostics_sink_t diagnostics_sink =
+      ProgramDiagnosticsSink(&diagnostics);
 
   OwningRef<id4_pipeline_kernel_library_t, id4_pipeline_kernel_library_release>
       kernel_library;
@@ -556,6 +587,8 @@ static void RunTwoRegionAddProgram(id4_pipeline_test_program_flags_t flags) {
   issue_options.structure_size = sizeof(issue_options);
   issue_options.boundary_binding_count = IREE_ARRAYSIZE(boundary_bindings);
   issue_options.boundary_bindings = boundary_bindings;
+  issue_options.parameter_load_prefetch_region_distance =
+      prefetches_deferred_parameter_loads ? 1 : 0;
   if (captures_diagnostic_taps) {
     issue_options.diagnostic_tap_binding_count =
         IREE_ARRAYSIZE(diagnostic_tap_bindings);
@@ -582,6 +615,19 @@ static void RunTwoRegionAddProgram(id4_pipeline_test_program_flags_t flags) {
     ExpectFloatValues(device, first_tap_buffer.get(), expected_first_tap);
     ExpectFloatValues(device, second_tap_buffer.get(), expected_output);
   }
+  if (prefetches_deferred_parameter_loads) {
+    bool found_prefetched_load_group = false;
+    for (const id4_pipeline_parameter_load_diagnostic_t& submission :
+         diagnostics.parameter_load_submissions) {
+      if (submission.submit_region_id != IREE_HOST_SIZE_MAX &&
+          submission.first_consumer_region_id != IREE_HOST_SIZE_MAX &&
+          submission.submit_region_id < submission.first_consumer_region_id) {
+        found_prefetched_load_group = true;
+        break;
+      }
+    }
+    EXPECT_TRUE(found_prefetched_load_group);
+  }
 }
 
 TEST(ProgramStageIntegration, IssuesMultiRegionProgramWithParameterGroups) {
@@ -590,6 +636,13 @@ TEST(ProgramStageIntegration, IssuesMultiRegionProgramWithParameterGroups) {
 
 TEST(ProgramStageIntegration, IssuesMultiRegionProgramWithDeferredParameters) {
   RunTwoRegionAddProgram(ID4_PIPELINE_TEST_PROGRAM_FLAG_DEFER_PARAMETER_LOADS);
+}
+
+TEST(ProgramStageIntegration,
+     IssuesMultiRegionProgramWithPrefetchedParameters) {
+  RunTwoRegionAddProgram(
+      ID4_PIPELINE_TEST_PROGRAM_FLAG_DEFER_PARAMETER_LOADS |
+      ID4_PIPELINE_TEST_PROGRAM_FLAG_PREFETCH_DEFERRED_PARAMETER_LOADS);
 }
 
 TEST(ProgramStageIntegration, IssuesMultiRegionProgramWithDiagnosticTaps) {

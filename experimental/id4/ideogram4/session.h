@@ -387,6 +387,9 @@ typedef struct id4_ideogram4_generation_issue_options_t {
   iree_tokenizer_encode_flags_t tokenizer_flags;
   // Policy controlling how the full generation is submitted.
   id4_ideogram4_generation_issue_policy_t issue_policy;
+  // Number of future regions whose deferred parameter load groups may be
+  // submitted before the current region is issued.
+  iree_host_size_t parameter_load_prefetch_region_distance;
   // Kernel diagnostic artifacts requested for issue-time stage preparation.
   id4_pipeline_kernel_diagnostic_artifact_flags_t
       kernel_diagnostic_artifact_flags;
@@ -445,6 +448,9 @@ typedef struct id4_ideogram4_generation_phase_issue_options_t {
   const void* next;
   // Semaphores that phase issue waits on before queueing phase work.
   iree_hal_semaphore_list_t wait_semaphore_list;
+  // Number of future regions whose deferred parameter load groups may be
+  // submitted before the current region is issued.
+  iree_host_size_t parameter_load_prefetch_region_distance;
   // Semaphores signaled after the phase completes.
   iree_hal_semaphore_list_t signal_semaphore_list;
   // Diagnostics sink for issue events.
