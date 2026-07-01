@@ -3048,9 +3048,13 @@ static iree_status_t loom_low_lower_emit_region_ops(
     }
     loom_op_t* source_op = NULL;
     loom_block_for_each_op(source_block, source_op) {
+      const uint32_t before_error_count = context->result->error_count;
       bool handled = false;
       status = loom_low_lower_structural_op(context, source_op, &handled);
       if (!iree_status_is_ok(status)) {
+        break;
+      }
+      if (context->result->error_count != before_error_count) {
         break;
       }
       if (!handled) {
@@ -3059,6 +3063,9 @@ static iree_status_t loom_low_lower_emit_region_ops(
         }
         status = loom_low_lower_emit_selected_plan(context, source_op);
         if (!iree_status_is_ok(status)) {
+          break;
+        }
+        if (context->result->error_count != before_error_count) {
           break;
         }
       }
@@ -3075,7 +3082,7 @@ static iree_status_t loom_low_lower_emit_body(loom_low_lower_context_t* context,
   iree_status_t status = loom_low_lower_emit_region_ops(
       context, source_body, /*map_source_blocks=*/true);
   loom_builder_restore(&context->builder, saved_ip);
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && context->result->error_count == 0) {
     IREE_ASSERT_EQ(context->lowering.selected_plan_emit_index,
                    context->lowering.selected_plan_count);
   }

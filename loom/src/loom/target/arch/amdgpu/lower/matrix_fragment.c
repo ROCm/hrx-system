@@ -19,6 +19,7 @@
 #include "loom/ops/vector/memory.h"
 #include "loom/ops/vector/ops.h"
 #include "loom/ops/view/ops.h"
+#include "loom/target/arch/amdgpu/error_catalog.h"
 #include "loom/target/arch/amdgpu/lower/constants.h"
 #include "loom/target/arch/amdgpu/lower/emit.h"
 #include "loom/target/arch/amdgpu/lower/legality.h"
@@ -316,6 +317,103 @@ static bool loom_amdgpu_fragment_memory_exact_nonnegative_i64(
     int64_t* out_value) {
   return loom_amdgpu_value_facts_as_exact_non_negative_i64(
       loom_value_fact_table_lookup(fact_table, value_id), out_value);
+}
+
+static bool loom_amdgpu_fragment_repack_shape_value_matches(
+    const loom_value_fact_table_t* fact_table, loom_value_id_t source_value,
+    loom_value_id_t result_value) {
+  if (source_value == result_value) {
+    return true;
+  }
+  int64_t source_exact = 0;
+  int64_t result_exact = 0;
+  return loom_amdgpu_fragment_memory_exact_nonnegative_i64(
+             fact_table, source_value, &source_exact) &&
+         loom_amdgpu_fragment_memory_exact_nonnegative_i64(
+             fact_table, result_value, &result_exact) &&
+         source_exact == result_exact;
+}
+
+static bool loom_amdgpu_fragment_repack_shape_matches(
+    const loom_value_fact_table_t* fact_table,
+    loom_vector_fragment_fact_t source_fact, loom_value_id_t rows,
+    loom_value_id_t columns) {
+  return source_fact.shape_rank == 2 &&
+         loom_amdgpu_fragment_repack_shape_value_matches(
+             fact_table, source_fact.shape_value_ids[0], rows) &&
+         loom_amdgpu_fragment_repack_shape_value_matches(
+             fact_table, source_fact.shape_value_ids[1], columns);
+}
+
+static iree_string_view_t loom_amdgpu_fragment_repack_role_flags_key(
+    loom_vector_fragment_role_flags_t role_flags) {
+  switch (role_flags) {
+    case LOOM_VECTOR_FRAGMENT_ROLE_FLAG_LHS:
+      return IREE_SV("lhs");
+    case LOOM_VECTOR_FRAGMENT_ROLE_FLAG_RHS:
+      return IREE_SV("rhs");
+    case LOOM_VECTOR_FRAGMENT_ROLE_FLAG_INIT:
+      return IREE_SV("init");
+    case LOOM_VECTOR_FRAGMENT_ROLE_FLAG_RESULT:
+      return IREE_SV("result");
+    case LOOM_VECTOR_FRAGMENT_ROLE_FLAG_INIT |
+        LOOM_VECTOR_FRAGMENT_ROLE_FLAG_RESULT:
+      return IREE_SV("accumulator_result");
+    default:
+      return IREE_SV("unknown");
+  }
+}
+
+static iree_string_view_t loom_amdgpu_fragment_repack_reason_key(
+    loom_amdgpu_fragment_repack_reason_t reason) {
+  switch (reason) {
+    case LOOM_AMDGPU_FRAGMENT_REPACK_REASON_NONE:
+      return IREE_SV("none");
+    case LOOM_AMDGPU_FRAGMENT_REPACK_REASON_SOURCE_FACTS:
+      return IREE_SV("source_fragment_facts");
+    case LOOM_AMDGPU_FRAGMENT_REPACK_REASON_SHAPE:
+      return IREE_SV("fragment_shape");
+    case LOOM_AMDGPU_FRAGMENT_REPACK_REASON_ROLE_TRANSITION:
+      return IREE_SV("role_transition");
+    case LOOM_AMDGPU_FRAGMENT_REPACK_REASON_TYPE_TRANSITION:
+      return IREE_SV("type_transition");
+    case LOOM_AMDGPU_FRAGMENT_REPACK_REASON_ROLE_TYPE_TRANSITION:
+      return IREE_SV("role_type_transition");
+    default:
+      return IREE_SV("unknown");
+  }
+}
+
+iree_string_view_t loom_amdgpu_fragment_repack_plan_key(
+    const loom_amdgpu_fragment_repack_plan_t* plan) {
+  switch (plan->strategy) {
+    case LOOM_AMDGPU_FRAGMENT_REPACK_STRATEGY_ALIAS:
+      return IREE_SV("amdgpu.fragment_repack.strategy.alias");
+    case LOOM_AMDGPU_FRAGMENT_REPACK_STRATEGY_DIAGNOSTIC:
+      return IREE_SV("amdgpu.fragment_repack.strategy.diagnostic");
+    case LOOM_AMDGPU_FRAGMENT_REPACK_STRATEGY_NONE:
+    default:
+      return iree_string_view_empty();
+  }
+}
+
+static loom_amdgpu_fragment_repack_reason_t
+loom_amdgpu_fragment_repack_transition_reason(
+    loom_vector_fragment_role_flags_t source_role_flags,
+    loom_vector_fragment_role_flags_t result_role_flags,
+    loom_type_t source_type, loom_type_t result_type) {
+  const bool role_matches = source_role_flags == result_role_flags;
+  const bool type_matches = loom_type_equal(source_type, result_type);
+  if (!role_matches && !type_matches) {
+    return LOOM_AMDGPU_FRAGMENT_REPACK_REASON_ROLE_TYPE_TRANSITION;
+  }
+  if (!role_matches) {
+    return LOOM_AMDGPU_FRAGMENT_REPACK_REASON_ROLE_TRANSITION;
+  }
+  if (!type_matches) {
+    return LOOM_AMDGPU_FRAGMENT_REPACK_REASON_TYPE_TRANSITION;
+  }
+  return LOOM_AMDGPU_FRAGMENT_REPACK_REASON_NONE;
 }
 
 static bool loom_amdgpu_fragment_memory_shape_matches(
@@ -2471,6 +2569,104 @@ iree_status_t loom_amdgpu_select_vector_fragment_store_plan(
   return loom_amdgpu_fragment_memory_select(context, source_op,
                                             LOOM_AMDGPU_MEMORY_OPERATION_STORE,
                                             out_plan, out_selected);
+}
+
+iree_status_t loom_amdgpu_select_vector_fragment_repack_plan(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_amdgpu_fragment_repack_plan_t* out_plan, bool* out_selected) {
+  *out_selected = false;
+  const loom_value_id_t source = loom_vector_fragment_repack_source(source_op);
+  const loom_value_id_t result = loom_vector_fragment_repack_result(source_op);
+  const loom_value_fact_table_t* fact_table =
+      loom_low_lower_context_fact_table(context);
+  const loom_module_t* module = loom_low_lower_context_module(context);
+  const loom_type_t source_type = loom_module_value_type(module, source);
+  const loom_type_t result_type = loom_module_value_type(module, result);
+  const loom_vector_fragment_role_flags_t result_role_flags =
+      loom_vector_fragment_fact_role_flags(
+          loom_vector_fragment_repack_role(source_op));
+  *out_plan = (loom_amdgpu_fragment_repack_plan_t){
+      .source = source,
+      .result = result,
+      .strategy = LOOM_AMDGPU_FRAGMENT_REPACK_STRATEGY_DIAGNOSTIC,
+      .reason = LOOM_AMDGPU_FRAGMENT_REPACK_REASON_SOURCE_FACTS,
+      .source_role_flags = 0,
+      .result_role_flags = result_role_flags,
+      .source_type = source_type,
+      .result_type = result_type,
+  };
+
+  loom_vector_fragment_fact_t source_fact = {0};
+  if (fact_table == NULL ||
+      !loom_vector_fragment_fact_query_value_facts(
+          &fact_table->context,
+          loom_value_fact_table_lookup(fact_table, source), &source_fact) ||
+      source_fact.role_flags == 0 || result_role_flags == 0) {
+    *out_selected = true;
+    return iree_ok_status();
+  }
+  out_plan->source_role_flags = source_fact.role_flags;
+
+  if (!loom_amdgpu_fragment_repack_shape_matches(
+          fact_table, source_fact, loom_vector_fragment_repack_rows(source_op),
+          loom_vector_fragment_repack_columns(source_op))) {
+    out_plan->reason = LOOM_AMDGPU_FRAGMENT_REPACK_REASON_SHAPE;
+    *out_selected = true;
+    return iree_ok_status();
+  }
+
+  const loom_amdgpu_fragment_repack_reason_t reason =
+      loom_amdgpu_fragment_repack_transition_reason(
+          source_fact.role_flags, result_role_flags, source_type, result_type);
+  if (reason == LOOM_AMDGPU_FRAGMENT_REPACK_REASON_NONE) {
+    out_plan->strategy = LOOM_AMDGPU_FRAGMENT_REPACK_STRATEGY_ALIAS;
+  } else {
+    out_plan->reason = reason;
+  }
+  *out_selected = true;
+  return iree_ok_status();
+}
+
+static iree_status_t loom_amdgpu_emit_fragment_repack_diagnostic(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_amdgpu_fragment_repack_plan_t* plan) {
+  loom_module_t* module = loom_low_lower_context_module(context);
+  const loom_diagnostic_param_t params[] = {
+      loom_param_string(loom_low_lower_context_target_key(context)),
+      loom_param_string(loom_low_lower_context_export_name(context)),
+      loom_param_string(loom_low_lower_context_config_key(context)),
+      loom_param_string(loom_low_lower_context_function_name(context)),
+      loom_param_string(loom_op_name(module, source_op)),
+      loom_param_string(
+          loom_amdgpu_fragment_repack_role_flags_key(plan->source_role_flags)),
+      loom_param_string(
+          loom_amdgpu_fragment_repack_role_flags_key(plan->result_role_flags)),
+      loom_param_type(plan->source_type),
+      loom_param_type(plan->result_type),
+      loom_param_string(loom_amdgpu_fragment_repack_plan_key(plan)),
+      loom_param_string(loom_amdgpu_fragment_repack_reason_key(plan->reason)),
+  };
+  return loom_low_lower_emit_error_ref(context, source_op,
+                                       LOOM_ERR_AMDGPU_041_REF, params,
+                                       IREE_ARRAYSIZE(params));
+}
+
+iree_status_t loom_amdgpu_lower_vector_fragment_repack(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_amdgpu_fragment_repack_plan_t* plan) {
+  switch (plan->strategy) {
+    case LOOM_AMDGPU_FRAGMENT_REPACK_STRATEGY_ALIAS:
+      return loom_low_lower_bind_value_alias(context, plan->source,
+                                             plan->result);
+    case LOOM_AMDGPU_FRAGMENT_REPACK_STRATEGY_DIAGNOSTIC:
+      return loom_amdgpu_emit_fragment_repack_diagnostic(context, source_op,
+                                                         plan);
+    case LOOM_AMDGPU_FRAGMENT_REPACK_STRATEGY_NONE:
+    default:
+      break;
+  }
+  return iree_make_status(IREE_STATUS_INTERNAL,
+                          "unknown AMDGPU fragment repack strategy");
 }
 
 iree_status_t loom_amdgpu_low_legality_verify_vector_fragment_memory(

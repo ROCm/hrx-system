@@ -135,8 +135,10 @@ enum loom_amdgpu_report_key_kind_e {
   LOOM_AMDGPU_REPORT_KEY_TABLE_LOOKUP_STRATEGY = 2,
   // Report the subgroup-reduce exchange and publication strategy.
   LOOM_AMDGPU_REPORT_KEY_SUBGROUP_REDUCE_STRATEGY = 3,
+  // Report the fragment-repack strategy selected by the plan.
+  LOOM_AMDGPU_REPORT_KEY_FRAGMENT_REPACK_STRATEGY = 4,
   // Maximum report-key kind accepted by dispatch rows.
-  LOOM_AMDGPU_REPORT_KEY_MAX = LOOM_AMDGPU_REPORT_KEY_SUBGROUP_REDUCE_STRATEGY,
+  LOOM_AMDGPU_REPORT_KEY_MAX = LOOM_AMDGPU_REPORT_KEY_FRAGMENT_REPACK_STRATEGY,
 };
 
 // Packing constants bridge the storage and preselection enum domains into the
@@ -534,6 +536,15 @@ LOOM_AMDGPU_DEFINE_DATA_SELECT(
 LOOM_AMDGPU_DEFINE_DATA_EMIT(loom_amdgpu_emit_vector_fragment_store_dispatch,
                              loom_amdgpu_fragment_memory_plan_t,
                              loom_amdgpu_lower_vector_fragment_store)
+
+LOOM_AMDGPU_DEFINE_DATA_SELECT(
+    loom_amdgpu_select_vector_fragment_repack_dispatch,
+    loom_amdgpu_fragment_repack_plan_t,
+    loom_amdgpu_select_vector_fragment_repack_plan)
+
+LOOM_AMDGPU_DEFINE_DATA_EMIT(loom_amdgpu_emit_vector_fragment_repack_dispatch,
+                             loom_amdgpu_fragment_repack_plan_t,
+                             loom_amdgpu_lower_vector_fragment_repack)
 
 LOOM_AMDGPU_DEFINE_DATA_SELECT(loom_amdgpu_select_vector_select_dispatch,
                                loom_amdgpu_vector_select_plan_t,
@@ -1060,6 +1071,8 @@ LOOM_AMDGPU_ASSERT_LEADING_SOURCE_FIELD(loom_amdgpu_clampf_plan_t, lower, 1);
 LOOM_AMDGPU_ASSERT_LEADING_SOURCE_FIELD(loom_amdgpu_clampf_plan_t, upper, 2);
 LOOM_AMDGPU_ASSERT_LEADING_SOURCE_FIELD(loom_amdgpu_vector_bitcast_plan_t,
                                         source, 0);
+LOOM_AMDGPU_ASSERT_LEADING_SOURCE_FIELD(loom_amdgpu_fragment_repack_plan_t,
+                                        source, 0);
 LOOM_AMDGPU_ASSERT_LEADING_SOURCE_FIELD(loom_amdgpu_vector_deinterleave_plan_t,
                                         source, 0);
 LOOM_AMDGPU_ASSERT_LEADING_SOURCE_FIELD(loom_amdgpu_table_lookup_plan_t, table,
@@ -1348,6 +1361,12 @@ static iree_string_view_t loom_amdgpu_plan_key(
       }
       return loom_amdgpu_table_lookup_plan_key(
           (const loom_amdgpu_table_lookup_plan_t*)plan.target_data);
+    case LOOM_AMDGPU_REPORT_KEY_FRAGMENT_REPACK_STRATEGY:
+      if (plan.target_data == NULL) {
+        return iree_string_view_empty();
+      }
+      return loom_amdgpu_fragment_repack_plan_key(
+          (const loom_amdgpu_fragment_repack_plan_t*)plan.target_data);
     default:
       return iree_string_view_empty();
   }

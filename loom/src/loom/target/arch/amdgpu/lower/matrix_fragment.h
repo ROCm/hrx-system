@@ -41,6 +41,11 @@ iree_status_t loom_amdgpu_select_vector_fragment_store_plan(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_amdgpu_fragment_memory_plan_t* out_plan, bool* out_selected);
 
+// Selects an AMDGPU matrix-fragment repack plan.
+iree_status_t loom_amdgpu_select_vector_fragment_repack_plan(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_amdgpu_fragment_repack_plan_t* out_plan, bool* out_selected);
+
 // Lowers a source vector.fragment.load op to lane-owned memory packets.
 iree_status_t loom_amdgpu_lower_vector_fragment_load(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
@@ -50,6 +55,15 @@ iree_status_t loom_amdgpu_lower_vector_fragment_load(
 iree_status_t loom_amdgpu_lower_vector_fragment_store(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_amdgpu_fragment_memory_plan_t* plan);
+
+// Lowers a source vector.fragment.repack op.
+iree_status_t loom_amdgpu_lower_vector_fragment_repack(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_amdgpu_fragment_repack_plan_t* plan);
+
+// Returns the compile-report plan key for a selected fragment repack plan.
+iree_string_view_t loom_amdgpu_fragment_repack_plan_key(
+    const loom_amdgpu_fragment_repack_plan_t* plan);
 
 // Marks the physical source values needed by a selected AMDGPU fragment memory
 // plan.

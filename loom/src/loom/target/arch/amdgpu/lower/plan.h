@@ -1179,6 +1179,49 @@ typedef struct loom_amdgpu_fragment_memory_plan_t {
   loom_value_id_t narrowed_result_scale_source;
 } loom_amdgpu_fragment_memory_plan_t;
 
+typedef enum loom_amdgpu_fragment_repack_strategy_e {
+  // No fragment repack strategy was selected.
+  LOOM_AMDGPU_FRAGMENT_REPACK_STRATEGY_NONE = 0,
+  // Source and result share the same physical fragment representation.
+  LOOM_AMDGPU_FRAGMENT_REPACK_STRATEGY_ALIAS = 1,
+  // Source and result require a target strategy that is not implemented.
+  LOOM_AMDGPU_FRAGMENT_REPACK_STRATEGY_DIAGNOSTIC = 2,
+} loom_amdgpu_fragment_repack_strategy_t;
+
+typedef enum loom_amdgpu_fragment_repack_reason_e {
+  // No rejection reason is associated with the selected strategy.
+  LOOM_AMDGPU_FRAGMENT_REPACK_REASON_NONE = 0,
+  // Source fragment facts were missing.
+  LOOM_AMDGPU_FRAGMENT_REPACK_REASON_SOURCE_FACTS = 1,
+  // Source and result fragment shapes differ.
+  LOOM_AMDGPU_FRAGMENT_REPACK_REASON_SHAPE = 2,
+  // Source and result roles require a target-owned layout transition.
+  LOOM_AMDGPU_FRAGMENT_REPACK_REASON_ROLE_TRANSITION = 3,
+  // Source and result element storage require a numeric conversion.
+  LOOM_AMDGPU_FRAGMENT_REPACK_REASON_TYPE_TRANSITION = 4,
+  // Source/result roles and element storage both require target work.
+  LOOM_AMDGPU_FRAGMENT_REPACK_REASON_ROLE_TYPE_TRANSITION = 5,
+} loom_amdgpu_fragment_repack_reason_t;
+
+typedef struct loom_amdgpu_fragment_repack_plan_t {
+  // Source fragment value being repacked.
+  loom_value_id_t source;
+  // Result fragment value receiving the repacked payload.
+  loom_value_id_t result;
+  // Target-owned repack strategy selected for this source/result pair.
+  loom_amdgpu_fragment_repack_strategy_t strategy;
+  // Reason associated with diagnostic strategies.
+  loom_amdgpu_fragment_repack_reason_t reason;
+  // Source fragment role fact bitset.
+  uint32_t source_role_flags;
+  // Result fragment role fact bitset.
+  uint32_t result_role_flags;
+  // Source vector type.
+  loom_type_t source_type;
+  // Result vector type.
+  loom_type_t result_type;
+} loom_amdgpu_fragment_repack_plan_t;
+
 #define LOOM_AMDGPU_EXPLICIT_PACKET_IMMEDIATE_CAPACITY 4
 
 typedef struct loom_amdgpu_explicit_packet_immediate_t {
