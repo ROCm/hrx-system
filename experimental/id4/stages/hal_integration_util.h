@@ -216,6 +216,22 @@ typedef struct StageDiagnostics {
   iree_duration_t parameter_load_group_submit_encode_duration_ns;
   // Maximum host-observed duration for one load group submit event.
   iree_duration_t parameter_load_group_submit_max_duration_ns;
+  // Number of issue-local encoded staging window events observed.
+  iree_host_size_t parameter_issue_encode_window_count;
+  // Total issue-local encoded staging window bytes observed.
+  iree_device_size_t parameter_issue_encode_window_staging_total_byte_length;
+  // Largest issue-local encoded staging window byte length observed.
+  iree_device_size_t parameter_issue_encode_window_staging_max_byte_length;
+  // Total provider source bytes planned through issue-local encode windows.
+  iree_device_size_t parameter_issue_encode_window_source_byte_length;
+  // Total final slab bytes planned through issue-local encode windows.
+  iree_device_size_t parameter_issue_encode_window_target_byte_length;
+  // Number of staging chunks planned through issue-local encode windows.
+  iree_host_size_t parameter_issue_encode_window_staging_chunk_count;
+  // Number of source gather batches planned through issue-local encode windows.
+  iree_host_size_t parameter_issue_encode_window_source_gather_batch_count;
+  // Number of encoder dispatches planned through issue-local encode windows.
+  iree_host_size_t parameter_issue_encode_window_encoder_dispatch_count;
 } StageDiagnostics;
 
 // Returns a diagnostics sink that counts lifecycle and kernel events.

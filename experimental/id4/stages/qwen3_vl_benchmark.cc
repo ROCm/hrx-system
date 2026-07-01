@@ -292,7 +292,7 @@ static void SetQwenBenchmarkLabel(
   IREE_CHECK_OK(ParseQwenWeightExecutionStrategy(&weight_execution_strategy));
   iree_string_view_t weight_execution_strategy_name =
       id4_qwen3_vl_weight_execution_strategy_name(weight_execution_strategy);
-  char label[1024];
+  char label[1536];
   std::snprintf(
       label, sizeof(label),
       "tokens=%" PRIu32 " weights=%.*s param_total=%" PRIu64
@@ -304,7 +304,11 @@ static void SetQwenBenchmarkLabel(
       " dispatches=%" PRIhsz
       " load_group_submit_ms[all=%.3f,gather=%.3f,encode=%.3f,max=%.3f]"
       " load_group_submit_count[total=%" PRIhsz ",gather=%" PRIhsz
-      ",encode=%" PRIhsz "]",
+      ",encode=%" PRIhsz
+      "]"
+      " issue_encode_window[count=%" PRIhsz ",staging=%" PRIu64
+      "MiB,max=%" PRIu64 "MiB,source=%" PRIu64 "MiB,target=%" PRIu64
+      "MiB,chunks=%" PRIhsz ",batches=%" PRIhsz ",dispatches=%" PRIhsz "]",
       token_count, static_cast<int>(weight_execution_strategy_name.size),
       weight_execution_strategy_name.data,
       CeilMiB(statistics.parameter_slab_byte_length),
@@ -332,7 +336,17 @@ static void SetQwenBenchmarkLabel(
           1000000.0,
       diagnostics.parameter_load_group_submit_count,
       diagnostics.parameter_load_group_submit_gather_count,
-      diagnostics.parameter_load_group_submit_encode_count);
+      diagnostics.parameter_load_group_submit_encode_count,
+      diagnostics.parameter_issue_encode_window_count,
+      CeilMiB(
+          diagnostics.parameter_issue_encode_window_staging_total_byte_length),
+      CeilMiB(
+          diagnostics.parameter_issue_encode_window_staging_max_byte_length),
+      CeilMiB(diagnostics.parameter_issue_encode_window_source_byte_length),
+      CeilMiB(diagnostics.parameter_issue_encode_window_target_byte_length),
+      diagnostics.parameter_issue_encode_window_staging_chunk_count,
+      diagnostics.parameter_issue_encode_window_source_gather_batch_count,
+      diagnostics.parameter_issue_encode_window_encoder_dispatch_count);
   iree_benchmark_set_label(benchmark_state, label);
 }
 

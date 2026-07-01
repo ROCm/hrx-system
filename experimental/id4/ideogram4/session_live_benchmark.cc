@@ -1539,6 +1539,7 @@ static iree_status_t SetGenerationBenchmarkLabel(
     const id4_ideogram4_generation_plan_summary_t& summary,
     const GenerationBenchmarkPlanStatistics& statistics,
     const id4_ideogram4_generation_resource_statistics_t& resource_statistics,
+    const id4::test::StageDiagnostics& diagnostics,
     const GenerationBenchmarkTimingStatistics& timing,
     uint64_t iteration_count) {
   const iree_string_view_t parameter_format =
@@ -1594,7 +1595,11 @@ static iree_status_t SetGenerationBenchmarkLabel(
       " boundary=%" PRIu64 "MiB kernels=%" PRIhsz " dispatches=%" PRIhsz
       " logical_live[boundary=%" PRIu64 "MiB,taps=%" PRIu64
       "MiB,resident=%" PRIu64 "MiB,phase_peak=%" PRIu64
-      "MiB,stage_serial_peak=%" PRIu64 "MiB,selected_peak=%" PRIu64 "MiB]",
+      "MiB,stage_serial_peak=%" PRIu64 "MiB,selected_peak=%" PRIu64
+      "MiB]"
+      " issue_encode_window[count=%" PRIhsz ",staging=%" PRIu64
+      "MiB,max=%" PRIu64 "MiB,source=%" PRIu64 "MiB,target=%" PRIu64
+      "MiB,chunks=%" PRIhsz ",batches=%" PRIhsz ",dispatches=%" PRIhsz "]",
       static_cast<int>(benchmark_scope.size), benchmark_scope.data,
       static_cast<int>(prompt_label.size), prompt_label.data,
       summary.qwen_token_count, summary.qwen_token_capacity,
@@ -1639,7 +1644,17 @@ static iree_status_t SetGenerationBenchmarkLabel(
       CeilMiB(resource_statistics.resident_stage_bundle_byte_length),
       CeilMiB(resource_statistics.phase_concurrent_total_peak_byte_length),
       CeilMiB(resource_statistics.stage_serial_total_peak_byte_length),
-      CeilMiB(selected_logical_peak_byte_length));
+      CeilMiB(selected_logical_peak_byte_length),
+      diagnostics.parameter_issue_encode_window_count,
+      CeilMiB(
+          diagnostics.parameter_issue_encode_window_staging_total_byte_length),
+      CeilMiB(
+          diagnostics.parameter_issue_encode_window_staging_max_byte_length),
+      CeilMiB(diagnostics.parameter_issue_encode_window_source_byte_length),
+      CeilMiB(diagnostics.parameter_issue_encode_window_target_byte_length),
+      diagnostics.parameter_issue_encode_window_staging_chunk_count,
+      diagnostics.parameter_issue_encode_window_source_gather_batch_count,
+      diagnostics.parameter_issue_encode_window_encoder_dispatch_count);
   if (iree_status_is_ok(status)) {
     status = AppendGenerationBenchmarkStageLabels(&label_builder, statistics);
   }
@@ -1674,8 +1689,9 @@ static iree_status_t RunGenerationEndToEndBenchmark(
   ParsedRequest request;
   IREE_RETURN_IF_ERROR(ParsePromptRequest(*prompt, &request));
 
-  id4_pipeline_diagnostics_sink_t diagnostics_sink;
-  id4_pipeline_diagnostics_sink_initialize_ignore(&diagnostics_sink);
+  id4::test::StageDiagnostics diagnostics = {};
+  id4_pipeline_diagnostics_sink_t diagnostics_sink =
+      id4::test::DiagnosticsSink(&diagnostics);
 
   iree_hal_device_t* device =
       id4_tooling_runtime_context_primary_device(&context.runtime_context);
@@ -1828,7 +1844,7 @@ static iree_status_t RunGenerationEndToEndBenchmark(
   IREE_RETURN_IF_ERROR(SetGenerationBenchmarkLabel(
       benchmark_state, context, last_residency, IREE_SV("end_to_end"),
       prompt->label, last_summary, last_statistics, last_resource_statistics,
-      timing_total, iteration_count));
+      diagnostics, timing_total, iteration_count));
   iree_benchmark_set_items_processed(
       benchmark_state, static_cast<int64_t>(iteration_count * token_count));
   return iree_ok_status();
@@ -1857,8 +1873,9 @@ static iree_status_t RunGenerationIssuePreparedBenchmark(
   ParsedRequest request;
   IREE_RETURN_IF_ERROR(ParsePromptRequest(*prompt, &request));
 
-  id4_pipeline_diagnostics_sink_t diagnostics_sink;
-  id4_pipeline_diagnostics_sink_initialize_ignore(&diagnostics_sink);
+  id4::test::StageDiagnostics diagnostics = {};
+  id4_pipeline_diagnostics_sink_t diagnostics_sink =
+      id4::test::DiagnosticsSink(&diagnostics);
 
   iree_hal_device_t* device =
       id4_tooling_runtime_context_primary_device(&context.runtime_context);
@@ -1916,6 +1933,7 @@ static iree_status_t RunGenerationIssuePreparedBenchmark(
       context, residency, bundle.get(), request, &diagnostics_sink,
       prepare_semaphore.get(), &prepare_value, completion_semaphore.get(),
       &completion_value);
+  diagnostics = {};
   if (iree_status_is_ok(status) && !capture_execution_profile) {
     status = iree_hal_begin_device_group_profiling_from_flags(
         context.runtime_context.device_group, iree_allocator_system(),
@@ -1972,8 +1990,8 @@ static iree_status_t RunGenerationIssuePreparedBenchmark(
   IREE_RETURN_IF_ERROR(status);
   IREE_RETURN_IF_ERROR(SetGenerationBenchmarkLabel(
       benchmark_state, context, residency, IREE_SV("prepared_issue"),
-      prompt->label, summary, statistics, resource_statistics, timing_total,
-      iteration_count));
+      prompt->label, summary, statistics, resource_statistics, diagnostics,
+      timing_total, iteration_count));
   iree_benchmark_set_items_processed(
       benchmark_state,
       static_cast<int64_t>(iteration_count * summary.qwen_token_count));
