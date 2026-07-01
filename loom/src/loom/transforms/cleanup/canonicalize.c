@@ -1951,6 +1951,12 @@ iree_status_t loom_canonicalizer_run_function(
         &seed_facts, &seed_arena, canonicalizer->module->values.capacity);
     if (iree_status_is_ok(status)) {
       loom_type_registry_configure_fact_context(&seed_facts.context);
+      if (options && options->seed_facts) {
+        seed_facts.context.target_bundle =
+            options->seed_facts->context.target_bundle;
+        seed_facts.context.target_data =
+            options->seed_facts->context.target_data;
+      }
     }
     if (iree_status_is_ok(status) && options && options->seed_facts) {
       status = loom_value_fact_table_clone_defined_facts(

@@ -114,6 +114,38 @@ low.kernel.def target(@target) workgroup_size(64, 4, 1) @dynamic_workgroup_count
 
 // ====
 
+amdgpu.target<gfx1100> @target {subgroup_size = 64}
+
+kernel.def target(@target) @target_subgroup_queries_use_wavefront_size() {
+  %c1 = index.constant 1 : index
+  %c128 = index.constant 128 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c128, %c1, %c1) : index
+} launch(%output: buffer) {
+  %subgroup_size = kernel.subgroup.size : index
+  %subgroup_count = kernel.subgroup.count : index
+  %sum = index.add %subgroup_size, %subgroup_count : index
+  %sum_i32 = index.cast %sum : index to i32
+  %value = vector.splat %sum_i32 : vector<1xi32>
+  %zero = index.constant 0 : offset
+  %output_view = buffer.view %output[%zero] : buffer -> view<1xi32, #dense>
+  vector.store %value, %output_view[0] : vector<1xi32>, view<1xi32, #dense>
+  kernel.return
+}
+
+// ----
+low.kernel.def target(@target) workgroup_size(128, 1, 1) @target_subgroup_queries_use_wavefront_size() asm<amdgpu.rdna3.core> {
+  %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
+  %subgroup_size = s_mov_b32 64
+  %subgroup_count = s_mov_b32 2
+  %sum_i32 = s_add_u32 %subgroup_size, %subgroup_count
+  %value = v_mov_b32_copy %sum_i32
+  %15 = v_mov_b32 0
+  global_store_b32_saddr %15, %value, %output_view
+  return
+}
+
+// ====
+
 amdgpu.target<gfx1100> @target {max_workgroup_size_x = 16}
 
 // ERROR@+1: TARGET/024 {axis="x"}
