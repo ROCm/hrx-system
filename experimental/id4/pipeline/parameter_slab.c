@@ -2063,14 +2063,15 @@ static iree_status_t id4_pipeline_parameter_slab_submit_encode_run(
   iree_host_size_t prepared_encoder_capacity =
       uses_encode_window ? encode_window_context->prepared_encoder_capacity
                          : step_count;
-  iree_host_size_t fallback_prepared_encoder_count = 0;
+  iree_host_size_t local_prepared_encoder_count = 0;
   iree_host_size_t* prepared_encoder_count =
       uses_encode_window ? &encode_window_context->prepared_encoder_count
-                         : &fallback_prepared_encoder_count;
+                         : &local_prepared_encoder_count;
   id4_pipeline_parameter_encode_staging_slot_t
-      fallback_slots[ID4_PIPELINE_PARAMETER_ENCODER_STAGING_SLOT_COUNT] = {0};
+      local_staging_slots[ID4_PIPELINE_PARAMETER_ENCODER_STAGING_SLOT_COUNT] = {
+          0};
   id4_pipeline_parameter_encode_staging_slot_t* slots =
-      uses_encode_window ? encode_window->staging_slots : fallback_slots;
+      uses_encode_window ? encode_window->staging_slots : local_staging_slots;
   iree_hal_semaphore_t* cleanup_semaphore = NULL;
   iree_hal_buffer_t* staging_buffer = NULL;
   iree_status_t status = iree_ok_status();
