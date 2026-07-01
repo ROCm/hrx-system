@@ -868,6 +868,18 @@ static bool id4_ideogram4_generation_bundle_stage_is_resident(
                                         descriptor->resident_stage_bit);
 }
 
+static bool id4_ideogram4_generation_stage_can_prepare_resident_bundle_eagerly(
+    id4_ideogram4_generation_stage_ordinal_t stage_ordinal) {
+  for (iree_host_size_t i = 0;
+       i < IREE_ARRAYSIZE(id4_ideogram4_generation_boundary_aliases); ++i) {
+    if (id4_ideogram4_generation_boundary_aliases[i].target_stage ==
+        stage_ordinal) {
+      return false;
+    }
+  }
+  return true;
+}
+
 static iree_status_t id4_ideogram4_generation_bundle_prepare_resident_stages(
     id4_ideogram4_generation_bundle_t* bundle,
     const id4_ideogram4_generation_prepare_options_t* options) {
@@ -885,6 +897,13 @@ static iree_status_t id4_ideogram4_generation_bundle_prepare_resident_stages(
     const id4_ideogram4_generation_stage_ordinal_t stage_ordinal =
         descriptor->ordinal;
     if (bundle->resident_stage_bundles[stage_ordinal]) continue;
+    if (!id4_ideogram4_generation_stage_can_prepare_resident_bundle_eagerly(
+            stage_ordinal)) {
+      // Imported stage-boundary tensors become semantically ready inside the
+      // generation schedule, so the prepared bundle is acquired with that
+      // schedule while the resident parameter slabs remain reusable.
+      continue;
+    }
     status = id4_ideogram4_generation_prepare_stage_bundle(
         bundle, stage_ordinal,
         ID4_IDEOGRAM4_GENERATION_STAGE_PREPARE_MODE_RETAIN_PARAMETERS,
