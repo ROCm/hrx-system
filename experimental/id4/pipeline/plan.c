@@ -370,6 +370,7 @@ static iree_status_t id4_pipeline_plan_copy_parameter_load_steps(
     target->request_offset = source->request_offset;
     target->request_count = source->request_count;
     target->source_count = source->source_count;
+    target->readiness_group_key = source->readiness_group_key;
     IREE_RETURN_IF_ERROR(id4_pipeline_string_clone(
         source->name, plan->host_allocator, &target->name));
     IREE_RETURN_IF_ERROR(id4_pipeline_string_clone(
@@ -1764,6 +1765,13 @@ static bool id4_pipeline_plan_parameter_load_step_is_encode(
   }
 }
 
+static bool id4_pipeline_plan_parameter_load_steps_share_readiness_group(
+    const id4_pipeline_parameter_load_step_t* lhs,
+    const id4_pipeline_parameter_load_step_t* rhs) {
+  return lhs->target_slab_index == rhs->target_slab_index &&
+         lhs->readiness_group_key == rhs->readiness_group_key;
+}
+
 static void id4_pipeline_plan_accumulate_parameter_load_group_statistics(
     const id4_pipeline_plan_t* plan,
     id4_pipeline_plan_statistics_t* statistics) {
@@ -1779,14 +1787,13 @@ static void id4_pipeline_plan_accumulate_parameter_load_group_statistics(
     }
 
     ++statistics->parameter_encode_load_group_count;
-    const iree_host_size_t target_slab_index = step->target_slab_index;
     do {
       ++step_index;
     } while (step_index < plan->parameter_load_step_count &&
              id4_pipeline_plan_parameter_load_step_is_encode(
                  &plan->parameter_load_steps[step_index]) &&
-             plan->parameter_load_steps[step_index].target_slab_index ==
-                 target_slab_index);
+             id4_pipeline_plan_parameter_load_steps_share_readiness_group(
+                 step, &plan->parameter_load_steps[step_index]));
   }
 }
 
@@ -2427,6 +2434,12 @@ iree_status_t id4_pipeline_plan_format_json(const id4_pipeline_plan_t* plan,
         iree_string_builder_append_cstring(builder, ",\"kind\":"));
     IREE_RETURN_IF_ERROR(id4_pipeline_plan_append_parameter_load_step_kind_json(
         builder, step->kind));
+    if (step->readiness_group_key !=
+        ID4_PIPELINE_PARAMETER_LOAD_READINESS_GROUP_NONE) {
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+          builder, ",\"readiness_group_key\":%" PRIhsz,
+          step->readiness_group_key));
+    }
     if (step->source_count != 0) {
       IREE_RETURN_IF_ERROR(
           iree_string_builder_append_cstring(builder, ",\"sources\":"));

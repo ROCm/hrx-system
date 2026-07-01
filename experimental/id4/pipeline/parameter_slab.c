@@ -1748,10 +1748,13 @@ static iree_host_size_t id4_pipeline_parameter_slab_encode_run_count(
     const id4_pipeline_parameter_load_step_t* load_steps) {
   const iree_host_size_t target_slab_index =
       load_steps[start_index].target_slab_index;
+  const iree_host_size_t readiness_group_key =
+      load_steps[start_index].readiness_group_key;
   iree_host_size_t end_index = start_index;
   while (end_index < load_step_count &&
          id4_pipeline_parameter_load_step_is_encode(&load_steps[end_index]) &&
-         load_steps[end_index].target_slab_index == target_slab_index) {
+         load_steps[end_index].target_slab_index == target_slab_index &&
+         load_steps[end_index].readiness_group_key == readiness_group_key) {
     ++end_index;
   }
   return end_index - start_index;

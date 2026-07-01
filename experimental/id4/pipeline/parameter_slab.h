@@ -122,6 +122,9 @@ typedef enum id4_pipeline_parameter_load_group_kind_e {
   ID4_PIPELINE_PARAMETER_LOAD_GROUP_KIND_ENCODE = 2u,
 } id4_pipeline_parameter_load_group_kind_e;
 
+// Sentinel readiness partition for load steps without a consumer-region key.
+#define ID4_PIPELINE_PARAMETER_LOAD_READINESS_GROUP_NONE IREE_HOST_SIZE_MAX
+
 // Production staging chunk byte budget for prepare-time parameter encoders.
 static const iree_device_size_t
     ID4_PIPELINE_PARAMETER_ENCODER_DEFAULT_STAGING_CHUNK_BYTE_CAPACITY =
@@ -177,6 +180,8 @@ typedef struct id4_pipeline_parameter_load_step_t {
   iree_host_size_t request_count;
   // Optional request ordinals for non-contiguous direct gather steps.
   const iree_host_size_t* request_indices;
+  // Semantic partition key used to keep readiness edges consumer-precise.
+  iree_host_size_t readiness_group_key;
 } id4_pipeline_parameter_load_step_t;
 
 // Contiguous prepare-time work submitted under one readiness edge.
@@ -208,6 +213,7 @@ id4_pipeline_parameter_gather_load_step(iree_string_view_t name,
   step.request_offset = request_offset;
   step.request_count = request_count;
   step.request_indices = NULL;
+  step.readiness_group_key = ID4_PIPELINE_PARAMETER_LOAD_READINESS_GROUP_NONE;
   return step;
 }
 
@@ -227,6 +233,7 @@ id4_pipeline_parameter_indexed_gather_load_step(
   step.request_offset = 0;
   step.request_count = request_count;
   step.request_indices = request_indices;
+  step.readiness_group_key = ID4_PIPELINE_PARAMETER_LOAD_READINESS_GROUP_NONE;
   return step;
 }
 
@@ -247,6 +254,7 @@ id4_pipeline_parameter_encode_fp8_e4m3_scaled_to_bf16_load_step(
   step.request_offset = request_offset;
   step.request_count = 1;
   step.request_indices = NULL;
+  step.readiness_group_key = ID4_PIPELINE_PARAMETER_LOAD_READINESS_GROUP_NONE;
   return step;
 }
 
@@ -266,6 +274,7 @@ id4_pipeline_parameter_encode_bf16_linear_rhs_tile_load_step(
   step.request_offset = request_offset;
   step.request_count = 1;
   step.request_indices = NULL;
+  step.readiness_group_key = ID4_PIPELINE_PARAMETER_LOAD_READINESS_GROUP_NONE;
   return step;
 }
 
@@ -286,6 +295,7 @@ id4_pipeline_parameter_encode_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_load_step(
   step.request_offset = request_offset;
   step.request_count = 1;
   step.request_indices = NULL;
+  step.readiness_group_key = ID4_PIPELINE_PARAMETER_LOAD_READINESS_GROUP_NONE;
   return step;
 }
 

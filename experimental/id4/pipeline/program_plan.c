@@ -706,9 +706,18 @@ static iree_status_t id4_pipeline_program_plan_build_parameter_requests(
   return iree_ok_status();
 }
 
+static iree_host_size_t id4_pipeline_program_plan_parameter_readiness_group_key(
+    const iree_host_size_t* request_readiness_group_keys,
+    iree_host_size_t request_index) {
+  return request_readiness_group_keys
+             ? request_readiness_group_keys[request_index]
+             : ID4_PIPELINE_PARAMETER_LOAD_READINESS_GROUP_NONE;
+}
+
 static void id4_pipeline_program_plan_build_parameter_load_steps(
     iree_host_size_t parameter_count,
     const id4_pipeline_program_plan_parameter_load_record_t* load_records,
+    const iree_host_size_t* request_readiness_group_keys,
     id4_pipeline_parameter_load_step_t* load_steps,
     iree_host_size_t* direct_request_indices,
     iree_host_size_t* out_load_step_count) {
@@ -718,6 +727,9 @@ static void id4_pipeline_program_plan_build_parameter_load_steps(
   for (iree_host_size_t i = 0; i < parameter_count; ++i) {
     const id4_pipeline_program_plan_parameter_load_record_t* record =
         &load_records[i];
+    const iree_host_size_t readiness_group_key =
+        id4_pipeline_program_plan_parameter_readiness_group_key(
+            request_readiness_group_keys, i);
     switch (record->encoding) {
       case ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_DIRECT:
         continue;
@@ -727,6 +739,8 @@ static void id4_pipeline_program_plan_build_parameter_load_steps(
                 IREE_SV("parameters.encode_fp8_e4m3_scaled_to_bf16"),
                 record->source_count, record->sources,
                 /*target_slab_index=*/0, /*request_offset=*/i);
+        load_steps[*out_load_step_count].readiness_group_key =
+            readiness_group_key;
         break;
       case ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_BF16_LINEAR_RHS_TILE:
         load_steps[*out_load_step_count] =
@@ -734,6 +748,8 @@ static void id4_pipeline_program_plan_build_parameter_load_steps(
                 IREE_SV("parameters.encode_bf16_linear_rhs_tile"),
                 record->source_count, record->sources,
                 /*target_slab_index=*/0, /*request_offset=*/i);
+        load_steps[*out_load_step_count].readiness_group_key =
+            readiness_group_key;
         break;
       case ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_FP8_E4M3_SCALED_TO_BF16_LINEAR_RHS_TILE:
         load_steps[*out_load_step_count] =
@@ -742,6 +758,8 @@ static void id4_pipeline_program_plan_build_parameter_load_steps(
                         "tile"),
                 record->source_count, record->sources,
                 /*target_slab_index=*/0, /*request_offset=*/i);
+        load_steps[*out_load_step_count].readiness_group_key =
+            readiness_group_key;
         break;
       default:
         continue;
@@ -756,12 +774,19 @@ static void id4_pipeline_program_plan_build_parameter_load_steps(
     if (record->encoding != ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_DIRECT) {
       continue;
     }
+    const iree_host_size_t readiness_group_key =
+        id4_pipeline_program_plan_parameter_readiness_group_key(
+            request_readiness_group_keys, i);
     bool source_scope_already_planned = false;
     for (iree_host_size_t j = 0; j < i; ++j) {
       const id4_pipeline_program_plan_parameter_load_record_t* previous =
           &load_records[j];
+      const iree_host_size_t previous_readiness_group_key =
+          id4_pipeline_program_plan_parameter_readiness_group_key(
+              request_readiness_group_keys, j);
       if (previous->encoding ==
               ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_DIRECT &&
+          previous_readiness_group_key == readiness_group_key &&
           iree_string_view_equal(previous->source_scope,
                                  record->source_scope)) {
         source_scope_already_planned = true;
@@ -776,8 +801,12 @@ static void id4_pipeline_program_plan_build_parameter_load_steps(
     for (iree_host_size_t j = i; j < parameter_count; ++j) {
       const id4_pipeline_program_plan_parameter_load_record_t* candidate =
           &load_records[j];
+      const iree_host_size_t candidate_readiness_group_key =
+          id4_pipeline_program_plan_parameter_readiness_group_key(
+              request_readiness_group_keys, j);
       if (candidate->encoding ==
               ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_DIRECT &&
+          candidate_readiness_group_key == readiness_group_key &&
           iree_string_view_equal(candidate->source_scope,
                                  record->source_scope)) {
         direct_request_indices[direct_request_index_count++] = j;
@@ -788,6 +817,7 @@ static void id4_pipeline_program_plan_build_parameter_load_steps(
         IREE_SV("parameters.gather"), record->source_scope,
         /*target_slab_index=*/0, direct_request_indices[request_index_start],
         direct_request_index_count - request_index_start);
+    load_steps[*out_load_step_count].readiness_group_key = readiness_group_key;
     for (iree_host_size_t j = request_index_start;
          j < direct_request_index_count; ++j) {
       const iree_host_size_t expected_request_index =
@@ -799,6 +829,8 @@ static void id4_pipeline_program_plan_build_parameter_load_steps(
                 /*target_slab_index=*/0,
                 direct_request_index_count - request_index_start,
                 &direct_request_indices[request_index_start]);
+        load_steps[*out_load_step_count].readiness_group_key =
+            readiness_group_key;
         break;
       }
     }
@@ -844,6 +876,96 @@ id4_pipeline_program_plan_build_parameter_request_indices_by_tensor(
         "program parameter request count %" PRIhsz
         " does not match counted parameter operations %" PRIhsz,
         request_index, counts.parameter_count);
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t
+id4_pipeline_program_plan_mark_parameter_tensor_first_reader(
+    const id4_pipeline_program_plan_options_t* options,
+    id4_pipeline_program_tensor_t tensor,
+    const iree_host_size_t* parameter_request_indices_by_tensor,
+    iree_host_size_t region_index,
+    iree_host_size_t* parameter_request_readiness_group_keys) {
+  const iree_host_size_t tensor_count =
+      id4_pipeline_program_tensor_count(options->program);
+  if ((iree_host_size_t)tensor.ordinal >= tensor_count) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "program tensor %u is missing", tensor.ordinal);
+  }
+  const iree_host_size_t request_index =
+      parameter_request_indices_by_tensor[tensor.ordinal];
+  if (request_index == IREE_HOST_SIZE_MAX) return iree_ok_status();
+  if (parameter_request_readiness_group_keys[request_index] ==
+      ID4_PIPELINE_PARAMETER_LOAD_READINESS_GROUP_NONE) {
+    parameter_request_readiness_group_keys[request_index] = region_index;
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t
+id4_pipeline_program_plan_mark_parameter_first_readers_for_op(
+    const id4_pipeline_program_plan_options_t* options,
+    const id4_pipeline_program_op_t* op,
+    const iree_host_size_t* parameter_request_indices_by_tensor,
+    iree_host_size_t region_index,
+    iree_host_size_t* parameter_request_readiness_group_keys) {
+  if (!op) return iree_ok_status();
+  switch (op->kind) {
+    case ID4_PIPELINE_PROGRAM_OP_KIND_DISPATCH_LOOM:
+      for (iree_host_size_t i = 0; i < op->payload.dispatch_loom.binding_count;
+           ++i) {
+        const id4_pipeline_program_dispatch_binding_t* binding =
+            &op->payload.dispatch_loom.bindings[i];
+        if (!iree_any_bit_set(binding->access,
+                              ID4_PIPELINE_PROGRAM_TENSOR_ACCESS_READ)) {
+          continue;
+        }
+        IREE_RETURN_IF_ERROR(
+            id4_pipeline_program_plan_mark_parameter_tensor_first_reader(
+                options, binding->tensor, parameter_request_indices_by_tensor,
+                region_index, parameter_request_readiness_group_keys));
+      }
+      return iree_ok_status();
+    case ID4_PIPELINE_PROGRAM_OP_KIND_TAP:
+      if (!id4_pipeline_program_plan_tap_name_requested(options,
+                                                        op->payload.tap.name)) {
+        return iree_ok_status();
+      }
+      return id4_pipeline_program_plan_mark_parameter_tensor_first_reader(
+          options, op->payload.tap.tensor, parameter_request_indices_by_tensor,
+          region_index, parameter_request_readiness_group_keys);
+    default:
+      return iree_ok_status();
+  }
+}
+
+static iree_status_t
+id4_pipeline_program_plan_build_parameter_request_readiness_group_keys(
+    const id4_pipeline_program_plan_options_t* options,
+    iree_host_size_t parameter_count, iree_host_size_t range_count,
+    const id4_pipeline_program_plan_region_range_t* ranges,
+    const iree_host_size_t* parameter_request_indices_by_tensor,
+    iree_host_size_t* parameter_request_readiness_group_keys) {
+  for (iree_host_size_t i = 0; i < parameter_count; ++i) {
+    parameter_request_readiness_group_keys[i] =
+        ID4_PIPELINE_PARAMETER_LOAD_READINESS_GROUP_NONE;
+  }
+  for (iree_host_size_t region_index = 0; region_index < range_count;
+       ++region_index) {
+    const id4_pipeline_program_plan_region_range_t* range =
+        &ranges[region_index];
+    const iree_host_size_t operation_limit =
+        range->source_operation_offset + range->source_operation_count;
+    for (iree_host_size_t operation_index = range->source_operation_offset;
+         operation_index < operation_limit; ++operation_index) {
+      const id4_pipeline_program_op_t* op =
+          id4_pipeline_program_operation_at(options->program, operation_index);
+      IREE_RETURN_IF_ERROR(
+          id4_pipeline_program_plan_mark_parameter_first_readers_for_op(
+              options, op, parameter_request_indices_by_tensor, region_index,
+              parameter_request_readiness_group_keys));
+    }
   }
   return iree_ok_status();
 }
@@ -1833,6 +1955,7 @@ iree_status_t id4_pipeline_program_create_plan(
   id4_pipeline_parameter_load_step_t* parameter_load_steps = NULL;
   iree_host_size_t* parameter_load_step_request_indices = NULL;
   iree_host_size_t* parameter_request_indices_by_tensor = NULL;
+  iree_host_size_t* parameter_request_readiness_group_keys = NULL;
   iree_host_size_t* parameter_load_groups_by_request = NULL;
   id4_pipeline_constant_request_t* constant_requests = NULL;
   id4_pipeline_boundary_tensor_plan_t* boundary_tensors = NULL;
@@ -1916,6 +2039,12 @@ iree_status_t id4_pipeline_program_create_plan(
         host_allocator, id4_pipeline_program_tensor_count(options->program),
         sizeof(parameter_request_indices_by_tensor[0]),
         (void**)&parameter_request_indices_by_tensor);
+  }
+  if (iree_status_is_ok(status) && counts.parameter_count != 0) {
+    status = iree_allocator_malloc_array(
+        host_allocator, counts.parameter_count,
+        sizeof(parameter_request_readiness_group_keys[0]),
+        (void**)&parameter_request_readiness_group_keys);
   }
   if (iree_status_is_ok(status) && counts.parameter_count != 0) {
     status =
@@ -2019,14 +2148,22 @@ iree_status_t id4_pipeline_program_create_plan(
         parameter_load_sources, &parameter_slab_byte_length);
   }
   if (iree_status_is_ok(status) && counts.parameter_count != 0) {
-    id4_pipeline_program_plan_build_parameter_load_steps(
-        counts.parameter_count, parameter_load_records, parameter_load_steps,
-        parameter_load_step_request_indices, &parameter_load_step_count);
-  }
-  if (iree_status_is_ok(status) && counts.parameter_count != 0) {
     status =
         id4_pipeline_program_plan_build_parameter_request_indices_by_tensor(
             options, counts, parameter_request_indices_by_tensor);
+  }
+  if (iree_status_is_ok(status) && counts.parameter_count != 0) {
+    status =
+        id4_pipeline_program_plan_build_parameter_request_readiness_group_keys(
+            options, counts.parameter_count, region_range_count, region_ranges,
+            parameter_request_indices_by_tensor,
+            parameter_request_readiness_group_keys);
+  }
+  if (iree_status_is_ok(status) && counts.parameter_count != 0) {
+    id4_pipeline_program_plan_build_parameter_load_steps(
+        counts.parameter_count, parameter_load_records,
+        parameter_request_readiness_group_keys, parameter_load_steps,
+        parameter_load_step_request_indices, &parameter_load_step_count);
   }
   if (iree_status_is_ok(status) && counts.parameter_count != 0) {
     status = id4_pipeline_program_plan_build_parameter_request_load_groups(
@@ -2288,6 +2425,7 @@ iree_status_t id4_pipeline_program_create_plan(
   iree_allocator_free(host_allocator, boundary_tensors);
   iree_allocator_free(host_allocator, constant_requests);
   iree_allocator_free(host_allocator, parameter_load_groups_by_request);
+  iree_allocator_free(host_allocator, parameter_request_readiness_group_keys);
   iree_allocator_free(host_allocator, parameter_request_indices_by_tensor);
   iree_allocator_free(host_allocator, parameter_load_step_request_indices);
   iree_allocator_free(host_allocator, parameter_load_steps);
