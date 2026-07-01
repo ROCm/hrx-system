@@ -6,7 +6,11 @@
 
 #include "experimental/id4/ideogram4/session_generation.h"
 
+#include <float.h>
 #include <inttypes.h>
+#include <math.h>
+
+#include "experimental/id4/stages/ideogram4_decode.h"
 
 const id4_ideogram4_generation_stage_descriptor_t
     id4_ideogram4_generation_stage_descriptors
@@ -220,6 +224,48 @@ id4_ideogram4_generation_request_diffusion_latent_shape(
   return id4_pipeline_program_make_shape_rank4(
       request->generation.latent_width, request->generation.latent_height, 128,
       1);
+}
+
+iree_status_t id4_ideogram4_validate_generation_request(
+    const id4_ideogram4_session_t* session,
+    const id4_ideogram4_request_t* request) {
+  if (!request) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "Ideogram 4 generation request is required");
+  }
+  if (!iree_all_bits_set(request->flags,
+                         ID4_IDEOGRAM4_REQUEST_FLAG_HAS_GENERATION)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "Ideogram 4 generation request metadata is required");
+  }
+  if (request->generation.denoise_step_count == 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "Ideogram 4 generation step count is zero");
+  }
+  if (request->generation.latent_width == 0 ||
+      request->generation.latent_height == 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "Ideogram 4 generation latent dimensions must be "
+                            "nonzero");
+  }
+  if (!isfinite(request->generation.guidance_scale) ||
+      request->generation.guidance_scale <= 0.0f ||
+      request->generation.guidance_scale > FLT_MAX) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "Ideogram 4 generation guidance scale is invalid");
+  }
+  id4_pipeline_program_shape_t latent_shape =
+      id4_ideogram4_generation_request_diffusion_latent_shape(request);
+  if (latent_shape.dims[2] != session->dit_model.input_channel_count) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "Ideogram 4 generation latent channel count %" PRIu64
+        " does not match DiT channel count %" PRIu32,
+        latent_shape.dims[2], session->dit_model.input_channel_count);
+  }
+  return id4_ideogram4_decode_program_validate_diffusion_latent_shape(
+      session->decode_model, latent_shape);
 }
 
 iree_status_t id4_ideogram4_validate_generation_phase_mask(

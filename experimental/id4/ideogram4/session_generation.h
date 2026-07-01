@@ -54,6 +54,11 @@ id4_pipeline_program_shape_t
 id4_ideogram4_generation_request_diffusion_latent_shape(
     const id4_ideogram4_request_t* request);
 
+// Validates the request shape and model compatibility for generation.
+iree_status_t id4_ideogram4_validate_generation_request(
+    const id4_ideogram4_session_t* session,
+    const id4_ideogram4_request_t* request);
+
 // Validates a public generation phase mask.
 iree_status_t id4_ideogram4_validate_generation_phase_mask(
     id4_ideogram4_generation_phase_mask_t phase_mask);
