@@ -30,6 +30,12 @@ TEST_BENCHMARK_LABEL = (
     "param_source_direct=4169MiB param_source_encoded=27848MiB "
     "param_load_steps[gather=322,encode=529] "
     "param_load_groups[total=851,gather=322,encode=529] "
+    "param_load_kind[gather_steps=322,gather_source=4169MiB,"
+    "gather_target=4169MiB,fp8_bf16_steps=421,"
+    "fp8_bf16_source=17480MiB,fp8_bf16_target=34924MiB,"
+    "bf16_rhs_steps=108,bf16_rhs_source=10368MiB,"
+    "bf16_rhs_target=10368MiB,fp8_bf16_rhs_steps=0,"
+    "fp8_bf16_rhs_source=0MiB,fp8_bf16_rhs_target=0MiB] "
     "local_hw_total=43MiB "
     "local_hw_largest=20MiB boundary=9MiB kernels=119 dispatches=1507 "
     "logical_live[boundary=5MiB,taps=0MiB,resident=0MiB,"
@@ -58,6 +64,76 @@ TEST_BENCHMARK_LABEL = (
 )
 
 
+def load_kind_statistics(
+    *,
+    gather_steps: int = 0,
+    gather_source_mib: int = 0,
+    gather_target_mib: int = 0,
+    fp8_bf16_steps: int = 0,
+    fp8_bf16_source_mib: int = 0,
+    fp8_bf16_target_mib: int = 0,
+    bf16_rhs_steps: int = 0,
+    bf16_rhs_source_mib: int = 0,
+    bf16_rhs_target_mib: int = 0,
+    fp8_bf16_rhs_steps: int = 0,
+    fp8_bf16_rhs_source_mib: int = 0,
+    fp8_bf16_rhs_target_mib: int = 0,
+) -> dict:
+    return load_kind_statistics_bytes(
+        gather_steps=gather_steps,
+        gather_source_byte_length=gather_source_mib * MIB,
+        gather_target_byte_length=gather_target_mib * MIB,
+        fp8_bf16_steps=fp8_bf16_steps,
+        fp8_bf16_source_byte_length=fp8_bf16_source_mib * MIB,
+        fp8_bf16_target_byte_length=fp8_bf16_target_mib * MIB,
+        bf16_rhs_steps=bf16_rhs_steps,
+        bf16_rhs_source_byte_length=bf16_rhs_source_mib * MIB,
+        bf16_rhs_target_byte_length=bf16_rhs_target_mib * MIB,
+        fp8_bf16_rhs_steps=fp8_bf16_rhs_steps,
+        fp8_bf16_rhs_source_byte_length=fp8_bf16_rhs_source_mib * MIB,
+        fp8_bf16_rhs_target_byte_length=fp8_bf16_rhs_target_mib * MIB,
+    )
+
+
+def load_kind_statistics_bytes(
+    *,
+    gather_steps: int = 0,
+    gather_source_byte_length: int = 0,
+    gather_target_byte_length: int = 0,
+    fp8_bf16_steps: int = 0,
+    fp8_bf16_source_byte_length: int = 0,
+    fp8_bf16_target_byte_length: int = 0,
+    bf16_rhs_steps: int = 0,
+    bf16_rhs_source_byte_length: int = 0,
+    bf16_rhs_target_byte_length: int = 0,
+    fp8_bf16_rhs_steps: int = 0,
+    fp8_bf16_rhs_source_byte_length: int = 0,
+    fp8_bf16_rhs_target_byte_length: int = 0,
+) -> dict:
+    return {
+        "gather": {
+            "step_count": gather_steps,
+            "source_byte_length": gather_source_byte_length,
+            "target_byte_length": gather_target_byte_length,
+        },
+        "encode_fp8_e4m3_scaled_to_bf16": {
+            "step_count": fp8_bf16_steps,
+            "source_byte_length": fp8_bf16_source_byte_length,
+            "target_byte_length": fp8_bf16_target_byte_length,
+        },
+        "encode_bf16_linear_rhs_tile": {
+            "step_count": bf16_rhs_steps,
+            "source_byte_length": bf16_rhs_source_byte_length,
+            "target_byte_length": bf16_rhs_target_byte_length,
+        },
+        "encode_fp8_e4m3_scaled_to_bf16_linear_rhs_tile": {
+            "step_count": fp8_bf16_rhs_steps,
+            "source_byte_length": fp8_bf16_rhs_source_byte_length,
+            "target_byte_length": fp8_bf16_rhs_target_byte_length,
+        },
+    }
+
+
 def stage_statistics(
     *,
     parameter_mib: int,
@@ -70,7 +146,17 @@ def stage_statistics(
     boundary_mib: int,
     kernels: int,
     dispatches: int,
+    load_kinds: dict | None = None,
 ) -> dict:
+    if load_kinds is None:
+        load_kinds = load_kind_statistics(
+            gather_steps=gather_loads,
+            gather_source_mib=source_direct_mib,
+            gather_target_mib=source_direct_mib,
+            fp8_bf16_rhs_steps=encode_loads,
+            fp8_bf16_rhs_source_mib=source_encoded_mib,
+            fp8_bf16_rhs_target_mib=source_encoded_mib,
+        )
     return {
         "statistics": {
             "parameter_slab_byte_length": parameter_mib * MIB,
@@ -94,6 +180,7 @@ def stage_statistics(
             "shared_tensor_count": 0,
             "operation_count": dispatches,
             "dispatch_count": dispatches,
+            "parameter_load_kind_statistics": load_kinds,
         }
     }
 
@@ -176,6 +263,11 @@ def minimal_generation_plan(qwen_token_count: int) -> dict:
                     "shared_tensor_count": 1,
                     "operation_count": 1571,
                     "dispatch_count": 1062,
+                    "parameter_load_kind_statistics": load_kind_statistics_bytes(
+                        gather_steps=1,
+                        gather_source_byte_length=2048,
+                        gather_target_byte_length=2048,
+                    ),
                 }
             },
             "decode": {
@@ -201,6 +293,11 @@ def minimal_generation_plan(qwen_token_count: int) -> dict:
                     "shared_tensor_count": 0,
                     "operation_count": 210,
                     "dispatch_count": 106,
+                    "parameter_load_kind_statistics": load_kind_statistics_bytes(
+                        gather_steps=1,
+                        gather_source_byte_length=95,
+                        gather_target_byte_length=95,
+                    ),
                 }
             },
         },
@@ -225,6 +322,7 @@ def live_label_generation_plan() -> dict:
             boundary_mib=1,
             kernels=1,
             dispatches=1,
+            load_kinds=load_kind_statistics(),
         ),
         "qwen": stage_statistics(
             parameter_mib=14436,
@@ -237,6 +335,14 @@ def live_label_generation_plan() -> dict:
             boundary_mib=4,
             kernels=28,
             dispatches=485,
+            load_kinds=load_kind_statistics(
+                gather_steps=36,
+                gather_source_mib=4068,
+                gather_target_mib=4068,
+                bf16_rhs_steps=108,
+                bf16_rhs_source_mib=10368,
+                bf16_rhs_target_mib=10368,
+            ),
         ),
         "dit_conditioned": stage_statistics(
             parameter_mib=17699,
@@ -249,6 +355,14 @@ def live_label_generation_plan() -> dict:
             boundary_mib=5,
             kernels=27,
             dispatches=458,
+            load_kinds=load_kind_statistics(
+                gather_steps=143,
+                gather_source_mib=3,
+                gather_target_mib=3,
+                fp8_bf16_steps=211,
+                fp8_bf16_source_mib=8857,
+                fp8_bf16_target_mib=17696,
+            ),
         ),
         "dit_unconditioned": stage_statistics(
             parameter_mib=17231,
@@ -261,6 +375,14 @@ def live_label_generation_plan() -> dict:
             boundary_mib=1,
             kernels=24,
             dispatches=455,
+            load_kinds=load_kind_statistics(
+                gather_steps=142,
+                gather_source_mib=3,
+                gather_target_mib=3,
+                fp8_bf16_steps=210,
+                fp8_bf16_source_mib=8623,
+                fp8_bf16_target_mib=17228,
+            ),
         ),
         "sampler_denoise": stage_statistics(
             parameter_mib=0,
@@ -273,6 +395,7 @@ def live_label_generation_plan() -> dict:
             boundary_mib=1,
             kernels=2,
             dispatches=2,
+            load_kinds=load_kind_statistics(),
         ),
         "decode": stage_statistics(
             parameter_mib=95,
@@ -285,6 +408,11 @@ def live_label_generation_plan() -> dict:
             boundary_mib=1,
             kernels=37,
             dispatches=106,
+            load_kinds=load_kind_statistics(
+                gather_steps=1,
+                gather_source_mib=95,
+                gather_target_mib=95,
+            ),
         ),
     }
     return plan
@@ -389,6 +517,11 @@ class GenerationBenchmarkSummaryTest(unittest.TestCase):
             self.assertEqual(row["runtime_parameter_load_group_count"], 851)
             self.assertEqual(row["runtime_parameter_gather_load_group_count"], 322)
             self.assertEqual(row["runtime_parameter_encode_load_group_count"], 529)
+            self.assertEqual(row["runtime_parameter_load_gather_source_mib"], 4169)
+            self.assertEqual(row["runtime_parameter_load_fp8_bf16_steps"], 421)
+            self.assertEqual(row["runtime_parameter_load_fp8_bf16_target_mib"], 34924)
+            self.assertEqual(row["runtime_parameter_load_bf16_rhs_steps"], 108)
+            self.assertEqual(row["runtime_parameter_load_bf16_rhs_source_mib"], 10368)
             self.assertEqual(row["runtime_dispatch_count"], 1507)
             self.assertEqual(row["logical_live_phase_peak_mib"], 34951)
             self.assertEqual(row["logical_live_stage_serial_peak_mib"], 17712)
@@ -467,7 +600,8 @@ class GenerationBenchmarkSummaryTest(unittest.TestCase):
             self.assertIn("| bucket | qwen tokens |", table)
             self.assertIn(
                 "| short128 | 19 | 32 | 83 | 128 | 3627.693 | 3477.614 | "
-                "150.049 | 4169 | 27848 | 2 | 318 | 1081 | 576 | 1507 |",
+                "150.049 | 4169 | 27848 | 17480 | 34924 | 10368 | 0 | "
+                "2 | 318 | 1081 | 576 | 1507 |",
                 table,
             )
 

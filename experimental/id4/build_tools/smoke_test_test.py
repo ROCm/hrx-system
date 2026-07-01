@@ -103,6 +103,28 @@ def minimal_generation_plan() -> dict:
                     "shared_tensor_count": 1,
                     "operation_count": 1571,
                     "dispatch_count": 1062,
+                    "parameter_load_kind_statistics": {
+                        "gather": {
+                            "step_count": 1,
+                            "source_byte_length": 1024,
+                            "target_byte_length": 1024,
+                        },
+                        "encode_fp8_e4m3_scaled_to_bf16": {
+                            "step_count": 0,
+                            "source_byte_length": 0,
+                            "target_byte_length": 0,
+                        },
+                        "encode_bf16_linear_rhs_tile": {
+                            "step_count": 0,
+                            "source_byte_length": 0,
+                            "target_byte_length": 0,
+                        },
+                        "encode_fp8_e4m3_scaled_to_bf16_linear_rhs_tile": {
+                            "step_count": 0,
+                            "source_byte_length": 0,
+                            "target_byte_length": 0,
+                        },
+                    },
                 }
             }
         },
@@ -507,6 +529,12 @@ class Id4SmokeTestTest(unittest.TestCase):
                 metrics["stages"]["qwen"]["memory_slab_high_water_mark"], 384
             )
             self.assertEqual(metrics["stages"]["qwen"]["parameter_load_group_count"], 1)
+            self.assertEqual(
+                metrics["stages"]["qwen"]["parameter_load_kind_statistics"]["gather"][
+                    "source_byte_length"
+                ],
+                1024,
+            )
             self.assertEqual(metrics["stages"]["qwen"]["shared_tensor_count"], 1)
             self.assertEqual(metrics["stages"]["qwen"]["dispatch_count"], 1062)
 

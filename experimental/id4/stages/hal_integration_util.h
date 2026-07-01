@@ -286,6 +286,11 @@ typedef struct StageDiagnostics {
 // Returns a diagnostics sink that counts lifecycle and kernel events.
 id4_pipeline_diagnostics_sink_t DiagnosticsSink(StageDiagnostics* diagnostics);
 
+// Appends a benchmark label group for per-kind parameter loading statistics.
+iree_status_t AppendParameterLoadKindStatisticsLabel(
+    iree_string_builder_t* builder,
+    const id4_pipeline_parameter_load_kind_statistics_t* statistics);
+
 // Creates a live HAL context from the standard --device= flag.
 iree_status_t CreateLiveStageContextFromFlags(LiveStageContext* out_context);
 

@@ -112,6 +112,9 @@ typedef enum id4_pipeline_parameter_load_step_kind_e {
       4u,
 } id4_pipeline_parameter_load_step_kind_e;
 
+// Number of entries required to index load-step kind tables by enum value.
+#define ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_CAPACITY 5u
+
 // Prepare-time parameter loading group kind.
 typedef uint32_t id4_pipeline_parameter_load_group_kind_t;
 

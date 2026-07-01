@@ -31,6 +31,21 @@ _LABEL_LOAD_GROUPS_PATTERN = re.compile(
     r"\bparam_load_groups\[total=(?P<total>[0-9]+),"
     r"gather=(?P<gather>[0-9]+),encode=(?P<encode>[0-9]+)\]"
 )
+_LABEL_LOAD_KIND_PATTERN = re.compile(
+    r"\bparam_load_kind\["
+    r"gather_steps=(?P<gather_steps>[0-9]+),"
+    r"gather_source=(?P<gather_source>[0-9]+)MiB,"
+    r"gather_target=(?P<gather_target>[0-9]+)MiB,"
+    r"fp8_bf16_steps=(?P<fp8_bf16_steps>[0-9]+),"
+    r"fp8_bf16_source=(?P<fp8_bf16_source>[0-9]+)MiB,"
+    r"fp8_bf16_target=(?P<fp8_bf16_target>[0-9]+)MiB,"
+    r"bf16_rhs_steps=(?P<bf16_rhs_steps>[0-9]+),"
+    r"bf16_rhs_source=(?P<bf16_rhs_source>[0-9]+)MiB,"
+    r"bf16_rhs_target=(?P<bf16_rhs_target>[0-9]+)MiB,"
+    r"fp8_bf16_rhs_steps=(?P<fp8_bf16_rhs_steps>[0-9]+),"
+    r"fp8_bf16_rhs_source=(?P<fp8_bf16_rhs_source>[0-9]+)MiB,"
+    r"fp8_bf16_rhs_target=(?P<fp8_bf16_rhs_target>[0-9]+)MiB\]"
+)
 _LABEL_LOGICAL_LIVE_PATTERN = re.compile(
     r"\blogical_live\[boundary=(?P<boundary>[0-9]+)MiB,"
     r"taps=(?P<taps>[0-9]+)MiB,"
@@ -180,6 +195,56 @@ def _ceil_mib(byte_length: int) -> int:
     return (byte_length + 1024 * 1024 - 1) // (1024 * 1024)
 
 
+_LOAD_KIND_ROW_PREFIXES = {
+    "gather": "parameter_load_gather",
+    "encode_fp8_e4m3_scaled_to_bf16": "parameter_load_fp8_bf16",
+    "encode_bf16_linear_rhs_tile": "parameter_load_bf16_rhs",
+    "encode_fp8_e4m3_scaled_to_bf16_linear_rhs_tile": ("parameter_load_fp8_bf16_rhs"),
+}
+
+
+def _sum_parameter_load_kind_statistics(
+    stages: dict[str, dict[str, Any]],
+) -> dict[str, int]:
+    totals: dict[str, int] = {}
+    for kind_name in smoke_test.PLAN_PARAMETER_LOAD_KIND_NAMES:
+        row_prefix = _LOAD_KIND_ROW_PREFIXES[kind_name]
+        totals[f"{row_prefix}_steps"] = 0
+        totals[f"{row_prefix}_source_byte_length"] = 0
+        totals[f"{row_prefix}_target_byte_length"] = 0
+        for stage_name, stage in stages.items():
+            load_kind_statistics = _require_object(
+                stage.get("parameter_load_kind_statistics"),
+                f"stages.{stage_name}.parameter_load_kind_statistics",
+            )
+            kind_statistics = _require_object(
+                load_kind_statistics.get(kind_name),
+                f"stages.{stage_name}.parameter_load_kind_statistics.{kind_name}",
+            )
+            totals[f"{row_prefix}_steps"] += int(
+                _require_number(
+                    kind_statistics.get("step_count"),
+                    f"stages.{stage_name}.parameter_load_kind_statistics."
+                    f"{kind_name}.step_count",
+                )
+            )
+            totals[f"{row_prefix}_source_byte_length"] += int(
+                _require_number(
+                    kind_statistics.get("source_byte_length"),
+                    f"stages.{stage_name}.parameter_load_kind_statistics."
+                    f"{kind_name}.source_byte_length",
+                )
+            )
+            totals[f"{row_prefix}_target_byte_length"] += int(
+                _require_number(
+                    kind_statistics.get("target_byte_length"),
+                    f"stages.{stage_name}.parameter_load_kind_statistics."
+                    f"{kind_name}.target_byte_length",
+                )
+            )
+    return totals
+
+
 def _require_equal(actual: Any, expected: Any, context: str) -> None:
     if actual != expected:
         raise GenerationBenchmarkSummaryError(
@@ -193,6 +258,9 @@ def _parse_generation_benchmark_label(label: str, context: str) -> dict[str, Any
     )
     load_groups_match = _require_match(
         _LABEL_LOAD_GROUPS_PATTERN, label, f"{context}.label"
+    )
+    load_kind_match = _require_match(
+        _LABEL_LOAD_KIND_PATTERN, label, f"{context}.label"
     )
     logical_live_match = _require_match(
         _LABEL_LOGICAL_LIVE_PATTERN, label, f"{context}.label"
@@ -341,6 +409,42 @@ def _parse_generation_benchmark_label(label: str, context: str) -> dict[str, Any
         ),
         "runtime_parameter_encode_load_group_count": _match_unsigned_group(
             load_groups_match, "encode", f"{context}.label"
+        ),
+        "runtime_parameter_load_gather_steps": _match_unsigned_group(
+            load_kind_match, "gather_steps", f"{context}.label"
+        ),
+        "runtime_parameter_load_gather_source_mib": _match_unsigned_group(
+            load_kind_match, "gather_source", f"{context}.label"
+        ),
+        "runtime_parameter_load_gather_target_mib": _match_unsigned_group(
+            load_kind_match, "gather_target", f"{context}.label"
+        ),
+        "runtime_parameter_load_fp8_bf16_steps": _match_unsigned_group(
+            load_kind_match, "fp8_bf16_steps", f"{context}.label"
+        ),
+        "runtime_parameter_load_fp8_bf16_source_mib": _match_unsigned_group(
+            load_kind_match, "fp8_bf16_source", f"{context}.label"
+        ),
+        "runtime_parameter_load_fp8_bf16_target_mib": _match_unsigned_group(
+            load_kind_match, "fp8_bf16_target", f"{context}.label"
+        ),
+        "runtime_parameter_load_bf16_rhs_steps": _match_unsigned_group(
+            load_kind_match, "bf16_rhs_steps", f"{context}.label"
+        ),
+        "runtime_parameter_load_bf16_rhs_source_mib": _match_unsigned_group(
+            load_kind_match, "bf16_rhs_source", f"{context}.label"
+        ),
+        "runtime_parameter_load_bf16_rhs_target_mib": _match_unsigned_group(
+            load_kind_match, "bf16_rhs_target", f"{context}.label"
+        ),
+        "runtime_parameter_load_fp8_bf16_rhs_steps": _match_unsigned_group(
+            load_kind_match, "fp8_bf16_rhs_steps", f"{context}.label"
+        ),
+        "runtime_parameter_load_fp8_bf16_rhs_source_mib": _match_unsigned_group(
+            load_kind_match, "fp8_bf16_rhs_source", f"{context}.label"
+        ),
+        "runtime_parameter_load_fp8_bf16_rhs_target_mib": _match_unsigned_group(
+            load_kind_match, "fp8_bf16_rhs_target", f"{context}.label"
         ),
         "runtime_local_high_water_total_mib": _label_mib(
             label, "local_hw_total", f"{context}.label"
@@ -580,6 +684,23 @@ def _validate_label_plan_join(
         row["parameter_encode_load_group_count"],
         f"{context}.label.param_load_groups.encode",
     )
+    for row_prefix in _LOAD_KIND_ROW_PREFIXES.values():
+        runtime_prefix = f"runtime_{row_prefix}"
+        _require_equal(
+            label_metrics[f"{runtime_prefix}_steps"],
+            row[f"{row_prefix}_steps"],
+            f"{context}.label.param_load_kind.{row_prefix}.steps",
+        )
+        _require_equal(
+            label_metrics[f"{runtime_prefix}_source_mib"],
+            _ceil_mib(row[f"{row_prefix}_source_byte_length"]),
+            f"{context}.label.param_load_kind.{row_prefix}.source",
+        )
+        _require_equal(
+            label_metrics[f"{runtime_prefix}_target_mib"],
+            _ceil_mib(row[f"{row_prefix}_target_byte_length"]),
+            f"{context}.label.param_load_kind.{row_prefix}.target",
+        )
     _require_equal(
         label_metrics["runtime_boundary_mib"],
         _ceil_mib(row["stage_boundary_byte_length"]),
@@ -635,6 +756,7 @@ def summarize_generation_benchmark(
         plan_summary = plan_metrics["summary"]
         residency = plan_metrics["residency"]
         stages = plan_metrics["stages"]
+        load_kind_statistics = _sum_parameter_load_kind_statistics(stages)
         row = {
             "bucket": bucket,
             "benchmark": name,
@@ -716,6 +838,7 @@ def summarize_generation_benchmark(
             ),
             "stages": stages,
         }
+        row.update(load_kind_statistics)
         label = benchmark_object.get("label")
         if label is not None:
             label_metrics = _parse_generation_benchmark_label(
@@ -744,6 +867,10 @@ _MARKDOWN_COLUMNS = (
     ("final wait ms", "timing_final_wait_ms"),
     ("direct MiB", "runtime_parameter_source_direct_mib"),
     ("encoded MiB", "runtime_parameter_source_encoded_mib"),
+    ("fp8 bf16 src MiB", "runtime_parameter_load_fp8_bf16_source_mib"),
+    ("fp8 bf16 target MiB", "runtime_parameter_load_fp8_bf16_target_mib"),
+    ("bf16 rhs src MiB", "runtime_parameter_load_bf16_rhs_source_mib"),
+    ("fp8 rhs src MiB", "runtime_parameter_load_fp8_bf16_rhs_source_mib"),
     ("issue windows", "issue_encode_window_count"),
     ("issue encodes", "issue_encode_window_dispatch_count"),
     ("staging MiB", "issue_encode_window_staging_mib"),

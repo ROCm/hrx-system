@@ -1547,6 +1547,12 @@ TEST(PipelineProgramPlan, GroupsDirectParameterLoadsBySourceScope) {
       id4_pipeline_plan_statistics(plan);
   EXPECT_EQ(statistics.parameter_direct_source_byte_length, 64u);
   EXPECT_EQ(statistics.parameter_encoded_source_byte_length, 32u);
+  const id4_pipeline_parameter_load_kind_statistics_t& fp8_statistics =
+      statistics.parameter_load_kind_statistics
+          [ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_ENCODE_FP8_E4M3_SCALED_TO_BF16];
+  EXPECT_EQ(fp8_statistics.step_count, 1u);
+  EXPECT_EQ(fp8_statistics.source_byte_length, 32u);
+  EXPECT_EQ(fp8_statistics.target_byte_length, 32u);
   EXPECT_EQ(statistics.parameter_gather_load_step_count, 1u);
   EXPECT_EQ(statistics.parameter_encode_load_step_count, 1u);
   EXPECT_EQ(statistics.parameter_load_group_count, 2u);
@@ -1558,6 +1564,8 @@ TEST(PipelineProgramPlan, GroupsDirectParameterLoadsBySourceScope) {
   IREE_ASSERT_OK(id4_pipeline_plan_format_json(plan, &builder));
   iree_string_view_t json = iree_string_builder_view(&builder);
   ExpectFinds(json, IREE_SV("\"request_indices\":[0,2]"));
+  ExpectFinds(json, IREE_SV("\"parameter_load_kind_statistics\""));
+  ExpectFinds(json, IREE_SV("\"encode_fp8_e4m3_scaled_to_bf16\""));
   iree_string_builder_deinitialize(&builder);
 
   id4_pipeline_plan_release(plan);

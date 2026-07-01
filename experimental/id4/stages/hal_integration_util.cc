@@ -32,6 +32,59 @@ static constexpr uint8_t kId4TensorMagic[8] = {
     'I', 'D', '4', 'T', 'E', 'N', 'S', 'R',
 };
 
+static uint64_t CeilMiB(iree_device_size_t byte_length) {
+  return (uint64_t)((byte_length + 1024 * 1024 - 1) / (1024 * 1024));
+}
+
+static const id4_pipeline_parameter_load_kind_statistics_t*
+ParameterLoadKindStatisticsAt(
+    const id4_pipeline_parameter_load_kind_statistics_t* statistics,
+    id4_pipeline_parameter_load_step_kind_t kind) {
+  return &statistics[kind];
+}
+
+static iree_status_t AppendParameterLoadKindStatisticsEntry(
+    iree_string_builder_t* builder, iree_string_view_t prefix,
+    const id4_pipeline_parameter_load_kind_statistics_t* statistics) {
+  return iree_string_builder_append_format(
+      builder,
+      "%.*s_steps=%" PRIhsz ",%.*s_source=%" PRIu64 "MiB,%.*s_target=%" PRIu64
+      "MiB",
+      (int)prefix.size, prefix.data, statistics->step_count, (int)prefix.size,
+      prefix.data, CeilMiB(statistics->source_byte_length), (int)prefix.size,
+      prefix.data, CeilMiB(statistics->target_byte_length));
+}
+
+iree_status_t AppendParameterLoadKindStatisticsLabel(
+    iree_string_builder_t* builder,
+    const id4_pipeline_parameter_load_kind_statistics_t* statistics) {
+  IREE_RETURN_IF_ERROR(
+      iree_string_builder_append_cstring(builder, " param_load_kind["));
+  IREE_RETURN_IF_ERROR(AppendParameterLoadKindStatisticsEntry(
+      builder, IREE_SV("gather"),
+      ParameterLoadKindStatisticsAt(
+          statistics, ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_GATHER)));
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, ","));
+  IREE_RETURN_IF_ERROR(AppendParameterLoadKindStatisticsEntry(
+      builder, IREE_SV("fp8_bf16"),
+      ParameterLoadKindStatisticsAt(
+          statistics,
+          ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_ENCODE_FP8_E4M3_SCALED_TO_BF16)));
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, ","));
+  IREE_RETURN_IF_ERROR(AppendParameterLoadKindStatisticsEntry(
+      builder, IREE_SV("bf16_rhs"),
+      ParameterLoadKindStatisticsAt(
+          statistics,
+          ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_ENCODE_BF16_LINEAR_RHS_TILE)));
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, ","));
+  IREE_RETURN_IF_ERROR(AppendParameterLoadKindStatisticsEntry(
+      builder, IREE_SV("fp8_bf16_rhs"),
+      ParameterLoadKindStatisticsAt(
+          statistics,
+          ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_ENCODE_FP8_E4M3_SCALED_TO_BF16_LINEAR_RHS_TILE)));
+  return iree_string_builder_append_cstring(builder, "]");
+}
+
 iree_hal_semaphore_list_t SemaphoreListStorage::list() {
   return iree_hal_semaphore_list_t{
       // One semaphore is carried by this stack-backed list.

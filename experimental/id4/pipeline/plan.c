@@ -1729,7 +1729,7 @@ const id4_pipeline_diagnostic_tap_plan_t* id4_pipeline_plan_diagnostic_tap_at(
   return &plan->diagnostic_taps[index];
 }
 
-static iree_device_size_t id4_pipeline_plan_direct_load_step_source_length(
+static iree_device_size_t id4_pipeline_plan_load_step_target_length(
     const id4_pipeline_plan_t* plan,
     const id4_pipeline_parameter_load_step_t* step) {
   const id4_pipeline_parameter_slab_plan_t* slab =
@@ -1742,6 +1742,25 @@ static iree_device_size_t id4_pipeline_plan_direct_load_step_source_length(
     byte_length += slab->requests[request_index].span.length;
   }
   return byte_length;
+}
+
+static iree_device_size_t id4_pipeline_plan_direct_load_step_source_length(
+    const id4_pipeline_plan_t* plan,
+    const id4_pipeline_parameter_load_step_t* step) {
+  return id4_pipeline_plan_load_step_target_length(plan, step);
+}
+
+static void id4_pipeline_plan_accumulate_parameter_load_kind_statistics(
+    id4_pipeline_plan_statistics_t* statistics,
+    id4_pipeline_parameter_load_step_kind_t kind,
+    iree_device_size_t source_byte_length,
+    iree_device_size_t target_byte_length) {
+  if (kind >= ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_CAPACITY) return;
+  id4_pipeline_parameter_load_kind_statistics_t* kind_statistics =
+      &statistics->parameter_load_kind_statistics[kind];
+  ++kind_statistics->step_count;
+  kind_statistics->source_byte_length += source_byte_length;
+  kind_statistics->target_byte_length += target_byte_length;
 }
 
 static iree_device_size_t id4_pipeline_plan_encoded_load_step_source_length(
@@ -1815,21 +1834,29 @@ id4_pipeline_plan_statistics_t id4_pipeline_plan_statistics(
         &plan->parameter_load_steps[i];
     switch (step->kind) {
       case ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_GATHER: {
-        const iree_device_size_t byte_length =
+        const iree_device_size_t source_byte_length =
             id4_pipeline_plan_direct_load_step_source_length(plan, step);
-        statistics.parameter_direct_source_byte_length += byte_length;
-        statistics.parameter_source_byte_length += byte_length;
+        const iree_device_size_t target_byte_length =
+            id4_pipeline_plan_load_step_target_length(plan, step);
+        statistics.parameter_direct_source_byte_length += source_byte_length;
+        statistics.parameter_source_byte_length += source_byte_length;
         ++statistics.parameter_gather_load_step_count;
+        id4_pipeline_plan_accumulate_parameter_load_kind_statistics(
+            &statistics, step->kind, source_byte_length, target_byte_length);
         break;
       }
       case ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_ENCODE_FP8_E4M3_SCALED_TO_BF16:
       case ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_ENCODE_BF16_LINEAR_RHS_TILE:
       case ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_ENCODE_FP8_E4M3_SCALED_TO_BF16_LINEAR_RHS_TILE: {
-        const iree_device_size_t byte_length =
+        const iree_device_size_t source_byte_length =
             id4_pipeline_plan_encoded_load_step_source_length(step);
-        statistics.parameter_encoded_source_byte_length += byte_length;
-        statistics.parameter_source_byte_length += byte_length;
+        const iree_device_size_t target_byte_length =
+            id4_pipeline_plan_load_step_target_length(plan, step);
+        statistics.parameter_encoded_source_byte_length += source_byte_length;
+        statistics.parameter_source_byte_length += source_byte_length;
         ++statistics.parameter_encode_load_step_count;
+        id4_pipeline_plan_accumulate_parameter_load_kind_statistics(
+            &statistics, step->kind, source_byte_length, target_byte_length);
         break;
       }
       default:
@@ -2169,6 +2196,44 @@ static iree_status_t id4_pipeline_plan_append_parameter_load_group_kind_json(
                               "unknown parameter load group kind %u",
                               (uint32_t)kind);
   }
+}
+
+static iree_status_t
+id4_pipeline_plan_append_parameter_load_kind_statistics_json(
+    iree_string_builder_t* builder,
+    const id4_pipeline_plan_statistics_t* statistics) {
+  const struct {
+    iree_string_view_t name;
+    id4_pipeline_parameter_load_step_kind_t kind;
+  } kKindEntries[] = {
+      {IREE_SV("gather"), ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_GATHER},
+      {IREE_SV("encode_fp8_e4m3_scaled_to_bf16"),
+       ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_ENCODE_FP8_E4M3_SCALED_TO_BF16},
+      {IREE_SV("encode_bf16_linear_rhs_tile"),
+       ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_ENCODE_BF16_LINEAR_RHS_TILE},
+      {IREE_SV("encode_fp8_e4m3_scaled_to_bf16_linear_rhs_tile"),
+       ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_ENCODE_FP8_E4M3_SCALED_TO_BF16_LINEAR_RHS_TILE},
+  };
+
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(
+      builder, ",\"parameter_load_kind_statistics\":{"));
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(kKindEntries); ++i) {
+    if (i != 0) {
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, ","));
+    }
+    const id4_pipeline_parameter_load_kind_statistics_t* kind_statistics =
+        &statistics->parameter_load_kind_statistics[kKindEntries[i].kind];
+    IREE_RETURN_IF_ERROR(
+        id4_pipeline_plan_append_json_string(builder, kKindEntries[i].name));
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+        builder,
+        ":{\"step_count\":%" PRIhsz ",\"source_byte_length\":%" PRIu64
+        ",\"target_byte_length\":%" PRIu64 "}",
+        kind_statistics->step_count,
+        (uint64_t)kind_statistics->source_byte_length,
+        (uint64_t)kind_statistics->target_byte_length));
+  }
+  return iree_string_builder_append_cstring(builder, "}");
 }
 
 static iree_status_t id4_pipeline_plan_append_region_statistics_json(
@@ -2526,7 +2591,7 @@ iree_status_t id4_pipeline_plan_format_json(const id4_pipeline_plan_t* plan,
       ",\"boundary_tensor_byte_length\":%" PRIu64
       ",\"diagnostic_tap_byte_length\":%" PRIu64 ",\"kernel_count\":%" PRIhsz
       ",\"region_count\":%" PRIhsz ",\"shared_tensor_count\":%" PRIhsz
-      ",\"operation_count\":%" PRIhsz ",\"dispatch_count\":%" PRIhsz "}",
+      ",\"operation_count\":%" PRIhsz ",\"dispatch_count\":%" PRIhsz,
       (uint64_t)statistics.parameter_slab_byte_length,
       (uint64_t)statistics.largest_parameter_slab_byte_length,
       (uint64_t)statistics.parameter_source_byte_length,
@@ -2545,6 +2610,10 @@ iree_status_t id4_pipeline_plan_format_json(const id4_pipeline_plan_t* plan,
       (uint64_t)statistics.diagnostic_tap_byte_length, statistics.kernel_count,
       statistics.region_count, statistics.shared_tensor_count,
       statistics.operation_count, statistics.dispatch_count));
+  IREE_RETURN_IF_ERROR(
+      id4_pipeline_plan_append_parameter_load_kind_statistics_json(
+          builder, &statistics));
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "}"));
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_cstring(builder, ",\"placements\":["));
   for (iree_host_size_t i = 0; i < plan->placement_count; ++i) {

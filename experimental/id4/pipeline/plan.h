@@ -200,6 +200,16 @@ typedef struct id4_pipeline_diagnostic_tap_plan_t {
   id4_pipeline_tensor_layout_t layout;
 } id4_pipeline_diagnostic_tap_plan_t;
 
+// Statistics for one semantic parameter load-step kind.
+typedef struct id4_pipeline_parameter_load_kind_statistics_t {
+  // Number of load steps using this semantic loading kind.
+  iree_host_size_t step_count;
+  // Provider source bytes consumed by this loading kind.
+  iree_device_size_t source_byte_length;
+  // Final slab bytes populated by this loading kind.
+  iree_device_size_t target_byte_length;
+} id4_pipeline_parameter_load_kind_statistics_t;
+
 // Aggregate plan statistics derived from retained plan metadata.
 typedef struct id4_pipeline_plan_statistics_t {
   // Total bytes across all parameter slabs.
@@ -222,6 +232,9 @@ typedef struct id4_pipeline_plan_statistics_t {
   iree_host_size_t parameter_gather_load_group_count;
   // Number of encoded parameter readiness groups.
   iree_host_size_t parameter_encode_load_group_count;
+  // Parameter loading statistics indexed by load-step kind enum value.
+  id4_pipeline_parameter_load_kind_statistics_t parameter_load_kind_statistics
+      [ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_CAPACITY];
   // Total bytes across all constant slabs.
   iree_device_size_t constant_slab_byte_length;
   // Total reserved bytes across all non-parameter memory slabs.

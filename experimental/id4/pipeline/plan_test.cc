@@ -242,6 +242,16 @@ TEST(PlanTest, ReportsAggregateStatistics) {
   EXPECT_EQ(statistics.parameter_encoded_source_byte_length, 320u);
   EXPECT_EQ(statistics.parameter_gather_load_step_count, 1u);
   EXPECT_EQ(statistics.parameter_encode_load_step_count, 1u);
+  const id4_pipeline_parameter_load_kind_statistics_t& gather_statistics =
+      statistics.parameter_load_kind_statistics
+          [ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_GATHER];
+  const id4_pipeline_parameter_load_kind_statistics_t& fp8_statistics =
+      statistics.parameter_load_kind_statistics
+          [ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_ENCODE_FP8_E4M3_SCALED_TO_BF16];
+  EXPECT_EQ(gather_statistics.step_count, 1u);
+  EXPECT_EQ(gather_statistics.source_byte_length, 128u);
+  EXPECT_EQ(fp8_statistics.source_byte_length, 320u);
+  EXPECT_EQ(fp8_statistics.target_byte_length, 512u);
   EXPECT_EQ(statistics.parameter_load_group_count, 2u);
   EXPECT_EQ(statistics.parameter_gather_load_group_count, 1u);
   EXPECT_EQ(statistics.parameter_encode_load_group_count, 1u);

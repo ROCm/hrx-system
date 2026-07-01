@@ -125,6 +125,9 @@ struct GenerationBenchmarkPlanStatistics {
   iree_host_size_t parameter_gather_load_group_count;
   // Number of encoded parameter readiness groups.
   iree_host_size_t parameter_encode_load_group_count;
+  // Parameter loading statistics indexed by load-step kind enum value.
+  id4_pipeline_parameter_load_kind_statistics_t parameter_load_kind_statistics
+      [ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_CAPACITY];
   // Sum of local slab high-water bytes across coarse stage plans.
   iree_device_size_t total_local_slab_high_water_mark;
   // Largest local slab high-water bytes across coarse stage plans.
@@ -810,6 +813,17 @@ static iree_status_t AccumulateGenerationBenchmarkPlanStatistics(
         stage_statistics.parameter_gather_load_group_count;
     out_statistics->parameter_encode_load_group_count +=
         stage_statistics.parameter_encode_load_group_count;
+    for (iree_host_size_t kind = 0;
+         kind < ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_CAPACITY; ++kind) {
+      out_statistics->parameter_load_kind_statistics[kind].step_count +=
+          stage_statistics.parameter_load_kind_statistics[kind].step_count;
+      out_statistics->parameter_load_kind_statistics[kind].source_byte_length +=
+          stage_statistics.parameter_load_kind_statistics[kind]
+              .source_byte_length;
+      out_statistics->parameter_load_kind_statistics[kind].target_byte_length +=
+          stage_statistics.parameter_load_kind_statistics[kind]
+              .target_byte_length;
+    }
     if (stage_statistics.largest_parameter_slab_byte_length >
         out_statistics->largest_parameter_slab_byte_length) {
       out_statistics->largest_parameter_slab_byte_length =
@@ -1754,6 +1768,10 @@ static iree_status_t SetGenerationBenchmarkLabel(
       diagnostics.parameter_issue_encode_window_staging_chunk_count,
       diagnostics.parameter_issue_encode_window_source_gather_batch_count,
       diagnostics.parameter_issue_encode_window_encoder_dispatch_count);
+  if (iree_status_is_ok(status)) {
+    status = id4::test::AppendParameterLoadKindStatisticsLabel(
+        &label_builder, statistics.parameter_load_kind_statistics);
+  }
   if (iree_status_is_ok(status)) {
     status = AppendGenerationBenchmarkStageLabels(&label_builder, statistics);
   }

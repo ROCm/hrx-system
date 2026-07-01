@@ -422,6 +422,8 @@ static void SetQwenBenchmarkLabel(
       diagnostics.parameter_issue_encode_window_staging_chunk_count,
       diagnostics.parameter_issue_encode_window_source_gather_batch_count,
       diagnostics.parameter_issue_encode_window_encoder_dispatch_count));
+  IREE_CHECK_OK(id4::test::AppendParameterLoadKindStatisticsLabel(
+      &label_builder, statistics.parameter_load_kind_statistics));
   iree_benchmark_set_label(benchmark_state,
                            iree_string_builder_buffer(&label_builder));
   iree_string_builder_deinitialize(&label_builder);

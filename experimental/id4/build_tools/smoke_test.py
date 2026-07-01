@@ -196,6 +196,19 @@ PLAN_STAGE_STATISTIC_FIELDS = (
     "dispatch_count",
 )
 
+PLAN_PARAMETER_LOAD_KIND_NAMES = (
+    "gather",
+    "encode_fp8_e4m3_scaled_to_bf16",
+    "encode_bf16_linear_rhs_tile",
+    "encode_fp8_e4m3_scaled_to_bf16_linear_rhs_tile",
+)
+
+PLAN_PARAMETER_LOAD_KIND_STATISTIC_FIELDS = (
+    "step_count",
+    "source_byte_length",
+    "target_byte_length",
+)
+
 PROFILE_TOP_ROW_COUNT = 20
 
 PROFILE_DISPATCH_RE = re.compile(
@@ -500,6 +513,26 @@ def _summarize_generation_plan(plan: dict[str, Any]) -> dict[str, Any]:
         stage_summaries[stage_key] = _copy_integer_fields(
             statistics, PLAN_STAGE_STATISTIC_FIELDS, f"{stage_context}.statistics"
         )
+        load_kind_statistics = _require_object(
+            statistics.get("parameter_load_kind_statistics"),
+            f"{stage_context}.statistics.parameter_load_kind_statistics",
+        )
+        stage_summaries[stage_key]["parameter_load_kind_statistics"] = {}
+        for load_kind_name in PLAN_PARAMETER_LOAD_KIND_NAMES:
+            load_kind_context = (
+                f"{stage_context}.statistics.parameter_load_kind_statistics."
+                f"{load_kind_name}"
+            )
+            load_kind_object = _require_object(
+                load_kind_statistics.get(load_kind_name), load_kind_context
+            )
+            stage_summaries[stage_key]["parameter_load_kind_statistics"][
+                load_kind_name
+            ] = _copy_integer_fields(
+                load_kind_object,
+                PLAN_PARAMETER_LOAD_KIND_STATISTIC_FIELDS,
+                load_kind_context,
+            )
 
     return {
         "summary": plan_summary,
