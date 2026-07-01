@@ -996,7 +996,8 @@ static iree_status_t id4_pipeline_program_prepared_make_region_wait_list(
 
 static iree_status_t
 id4_pipeline_program_prepared_submit_region_parameter_load_groups(
-    const id4_pipeline_plan_t* plan, const id4_pipeline_region_plan_t* region,
+    const id4_pipeline_plan_t* plan, iree_host_size_t region_id,
+    const id4_pipeline_region_plan_t* region,
     id4_pipeline_parameter_slab_set_t* parameter_slabs,
     id4_pipeline_diagnostics_sink_t* diagnostics_sink) {
   IREE_ASSERT_ARGUMENT(plan);
@@ -1004,7 +1005,7 @@ id4_pipeline_program_prepared_submit_region_parameter_load_groups(
   IREE_ASSERT_ARGUMENT(parameter_slabs);
   for (iree_host_size_t i = 0; i < region->parameter_load_group_count; ++i) {
     IREE_RETURN_IF_ERROR(id4_pipeline_plan_submit_parameter_load_group(
-        plan, parameter_slabs, region->parameter_load_groups[i],
+        plan, parameter_slabs, region->parameter_load_groups[i], region_id,
         diagnostics_sink));
   }
   return iree_ok_status();
@@ -1691,7 +1692,7 @@ iree_status_t id4_pipeline_program_prepared_issue(
     if (uses_deferred_parameter_loads) {
       status =
           id4_pipeline_program_prepared_submit_region_parameter_load_groups(
-              prepared->plan, region, parameter_slabs,
+              prepared->plan, i, region, parameter_slabs,
               options->diagnostics_sink);
       if (!iree_status_is_ok(status)) break;
     }

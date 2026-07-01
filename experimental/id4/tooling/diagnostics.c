@@ -92,6 +92,15 @@ static iree_status_t id4_tooling_diagnostics_append_json_field_string(
   return id4_tooling_diagnostics_append_json_string(builder, value);
 }
 
+static iree_status_t id4_tooling_diagnostics_append_host_size_or_null(
+    iree_string_builder_t* builder, iree_host_size_t value) {
+  if (value == IREE_HOST_SIZE_MAX) {
+    return iree_string_builder_append_cstring(builder, "null");
+  }
+  return iree_string_builder_append_format(builder, "%" PRIu64,
+                                           (uint64_t)value);
+}
+
 static iree_status_t id4_tooling_diagnostics_append_parameter_slab_json(
     iree_string_builder_t* builder,
     const id4_pipeline_parameter_slab_diagnostic_t* parameter_slab) {
@@ -124,9 +133,25 @@ static iree_status_t id4_tooling_diagnostics_append_parameter_slab_json(
 static iree_status_t id4_tooling_diagnostics_append_parameter_load_json(
     iree_string_builder_t* builder,
     const id4_pipeline_parameter_load_diagnostic_t* parameter_load) {
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+      builder,
+      ",\"parameter_load\":{\"slab_index\":%" PRIu64 ",\"load_group_index\":",
+      (uint64_t)parameter_load->slab_index));
+  IREE_RETURN_IF_ERROR(id4_tooling_diagnostics_append_host_size_or_null(
+      builder, parameter_load->load_group_index));
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, ","));
+  IREE_RETURN_IF_ERROR(id4_tooling_diagnostics_append_json_field_string(
+      builder, "load_group_kind", parameter_load->load_group_kind));
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(
+      builder, ",\"first_consumer_region_id\":"));
+  IREE_RETURN_IF_ERROR(id4_tooling_diagnostics_append_host_size_or_null(
+      builder, parameter_load->first_consumer_region_id));
+  IREE_RETURN_IF_ERROR(
+      iree_string_builder_append_cstring(builder, ",\"submit_region_id\":"));
+  IREE_RETURN_IF_ERROR(id4_tooling_diagnostics_append_host_size_or_null(
+      builder, parameter_load->submit_region_id));
   return iree_string_builder_append_format(
       builder,
-      ",\"parameter_load\":{\"slab_index\":%" PRIu64
       ",\"load_step_offset\":%" PRIu64 ",\"load_step_count\":%" PRIu64
       ",\"staging_slot_count\":%" PRIu64
       ",\"staging_slot_byte_length\":%" PRIu64
@@ -135,7 +160,6 @@ static iree_status_t id4_tooling_diagnostics_append_parameter_load_json(
       ",\"source_gather_batch_count\":%" PRIu64
       ",\"source_byte_length\":%" PRIu64 ",\"target_byte_length\":%" PRIu64
       ",\"encoder_dispatch_count\":%" PRIu64 "}",
-      (uint64_t)parameter_load->slab_index,
       (uint64_t)parameter_load->load_step_offset,
       (uint64_t)parameter_load->load_step_count,
       (uint64_t)parameter_load->staging_slot_count,

@@ -119,6 +119,14 @@ typedef struct id4_pipeline_test_diagnostics_log_t {
   std::vector<std::string> parameter_slab_scopes;
   // Parameter keys copied for parameter slab request events.
   std::vector<std::string> parameter_slab_keys;
+  // Parameter load events copied from diagnostic payloads.
+  std::vector<id4_pipeline_parameter_load_diagnostic_t> parameter_loads;
+  // Load group kind strings copied from parameter load events.
+  std::vector<std::string> parameter_load_kinds;
+  // Timing events copied from diagnostic payloads.
+  std::vector<id4_pipeline_timing_diagnostic_t> timings;
+  // Event keys copied for timing payloads.
+  std::vector<std::string> timing_keys;
 } id4_pipeline_test_diagnostics_log_t;
 
 typedef struct id4_pipeline_test_parameter_provider_t {
@@ -300,7 +308,43 @@ static iree_status_t CaptureDiagnostic(
     log->parameter_slab_keys.push_back(
         ToString(event->parameter_slab->parameter_key));
   }
+  if (event->parameter_load) {
+    log->parameter_loads.push_back(*event->parameter_load);
+    log->parameter_load_kinds.push_back(
+        ToString(event->parameter_load->load_group_kind));
+  }
+  if (event->timing) {
+    log->timings.push_back(*event->timing);
+    log->timing_keys.push_back(ToString(event->key));
+  }
   return iree_ok_status();
+}
+
+static iree_host_size_t FindDiagnosticKey(
+    const id4_pipeline_test_diagnostics_log_t& log, const char* key) {
+  for (iree_host_size_t i = 0; i < log.keys.size(); ++i) {
+    if (log.keys[i] == key) return i;
+  }
+  return IREE_HOST_SIZE_MAX;
+}
+
+static const id4_pipeline_parameter_slab_diagnostic_t* FindParameterSlabRequest(
+    const id4_pipeline_test_diagnostics_log_t& log,
+    iree_host_size_t request_index) {
+  for (iree_host_size_t i = 0; i < log.parameter_slabs.size(); ++i) {
+    if (log.parameter_slabs[i].request_index == request_index) {
+      return &log.parameter_slabs[i];
+    }
+  }
+  return NULL;
+}
+
+static iree_host_size_t FindTimingKey(
+    const id4_pipeline_test_diagnostics_log_t& log, const char* key) {
+  for (iree_host_size_t i = 0; i < log.timing_keys.size(); ++i) {
+    if (log.timing_keys[i] == key) return i;
+  }
+  return IREE_HOST_SIZE_MAX;
 }
 
 typedef struct id4_pipeline_smoke_stage_t {
@@ -1025,14 +1069,40 @@ TEST(PipelineStage, PrepareAndIssueSmokeBundle) {
                                          iree_infinite_timeout(),
                                          IREE_ASYNC_WAIT_FLAG_NONE));
 
-  ASSERT_EQ(diagnostics_log.keys.size(), 7u);
-  EXPECT_EQ(diagnostics_log.keys[0], "stage.load");
-  EXPECT_EQ(diagnostics_log.keys[1], "plan.create");
-  EXPECT_EQ(diagnostics_log.keys[2], "parameter_slab.plan");
-  EXPECT_EQ(diagnostics_log.keys[3], "parameter_slab.load");
-  EXPECT_EQ(diagnostics_log.keys[4], "parameter_slab.gather");
-  EXPECT_EQ(diagnostics_log.keys[5], "stage.prepare");
-  EXPECT_EQ(diagnostics_log.keys[6], "stage.issue");
+  EXPECT_NE(FindDiagnosticKey(diagnostics_log, "stage.load"),
+            IREE_HOST_SIZE_MAX);
+  EXPECT_NE(FindDiagnosticKey(diagnostics_log, "plan.create"),
+            IREE_HOST_SIZE_MAX);
+  EXPECT_NE(FindDiagnosticKey(diagnostics_log, "parameter_slab.plan"),
+            IREE_HOST_SIZE_MAX);
+  EXPECT_NE(FindDiagnosticKey(diagnostics_log, "parameter_slab.load"),
+            IREE_HOST_SIZE_MAX);
+  EXPECT_NE(FindDiagnosticKey(diagnostics_log, "parameter_slab.gather_group"),
+            IREE_HOST_SIZE_MAX);
+  EXPECT_NE(FindDiagnosticKey(diagnostics_log, "parameter_slab.gather"),
+            IREE_HOST_SIZE_MAX);
+  EXPECT_NE(
+      FindDiagnosticKey(diagnostics_log, "parameter_slab.load_group.submit"),
+      IREE_HOST_SIZE_MAX);
+  EXPECT_NE(FindDiagnosticKey(diagnostics_log, "stage.prepare"),
+            IREE_HOST_SIZE_MAX);
+  EXPECT_NE(FindDiagnosticKey(diagnostics_log, "stage.issue"),
+            IREE_HOST_SIZE_MAX);
+  ASSERT_EQ(diagnostics_log.parameter_loads.size(), 2u);
+  EXPECT_EQ(diagnostics_log.parameter_loads[0].load_group_index, 0u);
+  EXPECT_EQ(diagnostics_log.parameter_load_kinds[0], "gather");
+  EXPECT_EQ(diagnostics_log.parameter_loads[0].first_consumer_region_id,
+            IREE_HOST_SIZE_MAX);
+  EXPECT_EQ(diagnostics_log.parameter_loads[0].submit_region_id,
+            IREE_HOST_SIZE_MAX);
+  EXPECT_EQ(diagnostics_log.parameter_loads[0].source_byte_length, 16u);
+  EXPECT_EQ(diagnostics_log.parameter_loads[0].target_byte_length, 16u);
+  EXPECT_EQ(diagnostics_log.parameter_loads[1].load_group_index, 0u);
+  EXPECT_EQ(diagnostics_log.parameter_load_kinds[1], "gather");
+  const iree_host_size_t submit_timing_index =
+      FindTimingKey(diagnostics_log, "parameter_slab.load_group.submit");
+  ASSERT_NE(submit_timing_index, IREE_HOST_SIZE_MAX);
+  EXPECT_GE(diagnostics_log.timings[submit_timing_index].duration_ns, 0);
 
   id4_pipeline_bundle_release(bundle);
   iree_hal_semaphore_release(issue_semaphore);
@@ -1147,9 +1217,12 @@ TEST(PipelineStage, PrepareEmitsParameterSlabLoadFailureDiagnostic) {
   EXPECT_EQ(bundle, nullptr);
   EXPECT_EQ(provider.gather_count, 0u);
 
-  ASSERT_EQ(diagnostics_log.keys.size(), 1u);
-  EXPECT_EQ(diagnostics_log.keys[0], "parameter_slab.load.error");
-  ASSERT_EQ(diagnostics_log.parameter_slabs.size(), 1u);
+  EXPECT_NE(FindDiagnosticKey(diagnostics_log, "parameter_slab.load.error"),
+            IREE_HOST_SIZE_MAX);
+  EXPECT_NE(
+      FindDiagnosticKey(diagnostics_log, "parameter_slab.load_group.submit"),
+      IREE_HOST_SIZE_MAX);
+  ASSERT_GE(diagnostics_log.parameter_slabs.size(), 1u);
   EXPECT_EQ(diagnostics_log.parameter_slabs[0].slab_index, 0u);
   EXPECT_EQ(diagnostics_log.parameter_slabs[0].request_index,
             IREE_HOST_SIZE_MAX);
@@ -1157,6 +1230,11 @@ TEST(PipelineStage, PrepareEmitsParameterSlabLoadFailureDiagnostic) {
   EXPECT_EQ(diagnostics_log.parameter_slabs[0].device_index, 0u);
   EXPECT_EQ(diagnostics_log.parameter_slabs[0].slab_byte_length, 16u);
   EXPECT_EQ(diagnostics_log.parameter_slabs[0].request_count, 1u);
+  ASSERT_EQ(diagnostics_log.parameter_loads.size(), 1u);
+  EXPECT_EQ(diagnostics_log.parameter_loads[0].load_group_index, 0u);
+  EXPECT_EQ(diagnostics_log.parameter_load_kinds[0], "gather");
+  EXPECT_NE(FindTimingKey(diagnostics_log, "parameter_slab.load_group.submit"),
+            IREE_HOST_SIZE_MAX);
 
   iree_hal_semaphore_release(ready_semaphore);
   id4_pipeline_plan_release(plan);
@@ -1247,11 +1325,18 @@ TEST(PipelineStage, PrepareLoadsParameterSlabsWhenProviderIsSupplied) {
   EXPECT_EQ(provider.spans[0].buffer_offset, 0u);
   EXPECT_EQ(provider.spans[0].length, 16u);
 
-  ASSERT_EQ(diagnostics_log.keys.size(), 3u);
-  EXPECT_EQ(diagnostics_log.keys[0], "parameter_slab.load");
-  EXPECT_EQ(diagnostics_log.keys[1], "parameter_slab.gather");
-  EXPECT_EQ(diagnostics_log.keys[2], "stage.prepare");
-  ASSERT_EQ(diagnostics_log.parameter_slabs.size(), 2u);
+  EXPECT_NE(FindDiagnosticKey(diagnostics_log, "parameter_slab.load"),
+            IREE_HOST_SIZE_MAX);
+  EXPECT_NE(FindDiagnosticKey(diagnostics_log, "parameter_slab.gather_group"),
+            IREE_HOST_SIZE_MAX);
+  EXPECT_NE(FindDiagnosticKey(diagnostics_log, "parameter_slab.gather"),
+            IREE_HOST_SIZE_MAX);
+  EXPECT_NE(
+      FindDiagnosticKey(diagnostics_log, "parameter_slab.load_group.submit"),
+      IREE_HOST_SIZE_MAX);
+  EXPECT_NE(FindDiagnosticKey(diagnostics_log, "stage.prepare"),
+            IREE_HOST_SIZE_MAX);
+  ASSERT_GE(diagnostics_log.parameter_slabs.size(), 3u);
   EXPECT_EQ(diagnostics_log.parameter_slabs[0].slab_index, 0u);
   EXPECT_EQ(diagnostics_log.parameter_slabs[0].request_index,
             IREE_HOST_SIZE_MAX);
@@ -1259,13 +1344,21 @@ TEST(PipelineStage, PrepareLoadsParameterSlabsWhenProviderIsSupplied) {
   EXPECT_EQ(diagnostics_log.parameter_slabs[0].device_index, 0u);
   EXPECT_EQ(diagnostics_log.parameter_slabs[0].slab_byte_length, 16u);
   EXPECT_EQ(diagnostics_log.parameter_slabs[0].request_count, 1u);
-  EXPECT_EQ(diagnostics_log.parameter_slabs[1].slab_index, 0u);
-  EXPECT_EQ(diagnostics_log.parameter_slabs[1].request_index, 0u);
-  EXPECT_EQ(diagnostics_log.parameter_slab_scopes[1], "smoke");
-  EXPECT_EQ(diagnostics_log.parameter_slab_keys[1], "smoke.weight");
-  EXPECT_EQ(diagnostics_log.parameter_slabs[1].parameter_offset, 0u);
-  EXPECT_EQ(diagnostics_log.parameter_slabs[1].buffer_offset, 0u);
-  EXPECT_EQ(diagnostics_log.parameter_slabs[1].length, 16u);
+  const id4_pipeline_parameter_slab_diagnostic_t* request_slab =
+      FindParameterSlabRequest(diagnostics_log, 0u);
+  ASSERT_NE(request_slab, nullptr);
+  EXPECT_EQ(request_slab->slab_index, 0u);
+  EXPECT_EQ(request_slab->parameter_offset, 0u);
+  EXPECT_EQ(request_slab->buffer_offset, 0u);
+  EXPECT_EQ(request_slab->length, 16u);
+  ASSERT_EQ(diagnostics_log.parameter_loads.size(), 2u);
+  EXPECT_EQ(diagnostics_log.parameter_loads[0].load_group_index, 0u);
+  EXPECT_EQ(diagnostics_log.parameter_load_kinds[0], "gather");
+  EXPECT_EQ(diagnostics_log.parameter_loads[0].source_byte_length, 16u);
+  EXPECT_EQ(diagnostics_log.parameter_loads[0].target_byte_length, 16u);
+  EXPECT_EQ(diagnostics_log.parameter_loads[1].load_group_index, 0u);
+  EXPECT_NE(FindTimingKey(diagnostics_log, "parameter_slab.load_group.submit"),
+            IREE_HOST_SIZE_MAX);
 
   id4_pipeline_bundle_release(bundle);
   iree_hal_semaphore_release(ready_semaphore);

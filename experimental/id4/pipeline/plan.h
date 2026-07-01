@@ -438,6 +438,7 @@ iree_status_t id4_pipeline_plan_prepare_parameter_slabs(
 iree_status_t id4_pipeline_plan_submit_parameter_load_group(
     const id4_pipeline_plan_t* plan,
     id4_pipeline_parameter_slab_set_t* slab_set, iree_host_size_t group_index,
+    iree_host_size_t submit_region_id,
     id4_pipeline_diagnostics_sink_t* diagnostics_sink);
 
 // Appends deterministic JSON describing the plan.

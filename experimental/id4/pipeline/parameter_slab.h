@@ -197,6 +197,16 @@ typedef struct id4_pipeline_parameter_load_group_t {
   iree_host_size_t target_slab_index;
 } id4_pipeline_parameter_load_group_t;
 
+// Runtime context for submitting one planned parameter load group.
+typedef struct id4_pipeline_parameter_load_group_context_t {
+  // Plan-local load group ordinal.
+  iree_host_size_t group_index;
+  // First region that consumes the group, or IREE_HOST_SIZE_MAX when unknown.
+  iree_host_size_t first_consumer_region_id;
+  // Region issuing the group, or IREE_HOST_SIZE_MAX outside region issue.
+  iree_host_size_t submit_region_id;
+} id4_pipeline_parameter_load_group_context_t;
+
 // Returns a direct provider-gather load step into a final parameter slab.
 static inline id4_pipeline_parameter_load_step_t
 id4_pipeline_parameter_gather_load_step(iree_string_view_t name,
@@ -452,7 +462,8 @@ iree_status_t id4_pipeline_parameter_slab_set_submit_load_group(
     id4_pipeline_parameter_slab_set_t* slab_set,
     iree_host_size_t load_step_count,
     const id4_pipeline_parameter_load_step_t* load_steps,
-    iree_host_size_t group_index, iree_string_view_t stage_name,
+    id4_pipeline_parameter_load_group_context_t group_context,
+    iree_string_view_t stage_name,
     id4_pipeline_diagnostics_sink_t* diagnostics_sink);
 
 // Retains |slab_set| for the caller.

@@ -1951,14 +1951,35 @@ iree_status_t id4_pipeline_plan_prepare_parameter_slabs(
   return status;
 }
 
+static iree_host_size_t id4_pipeline_plan_find_load_group_first_region(
+    const id4_pipeline_plan_t* plan, iree_host_size_t group_index) {
+  for (iree_host_size_t i = 0; i < plan->region_count; ++i) {
+    const id4_pipeline_region_plan_t* region = &plan->regions[i];
+    for (iree_host_size_t j = 0; j < region->parameter_load_group_count; ++j) {
+      if (region->parameter_load_groups[j] == group_index) return i;
+    }
+  }
+  return IREE_HOST_SIZE_MAX;
+}
+
 iree_status_t id4_pipeline_plan_submit_parameter_load_group(
     const id4_pipeline_plan_t* plan,
     id4_pipeline_parameter_slab_set_t* slab_set, iree_host_size_t group_index,
+    iree_host_size_t submit_region_id,
     id4_pipeline_diagnostics_sink_t* diagnostics_sink) {
   IREE_ASSERT_ARGUMENT(plan);
+  id4_pipeline_parameter_load_group_context_t group_context = {
+      // Plan-local load group ordinal.
+      .group_index = group_index,
+      // First planned region that consumes the load group.
+      .first_consumer_region_id =
+          id4_pipeline_plan_find_load_group_first_region(plan, group_index),
+      // Region currently submitting the load group.
+      .submit_region_id = submit_region_id,
+  };
   return id4_pipeline_parameter_slab_set_submit_load_group(
       slab_set, plan->parameter_load_step_count, plan->parameter_load_steps,
-      group_index, plan->stage_name, diagnostics_sink);
+      group_context, plan->stage_name, diagnostics_sink);
 }
 
 static iree_status_t id4_pipeline_plan_append_json_string(
@@ -2048,17 +2069,6 @@ static iree_status_t id4_pipeline_plan_append_parameter_load_group_kind_json(
                               "unknown parameter load group kind %u",
                               (uint32_t)kind);
   }
-}
-
-static iree_host_size_t id4_pipeline_plan_find_load_group_first_region(
-    const id4_pipeline_plan_t* plan, iree_host_size_t group_index) {
-  for (iree_host_size_t i = 0; i < plan->region_count; ++i) {
-    const id4_pipeline_region_plan_t* region = &plan->regions[i];
-    for (iree_host_size_t j = 0; j < region->parameter_load_group_count; ++j) {
-      if (region->parameter_load_groups[j] == group_index) return i;
-    }
-  }
-  return IREE_HOST_SIZE_MAX;
 }
 
 static iree_status_t id4_pipeline_plan_append_region_statistics_json(

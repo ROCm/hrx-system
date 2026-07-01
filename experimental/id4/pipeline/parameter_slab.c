@@ -47,6 +47,18 @@ static iree_status_t id4_pipeline_parameter_add_host_size(
   return iree_ok_status();
 }
 
+static iree_string_view_t id4_pipeline_parameter_load_group_kind_name(
+    id4_pipeline_parameter_load_group_kind_t kind) {
+  switch (kind) {
+    case ID4_PIPELINE_PARAMETER_LOAD_GROUP_KIND_GATHER:
+      return IREE_SV("gather");
+    case ID4_PIPELINE_PARAMETER_LOAD_GROUP_KIND_ENCODE:
+      return IREE_SV("encode");
+    default:
+      return IREE_SV("unknown");
+  }
+}
+
 struct id4_pipeline_parameter_slab_set_t {
   // Reference count for shared slab set ownership.
   iree_atomic_ref_count_t ref_count;
@@ -1481,8 +1493,10 @@ static iree_status_t id4_pipeline_parameter_encode_run_collect_statistics(
 
 static iree_status_t id4_pipeline_parameter_slab_emit_encode_window_diagnostic(
     const id4_pipeline_parameter_slab_load_t* load,
-    iree_string_view_t stage_name, iree_host_size_t load_step_offset,
-    iree_host_size_t load_step_count, iree_device_size_t staging_byte_length,
+    iree_string_view_t stage_name,
+    id4_pipeline_parameter_load_group_context_t group_context,
+    iree_host_size_t load_step_offset, iree_host_size_t load_step_count,
+    iree_device_size_t staging_byte_length,
     const id4_pipeline_parameter_encode_run_statistics_t* statistics,
     id4_pipeline_diagnostics_sink_t* diagnostics_sink) {
   id4_pipeline_parameter_slab_diagnostic_t parameter_slab =
@@ -1491,6 +1505,15 @@ static iree_status_t id4_pipeline_parameter_slab_emit_encode_window_diagnostic(
   id4_pipeline_parameter_load_diagnostic_t parameter_load = {
       // Plan-local slab index populated by the loading window.
       .slab_index = load->slab_index,
+      // Plan-local load group ordinal.
+      .load_group_index = group_context.group_index,
+      // Submission strategy used by the load group.
+      .load_group_kind = id4_pipeline_parameter_load_group_kind_name(
+          ID4_PIPELINE_PARAMETER_LOAD_GROUP_KIND_ENCODE),
+      // First planned region that consumes this group.
+      .first_consumer_region_id = group_context.first_consumer_region_id,
+      // Region that submitted this group.
+      .submit_region_id = group_context.submit_region_id,
       // First load-step ordinal represented by the window.
       .load_step_offset = load_step_offset,
       // Number of load steps represented by the window.
@@ -1664,6 +1687,7 @@ static iree_status_t id4_pipeline_parameter_slab_submit_encode_run(
     const id4_pipeline_parameter_slab_set_load_options_t* options,
     const id4_pipeline_parameter_slab_load_t* load, iree_host_size_t step_count,
     const id4_pipeline_parameter_load_step_t* steps,
+    id4_pipeline_parameter_load_group_context_t group_context,
     iree_host_size_t load_step_offset, iree_string_view_t stage_name,
     iree_hal_buffer_t* target_buffer,
     iree_hal_semaphore_list_t wait_semaphore_list,
@@ -1686,8 +1710,8 @@ static iree_status_t id4_pipeline_parameter_slab_submit_encode_run(
   }
   IREE_RETURN_IF_ERROR(
       id4_pipeline_parameter_slab_emit_encode_window_diagnostic(
-          load, stage_name, load_step_offset, step_count, staging_byte_length,
-          &statistics, options->diagnostics_sink));
+          load, stage_name, group_context, load_step_offset, step_count,
+          staging_byte_length, &statistics, options->diagnostics_sink));
 
   iree_hal_semaphore_t* run_semaphore = NULL;
   id4_pipeline_parameter_prepared_encoder_t* prepared_encoders = NULL;
@@ -1994,11 +2018,85 @@ static iree_host_size_t id4_pipeline_parameter_slab_encode_run_count(
   return end_index - start_index;
 }
 
+static iree_status_t id4_pipeline_parameter_slab_emit_gather_group_diagnostic(
+    const id4_pipeline_parameter_slab_load_t* load,
+    const id4_pipeline_parameter_load_step_t* step,
+    iree_string_view_t stage_name,
+    id4_pipeline_parameter_load_group_context_t group_context,
+    id4_pipeline_parameter_load_group_t group,
+    id4_pipeline_diagnostics_sink_t* diagnostics_sink) {
+  iree_device_size_t byte_length = 0;
+  for (iree_host_size_t i = 0; i < step->request_count; ++i) {
+    const iree_host_size_t request_index = step->request_indices
+                                               ? step->request_indices[i]
+                                               : step->request_offset + i;
+    const id4_pipeline_parameter_request_t* request =
+        &load->slab->requests[request_index];
+    IREE_RETURN_IF_ERROR(id4_pipeline_parameter_add_device_size(
+        request->span.length, &byte_length, "gather group"));
+  }
+  id4_pipeline_parameter_slab_diagnostic_t parameter_slab =
+      id4_pipeline_parameter_slab_make_diagnostic(load, step->source_scope,
+                                                  IREE_HOST_SIZE_MAX);
+  id4_pipeline_parameter_load_diagnostic_t parameter_load = {
+      // Plan-local slab index populated by this gather group.
+      .slab_index = load->slab_index,
+      // Plan-local load group ordinal.
+      .load_group_index = group_context.group_index,
+      // Submission strategy used by the load group.
+      .load_group_kind = id4_pipeline_parameter_load_group_kind_name(
+          ID4_PIPELINE_PARAMETER_LOAD_GROUP_KIND_GATHER),
+      // First planned region that consumes this group.
+      .first_consumer_region_id = group_context.first_consumer_region_id,
+      // Region that submitted this group.
+      .submit_region_id = group_context.submit_region_id,
+      // First load-step ordinal represented by the group.
+      .load_step_offset = group.step_offset,
+      // Number of direct gather load steps in the group.
+      .load_step_count = group.step_count,
+      // Direct gathers do not allocate staging slots.
+      .staging_slot_count = 0,
+      // Direct gathers do not allocate staging slot storage.
+      .staging_slot_byte_length = 0,
+      // Direct gathers do not allocate staging storage.
+      .staging_total_byte_length = 0,
+      // Direct gathers do not submit staging chunks.
+      .staging_chunk_count = 0,
+      // Number of provider requests in this direct gather.
+      .logical_source_count = step->request_count,
+      // Direct gather groups submit one provider gather batch.
+      .source_gather_batch_count = 1,
+      // Total source bytes gathered directly.
+      .source_byte_length = byte_length,
+      // Total final slab bytes populated directly.
+      .target_byte_length = byte_length,
+      // Direct gathers do not dispatch encoder kernels.
+      .encoder_dispatch_count = 0,
+  };
+  id4_pipeline_diagnostic_event_t event = {
+      // Event kind for parameter slab diagnostics.
+      .kind = ID4_PIPELINE_DIAGNOSTIC_EVENT_KIND_PARAMETER_SLAB,
+      // Stage name associated with the load.
+      .stage_name = stage_name,
+      // Stable parameter load event key.
+      .key = IREE_SV("parameter_slab.gather_group"),
+      // Short event summary.
+      .message = IREE_SV("direct parameter gather group"),
+      // Structured slab payload.
+      .parameter_slab = &parameter_slab,
+      // Structured parameter loading payload.
+      .parameter_load = &parameter_load,
+  };
+  return id4_pipeline_diagnostics_emit(diagnostics_sink, &event);
+}
+
 static iree_status_t id4_pipeline_parameter_slab_submit_gather(
     const id4_pipeline_parameter_slab_set_load_options_t* options,
     const id4_pipeline_parameter_slab_load_t* load,
     const id4_pipeline_parameter_load_step_t* step,
-    iree_string_view_t stage_name, iree_hal_buffer_t* target_buffer,
+    iree_string_view_t stage_name,
+    id4_pipeline_parameter_load_group_context_t group_context,
+    id4_pipeline_parameter_load_group_t group, iree_hal_buffer_t* target_buffer,
     iree_hal_semaphore_list_t wait_semaphore_list,
     iree_hal_semaphore_list_t signal_semaphore_list) {
   if (!iree_io_parameter_provider_query_support(options->provider,
@@ -2019,6 +2117,8 @@ static iree_status_t id4_pipeline_parameter_slab_submit_gather(
       load, stage_name, IREE_SV("parameter_slab.load"),
       IREE_SV("loading parameter slab"), step->source_scope, IREE_HOST_SIZE_MAX,
       options->diagnostics_sink));
+  IREE_RETURN_IF_ERROR(id4_pipeline_parameter_slab_emit_gather_group_diagnostic(
+      load, step, stage_name, group_context, group, options->diagnostics_sink));
   for (iree_host_size_t j = 0; j < step->request_count; ++j) {
     const iree_host_size_t request_index = step->request_indices
                                                ? step->request_indices[j]
@@ -2082,6 +2182,78 @@ static bool id4_pipeline_parameter_load_group_is_encode(
   return group.kind == ID4_PIPELINE_PARAMETER_LOAD_GROUP_KIND_ENCODE;
 }
 
+static iree_status_t id4_pipeline_parameter_slab_emit_load_group_submit_timing(
+    const id4_pipeline_parameter_slab_load_t* load,
+    iree_string_view_t stage_name,
+    id4_pipeline_parameter_load_group_context_t group_context,
+    id4_pipeline_parameter_load_group_t group, iree_time_t start_time_ns,
+    iree_time_t end_time_ns,
+    id4_pipeline_diagnostics_sink_t* diagnostics_sink) {
+  id4_pipeline_parameter_slab_diagnostic_t parameter_slab =
+      id4_pipeline_parameter_slab_make_diagnostic(load, load->slab->scope,
+                                                  IREE_HOST_SIZE_MAX);
+  id4_pipeline_parameter_load_diagnostic_t parameter_load = {
+      // Plan-local slab index populated by the load group.
+      .slab_index = load->slab_index,
+      // Plan-local load group ordinal.
+      .load_group_index = group_context.group_index,
+      // Submission strategy used by the load group.
+      .load_group_kind =
+          id4_pipeline_parameter_load_group_kind_name(group.kind),
+      // First planned region that consumes this group.
+      .first_consumer_region_id = group_context.first_consumer_region_id,
+      // Region that submitted this group.
+      .submit_region_id = group_context.submit_region_id,
+      // First load-step ordinal represented by the group.
+      .load_step_offset = group.step_offset,
+      // Number of load steps represented by the group.
+      .load_step_count = group.step_count,
+      // Submit timing does not describe staging slot allocation.
+      .staging_slot_count = 0,
+      // Submit timing does not describe staging slot allocation.
+      .staging_slot_byte_length = 0,
+      // Submit timing does not describe staging allocation.
+      .staging_total_byte_length = 0,
+      // Submit timing does not describe staging chunks.
+      .staging_chunk_count = 0,
+      // Submit timing does not describe provider source count.
+      .logical_source_count = 0,
+      // Submit timing does not describe provider batch count.
+      .source_gather_batch_count = 0,
+      // Submit timing does not describe provider source bytes.
+      .source_byte_length = 0,
+      // Submit timing does not describe final slab bytes.
+      .target_byte_length = 0,
+      // Submit timing does not describe encoder dispatch count.
+      .encoder_dispatch_count = 0,
+  };
+  id4_pipeline_timing_diagnostic_t timing = {
+      // Monotonic start timestamp for the host submit span.
+      .start_time_ns = start_time_ns,
+      // Monotonic end timestamp for the host submit span.
+      .end_time_ns = end_time_ns,
+      // Host-observed elapsed submit duration.
+      .duration_ns = end_time_ns - start_time_ns,
+  };
+  id4_pipeline_diagnostic_event_t event = {
+      // Event kind for host-observed timing.
+      .kind = ID4_PIPELINE_DIAGNOSTIC_EVENT_KIND_TIMING,
+      // Stage name associated with the load.
+      .stage_name = stage_name,
+      // Stable timing event key.
+      .key = IREE_SV("parameter_slab.load_group.submit"),
+      // Short event summary.
+      .message = IREE_SV("submitted parameter load group"),
+      // Structured slab payload.
+      .parameter_slab = &parameter_slab,
+      // Structured parameter loading payload.
+      .parameter_load = &parameter_load,
+      // Host-observed timing payload.
+      .timing = &timing,
+  };
+  return id4_pipeline_diagnostics_emit(diagnostics_sink, &event);
+}
+
 iree_status_t id4_pipeline_parameter_load_group_count(
     iree_host_size_t load_step_count,
     const id4_pipeline_parameter_load_step_t* load_steps,
@@ -2136,6 +2308,7 @@ static iree_status_t id4_pipeline_parameter_slab_submit_load_group(
     const id4_pipeline_parameter_slab_set_load_options_t* options,
     const id4_pipeline_parameter_slab_load_t* loads,
     const id4_pipeline_parameter_load_step_t* load_steps,
+    id4_pipeline_parameter_load_group_context_t group_context,
     id4_pipeline_parameter_load_group_t group, iree_string_view_t stage_name,
     const id4_pipeline_parameter_slab_set_t* slab_set,
     iree_hal_semaphore_list_t wait_semaphore_list,
@@ -2147,18 +2320,23 @@ static iree_status_t id4_pipeline_parameter_slab_submit_load_group(
       &loads[step->target_slab_index];
 
   iree_status_t status = iree_ok_status();
+  const iree_time_t start_time_ns = iree_time_now();
   if (id4_pipeline_parameter_load_group_is_encode(group)) {
     status = id4_pipeline_parameter_slab_submit_encode_run(
-        options, load, group.step_count, step, group.step_offset, stage_name,
-        slab_set->buffers[step->target_slab_index], wait_semaphore_list,
-        signal_semaphore_list, host_allocator);
+        options, load, group.step_count, step, group_context, group.step_offset,
+        stage_name, slab_set->buffers[step->target_slab_index],
+        wait_semaphore_list, signal_semaphore_list, host_allocator);
   } else {
     status = id4_pipeline_parameter_slab_submit_gather(
-        options, load, step, stage_name,
+        options, load, step, stage_name, group_context, group,
         slab_set->buffers[step->target_slab_index], wait_semaphore_list,
         signal_semaphore_list);
   }
-  return status;
+  const iree_time_t end_time_ns = iree_time_now();
+  return iree_status_join(
+      status, id4_pipeline_parameter_slab_emit_load_group_submit_timing(
+                  load, stage_name, group_context, group, start_time_ns,
+                  end_time_ns, options->diagnostics_sink));
 }
 
 static iree_status_t id4_pipeline_parameter_slab_create_group_semaphores(
@@ -2281,8 +2459,16 @@ static iree_status_t id4_pipeline_parameter_slab_set_submit_eager_load_groups(
     const id4_pipeline_parameter_load_group_t group =
         id4_pipeline_parameter_load_group_from_steps(
             /*step_index=*/0, load_step_count, load_steps);
+    id4_pipeline_parameter_load_group_context_t group_context = {
+        // This eager path does not retain plan-local group ordering.
+        .group_index = IREE_HOST_SIZE_MAX,
+        // This eager path does not track first consumer regions.
+        .first_consumer_region_id = IREE_HOST_SIZE_MAX,
+        // Eager prepare-time loading happens outside region issue.
+        .submit_region_id = IREE_HOST_SIZE_MAX,
+    };
     return id4_pipeline_parameter_slab_submit_load_group(
-        options, loads, load_steps, group, stage_name, slab_set,
+        options, loads, load_steps, group_context, group, stage_name, slab_set,
         options->wait_semaphore_list, options->signal_semaphore_list,
         host_allocator);
   }
@@ -2320,8 +2506,16 @@ static iree_status_t id4_pipeline_parameter_slab_set_submit_eager_load_groups(
     iree_hal_semaphore_list_t group_signal_list =
         id4_pipeline_parameter_one_semaphore_list(&group_signal_semaphore,
                                                   &group_signal_payload_value);
+    id4_pipeline_parameter_load_group_context_t group_context = {
+        // Plan-local load group ordinal.
+        .group_index = group_index,
+        // Eager prepare-time loading does not track first consumer regions.
+        .first_consumer_region_id = IREE_HOST_SIZE_MAX,
+        // Eager prepare-time loading happens outside region issue.
+        .submit_region_id = IREE_HOST_SIZE_MAX,
+    };
     status = id4_pipeline_parameter_slab_submit_load_group(
-        options, loads, load_steps, group, stage_name, slab_set,
+        options, loads, load_steps, group_context, group, stage_name, slab_set,
         group_wait_list, group_signal_list, host_allocator);
     if (iree_status_is_ok(status)) {
       if (id4_pipeline_parameter_load_group_is_encode(group)) {
@@ -2518,7 +2712,8 @@ iree_status_t id4_pipeline_parameter_slab_set_submit_load_group(
     id4_pipeline_parameter_slab_set_t* slab_set,
     iree_host_size_t load_step_count,
     const id4_pipeline_parameter_load_step_t* load_steps,
-    iree_host_size_t group_index, iree_string_view_t stage_name,
+    id4_pipeline_parameter_load_group_context_t group_context,
+    iree_string_view_t stage_name,
     id4_pipeline_diagnostics_sink_t* diagnostics_sink) {
   if (!slab_set) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -2528,28 +2723,31 @@ iree_status_t id4_pipeline_parameter_slab_set_submit_load_group(
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "parameter slab set has no retained load context");
   }
-  if (group_index >= slab_set->load_group_count) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "parameter load group %" PRIhsz
-                            " is outside load group count %" PRIhsz,
-                            group_index, slab_set->load_group_count);
+  if (group_context.group_index >= slab_set->load_group_count) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "parameter load group %" PRIhsz " is outside load group count %" PRIhsz,
+        group_context.group_index, slab_set->load_group_count);
   }
   if (!slab_set->load_group_submitted) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
         "parameter slab set has no load group submission state");
   }
-  if (slab_set->load_group_submitted[group_index]) return iree_ok_status();
+  if (slab_set->load_group_submitted[group_context.group_index]) {
+    return iree_ok_status();
+  }
 
   id4_pipeline_parameter_load_group_t group;
   IREE_RETURN_IF_ERROR(id4_pipeline_parameter_load_group_at(
-      load_step_count, load_steps, group_index, &group));
+      load_step_count, load_steps, group_context.group_index, &group));
   if (group.target_slab_index >= slab_set->load_count) {
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "parameter load group %" PRIhsz " target slab %" PRIhsz
-        " is outside load count %" PRIhsz,
-        group_index, group.target_slab_index, slab_set->load_count);
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "parameter load group %" PRIhsz
+                            " target slab %" PRIhsz
+                            " is outside load count %" PRIhsz,
+                            group_context.group_index, group.target_slab_index,
+                            slab_set->load_count);
   }
 
   id4_pipeline_parameter_slab_set_load_options_t submit_options =
@@ -2564,15 +2762,15 @@ iree_status_t id4_pipeline_parameter_slab_set_submit_load_group(
   }
 
   iree_hal_semaphore_t* signal_semaphore =
-      slab_set->load_group_semaphores[group_index];
+      slab_set->load_group_semaphores[group_context.group_index];
   uint64_t signal_payload_value = 1;
   iree_hal_semaphore_list_t signal_list =
       id4_pipeline_parameter_one_semaphore_list(&signal_semaphore,
                                                 &signal_payload_value);
   IREE_RETURN_IF_ERROR(id4_pipeline_parameter_slab_submit_load_group(
-      &submit_options, slab_set->loads, load_steps, group, stage_name, slab_set,
-      wait_list, signal_list, slab_set->host_allocator));
-  slab_set->load_group_submitted[group_index] = true;
+      &submit_options, slab_set->loads, load_steps, group_context, group,
+      stage_name, slab_set, wait_list, signal_list, slab_set->host_allocator));
+  slab_set->load_group_submitted[group_context.group_index] = true;
   if (id4_pipeline_parameter_load_group_is_encode(group)) {
     slab_set->encode_tail_semaphore = signal_semaphore;
     slab_set->encode_tail_payload_value = signal_payload_value;

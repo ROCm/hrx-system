@@ -79,6 +79,14 @@ typedef struct id4_pipeline_parameter_slab_diagnostic_t {
 typedef struct id4_pipeline_parameter_load_diagnostic_t {
   // Plan-local slab index populated by this loading window.
   iree_host_size_t slab_index;
+  // Plan-local load group ordinal, or IREE_HOST_SIZE_MAX when not grouped.
+  iree_host_size_t load_group_index;
+  // Human-readable load group kind such as "gather" or "encode".
+  iree_string_view_t load_group_kind;
+  // First consumer region id, or IREE_HOST_SIZE_MAX when untracked.
+  iree_host_size_t first_consumer_region_id;
+  // Region id that submitted this group, or IREE_HOST_SIZE_MAX outside issue.
+  iree_host_size_t submit_region_id;
   // First load-step ordinal represented by this loading window.
   iree_host_size_t load_step_offset;
   // Number of load steps represented by this loading window.
