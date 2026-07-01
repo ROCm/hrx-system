@@ -2097,7 +2097,43 @@ static iree_status_t id4_pipeline_parameter_slab_signal_load_complete(
       signal_semaphore_list, IREE_HAL_EXECUTE_FLAG_NONE);
 }
 
-static iree_status_t id4_pipeline_parameter_slab_load_groups_submit(
+static iree_status_t id4_pipeline_parameter_slab_set_allocate_buffers(
+    const id4_pipeline_parameter_slab_set_load_options_t* options,
+    const id4_pipeline_parameter_slab_load_t* loads,
+    iree_host_size_t load_count, iree_string_view_t stage_name,
+    id4_pipeline_parameter_slab_set_t* slab_set) {
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0; i < load_count && iree_status_is_ok(status);
+       ++i) {
+    status = id4_pipeline_parameter_slab_allocate_buffer(&loads[i],
+                                                         &slab_set->buffers[i]);
+    if (!iree_status_is_ok(status)) {
+      status = iree_status_join(
+          status,
+          id4_pipeline_parameter_slab_emit_diagnostic(
+              &loads[i], stage_name, IREE_SV("parameter_slab.load.error"),
+              IREE_SV("parameter slab allocation failed"), loads[i].slab->scope,
+              IREE_HOST_SIZE_MAX, options->diagnostics_sink));
+    }
+  }
+  return status;
+}
+
+static iree_status_t id4_pipeline_parameter_slab_set_create_load_groups(
+    const id4_pipeline_parameter_slab_load_t* loads,
+    iree_host_size_t load_step_count,
+    const id4_pipeline_parameter_load_step_t* load_steps,
+    iree_allocator_t host_allocator,
+    id4_pipeline_parameter_slab_set_t* slab_set) {
+  iree_host_size_t load_group_count = 0;
+  IREE_RETURN_IF_ERROR(id4_pipeline_parameter_load_group_count(
+      load_step_count, load_steps, &load_group_count));
+  return id4_pipeline_parameter_slab_create_group_semaphores(
+      load_group_count, loads, load_step_count, load_steps, host_allocator,
+      &slab_set->load_group_semaphores, &slab_set->load_group_count);
+}
+
+static iree_status_t id4_pipeline_parameter_slab_set_submit_eager_load_groups(
     const id4_pipeline_parameter_slab_set_load_options_t* options,
     const id4_pipeline_parameter_slab_load_t* loads,
     iree_host_size_t load_step_count,
@@ -2119,14 +2155,15 @@ static iree_status_t id4_pipeline_parameter_slab_load_groups_submit(
 
   iree_hal_semaphore_t** completion_semaphores = NULL;
   uint64_t* completion_payload_values = NULL;
-  if (group_semaphore_count != 0) {
-    completion_semaphores = (iree_hal_semaphore_t**)iree_alloca(
-        group_semaphore_count * sizeof(completion_semaphores[0]));
-    completion_payload_values = (uint64_t*)iree_alloca(
-        group_semaphore_count * sizeof(completion_payload_values[0]));
+  iree_status_t status = iree_allocator_malloc_array(
+      host_allocator, group_semaphore_count, sizeof(completion_semaphores[0]),
+      (void**)&completion_semaphores);
+  if (iree_status_is_ok(status)) {
+    status = iree_allocator_malloc_array(host_allocator, group_semaphore_count,
+                                         sizeof(completion_payload_values[0]),
+                                         (void**)&completion_payload_values);
   }
 
-  iree_status_t status = iree_ok_status();
   iree_host_size_t completion_count = 0;
   iree_hal_semaphore_t* encode_wait_semaphore = NULL;
   uint64_t encode_wait_payload_value = 0;
@@ -2178,6 +2215,8 @@ static iree_status_t id4_pipeline_parameter_slab_load_groups_submit(
     status = id4_pipeline_parameter_slab_signal_load_complete(
         loads, load_steps, wait_list, options->signal_semaphore_list);
   }
+  iree_allocator_free(host_allocator, completion_payload_values);
+  iree_allocator_free(host_allocator, completion_semaphores);
   return status;
 }
 
@@ -2225,32 +2264,16 @@ iree_status_t id4_pipeline_parameter_slab_set_load(
   id4_pipeline_parameter_slab_set_t* slab_set = NULL;
   iree_status_t status = id4_pipeline_parameter_slab_set_create_empty(
       load_count, host_allocator, &slab_set);
-  for (iree_host_size_t i = 0; i < load_count && iree_status_is_ok(status);
-       ++i) {
-    status = id4_pipeline_parameter_slab_allocate_buffer(&loads[i],
-                                                         &slab_set->buffers[i]);
-    if (!iree_status_is_ok(status)) {
-      status = iree_status_join(
-          status,
-          id4_pipeline_parameter_slab_emit_diagnostic(
-              &loads[i], stage_name, IREE_SV("parameter_slab.load.error"),
-              IREE_SV("parameter slab allocation failed"), loads[i].slab->scope,
-              IREE_HOST_SIZE_MAX, options->diagnostics_sink));
-    }
-  }
-
-  iree_host_size_t load_group_count = 0;
   if (iree_status_is_ok(status)) {
-    status = id4_pipeline_parameter_load_group_count(
-        load_step_count, load_steps, &load_group_count);
+    status = id4_pipeline_parameter_slab_set_allocate_buffers(
+        options, loads, load_count, stage_name, slab_set);
   }
   if (iree_status_is_ok(status)) {
-    status = id4_pipeline_parameter_slab_create_group_semaphores(
-        load_group_count, loads, load_step_count, load_steps, host_allocator,
-        &slab_set->load_group_semaphores, &slab_set->load_group_count);
+    status = id4_pipeline_parameter_slab_set_create_load_groups(
+        loads, load_step_count, load_steps, host_allocator, slab_set);
   }
   if (iree_status_is_ok(status)) {
-    status = id4_pipeline_parameter_slab_load_groups_submit(
+    status = id4_pipeline_parameter_slab_set_submit_eager_load_groups(
         options, loads, load_step_count, load_steps, stage_name, slab_set,
         slab_set->load_group_semaphores, slab_set->load_group_count,
         host_allocator);

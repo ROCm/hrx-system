@@ -1992,6 +1992,32 @@ static iree_status_t id4_pipeline_plan_append_parameter_load_step_kind_json(
   }
 }
 
+static iree_status_t id4_pipeline_plan_append_parameter_load_group_kind_json(
+    iree_string_builder_t* builder,
+    id4_pipeline_parameter_load_group_kind_t kind) {
+  switch (kind) {
+    case ID4_PIPELINE_PARAMETER_LOAD_GROUP_KIND_GATHER:
+      return id4_pipeline_plan_append_json_string(builder, IREE_SV("gather"));
+    case ID4_PIPELINE_PARAMETER_LOAD_GROUP_KIND_ENCODE:
+      return id4_pipeline_plan_append_json_string(builder, IREE_SV("encode"));
+    default:
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "unknown parameter load group kind %u",
+                              (uint32_t)kind);
+  }
+}
+
+static iree_host_size_t id4_pipeline_plan_find_load_group_first_region(
+    const id4_pipeline_plan_t* plan, iree_host_size_t group_index) {
+  for (iree_host_size_t i = 0; i < plan->region_count; ++i) {
+    const id4_pipeline_region_plan_t* region = &plan->regions[i];
+    for (iree_host_size_t j = 0; j < region->parameter_load_group_count; ++j) {
+      if (region->parameter_load_groups[j] == group_index) return i;
+    }
+  }
+  return IREE_HOST_SIZE_MAX;
+}
+
 static iree_status_t id4_pipeline_plan_append_region_statistics_json(
     iree_string_builder_t* builder,
     id4_pipeline_region_statistics_t statistics) {
@@ -2464,6 +2490,48 @@ iree_status_t id4_pipeline_plan_format_json(const id4_pipeline_plan_t* plan,
         ",\"target_slab_index\":%" PRIhsz ",\"request_offset\":%" PRIhsz
         ",\"request_count\":%" PRIhsz "}",
         step->target_slab_index, step->request_offset, step->request_count));
+  }
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(
+      builder, "],\"parameter_load_groups\":["));
+  iree_host_size_t parameter_load_group_count = 0;
+  IREE_RETURN_IF_ERROR(id4_pipeline_plan_parameter_load_group_count(
+      plan, &parameter_load_group_count));
+  for (iree_host_size_t i = 0; i < parameter_load_group_count; ++i) {
+    id4_pipeline_parameter_load_group_t group;
+    IREE_RETURN_IF_ERROR(
+        id4_pipeline_plan_parameter_load_group_at(plan, i, &group));
+    const id4_pipeline_parameter_load_step_t* step =
+        &plan->parameter_load_steps[group.step_offset];
+    const iree_host_size_t first_consumer_region =
+        id4_pipeline_plan_find_load_group_first_region(plan, i);
+    if (i != 0) {
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, ","));
+    }
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+        builder, "{\"id\":%" PRIhsz ",\"kind\":", i));
+    IREE_RETURN_IF_ERROR(
+        id4_pipeline_plan_append_parameter_load_group_kind_json(builder,
+                                                                group.kind));
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+        builder,
+        ",\"step_offset\":%" PRIhsz ",\"step_count\":%" PRIhsz
+        ",\"target_slab_index\":%" PRIhsz,
+        group.step_offset, group.step_count, group.target_slab_index));
+    if (step->readiness_group_key !=
+        ID4_PIPELINE_PARAMETER_LOAD_READINESS_GROUP_NONE) {
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+          builder, ",\"readiness_group_key\":%" PRIhsz,
+          step->readiness_group_key));
+    }
+    if (first_consumer_region == IREE_HOST_SIZE_MAX) {
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(
+          builder, ",\"first_consumer_region_id\":null"));
+    } else {
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+          builder, ",\"first_consumer_region_id\":%" PRIhsz,
+          first_consumer_region));
+    }
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "}"));
   }
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_cstring(builder, "],\"constant_slabs\":["));
