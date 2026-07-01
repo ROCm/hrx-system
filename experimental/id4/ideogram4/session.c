@@ -102,6 +102,13 @@ typedef enum id4_ideogram4_generation_stage_ordinal_e {
   ID4_IDEOGRAM4_GENERATION_STAGE_COUNT = 6,
 } id4_ideogram4_generation_stage_ordinal_t;
 
+typedef enum id4_ideogram4_generation_stage_prepare_mode_e {
+  // Retains stage parameter loading work for issue-time submission.
+  ID4_IDEOGRAM4_GENERATION_STAGE_PREPARE_MODE_DEFER_PARAMETERS = 0,
+  // Submits stage parameter loading during stage-bundle preparation.
+  ID4_IDEOGRAM4_GENERATION_STAGE_PREPARE_MODE_MATERIALIZE_PARAMETERS = 1,
+} id4_ideogram4_generation_stage_prepare_mode_t;
+
 typedef struct id4_ideogram4_generation_stage_descriptor_t {
   // Stage ordinal used by generation scheduling tables.
   id4_ideogram4_generation_stage_ordinal_t ordinal;
@@ -3347,6 +3354,7 @@ id4_ideogram4_generation_phase_descriptor_for_mask(
 static iree_status_t id4_ideogram4_generation_prepare_stage_bundle(
     id4_ideogram4_generation_bundle_t* bundle,
     id4_ideogram4_generation_stage_ordinal_t stage_ordinal,
+    id4_ideogram4_generation_stage_prepare_mode_t prepare_mode,
     iree_hal_semaphore_list_t wait_semaphore_list,
     id4_pipeline_kernel_diagnostic_artifact_flags_t
         kernel_diagnostic_artifact_flags,
@@ -3357,7 +3365,41 @@ static iree_status_t id4_ideogram4_generation_prepare_stage_bundle(
   id4_ideogram4_generation_stage_slot_t* slot = &bundle->stages[stage_ordinal];
   const bool has_parameter_slabs =
       id4_pipeline_plan_parameter_slab_count(slot->plan) != 0;
-  const bool defer_parameter_loads_to_issue = has_parameter_slabs;
+  const bool defer_parameter_loads_to_issue =
+      has_parameter_slabs &&
+      prepare_mode ==
+          ID4_IDEOGRAM4_GENERATION_STAGE_PREPARE_MODE_DEFER_PARAMETERS;
+
+  iree_hal_semaphore_t* materialize_semaphore = NULL;
+  uint64_t materialize_payload_value = 1;
+  if (has_parameter_slabs &&
+      prepare_mode ==
+          ID4_IDEOGRAM4_GENERATION_STAGE_PREPARE_MODE_MATERIALIZE_PARAMETERS) {
+    IREE_RETURN_IF_ERROR(iree_hal_semaphore_create(
+        bundle->device, bundle->queue_affinity, /*initial_value=*/0,
+        IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &materialize_semaphore));
+  } else if (
+      prepare_mode !=
+          ID4_IDEOGRAM4_GENERATION_STAGE_PREPARE_MODE_DEFER_PARAMETERS &&
+      prepare_mode !=
+          ID4_IDEOGRAM4_GENERATION_STAGE_PREPARE_MODE_MATERIALIZE_PARAMETERS) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "Ideogram 4 generation stage prepare mode %" PRIu32
+                            " is invalid",
+                            (uint32_t)prepare_mode);
+  }
+
+  iree_hal_semaphore_list_t signal_semaphore_list =
+      materialize_semaphore
+          ? (iree_hal_semaphore_list_t){
+                // One internal readiness edge retained by the prepared bundle.
+                .count = 1,
+                // Internal readiness semaphore signaled by parameter loading.
+                .semaphores = &materialize_semaphore,
+                // Payload value paired with the internal readiness semaphore.
+                .payload_values = &materialize_payload_value,
+            }
+          : iree_hal_semaphore_list_empty();
 
   id4_pipeline_stage_prepare_options_t prepare_options;
   memset(&prepare_options, 0, sizeof(prepare_options));
@@ -3373,13 +3415,15 @@ static iree_status_t id4_ideogram4_generation_prepare_stage_bundle(
   prepare_options.wait_semaphore_list = has_parameter_slabs
                                             ? wait_semaphore_list
                                             : iree_hal_semaphore_list_empty();
-  prepare_options.signal_semaphore_list = iree_hal_semaphore_list_empty();
+  prepare_options.signal_semaphore_list = signal_semaphore_list;
   prepare_options.command_buffer_mode = bundle->command_buffer_mode;
   prepare_options.kernel_diagnostic_artifact_flags =
       kernel_diagnostic_artifact_flags;
   prepare_options.diagnostics_sink = diagnostics_sink;
-  return id4_pipeline_stage_prepare(slot->stage, slot->plan, &prepare_options,
-                                    out_stage_bundle);
+  iree_status_t status = id4_pipeline_stage_prepare(
+      slot->stage, slot->plan, &prepare_options, out_stage_bundle);
+  iree_hal_semaphore_release(materialize_semaphore);
+  return status;
 }
 
 static iree_status_t id4_ideogram4_generation_bundle_signal_prepared(
@@ -3515,8 +3559,10 @@ static iree_status_t id4_ideogram4_generation_bundle_prepare_resident_stages(
         descriptor->ordinal;
     if (bundle->resident_stage_bundles[stage_ordinal]) continue;
     status = id4_ideogram4_generation_prepare_stage_bundle(
-        bundle, stage_ordinal, options->wait_semaphore_list,
-        options->kernel_diagnostic_artifact_flags, options->diagnostics_sink,
+        bundle, stage_ordinal,
+        ID4_IDEOGRAM4_GENERATION_STAGE_PREPARE_MODE_MATERIALIZE_PARAMETERS,
+        options->wait_semaphore_list, options->kernel_diagnostic_artifact_flags,
+        options->diagnostics_sink,
         &bundle->resident_stage_bundles[stage_ordinal]);
   }
   if (iree_status_is_ok(status)) {
@@ -3558,8 +3604,8 @@ iree_status_t id4_ideogram4_session_prepare_generation(
             id4_ideogram4_generation_bundle_signal_prepared(bundle, options);
         break;
       case ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_SELECTED_STAGE_BUNDLES:
-        status =
-            id4_ideogram4_generation_bundle_signal_prepared(bundle, options);
+        status = id4_ideogram4_generation_bundle_prepare_resident_stages(
+            bundle, options);
         break;
       case ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_ALL_STAGE_BUNDLES:
         status = id4_ideogram4_generation_bundle_prepare_resident_stages(
@@ -3596,9 +3642,10 @@ static iree_status_t id4_ideogram4_generation_acquire_stage_bundle_ref(
                                                         stage_ordinal)) {
     if (!bundle->resident_stage_bundles[stage_ordinal]) {
       IREE_RETURN_IF_ERROR(id4_ideogram4_generation_prepare_stage_bundle(
-          bundle, stage_ordinal, wait_semaphore_list,
-          kernel_diagnostic_artifact_flags, diagnostics_sink,
-          &bundle->resident_stage_bundles[stage_ordinal]));
+          bundle, stage_ordinal,
+          ID4_IDEOGRAM4_GENERATION_STAGE_PREPARE_MODE_MATERIALIZE_PARAMETERS,
+          wait_semaphore_list, kernel_diagnostic_artifact_flags,
+          diagnostics_sink, &bundle->resident_stage_bundles[stage_ordinal]));
     }
     out_stage_bundle_ref->bundle =
         bundle->resident_stage_bundles[stage_ordinal];
@@ -3606,8 +3653,9 @@ static iree_status_t id4_ideogram4_generation_acquire_stage_bundle_ref(
     return iree_ok_status();
   }
   iree_status_t status = id4_ideogram4_generation_prepare_stage_bundle(
-      bundle, stage_ordinal, wait_semaphore_list,
-      kernel_diagnostic_artifact_flags, diagnostics_sink,
+      bundle, stage_ordinal,
+      ID4_IDEOGRAM4_GENERATION_STAGE_PREPARE_MODE_DEFER_PARAMETERS,
+      wait_semaphore_list, kernel_diagnostic_artifact_flags, diagnostics_sink,
       &out_stage_bundle_ref->bundle);
   out_stage_bundle_ref->owns_bundle = iree_status_is_ok(status);
   return status;

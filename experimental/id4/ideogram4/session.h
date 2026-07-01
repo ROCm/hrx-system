@@ -205,7 +205,7 @@ typedef enum id4_ideogram4_generation_residency_mode_e {
   ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_INVALID = 0,
   // Prepare heavy stage bundles at issue-time phase boundaries.
   ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_ISSUE_PHASES = 1,
-  // Retain selected coarse stage bundles after first preparation.
+  // Prepare and retain selected coarse stage bundles.
   ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_SELECTED_STAGE_BUNDLES = 2,
   // Prepare and retain every coarse stage bundle in the generation bundle.
   ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_ALL_STAGE_BUNDLES = 3,
