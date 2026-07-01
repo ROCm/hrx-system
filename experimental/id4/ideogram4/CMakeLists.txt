@@ -33,6 +33,7 @@ iree_cc_library(
     "session_lifecycle.c"
     "session_qwen.c"
     "session_state.h"
+    "session_support.c"
     "session_support.h"
   DEPS
     ::request
