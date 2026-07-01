@@ -139,6 +139,8 @@ iree_execution_test_suite(
 iree_execution_test_suite(
     name = "amdgpu_execution_test",
     data = [
+        "report_complex_loop_memory_economics_amdgpu.loom",
+        "report_loop_memory_economics_amdgpu.loom",
         "selected_root_amdgpu.loom",
     ],
     manifests = ["loom-compile-amdgpu.test.json"],

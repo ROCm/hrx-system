@@ -75,6 +75,8 @@ enum {
   LOOM_TARGET_COMPILE_REPORT_DETAIL_TARGET_CAPABILITY_ROWS = 1u << 19,
   // Static launch workload facts were recorded.
   LOOM_TARGET_COMPILE_REPORT_DETAIL_WORKLOAD = 1u << 20,
+  // Per-workitem dynamic instruction-mix estimates were recorded.
+  LOOM_TARGET_COMPILE_REPORT_DETAIL_DYNAMIC_INSTRUCTION_MIX = 1u << 21,
 };
 
 typedef enum loom_target_compile_report_move_cause_e {
@@ -573,6 +575,9 @@ typedef struct loom_target_compile_report_entry_t {
       move_causes[LOOM_TARGET_COMPILE_REPORT_MOVE_CAUSE_COUNT];
   // Static descriptor-backed instruction and effect feature counters.
   loom_target_compile_report_static_instruction_mix_t static_instruction_mix;
+  // Per-workitem instruction and effect counters after multiplying by exact
+  // statically-provable loop trip counts.
+  loom_target_compile_report_static_instruction_mix_t dynamic_instruction_mix;
   // Final target resource and occupancy summary.
   loom_target_compile_report_target_resources_t target_resources;
   // Target wait-counter planning summary.
@@ -1240,6 +1245,9 @@ typedef struct loom_target_compile_report_t {
       move_causes[LOOM_TARGET_COMPILE_REPORT_MOVE_CAUSE_COUNT];
   // Static descriptor-backed instruction and effect feature counters.
   loom_target_compile_report_static_instruction_mix_t static_instruction_mix;
+  // Per-workitem instruction and effect counters after multiplying by exact
+  // statically-provable loop trip counts shared by all entries.
+  loom_target_compile_report_static_instruction_mix_t dynamic_instruction_mix;
   // Final target resource and occupancy summary.
   loom_target_compile_report_target_resources_t target_resources;
   // Target wait-counter planning summary.
@@ -1355,6 +1363,12 @@ void loom_target_compile_report_record_move_cause(
 
 // Records static descriptor-backed instruction-mix feature counters.
 void loom_target_compile_report_record_static_instruction_mix(
+    loom_target_compile_report_t* report,
+    const loom_target_compile_report_static_instruction_mix_t* mix);
+
+// Records per-workitem instruction-mix counters weighted by exact static loop
+// trip counts.
+void loom_target_compile_report_record_dynamic_instruction_mix(
     loom_target_compile_report_t* report,
     const loom_target_compile_report_static_instruction_mix_t* mix);
 

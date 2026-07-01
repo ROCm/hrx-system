@@ -297,6 +297,89 @@
       ]
     },
     {
+      "name": "reports exact loop-weighted AMDGPU memory economics",
+      "steps": [
+        {
+          "name": "compile",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/report_loop_memory_economics_amdgpu.loom",
+              "--backend=amdgpu-hal",
+              "--target=gfx11-generic",
+              "--output={tmp}/loop_memory_economics_amdgpu.hsaco",
+              "--compile-report=details",
+              "--compile-report-output=-"
+            ]
+          },
+          "stdout": {
+            "contains": {
+              "unordered": [
+                "\"function\":\"compile_report_loop_memory_economics\"",
+                "\"status\":\"OK\"",
+                "\"static_instruction_mix\":{\"descriptor_count\":",
+                "\"memory_read_byte_count\":20",
+                "\"memory_write_byte_count\":4",
+                "\"dynamic_instruction_mix\":{\"descriptor_count\":",
+                "\"memory_read_byte_count\":32",
+                "\"memory_write_byte_count\":16",
+                "\"global_load_byte_count\":16",
+                "\"global_store_byte_count\":16",
+                "\"scalar_read_byte_count\":16",
+                "\"economics\":{\"memory\":{\"per_workitem_issued\":{\"read_bytes\":32,\"write_bytes\":16,\"total_bytes\":48"
+              ]
+            }
+          },
+          "files": [
+            {
+              "path": "{tmp}/loop_memory_economics_amdgpu.hsaco",
+              "non_empty": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "omits AMDGPU memory economics for unmodeled loop CFG",
+      "steps": [
+        {
+          "name": "compile",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/report_complex_loop_memory_economics_amdgpu.loom",
+              "--backend=amdgpu-hal",
+              "--target=gfx11-generic",
+              "--output={tmp}/complex_loop_memory_economics_amdgpu.hsaco",
+              "--compile-report=details",
+              "--compile-report-output=-"
+            ]
+          },
+          "stdout": {
+            "contains": {
+              "unordered": [
+                "\"function\":\"compile_report_complex_loop_memory_economics\"",
+                "\"status\":\"OK\"",
+                "\"static_instruction_mix\":{\"descriptor_count\":",
+                "\"memory_read_byte_count\":20",
+                "\"memory_write_byte_count\":4"
+              ]
+            },
+            "not_contains": [
+              "\"dynamic_instruction_mix\"",
+              "\"economics\""
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/complex_loop_memory_economics_amdgpu.hsaco",
+              "non_empty": true
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "compiles selected AMDGPU root before target selection",
       "steps": [
         {

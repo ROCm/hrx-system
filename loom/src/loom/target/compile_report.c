@@ -412,6 +412,14 @@ void loom_target_compile_report_record_static_instruction_mix(
   report->static_instruction_mix = *mix;
 }
 
+void loom_target_compile_report_record_dynamic_instruction_mix(
+    loom_target_compile_report_t* report,
+    const loom_target_compile_report_static_instruction_mix_t* mix) {
+  report->detail_flags |=
+      LOOM_TARGET_COMPILE_REPORT_DETAIL_DYNAMIC_INSTRUCTION_MIX;
+  report->dynamic_instruction_mix = *mix;
+}
+
 void loom_target_compile_report_record_emission(
     loom_target_compile_report_t* report, uint64_t instruction_count,
     uint64_t code_byte_count, uint64_t code_storage_byte_count) {
@@ -770,6 +778,12 @@ static void loom_target_compile_report_merge_entry_summary(
   const bool first_entry = report->entry_rows.count == 0;
   const bool report_had_target_resources = iree_any_bit_set(
       report->detail_flags, LOOM_TARGET_COMPILE_REPORT_DETAIL_TARGET_RESOURCES);
+  const bool report_had_dynamic_instruction_mix = iree_any_bit_set(
+      report->detail_flags,
+      LOOM_TARGET_COMPILE_REPORT_DETAIL_DYNAMIC_INSTRUCTION_MIX);
+  const bool entry_has_dynamic_instruction_mix = iree_any_bit_set(
+      entry_report->detail_flags,
+      LOOM_TARGET_COMPILE_REPORT_DETAIL_DYNAMIC_INSTRUCTION_MIX);
   report->detail_flags |=
       entry_report->detail_flags | LOOM_TARGET_COMPILE_REPORT_DETAIL_ENTRIES;
   if (first_entry) {
@@ -820,6 +834,7 @@ static void loom_target_compile_report_merge_entry_summary(
     report->private_memory_bytes = entry_report->private_memory_bytes;
     report->local_memory_bytes = entry_report->local_memory_bytes;
     report->static_instruction_mix = entry_report->static_instruction_mix;
+    report->dynamic_instruction_mix = entry_report->dynamic_instruction_mix;
     report->target_resources = entry_report->target_resources;
     report->wait_plan = entry_report->wait_plan;
     report->workload = entry_report->workload;
@@ -895,6 +910,16 @@ static void loom_target_compile_report_merge_entry_summary(
                                                   &entry_report->wait_plan);
   loom_target_compile_report_accumulate_instruction_mix(
       &report->static_instruction_mix, &entry_report->static_instruction_mix);
+  if (report_had_dynamic_instruction_mix && entry_has_dynamic_instruction_mix) {
+    loom_target_compile_report_accumulate_instruction_mix(
+        &report->dynamic_instruction_mix,
+        &entry_report->dynamic_instruction_mix);
+  } else {
+    report->detail_flags &=
+        ~LOOM_TARGET_COMPILE_REPORT_DETAIL_DYNAMIC_INSTRUCTION_MIX;
+    report->dynamic_instruction_mix =
+        (loom_target_compile_report_static_instruction_mix_t){0};
+  }
   report->math_legalization_rewritten_op_count +=
       entry_report->math_legalization_rewritten_op_count;
   report->math_legalization_rejected_op_count +=
@@ -970,6 +995,7 @@ loom_target_compile_report_entry_from_report(
       .private_memory_bytes = entry_report->private_memory_bytes,
       .local_memory_bytes = entry_report->local_memory_bytes,
       .static_instruction_mix = entry_report->static_instruction_mix,
+      .dynamic_instruction_mix = entry_report->dynamic_instruction_mix,
       .target_resources = entry_report->target_resources,
       .wait_plan = entry_report->wait_plan,
       .workload = entry_report->workload,

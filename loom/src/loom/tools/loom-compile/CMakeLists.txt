@@ -102,6 +102,8 @@ iree_execution_test_suite(
   TOOLS
     "loom-compile=::loom-compile"
   DATA
+    "report_complex_loop_memory_economics_amdgpu.loom"
+    "report_loop_memory_economics_amdgpu.loom"
     "selected_root_amdgpu.loom"
   LABELS
     "hostonly"
