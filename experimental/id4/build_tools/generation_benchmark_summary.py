@@ -80,6 +80,13 @@ _LABEL_ENCODE_WINDOWS_PATTERN = re.compile(
     r"chunks=(?P<chunks>[0-9]+),batches=(?P<batches>[0-9]+),"
     r"dispatches=(?P<dispatches>[0-9]+)\]"
 )
+_LABEL_PREPARE_ENCODE_WINDOW_PATTERN = re.compile(
+    r"\bprepare_encode_window\[count=(?P<count>[0-9]+),"
+    r"staging=(?P<staging>[0-9]+)MiB,max=(?P<maximum>[0-9]+)MiB,"
+    r"source=(?P<source>[0-9]+)MiB,target=(?P<target>[0-9]+)MiB,"
+    r"chunks=(?P<chunks>[0-9]+),batches=(?P<batches>[0-9]+),"
+    r"dispatches=(?P<dispatches>[0-9]+)\]"
+)
 _LABEL_ISSUE_ENCODE_WINDOW_PATTERN = re.compile(
     r"\bissue_encode_window\[count=(?P<count>[0-9]+),"
     r"staging=(?P<staging>[0-9]+)MiB,max=(?P<maximum>[0-9]+)MiB,"
@@ -198,6 +205,9 @@ def _parse_generation_benchmark_label(label: str, context: str) -> dict[str, Any
     )
     encode_windows_match = _require_match(
         _LABEL_ENCODE_WINDOWS_PATTERN, label, f"{context}.label"
+    )
+    prepare_encode_window_match = _require_match(
+        _LABEL_PREPARE_ENCODE_WINDOW_PATTERN, label, f"{context}.label"
     )
     issue_encode_window_match = _require_match(
         _LABEL_ISSUE_ENCODE_WINDOW_PATTERN, label, f"{context}.label"
@@ -384,6 +394,30 @@ def _parse_generation_benchmark_label(label: str, context: str) -> dict[str, Any
         ),
         "encode_window_dispatch_count": _match_unsigned_group(
             encode_windows_match, "dispatches", f"{context}.label"
+        ),
+        "prepare_encode_window_count": _match_unsigned_group(
+            prepare_encode_window_match, "count", f"{context}.label"
+        ),
+        "prepare_encode_window_staging_mib": _match_unsigned_group(
+            prepare_encode_window_match, "staging", f"{context}.label"
+        ),
+        "prepare_encode_window_staging_max_mib": _match_unsigned_group(
+            prepare_encode_window_match, "maximum", f"{context}.label"
+        ),
+        "prepare_encode_window_source_mib": _match_unsigned_group(
+            prepare_encode_window_match, "source", f"{context}.label"
+        ),
+        "prepare_encode_window_target_mib": _match_unsigned_group(
+            prepare_encode_window_match, "target", f"{context}.label"
+        ),
+        "prepare_encode_window_chunk_count": _match_unsigned_group(
+            prepare_encode_window_match, "chunks", f"{context}.label"
+        ),
+        "prepare_encode_window_batch_count": _match_unsigned_group(
+            prepare_encode_window_match, "batches", f"{context}.label"
+        ),
+        "prepare_encode_window_dispatch_count": _match_unsigned_group(
+            prepare_encode_window_match, "dispatches", f"{context}.label"
         ),
         "issue_encode_window_count": _match_unsigned_group(
             issue_encode_window_match, "count", f"{context}.label"
