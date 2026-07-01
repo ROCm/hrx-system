@@ -128,6 +128,39 @@ def _profile() -> list[dict[str, object]]:
     ]
 
 
+def _multi_region_plan() -> dict[str, object]:
+    plan = _plan()
+    plan["regions"] = [
+        {
+            "id": 0,
+            "name": "id4.test.first_region",
+        },
+        {
+            "id": 1,
+            "name": "id4.test.second_region",
+        },
+    ]
+    plan["program"]["dispatches"][1]["region_id"] = 1
+    return plan
+
+
+def _profile_only_dispatch(
+    event_id: int, function_name: str, duration_ns: int
+) -> dict[str, object]:
+    return {
+        "type": "dispatch_event",
+        "event_id": event_id,
+        "submission_id": event_id + 100,
+        "command_buffer_id": event_id + 200,
+        "command_index": 0,
+        "key": function_name,
+        "workgroup_count": [1, 1, 1],
+        "workgroup_size": [1, 1, 1],
+        "valid": True,
+        "duration_ns": duration_ns,
+    }
+
+
 def _dispatch(
     dispatch_ordinal: int,
     function_name: str,
@@ -264,6 +297,8 @@ class DispatchProfileJoinTest(unittest.TestCase):
         report = dispatch_profile_join.join_dispatch_profile(_plan(), _profile())
 
         self.assertEqual(report["summary"]["dispatch_count"], 2)
+        self.assertEqual(report["summary"]["profile_dispatch_count"], 2)
+        self.assertEqual(report["summary"]["unmatched_dispatch_count"], 0)
         self.assertEqual(report["summary"]["total_duration_ns"], 1500)
         self.assertEqual(len(report["dispatches"]), 2)
         first = report["dispatches"][0]
@@ -285,6 +320,38 @@ class DispatchProfileJoinTest(unittest.TestCase):
         self.assertEqual(report["by_kernel"][0]["p90_duration_ns"], 1000)
         self.assertEqual(report["by_kernel"][0]["p99_duration_ns"], 1000)
         self.assertEqual(report["by_kernel"][0]["max_duration_ns"], 1000)
+
+    def test_preserves_unmatched_profile_dispatches_around_regions(self) -> None:
+        profile = [
+            _profile_only_dispatch(1, "prepare.first", 10),
+            *_profile(),
+            _profile_only_dispatch(2, "prepare.tail", 20),
+        ]
+        profile.insert(2, _profile_only_dispatch(3, "prepare.between", 30))
+
+        report = dispatch_profile_join.join_dispatch_profile(
+            _multi_region_plan(), profile
+        )
+
+        self.assertEqual(report["summary"]["dispatch_count"], 2)
+        self.assertEqual(report["summary"]["profile_dispatch_count"], 5)
+        self.assertEqual(report["summary"]["unmatched_dispatch_count"], 3)
+        self.assertEqual(len(report["regions"]), 2)
+        self.assertIsNone(report["region"])
+        self.assertEqual(
+            report["dispatches"][0]["region_name"], "id4.test.first_region"
+        )
+        self.assertEqual(
+            report["dispatches"][1]["region_name"], "id4.test.second_region"
+        )
+        self.assertEqual(
+            [row["function_name"] for row in report["unmatched_dispatches"]],
+            ["prepare.first", "prepare.between", "prepare.tail"],
+        )
+        self.assertEqual(
+            report["unmatched_by_kernel"][0]["function_name"], "prepare.between"
+        )
+        self.assertEqual(report["unmatched_by_kernel"][0]["total_duration_ns"], 30)
 
     def test_joins_generation_plan_by_production_issue_sequence(self) -> None:
         report = dispatch_profile_join.join_profile(
@@ -386,7 +453,7 @@ class DispatchProfileJoinTest(unittest.TestCase):
 
         with self.assertRaisesRegex(
             dispatch_profile_join.DispatchProfileJoinError,
-            "function mismatch",
+            "no profile event matched.*id4_test_second",
         ):
             dispatch_profile_join.join_dispatch_profile(_plan(), profile)
 

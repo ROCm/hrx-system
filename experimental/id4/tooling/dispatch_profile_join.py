@@ -297,13 +297,23 @@ def _program_dispatches(plan: dict[str, Any]) -> list[dict[str, Any]]:
     return [_require_dict(row, "program.dispatches[]") for row in dispatches]
 
 
-def _region(plan: dict[str, Any]) -> dict[str, Any]:
+def _regions_by_id(plan: dict[str, Any]) -> dict[int, dict[str, Any]]:
     regions = _require_list(plan.get("regions"), "regions")
-    if len(regions) != 1:
-        raise DispatchProfileJoinError(
-            f"profile joining requires exactly one region, found {len(regions)}"
-        )
-    return _require_dict(regions[0], "regions[0]")
+    regions_by_id = {}
+    for index, region in enumerate(regions):
+        region_row = _require_dict(region, f"regions[{index}]")
+        region_id = _require_int(region_row.get("id"), f"regions[{index}].id")
+        if region_id in regions_by_id:
+            raise DispatchProfileJoinError(f"duplicate region id {region_id}")
+        regions_by_id[region_id] = region_row
+    return regions_by_id
+
+
+def _region_report(region_row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": _require_int(region_row.get("id"), "region.id"),
+        "name": _require_string(region_row.get("name"), "region.name"),
+    }
 
 
 def _join_row(
@@ -406,20 +416,17 @@ def _plan_dispatch_matches_event(
     plan_dispatch: dict[str, Any],
     profile_event: dict[str, Any],
 ) -> bool:
-    try:
-        plan_function = _require_string(
-            plan_dispatch.get("function_name"),
-            f"program.dispatches[{dispatch_ordinal}].function_name",
-        )
-        profile_function = _require_string(
-            profile_event.get("key"),
-            f"profile.dispatch_events[{dispatch_ordinal}].key",
-        )
-        if plan_function != profile_function:
-            return False
-        _launch_geometry(dispatch_ordinal, plan_dispatch, profile_event)
-    except DispatchProfileJoinError:
+    plan_function = _require_string(
+        plan_dispatch.get("function_name"),
+        f"program.dispatches[{dispatch_ordinal}].function_name",
+    )
+    profile_function = _require_string(
+        profile_event.get("key"),
+        f"profile.dispatch_events[{dispatch_ordinal}].key",
+    )
+    if plan_function != profile_function:
         return False
+    _launch_geometry(dispatch_ordinal, plan_dispatch, profile_event)
     return True
 
 
@@ -567,39 +574,65 @@ def _join_stage_dispatches(
     event_offset: int = 0,
 ) -> dict[str, Any]:
     stage_name = _require_string(plan.get("stage"), "stage")
-    region_row = _region(plan)
+    regions_by_id = _regions_by_id(plan)
     plan_dispatches = _program_dispatches(plan)
     if event_offset < 0:
         raise DispatchProfileJoinError("profile event offset must be non-negative")
-    if event_offset + len(plan_dispatches) > len(profile_events):
-        raise DispatchProfileJoinError(
-            f"plan/profile dispatch count mismatch: "
-            f"{len(plan_dispatches)} plan rows starting at event offset "
-            f"{event_offset}, {len(profile_events)} profile rows"
-        )
 
     rows = []
-    for dispatch_ordinal, (plan_dispatch, profile_event) in enumerate(
-        zip(plan_dispatches, profile_events[event_offset:])
-    ):
+    unmatched_events = []
+    profile_event_index = event_offset
+    for dispatch_ordinal, plan_dispatch in enumerate(plan_dispatches):
+        matched_event = None
+        while profile_event_index < len(profile_events):
+            profile_event = profile_events[profile_event_index]
+            profile_event_index += 1
+            if _plan_dispatch_matches_event(
+                dispatch_ordinal, plan_dispatch, profile_event
+            ):
+                matched_event = profile_event
+                break
+            unmatched_events.append(profile_event)
+        if matched_event is None:
+            plan_function = _require_string(
+                plan_dispatch.get("function_name"),
+                f"program.dispatches[{dispatch_ordinal}].function_name",
+            )
+            raise DispatchProfileJoinError(
+                f"plan/profile dispatch count mismatch: no profile event matched "
+                f"program.dispatches[{dispatch_ordinal}] {plan_function}"
+            )
+
+        region_id = _require_int(
+            plan_dispatch.get("region_id"),
+            f"program.dispatches[{dispatch_ordinal}].region_id",
+        )
+        if region_id not in regions_by_id:
+            raise DispatchProfileJoinError(
+                f"program.dispatches[{dispatch_ordinal}].region_id {region_id} "
+                "does not reference a region"
+            )
         rows.append(
             _join_row(
                 stage_name,
-                region_row,
+                regions_by_id[region_id],
                 dispatch_ordinal,
                 plan_dispatch,
-                profile_event,
+                matched_event,
             )
         )
+    unmatched_events.extend(profile_events[profile_event_index:])
+
+    regions = [_region_report(region) for _, region in sorted(regions_by_id.items())]
+    region = regions[0] if len(regions) == 1 else None
     return {
         "stage": stage_name,
-        "region": {
-            "id": _require_int(region_row.get("id"), "region.id"),
-            "name": _require_string(region_row.get("name"), "region.name"),
-        },
+        "region": region,
+        "regions": regions,
         "event_offset": event_offset,
         "dispatches": rows,
-        "next_event_offset": event_offset + len(rows),
+        "unmatched_events": unmatched_events,
+        "next_event_offset": profile_event_index,
     }
 
 
@@ -648,21 +681,23 @@ def join_dispatch_profile(
 
     profile_events = _dispatch_events(profile_records)
     stage_report = _join_stage_dispatches(plan, profile_events)
-    if stage_report["next_event_offset"] != len(profile_events):
-        raise DispatchProfileJoinError(
-            f"plan/profile dispatch count mismatch: "
-            f"{stage_report['next_event_offset']} consumed profile rows, "
-            f"{len(profile_events)} profile rows"
-        )
     rows = stage_report["dispatches"]
+    unmatched_rows = _profile_only_rows(stage_report["unmatched_events"])
     summary = _summary_for_rows(rows)
     return {
         "schema_version": 1,
         "stage": stage_report["stage"],
         "region": stage_report["region"],
-        "summary": summary,
+        "regions": stage_report["regions"],
+        "summary": {
+            **summary,
+            "profile_dispatch_count": len(profile_events),
+            "unmatched_dispatch_count": len(unmatched_rows),
+        },
         "by_kernel": _aggregate_rows(rows),
+        "unmatched_by_kernel": _aggregate_profile_only_rows(unmatched_rows),
         "dispatches": rows,
+        "unmatched_dispatches": unmatched_rows,
     }
 
 
