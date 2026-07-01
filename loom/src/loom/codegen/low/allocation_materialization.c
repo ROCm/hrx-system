@@ -740,13 +740,6 @@ static iree_status_t loom_low_allocation_materialize_block_arg_edges(
         "spilled non-entry block argument has reloads but no incoming value "
         "to store");
   }
-  if (plan->store_count != store_count) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "allocation spill plan store count is stale for value %u",
-        (unsigned)plan->value_id);
-  }
-
   IREE_RETURN_IF_ERROR(loom_block_remove_arg(module, block, arg_index));
   *out_store_count = store_count;
   return iree_ok_status();
@@ -773,24 +766,10 @@ static iree_status_t loom_low_allocation_materialize_one_spill_plan(
     reload_count = loom_low_allocation_count_materialized_reloads(
         uses, use_count, block_arg_block, block_arg_index);
   }
-  if (reload_count != plan->reload_count) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "allocation spill plan reload count is stale for value %u",
-        (unsigned)plan->value_id);
-  }
-  uint32_t expected_store_count = reload_count > 0 ? 1u : 0u;
-  if (is_block_arg && !block_arg_is_entry) {
-    expected_store_count = plan->store_count;
-  }
-  if (plan->store_count != expected_store_count) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "allocation spill plan store count is stale for value %u",
-        (unsigned)plan->value_id);
-  }
+  const bool needs_definition_store =
+      reload_count > 0 && (!is_block_arg || block_arg_is_entry);
 
-  if (plan->store_count > 0 && (!is_block_arg || block_arg_is_entry)) {
+  if (needs_definition_store) {
     IREE_RETURN_IF_ERROR(loom_low_allocation_insert_spill_store(
         module, table->function_op, plan, storage_value_id));
     if (result->spill_count == UINT32_MAX) {
