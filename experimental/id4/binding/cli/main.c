@@ -96,7 +96,7 @@ IREE_FLAG_LIST(
     "Stage-qualified diagnostic tap to capture as <stage>:<tap>. Repeat to "
     "capture multiple taps.");
 IREE_FLAG(string, profile_output, "",
-          "Path to write queue and dispatch-level profiling data.");
+          "Path to write queue, dispatch, and memory profiling statistics.");
 
 typedef enum id4_cli_generation_issue_mode_e {
   // Issue the whole generation through the monolithic convenience API.
@@ -568,7 +568,8 @@ static iree_status_t id4_cli_begin_profile_statistics(
         IREE_HAL_DEVICE_PROFILING_DATA_QUEUE_EVENTS |
         IREE_HAL_DEVICE_PROFILING_DATA_DEVICE_QUEUE_EVENTS |
         IREE_HAL_DEVICE_PROFILING_DATA_DISPATCH_EVENTS |
-        IREE_HAL_DEVICE_PROFILING_DATA_EXECUTABLE_METADATA;
+        IREE_HAL_DEVICE_PROFILING_DATA_EXECUTABLE_METADATA |
+        IREE_HAL_DEVICE_PROFILING_DATA_MEMORY_EVENTS;
     profiling_options.sink =
         iree_hal_profile_statistics_sink_base(statistics_sink);
     status = iree_hal_device_profiling_begin(device, &profiling_options);
