@@ -3186,6 +3186,28 @@ _KERNEL_CASES = [
         "target_name": "vae_spatial_attention_query2_vec8_bf16_flux2_mid_block_shape",
     },
     {
+        "actual_case": "@id4_vae_spatial_attention_online_bf16_wmma_small_case",
+        "benchmark": "@id4_vae_spatial_attention_online_bf16_wmma_small",
+        "configs": [
+            "--config=id4.vae.spatial_attention_wmma.token_count=16",
+            "--config=id4.vae.spatial_attention_wmma.channel_count=16",
+            "--config=id4.vae.spatial_attention_wmma.channel_tile_count=1",
+        ],
+        "source": "vae/spatial_attention_online_bf16_wmma.loom",
+        "target_name": "vae_spatial_attention_online_bf16_wmma_small",
+    },
+    {
+        "actual_case": "@id4_vae_spatial_attention_online_bf16_wmma_flux2_mid_block_shape_case",
+        "benchmark": "@id4_vae_spatial_attention_online_bf16_wmma_flux2_mid_block_shape",
+        "configs": [
+            "--config=id4.vae.spatial_attention_wmma.token_count=16384",
+            "--config=id4.vae.spatial_attention_wmma.channel_count=512",
+            "--config=id4.vae.spatial_attention_wmma.channel_tile_count=32",
+        ],
+        "source": "vae/spatial_attention_online_bf16_wmma.loom",
+        "target_name": "vae_spatial_attention_online_bf16_wmma_flux2_mid_block_shape",
+    },
+    {
         "actual_case": "@id4_vae_upsample_conv3x3_bias_f32_small_case",
         "benchmark": "@id4_vae_upsample_conv3x3_bias_f32_small",
         "configs": [
@@ -8163,6 +8185,28 @@ _KERNEL_CASES = [
         "target_name": "tensor_zero_tail_bf16_all",
     },
     {
+        "actual_case": "@id4_tensor_transpose_bf16_small_case",
+        "benchmark": "@id4_tensor_transpose_bf16_small",
+        "configs": [
+            "--config=id4.tensor.transpose.token_count=3",
+            "--config=id4.tensor.transpose.channel_count=2",
+            "--config=id4.tensor.transpose.element_count=6",
+        ],
+        "source": "tensor/transpose_bf16.loom",
+        "target_name": "tensor_transpose_bf16_small",
+    },
+    {
+        "actual_case": "@id4_tensor_transpose_bf16_vae_value_case",
+        "benchmark": "@id4_tensor_transpose_bf16_vae_value",
+        "configs": [
+            "--config=id4.tensor.transpose.token_count=16",
+            "--config=id4.tensor.transpose.channel_count=512",
+            "--config=id4.tensor.transpose.element_count=8192",
+        ],
+        "source": "tensor/transpose_bf16.loom",
+        "target_name": "tensor_transpose_bf16_vae_value",
+    },
+    {
         "actual_case": "@id4_qwen3_vl_linear_bf16_f32_small_case",
         "benchmark": "@id4_qwen3_vl_linear_bf16_f32_small",
         "configs": [
@@ -8323,6 +8367,7 @@ _KERNEL_SOURCES = [
     "sampler/euler_step_f32.loom",
     "sampler/noise_f32.loom",
     "smoke_configured.loom",
+    "tensor/transpose_bf16.loom",
     "tensor/zero_tail_bf16.loom",
     "vae/conv1x1_bias_bf16_wmma.loom",
     "vae/conv1x1_bias_f32.loom",
@@ -8344,6 +8389,7 @@ _KERNEL_SOURCES = [
     "vae/pack_conv3x3_weight_f32.loom",
     "vae/pack_upsample_conv3x3_weight_f32_bf16.loom",
     "vae/spatial_attention_f32.loom",
+    "vae/spatial_attention_online_bf16_wmma.loom",
     "vae/spatial_attention_vec2_bf16.loom",
     "vae/spatial_attention_vec2_f32.loom",
     "vae/spatial_attention_vec8_bf16.loom",

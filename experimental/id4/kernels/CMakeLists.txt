@@ -124,6 +124,7 @@ add_custom_command(OUTPUT loom_sources.stamp
     "sampler/euler_step_f32.loom"
     "sampler/noise_f32.loom"
     "smoke_configured.loom"
+    "tensor/transpose_bf16.loom"
     "tensor/zero_tail_bf16.loom"
     "vae/conv1x1_bias_bf16_wmma.loom"
     "vae/conv1x1_bias_f32.loom"
@@ -145,6 +146,7 @@ add_custom_command(OUTPUT loom_sources.stamp
     "vae/pack_conv3x3_weight_f32.loom"
     "vae/pack_upsample_conv3x3_weight_f32_bf16.loom"
     "vae/spatial_attention_f32.loom"
+    "vae/spatial_attention_online_bf16_wmma.loom"
     "vae/spatial_attention_vec2_bf16.loom"
     "vae/spatial_attention_vec2_f32.loom"
     "vae/spatial_attention_vec8_bf16.loom"
@@ -276,6 +278,7 @@ iree_c_embed_data(
     "sampler/euler_step_f32.loom"
     "sampler/noise_f32.loom"
     "smoke_configured.loom"
+    "tensor/transpose_bf16.loom"
     "tensor/zero_tail_bf16.loom"
     "vae/conv1x1_bias_bf16_wmma.loom"
     "vae/conv1x1_bias_f32.loom"
@@ -297,6 +300,7 @@ iree_c_embed_data(
     "vae/pack_conv3x3_weight_f32.loom"
     "vae/pack_upsample_conv3x3_weight_f32_bf16.loom"
     "vae/spatial_attention_f32.loom"
+    "vae/spatial_attention_online_bf16_wmma.loom"
     "vae/spatial_attention_vec2_bf16.loom"
     "vae/spatial_attention_vec2_f32.loom"
     "vae/spatial_attention_vec8_bf16.loom"
@@ -4868,6 +4872,40 @@ iree_native_test(
     "--config=id4.vae.spatial_attention.channel_count=512"
     "--config=id4.vae.spatial_attention.batch_count=1"
     "--config=id4.vae.spatial_attention.token_count=16384"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
+    "vae_spatial_attention_online_bf16_wmma_small_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/spatial_attention_online_bf16_wmma.loom}}"
+    "--benchmark=@id4_vae_spatial_attention_online_bf16_wmma_small"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.vae.spatial_attention_wmma.token_count=16"
+    "--config=id4.vae.spatial_attention_wmma.channel_count=16"
+    "--config=id4.vae.spatial_attention_wmma.channel_tile_count=1"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
+    "vae_spatial_attention_online_bf16_wmma_flux2_mid_block_shape_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/spatial_attention_online_bf16_wmma.loom}}"
+    "--benchmark=@id4_vae_spatial_attention_online_bf16_wmma_flux2_mid_block_shape"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.vae.spatial_attention_wmma.token_count=16384"
+    "--config=id4.vae.spatial_attention_wmma.channel_count=512"
+    "--config=id4.vae.spatial_attention_wmma.channel_tile_count=32"
   SRC
     loom::tools::iree-benchmark-loom
   LABELS
@@ -12268,6 +12306,40 @@ iree_native_test(
 
 iree_native_test(
   NAME
+    "tensor_transpose_bf16_small_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/tensor/transpose_bf16.loom}}"
+    "--benchmark=@id4_tensor_transpose_bf16_small"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.tensor.transpose.token_count=3"
+    "--config=id4.tensor.transpose.channel_count=2"
+    "--config=id4.tensor.transpose.element_count=6"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
+    "tensor_transpose_bf16_vae_value_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/tensor/transpose_bf16.loom}}"
+    "--benchmark=@id4_tensor_transpose_bf16_vae_value"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.tensor.transpose.token_count=16"
+    "--config=id4.tensor.transpose.channel_count=512"
+    "--config=id4.tensor.transpose.element_count=8192"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
     "qwen3_vl_linear_bf16_f32_small_plan_test"
   ARGS
     "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/linear_bf16_f32.loom}}"
@@ -17820,6 +17892,48 @@ iree_native_test(
     "--config=id4.vae.spatial_attention.channel_count=512"
     "--config=id4.vae.spatial_attention.batch_count=1"
     "--config=id4.vae.spatial_attention.token_count=16384"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
+    "vae_spatial_attention_online_bf16_wmma_small_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/spatial_attention_online_bf16_wmma.loom}}"
+    "--case=@id4_vae_spatial_attention_online_bf16_wmma_small_case"
+    "--device=amdgpu://0"
+    "--config=id4.vae.spatial_attention_wmma.token_count=16"
+    "--config=id4.vae.spatial_attention_wmma.channel_count=16"
+    "--config=id4.vae.spatial_attention_wmma.channel_tile_count=1"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
+    "vae_spatial_attention_online_bf16_wmma_flux2_mid_block_shape_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/spatial_attention_online_bf16_wmma.loom}}"
+    "--case=@id4_vae_spatial_attention_online_bf16_wmma_flux2_mid_block_shape_case"
+    "--device=amdgpu://0"
+    "--config=id4.vae.spatial_attention_wmma.token_count=16384"
+    "--config=id4.vae.spatial_attention_wmma.channel_count=512"
+    "--config=id4.vae.spatial_attention_wmma.channel_tile_count=32"
   SRC
     loom::tools::iree-test-loom
   LABELS
@@ -26840,6 +26954,48 @@ iree_native_test(
     "--device=amdgpu://0"
     "--config=id4.tensor.zero_tail.element_count=0"
     "--config=id4.tensor.zero_tail.dispatch_element_count=8"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
+    "tensor_transpose_bf16_small_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/tensor/transpose_bf16.loom}}"
+    "--case=@id4_tensor_transpose_bf16_small_case"
+    "--device=amdgpu://0"
+    "--config=id4.tensor.transpose.token_count=3"
+    "--config=id4.tensor.transpose.channel_count=2"
+    "--config=id4.tensor.transpose.element_count=6"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
+    "tensor_transpose_bf16_vae_value_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/tensor/transpose_bf16.loom}}"
+    "--case=@id4_tensor_transpose_bf16_vae_value_case"
+    "--device=amdgpu://0"
+    "--config=id4.tensor.transpose.token_count=16"
+    "--config=id4.tensor.transpose.channel_count=512"
+    "--config=id4.tensor.transpose.element_count=8192"
   SRC
     loom::tools::iree-test-loom
   LABELS

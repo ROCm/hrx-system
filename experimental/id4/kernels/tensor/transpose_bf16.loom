@@ -1,0 +1,59 @@
+config.decl @id4.tensor.transpose.token_count : %value: index where [range(%value, 1, 268435456)]
+
+config.decl @id4.tensor.transpose.channel_count : %value: index where [range(%value, 1, 65536)]
+
+config.decl @id4.tensor.transpose.element_count : %value: index where [range(%value, 1, 268435456)]
+
+kernel.def export("id4_tensor_transpose_bf16") @id4_tensor_transpose_bf16() {
+  %unit = index.constant 1 : index
+  %workgroup_size_x = index.constant 256 : index
+  %element_count = config.get @id4.tensor.transpose.element_count : index
+  %rounding = index.constant 255 : index
+  %rounded = index.add %element_count, %rounding : index
+  %workgroups_x = index.div %rounded, %workgroup_size_x : index
+  kernel.launch.config workgroups(%workgroups_x, %unit, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %workgroup = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %workgroup_size_x = index.constant 256 : index
+  %token_count = config.get @id4.tensor.transpose.token_count : index
+  %channel_count = config.get @id4.tensor.transpose.channel_count : index
+  %element_count = config.get @id4.tensor.transpose.element_count : index
+  %element_index = index.madd %workgroup, %workgroup_size_x, %lane : index
+  %in_bounds = index.cmp ult, %element_index, %element_count : index
+  %input_noalias, %output_noalias = buffer.assume.noalias %input, %output : buffer, buffer
+  %input_global = buffer.assume.memory_space<global> %input_noalias : buffer
+  %output_global = buffer.assume.memory_space<global> %output_noalias : buffer
+  %input_view = buffer.view %input_global[%base] : buffer -> view<[%token_count]x[%channel_count]xbf16, #dense>
+  %output_view = buffer.view %output_global[%base] : buffer -> view<[%channel_count]x[%token_count]xbf16, #dense>
+  scf.if %in_bounds {
+    %token = index.div %element_index, %channel_count : index
+    %channel = index.rem %element_index, %channel_count : index
+    %value = view.load %input_view[%token, %channel] : view<[%token_count]x[%channel_count]xbf16, #dense> -> bf16
+    view.store %value, %output_view[%channel, %token] : bf16, view<[%channel_count]x[%token_count]xbf16, #dense>
+  }
+  kernel.return
+}
+
+check.case public @id4_tensor_transpose_bf16_small_case {
+  %input = check.generate.fill value(1.0) : tensor<3x2xbf16>
+  %output = check.generate.fill value(0.0) : tensor<2x3xbf16>
+  %expected = check.generate.fill value(1.0) : tensor<2x3xbf16>
+  func.call @id4_tensor_transpose_bf16(%input, %output) : (tensor<3x2xbf16>, tensor<2x3xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2x3xbf16>
+  check.return
+}
+
+check.case public @id4_tensor_transpose_bf16_vae_value_case {
+  %input = check.generate.fill value(2.0) : tensor<16x512xbf16>
+  %output = check.generate.fill value(0.0) : tensor<512x16xbf16>
+  %expected = check.generate.fill value(2.0) : tensor<512x16xbf16>
+  func.call @id4_tensor_transpose_bf16(%input, %output) : (tensor<16x512xbf16>, tensor<512x16xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<512x16xbf16>
+  check.return
+}
+
+check.benchmark<@id4_tensor_transpose_bf16_small_case> @id4_tensor_transpose_bf16_small
+
+check.benchmark<@id4_tensor_transpose_bf16_vae_value_case> @id4_tensor_transpose_bf16_vae_value
