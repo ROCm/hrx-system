@@ -399,6 +399,8 @@ typedef struct loom_low_lower_memory_report_row_t {
   iree_string_view_t operation_kind;
   // Stable target packet key selected for this emitted low operation.
   iree_string_view_t packet_key;
+  // Stable target-owned strategy key selected for this memory packet, if any.
+  iree_string_view_t strategy_key;
   // Stable target address-form key selected for this emitted low operation.
   iree_string_view_t address_form;
   // Stable target dynamic-term operand key for the source address.

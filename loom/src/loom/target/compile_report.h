@@ -876,6 +876,8 @@ typedef struct loom_target_compile_report_source_low_memory_row_t {
   iree_string_view_t operation_kind;
   // Stable target packet key selected for this emitted low operation.
   iree_string_view_t packet_key;
+  // Stable target-owned strategy key selected for this memory packet, if any.
+  iree_string_view_t strategy_key;
   // Stable target address-form key selected for this emitted low operation.
   iree_string_view_t address_form;
   // Stable target dynamic-term operand key for the source address.
