@@ -11123,8 +11123,19 @@ HIPAPI hipError_t hipModuleLaunchKernel(
     HIP_RETURN_ERROR(init_result);
   }
 
-  // Untag the function pointer if it was tagged by hipModuleGetFunction.
+  // Validate the function handle before untagging it. An untagged or
+  // non-function handle is rejected here (as the other driver-style entry
+  // points do) so the extra-buffer handling below can safely dereference
+  // symbol->parameters.
+  if (!iree_hal_streaming_symbol_has_tag(f)) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidHandle);
+  }
   iree_hal_streaming_symbol_t* symbol = iree_hal_streaming_symbol_untag(f);
+  if (!symbol || symbol->type != IREE_HAL_STREAMING_SYMBOL_TYPE_FUNCTION) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidHandle);
+  }
 
   // Extract params pointer and size from HIP's parameter format.
   void* params_ptr = NULL;
@@ -11152,11 +11163,15 @@ HIPAPI hipError_t hipModuleLaunchKernel(
     // (CUSTOM_DIRECT_ARGUMENTS), skipping both pointer resolution and the
     // HSACO-driven hidden-kernarg synthesis, so the kernel would write through
     // unresolved pointers and its output would never reach the caller's buffer.
-    // Only pass the buffer through verbatim for kernels WITHOUT binding
-    // metadata (opaque/native kernels such as hipBLASLt), where it is already a
-    // complete native kernarg pack. Kernels with bindings fall through to the
-    // streaming layer's metadata unpack path (dispatch flags NONE).
-    if (!symbol || symbol->parameters.binding_count == 0) {
+    // Only pass the buffer through verbatim for kernels WITHOUT binding or
+    // copy metadata (opaque/native kernels such as hipBLASLt), where it is
+    // already a complete native kernarg pack. This matches the streaming
+    // layer's is_native_kernel definition (binding_count == 0 &&
+    // copy_count == 0); scalar-only kernels with copy operations still carry
+    // metadata and must fall through to the metadata unpack path (dispatch
+    // flags NONE) so their pointers resolve.
+    if (!symbol || (symbol->parameters.binding_count == 0 &&
+                    symbol->parameters.copy_count == 0)) {
       dispatch_flags |= IREE_HAL_STREAMING_DISPATCH_FLAG_PRE_PACKED;
     }
   } else if (kernelParams) {
@@ -14104,10 +14119,14 @@ HIPAPI hipError_t hipGraphAddKernelNode(hipGraphNode_t* pGraphNode,
     // Same reasoning as hipModuleLaunchKernel: the extra buffer is in the
     // kernel's native kernarg ABI, but for kernels with reflected pointer
     // bindings it still holds HIP device pointers that must be resolved to HAL
-    // bindings. Only pass it through pre-packed for kernels WITHOUT binding
-    // metadata (opaque/native kernels); metadata kernels fall through to the
-    // graph node's metadata unpack path so their pointers resolve.
-    if (!symbol || symbol->parameters.binding_count == 0) {
+    // bindings. Only pass it through pre-packed for kernels WITHOUT binding or
+    // copy metadata (opaque/native kernels), matching the streaming layer's
+    // is_native_kernel definition (binding_count == 0 && copy_count == 0);
+    // metadata kernels (including scalar-only kernels with copy operations)
+    // fall through to the graph node's metadata unpack path so their pointers
+    // resolve.
+    if (!symbol || (symbol->parameters.binding_count == 0 &&
+                    symbol->parameters.copy_count == 0)) {
       dispatch_flags |= IREE_HAL_STREAMING_DISPATCH_FLAG_PRE_PACKED;
     }
   } else if (params->kernelParams) {
@@ -18655,10 +18674,13 @@ HIPAPI hipError_t hipGraphKernelNodeSetParams(hipGraphNode_t node,
       }
     }
     // Same reasoning as hipModuleLaunchKernel / hipGraphAddKernelNode: only
-    // pass the extra buffer through pre-packed for kernels WITHOUT binding
-    // metadata; metadata kernels must be unpacked so their device pointers
-    // resolve.
-    if (!symbol || symbol->parameters.binding_count == 0) {
+    // pass the extra buffer through pre-packed for kernels WITHOUT binding or
+    // copy metadata, matching the streaming layer's is_native_kernel
+    // definition (binding_count == 0 && copy_count == 0); metadata kernels
+    // (including scalar-only kernels with copy operations) must be unpacked so
+    // their device pointers resolve.
+    if (!symbol || (symbol->parameters.binding_count == 0 &&
+                    symbol->parameters.copy_count == 0)) {
       dispatch_flags |= IREE_HAL_STREAMING_DISPATCH_FLAG_PRE_PACKED;
     }
   } else if (params->kernelParams) {
