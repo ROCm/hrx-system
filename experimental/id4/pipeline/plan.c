@@ -2242,14 +2242,15 @@ static iree_status_t id4_pipeline_plan_append_program_binding_json(
 static iree_status_t id4_pipeline_plan_append_program_dispatch_json(
     const id4_pipeline_program_t* program, iree_string_builder_t* builder,
     const id4_pipeline_program_op_t* op, iree_host_size_t dispatch_ordinal,
-    iree_host_size_t region_operation_ordinal) {
+    iree_host_size_t region_id, iree_host_size_t region_operation_ordinal) {
   const id4_pipeline_program_dispatch_loom_op_t* dispatch =
       &op->payload.dispatch_loom;
   IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
       builder,
       "{\"dispatch_ordinal\":%" PRIhsz ",\"operation_ordinal\":%" PRIhsz
-      ",\"region_id\":0,\"region_operation_ordinal\":%" PRIhsz ",\"name\":",
-      dispatch_ordinal, op->ordinal, region_operation_ordinal));
+      ",\"region_id\":%" PRIhsz ",\"region_operation_ordinal\":%" PRIhsz
+      ",\"name\":",
+      dispatch_ordinal, op->ordinal, region_id, region_operation_ordinal));
   IREE_RETURN_IF_ERROR(
       id4_pipeline_plan_append_json_string(builder, dispatch->name));
   IREE_RETURN_IF_ERROR(
@@ -2294,35 +2295,43 @@ static iree_status_t id4_pipeline_plan_append_program_json(
       operation_count,
       id4_pipeline_plan_source_program_dispatch_count(program)));
 
-  iree_host_size_t dispatch_ordinal = 0;
-  iree_host_size_t region_operation_ordinal = 0;
   bool emitted_dispatch = false;
-  for (iree_host_size_t i = 0; i < operation_count; ++i) {
-    const id4_pipeline_program_op_t* op =
-        id4_pipeline_program_operation_at(program, i);
-    if (!op) continue;
-    switch (op->kind) {
-      case ID4_PIPELINE_PROGRAM_OP_KIND_DISPATCH_LOOM:
-        if (emitted_dispatch) {
-          IREE_RETURN_IF_ERROR(
-              iree_string_builder_append_cstring(builder, ","));
-        }
-        IREE_RETURN_IF_ERROR(id4_pipeline_plan_append_program_dispatch_json(
-            program, builder, op, dispatch_ordinal, region_operation_ordinal));
-        emitted_dispatch = true;
-        ++dispatch_ordinal;
-        ++region_operation_ordinal;
-        break;
-      case ID4_PIPELINE_PROGRAM_OP_KIND_BARRIER:
-        ++region_operation_ordinal;
-        break;
-      case ID4_PIPELINE_PROGRAM_OP_KIND_TAP:
-        if (id4_pipeline_plan_has_captured_tap(plan, op->payload.tap.name)) {
-          region_operation_ordinal += 3;
-        }
-        break;
-      default:
-        break;
+  iree_host_size_t dispatch_ordinal = 0;
+  for (iree_host_size_t region_index = 0; region_index < plan->region_count;
+       ++region_index) {
+    const id4_pipeline_region_plan_t* region = &plan->regions[region_index];
+    iree_host_size_t region_operation_ordinal = 0;
+    const iree_host_size_t operation_limit =
+        region->source_operation_offset + region->source_operation_count;
+    for (iree_host_size_t i = region->source_operation_offset;
+         i < operation_limit; ++i) {
+      const id4_pipeline_program_op_t* op =
+          id4_pipeline_program_operation_at(program, i);
+      if (!op) continue;
+      switch (op->kind) {
+        case ID4_PIPELINE_PROGRAM_OP_KIND_DISPATCH_LOOM:
+          if (emitted_dispatch) {
+            IREE_RETURN_IF_ERROR(
+                iree_string_builder_append_cstring(builder, ","));
+          }
+          IREE_RETURN_IF_ERROR(id4_pipeline_plan_append_program_dispatch_json(
+              program, builder, op, dispatch_ordinal, region_index,
+              region_operation_ordinal));
+          emitted_dispatch = true;
+          ++dispatch_ordinal;
+          ++region_operation_ordinal;
+          break;
+        case ID4_PIPELINE_PROGRAM_OP_KIND_BARRIER:
+          ++region_operation_ordinal;
+          break;
+        case ID4_PIPELINE_PROGRAM_OP_KIND_TAP:
+          if (id4_pipeline_plan_has_captured_tap(plan, op->payload.tap.name)) {
+            region_operation_ordinal += 3;
+          }
+          break;
+        default:
+          break;
+      }
     }
   }
   return iree_string_builder_append_cstring(builder, "]}");

@@ -1248,6 +1248,16 @@ TEST(PipelineProgramPlan, PlansRegionRangesFromCuts) {
   EXPECT_EQ(second_region->statistics.dispatch_count, 1u);
   EXPECT_EQ(id4_pipeline_plan_memory_slab_count(plan), 0u);
 
+  iree_string_builder_t json_builder;
+  iree_string_builder_initialize(iree_allocator_system(), &json_builder);
+  IREE_ASSERT_OK(id4_pipeline_plan_format_json(plan, &json_builder));
+  iree_string_view_t json = iree_string_builder_view(&json_builder);
+  ExpectFinds(json, IREE_SV("\"dispatch_ordinal\":0,\"operation_ordinal\":2,"
+                            "\"region_id\":0,\"region_operation_ordinal\":0"));
+  ExpectFinds(json, IREE_SV("\"dispatch_ordinal\":1,\"operation_ordinal\":4,"
+                            "\"region_id\":1,\"region_operation_ordinal\":0"));
+  iree_string_builder_deinitialize(&json_builder);
+
   id4_pipeline_plan_release(plan);
   iree_hal_device_group_release(device_group);
   id4_pipeline_program_release(program);
