@@ -54,6 +54,17 @@ typedef struct id4_pipeline_program_plan_parameter_load_record_t {
   const id4_pipeline_parameter_load_source_t* sources;
 } id4_pipeline_program_plan_parameter_load_record_t;
 
+typedef struct id4_pipeline_program_plan_region_range_t {
+  // Region diagnostic name borrowed from the program or closing cut.
+  iree_string_view_t name;
+  // First source-program operation in the region interval.
+  iree_host_size_t source_operation_offset;
+  // Number of source-program operations in the region interval.
+  iree_host_size_t source_operation_count;
+  // Number of dispatch/barrier operations in the region interval.
+  iree_host_size_t region_operation_count;
+} id4_pipeline_program_plan_region_range_t;
+
 static iree_status_t id4_pipeline_program_plan_validate_options_size(
     iree_host_size_t actual_size, iree_host_size_t expected_size,
     iree_string_view_t options_name) {
@@ -245,6 +256,71 @@ static id4_pipeline_program_plan_counts_t id4_pipeline_program_plan_count_ops(
     }
   }
   return counts;
+}
+
+static bool id4_pipeline_program_plan_op_is_region_operation(
+    const id4_pipeline_program_op_t* op) {
+  return op && (op->kind == ID4_PIPELINE_PROGRAM_OP_KIND_DISPATCH_LOOM ||
+                op->kind == ID4_PIPELINE_PROGRAM_OP_KIND_BARRIER);
+}
+
+static iree_host_size_t id4_pipeline_program_plan_count_region_operations(
+    const id4_pipeline_program_t* program, iree_host_size_t operation_offset,
+    iree_host_size_t operation_limit) {
+  iree_host_size_t count = 0;
+  for (iree_host_size_t i = operation_offset; i < operation_limit; ++i) {
+    if (id4_pipeline_program_plan_op_is_region_operation(
+            id4_pipeline_program_operation_at(program, i))) {
+      ++count;
+    }
+  }
+  return count;
+}
+
+static void id4_pipeline_program_plan_append_region_range(
+    const id4_pipeline_program_t* program, iree_string_view_t name,
+    iree_host_size_t operation_offset, iree_host_size_t operation_limit,
+    iree_host_size_t* range_count,
+    id4_pipeline_program_plan_region_range_t* ranges) {
+  if (operation_limit <= operation_offset) return;
+  const iree_host_size_t region_operation_count =
+      id4_pipeline_program_plan_count_region_operations(
+          program, operation_offset, operation_limit);
+  if (region_operation_count == 0) return;
+  ranges[*range_count] = (id4_pipeline_program_plan_region_range_t){
+      // Region diagnostic name borrowed from the program or closing cut.
+      .name = name,
+      // First source-program operation in the interval.
+      .source_operation_offset = operation_offset,
+      // Number of source-program operations in the interval.
+      .source_operation_count = operation_limit - operation_offset,
+      // Dispatch/barrier operation count in the interval.
+      .region_operation_count = region_operation_count,
+  };
+  ++*range_count;
+}
+
+static void id4_pipeline_program_plan_build_region_ranges(
+    const id4_pipeline_program_plan_options_t* options,
+    iree_host_size_t* out_range_count,
+    id4_pipeline_program_plan_region_range_t* ranges) {
+  *out_range_count = 0;
+  const id4_pipeline_program_t* program = options->program;
+  const iree_host_size_t operation_count =
+      id4_pipeline_program_operation_count(program);
+  iree_host_size_t operation_offset = 0;
+  for (iree_host_size_t i = 0; i < operation_count; ++i) {
+    const id4_pipeline_program_op_t* op =
+        id4_pipeline_program_operation_at(program, i);
+    if (!op || op->kind != ID4_PIPELINE_PROGRAM_OP_KIND_REGION_CUT) continue;
+    id4_pipeline_program_plan_append_region_range(
+        program, op->payload.region_cut.name, operation_offset, i,
+        out_range_count, ranges);
+    operation_offset = i + 1;
+  }
+  id4_pipeline_program_plan_append_region_range(
+      program, id4_pipeline_program_name(program), operation_offset,
+      operation_count, out_range_count, ranges);
 }
 
 static bool id4_pipeline_program_plan_kernel_config_equal(
@@ -944,6 +1020,7 @@ static iree_status_t id4_pipeline_program_plan_resolve_tap(
 
 static iree_status_t id4_pipeline_program_plan_dry_run_region(
     const id4_pipeline_program_plan_options_t* options,
+    const id4_pipeline_program_plan_region_range_t* range,
     id4_pipeline_program_plan_counts_t counts,
     const id4_pipeline_parameter_request_t* parameter_requests,
     const id4_pipeline_constant_request_t* constant_requests,
@@ -956,7 +1033,7 @@ static iree_status_t id4_pipeline_program_plan_dry_run_region(
   memset(out_statistics, 0, sizeof(*out_statistics));
   *out_local_lifetime_count = 0;
   *out_local_lifetimes = NULL;
-  if (counts.region_operation_count == 0) return iree_ok_status();
+  if (range->region_operation_count == 0) return iree_ok_status();
 
   iree_arena_block_pool_t block_pool;
   iree_arena_block_pool_initialize(/*total_block_size=*/4096, host_allocator,
@@ -967,7 +1044,7 @@ static iree_status_t id4_pipeline_program_plan_dry_run_region(
       // Size of this structure for versioning.
       .structure_size = sizeof(builder_options),
       // Region name copied by the builder.
-      .region_name = id4_pipeline_program_name(options->program),
+      .region_name = range->name,
       // Dry-run validates the same region operations without HAL recording.
       .mode = ID4_PIPELINE_REGION_BUILDER_MODE_DRY_RUN,
       // Arena block pool used for region transient metadata.
@@ -998,11 +1075,10 @@ static iree_status_t id4_pipeline_program_plan_dry_run_region(
         .structure_size = sizeof(lower_options),
         // Semantic program being planned.
         .program = options->program,
-        // Dry-run emits the current single-region full program interval.
-        .source_operation_offset = 0,
-        // Dry-run emits the current single-region full program interval.
-        .source_operation_count =
-            id4_pipeline_program_operation_count(options->program),
+        // Dry-run emits the selected source-program interval.
+        .source_operation_offset = range->source_operation_offset,
+        // Dry-run emits the selected source-program interval.
+        .source_operation_count = range->source_operation_count,
         // Dry-run region builder.
         .builder = builder,
         // Diagnostic tap lowering policy.
@@ -1088,15 +1164,6 @@ iree_status_t id4_pipeline_program_create_plan(
 
   id4_pipeline_program_plan_counts_t counts =
       id4_pipeline_program_plan_count_ops(options);
-  if (counts.region_cut_count != 0) {
-    return iree_make_status(
-        IREE_STATUS_UNIMPLEMENTED,
-        "program %.*s has %" PRIhsz
-        " region cuts but only single-region planning is implemented",
-        (int)id4_pipeline_program_name(options->program).size,
-        id4_pipeline_program_name(options->program).data,
-        counts.region_cut_count);
-  }
   IREE_RETURN_IF_ERROR(
       id4_pipeline_program_plan_validate_exports(options->program));
   IREE_RETURN_IF_ERROR(
@@ -1155,13 +1222,41 @@ iree_status_t id4_pipeline_program_create_plan(
   id4_pipeline_boundary_tensor_plan_t* boundary_tensors = NULL;
   id4_pipeline_kernel_plan_t* kernels = NULL;
   id4_pipeline_diagnostic_tap_plan_t* taps = NULL;
+  id4_pipeline_program_plan_region_range_t* region_ranges = NULL;
+  id4_pipeline_region_statistics_t* region_statistics = NULL;
+  iree_host_size_t* region_local_lifetime_counts = NULL;
+  id4_pipeline_region_local_lifetime_t** region_local_lifetimes = NULL;
+  id4_pipeline_region_plan_t* regions = NULL;
+  id4_pipeline_memory_slab_plan_t* memory_slabs = NULL;
+  iree_string_view_t* local_slab_names = NULL;
   iree_host_size_t parameter_load_step_count = 0;
+  iree_host_size_t region_range_count = 0;
   const iree_host_size_t planned_tap_count =
       id4_pipeline_program_plan_captures_diagnostic_taps(options)
           ? options->diagnostic_tap_names.count
           : 0;
   iree_status_t status = iree_ok_status();
-  if (counts.parameter_count != 0) {
+  if (counts.region_operation_count != 0) {
+    status = iree_allocator_malloc_array(
+        host_allocator, counts.region_cut_count + 1, sizeof(region_ranges[0]),
+        (void**)&region_ranges);
+  }
+  if (iree_status_is_ok(status) && counts.region_operation_count != 0) {
+    id4_pipeline_program_plan_build_region_ranges(options, &region_range_count,
+                                                  region_ranges);
+    if (region_range_count == 0) {
+      status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                                "program has executable operations but no "
+                                "executable region ranges");
+    }
+  }
+  if (iree_status_is_ok(status) && region_range_count > 1 &&
+      planned_tap_count != 0) {
+    status = iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                              "diagnostic tap capture across multiple program "
+                              "regions is not implemented");
+  }
+  if (iree_status_is_ok(status) && counts.parameter_count != 0) {
     status = iree_allocator_malloc_array(host_allocator, counts.parameter_count,
                                          sizeof(parameter_requests[0]),
                                          (void**)&parameter_requests);
@@ -1208,6 +1303,48 @@ iree_status_t id4_pipeline_program_create_plan(
     status = iree_allocator_malloc_array(host_allocator, planned_tap_count,
                                          sizeof(taps[0]), (void**)&taps);
   }
+  if (iree_status_is_ok(status) && region_range_count != 0) {
+    status = iree_allocator_malloc_array(host_allocator, region_range_count,
+                                         sizeof(region_statistics[0]),
+                                         (void**)&region_statistics);
+  }
+  if (iree_status_is_ok(status) && region_range_count != 0) {
+    memset(region_statistics, 0,
+           region_range_count * sizeof(region_statistics[0]));
+    status =
+        iree_allocator_malloc_array(host_allocator, region_range_count,
+                                    sizeof(region_local_lifetime_counts[0]),
+                                    (void**)&region_local_lifetime_counts);
+  }
+  if (iree_status_is_ok(status) && region_range_count != 0) {
+    memset(region_local_lifetime_counts, 0,
+           region_range_count * sizeof(region_local_lifetime_counts[0]));
+    status = iree_allocator_malloc_array(host_allocator, region_range_count,
+                                         sizeof(region_local_lifetimes[0]),
+                                         (void**)&region_local_lifetimes);
+  }
+  if (iree_status_is_ok(status) && region_range_count != 0) {
+    memset(region_local_lifetimes, 0,
+           region_range_count * sizeof(region_local_lifetimes[0]));
+    status = iree_allocator_malloc_array(host_allocator, region_range_count,
+                                         sizeof(regions[0]), (void**)&regions);
+  }
+  if (iree_status_is_ok(status) && region_range_count != 0) {
+    memset(regions, 0, region_range_count * sizeof(regions[0]));
+    status = iree_allocator_malloc_array(host_allocator, region_range_count,
+                                         sizeof(memory_slabs[0]),
+                                         (void**)&memory_slabs);
+  }
+  if (iree_status_is_ok(status) && region_range_count != 0) {
+    memset(memory_slabs, 0, region_range_count * sizeof(memory_slabs[0]));
+    status = iree_allocator_malloc_array(host_allocator, region_range_count,
+                                         sizeof(local_slab_names[0]),
+                                         (void**)&local_slab_names);
+  }
+  if (iree_status_is_ok(status) && region_range_count != 0) {
+    memset(local_slab_names, 0,
+           region_range_count * sizeof(local_slab_names[0]));
+  }
 
   iree_device_size_t parameter_slab_byte_length = 0;
   if (iree_status_is_ok(status)) {
@@ -1242,16 +1379,15 @@ iree_status_t id4_pipeline_program_create_plan(
     status = id4_pipeline_program_plan_build_taps(options, counts, taps);
   }
 
-  id4_pipeline_region_statistics_t region_statistics;
-  memset(&region_statistics, 0, sizeof(region_statistics));
-  iree_host_size_t local_lifetime_count = 0;
-  id4_pipeline_region_local_lifetime_t* local_lifetimes = NULL;
-  const bool has_region = counts.region_operation_count != 0;
-  if (iree_status_is_ok(status) && has_region) {
-    status = id4_pipeline_program_plan_dry_run_region(
-        options, counts, parameter_requests, constant_requests,
-        boundary_tensors, taps, host_allocator, &region_statistics,
-        &local_lifetime_count, &local_lifetimes);
+  if (iree_status_is_ok(status) && region_range_count != 0) {
+    for (iree_host_size_t i = 0;
+         i < region_range_count && iree_status_is_ok(status); ++i) {
+      status = id4_pipeline_program_plan_dry_run_region(
+          options, &region_ranges[i], counts, parameter_requests,
+          constant_requests, boundary_tensors, taps, host_allocator,
+          &region_statistics[i], &region_local_lifetime_counts[i],
+          &region_local_lifetimes[i]);
+    }
   } else if (iree_status_is_ok(status) && planned_tap_count != 0) {
     status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                               "program has diagnostic taps but no executable "
@@ -1298,52 +1434,55 @@ iree_status_t id4_pipeline_program_create_plan(
     };
   }
 
-  iree_string_view_t local_slab_name = iree_string_view_empty();
-  id4_pipeline_memory_slab_plan_t local_slab;
-  memset(&local_slab, 0, sizeof(local_slab));
-  const bool has_local_slab = region_statistics.local_slab_byte_length != 0;
-  if (iree_status_is_ok(status) && has_local_slab) {
-    status = id4_pipeline_program_plan_make_local_slab_name(
-        id4_pipeline_program_name(options->program), host_allocator,
-        &local_slab_name);
-  }
-  if (iree_status_is_ok(status) && has_local_slab) {
-    local_slab = (id4_pipeline_memory_slab_plan_t){
-        // Human-readable local slab name.
-        .name = local_slab_name,
-        // Local transient slab is scoped to the single executable region.
-        .scope = ID4_PIPELINE_MEMORY_SLAB_SCOPE_REGION_LOCAL,
-        // Semantic programs currently lower into one executable region.
-        .region_id = 0,
-        // Local transient slab follows the executable region placement.
-        .placement_id = options->region_placement_id,
-        // Binding-table slot reserved for the local transient slab.
-        .binding_slot = options->region_local_binding_slot,
-        // HAL buffer parameters used for local transient allocation.
-        .params = options->region_local_slab_params,
-        // Planned local slab byte length.
-        .byte_length = region_statistics.local_slab_byte_length,
-        // Required local slab base alignment.
-        .alignment = options->region_local_slab_alignment,
-        // Peak concurrently live local tensor bytes observed by dry-run.
-        .high_water_mark = region_statistics.local_slab_high_water_mark,
-    };
-  }
+  iree_host_size_t memory_slab_count = 0;
+  if (iree_status_is_ok(status) && region_range_count != 0) {
+    for (iree_host_size_t i = 0;
+         i < region_range_count && iree_status_is_ok(status); ++i) {
+      if (i > UINT32_MAX) {
+        status = iree_make_status(
+            IREE_STATUS_OUT_OF_RANGE,
+            "program region index %" PRIhsz " exceeds uint32_t", i);
+        break;
+      }
+      const id4_pipeline_program_plan_region_range_t* range = &region_ranges[i];
+      id4_pipeline_region_plan_t* region = &regions[i];
+      region->name = range->name;
+      region->source_operation_offset = range->source_operation_offset;
+      region->source_operation_count = range->source_operation_count;
+      region->placement_id = options->region_placement_id;
+      region->binding_capacity = options->region_binding_capacity;
+      region->local_binding_slot = options->region_local_binding_slot;
+      region->local_tensor_alignment = options->region_local_tensor_alignment;
+      region->statistics = region_statistics[i];
+      region->local_lifetime_count = region_local_lifetime_counts[i];
+      region->local_lifetimes = region_local_lifetimes[i];
+      if (region_statistics[i].local_slab_byte_length == 0) continue;
 
-  id4_pipeline_region_plan_t region;
-  memset(&region, 0, sizeof(region));
-  if (iree_status_is_ok(status) && has_region) {
-    region.name = id4_pipeline_program_name(options->program);
-    region.source_operation_offset = 0;
-    region.source_operation_count =
-        id4_pipeline_program_operation_count(options->program);
-    region.placement_id = options->region_placement_id;
-    region.binding_capacity = options->region_binding_capacity;
-    region.local_binding_slot = options->region_local_binding_slot;
-    region.local_tensor_alignment = options->region_local_tensor_alignment;
-    region.statistics = region_statistics;
-    region.local_lifetime_count = local_lifetime_count;
-    region.local_lifetimes = local_lifetimes;
+      status = id4_pipeline_program_plan_make_local_slab_name(
+          range->name, host_allocator, &local_slab_names[memory_slab_count]);
+      if (!iree_status_is_ok(status)) break;
+      memory_slabs[memory_slab_count] = (id4_pipeline_memory_slab_plan_t){
+          // Human-readable local slab name.
+          .name = local_slab_names[memory_slab_count],
+          // Local transient slab is scoped to one executable region.
+          .scope = ID4_PIPELINE_MEMORY_SLAB_SCOPE_REGION_LOCAL,
+          // Executable region owning this local slab.
+          .region_id = (uint32_t)i,
+          // Local transient slab follows the executable region placement.
+          .placement_id = options->region_placement_id,
+          // Binding-table slot reserved for the local transient slab.
+          .binding_slot = options->region_local_binding_slot,
+          // HAL buffer parameters used for local transient allocation.
+          .params = options->region_local_slab_params,
+          // Planned local slab byte length.
+          .byte_length = region_statistics[i].local_slab_byte_length,
+          // Required local slab base alignment.
+          .alignment = options->region_local_slab_alignment,
+          // Peak concurrently live local tensor bytes observed by dry-run.
+          .high_water_mark = region_statistics[i].local_slab_high_water_mark,
+      };
+      ++memory_slab_count;
+    }
   }
 
   if (iree_status_is_ok(status)) {
@@ -1364,15 +1503,15 @@ iree_status_t id4_pipeline_program_create_plan(
     create_options.constant_slab_count = counts.constant_count == 0 ? 0 : 1;
     create_options.constant_slabs =
         counts.constant_count == 0 ? NULL : &constant_slab;
-    create_options.memory_slab_count = has_local_slab ? 1 : 0;
-    create_options.memory_slabs = has_local_slab ? &local_slab : NULL;
+    create_options.memory_slab_count = memory_slab_count;
+    create_options.memory_slabs = memory_slab_count == 0 ? NULL : memory_slabs;
     create_options.boundary_tensor_count = counts.import_count;
     create_options.boundary_tensors =
         counts.import_count == 0 ? NULL : boundary_tensors;
     create_options.kernel_count = kernel_count;
     create_options.kernels = kernel_count == 0 ? NULL : kernels;
-    create_options.region_count = has_region ? 1 : 0;
-    create_options.regions = has_region ? &region : NULL;
+    create_options.region_count = region_range_count;
+    create_options.regions = region_range_count == 0 ? NULL : regions;
     create_options.diagnostic_tap_count = planned_tap_count;
     create_options.diagnostic_taps = planned_tap_count == 0 ? NULL : taps;
     create_options.diagnostics_sink = options->diagnostics_sink;
@@ -1381,11 +1520,25 @@ iree_status_t id4_pipeline_program_create_plan(
   }
 
   iree_allocator_free(host_allocator, (void*)constant_slab_name.data);
-  iree_allocator_free(host_allocator, (void*)local_slab_name.data);
-  id4_pipeline_region_local_lifetime_list_release(
-      local_lifetime_count, local_lifetimes, host_allocator);
+  for (iree_host_size_t i = 0; i < region_range_count; ++i) {
+    if (local_slab_names) {
+      iree_allocator_free(host_allocator, (void*)local_slab_names[i].data);
+    }
+    if (region_local_lifetime_counts && region_local_lifetimes) {
+      id4_pipeline_region_local_lifetime_list_release(
+          region_local_lifetime_counts[i], region_local_lifetimes[i],
+          host_allocator);
+    }
+  }
   id4_pipeline_program_plan_release_specialization_keys(kernel_count, kernels,
                                                         host_allocator);
+  iree_allocator_free(host_allocator, local_slab_names);
+  iree_allocator_free(host_allocator, memory_slabs);
+  iree_allocator_free(host_allocator, regions);
+  iree_allocator_free(host_allocator, region_local_lifetimes);
+  iree_allocator_free(host_allocator, region_local_lifetime_counts);
+  iree_allocator_free(host_allocator, region_statistics);
+  iree_allocator_free(host_allocator, region_ranges);
   iree_allocator_free(host_allocator, taps);
   iree_allocator_free(host_allocator, kernels);
   iree_allocator_free(host_allocator, boundary_tensors);

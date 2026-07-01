@@ -199,6 +199,46 @@ static bool id4_pipeline_program_region_operation_uses_tensor(
   }
 }
 
+static bool id4_pipeline_program_region_binding_fully_writes_tensor(
+    const id4_pipeline_program_dispatch_binding_t* binding,
+    const id4_pipeline_program_tensor_record_t* tensor) {
+  if (!iree_all_bits_set(binding->access,
+                         ID4_PIPELINE_PROGRAM_TENSOR_ACCESS_WRITE)) {
+    return false;
+  }
+  if (!iree_all_bits_set(
+          binding->flags,
+          ID4_PIPELINE_PROGRAM_DISPATCH_BINDING_FLAG_WRITE_RANGE)) {
+    return true;
+  }
+  return binding->write_range.offset == 0 &&
+         binding->write_range.length >= tensor->byte_length;
+}
+
+static bool id4_pipeline_program_region_tensor_fully_written_before_range(
+    const id4_pipeline_program_region_lower_options_t* options,
+    id4_pipeline_program_tensor_t tensor,
+    const id4_pipeline_program_tensor_record_t* tensor_record) {
+  for (iree_host_size_t i = 0; i < options->source_operation_offset; ++i) {
+    const id4_pipeline_program_op_t* op =
+        id4_pipeline_program_operation_at(options->program, i);
+    if (!op || op->kind != ID4_PIPELINE_PROGRAM_OP_KIND_DISPATCH_LOOM) {
+      continue;
+    }
+    for (iree_host_size_t j = 0; j < op->payload.dispatch_loom.binding_count;
+         ++j) {
+      const id4_pipeline_program_dispatch_binding_t* binding =
+          &op->payload.dispatch_loom.bindings[j];
+      if (binding->tensor.ordinal == tensor.ordinal &&
+          id4_pipeline_program_region_binding_fully_writes_tensor(
+              binding, tensor_record)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 static iree_status_t id4_pipeline_program_region_lookup_local_producer(
     const id4_pipeline_program_region_lower_options_t* options,
     id4_pipeline_program_tensor_t tensor,
@@ -646,6 +686,12 @@ static iree_status_t id4_pipeline_program_region_lower_import(
   memset(&import, 0, sizeof(import));
   IREE_RETURN_IF_ERROR(context->options->resolve_import(
       context->options->user_data, import_op, tensor, import_ordinal, &import));
+  if (!iree_all_bits_set(import.flags,
+                         ID4_PIPELINE_TENSOR_IMPORT_FLAG_INITIALIZED) &&
+      id4_pipeline_program_region_tensor_fully_written_before_range(
+          context->options, import_op->tensor, tensor)) {
+    import.flags |= ID4_PIPELINE_TENSOR_IMPORT_FLAG_INITIALIZED;
+  }
   id4_pipeline_tensor_t region_tensor =
       id4_pipeline_program_region_invalid_tensor();
   IREE_RETURN_IF_ERROR(id4_pipeline_region_import_tensor(

@@ -224,7 +224,13 @@ static id4_pipeline_program_t* CreateLinearProgram() {
   return program;
 }
 
-static id4_pipeline_program_t* CreateRegionCutProgram() {
+typedef enum region_cut_program_write_mode_e {
+  kRegionCutProgramWriteModeFull,
+  kRegionCutProgramWriteModePartial,
+} region_cut_program_write_mode_t;
+
+static id4_pipeline_program_t* CreateRegionCutProgram(
+    region_cut_program_write_mode_t write_mode) {
   ProgramBuilderScope builder_scope;
   id4_pipeline_program_builder_t* builder = builder_scope.builder();
 
@@ -252,9 +258,15 @@ static id4_pipeline_program_t* CreateRegionCutProgram() {
   IREE_CHECK_OK(
       id4_pipeline_program_import_tensor(builder, &output_options, &output));
 
+  id4_pipeline_program_dispatch_binding_t output_write_binding =
+      id4_pipeline_program_write(output);
+  if (write_mode == kRegionCutProgramWriteModePartial) {
+    output_write_binding = id4_pipeline_program_write_range(
+        output, /*offset=*/0, /*length=*/sizeof(float));
+  }
   id4_pipeline_program_dispatch_binding_t bindings[] = {
       id4_pipeline_program_read(input),
-      id4_pipeline_program_write(output),
+      output_write_binding,
   };
   id4_pipeline_program_dispatch_loom_options_t dispatch_options = {
       /*.structure_size=*/sizeof(dispatch_options),
@@ -275,6 +287,24 @@ static id4_pipeline_program_t* CreateRegionCutProgram() {
       /*.name=*/IREE_SV("entry.after_copy"),
   };
   IREE_CHECK_OK(id4_pipeline_program_region_cut(builder, &cut_options));
+
+  id4_pipeline_program_dispatch_binding_t second_bindings[] = {
+      id4_pipeline_program_read_write(output),
+  };
+  id4_pipeline_program_dispatch_loom_options_t second_dispatch_options = {
+      /*.structure_size=*/sizeof(second_dispatch_options),
+      /*.next=*/nullptr,
+      /*.name=*/IREE_SV("entry.finalize"),
+      /*.kernel=*/
+      id4_pipeline_make_kernel_ref(IREE_SV("test/finalize"),
+                                   IREE_SV("finalize")),
+      /*.config_binding_count=*/0,
+      /*.config_bindings=*/nullptr,
+      /*.binding_count=*/IREE_ARRAYSIZE(second_bindings),
+      /*.bindings=*/second_bindings,
+  };
+  IREE_CHECK_OK(
+      id4_pipeline_program_dispatch_loom(builder, &second_dispatch_options));
 
   id4_pipeline_program_t* program = nullptr;
   IREE_CHECK_OK(id4_pipeline_program_builder_seal(
@@ -719,8 +749,9 @@ TEST(PipelineProgramPlan, DerivesParameterKernelRegionAndTapPlans) {
   id4_pipeline_program_release(program);
 }
 
-TEST(PipelineProgramPlan, RejectsRegionCutsUntilMultiRegionPlanningExists) {
-  id4_pipeline_program_t* program = CreateRegionCutProgram();
+TEST(PipelineProgramPlan, PlansRegionRangesFromCuts) {
+  id4_pipeline_program_t* program =
+      CreateRegionCutProgram(kRegionCutProgramWriteModeFull);
   iree_hal_device_group_t* device_group = CreateLocalSyncDeviceGroup();
   id4_pipeline_device_placement_t placement = {
       /*.role=*/IREE_SV("default"),
@@ -733,7 +764,47 @@ TEST(PipelineProgramPlan, RejectsRegionCutsUntilMultiRegionPlanningExists) {
       MakePlanOptions(program, device_group, &placement, &diagnostics_sink);
 
   id4_pipeline_plan_t* plan = nullptr;
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_UNIMPLEMENTED,
+  IREE_ASSERT_OK(id4_pipeline_program_create_plan(
+      &options, iree_allocator_system(), &plan));
+
+  ASSERT_EQ(id4_pipeline_plan_region_count(plan), 2u);
+  const id4_pipeline_region_plan_t* first_region =
+      id4_pipeline_plan_region_at(plan, 0);
+  ASSERT_NE(first_region, nullptr);
+  ExpectStringViewEqual(first_region->name, IREE_SV("entry.after_copy"));
+  EXPECT_EQ(first_region->source_operation_offset, 0u);
+  EXPECT_EQ(first_region->source_operation_count, 3u);
+  EXPECT_EQ(first_region->statistics.dispatch_count, 1u);
+  const id4_pipeline_region_plan_t* second_region =
+      id4_pipeline_plan_region_at(plan, 1);
+  ASSERT_NE(second_region, nullptr);
+  ExpectStringViewEqual(second_region->name, IREE_SV("test.forward"));
+  EXPECT_EQ(second_region->source_operation_offset, 4u);
+  EXPECT_EQ(second_region->source_operation_count, 1u);
+  EXPECT_EQ(second_region->statistics.dispatch_count, 1u);
+  EXPECT_EQ(id4_pipeline_plan_memory_slab_count(plan), 0u);
+
+  id4_pipeline_plan_release(plan);
+  iree_hal_device_group_release(device_group);
+  id4_pipeline_program_release(program);
+}
+
+TEST(PipelineProgramPlan, RejectsLaterRegionReadAfterPartialBoundaryWrite) {
+  id4_pipeline_program_t* program =
+      CreateRegionCutProgram(kRegionCutProgramWriteModePartial);
+  iree_hal_device_group_t* device_group = CreateLocalSyncDeviceGroup();
+  id4_pipeline_device_placement_t placement = {
+      /*.role=*/IREE_SV("default"),
+      /*.device_index=*/0,
+      /*.queue_affinity=*/IREE_HAL_QUEUE_AFFINITY_ANY,
+  };
+  id4_pipeline_diagnostics_sink_t diagnostics_sink;
+  id4_pipeline_diagnostics_sink_initialize_ignore(&diagnostics_sink);
+  id4_pipeline_program_plan_options_t options =
+      MakePlanOptions(program, device_group, &placement, &diagnostics_sink);
+
+  id4_pipeline_plan_t* plan = nullptr;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
                         id4_pipeline_program_create_plan(
                             &options, iree_allocator_system(), &plan));
   EXPECT_EQ(plan, nullptr);
