@@ -74,6 +74,8 @@ struct id4_pipeline_parameter_slab_set_t {
   id4_pipeline_parameter_slab_load_t* loads;
   // Number of retained parameter load readiness groups.
   iree_host_size_t load_group_count;
+  // Retained parameter load group descriptors.
+  id4_pipeline_parameter_load_group_t* load_groups;
   // Readiness semaphores retained in parameter load group order.
   iree_hal_semaphore_t** load_group_semaphores;
   // Per-load-group submission state owned by this set.
@@ -604,6 +606,7 @@ static void id4_pipeline_parameter_slab_set_destroy(
   iree_allocator_free(host_allocator, slab_set->wait_semaphores);
   iree_allocator_free(host_allocator, slab_set->load_group_submitted);
   iree_allocator_free(host_allocator, slab_set->load_group_semaphores);
+  iree_allocator_free(host_allocator, slab_set->load_groups);
   iree_allocator_free(host_allocator, slab_set->loads);
   iree_allocator_free(host_allocator, slab_set->buffers);
   iree_allocator_free(host_allocator, slab_set);
@@ -3020,10 +3023,20 @@ static iree_status_t id4_pipeline_parameter_slab_set_create_load_groups(
       load_group_count, loads, load_step_count, load_steps, host_allocator,
       &slab_set->load_group_semaphores, &slab_set->load_group_count));
   if (slab_set->load_group_count == 0) return iree_ok_status();
-  iree_status_t status =
-      iree_allocator_malloc_array(host_allocator, slab_set->load_group_count,
-                                  sizeof(slab_set->load_group_submitted[0]),
-                                  (void**)&slab_set->load_group_submitted);
+  iree_status_t status = iree_allocator_malloc_array(
+      host_allocator, slab_set->load_group_count,
+      sizeof(slab_set->load_groups[0]), (void**)&slab_set->load_groups);
+  for (iree_host_size_t i = 0;
+       i < slab_set->load_group_count && iree_status_is_ok(status); ++i) {
+    status = id4_pipeline_parameter_load_group_at(load_step_count, load_steps,
+                                                  i, &slab_set->load_groups[i]);
+  }
+  if (iree_status_is_ok(status)) {
+    status =
+        iree_allocator_malloc_array(host_allocator, slab_set->load_group_count,
+                                    sizeof(slab_set->load_group_submitted[0]),
+                                    (void**)&slab_set->load_group_submitted);
+  }
   if (iree_status_is_ok(status)) {
     memset(
         slab_set->load_group_submitted, 0,
@@ -3498,6 +3511,30 @@ iree_hal_buffer_t* id4_pipeline_parameter_slab_set_buffer_at(
 iree_host_size_t id4_pipeline_parameter_slab_set_load_group_count(
     const id4_pipeline_parameter_slab_set_t* slab_set) {
   return slab_set ? slab_set->load_group_count : 0;
+}
+
+iree_status_t id4_pipeline_parameter_slab_set_load_group_at(
+    const id4_pipeline_parameter_slab_set_t* slab_set, iree_host_size_t index,
+    id4_pipeline_parameter_load_group_t* out_group) {
+  IREE_ASSERT_ARGUMENT(out_group);
+  memset(out_group, 0, sizeof(*out_group));
+  if (!slab_set) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "parameter slab set is required");
+  }
+  if (index >= slab_set->load_group_count) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "parameter load group %" PRIhsz
+                            " is outside load group count %" PRIhsz,
+                            index, slab_set->load_group_count);
+  }
+  if (!slab_set->load_groups) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "parameter slab set has no retained load group descriptors");
+  }
+  *out_group = slab_set->load_groups[index];
+  return iree_ok_status();
 }
 
 bool id4_pipeline_parameter_slab_set_has_deferred_load_context(

@@ -462,13 +462,32 @@ static iree_status_t id4_pipeline_program_stage_validate_prepare_plan(
   const bool defer_parameter_loads_to_issue = iree_all_bits_set(
       options->stage_options->flags,
       ID4_PIPELINE_STAGE_PREPARE_FLAG_DEFER_PARAMETER_LOADS_TO_ISSUE);
-  if (parameter_slab_count != 0 &&
+  const bool reuse_parameter_slabs =
+      iree_all_bits_set(options->stage_options->flags,
+                        ID4_PIPELINE_STAGE_PREPARE_FLAG_REUSE_PARAMETER_SLABS);
+  if (parameter_slab_count == 0 && options->stage_options->parameter_provider) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "program stage parameter provider requires planned parameter slabs");
+  }
+  if (parameter_slab_count != 0 && !reuse_parameter_slabs &&
       !options->stage_options->parameter_provider) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "program stage parameter provider is required by the plan");
   }
+  if (parameter_slab_count != 0 && reuse_parameter_slabs) {
+    if (id4_pipeline_parameter_slab_set_has_deferred_load_context(
+            options->stage_options->parameter_slabs)) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "parameter slab reuse requires resident parameter slabs");
+    }
+    IREE_RETURN_IF_ERROR(id4_pipeline_plan_validate_parameter_slabs(
+        options->plan, options->stage_options->parameter_slabs));
+  }
   if (parameter_slab_count != 0 && !defer_parameter_loads_to_issue &&
+      !reuse_parameter_slabs &&
       options->stage_options->signal_semaphore_list.count == 0) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
@@ -478,6 +497,11 @@ static iree_status_t id4_pipeline_program_stage_validate_prepare_plan(
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "deferred parameter loading requires planned parameter slabs");
+  }
+  if (parameter_slab_count == 0 && reuse_parameter_slabs) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "parameter slab reuse requires planned parameter slabs");
   }
   if (parameter_slab_count == 0 &&
       options->stage_options->wait_semaphore_list.count != 0) {
@@ -511,11 +535,17 @@ iree_status_t id4_pipeline_program_stage_prepare(
   const bool defer_parameter_loads_to_issue = iree_all_bits_set(
       options->stage_options->flags,
       ID4_PIPELINE_STAGE_PREPARE_FLAG_DEFER_PARAMETER_LOADS_TO_ISSUE);
+  const bool reuse_parameter_slabs =
+      iree_all_bits_set(options->stage_options->flags,
+                        ID4_PIPELINE_STAGE_PREPARE_FLAG_REUSE_PARAMETER_SLABS);
   const iree_host_size_t parameter_slab_count =
       id4_pipeline_plan_parameter_slab_count(options->plan);
 
   iree_status_t status = iree_ok_status();
-  if (parameter_slab_count != 0) {
+  if (parameter_slab_count != 0 && reuse_parameter_slabs) {
+    parameter_slabs = options->stage_options->parameter_slabs;
+    id4_pipeline_parameter_slab_set_retain(parameter_slabs);
+  } else if (parameter_slab_count != 0) {
     id4_pipeline_parameter_slab_set_load_options_t load_options;
     memset(&load_options, 0, sizeof(load_options));
     load_options.structure_size = sizeof(load_options);

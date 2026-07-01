@@ -509,6 +509,11 @@ iree_hal_buffer_t* id4_pipeline_parameter_slab_set_buffer_at(
 iree_host_size_t id4_pipeline_parameter_slab_set_load_group_count(
     const id4_pipeline_parameter_slab_set_t* slab_set);
 
+// Returns retained parameter load group |index| represented by |slab_set|.
+iree_status_t id4_pipeline_parameter_slab_set_load_group_at(
+    const id4_pipeline_parameter_slab_set_t* slab_set, iree_host_size_t index,
+    id4_pipeline_parameter_load_group_t* out_group);
+
 // Returns true when |slab_set| owns retained load context for issue-time
 // materialization.
 bool id4_pipeline_parameter_slab_set_has_deferred_load_context(

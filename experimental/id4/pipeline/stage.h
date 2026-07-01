@@ -83,6 +83,8 @@ typedef uint32_t id4_pipeline_stage_prepare_flags_t;
 typedef enum id4_pipeline_stage_prepare_flag_bits_e {
   // Retains parameter loading work for submission by the issue path.
   ID4_PIPELINE_STAGE_PREPARE_FLAG_DEFER_PARAMETER_LOADS_TO_ISSUE = 1u << 0,
+  // Retains caller-provided resident parameter slabs instead of loading them.
+  ID4_PIPELINE_STAGE_PREPARE_FLAG_REUSE_PARAMETER_SLABS = 1u << 1,
 } id4_pipeline_stage_prepare_flag_bits_t;
 
 // Options for preparing a reusable execution bundle from a plan.
@@ -95,6 +97,8 @@ typedef struct id4_pipeline_stage_prepare_options_t {
   id4_pipeline_stage_prepare_flags_t flags;
   // Parameter provider used to populate planned parameter slabs.
   iree_io_parameter_provider_t* parameter_provider;
+  // Resident parameter slabs retained when reuse is explicitly requested.
+  id4_pipeline_parameter_slab_set_t* parameter_slabs;
   // Kernel library used to resolve planned Loom module paths.
   id4_pipeline_kernel_library_t* kernel_library;
   // Semaphores that parameter loading and command-buffer preparation wait on.

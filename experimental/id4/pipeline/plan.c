@@ -1967,6 +1967,79 @@ iree_status_t id4_pipeline_plan_prepare_parameter_slabs(
   return status;
 }
 
+static bool id4_pipeline_parameter_load_groups_equal(
+    id4_pipeline_parameter_load_group_t lhs,
+    id4_pipeline_parameter_load_group_t rhs) {
+  return lhs.step_offset == rhs.step_offset &&
+         lhs.step_count == rhs.step_count && lhs.kind == rhs.kind &&
+         lhs.target_slab_index == rhs.target_slab_index;
+}
+
+iree_status_t id4_pipeline_plan_validate_parameter_slabs(
+    const id4_pipeline_plan_t* plan,
+    const id4_pipeline_parameter_slab_set_t* slab_set) {
+  IREE_ASSERT_ARGUMENT(plan);
+  if (!slab_set) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "parameter slab set is required");
+  }
+
+  const iree_host_size_t slab_count =
+      id4_pipeline_parameter_slab_set_count(slab_set);
+  if (slab_count != plan->parameter_slab_count) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "parameter slab count mismatch: plan has %" PRIhsz
+                            " slabs but slab set has %" PRIhsz,
+                            plan->parameter_slab_count, slab_count);
+  }
+  for (iree_host_size_t i = 0; i < plan->parameter_slab_count; ++i) {
+    iree_hal_buffer_t* buffer =
+        id4_pipeline_parameter_slab_set_buffer_at(slab_set, i);
+    if (!buffer) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "parameter slab %" PRIhsz " has no retained buffer", i);
+    }
+    const iree_device_size_t buffer_byte_length =
+        iree_hal_buffer_byte_length(buffer);
+    if (buffer_byte_length != plan->parameter_slabs[i].byte_length) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "parameter slab %" PRIhsz
+                              " byte length mismatch: plan requires %" PRIu64
+                              " bytes but slab set has %" PRIu64,
+                              i, plan->parameter_slabs[i].byte_length,
+                              buffer_byte_length);
+    }
+  }
+
+  iree_host_size_t planned_group_count = 0;
+  IREE_RETURN_IF_ERROR(
+      id4_pipeline_plan_parameter_load_group_count(plan, &planned_group_count));
+  const iree_host_size_t slab_group_count =
+      id4_pipeline_parameter_slab_set_load_group_count(slab_set);
+  if (slab_group_count != planned_group_count) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "parameter load group count mismatch: plan has %" PRIhsz
+        " groups but slab set has %" PRIhsz,
+        planned_group_count, slab_group_count);
+  }
+  for (iree_host_size_t i = 0; i < planned_group_count; ++i) {
+    id4_pipeline_parameter_load_group_t planned_group;
+    IREE_RETURN_IF_ERROR(
+        id4_pipeline_plan_parameter_load_group_at(plan, i, &planned_group));
+    id4_pipeline_parameter_load_group_t slab_group;
+    IREE_RETURN_IF_ERROR(id4_pipeline_parameter_slab_set_load_group_at(
+        slab_set, i, &slab_group));
+    if (!id4_pipeline_parameter_load_groups_equal(planned_group, slab_group)) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "parameter load group %" PRIhsz " layout mismatch", i);
+    }
+  }
+  return iree_ok_status();
+}
+
 static iree_host_size_t id4_pipeline_plan_find_load_group_first_region(
     const id4_pipeline_plan_t* plan, iree_host_size_t group_index) {
   for (iree_host_size_t i = 0; i < plan->region_count; ++i) {

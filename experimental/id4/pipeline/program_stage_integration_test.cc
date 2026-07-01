@@ -166,6 +166,7 @@ enum id4_pipeline_test_program_flag_bits_t {
   ID4_PIPELINE_TEST_PROGRAM_FLAG_AUTHOR_DIAGNOSTIC_TAPS = 1u << 0,
   ID4_PIPELINE_TEST_PROGRAM_FLAG_DEFER_PARAMETER_LOADS = 1u << 1,
   ID4_PIPELINE_TEST_PROGRAM_FLAG_PREFETCH_DEFERRED_PARAMETER_LOADS = 1u << 2,
+  ID4_PIPELINE_TEST_PROGRAM_FLAG_REUSE_PARAMETER_SLABS = 1u << 3,
 };
 
 typedef struct id4_pipeline_test_program_diagnostics_t {
@@ -411,6 +412,8 @@ static void RunTwoRegionAddProgram(id4_pipeline_test_program_flags_t flags) {
       flags, ID4_PIPELINE_TEST_PROGRAM_FLAG_DEFER_PARAMETER_LOADS);
   const bool prefetches_deferred_parameter_loads = iree_all_bits_set(
       flags, ID4_PIPELINE_TEST_PROGRAM_FLAG_PREFETCH_DEFERRED_PARAMETER_LOADS);
+  const bool reuses_parameter_slabs = iree_all_bits_set(
+      flags, ID4_PIPELINE_TEST_PROGRAM_FLAG_REUSE_PARAMETER_SLABS);
 
   RuntimeContext& context = SharedRuntimeContext();
 
@@ -500,8 +503,50 @@ static void RunTwoRegionAddProgram(id4_pipeline_test_program_flags_t flags) {
   prepare_options.kernel_cache = context.value.kernel_cache;
   prepare_options.executable_cache = context.value.executable_cache;
   OwningRef<id4_pipeline_bundle_t, id4_pipeline_bundle_release> bundle;
-  IREE_ASSERT_OK(id4_pipeline_program_stage_prepare(
-      &prepare_options, iree_allocator_system(), bundle.out()));
+  OwningRef<id4_pipeline_bundle_t, id4_pipeline_bundle_release> source_bundle;
+  if (reuses_parameter_slabs) {
+    IREE_ASSERT_OK(id4_pipeline_program_stage_prepare(
+        &prepare_options, iree_allocator_system(), source_bundle.out()));
+    id4_pipeline_parameter_slab_set_t* source_parameter_slabs =
+        id4_pipeline_bundle_parameter_slabs(source_bundle.get());
+    ASSERT_NE(source_parameter_slabs, nullptr);
+    IREE_ASSERT_OK(id4_pipeline_plan_validate_parameter_slabs(
+        plan.get(), source_parameter_slabs));
+
+    id4_pipeline_stage_prepare_options_t reuse_stage_prepare_options;
+    std::memset(&reuse_stage_prepare_options, 0,
+                sizeof(reuse_stage_prepare_options));
+    reuse_stage_prepare_options.structure_size =
+        sizeof(reuse_stage_prepare_options);
+    reuse_stage_prepare_options.flags =
+        ID4_PIPELINE_STAGE_PREPARE_FLAG_REUSE_PARAMETER_SLABS;
+    reuse_stage_prepare_options.parameter_slabs = source_parameter_slabs;
+    reuse_stage_prepare_options.kernel_library = kernel_library.get();
+    reuse_stage_prepare_options.wait_semaphore_list =
+        iree_hal_semaphore_list_empty();
+    reuse_stage_prepare_options.signal_semaphore_list =
+        iree_hal_semaphore_list_empty();
+    reuse_stage_prepare_options.command_buffer_mode =
+        context.value.command_buffer_mode;
+    reuse_stage_prepare_options.diagnostics_sink = &diagnostics_sink;
+
+    prepare_options.stage_options = &reuse_stage_prepare_options;
+    if (defers_parameter_loads) {
+      IREE_EXPECT_STATUS_IS(
+          IREE_STATUS_INVALID_ARGUMENT,
+          id4_pipeline_program_stage_prepare(
+              &prepare_options, iree_allocator_system(), bundle.out()));
+      return;
+    }
+    IREE_ASSERT_OK(id4_pipeline_program_stage_prepare(
+        &prepare_options, iree_allocator_system(), bundle.out()));
+    EXPECT_EQ(id4_pipeline_bundle_parameter_slabs(bundle.get()),
+              source_parameter_slabs);
+    source_bundle.reset();
+  } else {
+    IREE_ASSERT_OK(id4_pipeline_program_stage_prepare(
+        &prepare_options, iree_allocator_system(), bundle.out()));
+  }
   id4_pipeline_parameter_slab_set_t* parameter_slabs =
       id4_pipeline_bundle_parameter_slabs(bundle.get());
   ASSERT_NE(parameter_slabs, nullptr);
@@ -511,7 +556,7 @@ static void RunTwoRegionAddProgram(id4_pipeline_test_program_flags_t flags) {
                 parameter_slabs),
             defers_parameter_loads);
   EXPECT_EQ(id4_pipeline_bundle_readiness_semaphore_list(bundle.get()).count,
-            defers_parameter_loads ? 0u : 1u);
+            (defers_parameter_loads || reuses_parameter_slabs) ? 0u : 1u);
 
   OwningRef<iree_hal_buffer_t, iree_hal_buffer_release> input_buffer;
   IREE_ASSERT_OK(AllocateDeviceBuffer(
@@ -643,6 +688,15 @@ TEST(ProgramStageIntegration,
   RunTwoRegionAddProgram(
       ID4_PIPELINE_TEST_PROGRAM_FLAG_DEFER_PARAMETER_LOADS |
       ID4_PIPELINE_TEST_PROGRAM_FLAG_PREFETCH_DEFERRED_PARAMETER_LOADS);
+}
+
+TEST(ProgramStageIntegration, IssuesMultiRegionProgramWithReusedParameters) {
+  RunTwoRegionAddProgram(ID4_PIPELINE_TEST_PROGRAM_FLAG_REUSE_PARAMETER_SLABS);
+}
+
+TEST(ProgramStageIntegration, RejectsDeferredParameterSlabReuse) {
+  RunTwoRegionAddProgram(ID4_PIPELINE_TEST_PROGRAM_FLAG_DEFER_PARAMETER_LOADS |
+                         ID4_PIPELINE_TEST_PROGRAM_FLAG_REUSE_PARAMETER_SLABS);
 }
 
 TEST(ProgramStageIntegration, IssuesMultiRegionProgramWithDiagnosticTaps) {

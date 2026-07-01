@@ -434,6 +434,12 @@ iree_status_t id4_pipeline_plan_prepare_parameter_slabs(
     iree_allocator_t host_allocator,
     id4_pipeline_parameter_slab_set_t** out_slab_set);
 
+// Verifies that |slab_set| matches the parameter slab layout and load-group
+// ordering required by |plan|.
+iree_status_t id4_pipeline_plan_validate_parameter_slabs(
+    const id4_pipeline_plan_t* plan,
+    const id4_pipeline_parameter_slab_set_t* slab_set);
+
 // Creates an issue-local context for deferred parameter loads in |plan|.
 iree_status_t id4_pipeline_plan_create_parameter_slab_issue_context(
     const id4_pipeline_plan_t* plan,

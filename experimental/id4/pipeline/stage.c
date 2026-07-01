@@ -147,14 +147,48 @@ static iree_status_t id4_pipeline_validate_prepare_options(
                             "prepare extension structures are not supported");
   }
   const id4_pipeline_stage_prepare_flags_t allowed_flags =
-      ID4_PIPELINE_STAGE_PREPARE_FLAG_DEFER_PARAMETER_LOADS_TO_ISSUE;
+      ID4_PIPELINE_STAGE_PREPARE_FLAG_DEFER_PARAMETER_LOADS_TO_ISSUE |
+      ID4_PIPELINE_STAGE_PREPARE_FLAG_REUSE_PARAMETER_SLABS;
   if (iree_any_bit_set(options->flags, ~allowed_flags)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "unsupported prepare flags 0x%x", options->flags);
   }
-  if (iree_all_bits_set(
-          options->flags,
-          ID4_PIPELINE_STAGE_PREPARE_FLAG_DEFER_PARAMETER_LOADS_TO_ISSUE) &&
+  const bool defer_parameter_loads_to_issue = iree_all_bits_set(
+      options->flags,
+      ID4_PIPELINE_STAGE_PREPARE_FLAG_DEFER_PARAMETER_LOADS_TO_ISSUE);
+  const bool reuse_parameter_slabs = iree_all_bits_set(
+      options->flags, ID4_PIPELINE_STAGE_PREPARE_FLAG_REUSE_PARAMETER_SLABS);
+  if (defer_parameter_loads_to_issue && reuse_parameter_slabs) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "deferred parameter loading cannot reuse parameter slabs");
+  }
+  if (reuse_parameter_slabs && !options->parameter_slabs) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "parameter slab reuse requires a parameter slab set");
+  }
+  if (!reuse_parameter_slabs && options->parameter_slabs) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "parameter slabs require explicit parameter slab reuse");
+  }
+  if (reuse_parameter_slabs && options->parameter_provider) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "parameter slab reuse cannot also load from a parameter provider");
+  }
+  if (reuse_parameter_slabs && options->wait_semaphore_list.count != 0) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "parameter slab reuse cannot wait on prepare semaphores");
+  }
+  if (reuse_parameter_slabs && options->signal_semaphore_list.count != 0) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "parameter slab reuse cannot signal prepare readiness");
+  }
+  if (defer_parameter_loads_to_issue &&
       options->signal_semaphore_list.count != 0) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
