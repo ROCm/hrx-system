@@ -1808,142 +1808,225 @@ static iree_status_t id4_pipeline_parameter_slab_submit_gather(
   return status;
 }
 
-static iree_hal_semaphore_list_t id4_pipeline_parameter_load_step_wait_list(
-    iree_host_size_t step_index, iree_hal_semaphore_list_t initial_wait_list,
-    iree_hal_semaphore_t** chain_semaphores, uint64_t* chain_wait_value,
-    iree_hal_semaphore_t** out_chain_wait_semaphore) {
-  if (step_index == 0) return initial_wait_list;
-  *out_chain_wait_semaphore = chain_semaphores[step_index - 1];
-  *chain_wait_value = 1;
-  return id4_pipeline_parameter_one_semaphore_list(out_chain_wait_semaphore,
-                                                   chain_wait_value);
+typedef struct id4_pipeline_parameter_load_group_t {
+  // First load-step ordinal represented by this submitted group.
+  iree_host_size_t step_offset;
+  // Number of load steps represented by this submitted group.
+  iree_host_size_t step_count;
+  // True when the group uses bounded encoder staging.
+  bool is_encode;
+} id4_pipeline_parameter_load_group_t;
+
+static id4_pipeline_parameter_load_group_t
+id4_pipeline_parameter_load_group_from_steps(
+    iree_host_size_t step_index, iree_host_size_t load_step_count,
+    const id4_pipeline_parameter_load_step_t* load_steps) {
+  id4_pipeline_parameter_load_group_t group = {
+      // First load-step ordinal represented by this group.
+      .step_offset = step_index,
+      // One direct gather by default.
+      .step_count = 1,
+      // Updated below for encoded groups.
+      .is_encode = false,
+  };
+  if (id4_pipeline_parameter_load_step_is_encode(&load_steps[step_index])) {
+    group.step_count = id4_pipeline_parameter_slab_encode_run_count(
+        step_index, load_step_count, load_steps);
+    group.is_encode = true;
+  }
+  return group;
 }
 
-static iree_hal_semaphore_list_t id4_pipeline_parameter_load_step_signal_list(
-    iree_host_size_t next_step_index, iree_host_size_t load_step_count,
-    iree_hal_semaphore_list_t final_signal_list,
-    iree_hal_semaphore_t** chain_semaphores, uint64_t* chain_signal_value,
-    iree_hal_semaphore_t** out_chain_signal_semaphore) {
-  if (next_step_index == load_step_count) return final_signal_list;
-  *out_chain_signal_semaphore = chain_semaphores[next_step_index - 1];
-  *chain_signal_value = 1;
-  return id4_pipeline_parameter_one_semaphore_list(out_chain_signal_semaphore,
-                                                   chain_signal_value);
+static iree_host_size_t id4_pipeline_parameter_load_group_count(
+    iree_host_size_t load_step_count,
+    const id4_pipeline_parameter_load_step_t* load_steps) {
+  iree_host_size_t group_count = 0;
+  for (iree_host_size_t i = 0; i < load_step_count;) {
+    const id4_pipeline_parameter_load_group_t group =
+        id4_pipeline_parameter_load_group_from_steps(i, load_step_count,
+                                                     load_steps);
+    i += group.step_count;
+    ++group_count;
+  }
+  return group_count;
 }
 
-static iree_status_t id4_pipeline_parameter_slab_submit_load_step(
+static iree_status_t id4_pipeline_parameter_slab_submit_load_group(
     const id4_pipeline_parameter_slab_set_load_options_t* options,
     const id4_pipeline_parameter_slab_load_t* loads,
     const id4_pipeline_parameter_load_step_t* load_steps,
-    iree_host_size_t load_step_count, iree_host_size_t step_index,
-    iree_host_size_t* inout_next_step_index, iree_string_view_t stage_name,
+    id4_pipeline_parameter_load_group_t group, iree_string_view_t stage_name,
     const id4_pipeline_parameter_slab_set_t* slab_set,
-    iree_hal_semaphore_t** chain_semaphores,
-    iree_hal_semaphore_list_t initial_wait_list,
-    iree_hal_semaphore_list_t final_signal_list) {
-  const id4_pipeline_parameter_load_step_t* step = &load_steps[step_index];
+    iree_hal_semaphore_list_t wait_semaphore_list,
+    iree_hal_semaphore_list_t signal_semaphore_list) {
+  const id4_pipeline_parameter_load_step_t* step =
+      &load_steps[group.step_offset];
   const id4_pipeline_parameter_slab_load_t* load =
       &loads[step->target_slab_index];
-  iree_host_size_t next_step_index = step_index + 1;
-  if (id4_pipeline_parameter_load_step_is_encode(step)) {
-    next_step_index = step_index + id4_pipeline_parameter_slab_encode_run_count(
-                                       step_index, load_step_count, load_steps);
-  }
-
-  iree_hal_semaphore_t* chain_wait_semaphore = NULL;
-  uint64_t chain_wait_value = 1;
-  iree_hal_semaphore_list_t step_wait_semaphore_list =
-      id4_pipeline_parameter_load_step_wait_list(
-          step_index, initial_wait_list, chain_semaphores, &chain_wait_value,
-          &chain_wait_semaphore);
-  iree_hal_semaphore_t* chain_signal_semaphore = NULL;
-  uint64_t chain_signal_value = 1;
-  iree_hal_semaphore_list_t step_signal_semaphore_list =
-      id4_pipeline_parameter_load_step_signal_list(
-          next_step_index, load_step_count, final_signal_list, chain_semaphores,
-          &chain_signal_value, &chain_signal_semaphore);
 
   iree_status_t status = iree_ok_status();
-  if (id4_pipeline_parameter_load_step_is_encode(step)) {
+  if (group.is_encode) {
     status = id4_pipeline_parameter_slab_submit_encode_run(
-        options, load, next_step_index - step_index, step, step_index,
-        stage_name, slab_set->buffers[step->target_slab_index],
-        step_wait_semaphore_list, step_signal_semaphore_list);
+        options, load, group.step_count, step, group.step_offset, stage_name,
+        slab_set->buffers[step->target_slab_index], wait_semaphore_list,
+        signal_semaphore_list);
   } else {
     status = id4_pipeline_parameter_slab_submit_gather(
         options, load, step, stage_name,
-        slab_set->buffers[step->target_slab_index], step_wait_semaphore_list,
-        step_signal_semaphore_list);
-  }
-  if (iree_status_is_ok(status)) {
-    *inout_next_step_index = next_step_index;
+        slab_set->buffers[step->target_slab_index], wait_semaphore_list,
+        signal_semaphore_list);
   }
   return status;
 }
 
-static iree_status_t id4_pipeline_parameter_slab_load_steps_submit(
-    const id4_pipeline_parameter_slab_set_load_options_t* options,
+static iree_status_t id4_pipeline_parameter_slab_create_group_semaphores(
+    iree_host_size_t group_count,
     const id4_pipeline_parameter_slab_load_t* loads,
     iree_host_size_t load_step_count,
-    const id4_pipeline_parameter_load_step_t* load_steps,
-    iree_string_view_t stage_name,
-    const id4_pipeline_parameter_slab_set_t* slab_set,
-    iree_hal_semaphore_t** chain_semaphores) {
-  iree_status_t status = iree_ok_status();
-  for (iree_host_size_t i = 0;
-       i < load_step_count && iree_status_is_ok(status);) {
-    iree_host_size_t next_step_index = i;
-    status = id4_pipeline_parameter_slab_submit_load_step(
-        options, loads, load_steps, load_step_count, i, &next_step_index,
-        stage_name, slab_set, chain_semaphores, options->wait_semaphore_list,
-        options->signal_semaphore_list);
-    i = next_step_index;
-  }
-  return status;
-}
-
-static iree_status_t id4_pipeline_parameter_slab_create_chain_semaphores(
-    iree_host_size_t load_step_count,
-    const id4_pipeline_parameter_slab_load_t* loads,
     const id4_pipeline_parameter_load_step_t* load_steps,
     iree_allocator_t host_allocator, iree_hal_semaphore_t*** out_semaphores,
     iree_host_size_t* out_semaphore_count) {
   IREE_ASSERT_ARGUMENT(out_semaphores);
   IREE_ASSERT_ARGUMENT(out_semaphore_count);
   *out_semaphores = NULL;
-  *out_semaphore_count = load_step_count > 1 ? load_step_count - 1 : 0;
+  *out_semaphore_count = group_count;
   if (*out_semaphore_count == 0) return iree_ok_status();
 
   iree_hal_semaphore_t** semaphores = NULL;
   iree_status_t status =
       iree_allocator_malloc_array(host_allocator, *out_semaphore_count,
                                   sizeof(semaphores[0]), (void**)&semaphores);
-  for (iree_host_size_t i = 0;
-       i < *out_semaphore_count && iree_status_is_ok(status); ++i) {
+  if (iree_status_is_ok(status)) {
+    memset(semaphores, 0, *out_semaphore_count * sizeof(semaphores[0]));
+  }
+  for (iree_host_size_t step_index = 0, group_index = 0;
+       step_index < load_step_count && iree_status_is_ok(status);
+       ++group_index) {
+    const id4_pipeline_parameter_load_group_t group =
+        id4_pipeline_parameter_load_group_from_steps(
+            step_index, load_step_count, load_steps);
     const id4_pipeline_parameter_slab_load_t* load =
-        &loads[load_steps[i].target_slab_index];
-    status = iree_hal_semaphore_create(
-        load->device, load->queue_affinity,
-        /*initial_value=*/0, IREE_HAL_SEMAPHORE_FLAG_NONE, &semaphores[i]);
+        &loads[load_steps[step_index].target_slab_index];
+    status = iree_hal_semaphore_create(load->device, load->queue_affinity,
+                                       /*initial_value=*/0,
+                                       IREE_HAL_SEMAPHORE_FLAG_NONE,
+                                       &semaphores[group_index]);
+    step_index += group.step_count;
   }
   if (iree_status_is_ok(status)) {
     *out_semaphores = semaphores;
   } else {
-    for (iree_host_size_t i = 0; i < *out_semaphore_count; ++i) {
-      iree_hal_semaphore_release(semaphores[i]);
+    if (semaphores) {
+      for (iree_host_size_t i = 0; i < *out_semaphore_count; ++i) {
+        iree_hal_semaphore_release(semaphores[i]);
+      }
     }
     iree_allocator_free(host_allocator, semaphores);
   }
   return status;
 }
 
-static void id4_pipeline_parameter_slab_release_chain_semaphores(
+static void id4_pipeline_parameter_slab_release_group_semaphores(
     iree_hal_semaphore_t** semaphores, iree_host_size_t semaphore_count,
     iree_allocator_t host_allocator) {
   for (iree_host_size_t i = 0; i < semaphore_count; ++i) {
     iree_hal_semaphore_release(semaphores[i]);
   }
   iree_allocator_free(host_allocator, semaphores);
+}
+
+static iree_status_t id4_pipeline_parameter_slab_signal_load_complete(
+    const id4_pipeline_parameter_slab_load_t* loads,
+    const id4_pipeline_parameter_load_step_t* load_steps,
+    iree_hal_semaphore_list_t wait_semaphore_list,
+    iree_hal_semaphore_list_t signal_semaphore_list) {
+  const id4_pipeline_parameter_slab_load_t* load =
+      &loads[load_steps[0].target_slab_index];
+  return iree_hal_device_queue_barrier(
+      load->device, load->queue_affinity, wait_semaphore_list,
+      signal_semaphore_list, IREE_HAL_EXECUTE_FLAG_NONE);
+}
+
+static iree_status_t id4_pipeline_parameter_slab_load_groups_submit(
+    const id4_pipeline_parameter_slab_set_load_options_t* options,
+    const id4_pipeline_parameter_slab_load_t* loads,
+    iree_host_size_t load_step_count,
+    const id4_pipeline_parameter_load_step_t* load_steps,
+    iree_string_view_t stage_name,
+    const id4_pipeline_parameter_slab_set_t* slab_set,
+    iree_hal_semaphore_t** group_semaphores,
+    iree_host_size_t group_semaphore_count) {
+  if (load_step_count == 0) return iree_ok_status();
+  if (group_semaphore_count == 0) {
+    const id4_pipeline_parameter_load_group_t group =
+        id4_pipeline_parameter_load_group_from_steps(
+            /*step_index=*/0, load_step_count, load_steps);
+    return id4_pipeline_parameter_slab_submit_load_group(
+        options, loads, load_steps, group, stage_name, slab_set,
+        options->wait_semaphore_list, options->signal_semaphore_list);
+  }
+
+  iree_hal_semaphore_t** completion_semaphores = NULL;
+  uint64_t* completion_payload_values = NULL;
+  if (group_semaphore_count != 0) {
+    completion_semaphores = (iree_hal_semaphore_t**)iree_alloca(
+        group_semaphore_count * sizeof(completion_semaphores[0]));
+    completion_payload_values = (uint64_t*)iree_alloca(
+        group_semaphore_count * sizeof(completion_payload_values[0]));
+  }
+
+  iree_status_t status = iree_ok_status();
+  iree_host_size_t completion_count = 0;
+  iree_hal_semaphore_t* encode_wait_semaphore = NULL;
+  uint64_t encode_wait_payload_value = 0;
+  for (iree_host_size_t step_index = 0, group_index = 0;
+       step_index < load_step_count && iree_status_is_ok(status);
+       ++group_index) {
+    const id4_pipeline_parameter_load_group_t group =
+        id4_pipeline_parameter_load_group_from_steps(
+            step_index, load_step_count, load_steps);
+    iree_hal_semaphore_list_t group_wait_list = options->wait_semaphore_list;
+    if (group.is_encode && encode_wait_semaphore) {
+      group_wait_list = id4_pipeline_parameter_one_semaphore_list(
+          &encode_wait_semaphore, &encode_wait_payload_value);
+    }
+
+    uint64_t group_signal_payload_value = 1;
+    iree_hal_semaphore_t* group_signal_semaphore =
+        group_semaphores[group_index];
+    iree_hal_semaphore_list_t group_signal_list =
+        id4_pipeline_parameter_one_semaphore_list(&group_signal_semaphore,
+                                                  &group_signal_payload_value);
+    status = id4_pipeline_parameter_slab_submit_load_group(
+        options, loads, load_steps, group, stage_name, slab_set,
+        group_wait_list, group_signal_list);
+    if (iree_status_is_ok(status)) {
+      if (group.is_encode) {
+        encode_wait_semaphore = group_signal_semaphore;
+        encode_wait_payload_value = group_signal_payload_value;
+      } else {
+        completion_semaphores[completion_count] = group_signal_semaphore;
+        completion_payload_values[completion_count] =
+            group_signal_payload_value;
+        ++completion_count;
+      }
+      step_index += group.step_count;
+    }
+  }
+
+  if (iree_status_is_ok(status) && encode_wait_semaphore) {
+    completion_semaphores[completion_count] = encode_wait_semaphore;
+    completion_payload_values[completion_count] = encode_wait_payload_value;
+    ++completion_count;
+  }
+  if (iree_status_is_ok(status)) {
+    iree_hal_semaphore_list_t wait_list =
+        id4_pipeline_parameter_many_semaphore_list(
+            completion_count, completion_semaphores, completion_payload_values);
+    status = id4_pipeline_parameter_slab_signal_load_complete(
+        loads, load_steps, wait_list, options->signal_semaphore_list);
+  }
+  return status;
 }
 
 iree_status_t id4_pipeline_parameter_slab_set_load(
@@ -2004,20 +2087,24 @@ iree_status_t id4_pipeline_parameter_slab_set_load(
     }
   }
 
-  iree_host_size_t chain_semaphore_count = 0;
-  iree_hal_semaphore_t** chain_semaphores = NULL;
+  const iree_host_size_t load_group_count =
+      id4_pipeline_parameter_load_group_count(load_step_count, load_steps);
+  const iree_host_size_t scheduled_group_semaphore_count =
+      load_group_count > 1 ? load_group_count : 0;
+  iree_host_size_t group_semaphore_count = 0;
+  iree_hal_semaphore_t** group_semaphores = NULL;
   if (iree_status_is_ok(status)) {
-    status = id4_pipeline_parameter_slab_create_chain_semaphores(
-        load_step_count, loads, load_steps, host_allocator, &chain_semaphores,
-        &chain_semaphore_count);
+    status = id4_pipeline_parameter_slab_create_group_semaphores(
+        scheduled_group_semaphore_count, loads, load_step_count, load_steps,
+        host_allocator, &group_semaphores, &group_semaphore_count);
   }
   if (iree_status_is_ok(status)) {
-    status = id4_pipeline_parameter_slab_load_steps_submit(
+    status = id4_pipeline_parameter_slab_load_groups_submit(
         options, loads, load_step_count, load_steps, stage_name, slab_set,
-        chain_semaphores);
+        group_semaphores, group_semaphore_count);
   }
-  id4_pipeline_parameter_slab_release_chain_semaphores(
-      chain_semaphores, chain_semaphore_count, host_allocator);
+  id4_pipeline_parameter_slab_release_group_semaphores(
+      group_semaphores, group_semaphore_count, host_allocator);
   if (iree_status_is_ok(status)) {
     *out_slab_set = slab_set;
   } else {
