@@ -1355,6 +1355,16 @@ iree_status_t loom_target_compile_report_record_source_low_row(
       &report->source_low_rows, sizeof(*row), report->allocator, row);
 }
 
+static bool loom_target_compile_report_source_low_memory_row_is_load(
+    const loom_target_compile_report_source_low_memory_row_t* row) {
+  return iree_string_view_equal(row->operation_kind, IREE_SV("load"));
+}
+
+static bool loom_target_compile_report_source_low_memory_row_is_store(
+    const loom_target_compile_report_source_low_memory_row_t* row) {
+  return iree_string_view_equal(row->operation_kind, IREE_SV("store"));
+}
+
 static void loom_target_compile_report_accumulate_source_low_memory_summary(
     loom_target_compile_report_source_low_memory_summary_t* summary,
     const loom_target_compile_report_source_low_memory_row_t* row) {
@@ -1363,6 +1373,13 @@ static void loom_target_compile_report_accumulate_source_low_memory_summary(
   ++summary->packet_count;
   summary->source_lane_count += lane_count;
   summary->source_byte_count += source_byte_count;
+  if (loom_target_compile_report_source_low_memory_row_is_load(row)) {
+    ++summary->load_packet_count;
+    summary->read_byte_count += source_byte_count;
+  } else if (loom_target_compile_report_source_low_memory_row_is_store(row)) {
+    ++summary->store_packet_count;
+    summary->write_byte_count += source_byte_count;
+  }
   if (lane_count == 1) {
     ++summary->scalar_packet_count;
   } else if (lane_count > 1) {
@@ -1386,10 +1403,10 @@ loom_target_compile_report_accumulate_source_low_memory_root_summary(
   ++summary->packet_count;
   summary->source_lane_count += lane_count;
   summary->source_byte_count += source_byte_count;
-  if (iree_string_view_equal(row->operation_kind, IREE_SV("load"))) {
+  if (loom_target_compile_report_source_low_memory_row_is_load(row)) {
     ++summary->load_packet_count;
     summary->read_byte_count += source_byte_count;
-  } else if (iree_string_view_equal(row->operation_kind, IREE_SV("store"))) {
+  } else if (loom_target_compile_report_source_low_memory_row_is_store(row)) {
     ++summary->store_packet_count;
     summary->write_byte_count += source_byte_count;
   }
