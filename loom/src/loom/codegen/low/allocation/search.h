@@ -15,6 +15,7 @@
 #include "loom/codegen/low/allocation/active_set.h"
 #include "loom/codegen/low/allocation/assignment.h"
 #include "loom/codegen/low/allocation/assignment_map.h"
+#include "loom/codegen/low/allocation/spill_plan.h"
 #include "loom/codegen/low/allocation/storage_lease.h"
 #include "loom/codegen/low/allocation/target_constraints.h"
 #include "loom/codegen/low/allocation/unit_liveness.h"
@@ -29,6 +30,8 @@ extern "C" {
 typedef struct loom_low_allocation_search_context_t {
   // Module containing the allocated low function.
   const loom_module_t* module;
+  // Low function body being allocated.
+  loom_region_t* body;
   // Descriptor set selected for the low function.
   const loom_low_descriptor_set_t* descriptor_set;
   // Liveness facts for the allocated low function body.
@@ -43,6 +46,9 @@ typedef struct loom_low_allocation_search_context_t {
   loom_low_allocation_active_set_t* active_set;
   // Materialized storage leases and release eligibility.
   const loom_low_allocation_storage_lease_state_t* storage_leases;
+  // Cached predicted spill traffic, dense by liveness value ordinal. A
+  // store_count of UINT32_MAX means the entry is not computed yet.
+  loom_low_allocation_spill_plan_traffic_t* spill_traffic_by_value_ordinal;
 } loom_low_allocation_search_context_t;
 
 // Active assignment set selected for spilling before an interval is assigned.

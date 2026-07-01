@@ -126,6 +126,7 @@ loom_cc_library(
     ::assignment
     ::assignment_map
     ::live_range
+    ::spill_plan
     ::spill_traffic
     ::storage_lease
     ::target_constraints
