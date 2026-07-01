@@ -212,6 +212,22 @@ PROFILE_QUEUE_RE = re.compile(
     r"(?:\s+payload=(?P<payload>\d+)B)?\s*$"
 )
 
+RESULT_SUMMARY_REQUIRED_TENSORS = (
+    "conditioned_velocity",
+    "unconditioned_velocity",
+    "denoised_latent",
+    "final_latent",
+    "decoded_image",
+)
+
+RESULT_TENSOR_INTEGER_FIELDS = (
+    "byte_length",
+    "element_count",
+    "finite_count",
+    "nan_count",
+    "infinity_count",
+)
+
 
 def parse_arguments(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -604,6 +620,68 @@ def read_profile_metrics(path: Path) -> dict[str, Any]:
     }
 
 
+def _nullable_number(value: Any, context: str) -> int | float | None:
+    if value is None:
+        return None
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return value
+    raise SmokeTestError(f"{context} must be a number or null")
+
+
+def _summarize_result_tensor(value: Any, context: str) -> dict[str, Any]:
+    tensor = _require_object(value, context)
+    summary = _copy_integer_fields(tensor, RESULT_TENSOR_INTEGER_FIELDS, context)
+    first_nonfinite_index = tensor.get("first_nonfinite_index")
+    if first_nonfinite_index is not None:
+        first_nonfinite_index = _require_int(
+            first_nonfinite_index, f"{context}.first_nonfinite_index"
+        )
+    if summary["finite_count"] > summary["element_count"]:
+        raise SmokeTestError(f"{context}.finite_count exceeds element_count")
+    classified_count = (
+        summary["finite_count"] + summary["nan_count"] + summary["infinity_count"]
+    )
+    if classified_count != summary["element_count"]:
+        raise SmokeTestError(f"{context} element classification counts do not sum")
+    return {
+        "dtype": _require_string(tensor.get("dtype"), f"{context}.dtype"),
+        "shape": _summarize_shape(tensor.get("shape"), f"{context}.shape"),
+        **summary,
+        "first_nonfinite_index": first_nonfinite_index,
+        "finite_min": _nullable_number(
+            tensor.get("finite_min"), f"{context}.finite_min"
+        ),
+        "finite_max": _nullable_number(
+            tensor.get("finite_max"), f"{context}.finite_max"
+        ),
+        "finite_mean": _nullable_number(
+            tensor.get("finite_mean"), f"{context}.finite_mean"
+        ),
+    }
+
+
+def read_result_summary_metrics(path: Path) -> dict[str, Any]:
+    with path.open(encoding="utf-8") as file:
+        result_summary = _require_object(json.load(file), "result_summary")
+    metrics = {
+        key: _summarize_result_tensor(value, f"result_summary.{key}")
+        for key, value in sorted(result_summary.items())
+    }
+    for key in RESULT_SUMMARY_REQUIRED_TENSORS:
+        if key not in metrics:
+            raise SmokeTestError(f"result_summary is missing {key}")
+    return metrics
+
+
+def validate_result_summary(metrics: dict[str, Any]) -> None:
+    for key in RESULT_SUMMARY_REQUIRED_TENSORS:
+        tensor = _require_object(metrics.get(key), f"result_summary.{key}")
+        if tensor["nan_count"] != 0 or tensor["infinity_count"] != 0:
+            raise SmokeTestError(f"result_summary.{key} contains nonfinite values")
+        if tensor["finite_count"] != tensor["element_count"]:
+            raise SmokeTestError(f"result_summary.{key} is not fully finite")
+
+
 def require_empty_output_dir(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
     if any(path.iterdir()):
@@ -628,6 +706,7 @@ def build_id4_command(args: argparse.Namespace, artifact_dir: Path) -> list[str]
         f"--vae_tiling_mode={args.vae_tiling_mode}",
         f"--dump_plan={artifact_dir / 'plan.json'}",
         f"--dump_diagnostics={artifact_dir / 'diagnostics'}",
+        f"--dump_result_summary={artifact_dir / 'result_summary.json'}",
         f"--profile_output={artifact_dir / 'profile.txt'}",
     ]
     if args.generation_resident_stage_bundles:
@@ -783,6 +862,7 @@ def run_smoke(args: argparse.Namespace) -> dict[str, Any]:
             "image": str(artifact_dir / "image.ppm"),
             "plan": str(artifact_dir / "plan.json"),
             "diagnostics": str(artifact_dir / "diagnostics"),
+            "result_summary": str(artifact_dir / "result_summary.json"),
             "profile": str(artifact_dir / "profile.txt"),
             "stdout": str(artifact_dir / "stdout.txt"),
             "stderr": str(artifact_dir / "stderr.txt"),
@@ -796,6 +876,10 @@ def run_smoke(args: argparse.Namespace) -> dict[str, Any]:
             summary["profile_metrics"] = read_profile_metrics(
                 artifact_dir / "profile.txt"
             )
+            summary["result_summary_metrics"] = read_result_summary_metrics(
+                artifact_dir / "result_summary.json"
+            )
+            validate_result_summary(summary["result_summary_metrics"])
             metrics = read_ppm_metrics(artifact_dir / "image.ppm")
             summary["image_metrics"] = metrics.to_json()
             validate_image(metrics, request)

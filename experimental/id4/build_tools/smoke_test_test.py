@@ -109,6 +109,40 @@ def minimal_generation_plan() -> dict:
     }
 
 
+def minimal_result_tensor(shape: dict) -> dict:
+    return {
+        "dtype": "f32",
+        "shape": shape,
+        "byte_length": 4,
+        "element_count": 1,
+        "finite_count": 1,
+        "nan_count": 0,
+        "infinity_count": 0,
+        "first_nonfinite_index": None,
+        "finite_min": 0.25,
+        "finite_max": 0.25,
+        "finite_mean": 0.25,
+    }
+
+
+def minimal_result_summary() -> dict:
+    latent_shape = {
+        "rank": 4,
+        "dims": [8, 8, 128, 1],
+    }
+    image_shape = {
+        "rank": 4,
+        "dims": [128, 128, 3, 1],
+    }
+    return {
+        "conditioned_velocity": minimal_result_tensor(latent_shape),
+        "unconditioned_velocity": minimal_result_tensor(latent_shape),
+        "denoised_latent": minimal_result_tensor(latent_shape),
+        "final_latent": minimal_result_tensor(latent_shape),
+        "decoded_image": minimal_result_tensor(image_shape),
+    }
+
+
 class Id4SmokeTestTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -209,6 +243,7 @@ class Id4SmokeTestTest(unittest.TestCase):
         self.assertIn("--output=artifacts/image.ppm", command)
         self.assertIn("--dump_plan=artifacts/plan.json", command)
         self.assertIn("--dump_diagnostics=artifacts/diagnostics", command)
+        self.assertIn("--dump_result_summary=artifacts/result_summary.json", command)
         self.assertIn("--profile_output=artifacts/profile.txt", command)
         self.assertIn("--dit_weight_execution_format=bf16_resident", command)
         self.assertIn("--dit_attention_implementation=online_wmma", command)
@@ -541,6 +576,38 @@ class Id4SmokeTestTest(unittest.TestCase):
             self.assertEqual(metrics["queue_operations"]["operation_count"], 7)
             self.assertEqual(metrics["unknown_timed_row_count"], 0)
 
+    def test_result_summary_metrics_require_finite_required_tensors(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "result_summary.json"
+            path.write_text(json.dumps(minimal_result_summary()), encoding="utf-8")
+
+            metrics = self.smoke_test.read_result_summary_metrics(path)
+            self.smoke_test.validate_result_summary(metrics)
+
+            self.assertEqual(metrics["decoded_image"]["dtype"], "f32")
+            self.assertEqual(metrics["decoded_image"]["finite_count"], 1)
+            self.assertEqual(metrics["decoded_image"]["nan_count"], 0)
+
+    def test_result_summary_validation_rejects_nonfinite_tensor(self):
+        result_summary = minimal_result_summary()
+        decoded_image = result_summary["decoded_image"]
+        decoded_image["finite_count"] = 0
+        decoded_image["nan_count"] = 1
+        decoded_image["first_nonfinite_index"] = 0
+        decoded_image["finite_min"] = None
+        decoded_image["finite_max"] = None
+        decoded_image["finite_mean"] = None
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "result_summary.json"
+            path.write_text(json.dumps(result_summary), encoding="utf-8")
+
+            metrics = self.smoke_test.read_result_summary_metrics(path)
+            with self.assertRaisesRegex(
+                self.smoke_test.SmokeTestError, "decoded_image contains nonfinite"
+            ):
+                self.smoke_test.validate_result_summary(metrics)
+
     def test_uniform_ppm_fails_validation(self):
         request = {
             "generation": {
@@ -571,6 +638,7 @@ class Id4SmokeTestTest(unittest.TestCase):
             root = Path(directory)
             fake_id4 = root / "fake_id4.py"
             plan_payload = json.dumps(minimal_generation_plan())
+            result_summary_payload = json.dumps(minimal_result_summary())
             fake_id4.write_text(
                 "\n".join(
                     [
@@ -580,6 +648,7 @@ class Id4SmokeTestTest(unittest.TestCase):
                         "output = None",
                         "plan = None",
                         "profile = None",
+                        "result_summary = None",
                         "for arg in sys.argv[1:]:",
                         "    if arg.startswith('--output='):",
                         "        output = Path(arg.split('=', 1)[1])",
@@ -587,13 +656,21 @@ class Id4SmokeTestTest(unittest.TestCase):
                         "        plan = Path(arg.split('=', 1)[1])",
                         "    if arg.startswith('--profile_output='):",
                         "        profile = Path(arg.split('=', 1)[1])",
+                        "    if arg.startswith('--dump_result_summary='):",
+                        "        result_summary = Path(arg.split('=', 1)[1])",
                         "if output is None:",
                         "    raise SystemExit(2)",
                         "if plan is None:",
                         "    raise SystemExit(2)",
                         "if profile is None:",
                         "    raise SystemExit(2)",
+                        "if result_summary is None:",
+                        "    raise SystemExit(2)",
                         f"plan.write_text({plan_payload!r}, encoding='utf-8')",
+                        (
+                            "result_summary.write_text("
+                            f"{result_summary_payload!r}, encoding='utf-8')"
+                        ),
                         (
                             "profile.write_text('  dispatch fake_kernel  count=1 "
                             "total=1 ticks avg=1 ticks\\n', encoding='utf-8')"
@@ -629,6 +706,10 @@ class Id4SmokeTestTest(unittest.TestCase):
             self.assertIn("dynamic range", summary["validation_error"])
             self.assertEqual(summary["plan_metrics"]["summary"]["qwen_token_count"], 37)
             self.assertEqual(summary["profile_metrics"]["dispatches"]["total_count"], 1)
+            self.assertEqual(
+                summary["result_summary_metrics"]["decoded_image"]["finite_count"],
+                1,
+            )
             self.assertEqual(summary["image_metrics"]["width"], 16)
 
 
