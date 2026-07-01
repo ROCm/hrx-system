@@ -233,6 +233,8 @@ iree_runtime_cc_library(
     hdrs = ["parameter_util.h"],
     deps = [
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:json",
+        "//runtime/src/iree/base/internal:path",
         "//runtime/src/iree/base/tooling:flags",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/io:file_handle",
@@ -243,6 +245,22 @@ iree_runtime_cc_library(
         "//runtime/src/iree/io/formats:parser_registry",
         "//runtime/src/iree/modules/io/parameters",
         "//runtime/src/iree/vm",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "parameter_util_test",
+    srcs = ["parameter_util_test.cc"],
+    tags = ["requires-filesystem"],
+    deps = [
+        ":parameter_util",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:path",
+        "//runtime/src/iree/io:file_handle",
+        "//runtime/src/iree/io:parameter_index",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/testing:temp_file",
     ],
 )
 
