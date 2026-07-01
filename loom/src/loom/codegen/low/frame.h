@@ -163,8 +163,10 @@ iree_status_t loom_low_emission_frame_build(
 
 // Builds an emission frame and greedily materializes target-lowerable spill
 // traffic until the final frame contains no spill assignments or spill plans.
-// The loop materializes one spill plan per iteration because each rewrite can
-// change liveness and invalidate later spill plans in the current frame.
+// Each iteration materializes the accepted allocation snapshot as a batch.
+// Individual plan traffic is recomputed from the current IR while consuming
+// that batch because earlier spill rewrites can make later allocation-time
+// traffic predictions stale.
 // Materialization, final addressability, and final-frame convergence
 // diagnostics follow the normal target-entry convention: if an error diagnostic
 // is emitted, the function returns OK and the caller must check its diagnostic
