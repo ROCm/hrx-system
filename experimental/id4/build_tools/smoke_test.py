@@ -92,6 +92,28 @@ def non_negative_integer(value: str) -> int:
     return parsed
 
 
+def validate_generation_residency_arguments(
+    parser: argparse.ArgumentParser, args: argparse.Namespace
+) -> None:
+    if args.generation_residency != "memory_budgeted":
+        if args.generation_residency_budget != 0:
+            parser.error(
+                "--generation_residency_budget requires "
+                "--generation_residency=memory_budgeted"
+            )
+        return
+    if args.generation_residency_budget == 0:
+        parser.error(
+            "--generation_residency_budget must be positive for "
+            "--generation_residency=memory_budgeted"
+        )
+    if not args.generation_resident_stage_bundles:
+        parser.error(
+            "--generation_resident_stage_bundles must list candidate stages "
+            "for --generation_residency=memory_budgeted"
+        )
+
+
 @dataclass(frozen=True)
 class ImageMetrics:
     width: int
@@ -239,7 +261,14 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
             "issue_phases",
             "selected_stage_bundles",
             "all_stage_bundles",
+            "memory_budgeted",
         ),
+    )
+    parser.add_argument(
+        "--generation_residency_budget",
+        type=non_negative_integer,
+        default=0,
+        help=("Logical live byte budget for --generation_residency=memory_budgeted."),
     )
     parser.add_argument(
         "--generation_issue_mode",
@@ -260,7 +289,8 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
         default="",
         help=(
             "Comma-separated stage bundles retained by "
-            "--generation_residency=selected_stage_bundles."
+            "--generation_residency=selected_stage_bundles or considered by "
+            "--generation_residency=memory_budgeted."
         ),
     )
     parser.add_argument(
@@ -280,7 +310,9 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--vae_memory_budget", type=int, default=536870912)
     parser.add_argument("--vae_overlap", type=float, default=0.5)
     parser.add_argument("--extra_id4_arg", action="append", default=[])
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    validate_generation_residency_arguments(parser, args)
+    return args
 
 
 def validate_request_payload(request: dict[str, Any]) -> None:
@@ -596,6 +628,10 @@ def build_id4_command(args: argparse.Namespace, artifact_dir: Path) -> list[str]
         command.append(
             "--generation_resident_stage_bundles="
             f"{args.generation_resident_stage_bundles}"
+        )
+    if args.generation_residency_budget != 0:
+        command.append(
+            f"--generation_residency_budget={args.generation_residency_budget}"
         )
     if args.vae_tiling_mode == "explicit_tile_size":
         command.extend(
