@@ -629,6 +629,21 @@ static void loom_target_compile_report_accumulate_move_causes(
   }
 }
 
+static void loom_target_compile_report_accumulate_source_low_memory_summaries(
+    loom_target_compile_report_source_low_memory_summary_t* target,
+    const loom_target_compile_report_source_low_memory_summary_t* source) {
+  target->packet_count += source->packet_count;
+  target->scalar_packet_count += source->scalar_packet_count;
+  target->vector_packet_count += source->vector_packet_count;
+  target->source_lane_count += source->source_lane_count;
+  target->source_byte_count += source->source_byte_count;
+  target->contiguous_vector_packet_count +=
+      source->contiguous_vector_packet_count;
+  target->strided_vector_packet_count += source->strided_vector_packet_count;
+  target->unknown_stride_vector_packet_count +=
+      source->unknown_stride_vector_packet_count;
+}
+
 static bool loom_target_compile_report_strings_equal_or_empty(
     iree_string_view_t lhs, iree_string_view_t rhs) {
   return iree_string_view_is_empty(lhs) || iree_string_view_is_empty(rhs) ||
@@ -838,6 +853,11 @@ static void loom_target_compile_report_merge_entry_summary(
     report->target_resources = entry_report->target_resources;
     report->wait_plan = entry_report->wait_plan;
     report->workload = entry_report->workload;
+    report->source_low_selected_op_count =
+        entry_report->source_low_selected_op_count;
+    report->source_low_emitted_op_count =
+        entry_report->source_low_emitted_op_count;
+    report->source_low_memory_summary = entry_report->source_low_memory_summary;
     if (report->workload.flags == LOOM_TARGET_COMPILE_REPORT_WORKLOAD_NONE) {
       report->detail_flags &= ~LOOM_TARGET_COMPILE_REPORT_DETAIL_WORKLOAD;
     }
@@ -928,6 +948,13 @@ static void loom_target_compile_report_merge_entry_summary(
       entry_report->math_legalization_missing_policy_op_count;
   report->math_legalization_missing_recipe_op_count +=
       entry_report->math_legalization_missing_recipe_op_count;
+  report->source_low_selected_op_count +=
+      entry_report->source_low_selected_op_count;
+  report->source_low_emitted_op_count +=
+      entry_report->source_low_emitted_op_count;
+  loom_target_compile_report_accumulate_source_low_memory_summaries(
+      &report->source_low_memory_summary,
+      &entry_report->source_low_memory_summary);
   if (iree_any_bit_set(entry_report->detail_flags,
                        LOOM_TARGET_COMPILE_REPORT_DETAIL_TARGET_RESOURCES)) {
     if (report_had_target_resources) {
@@ -1100,6 +1127,17 @@ iree_status_t loom_target_compile_report_record_entry_report(
         sizeof(loom_target_compile_report_wait_action_row_t),
         report->allocator));
   }
+  if (iree_any_bit_set(entry_report->detail_flags,
+                       LOOM_TARGET_COMPILE_REPORT_DETAIL_SOURCE_LOW_ROWS)) {
+    IREE_RETURN_IF_ERROR(loom_target_compile_report_append_rows(
+        &report->source_low_rows, &entry_report->source_low_rows,
+        sizeof(loom_target_compile_report_source_low_row_t),
+        report->allocator));
+    IREE_RETURN_IF_ERROR(loom_target_compile_report_append_rows(
+        &report->source_low_memory_rows, &entry_report->source_low_memory_rows,
+        sizeof(loom_target_compile_report_source_low_memory_row_t),
+        report->allocator));
+  }
   if (iree_any_bit_set(
           entry_report->detail_flags,
           LOOM_TARGET_COMPILE_REPORT_DETAIL_MATH_LEGALIZATION_ROWS)) {
@@ -1229,12 +1267,36 @@ iree_status_t loom_target_compile_report_record_source_low_row(
       &report->source_low_rows, sizeof(*row), report->allocator, row);
 }
 
+static void loom_target_compile_report_accumulate_source_low_memory_summary(
+    loom_target_compile_report_source_low_memory_summary_t* summary,
+    const loom_target_compile_report_source_low_memory_row_t* row) {
+  const uint64_t lane_count = row->vector_lane_count;
+  ++summary->packet_count;
+  summary->source_lane_count += lane_count;
+  summary->source_byte_count += lane_count * row->element_byte_count;
+  if (lane_count == 1) {
+    ++summary->scalar_packet_count;
+  } else if (lane_count > 1) {
+    ++summary->vector_packet_count;
+    if (row->element_byte_count == 0 || row->vector_lane_stride_bytes == 0) {
+      ++summary->unknown_stride_vector_packet_count;
+    } else if (row->vector_lane_stride_bytes == row->element_byte_count) {
+      ++summary->contiguous_vector_packet_count;
+    } else {
+      ++summary->strided_vector_packet_count;
+    }
+  }
+}
+
 iree_status_t loom_target_compile_report_record_source_low_memory_row(
     loom_target_compile_report_t* report,
     const loom_target_compile_report_source_low_memory_row_t* row) {
   report->detail_flags |= LOOM_TARGET_COMPILE_REPORT_DETAIL_SOURCE_LOW_ROWS;
-  return loom_target_compile_report_row_list_append(
-      &report->source_low_memory_rows, sizeof(*row), report->allocator, row);
+  IREE_RETURN_IF_ERROR(loom_target_compile_report_row_list_append(
+      &report->source_low_memory_rows, sizeof(*row), report->allocator, row));
+  loom_target_compile_report_accumulate_source_low_memory_summary(
+      &report->source_low_memory_summary, row);
+  return iree_ok_status();
 }
 
 static void loom_target_compile_report_count_math_action(

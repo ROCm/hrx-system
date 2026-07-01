@@ -19,7 +19,7 @@ kernel.def target(@target) @report_static_lds_bank_pattern_unknown() {
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
 COMPILE-REPORT: workload workgroup_size=1x1x1 flat_workgroup_size=1
 COMPILE-REPORT: source_low selected_ops=6 emitted_ops=5 rows=6
-COMPILE-REPORT: source_low_memory rows=1
+COMPILE-REPORT: source_low_memory packets=1 scalar_packets=1 vector_packets=0 source_lanes=1 source_bytes=4 contiguous_vector_packets=0 strided_vector_packets=0 unknown_stride_vector_packets=0
 COMPILE-REPORT: source_low[0] function=report_static_lds_bank_pattern_unknown source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
 COMPILE-REPORT: source_low[1] function=report_static_lds_bank_pattern_unknown source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
 COMPILE-REPORT: source_low[2] function=report_static_lds_bank_pattern_unknown source_op=buffer.alloca selection=plan plan=3072 descriptor=0 emitted_ops=2
@@ -55,7 +55,7 @@ kernel.def target(@target) @report_lds_f16_subword_bank_fields() {
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
 COMPILE-REPORT: workload workgroup_size=64x1x1 flat_workgroup_size=64
 COMPILE-REPORT: source_low selected_ops=11 emitted_ops=10 rows=11
-COMPILE-REPORT: source_low_memory rows=4
+COMPILE-REPORT: source_low_memory packets=4 scalar_packets=0 vector_packets=4 source_lanes=8 source_bytes=16 contiguous_vector_packets=4 strided_vector_packets=0 unknown_stride_vector_packets=0
 COMPILE-REPORT: source_low[0] function=report_lds_f16_subword_bank_fields source_op=kernel.workitem.id selection=plan plan=4112 descriptor=0 emitted_ops=0
 COMPILE-REPORT: source_low[1] function=report_lds_f16_subword_bank_fields source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
 COMPILE-REPORT: source_low[2] function=report_lds_f16_subword_bank_fields source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
@@ -99,7 +99,7 @@ kernel.def target(@target) @report_lds_read2_write2_bank_fields() {
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
 COMPILE-REPORT: workload workgroup_size=64x1x1 flat_workgroup_size=64
 COMPILE-REPORT: source_low selected_ops=10 emitted_ops=13 rows=10
-COMPILE-REPORT: source_low_memory rows=3
+COMPILE-REPORT: source_low_memory packets=3 scalar_packets=0 vector_packets=3 source_lanes=6 source_bytes=24 contiguous_vector_packets=1 strided_vector_packets=2 unknown_stride_vector_packets=0
 COMPILE-REPORT: source_low[0] function=report_lds_read2_write2_bank_fields source_op=kernel.workitem.id selection=plan plan=4112 descriptor=0 emitted_ops=0
 COMPILE-REPORT: source_low[1] function=report_lds_read2_write2_bank_fields source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
 COMPILE-REPORT: source_low[2] function=report_lds_read2_write2_bank_fields source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
@@ -142,7 +142,7 @@ kernel.def target(@target) @report_lds_b128_single_lane_extract() {
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
 COMPILE-REPORT: workload workgroup_size=64x1x1 flat_workgroup_size=64
 COMPILE-REPORT: source_low selected_ops=12 emitted_ops=11 rows=12
-COMPILE-REPORT: source_low_memory rows=4
+COMPILE-REPORT: source_low_memory packets=4 scalar_packets=1 vector_packets=3 source_lanes=13 source_bytes=52 contiguous_vector_packets=3 strided_vector_packets=0 unknown_stride_vector_packets=0
 COMPILE-REPORT: source_low[0] function=report_lds_b128_single_lane_extract source_op=kernel.workitem.id selection=plan plan=4112 descriptor=0 emitted_ops=0
 COMPILE-REPORT: source_low[1] function=report_lds_b128_single_lane_extract source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
 COMPILE-REPORT: source_low[2] function=report_lds_b128_single_lane_extract source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
@@ -184,7 +184,7 @@ kernel.def target(@target) @report_global_and_descriptor_load_families() {
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
 COMPILE-REPORT: workload workgroup_size=1x1x1 flat_workgroup_size=1
 COMPILE-REPORT: source_low selected_ops=8 emitted_ops=7 rows=8
-COMPILE-REPORT: source_low_memory rows=3
+COMPILE-REPORT: source_low_memory packets=3 scalar_packets=3 vector_packets=0 source_lanes=3 source_bytes=12 contiguous_vector_packets=0 strided_vector_packets=0 unknown_stride_vector_packets=0
 COMPILE-REPORT: source_low[0] function=report_global_and_descriptor_load_families source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
 COMPILE-REPORT: source_low[1] function=report_global_and_descriptor_load_families source_op=buffer.view selection=rule rule_set=1 rule=0 descriptor=0 emitted_ops=0
 COMPILE-REPORT: source_low[2] function=report_global_and_descriptor_load_families source_op=buffer.view selection=rule rule_set=1 rule=0 descriptor=0 emitted_ops=0
@@ -221,7 +221,7 @@ kernel.def target(@target) @report_bf16_result_fragment_packets() {
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
 COMPILE-REPORT: workload workgroup_size=32x1x1 flat_workgroup_size=32
 COMPILE-REPORT: source_low selected_ops=8 emitted_ops=145 rows=8
-COMPILE-REPORT: source_low_memory rows=16
+COMPILE-REPORT: source_low_memory packets=16 scalar_packets=8 vector_packets=8 source_lanes=24 source_bytes=48 contiguous_vector_packets=8 strided_vector_packets=0 unknown_stride_vector_packets=0
 COMPILE-REPORT: source_low[0] function=report_bf16_result_fragment_packets source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
 COMPILE-REPORT: source_low[1] function=report_bf16_result_fragment_packets source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
 COMPILE-REPORT: source_low[2] function=report_bf16_result_fragment_packets source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
@@ -278,7 +278,7 @@ kernel.def target(@target) @report_cdna3_bf16_result_fragment_packets() {
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
 COMPILE-REPORT: workload workgroup_size=64x1x1 flat_workgroup_size=64
 COMPILE-REPORT: source_low selected_ops=14 emitted_ops=90 rows=14
-COMPILE-REPORT: source_low_memory rows=10
+COMPILE-REPORT: source_low_memory packets=10 scalar_packets=4 vector_packets=6 source_lanes=20 source_bytes=48 contiguous_vector_packets=6 strided_vector_packets=0 unknown_stride_vector_packets=0
 COMPILE-REPORT: source_low[0] function=report_cdna3_bf16_result_fragment_packets source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
 COMPILE-REPORT: source_low[1] function=report_cdna3_bf16_result_fragment_packets source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
 COMPILE-REPORT: source_low[2] function=report_cdna3_bf16_result_fragment_packets source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
@@ -334,7 +334,7 @@ kernel.def target(@target) @report_rdna4_bf16_result_fragment_packets() {
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
 COMPILE-REPORT: workload workgroup_size=32x1x1 flat_workgroup_size=32
 COMPILE-REPORT: source_low selected_ops=12 emitted_ops=121 rows=12
-COMPILE-REPORT: source_low_memory rows=10
+COMPILE-REPORT: source_low_memory packets=10 scalar_packets=0 vector_packets=10 source_lanes=32 source_bytes=64 contiguous_vector_packets=10 strided_vector_packets=0 unknown_stride_vector_packets=0
 COMPILE-REPORT: source_low[0] function=report_rdna4_bf16_result_fragment_packets source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
 COMPILE-REPORT: source_low[1] function=report_rdna4_bf16_result_fragment_packets source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
 COMPILE-REPORT: source_low[2] function=report_rdna4_bf16_result_fragment_packets source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
@@ -388,7 +388,7 @@ kernel.def target(@target) @report_gfx1250_bf16_result_fragment_packets() {
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
 COMPILE-REPORT: workload workgroup_size=32x1x1 flat_workgroup_size=32
 COMPILE-REPORT: source_low selected_ops=12 emitted_ops=61 rows=12
-COMPILE-REPORT: source_low_memory rows=12
+COMPILE-REPORT: source_low_memory packets=12 scalar_packets=0 vector_packets=12 source_lanes=48 source_bytes=96 contiguous_vector_packets=12 strided_vector_packets=0 unknown_stride_vector_packets=0
 COMPILE-REPORT: source_low[0] function=report_gfx1250_bf16_result_fragment_packets source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
 COMPILE-REPORT: source_low[1] function=report_gfx1250_bf16_result_fragment_packets source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
 COMPILE-REPORT: source_low[2] function=report_gfx1250_bf16_result_fragment_packets source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
@@ -447,7 +447,7 @@ kernel.def target(@target) @report_launch_subgroup_fragment_footprint() {
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
 COMPILE-REPORT: workload workgroup_size=64x1x1 flat_workgroup_size=64 workgroup_count=64x1x1 dispatch_workgroup_count=64 dispatch_workitem_count=4096
 COMPILE-REPORT: source_low selected_ops=15 emitted_ops=178 rows=15
-COMPILE-REPORT: source_low_memory rows=3
+COMPILE-REPORT: source_low_memory packets=3 scalar_packets=0 vector_packets=3 source_lanes=32 source_bytes=48 contiguous_vector_packets=3 strided_vector_packets=0 unknown_stride_vector_packets=0
 COMPILE-REPORT: source_low[0] function=report_launch_subgroup_fragment_footprint source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
 COMPILE-REPORT: source_low[1] function=report_launch_subgroup_fragment_footprint source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
 COMPILE-REPORT: source_low[2] function=report_launch_subgroup_fragment_footprint source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
@@ -492,7 +492,7 @@ kernel.def target(@target) @report_fp8_fragment_full_decode() {
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
 COMPILE-REPORT: workload workgroup_size=32x1x1 flat_workgroup_size=32
 COMPILE-REPORT: source_low selected_ops=8 emitted_ops=170 rows=8
-COMPILE-REPORT: source_low_memory rows=3
+COMPILE-REPORT: source_low_memory packets=3 scalar_packets=0 vector_packets=3 source_lanes=32 source_bytes=48 contiguous_vector_packets=3 strided_vector_packets=0 unknown_stride_vector_packets=0
 COMPILE-REPORT: source_low[0] function=report_fp8_fragment_full_decode source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
 COMPILE-REPORT: source_low[1] function=report_fp8_fragment_full_decode source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
 COMPILE-REPORT: source_low[2] function=report_fp8_fragment_full_decode source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
@@ -532,7 +532,7 @@ kernel.def target(@target) @report_fp8_fragment_finite_nan_storage_full_decode()
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
 COMPILE-REPORT: workload workgroup_size=32x1x1 flat_workgroup_size=32
 COMPILE-REPORT: source_low selected_ops=8 emitted_ops=170 rows=8
-COMPILE-REPORT: source_low_memory rows=3
+COMPILE-REPORT: source_low_memory packets=3 scalar_packets=0 vector_packets=3 source_lanes=32 source_bytes=48 contiguous_vector_packets=3 strided_vector_packets=0 unknown_stride_vector_packets=0
 COMPILE-REPORT: source_low[0] function=report_fp8_fragment_finite_nan_storage_full_decode source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
 COMPILE-REPORT: source_low[1] function=report_fp8_fragment_finite_nan_storage_full_decode source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
 COMPILE-REPORT: source_low[2] function=report_fp8_fragment_finite_nan_storage_full_decode source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
@@ -572,7 +572,7 @@ kernel.def target(@target) @report_fp8_fragment_finite_only_storage_full_decode(
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
 COMPILE-REPORT: workload workgroup_size=32x1x1 flat_workgroup_size=32
 COMPILE-REPORT: source_low selected_ops=8 emitted_ops=135 rows=8
-COMPILE-REPORT: source_low_memory rows=3
+COMPILE-REPORT: source_low_memory packets=3 scalar_packets=0 vector_packets=3 source_lanes=32 source_bytes=48 contiguous_vector_packets=3 strided_vector_packets=0 unknown_stride_vector_packets=0
 COMPILE-REPORT: source_low[0] function=report_fp8_fragment_finite_only_storage_full_decode source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
 COMPILE-REPORT: source_low[1] function=report_fp8_fragment_finite_only_storage_full_decode source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
 COMPILE-REPORT: source_low[2] function=report_fp8_fragment_finite_only_storage_full_decode source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
@@ -612,7 +612,7 @@ kernel.def target(@target) @report_fp8_fragment_finite_packed_decode() {
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
 COMPILE-REPORT: workload workgroup_size=32x1x1 flat_workgroup_size=32
 COMPILE-REPORT: source_low selected_ops=8 emitted_ops=82 rows=8
-COMPILE-REPORT: source_low_memory rows=3
+COMPILE-REPORT: source_low_memory packets=3 scalar_packets=0 vector_packets=3 source_lanes=32 source_bytes=48 contiguous_vector_packets=3 strided_vector_packets=0 unknown_stride_vector_packets=0
 COMPILE-REPORT: source_low[0] function=report_fp8_fragment_finite_packed_decode source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
 COMPILE-REPORT: source_low[1] function=report_fp8_fragment_finite_packed_decode source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
 COMPILE-REPORT: source_low[2] function=report_fp8_fragment_finite_packed_decode source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
@@ -650,7 +650,7 @@ kernel.def target(@target) @report_bf8_fragment_full_decode() {
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
 COMPILE-REPORT: workload workgroup_size=32x1x1 flat_workgroup_size=32
 COMPILE-REPORT: source_low selected_ops=8 emitted_ops=204 rows=8
-COMPILE-REPORT: source_low_memory rows=3
+COMPILE-REPORT: source_low_memory packets=3 scalar_packets=0 vector_packets=3 source_lanes=32 source_bytes=48 contiguous_vector_packets=3 strided_vector_packets=0 unknown_stride_vector_packets=0
 COMPILE-REPORT: source_low[0] function=report_bf8_fragment_full_decode source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
 COMPILE-REPORT: source_low[1] function=report_bf8_fragment_full_decode source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
 COMPILE-REPORT: source_low[2] function=report_bf8_fragment_full_decode source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
@@ -690,7 +690,7 @@ kernel.def target(@target) @report_bf8_fragment_finite_only_decode() {
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
 COMPILE-REPORT: workload workgroup_size=32x1x1 flat_workgroup_size=32
 COMPILE-REPORT: source_low selected_ops=8 emitted_ops=135 rows=8
-COMPILE-REPORT: source_low_memory rows=3
+COMPILE-REPORT: source_low_memory packets=3 scalar_packets=0 vector_packets=3 source_lanes=32 source_bytes=48 contiguous_vector_packets=3 strided_vector_packets=0 unknown_stride_vector_packets=0
 COMPILE-REPORT: source_low[0] function=report_bf8_fragment_finite_only_decode source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
 COMPILE-REPORT: source_low[1] function=report_bf8_fragment_finite_only_decode source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
 COMPILE-REPORT: source_low[2] function=report_bf8_fragment_finite_only_decode source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
@@ -730,7 +730,7 @@ kernel.def target(@target) @report_bf8_fragment_finite_packed_decode() {
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
 COMPILE-REPORT: workload workgroup_size=32x1x1 flat_workgroup_size=32
 COMPILE-REPORT: source_low selected_ops=8 emitted_ops=82 rows=8
-COMPILE-REPORT: source_low_memory rows=3
+COMPILE-REPORT: source_low_memory packets=3 scalar_packets=0 vector_packets=3 source_lanes=32 source_bytes=48 contiguous_vector_packets=3 strided_vector_packets=0 unknown_stride_vector_packets=0
 COMPILE-REPORT: source_low[0] function=report_bf8_fragment_finite_packed_decode source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
 COMPILE-REPORT: source_low[1] function=report_bf8_fragment_finite_packed_decode source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
 COMPILE-REPORT: source_low[2] function=report_bf8_fragment_finite_packed_decode source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
@@ -768,7 +768,7 @@ kernel.def target(@target) @report_fp8_fragment_native_decode() {
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
 COMPILE-REPORT: workload workgroup_size=64x1x1 flat_workgroup_size=64
 COMPILE-REPORT: source_low selected_ops=8 emitted_ops=15 rows=8
-COMPILE-REPORT: source_low_memory rows=2
+COMPILE-REPORT: source_low_memory packets=2 scalar_packets=0 vector_packets=2 source_lanes=8 source_bytes=12 contiguous_vector_packets=2 strided_vector_packets=0 unknown_stride_vector_packets=0
 COMPILE-REPORT: source_low[0] function=report_fp8_fragment_native_decode source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
 COMPILE-REPORT: source_low[1] function=report_fp8_fragment_native_decode source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
 COMPILE-REPORT: source_low[2] function=report_fp8_fragment_native_decode source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0

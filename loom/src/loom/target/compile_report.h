@@ -995,6 +995,26 @@ typedef struct loom_target_compile_report_source_low_memory_row_t {
   iree_string_view_t bank_conflict_kind;
 } loom_target_compile_report_source_low_memory_row_t;
 
+// Summary of emitted source-memory packet shape.
+typedef struct loom_target_compile_report_source_low_memory_summary_t {
+  // Number of emitted source-memory packets.
+  uint64_t packet_count;
+  // Number of packets moving exactly one source lane.
+  uint64_t scalar_packet_count;
+  // Number of packets moving more than one source lane.
+  uint64_t vector_packet_count;
+  // Number of source lanes represented by packets with known lane counts.
+  uint64_t source_lane_count;
+  // Logical source bytes represented by packets with known element sizes.
+  uint64_t source_byte_count;
+  // Number of vector packets whose source lanes are element-contiguous.
+  uint64_t contiguous_vector_packet_count;
+  // Number of vector packets with a known non-contiguous source lane stride.
+  uint64_t strided_vector_packet_count;
+  // Number of vector packets without a usable source lane-stride fact.
+  uint64_t unknown_stride_vector_packet_count;
+} loom_target_compile_report_source_low_memory_summary_t;
+
 // One target math-legalization decision row copied into a compile report.
 typedef struct loom_target_compile_report_math_row_t {
   // Source function symbol containing the legalized math operation.
@@ -1280,6 +1300,9 @@ typedef struct loom_target_compile_report_t {
   loom_target_compile_report_row_list_t source_low_rows;
   // Owned emitted source-memory packet rows.
   loom_target_compile_report_row_list_t source_low_memory_rows;
+  // Derived summary of emitted source-memory packet shape.
+  loom_target_compile_report_source_low_memory_summary_t
+      source_low_memory_summary;
   // Owned target math-legalization decision rows.
   loom_target_compile_report_row_list_t math_legalization_rows;
   // Owned target-legalization decision rows.

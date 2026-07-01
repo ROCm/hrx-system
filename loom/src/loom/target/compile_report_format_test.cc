@@ -1040,9 +1040,15 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
                         "constraint=math.recipe.round_away_f32"),
                 0),
             IREE_STRING_VIEW_NPOS);
-  EXPECT_NE(
-      iree_string_view_find(output, IREE_SV("source_low_memory rows=1"), 0),
-      IREE_STRING_VIEW_NPOS);
+  EXPECT_NE(iree_string_view_find(
+                output,
+                IREE_SV("source_low_memory packets=1 scalar_packets=0 "
+                        "vector_packets=1 source_lanes=2 source_bytes=8 "
+                        "contiguous_vector_packets=0 "
+                        "strided_vector_packets=1 "
+                        "unknown_stride_vector_packets=0"),
+                0),
+            IREE_STRING_VIEW_NPOS);
   EXPECT_NE(iree_string_view_find(output,
                                   IREE_SV("source_low[0] function=branchy"), 0),
             IREE_STRING_VIEW_NPOS);
@@ -1483,7 +1489,17 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
   EXPECT_NE(iree_string_view_find(
                 output, IREE_SV("\"source_low\":{\"selected_op_count\":4"), 0),
             IREE_STRING_VIEW_NPOS);
-  EXPECT_NE(iree_string_view_find(output, IREE_SV("\"memory_count\":1"), 0),
+  EXPECT_NE(iree_string_view_find(
+                output,
+                IREE_SV("\"memory\":{\"packet_count\":1,"
+                        "\"scalar_packet_count\":0,"
+                        "\"vector_packet_count\":1,"
+                        "\"source_lane_count\":2,"
+                        "\"source_byte_count\":8,"
+                        "\"contiguous_vector_packet_count\":0,"
+                        "\"strided_vector_packet_count\":1,"
+                        "\"unknown_stride_vector_packet_count\":0}"),
+                0),
             IREE_STRING_VIEW_NPOS);
   EXPECT_NE(
       iree_string_view_find(output,
