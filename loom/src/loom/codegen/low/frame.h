@@ -86,6 +86,12 @@ typedef struct loom_low_emission_frame_t {
   loom_low_schedule_table_t schedule;
   // Allocation table for the prepared function.
   loom_low_allocation_table_t allocation;
+  // Cumulative spill storage materialized while reaching this frame.
+  uint64_t materialized_spill_storage_count;
+  // Cumulative low.spill stores materialized while reaching this frame.
+  uint64_t materialized_spill_store_count;
+  // Cumulative low.reload ops materialized while reaching this frame.
+  uint64_t materialized_reload_count;
 } loom_low_emission_frame_t;
 
 // Summary from target structural spill-traffic lowering.

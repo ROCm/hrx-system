@@ -469,6 +469,12 @@ typedef struct loom_target_compile_report_entry_t {
   uint64_t allocation_coalesced_copy_count;
   // Number of low.copy ops that must remain materialized.
   uint64_t allocation_materialized_copy_count;
+  // Number of spill storage slots materialized before the final frame.
+  uint64_t allocation_materialized_spill_storage_count;
+  // Number of low.spill stores materialized before the final frame.
+  uint64_t allocation_materialized_spill_store_count;
+  // Number of low.reload ops materialized before the final frame.
+  uint64_t allocation_materialized_reload_count;
   // Number of target storage-lease records.
   uint64_t allocation_storage_lease_count;
   // Number of assignment-backed target storage-lease instances.
@@ -1100,6 +1106,12 @@ typedef struct loom_target_compile_report_t {
   uint64_t allocation_coalesced_copy_count;
   // Number of low.copy ops that must remain materialized.
   uint64_t allocation_materialized_copy_count;
+  // Number of spill storage slots materialized before the final frame.
+  uint64_t allocation_materialized_spill_storage_count;
+  // Number of low.spill stores materialized before the final frame.
+  uint64_t allocation_materialized_spill_store_count;
+  // Number of low.reload ops materialized before the final frame.
+  uint64_t allocation_materialized_reload_count;
   // Number of target storage-lease records.
   uint64_t allocation_storage_lease_count;
   // Number of assignment-backed target storage-lease instances.
@@ -1243,6 +1255,11 @@ void loom_target_compile_report_record_allocation(
     uint64_t coalesced_copy_count, uint64_t materialized_copy_count,
     uint64_t storage_lease_count, uint64_t storage_lease_instance_count,
     uint64_t storage_release_action_count);
+
+// Records spill traffic materialized while reaching the final frame.
+void loom_target_compile_report_record_allocation_materialization(
+    loom_target_compile_report_t* report, uint64_t spill_storage_count,
+    uint64_t spill_store_count, uint64_t reload_count);
 
 // Records target move materialization attributed to one residual move cause.
 void loom_target_compile_report_record_move_cause(
