@@ -30,6 +30,8 @@ iree_cc_library(
     "session.h"
   SRCS
     "session.c"
+    "session_generation.c"
+    "session_generation.h"
     "session_lifecycle.c"
     "session_qwen.c"
     "session_state.h"
