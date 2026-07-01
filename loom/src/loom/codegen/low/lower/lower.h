@@ -453,6 +453,8 @@ typedef struct loom_low_lower_memory_report_row_t {
   iree_string_view_t storage_codebook_policy;
   // Sparse metadata contract recovered from source encoding facts.
   iree_string_view_t storage_sparsity_policy;
+  // Conservative source byte interval evidence for this memory packet.
+  loom_low_byte_interval_t source_interval;
 } loom_low_lower_memory_report_row_t;
 
 // Linked storage block for homogeneous source-to-low report rows.

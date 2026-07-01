@@ -641,6 +641,59 @@ static void loom_target_compile_report_accumulate_move_causes(
   }
 }
 
+static bool loom_target_compile_report_memory_interval_has_envelope(
+    const loom_target_compile_report_memory_interval_t* interval) {
+  const loom_target_compile_report_memory_interval_flags_t range_flags =
+      LOOM_TARGET_COMPILE_REPORT_MEMORY_INTERVAL_BEGIN_RANGE |
+      LOOM_TARGET_COMPILE_REPORT_MEMORY_INTERVAL_END_RANGE;
+  return iree_all_bits_set(interval->flags, range_flags) &&
+         interval->end_max_bytes >= interval->begin_min_bytes;
+}
+
+static uint64_t loom_target_compile_report_memory_interval_span(
+    int64_t begin_bytes, int64_t end_bytes) {
+  return end_bytes >= begin_bytes ? (uint64_t)end_bytes - (uint64_t)begin_bytes
+                                  : 0;
+}
+
+static void loom_target_compile_report_merge_memory_interval_envelope_bounds(
+    loom_target_compile_report_memory_interval_summary_t* target,
+    int64_t begin_min_bytes, int64_t end_max_bytes) {
+  if (target->packet_count == 0) {
+    target->envelope_begin_min_bytes = begin_min_bytes;
+    target->envelope_end_max_bytes = end_max_bytes;
+  } else {
+    target->envelope_begin_min_bytes =
+        iree_min(target->envelope_begin_min_bytes, begin_min_bytes);
+    target->envelope_end_max_bytes =
+        iree_max(target->envelope_end_max_bytes, end_max_bytes);
+  }
+  target->envelope_byte_count = loom_target_compile_report_memory_interval_span(
+      target->envelope_begin_min_bytes, target->envelope_end_max_bytes);
+}
+
+static void loom_target_compile_report_accumulate_memory_interval_summary(
+    loom_target_compile_report_memory_interval_summary_t* target,
+    const loom_target_compile_report_memory_interval_t* interval) {
+  if (!loom_target_compile_report_memory_interval_has_envelope(interval)) {
+    return;
+  }
+  loom_target_compile_report_merge_memory_interval_envelope_bounds(
+      target, interval->begin_min_bytes, interval->end_max_bytes);
+  ++target->packet_count;
+}
+
+static void loom_target_compile_report_merge_memory_interval_summary(
+    loom_target_compile_report_memory_interval_summary_t* target,
+    const loom_target_compile_report_memory_interval_summary_t* source) {
+  if (source->packet_count == 0) {
+    return;
+  }
+  loom_target_compile_report_merge_memory_interval_envelope_bounds(
+      target, source->envelope_begin_min_bytes, source->envelope_end_max_bytes);
+  target->packet_count += source->packet_count;
+}
+
 static void loom_target_compile_report_accumulate_source_low_memory_summaries(
     loom_target_compile_report_source_low_memory_summary_t* target,
     const loom_target_compile_report_source_low_memory_summary_t* source) {
@@ -664,6 +717,12 @@ static void loom_target_compile_report_accumulate_source_low_memory_summaries(
   target->strided_vector_packet_count += source->strided_vector_packet_count;
   target->unknown_stride_vector_packet_count +=
       source->unknown_stride_vector_packet_count;
+  loom_target_compile_report_merge_memory_interval_summary(
+      &target->interval_envelope, &source->interval_envelope);
+  loom_target_compile_report_merge_memory_interval_summary(
+      &target->read_interval_envelope, &source->read_interval_envelope);
+  loom_target_compile_report_merge_memory_interval_summary(
+      &target->write_interval_envelope, &source->write_interval_envelope);
 }
 
 static bool loom_target_compile_report_strings_equal_or_empty(
@@ -1101,6 +1160,12 @@ static void loom_target_compile_report_merge_source_low_memory_root_summary(
   target->strided_vector_packet_count += source->strided_vector_packet_count;
   target->unknown_stride_vector_packet_count +=
       source->unknown_stride_vector_packet_count;
+  loom_target_compile_report_merge_memory_interval_summary(
+      &target->interval_envelope, &source->interval_envelope);
+  loom_target_compile_report_merge_memory_interval_summary(
+      &target->read_interval_envelope, &source->read_interval_envelope);
+  loom_target_compile_report_merge_memory_interval_summary(
+      &target->write_interval_envelope, &source->write_interval_envelope);
 }
 
 static loom_target_compile_report_source_low_memory_root_summary_t*
@@ -1398,9 +1463,13 @@ static void loom_target_compile_report_accumulate_source_low_memory_summary(
   if (loom_target_compile_report_source_low_memory_row_is_load(row)) {
     ++summary->load_packet_count;
     summary->read_byte_count += source_byte_count;
+    loom_target_compile_report_accumulate_memory_interval_summary(
+        &summary->read_interval_envelope, &row->source_interval);
   } else if (loom_target_compile_report_source_low_memory_row_is_store(row)) {
     ++summary->store_packet_count;
     summary->write_byte_count += source_byte_count;
+    loom_target_compile_report_accumulate_memory_interval_summary(
+        &summary->write_interval_envelope, &row->source_interval);
   }
   summary->issued_read_byte_count += row->issued_read_byte_count;
   summary->issued_write_byte_count += row->issued_write_byte_count;
@@ -1408,6 +1477,8 @@ static void loom_target_compile_report_accumulate_source_low_memory_summary(
       row->issued_read_unknown_width_count;
   summary->issued_write_unknown_width_count +=
       row->issued_write_unknown_width_count;
+  loom_target_compile_report_accumulate_memory_interval_summary(
+      &summary->interval_envelope, &row->source_interval);
   if (lane_count == 1) {
     ++summary->scalar_packet_count;
   } else if (lane_count > 1) {
@@ -1434,9 +1505,13 @@ loom_target_compile_report_accumulate_source_low_memory_root_summary(
   if (loom_target_compile_report_source_low_memory_row_is_load(row)) {
     ++summary->load_packet_count;
     summary->read_byte_count += source_byte_count;
+    loom_target_compile_report_accumulate_memory_interval_summary(
+        &summary->read_interval_envelope, &row->source_interval);
   } else if (loom_target_compile_report_source_low_memory_row_is_store(row)) {
     ++summary->store_packet_count;
     summary->write_byte_count += source_byte_count;
+    loom_target_compile_report_accumulate_memory_interval_summary(
+        &summary->write_interval_envelope, &row->source_interval);
   }
   summary->issued_read_byte_count += row->issued_read_byte_count;
   summary->issued_write_byte_count += row->issued_write_byte_count;
@@ -1444,6 +1519,8 @@ loom_target_compile_report_accumulate_source_low_memory_root_summary(
       row->issued_read_unknown_width_count;
   summary->issued_write_unknown_width_count +=
       row->issued_write_unknown_width_count;
+  loom_target_compile_report_accumulate_memory_interval_summary(
+      &summary->interval_envelope, &row->source_interval);
   if (lane_count == 1) {
     ++summary->scalar_packet_count;
   } else if (lane_count > 1) {

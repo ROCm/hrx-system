@@ -19,6 +19,7 @@
 #include "loom/target/registers.h"
 #include "loom/util/cfg_graph.h"
 #include "loom/util/fact_table.h"
+#include "loom/util/math.h"
 
 static bool loom_target_compile_report_mul_u64(uint64_t lhs, uint64_t rhs,
                                                uint64_t* out_result) {
@@ -72,6 +73,48 @@ static iree_string_view_t loom_target_compile_report_descriptor_key(
   }
   return loom_low_descriptor_set_string(descriptor_set,
                                         descriptor->key_string_offset);
+}
+
+static bool loom_target_compile_report_facts_have_finite_range(
+    loom_value_facts_t facts) {
+  return facts.range_lo != INT64_MIN && facts.range_hi != INT64_MAX;
+}
+
+static loom_target_compile_report_memory_interval_t
+loom_target_compile_report_source_interval(
+    const loom_low_byte_interval_t* source_interval) {
+  const loom_low_byte_interval_precision_flags_t required_flags =
+      LOOM_LOW_BYTE_INTERVAL_PRECISION_BEGIN_RANGE |
+      LOOM_LOW_BYTE_INTERVAL_PRECISION_END_RANGE;
+  if (!iree_all_bits_set(source_interval->precision_flags, required_flags) ||
+      !loom_target_compile_report_facts_have_finite_range(
+          source_interval->begin_facts) ||
+      !loom_target_compile_report_facts_have_finite_range(
+          source_interval->end_facts)) {
+    return (loom_target_compile_report_memory_interval_t){0};
+  }
+
+  loom_target_compile_report_memory_interval_t target_interval = {
+      .flags = LOOM_TARGET_COMPILE_REPORT_MEMORY_INTERVAL_BEGIN_RANGE |
+               LOOM_TARGET_COMPILE_REPORT_MEMORY_INTERVAL_END_RANGE,
+      .begin_min_bytes = source_interval->begin_facts.range_lo,
+      .begin_max_bytes = source_interval->begin_facts.range_hi,
+      .end_min_bytes = source_interval->end_facts.range_lo,
+      .end_max_bytes = source_interval->end_facts.range_hi,
+  };
+  if (iree_all_bits_set(source_interval->precision_flags,
+                        LOOM_LOW_BYTE_INTERVAL_PRECISION_EXACT_LENGTH)) {
+    int64_t exact_length = 0;
+    if (loom_checked_sub_i64(source_interval->end_facts.range_lo,
+                             source_interval->begin_facts.range_lo,
+                             &exact_length) &&
+        exact_length > 0) {
+      target_interval.flags |=
+          LOOM_TARGET_COMPILE_REPORT_MEMORY_INTERVAL_EXACT_LENGTH;
+      target_interval.exact_length_bytes = (uint64_t)exact_length;
+    }
+  }
+  return target_interval;
 }
 
 static bool loom_target_compile_report_string_contains(
@@ -2189,6 +2232,9 @@ iree_status_t loom_target_compile_report_record_low_lowering(
        ++i) {
     const loom_low_lower_memory_report_row_t* source_row =
         &lower_result->memory_report_rows.rows[i];
+    const loom_target_compile_report_memory_interval_t source_interval =
+        loom_target_compile_report_source_interval(
+            &source_row->source_interval);
     const loom_target_compile_report_source_low_memory_row_t row = {
         .function_name = source_row->function_name,
         .source_op_name = source_row->source_op_name,
@@ -2226,6 +2272,7 @@ iree_status_t loom_target_compile_report_record_low_lowering(
         .storage_rounding_policy = source_row->storage_rounding_policy,
         .storage_codebook_policy = source_row->storage_codebook_policy,
         .storage_sparsity_policy = source_row->storage_sparsity_policy,
+        .source_interval = source_interval,
     };
     IREE_RETURN_IF_ERROR(
         loom_target_compile_report_record_source_low_memory_row(report, &row));
