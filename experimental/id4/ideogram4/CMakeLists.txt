@@ -30,6 +30,9 @@ iree_cc_library(
     "session.h"
   SRCS
     "session.c"
+    "session_qwen.c"
+    "session_state.h"
+    "session_support.h"
   DEPS
     ::request
     iree::base
