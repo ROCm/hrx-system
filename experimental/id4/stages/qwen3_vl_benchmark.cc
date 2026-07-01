@@ -645,18 +645,28 @@ IREE_BENCHMARK_FN(BM_Qwen3VlStagePrepareCachedKernels) {
   context.diagnostics = {};
 
   uint64_t iteration_count = 0;
-  while (iree_benchmark_keep_running(benchmark_state, 1)) {
+  iree_hal_profiling_from_flags_t* profiling = nullptr;
+  iree_status_t status = iree_hal_begin_device_group_profiling_from_flags(
+      context.live.device_group.get(), iree_allocator_system(), &profiling);
+  while (iree_status_is_ok(status) &&
+         iree_benchmark_keep_running(benchmark_state, 1)) {
     ++prepare_value;
     id4::test::OwningRef<id4_pipeline_bundle_t, id4_pipeline_bundle_release>
         bundle;
-    IREE_RETURN_IF_ERROR(PrepareQwenBundle(
-        &context, plan.get(), QwenParameterLoadMode::kEager,
-        prepare_semaphore.get(), prepare_value, bundle.out()));
-    IREE_RETURN_IF_ERROR(
-        WaitForSemaphore(prepare_semaphore.get(), prepare_value));
-    iree_optimization_barrier(bundle.get());
-    ++iteration_count;
+    status =
+        PrepareQwenBundle(&context, plan.get(), QwenParameterLoadMode::kEager,
+                          prepare_semaphore.get(), prepare_value, bundle.out());
+    if (iree_status_is_ok(status)) {
+      status = WaitForSemaphore(prepare_semaphore.get(), prepare_value);
+    }
+    if (iree_status_is_ok(status)) {
+      iree_optimization_barrier(bundle.get());
+      ++iteration_count;
+    }
   }
+  status =
+      iree_status_join(status, iree_hal_end_profiling_from_flags(profiling));
+  IREE_RETURN_IF_ERROR(status);
   iree_benchmark_set_items_processed(
       benchmark_state,
       static_cast<int64_t>(iteration_count * shape.token_count));
@@ -705,18 +715,28 @@ IREE_BENCHMARK_FN(BM_Qwen3VlStagePrepareFixtureCachedKernels) {
   context.diagnostics = {};
 
   uint64_t iteration_count = 0;
-  while (iree_benchmark_keep_running(benchmark_state, 1)) {
+  iree_hal_profiling_from_flags_t* profiling = nullptr;
+  iree_status_t status = iree_hal_begin_device_group_profiling_from_flags(
+      context.live.device_group.get(), iree_allocator_system(), &profiling);
+  while (iree_status_is_ok(status) &&
+         iree_benchmark_keep_running(benchmark_state, 1)) {
     ++prepare_value;
     id4::test::OwningRef<id4_pipeline_bundle_t, id4_pipeline_bundle_release>
         bundle;
-    IREE_RETURN_IF_ERROR(PrepareQwenBundle(
-        &context, plan.get(), QwenParameterLoadMode::kEager,
-        prepare_semaphore.get(), prepare_value, bundle.out()));
-    IREE_RETURN_IF_ERROR(
-        WaitForSemaphore(prepare_semaphore.get(), prepare_value));
-    iree_optimization_barrier(bundle.get());
-    ++iteration_count;
+    status =
+        PrepareQwenBundle(&context, plan.get(), QwenParameterLoadMode::kEager,
+                          prepare_semaphore.get(), prepare_value, bundle.out());
+    if (iree_status_is_ok(status)) {
+      status = WaitForSemaphore(prepare_semaphore.get(), prepare_value);
+    }
+    if (iree_status_is_ok(status)) {
+      iree_optimization_barrier(bundle.get());
+      ++iteration_count;
+    }
   }
+  status =
+      iree_status_join(status, iree_hal_end_profiling_from_flags(profiling));
+  IREE_RETURN_IF_ERROR(status);
   iree_benchmark_set_items_processed(
       benchmark_state,
       static_cast<int64_t>(iteration_count * context.request.token_count));
