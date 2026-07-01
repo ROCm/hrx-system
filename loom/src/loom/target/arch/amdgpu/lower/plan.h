@@ -683,6 +683,13 @@ typedef struct loom_amdgpu_subgroup_broadcast_first_plan_t {
   uint32_t register_count;
 } loom_amdgpu_subgroup_broadcast_first_plan_t;
 
+typedef enum loom_amdgpu_subgroup_shuffle_crosslane_kind_e {
+  // Use DS bpermute with a byte-addressed source lane.
+  LOOM_AMDGPU_SUBGROUP_SHUFFLE_CROSSLANE_BPERMUTE = 0,
+  // Use DPP row-lane moves with an immediate control value.
+  LOOM_AMDGPU_SUBGROUP_SHUFFLE_CROSSLANE_DPP = 1,
+} loom_amdgpu_subgroup_shuffle_crosslane_kind_t;
+
 typedef struct loom_amdgpu_subgroup_shuffle_plan_t {
   // Source value moved across subgroup lanes.
   loom_value_id_t value;
@@ -696,8 +703,12 @@ typedef struct loom_amdgpu_subgroup_shuffle_plan_t {
   loom_amdgpu_subgroup_payload_kind_t payload_kind;
   // Number of 32-bit registers in the shuffled payload.
   uint32_t register_count;
+  // Cross-lane packet family selected for the shuffle.
+  loom_amdgpu_subgroup_shuffle_crosslane_kind_t crosslane_kind;
   // Full-width lane addressing mode selected by the source op.
   loom_kernel_subgroup_shuffle_mode_t mode;
+  // DPP control immediate used when the selected packet family is DPP.
+  uint32_t dpp_ctrl;
   // Exact lane offset or lane index interpreted by mode.
   uint32_t offset;
   // Exact shuffle segment width from the source op.
