@@ -81,7 +81,7 @@ IREE_FLAG(string, generation_residency, "issue_phases",
 IREE_FLAG(int64_t, generation_residency_budget, 0,
           "Logical live byte budget for "
           "--generation_residency=memory_budgeted.");
-IREE_FLAG(string, generation_issue_mode, "full",
+IREE_FLAG(string, generation_issue_mode, "phases",
           "Generation issue mode: full, phases, or stage_serial.");
 IREE_FLAG(
     int64_t, parameter_load_prefetch_region_distance, 0,
@@ -635,7 +635,7 @@ static iree_status_t id4_cli_validate_dry_run_flags(void) {
                             "--generation_residency_budget requires "
                             "generation execution; omit --dry_run");
   }
-  if (strcmp(FLAG_generation_issue_mode, "full") != 0) {
+  if (strcmp(FLAG_generation_issue_mode, "phases") != 0) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "--generation_issue_mode requires generation execution; omit "
@@ -1757,7 +1757,7 @@ static iree_status_t id4_cli_run_generation(iree_allocator_t host_allocator) {
   iree_hal_profile_statistics_sink_t* profile_statistics_sink = NULL;
   bool profile_started = false;
   id4_cli_generation_issue_mode_t generation_issue_mode =
-      ID4_CLI_GENERATION_ISSUE_MODE_FULL;
+      ID4_CLI_GENERATION_ISSUE_MODE_PHASES;
   id4_cli_generation_residency_request_mode_t generation_residency_mode =
       ID4_CLI_GENERATION_RESIDENCY_REQUEST_ISSUE_PHASES;
   iree_host_size_t parameter_load_prefetch_region_distance = 0;

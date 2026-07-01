@@ -52,7 +52,7 @@ IREE_FLAG(string, generation_residency, "issue_phases",
 IREE_FLAG(int64_t, generation_residency_budget, 0,
           "Logical live byte budget for "
           "--generation_residency=memory_budgeted.");
-IREE_FLAG(string, generation_issue_mode, "full",
+IREE_FLAG(string, generation_issue_mode, "phases",
           "Generation issue mode: full, phases, or stage_serial.");
 IREE_FLAG(int64_t, parameter_load_prefetch_region_distance, 0,
           "Number of future stage regions whose deferred parameter load groups "
@@ -304,7 +304,7 @@ struct LiveGenerationBenchmarkContext {
   // Logical live byte budget for memory-budgeted residency selection.
   iree_device_size_t generation_residency_budget_byte_length = 0;
   // Generation issue mode selected by benchmark flags.
-  GenerationIssueMode generation_issue_mode = GenerationIssueMode::kFull;
+  GenerationIssueMode generation_issue_mode = GenerationIssueMode::kPhases;
   // Deferred parameter load lookahead selected by benchmark flags.
   iree_host_size_t parameter_load_prefetch_region_distance = 0;
   // Generation stage bundles selected or considered by benchmark flags.
