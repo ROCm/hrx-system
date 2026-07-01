@@ -673,6 +673,9 @@ TEST(PipelineProgramPlan, DerivesParameterKernelRegionAndTapPlans) {
       id4_pipeline_plan_region_at(plan, 0);
   ASSERT_NE(region, nullptr);
   ExpectStringViewEqual(region->name, IREE_SV("test.forward"));
+  EXPECT_EQ(region->source_operation_offset, 0u);
+  EXPECT_EQ(region->source_operation_count,
+            id4_pipeline_program_operation_count(program));
   EXPECT_EQ(region->statistics.operation_count, 6u);
   EXPECT_EQ(region->statistics.dispatch_count, 2u);
   EXPECT_EQ(region->statistics.copy_count, 1u);

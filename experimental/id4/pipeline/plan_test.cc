@@ -130,6 +130,10 @@ TEST(PlanTest, ReportsAggregateStatistics) {
   const id4_pipeline_region_plan_t region = {
       // Human-readable region name.
       /*.name=*/IREE_SV("test.region"),
+      // No source program backs this synthetic plan.
+      /*.source_operation_offset=*/0,
+      // No source program backs this synthetic plan.
+      /*.source_operation_count=*/0,
       // Placement containing this region.
       /*.placement_id=*/0,
       // Binding capacity covering storage, boundary, and tap tensors.
@@ -278,6 +282,10 @@ TEST(PlanTest, ScopesMemorySlabBindingSlotsPerRegion) {
       {
           // Human-readable region name.
           /*.name=*/IREE_SV("test.region0"),
+          // No source program backs this synthetic plan.
+          /*.source_operation_offset=*/0,
+          // No source program backs this synthetic plan.
+          /*.source_operation_count=*/0,
           // Placement containing this region.
           /*.placement_id=*/0,
           // Binding capacity covering local and shared slabs.
@@ -290,6 +298,10 @@ TEST(PlanTest, ScopesMemorySlabBindingSlotsPerRegion) {
       {
           // Human-readable region name.
           /*.name=*/IREE_SV("test.region1"),
+          // No source program backs this synthetic plan.
+          /*.source_operation_offset=*/0,
+          // No source program backs this synthetic plan.
+          /*.source_operation_count=*/0,
           // Placement containing this region.
           /*.placement_id=*/0,
           // Binding capacity covering local and shared slabs.

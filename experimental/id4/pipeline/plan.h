@@ -144,6 +144,10 @@ typedef struct id4_pipeline_kernel_plan_t {
 typedef struct id4_pipeline_region_plan_t {
   // Human-readable region name for diagnostics.
   iree_string_view_t name;
+  // First source-program operation ordinal represented by this region.
+  iree_host_size_t source_operation_offset;
+  // Number of source-program operations represented by this region.
+  iree_host_size_t source_operation_count;
   // Plan-local placement identifier.
   uint32_t placement_id;
   // Exact issue-time binding-table capacity.

@@ -57,6 +57,10 @@ class BindingTest : public ::testing::Test {
     id4_pipeline_region_plan_t region = {
         // Region name used by diagnostics.
         /*.name=*/IREE_SV("test.region"),
+        // No source program backs this synthetic plan.
+        /*.source_operation_offset=*/0,
+        // No source program backs this synthetic plan.
+        /*.source_operation_count=*/0,
         // Placement containing the region.
         /*.placement_id=*/0,
         // Local slab plus one boundary tensor.

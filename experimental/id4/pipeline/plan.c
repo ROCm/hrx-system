@@ -662,6 +662,35 @@ static iree_status_t id4_pipeline_plan_copy_regions(
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "region %" PRIhsz " name is required", i);
     }
+    if (plan->source_program) {
+      const iree_host_size_t source_operation_total =
+          id4_pipeline_program_operation_count(plan->source_program);
+      if (source->source_operation_offset > source_operation_total) {
+        return iree_make_status(
+            IREE_STATUS_OUT_OF_RANGE,
+            "region %.*s source operation offset %" PRIhsz
+            " exceeds source program operation count %" PRIhsz,
+            (int)source->name.size, source->name.data,
+            source->source_operation_offset, source_operation_total);
+      }
+      if (source->source_operation_count >
+          source_operation_total - source->source_operation_offset) {
+        return iree_make_status(
+            IREE_STATUS_OUT_OF_RANGE,
+            "region %.*s source operation range [%" PRIhsz ", %" PRIhsz
+            ") exceeds source program operation count %" PRIhsz,
+            (int)source->name.size, source->name.data,
+            source->source_operation_offset,
+            source->source_operation_offset + source->source_operation_count,
+            source_operation_total);
+      }
+    } else if (source->source_operation_offset != 0 ||
+               source->source_operation_count != 0) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "region %.*s source operation range requires a source program",
+          (int)source->name.size, source->name.data);
+    }
     IREE_RETURN_IF_ERROR(id4_pipeline_plan_validate_placement_id(
         plan, source->placement_id, IREE_SV("region")));
     if (source->binding_capacity == 0) {
@@ -699,6 +728,8 @@ static iree_status_t id4_pipeline_plan_copy_regions(
                               source->statistics.local_acquire_count);
     }
     id4_pipeline_region_plan_t* target = &plan->regions[i];
+    target->source_operation_offset = source->source_operation_offset;
+    target->source_operation_count = source->source_operation_count;
     target->placement_id = source->placement_id;
     target->binding_capacity = source->binding_capacity;
     target->local_binding_slot = source->local_binding_slot;
@@ -2321,9 +2352,12 @@ iree_status_t id4_pipeline_plan_format_json(const id4_pipeline_plan_t* plan,
         id4_pipeline_plan_append_json_string(builder, region->name));
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
         builder,
+        ",\"source_operation_offset\":%" PRIhsz
+        ",\"source_operation_count\":%" PRIhsz
         ",\"placement_id\":%u,\"binding_capacity\":%" PRIhsz
         ",\"local_binding_slot\":%u,\"local_tensor_alignment\":%" PRIu64
         ",\"statistics\":",
+        region->source_operation_offset, region->source_operation_count,
         region->placement_id, region->binding_capacity,
         region->local_binding_slot, (uint64_t)region->local_tensor_alignment));
     IREE_RETURN_IF_ERROR(id4_pipeline_plan_append_region_statistics_json(

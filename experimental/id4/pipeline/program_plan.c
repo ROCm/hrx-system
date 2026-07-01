@@ -1331,6 +1331,9 @@ iree_status_t id4_pipeline_program_create_plan(
   memset(&region, 0, sizeof(region));
   if (iree_status_is_ok(status) && has_region) {
     region.name = id4_pipeline_program_name(options->program);
+    region.source_operation_offset = 0;
+    region.source_operation_count =
+        id4_pipeline_program_operation_count(options->program);
     region.placement_id = options->region_placement_id;
     region.binding_capacity = options->region_binding_capacity;
     region.local_binding_slot = options->region_local_binding_slot;
