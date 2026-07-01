@@ -1215,7 +1215,7 @@ static iree_status_t id4_pipeline_parameter_encode_run_resolve_encoder(
   return iree_ok_status();
 }
 
-static void id4_pipeline_parameter_encode_run_release_encoders(
+static void id4_pipeline_parameter_release_prepared_encoders(
     iree_host_size_t prepared_encoder_count,
     id4_pipeline_parameter_prepared_encoder_t* prepared_encoders,
     iree_allocator_t host_allocator) {
@@ -1733,6 +1733,12 @@ typedef struct id4_pipeline_parameter_encode_window_context_t {
   const id4_pipeline_parameter_slab_load_t* loads;
   // True when window allocation emits issue-local diagnostics.
   bool emits_issue_window_diagnostic;
+  // Capacity of the context-owned prepared encoder cache.
+  iree_host_size_t prepared_encoder_capacity;
+  // Number of prepared encoder entries initialized in prepared_encoders.
+  iree_host_size_t prepared_encoder_count;
+  // Prepared encoder specializations reused across encoded load groups.
+  id4_pipeline_parameter_prepared_encoder_t* prepared_encoders;
   // Number of per-target staging windows.
   iree_host_size_t window_count;
   // Per-target reusable staging windows.
@@ -1953,6 +1959,9 @@ static void id4_pipeline_parameter_encode_window_context_deinitialize(
     id4_pipeline_parameter_encode_window_context_t* context) {
   iree_allocator_t host_allocator = context->host_allocator;
   if (iree_allocator_is_null(host_allocator)) return;
+  id4_pipeline_parameter_release_prepared_encoders(
+      context->prepared_encoder_count, context->prepared_encoders,
+      host_allocator);
   if (context->windows) {
     for (iree_host_size_t i = 0; i < context->window_count; ++i) {
       id4_pipeline_parameter_encode_window_t* window = &context->windows[i];
@@ -2032,16 +2041,26 @@ static iree_status_t id4_pipeline_parameter_slab_submit_encode_run(
   }
 
   iree_hal_semaphore_t* run_semaphore = NULL;
-  id4_pipeline_parameter_prepared_encoder_t* prepared_encoders = NULL;
-  iree_host_size_t prepared_encoder_count = 0;
+  id4_pipeline_parameter_prepared_encoder_t* prepared_encoders =
+      uses_encode_window ? encode_window_context->prepared_encoders : NULL;
+  iree_host_size_t prepared_encoder_capacity =
+      uses_encode_window ? encode_window_context->prepared_encoder_capacity
+                         : step_count;
+  iree_host_size_t fallback_prepared_encoder_count = 0;
+  iree_host_size_t* prepared_encoder_count =
+      uses_encode_window ? &encode_window_context->prepared_encoder_count
+                         : &fallback_prepared_encoder_count;
   id4_pipeline_parameter_encode_staging_slot_t
       slots[ID4_PIPELINE_PARAMETER_ENCODER_STAGING_SLOT_COUNT] = {0};
   iree_hal_semaphore_t* cleanup_semaphore = NULL;
   iree_hal_buffer_t* staging_buffer = NULL;
-  iree_status_t status = iree_allocator_malloc_array(
-      host_allocator, step_count, sizeof(prepared_encoders[0]),
-      (void**)&prepared_encoders);
-  if (iree_status_is_ok(status)) {
+  iree_status_t status = iree_ok_status();
+  if (!uses_encode_window) {
+    status = iree_allocator_malloc_array(host_allocator, step_count,
+                                         sizeof(prepared_encoders[0]),
+                                         (void**)&prepared_encoders);
+  }
+  if (iree_status_is_ok(status) && !uses_encode_window) {
     memset(prepared_encoders, 0, step_count * sizeof(prepared_encoders[0]));
   }
   if (iree_status_is_ok(status) && !uses_encode_window) {
@@ -2232,8 +2251,8 @@ static iree_status_t id4_pipeline_parameter_slab_submit_encode_run(
 
       id4_pipeline_parameter_prepared_encoder_t* prepared_encoder = NULL;
       status = id4_pipeline_parameter_encode_run_resolve_encoder(
-          options, load, step, prepared_encoders, step_count,
-          &prepared_encoder_count, &prepared_encoder);
+          options, load, step, prepared_encoders, prepared_encoder_capacity,
+          prepared_encoder_count, &prepared_encoder);
       if (iree_status_is_ok(status)) {
         status = id4_pipeline_parameter_slab_emit_diagnostic(
             load, stage_name, IREE_SV("parameter_slab.encode"),
@@ -2363,8 +2382,10 @@ static iree_status_t id4_pipeline_parameter_slab_submit_encode_run(
   iree_hal_semaphore_release(cleanup_semaphore);
   id4_pipeline_parameter_release_staging_slot_semaphores(slots);
   iree_hal_semaphore_release(run_semaphore);
-  id4_pipeline_parameter_encode_run_release_encoders(
-      prepared_encoder_count, prepared_encoders, host_allocator);
+  if (!uses_encode_window) {
+    id4_pipeline_parameter_release_prepared_encoders(
+        *prepared_encoder_count, prepared_encoders, host_allocator);
+  }
   return status;
 }
 
@@ -2685,6 +2706,7 @@ static iree_status_t id4_pipeline_parameter_encode_window_context_initialize(
   context->window_count = load_count;
 
   iree_status_t status = iree_ok_status();
+  iree_host_size_t encoded_load_step_count = 0;
   if (context->window_count != 0) {
     status = iree_allocator_malloc_array(host_allocator, context->window_count,
                                          sizeof(context->windows[0]),
@@ -2714,6 +2736,11 @@ static iree_status_t id4_pipeline_parameter_encode_window_context_initialize(
           load, &load_steps[group.step_offset], group.step_count,
           encoder_staging_chunk_byte_capacity,
           &context->windows[group.target_slab_index]);
+      if (iree_status_is_ok(status)) {
+        status = id4_pipeline_parameter_add_host_size(
+            group.step_count, &encoded_load_step_count,
+            "parameter encoder load step");
+      }
     }
     step_index += group.step_count;
   }
@@ -2721,6 +2748,18 @@ static iree_status_t id4_pipeline_parameter_encode_window_context_initialize(
        i < context->window_count && iree_status_is_ok(status); ++i) {
     status = id4_pipeline_parameter_encode_window_finalize_plan(
         &context->windows[i]);
+  }
+  if (iree_status_is_ok(status) && encoded_load_step_count != 0) {
+    context->prepared_encoder_capacity = encoded_load_step_count;
+    status = iree_allocator_malloc_array(host_allocator,
+                                         context->prepared_encoder_capacity,
+                                         sizeof(context->prepared_encoders[0]),
+                                         (void**)&context->prepared_encoders);
+    if (iree_status_is_ok(status)) {
+      memset(context->prepared_encoders, 0,
+             context->prepared_encoder_capacity *
+                 sizeof(context->prepared_encoders[0]));
+    }
   }
   if (iree_status_is_ok(status) && context->window_count != 0) {
     status = iree_allocator_malloc_array(host_allocator, context->window_count,
