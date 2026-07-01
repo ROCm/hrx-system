@@ -506,9 +506,9 @@ static iree_status_t CreateDitParameterProviderFromFlags(
   ParameterProviderRef fp8_provider;
   id4_tooling_parameter_provider_request_t requests[] = {
       {
-          // BF16-expanded fallback parameter scope.
+          // BF16 parameter scope.
           .scope = parameter_scope,
-          // BF16-expanded provider output.
+          // BF16 provider output.
           .out_provider = bf16_provider.out(),
       },
       {
@@ -523,9 +523,9 @@ static iree_status_t CreateDitParameterProviderFromFlags(
 
   const id4_tooling_parameter_provider_set_entry_t entries[] = {
       {
-          // BF16-expanded fallback parameter scope.
+          // BF16 parameter scope.
           .scope = parameter_scope,
-          // BF16-expanded fallback provider.
+          // BF16 provider.
           .provider = bf16_provider.get(),
       },
       {

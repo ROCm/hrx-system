@@ -307,7 +307,8 @@ typedef struct id4_ideogram4_generation_resource_statistics_t {
   iree_device_size_t phase_concurrent_constant_peak_byte_length;
   // Largest phase-concurrent local slab high-water live set.
   iree_device_size_t phase_concurrent_local_peak_byte_length;
-  // Largest phase-concurrent total live set excluding external source caches.
+  // Largest phase-concurrent total live set excluding external parameter
+  // storage.
   iree_device_size_t phase_concurrent_total_peak_byte_length;
   // Largest stage-serial parameter slab live set.
   iree_device_size_t stage_serial_parameter_peak_byte_length;
@@ -315,7 +316,7 @@ typedef struct id4_ideogram4_generation_resource_statistics_t {
   iree_device_size_t stage_serial_constant_peak_byte_length;
   // Largest stage-serial local slab high-water live set.
   iree_device_size_t stage_serial_local_peak_byte_length;
-  // Largest stage-serial total live set excluding external source caches.
+  // Largest stage-serial total live set excluding external parameter storage.
   iree_device_size_t stage_serial_total_peak_byte_length;
 } id4_ideogram4_generation_resource_statistics_t;
 
