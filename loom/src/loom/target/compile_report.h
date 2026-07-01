@@ -311,8 +311,12 @@ typedef struct loom_target_compile_report_static_instruction_mix_t {
   uint64_t matrix_count;
   // Descriptor-backed nodes identified as MFMA-like matrix instructions.
   uint64_t mfma_count;
+  // Descriptor-backed nodes identified as scaled MFMA-like instructions.
+  uint64_t smfmac_count;
   // Descriptor-backed nodes identified as WMMA-like matrix instructions.
   uint64_t wmma_count;
+  // Descriptor-backed nodes identified as scaled WMMA-like instructions.
+  uint64_t swmmac_count;
   // Descriptor-backed nodes identified as dot-product instructions.
   uint64_t dot_count;
   // Descriptor-backed nodes identified as global or vector-memory operations.

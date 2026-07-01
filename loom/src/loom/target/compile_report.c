@@ -604,7 +604,9 @@ static void loom_target_compile_report_accumulate_instruction_mix(
   target->vector_alu_count += source->vector_alu_count;
   target->matrix_count += source->matrix_count;
   target->mfma_count += source->mfma_count;
+  target->smfmac_count += source->smfmac_count;
   target->wmma_count += source->wmma_count;
+  target->swmmac_count += source->swmmac_count;
   target->dot_count += source->dot_count;
   target->global_memory_count += source->global_memory_count;
   target->global_load_count += source->global_load_count;

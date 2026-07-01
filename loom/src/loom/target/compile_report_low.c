@@ -227,8 +227,12 @@ typedef struct loom_target_compile_report_low_node_features_t {
   bool matrix;
   // Node contributes MFMA-family work.
   bool mfma;
+  // Node contributes scaled MFMA-family work.
+  bool smfmac;
   // Node contributes WMMA-family work.
   bool wmma;
+  // Node contributes scaled WMMA-family work.
+  bool swmmac;
   // Node contributes dot-product work.
   bool dot;
   // Node contributes global-memory work.
@@ -304,13 +308,17 @@ loom_target_compile_report_classify_low_node_features(
                                    IREE_SV("amdgpu.wmma")) ||
       loom_target_compile_report_schedule_class_uses_resource_kind(
           descriptor_set, schedule_class, LOOM_LOW_RESOURCE_KIND_MATRIX);
+  features.smfmac =
+      iree_string_view_starts_with(semantic_tag, IREE_SV("matrix.smfmac."));
   features.mfma =
       iree_string_view_starts_with(semantic_tag, IREE_SV("matrix.mfma.")) ||
-      iree_string_view_starts_with(semantic_tag, IREE_SV("matrix.smfmac.")) ||
+      features.smfmac ||
       iree_string_view_starts_with(schedule_class_name, IREE_SV("amdgpu.mfma"));
+  features.swmmac =
+      iree_string_view_starts_with(semantic_tag, IREE_SV("matrix.swmmac."));
   features.wmma =
       iree_string_view_starts_with(semantic_tag, IREE_SV("matrix.wmma.")) ||
-      iree_string_view_starts_with(semantic_tag, IREE_SV("matrix.swmmac.")) ||
+      features.swmmac ||
       iree_string_view_starts_with(schedule_class_name, IREE_SV("amdgpu.wmma"));
   features.dot = iree_string_view_starts_with(semantic_tag, IREE_SV("dot."));
   features.cache =
@@ -383,14 +391,15 @@ loom_target_compile_report_classify_low_node_features(
 static bool loom_target_compile_report_low_node_features_are_known(
     const loom_target_compile_report_low_node_features_t* features) {
   return features->scalar_alu || features->vector_alu || features->matrix ||
-         features->mfma || features->wmma || features->dot ||
-         features->global_memory || features->global_load ||
-         features->global_store || features->buffer_load ||
-         features->buffer_store || features->flat_memory ||
-         features->local_memory || features->scalar_memory ||
-         features->generic_memory || features->atomic || features->branch ||
-         features->barrier || features->control || features->conversion ||
-         features->cache || features->register_move;
+         features->mfma || features->smfmac || features->wmma ||
+         features->swmmac || features->dot || features->global_memory ||
+         features->global_load || features->global_store ||
+         features->buffer_load || features->buffer_store ||
+         features->flat_memory || features->local_memory ||
+         features->scalar_memory || features->generic_memory ||
+         features->atomic || features->branch || features->barrier ||
+         features->control || features->conversion || features->cache ||
+         features->register_move;
 }
 
 static uint64_t loom_target_compile_report_low_effect_byte_count(
@@ -502,7 +511,9 @@ static void loom_target_compile_report_accumulate_low_node_static_mix(
   mix->vector_alu_count += features.vector_alu ? 1 : 0;
   mix->matrix_count += features.matrix ? 1 : 0;
   mix->mfma_count += features.mfma ? 1 : 0;
+  mix->smfmac_count += features.smfmac ? 1 : 0;
   mix->wmma_count += features.wmma ? 1 : 0;
+  mix->swmmac_count += features.swmmac ? 1 : 0;
   mix->dot_count += features.dot ? 1 : 0;
   mix->global_memory_count += features.global_memory ? 1 : 0;
   mix->global_load_count += features.global_load ? 1 : 0;
@@ -533,7 +544,9 @@ static void loom_target_compile_report_accumulate_static_mix(
   target->vector_alu_count += source->vector_alu_count;
   target->matrix_count += source->matrix_count;
   target->mfma_count += source->mfma_count;
+  target->smfmac_count += source->smfmac_count;
   target->wmma_count += source->wmma_count;
+  target->swmmac_count += source->swmmac_count;
   target->dot_count += source->dot_count;
   target->global_memory_count += source->global_memory_count;
   target->global_load_count += source->global_load_count;
@@ -592,7 +605,9 @@ static bool loom_target_compile_report_accumulate_scaled_static_mix(
   LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(vector_alu_count);
   LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(matrix_count);
   LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(mfma_count);
+  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(smfmac_count);
   LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(wmma_count);
+  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(swmmac_count);
   LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(dot_count);
   LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(global_memory_count);
   LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(global_load_count);

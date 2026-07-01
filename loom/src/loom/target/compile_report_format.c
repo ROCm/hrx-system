@@ -703,10 +703,10 @@ static iree_status_t loom_target_compile_report_append_instruction_mix_fields(
       builder,
       "COMPILE-REPORT: %.*s descriptors=%" PRIu64 " unknown=%" PRIu64
       " scalar_alu=%" PRIu64 " vector_alu=%" PRIu64 " matrix=%" PRIu64
-      " mfma=%" PRIu64 " wmma=%" PRIu64 " dot=%" PRIu64
-      " global_memory=%" PRIu64 " global_load=%" PRIu64 " global_store=%" PRIu64
-      " buffer_load=%" PRIu64 " buffer_store=%" PRIu64 " flat_memory=%" PRIu64
-      " local_memory=%" PRIu64 " scalar_memory=%" PRIu64
+      " mfma=%" PRIu64 " smfmac=%" PRIu64 " wmma=%" PRIu64 " swmmac=%" PRIu64
+      " dot=%" PRIu64 " global_memory=%" PRIu64 " global_load=%" PRIu64
+      " global_store=%" PRIu64 " buffer_load=%" PRIu64 " buffer_store=%" PRIu64
+      " flat_memory=%" PRIu64 " local_memory=%" PRIu64 " scalar_memory=%" PRIu64
       " generic_memory=%" PRIu64 " memory_read_unknown_width=%" PRIu64
       " memory_write_unknown_width=%" PRIu64 " memory_read_bytes=%" PRIu64
       " memory_write_bytes=%" PRIu64 " global_load_bytes=%" PRIu64
@@ -720,10 +720,10 @@ static iree_status_t loom_target_compile_report_append_instruction_mix_fields(
       " cache=%" PRIu64 " register_move=%" PRIu64 "\n",
       (int)name.size, name.data, mix->descriptor_count, mix->unknown_count,
       mix->scalar_alu_count, mix->vector_alu_count, mix->matrix_count,
-      mix->mfma_count, mix->wmma_count, mix->dot_count,
-      mix->global_memory_count, mix->global_load_count, mix->global_store_count,
-      mix->buffer_load_count, mix->buffer_store_count, mix->flat_memory_count,
-      mix->local_memory_count, mix->scalar_memory_count,
+      mix->mfma_count, mix->smfmac_count, mix->wmma_count, mix->swmmac_count,
+      mix->dot_count, mix->global_memory_count, mix->global_load_count,
+      mix->global_store_count, mix->buffer_load_count, mix->buffer_store_count,
+      mix->flat_memory_count, mix->local_memory_count, mix->scalar_memory_count,
       mix->generic_memory_count, mix->memory_read_unknown_width_count,
       mix->memory_write_unknown_width_count, mix->memory_read_byte_count,
       mix->memory_write_byte_count, mix->global_load_byte_count,
@@ -1574,11 +1574,12 @@ static iree_status_t loom_target_compile_report_format_schedule_band_rows(
           " origin_op=%.*s semantic=%.*s sample=%.*s"
           " descriptors=%" PRIu64 " unknown=%" PRIu64 " scalar_alu=%" PRIu64
           " vector_alu=%" PRIu64 " matrix=%" PRIu64 " mfma=%" PRIu64
-          " wmma=%" PRIu64 " dot=%" PRIu64 " global_memory=%" PRIu64
-          " local_memory=%" PRIu64 " scalar_memory=%" PRIu64
-          " generic_memory=%" PRIu64 " atomic=%" PRIu64 " branch=%" PRIu64
-          " barrier=%" PRIu64 " control=%" PRIu64 " conversion=%" PRIu64
-          " cache=%" PRIu64 " register_move=%" PRIu64 " result_values=%" PRIu64
+          " smfmac=%" PRIu64 " wmma=%" PRIu64 " swmmac=%" PRIu64 " dot=%" PRIu64
+          " global_memory=%" PRIu64 " local_memory=%" PRIu64
+          " scalar_memory=%" PRIu64 " generic_memory=%" PRIu64
+          " atomic=%" PRIu64 " branch=%" PRIu64 " barrier=%" PRIu64
+          " control=%" PRIu64 " conversion=%" PRIu64 " cache=%" PRIu64
+          " register_move=%" PRIu64 " result_values=%" PRIu64
           " result_units=%" PRIu64 "\n",
           row_index, (int)function_name.size, function_name.data,
           (int)block_name.size, block_name.data, row->block_index,
@@ -1589,11 +1590,12 @@ static iree_status_t loom_target_compile_report_format_schedule_band_rows(
           (int)sample_value_name.size, sample_value_name.data,
           mix->descriptor_count, mix->unknown_count, mix->scalar_alu_count,
           mix->vector_alu_count, mix->matrix_count, mix->mfma_count,
-          mix->wmma_count, mix->dot_count, mix->global_memory_count,
-          mix->local_memory_count, mix->scalar_memory_count,
-          mix->generic_memory_count, mix->atomic_count, mix->branch_count,
-          mix->barrier_count, mix->control_count, mix->conversion_count,
-          mix->cache_count, mix->register_move_count, row->result_value_count,
+          mix->smfmac_count, mix->wmma_count, mix->swmmac_count, mix->dot_count,
+          mix->global_memory_count, mix->local_memory_count,
+          mix->scalar_memory_count, mix->generic_memory_count,
+          mix->atomic_count, mix->branch_count, mix->barrier_count,
+          mix->control_count, mix->conversion_count, mix->cache_count,
+          mix->register_move_count, row->result_value_count,
           row->result_unit_count));
     }
   }
@@ -1639,11 +1641,12 @@ loom_target_compile_report_format_schedule_band_summary_rows(
           " origin_op=%.*s semantic=%.*s sample=%.*s"
           " descriptors=%" PRIu64 " unknown=%" PRIu64 " scalar_alu=%" PRIu64
           " vector_alu=%" PRIu64 " matrix=%" PRIu64 " mfma=%" PRIu64
-          " wmma=%" PRIu64 " dot=%" PRIu64 " global_memory=%" PRIu64
-          " local_memory=%" PRIu64 " scalar_memory=%" PRIu64
-          " generic_memory=%" PRIu64 " atomic=%" PRIu64 " branch=%" PRIu64
-          " barrier=%" PRIu64 " control=%" PRIu64 " conversion=%" PRIu64
-          " cache=%" PRIu64 " register_move=%" PRIu64 " result_values=%" PRIu64
+          " smfmac=%" PRIu64 " wmma=%" PRIu64 " swmmac=%" PRIu64 " dot=%" PRIu64
+          " global_memory=%" PRIu64 " local_memory=%" PRIu64
+          " scalar_memory=%" PRIu64 " generic_memory=%" PRIu64
+          " atomic=%" PRIu64 " branch=%" PRIu64 " barrier=%" PRIu64
+          " control=%" PRIu64 " conversion=%" PRIu64 " cache=%" PRIu64
+          " register_move=%" PRIu64 " result_values=%" PRIu64
           " result_units=%" PRIu64 "\n",
           row_index, (int)function_name.size, function_name.data,
           (int)block_name.size, block_name.data, row->block_index,
@@ -1654,11 +1657,12 @@ loom_target_compile_report_format_schedule_band_summary_rows(
           (int)sample_value_name.size, sample_value_name.data,
           mix->descriptor_count, mix->unknown_count, mix->scalar_alu_count,
           mix->vector_alu_count, mix->matrix_count, mix->mfma_count,
-          mix->wmma_count, mix->dot_count, mix->global_memory_count,
-          mix->local_memory_count, mix->scalar_memory_count,
-          mix->generic_memory_count, mix->atomic_count, mix->branch_count,
-          mix->barrier_count, mix->control_count, mix->conversion_count,
-          mix->cache_count, mix->register_move_count, row->result_value_count,
+          mix->smfmac_count, mix->wmma_count, mix->swmmac_count, mix->dot_count,
+          mix->global_memory_count, mix->local_memory_count,
+          mix->scalar_memory_count, mix->generic_memory_count,
+          mix->atomic_count, mix->branch_count, mix->barrier_count,
+          mix->control_count, mix->conversion_count, mix->cache_count,
+          mix->register_move_count, row->result_value_count,
           row->result_unit_count));
     }
   }
@@ -2423,7 +2427,11 @@ static iree_status_t loom_target_compile_report_format_instruction_mix_json(
   IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
       stream, &first_field, "mfma_count", mix->mfma_count));
   IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
+      stream, &first_field, "smfmac_count", mix->smfmac_count));
+  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
       stream, &first_field, "wmma_count", mix->wmma_count));
+  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
+      stream, &first_field, "swmmac_count", mix->swmmac_count));
   IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
       stream, &first_field, "dot_count", mix->dot_count));
   IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
