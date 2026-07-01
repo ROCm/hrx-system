@@ -69,6 +69,14 @@ bool loom_amdgpu_matrix_feature_bits_from_profile(
     loom_amdgpu_matrix_feature_profile_t profile,
     loom_amdgpu_matrix_feature_bits_t* out_feature_bits);
 
+// Returns the number of named matrix feature bits.
+iree_host_size_t loom_amdgpu_matrix_feature_info_count(void);
+
+// Returns a named matrix feature bit by ordinal, or NULL when |index| is out
+// of range.
+const loom_amdgpu_matrix_feature_info_t* loom_amdgpu_matrix_feature_info_at(
+    iree_host_size_t index);
+
 // Maps a processor name such as "gfx942" or "gfx1250" to matrix feature bits.
 iree_status_t loom_amdgpu_matrix_feature_bits_from_processor(
     iree_string_view_t processor,

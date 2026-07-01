@@ -62,6 +62,13 @@ typedef enum loom_amdgpu_matrix_feature_flag_bits_e {
 // Bitset of loom_amdgpu_matrix_feature_flag_bits_t values.
 typedef uint64_t loom_amdgpu_matrix_feature_bits_t;
 
+typedef struct loom_amdgpu_matrix_feature_info_t {
+  // Single matrix feature bit represented by |name|.
+  loom_amdgpu_matrix_feature_bits_t feature_bit;
+  // Stable capability/report name for |feature_bit|.
+  iree_string_view_t name;
+} loom_amdgpu_matrix_feature_info_t;
+
 enum loom_amdgpu_matrix_wave_size_bits_e {
   // Contract may be selected for wave32 code generation.
   LOOM_AMDGPU_MATRIX_WAVE_SIZE_32 = 1u << 0,

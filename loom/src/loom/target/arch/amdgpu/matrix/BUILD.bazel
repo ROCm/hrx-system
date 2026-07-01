@@ -49,6 +49,7 @@ loom_cc_library(
         "//loom/src/loom/target/arch/amdgpu:__pkg__",
         "//loom/src/loom/target/arch/amdgpu/lower:__pkg__",
         "//loom/src/loom/target/arch/amdgpu/planning:__pkg__",
+        "//loom/src/loom/target/emit/native/amdgpu:__pkg__",
     ],
     deps = [
         ":contract_tables",
