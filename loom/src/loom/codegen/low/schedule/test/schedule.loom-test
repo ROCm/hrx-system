@@ -100,6 +100,23 @@ low.func.def target(@test_target) @resource_stall_avoids_pressure_cliff(
 }
 
 // ====
+// RUN: emit low-schedule-json @resource_stall_stays_below_near_pressure_cliff strategy=resource-stall diagnostics=candidates cliff=test.i32:73:15:14 output=none
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @resource_stall_stays_below_near_pressure_cliff(
+    %pad: reg<test.i32 x60>, %ptr0: reg<test.ptr>, %ptr1: reg<test.ptr>,
+    %lhs: reg<test.i32 x4>) -> (reg<test.i32 x60>, reg<test.i32 x4>, reg<test.i32 x4>) {
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", candidate_count="2", chosen_packet="test.load.v4i32", rejected_packet="test.load.v4i32"}
+  %load0 = low.op<test.load.v4i32>(%ptr0) : (reg<test.ptr>) -> reg<test.i32 x4>
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="1", chosen_packet="test.add.v4i32", rejected_packet="test.load.v4i32", chosen_data_ready_stall_cycles="3", rejected_data_ready_stall_cycles="0", chosen_units_until_pressure_cliff="5", rejected_units_until_pressure_cliff="1"}
+  %use0 = low.op<test.add.v4i32>(%load0, %lhs) : (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x4>
+  %load1 = low.op<test.load.v4i32>(%ptr1) : (reg<test.ptr>) -> reg<test.i32 x4>
+  %use1 = low.op<test.add.v4i32>(%load1, %use0) : (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x4>
+  low.return %pad, %lhs, %use1 : reg<test.i32 x60>, reg<test.i32 x4>, reg<test.i32 x4>
+}
+
+// ====
 // RUN: emit low-schedule-json @tied_storage_antidependency
 
 test.target<low_core> @test_target
