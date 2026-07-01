@@ -1534,8 +1534,8 @@ static iree_status_t loom_low_target_legalize_acquire_final_facts(
   loom_value_fact_table_t* fact_table = NULL;
   IREE_RETURN_IF_ERROR(loom_pass_value_facts_acquire(
       pass, module,
-      loom_pass_value_fact_scope_function_for_target(selection->func,
-                                                     selection->target_bundle),
+      loom_pass_value_fact_scope_function_for_target(
+          selection->func, selection->target_bundle, selection->target_data),
       &fact_table));
   *out_fact_table = fact_table;
   return iree_ok_status();
@@ -1575,7 +1575,7 @@ static iree_status_t loom_low_target_legalize_function(
     IREE_RETURN_IF_ERROR(loom_pass_value_facts_acquire(
         pass, module,
         loom_pass_value_fact_scope_function_for_target(
-            selection->func, selection->target_bundle),
+            selection->func, selection->target_bundle, selection->target_data),
         &seed_facts));
   }
   state.lower_options = (loom_low_lower_options_t){

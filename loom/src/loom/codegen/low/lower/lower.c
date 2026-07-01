@@ -210,6 +210,7 @@ static void loom_low_lower_assert_options(
   IREE_ASSERT(options->bundle->config != NULL);
   IREE_ASSERT(options->fact_table != NULL);
   IREE_ASSERT(options->fact_table->context.target_bundle == options->bundle);
+  IREE_ASSERT(options->fact_table->context.target_data == options->target_data);
   IREE_ASSERT(options->descriptor_registry != NULL);
   IREE_ASSERT(options->policy != NULL);
 }

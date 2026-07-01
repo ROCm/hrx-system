@@ -50,7 +50,7 @@ static iree_status_t loom_vector_memory_footprint_fact_scope(
       pass->arena, &resolved, bundle_storage));
   if (resolved) {
     *out_scope = loom_pass_value_fact_scope_function_for_target(
-        function, &bundle_storage->bundle);
+        function, &bundle_storage->bundle, NULL);
   }
   return iree_ok_status();
 }
