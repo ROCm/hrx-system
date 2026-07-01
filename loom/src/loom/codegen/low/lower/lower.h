@@ -393,6 +393,8 @@ typedef struct loom_low_lower_memory_report_row_t {
   iree_string_view_t source_op_name;
   // Numeric source operation kind that emitted this memory packet.
   loom_op_kind_t source_op_kind;
+  // Named source memory root selected by value facts, if available.
+  iree_string_view_t source_root_name;
   // Target-independent memory-space key selected by the target.
   iree_string_view_t memory_space;
   // Source memory operation kind selected by the target.

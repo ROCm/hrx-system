@@ -963,6 +963,8 @@ typedef struct loom_target_compile_report_source_low_memory_row_t {
   iree_string_view_t source_op_name;
   // Numeric source operation kind that emitted this memory packet.
   uint32_t source_op_kind;
+  // Named source memory root selected by value facts, if available.
+  iree_string_view_t source_root_name;
   // Target-independent memory-space key selected by the target.
   iree_string_view_t memory_space;
   // Source memory operation kind selected by the target.
@@ -1014,6 +1016,40 @@ typedef struct loom_target_compile_report_source_low_memory_summary_t {
   // Number of vector packets without a usable source lane-stride fact.
   uint64_t unknown_stride_vector_packet_count;
 } loom_target_compile_report_source_low_memory_summary_t;
+
+// Summary of emitted source-memory packet shape grouped by source memory root.
+typedef struct loom_target_compile_report_source_low_memory_root_summary_t {
+  // Source function symbol containing the source memory root.
+  iree_string_view_t function_name;
+  // Named source memory root selected by value facts.
+  iree_string_view_t source_root_name;
+  // Target-independent memory-space key selected by the target.
+  iree_string_view_t memory_space;
+  // Number of emitted source-memory packets for this root.
+  uint64_t packet_count;
+  // Number of load packets for this root.
+  uint64_t load_packet_count;
+  // Number of store packets for this root.
+  uint64_t store_packet_count;
+  // Number of packets moving exactly one source lane.
+  uint64_t scalar_packet_count;
+  // Number of packets moving more than one source lane.
+  uint64_t vector_packet_count;
+  // Number of source lanes represented by packets with known lane counts.
+  uint64_t source_lane_count;
+  // Logical source bytes represented by packets with known element sizes.
+  uint64_t source_byte_count;
+  // Logical source bytes read by load packets.
+  uint64_t read_byte_count;
+  // Logical source bytes written by store packets.
+  uint64_t write_byte_count;
+  // Number of vector packets whose source lanes are element-contiguous.
+  uint64_t contiguous_vector_packet_count;
+  // Number of vector packets with a known non-contiguous source lane stride.
+  uint64_t strided_vector_packet_count;
+  // Number of vector packets without a usable source lane-stride fact.
+  uint64_t unknown_stride_vector_packet_count;
+} loom_target_compile_report_source_low_memory_root_summary_t;
 
 // One target math-legalization decision row copied into a compile report.
 typedef struct loom_target_compile_report_math_row_t {
@@ -1300,6 +1336,8 @@ typedef struct loom_target_compile_report_t {
   loom_target_compile_report_row_list_t source_low_rows;
   // Owned emitted source-memory packet rows.
   loom_target_compile_report_row_list_t source_low_memory_rows;
+  // Owned source-memory summaries grouped by named source memory root.
+  loom_target_compile_report_row_list_t source_low_memory_root_summaries;
   // Derived summary of emitted source-memory packet shape.
   loom_target_compile_report_source_low_memory_summary_t
       source_low_memory_summary;

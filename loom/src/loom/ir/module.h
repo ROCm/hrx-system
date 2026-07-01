@@ -78,6 +78,20 @@ static inline loom_type_t loom_module_value_type(const loom_module_t* module,
   return module->values.entries[value_id].type;
 }
 
+// Returns the optional SSA display name for |value_id|, or an empty string view
+// when the value is anonymous or invalid.
+static inline iree_string_view_t loom_module_value_name(
+    const loom_module_t* module, loom_value_id_t value_id) {
+  if (module == NULL || value_id >= module->values.count) {
+    return iree_string_view_empty();
+  }
+  const loom_string_id_t name_id = module->values.entries[value_id].name_id;
+  if (name_id == LOOM_STRING_ID_INVALID || name_id >= module->strings.count) {
+    return iree_string_view_empty();
+  }
+  return module->strings.entries[name_id];
+}
+
 // Sets the type of a value by ID, updating SSA references carried by the old
 // and new type payloads in the module's type-use side table.
 iree_status_t loom_module_set_value_type(loom_module_t* module,

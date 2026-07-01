@@ -65,6 +65,8 @@ void loom_target_compile_report_deinitialize(
   loom_target_compile_report_row_list_deinitialize(
       allocator, &report->source_low_memory_rows);
   loom_target_compile_report_row_list_deinitialize(
+      allocator, &report->source_low_memory_root_summaries);
+  loom_target_compile_report_row_list_deinitialize(
       allocator, &report->math_legalization_rows);
   loom_target_compile_report_row_list_deinitialize(
       allocator, &report->target_legalization_rows);
@@ -86,6 +88,7 @@ static bool loom_target_compile_report_has_rows(
          report->wait_action_rows.count != 0 || report->entry_rows.count != 0 ||
          report->source_low_rows.count != 0 ||
          report->source_low_memory_rows.count != 0 ||
+         report->source_low_memory_root_summaries.count != 0 ||
          report->math_legalization_rows.count != 0 ||
          report->target_legalization_rows.count != 0 ||
          report->target_capability_rows.count != 0;
@@ -189,6 +192,8 @@ iree_status_t loom_target_compile_report_clone(
   target.wait_action_rows = (loom_target_compile_report_row_list_t){0};
   target.source_low_rows = (loom_target_compile_report_row_list_t){0};
   target.source_low_memory_rows = (loom_target_compile_report_row_list_t){0};
+  target.source_low_memory_root_summaries =
+      (loom_target_compile_report_row_list_t){0};
   target.math_legalization_rows = (loom_target_compile_report_row_list_t){0};
   target.target_legalization_rows = (loom_target_compile_report_row_list_t){0};
   target.target_capability_rows = (loom_target_compile_report_row_list_t){0};
@@ -203,6 +208,7 @@ iree_status_t loom_target_compile_report_clone(
       source->wait_action_rows.count == 0 &&
       source->source_low_rows.count == 0 &&
       source->source_low_memory_rows.count == 0 &&
+      source->source_low_memory_root_summaries.count == 0 &&
       source->math_legalization_rows.count == 0 &&
       source->target_legalization_rows.count == 0 &&
       source->target_capability_rows.count == 0) {
@@ -286,6 +292,12 @@ iree_status_t loom_target_compile_report_clone(
         &source->source_low_memory_rows,
         sizeof(loom_target_compile_report_source_low_memory_row_t), allocator,
         &target.source_low_memory_rows);
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_target_compile_report_row_list_clone(
+        &source->source_low_memory_root_summaries,
+        sizeof(loom_target_compile_report_source_low_memory_root_summary_t),
+        allocator, &target.source_low_memory_root_summaries);
   }
   if (iree_status_is_ok(status)) {
     status = loom_target_compile_report_row_list_clone(
@@ -1056,6 +1068,70 @@ static iree_status_t loom_target_compile_report_append_rows(
   return iree_ok_status();
 }
 
+static void loom_target_compile_report_merge_source_low_memory_root_summary(
+    loom_target_compile_report_source_low_memory_root_summary_t* target,
+    const loom_target_compile_report_source_low_memory_root_summary_t* source) {
+  target->packet_count += source->packet_count;
+  target->load_packet_count += source->load_packet_count;
+  target->store_packet_count += source->store_packet_count;
+  target->scalar_packet_count += source->scalar_packet_count;
+  target->vector_packet_count += source->vector_packet_count;
+  target->source_lane_count += source->source_lane_count;
+  target->source_byte_count += source->source_byte_count;
+  target->read_byte_count += source->read_byte_count;
+  target->write_byte_count += source->write_byte_count;
+  target->contiguous_vector_packet_count +=
+      source->contiguous_vector_packet_count;
+  target->strided_vector_packet_count += source->strided_vector_packet_count;
+  target->unknown_stride_vector_packet_count +=
+      source->unknown_stride_vector_packet_count;
+}
+
+static loom_target_compile_report_source_low_memory_root_summary_t*
+loom_target_compile_report_find_source_low_memory_root_summary(
+    loom_target_compile_report_t* report, iree_string_view_t function_name,
+    iree_string_view_t source_root_name, iree_string_view_t memory_space) {
+  if (iree_string_view_is_empty(source_root_name)) {
+    return NULL;
+  }
+  for (loom_target_compile_report_vec_t* vec =
+           report->source_low_memory_root_summaries.head;
+       vec != NULL; vec = vec->next) {
+    loom_target_compile_report_source_low_memory_root_summary_t* summaries =
+        (loom_target_compile_report_source_low_memory_root_summary_t*)
+            loom_target_compile_report_vec_rows(vec);
+    for (iree_host_size_t i = 0; i < vec->count; ++i) {
+      loom_target_compile_report_source_low_memory_root_summary_t* summary =
+          &summaries[i];
+      if (iree_string_view_equal(summary->function_name, function_name) &&
+          iree_string_view_equal(summary->source_root_name, source_root_name) &&
+          iree_string_view_equal(summary->memory_space, memory_space)) {
+        return summary;
+      }
+    }
+  }
+  return NULL;
+}
+
+static iree_status_t
+loom_target_compile_report_record_source_low_memory_root_summary_row(
+    loom_target_compile_report_t* report,
+    const loom_target_compile_report_source_low_memory_root_summary_t* row) {
+  loom_target_compile_report_source_low_memory_root_summary_t* summary =
+      loom_target_compile_report_find_source_low_memory_root_summary(
+          report, row->function_name, row->source_root_name, row->memory_space);
+  if (summary != NULL) {
+    loom_target_compile_report_merge_source_low_memory_root_summary(summary,
+                                                                    row);
+    return iree_ok_status();
+  } else if (iree_string_view_is_empty(row->source_root_name)) {
+    return iree_ok_status();
+  }
+  return loom_target_compile_report_row_list_append(
+      &report->source_low_memory_root_summaries, sizeof(*row),
+      report->allocator, row);
+}
+
 iree_status_t loom_target_compile_report_record_entry_report(
     loom_target_compile_report_t* report,
     const loom_target_compile_report_t* entry_report) {
@@ -1137,6 +1213,18 @@ iree_status_t loom_target_compile_report_record_entry_report(
         &report->source_low_memory_rows, &entry_report->source_low_memory_rows,
         sizeof(loom_target_compile_report_source_low_memory_row_t),
         report->allocator));
+    for (const loom_target_compile_report_vec_t* vec =
+             entry_report->source_low_memory_root_summaries.head;
+         vec != NULL; vec = vec->next) {
+      const loom_target_compile_report_source_low_memory_root_summary_t* rows =
+          (const loom_target_compile_report_source_low_memory_root_summary_t*)
+              loom_target_compile_report_vec_const_rows(vec);
+      for (iree_host_size_t i = 0; i < vec->count; ++i) {
+        IREE_RETURN_IF_ERROR(
+            loom_target_compile_report_record_source_low_memory_root_summary_row(
+                report, &rows[i]));
+      }
+    }
   }
   if (iree_any_bit_set(
           entry_report->detail_flags,
@@ -1271,9 +1359,10 @@ static void loom_target_compile_report_accumulate_source_low_memory_summary(
     loom_target_compile_report_source_low_memory_summary_t* summary,
     const loom_target_compile_report_source_low_memory_row_t* row) {
   const uint64_t lane_count = row->vector_lane_count;
+  const uint64_t source_byte_count = lane_count * row->element_byte_count;
   ++summary->packet_count;
   summary->source_lane_count += lane_count;
-  summary->source_byte_count += lane_count * row->element_byte_count;
+  summary->source_byte_count += source_byte_count;
   if (lane_count == 1) {
     ++summary->scalar_packet_count;
   } else if (lane_count > 1) {
@@ -1288,6 +1377,63 @@ static void loom_target_compile_report_accumulate_source_low_memory_summary(
   }
 }
 
+static void
+loom_target_compile_report_accumulate_source_low_memory_root_summary(
+    loom_target_compile_report_source_low_memory_root_summary_t* summary,
+    const loom_target_compile_report_source_low_memory_row_t* row) {
+  const uint64_t lane_count = row->vector_lane_count;
+  const uint64_t source_byte_count = lane_count * row->element_byte_count;
+  ++summary->packet_count;
+  summary->source_lane_count += lane_count;
+  summary->source_byte_count += source_byte_count;
+  if (iree_string_view_equal(row->operation_kind, IREE_SV("load"))) {
+    ++summary->load_packet_count;
+    summary->read_byte_count += source_byte_count;
+  } else if (iree_string_view_equal(row->operation_kind, IREE_SV("store"))) {
+    ++summary->store_packet_count;
+    summary->write_byte_count += source_byte_count;
+  }
+  if (lane_count == 1) {
+    ++summary->scalar_packet_count;
+  } else if (lane_count > 1) {
+    ++summary->vector_packet_count;
+    if (row->element_byte_count == 0 || row->vector_lane_stride_bytes == 0) {
+      ++summary->unknown_stride_vector_packet_count;
+    } else if (row->vector_lane_stride_bytes == row->element_byte_count) {
+      ++summary->contiguous_vector_packet_count;
+    } else {
+      ++summary->strided_vector_packet_count;
+    }
+  }
+}
+
+static iree_status_t
+loom_target_compile_report_record_source_low_memory_root_summary(
+    loom_target_compile_report_t* report,
+    const loom_target_compile_report_source_low_memory_row_t* row) {
+  loom_target_compile_report_source_low_memory_root_summary_t* summary =
+      loom_target_compile_report_find_source_low_memory_root_summary(
+          report, row->function_name, row->source_root_name, row->memory_space);
+  if (summary != NULL) {
+    loom_target_compile_report_accumulate_source_low_memory_root_summary(
+        summary, row);
+    return iree_ok_status();
+  } else if (iree_string_view_is_empty(row->source_root_name)) {
+    return iree_ok_status();
+  }
+
+  loom_target_compile_report_source_low_memory_root_summary_t new_summary = {
+      .function_name = row->function_name,
+      .source_root_name = row->source_root_name,
+      .memory_space = row->memory_space,
+  };
+  loom_target_compile_report_accumulate_source_low_memory_root_summary(
+      &new_summary, row);
+  return loom_target_compile_report_row_list_append(
+      &report->source_low_memory_root_summaries, sizeof(new_summary),
+      report->allocator, &new_summary);
+}
+
 iree_status_t loom_target_compile_report_record_source_low_memory_row(
     loom_target_compile_report_t* report,
     const loom_target_compile_report_source_low_memory_row_t* row) {
@@ -1296,6 +1442,9 @@ iree_status_t loom_target_compile_report_record_source_low_memory_row(
       &report->source_low_memory_rows, sizeof(*row), report->allocator, row));
   loom_target_compile_report_accumulate_source_low_memory_summary(
       &report->source_low_memory_summary, row);
+  IREE_RETURN_IF_ERROR(
+      loom_target_compile_report_record_source_low_memory_root_summary(report,
+                                                                       row));
   return iree_ok_status();
 }
 
