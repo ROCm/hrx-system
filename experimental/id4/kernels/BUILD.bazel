@@ -16,6 +16,42 @@ package(
 
 _KERNEL_CASES = [
     {
+        "actual_case": "@id4_attention_qk_scores_all_heads_bf16_f32_wmma_small_case",
+        "benchmark": "@id4_attention_qk_scores_all_heads_bf16_f32_wmma_small",
+        "configs": [
+            "--config=id4.attention.materialized_wmma.valid_token_count=16",
+            "--config=id4.attention.materialized_wmma.padded_token_count=16",
+            "--config=id4.attention.materialized_wmma.attention_head_count=2",
+            "--config=id4.attention.materialized_wmma.head_size=16",
+        ],
+        "source": "attention/materialized_bf16_wmma.loom",
+        "target_name": "attention_qk_scores_all_heads_bf16_f32_wmma_small",
+    },
+    {
+        "actual_case": "@id4_attention_softmax_all_heads_f32_bf16_small_case",
+        "benchmark": "@id4_attention_softmax_all_heads_f32_bf16_small",
+        "configs": [
+            "--config=id4.attention.materialized_wmma.valid_token_count=16",
+            "--config=id4.attention.materialized_wmma.padded_token_count=16",
+            "--config=id4.attention.materialized_wmma.attention_head_count=2",
+            "--config=id4.attention.materialized_wmma.head_size=16",
+        ],
+        "source": "attention/materialized_bf16_wmma.loom",
+        "target_name": "attention_softmax_all_heads_f32_bf16_small",
+    },
+    {
+        "actual_case": "@id4_attention_pv_all_heads_bf16_bf16_wmma_small_case",
+        "benchmark": "@id4_attention_pv_all_heads_bf16_bf16_wmma_small",
+        "configs": [
+            "--config=id4.attention.materialized_wmma.valid_token_count=16",
+            "--config=id4.attention.materialized_wmma.padded_token_count=16",
+            "--config=id4.attention.materialized_wmma.attention_head_count=2",
+            "--config=id4.attention.materialized_wmma.head_size=16",
+        ],
+        "source": "attention/materialized_bf16_wmma.loom",
+        "target_name": "attention_pv_all_heads_bf16_bf16_wmma_small",
+    },
+    {
         "actual_case": "@id4_elementwise_add_f32_small_case",
         "benchmark": "@id4_elementwise_add_f32_small",
         "configs": [
@@ -8255,6 +8291,7 @@ _KERNEL_CASES = [
 ]
 
 _KERNEL_SOURCES = [
+    "attention/materialized_bf16_wmma.loom",
     "elementwise/add_bf16.loom",
     "elementwise/add_f32.loom",
     "elementwise/cast_bf16_f32.loom",

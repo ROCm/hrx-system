@@ -1014,30 +1014,35 @@ static iree_status_t id4_vae_program_build_tensor_transpose_configs(
       element_count);
 }
 
-static iree_status_t id4_vae_program_build_spatial_attention_wmma_configs(
-    uint64_t token_count, uint32_t channel_count,
+static iree_status_t id4_vae_program_build_materialized_attention_wmma_configs(
+    uint64_t token_count, uint32_t attention_head_count, uint32_t head_size,
     id4_vae_program_config_list_t* out_config_list) {
   if (token_count % 16 != 0) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "VAE WMMA spatial attention requires token count "
+                            "materialized attention requires token count "
                             "multiple-of-16");
   }
-  if (channel_count % 16 != 0) {
+  if (head_size % 16 != 0) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
-        "VAE WMMA spatial attention requires channels multiple-of-16");
+        "materialized attention requires head size multiple-of-16");
   }
   memset(out_config_list, 0, sizeof(*out_config_list));
   IREE_RETURN_IF_ERROR(id4_vae_program_config_list_add_u64(
-      out_config_list, IREE_SV("id4.vae.spatial_attention_wmma.token_count"),
+      out_config_list,
+      IREE_SV("id4.attention.materialized_wmma.valid_token_count"),
       token_count));
   IREE_RETURN_IF_ERROR(id4_vae_program_config_list_add_u64(
-      out_config_list, IREE_SV("id4.vae.spatial_attention_wmma.channel_count"),
-      channel_count));
-  return id4_vae_program_config_list_add_u64(
       out_config_list,
-      IREE_SV("id4.vae.spatial_attention_wmma.channel_tile_count"),
-      channel_count / 16);
+      IREE_SV("id4.attention.materialized_wmma.padded_token_count"),
+      token_count));
+  IREE_RETURN_IF_ERROR(id4_vae_program_config_list_add_u64(
+      out_config_list,
+      IREE_SV("id4.attention.materialized_wmma.attention_head_count"),
+      attention_head_count));
+  return id4_vae_program_config_list_add_u64(
+      out_config_list, IREE_SV("id4.attention.materialized_wmma.head_size"),
+      head_size);
 }
 
 static iree_status_t id4_vae_program_build_upsample_conv3x3_bias_configs(
@@ -2369,6 +2374,144 @@ static iree_status_t id4_vae_program_author_transpose_bf16(
   return iree_ok_status();
 }
 
+static iree_status_t id4_vae_program_author_materialized_attention_bf16(
+    id4_pipeline_program_builder_t* builder, iree_string_view_t dispatch_name,
+    id4_pipeline_program_tensor_t query, id4_pipeline_program_tensor_t key,
+    id4_pipeline_program_tensor_t value, uint32_t width, uint32_t height,
+    uint32_t channel_count, uint32_t batch_count,
+    iree_string_view_t output_name, id4_pipeline_program_tensor_t* out_output) {
+  if (batch_count != 1 || channel_count != 512) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "VAE materialized attention requires batch-1 "
+                            "and 512 channels");
+  }
+
+  uint64_t token_count = 0;
+  IREE_RETURN_IF_ERROR(id4_vae_program_mul_u64(width, height, &token_count));
+  if (token_count % 16 != 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "VAE materialized attention requires token count "
+                            "multiple-of-16");
+  }
+
+  iree_string_view_t packed_value_name = iree_string_view_empty();
+  char packed_value_name_storage[ID4_VAE_PROGRAM_NAME_BUFFER_CAPACITY];
+  IREE_RETURN_IF_ERROR(id4_vae_program_format_suffix(
+      output_name, IREE_SV(".packed_value"), packed_value_name_storage,
+      sizeof(packed_value_name_storage), &packed_value_name));
+  id4_pipeline_program_tensor_t packed_value =
+      id4_pipeline_program_tensor_invalid();
+  IREE_RETURN_IF_ERROR(id4_vae_program_author_transpose_bf16(
+      builder, packed_value_name, value, token_count, channel_count,
+      packed_value_name, &packed_value));
+
+  id4_pipeline_program_tensor_t scores = id4_pipeline_program_tensor_invalid();
+  iree_string_view_t scores_name = iree_string_view_empty();
+  char scores_name_storage[ID4_VAE_PROGRAM_NAME_BUFFER_CAPACITY];
+  IREE_RETURN_IF_ERROR(id4_vae_program_format_suffix(
+      output_name, IREE_SV(".scores"), scores_name_storage,
+      sizeof(scores_name_storage), &scores_name));
+  IREE_RETURN_IF_ERROR(id4_vae_program_acquire_tensor(
+      builder, scores_name, ID4_PIPELINE_PROGRAM_DTYPE_F32,
+      id4_pipeline_program_make_shape_rank3(1, token_count, token_count),
+      &scores));
+
+  id4_vae_program_config_list_t config_list;
+  IREE_RETURN_IF_ERROR(
+      id4_vae_program_build_materialized_attention_wmma_configs(
+          token_count, 1, channel_count, &config_list));
+  id4_pipeline_program_dispatch_binding_t qk_bindings[] = {
+      id4_pipeline_program_read(query),
+      id4_pipeline_program_read(key),
+      id4_pipeline_program_write(scores),
+  };
+  id4_pipeline_program_dispatch_loom_options_t qk_dispatch_options;
+  memset(&qk_dispatch_options, 0, sizeof(qk_dispatch_options));
+  qk_dispatch_options.structure_size = sizeof(qk_dispatch_options);
+  qk_dispatch_options.name = scores_name;
+  qk_dispatch_options.kernel = id4_pipeline_make_kernel_ref(
+      IREE_SV("attention/materialized_bf16_wmma"),
+      IREE_SV("id4_attention_qk_scores_all_heads_bf16_f32_wmma"));
+  qk_dispatch_options.config_binding_count = config_list.count;
+  qk_dispatch_options.config_bindings = config_list.bindings;
+  qk_dispatch_options.binding_count = IREE_ARRAYSIZE(qk_bindings);
+  qk_dispatch_options.bindings = qk_bindings;
+  IREE_RETURN_IF_ERROR(
+      id4_pipeline_program_dispatch_loom(builder, &qk_dispatch_options));
+
+  iree_string_view_t after_qk_name = iree_string_view_empty();
+  char after_qk_name_storage[ID4_VAE_PROGRAM_NAME_BUFFER_CAPACITY];
+  IREE_RETURN_IF_ERROR(id4_vae_program_format_suffix(
+      output_name, IREE_SV(".after_qk_and_value_pack"), after_qk_name_storage,
+      sizeof(after_qk_name_storage), &after_qk_name));
+  IREE_RETURN_IF_ERROR(id4_vae_program_barrier(builder, after_qk_name));
+
+  id4_pipeline_program_tensor_t probabilities =
+      id4_pipeline_program_tensor_invalid();
+  iree_string_view_t probabilities_name = iree_string_view_empty();
+  char probabilities_name_storage[ID4_VAE_PROGRAM_NAME_BUFFER_CAPACITY];
+  IREE_RETURN_IF_ERROR(id4_vae_program_format_suffix(
+      output_name, IREE_SV(".probabilities"), probabilities_name_storage,
+      sizeof(probabilities_name_storage), &probabilities_name));
+  IREE_RETURN_IF_ERROR(id4_vae_program_acquire_tensor(
+      builder, probabilities_name, ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+      id4_pipeline_program_make_shape_rank3(1, token_count, token_count),
+      &probabilities));
+
+  id4_pipeline_program_dispatch_binding_t softmax_bindings[] = {
+      id4_pipeline_program_read(scores),
+      id4_pipeline_program_write(probabilities),
+  };
+  id4_pipeline_program_dispatch_loom_options_t softmax_dispatch_options;
+  memset(&softmax_dispatch_options, 0, sizeof(softmax_dispatch_options));
+  softmax_dispatch_options.structure_size = sizeof(softmax_dispatch_options);
+  softmax_dispatch_options.name = probabilities_name;
+  softmax_dispatch_options.kernel = id4_pipeline_make_kernel_ref(
+      IREE_SV("attention/materialized_bf16_wmma"),
+      IREE_SV("id4_attention_softmax_all_heads_f32_bf16"));
+  softmax_dispatch_options.config_binding_count = config_list.count;
+  softmax_dispatch_options.config_bindings = config_list.bindings;
+  softmax_dispatch_options.binding_count = IREE_ARRAYSIZE(softmax_bindings);
+  softmax_dispatch_options.bindings = softmax_bindings;
+  IREE_RETURN_IF_ERROR(
+      id4_pipeline_program_dispatch_loom(builder, &softmax_dispatch_options));
+
+  iree_string_view_t after_softmax_name = iree_string_view_empty();
+  char after_softmax_name_storage[ID4_VAE_PROGRAM_NAME_BUFFER_CAPACITY];
+  IREE_RETURN_IF_ERROR(id4_vae_program_format_suffix(
+      output_name, IREE_SV(".after_softmax"), after_softmax_name_storage,
+      sizeof(after_softmax_name_storage), &after_softmax_name));
+  IREE_RETURN_IF_ERROR(id4_vae_program_barrier(builder, after_softmax_name));
+
+  id4_pipeline_program_tensor_t output = id4_pipeline_program_tensor_invalid();
+  IREE_RETURN_IF_ERROR(id4_vae_program_acquire_tensor(
+      builder, output_name, ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+      id4_pipeline_program_make_shape_rank4(width, height, channel_count,
+                                            batch_count),
+      &output));
+  id4_pipeline_program_dispatch_binding_t pv_bindings[] = {
+      id4_pipeline_program_read(probabilities),
+      id4_pipeline_program_read(packed_value),
+      id4_pipeline_program_write(output),
+  };
+  id4_pipeline_program_dispatch_loom_options_t pv_dispatch_options;
+  memset(&pv_dispatch_options, 0, sizeof(pv_dispatch_options));
+  pv_dispatch_options.structure_size = sizeof(pv_dispatch_options);
+  pv_dispatch_options.name = dispatch_name;
+  pv_dispatch_options.kernel = id4_pipeline_make_kernel_ref(
+      IREE_SV("attention/materialized_bf16_wmma"),
+      IREE_SV("id4_attention_pv_all_heads_bf16_bf16_wmma"));
+  pv_dispatch_options.config_binding_count = config_list.count;
+  pv_dispatch_options.config_bindings = config_list.bindings;
+  pv_dispatch_options.binding_count = IREE_ARRAYSIZE(pv_bindings);
+  pv_dispatch_options.bindings = pv_bindings;
+  IREE_RETURN_IF_ERROR(
+      id4_pipeline_program_dispatch_loom(builder, &pv_dispatch_options));
+
+  *out_output = output;
+  return iree_ok_status();
+}
+
 static iree_status_t id4_vae_program_author_spatial_attention(
     id4_pipeline_program_builder_t* builder, iree_string_view_t dispatch_name,
     id4_pipeline_program_tensor_t query, id4_pipeline_program_tensor_t key,
@@ -2403,57 +2546,9 @@ static iree_status_t id4_vae_program_author_spatial_attention(
           "512");
     }
     if (channel_count == 512 && token_count % 16 == 0) {
-      iree_string_view_t packed_value_name = iree_string_view_empty();
-      char packed_value_name_storage[ID4_VAE_PROGRAM_NAME_BUFFER_CAPACITY];
-      IREE_RETURN_IF_ERROR(id4_vae_program_format_suffix(
-          output_name, IREE_SV(".packed_value"), packed_value_name_storage,
-          sizeof(packed_value_name_storage), &packed_value_name));
-      id4_pipeline_program_tensor_t packed_value =
-          id4_pipeline_program_tensor_invalid();
-      IREE_RETURN_IF_ERROR(id4_vae_program_author_transpose_bf16(
-          builder, packed_value_name, value, token_count, channel_count,
-          packed_value_name, &packed_value));
-
-      iree_string_view_t after_pack_name = iree_string_view_empty();
-      char after_pack_name_storage[ID4_VAE_PROGRAM_NAME_BUFFER_CAPACITY];
-      IREE_RETURN_IF_ERROR(id4_vae_program_format_suffix(
-          output_name, IREE_SV(".after_value_pack"), after_pack_name_storage,
-          sizeof(after_pack_name_storage), &after_pack_name));
-      IREE_RETURN_IF_ERROR(id4_vae_program_barrier(builder, after_pack_name));
-
-      id4_pipeline_program_tensor_t output =
-          id4_pipeline_program_tensor_invalid();
-      IREE_RETURN_IF_ERROR(id4_vae_program_acquire_tensor(
-          builder, output_name, activation_dtype,
-          id4_pipeline_program_make_shape_rank4(width, height, channel_count,
-                                                batch_count),
-          &output));
-
-      id4_vae_program_config_list_t config_list;
-      IREE_RETURN_IF_ERROR(id4_vae_program_build_spatial_attention_wmma_configs(
-          token_count, channel_count, &config_list));
-      id4_pipeline_program_dispatch_binding_t bindings[] = {
-          id4_pipeline_program_read(query),
-          id4_pipeline_program_read(key),
-          id4_pipeline_program_read(packed_value),
-          id4_pipeline_program_write(output),
-      };
-      id4_pipeline_program_dispatch_loom_options_t dispatch_options;
-      memset(&dispatch_options, 0, sizeof(dispatch_options));
-      dispatch_options.structure_size = sizeof(dispatch_options);
-      dispatch_options.name = dispatch_name;
-      dispatch_options.kernel = id4_pipeline_make_kernel_ref(
-          IREE_SV("vae/spatial_attention_online_bf16_wmma"),
-          IREE_SV("id4_vae_spatial_attention_online_bf16_wmma"));
-      dispatch_options.config_binding_count = config_list.count;
-      dispatch_options.config_bindings = config_list.bindings;
-      dispatch_options.binding_count = IREE_ARRAYSIZE(bindings);
-      dispatch_options.bindings = bindings;
-      IREE_RETURN_IF_ERROR(
-          id4_pipeline_program_dispatch_loom(builder, &dispatch_options));
-
-      *out_output = output;
-      return iree_ok_status();
+      return id4_vae_program_author_materialized_attention_bf16(
+          builder, dispatch_name, query, key, value, width, height,
+          channel_count, batch_count, output_name, out_output);
     }
     module_path = IREE_SV("vae/spatial_attention_vec8_bf16");
     function_name = IREE_SV("id4_vae_spatial_attention_query2_vec8_bf16");
