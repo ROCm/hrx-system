@@ -48,6 +48,8 @@ typedef enum id4_vae_program_conv3x3_weight_layout_e {
   ID4_VAE_PROGRAM_CONV3X3_WEIGHT_LAYOUT_SOURCE = 0,
   // Packed consumer layout: ICxKYxKXxOC.
   ID4_VAE_PROGRAM_CONV3X3_WEIGHT_LAYOUT_PACKED_IC_KY_KX_OC,
+  // Packed consumer layout: OCxKYxKXxIC.
+  ID4_VAE_PROGRAM_CONV3X3_WEIGHT_LAYOUT_PACKED_OC_KY_KX_IC,
   // Parity-packed upsample layout: ParityxICxTapxOC.
   ID4_VAE_PROGRAM_CONV3X3_WEIGHT_LAYOUT_PACKED_UPSAMPLE_PARITY_IC_TAP_OC,
 } id4_vae_program_conv3x3_weight_layout_t;
@@ -732,6 +734,11 @@ static iree_status_t id4_vae_program_resolve_conv3x3_weight(
       *out_shape = id4_pipeline_program_make_shape_rank4(
           input_channel_count, 3, 3, output_channel_count);
       return id4_vae_parameter_format_packed_conv3x3_weight_key(
+          source_key, key_storage, key_storage_capacity, out_key);
+    case ID4_VAE_PROGRAM_CONV3X3_WEIGHT_LAYOUT_PACKED_OC_KY_KX_IC:
+      *out_shape = id4_pipeline_program_make_shape_rank4(
+          output_channel_count, 3, 3, input_channel_count);
+      return id4_vae_parameter_format_rhs_packed_conv3x3_weight_key(
           source_key, key_storage, key_storage_capacity, out_key);
     case ID4_VAE_PROGRAM_CONV3X3_WEIGHT_LAYOUT_PACKED_UPSAMPLE_PARITY_IC_TAP_OC:
       *out_shape = id4_pipeline_program_make_shape_rank4(
@@ -1552,9 +1559,9 @@ static iree_status_t id4_vae_program_author_conv3x3_bias_bf16(
   // The OC32 WMMA path has lower register pressure and wins on small VAE
   // decode tiles; OC64 remains faster for the full mid-block tile.
   const bool use_small_spatial_wmma = spatial_element_count <= 64ull * 64ull;
-  const bool use_wmma_oc64 = !use_small_spatial_wmma &&
-                             output_channel_count >= 64 &&
-                             output_channel_count % 64 == 0;
+  const bool use_wmma_oc64 =
+      !use_small_spatial_wmma && input_channel_count % 16 == 0 &&
+      output_channel_count >= 64 && output_channel_count % 64 == 0;
   if (!use_wmma) {
     IREE_RETURN_IF_ERROR(id4_vae_program_add_conv3x3_bias_output_tile_configs(
         output_channel_count, 16, output_element_count, &config_list));
@@ -1563,9 +1570,11 @@ static iree_status_t id4_vae_program_author_conv3x3_bias_bf16(
   iree_string_view_t packed_weight_key = iree_string_view_empty();
   id4_pipeline_program_shape_t weight_shape;
   char packed_weight_key_storage[ID4_VAE_PROGRAM_NAME_BUFFER_CAPACITY];
+  const id4_vae_program_conv3x3_weight_layout_t weight_layout =
+      use_wmma_oc64 ? ID4_VAE_PROGRAM_CONV3X3_WEIGHT_LAYOUT_PACKED_OC_KY_KX_IC
+                    : ID4_VAE_PROGRAM_CONV3X3_WEIGHT_LAYOUT_PACKED_IC_KY_KX_OC;
   IREE_RETURN_IF_ERROR(id4_vae_program_resolve_conv3x3_weight(
-      weight_key, input_channel_count, output_channel_count,
-      ID4_VAE_PROGRAM_CONV3X3_WEIGHT_LAYOUT_PACKED_IC_KY_KX_OC,
+      weight_key, input_channel_count, output_channel_count, weight_layout,
       packed_weight_key_storage, sizeof(packed_weight_key_storage),
       &packed_weight_key, &weight_shape));
   iree_string_view_t resolved_weight_key = iree_string_view_empty();
@@ -1663,8 +1672,8 @@ static iree_status_t id4_vae_program_author_conv3x3_bias_add_bf16(
   const uint64_t spatial_element_count = (uint64_t)width * height * batch_count;
   const bool use_wmma_oc32 = spatial_element_count <= 64ull * 64ull &&
                              channel_count >= 32 && channel_count % 32 == 0;
-  const bool use_wmma_oc64 =
-      !use_wmma_oc32 && channel_count >= 64 && channel_count % 64 == 0;
+  const bool use_wmma_oc64 = !use_wmma_oc32 && channel_count >= 64 &&
+                             channel_count % 64 == 0 && channel_count % 16 == 0;
   if (!use_wmma_oc32 && !use_wmma_oc64) {
     IREE_RETURN_IF_ERROR(id4_vae_program_add_conv3x3_bias_output_tile_configs(
         channel_count, 16, output_element_count, &config_list));
@@ -1673,9 +1682,11 @@ static iree_status_t id4_vae_program_author_conv3x3_bias_add_bf16(
   iree_string_view_t packed_weight_key = iree_string_view_empty();
   id4_pipeline_program_shape_t weight_shape;
   char packed_weight_key_storage[ID4_VAE_PROGRAM_NAME_BUFFER_CAPACITY];
+  const id4_vae_program_conv3x3_weight_layout_t weight_layout =
+      use_wmma_oc64 ? ID4_VAE_PROGRAM_CONV3X3_WEIGHT_LAYOUT_PACKED_OC_KY_KX_IC
+                    : ID4_VAE_PROGRAM_CONV3X3_WEIGHT_LAYOUT_PACKED_IC_KY_KX_OC;
   IREE_RETURN_IF_ERROR(id4_vae_program_resolve_conv3x3_weight(
-      weight_key, channel_count, channel_count,
-      ID4_VAE_PROGRAM_CONV3X3_WEIGHT_LAYOUT_PACKED_IC_KY_KX_OC,
+      weight_key, channel_count, channel_count, weight_layout,
       packed_weight_key_storage, sizeof(packed_weight_key_storage),
       &packed_weight_key, &weight_shape));
   iree_string_view_t resolved_weight_key = iree_string_view_empty();

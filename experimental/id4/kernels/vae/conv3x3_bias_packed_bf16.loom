@@ -891,7 +891,6 @@ kernel.def target(@id4_gfx1100) export("id4_vae_conv3x3_bias_bf16_wmma_oc64") @i
 } launch(%input: buffer, %weight: buffer, %bias: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %lhs_scratch_bytes = index.constant 1024 : offset
-  %rhs_scratch_bytes = index.constant 2048 : offset
   %zero = index.constant 0 : index
   %unit = index.constant 1 : index
   %two = index.constant 2 : index
@@ -921,7 +920,6 @@ kernel.def target(@id4_gfx1100) export("id4_vae_conv3x3_bias_bf16_wmma_oc64") @i
   %m = index.constant 16 : index
   %n = index.constant 16 : index
   %k = index.constant 16 : index
-  %rhs_scratch_layout = encoding.layout.strided [1, %sixteen] : encoding<layout>
   %input_noalias, %weight_noalias, %bias_noalias, %output_noalias = buffer.assume.noalias %input, %weight, %bias, %output : buffer, buffer, buffer, buffer
   %input_global = buffer.assume.memory_space<global> %input_noalias : buffer
   %weight_global = buffer.assume.memory_space<global> %weight_noalias : buffer
@@ -931,22 +929,21 @@ kernel.def target(@id4_gfx1100) export("id4_vae_conv3x3_bias_bf16_wmma_oc64") @i
   %pixel_count = index.mul %input_pixel_count, %batch_count : index
   %input_pixel_element_count = index.mul %input_pixel_count, %input_channel_count : index
   %input_element_count = index.mul %input_pixel_element_count, %batch_count : index
+  %reduction_count0 = index.mul %input_channel_count, %nine : index
+  %reduction_count = index.assume %reduction_count0 [range(%reduction_count0, 9, 36864), mul(%reduction_count0, 16)] : index
+  %weight_layout = encoding.layout.strided [1, %reduction_count] : encoding<layout>
   %input_flat_view = buffer.view %input_global[%base] : buffer -> view<[%input_element_count]xbf16, #dense>
-  %weight_view = buffer.view %weight_global[%base] : buffer -> view<[%input_channel_count]x3x3x[%output_channel_count]xbf16, #dense>
+  %weight_view = buffer.view %weight_global[%base] : buffer -> view<[%reduction_count]x[%output_channel_count]xbf16, %weight_layout>
   %bias_view = buffer.view %bias_global[%base] : buffer -> view<[%output_channel_count]xbf16, #dense>
   %output_flat_view = buffer.view %output_global[%base] : buffer -> view<[%output_element_count]xbf16, #dense>
   %lhs_scratch = buffer.alloca %lhs_scratch_bytes {base_alignment = 16, memory_space = workgroup} : buffer
-  %rhs_scratch = buffer.alloca %rhs_scratch_bytes {base_alignment = 16, memory_space = workgroup} : buffer
   %lhs_scratch_view = buffer.view %lhs_scratch[%base] : buffer -> view<32x16xbf16, #dense>
-  %rhs_scratch_view = buffer.view %rhs_scratch[%base] : buffer -> view<16x64xbf16, %rhs_scratch_layout>
   %pixel_origin = index.mul %pixel_tile, %thirty_two : index
   %pixel_origin_high = index.add %pixel_origin, %sixteen : index
   %output_channel_origin = index.mul %output_channel_tile, %sixty_four : index
   %output_channel_origin1 = index.add %output_channel_origin, %sixteen : index
   %output_channel_origin2 = index.add %output_channel_origin, %thirty_two : index
   %output_channel_origin3 = index.add %output_channel_origin, %forty_eight : index
-  %reduction_count0 = index.mul %input_channel_count, %nine : index
-  %reduction_count = index.assume %reduction_count0 [range(%reduction_count0, 9, 36864)] : index
   %reduction_rounding = index.sub %sixteen, %unit : index
   %reduction_rounded = index.add %reduction_count, %reduction_rounding : index
   %k_tile_count = index.div %reduction_rounded, %sixteen : index
@@ -1035,42 +1032,13 @@ kernel.def target(@id4_gfx1100) export("id4_vae_conv3x3_bias_bf16_wmma_oc64") @i
       }
       vector.store %lhs_values, %lhs_scratch_view[%local_pixel, %local_crs] : vector<8xbf16>, view<32x16xbf16, #dense>
     }
-    %rhs_vector_count = index.constant 128 : index
-    scf.for %rhs_vector = [%lane to %rhs_vector_count step %workgroup_size_x] {
-      %local_crs = index.div %rhs_vector, %eight : index
-      %local_output_channel_group = index.rem %rhs_vector, %eight : index
-      %local_output_channel = index.mul %local_output_channel_group, %eight : index
-      %global_crs = index.add %k_origin, %local_crs : index
-      %output_channel = index.add %output_channel_origin, %local_output_channel : index
-      %crs_valid = index.cmp ult, %global_crs, %reduction_count : index
-      %rhs_values = scf.if %crs_valid -> (vector<8xbf16>) {
-        %global_crs_valid = index.assume %global_crs [ge(%global_crs, 0), lt(%global_crs, %reduction_count)] : index
-        %kernel_y0 = index.div %global_crs_valid, %kernel_y_span : index
-        %kernel_y = index.assume %kernel_y0 [range(%kernel_y0, 0, 2)] : index
-        %after_y0 = index.rem %global_crs_valid, %kernel_y_span : index
-        %after_y = index.assume %after_y0 [ge(%after_y0, 0), lt(%after_y0, %kernel_y_span)] : index
-        %kernel_x0 = index.div %after_y, %input_channel_count : index
-        %kernel_x = index.assume %kernel_x0 [range(%kernel_x0, 0, 2)] : index
-        %input_channel0 = index.rem %after_y, %input_channel_count : index
-        %input_channel = index.assume %input_channel0 [ge(%input_channel0, 0), lt(%input_channel0, %input_channel_count)] : index
-        %loaded = vector.load %weight_view[%input_channel, %kernel_y, %kernel_x, %output_channel] : view<[%input_channel_count]x3x3x[%output_channel_count]xbf16, #dense> -> vector<8xbf16>
-        scf.yield %loaded : vector<8xbf16>
-      } else {
-        scf.yield %zero_bf16x8 : vector<8xbf16>
-      }
-      scf.for %rhs_lane = [%zero to %eight step %unit] {
-        %rhs_value = vector.extract %rhs_values[%rhs_lane] : vector<8xbf16> -> bf16
-        %rhs_output_channel = index.add %local_output_channel, %rhs_lane : index
-        view.store %rhs_value, %rhs_scratch_view[%local_crs, %rhs_output_channel] : bf16, view<16x64xbf16, %rhs_scratch_layout>
-      }
-    }
     kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
     %lhs0 = vector.fragment.load<lhs> %lhs_scratch_view[%zero, %zero] shape [%m, %k] : view<32x16xbf16, #dense> -> vector<16xbf16>
     %lhs1 = vector.fragment.load<lhs> %lhs_scratch_view[%sixteen, %zero] shape [%m, %k] : view<32x16xbf16, #dense> -> vector<16xbf16>
-    %rhs0 = vector.fragment.load<rhs> %rhs_scratch_view[%zero, %zero] shape [%k, %n] : view<16x64xbf16, %rhs_scratch_layout> -> vector<16xbf16>
-    %rhs1 = vector.fragment.load<rhs> %rhs_scratch_view[%zero, %sixteen] shape [%k, %n] : view<16x64xbf16, %rhs_scratch_layout> -> vector<16xbf16>
-    %rhs2 = vector.fragment.load<rhs> %rhs_scratch_view[%zero, %thirty_two] shape [%k, %n] : view<16x64xbf16, %rhs_scratch_layout> -> vector<16xbf16>
-    %rhs3 = vector.fragment.load<rhs> %rhs_scratch_view[%zero, %forty_eight] shape [%k, %n] : view<16x64xbf16, %rhs_scratch_layout> -> vector<16xbf16>
+    %rhs0 = vector.fragment.load<rhs> %weight_view[%k_origin, %output_channel_origin] shape [%k, %n] : view<[%reduction_count]x[%output_channel_count]xbf16, %weight_layout> -> vector<16xbf16>
+    %rhs1 = vector.fragment.load<rhs> %weight_view[%k_origin, %output_channel_origin1] shape [%k, %n] : view<[%reduction_count]x[%output_channel_count]xbf16, %weight_layout> -> vector<16xbf16>
+    %rhs2 = vector.fragment.load<rhs> %weight_view[%k_origin, %output_channel_origin2] shape [%k, %n] : view<[%reduction_count]x[%output_channel_count]xbf16, %weight_layout> -> vector<16xbf16>
+    %rhs3 = vector.fragment.load<rhs> %weight_view[%k_origin, %output_channel_origin3] shape [%k, %n] : view<[%reduction_count]x[%output_channel_count]xbf16, %weight_layout> -> vector<16xbf16>
     %next00 = vector.mma %lhs0, %rhs0, %acc00 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
     %next01 = vector.mma %lhs0, %rhs1, %acc01 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
     %next02 = vector.mma %lhs0, %rhs2, %acc02 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
@@ -1201,7 +1169,6 @@ kernel.def target(@id4_gfx1100) export("id4_vae_conv3x3_bias_add_bf16_wmma_oc64"
 } launch(%input: buffer, %weight: buffer, %bias: buffer, %shortcut: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %lhs_scratch_bytes = index.constant 1024 : offset
-  %rhs_scratch_bytes = index.constant 2048 : offset
   %zero = index.constant 0 : index
   %unit = index.constant 1 : index
   %two = index.constant 2 : index
@@ -1231,7 +1198,6 @@ kernel.def target(@id4_gfx1100) export("id4_vae_conv3x3_bias_add_bf16_wmma_oc64"
   %m = index.constant 16 : index
   %n = index.constant 16 : index
   %k = index.constant 16 : index
-  %rhs_scratch_layout = encoding.layout.strided [1, %sixteen] : encoding<layout>
   %input_noalias, %weight_noalias, %bias_noalias, %shortcut_noalias, %output_noalias = buffer.assume.noalias %input, %weight, %bias, %shortcut, %output : buffer, buffer, buffer, buffer, buffer
   %input_global = buffer.assume.memory_space<global> %input_noalias : buffer
   %weight_global = buffer.assume.memory_space<global> %weight_noalias : buffer
@@ -1242,23 +1208,22 @@ kernel.def target(@id4_gfx1100) export("id4_vae_conv3x3_bias_add_bf16_wmma_oc64"
   %pixel_count = index.mul %input_pixel_count, %batch_count : index
   %input_pixel_element_count = index.mul %input_pixel_count, %input_channel_count : index
   %input_element_count = index.mul %input_pixel_element_count, %batch_count : index
+  %reduction_count0 = index.mul %input_channel_count, %nine : index
+  %reduction_count = index.assume %reduction_count0 [range(%reduction_count0, 9, 36864), mul(%reduction_count0, 16)] : index
+  %weight_layout = encoding.layout.strided [1, %reduction_count] : encoding<layout>
   %input_flat_view = buffer.view %input_global[%base] : buffer -> view<[%input_element_count]xbf16, #dense>
-  %weight_view = buffer.view %weight_global[%base] : buffer -> view<[%input_channel_count]x3x3x[%output_channel_count]xbf16, #dense>
+  %weight_view = buffer.view %weight_global[%base] : buffer -> view<[%reduction_count]x[%output_channel_count]xbf16, %weight_layout>
   %bias_view = buffer.view %bias_global[%base] : buffer -> view<[%output_channel_count]xbf16, #dense>
   %shortcut_flat_view = buffer.view %shortcut_global[%base] : buffer -> view<[%output_element_count]xbf16, #dense>
   %output_flat_view = buffer.view %output_global[%base] : buffer -> view<[%output_element_count]xbf16, #dense>
   %lhs_scratch = buffer.alloca %lhs_scratch_bytes {base_alignment = 16, memory_space = workgroup} : buffer
-  %rhs_scratch = buffer.alloca %rhs_scratch_bytes {base_alignment = 16, memory_space = workgroup} : buffer
   %lhs_scratch_view = buffer.view %lhs_scratch[%base] : buffer -> view<32x16xbf16, #dense>
-  %rhs_scratch_view = buffer.view %rhs_scratch[%base] : buffer -> view<16x64xbf16, %rhs_scratch_layout>
   %pixel_origin = index.mul %pixel_tile, %thirty_two : index
   %pixel_origin_high = index.add %pixel_origin, %sixteen : index
   %output_channel_origin = index.mul %output_channel_tile, %sixty_four : index
   %output_channel_origin1 = index.add %output_channel_origin, %sixteen : index
   %output_channel_origin2 = index.add %output_channel_origin, %thirty_two : index
   %output_channel_origin3 = index.add %output_channel_origin, %forty_eight : index
-  %reduction_count0 = index.mul %input_channel_count, %nine : index
-  %reduction_count = index.assume %reduction_count0 [range(%reduction_count0, 9, 36864)] : index
   %reduction_rounding = index.sub %sixteen, %unit : index
   %reduction_rounded = index.add %reduction_count, %reduction_rounding : index
   %k_tile_count = index.div %reduction_rounded, %sixteen : index
@@ -1347,42 +1312,13 @@ kernel.def target(@id4_gfx1100) export("id4_vae_conv3x3_bias_add_bf16_wmma_oc64"
       }
       vector.store %lhs_values, %lhs_scratch_view[%local_pixel, %local_crs] : vector<8xbf16>, view<32x16xbf16, #dense>
     }
-    %rhs_vector_count = index.constant 128 : index
-    scf.for %rhs_vector = [%lane to %rhs_vector_count step %workgroup_size_x] {
-      %local_crs = index.div %rhs_vector, %eight : index
-      %local_output_channel_group = index.rem %rhs_vector, %eight : index
-      %local_output_channel = index.mul %local_output_channel_group, %eight : index
-      %global_crs = index.add %k_origin, %local_crs : index
-      %output_channel = index.add %output_channel_origin, %local_output_channel : index
-      %crs_valid = index.cmp ult, %global_crs, %reduction_count : index
-      %rhs_values = scf.if %crs_valid -> (vector<8xbf16>) {
-        %global_crs_valid = index.assume %global_crs [ge(%global_crs, 0), lt(%global_crs, %reduction_count)] : index
-        %kernel_y0 = index.div %global_crs_valid, %kernel_y_span : index
-        %kernel_y = index.assume %kernel_y0 [range(%kernel_y0, 0, 2)] : index
-        %after_y0 = index.rem %global_crs_valid, %kernel_y_span : index
-        %after_y = index.assume %after_y0 [ge(%after_y0, 0), lt(%after_y0, %kernel_y_span)] : index
-        %kernel_x0 = index.div %after_y, %input_channel_count : index
-        %kernel_x = index.assume %kernel_x0 [range(%kernel_x0, 0, 2)] : index
-        %input_channel0 = index.rem %after_y, %input_channel_count : index
-        %input_channel = index.assume %input_channel0 [ge(%input_channel0, 0), lt(%input_channel0, %input_channel_count)] : index
-        %loaded = vector.load %weight_view[%input_channel, %kernel_y, %kernel_x, %output_channel] : view<[%input_channel_count]x3x3x[%output_channel_count]xbf16, #dense> -> vector<8xbf16>
-        scf.yield %loaded : vector<8xbf16>
-      } else {
-        scf.yield %zero_bf16x8 : vector<8xbf16>
-      }
-      scf.for %rhs_lane = [%zero to %eight step %unit] {
-        %rhs_value = vector.extract %rhs_values[%rhs_lane] : vector<8xbf16> -> bf16
-        %rhs_output_channel = index.add %local_output_channel, %rhs_lane : index
-        view.store %rhs_value, %rhs_scratch_view[%local_crs, %rhs_output_channel] : bf16, view<16x64xbf16, %rhs_scratch_layout>
-      }
-    }
     kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
     %lhs0 = vector.fragment.load<lhs> %lhs_scratch_view[%zero, %zero] shape [%m, %k] : view<32x16xbf16, #dense> -> vector<16xbf16>
     %lhs1 = vector.fragment.load<lhs> %lhs_scratch_view[%sixteen, %zero] shape [%m, %k] : view<32x16xbf16, #dense> -> vector<16xbf16>
-    %rhs0 = vector.fragment.load<rhs> %rhs_scratch_view[%zero, %zero] shape [%k, %n] : view<16x64xbf16, %rhs_scratch_layout> -> vector<16xbf16>
-    %rhs1 = vector.fragment.load<rhs> %rhs_scratch_view[%zero, %sixteen] shape [%k, %n] : view<16x64xbf16, %rhs_scratch_layout> -> vector<16xbf16>
-    %rhs2 = vector.fragment.load<rhs> %rhs_scratch_view[%zero, %thirty_two] shape [%k, %n] : view<16x64xbf16, %rhs_scratch_layout> -> vector<16xbf16>
-    %rhs3 = vector.fragment.load<rhs> %rhs_scratch_view[%zero, %forty_eight] shape [%k, %n] : view<16x64xbf16, %rhs_scratch_layout> -> vector<16xbf16>
+    %rhs0 = vector.fragment.load<rhs> %weight_view[%k_origin, %output_channel_origin] shape [%k, %n] : view<[%reduction_count]x[%output_channel_count]xbf16, %weight_layout> -> vector<16xbf16>
+    %rhs1 = vector.fragment.load<rhs> %weight_view[%k_origin, %output_channel_origin1] shape [%k, %n] : view<[%reduction_count]x[%output_channel_count]xbf16, %weight_layout> -> vector<16xbf16>
+    %rhs2 = vector.fragment.load<rhs> %weight_view[%k_origin, %output_channel_origin2] shape [%k, %n] : view<[%reduction_count]x[%output_channel_count]xbf16, %weight_layout> -> vector<16xbf16>
+    %rhs3 = vector.fragment.load<rhs> %weight_view[%k_origin, %output_channel_origin3] shape [%k, %n] : view<[%reduction_count]x[%output_channel_count]xbf16, %weight_layout> -> vector<16xbf16>
     %next00 = vector.mma %lhs0, %rhs0, %acc00 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
     %next01 = vector.mma %lhs0, %rhs1, %acc01 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
     %next02 = vector.mma %lhs0, %rhs2, %acc02 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
@@ -1577,25 +1513,27 @@ check.case public @id4_vae_conv3x3_bias_bf16_wmma_matches_scalar_medium_same_pad
 
 check.case public @id4_vae_conv3x3_bias_bf16_wmma_oc64_matches_scalar_medium_same_padding_case {
   %input = check.generate.iota offset(0.0) step(0.00390625) : tensor<8x8x32x1xbf16>
-  %weight = check.generate.iota offset(0.0) step(1.52587890625e-05) : tensor<32x3x3x64xbf16>
+  %scalar_weight = check.generate.fill value(1.0) : tensor<32x3x3x64xbf16>
+  %wmma_weight = check.generate.fill value(1.0) : tensor<64x3x3x32xbf16>
   %bias = check.generate.iota offset(1.0) step(1.0) : tensor<64xbf16>
   %scalar_output = check.generate.fill value(0.0) : tensor<8x8x64x1xbf16>
   %wmma_output = check.generate.fill value(0.0) : tensor<8x8x64x1xbf16>
-  func.call @id4_vae_conv3x3_bias_ic4_oc16_packed_bf16(%input, %weight, %bias, %scalar_output) : (tensor<8x8x32x1xbf16>, tensor<32x3x3x64xbf16>, tensor<64xbf16>, tensor<8x8x64x1xbf16>)
-  func.call @id4_vae_conv3x3_bias_bf16_wmma_oc64(%input, %weight, %bias, %wmma_output) : (tensor<8x8x32x1xbf16>, tensor<32x3x3x64xbf16>, tensor<64xbf16>, tensor<8x8x64x1xbf16>)
+  func.call @id4_vae_conv3x3_bias_ic4_oc16_packed_bf16(%input, %scalar_weight, %bias, %scalar_output) : (tensor<8x8x32x1xbf16>, tensor<32x3x3x64xbf16>, tensor<64xbf16>, tensor<8x8x64x1xbf16>)
+  func.call @id4_vae_conv3x3_bias_bf16_wmma_oc64(%input, %wmma_weight, %bias, %wmma_output) : (tensor<8x8x32x1xbf16>, tensor<64x3x3x32xbf16>, tensor<64xbf16>, tensor<8x8x64x1xbf16>)
   check.expect.close actual(%wmma_output) expected(%scalar_output) atol(0.25) rtol(0.01) nan(same) : tensor<8x8x64x1xbf16>
   check.return
 }
 
 check.case public @id4_vae_conv3x3_bias_add_bf16_wmma_oc64_matches_scalar_medium_same_padding_case {
   %input = check.generate.iota offset(0.0) step(0.00390625) : tensor<8x8x32x1xbf16>
-  %weight = check.generate.iota offset(0.0) step(1.52587890625e-05) : tensor<32x3x3x64xbf16>
+  %scalar_weight = check.generate.fill value(1.0) : tensor<32x3x3x64xbf16>
+  %wmma_weight = check.generate.fill value(1.0) : tensor<64x3x3x32xbf16>
   %bias = check.generate.iota offset(1.0) step(1.0) : tensor<64xbf16>
   %shortcut = check.generate.iota offset(-0.5) step(0.001953125) : tensor<8x8x64x1xbf16>
   %scalar_output = check.generate.fill value(0.0) : tensor<8x8x64x1xbf16>
   %wmma_output = check.generate.fill value(0.0) : tensor<8x8x64x1xbf16>
-  func.call @id4_vae_conv3x3_bias_add_ic4_oc16_packed_bf16(%input, %weight, %bias, %shortcut, %scalar_output) : (tensor<8x8x32x1xbf16>, tensor<32x3x3x64xbf16>, tensor<64xbf16>, tensor<8x8x64x1xbf16>, tensor<8x8x64x1xbf16>)
-  func.call @id4_vae_conv3x3_bias_add_bf16_wmma_oc64(%input, %weight, %bias, %shortcut, %wmma_output) : (tensor<8x8x32x1xbf16>, tensor<32x3x3x64xbf16>, tensor<64xbf16>, tensor<8x8x64x1xbf16>, tensor<8x8x64x1xbf16>)
+  func.call @id4_vae_conv3x3_bias_add_ic4_oc16_packed_bf16(%input, %scalar_weight, %bias, %shortcut, %scalar_output) : (tensor<8x8x32x1xbf16>, tensor<32x3x3x64xbf16>, tensor<64xbf16>, tensor<8x8x64x1xbf16>, tensor<8x8x64x1xbf16>)
+  func.call @id4_vae_conv3x3_bias_add_bf16_wmma_oc64(%input, %wmma_weight, %bias, %shortcut, %wmma_output) : (tensor<8x8x32x1xbf16>, tensor<64x3x3x32xbf16>, tensor<64xbf16>, tensor<8x8x64x1xbf16>, tensor<8x8x64x1xbf16>)
   check.expect.close actual(%wmma_output) expected(%scalar_output) atol(0.25) rtol(0.01) nan(same) : tensor<8x8x64x1xbf16>
   check.return
 }
@@ -1626,11 +1564,11 @@ check.case public @id4_vae_conv3x3_bias_bf16_wmma_flux2_conv_in_shape_case {
 
 check.case public @id4_vae_conv3x3_bias_bf16_wmma_oc64_flux2_conv_in_shape_case {
   %input = check.generate.fill value(1.0) : tensor<16384x32xbf16>
-  %weight = check.generate.fill value(0.0) : tensor<32x3x3x512xbf16>
+  %weight = check.generate.fill value(0.0) : tensor<512x3x3x32xbf16>
   %bias = check.generate.fill value(0.0) : tensor<512xbf16>
   %output = check.generate.fill value(1.0) : tensor<16384x512xbf16>
   %expected = check.generate.fill value(0.0) : tensor<16384x512xbf16>
-  func.call @id4_vae_conv3x3_bias_bf16_wmma_oc64(%input, %weight, %bias, %output) : (tensor<16384x32xbf16>, tensor<32x3x3x512xbf16>, tensor<512xbf16>, tensor<16384x512xbf16>)
+  func.call @id4_vae_conv3x3_bias_bf16_wmma_oc64(%input, %weight, %bias, %output) : (tensor<16384x32xbf16>, tensor<512x3x3x32xbf16>, tensor<512xbf16>, tensor<16384x512xbf16>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<16384x512xbf16>
   check.return
 }
@@ -1726,11 +1664,11 @@ check.case public @id4_vae_conv3x3_bias_bf16_wmma_oc64_flux2_128_decode_32x32_51
 
 check.case public @id4_vae_conv3x3_bias_bf16_wmma_oc64_flux2_128_decode_64x64_512x256_shape_case {
   %input = check.generate.fill value(1.0) : tensor<64x64x512x1xbf16>
-  %weight = check.generate.fill value(0.0) : tensor<512x3x3x256xbf16>
+  %weight = check.generate.fill value(0.0) : tensor<256x3x3x512xbf16>
   %bias = check.generate.fill value(0.0) : tensor<256xbf16>
   %output = check.generate.fill value(1.0) : tensor<64x64x256x1xbf16>
   %expected = check.generate.fill value(0.0) : tensor<64x64x256x1xbf16>
-  func.call @id4_vae_conv3x3_bias_bf16_wmma_oc64(%input, %weight, %bias, %output) : (tensor<64x64x512x1xbf16>, tensor<512x3x3x256xbf16>, tensor<256xbf16>, tensor<64x64x256x1xbf16>)
+  func.call @id4_vae_conv3x3_bias_bf16_wmma_oc64(%input, %weight, %bias, %output) : (tensor<64x64x512x1xbf16>, tensor<256x3x3x512xbf16>, tensor<256xbf16>, tensor<64x64x256x1xbf16>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<64x64x256x1xbf16>
   check.return
 }
@@ -1748,11 +1686,11 @@ check.case public @id4_vae_conv3x3_bias_bf16_wmma_flux2_full_decode_512x512_512x
 
 check.case public @id4_vae_conv3x3_bias_bf16_wmma_oc64_flux2_full_decode_512x512_512x256_shape_case {
   %input = check.generate.fill value(1.0) : tensor<512x512x512x1xbf16>
-  %weight = check.generate.fill value(0.0) : tensor<512x3x3x256xbf16>
+  %weight = check.generate.fill value(0.0) : tensor<256x3x3x512xbf16>
   %bias = check.generate.fill value(0.0) : tensor<256xbf16>
   %output = check.generate.fill value(1.0) : tensor<512x512x256x1xbf16>
   %expected = check.generate.fill value(0.0) : tensor<512x512x256x1xbf16>
-  func.call @id4_vae_conv3x3_bias_bf16_wmma_oc64(%input, %weight, %bias, %output) : (tensor<512x512x512x1xbf16>, tensor<512x3x3x256xbf16>, tensor<256xbf16>, tensor<512x512x256x1xbf16>)
+  func.call @id4_vae_conv3x3_bias_bf16_wmma_oc64(%input, %weight, %bias, %output) : (tensor<512x512x512x1xbf16>, tensor<256x3x3x512xbf16>, tensor<256xbf16>, tensor<512x512x256x1xbf16>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<512x512x256x1xbf16>
   check.return
 }
@@ -1792,11 +1730,11 @@ check.case public @id4_vae_conv3x3_bias_bf16_wmma_flux2_full_decode_1024x1024_25
 
 check.case public @id4_vae_conv3x3_bias_bf16_wmma_oc64_flux2_full_decode_1024x1024_256x128_shape_case {
   %input = check.generate.fill value(1.0) : tensor<1024x1024x256x1xbf16>
-  %weight = check.generate.fill value(0.0) : tensor<256x3x3x128xbf16>
+  %weight = check.generate.fill value(0.0) : tensor<128x3x3x256xbf16>
   %bias = check.generate.fill value(0.0) : tensor<128xbf16>
   %output = check.generate.fill value(1.0) : tensor<1024x1024x128x1xbf16>
   %expected = check.generate.fill value(0.0) : tensor<1024x1024x128x1xbf16>
-  func.call @id4_vae_conv3x3_bias_bf16_wmma_oc64(%input, %weight, %bias, %output) : (tensor<1024x1024x256x1xbf16>, tensor<256x3x3x128xbf16>, tensor<128xbf16>, tensor<1024x1024x128x1xbf16>)
+  func.call @id4_vae_conv3x3_bias_bf16_wmma_oc64(%input, %weight, %bias, %output) : (tensor<1024x1024x256x1xbf16>, tensor<128x3x3x256xbf16>, tensor<128xbf16>, tensor<1024x1024x128x1xbf16>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<1024x1024x128x1xbf16>
   check.return
 }
