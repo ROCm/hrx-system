@@ -82,11 +82,28 @@ bool loom_amdgpu_required_workgroup_size(
     const loom_module_t* module, loom_func_like_t function,
     const loom_target_bundle_t* bundle, loom_target_workgroup_size_t* out_size);
 
+// Returns the fixed per-dimension workgroup size required by the source
+// function or target ABI, using |fact_table| to prove launch-config values
+// that are not literal constants in the current IR.
+bool loom_amdgpu_required_workgroup_size_from_facts(
+    const loom_module_t* module, loom_func_like_t function,
+    const loom_target_bundle_t* bundle,
+    const loom_value_fact_table_t* fact_table,
+    loom_target_workgroup_size_t* out_size);
+
 // Returns the fixed flat workgroup size required by the source function or
 // target ABI.
 bool loom_amdgpu_required_flat_workgroup_size(
     const loom_module_t* module, loom_func_like_t function,
     const loom_target_bundle_t* bundle, uint32_t* out_flat_size);
+
+// Returns the fixed flat workgroup size required by the source function or
+// target ABI, using |fact_table| to prove launch-config values that are not
+// literal constants in the current IR.
+bool loom_amdgpu_required_flat_workgroup_size_from_facts(
+    const loom_module_t* module, loom_func_like_t function,
+    const loom_target_bundle_t* bundle,
+    const loom_value_fact_table_t* fact_table, uint32_t* out_flat_size);
 
 // Emits the current invocation lane id within its subgroup as a VGPR value.
 iree_status_t loom_amdgpu_emit_current_subgroup_lane_id(
