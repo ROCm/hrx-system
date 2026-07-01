@@ -4,6 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include <cinttypes>
 #include <cstdio>
 #include <cstring>
 
@@ -231,6 +232,35 @@ static iree_status_t WritePlanJsonIfRequested(const id4_pipeline_plan_t* plan,
   return status;
 }
 
+static uint64_t CeilMiB(iree_device_size_t byte_length) {
+  static constexpr iree_device_size_t kMiB = 1024ull * 1024ull;
+  return (uint64_t)((byte_length + kMiB - 1) / kMiB);
+}
+
+static void SetQwenBenchmarkLabel(
+    iree_benchmark_state_t* benchmark_state, uint32_t token_count,
+    const id4_pipeline_plan_statistics_t& statistics) {
+  char label[512];
+  std::snprintf(
+      label, sizeof(label),
+      "tokens=%" PRIu32 " param_total=%" PRIu64 "MiB param_largest=%" PRIu64
+      "MiB param_source=%" PRIu64 "MiB param_source_direct=%" PRIu64
+      "MiB param_source_encoded=%" PRIu64 "MiB param_load_steps[gather=%" PRIhsz
+      ",encode=%" PRIhsz "] local_hw=%" PRIu64 "MiB boundary=%" PRIu64
+      "MiB kernels=%" PRIhsz " dispatches=%" PRIhsz,
+      token_count, CeilMiB(statistics.parameter_slab_byte_length),
+      CeilMiB(statistics.largest_parameter_slab_byte_length),
+      CeilMiB(statistics.parameter_source_byte_length),
+      CeilMiB(statistics.parameter_direct_source_byte_length),
+      CeilMiB(statistics.parameter_encoded_source_byte_length),
+      statistics.parameter_gather_load_step_count,
+      statistics.parameter_encode_load_step_count,
+      CeilMiB(statistics.memory_slab_high_water_mark),
+      CeilMiB(statistics.boundary_tensor_byte_length), statistics.kernel_count,
+      statistics.dispatch_count);
+  iree_benchmark_set_label(benchmark_state, label);
+}
+
 static iree_status_t QueueFillSyntheticQwenInputs(
     iree_hal_device_t* device, iree_hal_queue_affinity_t queue_affinity,
     const id4_pipeline_plan_t* plan,
@@ -397,6 +427,8 @@ IREE_BENCHMARK_FN(BM_Qwen3VlStagePrepareCachedKernels) {
 
   id4::test::OwningRef<id4_pipeline_plan_t, id4_pipeline_plan_release> plan;
   IREE_RETURN_IF_ERROR(CreateQwenPlan(&context, request, plan.out()));
+  const id4_pipeline_plan_statistics_t statistics =
+      id4_pipeline_plan_statistics(plan.get());
 
   id4::test::OwningRef<iree_hal_semaphore_t, iree_hal_semaphore_release>
       prepare_semaphore;
@@ -430,6 +462,7 @@ IREE_BENCHMARK_FN(BM_Qwen3VlStagePrepareCachedKernels) {
   iree_benchmark_set_items_processed(
       benchmark_state,
       static_cast<int64_t>(iteration_count * shape.token_count));
+  SetQwenBenchmarkLabel(benchmark_state, shape.token_count, statistics);
   return iree_ok_status();
 }
 ID4_QWEN_BENCHMARK_REGISTER(BM_Qwen3VlStagePrepareCachedKernels,
@@ -451,6 +484,8 @@ IREE_BENCHMARK_FN(BM_Qwen3VlStagePrepareFixtureCachedKernels) {
   IREE_RETURN_IF_ERROR(CreateQwenPlan(&context, context.request, plan.out()));
   IREE_RETURN_IF_ERROR(
       WritePlanJsonIfRequested(plan.get(), context.request.token_count));
+  const id4_pipeline_plan_statistics_t statistics =
+      id4_pipeline_plan_statistics(plan.get());
 
   id4::test::OwningRef<iree_hal_semaphore_t, iree_hal_semaphore_release>
       prepare_semaphore;
@@ -484,6 +519,8 @@ IREE_BENCHMARK_FN(BM_Qwen3VlStagePrepareFixtureCachedKernels) {
   iree_benchmark_set_items_processed(
       benchmark_state,
       static_cast<int64_t>(iteration_count * context.request.token_count));
+  SetQwenBenchmarkLabel(benchmark_state, context.request.token_count,
+                        statistics);
   return iree_ok_status();
 }
 
@@ -498,6 +535,8 @@ static iree_status_t RunIssueBenchmarkWithPreparedContext(
   IREE_RETURN_IF_ERROR(CreateQwenPlan(context, context->request, plan.out()));
   IREE_RETURN_IF_ERROR(
       WritePlanJsonIfRequested(plan.get(), context->request.token_count));
+  const id4_pipeline_plan_statistics_t statistics =
+      id4_pipeline_plan_statistics(plan.get());
 
   id4::test::OwningRef<iree_hal_semaphore_t, iree_hal_semaphore_release>
       prepare_semaphore;
@@ -578,6 +617,8 @@ static iree_status_t RunIssueBenchmarkWithPreparedContext(
   iree_benchmark_set_items_processed(
       benchmark_state,
       static_cast<int64_t>(iteration_count * context->request.token_count));
+  SetQwenBenchmarkLabel(benchmark_state, context->request.token_count,
+                        statistics);
   return iree_ok_status();
 }
 
