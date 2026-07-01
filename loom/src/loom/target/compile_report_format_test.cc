@@ -1043,8 +1043,10 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
             IREE_STRING_VIEW_NPOS);
   EXPECT_NE(iree_string_view_find(
                 output,
-                IREE_SV("source_low_memory packets=1 scalar_packets=0 "
+                IREE_SV("source_low_memory packets=1 loads=1 stores=0 "
+                        "scalar_packets=0 "
                         "vector_packets=1 source_lanes=2 source_bytes=8 "
+                        "read_bytes=8 write_bytes=0 "
                         "contiguous_vector_packets=0 "
                         "strided_vector_packets=1 "
                         "unknown_stride_vector_packets=0 roots=1"),
@@ -1505,10 +1507,13 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
   EXPECT_NE(iree_string_view_find(
                 output,
                 IREE_SV("\"memory\":{\"packet_count\":1,"
+                        "\"load_packet_count\":1,"
+                        "\"store_packet_count\":0,"
                         "\"scalar_packet_count\":0,"
                         "\"vector_packet_count\":1,"
                         "\"source_lane_count\":2,"
                         "\"source_byte_count\":8,"
+                        "\"read_byte_count\":8,\"write_byte_count\":0,"
                         "\"contiguous_vector_packet_count\":0,"
                         "\"strided_vector_packet_count\":1,"
                         "\"unknown_stride_vector_packet_count\":0,"

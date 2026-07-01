@@ -812,15 +812,18 @@ static iree_status_t loom_target_compile_report_format_summary(
           &report->source_low_memory_summary;
       IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
           builder,
-          "COMPILE-REPORT: source_low_memory packets=%" PRIu64
-          " scalar_packets=%" PRIu64 " vector_packets=%" PRIu64
-          " source_lanes=%" PRIu64 " source_bytes=%" PRIu64
-          " contiguous_vector_packets=%" PRIu64
+          "COMPILE-REPORT: source_low_memory packets=%" PRIu64 " loads=%" PRIu64
+          " stores=%" PRIu64 " scalar_packets=%" PRIu64
+          " vector_packets=%" PRIu64 " source_lanes=%" PRIu64
+          " source_bytes=%" PRIu64 " read_bytes=%" PRIu64
+          " write_bytes=%" PRIu64 " contiguous_vector_packets=%" PRIu64
           " strided_vector_packets=%" PRIu64
           " unknown_stride_vector_packets=%" PRIu64 " roots=%" PRIhsz "\n",
-          summary->packet_count, summary->scalar_packet_count,
+          summary->packet_count, summary->load_packet_count,
+          summary->store_packet_count, summary->scalar_packet_count,
           summary->vector_packet_count, summary->source_lane_count,
-          summary->source_byte_count, summary->contiguous_vector_packet_count,
+          summary->source_byte_count, summary->read_byte_count,
+          summary->write_byte_count, summary->contiguous_vector_packet_count,
           summary->strided_vector_packet_count,
           summary->unknown_stride_vector_packet_count,
           report->source_low_memory_root_summaries.count));
@@ -3907,6 +3910,10 @@ loom_target_compile_report_format_source_low_memory_summary_json(
   IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
       stream, &first_field, "packet_count", summary->packet_count));
   IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
+      stream, &first_field, "load_packet_count", summary->load_packet_count));
+  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
+      stream, &first_field, "store_packet_count", summary->store_packet_count));
+  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
       stream, &first_field, "scalar_packet_count",
       summary->scalar_packet_count));
   IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
@@ -3916,6 +3923,10 @@ loom_target_compile_report_format_source_low_memory_summary_json(
       stream, &first_field, "source_lane_count", summary->source_lane_count));
   IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
       stream, &first_field, "source_byte_count", summary->source_byte_count));
+  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
+      stream, &first_field, "read_byte_count", summary->read_byte_count));
+  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
+      stream, &first_field, "write_byte_count", summary->write_byte_count));
   IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
       stream, &first_field, "contiguous_vector_packet_count",
       summary->contiguous_vector_packet_count));

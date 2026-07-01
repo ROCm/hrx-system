@@ -1001,6 +1001,10 @@ typedef struct loom_target_compile_report_source_low_memory_row_t {
 typedef struct loom_target_compile_report_source_low_memory_summary_t {
   // Number of emitted source-memory packets.
   uint64_t packet_count;
+  // Number of load packets.
+  uint64_t load_packet_count;
+  // Number of store packets.
+  uint64_t store_packet_count;
   // Number of packets moving exactly one source lane.
   uint64_t scalar_packet_count;
   // Number of packets moving more than one source lane.
@@ -1009,6 +1013,10 @@ typedef struct loom_target_compile_report_source_low_memory_summary_t {
   uint64_t source_lane_count;
   // Logical source bytes represented by packets with known element sizes.
   uint64_t source_byte_count;
+  // Logical source bytes read by load packets.
+  uint64_t read_byte_count;
+  // Logical source bytes written by store packets.
+  uint64_t write_byte_count;
   // Number of vector packets whose source lanes are element-contiguous.
   uint64_t contiguous_vector_packet_count;
   // Number of vector packets with a known non-contiguous source lane stride.
