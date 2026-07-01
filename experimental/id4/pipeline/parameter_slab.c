@@ -1808,15 +1808,6 @@ static iree_status_t id4_pipeline_parameter_slab_submit_gather(
   return status;
 }
 
-typedef struct id4_pipeline_parameter_load_group_t {
-  // First load-step ordinal represented by this submitted group.
-  iree_host_size_t step_offset;
-  // Number of load steps represented by this submitted group.
-  iree_host_size_t step_count;
-  // True when the group uses bounded encoder staging.
-  bool is_encode;
-} id4_pipeline_parameter_load_group_t;
-
 static id4_pipeline_parameter_load_group_t
 id4_pipeline_parameter_load_group_from_steps(
     iree_host_size_t step_index, iree_host_size_t load_step_count,
@@ -1826,20 +1817,34 @@ id4_pipeline_parameter_load_group_from_steps(
       .step_offset = step_index,
       // One direct gather by default.
       .step_count = 1,
-      // Updated below for encoded groups.
-      .is_encode = false,
+      // Direct gather by default.
+      .kind = ID4_PIPELINE_PARAMETER_LOAD_GROUP_KIND_GATHER,
+      // Final slab populated by the first step.
+      .target_slab_index = load_steps[step_index].target_slab_index,
   };
   if (id4_pipeline_parameter_load_step_is_encode(&load_steps[step_index])) {
     group.step_count = id4_pipeline_parameter_slab_encode_run_count(
         step_index, load_step_count, load_steps);
-    group.is_encode = true;
+    group.kind = ID4_PIPELINE_PARAMETER_LOAD_GROUP_KIND_ENCODE;
   }
   return group;
 }
 
-static iree_host_size_t id4_pipeline_parameter_load_group_count(
+static bool id4_pipeline_parameter_load_group_is_encode(
+    id4_pipeline_parameter_load_group_t group) {
+  return group.kind == ID4_PIPELINE_PARAMETER_LOAD_GROUP_KIND_ENCODE;
+}
+
+iree_status_t id4_pipeline_parameter_load_group_count(
     iree_host_size_t load_step_count,
-    const id4_pipeline_parameter_load_step_t* load_steps) {
+    const id4_pipeline_parameter_load_step_t* load_steps,
+    iree_host_size_t* out_group_count) {
+  IREE_ASSERT_ARGUMENT(out_group_count);
+  *out_group_count = 0;
+  if (load_step_count != 0 && !load_steps) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "parameter load step array is required");
+  }
   iree_host_size_t group_count = 0;
   for (iree_host_size_t i = 0; i < load_step_count;) {
     const id4_pipeline_parameter_load_group_t group =
@@ -1848,7 +1853,36 @@ static iree_host_size_t id4_pipeline_parameter_load_group_count(
     i += group.step_count;
     ++group_count;
   }
-  return group_count;
+  *out_group_count = group_count;
+  return iree_ok_status();
+}
+
+iree_status_t id4_pipeline_parameter_load_group_at(
+    iree_host_size_t load_step_count,
+    const id4_pipeline_parameter_load_step_t* load_steps,
+    iree_host_size_t group_index,
+    id4_pipeline_parameter_load_group_t* out_group) {
+  IREE_ASSERT_ARGUMENT(out_group);
+  memset(out_group, 0, sizeof(*out_group));
+  if (load_step_count != 0 && !load_steps) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "parameter load step array is required");
+  }
+  for (iree_host_size_t step_index = 0, current_group_index = 0;
+       step_index < load_step_count; ++current_group_index) {
+    const id4_pipeline_parameter_load_group_t group =
+        id4_pipeline_parameter_load_group_from_steps(
+            step_index, load_step_count, load_steps);
+    if (current_group_index == group_index) {
+      *out_group = group;
+      return iree_ok_status();
+    }
+    step_index += group.step_count;
+  }
+  return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                          "parameter load group %" PRIhsz
+                          " is outside load group count",
+                          group_index);
 }
 
 static iree_status_t id4_pipeline_parameter_slab_submit_load_group(
@@ -1865,7 +1899,7 @@ static iree_status_t id4_pipeline_parameter_slab_submit_load_group(
       &loads[step->target_slab_index];
 
   iree_status_t status = iree_ok_status();
-  if (group.is_encode) {
+  if (id4_pipeline_parameter_load_group_is_encode(group)) {
     status = id4_pipeline_parameter_slab_submit_encode_run(
         options, load, group.step_count, step, group.step_offset, stage_name,
         slab_set->buffers[step->target_slab_index], wait_semaphore_list,
@@ -1906,7 +1940,7 @@ static iree_status_t id4_pipeline_parameter_slab_create_group_semaphores(
         id4_pipeline_parameter_load_group_from_steps(
             step_index, load_step_count, load_steps);
     const id4_pipeline_parameter_slab_load_t* load =
-        &loads[load_steps[step_index].target_slab_index];
+        &loads[group.target_slab_index];
     status = iree_hal_semaphore_create(load->device, load->queue_affinity,
                                        /*initial_value=*/0,
                                        IREE_HAL_SEMAPHORE_FLAG_NONE,
@@ -1986,7 +2020,8 @@ static iree_status_t id4_pipeline_parameter_slab_load_groups_submit(
         id4_pipeline_parameter_load_group_from_steps(
             step_index, load_step_count, load_steps);
     iree_hal_semaphore_list_t group_wait_list = options->wait_semaphore_list;
-    if (group.is_encode && encode_wait_semaphore) {
+    if (id4_pipeline_parameter_load_group_is_encode(group) &&
+        encode_wait_semaphore) {
       group_wait_list = id4_pipeline_parameter_one_semaphore_list(
           &encode_wait_semaphore, &encode_wait_payload_value);
     }
@@ -2001,7 +2036,7 @@ static iree_status_t id4_pipeline_parameter_slab_load_groups_submit(
         options, loads, load_steps, group, stage_name, slab_set,
         group_wait_list, group_signal_list);
     if (iree_status_is_ok(status)) {
-      if (group.is_encode) {
+      if (id4_pipeline_parameter_load_group_is_encode(group)) {
         encode_wait_semaphore = group_signal_semaphore;
         encode_wait_payload_value = group_signal_payload_value;
       } else {
@@ -2087,8 +2122,11 @@ iree_status_t id4_pipeline_parameter_slab_set_load(
     }
   }
 
-  const iree_host_size_t load_group_count =
-      id4_pipeline_parameter_load_group_count(load_step_count, load_steps);
+  iree_host_size_t load_group_count = 0;
+  if (iree_status_is_ok(status)) {
+    status = id4_pipeline_parameter_load_group_count(
+        load_step_count, load_steps, &load_group_count);
+  }
   const iree_host_size_t scheduled_group_semaphore_count =
       load_group_count > 1 ? load_group_count : 0;
   iree_host_size_t group_semaphore_count = 0;

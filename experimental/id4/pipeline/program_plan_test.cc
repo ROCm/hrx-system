@@ -774,6 +774,9 @@ TEST(PipelineProgramPlan, GroupsDirectParameterLoadsBySourceScope) {
   EXPECT_EQ(statistics.parameter_encoded_source_byte_length, 32u);
   EXPECT_EQ(statistics.parameter_gather_load_step_count, 1u);
   EXPECT_EQ(statistics.parameter_encode_load_step_count, 1u);
+  EXPECT_EQ(statistics.parameter_load_group_count, 2u);
+  EXPECT_EQ(statistics.parameter_gather_load_group_count, 1u);
+  EXPECT_EQ(statistics.parameter_encode_load_group_count, 1u);
 
   iree_string_builder_t builder;
   iree_string_builder_initialize(iree_allocator_system(), &builder);

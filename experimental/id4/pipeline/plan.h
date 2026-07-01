@@ -180,6 +180,12 @@ typedef struct id4_pipeline_plan_statistics_t {
   iree_host_size_t parameter_gather_load_step_count;
   // Number of encoded parameter load steps.
   iree_host_size_t parameter_encode_load_step_count;
+  // Number of independent parameter readiness groups.
+  iree_host_size_t parameter_load_group_count;
+  // Number of direct-gather parameter readiness groups.
+  iree_host_size_t parameter_gather_load_group_count;
+  // Number of encoded parameter readiness groups.
+  iree_host_size_t parameter_encode_load_group_count;
   // Total bytes across all constant slabs.
   iree_device_size_t constant_slab_byte_length;
   // Total reserved bytes across all non-parameter memory slabs.

@@ -193,6 +193,77 @@ TEST(PipelineParameterSlab, ValidatesFp8ScaledEncodeLoadStep) {
                             &step, /*slab_count=*/1, &slab));
 }
 
+TEST(PipelineParameterSlab, GroupsDirectGathersAndContiguousEncoders) {
+  id4_pipeline_tensor_shape_t weight_shape = {
+      /*.rank=*/2,
+      /*.dims=*/{16, 16},
+  };
+  id4_pipeline_tensor_shape_t scale_shape = {
+      /*.rank=*/1,
+      /*.dims=*/{16},
+  };
+  const id4_pipeline_parameter_load_source_t fp8_sources[] = {
+      id4_pipeline_parameter_load_source(
+          IREE_SV("model.fp8"), IREE_SV("layers.0.attn.q.weight"),
+          ID4_PIPELINE_TENSOR_DTYPE_F8_E4M3, weight_shape,
+          /*byte_length=*/256),
+      id4_pipeline_parameter_load_source(
+          IREE_SV("model.fp8"), IREE_SV("layers.0.attn.q.weight_scale"),
+          ID4_PIPELINE_TENSOR_DTYPE_F32, scale_shape,
+          /*byte_length=*/64),
+  };
+  const id4_pipeline_parameter_load_step_t load_steps[] = {
+      id4_pipeline_parameter_gather_load_step(
+          IREE_SV("parameters.gather.embeddings"), IREE_SV("model.bf16"),
+          /*target_slab_index=*/0, /*request_offset=*/0,
+          /*request_count=*/1),
+      id4_pipeline_parameter_encode_fp8_e4m3_scaled_to_bf16_load_step(
+          IREE_SV("parameters.encode.layer0.q"),
+          /*source_count=*/IREE_ARRAYSIZE(fp8_sources), fp8_sources,
+          /*target_slab_index=*/0, /*request_offset=*/1),
+      id4_pipeline_parameter_encode_fp8_e4m3_scaled_to_bf16_load_step(
+          IREE_SV("parameters.encode.layer0.k"),
+          /*source_count=*/IREE_ARRAYSIZE(fp8_sources), fp8_sources,
+          /*target_slab_index=*/0, /*request_offset=*/2),
+      id4_pipeline_parameter_gather_load_step(
+          IREE_SV("parameters.gather.norm"), IREE_SV("model.bf16"),
+          /*target_slab_index=*/0, /*request_offset=*/3,
+          /*request_count=*/1),
+  };
+
+  iree_host_size_t group_count = 0;
+  IREE_ASSERT_OK(id4_pipeline_parameter_load_group_count(
+      IREE_ARRAYSIZE(load_steps), load_steps, &group_count));
+  EXPECT_EQ(group_count, 3u);
+
+  id4_pipeline_parameter_load_group_t group;
+  IREE_ASSERT_OK(id4_pipeline_parameter_load_group_at(
+      IREE_ARRAYSIZE(load_steps), load_steps, /*group_index=*/0, &group));
+  EXPECT_EQ(group.step_offset, 0u);
+  EXPECT_EQ(group.step_count, 1u);
+  EXPECT_EQ(group.kind, ID4_PIPELINE_PARAMETER_LOAD_GROUP_KIND_GATHER);
+  EXPECT_EQ(group.target_slab_index, 0u);
+
+  IREE_ASSERT_OK(id4_pipeline_parameter_load_group_at(
+      IREE_ARRAYSIZE(load_steps), load_steps, /*group_index=*/1, &group));
+  EXPECT_EQ(group.step_offset, 1u);
+  EXPECT_EQ(group.step_count, 2u);
+  EXPECT_EQ(group.kind, ID4_PIPELINE_PARAMETER_LOAD_GROUP_KIND_ENCODE);
+  EXPECT_EQ(group.target_slab_index, 0u);
+
+  IREE_ASSERT_OK(id4_pipeline_parameter_load_group_at(
+      IREE_ARRAYSIZE(load_steps), load_steps, /*group_index=*/2, &group));
+  EXPECT_EQ(group.step_offset, 3u);
+  EXPECT_EQ(group.step_count, 1u);
+  EXPECT_EQ(group.kind, ID4_PIPELINE_PARAMETER_LOAD_GROUP_KIND_GATHER);
+  EXPECT_EQ(group.target_slab_index, 0u);
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
+                        id4_pipeline_parameter_load_group_at(
+                            IREE_ARRAYSIZE(load_steps), load_steps,
+                            /*group_index=*/3, &group));
+}
+
 TEST(PipelineParameterSlab, EnumeratorCoversSelectedRequestRange) {
   id4_pipeline_parameter_request_t requests[] = {
       id4_pipeline_parameter_request(

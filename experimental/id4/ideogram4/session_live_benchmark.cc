@@ -111,6 +111,12 @@ struct GenerationBenchmarkPlanStatistics {
   iree_host_size_t parameter_gather_load_step_count;
   // Number of encoded parameter load steps.
   iree_host_size_t parameter_encode_load_step_count;
+  // Number of independent parameter readiness groups.
+  iree_host_size_t parameter_load_group_count;
+  // Number of direct-gather parameter readiness groups.
+  iree_host_size_t parameter_gather_load_group_count;
+  // Number of encoded parameter readiness groups.
+  iree_host_size_t parameter_encode_load_group_count;
   // Sum of local slab high-water bytes across coarse stage plans.
   iree_device_size_t total_local_slab_high_water_mark;
   // Largest local slab high-water bytes across coarse stage plans.
@@ -626,6 +632,12 @@ static iree_status_t AccumulateGenerationBenchmarkPlanStatistics(
         stage_statistics.parameter_gather_load_step_count;
     out_statistics->parameter_encode_load_step_count +=
         stage_statistics.parameter_encode_load_step_count;
+    out_statistics->parameter_load_group_count +=
+        stage_statistics.parameter_load_group_count;
+    out_statistics->parameter_gather_load_group_count +=
+        stage_statistics.parameter_gather_load_group_count;
+    out_statistics->parameter_encode_load_group_count +=
+        stage_statistics.parameter_encode_load_group_count;
     if (stage_statistics.largest_parameter_slab_byte_length >
         out_statistics->largest_parameter_slab_byte_length) {
       out_statistics->largest_parameter_slab_byte_length =
@@ -1358,9 +1370,9 @@ static iree_status_t AppendGenerationBenchmarkStageLabels(
         builder,
         " stage.%.*s[param=%" PRIu64 "MiB,src=%" PRIu64
         "MiB,src_direct=%" PRIu64 "MiB,src_encoded=%" PRIu64
-        "MiB,loads=%" PRIhsz "/%" PRIhsz ",local_hw=%" PRIu64
-        "MiB,boundary=%" PRIu64 "MiB,kernels=%" PRIhsz ",dispatches=%" PRIhsz
-        "]",
+        "MiB,load_steps=%" PRIhsz "/%" PRIhsz ",load_groups=%" PRIhsz
+        "/%" PRIhsz ",local_hw=%" PRIu64 "MiB,boundary=%" PRIu64
+        "MiB,kernels=%" PRIhsz ",dispatches=%" PRIhsz "]",
         static_cast<int>(key.size), key.data,
         CeilMiB(stage.parameter_slab_byte_length),
         CeilMiB(stage.parameter_source_byte_length),
@@ -1368,6 +1380,8 @@ static iree_status_t AppendGenerationBenchmarkStageLabels(
         CeilMiB(stage.parameter_encoded_source_byte_length),
         stage.parameter_gather_load_step_count,
         stage.parameter_encode_load_step_count,
+        stage.parameter_gather_load_group_count,
+        stage.parameter_encode_load_group_count,
         CeilMiB(stage.memory_slab_high_water_mark),
         CeilMiB(stage.boundary_tensor_byte_length), stage.kernel_count,
         stage.dispatch_count));
@@ -1425,6 +1439,8 @@ static iree_status_t SetGenerationBenchmarkLabel(
       "MiB param_source_encoded=%" PRIu64 "MiB param_load_steps[gather=%" PRIhsz
       ",encode=%" PRIhsz
       "]"
+      " param_load_groups[total=%" PRIhsz ",gather=%" PRIhsz ",encode=%" PRIhsz
+      "]"
       " local_hw_total=%" PRIu64 "MiB local_hw_largest=%" PRIu64
       "MiB"
       " boundary=%" PRIu64 "MiB kernels=%" PRIhsz " dispatches=%" PRIhsz
@@ -1461,6 +1477,9 @@ static iree_status_t SetGenerationBenchmarkLabel(
       CeilMiB(statistics.parameter_encoded_source_byte_length),
       statistics.parameter_gather_load_step_count,
       statistics.parameter_encode_load_step_count,
+      statistics.parameter_load_group_count,
+      statistics.parameter_gather_load_group_count,
+      statistics.parameter_encode_load_group_count,
       CeilMiB(statistics.total_local_slab_high_water_mark),
       CeilMiB(statistics.largest_local_slab_high_water_mark),
       CeilMiB(statistics.boundary_tensor_byte_length), statistics.kernel_count,

@@ -236,6 +236,9 @@ TEST(PlanTest, ReportsAggregateStatistics) {
   EXPECT_EQ(statistics.parameter_encoded_source_byte_length, 320u);
   EXPECT_EQ(statistics.parameter_gather_load_step_count, 1u);
   EXPECT_EQ(statistics.parameter_encode_load_step_count, 1u);
+  EXPECT_EQ(statistics.parameter_load_group_count, 2u);
+  EXPECT_EQ(statistics.parameter_gather_load_group_count, 1u);
+  EXPECT_EQ(statistics.parameter_encode_load_group_count, 1u);
   EXPECT_EQ(statistics.constant_slab_byte_length, 64u);
   EXPECT_EQ(statistics.memory_slab_byte_length, 1024u);
   EXPECT_EQ(statistics.memory_slab_high_water_mark, 768u);

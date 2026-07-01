@@ -1408,6 +1408,44 @@ static iree_device_size_t id4_pipeline_plan_encoded_load_step_source_length(
   return byte_length;
 }
 
+static bool id4_pipeline_plan_parameter_load_step_is_encode(
+    const id4_pipeline_parameter_load_step_t* step) {
+  switch (step->kind) {
+    case ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_ENCODE_FP8_E4M3_SCALED_TO_BF16:
+    case ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_ENCODE_BF16_LINEAR_RHS_TILE:
+    case ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_ENCODE_FP8_E4M3_SCALED_TO_BF16_LINEAR_RHS_TILE:
+      return true;
+    default:
+      return false;
+  }
+}
+
+static void id4_pipeline_plan_accumulate_parameter_load_group_statistics(
+    const id4_pipeline_plan_t* plan,
+    id4_pipeline_plan_statistics_t* statistics) {
+  for (iree_host_size_t step_index = 0;
+       step_index < plan->parameter_load_step_count;) {
+    const id4_pipeline_parameter_load_step_t* step =
+        &plan->parameter_load_steps[step_index];
+    ++statistics->parameter_load_group_count;
+    if (!id4_pipeline_plan_parameter_load_step_is_encode(step)) {
+      ++statistics->parameter_gather_load_group_count;
+      ++step_index;
+      continue;
+    }
+
+    ++statistics->parameter_encode_load_group_count;
+    const iree_host_size_t target_slab_index = step->target_slab_index;
+    do {
+      ++step_index;
+    } while (step_index < plan->parameter_load_step_count &&
+             id4_pipeline_plan_parameter_load_step_is_encode(
+                 &plan->parameter_load_steps[step_index]) &&
+             plan->parameter_load_steps[step_index].target_slab_index ==
+                 target_slab_index);
+  }
+}
+
 id4_pipeline_plan_statistics_t id4_pipeline_plan_statistics(
     const id4_pipeline_plan_t* plan) {
   id4_pipeline_plan_statistics_t statistics;
@@ -1447,6 +1485,8 @@ id4_pipeline_plan_statistics_t id4_pipeline_plan_statistics(
         break;
     }
   }
+  id4_pipeline_plan_accumulate_parameter_load_group_statistics(plan,
+                                                               &statistics);
   for (iree_host_size_t i = 0; i < plan->constant_slab_count; ++i) {
     const id4_pipeline_constant_slab_plan_t* slab = &plan->constant_slabs[i];
     statistics.constant_slab_byte_length += slab->byte_length;
@@ -1905,6 +1945,9 @@ iree_status_t id4_pipeline_plan_format_json(const id4_pipeline_plan_t* plan,
       ",\"parameter_encoded_source_byte_length\":%" PRIu64
       ",\"parameter_gather_load_step_count\":%" PRIhsz
       ",\"parameter_encode_load_step_count\":%" PRIhsz
+      ",\"parameter_load_group_count\":%" PRIhsz
+      ",\"parameter_gather_load_group_count\":%" PRIhsz
+      ",\"parameter_encode_load_group_count\":%" PRIhsz
       ",\"constant_slab_byte_length\":%" PRIu64
       ",\"memory_slab_byte_length\":%" PRIu64
       ",\"memory_slab_high_water_mark\":%" PRIu64
@@ -1919,6 +1962,9 @@ iree_status_t id4_pipeline_plan_format_json(const id4_pipeline_plan_t* plan,
       (uint64_t)statistics.parameter_encoded_source_byte_length,
       statistics.parameter_gather_load_step_count,
       statistics.parameter_encode_load_step_count,
+      statistics.parameter_load_group_count,
+      statistics.parameter_gather_load_group_count,
+      statistics.parameter_encode_load_group_count,
       (uint64_t)statistics.constant_slab_byte_length,
       (uint64_t)statistics.memory_slab_byte_length,
       (uint64_t)statistics.memory_slab_high_water_mark,

@@ -260,13 +260,14 @@ static void SetQwenBenchmarkLabel(
   IREE_CHECK_OK(ParseQwenWeightExecutionStrategy(&weight_execution_strategy));
   iree_string_view_t weight_execution_strategy_name =
       id4_qwen3_vl_weight_execution_strategy_name(weight_execution_strategy);
-  char label[512];
+  char label[768];
   std::snprintf(
       label, sizeof(label),
       "tokens=%" PRIu32 " weights=%.*s param_total=%" PRIu64
       "MiB param_largest=%" PRIu64 "MiB param_source=%" PRIu64
       "MiB param_source_direct=%" PRIu64 "MiB param_source_encoded=%" PRIu64
       "MiB param_load_steps[gather=%" PRIhsz ",encode=%" PRIhsz
+      "] param_load_groups[total=%" PRIhsz ",gather=%" PRIhsz ",encode=%" PRIhsz
       "] local_hw=%" PRIu64 "MiB boundary=%" PRIu64 "MiB kernels=%" PRIhsz
       " dispatches=%" PRIhsz,
       token_count, static_cast<int>(weight_execution_strategy_name.size),
@@ -278,6 +279,9 @@ static void SetQwenBenchmarkLabel(
       CeilMiB(statistics.parameter_encoded_source_byte_length),
       statistics.parameter_gather_load_step_count,
       statistics.parameter_encode_load_step_count,
+      statistics.parameter_load_group_count,
+      statistics.parameter_gather_load_group_count,
+      statistics.parameter_encode_load_group_count,
       CeilMiB(statistics.memory_slab_high_water_mark),
       CeilMiB(statistics.boundary_tensor_byte_length), statistics.kernel_count,
       statistics.dispatch_count);

@@ -111,6 +111,17 @@ typedef enum id4_pipeline_parameter_load_step_kind_e {
       4u,
 } id4_pipeline_parameter_load_step_kind_e;
 
+// Prepare-time parameter loading group kind.
+typedef uint32_t id4_pipeline_parameter_load_group_kind_t;
+
+// Parameter loading group kind values.
+typedef enum id4_pipeline_parameter_load_group_kind_e {
+  // Single direct provider gather submitted independently.
+  ID4_PIPELINE_PARAMETER_LOAD_GROUP_KIND_GATHER = 1u,
+  // Contiguous encoded load steps sharing one bounded staging run.
+  ID4_PIPELINE_PARAMETER_LOAD_GROUP_KIND_ENCODE = 2u,
+} id4_pipeline_parameter_load_group_kind_e;
+
 // Production staging chunk byte budget for prepare-time parameter encoders.
 static const iree_device_size_t
     ID4_PIPELINE_PARAMETER_ENCODER_DEFAULT_STAGING_CHUNK_BYTE_CAPACITY =
@@ -167,6 +178,18 @@ typedef struct id4_pipeline_parameter_load_step_t {
   // Optional request ordinals for non-contiguous direct gather steps.
   const iree_host_size_t* request_indices;
 } id4_pipeline_parameter_load_step_t;
+
+// Contiguous prepare-time work submitted under one readiness edge.
+typedef struct id4_pipeline_parameter_load_group_t {
+  // First load-step ordinal represented by this group.
+  iree_host_size_t step_offset;
+  // Number of load steps represented by this group.
+  iree_host_size_t step_count;
+  // Submission strategy used for this group.
+  id4_pipeline_parameter_load_group_kind_t kind;
+  // Final parameter slab populated by all steps in this group.
+  iree_host_size_t target_slab_index;
+} id4_pipeline_parameter_load_group_t;
 
 // Returns a direct provider-gather load step into a final parameter slab.
 static inline id4_pipeline_parameter_load_step_t
@@ -368,6 +391,19 @@ iree_status_t id4_pipeline_parameter_slab_validate(
 iree_status_t id4_pipeline_parameter_load_step_validate(
     const id4_pipeline_parameter_load_step_t* step, iree_host_size_t slab_count,
     const id4_pipeline_parameter_slab_plan_t* slabs);
+
+// Returns the number of readiness groups represented by |load_steps|.
+iree_status_t id4_pipeline_parameter_load_group_count(
+    iree_host_size_t load_step_count,
+    const id4_pipeline_parameter_load_step_t* load_steps,
+    iree_host_size_t* out_group_count);
+
+// Returns readiness group |group_index| represented by |load_steps|.
+iree_status_t id4_pipeline_parameter_load_group_at(
+    iree_host_size_t load_step_count,
+    const id4_pipeline_parameter_load_step_t* load_steps,
+    iree_host_size_t group_index,
+    id4_pipeline_parameter_load_group_t* out_group);
 
 // Enumerates one planned parameter request in IREE provider callback form.
 iree_status_t id4_pipeline_parameter_slab_enumerate(
