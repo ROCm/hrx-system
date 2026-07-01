@@ -1184,8 +1184,10 @@ typedef enum loom_amdgpu_fragment_repack_strategy_e {
   LOOM_AMDGPU_FRAGMENT_REPACK_STRATEGY_NONE = 0,
   // Source and result share the same physical fragment representation.
   LOOM_AMDGPU_FRAGMENT_REPACK_STRATEGY_ALIAS = 1,
+  // F32 result registers are permuted and packed into BF16 LHS registers.
+  LOOM_AMDGPU_FRAGMENT_REPACK_STRATEGY_RESULT_TO_LHS_BF16_BPERMUTE = 2,
   // Source and result require a target strategy that is not implemented.
-  LOOM_AMDGPU_FRAGMENT_REPACK_STRATEGY_DIAGNOSTIC = 2,
+  LOOM_AMDGPU_FRAGMENT_REPACK_STRATEGY_DIAGNOSTIC = 3,
 } loom_amdgpu_fragment_repack_strategy_t;
 
 typedef enum loom_amdgpu_fragment_repack_reason_e {
@@ -1201,6 +1203,12 @@ typedef enum loom_amdgpu_fragment_repack_reason_e {
   LOOM_AMDGPU_FRAGMENT_REPACK_REASON_TYPE_TRANSITION = 4,
   // Source/result roles and element storage both require target work.
   LOOM_AMDGPU_FRAGMENT_REPACK_REASON_ROLE_TYPE_TRANSITION = 5,
+  // No target-owned fragment layout matched the source/result transition.
+  LOOM_AMDGPU_FRAGMENT_REPACK_REASON_TARGET_LAYOUT = 6,
+  // A target-owned layout matched but no in-register strategy covers it yet.
+  LOOM_AMDGPU_FRAGMENT_REPACK_REASON_LAYOUT_STRATEGY = 7,
+  // The target-owned layout strategy is missing required packet descriptors.
+  LOOM_AMDGPU_FRAGMENT_REPACK_REASON_TARGET_PACKETS = 8,
 } loom_amdgpu_fragment_repack_reason_t;
 
 typedef struct loom_amdgpu_fragment_repack_plan_t {
@@ -1212,6 +1220,18 @@ typedef struct loom_amdgpu_fragment_repack_plan_t {
   loom_amdgpu_fragment_repack_strategy_t strategy;
   // Reason associated with diagnostic strategies.
   loom_amdgpu_fragment_repack_reason_t reason;
+  // Contract role selected for the source fragment layout.
+  loom_contract_operand_role_t source_role;
+  // Contract role selected for the result fragment layout.
+  loom_contract_operand_role_t result_role;
+  // Target-owned lane/register layout selected for the fragment transition.
+  loom_amdgpu_matrix_fragment_layout_kind_t layout_kind;
+  // Number of 32-bit source registers consumed by the selected strategy.
+  uint16_t source_register_count;
+  // Number of 32-bit result registers produced by the selected strategy.
+  uint16_t result_register_count;
+  // Number of lanes that share one logical result-fragment register row group.
+  uint16_t lane_group_count;
   // Source fragment role fact bitset.
   uint32_t source_role_flags;
   // Result fragment role fact bitset.
