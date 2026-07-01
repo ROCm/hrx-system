@@ -100,27 +100,27 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) @fp8_mfma_gfx950_fragmen
   %26 = v_add_u32 %24, %25
   %27 = s_mov_b32_m0_imm 0
   %lhs = global_load_dwordx2_saddr %26, %lhs_view, %27
-  %34 = s_mov_b32_m0_imm 0
-  %rhs = global_load_dwordx2_saddr %26, %rhs_view, %34
-  %36 = v_mov_b32 0
-  %init = concat(%36, %36, %36, %36) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
-  %41 = copy %init : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x4>
-  %result = v_mfma_f32_16x16x32_fp8_fp8 %lhs, %rhs, %41
-  %45 = v_lshlrev_b32_src0_inline %23, 8
-  %46 = v_lshlrev_b32_src0_inline %22, 2
-  %47 = v_add_u32 %45, %46
-  %48 = slice %result[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %49 = s_mov_b32_m0_imm 0
-  global_store_dword_saddr %47, %48, %out_view, %49
-  %50 = slice %result[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %51 = s_mov_b32_m0_imm 0
-  global_store_dword_saddr %47, %50, %out_view, %51 {offset = 64}
-  %52 = slice %result[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %53 = s_mov_b32_m0_imm 0
-  global_store_dword_saddr %47, %52, %out_view, %53 {offset = 128}
-  %54 = slice %result[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %55 = s_mov_b32_m0_imm 0
-  global_store_dword_saddr %47, %54, %out_view, %55 {offset = 192}
+  %29 = s_mov_b32_m0_imm 0
+  %rhs = global_load_dwordx2_saddr %26, %rhs_view, %29
+  %31 = v_mov_b32 0
+  %init = concat(%31, %31, %31, %31) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  %36 = copy %init : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x4>
+  %result = v_mfma_f32_16x16x32_fp8_fp8 %lhs, %rhs, %36
+  %38 = v_lshlrev_b32_src0_inline %23, 8
+  %39 = v_lshlrev_b32_src0_inline %22, 2
+  %40 = v_add_u32 %38, %39
+  %41 = slice %result[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %42 = s_mov_b32_m0_imm 0
+  global_store_dword_saddr %40, %41, %out_view, %42
+  %43 = slice %result[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %44 = s_mov_b32_m0_imm 0
+  global_store_dword_saddr %40, %43, %out_view, %44 {offset = 64}
+  %45 = slice %result[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %46 = s_mov_b32_m0_imm 0
+  global_store_dword_saddr %40, %45, %out_view, %46 {offset = 128}
+  %47 = slice %result[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %48 = s_mov_b32_m0_imm 0
+  global_store_dword_saddr %40, %47, %out_view, %48 {offset = 192}
   return
 }
 
