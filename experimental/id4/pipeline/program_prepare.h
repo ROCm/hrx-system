@@ -50,8 +50,8 @@ typedef struct id4_pipeline_program_prepare_options_t {
   id4_pipeline_diagnostics_sink_t* diagnostics_sink;
 } id4_pipeline_program_prepare_options_t;
 
-// Prepares kernels, records the semantic program into a reusable command
-// buffer, and seals the result as an issueable program region.
+// Prepares kernels, records the semantic program into reusable command-buffer
+// regions, and seals the result as an issueable prepared program.
 iree_status_t id4_pipeline_program_prepare(
     const id4_pipeline_program_prepare_options_t* options,
     iree_allocator_t host_allocator,
