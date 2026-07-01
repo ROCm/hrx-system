@@ -221,6 +221,44 @@ loom_target_compile_report_append_memory_interval_summary_text(
   return iree_string_builder_append_cstring(builder, "}");
 }
 
+static iree_status_t
+loom_target_compile_report_append_source_low_memory_summary_text(
+    const loom_target_compile_report_source_low_memory_summary_t* summary,
+    iree_string_builder_t* builder) {
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+      builder,
+      " packets=%" PRIu64 " loads=%" PRIu64 " stores=%" PRIu64
+      " scalar_packets=%" PRIu64 " vector_packets=%" PRIu64
+      " source_lanes=%" PRIu64 " source_bytes=%" PRIu64 " read_bytes=%" PRIu64
+      " write_bytes=%" PRIu64 " issued_read_bytes=%" PRIu64
+      " issued_write_bytes=%" PRIu64 " issued_read_unknown_widths=%" PRIu64
+      " issued_write_unknown_widths=%" PRIu64
+      " contiguous_vector_packets=%" PRIu64 " strided_vector_packets=%" PRIu64
+      " unknown_stride_vector_packets=%" PRIu64,
+      summary->packet_count, summary->load_packet_count,
+      summary->store_packet_count, summary->scalar_packet_count,
+      summary->vector_packet_count, summary->source_lane_count,
+      summary->source_byte_count, summary->read_byte_count,
+      summary->write_byte_count, summary->issued_read_byte_count,
+      summary->issued_write_byte_count,
+      summary->issued_read_unknown_width_count,
+      summary->issued_write_unknown_width_count,
+      summary->contiguous_vector_packet_count,
+      summary->strided_vector_packet_count,
+      summary->unknown_stride_vector_packet_count));
+  IREE_RETURN_IF_ERROR(
+      loom_target_compile_report_append_memory_interval_summary_text(
+          "interval_envelope", &summary->interval_envelope, builder));
+  IREE_RETURN_IF_ERROR(
+      loom_target_compile_report_append_memory_interval_summary_text(
+          "read_interval_envelope", &summary->read_interval_envelope, builder));
+  IREE_RETURN_IF_ERROR(
+      loom_target_compile_report_append_memory_interval_summary_text(
+          "write_interval_envelope", &summary->write_interval_envelope,
+          builder));
+  return iree_ok_status();
+}
+
 static iree_string_view_t
 loom_target_compile_report_allocation_failure_blocking_kind_name(
     loom_target_compile_report_allocation_failure_blocking_kind_t kind) {
@@ -959,39 +997,13 @@ static iree_status_t loom_target_compile_report_format_summary(
           &report->source_low_memory_summary;
       IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
           builder,
-          "COMPILE-REPORT: source_low_memory packets=%" PRIu64 " loads=%" PRIu64
-          " stores=%" PRIu64 " scalar_packets=%" PRIu64
-          " vector_packets=%" PRIu64 " source_lanes=%" PRIu64
-          " source_bytes=%" PRIu64 " read_bytes=%" PRIu64
-          " write_bytes=%" PRIu64 " issued_read_bytes=%" PRIu64
-          " issued_write_bytes=%" PRIu64 " issued_read_unknown_widths=%" PRIu64
-          " issued_write_unknown_widths=%" PRIu64
-          " contiguous_vector_packets=%" PRIu64
-          " strided_vector_packets=%" PRIu64
-          " unknown_stride_vector_packets=%" PRIu64 " roots=%" PRIhsz,
-          summary->packet_count, summary->load_packet_count,
-          summary->store_packet_count, summary->scalar_packet_count,
-          summary->vector_packet_count, summary->source_lane_count,
-          summary->source_byte_count, summary->read_byte_count,
-          summary->write_byte_count, summary->issued_read_byte_count,
-          summary->issued_write_byte_count,
-          summary->issued_read_unknown_width_count,
-          summary->issued_write_unknown_width_count,
-          summary->contiguous_vector_packet_count,
-          summary->strided_vector_packet_count,
-          summary->unknown_stride_vector_packet_count,
-          report->source_low_memory_root_summaries.count));
+          "COMPILE-REPORT: source_low_memory roots=%" PRIhsz
+          " arguments=%" PRIhsz,
+          report->source_low_memory_root_summaries.count,
+          report->source_low_memory_argument_summaries.count));
       IREE_RETURN_IF_ERROR(
-          loom_target_compile_report_append_memory_interval_summary_text(
-              "interval_envelope", &summary->interval_envelope, builder));
-      IREE_RETURN_IF_ERROR(
-          loom_target_compile_report_append_memory_interval_summary_text(
-              "read_interval_envelope", &summary->read_interval_envelope,
-              builder));
-      IREE_RETURN_IF_ERROR(
-          loom_target_compile_report_append_memory_interval_summary_text(
-              "write_interval_envelope", &summary->write_interval_envelope,
-              builder));
+          loom_target_compile_report_append_source_low_memory_summary_text(
+              summary, builder));
       IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "\n"));
     }
   }
@@ -2081,36 +2093,45 @@ loom_target_compile_report_format_source_low_memory_root_summaries(
             row->source_root_argument_index));
       }
       IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+          builder, " memory_space=%.*s", (int)memory_space.size,
+          memory_space.data));
+      IREE_RETURN_IF_ERROR(
+          loom_target_compile_report_append_source_low_memory_summary_text(
+              &row->summary, builder));
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "\n"));
+    }
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t
+loom_target_compile_report_format_source_low_memory_argument_summaries(
+    const loom_target_compile_report_t* report,
+    iree_string_builder_t* builder) {
+  iree_host_size_t row_index = 0;
+  for (const loom_target_compile_report_vec_t* vec =
+           report->source_low_memory_argument_summaries.head;
+       vec != NULL; vec = vec->next) {
+    const loom_target_compile_report_source_low_memory_argument_summary_t* rows =
+        (const loom_target_compile_report_source_low_memory_argument_summary_t*)
+            loom_target_compile_report_vec_const_rows(vec);
+    for (iree_host_size_t i = 0; i < vec->count; ++i, ++row_index) {
+      const loom_target_compile_report_source_low_memory_argument_summary_t*
+          row = &rows[i];
+      const iree_string_view_t function_name =
+          loom_target_compile_report_non_empty(row->function_name);
+      const iree_string_view_t memory_space =
+          loom_target_compile_report_non_empty(row->memory_space);
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
           builder,
-          " memory_space=%.*s packets=%" PRIu64 " loads=%" PRIu64
-          " stores=%" PRIu64 " scalar_packets=%" PRIu64
-          " vector_packets=%" PRIu64 " source_lanes=%" PRIu64
-          " source_bytes=%" PRIu64 " read_bytes=%" PRIu64
-          " write_bytes=%" PRIu64 " issued_read_bytes=%" PRIu64
-          " issued_write_bytes=%" PRIu64 " issued_read_unknown_widths=%" PRIu64
-          " issued_write_unknown_widths=%" PRIu64
-          " contiguous_vector_packets=%" PRIu64
-          " strided_vector_packets=%" PRIu64
-          " unknown_stride_vector_packets=%" PRIu64,
-          (int)memory_space.size, memory_space.data, row->packet_count,
-          row->load_packet_count, row->store_packet_count,
-          row->scalar_packet_count, row->vector_packet_count,
-          row->source_lane_count, row->source_byte_count, row->read_byte_count,
-          row->write_byte_count, row->issued_read_byte_count,
-          row->issued_write_byte_count, row->issued_read_unknown_width_count,
-          row->issued_write_unknown_width_count,
-          row->contiguous_vector_packet_count, row->strided_vector_packet_count,
-          row->unknown_stride_vector_packet_count));
+          "COMPILE-REPORT: source_low_memory_argument[%" PRIhsz
+          "] function=%.*s source_root_argument_index=%u memory_space=%.*s",
+          row_index, (int)function_name.size, function_name.data,
+          row->source_root_argument_index, (int)memory_space.size,
+          memory_space.data));
       IREE_RETURN_IF_ERROR(
-          loom_target_compile_report_append_memory_interval_summary_text(
-              "interval_envelope", &row->interval_envelope, builder));
-      IREE_RETURN_IF_ERROR(
-          loom_target_compile_report_append_memory_interval_summary_text(
-              "read_interval_envelope", &row->read_interval_envelope, builder));
-      IREE_RETURN_IF_ERROR(
-          loom_target_compile_report_append_memory_interval_summary_text(
-              "write_interval_envelope", &row->write_interval_envelope,
-              builder));
+          loom_target_compile_report_append_source_low_memory_summary_text(
+              &row->summary, builder));
       IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "\n"));
     }
   }
@@ -4170,6 +4191,71 @@ loom_target_compile_report_format_source_low_memory_row_json(
 }
 
 static iree_status_t
+loom_target_compile_report_format_source_low_memory_summary_fields_json(
+    const loom_target_compile_report_source_low_memory_summary_t* summary,
+    loom_output_stream_t* stream, bool* inout_first_field) {
+  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
+      stream, inout_first_field, "packet_count", summary->packet_count));
+  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
+      stream, inout_first_field, "load_packet_count",
+      summary->load_packet_count));
+  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
+      stream, inout_first_field, "store_packet_count",
+      summary->store_packet_count));
+  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
+      stream, inout_first_field, "scalar_packet_count",
+      summary->scalar_packet_count));
+  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
+      stream, inout_first_field, "vector_packet_count",
+      summary->vector_packet_count));
+  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
+      stream, inout_first_field, "source_lane_count",
+      summary->source_lane_count));
+  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
+      stream, inout_first_field, "source_byte_count",
+      summary->source_byte_count));
+  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
+      stream, inout_first_field, "read_byte_count", summary->read_byte_count));
+  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
+      stream, inout_first_field, "write_byte_count",
+      summary->write_byte_count));
+  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
+      stream, inout_first_field, "issued_read_byte_count",
+      summary->issued_read_byte_count));
+  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
+      stream, inout_first_field, "issued_write_byte_count",
+      summary->issued_write_byte_count));
+  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
+      stream, inout_first_field, "issued_read_unknown_width_count",
+      summary->issued_read_unknown_width_count));
+  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
+      stream, inout_first_field, "issued_write_unknown_width_count",
+      summary->issued_write_unknown_width_count));
+  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
+      stream, inout_first_field, "contiguous_vector_packet_count",
+      summary->contiguous_vector_packet_count));
+  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
+      stream, inout_first_field, "strided_vector_packet_count",
+      summary->strided_vector_packet_count));
+  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
+      stream, inout_first_field, "unknown_stride_vector_packet_count",
+      summary->unknown_stride_vector_packet_count));
+  IREE_RETURN_IF_ERROR(
+      loom_target_compile_report_format_memory_interval_summary_json(
+          "interval_envelope", &summary->interval_envelope, stream,
+          inout_first_field));
+  IREE_RETURN_IF_ERROR(
+      loom_target_compile_report_format_memory_interval_summary_json(
+          "read_interval_envelope", &summary->read_interval_envelope, stream,
+          inout_first_field));
+  IREE_RETURN_IF_ERROR(
+      loom_target_compile_report_format_memory_interval_summary_json(
+          "write_interval_envelope", &summary->write_interval_envelope, stream,
+          inout_first_field));
+  return iree_ok_status();
+}
+
+static iree_status_t
 loom_target_compile_report_format_source_low_memory_root_summary_json(
     const loom_target_compile_report_source_low_memory_root_summary_t* row,
     iree_host_size_t row_index, loom_output_stream_t* stream) {
@@ -4191,56 +4277,32 @@ loom_target_compile_report_format_source_low_memory_root_summary_json(
   IREE_RETURN_IF_ERROR(
       loom_target_compile_report_json_write_optional_string_field(
           stream, &first_field, "memory_space", row->memory_space));
-  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
-      stream, &first_field, "packet_count", row->packet_count));
-  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
-      stream, &first_field, "load_packet_count", row->load_packet_count));
-  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
-      stream, &first_field, "store_packet_count", row->store_packet_count));
-  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
-      stream, &first_field, "scalar_packet_count", row->scalar_packet_count));
-  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
-      stream, &first_field, "vector_packet_count", row->vector_packet_count));
-  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
-      stream, &first_field, "source_lane_count", row->source_lane_count));
-  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
-      stream, &first_field, "source_byte_count", row->source_byte_count));
-  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
-      stream, &first_field, "read_byte_count", row->read_byte_count));
-  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
-      stream, &first_field, "write_byte_count", row->write_byte_count));
-  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
-      stream, &first_field, "issued_read_byte_count",
-      row->issued_read_byte_count));
-  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
-      stream, &first_field, "issued_write_byte_count",
-      row->issued_write_byte_count));
-  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
-      stream, &first_field, "issued_read_unknown_width_count",
-      row->issued_read_unknown_width_count));
-  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
-      stream, &first_field, "issued_write_unknown_width_count",
-      row->issued_write_unknown_width_count));
-  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
-      stream, &first_field, "contiguous_vector_packet_count",
-      row->contiguous_vector_packet_count));
-  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
-      stream, &first_field, "strided_vector_packet_count",
-      row->strided_vector_packet_count));
-  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
-      stream, &first_field, "unknown_stride_vector_packet_count",
-      row->unknown_stride_vector_packet_count));
   IREE_RETURN_IF_ERROR(
-      loom_target_compile_report_format_memory_interval_summary_json(
-          "interval_envelope", &row->interval_envelope, stream, &first_field));
+      loom_target_compile_report_format_source_low_memory_summary_fields_json(
+          &row->summary, stream, &first_field));
+  return loom_output_stream_write_cstring(stream, "}");
+}
+
+static iree_status_t
+loom_target_compile_report_format_source_low_memory_argument_summary_json(
+    const loom_target_compile_report_source_low_memory_argument_summary_t* row,
+    iree_host_size_t row_index, loom_output_stream_t* stream) {
+  bool first_field = true;
+  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "{"));
+  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_size_field(
+      stream, &first_field, "index", row_index));
   IREE_RETURN_IF_ERROR(
-      loom_target_compile_report_format_memory_interval_summary_json(
-          "read_interval_envelope", &row->read_interval_envelope, stream,
-          &first_field));
+      loom_target_compile_report_json_write_optional_string_field(
+          stream, &first_field, "function", row->function_name));
+  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u32_field(
+      stream, &first_field, "source_root_argument_index",
+      row->source_root_argument_index));
   IREE_RETURN_IF_ERROR(
-      loom_target_compile_report_format_memory_interval_summary_json(
-          "write_interval_envelope", &row->write_interval_envelope, stream,
-          &first_field));
+      loom_target_compile_report_json_write_optional_string_field(
+          stream, &first_field, "memory_space", row->memory_space));
+  IREE_RETURN_IF_ERROR(
+      loom_target_compile_report_format_source_low_memory_summary_fields_json(
+          &row->summary, stream, &first_field));
   return loom_output_stream_write_cstring(stream, "}");
 }
 
@@ -4251,59 +4313,9 @@ loom_target_compile_report_format_source_low_memory_summary_json(
       &report->source_low_memory_summary;
   bool first_field = true;
   IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "{"));
-  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
-      stream, &first_field, "packet_count", summary->packet_count));
-  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
-      stream, &first_field, "load_packet_count", summary->load_packet_count));
-  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
-      stream, &first_field, "store_packet_count", summary->store_packet_count));
-  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
-      stream, &first_field, "scalar_packet_count",
-      summary->scalar_packet_count));
-  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
-      stream, &first_field, "vector_packet_count",
-      summary->vector_packet_count));
-  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
-      stream, &first_field, "source_lane_count", summary->source_lane_count));
-  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
-      stream, &first_field, "source_byte_count", summary->source_byte_count));
-  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
-      stream, &first_field, "read_byte_count", summary->read_byte_count));
-  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
-      stream, &first_field, "write_byte_count", summary->write_byte_count));
-  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
-      stream, &first_field, "issued_read_byte_count",
-      summary->issued_read_byte_count));
-  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
-      stream, &first_field, "issued_write_byte_count",
-      summary->issued_write_byte_count));
-  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
-      stream, &first_field, "issued_read_unknown_width_count",
-      summary->issued_read_unknown_width_count));
-  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
-      stream, &first_field, "issued_write_unknown_width_count",
-      summary->issued_write_unknown_width_count));
-  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
-      stream, &first_field, "contiguous_vector_packet_count",
-      summary->contiguous_vector_packet_count));
-  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
-      stream, &first_field, "strided_vector_packet_count",
-      summary->strided_vector_packet_count));
-  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
-      stream, &first_field, "unknown_stride_vector_packet_count",
-      summary->unknown_stride_vector_packet_count));
   IREE_RETURN_IF_ERROR(
-      loom_target_compile_report_format_memory_interval_summary_json(
-          "interval_envelope", &summary->interval_envelope, stream,
-          &first_field));
-  IREE_RETURN_IF_ERROR(
-      loom_target_compile_report_format_memory_interval_summary_json(
-          "read_interval_envelope", &summary->read_interval_envelope, stream,
-          &first_field));
-  IREE_RETURN_IF_ERROR(
-      loom_target_compile_report_format_memory_interval_summary_json(
-          "write_interval_envelope", &summary->write_interval_envelope, stream,
-          &first_field));
+      loom_target_compile_report_format_source_low_memory_summary_fields_json(
+          summary, stream, &first_field));
   if (report->source_low_memory_root_summaries.count != 0) {
     IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_size_field(
         stream, &first_field, "root_count",
@@ -4324,6 +4336,31 @@ loom_target_compile_report_format_source_low_memory_summary_json(
         }
         IREE_RETURN_IF_ERROR(
             loom_target_compile_report_format_source_low_memory_root_summary_json(
+                &rows[i], row_index, stream));
+      }
+    }
+    IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "]"));
+  }
+  if (report->source_low_memory_argument_summaries.count != 0) {
+    IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_size_field(
+        stream, &first_field, "argument_count",
+        report->source_low_memory_argument_summaries.count));
+    IREE_RETURN_IF_ERROR(loom_target_compile_report_json_begin_field(
+        stream, &first_field, "arguments"));
+    IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "["));
+    iree_host_size_t row_index = 0;
+    for (const loom_target_compile_report_vec_t* vec =
+             report->source_low_memory_argument_summaries.head;
+         vec != NULL; vec = vec->next) {
+      const loom_target_compile_report_source_low_memory_argument_summary_t* rows =
+          (const loom_target_compile_report_source_low_memory_argument_summary_t*)
+              loom_target_compile_report_vec_const_rows(vec);
+      for (iree_host_size_t i = 0; i < vec->count; ++i, ++row_index) {
+        if (row_index != 0) {
+          IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, ","));
+        }
+        IREE_RETURN_IF_ERROR(
+            loom_target_compile_report_format_source_low_memory_argument_summary_json(
                 &rows[i], row_index, stream));
       }
     }
@@ -4680,6 +4717,9 @@ iree_status_t loom_target_compile_report_format_text(
                                                                  builder));
     IREE_RETURN_IF_ERROR(
         loom_target_compile_report_format_source_low_memory_root_summaries(
+            report, builder));
+    IREE_RETURN_IF_ERROR(
+        loom_target_compile_report_format_source_low_memory_argument_summaries(
             report, builder));
     IREE_RETURN_IF_ERROR(
         loom_target_compile_report_format_legalization_rows(report, builder));
