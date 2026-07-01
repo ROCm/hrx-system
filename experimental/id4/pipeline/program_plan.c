@@ -18,6 +18,8 @@ typedef struct id4_pipeline_program_plan_counts_t {
   iree_host_size_t parameter_count;
   // Number of program-owned constant operations in the program.
   iree_host_size_t constant_count;
+  // Number of acquired transient tensors in the program.
+  iree_host_size_t acquire_count;
   // Number of Loom dispatch operations in the program.
   iree_host_size_t dispatch_count;
   // Number of barrier operations in the program.
@@ -33,6 +35,10 @@ typedef struct id4_pipeline_program_plan_counts_t {
 typedef struct id4_pipeline_program_plan_lowering_context_t {
   // Program lowering options.
   const id4_pipeline_program_plan_options_t* options;
+  // Shared tensor plans in program tensor ordinal lookup order.
+  const id4_pipeline_shared_tensor_plan_t* shared_tensors;
+  // Number of shared tensor plans.
+  iree_host_size_t shared_tensor_count;
   // Parameter requests in program parameter-operation order.
   const id4_pipeline_parameter_request_t* parameter_requests;
   // Constant requests in program constant-operation order.
@@ -64,6 +70,13 @@ typedef struct id4_pipeline_program_plan_region_range_t {
   // Number of dispatch/barrier operations in the region interval.
   iree_host_size_t region_operation_count;
 } id4_pipeline_program_plan_region_range_t;
+
+typedef struct id4_pipeline_program_plan_shared_tensor_record_t {
+  // Final shared tensor plan entry.
+  id4_pipeline_shared_tensor_plan_t plan;
+  // Last source-program operation ordinal that may use the tensor.
+  iree_host_size_t last_use_operation_ordinal;
+} id4_pipeline_program_plan_shared_tensor_record_t;
 
 static iree_status_t id4_pipeline_program_plan_validate_options_size(
     iree_host_size_t actual_size, iree_host_size_t expected_size,
@@ -234,6 +247,9 @@ static id4_pipeline_program_plan_counts_t id4_pipeline_program_plan_count_ops(
       case ID4_PIPELINE_PROGRAM_OP_KIND_CONSTANT:
         ++counts.constant_count;
         break;
+      case ID4_PIPELINE_PROGRAM_OP_KIND_ACQUIRE:
+        ++counts.acquire_count;
+        break;
       case ID4_PIPELINE_PROGRAM_OP_KIND_DISPATCH_LOOM:
         ++counts.dispatch_count;
         ++counts.region_operation_count;
@@ -321,6 +337,247 @@ static void id4_pipeline_program_plan_build_region_ranges(
   id4_pipeline_program_plan_append_region_range(
       program, id4_pipeline_program_name(program), operation_offset,
       operation_count, out_range_count, ranges);
+}
+
+static iree_status_t id4_pipeline_program_plan_find_region_index_for_operation(
+    iree_host_size_t range_count,
+    const id4_pipeline_program_plan_region_range_t* ranges,
+    iree_host_size_t operation_ordinal, iree_host_size_t* out_region_index) {
+  *out_region_index = IREE_HOST_SIZE_MAX;
+  for (iree_host_size_t i = 0; i < range_count; ++i) {
+    const iree_host_size_t range_offset = ranges[i].source_operation_offset;
+    const iree_host_size_t range_limit =
+        ranges[i].source_operation_offset + ranges[i].source_operation_count;
+    if (operation_ordinal >= range_offset && operation_ordinal < range_limit) {
+      *out_region_index = i;
+      return iree_ok_status();
+    }
+  }
+  return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                          "program operation %" PRIhsz
+                          " is not contained by an executable region",
+                          operation_ordinal);
+}
+
+static bool id4_pipeline_program_plan_operation_uses_tensor(
+    const id4_pipeline_program_plan_options_t* options,
+    const id4_pipeline_program_op_t* op, id4_pipeline_program_tensor_t tensor) {
+  if (!op) return false;
+  switch (op->kind) {
+    case ID4_PIPELINE_PROGRAM_OP_KIND_DISPATCH_LOOM:
+      for (iree_host_size_t i = 0; i < op->payload.dispatch_loom.binding_count;
+           ++i) {
+        if (op->payload.dispatch_loom.bindings[i].tensor.ordinal ==
+            tensor.ordinal) {
+          return true;
+        }
+      }
+      return false;
+    case ID4_PIPELINE_PROGRAM_OP_KIND_TAP:
+      return id4_pipeline_program_plan_tap_name_requested(
+                 options, op->payload.tap.name) &&
+             op->payload.tap.tensor.ordinal == tensor.ordinal;
+    case ID4_PIPELINE_PROGRAM_OP_KIND_EXPORT:
+      return op->payload.export_value.tensor.ordinal == tensor.ordinal;
+    default:
+      return false;
+  }
+}
+
+static iree_host_size_t id4_pipeline_program_plan_find_last_tensor_use(
+    const id4_pipeline_program_plan_options_t* options,
+    id4_pipeline_program_tensor_t tensor) {
+  iree_host_size_t last_use_operation_ordinal = IREE_HOST_SIZE_MAX;
+  const iree_host_size_t operation_count =
+      id4_pipeline_program_operation_count(options->program);
+  for (iree_host_size_t i = 0; i < operation_count; ++i) {
+    const id4_pipeline_program_op_t* op =
+        id4_pipeline_program_operation_at(options->program, i);
+    if (id4_pipeline_program_plan_operation_uses_tensor(options, op, tensor)) {
+      last_use_operation_ordinal = i;
+    }
+  }
+  return last_use_operation_ordinal;
+}
+
+static iree_status_t id4_pipeline_program_plan_try_reuse_shared_range(
+    iree_host_size_t shared_tensor_count,
+    const id4_pipeline_program_plan_shared_tensor_record_t* shared_tensors,
+    iree_host_size_t acquire_region_id, iree_device_size_t byte_length,
+    iree_device_size_t alignment, iree_device_size_t* out_offset,
+    bool* out_found) {
+  *out_offset = 0;
+  *out_found = false;
+  const iree_device_size_t effective_alignment = alignment == 0 ? 1 : alignment;
+  for (iree_host_size_t i = 0; i < shared_tensor_count; ++i) {
+    const id4_pipeline_shared_tensor_plan_t* existing = &shared_tensors[i].plan;
+    if (existing->last_use_region_id >= acquire_region_id) continue;
+    if (existing->layout.byte_length < byte_length) continue;
+    if (!iree_device_size_has_alignment(existing->offset,
+                                        effective_alignment)) {
+      continue;
+    }
+    *out_offset = existing->offset;
+    *out_found = true;
+    return iree_ok_status();
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t id4_pipeline_program_plan_bump_shared_range(
+    iree_device_size_t byte_length, iree_device_size_t alignment,
+    iree_device_size_t* io_shared_slab_byte_length,
+    iree_device_size_t* out_offset) {
+  const iree_device_size_t effective_alignment = alignment == 0 ? 1 : alignment;
+  iree_device_size_t aligned_offset = 0;
+  if (!iree_device_size_checked_align(*io_shared_slab_byte_length,
+                                      effective_alignment, &aligned_offset)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "shared transient slab alignment overflow");
+  }
+  iree_device_size_t allocation_end = 0;
+  if (!iree_device_size_checked_add(aligned_offset, byte_length,
+                                    &allocation_end)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "shared transient slab allocation overflow");
+  }
+  *io_shared_slab_byte_length = allocation_end;
+  *out_offset = aligned_offset;
+  return iree_ok_status();
+}
+
+static iree_status_t id4_pipeline_program_plan_shared_tensor_high_water_mark(
+    iree_host_size_t region_count, iree_host_size_t shared_tensor_count,
+    const id4_pipeline_program_plan_shared_tensor_record_t* shared_tensors,
+    iree_device_size_t* out_high_water_mark) {
+  *out_high_water_mark = 0;
+  iree_device_size_t high_water_mark = 0;
+  for (iree_host_size_t region_index = 0; region_index < region_count;
+       ++region_index) {
+    iree_device_size_t live_byte_length = 0;
+    for (iree_host_size_t tensor_index = 0; tensor_index < shared_tensor_count;
+         ++tensor_index) {
+      const id4_pipeline_shared_tensor_plan_t* shared_tensor =
+          &shared_tensors[tensor_index].plan;
+      if (shared_tensor->acquire_region_id <= region_index &&
+          shared_tensor->last_use_region_id >= region_index) {
+        if (!iree_device_size_checked_add(live_byte_length,
+                                          shared_tensor->layout.byte_length,
+                                          &live_byte_length)) {
+          return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                  "shared transient live byte length overflow");
+        }
+      }
+    }
+    high_water_mark = iree_max(high_water_mark, live_byte_length);
+  }
+  *out_high_water_mark = high_water_mark;
+  return iree_ok_status();
+}
+
+static iree_status_t id4_pipeline_program_plan_build_shared_tensors(
+    const id4_pipeline_program_plan_options_t* options,
+    iree_host_size_t range_count,
+    const id4_pipeline_program_plan_region_range_t* ranges,
+    id4_pipeline_program_plan_shared_tensor_record_t* shared_tensors,
+    iree_host_size_t* out_shared_tensor_count,
+    iree_device_size_t* out_shared_slab_byte_length,
+    iree_device_size_t* out_shared_slab_high_water_mark) {
+  *out_shared_tensor_count = 0;
+  *out_shared_slab_byte_length = 0;
+  *out_shared_slab_high_water_mark = 0;
+  if (range_count < 2) return iree_ok_status();
+
+  for (iree_host_size_t region_index = 0; region_index < range_count;
+       ++region_index) {
+    const id4_pipeline_program_plan_region_range_t* range =
+        &ranges[region_index];
+    const iree_host_size_t operation_limit =
+        range->source_operation_offset + range->source_operation_count;
+    for (iree_host_size_t i = range->source_operation_offset;
+         i < operation_limit; ++i) {
+      const id4_pipeline_program_op_t* op =
+          id4_pipeline_program_operation_at(options->program, i);
+      if (!op || op->kind != ID4_PIPELINE_PROGRAM_OP_KIND_ACQUIRE) continue;
+
+      const id4_pipeline_program_acquire_op_t* acquire = &op->payload.acquire;
+      const iree_host_size_t last_use_operation_ordinal =
+          id4_pipeline_program_plan_find_last_tensor_use(options,
+                                                         acquire->tensor);
+      if (last_use_operation_ordinal == IREE_HOST_SIZE_MAX) continue;
+
+      iree_host_size_t last_use_region_id = IREE_HOST_SIZE_MAX;
+      IREE_RETURN_IF_ERROR(
+          id4_pipeline_program_plan_find_region_index_for_operation(
+              range_count, ranges, last_use_operation_ordinal,
+              &last_use_region_id));
+      if (last_use_region_id == region_index) continue;
+      if (region_index > UINT32_MAX || last_use_region_id > UINT32_MAX) {
+        return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                "shared transient region index overflow");
+      }
+
+      const id4_pipeline_program_tensor_record_t* tensor =
+          id4_pipeline_program_tensor_at(options->program,
+                                         acquire->tensor.ordinal);
+      if (!tensor) {
+        return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                "program acquire tensor %u is missing",
+                                acquire->tensor.ordinal);
+      }
+      id4_pipeline_tensor_shape_t shape;
+      memset(&shape, 0, sizeof(shape));
+      shape.rank = tensor->shape.rank;
+      memcpy(shape.dims, tensor->shape.dims, sizeof(shape.dims));
+      const id4_pipeline_tensor_layout_t layout = {
+          // Shared tensor diagnostic name.
+          .name = tensor->name,
+          // Shared tensor element type.
+          .dtype = id4_pipeline_program_region_convert_dtype(tensor->dtype),
+          // Shared tensor shape.
+          .shape = shape,
+          // Dense shared tensor byte length.
+          .byte_length = tensor->byte_length,
+          // Required shared tensor alignment.
+          .alignment = options->region_local_tensor_alignment,
+      };
+
+      iree_device_size_t offset = 0;
+      bool found_reusable_range = false;
+      IREE_RETURN_IF_ERROR(id4_pipeline_program_plan_try_reuse_shared_range(
+          *out_shared_tensor_count, shared_tensors, region_index,
+          layout.byte_length, layout.alignment, &offset,
+          &found_reusable_range));
+      if (!found_reusable_range) {
+        IREE_RETURN_IF_ERROR(id4_pipeline_program_plan_bump_shared_range(
+            layout.byte_length, layout.alignment, out_shared_slab_byte_length,
+            &offset));
+      }
+
+      id4_pipeline_program_plan_shared_tensor_record_t* record =
+          &shared_tensors[*out_shared_tensor_count];
+      record->plan = (id4_pipeline_shared_tensor_plan_t){
+          // Shared tensor layout.
+          .layout = layout,
+          // Semantic program tensor ordinal.
+          .program_tensor_ordinal = acquire->tensor.ordinal,
+          // Single plan-shared slab emitted below.
+          .memory_slab_index = 0,
+          // Byte offset into the shared slab.
+          .offset = offset,
+          // Region acquiring this tensor.
+          .acquire_region_id = (uint32_t)region_index,
+          // Last region that may use this tensor.
+          .last_use_region_id = (uint32_t)last_use_region_id,
+      };
+      record->last_use_operation_ordinal = last_use_operation_ordinal;
+      ++*out_shared_tensor_count;
+    }
+  }
+
+  return id4_pipeline_program_plan_shared_tensor_high_water_mark(
+      range_count, *out_shared_tensor_count, shared_tensors,
+      out_shared_slab_high_water_mark);
 }
 
 static bool id4_pipeline_program_plan_kernel_config_equal(
@@ -755,6 +1012,69 @@ static iree_status_t id4_pipeline_program_plan_validate_diagnostic_tap_slots(
   return iree_ok_status();
 }
 
+static iree_status_t id4_pipeline_program_plan_validate_shared_slot(
+    const id4_pipeline_program_plan_options_t* options,
+    id4_pipeline_program_plan_counts_t counts) {
+  const uint32_t binding_slot = options->region_shared_binding_slot;
+  if (binding_slot >= options->region_binding_capacity) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "program shared binding slot %u exceeds region "
+                            "binding capacity %" PRIhsz,
+                            binding_slot, options->region_binding_capacity);
+  }
+  if (binding_slot == options->region_local_binding_slot) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "program shared binding slot must not match the "
+                            "local slab binding slot");
+  }
+  if (counts.parameter_count != 0 &&
+      binding_slot == options->parameter_slab_binding_slot) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "program shared binding slot must not match the "
+                            "parameter slab binding slot");
+  }
+  if (counts.constant_count != 0 &&
+      binding_slot == options->constant_slab_binding_slot) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "program shared binding slot must not match the "
+                            "constant slab binding slot");
+  }
+  for (iree_host_size_t i = 0; i < counts.import_count; ++i) {
+    if (i > UINT32_MAX ||
+        options->region_boundary_binding_slot_base > UINT32_MAX - (uint32_t)i) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "program boundary binding slot overflow");
+    }
+    const uint32_t boundary_slot =
+        options->region_boundary_binding_slot_base + (uint32_t)i;
+    if (binding_slot == boundary_slot) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "program shared binding slot must not match "
+                              "boundary binding slot %u",
+                              boundary_slot);
+    }
+  }
+  if (!id4_pipeline_program_plan_captures_diagnostic_taps(options)) {
+    return iree_ok_status();
+  }
+  for (iree_host_size_t i = 0; i < counts.tap_count; ++i) {
+    if (i > UINT32_MAX ||
+        options->diagnostic_tap_binding_slot_base > UINT32_MAX - (uint32_t)i) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "program diagnostic tap binding slot overflow");
+    }
+    const uint32_t tap_slot =
+        options->diagnostic_tap_binding_slot_base + (uint32_t)i;
+    if (binding_slot == tap_slot) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "program shared binding slot must not match "
+                              "diagnostic tap binding slot %u",
+                              tap_slot);
+    }
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t id4_pipeline_program_plan_build_boundary_tensors(
     const id4_pipeline_program_plan_options_t* options,
     id4_pipeline_program_plan_counts_t counts,
@@ -1001,6 +1321,31 @@ static iree_status_t id4_pipeline_program_plan_resolve_constant(
   return iree_ok_status();
 }
 
+static iree_status_t id4_pipeline_program_plan_resolve_shared_tensor(
+    void* user_data, const id4_pipeline_program_acquire_op_t* acquire_op,
+    const id4_pipeline_program_tensor_record_t* tensor, bool* out_is_shared,
+    id4_pipeline_tensor_import_t* out_import) {
+  (void)tensor;
+  *out_is_shared = false;
+  memset(out_import, 0, sizeof(*out_import));
+  id4_pipeline_program_plan_lowering_context_t* context =
+      (id4_pipeline_program_plan_lowering_context_t*)user_data;
+  for (iree_host_size_t i = 0; i < context->shared_tensor_count; ++i) {
+    const id4_pipeline_shared_tensor_plan_t* shared_tensor =
+        &context->shared_tensors[i];
+    if (shared_tensor->program_tensor_ordinal != acquire_op->tensor.ordinal) {
+      continue;
+    }
+    *out_is_shared = true;
+    out_import->layout = shared_tensor->layout;
+    out_import->binding_slot = context->options->region_shared_binding_slot;
+    out_import->offset = shared_tensor->offset;
+    out_import->flags = 0;
+    return iree_ok_status();
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t id4_pipeline_program_plan_resolve_tap(
     void* user_data, const id4_pipeline_program_tap_op_t* tap_op,
     const id4_pipeline_program_tensor_record_t* tensor,
@@ -1022,6 +1367,8 @@ static iree_status_t id4_pipeline_program_plan_dry_run_region(
     const id4_pipeline_program_plan_options_t* options,
     const id4_pipeline_program_plan_region_range_t* range,
     id4_pipeline_program_plan_counts_t counts,
+    iree_host_size_t shared_tensor_count,
+    const id4_pipeline_shared_tensor_plan_t* shared_tensors,
     const id4_pipeline_parameter_request_t* parameter_requests,
     const id4_pipeline_constant_request_t* constant_requests,
     const id4_pipeline_boundary_tensor_plan_t* boundary_tensors,
@@ -1030,6 +1377,7 @@ static iree_status_t id4_pipeline_program_plan_dry_run_region(
     id4_pipeline_region_statistics_t* out_statistics,
     iree_host_size_t* out_local_lifetime_count,
     id4_pipeline_region_local_lifetime_t** out_local_lifetimes) {
+  (void)counts;
   memset(out_statistics, 0, sizeof(*out_statistics));
   *out_local_lifetime_count = 0;
   *out_local_lifetimes = NULL;
@@ -1060,6 +1408,10 @@ static iree_status_t id4_pipeline_program_plan_dry_run_region(
   id4_pipeline_program_plan_lowering_context_t lowering_context = {
       // Program lowering options.
       .options = options,
+      // Shared tensor table.
+      .shared_tensors = shared_tensors,
+      // Number of shared tensor records.
+      .shared_tensor_count = shared_tensor_count,
       // Parameter request table.
       .parameter_requests = parameter_requests,
       // Constant request table.
@@ -1097,6 +1449,9 @@ static iree_status_t id4_pipeline_program_plan_dry_run_region(
         .resolve_parameter = id4_pipeline_program_plan_resolve_parameter,
         // Resolves constant tensor imports.
         .resolve_constant = id4_pipeline_program_plan_resolve_constant,
+        // Resolves plan-shared acquired tensor imports.
+        .resolve_shared_tensor =
+            id4_pipeline_program_plan_resolve_shared_tensor,
         // Resolves diagnostic tap imports.
         .resolve_tap = id4_pipeline_program_plan_resolve_tap,
     };
@@ -1145,6 +1500,26 @@ static iree_status_t id4_pipeline_program_plan_make_constant_slab_name(
       iree_string_builder_append_string(&builder, program_name);
   if (iree_status_is_ok(status)) {
     status = iree_string_builder_append_cstring(&builder, ".constants");
+  }
+  if (iree_status_is_ok(status)) {
+    const iree_host_size_t name_size = iree_string_builder_size(&builder);
+    char* storage = iree_string_builder_take_storage(&builder);
+    *out_name = iree_make_string_view(storage, name_size);
+  }
+  iree_string_builder_deinitialize(&builder);
+  return status;
+}
+
+static iree_status_t id4_pipeline_program_plan_make_shared_slab_name(
+    iree_string_view_t program_name, iree_allocator_t host_allocator,
+    iree_string_view_t* out_name) {
+  *out_name = iree_string_view_empty();
+  iree_string_builder_t builder;
+  iree_string_builder_initialize(host_allocator, &builder);
+  iree_status_t status =
+      iree_string_builder_append_string(&builder, program_name);
+  if (iree_status_is_ok(status)) {
+    status = iree_string_builder_append_cstring(&builder, ".shared");
   }
   if (iree_status_is_ok(status)) {
     const iree_host_size_t name_size = iree_string_builder_size(&builder);
@@ -1223,14 +1598,21 @@ iree_status_t id4_pipeline_program_create_plan(
   id4_pipeline_kernel_plan_t* kernels = NULL;
   id4_pipeline_diagnostic_tap_plan_t* taps = NULL;
   id4_pipeline_program_plan_region_range_t* region_ranges = NULL;
+  id4_pipeline_program_plan_shared_tensor_record_t* shared_tensor_records =
+      NULL;
+  id4_pipeline_shared_tensor_plan_t* shared_tensors = NULL;
   id4_pipeline_region_statistics_t* region_statistics = NULL;
   iree_host_size_t* region_local_lifetime_counts = NULL;
   id4_pipeline_region_local_lifetime_t** region_local_lifetimes = NULL;
   id4_pipeline_region_plan_t* regions = NULL;
   id4_pipeline_memory_slab_plan_t* memory_slabs = NULL;
+  iree_string_view_t shared_slab_name = iree_string_view_empty();
   iree_string_view_t* local_slab_names = NULL;
   iree_host_size_t parameter_load_step_count = 0;
   iree_host_size_t region_range_count = 0;
+  iree_host_size_t shared_tensor_count = 0;
+  iree_device_size_t shared_slab_byte_length = 0;
+  iree_device_size_t shared_slab_high_water_mark = 0;
   const iree_host_size_t planned_tap_count =
       id4_pipeline_program_plan_captures_diagnostic_taps(options)
           ? options->diagnostic_tap_names.count
@@ -1303,6 +1685,18 @@ iree_status_t id4_pipeline_program_create_plan(
     status = iree_allocator_malloc_array(host_allocator, planned_tap_count,
                                          sizeof(taps[0]), (void**)&taps);
   }
+  if (iree_status_is_ok(status) && counts.acquire_count != 0 &&
+      region_range_count > 1) {
+    status = iree_allocator_malloc_array(host_allocator, counts.acquire_count,
+                                         sizeof(shared_tensor_records[0]),
+                                         (void**)&shared_tensor_records);
+  }
+  if (iree_status_is_ok(status) && counts.acquire_count != 0 &&
+      region_range_count > 1) {
+    status = iree_allocator_malloc_array(host_allocator, counts.acquire_count,
+                                         sizeof(shared_tensors[0]),
+                                         (void**)&shared_tensors);
+  }
   if (iree_status_is_ok(status) && region_range_count != 0) {
     status = iree_allocator_malloc_array(host_allocator, region_range_count,
                                          sizeof(region_statistics[0]),
@@ -1331,12 +1725,12 @@ iree_status_t id4_pipeline_program_create_plan(
   }
   if (iree_status_is_ok(status) && region_range_count != 0) {
     memset(regions, 0, region_range_count * sizeof(regions[0]));
-    status = iree_allocator_malloc_array(host_allocator, region_range_count,
+    status = iree_allocator_malloc_array(host_allocator, region_range_count + 1,
                                          sizeof(memory_slabs[0]),
                                          (void**)&memory_slabs);
   }
   if (iree_status_is_ok(status) && region_range_count != 0) {
-    memset(memory_slabs, 0, region_range_count * sizeof(memory_slabs[0]));
+    memset(memory_slabs, 0, (region_range_count + 1) * sizeof(memory_slabs[0]));
     status = iree_allocator_malloc_array(host_allocator, region_range_count,
                                          sizeof(local_slab_names[0]),
                                          (void**)&local_slab_names);
@@ -1379,14 +1773,29 @@ iree_status_t id4_pipeline_program_create_plan(
     status = id4_pipeline_program_plan_build_taps(options, counts, taps);
   }
 
+  if (iree_status_is_ok(status) && shared_tensor_records) {
+    status = id4_pipeline_program_plan_build_shared_tensors(
+        options, region_range_count, region_ranges, shared_tensor_records,
+        &shared_tensor_count, &shared_slab_byte_length,
+        &shared_slab_high_water_mark);
+  }
+  if (iree_status_is_ok(status) && shared_tensor_count != 0) {
+    status = id4_pipeline_program_plan_validate_shared_slot(options, counts);
+  }
+  if (iree_status_is_ok(status)) {
+    for (iree_host_size_t i = 0; i < shared_tensor_count; ++i) {
+      shared_tensors[i] = shared_tensor_records[i].plan;
+    }
+  }
+
   if (iree_status_is_ok(status) && region_range_count != 0) {
     for (iree_host_size_t i = 0;
          i < region_range_count && iree_status_is_ok(status); ++i) {
       status = id4_pipeline_program_plan_dry_run_region(
-          options, &region_ranges[i], counts, parameter_requests,
-          constant_requests, boundary_tensors, taps, host_allocator,
-          &region_statistics[i], &region_local_lifetime_counts[i],
-          &region_local_lifetimes[i]);
+          options, &region_ranges[i], counts, shared_tensor_count,
+          shared_tensors, parameter_requests, constant_requests,
+          boundary_tensors, taps, host_allocator, &region_statistics[i],
+          &region_local_lifetime_counts[i], &region_local_lifetimes[i]);
     }
   } else if (iree_status_is_ok(status) && planned_tap_count != 0) {
     status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
@@ -1435,6 +1844,34 @@ iree_status_t id4_pipeline_program_create_plan(
   }
 
   iree_host_size_t memory_slab_count = 0;
+  if (iree_status_is_ok(status) && shared_tensor_count != 0) {
+    status = id4_pipeline_program_plan_make_shared_slab_name(
+        id4_pipeline_program_name(options->program), host_allocator,
+        &shared_slab_name);
+  }
+  if (iree_status_is_ok(status) && shared_tensor_count != 0) {
+    memory_slabs[memory_slab_count] = (id4_pipeline_memory_slab_plan_t){
+        // Human-readable shared transient slab name.
+        .name = shared_slab_name,
+        // Shared transient slab is visible to every executable region.
+        .scope = ID4_PIPELINE_MEMORY_SLAB_SCOPE_PLAN_SHARED,
+        // Plan-shared slabs are not owned by one region.
+        .region_id = 0,
+        // Shared transient slab follows the executable region placement.
+        .placement_id = options->region_placement_id,
+        // Binding-table slot reserved for the shared transient slab.
+        .binding_slot = options->region_shared_binding_slot,
+        // HAL buffer parameters used for shared transient allocation.
+        .params = options->region_local_slab_params,
+        // Planned shared slab byte length.
+        .byte_length = shared_slab_byte_length,
+        // Required shared slab base alignment.
+        .alignment = options->region_local_slab_alignment,
+        // Peak concurrently live shared tensor bytes.
+        .high_water_mark = shared_slab_high_water_mark,
+    };
+    ++memory_slab_count;
+  }
   if (iree_status_is_ok(status) && region_range_count != 0) {
     for (iree_host_size_t i = 0;
          i < region_range_count && iree_status_is_ok(status); ++i) {
@@ -1459,11 +1896,11 @@ iree_status_t id4_pipeline_program_create_plan(
       if (region_statistics[i].local_slab_byte_length == 0) continue;
 
       status = id4_pipeline_program_plan_make_local_slab_name(
-          range->name, host_allocator, &local_slab_names[memory_slab_count]);
+          range->name, host_allocator, &local_slab_names[i]);
       if (!iree_status_is_ok(status)) break;
       memory_slabs[memory_slab_count] = (id4_pipeline_memory_slab_plan_t){
           // Human-readable local slab name.
-          .name = local_slab_names[memory_slab_count],
+          .name = local_slab_names[i],
           // Local transient slab is scoped to one executable region.
           .scope = ID4_PIPELINE_MEMORY_SLAB_SCOPE_REGION_LOCAL,
           // Executable region owning this local slab.
@@ -1505,6 +1942,9 @@ iree_status_t id4_pipeline_program_create_plan(
         counts.constant_count == 0 ? NULL : &constant_slab;
     create_options.memory_slab_count = memory_slab_count;
     create_options.memory_slabs = memory_slab_count == 0 ? NULL : memory_slabs;
+    create_options.shared_tensor_count = shared_tensor_count;
+    create_options.shared_tensors =
+        shared_tensor_count == 0 ? NULL : shared_tensors;
     create_options.boundary_tensor_count = counts.import_count;
     create_options.boundary_tensors =
         counts.import_count == 0 ? NULL : boundary_tensors;
@@ -1520,6 +1960,7 @@ iree_status_t id4_pipeline_program_create_plan(
   }
 
   iree_allocator_free(host_allocator, (void*)constant_slab_name.data);
+  iree_allocator_free(host_allocator, (void*)shared_slab_name.data);
   for (iree_host_size_t i = 0; i < region_range_count; ++i) {
     if (local_slab_names) {
       iree_allocator_free(host_allocator, (void*)local_slab_names[i].data);
@@ -1538,6 +1979,8 @@ iree_status_t id4_pipeline_program_create_plan(
   iree_allocator_free(host_allocator, region_local_lifetimes);
   iree_allocator_free(host_allocator, region_local_lifetime_counts);
   iree_allocator_free(host_allocator, region_statistics);
+  iree_allocator_free(host_allocator, shared_tensors);
+  iree_allocator_free(host_allocator, shared_tensor_records);
   iree_allocator_free(host_allocator, region_ranges);
   iree_allocator_free(host_allocator, taps);
   iree_allocator_free(host_allocator, kernels);

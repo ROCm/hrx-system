@@ -199,6 +199,23 @@ static bool id4_pipeline_program_region_operation_uses_tensor(
   }
 }
 
+static bool id4_pipeline_program_region_range_uses_tensor(
+    const id4_pipeline_program_region_lower_options_t* options,
+    id4_pipeline_program_tensor_t tensor) {
+  const iree_host_size_t operation_limit =
+      options->source_operation_offset + options->source_operation_count;
+  for (iree_host_size_t i = options->source_operation_offset;
+       i < operation_limit; ++i) {
+    const id4_pipeline_program_op_t* op =
+        id4_pipeline_program_operation_at(options->program, i);
+    if (id4_pipeline_program_region_operation_uses_tensor(options, op,
+                                                          tensor)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 static bool id4_pipeline_program_region_binding_fully_writes_tensor(
     const id4_pipeline_program_dispatch_binding_t* binding,
     const id4_pipeline_program_tensor_record_t* tensor) {
@@ -242,7 +259,9 @@ static bool id4_pipeline_program_region_tensor_fully_written_before_range(
 static iree_status_t id4_pipeline_program_region_lookup_local_producer(
     const id4_pipeline_program_region_lower_options_t* options,
     id4_pipeline_program_tensor_t tensor,
+    const id4_pipeline_program_tensor_record_t** out_record,
     const id4_pipeline_program_op_t** out_producer) {
+  if (out_record) *out_record = NULL;
   *out_producer = NULL;
   const id4_pipeline_program_tensor_record_t* record =
       id4_pipeline_program_tensor_at(options->program, tensor.ordinal);
@@ -258,18 +277,32 @@ static iree_status_t id4_pipeline_program_region_lookup_local_producer(
                             " is missing",
                             tensor.ordinal, record->producer_operation_ordinal);
   }
+  if (out_record) *out_record = record;
   if (producer->kind == ID4_PIPELINE_PROGRAM_OP_KIND_ACQUIRE) {
     *out_producer = producer;
   }
   return iree_ok_status();
 }
 
+static iree_status_t id4_pipeline_program_region_resolve_shared_acquire(
+    const id4_pipeline_program_region_lower_options_t* options,
+    const id4_pipeline_program_acquire_op_t* acquire_op,
+    const id4_pipeline_program_tensor_record_t* tensor, bool* out_is_shared,
+    id4_pipeline_tensor_import_t* out_import) {
+  *out_is_shared = false;
+  memset(out_import, 0, sizeof(*out_import));
+  if (!options->resolve_shared_tensor) return iree_ok_status();
+  return options->resolve_shared_tensor(options->user_data, acquire_op, tensor,
+                                        out_is_shared, out_import);
+}
+
 static iree_status_t id4_pipeline_program_region_validate_local_tensor_range(
     const id4_pipeline_program_region_lower_options_t* options,
     id4_pipeline_program_tensor_t tensor) {
+  const id4_pipeline_program_tensor_record_t* tensor_record = NULL;
   const id4_pipeline_program_op_t* producer = NULL;
   IREE_RETURN_IF_ERROR(id4_pipeline_program_region_lookup_local_producer(
-      options, tensor, &producer));
+      options, tensor, &tensor_record, &producer));
   if (!producer) return iree_ok_status();
 
   const iree_host_size_t operation_offset = options->source_operation_offset;
@@ -277,6 +310,12 @@ static iree_status_t id4_pipeline_program_region_validate_local_tensor_range(
       options->source_operation_offset + options->source_operation_count;
   const iree_host_size_t producer_ordinal = producer->ordinal;
   if (producer_ordinal < operation_offset) {
+    bool is_shared = false;
+    id4_pipeline_tensor_import_t import;
+    IREE_RETURN_IF_ERROR(id4_pipeline_program_region_resolve_shared_acquire(
+        options, &producer->payload.acquire, tensor_record, &is_shared,
+        &import));
+    if (is_shared) return iree_ok_status();
     return iree_make_status(
         IREE_STATUS_UNIMPLEMENTED,
         "program tensor %u is a local transient produced before source "
@@ -341,13 +380,20 @@ static iree_status_t id4_pipeline_program_region_validate_local_residency(
         // Program-local tensor ordinal.
         .ordinal = (uint32_t)tensor_index,
     };
+    const id4_pipeline_program_tensor_record_t* tensor_record = NULL;
     const id4_pipeline_program_op_t* producer = NULL;
     IREE_RETURN_IF_ERROR(id4_pipeline_program_region_lookup_local_producer(
-        options, tensor, &producer));
+        options, tensor, &tensor_record, &producer));
     if (!producer || producer->ordinal < options->source_operation_offset ||
         producer->ordinal >= operation_limit) {
       continue;
     }
+    bool is_shared = false;
+    id4_pipeline_tensor_import_t import;
+    IREE_RETURN_IF_ERROR(id4_pipeline_program_region_resolve_shared_acquire(
+        options, &producer->payload.acquire, tensor_record, &is_shared,
+        &import));
+    if (is_shared) continue;
     for (iree_host_size_t i = operation_limit; i < operation_count; ++i) {
       const id4_pipeline_program_op_t* op =
           id4_pipeline_program_operation_at(options->program, i);
@@ -402,6 +448,19 @@ static iree_status_t id4_pipeline_program_region_build_liveness(
               "program acquire tensor %u exceeds tensor count %" PRIhsz,
               op->payload.acquire.tensor.ordinal, tensor_count);
         }
+        const id4_pipeline_program_tensor_record_t* tensor_record =
+            id4_pipeline_program_tensor_at(options->program,
+                                           op->payload.acquire.tensor.ordinal);
+        if (!tensor_record) {
+          return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                  "program acquire tensor %u is missing",
+                                  op->payload.acquire.tensor.ordinal);
+        }
+        bool is_shared = false;
+        id4_pipeline_tensor_import_t import;
+        IREE_RETURN_IF_ERROR(id4_pipeline_program_region_resolve_shared_acquire(
+            options, &op->payload.acquire, tensor_record, &is_shared, &import));
+        if (is_shared) break;
         local_tensor_bits[op->payload.acquire.tensor.ordinal] = 1;
         break;
       case ID4_PIPELINE_PROGRAM_OP_KIND_DISPATCH_LOOM:
@@ -754,6 +813,24 @@ static iree_status_t id4_pipeline_program_region_lower_acquire(
   const id4_pipeline_program_tensor_record_t* tensor = NULL;
   IREE_RETURN_IF_ERROR(id4_pipeline_program_region_tensor_at(
       context->options->program, acquire_op->tensor, &tensor));
+  bool is_shared = false;
+  id4_pipeline_tensor_import_t import;
+  IREE_RETURN_IF_ERROR(id4_pipeline_program_region_resolve_shared_acquire(
+      context->options, acquire_op, tensor, &is_shared, &import));
+  if (is_shared) {
+    if (!iree_all_bits_set(import.flags,
+                           ID4_PIPELINE_TENSOR_IMPORT_FLAG_INITIALIZED) &&
+        id4_pipeline_program_region_tensor_fully_written_before_range(
+            context->options, acquire_op->tensor, tensor)) {
+      import.flags |= ID4_PIPELINE_TENSOR_IMPORT_FLAG_INITIALIZED;
+    }
+    id4_pipeline_tensor_t region_tensor =
+        id4_pipeline_program_region_invalid_tensor();
+    IREE_RETURN_IF_ERROR(id4_pipeline_region_import_tensor(
+        context->options->builder, &import, &region_tensor));
+    return id4_pipeline_program_region_store_tensor(context, acquire_op->tensor,
+                                                    region_tensor);
+  }
   id4_pipeline_tensor_layout_t layout =
       id4_pipeline_program_region_tensor_layout(
           tensor, context->options->local_tensor_alignment);
@@ -1076,12 +1153,29 @@ iree_status_t id4_pipeline_program_region_lower(
         status = id4_pipeline_program_region_lower_constant(
             &context, &op->payload.constant, constant_ordinal++);
         break;
-      case ID4_PIPELINE_PROGRAM_OP_KIND_ACQUIRE:
-        if (emit_operation) {
+      case ID4_PIPELINE_PROGRAM_OP_KIND_ACQUIRE: {
+        bool should_lower_acquire = emit_operation;
+        if (!should_lower_acquire && i < operation_offset &&
+            id4_pipeline_program_region_range_uses_tensor(
+                options, op->payload.acquire.tensor)) {
+          const id4_pipeline_program_tensor_record_t* tensor_record = NULL;
+          status = id4_pipeline_program_region_tensor_at(
+              options->program, op->payload.acquire.tensor, &tensor_record);
+          if (iree_status_is_ok(status)) {
+            bool is_shared = false;
+            id4_pipeline_tensor_import_t import;
+            status = id4_pipeline_program_region_resolve_shared_acquire(
+                options, &op->payload.acquire, tensor_record, &is_shared,
+                &import);
+            should_lower_acquire = is_shared;
+          }
+        }
+        if (iree_status_is_ok(status) && should_lower_acquire) {
           status = id4_pipeline_program_region_lower_acquire(
               &context, &op->payload.acquire);
         }
         break;
+      }
       case ID4_PIPELINE_PROGRAM_OP_KIND_DISPATCH_LOOM:
         if (emit_operation) {
           status = id4_pipeline_program_region_lower_dispatch(

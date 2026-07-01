@@ -41,6 +41,10 @@ struct id4_pipeline_program_prepared_t {
   iree_host_size_t constant_slab_count;
   // Device buffers containing program-owned constants in plan slab order.
   iree_hal_buffer_t** constant_slab_buffers;
+  // HAL queue-alloca flags used for plan-shared transient slabs.
+  iree_hal_alloca_flags_t shared_slab_alloca_flags;
+  // HAL queue-dealloca flags used for plan-shared transient slabs.
+  iree_hal_dealloca_flags_t shared_slab_dealloca_flags;
 };
 
 typedef struct id4_pipeline_program_prepare_context_t {
@@ -134,6 +138,8 @@ static iree_status_t id4_pipeline_program_prepared_create_empty(
     prepared->region_count = region_count;
     prepared->kernel_count = kernel_count;
     prepared->constant_slab_count = constant_slab_count;
+    prepared->shared_slab_alloca_flags = options->local_slab_alloca_flags;
+    prepared->shared_slab_dealloca_flags = options->local_slab_dealloca_flags;
   }
   if (iree_status_is_ok(status) && region_count != 0) {
     status = iree_allocator_malloc_array(host_allocator, region_count,
@@ -530,6 +536,45 @@ static iree_status_t id4_pipeline_program_prepare_resolve_constant(
                           constant_ordinal);
 }
 
+static iree_status_t id4_pipeline_program_prepare_resolve_shared_tensor(
+    void* user_data, const id4_pipeline_program_acquire_op_t* acquire_op,
+    const id4_pipeline_program_tensor_record_t* tensor, bool* out_is_shared,
+    id4_pipeline_tensor_import_t* out_import) {
+  (void)tensor;
+  *out_is_shared = false;
+  memset(out_import, 0, sizeof(*out_import));
+  id4_pipeline_program_prepare_context_t* context =
+      (id4_pipeline_program_prepare_context_t*)user_data;
+  const id4_pipeline_plan_t* plan = context->options->plan;
+  const iree_host_size_t shared_tensor_count =
+      id4_pipeline_plan_shared_tensor_count(plan);
+  for (iree_host_size_t i = 0; i < shared_tensor_count; ++i) {
+    const id4_pipeline_shared_tensor_plan_t* shared_tensor =
+        id4_pipeline_plan_shared_tensor_at(plan, i);
+    if (!shared_tensor ||
+        shared_tensor->program_tensor_ordinal != acquire_op->tensor.ordinal) {
+      continue;
+    }
+    const id4_pipeline_memory_slab_plan_t* slab =
+        id4_pipeline_plan_memory_slab_at(plan,
+                                         shared_tensor->memory_slab_index);
+    if (!slab || slab->scope != ID4_PIPELINE_MEMORY_SLAB_SCOPE_PLAN_SHARED) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "program shared tensor %.*s references a missing plan-shared slab",
+          (int)shared_tensor->layout.name.size,
+          shared_tensor->layout.name.data);
+    }
+    *out_is_shared = true;
+    out_import->layout = shared_tensor->layout;
+    out_import->binding_slot = slab->binding_slot;
+    out_import->offset = shared_tensor->offset;
+    out_import->flags = 0;
+    return iree_ok_status();
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t id4_pipeline_program_prepare_resolve_kernel(
     void* user_data, const id4_pipeline_program_dispatch_loom_op_t* dispatch_op,
     iree_string_view_t specialization_key, iree_host_size_t dispatch_ordinal,
@@ -737,6 +782,8 @@ static iree_status_t id4_pipeline_program_prepare_record_region(
         id4_pipeline_program_prepare_resolve_parameter;
     lower_options.resolve_constant =
         id4_pipeline_program_prepare_resolve_constant;
+    lower_options.resolve_shared_tensor =
+        id4_pipeline_program_prepare_resolve_shared_tensor;
     lower_options.resolve_kernel = id4_pipeline_program_prepare_resolve_kernel;
     lower_options.resolve_tap = id4_pipeline_program_prepare_resolve_tap;
     status = id4_pipeline_program_region_lower(&lower_options,
@@ -877,7 +924,9 @@ static iree_status_t id4_pipeline_program_prepared_make_wait_list(
 static iree_status_t id4_pipeline_program_prepared_make_binding_table(
     id4_pipeline_program_prepared_t* prepared, id4_pipeline_bundle_t* bundle,
     const id4_pipeline_stage_issue_options_t* options,
-    iree_host_size_t region_index, iree_hal_buffer_binding_t* bindings,
+    iree_host_size_t region_index,
+    iree_hal_buffer_t* const* memory_slab_buffers,
+    iree_hal_buffer_binding_t* bindings,
     iree_hal_buffer_binding_table_t* out_binding_table) {
   if (region_index > UINT32_MAX) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
@@ -953,6 +1002,31 @@ static iree_status_t id4_pipeline_program_prepared_make_binding_table(
         // Constant slabs are bound from byte zero.
         .offset = 0,
         // Full constant slab byte length.
+        .length = slab->byte_length,
+    };
+  }
+
+  const iree_host_size_t memory_slab_count =
+      id4_pipeline_plan_memory_slab_count(plan);
+  for (iree_host_size_t i = 0; i < memory_slab_count; ++i) {
+    const id4_pipeline_memory_slab_plan_t* slab =
+        id4_pipeline_plan_memory_slab_at(plan, i);
+    if (!slab || slab->scope != ID4_PIPELINE_MEMORY_SLAB_SCOPE_PLAN_SHARED) {
+      continue;
+    }
+    iree_hal_buffer_t* buffer =
+        memory_slab_buffers ? memory_slab_buffers[i] : NULL;
+    if (!buffer) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "program issue plan-shared memory slab %" PRIhsz " is missing", i);
+    }
+    bindings[slab->binding_slot] = (iree_hal_buffer_binding_t){
+        // Allocated shared transient slab buffer for this issue.
+        .buffer = buffer,
+        // Shared slabs are bound from byte zero.
+        .offset = 0,
+        // Full shared slab byte length.
         .length = slab->byte_length,
     };
   }
@@ -1086,6 +1160,203 @@ static void id4_pipeline_program_release_internal_signals(
   }
 }
 
+static iree_status_t id4_pipeline_program_prepared_count_shared_slabs(
+    const id4_pipeline_plan_t* plan, iree_host_size_t* out_shared_slab_count) {
+  *out_shared_slab_count = 0;
+  const iree_host_size_t memory_slab_count =
+      id4_pipeline_plan_memory_slab_count(plan);
+  for (iree_host_size_t i = 0; i < memory_slab_count; ++i) {
+    const id4_pipeline_memory_slab_plan_t* slab =
+        id4_pipeline_plan_memory_slab_at(plan, i);
+    if (!slab) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "program memory slab %" PRIhsz " is missing", i);
+    }
+    if (slab->scope == ID4_PIPELINE_MEMORY_SLAB_SCOPE_PLAN_SHARED) {
+      ++*out_shared_slab_count;
+    }
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t id4_pipeline_program_prepared_collect_shared_slabs(
+    const id4_pipeline_plan_t* plan, iree_host_size_t* shared_slab_indices,
+    iree_host_size_t* out_shared_slab_count) {
+  *out_shared_slab_count = 0;
+  const iree_host_size_t memory_slab_count =
+      id4_pipeline_plan_memory_slab_count(plan);
+  for (iree_host_size_t i = 0; i < memory_slab_count; ++i) {
+    const id4_pipeline_memory_slab_plan_t* slab =
+        id4_pipeline_plan_memory_slab_at(plan, i);
+    if (!slab) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "program memory slab %" PRIhsz " is missing", i);
+    }
+    if (slab->scope == ID4_PIPELINE_MEMORY_SLAB_SCOPE_PLAN_SHARED) {
+      shared_slab_indices[*out_shared_slab_count] = i;
+      ++*out_shared_slab_count;
+    }
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t id4_pipeline_program_prepared_validate_shared_slab(
+    const id4_pipeline_program_prepared_t* prepared,
+    const id4_pipeline_memory_slab_plan_t* slab) {
+  if (!slab) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "program shared memory slab is required");
+  }
+  const id4_pipeline_region_plan_t* first_region =
+      id4_pipeline_plan_region_at(prepared->plan, 0);
+  if (!first_region) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "program first region is missing");
+  }
+  if (slab->placement_id != first_region->placement_id) {
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "program shared memory slab %.*s placement %u differs from first "
+        "region placement %u",
+        (int)slab->name.size, slab->name.data, slab->placement_id,
+        first_region->placement_id);
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t id4_pipeline_program_prepared_shared_slab_device(
+    const id4_pipeline_program_prepared_t* prepared,
+    const id4_pipeline_memory_slab_plan_t* slab, iree_hal_device_t** out_device,
+    iree_hal_queue_affinity_t* out_queue_affinity) {
+  *out_device = NULL;
+  *out_queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
+  IREE_RETURN_IF_ERROR(
+      id4_pipeline_program_prepared_validate_shared_slab(prepared, slab));
+  const id4_pipeline_device_placement_t* placement =
+      id4_pipeline_plan_placement_at(prepared->plan, slab->placement_id);
+  if (!placement) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "program shared memory slab references missing "
+                            "placement %u",
+                            slab->placement_id);
+  }
+  iree_hal_device_group_t* device_group =
+      id4_pipeline_plan_device_group(prepared->plan);
+  iree_hal_device_t* device =
+      iree_hal_device_group_device_at(device_group, placement->device_index);
+  if (!device) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "program shared memory slab device is required");
+  }
+  *out_device = device;
+  *out_queue_affinity = placement->queue_affinity;
+  return iree_ok_status();
+}
+
+static iree_status_t id4_pipeline_program_prepared_issue_shared_allocas(
+    id4_pipeline_program_prepared_t* prepared,
+    iree_hal_semaphore_list_t wait_list, iree_host_size_t shared_slab_count,
+    const iree_host_size_t* shared_slab_indices,
+    iree_hal_buffer_t** memory_slab_buffers,
+    iree_hal_semaphore_t** alloca_semaphores, uint64_t* alloca_payload_values,
+    iree_host_size_t* out_submitted_count) {
+  *out_submitted_count = 0;
+  const id4_pipeline_plan_t* plan = prepared->plan;
+  for (iree_host_size_t i = 0; i < shared_slab_count; ++i) {
+    const iree_host_size_t memory_slab_index = shared_slab_indices[i];
+    const id4_pipeline_memory_slab_plan_t* slab =
+        id4_pipeline_plan_memory_slab_at(plan, memory_slab_index);
+    if (!slab || slab->scope != ID4_PIPELINE_MEMORY_SLAB_SCOPE_PLAN_SHARED) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "program shared memory slab index %" PRIhsz
+                              " is invalid",
+                              memory_slab_index);
+    }
+    iree_hal_device_t* device = NULL;
+    iree_hal_queue_affinity_t queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
+    IREE_RETURN_IF_ERROR(id4_pipeline_program_prepared_shared_slab_device(
+        prepared, slab, &device, &queue_affinity));
+    alloca_payload_values[i] = 1;
+    IREE_RETURN_IF_ERROR(iree_hal_semaphore_create(
+        device, queue_affinity, /*initial_value=*/0,
+        IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &alloca_semaphores[i]));
+    iree_hal_semaphore_list_t signal_list =
+        id4_pipeline_program_one_semaphore_list(&alloca_semaphores[i],
+                                                &alloca_payload_values[i]);
+    IREE_RETURN_IF_ERROR(iree_hal_device_queue_alloca(
+        device, queue_affinity, wait_list, signal_list, /*pool=*/NULL,
+        slab->params, slab->byte_length, prepared->shared_slab_alloca_flags,
+        &memory_slab_buffers[memory_slab_index]));
+    ++*out_submitted_count;
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t id4_pipeline_program_prepared_dealloca_shared_slabs(
+    id4_pipeline_program_prepared_t* prepared,
+    iree_hal_semaphore_list_t initial_wait_list,
+    iree_hal_semaphore_list_t final_signal_list,
+    iree_host_size_t shared_slab_count,
+    const iree_host_size_t* shared_slab_indices,
+    iree_hal_buffer_t** memory_slab_buffers) {
+  iree_hal_semaphore_t* chain_semaphore = NULL;
+  uint64_t chain_payload_value = 1;
+  iree_hal_semaphore_list_t wait_list = initial_wait_list;
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0;
+       i < shared_slab_count && iree_status_is_ok(status); ++i) {
+    const iree_host_size_t memory_slab_index = shared_slab_indices[i];
+    const id4_pipeline_memory_slab_plan_t* slab =
+        id4_pipeline_plan_memory_slab_at(prepared->plan, memory_slab_index);
+    if (!slab || slab->scope != ID4_PIPELINE_MEMORY_SLAB_SCOPE_PLAN_SHARED) {
+      status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "program shared memory slab index %" PRIhsz
+                                " is invalid",
+                                memory_slab_index);
+      break;
+    }
+    if (!memory_slab_buffers[memory_slab_index]) {
+      status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "program shared memory slab buffer %" PRIhsz
+                                " is missing",
+                                memory_slab_index);
+      break;
+    }
+    iree_hal_device_t* device = NULL;
+    iree_hal_queue_affinity_t queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
+    status = id4_pipeline_program_prepared_shared_slab_device(
+        prepared, slab, &device, &queue_affinity);
+    if (!iree_status_is_ok(status)) break;
+
+    iree_hal_semaphore_t* next_chain_semaphore = NULL;
+    uint64_t next_chain_payload_value = 1;
+    iree_hal_semaphore_list_t signal_list = final_signal_list;
+    if (i + 1 < shared_slab_count) {
+      status = iree_hal_semaphore_create(
+          device, queue_affinity, /*initial_value=*/0,
+          IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &next_chain_semaphore);
+      if (!iree_status_is_ok(status)) break;
+      signal_list = id4_pipeline_program_one_semaphore_list(
+          &next_chain_semaphore, &next_chain_payload_value);
+    }
+
+    status = iree_hal_device_queue_dealloca(
+        device, queue_affinity, wait_list, signal_list,
+        memory_slab_buffers[memory_slab_index],
+        prepared->shared_slab_dealloca_flags);
+    iree_hal_semaphore_release(chain_semaphore);
+    chain_semaphore = next_chain_semaphore;
+    chain_payload_value = next_chain_payload_value;
+    wait_list = iree_hal_semaphore_list_empty();
+    if (chain_semaphore) {
+      wait_list = id4_pipeline_program_one_semaphore_list(&chain_semaphore,
+                                                          &chain_payload_value);
+    }
+  }
+  iree_hal_semaphore_release(chain_semaphore);
+  return status;
+}
+
 static iree_status_t id4_pipeline_program_validate_final_signal_list(
     iree_hal_semaphore_list_t signal_list) {
   if (signal_list.count == 0) {
@@ -1167,6 +1438,37 @@ iree_status_t id4_pipeline_program_prepared_issue(
   IREE_RETURN_IF_ERROR(id4_pipeline_program_prepared_make_wait_list(
       bundle, options, wait_semaphores, wait_payload_values, &wait_list));
 
+  const iree_host_size_t memory_slab_count =
+      id4_pipeline_plan_memory_slab_count(prepared->plan);
+  iree_hal_buffer_t** memory_slab_buffers = NULL;
+  if (memory_slab_count != 0) {
+    memory_slab_buffers = (iree_hal_buffer_t**)iree_alloca(
+        memory_slab_count * sizeof(memory_slab_buffers[0]));
+    memset(memory_slab_buffers, 0,
+           memory_slab_count * sizeof(memory_slab_buffers[0]));
+  }
+
+  iree_host_size_t shared_slab_count = 0;
+  IREE_RETURN_IF_ERROR(id4_pipeline_program_prepared_count_shared_slabs(
+      prepared->plan, &shared_slab_count));
+  iree_host_size_t* shared_slab_indices = NULL;
+  iree_hal_semaphore_t** shared_alloca_semaphores = NULL;
+  uint64_t* shared_alloca_payload_values = NULL;
+  if (shared_slab_count != 0) {
+    shared_slab_indices = (iree_host_size_t*)iree_alloca(
+        shared_slab_count * sizeof(shared_slab_indices[0]));
+    shared_alloca_semaphores = (iree_hal_semaphore_t**)iree_alloca(
+        shared_slab_count * sizeof(shared_alloca_semaphores[0]));
+    memset(shared_alloca_semaphores, 0,
+           shared_slab_count * sizeof(shared_alloca_semaphores[0]));
+    shared_alloca_payload_values = (uint64_t*)iree_alloca(
+        shared_slab_count * sizeof(shared_alloca_payload_values[0]));
+    memset(shared_alloca_payload_values, 0,
+           shared_slab_count * sizeof(shared_alloca_payload_values[0]));
+    IREE_RETURN_IF_ERROR(id4_pipeline_program_prepared_collect_shared_slabs(
+        prepared->plan, shared_slab_indices, &shared_slab_count));
+  }
+
   const iree_host_size_t internal_signal_count = prepared->region_count - 1;
   iree_hal_semaphore_t** internal_semaphores = NULL;
   uint64_t* internal_payload_values = NULL;
@@ -1179,12 +1481,52 @@ iree_status_t id4_pipeline_program_prepared_issue(
         internal_signal_count * sizeof(internal_payload_values[0]));
   }
 
+  iree_hal_semaphore_t* shared_completion_semaphore = NULL;
+  uint64_t shared_completion_payload_value = 1;
+  if (shared_slab_count != 0) {
+    const id4_pipeline_memory_slab_plan_t* first_shared_slab =
+        id4_pipeline_plan_memory_slab_at(prepared->plan,
+                                         shared_slab_indices[0]);
+    iree_hal_device_t* shared_slab_device = NULL;
+    iree_hal_queue_affinity_t shared_slab_queue_affinity =
+        IREE_HAL_QUEUE_AFFINITY_ANY;
+    IREE_RETURN_IF_ERROR(id4_pipeline_program_prepared_shared_slab_device(
+        prepared, first_shared_slab, &shared_slab_device,
+        &shared_slab_queue_affinity));
+    IREE_RETURN_IF_ERROR(iree_hal_semaphore_create(
+        shared_slab_device, shared_slab_queue_affinity, /*initial_value=*/0,
+        IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &shared_completion_semaphore));
+  }
+
   iree_status_t status = id4_pipeline_program_prepared_create_internal_signals(
       prepared, internal_signal_count, internal_semaphores,
       internal_payload_values);
+  iree_host_size_t shared_alloca_submitted_count = 0;
+  if (iree_status_is_ok(status) && shared_slab_count != 0) {
+    status = id4_pipeline_program_prepared_issue_shared_allocas(
+        prepared, wait_list, shared_slab_count, shared_slab_indices,
+        memory_slab_buffers, shared_alloca_semaphores,
+        shared_alloca_payload_values, &shared_alloca_submitted_count);
+  }
+
+  iree_hal_semaphore_list_t first_region_wait_list = wait_list;
+  if (iree_status_is_ok(status) && shared_slab_count != 0) {
+    first_region_wait_list = (iree_hal_semaphore_list_t){
+        // All shared slabs must be allocated before region execution.
+        .count = shared_slab_count,
+        // Per-slab alloca completion semaphores.
+        .semaphores = shared_alloca_semaphores,
+        // Per-slab alloca completion payloads.
+        .payload_values = shared_alloca_payload_values,
+    };
+  }
+
+  bool region_submitted = false;
+  iree_hal_semaphore_t* cleanup_wait_semaphore = NULL;
+  uint64_t cleanup_wait_payload_value = 0;
   for (iree_host_size_t i = 0;
        i < prepared->region_count && iree_status_is_ok(status); ++i) {
-    iree_hal_semaphore_list_t region_wait_list = wait_list;
+    iree_hal_semaphore_list_t region_wait_list = first_region_wait_list;
     iree_hal_semaphore_t* internal_wait_semaphore = NULL;
     uint64_t internal_wait_payload_value = 0;
     if (i != 0) {
@@ -1203,12 +1545,16 @@ iree_status_t id4_pipeline_program_prepared_issue(
       internal_signal_payload_value = internal_payload_values[i];
       region_signal_list = id4_pipeline_program_one_semaphore_list(
           &internal_signal_semaphore, &internal_signal_payload_value);
+    } else if (shared_slab_count != 0) {
+      region_signal_list = id4_pipeline_program_one_semaphore_list(
+          &shared_completion_semaphore, &shared_completion_payload_value);
     }
 
     iree_hal_buffer_binding_table_t binding_table =
         iree_hal_buffer_binding_table_empty();
     status = id4_pipeline_program_prepared_make_binding_table(
-        prepared, bundle, options, i, bindings, &binding_table);
+        prepared, bundle, options, i, memory_slab_buffers, bindings,
+        &binding_table);
     if (!iree_status_is_ok(status)) break;
 
     id4_pipeline_prepared_region_issue_options_t issue_options;
@@ -1220,7 +1566,56 @@ iree_status_t id4_pipeline_program_prepared_issue(
     issue_options.execute_flags = IREE_HAL_EXECUTE_FLAG_NONE;
     status = id4_pipeline_prepared_region_issue(prepared->prepared_regions[i],
                                                 &issue_options);
+    if (iree_status_is_ok(status)) {
+      region_submitted = true;
+      if (i + 1 < prepared->region_count) {
+        cleanup_wait_semaphore = internal_semaphores[i];
+        cleanup_wait_payload_value = internal_payload_values[i];
+      } else if (shared_slab_count != 0) {
+        cleanup_wait_semaphore = shared_completion_semaphore;
+        cleanup_wait_payload_value = shared_completion_payload_value;
+      }
+    }
   }
+
+  if (iree_status_is_ok(status) && shared_slab_count != 0) {
+    iree_hal_semaphore_list_t shared_completion_wait_list =
+        id4_pipeline_program_one_semaphore_list(
+            &shared_completion_semaphore, &shared_completion_payload_value);
+    status = id4_pipeline_program_prepared_dealloca_shared_slabs(
+        prepared, shared_completion_wait_list, options->signal_semaphore_list,
+        shared_slab_count, shared_slab_indices, memory_slab_buffers);
+  } else if (!iree_status_is_ok(status) && shared_alloca_submitted_count != 0) {
+    iree_hal_semaphore_list_t cleanup_wait_list =
+        iree_hal_semaphore_list_empty();
+    if (region_submitted && cleanup_wait_semaphore) {
+      cleanup_wait_list = id4_pipeline_program_one_semaphore_list(
+          &cleanup_wait_semaphore, &cleanup_wait_payload_value);
+    } else {
+      cleanup_wait_list = (iree_hal_semaphore_list_t){
+          // Shared alloca submissions that must complete before cleanup.
+          .count = shared_alloca_submitted_count,
+          // Per-slab alloca completion semaphores.
+          .semaphores = shared_alloca_semaphores,
+          // Per-slab alloca completion payloads.
+          .payload_values = shared_alloca_payload_values,
+      };
+    }
+    iree_status_t cleanup_status =
+        id4_pipeline_program_prepared_dealloca_shared_slabs(
+            prepared, cleanup_wait_list, iree_hal_semaphore_list_empty(),
+            shared_alloca_submitted_count, shared_slab_indices,
+            memory_slab_buffers);
+    status = iree_status_join(status, cleanup_status);
+  }
+
+  for (iree_host_size_t i = 0; i < memory_slab_count; ++i) {
+    iree_hal_buffer_release(memory_slab_buffers[i]);
+  }
+  for (iree_host_size_t i = 0; i < shared_slab_count; ++i) {
+    iree_hal_semaphore_release(shared_alloca_semaphores[i]);
+  }
+  iree_hal_semaphore_release(shared_completion_semaphore);
   id4_pipeline_program_release_internal_signals(internal_signal_count,
                                                 internal_semaphores);
   return status;

@@ -82,6 +82,22 @@ typedef struct id4_pipeline_memory_slab_plan_t {
   iree_device_size_t high_water_mark;
 } id4_pipeline_memory_slab_plan_t;
 
+// Planned acquired tensor stored in a plan-shared memory slab.
+typedef struct id4_pipeline_shared_tensor_plan_t {
+  // Tensor layout and stable diagnostic name.
+  id4_pipeline_tensor_layout_t layout;
+  // Semantic program tensor ordinal represented by this shared tensor.
+  uint32_t program_tensor_ordinal;
+  // Memory slab index containing this tensor storage.
+  iree_host_size_t memory_slab_index;
+  // Byte offset into the containing memory slab.
+  iree_device_size_t offset;
+  // Region index that acquires and initializes this tensor.
+  uint32_t acquire_region_id;
+  // Last region index that may use this tensor.
+  uint32_t last_use_region_id;
+} id4_pipeline_shared_tensor_plan_t;
+
 // Planned constant tensor embedded into a constant slab.
 typedef struct id4_pipeline_constant_request_t {
   // Constant tensor diagnostic name.
@@ -208,6 +224,8 @@ typedef struct id4_pipeline_plan_statistics_t {
   iree_device_size_t memory_slab_byte_length;
   // Total peak live bytes across all non-parameter memory slabs.
   iree_device_size_t memory_slab_high_water_mark;
+  // Total bytes across all plan-shared tensor logical layouts.
+  iree_device_size_t shared_tensor_byte_length;
   // Total bytes across all stage boundary tensors.
   iree_device_size_t boundary_tensor_byte_length;
   // Total bytes across all diagnostic tap tensors.
@@ -216,6 +234,8 @@ typedef struct id4_pipeline_plan_statistics_t {
   iree_host_size_t kernel_count;
   // Number of planned executable regions.
   iree_host_size_t region_count;
+  // Number of planned shared tensors.
+  iree_host_size_t shared_tensor_count;
   // Total planned operations across all regions.
   iree_host_size_t operation_count;
   // Total planned dispatches across all regions.
@@ -254,6 +274,10 @@ typedef struct id4_pipeline_plan_create_options_t {
   iree_host_size_t memory_slab_count;
   // Planned non-parameter memory slabs to copy into the plan.
   const id4_pipeline_memory_slab_plan_t* memory_slabs;
+  // Number of planned tensors backed by plan-shared memory slabs.
+  iree_host_size_t shared_tensor_count;
+  // Planned tensors backed by plan-shared memory slabs.
+  const id4_pipeline_shared_tensor_plan_t* shared_tensors;
   // Number of planned external boundary tensors.
   iree_host_size_t boundary_tensor_count;
   // Planned external boundary tensors to copy into the plan.
@@ -336,6 +360,14 @@ iree_host_size_t id4_pipeline_plan_memory_slab_count(
 
 // Returns memory slab |index| or NULL when out of range.
 const id4_pipeline_memory_slab_plan_t* id4_pipeline_plan_memory_slab_at(
+    const id4_pipeline_plan_t* plan, iree_host_size_t index);
+
+// Returns the number of shared tensors in |plan|.
+iree_host_size_t id4_pipeline_plan_shared_tensor_count(
+    const id4_pipeline_plan_t* plan);
+
+// Returns shared tensor |index| or NULL when out of range.
+const id4_pipeline_shared_tensor_plan_t* id4_pipeline_plan_shared_tensor_at(
     const id4_pipeline_plan_t* plan, iree_host_size_t index);
 
 // Returns the number of boundary tensors in |plan|.

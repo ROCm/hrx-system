@@ -81,6 +81,8 @@ typedef struct id4_pipeline_program_plan_options_t {
   iree_host_size_t region_binding_capacity;
   // Binding-table slot reserved for the derived region local slab.
   uint32_t region_local_binding_slot;
+  // Binding-table slot reserved for the plan-shared transient slab.
+  uint32_t region_shared_binding_slot;
   // First binding-table slot assigned to external boundary tensors.
   uint32_t region_boundary_binding_slot_base;
   // Caller-owned diagnostic tap names to capture.

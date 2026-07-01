@@ -57,6 +57,13 @@ typedef iree_status_t(
     iree_host_size_t constant_ordinal,
     id4_pipeline_tensor_import_t* out_import);
 
+// Resolves a semantic acquire operation into a plan-shared tensor import.
+typedef iree_status_t(
+    IREE_API_PTR* id4_pipeline_program_region_resolve_shared_tensor_fn_t)(
+    void* user_data, const id4_pipeline_program_acquire_op_t* acquire_op,
+    const id4_pipeline_program_tensor_record_t* tensor, bool* out_is_shared,
+    id4_pipeline_tensor_import_t* out_import);
+
 // Resolves a semantic Loom dispatch into prepared HAL executable state.
 typedef iree_status_t(
     IREE_API_PTR* id4_pipeline_program_region_resolve_kernel_fn_t)(
@@ -99,6 +106,8 @@ typedef struct id4_pipeline_program_region_lower_options_t {
   id4_pipeline_program_region_resolve_parameter_fn_t resolve_parameter;
   // Constant resolver required when the program contains constant operations.
   id4_pipeline_program_region_resolve_constant_fn_t resolve_constant;
+  // Shared tensor resolver used for acquired tensors that cross regions.
+  id4_pipeline_program_region_resolve_shared_tensor_fn_t resolve_shared_tensor;
   // Kernel resolver required when the region builder is in RECORD mode.
   id4_pipeline_program_region_resolve_kernel_fn_t resolve_kernel;
   // Tap resolver required when tap_mode is CAPTURE.

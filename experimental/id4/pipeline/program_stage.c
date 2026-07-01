@@ -36,6 +36,8 @@ typedef struct id4_pipeline_program_stage_binding_layout_t {
   uint32_t diagnostic_tap_binding_slot_base;
   // Binding-table slot reserved for the executable region local slab.
   uint32_t local_binding_slot;
+  // Binding-table slot reserved for the plan-shared transient slab.
+  uint32_t shared_binding_slot;
   // Exact issue-time binding-table capacity for the executable region.
   iree_host_size_t binding_capacity;
 } id4_pipeline_program_stage_binding_layout_t;
@@ -179,6 +181,76 @@ static id4_pipeline_program_stage_counts_t id4_pipeline_program_stage_count_ops(
   return counts;
 }
 
+static bool id4_pipeline_program_stage_tap_name_requested(
+    const id4_pipeline_stage_plan_options_t* options, iree_string_view_t name) {
+  if (!iree_all_bits_set(
+          options->flags,
+          ID4_PIPELINE_STAGE_PLAN_FLAG_CAPTURE_DIAGNOSTIC_TAPS)) {
+    return false;
+  }
+  for (iree_host_size_t i = 0; i < options->diagnostic_tap_names.count; ++i) {
+    if (iree_string_view_equal(options->diagnostic_tap_names.values[i], name)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static bool id4_pipeline_program_stage_operation_uses_tensor(
+    const id4_pipeline_stage_plan_options_t* options,
+    const id4_pipeline_program_op_t* op, id4_pipeline_program_tensor_t tensor) {
+  if (!op) return false;
+  switch (op->kind) {
+    case ID4_PIPELINE_PROGRAM_OP_KIND_DISPATCH_LOOM:
+      for (iree_host_size_t i = 0; i < op->payload.dispatch_loom.binding_count;
+           ++i) {
+        if (op->payload.dispatch_loom.bindings[i].tensor.ordinal ==
+            tensor.ordinal) {
+          return true;
+        }
+      }
+      return false;
+    case ID4_PIPELINE_PROGRAM_OP_KIND_TAP:
+      return id4_pipeline_program_stage_tap_name_requested(
+                 options, op->payload.tap.name) &&
+             op->payload.tap.tensor.ordinal == tensor.ordinal;
+    case ID4_PIPELINE_PROGRAM_OP_KIND_EXPORT:
+      return op->payload.export_value.tensor.ordinal == tensor.ordinal;
+    default:
+      return false;
+  }
+}
+
+static bool id4_pipeline_program_stage_needs_shared_transient_slot(
+    const id4_pipeline_program_stage_plan_options_t* options) {
+  const iree_host_size_t operation_count =
+      id4_pipeline_program_operation_count(options->program);
+  for (iree_host_size_t i = 0; i < operation_count; ++i) {
+    const id4_pipeline_program_op_t* acquire_op =
+        id4_pipeline_program_operation_at(options->program, i);
+    if (!acquire_op ||
+        acquire_op->kind != ID4_PIPELINE_PROGRAM_OP_KIND_ACQUIRE) {
+      continue;
+    }
+    bool passed_region_cut = false;
+    for (iree_host_size_t j = i + 1; j < operation_count; ++j) {
+      const id4_pipeline_program_op_t* op =
+          id4_pipeline_program_operation_at(options->program, j);
+      if (!op) continue;
+      if (op->kind == ID4_PIPELINE_PROGRAM_OP_KIND_REGION_CUT) {
+        passed_region_cut = true;
+        continue;
+      }
+      if (passed_region_cut &&
+          id4_pipeline_program_stage_operation_uses_tensor(
+              options->stage_options, op, acquire_op->payload.acquire.tensor)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 static iree_status_t id4_pipeline_program_stage_make_binding_layout(
     const id4_pipeline_program_stage_plan_options_t* options,
     id4_pipeline_program_stage_counts_t counts,
@@ -217,7 +289,18 @@ static iree_status_t id4_pipeline_program_stage_make_binding_layout(
   const uint32_t local_binding_slot =
       diagnostic_tap_binding_slot_base + (uint32_t)diagnostic_tap_count;
   iree_host_size_t binding_capacity = 0;
-  if (!iree_host_size_checked_add(local_binding_slot, 1, &binding_capacity)) {
+  const bool needs_shared_transient_slot =
+      id4_pipeline_program_stage_needs_shared_transient_slot(options);
+  uint32_t shared_binding_slot = local_binding_slot;
+  if (needs_shared_transient_slot) {
+    if (local_binding_slot == UINT32_MAX) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "program stage shared binding slot overflow");
+    }
+    shared_binding_slot = local_binding_slot + 1;
+  }
+  const uint32_t last_binding_slot = shared_binding_slot;
+  if (!iree_host_size_checked_add(last_binding_slot, 1, &binding_capacity)) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "program stage binding capacity overflow");
   }
@@ -225,6 +308,7 @@ static iree_status_t id4_pipeline_program_stage_make_binding_layout(
   out_layout->diagnostic_tap_binding_slot_base =
       diagnostic_tap_binding_slot_base;
   out_layout->local_binding_slot = local_binding_slot;
+  out_layout->shared_binding_slot = shared_binding_slot;
   out_layout->binding_capacity = binding_capacity;
   return iree_ok_status();
 }
@@ -327,6 +411,7 @@ iree_status_t id4_pipeline_program_stage_create_plan(
   plan_options.region_local_tensor_alignment = options->alignment;
   plan_options.region_binding_capacity = binding_layout.binding_capacity;
   plan_options.region_local_binding_slot = binding_layout.local_binding_slot;
+  plan_options.region_shared_binding_slot = binding_layout.shared_binding_slot;
   plan_options.region_boundary_binding_slot_base =
       binding_layout.boundary_binding_slot_base;
   plan_options.diagnostic_tap_names =

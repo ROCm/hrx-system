@@ -235,9 +235,11 @@ static id4_pipeline_program_plan_options_t MakePlanOptions(
       // Per-tensor alignment inside the local transient slab.
       /*.region_local_tensor_alignment=*/16,
       // Binding table capacity for the derived region.
-      /*.region_binding_capacity=*/8,
+      /*.region_binding_capacity=*/9,
       // Local transient slab binding slot.
       /*.region_local_binding_slot=*/7,
+      // Plan-shared transient slab binding slot.
+      /*.region_shared_binding_slot=*/8,
       // First external boundary tensor binding slot.
       /*.region_boundary_binding_slot_base=*/1,
       // Selected diagnostic tap names.
