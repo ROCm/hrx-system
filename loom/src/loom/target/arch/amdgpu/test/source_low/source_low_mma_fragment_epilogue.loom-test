@@ -910,6 +910,255 @@ low.kernel.def target(@target) workgroup_size(32, 1, 1) @result_fragment_repack_
 
 // ====
 
+amdgpu.target<gfx1100> @wave64_target {subgroup_size = 64}
+kernel.def target(@wave64_target) @result_fragment_repack_to_lhs_bf16_bpermute_wave64() {
+  %one = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+} launch(%lhs_values: vector<16xbf16>, %rhs_values: vector<16xbf16>, %init_values: vector<4xf32>, %output: buffer) {
+  %base = index.constant 0 : offset
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 16 : index
+  %output_global = buffer.assume.memory_space<global> %output : buffer
+  %output_aligned = buffer.assume.alignment %output_global {minimum_alignment = 16} : buffer
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<16x16xbf16, #dense>
+  %lhs = vector.fragment<lhs> %lhs_values shape [%m, %k] : vector<16xbf16>
+  %rhs = vector.fragment<rhs> %rhs_values shape [%k, %n] : vector<16xbf16>
+  %init = vector.fragment<init> %init_values shape [%m, %n] : vector<4xf32>
+  %result = vector.mma %lhs, %rhs, %init : vector<16xbf16>, vector<16xbf16>, vector<4xf32>
+  %repacked = vector.fragment.repack<lhs> %result shape [%m, %k] : vector<4xf32> -> vector<16xbf16>
+  vector.fragment.store<lhs> %repacked, %output_view[0, 0] shape [%m, %k] : vector<16xbf16>, view<16x16xbf16, #dense>
+  kernel.return
+}
+
+// ----
+low.kernel.def target(@wave64_target) workgroup_size(64, 1, 1) @result_fragment_repack_to_lhs_bf16_bpermute_wave64(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %init: reg<amdgpu.vgpr x4>) asm<amdgpu.rdna3.core> {
+  %21 = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
+  %23 = copy %init : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x4>
+  %result = v_wmma_f32_16x16x16_bf16_w64 %lhs, %rhs, %23
+  %25 = slice %result[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %26 = slice %result[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %27 = slice %result[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %28 = slice %result[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %29 = v_and_b32_src0_inline %21, 15
+  %31 = v_lshrrev_b32_src0_inline %29, 2
+  %33 = v_cmp_eq_i32_src1_inline %31 {rhs = 1}
+  %34 = v_cmp_eq_i32_src1_inline %31 {rhs = 2}
+  %35 = v_cmp_eq_i32_src1_inline %31 {rhs = 3}
+  %36 = v_and_b32_src0_inline %29, 3
+  %37 = v_lshlrev_b32_src0_inline %36, 6
+  %38 = ds_bpermute_b32 %37, %25
+  %39 = ds_bpermute_b32 %37, %26
+  %40 = v_cndmask_b32 %38, %39, %33
+  %41 = ds_bpermute_b32 %37, %27
+  %42 = v_cndmask_b32 %40, %41, %34
+  %43 = ds_bpermute_b32 %37, %28
+  %44 = v_cndmask_b32 %42, %43, %35
+  %45 = v_add_u32_src0_inline %37, 4
+  %46 = ds_bpermute_b32 %45, %25
+  %47 = ds_bpermute_b32 %45, %26
+  %48 = v_cndmask_b32 %46, %47, %33
+  %49 = ds_bpermute_b32 %45, %27
+  %50 = v_cndmask_b32 %48, %49, %34
+  %51 = ds_bpermute_b32 %45, %28
+  %52 = v_cndmask_b32 %50, %51, %35
+  %53 = v_lshrrev_b32_src0_inline %44, 16
+  %54 = v_and_b32_src0_inline %53, 1
+  %55 = v_add3_u32_src2_lit %44, %54, 32767
+  %56 = v_lshrrev_b32_src0_inline %55, 16
+  %57 = v_lshrrev_b32_src0_inline %52, 16
+  %58 = v_and_b32_src0_inline %57, 1
+  %59 = v_add3_u32_src2_lit %52, %58, 32767
+  %60 = v_lshrrev_b32_src0_inline %59, 16
+  %61 = v_cvt_pk_u16_u32 %56, %60
+  %62 = v_add_u32_src0_inline %37, 8
+  %63 = ds_bpermute_b32 %62, %25
+  %64 = ds_bpermute_b32 %62, %26
+  %65 = v_cndmask_b32 %63, %64, %33
+  %66 = ds_bpermute_b32 %62, %27
+  %67 = v_cndmask_b32 %65, %66, %34
+  %68 = ds_bpermute_b32 %62, %28
+  %69 = v_cndmask_b32 %67, %68, %35
+  %70 = v_add_u32_src0_inline %37, 12
+  %71 = ds_bpermute_b32 %70, %25
+  %72 = ds_bpermute_b32 %70, %26
+  %73 = v_cndmask_b32 %71, %72, %33
+  %74 = ds_bpermute_b32 %70, %27
+  %75 = v_cndmask_b32 %73, %74, %34
+  %76 = ds_bpermute_b32 %70, %28
+  %77 = v_cndmask_b32 %75, %76, %35
+  %78 = v_lshrrev_b32_src0_inline %69, 16
+  %79 = v_and_b32_src0_inline %78, 1
+  %80 = v_add3_u32_src2_lit %69, %79, 32767
+  %81 = v_lshrrev_b32_src0_inline %80, 16
+  %82 = v_lshrrev_b32_src0_inline %77, 16
+  %83 = v_and_b32_src0_inline %82, 1
+  %84 = v_add3_u32_src2_lit %77, %83, 32767
+  %85 = v_lshrrev_b32_src0_inline %84, 16
+  %86 = v_cvt_pk_u16_u32 %81, %85
+  %87 = v_add_u32_src0_inline %37, 16
+  %88 = ds_bpermute_b32 %87, %25
+  %89 = ds_bpermute_b32 %87, %26
+  %90 = v_cndmask_b32 %88, %89, %33
+  %91 = ds_bpermute_b32 %87, %27
+  %92 = v_cndmask_b32 %90, %91, %34
+  %93 = ds_bpermute_b32 %87, %28
+  %94 = v_cndmask_b32 %92, %93, %35
+  %95 = v_add_u32_src0_inline %37, 20
+  %96 = ds_bpermute_b32 %95, %25
+  %97 = ds_bpermute_b32 %95, %26
+  %98 = v_cndmask_b32 %96, %97, %33
+  %99 = ds_bpermute_b32 %95, %27
+  %100 = v_cndmask_b32 %98, %99, %34
+  %101 = ds_bpermute_b32 %95, %28
+  %102 = v_cndmask_b32 %100, %101, %35
+  %103 = v_lshrrev_b32_src0_inline %94, 16
+  %104 = v_and_b32_src0_inline %103, 1
+  %105 = v_add3_u32_src2_lit %94, %104, 32767
+  %106 = v_lshrrev_b32_src0_inline %105, 16
+  %107 = v_lshrrev_b32_src0_inline %102, 16
+  %108 = v_and_b32_src0_inline %107, 1
+  %109 = v_add3_u32_src2_lit %102, %108, 32767
+  %110 = v_lshrrev_b32_src0_inline %109, 16
+  %111 = v_cvt_pk_u16_u32 %106, %110
+  %112 = v_add_u32_src0_inline %37, 24
+  %113 = ds_bpermute_b32 %112, %25
+  %114 = ds_bpermute_b32 %112, %26
+  %115 = v_cndmask_b32 %113, %114, %33
+  %116 = ds_bpermute_b32 %112, %27
+  %117 = v_cndmask_b32 %115, %116, %34
+  %118 = ds_bpermute_b32 %112, %28
+  %119 = v_cndmask_b32 %117, %118, %35
+  %120 = v_add_u32_src0_inline %37, 28
+  %121 = ds_bpermute_b32 %120, %25
+  %122 = ds_bpermute_b32 %120, %26
+  %123 = v_cndmask_b32 %121, %122, %33
+  %124 = ds_bpermute_b32 %120, %27
+  %125 = v_cndmask_b32 %123, %124, %34
+  %126 = ds_bpermute_b32 %120, %28
+  %127 = v_cndmask_b32 %125, %126, %35
+  %128 = v_lshrrev_b32_src0_inline %119, 16
+  %129 = v_and_b32_src0_inline %128, 1
+  %130 = v_add3_u32_src2_lit %119, %129, 32767
+  %131 = v_lshrrev_b32_src0_inline %130, 16
+  %132 = v_lshrrev_b32_src0_inline %127, 16
+  %133 = v_and_b32_src0_inline %132, 1
+  %134 = v_add3_u32_src2_lit %127, %133, 32767
+  %135 = v_lshrrev_b32_src0_inline %134, 16
+  %136 = v_cvt_pk_u16_u32 %131, %135
+  %137 = v_add_u32_src0_inline %37, 32
+  %138 = ds_bpermute_b32 %137, %25
+  %139 = ds_bpermute_b32 %137, %26
+  %140 = v_cndmask_b32 %138, %139, %33
+  %141 = ds_bpermute_b32 %137, %27
+  %142 = v_cndmask_b32 %140, %141, %34
+  %143 = ds_bpermute_b32 %137, %28
+  %144 = v_cndmask_b32 %142, %143, %35
+  %145 = v_add_u32_src0_inline %37, 36
+  %146 = ds_bpermute_b32 %145, %25
+  %147 = ds_bpermute_b32 %145, %26
+  %148 = v_cndmask_b32 %146, %147, %33
+  %149 = ds_bpermute_b32 %145, %27
+  %150 = v_cndmask_b32 %148, %149, %34
+  %151 = ds_bpermute_b32 %145, %28
+  %152 = v_cndmask_b32 %150, %151, %35
+  %153 = v_lshrrev_b32_src0_inline %144, 16
+  %154 = v_and_b32_src0_inline %153, 1
+  %155 = v_add3_u32_src2_lit %144, %154, 32767
+  %156 = v_lshrrev_b32_src0_inline %155, 16
+  %157 = v_lshrrev_b32_src0_inline %152, 16
+  %158 = v_and_b32_src0_inline %157, 1
+  %159 = v_add3_u32_src2_lit %152, %158, 32767
+  %160 = v_lshrrev_b32_src0_inline %159, 16
+  %161 = v_cvt_pk_u16_u32 %156, %160
+  %162 = v_add_u32_src0_inline %37, 40
+  %163 = ds_bpermute_b32 %162, %25
+  %164 = ds_bpermute_b32 %162, %26
+  %165 = v_cndmask_b32 %163, %164, %33
+  %166 = ds_bpermute_b32 %162, %27
+  %167 = v_cndmask_b32 %165, %166, %34
+  %168 = ds_bpermute_b32 %162, %28
+  %169 = v_cndmask_b32 %167, %168, %35
+  %170 = v_add_u32_src0_inline %37, 44
+  %171 = ds_bpermute_b32 %170, %25
+  %172 = ds_bpermute_b32 %170, %26
+  %173 = v_cndmask_b32 %171, %172, %33
+  %174 = ds_bpermute_b32 %170, %27
+  %175 = v_cndmask_b32 %173, %174, %34
+  %176 = ds_bpermute_b32 %170, %28
+  %177 = v_cndmask_b32 %175, %176, %35
+  %178 = v_lshrrev_b32_src0_inline %169, 16
+  %179 = v_and_b32_src0_inline %178, 1
+  %180 = v_add3_u32_src2_lit %169, %179, 32767
+  %181 = v_lshrrev_b32_src0_inline %180, 16
+  %182 = v_lshrrev_b32_src0_inline %177, 16
+  %183 = v_and_b32_src0_inline %182, 1
+  %184 = v_add3_u32_src2_lit %177, %183, 32767
+  %185 = v_lshrrev_b32_src0_inline %184, 16
+  %186 = v_cvt_pk_u16_u32 %181, %185
+  %187 = v_add_u32_src0_inline %37, 48
+  %188 = ds_bpermute_b32 %187, %25
+  %189 = ds_bpermute_b32 %187, %26
+  %190 = v_cndmask_b32 %188, %189, %33
+  %191 = ds_bpermute_b32 %187, %27
+  %192 = v_cndmask_b32 %190, %191, %34
+  %193 = ds_bpermute_b32 %187, %28
+  %194 = v_cndmask_b32 %192, %193, %35
+  %195 = v_add_u32_src0_inline %37, 52
+  %196 = ds_bpermute_b32 %195, %25
+  %197 = ds_bpermute_b32 %195, %26
+  %198 = v_cndmask_b32 %196, %197, %33
+  %199 = ds_bpermute_b32 %195, %27
+  %200 = v_cndmask_b32 %198, %199, %34
+  %201 = ds_bpermute_b32 %195, %28
+  %202 = v_cndmask_b32 %200, %201, %35
+  %203 = v_lshrrev_b32_src0_inline %194, 16
+  %204 = v_and_b32_src0_inline %203, 1
+  %205 = v_add3_u32_src2_lit %194, %204, 32767
+  %206 = v_lshrrev_b32_src0_inline %205, 16
+  %207 = v_lshrrev_b32_src0_inline %202, 16
+  %208 = v_and_b32_src0_inline %207, 1
+  %209 = v_add3_u32_src2_lit %202, %208, 32767
+  %210 = v_lshrrev_b32_src0_inline %209, 16
+  %211 = v_cvt_pk_u16_u32 %206, %210
+  %212 = v_add_u32_src0_inline %37, 56
+  %213 = ds_bpermute_b32 %212, %25
+  %214 = ds_bpermute_b32 %212, %26
+  %215 = v_cndmask_b32 %213, %214, %33
+  %216 = ds_bpermute_b32 %212, %27
+  %217 = v_cndmask_b32 %215, %216, %34
+  %218 = ds_bpermute_b32 %212, %28
+  %219 = v_cndmask_b32 %217, %218, %35
+  %220 = v_add_u32_src0_inline %37, 60
+  %221 = ds_bpermute_b32 %220, %25
+  %222 = ds_bpermute_b32 %220, %26
+  %223 = v_cndmask_b32 %221, %222, %33
+  %224 = ds_bpermute_b32 %220, %27
+  %225 = v_cndmask_b32 %223, %224, %34
+  %226 = ds_bpermute_b32 %220, %28
+  %227 = v_cndmask_b32 %225, %226, %35
+  %228 = v_lshrrev_b32_src0_inline %219, 16
+  %229 = v_and_b32_src0_inline %228, 1
+  %230 = v_add3_u32_src2_lit %219, %229, 32767
+  %231 = v_lshrrev_b32_src0_inline %230, 16
+  %232 = v_lshrrev_b32_src0_inline %227, 16
+  %233 = v_and_b32_src0_inline %232, 1
+  %234 = v_add3_u32_src2_lit %227, %233, 32767
+  %235 = v_lshrrev_b32_src0_inline %234, 16
+  %236 = v_cvt_pk_u16_u32 %231, %235
+  %repacked = concat(%61, %86, %111, %136, %161, %186, %211, %236) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x8>
+  %238 = v_lshlrev_b32_src0_inline %29, 5
+  %239 = slice %repacked[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x4>
+  global_store_b128_saddr %238, %239, %output_view
+  %240 = slice %repacked[4] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x4>
+  global_store_b128_saddr %238, %240, %output_view {offset = 16}
+  return
+}
+
+// ====
+
 amdgpu.target<gfx1100> @target
 kernel.def target(@target) @bf16_wmmar3_dual_result_product_bf16_epilogue() {
   %unit = index.constant 1 : index
@@ -1080,3 +1329,40 @@ low.kernel.def target(@target) workgroup_size(32, 1, 1) @bf16_wmmar3_dual_result
   s_mov_b64_exec %97
   return
 }
+
+// ====
+
+// RUN: pass-report source-to-low,low-dce
+
+amdgpu.target<gfx1100> @target
+
+kernel.def target(@target) @report_result_fragment_repack_to_lhs_bf16() {
+  %one = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+} launch(%payload: vector<8xf32>, %output: buffer) {
+  %base = index.constant 0 : offset
+  %m = index.constant 16 : index
+  %k = index.constant 16 : index
+  %output_global = buffer.assume.memory_space<global> %output : buffer
+  %output_aligned = buffer.assume.alignment %output_global {minimum_alignment = 16} : buffer
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<16x16xbf16, #dense>
+  %fragment = vector.fragment<result> %payload shape [%m, %k] : vector<8xf32>
+  %repacked = vector.fragment.repack<lhs> %fragment shape [%m, %k] : vector<8xf32> -> vector<16xbf16>
+  vector.fragment.store<lhs> %repacked, %output_view[0, 0] shape [%m, %k] : vector<16xbf16>, view<16x16xbf16, #dense>
+  kernel.return
+}
+
+// ----
+COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
+COMPILE-REPORT: workload workgroup_size=32x1x1 flat_workgroup_size=32
+COMPILE-REPORT: source_low selected_ops=6 emitted_ops=354 rows=6
+COMPILE-REPORT: source_low_memory packets=2 scalar_packets=0 vector_packets=2 source_lanes=16 source_bytes=32 contiguous_vector_packets=2 strided_vector_packets=0 unknown_stride_vector_packets=0
+COMPILE-REPORT: source_low[0] function=report_result_fragment_repack_to_lhs_bf16 source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
+COMPILE-REPORT: source_low[1] function=report_result_fragment_repack_to_lhs_bf16 source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
+COMPILE-REPORT: source_low[2] function=report_result_fragment_repack_to_lhs_bf16 source_op=index.constant selection=plan plan=3840 descriptor=0 emitted_ops=0
+COMPILE-REPORT: source_low[3] function=report_result_fragment_repack_to_lhs_bf16 source_op=buffer.view selection=rule rule_set=1 rule=0 descriptor=0 emitted_ops=0
+COMPILE-REPORT: source_low[4] function=report_result_fragment_repack_to_lhs_bf16 source_op=vector.fragment.repack selection=plan plan=3734 plan_key=amdgpu.fragment_repack.strategy.result_to_lhs_bf16_bpermute descriptor=0 emitted_ops=349
+COMPILE-REPORT: source_low[5] function=report_result_fragment_repack_to_lhs_bf16 source_op=vector.fragment.store selection=plan plan=3604 descriptor=0 emitted_ops=5
+COMPILE-REPORT: source_low_memory[0] function=report_result_fragment_repack_to_lhs_bf16 source_op=vector.fragment.store memory_space=global operation=store packet=amdgpu.global_store_b128_saddr address_form=global_saddr dynamic_term_kind=vaddr fallback_reason=- static_offset_bytes=0 element_bytes=2 vector_lanes=8 dynamic_stride_bytes=32 vector_lane_stride_bytes=2 bank_stride_words=0 bank_conflict_degree=0 bank_conflict_kind=-
+COMPILE-REPORT: source_low_memory[1] function=report_result_fragment_repack_to_lhs_bf16 source_op=vector.fragment.store memory_space=global operation=store packet=amdgpu.global_store_b128_saddr address_form=global_saddr dynamic_term_kind=vaddr fallback_reason=- static_offset_bytes=16 element_bytes=2 vector_lanes=8 dynamic_stride_bytes=32 vector_lane_stride_bytes=2 bank_stride_words=0 bank_conflict_degree=0 bank_conflict_kind=-
