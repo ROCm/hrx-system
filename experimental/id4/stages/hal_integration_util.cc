@@ -985,6 +985,8 @@ iree_status_t CreateLiveStageContextFromFlags(LiveStageContext* out_context) {
   kernel_cache_options.structure_size = sizeof(kernel_cache_options);
   kernel_cache_options.target_processor =
       id4_pipeline_kernel_cache_default_target_processor();
+  kernel_cache_options.entry_limit =
+      ID4_PIPELINE_KERNEL_CACHE_INTERACTIVE_ENTRY_LIMIT;
   id4_pipeline_kernel_cache_t* kernel_cache = nullptr;
   if (iree_status_is_ok(status)) {
     status = id4_pipeline_kernel_cache_create(

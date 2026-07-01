@@ -3108,6 +3108,8 @@ static iree_status_t id4_ideogram4_generation_prepare_stage_bundle(
     id4_ideogram4_generation_bundle_t* bundle,
     id4_ideogram4_generation_stage_ordinal_t stage_ordinal,
     iree_hal_semaphore_list_t wait_semaphore_list,
+    id4_pipeline_kernel_diagnostic_artifact_flags_t
+        kernel_diagnostic_artifact_flags,
     id4_pipeline_diagnostics_sink_t* diagnostics_sink,
     id4_pipeline_bundle_t** out_stage_bundle) {
   IREE_ASSERT_ARGUMENT(out_stage_bundle);
@@ -3144,6 +3146,8 @@ static iree_status_t id4_ideogram4_generation_prepare_stage_bundle(
                                             : iree_hal_semaphore_list_empty();
   prepare_options.signal_semaphore_list = signal_list;
   prepare_options.command_buffer_mode = bundle->command_buffer_mode;
+  prepare_options.kernel_diagnostic_artifact_flags =
+      kernel_diagnostic_artifact_flags;
   prepare_options.diagnostics_sink = diagnostics_sink;
   if (iree_status_is_ok(status)) {
     status = id4_pipeline_stage_prepare(slot->stage, slot->plan,
@@ -3288,7 +3292,7 @@ static iree_status_t id4_ideogram4_generation_bundle_prepare_resident_stages(
     if (bundle->resident_stage_bundles[stage_ordinal]) continue;
     status = id4_ideogram4_generation_prepare_stage_bundle(
         bundle, stage_ordinal, options->wait_semaphore_list,
-        options->diagnostics_sink,
+        options->kernel_diagnostic_artifact_flags, options->diagnostics_sink,
         &bundle->resident_stage_bundles[stage_ordinal]);
   }
   if (iree_status_is_ok(status)) {
@@ -3359,6 +3363,8 @@ static iree_status_t id4_ideogram4_generation_acquire_stage_bundle_ref(
     id4_ideogram4_generation_bundle_t* bundle,
     id4_ideogram4_generation_stage_ordinal_t stage_ordinal,
     iree_hal_semaphore_list_t wait_semaphore_list,
+    id4_pipeline_kernel_diagnostic_artifact_flags_t
+        kernel_diagnostic_artifact_flags,
     id4_pipeline_diagnostics_sink_t* diagnostics_sink,
     id4_ideogram4_generation_stage_bundle_ref_t* out_stage_bundle_ref) {
   memset(out_stage_bundle_ref, 0, sizeof(*out_stage_bundle_ref));
@@ -3366,7 +3372,8 @@ static iree_status_t id4_ideogram4_generation_acquire_stage_bundle_ref(
                                                         stage_ordinal)) {
     if (!bundle->resident_stage_bundles[stage_ordinal]) {
       IREE_RETURN_IF_ERROR(id4_ideogram4_generation_prepare_stage_bundle(
-          bundle, stage_ordinal, wait_semaphore_list, diagnostics_sink,
+          bundle, stage_ordinal, wait_semaphore_list,
+          kernel_diagnostic_artifact_flags, diagnostics_sink,
           &bundle->resident_stage_bundles[stage_ordinal]));
     }
     out_stage_bundle_ref->bundle =
@@ -3375,7 +3382,8 @@ static iree_status_t id4_ideogram4_generation_acquire_stage_bundle_ref(
     return iree_ok_status();
   }
   iree_status_t status = id4_ideogram4_generation_prepare_stage_bundle(
-      bundle, stage_ordinal, wait_semaphore_list, diagnostics_sink,
+      bundle, stage_ordinal, wait_semaphore_list,
+      kernel_diagnostic_artifact_flags, diagnostics_sink,
       &out_stage_bundle_ref->bundle);
   out_stage_bundle_ref->owns_bundle = iree_status_is_ok(status);
   return status;
@@ -3385,6 +3393,8 @@ static iree_status_t id4_ideogram4_generation_prepare_phase_bundle(
     id4_ideogram4_generation_bundle_t* bundle,
     id4_ideogram4_generation_phase_mask_t phase_mask,
     iree_hal_semaphore_list_t wait_semaphore_list,
+    id4_pipeline_kernel_diagnostic_artifact_flags_t
+        kernel_diagnostic_artifact_flags,
     id4_pipeline_diagnostics_sink_t* diagnostics_sink,
     id4_ideogram4_generation_phase_bundle_t* out_phase_bundle) {
   id4_ideogram4_generation_phase_bundle_initialize(phase_mask,
@@ -3403,7 +3413,8 @@ static iree_status_t id4_ideogram4_generation_prepare_phase_bundle(
     const id4_ideogram4_generation_stage_ordinal_t stage_ordinal =
         phase->stage_ordinals[i];
     status = id4_ideogram4_generation_acquire_stage_bundle_ref(
-        bundle, stage_ordinal, wait_semaphore_list, diagnostics_sink,
+        bundle, stage_ordinal, wait_semaphore_list,
+        kernel_diagnostic_artifact_flags, diagnostics_sink,
         &out_phase_bundle->stage_bundle_refs[stage_ordinal]);
   }
   if (!iree_status_is_ok(status)) {
@@ -3515,7 +3526,8 @@ iree_status_t id4_ideogram4_generation_bundle_prepare_phase(
 
   iree_status_t status = id4_ideogram4_generation_prepare_phase_bundle(
       bundle, options->phase_mask, options->wait_semaphore_list,
-      options->diagnostics_sink, phase_bundle);
+      options->kernel_diagnostic_artifact_flags, options->diagnostics_sink,
+      phase_bundle);
   if (iree_status_is_ok(status)) {
     status = id4_ideogram4_generation_phase_bundle_signal_prepared(
         bundle, phase_bundle, options->signal_semaphore_list);
@@ -3947,11 +3959,14 @@ static iree_status_t id4_ideogram4_generation_wait_one(
 
 static iree_status_t id4_ideogram4_generation_issue_qwen_stage_serial(
     id4_ideogram4_generation_execution_t* execution,
+    id4_pipeline_kernel_diagnostic_artifact_flags_t
+        kernel_diagnostic_artifact_flags,
     id4_pipeline_diagnostics_sink_t* diagnostics_sink) {
   id4_ideogram4_generation_stage_bundle_ref_t qwen_ref = {0};
   iree_status_t status = id4_ideogram4_generation_acquire_stage_bundle_ref(
       execution->bundle, ID4_IDEOGRAM4_GENERATION_STAGE_QWEN,
-      iree_hal_semaphore_list_empty(), diagnostics_sink, &qwen_ref);
+      iree_hal_semaphore_list_empty(), kernel_diagnostic_artifact_flags,
+      diagnostics_sink, &qwen_ref);
   if (iree_status_is_ok(status)) {
     status = id4_ideogram4_generation_issue_qwen(
         execution, qwen_ref.bundle, execution->qwen_upload_payload_value,
@@ -3969,11 +3984,14 @@ static iree_status_t id4_ideogram4_generation_issue_qwen_stage_serial(
 
 static iree_status_t id4_ideogram4_generation_issue_noise_stage_serial(
     id4_ideogram4_generation_execution_t* execution,
+    id4_pipeline_kernel_diagnostic_artifact_flags_t
+        kernel_diagnostic_artifact_flags,
     id4_pipeline_diagnostics_sink_t* diagnostics_sink) {
   id4_ideogram4_generation_stage_bundle_ref_t noise_ref = {0};
   iree_status_t status = id4_ideogram4_generation_acquire_stage_bundle_ref(
       execution->bundle, ID4_IDEOGRAM4_GENERATION_STAGE_NOISE,
-      iree_hal_semaphore_list_empty(), diagnostics_sink, &noise_ref);
+      iree_hal_semaphore_list_empty(), kernel_diagnostic_artifact_flags,
+      diagnostics_sink, &noise_ref);
   if (iree_status_is_ok(status)) {
     status = id4_ideogram4_generation_issue_noise(
         execution, noise_ref.bundle, execution->seed_upload_payload_value,
@@ -3995,11 +4013,13 @@ static iree_status_t id4_ideogram4_generation_issue_dit_branch_stage_serial(
     iree_hal_semaphore_t* latent_semaphore, uint64_t latent_payload_value,
     iree_hal_semaphore_t* condition_semaphore, uint64_t condition_payload_value,
     iree_hal_semaphore_t* branch_done_semaphore, uint64_t branch_payload_value,
+    id4_pipeline_kernel_diagnostic_artifact_flags_t
+        kernel_diagnostic_artifact_flags,
     id4_pipeline_diagnostics_sink_t* diagnostics_sink) {
   id4_ideogram4_generation_stage_bundle_ref_t branch_ref = {0};
   iree_status_t status = id4_ideogram4_generation_acquire_stage_bundle_ref(
       execution->bundle, stage_ordinal, iree_hal_semaphore_list_empty(),
-      diagnostics_sink, &branch_ref);
+      kernel_diagnostic_artifact_flags, diagnostics_sink, &branch_ref);
   if (iree_status_is_ok(status)) {
     status = id4_ideogram4_generation_issue_dit_branch(
         execution, stage_ordinal, branch_ref.bundle, latent_semaphore,
@@ -4018,11 +4038,14 @@ static iree_status_t id4_ideogram4_generation_issue_dit_branch_stage_serial(
 
 static iree_status_t id4_ideogram4_generation_issue_sampler_stage_serial(
     id4_ideogram4_generation_execution_t* execution, uint64_t payload_value,
+    id4_pipeline_kernel_diagnostic_artifact_flags_t
+        kernel_diagnostic_artifact_flags,
     id4_pipeline_diagnostics_sink_t* diagnostics_sink) {
   id4_ideogram4_generation_stage_bundle_ref_t sampler_ref = {0};
   iree_status_t status = id4_ideogram4_generation_acquire_stage_bundle_ref(
       execution->bundle, ID4_IDEOGRAM4_GENERATION_STAGE_SAMPLER,
-      iree_hal_semaphore_list_empty(), diagnostics_sink, &sampler_ref);
+      iree_hal_semaphore_list_empty(), kernel_diagnostic_artifact_flags,
+      diagnostics_sink, &sampler_ref);
   if (iree_status_is_ok(status)) {
     status = id4_ideogram4_generation_issue_sampler(
         execution, sampler_ref.bundle, payload_value, diagnostics_sink);
@@ -4040,11 +4063,14 @@ static iree_status_t id4_ideogram4_generation_issue_sampler_stage_serial(
 static iree_status_t id4_ideogram4_generation_issue_decode_stage_serial(
     id4_ideogram4_generation_execution_t* execution,
     iree_hal_semaphore_list_t final_signal_list,
+    id4_pipeline_kernel_diagnostic_artifact_flags_t
+        kernel_diagnostic_artifact_flags,
     id4_pipeline_diagnostics_sink_t* diagnostics_sink) {
   id4_ideogram4_generation_stage_bundle_ref_t decode_ref = {0};
   iree_status_t status = id4_ideogram4_generation_acquire_stage_bundle_ref(
       execution->bundle, ID4_IDEOGRAM4_GENERATION_STAGE_DECODE,
-      iree_hal_semaphore_list_empty(), diagnostics_sink, &decode_ref);
+      iree_hal_semaphore_list_empty(), kernel_diagnostic_artifact_flags,
+      diagnostics_sink, &decode_ref);
   if (iree_status_is_ok(status)) {
     status = id4_ideogram4_generation_issue_decode(
         execution, decode_ref.bundle, execution->denoise_schedule.step_count,
@@ -4058,15 +4084,19 @@ static iree_status_t id4_ideogram4_generation_issue_decode_stage_serial(
 
 static iree_status_t id4_ideogram4_generation_issue_conditioning_stage_serial(
     id4_ideogram4_generation_execution_t* execution,
+    id4_pipeline_kernel_diagnostic_artifact_flags_t
+        kernel_diagnostic_artifact_flags,
     id4_pipeline_diagnostics_sink_t* diagnostics_sink) {
   IREE_RETURN_IF_ERROR(id4_ideogram4_generation_issue_qwen_stage_serial(
-      execution, diagnostics_sink));
-  return id4_ideogram4_generation_issue_noise_stage_serial(execution,
-                                                           diagnostics_sink);
+      execution, kernel_diagnostic_artifact_flags, diagnostics_sink));
+  return id4_ideogram4_generation_issue_noise_stage_serial(
+      execution, kernel_diagnostic_artifact_flags, diagnostics_sink);
 }
 
 static iree_status_t id4_ideogram4_generation_issue_denoise_stage_serial(
     id4_ideogram4_generation_execution_t* execution,
+    id4_pipeline_kernel_diagnostic_artifact_flags_t
+        kernel_diagnostic_artifact_flags,
     id4_pipeline_diagnostics_sink_t* diagnostics_sink) {
   iree_status_t status = iree_ok_status();
   for (uint32_t i = 0;
@@ -4091,18 +4121,19 @@ static iree_status_t id4_ideogram4_generation_issue_denoise_stage_serial(
           latent_semaphore, latent_payload_value,
           execution->qwen_done_semaphore, 1,
           execution->dit_conditioned_done_semaphore, payload_value,
-          diagnostics_sink);
+          kernel_diagnostic_artifact_flags, diagnostics_sink);
     }
     if (iree_status_is_ok(status)) {
       status = id4_ideogram4_generation_issue_dit_branch_stage_serial(
           execution, ID4_IDEOGRAM4_GENERATION_STAGE_DIT_UNCONDITIONED,
           latent_semaphore, latent_payload_value, NULL, 0,
           execution->dit_unconditioned_done_semaphore, payload_value,
-          diagnostics_sink);
+          kernel_diagnostic_artifact_flags, diagnostics_sink);
     }
     if (iree_status_is_ok(status)) {
       status = id4_ideogram4_generation_issue_sampler_stage_serial(
-          execution, payload_value, diagnostics_sink);
+          execution, payload_value, kernel_diagnostic_artifact_flags,
+          diagnostics_sink);
     }
   }
   return status;
@@ -4111,13 +4142,16 @@ static iree_status_t id4_ideogram4_generation_issue_denoise_stage_serial(
 static iree_status_t id4_ideogram4_generation_issue_stage_serial(
     id4_ideogram4_generation_execution_t* execution,
     iree_hal_semaphore_list_t final_signal_list,
+    id4_pipeline_kernel_diagnostic_artifact_flags_t
+        kernel_diagnostic_artifact_flags,
     id4_pipeline_diagnostics_sink_t* diagnostics_sink) {
   IREE_RETURN_IF_ERROR(id4_ideogram4_generation_issue_conditioning_stage_serial(
-      execution, diagnostics_sink));
+      execution, kernel_diagnostic_artifact_flags, diagnostics_sink));
   IREE_RETURN_IF_ERROR(id4_ideogram4_generation_issue_denoise_stage_serial(
-      execution, diagnostics_sink));
+      execution, kernel_diagnostic_artifact_flags, diagnostics_sink));
   return id4_ideogram4_generation_issue_decode_stage_serial(
-      execution, final_signal_list, diagnostics_sink);
+      execution, final_signal_list, kernel_diagnostic_artifact_flags,
+      diagnostics_sink);
 }
 
 static iree_status_t id4_ideogram4_generation_issue_denoise_phase(
@@ -4284,7 +4318,8 @@ iree_status_t id4_ideogram4_session_issue_generation(
         iree_hal_semaphore_list_empty(), &execution);
     if (iree_status_is_ok(status)) {
       status = id4_ideogram4_generation_issue_stage_serial(
-          execution, options->signal_semaphore_list, options->diagnostics_sink);
+          execution, options->signal_semaphore_list,
+          options->kernel_diagnostic_artifact_flags, options->diagnostics_sink);
     }
     if (iree_status_is_ok(status)) {
       *out_execution = execution;
@@ -4311,7 +4346,8 @@ iree_status_t id4_ideogram4_session_issue_generation(
   if (iree_status_is_ok(status)) {
     status = id4_ideogram4_generation_prepare_phase_bundle(
         bundle, ID4_IDEOGRAM4_GENERATION_PHASE_CONDITIONING,
-        iree_hal_semaphore_list_empty(), options->diagnostics_sink,
+        iree_hal_semaphore_list_empty(),
+        options->kernel_diagnostic_artifact_flags, options->diagnostics_sink,
         &conditioning_phase);
   }
   if (iree_status_is_ok(status)) {
@@ -4327,7 +4363,8 @@ iree_status_t id4_ideogram4_session_issue_generation(
   if (iree_status_is_ok(status)) {
     status = id4_ideogram4_generation_prepare_phase_bundle(
         bundle, ID4_IDEOGRAM4_GENERATION_PHASE_DENOISE,
-        iree_hal_semaphore_list_empty(), options->diagnostics_sink,
+        iree_hal_semaphore_list_empty(),
+        options->kernel_diagnostic_artifact_flags, options->diagnostics_sink,
         &denoise_phase);
   }
   if (iree_status_is_ok(status)) {
@@ -4340,7 +4377,8 @@ iree_status_t id4_ideogram4_session_issue_generation(
   if (iree_status_is_ok(status)) {
     status = id4_ideogram4_generation_prepare_phase_bundle(
         bundle, ID4_IDEOGRAM4_GENERATION_PHASE_DECODE,
-        iree_hal_semaphore_list_empty(), options->diagnostics_sink,
+        iree_hal_semaphore_list_empty(),
+        options->kernel_diagnostic_artifact_flags, options->diagnostics_sink,
         &decode_phase);
   }
   if (iree_status_is_ok(status)) {
@@ -4603,6 +4641,8 @@ static iree_status_t id4_ideogram4_qwen_prepare_bundle(
   prepare_options.wait_semaphore_list = options->wait_semaphore_list;
   prepare_options.signal_semaphore_list = signal_list;
   prepare_options.command_buffer_mode = options->command_buffer_mode;
+  prepare_options.kernel_diagnostic_artifact_flags =
+      options->kernel_diagnostic_artifact_flags;
   prepare_options.diagnostics_sink = options->diagnostics_sink;
   return id4_pipeline_stage_prepare(execution->session->qwen_stage,
                                     execution->plan, &prepare_options,

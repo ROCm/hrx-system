@@ -59,6 +59,8 @@ struct id4_pipeline_kernel_cache_t {
   iree_allocator_t host_allocator;
   // Explicit target processor used to create the Loom target profile.
   iree_string_view_t target_processor;
+  // Maximum retained prepared-executable cache entries.
+  iree_host_size_t entry_limit;
   // Target package linked into this embedding binary.
   loomc_target_environment_t* target_environment;
   // Shared Loom API context with target dialects registered.
@@ -75,8 +77,6 @@ struct id4_pipeline_kernel_cache_t {
   loomc_pass_program_t* pass_program;
   // Number of retained prepared-executable cache entries.
   iree_host_size_t entry_count;
-  // Allocated cache-entry capacity.
-  iree_host_size_t entry_capacity;
   // Retained prepared-executable cache entries.
   id4_pipeline_kernel_cache_entry_t* entries;
 };
@@ -293,10 +293,18 @@ static iree_status_t id4_pipeline_kernel_cache_store_entry(
     id4_pipeline_kernel_cache_t* kernel_cache,
     const id4_pipeline_kernel_cache_prepare_options_t* options,
     id4_pipeline_kernel_executable_t* executable) {
-  if (kernel_cache->entry_count == kernel_cache->entry_capacity) {
-    IREE_RETURN_IF_ERROR(iree_allocator_grow_array(
-        kernel_cache->host_allocator, 8, sizeof(kernel_cache->entries[0]),
-        &kernel_cache->entry_capacity, (void**)&kernel_cache->entries));
+  if (kernel_cache->entry_limit == 0) return iree_ok_status();
+  if (kernel_cache->entry_count == kernel_cache->entry_limit) {
+    id4_pipeline_kernel_cache_entry_deinitialize(&kernel_cache->entries[0],
+                                                 kernel_cache->host_allocator);
+    if (kernel_cache->entry_count > 1) {
+      memmove(
+          &kernel_cache->entries[0], &kernel_cache->entries[1],
+          (kernel_cache->entry_count - 1) * sizeof(kernel_cache->entries[0]));
+    }
+    --kernel_cache->entry_count;
+    memset(&kernel_cache->entries[kernel_cache->entry_count], 0,
+           sizeof(kernel_cache->entries[0]));
   }
   id4_pipeline_kernel_cache_entry_t* entry =
       &kernel_cache->entries[kernel_cache->entry_count];
@@ -809,9 +817,19 @@ iree_status_t id4_pipeline_kernel_cache_create(
     memset(kernel_cache, 0, sizeof(*kernel_cache));
     iree_atomic_ref_count_init(&kernel_cache->ref_count);
     kernel_cache->host_allocator = host_allocator;
+    kernel_cache->entry_limit = options->entry_limit;
     status = id4_pipeline_kernel_cache_copy_string(
         options->target_processor, host_allocator,
         &kernel_cache->target_processor);
+  }
+  if (iree_status_is_ok(status) && kernel_cache->entry_limit != 0) {
+    status = iree_allocator_malloc_array(
+        host_allocator, kernel_cache->entry_limit,
+        sizeof(kernel_cache->entries[0]), (void**)&kernel_cache->entries);
+  }
+  if (iree_status_is_ok(status) && kernel_cache->entry_limit != 0) {
+    memset(kernel_cache->entries, 0,
+           kernel_cache->entry_limit * sizeof(kernel_cache->entries[0]));
   }
 
   if (iree_status_is_ok(status)) {

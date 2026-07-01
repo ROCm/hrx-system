@@ -141,6 +141,8 @@ iree_status_t id4_tooling_runtime_context_initialize_from_flags(
     kernel_cache_options.structure_size = sizeof(kernel_cache_options);
     kernel_cache_options.target_processor =
         id4_pipeline_kernel_cache_default_target_processor();
+    kernel_cache_options.entry_limit =
+        ID4_PIPELINE_KERNEL_CACHE_INTERACTIVE_ENTRY_LIMIT;
     status = id4_pipeline_kernel_cache_create(
         &kernel_cache_options, host_allocator, &out_context->kernel_cache);
   }

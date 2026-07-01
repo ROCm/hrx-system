@@ -517,8 +517,7 @@ iree_status_t id4_pipeline_program_stage_prepare(
     load_options.command_buffer_mode =
         options->stage_options->command_buffer_mode;
     load_options.diagnostic_artifact_flags =
-        ID4_PIPELINE_KERNEL_DIAGNOSTIC_ARTIFACT_FLAG_COMPILE_REPORT_JSON |
-        ID4_PIPELINE_KERNEL_DIAGNOSTIC_ARTIFACT_FLAG_EMIT_MANIFEST_JSON;
+        options->stage_options->kernel_diagnostic_artifact_flags;
     load_options.wait_semaphore_list =
         options->stage_options->wait_semaphore_list;
     load_options.signal_semaphore_list =
@@ -542,9 +541,7 @@ iree_status_t id4_pipeline_program_stage_prepare(
     prepare_options.command_buffer_mode =
         options->stage_options->command_buffer_mode;
     prepare_options.diagnostic_artifact_flags =
-        ID4_PIPELINE_KERNEL_DIAGNOSTIC_ARTIFACT_FLAG_MODULE_TEXT |
-        ID4_PIPELINE_KERNEL_DIAGNOSTIC_ARTIFACT_FLAG_COMPILE_REPORT_JSON |
-        ID4_PIPELINE_KERNEL_DIAGNOSTIC_ARTIFACT_FLAG_EMIT_MANIFEST_JSON;
+        options->stage_options->kernel_diagnostic_artifact_flags;
     prepare_options.local_slab_alloca_flags = IREE_HAL_ALLOCA_FLAG_NONE;
     prepare_options.local_slab_dealloca_flags = IREE_HAL_DEALLOCA_FLAG_NONE;
     prepare_options.diagnostics_sink = options->stage_options->diagnostics_sink;

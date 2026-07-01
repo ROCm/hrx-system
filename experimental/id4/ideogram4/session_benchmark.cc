@@ -89,6 +89,7 @@ static id4_pipeline_kernel_cache_t* CreateKernelCache() {
   options.structure_size = sizeof(options);
   options.target_processor =
       id4_pipeline_kernel_cache_default_target_processor();
+  options.entry_limit = ID4_PIPELINE_KERNEL_CACHE_INTERACTIVE_ENTRY_LIMIT;
 
   id4_pipeline_kernel_cache_t* kernel_cache = nullptr;
   IREE_CHECK_OK(id4_pipeline_kernel_cache_create(

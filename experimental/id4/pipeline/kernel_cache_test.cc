@@ -20,6 +20,7 @@ TEST(KernelCacheTest, CreatesCompilerState) {
   options.structure_size = sizeof(options);
   options.target_processor =
       id4_pipeline_kernel_cache_default_target_processor();
+  options.entry_limit = ID4_PIPELINE_KERNEL_CACHE_INTERACTIVE_ENTRY_LIMIT;
 
   id4_pipeline_kernel_cache_t* kernel_cache = nullptr;
   IREE_ASSERT_OK(id4_pipeline_kernel_cache_create(
@@ -34,6 +35,7 @@ TEST(KernelCacheTest, CreateRequiresProcessor) {
   id4_pipeline_kernel_cache_create_options_t options;
   std::memset(&options, 0, sizeof(options));
   options.structure_size = sizeof(options);
+  options.entry_limit = ID4_PIPELINE_KERNEL_CACHE_INTERACTIVE_ENTRY_LIMIT;
 
   id4_pipeline_kernel_cache_t* kernel_cache = nullptr;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
@@ -42,12 +44,28 @@ TEST(KernelCacheTest, CreateRequiresProcessor) {
   EXPECT_EQ(kernel_cache, nullptr);
 }
 
+TEST(KernelCacheTest, CreateAllowsNoExecutableRetention) {
+  id4_pipeline_kernel_cache_create_options_t options;
+  std::memset(&options, 0, sizeof(options));
+  options.structure_size = sizeof(options);
+  options.target_processor =
+      id4_pipeline_kernel_cache_default_target_processor();
+  options.entry_limit = 0;
+
+  id4_pipeline_kernel_cache_t* kernel_cache = nullptr;
+  IREE_ASSERT_OK(id4_pipeline_kernel_cache_create(
+      &options, iree_allocator_system(), &kernel_cache));
+  id4_pipeline_kernel_cache_release(kernel_cache);
+}
+
 TEST(KernelCacheTest, PrepareRequiresRealExecutableCache) {
   id4_pipeline_kernel_cache_create_options_t create_options;
   std::memset(&create_options, 0, sizeof(create_options));
   create_options.structure_size = sizeof(create_options);
   create_options.target_processor =
       id4_pipeline_kernel_cache_default_target_processor();
+  create_options.entry_limit =
+      ID4_PIPELINE_KERNEL_CACHE_INTERACTIVE_ENTRY_LIMIT;
 
   id4_pipeline_kernel_cache_t* kernel_cache = nullptr;
   IREE_ASSERT_OK(id4_pipeline_kernel_cache_create(

@@ -92,6 +92,9 @@ typedef struct id4_pipeline_stage_prepare_options_t {
   iree_hal_semaphore_list_t signal_semaphore_list;
   // HAL command-buffer mode used when preparation records reusable regions.
   iree_hal_command_buffer_mode_t command_buffer_mode;
+  // Kernel diagnostic artifacts requested from JIT preparation.
+  id4_pipeline_kernel_diagnostic_artifact_flags_t
+      kernel_diagnostic_artifact_flags;
   // Diagnostics sink for prepare events.
   id4_pipeline_diagnostics_sink_t* diagnostics_sink;
 } id4_pipeline_stage_prepare_options_t;

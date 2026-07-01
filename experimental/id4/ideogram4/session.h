@@ -339,6 +339,9 @@ typedef struct id4_ideogram4_generation_prepare_options_t {
   iree_hal_semaphore_list_t wait_semaphore_list;
   // Semaphores signaled after generation state is ready for issue.
   iree_hal_semaphore_list_t signal_semaphore_list;
+  // Kernel diagnostic artifacts requested while preparing stage bundles.
+  id4_pipeline_kernel_diagnostic_artifact_flags_t
+      kernel_diagnostic_artifact_flags;
   // Diagnostics sink for prepare events.
   id4_pipeline_diagnostics_sink_t* diagnostics_sink;
 } id4_ideogram4_generation_prepare_options_t;
@@ -357,6 +360,9 @@ typedef struct id4_ideogram4_generation_issue_options_t {
   iree_tokenizer_encode_flags_t tokenizer_flags;
   // Policy controlling how the full generation is submitted.
   id4_ideogram4_generation_issue_policy_t issue_policy;
+  // Kernel diagnostic artifacts requested for issue-time stage preparation.
+  id4_pipeline_kernel_diagnostic_artifact_flags_t
+      kernel_diagnostic_artifact_flags;
   // Semaphores that request uploads and generation execution wait on.
   iree_hal_semaphore_list_t wait_semaphore_list;
   // Semaphores signaled when the final decoded image is ready.
@@ -397,6 +403,9 @@ typedef struct id4_ideogram4_generation_phase_prepare_options_t {
   iree_hal_semaphore_list_t wait_semaphore_list;
   // Semaphores signaled after phase preparation is ready for issue.
   iree_hal_semaphore_list_t signal_semaphore_list;
+  // Kernel diagnostic artifacts requested while preparing stage bundles.
+  id4_pipeline_kernel_diagnostic_artifact_flags_t
+      kernel_diagnostic_artifact_flags;
   // Diagnostics sink for prepare events.
   id4_pipeline_diagnostics_sink_t* diagnostics_sink;
 } id4_ideogram4_generation_phase_prepare_options_t;
@@ -437,6 +446,9 @@ typedef struct id4_ideogram4_qwen_issue_options_t {
   iree_hal_queue_affinity_t queue_affinity;
   // HAL command-buffer mode used when preparing reusable regions.
   iree_hal_command_buffer_mode_t command_buffer_mode;
+  // Kernel diagnostic artifacts requested while preparing this execution.
+  id4_pipeline_kernel_diagnostic_artifact_flags_t
+      kernel_diagnostic_artifact_flags;
   // Linear weight execution strategy selected for Qwen3-VL.
   id4_qwen3_vl_weight_execution_strategy_t qwen_weight_execution_strategy;
   // Caller-owned diagnostic tap names to capture.

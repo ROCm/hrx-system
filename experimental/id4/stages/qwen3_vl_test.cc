@@ -49,6 +49,8 @@ static id4_pipeline_stage_t* CreateStage(
   kernel_cache_options.structure_size = sizeof(kernel_cache_options);
   kernel_cache_options.target_processor =
       id4_pipeline_kernel_cache_default_target_processor();
+  kernel_cache_options.entry_limit =
+      ID4_PIPELINE_KERNEL_CACHE_INTERACTIVE_ENTRY_LIMIT;
   id4_pipeline_kernel_cache_t* kernel_cache = nullptr;
   IREE_CHECK_OK(id4_pipeline_kernel_cache_create(
       &kernel_cache_options, iree_allocator_system(), &kernel_cache));
@@ -223,6 +225,8 @@ TEST(Qwen3VlStage, RejectsInvalidStaticModelConfig) {
   kernel_cache_options.structure_size = sizeof(kernel_cache_options);
   kernel_cache_options.target_processor =
       id4_pipeline_kernel_cache_default_target_processor();
+  kernel_cache_options.entry_limit =
+      ID4_PIPELINE_KERNEL_CACHE_INTERACTIVE_ENTRY_LIMIT;
   id4_pipeline_kernel_cache_t* kernel_cache = nullptr;
   IREE_ASSERT_OK(id4_pipeline_kernel_cache_create(
       &kernel_cache_options, iree_allocator_system(), &kernel_cache));

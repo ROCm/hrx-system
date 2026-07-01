@@ -21,6 +21,11 @@ extern "C" {
 // Reusable Loom compiler state for ID4 pipeline kernels.
 typedef struct id4_pipeline_kernel_cache_t id4_pipeline_kernel_cache_t;
 
+// Retained executable budget for interactive ID4 contexts.
+//
+// Zero keeps shared compiler state but disables prepared-executable retention.
+#define ID4_PIPELINE_KERNEL_CACHE_INTERACTIVE_ENTRY_LIMIT 0
+
 // Prepared executable and copied compiler artifacts from a kernel cache miss.
 typedef struct id4_pipeline_kernel_executable_t
     id4_pipeline_kernel_executable_t;
@@ -49,21 +54,6 @@ typedef struct id4_pipeline_kernel_artifact_t {
   iree_const_byte_span_t contents;
 } id4_pipeline_kernel_artifact_t;
 
-// Diagnostic artifacts requested from the Loom compiler path.
-typedef uint32_t id4_pipeline_kernel_diagnostic_artifact_flags_t;
-
-// Diagnostic artifact request bits.
-typedef enum id4_pipeline_kernel_diagnostic_artifact_flag_bits_e {
-  // Copy textual Loom module IR after successful compilation.
-  ID4_PIPELINE_KERNEL_DIAGNOSTIC_ARTIFACT_FLAG_MODULE_TEXT = 1u << 0,
-  // Copy binary Loom bytecode after successful compilation.
-  ID4_PIPELINE_KERNEL_DIAGNOSTIC_ARTIFACT_FLAG_MODULE_BYTECODE = 1u << 1,
-  // Copy the JSON compile report.
-  ID4_PIPELINE_KERNEL_DIAGNOSTIC_ARTIFACT_FLAG_COMPILE_REPORT_JSON = 1u << 2,
-  // Copy the JSON emit artifact manifest.
-  ID4_PIPELINE_KERNEL_DIAGNOSTIC_ARTIFACT_FLAG_EMIT_MANIFEST_JSON = 1u << 3,
-} id4_pipeline_kernel_diagnostic_artifact_flag_bits_t;
-
 // Options for creating a reusable kernel cache.
 typedef struct id4_pipeline_kernel_cache_create_options_t {
   // Size of this structure for versioning.
@@ -72,6 +62,9 @@ typedef struct id4_pipeline_kernel_cache_create_options_t {
   const void* next;
   // Explicit target processor key used to build the Loom target profile.
   iree_string_view_t target_processor;
+  // Maximum retained entries before evicting the oldest prepared executable.
+  // Zero disables prepared-executable retention.
+  iree_host_size_t entry_limit;
 } id4_pipeline_kernel_cache_create_options_t;
 
 // Options for preparing one kernel executable through Loom and the HAL.
@@ -128,10 +121,13 @@ iree_string_view_t id4_pipeline_kernel_cache_target_processor(
 
 // Returns a retained executable for one exact kernel specialization.
 //
-// Compiles, emits, prepares, and caches the executable on miss. Reuses a
-// retained executable when the target, HAL cache, source, function, config
-// bindings, queue affinity, caching mode, and diagnostic artifact request all
-// match a prior prepare call.
+// Compiles, emits, and prepares the executable on miss. Reuses a retained
+// executable when the target, HAL cache, source, function, config bindings,
+// queue affinity, caching mode, and diagnostic artifact request all match a
+// prior prepare call. Cache residency is bounded by the construction entry
+// limit; a zero limit disables executable retention, and evicting an entry
+// releases only the cache's reference without invalidating executables already
+// retained by prepared bundles.
 iree_status_t id4_pipeline_kernel_cache_prepare_executable(
     id4_pipeline_kernel_cache_t* kernel_cache,
     const id4_pipeline_kernel_cache_prepare_options_t* options,

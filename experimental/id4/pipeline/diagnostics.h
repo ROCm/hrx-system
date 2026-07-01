@@ -30,6 +30,21 @@ typedef enum id4_pipeline_diagnostic_event_kind_e {
   ID4_PIPELINE_DIAGNOSTIC_EVENT_KIND_TIMING = 4,
 } id4_pipeline_diagnostic_event_kind_t;
 
+// Diagnostic artifacts requested from the Loom compiler path.
+typedef uint32_t id4_pipeline_kernel_diagnostic_artifact_flags_t;
+
+// Diagnostic artifact request bits.
+typedef enum id4_pipeline_kernel_diagnostic_artifact_flag_bits_e {
+  // Copy textual Loom module IR after successful compilation.
+  ID4_PIPELINE_KERNEL_DIAGNOSTIC_ARTIFACT_FLAG_MODULE_TEXT = 1u << 0,
+  // Copy binary Loom bytecode after successful compilation.
+  ID4_PIPELINE_KERNEL_DIAGNOSTIC_ARTIFACT_FLAG_MODULE_BYTECODE = 1u << 1,
+  // Copy the JSON compile report.
+  ID4_PIPELINE_KERNEL_DIAGNOSTIC_ARTIFACT_FLAG_COMPILE_REPORT_JSON = 1u << 2,
+  // Copy the JSON emit artifact manifest.
+  ID4_PIPELINE_KERNEL_DIAGNOSTIC_ARTIFACT_FLAG_EMIT_MANIFEST_JSON = 1u << 3,
+} id4_pipeline_kernel_diagnostic_artifact_flag_bits_t;
+
 // Parameter slab payload attached to parameter-slab diagnostic events.
 typedef struct id4_pipeline_parameter_slab_diagnostic_t {
   // Plan-local slab index.
