@@ -18,6 +18,110 @@ namespace {
 
 constexpr uint32_t kTestSourceRejectionDetail = 4;
 
+TEST(CompileReportFormatTest, MergesSourceLowMemorySummariesFromEntries) {
+  loom_target_compile_report_t report;
+  loom_target_compile_report_initialize(&report, iree_allocator_system());
+
+  loom_target_compile_report_source_low_memory_row_t rows[] = {
+      {
+          /*.function_name=*/IREE_SVL("kernel"),
+          /*.source_op_name=*/IREE_SVL("vector.load"),
+          /*.source_op_kind=*/43,
+          /*.source_root_name=*/IREE_SVL("scratch"),
+          /*.source_root_argument_index=*/1,
+          /*.memory_space=*/IREE_SVL("workgroup"),
+          /*.operation_kind=*/IREE_SVL("load"),
+          /*.packet_key=*/IREE_SVL("test.load.v2"),
+          /*.strategy_key=*/IREE_SVL(""),
+          /*.address_form=*/IREE_SVL("global_saddr"),
+          /*.dynamic_term_kind=*/IREE_SVL("vaddr"),
+          /*.fallback_reason=*/IREE_SVL(""),
+          /*.static_offset_bytes=*/0,
+          /*.element_byte_count=*/4,
+          /*.vector_lane_count=*/2,
+          /*.issued_read_byte_count=*/8,
+          /*.issued_write_byte_count=*/0,
+          /*.issued_read_unknown_width_count=*/0,
+          /*.issued_write_unknown_width_count=*/0,
+          /*.dynamic_stride_bytes=*/8,
+          /*.vector_lane_stride_bytes=*/4,
+      },
+      {
+          /*.function_name=*/IREE_SVL("kernel"),
+          /*.source_op_name=*/IREE_SVL("view.store"),
+          /*.source_op_kind=*/44,
+          /*.source_root_name=*/IREE_SVL("scratch"),
+          /*.source_root_argument_index=*/1,
+          /*.memory_space=*/IREE_SVL("workgroup"),
+          /*.operation_kind=*/IREE_SVL("store"),
+          /*.packet_key=*/IREE_SVL("test.store.v1"),
+          /*.strategy_key=*/IREE_SVL(""),
+          /*.address_form=*/IREE_SVL("global_saddr"),
+          /*.dynamic_term_kind=*/IREE_SVL("vaddr"),
+          /*.fallback_reason=*/IREE_SVL(""),
+          /*.static_offset_bytes=*/8,
+          /*.element_byte_count=*/4,
+          /*.vector_lane_count=*/1,
+          /*.issued_read_byte_count=*/0,
+          /*.issued_write_byte_count=*/4,
+          /*.issued_read_unknown_width_count=*/0,
+          /*.issued_write_unknown_width_count=*/0,
+          /*.dynamic_stride_bytes=*/4,
+          /*.vector_lane_stride_bytes=*/4,
+      },
+  };
+
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(rows); ++i) {
+    loom_target_compile_report_t entry_report;
+    loom_target_compile_report_initialize(&entry_report,
+                                          iree_allocator_system());
+    IREE_ASSERT_OK(loom_target_compile_report_record_source_low_memory_row(
+        &entry_report, &rows[i]));
+    IREE_ASSERT_OK(
+        loom_target_compile_report_record_entry_report(&report, &entry_report));
+    loom_target_compile_report_deinitialize(&entry_report);
+  }
+
+  const loom_target_compile_report_source_low_memory_summary_t* summary =
+      &report.source_low_memory_summary;
+  EXPECT_EQ(summary->packet_count, 2u);
+  EXPECT_EQ(summary->load_packet_count, 1u);
+  EXPECT_EQ(summary->store_packet_count, 1u);
+  EXPECT_EQ(summary->scalar_packet_count, 1u);
+  EXPECT_EQ(summary->vector_packet_count, 1u);
+  EXPECT_EQ(summary->source_lane_count, 3u);
+  EXPECT_EQ(summary->source_byte_count, 12u);
+  EXPECT_EQ(summary->read_byte_count, 8u);
+  EXPECT_EQ(summary->write_byte_count, 4u);
+  EXPECT_EQ(summary->issued_read_byte_count, 8u);
+  EXPECT_EQ(summary->issued_write_byte_count, 4u);
+  EXPECT_EQ(summary->issued_read_unknown_width_count, 0u);
+  EXPECT_EQ(summary->issued_write_unknown_width_count, 0u);
+  EXPECT_EQ(summary->contiguous_vector_packet_count, 1u);
+  EXPECT_EQ(summary->strided_vector_packet_count, 0u);
+  EXPECT_EQ(summary->unknown_stride_vector_packet_count, 0u);
+
+  ASSERT_EQ(report.source_low_memory_root_summaries.count, 1u);
+  ASSERT_NE(report.source_low_memory_root_summaries.head, nullptr);
+  const loom_target_compile_report_source_low_memory_root_summary_t*
+      root_summaries = static_cast<
+          const loom_target_compile_report_source_low_memory_root_summary_t*>(
+          loom_target_compile_report_vec_const_rows(
+              report.source_low_memory_root_summaries.head));
+  const loom_target_compile_report_source_low_memory_root_summary_t*
+      root_summary = &root_summaries[0];
+  EXPECT_EQ(root_summary->packet_count, 2u);
+  EXPECT_EQ(root_summary->load_packet_count, 1u);
+  EXPECT_EQ(root_summary->store_packet_count, 1u);
+  EXPECT_EQ(root_summary->source_byte_count, 12u);
+  EXPECT_EQ(root_summary->read_byte_count, 8u);
+  EXPECT_EQ(root_summary->write_byte_count, 4u);
+  EXPECT_EQ(root_summary->issued_read_byte_count, 8u);
+  EXPECT_EQ(root_summary->issued_write_byte_count, 4u);
+
+  loom_target_compile_report_deinitialize(&report);
+}
+
 TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
   loom_target_compile_report_pressure_row_t pressure_rows[] = {
       {

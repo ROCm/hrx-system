@@ -645,10 +645,20 @@ static void loom_target_compile_report_accumulate_source_low_memory_summaries(
     loom_target_compile_report_source_low_memory_summary_t* target,
     const loom_target_compile_report_source_low_memory_summary_t* source) {
   target->packet_count += source->packet_count;
+  target->load_packet_count += source->load_packet_count;
+  target->store_packet_count += source->store_packet_count;
   target->scalar_packet_count += source->scalar_packet_count;
   target->vector_packet_count += source->vector_packet_count;
   target->source_lane_count += source->source_lane_count;
   target->source_byte_count += source->source_byte_count;
+  target->read_byte_count += source->read_byte_count;
+  target->write_byte_count += source->write_byte_count;
+  target->issued_read_byte_count += source->issued_read_byte_count;
+  target->issued_write_byte_count += source->issued_write_byte_count;
+  target->issued_read_unknown_width_count +=
+      source->issued_read_unknown_width_count;
+  target->issued_write_unknown_width_count +=
+      source->issued_write_unknown_width_count;
   target->contiguous_vector_packet_count +=
       source->contiguous_vector_packet_count;
   target->strided_vector_packet_count += source->strided_vector_packet_count;
@@ -1080,6 +1090,12 @@ static void loom_target_compile_report_merge_source_low_memory_root_summary(
   target->source_byte_count += source->source_byte_count;
   target->read_byte_count += source->read_byte_count;
   target->write_byte_count += source->write_byte_count;
+  target->issued_read_byte_count += source->issued_read_byte_count;
+  target->issued_write_byte_count += source->issued_write_byte_count;
+  target->issued_read_unknown_width_count +=
+      source->issued_read_unknown_width_count;
+  target->issued_write_unknown_width_count +=
+      source->issued_write_unknown_width_count;
   target->contiguous_vector_packet_count +=
       source->contiguous_vector_packet_count;
   target->strided_vector_packet_count += source->strided_vector_packet_count;
