@@ -7,6 +7,7 @@
 #ifndef EXPERIMENTAL_ID4_PIPELINE_PARAMETER_SLAB_H_
 #define EXPERIMENTAL_ID4_PIPELINE_PARAMETER_SLAB_H_
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #include "experimental/id4/pipeline/diagnostics.h"
@@ -434,6 +435,26 @@ iree_status_t id4_pipeline_parameter_slab_set_load(
     iree_string_view_t stage_name, iree_allocator_t host_allocator,
     id4_pipeline_parameter_slab_set_t** out_slab_set);
 
+// Allocates final slabs and retained readiness edges without submitting load
+// work.
+iree_status_t id4_pipeline_parameter_slab_set_prepare(
+    const id4_pipeline_parameter_slab_set_load_options_t* options,
+    iree_host_size_t load_count,
+    const id4_pipeline_parameter_slab_load_t* loads,
+    iree_host_size_t load_step_count,
+    const id4_pipeline_parameter_load_step_t* load_steps,
+    iree_string_view_t stage_name, iree_allocator_t host_allocator,
+    id4_pipeline_parameter_slab_set_t** out_slab_set);
+
+// Submits planned parameter load group |group_index|, signaling its retained
+// readiness edge when the final slab bytes are populated.
+iree_status_t id4_pipeline_parameter_slab_set_submit_load_group(
+    id4_pipeline_parameter_slab_set_t* slab_set,
+    iree_host_size_t load_step_count,
+    const id4_pipeline_parameter_load_step_t* load_steps,
+    iree_host_size_t group_index, iree_string_view_t stage_name,
+    id4_pipeline_diagnostics_sink_t* diagnostics_sink);
+
 // Retains |slab_set| for the caller.
 void id4_pipeline_parameter_slab_set_retain(
     id4_pipeline_parameter_slab_set_t* slab_set);
@@ -452,6 +473,11 @@ iree_hal_buffer_t* id4_pipeline_parameter_slab_set_buffer_at(
 
 // Returns the number of retained parameter load readiness groups.
 iree_host_size_t id4_pipeline_parameter_slab_set_load_group_count(
+    const id4_pipeline_parameter_slab_set_t* slab_set);
+
+// Returns true when |slab_set| owns retained load context for issue-time
+// materialization.
+bool id4_pipeline_parameter_slab_set_has_deferred_load_context(
     const id4_pipeline_parameter_slab_set_t* slab_set);
 
 // Returns the borrowed readiness semaphore and payload for load group |index|.

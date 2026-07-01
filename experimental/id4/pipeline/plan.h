@@ -426,6 +426,20 @@ iree_status_t id4_pipeline_plan_load_parameter_slabs(
     iree_allocator_t host_allocator,
     id4_pipeline_parameter_slab_set_t** out_slab_set);
 
+// Allocates planned parameter slabs and readiness groups without submitting
+// load work.
+iree_status_t id4_pipeline_plan_prepare_parameter_slabs(
+    const id4_pipeline_plan_t* plan,
+    const id4_pipeline_parameter_slab_set_load_options_t* options,
+    iree_allocator_t host_allocator,
+    id4_pipeline_parameter_slab_set_t** out_slab_set);
+
+// Submits parameter load group |group_index| from |plan| into |slab_set|.
+iree_status_t id4_pipeline_plan_submit_parameter_load_group(
+    const id4_pipeline_plan_t* plan,
+    id4_pipeline_parameter_slab_set_t* slab_set, iree_host_size_t group_index,
+    id4_pipeline_diagnostics_sink_t* diagnostics_sink);
+
 // Appends deterministic JSON describing the plan.
 iree_status_t id4_pipeline_plan_format_json(const id4_pipeline_plan_t* plan,
                                             iree_string_builder_t* builder);

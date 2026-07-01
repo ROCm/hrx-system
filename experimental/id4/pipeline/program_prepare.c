@@ -994,6 +994,22 @@ static iree_status_t id4_pipeline_program_prepared_make_region_wait_list(
   return iree_ok_status();
 }
 
+static iree_status_t
+id4_pipeline_program_prepared_submit_region_parameter_load_groups(
+    const id4_pipeline_plan_t* plan, const id4_pipeline_region_plan_t* region,
+    id4_pipeline_parameter_slab_set_t* parameter_slabs,
+    id4_pipeline_diagnostics_sink_t* diagnostics_sink) {
+  IREE_ASSERT_ARGUMENT(plan);
+  IREE_ASSERT_ARGUMENT(region);
+  IREE_ASSERT_ARGUMENT(parameter_slabs);
+  for (iree_host_size_t i = 0; i < region->parameter_load_group_count; ++i) {
+    IREE_RETURN_IF_ERROR(id4_pipeline_plan_submit_parameter_load_group(
+        plan, parameter_slabs, region->parameter_load_groups[i],
+        diagnostics_sink));
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t id4_pipeline_program_prepared_make_binding_table(
     id4_pipeline_program_prepared_t* prepared, id4_pipeline_bundle_t* bundle,
     const id4_pipeline_stage_issue_options_t* options,
@@ -1504,6 +1520,9 @@ iree_status_t id4_pipeline_program_prepared_issue(
         planned_load_group_count, slab_set_load_group_count);
   }
   const bool uses_region_parameter_waits = slab_set_load_group_count != 0;
+  const bool uses_deferred_parameter_loads =
+      id4_pipeline_parameter_slab_set_has_deferred_load_context(
+          parameter_slabs);
   id4_pipeline_program_issue_wait_flags_t initial_wait_flags = 0;
   if (!uses_region_parameter_waits) {
     initial_wait_flags |=
@@ -1668,6 +1687,13 @@ iree_status_t id4_pipeline_program_prepared_issue(
           IREE_STATUS_OUT_OF_RANGE,
           "program issue region plan %" PRIhsz " is missing", i);
       break;
+    }
+    if (uses_deferred_parameter_loads) {
+      status =
+          id4_pipeline_program_prepared_submit_region_parameter_load_groups(
+              prepared->plan, region, parameter_slabs,
+              options->diagnostics_sink);
+      if (!iree_status_is_ok(status)) break;
     }
     iree_hal_semaphore_list_t region_wait_list =
         iree_hal_semaphore_list_empty();

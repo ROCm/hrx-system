@@ -459,17 +459,25 @@ static iree_status_t id4_pipeline_program_stage_validate_prepare_plan(
   }
   const iree_host_size_t parameter_slab_count =
       id4_pipeline_plan_parameter_slab_count(options->plan);
+  const bool defer_parameter_loads_to_issue = iree_all_bits_set(
+      options->stage_options->flags,
+      ID4_PIPELINE_STAGE_PREPARE_FLAG_DEFER_PARAMETER_LOADS_TO_ISSUE);
   if (parameter_slab_count != 0 &&
       !options->stage_options->parameter_provider) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "program stage parameter provider is required by the plan");
   }
-  if (parameter_slab_count != 0 &&
+  if (parameter_slab_count != 0 && !defer_parameter_loads_to_issue &&
       options->stage_options->signal_semaphore_list.count == 0) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "program stage prepare signal is required by parameter loading");
+  }
+  if (parameter_slab_count == 0 && defer_parameter_loads_to_issue) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "deferred parameter loading requires planned parameter slabs");
   }
   if (parameter_slab_count == 0 &&
       options->stage_options->wait_semaphore_list.count != 0) {
@@ -500,6 +508,9 @@ iree_status_t id4_pipeline_program_stage_prepare(
   id4_pipeline_program_prepared_t* prepared_program = NULL;
   id4_pipeline_bundle_t* bundle = NULL;
   bool parameter_load_submitted = false;
+  const bool defer_parameter_loads_to_issue = iree_all_bits_set(
+      options->stage_options->flags,
+      ID4_PIPELINE_STAGE_PREPARE_FLAG_DEFER_PARAMETER_LOADS_TO_ISSUE);
   const iree_host_size_t parameter_slab_count =
       id4_pipeline_plan_parameter_slab_count(options->plan);
 
@@ -523,9 +534,14 @@ iree_status_t id4_pipeline_program_stage_prepare(
     load_options.signal_semaphore_list =
         options->stage_options->signal_semaphore_list;
     load_options.diagnostics_sink = options->stage_options->diagnostics_sink;
-    status = id4_pipeline_plan_load_parameter_slabs(
-        options->plan, &load_options, host_allocator, &parameter_slabs);
-    parameter_load_submitted = iree_status_is_ok(status);
+    if (defer_parameter_loads_to_issue) {
+      status = id4_pipeline_plan_prepare_parameter_slabs(
+          options->plan, &load_options, host_allocator, &parameter_slabs);
+    } else {
+      status = id4_pipeline_plan_load_parameter_slabs(
+          options->plan, &load_options, host_allocator, &parameter_slabs);
+      parameter_load_submitted = iree_status_is_ok(status);
+    }
   }
   if (iree_status_is_ok(status)) {
     id4_pipeline_program_prepare_options_t prepare_options;

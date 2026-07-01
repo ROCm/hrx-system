@@ -61,6 +61,21 @@ class RuntimeContext {
   bool initialized = false;
 };
 
+static RuntimeContext& SharedRuntimeContext() {
+  static RuntimeContext context;
+  if (!context.initialized) {
+    id4_tooling_runtime_context_options_t context_options;
+    std::memset(&context_options, 0, sizeof(context_options));
+    context_options.structure_size = sizeof(context_options);
+    context_options.executable_cache_identifier =
+        IREE_SV("id4.program_stage.integration");
+    IREE_CHECK_OK(id4_tooling_runtime_context_initialize_from_flags(
+        &context_options, iree_allocator_system(), &context.value));
+    context.initialized = true;
+  }
+  return context;
+}
+
 class ProgramBuilderScope {
  public:
   ProgramBuilderScope() {
@@ -148,6 +163,7 @@ typedef uint32_t id4_pipeline_test_program_flags_t;
 
 enum id4_pipeline_test_program_flag_bits_t {
   ID4_PIPELINE_TEST_PROGRAM_FLAG_AUTHOR_DIAGNOSTIC_TAPS = 1u << 0,
+  ID4_PIPELINE_TEST_PROGRAM_FLAG_DEFER_PARAMETER_LOADS = 1u << 1,
 };
 
 static id4_pipeline_program_t* CreateTwoRegionAddProgram(
@@ -363,16 +379,10 @@ static void ExpectFloatValues(iree_hal_device_t* device,
 static void RunTwoRegionAddProgram(id4_pipeline_test_program_flags_t flags) {
   const bool captures_diagnostic_taps = iree_all_bits_set(
       flags, ID4_PIPELINE_TEST_PROGRAM_FLAG_AUTHOR_DIAGNOSTIC_TAPS);
+  const bool defers_parameter_loads = iree_all_bits_set(
+      flags, ID4_PIPELINE_TEST_PROGRAM_FLAG_DEFER_PARAMETER_LOADS);
 
-  RuntimeContext context;
-  id4_tooling_runtime_context_options_t context_options;
-  std::memset(&context_options, 0, sizeof(context_options));
-  context_options.structure_size = sizeof(context_options);
-  context_options.executable_cache_identifier =
-      IREE_SV("id4.program_stage.integration");
-  IREE_ASSERT_OK(id4_tooling_runtime_context_initialize_from_flags(
-      &context_options, iree_allocator_system(), &context.value));
-  context.initialized = true;
+  RuntimeContext& context = SharedRuntimeContext();
 
   id4_pipeline_diagnostics_sink_t diagnostics_sink;
   id4_pipeline_diagnostics_sink_initialize_ignore(&diagnostics_sink);
@@ -432,11 +442,17 @@ static void RunTwoRegionAddProgram(id4_pipeline_test_program_flags_t flags) {
   iree_hal_semaphore_t* prepare_signal_semaphore = prepare_semaphore.get();
   uint64_t prepare_signal_value = 1;
   iree_hal_semaphore_list_t prepare_signal_list =
-      OneSemaphoreList(&prepare_signal_semaphore, &prepare_signal_value);
+      defers_parameter_loads
+          ? iree_hal_semaphore_list_empty()
+          : OneSemaphoreList(&prepare_signal_semaphore, &prepare_signal_value);
 
   id4_pipeline_stage_prepare_options_t stage_prepare_options;
   std::memset(&stage_prepare_options, 0, sizeof(stage_prepare_options));
   stage_prepare_options.structure_size = sizeof(stage_prepare_options);
+  stage_prepare_options.flags =
+      defers_parameter_loads
+          ? ID4_PIPELINE_STAGE_PREPARE_FLAG_DEFER_PARAMETER_LOADS_TO_ISSUE
+          : 0;
   stage_prepare_options.parameter_provider = parameter_provider.get();
   stage_prepare_options.kernel_library = kernel_library.get();
   stage_prepare_options.wait_semaphore_list = iree_hal_semaphore_list_empty();
@@ -460,6 +476,11 @@ static void RunTwoRegionAddProgram(id4_pipeline_test_program_flags_t flags) {
   ASSERT_NE(parameter_slabs, nullptr);
   EXPECT_EQ(id4_pipeline_parameter_slab_set_load_group_count(parameter_slabs),
             2u);
+  EXPECT_EQ(id4_pipeline_parameter_slab_set_has_deferred_load_context(
+                parameter_slabs),
+            defers_parameter_loads);
+  EXPECT_EQ(id4_pipeline_bundle_readiness_semaphore_list(bundle.get()).count,
+            defers_parameter_loads ? 0u : 1u);
 
   OwningRef<iree_hal_buffer_t, iree_hal_buffer_release> input_buffer;
   IREE_ASSERT_OK(AllocateDeviceBuffer(
@@ -548,9 +569,11 @@ static void RunTwoRegionAddProgram(id4_pipeline_test_program_flags_t flags) {
   IREE_ASSERT_OK(iree_hal_semaphore_wait(
       issue_semaphore.get(), issue_signal_value, iree_infinite_timeout(),
       IREE_ASYNC_WAIT_FLAG_NONE));
-  IREE_ASSERT_OK(iree_hal_semaphore_wait(
-      prepare_semaphore.get(), prepare_signal_value, iree_infinite_timeout(),
-      IREE_ASYNC_WAIT_FLAG_NONE));
+  if (!defers_parameter_loads) {
+    IREE_ASSERT_OK(iree_hal_semaphore_wait(
+        prepare_semaphore.get(), prepare_signal_value, iree_infinite_timeout(),
+        IREE_ASYNC_WAIT_FLAG_NONE));
+  }
 
   const float expected_output[] = {111.0f, 112.0f, 113.0f, 114.0f};
   ExpectFloatValues(device, output_buffer.get(), expected_output);
@@ -563,6 +586,10 @@ static void RunTwoRegionAddProgram(id4_pipeline_test_program_flags_t flags) {
 
 TEST(ProgramStageIntegration, IssuesMultiRegionProgramWithParameterGroups) {
   RunTwoRegionAddProgram(/*flags=*/0);
+}
+
+TEST(ProgramStageIntegration, IssuesMultiRegionProgramWithDeferredParameters) {
+  RunTwoRegionAddProgram(ID4_PIPELINE_TEST_PROGRAM_FLAG_DEFER_PARAMETER_LOADS);
 }
 
 TEST(ProgramStageIntegration, IssuesMultiRegionProgramWithDiagnosticTaps) {

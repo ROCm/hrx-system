@@ -3117,26 +3117,15 @@ static iree_status_t id4_ideogram4_generation_prepare_stage_bundle(
   id4_ideogram4_generation_stage_slot_t* slot = &bundle->stages[stage_ordinal];
   const bool has_parameter_slabs =
       id4_pipeline_plan_parameter_slab_count(slot->plan) != 0;
-
-  iree_hal_semaphore_t* prepare_semaphore = NULL;
-  iree_hal_semaphore_t* prepare_semaphore_storage = NULL;
-  uint64_t prepare_payload_storage = 1;
-  iree_hal_semaphore_list_t signal_list = iree_hal_semaphore_list_empty();
-  iree_status_t status = iree_ok_status();
-  if (has_parameter_slabs) {
-    status = iree_hal_semaphore_create(bundle->device, bundle->queue_affinity,
-                                       0, IREE_HAL_SEMAPHORE_FLAG_NONE,
-                                       &prepare_semaphore);
-  }
-  if (iree_status_is_ok(status) && has_parameter_slabs) {
-    signal_list = id4_ideogram4_single_semaphore_list(
-        &prepare_semaphore_storage, &prepare_payload_storage, prepare_semaphore,
-        prepare_payload_storage);
-  }
+  const bool defer_parameter_loads_to_issue = has_parameter_slabs;
 
   id4_pipeline_stage_prepare_options_t prepare_options;
   memset(&prepare_options, 0, sizeof(prepare_options));
   prepare_options.structure_size = sizeof(prepare_options);
+  prepare_options.flags =
+      defer_parameter_loads_to_issue
+          ? ID4_PIPELINE_STAGE_PREPARE_FLAG_DEFER_PARAMETER_LOADS_TO_ISSUE
+          : 0;
   prepare_options.parameter_provider =
       id4_ideogram4_generation_prepare_stage_parameter_provider(
           &bundle->parameter_providers, stage_ordinal);
@@ -3144,18 +3133,13 @@ static iree_status_t id4_ideogram4_generation_prepare_stage_bundle(
   prepare_options.wait_semaphore_list = has_parameter_slabs
                                             ? wait_semaphore_list
                                             : iree_hal_semaphore_list_empty();
-  prepare_options.signal_semaphore_list = signal_list;
+  prepare_options.signal_semaphore_list = iree_hal_semaphore_list_empty();
   prepare_options.command_buffer_mode = bundle->command_buffer_mode;
   prepare_options.kernel_diagnostic_artifact_flags =
       kernel_diagnostic_artifact_flags;
   prepare_options.diagnostics_sink = diagnostics_sink;
-  if (iree_status_is_ok(status)) {
-    status = id4_pipeline_stage_prepare(slot->stage, slot->plan,
-                                        &prepare_options, out_stage_bundle);
-  }
-
-  iree_hal_semaphore_release(prepare_semaphore);
-  return status;
+  return id4_pipeline_stage_prepare(slot->stage, slot->plan, &prepare_options,
+                                    out_stage_bundle);
 }
 
 static iree_status_t id4_ideogram4_generation_bundle_signal_prepared(

@@ -1872,15 +1872,10 @@ id4_pipeline_plan_statistics_t id4_pipeline_plan_statistics(
   return statistics;
 }
 
-iree_status_t id4_pipeline_plan_load_parameter_slabs(
-    const id4_pipeline_plan_t* plan,
-    const id4_pipeline_parameter_slab_set_load_options_t* options,
-    iree_allocator_t host_allocator,
-    id4_pipeline_parameter_slab_set_t** out_slab_set) {
-  IREE_ASSERT_ARGUMENT(plan);
-  IREE_ASSERT_ARGUMENT(out_slab_set);
-  *out_slab_set = NULL;
-
+static iree_status_t id4_pipeline_plan_make_parameter_slab_loads(
+    const id4_pipeline_plan_t* plan, iree_allocator_t host_allocator,
+    id4_pipeline_parameter_slab_load_t** out_loads) {
+  *out_loads = NULL;
   id4_pipeline_parameter_slab_load_t* loads = NULL;
   if (plan->parameter_slab_count != 0) {
     IREE_RETURN_IF_ERROR(
@@ -1909,13 +1904,61 @@ iree_status_t id4_pipeline_plan_load_parameter_slabs(
     loads[i].queue_affinity = placement->queue_affinity;
   }
   if (iree_status_is_ok(status)) {
-    status = id4_pipeline_parameter_slab_set_load(
-        options, plan->parameter_slab_count, loads,
-        plan->parameter_load_step_count, plan->parameter_load_steps,
-        plan->stage_name, host_allocator, out_slab_set);
+    *out_loads = loads;
+  } else {
+    iree_allocator_free(host_allocator, loads);
   }
+  return status;
+}
+
+iree_status_t id4_pipeline_plan_load_parameter_slabs(
+    const id4_pipeline_plan_t* plan,
+    const id4_pipeline_parameter_slab_set_load_options_t* options,
+    iree_allocator_t host_allocator,
+    id4_pipeline_parameter_slab_set_t** out_slab_set) {
+  IREE_ASSERT_ARGUMENT(plan);
+  IREE_ASSERT_ARGUMENT(out_slab_set);
+  *out_slab_set = NULL;
+
+  id4_pipeline_parameter_slab_load_t* loads = NULL;
+  IREE_RETURN_IF_ERROR(id4_pipeline_plan_make_parameter_slab_loads(
+      plan, host_allocator, &loads));
+  iree_status_t status = id4_pipeline_parameter_slab_set_load(
+      options, plan->parameter_slab_count, loads,
+      plan->parameter_load_step_count, plan->parameter_load_steps,
+      plan->stage_name, host_allocator, out_slab_set);
   iree_allocator_free(host_allocator, loads);
   return status;
+}
+
+iree_status_t id4_pipeline_plan_prepare_parameter_slabs(
+    const id4_pipeline_plan_t* plan,
+    const id4_pipeline_parameter_slab_set_load_options_t* options,
+    iree_allocator_t host_allocator,
+    id4_pipeline_parameter_slab_set_t** out_slab_set) {
+  IREE_ASSERT_ARGUMENT(plan);
+  IREE_ASSERT_ARGUMENT(out_slab_set);
+  *out_slab_set = NULL;
+
+  id4_pipeline_parameter_slab_load_t* loads = NULL;
+  IREE_RETURN_IF_ERROR(id4_pipeline_plan_make_parameter_slab_loads(
+      plan, host_allocator, &loads));
+  iree_status_t status = id4_pipeline_parameter_slab_set_prepare(
+      options, plan->parameter_slab_count, loads,
+      plan->parameter_load_step_count, plan->parameter_load_steps,
+      plan->stage_name, host_allocator, out_slab_set);
+  iree_allocator_free(host_allocator, loads);
+  return status;
+}
+
+iree_status_t id4_pipeline_plan_submit_parameter_load_group(
+    const id4_pipeline_plan_t* plan,
+    id4_pipeline_parameter_slab_set_t* slab_set, iree_host_size_t group_index,
+    id4_pipeline_diagnostics_sink_t* diagnostics_sink) {
+  IREE_ASSERT_ARGUMENT(plan);
+  return id4_pipeline_parameter_slab_set_submit_load_group(
+      slab_set, plan->parameter_load_step_count, plan->parameter_load_steps,
+      group_index, plan->stage_name, diagnostics_sink);
 }
 
 static iree_status_t id4_pipeline_plan_append_json_string(

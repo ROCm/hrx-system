@@ -146,6 +146,20 @@ static iree_status_t id4_pipeline_validate_prepare_options(
     return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
                             "prepare extension structures are not supported");
   }
+  const id4_pipeline_stage_prepare_flags_t allowed_flags =
+      ID4_PIPELINE_STAGE_PREPARE_FLAG_DEFER_PARAMETER_LOADS_TO_ISSUE;
+  if (iree_any_bit_set(options->flags, ~allowed_flags)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "unsupported prepare flags 0x%x", options->flags);
+  }
+  if (iree_all_bits_set(
+          options->flags,
+          ID4_PIPELINE_STAGE_PREPARE_FLAG_DEFER_PARAMETER_LOADS_TO_ISSUE) &&
+      options->signal_semaphore_list.count != 0) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "deferred parameter loading cannot signal prepare readiness");
+  }
   IREE_RETURN_IF_ERROR(id4_pipeline_validate_semaphore_list(
       options->wait_semaphore_list, IREE_SV("prepare wait")));
   IREE_RETURN_IF_ERROR(id4_pipeline_validate_semaphore_list(

@@ -76,12 +76,23 @@ typedef struct id4_pipeline_stage_plan_options_t {
   id4_pipeline_diagnostics_sink_t* diagnostics_sink;
 } id4_pipeline_stage_plan_options_t;
 
+// Stage preparation behavior flags.
+typedef uint32_t id4_pipeline_stage_prepare_flags_t;
+
+// Stage preparation behavior flag bits.
+typedef enum id4_pipeline_stage_prepare_flag_bits_e {
+  // Retains parameter loading work for submission by the issue path.
+  ID4_PIPELINE_STAGE_PREPARE_FLAG_DEFER_PARAMETER_LOADS_TO_ISSUE = 1u << 0,
+} id4_pipeline_stage_prepare_flag_bits_t;
+
 // Options for preparing a reusable execution bundle from a plan.
 typedef struct id4_pipeline_stage_prepare_options_t {
   // Size of this structure for versioning.
   iree_host_size_t structure_size;
   // Extension structure chain; must be NULL for now.
   const void* next;
+  // Preparation behavior flags.
+  id4_pipeline_stage_prepare_flags_t flags;
   // Parameter provider used to populate planned parameter slabs.
   iree_io_parameter_provider_t* parameter_provider;
   // Kernel library used to resolve planned Loom module paths.
