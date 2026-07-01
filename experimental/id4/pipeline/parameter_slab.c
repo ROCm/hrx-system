@@ -56,6 +56,10 @@ struct id4_pipeline_parameter_slab_set_t {
   iree_host_size_t count;
   // Loaded slab buffers retained by this set.
   iree_hal_buffer_t** buffers;
+  // Number of retained parameter load readiness groups.
+  iree_host_size_t load_group_count;
+  // Readiness semaphores retained in parameter load group order.
+  iree_hal_semaphore_t** load_group_semaphores;
 };
 
 iree_status_t id4_pipeline_parameter_slab_pack_span(
@@ -537,6 +541,12 @@ static void id4_pipeline_parameter_slab_set_destroy(
       iree_hal_buffer_release(slab_set->buffers[i]);
     }
   }
+  if (slab_set->load_group_semaphores) {
+    for (iree_host_size_t i = 0; i < slab_set->load_group_count; ++i) {
+      iree_hal_semaphore_release(slab_set->load_group_semaphores[i]);
+    }
+  }
+  iree_allocator_free(host_allocator, slab_set->load_group_semaphores);
   iree_allocator_free(host_allocator, slab_set->buffers);
   iree_allocator_free(host_allocator, slab_set);
 }
@@ -1960,15 +1970,6 @@ static iree_status_t id4_pipeline_parameter_slab_create_group_semaphores(
   return status;
 }
 
-static void id4_pipeline_parameter_slab_release_group_semaphores(
-    iree_hal_semaphore_t** semaphores, iree_host_size_t semaphore_count,
-    iree_allocator_t host_allocator) {
-  for (iree_host_size_t i = 0; i < semaphore_count; ++i) {
-    iree_hal_semaphore_release(semaphores[i]);
-  }
-  iree_allocator_free(host_allocator, semaphores);
-}
-
 static iree_status_t id4_pipeline_parameter_slab_signal_load_complete(
     const id4_pipeline_parameter_slab_load_t* loads,
     const id4_pipeline_parameter_load_step_t* load_steps,
@@ -2127,22 +2128,16 @@ iree_status_t id4_pipeline_parameter_slab_set_load(
     status = id4_pipeline_parameter_load_group_count(
         load_step_count, load_steps, &load_group_count);
   }
-  const iree_host_size_t scheduled_group_semaphore_count =
-      load_group_count > 1 ? load_group_count : 0;
-  iree_host_size_t group_semaphore_count = 0;
-  iree_hal_semaphore_t** group_semaphores = NULL;
   if (iree_status_is_ok(status)) {
     status = id4_pipeline_parameter_slab_create_group_semaphores(
-        scheduled_group_semaphore_count, loads, load_step_count, load_steps,
-        host_allocator, &group_semaphores, &group_semaphore_count);
+        load_group_count, loads, load_step_count, load_steps, host_allocator,
+        &slab_set->load_group_semaphores, &slab_set->load_group_count);
   }
   if (iree_status_is_ok(status)) {
     status = id4_pipeline_parameter_slab_load_groups_submit(
         options, loads, load_step_count, load_steps, stage_name, slab_set,
-        group_semaphores, group_semaphore_count);
+        slab_set->load_group_semaphores, slab_set->load_group_count);
   }
-  id4_pipeline_parameter_slab_release_group_semaphores(
-      group_semaphores, group_semaphore_count, host_allocator);
   if (iree_status_is_ok(status)) {
     *out_slab_set = slab_set;
   } else {
@@ -2177,4 +2172,37 @@ iree_hal_buffer_t* id4_pipeline_parameter_slab_set_buffer_at(
     const id4_pipeline_parameter_slab_set_t* slab_set, iree_host_size_t index) {
   if (!slab_set || index >= slab_set->count) return NULL;
   return slab_set->buffers[index];
+}
+
+iree_host_size_t id4_pipeline_parameter_slab_set_load_group_count(
+    const id4_pipeline_parameter_slab_set_t* slab_set) {
+  return slab_set ? slab_set->load_group_count : 0;
+}
+
+iree_status_t id4_pipeline_parameter_slab_set_load_group_ready_at(
+    const id4_pipeline_parameter_slab_set_t* slab_set, iree_host_size_t index,
+    iree_hal_semaphore_t** out_semaphore, uint64_t* out_payload_value) {
+  IREE_ASSERT_ARGUMENT(out_semaphore);
+  IREE_ASSERT_ARGUMENT(out_payload_value);
+  *out_semaphore = NULL;
+  *out_payload_value = 0;
+  if (!slab_set) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "parameter slab set is required");
+  }
+  if (index >= slab_set->load_group_count) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "parameter load group %" PRIhsz
+                            " is outside load group count %" PRIhsz,
+                            index, slab_set->load_group_count);
+  }
+  if (!slab_set->load_group_semaphores ||
+      !slab_set->load_group_semaphores[index]) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "parameter load group %" PRIhsz " has no readiness semaphore", index);
+  }
+  *out_semaphore = slab_set->load_group_semaphores[index];
+  *out_payload_value = 1;
+  return iree_ok_status();
 }

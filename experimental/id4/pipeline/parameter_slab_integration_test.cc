@@ -395,6 +395,18 @@ TEST(ParameterSlabIntegration, EncodedFp8WeightsFeedBf16WmmaLinear) {
       slab_set;
   IREE_ASSERT_OK(id4_pipeline_plan_load_parameter_slabs(
       plan.get(), &load_options, iree_allocator_system(), slab_set.out()));
+  ASSERT_EQ(id4_pipeline_parameter_slab_set_load_group_count(slab_set.get()),
+            1u);
+  iree_hal_semaphore_t* load_group_ready_semaphore = nullptr;
+  uint64_t load_group_ready_value = 0;
+  IREE_ASSERT_OK(id4_pipeline_parameter_slab_set_load_group_ready_at(
+      slab_set.get(), /*index=*/0, &load_group_ready_semaphore,
+      &load_group_ready_value));
+  ASSERT_NE(load_group_ready_semaphore, nullptr);
+  EXPECT_EQ(load_group_ready_value, 1u);
+  IREE_ASSERT_OK(iree_hal_semaphore_wait(
+      load_group_ready_semaphore, load_group_ready_value,
+      iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
   IREE_ASSERT_OK(iree_hal_semaphore_wait(
       prepare_semaphore.get(), prepare_signal_value, iree_infinite_timeout(),
       IREE_ASYNC_WAIT_FLAG_NONE));
