@@ -199,50 +199,6 @@ def _dispatch_events(profile_records: list[dict[str, Any]]) -> list[dict[str, An
     return events
 
 
-def _profile_event_sort_key(event: dict[str, Any]) -> tuple[int, int]:
-    return (
-        _require_int(event.get("command_index"), "command_index"),
-        _require_int(event.get("event_id"), "event_id"),
-    )
-
-
-def _profile_group_sort_key(group: dict[str, Any]) -> tuple[int, int, int, int]:
-    events = _require_list(group["events"], "events")
-    first_event = _require_dict(events[0], "events[]")
-    return (
-        _require_int(first_event.get("event_id"), "event_id"),
-        _require_int(group["submission_id"], "submission_id"),
-        _require_int(group["command_buffer_id"], "command_buffer_id"),
-        len(events),
-    )
-
-
-def _profile_event_groups(
-    profile_events: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
-    groups_by_key: dict[tuple[int, int], list[dict[str, Any]]] = defaultdict(list)
-    for event in profile_events:
-        submission_id = _require_int(event.get("submission_id"), "submission_id")
-        command_buffer_id = _require_int(
-            event.get("command_buffer_id"), "command_buffer_id"
-        )
-        groups_by_key[(submission_id, command_buffer_id)].append(event)
-
-    groups = []
-    for (submission_id, command_buffer_id), events in groups_by_key.items():
-        events.sort(key=_profile_event_sort_key)
-        groups.append(
-            {
-                "submission_id": submission_id,
-                "command_buffer_id": command_buffer_id,
-                "events": events,
-                "matched": False,
-            }
-        )
-    groups.sort(key=_profile_group_sort_key)
-    return groups
-
-
 def _generation_stages(plan: dict[str, Any]) -> dict[str, dict[str, Any]]:
     stages = _require_dict(plan.get("stages"), "stages")
     return {
@@ -430,39 +386,74 @@ def _plan_dispatch_matches_event(
     return True
 
 
-def _stage_plan_matches_profile_group(
-    plan: dict[str, Any], profile_events: list[dict[str, Any]]
-) -> bool:
-    plan_dispatches = _program_dispatches(plan)
-    if len(plan_dispatches) != len(profile_events):
-        return False
-    for dispatch_ordinal, (plan_dispatch, profile_event) in enumerate(
-        zip(plan_dispatches, profile_events)
-    ):
-        if not _plan_dispatch_matches_event(
-            dispatch_ordinal, plan_dispatch, profile_event
-        ):
-            return False
-    return True
-
-
-def _find_generation_profile_group(
+def _find_generation_profile_events(
     stage_key: str,
     stage_plan: dict[str, Any],
-    profile_groups: list[dict[str, Any]],
-) -> dict[str, Any]:
-    for group in profile_groups:
-        if group["matched"]:
+    profile_events: list[dict[str, Any]],
+    matched_event_indexes: set[int],
+) -> list[dict[str, Any]]:
+    plan_dispatches = _program_dispatches(stage_plan)
+    if not plan_dispatches:
+        return []
+
+    for candidate_event_index, candidate_event in enumerate(profile_events):
+        if candidate_event_index in matched_event_indexes:
             continue
-        events = [_require_dict(event, "events[]") for event in group["events"]]
-        if _stage_plan_matches_profile_group(stage_plan, events):
-            group["matched"] = True
-            return group
+        if not _plan_dispatch_matches_event(0, plan_dispatches[0], candidate_event):
+            continue
+
+        matched_indexes = [candidate_event_index]
+        next_dispatch_ordinal = 1
+        for profile_event_index in range(
+            candidate_event_index + 1, len(profile_events)
+        ):
+            if next_dispatch_ordinal == len(plan_dispatches):
+                break
+            if profile_event_index in matched_event_indexes:
+                continue
+            profile_event = profile_events[profile_event_index]
+            if _plan_dispatch_matches_event(
+                next_dispatch_ordinal,
+                plan_dispatches[next_dispatch_ordinal],
+                profile_event,
+            ):
+                matched_indexes.append(profile_event_index)
+                next_dispatch_ordinal += 1
+
+        if next_dispatch_ordinal == len(plan_dispatches):
+            matched_event_indexes.update(matched_indexes)
+            return [profile_events[index] for index in matched_indexes]
+
     dispatch_count = len(_program_dispatches(stage_plan))
     raise DispatchProfileJoinError(
-        f"no unmatched profile command buffer matched generation stage "
+        f"no unmatched profile dispatch sequence matched generation stage "
         f"{stage_key} with {dispatch_count} dispatches"
     )
+
+
+def _profile_command_buffers_for_events(
+    profile_events: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    command_buffers = []
+    command_buffer_indexes: dict[tuple[int, int], int] = {}
+    for profile_event in profile_events:
+        key = (
+            _require_int(profile_event.get("submission_id"), "submission_id"),
+            _require_int(profile_event.get("command_buffer_id"), "command_buffer_id"),
+        )
+        command_buffer_index = command_buffer_indexes.get(key)
+        if command_buffer_index is None:
+            command_buffer_index = len(command_buffers)
+            command_buffer_indexes[key] = command_buffer_index
+            command_buffers.append(
+                {
+                    "submission_id": key[0],
+                    "command_buffer_id": key[1],
+                    "dispatch_count": 0,
+                }
+            )
+        command_buffers[command_buffer_index]["dispatch_count"] += 1
+    return command_buffers
 
 
 def _accumulate_kernel_aggregate(
@@ -835,19 +826,19 @@ def join_generation_dispatch_profile(
     if plan.get("kind") != "ideogram4_generation":
         raise DispatchProfileJoinError("plan kind must be ideogram4_generation")
     profile_events = _dispatch_events(profile_records)
-    profile_groups = _profile_event_groups(profile_events)
     stages = _generation_stages(plan)
     sequence = _generation_issue_sequence(plan)
 
     flattened_rows = []
     stage_invocations = []
+    matched_event_indexes: set[int] = set()
     for invocation_ordinal, (stage_key, denoise_step_index) in enumerate(sequence):
-        profile_group = _find_generation_profile_group(
-            stage_key, stages[stage_key], profile_groups
+        matched_events = _find_generation_profile_events(
+            stage_key, stages[stage_key], profile_events, matched_event_indexes
         )
-        stage_report = _join_stage_dispatches(
-            stages[stage_key], profile_group["events"]
-        )
+        stage_report = _join_stage_dispatches(stages[stage_key], matched_events)
+        profile_command_buffers = _profile_command_buffers_for_events(matched_events)
+        first_profile_command_buffer = profile_command_buffers[0]
         invocation_rows = []
         for row in stage_report["dispatches"]:
             generation_row = dict(row)
@@ -855,8 +846,8 @@ def join_generation_dispatch_profile(
             generation_row["stage_invocation_ordinal"] = invocation_ordinal
             generation_row["generation_dispatch_ordinal"] = len(flattened_rows)
             generation_row["denoise_step_index"] = denoise_step_index
-            generation_row["profile_submission_id"] = profile_group["submission_id"]
-            generation_row["profile_command_buffer_id"] = profile_group[
+            generation_row["profile_submission_id"] = generation_row["submission_id"]
+            generation_row["profile_command_buffer_id"] = generation_row[
                 "command_buffer_id"
             ]
             invocation_rows.append(generation_row)
@@ -868,8 +859,12 @@ def join_generation_dispatch_profile(
                 "stage": stage_report["stage"],
                 "stage_invocation_ordinal": invocation_ordinal,
                 "denoise_step_index": denoise_step_index,
-                "profile_submission_id": profile_group["submission_id"],
-                "profile_command_buffer_id": profile_group["command_buffer_id"],
+                "profile_submission_id": first_profile_command_buffer["submission_id"],
+                "profile_command_buffer_id": first_profile_command_buffer[
+                    "command_buffer_id"
+                ],
+                "profile_command_buffer_count": len(profile_command_buffers),
+                "profile_command_buffers": profile_command_buffers,
                 "summary": stage_summary,
                 "region": stage_report["region"],
                 "by_kernel": _aggregate_rows(invocation_rows),
@@ -877,10 +872,11 @@ def join_generation_dispatch_profile(
             }
         )
 
-    unmatched_events = []
-    for group in profile_groups:
-        if not group["matched"]:
-            unmatched_events.extend(group["events"])
+    unmatched_events = [
+        profile_event
+        for profile_event_index, profile_event in enumerate(profile_events)
+        if profile_event_index not in matched_event_indexes
+    ]
     unmatched_rows = _profile_only_rows(unmatched_events)
 
     return {

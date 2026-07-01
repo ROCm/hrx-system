@@ -388,6 +388,48 @@ class DispatchProfileJoinTest(unittest.TestCase):
         )
         self.assertEqual(dit_forward["total_duration_ns"], 1200)
 
+    def test_joins_generation_stage_split_across_command_buffers(self) -> None:
+        plan = _generation_plan()
+        plan["stages"]["qwen"] = _stage_plan(
+            "qwen", ["qwen.first", "qwen.second", "qwen.third"]
+        )
+        profile = [
+            _profile_event(1, "qwen.first", 10, 0, 100, 1),
+            _profile_event(2, "prepare.encode", 5, 0, 101, 2),
+            _profile_event(3, "qwen.second", 20, 0, 102, 3),
+            _profile_event(4, "qwen.third", 30, 0, 102, 4),
+            _profile_event(5, "noise.forward", 100, 0, 110, 5),
+            _profile_event(6, "dit.prelude", 300, 0, 120, 6),
+            _profile_event(7, "dit.forward", 400, 1, 120, 6),
+            _profile_event(8, "dit.forward", 500, 0, 130, 7),
+            _profile_event(9, "sampler.step", 600, 0, 140, 8),
+            _profile_event(10, "dit.prelude", 700, 0, 121, 6),
+            _profile_event(11, "dit.forward", 800, 1, 121, 6),
+            _profile_event(12, "dit.forward", 900, 0, 131, 7),
+            _profile_event(13, "sampler.step", 1000, 0, 141, 8),
+            _profile_event(14, "decode.forward", 1100, 0, 150, 9),
+        ]
+
+        report = dispatch_profile_join.join_profile(plan, profile)
+
+        qwen_invocation = report["stage_invocations"][0]
+        self.assertEqual(qwen_invocation["stage_key"], "qwen")
+        self.assertEqual(qwen_invocation["summary"]["dispatch_count"], 3)
+        self.assertEqual(qwen_invocation["summary"]["total_duration_ns"], 60)
+        self.assertEqual(qwen_invocation["profile_command_buffer_count"], 3)
+        self.assertEqual(
+            [
+                row["command_buffer_id"]
+                for row in qwen_invocation["profile_command_buffers"]
+            ],
+            [1, 3, 4],
+        )
+        self.assertEqual(report["summary"]["dispatch_count"], 13)
+        self.assertEqual(report["summary"]["unmatched_dispatch_count"], 1)
+        self.assertEqual(
+            report["unmatched_dispatches"][0]["function_name"], "prepare.encode"
+        )
+
     def test_preserves_ticks_when_clock_fit_is_unavailable(self) -> None:
         profile = _profile()
         profile[0] = dict(profile[0])
@@ -416,7 +458,7 @@ class DispatchProfileJoinTest(unittest.TestCase):
 
         with self.assertRaisesRegex(
             dispatch_profile_join.DispatchProfileJoinError,
-            "no unmatched profile command buffer matched generation stage qwen",
+            "no unmatched profile dispatch sequence matched generation stage qwen",
         ):
             dispatch_profile_join.join_profile(_generation_plan(), profile)
 
