@@ -544,6 +544,8 @@ typedef enum id4_qwen3_vl_operation_kind_e {
   ID4_QWEN3_VL_OPERATION_BARRIER = 11,
   // Diagnostic tap operation.
   ID4_QWEN3_VL_OPERATION_TAP = 12,
+  // Semantic region cut operation.
+  ID4_QWEN3_VL_OPERATION_REGION_CUT = 13,
 } id4_qwen3_vl_operation_kind_t;
 
 typedef enum id4_qwen3_vl_operation_site_e {
@@ -761,7 +763,7 @@ typedef enum id4_qwen3_vl_config_key_e {
 enum {
   ID4_QWEN3_VL_PARAMETER_KIND_COUNT = ID4_QWEN3_VL_PARAMETER_FINAL_NORM + 1,
   ID4_QWEN3_VL_TENSOR_KIND_COUNT = ID4_QWEN3_VL_TENSOR_OUTPUT + 1,
-  ID4_QWEN3_VL_OPERATION_KIND_COUNT = ID4_QWEN3_VL_OPERATION_TAP + 1,
+  ID4_QWEN3_VL_OPERATION_KIND_COUNT = ID4_QWEN3_VL_OPERATION_REGION_CUT + 1,
   ID4_QWEN3_VL_OPERATION_SITE_COUNT = ID4_QWEN3_VL_OPERATION_SITE_OUTPUT + 1,
   ID4_QWEN3_VL_KERNEL_KIND_COUNT =
       ID4_QWEN3_VL_KERNEL_LINEAR_BF16_BF16_WMMA_M48N32_COMPACT_RHS + 1,
@@ -1398,6 +1400,7 @@ static const id4_qwen3_vl_program_operation_kind_entry_t
             {true, IREE_SVL("normalize_token_weights")},
         [ID4_QWEN3_VL_OPERATION_BARRIER] = {true, IREE_SVL("barrier")},
         [ID4_QWEN3_VL_OPERATION_TAP] = {true, IREE_SVL("tap")},
+        [ID4_QWEN3_VL_OPERATION_REGION_CUT] = {true, IREE_SVL("region_cut")},
 };
 
 static const id4_pipeline_kernel_ref_t
@@ -2397,6 +2400,21 @@ static iree_status_t id4_qwen3_vl_program_barrier(
       .name = name,
   };
   return id4_pipeline_program_barrier(builder, &options);
+}
+
+static iree_status_t id4_qwen3_vl_program_region_cut(
+    id4_pipeline_program_builder_t* builder, uint32_t layer_ordinal,
+    id4_qwen3_vl_operation_site_t site) {
+  char name_buffer[ID4_QWEN3_VL_FORMAT_BUFFER_CAPACITY];
+  iree_string_view_t name = iree_string_view_empty();
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_format_operation_name(
+      ID4_QWEN3_VL_OPERATION_REGION_CUT, layer_ordinal, site, name_buffer,
+      IREE_ARRAYSIZE(name_buffer), &name));
+  id4_pipeline_program_region_cut_options_t options = {
+      .structure_size = sizeof(options),
+      .name = name,
+  };
+  return id4_pipeline_program_region_cut(builder, &options);
 }
 
 static iree_status_t id4_qwen3_vl_program_tap(
@@ -4121,6 +4139,8 @@ iree_status_t id4_qwen3_vl_program_author_forward(
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_tap_tensor(
       builder, ID4_QWEN3_VL_TENSOR_EMBEDDED_HIDDEN_STATES, UINT32_MAX,
       hidden_states));
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_region_cut(
+      builder, UINT32_MAX, ID4_QWEN3_VL_OPERATION_SITE_AFTER_TOKEN_EMBEDDING));
 
   const uint32_t selected_hidden_row_count =
       id4_qwen3_vl_program_selected_hidden_row_count(&options->model);
@@ -4147,6 +4167,10 @@ iree_status_t id4_qwen3_vl_program_author_forward(
           selected_hidden_states));
       ++selected_layer_index;
     }
+    if (i + 1 < options->model.layer_count) {
+      IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_region_cut(
+          builder, i, ID4_QWEN3_VL_OPERATION_SITE_AFTER_LAYER_OUTPUT));
+    }
   }
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_barrier(
       builder, UINT32_MAX,
@@ -4154,6 +4178,9 @@ iree_status_t id4_qwen3_vl_program_author_forward(
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_tap_tensor(
       builder, ID4_QWEN3_VL_TENSOR_SELECTED_HIDDEN_STATES, UINT32_MAX,
       selected_hidden_states));
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_region_cut(
+      builder, UINT32_MAX,
+      ID4_QWEN3_VL_OPERATION_SITE_AFTER_SELECTED_HIDDEN_PACK));
 
   id4_pipeline_program_tensor_t condition =
       id4_pipeline_program_tensor_invalid();

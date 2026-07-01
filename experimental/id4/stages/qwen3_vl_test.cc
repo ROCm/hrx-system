@@ -128,12 +128,19 @@ TEST(Qwen3VlStage, PlansForwardStageFromRequestConfig) {
   EXPECT_GT(id4_pipeline_plan_memory_slab_count(plan), 0u);
   EXPECT_GT(id4_pipeline_plan_boundary_tensor_count(plan), 0u);
   EXPECT_GT(id4_pipeline_plan_kernel_count(plan), 0u);
-  ASSERT_EQ(id4_pipeline_plan_region_count(plan), 1u);
-  const id4_pipeline_region_plan_t* region =
-      id4_pipeline_plan_region_at(plan, 0);
-  ASSERT_NE(region, nullptr);
-  EXPECT_GT(region->statistics.local_slab_byte_length, 0u);
-  EXPECT_GT(region->statistics.local_acquire_count, 0u);
+  EXPECT_GT(id4_pipeline_plan_region_count(plan), 1u);
+  EXPECT_GT(id4_pipeline_plan_shared_tensor_count(plan), 0u);
+  bool has_local_transient_region = false;
+  for (iree_host_size_t i = 0; i < id4_pipeline_plan_region_count(plan); ++i) {
+    const id4_pipeline_region_plan_t* region =
+        id4_pipeline_plan_region_at(plan, i);
+    ASSERT_NE(region, nullptr);
+    has_local_transient_region =
+        has_local_transient_region ||
+        (region->statistics.local_acquire_count > 0 &&
+         region->statistics.local_slab_byte_length > 0);
+  }
+  EXPECT_TRUE(has_local_transient_region);
 
   id4_pipeline_plan_release(plan);
   id4_pipeline_stage_release(stage);

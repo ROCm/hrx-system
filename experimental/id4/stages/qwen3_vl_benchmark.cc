@@ -247,6 +247,24 @@ static iree_status_t WritePlanJsonIfRequested(const id4_pipeline_plan_t* plan,
   return status;
 }
 
+static iree_status_t WriteInitialPlanJsonIfRequested(
+    iree_benchmark_state_t* benchmark_state, QwenBenchmarkContext* context,
+    id4_qwen3_vl_request_config_t request) {
+  if (iree_string_view_is_empty(
+          iree_make_cstring_view(FLAG_id4_plan_output_dir))) {
+    return iree_ok_status();
+  }
+
+  iree_benchmark_pause_timing(benchmark_state);
+  id4::test::OwningRef<id4_pipeline_plan_t, id4_pipeline_plan_release> plan;
+  iree_status_t status = CreateQwenPlan(context, request, plan.out());
+  if (iree_status_is_ok(status)) {
+    status = WritePlanJsonIfRequested(plan.get(), request.token_count);
+  }
+  iree_benchmark_resume_timing(benchmark_state);
+  return status;
+}
+
 static uint64_t CeilMiB(iree_device_size_t byte_length) {
   static constexpr iree_device_size_t kMiB = 1024ull * 1024ull;
   return (uint64_t)((byte_length + kMiB - 1) / kMiB);
@@ -403,8 +421,14 @@ IREE_BENCHMARK_FN(BM_Qwen3VlStagePlan) {
   id4_qwen3_vl_request_config_t request = {};
   request.token_count = shape.token_count;
 
+  bool wrote_initial_plan_json = false;
   uint64_t iteration_count = 0;
   while (iree_benchmark_keep_running(benchmark_state, 1)) {
+    if (!wrote_initial_plan_json) {
+      IREE_RETURN_IF_ERROR(
+          WriteInitialPlanJsonIfRequested(benchmark_state, &context, request));
+      wrote_initial_plan_json = true;
+    }
     id4_pipeline_plan_t* plan = nullptr;
     IREE_RETURN_IF_ERROR(CreateQwenPlan(&context, request, &plan));
     iree_optimization_barrier(plan);
@@ -431,8 +455,14 @@ IREE_BENCHMARK_FN(BM_Qwen3VlStagePlanFixture) {
   QwenBenchmarkContext context;
   IREE_RETURN_IF_ERROR(CreateLoadedQwenFixtureStageContext(&context));
 
+  bool wrote_initial_plan_json = false;
   uint64_t iteration_count = 0;
   while (iree_benchmark_keep_running(benchmark_state, 1)) {
+    if (!wrote_initial_plan_json) {
+      IREE_RETURN_IF_ERROR(WriteInitialPlanJsonIfRequested(
+          benchmark_state, &context, context.request));
+      wrote_initial_plan_json = true;
+    }
     id4_pipeline_plan_t* plan = nullptr;
     IREE_RETURN_IF_ERROR(CreateQwenPlan(&context, context.request, &plan));
     iree_optimization_barrier(plan);
@@ -649,6 +679,111 @@ static iree_status_t RunIssueBenchmarkWithPreparedContext(
   return iree_ok_status();
 }
 
+static iree_status_t RunPrepareIssueBenchmarkWithContext(
+    iree_benchmark_state_t* benchmark_state, QwenBenchmarkContext* context,
+    iree_status_t (*queue_inputs)(QwenBenchmarkContext*,
+                                  const id4_pipeline_plan_t*,
+                                  const id4::test::BufferBindingSet&,
+                                  iree_hal_semaphore_t*, uint64_t*)) {
+  id4::test::OwningRef<id4_pipeline_plan_t, id4_pipeline_plan_release> plan;
+  IREE_RETURN_IF_ERROR(CreateQwenPlan(context, context->request, plan.out()));
+  const id4_pipeline_plan_statistics_t statistics =
+      id4_pipeline_plan_statistics(plan.get());
+
+  id4::test::OwningRef<iree_hal_semaphore_t, iree_hal_semaphore_release>
+      prepare_semaphore;
+  IREE_RETURN_IF_ERROR(iree_hal_semaphore_create(
+      context->live.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, 0,
+      IREE_HAL_SEMAPHORE_FLAG_DEFAULT, prepare_semaphore.out()));
+
+  id4::test::OwningRef<id4_pipeline_bundle_t, id4_pipeline_bundle_release>
+      warm_bundle;
+  IREE_RETURN_IF_ERROR(PrepareQwenBundle(
+      context, plan.get(), prepare_semaphore.get(), 1, warm_bundle.out()));
+  IREE_RETURN_IF_ERROR(WaitForSemaphore(prepare_semaphore.get(), 1));
+  warm_bundle.reset();
+
+  id4::test::BufferBindingSet boundary_bindings;
+  IREE_RETURN_IF_ERROR(id4::test::AllocateBoundaryBindings(
+      context->live.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, plan.get(),
+      &boundary_bindings));
+
+  id4::test::OwningRef<iree_hal_semaphore_t, iree_hal_semaphore_release>
+      update_semaphore;
+  IREE_RETURN_IF_ERROR(iree_hal_semaphore_create(
+      context->live.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, 0,
+      IREE_HAL_SEMAPHORE_FLAG_DEFAULT, update_semaphore.out()));
+  uint64_t update_value = 0;
+  IREE_RETURN_IF_ERROR(queue_inputs(context, plan.get(), boundary_bindings,
+                                    update_semaphore.get(), &update_value));
+  const uint32_t sentinel_pattern = 0xA5A5A5A5u;
+  IREE_RETURN_IF_ERROR(id4::test::QueueFillBoundaryTensors(
+      context->live.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, plan.get(),
+      boundary_bindings, ID4_PIPELINE_BOUNDARY_TENSOR_FLAG_EXPORTED,
+      &sentinel_pattern, sizeof(sentinel_pattern), update_semaphore.get(),
+      &update_value));
+  if (update_value != 0) {
+    IREE_RETURN_IF_ERROR(
+        WaitForSemaphore(update_semaphore.get(), update_value));
+  }
+
+  id4::test::OwningRef<iree_hal_semaphore_t, iree_hal_semaphore_release>
+      issue_semaphore;
+  IREE_RETURN_IF_ERROR(iree_hal_semaphore_create(
+      context->live.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, 0,
+      IREE_HAL_SEMAPHORE_FLAG_DEFAULT, issue_semaphore.out()));
+
+  uint64_t prepare_value = 1;
+  uint64_t signal_value = 0;
+  uint64_t iteration_count = 0;
+  bool wrote_initial_plan_json = false;
+  iree_hal_profiling_from_flags_t* profiling = nullptr;
+  iree_status_t status = iree_hal_begin_device_group_profiling_from_flags(
+      context->live.device_group.get(), iree_allocator_system(), &profiling);
+  while (iree_status_is_ok(status) &&
+         iree_benchmark_keep_running(benchmark_state, 1)) {
+    if (!wrote_initial_plan_json) {
+      iree_benchmark_pause_timing(benchmark_state);
+      status =
+          WritePlanJsonIfRequested(plan.get(), context->request.token_count);
+      iree_benchmark_resume_timing(benchmark_state);
+      wrote_initial_plan_json = true;
+    }
+    if (!iree_status_is_ok(status)) break;
+
+    ++prepare_value;
+    id4::test::OwningRef<id4_pipeline_bundle_t, id4_pipeline_bundle_release>
+        bundle;
+    status = PrepareQwenBundle(context, plan.get(), prepare_semaphore.get(),
+                               prepare_value, bundle.out());
+    if (iree_status_is_ok(status)) {
+      ++signal_value;
+      status = IssueQwenBundle(context, bundle.get(), boundary_bindings,
+                               update_semaphore.get(), update_value,
+                               issue_semaphore.get(), signal_value);
+    }
+    if (iree_status_is_ok(status)) {
+      status = WaitForSemaphore(issue_semaphore.get(), signal_value);
+    }
+    if (iree_status_is_ok(status)) {
+      status = WaitForSemaphore(prepare_semaphore.get(), prepare_value);
+    }
+    if (iree_status_is_ok(status)) {
+      iree_optimization_barrier(bundle.get());
+      ++iteration_count;
+    }
+  }
+  status =
+      iree_status_join(status, iree_hal_end_profiling_from_flags(profiling));
+  IREE_RETURN_IF_ERROR(status);
+  iree_benchmark_set_items_processed(
+      benchmark_state,
+      static_cast<int64_t>(iteration_count * context->request.token_count));
+  SetQwenBenchmarkLabel(benchmark_state, context->request.token_count,
+                        statistics);
+  return iree_ok_status();
+}
+
 static iree_status_t QueueFixtureQwenInputs(
     QwenBenchmarkContext* context, const id4_pipeline_plan_t* plan,
     const id4::test::BufferBindingSet& boundary_bindings,
@@ -687,6 +822,25 @@ static iree_status_t RunSyntheticIssueBenchmark(
       benchmark_state, &context, timing_mode, QueueSyntheticQwenInputs);
 }
 
+static iree_status_t RunFixturePrepareIssueBenchmark(
+    iree_benchmark_state_t* benchmark_state) {
+  QwenBenchmarkContext context;
+  IREE_RETURN_IF_ERROR(CreateLoadedQwenFixtureBenchmarkContext(&context));
+  return RunPrepareIssueBenchmarkWithContext(benchmark_state, &context,
+                                             QueueFixtureQwenInputs);
+}
+
+static iree_status_t RunSyntheticPrepareIssueBenchmark(
+    const iree_benchmark_def_t* benchmark_def,
+    iree_benchmark_state_t* benchmark_state) {
+  const QwenBenchmarkShape& shape = QwenBenchmarkShapeFromDef(benchmark_def);
+  QwenBenchmarkContext context;
+  IREE_RETURN_IF_ERROR(CreateLoadedQwenBenchmarkContext(&context));
+  context.request.token_count = shape.token_count;
+  return RunPrepareIssueBenchmarkWithContext(benchmark_state, &context,
+                                             QueueSyntheticQwenInputs);
+}
+
 IREE_BENCHMARK_FN(BM_Qwen3VlStageIssueFixtureSubmitOnly) {
   return RunFixtureIssueBenchmark(benchmark_state,
                                   QwenIssueTimingMode::kSubmitOnly);
@@ -707,6 +861,14 @@ IREE_BENCHMARK_FN(BM_Qwen3VlStageIssueSyntheticEndToEnd) {
                                     QwenIssueTimingMode::kEndToEnd);
 }
 
+IREE_BENCHMARK_FN(BM_Qwen3VlStagePrepareIssueFixtureEndToEnd) {
+  return RunFixturePrepareIssueBenchmark(benchmark_state);
+}
+
+IREE_BENCHMARK_FN(BM_Qwen3VlStagePrepareIssueSyntheticEndToEnd) {
+  return RunSyntheticPrepareIssueBenchmark(benchmark_def, benchmark_state);
+}
+
 #define ID4_QWEN_FIXTURE_BENCHMARK_REGISTER(name, time_unit)     \
   static const iree_benchmark_def_t* name##_registration         \
       IREE_ATTRIBUTE_UNUSED =                                    \
@@ -719,6 +881,8 @@ ID4_QWEN_FIXTURE_BENCHMARK_REGISTER(BM_Qwen3VlStagePrepareFixtureCachedKernels,
 ID4_QWEN_FIXTURE_BENCHMARK_REGISTER(BM_Qwen3VlStageIssueFixtureSubmitOnly,
                                     MICROSECOND);
 ID4_QWEN_FIXTURE_BENCHMARK_REGISTER(BM_Qwen3VlStageIssueFixtureEndToEnd,
+                                    MILLISECOND);
+ID4_QWEN_FIXTURE_BENCHMARK_REGISTER(BM_Qwen3VlStagePrepareIssueFixtureEndToEnd,
                                     MILLISECOND);
 
 ID4_QWEN_BENCHMARK_REGISTER(BM_Qwen3VlStageIssueSyntheticSubmitOnly,
@@ -740,6 +904,16 @@ ID4_QWEN_BENCHMARK_REGISTER(BM_Qwen3VlStageIssueSyntheticEndToEnd,
 ID4_QWEN_BENCHMARK_REGISTER(BM_Qwen3VlStageIssueSyntheticEndToEnd,
                             kQwenToken512Shape, "token512", MILLISECOND);
 ID4_QWEN_BENCHMARK_REGISTER(BM_Qwen3VlStageIssueSyntheticEndToEnd,
+                            kQwenToken1024Shape, "token1024", MILLISECOND);
+ID4_QWEN_BENCHMARK_REGISTER(BM_Qwen3VlStagePrepareIssueSyntheticEndToEnd,
+                            kQwenToken19Shape, "token19", MILLISECOND);
+ID4_QWEN_BENCHMARK_REGISTER(BM_Qwen3VlStagePrepareIssueSyntheticEndToEnd,
+                            kQwenToken64Shape, "token64", MILLISECOND);
+ID4_QWEN_BENCHMARK_REGISTER(BM_Qwen3VlStagePrepareIssueSyntheticEndToEnd,
+                            kQwenToken256Shape, "token256", MILLISECOND);
+ID4_QWEN_BENCHMARK_REGISTER(BM_Qwen3VlStagePrepareIssueSyntheticEndToEnd,
+                            kQwenToken512Shape, "token512", MILLISECOND);
+ID4_QWEN_BENCHMARK_REGISTER(BM_Qwen3VlStagePrepareIssueSyntheticEndToEnd,
                             kQwenToken1024Shape, "token1024", MILLISECOND);
 
 #undef ID4_QWEN_BENCHMARK_REGISTER
