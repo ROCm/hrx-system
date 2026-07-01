@@ -65,6 +65,20 @@ def _write_id4_tensor(
     )
 
 
+def _write_result_manifest(
+    root: Path,
+    records: list[dict[str, object]],
+) -> None:
+    _write_json(
+        root / "manifest.json",
+        {
+            "format": "id4tensor-v1",
+            "records": records,
+            "schema_version": 1,
+        },
+    )
+
+
 class FixtureCompareTest(unittest.TestCase):
     def test_compares_expected_tensor_and_text_records(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -231,6 +245,146 @@ class FixtureCompareTest(unittest.TestCase):
             self.assertEqual(comparison["status"], "pass")
             self.assertEqual(comparison["dtype"], "bf16")
             self.assertEqual(comparison["mismatch_count"], 0)
+
+    def test_compares_result_tensor_manifests_by_key(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            expected_dir = root / "expected"
+            actual_dir = root / "actual"
+
+            _write_id4_tensor(
+                expected_dir,
+                "condition.id4tensor",
+                "bf16",
+                [2],
+                b"\x80\x3f\x00\x40",
+            )
+            _write_id4_tensor(
+                actual_dir,
+                "condition.id4tensor",
+                "bf16",
+                [2],
+                b"\x80\x3f\x40\x40",
+            )
+            _write_result_manifest(
+                expected_dir,
+                [
+                    {
+                        "byte_length": 4,
+                        "dtype": "bf16",
+                        "file": "condition.id4tensor",
+                        "key": "dit_conditioned:layer0.qkv",
+                        "ordinal": 0,
+                        "shape": {"dims": [2], "rank": 1},
+                    }
+                ],
+            )
+            _write_result_manifest(
+                actual_dir,
+                [
+                    {
+                        "byte_length": 4,
+                        "dtype": "bf16",
+                        "file": "condition.id4tensor",
+                        "key": "dit_conditioned:layer0.qkv",
+                        "ordinal": 0,
+                        "shape": {"dims": [2], "rank": 1},
+                    }
+                ],
+            )
+
+            report = fixture_compare.compare_result_tensors(
+                expected_dir, actual_dir, atol=0.0, rtol=0.0
+            )
+
+            self.assertEqual(
+                report["summary"],
+                {
+                    "actual_count": 1,
+                    "compared_count": 1,
+                    "expected_count": 1,
+                    "failed_count": 1,
+                    "passed_count": 0,
+                },
+            )
+            comparison = report["comparisons"][0]
+            self.assertEqual(comparison["stage"], "result")
+            self.assertEqual(comparison["name"], "dit_conditioned:layer0.qkv")
+            self.assertEqual(comparison["dtype"], "bf16")
+            self.assertEqual(comparison["mismatch_count"], 1)
+            self.assertEqual(comparison["mean_abs_error"], 0.5)
+            self.assertAlmostEqual(comparison["rmse"], 0.5**0.5)
+            self.assertEqual(comparison["max_abs_error_index"], 1)
+
+    def test_result_tensor_compare_reports_extra_actual_record(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            expected_dir = root / "expected"
+            actual_dir = root / "actual"
+
+            _write_id4_tensor(
+                expected_dir,
+                "condition.id4tensor",
+                "i32",
+                [1],
+                b"\x01\x00\x00\x00",
+            )
+            _write_id4_tensor(
+                actual_dir,
+                "condition.id4tensor",
+                "i32",
+                [1],
+                b"\x01\x00\x00\x00",
+            )
+            _write_id4_tensor(
+                actual_dir,
+                "extra.id4tensor",
+                "i32",
+                [1],
+                b"\x02\x00\x00\x00",
+            )
+            _write_result_manifest(
+                expected_dir,
+                [
+                    {
+                        "byte_length": 4,
+                        "dtype": "i32",
+                        "file": "condition.id4tensor",
+                        "key": "conditioned_velocity",
+                        "ordinal": 0,
+                        "shape": {"dims": [1], "rank": 1},
+                    }
+                ],
+            )
+            _write_result_manifest(
+                actual_dir,
+                [
+                    {
+                        "byte_length": 4,
+                        "dtype": "i32",
+                        "file": "condition.id4tensor",
+                        "key": "conditioned_velocity",
+                        "ordinal": 0,
+                        "shape": {"dims": [1], "rank": 1},
+                    },
+                    {
+                        "byte_length": 4,
+                        "dtype": "i32",
+                        "file": "extra.id4tensor",
+                        "key": "extra_tap",
+                        "ordinal": 1,
+                        "shape": {"dims": [1], "rank": 1},
+                    },
+                ],
+            )
+
+            report = fixture_compare.compare_result_tensors(
+                expected_dir, actual_dir, atol=0.0, rtol=0.0
+            )
+
+            self.assertEqual(report["summary"]["failed_count"], 1)
+            self.assertEqual(report["comparisons"][1]["name"], "extra_tap")
+            self.assertEqual(report["comparisons"][1]["reason"], "extra_actual_record")
 
     def test_reports_tensor_tolerance_failure(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

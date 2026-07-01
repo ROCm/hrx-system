@@ -26,6 +26,7 @@ NPY_MAGIC = b"\x93NUMPY"
 ID4_TENSOR_MAGIC = b"ID4TENSR"
 SUPPORTED_ACTUAL_ROLES = frozenset(("actual", "output"))
 SUPPORTED_EXPECTED_ROLES = frozenset(("expected",))
+RESULT_TENSOR_STAGE = "result"
 
 
 class FixtureCompareError(ValueError):
@@ -134,6 +135,61 @@ def _records_by_key(
             )
         records[key] = record
     return records
+
+
+def _result_records_by_key(
+    manifest: dict[str, Any],
+    description: str,
+) -> dict[str, dict[str, Any]]:
+    if (
+        _require_string(manifest.get("format"), f"{description}.format")
+        != "id4tensor-v1"
+    ):
+        raise FixtureCompareError(
+            f"{description}.format must be id4tensor-v1 for result tensor compare"
+        )
+    records = {}
+    for index, record in enumerate(_require_list(manifest.get("records"), "records")):
+        if not isinstance(record, dict):
+            raise FixtureCompareError(
+                f"{description}.records[{index}] must be an object"
+            )
+        key = _require_string(record.get("key"), f"{description}.records[{index}].key")
+        if key in records:
+            raise FixtureCompareError(f"duplicate {description} result record: {key}")
+        records[key] = record
+    return records
+
+
+def _result_shape(value: Any, field_name: str) -> list[Any]:
+    if isinstance(value, dict):
+        rank = _require_int(value.get("rank"), f"{field_name}.rank")
+        dims = _require_list(value.get("dims"), f"{field_name}.dims")
+        if rank != len(dims):
+            raise FixtureCompareError(
+                f"{field_name}.rank {rank} does not match dims length {len(dims)}"
+            )
+        return dims
+    return _require_list(value, field_name)
+
+
+def _result_tensor_record(
+    record: dict[str, Any],
+    role: str,
+    tolerance: dict[str, float] | None = None,
+) -> dict[str, Any]:
+    converted = {
+        "dtype": _require_string(record.get("dtype"), "result.dtype"),
+        "file": _require_string(record.get("file"), "result.file"),
+        "kind": "tensor",
+        "name": _require_string(record.get("key"), "result.key"),
+        "role": role,
+        "shape": _result_shape(record.get("shape"), "result.shape"),
+        "stage": RESULT_TENSOR_STAGE,
+    }
+    if tolerance is not None:
+        converted["tolerance"] = tolerance
+    return converted
 
 
 def _dtype_from_npy_descr(descr: str) -> str:
@@ -399,8 +455,12 @@ def _compare_float_values(
     atol, rtol = _tolerance(expected_record)
     mismatch_count = 0
     first_mismatch = None
+    abs_error_sum = 0.0
+    squared_error_sum = 0.0
     max_abs_error = 0.0
+    max_abs_error_index = None
     max_rel_error = 0.0
+    max_rel_error_index = None
     for index, (expected_value, actual_value) in enumerate(
         zip(expected.values, actual.values, strict=True)
     ):
@@ -419,8 +479,14 @@ def _compare_float_values(
             else:
                 rel_error = abs_error / abs(float(expected_value))
             passed = abs_error <= atol + rtol * abs(float(expected_value))
-        max_abs_error = max(max_abs_error, abs_error)
-        max_rel_error = max(max_rel_error, rel_error)
+        abs_error_sum += abs_error
+        squared_error_sum += abs_error * abs_error
+        if abs_error >= max_abs_error:
+            max_abs_error = abs_error
+            max_abs_error_index = index
+        if rel_error >= max_rel_error:
+            max_rel_error = rel_error
+            max_rel_error_index = index
         if not passed:
             mismatch_count += 1
             if first_mismatch is None:
@@ -431,13 +497,20 @@ def _compare_float_values(
                     "abs_error": abs_error,
                     "rel_error": rel_error,
                 }
+    element_count = len(expected.values)
+    mean_abs_error = abs_error_sum / element_count if element_count != 0 else 0.0
+    rmse = math.sqrt(squared_error_sum / element_count) if element_count != 0 else 0.0
     return {
         "atol": atol,
         "rtol": rtol,
-        "element_count": len(expected.values),
+        "element_count": element_count,
         "mismatch_count": mismatch_count,
+        "mean_abs_error": mean_abs_error,
+        "rmse": rmse,
         "max_abs_error": max_abs_error,
+        "max_abs_error_index": max_abs_error_index,
         "max_rel_error": max_rel_error,
+        "max_rel_error_index": max_rel_error_index,
         "first_mismatch": first_mismatch,
     }
 
@@ -635,28 +708,137 @@ def compare_fixtures(fixture_root: Path, actual_root: Path) -> dict[str, Any]:
     }
 
 
+def compare_result_tensors(
+    expected_root: Path,
+    actual_root: Path,
+    atol: float,
+    rtol: float,
+) -> dict[str, Any]:
+    expected_manifest_path = _manifest_path(expected_root)
+    actual_manifest_path = _manifest_path(actual_root)
+    expected_manifest = _load_json(expected_manifest_path, "expected result manifest")
+    actual_manifest = _load_json(actual_manifest_path, "actual result manifest")
+    expected_records = _result_records_by_key(expected_manifest, "expected result")
+    if not expected_records:
+        raise FixtureCompareError("expected result manifest contains no records")
+    actual_records = _result_records_by_key(actual_manifest, "actual result")
+    tolerance = {"atol": atol, "rtol": rtol}
+    comparisons = []
+    for key, expected_record in sorted(expected_records.items()):
+        actual_record = actual_records.get(key)
+        if not actual_record:
+            comparisons.append(
+                {
+                    "stage": RESULT_TENSOR_STAGE,
+                    "name": key,
+                    "kind": "tensor",
+                    "status": "fail",
+                    "reason": "missing_actual_record",
+                }
+            )
+            continue
+        comparisons.append(
+            _compare_tensors(
+                expected_root,
+                actual_root,
+                _result_tensor_record(expected_record, "expected", tolerance),
+                _result_tensor_record(actual_record, "actual"),
+            )
+        )
+    for key in sorted(set(actual_records) - set(expected_records)):
+        comparisons.append(
+            {
+                "stage": RESULT_TENSOR_STAGE,
+                "name": key,
+                "kind": "tensor",
+                "status": "fail",
+                "reason": "extra_actual_record",
+            }
+        )
+    passed_count = sum(
+        1 for comparison in comparisons if comparison["status"] == "pass"
+    )
+    failed_count = len(comparisons) - passed_count
+    return {
+        "schema_version": 1,
+        "expected": _manifest_summary(expected_manifest_path, expected_manifest),
+        "actual": _manifest_summary(actual_manifest_path, actual_manifest),
+        "summary": {
+            "expected_count": len(expected_records),
+            "actual_count": len(actual_records),
+            "compared_count": len(comparisons),
+            "passed_count": passed_count,
+            "failed_count": failed_count,
+        },
+        "comparisons": comparisons,
+    }
+
+
 def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Compare an ID4 actual run capture against a reference fixture."
+        description=(
+            "Compare ID4 actual run captures against reference fixtures or "
+            "compare two CLI result tensor directories."
+        )
     )
     parser.add_argument(
         "--fixture-dir",
-        required=True,
         type=Path,
         help="Generated fixture directory containing manifest.json.",
     )
     parser.add_argument(
         "--actual-dir",
-        required=True,
         type=Path,
         help="Actual run capture directory containing manifest.json.",
+    )
+    parser.add_argument(
+        "--expected-result-dir",
+        type=Path,
+        help="CLI result tensor directory to use as the expected payload set.",
+    )
+    parser.add_argument(
+        "--actual-result-dir",
+        type=Path,
+        help="CLI result tensor directory to compare against the expected set.",
+    )
+    parser.add_argument(
+        "--atol",
+        default=0.0,
+        type=float,
+        help="Absolute tolerance for result tensor floating-point comparisons.",
+    )
+    parser.add_argument(
+        "--rtol",
+        default=0.0,
+        type=float,
+        help="Relative tolerance for result tensor floating-point comparisons.",
     )
     parser.add_argument(
         "--output",
         type=Path,
         help="Optional JSON report path. Reports are printed to stdout by default.",
     )
-    return parser.parse_args()
+    args = parser.parse_args()
+    fixture_mode = args.fixture_dir is not None or args.actual_dir is not None
+    result_mode = (
+        args.expected_result_dir is not None or args.actual_result_dir is not None
+    )
+    if fixture_mode == result_mode:
+        parser.error(
+            "select exactly one input mode: --fixture-dir/--actual-dir or "
+            "--expected-result-dir/--actual-result-dir"
+        )
+    if fixture_mode and (args.fixture_dir is None or args.actual_dir is None):
+        parser.error("--fixture-dir and --actual-dir must be provided together")
+    if result_mode and (
+        args.expected_result_dir is None or args.actual_result_dir is None
+    ):
+        parser.error(
+            "--expected-result-dir and --actual-result-dir must be provided together"
+        )
+    if args.atol < 0 or args.rtol < 0:
+        parser.error("--atol and --rtol must be non-negative")
+    return args
 
 
 def write_report(report: dict[str, Any], output: Path | None) -> None:
@@ -673,7 +855,15 @@ def write_report(report: dict[str, Any], output: Path | None) -> None:
 def main() -> int:
     args = parse_arguments()
     try:
-        report = compare_fixtures(args.fixture_dir, args.actual_dir)
+        if args.fixture_dir is not None:
+            report = compare_fixtures(args.fixture_dir, args.actual_dir)
+        else:
+            report = compare_result_tensors(
+                args.expected_result_dir,
+                args.actual_result_dir,
+                args.atol,
+                args.rtol,
+            )
         write_report(report, args.output)
     except (FixtureCompareError, trace_reduce.TraceReduceError) as exc:
         print(f"fixture_compare: {exc}", file=sys.stderr)
