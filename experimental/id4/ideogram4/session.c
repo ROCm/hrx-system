@@ -1589,6 +1589,8 @@ iree_status_t id4_ideogram4_generation_plan_stage_at(
 typedef struct id4_ideogram4_generation_stage_resource_statistics_t {
   // Parameter slab bytes retained by one prepared stage bundle.
   iree_device_size_t parameter_byte_length;
+  // Parameter source and target bytes moved while materializing one bundle.
+  iree_device_size_t parameter_materialization_byte_length;
   // Constant slab bytes retained by one prepared stage bundle.
   iree_device_size_t constant_byte_length;
   // Local transient high-water bytes used while issuing one stage.
@@ -1628,6 +1630,17 @@ static iree_status_t id4_ideogram4_generation_stage_resource_statistics(
       id4_pipeline_plan_statistics(stage_plan);
   out_statistics->parameter_byte_length =
       stage_statistics.parameter_slab_byte_length;
+  for (iree_host_size_t i = 0;
+       i < ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_CAPACITY; ++i) {
+    IREE_RETURN_IF_ERROR(id4_ideogram4_generation_add_device_size(
+        &out_statistics->parameter_materialization_byte_length,
+        stage_statistics.parameter_load_kind_statistics[i].source_byte_length,
+        IREE_SV("parameter.materialization.source")));
+    IREE_RETURN_IF_ERROR(id4_ideogram4_generation_add_device_size(
+        &out_statistics->parameter_materialization_byte_length,
+        stage_statistics.parameter_load_kind_statistics[i].target_byte_length,
+        IREE_SV("parameter.materialization.target")));
+  }
   out_statistics->constant_byte_length =
       stage_statistics.constant_slab_byte_length;
   out_statistics->local_high_water_mark =
@@ -2030,19 +2043,20 @@ static iree_status_t id4_ideogram4_generation_stage_residency_score(
   id4_ideogram4_generation_stage_resource_statistics_t statistics;
   IREE_RETURN_IF_ERROR(id4_ideogram4_generation_stage_resource_statistics(
       plan, stage_ordinal, &statistics));
-  iree_device_size_t resident_byte_length = statistics.parameter_byte_length;
+  iree_device_size_t avoided_byte_length =
+      statistics.parameter_materialization_byte_length;
   IREE_RETURN_IF_ERROR(id4_ideogram4_generation_add_device_size(
-      &resident_byte_length, statistics.constant_byte_length,
+      &avoided_byte_length, statistics.constant_byte_length,
       IREE_SV("resident.score")));
-  const uint64_t resident_mib =
-      (uint64_t)id4_ideogram4_generation_ceil_mib(resident_byte_length);
+  const uint64_t avoided_mib =
+      (uint64_t)id4_ideogram4_generation_ceil_mib(avoided_byte_length);
   const uint64_t issue_count = id4_ideogram4_generation_stage_issue_count(
       plan, issue_policy, stage_ordinal);
-  if (issue_count != 0 && resident_mib > UINT64_MAX / issue_count) {
+  if (issue_count != 0 && avoided_mib > UINT64_MAX / issue_count) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "Ideogram 4 generation residency score overflow");
   }
-  *out_score = resident_mib * issue_count;
+  *out_score = avoided_mib * issue_count;
   return iree_ok_status();
 }
 
