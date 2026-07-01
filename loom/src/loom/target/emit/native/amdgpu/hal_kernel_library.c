@@ -894,6 +894,9 @@ static iree_status_t loom_amdgpu_hal_kernel_library_build_kernel_contribution(
               .supported_storage_spaces = LOOM_LOW_STORAGE_SPACE_SET_SCRATCH |
                                           LOOM_LOW_STORAGE_SPACE_SET_PRIVATE,
               .emit_spill_diagnostics = true,
+              .record_materialized_spills =
+                  loom_target_compile_report_wants_details(
+                      report, LOOM_TARGET_COMPILE_REPORT_DETAIL_SPILL_ROWS),
               .emitter = frame_options.emitter,
           },
       .lower_spill_traffic = loom_amdgpu_hal_kernel_library_lower_spill_traffic,

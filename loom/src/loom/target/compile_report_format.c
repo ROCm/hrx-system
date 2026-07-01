@@ -143,6 +143,19 @@ static iree_string_view_t loom_target_compile_report_pressure_origin_kind_name(
   }
 }
 
+static iree_string_view_t loom_target_compile_report_spill_row_kind_name(
+    loom_target_compile_report_spill_row_kind_t kind) {
+  switch (kind) {
+    case LOOM_TARGET_COMPILE_REPORT_SPILL_ROW_PLANNED:
+      return IREE_SV("planned");
+    case LOOM_TARGET_COMPILE_REPORT_SPILL_ROW_MATERIALIZED:
+      return IREE_SV("materialized");
+    case LOOM_TARGET_COMPILE_REPORT_SPILL_ROW_UNKNOWN:
+    default:
+      return IREE_SV("unknown");
+  }
+}
+
 static iree_string_view_t loom_target_compile_report_legalization_mode_name(
     loom_target_compile_report_legalization_mode_t mode) {
   switch (mode) {
@@ -1360,6 +1373,8 @@ static iree_status_t loom_target_compile_report_format_spill_rows(
             loom_target_compile_report_vec_const_rows(vec);
     for (iree_host_size_t i = 0; i < vec->count; ++i, ++row_index) {
       const loom_target_compile_report_spill_row_t* row = &rows[i];
+      const iree_string_view_t kind =
+          loom_target_compile_report_spill_row_kind_name(row->kind);
       const iree_string_view_t function_name =
           loom_target_compile_report_non_empty(row->function_name);
       const iree_string_view_t value_name =
@@ -1375,12 +1390,14 @@ static iree_status_t loom_target_compile_report_format_spill_rows(
       IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
           builder,
           "COMPILE-REPORT: spill[%" PRIhsz
-          "] function=%.*s value=%.*s class=%.*s type=%.*s element=%.*s "
+          "] kind=%.*s function=%.*s value=%.*s class=%.*s type=%.*s "
+          "element=%.*s "
           "assignment=%u slot=%u space=%.*s bytes=%" PRIu64 " align=%" PRIu64
           " stores=%" PRIu64 " reloads=%" PRIu64 "\n",
-          row_index, (int)function_name.size, function_name.data,
-          (int)value_name.size, value_name.data, (int)register_class.size,
-          register_class.data, (int)type_kind_name.size, type_kind_name.data,
+          row_index, (int)kind.size, kind.data, (int)function_name.size,
+          function_name.data, (int)value_name.size, value_name.data,
+          (int)register_class.size, register_class.data,
+          (int)type_kind_name.size, type_kind_name.data,
           (int)element_type_name.size, element_type_name.data,
           row->assignment_index, row->slot_index, (int)slot_space.size,
           slot_space.data, row->byte_size, row->byte_alignment,
@@ -3114,6 +3131,9 @@ static iree_status_t loom_target_compile_report_format_spill_row_json(
   IREE_RETURN_IF_ERROR(
       loom_target_compile_report_json_write_optional_string_field(
           stream, &first_field, "function", row->function_name));
+  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_string_field(
+      stream, &first_field, "kind",
+      loom_target_compile_report_spill_row_kind_name(row->kind)));
   IREE_RETURN_IF_ERROR(
       loom_target_compile_report_json_write_optional_string_field(
           stream, &first_field, "value", row->value_name));

@@ -92,6 +92,8 @@ typedef struct loom_low_emission_frame_t {
   uint64_t materialized_spill_store_count;
   // Cumulative low.reload ops materialized while reaching this frame.
   uint64_t materialized_reload_count;
+  // Materialized spill records retained while reaching this frame.
+  loom_low_allocation_materialized_spill_list_t materialized_spills;
 } loom_low_emission_frame_t;
 
 // Summary from target structural spill-traffic lowering.

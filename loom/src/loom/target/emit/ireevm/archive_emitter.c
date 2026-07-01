@@ -443,6 +443,10 @@ static iree_status_t loom_ireevm_archive_emit_function(
           {
               .has_supported_storage_spaces = true,
               .supported_storage_spaces = LOOM_LOW_STORAGE_SPACE_SET_NONE,
+              .record_materialized_spills =
+                  loom_target_compile_report_wants_details(
+                      state->report,
+                      LOOM_TARGET_COMPILE_REPORT_DETAIL_SPILL_ROWS),
               .emitter = frame_options.emitter,
           },
   };

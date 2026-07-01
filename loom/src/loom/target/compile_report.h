@@ -180,6 +180,15 @@ typedef enum loom_target_compile_report_pressure_origin_kind_e {
   LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_OPERATION = 21,
 } loom_target_compile_report_pressure_origin_kind_t;
 
+typedef enum loom_target_compile_report_spill_row_kind_e {
+  // Unknown spill row source.
+  LOOM_TARGET_COMPILE_REPORT_SPILL_ROW_UNKNOWN = 0,
+  // Spill row came from a current allocation spill plan.
+  LOOM_TARGET_COMPILE_REPORT_SPILL_ROW_PLANNED = 1,
+  // Spill row came from storage traffic materialized before the final frame.
+  LOOM_TARGET_COMPILE_REPORT_SPILL_ROW_MATERIALIZED = 2,
+} loom_target_compile_report_spill_row_kind_t;
+
 typedef enum loom_target_compile_report_legalization_mode_e {
   // No target-legalization mode was recorded.
   LOOM_TARGET_COMPILE_REPORT_LEGALIZATION_MODE_NONE = 0,
@@ -706,8 +715,10 @@ typedef struct loom_target_compile_report_schedule_band_summary_row_t {
   uint64_t result_unit_count;
 } loom_target_compile_report_schedule_band_summary_row_t;
 
-// One predicted spill row in a compile report.
+// One planned or materialized spill row in a compile report.
 typedef struct loom_target_compile_report_spill_row_t {
+  // Source of this spill row.
+  loom_target_compile_report_spill_row_kind_t kind;
   // Target artifact function symbol containing this spill plan.
   iree_string_view_t function_name;
   // SSA value name represented by the spilled assignment.

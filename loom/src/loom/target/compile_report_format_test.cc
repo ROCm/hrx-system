@@ -155,6 +155,7 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
       };
   loom_target_compile_report_spill_row_t spill_rows[] = {
       {
+          /*.kind=*/LOOM_TARGET_COMPILE_REPORT_SPILL_ROW_PLANNED,
           /*.function_name=*/IREE_SVL("branchy"),
           /*.value_name=*/IREE_SVL("rhs"),
           /*.register_class=*/IREE_SVL("test.i32"),
@@ -813,8 +814,8 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
                 0),
             IREE_STRING_VIEW_NPOS);
   EXPECT_NE(iree_string_view_find(output,
-                                  IREE_SV("spill[0] function=branchy "
-                                          "value=rhs"),
+                                  IREE_SV("spill[0] kind=planned "
+                                          "function=branchy value=rhs"),
                                   0),
             IREE_STRING_VIEW_NPOS);
   EXPECT_NE(
@@ -1297,7 +1298,9 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
             IREE_STRING_VIEW_NPOS);
   EXPECT_NE(iree_string_view_find(output,
                                   IREE_SV("\"spill_rows\":{\"count\":1,"
-                                          "\"rows\":["),
+                                          "\"rows\":[{\"index\":0,"
+                                          "\"function\":\"branchy\","
+                                          "\"kind\":\"planned\""),
                                   0),
             IREE_STRING_VIEW_NPOS);
   EXPECT_NE(
