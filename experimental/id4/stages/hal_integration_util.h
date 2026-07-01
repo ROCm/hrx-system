@@ -232,6 +232,22 @@ typedef struct StageDiagnostics {
   iree_device_size_t parameter_direct_gather_target_byte_length;
   // Largest source byte length for one direct gather group.
   iree_device_size_t parameter_direct_gather_max_source_byte_length;
+  // Number of encoded staging run diagnostics observed.
+  iree_host_size_t parameter_encode_window_count;
+  // Total encoded staging run bytes observed.
+  iree_device_size_t parameter_encode_window_staging_total_byte_length;
+  // Largest encoded staging run byte length observed.
+  iree_device_size_t parameter_encode_window_staging_max_byte_length;
+  // Total provider source bytes planned through encoded staging runs.
+  iree_device_size_t parameter_encode_window_source_byte_length;
+  // Total final slab bytes planned through encoded staging runs.
+  iree_device_size_t parameter_encode_window_target_byte_length;
+  // Number of staging chunks planned through encoded staging runs.
+  iree_host_size_t parameter_encode_window_staging_chunk_count;
+  // Number of source gather batches planned through encoded staging runs.
+  iree_host_size_t parameter_encode_window_source_gather_batch_count;
+  // Number of encoder dispatches planned through encoded staging runs.
+  iree_host_size_t parameter_encode_window_encoder_dispatch_count;
   // Number of issue-local encoded staging window events observed.
   iree_host_size_t parameter_issue_encode_window_count;
   // Total issue-local encoded staging window bytes observed.

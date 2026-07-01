@@ -344,6 +344,10 @@ static void SetQwenBenchmarkLabel(
       " direct_gather_groups[count=%" PRIhsz ",requests=%" PRIhsz
       ",source=%" PRIu64 "MiB,target=%" PRIu64 "MiB,max=%" PRIu64
       "MiB]"
+      " encode_windows[count=%" PRIhsz ",staging=%" PRIu64 "MiB,max=%" PRIu64
+      "MiB,source=%" PRIu64 "MiB,target=%" PRIu64 "MiB,chunks=%" PRIhsz
+      ",batches=%" PRIhsz ",dispatches=%" PRIhsz
+      "]"
       " issue_encode_window[count=%" PRIhsz ",staging=%" PRIu64
       "MiB,max=%" PRIu64 "MiB,source=%" PRIu64 "MiB,target=%" PRIu64
       "MiB,chunks=%" PRIhsz ",batches=%" PRIhsz ",dispatches=%" PRIhsz "]",
@@ -386,6 +390,14 @@ static void SetQwenBenchmarkLabel(
       CeilMiB(diagnostics.parameter_direct_gather_source_byte_length),
       CeilMiB(diagnostics.parameter_direct_gather_target_byte_length),
       CeilMiB(diagnostics.parameter_direct_gather_max_source_byte_length),
+      diagnostics.parameter_encode_window_count,
+      CeilMiB(diagnostics.parameter_encode_window_staging_total_byte_length),
+      CeilMiB(diagnostics.parameter_encode_window_staging_max_byte_length),
+      CeilMiB(diagnostics.parameter_encode_window_source_byte_length),
+      CeilMiB(diagnostics.parameter_encode_window_target_byte_length),
+      diagnostics.parameter_encode_window_staging_chunk_count,
+      diagnostics.parameter_encode_window_source_gather_batch_count,
+      diagnostics.parameter_encode_window_encoder_dispatch_count,
       diagnostics.parameter_issue_encode_window_count,
       CeilMiB(
           diagnostics.parameter_issue_encode_window_staging_total_byte_length),

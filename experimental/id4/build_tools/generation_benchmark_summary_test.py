@@ -38,6 +38,9 @@ TEST_BENCHMARK_LABEL = (
     "prefetch_groups[count=142,avg_regions=1.00,max_regions=1] "
     "direct_gather_groups[count=322,requests=384,source=4169MiB,"
     "target=4169MiB,max=256MiB] "
+    "encode_windows[count=529,staging=2218MiB,max=1024MiB,"
+    "source=27848MiB,target=27848MiB,chunks=529,batches=529,"
+    "dispatches=529] "
     "issue_encode_window[count=2,staging=1081MiB,max=576MiB,"
     "source=18991MiB,target=27597MiB,chunks=72,batches=72,"
     "dispatches=318] "
@@ -391,6 +394,14 @@ class GenerationBenchmarkSummaryTest(unittest.TestCase):
             self.assertEqual(row["direct_gather_source_mib"], 4169)
             self.assertEqual(row["direct_gather_target_mib"], 4169)
             self.assertEqual(row["direct_gather_max_mib"], 256)
+            self.assertEqual(row["encode_window_count"], 529)
+            self.assertEqual(row["encode_window_staging_mib"], 2218)
+            self.assertEqual(row["encode_window_staging_max_mib"], 1024)
+            self.assertEqual(row["encode_window_source_mib"], 27848)
+            self.assertEqual(row["encode_window_target_mib"], 27848)
+            self.assertEqual(row["encode_window_chunk_count"], 529)
+            self.assertEqual(row["encode_window_batch_count"], 529)
+            self.assertEqual(row["encode_window_dispatch_count"], 529)
             self.assertEqual(row["issue_encode_window_count"], 2)
             self.assertEqual(row["issue_encode_window_staging_mib"], 1081)
             self.assertEqual(row["issue_encode_window_dispatch_count"], 318)

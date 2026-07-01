@@ -954,6 +954,28 @@ static iree_status_t CaptureDiagnostics(
   }
   if (event->parameter_load &&
       iree_string_view_equal(event->key,
+                             IREE_SV("parameter_slab.encode_window"))) {
+    const id4_pipeline_parameter_load_diagnostic_t* parameter_load =
+        event->parameter_load;
+    ++diagnostics->parameter_encode_window_count;
+    diagnostics->parameter_encode_window_staging_total_byte_length +=
+        parameter_load->staging_total_byte_length;
+    diagnostics->parameter_encode_window_staging_max_byte_length =
+        iree_max(diagnostics->parameter_encode_window_staging_max_byte_length,
+                 parameter_load->staging_total_byte_length);
+    diagnostics->parameter_encode_window_source_byte_length +=
+        parameter_load->source_byte_length;
+    diagnostics->parameter_encode_window_target_byte_length +=
+        parameter_load->target_byte_length;
+    diagnostics->parameter_encode_window_staging_chunk_count +=
+        parameter_load->staging_chunk_count;
+    diagnostics->parameter_encode_window_source_gather_batch_count +=
+        parameter_load->source_gather_batch_count;
+    diagnostics->parameter_encode_window_encoder_dispatch_count +=
+        parameter_load->encoder_dispatch_count;
+  }
+  if (event->parameter_load &&
+      iree_string_view_equal(event->key,
                              IREE_SV("parameter_slab.issue_encode_window"))) {
     const id4_pipeline_parameter_load_diagnostic_t* parameter_load =
         event->parameter_load;
