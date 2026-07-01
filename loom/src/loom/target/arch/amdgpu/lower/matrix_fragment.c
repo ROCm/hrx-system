@@ -3812,6 +3812,11 @@ static iree_status_t loom_amdgpu_record_fragment_memory_packet(
   int64_t static_offset_bytes = plan->source.static_byte_offset;
   (void)loom_amdgpu_fragment_memory_packet_static_offset(
       layout, plan, packet, element_index, &static_offset_bytes);
+  loom_low_source_memory_access_plan_t packet_source = plan->source;
+  packet_source.static_byte_offset = static_offset_bytes;
+  packet_source.element_byte_count = plan->element_byte_count;
+  packet_source.vector_lane_count = vector_lane_count;
+  packet_source.vector_lane_byte_stride = plan->element_byte_count;
   loom_low_lower_memory_report_row_t row = {
       .function_name = loom_low_lower_context_function_name(context),
       .source_op_name =
@@ -3848,6 +3853,7 @@ static iree_status_t loom_amdgpu_record_fragment_memory_packet(
   };
   loom_amdgpu_memory_report_row_populate_storage_schema(context, &plan->source,
                                                         &row);
+  loom_amdgpu_memory_report_row_populate_source_interval(&packet_source, &row);
   return loom_low_lower_record_memory_report_row(context, &row);
 }
 

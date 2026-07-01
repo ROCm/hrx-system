@@ -955,6 +955,45 @@ typedef struct loom_target_compile_report_source_low_row_t {
   uint32_t emitted_low_op_count;
 } loom_target_compile_report_source_low_row_t;
 
+typedef uint32_t loom_target_compile_report_memory_interval_flags_t;
+enum {
+  // The interval carries a bounded range for the byte interval begin.
+  LOOM_TARGET_COMPILE_REPORT_MEMORY_INTERVAL_BEGIN_RANGE = 1u << 0,
+  // The interval carries a bounded range for the exclusive byte interval end.
+  LOOM_TARGET_COMPILE_REPORT_MEMORY_INTERVAL_END_RANGE = 1u << 1,
+  // The interval length is exact even when the begin offset is dynamic.
+  LOOM_TARGET_COMPILE_REPORT_MEMORY_INTERVAL_EXACT_LENGTH = 1u << 2,
+};
+
+// Conservative source byte interval evidence for one memory packet.
+typedef struct loom_target_compile_report_memory_interval_t {
+  // Bitset of loom_target_compile_report_memory_interval_flags_t values.
+  loom_target_compile_report_memory_interval_flags_t flags;
+  // Minimum possible byte offset for the interval begin.
+  int64_t begin_min_bytes;
+  // Maximum possible byte offset for the interval begin.
+  int64_t begin_max_bytes;
+  // Minimum possible byte offset for the exclusive interval end.
+  int64_t end_min_bytes;
+  // Maximum possible byte offset for the exclusive interval end.
+  int64_t end_max_bytes;
+  // Exact touched byte length for each dynamic instance, or zero when unknown.
+  uint64_t exact_length_bytes;
+} loom_target_compile_report_memory_interval_t;
+
+// Conservative source byte interval envelope for a packet group.
+typedef struct loom_target_compile_report_memory_interval_summary_t {
+  // Number of packets carrying bounded source interval evidence.
+  uint64_t packet_count;
+  // Minimum possible byte offset across all interval begins.
+  int64_t envelope_begin_min_bytes;
+  // Maximum possible exclusive byte offset across all interval ends.
+  int64_t envelope_end_max_bytes;
+  // Conservative byte span from |envelope_begin_min_bytes| to
+  // |envelope_end_max_bytes|.
+  uint64_t envelope_byte_count;
+} loom_target_compile_report_memory_interval_summary_t;
+
 // One emitted source-memory packet row copied into a compile report.
 typedef struct loom_target_compile_report_source_low_memory_row_t {
   // Source function symbol containing the lowered source operation.
@@ -1023,6 +1062,8 @@ typedef struct loom_target_compile_report_source_low_memory_row_t {
   iree_string_view_t storage_codebook_policy;
   // Sparse metadata contract recovered from source encoding facts.
   iree_string_view_t storage_sparsity_policy;
+  // Conservative source byte interval evidence for this memory packet.
+  loom_target_compile_report_memory_interval_t source_interval;
 } loom_target_compile_report_source_low_memory_row_t;
 
 // Summary of emitted source-memory packet shape.
@@ -1059,6 +1100,12 @@ typedef struct loom_target_compile_report_source_low_memory_summary_t {
   uint64_t strided_vector_packet_count;
   // Number of vector packets without a usable source lane-stride fact.
   uint64_t unknown_stride_vector_packet_count;
+  // Source byte interval envelope across packets with bounded intervals.
+  loom_target_compile_report_memory_interval_summary_t interval_envelope;
+  // Source byte interval envelope across load packets with bounded intervals.
+  loom_target_compile_report_memory_interval_summary_t read_interval_envelope;
+  // Source byte interval envelope across store packets with bounded intervals.
+  loom_target_compile_report_memory_interval_summary_t write_interval_envelope;
 } loom_target_compile_report_source_low_memory_summary_t;
 
 // Summary of emitted source-memory packet shape grouped by source memory root.
@@ -1103,6 +1150,12 @@ typedef struct loom_target_compile_report_source_low_memory_root_summary_t {
   uint64_t strided_vector_packet_count;
   // Number of vector packets without a usable source lane-stride fact.
   uint64_t unknown_stride_vector_packet_count;
+  // Source byte interval envelope across packets with bounded intervals.
+  loom_target_compile_report_memory_interval_summary_t interval_envelope;
+  // Source byte interval envelope across load packets with bounded intervals.
+  loom_target_compile_report_memory_interval_summary_t read_interval_envelope;
+  // Source byte interval envelope across store packets with bounded intervals.
+  loom_target_compile_report_memory_interval_summary_t write_interval_envelope;
 } loom_target_compile_report_source_low_memory_root_summary_t;
 
 // One target math-legalization decision row copied into a compile report.

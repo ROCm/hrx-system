@@ -256,6 +256,7 @@ loom_cc_library(
     loom::ops::low
     loom::util::cfg_graph
     loom::util::fact_table
+    loom::util::math
   PUBLIC
 )
 

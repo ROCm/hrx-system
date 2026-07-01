@@ -18,57 +18,75 @@ namespace {
 
 constexpr uint32_t kTestSourceRejectionDetail = 4;
 
+static loom_target_compile_report_memory_interval_t MakeExactSourceInterval(
+    int64_t begin_bytes, int64_t end_bytes) {
+  return {
+      /*.flags=*/
+      LOOM_TARGET_COMPILE_REPORT_MEMORY_INTERVAL_BEGIN_RANGE |
+          LOOM_TARGET_COMPILE_REPORT_MEMORY_INTERVAL_END_RANGE |
+          LOOM_TARGET_COMPILE_REPORT_MEMORY_INTERVAL_EXACT_LENGTH,
+      /*.begin_min_bytes=*/begin_bytes,
+      /*.begin_max_bytes=*/begin_bytes,
+      /*.end_min_bytes=*/end_bytes,
+      /*.end_max_bytes=*/end_bytes,
+      /*.exact_length_bytes=*/static_cast<uint64_t>(end_bytes - begin_bytes),
+  };
+}
+
+static loom_target_compile_report_source_low_memory_row_t MakeMemoryRow(
+    iree_string_view_t source_op_name, uint32_t source_op_kind,
+    iree_string_view_t operation_kind, iree_string_view_t packet_key,
+    int64_t static_offset_bytes, uint32_t vector_lane_count,
+    uint32_t issued_read_byte_count, uint32_t issued_write_byte_count,
+    uint32_t dynamic_stride_bytes, uint32_t vector_lane_stride_bytes,
+    loom_target_compile_report_memory_interval_t source_interval) {
+  loom_target_compile_report_source_low_memory_row_t row = {};
+  row.function_name = IREE_SVL("kernel");
+  row.source_op_name = source_op_name;
+  row.source_op_kind = source_op_kind;
+  row.source_root_name = IREE_SVL("scratch");
+  row.source_root_argument_index = 1;
+  row.memory_space = IREE_SVL("workgroup");
+  row.operation_kind = operation_kind;
+  row.packet_key = packet_key;
+  row.address_form = IREE_SVL("global_saddr");
+  row.dynamic_term_kind = IREE_SVL("vaddr");
+  row.static_offset_bytes = static_offset_bytes;
+  row.element_byte_count = 4;
+  row.vector_lane_count = vector_lane_count;
+  row.issued_read_byte_count = issued_read_byte_count;
+  row.issued_write_byte_count = issued_write_byte_count;
+  row.dynamic_stride_bytes = dynamic_stride_bytes;
+  row.vector_lane_stride_bytes = vector_lane_stride_bytes;
+  row.source_interval = source_interval;
+  return row;
+}
+
 TEST(CompileReportFormatTest, MergesSourceLowMemorySummariesFromEntries) {
   loom_target_compile_report_t report;
   loom_target_compile_report_initialize(&report, iree_allocator_system());
 
   loom_target_compile_report_source_low_memory_row_t rows[] = {
-      {
-          /*.function_name=*/IREE_SVL("kernel"),
-          /*.source_op_name=*/IREE_SVL("vector.load"),
-          /*.source_op_kind=*/43,
-          /*.source_root_name=*/IREE_SVL("scratch"),
-          /*.source_root_argument_index=*/1,
-          /*.memory_space=*/IREE_SVL("workgroup"),
-          /*.operation_kind=*/IREE_SVL("load"),
-          /*.packet_key=*/IREE_SVL("test.load.v2"),
-          /*.strategy_key=*/IREE_SVL(""),
-          /*.address_form=*/IREE_SVL("global_saddr"),
-          /*.dynamic_term_kind=*/IREE_SVL("vaddr"),
-          /*.fallback_reason=*/IREE_SVL(""),
-          /*.static_offset_bytes=*/0,
-          /*.element_byte_count=*/4,
-          /*.vector_lane_count=*/2,
-          /*.issued_read_byte_count=*/8,
-          /*.issued_write_byte_count=*/0,
-          /*.issued_read_unknown_width_count=*/0,
-          /*.issued_write_unknown_width_count=*/0,
-          /*.dynamic_stride_bytes=*/8,
-          /*.vector_lane_stride_bytes=*/4,
-      },
-      {
-          /*.function_name=*/IREE_SVL("kernel"),
-          /*.source_op_name=*/IREE_SVL("view.store"),
-          /*.source_op_kind=*/44,
-          /*.source_root_name=*/IREE_SVL("scratch"),
-          /*.source_root_argument_index=*/1,
-          /*.memory_space=*/IREE_SVL("workgroup"),
-          /*.operation_kind=*/IREE_SVL("store"),
-          /*.packet_key=*/IREE_SVL("test.store.v1"),
-          /*.strategy_key=*/IREE_SVL(""),
-          /*.address_form=*/IREE_SVL("global_saddr"),
-          /*.dynamic_term_kind=*/IREE_SVL("vaddr"),
-          /*.fallback_reason=*/IREE_SVL(""),
-          /*.static_offset_bytes=*/8,
-          /*.element_byte_count=*/4,
-          /*.vector_lane_count=*/1,
-          /*.issued_read_byte_count=*/0,
-          /*.issued_write_byte_count=*/4,
-          /*.issued_read_unknown_width_count=*/0,
-          /*.issued_write_unknown_width_count=*/0,
-          /*.dynamic_stride_bytes=*/4,
-          /*.vector_lane_stride_bytes=*/4,
-      },
+      MakeMemoryRow(IREE_SVL("vector.load"), /*source_op_kind=*/43,
+                    IREE_SVL("load"), IREE_SVL("test.load.v2"),
+                    /*static_offset_bytes=*/0,
+                    /*vector_lane_count=*/2,
+                    /*issued_read_byte_count=*/8,
+                    /*issued_write_byte_count=*/0,
+                    /*dynamic_stride_bytes=*/8,
+                    /*vector_lane_stride_bytes=*/4,
+                    MakeExactSourceInterval(/*begin_bytes=*/0,
+                                            /*end_bytes=*/8)),
+      MakeMemoryRow(IREE_SVL("view.store"), /*source_op_kind=*/44,
+                    IREE_SVL("store"), IREE_SVL("test.store.v1"),
+                    /*static_offset_bytes=*/8,
+                    /*vector_lane_count=*/1,
+                    /*issued_read_byte_count=*/0,
+                    /*issued_write_byte_count=*/4,
+                    /*dynamic_stride_bytes=*/4,
+                    /*vector_lane_stride_bytes=*/4,
+                    MakeExactSourceInterval(/*begin_bytes=*/8,
+                                            /*end_bytes=*/12)),
   };
 
   for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(rows); ++i) {
@@ -100,6 +118,14 @@ TEST(CompileReportFormatTest, MergesSourceLowMemorySummariesFromEntries) {
   EXPECT_EQ(summary->contiguous_vector_packet_count, 1u);
   EXPECT_EQ(summary->strided_vector_packet_count, 0u);
   EXPECT_EQ(summary->unknown_stride_vector_packet_count, 0u);
+  EXPECT_EQ(summary->interval_envelope.packet_count, 2u);
+  EXPECT_EQ(summary->interval_envelope.envelope_begin_min_bytes, 0);
+  EXPECT_EQ(summary->interval_envelope.envelope_end_max_bytes, 12);
+  EXPECT_EQ(summary->interval_envelope.envelope_byte_count, 12u);
+  EXPECT_EQ(summary->read_interval_envelope.packet_count, 1u);
+  EXPECT_EQ(summary->read_interval_envelope.envelope_byte_count, 8u);
+  EXPECT_EQ(summary->write_interval_envelope.packet_count, 1u);
+  EXPECT_EQ(summary->write_interval_envelope.envelope_byte_count, 4u);
 
   ASSERT_EQ(report.source_low_memory_root_summaries.count, 1u);
   ASSERT_NE(report.source_low_memory_root_summaries.head, nullptr);
@@ -118,6 +144,101 @@ TEST(CompileReportFormatTest, MergesSourceLowMemorySummariesFromEntries) {
   EXPECT_EQ(root_summary->write_byte_count, 4u);
   EXPECT_EQ(root_summary->issued_read_byte_count, 8u);
   EXPECT_EQ(root_summary->issued_write_byte_count, 4u);
+  EXPECT_EQ(root_summary->interval_envelope.packet_count, 2u);
+  EXPECT_EQ(root_summary->interval_envelope.envelope_byte_count, 12u);
+  EXPECT_EQ(root_summary->read_interval_envelope.packet_count, 1u);
+  EXPECT_EQ(root_summary->read_interval_envelope.envelope_byte_count, 8u);
+  EXPECT_EQ(root_summary->write_interval_envelope.packet_count, 1u);
+  EXPECT_EQ(root_summary->write_interval_envelope.envelope_byte_count, 4u);
+
+  loom_target_compile_report_deinitialize(&report);
+}
+
+TEST(CompileReportFormatTest, FormatsSourceLowMemoryIntervals) {
+  loom_target_compile_report_t report;
+  loom_target_compile_report_initialize(&report, iree_allocator_system());
+
+  loom_target_compile_report_source_low_memory_row_t row = {};
+  row.function_name = IREE_SVL("kernel");
+  row.source_op_name = IREE_SVL("vector.load");
+  row.source_op_kind = 43;
+  row.source_root_name = IREE_SVL("input");
+  row.source_root_argument_index = 0;
+  row.memory_space = IREE_SVL("global");
+  row.operation_kind = IREE_SVL("load");
+  row.packet_key = IREE_SVL("test.load.v2");
+  row.address_form = IREE_SVL("global_saddr");
+  row.dynamic_term_kind = IREE_SVL("vaddr");
+  row.element_byte_count = 4;
+  row.vector_lane_count = 2;
+  row.issued_read_byte_count = 8;
+  row.dynamic_stride_bytes = 16;
+  row.vector_lane_stride_bytes = 4;
+  row.source_interval = {
+      /*.flags=*/
+      LOOM_TARGET_COMPILE_REPORT_MEMORY_INTERVAL_BEGIN_RANGE |
+          LOOM_TARGET_COMPILE_REPORT_MEMORY_INTERVAL_END_RANGE |
+          LOOM_TARGET_COMPILE_REPORT_MEMORY_INTERVAL_EXACT_LENGTH,
+      /*.begin_min_bytes=*/4,
+      /*.begin_max_bytes=*/12,
+      /*.end_min_bytes=*/12,
+      /*.end_max_bytes=*/20,
+      /*.exact_length_bytes=*/8,
+  };
+  IREE_ASSERT_OK(
+      loom_target_compile_report_record_source_low_memory_row(&report, &row));
+
+  const loom_target_compile_report_format_options_t options = {
+      /*.mode=*/LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS,
+  };
+
+  iree_string_builder_t builder;
+  iree_string_builder_initialize(iree_allocator_system(), &builder);
+  IREE_ASSERT_OK(
+      loom_target_compile_report_format_text(&report, &options, &builder));
+  iree_string_view_t output = iree_string_builder_view(&builder);
+  EXPECT_NE(iree_string_view_find(
+                output,
+                IREE_SV("interval_envelope={packets:1,begin_min_bytes:4,"
+                        "end_max_bytes:20,byte_count:16}"),
+                0),
+            IREE_STRING_VIEW_NPOS);
+  EXPECT_NE(iree_string_view_find(
+                output,
+                IREE_SV("read_interval_envelope={packets:1,"
+                        "begin_min_bytes:4,end_max_bytes:20,byte_count:16}"),
+                0),
+            IREE_STRING_VIEW_NPOS);
+  EXPECT_NE(
+      iree_string_view_find(output,
+                            IREE_SV("source_interval={begin_min_bytes:4,"
+                                    "begin_max_bytes:12,end_min_bytes:12,"
+                                    "end_max_bytes:20,exact_length_bytes:8}"),
+                            0),
+      IREE_STRING_VIEW_NPOS);
+  iree_string_builder_deinitialize(&builder);
+
+  iree_string_builder_initialize(iree_allocator_system(), &builder);
+  loom_output_stream_t stream;
+  loom_output_stream_for_builder(&builder, &stream);
+  IREE_ASSERT_OK(
+      loom_target_compile_report_format_json(&report, &options, &stream));
+  output = iree_string_builder_view(&builder);
+  EXPECT_NE(iree_string_view_find(
+                output,
+                IREE_SV("\"interval_envelope\":{\"packet_count\":1,"
+                        "\"begin_min_bytes\":4,\"end_max_bytes\":20,"
+                        "\"byte_count\":16}"),
+                0),
+            IREE_STRING_VIEW_NPOS);
+  EXPECT_NE(iree_string_view_find(
+                output,
+                IREE_SV("\"source_interval\":{\"begin_min_bytes\":4,"
+                        "\"begin_max_bytes\":12,\"end_min_bytes\":12,"
+                        "\"end_max_bytes\":20,\"exact_length_bytes\":8}"),
+                0),
+            IREE_STRING_VIEW_NPOS);
+  iree_string_builder_deinitialize(&builder);
 
   loom_target_compile_report_deinitialize(&report);
 }
