@@ -858,6 +858,9 @@ def summarize_generation_benchmark(
 
 _MARKDOWN_COLUMNS = (
     ("bucket", "bucket"),
+    ("residency", "generation_residency"),
+    ("resident mask", "generation_resident_stage_mask"),
+    ("selected peak MiB", "logical_live_selected_peak_mib"),
     ("qwen tokens", "qwen_token_count"),
     ("qwen cap", "qwen_token_capacity"),
     ("cond tokens", "conditioned_dit_token_count"),
@@ -878,6 +881,8 @@ _MARKDOWN_COLUMNS = (
     ("dispatches", "runtime_dispatch_count"),
 )
 
+_MARKDOWN_TEXT_COLUMNS = frozenset(("bucket", "generation_residency"))
+
 
 def _markdown_cell(value: Any) -> str:
     if value is None:
@@ -893,7 +898,8 @@ def format_generation_benchmark_markdown(summary: dict[str, Any]) -> str:
         "| " + " | ".join(header for header, _ in _MARKDOWN_COLUMNS) + " |",
         "| "
         + " | ".join(
-            "---" if column == "bucket" else "---:" for _, column in _MARKDOWN_COLUMNS
+            "---" if column in _MARKDOWN_TEXT_COLUMNS else "---:"
+            for _, column in _MARKDOWN_COLUMNS
         )
         + " |",
     ]

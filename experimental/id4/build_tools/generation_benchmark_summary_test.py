@@ -597,11 +597,11 @@ class GenerationBenchmarkSummaryTest(unittest.TestCase):
                 summary
             )
 
-            self.assertIn("| bucket | qwen tokens |", table)
+            self.assertIn("| bucket | residency | resident mask |", table)
             self.assertIn(
-                "| short128 | 19 | 32 | 83 | 128 | 3627.693 | 3477.614 | "
-                "150.049 | 4169 | 27848 | 17480 | 34924 | 10368 | 0 | "
-                "2 | 318 | 1081 | 576 | 1507 |",
+                "| short128 | selected_stage_bundles | 3 | 17712 | 19 | 32 | "
+                "83 | 128 | 3627.693 | 3477.614 | 150.049 | 4169 | 27848 | "
+                "17480 | 34924 | 10368 | 0 | 2 | 318 | 1081 | 576 | 1507 |",
                 table,
             )
 
