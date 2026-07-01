@@ -21,6 +21,7 @@
 #include "loom/sanitizer/site_table.h"
 #include "loom/target/arch/amdgpu/descriptors/low_registry.h"
 #include "loom/target/arch/amdgpu/error_catalog.h"
+#include "loom/target/arch/amdgpu/matrix/contract.h"
 #include "loom/target/arch/amdgpu/provider.h"
 #include "loom/target/arch/amdgpu/records/target_records.h"
 #include "loom/target/arch/amdgpu/target_info.h"
@@ -68,6 +69,58 @@ bool SupportsWgpMode(const loom_amdgpu_processor_info_t* processor) {
     case LOOM_AMDGPU_KERNEL_DESCRIPTOR_PROFILE_GFX9:
     case LOOM_AMDGPU_KERNEL_DESCRIPTOR_PROFILE_GFX125:
       return false;
+  }
+  return false;
+}
+
+bool HasTargetCapabilityString(const loom_target_compile_report_t& report,
+                               const char* namespace_name, const char* key,
+                               const char* value) {
+  const iree_string_view_t expected_namespace =
+      iree_make_cstring_view(namespace_name);
+  const iree_string_view_t expected_key = iree_make_cstring_view(key);
+  const iree_string_view_t expected_value = iree_make_cstring_view(value);
+  for (const loom_target_compile_report_vec_t* vec =
+           report.target_capability_rows.head;
+       vec != nullptr; vec = vec->next) {
+    const loom_target_compile_report_target_capability_row_t* rows =
+        static_cast<const loom_target_compile_report_target_capability_row_t*>(
+            loom_target_compile_report_vec_const_rows(vec));
+    for (iree_host_size_t i = 0; i < vec->count; ++i) {
+      const loom_target_compile_report_target_capability_row_t& row = rows[i];
+      if (row.value_kind ==
+              LOOM_TARGET_COMPILE_REPORT_CAPABILITY_VALUE_STRING &&
+          iree_string_view_equal(row.namespace_name, expected_namespace) &&
+          iree_string_view_equal(row.key, expected_key) &&
+          iree_string_view_equal(row.value_string, expected_value)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+bool HasTargetCapabilityU64(const loom_target_compile_report_t& report,
+                            const char* namespace_name, const char* key,
+                            uint64_t value) {
+  const iree_string_view_t expected_namespace =
+      iree_make_cstring_view(namespace_name);
+  const iree_string_view_t expected_key = iree_make_cstring_view(key);
+  for (const loom_target_compile_report_vec_t* vec =
+           report.target_capability_rows.head;
+       vec != nullptr; vec = vec->next) {
+    const loom_target_compile_report_target_capability_row_t* rows =
+        static_cast<const loom_target_compile_report_target_capability_row_t*>(
+            loom_target_compile_report_vec_const_rows(vec));
+    for (iree_host_size_t i = 0; i < vec->count; ++i) {
+      const loom_target_compile_report_target_capability_row_t& row = rows[i];
+      if (row.value_kind == LOOM_TARGET_COMPILE_REPORT_CAPABILITY_VALUE_U64 &&
+          iree_string_view_equal(row.namespace_name, expected_namespace) &&
+          iree_string_view_equal(row.key, expected_key) &&
+          row.value_u64 == value) {
+        return true;
+      }
+    }
   }
   return false;
 }
@@ -656,6 +709,82 @@ TEST_F(AmdgpuHalKernelLibraryTest, EmitsEveryLinkedSupportedProcessor) {
     loom_module_free(module);
   }
   EXPECT_GE(linked_supported_count, 1u);
+}
+
+TEST_F(AmdgpuHalKernelLibraryTest, RecordsMatrixFeatureCapabilities) {
+  struct MatrixFeatureReportCase {
+    // Concrete AMDGPU processor to compile for.
+    const char* processor_name;
+    // Matrix feature profile expected for |processor_name|.
+    const char* profile_name;
+    // Active matrix feature expected for |processor_name|.
+    const char* feature_name;
+  };
+  static constexpr MatrixFeatureReportCase kCases[] = {
+      {"gfx942", "mfma-gfx940", "mfma-gfx940-fp8"},
+      {"gfx950", "mfma-gfx950", "mfma-gfx950-scale-f8f6f4"},
+      {"gfx1100", "wmma-gfx11", "wmma-gfx11"},
+      {"gfx1200", "wmma-gfx12", "wmma-gfx12"},
+      {"gfx1250", "wmma-gfx1250", "wmma-gfx1250-scale-f8f6f4"},
+  };
+
+  iree_host_size_t checked_count = 0;
+  for (const MatrixFeatureReportCase& test_case : kCases) {
+    const loom_amdgpu_processor_info_t* processor =
+        loom_amdgpu_target_info_find_processor(
+            iree_make_cstring_view(test_case.processor_name));
+    ASSERT_NE(processor, nullptr) << test_case.processor_name;
+    if (!loom_amdgpu_processor_supports_hsaco(processor) ||
+        !IsProcessorDescriptorSetLinked(processor)) {
+      continue;
+    }
+    ++checked_count;
+
+    loom_module_t* module = nullptr;
+    ASSERT_NO_FATAL_FAILURE(ParseKernelForProcessor(processor, &module));
+
+    loom_target_compile_report_t report = {};
+    loom_target_compile_report_initialize(&report, iree_allocator_system());
+    DiagnosticCapture capture;
+    loom_amdgpu_hal_kernel_library_t library = {};
+    loom_amdgpu_hal_kernel_library_options_t options = {
+        /*.processor=*/{},
+        /*.target_selection=*/{},
+        /*.runtime_globals=*/{},
+        /*.data_symbols=*/{},
+        /*.data_symbol_count=*/{},
+        /*.diagnostic_sink=*/capture.sink(),
+        /*.source_resolver=*/{},
+        /*.max_errors=*/20,
+        /*.report=*/&report,
+    };
+    bool emitted = false;
+    IREE_ASSERT_OK(loom_amdgpu_emit_hal_kernel_library(
+        module, &options, iree_allocator_system(), &emitted, &library))
+        << test_case.processor_name;
+
+    EXPECT_TRUE(emitted) << test_case.processor_name;
+    EXPECT_TRUE(capture.diagnostics.empty()) << test_case.processor_name;
+    EXPECT_TRUE(HasTargetCapabilityString(
+        report, "amdgpu", "matrix_feature_profile", test_case.profile_name))
+        << test_case.processor_name;
+    EXPECT_TRUE(HasTargetCapabilityString(report, "amdgpu", "matrix_feature",
+                                          test_case.feature_name))
+        << test_case.processor_name;
+    loom_amdgpu_matrix_feature_bits_t feature_bits = 0;
+    ASSERT_TRUE(loom_amdgpu_matrix_feature_bits_from_profile(
+        processor->features.matrix, &feature_bits))
+        << test_case.processor_name;
+    EXPECT_TRUE(HasTargetCapabilityU64(report, "amdgpu", "matrix_feature_bits",
+                                       feature_bits))
+        << test_case.processor_name;
+
+    loom_amdgpu_hal_kernel_library_deinitialize(&library,
+                                                iree_allocator_system());
+    loom_target_compile_report_deinitialize(&report);
+    loom_module_free(module);
+  }
+  EXPECT_GE(checked_count, 1u);
 }
 
 TEST_F(AmdgpuHalKernelLibraryTest, CapturesCompleteGfx11KernelDirectives) {

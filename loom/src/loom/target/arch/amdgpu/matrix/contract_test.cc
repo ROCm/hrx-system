@@ -194,6 +194,42 @@ TEST(MatrixContractTest, Gfx908AndGfx90aOnlyMfmaFeatureProfiles) {
                                 LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX908_GFX90A));
 }
 
+TEST(MatrixContractTest, FeatureInfoCoversKnownFeatureBits) {
+  loom_amdgpu_matrix_feature_bits_t seen_bits = 0;
+  const iree_host_size_t count = loom_amdgpu_matrix_feature_info_count();
+  ASSERT_GT(count, 0u);
+  for (iree_host_size_t i = 0; i < count; ++i) {
+    const loom_amdgpu_matrix_feature_info_t* feature_info =
+        loom_amdgpu_matrix_feature_info_at(i);
+    ASSERT_NE(feature_info, nullptr);
+    EXPECT_NE(feature_info->feature_bit, 0u);
+    EXPECT_EQ(feature_info->feature_bit & (feature_info->feature_bit - 1), 0u);
+    EXPECT_FALSE(iree_string_view_is_empty(feature_info->name));
+    EXPECT_FALSE(iree_any_bit_set(seen_bits, feature_info->feature_bit))
+        << ToString(feature_info->name);
+    seen_bits |= feature_info->feature_bit;
+  }
+  EXPECT_EQ(loom_amdgpu_matrix_feature_info_at(count), nullptr);
+
+  const loom_amdgpu_matrix_feature_bits_t expected_bits =
+      LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX908 |
+      LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX908_GFX90A |
+      LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX90A_BF16_1K |
+      LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX90A_F64 |
+      LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX940_FP8 |
+      LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX950 |
+      LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX950_SCALE_F8F6F4 |
+      LOOM_AMDGPU_MATRIX_FEATURE_SMFMAC_GFX940 |
+      LOOM_AMDGPU_MATRIX_FEATURE_SMFMAC_GFX950 |
+      LOOM_AMDGPU_MATRIX_FEATURE_WMMA_GFX11 |
+      LOOM_AMDGPU_MATRIX_FEATURE_WMMA_GFX12 |
+      LOOM_AMDGPU_MATRIX_FEATURE_SWMMAC_GFX12 |
+      LOOM_AMDGPU_MATRIX_FEATURE_WMMA_GFX1250 |
+      LOOM_AMDGPU_MATRIX_FEATURE_WMMA_GFX1250_SCALE_F8F6F4 |
+      LOOM_AMDGPU_MATRIX_FEATURE_SWMMAC_GFX1250;
+  EXPECT_EQ(seen_bits, expected_bits);
+}
+
 TEST(MatrixContractTest, Gfx908SmallLegacyMfmaDescriptor) {
   const loom_amdgpu_matrix_contract_descriptor_t* descriptor =
       FindDescriptor("mfma.f32.4x4x2.bf16");

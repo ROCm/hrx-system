@@ -24,6 +24,7 @@
 #include "loom/ops/target/ops.h"
 #include "loom/target/arch/amdgpu/error_catalog.h"
 #include "loom/target/arch/amdgpu/hal/kernel_abi.h"
+#include "loom/target/arch/amdgpu/matrix/contract.h"
 #include "loom/target/arch/amdgpu/ops/ops.h"
 #include "loom/target/arch/amdgpu/ops/target.h"
 #include "loom/target/arch/amdgpu/planning/address_state.h"
@@ -387,6 +388,38 @@ loom_amdgpu_hal_kernel_library_record_target_snapshot_capabilities(
 }
 
 static iree_status_t
+loom_amdgpu_hal_kernel_library_record_matrix_feature_capabilities(
+    loom_amdgpu_matrix_feature_profile_t profile,
+    iree_string_view_t function_name, loom_target_compile_report_t* report) {
+  loom_amdgpu_matrix_feature_bits_t feature_bits = 0;
+  if (!loom_amdgpu_matrix_feature_bits_from_profile(profile, &feature_bits)) {
+    return iree_ok_status();
+  }
+
+  const iree_string_view_t namespace_name = IREE_SV("amdgpu");
+  IREE_RETURN_IF_ERROR(
+      loom_amdgpu_hal_kernel_library_record_target_capability_u64(
+          report, function_name, namespace_name, IREE_SV("matrix_feature_bits"),
+          feature_bits));
+
+  const iree_host_size_t feature_count =
+      loom_amdgpu_matrix_feature_info_count();
+  for (iree_host_size_t i = 0; i < feature_count; ++i) {
+    const loom_amdgpu_matrix_feature_info_t* feature_info =
+        loom_amdgpu_matrix_feature_info_at(i);
+    if (feature_info == NULL ||
+        !iree_all_bits_set(feature_bits, feature_info->feature_bit)) {
+      continue;
+    }
+    IREE_RETURN_IF_ERROR(
+        loom_amdgpu_hal_kernel_library_record_target_capability_string(
+            report, function_name, namespace_name, IREE_SV("matrix_feature"),
+            feature_info->name));
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t
 loom_amdgpu_hal_kernel_library_record_processor_capabilities(
     const loom_amdgpu_processor_info_t* processor,
     iree_string_view_t function_name, loom_target_compile_report_t* report) {
@@ -434,6 +467,9 @@ loom_amdgpu_hal_kernel_library_record_processor_capabilities(
           IREE_SV("matrix_feature_profile"),
           loom_amdgpu_hal_kernel_library_matrix_feature_profile_name(
               processor->features.matrix)));
+  IREE_RETURN_IF_ERROR(
+      loom_amdgpu_hal_kernel_library_record_matrix_feature_capabilities(
+          processor->features.matrix, function_name, report));
   return loom_amdgpu_hal_kernel_library_record_target_capability_u64(
       report, function_name, namespace_name, IREE_SV("scheduling_bits"),
       processor->features.scheduling);

@@ -494,6 +494,69 @@ static const loom_amdgpu_matrix_feature_bits_t
             LOOM_AMDGPU_MATRIX_FEATURE_SWMMAC_GFX1250,
 };
 
+static const loom_amdgpu_matrix_feature_info_t kAmdgpuMatrixFeatureInfos[] = {
+    {
+        .feature_bit = LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX908,
+        .name = IREE_SVL("mfma-gfx908"),
+    },
+    {
+        .feature_bit = LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX908_GFX90A,
+        .name = IREE_SVL("mfma-gfx908-gfx90a"),
+    },
+    {
+        .feature_bit = LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX90A_BF16_1K,
+        .name = IREE_SVL("mfma-gfx90a-bf16-1k"),
+    },
+    {
+        .feature_bit = LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX90A_F64,
+        .name = IREE_SVL("mfma-gfx90a-f64"),
+    },
+    {
+        .feature_bit = LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX940_FP8,
+        .name = IREE_SVL("mfma-gfx940-fp8"),
+    },
+    {
+        .feature_bit = LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX950,
+        .name = IREE_SVL("mfma-gfx950"),
+    },
+    {
+        .feature_bit = LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX950_SCALE_F8F6F4,
+        .name = IREE_SVL("mfma-gfx950-scale-f8f6f4"),
+    },
+    {
+        .feature_bit = LOOM_AMDGPU_MATRIX_FEATURE_SMFMAC_GFX940,
+        .name = IREE_SVL("smfmac-gfx940"),
+    },
+    {
+        .feature_bit = LOOM_AMDGPU_MATRIX_FEATURE_SMFMAC_GFX950,
+        .name = IREE_SVL("smfmac-gfx950"),
+    },
+    {
+        .feature_bit = LOOM_AMDGPU_MATRIX_FEATURE_WMMA_GFX11,
+        .name = IREE_SVL("wmma-gfx11"),
+    },
+    {
+        .feature_bit = LOOM_AMDGPU_MATRIX_FEATURE_WMMA_GFX12,
+        .name = IREE_SVL("wmma-gfx12"),
+    },
+    {
+        .feature_bit = LOOM_AMDGPU_MATRIX_FEATURE_SWMMAC_GFX12,
+        .name = IREE_SVL("swmmac-gfx12"),
+    },
+    {
+        .feature_bit = LOOM_AMDGPU_MATRIX_FEATURE_WMMA_GFX1250,
+        .name = IREE_SVL("wmma-gfx1250"),
+    },
+    {
+        .feature_bit = LOOM_AMDGPU_MATRIX_FEATURE_WMMA_GFX1250_SCALE_F8F6F4,
+        .name = IREE_SVL("wmma-gfx1250-scale-f8f6f4"),
+    },
+    {
+        .feature_bit = LOOM_AMDGPU_MATRIX_FEATURE_SWMMAC_GFX1250,
+        .name = IREE_SVL("swmmac-gfx1250"),
+    },
+};
+
 iree_string_view_t loom_amdgpu_matrix_family_name(
     loom_amdgpu_matrix_family_t family) {
   if ((iree_host_size_t)family >= IREE_ARRAYSIZE(kAmdgpuMatrixFamilyNames)) {
@@ -587,6 +650,18 @@ bool loom_amdgpu_matrix_feature_bits_from_profile(
   }
   *out_feature_bits = feature_bits;
   return feature_bits != 0;
+}
+
+iree_host_size_t loom_amdgpu_matrix_feature_info_count(void) {
+  return IREE_ARRAYSIZE(kAmdgpuMatrixFeatureInfos);
+}
+
+const loom_amdgpu_matrix_feature_info_t* loom_amdgpu_matrix_feature_info_at(
+    iree_host_size_t index) {
+  if (index >= IREE_ARRAYSIZE(kAmdgpuMatrixFeatureInfos)) {
+    return NULL;
+  }
+  return &kAmdgpuMatrixFeatureInfos[index];
 }
 
 iree_status_t loom_amdgpu_matrix_feature_bits_from_processor(
