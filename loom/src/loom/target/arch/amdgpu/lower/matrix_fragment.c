@@ -2046,33 +2046,8 @@ static bool loom_amdgpu_fragment_memory_crosslane_packed_b16_store_layout(
     return false;
   }
 
-  for (uint16_t register_index = 0; register_index < plan->register_count;
-       ++register_index) {
-    for (uint16_t lane = 0; lane < layout->wave_size; ++lane) {
-      if ((lane & 1u) != 0) {
-        continue;
-      }
-      const uint16_t paired_lane = lane ^ 1u;
-      if (paired_lane >= layout->wave_size) {
-        return false;
-      }
-      loom_amdgpu_matrix_fragment_coordinate_t coordinate = {0};
-      loom_amdgpu_matrix_fragment_coordinate_t paired_coordinate = {0};
-      if (!loom_amdgpu_matrix_fragment_coordinate(
-              layout, plan->role, lane, register_index, /*element_index=*/0,
-              &coordinate) ||
-          !loom_amdgpu_matrix_fragment_coordinate(
-              layout, plan->role, paired_lane, register_index,
-              /*element_index=*/0, &paired_coordinate) ||
-          coordinate.coordinate_flags != role_layout->coordinate_flags ||
-          paired_coordinate.coordinate_flags != role_layout->coordinate_flags ||
-          coordinate.row != paired_coordinate.row ||
-          paired_coordinate.column != coordinate.column + 1u) {
-        return false;
-      }
-    }
-  }
-  return true;
+  return loom_matrix_fragment_role_has_contiguous_lane_xor1_columns(layout,
+                                                                    plan->role);
 }
 
 static bool loom_amdgpu_fragment_memory_select_packet(
