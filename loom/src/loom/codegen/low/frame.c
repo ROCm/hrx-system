@@ -30,6 +30,8 @@ typedef struct loom_low_emission_frame_materialization_summary_t {
   uint64_t spill_store_count;
   // Cumulative low.reload ops materialized while building the final frame.
   uint64_t reload_count;
+  // Cumulative materialized spill records retained for report detail rows.
+  loom_low_allocation_materialized_spill_list_t spill_records;
 } loom_low_emission_frame_materialization_summary_t;
 
 static iree_status_t loom_low_emission_frame_liveness_order_from_schedule(
@@ -229,6 +231,36 @@ static iree_status_t loom_low_emission_frame_materialize_address_state(
   return options->materialize_address_state(
       options->materialize_address_state_user_data, module, low_func_op, frame,
       arena, out_result);
+}
+
+static iree_status_t loom_low_emission_frame_append_materialized_spill_records(
+    const loom_low_allocation_materialization_result_t* result,
+    loom_low_emission_frame_materialization_summary_t* summary,
+    iree_arena_allocator_t* arena) {
+  if (result->materialized_spill_count == 0) {
+    return iree_ok_status();
+  }
+  loom_low_allocation_materialized_spill_vec_t* vec = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate(arena, sizeof(*vec), (void**)&vec));
+  *vec = (loom_low_allocation_materialized_spill_vec_t){
+      .records = result->materialized_spills,
+      .record_count = result->materialized_spill_count,
+  };
+  if (summary->spill_records.tail) {
+    summary->spill_records.tail->next = vec;
+  } else {
+    summary->spill_records.head = vec;
+  }
+  summary->spill_records.tail = vec;
+  if (!iree_host_size_checked_add(summary->spill_records.record_count,
+                                  result->materialized_spill_count,
+                                  &summary->spill_records.record_count)) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "low emission frame materialized spill record count overflows host "
+        "size");
+  }
+  return iree_ok_status();
 }
 
 static void loom_low_emission_frame_accumulate_materialization(
@@ -525,6 +557,7 @@ iree_status_t loom_low_emission_frame_build_spill_free(
       frame.materialized_spill_store_count =
           materialization_summary.spill_store_count;
       frame.materialized_reload_count = materialization_summary.reload_count;
+      frame.materialized_spills = materialization_summary.spill_records;
       *out_frame = frame;
       return iree_ok_status();
     }
@@ -565,6 +598,9 @@ iree_status_t loom_low_emission_frame_build_spill_free(
     }
     loom_low_emission_frame_accumulate_materialization(
         &result, &materialization_summary);
+    IREE_RETURN_IF_ERROR(
+        loom_low_emission_frame_append_materialized_spill_records(
+            &result, &materialization_summary, arena));
 
     IREE_RETURN_IF_ERROR(loom_low_emission_frame_lower_spill_traffic(
         frame_options, spill_free_options, module, low_func_op,

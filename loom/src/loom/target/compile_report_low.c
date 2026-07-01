@@ -1623,6 +1623,7 @@ static iree_status_t loom_target_compile_report_record_spill_rows(
         assignment != NULL ? assignment->value_class
                            : (loom_liveness_value_class_t){0};
     const loom_target_compile_report_spill_row_t row = {
+        .kind = LOOM_TARGET_COMPILE_REPORT_SPILL_ROW_PLANNED,
         .function_name = report->function_name,
         .value_name = loom_target_compile_report_value_name(
             allocation->module, spill_plan->value_id),
@@ -1640,6 +1641,42 @@ static iree_status_t loom_target_compile_report_record_spill_rows(
     };
     IREE_RETURN_IF_ERROR(
         loom_target_compile_report_record_spill_row(report, &row));
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_target_compile_report_record_materialized_spill_rows(
+    loom_target_compile_report_t* report,
+    const loom_low_emission_frame_t* frame) {
+  if (!loom_target_compile_report_wants_details(
+          report, LOOM_TARGET_COMPILE_REPORT_DETAIL_SPILL_ROWS)) {
+    return iree_ok_status();
+  }
+  for (const loom_low_allocation_materialized_spill_vec_t* vec =
+           frame->materialized_spills.head;
+       vec != NULL; vec = vec->next) {
+    for (iree_host_size_t i = 0; i < vec->record_count; ++i) {
+      const loom_low_allocation_materialized_spill_t* spill = &vec->records[i];
+      const loom_target_compile_report_spill_row_t row = {
+          .kind = LOOM_TARGET_COMPILE_REPORT_SPILL_ROW_MATERIALIZED,
+          .function_name = report->function_name,
+          .value_name = loom_target_compile_report_value_name(frame->module,
+                                                              spill->value_id),
+          .register_class = loom_target_compile_report_value_class_name(
+              frame->target.descriptor_set, spill->value_class),
+          .type_kind = spill->value_class.type_kind,
+          .element_type = spill->value_class.element_type,
+          .assignment_index = spill->assignment_index,
+          .slot_index = spill->slot_index,
+          .slot_space = loom_low_spill_slot_space_name(spill->slot_space),
+          .byte_size = spill->byte_size,
+          .byte_alignment = spill->byte_alignment,
+          .store_count = spill->store_count,
+          .reload_count = spill->reload_count,
+      };
+      IREE_RETURN_IF_ERROR(
+          loom_target_compile_report_record_spill_row(report, &row));
+    }
   }
   return iree_ok_status();
 }
@@ -2293,6 +2330,10 @@ iree_status_t loom_target_compile_report_record_low_emission_frame(
         report, frame->materialized_spill_storage_count,
         frame->materialized_spill_store_count,
         frame->materialized_reload_count);
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_target_compile_report_record_materialized_spill_rows(report,
+                                                                       frame);
   }
   loom_low_allocation_release_value_scratch(&value_scratch);
   return status;

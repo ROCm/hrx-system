@@ -23,6 +23,26 @@ typedef struct loom_low_materialized_spill_slot_t {
   loom_value_id_t storage_value_id;
 } loom_low_materialized_spill_slot_t;
 
+static void loom_low_allocation_record_materialized_spill(
+    const loom_low_allocation_table_t* table,
+    const loom_low_allocation_spill_plan_t* plan,
+    loom_low_allocation_materialized_spill_t* record) {
+  IREE_ASSERT_LT(plan->assignment_index, table->assignment_count);
+  const loom_low_allocation_assignment_t* assignment =
+      &table->assignments[plan->assignment_index];
+  *record = (loom_low_allocation_materialized_spill_t){
+      .value_id = plan->value_id,
+      .value_class = assignment->value_class,
+      .assignment_index = plan->assignment_index,
+      .slot_index = plan->slot_index,
+      .slot_space = plan->slot_space,
+      .byte_size = plan->byte_size,
+      .byte_alignment = plan->byte_alignment,
+      .store_count = plan->store_count,
+      .reload_count = plan->reload_count,
+  };
+}
+
 static iree_status_t loom_low_allocation_emit_materialized_spill(
     const loom_low_allocation_table_t* table,
     const loom_low_allocation_spill_plan_t* plan,
@@ -716,6 +736,8 @@ iree_status_t loom_low_allocation_materialize_spills(
       options && options->allow_existing_storage_traffic;
   const bool emit_spill_diagnostics =
       options && options->emit_spill_diagnostics;
+  const bool record_materialized_spills =
+      options && options->record_materialized_spills;
   const iree_diagnostic_emitter_t emitter =
       options ? options->emitter : (iree_diagnostic_emitter_t){0};
   if (!allow_existing_storage_traffic) {
@@ -745,18 +767,31 @@ iree_status_t loom_low_allocation_materialize_spills(
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       arena, spill_plan_count, sizeof(*slots), (void**)&slots));
   memset(slots, 0, spill_plan_count * sizeof(*slots));
+  loom_low_allocation_materialized_spill_t* materialized_spills = NULL;
+  if (record_materialized_spills) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        arena, spill_plan_count, sizeof(*materialized_spills),
+        (void**)&materialized_spills));
+  }
 
   IREE_RETURN_IF_ERROR(loom_low_allocation_insert_storage_reserves(
       module, table, spill_plan_count, arena, slots));
   result.storage_count = (uint32_t)spill_plan_count;
 
   for (iree_host_size_t i = 0; i < spill_plan_count; ++i) {
+    if (record_materialized_spills) {
+      loom_low_allocation_record_materialized_spill(
+          table, &table->spill_plans[i], &materialized_spills[i]);
+    }
     IREE_RETURN_IF_ERROR(loom_low_allocation_materialize_one_spill_plan(
         module, table, &table->spill_plans[i], slots[i].storage_value_id,
         emit_spill_diagnostics ? emitter : (iree_diagnostic_emitter_t){0},
         arena, &result));
   }
 
+  result.materialized_spills = materialized_spills;
+  result.materialized_spill_count =
+      record_materialized_spills ? spill_plan_count : 0;
   if (out_result) *out_result = result;
   return iree_ok_status();
 }
