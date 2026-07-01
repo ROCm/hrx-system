@@ -10,6 +10,7 @@
 
 #include "loom/ops/kernel/launch_config.h"
 #include "loom/ops/kernel/ops.h"
+#include "loom/target/capability_facts.h"
 #include "loom/target/types.h"
 #include "loom/util/fact_table.h"
 #include "loom/util/math.h"
@@ -264,7 +265,14 @@ static uint32_t loom_kernel_context_fixed_subgroup_size(
   if (!bundle || bundle->export_plan->abi_kind != LOOM_TARGET_ABI_HAL_KERNEL) {
     return 0;
   }
-  return bundle->snapshot->subgroup_size;
+  uint64_t subgroup_size = 0;
+  if (!loom_target_fact_context_query_u64(context, IREE_SV("target"),
+                                          IREE_SV("subgroup_size"),
+                                          &subgroup_size) ||
+      subgroup_size > UINT32_MAX) {
+    return 0;
+  }
+  return (uint32_t)subgroup_size;
 }
 
 static bool loom_kernel_context_required_workgroup_size(
