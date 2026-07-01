@@ -985,6 +985,8 @@ typedef struct loom_target_compile_report_memory_interval_t {
 typedef struct loom_target_compile_report_memory_interval_summary_t {
   // Number of packets carrying bounded source interval evidence.
   uint64_t packet_count;
+  // Number of packets with exact static intervals used for unique accounting.
+  uint64_t exact_static_packet_count;
   // Minimum possible byte offset across all interval begins.
   int64_t envelope_begin_min_bytes;
   // Maximum possible exclusive byte offset across all interval ends.
@@ -992,6 +994,8 @@ typedef struct loom_target_compile_report_memory_interval_summary_t {
   // Conservative byte span from |envelope_begin_min_bytes| to
   // |envelope_end_max_bytes|.
   uint64_t envelope_byte_count;
+  // Proven unique bytes across exact static packet intervals.
+  uint64_t unique_byte_count;
 } loom_target_compile_report_memory_interval_summary_t;
 
 // One emitted source-memory packet row copied into a compile report.

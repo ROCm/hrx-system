@@ -656,6 +656,177 @@ static uint64_t loom_target_compile_report_memory_interval_span(
                                   : 0;
 }
 
+typedef struct loom_target_compile_report_static_memory_interval_t {
+  int64_t begin_bytes;
+  int64_t end_bytes;
+} loom_target_compile_report_static_memory_interval_t;
+
+typedef struct loom_target_compile_report_memory_interval_unique_delta_t {
+  bool has_exact_static_interval;
+  uint64_t unique_byte_delta;
+} loom_target_compile_report_memory_interval_unique_delta_t;
+
+static bool loom_target_compile_report_memory_interval_is_exact_static(
+    const loom_target_compile_report_memory_interval_t* interval,
+    loom_target_compile_report_static_memory_interval_t* out_static_interval) {
+  if (!loom_target_compile_report_memory_interval_has_envelope(interval) ||
+      interval->begin_min_bytes != interval->begin_max_bytes ||
+      interval->end_min_bytes != interval->end_max_bytes) {
+    return false;
+  }
+  *out_static_interval = (loom_target_compile_report_static_memory_interval_t){
+      .begin_bytes = interval->begin_min_bytes,
+      .end_bytes = interval->end_max_bytes,
+  };
+  return true;
+}
+
+static bool loom_target_compile_report_source_low_memory_row_has_root(
+    const loom_target_compile_report_source_low_memory_row_t* row) {
+  return !iree_string_view_is_empty(row->source_root_name) ||
+         row->source_root_argument_index != UINT16_MAX;
+}
+
+static bool loom_target_compile_report_source_low_memory_rows_match_interval(
+    const loom_target_compile_report_source_low_memory_row_t* lhs,
+    const loom_target_compile_report_source_low_memory_row_t* rhs,
+    bool match_operation_kind) {
+  if (!loom_target_compile_report_source_low_memory_row_has_root(lhs) ||
+      !loom_target_compile_report_source_low_memory_row_has_root(rhs)) {
+    return false;
+  }
+  if (!iree_string_view_equal(lhs->function_name, rhs->function_name) ||
+      !iree_string_view_equal(lhs->source_root_name, rhs->source_root_name) ||
+      lhs->source_root_argument_index != rhs->source_root_argument_index ||
+      !iree_string_view_equal(lhs->memory_space, rhs->memory_space)) {
+    return false;
+  }
+  return !match_operation_kind ||
+         iree_string_view_equal(lhs->operation_kind, rhs->operation_kind);
+}
+
+static bool loom_target_compile_report_static_memory_intervals_overlap(
+    loom_target_compile_report_static_memory_interval_t lhs,
+    loom_target_compile_report_static_memory_interval_t rhs,
+    loom_target_compile_report_static_memory_interval_t* out_overlap) {
+  const int64_t begin_bytes = iree_max(lhs.begin_bytes, rhs.begin_bytes);
+  const int64_t end_bytes = iree_min(lhs.end_bytes, rhs.end_bytes);
+  if (begin_bytes >= end_bytes) {
+    return false;
+  }
+  *out_overlap = (loom_target_compile_report_static_memory_interval_t){
+      .begin_bytes = begin_bytes,
+      .end_bytes = end_bytes,
+  };
+  return true;
+}
+
+static void loom_target_compile_report_insert_sorted_static_memory_interval(
+    loom_target_compile_report_static_memory_interval_t* intervals,
+    iree_host_size_t* inout_count,
+    loom_target_compile_report_static_memory_interval_t interval) {
+  iree_host_size_t index = *inout_count;
+  while (index > 0 &&
+         (intervals[index - 1].begin_bytes > interval.begin_bytes ||
+          (intervals[index - 1].begin_bytes == interval.begin_bytes &&
+           intervals[index - 1].end_bytes > interval.end_bytes))) {
+    intervals[index] = intervals[index - 1];
+    --index;
+  }
+  intervals[index] = interval;
+  ++*inout_count;
+}
+
+static uint64_t loom_target_compile_report_static_memory_interval_union_bytes(
+    const loom_target_compile_report_static_memory_interval_t* intervals,
+    iree_host_size_t interval_count) {
+  if (interval_count == 0) {
+    return 0;
+  }
+  int64_t begin_bytes = intervals[0].begin_bytes;
+  int64_t end_bytes = intervals[0].end_bytes;
+  uint64_t byte_count = 0;
+  for (iree_host_size_t i = 1; i < interval_count; ++i) {
+    if (intervals[i].begin_bytes <= end_bytes) {
+      end_bytes = iree_max(end_bytes, intervals[i].end_bytes);
+      continue;
+    }
+    byte_count +=
+        loom_target_compile_report_memory_interval_span(begin_bytes, end_bytes);
+    begin_bytes = intervals[i].begin_bytes;
+    end_bytes = intervals[i].end_bytes;
+  }
+  return byte_count + loom_target_compile_report_memory_interval_span(
+                          begin_bytes, end_bytes);
+}
+
+static iree_status_t
+loom_target_compile_report_calculate_source_low_unique_interval_delta(
+    const loom_target_compile_report_t* report,
+    const loom_target_compile_report_source_low_memory_row_t* row,
+    bool match_operation_kind,
+    loom_target_compile_report_memory_interval_unique_delta_t* out_delta) {
+  *out_delta = (loom_target_compile_report_memory_interval_unique_delta_t){0};
+  if (iree_allocator_is_null(report->allocator) ||
+      !loom_target_compile_report_source_low_memory_row_has_root(row)) {
+    return iree_ok_status();
+  }
+  loom_target_compile_report_static_memory_interval_t row_interval = {0};
+  if (!loom_target_compile_report_memory_interval_is_exact_static(
+          &row->source_interval, &row_interval)) {
+    return iree_ok_status();
+  }
+  out_delta->has_exact_static_interval = true;
+  const uint64_t row_byte_count =
+      loom_target_compile_report_memory_interval_span(row_interval.begin_bytes,
+                                                      row_interval.end_bytes);
+  if (report->source_low_memory_rows.count == 0) {
+    out_delta->unique_byte_delta = row_byte_count;
+    return iree_ok_status();
+  }
+
+  loom_target_compile_report_static_memory_interval_t* overlaps = NULL;
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
+      report->allocator, report->source_low_memory_rows.count,
+      sizeof(*overlaps), (void**)&overlaps));
+
+  iree_host_size_t overlap_count = 0;
+  for (const loom_target_compile_report_vec_t* vec =
+           report->source_low_memory_rows.head;
+       vec != NULL; vec = vec->next) {
+    const loom_target_compile_report_source_low_memory_row_t* rows =
+        (const loom_target_compile_report_source_low_memory_row_t*)
+            loom_target_compile_report_vec_const_rows(vec);
+    for (iree_host_size_t i = 0; i < vec->count; ++i) {
+      const loom_target_compile_report_source_low_memory_row_t* existing =
+          &rows[i];
+      if (!loom_target_compile_report_source_low_memory_rows_match_interval(
+              existing, row, match_operation_kind)) {
+        continue;
+      }
+      loom_target_compile_report_static_memory_interval_t existing_interval = {
+          0};
+      loom_target_compile_report_static_memory_interval_t overlap = {0};
+      if (loom_target_compile_report_memory_interval_is_exact_static(
+              &existing->source_interval, &existing_interval) &&
+          loom_target_compile_report_static_memory_intervals_overlap(
+              row_interval, existing_interval, &overlap)) {
+        loom_target_compile_report_insert_sorted_static_memory_interval(
+            overlaps, &overlap_count, overlap);
+      }
+    }
+  }
+
+  const uint64_t covered_byte_count =
+      loom_target_compile_report_static_memory_interval_union_bytes(
+          overlaps, overlap_count);
+  iree_allocator_free(report->allocator, overlaps);
+  out_delta->unique_byte_delta = row_byte_count > covered_byte_count
+                                     ? row_byte_count - covered_byte_count
+                                     : 0;
+  return iree_ok_status();
+}
+
 static void loom_target_compile_report_merge_memory_interval_envelope_bounds(
     loom_target_compile_report_memory_interval_summary_t* target,
     int64_t begin_min_bytes, int64_t end_max_bytes) {
@@ -674,16 +845,21 @@ static void loom_target_compile_report_merge_memory_interval_envelope_bounds(
 
 static void loom_target_compile_report_accumulate_memory_interval_summary(
     loom_target_compile_report_memory_interval_summary_t* target,
-    const loom_target_compile_report_memory_interval_t* interval) {
+    const loom_target_compile_report_memory_interval_t* interval,
+    loom_target_compile_report_memory_interval_unique_delta_t unique_delta) {
   if (!loom_target_compile_report_memory_interval_has_envelope(interval)) {
     return;
   }
   loom_target_compile_report_merge_memory_interval_envelope_bounds(
       target, interval->begin_min_bytes, interval->end_max_bytes);
   ++target->packet_count;
+  if (unique_delta.has_exact_static_interval) {
+    ++target->exact_static_packet_count;
+    target->unique_byte_count += unique_delta.unique_byte_delta;
+  }
 }
 
-static void loom_target_compile_report_merge_memory_interval_summary(
+static void loom_target_compile_report_merge_memory_interval_envelope_summary(
     loom_target_compile_report_memory_interval_summary_t* target,
     const loom_target_compile_report_memory_interval_summary_t* source) {
   if (source->packet_count == 0) {
@@ -692,6 +868,12 @@ static void loom_target_compile_report_merge_memory_interval_summary(
   loom_target_compile_report_merge_memory_interval_envelope_bounds(
       target, source->envelope_begin_min_bytes, source->envelope_end_max_bytes);
   target->packet_count += source->packet_count;
+}
+
+static void loom_target_compile_report_forget_memory_interval_unique_accounting(
+    loom_target_compile_report_memory_interval_summary_t* summary) {
+  summary->exact_static_packet_count = 0;
+  summary->unique_byte_count = 0;
 }
 
 static void loom_target_compile_report_accumulate_source_low_memory_summaries(
@@ -717,11 +899,11 @@ static void loom_target_compile_report_accumulate_source_low_memory_summaries(
   target->strided_vector_packet_count += source->strided_vector_packet_count;
   target->unknown_stride_vector_packet_count +=
       source->unknown_stride_vector_packet_count;
-  loom_target_compile_report_merge_memory_interval_summary(
+  loom_target_compile_report_merge_memory_interval_envelope_summary(
       &target->interval_envelope, &source->interval_envelope);
-  loom_target_compile_report_merge_memory_interval_summary(
+  loom_target_compile_report_merge_memory_interval_envelope_summary(
       &target->read_interval_envelope, &source->read_interval_envelope);
-  loom_target_compile_report_merge_memory_interval_summary(
+  loom_target_compile_report_merge_memory_interval_envelope_summary(
       &target->write_interval_envelope, &source->write_interval_envelope);
 }
 
@@ -1160,12 +1342,18 @@ static void loom_target_compile_report_merge_source_low_memory_root_summary(
   target->strided_vector_packet_count += source->strided_vector_packet_count;
   target->unknown_stride_vector_packet_count +=
       source->unknown_stride_vector_packet_count;
-  loom_target_compile_report_merge_memory_interval_summary(
+  loom_target_compile_report_merge_memory_interval_envelope_summary(
       &target->interval_envelope, &source->interval_envelope);
-  loom_target_compile_report_merge_memory_interval_summary(
+  loom_target_compile_report_merge_memory_interval_envelope_summary(
       &target->read_interval_envelope, &source->read_interval_envelope);
-  loom_target_compile_report_merge_memory_interval_summary(
+  loom_target_compile_report_merge_memory_interval_envelope_summary(
       &target->write_interval_envelope, &source->write_interval_envelope);
+  loom_target_compile_report_forget_memory_interval_unique_accounting(
+      &target->interval_envelope);
+  loom_target_compile_report_forget_memory_interval_unique_accounting(
+      &target->read_interval_envelope);
+  loom_target_compile_report_forget_memory_interval_unique_accounting(
+      &target->write_interval_envelope);
 }
 
 static loom_target_compile_report_source_low_memory_root_summary_t*
@@ -1454,7 +1642,10 @@ static bool loom_target_compile_report_source_low_memory_row_is_store(
 
 static void loom_target_compile_report_accumulate_source_low_memory_summary(
     loom_target_compile_report_source_low_memory_summary_t* summary,
-    const loom_target_compile_report_source_low_memory_row_t* row) {
+    const loom_target_compile_report_source_low_memory_row_t* row,
+    loom_target_compile_report_memory_interval_unique_delta_t unique_delta,
+    loom_target_compile_report_memory_interval_unique_delta_t
+        direction_unique_delta) {
   const uint64_t lane_count = row->vector_lane_count;
   const uint64_t source_byte_count = lane_count * row->element_byte_count;
   ++summary->packet_count;
@@ -1464,12 +1655,14 @@ static void loom_target_compile_report_accumulate_source_low_memory_summary(
     ++summary->load_packet_count;
     summary->read_byte_count += source_byte_count;
     loom_target_compile_report_accumulate_memory_interval_summary(
-        &summary->read_interval_envelope, &row->source_interval);
+        &summary->read_interval_envelope, &row->source_interval,
+        direction_unique_delta);
   } else if (loom_target_compile_report_source_low_memory_row_is_store(row)) {
     ++summary->store_packet_count;
     summary->write_byte_count += source_byte_count;
     loom_target_compile_report_accumulate_memory_interval_summary(
-        &summary->write_interval_envelope, &row->source_interval);
+        &summary->write_interval_envelope, &row->source_interval,
+        direction_unique_delta);
   }
   summary->issued_read_byte_count += row->issued_read_byte_count;
   summary->issued_write_byte_count += row->issued_write_byte_count;
@@ -1478,7 +1671,7 @@ static void loom_target_compile_report_accumulate_source_low_memory_summary(
   summary->issued_write_unknown_width_count +=
       row->issued_write_unknown_width_count;
   loom_target_compile_report_accumulate_memory_interval_summary(
-      &summary->interval_envelope, &row->source_interval);
+      &summary->interval_envelope, &row->source_interval, unique_delta);
   if (lane_count == 1) {
     ++summary->scalar_packet_count;
   } else if (lane_count > 1) {
@@ -1496,7 +1689,10 @@ static void loom_target_compile_report_accumulate_source_low_memory_summary(
 static void
 loom_target_compile_report_accumulate_source_low_memory_root_summary(
     loom_target_compile_report_source_low_memory_root_summary_t* summary,
-    const loom_target_compile_report_source_low_memory_row_t* row) {
+    const loom_target_compile_report_source_low_memory_row_t* row,
+    loom_target_compile_report_memory_interval_unique_delta_t unique_delta,
+    loom_target_compile_report_memory_interval_unique_delta_t
+        direction_unique_delta) {
   const uint64_t lane_count = row->vector_lane_count;
   const uint64_t source_byte_count = lane_count * row->element_byte_count;
   ++summary->packet_count;
@@ -1506,12 +1702,14 @@ loom_target_compile_report_accumulate_source_low_memory_root_summary(
     ++summary->load_packet_count;
     summary->read_byte_count += source_byte_count;
     loom_target_compile_report_accumulate_memory_interval_summary(
-        &summary->read_interval_envelope, &row->source_interval);
+        &summary->read_interval_envelope, &row->source_interval,
+        direction_unique_delta);
   } else if (loom_target_compile_report_source_low_memory_row_is_store(row)) {
     ++summary->store_packet_count;
     summary->write_byte_count += source_byte_count;
     loom_target_compile_report_accumulate_memory_interval_summary(
-        &summary->write_interval_envelope, &row->source_interval);
+        &summary->write_interval_envelope, &row->source_interval,
+        direction_unique_delta);
   }
   summary->issued_read_byte_count += row->issued_read_byte_count;
   summary->issued_write_byte_count += row->issued_write_byte_count;
@@ -1520,7 +1718,7 @@ loom_target_compile_report_accumulate_source_low_memory_root_summary(
   summary->issued_write_unknown_width_count +=
       row->issued_write_unknown_width_count;
   loom_target_compile_report_accumulate_memory_interval_summary(
-      &summary->interval_envelope, &row->source_interval);
+      &summary->interval_envelope, &row->source_interval, unique_delta);
   if (lane_count == 1) {
     ++summary->scalar_packet_count;
   } else if (lane_count > 1) {
@@ -1538,14 +1736,17 @@ loom_target_compile_report_accumulate_source_low_memory_root_summary(
 static iree_status_t
 loom_target_compile_report_record_source_low_memory_root_summary(
     loom_target_compile_report_t* report,
-    const loom_target_compile_report_source_low_memory_row_t* row) {
+    const loom_target_compile_report_source_low_memory_row_t* row,
+    loom_target_compile_report_memory_interval_unique_delta_t unique_delta,
+    loom_target_compile_report_memory_interval_unique_delta_t
+        direction_unique_delta) {
   loom_target_compile_report_source_low_memory_root_summary_t* summary =
       loom_target_compile_report_find_source_low_memory_root_summary(
           report, row->function_name, row->source_root_name,
           row->source_root_argument_index, row->memory_space);
   if (summary != NULL) {
     loom_target_compile_report_accumulate_source_low_memory_root_summary(
-        summary, row);
+        summary, row, unique_delta, direction_unique_delta);
     return iree_ok_status();
   } else if (iree_string_view_is_empty(row->source_root_name) &&
              row->source_root_argument_index == UINT16_MAX) {
@@ -1559,7 +1760,7 @@ loom_target_compile_report_record_source_low_memory_root_summary(
       .memory_space = row->memory_space,
   };
   loom_target_compile_report_accumulate_source_low_memory_root_summary(
-      &new_summary, row);
+      &new_summary, row, unique_delta, direction_unique_delta);
   return loom_target_compile_report_row_list_append(
       &report->source_low_memory_root_summaries, sizeof(new_summary),
       report->allocator, &new_summary);
@@ -1569,13 +1770,25 @@ iree_status_t loom_target_compile_report_record_source_low_memory_row(
     loom_target_compile_report_t* report,
     const loom_target_compile_report_source_low_memory_row_t* row) {
   report->detail_flags |= LOOM_TARGET_COMPILE_REPORT_DETAIL_SOURCE_LOW_ROWS;
+  loom_target_compile_report_memory_interval_unique_delta_t unique_delta;
+  IREE_RETURN_IF_ERROR(
+      loom_target_compile_report_calculate_source_low_unique_interval_delta(
+          report, row, /*match_operation_kind=*/false, &unique_delta));
+  loom_target_compile_report_memory_interval_unique_delta_t
+      direction_unique_delta;
+  IREE_RETURN_IF_ERROR(
+      loom_target_compile_report_calculate_source_low_unique_interval_delta(
+          report, row, /*match_operation_kind=*/true, &direction_unique_delta));
   IREE_RETURN_IF_ERROR(loom_target_compile_report_row_list_append(
       &report->source_low_memory_rows, sizeof(*row), report->allocator, row));
+  const loom_target_compile_report_memory_interval_unique_delta_t
+      no_unique_delta = {0};
   loom_target_compile_report_accumulate_source_low_memory_summary(
-      &report->source_low_memory_summary, row);
+      &report->source_low_memory_summary, row, no_unique_delta,
+      no_unique_delta);
   IREE_RETURN_IF_ERROR(
-      loom_target_compile_report_record_source_low_memory_root_summary(report,
-                                                                       row));
+      loom_target_compile_report_record_source_low_memory_root_summary(
+          report, row, unique_delta, direction_unique_delta));
   return iree_ok_status();
 }
 
