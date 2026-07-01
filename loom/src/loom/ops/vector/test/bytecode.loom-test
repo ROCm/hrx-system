@@ -21,15 +21,16 @@ func.def @fragment_memory(%buffer: buffer, %offset: offset, %row: index, %col: i
 
 // Source-level fragment interpretation keeps schema and auxiliary data as
 // ordinary SSA operands. The bytecode path must preserve the sorted
-// key-to-operand dictionary, shape operands, predicates, and the compact
-// vector.mma consumer form.
+// key-to-operand dictionary, shape operands, predicates, fragment-role repacks,
+// and the compact vector.mma consumer form.
 func.def @fragment_interpretation(%lhs_payload: vector<6xi32>, %rhs_payload: vector<6xi32>, %init_payload: vector<8xf32>, %scale_a: vector<1xf16>, %scale_b: vector<1xf16>, %m: index, %n: index, %k: index) {
   %schema = encoding.define #matrix_operand<element_format=f6e3m2, payload_elements=32, payload_registers=6, scale_group_elements=32, scale_operands=1, scale_topology=block_1d, zero_scale_fallback=true> : encoding<schema>
   %lhs = vector.fragment<lhs> %lhs_payload shape [%m, %k] using {schema = %schema : encoding<schema>, scale = %scale_a : vector<1xf16>} where [mul(%k, 32)] : vector<6xi32>
   %rhs = vector.fragment<rhs> %rhs_payload shape [%k, %n] using {scale = %scale_b : vector<1xf16>, schema = %schema : encoding<schema>} : vector<6xi32>
   %init = vector.fragment<init> %init_payload shape [%m, %n] : vector<8xf32>
+  %repacked = vector.fragment.repack<lhs> %init shape [%m, %n] : vector<8xf32> -> vector<16xbf16>
   %result = vector.mma %lhs, %rhs, %init : vector<6xi32>, vector<6xi32>, vector<8xf32>
-  test.use %result : vector<8xf32>
+  test.use %repacked, %result : vector<16xbf16>, vector<8xf32>
   func.return
 }
 
@@ -39,8 +40,9 @@ func.def @fragment_interpretation(%lhs_payload: vector<6xi32>, %rhs_payload: vec
   %lhs = vector.fragment<lhs> %lhs_payload shape [%m, %k] using {scale = %scale_a : vector<1xf16>, schema = %schema : encoding<schema>} where [mul(%k, 32)] : vector<6xi32>
   %rhs = vector.fragment<rhs> %rhs_payload shape [%k, %n] using {scale = %scale_b : vector<1xf16>, schema = %schema : encoding<schema>} : vector<6xi32>
   %init = vector.fragment<init> %init_payload shape [%m, %n] : vector<8xf32>
+  %repacked = vector.fragment.repack<lhs> %init shape [%m, %n] : vector<8xf32> -> vector<16xbf16>
   %result = vector.mma %lhs, %rhs, %init : vector<6xi32>, vector<6xi32>, vector<8xf32>
-  test.use %result : vector<8xf32>
+  test.use %repacked, %result : vector<16xbf16>, vector<8xf32>
   func.return
 }
 

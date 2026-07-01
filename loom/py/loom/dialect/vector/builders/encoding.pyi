@@ -49,3 +49,16 @@ class VectorEncodingMixin:
         result_names: Sequence[str] | None = ...,
         location_id: int | None = ...,
     ) -> ValueRef: ...
+    def repack(
+        self,
+        *,
+        role: str,
+        source: ValueRef,
+        rows: ValueRef,
+        columns: ValueRef,
+        results: list[Type | TiedResultSpec],
+        name: str | None = ...,
+        names: Sequence[str] | None = ...,
+        result_names: Sequence[str] | None = ...,
+        location_id: int | None = ...,
+    ) -> ValueRef: ...
