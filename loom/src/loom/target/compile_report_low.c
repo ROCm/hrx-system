@@ -2194,6 +2194,12 @@ iree_status_t loom_target_compile_report_record_low_emission_frame(
   iree_status_t status =
       loom_target_compile_report_record_low_allocation_contents(
           report, &frame->allocation, &frame->schedule);
+  if (iree_status_is_ok(status)) {
+    loom_target_compile_report_record_allocation_materialization(
+        report, frame->materialized_spill_storage_count,
+        frame->materialized_spill_store_count,
+        frame->materialized_reload_count);
+  }
   loom_low_allocation_release_value_scratch(&value_scratch);
   return status;
 }

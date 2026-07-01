@@ -23,6 +23,15 @@ typedef enum loom_low_emission_frame_failure_e {
   LOOM_LOW_EMISSION_FRAME_FAILURE_REMATERIALIZATION_ITERATION_LIMIT = 4,
 } loom_low_emission_frame_failure_t;
 
+typedef struct loom_low_emission_frame_materialization_summary_t {
+  // Cumulative spill storage materialized while building the final frame.
+  uint64_t spill_storage_count;
+  // Cumulative low.spill stores materialized while building the final frame.
+  uint64_t spill_store_count;
+  // Cumulative low.reload ops materialized while building the final frame.
+  uint64_t reload_count;
+} loom_low_emission_frame_materialization_summary_t;
+
 static iree_status_t loom_low_emission_frame_liveness_order_from_schedule(
     loom_op_t* low_func_op, const loom_low_schedule_table_t* schedule,
     iree_arena_allocator_t* arena, loom_liveness_order_t* out_order) {
@@ -222,6 +231,14 @@ static iree_status_t loom_low_emission_frame_materialize_address_state(
       arena, out_result);
 }
 
+static void loom_low_emission_frame_accumulate_materialization(
+    const loom_low_allocation_materialization_result_t* result,
+    loom_low_emission_frame_materialization_summary_t* summary) {
+  summary->spill_storage_count += result->storage_count;
+  summary->spill_store_count += result->spill_count;
+  summary->reload_count += result->reload_count;
+}
+
 static iree_status_t loom_low_emission_frame_validate_final(
     const loom_low_emission_frame_options_t* frame_options,
     const loom_low_emission_frame_spill_free_options_t* options,
@@ -416,6 +433,8 @@ iree_status_t loom_low_emission_frame_build_spill_free(
   iree_host_size_t address_state_iteration_limit = 0;
   iree_host_size_t rematerialization_iteration_count = 0;
   iree_host_size_t rematerialization_iteration_limit = 0;
+  loom_low_emission_frame_materialization_summary_t materialization_summary = {
+      0};
   for (;;) {
     loom_low_emission_frame_t frame = {0};
     IREE_RETURN_IF_ERROR(loom_low_emission_frame_build_with_allocation_emitter(
@@ -501,6 +520,11 @@ iree_status_t loom_low_emission_frame_build_spill_free(
       if (!accepted) {
         return iree_ok_status();
       }
+      frame.materialized_spill_storage_count =
+          materialization_summary.spill_storage_count;
+      frame.materialized_spill_store_count =
+          materialization_summary.spill_store_count;
+      frame.materialized_reload_count = materialization_summary.reload_count;
       *out_frame = frame;
       return iree_ok_status();
     }
@@ -539,6 +563,8 @@ iree_status_t loom_low_emission_frame_build_spill_free(
           LOOM_LOW_EMISSION_FRAME_FAILURE_SPILL_NO_PROGRESS, iteration_count,
           iteration_limit);
     }
+    loom_low_emission_frame_accumulate_materialization(
+        &result, &materialization_summary);
 
     IREE_RETURN_IF_ERROR(loom_low_emission_frame_lower_spill_traffic(
         frame_options, spill_free_options, module, low_func_op,

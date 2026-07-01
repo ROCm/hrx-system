@@ -572,6 +572,9 @@ TEST(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
           /*.coalesced_copy_count=*/3,
           /*.materialized_copy_count=*/1,
       },
+      /*.materialized_spill_storage_count=*/4,
+      /*.materialized_spill_store_count=*/5,
+      /*.materialized_reload_count=*/6,
   };
 
   IREE_ASSERT_OK(
@@ -608,6 +611,9 @@ TEST(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
   EXPECT_EQ(report.register_pressure_summary_count, 2u);
   EXPECT_EQ(report.register_pressure_peak_live_units, 11u);
   EXPECT_EQ(report.allocation_spill_count, 2u);
+  EXPECT_EQ(report.allocation_materialized_spill_storage_count, 4u);
+  EXPECT_EQ(report.allocation_materialized_spill_store_count, 5u);
+  EXPECT_EQ(report.allocation_materialized_reload_count, 6u);
   EXPECT_EQ(report.static_instruction_mix.descriptor_count, 5u);
   EXPECT_EQ(report.static_instruction_mix.vector_alu_count, 1u);
   EXPECT_EQ(report.static_instruction_mix.global_memory_count, 2u);
