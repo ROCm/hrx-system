@@ -142,9 +142,9 @@ static iree_status_t id4_tooling_capture_validate_options(
       options->wait_semaphore_list, IREE_SV("capture wait"));
 }
 
-static iree_status_t id4_tooling_capture_write_file(
-    iree_string_view_t path, iree_const_byte_span_t contents,
-    iree_allocator_t host_allocator) {
+static iree_status_t id4_tooling_capture_write_file_spans(
+    iree_string_view_t path, iree_host_size_t span_count,
+    const iree_const_byte_span_t* spans, iree_allocator_t host_allocator) {
   char* path_string = NULL;
   IREE_RETURN_IF_ERROR(
       id4_tooling_capture_dup_cstring(path, host_allocator, &path_string));
@@ -156,9 +156,11 @@ static iree_status_t id4_tooling_capture_write_file(
                             "failed to open capture file (%d)", open_errno);
   }
   iree_status_t status = iree_ok_status();
-  if (contents.data_length != 0) {
-    const size_t written = fwrite(contents.data, 1, contents.data_length, file);
-    if (written != contents.data_length) {
+  for (iree_host_size_t i = 0; i < span_count && iree_status_is_ok(status);
+       ++i) {
+    if (spans[i].data_length == 0) continue;
+    const size_t written = fwrite(spans[i].data, 1, spans[i].data_length, file);
+    if (written != spans[i].data_length) {
       status = iree_make_status(IREE_STATUS_DATA_LOSS,
                                 "failed to write capture file contents");
     }
@@ -168,6 +170,13 @@ static iree_status_t id4_tooling_capture_write_file(
                               "failed to close capture file (%d)", errno);
   }
   return status;
+}
+
+static iree_status_t id4_tooling_capture_write_file(
+    iree_string_view_t path, iree_const_byte_span_t contents,
+    iree_allocator_t host_allocator) {
+  return id4_tooling_capture_write_file_spans(path, 1, &contents,
+                                              host_allocator);
 }
 
 static iree_status_t id4_tooling_capture_append_json_string(
@@ -241,13 +250,21 @@ static iree_status_t id4_tooling_capture_append_shape_json(
   return iree_string_builder_append_cstring(builder, "]");
 }
 
-static iree_status_t id4_tooling_capture_write_tensor(
+iree_status_t id4_tooling_capture_write_tensor_file(
     iree_string_view_t path, const id4_pipeline_tensor_layout_t* layout,
     iree_const_byte_span_t payload, iree_allocator_t host_allocator) {
   if (id4_pipeline_tensor_dtype_byte_length(layout->dtype) == 0) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "capture tensor %.*s has invalid dtype",
                             (int)layout->name.size, layout->name.data);
+  }
+  if (payload.data_length != layout->byte_length) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "capture tensor %.*s payload byte length mismatch: expected %" PRIhsz
+        ", got %" PRIhsz,
+        (int)layout->name.size, layout->name.data, layout->byte_length,
+        payload.data_length);
   }
 
   iree_string_builder_t header_builder;
@@ -288,8 +305,7 @@ static iree_status_t id4_tooling_capture_write_tensor(
         payload.data_length);
   }
 
-  iree_string_builder_t file_builder;
-  iree_string_builder_initialize(host_allocator, &file_builder);
+  uint8_t prefix[sizeof(id4_tooling_capture_tensor_magic) + 4];
   if (iree_status_is_ok(status)) {
     const iree_host_size_t header_length =
         iree_string_builder_size(&header_builder);
@@ -297,35 +313,24 @@ static iree_status_t id4_tooling_capture_write_tensor(
       status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                                 "capture tensor header is too large");
     } else {
-      uint8_t prefix[sizeof(id4_tooling_capture_tensor_magic) + 4];
       memcpy(prefix, id4_tooling_capture_tensor_magic,
              sizeof(id4_tooling_capture_tensor_magic));
       prefix[8] = (uint8_t)(header_length & 0xFFu);
       prefix[9] = (uint8_t)((header_length >> 8) & 0xFFu);
       prefix[10] = (uint8_t)((header_length >> 16) & 0xFFu);
       prefix[11] = (uint8_t)((header_length >> 24) & 0xFFu);
-      status = iree_string_builder_append_string(
-          &file_builder,
-          iree_make_string_view((const char*)prefix, sizeof(prefix)));
     }
   }
   if (iree_status_is_ok(status)) {
-    status = iree_string_builder_append_string(
-        &file_builder, iree_string_builder_view(&header_builder));
+    iree_string_view_t header = iree_string_builder_view(&header_builder);
+    const iree_const_byte_span_t spans[] = {
+        iree_make_const_byte_span(prefix, sizeof(prefix)),
+        iree_make_const_byte_span(header.data, header.size),
+        payload,
+    };
+    status = id4_tooling_capture_write_file_spans(path, IREE_ARRAYSIZE(spans),
+                                                  spans, host_allocator);
   }
-  if (iree_status_is_ok(status) && payload.data_length != 0) {
-    status = iree_string_builder_append_string(
-        &file_builder,
-        iree_make_string_view((const char*)payload.data, payload.data_length));
-  }
-  if (iree_status_is_ok(status)) {
-    status = id4_tooling_capture_write_file(
-        path,
-        iree_make_const_byte_span(iree_string_builder_buffer(&file_builder),
-                                  iree_string_builder_size(&file_builder)),
-        host_allocator);
-  }
-  iree_string_builder_deinitialize(&file_builder);
   iree_string_builder_deinitialize(&header_builder);
   return status;
 }
@@ -457,7 +462,7 @@ static iree_status_t id4_tooling_capture_capture_tensor(
         id4_tooling_capture_readback_tensor(options, layout, binding, &bytes);
   }
   if (iree_status_is_ok(status)) {
-    status = id4_tooling_capture_write_tensor(
+    status = id4_tooling_capture_write_tensor_file(
         file_path, layout, iree_make_const_byte_span(bytes.data, bytes.length),
         options->host_allocator);
   }

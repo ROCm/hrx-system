@@ -231,4 +231,52 @@ TEST(FixtureCaptureTest, CapturesExistingNonF32TensorDtypes) {
       IREE_SV("\"dtype\":\"u32\""));
 }
 
+TEST(FixtureCaptureTest, WritesTensorArtifactFile) {
+  id4_pipeline_tensor_layout_t layout;
+  memset(&layout, 0, sizeof(layout));
+  layout.name = IREE_SV("direct.output");
+  layout.dtype = ID4_PIPELINE_TENSOR_DTYPE_F32;
+  layout.shape.rank = 1;
+  layout.shape.dims[0] = 2;
+  layout.byte_length = 8;
+  layout.alignment = 4;
+
+  const uint8_t payload[] = {0x00, 0x00, 0x80, 0x3F, 0x00, 0x00, 0x00, 0x40};
+  iree::testing::TempFilePath tensor_path("id4_tensor_artifact");
+  IREE_ASSERT_OK(id4_tooling_capture_write_tensor_file(
+      tensor_path.path_view(), &layout,
+      iree_make_const_byte_span(payload, sizeof(payload)),
+      iree_allocator_system()));
+
+  const std::vector<uint8_t> artifact = ReadBinaryFile(tensor_path.path());
+  ASSERT_GE(artifact.size(), sizeof(payload));
+  const iree_string_view_t artifact_view = iree_make_string_view(
+      reinterpret_cast<const char*>(artifact.data()), artifact.size());
+  ExpectFinds(artifact_view, IREE_SV("\"kind\":\"tensor\""));
+  ExpectFinds(artifact_view, IREE_SV("\"dtype\":\"f32\""));
+  ExpectFinds(artifact_view, IREE_SV("\"layout\":\"dense-row-major\""));
+  for (iree_host_size_t i = 0; i < sizeof(payload); ++i) {
+    EXPECT_EQ(artifact[artifact.size() - sizeof(payload) + i], payload[i]) << i;
+  }
+}
+
+TEST(FixtureCaptureTest, RejectsTensorArtifactPayloadLengthMismatch) {
+  id4_pipeline_tensor_layout_t layout;
+  memset(&layout, 0, sizeof(layout));
+  layout.name = IREE_SV("direct.output");
+  layout.dtype = ID4_PIPELINE_TENSOR_DTYPE_F32;
+  layout.shape.rank = 1;
+  layout.shape.dims[0] = 2;
+  layout.byte_length = 8;
+  layout.alignment = 4;
+
+  const uint8_t payload[] = {0x00, 0x00, 0x80, 0x3F};
+  iree::testing::TempFilePath tensor_path("id4_tensor_artifact_mismatch");
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        id4_tooling_capture_write_tensor_file(
+                            tensor_path.path_view(), &layout,
+                            iree_make_const_byte_span(payload, sizeof(payload)),
+                            iree_allocator_system()));
+}
+
 }  // namespace

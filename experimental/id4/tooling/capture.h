@@ -52,6 +52,12 @@ typedef struct id4_tooling_capture_execution_options_t {
 iree_status_t id4_tooling_capture_execution(
     const id4_tooling_capture_execution_options_t* options);
 
+// Writes one exact tensor artifact at |path| using the id4tensor-v1 format.
+// The payload byte length must exactly match |layout->byte_length|.
+iree_status_t id4_tooling_capture_write_tensor_file(
+    iree_string_view_t path, const id4_pipeline_tensor_layout_t* layout,
+    iree_const_byte_span_t payload, iree_allocator_t host_allocator);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif  // __cplusplus
