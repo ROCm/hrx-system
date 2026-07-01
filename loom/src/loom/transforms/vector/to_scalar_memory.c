@@ -1106,8 +1106,9 @@ loom_vector_fragment_store_to_scalar_physical_result_loop_rewrite_ops(
 
   loom_op_t* loop = NULL;
   IREE_RETURN_IF_ERROR(loom_scf_for_build(
-      &rewriter->builder, /*build_flags=*/0, zero, upper_bound, step, NULL, 0,
-      NULL, 0, NULL, 0, LOOM_VALUE_ID_INVALID, /*unroll_policy=*/0,
+      &rewriter->builder, LOOM_SCF_FOR_BUILD_FLAG_HAS_UNROLL_POLICY, zero,
+      upper_bound, step, NULL, 0, NULL, 0, NULL, 0, LOOM_VALUE_ID_INVALID,
+      LOOM_SCF_FOR_UNROLL_POLICY_UNROLL,
       /*unroll_schedule=*/0, first_op->location, &loop));
   loom_vector_to_scalar_record_loop_created(&state);
 
