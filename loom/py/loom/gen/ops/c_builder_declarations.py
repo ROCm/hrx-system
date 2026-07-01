@@ -36,7 +36,7 @@ def _generate_builder_declaration(op: Op, prefix: str, shared_enums: SharedEnumM
     params = c_builder_model.extract_c_params(op, shared_enums)
     layout = compute_layout(op)
     lines: list[str] = []
-    c_params = c_builder_model.build_c_param_list(params, layout, prefix)
+    c_params = c_builder_model.build_c_param_list(op, params, layout, prefix)
 
     # Format as multi-line declaration.
     lines.append(f"iree_status_t {prefix}_build(")

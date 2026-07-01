@@ -44,7 +44,7 @@ from loom.assembly import (
     TypesOf,
 )
 from loom.assembly import Region as RegionFmt
-from loom.dsl import ATTR_TYPE_FLAGS, AttrDef, FuncLikeInterface, Op, RegionDef, TiedResult
+from loom.dsl import ATTR_TYPE_FLAGS, AttrDef, FuncLikeInterface, Op, RegionDef, TiedResult, TypeConstraint
 from loom.fields import FieldKind, FieldLayout, compute_layout
 from loom.gen.ops import c_queries
 from loom.gen.ops.c_enum_attrs import SharedEnumMap
@@ -139,6 +139,14 @@ IMPLICIT_ARG_TYPE_MAP: dict[str, str] = {
     "f64": "LOOM_SCALAR_TYPE_F64",
 }
 
+_FIXED_RESULT_TYPE_CONSTRAINTS = frozenset(
+    {
+        TypeConstraint.I1,
+        TypeConstraint.INDEX,
+        TypeConstraint.OFFSET,
+    }
+)
+
 _BUILD_FLAG_OPTIONAL_ATTR_TYPES = frozenset(
     {
         "i64",
@@ -179,6 +187,25 @@ def static_tied_results(op: Op) -> list[tuple[int, int]]:
             operand_index = operand_names.index(result.tied_to)
             ties.append((i, operand_index))
     return ties
+
+
+def fixed_result_types_fit_single_builder_type(op: Op) -> bool:
+    """Returns true when fixed results can be built from one dynamic type.
+
+    Fixed non-variadic ResultTypeList builders expose a compact C signature
+    with one caller-provided result_type when at most one result type is not
+    statically known from the op declaration. Remaining results must be
+    concrete scalar constraints that the generated builder can synthesize.
+    """
+    layout = compute_layout(op)
+    if layout.variadic_result or layout.fixed_result_count <= 1:
+        return True
+    dynamic_result_count = 0
+    for result in op.results:
+        if result.type_constraint in _FIXED_RESULT_TYPE_CONSTRAINTS:
+            continue
+        dynamic_result_count += 1
+    return dynamic_result_count <= 1
 
 
 def _c_attr_param_type(
@@ -650,7 +677,7 @@ def build_flag_bit_name(prefix: str, param: dict[str, object]) -> str:
     return f"{prefix.upper()}_BUILD_FLAG_HAS_{str(param['name']).upper()}"
 
 
-def build_c_param_list(params: list[dict[str, object]], layout: FieldLayout, prefix: str) -> list[str]:
+def build_c_param_list(op: Op, params: list[dict[str, object]], layout: FieldLayout, prefix: str) -> list[str]:
     """Builds the C parameter string list from extracted params.
 
     Adds loom_optional annotations for optional attrs and regions.
@@ -694,8 +721,10 @@ def build_c_param_list(params: list[dict[str, object]], layout: FieldLayout, pre
                 if layout.variadic_result:
                     c_params.append("const loom_type_t* result_types")
                     c_params.append("iree_host_size_t result_count")
-                else:
+                elif fixed_result_types_fit_single_builder_type(op):
                     c_params.append("loom_type_t result_type")
+                else:
+                    c_params.append("const loom_type_t* result_types")
             case "tied_results":
                 c_params.append("const loom_tied_result_t* tied_results")
                 c_params.append("iree_host_size_t tied_result_count")
