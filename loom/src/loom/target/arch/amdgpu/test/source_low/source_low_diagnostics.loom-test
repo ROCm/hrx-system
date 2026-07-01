@@ -723,13 +723,13 @@ kernel.def target(@target) @fragment_private_memory_rejected() {
 
 amdgpu.target<gfx1100> @target
 
-func.def target(@target) @fragment_repack_result_to_lhs_rejected(%payload: vector<8xf32>) -> (vector<16xbf16>) {
+func.def target(@target) @fragment_repack_result_to_lhs_rejected(%payload: vector<8xf32>) -> (vector<16xf16>) {
   %m = index.constant 16 : index
   %n = index.constant 16 : index
   %fragment = vector.fragment<result> %payload shape [%m, %n] : vector<8xf32>
-  // ERROR@+1: AMDGPU/041 {source_role_key="accumulator_result", result_role_key="lhs", source_type="vector<8xf32>", result_type="vector<16xbf16>", strategy_key="amdgpu.fragment_repack.strategy.diagnostic", reason_key="role_type_transition"}
-  %repacked = vector.fragment.repack<lhs> %fragment shape [%m, %n] : vector<8xf32> -> vector<16xbf16>
-  func.return %repacked : vector<16xbf16>
+  // ERROR@+1: AMDGPU/041 {source_role_key="accumulator_result", result_role_key="lhs", source_type="vector<8xf32>", result_type="vector<16xf16>", strategy_key="amdgpu.fragment_repack.strategy.diagnostic", reason_key="layout_strategy"}
+  %repacked = vector.fragment.repack<lhs> %fragment shape [%m, %n] : vector<8xf32> -> vector<16xf16>
+  func.return %repacked : vector<16xf16>
 }
 
 // ====
