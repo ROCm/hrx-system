@@ -88,13 +88,18 @@ def minimal_generation_plan() -> dict:
                     "parameter_encoded_source_byte_length": 0,
                     "parameter_gather_load_step_count": 1,
                     "parameter_encode_load_step_count": 0,
+                    "parameter_load_group_count": 1,
+                    "parameter_gather_load_group_count": 1,
+                    "parameter_encode_load_group_count": 0,
                     "constant_slab_byte_length": 0,
                     "memory_slab_byte_length": 512,
                     "memory_slab_high_water_mark": 384,
+                    "shared_tensor_byte_length": 64,
                     "boundary_tensor_byte_length": 128,
                     "diagnostic_tap_byte_length": 0,
                     "kernel_count": 35,
                     "region_count": 1,
+                    "shared_tensor_count": 1,
                     "operation_count": 1571,
                     "dispatch_count": 1062,
                 }
@@ -464,6 +469,8 @@ class Id4SmokeTestTest(unittest.TestCase):
             self.assertEqual(
                 metrics["stages"]["qwen"]["memory_slab_high_water_mark"], 384
             )
+            self.assertEqual(metrics["stages"]["qwen"]["parameter_load_group_count"], 1)
+            self.assertEqual(metrics["stages"]["qwen"]["shared_tensor_count"], 1)
             self.assertEqual(metrics["stages"]["qwen"]["dispatch_count"], 1062)
 
     def test_generation_plan_shape_rank_must_match_dimensions(self):
