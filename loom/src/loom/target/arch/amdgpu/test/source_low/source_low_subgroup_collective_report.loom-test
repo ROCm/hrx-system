@@ -21,6 +21,7 @@ kernel.def target(@target) @report_workgroup_reduce_scalar_publication() {
 
 // ----
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
+COMPILE-REPORT: workload workgroup_size=64x1x1 flat_workgroup_size=64
 COMPILE-REPORT: source_low selected_ops=7 emitted_ops=35 rows=7
 COMPILE-REPORT: source_low_memory rows=2
 COMPILE-REPORT: target_legalization legal=0 rewritten=1 target_rewritten=0 reference_rewritten=1 deferred=0 invalid_ir=0 unsupported=0 unhandled=0 rows=1
@@ -64,6 +65,7 @@ kernel.def target(@target) @report_workgroup_reduce_scalar_leader_publication() 
 
 // ----
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
+COMPILE-REPORT: workload workgroup_size=64x1x1 flat_workgroup_size=64
 COMPILE-REPORT: source_low selected_ops=9 emitted_ops=34 rows=9
 COMPILE-REPORT: source_low_memory rows=2
 COMPILE-REPORT: target_legalization legal=0 rewritten=1 target_rewritten=0 reference_rewritten=1 deferred=0 invalid_ir=0 unsupported=0 unhandled=0 rows=1
@@ -111,6 +113,7 @@ kernel.def target(@target) @report_workgroup_reduce_scalar_leader_publication_pr
 
 // ----
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
+COMPILE-REPORT: workload workgroup_size=64x1x1 flat_workgroup_size=64
 COMPILE-REPORT: source_low selected_ops=9 emitted_ops=34 rows=9
 COMPILE-REPORT: source_low_memory rows=2
 COMPILE-REPORT: target_legalization legal=0 rewritten=1 target_rewritten=0 reference_rewritten=1 deferred=0 invalid_ir=0 unsupported=0 unhandled=0 rows=1
@@ -157,6 +160,7 @@ kernel.def target(@target) @report_workgroup_reduce_scalar_wave_leader_publicati
 
 // ----
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
+COMPILE-REPORT: workload workgroup_size=64x1x1 flat_workgroup_size=64
 COMPILE-REPORT: source_low selected_ops=10 emitted_ops=35 rows=10
 COMPILE-REPORT: source_low_memory rows=2
 COMPILE-REPORT: target_legalization legal=0 rewritten=1 target_rewritten=0 reference_rewritten=1 deferred=0 invalid_ir=0 unsupported=0 unhandled=0 rows=1
@@ -195,6 +199,7 @@ kernel.def target(@target) @report_workgroup_reduce_vector_publication() {
 
 // ----
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
+COMPILE-REPORT: workload workgroup_size=64x1x1 flat_workgroup_size=64
 COMPILE-REPORT: source_low selected_ops=18 emitted_ops=111 rows=18
 COMPILE-REPORT: source_low_memory rows=5
 COMPILE-REPORT: target_legalization legal=0 rewritten=1 target_rewritten=0 reference_rewritten=1 deferred=0 invalid_ir=0 unsupported=0 unhandled=0 rows=1
@@ -244,6 +249,7 @@ kernel.def target(@target) @report_subgroup_reduce_addf_f32_wave32_all_lanes() {
 
 // ----
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
+COMPILE-REPORT: workload workgroup_size=32x1x1 flat_workgroup_size=32
 COMPILE-REPORT: source_low selected_ops=7 emitted_ops=10 rows=7
 COMPILE-REPORT: source_low_memory rows=2
 COMPILE-REPORT: source_low[0] function=report_subgroup_reduce_addf_f32_wave32_all_lanes source_op=kernel.workitem.id selection=plan plan=4112 descriptor=0 emitted_ops=0
@@ -284,6 +290,7 @@ kernel.def target(@target) @report_subgroup_reduce_addf_f32_wave64_leader_lane()
 
 // ----
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
+COMPILE-REPORT: workload workgroup_size=64x1x1 flat_workgroup_size=64
 COMPILE-REPORT: source_low selected_ops=10 emitted_ops=15 rows=10
 COMPILE-REPORT: source_low_memory rows=2
 COMPILE-REPORT: source_low[0] function=report_subgroup_reduce_addf_f32_wave64_leader_lane source_op=kernel.workitem.id selection=plan plan=4112 descriptor=0 emitted_ops=0
@@ -340,6 +347,7 @@ kernel.def target(@target) @report_subgroup_reduce_addf_f32_wave64_scalar_workit
 
 // ----
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
+COMPILE-REPORT: workload workgroup_size=64x1x1 flat_workgroup_size=64
 COMPILE-REPORT: source_low selected_ops=17 emitted_ops=21 rows=17
 COMPILE-REPORT: source_low_memory rows=4
 COMPILE-REPORT: source_low[0] function=report_subgroup_reduce_addf_f32_wave64_scalar_workitem_guard_nested source_op=kernel.workitem.id selection=plan plan=4112 descriptor=0 emitted_ops=0

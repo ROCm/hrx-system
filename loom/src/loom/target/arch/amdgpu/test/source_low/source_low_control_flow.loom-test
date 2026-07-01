@@ -1229,7 +1229,7 @@ kernel.def target(@target) @workgroup_loop_bound_f32_accumulator() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @workgroup_loop_bound_f32_accumulator() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(128, 1, 1) @workgroup_loop_bound_f32_accumulator() asm<amdgpu.rdna3.core> {
   %row = live_in<amdgpu.workgroup_id.x> : reg<amdgpu.sgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
@@ -2380,7 +2380,7 @@ kernel.def target(@wave64_target) @predicated_tile_sweep_kq_src1_reduction_shape
 }
 
 // ----
-low.kernel.def target(@wave64_target) workgroup_size(32, 1, 1) @predicated_tile_sweep_kq_src1_reduction_shape() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@wave64_target) workgroup_size(32, 1, 1) workgroup_count(32, 1, 1) @predicated_tile_sweep_kq_src1_reduction_shape() asm<amdgpu.rdna3.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %src0_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 524288} : reg<amdgpu.sgpr x2>
   %src1_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 6308736} : reg<amdgpu.sgpr x2>

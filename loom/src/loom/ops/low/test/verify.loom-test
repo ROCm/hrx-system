@@ -20,6 +20,15 @@ low.kernel.def target(@test_target) workgroup_size(0, 1, 1) @kernel_rejects_zero
 
 test.target<low_core> @test_target
 
+// ERROR@+1: STRUCTURE/014 {attr_name="workgroup_count_x", actual_value="0", expected_constraint="positive u32"}
+low.kernel.def target(@test_target) workgroup_count(0, 1, 1) @kernel_rejects_zero_workgroup_count() {
+  low.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
 low.kernel.def target(@test_target) @kernel_return_rejects_values(%value: reg<test.i32>) {
   // ERROR@+1: STRUCTURE/001 {op_name="low.return", actual_count="1", expected_count="0"}
   low.return %value : reg<test.i32>

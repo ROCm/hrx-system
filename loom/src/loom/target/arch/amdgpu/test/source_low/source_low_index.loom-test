@@ -538,7 +538,7 @@ kernel.def target(@target) @dispatch_id_xy_global_b32() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(8, 4, 1) @dispatch_id_xy_global_b32() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(8, 4, 1) workgroup_count(4, 4, 1) @dispatch_id_xy_global_b32() asm<amdgpu.rdna3.core> {
   %13 = live_in<amdgpu.workgroup_id.x> : reg<amdgpu.sgpr>
   %14 = live_in<amdgpu.workgroup_id.y> : reg<amdgpu.sgpr>
   %packed_tid = live_in<amdgpu.workitem_id.packed.xy> : reg<amdgpu.vgpr>

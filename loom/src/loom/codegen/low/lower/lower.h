@@ -695,6 +695,16 @@ typedef struct loom_low_lower_options_t {
   iree_allocator_t report_allocator;
 } loom_low_lower_options_t;
 
+typedef uint32_t loom_low_lower_static_launch_config_flags_t;
+enum {
+  // No source launch-config facts were proven.
+  LOOM_LOW_LOWER_STATIC_LAUNCH_CONFIG_NONE = 0u,
+  // |static_workgroup_size| was proven from the source launch config.
+  LOOM_LOW_LOWER_STATIC_LAUNCH_CONFIG_WORKGROUP_SIZE = 1u << 0,
+  // |static_workgroup_count| was proven from the source launch config.
+  LOOM_LOW_LOWER_STATIC_LAUNCH_CONFIG_WORKGROUP_COUNT = 1u << 1,
+};
+
 typedef struct loom_low_lower_result_t {
   // Number of error diagnostics emitted.
   uint32_t error_count;
@@ -711,6 +721,12 @@ typedef struct loom_low_lower_result_t {
   uint64_t selected_source_op_count;
   // Reported number of low operations emitted from source operation selections.
   uint64_t emitted_low_op_count;
+  // Static launch-config fact bits proven while the source kernel was alive.
+  loom_low_lower_static_launch_config_flags_t static_launch_config_flags;
+  // Proven workgroup size from the source kernel launch config.
+  loom_target_workgroup_size_t static_workgroup_size;
+  // Proven dispatch workgroup count from the source kernel launch config.
+  loom_target_dispatch_workgroup_count_t static_workgroup_count;
   // Allocator used for owned source-low report rows.
   iree_allocator_t report_allocator;
   // Allocator used for owned source-memory packet report row storage.

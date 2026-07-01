@@ -52,7 +52,7 @@ kernel.def target(@target) @intermediate_block_atomic_output_f32() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @intermediate_block_atomic_output_f32() asm<amdgpu.cdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(2, 4, 1) @intermediate_block_atomic_output_f32() asm<amdgpu.cdna3.core> {
   %intermediate_block = live_in<amdgpu.workgroup_id.x> : reg<amdgpu.sgpr>
   %row = live_in<amdgpu.workgroup_id.y> : reg<amdgpu.sgpr>
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>

@@ -527,6 +527,29 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
       /*.occupancy_percent=*/50,
       /*.limiting_resource=*/IREE_SVL("amdgpu.vgpr"),
   };
+  const loom_target_compile_report_workload_t workload = {
+      /*.flags=*/
+      LOOM_TARGET_COMPILE_REPORT_WORKLOAD_WORKGROUP_SIZE |
+          LOOM_TARGET_COMPILE_REPORT_WORKLOAD_WORKGROUP_COUNT |
+          LOOM_TARGET_COMPILE_REPORT_WORKLOAD_FLAT_WORKGROUP_SIZE |
+          LOOM_TARGET_COMPILE_REPORT_WORKLOAD_DISPATCH_WORKGROUP_COUNT |
+          LOOM_TARGET_COMPILE_REPORT_WORKLOAD_DISPATCH_WORKITEM_COUNT,
+      /*.workgroup_size=*/
+      {
+          /*.x=*/64,
+          /*.y=*/2,
+          /*.z=*/1,
+      },
+      /*.workgroup_count=*/
+      {
+          /*.x=*/8,
+          /*.y=*/4,
+          /*.z=*/1,
+      },
+      /*.flat_workgroup_size=*/128,
+      /*.dispatch_workgroup_count=*/32,
+      /*.dispatch_workitem_count=*/4096,
+  };
   loom_target_compile_report_t entry_report = {};
   loom_target_compile_report_initialize(&entry_report, iree_allocator_system());
   entry_report.requested_detail_flags = report.requested_detail_flags;
@@ -553,6 +576,7 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
       LOOM_TARGET_COMPILE_REPORT_MOVE_CAUSE_OPERAND_BANK_MATERIALIZATION, 1, 1);
   loom_target_compile_report_record_emission(&entry_report, 8, 64, 80);
   loom_target_compile_report_record_memory(&entry_report, 16, 32);
+  loom_target_compile_report_record_workload(&entry_report, &workload);
   IREE_ASSERT_OK(loom_target_compile_report_record_pressure_row(
       &entry_report, &pressure_rows[0]));
   IREE_ASSERT_OK(loom_target_compile_report_record_pressure_row(
@@ -758,6 +782,14 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
                         "occupancy_percent=50 limiting=amdgpu.vgpr"),
                 0),
             IREE_STRING_VIEW_NPOS);
+  EXPECT_NE(iree_string_view_find(output,
+                                  IREE_SV("workload workgroup_size=64x2x1 "
+                                          "flat_workgroup_size=128 "
+                                          "workgroup_count=8x4x1 "
+                                          "dispatch_workgroup_count=32 "
+                                          "dispatch_workitem_count=4096"),
+                                  0),
+            IREE_STRING_VIEW_NPOS);
   EXPECT_NE(iree_string_view_find(output, IREE_SV("vector_alu=3"), 0),
             IREE_STRING_VIEW_NPOS);
   EXPECT_NE(iree_string_view_find(output,
@@ -848,6 +880,14 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
                         "max_subgroups_per_simd=16 "
                         "occupancy_percent=50 limiting=amdgpu.vgpr"),
                 0),
+            IREE_STRING_VIEW_NPOS);
+  EXPECT_NE(iree_string_view_find(output,
+                                  IREE_SV("workgroup_size=64x2x1 "
+                                          "flat_workgroup_size=128 "
+                                          "workgroup_count=8x4x1 "
+                                          "dispatch_workgroup_count=32 "
+                                          "dispatch_workitem_count=4096"),
+                                  0),
             IREE_STRING_VIEW_NPOS);
   EXPECT_NE(iree_string_view_find(output,
                                   IREE_SV("spill_plans=1 coalesced_copies=2 "
@@ -979,6 +1019,14 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
             IREE_STRING_VIEW_NPOS);
   EXPECT_NE(iree_string_view_find(output,
                                   IREE_SV("\"schedule\":{\"node_count\":5"), 0),
+            IREE_STRING_VIEW_NPOS);
+  EXPECT_NE(iree_string_view_find(
+                output,
+                IREE_SV("\"workload\":{\"workgroup_size\":{\"x\":64,"
+                        "\"y\":2,\"z\":1,\"flat\":128},"
+                        "\"workgroup_count\":{\"x\":8,\"y\":4,\"z\":1,"
+                        "\"flat\":32},\"dispatch_workitem_count\":4096}"),
+                0),
             IREE_STRING_VIEW_NPOS);
   EXPECT_NE(iree_string_view_find(output,
                                   IREE_SV("\"entries\":{\"count\":1,"

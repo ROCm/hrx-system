@@ -1806,12 +1806,20 @@ static iree_status_t loom_low_lower_create_kernel_op(
   }
 
   loom_target_workgroup_size_t workgroup_size = {0};
-  if (loom_kernel_def_static_workgroup_size_from_facts(
-          context->module, context->source_function.op,
-          context->lowering.fact_table, &workgroup_size)) {
+  if (iree_any_bit_set(context->result->static_launch_config_flags,
+                       LOOM_LOW_LOWER_STATIC_LAUNCH_CONFIG_WORKGROUP_SIZE)) {
     build_flags |= LOOM_LOW_KERNEL_DEF_BUILD_FLAG_HAS_WORKGROUP_SIZE_X |
                    LOOM_LOW_KERNEL_DEF_BUILD_FLAG_HAS_WORKGROUP_SIZE_Y |
                    LOOM_LOW_KERNEL_DEF_BUILD_FLAG_HAS_WORKGROUP_SIZE_Z;
+    workgroup_size = context->result->static_workgroup_size;
+  }
+  loom_target_dispatch_workgroup_count_t workgroup_count = {0};
+  if (iree_any_bit_set(context->result->static_launch_config_flags,
+                       LOOM_LOW_LOWER_STATIC_LAUNCH_CONFIG_WORKGROUP_COUNT)) {
+    build_flags |= LOOM_LOW_KERNEL_DEF_BUILD_FLAG_HAS_WORKGROUP_COUNT_X |
+                   LOOM_LOW_KERNEL_DEF_BUILD_FLAG_HAS_WORKGROUP_COUNT_Y |
+                   LOOM_LOW_KERNEL_DEF_BUILD_FLAG_HAS_WORKGROUP_COUNT_Z;
+    workgroup_count = context->result->static_workgroup_count;
   }
   uint8_t retain = 0;
   if (loom_low_lower_source_is_retained(context->module,
@@ -1831,9 +1839,10 @@ static iree_status_t loom_low_lower_create_kernel_op(
   IREE_RETURN_IF_ERROR(loom_low_kernel_def_build(
       &context->builder, build_flags, retain, /*allocation=*/0, /*schedule=*/0,
       context->options->target_ref, abi_layout, export_symbol, export_linkage,
-      workgroup_size.x, workgroup_size.y, workgroup_size.z, low_func_ref,
-      arg_types, arg_count, predicates, predicate_count,
-      context->source_function.op->location, &context->low_func_op));
+      workgroup_size.x, workgroup_size.y, workgroup_size.z, workgroup_count.x,
+      workgroup_count.y, workgroup_count.z, low_func_ref, arg_types, arg_count,
+      predicates, predicate_count, context->source_function.op->location,
+      &context->low_func_op));
 
   loom_region_t* low_body = loom_low_lower_low_body(context);
   low_body->flags = source_body->flags;
@@ -3099,6 +3108,31 @@ static iree_status_t loom_low_lower_finalize_function(
       context->policy->finalize_function.user_data, context);
 }
 
+static void loom_low_lower_record_static_launch_config(
+    const loom_module_t* module, loom_func_like_t source_function,
+    const loom_value_fact_table_t* fact_table,
+    loom_low_lower_result_t* result) {
+  if (!loom_kernel_def_isa(source_function.op)) {
+    return;
+  }
+  if (loom_kernel_def_static_workgroup_size_from_facts(
+          module, source_function.op, fact_table,
+          &result->static_workgroup_size)) {
+    result->static_launch_config_flags |=
+        LOOM_LOW_LOWER_STATIC_LAUNCH_CONFIG_WORKGROUP_SIZE;
+  }
+  if (loom_kernel_def_static_workgroup_count_from_facts(
+          module, source_function.op, fact_table,
+          &result->static_workgroup_count)) {
+    if (result->static_workgroup_count.x != 1 ||
+        result->static_workgroup_count.y != 1 ||
+        result->static_workgroup_count.z != 1) {
+      result->static_launch_config_flags |=
+          LOOM_LOW_LOWER_STATIC_LAUNCH_CONFIG_WORKGROUP_COUNT;
+    }
+  }
+}
+
 iree_status_t loom_low_lower_function(loom_module_t* module,
                                       loom_func_like_t source_function,
                                       const loom_low_lower_options_t* options,
@@ -3112,6 +3146,8 @@ iree_status_t loom_low_lower_function(loom_module_t* module,
     out_result->report_allocator = options->report_allocator;
     out_result->memory_report_row_allocator = module->allocator;
   }
+  loom_low_lower_record_static_launch_config(module, source_function,
+                                             options->fact_table, out_result);
 
   loom_region_t* source_body = loom_func_like_body(source_function);
   IREE_ASSERT(source_body != NULL);

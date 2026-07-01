@@ -13,6 +13,7 @@
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ir/types.h"
+#include "loom/ops/low/kernel.h"
 #include "loom/ops/low/ops.h"
 #include "loom/target/registers.h"
 
@@ -1407,9 +1408,102 @@ loom_target_compile_report_source_low_selection_kind(
   }
 }
 
+static bool loom_target_compile_report_mul_u64(uint64_t lhs, uint64_t rhs,
+                                               uint64_t* out_result) {
+  if (lhs != 0 && rhs > UINT64_MAX / lhs) {
+    return false;
+  }
+  *out_result = lhs * rhs;
+  return true;
+}
+
+static bool loom_target_compile_report_mul3_u32(uint32_t x, uint32_t y,
+                                                uint32_t z,
+                                                uint64_t* out_result) {
+  uint64_t xy = 0;
+  return loom_target_compile_report_mul_u64(x, y, &xy) &&
+         loom_target_compile_report_mul_u64(xy, z, out_result);
+}
+
+static void loom_target_compile_report_record_static_workload(
+    loom_target_compile_report_t* report,
+    const loom_target_workgroup_size_t* workgroup_size,
+    const loom_target_dispatch_workgroup_count_t* workgroup_count) {
+  loom_target_compile_report_workload_t workload = {0};
+  if (workgroup_size != NULL) {
+    workload.flags |= LOOM_TARGET_COMPILE_REPORT_WORKLOAD_WORKGROUP_SIZE;
+    workload.workgroup_size = *workgroup_size;
+    if (loom_target_compile_report_mul3_u32(
+            workload.workgroup_size.x, workload.workgroup_size.y,
+            workload.workgroup_size.z, &workload.flat_workgroup_size)) {
+      workload.flags |= LOOM_TARGET_COMPILE_REPORT_WORKLOAD_FLAT_WORKGROUP_SIZE;
+    }
+  }
+  if (workgroup_count != NULL) {
+    workload.flags |= LOOM_TARGET_COMPILE_REPORT_WORKLOAD_WORKGROUP_COUNT;
+    workload.workgroup_count = *workgroup_count;
+    if (loom_target_compile_report_mul3_u32(
+            workload.workgroup_count.x, workload.workgroup_count.y,
+            workload.workgroup_count.z, &workload.dispatch_workgroup_count)) {
+      workload.flags |=
+          LOOM_TARGET_COMPILE_REPORT_WORKLOAD_DISPATCH_WORKGROUP_COUNT;
+    }
+  }
+  if (iree_all_bits_set(
+          workload.flags,
+          LOOM_TARGET_COMPILE_REPORT_WORKLOAD_FLAT_WORKGROUP_SIZE |
+              LOOM_TARGET_COMPILE_REPORT_WORKLOAD_DISPATCH_WORKGROUP_COUNT) &&
+      loom_target_compile_report_mul_u64(workload.flat_workgroup_size,
+                                         workload.dispatch_workgroup_count,
+                                         &workload.dispatch_workitem_count)) {
+    workload.flags |=
+        LOOM_TARGET_COMPILE_REPORT_WORKLOAD_DISPATCH_WORKITEM_COUNT;
+  }
+  loom_target_compile_report_record_workload(report, &workload);
+}
+
+static void loom_target_compile_report_record_low_workload(
+    loom_target_compile_report_t* report,
+    const loom_low_lower_result_t* lower_result) {
+  const loom_target_workgroup_size_t* workgroup_size = NULL;
+  if (iree_any_bit_set(lower_result->static_launch_config_flags,
+                       LOOM_LOW_LOWER_STATIC_LAUNCH_CONFIG_WORKGROUP_SIZE)) {
+    workgroup_size = &lower_result->static_workgroup_size;
+  }
+  const loom_target_dispatch_workgroup_count_t* workgroup_count = NULL;
+  if (iree_any_bit_set(lower_result->static_launch_config_flags,
+                       LOOM_LOW_LOWER_STATIC_LAUNCH_CONFIG_WORKGROUP_COUNT)) {
+    workgroup_count = &lower_result->static_workgroup_count;
+  }
+  loom_target_compile_report_record_static_workload(report, workgroup_size,
+                                                    workgroup_count);
+}
+
+void loom_target_compile_report_record_low_kernel_workload(
+    loom_target_compile_report_t* report, const loom_op_t* low_function_op) {
+  loom_target_workgroup_size_t workgroup_size = {0};
+  const bool has_workgroup_size = loom_low_kernel_def_static_workgroup_size(
+      low_function_op, &workgroup_size);
+  loom_target_dispatch_workgroup_count_t workgroup_count = {0};
+  const bool has_workgroup_count = loom_low_kernel_def_static_workgroup_count(
+      low_function_op, &workgroup_count);
+  loom_target_compile_report_record_static_workload(
+      report, has_workgroup_size ? &workgroup_size : NULL,
+      has_workgroup_count ? &workgroup_count : NULL);
+}
+
 iree_status_t loom_target_compile_report_record_low_lowering(
     loom_target_compile_report_t* report,
     const loom_low_lower_result_t* lower_result) {
+  loom_target_compile_report_record_low_workload(report, lower_result);
+  const bool has_source_low_summary =
+      lower_result->selected_source_op_count != 0 ||
+      lower_result->emitted_low_op_count != 0 ||
+      lower_result->report_rows.head != NULL ||
+      lower_result->memory_report_rows.count != 0;
+  if (!has_source_low_summary) {
+    return iree_ok_status();
+  }
   report->detail_flags |= LOOM_TARGET_COMPILE_REPORT_DETAIL_SOURCE_LOW_ROWS;
   report->source_low_selected_op_count +=
       lower_result->selected_source_op_count;

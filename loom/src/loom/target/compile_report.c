@@ -553,6 +553,16 @@ void loom_target_compile_report_record_wait_plan(
                                                   wait_plan);
 }
 
+void loom_target_compile_report_record_workload(
+    loom_target_compile_report_t* report,
+    const loom_target_compile_report_workload_t* workload) {
+  if (workload->flags == LOOM_TARGET_COMPILE_REPORT_WORKLOAD_NONE) {
+    return;
+  }
+  report->detail_flags |= LOOM_TARGET_COMPILE_REPORT_DETAIL_WORKLOAD;
+  report->workload = *workload;
+}
+
 static void loom_target_compile_report_accumulate_instruction_mix(
     loom_target_compile_report_static_instruction_mix_t* target,
     const loom_target_compile_report_static_instruction_mix_t* source) {
@@ -627,6 +637,74 @@ static iree_string_view_t loom_target_compile_report_shared_string(
 static uint32_t loom_target_compile_report_shared_u32(uint32_t current,
                                                       uint32_t next) {
   return current == next ? current : 0;
+}
+
+static bool loom_target_compile_report_workgroup_sizes_equal(
+    loom_target_workgroup_size_t lhs, loom_target_workgroup_size_t rhs) {
+  return lhs.x == rhs.x && lhs.y == rhs.y && lhs.z == rhs.z;
+}
+
+static bool loom_target_compile_report_workgroup_counts_equal(
+    loom_target_dispatch_workgroup_count_t lhs,
+    loom_target_dispatch_workgroup_count_t rhs) {
+  return lhs.x == rhs.x && lhs.y == rhs.y && lhs.z == rhs.z;
+}
+
+static void loom_target_compile_report_merge_workload(
+    loom_target_compile_report_workload_t* target,
+    const loom_target_compile_report_workload_t* source) {
+  loom_target_compile_report_workload_flags_t flags =
+      target->flags & source->flags;
+  if (iree_any_bit_set(flags,
+                       LOOM_TARGET_COMPILE_REPORT_WORKLOAD_WORKGROUP_SIZE) &&
+      !loom_target_compile_report_workgroup_sizes_equal(
+          target->workgroup_size, source->workgroup_size)) {
+    flags &= ~LOOM_TARGET_COMPILE_REPORT_WORKLOAD_WORKGROUP_SIZE;
+  }
+  if (iree_any_bit_set(flags,
+                       LOOM_TARGET_COMPILE_REPORT_WORKLOAD_WORKGROUP_COUNT) &&
+      !loom_target_compile_report_workgroup_counts_equal(
+          target->workgroup_count, source->workgroup_count)) {
+    flags &= ~LOOM_TARGET_COMPILE_REPORT_WORKLOAD_WORKGROUP_COUNT;
+  }
+  if (iree_any_bit_set(
+          flags, LOOM_TARGET_COMPILE_REPORT_WORKLOAD_FLAT_WORKGROUP_SIZE) &&
+      target->flat_workgroup_size != source->flat_workgroup_size) {
+    flags &= ~LOOM_TARGET_COMPILE_REPORT_WORKLOAD_FLAT_WORKGROUP_SIZE;
+  }
+  if (iree_any_bit_set(
+          flags,
+          LOOM_TARGET_COMPILE_REPORT_WORKLOAD_DISPATCH_WORKGROUP_COUNT) &&
+      target->dispatch_workgroup_count != source->dispatch_workgroup_count) {
+    flags &= ~LOOM_TARGET_COMPILE_REPORT_WORKLOAD_DISPATCH_WORKGROUP_COUNT;
+  }
+  if (iree_any_bit_set(
+          flags, LOOM_TARGET_COMPILE_REPORT_WORKLOAD_DISPATCH_WORKITEM_COUNT) &&
+      target->dispatch_workitem_count != source->dispatch_workitem_count) {
+    flags &= ~LOOM_TARGET_COMPILE_REPORT_WORKLOAD_DISPATCH_WORKITEM_COUNT;
+  }
+  target->flags = flags;
+  if (!iree_any_bit_set(flags,
+                        LOOM_TARGET_COMPILE_REPORT_WORKLOAD_WORKGROUP_SIZE)) {
+    target->workgroup_size = (loom_target_workgroup_size_t){0};
+  }
+  if (!iree_any_bit_set(flags,
+                        LOOM_TARGET_COMPILE_REPORT_WORKLOAD_WORKGROUP_COUNT)) {
+    target->workgroup_count = (loom_target_dispatch_workgroup_count_t){0};
+  }
+  if (!iree_any_bit_set(
+          flags, LOOM_TARGET_COMPILE_REPORT_WORKLOAD_FLAT_WORKGROUP_SIZE)) {
+    target->flat_workgroup_size = 0;
+  }
+  if (!iree_any_bit_set(
+          flags,
+          LOOM_TARGET_COMPILE_REPORT_WORKLOAD_DISPATCH_WORKGROUP_COUNT)) {
+    target->dispatch_workgroup_count = 0;
+  }
+  if (!iree_any_bit_set(
+          flags, LOOM_TARGET_COMPILE_REPORT_WORKLOAD_DISPATCH_WORKITEM_COUNT)) {
+    target->dispatch_workitem_count = 0;
+  }
 }
 
 static void loom_target_compile_report_merge_target_resources(
@@ -744,6 +822,10 @@ static void loom_target_compile_report_merge_entry_summary(
     report->static_instruction_mix = entry_report->static_instruction_mix;
     report->target_resources = entry_report->target_resources;
     report->wait_plan = entry_report->wait_plan;
+    report->workload = entry_report->workload;
+    if (report->workload.flags == LOOM_TARGET_COMPILE_REPORT_WORKLOAD_NONE) {
+      report->detail_flags &= ~LOOM_TARGET_COMPILE_REPORT_DETAIL_WORKLOAD;
+    }
     report->math_legalization_rewritten_op_count =
         entry_report->math_legalization_rewritten_op_count;
     report->math_legalization_rejected_op_count =
@@ -830,6 +912,11 @@ static void loom_target_compile_report_merge_entry_summary(
       report->target_resources = entry_report->target_resources;
     }
   }
+  loom_target_compile_report_merge_workload(&report->workload,
+                                            &entry_report->workload);
+  if (report->workload.flags == LOOM_TARGET_COMPILE_REPORT_WORKLOAD_NONE) {
+    report->detail_flags &= ~LOOM_TARGET_COMPILE_REPORT_DETAIL_WORKLOAD;
+  }
   loom_target_compile_report_accumulate_move_causes(report->move_causes,
                                                     entry_report->move_causes);
 }
@@ -885,6 +972,7 @@ loom_target_compile_report_entry_from_report(
       .static_instruction_mix = entry_report->static_instruction_mix,
       .target_resources = entry_report->target_resources,
       .wait_plan = entry_report->wait_plan,
+      .workload = entry_report->workload,
       .pressure_row_count = entry_report->pressure_rows.count,
       .pressure_origin_row_count = entry_report->pressure_origin_rows.count,
       .schedule_band_row_count = entry_report->schedule_band_rows.count,

@@ -286,7 +286,7 @@ kernel.def target(@target) @fragment_store_launch_subgroup_footprint() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @fragment_store_launch_subgroup_footprint() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(64, 1, 1) @fragment_store_launch_subgroup_footprint() asm<amdgpu.rdna3.core> {
   %workgroup = live_in<amdgpu.workgroup_id.x> : reg<amdgpu.sgpr>
   %19 = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 262144} : reg<amdgpu.sgpr x2>

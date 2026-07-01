@@ -43,7 +43,7 @@ kernel.def target(@target) @prefetch_workgroup_id() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @prefetch_workgroup_id() asm<amdgpu.rdna4.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1025, 1, 1) @prefetch_workgroup_id() asm<amdgpu.rdna4.core> {
   %workgroup = live_in<amdgpu.workgroup_id.x> : reg<amdgpu.sgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 4100} : reg<amdgpu.sgpr x2>
   %8 = s_lshl_b32_rhs_inline %workgroup, 2
