@@ -194,6 +194,28 @@ loom_func_like_t loom_low_lower_context_source_function(
   return context->source_function;
 }
 
+uint16_t loom_low_lower_source_memory_root_argument_index(
+    const loom_low_lower_context_t* context,
+    const loom_low_source_memory_access_plan_t* source_plan) {
+  if (context == NULL || source_plan == NULL ||
+      source_plan->root_value_id == LOOM_VALUE_ID_INVALID ||
+      source_plan->root_value_id >= context->module->values.count ||
+      !loom_func_like_isa(context->source_function)) {
+    return UINT16_MAX;
+  }
+  loom_region_t* body = loom_func_like_body(context->source_function);
+  if (body == NULL || body->block_count == 0) {
+    return UINT16_MAX;
+  }
+  const loom_value_t* root_value =
+      loom_module_value(context->module, source_plan->root_value_id);
+  if (!loom_value_is_block_arg(root_value) ||
+      loom_value_def_block(root_value) != loom_region_const_entry_block(body)) {
+    return UINT16_MAX;
+  }
+  return loom_value_def_index(root_value);
+}
+
 const loom_low_lower_abi_argument_t* loom_low_lower_context_argument_map(
     const loom_low_lower_context_t* context, uint16_t* out_argument_count) {
   IREE_ASSERT_ARGUMENT(out_argument_count);

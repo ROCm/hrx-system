@@ -1090,8 +1090,11 @@ static void loom_target_compile_report_merge_source_low_memory_root_summary(
 static loom_target_compile_report_source_low_memory_root_summary_t*
 loom_target_compile_report_find_source_low_memory_root_summary(
     loom_target_compile_report_t* report, iree_string_view_t function_name,
-    iree_string_view_t source_root_name, iree_string_view_t memory_space) {
-  if (iree_string_view_is_empty(source_root_name)) {
+    iree_string_view_t source_root_name, uint16_t source_root_argument_index,
+    iree_string_view_t memory_space) {
+  const bool has_root_identity = !iree_string_view_is_empty(source_root_name) ||
+                                 source_root_argument_index != UINT16_MAX;
+  if (!has_root_identity) {
     return NULL;
   }
   for (loom_target_compile_report_vec_t* vec =
@@ -1105,6 +1108,7 @@ loom_target_compile_report_find_source_low_memory_root_summary(
           &summaries[i];
       if (iree_string_view_equal(summary->function_name, function_name) &&
           iree_string_view_equal(summary->source_root_name, source_root_name) &&
+          summary->source_root_argument_index == source_root_argument_index &&
           iree_string_view_equal(summary->memory_space, memory_space)) {
         return summary;
       }
@@ -1119,12 +1123,14 @@ loom_target_compile_report_record_source_low_memory_root_summary_row(
     const loom_target_compile_report_source_low_memory_root_summary_t* row) {
   loom_target_compile_report_source_low_memory_root_summary_t* summary =
       loom_target_compile_report_find_source_low_memory_root_summary(
-          report, row->function_name, row->source_root_name, row->memory_space);
+          report, row->function_name, row->source_root_name,
+          row->source_root_argument_index, row->memory_space);
   if (summary != NULL) {
     loom_target_compile_report_merge_source_low_memory_root_summary(summary,
                                                                     row);
     return iree_ok_status();
-  } else if (iree_string_view_is_empty(row->source_root_name)) {
+  } else if (iree_string_view_is_empty(row->source_root_name) &&
+             row->source_root_argument_index == UINT16_MAX) {
     return iree_ok_status();
   }
   return loom_target_compile_report_row_list_append(
@@ -1430,18 +1436,21 @@ loom_target_compile_report_record_source_low_memory_root_summary(
     const loom_target_compile_report_source_low_memory_row_t* row) {
   loom_target_compile_report_source_low_memory_root_summary_t* summary =
       loom_target_compile_report_find_source_low_memory_root_summary(
-          report, row->function_name, row->source_root_name, row->memory_space);
+          report, row->function_name, row->source_root_name,
+          row->source_root_argument_index, row->memory_space);
   if (summary != NULL) {
     loom_target_compile_report_accumulate_source_low_memory_root_summary(
         summary, row);
     return iree_ok_status();
-  } else if (iree_string_view_is_empty(row->source_root_name)) {
+  } else if (iree_string_view_is_empty(row->source_root_name) &&
+             row->source_root_argument_index == UINT16_MAX) {
     return iree_ok_status();
   }
 
   loom_target_compile_report_source_low_memory_root_summary_t new_summary = {
       .function_name = row->function_name,
       .source_root_name = row->source_root_name,
+      .source_root_argument_index = row->source_root_argument_index,
       .memory_space = row->memory_space,
   };
   loom_target_compile_report_accumulate_source_low_memory_root_summary(

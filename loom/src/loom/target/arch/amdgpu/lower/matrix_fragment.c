@@ -3817,6 +3817,9 @@ static iree_status_t loom_amdgpu_record_fragment_memory_packet(
       .source_op_kind = source_op->kind,
       .source_root_name = loom_module_value_name(
           loom_low_lower_context_module(context), plan->source.root_value_id),
+      .source_root_argument_index =
+          loom_low_lower_source_memory_root_argument_index(context,
+                                                           &plan->source),
       .memory_space = loom_amdgpu_memory_space_name(plan->source.memory_space),
       .operation_kind = loom_amdgpu_memory_operation_name(plan->operation_kind),
       .packet_key = packet_key,
