@@ -6002,8 +6002,8 @@ static iree_status_t loom_amdgpu_try_lower_vector_fp8_scalef32_pair_native(
   *out_low_pair = LOOM_VALUE_ID_INVALID;
 
   loom_amdgpu_vector_fp8_pair_storage_t pair_storage;
-  if (!loom_amdgpu_vector_fp8_query_adjacent_pair_storage(plan, lane_index,
-                                                          &pair_storage)) {
+  if (!loom_amdgpu_vector_fp8_query_storage_pair(plan, lane_index,
+                                                 &pair_storage)) {
     return iree_ok_status();
   }
 
@@ -6058,8 +6058,8 @@ loom_amdgpu_try_lower_vector_fp8_pair_to_packed_16bit_native(
   *out_low_pair = LOOM_VALUE_ID_INVALID;
 
   loom_amdgpu_vector_fp8_pair_storage_t pair_storage;
-  if (!loom_amdgpu_vector_fp8_query_adjacent_pair_storage(plan, lane_index,
-                                                          &pair_storage)) {
+  if (!loom_amdgpu_vector_fp8_query_storage_pair(plan, lane_index,
+                                                 &pair_storage)) {
     return iree_ok_status();
   }
 
@@ -6104,8 +6104,8 @@ loom_amdgpu_try_lower_vector_fp8_identity_scalef32_to_packed_16bit_native(
        register_index < plan->result_register_count; ++register_index) {
     const uint32_t lane_index = register_index * 2u;
     loom_amdgpu_vector_fp8_pair_storage_t pair_storage;
-    if (!loom_amdgpu_vector_fp8_query_adjacent_pair_storage(plan, lane_index,
-                                                            &pair_storage)) {
+    if (!loom_amdgpu_vector_fp8_query_storage_pair(plan, lane_index,
+                                                   &pair_storage)) {
       continue;
     }
     if (low_scale_one == LOOM_VALUE_ID_INVALID) {

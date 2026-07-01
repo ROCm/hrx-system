@@ -2043,16 +2043,13 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx950_direct_extf_f8e4
   %26 = v_mov_b32 1065353216
   %27 = v_cvt_scalef32_pk_bf16_fp8 %packed, %26
   %28 = v_lshrrev_b32_src0_inline %packed, 16
-  %29 = v_cvt_pk_f32_fp8 %28
-  %30 = slice %29[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %31 = v_mov_b32 0
-  %32 = v_cvt_pk_bf16_f32 %30, %31
-  %35 = v_mov_b32 6
-  %36 = v_mul_lo_u32 %lane, %35
-  %37 = s_mov_b32_m0_imm 0
-  global_store_dword_saddr %36, %27, %output_view, %37
-  %41 = s_mov_b32_m0_imm 0
-  global_store_short_saddr %36, %32, %output_view, %41 {offset = 4}
+  %29 = v_cvt_scalef32_pk_bf16_fp8 %28, %26
+  %32 = v_mov_b32 6
+  %33 = v_mul_lo_u32 %lane, %32
+  %34 = s_mov_b32_m0_imm 0
+  global_store_dword_saddr %33, %27, %output_view, %34
+  %38 = s_mov_b32_m0_imm 0
+  global_store_short_saddr %33, %29, %output_view, %38 {offset = 4}
   return
 }
 
@@ -2086,16 +2083,13 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx950_direct_extf_f8e4
   %26 = v_mov_b32 1065353216
   %27 = v_cvt_scalef32_pk_f16_fp8 %packed, %26
   %28 = v_lshrrev_b32_src0_inline %packed, 16
-  %29 = v_cvt_pk_f32_fp8 %28
-  %30 = slice %29[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %31 = v_cvt_f16_f32 %30
-  %32 = v_bfe_u32_offset_0_width_16_low16 %31
-  %35 = v_mov_b32 6
-  %36 = v_mul_lo_u32 %lane, %35
-  %37 = s_mov_b32_m0_imm 0
-  global_store_dword_saddr %36, %27, %output_view, %37
-  %41 = s_mov_b32_m0_imm 0
-  global_store_short_saddr %36, %32, %output_view, %41 {offset = 4}
+  %29 = v_cvt_scalef32_pk_f16_fp8 %28, %26
+  %32 = v_mov_b32 6
+  %33 = v_mul_lo_u32 %lane, %32
+  %34 = s_mov_b32_m0_imm 0
+  global_store_dword_saddr %33, %27, %output_view, %34
+  %38 = s_mov_b32_m0_imm 0
+  global_store_short_saddr %33, %29, %output_view, %38 {offset = 4}
   return
 }
 
@@ -2176,16 +2170,13 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx950_direct_decode_sc
   %row_scale = global_load_dword_saddr %29, %scale_view, %33
   %35 = v_cvt_scalef32_pk_bf16_fp8 %packed, %row_scale
   %36 = v_lshrrev_b32_src0_inline %packed, 16
-  %37 = v_cvt_scalef32_pk_f32_fp8 %36, %row_scale
-  %38 = slice %37[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %39 = v_mov_b32 0
-  %40 = v_cvt_pk_bf16_f32 %38, %39
-  %43 = v_mov_b32 6
-  %44 = v_mul_lo_u32 %lane, %43
-  %45 = s_mov_b32_m0_imm 0
-  global_store_dword_saddr %44, %35, %output_view, %45
-  %49 = s_mov_b32_m0_imm 0
-  global_store_short_saddr %44, %40, %output_view, %49 {offset = 4}
+  %37 = v_cvt_scalef32_pk_bf16_fp8 %36, %row_scale
+  %40 = v_mov_b32 6
+  %41 = v_mul_lo_u32 %lane, %40
+  %42 = s_mov_b32_m0_imm 0
+  global_store_dword_saddr %41, %35, %output_view, %42
+  %46 = s_mov_b32_m0_imm 0
+  global_store_short_saddr %41, %37, %output_view, %46 {offset = 4}
   return
 }
 
@@ -2225,16 +2216,13 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx950_direct_decode_sc
   %row_scale = global_load_dword_saddr %29, %scale_view, %33
   %35 = v_cvt_scalef32_pk_f16_fp8 %packed, %row_scale
   %36 = v_lshrrev_b32_src0_inline %packed, 16
-  %37 = v_cvt_scalef32_pk_f32_fp8 %36, %row_scale
-  %38 = slice %37[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %39 = v_cvt_f16_f32 %38
-  %40 = v_bfe_u32_offset_0_width_16_low16 %39
-  %43 = v_mov_b32 6
-  %44 = v_mul_lo_u32 %lane, %43
-  %45 = s_mov_b32_m0_imm 0
-  global_store_dword_saddr %44, %35, %output_view, %45
-  %49 = s_mov_b32_m0_imm 0
-  global_store_short_saddr %44, %40, %output_view, %49 {offset = 4}
+  %37 = v_cvt_scalef32_pk_f16_fp8 %36, %row_scale
+  %40 = v_mov_b32 6
+  %41 = v_mul_lo_u32 %lane, %40
+  %42 = s_mov_b32_m0_imm 0
+  global_store_dword_saddr %41, %35, %output_view, %42
+  %46 = s_mov_b32_m0_imm 0
+  global_store_short_saddr %41, %37, %output_view, %46 {offset = 4}
   return
 }
 
