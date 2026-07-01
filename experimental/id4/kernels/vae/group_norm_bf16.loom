@@ -6,11 +6,11 @@ config.decl @id4.vae.group_norm.channel_count : %value: index where [range(%valu
 
 config.decl @id4.vae.group_norm.group_count : %value: index where [range(%value, 1, 1024)]
 
-config.decl @id4.vae.group_norm.channels_per_group : %value: index where [range(%value, 4, 1024)]
+config.decl @id4.vae.group_norm.channels_per_group : %value: index where [range(%value, 4, 1024), mul(%value, 4)]
 
-config.decl @id4.vae.group_norm.batch_count : %value: index where [range(%value, 1, 1024)]
+config.decl @id4.vae.group_norm.batch_count : %value: index where [range(%value, 1, 1)]
 
-config.decl @id4.vae.group_norm.group_element_count : %value: index where [range(%value, 4, 268435456)]
+config.decl @id4.vae.group_norm.group_element_count : %value: index where [range(%value, 4, 268435456), mul(%value, 4)]
 
 kernel.def export("id4_vae_group_norm_stats_bf16") @id4_vae_group_norm_stats_bf16() {
   %unit = index.constant 1 : index
@@ -91,6 +91,8 @@ kernel.def export("id4_vae_group_norm_stats_onepass_bf16") @id4_vae_group_norm_s
   %base = index.constant 0 : offset
   %zero = index.constant 0 : index
   %unit = index.constant 1 : index
+  %three = index.constant 3 : index
+  %four = index.constant 4 : index
   %workgroup_size_x = index.constant 256 : index
   %group = kernel.workgroup.id<x> : index
   %batch = kernel.workgroup.id<y> : index
@@ -111,21 +113,38 @@ kernel.def export("id4_vae_group_norm_stats_onepass_bf16") @id4_vae_group_norm_s
   %input_global = buffer.assume.memory_space<global> %input_noalias : buffer
   %stats_global = buffer.assume.memory_space<global> %stats_noalias : buffer
   %input_view = buffer.view %input_global[%base] : buffer -> view<[%width]x[%height]x[%channel_count]x[%batch_count]xbf16, #dense>
+  %pixel_count = index.mul %width, %height : index
+  %pixel_element_count = index.mul %pixel_count, %channel_count : index
+  %element_count = index.mul %pixel_element_count, %batch_count : index
+  %input_flat_view = buffer.view %input_global[%base] : buffer -> view<[%element_count]xbf16, #dense>
   %stats_view = buffer.view %stats_global[%base] : buffer -> view<[%batch_count]x[%group_count]x2xf32, #dense>
   %center_bf16 = view.load %input_view[%zero, %zero, %channel_base, %batch] : view<[%width]x[%height]x[%channel_count]x[%batch_count]xbf16, #dense> -> bf16
   %center = scalar.extf %center_bf16 : bf16 to f32
-  %lane_delta_sum, %lane_delta_square_sum = scf.for %element_index = [%lane to %group_element_count step %workgroup_size_x](%acc_delta_sum = %zero_f32 : f32, %acc_delta_square_sum = %zero_f32 : f32) -> (f32, f32) {
+  %lane_element_base = index.mul %lane, %four : index
+  %workgroup_element_span = index.mul %workgroup_size_x, %four : index
+  %center_vector = vector.splat %center : vector<4xf32>
+  %lane_delta_sum, %lane_delta_square_sum = scf.for %element_index = [%lane_element_base to %group_element_count step %workgroup_element_span](%acc_delta_sum = %zero_f32 : f32, %acc_delta_square_sum = %zero_f32 : f32) -> (f32, f32) {
     %channel_in_group = index.rem %element_index, %channels_per_group : index
     %spatial_index = index.div %element_index, %channels_per_group : index
     %y = index.rem %spatial_index, %height : index
     %x = index.div %spatial_index, %height : index
     %channel = index.add %channel_base, %channel_in_group : index
-    %value_bf16 = view.load %input_view[%x, %y, %channel, %batch] : view<[%width]x[%height]x[%channel_count]x[%batch_count]xbf16, #dense> -> bf16
-    %value = scalar.extf %value_bf16 : bf16 to f32
-    %delta = scalar.subf<reassoc|nnan|ninf|nsz> %value, %center : f32
-    %delta_square = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %delta, %delta : f32
-    %next_delta_sum = scalar.addf<reassoc|nnan|ninf|nsz> %acc_delta_sum, %delta : f32
-    %next_delta_square_sum = scalar.addf<reassoc|nnan|ninf|nsz> %acc_delta_square_sum, %delta_square : f32
+    %input_x_row_base = index.mul %x, %height : index
+    %input_pixel_base = index.add %input_x_row_base, %y : index
+    %input_pixel_element_base = index.mul %input_pixel_base, %channel_count : index
+    %input_channel_element_base = index.add %input_pixel_element_base, %channel : index
+    %input_batch_element_base = index.mul %input_channel_element_base, %batch_count : index
+    %input_element0 = index.add %input_batch_element_base, %batch : index
+    %last_valid_input_element = index.sub %element_count, %three : index
+    %input_element = index.assume %input_element0 [ge(%input_element0, 0), lt(%input_element0, %last_valid_input_element)] : index
+    %values_bf16 = vector.load %input_flat_view[%input_element] : view<[%element_count]xbf16, #dense> -> vector<4xbf16>
+    %values = vector.extf %values_bf16 : vector<4xbf16> to vector<4xf32>
+    %delta = vector.subf<reassoc|nnan|ninf|nsz> %values, %center_vector : vector<4xf32>
+    %delta_square = vector.mulf<reassoc|nnan|ninf|nsz|contract> %delta, %delta : vector<4xf32>
+    %delta_sum = vector.reduce<addf, reassoc|nnan|ninf|nsz> %delta, %zero_f32 : vector<4xf32>, f32
+    %delta_square_sum = vector.reduce<addf, reassoc|nnan|ninf|nsz> %delta_square, %zero_f32 : vector<4xf32>, f32
+    %next_delta_sum = scalar.addf<reassoc|nnan|ninf|nsz> %acc_delta_sum, %delta_sum : f32
+    %next_delta_square_sum = scalar.addf<reassoc|nnan|ninf|nsz> %acc_delta_square_sum, %delta_square_sum : f32
     scf.yield %next_delta_sum, %next_delta_square_sum : f32, f32
   }
   %delta_sum = kernel.workgroup.reduce<addf> %lane_delta_sum : f32
