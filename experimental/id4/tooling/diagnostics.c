@@ -121,6 +121,34 @@ static iree_status_t id4_tooling_diagnostics_append_parameter_slab_json(
   return iree_string_builder_append_cstring(builder, "}");
 }
 
+static iree_status_t id4_tooling_diagnostics_append_parameter_load_json(
+    iree_string_builder_t* builder,
+    const id4_pipeline_parameter_load_diagnostic_t* parameter_load) {
+  return iree_string_builder_append_format(
+      builder,
+      ",\"parameter_load\":{\"slab_index\":%" PRIu64
+      ",\"load_step_offset\":%" PRIu64 ",\"load_step_count\":%" PRIu64
+      ",\"staging_slot_count\":%" PRIu64
+      ",\"staging_slot_byte_length\":%" PRIu64
+      ",\"staging_total_byte_length\":%" PRIu64
+      ",\"staging_chunk_count\":%" PRIu64 ",\"logical_source_count\":%" PRIu64
+      ",\"source_gather_batch_count\":%" PRIu64
+      ",\"source_byte_length\":%" PRIu64 ",\"target_byte_length\":%" PRIu64
+      ",\"encoder_dispatch_count\":%" PRIu64 "}",
+      (uint64_t)parameter_load->slab_index,
+      (uint64_t)parameter_load->load_step_offset,
+      (uint64_t)parameter_load->load_step_count,
+      (uint64_t)parameter_load->staging_slot_count,
+      (uint64_t)parameter_load->staging_slot_byte_length,
+      (uint64_t)parameter_load->staging_total_byte_length,
+      (uint64_t)parameter_load->staging_chunk_count,
+      (uint64_t)parameter_load->logical_source_count,
+      (uint64_t)parameter_load->source_gather_batch_count,
+      (uint64_t)parameter_load->source_byte_length,
+      (uint64_t)parameter_load->target_byte_length,
+      (uint64_t)parameter_load->encoder_dispatch_count);
+}
+
 static iree_status_t id4_tooling_diagnostics_append_kernel_json(
     iree_string_builder_t* builder,
     const id4_pipeline_kernel_diagnostic_t* kernel) {
@@ -187,6 +215,10 @@ static iree_status_t id4_tooling_diagnostics_format_event(
   if (event->parameter_slab) {
     IREE_RETURN_IF_ERROR(id4_tooling_diagnostics_append_parameter_slab_json(
         builder, event->parameter_slab));
+  }
+  if (event->parameter_load) {
+    IREE_RETURN_IF_ERROR(id4_tooling_diagnostics_append_parameter_load_json(
+        builder, event->parameter_load));
   }
   if (event->kernel) {
     IREE_RETURN_IF_ERROR(

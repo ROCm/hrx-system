@@ -28,6 +28,29 @@ static const iree_device_size_t
     ID4_PIPELINE_PARAMETER_ENCODER_STAGING_CHUNK_BYTE_CAPACITY =
         512ull * 1024ull * 1024ull;
 
+static iree_status_t id4_pipeline_parameter_add_device_size(
+    iree_device_size_t value, iree_device_size_t* inout_total,
+    const char* name) {
+  iree_device_size_t result = 0;
+  if (!iree_device_size_checked_add(*inout_total, value, &result)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "parameter %s byte length overflows", name);
+  }
+  *inout_total = result;
+  return iree_ok_status();
+}
+
+static iree_status_t id4_pipeline_parameter_add_host_size(
+    iree_host_size_t value, iree_host_size_t* inout_total, const char* name) {
+  iree_host_size_t result = 0;
+  if (!iree_host_size_checked_add(*inout_total, value, &result)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "parameter %s count overflows", name);
+  }
+  *inout_total = result;
+  return iree_ok_status();
+}
+
 struct id4_pipeline_parameter_slab_set_t {
   // Reference count for shared slab set ownership.
   iree_atomic_ref_count_t ref_count;
@@ -1141,27 +1164,130 @@ static iree_status_t id4_pipeline_parameter_encode_group_chunk_sources(
   return iree_ok_status();
 }
 
-static iree_status_t id4_pipeline_parameter_encode_run_staging_size(
+typedef struct id4_pipeline_parameter_encode_run_statistics_t {
+  // Byte length required by each bounded staging slot.
+  iree_device_size_t staging_slot_byte_length;
+  // Number of staging chunks planned for the encode run.
+  iree_host_size_t staging_chunk_count;
+  // Number of logical provider source tensors gathered into staging.
+  iree_host_size_t logical_source_count;
+  // Number of provider gather batches submitted by the encode run.
+  iree_host_size_t source_gather_batch_count;
+  // Total provider source bytes gathered by the encode run.
+  iree_device_size_t source_byte_length;
+  // Total final target slab bytes populated by the encode run.
+  iree_device_size_t target_byte_length;
+  // Number of encoder dispatches recorded by the encode run.
+  iree_host_size_t encoder_dispatch_count;
+} id4_pipeline_parameter_encode_run_statistics_t;
+
+static iree_status_t id4_pipeline_parameter_encode_run_collect_statistics(
+    const id4_pipeline_parameter_slab_load_t* load,
     const id4_pipeline_parameter_load_step_t* steps, iree_host_size_t count,
-    iree_device_size_t* out_byte_length) {
-  *out_byte_length = 0;
+    id4_pipeline_parameter_encode_run_statistics_t* out_statistics) {
+  memset(out_statistics, 0, sizeof(*out_statistics));
+  out_statistics->encoder_dispatch_count = count;
   for (iree_host_size_t i = 0; i < count;) {
+    id4_pipeline_parameter_encode_step_staging_layout_t
+        layouts[ID4_PIPELINE_PARAMETER_ENCODER_CHUNK_STEP_CAPACITY];
     iree_host_size_t chunk_step_count = 0;
     iree_device_size_t chunk_byte_length = 0;
     IREE_RETURN_IF_ERROR(id4_pipeline_parameter_encode_plan_chunk(
-        count - i, &steps[i], /*out_layouts=*/NULL, &chunk_step_count,
-        &chunk_byte_length));
+        count - i, &steps[i], layouts, &chunk_step_count, &chunk_byte_length));
     if (chunk_step_count == 0) {
       return iree_make_status(
           IREE_STATUS_INTERNAL,
           "parameter encoder could not plan a staging chunk");
     }
-    if (chunk_byte_length > *out_byte_length) {
-      *out_byte_length = chunk_byte_length;
+    if (chunk_byte_length > out_statistics->staging_slot_byte_length) {
+      out_statistics->staging_slot_byte_length = chunk_byte_length;
+    }
+    id4_pipeline_parameter_encode_chunk_source_t
+        grouped_sources[ID4_PIPELINE_PARAMETER_ENCODER_CHUNK_SOURCE_CAPACITY] =
+            {0};
+    id4_pipeline_parameter_encode_source_batch_t
+        source_batches[ID4_PIPELINE_PARAMETER_ENCODER_CHUNK_SOURCE_CAPACITY] = {
+            0};
+    iree_host_size_t source_batch_count = 0;
+    IREE_RETURN_IF_ERROR(id4_pipeline_parameter_encode_group_chunk_sources(
+        chunk_step_count, &steps[i], layouts, /*slot_base_offset=*/0,
+        grouped_sources, source_batches, &source_batch_count));
+    IREE_RETURN_IF_ERROR(id4_pipeline_parameter_add_host_size(
+        1, &out_statistics->staging_chunk_count, "staging chunk"));
+    IREE_RETURN_IF_ERROR(id4_pipeline_parameter_add_host_size(
+        source_batch_count, &out_statistics->source_gather_batch_count,
+        "source gather batch"));
+    for (iree_host_size_t j = 0; j < chunk_step_count; ++j) {
+      const id4_pipeline_parameter_load_step_t* step = &steps[i + j];
+      IREE_RETURN_IF_ERROR(id4_pipeline_parameter_add_host_size(
+          step->source_count, &out_statistics->logical_source_count,
+          "logical source"));
+      for (iree_host_size_t k = 0; k < step->source_count; ++k) {
+        IREE_RETURN_IF_ERROR(id4_pipeline_parameter_add_device_size(
+            step->sources[k].byte_length, &out_statistics->source_byte_length,
+            "source"));
+      }
+      const id4_pipeline_parameter_request_t* target_request =
+          &load->slab->requests[step->request_offset];
+      IREE_RETURN_IF_ERROR(id4_pipeline_parameter_add_device_size(
+          target_request->span.length, &out_statistics->target_byte_length,
+          "target"));
     }
     i += chunk_step_count;
   }
   return iree_ok_status();
+}
+
+static iree_status_t id4_pipeline_parameter_slab_emit_encode_window_diagnostic(
+    const id4_pipeline_parameter_slab_load_t* load,
+    iree_string_view_t stage_name, iree_host_size_t load_step_offset,
+    iree_host_size_t load_step_count, iree_device_size_t staging_byte_length,
+    const id4_pipeline_parameter_encode_run_statistics_t* statistics,
+    id4_pipeline_diagnostics_sink_t* diagnostics_sink) {
+  id4_pipeline_parameter_slab_diagnostic_t parameter_slab =
+      id4_pipeline_parameter_slab_make_diagnostic(load, load->slab->scope,
+                                                  IREE_HOST_SIZE_MAX);
+  id4_pipeline_parameter_load_diagnostic_t parameter_load = {
+      // Plan-local slab index populated by the loading window.
+      .slab_index = load->slab_index,
+      // First load-step ordinal represented by the window.
+      .load_step_offset = load_step_offset,
+      // Number of load steps represented by the window.
+      .load_step_count = load_step_count,
+      // Number of staging slots allocated for the window.
+      .staging_slot_count = ID4_PIPELINE_PARAMETER_ENCODER_STAGING_SLOT_COUNT,
+      // Byte length of one staging slot.
+      .staging_slot_byte_length = statistics->staging_slot_byte_length,
+      // Total byte length of all staging slots.
+      .staging_total_byte_length = staging_byte_length,
+      // Number of chunks planned for the staging slots.
+      .staging_chunk_count = statistics->staging_chunk_count,
+      // Number of logical source tensors gathered into staging.
+      .logical_source_count = statistics->logical_source_count,
+      // Number of provider gather batches submitted.
+      .source_gather_batch_count = statistics->source_gather_batch_count,
+      // Total source bytes gathered into staging.
+      .source_byte_length = statistics->source_byte_length,
+      // Total final slab bytes populated by encoder dispatches.
+      .target_byte_length = statistics->target_byte_length,
+      // Number of encoder dispatches recorded.
+      .encoder_dispatch_count = statistics->encoder_dispatch_count,
+  };
+  id4_pipeline_diagnostic_event_t event = {
+      // Event kind for parameter slab diagnostics.
+      .kind = ID4_PIPELINE_DIAGNOSTIC_EVENT_KIND_PARAMETER_SLAB,
+      // Stage name associated with the load.
+      .stage_name = stage_name,
+      // Stable parameter load event key.
+      .key = IREE_SV("parameter_slab.encode_window"),
+      // Short event summary.
+      .message = IREE_SV("encoded parameter staging window"),
+      // Structured slab payload.
+      .parameter_slab = &parameter_slab,
+      // Structured parameter loading payload.
+      .parameter_load = &parameter_load,
+  };
+  return id4_pipeline_diagnostics_emit(diagnostics_sink, &event);
 }
 
 static iree_hal_semaphore_list_t
@@ -1297,12 +1423,15 @@ static iree_status_t id4_pipeline_parameter_slab_submit_encode_run(
     const id4_pipeline_parameter_slab_set_load_options_t* options,
     const id4_pipeline_parameter_slab_load_t* load, iree_host_size_t step_count,
     const id4_pipeline_parameter_load_step_t* steps,
-    iree_string_view_t stage_name, iree_hal_buffer_t* target_buffer,
+    iree_host_size_t load_step_offset, iree_string_view_t stage_name,
+    iree_hal_buffer_t* target_buffer,
     iree_hal_semaphore_list_t wait_semaphore_list,
     iree_hal_semaphore_list_t signal_semaphore_list) {
-  iree_device_size_t staging_slot_byte_length = 0;
-  IREE_RETURN_IF_ERROR(id4_pipeline_parameter_encode_run_staging_size(
-      steps, step_count, &staging_slot_byte_length));
+  id4_pipeline_parameter_encode_run_statistics_t statistics;
+  IREE_RETURN_IF_ERROR(id4_pipeline_parameter_encode_run_collect_statistics(
+      load, steps, step_count, &statistics));
+  const iree_device_size_t staging_slot_byte_length =
+      statistics.staging_slot_byte_length;
   iree_device_size_t staging_byte_length = 0;
   if (!iree_device_size_checked_mul(
           staging_slot_byte_length,
@@ -1312,6 +1441,10 @@ static iree_status_t id4_pipeline_parameter_slab_submit_encode_run(
         IREE_STATUS_OUT_OF_RANGE,
         "parameter encoder staging allocation byte length overflows");
   }
+  IREE_RETURN_IF_ERROR(
+      id4_pipeline_parameter_slab_emit_encode_window_diagnostic(
+          load, stage_name, load_step_offset, step_count, staging_byte_length,
+          &statistics, options->diagnostics_sink));
 
   iree_hal_semaphore_t* run_semaphore = NULL;
   id4_pipeline_parameter_encode_staging_slot_t
@@ -1720,9 +1853,9 @@ static iree_status_t id4_pipeline_parameter_slab_submit_load_step(
   iree_status_t status = iree_ok_status();
   if (id4_pipeline_parameter_load_step_is_encode(step)) {
     status = id4_pipeline_parameter_slab_submit_encode_run(
-        options, load, next_step_index - step_index, step, stage_name,
-        slab_set->buffers[step->target_slab_index], step_wait_semaphore_list,
-        step_signal_semaphore_list);
+        options, load, next_step_index - step_index, step, step_index,
+        stage_name, slab_set->buffers[step->target_slab_index],
+        step_wait_semaphore_list, step_signal_semaphore_list);
   } else {
     status = id4_pipeline_parameter_slab_submit_gather(
         options, load, step, stage_name,

@@ -58,6 +58,31 @@ TEST(DiagnosticsTest, WritesJsonLinesEvents) {
   IREE_ASSERT_OK(
       id4_pipeline_diagnostics_emit(&diagnostics_sink, &parameter_event));
 
+  const id4_pipeline_parameter_load_diagnostic_t parameter_load = {
+      /*.slab_index=*/3,
+      /*.load_step_offset=*/5,
+      /*.load_step_count=*/2,
+      /*.staging_slot_count=*/2,
+      /*.staging_slot_byte_length=*/4096,
+      /*.staging_total_byte_length=*/8192,
+      /*.staging_chunk_count=*/1,
+      /*.logical_source_count=*/4,
+      /*.source_gather_batch_count=*/2,
+      /*.source_byte_length=*/1024,
+      /*.target_byte_length=*/2048,
+      /*.encoder_dispatch_count=*/2,
+  };
+  id4_pipeline_diagnostic_event_t parameter_load_event = {
+      /*.kind=*/ID4_PIPELINE_DIAGNOSTIC_EVENT_KIND_PARAMETER_SLAB,
+      /*.stage_name=*/IREE_SV("dit.stage"),
+      /*.key=*/IREE_SV("parameter.slab.encode_window"),
+      /*.message=*/IREE_SV("encoded parameter window"),
+      /*.parameter_slab=*/&parameter_slab,
+      /*.parameter_load=*/&parameter_load,
+  };
+  IREE_ASSERT_OK(
+      id4_pipeline_diagnostics_emit(&diagnostics_sink, &parameter_load_event));
+
   const id4_pipeline_kernel_diagnostic_t kernel = {
       /*.phase=*/IREE_SV("prepare"),
       /*.source_identifier=*/IREE_SV("qwen3_vl/rmsnorm"),
@@ -79,6 +104,7 @@ TEST(DiagnosticsTest, WritesJsonLinesEvents) {
       /*.key=*/IREE_SV("kernel.prepare"),
       /*.message=*/IREE_SV("prepared"),
       /*.parameter_slab=*/NULL,
+      /*.parameter_load=*/NULL,
       /*.kernel=*/&kernel,
   };
   IREE_ASSERT_OK(
@@ -95,6 +121,7 @@ TEST(DiagnosticsTest, WritesJsonLinesEvents) {
       /*.key=*/IREE_SV("cli.phase"),
       /*.message=*/IREE_SV("completed phase"),
       /*.parameter_slab=*/NULL,
+      /*.parameter_load=*/NULL,
       /*.kernel=*/NULL,
       /*.timing=*/&timing,
   };
@@ -109,6 +136,11 @@ TEST(DiagnosticsTest, WritesJsonLinesEvents) {
   ExpectFinds(event_log, "\"message\":\"copied\\tweight\"");
   ExpectFinds(event_log, "\"parameter_key\":\"layer.\\\"q\\\".weight\"");
   ExpectFinds(event_log, "\"slab_index\":3");
+  ExpectFinds(event_log, "\"key\":\"parameter.slab.encode_window\"");
+  ExpectFinds(event_log, "\"parameter_load\"");
+  ExpectFinds(event_log, "\"staging_slot_count\":2");
+  ExpectFinds(event_log, "\"source_gather_batch_count\":2");
+  ExpectFinds(event_log, "\"encoder_dispatch_count\":2");
   ExpectFinds(event_log, "\"kind\":\"kernel\"");
   ExpectFinds(event_log, "\"module_path\":\"qwen3_vl/rmsnorm\"");
   ExpectFinds(event_log, "\"artifact_byte_length\":4096");

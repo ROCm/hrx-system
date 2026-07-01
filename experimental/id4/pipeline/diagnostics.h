@@ -60,6 +60,34 @@ typedef struct id4_pipeline_parameter_slab_diagnostic_t {
   iree_host_size_t request_count;
 } id4_pipeline_parameter_slab_diagnostic_t;
 
+// Parameter loading payload attached to parameter-slab diagnostic events.
+typedef struct id4_pipeline_parameter_load_diagnostic_t {
+  // Plan-local slab index populated by this loading window.
+  iree_host_size_t slab_index;
+  // First load-step ordinal represented by this loading window.
+  iree_host_size_t load_step_offset;
+  // Number of load steps represented by this loading window.
+  iree_host_size_t load_step_count;
+  // Number of bounded staging slots allocated for encoded source tensors.
+  iree_host_size_t staging_slot_count;
+  // Byte length of one bounded staging slot.
+  iree_device_size_t staging_slot_byte_length;
+  // Total byte length of all bounded staging slots.
+  iree_device_size_t staging_total_byte_length;
+  // Number of staging chunks submitted by this loading window.
+  iree_host_size_t staging_chunk_count;
+  // Number of logical provider source tensors gathered into staging.
+  iree_host_size_t logical_source_count;
+  // Number of provider gather batches submitted by this loading window.
+  iree_host_size_t source_gather_batch_count;
+  // Total provider source bytes gathered by this loading window.
+  iree_device_size_t source_byte_length;
+  // Total final slab bytes populated by this loading window.
+  iree_device_size_t target_byte_length;
+  // Number of encoder dispatches recorded by this loading window.
+  iree_host_size_t encoder_dispatch_count;
+} id4_pipeline_parameter_load_diagnostic_t;
+
 // Kernel payload attached to kernel diagnostic events.
 typedef struct id4_pipeline_kernel_diagnostic_t {
   // Kernel-cache phase associated with the event.
@@ -113,6 +141,8 @@ typedef struct id4_pipeline_diagnostic_event_t {
   iree_string_view_t message;
   // Optional parameter slab payload valid only during the emit callback.
   const id4_pipeline_parameter_slab_diagnostic_t* parameter_slab;
+  // Optional parameter loading payload valid only during the emit callback.
+  const id4_pipeline_parameter_load_diagnostic_t* parameter_load;
   // Optional kernel payload valid only during the emit callback.
   const id4_pipeline_kernel_diagnostic_t* kernel;
   // Optional timing payload valid only during the emit callback.
