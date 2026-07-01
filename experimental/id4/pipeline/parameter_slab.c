@@ -1688,6 +1688,13 @@ typedef struct id4_pipeline_parameter_encode_window_t {
   bool planned;
   // True when queue_alloca has been submitted for staging_buffer.
   bool alloca_submitted;
+  // True when staging_slots owns reusable semaphores.
+  bool staging_slots_initialized;
+  // Next staging chunk ordinal used to choose a reusable staging slot.
+  iree_host_size_t next_chunk_ordinal;
+  // Reusable staging slot semaphore state for this target slab window.
+  id4_pipeline_parameter_encode_staging_slot_t
+      staging_slots[ID4_PIPELINE_PARAMETER_ENCODER_STAGING_SLOT_COUNT];
   // Byte length required by one staging slot across all encoded groups.
   iree_device_size_t staging_slot_byte_length;
   // Byte length allocated for all staging slots.
@@ -1905,8 +1912,7 @@ static iree_status_t id4_pipeline_parameter_encode_window_allocate(
     iree_string_view_t stage_name, iree_hal_semaphore_list_t wait_list,
     id4_pipeline_diagnostics_sink_t* diagnostics_sink,
     bool emits_issue_window_diagnostic,
-    id4_pipeline_parameter_encode_window_t* window, bool* out_allocated_now) {
-  *out_allocated_now = false;
+    id4_pipeline_parameter_encode_window_t* window) {
   if (window->alloca_submitted) return iree_ok_status();
   if (!window->planned || window->staging_total_byte_length == 0) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
@@ -1916,6 +1922,11 @@ static iree_status_t id4_pipeline_parameter_encode_window_allocate(
   IREE_RETURN_IF_ERROR(id4_pipeline_parameter_create_semaphore(
       load->device, load->queue_affinity, &window->staging_ready_semaphore));
   window->staging_ready_payload_value = 1;
+  if (!window->staging_slots_initialized) {
+    IREE_RETURN_IF_ERROR(id4_pipeline_parameter_create_staging_slot_semaphores(
+        load->device, load->queue_affinity, window->staging_slots));
+    window->staging_slots_initialized = true;
+  }
 
   iree_hal_buffer_params_t staging_params = {0};
   staging_params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
@@ -1936,7 +1947,6 @@ static iree_status_t id4_pipeline_parameter_encode_window_allocate(
       /*pool=*/NULL, staging_params, window->staging_total_byte_length,
       IREE_HAL_ALLOCA_FLAG_NONE, &window->staging_buffer));
   window->alloca_submitted = true;
-  *out_allocated_now = true;
 
   iree_hal_semaphore_list_t cleanup_wait_list =
       id4_pipeline_parameter_one_semaphore_list(
@@ -1967,6 +1977,8 @@ static void id4_pipeline_parameter_encode_window_context_deinitialize(
       id4_pipeline_parameter_encode_window_t* window = &context->windows[i];
       iree_hal_semaphore_list_release(
           id4_pipeline_parameter_encode_window_cleanup_wait_list(window));
+      id4_pipeline_parameter_release_staging_slot_semaphores(
+          window->staging_slots);
       iree_hal_buffer_release(window->staging_buffer);
       iree_hal_semaphore_release(window->cleanup_semaphore);
       iree_hal_semaphore_release(window->staging_ready_semaphore);
@@ -2020,7 +2032,6 @@ static iree_status_t id4_pipeline_parameter_slab_submit_encode_run(
 
   const bool uses_encode_window = encode_window_context != NULL;
   id4_pipeline_parameter_encode_window_t* encode_window = NULL;
-  bool encode_window_allocated_now = false;
   if (uses_encode_window) {
     if (load->slab_index >= encode_window_context->window_count) {
       return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
@@ -2051,7 +2062,9 @@ static iree_status_t id4_pipeline_parameter_slab_submit_encode_run(
       uses_encode_window ? &encode_window_context->prepared_encoder_count
                          : &fallback_prepared_encoder_count;
   id4_pipeline_parameter_encode_staging_slot_t
-      slots[ID4_PIPELINE_PARAMETER_ENCODER_STAGING_SLOT_COUNT] = {0};
+      fallback_slots[ID4_PIPELINE_PARAMETER_ENCODER_STAGING_SLOT_COUNT] = {0};
+  id4_pipeline_parameter_encode_staging_slot_t* slots =
+      uses_encode_window ? encode_window->staging_slots : fallback_slots;
   iree_hal_semaphore_t* cleanup_semaphore = NULL;
   iree_hal_buffer_t* staging_buffer = NULL;
   iree_status_t status = iree_ok_status();
@@ -2067,7 +2080,7 @@ static iree_status_t id4_pipeline_parameter_slab_submit_encode_run(
     status = id4_pipeline_parameter_create_semaphore(
         load->device, load->queue_affinity, &run_semaphore);
   }
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && !uses_encode_window) {
     status = id4_pipeline_parameter_create_staging_slot_semaphores(
         load->device, load->queue_affinity, slots);
   }
@@ -2103,8 +2116,7 @@ static iree_status_t id4_pipeline_parameter_slab_submit_encode_run(
     status = id4_pipeline_parameter_encode_window_allocate(
         load, group_context, stage_name, wait_semaphore_list,
         options->diagnostics_sink,
-        encode_window_context->emits_issue_window_diagnostic, encode_window,
-        &encode_window_allocated_now);
+        encode_window_context->emits_issue_window_diagnostic, encode_window);
     if (iree_status_is_ok(status)) {
       staging_buffer = encode_window->staging_buffer;
       staging_alloca_submitted = encode_window->alloca_submitted;
@@ -2124,7 +2136,15 @@ static iree_status_t id4_pipeline_parameter_slab_submit_encode_run(
   }
 
   iree_host_size_t step_offset = 0;
-  iree_host_size_t chunk_ordinal = 0;
+  iree_host_size_t chunk_ordinal =
+      uses_encode_window ? encode_window->next_chunk_ordinal : 0;
+  bool run_wait_slot_used[ID4_PIPELINE_PARAMETER_ENCODER_STAGING_SLOT_COUNT] = {
+      false};
+  iree_hal_semaphore_t*
+      run_wait_semaphores[ID4_PIPELINE_PARAMETER_ENCODER_STAGING_SLOT_COUNT] = {
+          0};
+  uint64_t run_wait_payload_values
+      [ID4_PIPELINE_PARAMETER_ENCODER_STAGING_SLOT_COUNT] = {0};
   while (step_offset < step_count && iree_status_is_ok(status)) {
     id4_pipeline_parameter_encode_step_staging_layout_t
         layouts[ID4_PIPELINE_PARAMETER_ENCODER_CHUNK_STEP_CAPACITY];
@@ -2164,9 +2184,7 @@ static iree_status_t id4_pipeline_parameter_slab_submit_encode_run(
     iree_hal_semaphore_list_t source_wait_list =
         iree_hal_semaphore_list_empty();
     if (slot_state->encode_payload_value == 0) {
-      if (uses_encode_window && !encode_window_allocated_now) {
-        source_wait_list = wait_semaphore_list;
-      } else if (uses_encode_window) {
+      if (uses_encode_window) {
         source_wait_semaphore = encode_window->staging_ready_semaphore;
         source_wait_payload_value = encode_window->staging_ready_payload_value;
         source_wait_list = id4_pipeline_parameter_one_semaphore_list(
@@ -2313,8 +2331,13 @@ static iree_status_t id4_pipeline_parameter_slab_submit_encode_run(
             id4_pipeline_parameter_encode_cleanup_waits_flatten(
                 slots, cleanup_wait_semaphores, cleanup_wait_payload_values);
         slot_state->encode_payload_value = encode_payload_value;
+        if (!run_wait_slot_used[slot]) run_wait_slot_used[slot] = true;
+        run_wait_semaphores[slot] = slot_state->encode_semaphore;
+        run_wait_payload_values[slot] = encode_payload_value;
         step_offset += chunk_step_count;
         ++chunk_ordinal;
+        if (uses_encode_window)
+          encode_window->next_chunk_ordinal = chunk_ordinal;
       }
     }
     iree_hal_command_buffer_release(command_buffer);
@@ -2323,6 +2346,19 @@ static iree_status_t id4_pipeline_parameter_slab_submit_encode_run(
   if (iree_status_is_ok(status)) {
     cleanup_wait_count = id4_pipeline_parameter_encode_cleanup_waits_flatten(
         slots, cleanup_wait_semaphores, cleanup_wait_payload_values);
+    iree_hal_semaphore_t* group_wait_semaphores
+        [ID4_PIPELINE_PARAMETER_ENCODER_STAGING_SLOT_COUNT] = {0};
+    uint64_t group_wait_payload_values
+        [ID4_PIPELINE_PARAMETER_ENCODER_STAGING_SLOT_COUNT] = {0};
+    iree_host_size_t group_wait_count = 0;
+    for (iree_host_size_t slot = 0;
+         slot < ID4_PIPELINE_PARAMETER_ENCODER_STAGING_SLOT_COUNT; ++slot) {
+      if (!run_wait_slot_used[slot]) continue;
+      group_wait_semaphores[group_wait_count] = run_wait_semaphores[slot];
+      group_wait_payload_values[group_wait_count] =
+          run_wait_payload_values[slot];
+      ++group_wait_count;
+    }
     if (cleanup_wait_count == 0) {
       if (uses_encode_window) {
         cleanup_wait_semaphores[0] = encode_window->staging_ready_semaphore;
@@ -2334,21 +2370,35 @@ static iree_status_t id4_pipeline_parameter_slab_submit_encode_run(
       }
       cleanup_wait_count = 1;
     }
-    iree_hal_semaphore_list_t run_complete_wait_list =
+    if (group_wait_count == 0) {
+      if (uses_encode_window) {
+        group_wait_semaphores[0] = encode_window->staging_ready_semaphore;
+        group_wait_payload_values[0] =
+            encode_window->staging_ready_payload_value;
+      } else {
+        group_wait_semaphores[0] = run_semaphore;
+        group_wait_payload_values[0] = staging_ready_payload_value;
+      }
+      group_wait_count = 1;
+    }
+    iree_hal_semaphore_list_t cleanup_wait_list =
         id4_pipeline_parameter_encode_cleanup_wait_list(
             cleanup_wait_count, cleanup_wait_semaphores,
             cleanup_wait_payload_values);
+    iree_hal_semaphore_list_t group_wait_list =
+        id4_pipeline_parameter_encode_cleanup_wait_list(
+            group_wait_count, group_wait_semaphores, group_wait_payload_values);
     if (uses_encode_window) {
       status = iree_hal_device_queue_barrier(
-          load->device, load->queue_affinity, run_complete_wait_list,
+          load->device, load->queue_affinity, group_wait_list,
           signal_semaphore_list, IREE_HAL_EXECUTE_FLAG_NONE);
       if (iree_status_is_ok(status)) {
         status = id4_pipeline_parameter_encode_window_set_cleanup_waits(
-            encode_window, signal_semaphore_list);
+            encode_window, cleanup_wait_list);
       }
     } else {
       status = iree_hal_device_queue_dealloca(
-          load->device, load->queue_affinity, run_complete_wait_list,
+          load->device, load->queue_affinity, cleanup_wait_list,
           signal_semaphore_list, staging_buffer, IREE_HAL_DEALLOCA_FLAG_NONE);
     }
   } else if (staging_buffer &&
@@ -2380,7 +2430,9 @@ static iree_status_t id4_pipeline_parameter_slab_submit_encode_run(
     iree_hal_buffer_release(staging_buffer);
   }
   iree_hal_semaphore_release(cleanup_semaphore);
-  id4_pipeline_parameter_release_staging_slot_semaphores(slots);
+  if (!uses_encode_window) {
+    id4_pipeline_parameter_release_staging_slot_semaphores(slots);
+  }
   iree_hal_semaphore_release(run_semaphore);
   if (!uses_encode_window) {
     id4_pipeline_parameter_release_prepared_encoders(
@@ -3045,7 +3097,7 @@ static iree_status_t id4_pipeline_parameter_slab_set_submit_eager_load_groups(
             step_index, load_step_count, load_steps);
     iree_hal_semaphore_list_t group_wait_list = options->wait_semaphore_list;
     if (id4_pipeline_parameter_load_group_is_encode(group) &&
-        encode_wait_semaphore) {
+        encode_wait_semaphore && !encode_window_context_initialized) {
       group_wait_list = id4_pipeline_parameter_one_semaphore_list(
           &encode_wait_semaphore, &encode_wait_payload_value);
     }
