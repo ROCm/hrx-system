@@ -381,6 +381,8 @@ TEST(ParameterSlabIntegration, EncodedFp8WeightsFeedBf16WmmaLinear) {
   id4_pipeline_parameter_slab_set_load_options_t load_options;
   std::memset(&load_options, 0, sizeof(load_options));
   load_options.structure_size = sizeof(load_options);
+  load_options.encoder_staging_chunk_byte_capacity =
+      ID4_PIPELINE_PARAMETER_ENCODER_DEFAULT_STAGING_CHUNK_BYTE_CAPACITY;
   load_options.provider = provider.get();
   load_options.kernel_library = kernel_library.get();
   load_options.kernel_cache = context.value.kernel_cache;
@@ -617,6 +619,8 @@ static void RunCompactLinearRhsTileEncoding(
   id4_pipeline_parameter_slab_set_load_options_t load_options;
   std::memset(&load_options, 0, sizeof(load_options));
   load_options.structure_size = sizeof(load_options);
+  load_options.encoder_staging_chunk_byte_capacity =
+      ID4_PIPELINE_PARAMETER_ENCODER_DEFAULT_STAGING_CHUNK_BYTE_CAPACITY;
   load_options.provider = provider;
   load_options.kernel_library = kernel_library;
   load_options.kernel_cache = context->value.kernel_cache;

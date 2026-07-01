@@ -756,6 +756,8 @@ static iree_status_t id4_smoke_stage_prepare(
   id4_pipeline_parameter_slab_set_load_options_t load_options;
   memset(&load_options, 0, sizeof(load_options));
   load_options.structure_size = sizeof(load_options);
+  load_options.encoder_staging_chunk_byte_capacity =
+      ID4_PIPELINE_PARAMETER_ENCODER_DEFAULT_STAGING_CHUNK_BYTE_CAPACITY;
   load_options.provider = options->parameter_provider;
   load_options.kernel_library = options->kernel_library;
   load_options.kernel_cache = stage->kernel_cache;

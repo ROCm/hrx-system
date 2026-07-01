@@ -408,6 +408,8 @@ static iree_status_t SmokeStagePrepare(
     id4_pipeline_parameter_slab_set_load_options_t load_options;
     std::memset(&load_options, 0, sizeof(load_options));
     load_options.structure_size = sizeof(load_options);
+    load_options.encoder_staging_chunk_byte_capacity =
+        ID4_PIPELINE_PARAMETER_ENCODER_DEFAULT_STAGING_CHUNK_BYTE_CAPACITY;
     load_options.provider = options->parameter_provider;
     load_options.wait_semaphore_list = options->wait_semaphore_list;
     load_options.signal_semaphore_list = options->signal_semaphore_list;

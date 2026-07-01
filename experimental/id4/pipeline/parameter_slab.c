@@ -24,10 +24,6 @@ enum {
   ID4_PIPELINE_PARAMETER_ENCODER_LINEAR_CONFIG_COUNT = 2,
 };
 
-static const iree_device_size_t
-    ID4_PIPELINE_PARAMETER_ENCODER_STAGING_CHUNK_BYTE_CAPACITY =
-        512ull * 1024ull * 1024ull;
-
 static iree_status_t id4_pipeline_parameter_add_device_size(
     iree_device_size_t value, iree_device_size_t* inout_total,
     const char* name) {
@@ -680,6 +676,12 @@ static iree_status_t id4_pipeline_parameter_slab_set_load_validate_options(
         IREE_STATUS_INVALID_ARGUMENT,
         "parameter slab encoded loading requires a HAL executable cache");
   }
+  if (requires_encoder && options->encoder_staging_chunk_byte_capacity == 0) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "parameter slab encoded loading requires a nonzero staging chunk byte "
+        "capacity");
+  }
   IREE_RETURN_IF_ERROR(id4_pipeline_parameter_slab_validate_semaphore_list(
       options->wait_semaphore_list, IREE_SV("parameter slab wait")));
   IREE_RETURN_IF_ERROR(id4_pipeline_parameter_slab_validate_semaphore_list(
@@ -1068,6 +1070,7 @@ static iree_status_t id4_pipeline_parameter_encode_step_staging_layout(
 static iree_status_t id4_pipeline_parameter_encode_plan_chunk(
     iree_host_size_t step_count,
     const id4_pipeline_parameter_load_step_t* steps,
+    iree_device_size_t chunk_byte_capacity,
     id4_pipeline_parameter_encode_step_staging_layout_t* out_layouts,
     iree_host_size_t* out_chunk_step_count,
     iree_device_size_t* out_chunk_byte_length) {
@@ -1080,9 +1083,15 @@ static iree_status_t id4_pipeline_parameter_encode_plan_chunk(
     id4_pipeline_parameter_encode_step_staging_layout_t layout;
     IREE_RETURN_IF_ERROR(id4_pipeline_parameter_encode_step_staging_layout(
         &steps[i], byte_length, &layout));
-    if (i != 0 &&
-        layout.end_offset >
-            ID4_PIPELINE_PARAMETER_ENCODER_STAGING_CHUNK_BYTE_CAPACITY) {
+    if (layout.end_offset > chunk_byte_capacity) {
+      if (i == 0) {
+        return iree_make_status(
+            IREE_STATUS_OUT_OF_RANGE,
+            "parameter load step '%.*s' requires %" PRIu64
+            " staging bytes, exceeding chunk capacity %" PRIu64,
+            (int)steps[i].name.size, steps[i].name.data,
+            (uint64_t)layout.end_offset, (uint64_t)chunk_byte_capacity);
+      }
       break;
     }
     if (out_layouts) out_layouts[i] = layout;
@@ -1184,6 +1193,7 @@ typedef struct id4_pipeline_parameter_encode_run_statistics_t {
 static iree_status_t id4_pipeline_parameter_encode_run_collect_statistics(
     const id4_pipeline_parameter_slab_load_t* load,
     const id4_pipeline_parameter_load_step_t* steps, iree_host_size_t count,
+    iree_device_size_t chunk_byte_capacity,
     id4_pipeline_parameter_encode_run_statistics_t* out_statistics) {
   memset(out_statistics, 0, sizeof(*out_statistics));
   out_statistics->encoder_dispatch_count = count;
@@ -1193,7 +1203,8 @@ static iree_status_t id4_pipeline_parameter_encode_run_collect_statistics(
     iree_host_size_t chunk_step_count = 0;
     iree_device_size_t chunk_byte_length = 0;
     IREE_RETURN_IF_ERROR(id4_pipeline_parameter_encode_plan_chunk(
-        count - i, &steps[i], layouts, &chunk_step_count, &chunk_byte_length));
+        count - i, &steps[i], chunk_byte_capacity, layouts, &chunk_step_count,
+        &chunk_byte_length));
     if (chunk_step_count == 0) {
       return iree_make_status(
           IREE_STATUS_INTERNAL,
@@ -1429,7 +1440,8 @@ static iree_status_t id4_pipeline_parameter_slab_submit_encode_run(
     iree_hal_semaphore_list_t signal_semaphore_list) {
   id4_pipeline_parameter_encode_run_statistics_t statistics;
   IREE_RETURN_IF_ERROR(id4_pipeline_parameter_encode_run_collect_statistics(
-      load, steps, step_count, &statistics));
+      load, steps, step_count, options->encoder_staging_chunk_byte_capacity,
+      &statistics));
   const iree_device_size_t staging_slot_byte_length =
       statistics.staging_slot_byte_length;
   iree_device_size_t staging_byte_length = 0;
@@ -1507,7 +1519,8 @@ static iree_status_t id4_pipeline_parameter_slab_submit_encode_run(
     iree_host_size_t chunk_step_count = 0;
     iree_device_size_t chunk_byte_length = 0;
     status = id4_pipeline_parameter_encode_plan_chunk(
-        step_count - step_offset, &steps[step_offset], layouts,
+        step_count - step_offset, &steps[step_offset],
+        options->encoder_staging_chunk_byte_capacity, layouts,
         &chunk_step_count, &chunk_byte_length);
     if (!iree_status_is_ok(status)) break;
     if (chunk_step_count == 0) {

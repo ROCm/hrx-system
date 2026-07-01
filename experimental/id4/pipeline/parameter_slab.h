@@ -111,6 +111,11 @@ typedef enum id4_pipeline_parameter_load_step_kind_e {
       4u,
 } id4_pipeline_parameter_load_step_kind_e;
 
+// Production staging chunk byte budget for prepare-time parameter encoders.
+static const iree_device_size_t
+    ID4_PIPELINE_PARAMETER_ENCODER_DEFAULT_STAGING_CHUNK_BYTE_CAPACITY =
+        1024ull * 1024ull * 1024ull;
+
 // Provider source tensor consumed by a parameter load step.
 typedef struct id4_pipeline_parameter_load_source_t {
   // Provider scope containing the source tensor.
@@ -338,6 +343,8 @@ typedef struct id4_pipeline_parameter_slab_set_load_options_t {
   iree_hal_executable_cache_t* executable_cache;
   // HAL command-buffer mode used by prepare-time encoder dispatches.
   iree_hal_command_buffer_mode_t command_buffer_mode;
+  // Maximum source bytes staged in one encoder chunk.
+  iree_device_size_t encoder_staging_chunk_byte_capacity;
   // Diagnostic artifact classes requested while JITing encoder kernels.
   id4_pipeline_kernel_diagnostic_artifact_flags_t diagnostic_artifact_flags;
   // Semaphores that all parameter loading waits on.
