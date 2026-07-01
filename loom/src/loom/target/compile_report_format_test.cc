@@ -382,6 +382,7 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
               /*.function_name=*/IREE_SVL("branchy"),
               /*.source_op_name=*/IREE_SVL("vector.load"),
               /*.source_op_kind=*/43,
+              /*.source_root_name=*/IREE_SVL("lhs"),
               /*.memory_space=*/IREE_SVL("workgroup"),
               /*.operation_kind=*/IREE_SVL("load"),
               /*.packet_key=*/IREE_SVL("amdgpu.ds_read2_b32"),
@@ -1046,6 +1047,17 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
                         "vector_packets=1 source_lanes=2 source_bytes=8 "
                         "contiguous_vector_packets=0 "
                         "strided_vector_packets=1 "
+                        "unknown_stride_vector_packets=0 roots=1"),
+                0),
+            IREE_STRING_VIEW_NPOS);
+  EXPECT_NE(iree_string_view_find(
+                output,
+                IREE_SV("source_low_memory_root[0] function=branchy "
+                        "source_root=lhs memory_space=workgroup packets=1 "
+                        "loads=1 stores=0 scalar_packets=0 vector_packets=1 "
+                        "source_lanes=2 source_bytes=8 read_bytes=8 "
+                        "write_bytes=0 contiguous_vector_packets=0 "
+                        "strided_vector_packets=1 "
                         "unknown_stride_vector_packets=0"),
                 0),
             IREE_STRING_VIEW_NPOS);
@@ -1064,6 +1076,7 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
                 IREE_SV("source_low_memory[0] function=branchy "
                         "source_op=vector.load memory_space=workgroup "
                         "operation=load packet=amdgpu.ds_read2_b32 "
+                        "source_root=lhs "
                         "strategy=ds_2addr_bank_report "
                         "address_form=ds_2addr dynamic_term_kind=vaddr "
                         "fallback_reason=cross_wave_workgroup "
@@ -1498,7 +1511,18 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
                         "\"source_byte_count\":8,"
                         "\"contiguous_vector_packet_count\":0,"
                         "\"strided_vector_packet_count\":1,"
-                        "\"unknown_stride_vector_packet_count\":0}"),
+                        "\"unknown_stride_vector_packet_count\":0,"
+                        "\"root_count\":1,\"roots\":[{\"index\":0,"
+                        "\"function\":\"branchy\",\"source_root\":\"lhs\","
+                        "\"memory_space\":\"workgroup\",\"packet_count\":1,"
+                        "\"load_packet_count\":1,\"store_packet_count\":0,"
+                        "\"scalar_packet_count\":0,"
+                        "\"vector_packet_count\":1,"
+                        "\"source_lane_count\":2,\"source_byte_count\":8,"
+                        "\"read_byte_count\":8,\"write_byte_count\":0,"
+                        "\"contiguous_vector_packet_count\":0,"
+                        "\"strided_vector_packet_count\":1,"
+                        "\"unknown_stride_vector_packet_count\":0}]}"),
                 0),
             IREE_STRING_VIEW_NPOS);
   EXPECT_NE(
@@ -1514,7 +1538,8 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
                 output,
                 IREE_SV("\"memory_rows\":[{\"index\":0,\"function\":"
                         "\"branchy\",\"source_op\":\"vector.load\","
-                        "\"source_op_kind\":43,\"memory_space\":\"workgroup\","
+                        "\"source_op_kind\":43,\"source_root\":\"lhs\","
+                        "\"memory_space\":\"workgroup\","
                         "\"operation\":\"load\",\"packet\":"
                         "\"amdgpu.ds_read2_b32\","
                         "\"strategy\":\"ds_2addr_bank_report\","

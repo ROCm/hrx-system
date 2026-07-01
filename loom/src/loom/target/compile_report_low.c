@@ -2193,6 +2193,7 @@ iree_status_t loom_target_compile_report_record_low_lowering(
         .function_name = source_row->function_name,
         .source_op_name = source_row->source_op_name,
         .source_op_kind = source_row->source_op_kind,
+        .source_root_name = source_row->source_root_name,
         .memory_space = source_row->memory_space,
         .operation_kind = source_row->operation_kind,
         .packet_key = source_row->packet_key,

@@ -10,6 +10,7 @@
 
 #include "loom/ir/attribute.h"
 #include "loom/ir/context.h"
+#include "loom/ir/module.h"
 #include "loom/ir/scalar_type.h"
 #include "loom/ir/types.h"
 #include "loom/ops/buffer/ops.h"
@@ -3814,6 +3815,8 @@ static iree_status_t loom_amdgpu_record_fragment_memory_packet(
       .source_op_name =
           loom_op_name(loom_low_lower_context_module(context), source_op),
       .source_op_kind = source_op->kind,
+      .source_root_name = loom_module_value_name(
+          loom_low_lower_context_module(context), plan->source.root_value_id),
       .memory_space = loom_amdgpu_memory_space_name(plan->source.memory_space),
       .operation_kind = loom_amdgpu_memory_operation_name(plan->operation_kind),
       .packet_key = packet_key,
