@@ -1999,6 +1999,8 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
                         "\"contiguous_vector_packet_count\":0,"
                         "\"strided_vector_packet_count\":1,"
                         "\"unknown_stride_vector_packet_count\":0,"
+                        "\"dispatch_issued\":{\"read_bytes\":32768,"
+                        "\"write_bytes\":0,\"total_bytes\":32768},"
                         "\"root_count\":1,\"roots\":[{\"index\":0,"
                         "\"function\":\"branchy\",\"source_root\":\"lhs\","
                         "\"source_root_argument_index\":0,"
@@ -2014,7 +2016,9 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
                         "\"issued_write_unknown_width_count\":0,"
                         "\"contiguous_vector_packet_count\":0,"
                         "\"strided_vector_packet_count\":1,"
-                        "\"unknown_stride_vector_packet_count\":0}],"
+                        "\"unknown_stride_vector_packet_count\":0,"
+                        "\"dispatch_issued\":{\"read_bytes\":32768,"
+                        "\"write_bytes\":0,\"total_bytes\":32768}}],"
                         "\"argument_count\":1,\"arguments\":[{\"index\":0,"
                         "\"function\":\"branchy\","
                         "\"source_root_argument_index\":0,"
@@ -2030,7 +2034,9 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
                         "\"issued_write_unknown_width_count\":0,"
                         "\"contiguous_vector_packet_count\":0,"
                         "\"strided_vector_packet_count\":1,"
-                        "\"unknown_stride_vector_packet_count\":0}],"
+                        "\"unknown_stride_vector_packet_count\":0,"
+                        "\"dispatch_issued\":{\"read_bytes\":32768,"
+                        "\"write_bytes\":0,\"total_bytes\":32768}}],"
                         "\"strategy_count\":1,\"strategies\":[{\"index\":0,"
                         "\"function\":\"branchy\","
                         "\"memory_space\":\"workgroup\","
@@ -2055,7 +2061,9 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
                         "\"issued_write_unknown_width_count\":0,"
                         "\"contiguous_vector_packet_count\":0,"
                         "\"strided_vector_packet_count\":1,"
-                        "\"unknown_stride_vector_packet_count\":0}]}"),
+                        "\"unknown_stride_vector_packet_count\":0,"
+                        "\"dispatch_issued\":{\"read_bytes\":32768,"
+                        "\"write_bytes\":0,\"total_bytes\":32768}}]}"),
                 0),
             IREE_STRING_VIEW_NPOS);
   EXPECT_NE(
