@@ -301,7 +301,7 @@ iree_status_t loom_kernel_launch_config_evaluate(
         &fact_owner, module,
         loom_pass_value_fact_scope_region_for_target(
             function, loom_kernel_def_config(symbol->defining_op),
-            symbol->defining_op, target_bundle),
+            symbol->defining_op, target_bundle, NULL),
         &fact_table);
   }
   if (iree_status_is_ok(status) &&

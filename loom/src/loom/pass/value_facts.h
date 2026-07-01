@@ -53,6 +53,9 @@ typedef struct loom_pass_value_fact_scope_t {
 
   // Optional target bundle for target-sensitive fact inference.
   const loom_target_bundle_t* target_bundle;
+
+  // Optional target-family-owned immutable payload paired with target_bundle.
+  const void* target_data;
 } loom_pass_value_fact_scope_t;
 
 static inline loom_pass_value_fact_scope_t loom_pass_value_fact_scope_none(
@@ -72,11 +75,13 @@ static inline loom_pass_value_fact_scope_t loom_pass_value_fact_scope_function(
 
 static inline loom_pass_value_fact_scope_t
 loom_pass_value_fact_scope_function_for_target(
-    loom_func_like_t function, const loom_target_bundle_t* target_bundle) {
+    loom_func_like_t function, const loom_target_bundle_t* target_bundle,
+    const void* target_data) {
   loom_pass_value_fact_scope_t scope = {LOOM_PASS_VALUE_FACT_SCOPE_NONE};
   scope.kind = LOOM_PASS_VALUE_FACT_SCOPE_FUNCTION;
   scope.function = function;
   scope.target_bundle = target_bundle;
+  scope.target_data = target_data;
   return scope;
 }
 
@@ -93,13 +98,14 @@ static inline loom_pass_value_fact_scope_t loom_pass_value_fact_scope_region(
 static inline loom_pass_value_fact_scope_t
 loom_pass_value_fact_scope_region_for_target(
     loom_func_like_t function, loom_region_t* region, loom_op_t* parent_op,
-    const loom_target_bundle_t* target_bundle) {
+    const loom_target_bundle_t* target_bundle, const void* target_data) {
   loom_pass_value_fact_scope_t scope = {LOOM_PASS_VALUE_FACT_SCOPE_NONE};
   scope.kind = LOOM_PASS_VALUE_FACT_SCOPE_REGION;
   scope.function = function;
   scope.region = region;
   scope.parent_op = parent_op;
   scope.target_bundle = target_bundle;
+  scope.target_data = target_data;
   return scope;
 }
 

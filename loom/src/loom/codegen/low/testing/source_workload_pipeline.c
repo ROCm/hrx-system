@@ -211,7 +211,8 @@ iree_status_t loom_low_source_workload_run_pipeline(
       status = loom_pass_value_fact_owner_acquire(
           &value_facts, module,
           loom_pass_value_fact_scope_function_for_target(
-              selection->func, selection->target_bundle),
+              selection->func, selection->target_bundle,
+              selection->target_data),
           &fact_table);
       if (!iree_status_is_ok(status)) {
         break;

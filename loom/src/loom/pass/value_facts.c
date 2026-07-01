@@ -13,7 +13,8 @@
 
 static bool loom_pass_value_fact_scope_equal(loom_pass_value_fact_scope_t lhs,
                                              loom_pass_value_fact_scope_t rhs) {
-  if (lhs.kind != rhs.kind || lhs.target_bundle != rhs.target_bundle) {
+  if (lhs.kind != rhs.kind || lhs.target_bundle != rhs.target_bundle ||
+      lhs.target_data != rhs.target_data) {
     return false;
   }
   switch (lhs.kind) {
@@ -133,6 +134,7 @@ iree_status_t loom_pass_value_fact_owner_prepare(
   IREE_RETURN_IF_ERROR(loom_pass_value_fact_owner_ensure_table(owner, module));
   loom_pass_value_fact_owner_invalidate(owner);
   owner->table.context.target_bundle = scope.target_bundle;
+  owner->table.context.target_data = scope.target_data;
   *out_table = &owner->table;
   return iree_ok_status();
 }

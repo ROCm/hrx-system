@@ -345,7 +345,7 @@ iree_status_t loom_low_source_to_low_run(loom_pass_t* pass,
     status = loom_pass_value_facts_acquire(
         pass, module,
         loom_pass_value_fact_scope_function_for_target(
-            selection->func, selection->target_bundle),
+            selection->func, selection->target_bundle, selection->target_data),
         &fact_table);
     if (!iree_status_is_ok(status)) break;
     const loom_low_lower_options_t lower_options = {
