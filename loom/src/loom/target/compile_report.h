@@ -965,6 +965,8 @@ typedef struct loom_target_compile_report_source_low_memory_row_t {
   uint32_t source_op_kind;
   // Named source memory root selected by value facts, if available.
   iree_string_view_t source_root_name;
+  // Source function entry argument index for the memory root, or UINT16_MAX.
+  uint16_t source_root_argument_index;
   // Target-independent memory-space key selected by the target.
   iree_string_view_t memory_space;
   // Source memory operation kind selected by the target.
@@ -1049,6 +1051,8 @@ typedef struct loom_target_compile_report_source_low_memory_root_summary_t {
   iree_string_view_t function_name;
   // Named source memory root selected by value facts.
   iree_string_view_t source_root_name;
+  // Source function entry argument index for the memory root, or UINT16_MAX.
+  uint16_t source_root_argument_index;
   // Target-independent memory-space key selected by the target.
   iree_string_view_t memory_space;
   // Number of emitted source-memory packets for this root.

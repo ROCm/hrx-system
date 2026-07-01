@@ -395,6 +395,8 @@ typedef struct loom_low_lower_memory_report_row_t {
   loom_op_kind_t source_op_kind;
   // Named source memory root selected by value facts, if available.
   iree_string_view_t source_root_name;
+  // Source function entry argument index for the memory root, or UINT16_MAX.
+  uint16_t source_root_argument_index;
   // Target-independent memory-space key selected by the target.
   iree_string_view_t memory_space;
   // Source memory operation kind selected by the target.
@@ -863,6 +865,12 @@ loom_builder_t* loom_low_lower_context_builder(
 // Returns the source function being lowered.
 loom_func_like_t loom_low_lower_context_source_function(
     const loom_low_lower_context_t* context);
+
+// Returns the source function entry argument index for |source_plan|'s memory
+// root, or UINT16_MAX when the root is not an entry argument.
+uint16_t loom_low_lower_source_memory_root_argument_index(
+    const loom_low_lower_context_t* context,
+    const loom_low_source_memory_access_plan_t* source_plan);
 
 // Returns the mapped ABI argument records for every source function argument.
 // Resource entries may not appear in the emitted low function signature; this

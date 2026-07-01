@@ -383,6 +383,7 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
               /*.source_op_name=*/IREE_SVL("vector.load"),
               /*.source_op_kind=*/43,
               /*.source_root_name=*/IREE_SVL("lhs"),
+              /*.source_root_argument_index=*/0,
               /*.memory_space=*/IREE_SVL("workgroup"),
               /*.operation_kind=*/IREE_SVL("load"),
               /*.packet_key=*/IREE_SVL("amdgpu.ds_read2_b32"),
@@ -1064,10 +1065,11 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
   EXPECT_NE(iree_string_view_find(
                 output,
                 IREE_SV("source_low_memory_root[0] function=branchy "
-                        "source_root=lhs memory_space=workgroup packets=1 "
-                        "loads=1 stores=0 scalar_packets=0 vector_packets=1 "
-                        "source_lanes=2 source_bytes=8 read_bytes=8 "
-                        "write_bytes=0 contiguous_vector_packets=0 "
+                        "source_root=lhs source_root_argument_index=0 "
+                        "memory_space=workgroup packets=1 loads=1 stores=0 "
+                        "scalar_packets=0 vector_packets=1 source_lanes=2 "
+                        "source_bytes=8 read_bytes=8 write_bytes=0 "
+                        "contiguous_vector_packets=0 "
                         "strided_vector_packets=1 "
                         "unknown_stride_vector_packets=0"),
                 0),
@@ -1087,7 +1089,7 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
                 IREE_SV("source_low_memory[0] function=branchy "
                         "source_op=vector.load memory_space=workgroup "
                         "operation=load packet=amdgpu.ds_read2_b32 "
-                        "source_root=lhs "
+                        "source_root=lhs source_root_argument_index=0 "
                         "strategy=ds_2addr_bank_report "
                         "storage={element_format:f8e4m3fn,scale_format:f32,"
                         "payload_packing:dense_lanes,"
@@ -1532,6 +1534,7 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
                         "\"unknown_stride_vector_packet_count\":0,"
                         "\"root_count\":1,\"roots\":[{\"index\":0,"
                         "\"function\":\"branchy\",\"source_root\":\"lhs\","
+                        "\"source_root_argument_index\":0,"
                         "\"memory_space\":\"workgroup\",\"packet_count\":1,"
                         "\"load_packet_count\":1,\"store_packet_count\":0,"
                         "\"scalar_packet_count\":0,"
@@ -1557,6 +1560,7 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
                 IREE_SV("\"memory_rows\":[{\"index\":0,\"function\":"
                         "\"branchy\",\"source_op\":\"vector.load\","
                         "\"source_op_kind\":43,\"source_root\":\"lhs\","
+                        "\"source_root_argument_index\":0,"
                         "\"memory_space\":\"workgroup\","
                         "\"operation\":\"load\",\"packet\":"
                         "\"amdgpu.ds_read2_b32\","
