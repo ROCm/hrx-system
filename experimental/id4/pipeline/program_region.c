@@ -858,6 +858,13 @@ iree_status_t id4_pipeline_program_region_lower(
       case ID4_PIPELINE_PROGRAM_OP_KIND_BARRIER:
         status = id4_pipeline_program_region_lower_barrier(&context);
         break;
+      case ID4_PIPELINE_PROGRAM_OP_KIND_REGION_CUT:
+        status = iree_make_status(
+            IREE_STATUS_UNIMPLEMENTED,
+            "program region cut %.*s requires multi-region lowering",
+            (int)op->payload.region_cut.name.size,
+            op->payload.region_cut.name.data);
+        break;
       case ID4_PIPELINE_PROGRAM_OP_KIND_TAP:
         if (id4_pipeline_program_region_captures_tap(options,
                                                      op->payload.tap.name)) {

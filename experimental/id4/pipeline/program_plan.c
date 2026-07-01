@@ -22,6 +22,8 @@ typedef struct id4_pipeline_program_plan_counts_t {
   iree_host_size_t dispatch_count;
   // Number of barrier operations in the program.
   iree_host_size_t barrier_count;
+  // Number of stage-region cut operations in the program.
+  iree_host_size_t region_cut_count;
   // Number of executable region operations in the program.
   iree_host_size_t region_operation_count;
   // Number of diagnostic tap operations in the program.
@@ -228,6 +230,9 @@ static id4_pipeline_program_plan_counts_t id4_pipeline_program_plan_count_ops(
       case ID4_PIPELINE_PROGRAM_OP_KIND_BARRIER:
         ++counts.barrier_count;
         ++counts.region_operation_count;
+        break;
+      case ID4_PIPELINE_PROGRAM_OP_KIND_REGION_CUT:
+        ++counts.region_cut_count;
         break;
       case ID4_PIPELINE_PROGRAM_OP_KIND_TAP:
         if (id4_pipeline_program_plan_tap_name_requested(
@@ -1080,6 +1085,15 @@ iree_status_t id4_pipeline_program_create_plan(
 
   id4_pipeline_program_plan_counts_t counts =
       id4_pipeline_program_plan_count_ops(options);
+  if (counts.region_cut_count != 0) {
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "program %.*s has %" PRIhsz
+        " region cuts but only single-region planning is implemented",
+        (int)id4_pipeline_program_name(options->program).size,
+        id4_pipeline_program_name(options->program).data,
+        counts.region_cut_count);
+  }
   IREE_RETURN_IF_ERROR(
       id4_pipeline_program_plan_validate_exports(options->program));
   IREE_RETURN_IF_ERROR(

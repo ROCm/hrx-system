@@ -71,6 +71,8 @@ typedef enum id4_pipeline_program_op_kind_e {
   ID4_PIPELINE_PROGRAM_OP_KIND_TAP = 7,
   // External initialized tensor exported by the stage after producer writes.
   ID4_PIPELINE_PROGRAM_OP_KIND_EXPORT = 8,
+  // Stage-region scheduling boundary between executable regions.
+  ID4_PIPELINE_PROGRAM_OP_KIND_REGION_CUT = 9,
 } id4_pipeline_program_op_kind_t;
 
 // Tensor access flags observed by a semantic dispatch.
@@ -235,6 +237,12 @@ typedef struct id4_pipeline_program_barrier_op_t {
   iree_string_view_t name;
 } id4_pipeline_program_barrier_op_t;
 
+// Stage-region cut operation payload.
+typedef struct id4_pipeline_program_region_cut_op_t {
+  // Stable cut name used for region diagnostics and scheduling.
+  iree_string_view_t name;
+} id4_pipeline_program_region_cut_op_t;
+
 // Diagnostic tap operation payload.
 typedef struct id4_pipeline_program_tap_op_t {
   // Stable tap name used for diagnostics and trace matching.
@@ -271,6 +279,8 @@ typedef struct id4_pipeline_program_op_t {
     id4_pipeline_program_dispatch_loom_op_t dispatch_loom;
     // Barrier operation payload.
     id4_pipeline_program_barrier_op_t barrier;
+    // Stage-region cut operation payload.
+    id4_pipeline_program_region_cut_op_t region_cut;
     // Diagnostic tap operation payload.
     id4_pipeline_program_tap_op_t tap;
     // Export operation payload.
@@ -385,6 +395,16 @@ typedef struct id4_pipeline_program_barrier_options_t {
   // Stable barrier name used for diagnostics.
   iree_string_view_t name;
 } id4_pipeline_program_barrier_options_t;
+
+// Options for authoring a stage-region cut.
+typedef struct id4_pipeline_program_region_cut_options_t {
+  // Size of this structure for versioning.
+  iree_host_size_t structure_size;
+  // Extension structure chain; must be NULL for now.
+  const void* next;
+  // Stable cut name used for region diagnostics and scheduling.
+  iree_string_view_t name;
+} id4_pipeline_program_region_cut_options_t;
 
 // Options for authoring a diagnostic tap.
 typedef struct id4_pipeline_program_tap_options_t {
@@ -614,6 +634,11 @@ iree_status_t id4_pipeline_program_dispatch_loom(
 iree_status_t id4_pipeline_program_barrier(
     id4_pipeline_program_builder_t* builder,
     const id4_pipeline_program_barrier_options_t* options);
+
+// Authors a stage-region scheduling cut.
+iree_status_t id4_pipeline_program_region_cut(
+    id4_pipeline_program_builder_t* builder,
+    const id4_pipeline_program_region_cut_options_t* options);
 
 // Authors a diagnostic tap for an initialized tensor.
 iree_status_t id4_pipeline_program_tap(

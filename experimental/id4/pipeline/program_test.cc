@@ -297,6 +297,35 @@ TEST(PipelineProgram, AuthorsProgramAndSealsImmutableCopies) {
   id4_pipeline_program_release(program);
 }
 
+TEST(PipelineProgram, AuthorsRegionCut) {
+  ProgramBuilderScope builder_scope;
+  id4_pipeline_program_builder_t* builder = builder_scope.builder();
+
+  id4_pipeline_program_region_cut_options_t cut_options = {
+      /*.structure_size=*/sizeof(cut_options),
+      /*.next=*/nullptr,
+      /*.name=*/IREE_SV("layer0.after_attention"),
+  };
+  IREE_ASSERT_OK(id4_pipeline_program_region_cut(builder, &cut_options));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_ALREADY_EXISTS,
+                        id4_pipeline_program_region_cut(builder, &cut_options));
+
+  id4_pipeline_program_t* program = nullptr;
+  IREE_ASSERT_OK(id4_pipeline_program_builder_seal(
+      builder, iree_allocator_system(), &program));
+  builder_scope.DestroyBuilder();
+
+  ASSERT_EQ(id4_pipeline_program_operation_count(program), 1u);
+  const id4_pipeline_program_op_t* cut =
+      id4_pipeline_program_operation_at(program, 0);
+  ASSERT_NE(cut, nullptr);
+  ASSERT_EQ(cut->kind, ID4_PIPELINE_PROGRAM_OP_KIND_REGION_CUT);
+  ExpectStringViewEqual(cut->payload.region_cut.name,
+                        IREE_SV("layer0.after_attention"));
+
+  id4_pipeline_program_release(program);
+}
+
 TEST(PipelineProgram, InternsRepeatedParameterDeclarations) {
   ProgramBuilderScope builder_scope;
   id4_pipeline_program_builder_t* builder = builder_scope.builder();

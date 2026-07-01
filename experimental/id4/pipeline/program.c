@@ -611,6 +611,10 @@ static void id4_pipeline_program_free_op(id4_pipeline_program_op_t* op,
       id4_pipeline_program_free_string(&op->payload.barrier.name,
                                        host_allocator);
       break;
+    case ID4_PIPELINE_PROGRAM_OP_KIND_REGION_CUT:
+      id4_pipeline_program_free_string(&op->payload.region_cut.name,
+                                       host_allocator);
+      break;
     case ID4_PIPELINE_PROGRAM_OP_KIND_TAP:
       id4_pipeline_program_free_string(&op->payload.tap.name, host_allocator);
       break;
@@ -695,6 +699,11 @@ static iree_status_t id4_pipeline_program_copy_op(
                                                 host_allocator,
                                                 &target->payload.barrier.name);
       break;
+    case ID4_PIPELINE_PROGRAM_OP_KIND_REGION_CUT:
+      status = id4_pipeline_program_copy_string(
+          source->payload.region_cut.name, host_allocator,
+          &target->payload.region_cut.name);
+      break;
     case ID4_PIPELINE_PROGRAM_OP_KIND_TAP:
       target->payload.tap.tensor = source->payload.tap.tensor;
       status = id4_pipeline_program_copy_string(
@@ -761,6 +770,9 @@ static bool id4_pipeline_program_builder_has_named_op(
         break;
       case ID4_PIPELINE_PROGRAM_OP_KIND_BARRIER:
         op_name = op->payload.barrier.name;
+        break;
+      case ID4_PIPELINE_PROGRAM_OP_KIND_REGION_CUT:
+        op_name = op->payload.region_cut.name;
         break;
       case ID4_PIPELINE_PROGRAM_OP_KIND_TAP:
         op_name = op->payload.tap.name;
@@ -1365,6 +1377,44 @@ iree_status_t id4_pipeline_program_barrier(
       .kind = ID4_PIPELINE_PROGRAM_OP_KIND_BARRIER,
       .ordinal = builder->operation_count,
       .payload.barrier.name = options->name,
+  };
+  return id4_pipeline_program_builder_append_op(builder, &op);
+}
+
+iree_status_t id4_pipeline_program_region_cut(
+    id4_pipeline_program_builder_t* builder,
+    const id4_pipeline_program_region_cut_options_t* options) {
+  if (!builder) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "program builder is required");
+  }
+  if (!options) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "program region cut options are required");
+  }
+  IREE_RETURN_IF_ERROR(id4_pipeline_program_validate_options_size(
+      options->structure_size, sizeof(*options),
+      IREE_SV("program region cut")));
+  if (options->next) {
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "program region cut extension structures are not supported");
+  }
+  if (iree_string_view_is_empty(options->name)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "program region cut name is required");
+  }
+  if (id4_pipeline_program_builder_has_named_op(
+          builder, ID4_PIPELINE_PROGRAM_OP_KIND_REGION_CUT, options->name)) {
+    return iree_make_status(IREE_STATUS_ALREADY_EXISTS,
+                            "program region cut %.*s already exists",
+                            (int)options->name.size, options->name.data);
+  }
+
+  id4_pipeline_program_op_t op = {
+      .kind = ID4_PIPELINE_PROGRAM_OP_KIND_REGION_CUT,
+      .ordinal = builder->operation_count,
+      .payload.region_cut.name = options->name,
   };
   return id4_pipeline_program_builder_append_op(builder, &op);
 }

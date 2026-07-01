@@ -224,6 +224,65 @@ static id4_pipeline_program_t* CreateLinearProgram() {
   return program;
 }
 
+static id4_pipeline_program_t* CreateRegionCutProgram() {
+  ProgramBuilderScope builder_scope;
+  id4_pipeline_program_builder_t* builder = builder_scope.builder();
+
+  id4_pipeline_program_tensor_t input = id4_pipeline_program_tensor_invalid();
+  id4_pipeline_program_import_tensor_options_t input_options = {
+      /*.structure_size=*/sizeof(input_options),
+      /*.next=*/nullptr,
+      /*.flags=*/ID4_PIPELINE_PROGRAM_IMPORT_TENSOR_FLAG_INITIALIZED,
+      /*.name=*/IREE_SV("hidden_states.input"),
+      /*.dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_F32,
+      /*.shape=*/id4_pipeline_program_make_shape_rank2(1, 4),
+  };
+  IREE_CHECK_OK(
+      id4_pipeline_program_import_tensor(builder, &input_options, &input));
+
+  id4_pipeline_program_tensor_t output = id4_pipeline_program_tensor_invalid();
+  id4_pipeline_program_import_tensor_options_t output_options = {
+      /*.structure_size=*/sizeof(output_options),
+      /*.next=*/nullptr,
+      /*.flags=*/0,
+      /*.name=*/IREE_SV("hidden_states.output"),
+      /*.dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_F32,
+      /*.shape=*/id4_pipeline_program_make_shape_rank2(1, 4),
+  };
+  IREE_CHECK_OK(
+      id4_pipeline_program_import_tensor(builder, &output_options, &output));
+
+  id4_pipeline_program_dispatch_binding_t bindings[] = {
+      id4_pipeline_program_read(input),
+      id4_pipeline_program_write(output),
+  };
+  id4_pipeline_program_dispatch_loom_options_t dispatch_options = {
+      /*.structure_size=*/sizeof(dispatch_options),
+      /*.next=*/nullptr,
+      /*.name=*/IREE_SV("entry.copy"),
+      /*.kernel=*/
+      id4_pipeline_make_kernel_ref(IREE_SV("test/copy"), IREE_SV("copy")),
+      /*.config_binding_count=*/0,
+      /*.config_bindings=*/nullptr,
+      /*.binding_count=*/IREE_ARRAYSIZE(bindings),
+      /*.bindings=*/bindings,
+  };
+  IREE_CHECK_OK(id4_pipeline_program_dispatch_loom(builder, &dispatch_options));
+
+  id4_pipeline_program_region_cut_options_t cut_options = {
+      /*.structure_size=*/sizeof(cut_options),
+      /*.next=*/nullptr,
+      /*.name=*/IREE_SV("entry.after_copy"),
+  };
+  IREE_CHECK_OK(id4_pipeline_program_region_cut(builder, &cut_options));
+
+  id4_pipeline_program_t* program = nullptr;
+  IREE_CHECK_OK(id4_pipeline_program_builder_seal(
+      builder, iree_allocator_system(), &program));
+  builder_scope.DestroyBuilder();
+  return program;
+}
+
 static id4_pipeline_program_t* CreateLocalReuseProgram() {
   ProgramBuilderScope builder_scope;
   id4_pipeline_program_builder_t* builder = builder_scope.builder();
@@ -653,6 +712,29 @@ TEST(PipelineProgramPlan, DerivesParameterKernelRegionAndTapPlans) {
   iree_string_builder_deinitialize(&json_builder);
 
   id4_pipeline_plan_release(plan);
+  iree_hal_device_group_release(device_group);
+  id4_pipeline_program_release(program);
+}
+
+TEST(PipelineProgramPlan, RejectsRegionCutsUntilMultiRegionPlanningExists) {
+  id4_pipeline_program_t* program = CreateRegionCutProgram();
+  iree_hal_device_group_t* device_group = CreateLocalSyncDeviceGroup();
+  id4_pipeline_device_placement_t placement = {
+      /*.role=*/IREE_SV("default"),
+      /*.device_index=*/0,
+      /*.queue_affinity=*/IREE_HAL_QUEUE_AFFINITY_ANY,
+  };
+  id4_pipeline_diagnostics_sink_t diagnostics_sink;
+  id4_pipeline_diagnostics_sink_initialize_ignore(&diagnostics_sink);
+  id4_pipeline_program_plan_options_t options =
+      MakePlanOptions(program, device_group, &placement, &diagnostics_sink);
+
+  id4_pipeline_plan_t* plan = nullptr;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_UNIMPLEMENTED,
+                        id4_pipeline_program_create_plan(
+                            &options, iree_allocator_system(), &plan));
+  EXPECT_EQ(plan, nullptr);
+
   iree_hal_device_group_release(device_group);
   id4_pipeline_program_release(program);
 }
