@@ -4494,26 +4494,7 @@ iree_status_t loom_amdgpu_lower_vector_fragment_store(
           context, plan->narrowed_result_scale_source, &low_scale));
       IREE_RETURN_IF_ERROR(loom_amdgpu_materialize_full_low_vgpr_b32(
           context, source_op, low_scale, &low_scale));
-      if (has_crosslane_packed_b16_store) {
-        const loom_amdgpu_fragment_memory_packet_plan_t* scale_packet = NULL;
-        for (uint16_t packet_index = 0; packet_index < plan->packet_count;
-             ++packet_index) {
-          const loom_amdgpu_fragment_memory_packet_plan_t* packet =
-              &plan->packets[packet_index];
-          if (iree_all_bits_set(
-                  packet->flags,
-                  LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_CROSSLANE_PACKED_B16_STORE)) {
-            scale_packet = packet;
-            break;
-          }
-        }
-        IREE_ASSERT_NE(scale_packet, NULL);
-        IREE_RETURN_IF_ERROR(
-            loom_amdgpu_emit_fragment_memory_crosslane_packed_b16_pair_register(
-                context, source_op, scale_packet, &crosslane_descriptor,
-                low_paired_lane_byte_offset, low_scale, vgpr_type,
-                &low_paired_scale));
-      }
+      low_paired_scale = low_scale;
     }
 
     loom_amdgpu_fragment_memory_pending_store_t
