@@ -108,8 +108,12 @@ struct id4_ideogram4_generation_plan_t {
 typedef enum id4_ideogram4_generation_stage_prepare_mode_e {
   // Retains stage parameter loading work for issue-time submission.
   ID4_IDEOGRAM4_GENERATION_STAGE_PREPARE_MODE_DEFER_PARAMETERS = 0,
-  // Submits stage parameter loading during stage-bundle preparation.
+  // Submits stage parameter loading during stage-bundle preparation and leaves
+  // the materialized slabs owned by the stage bundle.
   ID4_IDEOGRAM4_GENERATION_STAGE_PREPARE_MODE_MATERIALIZE_PARAMETERS = 1,
+  // Submits stage parameter loading during stage-bundle preparation and retains
+  // compatible materialized slabs in the session cache.
+  ID4_IDEOGRAM4_GENERATION_STAGE_PREPARE_MODE_RETAIN_PARAMETERS = 2,
 } id4_ideogram4_generation_stage_prepare_mode_t;
 
 typedef struct id4_ideogram4_generation_stage_descriptor_t {
@@ -612,6 +616,14 @@ id4_ideogram4_validate_generation_prepare_residency_options(
             "stage bundles");
       }
       return iree_ok_status();
+    case ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_PHASE_STAGE_BUNDLES:
+      if (resident_stage_mask != ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_NONE) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "Ideogram 4 phase-stage-bundle residency mode must not select "
+            "resident stage bundles");
+      }
+      return iree_ok_status();
     case ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_SELECTED_STAGE_BUNDLES:
       if (resident_stage_mask == ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_NONE) {
         return iree_make_status(
@@ -647,6 +659,14 @@ static iree_status_t id4_ideogram4_validate_generation_bundle_residency(
         return iree_make_status(
             IREE_STATUS_INVALID_ARGUMENT,
             "Ideogram 4 issue-phase generation bundle must not retain "
+            "resident stage bundles");
+      }
+      return iree_ok_status();
+    case ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_PHASE_STAGE_BUNDLES:
+      if (resident_stage_mask != ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_NONE) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "Ideogram 4 phase-stage-bundle generation bundle must not retain "
             "resident stage bundles");
       }
       return iree_ok_status();
@@ -1633,6 +1653,8 @@ id4_ideogram4_generation_normalized_resource_resident_stage_mask(
       return ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_ALL;
     case ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_SELECTED_STAGE_BUNDLES:
       return resident_stage_mask;
+    case ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_PHASE_STAGE_BUNDLES:
+    case ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_ISSUE_PHASES:
     default:
       return ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_NONE;
   }
@@ -2885,6 +2907,15 @@ static iree_status_t id4_ideogram4_validate_generation_issue_options(
                               " is invalid",
                               (uint32_t)options->issue_policy);
   }
+  if (options->issue_policy ==
+          ID4_IDEOGRAM4_GENERATION_ISSUE_POLICY_STAGE_SERIAL &&
+      bundle->residency_mode ==
+          ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_PHASE_STAGE_BUNDLES) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "Ideogram 4 phase-stage-bundle residency requires phase-concurrent "
+        "generation issue");
+  }
   if (!options->tokenizer) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
@@ -3450,13 +3481,19 @@ static iree_status_t id4_ideogram4_generation_prepare_stage_bundle(
           ID4_IDEOGRAM4_GENERATION_STAGE_PREPARE_MODE_DEFER_PARAMETERS;
   const bool materialize_parameter_slabs =
       has_parameter_slabs &&
+      (prepare_mode ==
+           ID4_IDEOGRAM4_GENERATION_STAGE_PREPARE_MODE_MATERIALIZE_PARAMETERS ||
+       prepare_mode ==
+           ID4_IDEOGRAM4_GENERATION_STAGE_PREPARE_MODE_RETAIN_PARAMETERS);
+  const bool retain_parameter_slabs =
+      materialize_parameter_slabs &&
       prepare_mode ==
-          ID4_IDEOGRAM4_GENERATION_STAGE_PREPARE_MODE_MATERIALIZE_PARAMETERS;
+          ID4_IDEOGRAM4_GENERATION_STAGE_PREPARE_MODE_RETAIN_PARAMETERS;
 
   id4_pipeline_parameter_slab_set_t* resident_parameter_slabs =
       bundle->session->resident_stage_parameter_slabs[stage_ordinal];
   const bool reuse_parameter_slabs =
-      materialize_parameter_slabs && resident_parameter_slabs != NULL;
+      retain_parameter_slabs && resident_parameter_slabs != NULL;
   if (reuse_parameter_slabs) {
     IREE_RETURN_IF_ERROR(id4_pipeline_plan_validate_parameter_slabs(
         slot->plan, resident_parameter_slabs));
@@ -3472,7 +3509,9 @@ static iree_status_t id4_ideogram4_generation_prepare_stage_bundle(
       prepare_mode !=
           ID4_IDEOGRAM4_GENERATION_STAGE_PREPARE_MODE_DEFER_PARAMETERS &&
       prepare_mode !=
-          ID4_IDEOGRAM4_GENERATION_STAGE_PREPARE_MODE_MATERIALIZE_PARAMETERS) {
+          ID4_IDEOGRAM4_GENERATION_STAGE_PREPARE_MODE_MATERIALIZE_PARAMETERS &&
+      prepare_mode !=
+          ID4_IDEOGRAM4_GENERATION_STAGE_PREPARE_MODE_RETAIN_PARAMETERS) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "Ideogram 4 generation stage prepare mode %" PRIu32
                             " is invalid",
@@ -3520,7 +3559,7 @@ static iree_status_t id4_ideogram4_generation_prepare_stage_bundle(
   prepare_options.diagnostics_sink = diagnostics_sink;
   iree_status_t status = id4_pipeline_stage_prepare(
       slot->stage, slot->plan, &prepare_options, out_stage_bundle);
-  if (iree_status_is_ok(status) && materialize_parameter_slabs &&
+  if (iree_status_is_ok(status) && retain_parameter_slabs &&
       !reuse_parameter_slabs) {
     id4_pipeline_parameter_slab_set_t* parameter_slabs =
         id4_pipeline_bundle_parameter_slabs(*out_stage_bundle);
@@ -3692,7 +3731,7 @@ static iree_status_t id4_ideogram4_generation_bundle_prepare_resident_stages(
     if (bundle->resident_stage_bundles[stage_ordinal]) continue;
     status = id4_ideogram4_generation_prepare_stage_bundle(
         bundle, stage_ordinal,
-        ID4_IDEOGRAM4_GENERATION_STAGE_PREPARE_MODE_MATERIALIZE_PARAMETERS,
+        ID4_IDEOGRAM4_GENERATION_STAGE_PREPARE_MODE_RETAIN_PARAMETERS,
         options->wait_semaphore_list, options->kernel_diagnostic_artifact_flags,
         options->diagnostics_sink,
         &bundle->resident_stage_bundles[stage_ordinal]);
@@ -3737,6 +3776,10 @@ iree_status_t id4_ideogram4_session_prepare_generation(
         status =
             id4_ideogram4_generation_bundle_signal_prepared(bundle, options);
         break;
+      case ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_PHASE_STAGE_BUNDLES:
+        status =
+            id4_ideogram4_generation_bundle_signal_prepared(bundle, options);
+        break;
       case ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_SELECTED_STAGE_BUNDLES:
         status = id4_ideogram4_generation_bundle_prepare_resident_stages(
             bundle, options);
@@ -3777,7 +3820,7 @@ static iree_status_t id4_ideogram4_generation_acquire_stage_bundle_ref(
     if (!bundle->resident_stage_bundles[stage_ordinal]) {
       IREE_RETURN_IF_ERROR(id4_ideogram4_generation_prepare_stage_bundle(
           bundle, stage_ordinal,
-          ID4_IDEOGRAM4_GENERATION_STAGE_PREPARE_MODE_MATERIALIZE_PARAMETERS,
+          ID4_IDEOGRAM4_GENERATION_STAGE_PREPARE_MODE_RETAIN_PARAMETERS,
           wait_semaphore_list, kernel_diagnostic_artifact_flags,
           diagnostics_sink, &bundle->resident_stage_bundles[stage_ordinal]));
     }
@@ -3786,10 +3829,14 @@ static iree_status_t id4_ideogram4_generation_acquire_stage_bundle_ref(
     out_stage_bundle_ref->owns_bundle = false;
     return iree_ok_status();
   }
+  const id4_ideogram4_generation_stage_prepare_mode_t prepare_mode =
+      bundle->residency_mode ==
+              ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_PHASE_STAGE_BUNDLES
+          ? ID4_IDEOGRAM4_GENERATION_STAGE_PREPARE_MODE_MATERIALIZE_PARAMETERS
+          : ID4_IDEOGRAM4_GENERATION_STAGE_PREPARE_MODE_DEFER_PARAMETERS;
   iree_status_t status = id4_ideogram4_generation_prepare_stage_bundle(
-      bundle, stage_ordinal,
-      ID4_IDEOGRAM4_GENERATION_STAGE_PREPARE_MODE_DEFER_PARAMETERS,
-      wait_semaphore_list, kernel_diagnostic_artifact_flags, diagnostics_sink,
+      bundle, stage_ordinal, prepare_mode, wait_semaphore_list,
+      kernel_diagnostic_artifact_flags, diagnostics_sink,
       &out_stage_bundle_ref->bundle);
   out_stage_bundle_ref->owns_bundle = iree_status_is_ok(status);
   return status;

@@ -205,10 +205,13 @@ typedef enum id4_ideogram4_generation_residency_mode_e {
   ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_INVALID = 0,
   // Prepare heavy stage bundles at issue-time phase boundaries.
   ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_ISSUE_PHASES = 1,
+  // Prepare materialized stage bundles at phase boundaries and release them
+  // after each phase.
+  ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_PHASE_STAGE_BUNDLES = 2,
   // Prepare and retain selected coarse stage bundles.
-  ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_SELECTED_STAGE_BUNDLES = 2,
+  ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_SELECTED_STAGE_BUNDLES = 3,
   // Prepare and retain every coarse stage bundle in the generation bundle.
-  ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_ALL_STAGE_BUNDLES = 3,
+  ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_ALL_STAGE_BUNDLES = 4,
 } id4_ideogram4_generation_residency_mode_e;
 
 // Bitmask selecting high-level generation phases for phase issue.
@@ -577,10 +580,11 @@ iree_status_t id4_ideogram4_generation_plan_format_json(
 // Prepares reusable generation state for |plan|.
 //
 // |options->residency_mode| selects whether heavy stage bundles are prepared at
-// issue-time phase boundaries, lazily retained by selected coarse stage
-// bundles, or all retained by the prepared generation bundle. Selected resident
-// stage bundles remove repeated parameter loading after their first preparation
-// while allowing unrelated stages to release memory first.
+// issue-time phase boundaries, materialized and released at semantic phase
+// boundaries, retained by selected coarse stage bundles, or all retained by the
+// prepared generation bundle. Selected resident stage bundles remove repeated
+// parameter loading after their first preparation while allowing unrelated
+// stages to release memory first.
 iree_status_t id4_ideogram4_session_prepare_generation(
     id4_ideogram4_session_t* session,
     const id4_ideogram4_generation_plan_t* plan,

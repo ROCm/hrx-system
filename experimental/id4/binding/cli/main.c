@@ -77,7 +77,8 @@ IREE_FLAG(bool, dry_run, false,
           "or issuing device work.");
 IREE_FLAG(string, generation_residency, "issue_phases",
           "Generation residency mode: issue_phases, "
-          "selected_stage_bundles, all_stage_bundles, or memory_budgeted.");
+          "phase_stage_bundles, selected_stage_bundles, all_stage_bundles, "
+          "or memory_budgeted.");
 IREE_FLAG(int64_t, generation_residency_budget, 0,
           "Logical live byte budget for "
           "--generation_residency=memory_budgeted.");
@@ -118,12 +119,14 @@ typedef enum id4_cli_generation_issue_mode_e {
 typedef enum id4_cli_generation_residency_request_mode_e {
   // Prepare stage bundles at issue-time phase boundaries.
   ID4_CLI_GENERATION_RESIDENCY_REQUEST_ISSUE_PHASES = 0,
+  // Prepare materialized stage bundles at phase boundaries.
+  ID4_CLI_GENERATION_RESIDENCY_REQUEST_PHASE_STAGE_BUNDLES = 1,
   // Retain exactly the user-selected coarse stage bundles.
-  ID4_CLI_GENERATION_RESIDENCY_REQUEST_SELECTED_STAGE_BUNDLES = 1,
+  ID4_CLI_GENERATION_RESIDENCY_REQUEST_SELECTED_STAGE_BUNDLES = 2,
   // Retain every coarse stage bundle.
-  ID4_CLI_GENERATION_RESIDENCY_REQUEST_ALL_STAGE_BUNDLES = 2,
+  ID4_CLI_GENERATION_RESIDENCY_REQUEST_ALL_STAGE_BUNDLES = 3,
   // Select retained stage bundles from candidates under a memory budget.
-  ID4_CLI_GENERATION_RESIDENCY_REQUEST_MEMORY_BUDGETED = 3,
+  ID4_CLI_GENERATION_RESIDENCY_REQUEST_MEMORY_BUDGETED = 4,
 } id4_cli_generation_residency_request_mode_t;
 
 static iree_status_t id4_cli_load_tokenizer(iree_string_view_t tokenizer_path,
@@ -442,6 +445,10 @@ static iree_status_t id4_cli_parse_generation_residency_request_mode(
     *out_mode = ID4_CLI_GENERATION_RESIDENCY_REQUEST_ISSUE_PHASES;
     return iree_ok_status();
   }
+  if (iree_string_view_equal(value, IREE_SV("phase_stage_bundles"))) {
+    *out_mode = ID4_CLI_GENERATION_RESIDENCY_REQUEST_PHASE_STAGE_BUNDLES;
+    return iree_ok_status();
+  }
   if (iree_string_view_equal(value, IREE_SV("selected_stage_bundles"))) {
     *out_mode = ID4_CLI_GENERATION_RESIDENCY_REQUEST_SELECTED_STAGE_BUNDLES;
     return iree_ok_status();
@@ -456,8 +463,8 @@ static iree_status_t id4_cli_parse_generation_residency_request_mode(
   }
   return iree_make_status(
       IREE_STATUS_INVALID_ARGUMENT,
-      "--generation_residency must be issue_phases, selected_stage_bundles, "
-      "all_stage_bundles, or memory_budgeted");
+      "--generation_residency must be issue_phases, phase_stage_bundles, "
+      "selected_stage_bundles, all_stage_bundles, or memory_budgeted");
 }
 
 static iree_status_t id4_cli_parse_generation_issue_mode(
@@ -556,6 +563,11 @@ static iree_status_t id4_cli_resolve_generation_residency(
     case ID4_CLI_GENERATION_RESIDENCY_REQUEST_ISSUE_PHASES:
       *out_residency_mode =
           ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_ISSUE_PHASES;
+      *out_resident_stage_mask = requested_stage_mask;
+      return iree_ok_status();
+    case ID4_CLI_GENERATION_RESIDENCY_REQUEST_PHASE_STAGE_BUNDLES:
+      *out_residency_mode =
+          ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_PHASE_STAGE_BUNDLES;
       *out_resident_stage_mask = requested_stage_mask;
       return iree_ok_status();
     case ID4_CLI_GENERATION_RESIDENCY_REQUEST_SELECTED_STAGE_BUNDLES:

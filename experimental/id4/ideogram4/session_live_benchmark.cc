@@ -48,7 +48,8 @@ IREE_FLAG(string, dit_feed_forward_implementation, "fused_product",
           "pytorch_parity.");
 IREE_FLAG(string, generation_residency, "issue_phases",
           "Generation stage-bundle residency: issue_phases, "
-          "selected_stage_bundles, all_stage_bundles, or memory_budgeted.");
+          "phase_stage_bundles, selected_stage_bundles, all_stage_bundles, "
+          "or memory_budgeted.");
 IREE_FLAG(int64_t, generation_residency_budget, 0,
           "Logical live byte budget for "
           "--generation_residency=memory_budgeted.");
@@ -185,6 +186,7 @@ enum class GenerationIssueMode {
 
 enum class GenerationResidencyRequestMode {
   kIssuePhases,
+  kPhaseStageBundles,
   kSelectedStageBundles,
   kAllStageBundles,
   kMemoryBudgeted,
@@ -480,6 +482,10 @@ static iree_status_t ParseGenerationResidencyRequestMode(
     *out_mode = GenerationResidencyRequestMode::kIssuePhases;
     return iree_ok_status();
   }
+  if (iree_string_view_equal(value, IREE_SV("phase_stage_bundles"))) {
+    *out_mode = GenerationResidencyRequestMode::kPhaseStageBundles;
+    return iree_ok_status();
+  }
   if (iree_string_view_equal(value, IREE_SV("selected_stage_bundles"))) {
     *out_mode = GenerationResidencyRequestMode::kSelectedStageBundles;
     return iree_ok_status();
@@ -494,8 +500,8 @@ static iree_status_t ParseGenerationResidencyRequestMode(
   }
   return iree_make_status(
       IREE_STATUS_INVALID_ARGUMENT,
-      "--generation_residency must be issue_phases, selected_stage_bundles, "
-      "all_stage_bundles, or memory_budgeted");
+      "--generation_residency must be issue_phases, phase_stage_bundles, "
+      "selected_stage_bundles, all_stage_bundles, or memory_budgeted");
 }
 
 static iree_string_view_t GenerationResidencyRequestModeName(
@@ -503,6 +509,8 @@ static iree_string_view_t GenerationResidencyRequestModeName(
   switch (mode) {
     case GenerationResidencyRequestMode::kIssuePhases:
       return IREE_SV("issue_phases");
+    case GenerationResidencyRequestMode::kPhaseStageBundles:
+      return IREE_SV("phase_stage_bundles");
     case GenerationResidencyRequestMode::kSelectedStageBundles:
       return IREE_SV("selected_stage_bundles");
     case GenerationResidencyRequestMode::kAllStageBundles:
@@ -518,6 +526,8 @@ static iree_string_view_t GenerationResidencyModeName(
   switch (mode) {
     case ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_ISSUE_PHASES:
       return IREE_SV("issue_phases");
+    case ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_PHASE_STAGE_BUNDLES:
+      return IREE_SV("phase_stage_bundles");
     case ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_SELECTED_STAGE_BUNDLES:
       return IREE_SV("selected_stage_bundles");
     case ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_ALL_STAGE_BUNDLES:
@@ -666,6 +676,12 @@ static iree_status_t ResolveGenerationBenchmarkResidency(
     case GenerationResidencyRequestMode::kIssuePhases:
       out_resolution->residency_mode =
           ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_ISSUE_PHASES;
+      out_resolution->resident_stage_mask =
+          context.generation_resident_stage_mask;
+      return iree_ok_status();
+    case GenerationResidencyRequestMode::kPhaseStageBundles:
+      out_resolution->residency_mode =
+          ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_PHASE_STAGE_BUNDLES;
       out_resolution->resident_stage_mask =
           context.generation_resident_stage_mask;
       return iree_ok_status();
