@@ -17,6 +17,7 @@
 #define LOOM_TARGET_ARCH_AMDGPU_MATRIX_CONTRACT_H_
 
 #include "loom/target/arch/amdgpu/matrix/types.h"
+#include "loom/util/numeric_format.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -33,6 +34,10 @@ iree_string_view_t loom_amdgpu_matrix_numeric_type_name(
 // Returns the stable display name for a scale kind.
 iree_string_view_t loom_amdgpu_matrix_scale_kind_name(
     loom_amdgpu_matrix_scale_kind_t scale_kind);
+
+// Maps an encoded scale numeric format to the target selector value.
+bool loom_amdgpu_matrix_scale_format_selector_from_numeric_format(
+    loom_value_fact_numeric_format_flags_t format, int64_t* out_value);
 
 // Returns a target-owned fragment layout by kind, or NULL when unknown.
 const loom_amdgpu_matrix_fragment_layout_t*

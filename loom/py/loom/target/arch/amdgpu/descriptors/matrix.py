@@ -389,8 +389,8 @@ def _v_mfma_scale_overlay(
             AmdgpuOperandOverlay(
                 "SRC2", _vgpr_agpr_const_operand("acc", units=accumulator_units)
             ),
-            AmdgpuOperandOverlay("SCALE_SRC0", _sgpr_vgpr_operand("scale_a")),
-            AmdgpuOperandOverlay("SCALE_SRC1", _sgpr_vgpr_operand("scale_b")),
+            AmdgpuOperandOverlay("SCALE_SRC0", _sgpr_vgpr_operand("scale_src0")),
+            AmdgpuOperandOverlay("SCALE_SRC1", _sgpr_vgpr_operand("scale_src1")),
         ),
         constraints=_destructive_accumulator_constraints(3),
         flags=(DescriptorFlag.DEAD_REMOVABLE,),

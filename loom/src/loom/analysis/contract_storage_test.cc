@@ -128,6 +128,22 @@ TEST(ContractStorageTest, MapsMatrixStorageSchemaToGenericOperand) {
                                 LOOM_CONTRACT_CAPABILITY_ZERO_SCALE_FALLBACK));
 }
 
+TEST(ContractStorageTest, MapsScaleFormatToAvailableSelectorCapability) {
+  loom_value_fact_storage_schema_t schema =
+      EncodedSchema(LOOM_VALUE_FACT_NUMERIC_FORMAT_F4_E2M1, 32,
+                    LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E8M0, 4, 32);
+
+  const loom_contract_capability_flags_t available_flags =
+      loom_contract_available_capability_flags_from_storage_schema(schema);
+  EXPECT_TRUE(iree_any_bit_set(
+      available_flags, LOOM_CONTRACT_CAPABILITY_SCALE_FORMAT_SELECTORS));
+
+  const loom_contract_capability_flags_t required_flags =
+      loom_contract_required_capability_flags_from_storage_schema(schema);
+  EXPECT_FALSE(iree_any_bit_set(
+      required_flags, LOOM_CONTRACT_CAPABILITY_SCALE_FORMAT_SELECTORS));
+}
+
 TEST(ContractStorageTest, MapsEncodedFloat8FormatsToMatrixNumerics) {
   loom_contract_numeric_type_t numeric_type = LOOM_CONTRACT_NUMERIC_UNKNOWN;
   ASSERT_TRUE(loom_contract_numeric_type_from_encoded_format(
