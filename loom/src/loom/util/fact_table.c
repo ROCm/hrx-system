@@ -1408,9 +1408,7 @@ bool loom_value_fact_table_query_static_lane_origin(
   const loom_type_t value_type = loom_module_value_type(module, value_id);
   const loom_type_t source_type =
       loom_module_value_type(module, origin.source_value_id);
-  if (!loom_type_is_vector(value_type) || !loom_type_is_vector(source_type) ||
-      loom_type_element_type(value_type) !=
-          loom_type_element_type(source_type)) {
+  if (!loom_type_is_vector(value_type) || !loom_type_is_vector(source_type)) {
     return false;
   }
 
