@@ -222,6 +222,16 @@ typedef struct StageDiagnostics {
   iree_host_size_t parameter_load_group_prefetch_region_distance_sum;
   // Maximum region distance for one prefetched load group submission.
   iree_host_size_t parameter_load_group_prefetch_region_distance_max;
+  // Number of submitted direct gather group diagnostics observed.
+  iree_host_size_t parameter_direct_gather_group_count;
+  // Number of logical parameter requests in direct gather groups.
+  iree_host_size_t parameter_direct_gather_request_count;
+  // Total provider source bytes in direct gather groups.
+  iree_device_size_t parameter_direct_gather_source_byte_length;
+  // Total final slab bytes populated by direct gather groups.
+  iree_device_size_t parameter_direct_gather_target_byte_length;
+  // Largest source byte length for one direct gather group.
+  iree_device_size_t parameter_direct_gather_max_source_byte_length;
   // Number of issue-local encoded staging window events observed.
   iree_host_size_t parameter_issue_encode_window_count;
   // Total issue-local encoded staging window bytes observed.

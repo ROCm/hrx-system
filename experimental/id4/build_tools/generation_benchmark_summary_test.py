@@ -36,6 +36,8 @@ TEST_BENCHMARK_LABEL = (
     "phase_peak=34951MiB,stage_serial_peak=17712MiB,"
     "selected_peak=17712MiB] "
     "prefetch_groups[count=142,avg_regions=1.00,max_regions=1] "
+    "direct_gather_groups[count=322,requests=384,source=4169MiB,"
+    "target=4169MiB,max=256MiB] "
     "issue_encode_window[count=2,staging=1081MiB,max=576MiB,"
     "source=18991MiB,target=27597MiB,chunks=72,batches=72,"
     "dispatches=318] "
@@ -384,6 +386,11 @@ class GenerationBenchmarkSummaryTest(unittest.TestCase):
             self.assertEqual(row["prefetch_group_submit_count"], 142)
             self.assertAlmostEqual(row["prefetch_group_average_region_distance"], 1.0)
             self.assertEqual(row["prefetch_group_max_region_distance"], 1)
+            self.assertEqual(row["direct_gather_group_count"], 322)
+            self.assertEqual(row["direct_gather_request_count"], 384)
+            self.assertEqual(row["direct_gather_source_mib"], 4169)
+            self.assertEqual(row["direct_gather_target_mib"], 4169)
+            self.assertEqual(row["direct_gather_max_mib"], 256)
             self.assertEqual(row["issue_encode_window_count"], 2)
             self.assertEqual(row["issue_encode_window_staging_mib"], 1081)
             self.assertEqual(row["issue_encode_window_dispatch_count"], 318)

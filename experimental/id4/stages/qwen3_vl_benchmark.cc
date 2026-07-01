@@ -5,7 +5,6 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 #include <cinttypes>
-#include <cstdio>
 #include <cstring>
 
 #include "experimental/id4/pipeline/plan.h"
@@ -325,9 +324,10 @@ static void SetQwenBenchmarkLabel(
   IREE_CHECK_OK(ParseQwenWeightExecutionStrategy(&weight_execution_strategy));
   iree_string_view_t weight_execution_strategy_name =
       id4_qwen3_vl_weight_execution_strategy_name(weight_execution_strategy);
-  char label[1792];
-  std::snprintf(
-      label, sizeof(label),
+  iree_string_builder_t label_builder;
+  iree_string_builder_initialize(iree_allocator_system(), &label_builder);
+  IREE_CHECK_OK(iree_string_builder_append_format(
+      &label_builder,
       "tokens=%" PRIu32 " weights=%.*s prefetch_regions=%" PRIhsz
       " param_total=%" PRIu64 "MiB param_largest=%" PRIu64
       "MiB param_source=%" PRIu64 "MiB param_source_direct=%" PRIu64
@@ -341,6 +341,9 @@ static void SetQwenBenchmarkLabel(
       "]"
       " prefetch_groups[count=%" PRIhsz ",avg_regions=%.2f,max_regions=%" PRIhsz
       "]"
+      " direct_gather_groups[count=%" PRIhsz ",requests=%" PRIhsz
+      ",source=%" PRIu64 "MiB,target=%" PRIu64 "MiB,max=%" PRIu64
+      "MiB]"
       " issue_encode_window[count=%" PRIhsz ",staging=%" PRIu64
       "MiB,max=%" PRIu64 "MiB,source=%" PRIu64 "MiB,target=%" PRIu64
       "MiB,chunks=%" PRIhsz ",batches=%" PRIhsz ",dispatches=%" PRIhsz "]",
@@ -378,6 +381,11 @@ static void SetQwenBenchmarkLabel(
           diagnostics.parameter_load_group_prefetch_region_distance_sum,
           diagnostics.parameter_load_group_prefetch_submit_count),
       diagnostics.parameter_load_group_prefetch_region_distance_max,
+      diagnostics.parameter_direct_gather_group_count,
+      diagnostics.parameter_direct_gather_request_count,
+      CeilMiB(diagnostics.parameter_direct_gather_source_byte_length),
+      CeilMiB(diagnostics.parameter_direct_gather_target_byte_length),
+      CeilMiB(diagnostics.parameter_direct_gather_max_source_byte_length),
       diagnostics.parameter_issue_encode_window_count,
       CeilMiB(
           diagnostics.parameter_issue_encode_window_staging_total_byte_length),
@@ -387,8 +395,10 @@ static void SetQwenBenchmarkLabel(
       CeilMiB(diagnostics.parameter_issue_encode_window_target_byte_length),
       diagnostics.parameter_issue_encode_window_staging_chunk_count,
       diagnostics.parameter_issue_encode_window_source_gather_batch_count,
-      diagnostics.parameter_issue_encode_window_encoder_dispatch_count);
-  iree_benchmark_set_label(benchmark_state, label);
+      diagnostics.parameter_issue_encode_window_encoder_dispatch_count));
+  iree_benchmark_set_label(benchmark_state,
+                           iree_string_builder_buffer(&label_builder));
+  iree_string_builder_deinitialize(&label_builder);
 }
 
 static iree_status_t QueueFillSyntheticQwenInputs(

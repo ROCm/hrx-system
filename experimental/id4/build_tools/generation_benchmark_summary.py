@@ -67,6 +67,12 @@ _LABEL_PREFETCH_GROUPS_PATTERN = re.compile(
     r"avg_regions=(?P<average>[0-9]+(?:\.[0-9]+)?),"
     r"max_regions=(?P<maximum>[0-9]+)\]"
 )
+_LABEL_DIRECT_GATHER_GROUPS_PATTERN = re.compile(
+    r"\bdirect_gather_groups\[count=(?P<count>[0-9]+),"
+    r"requests=(?P<requests>[0-9]+),"
+    r"source=(?P<source>[0-9]+)MiB,target=(?P<target>[0-9]+)MiB,"
+    r"max=(?P<maximum>[0-9]+)MiB\]"
+)
 _LABEL_ISSUE_ENCODE_WINDOW_PATTERN = re.compile(
     r"\bissue_encode_window\[count=(?P<count>[0-9]+),"
     r"staging=(?P<staging>[0-9]+)MiB,max=(?P<maximum>[0-9]+)MiB,"
@@ -179,6 +185,9 @@ def _parse_generation_benchmark_label(label: str, context: str) -> dict[str, Any
     )
     prefetch_groups_match = _require_match(
         _LABEL_PREFETCH_GROUPS_PATTERN, label, f"{context}.label"
+    )
+    direct_gather_groups_match = _require_match(
+        _LABEL_DIRECT_GATHER_GROUPS_PATTERN, label, f"{context}.label"
     )
     issue_encode_window_match = _require_match(
         _LABEL_ISSUE_ENCODE_WINDOW_PATTERN, label, f"{context}.label"
@@ -326,6 +335,21 @@ def _parse_generation_benchmark_label(label: str, context: str) -> dict[str, Any
         ),
         "prefetch_group_max_region_distance": _match_unsigned_group(
             prefetch_groups_match, "maximum", f"{context}.label"
+        ),
+        "direct_gather_group_count": _match_unsigned_group(
+            direct_gather_groups_match, "count", f"{context}.label"
+        ),
+        "direct_gather_request_count": _match_unsigned_group(
+            direct_gather_groups_match, "requests", f"{context}.label"
+        ),
+        "direct_gather_source_mib": _match_unsigned_group(
+            direct_gather_groups_match, "source", f"{context}.label"
+        ),
+        "direct_gather_target_mib": _match_unsigned_group(
+            direct_gather_groups_match, "target", f"{context}.label"
+        ),
+        "direct_gather_max_mib": _match_unsigned_group(
+            direct_gather_groups_match, "maximum", f"{context}.label"
         ),
         "issue_encode_window_count": _match_unsigned_group(
             issue_encode_window_match, "count", f"{context}.label"

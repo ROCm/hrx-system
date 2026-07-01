@@ -938,6 +938,22 @@ static iree_status_t CaptureDiagnostics(
   }
   if (event->parameter_load &&
       iree_string_view_equal(event->key,
+                             IREE_SV("parameter_slab.gather_group"))) {
+    const id4_pipeline_parameter_load_diagnostic_t* parameter_load =
+        event->parameter_load;
+    ++diagnostics->parameter_direct_gather_group_count;
+    diagnostics->parameter_direct_gather_request_count +=
+        parameter_load->logical_source_count;
+    diagnostics->parameter_direct_gather_source_byte_length +=
+        parameter_load->source_byte_length;
+    diagnostics->parameter_direct_gather_target_byte_length +=
+        parameter_load->target_byte_length;
+    diagnostics->parameter_direct_gather_max_source_byte_length =
+        iree_max(diagnostics->parameter_direct_gather_max_source_byte_length,
+                 parameter_load->source_byte_length);
+  }
+  if (event->parameter_load &&
+      iree_string_view_equal(event->key,
                              IREE_SV("parameter_slab.issue_encode_window"))) {
     const id4_pipeline_parameter_load_diagnostic_t* parameter_load =
         event->parameter_load;

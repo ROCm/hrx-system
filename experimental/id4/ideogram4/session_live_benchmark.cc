@@ -1640,6 +1640,9 @@ static iree_status_t SetGenerationBenchmarkLabel(
       "MiB]"
       " prefetch_groups[count=%" PRIhsz ",avg_regions=%.2f,max_regions=%" PRIhsz
       "]"
+      " direct_gather_groups[count=%" PRIhsz ",requests=%" PRIhsz
+      ",source=%" PRIu64 "MiB,target=%" PRIu64 "MiB,max=%" PRIu64
+      "MiB]"
       " issue_encode_window[count=%" PRIhsz ",staging=%" PRIu64
       "MiB,max=%" PRIu64 "MiB,source=%" PRIu64 "MiB,target=%" PRIu64
       "MiB,chunks=%" PRIhsz ",batches=%" PRIhsz ",dispatches=%" PRIhsz "]",
@@ -1694,6 +1697,11 @@ static iree_status_t SetGenerationBenchmarkLabel(
           diagnostics.parameter_load_group_prefetch_region_distance_sum,
           diagnostics.parameter_load_group_prefetch_submit_count),
       diagnostics.parameter_load_group_prefetch_region_distance_max,
+      diagnostics.parameter_direct_gather_group_count,
+      diagnostics.parameter_direct_gather_request_count,
+      CeilMiB(diagnostics.parameter_direct_gather_source_byte_length),
+      CeilMiB(diagnostics.parameter_direct_gather_target_byte_length),
+      CeilMiB(diagnostics.parameter_direct_gather_max_source_byte_length),
       diagnostics.parameter_issue_encode_window_count,
       CeilMiB(
           diagnostics.parameter_issue_encode_window_staging_total_byte_length),
