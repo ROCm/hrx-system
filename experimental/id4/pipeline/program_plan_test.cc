@@ -1432,6 +1432,7 @@ TEST(PipelineProgramPlan, AttributesParameterLoadGroupsToRegions) {
   const iree_host_size_t encoded_group = FindParameterLoadGroupForKey(
       plan, IREE_SV("model.layers.0.mlp.w1.weight"));
   ASSERT_NE(direct_group, encoded_group);
+  EXPECT_LT(direct_group, encoded_group);
 
   ASSERT_EQ(id4_pipeline_plan_region_count(plan), 2u);
   const id4_pipeline_region_plan_t* first_region =

@@ -714,6 +714,39 @@ static iree_host_size_t id4_pipeline_program_plan_parameter_readiness_group_key(
              : ID4_PIPELINE_PARAMETER_LOAD_READINESS_GROUP_NONE;
 }
 
+static bool
+id4_pipeline_program_plan_parameter_load_step_precedes_for_submission(
+    const id4_pipeline_parameter_load_step_t* lhs,
+    const id4_pipeline_parameter_load_step_t* rhs) {
+  const iree_host_size_t lhs_key = lhs->readiness_group_key;
+  const iree_host_size_t rhs_key = rhs->readiness_group_key;
+  if (lhs_key == rhs_key) return true;
+  if (lhs_key == ID4_PIPELINE_PARAMETER_LOAD_READINESS_GROUP_NONE) {
+    return false;
+  }
+  if (rhs_key == ID4_PIPELINE_PARAMETER_LOAD_READINESS_GROUP_NONE) {
+    return true;
+  }
+  return lhs_key < rhs_key;
+}
+
+static void id4_pipeline_program_plan_order_parameter_load_steps_for_submission(
+    iree_host_size_t load_step_count,
+    id4_pipeline_parameter_load_step_t* load_steps) {
+  for (iree_host_size_t i = 1; i < load_step_count; ++i) {
+    id4_pipeline_parameter_load_step_t step = load_steps[i];
+    iree_host_size_t j = i;
+    while (
+        j > 0 &&
+        !id4_pipeline_program_plan_parameter_load_step_precedes_for_submission(
+            &load_steps[j - 1], &step)) {
+      load_steps[j] = load_steps[j - 1];
+      --j;
+    }
+    load_steps[j] = step;
+  }
+}
+
 static void id4_pipeline_program_plan_build_parameter_load_steps(
     iree_host_size_t parameter_count,
     const id4_pipeline_program_plan_parameter_load_record_t* load_records,
@@ -836,6 +869,9 @@ static void id4_pipeline_program_plan_build_parameter_load_steps(
     }
     ++*out_load_step_count;
   }
+
+  id4_pipeline_program_plan_order_parameter_load_steps_for_submission(
+      *out_load_step_count, load_steps);
 }
 
 static iree_status_t
