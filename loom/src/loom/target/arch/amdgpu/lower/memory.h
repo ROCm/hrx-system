@@ -336,6 +336,12 @@ iree_status_t loom_amdgpu_record_memory_cache_policy_rejection_diagnostic(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_amdgpu_memory_access_t* access);
 
+// Populates optional source storage-schema fields on a memory report row.
+void loom_amdgpu_memory_report_row_populate_storage_schema(
+    loom_low_lower_context_t* context,
+    const loom_low_source_memory_access_plan_t* source,
+    loom_low_lower_memory_report_row_t* row);
+
 // Selects an AMDGPU source memory-load packet plan.
 iree_status_t loom_amdgpu_select_memory_load_plan(
     loom_low_lower_context_t* context, const loom_op_t* source_op,

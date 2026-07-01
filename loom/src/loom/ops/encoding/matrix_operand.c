@@ -201,6 +201,20 @@ static bool loom_encoding_matrix_operand_lookup_in_table(
   return false;
 }
 
+static bool loom_encoding_matrix_operand_lookup_value_in_table(
+    const loom_encoding_matrix_operand_symbol_t* symbols,
+    iree_host_size_t symbol_count, uint64_t value,
+    iree_string_view_t* out_symbol) {
+  *out_symbol = iree_string_view_empty();
+  for (iree_host_size_t i = 0; i < symbol_count; ++i) {
+    if (symbols[i].value == value) {
+      *out_symbol = symbols[i].spelling;
+      return true;
+    }
+  }
+  return false;
+}
+
 bool loom_encoding_matrix_operand_lookup_symbol(
     loom_encoding_matrix_operand_symbol_set_t symbol_set,
     iree_string_view_t symbol, uint64_t* out_value) {
@@ -243,6 +257,54 @@ bool loom_encoding_matrix_operand_lookup_symbol(
           symbol, out_value);
     default:
       *out_value = 0;
+      return false;
+  }
+}
+
+bool loom_encoding_matrix_operand_lookup_value(
+    loom_encoding_matrix_operand_symbol_set_t symbol_set, uint64_t value,
+    iree_string_view_t* out_symbol) {
+  if (!out_symbol) {
+    return false;
+  }
+  switch (symbol_set) {
+    case LOOM_ENCODING_MATRIX_OPERAND_SYMBOL_SET_NUMERIC_FORMAT:
+      return loom_encoding_matrix_operand_lookup_value_in_table(
+          loom_encoding_matrix_operand_numeric_format_symbols,
+          IREE_ARRAYSIZE(loom_encoding_matrix_operand_numeric_format_symbols),
+          value, out_symbol);
+    case LOOM_ENCODING_MATRIX_OPERAND_SYMBOL_SET_PAYLOAD_PACKING:
+      return loom_encoding_matrix_operand_lookup_value_in_table(
+          loom_encoding_matrix_operand_payload_packing_symbols,
+          IREE_ARRAYSIZE(loom_encoding_matrix_operand_payload_packing_symbols),
+          value, out_symbol);
+    case LOOM_ENCODING_MATRIX_OPERAND_SYMBOL_SET_SCALE_TOPOLOGY:
+      return loom_encoding_matrix_operand_lookup_value_in_table(
+          loom_encoding_matrix_operand_scale_topology_symbols,
+          IREE_ARRAYSIZE(loom_encoding_matrix_operand_scale_topology_symbols),
+          value, out_symbol);
+    case LOOM_ENCODING_MATRIX_OPERAND_SYMBOL_SET_AFFINE_POLICY:
+      return loom_encoding_matrix_operand_lookup_value_in_table(
+          loom_encoding_matrix_operand_affine_policy_symbols,
+          IREE_ARRAYSIZE(loom_encoding_matrix_operand_affine_policy_symbols),
+          value, out_symbol);
+    case LOOM_ENCODING_MATRIX_OPERAND_SYMBOL_SET_ROUNDING_POLICY:
+      return loom_encoding_matrix_operand_lookup_value_in_table(
+          loom_encoding_matrix_operand_rounding_policy_symbols,
+          IREE_ARRAYSIZE(loom_encoding_matrix_operand_rounding_policy_symbols),
+          value, out_symbol);
+    case LOOM_ENCODING_MATRIX_OPERAND_SYMBOL_SET_CODEBOOK_POLICY:
+      return loom_encoding_matrix_operand_lookup_value_in_table(
+          loom_encoding_matrix_operand_codebook_policy_symbols,
+          IREE_ARRAYSIZE(loom_encoding_matrix_operand_codebook_policy_symbols),
+          value, out_symbol);
+    case LOOM_ENCODING_MATRIX_OPERAND_SYMBOL_SET_SPARSITY_POLICY:
+      return loom_encoding_matrix_operand_lookup_value_in_table(
+          loom_encoding_matrix_operand_sparsity_policy_symbols,
+          IREE_ARRAYSIZE(loom_encoding_matrix_operand_sparsity_policy_symbols),
+          value, out_symbol);
+    default:
+      *out_symbol = iree_string_view_empty();
       return false;
   }
 }

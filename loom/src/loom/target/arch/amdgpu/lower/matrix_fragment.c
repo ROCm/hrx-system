@@ -3810,7 +3810,7 @@ static iree_status_t loom_amdgpu_record_fragment_memory_packet(
   int64_t static_offset_bytes = plan->source.static_byte_offset;
   (void)loom_amdgpu_fragment_memory_packet_static_offset(
       layout, plan, packet, element_index, &static_offset_bytes);
-  const loom_low_lower_memory_report_row_t row = {
+  loom_low_lower_memory_report_row_t row = {
       .function_name = loom_low_lower_context_function_name(context),
       .source_op_name =
           loom_op_name(loom_low_lower_context_module(context), source_op),
@@ -3837,6 +3837,8 @@ static iree_status_t loom_amdgpu_record_fragment_memory_packet(
       .bank_conflict_degree = 0,
       .bank_conflict_kind = iree_string_view_empty(),
   };
+  loom_amdgpu_memory_report_row_populate_storage_schema(context, &plan->source,
+                                                        &row);
   return loom_low_lower_record_memory_report_row(context, &row);
 }
 

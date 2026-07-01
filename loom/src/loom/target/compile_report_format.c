@@ -74,6 +74,98 @@ static iree_string_view_t loom_target_compile_report_source_low_selection_name(
   }
 }
 
+typedef struct loom_target_compile_report_string_field_t {
+  const char* name;
+  iree_string_view_t value;
+} loom_target_compile_report_string_field_t;
+
+enum {
+  LOOM_TARGET_COMPILE_REPORT_SOURCE_LOW_MEMORY_STORAGE_FIELD_COUNT = 9,
+};
+
+static iree_host_size_t
+loom_target_compile_report_source_low_memory_storage_fields(
+    const loom_target_compile_report_source_low_memory_row_t* row,
+    loom_target_compile_report_string_field_t* fields) {
+  fields[0] = (loom_target_compile_report_string_field_t){
+      .name = "element_format",
+      .value = row->storage_element_format,
+  };
+  fields[1] = (loom_target_compile_report_string_field_t){
+      .name = "scale_format",
+      .value = row->storage_scale_format,
+  };
+  fields[2] = (loom_target_compile_report_string_field_t){
+      .name = "secondary_scale_format",
+      .value = row->storage_secondary_scale_format,
+  };
+  fields[3] = (loom_target_compile_report_string_field_t){
+      .name = "payload_packing",
+      .value = row->storage_payload_packing,
+  };
+  fields[4] = (loom_target_compile_report_string_field_t){
+      .name = "scale_topology",
+      .value = row->storage_scale_topology,
+  };
+  fields[5] = (loom_target_compile_report_string_field_t){
+      .name = "affine_policy",
+      .value = row->storage_affine_policy,
+  };
+  fields[6] = (loom_target_compile_report_string_field_t){
+      .name = "rounding_policy",
+      .value = row->storage_rounding_policy,
+  };
+  fields[7] = (loom_target_compile_report_string_field_t){
+      .name = "codebook_policy",
+      .value = row->storage_codebook_policy,
+  };
+  fields[8] = (loom_target_compile_report_string_field_t){
+      .name = "sparsity_policy",
+      .value = row->storage_sparsity_policy,
+  };
+  return LOOM_TARGET_COMPILE_REPORT_SOURCE_LOW_MEMORY_STORAGE_FIELD_COUNT;
+}
+
+static iree_host_size_t loom_target_compile_report_first_non_empty_string_field(
+    const loom_target_compile_report_string_field_t* fields,
+    iree_host_size_t field_count) {
+  for (iree_host_size_t i = 0; i < field_count; ++i) {
+    if (!iree_string_view_is_empty(fields[i].value)) {
+      return i;
+    }
+  }
+  return field_count;
+}
+
+static iree_status_t
+loom_target_compile_report_append_source_low_memory_storage_text(
+    const loom_target_compile_report_source_low_memory_row_t* row,
+    iree_string_builder_t* builder) {
+  loom_target_compile_report_string_field_t
+      fields[LOOM_TARGET_COMPILE_REPORT_SOURCE_LOW_MEMORY_STORAGE_FIELD_COUNT];
+  const iree_host_size_t field_count =
+      loom_target_compile_report_source_low_memory_storage_fields(row, fields);
+  const iree_host_size_t first_storage_field =
+      loom_target_compile_report_first_non_empty_string_field(fields,
+                                                              field_count);
+  if (first_storage_field == field_count) {
+    return iree_ok_status();
+  }
+  IREE_RETURN_IF_ERROR(
+      iree_string_builder_append_cstring(builder, " storage={"));
+  bool first_field = true;
+  for (iree_host_size_t i = first_storage_field; i < field_count; ++i) {
+    if (iree_string_view_is_empty(fields[i].value)) {
+      continue;
+    }
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+        builder, "%s%s:%.*s", first_field ? "" : ",", fields[i].name,
+        (int)fields[i].value.size, fields[i].value.data));
+    first_field = false;
+  }
+  return iree_string_builder_append_cstring(builder, "}");
+}
+
 static iree_string_view_t
 loom_target_compile_report_allocation_failure_blocking_kind_name(
     loom_target_compile_report_allocation_failure_blocking_kind_t kind) {
@@ -1847,6 +1939,9 @@ static iree_status_t loom_target_compile_report_format_source_low_memory_rows(
             builder, " strategy=%.*s", (int)strategy_key.size,
             strategy_key.data));
       }
+      IREE_RETURN_IF_ERROR(
+          loom_target_compile_report_append_source_low_memory_storage_text(
+              row, builder));
       IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
           builder,
           " address_form=%.*s dynamic_term_kind=%.*s "
@@ -3793,6 +3888,34 @@ static iree_status_t loom_target_compile_report_format_source_low_row_json(
 }
 
 static iree_status_t
+loom_target_compile_report_format_source_low_memory_storage_json(
+    const loom_target_compile_report_source_low_memory_row_t* row,
+    loom_output_stream_t* stream, bool* inout_first_field) {
+  loom_target_compile_report_string_field_t
+      fields[LOOM_TARGET_COMPILE_REPORT_SOURCE_LOW_MEMORY_STORAGE_FIELD_COUNT];
+  const iree_host_size_t field_count =
+      loom_target_compile_report_source_low_memory_storage_fields(row, fields);
+  const iree_host_size_t first_storage_field =
+      loom_target_compile_report_first_non_empty_string_field(fields,
+                                                              field_count);
+  if (first_storage_field == field_count) {
+    return iree_ok_status();
+  }
+  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_begin_field(
+      stream, inout_first_field, "storage"));
+  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "{"));
+  bool first_field = true;
+  for (iree_host_size_t i = first_storage_field; i < field_count; ++i) {
+    if (iree_string_view_is_empty(fields[i].value)) {
+      continue;
+    }
+    IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_string_field(
+        stream, &first_field, fields[i].name, fields[i].value));
+  }
+  return loom_output_stream_write_cstring(stream, "}");
+}
+
+static iree_status_t
 loom_target_compile_report_format_source_low_memory_row_json(
     const loom_target_compile_report_source_low_memory_row_t* row,
     iree_host_size_t row_index, loom_output_stream_t* stream) {
@@ -3850,6 +3973,9 @@ loom_target_compile_report_format_source_low_memory_row_json(
   IREE_RETURN_IF_ERROR(
       loom_target_compile_report_json_write_optional_string_field(
           stream, &first_field, "bank_conflict_kind", row->bank_conflict_kind));
+  IREE_RETURN_IF_ERROR(
+      loom_target_compile_report_format_source_low_memory_storage_json(
+          row, stream, &first_field));
   return loom_output_stream_write_cstring(stream, "}");
 }
 

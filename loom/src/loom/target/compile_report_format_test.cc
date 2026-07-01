@@ -398,6 +398,15 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
               /*.bank_stride_words=*/8,
               /*.bank_conflict_degree=*/8,
               /*.bank_conflict_kind=*/IREE_SVL("bank-conflict-risk"),
+              /*.storage_element_format=*/IREE_SVL("f8e4m3fn"),
+              /*.storage_scale_format=*/IREE_SVL("f32"),
+              /*.storage_secondary_scale_format=*/IREE_SVL(""),
+              /*.storage_payload_packing=*/IREE_SVL("dense_lanes"),
+              /*.storage_scale_topology=*/IREE_SVL("block_1d"),
+              /*.storage_affine_policy=*/IREE_SVL("scale_only"),
+              /*.storage_rounding_policy=*/IREE_SVL("finite_only"),
+              /*.storage_codebook_policy=*/IREE_SVL(""),
+              /*.storage_sparsity_policy=*/IREE_SVL(""),
           },
       };
   loom_target_compile_report_math_row_t math_legalization_rows[] = {
@@ -1080,6 +1089,10 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
                         "operation=load packet=amdgpu.ds_read2_b32 "
                         "source_root=lhs "
                         "strategy=ds_2addr_bank_report "
+                        "storage={element_format:f8e4m3fn,scale_format:f32,"
+                        "payload_packing:dense_lanes,"
+                        "scale_topology:block_1d,affine_policy:scale_only,"
+                        "rounding_policy:finite_only} "
                         "address_form=ds_2addr dynamic_term_kind=vaddr "
                         "fallback_reason=cross_wave_workgroup "
                         "static_offset_bytes=0 element_bytes=4 vector_lanes=2 "
@@ -1557,7 +1570,13 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
                         "\"vector_lane_stride_bytes\":8,"
                         "\"bank_stride_words\":8,"
                         "\"bank_conflict_degree\":8,\"bank_conflict_kind\":"
-                        "\"bank-conflict-risk\"}]"),
+                        "\"bank-conflict-risk\","
+                        "\"storage\":{\"element_format\":\"f8e4m3fn\","
+                        "\"scale_format\":\"f32\","
+                        "\"payload_packing\":\"dense_lanes\","
+                        "\"scale_topology\":\"block_1d\","
+                        "\"affine_policy\":\"scale_only\","
+                        "\"rounding_policy\":\"finite_only\"}}]"),
                 0),
             IREE_STRING_VIEW_NPOS);
   EXPECT_NE(iree_string_view_find(
