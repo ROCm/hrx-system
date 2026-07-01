@@ -102,9 +102,13 @@ kernel.def target(@id4_gfx1100) export("id4_ideogram4_mlp_gate_up_silu_product_f
     %gate_bf16_00 = scalar.fptrunc %gate_scaled00 : f32 to bf16
     %gate_rounded00 = scalar.extf %gate_bf16_00 : bf16 to f32
     %gate_silu00 = scalar.siluf %gate_rounded00 : f32
+    %gate_silu_bf16_00 = scalar.fptrunc %gate_silu00 : f32 to bf16
+    %gate_silu_rounded00 = scalar.extf %gate_silu_bf16_00 : bf16 to f32
     %up_value00 = vector.extract %up_result00[%register_index] : vector<8xf32> -> f32
     %up_scaled00 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %up_value00, %up_scale0 : f32
-    %product00 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %gate_silu00, %up_scaled00 : f32
+    %up_bf16_00 = scalar.fptrunc %up_scaled00 : f32 to bf16
+    %up_rounded00 = scalar.extf %up_bf16_00 : bf16 to f32
+    %product00 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %gate_silu_rounded00, %up_rounded00 : f32
     %rounded00 = scalar.fptrunc %product00 : f32 to bf16
     view.store %rounded00, %output_view[%token0, %column0] : bf16, view<[%token_capacity]x[%intermediate_size]xbf16, #dense>
     %gate_value01 = vector.extract %gate_result01[%register_index] : vector<8xf32> -> f32
@@ -112,9 +116,13 @@ kernel.def target(@id4_gfx1100) export("id4_ideogram4_mlp_gate_up_silu_product_f
     %gate_bf16_01 = scalar.fptrunc %gate_scaled01 : f32 to bf16
     %gate_rounded01 = scalar.extf %gate_bf16_01 : bf16 to f32
     %gate_silu01 = scalar.siluf %gate_rounded01 : f32
+    %gate_silu_bf16_01 = scalar.fptrunc %gate_silu01 : f32 to bf16
+    %gate_silu_rounded01 = scalar.extf %gate_silu_bf16_01 : bf16 to f32
     %up_value01 = vector.extract %up_result01[%register_index] : vector<8xf32> -> f32
     %up_scaled01 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %up_value01, %up_scale1 : f32
-    %product01 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %gate_silu01, %up_scaled01 : f32
+    %up_bf16_01 = scalar.fptrunc %up_scaled01 : f32 to bf16
+    %up_rounded01 = scalar.extf %up_bf16_01 : bf16 to f32
+    %product01 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %gate_silu_rounded01, %up_rounded01 : f32
     %rounded01 = scalar.fptrunc %product01 : f32 to bf16
     view.store %rounded01, %output_view[%token0, %column1] : bf16, view<[%token_capacity]x[%intermediate_size]xbf16, #dense>
     %gate_value10 = vector.extract %gate_result10[%register_index] : vector<8xf32> -> f32
@@ -122,9 +130,13 @@ kernel.def target(@id4_gfx1100) export("id4_ideogram4_mlp_gate_up_silu_product_f
     %gate_bf16_10 = scalar.fptrunc %gate_scaled10 : f32 to bf16
     %gate_rounded10 = scalar.extf %gate_bf16_10 : bf16 to f32
     %gate_silu10 = scalar.siluf %gate_rounded10 : f32
+    %gate_silu_bf16_10 = scalar.fptrunc %gate_silu10 : f32 to bf16
+    %gate_silu_rounded10 = scalar.extf %gate_silu_bf16_10 : bf16 to f32
     %up_value10 = vector.extract %up_result10[%register_index] : vector<8xf32> -> f32
     %up_scaled10 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %up_value10, %up_scale0 : f32
-    %product10 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %gate_silu10, %up_scaled10 : f32
+    %up_bf16_10 = scalar.fptrunc %up_scaled10 : f32 to bf16
+    %up_rounded10 = scalar.extf %up_bf16_10 : bf16 to f32
+    %product10 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %gate_silu_rounded10, %up_rounded10 : f32
     %rounded10 = scalar.fptrunc %product10 : f32 to bf16
     view.store %rounded10, %output_view[%token1, %column0] : bf16, view<[%token_capacity]x[%intermediate_size]xbf16, #dense>
     %gate_value11 = vector.extract %gate_result11[%register_index] : vector<8xf32> -> f32
@@ -132,9 +144,13 @@ kernel.def target(@id4_gfx1100) export("id4_ideogram4_mlp_gate_up_silu_product_f
     %gate_bf16_11 = scalar.fptrunc %gate_scaled11 : f32 to bf16
     %gate_rounded11 = scalar.extf %gate_bf16_11 : bf16 to f32
     %gate_silu11 = scalar.siluf %gate_rounded11 : f32
+    %gate_silu_bf16_11 = scalar.fptrunc %gate_silu11 : f32 to bf16
+    %gate_silu_rounded11 = scalar.extf %gate_silu_bf16_11 : bf16 to f32
     %up_value11 = vector.extract %up_result11[%register_index] : vector<8xf32> -> f32
     %up_scaled11 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %up_value11, %up_scale1 : f32
-    %product11 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %gate_silu11, %up_scaled11 : f32
+    %up_bf16_11 = scalar.fptrunc %up_scaled11 : f32 to bf16
+    %up_rounded11 = scalar.extf %up_bf16_11 : bf16 to f32
+    %product11 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %gate_silu_rounded11, %up_rounded11 : f32
     %rounded11 = scalar.fptrunc %product11 : f32 to bf16
     view.store %rounded11, %output_view[%token1, %column1] : bf16, view<[%token_capacity]x[%intermediate_size]xbf16, #dense>
   }
