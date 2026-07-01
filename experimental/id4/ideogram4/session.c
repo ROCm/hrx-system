@@ -1089,6 +1089,18 @@ static iree_status_t id4_ideogram4_validate_generation_policy(
           " is invalid",
           (uint32_t)policy.dit_weight_execution_format);
   }
+  switch (policy.qwen_weight_execution_strategy) {
+    case ID4_QWEN3_VL_WEIGHT_EXECUTION_STRATEGY_ROW_MAJOR:
+    case ID4_QWEN3_VL_WEIGHT_EXECUTION_STRATEGY_COMPACT_RHS:
+    case ID4_QWEN3_VL_WEIGHT_EXECUTION_STRATEGY_HYBRID_COMPACT_RHS:
+      break;
+    default:
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "Ideogram 4 generation Qwen weight execution strategy %" PRIu32
+          " is invalid",
+          (uint32_t)policy.qwen_weight_execution_strategy);
+  }
   switch (policy.dit_attention_implementation) {
     case ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_STREAMING:
     case ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_MATERIALIZED_WMMA:
@@ -1242,6 +1254,8 @@ static iree_status_t id4_ideogram4_plan_generation_qwen(
   memset(&qwen_options, 0, sizeof(qwen_options));
   qwen_options.structure_size = sizeof(qwen_options);
   qwen_options.request.token_count = token_count;
+  qwen_options.weight_execution_strategy =
+      options->policy.qwen_weight_execution_strategy;
   return id4_ideogram4_plan_stage(ID4_IDEOGRAM4_GENERATION_STAGE_QWEN,
                                   session->qwen_stage, &qwen_options, options,
                                   out_plan);
@@ -1362,6 +1376,8 @@ static iree_status_t id4_ideogram4_plan_generation_stages(
   plan->summary.dit_activation_format = options->policy.dit_activation_format;
   plan->summary.dit_weight_execution_format =
       options->policy.dit_weight_execution_format;
+  plan->summary.qwen_weight_execution_strategy =
+      options->policy.qwen_weight_execution_strategy;
   plan->summary.dit_attention_implementation =
       options->policy.dit_attention_implementation;
   plan->summary.dit_feed_forward_implementation =
@@ -2107,10 +2123,12 @@ iree_status_t id4_ideogram4_generation_plan_format_json(
   IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
       builder,
       ",\"dit_activation_format\":%u,\"dit_weight_execution_format\":%u,"
+      "\"qwen_weight_execution_strategy\":%u,"
       "\"dit_attention_implementation\":%u,"
       "\"dit_feed_forward_implementation\":%u,\"vae_tiling\":",
       (uint32_t)plan->summary.dit_activation_format,
       (uint32_t)plan->summary.dit_weight_execution_format,
+      (uint32_t)plan->summary.qwen_weight_execution_strategy,
       (uint32_t)plan->summary.dit_attention_implementation,
       (uint32_t)plan->summary.dit_feed_forward_implementation));
   IREE_RETURN_IF_ERROR(id4_ideogram4_generation_plan_append_tiling_json(
@@ -4477,6 +4495,17 @@ static iree_status_t id4_ideogram4_validate_qwen_issue_options(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "Qwen issue kernel library is required");
   }
+  switch (options->qwen_weight_execution_strategy) {
+    case ID4_QWEN3_VL_WEIGHT_EXECUTION_STRATEGY_ROW_MAJOR:
+    case ID4_QWEN3_VL_WEIGHT_EXECUTION_STRATEGY_COMPACT_RHS:
+    case ID4_QWEN3_VL_WEIGHT_EXECUTION_STRATEGY_HYBRID_COMPACT_RHS:
+      break;
+    default:
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "Qwen issue weight execution strategy %" PRIu32 " is invalid",
+          (uint32_t)options->qwen_weight_execution_strategy);
+  }
   const iree_host_size_t device_count = iree_hal_device_group_device_count(
       id4_pipeline_stage_services(session->qwen_stage)->device_group);
   if (options->device_index >= device_count) {
@@ -4524,6 +4553,8 @@ static iree_status_t id4_ideogram4_qwen_create_plan(
   memset(&qwen_options, 0, sizeof(qwen_options));
   qwen_options.structure_size = sizeof(qwen_options);
   qwen_options.request.token_count = inputs->token_count;
+  qwen_options.weight_execution_strategy =
+      options->qwen_weight_execution_strategy;
 
   id4_pipeline_stage_plan_options_t plan_options;
   memset(&plan_options, 0, sizeof(plan_options));

@@ -110,6 +110,8 @@ TEST(Qwen3VlStage, PlansForwardStageFromRequestConfig) {
   memset(&qwen_options, 0, sizeof(qwen_options));
   qwen_options.structure_size = sizeof(qwen_options);
   qwen_options.request.token_count = 19;
+  qwen_options.weight_execution_strategy =
+      ID4_QWEN3_VL_WEIGHT_EXECUTION_STRATEGY_ROW_MAJOR;
 
   id4_pipeline_stage_plan_options_t plan_options;
   memset(&plan_options, 0, sizeof(plan_options));
@@ -161,6 +163,8 @@ TEST(Qwen3VlStage, PlansIdeogram4ForwardBoundaryContract) {
     memset(&qwen_options, 0, sizeof(qwen_options));
     qwen_options.structure_size = sizeof(qwen_options);
     qwen_options.request.token_count = token_count;
+    qwen_options.weight_execution_strategy =
+        ID4_QWEN3_VL_WEIGHT_EXECUTION_STRATEGY_ROW_MAJOR;
 
     id4_pipeline_stage_plan_options_t plan_options;
     memset(&plan_options, 0, sizeof(plan_options));

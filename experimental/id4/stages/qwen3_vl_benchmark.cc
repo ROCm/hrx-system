@@ -25,6 +25,9 @@ IREE_FLAG(string, id4_fixture_dir, "",
           "Directory containing a Qwen3-VL fixture manifest.");
 IREE_FLAG(string, id4_plan_output_dir, "",
           "Optional directory receiving benchmark Qwen3-VL stage plan JSON.");
+IREE_FLAG(string, qwen_weight_execution_strategy, "row_major",
+          "Qwen3-VL weight execution strategy: row_major, compact_rhs, or "
+          "hybrid_compact_rhs.");
 
 namespace {
 
@@ -85,6 +88,16 @@ struct QwenBenchmarkContext {
   // Diagnostics sink passed to stage lifecycle calls.
   id4_pipeline_diagnostics_sink_t diagnostics_sink;
 };
+
+static iree_status_t ParseQwenWeightExecutionStrategy(
+    id4_qwen3_vl_weight_execution_strategy_t* out_strategy) {
+  iree_status_t status = id4_qwen3_vl_weight_execution_strategy_parse(
+      iree_make_cstring_view(FLAG_qwen_weight_execution_strategy),
+      out_strategy);
+  if (iree_status_is_ok(status)) return status;
+  return iree_status_annotate(status,
+                              IREE_SV("--qwen_weight_execution_strategy"));
+}
 
 static const QwenBenchmarkShape& QwenBenchmarkShapeFromDef(
     const iree_benchmark_def_t* benchmark_def) {
@@ -182,6 +195,8 @@ static iree_status_t CreateQwenPlan(QwenBenchmarkContext* context,
   std::memset(&qwen_options, 0, sizeof(qwen_options));
   qwen_options.structure_size = sizeof(qwen_options);
   qwen_options.request = request;
+  IREE_RETURN_IF_ERROR(ParseQwenWeightExecutionStrategy(
+      &qwen_options.weight_execution_strategy));
 
   id4_pipeline_stage_plan_options_t plan_options;
   std::memset(&plan_options, 0, sizeof(plan_options));
@@ -240,15 +255,23 @@ static uint64_t CeilMiB(iree_device_size_t byte_length) {
 static void SetQwenBenchmarkLabel(
     iree_benchmark_state_t* benchmark_state, uint32_t token_count,
     const id4_pipeline_plan_statistics_t& statistics) {
+  id4_qwen3_vl_weight_execution_strategy_t weight_execution_strategy =
+      ID4_QWEN3_VL_WEIGHT_EXECUTION_STRATEGY_INVALID;
+  IREE_CHECK_OK(ParseQwenWeightExecutionStrategy(&weight_execution_strategy));
+  iree_string_view_t weight_execution_strategy_name =
+      id4_qwen3_vl_weight_execution_strategy_name(weight_execution_strategy);
   char label[512];
   std::snprintf(
       label, sizeof(label),
-      "tokens=%" PRIu32 " param_total=%" PRIu64 "MiB param_largest=%" PRIu64
-      "MiB param_source=%" PRIu64 "MiB param_source_direct=%" PRIu64
-      "MiB param_source_encoded=%" PRIu64 "MiB param_load_steps[gather=%" PRIhsz
-      ",encode=%" PRIhsz "] local_hw=%" PRIu64 "MiB boundary=%" PRIu64
-      "MiB kernels=%" PRIhsz " dispatches=%" PRIhsz,
-      token_count, CeilMiB(statistics.parameter_slab_byte_length),
+      "tokens=%" PRIu32 " weights=%.*s param_total=%" PRIu64
+      "MiB param_largest=%" PRIu64 "MiB param_source=%" PRIu64
+      "MiB param_source_direct=%" PRIu64 "MiB param_source_encoded=%" PRIu64
+      "MiB param_load_steps[gather=%" PRIhsz ",encode=%" PRIhsz
+      "] local_hw=%" PRIu64 "MiB boundary=%" PRIu64 "MiB kernels=%" PRIhsz
+      " dispatches=%" PRIhsz,
+      token_count, static_cast<int>(weight_execution_strategy_name.size),
+      weight_execution_strategy_name.data,
+      CeilMiB(statistics.parameter_slab_byte_length),
       CeilMiB(statistics.largest_parameter_slab_byte_length),
       CeilMiB(statistics.parameter_source_byte_length),
       CeilMiB(statistics.parameter_direct_source_byte_length),

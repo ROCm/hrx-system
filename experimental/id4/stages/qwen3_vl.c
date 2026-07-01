@@ -150,6 +150,7 @@ static iree_status_t id4_qwen3_vl_stage_emit_lifecycle(
 
 static iree_status_t id4_qwen3_vl_stage_author_program(
     const id4_qwen3_vl_stage_t* stage, id4_qwen3_vl_request_config_t request,
+    id4_qwen3_vl_weight_execution_strategy_t weight_execution_strategy,
     iree_string_view_list_t diagnostic_tap_names,
     iree_allocator_t host_allocator, id4_pipeline_program_t** out_program) {
   IREE_ASSERT_ARGUMENT(out_program);
@@ -174,6 +175,7 @@ static iree_status_t id4_qwen3_vl_stage_author_program(
     program_options.parameter_scope = stage->parameter_scope;
     program_options.model = stage->model;
     program_options.request = request;
+    program_options.weight_execution_strategy = weight_execution_strategy;
     program_options.diagnostic_tap_names = diagnostic_tap_names;
     status = id4_qwen3_vl_program_author_forward(&program_options, builder);
   }
@@ -207,6 +209,17 @@ static iree_status_t id4_qwen3_vl_stage_parse_plan_extension(
   if (qwen_options->request.token_count == 0) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "Qwen3-VL plan token count must be nonzero");
+  }
+  switch (qwen_options->weight_execution_strategy) {
+    case ID4_QWEN3_VL_WEIGHT_EXECUTION_STRATEGY_ROW_MAJOR:
+    case ID4_QWEN3_VL_WEIGHT_EXECUTION_STRATEGY_COMPACT_RHS:
+    case ID4_QWEN3_VL_WEIGHT_EXECUTION_STRATEGY_HYBRID_COMPACT_RHS:
+      break;
+    default:
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "Qwen3-VL plan weight execution strategy %" PRIu32 " is invalid",
+          (uint32_t)qwen_options->weight_execution_strategy);
   }
   *out_qwen_options = qwen_options;
   return iree_ok_status();
@@ -254,8 +267,8 @@ static iree_status_t id4_qwen3_vl_stage_plan(
 
   id4_pipeline_program_t* program = NULL;
   iree_status_t status = id4_qwen3_vl_stage_author_program(
-      stage, qwen_options->request, options->diagnostic_tap_names,
-      stage->host_allocator, &program);
+      stage, qwen_options->request, qwen_options->weight_execution_strategy,
+      options->diagnostic_tap_names, stage->host_allocator, &program);
   if (iree_status_is_ok(status)) {
     status = id4_qwen3_vl_stage_create_program_plan(stage, options, program,
                                                     out_plan);

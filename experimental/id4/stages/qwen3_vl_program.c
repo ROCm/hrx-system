@@ -64,6 +64,42 @@ static const id4_qwen3_vl_model_config_t
             id4_qwen3_vl_program_ideogram4_selected_layers,
 };
 
+iree_status_t id4_qwen3_vl_weight_execution_strategy_parse(
+    iree_string_view_t value,
+    id4_qwen3_vl_weight_execution_strategy_t* out_strategy) {
+  IREE_ASSERT_ARGUMENT(out_strategy);
+  if (iree_string_view_equal(value, IREE_SV("row_major"))) {
+    *out_strategy = ID4_QWEN3_VL_WEIGHT_EXECUTION_STRATEGY_ROW_MAJOR;
+    return iree_ok_status();
+  }
+  if (iree_string_view_equal(value, IREE_SV("compact_rhs"))) {
+    *out_strategy = ID4_QWEN3_VL_WEIGHT_EXECUTION_STRATEGY_COMPACT_RHS;
+    return iree_ok_status();
+  }
+  if (iree_string_view_equal(value, IREE_SV("hybrid_compact_rhs"))) {
+    *out_strategy = ID4_QWEN3_VL_WEIGHT_EXECUTION_STRATEGY_HYBRID_COMPACT_RHS;
+    return iree_ok_status();
+  }
+  return iree_make_status(
+      IREE_STATUS_INVALID_ARGUMENT,
+      "Qwen3-VL weight execution strategy must be row_major, compact_rhs, or "
+      "hybrid_compact_rhs");
+}
+
+iree_string_view_t id4_qwen3_vl_weight_execution_strategy_name(
+    id4_qwen3_vl_weight_execution_strategy_t strategy) {
+  switch (strategy) {
+    case ID4_QWEN3_VL_WEIGHT_EXECUTION_STRATEGY_ROW_MAJOR:
+      return IREE_SV("row_major");
+    case ID4_QWEN3_VL_WEIGHT_EXECUTION_STRATEGY_COMPACT_RHS:
+      return IREE_SV("compact_rhs");
+    case ID4_QWEN3_VL_WEIGHT_EXECUTION_STRATEGY_HYBRID_COMPACT_RHS:
+      return IREE_SV("hybrid_compact_rhs");
+    default:
+      return IREE_SV("invalid");
+  }
+}
+
 static iree_status_t id4_qwen3_vl_program_validate_options_size(
     iree_host_size_t actual_size, iree_host_size_t expected_size,
     iree_string_view_t options_name) {
@@ -376,6 +412,17 @@ static iree_status_t id4_qwen3_vl_program_validate_options(
         IREE_STATUS_OUT_OF_RANGE,
         "Qwen3-VL token count %" PRIu32 " exceeds model maximum %" PRIu32,
         options->request.token_count, options->model.max_token_count);
+  }
+  switch (options->weight_execution_strategy) {
+    case ID4_QWEN3_VL_WEIGHT_EXECUTION_STRATEGY_ROW_MAJOR:
+    case ID4_QWEN3_VL_WEIGHT_EXECUTION_STRATEGY_COMPACT_RHS:
+    case ID4_QWEN3_VL_WEIGHT_EXECUTION_STRATEGY_HYBRID_COMPACT_RHS:
+      break;
+    default:
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "Qwen3-VL weight execution strategy %" PRIu32
+                              " is invalid",
+                              (uint32_t)options->weight_execution_strategy);
   }
   return id4_qwen3_vl_program_validate_model_config(&options->model);
 }
@@ -798,6 +845,71 @@ typedef struct id4_qwen3_vl_program_linear_kernel_selection_t {
   // Parameter encoding required by the selected kernel.
   id4_pipeline_program_parameter_encoding_t weight_encoding;
 } id4_qwen3_vl_program_linear_kernel_selection_t;
+
+static bool id4_qwen3_vl_program_kernel_kind_is_valid(
+    id4_qwen3_vl_kernel_kind_t kernel_kind) {
+  return kernel_kind !=
+         (id4_qwen3_vl_kernel_kind_t)ID4_QWEN3_VL_KERNEL_KIND_COUNT;
+}
+
+static iree_status_t id4_qwen3_vl_program_select_linear_kernel(
+    id4_qwen3_vl_weight_execution_strategy_t strategy,
+    id4_qwen3_vl_kernel_kind_t direct_kernel_kind,
+    id4_qwen3_vl_kernel_kind_t compact_rhs_kernel_kind,
+    id4_qwen3_vl_program_linear_kernel_selection_t* out_selection) {
+  switch (strategy) {
+    case ID4_QWEN3_VL_WEIGHT_EXECUTION_STRATEGY_ROW_MAJOR:
+      if (!id4_qwen3_vl_program_kernel_kind_is_valid(direct_kernel_kind)) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "Qwen3-VL row-major weight execution strategy is not supported by "
+            "the selected linear tile");
+      }
+      out_selection->kernel_kind = direct_kernel_kind;
+      out_selection->weight_encoding =
+          ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_DIRECT;
+      return iree_ok_status();
+    case ID4_QWEN3_VL_WEIGHT_EXECUTION_STRATEGY_COMPACT_RHS:
+      if (!id4_qwen3_vl_program_kernel_kind_is_valid(compact_rhs_kernel_kind)) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "Qwen3-VL compact-RHS weight execution "
+                                "strategy is not supported by "
+                                "the selected linear tile");
+      }
+      out_selection->kernel_kind = compact_rhs_kernel_kind;
+      out_selection->weight_encoding =
+          ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_BF16_LINEAR_RHS_TILE;
+      return iree_ok_status();
+    case ID4_QWEN3_VL_WEIGHT_EXECUTION_STRATEGY_HYBRID_COMPACT_RHS:
+      if (id4_qwen3_vl_program_kernel_kind_is_valid(compact_rhs_kernel_kind)) {
+        out_selection->kernel_kind = compact_rhs_kernel_kind;
+        out_selection->weight_encoding =
+            ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_BF16_LINEAR_RHS_TILE;
+        return iree_ok_status();
+      }
+      if (id4_qwen3_vl_program_kernel_kind_is_valid(direct_kernel_kind)) {
+        out_selection->kernel_kind = direct_kernel_kind;
+        out_selection->weight_encoding =
+            ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_DIRECT;
+        return iree_ok_status();
+      }
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "Qwen3-VL hybrid compact-RHS weight execution strategy is not "
+          "supported by the selected linear tile");
+    default:
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "Qwen3-VL weight execution strategy %" PRIu32
+                              " is invalid",
+                              (uint32_t)strategy);
+  }
+}
+
+static bool id4_qwen3_vl_program_selection_uses_compact_rhs(
+    const id4_qwen3_vl_program_linear_kernel_selection_t* selection) {
+  return selection->weight_encoding ==
+         ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_BF16_LINEAR_RHS_TILE;
+}
 
 static const id4_qwen3_vl_program_linear_wmma_tile_t
     id4_qwen3_vl_program_linear_wmma_m32n32_tile = {
@@ -2528,20 +2640,38 @@ static iree_status_t id4_qwen3_vl_program_author_linear(
   const uint32_t wmma_token_count =
       wmma_tile ? token_capacity - (token_capacity % wmma_tile->token_block)
                 : 0;
-  const bool uses_compact_rhs =
-      wmma_tile &&
-      wmma_tile->kernels.compact_rhs_output_kernel_kind !=
-          (id4_qwen3_vl_kernel_kind_t)ID4_QWEN3_VL_KERNEL_KIND_COUNT &&
-      wmma_token_count == token_capacity;
-  const id4_pipeline_program_parameter_encoding_t weight_encoding =
-      uses_compact_rhs
-          ? ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_BF16_LINEAR_RHS_TILE
-          : ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_DIRECT;
+  id4_qwen3_vl_program_linear_kernel_selection_t wmma_selection = {
+      // Kernel kind selected when a WMMA tile covers at least one row.
+      .kernel_kind = (id4_qwen3_vl_kernel_kind_t)ID4_QWEN3_VL_KERNEL_KIND_COUNT,
+      // Parameter encoding used by row-major scalar or WMMA paths.
+      .weight_encoding = ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_DIRECT,
+  };
+  if (options->weight_execution_strategy ==
+      ID4_QWEN3_VL_WEIGHT_EXECUTION_STRATEGY_COMPACT_RHS) {
+    if (!wmma_tile || wmma_token_count != token_capacity) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "Qwen3-VL compact-RHS linear weight execution requires full WMMA "
+          "coverage");
+    }
+  }
+  id4_qwen3_vl_weight_execution_strategy_t wmma_strategy =
+      options->weight_execution_strategy;
+  if (wmma_strategy ==
+          ID4_QWEN3_VL_WEIGHT_EXECUTION_STRATEGY_HYBRID_COMPACT_RHS &&
+      (!wmma_tile || wmma_token_count != token_capacity)) {
+    wmma_strategy = ID4_QWEN3_VL_WEIGHT_EXECUTION_STRATEGY_ROW_MAJOR;
+  }
+  if (wmma_token_count != 0) {
+    IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_select_linear_kernel(
+        wmma_strategy, wmma_tile->kernels.direct_output_kernel_kind,
+        wmma_tile->kernels.compact_rhs_output_kernel_kind, &wmma_selection));
+  }
 
   id4_pipeline_program_tensor_t weight = id4_pipeline_program_tensor_invalid();
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_parameter_bf16_linear_weight(
       builder, options->parameter_scope, parameter_kind, layer_ordinal,
-      input_size, output_size, weight_encoding, &weight));
+      input_size, output_size, wmma_selection.weight_encoding, &weight));
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_acquire_tensor(
       builder, output_kind, layer_ordinal, ID4_PIPELINE_PROGRAM_DTYPE_BF16,
       id4_pipeline_program_make_shape_rank2(token_capacity, output_size),
@@ -2576,11 +2706,10 @@ static iree_status_t id4_qwen3_vl_program_author_linear(
     iree_string_view_t wmma_name = iree_string_view_empty();
     IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_format_child_name(
         operation_name,
-        uses_compact_rhs ? IREE_SV("wmma_compact_rhs") : IREE_SV("wmma"),
+        id4_qwen3_vl_program_selection_uses_compact_rhs(&wmma_selection)
+            ? IREE_SV("wmma_compact_rhs")
+            : IREE_SV("wmma"),
         wmma_name_buffer, IREE_ARRAYSIZE(wmma_name_buffer), &wmma_name));
-    const id4_qwen3_vl_kernel_kind_t wmma_kernel_kind =
-        uses_compact_rhs ? wmma_tile->kernels.compact_rhs_output_kernel_kind
-                         : wmma_tile->kernels.direct_output_kernel_kind;
     const id4_qwen3_vl_program_config_value_t wmma_config_values[] = {
         {ID4_QWEN3_VL_CONFIG_DISPATCH_TOKEN_COUNT, wmma_token_count},
         {ID4_QWEN3_VL_CONFIG_INPUT_SIZE, input_size},
@@ -2591,7 +2720,7 @@ static iree_status_t id4_qwen3_vl_program_author_linear(
     id4_pipeline_kernel_config_binding_t
         wmma_config_bindings[ID4_QWEN3_VL_MAX_KERNEL_CONFIG_BINDING_COUNT];
     IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_make_config_bindings(
-        wmma_kernel_kind, IREE_ARRAYSIZE(wmma_config_values),
+        wmma_selection.kernel_kind, IREE_ARRAYSIZE(wmma_config_values),
         wmma_config_values, wmma_value_buffers, wmma_config_bindings));
     id4_pipeline_program_dispatch_binding_t wmma_bindings[] = {
         id4_pipeline_program_read(input),
@@ -2599,7 +2728,7 @@ static iree_status_t id4_qwen3_vl_program_author_linear(
         id4_pipeline_program_write_range(*out_output, 0, wmma_byte_length),
     };
     IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_dispatch_named(
-        builder, wmma_name, wmma_kernel_kind,
+        builder, wmma_name, wmma_selection.kernel_kind,
         IREE_ARRAYSIZE(wmma_config_values), wmma_config_bindings,
         IREE_ARRAYSIZE(wmma_bindings), wmma_bindings));
 
@@ -2682,23 +2811,48 @@ static bool id4_qwen3_vl_program_select_value_projection_packed_kernel(
   if (!wmma_tile || (token_capacity % wmma_tile->token_block) != 0) {
     return false;
   }
-  if (wmma_tile->kernels.compact_rhs_transposed_output_kernel_kind !=
-      (id4_qwen3_vl_kernel_kind_t)ID4_QWEN3_VL_KERNEL_KIND_COUNT) {
-    out_selection->kernel_kind =
-        wmma_tile->kernels.compact_rhs_transposed_output_kernel_kind;
-    out_selection->weight_encoding =
-        ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_BF16_LINEAR_RHS_TILE;
-    return true;
+  switch (options->weight_execution_strategy) {
+    case ID4_QWEN3_VL_WEIGHT_EXECUTION_STRATEGY_ROW_MAJOR:
+      if (!id4_qwen3_vl_program_kernel_kind_is_valid(
+              wmma_tile->kernels.direct_transposed_output_kernel_kind)) {
+        return false;
+      }
+      out_selection->kernel_kind =
+          wmma_tile->kernels.direct_transposed_output_kernel_kind;
+      out_selection->weight_encoding =
+          ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_DIRECT;
+      return true;
+    case ID4_QWEN3_VL_WEIGHT_EXECUTION_STRATEGY_COMPACT_RHS:
+      if (!id4_qwen3_vl_program_kernel_kind_is_valid(
+              wmma_tile->kernels.compact_rhs_transposed_output_kernel_kind)) {
+        return false;
+      }
+      out_selection->kernel_kind =
+          wmma_tile->kernels.compact_rhs_transposed_output_kernel_kind;
+      out_selection->weight_encoding =
+          ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_BF16_LINEAR_RHS_TILE;
+      return true;
+    case ID4_QWEN3_VL_WEIGHT_EXECUTION_STRATEGY_HYBRID_COMPACT_RHS:
+      if (id4_qwen3_vl_program_kernel_kind_is_valid(
+              wmma_tile->kernels.compact_rhs_transposed_output_kernel_kind)) {
+        out_selection->kernel_kind =
+            wmma_tile->kernels.compact_rhs_transposed_output_kernel_kind;
+        out_selection->weight_encoding =
+            ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_BF16_LINEAR_RHS_TILE;
+        return true;
+      }
+      if (id4_qwen3_vl_program_kernel_kind_is_valid(
+              wmma_tile->kernels.direct_transposed_output_kernel_kind)) {
+        out_selection->kernel_kind =
+            wmma_tile->kernels.direct_transposed_output_kernel_kind;
+        out_selection->weight_encoding =
+            ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_DIRECT;
+        return true;
+      }
+      return false;
+    default:
+      return false;
   }
-  if (wmma_tile->kernels.direct_transposed_output_kernel_kind !=
-      (id4_qwen3_vl_kernel_kind_t)ID4_QWEN3_VL_KERNEL_KIND_COUNT) {
-    out_selection->kernel_kind =
-        wmma_tile->kernels.direct_transposed_output_kernel_kind;
-    out_selection->weight_encoding =
-        ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_DIRECT;
-    return true;
-  }
-  return false;
 }
 
 static bool id4_qwen3_vl_program_can_author_value_projection_packed(
@@ -3239,30 +3393,38 @@ static iree_status_t id4_qwen3_vl_program_author_mlp_gate_up_silu_product(
                             " must be a multiple of tile size %" PRIu32,
                             token_capacity, wmma_tile->token_block);
   }
-  const bool uses_compact_rhs =
-      wmma_tile->compact_rhs_kernel_kind !=
-          (id4_qwen3_vl_kernel_kind_t)ID4_QWEN3_VL_KERNEL_KIND_COUNT &&
-      token_capacity >= wmma_tile->compact_rhs_min_token_count;
-  const id4_qwen3_vl_kernel_kind_t kernel_kind =
-      uses_compact_rhs ? wmma_tile->compact_rhs_kernel_kind
-                       : wmma_tile->direct_kernel_kind;
-  const id4_pipeline_program_parameter_encoding_t weight_encoding =
-      uses_compact_rhs
-          ? ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_BF16_LINEAR_RHS_TILE
-          : ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_DIRECT;
+  if (options->weight_execution_strategy ==
+          ID4_QWEN3_VL_WEIGHT_EXECUTION_STRATEGY_COMPACT_RHS &&
+      token_capacity < wmma_tile->compact_rhs_min_token_count) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "Qwen3-VL compact-RHS fused MLP weight execution requires token "
+        "capacity at least %" PRIu32,
+        wmma_tile->compact_rhs_min_token_count);
+  }
+  id4_qwen3_vl_weight_execution_strategy_t strategy =
+      options->weight_execution_strategy;
+  if (strategy == ID4_QWEN3_VL_WEIGHT_EXECUTION_STRATEGY_HYBRID_COMPACT_RHS &&
+      token_capacity < wmma_tile->compact_rhs_min_token_count) {
+    strategy = ID4_QWEN3_VL_WEIGHT_EXECUTION_STRATEGY_ROW_MAJOR;
+  }
+  id4_qwen3_vl_program_linear_kernel_selection_t selection;
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_select_linear_kernel(
+      strategy, wmma_tile->direct_kernel_kind,
+      wmma_tile->compact_rhs_kernel_kind, &selection));
 
   id4_pipeline_program_tensor_t gate_weight =
       id4_pipeline_program_tensor_invalid();
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_parameter_bf16_linear_weight(
       builder, options->parameter_scope,
       ID4_QWEN3_VL_PARAMETER_LAYER_GATE_PROJECTION, layer_ordinal, hidden_size,
-      intermediate_size, weight_encoding, &gate_weight));
+      intermediate_size, selection.weight_encoding, &gate_weight));
   id4_pipeline_program_tensor_t up_weight =
       id4_pipeline_program_tensor_invalid();
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_parameter_bf16_linear_weight(
       builder, options->parameter_scope,
       ID4_QWEN3_VL_PARAMETER_LAYER_UP_PROJECTION, layer_ordinal, hidden_size,
-      intermediate_size, weight_encoding, &up_weight));
+      intermediate_size, selection.weight_encoding, &up_weight));
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_acquire_tensor(
       builder, ID4_QWEN3_VL_TENSOR_LAYER_MLP_ACTIVATION, layer_ordinal,
       ID4_PIPELINE_PROGRAM_DTYPE_BF16,
@@ -3279,8 +3441,8 @@ static iree_status_t id4_qwen3_vl_program_author_mlp_gate_up_silu_product(
   id4_pipeline_kernel_config_binding_t
       config_bindings[ID4_QWEN3_VL_MAX_KERNEL_CONFIG_BINDING_COUNT];
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_make_config_bindings(
-      kernel_kind, IREE_ARRAYSIZE(config_values), config_values, value_buffers,
-      config_bindings));
+      selection.kernel_kind, IREE_ARRAYSIZE(config_values), config_values,
+      value_buffers, config_bindings));
   id4_pipeline_program_dispatch_binding_t bindings[] = {
       id4_pipeline_program_read(input),
       id4_pipeline_program_read(gate_weight),
@@ -3289,7 +3451,7 @@ static iree_status_t id4_qwen3_vl_program_author_mlp_gate_up_silu_product(
   };
   return id4_qwen3_vl_program_dispatch(
       builder, ID4_QWEN3_VL_OPERATION_SILU_GATE, layer_ordinal,
-      ID4_QWEN3_VL_OPERATION_SITE_MLP, kernel_kind,
+      ID4_QWEN3_VL_OPERATION_SITE_MLP, selection.kernel_kind,
       IREE_ARRAYSIZE(config_values), config_bindings, IREE_ARRAYSIZE(bindings),
       bindings);
 }
@@ -3333,8 +3495,25 @@ static iree_status_t id4_qwen3_vl_program_author_silu_gate(
 
 static bool id4_qwen3_vl_program_can_author_mlp_down_residual(
     const id4_qwen3_vl_program_options_t* options, uint32_t token_capacity) {
-  return id4_qwen3_vl_program_select_mlp_down_residual_wmma_tile(
-             options, token_capacity) != NULL;
+  const id4_qwen3_vl_program_linear_wmma_tile_t* wmma_tile =
+      id4_qwen3_vl_program_select_mlp_down_residual_wmma_tile(options,
+                                                              token_capacity);
+  if (!wmma_tile) return false;
+  switch (options->weight_execution_strategy) {
+    case ID4_QWEN3_VL_WEIGHT_EXECUTION_STRATEGY_ROW_MAJOR:
+      return id4_qwen3_vl_program_kernel_kind_is_valid(
+          wmma_tile->kernels.direct_output_kernel_kind);
+    case ID4_QWEN3_VL_WEIGHT_EXECUTION_STRATEGY_COMPACT_RHS:
+      return id4_qwen3_vl_program_kernel_kind_is_valid(
+          wmma_tile->kernels.compact_rhs_output_kernel_kind);
+    case ID4_QWEN3_VL_WEIGHT_EXECUTION_STRATEGY_HYBRID_COMPACT_RHS:
+      return id4_qwen3_vl_program_kernel_kind_is_valid(
+                 wmma_tile->kernels.compact_rhs_output_kernel_kind) ||
+             id4_qwen3_vl_program_kernel_kind_is_valid(
+                 wmma_tile->kernels.direct_output_kernel_kind);
+    default:
+      return false;
+  }
 }
 
 static iree_status_t id4_qwen3_vl_program_author_mlp_down_residual(
@@ -3358,21 +3537,16 @@ static iree_status_t id4_qwen3_vl_program_author_mlp_down_residual(
         "Qwen3-VL fused MLP down residual requires a supported WMMA tile");
   }
 
-  const bool uses_compact_rhs =
-      wmma_tile->kernels.compact_rhs_output_kernel_kind !=
-      (id4_qwen3_vl_kernel_kind_t)ID4_QWEN3_VL_KERNEL_KIND_COUNT;
-  const id4_qwen3_vl_kernel_kind_t kernel_kind =
-      uses_compact_rhs ? wmma_tile->kernels.compact_rhs_output_kernel_kind
-                       : wmma_tile->kernels.direct_output_kernel_kind;
-  const id4_pipeline_program_parameter_encoding_t weight_encoding =
-      uses_compact_rhs
-          ? ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_BF16_LINEAR_RHS_TILE
-          : ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_DIRECT;
+  id4_qwen3_vl_program_linear_kernel_selection_t selection;
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_select_linear_kernel(
+      options->weight_execution_strategy,
+      wmma_tile->kernels.direct_output_kernel_kind,
+      wmma_tile->kernels.compact_rhs_output_kernel_kind, &selection));
   id4_pipeline_program_tensor_t weight = id4_pipeline_program_tensor_invalid();
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_parameter_bf16_linear_weight(
       builder, options->parameter_scope,
       ID4_QWEN3_VL_PARAMETER_LAYER_DOWN_PROJECTION, layer_ordinal,
-      intermediate_size, hidden_size, weight_encoding, &weight));
+      intermediate_size, hidden_size, selection.weight_encoding, &weight));
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_acquire_tensor(
       builder, ID4_QWEN3_VL_TENSOR_LAYER_OUTPUT, layer_ordinal,
       ID4_PIPELINE_PROGRAM_DTYPE_BF16,
@@ -3390,8 +3564,8 @@ static iree_status_t id4_qwen3_vl_program_author_mlp_down_residual(
   id4_pipeline_kernel_config_binding_t
       config_bindings[ID4_QWEN3_VL_MAX_KERNEL_CONFIG_BINDING_COUNT];
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_make_config_bindings(
-      kernel_kind, IREE_ARRAYSIZE(config_values), config_values, value_buffers,
-      config_bindings));
+      selection.kernel_kind, IREE_ARRAYSIZE(config_values), config_values,
+      value_buffers, config_bindings));
   id4_pipeline_program_dispatch_binding_t bindings[] = {
       id4_pipeline_program_read(activation),
       id4_pipeline_program_read(weight),
@@ -3400,7 +3574,7 @@ static iree_status_t id4_qwen3_vl_program_author_mlp_down_residual(
   };
   return id4_qwen3_vl_program_dispatch(
       builder, ID4_QWEN3_VL_OPERATION_LINEAR, layer_ordinal,
-      ID4_QWEN3_VL_OPERATION_SITE_MLP_DOWN_PROJECTION, kernel_kind,
+      ID4_QWEN3_VL_OPERATION_SITE_MLP_DOWN_PROJECTION, selection.kernel_kind,
       IREE_ARRAYSIZE(config_values), config_bindings, IREE_ARRAYSIZE(bindings),
       bindings);
 }

@@ -98,6 +98,8 @@ static id4_ideogram4_generation_plan_policy_t MakeGenerationPolicy() {
       ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT;
   policy.dit_weight_execution_format =
       ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_BF16_RESIDENT;
+  policy.qwen_weight_execution_strategy =
+      ID4_QWEN3_VL_WEIGHT_EXECUTION_STRATEGY_ROW_MAJOR;
   policy.dit_attention_implementation =
       ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_ONLINE_WMMA;
   policy.dit_feed_forward_implementation =
@@ -791,6 +793,8 @@ TEST_F(SessionTest, PlansFp8E4m3DitSources) {
             ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT);
   EXPECT_EQ(summary.dit_weight_execution_format,
             ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_BF16_RESIDENT);
+  EXPECT_EQ(summary.qwen_weight_execution_strategy,
+            ID4_QWEN3_VL_WEIGHT_EXECUTION_STRATEGY_ROW_MAJOR);
   EXPECT_EQ(summary.dit_attention_implementation,
             ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_ONLINE_WMMA);
   EXPECT_EQ(summary.dit_feed_forward_implementation,

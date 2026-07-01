@@ -15,6 +15,7 @@
 #include "experimental/id4/pipeline/stage.h"
 #include "experimental/id4/stages/ideogram4_dit_parameters.h"
 #include "experimental/id4/stages/ideogram4_dit_program.h"
+#include "experimental/id4/stages/qwen3_vl_program.h"
 #include "experimental/id4/stages/vae_program.h"
 #include "iree/base/api.h"
 #include "iree/hal/api.h"
@@ -100,6 +101,8 @@ typedef struct id4_ideogram4_generation_plan_policy_t {
   id4_ideogram4_dit_activation_format_t dit_activation_format;
   // Execution storage strategy selected for DiT linear weights.
   id4_ideogram4_dit_weight_execution_format_t dit_weight_execution_format;
+  // Execution storage strategy selected for Qwen3-VL linear weights.
+  id4_qwen3_vl_weight_execution_strategy_t qwen_weight_execution_strategy;
   // Attention implementation selected for DiT transformer blocks.
   id4_ideogram4_dit_attention_implementation_t dit_attention_implementation;
   // Feed-forward implementation selected for DiT transformer blocks.
@@ -170,6 +173,8 @@ typedef struct id4_ideogram4_generation_plan_summary_t {
   id4_ideogram4_dit_activation_format_t dit_activation_format;
   // DiT linear weight execution strategy selected by the plan.
   id4_ideogram4_dit_weight_execution_format_t dit_weight_execution_format;
+  // Qwen3-VL linear weight execution strategy selected by the plan.
+  id4_qwen3_vl_weight_execution_strategy_t qwen_weight_execution_strategy;
   // DiT attention implementation selected by the plan.
   id4_ideogram4_dit_attention_implementation_t dit_attention_implementation;
   // DiT feed-forward implementation selected by the plan.
@@ -432,6 +437,8 @@ typedef struct id4_ideogram4_qwen_issue_options_t {
   iree_hal_queue_affinity_t queue_affinity;
   // HAL command-buffer mode used when preparing reusable regions.
   iree_hal_command_buffer_mode_t command_buffer_mode;
+  // Linear weight execution strategy selected for Qwen3-VL.
+  id4_qwen3_vl_weight_execution_strategy_t qwen_weight_execution_strategy;
   // Caller-owned diagnostic tap names to capture.
   iree_string_view_list_t diagnostic_tap_names;
   // Semaphores that preparation, input upload, and execution wait on.

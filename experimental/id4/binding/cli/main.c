@@ -42,6 +42,9 @@ IREE_FLAG(string, dit_activation_format, "bf16_linear_input",
 IREE_FLAG(string, dit_weight_execution_format, "bf16_resident",
           "DiT weight execution format: bf16_resident, fp8_direct, or "
           "fp8_direct_feed_forward_bf16_resident.");
+IREE_FLAG(string, qwen_weight_execution_strategy, "row_major",
+          "Qwen3-VL weight execution strategy: row_major, compact_rhs, or "
+          "hybrid_compact_rhs.");
 IREE_FLAG(string, dit_attention_implementation, "online_wmma",
           "DiT attention implementation: streaming, materialized_wmma, "
           "blocked_wmma, or online_wmma.");
@@ -214,6 +217,16 @@ static iree_status_t id4_cli_parse_dit_weight_execution_format(
       iree_make_cstring_view(FLAG_dit_weight_execution_format), out_format);
   if (iree_status_is_ok(status)) return status;
   return iree_status_annotate(status, IREE_SV("--dit_weight_execution_format"));
+}
+
+static iree_status_t id4_cli_parse_qwen_weight_execution_strategy(
+    id4_qwen3_vl_weight_execution_strategy_t* out_strategy) {
+  iree_status_t status = id4_qwen3_vl_weight_execution_strategy_parse(
+      iree_make_cstring_view(FLAG_qwen_weight_execution_strategy),
+      out_strategy);
+  if (iree_status_is_ok(status)) return status;
+  return iree_status_annotate(status,
+                              IREE_SV("--qwen_weight_execution_strategy"));
 }
 
 static iree_status_t id4_cli_parse_dit_attention_implementation(
@@ -1327,6 +1340,8 @@ static iree_status_t id4_cli_make_generation_plan_policy(
       id4_cli_parse_dit_activation_format(&policy.dit_activation_format));
   IREE_RETURN_IF_ERROR(id4_cli_parse_dit_weight_execution_format(
       &policy.dit_weight_execution_format));
+  IREE_RETURN_IF_ERROR(id4_cli_parse_qwen_weight_execution_strategy(
+      &policy.qwen_weight_execution_strategy));
   IREE_RETURN_IF_ERROR(id4_cli_parse_dit_attention_implementation(
       &policy.dit_attention_implementation));
   IREE_RETURN_IF_ERROR(id4_cli_parse_dit_feed_forward_implementation(

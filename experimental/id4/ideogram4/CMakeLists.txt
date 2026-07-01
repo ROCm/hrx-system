@@ -44,6 +44,7 @@ iree_cc_library(
     iree::experimental::id4::stages::ideogram4_dit_parameters
     iree::experimental::id4::stages::ideogram4_dit_program
     iree::experimental::id4::stages::qwen3_vl
+    iree::experimental::id4::stages::qwen3_vl_program
     iree::experimental::id4::stages::sampler
     iree::experimental::id4::stages::vae_program
     iree::hal

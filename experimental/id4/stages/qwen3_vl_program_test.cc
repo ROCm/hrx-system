@@ -55,6 +55,9 @@ static id4_qwen3_vl_program_options_t MakeProgramOptions(uint32_t layer_count) {
           // Number of token positions.
           /*.token_count=*/19,
       },
+      // Linear weight execution strategy selected for this program.
+      /*.weight_execution_strategy=*/
+      ID4_QWEN3_VL_WEIGHT_EXECUTION_STRATEGY_ROW_MAJOR,
       // Diagnostic tap names requested by the caller.
       /*.diagnostic_tap_names=*/iree_string_view_list_empty(),
   };
@@ -86,6 +89,35 @@ TEST(Qwen3VLProgramTest, RejectsInvalidBf16TokenCapacityInputs) {
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
       id4_qwen3_vl_program_calculate_bf16_token_capacity(1, nullptr));
+}
+
+TEST(Qwen3VLProgramTest, ParsesWeightExecutionStrategyNames) {
+  struct StrategyCase {
+    iree_string_view_t value;
+    id4_qwen3_vl_weight_execution_strategy_t strategy;
+  };
+  const StrategyCase cases[] = {
+      {IREE_SV("row_major"), ID4_QWEN3_VL_WEIGHT_EXECUTION_STRATEGY_ROW_MAJOR},
+      {IREE_SV("compact_rhs"),
+       ID4_QWEN3_VL_WEIGHT_EXECUTION_STRATEGY_COMPACT_RHS},
+      {IREE_SV("hybrid_compact_rhs"),
+       ID4_QWEN3_VL_WEIGHT_EXECUTION_STRATEGY_HYBRID_COMPACT_RHS},
+  };
+  for (const StrategyCase& test_case : cases) {
+    id4_qwen3_vl_weight_execution_strategy_t parsed_strategy =
+        ID4_QWEN3_VL_WEIGHT_EXECUTION_STRATEGY_INVALID;
+    IREE_ASSERT_OK(id4_qwen3_vl_weight_execution_strategy_parse(
+        test_case.value, &parsed_strategy));
+    EXPECT_EQ(parsed_strategy, test_case.strategy);
+    EXPECT_TRUE(iree_string_view_equal(
+        id4_qwen3_vl_weight_execution_strategy_name(test_case.strategy),
+        test_case.value));
+  }
+  id4_qwen3_vl_weight_execution_strategy_t parsed_strategy =
+      ID4_QWEN3_VL_WEIGHT_EXECUTION_STRATEGY_ROW_MAJOR;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        id4_qwen3_vl_weight_execution_strategy_parse(
+                            IREE_SV("surprise"), &parsed_strategy));
 }
 
 class ProgramBuilderScope {

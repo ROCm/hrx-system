@@ -44,6 +44,8 @@ typedef struct id4_qwen3_vl_stage_plan_options_t {
   const void* next;
   // Dynamic request dimensions for this plan.
   id4_qwen3_vl_request_config_t request;
+  // Linear weight execution strategy selected for this plan.
+  id4_qwen3_vl_weight_execution_strategy_t weight_execution_strategy;
 } id4_qwen3_vl_stage_plan_options_t;
 
 // Creates a Qwen3-VL forward stage.

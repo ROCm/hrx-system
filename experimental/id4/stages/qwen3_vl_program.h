@@ -48,6 +48,28 @@ typedef struct id4_qwen3_vl_request_config_t {
   uint32_t token_count;
 } id4_qwen3_vl_request_config_t;
 
+// Qwen3-VL linear weight execution strategy selected by the planner.
+typedef enum id4_qwen3_vl_weight_execution_strategy_e {
+  // Invalid weight execution strategy.
+  ID4_QWEN3_VL_WEIGHT_EXECUTION_STRATEGY_INVALID = 0,
+  // Consume provider row-major BF16 linear weights directly.
+  ID4_QWEN3_VL_WEIGHT_EXECUTION_STRATEGY_ROW_MAJOR = 1,
+  // Require every BF16 linear weight to use compact RHS WMMA execution tiles.
+  ID4_QWEN3_VL_WEIGHT_EXECUTION_STRATEGY_COMPACT_RHS = 2,
+  // Use compact RHS for authored compact tile families and row-major for
+  // row-major-only tile families.
+  ID4_QWEN3_VL_WEIGHT_EXECUTION_STRATEGY_HYBRID_COMPACT_RHS = 3,
+} id4_qwen3_vl_weight_execution_strategy_t;
+
+// Parses a Qwen3-VL weight execution strategy name.
+iree_status_t id4_qwen3_vl_weight_execution_strategy_parse(
+    iree_string_view_t value,
+    id4_qwen3_vl_weight_execution_strategy_t* out_strategy);
+
+// Returns the stable Qwen3-VL weight execution strategy name.
+iree_string_view_t id4_qwen3_vl_weight_execution_strategy_name(
+    id4_qwen3_vl_weight_execution_strategy_t strategy);
+
 // Calculates the BF16 packed token capacity used by Qwen3-VL linear kernels.
 iree_status_t id4_qwen3_vl_program_calculate_bf16_token_capacity(
     uint32_t token_count, uint32_t* out_token_capacity);
@@ -64,6 +86,8 @@ typedef struct id4_qwen3_vl_program_options_t {
   id4_qwen3_vl_model_config_t model;
   // Dynamic request dimensions.
   id4_qwen3_vl_request_config_t request;
+  // Linear weight execution strategy selected for this program.
+  id4_qwen3_vl_weight_execution_strategy_t weight_execution_strategy;
   // Diagnostic tap names requested by the caller during planning.
   iree_string_view_list_t diagnostic_tap_names;
 } id4_qwen3_vl_program_options_t;

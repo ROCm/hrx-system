@@ -124,6 +124,8 @@ TEST(Qwen3VlStageIntegration, PrepareAndIssueForwardWithDenseParameters) {
   std::memset(&qwen_options, 0, sizeof(qwen_options));
   qwen_options.structure_size = sizeof(qwen_options);
   qwen_options.request.token_count = token_count;
+  qwen_options.weight_execution_strategy =
+      ID4_QWEN3_VL_WEIGHT_EXECUTION_STRATEGY_ROW_MAJOR;
 
   id4_pipeline_stage_plan_options_t plan_options;
   std::memset(&plan_options, 0, sizeof(plan_options));

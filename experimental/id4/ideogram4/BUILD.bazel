@@ -42,6 +42,7 @@ iree_runtime_cc_library(
         "//experimental/id4/stages:ideogram4_dit_parameters",
         "//experimental/id4/stages:ideogram4_dit_program",
         "//experimental/id4/stages:qwen3_vl",
+        "//experimental/id4/stages:qwen3_vl_program",
         "//experimental/id4/stages:sampler",
         "//experimental/id4/stages:vae_program",
         "//runtime/src/iree/base",

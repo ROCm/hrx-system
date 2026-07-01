@@ -37,6 +37,9 @@ IREE_FLAG(string, dit_activation_format, "bf16_linear_input",
 IREE_FLAG(string, dit_weight_execution_format, "bf16_resident",
           "DiT weight execution format: bf16_resident, fp8_direct, or "
           "fp8_direct_feed_forward_bf16_resident.");
+IREE_FLAG(string, qwen_weight_execution_strategy, "row_major",
+          "Qwen3-VL weight execution strategy: row_major, compact_rhs, or "
+          "hybrid_compact_rhs.");
 IREE_FLAG(string, dit_attention_implementation, "online_wmma",
           "DiT attention implementation: streaming, materialized_wmma, "
           "blocked_wmma, or online_wmma.");
@@ -293,6 +296,8 @@ static id4_ideogram4_generation_plan_policy_t MakeGenerationPolicy() {
   id4_ideogram4_generation_plan_policy_t policy;
   std::memset(&policy, 0, sizeof(policy));
   policy.structure_size = sizeof(policy);
+  policy.qwen_weight_execution_strategy =
+      ID4_QWEN3_VL_WEIGHT_EXECUTION_STRATEGY_ROW_MAJOR;
   policy.dit_attention_implementation =
       ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_ONLINE_WMMA;
   policy.dit_feed_forward_implementation =
@@ -315,6 +320,16 @@ static iree_status_t ParseDitWeightExecutionFormat(
       iree_make_cstring_view(FLAG_dit_weight_execution_format), out_format);
   if (iree_status_is_ok(status)) return status;
   return iree_status_annotate(status, IREE_SV("--dit_weight_execution_format"));
+}
+
+static iree_status_t ParseQwenWeightExecutionStrategy(
+    id4_qwen3_vl_weight_execution_strategy_t* out_strategy) {
+  iree_status_t status = id4_qwen3_vl_weight_execution_strategy_parse(
+      iree_make_cstring_view(FLAG_qwen_weight_execution_strategy),
+      out_strategy);
+  if (iree_status_is_ok(status)) return status;
+  return iree_status_annotate(status,
+                              IREE_SV("--qwen_weight_execution_strategy"));
 }
 
 static iree_status_t ParseDitActivationFormat(
@@ -1009,6 +1024,8 @@ static iree_status_t CreateGenerationPlan(
       ParseDitActivationFormat(&plan_options.policy.dit_activation_format));
   IREE_RETURN_IF_ERROR(ParseDitWeightExecutionFormat(
       &plan_options.policy.dit_weight_execution_format));
+  IREE_RETURN_IF_ERROR(ParseQwenWeightExecutionStrategy(
+      &plan_options.policy.qwen_weight_execution_strategy));
   IREE_RETURN_IF_ERROR(ParseDitAttentionImplementation(
       &plan_options.policy.dit_attention_implementation));
   IREE_RETURN_IF_ERROR(ParseDitFeedForwardImplementation(
@@ -1374,6 +1391,9 @@ static iree_status_t SetGenerationBenchmarkLabel(
   const iree_string_view_t weight_execution_format =
       id4_ideogram4_dit_weight_execution_format_name(
           summary.dit_weight_execution_format);
+  const iree_string_view_t qwen_weight_execution_strategy =
+      id4_qwen3_vl_weight_execution_strategy_name(
+          summary.qwen_weight_execution_strategy);
   const iree_string_view_t attention_implementation =
       DitAttentionImplementationName(summary.dit_attention_implementation);
   const iree_string_view_t feed_forward_implementation =
@@ -1398,7 +1418,8 @@ static iree_status_t SetGenerationBenchmarkLabel(
       " dit_uncond_capacity=%" PRIu32 " latent=%" PRIu64 "x%" PRIu64
       " steps=%" PRIu32 " image=%" PRIu64 "x%" PRIu64
       " residency=%.*s issue=%.*s resident_stage_mask=0x%08x"
-      " params=%.*s activation=%.*s weights=%.*s attention=%.*s ff=%.*s"
+      " params=%.*s activation=%.*s weights=%.*s qwen_weights=%.*s"
+      " attention=%.*s ff=%.*s"
       " param_total=%" PRIu64 "MiB param_largest=%" PRIu64
       "MiB param_source=%" PRIu64 "MiB param_source_direct=%" PRIu64
       "MiB param_source_encoded=%" PRIu64 "MiB param_load_steps[gather=%" PRIhsz
@@ -1427,6 +1448,8 @@ static iree_status_t SetGenerationBenchmarkLabel(
       static_cast<int>(activation_format.size), activation_format.data,
       static_cast<int>(weight_execution_format.size),
       weight_execution_format.data,
+      static_cast<int>(qwen_weight_execution_strategy.size),
+      qwen_weight_execution_strategy.data,
       static_cast<int>(attention_implementation.size),
       attention_implementation.data,
       static_cast<int>(feed_forward_implementation.size),
