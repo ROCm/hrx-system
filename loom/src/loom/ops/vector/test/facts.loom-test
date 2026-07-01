@@ -1458,3 +1458,30 @@ func.def @finite_flush_vector_decode_content(%payload: vector<2xf8E4M3>) -> (i1,
   %not_subnormal = scalar.constant true : i1
   func.return %finite, %not_subnormal : i1, i1
 }
+
+// ====
+
+// Matrix operand formats without NaN or infinity encodings publish finite
+// decoded-content facts without requiring a separate finite_only rounding
+// contract. This covers future narrow float payloads such as FP4/FP6 that are
+// represented through encoding schemas before they become scalar element types.
+func.def @finite_numeric_format_vector_decode_content(%payload: vector<1xi32>) -> (i1, i1, i1) {
+  %fp4_schema = encoding.define #matrix_operand<element_format=f4e2m1, payload_elements=8, payload_registers=1> : encoding<schema>
+  %fp6_schema = encoding.define #matrix_operand<element_format=f6e3m2, payload_elements=4, payload_registers=1> : encoding<schema>
+  %bf6_schema = encoding.define #matrix_operand<element_format=bf6, payload_elements=4, payload_registers=1> : encoding<schema>
+  %fp4 = vector.decode %payload using %fp4_schema : vector<1xi32>, encoding<schema> -> vector<8xbf16>
+  %fp6 = vector.decode %payload using %fp6_schema : vector<1xi32>, encoding<schema> -> vector<4xbf16>
+  %bf6 = vector.decode %payload using %bf6_schema : vector<1xi32>, encoding<schema> -> vector<4xbf16>
+  %fp4_finite = test.fact_finite %fp4 : vector<8xbf16> -> i1
+  %fp6_finite = test.fact_finite %fp6 : vector<4xbf16> -> i1
+  %bf6_finite = test.fact_finite %bf6 : vector<4xbf16> -> i1
+  func.return %fp4_finite, %fp6_finite, %bf6_finite : i1, i1, i1
+}
+
+// ----
+func.def @finite_numeric_format_vector_decode_content(%payload: vector<1xi32>) -> (i1, i1, i1) {
+  %fp4_finite = scalar.constant true : i1
+  %fp6_finite = scalar.constant true : i1
+  %bf6_finite = scalar.constant true : i1
+  func.return %fp4_finite, %fp6_finite, %bf6_finite : i1, i1, i1
+}
