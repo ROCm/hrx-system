@@ -470,6 +470,23 @@ iree_allocator_t HostQueueStagingTest::host_allocator_;
 iree_hal_amdgpu_libhsa_t HostQueueStagingTest::libhsa_;
 iree_hal_amdgpu_topology_t HostQueueStagingTest::topology_;
 
+TEST_F(HostQueueStagingTest, LogicalDeviceOptionsSetFileStagingPool) {
+  iree_hal_amdgpu_logical_device_options_t options;
+  iree_hal_amdgpu_logical_device_options_initialize(&options);
+  options.preallocate_pools = 0;
+  options.file_staging.slot_size = kStagingSlotSize;
+  options.file_staging.slot_count = 2;
+
+  TestLogicalDevice test_device;
+  IREE_ASSERT_OK(
+      test_device.Initialize(&options, &libhsa_, &topology_, host_allocator_));
+  iree_hal_amdgpu_physical_device_t* physical_device =
+      test_device.first_physical_device();
+  ASSERT_NE(physical_device, nullptr);
+  EXPECT_EQ(physical_device->file_staging_pool.slot_size, kStagingSlotSize);
+  EXPECT_EQ(physical_device->file_staging_pool.slot_count, 2u);
+}
+
 #if IREE_FILE_IO_ENABLE
 
 TEST_F(HostQueueStagingTest, OneSlotLargeReadCompletesThroughSlotWaiter) {

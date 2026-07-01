@@ -256,6 +256,16 @@ typedef struct iree_hal_amdgpu_logical_device_options_t {
     uint32_t upload_capacity;
   } host_queues;
 
+  // Per-physical-device queue_read/queue_write file staging policy.
+  struct {
+    // Byte length of each staging slot. Must be a non-zero power of two.
+    iree_host_size_t slot_size;
+    // Number of staging slots. Must be non-zero and a power of two.
+    uint32_t slot_count;
+    // True to force fine-grained host memory instead of coarse-grained memory.
+    uint64_t force_fine_host_memory : 1;
+  } file_staging;
+
   // Optional device-side feedback channel support.
   struct {
     // True to reserve feedback channel state for the logical device.
