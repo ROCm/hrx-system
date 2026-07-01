@@ -141,9 +141,11 @@ typedef struct loom_low_allocation_spill_plan_t {
   uint32_t byte_size;
   // Required slot alignment in bytes.
   uint32_t byte_alignment;
-  // Predicted stores needed by the current synthetic spill plan.
+  // Predicted stores needed by the current synthetic spill plan. Actual
+  // materialization may differ after earlier spill rewrites in the same frame.
   uint32_t store_count;
-  // Predicted operand-use reloads in the current synthetic spill plan.
+  // Predicted operand-use reloads in the current synthetic spill plan. Actual
+  // materialization may differ after earlier spill rewrites in the same frame.
   uint32_t reload_count;
 } loom_low_allocation_spill_plan_t;
 

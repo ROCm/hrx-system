@@ -322,6 +322,26 @@ loom_cc_library(
   PUBLIC
 )
 
+loom_cc_test(
+  NAME
+    allocation_materialization_test
+  SRCS
+    "allocation_materialization_test.cc"
+  DEPS
+    ::allocation_materialization
+    ::diagnostics
+    ::text_asm
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::format::text::parser
+    loom::ir
+    loom::ops::low
+    loom::ops::test
+    loom::target::test::descriptors
+    loom::testing::module_ptr
+)
+
 loom_cc_library(
   NAME
     allocation_rematerialization
