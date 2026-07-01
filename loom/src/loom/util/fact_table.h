@@ -117,7 +117,9 @@ typedef struct loom_value_fact_vector_iota_t {
 } loom_value_fact_vector_iota_t;
 
 // Static strided logical-lane origin for one aggregate value. Result lane N is
-// materialized from source lane source_lane_offset + N * source_lane_stride.
+// derived from source lane source_lane_offset + N * source_lane_stride. The
+// source and result may have different element types when an operation
+// preserves lane provenance while changing representation.
 typedef struct loom_value_fact_static_lane_origin_t {
   // Aggregate source value containing the materialized lanes.
   loom_value_id_t source_value_id;
@@ -770,8 +772,9 @@ iree_status_t loom_value_fact_table_define_static_lane_origin(
     loom_value_fact_static_lane_origin_t origin);
 
 // Returns true when |value_id| has a known static source-lane view. The query
-// validates that both values are vectors with matching element types, static
-// lane counts, and an in-bounds strided source lane mapping.
+// validates that both values are vectors with static lane counts and an
+// in-bounds strided source lane mapping. Element types may differ when the
+// defining operation preserves lane provenance while changing representation.
 bool loom_value_fact_table_query_static_lane_origin(
     const loom_value_fact_table_t* table, const loom_module_t* module,
     loom_value_id_t value_id, loom_value_fact_static_lane_origin_t* out_origin);
