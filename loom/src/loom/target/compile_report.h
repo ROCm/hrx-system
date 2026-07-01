@@ -71,6 +71,8 @@ enum {
   LOOM_TARGET_COMPILE_REPORT_DETAIL_ALLOCATION_HIGH_WATER_ROWS = 1u << 17,
   // Target wait-planning summaries or rows were recorded.
   LOOM_TARGET_COMPILE_REPORT_DETAIL_WAIT_PLAN = 1u << 18,
+  // Target capability rows were recorded or counted.
+  LOOM_TARGET_COMPILE_REPORT_DETAIL_TARGET_CAPABILITY_ROWS = 1u << 19,
 };
 
 typedef enum loom_target_compile_report_move_cause_e {
@@ -407,6 +409,36 @@ typedef struct loom_target_compile_report_target_resources_t {
   iree_string_view_t limiting_resource;
 } loom_target_compile_report_target_resources_t;
 
+typedef uint8_t loom_target_compile_report_capability_value_kind_t;
+typedef enum loom_target_compile_report_capability_value_kind_e {
+  // No capability value kind is available.
+  LOOM_TARGET_COMPILE_REPORT_CAPABILITY_VALUE_NONE = 0,
+  // Capability value is a boolean stored in value_u64 as 0 or 1.
+  LOOM_TARGET_COMPILE_REPORT_CAPABILITY_VALUE_BOOL = 1,
+  // Capability value is an unsigned integer stored in value_u64.
+  LOOM_TARGET_COMPILE_REPORT_CAPABILITY_VALUE_U64 = 2,
+  // Capability value is a borrowed string stored in value_string.
+  LOOM_TARGET_COMPILE_REPORT_CAPABILITY_VALUE_STRING = 3,
+} loom_target_compile_report_capability_value_kind_e;
+
+// Selected target capability fact recorded for an emitted entry.
+typedef struct loom_target_compile_report_target_capability_row_t {
+  // Target artifact function symbol associated with this capability.
+  iree_string_view_t function_name;
+  // Target family that owns the capability namespace.
+  iree_string_view_t target_family_name;
+  // Stable capability namespace such as "target" or "amdgpu".
+  iree_string_view_t namespace_name;
+  // Stable capability key within namespace_name.
+  iree_string_view_t key;
+  // Value representation used by this capability row.
+  loom_target_compile_report_capability_value_kind_t value_kind;
+  // Boolean or unsigned integer payload for this capability row.
+  uint64_t value_u64;
+  // Borrowed string payload for this capability row.
+  iree_string_view_t value_string;
+} loom_target_compile_report_target_capability_row_t;
+
 // Wait-counter planning summary for target packets that survive emission.
 typedef struct loom_target_compile_report_wait_plan_t {
   // Number of wait-counter actions recorded by target planning.
@@ -517,6 +549,8 @@ typedef struct loom_target_compile_report_entry_t {
   iree_host_size_t wait_counter_row_count;
   // Number of target wait-action rows copied for this entry.
   iree_host_size_t wait_action_row_count;
+  // Number of selected-target capability rows copied for this entry.
+  iree_host_size_t target_capability_row_count;
 } loom_target_compile_report_entry_t;
 
 // One register-pressure peak row in a compile report.
@@ -1192,6 +1226,8 @@ typedef struct loom_target_compile_report_t {
   loom_target_compile_report_row_list_t math_legalization_rows;
   // Owned target-legalization decision rows.
   loom_target_compile_report_row_list_t target_legalization_rows;
+  // Owned selected-target capability rows.
+  loom_target_compile_report_row_list_t target_capability_rows;
   // Estimated target private memory bytes.
   uint64_t private_memory_bytes;
   // Estimated target local/shared memory bytes.
@@ -1350,6 +1386,11 @@ iree_status_t loom_target_compile_report_record_wait_counter_row(
 iree_status_t loom_target_compile_report_record_wait_action_row(
     loom_target_compile_report_t* report,
     const loom_target_compile_report_wait_action_row_t* row);
+
+// Records one selected-target capability row.
+iree_status_t loom_target_compile_report_record_target_capability_row(
+    loom_target_compile_report_t* report,
+    const loom_target_compile_report_target_capability_row_t* row);
 
 // Records one source-low row.
 iree_status_t loom_target_compile_report_record_source_low_row(
