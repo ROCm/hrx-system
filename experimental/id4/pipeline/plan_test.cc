@@ -256,6 +256,149 @@ TEST(PlanTest, ReportsAggregateStatistics) {
   EXPECT_EQ(statistics.dispatch_count, 3u);
 }
 
+TEST(PlanTest, ReportsMemoryHighWaterAcrossSequentialRegions) {
+  DeviceGroupPtr device_group(id4::test::CreateLocalSyncDeviceGroup(),
+                              iree_hal_device_group_release);
+
+  id4_pipeline_device_placement_t placement = {
+      // Human-readable placement role.
+      /*.role=*/IREE_SV("default"),
+      // Local-sync device index.
+      /*.device_index=*/0,
+      // Queue affinity selected by the test plan.
+      /*.queue_affinity=*/IREE_HAL_QUEUE_AFFINITY_ANY,
+  };
+  iree_hal_buffer_params_t storage_params;
+  std::memset(&storage_params, 0, sizeof(storage_params));
+  storage_params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
+  storage_params.access = IREE_HAL_MEMORY_ACCESS_ALL;
+  storage_params.usage = IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE;
+  storage_params.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
+  storage_params.min_alignment = 16;
+
+  const id4_pipeline_memory_slab_plan_t memory_slabs[] = {
+      {
+          // Human-readable slab name.
+          /*.name=*/IREE_SV("shared"),
+          // Shared slab is live for the full prepared program issue.
+          /*.scope=*/ID4_PIPELINE_MEMORY_SLAB_SCOPE_PLAN_SHARED,
+          // Shared slabs do not belong to a single region.
+          /*.region_id=*/0,
+          // Placement containing the shared slab.
+          /*.placement_id=*/0,
+          // Binding-table slot used by the shared slab.
+          /*.binding_slot=*/1,
+          // HAL buffer parameters for slab allocation.
+          /*.params=*/storage_params,
+          // Reserved shared slab byte length.
+          /*.byte_length=*/512,
+          // Required slab base alignment.
+          /*.alignment=*/16,
+          // Peak live byte count in the shared slab.
+          /*.high_water_mark=*/384,
+      },
+      {
+          // Human-readable slab name.
+          /*.name=*/IREE_SV("region0.local"),
+          // Local slab is visible only to region 0.
+          /*.scope=*/ID4_PIPELINE_MEMORY_SLAB_SCOPE_REGION_LOCAL,
+          // Region containing the local slab.
+          /*.region_id=*/0,
+          // Placement containing the local slab.
+          /*.placement_id=*/0,
+          // Binding-table slot used by the local slab.
+          /*.binding_slot=*/2,
+          // HAL buffer parameters for slab allocation.
+          /*.params=*/storage_params,
+          // Reserved local slab byte length.
+          /*.byte_length=*/1024,
+          // Required slab base alignment.
+          /*.alignment=*/16,
+          // Peak live byte count in the local slab.
+          /*.high_water_mark=*/768,
+      },
+      {
+          // Human-readable slab name.
+          /*.name=*/IREE_SV("region1.local"),
+          // Local slab is visible only to region 1.
+          /*.scope=*/ID4_PIPELINE_MEMORY_SLAB_SCOPE_REGION_LOCAL,
+          // Region containing the local slab.
+          /*.region_id=*/1,
+          // Placement containing the local slab.
+          /*.placement_id=*/0,
+          // Binding-table slot used by the local slab.
+          /*.binding_slot=*/2,
+          // HAL buffer parameters for slab allocation.
+          /*.params=*/storage_params,
+          // Reserved local slab byte length.
+          /*.byte_length=*/2048,
+          // Required slab base alignment.
+          /*.alignment=*/16,
+          // Peak live byte count in the local slab.
+          /*.high_water_mark=*/640,
+      },
+  };
+  const id4_pipeline_region_plan_t regions[] = {
+      {
+          // Human-readable region name.
+          /*.name=*/IREE_SV("region0"),
+          // No source program backs this synthetic plan.
+          /*.source_operation_offset=*/0,
+          // No source program backs this synthetic plan.
+          /*.source_operation_count=*/0,
+          // Placement containing this region.
+          /*.placement_id=*/0,
+          // Binding capacity covering the shared and local slabs.
+          /*.binding_capacity=*/3,
+          // Binding-table slot reserved for the local slab.
+          /*.local_binding_slot=*/2,
+          // Required local tensor alignment.
+          /*.local_tensor_alignment=*/16,
+      },
+      {
+          // Human-readable region name.
+          /*.name=*/IREE_SV("region1"),
+          // No source program backs this synthetic plan.
+          /*.source_operation_offset=*/0,
+          // No source program backs this synthetic plan.
+          /*.source_operation_count=*/0,
+          // Placement containing this region.
+          /*.placement_id=*/0,
+          // Binding capacity covering the shared and local slabs.
+          /*.binding_capacity=*/3,
+          // Binding-table slot reserved for the local slab.
+          /*.local_binding_slot=*/2,
+          // Required local tensor alignment.
+          /*.local_tensor_alignment=*/16,
+      },
+  };
+
+  id4_pipeline_diagnostics_sink_t diagnostics_sink;
+  id4_pipeline_diagnostics_sink_initialize_ignore(&diagnostics_sink);
+  id4_pipeline_plan_create_options_t options;
+  std::memset(&options, 0, sizeof(options));
+  options.structure_size = sizeof(options);
+  options.stage_name = IREE_SV("test.plan");
+  options.device_group = device_group.get();
+  options.placement_count = 1;
+  options.placements = &placement;
+  options.memory_slab_count = IREE_ARRAYSIZE(memory_slabs);
+  options.memory_slabs = memory_slabs;
+  options.region_count = IREE_ARRAYSIZE(regions);
+  options.regions = regions;
+  options.diagnostics_sink = &diagnostics_sink;
+
+  id4_pipeline_plan_t* plan = nullptr;
+  IREE_ASSERT_OK(
+      id4_pipeline_plan_create(&options, iree_allocator_system(), &plan));
+  PlanPtr plan_owner(plan);
+
+  id4_pipeline_plan_statistics_t statistics =
+      id4_pipeline_plan_statistics(plan_owner.get());
+  EXPECT_EQ(statistics.memory_slab_byte_length, 3584u);
+  EXPECT_EQ(statistics.memory_slab_high_water_mark, 1152u);
+}
+
 TEST(PlanTest, ScopesMemorySlabBindingSlotsPerRegion) {
   DeviceGroupPtr device_group(id4::test::CreateLocalSyncDeviceGroup(),
                               iree_hal_device_group_release);

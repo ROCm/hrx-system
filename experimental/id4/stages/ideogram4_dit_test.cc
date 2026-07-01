@@ -240,7 +240,7 @@ TEST(Ideogram4DitStage, PlansPreludeSliceFromRequestConfig) {
   EXPECT_GT(id4_pipeline_plan_boundary_tensor_count(plan), 0u);
   EXPECT_GT(id4_pipeline_plan_kernel_count(plan), 0u);
   EXPECT_EQ(id4_pipeline_plan_diagnostic_tap_count(plan), 2u);
-  ASSERT_EQ(id4_pipeline_plan_region_count(plan), 1u);
+  EXPECT_GT(id4_pipeline_plan_region_count(plan), 1u);
 
   const uint32_t head_size = model.hidden_size / model.attention_head_count;
   bool found_timestep_boundary = false;

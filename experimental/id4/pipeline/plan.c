@@ -1842,11 +1842,27 @@ id4_pipeline_plan_statistics_t id4_pipeline_plan_statistics(
     const id4_pipeline_constant_slab_plan_t* slab = &plan->constant_slabs[i];
     statistics.constant_slab_byte_length += slab->byte_length;
   }
+  iree_device_size_t shared_memory_slab_high_water_mark = 0;
+  iree_device_size_t largest_region_local_memory_slab_high_water_mark = 0;
   for (iree_host_size_t i = 0; i < plan->memory_slab_count; ++i) {
     const id4_pipeline_memory_slab_plan_t* slab = &plan->memory_slabs[i];
     statistics.memory_slab_byte_length += slab->byte_length;
-    statistics.memory_slab_high_water_mark += slab->high_water_mark;
+    switch (slab->scope) {
+      case ID4_PIPELINE_MEMORY_SLAB_SCOPE_PLAN_SHARED:
+        shared_memory_slab_high_water_mark += slab->high_water_mark;
+        break;
+      case ID4_PIPELINE_MEMORY_SLAB_SCOPE_REGION_LOCAL:
+        largest_region_local_memory_slab_high_water_mark =
+            iree_max(largest_region_local_memory_slab_high_water_mark,
+                     slab->high_water_mark);
+        break;
+      default:
+        break;
+    }
   }
+  statistics.memory_slab_high_water_mark =
+      shared_memory_slab_high_water_mark +
+      largest_region_local_memory_slab_high_water_mark;
   for (iree_host_size_t i = 0; i < plan->shared_tensor_count; ++i) {
     const id4_pipeline_shared_tensor_plan_t* shared_tensor =
         &plan->shared_tensors[i];
