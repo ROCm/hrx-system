@@ -169,8 +169,6 @@ TEST(PlanTest, ReportsAggregateStatistics) {
       // Caller-provided storage exported by the stage.
       /*.flags=*/ID4_PIPELINE_BOUNDARY_TENSOR_FLAG_IMPORTED |
           ID4_PIPELINE_BOUNDARY_TENSOR_FLAG_EXPORTED,
-      // Region containing this boundary tensor.
-      /*.region_id=*/0,
       // Placement containing this boundary tensor.
       /*.placement_id=*/0,
       // Binding-table slot used by this boundary tensor.
@@ -423,6 +421,128 @@ TEST(PlanTest, ScopesMemorySlabBindingSlotsPerRegion) {
       iree_string_view_find(json, IREE_SV("\"scope\":\"plan_shared\""), 0),
       IREE_STRING_VIEW_NPOS);
   iree_string_builder_deinitialize(&json_builder);
+}
+
+TEST(PlanTest, BoundaryBindingsAreVisibleToEveryRegion) {
+  DeviceGroupPtr device_group(id4::test::CreateLocalSyncDeviceGroup(),
+                              iree_hal_device_group_release);
+
+  id4_pipeline_device_placement_t placement = {
+      // Human-readable placement role.
+      /*.role=*/IREE_SV("default"),
+      // Local-sync device index.
+      /*.device_index=*/0,
+      // Queue affinity selected by the test plan.
+      /*.queue_affinity=*/IREE_HAL_QUEUE_AFFINITY_ANY,
+  };
+  iree_hal_buffer_params_t storage_params;
+  std::memset(&storage_params, 0, sizeof(storage_params));
+  storage_params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
+  storage_params.access = IREE_HAL_MEMORY_ACCESS_ALL;
+  storage_params.usage = IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE;
+  storage_params.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
+  storage_params.min_alignment = 16;
+
+  const id4_pipeline_region_plan_t regions[] = {
+      {
+          // Human-readable region name.
+          /*.name=*/IREE_SV("test.region0"),
+          // No source program backs this synthetic plan.
+          /*.source_operation_offset=*/0,
+          // No source program backs this synthetic plan.
+          /*.source_operation_count=*/0,
+          // Placement containing this region.
+          /*.placement_id=*/0,
+          // Binding capacity covering local and boundary bindings.
+          /*.binding_capacity=*/4,
+          // Binding-table slot reserved for this region's local slab.
+          /*.local_binding_slot=*/2,
+          // Required local tensor alignment.
+          /*.local_tensor_alignment=*/16,
+      },
+      {
+          // Human-readable region name.
+          /*.name=*/IREE_SV("test.region1"),
+          // No source program backs this synthetic plan.
+          /*.source_operation_offset=*/0,
+          // No source program backs this synthetic plan.
+          /*.source_operation_count=*/0,
+          // Placement containing this region.
+          /*.placement_id=*/0,
+          // Binding capacity covering local and boundary bindings.
+          /*.binding_capacity=*/4,
+          // Binding-table slot reserved for this region's local slab.
+          /*.local_binding_slot=*/1,
+          // Required local tensor alignment.
+          /*.local_tensor_alignment=*/16,
+      },
+  };
+  const id4_pipeline_memory_slab_plan_t memory_slab = {
+      // Human-readable slab name.
+      /*.name=*/IREE_SV("region1.local"),
+      // Local slab is visible only to region 1.
+      /*.scope=*/ID4_PIPELINE_MEMORY_SLAB_SCOPE_REGION_LOCAL,
+      // Region containing this local slab.
+      /*.region_id=*/1,
+      // Placement containing this local slab.
+      /*.placement_id=*/0,
+      // Local slab binding slot for region 1.
+      /*.binding_slot=*/1,
+      // HAL buffer parameters for slab allocation.
+      /*.params=*/storage_params,
+      // Reserved local slab byte length.
+      /*.byte_length=*/64,
+      // Required slab base alignment.
+      /*.alignment=*/16,
+      // Peak live byte count in the local slab.
+      /*.high_water_mark=*/64,
+  };
+  const id4_pipeline_boundary_tensor_plan_t boundary = {
+      // Tensor layout and diagnostic name.
+      /*.layout=*/
+      {
+          // Stable boundary tensor name.
+          /*.name=*/IREE_SV("boundary"),
+          // Scalar element type.
+          /*.dtype=*/ID4_PIPELINE_TENSOR_DTYPE_U32,
+          // Dense rank-1 tensor shape.
+          /*.shape=*/{/*.rank=*/1, /*.dims=*/{4}},
+          // Dense tensor byte length.
+          /*.byte_length=*/4 * sizeof(uint32_t),
+          // Base alignment required by the tensor.
+          /*.alignment=*/alignof(uint32_t),
+      },
+      // Caller-provided initialized boundary tensor.
+      /*.flags=*/ID4_PIPELINE_BOUNDARY_TENSOR_FLAG_IMPORTED |
+          ID4_PIPELINE_BOUNDARY_TENSOR_FLAG_INITIALIZED,
+      // Placement containing this boundary tensor.
+      /*.placement_id=*/0,
+      // Boundary binding slot conflicts with region 1's local slab.
+      /*.binding_slot=*/1,
+  };
+
+  id4_pipeline_diagnostics_sink_t diagnostics_sink;
+  id4_pipeline_diagnostics_sink_initialize_ignore(&diagnostics_sink);
+  id4_pipeline_plan_create_options_t options;
+  std::memset(&options, 0, sizeof(options));
+  options.structure_size = sizeof(options);
+  options.stage_name = IREE_SV("test.plan");
+  options.device_group = device_group.get();
+  options.placement_count = 1;
+  options.placements = &placement;
+  options.memory_slab_count = 1;
+  options.memory_slabs = &memory_slab;
+  options.boundary_tensor_count = 1;
+  options.boundary_tensors = &boundary;
+  options.region_count = IREE_ARRAYSIZE(regions);
+  options.regions = regions;
+  options.diagnostics_sink = &diagnostics_sink;
+
+  id4_pipeline_plan_t* plan = nullptr;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      id4_pipeline_plan_create(&options, iree_allocator_system(), &plan));
+  EXPECT_EQ(plan, nullptr);
 }
 
 }  // namespace

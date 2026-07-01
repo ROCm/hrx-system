@@ -88,8 +88,6 @@ class BindingTest : public ::testing::Test {
         // Imported and initialized by the stage caller.
         /*.flags=*/ID4_PIPELINE_BOUNDARY_TENSOR_FLAG_IMPORTED |
             ID4_PIPELINE_BOUNDARY_TENSOR_FLAG_INITIALIZED,
-        // Region containing this boundary tensor.
-        /*.region_id=*/0,
         // Placement containing this boundary tensor.
         /*.placement_id=*/0,
         // Binding-table slot used by this boundary tensor.

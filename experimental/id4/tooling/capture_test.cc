@@ -83,7 +83,6 @@ static iree_status_t CreateSingleBoundaryPlan(
   boundary.layout.alignment = alignment;
   boundary.flags = ID4_PIPELINE_BOUNDARY_TENSOR_FLAG_IMPORTED |
                    ID4_PIPELINE_BOUNDARY_TENSOR_FLAG_EXPORTED;
-  boundary.region_id = 0;
   boundary.placement_id = 0;
   boundary.binding_slot = 0;
 

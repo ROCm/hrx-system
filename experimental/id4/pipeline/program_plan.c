@@ -729,8 +729,6 @@ static iree_status_t id4_pipeline_program_plan_build_boundary_tensors(
             },
         // Boundary behavior flags.
         .flags = flags,
-        // Semantic programs currently lower into one executable region.
-        .region_id = 0,
         // External tensors follow the executable region placement.
         .placement_id = options->region_placement_id,
         // Binding slot assigned from the configured boundary range.

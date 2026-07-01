@@ -116,8 +116,6 @@ typedef struct id4_pipeline_boundary_tensor_plan_t {
   id4_pipeline_tensor_layout_t layout;
   // Boundary behavior flags.
   id4_pipeline_boundary_tensor_flags_t flags;
-  // Region index whose binding table contains this tensor.
-  uint32_t region_id;
   // Plan-local placement identifier.
   uint32_t placement_id;
   // Issue-time binding-table slot containing this tensor.

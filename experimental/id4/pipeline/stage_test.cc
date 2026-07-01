@@ -765,7 +765,6 @@ TEST(PipelineStage, IssueRequiresPlannedBoundaryBindings) {
   boundary_tensor.layout.alignment = 4;
   boundary_tensor.flags = ID4_PIPELINE_BOUNDARY_TENSOR_FLAG_IMPORTED |
                           ID4_PIPELINE_BOUNDARY_TENSOR_FLAG_INITIALIZED;
-  boundary_tensor.region_id = 0;
   boundary_tensor.placement_id = 0;
   boundary_tensor.binding_slot = 0;
 

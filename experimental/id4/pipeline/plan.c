@@ -1087,12 +1087,39 @@ static bool id4_pipeline_plan_boundary_binding_conflicts(
   for (iree_host_size_t i = 0; i < plan->boundary_tensor_count; ++i) {
     const id4_pipeline_boundary_tensor_plan_t* tensor =
         &plan->boundary_tensors[i];
-    if (tensor->region_id == region_id &&
-        tensor->binding_slot == binding_slot) {
-      return true;
-    }
+    if (tensor->binding_slot == binding_slot) return true;
   }
   return false;
+}
+
+static iree_status_t id4_pipeline_plan_validate_boundary_binding_slot(
+    const id4_pipeline_plan_t* plan,
+    const id4_pipeline_boundary_tensor_plan_t* tensor) {
+  if (plan->region_count == 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "boundary tensor %.*s requires at least one "
+                            "executable region",
+                            (int)tensor->layout.name.size,
+                            tensor->layout.name.data);
+  }
+  for (iree_host_size_t i = 0; i < plan->region_count; ++i) {
+    if (i > UINT32_MAX) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "region index %" PRIhsz " exceeds uint32_t", i);
+    }
+    const uint32_t region_id = (uint32_t)i;
+    IREE_RETURN_IF_ERROR(id4_pipeline_plan_validate_region_binding_slot(
+        plan, region_id, tensor->binding_slot, tensor->layout.name));
+    if (id4_pipeline_plan_boundary_binding_conflicts(plan, region_id,
+                                                     tensor->binding_slot)) {
+      return iree_make_status(IREE_STATUS_ALREADY_EXISTS,
+                              "boundary tensor %.*s binding slot %u is "
+                              "already planned",
+                              (int)tensor->layout.name.size,
+                              tensor->layout.name.data, tensor->binding_slot);
+    }
+  }
+  return iree_ok_status();
 }
 
 static bool id4_pipeline_plan_diagnostic_tap_binding_conflicts(
@@ -1134,20 +1161,11 @@ static iree_status_t id4_pipeline_plan_copy_boundary_tensors(
         id4_pipeline_plan_validate_boundary_tensor_flags(source));
     IREE_RETURN_IF_ERROR(id4_pipeline_plan_validate_placement_id(
         plan, source->placement_id, IREE_SV("boundary tensor")));
-    IREE_RETURN_IF_ERROR(id4_pipeline_plan_validate_region_binding_slot(
-        plan, source->region_id, source->binding_slot, source->layout.name));
-    if (id4_pipeline_plan_boundary_binding_conflicts(plan, source->region_id,
-                                                     source->binding_slot)) {
-      return iree_make_status(IREE_STATUS_ALREADY_EXISTS,
-                              "boundary tensor %.*s binding slot %u is "
-                              "already planned",
-                              (int)source->layout.name.size,
-                              source->layout.name.data, source->binding_slot);
-    }
+    IREE_RETURN_IF_ERROR(
+        id4_pipeline_plan_validate_boundary_binding_slot(plan, source));
     id4_pipeline_boundary_tensor_plan_t* target = &plan->boundary_tensors[i];
     target->layout = source->layout;
     target->flags = source->flags;
-    target->region_id = source->region_id;
     target->placement_id = source->placement_id;
     target->binding_slot = source->binding_slot;
     IREE_RETURN_IF_ERROR(id4_pipeline_string_clone(
@@ -2303,11 +2321,10 @@ iree_status_t id4_pipeline_plan_format_json(const id4_pipeline_plan_t* plan,
         builder, id4_pipeline_tensor_dtype_format(tensor->layout.dtype)));
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
         builder,
-        ",\"flags\":%u,\"region_id\":%u,\"placement_id\":%u"
-        ",\"binding_slot\":%u,\"byte_length\":%" PRIu64
-        ",\"alignment\":%" PRIu64 ",\"shape\":",
-        tensor->flags, tensor->region_id, tensor->placement_id,
-        tensor->binding_slot, (uint64_t)tensor->layout.byte_length,
+        ",\"flags\":%u,\"placement_id\":%u,\"binding_slot\":%u"
+        ",\"byte_length\":%" PRIu64 ",\"alignment\":%" PRIu64 ",\"shape\":",
+        tensor->flags, tensor->placement_id, tensor->binding_slot,
+        (uint64_t)tensor->layout.byte_length,
         (uint64_t)tensor->layout.alignment));
     IREE_RETURN_IF_ERROR(
         id4_pipeline_plan_append_shape_json(builder, tensor->layout.shape));
