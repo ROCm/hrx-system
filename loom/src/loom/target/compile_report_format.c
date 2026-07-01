@@ -203,12 +203,22 @@ loom_target_compile_report_append_memory_interval_summary_text(
   if (summary->packet_count == 0) {
     return iree_ok_status();
   }
-  return iree_string_builder_append_format(
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
       builder,
       " %s={packets:%" PRIu64 ",begin_min_bytes:%" PRId64
-      ",end_max_bytes:%" PRId64 ",byte_count:%" PRIu64 "}",
+      ",end_max_bytes:%" PRId64 ",byte_count:%" PRIu64,
       field_name, summary->packet_count, summary->envelope_begin_min_bytes,
-      summary->envelope_end_max_bytes, summary->envelope_byte_count);
+      summary->envelope_end_max_bytes, summary->envelope_byte_count));
+  if (summary->exact_static_packet_count != 0) {
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+        builder, ",exact_static_packet_count:%" PRIu64,
+        summary->exact_static_packet_count));
+  }
+  if (summary->exact_static_packet_count == summary->packet_count) {
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+        builder, ",unique_byte_count:%" PRIu64, summary->unique_byte_count));
+  }
+  return iree_string_builder_append_cstring(builder, "}");
 }
 
 static iree_string_view_t
@@ -4036,6 +4046,15 @@ loom_target_compile_report_format_memory_interval_summary_json(
       stream, &first_field, "end_max_bytes", summary->envelope_end_max_bytes));
   IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
       stream, &first_field, "byte_count", summary->envelope_byte_count));
+  if (summary->exact_static_packet_count != 0) {
+    IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
+        stream, &first_field, "exact_static_packet_count",
+        summary->exact_static_packet_count));
+  }
+  if (summary->exact_static_packet_count == summary->packet_count) {
+    IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
+        stream, &first_field, "unique_byte_count", summary->unique_byte_count));
+  }
   return loom_output_stream_write_cstring(stream, "}");
 }
 
