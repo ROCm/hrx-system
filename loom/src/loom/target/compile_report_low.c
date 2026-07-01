@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "loom/codegen/low/diagnostics.h"
+#include "loom/codegen/low/function.h"
 #include "loom/codegen/low/packet.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
@@ -16,6 +17,26 @@
 #include "loom/ops/low/kernel.h"
 #include "loom/ops/low/ops.h"
 #include "loom/target/registers.h"
+#include "loom/util/cfg_graph.h"
+#include "loom/util/fact_table.h"
+
+static bool loom_target_compile_report_mul_u64(uint64_t lhs, uint64_t rhs,
+                                               uint64_t* out_result) {
+  if (lhs != 0 && rhs > UINT64_MAX / lhs) {
+    return false;
+  }
+  *out_result = lhs * rhs;
+  return true;
+}
+
+static bool loom_target_compile_report_add_u64(uint64_t lhs, uint64_t rhs,
+                                               uint64_t* out_result) {
+  if (UINT64_MAX - lhs < rhs) {
+    return false;
+  }
+  *out_result = lhs + rhs;
+  return true;
+}
 
 static bool loom_target_compile_report_descriptor_semantic_tag_is(
     const loom_low_descriptor_set_t* descriptor_set,
@@ -508,6 +529,594 @@ static void loom_target_compile_report_accumulate_static_mix(
   target->register_move_count += source->register_move_count;
 }
 
+static bool loom_target_compile_report_accumulate_scaled_static_mix(
+    loom_target_compile_report_static_instruction_mix_t* target,
+    const loom_target_compile_report_static_instruction_mix_t* source,
+    uint64_t scale) {
+#define LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(field)        \
+  do {                                                                   \
+    uint64_t scaled_value = 0;                                           \
+    if (!loom_target_compile_report_mul_u64(source->field, scale,        \
+                                            &scaled_value) ||            \
+        !loom_target_compile_report_add_u64(target->field, scaled_value, \
+                                            &target->field)) {           \
+      return false;                                                      \
+    }                                                                    \
+  } while (0)
+  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(descriptor_count);
+  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(unknown_count);
+  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(scalar_alu_count);
+  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(vector_alu_count);
+  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(matrix_count);
+  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(mfma_count);
+  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(wmma_count);
+  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(dot_count);
+  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(global_memory_count);
+  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(global_load_count);
+  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(global_store_count);
+  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(buffer_load_count);
+  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(buffer_store_count);
+  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(flat_memory_count);
+  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(local_memory_count);
+  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(scalar_memory_count);
+  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(generic_memory_count);
+  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(
+      memory_read_unknown_width_count);
+  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(
+      memory_write_unknown_width_count);
+  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(memory_read_byte_count);
+  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(memory_write_byte_count);
+  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(global_load_byte_count);
+  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(global_store_byte_count);
+  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(buffer_load_byte_count);
+  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(buffer_store_byte_count);
+  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(flat_read_byte_count);
+  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(flat_write_byte_count);
+  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(local_read_byte_count);
+  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(local_write_byte_count);
+  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(scalar_read_byte_count);
+  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(scalar_write_byte_count);
+  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(
+      unclassified_read_byte_count);
+  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(
+      unclassified_write_byte_count);
+  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(atomic_count);
+  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(branch_count);
+  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(barrier_count);
+  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(control_count);
+  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(conversion_count);
+  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(cache_count);
+  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(register_move_count);
+#undef LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD
+  return true;
+}
+
+static bool loom_target_compile_report_low_exact_trip_count(
+    const loom_value_fact_table_t* fact_table, loom_loop_like_t loop,
+    uint64_t* out_trip_count) {
+  *out_trip_count = 0;
+  if (!loom_loop_like_isa(loop) || !loom_loop_like_has_counted_range(loop)) {
+    return false;
+  }
+  int64_t lower_bound = 0;
+  int64_t upper_bound = 0;
+  int64_t step = 0;
+  if (!loom_value_facts_as_exact_i64(
+          loom_value_fact_table_lookup(fact_table,
+                                       loom_loop_like_lower_bound(loop)),
+          &lower_bound) ||
+      !loom_value_facts_as_exact_i64(
+          loom_value_fact_table_lookup(fact_table,
+                                       loom_loop_like_upper_bound(loop)),
+          &upper_bound) ||
+      !loom_value_facts_as_exact_i64(
+          loom_value_fact_table_lookup(fact_table, loom_loop_like_step(loop)),
+          &step) ||
+      step <= 0) {
+    return false;
+  }
+  if (upper_bound <= lower_bound) {
+    return true;
+  }
+  int64_t span = 0;
+  if (!loom_checked_sub_i64(upper_bound, lower_bound, &span)) {
+    return false;
+  }
+  const uint64_t unsigned_span = (uint64_t)span;
+  const uint64_t unsigned_step = (uint64_t)step;
+  *out_trip_count = ((unsigned_span - 1) / unsigned_step) + 1;
+  return true;
+}
+
+static const loom_low_descriptor_t*
+loom_target_compile_report_schedule_descriptor_for_op(
+    const loom_low_schedule_table_t* schedule, const loom_op_t* op) {
+  if (schedule == NULL || op == NULL) {
+    return NULL;
+  }
+  for (iree_host_size_t i = 0; i < schedule->node_count; ++i) {
+    const loom_low_schedule_node_t* node = &schedule->nodes[i];
+    if (node->op == op) {
+      return node->descriptor;
+    }
+  }
+  return NULL;
+}
+
+static iree_string_view_t loom_target_compile_report_low_op_semantic_tag(
+    const loom_low_schedule_table_t* schedule, const loom_op_t* op) {
+  return loom_target_compile_report_descriptor_semantic_tag(
+      schedule->target.descriptor_set,
+      loom_target_compile_report_schedule_descriptor_for_op(schedule, op));
+}
+
+static bool loom_target_compile_report_value_exact_i64(
+    const loom_value_fact_table_t* fact_table, loom_value_id_t value_id,
+    int64_t* out_value) {
+  *out_value = 0;
+  if (value_id == LOOM_VALUE_ID_INVALID) {
+    return false;
+  }
+  const loom_value_facts_t facts =
+      loom_value_fact_table_lookup(fact_table, value_id);
+  if (loom_value_facts_as_exact_i64(facts, out_value)) {
+    return true;
+  }
+  loom_value_facts_t element_facts = loom_value_facts_unknown();
+  return loom_value_facts_query_all_equal_element(&fact_table->context, facts,
+                                                  &element_facts) &&
+         loom_value_facts_as_exact_i64(element_facts, out_value);
+}
+
+static const loom_named_attr_t* loom_target_compile_report_low_find_attr(
+    const loom_module_t* module, loom_named_attr_slice_t attrs,
+    iree_string_view_t name) {
+  for (iree_host_size_t i = 0; i < attrs.count; ++i) {
+    const loom_named_attr_t* attr = &attrs.entries[i];
+    if (attr->name_id < module->strings.count &&
+        iree_string_view_equal(module->strings.entries[attr->name_id], name)) {
+      return attr;
+    }
+  }
+  return NULL;
+}
+
+static bool loom_target_compile_report_low_op_i64_attr(
+    const loom_module_t* module, const loom_op_t* op, iree_string_view_t name,
+    int64_t* out_value) {
+  const loom_named_attr_t* attr = loom_target_compile_report_low_find_attr(
+      module, loom_low_op_attrs(op), name);
+  if (attr == NULL || attr->value.kind != LOOM_ATTR_I64) {
+    return false;
+  }
+  *out_value = loom_attr_as_i64(attr->value);
+  return true;
+}
+
+static bool loom_target_compile_report_low_block_branch_to(
+    const loom_block_t* block, const loom_block_t* dest,
+    const loom_op_t** out_br) {
+  const loom_op_t* terminator = block != NULL ? block->last_op : NULL;
+  if (terminator == NULL || !loom_low_br_isa(terminator) ||
+      loom_low_br_dest(terminator) != dest) {
+    return false;
+  }
+  *out_br = terminator;
+  return true;
+}
+
+static bool loom_target_compile_report_low_block_branch_edge_to(
+    const loom_cfg_graph_t* graph, uint16_t source_index, uint16_t target_index,
+    const loom_op_t** out_br, loom_cfg_edge_index_t* out_edge_index) {
+  const loom_op_t* branch_op = NULL;
+  const loom_block_t* source_block = graph->blocks[source_index].block;
+  const loom_block_t* target_block = graph->blocks[target_index].block;
+  if (!loom_target_compile_report_low_block_branch_to(
+          source_block, target_block, &branch_op)) {
+    return false;
+  }
+  const loom_cfg_edge_index_span_t edges =
+      loom_cfg_graph_successor_edges(graph, source_index);
+  for (iree_host_size_t i = 0; i < edges.count; ++i) {
+    const loom_cfg_edge_info_t* edge =
+        loom_cfg_graph_edge(graph, edges.values[i]);
+    if (edge != NULL && edge->target_block_index == target_index &&
+        edge->terminator == branch_op) {
+      *out_br = branch_op;
+      *out_edge_index = edges.values[i];
+      return true;
+    }
+  }
+  return false;
+}
+
+static bool loom_target_compile_report_low_edge_copy_branch_arg(
+    const loom_low_allocation_table_t* allocation, const loom_op_t* branch_op,
+    const loom_block_t* dest, uint16_t arg_index,
+    loom_value_id_t* out_value_id) {
+  if (allocation == NULL || branch_op == NULL || dest == NULL ||
+      arg_index >= dest->arg_count) {
+    return false;
+  }
+  const loom_value_id_t destination_value_id =
+      loom_block_arg_id(dest, arg_index);
+  for (iree_host_size_t i = 0; i < allocation->edge_copy_group_count; ++i) {
+    const loom_low_allocation_edge_copy_group_t* group =
+        &allocation->edge_copy_groups[i];
+    if (group->terminator_op != branch_op) {
+      continue;
+    }
+    bool found = false;
+    loom_value_id_t source_value_id = LOOM_VALUE_ID_INVALID;
+    const iree_host_size_t copy_end = (iree_host_size_t)group->copy_start +
+                                      (iree_host_size_t)group->copy_count;
+    if (copy_end > allocation->edge_copy_count) {
+      return false;
+    }
+    for (iree_host_size_t j = group->copy_start; j < copy_end; ++j) {
+      const loom_low_allocation_edge_copy_t* copy = &allocation->edge_copies[j];
+      if (copy->payload_index != arg_index ||
+          copy->destination_value_id != destination_value_id) {
+        continue;
+      }
+      if (found && copy->source_value_id != source_value_id) {
+        return false;
+      }
+      found = true;
+      source_value_id = copy->source_value_id;
+    }
+    if (!found) {
+      return false;
+    }
+    *out_value_id = source_value_id;
+    return true;
+  }
+  return false;
+}
+
+static bool loom_target_compile_report_low_branch_arg(
+    const loom_low_allocation_table_t* allocation, const loom_op_t* branch_op,
+    const loom_block_t* dest, uint16_t arg_index,
+    loom_value_id_t* out_value_id) {
+  *out_value_id = LOOM_VALUE_ID_INVALID;
+  if (branch_op == NULL || arg_index >= dest->arg_count) {
+    return false;
+  }
+  const loom_value_slice_t args = loom_low_br_args(branch_op);
+  if (arg_index < args.count) {
+    *out_value_id = args.values[arg_index];
+    return true;
+  }
+  return loom_target_compile_report_low_edge_copy_branch_arg(
+      allocation, branch_op, dest, arg_index, out_value_id);
+}
+
+static bool loom_target_compile_report_low_add_step(
+    const loom_low_schedule_table_t* schedule,
+    const loom_value_fact_table_t* fact_table, const loom_module_t* module,
+    loom_value_id_t value_id, loom_value_id_t iv_id, int64_t* out_step) {
+  if (value_id >= module->values.count) {
+    return false;
+  }
+  const loom_value_t* value = &module->values.entries[value_id];
+  if (loom_value_is_block_arg(value)) {
+    return false;
+  }
+  const loom_op_t* defining_op = loom_value_def_op(value);
+  if (defining_op == NULL || !loom_low_op_isa(defining_op)) {
+    return false;
+  }
+  const iree_string_view_t tag =
+      loom_target_compile_report_low_op_semantic_tag(schedule, defining_op);
+  if (!iree_string_view_equal(tag, IREE_SV("integer.add.u32")) &&
+      !iree_string_view_equal(tag, IREE_SV("integer.add.i32"))) {
+    return false;
+  }
+  loom_value_slice_t operands = loom_low_op_operands(defining_op);
+  if (operands.count == 1 && operands.values[0] == iv_id) {
+    return loom_target_compile_report_low_op_i64_attr(
+        module, defining_op, IREE_SV("imm32"), out_step);
+  }
+  if (operands.count != 2) {
+    return false;
+  }
+  if (operands.values[0] == iv_id) {
+    return loom_target_compile_report_value_exact_i64(
+        fact_table, operands.values[1], out_step);
+  }
+  if (operands.values[1] == iv_id) {
+    return loom_target_compile_report_value_exact_i64(
+        fact_table, operands.values[0], out_step);
+  }
+  return false;
+}
+
+static bool loom_target_compile_report_low_header_upper_bound(
+    const loom_low_schedule_table_t* schedule,
+    const loom_value_fact_table_t* fact_table, const loom_module_t* module,
+    const loom_op_t* cond_br_op, loom_value_id_t iv_id,
+    int64_t* out_upper_bound, bool* out_inclusive_bound) {
+  *out_inclusive_bound = false;
+  const loom_value_id_t condition = loom_low_cond_br_condition(cond_br_op);
+  if (condition >= module->values.count) {
+    return false;
+  }
+  const loom_value_t* condition_value = &module->values.entries[condition];
+  if (loom_value_is_block_arg(condition_value)) {
+    return false;
+  }
+  const loom_op_t* compare_op = loom_value_def_op(condition_value);
+  if (compare_op == NULL || !loom_low_op_isa(compare_op)) {
+    return false;
+  }
+  const iree_string_view_t tag =
+      loom_target_compile_report_low_op_semantic_tag(schedule, compare_op);
+  const bool exclusive_upper =
+      iree_string_view_equal(tag, IREE_SV("integer.compare.slt.i32")) ||
+      iree_string_view_equal(tag, IREE_SV("integer.compare.ult.i32"));
+  const bool inclusive_upper =
+      iree_string_view_equal(tag, IREE_SV("integer.compare.sle.i32")) ||
+      iree_string_view_equal(tag, IREE_SV("integer.compare.ule.i32"));
+  if (!exclusive_upper && !inclusive_upper) {
+    return false;
+  }
+  loom_value_slice_t operands = loom_low_op_operands(compare_op);
+  if (operands.count != 2 || operands.values[0] != iv_id) {
+    return false;
+  }
+  if (!loom_target_compile_report_value_exact_i64(
+          fact_table, operands.values[1], out_upper_bound)) {
+    return false;
+  }
+  *out_inclusive_bound = inclusive_upper;
+  return true;
+}
+
+static bool loom_target_compile_report_low_compute_trip_count(
+    int64_t lower_bound, int64_t upper_bound, bool inclusive_upper_bound,
+    int64_t step, uint64_t* out_trip_count) {
+  *out_trip_count = 0;
+  if (step <= 0) {
+    return false;
+  }
+  if (inclusive_upper_bound) {
+    if (upper_bound == INT64_MAX) {
+      return false;
+    }
+    ++upper_bound;
+  }
+  if (upper_bound <= lower_bound) {
+    return true;
+  }
+  int64_t span = 0;
+  if (!loom_checked_sub_i64(upper_bound, lower_bound, &span)) {
+    return false;
+  }
+  const uint64_t unsigned_span = (uint64_t)span;
+  const uint64_t unsigned_step = (uint64_t)step;
+  *out_trip_count = ((unsigned_span - 1) / unsigned_step) + 1;
+  return true;
+}
+
+static bool loom_target_compile_report_low_multiply_block(
+    uint64_t* block_multipliers, uint16_t block_index, uint64_t multiplier) {
+  return loom_target_compile_report_mul_u64(block_multipliers[block_index],
+                                            multiplier,
+                                            &block_multipliers[block_index]);
+}
+
+static bool loom_target_compile_report_low_try_counted_loop(
+    const loom_low_schedule_table_t* schedule,
+    const loom_low_allocation_table_t* allocation,
+    const loom_value_fact_table_t* fact_table, const loom_module_t* module,
+    const loom_cfg_graph_t* graph, uint16_t header_index,
+    uint64_t* block_multipliers, uint8_t* counted_backedge_edges) {
+  const loom_block_t* header = graph->blocks[header_index].block;
+  if (header == NULL || header->arg_count != 1 || header->last_op == NULL ||
+      !loom_low_cond_br_isa(header->last_op)) {
+    return true;
+  }
+  const loom_value_id_t iv_id = loom_block_arg_id(header, 0);
+  const loom_block_t* true_dest = loom_low_cond_br_true_dest(header->last_op);
+  const loom_block_t* false_dest = loom_low_cond_br_false_dest(header->last_op);
+  const iree_host_size_t true_index =
+      loom_cfg_graph_block_index(graph, true_dest);
+  const iree_host_size_t false_index =
+      loom_cfg_graph_block_index(graph, false_dest);
+  if (true_index == IREE_HOST_SIZE_MAX || false_index == IREE_HOST_SIZE_MAX ||
+      true_index == false_index) {
+    return true;
+  }
+
+  const loom_op_t* body_backedge_op = NULL;
+  loom_cfg_edge_index_t body_backedge_edge = LOOM_CFG_EDGE_INDEX_INVALID;
+  uint16_t body_index = UINT16_MAX;
+  if (loom_target_compile_report_low_block_branch_edge_to(
+          graph, (uint16_t)true_index, header_index, &body_backedge_op,
+          &body_backedge_edge)) {
+    body_index = (uint16_t)true_index;
+  }
+  if (loom_target_compile_report_low_block_branch_edge_to(
+          graph, (uint16_t)false_index, header_index, &body_backedge_op,
+          &body_backedge_edge)) {
+    if (body_index != UINT16_MAX) {
+      return false;
+    }
+    body_index = (uint16_t)false_index;
+  }
+  if (body_index == UINT16_MAX) {
+    return true;
+  }
+  loom_value_id_t body_backedge_arg = LOOM_VALUE_ID_INVALID;
+  if (!loom_target_compile_report_low_branch_arg(allocation, body_backedge_op,
+                                                 header, /*arg_index=*/0,
+                                                 &body_backedge_arg)) {
+    return false;
+  }
+
+  const loom_op_t* initial_branch_op = NULL;
+  loom_value_id_t initial_arg = LOOM_VALUE_ID_INVALID;
+  loom_cfg_block_index_span_t predecessors =
+      loom_cfg_graph_predecessors(graph, header_index);
+  for (iree_host_size_t i = 0; i < predecessors.count; ++i) {
+    const uint16_t predecessor_index = predecessors.values[i];
+    if (predecessor_index == body_index) {
+      continue;
+    }
+    const loom_op_t* branch_op = NULL;
+    if (!loom_target_compile_report_low_block_branch_to(
+            graph->blocks[predecessor_index].block, header, &branch_op)) {
+      return false;
+    }
+    loom_value_id_t branch_arg = LOOM_VALUE_ID_INVALID;
+    if (!loom_target_compile_report_low_branch_arg(
+            allocation, branch_op, header, /*arg_index=*/0, &branch_arg)) {
+      return false;
+    }
+    if (initial_branch_op != NULL) {
+      return false;
+    }
+    initial_branch_op = branch_op;
+    initial_arg = branch_arg;
+  }
+  if (initial_branch_op == NULL) {
+    return false;
+  }
+
+  int64_t lower_bound = 0;
+  int64_t upper_bound = 0;
+  int64_t step = 0;
+  bool inclusive_upper_bound = false;
+  uint64_t trip_count = 0;
+  bool lower_ok = loom_target_compile_report_value_exact_i64(
+      fact_table, initial_arg, &lower_bound);
+  bool step_ok = loom_target_compile_report_low_add_step(
+      schedule, fact_table, module, body_backedge_arg, iv_id, &step);
+  bool upper_ok = loom_target_compile_report_low_header_upper_bound(
+      schedule, fact_table, module, header->last_op, iv_id, &upper_bound,
+      &inclusive_upper_bound);
+  bool trip_ok = loom_target_compile_report_low_compute_trip_count(
+      lower_bound, upper_bound, inclusive_upper_bound, step, &trip_count);
+  if (!lower_ok || !step_ok || !upper_ok || !trip_ok) {
+    return false;
+  }
+
+  uint64_t header_count = 0;
+  if (!loom_target_compile_report_add_u64(trip_count, 1, &header_count) ||
+      !loom_target_compile_report_low_multiply_block(
+          block_multipliers, header_index, header_count) ||
+      !loom_target_compile_report_low_multiply_block(block_multipliers,
+                                                     body_index, trip_count)) {
+    return false;
+  }
+  if (body_backedge_edge == LOOM_CFG_EDGE_INDEX_INVALID ||
+      body_backedge_edge >= graph->edge_count) {
+    return false;
+  }
+  counted_backedge_edges[body_backedge_edge] = 1;
+  return true;
+}
+
+static bool loom_target_compile_report_low_has_uncounted_backedge(
+    const loom_cfg_graph_t* graph, const uint8_t* counted_backedge_edges) {
+  for (iree_host_size_t i = 0; i < graph->edge_count; ++i) {
+    const loom_cfg_edge_info_t* edge = loom_cfg_graph_edge(graph, (uint32_t)i);
+    if (edge == NULL ||
+        !loom_cfg_graph_block_is_reachable(graph, edge->source_block_index)) {
+      continue;
+    }
+    if (edge->target_block_index <= edge->source_block_index &&
+        counted_backedge_edges[i] == 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static iree_status_t loom_target_compile_report_low_block_multipliers(
+    const loom_low_schedule_table_t* schedule,
+    const loom_low_allocation_table_t* allocation,
+    const loom_value_fact_table_t* fact_table, const loom_module_t* module,
+    const loom_op_t* function_op, iree_arena_allocator_t* arena,
+    uint64_t** out_block_multipliers, bool* out_exact) {
+  *out_block_multipliers = NULL;
+  *out_exact = true;
+  if (schedule->block_count == 0) {
+    return iree_ok_status();
+  }
+  uint64_t* block_multipliers = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, schedule->block_count,
+                                                 sizeof(*block_multipliers),
+                                                 (void**)&block_multipliers));
+  for (iree_host_size_t i = 0; i < schedule->block_count; ++i) {
+    block_multipliers[i] = 1;
+  }
+
+  const loom_region_t* body = loom_low_function_const_body(function_op);
+  if (body == NULL || body->block_count == 0) {
+    *out_block_multipliers = block_multipliers;
+    return iree_ok_status();
+  }
+  loom_cfg_graph_t graph = {0};
+  IREE_RETURN_IF_ERROR(loom_cfg_graph_build(module, body, arena, &graph));
+  if (graph.malformed || graph.block_count != schedule->block_count) {
+    *out_block_multipliers = block_multipliers;
+    return iree_ok_status();
+  }
+  uint8_t* counted_backedge_edges = NULL;
+  if (graph.edge_count > 0) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        arena, graph.edge_count, sizeof(*counted_backedge_edges),
+        (void**)&counted_backedge_edges));
+    memset(counted_backedge_edges, 0,
+           graph.edge_count * sizeof(*counted_backedge_edges));
+  }
+  for (uint16_t block_index = 0; block_index < graph.block_count;
+       ++block_index) {
+    if (!loom_target_compile_report_low_try_counted_loop(
+            schedule, allocation, fact_table, module, &graph, block_index,
+            block_multipliers, counted_backedge_edges)) {
+      *out_block_multipliers = NULL;
+      *out_exact = false;
+      return iree_ok_status();
+    }
+  }
+  if (loom_target_compile_report_low_has_uncounted_backedge(
+          &graph, counted_backedge_edges)) {
+    *out_block_multipliers = NULL;
+    *out_exact = false;
+    return iree_ok_status();
+  }
+  *out_block_multipliers = block_multipliers;
+  return iree_ok_status();
+}
+
+static bool loom_target_compile_report_low_node_execution_multiplier(
+    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
+    const uint64_t* block_multipliers, const loom_low_schedule_node_t* node,
+    uint64_t* out_multiplier) {
+  *out_multiplier = block_multipliers != NULL &&
+                            node->block_index != LOOM_LOW_PACKET_INDEX_NONE
+                        ? block_multipliers[node->block_index]
+                        : 1;
+  const loom_op_t* op = node->op;
+  for (const loom_op_t* parent = op ? op->parent_op : NULL; parent;
+       parent = parent->parent_op) {
+    loom_loop_like_t loop = loom_loop_like_cast(module, (loom_op_t*)parent);
+    if (!loom_loop_like_isa(loop)) {
+      continue;
+    }
+    uint64_t trip_count = 0;
+    if (!loom_target_compile_report_low_exact_trip_count(fact_table, loop,
+                                                         &trip_count) ||
+        !loom_target_compile_report_mul_u64(*out_multiplier, trip_count,
+                                            out_multiplier)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 static void loom_target_compile_report_record_low_static_instruction_mix(
     loom_target_compile_report_t* report,
     const loom_low_emission_frame_t* frame) {
@@ -520,6 +1129,58 @@ static void loom_target_compile_report_record_low_static_instruction_mix(
         &frame->schedule, descriptor_set, node, &mix);
   }
   loom_target_compile_report_record_static_instruction_mix(report, &mix);
+}
+
+static iree_status_t loom_target_compile_report_record_low_dynamic_mix(
+    loom_target_compile_report_t* report,
+    const loom_low_emission_frame_t* frame) {
+  if (frame->module == NULL || frame->function_op == NULL ||
+      frame->module->arena.block_pool == NULL) {
+    return iree_ok_status();
+  }
+  iree_arena_allocator_t arena = {0};
+  iree_arena_initialize(frame->module->arena.block_pool, &arena);
+  loom_value_fact_table_t fact_table = {0};
+  iree_status_t status = loom_value_fact_table_initialize(
+      &fact_table, &arena, frame->module->values.count);
+  loom_func_like_t function =
+      loom_func_like_cast(frame->module, (loom_op_t*)frame->function_op);
+  if (iree_status_is_ok(status)) {
+    status = loom_value_fact_table_compute_region(
+        &fact_table, frame->module, function,
+        (loom_region_t*)loom_low_function_const_body(frame->function_op),
+        (loom_op_t*)frame->function_op);
+  }
+  uint64_t* block_multipliers = NULL;
+  bool block_multipliers_exact = true;
+  if (iree_status_is_ok(status)) {
+    status = loom_target_compile_report_low_block_multipliers(
+        &frame->schedule, &frame->allocation, &fact_table, frame->module,
+        frame->function_op, &arena, &block_multipliers,
+        &block_multipliers_exact);
+  }
+  bool exact = iree_status_is_ok(status) && block_multipliers_exact;
+  loom_target_compile_report_static_instruction_mix_t mix = {0};
+  for (iree_host_size_t i = 0; exact && i < frame->schedule.node_count; ++i) {
+    const loom_low_schedule_node_t* node = &frame->schedule.nodes[i];
+    uint64_t multiplier = 1;
+    exact = loom_target_compile_report_low_node_execution_multiplier(
+        frame->module, &fact_table, block_multipliers, node, &multiplier);
+    if (!exact) {
+      break;
+    }
+    loom_target_compile_report_static_instruction_mix_t node_mix = {0};
+    loom_target_compile_report_accumulate_low_node_static_mix(
+        &frame->schedule, frame->schedule.target.descriptor_set, node,
+        &node_mix);
+    exact = loom_target_compile_report_accumulate_scaled_static_mix(
+        &mix, &node_mix, multiplier);
+  }
+  if (exact) {
+    loom_target_compile_report_record_dynamic_instruction_mix(report, &mix);
+  }
+  iree_arena_deinitialize(&arena);
+  return status;
 }
 
 static iree_string_view_t
@@ -1406,15 +2067,6 @@ loom_target_compile_report_source_low_selection_kind(
     default:
       return LOOM_TARGET_COMPILE_REPORT_SOURCE_LOW_SELECTION_NONE;
   }
-}
-
-static bool loom_target_compile_report_mul_u64(uint64_t lhs, uint64_t rhs,
-                                               uint64_t* out_result) {
-  if (lhs != 0 && rhs > UINT64_MAX / lhs) {
-    return false;
-  }
-  *out_result = lhs * rhs;
-  return true;
 }
 
 static bool loom_target_compile_report_mul3_u32(uint32_t x, uint32_t y,
@@ -2321,6 +2973,8 @@ iree_status_t loom_target_compile_report_record_low_emission_frame(
       frame->schedule.hazard_gap_count, frame->schedule.model_summary_count,
       liveness->pressure_summary_count, peak_live_units);
   loom_target_compile_report_record_low_static_instruction_mix(report, frame);
+  IREE_RETURN_IF_ERROR(
+      loom_target_compile_report_record_low_dynamic_mix(report, frame));
   loom_target_compile_report_record_move_causes(report, frame);
   iree_status_t status =
       loom_target_compile_report_record_low_allocation_contents(

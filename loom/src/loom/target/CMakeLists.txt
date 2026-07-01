@@ -249,10 +249,13 @@ loom_cc_library(
     loom::codegen::low::descriptors
     loom::codegen::low::diagnostics
     loom::codegen::low::frame
+    loom::codegen::low::function
     loom::codegen::low::lower
     loom::codegen::low::packet
     loom::ir
     loom::ops::low
+    loom::util::cfg_graph
+    loom::util::fact_table
   PUBLIC
 )
 

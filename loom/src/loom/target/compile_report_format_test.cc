@@ -503,14 +503,77 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
       /*.local_memory_count=*/{},
       /*.scalar_memory_count=*/{},
       /*.generic_memory_count=*/{},
+      /*.memory_read_unknown_width_count=*/{},
+      /*.memory_write_unknown_width_count=*/{},
+      /*.memory_read_byte_count=*/{},
+      /*.memory_write_byte_count=*/{},
+      /*.global_load_byte_count=*/{},
+      /*.global_store_byte_count=*/{},
+      /*.buffer_load_byte_count=*/{},
+      /*.buffer_store_byte_count=*/{},
+      /*.flat_read_byte_count=*/{},
+      /*.flat_write_byte_count=*/{},
+      /*.local_read_byte_count=*/{},
+      /*.local_write_byte_count=*/{},
+      /*.scalar_read_byte_count=*/{},
+      /*.scalar_write_byte_count=*/{},
+      /*.unclassified_read_byte_count=*/{},
+      /*.unclassified_write_byte_count=*/{},
       /*.atomic_count=*/{},
       /*.branch_count=*/{},
       /*.barrier_count=*/1,
       /*.control_count=*/{},
       /*.conversion_count=*/1,
+      /*.cache_count=*/{},
+      /*.register_move_count=*/{},
   };
+  const loom_target_compile_report_static_instruction_mix_t
+      dynamic_instruction_mix = {
+          /*.descriptor_count=*/9,
+          /*.unknown_count=*/{},
+          /*.scalar_alu_count=*/2,
+          /*.vector_alu_count=*/3,
+          /*.matrix_count=*/1,
+          /*.mfma_count=*/{},
+          /*.wmma_count=*/1,
+          /*.dot_count=*/{},
+          /*.global_memory_count=*/3,
+          /*.global_load_count=*/1,
+          /*.global_store_count=*/1,
+          /*.buffer_load_count=*/1,
+          /*.buffer_store_count=*/{},
+          /*.flat_memory_count=*/{},
+          /*.local_memory_count=*/{},
+          /*.scalar_memory_count=*/{},
+          /*.generic_memory_count=*/{},
+          /*.memory_read_unknown_width_count=*/{},
+          /*.memory_write_unknown_width_count=*/{},
+          /*.memory_read_byte_count=*/24,
+          /*.memory_write_byte_count=*/8,
+          /*.global_load_byte_count=*/16,
+          /*.global_store_byte_count=*/8,
+          /*.buffer_load_byte_count=*/8,
+          /*.buffer_store_byte_count=*/{},
+          /*.flat_read_byte_count=*/{},
+          /*.flat_write_byte_count=*/{},
+          /*.local_read_byte_count=*/{},
+          /*.local_write_byte_count=*/{},
+          /*.scalar_read_byte_count=*/{},
+          /*.scalar_write_byte_count=*/{},
+          /*.unclassified_read_byte_count=*/{},
+          /*.unclassified_write_byte_count=*/{},
+          /*.atomic_count=*/{},
+          /*.branch_count=*/{},
+          /*.barrier_count=*/1,
+          /*.control_count=*/{},
+          /*.conversion_count=*/1,
+          /*.cache_count=*/{},
+          /*.register_move_count=*/{},
+      };
   loom_target_compile_report_record_static_instruction_mix(&report,
                                                            &instruction_mix);
+  loom_target_compile_report_record_dynamic_instruction_mix(
+      &report, &dynamic_instruction_mix);
   loom_target_compile_report_record_emission(&report, 8, 64, 80);
   loom_target_compile_report_record_memory(&report, 16, 32);
   const loom_target_compile_report_target_resources_t target_resources = {
@@ -609,6 +672,8 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
                                                      &target_resources);
   loom_target_compile_report_record_static_instruction_mix(&entry_report,
                                                            &instruction_mix);
+  loom_target_compile_report_record_dynamic_instruction_mix(
+      &entry_report, &dynamic_instruction_mix);
   IREE_ASSERT_OK(
       loom_target_compile_report_record_entry_report(&report, &entry_report));
   IREE_ASSERT_OK(
@@ -769,6 +834,25 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
       iree_string_view_find(
           output, IREE_SV("global_load=1 global_store=0 buffer_load=1"), 0),
       IREE_STRING_VIEW_NPOS);
+  EXPECT_NE(iree_string_view_find(output,
+                                  IREE_SV("dynamic_instruction_mix "
+                                          "descriptors=9"),
+                                  0),
+            IREE_STRING_VIEW_NPOS);
+  EXPECT_NE(
+      iree_string_view_find(
+          output, IREE_SV("global_load=1 global_store=1 buffer_load=1"), 0),
+      IREE_STRING_VIEW_NPOS);
+  EXPECT_NE(iree_string_view_find(
+                output,
+                IREE_SV("economics memory per_workitem_issued_read_bytes=24 "
+                        "per_workitem_issued_write_bytes=8 "
+                        "per_workitem_issued_total_bytes=32 "
+                        "dispatch_read_bytes=98304 "
+                        "dispatch_write_bytes=32768 "
+                        "dispatch_total_bytes=131072"),
+                0),
+            IREE_STRING_VIEW_NPOS);
   EXPECT_NE(iree_string_view_find(
                 output,
                 IREE_SV("target_resources scalar_register_class=amdgpu.sgpr "
@@ -1180,6 +1264,19 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
           output, IREE_SV("\"static_instruction_mix\":{\"descriptor_count\":9"),
           0),
       IREE_STRING_VIEW_NPOS);
+  EXPECT_NE(iree_string_view_find(
+                output,
+                IREE_SV("\"economics\":{\"memory\":"
+                        "{\"per_workitem_issued\":{\"read_bytes\":24,"
+                        "\"write_bytes\":8,\"total_bytes\":32"),
+                0),
+            IREE_STRING_VIEW_NPOS);
+  EXPECT_NE(iree_string_view_find(
+                output,
+                IREE_SV("\"dispatch_issued\":{\"read_bytes\":98304,"
+                        "\"write_bytes\":32768,\"total_bytes\":131072"),
+                0),
+            IREE_STRING_VIEW_NPOS);
   EXPECT_NE(
       iree_string_view_find(output,
                             IREE_SV("\"allocation\":{\"assignment_count\":6,"

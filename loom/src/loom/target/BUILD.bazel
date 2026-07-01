@@ -221,10 +221,13 @@ loom_cc_library(
         "//loom/src/loom/codegen/low:descriptors",
         "//loom/src/loom/codegen/low:diagnostics",
         "//loom/src/loom/codegen/low:frame",
+        "//loom/src/loom/codegen/low:function",
         "//loom/src/loom/codegen/low:packet",
         "//loom/src/loom/codegen/low/lower",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/low",
+        "//loom/src/loom/util:cfg_graph",
+        "//loom/src/loom/util:fact_table",
         "//runtime/src/iree/base",
     ],
 )
