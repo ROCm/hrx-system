@@ -12,7 +12,10 @@
 
 enum {
   ID4_PIPELINE_PARAMETER_ENCODER_CONFIG_VALUE_CAPACITY = 24,
-  ID4_PIPELINE_PARAMETER_ENCODER_CHUNK_STEP_CAPACITY = 32,
+  // A staging chunk owns one logical target encode. The staging window still
+  // pipelines chunks through reusable slots, while each provider gather,
+  // command buffer, and readiness edge remains parameter-local.
+  ID4_PIPELINE_PARAMETER_ENCODER_CHUNK_STEP_CAPACITY = 1,
   ID4_PIPELINE_PARAMETER_ENCODER_STAGING_SLOT_COUNT = 2,
   ID4_PIPELINE_PARAMETER_ENCODER_MAX_SOURCE_COUNT = 2,
   ID4_PIPELINE_PARAMETER_ENCODER_CHUNK_SOURCE_CAPACITY =
