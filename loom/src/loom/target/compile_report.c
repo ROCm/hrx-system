@@ -68,6 +68,8 @@ void loom_target_compile_report_deinitialize(
       allocator, &report->math_legalization_rows);
   loom_target_compile_report_row_list_deinitialize(
       allocator, &report->target_legalization_rows);
+  loom_target_compile_report_row_list_deinitialize(
+      allocator, &report->target_capability_rows);
   *report = (loom_target_compile_report_t){0};
 }
 
@@ -85,7 +87,8 @@ static bool loom_target_compile_report_has_rows(
          report->source_low_rows.count != 0 ||
          report->source_low_memory_rows.count != 0 ||
          report->math_legalization_rows.count != 0 ||
-         report->target_legalization_rows.count != 0;
+         report->target_legalization_rows.count != 0 ||
+         report->target_capability_rows.count != 0;
 }
 
 void loom_target_compile_report_initialize_if_empty(
@@ -188,6 +191,7 @@ iree_status_t loom_target_compile_report_clone(
   target.source_low_memory_rows = (loom_target_compile_report_row_list_t){0};
   target.math_legalization_rows = (loom_target_compile_report_row_list_t){0};
   target.target_legalization_rows = (loom_target_compile_report_row_list_t){0};
+  target.target_capability_rows = (loom_target_compile_report_row_list_t){0};
   if (source->entry_rows.count == 0 && source->pressure_summaries.count == 0 &&
       source->pressure_rows.count == 0 &&
       source->pressure_origin_rows.count == 0 &&
@@ -200,7 +204,8 @@ iree_status_t loom_target_compile_report_clone(
       source->source_low_rows.count == 0 &&
       source->source_low_memory_rows.count == 0 &&
       source->math_legalization_rows.count == 0 &&
-      source->target_legalization_rows.count == 0) {
+      source->target_legalization_rows.count == 0 &&
+      source->target_capability_rows.count == 0) {
     *out_target = target;
     return iree_ok_status();
   }
@@ -293,6 +298,12 @@ iree_status_t loom_target_compile_report_clone(
         &source->target_legalization_rows,
         sizeof(loom_target_compile_report_legalization_row_t), allocator,
         &target.target_legalization_rows);
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_target_compile_report_row_list_clone(
+        &source->target_capability_rows,
+        sizeof(loom_target_compile_report_target_capability_row_t), allocator,
+        &target.target_capability_rows);
   }
   if (!iree_status_is_ok(status)) {
     loom_target_compile_report_deinitialize(&target);
@@ -884,6 +895,7 @@ loom_target_compile_report_entry_from_report(
           entry_report->allocation_high_water_rows.count,
       .wait_counter_row_count = entry_report->wait_counter_rows.count,
       .wait_action_row_count = entry_report->wait_action_rows.count,
+      .target_capability_row_count = entry_report->target_capability_rows.count,
   };
 }
 
@@ -981,6 +993,14 @@ iree_status_t loom_target_compile_report_record_entry_report(
         &report->math_legalization_rows, &entry_report->math_legalization_rows,
         sizeof(loom_target_compile_report_math_row_t), report->allocator));
   }
+  if (iree_any_bit_set(
+          entry_report->detail_flags,
+          LOOM_TARGET_COMPILE_REPORT_DETAIL_TARGET_CAPABILITY_ROWS)) {
+    IREE_RETURN_IF_ERROR(loom_target_compile_report_append_rows(
+        &report->target_capability_rows, &entry_report->target_capability_rows,
+        sizeof(loom_target_compile_report_target_capability_row_t),
+        report->allocator));
+  }
   return iree_ok_status();
 }
 
@@ -1076,6 +1096,15 @@ iree_status_t loom_target_compile_report_record_wait_action_row(
   }
   return loom_target_compile_report_row_list_append(
       &report->wait_action_rows, sizeof(*row), report->allocator, row);
+}
+
+iree_status_t loom_target_compile_report_record_target_capability_row(
+    loom_target_compile_report_t* report,
+    const loom_target_compile_report_target_capability_row_t* row) {
+  report->detail_flags |=
+      LOOM_TARGET_COMPILE_REPORT_DETAIL_TARGET_CAPABILITY_ROWS;
+  return loom_target_compile_report_row_list_append(
+      &report->target_capability_rows, sizeof(*row), report->allocator, row);
 }
 
 iree_status_t loom_target_compile_report_record_source_low_row(

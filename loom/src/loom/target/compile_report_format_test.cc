@@ -328,6 +328,38 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
           /*.outstanding_before=*/2,
       },
   };
+  loom_target_compile_report_target_capability_row_t target_capability_rows[] =
+      {
+          {
+              /*.function_name=*/IREE_SVL("branchy_export"),
+              /*.target_family_name=*/IREE_SVL("amdgpu"),
+              /*.namespace_name=*/IREE_SVL("amdgpu"),
+              /*.key=*/IREE_SVL("matrix_feature_profile"),
+              /*.value_kind=*/
+              LOOM_TARGET_COMPILE_REPORT_CAPABILITY_VALUE_STRING,
+              /*.value_u64=*/0,
+              /*.value_string=*/IREE_SVL("wmma-gfx11"),
+          },
+          {
+              /*.function_name=*/IREE_SVL("branchy_export"),
+              /*.target_family_name=*/IREE_SVL("amdgpu"),
+              /*.namespace_name=*/IREE_SVL("target"),
+              /*.key=*/IREE_SVL("subgroup_size"),
+              /*.value_kind=*/LOOM_TARGET_COMPILE_REPORT_CAPABILITY_VALUE_U64,
+              /*.value_u64=*/32,
+              /*.value_string=*/IREE_SVL(""),
+          },
+          {
+              /*.function_name=*/IREE_SVL("branchy_export"),
+              /*.target_family_name=*/IREE_SVL("amdgpu"),
+              /*.namespace_name=*/IREE_SVL("amdgpu"),
+              /*.key=*/IREE_SVL("wavefront_64"),
+              /*.value_kind=*/
+              LOOM_TARGET_COMPILE_REPORT_CAPABILITY_VALUE_BOOL,
+              /*.value_u64=*/1,
+              /*.value_string=*/IREE_SVL(""),
+          },
+      };
   loom_target_compile_report_source_low_row_t source_low_rows[] = {
       {
           /*.function_name=*/IREE_SVL("branchy"),
@@ -431,7 +463,8 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
       LOOM_TARGET_COMPILE_REPORT_DETAIL_SOURCE_LOW_ROWS |
       LOOM_TARGET_COMPILE_REPORT_DETAIL_MATH_LEGALIZATION_ROWS |
       LOOM_TARGET_COMPILE_REPORT_DETAIL_TARGET_LEGALIZATION_ROWS |
-      LOOM_TARGET_COMPILE_REPORT_DETAIL_WAIT_PLAN;
+      LOOM_TARGET_COMPILE_REPORT_DETAIL_WAIT_PLAN |
+      LOOM_TARGET_COMPILE_REPORT_DETAIL_TARGET_CAPABILITY_ROWS;
   report.artifact_kind = LOOM_TARGET_COMPILE_ARTIFACT_KIND_VM_ARCHIVE;
   report.function_name = IREE_SVL("branchy");
   report.target_bundle_name = IREE_SVL("vm_target");
@@ -541,6 +574,12 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
       &entry_report, &wait_action_rows[0]));
   IREE_ASSERT_OK(loom_target_compile_report_record_wait_action_row(
       &entry_report, &wait_action_rows[1]));
+  IREE_ASSERT_OK(loom_target_compile_report_record_target_capability_row(
+      &entry_report, &target_capability_rows[0]));
+  IREE_ASSERT_OK(loom_target_compile_report_record_target_capability_row(
+      &entry_report, &target_capability_rows[1]));
+  IREE_ASSERT_OK(loom_target_compile_report_record_target_capability_row(
+      &entry_report, &target_capability_rows[2]));
   loom_target_compile_report_record_target_resources(&entry_report,
                                                      &target_resources);
   loom_target_compile_report_record_static_instruction_mix(&entry_report,
@@ -606,6 +645,9 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
                                   0),
             IREE_STRING_VIEW_NPOS);
   EXPECT_NE(iree_string_view_find(output,
+                                  IREE_SV("target_capability_rows count=3"), 0),
+            IREE_STRING_VIEW_NPOS);
+  EXPECT_NE(iree_string_view_find(output,
                                   IREE_SV("wait_counter[0] "
                                           "function=branchy_export "
                                           "counter=vmem_load counter_id=1 "
@@ -663,6 +705,28 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
                         "consumer_ordinal=- consumer_operation=- "
                         "consumer_descriptor_key=- consumer_semantic_tag=- "
                         "target_count=0 outstanding_before=2"),
+                0),
+            IREE_STRING_VIEW_NPOS);
+  EXPECT_NE(iree_string_view_find(
+                output,
+                IREE_SV("target_capability[0] function=branchy_export "
+                        "target_family=amdgpu namespace=amdgpu "
+                        "key=matrix_feature_profile value_kind=string "
+                        "value=wmma-gfx11"),
+                0),
+            IREE_STRING_VIEW_NPOS);
+  EXPECT_NE(iree_string_view_find(
+                output,
+                IREE_SV("target_capability[1] function=branchy_export "
+                        "target_family=amdgpu namespace=target "
+                        "key=subgroup_size value_kind=u64 value=32"),
+                0),
+            IREE_STRING_VIEW_NPOS);
+  EXPECT_NE(iree_string_view_find(
+                output,
+                IREE_SV("target_capability[2] function=branchy_export "
+                        "target_family=amdgpu namespace=amdgpu "
+                        "key=wavefront_64 value_kind=bool value=true"),
                 0),
             IREE_STRING_VIEW_NPOS);
   EXPECT_NE(iree_string_view_find(
@@ -815,7 +879,8 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
                                           "spill_rows=0 "
                                           "allocation_high_water_rows=1 "
                                           "wait_counter_rows=2 "
-                                          "wait_action_rows=2"),
+                                          "wait_action_rows=2 "
+                                          "target_capability_rows=3"),
                                   0),
             IREE_STRING_VIEW_NPOS);
   EXPECT_NE(iree_string_view_find(
@@ -954,6 +1019,9 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
   EXPECT_NE(
       iree_string_view_find(output, IREE_SV("\"wait_action_row_count\":2"), 0),
       IREE_STRING_VIEW_NPOS);
+  EXPECT_NE(iree_string_view_find(
+                output, IREE_SV("\"target_capability_row_count\":3"), 0),
+            IREE_STRING_VIEW_NPOS);
   EXPECT_NE(
       iree_string_view_find(
           output, IREE_SV("\"wait_counter_rows\":{\"count\":2,\"rows\":["), 0),
@@ -1027,6 +1095,32 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
                         "\"consumer_descriptor_key\":null,"
                         "\"consumer_semantic_tag\":null,"
                         "\"target_count\":0,\"outstanding_before\":2"),
+                0),
+            IREE_STRING_VIEW_NPOS);
+  EXPECT_NE(
+      iree_string_view_find(
+          output, IREE_SV("\"target_capability_rows\":{\"count\":3,\"rows\":["),
+          0),
+      IREE_STRING_VIEW_NPOS);
+  EXPECT_NE(iree_string_view_find(output,
+                                  IREE_SV("\"function\":\"branchy_export\","
+                                          "\"target_family\":\"amdgpu\","
+                                          "\"namespace\":\"amdgpu\","
+                                          "\"key\":\"matrix_feature_profile\","
+                                          "\"value_kind\":\"string\","
+                                          "\"value_string\":\"wmma-gfx11\""),
+                                  0),
+            IREE_STRING_VIEW_NPOS);
+  EXPECT_NE(iree_string_view_find(
+                output,
+                IREE_SV("\"namespace\":\"target\",\"key\":\"subgroup_size\","
+                        "\"value_kind\":\"u64\",\"value_u64\":32"),
+                0),
+            IREE_STRING_VIEW_NPOS);
+  EXPECT_NE(iree_string_view_find(
+                output,
+                IREE_SV("\"namespace\":\"amdgpu\",\"key\":\"wavefront_64\","
+                        "\"value_kind\":\"bool\",\"value_bool\":true"),
                 0),
             IREE_STRING_VIEW_NPOS);
   EXPECT_NE(iree_string_view_find(
