@@ -78,3 +78,51 @@ low.func.def target(@target) @gfx950_fp8_materialized_bf16_two_k_block_schedule(
   s_nop 7
   global_store_dword v0, v4, s[4:5] offset:0
   s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @gfx942_bf16_two_k_block_loads_schedule_before_mfma
+
+amdgpu.target<gfx942> @target
+low.func.def target(@target) @gfx942_bf16_two_k_block_loads_schedule_before_mfma(%workitem_id: reg<amdgpu.vgpr>, %lhs_view: reg<amdgpu.sgpr x2>, %rhs_view: reg<amdgpu.sgpr x2>, %out_view: reg<amdgpu.sgpr x2>) asm<amdgpu.cdna3.core> {
+  %lane = v_and_b32_src0_inline %workitem_id, 15
+  %byte_offset = v_lshlrev_b32_src0_inline %lane, 5
+  %m0 = s_mov_b32_m0_imm 0
+  %lhs0 = global_load_dwordx2_saddr %byte_offset, %lhs_view, %m0
+  %rhs0 = global_load_dwordx2_saddr %byte_offset, %rhs_view, %m0
+  %zero = v_mov_b32 0
+  %zero_acc = concat(%zero, %zero, %zero, %zero) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  %zero_acc_copy = copy %zero_acc : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x4>
+  %partial = v_mfma_f32_16x16x16_bf16 %lhs0, %rhs0, %zero_acc_copy
+  %lhs1 = global_load_dwordx2_saddr %byte_offset, %lhs_view, %m0 {offset = 8}
+  %rhs1 = global_load_dwordx2_saddr %byte_offset, %rhs_view, %m0 {offset = 8}
+  %partial_copy = copy %partial : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x4>
+  %result = v_mfma_f32_16x16x16_bf16 %lhs1, %rhs1, %partial_copy
+  %out_offset = v_lshlrev_b32_src0_inline %workitem_id, 2
+  %result0 = slice %result[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  global_store_dword_saddr %out_offset, %result0, %out_view, %m0
+  return
+}
+
+// Raw memory for both K blocks should issue before the first MFMA on CDNA3 as
+// well as CDNA4, preserving VMEM latency hiding for BF16 GEMM schedules.
+// ----
+  s_mov_b32_m0_imm m0, 0
+  v_and_b32 v1, 15, v0
+  v_lshlrev_b32 v0, 2, v0
+  v_mov_b32 v4, 0
+  v_lshlrev_b32 v1, 5, v1
+  global_load_dwordx2 v[2:3], v1, s[0:1] offset:0
+  global_load_dwordx2 v[8:9], v1, s[2:3] offset:0
+  global_load_dwordx2 v[10:11], v1, s[0:1] offset:8
+  global_load_dwordx2 v[12:13], v1, s[2:3] offset:8
+  v_mov_b32 v5, v4
+  v_mov_b32 v6, v4
+  v_mov_b32 v7, v4
+  s_waitcnt vmcnt(2) lgkmcnt(15)
+  s_nop 1
+  v_mfma_f32_16x16x16_bf16 v[4:7], v[2:3], v[8:9], v[4:7]
+  s_waitcnt vmcnt(0) lgkmcnt(15)
+  v_mfma_f32_16x16x16_bf16 v[4:7], v[10:11], v[12:13], v[4:7]
+  s_nop 6
+  global_store_dword v0, v4, s[4:5] offset:0
+  s_endpgm
