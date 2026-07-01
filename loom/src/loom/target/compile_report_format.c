@@ -1125,6 +1125,10 @@ static iree_status_t loom_target_compile_report_format_summary(
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
         builder, "COMPILE-REPORT: schedule_band_rows count=%" PRIhsz "\n",
         report->schedule_band_rows.count));
+  }
+  if (iree_any_bit_set(
+          report->detail_flags,
+          LOOM_TARGET_COMPILE_REPORT_DETAIL_SCHEDULE_BAND_SUMMARY_ROWS)) {
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
         builder,
         "COMPILE-REPORT: schedule_band_summary_rows count=%" PRIhsz "\n",
@@ -5114,6 +5118,10 @@ iree_status_t loom_target_compile_report_format_json(
     IREE_RETURN_IF_ERROR(
         loom_target_compile_report_format_schedule_band_rows_json(
             report, options->mode, stream));
+  }
+  if (iree_any_bit_set(
+          report->detail_flags,
+          LOOM_TARGET_COMPILE_REPORT_DETAIL_SCHEDULE_BAND_SUMMARY_ROWS)) {
     IREE_RETURN_IF_ERROR(loom_target_compile_report_json_begin_field(
         stream, &first_field, "schedule_band_summary_rows"));
     IREE_RETURN_IF_ERROR(

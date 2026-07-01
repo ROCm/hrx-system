@@ -190,6 +190,7 @@ TEST(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
       LOOM_TARGET_COMPILE_REPORT_DETAIL_PRESSURE_ROWS |
       LOOM_TARGET_COMPILE_REPORT_DETAIL_PRESSURE_ORIGIN_ROWS |
       LOOM_TARGET_COMPILE_REPORT_DETAIL_SCHEDULE_BAND_ROWS |
+      LOOM_TARGET_COMPILE_REPORT_DETAIL_SCHEDULE_BAND_SUMMARY_ROWS |
       LOOM_TARGET_COMPILE_REPORT_DETAIL_SPILL_ROWS |
       LOOM_TARGET_COMPILE_REPORT_DETAIL_ALLOCATION_FAILURE_ROWS |
       LOOM_TARGET_COMPILE_REPORT_DETAIL_ALLOCATION_HIGH_WATER_ROWS;
@@ -652,6 +653,9 @@ TEST(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
   EXPECT_TRUE(
       iree_all_bits_set(report.detail_flags,
                         LOOM_TARGET_COMPILE_REPORT_DETAIL_SCHEDULE_BAND_ROWS));
+  EXPECT_TRUE(iree_all_bits_set(
+      report.detail_flags,
+      LOOM_TARGET_COMPILE_REPORT_DETAIL_SCHEDULE_BAND_SUMMARY_ROWS));
   EXPECT_TRUE(iree_all_bits_set(report.detail_flags,
                                 LOOM_TARGET_COMPILE_REPORT_DETAIL_SPILL_ROWS));
   EXPECT_TRUE(iree_all_bits_set(
@@ -953,6 +957,24 @@ TEST(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
   EXPECT_EQ(
       allocation_high_water_rows[0].active_fallback_storage_lease_blocker_units,
       0u);
+
+  loom_target_compile_report_t summary_report = {};
+  loom_target_compile_report_initialize(&summary_report,
+                                        iree_allocator_system());
+  summary_report.requested_detail_flags =
+      LOOM_TARGET_COMPILE_REPORT_DETAIL_SCHEDULE_BAND_SUMMARY_ROWS;
+  IREE_ASSERT_OK(loom_target_compile_report_record_low_emission_frame(
+      &summary_report, &frame));
+  EXPECT_FALSE(
+      iree_any_bit_set(summary_report.detail_flags,
+                       LOOM_TARGET_COMPILE_REPORT_DETAIL_SCHEDULE_BAND_ROWS));
+  EXPECT_TRUE(iree_all_bits_set(
+      summary_report.detail_flags,
+      LOOM_TARGET_COMPILE_REPORT_DETAIL_SCHEDULE_BAND_SUMMARY_ROWS));
+  EXPECT_EQ(summary_report.schedule_band_rows.count, 0u);
+  EXPECT_EQ(summary_report.schedule_band_summary_rows.count, 5u);
+  loom_target_compile_report_deinitialize(&summary_report);
+
   loom_target_compile_report_deinitialize(&report);
 }
 

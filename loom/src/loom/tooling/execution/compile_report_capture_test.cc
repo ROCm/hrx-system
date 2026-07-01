@@ -56,6 +56,7 @@ TEST(CompileReportCaptureTest, ConfiguresDetailedReportRequest) {
       LOOM_TARGET_COMPILE_REPORT_DETAIL_PRESSURE_ROWS |
           LOOM_TARGET_COMPILE_REPORT_DETAIL_PRESSURE_ORIGIN_ROWS |
           LOOM_TARGET_COMPILE_REPORT_DETAIL_SCHEDULE_BAND_ROWS |
+          LOOM_TARGET_COMPILE_REPORT_DETAIL_SCHEDULE_BAND_SUMMARY_ROWS |
           LOOM_TARGET_COMPILE_REPORT_DETAIL_SPILL_ROWS |
           LOOM_TARGET_COMPILE_REPORT_DETAIL_ALLOCATION_FAILURE_ROWS |
           LOOM_TARGET_COMPILE_REPORT_DETAIL_ALLOCATION_HIGH_WATER_ROWS |
@@ -84,6 +85,8 @@ TEST(CompileReportCaptureTest,
   EXPECT_EQ(compile_options.target_pipeline_options
                 .source_to_low_legality_diagnostic_flags,
             0u);
+  EXPECT_EQ(capture.report.requested_detail_flags,
+            LOOM_TARGET_COMPILE_REPORT_DETAIL_SCHEDULE_BAND_SUMMARY_ROWS);
 
   loom_run_compile_report_capture_deinitialize(&capture);
 }

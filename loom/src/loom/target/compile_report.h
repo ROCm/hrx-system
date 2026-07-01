@@ -77,6 +77,8 @@ enum {
   LOOM_TARGET_COMPILE_REPORT_DETAIL_WORKLOAD = 1u << 20,
   // Per-workitem dynamic instruction-mix estimates were recorded.
   LOOM_TARGET_COMPILE_REPORT_DETAIL_DYNAMIC_INSTRUCTION_MIX = 1u << 21,
+  // Aggregated low-schedule band summary rows were recorded or counted.
+  LOOM_TARGET_COMPILE_REPORT_DETAIL_SCHEDULE_BAND_SUMMARY_ROWS = 1u << 22,
 };
 
 typedef enum loom_target_compile_report_move_cause_e {

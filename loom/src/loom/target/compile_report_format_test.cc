@@ -879,6 +879,7 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
       LOOM_TARGET_COMPILE_REPORT_DETAIL_PRESSURE_ROWS |
       LOOM_TARGET_COMPILE_REPORT_DETAIL_PRESSURE_ORIGIN_ROWS |
       LOOM_TARGET_COMPILE_REPORT_DETAIL_SCHEDULE_BAND_ROWS |
+      LOOM_TARGET_COMPILE_REPORT_DETAIL_SCHEDULE_BAND_SUMMARY_ROWS |
       LOOM_TARGET_COMPILE_REPORT_DETAIL_SPILL_ROWS |
       LOOM_TARGET_COMPILE_REPORT_DETAIL_ALLOCATION_FAILURE_ROWS |
       LOOM_TARGET_COMPILE_REPORT_DETAIL_ALLOCATION_HIGH_WATER_ROWS |
@@ -2209,8 +2210,7 @@ TEST(CompileReportFormatTest, FormatsJsonSummaryWithoutDetailRows) {
   EXPECT_EQ(iree_string_view_find(
                 output, IREE_SV("\"pressure_rows\":{\"count\":1,\"rows\""), 0),
             IREE_STRING_VIEW_NPOS);
-  EXPECT_NE(iree_string_view_find(
-                output, IREE_SV("\"schedule_band_rows\":{\"count\":0}"), 0),
+  EXPECT_EQ(iree_string_view_find(output, IREE_SV("\"schedule_band_rows\""), 0),
             IREE_STRING_VIEW_NPOS);
   EXPECT_NE(iree_string_view_find(
                 output,
