@@ -11152,10 +11152,10 @@ HIPAPI hipError_t hipModuleLaunchKernel(
     // (CUSTOM_DIRECT_ARGUMENTS), skipping both pointer resolution and the
     // HSACO-driven hidden-kernarg synthesis, so the kernel would write through
     // unresolved pointers and its output would never reach the caller's buffer.
-    // Only pass the buffer through verbatim for kernels WITHOUT binding metadata
-    // (opaque/native kernels such as hipBLASLt), where it is already a complete
-    // native kernarg pack. Kernels with bindings fall through to the streaming
-    // layer's metadata unpack path (dispatch flags NONE).
+    // Only pass the buffer through verbatim for kernels WITHOUT binding
+    // metadata (opaque/native kernels such as hipBLASLt), where it is already a
+    // complete native kernarg pack. Kernels with bindings fall through to the
+    // streaming layer's metadata unpack path (dispatch flags NONE).
     if (!symbol || symbol->parameters.binding_count == 0) {
       dispatch_flags |= IREE_HAL_STREAMING_DISPATCH_FLAG_PRE_PACKED;
     }
@@ -18654,9 +18654,10 @@ HIPAPI hipError_t hipGraphKernelNodeSetParams(hipGraphNode_t node,
         params_size = *(size_t*)params->extra[i + 1];
       }
     }
-    // Same reasoning as hipModuleLaunchKernel / hipGraphAddKernelNode: only pass
-    // the extra buffer through pre-packed for kernels WITHOUT binding metadata;
-    // metadata kernels must be unpacked so their device pointers resolve.
+    // Same reasoning as hipModuleLaunchKernel / hipGraphAddKernelNode: only
+    // pass the extra buffer through pre-packed for kernels WITHOUT binding
+    // metadata; metadata kernels must be unpacked so their device pointers
+    // resolve.
     if (!symbol || symbol->parameters.binding_count == 0) {
       dispatch_flags |= IREE_HAL_STREAMING_DISPATCH_FLAG_PRE_PACKED;
     }
