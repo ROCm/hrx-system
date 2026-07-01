@@ -47,13 +47,17 @@ IREE_FLAG(string, dit_feed_forward_implementation, "fused_product",
           "DiT feed-forward implementation: fused_product or "
           "pytorch_parity.");
 IREE_FLAG(string, generation_residency, "issue_phases",
-          "Generation stage-bundle residency: issue_phases or "
-          "selected_stage_bundles or all_stage_bundles.");
+          "Generation stage-bundle residency: issue_phases, "
+          "selected_stage_bundles, all_stage_bundles, or memory_budgeted.");
+IREE_FLAG(int64_t, generation_residency_budget, 0,
+          "Logical live byte budget for "
+          "--generation_residency=memory_budgeted.");
 IREE_FLAG(string, generation_issue_mode, "full",
           "Generation issue mode: full, phases, or stage_serial.");
 IREE_FLAG(string, generation_resident_stage_bundles, "",
-          "Comma-separated generation stage bundles retained when "
-          "--generation_residency=selected_stage_bundles: qwen, "
+          "Comma-separated generation stage bundles retained or considered by "
+          "--generation_residency=selected_stage_bundles or memory_budgeted: "
+          "qwen, "
           "sampler_noise, dit_conditioned, dit_unconditioned, "
           "sampler_denoise, decode, or all.");
 IREE_FLAG(string, dit_conditioned_fp8_scope, "dit_cond_fp8",
@@ -176,6 +180,22 @@ enum class GenerationIssueMode {
   kStageSerial,
 };
 
+enum class GenerationResidencyRequestMode {
+  kIssuePhases,
+  kSelectedStageBundles,
+  kAllStageBundles,
+  kMemoryBudgeted,
+};
+
+struct GenerationResidencyResolution {
+  // Concrete residency mode used by generation preparation and statistics.
+  id4_ideogram4_generation_residency_mode_t residency_mode =
+      ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_INVALID;
+  // Concrete resident stage mask used by generation preparation and statistics.
+  id4_ideogram4_generation_resident_stage_mask_t resident_stage_mask =
+      ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_NONE;
+};
+
 enum class CustomRequestSource {
   // No custom request source was provided.
   kNone,
@@ -275,12 +295,14 @@ struct LiveGenerationBenchmarkContext {
   // DiT parameter source policy selected by benchmark flags.
   id4_ideogram4_dit_parameter_format_t dit_parameter_format =
       ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_INVALID;
-  // Generation stage-bundle residency selected by benchmark flags.
-  id4_ideogram4_generation_residency_mode_t generation_residency_mode =
-      ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_INVALID;
+  // Generation stage-bundle residency request selected by benchmark flags.
+  GenerationResidencyRequestMode generation_residency_request_mode =
+      GenerationResidencyRequestMode::kIssuePhases;
+  // Logical live byte budget for memory-budgeted residency selection.
+  iree_device_size_t generation_residency_budget_byte_length = 0;
   // Generation issue mode selected by benchmark flags.
   GenerationIssueMode generation_issue_mode = GenerationIssueMode::kFull;
-  // Generation stage bundles selected by benchmark flags.
+  // Generation stage bundles selected or considered by benchmark flags.
   id4_ideogram4_generation_resident_stage_mask_t
       generation_resident_stage_mask =
           ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_NONE;
@@ -445,26 +467,45 @@ static iree_string_view_t DitFeedForwardImplementationName(
   }
 }
 
-static iree_status_t ParseGenerationResidencyMode(
-    id4_ideogram4_generation_residency_mode_t* out_mode) {
+static iree_status_t ParseGenerationResidencyRequestMode(
+    GenerationResidencyRequestMode* out_mode) {
   IREE_ASSERT_ARGUMENT(out_mode);
   iree_string_view_t value = iree_make_cstring_view(FLAG_generation_residency);
   if (iree_string_view_equal(value, IREE_SV("issue_phases"))) {
-    *out_mode = ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_ISSUE_PHASES;
+    *out_mode = GenerationResidencyRequestMode::kIssuePhases;
     return iree_ok_status();
   }
   if (iree_string_view_equal(value, IREE_SV("selected_stage_bundles"))) {
-    *out_mode = ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_SELECTED_STAGE_BUNDLES;
+    *out_mode = GenerationResidencyRequestMode::kSelectedStageBundles;
     return iree_ok_status();
   }
   if (iree_string_view_equal(value, IREE_SV("all_stage_bundles"))) {
-    *out_mode = ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_ALL_STAGE_BUNDLES;
+    *out_mode = GenerationResidencyRequestMode::kAllStageBundles;
+    return iree_ok_status();
+  }
+  if (iree_string_view_equal(value, IREE_SV("memory_budgeted"))) {
+    *out_mode = GenerationResidencyRequestMode::kMemoryBudgeted;
     return iree_ok_status();
   }
   return iree_make_status(
       IREE_STATUS_INVALID_ARGUMENT,
       "--generation_residency must be issue_phases, selected_stage_bundles, "
-      "or all_stage_bundles");
+      "all_stage_bundles, or memory_budgeted");
+}
+
+static iree_string_view_t GenerationResidencyRequestModeName(
+    GenerationResidencyRequestMode mode) {
+  switch (mode) {
+    case GenerationResidencyRequestMode::kIssuePhases:
+      return IREE_SV("issue_phases");
+    case GenerationResidencyRequestMode::kSelectedStageBundles:
+      return IREE_SV("selected_stage_bundles");
+    case GenerationResidencyRequestMode::kAllStageBundles:
+      return IREE_SV("all_stage_bundles");
+    case GenerationResidencyRequestMode::kMemoryBudgeted:
+      return IREE_SV("memory_budgeted");
+  }
+  return IREE_SV("invalid");
 }
 
 static iree_string_view_t GenerationResidencyModeName(
@@ -514,6 +555,32 @@ static iree_string_view_t GenerationIssueModeName(GenerationIssueMode mode) {
   return IREE_SV("unknown");
 }
 
+static id4_ideogram4_generation_issue_policy_t GenerationIssuePolicy(
+    GenerationIssueMode issue_mode) {
+  return issue_mode == GenerationIssueMode::kStageSerial
+             ? ID4_IDEOGRAM4_GENERATION_ISSUE_POLICY_STAGE_SERIAL
+             : ID4_IDEOGRAM4_GENERATION_ISSUE_POLICY_PHASE_CONCURRENT;
+}
+
+static iree_status_t ParsePositiveByteBudgetFlag(
+    int64_t value, iree_string_view_t flag_name,
+    iree_device_size_t* out_byte_length) {
+  IREE_ASSERT_ARGUMENT(out_byte_length);
+  *out_byte_length = 0;
+  if (value <= 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "%.*s must be positive",
+                            static_cast<int>(flag_name.size), flag_name.data);
+  }
+  *out_byte_length = static_cast<iree_device_size_t>(value);
+  if (static_cast<int64_t>(*out_byte_length) != value) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "%.*s value is out of range",
+                            static_cast<int>(flag_name.size), flag_name.data);
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t ParseGenerationResidentStageMask(
     id4_ideogram4_generation_resident_stage_mask_t* out_stage_mask) {
   IREE_ASSERT_ARGUMENT(out_stage_mask);
@@ -558,6 +625,65 @@ static iree_status_t ParseGenerationResidentStageMask(
     remaining = iree_string_view_trim(remaining);
   }
   return iree_ok_status();
+}
+
+static iree_status_t ResolveGenerationBenchmarkResidency(
+    const LiveGenerationBenchmarkContext& context,
+    const id4_ideogram4_generation_plan_t* plan,
+    GenerationResidencyResolution* out_resolution) {
+  IREE_ASSERT_ARGUMENT(plan);
+  IREE_ASSERT_ARGUMENT(out_resolution);
+  out_resolution->residency_mode =
+      ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_INVALID;
+  out_resolution->resident_stage_mask =
+      ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_NONE;
+
+  switch (context.generation_residency_request_mode) {
+    case GenerationResidencyRequestMode::kIssuePhases:
+      out_resolution->residency_mode =
+          ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_ISSUE_PHASES;
+      out_resolution->resident_stage_mask =
+          context.generation_resident_stage_mask;
+      return iree_ok_status();
+    case GenerationResidencyRequestMode::kSelectedStageBundles:
+      out_resolution->residency_mode =
+          ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_SELECTED_STAGE_BUNDLES;
+      out_resolution->resident_stage_mask =
+          context.generation_resident_stage_mask;
+      return iree_ok_status();
+    case GenerationResidencyRequestMode::kAllStageBundles:
+      out_resolution->residency_mode =
+          ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_ALL_STAGE_BUNDLES;
+      out_resolution->resident_stage_mask =
+          context.generation_resident_stage_mask;
+      return iree_ok_status();
+    case GenerationResidencyRequestMode::kMemoryBudgeted: {
+      if (context.generation_resident_stage_mask ==
+          ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_NONE) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "--generation_resident_stage_bundles must list candidate stages "
+            "for --generation_residency=memory_budgeted");
+      }
+      id4_ideogram4_generation_residency_select_options_t select_options;
+      std::memset(&select_options, 0, sizeof(select_options));
+      select_options.structure_size = sizeof(select_options);
+      select_options.issue_policy =
+          GenerationIssuePolicy(context.generation_issue_mode);
+      select_options.candidate_stage_mask =
+          context.generation_resident_stage_mask;
+      select_options.memory_budget_byte_length =
+          context.generation_residency_budget_byte_length;
+      id4_ideogram4_generation_residency_selection_t selection;
+      IREE_RETURN_IF_ERROR(id4_ideogram4_generation_plan_select_residency(
+          plan, &select_options, &selection));
+      out_resolution->residency_mode = selection.residency_mode;
+      out_resolution->resident_stage_mask = selection.resident_stage_mask;
+      return iree_ok_status();
+    }
+  }
+  return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                          "generation residency request mode is invalid");
 }
 
 static uint64_t CeilMiB(iree_device_size_t byte_length) {
@@ -659,14 +785,14 @@ static iree_status_t AccumulateGenerationBenchmarkPlanStatistics(
 }
 
 static iree_status_t QueryGenerationBenchmarkResourceStatistics(
-    const LiveGenerationBenchmarkContext& context,
     const id4_ideogram4_generation_plan_t* plan,
+    const GenerationResidencyResolution& residency,
     id4_ideogram4_generation_resource_statistics_t* out_statistics) {
   id4_ideogram4_generation_resource_statistics_options_t options;
   std::memset(&options, 0, sizeof(options));
   options.structure_size = sizeof(options);
-  options.residency_mode = context.generation_residency_mode;
-  options.resident_stage_mask = context.generation_resident_stage_mask;
+  options.residency_mode = residency.residency_mode;
+  options.resident_stage_mask = residency.resident_stage_mask;
   return id4_ideogram4_generation_plan_resource_statistics(plan, &options,
                                                            out_statistics);
 }
@@ -1005,8 +1131,22 @@ static iree_status_t CreateLiveGenerationBenchmarkContext(
       iree_allocator_system(), out_context->kernel_library.out()));
   IREE_RETURN_IF_ERROR(
       ParseDitParameterFormat(&out_context->dit_parameter_format));
-  IREE_RETURN_IF_ERROR(
-      ParseGenerationResidencyMode(&out_context->generation_residency_mode));
+  IREE_RETURN_IF_ERROR(ParseGenerationResidencyRequestMode(
+      &out_context->generation_residency_request_mode));
+  if (out_context->generation_residency_request_mode !=
+          GenerationResidencyRequestMode::kMemoryBudgeted &&
+      FLAG_generation_residency_budget != 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "--generation_residency_budget requires "
+                            "--generation_residency=memory_budgeted");
+  }
+  if (out_context->generation_residency_request_mode ==
+      GenerationResidencyRequestMode::kMemoryBudgeted) {
+    IREE_RETURN_IF_ERROR(ParsePositiveByteBudgetFlag(
+        FLAG_generation_residency_budget,
+        IREE_SV("--generation_residency_budget"),
+        &out_context->generation_residency_budget_byte_length));
+  }
   IREE_RETURN_IF_ERROR(
       ParseGenerationIssueMode(&out_context->generation_issue_mode));
   IREE_RETURN_IF_ERROR(ParseGenerationResidentStageMask(
@@ -1052,6 +1192,7 @@ static iree_status_t CreateGenerationPlan(
 static iree_status_t PrepareGenerationBundle(
     const LiveGenerationBenchmarkContext& context,
     const id4_ideogram4_generation_plan_t* plan,
+    const GenerationResidencyResolution& residency,
     id4_pipeline_diagnostics_sink_t* diagnostics_sink,
     iree_hal_semaphore_t* prepare_semaphore, uint64_t prepare_value,
     id4_ideogram4_generation_bundle_t** out_bundle) {
@@ -1070,8 +1211,8 @@ static iree_status_t PrepareGenerationBundle(
   prepare_options.parameter_providers =
       LiveGenerationParameterProviders(context);
   prepare_options.kernel_library = context.kernel_library.get();
-  prepare_options.residency_mode = context.generation_residency_mode;
-  prepare_options.resident_stage_mask = context.generation_resident_stage_mask;
+  prepare_options.residency_mode = residency.residency_mode;
+  prepare_options.resident_stage_mask = residency.resident_stage_mask;
   prepare_options.command_buffer_mode =
       context.runtime_context.command_buffer_mode;
   prepare_options.wait_semaphore_list = iree_hal_semaphore_list_empty();
@@ -1285,13 +1426,14 @@ static iree_status_t IssueGenerationBundle(
 }
 
 static bool RequiresPreparedGenerationWarmup(
-    const LiveGenerationBenchmarkContext& context) {
-  return context.generation_residency_mode ==
+    const GenerationResidencyResolution& residency) {
+  return residency.residency_mode ==
          ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_SELECTED_STAGE_BUNDLES;
 }
 
 static iree_status_t WarmPreparedGenerationState(
     const LiveGenerationBenchmarkContext& context,
+    const GenerationResidencyResolution& residency,
     id4_ideogram4_generation_bundle_t* bundle, const ParsedRequest& request,
     id4_pipeline_diagnostics_sink_t* diagnostics_sink,
     iree_hal_semaphore_t* prepare_semaphore, uint64_t* prepare_value,
@@ -1300,7 +1442,7 @@ static iree_status_t WarmPreparedGenerationState(
   IREE_ASSERT_ARGUMENT(diagnostics_sink);
   IREE_ASSERT_ARGUMENT(prepare_value);
   IREE_ASSERT_ARGUMENT(completion_value);
-  if (!RequiresPreparedGenerationWarmup(context)) {
+  if (!RequiresPreparedGenerationWarmup(residency)) {
     return iree_ok_status();
   }
 
@@ -1392,6 +1534,7 @@ static iree_status_t AppendGenerationBenchmarkStageLabels(
 static iree_status_t SetGenerationBenchmarkLabel(
     iree_benchmark_state_t* benchmark_state,
     const LiveGenerationBenchmarkContext& context,
+    const GenerationResidencyResolution& residency,
     iree_string_view_t benchmark_scope, iree_string_view_t prompt_label,
     const id4_ideogram4_generation_plan_summary_t& summary,
     const GenerationBenchmarkPlanStatistics& statistics,
@@ -1412,8 +1555,11 @@ static iree_status_t SetGenerationBenchmarkLabel(
       DitAttentionImplementationName(summary.dit_attention_implementation);
   const iree_string_view_t feed_forward_implementation =
       DitFeedForwardImplementationName(summary.dit_feed_forward_implementation);
+  const iree_string_view_t residency_request =
+      GenerationResidencyRequestModeName(
+          context.generation_residency_request_mode);
   const iree_string_view_t residency_mode =
-      GenerationResidencyModeName(context.generation_residency_mode);
+      GenerationResidencyModeName(residency.residency_mode);
   const iree_string_view_t issue_mode =
       GenerationIssueModeName(context.generation_issue_mode);
   const bool stage_serial_issue =
@@ -1431,7 +1577,9 @@ static iree_status_t SetGenerationBenchmarkLabel(
       " dit_cond_capacity=%" PRIu32 " dit_uncond_tokens=%" PRIu32
       " dit_uncond_capacity=%" PRIu32 " latent=%" PRIu64 "x%" PRIu64
       " steps=%" PRIu32 " image=%" PRIu64 "x%" PRIu64
-      " residency=%.*s issue=%.*s resident_stage_mask=0x%08x"
+      " residency_request=%.*s residency=%.*s issue=%.*s"
+      " resident_stage_mask=0x%08x residency_budget=%" PRIu64
+      "MiB"
       " params=%.*s activation=%.*s weights=%.*s qwen_weights=%.*s"
       " attention=%.*s ff=%.*s"
       " param_total=%" PRIu64 "MiB param_largest=%" PRIu64
@@ -1457,9 +1605,11 @@ static iree_status_t SetGenerationBenchmarkLabel(
       summary.diffusion_latent_shape.dims[0],
       summary.diffusion_latent_shape.dims[1], summary.denoise_step_count,
       summary.decoded_image_shape.dims[0], summary.decoded_image_shape.dims[1],
+      static_cast<int>(residency_request.size), residency_request.data,
       static_cast<int>(residency_mode.size), residency_mode.data,
       static_cast<int>(issue_mode.size), issue_mode.data,
-      context.generation_resident_stage_mask,
+      residency.resident_stage_mask,
+      CeilMiB(context.generation_residency_budget_byte_length),
       static_cast<int>(parameter_format.size), parameter_format.data,
       static_cast<int>(activation_format.size), activation_format.data,
       static_cast<int>(weight_execution_format.size),
@@ -1548,6 +1698,7 @@ static iree_status_t RunGenerationEndToEndBenchmark(
   std::memset(&last_statistics, 0, sizeof(last_statistics));
   id4_ideogram4_generation_resource_statistics_t last_resource_statistics;
   std::memset(&last_resource_statistics, 0, sizeof(last_resource_statistics));
+  GenerationResidencyResolution last_residency;
   GenerationBenchmarkTimingStatistics timing_total;
   std::memset(&timing_total, 0, sizeof(timing_total));
   bool plan_json_written = false;
@@ -1591,12 +1742,18 @@ static iree_status_t RunGenerationEndToEndBenchmark(
     if (iree_status_is_ok(status)) {
       last_statistics = statistics;
     }
+    GenerationResidencyResolution residency;
+    if (iree_status_is_ok(status)) {
+      status =
+          ResolveGenerationBenchmarkResidency(context, plan.get(), &residency);
+    }
     id4_ideogram4_generation_resource_statistics_t resource_statistics;
     if (iree_status_is_ok(status)) {
-      status = QueryGenerationBenchmarkResourceStatistics(context, plan.get(),
+      status = QueryGenerationBenchmarkResourceStatistics(plan.get(), residency,
                                                           &resource_statistics);
     }
     if (iree_status_is_ok(status)) {
+      last_residency = residency;
       last_resource_statistics = resource_statistics;
     }
     iteration_timing.plan_ns += iree_time_now() - phase_start_time_ns;
@@ -1611,9 +1768,9 @@ static iree_status_t RunGenerationEndToEndBenchmark(
     GenerationBundleRef bundle;
     if (iree_status_is_ok(status)) {
       phase_start_time_ns = iree_time_now();
-      status = PrepareGenerationBundle(context, plan.get(), &diagnostics_sink,
-                                       prepare_semaphore.get(), prepare_value,
-                                       bundle.out());
+      status = PrepareGenerationBundle(
+          context, plan.get(), residency, &diagnostics_sink,
+          prepare_semaphore.get(), prepare_value, bundle.out());
       iteration_timing.prepare_ns += iree_time_now() - phase_start_time_ns;
     }
 
@@ -1669,9 +1826,9 @@ static iree_status_t RunGenerationEndToEndBenchmark(
   }
   IREE_RETURN_IF_ERROR(status);
   IREE_RETURN_IF_ERROR(SetGenerationBenchmarkLabel(
-      benchmark_state, context, IREE_SV("end_to_end"), prompt->label,
-      last_summary, last_statistics, last_resource_statistics, timing_total,
-      iteration_count));
+      benchmark_state, context, last_residency, IREE_SV("end_to_end"),
+      prompt->label, last_summary, last_statistics, last_resource_statistics,
+      timing_total, iteration_count));
   iree_benchmark_set_items_processed(
       benchmark_state, static_cast<int64_t>(iteration_count * token_count));
   return iree_ok_status();
@@ -1725,9 +1882,12 @@ static iree_status_t RunGenerationIssuePreparedBenchmark(
   GenerationBenchmarkPlanStatistics statistics;
   IREE_RETURN_IF_ERROR(
       AccumulateGenerationBenchmarkPlanStatistics(plan.get(), &statistics));
+  GenerationResidencyResolution residency;
+  IREE_RETURN_IF_ERROR(
+      ResolveGenerationBenchmarkResidency(context, plan.get(), &residency));
   id4_ideogram4_generation_resource_statistics_t resource_statistics;
   IREE_RETURN_IF_ERROR(QueryGenerationBenchmarkResourceStatistics(
-      context, plan.get(), &resource_statistics));
+      plan.get(), residency, &resource_statistics));
 
   IREE_RETURN_IF_ERROR(
       WriteGenerationPlanJsonIfRequested(prompt->label, plan.get()));
@@ -1736,8 +1896,8 @@ static iree_status_t RunGenerationIssuePreparedBenchmark(
   uint64_t completion_value = 0;
   GenerationBundleRef bundle;
   IREE_RETURN_IF_ERROR(PrepareGenerationBundle(
-      context, plan.get(), &diagnostics_sink, prepare_semaphore.get(),
-      prepare_value, bundle.out()));
+      context, plan.get(), residency, &diagnostics_sink,
+      prepare_semaphore.get(), prepare_value, bundle.out()));
   IREE_RETURN_IF_ERROR(
       WaitForSemaphore(prepare_semaphore.get(), prepare_value));
 
@@ -1753,7 +1913,7 @@ static iree_status_t RunGenerationIssuePreparedBenchmark(
   bool execution_profile_captured = false;
   iree_hal_profiling_from_flags_t* profiling = nullptr;
   iree_status_t status = WarmPreparedGenerationState(
-      context, bundle.get(), request, &diagnostics_sink,
+      context, residency, bundle.get(), request, &diagnostics_sink,
       prepare_semaphore.get(), &prepare_value, completion_semaphore.get(),
       &completion_value);
   if (iree_status_is_ok(status) && !capture_execution_profile) {
@@ -1811,8 +1971,9 @@ static iree_status_t RunGenerationIssuePreparedBenchmark(
   }
   IREE_RETURN_IF_ERROR(status);
   IREE_RETURN_IF_ERROR(SetGenerationBenchmarkLabel(
-      benchmark_state, context, IREE_SV("prepared_issue"), prompt->label,
-      summary, statistics, resource_statistics, timing_total, iteration_count));
+      benchmark_state, context, residency, IREE_SV("prepared_issue"),
+      prompt->label, summary, statistics, resource_statistics, timing_total,
+      iteration_count));
   iree_benchmark_set_items_processed(
       benchmark_state,
       static_cast<int64_t>(iteration_count * summary.qwen_token_count));
