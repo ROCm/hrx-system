@@ -98,6 +98,24 @@ typedef struct id4_pipeline_shared_tensor_plan_t {
   uint32_t last_use_region_id;
 } id4_pipeline_shared_tensor_plan_t;
 
+// Planned parameter tensor stored inside a parameter slab.
+typedef struct id4_pipeline_parameter_tensor_plan_t {
+  // Tensor layout and stable diagnostic name.
+  id4_pipeline_tensor_layout_t layout;
+  // Semantic program tensor ordinal represented by this parameter.
+  uint32_t program_tensor_ordinal;
+  // Parameter slab index containing this tensor storage.
+  iree_host_size_t parameter_slab_index;
+  // First request ordinal in the containing slab that populates this tensor.
+  iree_host_size_t request_offset;
+  // Number of requests in the containing slab that populate this tensor.
+  iree_host_size_t request_count;
+  // First request ordinal in plan-global parameter request order.
+  iree_host_size_t global_request_offset;
+  // Byte offset of this tensor storage in the containing slab.
+  iree_device_size_t offset;
+} id4_pipeline_parameter_tensor_plan_t;
+
 // Planned constant tensor embedded into a constant slab.
 typedef struct id4_pipeline_constant_request_t {
   // Constant tensor diagnostic name.
@@ -315,6 +333,10 @@ typedef struct id4_pipeline_plan_create_options_t {
   iree_host_size_t parameter_slab_count;
   // Parameter slabs to copy into the plan.
   const id4_pipeline_parameter_slab_plan_t* parameter_slabs;
+  // Number of planned parameter tensors.
+  iree_host_size_t parameter_tensor_count;
+  // Planned parameter tensors in program parameter-operation order.
+  const id4_pipeline_parameter_tensor_plan_t* parameter_tensors;
   // Number of prepare-time parameter load steps.
   iree_host_size_t parameter_load_step_count;
   // Prepare-time parameter load steps to copy into the plan.
@@ -389,6 +411,15 @@ iree_host_size_t id4_pipeline_plan_parameter_slab_count(
 // Returns parameter slab |index| or NULL when out of range.
 const id4_pipeline_parameter_slab_plan_t* id4_pipeline_plan_parameter_slab_at(
     const id4_pipeline_plan_t* plan, iree_host_size_t index);
+
+// Returns the number of planned parameter tensors in |plan|.
+iree_host_size_t id4_pipeline_plan_parameter_tensor_count(
+    const id4_pipeline_plan_t* plan);
+
+// Returns parameter tensor |index| or NULL when out of range.
+const id4_pipeline_parameter_tensor_plan_t*
+id4_pipeline_plan_parameter_tensor_at(const id4_pipeline_plan_t* plan,
+                                      iree_host_size_t index);
 
 // Returns the number of parameter load steps in |plan|.
 iree_host_size_t id4_pipeline_plan_parameter_load_step_count(

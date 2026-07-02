@@ -30,6 +30,10 @@ struct id4_pipeline_plan_t {
   iree_host_size_t parameter_slab_count;
   // Planned parameter slabs owned by this plan.
   id4_pipeline_parameter_slab_plan_t* parameter_slabs;
+  // Number of planned parameter tensors.
+  iree_host_size_t parameter_tensor_count;
+  // Planned parameter tensors owned by this plan.
+  id4_pipeline_parameter_tensor_plan_t* parameter_tensors;
   // Number of prepare-time parameter load steps.
   iree_host_size_t parameter_load_step_count;
   // Prepare-time parameter load steps owned by this plan.
@@ -240,6 +244,11 @@ static void id4_pipeline_plan_destroy(id4_pipeline_plan_t* plan) {
     id4_pipeline_string_release(slab->scope, host_allocator);
   }
   iree_allocator_free(host_allocator, plan->parameter_slabs);
+  for (iree_host_size_t i = 0; i < plan->parameter_tensor_count; ++i) {
+    id4_pipeline_string_release(plan->parameter_tensors[i].layout.name,
+                                host_allocator);
+  }
+  iree_allocator_free(host_allocator, plan->parameter_tensors);
   for (iree_host_size_t i = 0; i < plan->placement_count; ++i) {
     id4_pipeline_string_release(plan->placements[i].role, host_allocator);
   }
@@ -326,6 +335,134 @@ static iree_status_t id4_pipeline_plan_copy_parameter_slabs(
       IREE_RETURN_IF_ERROR(id4_pipeline_string_clone(
           source->requests[j].key, plan->host_allocator, &requests[j].key));
     }
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t id4_pipeline_plan_copy_parameter_tensors(
+    id4_pipeline_plan_t* plan,
+    const id4_pipeline_plan_create_options_t* options) {
+  plan->parameter_tensor_count = options->parameter_tensor_count;
+  if (plan->parameter_tensor_count == 0) return iree_ok_status();
+  if (plan->parameter_slab_count == 0) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "parameter tensors require at least one parameter slab");
+  }
+  if (!options->parameter_tensors) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "parameter tensor array is required");
+  }
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
+      plan->host_allocator, plan->parameter_tensor_count,
+      sizeof(plan->parameter_tensors[0]), (void**)&plan->parameter_tensors));
+  memset(plan->parameter_tensors, 0,
+         plan->parameter_tensor_count * sizeof(plan->parameter_tensors[0]));
+  iree_host_size_t global_request_count = 0;
+  for (iree_host_size_t i = 0; i < plan->parameter_slab_count; ++i) {
+    if (!iree_host_size_checked_add(global_request_count,
+                                    plan->parameter_slabs[i].request_count,
+                                    &global_request_count)) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "global parameter request count overflows");
+    }
+  }
+  for (iree_host_size_t i = 0; i < plan->parameter_tensor_count; ++i) {
+    const id4_pipeline_parameter_tensor_plan_t* source =
+        &options->parameter_tensors[i];
+    if (id4_pipeline_tensor_dtype_byte_length(source->layout.dtype) == 0) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "parameter tensor %" PRIhsz " dtype is invalid",
+                              i);
+    }
+    if (iree_string_view_is_empty(source->layout.name)) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "parameter tensor %" PRIhsz " name is required",
+                              i);
+    }
+    if (source->layout.byte_length == 0) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "parameter tensor %.*s byte length is zero",
+                              (int)source->layout.name.size,
+                              source->layout.name.data);
+    }
+    if (source->parameter_slab_index >= plan->parameter_slab_count) {
+      return iree_make_status(
+          IREE_STATUS_OUT_OF_RANGE,
+          "parameter tensor %.*s slab index %" PRIhsz
+          " exceeds slab count %" PRIhsz,
+          (int)source->layout.name.size, source->layout.name.data,
+          source->parameter_slab_index, plan->parameter_slab_count);
+    }
+    const id4_pipeline_parameter_slab_plan_t* slab =
+        &plan->parameter_slabs[source->parameter_slab_index];
+    if (source->request_count == 0) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "parameter tensor %.*s request count is zero",
+                              (int)source->layout.name.size,
+                              source->layout.name.data);
+    }
+    if (source->request_offset > slab->request_count ||
+        source->request_count > slab->request_count - source->request_offset) {
+      return iree_make_status(
+          IREE_STATUS_OUT_OF_RANGE,
+          "parameter tensor %.*s request range [%" PRIhsz ", %" PRIhsz
+          ") exceeds slab request count %" PRIhsz,
+          (int)source->layout.name.size, source->layout.name.data,
+          source->request_offset,
+          source->request_offset + source->request_count, slab->request_count);
+    }
+    if (source->offset > slab->byte_length ||
+        source->layout.byte_length > slab->byte_length - source->offset) {
+      return iree_make_status(
+          IREE_STATUS_OUT_OF_RANGE,
+          "parameter tensor %.*s byte range exceeds slab byte length",
+          (int)source->layout.name.size, source->layout.name.data);
+    }
+    if (source->global_request_offset > global_request_count ||
+        source->request_count >
+            global_request_count - source->global_request_offset) {
+      return iree_make_status(
+          IREE_STATUS_OUT_OF_RANGE,
+          "parameter tensor %.*s global request range [%" PRIhsz ", %" PRIhsz
+          ") exceeds global request count %" PRIhsz,
+          (int)source->layout.name.size, source->layout.name.data,
+          source->global_request_offset,
+          source->global_request_offset + source->request_count,
+          global_request_count);
+    }
+    for (iree_host_size_t j = 0; j < source->request_count; ++j) {
+      const id4_pipeline_parameter_request_t* request =
+          &slab->requests[source->request_offset + j];
+      if (request->span.buffer_offset < source->offset) {
+        return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                "parameter tensor %.*s request %" PRIhsz
+                                " starts before tensor byte range",
+                                (int)source->layout.name.size,
+                                source->layout.name.data, j);
+      }
+      const iree_device_size_t request_tensor_offset =
+          request->span.buffer_offset - source->offset;
+      if (request_tensor_offset > source->layout.byte_length ||
+          request->span.length >
+              source->layout.byte_length - request_tensor_offset) {
+        return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                "parameter tensor %.*s request %" PRIhsz
+                                " exceeds tensor byte range",
+                                (int)source->layout.name.size,
+                                source->layout.name.data, j);
+      }
+    }
+    id4_pipeline_parameter_tensor_plan_t* target = &plan->parameter_tensors[i];
+    target->layout = source->layout;
+    IREE_RETURN_IF_ERROR(id4_pipeline_string_clone(
+        source->layout.name, plan->host_allocator, &target->layout.name));
+    target->program_tensor_ordinal = source->program_tensor_ordinal;
+    target->parameter_slab_index = source->parameter_slab_index;
+    target->request_offset = source->request_offset;
+    target->request_count = source->request_count;
+    target->global_request_offset = source->global_request_offset;
+    target->offset = source->offset;
   }
   return iree_ok_status();
 }
@@ -1523,6 +1660,9 @@ iree_status_t id4_pipeline_plan_create(
     status = id4_pipeline_plan_copy_parameter_slabs(plan, options);
   }
   if (iree_status_is_ok(status)) {
+    status = id4_pipeline_plan_copy_parameter_tensors(plan, options);
+  }
+  if (iree_status_is_ok(status)) {
     status = id4_pipeline_plan_copy_parameter_load_steps(plan, options);
   }
   if (iree_status_is_ok(status)) {
@@ -1620,6 +1760,18 @@ const id4_pipeline_parameter_slab_plan_t* id4_pipeline_plan_parameter_slab_at(
     const id4_pipeline_plan_t* plan, iree_host_size_t index) {
   if (!plan || index >= plan->parameter_slab_count) return NULL;
   return &plan->parameter_slabs[index];
+}
+
+iree_host_size_t id4_pipeline_plan_parameter_tensor_count(
+    const id4_pipeline_plan_t* plan) {
+  return plan ? plan->parameter_tensor_count : 0;
+}
+
+const id4_pipeline_parameter_tensor_plan_t*
+id4_pipeline_plan_parameter_tensor_at(const id4_pipeline_plan_t* plan,
+                                      iree_host_size_t index) {
+  if (!plan || index >= plan->parameter_tensor_count) return NULL;
+  return &plan->parameter_tensors[index];
 }
 
 iree_host_size_t id4_pipeline_plan_parameter_load_step_count(
@@ -3113,6 +3265,29 @@ iree_status_t id4_pipeline_plan_format_json(const id4_pipeline_plan_t* plan,
           (uint64_t)request->span.length));
     }
     IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "]}"));
+  }
+  IREE_RETURN_IF_ERROR(
+      iree_string_builder_append_cstring(builder, "],\"parameter_tensors\":["));
+  for (iree_host_size_t i = 0; i < plan->parameter_tensor_count; ++i) {
+    const id4_pipeline_parameter_tensor_plan_t* tensor =
+        &plan->parameter_tensors[i];
+    if (i != 0) {
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, ","));
+    }
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+        builder, "{\"id\":%" PRIhsz ",\"name\":", i));
+    IREE_RETURN_IF_ERROR(
+        id4_pipeline_plan_append_json_string(builder, tensor->layout.name));
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+        builder,
+        ",\"program_tensor_ordinal\":%u,\"parameter_slab_index\":%" PRIhsz
+        ",\"request_offset\":%" PRIhsz ",\"request_count\":%" PRIhsz
+        ",\"global_request_offset\":%" PRIhsz ",\"offset\":%" PRIu64
+        ",\"byte_length\":%" PRIu64 "}",
+        tensor->program_tensor_ordinal, tensor->parameter_slab_index,
+        tensor->request_offset, tensor->request_count,
+        tensor->global_request_offset, (uint64_t)tensor->offset,
+        (uint64_t)tensor->layout.byte_length));
   }
   IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(
       builder, "],\"parameter_load_steps\":["));

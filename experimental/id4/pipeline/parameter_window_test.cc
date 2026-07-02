@@ -167,6 +167,113 @@ static PlanPtr MakeWindowPlan() {
   return PlanPtr(raw_plan);
 }
 
+static PlanPtr MakeDenseTensorWindowPlan() {
+  DeviceGroupPtr device_group(id4::test::CreateLocalSyncDeviceGroup(),
+                              iree_hal_device_group_release);
+
+  id4_pipeline_device_placement_t placement = {
+      /*.role=*/IREE_SV("default"),
+      /*.device_index=*/0,
+      /*.queue_affinity=*/IREE_HAL_QUEUE_AFFINITY_ANY,
+  };
+  const iree_hal_buffer_params_t storage_params = MakeStorageParams();
+  const id4_pipeline_parameter_request_t parameter_requests[] = {
+      id4_pipeline_parameter_request(
+          IREE_SV("embedding.table"),
+          id4_pipeline_parameter_span(/*parameter_offset=*/16,
+                                      /*buffer_offset=*/0,
+                                      /*length=*/8)),
+      id4_pipeline_parameter_request(
+          IREE_SV("embedding.table"),
+          id4_pipeline_parameter_span(/*parameter_offset=*/40,
+                                      /*buffer_offset=*/8,
+                                      /*length=*/8)),
+      id4_pipeline_parameter_request(
+          IREE_SV("next.weight"),
+          id4_pipeline_parameter_span(/*parameter_offset=*/0,
+                                      /*buffer_offset=*/16,
+                                      /*length=*/32)),
+  };
+  const id4_pipeline_parameter_slab_plan_t parameter_slab =
+      id4_pipeline_make_parameter_slab_plan(
+          IREE_SV("model"), /*placement_id=*/0, /*binding_slot=*/0,
+          storage_params, /*byte_length=*/48, /*alignment=*/16,
+          IREE_ARRAYSIZE(parameter_requests), parameter_requests);
+  const id4_pipeline_parameter_tensor_plan_t parameter_tensors[] = {
+      {
+          /*.layout=*/
+          {
+              /*.name=*/IREE_SV("embedding.rows"),
+              /*.dtype=*/ID4_PIPELINE_TENSOR_DTYPE_BF16,
+              /*.shape=*/MakeShape2(2, 4),
+              /*.byte_length=*/16,
+              /*.alignment=*/16,
+          },
+          /*.program_tensor_ordinal=*/0,
+          /*.parameter_slab_index=*/0,
+          /*.request_offset=*/0,
+          /*.request_count=*/2,
+          /*.global_request_offset=*/0,
+          /*.offset=*/0,
+      },
+      {
+          /*.layout=*/
+          {
+              /*.name=*/IREE_SV("next.weight"),
+              /*.dtype=*/ID4_PIPELINE_TENSOR_DTYPE_BF16,
+              /*.shape=*/MakeShape2(4, 4),
+              /*.byte_length=*/32,
+              /*.alignment=*/16,
+          },
+          /*.program_tensor_ordinal=*/1,
+          /*.parameter_slab_index=*/0,
+          /*.request_offset=*/2,
+          /*.request_count=*/1,
+          /*.global_request_offset=*/2,
+          /*.offset=*/16,
+      },
+  };
+  const id4_pipeline_parameter_load_step_t parameter_load_steps[] = {
+      id4_pipeline_parameter_gather_load_step(
+          IREE_SV("gather.embedding.rows"), IREE_SV("model"),
+          /*target_slab_index=*/0, /*request_offset=*/0,
+          /*request_count=*/2),
+      id4_pipeline_parameter_gather_load_step(
+          IREE_SV("gather.next.weight"), IREE_SV("model"),
+          /*target_slab_index=*/0, /*request_offset=*/2,
+          /*request_count=*/1),
+  };
+  const iree_host_size_t region0_load_groups[] = {0};
+  const id4_pipeline_region_plan_t regions[] = {
+      MakeParameterRegion(IREE_SV("embedding.region"), region0_load_groups,
+                          IREE_ARRAYSIZE(region0_load_groups)),
+  };
+
+  id4_pipeline_diagnostics_sink_t diagnostics_sink;
+  id4_pipeline_diagnostics_sink_initialize_ignore(&diagnostics_sink);
+  id4_pipeline_plan_create_options_t options;
+  std::memset(&options, 0, sizeof(options));
+  options.structure_size = sizeof(options);
+  options.stage_name = IREE_SV("test.dense_tensor_window");
+  options.device_group = device_group.get();
+  options.placement_count = 1;
+  options.placements = &placement;
+  options.parameter_slab_count = 1;
+  options.parameter_slabs = &parameter_slab;
+  options.parameter_tensor_count = IREE_ARRAYSIZE(parameter_tensors);
+  options.parameter_tensors = parameter_tensors;
+  options.parameter_load_step_count = IREE_ARRAYSIZE(parameter_load_steps);
+  options.parameter_load_steps = parameter_load_steps;
+  options.region_count = IREE_ARRAYSIZE(regions);
+  options.regions = regions;
+  options.diagnostics_sink = &diagnostics_sink;
+
+  id4_pipeline_plan_t* raw_plan = nullptr;
+  IREE_CHECK_OK(
+      id4_pipeline_plan_create(&options, iree_allocator_system(), &raw_plan));
+  return PlanPtr(raw_plan);
+}
+
 static PlanPtr MakeSchedulePlan() {
   DeviceGroupPtr device_group(id4::test::CreateLocalSyncDeviceGroup(),
                               iree_hal_device_group_release);
@@ -380,6 +487,36 @@ TEST(ParameterWindowTest, CoalescesDuplicateGroupsInsideWindow) {
   EXPECT_EQ(id4_pipeline_parameter_window_load_group_at(window.get(), 0), 0u);
   EXPECT_EQ(id4_pipeline_parameter_window_load_group_at(window.get(), 1), 1u);
   EXPECT_EQ(id4_pipeline_parameter_window_load_group_at(window.get(), 2), 2u);
+}
+
+TEST(ParameterWindowTest, PreservesDenseTensorLayoutAcrossSourceSpans) {
+  PlanPtr plan = MakeDenseTensorWindowPlan();
+  ParameterWindowPtr window =
+      MakeParameterWindow(plan.get(), /*region_offset=*/0, /*region_count=*/1);
+
+  ASSERT_EQ(id4_pipeline_parameter_window_slab_count(window.get()), 1u);
+  const id4_pipeline_parameter_window_slab_t* slab =
+      id4_pipeline_parameter_window_slab_at(window.get(), 0);
+  ASSERT_NE(slab, nullptr);
+  EXPECT_EQ(slab->byte_length, 16u);
+  EXPECT_EQ(slab->request_count, 2u);
+
+  ASSERT_EQ(id4_pipeline_parameter_window_request_count(window.get()), 2u);
+  const id4_pipeline_parameter_window_request_t* first_request =
+      id4_pipeline_parameter_window_request_at(window.get(), 0);
+  ASSERT_NE(first_request, nullptr);
+  EXPECT_EQ(first_request->original_request_index, 0u);
+  EXPECT_EQ(first_request->span.parameter_offset, 16u);
+  EXPECT_EQ(first_request->span.buffer_offset, 0u);
+  EXPECT_EQ(first_request->span.length, 8u);
+
+  const id4_pipeline_parameter_window_request_t* second_request =
+      id4_pipeline_parameter_window_request_at(window.get(), 1);
+  ASSERT_NE(second_request, nullptr);
+  EXPECT_EQ(second_request->original_request_index, 1u);
+  EXPECT_EQ(second_request->span.parameter_offset, 40u);
+  EXPECT_EQ(second_request->span.buffer_offset, 8u);
+  EXPECT_EQ(second_request->span.length, 8u);
 }
 
 TEST(ParameterWindowTest, RejectsInvalidRegionRange) {

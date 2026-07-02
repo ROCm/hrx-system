@@ -676,6 +676,7 @@ static iree_status_t id4_pipeline_program_plan_build_parameter_requests(
     const id4_pipeline_program_plan_options_t* options,
     id4_pipeline_program_plan_counts_t counts,
     id4_pipeline_parameter_request_t* requests,
+    id4_pipeline_parameter_tensor_plan_t* parameter_tensors,
     id4_pipeline_program_plan_parameter_request_range_t* request_ranges,
     id4_pipeline_program_plan_parameter_load_record_t* load_records,
     id4_pipeline_parameter_load_source_t* load_sources,
@@ -732,6 +733,35 @@ static iree_status_t id4_pipeline_program_plan_build_parameter_requests(
             // Number of gather requests backing this parameter.
             .request_count = load_record->request_count,
         };
+    parameter_tensors[parameter_index] = (id4_pipeline_parameter_tensor_plan_t){
+        // Parameter tensor layout.
+        .layout =
+            {
+                // Parameter tensor diagnostic name.
+                .name = tensor->name,
+                // Parameter tensor element type.
+                .dtype =
+                    id4_pipeline_program_region_convert_dtype(tensor->dtype),
+                // Parameter tensor shape.
+                .shape = id4_pipeline_program_plan_convert_shape(tensor->shape),
+                // Dense parameter tensor byte length.
+                .byte_length = tensor->byte_length,
+                // Required parameter subrange alignment.
+                .alignment = options->parameter_request_alignment,
+            },
+        // Semantic program tensor ordinal.
+        .program_tensor_ordinal = op->payload.parameter.tensor.ordinal,
+        // Single parameter slab emitted below.
+        .parameter_slab_index = 0,
+        // First request in the single parameter slab.
+        .request_offset = load_record->request_offset,
+        // Number of requests populating this tensor.
+        .request_count = load_record->request_count,
+        // Plan-global request ordinal matches the single-slab ordinal.
+        .global_request_offset = load_record->request_offset,
+        // Base byte offset of the tensor in the parameter slab.
+        .offset = span.buffer_offset,
+    };
     if (op->payload.parameter.source_span_count == 0) {
       requests[request_index] =
           id4_pipeline_parameter_request(tensor->name, span);
@@ -2148,6 +2178,7 @@ iree_status_t id4_pipeline_program_create_plan(
       id4_pipeline_program_plan_validate_diagnostic_tap_slots(options, counts));
 
   id4_pipeline_parameter_request_t* parameter_requests = NULL;
+  id4_pipeline_parameter_tensor_plan_t* parameter_tensors = NULL;
   id4_pipeline_program_plan_parameter_load_record_t* parameter_load_records =
       NULL;
   id4_pipeline_parameter_load_source_t* parameter_load_sources = NULL;
@@ -2210,6 +2241,11 @@ iree_status_t id4_pipeline_program_create_plan(
     status = iree_allocator_malloc_array(
         host_allocator, counts.parameter_request_count,
         sizeof(parameter_requests[0]), (void**)&parameter_requests);
+  }
+  if (iree_status_is_ok(status) && counts.parameter_count != 0) {
+    status = iree_allocator_malloc_array(host_allocator, counts.parameter_count,
+                                         sizeof(parameter_tensors[0]),
+                                         (void**)&parameter_tensors);
   }
   if (iree_status_is_ok(status) && counts.parameter_count != 0) {
     status = iree_allocator_malloc_array(host_allocator, counts.parameter_count,
@@ -2345,9 +2381,9 @@ iree_status_t id4_pipeline_program_create_plan(
   iree_device_size_t parameter_slab_byte_length = 0;
   if (iree_status_is_ok(status)) {
     status = id4_pipeline_program_plan_build_parameter_requests(
-        options, counts, parameter_requests, parameter_request_ranges,
-        parameter_load_records, parameter_load_sources,
-        &parameter_slab_byte_length);
+        options, counts, parameter_requests, parameter_tensors,
+        parameter_request_ranges, parameter_load_records,
+        parameter_load_sources, &parameter_slab_byte_length);
   }
   if (iree_status_is_ok(status) && counts.parameter_count != 0) {
     status = id4_pipeline_program_plan_build_parameter_request_ranges_by_tensor(
@@ -2572,6 +2608,9 @@ iree_status_t id4_pipeline_program_create_plan(
     create_options.parameter_slab_count = counts.parameter_count == 0 ? 0 : 1;
     create_options.parameter_slabs =
         counts.parameter_count == 0 ? NULL : &parameter_slab;
+    create_options.parameter_tensor_count = counts.parameter_count;
+    create_options.parameter_tensors =
+        counts.parameter_count == 0 ? NULL : parameter_tensors;
     create_options.parameter_load_step_count = parameter_load_step_count;
     create_options.parameter_load_steps =
         parameter_load_step_count == 0 ? NULL : parameter_load_steps;
@@ -2637,6 +2676,7 @@ iree_status_t id4_pipeline_program_create_plan(
   iree_allocator_free(host_allocator, parameter_load_steps);
   iree_allocator_free(host_allocator, parameter_load_sources);
   iree_allocator_free(host_allocator, parameter_load_records);
+  iree_allocator_free(host_allocator, parameter_tensors);
   iree_allocator_free(host_allocator, parameter_requests);
   return status;
 }

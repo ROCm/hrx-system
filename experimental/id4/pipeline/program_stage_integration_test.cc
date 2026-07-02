@@ -139,7 +139,7 @@ static iree_status_t CreateTwoScopeParameterProvider(
   OwningRef<iree_io_parameter_provider_t, iree_io_parameter_provider_release>
       first_provider;
   IREE_RETURN_IF_ERROR(CreateScopedParameterProvider(
-      IREE_SV("first"), IREE_SV("first.bias"), /*count=*/4, /*value=*/10.0f,
+      IREE_SV("first"), IREE_SV("first.bias"), /*count=*/6, /*value=*/10.0f,
       first_provider.out()));
   OwningRef<iree_io_parameter_provider_t, iree_io_parameter_provider_release>
       second_provider;
@@ -221,16 +221,20 @@ static id4_pipeline_program_t* CreateTwoRegionAddProgram(
           /*.key=*/IREE_SV("first.bias"),
           /*.dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_F32,
           /*.shape=*/
-          first_parameter_source_offset == 0
-              ? shape
-              : id4_pipeline_program_make_shape_rank1(5),
+          id4_pipeline_program_make_shape_rank1(
+              first_parameter_source_offset == 0 ? 6 : 7),
       },
   };
   const id4_pipeline_program_parameter_source_span_t first_source_span[] = {
       {
           /*.source_offset=*/first_parameter_source_offset,
           /*.target_offset=*/0,
-          /*.length=*/4 * sizeof(float),
+          /*.length=*/2 * sizeof(float),
+      },
+      {
+          /*.source_offset=*/first_parameter_source_offset + 4 * sizeof(float),
+          /*.target_offset=*/2 * sizeof(float),
+          /*.length=*/2 * sizeof(float),
       },
   };
   id4_pipeline_program_parameter_options_t first_options = {
@@ -242,11 +246,8 @@ static id4_pipeline_program_t* CreateTwoRegionAddProgram(
       /*.key=*/IREE_SV("first.bias"),
       /*.dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_F32,
       /*.shape=*/shape,
-      /*.source_span_count=*/
-      first_parameter_source_offset == 0 ? 0
-                                         : IREE_ARRAYSIZE(first_source_span),
-      /*.source_spans=*/
-      first_parameter_source_offset == 0 ? nullptr : first_source_span,
+      /*.source_span_count=*/IREE_ARRAYSIZE(first_source_span),
+      /*.source_spans=*/first_source_span,
   };
   id4_pipeline_program_tensor_t first = id4_pipeline_program_tensor_invalid();
   IREE_CHECK_OK(

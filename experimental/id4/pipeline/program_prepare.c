@@ -534,88 +534,180 @@ id4_pipeline_program_prepare_find_window_slab(
   return NULL;
 }
 
+static iree_status_t id4_pipeline_program_prepare_validate_parameter_tensor(
+    const id4_pipeline_parameter_tensor_plan_t* parameter_tensor,
+    const id4_pipeline_program_parameter_op_t* parameter_op,
+    const id4_pipeline_program_tensor_record_t* tensor,
+    iree_host_size_t parameter_ordinal) {
+  if (!parameter_tensor) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "program parameter tensor %" PRIhsz
+                            " is missing from the plan",
+                            parameter_ordinal);
+  }
+  if (parameter_tensor->program_tensor_ordinal !=
+      parameter_op->tensor.ordinal) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "program parameter tensor %" PRIhsz
+        " plan ordinal %u does not match program tensor ordinal %u",
+        parameter_ordinal, parameter_tensor->program_tensor_ordinal,
+        parameter_op->tensor.ordinal);
+  }
+  if (!iree_string_view_equal(parameter_tensor->layout.name, tensor->name) ||
+      parameter_tensor->layout.byte_length != tensor->byte_length ||
+      parameter_tensor->layout.dtype !=
+          id4_pipeline_program_region_convert_dtype(tensor->dtype)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "program parameter tensor %" PRIhsz
+                            " plan layout does not match program tensor %.*s",
+                            parameter_ordinal, (int)tensor->name.size,
+                            tensor->name.data);
+  }
+  if (parameter_tensor->layout.shape.rank != tensor->shape.rank) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "program parameter tensor %" PRIhsz
+                            " plan rank does not match program tensor %.*s",
+                            parameter_ordinal, (int)tensor->name.size,
+                            tensor->name.data);
+  }
+  for (uint32_t i = 0; i < tensor->shape.rank; ++i) {
+    if (parameter_tensor->layout.shape.dims[i] != tensor->shape.dims[i]) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "program parameter tensor %" PRIhsz
+                              " plan shape does not match program tensor %.*s",
+                              parameter_ordinal, (int)tensor->name.size,
+                              tensor->name.data);
+    }
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t
+id4_pipeline_program_prepare_resolve_window_parameter_tensor(
+    const id4_pipeline_plan_t* plan,
+    const id4_pipeline_parameter_window_t* parameter_window,
+    const id4_pipeline_parameter_tensor_plan_t* parameter_tensor,
+    iree_host_size_t parameter_ordinal,
+    id4_pipeline_tensor_import_t* out_import) {
+  const id4_pipeline_parameter_window_request_t* first_window_request =
+      id4_pipeline_parameter_window_resolve_request(
+          parameter_window, parameter_tensor->global_request_offset);
+  if (!first_window_request) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "program parameter tensor %" PRIhsz
+                            " is outside the compact parameter window",
+                            parameter_ordinal);
+  }
+  const id4_pipeline_parameter_window_slab_t* window_slab =
+      id4_pipeline_program_prepare_find_window_slab(
+          parameter_window, first_window_request->original_slab_index);
+  if (!window_slab) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "program parameter tensor %" PRIhsz
+        " references missing compact slab for original slab %" PRIhsz,
+        parameter_ordinal, first_window_request->original_slab_index);
+  }
+  const id4_pipeline_parameter_slab_plan_t* original_slab =
+      id4_pipeline_plan_parameter_slab_at(
+          plan, parameter_tensor->parameter_slab_index);
+  if (!original_slab) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "program parameter tensor %" PRIhsz
+                            " references missing original slab %" PRIhsz,
+                            parameter_ordinal,
+                            parameter_tensor->parameter_slab_index);
+  }
+  for (iree_host_size_t i = 0; i < parameter_tensor->request_count; ++i) {
+    const iree_host_size_t slab_request_index =
+        parameter_tensor->request_offset + i;
+    const id4_pipeline_parameter_request_t* original_request =
+        &original_slab->requests[slab_request_index];
+    const id4_pipeline_parameter_window_request_t* window_request =
+        id4_pipeline_parameter_window_resolve_request(
+            parameter_window, parameter_tensor->global_request_offset + i);
+    if (!window_request) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "program parameter tensor %" PRIhsz
+                              " request %" PRIhsz
+                              " is outside the compact parameter window",
+                              parameter_ordinal, i);
+    }
+    if (window_request->original_slab_index !=
+            parameter_tensor->parameter_slab_index ||
+        window_request->original_request_index != slab_request_index) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "program parameter tensor %" PRIhsz
+                              " compact request %" PRIhsz
+                              " resolves to the wrong original request",
+                              parameter_ordinal, i);
+    }
+    if (original_request->span.buffer_offset < parameter_tensor->offset) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "program parameter tensor %" PRIhsz
+                              " request %" PRIhsz
+                              " starts before tensor storage",
+                              parameter_ordinal, i);
+    }
+    const iree_device_size_t tensor_relative_offset =
+        original_request->span.buffer_offset - parameter_tensor->offset;
+    iree_device_size_t expected_window_offset = 0;
+    if (!iree_device_size_checked_add(first_window_request->span.buffer_offset,
+                                      tensor_relative_offset,
+                                      &expected_window_offset)) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "program parameter tensor %" PRIhsz
+                              " compact request offset overflows",
+                              parameter_ordinal);
+    }
+    if (window_request->span.buffer_offset != expected_window_offset ||
+        window_request->span.length != original_request->span.length) {
+      return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                              "program parameter tensor %" PRIhsz
+                              " is not dense in the compact parameter window",
+                              parameter_ordinal);
+    }
+  }
+  out_import->layout = parameter_tensor->layout;
+  out_import->binding_slot = window_slab->binding_slot;
+  out_import->offset = first_window_request->span.buffer_offset;
+  out_import->flags = ID4_PIPELINE_TENSOR_IMPORT_FLAG_INITIALIZED;
+  return iree_ok_status();
+}
+
 static iree_status_t id4_pipeline_program_prepare_resolve_parameter(
     void* user_data, const id4_pipeline_program_parameter_op_t* parameter_op,
     const id4_pipeline_program_tensor_record_t* tensor,
     iree_host_size_t parameter_ordinal,
     id4_pipeline_tensor_import_t* out_import) {
-  (void)parameter_op;
   id4_pipeline_program_prepare_context_t* context =
       (id4_pipeline_program_prepare_context_t*)user_data;
+  const id4_pipeline_parameter_tensor_plan_t* parameter_tensor =
+      id4_pipeline_plan_parameter_tensor_at(context->options->plan,
+                                            parameter_ordinal);
+  IREE_RETURN_IF_ERROR(id4_pipeline_program_prepare_validate_parameter_tensor(
+      parameter_tensor, parameter_op, tensor, parameter_ordinal));
   if (context->parameter_window) {
-    const id4_pipeline_parameter_window_request_t* request =
-        id4_pipeline_parameter_window_resolve_request(context->parameter_window,
-                                                      parameter_ordinal);
-    if (!request) {
-      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "program parameter tensor %" PRIhsz
-                              " is outside the compact parameter window",
-                              parameter_ordinal);
-    }
-    const id4_pipeline_parameter_window_slab_t* slab =
-        id4_pipeline_program_prepare_find_window_slab(
-            context->parameter_window, request->original_slab_index);
-    if (!slab) {
-      return iree_make_status(
-          IREE_STATUS_OUT_OF_RANGE,
-          "program parameter tensor %" PRIhsz
-          " references missing compact slab for original slab %" PRIhsz,
-          parameter_ordinal, request->original_slab_index);
-    }
-    out_import->layout = (id4_pipeline_tensor_layout_t){
-        // Parameter tensor diagnostic name.
-        .name = tensor->name,
-        // Parameter tensor element type.
-        .dtype = id4_pipeline_program_region_convert_dtype(tensor->dtype),
-        // Parameter tensor shape.
-        .shape = id4_pipeline_program_prepare_convert_shape(tensor->shape),
-        // Dense parameter tensor byte length.
-        .byte_length = tensor->byte_length,
-        // Parameter subrange alignment is already represented by the compact
-        // span offset.
-        .alignment = 0,
-    };
-    out_import->binding_slot = slab->binding_slot;
-    out_import->offset = request->span.buffer_offset;
-    out_import->flags = ID4_PIPELINE_TENSOR_IMPORT_FLAG_INITIALIZED;
-    return iree_ok_status();
+    return id4_pipeline_program_prepare_resolve_window_parameter_tensor(
+        context->options->plan, context->parameter_window, parameter_tensor,
+        parameter_ordinal, out_import);
   }
 
-  iree_host_size_t remaining_ordinal = parameter_ordinal;
-  for (iree_host_size_t slab_index = 0;
-       slab_index <
-       id4_pipeline_plan_parameter_slab_count(context->options->plan);
-       ++slab_index) {
-    const id4_pipeline_parameter_slab_plan_t* slab =
-        id4_pipeline_plan_parameter_slab_at(context->options->plan, slab_index);
-    if (!slab) continue;
-    if (remaining_ordinal >= slab->request_count) {
-      remaining_ordinal -= slab->request_count;
-      continue;
-    }
-    const id4_pipeline_parameter_request_t* request =
-        &slab->requests[remaining_ordinal];
-    out_import->layout = (id4_pipeline_tensor_layout_t){
-        // Parameter tensor diagnostic name.
-        .name = tensor->name,
-        // Parameter tensor element type.
-        .dtype = id4_pipeline_program_region_convert_dtype(tensor->dtype),
-        // Parameter tensor shape.
-        .shape = id4_pipeline_program_prepare_convert_shape(tensor->shape),
-        // Dense parameter tensor byte length.
-        .byte_length = tensor->byte_length,
-        // Parameter subrange alignment is already represented by the plan
-        // span offset.
-        .alignment = 0,
-    };
-    out_import->binding_slot = slab->binding_slot;
-    out_import->offset = request->span.buffer_offset;
-    out_import->flags = ID4_PIPELINE_TENSOR_IMPORT_FLAG_INITIALIZED;
-    return iree_ok_status();
+  const id4_pipeline_parameter_slab_plan_t* slab =
+      id4_pipeline_plan_parameter_slab_at(
+          context->options->plan, parameter_tensor->parameter_slab_index);
+  if (!slab) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "program parameter tensor %" PRIhsz " references missing slab %" PRIhsz,
+        parameter_ordinal, parameter_tensor->parameter_slab_index);
   }
-  return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                          "program parameter tensor %" PRIhsz " is missing",
-                          parameter_ordinal);
+  out_import->layout = parameter_tensor->layout;
+  out_import->binding_slot = slab->binding_slot;
+  out_import->offset = parameter_tensor->offset;
+  out_import->flags = ID4_PIPELINE_TENSOR_IMPORT_FLAG_INITIALIZED;
+  return iree_ok_status();
 }
 
 static iree_status_t id4_pipeline_program_prepare_resolve_constant(

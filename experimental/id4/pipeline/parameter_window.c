@@ -81,6 +81,8 @@ typedef struct id4_pipeline_parameter_window_build_state_t {
   uint8_t* request_used_bits;
   // Number of entries in request_used_bits.
   iree_host_size_t global_request_count;
+  // Parameter tensor ordinal by global original request ordinal.
+  iree_host_size_t* parameter_tensor_indices_by_global_request;
 } id4_pipeline_parameter_window_build_state_t;
 
 static iree_status_t id4_pipeline_parameter_window_validate_options_size(
@@ -294,6 +296,89 @@ static iree_status_t id4_pipeline_parameter_window_mark_used_groups(
   return iree_ok_status();
 }
 
+static iree_status_t id4_pipeline_parameter_window_map_parameter_tensors(
+    id4_pipeline_parameter_window_build_state_t* state,
+    iree_allocator_t host_allocator) {
+  const iree_host_size_t parameter_tensor_count =
+      id4_pipeline_plan_parameter_tensor_count(state->plan);
+  if (parameter_tensor_count == 0 || state->global_request_count == 0) {
+    return iree_ok_status();
+  }
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
+      host_allocator, state->global_request_count,
+      sizeof(state->parameter_tensor_indices_by_global_request[0]),
+      (void**)&state->parameter_tensor_indices_by_global_request));
+  for (iree_host_size_t i = 0; i < state->global_request_count; ++i) {
+    state->parameter_tensor_indices_by_global_request[i] = IREE_HOST_SIZE_MAX;
+  }
+  for (iree_host_size_t tensor_index = 0; tensor_index < parameter_tensor_count;
+       ++tensor_index) {
+    const id4_pipeline_parameter_tensor_plan_t* tensor =
+        id4_pipeline_plan_parameter_tensor_at(state->plan, tensor_index);
+    if (!tensor) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "parameter tensor %" PRIhsz " is missing",
+                              tensor_index);
+    }
+    if (tensor->parameter_slab_index >= state->global_request_offset_count ||
+        state->global_request_offset_count - tensor->parameter_slab_index <=
+            1) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "parameter tensor %.*s slab index %" PRIhsz
+                              " exceeds window slab map count %" PRIhsz,
+                              (int)tensor->layout.name.size,
+                              tensor->layout.name.data,
+                              tensor->parameter_slab_index,
+                              state->global_request_offset_count == 0
+                                  ? 0
+                                  : state->global_request_offset_count - 1);
+    }
+    iree_host_size_t global_request_offset = 0;
+    if (!iree_host_size_checked_add(
+            state->global_request_offsets_by_slab[tensor->parameter_slab_index],
+            tensor->request_offset, &global_request_offset)) {
+      return iree_make_status(
+          IREE_STATUS_OUT_OF_RANGE,
+          "parameter tensor %.*s global request offset overflows",
+          (int)tensor->layout.name.size, tensor->layout.name.data);
+    }
+    if (tensor->global_request_offset != global_request_offset) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "parameter tensor %.*s global request offset %" PRIhsz
+          " does not match slab request offset %" PRIhsz,
+          (int)tensor->layout.name.size, tensor->layout.name.data,
+          tensor->global_request_offset, global_request_offset);
+    }
+    for (iree_host_size_t i = 0; i < tensor->request_count; ++i) {
+      iree_host_size_t global_request_index = 0;
+      if (!iree_host_size_checked_add(tensor->global_request_offset, i,
+                                      &global_request_index)) {
+        return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                "parameter tensor %.*s request index overflows",
+                                (int)tensor->layout.name.size,
+                                tensor->layout.name.data);
+      }
+      if (global_request_index >= state->global_request_count) {
+        return iree_make_status(
+            IREE_STATUS_OUT_OF_RANGE,
+            "parameter tensor %.*s request range exceeds global request count",
+            (int)tensor->layout.name.size, tensor->layout.name.data);
+      }
+      if (state->parameter_tensor_indices_by_global_request
+              [global_request_index] != IREE_HOST_SIZE_MAX) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "parameter tensor %.*s overlaps another parameter tensor request",
+            (int)tensor->layout.name.size, tensor->layout.name.data);
+      }
+      state->parameter_tensor_indices_by_global_request[global_request_index] =
+          tensor_index;
+    }
+  }
+  return iree_ok_status();
+}
+
 static iree_host_size_t id4_pipeline_parameter_window_count_used_bits(
     iree_host_size_t bit_count, const uint8_t* bits) {
   iree_host_size_t used_count = 0;
@@ -416,6 +501,8 @@ static iree_status_t id4_pipeline_parameter_window_pack_requests(
 
     const iree_host_size_t global_request_offset =
         state->global_request_offsets_by_slab[original_slab_index];
+    iree_host_size_t active_parameter_tensor_index = IREE_HOST_SIZE_MAX;
+    iree_device_size_t active_parameter_tensor_offset = 0;
     for (iree_host_size_t original_request_index = 0;
          original_request_index < original_slab->request_count;
          ++original_request_index) {
@@ -425,9 +512,92 @@ static iree_status_t id4_pipeline_parameter_window_pack_requests(
       const id4_pipeline_parameter_request_t* original_request =
           &original_slab->requests[original_request_index];
       iree_io_parameter_span_t compact_span;
-      IREE_RETURN_IF_ERROR(id4_pipeline_parameter_slab_pack_span(
-          original_request->span.length, compact_slab.alignment,
-          &compact_slab.byte_length, &compact_span));
+      const iree_host_size_t parameter_tensor_index =
+          state->parameter_tensor_indices_by_global_request
+              ? state->parameter_tensor_indices_by_global_request
+                    [global_request_index]
+              : IREE_HOST_SIZE_MAX;
+      if (parameter_tensor_index == IREE_HOST_SIZE_MAX) {
+        IREE_RETURN_IF_ERROR(id4_pipeline_parameter_slab_pack_span(
+            original_request->span.length, compact_slab.alignment,
+            &compact_slab.byte_length, &compact_span));
+      } else {
+        const id4_pipeline_parameter_tensor_plan_t* parameter_tensor =
+            id4_pipeline_plan_parameter_tensor_at(state->plan,
+                                                  parameter_tensor_index);
+        if (!parameter_tensor) {
+          return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                  "parameter tensor %" PRIhsz " is missing",
+                                  parameter_tensor_index);
+        }
+        if (parameter_tensor_index != active_parameter_tensor_index) {
+          if (original_request_index != parameter_tensor->request_offset) {
+            return iree_make_status(
+                IREE_STATUS_FAILED_PRECONDITION,
+                "parameter window does not materialize leading request for "
+                "parameter tensor %.*s",
+                (int)parameter_tensor->layout.name.size,
+                parameter_tensor->layout.name.data);
+          }
+          for (iree_host_size_t i = 0; i < parameter_tensor->request_count;
+               ++i) {
+            iree_host_size_t tensor_global_request_index = 0;
+            if (!iree_host_size_checked_add(
+                    parameter_tensor->global_request_offset, i,
+                    &tensor_global_request_index)) {
+              return iree_make_status(
+                  IREE_STATUS_OUT_OF_RANGE,
+                  "parameter tensor %.*s request index overflows",
+                  (int)parameter_tensor->layout.name.size,
+                  parameter_tensor->layout.name.data);
+            }
+            if (tensor_global_request_index >= state->global_request_count ||
+                !state->request_used_bits[tensor_global_request_index]) {
+              return iree_make_status(
+                  IREE_STATUS_FAILED_PRECONDITION,
+                  "parameter window does not materialize all requests for "
+                  "parameter tensor %.*s",
+                  (int)parameter_tensor->layout.name.size,
+                  parameter_tensor->layout.name.data);
+            }
+          }
+          IREE_RETURN_IF_ERROR(id4_pipeline_parameter_slab_pack_span(
+              parameter_tensor->layout.byte_length, compact_slab.alignment,
+              &compact_slab.byte_length, &compact_span));
+          active_parameter_tensor_index = parameter_tensor_index;
+          active_parameter_tensor_offset = compact_span.buffer_offset;
+        } else {
+          memset(&compact_span, 0, sizeof(compact_span));
+        }
+        if (original_request->span.buffer_offset < parameter_tensor->offset) {
+          return iree_make_status(
+              IREE_STATUS_OUT_OF_RANGE,
+              "parameter tensor %.*s request starts before tensor storage",
+              (int)parameter_tensor->layout.name.size,
+              parameter_tensor->layout.name.data);
+        }
+        const iree_device_size_t request_tensor_offset =
+            original_request->span.buffer_offset - parameter_tensor->offset;
+        if (request_tensor_offset > parameter_tensor->layout.byte_length ||
+            original_request->span.length >
+                parameter_tensor->layout.byte_length - request_tensor_offset) {
+          return iree_make_status(
+              IREE_STATUS_OUT_OF_RANGE,
+              "parameter tensor %.*s request exceeds tensor storage",
+              (int)parameter_tensor->layout.name.size,
+              parameter_tensor->layout.name.data);
+        }
+        if (!iree_device_size_checked_add(active_parameter_tensor_offset,
+                                          request_tensor_offset,
+                                          &compact_span.buffer_offset)) {
+          return iree_make_status(
+              IREE_STATUS_OUT_OF_RANGE,
+              "parameter tensor %.*s compact request offset overflows",
+              (int)parameter_tensor->layout.name.size,
+              parameter_tensor->layout.name.data);
+        }
+        compact_span.length = original_request->span.length;
+      }
       compact_span.parameter_offset = original_request->span.parameter_offset;
       window->requests[compact_request_index] =
           (id4_pipeline_parameter_window_request_t){
@@ -506,6 +676,10 @@ iree_status_t id4_pipeline_parameter_window_create(
            state.global_request_count * sizeof(state.request_used_bits[0]));
   }
   if (iree_status_is_ok(status)) {
+    status = id4_pipeline_parameter_window_map_parameter_tensors(
+        &state, host_allocator);
+  }
+  if (iree_status_is_ok(status)) {
     status = id4_pipeline_parameter_window_mark_used_groups(options, &state);
   }
 
@@ -541,6 +715,8 @@ iree_status_t id4_pipeline_parameter_window_create(
   }
 
   id4_pipeline_parameter_window_release(window);
+  iree_allocator_free(host_allocator,
+                      state.parameter_tensor_indices_by_global_request);
   iree_allocator_free(host_allocator, state.request_used_bits);
   iree_allocator_free(host_allocator, state.load_group_used_bits);
   iree_allocator_free(host_allocator, state.global_request_offsets_by_slab);
