@@ -1041,12 +1041,20 @@ _MARKDOWN_COLUMNS = (
     ("staging MiB", "issue_encode_window_staging_mib"),
     ("max staging MiB", "issue_encode_window_staging_max_mib"),
     ("max group MiB", "parameter_window_largest_load_group_mib"),
+    ("max group stage", "parameter_window_largest_load_group_stage"),
     ("max request MiB", "parameter_window_largest_request_mib"),
+    ("max request stage", "parameter_window_largest_request_stage"),
     ("dispatches", "runtime_dispatch_count"),
 )
 
 _MARKDOWN_TEXT_COLUMNS = frozenset(
-    ("bucket", "generation_residency", "generation_phase_stage_masks")
+    (
+        "bucket",
+        "generation_residency",
+        "generation_phase_stage_masks",
+        "parameter_window_largest_load_group_stage",
+        "parameter_window_largest_request_stage",
+    )
 )
 
 
