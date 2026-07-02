@@ -460,9 +460,10 @@ infinity. The schema `element_format` records the payload dialect, such as
 `f8e4m3`, `f8e4m3fn`, or `f8e5m2`. Model weights that have been validated finite
 should also set `rounding=finite_only` so loads and fragments publish
 no-NaN/no-infinity facts while still preserving exact zero and subnormal
-behavior. Formats that also flush or forbid subnormal payloads can use
-`finite_flush_subnormal`, but that is a stronger numeric contract than ordinary
-finite FP8 weights.
+behavior. `finite_flush_subnormal` is only for storage whose physical payloads
+have already been flushed or are otherwise guaranteed not to contain subnormal
+values; it is a stronger content contract, not a request for the target decoder
+to repair contradictory bytes at load time.
 
 ```loom
 %weight_layout = encoding.layout.strided [1, %input_size] : encoding<layout>
