@@ -27,6 +27,32 @@ static uint32_t loom_amdgpu_fp8_subnormal_bf16_payload(
   return (exponent << 7) | fraction;
 }
 
+static uint32_t loom_amdgpu_fp8_subnormal_f16_payload(
+    const loom_scalar_type_fp8_format_t* format, uint32_t mantissa) {
+  if (mantissa == 0) {
+    return 0;
+  }
+  const int32_t source_power =
+      1 - (int32_t)format->exponent_bias - (int32_t)format->mantissa_bits;
+  int32_t leading_index = 0;
+  for (uint32_t i = 1; i < format->mantissa_bits; ++i) {
+    if ((mantissa & (UINT32_C(1) << i)) != 0) {
+      leading_index = (int32_t)i;
+    }
+  }
+  const int32_t exponent = source_power + leading_index;
+  const int32_t f16_exponent = exponent + 15;
+  if (f16_exponent > 0) {
+    const uint32_t fraction =
+        (mantissa << (10u - (uint32_t)leading_index)) & UINT32_C(0x3FF);
+    return ((uint32_t)f16_exponent << 10) | fraction;
+  }
+
+  const int32_t subnormal_shift = source_power + 24;
+  IREE_ASSERT_GE(subnormal_shift, 0);
+  return mantissa << (uint32_t)subnormal_shift;
+}
+
 static uint32_t loom_amdgpu_fp8_subnormal_table_word(
     const loom_scalar_type_fp8_format_t* format, uint32_t mantissa_base) {
   return loom_amdgpu_fp8_subnormal_bf16_payload(format, mantissa_base) |
@@ -41,6 +67,18 @@ static uint32_t loom_amdgpu_fp8_subnormal_byte_table_word(
   for (uint32_t i = 0; i < 4; ++i) {
     const uint32_t payload =
         loom_amdgpu_fp8_subnormal_bf16_payload(format, mantissa_base + i);
+    table_word |= ((payload >> (byte_index * 8u)) & UINT32_C(0xFF)) << (i * 8u);
+  }
+  return table_word;
+}
+
+static uint32_t loom_amdgpu_fp8_subnormal_f16_byte_table_word(
+    const loom_scalar_type_fp8_format_t* format, uint32_t byte_index,
+    uint32_t mantissa_base) {
+  uint32_t table_word = 0;
+  for (uint32_t i = 0; i < 4; ++i) {
+    const uint32_t payload =
+        loom_amdgpu_fp8_subnormal_f16_payload(format, mantissa_base + i);
     table_word |= ((payload >> (byte_index * 8u)) & UINT32_C(0xFF)) << (i * 8u);
   }
   return table_word;
@@ -67,6 +105,15 @@ static void loom_amdgpu_initialize_fp8_decode_format(
       plan->subnormal_bf16_byte_table_words[byte_index][1] =
           loom_amdgpu_fp8_subnormal_byte_table_word(&plan->format, byte_index,
                                                     4);
+    }
+    for (uint32_t byte_index = 0; byte_index < LOOM_AMDGPU_FP8_U16_BYTE_COUNT;
+         ++byte_index) {
+      plan->subnormal_f16_byte_table_words[byte_index][0] =
+          loom_amdgpu_fp8_subnormal_f16_byte_table_word(&plan->format,
+                                                        byte_index, 0);
+      plan->subnormal_f16_byte_table_words[byte_index][1] =
+          loom_amdgpu_fp8_subnormal_f16_byte_table_word(&plan->format,
+                                                        byte_index, 4);
     }
   }
 }
