@@ -331,6 +331,17 @@ static iree_status_t loom_low_allocation_set_block_arg_spill_insertion_point(
   return iree_ok_status();
 }
 
+static bool loom_low_allocation_defines_entry_preamble_value(
+    const loom_op_t* function_op, const loom_op_t* op) {
+  if (!op || !loom_low_allocation_entry_preamble_op(op)) {
+    return false;
+  }
+  const loom_region_t* body = loom_low_function_const_body(function_op);
+  const loom_block_t* entry_block =
+      body ? loom_region_const_entry_block(body) : NULL;
+  return op->parent_block == entry_block;
+}
+
 static iree_status_t loom_low_allocation_insert_storage_reserves(
     loom_module_t* module, const loom_low_allocation_table_t* table,
     iree_host_size_t spill_plan_count, iree_arena_allocator_t* arena,
@@ -540,7 +551,14 @@ static iree_status_t loom_low_allocation_insert_spill_store(
   }
   loom_builder_initialize(module, &module->arena, defining_op->parent_block,
                           &builder);
-  loom_builder_set_after(&builder, defining_op);
+  if (loom_low_allocation_defines_entry_preamble_value(function_op,
+                                                       defining_op)) {
+    IREE_RETURN_IF_ERROR(
+        loom_low_allocation_set_block_arg_spill_insertion_point(
+            &builder, function_op, defining_op->parent_block));
+  } else {
+    loom_builder_set_after(&builder, defining_op);
+  }
   return loom_low_spill_build(&builder, plan->value_id, storage_value_id, 0,
                               defining_op->location, &spill_op);
 }
