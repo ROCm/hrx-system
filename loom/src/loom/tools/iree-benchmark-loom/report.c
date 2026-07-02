@@ -1875,6 +1875,30 @@ iree_status_t iree_benchmark_loom_write_compile_report_artifact(
   return status;
 }
 
+static iree_string_view_t iree_benchmark_loom_buffer_materialization_name(
+    iree_benchmark_loom_buffer_materialization_t materialization) {
+  switch (materialization) {
+    case IREE_BENCHMARK_LOOM_BUFFER_MATERIALIZATION_HOST_VISIBLE:
+      return IREE_SV("host_visible");
+    case IREE_BENCHMARK_LOOM_BUFFER_MATERIALIZATION_DEVICE_LOCAL:
+      return IREE_SV("device_local");
+    default:
+      return iree_string_view_empty();
+  }
+}
+
+static iree_status_t iree_benchmark_loom_write_data_cache_materialization_json(
+    loom_output_stream_t* stream, bool* first_field, const char* field_name,
+    iree_benchmark_loom_buffer_materialization_t materialization) {
+  iree_string_view_t name =
+      iree_benchmark_loom_buffer_materialization_name(materialization);
+  if (iree_string_view_is_empty(name)) {
+    return iree_ok_status();
+  }
+  return iree_benchmark_loom_write_json_string_field(stream, first_field,
+                                                     field_name, name);
+}
+
 static iree_status_t iree_benchmark_loom_write_data_cache_summary_json(
     const iree_benchmark_loom_data_cache_summary_t* summary,
     loom_output_stream_t* stream) {
@@ -1884,6 +1908,14 @@ static iree_status_t iree_benchmark_loom_write_data_cache_summary_json(
       stream, &first_field, "validity", IREE_SV("check_ops")));
   IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_string_field(
       stream, &first_field, "cache_policy", IREE_SV("binding_ring")));
+  IREE_RETURN_IF_ERROR(
+      iree_benchmark_loom_write_data_cache_materialization_json(
+          stream, &first_field, "correctness_materialization",
+          summary->correctness_materialization));
+  IREE_RETURN_IF_ERROR(
+      iree_benchmark_loom_write_data_cache_materialization_json(
+          stream, &first_field, "measurement_materialization",
+          summary->measurement_materialization));
   IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_size_field(
       stream, &first_field, "binding_count", summary->binding_count));
   IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_json_size_field(
