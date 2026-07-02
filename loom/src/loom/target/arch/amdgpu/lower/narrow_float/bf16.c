@@ -136,6 +136,50 @@ iree_status_t loom_amdgpu_get_bf16_pack_descriptors(
   return iree_ok_status();
 }
 
+bool loom_amdgpu_bf16_descriptor_set_can_emit_f32_to_bf16_lane(
+    const loom_low_descriptor_set_t* descriptor_set) {
+  if (!loom_amdgpu_descriptor_set_can_emit_vgpr_binary_immediate(
+          descriptor_set, LOOM_AMDGPU_DESCRIPTOR_REF_V_LSHRREV_B32_LIT, 16) ||
+      !loom_amdgpu_descriptor_set_can_emit_vgpr_binary_immediate(
+          descriptor_set, LOOM_AMDGPU_DESCRIPTOR_REF_V_AND_B32_LIT, 1)) {
+    return false;
+  }
+  if (loom_amdgpu_descriptor_set_has_ref(
+          descriptor_set, LOOM_AMDGPU_DESCRIPTOR_REF_V_ADD3_U32_SRC2_LIT)) {
+    return true;
+  }
+  return loom_amdgpu_descriptor_set_can_emit_vgpr_binary_immediate(
+             descriptor_set, LOOM_AMDGPU_DESCRIPTOR_REF_V_ADD_U32_LIT,
+             UINT32_C(0x7FFF)) &&
+         loom_amdgpu_descriptor_set_has_ref(
+             descriptor_set, LOOM_AMDGPU_DESCRIPTOR_REF_V_ADD_U32);
+}
+
+bool loom_amdgpu_bf16_descriptor_set_can_emit_packed_lane_pair(
+    const loom_low_descriptor_set_t* descriptor_set) {
+  if (loom_amdgpu_descriptor_set_has_ref(
+          descriptor_set, LOOM_AMDGPU_DESCRIPTOR_REF_V_CVT_PK_U16_U32)) {
+    return true;
+  }
+  return loom_amdgpu_descriptor_set_can_emit_vgpr_binary_immediate(
+             descriptor_set, LOOM_AMDGPU_DESCRIPTOR_REF_V_LSHLREV_B32_LIT,
+             16) &&
+         loom_amdgpu_descriptor_set_has_ref(
+             descriptor_set, LOOM_AMDGPU_DESCRIPTOR_REF_V_OR_B32);
+}
+
+bool loom_amdgpu_bf16_descriptor_set_can_emit_f32_pair_to_packed_bf16(
+    const loom_low_descriptor_set_t* descriptor_set) {
+  if (loom_amdgpu_descriptor_set_has_ref(
+          descriptor_set, LOOM_AMDGPU_DESCRIPTOR_REF_V_CVT_PK_BF16_F32)) {
+    return true;
+  }
+  return loom_amdgpu_bf16_descriptor_set_can_emit_f32_to_bf16_lane(
+             descriptor_set) &&
+         loom_amdgpu_bf16_descriptor_set_can_emit_packed_lane_pair(
+             descriptor_set);
+}
+
 iree_status_t loom_amdgpu_emit_f32_to_bf16_lane(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_value_id_t source_lane, loom_type_t lane_type,

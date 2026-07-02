@@ -117,6 +117,12 @@ bool loom_amdgpu_descriptor_set_has_ref(
     const loom_low_descriptor_set_t* descriptor_set,
     loom_amdgpu_descriptor_ref_t descriptor_ref);
 
+// Returns true when |descriptor_set| can emit |descriptor_ref| with |immediate|
+// through the normal VGPR immediate helper, including target inline forms.
+bool loom_amdgpu_descriptor_set_can_emit_vgpr_binary_immediate(
+    const loom_low_descriptor_set_t* descriptor_set,
+    loom_amdgpu_descriptor_ref_t descriptor_ref, uint32_t immediate);
+
 // Returns true when |descriptor_set| contains a descriptor with |key|.
 bool loom_amdgpu_descriptor_set_has_key(
     const loom_low_descriptor_set_t* descriptor_set, iree_string_view_t key);
