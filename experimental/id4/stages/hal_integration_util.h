@@ -244,6 +244,8 @@ typedef struct StageDiagnostics {
   iree_device_size_t parameter_encode_window_target_byte_length;
   // Number of staging chunks planned through encoded staging runs.
   iree_host_size_t parameter_encode_window_staging_chunk_count;
+  // Number of logical source tensors staged through encoded staging runs.
+  iree_host_size_t parameter_encode_window_logical_source_count;
   // Number of source gather batches planned through encoded staging runs.
   iree_host_size_t parameter_encode_window_source_gather_batch_count;
   // Number of encoder dispatches planned through encoded staging runs.
@@ -260,6 +262,9 @@ typedef struct StageDiagnostics {
   iree_device_size_t parameter_prepare_encode_window_target_byte_length;
   // Number of staging chunks planned through prepare-time encode windows.
   iree_host_size_t parameter_prepare_encode_window_staging_chunk_count;
+  // Number of logical source tensors staged through prepare-time encode
+  // windows.
+  iree_host_size_t parameter_prepare_encode_window_logical_source_count;
   // Number of source gather batches planned through prepare-time encode
   // windows.
   iree_host_size_t parameter_prepare_encode_window_source_gather_batch_count;
@@ -277,6 +282,9 @@ typedef struct StageDiagnostics {
   iree_device_size_t parameter_issue_encode_window_target_byte_length;
   // Number of staging chunks planned through issue-local encode windows.
   iree_host_size_t parameter_issue_encode_window_staging_chunk_count;
+  // Number of logical source tensors staged through issue-local encode
+  // windows.
+  iree_host_size_t parameter_issue_encode_window_logical_source_count;
   // Number of source gather batches planned through issue-local encode windows.
   iree_host_size_t parameter_issue_encode_window_source_gather_batch_count;
   // Number of encoder dispatches planned through issue-local encode windows.

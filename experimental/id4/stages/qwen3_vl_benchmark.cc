@@ -385,15 +385,17 @@ static void SetQwenBenchmarkLabel(
       "MiB]"
       " encode_windows[count=%" PRIhsz ",staging=%" PRIu64 "MiB,max=%" PRIu64
       "MiB,source=%" PRIu64 "MiB,target=%" PRIu64 "MiB,chunks=%" PRIhsz
-      ",batches=%" PRIhsz ",dispatches=%" PRIhsz
+      ",sources=%" PRIhsz ",batches=%" PRIhsz ",dispatches=%" PRIhsz
       "]"
       " prepare_encode_window[count=%" PRIhsz ",staging=%" PRIu64
       "MiB,max=%" PRIu64 "MiB,source=%" PRIu64 "MiB,target=%" PRIu64
-      "MiB,chunks=%" PRIhsz ",batches=%" PRIhsz ",dispatches=%" PRIhsz
+      "MiB,chunks=%" PRIhsz ",sources=%" PRIhsz ",batches=%" PRIhsz
+      ",dispatches=%" PRIhsz
       "]"
       " issue_encode_window[count=%" PRIhsz ",staging=%" PRIu64
       "MiB,max=%" PRIu64 "MiB,source=%" PRIu64 "MiB,target=%" PRIu64
-      "MiB,chunks=%" PRIhsz ",batches=%" PRIhsz ",dispatches=%" PRIhsz "]",
+      "MiB,chunks=%" PRIhsz ",sources=%" PRIhsz ",batches=%" PRIhsz
+      ",dispatches=%" PRIhsz "]",
       token_count, static_cast<int>(weight_execution_strategy_name.size),
       weight_execution_strategy_name.data,
       parameter_load_prefetch_region_distance,
@@ -439,6 +441,7 @@ static void SetQwenBenchmarkLabel(
       CeilMiB(diagnostics.parameter_encode_window_source_byte_length),
       CeilMiB(diagnostics.parameter_encode_window_target_byte_length),
       diagnostics.parameter_encode_window_staging_chunk_count,
+      diagnostics.parameter_encode_window_logical_source_count,
       diagnostics.parameter_encode_window_source_gather_batch_count,
       diagnostics.parameter_encode_window_encoder_dispatch_count,
       diagnostics.parameter_prepare_encode_window_count,
@@ -449,6 +452,7 @@ static void SetQwenBenchmarkLabel(
       CeilMiB(diagnostics.parameter_prepare_encode_window_source_byte_length),
       CeilMiB(diagnostics.parameter_prepare_encode_window_target_byte_length),
       diagnostics.parameter_prepare_encode_window_staging_chunk_count,
+      diagnostics.parameter_prepare_encode_window_logical_source_count,
       diagnostics.parameter_prepare_encode_window_source_gather_batch_count,
       diagnostics.parameter_prepare_encode_window_encoder_dispatch_count,
       diagnostics.parameter_issue_encode_window_count,
@@ -459,6 +463,7 @@ static void SetQwenBenchmarkLabel(
       CeilMiB(diagnostics.parameter_issue_encode_window_source_byte_length),
       CeilMiB(diagnostics.parameter_issue_encode_window_target_byte_length),
       diagnostics.parameter_issue_encode_window_staging_chunk_count,
+      diagnostics.parameter_issue_encode_window_logical_source_count,
       diagnostics.parameter_issue_encode_window_source_gather_batch_count,
       diagnostics.parameter_issue_encode_window_encoder_dispatch_count));
   IREE_CHECK_OK(id4::test::AppendParameterLoadKindStatisticsLabel(

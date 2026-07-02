@@ -1022,6 +1022,8 @@ static iree_status_t CaptureDiagnostics(
         parameter_load->target_byte_length;
     diagnostics->parameter_encode_window_staging_chunk_count +=
         parameter_load->staging_chunk_count;
+    diagnostics->parameter_encode_window_logical_source_count +=
+        parameter_load->logical_source_count;
     diagnostics->parameter_encode_window_source_gather_batch_count +=
         parameter_load->source_gather_batch_count;
     diagnostics->parameter_encode_window_encoder_dispatch_count +=
@@ -1045,6 +1047,8 @@ static iree_status_t CaptureDiagnostics(
         parameter_load->target_byte_length;
     diagnostics->parameter_prepare_encode_window_staging_chunk_count +=
         parameter_load->staging_chunk_count;
+    diagnostics->parameter_prepare_encode_window_logical_source_count +=
+        parameter_load->logical_source_count;
     diagnostics->parameter_prepare_encode_window_source_gather_batch_count +=
         parameter_load->source_gather_batch_count;
     diagnostics->parameter_prepare_encode_window_encoder_dispatch_count +=
@@ -1068,6 +1072,8 @@ static iree_status_t CaptureDiagnostics(
         parameter_load->target_byte_length;
     diagnostics->parameter_issue_encode_window_staging_chunk_count +=
         parameter_load->staging_chunk_count;
+    diagnostics->parameter_issue_encode_window_logical_source_count +=
+        parameter_load->logical_source_count;
     diagnostics->parameter_issue_encode_window_source_gather_batch_count +=
         parameter_load->source_gather_batch_count;
     diagnostics->parameter_issue_encode_window_encoder_dispatch_count +=

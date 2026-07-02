@@ -107,21 +107,24 @@ _LABEL_ENCODE_WINDOWS_PATTERN = re.compile(
     r"\bencode_windows\[count=(?P<count>[0-9]+),"
     r"staging=(?P<staging>[0-9]+)MiB,max=(?P<maximum>[0-9]+)MiB,"
     r"source=(?P<source>[0-9]+)MiB,target=(?P<target>[0-9]+)MiB,"
-    r"chunks=(?P<chunks>[0-9]+),batches=(?P<batches>[0-9]+),"
+    r"chunks=(?P<chunks>[0-9]+),sources=(?P<sources>[0-9]+),"
+    r"batches=(?P<batches>[0-9]+),"
     r"dispatches=(?P<dispatches>[0-9]+)\]"
 )
 _LABEL_PREPARE_ENCODE_WINDOW_PATTERN = re.compile(
     r"\bprepare_encode_window\[count=(?P<count>[0-9]+),"
     r"staging=(?P<staging>[0-9]+)MiB,max=(?P<maximum>[0-9]+)MiB,"
     r"source=(?P<source>[0-9]+)MiB,target=(?P<target>[0-9]+)MiB,"
-    r"chunks=(?P<chunks>[0-9]+),batches=(?P<batches>[0-9]+),"
+    r"chunks=(?P<chunks>[0-9]+),sources=(?P<sources>[0-9]+),"
+    r"batches=(?P<batches>[0-9]+),"
     r"dispatches=(?P<dispatches>[0-9]+)\]"
 )
 _LABEL_ISSUE_ENCODE_WINDOW_PATTERN = re.compile(
     r"\bissue_encode_window\[count=(?P<count>[0-9]+),"
     r"staging=(?P<staging>[0-9]+)MiB,max=(?P<maximum>[0-9]+)MiB,"
     r"source=(?P<source>[0-9]+)MiB,target=(?P<target>[0-9]+)MiB,"
-    r"chunks=(?P<chunks>[0-9]+),batches=(?P<batches>[0-9]+),"
+    r"chunks=(?P<chunks>[0-9]+),sources=(?P<sources>[0-9]+),"
+    r"batches=(?P<batches>[0-9]+),"
     r"dispatches=(?P<dispatches>[0-9]+)\]"
 )
 
@@ -318,7 +321,7 @@ def _max_parameter_window_blockers(
                 largest_request_load_group_index = window.get(
                     "largest_request_load_group_index"
                 )
-    return {
+    row = {
         "parameter_window_largest_load_group_byte_length": (
             largest_load_group_byte_length
         ),
@@ -335,6 +338,7 @@ def _max_parameter_window_blockers(
             largest_request_load_group_index
         ),
     }
+    return row
 
 
 def _require_equal(actual: Any, expected: Any, context: str) -> None:
@@ -458,7 +462,7 @@ def _parse_generation_benchmark_label(label: str, context: str) -> dict[str, Any
         phase_wait_ms += phase_timing["wait_ms"]
         phase_release_ms += phase_timing["release_ms"]
 
-    return {
+    row = {
         "benchmark_scope": _label_token(label, "scope", f"{context}.label"),
         "prompt_label": _label_token(label, "prompt", f"{context}.label"),
         "generation_residency_request": _label_token(
@@ -663,6 +667,9 @@ def _parse_generation_benchmark_label(label: str, context: str) -> dict[str, Any
         "encode_window_chunk_count": _match_unsigned_group(
             encode_windows_match, "chunks", f"{context}.label"
         ),
+        "encode_window_source_count": _match_unsigned_group(
+            encode_windows_match, "sources", f"{context}.label"
+        ),
         "encode_window_batch_count": _match_unsigned_group(
             encode_windows_match, "batches", f"{context}.label"
         ),
@@ -687,6 +694,9 @@ def _parse_generation_benchmark_label(label: str, context: str) -> dict[str, Any
         "prepare_encode_window_chunk_count": _match_unsigned_group(
             prepare_encode_window_match, "chunks", f"{context}.label"
         ),
+        "prepare_encode_window_source_count": _match_unsigned_group(
+            prepare_encode_window_match, "sources", f"{context}.label"
+        ),
         "prepare_encode_window_batch_count": _match_unsigned_group(
             prepare_encode_window_match, "batches", f"{context}.label"
         ),
@@ -710,6 +720,9 @@ def _parse_generation_benchmark_label(label: str, context: str) -> dict[str, Any
         ),
         "issue_encode_window_chunk_count": _match_unsigned_group(
             issue_encode_window_match, "chunks", f"{context}.label"
+        ),
+        "issue_encode_window_source_count": _match_unsigned_group(
+            issue_encode_window_match, "sources", f"{context}.label"
         ),
         "issue_encode_window_batch_count": _match_unsigned_group(
             issue_encode_window_match, "batches", f"{context}.label"
@@ -740,6 +753,10 @@ def _parse_generation_benchmark_label(label: str, context: str) -> dict[str, Any
         "phase_release_ms": phase_release_ms if phase_timings else None,
         "runtime_stages": runtime_stages,
     }
+    row["provider_source_count"] = (
+        row["direct_gather_request_count"] + row["encode_window_source_count"]
+    )
+    return row
 
 
 def _validate_label_plan_join(
@@ -1032,6 +1049,9 @@ _MARKDOWN_COLUMNS = (
     ("max submit ms", "parameter_load_submit_max_ms"),
     ("direct MiB", "runtime_parameter_source_direct_mib"),
     ("encoded MiB", "runtime_parameter_source_encoded_mib"),
+    ("direct req", "direct_gather_request_count"),
+    ("encoded src", "encode_window_source_count"),
+    ("provider reads", "provider_source_count"),
     ("fp8 bf16 src MiB", "runtime_parameter_load_fp8_bf16_source_mib"),
     ("fp8 bf16 target MiB", "runtime_parameter_load_fp8_bf16_target_mib"),
     ("bf16 rhs src MiB", "runtime_parameter_load_bf16_rhs_source_mib"),

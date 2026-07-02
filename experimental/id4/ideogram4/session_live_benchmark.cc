@@ -1709,15 +1709,17 @@ static iree_status_t SetGenerationBenchmarkLabel(
       "MiB]"
       " encode_windows[count=%" PRIhsz ",staging=%" PRIu64 "MiB,max=%" PRIu64
       "MiB,source=%" PRIu64 "MiB,target=%" PRIu64 "MiB,chunks=%" PRIhsz
-      ",batches=%" PRIhsz ",dispatches=%" PRIhsz
+      ",sources=%" PRIhsz ",batches=%" PRIhsz ",dispatches=%" PRIhsz
       "]"
       " prepare_encode_window[count=%" PRIhsz ",staging=%" PRIu64
       "MiB,max=%" PRIu64 "MiB,source=%" PRIu64 "MiB,target=%" PRIu64
-      "MiB,chunks=%" PRIhsz ",batches=%" PRIhsz ",dispatches=%" PRIhsz
+      "MiB,chunks=%" PRIhsz ",sources=%" PRIhsz ",batches=%" PRIhsz
+      ",dispatches=%" PRIhsz
       "]"
       " issue_encode_window[count=%" PRIhsz ",staging=%" PRIu64
       "MiB,max=%" PRIu64 "MiB,source=%" PRIu64 "MiB,target=%" PRIu64
-      "MiB,chunks=%" PRIhsz ",batches=%" PRIhsz ",dispatches=%" PRIhsz "]",
+      "MiB,chunks=%" PRIhsz ",sources=%" PRIhsz ",batches=%" PRIhsz
+      ",dispatches=%" PRIhsz "]",
       static_cast<int>(benchmark_scope.size), benchmark_scope.data,
       static_cast<int>(prompt_label.size), prompt_label.data,
       summary.qwen_token_count, summary.qwen_token_capacity,
@@ -1793,6 +1795,7 @@ static iree_status_t SetGenerationBenchmarkLabel(
       CeilMiB(diagnostics.parameter_encode_window_source_byte_length),
       CeilMiB(diagnostics.parameter_encode_window_target_byte_length),
       diagnostics.parameter_encode_window_staging_chunk_count,
+      diagnostics.parameter_encode_window_logical_source_count,
       diagnostics.parameter_encode_window_source_gather_batch_count,
       diagnostics.parameter_encode_window_encoder_dispatch_count,
       diagnostics.parameter_prepare_encode_window_count,
@@ -1803,6 +1806,7 @@ static iree_status_t SetGenerationBenchmarkLabel(
       CeilMiB(diagnostics.parameter_prepare_encode_window_source_byte_length),
       CeilMiB(diagnostics.parameter_prepare_encode_window_target_byte_length),
       diagnostics.parameter_prepare_encode_window_staging_chunk_count,
+      diagnostics.parameter_prepare_encode_window_logical_source_count,
       diagnostics.parameter_prepare_encode_window_source_gather_batch_count,
       diagnostics.parameter_prepare_encode_window_encoder_dispatch_count,
       diagnostics.parameter_issue_encode_window_count,
@@ -1813,6 +1817,7 @@ static iree_status_t SetGenerationBenchmarkLabel(
       CeilMiB(diagnostics.parameter_issue_encode_window_source_byte_length),
       CeilMiB(diagnostics.parameter_issue_encode_window_target_byte_length),
       diagnostics.parameter_issue_encode_window_staging_chunk_count,
+      diagnostics.parameter_issue_encode_window_logical_source_count,
       diagnostics.parameter_issue_encode_window_source_gather_batch_count,
       diagnostics.parameter_issue_encode_window_encoder_dispatch_count);
   if (iree_status_is_ok(status)) {
