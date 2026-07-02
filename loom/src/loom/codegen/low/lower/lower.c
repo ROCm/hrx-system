@@ -1412,37 +1412,6 @@ static iree_status_t loom_low_lower_report_row_list_append(
   return iree_ok_status();
 }
 
-static iree_status_t loom_low_lower_memory_report_row_list_append(
-    loom_low_lower_memory_report_row_list_t* list, iree_allocator_t allocator,
-    const loom_low_lower_memory_report_row_t* row) {
-  if (iree_allocator_is_null(allocator)) {
-    return iree_ok_status();
-  }
-  if (list->count == list->capacity) {
-    iree_host_size_t minimum_capacity =
-        LOOM_LOW_LOWER_REPORT_ROW_VEC_DEFAULT_BYTE_LENGTH / sizeof(*row);
-    minimum_capacity = iree_max((iree_host_size_t)1, minimum_capacity);
-    iree_host_size_t capacity = list->capacity;
-    IREE_RETURN_IF_ERROR(iree_allocator_grow_array(allocator, minimum_capacity,
-                                                   sizeof(*row), &capacity,
-                                                   (void**)&list->rows));
-    list->capacity = capacity;
-  }
-  list->rows[list->count++] = *row;
-  return iree_ok_status();
-}
-
-iree_status_t loom_low_lower_record_memory_report_row(
-    loom_low_lower_context_t* context,
-    const loom_low_lower_memory_report_row_t* row) {
-  if (!loom_low_lower_context_wants_report_rows(context)) {
-    return iree_ok_status();
-  }
-  return loom_low_lower_memory_report_row_list_append(
-      &context->result->memory_report_rows,
-      context->result->memory_report_row_allocator, row);
-}
-
 static iree_status_t loom_low_lower_record_report_row(
     loom_low_lower_context_t* context,
     const loom_low_lower_selected_plan_t* selected_plan,

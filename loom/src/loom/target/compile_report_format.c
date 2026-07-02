@@ -311,6 +311,36 @@ loom_target_compile_report_append_memory_interval_summary_text(
   return iree_string_builder_append_cstring(builder, "}");
 }
 
+static bool loom_target_compile_report_source_low_memory_has_dynamic_evidence(
+    const loom_target_compile_report_source_low_memory_summary_t* summary) {
+  return summary->exact_dynamic_packet_count != 0 ||
+         summary->unknown_dynamic_packet_count != 0;
+}
+
+static bool
+loom_target_compile_report_source_low_memory_has_complete_dynamic_evidence(
+    const loom_target_compile_report_source_low_memory_summary_t* summary) {
+  return summary->packet_count == summary->exact_dynamic_packet_count &&
+         summary->unknown_dynamic_packet_count == 0;
+}
+
+static bool loom_target_compile_report_source_low_memory_has_dynamic_delta(
+    const loom_target_compile_report_source_low_memory_summary_t* summary) {
+  return summary->unknown_dynamic_packet_count != 0 ||
+         summary->dynamic_packet_count != summary->packet_count ||
+         summary->dynamic_source_byte_count != summary->source_byte_count ||
+         summary->dynamic_read_byte_count != summary->read_byte_count ||
+         summary->dynamic_write_byte_count != summary->write_byte_count ||
+         summary->dynamic_issued_read_byte_count !=
+             summary->issued_read_byte_count ||
+         summary->dynamic_issued_write_byte_count !=
+             summary->issued_write_byte_count ||
+         summary->dynamic_issued_read_unknown_width_count !=
+             summary->issued_read_unknown_width_count ||
+         summary->dynamic_issued_write_unknown_width_count !=
+             summary->issued_write_unknown_width_count;
+}
+
 static iree_status_t
 loom_target_compile_report_append_source_low_memory_summary_text(
     const loom_target_compile_report_source_low_memory_summary_t* summary,
@@ -337,28 +367,65 @@ loom_target_compile_report_append_source_low_memory_summary_text(
       summary->contiguous_vector_packet_count,
       summary->strided_vector_packet_count,
       summary->unknown_stride_vector_packet_count));
+  if (loom_target_compile_report_source_low_memory_has_dynamic_evidence(
+          summary) &&
+      loom_target_compile_report_source_low_memory_has_dynamic_delta(summary)) {
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+        builder,
+        " exact_dynamic_packets=%" PRIu64 " unknown_dynamic_packets=%" PRIu64
+        " dynamic_packets=%" PRIu64 " dynamic_source_bytes=%" PRIu64
+        " dynamic_read_bytes=%" PRIu64 " dynamic_write_bytes=%" PRIu64
+        " dynamic_issued_read_bytes=%" PRIu64
+        " dynamic_issued_write_bytes=%" PRIu64
+        " dynamic_issued_read_unknown_widths=%" PRIu64
+        " dynamic_issued_write_unknown_widths=%" PRIu64,
+        summary->exact_dynamic_packet_count,
+        summary->unknown_dynamic_packet_count, summary->dynamic_packet_count,
+        summary->dynamic_source_byte_count, summary->dynamic_read_byte_count,
+        summary->dynamic_write_byte_count,
+        summary->dynamic_issued_read_byte_count,
+        summary->dynamic_issued_write_byte_count,
+        summary->dynamic_issued_read_unknown_width_count,
+        summary->dynamic_issued_write_unknown_width_count));
+  }
   if (iree_any_bit_set(
           workload->flags,
           LOOM_TARGET_COMPILE_REPORT_WORKLOAD_DISPATCH_WORKITEM_COUNT)) {
-    uint64_t dispatch_read_byte_count = 0;
-    uint64_t dispatch_write_byte_count = 0;
-    uint64_t dispatch_total_byte_count = 0;
-    if (loom_target_compile_report_checked_mul_u64(
-            summary->issued_read_byte_count, workload->dispatch_workitem_count,
-            &dispatch_read_byte_count) &&
-        loom_target_compile_report_checked_mul_u64(
-            summary->issued_write_byte_count, workload->dispatch_workitem_count,
-            &dispatch_write_byte_count) &&
-        loom_target_compile_report_checked_add_u64(
+    const bool has_incomplete_dynamic_evidence =
+        loom_target_compile_report_source_low_memory_has_dynamic_evidence(
+            summary) &&
+        !loom_target_compile_report_source_low_memory_has_complete_dynamic_evidence(
+            summary);
+    if (!has_incomplete_dynamic_evidence) {
+      const bool use_dynamic_issued_counts =
+          loom_target_compile_report_source_low_memory_has_dynamic_evidence(
+              summary);
+      const uint64_t issued_read_byte_count =
+          use_dynamic_issued_counts ? summary->dynamic_issued_read_byte_count
+                                    : summary->issued_read_byte_count;
+      const uint64_t issued_write_byte_count =
+          use_dynamic_issued_counts ? summary->dynamic_issued_write_byte_count
+                                    : summary->issued_write_byte_count;
+      uint64_t dispatch_read_byte_count = 0;
+      uint64_t dispatch_write_byte_count = 0;
+      uint64_t dispatch_total_byte_count = 0;
+      if (loom_target_compile_report_checked_mul_u64(
+              issued_read_byte_count, workload->dispatch_workitem_count,
+              &dispatch_read_byte_count) &&
+          loom_target_compile_report_checked_mul_u64(
+              issued_write_byte_count, workload->dispatch_workitem_count,
+              &dispatch_write_byte_count) &&
+          loom_target_compile_report_checked_add_u64(
+              dispatch_read_byte_count, dispatch_write_byte_count,
+              &dispatch_total_byte_count)) {
+        IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+            builder,
+            " dispatch_issued_read_bytes=%" PRIu64
+            " dispatch_issued_write_bytes=%" PRIu64
+            " dispatch_issued_total_bytes=%" PRIu64,
             dispatch_read_byte_count, dispatch_write_byte_count,
-            &dispatch_total_byte_count)) {
-      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-          builder,
-          " dispatch_issued_read_bytes=%" PRIu64
-          " dispatch_issued_write_bytes=%" PRIu64
-          " dispatch_issued_total_bytes=%" PRIu64,
-          dispatch_read_byte_count, dispatch_write_byte_count,
-          dispatch_total_byte_count));
+            dispatch_total_byte_count));
+      }
     }
   }
   IREE_RETURN_IF_ERROR(
@@ -4372,6 +4439,13 @@ loom_target_compile_report_format_source_low_memory_row_json(
   IREE_RETURN_IF_ERROR(
       loom_target_compile_report_format_source_low_memory_storage_json(
           row, stream, &first_field));
+  if (row->execution_count_plus_one !=
+          LOOM_TARGET_COMPILE_REPORT_SOURCE_LOW_MEMORY_EXECUTION_COUNT_PLUS_ONE_UNKNOWN &&
+      row->execution_count_plus_one != 2) {
+    IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
+        stream, &first_field, "execution_count",
+        row->execution_count_plus_one - 1));
+  }
   IREE_RETURN_IF_ERROR(loom_target_compile_report_format_memory_interval_json(
       &row->source_interval, stream, &first_field));
   return loom_output_stream_write_cstring(stream, "}");
@@ -4387,17 +4461,39 @@ loom_target_compile_report_format_source_low_memory_dispatch_issued_json(
           LOOM_TARGET_COMPILE_REPORT_WORKLOAD_DISPATCH_WORKITEM_COUNT)) {
     return iree_ok_status();
   }
+  if (loom_target_compile_report_source_low_memory_has_dynamic_evidence(
+          summary) &&
+      !loom_target_compile_report_source_low_memory_has_complete_dynamic_evidence(
+          summary)) {
+    return iree_ok_status();
+  }
+  const bool use_dynamic_issued_counts =
+      loom_target_compile_report_source_low_memory_has_dynamic_evidence(
+          summary);
+  const uint64_t issued_read_byte_count =
+      use_dynamic_issued_counts ? summary->dynamic_issued_read_byte_count
+                                : summary->issued_read_byte_count;
+  const uint64_t issued_write_byte_count =
+      use_dynamic_issued_counts ? summary->dynamic_issued_write_byte_count
+                                : summary->issued_write_byte_count;
+  const uint64_t issued_read_unknown_width_count =
+      use_dynamic_issued_counts
+          ? summary->dynamic_issued_read_unknown_width_count
+          : summary->issued_read_unknown_width_count;
+  const uint64_t issued_write_unknown_width_count =
+      use_dynamic_issued_counts
+          ? summary->dynamic_issued_write_unknown_width_count
+          : summary->issued_write_unknown_width_count;
   uint64_t read_byte_count = 0;
   const bool has_read_byte_count = loom_target_compile_report_checked_mul_u64(
-      summary->issued_read_byte_count, workload->dispatch_workitem_count,
+      issued_read_byte_count, workload->dispatch_workitem_count,
       &read_byte_count);
   uint64_t write_byte_count = 0;
   const bool has_write_byte_count = loom_target_compile_report_checked_mul_u64(
-      summary->issued_write_byte_count, workload->dispatch_workitem_count,
+      issued_write_byte_count, workload->dispatch_workitem_count,
       &write_byte_count);
-  const bool has_unknown_width_count =
-      summary->issued_read_unknown_width_count != 0 ||
-      summary->issued_write_unknown_width_count != 0;
+  const bool has_unknown_width_count = issued_read_unknown_width_count != 0 ||
+                                       issued_write_unknown_width_count != 0;
   if (!has_read_byte_count && !has_write_byte_count &&
       !has_unknown_width_count) {
     return iree_ok_status();
@@ -4424,10 +4520,10 @@ loom_target_compile_report_format_source_low_memory_dispatch_issued_json(
   }
   IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_nonzero_u64_field(
       stream, &first_dispatch_field, "read_unknown_width_count",
-      summary->issued_read_unknown_width_count));
+      issued_read_unknown_width_count));
   IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_nonzero_u64_field(
       stream, &first_dispatch_field, "write_unknown_width_count",
-      summary->issued_write_unknown_width_count));
+      issued_write_unknown_width_count));
   return loom_output_stream_write_cstring(stream, "}");
 }
 
@@ -4473,6 +4569,40 @@ loom_target_compile_report_format_source_low_memory_summary_fields_json(
   IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
       stream, inout_first_field, "issued_write_unknown_width_count",
       summary->issued_write_unknown_width_count));
+  if (loom_target_compile_report_source_low_memory_has_dynamic_evidence(
+          summary) &&
+      loom_target_compile_report_source_low_memory_has_dynamic_delta(summary)) {
+    IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
+        stream, inout_first_field, "exact_dynamic_packet_count",
+        summary->exact_dynamic_packet_count));
+    IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
+        stream, inout_first_field, "unknown_dynamic_packet_count",
+        summary->unknown_dynamic_packet_count));
+    IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
+        stream, inout_first_field, "dynamic_packet_count",
+        summary->dynamic_packet_count));
+    IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
+        stream, inout_first_field, "dynamic_source_byte_count",
+        summary->dynamic_source_byte_count));
+    IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
+        stream, inout_first_field, "dynamic_read_byte_count",
+        summary->dynamic_read_byte_count));
+    IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
+        stream, inout_first_field, "dynamic_write_byte_count",
+        summary->dynamic_write_byte_count));
+    IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
+        stream, inout_first_field, "dynamic_issued_read_byte_count",
+        summary->dynamic_issued_read_byte_count));
+    IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
+        stream, inout_first_field, "dynamic_issued_write_byte_count",
+        summary->dynamic_issued_write_byte_count));
+    IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
+        stream, inout_first_field, "dynamic_issued_read_unknown_width_count",
+        summary->dynamic_issued_read_unknown_width_count));
+    IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
+        stream, inout_first_field, "dynamic_issued_write_unknown_width_count",
+        summary->dynamic_issued_write_unknown_width_count));
+  }
   IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
       stream, inout_first_field, "contiguous_vector_packet_count",
       summary->contiguous_vector_packet_count));

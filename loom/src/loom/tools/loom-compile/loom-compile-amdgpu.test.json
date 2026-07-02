@@ -356,7 +356,7 @@
               "--backend=amdgpu-hal",
               "--target=gfx11-generic",
               "--output={tmp}/carried_loop_memory_economics_amdgpu.hsaco",
-              "--compile-report=summary",
+              "--compile-report=details",
               "--compile-report-output=-"
             ]
           },
@@ -375,9 +375,13 @@
                 "\"global_store_byte_count\":20",
                 "\"economics\":{\"memory\":{\"per_workitem_issued\":{\"read_bytes\":32,\"write_bytes\":20,\"total_bytes\":52",
                 "\"source_low\":{\"selected_op_count\":13,\"emitted_op_count\":27,\"count\":13,\"memory\":{\"packet_count\":3",
+                "\"exact_dynamic_packet_count\":3,\"unknown_dynamic_packet_count\":0,\"dynamic_packet_count\":9,\"dynamic_source_byte_count\":36,\"dynamic_read_byte_count\":16,\"dynamic_write_byte_count\":20",
+                "\"dynamic_issued_read_byte_count\":16,\"dynamic_issued_write_byte_count\":20",
                 "\"root_count\":2,\"roots\":[",
                 "\"source_root\":\"input\",\"source_root_argument_index\":0,\"memory_space\":\"global\",\"packet_count\":1,\"load_packet_count\":1",
                 "\"source_root\":\"output\",\"source_root_argument_index\":1,\"memory_space\":\"global\",\"packet_count\":2,\"load_packet_count\":0,\"store_packet_count\":2",
+                "\"memory_rows\":[{\"index\":0,\"function\":\"compile_report_carried_loop_memory_economics\",\"source_op\":\"view.load\"",
+                "\"execution_count\":4,\"source_interval\":{\"begin_min_bytes\":0,\"begin_max_bytes\":12",
                 "\"argument_count\":2,\"arguments\":["
               ]
             }

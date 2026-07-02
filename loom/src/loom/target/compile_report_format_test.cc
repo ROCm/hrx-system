@@ -59,6 +59,7 @@ static loom_target_compile_report_source_low_memory_row_t MakeMemoryRow(
   row.dynamic_stride_bytes = dynamic_stride_bytes;
   row.vector_lane_stride_bytes = vector_lane_stride_bytes;
   row.source_interval = source_interval;
+  row.execution_count_plus_one = 2;
   return row;
 }
 
@@ -820,6 +821,8 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
               /*.storage_rounding_policy=*/IREE_SVL("finite_only"),
               /*.storage_codebook_policy=*/IREE_SVL(""),
               /*.storage_sparsity_policy=*/IREE_SVL(""),
+              /*.source_interval=*/{},
+              /*.execution_count_plus_one=*/2,
           },
       };
   loom_target_compile_report_math_row_t math_legalization_rows[] = {

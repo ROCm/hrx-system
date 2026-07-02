@@ -345,7 +345,7 @@ static iree_status_t loom_amdgpu_record_memory_packet_report(
   };
   loom_amdgpu_memory_report_row_populate_storage_schema(context, source, &row);
   loom_amdgpu_memory_report_row_populate_source_interval(source, &row);
-  return loom_low_lower_record_memory_report_row(context, &row);
+  return loom_low_lower_record_memory_report_row(context, source_op, &row);
 }
 
 static iree_status_t loom_amdgpu_emit_memory_packet(
