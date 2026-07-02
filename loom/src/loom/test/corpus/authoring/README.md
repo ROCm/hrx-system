@@ -30,7 +30,7 @@ belong to `iree-benchmark-loom` flags or embedding APIs.
 | Local unroll intent | `ffn_gate_up_swiglu_q6q8.loom` keeps block/part loops structured and marks the tiny trip-count loops with `unroll`. |
 | Logical indexing | The examples use index/view math for logical rows, blocks, lanes, byte positions, and dense tensor coordinates. |
 | Dynamic case parameters | `mlp_down_projection_residual_bf16.loom` names `rows` on a `check.param.choice` and threads it through shapes, launch geometry, and the kernel ABI. |
-| Finite FP8/BF8 checkpoint storage | `fp8_finite_storage_decode.loom` puts `rounding=finite_only` on physical storage and materializes E4M3/BF8 rows into F32 and BF16 destinations, including scale-only BF16 decode. |
+| Finite FP8/BF8 checkpoint storage | `fp8_finite_storage_decode.loom` puts explicit rounding policy on physical storage and materializes E4M3/BF8 rows into F32 and BF16 destinations, including scale-only BF16 decode. |
 | Benchmark slices | `mlp_down_projection_residual_bf16.loom` has an anonymous full sweep plus named decode/full rows with assignment dictionaries. |
 | HIP C++ porting motifs | `hip/README.md` maps HIP/CUDA kernel habits to Loom source spellings, proof commands, diagnostics, and authoring-level report workflows. |
 | Packed field contracts | `hip/packed_field_contracts.loom` shows q2/q3/q4/q5/q6-style fields as explicit storage/decode/repack contracts instead of fake scalar element types. |
@@ -521,6 +521,15 @@ behavior. `finite_flush_subnormal` is only for storage whose physical payloads
 have already been flushed or are otherwise guaranteed not to contain subnormal
 values; it is a stronger content contract, not a request for the target decoder
 to repair contradictory bytes at load time.
+
+The distinction is visible in codegen on targets that construct FP8 fragments
+through software packets. `finite_only` removes NaN and infinity repair, but
+exact zero and subnormal payloads still require repair unless other value facts
+prove they cannot appear. `finite_flush_subnormal` lets those targets skip the
+subnormal side of that repair. Use the source-low memory report strategy key to
+confirm the selected route, such as
+`fp8_packed_bf16_decode_repair_zero_subnormal` versus
+`fp8_packed_bf16_decode_repair_zero`, instead of inferring it from source text.
 
 ```loom
 %weight_layout = encoding.layout.strided [1, %input_size] : encoding<layout>
