@@ -1921,6 +1921,150 @@ id4_pipeline_plan_statistics_t id4_pipeline_plan_statistics(
   return statistics;
 }
 
+static bool id4_pipeline_plan_region_window_has_prior_load_group(
+    const id4_pipeline_plan_t* plan, iree_host_size_t window_start_region,
+    iree_host_size_t current_region_index,
+    iree_host_size_t current_group_ordinal) {
+  const iree_host_size_t group_index =
+      plan->regions[current_region_index]
+          .parameter_load_groups[current_group_ordinal];
+  for (iree_host_size_t region_index = window_start_region;
+       region_index <= current_region_index; ++region_index) {
+    const id4_pipeline_region_plan_t* region = &plan->regions[region_index];
+    const iree_host_size_t group_ordinal_limit =
+        region_index == current_region_index
+            ? current_group_ordinal
+            : region->parameter_load_group_count;
+    for (iree_host_size_t group_ordinal = 0;
+         group_ordinal < group_ordinal_limit; ++group_ordinal) {
+      if (region->parameter_load_groups[group_ordinal] == group_index) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+static void id4_pipeline_plan_parameter_load_group_byte_statistics(
+    const id4_pipeline_plan_t* plan, id4_pipeline_parameter_load_group_t group,
+    iree_device_size_t* out_source_byte_length,
+    iree_device_size_t* out_target_byte_length,
+    iree_host_size_t* out_encode_load_step_count) {
+  iree_device_size_t source_byte_length = 0;
+  iree_device_size_t target_byte_length = 0;
+  iree_host_size_t encode_load_step_count = 0;
+  const iree_host_size_t step_limit = group.step_offset + group.step_count;
+  for (iree_host_size_t step_index = group.step_offset; step_index < step_limit;
+       ++step_index) {
+    const id4_pipeline_parameter_load_step_t* step =
+        &plan->parameter_load_steps[step_index];
+    target_byte_length += id4_pipeline_plan_load_step_target_length(plan, step);
+    if (id4_pipeline_plan_parameter_load_step_is_encode(step)) {
+      source_byte_length +=
+          id4_pipeline_plan_encoded_load_step_source_length(step);
+      ++encode_load_step_count;
+    } else {
+      source_byte_length +=
+          id4_pipeline_plan_direct_load_step_source_length(plan, step);
+    }
+  }
+  *out_source_byte_length = source_byte_length;
+  *out_target_byte_length = target_byte_length;
+  *out_encode_load_step_count = encode_load_step_count;
+}
+
+iree_status_t id4_pipeline_plan_parameter_window_statistics(
+    const id4_pipeline_plan_t* plan, iree_host_size_t region_window_size,
+    id4_pipeline_parameter_window_statistics_t* out_statistics) {
+  IREE_ASSERT_ARGUMENT(out_statistics);
+  memset(out_statistics, 0, sizeof(*out_statistics));
+  out_statistics->largest_load_group_index = IREE_HOST_SIZE_MAX;
+  if (!plan) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "plan is required");
+  }
+  if (region_window_size == 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "region window size must be non-zero");
+  }
+
+  id4_pipeline_parameter_window_statistics_t statistics;
+  memset(&statistics, 0, sizeof(statistics));
+  statistics.region_window_size = region_window_size;
+  statistics.largest_load_group_index = IREE_HOST_SIZE_MAX;
+  for (iree_host_size_t i = 0; i < plan->parameter_slab_count; ++i) {
+    statistics.full_slab_target_byte_length +=
+        plan->parameter_slabs[i].byte_length;
+  }
+
+  for (iree_host_size_t window_start_region = 0;
+       window_start_region < plan->region_count;
+       window_start_region += region_window_size) {
+    ++statistics.window_count;
+    const iree_host_size_t remaining_region_count =
+        plan->region_count - window_start_region;
+    const iree_host_size_t window_region_count =
+        iree_min(region_window_size, remaining_region_count);
+    const iree_host_size_t window_end_region =
+        window_start_region + window_region_count;
+
+    iree_device_size_t window_source_byte_length = 0;
+    iree_device_size_t window_target_byte_length = 0;
+    iree_host_size_t window_load_group_count = 0;
+    iree_host_size_t window_encode_load_step_count = 0;
+    for (iree_host_size_t region_index = window_start_region;
+         region_index < window_end_region; ++region_index) {
+      const id4_pipeline_region_plan_t* region = &plan->regions[region_index];
+      for (iree_host_size_t group_ordinal = 0;
+           group_ordinal < region->parameter_load_group_count;
+           ++group_ordinal) {
+        if (id4_pipeline_plan_region_window_has_prior_load_group(
+                plan, window_start_region, region_index, group_ordinal)) {
+          continue;
+        }
+        const iree_host_size_t group_index =
+            region->parameter_load_groups[group_ordinal];
+        id4_pipeline_parameter_load_group_t group;
+        IREE_RETURN_IF_ERROR(id4_pipeline_plan_parameter_load_group_at(
+            plan, group_index, &group));
+        iree_device_size_t group_source_byte_length = 0;
+        iree_device_size_t group_target_byte_length = 0;
+        iree_host_size_t group_encode_load_step_count = 0;
+        id4_pipeline_plan_parameter_load_group_byte_statistics(
+            plan, group, &group_source_byte_length, &group_target_byte_length,
+            &group_encode_load_step_count);
+        window_source_byte_length += group_source_byte_length;
+        window_target_byte_length += group_target_byte_length;
+        window_encode_load_step_count += group_encode_load_step_count;
+        ++window_load_group_count;
+        if (group_target_byte_length >
+            statistics.largest_load_group_target_byte_length) {
+          statistics.largest_load_group_target_byte_length =
+              group_target_byte_length;
+          statistics.largest_load_group_index = group_index;
+        }
+      }
+    }
+
+    statistics.peak_window_target_byte_length = iree_max(
+        statistics.peak_window_target_byte_length, window_target_byte_length);
+    statistics.peak_window_source_byte_length = iree_max(
+        statistics.peak_window_source_byte_length, window_source_byte_length);
+    statistics.total_window_target_byte_length += window_target_byte_length;
+    statistics.total_window_source_byte_length += window_source_byte_length;
+    statistics.peak_window_load_group_count = iree_max(
+        statistics.peak_window_load_group_count, window_load_group_count);
+    statistics.total_window_load_group_count += window_load_group_count;
+    statistics.peak_window_encode_load_step_count =
+        iree_max(statistics.peak_window_encode_load_step_count,
+                 window_encode_load_step_count);
+    statistics.total_window_encode_load_step_count +=
+        window_encode_load_step_count;
+  }
+
+  *out_statistics = statistics;
+  return iree_ok_status();
+}
+
 static iree_status_t id4_pipeline_plan_make_parameter_slab_loads(
     const id4_pipeline_plan_t* plan, iree_allocator_t host_allocator,
     id4_pipeline_parameter_slab_load_t** out_loads) {
@@ -2240,6 +2384,69 @@ id4_pipeline_plan_append_parameter_load_kind_statistics_json(
         (uint64_t)kind_statistics->target_byte_length));
   }
   return iree_string_builder_append_cstring(builder, "}");
+}
+
+static iree_status_t id4_pipeline_plan_append_parameter_window_statistics_json(
+    const id4_pipeline_plan_t* plan, iree_string_builder_t* builder) {
+  const iree_host_size_t candidate_window_sizes[] = {
+      1, 2, 4, 8, 16, plan->region_count,
+  };
+  iree_host_size_t emitted_window_sizes[IREE_ARRAYSIZE(candidate_window_sizes)];
+  iree_host_size_t emitted_window_size_count = 0;
+
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "["));
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(candidate_window_sizes);
+       ++i) {
+    const iree_host_size_t window_size = candidate_window_sizes[i];
+    if (window_size == 0 || window_size > plan->region_count) continue;
+    bool already_emitted = false;
+    for (iree_host_size_t j = 0; j < emitted_window_size_count; ++j) {
+      already_emitted =
+          already_emitted || emitted_window_sizes[j] == window_size;
+    }
+    if (already_emitted) continue;
+    emitted_window_sizes[emitted_window_size_count++] = window_size;
+
+    id4_pipeline_parameter_window_statistics_t statistics;
+    IREE_RETURN_IF_ERROR(id4_pipeline_plan_parameter_window_statistics(
+        plan, window_size, &statistics));
+    if (emitted_window_size_count != 1) {
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, ","));
+    }
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+        builder,
+        "{\"region_window_size\":%" PRIhsz ",\"window_count\":%" PRIhsz
+        ",\"full_slab_target_byte_length\":%" PRIu64
+        ",\"peak_window_target_byte_length\":%" PRIu64
+        ",\"peak_window_source_byte_length\":%" PRIu64
+        ",\"total_window_target_byte_length\":%" PRIu64
+        ",\"total_window_source_byte_length\":%" PRIu64
+        ",\"peak_window_load_group_count\":%" PRIhsz
+        ",\"total_window_load_group_count\":%" PRIhsz
+        ",\"peak_window_encode_load_step_count\":%" PRIhsz
+        ",\"total_window_encode_load_step_count\":%" PRIhsz
+        ",\"largest_load_group_target_byte_length\":%" PRIu64
+        ",\"largest_load_group_index\":",
+        statistics.region_window_size, statistics.window_count,
+        (uint64_t)statistics.full_slab_target_byte_length,
+        (uint64_t)statistics.peak_window_target_byte_length,
+        (uint64_t)statistics.peak_window_source_byte_length,
+        (uint64_t)statistics.total_window_target_byte_length,
+        (uint64_t)statistics.total_window_source_byte_length,
+        statistics.peak_window_load_group_count,
+        statistics.total_window_load_group_count,
+        statistics.peak_window_encode_load_step_count,
+        statistics.total_window_encode_load_step_count,
+        (uint64_t)statistics.largest_load_group_target_byte_length));
+    if (statistics.largest_load_group_index == IREE_HOST_SIZE_MAX) {
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "null"));
+    } else {
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+          builder, "%" PRIhsz, statistics.largest_load_group_index));
+    }
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "}"));
+  }
+  return iree_string_builder_append_cstring(builder, "]");
 }
 
 static iree_status_t id4_pipeline_plan_append_region_statistics_json(
@@ -2620,6 +2827,10 @@ iree_status_t id4_pipeline_plan_format_json(const id4_pipeline_plan_t* plan,
       id4_pipeline_plan_append_parameter_load_kind_statistics_json(
           builder, &statistics));
   IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "}"));
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(
+      builder, ",\"parameter_window_statistics\":"));
+  IREE_RETURN_IF_ERROR(
+      id4_pipeline_plan_append_parameter_window_statistics_json(plan, builder));
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_cstring(builder, ",\"placements\":["));
   for (iree_host_size_t i = 0; i < plan->placement_count; ++i) {
