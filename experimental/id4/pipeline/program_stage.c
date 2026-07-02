@@ -284,17 +284,7 @@ static iree_status_t id4_pipeline_program_stage_make_binding_layout(
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "program stage boundary binding slot overflow");
   }
-  const uint32_t diagnostic_tap_binding_slot_base =
-      next_binding_slot + (uint32_t)counts.import_count;
-  if (diagnostic_tap_count > UINT32_MAX ||
-      diagnostic_tap_binding_slot_base >
-          UINT32_MAX - (uint32_t)diagnostic_tap_count) {
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "program stage diagnostic tap binding slot overflow");
-  }
-  next_binding_slot =
-      diagnostic_tap_binding_slot_base + (uint32_t)diagnostic_tap_count;
+  next_binding_slot += (uint32_t)counts.import_count;
   const bool needs_shared_transient_slot =
       id4_pipeline_program_stage_needs_shared_transient_slot(options);
   uint32_t shared_binding_slot = next_binding_slot;
@@ -310,11 +300,16 @@ static iree_status_t id4_pipeline_program_stage_make_binding_layout(
                             "program stage local binding slot overflow");
   }
   const uint32_t local_binding_slot = next_binding_slot++;
-  iree_host_size_t binding_capacity = 0;
-  if (!iree_host_size_checked_add(local_binding_slot, 1, &binding_capacity)) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "program stage binding capacity overflow");
+  const uint32_t diagnostic_tap_binding_slot_base = next_binding_slot;
+  if (diagnostic_tap_count > UINT32_MAX ||
+      diagnostic_tap_binding_slot_base >
+          UINT32_MAX - (uint32_t)diagnostic_tap_count) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "program stage diagnostic tap binding slot overflow");
   }
+  next_binding_slot += (uint32_t)diagnostic_tap_count;
+  const iree_host_size_t binding_capacity = next_binding_slot;
 
   out_layout->diagnostic_tap_binding_slot_base =
       diagnostic_tap_binding_slot_base;

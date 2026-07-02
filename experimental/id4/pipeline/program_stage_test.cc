@@ -231,6 +231,14 @@ static id4_pipeline_program_t* CreateCrossDispatchTransientProgram() {
   };
   IREE_CHECK_OK(id4_pipeline_program_dispatch_loom(builder, &producer_options));
 
+  id4_pipeline_program_tap_options_t hidden_tap_options = {
+      /*.structure_size=*/sizeof(hidden_tap_options),
+      /*.next=*/nullptr,
+      /*.name=*/IREE_SV("cross_dispatch.hidden"),
+      /*.tensor=*/hidden,
+  };
+  IREE_CHECK_OK(id4_pipeline_program_tap(builder, &hidden_tap_options));
+
   id4_pipeline_program_dispatch_binding_t consumer_bindings[] = {
       id4_pipeline_program_read(hidden),
       id4_pipeline_program_write(output),
@@ -248,6 +256,14 @@ static id4_pipeline_program_t* CreateCrossDispatchTransientProgram() {
       /*.bindings=*/consumer_bindings,
   };
   IREE_CHECK_OK(id4_pipeline_program_dispatch_loom(builder, &consumer_options));
+
+  id4_pipeline_program_tap_options_t output_tap_options = {
+      /*.structure_size=*/sizeof(output_tap_options),
+      /*.next=*/nullptr,
+      /*.name=*/IREE_SV("cross_dispatch.output"),
+      /*.tensor=*/output,
+  };
+  IREE_CHECK_OK(id4_pipeline_program_tap(builder, &output_tap_options));
 
   id4_pipeline_program_export_options_t export_options = {
       /*.structure_size=*/sizeof(export_options),
@@ -396,6 +412,85 @@ TEST(ProgramStage, PromotesImplicitCrossDispatchTransientsToSharedSlab) {
             id4_pipeline_plan_boundary_tensor_count(plan) + 1);
 
   id4_pipeline_plan_release(plan);
+  id4_pipeline_program_release(program);
+  iree_hal_device_group_release(device_group);
+}
+
+TEST(ProgramStage, DiagnosticTapsDoNotRenumberProductionBindings) {
+  iree_hal_device_group_t* device_group = CreateLocalSyncDeviceGroup();
+  id4_pipeline_program_t* program = CreateCrossDispatchTransientProgram();
+
+  id4_pipeline_diagnostics_sink_t diagnostics_sink;
+  id4_pipeline_diagnostics_sink_initialize_ignore(&diagnostics_sink);
+
+  id4_pipeline_stage_plan_options_t base_stage_options =
+      MakeStagePlanOptions(&diagnostics_sink);
+  base_stage_options.flags = ID4_PIPELINE_STAGE_PLAN_FLAG_REGION_PER_DISPATCH;
+  id4_pipeline_program_stage_plan_options_t base_options =
+      MakeProgramStagePlanOptions(&base_stage_options, program, device_group);
+
+  id4_pipeline_plan_t* base_plan = nullptr;
+  IREE_ASSERT_OK(id4_pipeline_program_stage_create_plan(
+      &base_options, iree_allocator_system(), &base_plan));
+
+  const id4_pipeline_shared_tensor_plan_t* base_shared_tensor =
+      id4_pipeline_plan_shared_tensor_at(base_plan, 0);
+  ASSERT_NE(base_shared_tensor, nullptr);
+  const id4_pipeline_memory_slab_plan_t* base_shared_slab =
+      id4_pipeline_plan_memory_slab_at(base_plan,
+                                       base_shared_tensor->memory_slab_index);
+  ASSERT_NE(base_shared_slab, nullptr);
+  const id4_pipeline_region_plan_t* base_region =
+      id4_pipeline_plan_region_at(base_plan, 0);
+  ASSERT_NE(base_region, nullptr);
+
+  const iree_string_view_t diagnostic_tap_names[] = {
+      IREE_SV("cross_dispatch.hidden"),
+      IREE_SV("cross_dispatch.output"),
+  };
+  id4_pipeline_stage_plan_options_t tap_stage_options =
+      MakeStagePlanOptions(&diagnostics_sink);
+  tap_stage_options.flags =
+      ID4_PIPELINE_STAGE_PLAN_FLAG_REGION_PER_DISPATCH |
+      ID4_PIPELINE_STAGE_PLAN_FLAG_CAPTURE_DIAGNOSTIC_TAPS;
+  tap_stage_options.diagnostic_tap_names = (iree_string_view_list_t){
+      IREE_ARRAYSIZE(diagnostic_tap_names),
+      diagnostic_tap_names,
+  };
+  id4_pipeline_program_stage_plan_options_t tap_options =
+      MakeProgramStagePlanOptions(&tap_stage_options, program, device_group);
+
+  id4_pipeline_plan_t* tap_plan = nullptr;
+  IREE_ASSERT_OK(id4_pipeline_program_stage_create_plan(
+      &tap_options, iree_allocator_system(), &tap_plan));
+
+  const id4_pipeline_shared_tensor_plan_t* tap_shared_tensor =
+      id4_pipeline_plan_shared_tensor_at(tap_plan, 0);
+  ASSERT_NE(tap_shared_tensor, nullptr);
+  const id4_pipeline_memory_slab_plan_t* tap_shared_slab =
+      id4_pipeline_plan_memory_slab_at(tap_plan,
+                                       tap_shared_tensor->memory_slab_index);
+  ASSERT_NE(tap_shared_slab, nullptr);
+  const id4_pipeline_region_plan_t* tap_region =
+      id4_pipeline_plan_region_at(tap_plan, 0);
+  ASSERT_NE(tap_region, nullptr);
+  ASSERT_EQ(id4_pipeline_plan_diagnostic_tap_count(tap_plan), 2u);
+
+  EXPECT_EQ(tap_shared_slab->binding_slot, base_shared_slab->binding_slot);
+  EXPECT_EQ(tap_region->local_binding_slot, base_region->local_binding_slot);
+  EXPECT_EQ(tap_region->binding_capacity,
+            base_region->binding_capacity +
+                id4_pipeline_plan_diagnostic_tap_count(tap_plan));
+  for (iree_host_size_t i = 0;
+       i < id4_pipeline_plan_diagnostic_tap_count(tap_plan); ++i) {
+    const id4_pipeline_diagnostic_tap_plan_t* tap =
+        id4_pipeline_plan_diagnostic_tap_at(tap_plan, i);
+    ASSERT_NE(tap, nullptr);
+    EXPECT_GE(tap->binding_slot, base_region->binding_capacity);
+  }
+
+  id4_pipeline_plan_release(tap_plan);
+  id4_pipeline_plan_release(base_plan);
   id4_pipeline_program_release(program);
   iree_hal_device_group_release(device_group);
 }

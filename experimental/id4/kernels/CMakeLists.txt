@@ -4625,6 +4625,30 @@ iree_native_test(
 
 iree_native_test(
   NAME
+    "vae_group_norm_silu_ic4_oc8_flat_bf16_repeat_exact_flux2_128_decode_64x64_256_channel_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_oc8_bf16.loom}}"
+    "--benchmark=@id4_vae_group_norm_silu_ic4_oc8_flat_bf16_repeat_exact_flux2_128_decode_64x64_256_channel"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.vae.group_norm.width=64"
+    "--config=id4.vae.group_norm.height=64"
+    "--config=id4.vae.group_norm.channel_count=256"
+    "--config=id4.vae.group_norm.group_count=32"
+    "--config=id4.vae.group_norm.channels_per_group=8"
+    "--config=id4.vae.group_norm.batch_count=1"
+    "--config=id4.vae.group_norm.group_element_count=32768"
+    "--config=id4.vae.group_norm.output_element_count=1048576"
+    "--config=id4.vae.group_norm.output_channel_tile_count=32"
+    "--config=id4.vae.group_norm.output_tile_element_count=131072"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
     "vae_group_norm_ic4_oc8_flat_bf16_small_plan_test"
   ARGS
     "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_oc8_bf16.loom}}"
@@ -17953,6 +17977,34 @@ iree_native_test(
     "--config=id4.vae.group_norm.output_element_count=4194304"
     "--config=id4.vae.group_norm.output_channel_tile_count=32"
     "--config=id4.vae.group_norm.output_tile_element_count=524288"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
+    "vae_group_norm_silu_ic4_oc8_flat_bf16_repeat_exact_flux2_128_decode_64x64_256_channel_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/vae/group_norm_oc8_bf16.loom}}"
+    "--case=@id4_vae_group_norm_silu_ic4_oc8_flat_bf16_repeat_exact_flux2_128_decode_64x64_256_channel_case"
+    "--device=amdgpu://0"
+    "--config=id4.vae.group_norm.width=64"
+    "--config=id4.vae.group_norm.height=64"
+    "--config=id4.vae.group_norm.channel_count=256"
+    "--config=id4.vae.group_norm.group_count=32"
+    "--config=id4.vae.group_norm.channels_per_group=8"
+    "--config=id4.vae.group_norm.batch_count=1"
+    "--config=id4.vae.group_norm.group_element_count=32768"
+    "--config=id4.vae.group_norm.output_element_count=1048576"
+    "--config=id4.vae.group_norm.output_channel_tile_count=32"
+    "--config=id4.vae.group_norm.output_tile_element_count=131072"
   SRC
     loom::tools::iree-test-loom
   LABELS

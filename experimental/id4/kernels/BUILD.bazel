@@ -2983,6 +2983,24 @@ _KERNEL_CASES = [
         "target_name": "vae_group_norm_silu_ic4_oc8_flat_bf16_flux2_256_channel",
     },
     {
+        "actual_case": "@id4_vae_group_norm_silu_ic4_oc8_flat_bf16_repeat_exact_flux2_128_decode_64x64_256_channel_case",
+        "benchmark": "@id4_vae_group_norm_silu_ic4_oc8_flat_bf16_repeat_exact_flux2_128_decode_64x64_256_channel",
+        "configs": [
+            "--config=id4.vae.group_norm.width=64",
+            "--config=id4.vae.group_norm.height=64",
+            "--config=id4.vae.group_norm.channel_count=256",
+            "--config=id4.vae.group_norm.group_count=32",
+            "--config=id4.vae.group_norm.channels_per_group=8",
+            "--config=id4.vae.group_norm.batch_count=1",
+            "--config=id4.vae.group_norm.group_element_count=32768",
+            "--config=id4.vae.group_norm.output_element_count=1048576",
+            "--config=id4.vae.group_norm.output_channel_tile_count=32",
+            "--config=id4.vae.group_norm.output_tile_element_count=131072",
+        ],
+        "source": "vae/group_norm_oc8_bf16.loom",
+        "target_name": "vae_group_norm_silu_ic4_oc8_flat_bf16_repeat_exact_flux2_128_decode_64x64_256_channel",
+    },
+    {
         "actual_case": "@id4_vae_group_norm_ic4_oc8_flat_bf16_small_case",
         "benchmark": "@id4_vae_group_norm_ic4_oc8_flat_bf16_small",
         "configs": [

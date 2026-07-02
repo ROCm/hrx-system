@@ -211,6 +211,19 @@ check.case public @id4_vae_group_norm_silu_ic4_oc8_flat_bf16_flux2_256_channel_c
   check.return
 }
 
+check.case public @id4_vae_group_norm_silu_ic4_oc8_flat_bf16_repeat_exact_flux2_128_decode_64x64_256_channel_case {
+  %input = check.generate.iota offset(-1.0) step(0.000244140625) : tensor<64x64x256x1xbf16>
+  %weight = check.generate.iota offset(0.5) step(0.001953125) : tensor<256xbf16>
+  %bias = check.generate.iota offset(-0.25) step(0.0009765625) : tensor<256xbf16>
+  %stats = check.generate.iota offset(0.125) step(0.0009765625) : tensor<1x32x2xf32>
+  %output0 = check.generate.fill value(0.0) : tensor<64x64x256x1xbf16>
+  %output1 = check.generate.fill value(0.0) : tensor<64x64x256x1xbf16>
+  func.call @id4_vae_group_norm_silu_ic4_oc8_flat_bf16(%input, %weight, %bias, %stats, %output0) : (tensor<64x64x256x1xbf16>, tensor<256xbf16>, tensor<256xbf16>, tensor<1x32x2xf32>, tensor<64x64x256x1xbf16>)
+  func.call @id4_vae_group_norm_silu_ic4_oc8_flat_bf16(%input, %weight, %bias, %stats, %output1) : (tensor<64x64x256x1xbf16>, tensor<256xbf16>, tensor<256xbf16>, tensor<1x32x2xf32>, tensor<64x64x256x1xbf16>)
+  check.expect.close actual(%output1) expected(%output0) atol(0.0) rtol(0.0) nan(same) : tensor<64x64x256x1xbf16>
+  check.return
+}
+
 check.case public @id4_vae_group_norm_ic4_oc8_flat_bf16_flux2_256_channel_case {
   %input = check.generate.fill value(0.0) : tensor<128x128x256x1xbf16>
   %weight = check.generate.fill value(2.0) : tensor<256xbf16>
@@ -226,6 +239,8 @@ check.case public @id4_vae_group_norm_ic4_oc8_flat_bf16_flux2_256_channel_case {
 check.benchmark<@id4_vae_group_norm_silu_ic4_oc8_flat_bf16_small_case> @id4_vae_group_norm_silu_ic4_oc8_flat_bf16_small
 
 check.benchmark<@id4_vae_group_norm_silu_ic4_oc8_flat_bf16_flux2_256_channel_case> @id4_vae_group_norm_silu_ic4_oc8_flat_bf16_flux2_256_channel
+
+check.benchmark<@id4_vae_group_norm_silu_ic4_oc8_flat_bf16_repeat_exact_flux2_128_decode_64x64_256_channel_case> @id4_vae_group_norm_silu_ic4_oc8_flat_bf16_repeat_exact_flux2_128_decode_64x64_256_channel
 
 check.benchmark<@id4_vae_group_norm_ic4_oc8_flat_bf16_small_case> @id4_vae_group_norm_ic4_oc8_flat_bf16_small
 
