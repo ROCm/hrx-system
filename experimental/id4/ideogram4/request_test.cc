@@ -260,22 +260,28 @@ TEST(Ideogram4RequestTest, LowersPromptToQwenInputTensors) {
   options.request = &request.value;
   options.tokenizer_flags = IREE_TOKENIZER_ENCODE_FLAG_NONE;
   options.max_token_count = 128;
+  options.token_capacity = 128;
   options.vocab_size = TokenizerVocabSize(tokenizer.get());
 
   ScopedQwenInputs inputs;
   IREE_ASSERT_OK(id4_ideogram4_request_lower_qwen_inputs(
       &options, iree_allocator_system(), &inputs.value));
   ASSERT_GT(inputs.value.token_count, 3u);
+  EXPECT_EQ(inputs.value.token_capacity, 128u);
   for (uint32_t i = 0; i < inputs.value.token_count; ++i) {
     EXPECT_EQ(inputs.value.token_weights[i], 1.0f);
   }
   const float future_token_mask = -FLT_MAX / 4.0f;
   for (uint32_t query = 0; query < inputs.value.token_count; ++query) {
     for (uint32_t key = 0; key < inputs.value.token_count; ++key) {
-      EXPECT_EQ(
-          inputs.value.attention_mask[query * inputs.value.token_count + key],
-          key <= query ? 0.0f : future_token_mask);
+      EXPECT_EQ(inputs.value
+                    .attention_mask[query * inputs.value.token_capacity + key],
+                key <= query ? 0.0f : future_token_mask);
     }
+  }
+  for (uint32_t key = inputs.value.token_count;
+       key < inputs.value.token_capacity; ++key) {
+    EXPECT_EQ(inputs.value.attention_mask[key], future_token_mask);
   }
 
   uint32_t counted_token_count = 0;
@@ -298,6 +304,7 @@ TEST(Ideogram4RequestTest, RejectsTokenOverflow) {
   options.request = &request.value;
   options.tokenizer_flags = IREE_TOKENIZER_ENCODE_FLAG_NONE;
   options.max_token_count = 1;
+  options.token_capacity = 1;
   options.vocab_size = TokenizerVocabSize(tokenizer.get());
 
   ScopedQwenInputs inputs;
@@ -320,6 +327,7 @@ TEST(Ideogram4RequestTest, RejectsTokenIdOutsideModelVocab) {
   options.request = &request.value;
   options.tokenizer_flags = IREE_TOKENIZER_ENCODE_FLAG_NONE;
   options.max_token_count = 128;
+  options.token_capacity = 128;
   options.vocab_size = 1;
 
   ScopedQwenInputs inputs;

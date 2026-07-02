@@ -246,6 +246,8 @@ struct id4_ideogram4_generation_execution_t {
   id4_ideogram4_generation_bundle_t* bundle;
   // Deferred parameter load lookahead selected for stage issues.
   iree_host_size_t parameter_load_prefetch_region_distance;
+  // Stage issue flags forwarded to every coarse stage submission.
+  id4_pipeline_stage_issue_flags_t stage_issue_flags;
   // Lowered Qwen prompt inputs used by the conditioning phase.
   id4_ideogram4_qwen_inputs_t qwen_inputs;
   // Lowered DiT conditioning and guidance inputs used by the denoise phase.

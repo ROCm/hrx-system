@@ -112,6 +112,9 @@ typedef struct id4_ideogram4_generation_plan_policy_t {
   id4_vae_tiling_config_t vae_tiling;
 } id4_ideogram4_generation_plan_policy_t;
 
+// Bitmask selecting coarse generation stage bundles.
+typedef uint32_t id4_ideogram4_generation_resident_stage_mask_t;
+
 // Diagnostic taps requested from one coarse generation stage.
 typedef struct id4_ideogram4_generation_stage_diagnostic_tap_list_t {
   // Stable stage key from generation-plan JSON.
@@ -134,6 +137,8 @@ typedef struct id4_ideogram4_generation_plan_options_t {
   iree_tokenizer_encode_flags_t tokenizer_flags;
   // Target and representation policy for this generation plan.
   id4_ideogram4_generation_plan_policy_t policy;
+  // Coarse stages planned with one semantic dispatch per executable region.
+  id4_ideogram4_generation_resident_stage_mask_t region_per_dispatch_stage_mask;
   // Device index within the session device group used by every stage plan.
   iree_host_size_t device_index;
   // Queue affinity used by every stage plan.
@@ -252,9 +257,6 @@ typedef enum id4_ideogram4_generation_issue_policy_e {
   // heavyweight stage is prepared.
   ID4_IDEOGRAM4_GENERATION_ISSUE_POLICY_STAGE_SERIAL = 1,
 } id4_ideogram4_generation_issue_policy_t;
-
-// Bitmask selecting coarse stage bundles retained across generation issues.
-typedef uint32_t id4_ideogram4_generation_resident_stage_mask_t;
 
 // Coarse generation stage bundles that may be retained.
 typedef enum id4_ideogram4_generation_resident_stage_bit_e {
@@ -411,6 +413,8 @@ typedef struct id4_ideogram4_generation_issue_options_t {
   iree_tokenizer_encode_flags_t tokenizer_flags;
   // Policy controlling how the full generation is submitted.
   id4_ideogram4_generation_issue_policy_t issue_policy;
+  // Stage issue flags forwarded to each coarse generation stage.
+  id4_pipeline_stage_issue_flags_t stage_issue_flags;
   // Number of future regions whose deferred parameter load groups may be
   // submitted before the current region is issued.
   iree_host_size_t parameter_load_prefetch_region_distance;
@@ -472,6 +476,8 @@ typedef struct id4_ideogram4_generation_phase_issue_options_t {
   const void* next;
   // Semaphores that phase issue waits on before queueing phase work.
   iree_hal_semaphore_list_t wait_semaphore_list;
+  // Stage issue flags forwarded to each coarse generation stage in the phase.
+  id4_pipeline_stage_issue_flags_t stage_issue_flags;
   // Number of future regions whose deferred parameter load groups may be
   // submitted before the current region is issued.
   iree_host_size_t parameter_load_prefetch_region_distance;

@@ -100,6 +100,12 @@ IREE_FLAG(string, dump_plan, "",
           "Path to write the structured pipeline plan JSON.");
 IREE_FLAG(string, dump_diagnostics, "",
           "Directory for loomc, HAL, tensor, and stage diagnostics.");
+IREE_FLAG(bool, diagnostic_wait_after_each_region, false,
+          "Wait after every scheduler-visible internal region and emit "
+          "completion diagnostics. This serializes execution.");
+IREE_FLAG(string, diagnostic_region_per_dispatch_stages, "",
+          "Comma-separated stage names to plan with one semantic dispatch per "
+          "executable region for fault-localization diagnostics.");
 IREE_FLAG(string, dump_result_summary, "",
           "Path to write final latent and decoded image F32 summary JSON.");
 IREE_FLAG(string, dump_result_tensors, "",
@@ -536,20 +542,20 @@ static id4_ideogram4_generation_issue_policy_t id4_cli_generation_issue_policy(
              : ID4_IDEOGRAM4_GENERATION_ISSUE_POLICY_PHASE_CONCURRENT;
 }
 
-static iree_status_t id4_cli_parse_generation_resident_stage_mask(
+static iree_status_t id4_cli_parse_generation_stage_mask(
+    iree_string_view_t value, iree_string_view_t flag_name,
     id4_ideogram4_generation_resident_stage_mask_t* out_stage_mask) {
   IREE_ASSERT_ARGUMENT(out_stage_mask);
   *out_stage_mask = ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_NONE;
-  iree_string_view_t remaining = iree_string_view_trim(
-      iree_make_cstring_view(FLAG_generation_resident_stage_bundles));
+  iree_string_view_t remaining = iree_string_view_trim(value);
   while (!iree_string_view_is_empty(remaining)) {
     iree_string_view_t stage_name = iree_string_view_empty();
     iree_string_view_split(remaining, ',', &stage_name, &remaining);
     stage_name = iree_string_view_trim(stage_name);
     if (iree_string_view_is_empty(stage_name)) {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "--generation_resident_stage_bundles contains an empty stage name");
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "%.*s contains an empty stage name",
+                              (int)flag_name.size, flag_name.data);
     }
     if (iree_string_view_equal(stage_name, IREE_SV("all"))) {
       *out_stage_mask |= ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_ALL;
@@ -570,14 +576,21 @@ static iree_status_t id4_cli_parse_generation_resident_stage_mask(
     } else if (iree_string_view_equal(stage_name, IREE_SV("decode"))) {
       *out_stage_mask |= ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_DECODE;
     } else {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "unknown --generation_resident_stage_bundles value '%.*s'",
-          (int)stage_name.size, stage_name.data);
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "unknown %.*s value '%.*s'", (int)flag_name.size,
+                              flag_name.data, (int)stage_name.size,
+                              stage_name.data);
     }
     remaining = iree_string_view_trim(remaining);
   }
   return iree_ok_status();
+}
+
+static iree_status_t id4_cli_parse_generation_resident_stage_mask(
+    id4_ideogram4_generation_resident_stage_mask_t* out_stage_mask) {
+  return id4_cli_parse_generation_stage_mask(
+      iree_make_cstring_view(FLAG_generation_resident_stage_bundles),
+      IREE_SV("--generation_resident_stage_bundles"), out_stage_mask);
 }
 
 static iree_status_t id4_cli_resolve_generation_residency(
@@ -1420,6 +1433,7 @@ static iree_status_t id4_cli_issue_generation_phase(
     id4_ideogram4_generation_phase_bundle_t* phase_bundle,
     iree_hal_semaphore_t* wait_semaphore, uint64_t wait_payload_value,
     iree_hal_semaphore_t* signal_semaphore, uint64_t signal_payload_value,
+    id4_pipeline_stage_issue_flags_t stage_issue_flags,
     iree_host_size_t parameter_load_prefetch_region_distance,
     id4_pipeline_diagnostics_sink_t* diagnostics_sink) {
   iree_hal_semaphore_t* wait_semaphore_storage = NULL;
@@ -1437,6 +1451,7 @@ static iree_status_t id4_cli_issue_generation_phase(
   memset(&issue_options, 0, sizeof(issue_options));
   issue_options.structure_size = sizeof(issue_options);
   issue_options.wait_semaphore_list = wait_list;
+  issue_options.stage_issue_flags = stage_issue_flags;
   issue_options.parameter_load_prefetch_region_distance =
       parameter_load_prefetch_region_distance;
   issue_options.signal_semaphore_list = signal_list;
@@ -1456,6 +1471,7 @@ static iree_status_t id4_cli_prepare_issue_release_generation_phase(
     uint64_t* inout_prepare_payload_value,
     iree_hal_semaphore_t* completion_semaphore,
     uint64_t* inout_completion_payload_value,
+    id4_pipeline_stage_issue_flags_t stage_issue_flags,
     iree_host_size_t parameter_load_prefetch_region_distance,
     id4_pipeline_diagnostics_sink_t* diagnostics_sink) {
   id4_ideogram4_generation_phase_bundle_t* phase_bundle = NULL;
@@ -1474,7 +1490,7 @@ static iree_status_t id4_cli_prepare_issue_release_generation_phase(
     status = id4_cli_issue_generation_phase(
         execution, phase_bundle, prepare_semaphore,
         *inout_prepare_payload_value, completion_semaphore,
-        ++*inout_completion_payload_value,
+        ++*inout_completion_payload_value, stage_issue_flags,
         parameter_load_prefetch_region_distance, diagnostics_sink);
     if (iree_status_is_ok(status)) {
       status = id4_cli_emit_timing(diagnostics_sink, issue_event_name,
@@ -1509,6 +1525,7 @@ static iree_status_t id4_cli_issue_generation_full(
     id4_ideogram4_generation_issue_policy_t issue_policy,
     iree_hal_semaphore_list_t prepare_wait_list,
     iree_hal_semaphore_list_t completion_signal_list,
+    id4_pipeline_stage_issue_flags_t stage_issue_flags,
     iree_host_size_t parameter_load_prefetch_region_distance,
     id4_pipeline_diagnostics_sink_t* diagnostics_sink,
     id4_ideogram4_generation_execution_t** out_execution) {
@@ -1519,6 +1536,7 @@ static iree_status_t id4_cli_issue_generation_full(
   issue_options.tokenizer = tokenizer;
   issue_options.tokenizer_flags = IREE_TOKENIZER_ENCODE_FLAG_NONE;
   issue_options.issue_policy = issue_policy;
+  issue_options.stage_issue_flags = stage_issue_flags;
   issue_options.parameter_load_prefetch_region_distance =
       parameter_load_prefetch_region_distance;
   issue_options.wait_semaphore_list = prepare_wait_list;
@@ -1535,6 +1553,7 @@ static iree_status_t id4_cli_issue_generation_phases(
     uint64_t* inout_prepare_payload_value,
     iree_hal_semaphore_t* completion_semaphore,
     uint64_t* inout_completion_payload_value,
+    id4_pipeline_stage_issue_flags_t stage_issue_flags,
     iree_host_size_t parameter_load_prefetch_region_distance,
     id4_pipeline_diagnostics_sink_t* diagnostics_sink,
     id4_ideogram4_generation_execution_t** out_execution) {
@@ -1577,8 +1596,8 @@ static iree_status_t id4_cli_issue_generation_phases(
         IREE_SV("cli.wait_conditioning"), IREE_SV("cli.release_conditioning"),
         prepare_semaphore, *inout_prepare_payload_value, prepare_semaphore,
         inout_prepare_payload_value, completion_semaphore,
-        inout_completion_payload_value, parameter_load_prefetch_region_distance,
-        diagnostics_sink);
+        inout_completion_payload_value, stage_issue_flags,
+        parameter_load_prefetch_region_distance, diagnostics_sink);
   }
   if (iree_status_is_ok(status)) {
     status = id4_cli_prepare_issue_release_generation_phase(
@@ -1587,8 +1606,8 @@ static iree_status_t id4_cli_issue_generation_phases(
         IREE_SV("cli.wait_denoise"), IREE_SV("cli.release_denoise"),
         completion_semaphore, *inout_completion_payload_value,
         prepare_semaphore, inout_prepare_payload_value, completion_semaphore,
-        inout_completion_payload_value, parameter_load_prefetch_region_distance,
-        diagnostics_sink);
+        inout_completion_payload_value, stage_issue_flags,
+        parameter_load_prefetch_region_distance, diagnostics_sink);
   }
   if (iree_status_is_ok(status)) {
     status = id4_cli_prepare_issue_release_generation_phase(
@@ -1597,8 +1616,8 @@ static iree_status_t id4_cli_issue_generation_phases(
         IREE_SV("cli.wait_decode"), IREE_SV("cli.release_decode"),
         completion_semaphore, *inout_completion_payload_value,
         prepare_semaphore, inout_prepare_payload_value, completion_semaphore,
-        inout_completion_payload_value, parameter_load_prefetch_region_distance,
-        diagnostics_sink);
+        inout_completion_payload_value, stage_issue_flags,
+        parameter_load_prefetch_region_distance, diagnostics_sink);
   }
   if (iree_status_is_ok(status)) {
     *out_execution = execution;
@@ -1799,6 +1818,9 @@ static iree_status_t id4_cli_run_generation_dry_run(
   id4_cli_generation_residency_request_mode_t generation_residency_mode =
       ID4_CLI_GENERATION_RESIDENCY_REQUEST_ISSUE_PHASES;
   iree_host_size_t parameter_load_prefetch_region_distance = 0;
+  id4_ideogram4_generation_resident_stage_mask_t
+      region_per_dispatch_stage_mask =
+          ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_NONE;
   id4_ideogram4_generation_resident_stage_mask_t requested_stage_mask =
       ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_NONE;
 
@@ -1822,6 +1844,12 @@ static iree_status_t id4_cli_run_generation_dry_run(
   }
   if (iree_status_is_ok(status)) {
     status = id4_cli_parse_request(host_allocator, &request);
+  }
+  if (iree_status_is_ok(status)) {
+    status = id4_cli_parse_generation_stage_mask(
+        iree_make_cstring_view(FLAG_diagnostic_region_per_dispatch_stages),
+        IREE_SV("--diagnostic_region_per_dispatch_stages"),
+        &region_per_dispatch_stage_mask);
   }
   if (iree_status_is_ok(status)) {
     status = id4_cli_parse_diagnostic_taps(host_allocator, &diagnostic_taps);
@@ -1856,6 +1884,8 @@ static iree_status_t id4_cli_run_generation_dry_run(
     plan_options.tokenizer = tokenizer;
     plan_options.tokenizer_flags = IREE_TOKENIZER_ENCODE_FLAG_NONE;
     status = id4_cli_make_generation_plan_policy(&plan_options.policy);
+    plan_options.region_per_dispatch_stage_mask =
+        region_per_dispatch_stage_mask;
     plan_options.device_index = 0;
     plan_options.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
     plan_options.stage_diagnostic_tap_list_count = diagnostic_taps.list_count;
@@ -1991,6 +2021,10 @@ static iree_status_t id4_cli_run_generation(iree_allocator_t host_allocator) {
   id4_cli_generation_residency_request_mode_t generation_residency_mode =
       ID4_CLI_GENERATION_RESIDENCY_REQUEST_ISSUE_PHASES;
   iree_host_size_t parameter_load_prefetch_region_distance = 0;
+  id4_ideogram4_generation_resident_stage_mask_t
+      region_per_dispatch_stage_mask =
+          ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_NONE;
+  id4_pipeline_stage_issue_flags_t stage_issue_flags = 0;
   const iree_time_t generation_start_time_ns = iree_time_now();
 
   iree_status_t status = id4_cli_validate_execution_flags();
@@ -2009,6 +2043,15 @@ static iree_status_t id4_cli_run_generation(iree_allocator_t host_allocator) {
   }
   if (iree_status_is_ok(status)) {
     status = id4_cli_parse_request(host_allocator, &request);
+  }
+  if (iree_status_is_ok(status)) {
+    status = id4_cli_parse_generation_stage_mask(
+        iree_make_cstring_view(FLAG_diagnostic_region_per_dispatch_stages),
+        IREE_SV("--diagnostic_region_per_dispatch_stages"),
+        &region_per_dispatch_stage_mask);
+  }
+  if (FLAG_diagnostic_wait_after_each_region) {
+    stage_issue_flags |= ID4_PIPELINE_STAGE_ISSUE_FLAG_WAIT_AFTER_EACH_REGION;
   }
   if (iree_status_is_ok(status)) {
     status = id4_cli_parse_diagnostic_taps(host_allocator, &diagnostic_taps);
@@ -2072,6 +2115,8 @@ static iree_status_t id4_cli_run_generation(iree_allocator_t host_allocator) {
     plan_options.tokenizer = tokenizer;
     plan_options.tokenizer_flags = IREE_TOKENIZER_ENCODE_FLAG_NONE;
     status = id4_cli_make_generation_plan_policy(&plan_options.policy);
+    plan_options.region_per_dispatch_stage_mask =
+        region_per_dispatch_stage_mask;
     plan_options.device_index = 0;
     plan_options.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
     plan_options.stage_diagnostic_tap_list_count = diagnostic_taps.list_count;
@@ -2163,7 +2208,7 @@ static iree_status_t id4_cli_run_generation(iree_allocator_t host_allocator) {
         status = id4_cli_issue_generation_full(
             session, generation_bundle, &request, tokenizer,
             id4_cli_generation_issue_policy(generation_issue_mode),
-            prepare_signal_list, completion_list,
+            prepare_signal_list, completion_list, stage_issue_flags,
             parameter_load_prefetch_region_distance, &diagnostics_sink,
             &execution);
         break;
@@ -2173,7 +2218,7 @@ static iree_status_t id4_cli_run_generation(iree_allocator_t host_allocator) {
         status = id4_cli_issue_generation_full(
             session, generation_bundle, &request, tokenizer,
             id4_cli_generation_issue_policy(generation_issue_mode),
-            prepare_signal_list, completion_list,
+            prepare_signal_list, completion_list, stage_issue_flags,
             parameter_load_prefetch_region_distance, &diagnostics_sink,
             &execution);
         break;
@@ -2182,7 +2227,7 @@ static iree_status_t id4_cli_run_generation(iree_allocator_t host_allocator) {
         status = id4_cli_issue_generation_phases(
             session, generation_bundle, &request, tokenizer, prepare_semaphore,
             &prepare_payload_storage, completion_semaphore,
-            &completion_payload_storage,
+            &completion_payload_storage, stage_issue_flags,
             parameter_load_prefetch_region_distance, &diagnostics_sink,
             &execution);
         break;

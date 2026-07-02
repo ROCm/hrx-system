@@ -90,6 +90,8 @@ typedef struct id4_pipeline_program_plan_region_range_t {
 typedef struct id4_pipeline_program_plan_shared_tensor_record_t {
   // Final shared tensor plan entry.
   id4_pipeline_shared_tensor_plan_t plan;
+  // Source-program operation ordinal that acquires the tensor.
+  iree_host_size_t acquire_operation_ordinal;
   // Last source-program operation ordinal that may use the tensor.
   iree_host_size_t last_use_operation_ordinal;
 } id4_pipeline_program_plan_shared_tensor_record_t;
@@ -127,7 +129,8 @@ static iree_status_t id4_pipeline_program_plan_validate_options(
                             "program plan device group is required");
   }
   const id4_pipeline_program_plan_flags_t allowed_flags =
-      ID4_PIPELINE_PROGRAM_PLAN_FLAG_CAPTURE_DIAGNOSTIC_TAPS;
+      ID4_PIPELINE_PROGRAM_PLAN_FLAG_CAPTURE_DIAGNOSTIC_TAPS |
+      ID4_PIPELINE_PROGRAM_PLAN_FLAG_REGION_PER_DISPATCH;
   if (iree_any_bit_set(options->flags, ~allowed_flags)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "unsupported program plan flags 0x%x",
@@ -227,6 +230,12 @@ static bool id4_pipeline_program_plan_captures_diagnostic_taps(
     const id4_pipeline_program_plan_options_t* options) {
   return iree_all_bits_set(
       options->flags, ID4_PIPELINE_PROGRAM_PLAN_FLAG_CAPTURE_DIAGNOSTIC_TAPS);
+}
+
+static bool id4_pipeline_program_plan_uses_dispatch_regions(
+    const id4_pipeline_program_plan_options_t* options) {
+  return iree_all_bits_set(options->flags,
+                           ID4_PIPELINE_PROGRAM_PLAN_FLAG_REGION_PER_DISPATCH);
 }
 
 static bool id4_pipeline_program_plan_tap_name_requested(
@@ -348,6 +357,14 @@ static void id4_pipeline_program_plan_build_region_ranges(
   for (iree_host_size_t i = 0; i < operation_count; ++i) {
     const id4_pipeline_program_op_t* op =
         id4_pipeline_program_operation_at(program, i);
+    if (id4_pipeline_program_plan_uses_dispatch_regions(options) && op &&
+        op->kind == ID4_PIPELINE_PROGRAM_OP_KIND_DISPATCH_LOOM) {
+      id4_pipeline_program_plan_append_region_range(
+          program, op->payload.dispatch_loom.name, operation_offset, i + 1,
+          out_range_count, ranges);
+      operation_offset = i + 1;
+      continue;
+    }
     if (!op || op->kind != ID4_PIPELINE_PROGRAM_OP_KIND_REGION_CUT) continue;
     id4_pipeline_program_plan_append_region_range(
         program, op->payload.region_cut.name, operation_offset, i,
@@ -423,21 +440,56 @@ static iree_host_size_t id4_pipeline_program_plan_find_last_tensor_use(
 static iree_status_t id4_pipeline_program_plan_try_reuse_shared_range(
     iree_host_size_t shared_tensor_count,
     const id4_pipeline_program_plan_shared_tensor_record_t* shared_tensors,
-    iree_host_size_t acquire_region_id, iree_device_size_t byte_length,
+    iree_host_size_t acquire_region_id,
+    iree_host_size_t acquire_operation_ordinal, iree_device_size_t byte_length,
     iree_device_size_t alignment, iree_device_size_t* out_offset,
     bool* out_found) {
   *out_offset = 0;
   *out_found = false;
   const iree_device_size_t effective_alignment = alignment == 0 ? 1 : alignment;
   for (iree_host_size_t i = 0; i < shared_tensor_count; ++i) {
-    const id4_pipeline_shared_tensor_plan_t* existing = &shared_tensors[i].plan;
-    if (existing->last_use_region_id >= acquire_region_id) continue;
-    if (existing->layout.byte_length < byte_length) continue;
-    if (!iree_device_size_has_alignment(existing->offset,
+    const id4_pipeline_program_plan_shared_tensor_record_t* candidate_record =
+        &shared_tensors[i];
+    if (candidate_record->last_use_operation_ordinal >=
+        acquire_operation_ordinal) {
+      continue;
+    }
+    const id4_pipeline_shared_tensor_plan_t* candidate =
+        &candidate_record->plan;
+    if (candidate->last_use_region_id >= acquire_region_id) continue;
+    if (candidate->layout.byte_length < byte_length) continue;
+    if (!iree_device_size_has_alignment(candidate->offset,
                                         effective_alignment)) {
       continue;
     }
-    *out_offset = existing->offset;
+    iree_device_size_t candidate_end = 0;
+    if (!iree_device_size_checked_add(candidate->offset, byte_length,
+                                      &candidate_end)) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "shared transient candidate range overflow");
+    }
+    bool overlaps_live_range = false;
+    for (iree_host_size_t j = 0; j < shared_tensor_count; ++j) {
+      const id4_pipeline_program_plan_shared_tensor_record_t* live_record =
+          &shared_tensors[j];
+      if (live_record->acquire_operation_ordinal > acquire_operation_ordinal ||
+          live_record->last_use_operation_ordinal < acquire_operation_ordinal) {
+        continue;
+      }
+      const id4_pipeline_shared_tensor_plan_t* live = &live_record->plan;
+      iree_device_size_t live_end = 0;
+      if (!iree_device_size_checked_add(live->offset, live->layout.byte_length,
+                                        &live_end)) {
+        return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                "shared transient live range overflow");
+      }
+      if (candidate->offset < live_end && live->offset < candidate_end) {
+        overlaps_live_range = true;
+        break;
+      }
+    }
+    if (overlaps_live_range) continue;
+    *out_offset = candidate->offset;
     *out_found = true;
     return iree_ok_status();
   }
@@ -565,7 +617,7 @@ static iree_status_t id4_pipeline_program_plan_build_shared_tensors(
       iree_device_size_t offset = 0;
       bool found_reusable_range = false;
       IREE_RETURN_IF_ERROR(id4_pipeline_program_plan_try_reuse_shared_range(
-          *out_shared_tensor_count, shared_tensors, region_index,
+          *out_shared_tensor_count, shared_tensors, region_index, i,
           layout.byte_length, layout.alignment, &offset,
           &found_reusable_range));
       if (!found_reusable_range) {
@@ -590,6 +642,7 @@ static iree_status_t id4_pipeline_program_plan_build_shared_tensors(
           // Last region that may use this tensor.
           .last_use_region_id = (uint32_t)last_use_region_id,
       };
+      record->acquire_operation_ordinal = i;
       record->last_use_operation_ordinal = last_use_operation_ordinal;
       ++*out_shared_tensor_count;
     }
@@ -2219,9 +2272,14 @@ iree_status_t id4_pipeline_program_create_plan(
           : 0;
   iree_status_t status = iree_ok_status();
   if (counts.region_operation_count != 0) {
-    status = iree_allocator_malloc_array(
-        host_allocator, counts.region_cut_count + 1, sizeof(region_ranges[0]),
-        (void**)&region_ranges);
+    const iree_host_size_t region_range_capacity =
+        id4_pipeline_program_plan_uses_dispatch_regions(options) &&
+                counts.dispatch_count != 0
+            ? counts.region_operation_count
+            : counts.region_cut_count + 1;
+    status = iree_allocator_malloc_array(host_allocator, region_range_capacity,
+                                         sizeof(region_ranges[0]),
+                                         (void**)&region_ranges);
   }
   if (iree_status_is_ok(status) && counts.region_operation_count != 0) {
     id4_pipeline_program_plan_build_region_ranges(options, &region_range_count,

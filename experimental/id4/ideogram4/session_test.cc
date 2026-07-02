@@ -322,7 +322,7 @@ static void ExpectGenerationStageBoundaryContract(
   ExpectBoundaryLayout(
       qwen_plan, IREE_SV("attention_mask"), ID4_PIPELINE_TENSOR_DTYPE_F32,
       TensorShape(id4_pipeline_program_make_shape_rank2(
-          summary.qwen_token_count, summary.qwen_token_count)));
+          summary.qwen_token_capacity, summary.qwen_token_capacity)));
   ExpectBoundaryLayout(
       qwen_plan, IREE_SV("token_weights"), ID4_PIPELINE_TENSOR_DTYPE_F32,
       TensorShape(

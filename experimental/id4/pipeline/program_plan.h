@@ -25,6 +25,10 @@ typedef uint32_t id4_pipeline_program_plan_flags_t;
 typedef enum id4_pipeline_program_plan_flag_bits_e {
   // Includes diagnostic tap copies in the planned executable region.
   ID4_PIPELINE_PROGRAM_PLAN_FLAG_CAPTURE_DIAGNOSTIC_TAPS = 1u << 0,
+  // Splits authored regions so each semantic dispatch ends one executable
+  // region. This diagnostic mode promotes crossing transients into shared
+  // storage and should not be used for production memory planning.
+  ID4_PIPELINE_PROGRAM_PLAN_FLAG_REGION_PER_DISPATCH = 1u << 1,
 } id4_pipeline_program_plan_flag_bits_t;
 
 // Options for deriving a pipeline plan from a semantic program.

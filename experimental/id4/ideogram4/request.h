@@ -51,11 +51,14 @@ typedef struct id4_ideogram4_request_t {
 
 // Host-side Qwen3-VL input tensors lowered from a generation request.
 typedef struct id4_ideogram4_qwen_inputs_t {
-  // Number of token positions in every tensor.
+  // Number of logical prompt token positions.
   uint32_t token_count;
+  // Number of dispatch token positions in padded attention tensors.
+  uint32_t token_capacity;
   // Rank-1 I32 token ID tensor with token_count elements.
   iree_tokenizer_token_id_t* token_ids;
-  // Rank-2 F32 additive attention mask with token_count x token_count elements.
+  // Rank-2 F32 additive attention mask with token_capacity x token_capacity
+  // elements.
   float* attention_mask;
   // Rank-1 F32 token weighting tensor with token_count elements.
   float* token_weights;
@@ -131,6 +134,8 @@ typedef struct id4_ideogram4_qwen_lowering_options_t {
   iree_tokenizer_encode_flags_t tokenizer_flags;
   // Maximum token count accepted by the caller's planned request shape.
   uint32_t max_token_count;
+  // Padded token capacity accepted by the caller's planned attention shape.
+  uint32_t token_capacity;
   // Vocabulary row count accepted by the caller's token embedding table.
   uint32_t vocab_size;
 } id4_ideogram4_qwen_lowering_options_t;

@@ -390,6 +390,10 @@ iree_status_t id4_pipeline_program_stage_create_plan(
                         ID4_PIPELINE_STAGE_PLAN_FLAG_CAPTURE_DIAGNOSTIC_TAPS)
           ? ID4_PIPELINE_PROGRAM_PLAN_FLAG_CAPTURE_DIAGNOSTIC_TAPS
           : 0;
+  if (iree_all_bits_set(options->stage_options->flags,
+                        ID4_PIPELINE_STAGE_PLAN_FLAG_REGION_PER_DISPATCH)) {
+    plan_options.flags |= ID4_PIPELINE_PROGRAM_PLAN_FLAG_REGION_PER_DISPATCH;
+  }
   plan_options.stage_name = options->stage_name;
   plan_options.program = options->program;
   plan_options.device_group = options->device_group;

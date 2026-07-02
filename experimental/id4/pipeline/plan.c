@@ -3006,9 +3006,257 @@ static iree_host_size_t id4_pipeline_plan_source_program_dispatch_count(
   return dispatch_count;
 }
 
+typedef struct id4_pipeline_plan_recorded_binding_ref_t {
+  // Issue-time binding-table slot referenced by the recorded command.
+  uint32_t binding_slot;
+  // Byte offset into |binding_slot| referenced by the recorded command.
+  iree_device_size_t offset;
+  // Byte length referenced by the recorded command.
+  iree_device_size_t length;
+} id4_pipeline_plan_recorded_binding_ref_t;
+
+static iree_status_t id4_pipeline_plan_find_producer_ordinal(
+    const id4_pipeline_program_t* program,
+    const id4_pipeline_program_tensor_record_t* tensor,
+    id4_pipeline_program_op_kind_t producer_kind,
+    iree_host_size_t* out_ordinal) {
+  *out_ordinal = 0;
+  const iree_host_size_t operation_count =
+      id4_pipeline_program_operation_count(program);
+  if (tensor->producer_operation_ordinal >= operation_count) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "program tensor %.*s producer operation %" PRIhsz
+                            " exceeds operation count %" PRIhsz,
+                            (int)tensor->name.size, tensor->name.data,
+                            tensor->producer_operation_ordinal,
+                            operation_count);
+  }
+  for (iree_host_size_t i = 0; i <= tensor->producer_operation_ordinal; ++i) {
+    const id4_pipeline_program_op_t* op =
+        id4_pipeline_program_operation_at(program, i);
+    if (!op || op->kind != producer_kind) continue;
+    if (i == tensor->producer_operation_ordinal) return iree_ok_status();
+    ++*out_ordinal;
+  }
+  return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                          "program tensor %.*s producer is not kind %d",
+                          (int)tensor->name.size, tensor->name.data,
+                          (int)producer_kind);
+}
+
+static iree_status_t id4_pipeline_plan_resolve_parameter_recorded_binding_ref(
+    const id4_pipeline_plan_t* plan,
+    const id4_pipeline_program_tensor_record_t* tensor,
+    uint32_t program_tensor_ordinal,
+    id4_pipeline_plan_recorded_binding_ref_t* out_ref) {
+  for (iree_host_size_t i = 0; i < plan->parameter_tensor_count; ++i) {
+    const id4_pipeline_parameter_tensor_plan_t* parameter =
+        &plan->parameter_tensors[i];
+    if (parameter->program_tensor_ordinal != program_tensor_ordinal) continue;
+    if (parameter->parameter_slab_index >= plan->parameter_slab_count) {
+      return iree_make_status(
+          IREE_STATUS_OUT_OF_RANGE,
+          "program parameter tensor %.*s references missing slab %" PRIhsz,
+          (int)tensor->name.size, tensor->name.data,
+          parameter->parameter_slab_index);
+    }
+    const id4_pipeline_parameter_slab_plan_t* slab =
+        &plan->parameter_slabs[parameter->parameter_slab_index];
+    *out_ref = (id4_pipeline_plan_recorded_binding_ref_t){
+        // Issue-time binding-table slot containing the parameter slab.
+        .binding_slot = slab->binding_slot,
+        // Byte offset of this parameter tensor in the containing slab.
+        .offset = parameter->offset,
+        // Dense parameter tensor byte length.
+        .length = parameter->layout.byte_length,
+    };
+    return iree_ok_status();
+  }
+  return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                          "program parameter tensor %.*s is not planned",
+                          (int)tensor->name.size, tensor->name.data);
+}
+
+static iree_status_t id4_pipeline_plan_resolve_constant_recorded_binding_ref(
+    const id4_pipeline_plan_t* plan, const id4_pipeline_program_t* program,
+    const id4_pipeline_program_tensor_record_t* tensor,
+    id4_pipeline_plan_recorded_binding_ref_t* out_ref) {
+  iree_host_size_t constant_ordinal = 0;
+  IREE_RETURN_IF_ERROR(id4_pipeline_plan_find_producer_ordinal(
+      program, tensor, ID4_PIPELINE_PROGRAM_OP_KIND_CONSTANT,
+      &constant_ordinal));
+  iree_host_size_t remaining_ordinal = constant_ordinal;
+  for (iree_host_size_t i = 0; i < plan->constant_slab_count; ++i) {
+    const id4_pipeline_constant_slab_plan_t* slab = &plan->constant_slabs[i];
+    if (remaining_ordinal >= slab->request_count) {
+      remaining_ordinal -= slab->request_count;
+      continue;
+    }
+    const id4_pipeline_constant_request_t* request =
+        &slab->requests[remaining_ordinal];
+    *out_ref = (id4_pipeline_plan_recorded_binding_ref_t){
+        // Issue-time binding-table slot containing the constant slab.
+        .binding_slot = slab->binding_slot,
+        // Byte offset of this constant tensor in the containing slab.
+        .offset = request->span.buffer_offset,
+        // Constant tensor byte length.
+        .length = request->span.length,
+    };
+    return iree_ok_status();
+  }
+  return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                          "program constant tensor %.*s is not planned",
+                          (int)tensor->name.size, tensor->name.data);
+}
+
+static iree_status_t id4_pipeline_plan_try_resolve_shared_recorded_binding_ref(
+    const id4_pipeline_plan_t* plan,
+    const id4_pipeline_program_tensor_record_t* tensor,
+    uint32_t program_tensor_ordinal, bool* out_found,
+    id4_pipeline_plan_recorded_binding_ref_t* out_ref) {
+  *out_found = false;
+  for (iree_host_size_t i = 0; i < plan->shared_tensor_count; ++i) {
+    const id4_pipeline_shared_tensor_plan_t* shared = &plan->shared_tensors[i];
+    if (shared->program_tensor_ordinal != program_tensor_ordinal) continue;
+    if (shared->memory_slab_index >= plan->memory_slab_count) {
+      return iree_make_status(
+          IREE_STATUS_OUT_OF_RANGE,
+          "program shared tensor %.*s references missing memory slab %" PRIhsz,
+          (int)tensor->name.size, tensor->name.data, shared->memory_slab_index);
+    }
+    const id4_pipeline_memory_slab_plan_t* slab =
+        &plan->memory_slabs[shared->memory_slab_index];
+    *out_ref = (id4_pipeline_plan_recorded_binding_ref_t){
+        // Issue-time binding-table slot containing the shared memory slab.
+        .binding_slot = slab->binding_slot,
+        // Byte offset of this shared tensor in the containing slab.
+        .offset = shared->offset,
+        // Dense shared tensor byte length.
+        .length = shared->layout.byte_length,
+    };
+    *out_found = true;
+    return iree_ok_status();
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t id4_pipeline_plan_resolve_local_recorded_binding_ref(
+    const id4_pipeline_plan_t* plan,
+    const id4_pipeline_program_tensor_record_t* tensor,
+    iree_host_size_t region_id,
+    id4_pipeline_plan_recorded_binding_ref_t* out_ref) {
+  if (region_id >= plan->region_count) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "program dispatch region %" PRIhsz
+                            " exceeds region count %" PRIhsz,
+                            region_id, plan->region_count);
+  }
+  const id4_pipeline_region_plan_t* region = &plan->regions[region_id];
+  for (iree_host_size_t i = 0; i < region->local_lifetime_count; ++i) {
+    const id4_pipeline_region_local_lifetime_t* lifetime =
+        &region->local_lifetimes[i];
+    if (!iree_string_view_equal(lifetime->name, tensor->name)) continue;
+    *out_ref = (id4_pipeline_plan_recorded_binding_ref_t){
+        // Issue-time binding-table slot containing the region-local slab.
+        .binding_slot = region->local_binding_slot,
+        // Byte offset of this local tensor in the region-local slab.
+        .offset = lifetime->offset,
+        // Local tensor byte length.
+        .length = lifetime->byte_length,
+    };
+    return iree_ok_status();
+  }
+  return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                          "program local tensor %.*s is not planned in region "
+                          "%" PRIhsz,
+                          (int)tensor->name.size, tensor->name.data, region_id);
+}
+
+static iree_status_t id4_pipeline_plan_resolve_boundary_recorded_binding_ref(
+    const id4_pipeline_plan_t* plan, const id4_pipeline_program_t* program,
+    const id4_pipeline_program_tensor_record_t* tensor,
+    id4_pipeline_plan_recorded_binding_ref_t* out_ref) {
+  iree_host_size_t import_ordinal = 0;
+  IREE_RETURN_IF_ERROR(id4_pipeline_plan_find_producer_ordinal(
+      program, tensor, ID4_PIPELINE_PROGRAM_OP_KIND_IMPORT, &import_ordinal));
+  if (import_ordinal >= plan->boundary_tensor_count) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "program boundary tensor %.*s import ordinal %" PRIhsz
+        " exceeds boundary tensor count %" PRIhsz,
+        (int)tensor->name.size, tensor->name.data, import_ordinal,
+        plan->boundary_tensor_count);
+  }
+  const id4_pipeline_boundary_tensor_plan_t* boundary =
+      &plan->boundary_tensors[import_ordinal];
+  *out_ref = (id4_pipeline_plan_recorded_binding_ref_t){
+      // Issue-time binding-table slot containing this boundary tensor.
+      .binding_slot = boundary->binding_slot,
+      // Boundary tensors are bound from byte zero.
+      .offset = 0,
+      // Boundary tensor byte length.
+      .length = boundary->layout.byte_length,
+  };
+  return iree_ok_status();
+}
+
+static iree_status_t id4_pipeline_plan_resolve_recorded_binding_ref(
+    const id4_pipeline_plan_t* plan, const id4_pipeline_program_t* program,
+    const id4_pipeline_program_tensor_record_t* tensor,
+    uint32_t program_tensor_ordinal, iree_host_size_t region_id,
+    id4_pipeline_plan_recorded_binding_ref_t* out_ref) {
+  const iree_host_size_t operation_count =
+      id4_pipeline_program_operation_count(program);
+  if (tensor->producer_operation_ordinal >= operation_count) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "program tensor %.*s producer operation %" PRIhsz
+                            " exceeds operation count %" PRIhsz,
+                            (int)tensor->name.size, tensor->name.data,
+                            tensor->producer_operation_ordinal,
+                            operation_count);
+  }
+  const id4_pipeline_program_op_t* producer = id4_pipeline_program_operation_at(
+      program, tensor->producer_operation_ordinal);
+  if (!producer) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "program tensor %.*s producer operation %" PRIhsz
+                            " is missing",
+                            (int)tensor->name.size, tensor->name.data,
+                            tensor->producer_operation_ordinal);
+  }
+  switch (producer->kind) {
+    case ID4_PIPELINE_PROGRAM_OP_KIND_IMPORT:
+      return id4_pipeline_plan_resolve_boundary_recorded_binding_ref(
+          plan, program, tensor, out_ref);
+    case ID4_PIPELINE_PROGRAM_OP_KIND_PARAMETER:
+      return id4_pipeline_plan_resolve_parameter_recorded_binding_ref(
+          plan, tensor, program_tensor_ordinal, out_ref);
+    case ID4_PIPELINE_PROGRAM_OP_KIND_CONSTANT:
+      return id4_pipeline_plan_resolve_constant_recorded_binding_ref(
+          plan, program, tensor, out_ref);
+    case ID4_PIPELINE_PROGRAM_OP_KIND_ACQUIRE: {
+      bool found_shared = false;
+      IREE_RETURN_IF_ERROR(
+          id4_pipeline_plan_try_resolve_shared_recorded_binding_ref(
+              plan, tensor, program_tensor_ordinal, &found_shared, out_ref));
+      return found_shared
+                 ? iree_ok_status()
+                 : id4_pipeline_plan_resolve_local_recorded_binding_ref(
+                       plan, tensor, region_id, out_ref);
+    }
+    default:
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "program tensor %.*s producer kind %d is not "
+                              "dispatch-bindable",
+                              (int)tensor->name.size, tensor->name.data,
+                              (int)producer->kind);
+  }
+}
+
 static iree_status_t id4_pipeline_plan_append_program_binding_json(
-    const id4_pipeline_program_t* program, iree_string_builder_t* builder,
-    iree_host_size_t binding_index,
+    const id4_pipeline_plan_t* plan, const id4_pipeline_program_t* program,
+    iree_string_builder_t* builder, iree_host_size_t binding_index,
+    iree_host_size_t region_id,
     const id4_pipeline_program_dispatch_binding_t* binding) {
   const id4_pipeline_program_tensor_record_t* tensor =
       id4_pipeline_program_tensor_at(program, binding->tensor.ordinal);
@@ -3017,6 +3265,10 @@ static iree_status_t id4_pipeline_plan_append_program_binding_json(
                             "program dispatch binding tensor %u is missing",
                             binding->tensor.ordinal);
   }
+  id4_pipeline_plan_recorded_binding_ref_t recorded_ref;
+  IREE_RETURN_IF_ERROR(id4_pipeline_plan_resolve_recorded_binding_ref(
+      plan, program, tensor, binding->tensor.ordinal, region_id,
+      &recorded_ref));
   IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
       builder, "{\"index\":%" PRIhsz ",\"tensor_ordinal\":%u,\"name\":",
       binding_index, binding->tensor.ordinal));
@@ -3027,6 +3279,12 @@ static iree_status_t id4_pipeline_plan_append_program_binding_json(
   IREE_RETURN_IF_ERROR(id4_pipeline_plan_append_json_string(
       builder,
       id4_pipeline_plan_program_tensor_access_format(binding->access)));
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+      builder,
+      ",\"recorded_ref\":{\"binding_slot\":%u,\"offset\":%" PRIu64
+      ",\"length\":%" PRIu64 "}",
+      recorded_ref.binding_slot, (uint64_t)recorded_ref.offset,
+      (uint64_t)recorded_ref.length));
   if (iree_all_bits_set(
           binding->flags,
           ID4_PIPELINE_PROGRAM_DISPATCH_BINDING_FLAG_WRITE_RANGE)) {
@@ -3049,9 +3307,10 @@ static iree_status_t id4_pipeline_plan_append_program_binding_json(
 }
 
 static iree_status_t id4_pipeline_plan_append_program_dispatch_json(
-    const id4_pipeline_program_t* program, iree_string_builder_t* builder,
-    const id4_pipeline_program_op_t* op, iree_host_size_t dispatch_ordinal,
-    iree_host_size_t region_id, iree_host_size_t region_operation_ordinal) {
+    const id4_pipeline_plan_t* plan, const id4_pipeline_program_t* program,
+    iree_string_builder_t* builder, const id4_pipeline_program_op_t* op,
+    iree_host_size_t dispatch_ordinal, iree_host_size_t region_id,
+    iree_host_size_t region_operation_ordinal) {
   const id4_pipeline_program_dispatch_loom_op_t* dispatch =
       &op->payload.dispatch_loom;
   IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
@@ -3081,7 +3340,7 @@ static iree_status_t id4_pipeline_plan_append_program_dispatch_json(
       IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, ","));
     }
     IREE_RETURN_IF_ERROR(id4_pipeline_plan_append_program_binding_json(
-        program, builder, i, &dispatch->bindings[i]));
+        plan, program, builder, i, region_id, &dispatch->bindings[i]));
   }
   return iree_string_builder_append_cstring(builder, "]}");
 }
@@ -3124,7 +3383,7 @@ static iree_status_t id4_pipeline_plan_append_program_json(
                 iree_string_builder_append_cstring(builder, ","));
           }
           IREE_RETURN_IF_ERROR(id4_pipeline_plan_append_program_dispatch_json(
-              program, builder, op, dispatch_ordinal, region_index,
+              plan, program, builder, op, dispatch_ordinal, region_index,
               region_operation_ordinal));
           emitted_dispatch = true;
           ++dispatch_ordinal;

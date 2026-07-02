@@ -71,7 +71,8 @@ static iree_status_t id4_pipeline_validate_plan_options(
   IREE_RETURN_IF_ERROR(id4_pipeline_validate_options_size(
       options->structure_size, sizeof(*options), IREE_SV("plan")));
   const id4_pipeline_stage_plan_flags_t allowed_flags =
-      ID4_PIPELINE_STAGE_PLAN_FLAG_CAPTURE_DIAGNOSTIC_TAPS;
+      ID4_PIPELINE_STAGE_PLAN_FLAG_CAPTURE_DIAGNOSTIC_TAPS |
+      ID4_PIPELINE_STAGE_PLAN_FLAG_REGION_PER_DISPATCH;
   if (iree_any_bit_set(options->flags, ~allowed_flags)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "unsupported plan flags 0x%x", options->flags);
@@ -358,6 +359,12 @@ static iree_status_t id4_pipeline_validate_issue_options(
   if (options->next) {
     return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
                             "issue extension structures are not supported");
+  }
+  const id4_pipeline_stage_issue_flags_t allowed_flags =
+      ID4_PIPELINE_STAGE_ISSUE_FLAG_WAIT_AFTER_EACH_REGION;
+  if (iree_any_bit_set(options->flags, ~allowed_flags)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "unsupported issue flags 0x%x", options->flags);
   }
   IREE_RETURN_IF_ERROR(id4_pipeline_validate_semaphore_list(
       options->wait_semaphore_list, IREE_SV("issue wait")));

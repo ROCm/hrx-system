@@ -49,6 +49,11 @@ static constexpr QwenBenchmarkShape kQwenToken64Shape = {
     64,
 };
 
+static constexpr QwenBenchmarkShape kQwenToken171Shape = {
+    // Structured prompt-class token count crossing several WMMA tile buckets.
+    171,
+};
+
 static constexpr QwenBenchmarkShape kQwenToken256Shape = {
     // Medium prompt-class token count.
     256,
@@ -624,6 +629,8 @@ ID4_QWEN_BENCHMARK_REGISTER(BM_Qwen3VlStagePlan, kQwenToken19Shape, "token19",
                             MICROSECOND);
 ID4_QWEN_BENCHMARK_REGISTER(BM_Qwen3VlStagePlan, kQwenToken64Shape, "token64",
                             MICROSECOND);
+ID4_QWEN_BENCHMARK_REGISTER(BM_Qwen3VlStagePlan, kQwenToken171Shape, "token171",
+                            MICROSECOND);
 ID4_QWEN_BENCHMARK_REGISTER(BM_Qwen3VlStagePlan, kQwenToken256Shape, "token256",
                             MICROSECOND);
 ID4_QWEN_BENCHMARK_REGISTER(BM_Qwen3VlStagePlan, kQwenToken512Shape, "token512",
@@ -720,6 +727,8 @@ ID4_QWEN_BENCHMARK_REGISTER(BM_Qwen3VlStagePrepareCachedKernels,
                             kQwenToken19Shape, "token19", MILLISECOND);
 ID4_QWEN_BENCHMARK_REGISTER(BM_Qwen3VlStagePrepareCachedKernels,
                             kQwenToken64Shape, "token64", MILLISECOND);
+ID4_QWEN_BENCHMARK_REGISTER(BM_Qwen3VlStagePrepareCachedKernels,
+                            kQwenToken171Shape, "token171", MILLISECOND);
 ID4_QWEN_BENCHMARK_REGISTER(BM_Qwen3VlStagePrepareCachedKernels,
                             kQwenToken256Shape, "token256", MILLISECOND);
 ID4_QWEN_BENCHMARK_REGISTER(BM_Qwen3VlStagePrepareCachedKernels,
@@ -1142,6 +1151,8 @@ ID4_QWEN_BENCHMARK_REGISTER(BM_Qwen3VlStageIssueSyntheticSubmitOnly,
 ID4_QWEN_BENCHMARK_REGISTER(BM_Qwen3VlStageIssueSyntheticSubmitOnly,
                             kQwenToken64Shape, "token64", MICROSECOND);
 ID4_QWEN_BENCHMARK_REGISTER(BM_Qwen3VlStageIssueSyntheticSubmitOnly,
+                            kQwenToken171Shape, "token171", MICROSECOND);
+ID4_QWEN_BENCHMARK_REGISTER(BM_Qwen3VlStageIssueSyntheticSubmitOnly,
                             kQwenToken256Shape, "token256", MICROSECOND);
 ID4_QWEN_BENCHMARK_REGISTER(BM_Qwen3VlStageIssueSyntheticSubmitOnly,
                             kQwenToken512Shape, "token512", MICROSECOND);
@@ -1152,6 +1163,8 @@ ID4_QWEN_BENCHMARK_REGISTER(BM_Qwen3VlStageIssueSyntheticEndToEnd,
 ID4_QWEN_BENCHMARK_REGISTER(BM_Qwen3VlStageIssueSyntheticEndToEnd,
                             kQwenToken64Shape, "token64", MILLISECOND);
 ID4_QWEN_BENCHMARK_REGISTER(BM_Qwen3VlStageIssueSyntheticEndToEnd,
+                            kQwenToken171Shape, "token171", MILLISECOND);
+ID4_QWEN_BENCHMARK_REGISTER(BM_Qwen3VlStageIssueSyntheticEndToEnd,
                             kQwenToken256Shape, "token256", MILLISECOND);
 ID4_QWEN_BENCHMARK_REGISTER(BM_Qwen3VlStageIssueSyntheticEndToEnd,
                             kQwenToken512Shape, "token512", MILLISECOND);
@@ -1161,6 +1174,8 @@ ID4_QWEN_BENCHMARK_REGISTER(BM_Qwen3VlStagePrepareIssueSyntheticEndToEnd,
                             kQwenToken19Shape, "token19", MILLISECOND);
 ID4_QWEN_BENCHMARK_REGISTER(BM_Qwen3VlStagePrepareIssueSyntheticEndToEnd,
                             kQwenToken64Shape, "token64", MILLISECOND);
+ID4_QWEN_BENCHMARK_REGISTER(BM_Qwen3VlStagePrepareIssueSyntheticEndToEnd,
+                            kQwenToken171Shape, "token171", MILLISECOND);
 ID4_QWEN_BENCHMARK_REGISTER(BM_Qwen3VlStagePrepareIssueSyntheticEndToEnd,
                             kQwenToken256Shape, "token256", MILLISECOND);
 ID4_QWEN_BENCHMARK_REGISTER(BM_Qwen3VlStagePrepareIssueSyntheticEndToEnd,
@@ -1173,6 +1188,9 @@ ID4_QWEN_BENCHMARK_REGISTER(
 ID4_QWEN_BENCHMARK_REGISTER(
     BM_Qwen3VlStagePrepareIssueDeferredSyntheticEndToEnd, kQwenToken64Shape,
     "token64", MILLISECOND);
+ID4_QWEN_BENCHMARK_REGISTER(
+    BM_Qwen3VlStagePrepareIssueDeferredSyntheticEndToEnd, kQwenToken171Shape,
+    "token171", MILLISECOND);
 ID4_QWEN_BENCHMARK_REGISTER(
     BM_Qwen3VlStagePrepareIssueDeferredSyntheticEndToEnd, kQwenToken256Shape,
     "token256", MILLISECOND);

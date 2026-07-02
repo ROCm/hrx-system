@@ -69,6 +69,15 @@ static iree_status_t id4_ideogram4_validate_generation_issue_options(
                               " is invalid",
                               (uint32_t)options->issue_policy);
   }
+  const id4_pipeline_stage_issue_flags_t allowed_stage_issue_flags =
+      ID4_PIPELINE_STAGE_ISSUE_FLAG_WAIT_AFTER_EACH_REGION;
+  if (iree_any_bit_set(options->stage_issue_flags,
+                       ~allowed_stage_issue_flags)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "Ideogram 4 generation issue stage flags 0x%x are unsupported",
+        options->stage_issue_flags);
+  }
   if (options->issue_policy ==
           ID4_IDEOGRAM4_GENERATION_ISSUE_POLICY_STAGE_SERIAL &&
       bundle->residency_policy.mode ==
@@ -243,6 +252,15 @@ static iree_status_t id4_ideogram4_validate_generation_phase_issue_options(
                             "Ideogram 4 generation phase issue extension "
                             "structures are not supported");
   }
+  const id4_pipeline_stage_issue_flags_t allowed_stage_issue_flags =
+      ID4_PIPELINE_STAGE_ISSUE_FLAG_WAIT_AFTER_EACH_REGION;
+  if (iree_any_bit_set(options->stage_issue_flags,
+                       ~allowed_stage_issue_flags)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "Ideogram 4 generation phase issue stage flags 0x%x are unsupported",
+        options->stage_issue_flags);
+  }
   IREE_RETURN_IF_ERROR(id4_ideogram4_validate_semaphore_list(
       options->wait_semaphore_list,
       IREE_SV("Ideogram 4 generation phase issue wait")));
@@ -352,7 +370,7 @@ static iree_status_t id4_ideogram4_generation_upload_qwen_inputs(
     const id4_ideogram4_qwen_inputs_t* inputs,
     iree_hal_semaphore_list_t initial_wait_semaphore_list) {
   const iree_host_size_t attention_mask_length =
-      inputs->token_count * (iree_host_size_t)inputs->token_count *
+      inputs->token_capacity * (iree_host_size_t)inputs->token_capacity *
       sizeof(inputs->attention_mask[0]);
   const iree_host_size_t token_weights_length =
       inputs->token_count * (iree_host_size_t)sizeof(inputs->token_weights[0]);
@@ -513,6 +531,7 @@ static iree_status_t id4_ideogram4_generation_issue_stage(
   id4_pipeline_stage_issue_options_t issue_options;
   memset(&issue_options, 0, sizeof(issue_options));
   issue_options.structure_size = sizeof(issue_options);
+  issue_options.flags = execution->stage_issue_flags;
   issue_options.boundary_binding_count = slot->boundary_bindings.count;
   issue_options.boundary_bindings = slot->boundary_bindings.bindings;
   issue_options.diagnostic_tap_binding_count =
@@ -705,6 +724,7 @@ static iree_status_t id4_ideogram4_generation_begin_execution(
     qwen_lowering_options.request = request;
     qwen_lowering_options.tokenizer_flags = tokenizer_flags;
     qwen_lowering_options.max_token_count = session->qwen_model.max_token_count;
+    qwen_lowering_options.token_capacity = bundle->summary.qwen_token_capacity;
     qwen_lowering_options.vocab_size = session->qwen_model.vocab_size;
     status = id4_ideogram4_request_lower_qwen_inputs(&qwen_lowering_options,
                                                      execution->host_allocator,
@@ -1200,6 +1220,7 @@ iree_status_t id4_ideogram4_generation_execution_issue_phase(
       execution, phase_bundle, options));
   execution->parameter_load_prefetch_region_distance =
       options->parameter_load_prefetch_region_distance;
+  execution->stage_issue_flags = options->stage_issue_flags;
   iree_status_t status = id4_ideogram4_generation_chain_phase_issue_wait(
       execution, phase_bundle->phase_mask, options->wait_semaphore_list);
   if (!iree_status_is_ok(status)) return status;
@@ -1252,6 +1273,7 @@ iree_status_t id4_ideogram4_session_issue_generation(
     if (iree_status_is_ok(status)) {
       execution->parameter_load_prefetch_region_distance =
           options->parameter_load_prefetch_region_distance;
+      execution->stage_issue_flags = options->stage_issue_flags;
     }
     if (iree_status_is_ok(status)) {
       status = id4_ideogram4_generation_issue_stage_serial(
@@ -1286,6 +1308,7 @@ iree_status_t id4_ideogram4_session_issue_generation(
   if (iree_status_is_ok(status)) {
     execution->parameter_load_prefetch_region_distance =
         options->parameter_load_prefetch_region_distance;
+    execution->stage_issue_flags = options->stage_issue_flags;
   }
   if (iree_status_is_ok(status)) {
     status = id4_ideogram4_generation_prepare_phase_bundle(

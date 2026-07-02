@@ -35,6 +35,9 @@ typedef uint32_t id4_pipeline_stage_plan_flags_t;
 typedef enum id4_pipeline_stage_plan_flag_bits_e {
   // Plans device-side diagnostic tap copies into caller-provided buffers.
   ID4_PIPELINE_STAGE_PLAN_FLAG_CAPTURE_DIAGNOSTIC_TAPS = 1u << 0,
+  // Plans each semantic dispatch into its own executable region for fault
+  // localization. This is a diagnostic mode that changes memory planning.
+  ID4_PIPELINE_STAGE_PLAN_FLAG_REGION_PER_DISPATCH = 1u << 1,
 } id4_pipeline_stage_plan_flag_bits_t;
 
 // Shared services available to all pipeline stages.
@@ -114,12 +117,24 @@ typedef struct id4_pipeline_stage_prepare_options_t {
   id4_pipeline_diagnostics_sink_t* diagnostics_sink;
 } id4_pipeline_stage_prepare_options_t;
 
+// Stage issue behavior flags.
+typedef uint32_t id4_pipeline_stage_issue_flags_t;
+
+// Stage issue behavior flag bits.
+typedef enum id4_pipeline_stage_issue_flag_bits_e {
+  // Waits after every scheduler-visible internal region and emits completion
+  // diagnostics. This is a fault-localization mode and serializes execution.
+  ID4_PIPELINE_STAGE_ISSUE_FLAG_WAIT_AFTER_EACH_REGION = 1u << 0,
+} id4_pipeline_stage_issue_flag_bits_t;
+
 // Options for issuing a prepared bundle.
 typedef struct id4_pipeline_stage_issue_options_t {
   // Size of this structure for versioning.
   iree_host_size_t structure_size;
   // Extension structure chain; must be NULL for now.
   const void* next;
+  // Issue behavior flags.
+  id4_pipeline_stage_issue_flags_t flags;
   // Number of caller-owned boundary tensor bindings.
   iree_host_size_t boundary_binding_count;
   // Caller-owned boundary tensor bindings in plan boundary tensor order.

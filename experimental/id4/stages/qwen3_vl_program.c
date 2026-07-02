@@ -2627,7 +2627,7 @@ static iree_status_t id4_qwen3_vl_program_author_token_embedding(
       builder, ID4_QWEN3_VL_TENSOR_ATTENTION_MASK,
       ID4_PIPELINE_PROGRAM_IMPORT_TENSOR_FLAG_INITIALIZED,
       ID4_PIPELINE_PROGRAM_DTYPE_F32,
-      id4_pipeline_program_make_shape_rank2(token_count, token_count),
+      id4_pipeline_program_make_shape_rank2(token_capacity, token_capacity),
       out_attention_mask));
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_import_tensor(
       builder, ID4_QWEN3_VL_TENSOR_TOKEN_WEIGHTS,

@@ -103,7 +103,7 @@ static iree_status_t id4_ideogram4_request_validate_full_schema_member(
       (int)key.size, key.data);
 }
 
-static iree_status_t id4_ideogram4_request_validate_lowering_options(
+static iree_status_t id4_ideogram4_request_validate_qwen_encode_options(
     const id4_ideogram4_qwen_lowering_options_t* options) {
   if (!options) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -139,6 +139,17 @@ static iree_status_t id4_ideogram4_request_validate_lowering_options(
   if (options->vocab_size == 0) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "Qwen request lowering vocab size is zero");
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t id4_ideogram4_request_validate_lowering_options(
+    const id4_ideogram4_qwen_lowering_options_t* options) {
+  IREE_RETURN_IF_ERROR(
+      id4_ideogram4_request_validate_qwen_encode_options(options));
+  if (options->token_capacity == 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "Qwen request lowering token capacity is zero");
   }
   return iree_ok_status();
 }
@@ -508,17 +519,23 @@ void id4_ideogram4_request_deinitialize(id4_ideogram4_request_t* request,
 }
 
 static iree_status_t id4_ideogram4_request_allocate_qwen_inputs(
-    uint32_t token_count, iree_allocator_t host_allocator,
-    id4_ideogram4_qwen_inputs_t* out_inputs) {
+    uint32_t token_count, uint32_t token_capacity,
+    iree_allocator_t host_allocator, id4_ideogram4_qwen_inputs_t* out_inputs) {
   out_inputs->token_count = token_count;
+  out_inputs->token_capacity = token_capacity;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
       host_allocator, token_count, sizeof(out_inputs->token_ids[0]),
       (void**)&out_inputs->token_ids));
   IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
       host_allocator, token_count, sizeof(out_inputs->token_weights[0]),
       (void**)&out_inputs->token_weights));
-  const iree_host_size_t attention_element_count =
-      token_count * (iree_host_size_t)token_count;
+  iree_host_size_t attention_element_count = 0;
+  if (!iree_host_size_checked_mul(token_capacity,
+                                  (iree_host_size_t)token_capacity,
+                                  &attention_element_count)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "Qwen attention mask element count overflow");
+  }
   IREE_RETURN_IF_ERROR(
       iree_allocator_malloc_array(host_allocator, attention_element_count,
                                   sizeof(out_inputs->attention_mask[0]),
@@ -588,9 +605,15 @@ iree_status_t id4_ideogram4_request_lower_qwen_inputs(
   uint32_t token_count = 0;
   iree_status_t status = id4_ideogram4_request_encode_qwen_tokens(
       options, host_allocator, &token_storage, &token_count);
+  if (iree_status_is_ok(status) && token_count > options->token_capacity) {
+    status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "Ideogram 4 request token count %" PRIu32
+                              " exceeds planned Qwen token capacity %" PRIu32,
+                              token_count, options->token_capacity);
+  }
   if (iree_status_is_ok(status)) {
     status = id4_ideogram4_request_allocate_qwen_inputs(
-        token_count, host_allocator, out_inputs);
+        token_count, options->token_capacity, host_allocator, out_inputs);
   }
   if (iree_status_is_ok(status)) {
     memcpy(out_inputs->token_ids, token_storage,
@@ -599,14 +622,27 @@ iree_status_t id4_ideogram4_request_lower_qwen_inputs(
       out_inputs->token_weights[i] = 1.0f;
     }
     const float future_token_mask = -FLT_MAX / 4.0f;
-    for (iree_host_size_t query = 0; query < token_count; ++query) {
-      for (iree_host_size_t key = 0; key < token_count; ++key) {
-        out_inputs
-            ->attention_mask[query * (iree_host_size_t)token_count + key] =
-            key <= query ? 0.0f : future_token_mask;
+    iree_host_size_t attention_element_count = 0;
+    if (!iree_host_size_checked_mul(options->token_capacity,
+                                    (iree_host_size_t)options->token_capacity,
+                                    &attention_element_count)) {
+      status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                "Qwen attention mask element count overflow");
+    }
+    if (iree_status_is_ok(status)) {
+      for (iree_host_size_t i = 0; i < attention_element_count; ++i) {
+        out_inputs->attention_mask[i] = future_token_mask;
+      }
+      for (iree_host_size_t query = 0; query < token_count; ++query) {
+        for (iree_host_size_t key = 0; key < token_count; ++key) {
+          out_inputs->attention_mask
+              [query * (iree_host_size_t)options->token_capacity + key] =
+              key <= query ? 0.0f : future_token_mask;
+        }
       }
     }
-  } else {
+  }
+  if (!iree_status_is_ok(status)) {
     id4_ideogram4_qwen_inputs_deinitialize(out_inputs, host_allocator);
   }
   iree_allocator_free(host_allocator, token_storage);
@@ -619,7 +655,7 @@ iree_status_t id4_ideogram4_request_count_qwen_tokens(
   IREE_ASSERT_ARGUMENT(out_token_count);
   *out_token_count = 0;
   IREE_RETURN_IF_ERROR(
-      id4_ideogram4_request_validate_lowering_options(options));
+      id4_ideogram4_request_validate_qwen_encode_options(options));
 
   iree_tokenizer_token_id_t* token_storage = NULL;
   iree_status_t status = id4_ideogram4_request_encode_qwen_tokens(

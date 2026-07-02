@@ -69,6 +69,42 @@ enum {
   ID4_PIPELINE_PROGRAM_ISSUE_WAIT_FLAG_INCLUDE_BUNDLE_READINESS = 1u << 0,
 };
 
+static iree_status_t id4_pipeline_program_emit_lifecycle(
+    id4_pipeline_diagnostics_sink_t* diagnostics_sink,
+    iree_string_view_t stage_name, iree_string_view_t key,
+    iree_string_view_t message) {
+  id4_pipeline_diagnostic_event_t event = {
+      // Lifecycle event emitted by the program runtime.
+      .kind = ID4_PIPELINE_DIAGNOSTIC_EVENT_KIND_LIFECYCLE,
+      // Stage owning the program execution.
+      .stage_name = stage_name,
+      // Stable event key for this lifecycle boundary.
+      .key = key,
+      // Human-readable event context.
+      .message = message,
+      // No parameter slab payload is attached to lifecycle events.
+      .parameter_slab = NULL,
+      // No parameter loading payload is attached to lifecycle events.
+      .parameter_load = NULL,
+      // No kernel payload is attached to lifecycle events.
+      .kernel = NULL,
+      // No timing payload is attached to lifecycle events.
+      .timing = NULL,
+  };
+  return id4_pipeline_diagnostics_emit(diagnostics_sink, &event);
+}
+
+static iree_status_t id4_pipeline_program_wait_after_region_issue(
+    id4_pipeline_diagnostics_sink_t* diagnostics_sink,
+    iree_string_view_t stage_name, iree_string_view_t region_name,
+    iree_hal_semaphore_list_t signal_list) {
+  IREE_RETURN_IF_ERROR(iree_hal_semaphore_list_wait(
+      signal_list, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
+  return id4_pipeline_program_emit_lifecycle(
+      diagnostics_sink, stage_name, IREE_SV("program.region.issue.completed"),
+      region_name);
+}
+
 typedef struct id4_pipeline_program_parameter_window_slot_t {
   // Plan region currently using this slot, or IREE_HOST_SIZE_MAX when idle.
   iree_host_size_t region_index;
@@ -1841,6 +1877,7 @@ static iree_status_t id4_pipeline_program_prepared_shared_slab_device(
 
 static iree_status_t id4_pipeline_program_prepared_issue_shared_allocas(
     id4_pipeline_program_prepared_t* prepared,
+    id4_pipeline_diagnostics_sink_t* diagnostics_sink,
     iree_hal_semaphore_list_t wait_list, iree_host_size_t shared_slab_count,
     const iree_host_size_t* shared_slab_indices,
     iree_hal_buffer_t** memory_slab_buffers,
@@ -1870,10 +1907,23 @@ static iree_status_t id4_pipeline_program_prepared_issue_shared_allocas(
       iree_hal_semaphore_list_t signal_list =
           id4_pipeline_program_one_semaphore_list(&alloca_semaphores[i],
                                                   &alloca_payload_values[i]);
+      status = id4_pipeline_program_emit_lifecycle(
+          diagnostics_sink, id4_pipeline_plan_stage_name(prepared->plan),
+          IREE_SV("program.shared_alloca.issue.begin"), slab->name);
+      if (!iree_status_is_ok(status)) {
+        iree_hal_semaphore_release(alloca_semaphores[i]);
+        alloca_semaphores[i] = NULL;
+        return status;
+      }
       status = iree_hal_device_queue_alloca(
           device, queue_affinity, wait_list, signal_list, /*pool=*/NULL,
           slab->params, slab->byte_length, prepared->shared_slab_alloca_flags,
           &memory_slab_buffers[memory_slab_index]);
+      if (iree_status_is_ok(status)) {
+        status = id4_pipeline_program_emit_lifecycle(
+            diagnostics_sink, id4_pipeline_plan_stage_name(prepared->plan),
+            IREE_SV("program.shared_alloca.issue.submitted"), slab->name);
+      }
     }
     if (!iree_status_is_ok(status)) {
       iree_hal_semaphore_release(alloca_semaphores[i]);
@@ -2785,8 +2835,8 @@ iree_status_t id4_pipeline_program_prepared_issue(
   iree_host_size_t shared_alloca_submitted_count = 0;
   if (iree_status_is_ok(status) && shared_slab_count != 0) {
     status = id4_pipeline_program_prepared_issue_shared_allocas(
-        prepared, wait_list, shared_slab_count, shared_slab_indices,
-        memory_slab_buffers, shared_alloca_semaphores,
+        prepared, options->diagnostics_sink, wait_list, shared_slab_count,
+        shared_slab_indices, memory_slab_buffers, shared_alloca_semaphores,
         shared_alloca_payload_values, &shared_alloca_submitted_count);
   }
 
@@ -2803,6 +2853,8 @@ iree_status_t id4_pipeline_program_prepared_issue(
   }
 
   bool region_submitted = false;
+  const bool wait_after_each_region = iree_all_bits_set(
+      options->flags, ID4_PIPELINE_STAGE_ISSUE_FLAG_WAIT_AFTER_EACH_REGION);
   iree_hal_semaphore_t* cleanup_wait_semaphore = NULL;
   uint64_t cleanup_wait_payload_value = 0;
   iree_host_size_t next_parameter_window_region = 0;
@@ -2911,8 +2963,16 @@ iree_status_t id4_pipeline_program_prepared_issue(
     issue_options.signal_semaphore_list = region_signal_list;
     issue_options.binding_table = binding_table;
     issue_options.execute_flags = IREE_HAL_EXECUTE_FLAG_NONE;
+    status = id4_pipeline_program_emit_lifecycle(
+        options->diagnostics_sink, id4_pipeline_plan_stage_name(prepared->plan),
+        IREE_SV("program.region.issue.begin"), region->name);
+    if (!iree_status_is_ok(status)) break;
     status = id4_pipeline_prepared_region_issue(prepared->prepared_regions[i],
                                                 &issue_options);
+    if (!iree_status_is_ok(status)) break;
+    status = id4_pipeline_program_emit_lifecycle(
+        options->diagnostics_sink, id4_pipeline_plan_stage_name(prepared->plan),
+        IREE_SV("program.region.issue.submitted"), region->name);
     if (!iree_status_is_ok(status)) break;
     if (iree_status_is_ok(status)) {
       region_submitted = true;
@@ -2925,6 +2985,13 @@ iree_status_t id4_pipeline_program_prepared_issue(
       } else if (uses_deferred_parameter_loads) {
         cleanup_wait_semaphore = execution_completion_semaphore;
         cleanup_wait_payload_value = execution_completion_payload_value;
+      }
+      if (wait_after_each_region) {
+        status = id4_pipeline_program_wait_after_region_issue(
+            options->diagnostics_sink,
+            id4_pipeline_plan_stage_name(prepared->plan), region->name,
+            region_signal_list);
+        if (!iree_status_is_ok(status)) break;
       }
       if (parameter_window_slot) {
         status =

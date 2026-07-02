@@ -202,6 +202,8 @@ static iree_status_t id4_ideogram4_validate_generation_plan_options(
       id4_ideogram4_validate_generation_request(session, options->request));
   IREE_RETURN_IF_ERROR(
       id4_ideogram4_validate_generation_policy(options->policy));
+  IREE_RETURN_IF_ERROR(id4_ideogram4_validate_generation_resident_stage_mask(
+      options->region_per_dispatch_stage_mask));
   IREE_RETURN_IF_ERROR(
       id4_ideogram4_validate_generation_stage_diagnostic_tap_lists(
           options->stage_diagnostic_tap_list_count,
@@ -261,6 +263,12 @@ static iree_status_t id4_ideogram4_plan_stage(
       diagnostic_tap_names.count == 0
           ? 0
           : ID4_PIPELINE_STAGE_PLAN_FLAG_CAPTURE_DIAGNOSTIC_TAPS;
+  const id4_ideogram4_generation_stage_descriptor_t* descriptor =
+      id4_ideogram4_generation_stage_descriptor(stage_ordinal);
+  if (descriptor && iree_any_bit_set(options->region_per_dispatch_stage_mask,
+                                     descriptor->resident_stage_bit)) {
+    plan_options.flags |= ID4_PIPELINE_STAGE_PLAN_FLAG_REGION_PER_DISPATCH;
+  }
   plan_options.device_index = options->device_index;
   plan_options.queue_affinity = options->queue_affinity;
   plan_options.diagnostic_tap_names = diagnostic_tap_names;
@@ -365,17 +373,25 @@ static iree_status_t id4_ideogram4_plan_generation_stages(
   qwen_lowering_options.tokenizer_flags = options->tokenizer_flags;
   qwen_lowering_options.max_token_count = session->qwen_model.max_token_count;
   qwen_lowering_options.vocab_size = session->qwen_model.vocab_size;
+  uint32_t qwen_token_count = 0;
+  iree_status_t status = id4_ideogram4_request_count_qwen_tokens(
+      &qwen_lowering_options, session->host_allocator, &qwen_token_count);
+  if (iree_status_is_ok(status)) {
+    status = id4_qwen3_vl_program_calculate_bf16_token_capacity(
+        qwen_token_count, &qwen_lowering_options.token_capacity);
+  }
   id4_ideogram4_qwen_inputs_t qwen_inputs;
   memset(&qwen_inputs, 0, sizeof(qwen_inputs));
-  iree_status_t status = id4_ideogram4_request_lower_qwen_inputs(
-      &qwen_lowering_options, session->host_allocator, &qwen_inputs);
+  if (iree_status_is_ok(status)) {
+    status = id4_ideogram4_request_lower_qwen_inputs(
+        &qwen_lowering_options, session->host_allocator, &qwen_inputs);
+  }
 
   plan->summary.diffusion_latent_shape =
       id4_ideogram4_generation_request_diffusion_latent_shape(options->request);
   if (iree_status_is_ok(status)) {
     plan->summary.qwen_token_count = qwen_inputs.token_count;
-    status = id4_qwen3_vl_program_calculate_bf16_token_capacity(
-        qwen_inputs.token_count, &plan->summary.qwen_token_capacity);
+    plan->summary.qwen_token_capacity = qwen_inputs.token_capacity;
   }
   if (iree_status_is_ok(status)) {
     status = id4_ideogram4_dit_program_image_token_count(

@@ -189,7 +189,7 @@ static iree_status_t id4_ideogram4_qwen_upload_inputs(
     const id4_ideogram4_qwen_inputs_t* inputs,
     id4_ideogram4_qwen_execution_t* execution) {
   const iree_host_size_t attention_mask_length =
-      inputs->token_count * (iree_host_size_t)inputs->token_count *
+      inputs->token_capacity * (iree_host_size_t)inputs->token_capacity *
       sizeof(inputs->attention_mask[0]);
   const iree_host_size_t token_weights_length =
       inputs->token_count * (iree_host_size_t)sizeof(inputs->token_weights[0]);
@@ -267,8 +267,17 @@ iree_status_t id4_ideogram4_session_issue_qwen(
     lowering_options.tokenizer_flags = options->tokenizer_flags;
     lowering_options.max_token_count = session->qwen_model.max_token_count;
     lowering_options.vocab_size = session->qwen_model.vocab_size;
-    status = id4_ideogram4_request_lower_qwen_inputs(
-        &lowering_options, session->host_allocator, &inputs);
+    uint32_t token_count = 0;
+    status = id4_ideogram4_request_count_qwen_tokens(
+        &lowering_options, session->host_allocator, &token_count);
+    if (iree_status_is_ok(status)) {
+      status = id4_qwen3_vl_program_calculate_bf16_token_capacity(
+          token_count, &lowering_options.token_capacity);
+    }
+    if (iree_status_is_ok(status)) {
+      status = id4_ideogram4_request_lower_qwen_inputs(
+          &lowering_options, session->host_allocator, &inputs);
+    }
   }
   if (iree_status_is_ok(status)) {
     execution->token_count = inputs.token_count;
