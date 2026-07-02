@@ -102,6 +102,8 @@ struct id4_pipeline_parameter_slab_set_t {
   iree_hal_executable_cache_t* executable_cache;
   // HAL command-buffer mode used by deferred encoder dispatches.
   iree_hal_command_buffer_mode_t command_buffer_mode;
+  // HAL memory type used for deferred encoder source staging allocations.
+  iree_hal_memory_type_t encoder_staging_memory_type;
   // Maximum source bytes staged in one deferred encoder chunk.
   iree_device_size_t encoder_staging_chunk_byte_capacity;
   // Diagnostic artifact classes requested for deferred encoder JITs.
@@ -710,6 +712,7 @@ static void id4_pipeline_parameter_slab_set_capture_encoder_diagnostics(
   }
   slab_set->encoder_staging_chunk_byte_capacity =
       options->encoder_staging_chunk_byte_capacity;
+  slab_set->encoder_staging_memory_type = options->encoder_staging_memory_type;
 }
 
 static iree_status_t id4_pipeline_parameter_slab_set_copy_waits(
@@ -765,6 +768,8 @@ static iree_status_t id4_pipeline_parameter_slab_set_retain_load_context(
     slab_set->executable_cache = options->executable_cache;
     iree_hal_executable_cache_retain(slab_set->executable_cache);
     slab_set->command_buffer_mode = options->command_buffer_mode;
+    slab_set->encoder_staging_memory_type =
+        options->encoder_staging_memory_type;
     slab_set->encoder_staging_chunk_byte_capacity =
         options->encoder_staging_chunk_byte_capacity;
     slab_set->diagnostic_artifact_flags = options->diagnostic_artifact_flags;
@@ -870,6 +875,19 @@ static iree_status_t id4_pipeline_parameter_slab_set_load_validate_options(
         IREE_STATUS_INVALID_ARGUMENT,
         "parameter slab encoded loading requires a nonzero staging chunk byte "
         "capacity");
+  }
+  if (requires_encoder &&
+      options->encoder_staging_memory_type == IREE_HAL_MEMORY_TYPE_NONE) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "parameter slab encoded loading requires a staging memory type");
+  }
+  if (requires_encoder &&
+      !iree_all_bits_set(options->encoder_staging_memory_type,
+                         IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "parameter slab encoded loading requires device-visible staging");
   }
   IREE_RETURN_IF_ERROR(id4_pipeline_parameter_slab_validate_semaphore_list(
       options->wait_semaphore_list, IREE_SV("parameter slab wait")));
@@ -2046,6 +2064,7 @@ static iree_status_t id4_pipeline_parameter_encode_window_allocate(
     const id4_pipeline_parameter_slab_load_t* load,
     id4_pipeline_parameter_load_group_context_t group_context,
     iree_string_view_t stage_name, iree_hal_semaphore_list_t wait_list,
+    iree_hal_memory_type_t staging_memory_type,
     id4_pipeline_diagnostics_sink_t* diagnostics_sink,
     bool emits_issue_window_diagnostic,
     id4_pipeline_parameter_encode_window_t* window) {
@@ -2065,7 +2084,7 @@ static iree_status_t id4_pipeline_parameter_encode_window_allocate(
   }
 
   iree_hal_buffer_params_t staging_params = {0};
-  staging_params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
+  staging_params.type = staging_memory_type;
   staging_params.access = IREE_HAL_MEMORY_ACCESS_ALL;
   staging_params.usage = IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET |
                          IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE;
@@ -2237,7 +2256,7 @@ static iree_status_t id4_pipeline_parameter_slab_submit_encode_run(
                                                 &cleanup_payload_value);
 
   iree_hal_buffer_params_t staging_params = {0};
-  staging_params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
+  staging_params.type = options->encoder_staging_memory_type;
   staging_params.access = IREE_HAL_MEMORY_ACCESS_ALL;
   staging_params.usage = IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET |
                          IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE;
@@ -2253,7 +2272,7 @@ static iree_status_t id4_pipeline_parameter_slab_submit_encode_run(
   if (iree_status_is_ok(status) && uses_encode_window) {
     status = id4_pipeline_parameter_encode_window_allocate(
         load, group_context, stage_name, wait_semaphore_list,
-        options->diagnostics_sink,
+        options->encoder_staging_memory_type, options->diagnostics_sink,
         encode_window_context->emits_issue_window_diagnostic, encode_window);
     if (iree_status_is_ok(status)) {
       staging_buffer = encode_window->staging_buffer;
@@ -3687,6 +3706,7 @@ id4_pipeline_parameter_slab_set_submit_options(
   options.kernel_cache = slab_set->kernel_cache;
   options.executable_cache = slab_set->executable_cache;
   options.command_buffer_mode = slab_set->command_buffer_mode;
+  options.encoder_staging_memory_type = slab_set->encoder_staging_memory_type;
   options.encoder_staging_chunk_byte_capacity =
       slab_set->encoder_staging_chunk_byte_capacity;
   options.diagnostic_artifact_flags = slab_set->diagnostic_artifact_flags;

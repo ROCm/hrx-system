@@ -390,6 +390,8 @@ typedef struct id4_pipeline_parameter_slab_set_load_options_t {
   iree_hal_executable_cache_t* executable_cache;
   // HAL command-buffer mode used by prepare-time encoder dispatches.
   iree_hal_command_buffer_mode_t command_buffer_mode;
+  // HAL memory type used for encoder source staging allocations.
+  iree_hal_memory_type_t encoder_staging_memory_type;
   // Maximum source bytes staged in one encoder chunk.
   iree_device_size_t encoder_staging_chunk_byte_capacity;
   // Diagnostic artifact classes requested while JITing encoder kernels.

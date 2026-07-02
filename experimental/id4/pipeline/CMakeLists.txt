@@ -293,10 +293,13 @@ iree_cc_test(
     iree::base::tooling::flags
     iree::experimental::id4::tooling::runtime
     iree::hal
+    iree::io::file_handle
     iree::io::parameter_index
     iree::io::parameter_index_provider
+    iree::io::stream
     iree::testing::gtest
     iree::testing::gtest_main
+    iree::testing::temp_file
   LABELS
     "manual"
     "requires-gpu"

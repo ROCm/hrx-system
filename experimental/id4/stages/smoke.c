@@ -760,6 +760,7 @@ static iree_status_t id4_smoke_stage_prepare(
   load_options.structure_size = sizeof(load_options);
   load_options.encoder_staging_chunk_byte_capacity =
       ID4_PIPELINE_PARAMETER_ENCODER_DEFAULT_STAGING_CHUNK_BYTE_CAPACITY;
+  load_options.encoder_staging_memory_type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
   load_options.provider = options->parameter_provider;
   load_options.kernel_library = options->kernel_library;
   load_options.kernel_cache = stage->kernel_cache;
