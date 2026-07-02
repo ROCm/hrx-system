@@ -3353,6 +3353,19 @@ static iree_status_t loom_target_compile_report_json_write_nonzero_u64_field(
                                                          key, value);
 }
 
+static iree_status_t
+loom_target_compile_report_json_write_scaled_nonzero_u64_field(
+    loom_output_stream_t* stream, bool* first_field, const char* key,
+    uint64_t value, uint64_t scale) {
+  uint64_t scaled_value = 0;
+  if (!loom_target_compile_report_checked_mul_u64(value, scale,
+                                                  &scaled_value)) {
+    return iree_ok_status();
+  }
+  return loom_target_compile_report_json_write_nonzero_u64_field(
+      stream, first_field, key, scaled_value);
+}
+
 static iree_status_t loom_target_compile_report_format_memory_economics_json(
     const loom_target_compile_report_static_instruction_mix_t* mix,
     uint64_t scale, loom_output_stream_t* stream) {
@@ -3379,12 +3392,40 @@ static iree_status_t loom_target_compile_report_format_memory_economics_json(
     IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
         stream, &first_field, "total_bytes", total_byte_count));
   }
-  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_nonzero_u64_field(
-      stream, &first_field, "read_unknown_width_count",
-      mix->memory_read_unknown_width_count));
-  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_nonzero_u64_field(
-      stream, &first_field, "write_unknown_width_count",
-      mix->memory_write_unknown_width_count));
+
+#define LOOM_TARGET_COMPILE_REPORT_WRITE_MEMORY_ECONOMICS_COUNT_FIELD(field) \
+  do {                                                                       \
+    IREE_RETURN_IF_ERROR(                                                    \
+        loom_target_compile_report_json_write_scaled_nonzero_u64_field(      \
+            stream, &first_field, #field, mix->field, scale));               \
+  } while (0)
+  LOOM_TARGET_COMPILE_REPORT_WRITE_MEMORY_ECONOMICS_COUNT_FIELD(
+      global_load_count);
+  LOOM_TARGET_COMPILE_REPORT_WRITE_MEMORY_ECONOMICS_COUNT_FIELD(
+      global_store_count);
+  LOOM_TARGET_COMPILE_REPORT_WRITE_MEMORY_ECONOMICS_COUNT_FIELD(
+      buffer_load_count);
+  LOOM_TARGET_COMPILE_REPORT_WRITE_MEMORY_ECONOMICS_COUNT_FIELD(
+      buffer_store_count);
+  LOOM_TARGET_COMPILE_REPORT_WRITE_MEMORY_ECONOMICS_COUNT_FIELD(
+      flat_memory_count);
+  LOOM_TARGET_COMPILE_REPORT_WRITE_MEMORY_ECONOMICS_COUNT_FIELD(
+      local_memory_count);
+  LOOM_TARGET_COMPILE_REPORT_WRITE_MEMORY_ECONOMICS_COUNT_FIELD(
+      scalar_memory_count);
+  LOOM_TARGET_COMPILE_REPORT_WRITE_MEMORY_ECONOMICS_COUNT_FIELD(
+      private_memory_count);
+  LOOM_TARGET_COMPILE_REPORT_WRITE_MEMORY_ECONOMICS_COUNT_FIELD(
+      generic_memory_count);
+#undef LOOM_TARGET_COMPILE_REPORT_WRITE_MEMORY_ECONOMICS_COUNT_FIELD
+  IREE_RETURN_IF_ERROR(
+      loom_target_compile_report_json_write_scaled_nonzero_u64_field(
+          stream, &first_field, "read_unknown_width_count",
+          mix->memory_read_unknown_width_count, scale));
+  IREE_RETURN_IF_ERROR(
+      loom_target_compile_report_json_write_scaled_nonzero_u64_field(
+          stream, &first_field, "write_unknown_width_count",
+          mix->memory_write_unknown_width_count, scale));
 
   uint64_t byte_count = 0;
 #define LOOM_TARGET_COMPILE_REPORT_WRITE_MEMORY_ECONOMICS_FIELD(field) \

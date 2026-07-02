@@ -2179,13 +2179,18 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
                 output,
                 IREE_SV("\"economics\":{\"memory\":"
                         "{\"per_workitem_issued\":{\"read_bytes\":24,"
-                        "\"write_bytes\":8,\"total_bytes\":32"),
+                        "\"write_bytes\":8,\"total_bytes\":32,"
+                        "\"global_load_count\":1,\"global_store_count\":1,"
+                        "\"buffer_load_count\":1"),
                 0),
             IREE_STRING_VIEW_NPOS);
   EXPECT_NE(iree_string_view_find(
                 output,
                 IREE_SV("\"dispatch_issued\":{\"read_bytes\":98304,"
-                        "\"write_bytes\":32768,\"total_bytes\":131072"),
+                        "\"write_bytes\":32768,\"total_bytes\":131072,"
+                        "\"global_load_count\":4096,"
+                        "\"global_store_count\":4096,"
+                        "\"buffer_load_count\":4096"),
                 0),
             IREE_STRING_VIEW_NPOS);
   EXPECT_NE(
