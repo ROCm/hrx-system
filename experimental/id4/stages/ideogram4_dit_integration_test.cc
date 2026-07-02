@@ -1416,10 +1416,13 @@ static void RunDitFixture(const DitFixtureRunOptions& options) {
           diagnostic_tap_bindings, request, pytorch_oracle_directory,
           read_wait.list()));
     }
-    IREE_ASSERT_OK(ComparePytorchOracleOutputBoundary(
-        context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, plan.get(),
-        boundary_bindings, request, pytorch_oracle_directory,
-        read_wait.list()));
+    if (iree_all_bits_set(options.flags,
+                          ID4_DIT_FIXTURE_RUN_FLAG_COMPARE_OUTPUT_BOUNDARY)) {
+      IREE_ASSERT_OK(ComparePytorchOracleOutputBoundary(
+          context.device.get(), IREE_HAL_QUEUE_AFFINITY_ANY, plan.get(),
+          boundary_bindings, request, pytorch_oracle_directory,
+          read_wait.list()));
+    }
   } else if (iree_all_bits_set(
                  options.flags,
                  ID4_DIT_FIXTURE_RUN_FLAG_COMPARE_OUTPUT_BOUNDARY)) {
@@ -1611,6 +1614,50 @@ TEST(Ideogram4DitStageIntegration,
           IREE_SV("ideogram4_dit_online_wmma_attention_fp8_direct_fused_ffn"),
       .flags = ID4_DIT_FIXTURE_RUN_FLAG_VERIFY_DIAGNOSTIC_TAPS_WRITTEN,
   });
+}
+
+static void RunBf16FusedFeedForwardFixture(id4::test::Ideogram4DitBranch branch,
+                                           iree_string_view_t hidden_tap_name,
+                                           iree_string_view_t capture_run_id) {
+  const iree_string_view_t diagnostic_tap_names[] = {
+      hidden_tap_name,
+  };
+  RunDitFixture(DitFixtureRunOptions{
+      .activation_format =
+          ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT,
+      .weight_execution_format =
+          ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_BF16_RESIDENT,
+      .attention_implementation =
+          ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_ONLINE_WMMA,
+      .feed_forward_implementation =
+          ID4_IDEOGRAM4_DIT_FEED_FORWARD_IMPLEMENTATION_FUSED_PRODUCT,
+      .branch = branch,
+      .diagnostic_tap_names =
+          {
+              IREE_ARRAYSIZE(diagnostic_tap_names),
+              diagnostic_tap_names,
+          },
+      .capture_run_id = capture_run_id,
+      .flags = ID4_DIT_FIXTURE_RUN_FLAG_VERIFY_DIAGNOSTIC_TAPS_WRITTEN,
+  });
+}
+
+TEST(Ideogram4DitStageIntegration,
+     PrepareAndIssueOnlineWmmaFusedFeedForwardPytorchOracleFixture) {
+  RunBf16FusedFeedForwardFixture(
+      id4::test::Ideogram4DitBranch::kConditioned,
+      IREE_SV("ideogram4.cond.layers.0.ffn.hidden"),
+      IREE_SV("ideogram4_dit_online_wmma_fused_ffn_pytorch_oracle"));
+}
+
+TEST(
+    Ideogram4DitStageIntegration,
+    PrepareAndIssueOnlineWmmaFusedFeedForwardUnconditionedPytorchOracleFixture) {
+  RunBf16FusedFeedForwardFixture(
+      id4::test::Ideogram4DitBranch::kUnconditioned,
+      IREE_SV("ideogram4.uncond.layers.0.ffn.hidden"),
+      IREE_SV(
+          "ideogram4_dit_online_wmma_fused_ffn_unconditioned_pytorch_oracle"));
 }
 
 TEST(Ideogram4DitStageIntegration,
