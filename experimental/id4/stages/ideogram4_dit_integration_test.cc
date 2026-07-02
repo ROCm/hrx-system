@@ -1616,17 +1616,17 @@ TEST(Ideogram4DitStageIntegration,
   });
 }
 
-static void RunBf16FusedFeedForwardFixture(id4::test::Ideogram4DitBranch branch,
-                                           iree_string_view_t hidden_tap_name,
-                                           iree_string_view_t capture_run_id) {
+static void RunFusedFeedForwardFixture(
+    id4::test::Ideogram4DitBranch branch,
+    id4_ideogram4_dit_weight_execution_format_t weight_execution_format,
+    iree_string_view_t hidden_tap_name, iree_string_view_t capture_run_id) {
   const iree_string_view_t diagnostic_tap_names[] = {
       hidden_tap_name,
   };
   RunDitFixture(DitFixtureRunOptions{
       .activation_format =
           ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT,
-      .weight_execution_format =
-          ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_BF16_RESIDENT,
+      .weight_execution_format = weight_execution_format,
       .attention_implementation =
           ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_ONLINE_WMMA,
       .feed_forward_implementation =
@@ -1644,8 +1644,9 @@ static void RunBf16FusedFeedForwardFixture(id4::test::Ideogram4DitBranch branch,
 
 TEST(Ideogram4DitStageIntegration,
      PrepareAndIssueOnlineWmmaFusedFeedForwardPytorchOracleFixture) {
-  RunBf16FusedFeedForwardFixture(
+  RunFusedFeedForwardFixture(
       id4::test::Ideogram4DitBranch::kConditioned,
+      ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_BF16_RESIDENT,
       IREE_SV("ideogram4.cond.layers.0.ffn.hidden"),
       IREE_SV("ideogram4_dit_online_wmma_fused_ffn_pytorch_oracle"));
 }
@@ -1653,11 +1654,32 @@ TEST(Ideogram4DitStageIntegration,
 TEST(
     Ideogram4DitStageIntegration,
     PrepareAndIssueOnlineWmmaFusedFeedForwardUnconditionedPytorchOracleFixture) {
-  RunBf16FusedFeedForwardFixture(
+  RunFusedFeedForwardFixture(
       id4::test::Ideogram4DitBranch::kUnconditioned,
+      ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_BF16_RESIDENT,
       IREE_SV("ideogram4.uncond.layers.0.ffn.hidden"),
       IREE_SV(
           "ideogram4_dit_online_wmma_fused_ffn_unconditioned_pytorch_oracle"));
+}
+
+TEST(Ideogram4DitStageIntegration,
+     PrepareAndIssueOnlineWmmaFp8DirectFusedFeedForwardPytorchOracleFixture) {
+  RunFusedFeedForwardFixture(
+      id4::test::Ideogram4DitBranch::kConditioned,
+      ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_FP8_DIRECT,
+      IREE_SV("ideogram4.cond.layers.0.ffn.hidden"),
+      IREE_SV("ideogram4_dit_online_wmma_fp8_direct_fused_ffn_pytorch_oracle"));
+}
+
+TEST(
+    Ideogram4DitStageIntegration,
+    PrepareAndIssueOnlineWmmaFp8DirectFusedFeedForwardUnconditionedPytorchOracleFixture) {
+  RunFusedFeedForwardFixture(
+      id4::test::Ideogram4DitBranch::kUnconditioned,
+      ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_FP8_DIRECT,
+      IREE_SV("ideogram4.uncond.layers.0.ffn.hidden"),
+      IREE_SV("ideogram4_dit_online_wmma_fp8_direct_fused_ffn_unconditioned_"
+              "pytorch_oracle"));
 }
 
 TEST(Ideogram4DitStageIntegration,
