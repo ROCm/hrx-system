@@ -89,7 +89,7 @@ typedef struct loom_amdgpu_fp8_decode_plan_descriptor_row_t {
 
 static const loom_amdgpu_fp8_decode_plan_descriptor_row_t
     kLoomAmdgpuFp8DecodePlanDescriptorRows[] = {
-#include "loom/target/arch/amdgpu/lower/fp8_decode_plan_descriptor_rows.inl"
+#include "loom/target/arch/amdgpu/lower/narrow_float/fp8_decode_plan_descriptor_rows.inl"
 };
 
 #undef LOOM_AMDGPU_FP8_DECODE_PLAN_DESCRIPTOR_ROW
