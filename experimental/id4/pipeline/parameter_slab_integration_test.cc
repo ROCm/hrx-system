@@ -965,12 +965,41 @@ static iree_device_size_t RhsTileSourceByteOffsetForTargetByteOffset(
   return (source_row * input_size + source_column) * sizeof(uint16_t);
 }
 
+typedef uint32_t FileBackedQwenRhsTileEncodingFlags;
+enum FileBackedQwenRhsTileEncodingFlagBits : FileBackedQwenRhsTileEncodingFlags {
+  FILE_BACKED_QWEN_RHS_TILE_ENCODING_FLAG_NONE = 0u,
+  FILE_BACKED_QWEN_RHS_TILE_ENCODING_FLAG_DEFERRED_ISSUE = 1u << 0,
+  FILE_BACKED_QWEN_RHS_TILE_ENCODING_FLAG_SPLIT_READINESS_GROUPS = 1u << 1,
+  FILE_BACKED_QWEN_RHS_TILE_ENCODING_FLAG_RELEASE_CONTEXT_BEFORE_WAIT = 1u << 2,
+};
+
+static void WaitSemaphoreList(iree_hal_semaphore_list_t list) {
+  for (iree_host_size_t i = 0; i < list.count; ++i) {
+    IREE_ASSERT_OK(iree_hal_semaphore_wait(
+        list.semaphores[i], list.payload_values[i], iree_infinite_timeout(),
+        IREE_ASYNC_WAIT_FLAG_NONE));
+  }
+}
+
 static void RunFileBackedQwenRhsTileEncoding(
-    iree_hal_memory_type_t encoder_staging_memory_type) {
+    iree_hal_memory_type_t encoder_staging_memory_type,
+    iree_host_size_t load_step_count,
+    FileBackedQwenRhsTileEncodingFlags flags) {
   constexpr uint64_t kOutputSize = 13824;
   constexpr uint64_t kInputSize = 4608;
   constexpr uint64_t kElementCount = kOutputSize * kInputSize;
   constexpr iree_device_size_t kByteLength = kElementCount * sizeof(uint16_t);
+  constexpr iree_host_size_t kMaxLoadStepCount = 5;
+
+  ASSERT_GT(load_step_count, 0u);
+  ASSERT_LE(load_step_count, kMaxLoadStepCount);
+  const bool use_deferred_issue = iree_all_bits_set(
+      flags, FILE_BACKED_QWEN_RHS_TILE_ENCODING_FLAG_DEFERRED_ISSUE);
+  const bool split_readiness_groups = iree_all_bits_set(
+      flags, FILE_BACKED_QWEN_RHS_TILE_ENCODING_FLAG_SPLIT_READINESS_GROUPS);
+  const bool release_context_before_wait = iree_all_bits_set(
+      flags,
+      FILE_BACKED_QWEN_RHS_TILE_ENCODING_FLAG_RELEASE_CONTEXT_BEFORE_WAIT);
 
   RuntimeContext context;
   id4_tooling_runtime_context_options_t context_options;
@@ -1014,37 +1043,50 @@ static void RunFileBackedQwenRhsTileEncoding(
   placement.device_index = 0;
   placement.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
 
-  id4_pipeline_parameter_request_t target_request =
-      id4_pipeline_parameter_request(
-          IREE_SV("weight.bf16_qwen_rhs_tile"),
-          id4_pipeline_parameter_span(/*parameter_offset=*/0,
-                                      /*buffer_offset=*/0,
-                                      /*length=*/kByteLength));
+  id4_pipeline_parameter_request_t target_requests[kMaxLoadStepCount];
+  for (iree_host_size_t i = 0; i < load_step_count; ++i) {
+    target_requests[i] = id4_pipeline_parameter_request(
+        IREE_SV("weight.bf16_qwen_rhs_tile"),
+        id4_pipeline_parameter_span(/*parameter_offset=*/0,
+                                    /*buffer_offset=*/i * kByteLength,
+                                    /*length=*/kByteLength));
+  }
   id4_pipeline_parameter_slab_plan_t slab =
       id4_pipeline_make_device_local_parameter_slab_plan(
           IREE_SV("execution"), /*placement_id=*/0, /*binding_slot=*/0,
           IREE_HAL_QUEUE_AFFINITY_ANY,
           IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE |
               IREE_HAL_BUFFER_USAGE_TRANSFER_SOURCE,
-          /*byte_length=*/kByteLength, /*alignment=*/16,
-          /*request_count=*/1, &target_request);
+          /*byte_length=*/load_step_count * kByteLength, /*alignment=*/16,
+          load_step_count, target_requests);
 
   id4_pipeline_tensor_shape_t weight_shape;
   std::memset(&weight_shape, 0, sizeof(weight_shape));
   weight_shape.rank = 2;
   weight_shape.dims[0] = kOutputSize;
   weight_shape.dims[1] = kInputSize;
-  const id4_pipeline_parameter_load_source_t sources[] = {
+  const id4_pipeline_parameter_load_source_t source =
       id4_pipeline_parameter_load_source(
           IREE_SV("parameters"), IREE_SV("weight.bf16_qwen_rhs_tile"),
           ID4_PIPELINE_TENSOR_DTYPE_BF16, weight_shape,
-          /*byte_length=*/kByteLength),
+          /*byte_length=*/kByteLength);
+  const iree_string_view_t load_step_names[kMaxLoadStepCount] = {
+      IREE_SV("parameters.encode_bf16_qwen_rhs_tile.0"),
+      IREE_SV("parameters.encode_bf16_qwen_rhs_tile.1"),
+      IREE_SV("parameters.encode_bf16_qwen_rhs_tile.2"),
+      IREE_SV("parameters.encode_bf16_qwen_rhs_tile.3"),
+      IREE_SV("parameters.encode_bf16_qwen_rhs_tile.4"),
   };
-  id4_pipeline_parameter_load_step_t load_step =
-      id4_pipeline_parameter_encode_bf16_linear_rhs_tile_load_step(
-          IREE_SV("parameters.encode_bf16_qwen_rhs_tile"),
-          IREE_ARRAYSIZE(sources), sources,
-          /*target_slab_index=*/0, /*request_offset=*/0);
+  id4_pipeline_parameter_load_step_t load_steps[kMaxLoadStepCount];
+  for (iree_host_size_t i = 0; i < load_step_count; ++i) {
+    load_steps[i] =
+        id4_pipeline_parameter_encode_bf16_linear_rhs_tile_load_step(
+            load_step_names[i], /*source_count=*/1, &source,
+            /*target_slab_index=*/0, /*request_offset=*/i);
+    if (split_readiness_groups) {
+      load_steps[i].readiness_group_key = i;
+    }
+  }
 
   id4_pipeline_plan_create_options_t plan_options;
   std::memset(&plan_options, 0, sizeof(plan_options));
@@ -1056,8 +1098,8 @@ static void RunFileBackedQwenRhsTileEncoding(
   plan_options.placements = &placement;
   plan_options.parameter_slab_count = 1;
   plan_options.parameter_slabs = &slab;
-  plan_options.parameter_load_step_count = 1;
-  plan_options.parameter_load_steps = &load_step;
+  plan_options.parameter_load_step_count = load_step_count;
+  plan_options.parameter_load_steps = load_steps;
   OwningRef<id4_pipeline_plan_t, id4_pipeline_plan_release> plan;
   IREE_ASSERT_OK(id4_pipeline_plan_create(&plan_options,
                                           iree_allocator_system(), plan.out()));
@@ -1065,13 +1107,18 @@ static void RunFileBackedQwenRhsTileEncoding(
   iree_hal_device_t* device =
       id4_tooling_runtime_context_primary_device(&context.value);
   OwningRef<iree_hal_semaphore_t, iree_hal_semaphore_release> prepare_semaphore;
-  IREE_ASSERT_OK(iree_hal_semaphore_create(
-      device, IREE_HAL_QUEUE_AFFINITY_ANY, /*initial_value=*/0,
-      IREE_HAL_SEMAPHORE_FLAG_DEFAULT, prepare_semaphore.out()));
-  iree_hal_semaphore_t* prepare_signal_semaphore = prepare_semaphore.get();
+  if (!use_deferred_issue) {
+    IREE_ASSERT_OK(iree_hal_semaphore_create(
+        device, IREE_HAL_QUEUE_AFFINITY_ANY, /*initial_value=*/0,
+        IREE_HAL_SEMAPHORE_FLAG_DEFAULT, prepare_semaphore.out()));
+  }
+  iree_hal_semaphore_t* prepare_signal_semaphore =
+      use_deferred_issue ? nullptr : prepare_semaphore.get();
   uint64_t prepare_signal_value = 1;
   iree_hal_semaphore_list_t prepare_signal_list =
-      MakeOneSemaphoreList(&prepare_signal_semaphore, &prepare_signal_value);
+      use_deferred_issue ? iree_hal_semaphore_list_empty()
+                         : MakeOneSemaphoreList(&prepare_signal_semaphore,
+                                                &prepare_signal_value);
 
   id4_pipeline_parameter_slab_set_load_options_t load_options;
   std::memset(&load_options, 0, sizeof(load_options));
@@ -1089,22 +1136,107 @@ static void RunFileBackedQwenRhsTileEncoding(
   OwningRef<id4_pipeline_parameter_slab_set_t,
             id4_pipeline_parameter_slab_set_release>
       slab_set;
-  IREE_ASSERT_OK(id4_pipeline_plan_load_parameter_slabs(
-      plan.get(), &load_options, iree_allocator_system(), slab_set.out()));
-  IREE_ASSERT_OK(iree_hal_semaphore_wait(
-      prepare_semaphore.get(), prepare_signal_value, iree_infinite_timeout(),
-      IREE_ASYNC_WAIT_FLAG_NONE));
+  if (use_deferred_issue) {
+    IREE_ASSERT_OK(id4_pipeline_plan_prepare_parameter_slabs(
+        plan.get(), &load_options, iree_allocator_system(), slab_set.out()));
+    OwningRef<id4_pipeline_parameter_slab_issue_context_t,
+              id4_pipeline_parameter_slab_issue_context_release>
+        issue_context;
+    IREE_ASSERT_OK(id4_pipeline_parameter_slab_issue_context_create(
+        slab_set.get(), load_step_count, load_steps, iree_allocator_system(),
+        issue_context.out()));
+    const iree_host_size_t load_group_count =
+        id4_pipeline_parameter_slab_set_load_group_count(slab_set.get());
+    ASSERT_EQ(load_group_count,
+              split_readiness_groups ? load_step_count : (iree_host_size_t)1);
+    for (iree_host_size_t group_index = 0; group_index < load_group_count;
+         ++group_index) {
+      id4_pipeline_parameter_load_group_context_t group_context = {
+          // Plan-local load group ordinal.
+          .group_index = group_index,
+          // This test has no consumer region graph.
+          .first_consumer_region_id = IREE_HOST_SIZE_MAX,
+          // This test submits parameter groups directly.
+          .submit_region_id = IREE_HOST_SIZE_MAX,
+      };
+      IREE_ASSERT_OK(
+          id4_pipeline_parameter_slab_issue_context_submit_load_group(
+              issue_context.get(), load_step_count, load_steps, group_context,
+              plan_options.stage_name, &diagnostics_sink));
+    }
+    iree_hal_semaphore_list_t cleanup_wait_list =
+        iree_hal_semaphore_list_empty();
+    IREE_ASSERT_OK(id4_pipeline_parameter_slab_issue_context_finish(
+        issue_context.get(), &cleanup_wait_list));
+    if (release_context_before_wait) {
+      OwningRef<iree_hal_semaphore_t, iree_hal_semaphore_release>
+          final_semaphore;
+      IREE_ASSERT_OK(iree_hal_semaphore_create(
+          device, IREE_HAL_QUEUE_AFFINITY_ANY, /*initial_value=*/0,
+          IREE_HAL_SEMAPHORE_FLAG_DEFAULT, final_semaphore.out()));
+      iree_hal_semaphore_t* final_signal_semaphore = final_semaphore.get();
+      uint64_t final_signal_value = 1;
+      iree_hal_semaphore_list_t final_signal_list =
+          MakeOneSemaphoreList(&final_signal_semaphore, &final_signal_value);
+      IREE_ASSERT_OK(iree_hal_device_queue_barrier(
+          device, IREE_HAL_QUEUE_AFFINITY_ANY, cleanup_wait_list,
+          final_signal_list, IREE_HAL_EXECUTE_FLAG_NONE));
+      issue_context.reset();
+      IREE_ASSERT_OK(iree_hal_semaphore_wait(
+          final_semaphore.get(), final_signal_value, iree_infinite_timeout(),
+          IREE_ASYNC_WAIT_FLAG_NONE));
+    } else {
+      WaitSemaphoreList(cleanup_wait_list);
+    }
+  } else {
+    IREE_ASSERT_OK(id4_pipeline_plan_load_parameter_slabs(
+        plan.get(), &load_options, iree_allocator_system(), slab_set.out()));
+    IREE_ASSERT_OK(iree_hal_semaphore_wait(
+        prepare_semaphore.get(), prepare_signal_value, iree_infinite_timeout(),
+        IREE_ASYNC_WAIT_FLAG_NONE));
+  }
+  IREE_ASSERT_OK(id4_pipeline_parameter_slab_set_check_load_group_failures(
+      slab_set.get(), plan_options.stage_name, &diagnostics_sink));
 
   iree_hal_buffer_t* target_buffer =
       id4_pipeline_parameter_slab_set_buffer_at(slab_set.get(), 0);
-  for (iree_device_size_t target_check_offset : target_check_offsets) {
-    ExpectBf16OnesAt(device, target_buffer, target_check_offset);
+  for (iree_host_size_t step_index = 0; step_index < load_step_count;
+       ++step_index) {
+    const iree_device_size_t target_base_offset = step_index * kByteLength;
+    for (iree_device_size_t target_check_offset : target_check_offsets) {
+      ExpectBf16OnesAt(device, target_buffer,
+                       target_base_offset + target_check_offset);
+    }
   }
 }
 
 TEST(ParameterSlabIntegration, FileBackedHostVisibleQwenRhsTileEncoding) {
-  RunFileBackedQwenRhsTileEncoding(IREE_HAL_MEMORY_TYPE_HOST_VISIBLE |
-                                   IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE);
+  RunFileBackedQwenRhsTileEncoding(
+      IREE_HAL_MEMORY_TYPE_HOST_VISIBLE | IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
+      /*load_step_count=*/1, FILE_BACKED_QWEN_RHS_TILE_ENCODING_FLAG_NONE);
+}
+
+TEST(ParameterSlabIntegration, FileBackedHostVisibleQwenQkvRhsTileEncoding) {
+  RunFileBackedQwenRhsTileEncoding(
+      IREE_HAL_MEMORY_TYPE_HOST_VISIBLE | IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
+      /*load_step_count=*/3, FILE_BACKED_QWEN_RHS_TILE_ENCODING_FLAG_NONE);
+}
+
+TEST(ParameterSlabIntegration,
+     FileBackedHostVisibleQwenFiveChunkRhsTileEncoding) {
+  RunFileBackedQwenRhsTileEncoding(
+      IREE_HAL_MEMORY_TYPE_HOST_VISIBLE | IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
+      /*load_step_count=*/5, FILE_BACKED_QWEN_RHS_TILE_ENCODING_FLAG_NONE);
+}
+
+TEST(ParameterSlabIntegration,
+     FileBackedHostVisibleQwenSplitIssueRhsTileEncoding) {
+  RunFileBackedQwenRhsTileEncoding(
+      IREE_HAL_MEMORY_TYPE_HOST_VISIBLE | IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
+      /*load_step_count=*/5,
+      FILE_BACKED_QWEN_RHS_TILE_ENCODING_FLAG_DEFERRED_ISSUE |
+          FILE_BACKED_QWEN_RHS_TILE_ENCODING_FLAG_SPLIT_READINESS_GROUPS |
+          FILE_BACKED_QWEN_RHS_TILE_ENCODING_FLAG_RELEASE_CONTEXT_BEFORE_WAIT);
 }
 
 }  // namespace
