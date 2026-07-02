@@ -29,12 +29,19 @@ TEST(LowAllocationSpillPlanTest, ComputesByteLayout) {
   IREE_ASSERT_OK(loom_low_allocation_spill_plan_layout(
       &assignment, /*alloc_unit_bits=*/16, &byte_size, &byte_alignment));
   EXPECT_EQ(byte_size, 6u);
-  EXPECT_EQ(byte_alignment, 2u);
+  EXPECT_EQ(byte_alignment, 4u);
 
   IREE_ASSERT_OK(loom_low_allocation_spill_plan_layout(
       &assignment, /*alloc_unit_bits=*/24, &byte_size, &byte_alignment));
   EXPECT_EQ(byte_size, 9u);
-  EXPECT_EQ(byte_alignment, 4u);
+  EXPECT_EQ(byte_alignment, 8u);
+
+  const loom_low_allocation_assignment_t wide_assignment =
+      Assignment(/*unit_count=*/4);
+  IREE_ASSERT_OK(loom_low_allocation_spill_plan_layout(
+      &wide_assignment, /*alloc_unit_bits=*/32, &byte_size, &byte_alignment));
+  EXPECT_EQ(byte_size, 16u);
+  EXPECT_EQ(byte_alignment, 16u);
 }
 
 TEST(LowAllocationSpillPlanTest, RejectsZeroBitAllocationUnits) {

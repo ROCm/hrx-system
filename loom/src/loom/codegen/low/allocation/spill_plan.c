@@ -9,6 +9,8 @@
 #include "loom/ir/module.h"
 #include "loom/ops/low/ops.h"
 
+#define LOOM_LOW_ALLOCATION_SPILL_PLAN_MAX_NATURAL_ALIGNMENT 16u
+
 static uint32_t loom_low_allocation_spill_plan_round_up_to_power_of_two_u32(
     uint32_t value) {
   if (value <= 1) {
@@ -21,6 +23,17 @@ static uint32_t loom_low_allocation_spill_plan_round_up_to_power_of_two_u32(
   value |= value >> 8;
   value |= value >> 16;
   return value == UINT32_MAX ? 0 : value + 1u;
+}
+
+static uint32_t loom_low_allocation_spill_plan_natural_chunk_units(
+    uint32_t unit_count) {
+  if (unit_count >= 4) {
+    return 4;
+  }
+  if (unit_count >= 2) {
+    return 2;
+  }
+  return 1;
 }
 
 iree_status_t loom_low_allocation_spill_plan_layout(
@@ -42,9 +55,17 @@ iree_status_t loom_low_allocation_spill_plan_layout(
                             "spill slot byte size exceeds uint32_t");
   }
   uint32_t unit_byte_size = ((uint32_t)alloc_unit_bits + 7u) / 8u;
+  const uint32_t chunk_units =
+      loom_low_allocation_spill_plan_natural_chunk_units(
+          assignment->unit_count);
+  uint64_t natural_alignment = (uint64_t)unit_byte_size * chunk_units;
+  if (natural_alignment >
+      LOOM_LOW_ALLOCATION_SPILL_PLAN_MAX_NATURAL_ALIGNMENT) {
+    natural_alignment = LOOM_LOW_ALLOCATION_SPILL_PLAN_MAX_NATURAL_ALIGNMENT;
+  }
   uint32_t byte_alignment =
       loom_low_allocation_spill_plan_round_up_to_power_of_two_u32(
-          unit_byte_size);
+          (uint32_t)natural_alignment);
   if (byte_alignment == 0) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "spill slot byte alignment exceeds uint32_t");

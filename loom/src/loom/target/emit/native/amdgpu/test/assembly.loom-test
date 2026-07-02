@@ -2155,6 +2155,28 @@ low.func.def target(@gfx11_target) @gfx11_sgpr_spill_reload(%value: reg<amdgpu.s
 
 // ====
 
+// RUN: emit amdgpu-assembly @gfx11_vgpr_spill_reload waits=none strategy=source
+amdgpu.target<gfx1100> @gfx11_target
+low.func.def target(@gfx11_target) @gfx11_vgpr_spill_reload(%value: reg<amdgpu.vgpr x2>) {
+  %storage = low.storage.reserve {byte_alignment = 8, byte_length = 8} : low.storage<private>
+  low.spill %value, %storage : reg<amdgpu.vgpr x2>, low.storage<private>
+  %reload = low.reload %storage : low.storage<private> -> reg<amdgpu.vgpr x2>
+  low.return
+}
+
+// ----
+  s_mov_b64_exec_read s[0:1]
+  s_mov_b64 exec, -1
+  scratch_store_b64 off, v[0:1], off offset:0 glc:0 slc:0 dlc:0
+  s_mov_b64 exec, s[0:1]
+  s_mov_b64_exec_read s[0:1]
+  s_mov_b64 exec, -1
+  scratch_load_b64 v[0:1], off, off offset:0 glc:0 slc:0 dlc:0
+  s_mov_b64 exec, s[0:1]
+  s_endpgm
+
+// ====
+
 // RUN: emit amdgpu-assembly @gfx942_sgpr_spill_reload waits=none strategy=source
 amdgpu.target<gfx942> @gfx942_target
 low.func.def target(@gfx942_target) @gfx942_sgpr_spill_reload(%value: reg<amdgpu.sgpr x2>) {
@@ -2182,6 +2204,30 @@ low.func.def target(@gfx942_target) @gfx942_sgpr_spill_reload(%value: reg<amdgpu
   s_mov_b32_m0_imm m0, 0
   scratch_load_b32 v0, off, off offset:4 nt:0 sc0:0 sc1:0
   v_readfirstlane_b32 s3, v0
+  s_mov_b64 exec, s[0:1]
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @gfx942_vgpr_spill_reload waits=none strategy=source
+amdgpu.target<gfx942> @gfx942_target
+low.func.def target(@gfx942_target) @gfx942_vgpr_spill_reload(%value: reg<amdgpu.vgpr x2>) {
+  %storage = low.storage.reserve {byte_alignment = 8, byte_length = 8} : low.storage<private>
+  low.spill %value, %storage : reg<amdgpu.vgpr x2>, low.storage<private>
+  %reload = low.reload %storage : low.storage<private> -> reg<amdgpu.vgpr x2>
+  low.return
+}
+
+// ----
+  s_mov_b64_exec_read s[0:1]
+  s_mov_b64 exec, -1
+  s_mov_b32_m0_imm m0, 0
+  scratch_store_b64 off, v[0:1], off offset:0 nt:0 sc0:0 sc1:0
+  s_mov_b64 exec, s[0:1]
+  s_mov_b64_exec_read s[0:1]
+  s_mov_b64 exec, -1
+  s_mov_b32_m0_imm m0, 0
+  scratch_load_b64 v[0:1], off, off offset:0 nt:0 sc0:0 sc1:0
   s_mov_b64 exec, s[0:1]
   s_endpgm
 

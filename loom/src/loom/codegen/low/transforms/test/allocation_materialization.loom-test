@@ -31,6 +31,41 @@ low.func.def target(@test_target) @spill(%a: reg<test.i32>, %b: reg<test.i32>, %
 
 test.target<low_core> @test_target
 
+low.func.def target(@test_target) @live_in_spill_storage_prefix() -> (reg<test.i32>) asm<test.low.core> {
+  %live = live_in<test.arg0> : reg<test.i32>
+  %seed0 = test.const.i32 1
+  %seed1 = test.const.i32 2
+  %pair = test.add.i32 %seed0, %seed1
+  %sum0 = test.add.i32 %pair, %live
+  %sum1 = test.add.i32 %sum0, %pair
+  %out = test.add.i32 %sum1, %live
+  return %out
+}
+
+// ----
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @live_in_spill_storage_prefix() -> (reg<test.i32>) {
+  %live = low.live_in<test.arg0> : reg<test.i32>
+  %live_in_spill_storage_prefix_spill_storage_0 = low.storage.reserve {byte_alignment = 4, byte_length = 4} : low.storage<private>
+  low.spill %live, %live_in_spill_storage_prefix_spill_storage_0 : reg<test.i32>, low.storage<private>
+  %seed0 = low.const<test.const.i32> {i32_value = 1} : reg<test.i32>
+  %seed1 = low.const<test.const.i32> {i32_value = 2} : reg<test.i32>
+  %pair = low.op<test.add.i32>(%seed0, %seed1) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  %9 = low.reload %live_in_spill_storage_prefix_spill_storage_0 : low.storage<private> -> reg<test.i32>
+  %sum0 = low.op<test.add.i32>(%pair, %9) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  %sum1 = low.op<test.add.i32>(%sum0, %pair) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  %10 = low.reload %live_in_spill_storage_prefix_spill_storage_0 : low.storage<private> -> reg<test.i32>
+  %out = low.op<test.add.i32>(%sum1, %10) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  low.return %out : reg<test.i32>
+}
+
+// ====
+
+// RUN: pass low-materialize-allocation{budgets=test.i32=2}
+
+test.target<low_core> @test_target
+
 low.func.def target(@test_target) @block_arg_spill(%row: reg<test.i32>, %carry: reg<test.i32>) -> (reg<test.i32>) asm<test.low.core> {
   low.br ^late
 ^join(%state: reg<test.i32>):
@@ -88,7 +123,7 @@ low.func.def target(@test_target) @wide_slice_reload_cluster(%blocker: reg<test.
 test.target<low_core> @test_target
 
 low.func.def target(@test_target) @wide_slice_reload_cluster(%blocker: reg<test.i32>, %wide: reg<test.i32 x4>) -> (reg<test.i32>) {
-  %wide_slice_reload_cluster_spill_storage_0 = low.storage.reserve {byte_alignment = 4, byte_length = 16} : low.storage<private>
+  %wide_slice_reload_cluster_spill_storage_0 = low.storage.reserve {byte_alignment = 16, byte_length = 16} : low.storage<private>
   low.spill %wide, %wide_slice_reload_cluster_spill_storage_0 : reg<test.i32 x4>, low.storage<private>
   %blocker_use = low.op<test.add.i32>(%blocker, %blocker) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
   %13 = low.reload %wide_slice_reload_cluster_spill_storage_0 : low.storage<private> -> reg<test.i32>
