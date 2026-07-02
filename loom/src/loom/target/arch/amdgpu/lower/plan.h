@@ -1234,6 +1234,14 @@ typedef struct loom_amdgpu_fragment_repack_plan_t {
   uint16_t result_register_count;
   // Number of lanes that share one logical result-fragment register row group.
   uint16_t lane_group_count;
+  // Tile row divisor used to derive target-row and target-reduction lane ids.
+  uint16_t lane_divisor;
+  // Log2 byte spacing between source result-fragment lane groups.
+  uint16_t source_lane_group_byte_shift;
+  // Log2 byte spacing contributed by the target LHS lane-div reduction group.
+  uint16_t result_lane_div_byte_shift;
+  // Source result-fragment layout map selected by the target contract.
+  loom_matrix_fragment_map_kind_t source_map_kind;
   // Source fragment role fact bitset.
   uint32_t source_role_flags;
   // Result fragment role fact bitset.
