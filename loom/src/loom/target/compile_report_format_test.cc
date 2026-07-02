@@ -1067,8 +1067,9 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
   loom_target_compile_report_record_allocation(&entry_report, 6, 1, 1, 2, 0, 11,
                                                9, 3);
   loom_target_compile_report_record_allocation_materialization(
-      &entry_report, /*spill_storage_count=*/4, /*spill_store_count=*/5,
-      /*reload_count=*/6);
+      &entry_report, /*spill_storage_count=*/4, /*spill_storage_bytes=*/40,
+      /*spill_store_count=*/5, /*spill_store_bytes=*/50, /*reload_count=*/6,
+      /*reload_bytes=*/60);
   loom_target_compile_report_record_move_cause(
       &entry_report,
       LOOM_TARGET_COMPILE_REPORT_MOVE_CAUSE_CONSTANT_MATERIALIZATION, 3, 3);
@@ -1417,8 +1418,11 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
                                   IREE_SV("spill_plans=1 coalesced_copies=2 "
                                           "materialized_copies=0 "
                                           "materialized_spill_storage=4 "
+                                          "materialized_spill_storage_bytes=40 "
                                           "materialized_spill_stores=5 "
+                                          "materialized_spill_store_bytes=50 "
                                           "materialized_reloads=6 "
+                                          "materialized_reload_bytes=60 "
                                           "storage_leases=11 "
                                           "storage_lease_instances=9 "
                                           "storage_release_actions=3 "
@@ -1641,8 +1645,11 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
   EXPECT_NE(iree_string_view_find(
                 output,
                 IREE_SV("\"allocation_materialized_spill_storage_count\":4,"
+                        "\"allocation_materialized_spill_storage_bytes\":40,"
                         "\"allocation_materialized_spill_store_count\":5,"
-                        "\"allocation_materialized_reload_count\":6"),
+                        "\"allocation_materialized_spill_store_bytes\":50,"
+                        "\"allocation_materialized_reload_count\":6,"
+                        "\"allocation_materialized_reload_bytes\":60"),
                 0),
             IREE_STRING_VIEW_NPOS);
   EXPECT_NE(iree_string_view_find(
@@ -1800,8 +1807,11 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
                                     "\"coalesced_copy_count\":2,"
                                     "\"materialized_copy_count\":0,"
                                     "\"materialized_spill_storage_count\":4,"
+                                    "\"materialized_spill_storage_bytes\":40,"
                                     "\"materialized_spill_store_count\":5,"
+                                    "\"materialized_spill_store_bytes\":50,"
                                     "\"materialized_reload_count\":6,"
+                                    "\"materialized_reload_bytes\":60,"
                                     "\"storage_lease_count\":11,"
                                     "\"storage_lease_instance_count\":9,"
                                     "\"storage_release_action_count\":3}"),

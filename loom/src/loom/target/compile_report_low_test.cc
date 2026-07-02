@@ -715,8 +715,11 @@ TEST(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
           /*.materialized_copy_count=*/1,
       },
       /*.materialized_spill_storage_count=*/4,
+      /*.materialized_spill_storage_bytes=*/40,
       /*.materialized_spill_store_count=*/5,
+      /*.materialized_spill_store_bytes=*/50,
       /*.materialized_reload_count=*/6,
+      /*.materialized_reload_bytes=*/60,
       /*.materialized_spills=*/
       {
           /*.head=*/&materialized_spill_vec,

@@ -88,10 +88,16 @@ typedef struct loom_low_emission_frame_t {
   loom_low_allocation_table_t allocation;
   // Cumulative spill storage materialized while reaching this frame.
   uint64_t materialized_spill_storage_count;
+  // Cumulative materialized spill storage byte size.
+  uint64_t materialized_spill_storage_bytes;
   // Cumulative low.spill stores materialized while reaching this frame.
   uint64_t materialized_spill_store_count;
+  // Cumulative materialized low.spill store byte traffic.
+  uint64_t materialized_spill_store_bytes;
   // Cumulative low.reload ops materialized while reaching this frame.
   uint64_t materialized_reload_count;
+  // Cumulative materialized low.reload byte traffic.
+  uint64_t materialized_reload_bytes;
   // Materialized spill records retained while reaching this frame.
   loom_low_allocation_materialized_spill_list_t materialized_spills;
 } loom_low_emission_frame_t;
