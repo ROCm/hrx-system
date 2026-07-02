@@ -120,7 +120,14 @@ emitted code bytes, and memory summaries. Useful first inspections are:
 
 ```bash
 jq '{artifact, targets, functions}' /tmp/loom-q6q8.manifest.json
-jq '{status, target_key, target_bundle, target_export, spills:.allocation.spill_count, code_bytes:.emission.code_byte_count, dots:.static_instruction_mix.dot_count}' \
+jq '{status, target_key, target_bundle, target_export,
+     planned_spills:.allocation.spill_count,
+     materialized_spill_storage:.allocation.materialized_spill_storage_count,
+     materialized_spill_stores:.allocation.materialized_spill_store_count,
+     materialized_reloads:.allocation.materialized_reload_count,
+     private:.memory.private_bytes,
+     code_bytes:.emission.code_byte_count,
+     dots:.static_instruction_mix.dot_count}' \
   /tmp/loom-q6q8.compile-report.json
 ```
 
@@ -227,8 +234,14 @@ between tools without changing the report fields:
 jq 'select(.row=="compile" and .compile_report) |
   {candidate_id,
    code:.compile_report.emission.code_byte_count,
-   spills:.compile_report.allocation.spill_count,
+   planned_spills:.compile_report.allocation.spill_count,
+   materialized_spill_storage:
+     .compile_report.allocation.materialized_spill_storage_count,
+   materialized_spill_stores:
+     .compile_report.allocation.materialized_spill_store_count,
+   materialized_reloads:.compile_report.allocation.materialized_reload_count,
    local:.compile_report.memory.local_bytes,
+   private:.compile_report.memory.private_bytes,
    pressure:.compile_report.schedule.register_pressure_peak_live_units}' \
   /tmp/loom-q6q8-run/results.jsonl
 
@@ -236,8 +249,14 @@ jq 'select(.row=="benchmark" and .benchmark_result.compile_report) |
   .benchmark_result |
   {benchmark,
    code:.compile_report.emission.code_byte_count,
-   spills:.compile_report.allocation.spill_count,
-   local:.compile_report.memory.local_bytes}' \
+   planned_spills:.compile_report.allocation.spill_count,
+   materialized_spill_storage:
+     .compile_report.allocation.materialized_spill_storage_count,
+   materialized_spill_stores:
+     .compile_report.allocation.materialized_spill_store_count,
+   materialized_reloads:.compile_report.allocation.materialized_reload_count,
+   local:.compile_report.memory.local_bytes,
+   private:.compile_report.memory.private_bytes}' \
   /tmp/loom-q6q8-run/results.jsonl
 ```
 
