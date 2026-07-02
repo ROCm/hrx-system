@@ -580,6 +580,12 @@ def test_gfx11_wmma_wave64_asm_forms_keep_native_mnemonics_unsuffixed() -> None:
         assert form.operands == ("a", "b", "acc")
 
         zero_descriptor = descriptors[f"{descriptor_key}.acc_zero"]
+        assert tuple(constraint.kind for constraint in zero_descriptor.constraints) == (
+            ConstraintKind.EARLY_CLOBBER,
+        )
+        assert tuple(
+            constraint.lhs_operand_index for constraint in zero_descriptor.constraints
+        ) == (0,)
         zero_form = zero_descriptor.asm_forms[0]
         assert zero_form.mnemonic == f"{low_mnemonic}_acc_zero"
         assert zero_form.native_assembly_mnemonic == native_mnemonic
