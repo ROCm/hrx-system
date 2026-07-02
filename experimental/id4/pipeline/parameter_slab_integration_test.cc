@@ -86,6 +86,21 @@ class RuntimeContext {
   bool initialized = false;
 };
 
+static RuntimeContext& SharedRuntimeContext() {
+  static RuntimeContext context;
+  if (!context.initialized) {
+    id4_tooling_runtime_context_options_t context_options;
+    std::memset(&context_options, 0, sizeof(context_options));
+    context_options.structure_size = sizeof(context_options);
+    context_options.executable_cache_identifier =
+        IREE_SV("id4.parameter_slab.integration");
+    IREE_CHECK_OK(id4_tooling_runtime_context_initialize_from_flags(
+        &context_options, iree_allocator_system(), &context.value));
+    context.initialized = true;
+  }
+  return context;
+}
+
 class ScopedTempFilePath {
  public:
   explicit ScopedTempFilePath(const char* stem) : path_(stem) {}
@@ -366,15 +381,7 @@ static void RunCompactLinearRhsTileEncoding(
     id4_pipeline_diagnostics_sink_t* diagnostics_sink);
 
 TEST(ParameterSlabIntegration, CheckLoadGroupFailuresReportsFailedSemaphore) {
-  RuntimeContext context;
-  id4_tooling_runtime_context_options_t context_options;
-  std::memset(&context_options, 0, sizeof(context_options));
-  context_options.structure_size = sizeof(context_options);
-  context_options.executable_cache_identifier =
-      IREE_SV("id4.parameter_slab.failure_check");
-  IREE_ASSERT_OK(id4_tooling_runtime_context_initialize_from_flags(
-      &context_options, iree_allocator_system(), &context.value));
-  context.initialized = true;
+  RuntimeContext& context = SharedRuntimeContext();
 
   FailureDiagnosticCapture capture;
   std::memset(&capture, 0, sizeof(capture));
@@ -461,15 +468,7 @@ TEST(ParameterSlabIntegration, CheckLoadGroupFailuresReportsFailedSemaphore) {
 }
 
 TEST(ParameterSlabIntegration, EncodedFp8WeightsFeedBf16WmmaLinear) {
-  RuntimeContext context;
-  id4_tooling_runtime_context_options_t context_options;
-  std::memset(&context_options, 0, sizeof(context_options));
-  context_options.structure_size = sizeof(context_options);
-  context_options.executable_cache_identifier =
-      IREE_SV("id4.parameter_slab.integration");
-  IREE_ASSERT_OK(id4_tooling_runtime_context_initialize_from_flags(
-      &context_options, iree_allocator_system(), &context.value));
-  context.initialized = true;
+  RuntimeContext& context = SharedRuntimeContext();
 
   id4_pipeline_diagnostics_sink_t diagnostics_sink;
   id4_pipeline_diagnostics_sink_initialize_ignore(&diagnostics_sink);
@@ -1001,15 +1000,7 @@ static void RunFileBackedQwenRhsTileEncoding(
       flags,
       FILE_BACKED_QWEN_RHS_TILE_ENCODING_FLAG_RELEASE_CONTEXT_BEFORE_WAIT);
 
-  RuntimeContext context;
-  id4_tooling_runtime_context_options_t context_options;
-  std::memset(&context_options, 0, sizeof(context_options));
-  context_options.structure_size = sizeof(context_options);
-  context_options.executable_cache_identifier =
-      IREE_SV("id4.parameter_slab.file_backed_qwen_rhs_tile");
-  IREE_ASSERT_OK(id4_tooling_runtime_context_initialize_from_flags(
-      &context_options, iree_allocator_system(), &context.value));
-  context.initialized = true;
+  RuntimeContext& context = SharedRuntimeContext();
 
   id4_pipeline_diagnostics_sink_t diagnostics_sink;
   id4_pipeline_diagnostics_sink_initialize_ignore(&diagnostics_sink);
