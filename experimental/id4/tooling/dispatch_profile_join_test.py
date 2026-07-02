@@ -292,6 +292,18 @@ def _find_kernel_row(
     )
 
 
+def _find_operation_row(
+    rows: list[dict[str, object]], name: str, function_name: str
+) -> dict[str, object]:
+    for row in rows:
+        if row.get("name") == name and row.get("function_name") == function_name:
+            return row
+    raise AssertionError(
+        f"operation row with name={name!r} "
+        f"and function_name={function_name!r} not found"
+    )
+
+
 class DispatchProfileJoinTest(unittest.TestCase):
     def test_joins_plan_dispatch_rows_to_profile_events_by_order(self) -> None:
         report = dispatch_profile_join.join_dispatch_profile(_plan(), _profile())
@@ -320,6 +332,30 @@ class DispatchProfileJoinTest(unittest.TestCase):
         self.assertEqual(report["by_kernel"][0]["p90_duration_ns"], 1000)
         self.assertEqual(report["by_kernel"][0]["p99_duration_ns"], 1000)
         self.assertEqual(report["by_kernel"][0]["max_duration_ns"], 1000)
+
+    def test_aggregates_repeated_layer_operation_families(self) -> None:
+        plan = _plan()
+        dispatches = plan["program"]["dispatches"]
+        dispatches[0]["name"] = "model.layers.0.attention.qkv_projection.wmma"
+        dispatches[0]["module_path"] = "model/qkv_projection"
+        dispatches[0]["function_name"] = "id4_model_qkv_projection"
+        dispatches[1]["name"] = "model.layers.1.attention.qkv_projection.wmma"
+        dispatches[1]["module_path"] = "model/qkv_projection"
+        dispatches[1]["function_name"] = "id4_model_qkv_projection"
+        profile = _profile()
+        profile[0]["key"] = "id4_model_qkv_projection"
+        profile[1]["key"] = "id4_model_qkv_projection"
+
+        report = dispatch_profile_join.join_dispatch_profile(plan, profile)
+
+        operation = _find_operation_row(
+            report["by_operation"],
+            "model.layers.*.attention.qkv_projection.wmma",
+            "id4_model_qkv_projection",
+        )
+        self.assertEqual(operation["count"], 2)
+        self.assertEqual(operation["total_duration_ns"], 1500)
+        self.assertEqual(operation["p50_duration_ns"], 1000)
 
     def test_preserves_unmatched_profile_dispatches_around_regions(self) -> None:
         profile = [
@@ -387,6 +423,11 @@ class DispatchProfileJoinTest(unittest.TestCase):
             report["by_kernel"], "dit_conditioned", "dit.forward"
         )
         self.assertEqual(dit_forward["total_duration_ns"], 1200)
+        dit_operation = _find_operation_row(
+            report["by_operation"], "dit.cond.1", "dit.forward"
+        )
+        self.assertEqual(dit_operation["stage_key"], "dit_conditioned")
+        self.assertEqual(dit_operation["total_duration_ns"], 1200)
 
     def test_joins_generation_stage_split_across_command_buffers(self) -> None:
         plan = _generation_plan()

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from collections import defaultdict
 from dataclasses import dataclass
@@ -686,6 +687,7 @@ def join_dispatch_profile(
             "unmatched_dispatch_count": len(unmatched_rows),
         },
         "by_kernel": _aggregate_rows(rows),
+        "by_operation": _aggregate_operations(rows),
         "unmatched_by_kernel": _aggregate_profile_only_rows(unmatched_rows),
         "dispatches": rows,
         "unmatched_dispatches": unmatched_rows,
@@ -740,6 +742,76 @@ def _aggregate_generation_kernels(rows: list[dict[str, Any]]) -> list[dict[str, 
         key=lambda row: (
             *_duration_sort_key(row),
             row["stage_key"],
+            row["function_name"],
+        )
+    )
+    return records
+
+
+_REPEATED_OPERATION_COMPONENT_PATTERN = re.compile(r"\.(layers|blocks)\.[0-9]+(?=\.)")
+
+
+def _operation_family_name(name: str) -> str:
+    return _REPEATED_OPERATION_COMPONENT_PATTERN.sub(r".\1.*", name)
+
+
+def _aggregate_operations(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    aggregates: dict[tuple[str, str, str], KernelAggregate] = defaultdict(
+        KernelAggregate
+    )
+    for row in rows:
+        key = (
+            _operation_family_name(_require_string(row["name"], "name")),
+            _require_string(row["module_path"], "module_path"),
+            _require_string(row["function_name"], "function_name"),
+        )
+        _accumulate_kernel_aggregate(aggregates[key], row)
+    records = []
+    for (name, module_path, function_name), aggregate in aggregates.items():
+        records.append(
+            {
+                "name": name,
+                "module_path": module_path,
+                "function_name": function_name,
+                **_kernel_aggregate_duration_fields(aggregate),
+            }
+        )
+    records.sort(
+        key=lambda row: (*_duration_sort_key(row), row["name"], row["function_name"])
+    )
+    return records
+
+
+def _aggregate_generation_operations(
+    rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    aggregates: dict[tuple[str, str, str, str], KernelAggregate] = defaultdict(
+        KernelAggregate
+    )
+    for row in rows:
+        key = (
+            _require_string(row["stage_key"], "stage_key"),
+            _operation_family_name(_require_string(row["name"], "name")),
+            _require_string(row["module_path"], "module_path"),
+            _require_string(row["function_name"], "function_name"),
+        )
+        _accumulate_kernel_aggregate(aggregates[key], row)
+    records = []
+    for (stage_key, name, module_path, function_name), aggregate in aggregates.items():
+        records.append(
+            {
+                "stage_key": stage_key,
+                "name": name,
+                "module_path": module_path,
+                "function_name": function_name,
+                **_kernel_aggregate_duration_fields(aggregate),
+            }
+        )
+    records.sort(
+        key=lambda row: (
+            *_duration_sort_key(row),
+            row["stage_key"],
+            row["name"],
             row["function_name"],
         )
     )
@@ -894,6 +966,7 @@ def join_generation_dispatch_profile(
         },
         "by_stage": _aggregate_generation_stages(stage_invocations),
         "by_kernel": _aggregate_generation_kernels(flattened_rows),
+        "by_operation": _aggregate_generation_operations(flattened_rows),
         "unmatched_by_kernel": _aggregate_profile_only_rows(unmatched_rows),
         "stage_invocations": stage_invocations,
         "dispatches": flattened_rows,
