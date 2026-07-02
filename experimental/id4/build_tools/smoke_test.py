@@ -22,6 +22,13 @@ from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_ID4_BINARY = Path("bazel-bin/experimental/id4/binding/cli/id4")
+DEFAULT_GENERATION_RESIDENCY = "memory_budgeted"
+DEFAULT_GENERATION_RESIDENCY_BUDGET = 32 * 1024 * 1024 * 1024
+DEFAULT_GENERATION_ISSUE_MODE = "stage_serial"
+DEFAULT_PARAMETER_LOAD_PREFETCH_REGION_DISTANCE = 2
+DEFAULT_GENERATION_RESIDENT_STAGE_BUNDLES = (
+    "qwen,dit_conditioned,dit_unconditioned,decode"
+)
 
 DEFAULT_PROMPT: dict[str, Any] = {
     "high_level_description": (
@@ -96,12 +103,20 @@ def validate_generation_residency_arguments(
     parser: argparse.ArgumentParser, args: argparse.Namespace
 ) -> None:
     if args.generation_residency != "memory_budgeted":
-        if args.generation_residency_budget != 0:
+        if args.generation_residency_budget is not None:
             parser.error(
                 "--generation_residency_budget requires "
                 "--generation_residency=memory_budgeted"
             )
+        if args.generation_resident_stage_bundles is None:
+            args.generation_resident_stage_bundles = ""
         return
+    if args.generation_residency_budget is None:
+        args.generation_residency_budget = DEFAULT_GENERATION_RESIDENCY_BUDGET
+    if args.generation_resident_stage_bundles is None:
+        args.generation_resident_stage_bundles = (
+            DEFAULT_GENERATION_RESIDENT_STAGE_BUNDLES
+        )
     if args.generation_residency_budget == 0:
         parser.error(
             "--generation_residency_budget must be positive for "
@@ -325,7 +340,7 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
     )
     parser.add_argument(
         "--generation_residency",
-        default="issue_phases",
+        default=DEFAULT_GENERATION_RESIDENCY,
         choices=(
             "issue_phases",
             "phase_stage_bundles",
@@ -337,18 +352,18 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--generation_residency_budget",
         type=non_negative_integer,
-        default=0,
+        default=None,
         help=("Logical live byte budget for --generation_residency=memory_budgeted."),
     )
     parser.add_argument(
         "--generation_issue_mode",
-        default="phases",
+        default=DEFAULT_GENERATION_ISSUE_MODE,
         choices=("full", "phases", "stage_serial"),
     )
     parser.add_argument(
         "--parameter_load_prefetch_region_distance",
         type=non_negative_integer,
-        default=0,
+        default=DEFAULT_PARAMETER_LOAD_PREFETCH_REGION_DISTANCE,
         help=(
             "Number of plan regions ahead of execution to prefetch parameter "
             "load groups."
@@ -356,7 +371,7 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
     )
     parser.add_argument(
         "--generation_resident_stage_bundles",
-        default="",
+        default=None,
         help=(
             "Comma-separated stage bundles retained by "
             "--generation_residency=selected_stage_bundles or considered by "
@@ -822,7 +837,7 @@ def build_id4_command(args: argparse.Namespace, artifact_dir: Path) -> list[str]
             "--generation_resident_stage_bundles="
             f"{args.generation_resident_stage_bundles}"
         )
-    if args.generation_residency_budget != 0:
+    if args.generation_residency_budget is not None:
         command.append(
             f"--generation_residency_budget={args.generation_residency_budget}"
         )

@@ -298,9 +298,15 @@ class Id4SmokeTestTest(unittest.TestCase):
         self.assertIn("--qwen_attention_implementation=auto", command)
         self.assertIn("--dit_attention_implementation=online_wmma", command)
         self.assertIn("--dit_feed_forward_implementation=fused_product", command)
-        self.assertIn("--generation_residency=issue_phases", command)
-        self.assertIn("--generation_issue_mode=phases", command)
-        self.assertIn("--parameter_load_prefetch_region_distance=0", command)
+        self.assertIn("--generation_residency=memory_budgeted", command)
+        self.assertIn("--generation_issue_mode=stage_serial", command)
+        self.assertIn("--parameter_load_prefetch_region_distance=2", command)
+        self.assertIn("--generation_residency_budget=34359738368", command)
+        self.assertIn(
+            "--generation_resident_stage_bundles="
+            "qwen,dit_conditioned,dit_unconditioned,decode",
+            command,
+        )
         self.assertIn("--vae_tiling_mode=memory_budget", command)
         self.assertIn("--vae_memory_budget=536870912", command)
         self.assertIn("--vae_overlap=0.5", command)
@@ -355,6 +361,7 @@ class Id4SmokeTestTest(unittest.TestCase):
         self.assertIn("--generation_residency=selected_stage_bundles", command)
         self.assertIn("--generation_issue_mode=phases", command)
         self.assertIn("--generation_resident_stage_bundles=dit_conditioned", command)
+        self.assertNotIn("--generation_residency_budget=34359738368", command)
 
     def test_build_id4_command_routes_phase_stage_residency_policy(self):
         args = self.smoke_test.parse_arguments(
@@ -373,6 +380,12 @@ class Id4SmokeTestTest(unittest.TestCase):
 
         self.assertIn("--generation_residency=phase_stage_bundles", command)
         self.assertIn("--generation_issue_mode=phases", command)
+        self.assertNotIn(
+            "--generation_resident_stage_bundles="
+            "qwen,dit_conditioned,dit_unconditioned,decode",
+            command,
+        )
+        self.assertNotIn("--generation_residency_budget=34359738368", command)
 
     def test_build_id4_command_routes_memory_budgeted_residency_policy(self):
         args = self.smoke_test.parse_arguments(
@@ -404,6 +417,7 @@ class Id4SmokeTestTest(unittest.TestCase):
                     "--device=amdgpu",
                     "--tokenizer=tokenizer.json",
                     "--parameters=qwen=qwen.safetensors",
+                    "--generation_residency=issue_phases",
                     "--generation_residency_budget=37580963840",
                 ]
             )
@@ -418,6 +432,7 @@ class Id4SmokeTestTest(unittest.TestCase):
                     "--parameters=qwen=qwen.safetensors",
                     "--generation_residency=memory_budgeted",
                     "--generation_residency_budget=37580963840",
+                    "--generation_resident_stage_bundles=",
                 ]
             )
 
