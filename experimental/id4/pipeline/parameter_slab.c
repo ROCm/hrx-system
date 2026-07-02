@@ -1250,32 +1250,56 @@ static iree_status_t id4_pipeline_parameter_create_semaphore(
                                    IREE_HAL_SEMAPHORE_FLAG_NONE, out_semaphore);
 }
 
-static iree_status_t id4_pipeline_parameter_submit_source_gather_batch(
+static iree_status_t id4_pipeline_parameter_submit_source_gather_batches(
     const id4_pipeline_parameter_slab_set_load_options_t* options,
     const id4_pipeline_parameter_slab_load_t* load,
-    iree_string_view_t source_scope, iree_host_size_t source_count,
+    iree_host_size_t source_batch_count,
+    const id4_pipeline_parameter_encode_source_batch_t* source_batches,
     const id4_pipeline_parameter_encode_chunk_source_t* sources,
     iree_hal_buffer_t* staging_buffer,
     iree_hal_semaphore_list_t wait_semaphore_list,
-    iree_hal_semaphore_list_t signal_semaphore_list) {
-  if (!iree_io_parameter_provider_query_support(options->provider,
-                                                source_scope)) {
-    return iree_make_status(
-        IREE_STATUS_NOT_FOUND,
-        "parameter provider does not support source scope '%.*s'",
-        (int)source_scope.size, source_scope.data);
+    const iree_hal_semaphore_list_t* signal_semaphore_lists) {
+  id4_pipeline_parameter_load_source_enumerator_state_t
+      enumerator_states[ID4_PIPELINE_PARAMETER_ENCODER_CHUNK_SOURCE_CAPACITY] =
+          {0};
+  iree_io_parameter_gather_t
+      gathers[ID4_PIPELINE_PARAMETER_ENCODER_CHUNK_SOURCE_CAPACITY] = {0};
+  for (iree_host_size_t i = 0; i < source_batch_count; ++i) {
+    const id4_pipeline_parameter_encode_source_batch_t* batch =
+        &source_batches[i];
+    if (!iree_io_parameter_provider_query_support(options->provider,
+                                                  batch->source_scope)) {
+      return iree_make_status(
+          IREE_STATUS_NOT_FOUND,
+          "parameter provider does not support source scope '%.*s'",
+          (int)batch->source_scope.size, batch->source_scope.data);
+    }
+    enumerator_states[i] =
+        (id4_pipeline_parameter_load_source_enumerator_state_t){
+            // Number of source descriptors gathered by this request.
+            .source_count = batch->source_count,
+            // Source descriptors gathered by this request.
+            .sources = &sources[batch->source_offset],
+        };
+    gathers[i] = (iree_io_parameter_gather_t){
+        // Source scope for this provider gather group.
+        .source_scope = batch->source_scope,
+        // Staging buffer populated by the source gather.
+        .target_buffer = staging_buffer,
+        // Number of source descriptors in this gather group.
+        .count = batch->source_count,
+        // Source descriptor enumerator for this gather group.
+        .enumerator = id4_pipeline_parameter_load_source_enumerator(
+            &enumerator_states[i]),
+        // Slot readiness required before source writes may begin.
+        .wait_semaphore_list = wait_semaphore_list,
+        // Group-local readiness signaled after these source writes complete.
+        .signal_semaphore_list = signal_semaphore_lists[i],
+    };
   }
-  id4_pipeline_parameter_load_source_enumerator_state_t enumerator_state = {
-      // Number of source descriptors gathered by this request.
-      .source_count = source_count,
-      // Source descriptors gathered by this request.
-      .sources = sources,
-  };
-  return iree_io_parameter_provider_gather(
-      options->provider, load->device, load->queue_affinity,
-      wait_semaphore_list, signal_semaphore_list, source_scope, staging_buffer,
-      source_count,
-      id4_pipeline_parameter_load_source_enumerator(&enumerator_state));
+  return iree_io_parameter_provider_gather_batch(
+      options->provider, load->device, load->queue_affinity, source_batch_count,
+      gathers);
 }
 
 typedef struct id4_pipeline_parameter_encode_step_staging_layout_t {
@@ -1474,8 +1498,8 @@ static iree_status_t id4_pipeline_parameter_encode_run_collect_statistics(
     IREE_RETURN_IF_ERROR(id4_pipeline_parameter_add_host_size(
         1, &out_statistics->staging_chunk_count, "staging chunk"));
     IREE_RETURN_IF_ERROR(id4_pipeline_parameter_add_host_size(
-        source_batch_count, &out_statistics->source_gather_batch_count,
-        "source gather batch"));
+        source_batch_count == 0 ? 0 : 1,
+        &out_statistics->source_gather_batch_count, "source gather batch"));
     for (iree_host_size_t j = 0; j < chunk_step_count; ++j) {
       const id4_pipeline_parameter_load_step_t* step = &steps[i + j];
       IREE_RETURN_IF_ERROR(id4_pipeline_parameter_add_host_size(
@@ -2226,30 +2250,30 @@ static iree_status_t id4_pipeline_parameter_slab_submit_encode_run(
       source_signal_payload_values[i] = source_payload_value;
     }
 
-    for (iree_host_size_t batch_index = 0;
-         batch_index < source_batch_count && iree_status_is_ok(status);
+    iree_hal_semaphore_list_t source_signal_lists
+        [ID4_PIPELINE_PARAMETER_ENCODER_CHUNK_SOURCE_CAPACITY] = {0};
+    for (iree_host_size_t batch_index = 0; batch_index < source_batch_count;
          ++batch_index) {
-      const id4_pipeline_parameter_encode_source_batch_t* batch =
-          &source_batches[batch_index];
-      iree_hal_semaphore_list_t source_signal_list =
+      source_signal_lists[batch_index] =
           id4_pipeline_parameter_one_semaphore_list(
               &slot_state->source_semaphores[batch_index],
               &source_signal_payload_values[batch_index]);
-      status = id4_pipeline_parameter_submit_source_gather_batch(
-          options, load, batch->source_scope, batch->source_count,
-          &grouped_sources[batch->source_offset], staging_buffer,
-          source_wait_list, source_signal_list);
-      if (iree_status_is_ok(status)) {
-        if (batch_index == 0) slot_state->cleanup_wait_count = 0;
+    }
+    status = id4_pipeline_parameter_submit_source_gather_batches(
+        options, load, source_batch_count, source_batches, grouped_sources,
+        staging_buffer, source_wait_list, source_signal_lists);
+    if (iree_status_is_ok(status)) {
+      slot_state->cleanup_wait_count = 0;
+      for (iree_host_size_t batch_index = 0; batch_index < source_batch_count;
+           ++batch_index) {
         slot_state->cleanup_wait_semaphores[batch_index] =
             slot_state->source_semaphores[batch_index];
         slot_state->cleanup_wait_payload_values[batch_index] =
             source_signal_payload_values[batch_index];
         slot_state->cleanup_wait_count = batch_index + 1;
-        cleanup_wait_count =
-            id4_pipeline_parameter_encode_cleanup_waits_flatten(
-                slots, cleanup_wait_semaphores, cleanup_wait_payload_values);
       }
+      cleanup_wait_count = id4_pipeline_parameter_encode_cleanup_waits_flatten(
+          slots, cleanup_wait_semaphores, cleanup_wait_payload_values);
     }
     if (iree_status_is_ok(status)) {
       slot_state->source_payload_value = source_payload_value;
