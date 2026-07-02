@@ -86,6 +86,19 @@ iree_cc_library(
 
 iree_cc_library(
   NAME
+    parameter_window
+  HDRS
+    "parameter_window.h"
+  SRCS
+    "parameter_window.c"
+  DEPS
+    ::plan
+    iree::base
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
     plan
   HDRS
     "plan.h"
@@ -329,6 +342,20 @@ iree_cc_test(
   LABELS
     "manual"
     "requires-gpu"
+)
+
+iree_cc_test(
+  NAME
+    parameter_window_test
+  SRCS
+    "parameter_window_test.cc"
+  DEPS
+    ::parameter_window
+    iree::base
+    iree::experimental::id4::stages::test_util
+    iree::hal
+    iree::testing::gtest
+    iree::testing::gtest_main
 )
 
 iree_cc_test(

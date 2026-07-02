@@ -75,6 +75,16 @@ iree_runtime_cc_library(
 )
 
 iree_runtime_cc_library(
+    name = "parameter_window",
+    srcs = ["parameter_window.c"],
+    hdrs = ["parameter_window.h"],
+    deps = [
+        ":plan",
+        "//runtime/src/iree/base",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "plan",
     srcs = ["plan.c"],
     hdrs = ["plan.h"],
@@ -288,6 +298,19 @@ iree_runtime_cc_test(
         "//runtime/src/iree/hal",
         "//runtime/src/iree/io:parameter_index",
         "//runtime/src/iree/io:parameter_index_provider",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "parameter_window_test",
+    srcs = ["parameter_window_test.cc"],
+    deps = [
+        ":parameter_window",
+        "//experimental/id4/stages:test_util",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],
