@@ -109,9 +109,24 @@ typedef struct iree_benchmark_loom_timing_stats_t {
   int64_t p90_ns;
 } iree_benchmark_loom_timing_stats_t;
 
+typedef uint8_t iree_benchmark_loom_buffer_materialization_t;
+enum iree_benchmark_loom_buffer_materialization_e {
+  // The report does not know how this buffer family was materialized.
+  IREE_BENCHMARK_LOOM_BUFFER_MATERIALIZATION_UNKNOWN = 0,
+  // Buffers were materialized as host-local device-visible mappings.
+  IREE_BENCHMARK_LOOM_BUFFER_MATERIALIZATION_HOST_VISIBLE = 1,
+  // Buffers were materialized using the materializer default device-local
+  // placement.
+  IREE_BENCHMARK_LOOM_BUFFER_MATERIALIZATION_DEVICE_LOCAL = 2,
+};
+
 typedef struct iree_benchmark_loom_data_cache_summary_t {
   // True when the dispatch benchmark has populated this summary.
   bool populated;
+  // Placement used for correctness samples before benchmark timing.
+  iree_benchmark_loom_buffer_materialization_t correctness_materialization;
+  // Placement used for measured dispatch-complete binding-ring buffers.
+  iree_benchmark_loom_buffer_materialization_t measurement_materialization;
   // Number of HAL binding references in each dispatch binding set.
   iree_host_size_t binding_count;
   // Number of physical binding sets materialized from check ops.

@@ -150,6 +150,10 @@ static iree_status_t iree_benchmark_loom_hal_input_ring_initialize(
     out_ring->binding_lists[0] = out_ring->plans[0].bindings;
     out_ring->summary = (iree_benchmark_loom_data_cache_summary_t){
         .populated = true,
+        .correctness_materialization =
+            IREE_BENCHMARK_LOOM_BUFFER_MATERIALIZATION_HOST_VISIBLE,
+        .measurement_materialization =
+            IREE_BENCHMARK_LOOM_BUFFER_MATERIALIZATION_DEVICE_LOCAL,
         .binding_count = out_ring->plans[0].bindings.count,
         .binding_ring_count = ring_count,
         .dispatches_per_batch = policy->hal_options.timing.batch_size,
@@ -374,6 +378,10 @@ static iree_status_t iree_benchmark_loom_hal_sequence_input_ring_initialize(
     } else {
       out_ring->summary = (iree_benchmark_loom_data_cache_summary_t){
           .populated = true,
+          .correctness_materialization =
+              IREE_BENCHMARK_LOOM_BUFFER_MATERIALIZATION_HOST_VISIBLE,
+          .measurement_materialization =
+              IREE_BENCHMARK_LOOM_BUFFER_MATERIALIZATION_DEVICE_LOCAL,
           .binding_count = iree_benchmark_loom_hal_sequence_binding_count(
               out_ring->plans, sequence->provider_count),
           .binding_ring_count = ring_count,
