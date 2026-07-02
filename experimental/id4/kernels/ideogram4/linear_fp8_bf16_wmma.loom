@@ -58,6 +58,13 @@ kernel.def target(@id4_gfx1100) export("id4_ideogram4_linear_fp8_bf16_wmma") @id
   %weight_view = buffer.view %weight_aligned[%base] : buffer -> view<[%input_size]x[%output_size]xf8E4M3, %fp8_storage>
   %scale_view = buffer.view %scale_aligned[%base] : buffer -> view<[%output_size]xf32, #dense>
   %output_view = buffer.view %output_aligned[%base] : buffer -> view<[%token_count]x[%output_size]xbf16, #dense>
+  %lane_column = index.rem %lane, %sixteen : index
+  %column0 = index.add %row_origin0, %lane_column : index
+  %column1 = index.add %row_origin1, %lane_column : index
+  %scale0 = view.load %scale_view[%column0] : view<[%output_size]xf32, #dense> -> f32
+  %scale1 = view.load %scale_view[%column1] : view<[%output_size]xf32, #dense> -> f32
+  %scale0_rhs_vector = vector.splat %scale0 : vector<16xf32>
+  %scale1_rhs_vector = vector.splat %scale1 : vector<16xf32>
   %init00 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
   %init01 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
   %init10 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
@@ -68,27 +75,22 @@ kernel.def target(@id4_gfx1100) export("id4_ideogram4_linear_fp8_bf16_wmma") @id
     %lhs1 = vector.fragment.load<lhs> %input_view[%token_origin1, %k_origin] shape [%m, %k] : view<[%token_count]x[%input_size]xbf16, #dense> -> vector<16xbf16>
     %rhs0 = vector.fragment.load<rhs> %weight_view[%k_origin, %row_origin0] shape [%k, %n] : view<[%input_size]x[%output_size]xf8E4M3, %fp8_storage> -> vector<16xbf16>
     %rhs1 = vector.fragment.load<rhs> %weight_view[%k_origin, %row_origin1] shape [%k, %n] : view<[%input_size]x[%output_size]xf8E4M3, %fp8_storage> -> vector<16xbf16>
-    %next00 = vector.mma %lhs0, %rhs0, %acc00 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
-    %next01 = vector.mma %lhs0, %rhs1, %acc01 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
-    %next10 = vector.mma %lhs1, %rhs0, %acc10 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
-    %next11 = vector.mma %lhs1, %rhs1, %acc11 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %rhs0_f32 = vector.extf %rhs0 : vector<16xbf16> to vector<16xf32>
+    %rhs1_f32 = vector.extf %rhs1 : vector<16xbf16> to vector<16xf32>
+    %scaled_rhs0_f32 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %rhs0_f32, %scale0_rhs_vector : vector<16xf32>
+    %scaled_rhs1_f32 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %rhs1_f32, %scale1_rhs_vector : vector<16xf32>
+    %scaled_rhs0 = vector.fptrunc %scaled_rhs0_f32 : vector<16xf32> to vector<16xbf16>
+    %scaled_rhs1 = vector.fptrunc %scaled_rhs1_f32 : vector<16xf32> to vector<16xbf16>
+    %next00 = vector.mma %lhs0, %scaled_rhs0, %acc00 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next01 = vector.mma %lhs0, %scaled_rhs1, %acc01 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next10 = vector.mma %lhs1, %scaled_rhs0, %acc10 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next11 = vector.mma %lhs1, %scaled_rhs1, %acc11 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
     scf.yield %next00, %next01, %next10, %next11 : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>
   }
-  %lane_column = index.rem %lane, %sixteen : index
-  %column0 = index.add %row_origin0, %lane_column : index
-  %column1 = index.add %row_origin1, %lane_column : index
-  %scale0 = view.load %scale_view[%column0] : view<[%output_size]xf32, #dense> -> f32
-  %scale1 = view.load %scale_view[%column1] : view<[%output_size]xf32, #dense> -> f32
-  %scale0_vector = vector.splat %scale0 : vector<8xf32>
-  %scale1_vector = vector.splat %scale1 : vector<8xf32>
-  %scaled00 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %result00, %scale0_vector : vector<8xf32>
-  %scaled01 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %result01, %scale1_vector : vector<8xf32>
-  %scaled10 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %result10, %scale0_vector : vector<8xf32>
-  %scaled11 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %result11, %scale1_vector : vector<8xf32>
-  vector.fragment.store<result> %scaled00, %output_view[%token_origin0, %row_origin0] shape [%m, %n] : vector<8xf32>, view<[%token_count]x[%output_size]xbf16, #dense>
-  vector.fragment.store<result> %scaled01, %output_view[%token_origin0, %row_origin1] shape [%m, %n] : vector<8xf32>, view<[%token_count]x[%output_size]xbf16, #dense>
-  vector.fragment.store<result> %scaled10, %output_view[%token_origin1, %row_origin0] shape [%m, %n] : vector<8xf32>, view<[%token_count]x[%output_size]xbf16, #dense>
-  vector.fragment.store<result> %scaled11, %output_view[%token_origin1, %row_origin1] shape [%m, %n] : vector<8xf32>, view<[%token_count]x[%output_size]xbf16, #dense>
+  vector.fragment.store<result> %result00, %output_view[%token_origin0, %row_origin0] shape [%m, %n] : vector<8xf32>, view<[%token_count]x[%output_size]xbf16, #dense>
+  vector.fragment.store<result> %result01, %output_view[%token_origin0, %row_origin1] shape [%m, %n] : vector<8xf32>, view<[%token_count]x[%output_size]xbf16, #dense>
+  vector.fragment.store<result> %result10, %output_view[%token_origin1, %row_origin0] shape [%m, %n] : vector<8xf32>, view<[%token_count]x[%output_size]xbf16, #dense>
+  vector.fragment.store<result> %result11, %output_view[%token_origin1, %row_origin1] shape [%m, %n] : vector<8xf32>, view<[%token_count]x[%output_size]xbf16, #dense>
   kernel.return
 }
 
