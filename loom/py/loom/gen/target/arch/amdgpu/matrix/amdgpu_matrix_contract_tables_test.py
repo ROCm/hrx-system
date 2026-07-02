@@ -52,6 +52,21 @@ def _is_gfx950_dense_mfma_16x16x32_half_contract(
     )
 
 
+def _is_cdna_dense_mfma_32x32x16_f32_contract(
+    contract: AmdgpuMatrixContract,
+) -> bool:
+    return (
+        contract.family == "mfma"
+        and any(feature in {"mfma_gfx940_fp8", "mfma_gfx950"} for feature in contract.features)
+        and contract.tile_shape == (32, 32, 16)
+        and not contract.flags
+        and contract.accumulator.numeric_type == "f32"
+        and contract.result.numeric_type == "f32"
+        and contract.lhs.numeric_type in {"f16", "bf16", "fp8", "bf8"}
+        and contract.rhs.numeric_type in {"f16", "bf16", "fp8", "bf8"}
+    )
+
+
 def _payload_numeric_types(contract: AmdgpuMatrixContract) -> tuple[str, ...]:
     return (
         contract.lhs.numeric_type,
@@ -134,15 +149,27 @@ def test_generation_resolves_gfx1250_wmma_f32_fragment_layouts() -> None:
 
 
 def test_generation_resolves_gfx950_mfma_f32_fragment_layouts() -> None:
-    f16 = _contract_initializer(_contract("mfma.f32.16x16x32.f16"))
-    bf16 = _contract_initializer(_contract("mfma.f32.16x16x32.bf16"))
+    f16_16x16 = _contract_initializer(_contract("mfma.f32.16x16x32.f16"))
+    bf16_16x16 = _contract_initializer(_contract("mfma.f32.16x16x32.bf16"))
+    f16_32x32 = _contract_initializer(_contract("mfma.f32.32x32x16.f16"))
+    bf16_32x32 = _contract_initializer(_contract("mfma.f32.32x32x16.bf16"))
+    fp8_bf8_32x32 = _contract_initializer(_contract("mfma.f32.32x32x16.fp8.bf8"))
 
-    assert ".fragment_layout_kind = LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_CDNA_MFMA_F32_16X16X32_F16" in f16
-    assert ".fragment_layout_kind = LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_CDNA_MFMA_F32_16X16X32_BF16" in bf16
+    assert ".fragment_layout_kind = LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_CDNA_MFMA_F32_16X16X32_F16" in f16_16x16
+    assert ".fragment_layout_kind = LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_CDNA_MFMA_F32_16X16X32_BF16" in bf16_16x16
+    assert ".fragment_layout_kind = LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_CDNA_MFMA_F32_32X32X16_F16" in f16_32x32
+    assert ".fragment_layout_kind = LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_CDNA_MFMA_F32_32X32X16_BF16" in bf16_32x32
+    assert ".fragment_layout_kind = LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_CDNA_MFMA_F32_32X32X16_PACKED8" in fp8_bf8_32x32
 
 
 def test_generation_audits_gfx950_dense_mfma_half_layout_surface() -> None:
     missing = tuple(contract.name for contract in AMDGPU_MATRIX_CONTRACTS if _is_gfx950_dense_mfma_16x16x32_half_contract(contract) and contract.fragment_layout is None)
+
+    assert missing == ()
+
+
+def test_generation_audits_cdna_dense_mfma_32x32x16_f32_layout_surface() -> None:
+    missing = tuple(contract.name for contract in AMDGPU_MATRIX_CONTRACTS if _is_cdna_dense_mfma_32x32x16_f32_contract(contract) and contract.fragment_layout is None)
 
     assert missing == ()
 
