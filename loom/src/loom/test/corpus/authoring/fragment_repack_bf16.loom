@@ -55,7 +55,7 @@ kernel.def @fragment_repack_direct_bf16() {
 
 check.case public @fragment_repack_bf16_equivalence_case {
   %input = check.generate.iota offset(0.0) step(0.00390625) : tensor<16x16xf32>
-  %rhs = check.generate.fill value(1.0) : tensor<16x16xbf16>
+  %rhs = check.generate.iota offset(0.5) step(0.00390625) : tensor<16x16xbf16>
   %roundtrip_output = check.generate.fill value(0.0) : tensor<16x16xf32>
   %direct_output = check.generate.fill value(0.0) : tensor<16x16xf32>
   func.call @fragment_repack_roundtrip_bf16(%input, %rhs, %roundtrip_output) : (tensor<16x16xf32>, tensor<16x16xbf16>, tensor<16x16xf32>)
