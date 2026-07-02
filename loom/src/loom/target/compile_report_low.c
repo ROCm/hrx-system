@@ -970,7 +970,7 @@ static bool loom_target_compile_report_low_try_counted_loop(
     const loom_cfg_graph_t* graph, uint16_t header_index,
     uint64_t* block_multipliers, uint8_t* counted_backedge_edges) {
   const loom_block_t* header = graph->blocks[header_index].block;
-  if (header == NULL || header->arg_count != 1 || header->last_op == NULL ||
+  if (header == NULL || header->arg_count == 0 || header->last_op == NULL ||
       !loom_low_cond_br_isa(header->last_op)) {
     return true;
   }
