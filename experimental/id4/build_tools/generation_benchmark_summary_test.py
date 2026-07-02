@@ -22,6 +22,7 @@ TEST_BENCHMARK_LABEL = (
     "image=128x128 residency_request=memory_budgeted "
     "residency=selected_stage_bundles issue=stage_serial "
     "prefetch_regions=1 resident_stage_mask=0x00000003 "
+    "phase_stage_masks=[0x00000001,0x0000000c,0x00000020] "
     "residency_budget=35840MiB params=fp8_e4m3 "
     "activation=bf16_linear_input weights=bf16_resident "
     "qwen_weights=hybrid_compact_rhs attention=online_wmma "
@@ -582,6 +583,11 @@ class GenerationBenchmarkSummaryTest(unittest.TestCase):
             self.assertEqual(row["generation_residency_request"], "memory_budgeted")
             self.assertEqual(row["generation_residency"], "selected_stage_bundles")
             self.assertEqual(row["parameter_load_prefetch_region_distance"], 1)
+            self.assertEqual(row["generation_resident_stage_mask"], 0x00000003)
+            self.assertEqual(
+                row["generation_phase_stage_masks"],
+                [0x00000001, 0x0000000C, 0x00000020],
+            )
             self.assertEqual(row["generation_residency_budget_mib"], 35840)
             self.assertEqual(row["runtime_qwen_token_count"], 19)
             self.assertEqual(row["runtime_qwen_token_capacity"], 32)
@@ -744,9 +750,10 @@ class GenerationBenchmarkSummaryTest(unittest.TestCase):
                 summary
             )
 
-            self.assertIn("| bucket | residency | resident mask |", table)
+            self.assertIn("| bucket | residency | resident mask | phase masks |", table)
             self.assertIn(
-                "| short128 | selected_stage_bundles | 3 | 17712 | 19 | 32 | "
+                "| short128 | selected_stage_bundles | 3 | "
+                "[0x00000001,0x0000000c,0x00000020] | 17712 | 19 | 32 | "
                 "83 | 128 | 3627.693 | 3477.614 | 150.049 | - | - | - | "
                 "- | 912.500 | 601.125 | 311.375 | 27.250 | 4169 | 27848 | "
                 "17480 | 34924 | 10368 | 0 | 2 | 318 | 1081 | 576 | 1187 | "

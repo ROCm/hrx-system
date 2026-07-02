@@ -180,6 +180,23 @@ def _label_hex(label: str, key: str, context: str) -> int:
     return int(value, 16)
 
 
+def _label_hex_list(label: str, key: str, context: str) -> list[int]:
+    value = _label_token(label, key, context)
+    if not value.startswith("[") or not value.endswith("]"):
+        raise GenerationBenchmarkSummaryError(f"{context} {key} must be a hex list")
+    body = value[1:-1]
+    if not body:
+        return []
+    values: list[int] = []
+    for index, item in enumerate(body.split(",")):
+        if not re.fullmatch(r"0x[0-9A-Fa-f]+", item):
+            raise GenerationBenchmarkSummaryError(
+                f"{context} {key}[{index}] must be hex"
+            )
+        values.append(int(item, 16))
+    return values
+
+
 def _label_mib(label: str, key: str, context: str) -> int:
     value = _label_token(label, key, context)
     if not value.endswith("MiB") or not value[:-3].isdecimal():
@@ -454,6 +471,9 @@ def _parse_generation_benchmark_label(label: str, context: str) -> dict[str, Any
         ),
         "generation_resident_stage_mask": _label_hex(
             label, "resident_stage_mask", f"{context}.label"
+        ),
+        "generation_phase_stage_masks": _label_hex_list(
+            label, "phase_stage_masks", f"{context}.label"
         ),
         "generation_residency_budget_mib": _label_mib(
             label, "residency_budget", f"{context}.label"
@@ -993,6 +1013,7 @@ _MARKDOWN_COLUMNS = (
     ("bucket", "bucket"),
     ("residency", "generation_residency"),
     ("resident mask", "generation_resident_stage_mask"),
+    ("phase masks", "generation_phase_stage_masks"),
     ("selected peak MiB", "logical_live_selected_peak_mib"),
     ("qwen tokens", "qwen_token_count"),
     ("qwen cap", "qwen_token_capacity"),
@@ -1024,7 +1045,9 @@ _MARKDOWN_COLUMNS = (
     ("dispatches", "runtime_dispatch_count"),
 )
 
-_MARKDOWN_TEXT_COLUMNS = frozenset(("bucket", "generation_residency"))
+_MARKDOWN_TEXT_COLUMNS = frozenset(
+    ("bucket", "generation_residency", "generation_phase_stage_masks")
+)
 
 
 def _markdown_cell(value: Any) -> str:
@@ -1032,6 +1055,8 @@ def _markdown_cell(value: Any) -> str:
         return "-"
     if isinstance(value, float):
         return f"{value:.3f}"
+    if isinstance(value, list) and all(isinstance(item, int) for item in value):
+        return "[" + ",".join(f"0x{item:08x}" for item in value) + "]"
     return str(value)
 
 
