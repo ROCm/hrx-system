@@ -21,6 +21,8 @@
             "whole-module snapshots",
             ".entries.rows[]",
             "post-run slicing",
+            "rounding=finite_only",
+            "fp8_packed_bf16_decode_repair_zero_subnormal",
             "jq -r"
           ]
         }
