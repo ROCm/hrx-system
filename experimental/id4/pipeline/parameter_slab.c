@@ -1312,6 +1312,17 @@ static iree_status_t id4_pipeline_parameter_create_semaphore(
                                    IREE_HAL_SEMAPHORE_FLAG_NONE, out_semaphore);
 }
 
+static iree_hal_buffer_usage_t
+id4_pipeline_parameter_encoder_staging_buffer_usage(
+    iree_hal_memory_type_t memory_type) {
+  iree_hal_buffer_usage_t usage = IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET |
+                                  IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE;
+  if (iree_all_bits_set(memory_type, IREE_HAL_MEMORY_TYPE_HOST_VISIBLE)) {
+    usage |= IREE_HAL_BUFFER_USAGE_MAPPING_SCOPED;
+  }
+  return usage;
+}
+
 typedef struct id4_pipeline_parameter_encode_step_staging_layout_t {
   // Staging offsets where each encoded source tensor starts.
   iree_device_size_t
@@ -2086,8 +2097,8 @@ static iree_status_t id4_pipeline_parameter_encode_window_allocate(
   iree_hal_buffer_params_t staging_params = {0};
   staging_params.type = staging_memory_type;
   staging_params.access = IREE_HAL_MEMORY_ACCESS_ALL;
-  staging_params.usage = IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET |
-                         IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE;
+  staging_params.usage =
+      id4_pipeline_parameter_encoder_staging_buffer_usage(staging_params.type);
   staging_params.queue_affinity = load->queue_affinity;
   staging_params.min_alignment = 16;
 
@@ -2258,8 +2269,8 @@ static iree_status_t id4_pipeline_parameter_slab_submit_encode_run(
   iree_hal_buffer_params_t staging_params = {0};
   staging_params.type = options->encoder_staging_memory_type;
   staging_params.access = IREE_HAL_MEMORY_ACCESS_ALL;
-  staging_params.usage = IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET |
-                         IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE;
+  staging_params.usage =
+      id4_pipeline_parameter_encoder_staging_buffer_usage(staging_params.type);
   staging_params.queue_affinity = load->queue_affinity;
   staging_params.min_alignment = 16;
 
