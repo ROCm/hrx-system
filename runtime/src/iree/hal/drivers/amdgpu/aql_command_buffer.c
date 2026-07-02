@@ -6,6 +6,7 @@
 
 #include "iree/hal/drivers/amdgpu/aql_command_buffer.h"
 
+#include <inttypes.h>
 #include <string.h>
 
 #include "iree/base/alignment.h"
@@ -662,6 +663,22 @@ iree_hal_amdgpu_aql_command_buffer_verify_prepublished_kernarg_storage(
 #endif  // IREE_STATUS_MODE
 }
 
+static void iree_hal_amdgpu_aql_command_buffer_publish_prepublished_kernargs(
+    const iree_hal_amdgpu_aql_command_buffer_t* command_buffer) {
+  switch (command_buffer->prepublished_kernargs.storage.mode) {
+    case IREE_HAL_AMDGPU_AQL_PREPUBLISHED_KERNARG_STORAGE_MODE_DISABLED:
+      return;
+    case IREE_HAL_AMDGPU_AQL_PREPUBLISHED_KERNARG_STORAGE_MODE_DEVICE_FINE_HOST_COHERENT:
+      // Reusable command buffers publish immutable kernarg templates at
+      // finalization time. Replayed packet headers later point directly at this
+      // storage, so the one-time host writes must drain before the materialized
+      // device pointer becomes observable by replay.
+      iree_hal_amdgpu_kernarg_ring_host_write_fence();
+      return;
+  }
+  IREE_ASSERT_UNREACHABLE("invalid prepublished kernarg storage mode");
+}
+
 static iree_status_t
 iree_hal_amdgpu_aql_command_buffer_materialize_prepublished_kernargs(
     iree_hal_amdgpu_aql_command_buffer_t* command_buffer) {
@@ -750,6 +767,8 @@ iree_hal_amdgpu_aql_command_buffer_materialize_prepublished_kernargs(
     status = iree_status_join(status, iree_hal_buffer_unmap_range(&mapping));
   }
   if (iree_status_is_ok(status)) {
+    iree_hal_amdgpu_aql_command_buffer_publish_prepublished_kernargs(
+        command_buffer);
     command_buffer->prepublished_kernargs.materialized.buffer = template_buffer;
     command_buffer->prepublished_kernargs.materialized.device_base =
         device_base;
