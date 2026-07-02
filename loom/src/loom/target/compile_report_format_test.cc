@@ -616,6 +616,86 @@ TEST(CompileReportFormatTest, FormatsSourceLowMemoryIntervals) {
   loom_target_compile_report_deinitialize(&report);
 }
 
+TEST(CompileReportFormatTest, FormatsSourceLowMemorySummaryEconomics) {
+  loom_target_compile_report_t report;
+  loom_target_compile_report_initialize(&report, iree_allocator_system());
+
+  const loom_target_compile_report_workload_t workload = {
+      /*.flags=*/LOOM_TARGET_COMPILE_REPORT_WORKLOAD_DISPATCH_WORKITEM_COUNT,
+      /*.workgroup_size=*/{},
+      /*.workgroup_count=*/{},
+      /*.flat_workgroup_size=*/{},
+      /*.dispatch_workgroup_count=*/{},
+      /*.dispatch_workitem_count=*/16,
+  };
+  loom_target_compile_report_record_workload(&report, &workload);
+
+  const loom_target_compile_report_source_low_memory_row_t load_row =
+      MakeMemoryRow(IREE_SVL("vector.load"), /*source_op_kind=*/43,
+                    IREE_SVL("load"), IREE_SVL("test.load.v2"),
+                    /*static_offset_bytes=*/0,
+                    /*vector_lane_count=*/2,
+                    /*issued_read_byte_count=*/8,
+                    /*issued_write_byte_count=*/0,
+                    /*dynamic_stride_bytes=*/8,
+                    /*vector_lane_stride_bytes=*/4,
+                    MakeExactSourceInterval(/*begin_bytes=*/0,
+                                            /*end_bytes=*/8));
+  const loom_target_compile_report_source_low_memory_row_t store_row =
+      MakeMemoryRow(IREE_SVL("view.store"), /*source_op_kind=*/44,
+                    IREE_SVL("store"), IREE_SVL("test.store.v1"),
+                    /*static_offset_bytes=*/8,
+                    /*vector_lane_count=*/1,
+                    /*issued_read_byte_count=*/0,
+                    /*issued_write_byte_count=*/4,
+                    /*dynamic_stride_bytes=*/4,
+                    /*vector_lane_stride_bytes=*/4,
+                    MakeExactSourceInterval(/*begin_bytes=*/8,
+                                            /*end_bytes=*/12));
+  IREE_ASSERT_OK(loom_target_compile_report_record_source_low_memory_row(
+      &report, &load_row));
+  IREE_ASSERT_OK(loom_target_compile_report_record_source_low_memory_row(
+      &report, &store_row));
+
+  const loom_target_compile_report_format_options_t options = {
+      /*.mode=*/LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_SUMMARY,
+  };
+  iree_string_builder_t builder;
+  iree_string_builder_initialize(iree_allocator_system(), &builder);
+  loom_output_stream_t stream;
+  loom_output_stream_for_builder(&builder, &stream);
+  IREE_ASSERT_OK(
+      loom_target_compile_report_format_json(&report, &options, &stream));
+
+  iree_string_view_t output = iree_string_builder_view(&builder);
+  EXPECT_NE(iree_string_view_find(output, IREE_SV("\"source_low\":{"), 0),
+            IREE_STRING_VIEW_NPOS);
+  EXPECT_NE(iree_string_view_find(output,
+                                  IREE_SV("\"memory\":{"
+                                          "\"packet_count\":2"),
+                                  0),
+            IREE_STRING_VIEW_NPOS);
+  EXPECT_NE(
+      iree_string_view_find(output,
+                            IREE_SV("\"dispatch_source\":{\"read_bytes\":128,"
+                                    "\"write_bytes\":64,\"total_bytes\":192}"),
+                            0),
+      IREE_STRING_VIEW_NPOS);
+  EXPECT_NE(
+      iree_string_view_find(output,
+                            IREE_SV("\"dispatch_issued\":{\"read_bytes\":128,"
+                                    "\"write_bytes\":64,\"total_bytes\":192}"),
+                            0),
+      IREE_STRING_VIEW_NPOS);
+  EXPECT_EQ(iree_string_view_find(output, IREE_SV("\"memory_rows\""), 0),
+            IREE_STRING_VIEW_NPOS);
+  EXPECT_EQ(iree_string_view_find(output, IREE_SV("\"economics\""), 0),
+            IREE_STRING_VIEW_NPOS);
+
+  iree_string_builder_deinitialize(&builder);
+  loom_target_compile_report_deinitialize(&report);
+}
+
 TEST(CompileReportFormatTest, FormatsExactSymbolicSourceLowMemoryIntervals) {
   loom_target_compile_report_t report;
   loom_target_compile_report_initialize(&report, iree_allocator_system());
