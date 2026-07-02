@@ -13,6 +13,7 @@
 #include "iree/async/util/proactor_pool.h"
 #include "iree/hal/api.h"
 #include "iree/hal/drivers/local_sync/sync_device.h"
+#include "iree/io/file_handle.h"
 #include "iree/io/parameter_index.h"
 #include "iree/io/parameter_provider.h"
 #include "iree/testing/gtest.h"
@@ -96,6 +97,20 @@ static iree_status_t AddSplatEntry(iree_io_parameter_index_t* index,
   return iree_io_parameter_index_add(index, &entry);
 }
 
+static iree_status_t AddFileEntry(iree_io_parameter_index_t* index,
+                                  iree_string_view_t key, uint64_t offset,
+                                  uint64_t length,
+                                  iree_io_file_handle_t* handle) {
+  iree_io_parameter_index_entry_t entry;
+  std::memset(&entry, 0, sizeof(entry));
+  entry.key = key;
+  entry.length = length;
+  entry.type = IREE_IO_PARAMETER_INDEX_ENTRY_STORAGE_TYPE_FILE;
+  entry.storage.file.handle = handle;
+  entry.storage.file.offset = offset;
+  return iree_io_parameter_index_add(index, &entry);
+}
+
 typedef struct ParameterRequest {
   // Source parameter key.
   iree_string_view_t key;
@@ -139,6 +154,20 @@ static void ExpectBufferBytes(iree_hal_buffer_t* buffer,
   for (iree_host_size_t i = 0; i < byte_length; ++i) {
     EXPECT_EQ(span.data[i], expected_value);
   }
+  IREE_ASSERT_OK(iree_hal_buffer_unmap_range(&mapping));
+}
+
+static void ExpectBufferBytesEqual(iree_hal_buffer_t* buffer,
+                                   iree_const_byte_span_t expected) {
+  iree_hal_buffer_mapping_t mapping;
+  IREE_ASSERT_OK(iree_hal_buffer_map_range(buffer, IREE_HAL_MAPPING_MODE_SCOPED,
+                                           IREE_HAL_MEMORY_ACCESS_READ, 0,
+                                           expected.data_length, &mapping));
+  iree_byte_span_t span;
+  IREE_ASSERT_OK(iree_hal_buffer_mapping_subspan(
+      &mapping, IREE_HAL_MEMORY_ACCESS_READ, 0, expected.data_length, &span));
+  EXPECT_EQ(span.data_length, expected.data_length);
+  EXPECT_EQ(0, std::memcmp(span.data, expected.data, expected.data_length));
   IREE_ASSERT_OK(iree_hal_buffer_unmap_range(&mapping));
 }
 
@@ -241,6 +270,97 @@ TEST(ParameterIndexProviderTest, GatherBatchPreservesGroupSignals) {
 
   ExpectBufferBytes(first_buffer.get(), 4, 0xAB);
   ExpectBufferBytes(second_buffer.get(), 4, 0xCD);
+}
+
+TEST(ParameterIndexProviderTest, GatherBatchReadsAdjacentFileSpans) {
+  Ref<iree_hal_device_group_t, iree_hal_device_group_release> device_group;
+  device_group.reset(CreateLocalSyncDeviceGroup());
+  iree_hal_device_t* device =
+      iree_hal_device_group_device_at(device_group.get(), 0);
+
+  uint8_t source_data[12] = {
+      0x10, 0x11, 0x12, 0x13, 0x20, 0x21, 0x22, 0x23, 0x30, 0x31, 0x32, 0x33,
+  };
+  Ref<iree_io_file_handle_t, iree_io_file_handle_release> source_handle;
+  IREE_ASSERT_OK(iree_io_file_handle_wrap_host_allocation(
+      IREE_IO_FILE_ACCESS_READ,
+      iree_make_byte_span(source_data, sizeof(source_data)),
+      iree_io_file_handle_release_callback_null(), iree_allocator_system(),
+      source_handle.out()));
+
+  Ref<iree_io_parameter_index_t, iree_io_parameter_index_release> index;
+  IREE_ASSERT_OK(
+      iree_io_parameter_index_create(iree_allocator_system(), index.out()));
+  IREE_ASSERT_OK(
+      AddFileEntry(index.get(), IREE_SV("first"), 0, 4, source_handle.get()));
+  IREE_ASSERT_OK(
+      AddFileEntry(index.get(), IREE_SV("second"), 4, 4, source_handle.get()));
+  IREE_ASSERT_OK(
+      AddFileEntry(index.get(), IREE_SV("third"), 8, 4, source_handle.get()));
+
+  Ref<iree_io_parameter_provider_t, iree_io_parameter_provider_release>
+      provider;
+  IREE_ASSERT_OK(iree_io_parameter_index_provider_create(
+      IREE_SV("model"), index.get(),
+      IREE_IO_PARAMETER_INDEX_PROVIDER_DEFAULT_MAX_CONCURRENT_OPERATIONS,
+      iree_allocator_system(), provider.out()));
+
+  Ref<iree_hal_buffer_t, iree_hal_buffer_release> target_buffer;
+  target_buffer.reset(AllocateTargetBuffer(device, sizeof(source_data)));
+
+  Ref<iree_hal_semaphore_t, iree_hal_semaphore_release> signal;
+  IREE_ASSERT_OK(iree_hal_semaphore_create(
+      device, IREE_HAL_QUEUE_AFFINITY_ANY, /*initial_value=*/0,
+      IREE_HAL_SEMAPHORE_FLAG_DEFAULT, signal.out()));
+
+  ParameterRequest requests[3] = {
+      {
+          /*.key=*/IREE_SV("first"),
+          /*.span=*/
+          {/*.parameter_offset=*/0, /*.buffer_offset=*/0, /*.length=*/4},
+      },
+      {
+          /*.key=*/IREE_SV("second"),
+          /*.span=*/
+          {/*.parameter_offset=*/0, /*.buffer_offset=*/4, /*.length=*/4},
+      },
+      {
+          /*.key=*/IREE_SV("third"),
+          /*.span=*/
+          {/*.parameter_offset=*/0, /*.buffer_offset=*/8, /*.length=*/4},
+      },
+  };
+
+  uint64_t signal_value = 1;
+  iree_hal_semaphore_t* signal_ptr = signal.get();
+  iree_io_parameter_gather_t gather = {
+      /*.source_scope=*/IREE_SV("model"),
+      /*.target_buffer=*/target_buffer.get(),
+      /*.count=*/IREE_ARRAYSIZE(requests),
+      /*.enumerator=*/
+      {
+          /*.fn=*/EnumerateParameterRequest,
+          /*.user_data=*/requests,
+      },
+      /*.wait_semaphore_list=*/iree_hal_semaphore_list_empty(),
+      /*.signal_semaphore_list=*/
+      {
+          /*.count=*/1,
+          /*.semaphores=*/&signal_ptr,
+          /*.payload_values=*/&signal_value,
+      },
+  };
+
+  IREE_ASSERT_OK(iree_io_parameter_provider_gather_batch(
+      provider.get(), device, IREE_HAL_QUEUE_AFFINITY_ANY,
+      /*gather_count=*/1, &gather));
+  IREE_ASSERT_OK(iree_hal_semaphore_wait(signal.get(), signal_value,
+                                         iree_infinite_timeout(),
+                                         IREE_ASYNC_WAIT_FLAG_NONE));
+
+  ExpectBufferBytesEqual(
+      target_buffer.get(),
+      iree_make_const_byte_span(source_data, sizeof(source_data)));
 }
 
 }  // namespace
