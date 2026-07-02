@@ -32,6 +32,12 @@ enum {
   ID4_PIPELINE_PARAMETER_ENCODER_LINEAR_CONFIG_COUNT = 2,
 };
 
+typedef uint32_t id4_pipeline_parameter_slab_prepare_flags_t;
+
+enum {
+  ID4_PIPELINE_PARAMETER_SLAB_PREPARE_FLAG_ALLOCATE_RESIDENT_BUFFERS = 1u << 0,
+};
+
 static iree_status_t id4_pipeline_parameter_add_device_size(
     iree_device_size_t value, iree_device_size_t* inout_total,
     const char* name) {
@@ -3606,12 +3612,13 @@ static iree_status_t id4_pipeline_parameter_slab_set_validate_load_inputs(
   return iree_ok_status();
 }
 
-iree_status_t id4_pipeline_parameter_slab_set_prepare(
+static iree_status_t id4_pipeline_parameter_slab_set_prepare_internal(
     const id4_pipeline_parameter_slab_set_load_options_t* options,
     iree_host_size_t load_count,
     const id4_pipeline_parameter_slab_load_t* loads,
     iree_host_size_t load_step_count,
     const id4_pipeline_parameter_load_step_t* load_steps,
+    id4_pipeline_parameter_slab_prepare_flags_t flags,
     iree_string_view_t stage_name, iree_allocator_t host_allocator,
     id4_pipeline_parameter_slab_set_t** out_slab_set) {
   IREE_ASSERT_ARGUMENT(out_slab_set);
@@ -3627,7 +3634,10 @@ iree_status_t id4_pipeline_parameter_slab_set_prepare(
   id4_pipeline_parameter_slab_set_t* slab_set = NULL;
   iree_status_t status = id4_pipeline_parameter_slab_set_create_empty(
       load_count, host_allocator, &slab_set);
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) &&
+      iree_all_bits_set(
+          flags,
+          ID4_PIPELINE_PARAMETER_SLAB_PREPARE_FLAG_ALLOCATE_RESIDENT_BUFFERS)) {
     status = id4_pipeline_parameter_slab_set_allocate_buffers(
         options, loads, load_count, stage_name, slab_set);
   }
@@ -3657,6 +3667,33 @@ iree_status_t id4_pipeline_parameter_slab_set_prepare(
     id4_pipeline_parameter_slab_set_release(slab_set);
   }
   return status;
+}
+
+iree_status_t id4_pipeline_parameter_slab_set_prepare(
+    const id4_pipeline_parameter_slab_set_load_options_t* options,
+    iree_host_size_t load_count,
+    const id4_pipeline_parameter_slab_load_t* loads,
+    iree_host_size_t load_step_count,
+    const id4_pipeline_parameter_load_step_t* load_steps,
+    iree_string_view_t stage_name, iree_allocator_t host_allocator,
+    id4_pipeline_parameter_slab_set_t** out_slab_set) {
+  return id4_pipeline_parameter_slab_set_prepare_internal(
+      options, load_count, loads, load_step_count, load_steps,
+      ID4_PIPELINE_PARAMETER_SLAB_PREPARE_FLAG_ALLOCATE_RESIDENT_BUFFERS,
+      stage_name, host_allocator, out_slab_set);
+}
+
+iree_status_t id4_pipeline_parameter_slab_set_prepare_load_context(
+    const id4_pipeline_parameter_slab_set_load_options_t* options,
+    iree_host_size_t load_count,
+    const id4_pipeline_parameter_slab_load_t* loads,
+    iree_host_size_t load_step_count,
+    const id4_pipeline_parameter_load_step_t* load_steps,
+    iree_string_view_t stage_name, iree_allocator_t host_allocator,
+    id4_pipeline_parameter_slab_set_t** out_slab_set) {
+  return id4_pipeline_parameter_slab_set_prepare_internal(
+      options, load_count, loads, load_step_count, load_steps,
+      /*flags=*/0, stage_name, host_allocator, out_slab_set);
 }
 
 iree_status_t id4_pipeline_parameter_slab_set_load(
@@ -3830,10 +3867,25 @@ iree_status_t id4_pipeline_parameter_slab_issue_context_submit_load_group(
         IREE_STATUS_FAILED_PRECONDITION,
         "parameter slab issue context has no retained slab set");
   }
+  if (group_context.group_index >= slab_set->load_group_count ||
+      !slab_set->load_group_semaphores ||
+      !slab_set->load_group_semaphores[group_context.group_index]) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "parameter load group %" PRIhsz " is outside load group count %" PRIhsz,
+        group_context.group_index, slab_set->load_group_count);
+  }
+  uint64_t target_signal_payload_value = 1;
+  iree_hal_semaphore_t* target_signal_semaphore =
+      slab_set->load_group_semaphores[group_context.group_index];
+  iree_hal_semaphore_list_t target_signal_list =
+      id4_pipeline_parameter_one_semaphore_list(&target_signal_semaphore,
+                                                &target_signal_payload_value);
   return id4_pipeline_parameter_slab_issue_context_submit_load_group_to_buffers(
       context, slab_set->load_count, slab_set->loads, load_step_count,
       load_steps, group_context.group_index, slab_set->count, slab_set->buffers,
-      group_context, stage_name, diagnostics_sink);
+      iree_hal_semaphore_list_empty(), target_signal_list, group_context,
+      stage_name, diagnostics_sink);
 }
 
 iree_status_t
@@ -3845,6 +3897,8 @@ id4_pipeline_parameter_slab_issue_context_submit_load_group_to_buffers(
     const id4_pipeline_parameter_load_step_t* load_steps,
     iree_host_size_t load_group_index, iree_host_size_t target_buffer_count,
     iree_hal_buffer_t* const* buffers,
+    iree_hal_semaphore_list_t target_wait_semaphore_list,
+    iree_hal_semaphore_list_t target_signal_semaphore_list,
     id4_pipeline_parameter_load_group_context_t group_context,
     iree_string_view_t stage_name,
     id4_pipeline_diagnostics_sink_t* diagnostics_sink) {
@@ -3885,7 +3939,20 @@ id4_pipeline_parameter_slab_issue_context_submit_load_group_to_buffers(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "parameter target buffer table is required");
   }
-  if (group_context.group_index >= slab_set->load_group_count) {
+  IREE_RETURN_IF_ERROR(id4_pipeline_parameter_slab_validate_semaphore_list(
+      target_wait_semaphore_list, IREE_SV("parameter target wait")));
+  IREE_RETURN_IF_ERROR(id4_pipeline_parameter_slab_validate_semaphore_list(
+      target_signal_semaphore_list, IREE_SV("parameter target signal")));
+  if (target_signal_semaphore_list.count != 1) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "parameter load group requires exactly one target signal semaphore");
+  }
+  const bool uses_retained_targets =
+      loads == slab_set->loads && load_count == slab_set->load_count &&
+      buffers == slab_set->buffers && target_buffer_count == slab_set->count;
+  if (uses_retained_targets &&
+      group_context.group_index >= slab_set->load_group_count) {
     return iree_make_status(
         IREE_STATUS_OUT_OF_RANGE,
         "parameter load group %" PRIhsz " is outside load group count %" PRIhsz,
@@ -3912,44 +3979,73 @@ id4_pipeline_parameter_slab_issue_context_submit_load_group_to_buffers(
                             " target slab %" PRIhsz " has no buffer",
                             load_group_index, group.target_slab_index);
   }
-  if (!slab_set->load_group_submitted) {
+  if (uses_retained_targets && !slab_set->load_group_submitted) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
         "parameter slab set has no load group submission state");
   }
-  if (slab_set->load_group_submitted[group_context.group_index]) {
+  if (uses_retained_targets &&
+      slab_set->load_group_submitted[group_context.group_index]) {
     return iree_ok_status();
   }
 
   id4_pipeline_parameter_slab_set_load_options_t submit_options =
       id4_pipeline_parameter_slab_set_submit_options(slab_set,
                                                      diagnostics_sink);
-  iree_hal_semaphore_list_t wait_list =
+  const iree_hal_semaphore_list_t prepare_wait_list =
       id4_pipeline_parameter_slab_set_prepare_wait_list(slab_set);
-  if (id4_pipeline_parameter_load_group_is_encode(group) &&
+  iree_hal_semaphore_list_t wait_list = prepare_wait_list;
+  iree_hal_semaphore_t** combined_wait_semaphores = NULL;
+  uint64_t* combined_wait_payload_values = NULL;
+  iree_host_size_t combined_wait_count = 0;
+  if (!iree_host_size_checked_add(prepare_wait_list.count,
+                                  target_wait_semaphore_list.count,
+                                  &combined_wait_count)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "parameter load group wait count overflows");
+  }
+  if (combined_wait_count != 0) {
+    combined_wait_semaphores = (iree_hal_semaphore_t**)iree_alloca(
+        combined_wait_count * sizeof(combined_wait_semaphores[0]));
+    combined_wait_payload_values = (uint64_t*)iree_alloca(
+        combined_wait_count * sizeof(combined_wait_payload_values[0]));
+    for (iree_host_size_t i = 0; i < prepare_wait_list.count; ++i) {
+      combined_wait_semaphores[i] = prepare_wait_list.semaphores[i];
+      combined_wait_payload_values[i] = prepare_wait_list.payload_values[i];
+    }
+    for (iree_host_size_t i = 0; i < target_wait_semaphore_list.count; ++i) {
+      const iree_host_size_t target_index = prepare_wait_list.count + i;
+      combined_wait_semaphores[target_index] =
+          target_wait_semaphore_list.semaphores[i];
+      combined_wait_payload_values[target_index] =
+          target_wait_semaphore_list.payload_values[i];
+    }
+    wait_list = id4_pipeline_parameter_many_semaphore_list(
+        combined_wait_count, combined_wait_semaphores,
+        combined_wait_payload_values);
+  }
+  if (uses_retained_targets &&
+      id4_pipeline_parameter_load_group_is_encode(group) &&
       slab_set->encode_tail_semaphore) {
     wait_list = id4_pipeline_parameter_one_semaphore_list(
         &slab_set->encode_tail_semaphore, &slab_set->encode_tail_payload_value);
   }
 
-  iree_hal_semaphore_t* signal_semaphore =
-      slab_set->load_group_semaphores[group_context.group_index];
-  uint64_t signal_payload_value = 1;
-  iree_hal_semaphore_list_t signal_list =
-      id4_pipeline_parameter_one_semaphore_list(&signal_semaphore,
-                                                &signal_payload_value);
-  const bool matches_retained_loads =
-      loads == slab_set->loads && load_count == slab_set->load_count;
+  const bool matches_retained_loads = uses_retained_targets;
   id4_pipeline_parameter_encode_window_context_t* encode_window_context =
       matches_retained_loads ? &context->encode_windows : NULL;
   IREE_RETURN_IF_ERROR(id4_pipeline_parameter_slab_submit_load_group(
       &submit_options, encode_window_context, loads, load_count, load_steps,
       group_context, group, stage_name, target_buffer_count, buffers, wait_list,
-      signal_list, slab_set->host_allocator));
-  slab_set->load_group_submitted[group_context.group_index] = true;
-  if (id4_pipeline_parameter_load_group_is_encode(group)) {
-    slab_set->encode_tail_semaphore = signal_semaphore;
-    slab_set->encode_tail_payload_value = signal_payload_value;
+      target_signal_semaphore_list, slab_set->host_allocator));
+  if (uses_retained_targets) {
+    slab_set->load_group_submitted[group_context.group_index] = true;
+    if (id4_pipeline_parameter_load_group_is_encode(group)) {
+      slab_set->encode_tail_semaphore =
+          target_signal_semaphore_list.semaphores[0];
+      slab_set->encode_tail_payload_value =
+          target_signal_semaphore_list.payload_values[0];
+    }
   }
   return iree_ok_status();
 }
@@ -3974,7 +4070,7 @@ iree_host_size_t id4_pipeline_parameter_slab_set_count(
 
 iree_hal_buffer_t* id4_pipeline_parameter_slab_set_buffer_at(
     const id4_pipeline_parameter_slab_set_t* slab_set, iree_host_size_t index) {
-  if (!slab_set || index >= slab_set->count) return NULL;
+  if (!slab_set || index >= slab_set->count || !slab_set->buffers) return NULL;
   return slab_set->buffers[index];
 }
 
@@ -4010,6 +4106,15 @@ iree_status_t id4_pipeline_parameter_slab_set_load_group_at(
 bool id4_pipeline_parameter_slab_set_has_deferred_load_context(
     const id4_pipeline_parameter_slab_set_t* slab_set) {
   return slab_set && slab_set->provider;
+}
+
+bool id4_pipeline_parameter_slab_set_has_resident_buffers(
+    const id4_pipeline_parameter_slab_set_t* slab_set) {
+  if (!slab_set || slab_set->count == 0 || !slab_set->buffers) return false;
+  for (iree_host_size_t i = 0; i < slab_set->count; ++i) {
+    if (!slab_set->buffers[i]) return false;
+  }
+  return true;
 }
 
 iree_status_t id4_pipeline_parameter_slab_set_load_group_ready_at(

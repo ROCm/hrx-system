@@ -9,6 +9,7 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "experimental/id4/pipeline/parameter_window.h"
 #include "experimental/id4/pipeline/program_region.h"
 #include "iree/base/internal/arena.h"
 #include "iree/hal/buffer_transfer.h"
@@ -33,6 +34,12 @@ struct id4_pipeline_program_prepared_t {
   iree_host_size_t region_count;
   // Sealed prepared regions in plan region order.
   id4_pipeline_prepared_region_t** prepared_regions;
+  // Whether prepared regions use compact region-local parameter bindings.
+  bool uses_compact_parameter_windows;
+  // Compact parameter windows retained in plan region order.
+  id4_pipeline_parameter_window_t** parameter_windows;
+  // Compact parameter loading schedules retained in plan region order.
+  id4_pipeline_parameter_window_schedule_t** parameter_window_schedules;
   // Number of prepared kernel entries.
   iree_host_size_t kernel_count;
   // Prepared kernel entries in plan kernel order.
@@ -52,6 +59,8 @@ typedef struct id4_pipeline_program_prepare_context_t {
   const id4_pipeline_program_prepare_options_t* options;
   // Prepared object receiving executables and the sealed region.
   id4_pipeline_program_prepared_t* prepared;
+  // Optional compact parameter window used while recording one region.
+  const id4_pipeline_parameter_window_t* parameter_window;
 } id4_pipeline_program_prepare_context_t;
 
 typedef uint32_t id4_pipeline_program_issue_wait_flags_t;
@@ -83,6 +92,14 @@ static iree_status_t id4_pipeline_program_prepare_validate_options(
     return iree_make_status(
         IREE_STATUS_UNIMPLEMENTED,
         "program prepare extension structures are not supported");
+  }
+  const id4_pipeline_program_prepare_flags_t allowed_flags =
+      ID4_PIPELINE_PROGRAM_PREPARE_FLAG_COMPACT_PARAMETER_WINDOWS;
+  if (options->flags & ~allowed_flags) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "program prepare flags 0x%08" PRIx32
+                            " contain unsupported bits",
+                            options->flags & ~allowed_flags);
   }
   if (!options->program) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -142,6 +159,9 @@ static iree_status_t id4_pipeline_program_prepared_create_empty(
     prepared->plan = (id4_pipeline_plan_t*)options->plan;
     id4_pipeline_plan_retain(prepared->plan);
     prepared->region_count = region_count;
+    prepared->uses_compact_parameter_windows = iree_all_bits_set(
+        options->flags,
+        ID4_PIPELINE_PROGRAM_PREPARE_FLAG_COMPACT_PARAMETER_WINDOWS);
     prepared->kernel_count = kernel_count;
     prepared->constant_slab_count = constant_slab_count;
     prepared->shared_slab_alloca_flags = options->local_slab_alloca_flags;
@@ -155,6 +175,29 @@ static iree_status_t id4_pipeline_program_prepared_create_empty(
   if (iree_status_is_ok(status) && region_count != 0) {
     memset(prepared->prepared_regions, 0,
            region_count * sizeof(prepared->prepared_regions[0]));
+  }
+  if (iree_status_is_ok(status) && prepared->uses_compact_parameter_windows &&
+      region_count != 0) {
+    status = iree_allocator_malloc_array(host_allocator, region_count,
+                                         sizeof(prepared->parameter_windows[0]),
+                                         (void**)&prepared->parameter_windows);
+  }
+  if (iree_status_is_ok(status) && prepared->uses_compact_parameter_windows &&
+      region_count != 0) {
+    memset(prepared->parameter_windows, 0,
+           region_count * sizeof(prepared->parameter_windows[0]));
+  }
+  if (iree_status_is_ok(status) && prepared->uses_compact_parameter_windows &&
+      region_count != 0) {
+    status = iree_allocator_malloc_array(
+        host_allocator, region_count,
+        sizeof(prepared->parameter_window_schedules[0]),
+        (void**)&prepared->parameter_window_schedules);
+  }
+  if (iree_status_is_ok(status) && prepared->uses_compact_parameter_windows &&
+      region_count != 0) {
+    memset(prepared->parameter_window_schedules, 0,
+           region_count * sizeof(prepared->parameter_window_schedules[0]));
   }
   if (iree_status_is_ok(status) && kernel_count != 0) {
     status = iree_allocator_malloc_array(host_allocator, kernel_count,
@@ -452,6 +495,20 @@ static iree_status_t id4_pipeline_program_prepare_resolve_import(
   return iree_ok_status();
 }
 
+static const id4_pipeline_parameter_window_slab_t*
+id4_pipeline_program_prepare_find_window_slab(
+    const id4_pipeline_parameter_window_t* parameter_window,
+    iree_host_size_t original_slab_index) {
+  const iree_host_size_t slab_count =
+      id4_pipeline_parameter_window_slab_count(parameter_window);
+  for (iree_host_size_t i = 0; i < slab_count; ++i) {
+    const id4_pipeline_parameter_window_slab_t* slab =
+        id4_pipeline_parameter_window_slab_at(parameter_window, i);
+    if (slab && slab->original_slab_index == original_slab_index) return slab;
+  }
+  return NULL;
+}
+
 static iree_status_t id4_pipeline_program_prepare_resolve_parameter(
     void* user_data, const id4_pipeline_program_parameter_op_t* parameter_op,
     const id4_pipeline_program_tensor_record_t* tensor,
@@ -460,6 +517,45 @@ static iree_status_t id4_pipeline_program_prepare_resolve_parameter(
   (void)parameter_op;
   id4_pipeline_program_prepare_context_t* context =
       (id4_pipeline_program_prepare_context_t*)user_data;
+  if (context->parameter_window) {
+    const id4_pipeline_parameter_window_request_t* request =
+        id4_pipeline_parameter_window_resolve_request(context->parameter_window,
+                                                      parameter_ordinal);
+    if (!request) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "program parameter tensor %" PRIhsz
+                              " is outside the compact parameter window",
+                              parameter_ordinal);
+    }
+    const id4_pipeline_parameter_window_slab_t* slab =
+        id4_pipeline_program_prepare_find_window_slab(
+            context->parameter_window, request->original_slab_index);
+    if (!slab) {
+      return iree_make_status(
+          IREE_STATUS_OUT_OF_RANGE,
+          "program parameter tensor %" PRIhsz
+          " references missing compact slab for original slab %" PRIhsz,
+          parameter_ordinal, request->original_slab_index);
+    }
+    out_import->layout = (id4_pipeline_tensor_layout_t){
+        // Parameter tensor diagnostic name.
+        .name = tensor->name,
+        // Parameter tensor element type.
+        .dtype = id4_pipeline_program_region_convert_dtype(tensor->dtype),
+        // Parameter tensor shape.
+        .shape = id4_pipeline_program_prepare_convert_shape(tensor->shape),
+        // Dense parameter tensor byte length.
+        .byte_length = tensor->byte_length,
+        // Parameter subrange alignment is already represented by the compact
+        // span offset.
+        .alignment = 0,
+    };
+    out_import->binding_slot = slab->binding_slot;
+    out_import->offset = request->span.buffer_offset;
+    out_import->flags = ID4_PIPELINE_TENSOR_IMPORT_FLAG_INITIALIZED;
+    return iree_ok_status();
+  }
+
   iree_host_size_t remaining_ordinal = parameter_ordinal;
   for (iree_host_size_t slab_index = 0;
        slab_index <
@@ -730,6 +826,27 @@ static iree_status_t id4_pipeline_program_prepare_record_region(
       planned_tap_names[i] = tap->name;
     }
   }
+  if (iree_status_is_ok(status) && prepared->uses_compact_parameter_windows) {
+    id4_pipeline_parameter_window_create_options_t window_options;
+    memset(&window_options, 0, sizeof(window_options));
+    window_options.structure_size = sizeof(window_options);
+    window_options.plan = options->plan;
+    window_options.region_offset = region_index;
+    window_options.region_count = 1;
+    status = id4_pipeline_parameter_window_create(
+        &window_options, prepared->host_allocator,
+        &prepared->parameter_windows[region_index]);
+  }
+  if (iree_status_is_ok(status) && prepared->uses_compact_parameter_windows) {
+    id4_pipeline_parameter_window_schedule_create_options_t schedule_options;
+    memset(&schedule_options, 0, sizeof(schedule_options));
+    schedule_options.structure_size = sizeof(schedule_options);
+    schedule_options.plan = prepared->plan;
+    schedule_options.window = prepared->parameter_windows[region_index];
+    status = id4_pipeline_parameter_window_schedule_create(
+        &schedule_options, prepared->host_allocator,
+        &prepared->parameter_window_schedules[region_index]);
+  }
 
   iree_hal_command_buffer_t* command_buffer = NULL;
   id4_pipeline_region_builder_t* builder = NULL;
@@ -763,6 +880,10 @@ static iree_status_t id4_pipeline_program_prepare_record_region(
       .options = options,
       // Prepared object containing resolved kernel executables.
       .prepared = prepared,
+      // Compact parameter window used by this region, if enabled.
+      .parameter_window = prepared->uses_compact_parameter_windows
+                              ? prepared->parameter_windows[region_index]
+                              : NULL,
   };
   if (iree_status_is_ok(status)) {
     id4_pipeline_program_region_lower_options_t lower_options;
@@ -873,6 +994,16 @@ static void id4_pipeline_program_prepared_destroy(
     id4_pipeline_prepared_region_release(prepared->prepared_regions[i]);
   }
   iree_allocator_free(host_allocator, prepared->prepared_regions);
+  for (iree_host_size_t i = 0; i < prepared->region_count; ++i) {
+    id4_pipeline_parameter_window_release(
+        prepared->parameter_windows ? prepared->parameter_windows[i] : NULL);
+    id4_pipeline_parameter_window_schedule_release(
+        prepared->parameter_window_schedules
+            ? prepared->parameter_window_schedules[i]
+            : NULL);
+  }
+  iree_allocator_free(host_allocator, prepared->parameter_windows);
+  iree_allocator_free(host_allocator, prepared->parameter_window_schedules);
   for (iree_host_size_t i = 0; i < prepared->kernel_count; ++i) {
     id4_pipeline_kernel_executable_release(prepared->kernels[i].executable);
   }
@@ -953,12 +1084,17 @@ id4_pipeline_program_prepared_max_region_parameter_load_group_count(
 static iree_status_t id4_pipeline_program_prepared_make_region_wait_list(
     const id4_pipeline_region_plan_t* region,
     id4_pipeline_parameter_slab_set_t* parameter_slabs,
-    iree_hal_semaphore_list_t base_wait_list, iree_hal_semaphore_t** semaphores,
-    uint64_t* payload_values, iree_hal_semaphore_list_t* out_wait_list) {
+    iree_hal_semaphore_list_t base_wait_list,
+    iree_hal_semaphore_list_t explicit_parameter_wait_list,
+    iree_hal_semaphore_t** semaphores, uint64_t* payload_values,
+    iree_hal_semaphore_list_t* out_wait_list) {
   IREE_ASSERT_ARGUMENT(region);
   IREE_ASSERT_ARGUMENT(out_wait_list);
   *out_wait_list = iree_hal_semaphore_list_empty();
-  if (region->parameter_load_group_count != 0 && !parameter_slabs) {
+  const bool uses_explicit_parameter_waits =
+      explicit_parameter_wait_list.count != 0;
+  if (region->parameter_load_group_count != 0 &&
+      !uses_explicit_parameter_waits && !parameter_slabs) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "program issue region %.*s requires parameter load groups but has no "
@@ -966,9 +1102,11 @@ static iree_status_t id4_pipeline_program_prepared_make_region_wait_list(
         (int)region->name.size, region->name.data);
   }
 
+  const iree_host_size_t parameter_wait_count =
+      uses_explicit_parameter_waits ? explicit_parameter_wait_list.count
+                                    : region->parameter_load_group_count;
   iree_host_size_t wait_count = 0;
-  if (!iree_host_size_checked_add(base_wait_list.count,
-                                  region->parameter_load_group_count,
+  if (!iree_host_size_checked_add(base_wait_list.count, parameter_wait_count,
                                   &wait_count)) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "program issue region wait list count overflow");
@@ -977,11 +1115,20 @@ static iree_status_t id4_pipeline_program_prepared_make_region_wait_list(
     semaphores[i] = base_wait_list.semaphores[i];
     payload_values[i] = base_wait_list.payload_values[i];
   }
-  for (iree_host_size_t i = 0; i < region->parameter_load_group_count; ++i) {
-    const iree_host_size_t target_index = base_wait_list.count + i;
-    IREE_RETURN_IF_ERROR(id4_pipeline_parameter_slab_set_load_group_ready_at(
-        parameter_slabs, region->parameter_load_groups[i],
-        &semaphores[target_index], &payload_values[target_index]));
+  if (uses_explicit_parameter_waits) {
+    for (iree_host_size_t i = 0; i < explicit_parameter_wait_list.count; ++i) {
+      const iree_host_size_t target_index = base_wait_list.count + i;
+      semaphores[target_index] = explicit_parameter_wait_list.semaphores[i];
+      payload_values[target_index] =
+          explicit_parameter_wait_list.payload_values[i];
+    }
+  } else {
+    for (iree_host_size_t i = 0; i < region->parameter_load_group_count; ++i) {
+      const iree_host_size_t target_index = base_wait_list.count + i;
+      IREE_RETURN_IF_ERROR(id4_pipeline_parameter_slab_set_load_group_ready_at(
+          parameter_slabs, region->parameter_load_groups[i],
+          &semaphores[target_index], &payload_values[target_index]));
+    }
   }
   *out_wait_list = (iree_hal_semaphore_list_t){
       // Number of region wait semaphores.
@@ -1007,6 +1154,105 @@ id4_pipeline_program_prepared_submit_region_parameter_load_groups(
     IREE_RETURN_IF_ERROR(id4_pipeline_plan_submit_parameter_load_group(
         plan, parameter_issue_context, region->parameter_load_groups[i],
         submit_region_id, diagnostics_sink));
+  }
+  return iree_ok_status();
+}
+
+static iree_host_size_t
+id4_pipeline_program_prepared_find_load_group_first_region(
+    const id4_pipeline_plan_t* plan, iree_host_size_t group_index) {
+  const iree_host_size_t region_count = id4_pipeline_plan_region_count(plan);
+  for (iree_host_size_t i = 0; i < region_count; ++i) {
+    const id4_pipeline_region_plan_t* region =
+        id4_pipeline_plan_region_at(plan, i);
+    if (!region) continue;
+    for (iree_host_size_t j = 0; j < region->parameter_load_group_count; ++j) {
+      if (region->parameter_load_groups[j] == group_index) return i;
+    }
+  }
+  return IREE_HOST_SIZE_MAX;
+}
+
+static iree_status_t
+id4_pipeline_program_prepared_submit_parameter_window_load_groups(
+    const id4_pipeline_plan_t* plan, iree_host_size_t submit_region_id,
+    const id4_pipeline_parameter_window_schedule_t* schedule,
+    id4_pipeline_parameter_slab_issue_context_t* parameter_issue_context,
+    iree_hal_buffer_t** parameter_window_buffers,
+    iree_hal_semaphore_list_t target_wait_list,
+    iree_hal_semaphore_t** load_semaphores, uint64_t* load_payload_values,
+    iree_host_size_t* out_load_signal_count,
+    id4_pipeline_diagnostics_sink_t* diagnostics_sink) {
+  IREE_ASSERT_ARGUMENT(plan);
+  IREE_ASSERT_ARGUMENT(schedule);
+  IREE_ASSERT_ARGUMENT(parameter_issue_context);
+  IREE_ASSERT_ARGUMENT(out_load_signal_count);
+  *out_load_signal_count = 0;
+  const iree_host_size_t load_count =
+      id4_pipeline_parameter_window_schedule_load_count(schedule);
+  const id4_pipeline_parameter_slab_load_t* loads =
+      id4_pipeline_parameter_window_schedule_loads(schedule);
+  const iree_host_size_t load_step_count =
+      id4_pipeline_parameter_window_schedule_load_step_count(schedule);
+  const id4_pipeline_parameter_load_step_t* load_steps =
+      id4_pipeline_parameter_window_schedule_load_steps(schedule);
+  const iree_host_size_t load_group_count =
+      id4_pipeline_parameter_window_schedule_load_group_count(schedule);
+  for (iree_host_size_t compact_group_index = 0;
+       compact_group_index < load_group_count; ++compact_group_index) {
+    id4_pipeline_parameter_load_group_t compact_group;
+    IREE_RETURN_IF_ERROR(id4_pipeline_parameter_load_group_at(
+        load_step_count, load_steps, compact_group_index, &compact_group));
+    if (compact_group.target_slab_index >= load_count) {
+      return iree_make_status(
+          IREE_STATUS_OUT_OF_RANGE,
+          "program compact parameter load group %" PRIhsz
+          " target slab %" PRIhsz " exceeds load count %" PRIhsz,
+          compact_group_index, compact_group.target_slab_index, load_count);
+    }
+    const id4_pipeline_parameter_slab_load_t* load =
+        &loads[compact_group.target_slab_index];
+    const iree_host_size_t original_group_index =
+        id4_pipeline_parameter_window_schedule_original_load_group_at(
+            schedule, compact_group_index);
+    id4_pipeline_parameter_load_group_context_t group_context = {
+        // Original plan-local load group ordinal.
+        .group_index = original_group_index,
+        // First planned region that consumes the original load group.
+        .first_consumer_region_id =
+            id4_pipeline_program_prepared_find_load_group_first_region(
+                plan, original_group_index),
+        // Region currently submitting the compact load group.
+        .submit_region_id = submit_region_id,
+    };
+    load_payload_values[*out_load_signal_count] = 1;
+    iree_status_t status = iree_hal_semaphore_create(
+        load->device, load->queue_affinity, /*initial_value=*/0,
+        IREE_HAL_SEMAPHORE_FLAG_DEFAULT,
+        &load_semaphores[*out_load_signal_count]);
+    if (!iree_status_is_ok(status)) return status;
+    iree_hal_semaphore_t* load_signal_semaphore =
+        load_semaphores[*out_load_signal_count];
+    uint64_t load_signal_payload_value =
+        load_payload_values[*out_load_signal_count];
+    iree_hal_semaphore_list_t load_signal_list = {
+        .count = 1,
+        .semaphores = &load_signal_semaphore,
+        .payload_values = &load_signal_payload_value,
+    };
+    status =
+        id4_pipeline_parameter_slab_issue_context_submit_load_group_to_buffers(
+            parameter_issue_context, load_count, loads, load_step_count,
+            load_steps, compact_group_index, load_count,
+            parameter_window_buffers, target_wait_list, load_signal_list,
+            group_context, id4_pipeline_plan_stage_name(plan),
+            diagnostics_sink);
+    if (!iree_status_is_ok(status)) {
+      iree_hal_semaphore_release(load_semaphores[*out_load_signal_count]);
+      load_semaphores[*out_load_signal_count] = NULL;
+      return status;
+    }
+    ++*out_load_signal_count;
   }
   return iree_ok_status();
 }
@@ -1054,6 +1300,8 @@ static iree_status_t id4_pipeline_program_prepared_make_binding_table(
     id4_pipeline_program_prepared_t* prepared, id4_pipeline_bundle_t* bundle,
     const id4_pipeline_stage_issue_options_t* options,
     iree_host_size_t region_index,
+    const id4_pipeline_parameter_window_schedule_t* parameter_window_schedule,
+    iree_hal_buffer_t* const* parameter_window_buffers,
     iree_hal_buffer_t* const* memory_slab_buffers,
     iree_hal_buffer_binding_t* bindings,
     iree_hal_buffer_binding_table_t* out_binding_table) {
@@ -1069,38 +1317,68 @@ static iree_status_t id4_pipeline_program_prepared_make_binding_table(
     memset(bindings, 0, region->binding_capacity * sizeof(bindings[0]));
   }
 
-  id4_pipeline_parameter_slab_set_t* parameter_slabs =
-      id4_pipeline_bundle_parameter_slabs(bundle);
-  const iree_host_size_t parameter_slab_count =
-      id4_pipeline_plan_parameter_slab_count(plan);
-  if (parameter_slab_count != 0 && !parameter_slabs) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "program issue parameter slab set is required");
-  }
-  if (parameter_slab_count != 0 &&
-      id4_pipeline_parameter_slab_set_count(parameter_slabs) !=
-          parameter_slab_count) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "program issue parameter slab count mismatch");
-  }
-  for (iree_host_size_t i = 0; i < parameter_slab_count; ++i) {
-    const id4_pipeline_parameter_slab_plan_t* slab =
-        id4_pipeline_plan_parameter_slab_at(plan, i);
-    iree_hal_buffer_t* buffer =
-        id4_pipeline_parameter_slab_set_buffer_at(parameter_slabs, i);
-    if (!slab || !buffer) {
+  if (parameter_window_schedule) {
+    const iree_host_size_t load_count =
+        id4_pipeline_parameter_window_schedule_load_count(
+            parameter_window_schedule);
+    const id4_pipeline_parameter_slab_load_t* loads =
+        id4_pipeline_parameter_window_schedule_loads(parameter_window_schedule);
+    if (load_count != 0 && !parameter_window_buffers) {
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
-          "program issue parameter slab %" PRIhsz " is missing", i);
+          "program issue compact parameter buffer table is required");
     }
-    bindings[slab->binding_slot] = (iree_hal_buffer_binding_t){
-        // Loaded parameter slab buffer retained by the bundle.
-        .buffer = buffer,
-        // Parameter slabs are bound from byte zero.
-        .offset = 0,
-        // Full parameter slab byte length.
-        .length = slab->byte_length,
-    };
+    for (iree_host_size_t i = 0; i < load_count; ++i) {
+      const id4_pipeline_parameter_slab_plan_t* slab = loads[i].slab;
+      iree_hal_buffer_t* buffer = parameter_window_buffers[i];
+      if (!slab || !buffer) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "program issue compact parameter slab %" PRIhsz " is missing", i);
+      }
+      bindings[slab->binding_slot] = (iree_hal_buffer_binding_t){
+          // Queue-allocated compact parameter slab buffer.
+          .buffer = buffer,
+          // Compact parameter slabs are bound from byte zero.
+          .offset = 0,
+          // Compact parameter slab byte length.
+          .length = slab->byte_length,
+      };
+    }
+  } else {
+    id4_pipeline_parameter_slab_set_t* parameter_slabs =
+        id4_pipeline_bundle_parameter_slabs(bundle);
+    const iree_host_size_t parameter_slab_count =
+        id4_pipeline_plan_parameter_slab_count(plan);
+    if (parameter_slab_count != 0 && !parameter_slabs) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "program issue parameter slab set is required");
+    }
+    if (parameter_slab_count != 0 &&
+        id4_pipeline_parameter_slab_set_count(parameter_slabs) !=
+            parameter_slab_count) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "program issue parameter slab count mismatch");
+    }
+    for (iree_host_size_t i = 0; i < parameter_slab_count; ++i) {
+      const id4_pipeline_parameter_slab_plan_t* slab =
+          id4_pipeline_plan_parameter_slab_at(plan, i);
+      iree_hal_buffer_t* buffer =
+          id4_pipeline_parameter_slab_set_buffer_at(parameter_slabs, i);
+      if (!slab || !buffer) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "program issue parameter slab %" PRIhsz " is missing", i);
+      }
+      bindings[slab->binding_slot] = (iree_hal_buffer_binding_t){
+          // Loaded parameter slab buffer retained by the bundle.
+          .buffer = buffer,
+          // Parameter slabs are bound from byte zero.
+          .offset = 0,
+          // Full parameter slab byte length.
+          .length = slab->byte_length,
+      };
+    }
   }
 
   const iree_host_size_t constant_slab_count =
@@ -1212,6 +1490,48 @@ static iree_status_t id4_pipeline_program_prepared_max_binding_capacity(
   return iree_ok_status();
 }
 
+static iree_status_t
+id4_pipeline_program_prepared_max_parameter_window_load_count(
+    const id4_pipeline_program_prepared_t* prepared,
+    iree_host_size_t* out_load_count) {
+  *out_load_count = 0;
+  if (!prepared->uses_compact_parameter_windows) return iree_ok_status();
+  for (iree_host_size_t i = 0; i < prepared->region_count; ++i) {
+    const id4_pipeline_parameter_window_schedule_t* schedule =
+        prepared->parameter_window_schedules[i];
+    if (!schedule) {
+      return iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "program compact parameter schedule %" PRIhsz " is missing", i);
+    }
+    *out_load_count =
+        iree_max(*out_load_count,
+                 id4_pipeline_parameter_window_schedule_load_count(schedule));
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t
+id4_pipeline_program_prepared_max_parameter_window_load_group_count(
+    const id4_pipeline_program_prepared_t* prepared,
+    iree_host_size_t* out_load_group_count) {
+  *out_load_group_count = 0;
+  if (!prepared->uses_compact_parameter_windows) return iree_ok_status();
+  for (iree_host_size_t i = 0; i < prepared->region_count; ++i) {
+    const id4_pipeline_parameter_window_schedule_t* schedule =
+        prepared->parameter_window_schedules[i];
+    if (!schedule) {
+      return iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "program compact parameter schedule %" PRIhsz " is missing", i);
+    }
+    *out_load_group_count = iree_max(
+        *out_load_group_count,
+        id4_pipeline_parameter_window_schedule_load_group_count(schedule));
+  }
+  return iree_ok_status();
+}
+
 static iree_hal_semaphore_list_t id4_pipeline_program_one_semaphore_list(
     iree_hal_semaphore_t** semaphore, uint64_t* payload_value) {
   return (iree_hal_semaphore_list_t){
@@ -1222,6 +1542,34 @@ static iree_hal_semaphore_list_t id4_pipeline_program_one_semaphore_list(
       // Single payload value pointer.
       .payload_values = payload_value,
   };
+}
+
+static iree_hal_semaphore_list_t id4_pipeline_program_many_semaphore_list(
+    iree_host_size_t count, iree_hal_semaphore_t** semaphores,
+    uint64_t* payload_values) {
+  return (iree_hal_semaphore_list_t){
+      // Number of semaphores in the list.
+      .count = count,
+      // Semaphore pointer list.
+      .semaphores = count == 0 ? NULL : semaphores,
+      // Payload values paired with semaphores.
+      .payload_values = count == 0 ? NULL : payload_values,
+  };
+}
+
+static void id4_pipeline_program_release_semaphores(
+    iree_host_size_t count, iree_hal_semaphore_t** semaphores) {
+  for (iree_host_size_t i = 0; i < count; ++i) {
+    iree_hal_semaphore_release(semaphores[i]);
+  }
+}
+
+static void id4_pipeline_program_release_buffers(iree_host_size_t count,
+                                                 iree_hal_buffer_t** buffers) {
+  for (iree_host_size_t i = 0; i < count; ++i) {
+    iree_hal_buffer_release(buffers[i]);
+    buffers[i] = NULL;
+  }
 }
 
 static iree_status_t id4_pipeline_program_prepared_create_internal_signals(
@@ -1279,13 +1627,6 @@ static iree_status_t id4_pipeline_program_prepared_create_internal_signals(
         IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &semaphores[i]);
   }
   return status;
-}
-
-static void id4_pipeline_program_release_internal_signals(
-    iree_host_size_t internal_signal_count, iree_hal_semaphore_t** semaphores) {
-  for (iree_host_size_t i = 0; i < internal_signal_count; ++i) {
-    iree_hal_semaphore_release(semaphores[i]);
-  }
 }
 
 static iree_status_t id4_pipeline_program_prepared_count_shared_slabs(
@@ -1405,16 +1746,74 @@ static iree_status_t id4_pipeline_program_prepared_issue_shared_allocas(
     IREE_RETURN_IF_ERROR(id4_pipeline_program_prepared_shared_slab_device(
         prepared, slab, &device, &queue_affinity));
     alloca_payload_values[i] = 1;
-    IREE_RETURN_IF_ERROR(iree_hal_semaphore_create(
+    iree_status_t status = iree_hal_semaphore_create(
         device, queue_affinity, /*initial_value=*/0,
-        IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &alloca_semaphores[i]));
-    iree_hal_semaphore_list_t signal_list =
-        id4_pipeline_program_one_semaphore_list(&alloca_semaphores[i],
-                                                &alloca_payload_values[i]);
-    IREE_RETURN_IF_ERROR(iree_hal_device_queue_alloca(
-        device, queue_affinity, wait_list, signal_list, /*pool=*/NULL,
-        slab->params, slab->byte_length, prepared->shared_slab_alloca_flags,
-        &memory_slab_buffers[memory_slab_index]));
+        IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &alloca_semaphores[i]);
+    if (iree_status_is_ok(status)) {
+      iree_hal_semaphore_list_t signal_list =
+          id4_pipeline_program_one_semaphore_list(&alloca_semaphores[i],
+                                                  &alloca_payload_values[i]);
+      status = iree_hal_device_queue_alloca(
+          device, queue_affinity, wait_list, signal_list, /*pool=*/NULL,
+          slab->params, slab->byte_length, prepared->shared_slab_alloca_flags,
+          &memory_slab_buffers[memory_slab_index]);
+    }
+    if (!iree_status_is_ok(status)) {
+      iree_hal_semaphore_release(alloca_semaphores[i]);
+      alloca_semaphores[i] = NULL;
+      iree_hal_buffer_release(memory_slab_buffers[memory_slab_index]);
+      memory_slab_buffers[memory_slab_index] = NULL;
+      return status;
+    }
+    ++*out_submitted_count;
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t
+id4_pipeline_program_prepared_issue_parameter_window_allocas(
+    const id4_pipeline_parameter_window_schedule_t* schedule,
+    iree_hal_semaphore_list_t wait_list, iree_hal_buffer_t** buffers,
+    iree_hal_semaphore_t** alloca_semaphores, uint64_t* alloca_payload_values,
+    iree_host_size_t* out_submitted_count) {
+  IREE_ASSERT_ARGUMENT(out_submitted_count);
+  *out_submitted_count = 0;
+  const iree_host_size_t load_count =
+      id4_pipeline_parameter_window_schedule_load_count(schedule);
+  const id4_pipeline_parameter_slab_load_t* loads =
+      id4_pipeline_parameter_window_schedule_loads(schedule);
+  if (load_count != 0 && !loads) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "program compact parameter schedule has no load descriptors");
+  }
+  for (iree_host_size_t i = 0; i < load_count; ++i) {
+    const id4_pipeline_parameter_slab_load_t* load = &loads[i];
+    if (!load->slab) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "program compact parameter load %" PRIhsz " has no slab plan", i);
+    }
+    alloca_payload_values[i] = 1;
+    iree_status_t status = iree_hal_semaphore_create(
+        load->device, load->queue_affinity, /*initial_value=*/0,
+        IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &alloca_semaphores[i]);
+    if (iree_status_is_ok(status)) {
+      iree_hal_semaphore_list_t signal_list =
+          id4_pipeline_program_one_semaphore_list(&alloca_semaphores[i],
+                                                  &alloca_payload_values[i]);
+      status = iree_hal_device_queue_alloca(
+          load->device, load->queue_affinity, wait_list, signal_list,
+          /*pool=*/NULL, load->slab->target_params, load->slab->byte_length,
+          IREE_HAL_ALLOCA_FLAG_NONE, &buffers[i]);
+    }
+    if (!iree_status_is_ok(status)) {
+      iree_hal_semaphore_release(alloca_semaphores[i]);
+      alloca_semaphores[i] = NULL;
+      iree_hal_buffer_release(buffers[i]);
+      buffers[i] = NULL;
+      return status;
+    }
     ++*out_submitted_count;
   }
   return iree_ok_status();
@@ -1485,6 +1884,101 @@ static iree_status_t id4_pipeline_program_prepared_dealloca_shared_slabs(
   return status;
 }
 
+static iree_status_t id4_pipeline_program_prepared_dealloca_parameter_window(
+    const id4_pipeline_parameter_window_schedule_t* schedule,
+    iree_hal_semaphore_list_t initial_wait_list,
+    iree_hal_semaphore_list_t final_signal_list, iree_host_size_t buffer_count,
+    iree_hal_buffer_t** buffers) {
+  const iree_host_size_t load_count =
+      id4_pipeline_parameter_window_schedule_load_count(schedule);
+  const id4_pipeline_parameter_slab_load_t* loads =
+      id4_pipeline_parameter_window_schedule_loads(schedule);
+  if (buffer_count > load_count) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "program compact parameter dealloca buffer count "
+                            "%" PRIhsz " exceeds load count %" PRIhsz,
+                            buffer_count, load_count);
+  }
+  iree_hal_semaphore_t* chain_semaphore = NULL;
+  uint64_t chain_payload_value = 1;
+  iree_hal_semaphore_list_t wait_list = initial_wait_list;
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0; i < buffer_count && iree_status_is_ok(status);
+       ++i) {
+    const id4_pipeline_parameter_slab_load_t* load = &loads[i];
+    if (!buffers[i]) {
+      status = iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "program compact parameter buffer %" PRIhsz " is missing", i);
+      break;
+    }
+
+    iree_hal_semaphore_t* next_chain_semaphore = NULL;
+    uint64_t next_chain_payload_value = 1;
+    iree_hal_semaphore_list_t signal_list = final_signal_list;
+    if (i + 1 < buffer_count) {
+      status = iree_hal_semaphore_create(
+          load->device, load->queue_affinity, /*initial_value=*/0,
+          IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &next_chain_semaphore);
+      if (!iree_status_is_ok(status)) break;
+      signal_list = id4_pipeline_program_one_semaphore_list(
+          &next_chain_semaphore, &next_chain_payload_value);
+    }
+
+    status = iree_hal_device_queue_dealloca(load->device, load->queue_affinity,
+                                            wait_list, signal_list, buffers[i],
+                                            IREE_HAL_DEALLOCA_FLAG_NONE);
+    iree_hal_semaphore_release(chain_semaphore);
+    chain_semaphore = next_chain_semaphore;
+    chain_payload_value = next_chain_payload_value;
+    wait_list = iree_hal_semaphore_list_empty();
+    if (chain_semaphore) {
+      wait_list = id4_pipeline_program_one_semaphore_list(&chain_semaphore,
+                                                          &chain_payload_value);
+    }
+  }
+  iree_hal_semaphore_release(chain_semaphore);
+  return status;
+}
+
+static iree_status_t
+id4_pipeline_program_prepared_cleanup_failed_parameter_window(
+    const id4_pipeline_parameter_window_schedule_t* schedule,
+    iree_host_size_t alloca_submitted_count,
+    iree_hal_semaphore_list_t alloca_wait_list,
+    iree_host_size_t load_submitted_count,
+    iree_hal_semaphore_list_t load_wait_list, iree_hal_buffer_t** buffers) {
+  if (alloca_submitted_count == 0) return iree_ok_status();
+  iree_hal_semaphore_list_t cleanup_wait_list =
+      load_submitted_count == 0 ? alloca_wait_list : load_wait_list;
+  return id4_pipeline_program_prepared_dealloca_parameter_window(
+      schedule, cleanup_wait_list, iree_hal_semaphore_list_empty(),
+      alloca_submitted_count, buffers);
+}
+
+static iree_status_t
+id4_pipeline_program_prepared_cleanup_and_release_failed_parameter_window(
+    iree_status_t status,
+    const id4_pipeline_parameter_window_schedule_t* schedule,
+    iree_host_size_t alloca_submitted_count,
+    iree_hal_semaphore_list_t alloca_wait_list,
+    iree_host_size_t load_submitted_count,
+    iree_hal_semaphore_list_t load_wait_list, iree_hal_buffer_t** buffers,
+    iree_hal_semaphore_t** alloca_semaphores,
+    iree_hal_semaphore_t** load_semaphores) {
+  iree_status_t cleanup_status =
+      id4_pipeline_program_prepared_cleanup_failed_parameter_window(
+          schedule, alloca_submitted_count, alloca_wait_list,
+          load_submitted_count, load_wait_list, buffers);
+  status = iree_status_join(status, cleanup_status);
+  id4_pipeline_program_release_buffers(alloca_submitted_count, buffers);
+  id4_pipeline_program_release_semaphores(alloca_submitted_count,
+                                          alloca_semaphores);
+  id4_pipeline_program_release_semaphores(load_submitted_count,
+                                          load_semaphores);
+  return status;
+}
+
 static iree_status_t id4_pipeline_program_validate_final_signal_list(
     iree_hal_semaphore_list_t signal_list) {
   if (signal_list.count == 0) {
@@ -1535,6 +2029,12 @@ iree_status_t id4_pipeline_program_prepared_issue(
                               i);
     }
   }
+  if (prepared->uses_compact_parameter_windows &&
+      options->parameter_load_prefetch_region_distance != 0) {
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "compact parameter windows currently require zero prefetch distance");
+  }
 
   iree_host_size_t max_binding_capacity = 0;
   IREE_RETURN_IF_ERROR(id4_pipeline_program_prepared_max_binding_capacity(
@@ -1543,6 +2043,38 @@ iree_status_t id4_pipeline_program_prepared_issue(
   if (max_binding_capacity != 0) {
     bindings = (iree_hal_buffer_binding_t*)iree_alloca(max_binding_capacity *
                                                        sizeof(bindings[0]));
+  }
+
+  iree_host_size_t max_parameter_window_load_count = 0;
+  IREE_RETURN_IF_ERROR(
+      id4_pipeline_program_prepared_max_parameter_window_load_count(
+          prepared, &max_parameter_window_load_count));
+  iree_host_size_t max_parameter_window_load_group_count = 0;
+  IREE_RETURN_IF_ERROR(
+      id4_pipeline_program_prepared_max_parameter_window_load_group_count(
+          prepared, &max_parameter_window_load_group_count));
+  iree_hal_buffer_t** parameter_window_buffers = NULL;
+  iree_hal_semaphore_t** parameter_window_alloca_semaphores = NULL;
+  uint64_t* parameter_window_alloca_payload_values = NULL;
+  if (max_parameter_window_load_count != 0) {
+    parameter_window_buffers = (iree_hal_buffer_t**)iree_alloca(
+        max_parameter_window_load_count * sizeof(parameter_window_buffers[0]));
+    parameter_window_alloca_semaphores = (iree_hal_semaphore_t**)iree_alloca(
+        max_parameter_window_load_count *
+        sizeof(parameter_window_alloca_semaphores[0]));
+    parameter_window_alloca_payload_values = (uint64_t*)iree_alloca(
+        max_parameter_window_load_count *
+        sizeof(parameter_window_alloca_payload_values[0]));
+  }
+  iree_hal_semaphore_t** parameter_window_load_semaphores = NULL;
+  uint64_t* parameter_window_load_payload_values = NULL;
+  if (max_parameter_window_load_group_count != 0) {
+    parameter_window_load_semaphores = (iree_hal_semaphore_t**)iree_alloca(
+        max_parameter_window_load_group_count *
+        sizeof(parameter_window_load_semaphores[0]));
+    parameter_window_load_payload_values =
+        (uint64_t*)iree_alloca(max_parameter_window_load_group_count *
+                               sizeof(parameter_window_load_payload_values[0]));
   }
 
   id4_pipeline_parameter_slab_set_t* parameter_slabs =
@@ -1563,6 +2095,12 @@ iree_status_t id4_pipeline_program_prepared_issue(
   const bool uses_deferred_parameter_loads =
       id4_pipeline_parameter_slab_set_has_deferred_load_context(
           parameter_slabs);
+  if (prepared->uses_compact_parameter_windows &&
+      !uses_deferred_parameter_loads) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "compact parameter windows require deferred parameter loads");
+  }
   id4_pipeline_program_issue_wait_flags_t initial_wait_flags = 0;
   if (!uses_region_parameter_waits) {
     initial_wait_flags |=
@@ -1650,9 +2188,12 @@ iree_status_t id4_pipeline_program_prepared_issue(
   if (internal_signal_count != 0) {
     max_region_base_wait_count = iree_max(max_region_base_wait_count, 1);
   }
+  const iree_host_size_t max_region_parameter_wait_count =
+      iree_max(max_region_parameter_load_group_count,
+               max_parameter_window_load_group_count);
   iree_host_size_t max_region_wait_count = 0;
   if (!iree_host_size_checked_add(max_region_base_wait_count,
-                                  max_region_parameter_load_group_count,
+                                  max_region_parameter_wait_count,
                                   &max_region_wait_count)) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "program issue region wait list count overflow");
@@ -1755,16 +2296,32 @@ iree_status_t id4_pipeline_program_prepared_issue(
   bool region_submitted = false;
   iree_hal_semaphore_t* cleanup_wait_semaphore = NULL;
   uint64_t cleanup_wait_payload_value = 0;
+  iree_hal_semaphore_t* parameter_window_cleanup_semaphore = NULL;
+  uint64_t parameter_window_cleanup_payload_value = 0;
   for (iree_host_size_t i = 0;
        i < prepared->region_count && iree_status_is_ok(status); ++i) {
-    iree_hal_semaphore_list_t base_region_wait_list = first_region_wait_list;
+    iree_hal_semaphore_list_t structural_region_wait_list = wait_list;
+    iree_hal_semaphore_t* previous_parameter_window_cleanup_semaphore =
+        parameter_window_cleanup_semaphore;
+    uint64_t previous_parameter_window_cleanup_payload_value =
+        parameter_window_cleanup_payload_value;
     iree_hal_semaphore_t* internal_wait_semaphore = NULL;
     uint64_t internal_wait_payload_value = 0;
     if (i != 0) {
       internal_wait_semaphore = internal_semaphores[i - 1];
       internal_wait_payload_value = internal_payload_values[i - 1];
-      base_region_wait_list = id4_pipeline_program_one_semaphore_list(
+      structural_region_wait_list = id4_pipeline_program_one_semaphore_list(
           &internal_wait_semaphore, &internal_wait_payload_value);
+    }
+    if (previous_parameter_window_cleanup_semaphore) {
+      structural_region_wait_list = id4_pipeline_program_one_semaphore_list(
+          &previous_parameter_window_cleanup_semaphore,
+          &previous_parameter_window_cleanup_payload_value);
+    }
+    iree_hal_semaphore_list_t base_region_wait_list =
+        structural_region_wait_list;
+    if (i == 0 && shared_slab_count != 0) {
+      base_region_wait_list = first_region_wait_list;
     }
     const id4_pipeline_region_plan_t* region =
         id4_pipeline_plan_region_at(prepared->plan, i);
@@ -1774,7 +2331,106 @@ iree_status_t id4_pipeline_program_prepared_issue(
           "program issue region plan %" PRIhsz " is missing", i);
       break;
     }
-    if (uses_deferred_parameter_loads) {
+    const id4_pipeline_parameter_window_schedule_t* parameter_window_schedule =
+        prepared->uses_compact_parameter_windows
+            ? prepared->parameter_window_schedules[i]
+            : NULL;
+    iree_host_size_t parameter_window_load_count = 0;
+    iree_host_size_t parameter_window_load_group_count = 0;
+    iree_host_size_t parameter_window_alloca_submitted_count = 0;
+    iree_host_size_t parameter_window_load_submitted_count = 0;
+    iree_hal_semaphore_list_t parameter_window_alloca_wait_list =
+        iree_hal_semaphore_list_empty();
+    iree_hal_semaphore_list_t parameter_window_load_wait_list =
+        iree_hal_semaphore_list_empty();
+    if (parameter_window_schedule) {
+      parameter_window_load_count =
+          id4_pipeline_parameter_window_schedule_load_count(
+              parameter_window_schedule);
+      parameter_window_load_group_count =
+          id4_pipeline_parameter_window_schedule_load_group_count(
+              parameter_window_schedule);
+      if (parameter_window_load_count > max_parameter_window_load_count) {
+        status = iree_make_status(
+            IREE_STATUS_INTERNAL,
+            "program compact parameter window load count exceeds scratch "
+            "capacity");
+        break;
+      }
+      if (parameter_window_load_group_count >
+          max_parameter_window_load_group_count) {
+        status = iree_make_status(
+            IREE_STATUS_INTERNAL,
+            "program compact parameter window load group count exceeds scratch "
+            "capacity");
+        break;
+      }
+      if (parameter_window_load_count != 0) {
+        memset(
+            parameter_window_buffers, 0,
+            parameter_window_load_count * sizeof(parameter_window_buffers[0]));
+        memset(parameter_window_alloca_semaphores, 0,
+               parameter_window_load_count *
+                   sizeof(parameter_window_alloca_semaphores[0]));
+        memset(parameter_window_alloca_payload_values, 0,
+               parameter_window_load_count *
+                   sizeof(parameter_window_alloca_payload_values[0]));
+        memset(parameter_window_load_semaphores, 0,
+               parameter_window_load_group_count *
+                   sizeof(parameter_window_load_semaphores[0]));
+        memset(parameter_window_load_payload_values, 0,
+               parameter_window_load_group_count *
+                   sizeof(parameter_window_load_payload_values[0]));
+        status = id4_pipeline_program_prepared_issue_parameter_window_allocas(
+            parameter_window_schedule, structural_region_wait_list,
+            parameter_window_buffers, parameter_window_alloca_semaphores,
+            parameter_window_alloca_payload_values,
+            &parameter_window_alloca_submitted_count);
+        parameter_window_alloca_wait_list =
+            id4_pipeline_program_many_semaphore_list(
+                parameter_window_alloca_submitted_count,
+                parameter_window_alloca_semaphores,
+                parameter_window_alloca_payload_values);
+        if (!iree_status_is_ok(status)) {
+          status =
+              id4_pipeline_program_prepared_cleanup_and_release_failed_parameter_window(
+                  status, parameter_window_schedule,
+                  parameter_window_alloca_submitted_count,
+                  parameter_window_alloca_wait_list,
+                  parameter_window_load_submitted_count,
+                  parameter_window_load_wait_list, parameter_window_buffers,
+                  parameter_window_alloca_semaphores,
+                  parameter_window_load_semaphores);
+          break;
+        }
+      }
+      status =
+          id4_pipeline_program_prepared_submit_parameter_window_load_groups(
+              prepared->plan, i, parameter_window_schedule,
+              parameter_issue_context, parameter_window_buffers,
+              parameter_window_alloca_wait_list,
+              parameter_window_load_semaphores,
+              parameter_window_load_payload_values,
+              &parameter_window_load_submitted_count,
+              options->diagnostics_sink);
+      parameter_window_load_wait_list =
+          id4_pipeline_program_many_semaphore_list(
+              parameter_window_load_submitted_count,
+              parameter_window_load_semaphores,
+              parameter_window_load_payload_values);
+      if (!iree_status_is_ok(status)) {
+        status =
+            id4_pipeline_program_prepared_cleanup_and_release_failed_parameter_window(
+                status, parameter_window_schedule,
+                parameter_window_alloca_submitted_count,
+                parameter_window_alloca_wait_list,
+                parameter_window_load_submitted_count,
+                parameter_window_load_wait_list, parameter_window_buffers,
+                parameter_window_alloca_semaphores,
+                parameter_window_load_semaphores);
+        break;
+      }
+    } else if (uses_deferred_parameter_loads) {
       status =
           id4_pipeline_program_prepared_submit_region_parameter_load_window(
               prepared->plan, i, prepared->region_count,
@@ -1785,9 +2441,24 @@ iree_status_t id4_pipeline_program_prepared_issue(
     iree_hal_semaphore_list_t region_wait_list =
         iree_hal_semaphore_list_empty();
     status = id4_pipeline_program_prepared_make_region_wait_list(
-        region, parameter_slabs, base_region_wait_list, region_wait_semaphores,
+        region, parameter_slabs, base_region_wait_list,
+        parameter_window_load_wait_list, region_wait_semaphores,
         region_wait_payload_values, &region_wait_list);
-    if (!iree_status_is_ok(status)) break;
+    if (!iree_status_is_ok(status)) {
+      if (parameter_window_schedule &&
+          parameter_window_alloca_submitted_count != 0) {
+        status =
+            id4_pipeline_program_prepared_cleanup_and_release_failed_parameter_window(
+                status, parameter_window_schedule,
+                parameter_window_alloca_submitted_count,
+                parameter_window_alloca_wait_list,
+                parameter_window_load_submitted_count,
+                parameter_window_load_wait_list, parameter_window_buffers,
+                parameter_window_alloca_semaphores,
+                parameter_window_load_semaphores);
+      }
+      break;
+    }
 
     iree_hal_semaphore_list_t region_signal_list =
         options->signal_semaphore_list;
@@ -1809,9 +2480,24 @@ iree_status_t id4_pipeline_program_prepared_issue(
     iree_hal_buffer_binding_table_t binding_table =
         iree_hal_buffer_binding_table_empty();
     status = id4_pipeline_program_prepared_make_binding_table(
-        prepared, bundle, options, i, memory_slab_buffers, bindings,
+        prepared, bundle, options, i, parameter_window_schedule,
+        parameter_window_buffers, memory_slab_buffers, bindings,
         &binding_table);
-    if (!iree_status_is_ok(status)) break;
+    if (!iree_status_is_ok(status)) {
+      if (parameter_window_schedule &&
+          parameter_window_alloca_submitted_count != 0) {
+        status =
+            id4_pipeline_program_prepared_cleanup_and_release_failed_parameter_window(
+                status, parameter_window_schedule,
+                parameter_window_alloca_submitted_count,
+                parameter_window_alloca_wait_list,
+                parameter_window_load_submitted_count,
+                parameter_window_load_wait_list, parameter_window_buffers,
+                parameter_window_alloca_semaphores,
+                parameter_window_load_semaphores);
+      }
+      break;
+    }
 
     id4_pipeline_prepared_region_issue_options_t issue_options;
     memset(&issue_options, 0, sizeof(issue_options));
@@ -1822,6 +2508,21 @@ iree_status_t id4_pipeline_program_prepared_issue(
     issue_options.execute_flags = IREE_HAL_EXECUTE_FLAG_NONE;
     status = id4_pipeline_prepared_region_issue(prepared->prepared_regions[i],
                                                 &issue_options);
+    if (!iree_status_is_ok(status)) {
+      if (parameter_window_schedule &&
+          parameter_window_alloca_submitted_count != 0) {
+        status =
+            id4_pipeline_program_prepared_cleanup_and_release_failed_parameter_window(
+                status, parameter_window_schedule,
+                parameter_window_alloca_submitted_count,
+                parameter_window_alloca_wait_list,
+                parameter_window_load_submitted_count,
+                parameter_window_load_wait_list, parameter_window_buffers,
+                parameter_window_alloca_semaphores,
+                parameter_window_load_semaphores);
+      }
+      break;
+    }
     if (iree_status_is_ok(status)) {
       region_submitted = true;
       if (i + 1 < prepared->region_count) {
@@ -1833,6 +2534,50 @@ iree_status_t id4_pipeline_program_prepared_issue(
       } else if (uses_deferred_parameter_loads) {
         cleanup_wait_semaphore = execution_completion_semaphore;
         cleanup_wait_payload_value = execution_completion_payload_value;
+      }
+      if (parameter_window_schedule) {
+        iree_hal_semaphore_t* next_parameter_window_cleanup_semaphore = NULL;
+        uint64_t next_parameter_window_cleanup_payload_value = 1;
+        if (parameter_window_load_count != 0) {
+          const id4_pipeline_parameter_slab_load_t* loads =
+              id4_pipeline_parameter_window_schedule_loads(
+                  parameter_window_schedule);
+          status = iree_hal_semaphore_create(
+              loads[0].device, loads[0].queue_affinity, /*initial_value=*/0,
+              IREE_HAL_SEMAPHORE_FLAG_DEFAULT,
+              &next_parameter_window_cleanup_semaphore);
+          iree_hal_semaphore_list_t parameter_window_cleanup_signal_list =
+              id4_pipeline_program_one_semaphore_list(
+                  &next_parameter_window_cleanup_semaphore,
+                  &next_parameter_window_cleanup_payload_value);
+          if (iree_status_is_ok(status)) {
+            status = id4_pipeline_program_prepared_dealloca_parameter_window(
+                parameter_window_schedule, region_signal_list,
+                parameter_window_cleanup_signal_list,
+                parameter_window_alloca_submitted_count,
+                parameter_window_buffers);
+          }
+        }
+        if (iree_status_is_ok(status)) {
+          iree_hal_semaphore_release(parameter_window_cleanup_semaphore);
+          parameter_window_cleanup_semaphore =
+              next_parameter_window_cleanup_semaphore;
+          parameter_window_cleanup_payload_value =
+              parameter_window_load_count == 0
+                  ? 0
+                  : next_parameter_window_cleanup_payload_value;
+          next_parameter_window_cleanup_semaphore = NULL;
+        }
+        iree_hal_semaphore_release(next_parameter_window_cleanup_semaphore);
+        id4_pipeline_program_release_buffers(
+            parameter_window_alloca_submitted_count, parameter_window_buffers);
+        id4_pipeline_program_release_semaphores(
+            parameter_window_alloca_submitted_count,
+            parameter_window_alloca_semaphores);
+        id4_pipeline_program_release_semaphores(
+            parameter_window_load_submitted_count,
+            parameter_window_load_semaphores);
+        if (!iree_status_is_ok(status)) break;
       }
     }
   }
@@ -1906,7 +2651,13 @@ iree_status_t id4_pipeline_program_prepared_issue(
     }
     if (iree_status_is_ok(status)) {
       iree_host_size_t final_wait_count = 0;
-      if (!iree_host_size_checked_add(1, parameter_cleanup_wait_list.count,
+      const iree_host_size_t parameter_window_cleanup_count =
+          parameter_window_cleanup_semaphore ? 1 : 0;
+      iree_host_size_t parameter_wait_count = 0;
+      if (!iree_host_size_checked_add(parameter_cleanup_wait_list.count,
+                                      parameter_window_cleanup_count,
+                                      &parameter_wait_count) ||
+          !iree_host_size_checked_add(1, parameter_wait_count,
                                       &final_wait_count)) {
         status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                                   "program final wait list count overflows");
@@ -1918,11 +2669,17 @@ iree_status_t id4_pipeline_program_prepared_issue(
             final_wait_count * sizeof(final_wait_payload_values[0]));
         final_wait_semaphores[0] = execution_wait_semaphore;
         final_wait_payload_values[0] = execution_wait_payload_value;
+        if (parameter_window_cleanup_semaphore) {
+          final_wait_semaphores[1] = parameter_window_cleanup_semaphore;
+          final_wait_payload_values[1] = parameter_window_cleanup_payload_value;
+        }
+        const iree_host_size_t parameter_cleanup_offset =
+            1 + parameter_window_cleanup_count;
         for (iree_host_size_t i = 0; i < parameter_cleanup_wait_list.count;
              ++i) {
-          final_wait_semaphores[i + 1] =
+          final_wait_semaphores[parameter_cleanup_offset + i] =
               parameter_cleanup_wait_list.semaphores[i];
-          final_wait_payload_values[i + 1] =
+          final_wait_payload_values[parameter_cleanup_offset + i] =
               parameter_cleanup_wait_list.payload_values[i];
         }
         iree_hal_semaphore_list_t final_wait_list = {
@@ -1981,8 +2738,9 @@ iree_status_t id4_pipeline_program_prepared_issue(
   iree_hal_semaphore_release(shared_completion_semaphore);
   iree_hal_semaphore_release(shared_cleanup_semaphore);
   iree_hal_semaphore_release(execution_completion_semaphore);
+  iree_hal_semaphore_release(parameter_window_cleanup_semaphore);
   id4_pipeline_parameter_slab_issue_context_release(parameter_issue_context);
-  id4_pipeline_program_release_internal_signals(internal_signal_count,
-                                                internal_semaphores);
+  id4_pipeline_program_release_semaphores(internal_signal_count,
+                                          internal_semaphores);
   return status;
 }

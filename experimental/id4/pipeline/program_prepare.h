@@ -20,12 +20,23 @@ extern "C" {
 // Opaque prepared semantic program execution state.
 typedef struct id4_pipeline_program_prepared_t id4_pipeline_program_prepared_t;
 
+// Program preparation behavior flags.
+typedef uint32_t id4_pipeline_program_prepare_flags_t;
+
+// Program preparation behavior flag bits.
+typedef enum id4_pipeline_program_prepare_flag_bits_e {
+  // Records reusable regions against compact region-local parameter windows.
+  ID4_PIPELINE_PROGRAM_PREPARE_FLAG_COMPACT_PARAMETER_WINDOWS = 1u << 0,
+} id4_pipeline_program_prepare_flag_bits_t;
+
 // Options for preparing executable state from a semantic program and plan.
 typedef struct id4_pipeline_program_prepare_options_t {
   // Size of this structure for versioning.
   iree_host_size_t structure_size;
   // Extension structure chain; must be NULL for now.
   const void* next;
+  // Preparation behavior flags.
+  id4_pipeline_program_prepare_flags_t flags;
   // Immutable semantic program to record.
   const id4_pipeline_program_t* program;
   // Plan derived from the same semantic program.

@@ -465,6 +465,17 @@ iree_status_t id4_pipeline_parameter_slab_set_prepare(
     iree_string_view_t stage_name, iree_allocator_t host_allocator,
     id4_pipeline_parameter_slab_set_t** out_slab_set);
 
+// Retains parameter loading work and readiness edges without allocating final
+// resident slabs.
+iree_status_t id4_pipeline_parameter_slab_set_prepare_load_context(
+    const id4_pipeline_parameter_slab_set_load_options_t* options,
+    iree_host_size_t load_count,
+    const id4_pipeline_parameter_slab_load_t* loads,
+    iree_host_size_t load_step_count,
+    const id4_pipeline_parameter_load_step_t* load_steps,
+    iree_string_view_t stage_name, iree_allocator_t host_allocator,
+    id4_pipeline_parameter_slab_set_t** out_slab_set);
+
 // Creates an issue-local context for deferred parameter load submissions.
 iree_status_t id4_pipeline_parameter_slab_issue_context_create(
     id4_pipeline_parameter_slab_set_t* slab_set,
@@ -495,8 +506,9 @@ iree_status_t id4_pipeline_parameter_slab_issue_context_submit_load_group(
     id4_pipeline_diagnostics_sink_t* diagnostics_sink);
 
 // Submits load-step group |load_group_index| into explicit target buffers
-// matching |loads|. The retained slab set still owns the load readiness edge
-// named by |group_context|.
+// matching |loads|. |target_wait_semaphore_list| must reach its payload values
+// before loads may write the target buffers. |target_signal_semaphore_list| is
+// signaled when the selected load group has populated its target bytes.
 iree_status_t
 id4_pipeline_parameter_slab_issue_context_submit_load_group_to_buffers(
     id4_pipeline_parameter_slab_issue_context_t* context,
@@ -506,6 +518,8 @@ id4_pipeline_parameter_slab_issue_context_submit_load_group_to_buffers(
     const id4_pipeline_parameter_load_step_t* load_steps,
     iree_host_size_t load_group_index, iree_host_size_t target_buffer_count,
     iree_hal_buffer_t* const* buffers,
+    iree_hal_semaphore_list_t target_wait_semaphore_list,
+    iree_hal_semaphore_list_t target_signal_semaphore_list,
     id4_pipeline_parameter_load_group_context_t group_context,
     iree_string_view_t stage_name,
     id4_pipeline_diagnostics_sink_t* diagnostics_sink);
@@ -538,6 +552,10 @@ iree_status_t id4_pipeline_parameter_slab_set_load_group_at(
 // Returns true when |slab_set| owns retained load context for issue-time
 // materialization.
 bool id4_pipeline_parameter_slab_set_has_deferred_load_context(
+    const id4_pipeline_parameter_slab_set_t* slab_set);
+
+// Returns true when |slab_set| owns resident slab buffers.
+bool id4_pipeline_parameter_slab_set_has_resident_buffers(
     const id4_pipeline_parameter_slab_set_t* slab_set);
 
 // Returns the borrowed readiness semaphore and payload for load group |index|.

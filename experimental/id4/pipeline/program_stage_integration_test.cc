@@ -510,8 +510,14 @@ static void RunTwoRegionAddProgram(id4_pipeline_test_program_flags_t flags) {
     id4_pipeline_parameter_slab_set_t* source_parameter_slabs =
         id4_pipeline_bundle_parameter_slabs(source_bundle.get());
     ASSERT_NE(source_parameter_slabs, nullptr);
-    IREE_ASSERT_OK(id4_pipeline_plan_validate_parameter_slabs(
-        plan.get(), source_parameter_slabs));
+    if (defers_parameter_loads) {
+      IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                            id4_pipeline_plan_validate_parameter_slabs(
+                                plan.get(), source_parameter_slabs));
+    } else {
+      IREE_ASSERT_OK(id4_pipeline_plan_validate_parameter_slabs(
+          plan.get(), source_parameter_slabs));
+    }
 
     id4_pipeline_stage_prepare_options_t reuse_stage_prepare_options;
     std::memset(&reuse_stage_prepare_options, 0,
@@ -555,6 +561,9 @@ static void RunTwoRegionAddProgram(id4_pipeline_test_program_flags_t flags) {
   EXPECT_EQ(id4_pipeline_parameter_slab_set_has_deferred_load_context(
                 parameter_slabs),
             defers_parameter_loads);
+  EXPECT_EQ(
+      id4_pipeline_parameter_slab_set_has_resident_buffers(parameter_slabs),
+      !defers_parameter_loads);
   EXPECT_EQ(id4_pipeline_bundle_readiness_semaphore_list(bundle.get()).count,
             (defers_parameter_loads || reuses_parameter_slabs) ? 0u : 1u);
 
@@ -642,6 +651,13 @@ static void RunTwoRegionAddProgram(id4_pipeline_test_program_flags_t flags) {
   issue_options.wait_semaphore_list = iree_hal_semaphore_list_empty();
   issue_options.signal_semaphore_list = issue_signal_list;
   issue_options.diagnostics_sink = &diagnostics_sink;
+  if (prefetches_deferred_parameter_loads) {
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_UNIMPLEMENTED,
+        id4_pipeline_program_stage_issue(IREE_SV("test.two_region_add"),
+                                         bundle.get(), &issue_options));
+    return;
+  }
   IREE_ASSERT_OK(id4_pipeline_program_stage_issue(
       IREE_SV("test.two_region_add"), bundle.get(), &issue_options));
   IREE_ASSERT_OK(iree_hal_semaphore_wait(
@@ -660,19 +676,6 @@ static void RunTwoRegionAddProgram(id4_pipeline_test_program_flags_t flags) {
     ExpectFloatValues(device, first_tap_buffer.get(), expected_first_tap);
     ExpectFloatValues(device, second_tap_buffer.get(), expected_output);
   }
-  if (prefetches_deferred_parameter_loads) {
-    bool found_prefetched_load_group = false;
-    for (const id4_pipeline_parameter_load_diagnostic_t& submission :
-         diagnostics.parameter_load_submissions) {
-      if (submission.submit_region_id != IREE_HOST_SIZE_MAX &&
-          submission.first_consumer_region_id != IREE_HOST_SIZE_MAX &&
-          submission.submit_region_id < submission.first_consumer_region_id) {
-        found_prefetched_load_group = true;
-        break;
-      }
-    }
-    EXPECT_TRUE(found_prefetched_load_group);
-  }
 }
 
 TEST(ProgramStageIntegration, IssuesMultiRegionProgramWithParameterGroups) {
@@ -683,8 +686,7 @@ TEST(ProgramStageIntegration, IssuesMultiRegionProgramWithDeferredParameters) {
   RunTwoRegionAddProgram(ID4_PIPELINE_TEST_PROGRAM_FLAG_DEFER_PARAMETER_LOADS);
 }
 
-TEST(ProgramStageIntegration,
-     IssuesMultiRegionProgramWithPrefetchedParameters) {
+TEST(ProgramStageIntegration, RejectsPrefetchForCompactDeferredParameters) {
   RunTwoRegionAddProgram(
       ID4_PIPELINE_TEST_PROGRAM_FLAG_DEFER_PARAMETER_LOADS |
       ID4_PIPELINE_TEST_PROGRAM_FLAG_PREFETCH_DEFERRED_PARAMETER_LOADS);

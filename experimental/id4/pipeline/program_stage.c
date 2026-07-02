@@ -567,7 +567,7 @@ iree_status_t id4_pipeline_program_stage_prepare(
         options->stage_options->signal_semaphore_list;
     load_options.diagnostics_sink = options->stage_options->diagnostics_sink;
     if (defer_parameter_loads_to_issue) {
-      status = id4_pipeline_plan_prepare_parameter_slabs(
+      status = id4_pipeline_plan_prepare_parameter_load_context(
           options->plan, &load_options, host_allocator, &parameter_slabs);
     } else {
       status = id4_pipeline_plan_load_parameter_slabs(
@@ -579,6 +579,10 @@ iree_status_t id4_pipeline_program_stage_prepare(
     id4_pipeline_program_prepare_options_t prepare_options;
     memset(&prepare_options, 0, sizeof(prepare_options));
     prepare_options.structure_size = sizeof(prepare_options);
+    if (defer_parameter_loads_to_issue) {
+      prepare_options.flags =
+          ID4_PIPELINE_PROGRAM_PREPARE_FLAG_COMPACT_PARAMETER_WINDOWS;
+    }
     prepare_options.program = id4_pipeline_plan_source_program(options->plan);
     prepare_options.plan = options->plan;
     prepare_options.kernel_cache = options->kernel_cache;

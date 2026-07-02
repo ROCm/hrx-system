@@ -1146,8 +1146,12 @@ iree_status_t id4_pipeline_program_region_lower(
             &context, &op->payload.import_value, import_ordinal++);
         break;
       case ID4_PIPELINE_PROGRAM_OP_KIND_PARAMETER:
-        status = id4_pipeline_program_region_lower_parameter(
-            &context, &op->payload.parameter, parameter_ordinal++);
+        if (id4_pipeline_program_region_range_uses_tensor(
+                options, op->payload.parameter.tensor)) {
+          status = id4_pipeline_program_region_lower_parameter(
+              &context, &op->payload.parameter, parameter_ordinal);
+        }
+        ++parameter_ordinal;
         break;
       case ID4_PIPELINE_PROGRAM_OP_KIND_CONSTANT:
         status = id4_pipeline_program_region_lower_constant(

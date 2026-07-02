@@ -2144,6 +2144,26 @@ iree_status_t id4_pipeline_plan_prepare_parameter_slabs(
   return status;
 }
 
+iree_status_t id4_pipeline_plan_prepare_parameter_load_context(
+    const id4_pipeline_plan_t* plan,
+    const id4_pipeline_parameter_slab_set_load_options_t* options,
+    iree_allocator_t host_allocator,
+    id4_pipeline_parameter_slab_set_t** out_slab_set) {
+  IREE_ASSERT_ARGUMENT(plan);
+  IREE_ASSERT_ARGUMENT(out_slab_set);
+  *out_slab_set = NULL;
+
+  id4_pipeline_parameter_slab_load_t* loads = NULL;
+  IREE_RETURN_IF_ERROR(id4_pipeline_plan_make_parameter_slab_loads(
+      plan, host_allocator, &loads));
+  iree_status_t status = id4_pipeline_parameter_slab_set_prepare_load_context(
+      options, plan->parameter_slab_count, loads,
+      plan->parameter_load_step_count, plan->parameter_load_steps,
+      plan->stage_name, host_allocator, out_slab_set);
+  iree_allocator_free(host_allocator, loads);
+  return status;
+}
+
 static bool id4_pipeline_parameter_load_groups_equal(
     id4_pipeline_parameter_load_group_t lhs,
     id4_pipeline_parameter_load_group_t rhs) {

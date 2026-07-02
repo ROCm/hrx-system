@@ -159,6 +159,7 @@ iree_cc_library(
     ::kernel_cache
     ::kernel_library
     ::parameter_slab
+    ::parameter_window
     ::plan
     ::program
     ::program_region

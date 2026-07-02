@@ -482,6 +482,14 @@ iree_status_t id4_pipeline_plan_prepare_parameter_slabs(
     iree_allocator_t host_allocator,
     id4_pipeline_parameter_slab_set_t** out_slab_set);
 
+// Retains planned parameter loading work and readiness groups without
+// allocating resident parameter slabs.
+iree_status_t id4_pipeline_plan_prepare_parameter_load_context(
+    const id4_pipeline_plan_t* plan,
+    const id4_pipeline_parameter_slab_set_load_options_t* options,
+    iree_allocator_t host_allocator,
+    id4_pipeline_parameter_slab_set_t** out_slab_set);
+
 // Verifies that |slab_set| matches the parameter slab layout and load-group
 // ordering required by |plan|.
 iree_status_t id4_pipeline_plan_validate_parameter_slabs(
