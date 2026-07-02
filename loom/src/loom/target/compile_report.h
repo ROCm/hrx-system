@@ -1013,6 +1013,10 @@ enum {
   LOOM_TARGET_COMPILE_REPORT_MEMORY_INTERVAL_END_RANGE = 1u << 1,
   // The interval length is exact even when the begin offset is dynamic.
   LOOM_TARGET_COMPILE_REPORT_MEMORY_INTERVAL_EXACT_LENGTH = 1u << 2,
+  // The interval begin has a report-private exact expression identity.
+  LOOM_TARGET_COMPILE_REPORT_MEMORY_INTERVAL_BEGIN_EXPR = 1u << 3,
+  // The exclusive interval end has a report-private exact expression identity.
+  LOOM_TARGET_COMPILE_REPORT_MEMORY_INTERVAL_END_EXPR = 1u << 4,
 };
 
 // Conservative source byte interval evidence for one memory packet.
@@ -1029,6 +1033,10 @@ typedef struct loom_target_compile_report_memory_interval_t {
   int64_t end_max_bytes;
   // Exact touched byte length for each dynamic instance, or zero when unknown.
   uint64_t exact_length_bytes;
+  // Report-private exact expression ID for begin when BEGIN_EXPR is set.
+  uint32_t begin_expr_id;
+  // Report-private exact expression ID for end when END_EXPR is set.
+  uint32_t end_expr_id;
 } loom_target_compile_report_memory_interval_t;
 
 // Conservative source byte interval envelope for a packet group.
@@ -1037,6 +1045,8 @@ typedef struct loom_target_compile_report_memory_interval_summary_t {
   uint64_t packet_count;
   // Number of packets with exact static intervals used for unique accounting.
   uint64_t exact_static_packet_count;
+  // Number of packets with exact symbolic intervals used for unique accounting.
+  uint64_t exact_symbolic_packet_count;
   // Minimum possible byte offset across all interval begins.
   int64_t envelope_begin_min_bytes;
   // Maximum possible exclusive byte offset across all interval ends.
@@ -1044,7 +1054,7 @@ typedef struct loom_target_compile_report_memory_interval_summary_t {
   // Conservative byte span from |envelope_begin_min_bytes| to
   // |envelope_end_max_bytes|.
   uint64_t envelope_byte_count;
-  // Proven unique bytes across exact static packet intervals.
+  // Proven unique bytes across exact packet intervals.
   uint64_t unique_byte_count;
 } loom_target_compile_report_memory_interval_summary_t;
 

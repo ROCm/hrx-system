@@ -225,6 +225,12 @@ bool loom_low_source_memory_dynamic_offset_fits_unsigned_bit_count(
     const loom_low_source_memory_access_plan_t* plan,
     int64_t static_byte_offset, uint8_t bit_count);
 
+// Returns the conservative byte envelope added by vector lanes within a single
+// planned memory packet.
+bool loom_low_source_memory_access_plan_lane_byte_envelope(
+    const loom_low_source_memory_access_plan_t* plan, int64_t* out_begin_offset,
+    int64_t* out_end_offset);
+
 // Builds a dependency/scheduling summary from an already selected source
 // memory access plan. |out_interval| is caller-owned and may be borrowed by the
 // returned summary when interval precision is available.

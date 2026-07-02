@@ -1063,7 +1063,7 @@ static loom_low_memory_space_t loom_low_source_memory_access_space(
   }
 }
 
-static bool loom_low_source_memory_access_lane_byte_envelope(
+bool loom_low_source_memory_access_plan_lane_byte_envelope(
     const loom_low_source_memory_access_plan_t* plan, int64_t* out_begin_offset,
     int64_t* out_end_offset) {
   *out_begin_offset = 0;
@@ -1109,8 +1109,8 @@ void loom_low_source_memory_access_plan_make_summary(
   const loom_low_byte_interval_t* interval = NULL;
   int64_t lane_begin_offset = 0;
   int64_t lane_end_offset = 0;
-  if (loom_low_source_memory_access_lane_byte_envelope(plan, &lane_begin_offset,
-                                                       &lane_end_offset)) {
+  if (loom_low_source_memory_access_plan_lane_byte_envelope(
+          plan, &lane_begin_offset, &lane_end_offset)) {
     loom_value_facts_t begin_facts =
         loom_value_facts_exact_i64(plan->static_byte_offset);
     for (uint8_t i = 0; i < plan->dynamic_term_count; ++i) {

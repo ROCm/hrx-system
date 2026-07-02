@@ -17,6 +17,7 @@
 #include "loom/codegen/low/lower/lower.h"
 #include "loom/codegen/low/lower/lower_rules.h"
 #include "loom/codegen/low/memory_access.h"
+#include "loom/codegen/low/source_memory_plan.h"
 #include "loom/ir/local_value_domain.h"
 #include "loom/ir/module.h"
 
@@ -38,6 +39,28 @@ enum loom_low_lower_selected_plan_flag_bits_e {
   LOOM_LOW_LOWER_SELECTED_PLAN_ELIDED = (uint8_t)1u << 0,
 };
 typedef uint8_t loom_low_lower_selected_plan_flags_t;
+
+typedef struct loom_low_lower_memory_expr_term_t {
+  // Source SSA value multiplied into this symbolic byte expression.
+  loom_value_id_t value_id;
+  // Signed byte coefficient applied to |value_id|.
+  int64_t coefficient;
+} loom_low_lower_memory_expr_term_t;
+
+typedef struct loom_low_lower_memory_expr_key_t {
+  // Static byte constant added to all dynamic terms.
+  int64_t constant;
+  // Number of populated entries in |terms|.
+  uint8_t term_count;
+  // Sorted symbolic byte terms.
+  loom_low_lower_memory_expr_term_t
+      terms[LOOM_LOW_SOURCE_MEMORY_DYNAMIC_TERM_CAPACITY];
+} loom_low_lower_memory_expr_key_t;
+
+typedef struct loom_low_lower_memory_expr_entry_t {
+  // Comparable symbolic expression key interned for report-only accounting.
+  loom_low_lower_memory_expr_key_t key;
+} loom_low_lower_memory_expr_entry_t;
 
 typedef enum loom_low_lower_selected_plan_kind_e {
   // Selection came from a table-driven source-to-low rule.
@@ -154,6 +177,12 @@ typedef struct loom_low_lowering_frame_t {
   bool source_block_execution_counts_initialized;
   // True when every reachable source CFG backedge was counted exactly.
   bool source_block_execution_counts_exact;
+  // Function-local symbolic byte expressions interned for report accounting.
+  loom_low_lower_memory_expr_entry_t* memory_expr_entries;
+  // Number of interned symbolic byte expressions.
+  iree_host_size_t memory_expr_entry_count;
+  // Capacity of |memory_expr_entries|.
+  iree_host_size_t memory_expr_entry_capacity;
   // Source-derived memory access rows copied into options.table_arena.
   loom_low_memory_access_record_t* memory_access_records;
   // Number of memory access rows recorded during emission.

@@ -266,18 +266,6 @@ void loom_amdgpu_memory_report_row_populate_storage_schema(
   }
 }
 
-void loom_amdgpu_memory_report_row_populate_source_interval(
-    const loom_low_source_memory_access_plan_t* source,
-    loom_low_lower_memory_report_row_t* row) {
-  loom_low_byte_interval_t byte_interval = {0};
-  loom_low_memory_access_summary_t summary = {0};
-  loom_low_source_memory_access_plan_make_summary(source, &byte_interval,
-                                                  &summary);
-  if (summary.byte_interval != NULL) {
-    row->source_interval = *summary.byte_interval;
-  }
-}
-
 static iree_status_t loom_amdgpu_record_memory_packet_report(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_amdgpu_memory_packet_plan_t* packet) {
@@ -344,7 +332,9 @@ static iree_status_t loom_amdgpu_record_memory_packet_report(
       .bank_conflict_kind = bank_conflict_kind,
   };
   loom_amdgpu_memory_report_row_populate_storage_schema(context, source, &row);
-  loom_amdgpu_memory_report_row_populate_source_interval(source, &row);
+  IREE_RETURN_IF_ERROR(
+      loom_low_lower_memory_report_row_populate_source_interval(context, source,
+                                                                &row));
   return loom_low_lower_record_memory_report_row(context, source_op, &row);
 }
 
