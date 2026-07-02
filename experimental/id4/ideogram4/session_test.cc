@@ -197,7 +197,8 @@ static iree_device_size_t RawGenerationBoundaryByteLength(
 }
 
 static iree_device_size_t MaxGenerationParameterWindowPeak(
-    const id4_ideogram4_generation_plan_t* plan) {
+    const id4_ideogram4_generation_plan_t* plan,
+    iree_host_size_t region_window_size) {
   iree_device_size_t byte_length = 0;
   const iree_host_size_t stage_count =
       id4_ideogram4_generation_plan_stage_count(plan);
@@ -208,7 +209,7 @@ static iree_device_size_t MaxGenerationParameterWindowPeak(
                                                          &stage_plan));
     id4_pipeline_parameter_window_statistics_t statistics;
     IREE_CHECK_OK(id4_pipeline_plan_parameter_window_statistics(
-        stage_plan, /*region_window_size=*/1, &statistics));
+        stage_plan, region_window_size, &statistics));
     byte_length =
         std::max(byte_length, statistics.peak_window_target_byte_length);
   }
@@ -219,12 +220,15 @@ static id4_ideogram4_generation_resource_statistics_t
 EstimateGenerationResources(
     const id4_ideogram4_generation_plan_t* plan,
     id4_ideogram4_generation_residency_mode_t residency_mode,
-    id4_ideogram4_generation_resident_stage_mask_t resident_stage_mask) {
+    id4_ideogram4_generation_resident_stage_mask_t resident_stage_mask,
+    iree_host_size_t parameter_load_prefetch_region_distance = 0) {
   id4_ideogram4_generation_resource_statistics_options_t options;
   std::memset(&options, 0, sizeof(options));
   options.structure_size = sizeof(options);
   options.residency_mode = residency_mode;
   options.resident_stage_mask = resident_stage_mask;
+  options.parameter_load_prefetch_region_distance =
+      parameter_load_prefetch_region_distance;
   id4_ideogram4_generation_resource_statistics_t statistics;
   IREE_CHECK_OK(id4_ideogram4_generation_plan_resource_statistics(
       plan, &options, &statistics));
@@ -742,9 +746,19 @@ TEST_F(SessionTest, EstimatesGenerationResourceLifetimes) {
             issue_phase_statistics.boundary_buffer_byte_length);
   EXPECT_EQ(issue_phase_statistics.resident_stage_bundle_byte_length, 0u);
   EXPECT_EQ(issue_phase_statistics.stage_serial_parameter_peak_byte_length,
-            MaxGenerationParameterWindowPeak(plan.get()));
+            MaxGenerationParameterWindowPeak(plan.get(), 1));
   EXPECT_GE(issue_phase_statistics.phase_concurrent_total_peak_byte_length,
             issue_phase_statistics.stage_serial_total_peak_byte_length);
+
+  id4_ideogram4_generation_resource_statistics_t prefetched_statistics =
+      EstimateGenerationResources(
+          plan.get(), ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_ISSUE_PHASES,
+          ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_NONE,
+          /*parameter_load_prefetch_region_distance=*/1);
+  EXPECT_EQ(prefetched_statistics.stage_serial_parameter_peak_byte_length,
+            MaxGenerationParameterWindowPeak(plan.get(), 2));
+  EXPECT_GE(prefetched_statistics.stage_serial_parameter_peak_byte_length,
+            issue_phase_statistics.stage_serial_parameter_peak_byte_length);
 
   id4_ideogram4_generation_resource_statistics_t phase_stage_statistics =
       EstimateGenerationResources(

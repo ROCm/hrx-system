@@ -284,6 +284,8 @@ typedef struct id4_ideogram4_generation_resource_statistics_options_t {
   id4_ideogram4_generation_residency_mode_t residency_mode;
   // Stage-bundle mask used when |residency_mode| selects explicit stages.
   id4_ideogram4_generation_resident_stage_mask_t resident_stage_mask;
+  // Future regions whose compact parameter issue windows may be live.
+  iree_host_size_t parameter_load_prefetch_region_distance;
 } id4_ideogram4_generation_resource_statistics_options_t;
 
 // Logical resource lifetime statistics derived from a generation plan.
@@ -333,6 +335,8 @@ typedef struct id4_ideogram4_generation_residency_select_options_t {
   id4_ideogram4_generation_issue_policy_t issue_policy;
   // Candidate coarse stage bundles the selector may retain.
   id4_ideogram4_generation_resident_stage_mask_t candidate_stage_mask;
+  // Future regions whose compact parameter issue windows may be live.
+  iree_host_size_t parameter_load_prefetch_region_distance;
   // Maximum logical live bytes allowed by the selected policy.
   iree_device_size_t memory_budget_byte_length;
 } id4_ideogram4_generation_residency_select_options_t;

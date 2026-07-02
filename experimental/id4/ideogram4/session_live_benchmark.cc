@@ -715,6 +715,8 @@ static iree_status_t ResolveGenerationBenchmarkResidency(
           GenerationIssuePolicy(context.generation_issue_mode);
       select_options.candidate_stage_mask =
           context.generation_resident_stage_mask;
+      select_options.parameter_load_prefetch_region_distance =
+          context.parameter_load_prefetch_region_distance;
       select_options.memory_budget_byte_length =
           context.generation_residency_budget_byte_length;
       id4_ideogram4_generation_residency_selection_t selection;
@@ -847,12 +849,15 @@ static iree_status_t AccumulateGenerationBenchmarkPlanStatistics(
 static iree_status_t QueryGenerationBenchmarkResourceStatistics(
     const id4_ideogram4_generation_plan_t* plan,
     const GenerationResidencyResolution& residency,
+    iree_host_size_t parameter_load_prefetch_region_distance,
     id4_ideogram4_generation_resource_statistics_t* out_statistics) {
   id4_ideogram4_generation_resource_statistics_options_t options;
   std::memset(&options, 0, sizeof(options));
   options.structure_size = sizeof(options);
   options.residency_mode = residency.residency_mode;
   options.resident_stage_mask = residency.resident_stage_mask;
+  options.parameter_load_prefetch_region_distance =
+      parameter_load_prefetch_region_distance;
   return id4_ideogram4_generation_plan_resource_statistics(plan, &options,
                                                            out_statistics);
 }
@@ -1898,8 +1903,10 @@ static iree_status_t RunGenerationEndToEndBenchmark(
     }
     id4_ideogram4_generation_resource_statistics_t resource_statistics;
     if (iree_status_is_ok(status)) {
-      status = QueryGenerationBenchmarkResourceStatistics(plan.get(), residency,
-                                                          &resource_statistics);
+      status = QueryGenerationBenchmarkResourceStatistics(
+          plan.get(), residency,
+          context.parameter_load_prefetch_region_distance,
+          &resource_statistics);
     }
     if (iree_status_is_ok(status)) {
       last_residency = residency;
@@ -2037,7 +2044,8 @@ static iree_status_t RunGenerationIssuePreparedBenchmark(
       ResolveGenerationBenchmarkResidency(context, plan.get(), &residency));
   id4_ideogram4_generation_resource_statistics_t resource_statistics;
   IREE_RETURN_IF_ERROR(QueryGenerationBenchmarkResourceStatistics(
-      plan.get(), residency, &resource_statistics));
+      plan.get(), residency, context.parameter_load_prefetch_region_distance,
+      &resource_statistics));
 
   IREE_RETURN_IF_ERROR(
       WriteGenerationPlanJsonIfRequested(prompt->label, plan.get()));

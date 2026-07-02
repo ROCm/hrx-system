@@ -549,6 +549,7 @@ static iree_status_t id4_cli_resolve_generation_residency(
     id4_cli_generation_issue_mode_t issue_mode,
     id4_cli_generation_residency_request_mode_t request_mode,
     id4_ideogram4_generation_resident_stage_mask_t requested_stage_mask,
+    iree_host_size_t parameter_load_prefetch_region_distance,
     id4_ideogram4_generation_residency_mode_t* out_residency_mode,
     id4_ideogram4_generation_resident_stage_mask_t* out_resident_stage_mask) {
   IREE_ASSERT_ARGUMENT(generation_plan);
@@ -602,6 +603,8 @@ static iree_status_t id4_cli_resolve_generation_residency(
       select_options.structure_size = sizeof(select_options);
       select_options.issue_policy = id4_cli_generation_issue_policy(issue_mode);
       select_options.candidate_stage_mask = requested_stage_mask;
+      select_options.parameter_load_prefetch_region_distance =
+          parameter_load_prefetch_region_distance;
       select_options.memory_budget_byte_length = memory_budget;
       id4_ideogram4_generation_residency_selection_t selection;
       IREE_RETURN_IF_ERROR(id4_ideogram4_generation_plan_select_residency(
@@ -2014,7 +2017,8 @@ static iree_status_t id4_cli_run_generation(iree_allocator_t host_allocator) {
     if (iree_status_is_ok(status)) {
       status = id4_cli_resolve_generation_residency(
           generation_plan, generation_issue_mode, generation_residency_mode,
-          requested_stage_mask, &prepare_options.residency_mode,
+          requested_stage_mask, parameter_load_prefetch_region_distance,
+          &prepare_options.residency_mode,
           &prepare_options.resident_stage_mask);
     }
     prepare_options.command_buffer_mode =

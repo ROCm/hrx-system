@@ -651,13 +651,6 @@ static void RunTwoRegionAddProgram(id4_pipeline_test_program_flags_t flags) {
   issue_options.wait_semaphore_list = iree_hal_semaphore_list_empty();
   issue_options.signal_semaphore_list = issue_signal_list;
   issue_options.diagnostics_sink = &diagnostics_sink;
-  if (prefetches_deferred_parameter_loads) {
-    IREE_EXPECT_STATUS_IS(
-        IREE_STATUS_UNIMPLEMENTED,
-        id4_pipeline_program_stage_issue(IREE_SV("test.two_region_add"),
-                                         bundle.get(), &issue_options));
-    return;
-  }
   IREE_ASSERT_OK(id4_pipeline_program_stage_issue(
       IREE_SV("test.two_region_add"), bundle.get(), &issue_options));
   IREE_ASSERT_OK(iree_hal_semaphore_wait(
@@ -686,7 +679,8 @@ TEST(ProgramStageIntegration, IssuesMultiRegionProgramWithDeferredParameters) {
   RunTwoRegionAddProgram(ID4_PIPELINE_TEST_PROGRAM_FLAG_DEFER_PARAMETER_LOADS);
 }
 
-TEST(ProgramStageIntegration, RejectsPrefetchForCompactDeferredParameters) {
+TEST(ProgramStageIntegration,
+     IssuesMultiRegionProgramWithPrefetchedDeferredParameters) {
   RunTwoRegionAddProgram(
       ID4_PIPELINE_TEST_PROGRAM_FLAG_DEFER_PARAMETER_LOADS |
       ID4_PIPELINE_TEST_PROGRAM_FLAG_PREFETCH_DEFERRED_PARAMETER_LOADS);
