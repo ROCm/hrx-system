@@ -436,11 +436,15 @@ void loom_target_compile_report_record_allocation(
 
 void loom_target_compile_report_record_allocation_materialization(
     loom_target_compile_report_t* report, uint64_t spill_storage_count,
-    uint64_t spill_store_count, uint64_t reload_count) {
+    uint64_t spill_storage_bytes, uint64_t spill_store_count,
+    uint64_t spill_store_bytes, uint64_t reload_count, uint64_t reload_bytes) {
   report->detail_flags |= LOOM_TARGET_COMPILE_REPORT_DETAIL_ALLOCATION;
   report->allocation_materialized_spill_storage_count += spill_storage_count;
+  report->allocation_materialized_spill_storage_bytes += spill_storage_bytes;
   report->allocation_materialized_spill_store_count += spill_store_count;
+  report->allocation_materialized_spill_store_bytes += spill_store_bytes;
   report->allocation_materialized_reload_count += reload_count;
+  report->allocation_materialized_reload_bytes += reload_bytes;
 }
 
 void loom_target_compile_report_record_move_cause(
@@ -1162,10 +1166,16 @@ static void loom_target_compile_report_merge_entry_summary(
         entry_report->allocation_materialized_copy_count;
     report->allocation_materialized_spill_storage_count =
         entry_report->allocation_materialized_spill_storage_count;
+    report->allocation_materialized_spill_storage_bytes =
+        entry_report->allocation_materialized_spill_storage_bytes;
     report->allocation_materialized_spill_store_count =
         entry_report->allocation_materialized_spill_store_count;
+    report->allocation_materialized_spill_store_bytes =
+        entry_report->allocation_materialized_spill_store_bytes;
     report->allocation_materialized_reload_count =
         entry_report->allocation_materialized_reload_count;
+    report->allocation_materialized_reload_bytes =
+        entry_report->allocation_materialized_reload_bytes;
     report->allocation_storage_lease_count =
         entry_report->allocation_storage_lease_count;
     report->allocation_storage_lease_instance_count =
@@ -1242,10 +1252,16 @@ static void loom_target_compile_report_merge_entry_summary(
       entry_report->allocation_materialized_copy_count;
   report->allocation_materialized_spill_storage_count +=
       entry_report->allocation_materialized_spill_storage_count;
+  report->allocation_materialized_spill_storage_bytes +=
+      entry_report->allocation_materialized_spill_storage_bytes;
   report->allocation_materialized_spill_store_count +=
       entry_report->allocation_materialized_spill_store_count;
+  report->allocation_materialized_spill_store_bytes +=
+      entry_report->allocation_materialized_spill_store_bytes;
   report->allocation_materialized_reload_count +=
       entry_report->allocation_materialized_reload_count;
+  report->allocation_materialized_reload_bytes +=
+      entry_report->allocation_materialized_reload_bytes;
   report->allocation_storage_lease_count +=
       entry_report->allocation_storage_lease_count;
   report->allocation_storage_lease_instance_count +=
@@ -1339,10 +1355,16 @@ loom_target_compile_report_entry_from_report(
           entry_report->allocation_materialized_copy_count,
       .allocation_materialized_spill_storage_count =
           entry_report->allocation_materialized_spill_storage_count,
+      .allocation_materialized_spill_storage_bytes =
+          entry_report->allocation_materialized_spill_storage_bytes,
       .allocation_materialized_spill_store_count =
           entry_report->allocation_materialized_spill_store_count,
+      .allocation_materialized_spill_store_bytes =
+          entry_report->allocation_materialized_spill_store_bytes,
       .allocation_materialized_reload_count =
           entry_report->allocation_materialized_reload_count,
+      .allocation_materialized_reload_bytes =
+          entry_report->allocation_materialized_reload_bytes,
       .allocation_storage_lease_count =
           entry_report->allocation_storage_lease_count,
       .allocation_storage_lease_instance_count =

@@ -97,6 +97,12 @@ typedef struct loom_low_allocation_materialization_result_t {
   uint32_t spill_count;
   // Number of low.reload ops inserted.
   uint32_t reload_count;
+  // Byte size of low.storage.reserve ops created from spill plans.
+  uint64_t storage_bytes;
+  // Byte traffic from low.spill stores inserted.
+  uint64_t spill_bytes;
+  // Byte traffic from low.reload ops inserted.
+  uint64_t reload_bytes;
   // Materialized spill records owned by the caller-provided arena.
   const loom_low_allocation_materialized_spill_t* materialized_spills;
   // Number of records in |materialized_spills|.

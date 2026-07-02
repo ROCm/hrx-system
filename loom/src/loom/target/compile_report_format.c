@@ -1102,7 +1102,10 @@ static iree_status_t loom_target_compile_report_format_summary(
         "COMPILE-REPORT: allocation assignments=%" PRIu64 " spills=%" PRIu64
         " spill_plans=%" PRIu64 " coalesced_copies=%" PRIu64
         " materialized_copies=%" PRIu64 " materialized_spill_storage=%" PRIu64
-        " materialized_spill_stores=%" PRIu64 " materialized_reloads=%" PRIu64
+        " materialized_spill_storage_bytes=%" PRIu64
+        " materialized_spill_stores=%" PRIu64
+        " materialized_spill_store_bytes=%" PRIu64
+        " materialized_reloads=%" PRIu64 " materialized_reload_bytes=%" PRIu64
         " storage_leases=%" PRIu64 " storage_lease_instances=%" PRIu64
         " storage_release_actions=%" PRIu64 "\n",
         report->allocation_assignment_count, report->allocation_spill_count,
@@ -1110,8 +1113,11 @@ static iree_status_t loom_target_compile_report_format_summary(
         report->allocation_coalesced_copy_count,
         report->allocation_materialized_copy_count,
         report->allocation_materialized_spill_storage_count,
+        report->allocation_materialized_spill_storage_bytes,
         report->allocation_materialized_spill_store_count,
+        report->allocation_materialized_spill_store_bytes,
         report->allocation_materialized_reload_count,
+        report->allocation_materialized_reload_bytes,
         report->allocation_storage_lease_count,
         report->allocation_storage_lease_instance_count,
         report->allocation_storage_release_action_count));
@@ -1381,7 +1387,10 @@ static iree_status_t loom_target_compile_report_format_entry_rows(
           " assignments=%" PRIu64 " spills=%" PRIu64 " spill_plans=%" PRIu64
           " coalesced_copies=%" PRIu64 " materialized_copies=%" PRIu64
           " materialized_spill_storage=%" PRIu64
-          " materialized_spill_stores=%" PRIu64 " materialized_reloads=%" PRIu64
+          " materialized_spill_storage_bytes=%" PRIu64
+          " materialized_spill_stores=%" PRIu64
+          " materialized_spill_store_bytes=%" PRIu64
+          " materialized_reloads=%" PRIu64 " materialized_reload_bytes=%" PRIu64
           " storage_leases=%" PRIu64 " storage_lease_instances=%" PRIu64
           " storage_release_actions=%" PRIu64 " move_kinds=%" PRIu64
           " move_packets=%" PRIu64 " move_units=%" PRIu64
@@ -1407,8 +1416,11 @@ static iree_status_t loom_target_compile_report_format_entry_rows(
           row->allocation_coalesced_copy_count,
           row->allocation_materialized_copy_count,
           row->allocation_materialized_spill_storage_count,
+          row->allocation_materialized_spill_storage_bytes,
           row->allocation_materialized_spill_store_count,
+          row->allocation_materialized_spill_store_bytes,
           row->allocation_materialized_reload_count,
+          row->allocation_materialized_reload_bytes,
           row->allocation_storage_lease_count,
           row->allocation_storage_lease_instance_count,
           row->allocation_storage_release_action_count, move_kind_count,
@@ -2832,11 +2844,20 @@ static iree_status_t loom_target_compile_report_format_allocation_json(
       stream, &first_field, "materialized_spill_storage_count",
       report->allocation_materialized_spill_storage_count));
   IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
+      stream, &first_field, "materialized_spill_storage_bytes",
+      report->allocation_materialized_spill_storage_bytes));
+  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
       stream, &first_field, "materialized_spill_store_count",
       report->allocation_materialized_spill_store_count));
   IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
+      stream, &first_field, "materialized_spill_store_bytes",
+      report->allocation_materialized_spill_store_bytes));
+  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
       stream, &first_field, "materialized_reload_count",
       report->allocation_materialized_reload_count));
+  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
+      stream, &first_field, "materialized_reload_bytes",
+      report->allocation_materialized_reload_bytes));
   IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
       stream, &first_field, "storage_lease_count",
       report->allocation_storage_lease_count));
@@ -3497,11 +3518,20 @@ static iree_status_t loom_target_compile_report_format_entry_json(
       stream, &first_field, "allocation_materialized_spill_storage_count",
       row->allocation_materialized_spill_storage_count));
   IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
+      stream, &first_field, "allocation_materialized_spill_storage_bytes",
+      row->allocation_materialized_spill_storage_bytes));
+  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
       stream, &first_field, "allocation_materialized_spill_store_count",
       row->allocation_materialized_spill_store_count));
   IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
+      stream, &first_field, "allocation_materialized_spill_store_bytes",
+      row->allocation_materialized_spill_store_bytes));
+  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
       stream, &first_field, "allocation_materialized_reload_count",
       row->allocation_materialized_reload_count));
+  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
+      stream, &first_field, "allocation_materialized_reload_bytes",
+      row->allocation_materialized_reload_bytes));
   IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
       stream, &first_field, "allocation_storage_lease_count",
       row->allocation_storage_lease_count));

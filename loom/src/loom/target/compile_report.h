@@ -563,10 +563,16 @@ typedef struct loom_target_compile_report_entry_t {
   uint64_t allocation_materialized_copy_count;
   // Number of spill storage slots materialized before the final frame.
   uint64_t allocation_materialized_spill_storage_count;
+  // Byte size of spill storage materialized before the final frame.
+  uint64_t allocation_materialized_spill_storage_bytes;
   // Number of low.spill stores materialized before the final frame.
   uint64_t allocation_materialized_spill_store_count;
+  // Byte traffic from low.spill stores materialized before the final frame.
+  uint64_t allocation_materialized_spill_store_bytes;
   // Number of low.reload ops materialized before the final frame.
   uint64_t allocation_materialized_reload_count;
+  // Byte traffic from low.reload ops materialized before the final frame.
+  uint64_t allocation_materialized_reload_bytes;
   // Number of target storage-lease records.
   uint64_t allocation_storage_lease_count;
   // Number of assignment-backed target storage-lease instances.
@@ -1415,10 +1421,16 @@ typedef struct loom_target_compile_report_t {
   uint64_t allocation_materialized_copy_count;
   // Number of spill storage slots materialized before the final frame.
   uint64_t allocation_materialized_spill_storage_count;
+  // Byte size of spill storage materialized before the final frame.
+  uint64_t allocation_materialized_spill_storage_bytes;
   // Number of low.spill stores materialized before the final frame.
   uint64_t allocation_materialized_spill_store_count;
+  // Byte traffic from low.spill stores materialized before the final frame.
+  uint64_t allocation_materialized_spill_store_bytes;
   // Number of low.reload ops materialized before the final frame.
   uint64_t allocation_materialized_reload_count;
+  // Byte traffic from low.reload ops materialized before the final frame.
+  uint64_t allocation_materialized_reload_bytes;
   // Number of target storage-lease records.
   uint64_t allocation_storage_lease_count;
   // Number of assignment-backed target storage-lease instances.
@@ -1582,7 +1594,8 @@ void loom_target_compile_report_record_allocation(
 // Records spill traffic materialized while reaching the final frame.
 void loom_target_compile_report_record_allocation_materialization(
     loom_target_compile_report_t* report, uint64_t spill_storage_count,
-    uint64_t spill_store_count, uint64_t reload_count);
+    uint64_t spill_storage_bytes, uint64_t spill_store_count,
+    uint64_t spill_store_bytes, uint64_t reload_count, uint64_t reload_bytes);
 
 // Records target move materialization attributed to one residual move cause.
 void loom_target_compile_report_record_move_cause(

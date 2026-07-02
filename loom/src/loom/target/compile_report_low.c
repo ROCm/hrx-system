@@ -3109,8 +3109,10 @@ iree_status_t loom_target_compile_report_record_low_emission_frame(
   if (iree_status_is_ok(status)) {
     loom_target_compile_report_record_allocation_materialization(
         report, frame->materialized_spill_storage_count,
+        frame->materialized_spill_storage_bytes,
         frame->materialized_spill_store_count,
-        frame->materialized_reload_count);
+        frame->materialized_spill_store_bytes, frame->materialized_reload_count,
+        frame->materialized_reload_bytes);
   }
   if (iree_status_is_ok(status)) {
     status = loom_target_compile_report_record_materialized_spill_rows(report,

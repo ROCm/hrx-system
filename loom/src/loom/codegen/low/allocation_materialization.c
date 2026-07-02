@@ -896,6 +896,10 @@ iree_status_t loom_low_allocation_materialize_spills(
         result.spill_count - prior_spill_count;
     const uint32_t materialized_reload_count =
         result.reload_count - prior_reload_count;
+    const uint64_t byte_size = table->spill_plans[i].byte_size;
+    result.storage_bytes += byte_size;
+    result.spill_bytes += byte_size * materialized_store_count;
+    result.reload_bytes += byte_size * materialized_reload_count;
     if (record_materialized_spills) {
       loom_low_allocation_record_materialized_spill(
           table, &table->spill_plans[i], materialized_store_count,

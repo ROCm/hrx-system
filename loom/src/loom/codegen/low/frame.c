@@ -26,10 +26,16 @@ typedef enum loom_low_emission_frame_failure_e {
 typedef struct loom_low_emission_frame_materialization_summary_t {
   // Cumulative spill storage materialized while building the final frame.
   uint64_t spill_storage_count;
+  // Cumulative materialized spill storage byte size.
+  uint64_t spill_storage_bytes;
   // Cumulative low.spill stores materialized while building the final frame.
   uint64_t spill_store_count;
+  // Cumulative materialized low.spill store byte traffic.
+  uint64_t spill_store_bytes;
   // Cumulative low.reload ops materialized while building the final frame.
   uint64_t reload_count;
+  // Cumulative materialized low.reload byte traffic.
+  uint64_t reload_bytes;
   // Cumulative materialized spill records retained for report detail rows.
   loom_low_allocation_materialized_spill_list_t spill_records;
 } loom_low_emission_frame_materialization_summary_t;
@@ -267,8 +273,11 @@ static void loom_low_emission_frame_accumulate_materialization(
     const loom_low_allocation_materialization_result_t* result,
     loom_low_emission_frame_materialization_summary_t* summary) {
   summary->spill_storage_count += result->storage_count;
+  summary->spill_storage_bytes += result->storage_bytes;
   summary->spill_store_count += result->spill_count;
+  summary->spill_store_bytes += result->spill_bytes;
   summary->reload_count += result->reload_count;
+  summary->reload_bytes += result->reload_bytes;
 }
 
 static iree_status_t loom_low_emission_frame_validate_final(
@@ -554,9 +563,14 @@ iree_status_t loom_low_emission_frame_build_spill_free(
       }
       frame.materialized_spill_storage_count =
           materialization_summary.spill_storage_count;
+      frame.materialized_spill_storage_bytes =
+          materialization_summary.spill_storage_bytes;
       frame.materialized_spill_store_count =
           materialization_summary.spill_store_count;
+      frame.materialized_spill_store_bytes =
+          materialization_summary.spill_store_bytes;
       frame.materialized_reload_count = materialization_summary.reload_count;
+      frame.materialized_reload_bytes = materialization_summary.reload_bytes;
       frame.materialized_spills = materialization_summary.spill_records;
       *out_frame = frame;
       return iree_ok_status();

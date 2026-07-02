@@ -180,8 +180,9 @@ TEST(BenchmarkReportTest, WritesCanonicalCompileReportTree) {
       /*storage_lease_instance_count=*/9,
       /*storage_release_action_count=*/4);
   loom_target_compile_report_record_allocation_materialization(
-      report, /*spill_storage_count=*/4, /*spill_store_count=*/5,
-      /*reload_count=*/6);
+      report, /*spill_storage_count=*/4, /*spill_storage_bytes=*/40,
+      /*spill_store_count=*/5, /*spill_store_bytes=*/50, /*reload_count=*/6,
+      /*reload_bytes=*/60);
   loom_target_compile_report_record_emission(report, /*instruction_count=*/37,
                                              /*code_byte_count=*/148,
                                              /*code_storage_byte_count=*/160);
@@ -265,10 +266,16 @@ TEST(BenchmarkReportTest, WritesCanonicalCompileReportTree) {
   ExpectObjectValueEquals(allocation, IREE_SV("spill_count"), IREE_SV("2"));
   ExpectObjectValueEquals(
       allocation, IREE_SV("materialized_spill_storage_count"), IREE_SV("4"));
+  ExpectObjectValueEquals(
+      allocation, IREE_SV("materialized_spill_storage_bytes"), IREE_SV("40"));
   ExpectObjectValueEquals(allocation, IREE_SV("materialized_spill_store_count"),
                           IREE_SV("5"));
+  ExpectObjectValueEquals(allocation, IREE_SV("materialized_spill_store_bytes"),
+                          IREE_SV("50"));
   ExpectObjectValueEquals(allocation, IREE_SV("materialized_reload_count"),
                           IREE_SV("6"));
+  ExpectObjectValueEquals(allocation, IREE_SV("materialized_reload_bytes"),
+                          IREE_SV("60"));
   ExpectObjectValueEquals(allocation, IREE_SV("storage_lease_count"),
                           IREE_SV("11"));
   ExpectObjectValueEquals(allocation, IREE_SV("storage_release_action_count"),
