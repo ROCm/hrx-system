@@ -67,7 +67,7 @@ typedef enum id4_qwen3_vl_weight_execution_strategy_e {
 typedef enum id4_qwen3_vl_attention_implementation_e {
   // Invalid attention implementation.
   ID4_QWEN3_VL_ATTENTION_IMPLEMENTATION_INVALID = 0,
-  // Select the implementation from request shape and diagnostic needs.
+  // Select the planner-owned stable attention implementation.
   ID4_QWEN3_VL_ATTENTION_IMPLEMENTATION_AUTO = 1,
   // Materialize score and probability tensors around scalar attention kernels.
   ID4_QWEN3_VL_ATTENTION_IMPLEMENTATION_MATERIALIZED = 2,

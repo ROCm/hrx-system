@@ -28,7 +28,6 @@ enum {
   ID4_QWEN3_VL_LINEAR_WMMA_M48N32_MIN_DOWN_INPUT_SIZE = 8192,
   ID4_QWEN3_VL_LINEAR_WMMA_M64N64_MIN_TOKEN_COUNT = 512,
   ID4_QWEN3_VL_LINEAR_WMMA_M64N64_MIN_OUTPUT_SIZE = 4096,
-  ID4_QWEN3_VL_ATTENTION_WMMA_AUTO_MIN_TOKEN_COUNT = 64,
   ID4_QWEN3_VL_CONDITION_BLOCK_ELEMENT_COUNT = 2048,
   ID4_QWEN3_VL_CONFIG_VALUE_BUFFER_CAPACITY = 16,
   ID4_QWEN3_VL_MAX_KERNEL_CONFIG_BINDING_COUNT = 8,
@@ -3474,10 +3473,7 @@ static iree_status_t id4_qwen3_vl_program_attention_uses_materialized(
       &has_probabilities_tap));
   switch (options->attention_implementation) {
     case ID4_QWEN3_VL_ATTENTION_IMPLEMENTATION_AUTO:
-      *out_uses_materialized_attention =
-          has_scores_tap || has_probabilities_tap ||
-          options->request.token_count <
-              ID4_QWEN3_VL_ATTENTION_WMMA_AUTO_MIN_TOKEN_COUNT;
+      *out_uses_materialized_attention = true;
       return iree_ok_status();
     case ID4_QWEN3_VL_ATTENTION_IMPLEMENTATION_MATERIALIZED:
       *out_uses_materialized_attention = true;
