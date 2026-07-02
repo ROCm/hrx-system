@@ -1313,8 +1313,8 @@ func.def @finite_only_storage_vector_load_content(%buffer: buffer) -> (i1, i1) {
 
 // ====
 
-// Finite-flush storage schemas strengthen finite-only payload facts by also
-// proving that decoded lanes are not subnormal.
+// Finite-flush storage schemas strengthen finite-only payload facts by proving
+// that storage/import has already removed subnormal payloads.
 func.def @finite_flush_storage_vector_load_content(%buffer: buffer) -> (i1, i1) {
   %offset = index.constant 0 : offset
   %layout = encoding.layout.dense : encoding<layout>
@@ -1442,7 +1442,7 @@ func.def @finite_only_vector_decode_content(%payload: vector<2xf8E4M3>) -> (i1, 
 // ====
 
 // Explicit finite-flush decodes carry both finite and not-subnormal content
-// facts to consumers.
+// facts to consumers when the payload source has the same storage contract.
 func.def @finite_flush_vector_decode_content(%payload: vector<2xf8E4M3>) -> (i1, i1) {
   %schema = encoding.define #matrix_operand<element_format=f8e4m3, payload_elements=2, payload_registers=0, rounding=finite_flush_subnormal> : encoding<schema>
   %decoded = vector.decode %payload using %schema : vector<2xf8E4M3>, encoding<schema> -> vector<2xbf16>
