@@ -89,6 +89,11 @@ typedef enum loom_amdgpu_fp8_packed_bf16_repair_bits_e {
 typedef uint32_t loom_amdgpu_fp8_packed_bf16_repairs_t;
 
 enum {
+  LOOM_AMDGPU_FP8_U16_BYTE_COUNT = 2u,
+  LOOM_AMDGPU_FP8_U16_BYTE_TABLE_WORD_COUNT = 2u,
+};
+
+enum {
   LOOM_AMDGPU_FP8_BF16_BYTE_COUNT = 2u,
   LOOM_AMDGPU_FP8_BF16_BYTE_TABLE_WORD_COUNT = 2u,
   // Raw f32 bit pattern for the identity scale used with scale-f32 packets.
@@ -129,6 +134,10 @@ typedef struct loom_amdgpu_fp8_decode_plan_t {
   uint32_t subnormal_bf16_byte_table_words
       [LOOM_AMDGPU_FP8_BF16_BYTE_COUNT]
       [LOOM_AMDGPU_FP8_BF16_BYTE_TABLE_WORD_COUNT];
+  // Packed F16 subnormal payload byte tables.
+  uint32_t
+      subnormal_f16_byte_table_words[LOOM_AMDGPU_FP8_U16_BYTE_COUNT]
+                                    [LOOM_AMDGPU_FP8_U16_BYTE_TABLE_WORD_COUNT];
   // Unsigned VGPR bitfield extract descriptor used to isolate packed bytes.
   loom_low_lower_resolved_descriptor_t bfe_u32_descriptor;
   // Optional signed equality compare descriptor with an inline RHS operand.
@@ -294,7 +303,9 @@ iree_status_t loom_amdgpu_emit_fp8_pairs_to_packed_bf16(
     loom_value_id_t* out_low_packets);
 
 // Returns true when the target packets and value facts can use the packed
-// finite FP8-to-F16 pair decode path without exact special-value repair.
+// finite FP8-to-F16 pair decode path. Finite-only inputs may require exact
+// zero/subnormal repair while finite-not-subnormal inputs stay on the normal
+// fast path.
 bool loom_amdgpu_can_emit_fp8_pair_to_packed_f16_finite(
     const loom_amdgpu_fp8_decode_plan_t* plan,
     loom_amdgpu_fp8_decode_value_flags_t value_flags);
@@ -307,17 +318,19 @@ iree_status_t loom_amdgpu_emit_fp8_pair_to_packed_f16_finite(
     const loom_amdgpu_fp8_decode_plan_t* plan,
     loom_value_id_t low_source_register, uint32_t byte_offset,
     loom_amdgpu_fp8_decode_value_flags_t value_flags, loom_type_t vgpr_type,
-    loom_type_t sgpr_type, loom_value_id_t* out_low_packet);
+    loom_type_t sgpr_type, loom_type_t mask_type,
+    loom_value_id_t* out_low_packet);
 
 // Emits packed F16 registers for adjacent FP8 byte-pair sources when value
-// facts prove finite non-subnormal storage.
+// facts prove finite storage.
 iree_status_t loom_amdgpu_emit_fp8_pairs_to_packed_f16_finite(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_amdgpu_fp8_decode_plan_t* plan,
     const loom_amdgpu_fp8_packed_u16_pair_source_t* pair_sources,
     iree_host_size_t pair_count,
     loom_amdgpu_fp8_decode_value_flags_t value_flags, loom_type_t vgpr_type,
-    loom_type_t sgpr_type, loom_value_id_t* out_low_packets);
+    loom_type_t sgpr_type, loom_type_t mask_type,
+    loom_value_id_t* out_low_packets);
 
 #ifdef __cplusplus
 }  // extern "C"

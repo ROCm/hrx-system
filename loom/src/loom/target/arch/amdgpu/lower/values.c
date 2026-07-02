@@ -6247,7 +6247,7 @@ static iree_status_t loom_amdgpu_try_lower_vector_fp8_pairs_to_packed_f16(
       source_lane_type, pair_sources));
   IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fp8_pairs_to_packed_f16_finite(
       context, source_op, *decode_plan, pair_sources, pair_count, value_flags,
-      result_lane_type, *sgpr_type, out_low_packets));
+      result_lane_type, *sgpr_type, *mask_type, out_low_packets));
   return iree_ok_status();
 }
 
@@ -6289,7 +6289,7 @@ static iree_status_t loom_amdgpu_try_lower_vector_fp8_pair_to_packed_f16(
   };
   return loom_amdgpu_emit_fp8_pairs_to_packed_f16_finite(
       context, source_op, *decode_plan, &pair_source, 1, value_flags,
-      result_lane_type, *sgpr_type, out_low_packet);
+      result_lane_type, *sgpr_type, *mask_type, out_low_packet);
 }
 
 static iree_status_t loom_amdgpu_try_lower_vector_fp8_pairs_to_f32(
