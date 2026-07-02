@@ -63,7 +63,7 @@ IREE_FLAG(string, qwen_attention_implementation, "auto",
 IREE_FLAG(string, dit_attention_implementation, "online_wmma",
           "DiT attention implementation: streaming, materialized_wmma, "
           "blocked_wmma, or online_wmma.");
-IREE_FLAG(string, dit_feed_forward_implementation, "fused_product",
+IREE_FLAG(string, dit_feed_forward_implementation, "pytorch_parity",
           "DiT feed-forward implementation: fused_product or "
           "pytorch_parity.");
 IREE_FLAG(string, dit_conditioned_fp8_scope, "dit_cond_fp8",

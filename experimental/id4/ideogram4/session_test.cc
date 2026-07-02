@@ -106,7 +106,7 @@ static id4_ideogram4_generation_plan_policy_t MakeGenerationPolicy() {
   policy.dit_attention_implementation =
       ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_ONLINE_WMMA;
   policy.dit_feed_forward_implementation =
-      ID4_IDEOGRAM4_DIT_FEED_FORWARD_IMPLEMENTATION_FUSED_PRODUCT;
+      ID4_IDEOGRAM4_DIT_FEED_FORWARD_IMPLEMENTATION_PYTORCH_PARITY;
   policy.vae_tiling.mode = ID4_VAE_TILING_MODE_DISABLED;
   return policy;
 }
@@ -679,7 +679,7 @@ TEST_F(SessionTest, PlansGenerationFromDynamicPromptLength) {
   EXPECT_EQ(long_summary.dit_attention_implementation,
             ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_ONLINE_WMMA);
   EXPECT_EQ(long_summary.dit_feed_forward_implementation,
-            ID4_IDEOGRAM4_DIT_FEED_FORWARD_IMPLEMENTATION_FUSED_PRODUCT);
+            ID4_IDEOGRAM4_DIT_FEED_FORWARD_IMPLEMENTATION_PYTORCH_PARITY);
   EXPECT_EQ(long_summary.vae_tiling.mode, ID4_VAE_TILING_MODE_DISABLED);
   ExpectGenerationStageBoundaryContract(short_plan_owner.get(), short_summary);
   ExpectGenerationStageBoundaryContract(long_plan_owner.get(), long_summary);
@@ -1003,7 +1003,7 @@ TEST_F(SessionTest, PlansFp8E4m3DitSources) {
   EXPECT_EQ(summary.dit_attention_implementation,
             ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_ONLINE_WMMA);
   EXPECT_EQ(summary.dit_feed_forward_implementation,
-            ID4_IDEOGRAM4_DIT_FEED_FORWARD_IMPLEMENTATION_FUSED_PRODUCT);
+            ID4_IDEOGRAM4_DIT_FEED_FORWARD_IMPLEMENTATION_PYTORCH_PARITY);
 
   iree_string_builder_t builder;
   iree_string_builder_initialize(iree_allocator_system(), &builder);
