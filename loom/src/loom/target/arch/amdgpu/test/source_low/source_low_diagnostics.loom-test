@@ -719,6 +719,24 @@ kernel.def target(@target) @fragment_private_memory_rejected() {
 
 // ====
 
+amdgpu.target<gfx1100> @target
+
+kernel.def target(@target) @fragment_static_vaddr_offset_range_rejected() {
+  %c1 = index.constant 1 : index
+  %c32 = index.constant 32 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c32, %c1, %c1) : index
+} launch(%lhs_buffer: buffer) {
+  %base = index.constant 4294967296 : offset
+  %m = index.constant 16 : index
+  %k = index.constant 16 : index
+  %lhs_view = buffer.view %lhs_buffer[%base] : buffer -> view<16x16xf16, #dense>
+  // ERROR@+1: AMDGPU/023 {constraint_key="fragment_memory.base_offset"}
+  %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] : view<16x16xf16, #dense> -> vector<16xf16>
+  kernel.return
+}
+
+// ====
+
 // RUN: emit source-low diagnostics=all output=low
 
 amdgpu.target<gfx1100> @target

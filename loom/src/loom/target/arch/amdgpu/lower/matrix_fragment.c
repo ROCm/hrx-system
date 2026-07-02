@@ -2562,6 +2562,127 @@ static bool loom_amdgpu_fragment_memory_register_group_is_contiguous(
   return true;
 }
 
+static bool loom_amdgpu_fragment_memory_register_static_offset(
+    const loom_amdgpu_matrix_fragment_layout_t* layout,
+    const loom_amdgpu_fragment_memory_plan_t* plan, uint16_t register_index,
+    uint16_t element_index, uint64_t* out_static_byte_offset) {
+  *out_static_byte_offset = 0;
+  uint32_t unused_lane_mod_stride = 0;
+  uint32_t unused_lane_div_stride = 0;
+  if (!loom_amdgpu_fragment_memory_register_terms(
+          layout, plan, register_index, &unused_lane_mod_stride,
+          &unused_lane_div_stride, out_static_byte_offset)) {
+    return false;
+  }
+  if (element_index == 0) {
+    return true;
+  }
+
+  const loom_amdgpu_matrix_fragment_role_layout_t* role_layout =
+      loom_amdgpu_matrix_fragment_role_layout(layout, plan->role);
+  uint8_t element_axis = UINT8_MAX;
+  if (!loom_amdgpu_fragment_memory_role_packed_element_axis(role_layout,
+                                                            &element_axis) ||
+      element_axis >= plan->view_rank ||
+      element_index >= role_layout->elements_per_register) {
+    return false;
+  }
+  if (plan->axis_byte_strides[element_axis] != 0 &&
+      element_index > UINT64_MAX / plan->axis_byte_strides[element_axis]) {
+    return false;
+  }
+  const uint64_t element_static_offset =
+      (uint64_t)element_index * plan->axis_byte_strides[element_axis];
+  if (*out_static_byte_offset > UINT64_MAX - element_static_offset) {
+    return false;
+  }
+  *out_static_byte_offset += element_static_offset;
+  return true;
+}
+
+static bool loom_amdgpu_fragment_memory_static_offset_i64(
+    const loom_amdgpu_matrix_fragment_layout_t* layout,
+    const loom_amdgpu_fragment_memory_plan_t* plan, uint16_t register_index,
+    uint16_t element_index, int64_t* out_static_byte_offset) {
+  *out_static_byte_offset = plan->source.static_byte_offset;
+  if (plan->source.static_byte_offset < 0) {
+    return false;
+  }
+  uint64_t register_static_offset = 0;
+  if (!loom_amdgpu_fragment_memory_register_static_offset(
+          layout, plan, register_index, element_index,
+          &register_static_offset) ||
+      register_static_offset > INT64_MAX) {
+    return false;
+  }
+  return iree_checked_add_i64(plan->source.static_byte_offset,
+                              (int64_t)register_static_offset,
+                              out_static_byte_offset);
+}
+
+static bool loom_amdgpu_fragment_memory_vaddr_static_offset_u32(
+    const loom_amdgpu_matrix_fragment_layout_t* layout,
+    const loom_amdgpu_fragment_memory_plan_t* plan, uint16_t register_index,
+    uint16_t element_index, uint64_t* out_static_byte_offset) {
+  *out_static_byte_offset = 0;
+  if (plan->source.static_byte_offset < 0) {
+    return false;
+  }
+  int64_t static_byte_offset = plan->source.static_byte_offset;
+  if (loom_amdgpu_fragment_memory_uses_dynamic_view_base_value(
+          plan, /*term_index=*/0) &&
+      !loom_checked_sub_i64(static_byte_offset,
+                            plan->source.static_view_base_byte_offset,
+                            &static_byte_offset)) {
+    return false;
+  }
+
+  uint64_t register_static_offset = 0;
+  if (!loom_amdgpu_fragment_memory_register_static_offset(
+          layout, plan, register_index, element_index,
+          &register_static_offset) ||
+      register_static_offset > INT64_MAX ||
+      !iree_checked_add_i64(static_byte_offset, (int64_t)register_static_offset,
+                            &static_byte_offset) ||
+      static_byte_offset < 0) {
+    return false;
+  }
+  *out_static_byte_offset = (uint64_t)static_byte_offset;
+  return *out_static_byte_offset <= UINT32_MAX;
+}
+
+static bool loom_amdgpu_fragment_memory_packet_addresses_fit_u32(
+    const loom_amdgpu_matrix_fragment_layout_t* layout,
+    const loom_amdgpu_fragment_memory_plan_t* plan,
+    const loom_amdgpu_fragment_memory_packet_plan_t* packet,
+    loom_amdgpu_fragment_memory_diagnostic_t* diagnostic) {
+  const loom_amdgpu_matrix_fragment_role_layout_t* role_layout =
+      loom_amdgpu_matrix_fragment_role_layout(layout, plan->role);
+  const uint16_t register_address_count =
+      plan->payload_form ==
+              LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_LOAD_PACKED_16BIT_RESULT
+          ? packet->result_register_count
+          : 1;
+  const uint16_t element_address_count =
+      loom_amdgpu_fragment_memory_role_uses_packed_b16_elements(role_layout)
+          ? LOOM_AMDGPU_FRAGMENT_PACKED_B16_ELEMENT_COUNT
+          : 1;
+  for (uint16_t register_offset = 0; register_offset < register_address_count;
+       ++register_offset) {
+    for (uint16_t element_index = 0; element_index < element_address_count;
+         ++element_index) {
+      uint64_t unused_static_byte_offset = 0;
+      if (!loom_amdgpu_fragment_memory_vaddr_static_offset_u32(
+              layout, plan, packet->register_index + register_offset,
+              element_index, &unused_static_byte_offset)) {
+        return loom_amdgpu_fragment_memory_reject(
+            diagnostic, IREE_SV("fragment_memory.base_offset"));
+      }
+    }
+  }
+  return true;
+}
+
 static loom_amdgpu_descriptor_ref_t
 loom_amdgpu_fragment_memory_crosslane_packed_b16_store_dpp_ref(
     const loom_low_descriptor_set_t* descriptor_set) {
@@ -2958,6 +3079,8 @@ static bool loom_amdgpu_fragment_memory_plan_packets(
             : loom_amdgpu_fragment_memory_select_packet(
                   descriptor_set, layout, plan, register_index, &packet);
     if (!selected ||
+        !loom_amdgpu_fragment_memory_packet_addresses_fit_u32(
+            layout, plan, &packet, diagnostic) ||
         !loom_amdgpu_fragment_memory_plan_push_packet(plan, &packet)) {
       return loom_amdgpu_fragment_memory_reject(
           diagnostic, IREE_SV("fragment_memory.packet"));
@@ -3504,54 +3627,11 @@ static iree_status_t loom_amdgpu_emit_fragment_memory_vaddr(
       .low_vaddr = LOOM_VALUE_ID_INVALID,
       .immediate_offset = 0,
   };
-  uint32_t lane_mod_stride = 0;
-  uint32_t lane_div_stride = 0;
-  if (plan->source.static_byte_offset < 0) {
-    IREE_ASSERT_UNREACHABLE("selected AMDGPU fragment memory base offset");
+  uint64_t static_byte_offset = 0;
+  if (!loom_amdgpu_fragment_memory_vaddr_static_offset_u32(
+          layout, plan, register_index, element_index, &static_byte_offset)) {
+    IREE_ASSERT_UNREACHABLE("selected AMDGPU fragment memory address range");
     IREE_BUILTIN_UNREACHABLE();
-  }
-  int64_t static_byte_offset_i64 = plan->source.static_byte_offset;
-  if (loom_amdgpu_fragment_memory_uses_dynamic_view_base_value(
-          plan, /*term_index=*/0) &&
-      !loom_checked_sub_i64(static_byte_offset_i64,
-                            plan->source.static_view_base_byte_offset,
-                            &static_byte_offset_i64)) {
-    IREE_ASSERT_UNREACHABLE("selected AMDGPU fragment memory static offset");
-    IREE_BUILTIN_UNREACHABLE();
-  }
-  uint64_t register_static_offset = 0;
-  if (!loom_amdgpu_fragment_memory_register_terms(
-          layout, plan, register_index, &lane_mod_stride, &lane_div_stride,
-          &register_static_offset)) {
-    IREE_ASSERT_UNREACHABLE("selected AMDGPU fragment register map");
-    IREE_BUILTIN_UNREACHABLE();
-  }
-  if (element_index != 0) {
-    const loom_amdgpu_matrix_fragment_role_layout_t* role_layout =
-        loom_amdgpu_matrix_fragment_role_layout(layout, plan->role);
-    uint8_t element_axis = UINT8_MAX;
-    if (!loom_amdgpu_fragment_memory_role_packed_element_axis(role_layout,
-                                                              &element_axis) ||
-        element_axis >= plan->view_rank ||
-        element_index >= role_layout->elements_per_register) {
-      IREE_ASSERT_UNREACHABLE("selected AMDGPU fragment element map");
-      IREE_BUILTIN_UNREACHABLE();
-    }
-    const uint64_t element_static_offset =
-        (uint64_t)element_index * plan->axis_byte_strides[element_axis];
-    register_static_offset += element_static_offset;
-  }
-  if (register_static_offset > INT64_MAX ||
-      !iree_checked_add_i64(static_byte_offset_i64,
-                            (int64_t)register_static_offset,
-                            &static_byte_offset_i64)) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "AMDGPU fragment memory byte offset exceeds i64");
-  }
-  uint64_t static_byte_offset = (uint64_t)static_byte_offset_i64;
-  if (static_byte_offset > UINT32_MAX) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "AMDGPU fragment memory byte offset exceeds u32");
   }
 
   loom_type_t sgpr_type = loom_type_none();
@@ -3639,36 +3719,9 @@ static bool loom_amdgpu_fragment_memory_packet_static_offset(
     const loom_amdgpu_fragment_memory_plan_t* plan,
     const loom_amdgpu_fragment_memory_packet_plan_t* packet,
     uint16_t element_index, int64_t* out_static_byte_offset) {
-  *out_static_byte_offset = plan->source.static_byte_offset;
-  if (plan->source.static_byte_offset < 0) {
-    return false;
-  }
-  uint32_t unused_lane_mod_stride = 0;
-  uint32_t unused_lane_div_stride = 0;
-  uint64_t register_static_offset = 0;
-  if (!loom_amdgpu_fragment_memory_register_terms(
-          layout, plan, packet->register_index, &unused_lane_mod_stride,
-          &unused_lane_div_stride, &register_static_offset)) {
-    return false;
-  }
-  if (element_index != 0) {
-    if (plan->axis_byte_strides[0] != 0 &&
-        element_index > UINT64_MAX / plan->axis_byte_strides[0]) {
-      return false;
-    }
-    const uint64_t element_static_offset =
-        (uint64_t)element_index * plan->axis_byte_strides[0];
-    if (register_static_offset > UINT64_MAX - element_static_offset) {
-      return false;
-    }
-    register_static_offset += element_static_offset;
-  }
-  if (register_static_offset > INT64_MAX) {
-    return false;
-  }
-  return iree_checked_add_i64(plan->source.static_byte_offset,
-                              (int64_t)register_static_offset,
-                              out_static_byte_offset);
+  return loom_amdgpu_fragment_memory_static_offset_i64(
+      layout, plan, packet->register_index, element_index,
+      out_static_byte_offset);
 }
 
 static uint32_t loom_amdgpu_fragment_memory_packet_dynamic_stride_bytes(
