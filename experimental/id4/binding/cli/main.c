@@ -134,6 +134,42 @@ typedef enum id4_cli_generation_residency_request_mode_e {
   ID4_CLI_GENERATION_RESIDENCY_REQUEST_MEMORY_BUDGETED = 4,
 } id4_cli_generation_residency_request_mode_t;
 
+static uint64_t id4_cli_ceil_mib(iree_device_size_t byte_length) {
+  return ((uint64_t)byte_length + 1024u * 1024u - 1u) / (1024u * 1024u);
+}
+
+static iree_string_view_t id4_cli_generation_issue_mode_name(
+    id4_cli_generation_issue_mode_t issue_mode) {
+  switch (issue_mode) {
+    case ID4_CLI_GENERATION_ISSUE_MODE_FULL:
+      return IREE_SV("full");
+    case ID4_CLI_GENERATION_ISSUE_MODE_PHASES:
+      return IREE_SV("phases");
+    case ID4_CLI_GENERATION_ISSUE_MODE_STAGE_SERIAL:
+      return IREE_SV("stage_serial");
+    default:
+      return IREE_SV("invalid");
+  }
+}
+
+static iree_string_view_t id4_cli_generation_residency_mode_name(
+    id4_ideogram4_generation_residency_mode_t residency_mode) {
+  switch (residency_mode) {
+    case ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_ISSUE_PHASES:
+      return IREE_SV("issue_phases");
+    case ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_PHASE_STAGE_BUNDLES:
+      return IREE_SV("phase_stage_bundles");
+    case ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_SELECTED_STAGE_BUNDLES:
+      return IREE_SV("selected_stage_bundles");
+    case ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_ALL_STAGE_BUNDLES:
+      return IREE_SV("all_stage_bundles");
+    case ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_PHASE_AWARE_STAGE_BUNDLES:
+      return IREE_SV("phase_aware_stage_bundles");
+    default:
+      return IREE_SV("invalid");
+  }
+}
+
 static iree_status_t id4_cli_load_tokenizer(iree_string_view_t tokenizer_path,
                                             iree_allocator_t host_allocator,
                                             iree_tokenizer_t** out_tokenizer) {
@@ -626,6 +662,68 @@ static iree_status_t id4_cli_resolve_generation_residency(
   }
 }
 
+static iree_status_t id4_cli_print_generation_resource_statistics(
+    const id4_ideogram4_generation_plan_t* generation_plan,
+    id4_cli_generation_issue_mode_t issue_mode,
+    id4_cli_generation_residency_request_mode_t request_mode,
+    id4_ideogram4_generation_resident_stage_mask_t requested_stage_mask,
+    iree_host_size_t parameter_load_prefetch_region_distance) {
+  id4_ideogram4_generation_residency_mode_t residency_mode =
+      ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_INVALID;
+  id4_ideogram4_generation_resident_stage_mask_t resident_stage_mask =
+      ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_NONE;
+  id4_ideogram4_generation_resident_stage_mask_t
+      phase_stage_masks[ID4_IDEOGRAM4_GENERATION_PHASE_COUNT];
+  memset(phase_stage_masks, 0, sizeof(phase_stage_masks));
+  IREE_RETURN_IF_ERROR(id4_cli_resolve_generation_residency(
+      generation_plan, issue_mode, request_mode, requested_stage_mask,
+      parameter_load_prefetch_region_distance, &residency_mode,
+      &resident_stage_mask, phase_stage_masks));
+
+  id4_ideogram4_generation_resource_statistics_options_t statistics_options;
+  memset(&statistics_options, 0, sizeof(statistics_options));
+  statistics_options.structure_size = sizeof(statistics_options);
+  statistics_options.residency_mode = residency_mode;
+  statistics_options.resident_stage_mask = resident_stage_mask;
+  memcpy(statistics_options.phase_stage_masks, phase_stage_masks,
+         sizeof(statistics_options.phase_stage_masks));
+  statistics_options.parameter_load_prefetch_region_distance =
+      parameter_load_prefetch_region_distance;
+  id4_ideogram4_generation_resource_statistics_t statistics;
+  IREE_RETURN_IF_ERROR(id4_ideogram4_generation_plan_resource_statistics(
+      generation_plan, &statistics_options, &statistics));
+
+  const id4_ideogram4_generation_issue_policy_t issue_policy =
+      id4_cli_generation_issue_policy(issue_mode);
+  const iree_device_size_t selected_peak_byte_length =
+      issue_policy == ID4_IDEOGRAM4_GENERATION_ISSUE_POLICY_STAGE_SERIAL
+          ? statistics.stage_serial_total_peak_byte_length
+          : statistics.phase_concurrent_total_peak_byte_length;
+  const iree_string_view_t issue_name =
+      id4_cli_generation_issue_mode_name(issue_mode);
+  const iree_string_view_t residency_name =
+      id4_cli_generation_residency_mode_name(residency_mode);
+  fprintf(stdout,
+          "Ideogram 4 generation resources: issue=%.*s residency=%.*s "
+          "resident_stage_mask=0x%08x phase_stage_masks=[",
+          (int)issue_name.size, issue_name.data, (int)residency_name.size,
+          residency_name.data, resident_stage_mask);
+  for (iree_host_size_t i = 0; i < ID4_IDEOGRAM4_GENERATION_PHASE_COUNT; ++i) {
+    fprintf(stdout, "%s0x%08x", i == 0 ? "" : ",", phase_stage_masks[i]);
+  }
+  fprintf(stdout,
+          "] selected_peak=%" PRIu64 "MiB phase_peak=%" PRIu64
+          "MiB stage_serial_peak=%" PRIu64 "MiB resident=%" PRIu64
+          "MiB boundary=%" PRIu64 "MiB diagnostic_taps=%" PRIu64 "MiB\n",
+          id4_cli_ceil_mib(selected_peak_byte_length),
+          id4_cli_ceil_mib(statistics.phase_concurrent_total_peak_byte_length),
+          id4_cli_ceil_mib(statistics.stage_serial_total_peak_byte_length),
+          id4_cli_ceil_mib(statistics.resident_stage_bundle_byte_length),
+          id4_cli_ceil_mib(statistics.boundary_buffer_byte_length),
+          id4_cli_ceil_mib(statistics.diagnostic_tap_buffer_byte_length));
+  return iree_ok_status();
+}
+
 static iree_status_t id4_cli_validate_execution_flags(void) {
   if (strlen(FLAG_output) == 0) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -654,30 +752,6 @@ static iree_status_t id4_cli_validate_dry_run_flags(void) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "--output requires generation execution; omit --dry_run");
-  }
-  if (strcmp(FLAG_generation_residency, "issue_phases") != 0 ||
-      strlen(FLAG_generation_resident_stage_bundles) != 0) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "--generation_residency and --generation_resident_stage_bundles "
-        "require generation execution; omit --dry_run");
-  }
-  if (FLAG_generation_residency_budget != 0) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "--generation_residency_budget requires "
-                            "generation execution; omit --dry_run");
-  }
-  if (strcmp(FLAG_generation_issue_mode, "phases") != 0) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "--generation_issue_mode requires generation execution; omit "
-        "--dry_run");
-  }
-  if (FLAG_parameter_load_prefetch_region_distance != 0) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "--parameter_load_prefetch_region_distance requires generation "
-        "execution; omit --dry_run");
   }
   return iree_ok_status();
 }
@@ -1720,8 +1794,32 @@ static iree_status_t id4_cli_run_generation_dry_run(
   id4_pipeline_diagnostics_sink_initialize_ignore(&diagnostics_sink);
   id4_cli_generation_diagnostic_taps_t diagnostic_taps;
   memset(&diagnostic_taps, 0, sizeof(diagnostic_taps));
+  id4_cli_generation_issue_mode_t generation_issue_mode =
+      ID4_CLI_GENERATION_ISSUE_MODE_PHASES;
+  id4_cli_generation_residency_request_mode_t generation_residency_mode =
+      ID4_CLI_GENERATION_RESIDENCY_REQUEST_ISSUE_PHASES;
+  iree_host_size_t parameter_load_prefetch_region_distance = 0;
+  id4_ideogram4_generation_resident_stage_mask_t requested_stage_mask =
+      ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_NONE;
 
   iree_status_t status = id4_cli_validate_dry_run_flags();
+  if (iree_status_is_ok(status)) {
+    status = id4_cli_parse_generation_issue_mode(&generation_issue_mode);
+  }
+  if (iree_status_is_ok(status)) {
+    status = id4_cli_parse_generation_residency_request_mode(
+        &generation_residency_mode);
+  }
+  if (iree_status_is_ok(status)) {
+    status = id4_cli_parse_non_negative_host_size_flag(
+        FLAG_parameter_load_prefetch_region_distance,
+        IREE_SV("--parameter_load_prefetch_region_distance"),
+        &parameter_load_prefetch_region_distance);
+  }
+  if (iree_status_is_ok(status)) {
+    status =
+        id4_cli_parse_generation_resident_stage_mask(&requested_stage_mask);
+  }
   if (iree_status_is_ok(status)) {
     status = id4_cli_parse_request(host_allocator, &request);
   }
@@ -1796,6 +1894,11 @@ static iree_status_t id4_cli_run_generation_dry_run(
               summary.decoded_image_shape.dims[0],
               summary.decoded_image_shape.dims[1], summary.denoise_step_count);
     }
+  }
+  if (iree_status_is_ok(status)) {
+    status = id4_cli_print_generation_resource_statistics(
+        generation_plan, generation_issue_mode, generation_residency_mode,
+        requested_stage_mask, parameter_load_prefetch_region_distance);
   }
 
   id4_ideogram4_generation_plan_release(generation_plan);
