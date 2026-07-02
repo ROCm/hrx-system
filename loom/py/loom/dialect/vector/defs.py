@@ -3333,6 +3333,7 @@ vector_fptrunc = _vector_cast(
     result_constraint=FLOAT_ELEMENT,
     doc=("Lanewise floating-point precision truncation. Source and result shapes match exactly; only the floating-point element type narrows."),
     constraints=[ElementWidthLessThan("result", "input")],
+    facts="loom_vector_fptrunc_facts",
     canonicalize="loom_vector_fptrunc_canonicalize",
 )
 

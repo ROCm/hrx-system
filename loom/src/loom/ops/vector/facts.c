@@ -2876,6 +2876,26 @@ static iree_status_t loom_vector_try_define_same_lane_origin(
                                                          source_origin);
 }
 
+static iree_status_t loom_vector_try_define_select_same_lane_origin(
+    loom_fact_context_t* context, const loom_module_t* module,
+    loom_value_facts_t condition_facts, loom_value_id_t result,
+    loom_value_id_t true_value, loom_value_id_t false_value) {
+  if (context == NULL || context->table == NULL || module == NULL) {
+    return iree_ok_status();
+  }
+
+  loom_value_facts_t condition = {0};
+  if (loom_vector_facts_query_uniform_element(context, condition_facts,
+                                              &condition) &&
+      loom_value_facts_is_exact(condition)) {
+    const loom_value_id_t selected =
+        condition.range_lo ? true_value : false_value;
+    return loom_vector_try_define_same_lane_origin(context, module, result,
+                                                   selected);
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_vector_try_define_uniform_scale_origin(
     loom_fact_context_t* context, const loom_module_t* module,
     loom_value_id_t result, loom_value_id_t source, loom_value_id_t scale) {
@@ -3065,6 +3085,18 @@ iree_status_t loom_vector_extf_facts(loom_fact_context_t* context,
       context, module, loom_vector_extf_result(op), loom_vector_extf_input(op));
 }
 
+iree_status_t loom_vector_fptrunc_facts(loom_fact_context_t* context,
+                                        const loom_module_t* module,
+                                        const loom_op_t* op,
+                                        const loom_value_facts_t* operand_facts,
+                                        loom_value_facts_t* result_facts) {
+  (void)operand_facts;
+  IREE_RETURN_IF_ERROR(loom_vector_make_unknown_facts(result_facts));
+  return loom_vector_try_define_same_lane_origin(context, module,
+                                                 loom_vector_fptrunc_result(op),
+                                                 loom_vector_fptrunc_input(op));
+}
+
 LOOM_VECTOR_UNARY_FACTS(loom_vector_extsi_facts,
                         loom_vector_passthrough_transfer)
 LOOM_VECTOR_UNARY_FACTS(loom_vector_sitofp_facts, loom_vector_sitofp_transfer)
@@ -3190,6 +3222,10 @@ iree_status_t loom_vector_select_facts(loom_fact_context_t* context,
                                        const loom_op_t* op,
                                        const loom_value_facts_t* operand_facts,
                                        loom_value_facts_t* result_facts) {
+  IREE_RETURN_IF_ERROR(loom_vector_try_define_select_same_lane_origin(
+      context, module, operand_facts[0], loom_vector_select_result(op),
+      loom_vector_select_true_value(op), loom_vector_select_false_value(op)));
+
   if (loom_value_facts_equal(operand_facts[1], operand_facts[2])) {
     result_facts[0] = operand_facts[1];
     return iree_ok_status();
