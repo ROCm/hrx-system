@@ -118,220 +118,140 @@ low.kernel.def target(@target) workgroup_size(32, 1, 1) @bf16_result_fragment_ep
   %132 = v_and_b32_src0_inline %41, 1
   %133 = v_cmp_eq_i32_src1_inline %132 {rhs = 0}
   %134 = v_mov_b32_copy %scale
-  %136 = v_mov_b32_dpp16 %97 {dpp_ctrl = 177}
-  %138 = v_mov_b32_dpp16 %99 {dpp_ctrl = 177}
-  %140 = v_mov_b32_dpp16 %101 {dpp_ctrl = 177}
-  %142 = v_mov_b32_dpp16 %103 {dpp_ctrl = 177}
-  %144 = v_mov_b32_dpp16 %105 {dpp_ctrl = 177}
-  %146 = v_mov_b32_dpp16 %107 {dpp_ctrl = 177}
-  %148 = v_mov_b32_dpp16 %109 {dpp_ctrl = 177}
-  %150 = v_mov_b32_dpp16 %111 {dpp_ctrl = 177}
-  %151, %152 = s_and_saveexec_b64 %133
-  %153 = v_mul_f32 %97, %134
-  %154 = v_mul_f32 %136, %134
-  %155 = v_lshrrev_b32_src0_inline %153, 16
-  %156 = v_and_b32_src0_inline %155, 1
-  %157 = v_add3_u32_src2_lit %153, %156, 32767
+  %136 = v_mul_f32 %97, %134
+  %137 = v_lshrrev_b32_src0_inline %136, 16
+  %138 = v_and_b32_src0_inline %137, 1
+  %139 = v_add3_u32_src2_lit %136, %138, 32767
+  %140 = v_lshrrev_b32_src0_inline %139, 16
+  %141 = v_mov_b32_dpp16 %140 {dpp_ctrl = 177}
+  %143 = v_mul_f32 %99, %134
+  %144 = v_lshrrev_b32_src0_inline %143, 16
+  %145 = v_and_b32_src0_inline %144, 1
+  %146 = v_add3_u32_src2_lit %143, %145, 32767
+  %147 = v_lshrrev_b32_src0_inline %146, 16
+  %148 = v_mov_b32_dpp16 %147 {dpp_ctrl = 177}
+  %150 = v_mul_f32 %101, %134
+  %151 = v_lshrrev_b32_src0_inline %150, 16
+  %152 = v_and_b32_src0_inline %151, 1
+  %153 = v_add3_u32_src2_lit %150, %152, 32767
+  %154 = v_lshrrev_b32_src0_inline %153, 16
+  %155 = v_mov_b32_dpp16 %154 {dpp_ctrl = 177}
+  %157 = v_mul_f32 %103, %134
   %158 = v_lshrrev_b32_src0_inline %157, 16
-  %159 = v_lshrrev_b32_src0_inline %154, 16
-  %160 = v_and_b32_src0_inline %159, 1
-  %161 = v_add3_u32_src2_lit %154, %160, 32767
-  %162 = v_lshrrev_b32_src0_inline %161, 16
-  %163 = v_cvt_pk_u16_u32 %158, %162
-  global_store_b32_saddr %45, %163, %output_view
-  %164 = v_mul_f32 %99, %134
-  %165 = v_mul_f32 %138, %134
-  %166 = v_lshrrev_b32_src0_inline %164, 16
-  %167 = v_and_b32_src0_inline %166, 1
-  %168 = v_add3_u32_src2_lit %164, %167, 32767
-  %169 = v_lshrrev_b32_src0_inline %168, 16
-  %170 = v_lshrrev_b32_src0_inline %165, 16
-  %171 = v_and_b32_src0_inline %170, 1
-  %172 = v_add3_u32_src2_lit %165, %171, 32767
-  %173 = v_lshrrev_b32_src0_inline %172, 16
-  %174 = v_cvt_pk_u16_u32 %169, %173
-  global_store_b32_saddr %45, %174, %output_view {offset = 256}
-  %175 = v_mul_f32 %101, %134
-  %176 = v_mul_f32 %140, %134
-  %177 = v_lshrrev_b32_src0_inline %175, 16
-  %178 = v_and_b32_src0_inline %177, 1
-  %179 = v_add3_u32_src2_lit %175, %178, 32767
-  %180 = v_lshrrev_b32_src0_inline %179, 16
-  %181 = v_lshrrev_b32_src0_inline %176, 16
-  %182 = v_and_b32_src0_inline %181, 1
-  %183 = v_add3_u32_src2_lit %176, %182, 32767
-  %184 = v_lshrrev_b32_src0_inline %183, 16
-  %185 = v_cvt_pk_u16_u32 %180, %184
-  global_store_b32_saddr %45, %185, %output_view {offset = 512}
-  %186 = v_mul_f32 %103, %134
-  %187 = v_mul_f32 %142, %134
-  %188 = v_lshrrev_b32_src0_inline %186, 16
-  %189 = v_and_b32_src0_inline %188, 1
-  %190 = v_add3_u32_src2_lit %186, %189, 32767
-  %191 = v_lshrrev_b32_src0_inline %190, 16
-  %192 = v_lshrrev_b32_src0_inline %187, 16
-  %193 = v_and_b32_src0_inline %192, 1
-  %194 = v_add3_u32_src2_lit %187, %193, 32767
-  %195 = v_lshrrev_b32_src0_inline %194, 16
-  %196 = v_cvt_pk_u16_u32 %191, %195
+  %159 = v_and_b32_src0_inline %158, 1
+  %160 = v_add3_u32_src2_lit %157, %159, 32767
+  %161 = v_lshrrev_b32_src0_inline %160, 16
+  %162 = v_mov_b32_dpp16 %161 {dpp_ctrl = 177}
+  %164 = v_mul_f32 %105, %134
+  %165 = v_lshrrev_b32_src0_inline %164, 16
+  %166 = v_and_b32_src0_inline %165, 1
+  %167 = v_add3_u32_src2_lit %164, %166, 32767
+  %168 = v_lshrrev_b32_src0_inline %167, 16
+  %169 = v_mov_b32_dpp16 %168 {dpp_ctrl = 177}
+  %171 = v_mul_f32 %107, %134
+  %172 = v_lshrrev_b32_src0_inline %171, 16
+  %173 = v_and_b32_src0_inline %172, 1
+  %174 = v_add3_u32_src2_lit %171, %173, 32767
+  %175 = v_lshrrev_b32_src0_inline %174, 16
+  %176 = v_mov_b32_dpp16 %175 {dpp_ctrl = 177}
+  %178 = v_mul_f32 %109, %134
+  %179 = v_lshrrev_b32_src0_inline %178, 16
+  %180 = v_and_b32_src0_inline %179, 1
+  %181 = v_add3_u32_src2_lit %178, %180, 32767
+  %182 = v_lshrrev_b32_src0_inline %181, 16
+  %183 = v_mov_b32_dpp16 %182 {dpp_ctrl = 177}
+  %185 = v_mul_f32 %111, %134
+  %186 = v_lshrrev_b32_src0_inline %185, 16
+  %187 = v_and_b32_src0_inline %186, 1
+  %188 = v_add3_u32_src2_lit %185, %187, 32767
+  %189 = v_lshrrev_b32_src0_inline %188, 16
+  %190 = v_mov_b32_dpp16 %189 {dpp_ctrl = 177}
+  %191, %192 = s_and_saveexec_b64 %133
+  %193 = v_cvt_pk_u16_u32 %140, %141
+  global_store_b32_saddr %45, %193, %output_view
+  %194 = v_cvt_pk_u16_u32 %147, %148
+  global_store_b32_saddr %45, %194, %output_view {offset = 256}
+  %195 = v_cvt_pk_u16_u32 %154, %155
+  global_store_b32_saddr %45, %195, %output_view {offset = 512}
+  %196 = v_cvt_pk_u16_u32 %161, %162
   global_store_b32_saddr %45, %196, %output_view {offset = 768}
-  %197 = v_mul_f32 %105, %134
-  %198 = v_mul_f32 %144, %134
-  %199 = v_lshrrev_b32_src0_inline %197, 16
-  %200 = v_and_b32_src0_inline %199, 1
-  %201 = v_add3_u32_src2_lit %197, %200, 32767
-  %202 = v_lshrrev_b32_src0_inline %201, 16
-  %203 = v_lshrrev_b32_src0_inline %198, 16
-  %204 = v_and_b32_src0_inline %203, 1
-  %205 = v_add3_u32_src2_lit %198, %204, 32767
+  %197 = v_cvt_pk_u16_u32 %168, %169
+  global_store_b32_saddr %45, %197, %output_view {offset = 1024}
+  %198 = v_cvt_pk_u16_u32 %175, %176
+  global_store_b32_saddr %45, %198, %output_view {offset = 1280}
+  %199 = v_cvt_pk_u16_u32 %182, %183
+  global_store_b32_saddr %45, %199, %output_view {offset = 1536}
+  %200 = v_cvt_pk_u16_u32 %189, %190
+  global_store_b32_saddr %45, %200, %output_view {offset = 1792}
+  s_mov_b64_exec %191
+  %201 = v_and_b32_src0_inline %41, 1
+  %202 = v_cmp_eq_i32_src1_inline %201 {rhs = 0}
+  %203 = v_mov_b32_copy %scale
+  %205 = v_mul_f32 %114, %203
   %206 = v_lshrrev_b32_src0_inline %205, 16
-  %207 = v_cvt_pk_u16_u32 %202, %206
-  global_store_b32_saddr %45, %207, %output_view {offset = 1024}
-  %208 = v_mul_f32 %107, %134
-  %209 = v_mul_f32 %146, %134
-  %210 = v_lshrrev_b32_src0_inline %208, 16
-  %211 = v_and_b32_src0_inline %210, 1
-  %212 = v_add3_u32_src2_lit %208, %211, 32767
+  %207 = v_and_b32_src0_inline %206, 1
+  %208 = v_add3_u32_src2_lit %205, %207, 32767
+  %209 = v_lshrrev_b32_src0_inline %208, 16
+  %210 = v_mov_b32_dpp16 %209 {dpp_ctrl = 177}
+  %212 = v_mul_f32 %116, %203
   %213 = v_lshrrev_b32_src0_inline %212, 16
-  %214 = v_lshrrev_b32_src0_inline %209, 16
-  %215 = v_and_b32_src0_inline %214, 1
-  %216 = v_add3_u32_src2_lit %209, %215, 32767
-  %217 = v_lshrrev_b32_src0_inline %216, 16
-  %218 = v_cvt_pk_u16_u32 %213, %217
-  global_store_b32_saddr %45, %218, %output_view {offset = 1280}
-  %219 = v_mul_f32 %109, %134
-  %220 = v_mul_f32 %148, %134
-  %221 = v_lshrrev_b32_src0_inline %219, 16
-  %222 = v_and_b32_src0_inline %221, 1
-  %223 = v_add3_u32_src2_lit %219, %222, 32767
-  %224 = v_lshrrev_b32_src0_inline %223, 16
-  %225 = v_lshrrev_b32_src0_inline %220, 16
-  %226 = v_and_b32_src0_inline %225, 1
-  %227 = v_add3_u32_src2_lit %220, %226, 32767
-  %228 = v_lshrrev_b32_src0_inline %227, 16
-  %229 = v_cvt_pk_u16_u32 %224, %228
-  global_store_b32_saddr %45, %229, %output_view {offset = 1536}
-  %230 = v_mul_f32 %111, %134
-  %231 = v_mul_f32 %150, %134
-  %232 = v_lshrrev_b32_src0_inline %230, 16
-  %233 = v_and_b32_src0_inline %232, 1
-  %234 = v_add3_u32_src2_lit %230, %233, 32767
-  %235 = v_lshrrev_b32_src0_inline %234, 16
-  %236 = v_lshrrev_b32_src0_inline %231, 16
-  %237 = v_and_b32_src0_inline %236, 1
-  %238 = v_add3_u32_src2_lit %231, %237, 32767
-  %239 = v_lshrrev_b32_src0_inline %238, 16
-  %240 = v_cvt_pk_u16_u32 %235, %239
-  global_store_b32_saddr %45, %240, %output_view {offset = 1792}
-  s_mov_b64_exec %151
-  %241 = v_and_b32_src0_inline %41, 1
-  %242 = v_cmp_eq_i32_src1_inline %241 {rhs = 0}
-  %243 = v_mov_b32_copy %scale
-  %245 = v_mov_b32_dpp16 %114 {dpp_ctrl = 177}
-  %247 = v_mov_b32_dpp16 %116 {dpp_ctrl = 177}
-  %249 = v_mov_b32_dpp16 %118 {dpp_ctrl = 177}
-  %251 = v_mov_b32_dpp16 %120 {dpp_ctrl = 177}
-  %253 = v_mov_b32_dpp16 %122 {dpp_ctrl = 177}
-  %255 = v_mov_b32_dpp16 %124 {dpp_ctrl = 177}
-  %257 = v_mov_b32_dpp16 %126 {dpp_ctrl = 177}
-  %259 = v_mov_b32_dpp16 %128 {dpp_ctrl = 177}
-  %260, %261 = s_and_saveexec_b64 %242
-  %262 = v_mul_f32 %114, %243
-  %263 = v_mul_f32 %245, %243
-  %264 = v_lshrrev_b32_src0_inline %262, 16
-  %265 = v_and_b32_src0_inline %264, 1
-  %266 = v_add3_u32_src2_lit %262, %265, 32767
-  %267 = v_lshrrev_b32_src0_inline %266, 16
-  %268 = v_lshrrev_b32_src0_inline %263, 16
-  %269 = v_and_b32_src0_inline %268, 1
-  %270 = v_add3_u32_src2_lit %263, %269, 32767
-  %271 = v_lshrrev_b32_src0_inline %270, 16
-  %272 = v_cvt_pk_u16_u32 %267, %271
-  global_store_b32_saddr %45, %272, %output_view {offset = 32}
-  %273 = v_mul_f32 %116, %243
-  %274 = v_mul_f32 %247, %243
-  %275 = v_lshrrev_b32_src0_inline %273, 16
-  %276 = v_and_b32_src0_inline %275, 1
-  %277 = v_add3_u32_src2_lit %273, %276, 32767
-  %278 = v_lshrrev_b32_src0_inline %277, 16
-  %279 = v_lshrrev_b32_src0_inline %274, 16
-  %280 = v_and_b32_src0_inline %279, 1
-  %281 = v_add3_u32_src2_lit %274, %280, 32767
-  %282 = v_lshrrev_b32_src0_inline %281, 16
-  %283 = v_cvt_pk_u16_u32 %278, %282
-  global_store_b32_saddr %45, %283, %output_view {offset = 288}
-  %284 = v_mul_f32 %118, %243
-  %285 = v_mul_f32 %249, %243
-  %286 = v_lshrrev_b32_src0_inline %284, 16
-  %287 = v_and_b32_src0_inline %286, 1
-  %288 = v_add3_u32_src2_lit %284, %287, 32767
-  %289 = v_lshrrev_b32_src0_inline %288, 16
-  %290 = v_lshrrev_b32_src0_inline %285, 16
-  %291 = v_and_b32_src0_inline %290, 1
-  %292 = v_add3_u32_src2_lit %285, %291, 32767
-  %293 = v_lshrrev_b32_src0_inline %292, 16
-  %294 = v_cvt_pk_u16_u32 %289, %293
-  global_store_b32_saddr %45, %294, %output_view {offset = 544}
-  %295 = v_mul_f32 %120, %243
-  %296 = v_mul_f32 %251, %243
-  %297 = v_lshrrev_b32_src0_inline %295, 16
-  %298 = v_and_b32_src0_inline %297, 1
-  %299 = v_add3_u32_src2_lit %295, %298, 32767
-  %300 = v_lshrrev_b32_src0_inline %299, 16
-  %301 = v_lshrrev_b32_src0_inline %296, 16
-  %302 = v_and_b32_src0_inline %301, 1
-  %303 = v_add3_u32_src2_lit %296, %302, 32767
-  %304 = v_lshrrev_b32_src0_inline %303, 16
-  %305 = v_cvt_pk_u16_u32 %300, %304
-  global_store_b32_saddr %45, %305, %output_view {offset = 800}
-  %306 = v_mul_f32 %122, %243
-  %307 = v_mul_f32 %253, %243
-  %308 = v_lshrrev_b32_src0_inline %306, 16
-  %309 = v_and_b32_src0_inline %308, 1
-  %310 = v_add3_u32_src2_lit %306, %309, 32767
-  %311 = v_lshrrev_b32_src0_inline %310, 16
-  %312 = v_lshrrev_b32_src0_inline %307, 16
-  %313 = v_and_b32_src0_inline %312, 1
-  %314 = v_add3_u32_src2_lit %307, %313, 32767
-  %315 = v_lshrrev_b32_src0_inline %314, 16
-  %316 = v_cvt_pk_u16_u32 %311, %315
-  global_store_b32_saddr %45, %316, %output_view {offset = 1056}
-  %317 = v_mul_f32 %124, %243
-  %318 = v_mul_f32 %255, %243
-  %319 = v_lshrrev_b32_src0_inline %317, 16
-  %320 = v_and_b32_src0_inline %319, 1
-  %321 = v_add3_u32_src2_lit %317, %320, 32767
-  %322 = v_lshrrev_b32_src0_inline %321, 16
-  %323 = v_lshrrev_b32_src0_inline %318, 16
-  %324 = v_and_b32_src0_inline %323, 1
-  %325 = v_add3_u32_src2_lit %318, %324, 32767
-  %326 = v_lshrrev_b32_src0_inline %325, 16
-  %327 = v_cvt_pk_u16_u32 %322, %326
-  global_store_b32_saddr %45, %327, %output_view {offset = 1312}
-  %328 = v_mul_f32 %126, %243
-  %329 = v_mul_f32 %257, %243
-  %330 = v_lshrrev_b32_src0_inline %328, 16
-  %331 = v_and_b32_src0_inline %330, 1
-  %332 = v_add3_u32_src2_lit %328, %331, 32767
-  %333 = v_lshrrev_b32_src0_inline %332, 16
-  %334 = v_lshrrev_b32_src0_inline %329, 16
-  %335 = v_and_b32_src0_inline %334, 1
-  %336 = v_add3_u32_src2_lit %329, %335, 32767
-  %337 = v_lshrrev_b32_src0_inline %336, 16
-  %338 = v_cvt_pk_u16_u32 %333, %337
-  global_store_b32_saddr %45, %338, %output_view {offset = 1568}
-  %339 = v_mul_f32 %128, %243
-  %340 = v_mul_f32 %259, %243
-  %341 = v_lshrrev_b32_src0_inline %339, 16
-  %342 = v_and_b32_src0_inline %341, 1
-  %343 = v_add3_u32_src2_lit %339, %342, 32767
-  %344 = v_lshrrev_b32_src0_inline %343, 16
-  %345 = v_lshrrev_b32_src0_inline %340, 16
-  %346 = v_and_b32_src0_inline %345, 1
-  %347 = v_add3_u32_src2_lit %340, %346, 32767
-  %348 = v_lshrrev_b32_src0_inline %347, 16
-  %349 = v_cvt_pk_u16_u32 %344, %348
-  global_store_b32_saddr %45, %349, %output_view {offset = 1824}
+  %214 = v_and_b32_src0_inline %213, 1
+  %215 = v_add3_u32_src2_lit %212, %214, 32767
+  %216 = v_lshrrev_b32_src0_inline %215, 16
+  %217 = v_mov_b32_dpp16 %216 {dpp_ctrl = 177}
+  %219 = v_mul_f32 %118, %203
+  %220 = v_lshrrev_b32_src0_inline %219, 16
+  %221 = v_and_b32_src0_inline %220, 1
+  %222 = v_add3_u32_src2_lit %219, %221, 32767
+  %223 = v_lshrrev_b32_src0_inline %222, 16
+  %224 = v_mov_b32_dpp16 %223 {dpp_ctrl = 177}
+  %226 = v_mul_f32 %120, %203
+  %227 = v_lshrrev_b32_src0_inline %226, 16
+  %228 = v_and_b32_src0_inline %227, 1
+  %229 = v_add3_u32_src2_lit %226, %228, 32767
+  %230 = v_lshrrev_b32_src0_inline %229, 16
+  %231 = v_mov_b32_dpp16 %230 {dpp_ctrl = 177}
+  %233 = v_mul_f32 %122, %203
+  %234 = v_lshrrev_b32_src0_inline %233, 16
+  %235 = v_and_b32_src0_inline %234, 1
+  %236 = v_add3_u32_src2_lit %233, %235, 32767
+  %237 = v_lshrrev_b32_src0_inline %236, 16
+  %238 = v_mov_b32_dpp16 %237 {dpp_ctrl = 177}
+  %240 = v_mul_f32 %124, %203
+  %241 = v_lshrrev_b32_src0_inline %240, 16
+  %242 = v_and_b32_src0_inline %241, 1
+  %243 = v_add3_u32_src2_lit %240, %242, 32767
+  %244 = v_lshrrev_b32_src0_inline %243, 16
+  %245 = v_mov_b32_dpp16 %244 {dpp_ctrl = 177}
+  %247 = v_mul_f32 %126, %203
+  %248 = v_lshrrev_b32_src0_inline %247, 16
+  %249 = v_and_b32_src0_inline %248, 1
+  %250 = v_add3_u32_src2_lit %247, %249, 32767
+  %251 = v_lshrrev_b32_src0_inline %250, 16
+  %252 = v_mov_b32_dpp16 %251 {dpp_ctrl = 177}
+  %254 = v_mul_f32 %128, %203
+  %255 = v_lshrrev_b32_src0_inline %254, 16
+  %256 = v_and_b32_src0_inline %255, 1
+  %257 = v_add3_u32_src2_lit %254, %256, 32767
+  %258 = v_lshrrev_b32_src0_inline %257, 16
+  %259 = v_mov_b32_dpp16 %258 {dpp_ctrl = 177}
+  %260, %261 = s_and_saveexec_b64 %202
+  %262 = v_cvt_pk_u16_u32 %209, %210
+  global_store_b32_saddr %45, %262, %output_view {offset = 32}
+  %263 = v_cvt_pk_u16_u32 %216, %217
+  global_store_b32_saddr %45, %263, %output_view {offset = 288}
+  %264 = v_cvt_pk_u16_u32 %223, %224
+  global_store_b32_saddr %45, %264, %output_view {offset = 544}
+  %265 = v_cvt_pk_u16_u32 %230, %231
+  global_store_b32_saddr %45, %265, %output_view {offset = 800}
+  %266 = v_cvt_pk_u16_u32 %237, %238
+  global_store_b32_saddr %45, %266, %output_view {offset = 1056}
+  %267 = v_cvt_pk_u16_u32 %244, %245
+  global_store_b32_saddr %45, %267, %output_view {offset = 1312}
+  %268 = v_cvt_pk_u16_u32 %251, %252
+  global_store_b32_saddr %45, %268, %output_view {offset = 1568}
+  %269 = v_cvt_pk_u16_u32 %258, %259
+  global_store_b32_saddr %45, %269, %output_view {offset = 1824}
   s_mov_b64_exec %260
   return
 }
@@ -413,96 +333,64 @@ low.kernel.def target(@target) workgroup_size(32, 1, 1) @bf16_result_fragment_ep
   s_waitcnt {lgkmcnt = 0}
   %84 = v_and_b32_src0_inline %22, 1
   %85 = v_cmp_eq_i32_src1_inline %84 {rhs = 0}
-  %87 = v_mov_b32_dpp16 %68 {dpp_ctrl = 177}
-  %89 = v_mov_b32_dpp16 %70 {dpp_ctrl = 177}
-  %91 = v_mov_b32_dpp16 %72 {dpp_ctrl = 177}
-  %93 = v_mov_b32_dpp16 %74 {dpp_ctrl = 177}
-  %95 = v_mov_b32_dpp16 %76 {dpp_ctrl = 177}
-  %97 = v_mov_b32_dpp16 %78 {dpp_ctrl = 177}
-  %99 = v_mov_b32_dpp16 %80 {dpp_ctrl = 177}
-  %101 = v_mov_b32_dpp16 %82 {dpp_ctrl = 177}
-  %102, %103 = s_and_saveexec_b64 %85
-  %104 = v_lshrrev_b32_src0_inline %68, 16
-  %105 = v_and_b32_src0_inline %104, 1
-  %106 = v_add3_u32_src2_lit %68, %105, 32767
-  %107 = v_lshrrev_b32_src0_inline %106, 16
-  %108 = v_lshrrev_b32_src0_inline %87, 16
-  %109 = v_and_b32_src0_inline %108, 1
-  %110 = v_add3_u32_src2_lit %87, %109, 32767
-  %111 = v_lshrrev_b32_src0_inline %110, 16
-  %112 = v_cvt_pk_u16_u32 %107, %111
-  global_store_b32_saddr %24, %112, %output_view
-  %113 = v_lshrrev_b32_src0_inline %70, 16
-  %114 = v_and_b32_src0_inline %113, 1
-  %115 = v_add3_u32_src2_lit %70, %114, 32767
-  %116 = v_lshrrev_b32_src0_inline %115, 16
-  %117 = v_lshrrev_b32_src0_inline %89, 16
+  %87 = v_lshrrev_b32_src0_inline %68, 16
+  %88 = v_and_b32_src0_inline %87, 1
+  %89 = v_add3_u32_src2_lit %68, %88, 32767
+  %90 = v_lshrrev_b32_src0_inline %89, 16
+  %91 = v_mov_b32_dpp16 %90 {dpp_ctrl = 177}
+  %93 = v_lshrrev_b32_src0_inline %70, 16
+  %94 = v_and_b32_src0_inline %93, 1
+  %95 = v_add3_u32_src2_lit %70, %94, 32767
+  %96 = v_lshrrev_b32_src0_inline %95, 16
+  %97 = v_mov_b32_dpp16 %96 {dpp_ctrl = 177}
+  %99 = v_lshrrev_b32_src0_inline %72, 16
+  %100 = v_and_b32_src0_inline %99, 1
+  %101 = v_add3_u32_src2_lit %72, %100, 32767
+  %102 = v_lshrrev_b32_src0_inline %101, 16
+  %103 = v_mov_b32_dpp16 %102 {dpp_ctrl = 177}
+  %105 = v_lshrrev_b32_src0_inline %74, 16
+  %106 = v_and_b32_src0_inline %105, 1
+  %107 = v_add3_u32_src2_lit %74, %106, 32767
+  %108 = v_lshrrev_b32_src0_inline %107, 16
+  %109 = v_mov_b32_dpp16 %108 {dpp_ctrl = 177}
+  %111 = v_lshrrev_b32_src0_inline %76, 16
+  %112 = v_and_b32_src0_inline %111, 1
+  %113 = v_add3_u32_src2_lit %76, %112, 32767
+  %114 = v_lshrrev_b32_src0_inline %113, 16
+  %115 = v_mov_b32_dpp16 %114 {dpp_ctrl = 177}
+  %117 = v_lshrrev_b32_src0_inline %78, 16
   %118 = v_and_b32_src0_inline %117, 1
-  %119 = v_add3_u32_src2_lit %89, %118, 32767
+  %119 = v_add3_u32_src2_lit %78, %118, 32767
   %120 = v_lshrrev_b32_src0_inline %119, 16
-  %121 = v_cvt_pk_u16_u32 %116, %120
-  global_store_b32_saddr %24, %121, %output_view {offset = 64}
-  %122 = v_lshrrev_b32_src0_inline %72, 16
-  %123 = v_and_b32_src0_inline %122, 1
-  %124 = v_add3_u32_src2_lit %72, %123, 32767
-  %125 = v_lshrrev_b32_src0_inline %124, 16
-  %126 = v_lshrrev_b32_src0_inline %91, 16
-  %127 = v_and_b32_src0_inline %126, 1
-  %128 = v_add3_u32_src2_lit %91, %127, 32767
-  %129 = v_lshrrev_b32_src0_inline %128, 16
-  %130 = v_cvt_pk_u16_u32 %125, %129
-  global_store_b32_saddr %24, %130, %output_view {offset = 128}
-  %131 = v_lshrrev_b32_src0_inline %74, 16
-  %132 = v_and_b32_src0_inline %131, 1
-  %133 = v_add3_u32_src2_lit %74, %132, 32767
-  %134 = v_lshrrev_b32_src0_inline %133, 16
-  %135 = v_lshrrev_b32_src0_inline %93, 16
-  %136 = v_and_b32_src0_inline %135, 1
-  %137 = v_add3_u32_src2_lit %93, %136, 32767
-  %138 = v_lshrrev_b32_src0_inline %137, 16
-  %139 = v_cvt_pk_u16_u32 %134, %138
+  %121 = v_mov_b32_dpp16 %120 {dpp_ctrl = 177}
+  %123 = v_lshrrev_b32_src0_inline %80, 16
+  %124 = v_and_b32_src0_inline %123, 1
+  %125 = v_add3_u32_src2_lit %80, %124, 32767
+  %126 = v_lshrrev_b32_src0_inline %125, 16
+  %127 = v_mov_b32_dpp16 %126 {dpp_ctrl = 177}
+  %129 = v_lshrrev_b32_src0_inline %82, 16
+  %130 = v_and_b32_src0_inline %129, 1
+  %131 = v_add3_u32_src2_lit %82, %130, 32767
+  %132 = v_lshrrev_b32_src0_inline %131, 16
+  %133 = v_mov_b32_dpp16 %132 {dpp_ctrl = 177}
+  %134, %135 = s_and_saveexec_b64 %85
+  %136 = v_cvt_pk_u16_u32 %90, %91
+  global_store_b32_saddr %24, %136, %output_view
+  %137 = v_cvt_pk_u16_u32 %96, %97
+  global_store_b32_saddr %24, %137, %output_view {offset = 64}
+  %138 = v_cvt_pk_u16_u32 %102, %103
+  global_store_b32_saddr %24, %138, %output_view {offset = 128}
+  %139 = v_cvt_pk_u16_u32 %108, %109
   global_store_b32_saddr %24, %139, %output_view {offset = 192}
-  %140 = v_lshrrev_b32_src0_inline %76, 16
-  %141 = v_and_b32_src0_inline %140, 1
-  %142 = v_add3_u32_src2_lit %76, %141, 32767
-  %143 = v_lshrrev_b32_src0_inline %142, 16
-  %144 = v_lshrrev_b32_src0_inline %95, 16
-  %145 = v_and_b32_src0_inline %144, 1
-  %146 = v_add3_u32_src2_lit %95, %145, 32767
-  %147 = v_lshrrev_b32_src0_inline %146, 16
-  %148 = v_cvt_pk_u16_u32 %143, %147
-  global_store_b32_saddr %24, %148, %output_view {offset = 256}
-  %149 = v_lshrrev_b32_src0_inline %78, 16
-  %150 = v_and_b32_src0_inline %149, 1
-  %151 = v_add3_u32_src2_lit %78, %150, 32767
-  %152 = v_lshrrev_b32_src0_inline %151, 16
-  %153 = v_lshrrev_b32_src0_inline %97, 16
-  %154 = v_and_b32_src0_inline %153, 1
-  %155 = v_add3_u32_src2_lit %97, %154, 32767
-  %156 = v_lshrrev_b32_src0_inline %155, 16
-  %157 = v_cvt_pk_u16_u32 %152, %156
-  global_store_b32_saddr %24, %157, %output_view {offset = 320}
-  %158 = v_lshrrev_b32_src0_inline %80, 16
-  %159 = v_and_b32_src0_inline %158, 1
-  %160 = v_add3_u32_src2_lit %80, %159, 32767
-  %161 = v_lshrrev_b32_src0_inline %160, 16
-  %162 = v_lshrrev_b32_src0_inline %99, 16
-  %163 = v_and_b32_src0_inline %162, 1
-  %164 = v_add3_u32_src2_lit %99, %163, 32767
-  %165 = v_lshrrev_b32_src0_inline %164, 16
-  %166 = v_cvt_pk_u16_u32 %161, %165
-  global_store_b32_saddr %24, %166, %output_view {offset = 384}
-  %167 = v_lshrrev_b32_src0_inline %82, 16
-  %168 = v_and_b32_src0_inline %167, 1
-  %169 = v_add3_u32_src2_lit %82, %168, 32767
-  %170 = v_lshrrev_b32_src0_inline %169, 16
-  %171 = v_lshrrev_b32_src0_inline %101, 16
-  %172 = v_and_b32_src0_inline %171, 1
-  %173 = v_add3_u32_src2_lit %101, %172, 32767
-  %174 = v_lshrrev_b32_src0_inline %173, 16
-  %175 = v_cvt_pk_u16_u32 %170, %174
-  global_store_b32_saddr %24, %175, %output_view {offset = 448}
-  s_mov_b64_exec %102
+  %140 = v_cvt_pk_u16_u32 %114, %115
+  global_store_b32_saddr %24, %140, %output_view {offset = 256}
+  %141 = v_cvt_pk_u16_u32 %120, %121
+  global_store_b32_saddr %24, %141, %output_view {offset = 320}
+  %142 = v_cvt_pk_u16_u32 %126, %127
+  global_store_b32_saddr %24, %142, %output_view {offset = 384}
+  %143 = v_cvt_pk_u16_u32 %132, %133
+  global_store_b32_saddr %24, %143, %output_view {offset = 448}
+  s_mov_b64_exec %134
   return
 }
 
@@ -1482,96 +1370,64 @@ low.kernel.def target(@target) workgroup_size(32, 1, 1) @bf16_wmmar3_dual_result
   %78 = v_lshlrev_b32_src0_inline %23, 1
   %79 = v_and_b32_src0_inline %28, 1
   %80 = v_cmp_eq_i32_src1_inline %79 {rhs = 0}
-  %82 = v_mov_b32_dpp16 %55 {dpp_ctrl = 177}
-  %84 = v_mov_b32_dpp16 %58 {dpp_ctrl = 177}
-  %86 = v_mov_b32_dpp16 %61 {dpp_ctrl = 177}
-  %88 = v_mov_b32_dpp16 %64 {dpp_ctrl = 177}
-  %90 = v_mov_b32_dpp16 %67 {dpp_ctrl = 177}
-  %92 = v_mov_b32_dpp16 %70 {dpp_ctrl = 177}
-  %94 = v_mov_b32_dpp16 %73 {dpp_ctrl = 177}
-  %96 = v_mov_b32_dpp16 %76 {dpp_ctrl = 177}
-  %97, %98 = s_and_saveexec_b64 %80
-  %99 = v_lshrrev_b32_src0_inline %55, 16
-  %100 = v_and_b32_src0_inline %99, 1
-  %101 = v_add3_u32_src2_lit %55, %100, 32767
-  %102 = v_lshrrev_b32_src0_inline %101, 16
-  %103 = v_lshrrev_b32_src0_inline %82, 16
-  %104 = v_and_b32_src0_inline %103, 1
-  %105 = v_add3_u32_src2_lit %82, %104, 32767
-  %106 = v_lshrrev_b32_src0_inline %105, 16
-  %107 = v_cvt_pk_u16_u32 %102, %106
-  global_store_b32_saddr %78, %107, %out_view
-  %108 = v_lshrrev_b32_src0_inline %58, 16
-  %109 = v_and_b32_src0_inline %108, 1
-  %110 = v_add3_u32_src2_lit %58, %109, 32767
-  %111 = v_lshrrev_b32_src0_inline %110, 16
-  %112 = v_lshrrev_b32_src0_inline %84, 16
+  %82 = v_lshrrev_b32_src0_inline %55, 16
+  %83 = v_and_b32_src0_inline %82, 1
+  %84 = v_add3_u32_src2_lit %55, %83, 32767
+  %85 = v_lshrrev_b32_src0_inline %84, 16
+  %86 = v_mov_b32_dpp16 %85 {dpp_ctrl = 177}
+  %88 = v_lshrrev_b32_src0_inline %58, 16
+  %89 = v_and_b32_src0_inline %88, 1
+  %90 = v_add3_u32_src2_lit %58, %89, 32767
+  %91 = v_lshrrev_b32_src0_inline %90, 16
+  %92 = v_mov_b32_dpp16 %91 {dpp_ctrl = 177}
+  %94 = v_lshrrev_b32_src0_inline %61, 16
+  %95 = v_and_b32_src0_inline %94, 1
+  %96 = v_add3_u32_src2_lit %61, %95, 32767
+  %97 = v_lshrrev_b32_src0_inline %96, 16
+  %98 = v_mov_b32_dpp16 %97 {dpp_ctrl = 177}
+  %100 = v_lshrrev_b32_src0_inline %64, 16
+  %101 = v_and_b32_src0_inline %100, 1
+  %102 = v_add3_u32_src2_lit %64, %101, 32767
+  %103 = v_lshrrev_b32_src0_inline %102, 16
+  %104 = v_mov_b32_dpp16 %103 {dpp_ctrl = 177}
+  %106 = v_lshrrev_b32_src0_inline %67, 16
+  %107 = v_and_b32_src0_inline %106, 1
+  %108 = v_add3_u32_src2_lit %67, %107, 32767
+  %109 = v_lshrrev_b32_src0_inline %108, 16
+  %110 = v_mov_b32_dpp16 %109 {dpp_ctrl = 177}
+  %112 = v_lshrrev_b32_src0_inline %70, 16
   %113 = v_and_b32_src0_inline %112, 1
-  %114 = v_add3_u32_src2_lit %84, %113, 32767
+  %114 = v_add3_u32_src2_lit %70, %113, 32767
   %115 = v_lshrrev_b32_src0_inline %114, 16
-  %116 = v_cvt_pk_u16_u32 %111, %115
-  global_store_b32_saddr %78, %116, %out_view {offset = 64}
-  %117 = v_lshrrev_b32_src0_inline %61, 16
-  %118 = v_and_b32_src0_inline %117, 1
-  %119 = v_add3_u32_src2_lit %61, %118, 32767
-  %120 = v_lshrrev_b32_src0_inline %119, 16
-  %121 = v_lshrrev_b32_src0_inline %86, 16
-  %122 = v_and_b32_src0_inline %121, 1
-  %123 = v_add3_u32_src2_lit %86, %122, 32767
-  %124 = v_lshrrev_b32_src0_inline %123, 16
-  %125 = v_cvt_pk_u16_u32 %120, %124
-  global_store_b32_saddr %78, %125, %out_view {offset = 128}
-  %126 = v_lshrrev_b32_src0_inline %64, 16
-  %127 = v_and_b32_src0_inline %126, 1
-  %128 = v_add3_u32_src2_lit %64, %127, 32767
-  %129 = v_lshrrev_b32_src0_inline %128, 16
-  %130 = v_lshrrev_b32_src0_inline %88, 16
-  %131 = v_and_b32_src0_inline %130, 1
-  %132 = v_add3_u32_src2_lit %88, %131, 32767
-  %133 = v_lshrrev_b32_src0_inline %132, 16
-  %134 = v_cvt_pk_u16_u32 %129, %133
+  %116 = v_mov_b32_dpp16 %115 {dpp_ctrl = 177}
+  %118 = v_lshrrev_b32_src0_inline %73, 16
+  %119 = v_and_b32_src0_inline %118, 1
+  %120 = v_add3_u32_src2_lit %73, %119, 32767
+  %121 = v_lshrrev_b32_src0_inline %120, 16
+  %122 = v_mov_b32_dpp16 %121 {dpp_ctrl = 177}
+  %124 = v_lshrrev_b32_src0_inline %76, 16
+  %125 = v_and_b32_src0_inline %124, 1
+  %126 = v_add3_u32_src2_lit %76, %125, 32767
+  %127 = v_lshrrev_b32_src0_inline %126, 16
+  %128 = v_mov_b32_dpp16 %127 {dpp_ctrl = 177}
+  %129, %130 = s_and_saveexec_b64 %80
+  %131 = v_cvt_pk_u16_u32 %85, %86
+  global_store_b32_saddr %78, %131, %out_view
+  %132 = v_cvt_pk_u16_u32 %91, %92
+  global_store_b32_saddr %78, %132, %out_view {offset = 64}
+  %133 = v_cvt_pk_u16_u32 %97, %98
+  global_store_b32_saddr %78, %133, %out_view {offset = 128}
+  %134 = v_cvt_pk_u16_u32 %103, %104
   global_store_b32_saddr %78, %134, %out_view {offset = 192}
-  %135 = v_lshrrev_b32_src0_inline %67, 16
-  %136 = v_and_b32_src0_inline %135, 1
-  %137 = v_add3_u32_src2_lit %67, %136, 32767
-  %138 = v_lshrrev_b32_src0_inline %137, 16
-  %139 = v_lshrrev_b32_src0_inline %90, 16
-  %140 = v_and_b32_src0_inline %139, 1
-  %141 = v_add3_u32_src2_lit %90, %140, 32767
-  %142 = v_lshrrev_b32_src0_inline %141, 16
-  %143 = v_cvt_pk_u16_u32 %138, %142
-  global_store_b32_saddr %78, %143, %out_view {offset = 256}
-  %144 = v_lshrrev_b32_src0_inline %70, 16
-  %145 = v_and_b32_src0_inline %144, 1
-  %146 = v_add3_u32_src2_lit %70, %145, 32767
-  %147 = v_lshrrev_b32_src0_inline %146, 16
-  %148 = v_lshrrev_b32_src0_inline %92, 16
-  %149 = v_and_b32_src0_inline %148, 1
-  %150 = v_add3_u32_src2_lit %92, %149, 32767
-  %151 = v_lshrrev_b32_src0_inline %150, 16
-  %152 = v_cvt_pk_u16_u32 %147, %151
-  global_store_b32_saddr %78, %152, %out_view {offset = 320}
-  %153 = v_lshrrev_b32_src0_inline %73, 16
-  %154 = v_and_b32_src0_inline %153, 1
-  %155 = v_add3_u32_src2_lit %73, %154, 32767
-  %156 = v_lshrrev_b32_src0_inline %155, 16
-  %157 = v_lshrrev_b32_src0_inline %94, 16
-  %158 = v_and_b32_src0_inline %157, 1
-  %159 = v_add3_u32_src2_lit %94, %158, 32767
-  %160 = v_lshrrev_b32_src0_inline %159, 16
-  %161 = v_cvt_pk_u16_u32 %156, %160
-  global_store_b32_saddr %78, %161, %out_view {offset = 384}
-  %162 = v_lshrrev_b32_src0_inline %76, 16
-  %163 = v_and_b32_src0_inline %162, 1
-  %164 = v_add3_u32_src2_lit %76, %163, 32767
-  %165 = v_lshrrev_b32_src0_inline %164, 16
-  %166 = v_lshrrev_b32_src0_inline %96, 16
-  %167 = v_and_b32_src0_inline %166, 1
-  %168 = v_add3_u32_src2_lit %96, %167, 32767
-  %169 = v_lshrrev_b32_src0_inline %168, 16
-  %170 = v_cvt_pk_u16_u32 %165, %169
-  global_store_b32_saddr %78, %170, %out_view {offset = 448}
-  s_mov_b64_exec %97
+  %135 = v_cvt_pk_u16_u32 %109, %110
+  global_store_b32_saddr %78, %135, %out_view {offset = 256}
+  %136 = v_cvt_pk_u16_u32 %115, %116
+  global_store_b32_saddr %78, %136, %out_view {offset = 320}
+  %137 = v_cvt_pk_u16_u32 %121, %122
+  global_store_b32_saddr %78, %137, %out_view {offset = 384}
+  %138 = v_cvt_pk_u16_u32 %127, %128
+  global_store_b32_saddr %78, %138, %out_view {offset = 448}
+  s_mov_b64_exec %129
   return
 }
 
