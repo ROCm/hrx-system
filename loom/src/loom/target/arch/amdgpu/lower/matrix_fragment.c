@@ -3935,6 +3935,10 @@ static bool loom_amdgpu_fragment_memory_prefers_fp8_packed_bf16(
                         LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_NATIVE_F32_PAIR)) {
     return true;
   }
+  if (iree_any_bit_set(decode_plan->flags,
+                       LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_NATIVE_BF16_PACK)) {
+    return false;
+  }
 
   const loom_amdgpu_fp8_packed_bf16_repairs_t repairs =
       loom_amdgpu_fp8_pair_to_packed_bf16_repairs(decode_plan,
