@@ -197,6 +197,19 @@ id4_ideogram4_generation_stage_descriptor_for_key(
   return NULL;
 }
 
+id4_ideogram4_generation_resident_stage_mask_t
+id4_ideogram4_generation_phase_stage_mask(
+    const id4_ideogram4_generation_phase_descriptor_t* phase) {
+  id4_ideogram4_generation_resident_stage_mask_t stage_mask =
+      ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_NONE;
+  for (iree_host_size_t i = 0; i < phase->stage_count; ++i) {
+    const id4_ideogram4_generation_stage_descriptor_t* descriptor =
+        id4_ideogram4_generation_stage_descriptor(phase->stage_ordinals[i]);
+    stage_mask |= descriptor->resident_stage_bit;
+  }
+  return stage_mask;
+}
+
 const id4_pipeline_plan_t* id4_ideogram4_generation_stage_plan(
     const id4_ideogram4_generation_plan_t* plan,
     id4_ideogram4_generation_stage_ordinal_t ordinal) {

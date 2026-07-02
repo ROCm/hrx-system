@@ -128,19 +128,6 @@ static void id4_ideogram4_generation_parameter_providers_release(
   memset(providers, 0, sizeof(*providers));
 }
 
-static id4_ideogram4_generation_resident_stage_mask_t
-id4_ideogram4_generation_phase_stage_mask(
-    const id4_ideogram4_generation_phase_descriptor_t* phase) {
-  id4_ideogram4_generation_resident_stage_mask_t stage_mask =
-      ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_NONE;
-  for (iree_host_size_t i = 0; i < phase->stage_count; ++i) {
-    const id4_ideogram4_generation_stage_descriptor_t* descriptor =
-        id4_ideogram4_generation_stage_descriptor(phase->stage_ordinals[i]);
-    stage_mask |= descriptor->resident_stage_bit;
-  }
-  return stage_mask;
-}
-
 static void id4_ideogram4_generation_bundle_capture_prepare_resources(
     id4_ideogram4_generation_bundle_t* bundle,
     const id4_ideogram4_generation_prepare_options_t* options) {

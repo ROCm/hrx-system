@@ -42,6 +42,11 @@ id4_ideogram4_generation_stage_descriptor(
 const id4_ideogram4_generation_stage_descriptor_t*
 id4_ideogram4_generation_stage_descriptor_for_key(iree_string_view_t stage_key);
 
+// Returns the resident-stage mask for every stage in |phase|.
+id4_ideogram4_generation_resident_stage_mask_t
+id4_ideogram4_generation_phase_stage_mask(
+    const id4_ideogram4_generation_phase_descriptor_t* phase);
+
 // Returns the planned stage selected by |ordinal|, or NULL when absent.
 const id4_pipeline_plan_t* id4_ideogram4_generation_stage_plan(
     const id4_ideogram4_generation_plan_t* plan,
