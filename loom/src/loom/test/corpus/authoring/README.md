@@ -130,6 +130,9 @@ jq '{status, target_key, target_bundle, target_export,
      scheduled_vgpr_pressure:
        .target_resources.vector.scheduled_pressure.peak_live_units,
      code_bytes:.emission.code_byte_count,
+     matrix:.static_instruction_mix.matrix_count,
+     wmma:.static_instruction_mix.wmma_count,
+     mfma:.static_instruction_mix.mfma_count,
      dots:.static_instruction_mix.dot_count}' \
   /tmp/loom-q6q8.compile-report.json
 ```
@@ -139,6 +142,26 @@ metadata used for occupancy. The adjacent
 `target_resources.{scalar,vector}.scheduled_pressure.peak_live_units` value is
 scheduled virtual pressure before final allocation metadata, so the two numbers
 can differ without implying that allocation contradicted itself.
+
+Source-low selection summaries show which target rule or plan handled each
+source operation. The descriptor key is target-specific, while
+`descriptor_semantic_tag` gives the portable instruction family used for
+high-level comparisons. Matrix-family checks should filter on semantic tags
+instead of hardcoding one target mnemonic:
+
+```bash
+jq '.source_low.selection_summaries.rows[]?
+  | {function, source_op, selection, plan_key, descriptor_key,
+     descriptor_semantic_tag, selected_op_count, emitted_low_op_count}
+  | with_entries(select(.value != null))' \
+  /tmp/loom-q6q8.compile-report.json
+
+jq '.source_low.selection_summaries.rows[]?
+  | select((.descriptor_semantic_tag // "") | startswith("matrix."))
+  | {function, source_op, plan_key, descriptor_key, descriptor_semantic_tag,
+     selected_op_count, emitted_low_op_count}' \
+  /tmp/loom-q6q8.compile-report.json
+```
 
 When provider selection, inlining, or math legalization is suspect, capture IR
 snapshots around those boundaries:
