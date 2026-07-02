@@ -44,6 +44,12 @@ typedef struct id4_pipeline_region_tensor_record_t {
   iree_host_size_t epoch_write_range_count;
   // Allocated capacity of epoch_write_ranges.
   iree_host_size_t epoch_write_range_capacity;
+  // Write coverage ranges accumulated across epochs before full initialization.
+  id4_pipeline_region_tensor_byte_range_t* initialized_write_ranges;
+  // Number of accumulated initialization write coverage ranges.
+  iree_host_size_t initialized_write_range_count;
+  // Allocated capacity of initialized_write_ranges.
+  iree_host_size_t initialized_write_range_capacity;
   // True when the tensor contents may be read.
   bool initialized;
   // True after a local tensor has been released.
@@ -398,6 +404,46 @@ static iree_status_t id4_pipeline_region_validate_binding_write_range(
                           (uint64_t)end, (uint64_t)binding->tensor.length);
 }
 
+static iree_status_t id4_pipeline_region_validate_initialized_import_ranges(
+    const id4_pipeline_tensor_import_t* import) {
+  if (iree_all_bits_set(import->flags,
+                        ID4_PIPELINE_TENSOR_IMPORT_FLAG_INITIALIZED) &&
+      import->initialized_range_count != 0) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "tensor %.*s import specifies both full and range initialization",
+        (int)import->layout.name.size, import->layout.name.data);
+  }
+  if (import->initialized_range_count != 0 && !import->initialized_ranges) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "tensor %.*s import initialized ranges are required",
+        (int)import->layout.name.size, import->layout.name.data);
+  }
+  for (iree_host_size_t i = 0; i < import->initialized_range_count; ++i) {
+    const id4_pipeline_region_tensor_byte_range_t range =
+        import->initialized_ranges[i];
+    if (range.length == 0) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "tensor %.*s import initialized range %" PRIhsz " is empty",
+          (int)import->layout.name.size, import->layout.name.data, i);
+    }
+    iree_device_size_t range_end = 0;
+    IREE_RETURN_IF_ERROR(
+        id4_pipeline_region_tensor_byte_range_end(range, &range_end));
+    if (range_end <= import->layout.byte_length) continue;
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "tensor %.*s import initialized range %" PRIhsz " [%" PRIu64
+        ", %" PRIu64 ") exceeds tensor byte length %" PRIu64,
+        (int)import->layout.name.size, import->layout.name.data, i,
+        (uint64_t)range.offset, (uint64_t)range_end,
+        (uint64_t)import->layout.byte_length);
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t id4_pipeline_region_reserve_tensor_records(
     id4_pipeline_region_builder_t* builder, iree_host_size_t capacity) {
   if (capacity <= builder->tensor_record_capacity) return iree_ok_status();
@@ -433,6 +479,18 @@ static iree_status_t id4_pipeline_region_reserve_epoch_write_ranges(
                                capacity, sizeof(record->epoch_write_ranges[0]),
                                &record->epoch_write_range_capacity,
                                (void**)&record->epoch_write_ranges);
+}
+
+static iree_status_t id4_pipeline_region_reserve_initialized_write_ranges(
+    id4_pipeline_region_builder_t* builder,
+    id4_pipeline_region_tensor_record_t* record, iree_host_size_t capacity) {
+  if (capacity <= record->initialized_write_range_capacity)
+    return iree_ok_status();
+  return iree_arena_grow_array(&builder->arena,
+                               record->initialized_write_range_count, capacity,
+                               sizeof(record->initialized_write_ranges[0]),
+                               &record->initialized_write_range_capacity,
+                               (void**)&record->initialized_write_ranges);
 }
 
 static void id4_pipeline_region_remove_free_range(
@@ -691,6 +749,47 @@ static iree_status_t id4_pipeline_region_lookup_tensor_record(
                             "tensor handle does not match region record");
   }
   *out_record = record;
+  return iree_ok_status();
+}
+
+static bool id4_pipeline_region_write_ranges_cover_tensor(
+    id4_pipeline_tensor_t tensor,
+    const id4_pipeline_region_tensor_byte_range_t* ranges,
+    iree_host_size_t range_count) {
+  iree_device_size_t covered_end = 0;
+  bool changed = true;
+  while (changed && covered_end < tensor.length) {
+    changed = false;
+    for (iree_host_size_t i = 0; i < range_count; ++i) {
+      const id4_pipeline_region_tensor_byte_range_t range = ranges[i];
+      if (range.offset > covered_end) continue;
+      iree_device_size_t range_end = 0;
+      if (!iree_device_size_checked_add(range.offset, range.length,
+                                        &range_end)) {
+        continue;
+      }
+      if (range_end <= covered_end) continue;
+      covered_end = range_end;
+      changed = true;
+    }
+  }
+  return covered_end >= tensor.length;
+}
+
+static iree_status_t id4_pipeline_region_note_initialized_write_range(
+    id4_pipeline_region_builder_t* builder,
+    id4_pipeline_region_tensor_record_t* record,
+    id4_pipeline_region_tensor_byte_range_t write_range) {
+  if (record->initialized) return iree_ok_status();
+  IREE_RETURN_IF_ERROR(id4_pipeline_region_reserve_initialized_write_ranges(
+      builder, record, record->initialized_write_range_count + 1));
+  record->initialized_write_ranges[record->initialized_write_range_count++] =
+      write_range;
+  if (id4_pipeline_region_write_ranges_cover_tensor(
+          record->tensor, record->initialized_write_ranges,
+          record->initialized_write_range_count)) {
+    record->initialized = true;
+  }
   return iree_ok_status();
 }
 
@@ -976,6 +1075,8 @@ iree_status_t id4_pipeline_region_import_tensor(
                             "tensor import is required");
   }
   IREE_RETURN_IF_ERROR(id4_pipeline_region_validate_layout(&import->layout));
+  IREE_RETURN_IF_ERROR(
+      id4_pipeline_region_validate_initialized_import_ranges(import));
   IREE_RETURN_IF_ERROR(id4_pipeline_region_validate_binding_slot(
       builder, import->binding_slot, import->layout.name));
   if (import->binding_slot == builder->local_binding_slot) {
@@ -998,6 +1099,10 @@ iree_status_t id4_pipeline_region_import_tensor(
   IREE_RETURN_IF_ERROR(id4_pipeline_region_make_tensor_record(
       builder, ID4_PIPELINE_TENSOR_STORAGE_CLASS_BOUND, &import->layout,
       import->binding_slot, import->offset, initialized, &record));
+  for (iree_host_size_t i = 0; i < import->initialized_range_count; ++i) {
+    IREE_RETURN_IF_ERROR(id4_pipeline_region_note_initialized_write_range(
+        builder, record, import->initialized_ranges[i]));
+  }
   ++builder->statistics.bound_import_count;
   *out_tensor = record->tensor;
   return iree_ok_status();
@@ -1109,25 +1214,6 @@ static iree_status_t id4_pipeline_region_validate_dispatch_binding(
   return iree_ok_status();
 }
 
-static bool id4_pipeline_region_epoch_writes_cover_tensor(
-    const id4_pipeline_region_tensor_record_t* record) {
-  iree_device_size_t covered_end = 0;
-  bool changed = true;
-  while (changed && covered_end < record->tensor.length) {
-    changed = false;
-    for (iree_host_size_t i = 0; i < record->epoch_write_range_count; ++i) {
-      const id4_pipeline_region_tensor_byte_range_t range =
-          record->epoch_write_ranges[i];
-      if (range.offset > covered_end) continue;
-      const iree_device_size_t range_end = range.offset + range.length;
-      if (range_end <= covered_end) continue;
-      covered_end = range_end;
-      changed = true;
-    }
-  }
-  return covered_end >= record->tensor.length;
-}
-
 static iree_status_t id4_pipeline_region_apply_dispatch_binding_access(
     id4_pipeline_region_builder_t* builder,
     id4_pipeline_region_tensor_record_t* record,
@@ -1145,9 +1231,8 @@ static iree_status_t id4_pipeline_region_apply_dispatch_binding_access(
     IREE_RETURN_IF_ERROR(id4_pipeline_region_reserve_epoch_write_ranges(
         builder, record, record->epoch_write_range_count + 1));
     record->epoch_write_ranges[record->epoch_write_range_count++] = write_range;
-    if (id4_pipeline_region_epoch_writes_cover_tensor(record)) {
-      record->initialized = true;
-    }
+    IREE_RETURN_IF_ERROR(id4_pipeline_region_note_initialized_write_range(
+        builder, record, write_range));
   }
   return iree_ok_status();
 }

@@ -115,6 +115,37 @@ static iree_status_t ResolveImport(
   return iree_ok_status();
 }
 
+static iree_status_t ResolveSharedTensor(
+    void* user_data, const id4_pipeline_program_acquire_op_t* acquire_op,
+    const id4_pipeline_program_tensor_record_t* tensor, bool* out_is_shared,
+    id4_pipeline_tensor_import_t* out_import) {
+  (void)user_data;
+  (void)acquire_op;
+  *out_is_shared = true;
+  *out_import = id4_pipeline_tensor_import_t{
+      /*.layout=*/MakeTensorLayout(tensor),
+      /*.binding_slot=*/1,
+      /*.offset=*/0,
+      /*.flags=*/0,
+  };
+  return iree_ok_status();
+}
+
+static iree_status_t ResolveTap(
+    void* user_data, const id4_pipeline_program_tap_op_t* tap_op,
+    const id4_pipeline_program_tensor_record_t* tensor,
+    iree_host_size_t tap_ordinal, id4_pipeline_tensor_import_t* out_import) {
+  (void)user_data;
+  (void)tap_op;
+  *out_import = id4_pipeline_tensor_import_t{
+      /*.layout=*/MakeTensorLayout(tensor),
+      /*.binding_slot=*/(uint32_t)(2 + tap_ordinal),
+      /*.offset=*/0,
+      /*.flags=*/0,
+  };
+  return iree_ok_status();
+}
+
 static id4_pipeline_program_t* CreateBoundaryDispatchProgram() {
   ProgramBuilderScope builder_scope;
   id4_pipeline_program_builder_t* builder = builder_scope.builder();
@@ -159,6 +190,86 @@ static id4_pipeline_program_t* CreateBoundaryDispatchProgram() {
       /*.bindings=*/bindings,
   };
   IREE_CHECK_OK(id4_pipeline_program_dispatch_loom(builder, &dispatch_options));
+
+  id4_pipeline_program_t* program = nullptr;
+  IREE_CHECK_OK(id4_pipeline_program_builder_seal(
+      builder, iree_allocator_system(), &program));
+  builder_scope.DestroyBuilder();
+  return program;
+}
+
+static id4_pipeline_program_t* CreateSharedPartialWriteProgram() {
+  ProgramBuilderScope builder_scope;
+  id4_pipeline_program_builder_t* builder = builder_scope.builder();
+
+  id4_pipeline_program_tensor_t shared = id4_pipeline_program_tensor_invalid();
+  id4_pipeline_program_acquire_tensor_options_t shared_options = {
+      /*.structure_size=*/sizeof(shared_options),
+      /*.next=*/nullptr,
+      /*.name=*/IREE_SV("shared"),
+      /*.dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_U32,
+      /*.shape=*/id4_pipeline_program_make_shape_rank1(4),
+  };
+  IREE_CHECK_OK(
+      id4_pipeline_program_acquire_tensor(builder, &shared_options, &shared));
+
+  id4_pipeline_program_dispatch_binding_t first_bindings[] = {
+      id4_pipeline_program_write_range(shared, 0, 8),
+  };
+  id4_pipeline_program_dispatch_loom_options_t first_dispatch_options = {
+      /*.structure_size=*/sizeof(first_dispatch_options),
+      /*.next=*/nullptr,
+      /*.name=*/IREE_SV("write_first"),
+      /*.kernel=*/
+      id4_pipeline_make_kernel_ref(IREE_SV("test/write"),
+                                   IREE_SV("write_first")),
+      /*.config_binding_count=*/0,
+      /*.config_bindings=*/nullptr,
+      /*.binding_count=*/IREE_ARRAYSIZE(first_bindings),
+      /*.bindings=*/first_bindings,
+  };
+  IREE_CHECK_OK(
+      id4_pipeline_program_dispatch_loom(builder, &first_dispatch_options));
+
+  id4_pipeline_program_region_cut_options_t cut_options = {
+      /*.structure_size=*/sizeof(cut_options),
+      /*.next=*/nullptr,
+      /*.name=*/IREE_SV("after_first"),
+  };
+  IREE_CHECK_OK(id4_pipeline_program_region_cut(builder, &cut_options));
+
+  id4_pipeline_program_dispatch_binding_t second_bindings[] = {
+      id4_pipeline_program_write_range(shared, 8, 8),
+  };
+  id4_pipeline_program_dispatch_loom_options_t second_dispatch_options = {
+      /*.structure_size=*/sizeof(second_dispatch_options),
+      /*.next=*/nullptr,
+      /*.name=*/IREE_SV("write_second"),
+      /*.kernel=*/
+      id4_pipeline_make_kernel_ref(IREE_SV("test/write"),
+                                   IREE_SV("write_second")),
+      /*.config_binding_count=*/0,
+      /*.config_bindings=*/nullptr,
+      /*.binding_count=*/IREE_ARRAYSIZE(second_bindings),
+      /*.bindings=*/second_bindings,
+  };
+  IREE_CHECK_OK(
+      id4_pipeline_program_dispatch_loom(builder, &second_dispatch_options));
+
+  id4_pipeline_program_barrier_options_t barrier_options = {
+      /*.structure_size=*/sizeof(barrier_options),
+      /*.next=*/nullptr,
+      /*.name=*/IREE_SV("after_second"),
+  };
+  IREE_CHECK_OK(id4_pipeline_program_barrier(builder, &barrier_options));
+
+  id4_pipeline_program_tap_options_t tap_options = {
+      /*.structure_size=*/sizeof(tap_options),
+      /*.next=*/nullptr,
+      /*.name=*/IREE_SV("shared"),
+      /*.tensor=*/shared,
+  };
+  IREE_CHECK_OK(id4_pipeline_program_tap(builder, &tap_options));
 
   id4_pipeline_program_t* program = nullptr;
   IREE_CHECK_OK(id4_pipeline_program_builder_seal(
@@ -301,6 +412,46 @@ TEST(PipelineProgramRegion, RejectsLocalTensorCrossingSourceRange) {
   IREE_EXPECT_STATUS_IS(IREE_STATUS_UNIMPLEMENTED,
                         id4_pipeline_program_region_lower(
                             &lower_options, iree_allocator_system()));
+
+  id4_pipeline_program_release(program);
+}
+
+TEST(PipelineProgramRegion,
+     SharedTensorImportsPriorWriteRangesIntoSourceRange) {
+  id4_pipeline_program_t* program = CreateSharedPartialWriteProgram();
+  RegionBuilderScope region_scope;
+  iree_string_view_t captured_tap_names[] = {IREE_SV("shared")};
+
+  id4_pipeline_program_region_lower_options_t lower_options = {
+      /*.structure_size=*/sizeof(lower_options),
+      /*.next=*/nullptr,
+      /*.program=*/program,
+      /*.source_operation_offset=*/3,
+      /*.source_operation_count=*/3,
+      /*.builder=*/region_scope.builder(),
+      /*.tap_mode=*/ID4_PIPELINE_PROGRAM_REGION_TAP_MODE_CAPTURE,
+      /*.captured_tap_names=*/
+      iree_string_view_list_t{
+          /*.count=*/IREE_ARRAYSIZE(captured_tap_names),
+          /*.values=*/captured_tap_names,
+      },
+      /*.local_tensor_alignment=*/16,
+      /*.user_data=*/nullptr,
+      /*.resolve_import=*/ResolveImport,
+      /*.resolve_parameter=*/nullptr,
+      /*.resolve_constant=*/nullptr,
+      /*.resolve_shared_tensor=*/ResolveSharedTensor,
+      /*.resolve_kernel=*/nullptr,
+      /*.resolve_tap=*/ResolveTap,
+  };
+  IREE_ASSERT_OK(id4_pipeline_program_region_lower(&lower_options,
+                                                   iree_allocator_system()));
+
+  id4_pipeline_region_statistics_t statistics = {};
+  id4_pipeline_region_builder_statistics(region_scope.builder(), &statistics);
+  EXPECT_EQ(statistics.bound_import_count, 2u);
+  EXPECT_EQ(statistics.dispatch_count, 1u);
+  EXPECT_EQ(statistics.copy_count, 1u);
 
   id4_pipeline_program_release(program);
 }

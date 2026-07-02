@@ -13,6 +13,13 @@ typedef struct id4_pipeline_program_region_counts_t {
   iree_host_size_t max_dispatch_binding_count;
 } id4_pipeline_program_region_counts_t;
 
+typedef struct id4_pipeline_program_region_initialized_ranges_t {
+  // Tensor-relative byte ranges initialized by prior program operations.
+  id4_pipeline_region_tensor_byte_range_t* values;
+  // Number of entries in values.
+  iree_host_size_t count;
+} id4_pipeline_program_region_initialized_ranges_t;
+
 typedef struct id4_pipeline_program_region_context_t {
   // Program lowering options.
   const id4_pipeline_program_region_lower_options_t* options;
@@ -245,8 +252,86 @@ static iree_status_t id4_pipeline_program_region_binding_write_range(
                             (uint64_t)binding->write_range.offset,
                             (uint64_t)write_end, (uint64_t)tensor->byte_length);
   }
+  if (binding->write_range.length == 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "program tensor %.*s write range is empty",
+                            (int)tensor->name.size, tensor->name.data);
+  }
   *out_range = binding->write_range;
   return iree_ok_status();
+}
+
+static iree_status_t
+id4_pipeline_program_region_collect_initialized_write_ranges_before_range(
+    const id4_pipeline_program_region_lower_options_t* options,
+    id4_pipeline_program_tensor_t tensor,
+    const id4_pipeline_program_tensor_record_t* tensor_record,
+    iree_allocator_t host_allocator,
+    id4_pipeline_program_region_initialized_ranges_t* out_ranges) {
+  out_ranges->values = NULL;
+  out_ranges->count = 0;
+
+  iree_host_size_t range_count = 0;
+  for (iree_host_size_t i = 0; i < options->source_operation_offset; ++i) {
+    const id4_pipeline_program_op_t* op =
+        id4_pipeline_program_operation_at(options->program, i);
+    if (!op || op->kind != ID4_PIPELINE_PROGRAM_OP_KIND_DISPATCH_LOOM) {
+      continue;
+    }
+    for (iree_host_size_t j = 0; j < op->payload.dispatch_loom.binding_count;
+         ++j) {
+      const id4_pipeline_program_dispatch_binding_t* binding =
+          &op->payload.dispatch_loom.bindings[j];
+      if (binding->tensor.ordinal == tensor.ordinal &&
+          iree_all_bits_set(binding->access,
+                            ID4_PIPELINE_PROGRAM_TENSOR_ACCESS_WRITE)) {
+        ++range_count;
+      }
+    }
+  }
+  if (range_count == 0) return iree_ok_status();
+
+  id4_pipeline_region_tensor_byte_range_t* ranges = NULL;
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
+      host_allocator, range_count, sizeof(ranges[0]), (void**)&ranges));
+  iree_host_size_t range_index = 0;
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0;
+       i < options->source_operation_offset && iree_status_is_ok(status); ++i) {
+    const id4_pipeline_program_op_t* op =
+        id4_pipeline_program_operation_at(options->program, i);
+    if (!op || op->kind != ID4_PIPELINE_PROGRAM_OP_KIND_DISPATCH_LOOM) {
+      continue;
+    }
+    for (iree_host_size_t j = 0; j < op->payload.dispatch_loom.binding_count &&
+                                 iree_status_is_ok(status);
+         ++j) {
+      const id4_pipeline_program_dispatch_binding_t* binding =
+          &op->payload.dispatch_loom.bindings[j];
+      if (binding->tensor.ordinal != tensor.ordinal ||
+          !iree_all_bits_set(binding->access,
+                             ID4_PIPELINE_PROGRAM_TENSOR_ACCESS_WRITE)) {
+        continue;
+      }
+      id4_pipeline_program_tensor_byte_range_t write_range;
+      status = id4_pipeline_program_region_binding_write_range(
+          binding, tensor_record, &write_range);
+      if (!iree_status_is_ok(status)) break;
+      ranges[range_index++] = (id4_pipeline_region_tensor_byte_range_t){
+          // Byte offset from the start of the logical tensor.
+          .offset = write_range.offset,
+          // Byte length of the initialized interval.
+          .length = write_range.length,
+      };
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    out_ranges->values = ranges;
+    out_ranges->count = range_index;
+  } else {
+    iree_allocator_free(host_allocator, ranges);
+  }
+  return status;
 }
 
 static iree_status_t
@@ -296,6 +381,38 @@ id4_pipeline_program_region_tensor_fully_written_before_range(
     }
   }
   *out_fully_written = covered_end >= tensor_record->byte_length;
+  return iree_ok_status();
+}
+
+static iree_status_t id4_pipeline_program_region_populate_prior_initialization(
+    const id4_pipeline_program_region_lower_options_t* options,
+    id4_pipeline_program_tensor_t tensor,
+    const id4_pipeline_program_tensor_record_t* tensor_record,
+    iree_allocator_t host_allocator, id4_pipeline_tensor_import_t* import,
+    id4_pipeline_program_region_initialized_ranges_t* out_ranges) {
+  out_ranges->values = NULL;
+  out_ranges->count = 0;
+  import->initialized_ranges = NULL;
+  import->initialized_range_count = 0;
+  if (iree_all_bits_set(import->flags,
+                        ID4_PIPELINE_TENSOR_IMPORT_FLAG_INITIALIZED)) {
+    return iree_ok_status();
+  }
+
+  bool fully_written = false;
+  IREE_RETURN_IF_ERROR(
+      id4_pipeline_program_region_tensor_fully_written_before_range(
+          options, tensor, tensor_record, &fully_written));
+  if (fully_written) {
+    import->flags |= ID4_PIPELINE_TENSOR_IMPORT_FLAG_INITIALIZED;
+    return iree_ok_status();
+  }
+
+  IREE_RETURN_IF_ERROR(
+      id4_pipeline_program_region_collect_initialized_write_ranges_before_range(
+          options, tensor, tensor_record, host_allocator, out_ranges));
+  import->initialized_ranges = out_ranges->values;
+  import->initialized_range_count = out_ranges->count;
   return iree_ok_status();
 }
 
@@ -788,22 +905,21 @@ static iree_status_t id4_pipeline_program_region_lower_import(
   memset(&import, 0, sizeof(import));
   IREE_RETURN_IF_ERROR(context->options->resolve_import(
       context->options->user_data, import_op, tensor, import_ordinal, &import));
-  if (!iree_all_bits_set(import.flags,
-                         ID4_PIPELINE_TENSOR_IMPORT_FLAG_INITIALIZED)) {
-    bool fully_written = false;
-    IREE_RETURN_IF_ERROR(
-        id4_pipeline_program_region_tensor_fully_written_before_range(
-            context->options, import_op->tensor, tensor, &fully_written));
-    if (fully_written) {
-      import.flags |= ID4_PIPELINE_TENSOR_IMPORT_FLAG_INITIALIZED;
-    }
-  }
+  id4_pipeline_program_region_initialized_ranges_t initialized_ranges;
+  IREE_RETURN_IF_ERROR(
+      id4_pipeline_program_region_populate_prior_initialization(
+          context->options, import_op->tensor, tensor, context->host_allocator,
+          &import, &initialized_ranges));
   id4_pipeline_tensor_t region_tensor =
       id4_pipeline_program_region_invalid_tensor();
-  IREE_RETURN_IF_ERROR(id4_pipeline_region_import_tensor(
-      context->options->builder, &import, &region_tensor));
-  return id4_pipeline_program_region_store_tensor(context, import_op->tensor,
-                                                  region_tensor);
+  iree_status_t status = id4_pipeline_region_import_tensor(
+      context->options->builder, &import, &region_tensor);
+  iree_allocator_free(context->host_allocator, initialized_ranges.values);
+  if (iree_status_is_ok(status)) {
+    status = id4_pipeline_program_region_store_tensor(
+        context, import_op->tensor, region_tensor);
+  }
+  return status;
 }
 
 static iree_status_t id4_pipeline_program_region_lower_parameter(
@@ -865,22 +981,21 @@ static iree_status_t id4_pipeline_program_region_lower_acquire(
   IREE_RETURN_IF_ERROR(id4_pipeline_program_region_resolve_shared_acquire(
       context->options, acquire_op, tensor, &is_shared, &import));
   if (is_shared) {
-    if (!iree_all_bits_set(import.flags,
-                           ID4_PIPELINE_TENSOR_IMPORT_FLAG_INITIALIZED)) {
-      bool fully_written = false;
-      IREE_RETURN_IF_ERROR(
-          id4_pipeline_program_region_tensor_fully_written_before_range(
-              context->options, acquire_op->tensor, tensor, &fully_written));
-      if (fully_written) {
-        import.flags |= ID4_PIPELINE_TENSOR_IMPORT_FLAG_INITIALIZED;
-      }
-    }
+    id4_pipeline_program_region_initialized_ranges_t initialized_ranges;
+    IREE_RETURN_IF_ERROR(
+        id4_pipeline_program_region_populate_prior_initialization(
+            context->options, acquire_op->tensor, tensor,
+            context->host_allocator, &import, &initialized_ranges));
     id4_pipeline_tensor_t region_tensor =
         id4_pipeline_program_region_invalid_tensor();
-    IREE_RETURN_IF_ERROR(id4_pipeline_region_import_tensor(
-        context->options->builder, &import, &region_tensor));
-    return id4_pipeline_program_region_store_tensor(context, acquire_op->tensor,
-                                                    region_tensor);
+    iree_status_t status = id4_pipeline_region_import_tensor(
+        context->options->builder, &import, &region_tensor);
+    iree_allocator_free(context->host_allocator, initialized_ranges.values);
+    if (iree_status_is_ok(status)) {
+      status = id4_pipeline_program_region_store_tensor(
+          context, acquire_op->tensor, region_tensor);
+    }
+    return status;
   }
   id4_pipeline_tensor_layout_t layout =
       id4_pipeline_program_region_tensor_layout(

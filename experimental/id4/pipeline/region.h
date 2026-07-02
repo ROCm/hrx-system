@@ -174,6 +174,10 @@ typedef struct id4_pipeline_tensor_import_t {
   iree_device_size_t offset;
   // Import behavior flags.
   id4_pipeline_tensor_import_flags_t flags;
+  // Tensor-relative byte ranges initialized before the region begins.
+  const id4_pipeline_region_tensor_byte_range_t* initialized_ranges;
+  // Number of entries in initialized_ranges.
+  iree_host_size_t initialized_range_count;
 } id4_pipeline_tensor_import_t;
 
 // Local tensor lifetime record emitted by a region builder.

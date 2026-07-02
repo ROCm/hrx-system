@@ -106,11 +106,11 @@ kernel.def export("id4_qwen3_vl_attention_softmax_mask_f32") @id4_qwen3_vl_atten
   %attention_mask_global = buffer.assume.memory_space<global> %attention_mask_noalias : buffer
   %probabilities_global = buffer.assume.memory_space<global> %probabilities_noalias : buffer
   %scores_view = buffer.view %scores_global[%scores_offset] : buffer -> view<[%dispatch_token_count]x[%dispatch_token_count]xf32, #dense>
-  %attention_mask_view = buffer.view %attention_mask_global[%base] : buffer -> view<[%token_count]x[%token_count]xf32, #dense>
+  %attention_mask_view = buffer.view %attention_mask_global[%base] : buffer -> view<[%dispatch_token_count]x[%dispatch_token_count]xf32, #dense>
   %probabilities_view = buffer.view %probabilities_global[%base] : buffer -> view<[%attention_head_count]x[%token_count]x[%token_count]xf32, #dense>
   %lane_max = scf.for %key_token = [%lane to %token_count step %workgroup_size_x](%current_max = %negative_large : f32) -> (f32) {
     %raw_score = view.load %scores_view[%query_token, %key_token] : view<[%dispatch_token_count]x[%dispatch_token_count]xf32, #dense> -> f32
-    %mask_value = view.load %attention_mask_view[%query_token, %key_token] : view<[%token_count]x[%token_count]xf32, #dense> -> f32
+    %mask_value = view.load %attention_mask_view[%query_token, %key_token] : view<[%dispatch_token_count]x[%dispatch_token_count]xf32, #dense> -> f32
     %score = scalar.addf<reassoc|nnan|ninf|nsz> %raw_score, %mask_value : f32
     %next_max = scalar.maxnumf %current_max, %score : f32
     scf.yield %next_max : f32
@@ -118,7 +118,7 @@ kernel.def export("id4_qwen3_vl_attention_softmax_mask_f32") @id4_qwen3_vl_atten
   %row_max = kernel.workgroup.reduce<maxnumf> %lane_max : f32
   %lane_sum = scf.for %key_token = [%lane to %token_count step %workgroup_size_x](%current_sum = %zero_f32 : f32) -> (f32) {
     %raw_score = view.load %scores_view[%query_token, %key_token] : view<[%dispatch_token_count]x[%dispatch_token_count]xf32, #dense> -> f32
-    %mask_value = view.load %attention_mask_view[%query_token, %key_token] : view<[%token_count]x[%token_count]xf32, #dense> -> f32
+    %mask_value = view.load %attention_mask_view[%query_token, %key_token] : view<[%dispatch_token_count]x[%dispatch_token_count]xf32, #dense> -> f32
     %score = scalar.addf<reassoc|nnan|ninf|nsz> %raw_score, %mask_value : f32
     %centered = scalar.subf<reassoc|nnan|ninf|nsz> %score, %row_max : f32
     %weight = scalar.expf<afn> %centered : f32
@@ -129,7 +129,7 @@ kernel.def export("id4_qwen3_vl_attention_softmax_mask_f32") @id4_qwen3_vl_atten
   %inverse_sum = scalar.divf<nnan|ninf|nsz|arcp> %one_f32, %row_sum : f32
   scf.for %key_token = [%lane to %token_count step %workgroup_size_x] {
     %raw_score = view.load %scores_view[%query_token, %key_token] : view<[%dispatch_token_count]x[%dispatch_token_count]xf32, #dense> -> f32
-    %mask_value = view.load %attention_mask_view[%query_token, %key_token] : view<[%token_count]x[%token_count]xf32, #dense> -> f32
+    %mask_value = view.load %attention_mask_view[%query_token, %key_token] : view<[%dispatch_token_count]x[%dispatch_token_count]xf32, #dense> -> f32
     %score = scalar.addf<reassoc|nnan|ninf|nsz> %raw_score, %mask_value : f32
     %centered = scalar.subf<reassoc|nnan|ninf|nsz> %score, %row_max : f32
     %weight = scalar.expf<afn> %centered : f32
@@ -168,13 +168,13 @@ kernel.def export("id4_qwen3_vl_attention_softmax_mask_bf16") @id4_qwen3_vl_atte
   %attention_mask_global = buffer.assume.memory_space<global> %attention_mask_noalias : buffer
   %probabilities_global = buffer.assume.memory_space<global> %probabilities_noalias : buffer
   %scores_view = buffer.view %scores_global[%scores_offset] : buffer -> view<[%dispatch_token_count]x[%dispatch_token_count]xf32, #dense>
-  %attention_mask_view = buffer.view %attention_mask_global[%base] : buffer -> view<[%token_count]x[%token_count]xf32, #dense>
+  %attention_mask_view = buffer.view %attention_mask_global[%base] : buffer -> view<[%dispatch_token_count]x[%dispatch_token_count]xf32, #dense>
   %probabilities_view = buffer.view %probabilities_global[%probabilities_offset] : buffer -> view<[%dispatch_token_count]x[%dispatch_token_count]xbf16, #dense>
   %query_in_range = index.cmp ult, %query_token, %token_count : index
   scf.if %query_in_range {
     %lane_max = scf.for %key_token = [%lane to %token_count step %workgroup_size_x](%current_max = %negative_large : f32) -> (f32) {
       %raw_score = view.load %scores_view[%query_token, %key_token] : view<[%dispatch_token_count]x[%dispatch_token_count]xf32, #dense> -> f32
-      %mask_value = view.load %attention_mask_view[%query_token, %key_token] : view<[%token_count]x[%token_count]xf32, #dense> -> f32
+      %mask_value = view.load %attention_mask_view[%query_token, %key_token] : view<[%dispatch_token_count]x[%dispatch_token_count]xf32, #dense> -> f32
       %score = scalar.addf<reassoc|nnan|ninf|nsz> %raw_score, %mask_value : f32
       %next_max = scalar.maxnumf %current_max, %score : f32
       scf.yield %next_max : f32
@@ -182,7 +182,7 @@ kernel.def export("id4_qwen3_vl_attention_softmax_mask_bf16") @id4_qwen3_vl_atte
     %row_max = kernel.workgroup.reduce<maxnumf> %lane_max : f32
     %lane_sum = scf.for %key_token = [%lane to %token_count step %workgroup_size_x](%current_sum = %zero_f32 : f32) -> (f32) {
       %raw_score = view.load %scores_view[%query_token, %key_token] : view<[%dispatch_token_count]x[%dispatch_token_count]xf32, #dense> -> f32
-      %mask_value = view.load %attention_mask_view[%query_token, %key_token] : view<[%token_count]x[%token_count]xf32, #dense> -> f32
+      %mask_value = view.load %attention_mask_view[%query_token, %key_token] : view<[%dispatch_token_count]x[%dispatch_token_count]xf32, #dense> -> f32
       %score = scalar.addf<reassoc|nnan|ninf|nsz> %raw_score, %mask_value : f32
       %centered = scalar.subf<reassoc|nnan|ninf|nsz> %score, %row_max : f32
       %weight = scalar.expf<afn> %centered : f32
@@ -195,7 +195,7 @@ kernel.def export("id4_qwen3_vl_attention_softmax_mask_bf16") @id4_qwen3_vl_atte
       %key_in_range = index.cmp ult, %key_token, %token_count : index
       scf.if %key_in_range {
         %raw_score = view.load %scores_view[%query_token, %key_token] : view<[%dispatch_token_count]x[%dispatch_token_count]xf32, #dense> -> f32
-        %mask_value = view.load %attention_mask_view[%query_token, %key_token] : view<[%token_count]x[%token_count]xf32, #dense> -> f32
+        %mask_value = view.load %attention_mask_view[%query_token, %key_token] : view<[%dispatch_token_count]x[%dispatch_token_count]xf32, #dense> -> f32
         %score = scalar.addf<reassoc|nnan|ninf|nsz> %raw_score, %mask_value : f32
         %centered = scalar.subf<reassoc|nnan|ninf|nsz> %score, %row_max : f32
         %weight = scalar.expf<afn> %centered : f32
@@ -432,13 +432,13 @@ check.case public @id4_qwen3_vl_attention_wmma_sequence_short_prompt_zero_case {
   %query = check.generate.fill value(0.0) : tensor<32x4096xbf16>
   %key = check.generate.fill value(0.0) : tensor<32x1024xbf16>
   %scores = check.generate.fill value(1.0) : tensor<32x32x32xf32>
-  %attention_mask = check.generate.fill value(0.0) : tensor<19x19xf32>
+  %attention_mask = check.generate.fill value(0.0) : tensor<32x32xf32>
   %probabilities = check.generate.fill value(1.0) : tensor<32x32x32xbf16>
   %value = check.generate.fill value(0.0) : tensor<1024x32xbf16>
   %output = check.generate.fill value(1.0) : tensor<32x4096xbf16>
   %expected = check.generate.fill value(0.0) : tensor<32x4096xbf16>
   func.call @id4_qwen3_vl_attention_qk_scores_bf16_f32_wmma(%query, %key, %scores) : (tensor<32x4096xbf16>, tensor<32x1024xbf16>, tensor<32x32x32xf32>)
-  func.call @id4_qwen3_vl_attention_softmax_mask_bf16(%scores, %attention_mask, %probabilities) : (tensor<32x32x32xf32>, tensor<19x19xf32>, tensor<32x32x32xbf16>)
+  func.call @id4_qwen3_vl_attention_softmax_mask_bf16(%scores, %attention_mask, %probabilities) : (tensor<32x32x32xf32>, tensor<32x32xf32>, tensor<32x32x32xbf16>)
   func.call @id4_qwen3_vl_attention_pv_bf16_bf16_wmma(%probabilities, %value, %output) : (tensor<32x32x32xbf16>, tensor<1024x32xbf16>, tensor<32x4096xbf16>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<32x4096xbf16>
   check.return
@@ -448,13 +448,13 @@ check.case public @id4_qwen3_vl_attention_wmma_sequence_padded_171_zero_case {
   %query = check.generate.fill value(0.0) : tensor<192x4096xbf16>
   %key = check.generate.fill value(0.0) : tensor<192x1024xbf16>
   %scores = check.generate.fill value(1.0) : tensor<32x192x192xf32>
-  %attention_mask = check.generate.fill value(0.0) : tensor<171x171xf32>
+  %attention_mask = check.generate.fill value(0.0) : tensor<192x192xf32>
   %probabilities = check.generate.fill value(1.0) : tensor<32x192x192xbf16>
   %value = check.generate.fill value(0.0) : tensor<1024x192xbf16>
   %output = check.generate.fill value(1.0) : tensor<192x4096xbf16>
   %expected = check.generate.fill value(0.0) : tensor<192x4096xbf16>
   func.call @id4_qwen3_vl_attention_qk_scores_bf16_f32_wmma(%query, %key, %scores) : (tensor<192x4096xbf16>, tensor<192x1024xbf16>, tensor<32x192x192xf32>)
-  func.call @id4_qwen3_vl_attention_softmax_mask_bf16(%scores, %attention_mask, %probabilities) : (tensor<32x192x192xf32>, tensor<171x171xf32>, tensor<32x192x192xbf16>)
+  func.call @id4_qwen3_vl_attention_softmax_mask_bf16(%scores, %attention_mask, %probabilities) : (tensor<32x192x192xf32>, tensor<192x192xf32>, tensor<32x192x192xbf16>)
   func.call @id4_qwen3_vl_attention_pv_bf16_bf16_wmma(%probabilities, %value, %output) : (tensor<32x192x192xbf16>, tensor<1024x192xbf16>, tensor<192x4096xbf16>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<192x4096xbf16>
   check.return

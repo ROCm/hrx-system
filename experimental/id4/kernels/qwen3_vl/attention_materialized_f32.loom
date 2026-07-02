@@ -25,6 +25,7 @@ kernel.def export("id4_qwen3_vl_attention_scores_f32") @id4_qwen3_vl_attention_s
   %lane = kernel.workitem.id<x> : index
   %zero_f32 = scalar.constant 0.0 : f32
   %token_count = config.get @id4.qwen3_vl.attention.token_count : index
+  %dispatch_token_count = config.get @id4.qwen3_vl.attention.dispatch_token_count : index
   %hidden_size = config.get @id4.qwen3_vl.attention.hidden_size : index
   %attention_head_count = config.get @id4.qwen3_vl.attention.attention_head_count : index
   %key_value_head_count = config.get @id4.qwen3_vl.attention.key_value_head_count : index
@@ -46,7 +47,7 @@ kernel.def export("id4_qwen3_vl_attention_scores_f32") @id4_qwen3_vl_attention_s
   %scores_global = buffer.assume.memory_space<global> %scores_noalias : buffer
   %query_view = buffer.view %query_global[%base] : buffer -> view<[%token_count]x[%hidden_size]xf32, #dense>
   %key_view = buffer.view %key_global[%base] : buffer -> view<[%token_count]x[%key_value_width]xf32, #dense>
-  %attention_mask_view = buffer.view %attention_mask_global[%base] : buffer -> view<[%token_count]x[%token_count]xf32, #dense>
+  %attention_mask_view = buffer.view %attention_mask_global[%base] : buffer -> view<[%dispatch_token_count]x[%dispatch_token_count]xf32, #dense>
   %scores_view = buffer.view %scores_global[%base] : buffer -> view<[%attention_head_count]x[%token_count]x[%token_count]xf32, #dense>
   %lane_product = scf.if %lane_has_channel -> (f32) {
     %query_channel = index.add %query_head_base, %lane : index
@@ -61,7 +62,7 @@ kernel.def export("id4_qwen3_vl_attention_scores_f32") @id4_qwen3_vl_attention_s
   %dot = kernel.workgroup.reduce<addf> %lane_product : f32
   scf.if %is_lane_zero {
     %scaled_dot = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %dot, %attention_scale : f32
-    %mask_value = view.load %attention_mask_view[%query_token, %key_token] : view<[%token_count]x[%token_count]xf32, #dense> -> f32
+    %mask_value = view.load %attention_mask_view[%query_token, %key_token] : view<[%dispatch_token_count]x[%dispatch_token_count]xf32, #dense> -> f32
     %score = scalar.addf<reassoc|nnan|ninf|nsz> %scaled_dot, %mask_value : f32
     view.store %score, %scores_view[%query_head, %query_token, %key_token] : f32, view<[%attention_head_count]x[%token_count]x[%token_count]xf32, #dense>
   }
@@ -177,6 +178,7 @@ kernel.def export("id4_qwen3_vl_attention_scores_bf16_f32") @id4_qwen3_vl_attent
   %lane = kernel.workitem.id<x> : index
   %zero_f32 = scalar.constant 0.0 : f32
   %token_count = config.get @id4.qwen3_vl.attention.token_count : index
+  %dispatch_token_count = config.get @id4.qwen3_vl.attention.dispatch_token_count : index
   %hidden_size = config.get @id4.qwen3_vl.attention.hidden_size : index
   %attention_head_count = config.get @id4.qwen3_vl.attention.attention_head_count : index
   %key_value_head_count = config.get @id4.qwen3_vl.attention.key_value_head_count : index
@@ -198,7 +200,7 @@ kernel.def export("id4_qwen3_vl_attention_scores_bf16_f32") @id4_qwen3_vl_attent
   %scores_global = buffer.assume.memory_space<global> %scores_noalias : buffer
   %query_view = buffer.view %query_global[%base] : buffer -> view<[%token_count]x[%hidden_size]xbf16, #dense>
   %key_view = buffer.view %key_global[%base] : buffer -> view<[%token_count]x[%key_value_width]xbf16, #dense>
-  %attention_mask_view = buffer.view %attention_mask_global[%base] : buffer -> view<[%token_count]x[%token_count]xf32, #dense>
+  %attention_mask_view = buffer.view %attention_mask_global[%base] : buffer -> view<[%dispatch_token_count]x[%dispatch_token_count]xf32, #dense>
   %scores_view = buffer.view %scores_global[%base] : buffer -> view<[%attention_head_count]x[%token_count]x[%token_count]xf32, #dense>
   %lane_product = scf.if %lane_has_channel -> (f32) {
     %query_channel = index.add %query_head_base, %lane : index
@@ -215,7 +217,7 @@ kernel.def export("id4_qwen3_vl_attention_scores_bf16_f32") @id4_qwen3_vl_attent
   %dot = kernel.workgroup.reduce<addf> %lane_product : f32
   scf.if %is_lane_zero {
     %scaled_dot = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %dot, %attention_scale : f32
-    %mask_value = view.load %attention_mask_view[%query_token, %key_token] : view<[%token_count]x[%token_count]xf32, #dense> -> f32
+    %mask_value = view.load %attention_mask_view[%query_token, %key_token] : view<[%dispatch_token_count]x[%dispatch_token_count]xf32, #dense> -> f32
     %score = scalar.addf<reassoc|nnan|ninf|nsz> %scaled_dot, %mask_value : f32
     view.store %score, %scores_view[%query_head, %query_token, %key_token] : f32, view<[%attention_head_count]x[%token_count]x[%token_count]xf32, #dense>
   }
