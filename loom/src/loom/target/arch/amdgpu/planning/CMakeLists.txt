@@ -158,6 +158,7 @@ loom_cc_library(
     ::wait_counters
     ::wait_packet_tables
     iree::base
+    iree::base::internal
     iree::base::internal::arena
     loom::codegen::low::allocation
     loom::codegen::low::descriptors

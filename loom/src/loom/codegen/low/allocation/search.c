@@ -8,6 +8,7 @@
 
 #include <string.h>
 
+#include "iree/base/internal/math.h"
 #include "loom/codegen/low/allocation/live_range.h"
 #include "loom/codegen/low/allocation/spill_traffic.h"
 
@@ -256,17 +257,6 @@ iree_status_t loom_low_allocation_search_assignment_spill_capacity(
   return iree_ok_status();
 }
 
-static uint64_t loom_low_allocation_search_saturating_add_u64(uint64_t lhs,
-                                                              uint64_t rhs) {
-  return lhs > UINT64_MAX - rhs ? UINT64_MAX : lhs + rhs;
-}
-
-static uint64_t loom_low_allocation_search_saturating_mul_u64(uint64_t lhs,
-                                                              uint64_t rhs) {
-  if (lhs == 0 || rhs == 0) return 0;
-  return lhs > UINT64_MAX / rhs ? UINT64_MAX : lhs * rhs;
-}
-
 static iree_status_t loom_low_allocation_search_assignment_spill_traffic_cost(
     loom_low_allocation_search_context_t* context,
     const loom_low_allocation_assignment_t* assignment, uint64_t* out_cost) {
@@ -288,10 +278,9 @@ static iree_status_t loom_low_allocation_search_assignment_spill_traffic_cost(
     }
   }
   const uint64_t operation_count =
-      loom_low_allocation_search_saturating_add_u64(traffic.store_count,
-                                                    traffic.reload_count);
-  *out_cost = loom_low_allocation_search_saturating_mul_u64(
-      operation_count, assignment->unit_count);
+      iree_math_saturating_add_u64(traffic.store_count, traffic.reload_count);
+  *out_cost =
+      iree_math_saturating_mul_u64(operation_count, assignment->unit_count);
   return iree_ok_status();
 }
 
@@ -427,8 +416,8 @@ static iree_status_t loom_low_allocation_search_collect_active_spill_victim_set(
     ignored_value_ids[assignment_count] = assignment->value_id;
     ++assignment_count;
     unit_count += assignment->unit_count;
-    traffic_cost = loom_low_allocation_search_saturating_add_u64(
-        traffic_cost, assignment_traffic_cost);
+    traffic_cost =
+        iree_math_saturating_add_u64(traffic_cost, assignment_traffic_cost);
     if (latest_end_point < assignment->end_point) {
       latest_end_point = assignment->end_point;
     }
