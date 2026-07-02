@@ -1569,12 +1569,6 @@ iree_status_t id4_ideogram4_session_issue_generation(
   status = iree_status_join(
       status,
       id4_ideogram4_generation_phase_bundle_deinitialize(&decode_phase));
-  status = iree_status_join(
-      status,
-      id4_ideogram4_generation_phase_bundle_deinitialize(&conditioning_phase));
-  status = iree_status_join(
-      status,
-      id4_ideogram4_generation_phase_bundle_deinitialize(&denoise_phase));
   if (!iree_status_is_ok(status)) {
     status = iree_status_join(
         status, id4_ideogram4_generation_bundle_check_resident_failures(
