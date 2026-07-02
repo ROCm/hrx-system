@@ -1619,6 +1619,19 @@ static iree_status_t AppendGenerationBenchmarkStageLabels(
   return iree_ok_status();
 }
 
+static iree_status_t AppendGenerationBenchmarkPhaseStageMasksLabel(
+    iree_string_builder_t* builder,
+    const GenerationResidencyResolution& residency) {
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_string(
+      builder, IREE_SV(" phase_stage_masks=[")));
+  for (iree_host_size_t i = 0; i < ID4_IDEOGRAM4_GENERATION_PHASE_COUNT; ++i) {
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+        builder, "%s0x%08x", i == 0 ? "" : ",",
+        residency.phase_stage_masks[i]));
+  }
+  return iree_string_builder_append_string(builder, IREE_SV("]"));
+}
+
 static iree_status_t SetGenerationBenchmarkLabel(
     iree_benchmark_state_t* benchmark_state,
     const LiveGenerationBenchmarkContext& context,
@@ -1802,6 +1815,10 @@ static iree_status_t SetGenerationBenchmarkLabel(
       diagnostics.parameter_issue_encode_window_staging_chunk_count,
       diagnostics.parameter_issue_encode_window_source_gather_batch_count,
       diagnostics.parameter_issue_encode_window_encoder_dispatch_count);
+  if (iree_status_is_ok(status)) {
+    status = AppendGenerationBenchmarkPhaseStageMasksLabel(&label_builder,
+                                                           residency);
+  }
   if (iree_status_is_ok(status)) {
     status = id4::test::AppendParameterLoadKindStatisticsLabel(
         &label_builder, statistics.parameter_load_kind_statistics);
