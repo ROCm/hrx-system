@@ -26,7 +26,7 @@ static const loom_amdgpu_fp8_native_descriptor_ref_row_t
   {                                                                         \
     source_type, result_type, { lane_ref, pair_ref }                        \
   }
-#include "loom/target/arch/amdgpu/lower/fp8_native_descriptor_ref_rows.inl"
+#include "loom/target/arch/amdgpu/lower/narrow_float/fp8_native_descriptor_ref_rows.inl"
 #undef LOOM_AMDGPU_FP8_NATIVE_DESCRIPTOR_REF_ROW
 };
 static_assert(IREE_ARRAYSIZE(kLoomAmdgpuFp8NativeDescriptorRefRows) <= 64,
@@ -132,7 +132,7 @@ static const loom_amdgpu_fp8_scalef32_descriptor_ref_row_t
 #define LOOM_AMDGPU_FP8_SCALEF32_DESCRIPTOR_REF_ROW(source_type, result_type, \
                                                     ref)                      \
   {source_type, result_type, ref}
-#include "loom/target/arch/amdgpu/lower/fp8_scalef32_descriptor_ref_rows.inl"
+#include "loom/target/arch/amdgpu/lower/narrow_float/fp8_scalef32_descriptor_ref_rows.inl"
 #undef LOOM_AMDGPU_FP8_SCALEF32_DESCRIPTOR_REF_ROW
 };
 static_assert(IREE_ARRAYSIZE(kLoomAmdgpuFp8ScaleF32DescriptorRefRows) <= 64,

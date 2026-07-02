@@ -93,7 +93,7 @@ loom_generated_textual_header(
   GENERATOR
     loom::py::loom::gen::target::arch::amdgpu::lower::narrow_float_tables
   OUTPUT
-    "fp8_decode_plan_descriptor_rows.inl"
+    "narrow_float/fp8_decode_plan_descriptor_rows.inl"
   OUTPUT_FLAG
     "--fp8-decode-plan-descriptor-rows"
 )
@@ -106,7 +106,7 @@ loom_generated_textual_header(
   GENERATOR
     loom::py::loom::gen::target::arch::amdgpu::lower::narrow_float_tables
   OUTPUT
-    "fp8_native_descriptor_ref_rows.inl"
+    "narrow_float/fp8_native_descriptor_ref_rows.inl"
   OUTPUT_FLAG
     "--fp8-native-descriptor-ref-rows"
 )
@@ -119,7 +119,7 @@ loom_generated_textual_header(
   GENERATOR
     loom::py::loom::gen::target::arch::amdgpu::lower::narrow_float_tables
   OUTPUT
-    "fp8_scalef32_descriptor_ref_rows.inl"
+    "narrow_float/fp8_scalef32_descriptor_ref_rows.inl"
   OUTPUT_FLAG
     "--fp8-scalef32-descriptor-ref-rows"
 )
@@ -172,13 +172,13 @@ loom_cc_library(
     "values.h"
     "workgroup.h"
   TEXTUAL_HDRS
-    "fp8_decode_plan_descriptor_rows.inl"
-    "fp8_native_descriptor_ref_rows.inl"
-    "fp8_scalef32_descriptor_ref_rows.inl"
     "memory_cache_policy_encoding_rows.inl"
     "memory_cache_policy_temporal_th.inl"
     "memory_descriptor_candidate_ranges.inl"
     "memory_descriptor_candidates.inl"
+    "narrow_float/fp8_decode_plan_descriptor_rows.inl"
+    "narrow_float/fp8_native_descriptor_ref_rows.inl"
+    "narrow_float/fp8_scalef32_descriptor_ref_rows.inl"
     "registry_tables.inl"
   SRCS
     "abi.c"
