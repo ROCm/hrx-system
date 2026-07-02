@@ -479,6 +479,52 @@ func.def @reduce_axes_all_axes_to_reduce(%v: vector<2x3xf32>, %init: f32) -> (f3
 
 // ====
 
+// Contracted product-add spellings become an explicit fused multiply-add.
+func.def @contracted_product_add_to_fmaf(%lhs: vector<4xf32>, %rhs: vector<4xf32>, %addend: vector<4xf32>) -> (vector<4xf32>) {
+  %product = vector.mulf<reassoc|nnan|ninf|nsz|contract> %lhs, %rhs : vector<4xf32>
+  %r = vector.addf<reassoc|nnan|ninf|nsz|contract> %product, %addend : vector<4xf32>
+  func.return %r : vector<4xf32>
+}
+// ----
+func.def @contracted_product_add_to_fmaf(%lhs: vector<4xf32>, %rhs: vector<4xf32>, %addend: vector<4xf32>) -> (vector<4xf32>) {
+  %r = vector.fmaf<reassoc|nnan|ninf|nsz|contract> %lhs, %rhs, %addend : vector<4xf32>
+  func.return %r : vector<4xf32>
+}
+
+// ====
+
+// Addition is commutative, so the product can appear on either side.
+func.def @contracted_reversed_product_add_to_fmaf(%lhs: vector<4xf32>, %rhs: vector<4xf32>, %addend: vector<4xf32>) -> (vector<4xf32>) {
+  %product = vector.mulf<reassoc|nnan|ninf|nsz|contract> %lhs, %rhs : vector<4xf32>
+  %r = vector.addf<reassoc|nnan|ninf|nsz|contract> %addend, %product : vector<4xf32>
+  func.return %r : vector<4xf32>
+}
+// ----
+func.def @contracted_reversed_product_add_to_fmaf(%lhs: vector<4xf32>, %rhs: vector<4xf32>, %addend: vector<4xf32>) -> (vector<4xf32>) {
+  %r = vector.fmaf<reassoc|nnan|ninf|nsz|contract> %lhs, %rhs, %addend : vector<4xf32>
+  func.return %r : vector<4xf32>
+}
+
+// ====
+
+// Exact add keeps the separately rounded product and addition.
+func.def @exact_product_add_stays_separate(%lhs: vector<4xf32>, %rhs: vector<4xf32>, %addend: vector<4xf32>) -> (vector<4xf32>) {
+  %product = vector.mulf<reassoc|nnan|ninf|nsz|contract> %lhs, %rhs : vector<4xf32>
+  %r = vector.addf<reassoc|nnan|ninf|nsz> %product, %addend : vector<4xf32>
+  func.return %r : vector<4xf32>
+}
+
+// ====
+
+// A shared product remains explicit instead of duplicating the multiply.
+func.def @shared_product_add_stays_separate(%lhs: vector<4xf32>, %rhs: vector<4xf32>, %addend: vector<4xf32>) -> (vector<4xf32>, vector<4xf32>) {
+  %product = vector.mulf<reassoc|nnan|ninf|nsz|contract> %lhs, %rhs : vector<4xf32>
+  %r = vector.addf<reassoc|nnan|ninf|nsz|contract> %product, %addend : vector<4xf32>
+  func.return %product, %r : vector<4xf32>, vector<4xf32>
+}
+
+// ====
+
 // Dotting zero lanes observes no vector lanes and returns the explicit init.
 func.def @empty_dotf(%lhs: vector<0xf32>, %rhs: vector<0xf32>, %init: f32) -> (f32) {
   %r = vector.dotf %lhs, %rhs, %init : vector<0xf32>, vector<0xf32>, f32

@@ -2422,7 +2422,7 @@ vector_addf = _lanewise_binary(
     traits=[SAFE_TO_SPECULATE],
     flags=_VF,
     facts="loom_vector_addf_facts",
-    canonicalize="loom_vector_uniform_result_canonicalize",
+    canonicalize="loom_vector_addf_canonicalize",
 )
 
 vector_subf = _lanewise_binary(
