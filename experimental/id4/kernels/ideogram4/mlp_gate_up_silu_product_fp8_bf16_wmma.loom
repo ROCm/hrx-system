@@ -157,6 +157,165 @@ kernel.def target(@id4_gfx1100) export("id4_ideogram4_mlp_gate_up_silu_product_f
   kernel.return
 }
 
+kernel.def target(@id4_gfx1100) export("id4_ideogram4_mlp_gate_up_silu_product_fp8_bf16_wmma_compact_rhs_tile") @id4_ideogram4_mlp_gate_up_silu_product_fp8_bf16_wmma_compact_rhs_tile() {
+  %unit = index.constant 1 : index
+  %thirty_two = index.constant 32 : index
+  %workgroup_size_x = index.constant 32 : index
+  %dispatch_token_count = config.get @id4.ideogram4.mlp_gate_up_silu_product_fp8_wmma.dispatch_token_count : index
+  %intermediate_size = config.get @id4.ideogram4.mlp_gate_up_silu_product_fp8_wmma.intermediate_size : index
+  %token_tile_count = index.div %dispatch_token_count, %thirty_two : index
+  %row_tile_count = index.div %intermediate_size, %thirty_two : index
+  kernel.launch.config workgroups(%token_tile_count, %row_tile_count, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
+} launch(%input: buffer, %gate_weight: buffer, %gate_scale: buffer, %up_weight: buffer, %up_scale: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %two = index.constant 2 : index
+  %eight = index.constant 8 : index
+  %sixteen = index.constant 16 : index
+  %thirty_two = index.constant 32 : index
+  %two_fifty_six = index.constant 256 : index
+  %token_tile = kernel.workgroup.id<x> : index
+  %row_pair = kernel.workgroup.id<y> : index
+  %lane = kernel.workitem.id<x> : index
+  %token_capacity = config.get @id4.ideogram4.mlp_gate_up_silu_product_fp8_wmma.token_capacity : index
+  %input_size = config.get @id4.ideogram4.mlp_gate_up_silu_product_fp8_wmma.input_size : index
+  %intermediate_size = config.get @id4.ideogram4.mlp_gate_up_silu_product_fp8_wmma.intermediate_size : index
+  %k_tile_count = index.div %input_size, %sixteen : index
+  %output_tile_count = index.div %intermediate_size, %sixteen : index
+  %packed_tile_count = index.mul %output_tile_count, %k_tile_count : index
+  %packed_element_count = index.mul %packed_tile_count, %two_fifty_six : index
+  %token_origin0 = index.mul %token_tile, %thirty_two : index
+  %token_origin1 = index.add %token_origin0, %sixteen : index
+  %row_origin0 = index.mul %row_pair, %thirty_two : index
+  %row_origin1 = index.add %row_origin0, %sixteen : index
+  %row_tile0 = index.div %row_origin0, %sixteen : index
+  %row_tile1 = index.div %row_origin1, %sixteen : index
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 16 : index
+  %packed_weight_layout = encoding.layout.strided [1, %sixteen] : encoding<layout>
+  %fp8_storage_schema = encoding.define #matrix_operand<element_format=f8e4m3, payload_elements=1, payload_registers=1, rounding=finite_only> : encoding<schema>
+  %fp8_storage = encoding.define #physical_storage {layout = %packed_weight_layout : encoding<layout>, schema = %fp8_storage_schema : encoding<schema>} : encoding<storage>
+  %zero_acc = vector.constant 0.0 : vector<8xf32>
+  %input_noalias, %gate_weight_noalias, %gate_scale_noalias, %up_weight_noalias, %up_scale_noalias, %output_noalias = buffer.assume.noalias %input, %gate_weight, %gate_scale, %up_weight, %up_scale, %output : buffer, buffer, buffer, buffer, buffer, buffer
+  %input_global = buffer.assume.memory_space<global> %input_noalias : buffer
+  %gate_weight_global = buffer.assume.memory_space<global> %gate_weight_noalias : buffer
+  %gate_scale_global = buffer.assume.memory_space<global> %gate_scale_noalias : buffer
+  %up_weight_global = buffer.assume.memory_space<global> %up_weight_noalias : buffer
+  %up_scale_global = buffer.assume.memory_space<global> %up_scale_noalias : buffer
+  %output_global = buffer.assume.memory_space<global> %output_noalias : buffer
+  %input_aligned = buffer.assume.alignment %input_global {minimum_alignment = 16} : buffer
+  %gate_weight_aligned = buffer.assume.alignment %gate_weight_global {minimum_alignment = 16} : buffer
+  %gate_scale_aligned = buffer.assume.alignment %gate_scale_global {minimum_alignment = 16} : buffer
+  %up_weight_aligned = buffer.assume.alignment %up_weight_global {minimum_alignment = 16} : buffer
+  %up_scale_aligned = buffer.assume.alignment %up_scale_global {minimum_alignment = 16} : buffer
+  %output_aligned = buffer.assume.alignment %output_global {minimum_alignment = 16} : buffer
+  %input_view = buffer.view %input_aligned[%base] : buffer -> view<[%token_capacity]x[%input_size]xbf16, #dense>
+  %gate_weight_view = buffer.view %gate_weight_aligned[%base] : buffer -> view<[%packed_element_count]x16xf8E4M3, %fp8_storage>
+  %gate_scale_view = buffer.view %gate_scale_aligned[%base] : buffer -> view<[%intermediate_size]xf32, #dense>
+  %up_weight_view = buffer.view %up_weight_aligned[%base] : buffer -> view<[%packed_element_count]x16xf8E4M3, %fp8_storage>
+  %up_scale_view = buffer.view %up_scale_aligned[%base] : buffer -> view<[%intermediate_size]xf32, #dense>
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<[%token_capacity]x[%intermediate_size]xbf16, #dense>
+  %init00 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
+  %init01 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
+  %init10 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
+  %init11 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
+  %gate_result00, %gate_result01, %gate_result10, %gate_result11, %up_result00, %up_result01, %up_result10, %up_result11 = scf.for %k_tile = [%zero to %k_tile_count step %one](%gate_acc00 = %init00 : vector<8xf32>, %gate_acc01 = %init01 : vector<8xf32>, %gate_acc10 = %init10 : vector<8xf32>, %gate_acc11 = %init11 : vector<8xf32>, %up_acc00 = %init00 : vector<8xf32>, %up_acc01 = %init01 : vector<8xf32>, %up_acc10 = %init10 : vector<8xf32>, %up_acc11 = %init11 : vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
+    %k_origin = index.mul %k_tile, %sixteen : index
+    %lhs0 = vector.fragment.load<lhs> %input_view[%token_origin0, %k_origin] shape [%m, %k] : view<[%token_capacity]x[%input_size]xbf16, #dense> -> vector<16xbf16>
+    %lhs1 = vector.fragment.load<lhs> %input_view[%token_origin1, %k_origin] shape [%m, %k] : view<[%token_capacity]x[%input_size]xbf16, #dense> -> vector<16xbf16>
+    %rhs_tile0 = index.madd %row_tile0, %k_tile_count, %k_tile : index
+    %rhs_tile1 = index.madd %row_tile1, %k_tile_count, %k_tile : index
+    %rhs_row0 = index.mul %rhs_tile0, %two_fifty_six : index
+    %rhs_row1 = index.mul %rhs_tile1, %two_fifty_six : index
+    %gate_rhs0 = vector.fragment.load<rhs> %gate_weight_view[%rhs_row0, %zero] shape [%k, %n] : view<[%packed_element_count]x16xf8E4M3, %fp8_storage> -> vector<16xbf16>
+    %gate_rhs1 = vector.fragment.load<rhs> %gate_weight_view[%rhs_row1, %zero] shape [%k, %n] : view<[%packed_element_count]x16xf8E4M3, %fp8_storage> -> vector<16xbf16>
+    %up_rhs0 = vector.fragment.load<rhs> %up_weight_view[%rhs_row0, %zero] shape [%k, %n] : view<[%packed_element_count]x16xf8E4M3, %fp8_storage> -> vector<16xbf16>
+    %up_rhs1 = vector.fragment.load<rhs> %up_weight_view[%rhs_row1, %zero] shape [%k, %n] : view<[%packed_element_count]x16xf8E4M3, %fp8_storage> -> vector<16xbf16>
+    %next_gate00 = vector.mma %lhs0, %gate_rhs0, %gate_acc00 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next_gate01 = vector.mma %lhs0, %gate_rhs1, %gate_acc01 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next_gate10 = vector.mma %lhs1, %gate_rhs0, %gate_acc10 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next_gate11 = vector.mma %lhs1, %gate_rhs1, %gate_acc11 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next_up00 = vector.mma %lhs0, %up_rhs0, %up_acc00 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next_up01 = vector.mma %lhs0, %up_rhs1, %up_acc01 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next_up10 = vector.mma %lhs1, %up_rhs0, %up_acc10 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next_up11 = vector.mma %lhs1, %up_rhs1, %up_acc11 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    scf.yield %next_gate00, %next_gate01, %next_gate10, %next_gate11, %next_up00, %next_up01, %next_up10, %next_up11 : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>
+  }
+  %lane_column = index.rem %lane, %sixteen : index
+  %lane_group = index.div %lane, %sixteen : index
+  %column0 = index.add %row_origin0, %lane_column : index
+  %column1 = index.add %row_origin1, %lane_column : index
+  %gate_scale0 = view.load %gate_scale_view[%column0] : view<[%intermediate_size]xf32, #dense> -> f32
+  %gate_scale1 = view.load %gate_scale_view[%column1] : view<[%intermediate_size]xf32, #dense> -> f32
+  %up_scale0 = view.load %up_scale_view[%column0] : view<[%intermediate_size]xf32, #dense> -> f32
+  %up_scale1 = view.load %up_scale_view[%column1] : view<[%intermediate_size]xf32, #dense> -> f32
+  scf.for %register_index = [%zero to %eight step %one] {
+    %register_token_base = index.mul %register_index, %two : index
+    %local_token = index.add %register_token_base, %lane_group : index
+    %token0 = index.add %token_origin0, %local_token : index
+    %token1 = index.add %token_origin1, %local_token : index
+    %gate_value00 = vector.extract %gate_result00[%register_index] : vector<8xf32> -> f32
+    %gate_scaled00 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %gate_value00, %gate_scale0 : f32
+    %gate_bf16_00 = scalar.fptrunc %gate_scaled00 : f32 to bf16
+    %gate_rounded00 = scalar.extf %gate_bf16_00 : bf16 to f32
+    %gate_silu00 = scalar.siluf %gate_rounded00 : f32
+    %gate_silu_bf16_00 = scalar.fptrunc %gate_silu00 : f32 to bf16
+    %gate_silu_rounded00 = scalar.extf %gate_silu_bf16_00 : bf16 to f32
+    %up_value00 = vector.extract %up_result00[%register_index] : vector<8xf32> -> f32
+    %up_scaled00 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %up_value00, %up_scale0 : f32
+    %up_bf16_00 = scalar.fptrunc %up_scaled00 : f32 to bf16
+    %up_rounded00 = scalar.extf %up_bf16_00 : bf16 to f32
+    %product00 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %gate_silu_rounded00, %up_rounded00 : f32
+    %rounded00 = scalar.fptrunc %product00 : f32 to bf16
+    view.store %rounded00, %output_view[%token0, %column0] : bf16, view<[%token_capacity]x[%intermediate_size]xbf16, #dense>
+    %gate_value01 = vector.extract %gate_result01[%register_index] : vector<8xf32> -> f32
+    %gate_scaled01 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %gate_value01, %gate_scale1 : f32
+    %gate_bf16_01 = scalar.fptrunc %gate_scaled01 : f32 to bf16
+    %gate_rounded01 = scalar.extf %gate_bf16_01 : bf16 to f32
+    %gate_silu01 = scalar.siluf %gate_rounded01 : f32
+    %gate_silu_bf16_01 = scalar.fptrunc %gate_silu01 : f32 to bf16
+    %gate_silu_rounded01 = scalar.extf %gate_silu_bf16_01 : bf16 to f32
+    %up_value01 = vector.extract %up_result01[%register_index] : vector<8xf32> -> f32
+    %up_scaled01 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %up_value01, %up_scale1 : f32
+    %up_bf16_01 = scalar.fptrunc %up_scaled01 : f32 to bf16
+    %up_rounded01 = scalar.extf %up_bf16_01 : bf16 to f32
+    %product01 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %gate_silu_rounded01, %up_rounded01 : f32
+    %rounded01 = scalar.fptrunc %product01 : f32 to bf16
+    view.store %rounded01, %output_view[%token0, %column1] : bf16, view<[%token_capacity]x[%intermediate_size]xbf16, #dense>
+    %gate_value10 = vector.extract %gate_result10[%register_index] : vector<8xf32> -> f32
+    %gate_scaled10 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %gate_value10, %gate_scale0 : f32
+    %gate_bf16_10 = scalar.fptrunc %gate_scaled10 : f32 to bf16
+    %gate_rounded10 = scalar.extf %gate_bf16_10 : bf16 to f32
+    %gate_silu10 = scalar.siluf %gate_rounded10 : f32
+    %gate_silu_bf16_10 = scalar.fptrunc %gate_silu10 : f32 to bf16
+    %gate_silu_rounded10 = scalar.extf %gate_silu_bf16_10 : bf16 to f32
+    %up_value10 = vector.extract %up_result10[%register_index] : vector<8xf32> -> f32
+    %up_scaled10 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %up_value10, %up_scale0 : f32
+    %up_bf16_10 = scalar.fptrunc %up_scaled10 : f32 to bf16
+    %up_rounded10 = scalar.extf %up_bf16_10 : bf16 to f32
+    %product10 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %gate_silu_rounded10, %up_rounded10 : f32
+    %rounded10 = scalar.fptrunc %product10 : f32 to bf16
+    view.store %rounded10, %output_view[%token1, %column0] : bf16, view<[%token_capacity]x[%intermediate_size]xbf16, #dense>
+    %gate_value11 = vector.extract %gate_result11[%register_index] : vector<8xf32> -> f32
+    %gate_scaled11 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %gate_value11, %gate_scale1 : f32
+    %gate_bf16_11 = scalar.fptrunc %gate_scaled11 : f32 to bf16
+    %gate_rounded11 = scalar.extf %gate_bf16_11 : bf16 to f32
+    %gate_silu11 = scalar.siluf %gate_rounded11 : f32
+    %gate_silu_bf16_11 = scalar.fptrunc %gate_silu11 : f32 to bf16
+    %gate_silu_rounded11 = scalar.extf %gate_silu_bf16_11 : bf16 to f32
+    %up_value11 = vector.extract %up_result11[%register_index] : vector<8xf32> -> f32
+    %up_scaled11 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %up_value11, %up_scale1 : f32
+    %up_bf16_11 = scalar.fptrunc %up_scaled11 : f32 to bf16
+    %up_rounded11 = scalar.extf %up_bf16_11 : bf16 to f32
+    %product11 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %gate_silu_rounded11, %up_rounded11 : f32
+    %rounded11 = scalar.fptrunc %product11 : f32 to bf16
+    view.store %rounded11, %output_view[%token1, %column1] : bf16, view<[%token_capacity]x[%intermediate_size]xbf16, #dense>
+  }
+  kernel.return
+}
+
 check.case public @id4_ideogram4_mlp_gate_up_silu_product_fp8_bf16_wmma_small_case {
   %input = check.generate.fill value(1.0) : tensor<32x16xbf16>
   %gate_weight = check.generate.fill value(1.0) : tensor<32x16xf8E4M3>
@@ -166,6 +325,19 @@ check.case public @id4_ideogram4_mlp_gate_up_silu_product_fp8_bf16_wmma_small_ca
   %output = check.generate.fill value(0.0) : tensor<32x32xbf16>
   %expected = check.generate.fill value(2048.0) : tensor<32x32xbf16>
   func.call @id4_ideogram4_mlp_gate_up_silu_product_fp8_bf16_wmma(%input, %gate_weight, %gate_scale, %up_weight, %up_scale, %output) : (tensor<32x16xbf16>, tensor<32x16xf8E4M3>, tensor<32xf32>, tensor<32x16xf8E4M3>, tensor<32xf32>, tensor<32x32xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.5) rtol(0.01) nan(same) : tensor<32x32xbf16>
+  check.return
+}
+
+check.case public @id4_ideogram4_mlp_gate_up_silu_product_fp8_bf16_wmma_compact_rhs_tile_small_case {
+  %input = check.generate.fill value(1.0) : tensor<32x16xbf16>
+  %gate_weight = check.generate.fill value(1.0) : tensor<512xf8E4M3>
+  %gate_scale = check.generate.fill value(2.0) : tensor<32xf32>
+  %up_weight = check.generate.fill value(2.0) : tensor<512xf8E4M3>
+  %up_scale = check.generate.fill value(2.0) : tensor<32xf32>
+  %output = check.generate.fill value(0.0) : tensor<32x32xbf16>
+  %expected = check.generate.fill value(2048.0) : tensor<32x32xbf16>
+  func.call @id4_ideogram4_mlp_gate_up_silu_product_fp8_bf16_wmma_compact_rhs_tile(%input, %gate_weight, %gate_scale, %up_weight, %up_scale, %output) : (tensor<32x16xbf16>, tensor<512xf8E4M3>, tensor<32xf32>, tensor<512xf8E4M3>, tensor<32xf32>, tensor<32x32xbf16>)
   check.expect.close actual(%output) expected(%expected) atol(0.5) rtol(0.01) nan(same) : tensor<32x32xbf16>
   check.return
 }
@@ -183,6 +355,19 @@ check.case public @id4_ideogram4_mlp_gate_up_silu_product_fp8_bf16_wmma_uncond_1
   check.return
 }
 
+check.case public @id4_ideogram4_mlp_gate_up_silu_product_fp8_bf16_wmma_compact_rhs_tile_uncond_1024_shape_case {
+  %input = check.generate.fill value(1.0) : tensor<4096x4608xbf16>
+  %gate_weight = check.generate.fill value(0.0) : tensor<56623104xf8E4M3>
+  %gate_scale = check.generate.fill value(1.0) : tensor<12288xf32>
+  %up_weight = check.generate.fill value(0.0) : tensor<56623104xf8E4M3>
+  %up_scale = check.generate.fill value(1.0) : tensor<12288xf32>
+  %output = check.generate.fill value(1.0) : tensor<4096x12288xbf16>
+  %expected = check.generate.fill value(0.0) : tensor<4096x12288xbf16>
+  func.call @id4_ideogram4_mlp_gate_up_silu_product_fp8_bf16_wmma_compact_rhs_tile(%input, %gate_weight, %gate_scale, %up_weight, %up_scale, %output) : (tensor<4096x4608xbf16>, tensor<56623104xf8E4M3>, tensor<12288xf32>, tensor<56623104xf8E4M3>, tensor<12288xf32>, tensor<4096x12288xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<4096x12288xbf16>
+  check.return
+}
+
 check.case public @id4_ideogram4_mlp_gate_up_silu_product_fp8_bf16_wmma_structured128_shape_case {
   %input = check.generate.fill value(1.0) : tensor<256x4608xbf16>
   %gate_weight = check.generate.fill value(0.0) : tensor<12288x4608xf8E4M3>
@@ -196,8 +381,27 @@ check.case public @id4_ideogram4_mlp_gate_up_silu_product_fp8_bf16_wmma_structur
   check.return
 }
 
+check.case public @id4_ideogram4_mlp_gate_up_silu_product_fp8_bf16_wmma_compact_rhs_tile_structured128_shape_case {
+  %input = check.generate.fill value(1.0) : tensor<256x4608xbf16>
+  %gate_weight = check.generate.fill value(0.0) : tensor<56623104xf8E4M3>
+  %gate_scale = check.generate.fill value(1.0) : tensor<12288xf32>
+  %up_weight = check.generate.fill value(0.0) : tensor<56623104xf8E4M3>
+  %up_scale = check.generate.fill value(1.0) : tensor<12288xf32>
+  %output = check.generate.fill value(1.0) : tensor<256x12288xbf16>
+  %expected = check.generate.fill value(0.0) : tensor<256x12288xbf16>
+  func.call @id4_ideogram4_mlp_gate_up_silu_product_fp8_bf16_wmma_compact_rhs_tile(%input, %gate_weight, %gate_scale, %up_weight, %up_scale, %output) : (tensor<256x4608xbf16>, tensor<56623104xf8E4M3>, tensor<12288xf32>, tensor<56623104xf8E4M3>, tensor<12288xf32>, tensor<256x12288xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<256x12288xbf16>
+  check.return
+}
+
 check.benchmark<@id4_ideogram4_mlp_gate_up_silu_product_fp8_bf16_wmma_small_case> @id4_ideogram4_mlp_gate_up_silu_product_fp8_bf16_wmma_small
+
+check.benchmark<@id4_ideogram4_mlp_gate_up_silu_product_fp8_bf16_wmma_compact_rhs_tile_small_case> @id4_ideogram4_mlp_gate_up_silu_product_fp8_bf16_wmma_compact_rhs_tile_small
 
 check.benchmark<@id4_ideogram4_mlp_gate_up_silu_product_fp8_bf16_wmma_uncond_1024_shape_case> @id4_ideogram4_mlp_gate_up_silu_product_fp8_bf16_wmma_uncond_1024_shape
 
+check.benchmark<@id4_ideogram4_mlp_gate_up_silu_product_fp8_bf16_wmma_compact_rhs_tile_uncond_1024_shape_case> @id4_ideogram4_mlp_gate_up_silu_product_fp8_bf16_wmma_compact_rhs_tile_uncond_1024_shape
+
 check.benchmark<@id4_ideogram4_mlp_gate_up_silu_product_fp8_bf16_wmma_structured128_shape_case> @id4_ideogram4_mlp_gate_up_silu_product_fp8_bf16_wmma_structured128_shape
+
+check.benchmark<@id4_ideogram4_mlp_gate_up_silu_product_fp8_bf16_wmma_compact_rhs_tile_structured128_shape_case> @id4_ideogram4_mlp_gate_up_silu_product_fp8_bf16_wmma_compact_rhs_tile_structured128_shape

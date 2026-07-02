@@ -1607,7 +1607,7 @@ iree_status_t id4_ideogram4_dit_program_author_transformer_block(
       ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_FP8_DIRECT;
   const bool compact_feed_forward_w1_w3_layout =
       bf16_resident_feed_forward_weight_execution ||
-      (pytorch_parity_feed_forward && fp8_direct_feed_forward_weight_execution);
+      fp8_direct_feed_forward_weight_execution;
   const bool compact_feed_forward_w2_layout =
       bf16_resident_feed_forward_weight_execution ||
       fp8_direct_feed_forward_weight_execution;
@@ -1674,13 +1674,45 @@ iree_status_t id4_ideogram4_dit_program_author_transformer_block(
             ID4_IDEOGRAM4_DIT_PARAMETER_STORAGE_FP8_E4M3_SCALED &&
         feed_forward_w3_parameter.storage ==
             ID4_IDEOGRAM4_DIT_PARAMETER_STORAGE_FP8_E4M3_SCALED) {
-      IREE_RETURN_IF_ERROR(
-          id4_ideogram4_dit_program_dispatch_mlp_gate_up_silu_product_fp8_bf16_wmma(
-              builder, mlp_hidden_dispatch_name, total_token_count,
-              bf16_token_capacity, hidden_size, intermediate_size, ffn_input,
-              feed_forward_w1_parameter.weight, feed_forward_w1_parameter.scale,
-              feed_forward_w3_parameter.weight, feed_forward_w3_parameter.scale,
-              mlp_hidden));
+      if (feed_forward_w1_parameter.layout !=
+          feed_forward_w3_parameter.layout) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "Ideogram4 DiT FP8 feed-forward gate/up layouts %" PRIu32
+            "/%" PRIu32 " do not match",
+            (uint32_t)feed_forward_w1_parameter.layout,
+            (uint32_t)feed_forward_w3_parameter.layout);
+      }
+      switch (feed_forward_w1_parameter.layout) {
+        case ID4_IDEOGRAM4_DIT_PROGRAM_LINEAR_WEIGHT_LAYOUT_DENSE: {
+          IREE_RETURN_IF_ERROR(
+              id4_ideogram4_dit_program_dispatch_mlp_gate_up_silu_product_fp8_bf16_wmma(
+                  builder, mlp_hidden_dispatch_name, total_token_count,
+                  bf16_token_capacity, hidden_size, intermediate_size,
+                  ffn_input, feed_forward_w1_parameter.weight,
+                  feed_forward_w1_parameter.scale,
+                  feed_forward_w3_parameter.weight,
+                  feed_forward_w3_parameter.scale, mlp_hidden));
+          break;
+        }
+        case ID4_IDEOGRAM4_DIT_PROGRAM_LINEAR_WEIGHT_LAYOUT_COMPACT_RHS_TILE: {
+          IREE_RETURN_IF_ERROR(
+              id4_ideogram4_dit_program_dispatch_mlp_gate_up_silu_product_fp8_bf16_wmma_compact_rhs_tile(
+                  builder, mlp_hidden_dispatch_name, total_token_count,
+                  bf16_token_capacity, hidden_size, intermediate_size,
+                  ffn_input, feed_forward_w1_parameter.weight,
+                  feed_forward_w1_parameter.scale,
+                  feed_forward_w3_parameter.weight,
+                  feed_forward_w3_parameter.scale, mlp_hidden));
+          break;
+        }
+        default:
+          return iree_make_status(
+              IREE_STATUS_UNIMPLEMENTED,
+              "Ideogram4 DiT FP8 feed-forward gate/up weight layout %" PRIu32
+              " is not supported",
+              (uint32_t)feed_forward_w1_parameter.layout);
+      }
     } else if (materialize_feed_forward_projections ||
                (feed_forward_w1_parameter.storage ==
                     ID4_IDEOGRAM4_DIT_PARAMETER_STORAGE_FP8_E4M3_SCALED &&

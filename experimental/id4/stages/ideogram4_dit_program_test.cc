@@ -426,15 +426,6 @@ static bool ProgramHasFp8CompactExecutionParameter(
       ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_FP8_E4M3_LINEAR_RHS_TILE);
 }
 
-static bool ProgramHasFp8DirectExecutionParameter(
-    const id4_pipeline_program_t* program, iree_string_view_t key,
-    iree_string_view_t source_scope,
-    id4_pipeline_program_shape_t expected_shape) {
-  return ProgramHasFp8ExecutionParameterEncoding(
-      program, key, source_scope, expected_shape,
-      ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_DIRECT);
-}
-
 static bool DispatchHasConfigBinding(
     const id4_pipeline_program_dispatch_loom_op_t* dispatch,
     iree_string_view_t key, iree_string_view_t value) {
@@ -815,8 +806,7 @@ TEST(Ideogram4DitProgram, AuthorsDirectFp8ProjectionParameterContract) {
       &rules, iree_allocator_system());
 }
 
-TEST(Ideogram4DitProgram,
-     AuthorsDirectFp8FusedFeedForwardDownAsCompactParameter) {
+TEST(Ideogram4DitProgram, AuthorsDirectFp8FusedFeedForwardCompactParameters) {
   id4_pipeline_program_shape_t latent_shape =
       id4_pipeline_program_make_shape_rank4(1, 2, 4, 1);
   id4_ideogram4_dit_program_options_t options =
@@ -836,11 +826,11 @@ TEST(Ideogram4DitProgram,
   options.parameter_sources.rules = rules.values;
 
   id4_pipeline_program_t* program = CreateForwardProgram(&options);
-  EXPECT_TRUE(ProgramHasFp8DirectExecutionParameter(
+  EXPECT_TRUE(ProgramHasFp8CompactExecutionParameter(
       program, IREE_SV("layers.0.feed_forward.w1.weight"), IREE_SV("fp8"),
       id4_pipeline_program_make_shape_rank2(options.model.intermediate_size,
                                             options.model.hidden_size)));
-  EXPECT_TRUE(ProgramHasFp8DirectExecutionParameter(
+  EXPECT_TRUE(ProgramHasFp8CompactExecutionParameter(
       program, IREE_SV("layers.0.feed_forward.w3.weight"), IREE_SV("fp8"),
       id4_pipeline_program_make_shape_rank2(options.model.intermediate_size,
                                             options.model.hidden_size)));
