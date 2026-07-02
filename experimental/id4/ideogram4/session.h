@@ -637,6 +637,12 @@ iree_status_t id4_ideogram4_generation_phase_bundle_release(
 void id4_ideogram4_generation_execution_release(
     id4_ideogram4_generation_execution_t* execution);
 
+// Queries retained generation readiness sources and returns annotated
+// asynchronous parameter loading failures.
+iree_status_t id4_ideogram4_generation_execution_check_failures(
+    const id4_ideogram4_generation_execution_t* execution,
+    id4_pipeline_diagnostics_sink_t* diagnostics_sink);
+
 // Returns the result bindings retained by |execution|.
 iree_status_t id4_ideogram4_generation_execution_result(
     const id4_ideogram4_generation_execution_t* execution,

@@ -527,6 +527,13 @@ iree_status_t id4_pipeline_parameter_slab_set_load_group_ready_at(
     const id4_pipeline_parameter_slab_set_t* slab_set, iree_host_size_t index,
     iree_hal_semaphore_t** out_semaphore, uint64_t* out_payload_value);
 
+// Queries retained load-group readiness semaphores and returns annotated
+// asynchronous parameter loading failures.
+iree_status_t id4_pipeline_parameter_slab_set_check_load_group_failures(
+    const id4_pipeline_parameter_slab_set_t* slab_set,
+    iree_string_view_t stage_name,
+    id4_pipeline_diagnostics_sink_t* diagnostics_sink);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif  // __cplusplus

@@ -666,6 +666,19 @@ iree_hal_semaphore_list_t id4_pipeline_bundle_readiness_semaphore_list(
   };
 }
 
+iree_status_t id4_pipeline_bundle_check_readiness_failures(
+    const id4_pipeline_bundle_t* bundle,
+    id4_pipeline_diagnostics_sink_t* diagnostics_sink) {
+  if (!bundle) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "pipeline bundle is required");
+  }
+  if (!bundle->parameter_slabs) return iree_ok_status();
+  return id4_pipeline_parameter_slab_set_check_load_group_failures(
+      bundle->parameter_slabs, id4_pipeline_plan_stage_name(bundle->plan),
+      diagnostics_sink);
+}
+
 void* id4_pipeline_bundle_payload(id4_pipeline_bundle_t* bundle) {
   return bundle ? bundle->payload : NULL;
 }

@@ -67,6 +67,12 @@ typedef struct id4_pipeline_parameter_slab_diagnostic_t {
   iree_host_size_t device_index;
   // Queue affinity used by loading work.
   iree_hal_queue_affinity_t queue_affinity;
+  // HAL memory type requested for the slab buffer.
+  iree_hal_memory_type_t memory_type;
+  // HAL memory access requested for the slab buffer.
+  iree_hal_memory_access_t memory_access;
+  // HAL buffer usage requested for the slab buffer.
+  iree_hal_buffer_usage_t buffer_usage;
   // Total slab byte length.
   iree_device_size_t slab_byte_length;
   // Required slab base alignment in bytes.
@@ -91,6 +97,8 @@ typedef struct id4_pipeline_parameter_load_diagnostic_t {
   iree_host_size_t load_step_offset;
   // Number of load steps represented by this loading window.
   iree_host_size_t load_step_count;
+  // Human-readable first load-step name for diagnostics.
+  iree_string_view_t first_load_step_name;
   // Number of bounded staging slots allocated for encoded source tensors.
   iree_host_size_t staging_slot_count;
   // Byte length of one bounded staging slot.

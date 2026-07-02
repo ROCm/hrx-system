@@ -243,6 +243,28 @@ static iree_hal_semaphore_list_t MakeOneSemaphoreList(
   return list;
 }
 
+typedef struct FailureDiagnosticCapture {
+  // True after observing the parameter load group failure event.
+  bool saw_failure_event;
+  // True when the failure event names the failed load step.
+  bool saw_failure_step_name;
+} FailureDiagnosticCapture;
+
+static iree_status_t CaptureFailureDiagnostic(
+    void* user_data, const id4_pipeline_diagnostic_event_t* event) {
+  auto* capture = static_cast<FailureDiagnosticCapture*>(user_data);
+  if (!iree_string_view_equal(event->key,
+                              IREE_SV("parameter_slab.load_group.failure"))) {
+    return iree_ok_status();
+  }
+  capture->saw_failure_event = true;
+  capture->saw_failure_step_name =
+      event->parameter_load &&
+      iree_string_view_equal(event->parameter_load->first_load_step_name,
+                             IREE_SV("parameters.gather.weight"));
+  return iree_ok_status();
+}
+
 static void ExpectDecodedFp8Pattern(const uint16_t* encoded_weight,
                                     iree_host_size_t element_offset,
                                     const uint8_t* pattern,
@@ -263,6 +285,101 @@ static void RunCompactLinearRhsTileEncoding(
     RuntimeContext* context, id4_pipeline_kernel_library_t* kernel_library,
     iree_io_parameter_provider_t* provider,
     id4_pipeline_diagnostics_sink_t* diagnostics_sink);
+
+TEST(ParameterSlabIntegration, CheckLoadGroupFailuresReportsFailedSemaphore) {
+  RuntimeContext context;
+  id4_tooling_runtime_context_options_t context_options;
+  std::memset(&context_options, 0, sizeof(context_options));
+  context_options.structure_size = sizeof(context_options);
+  context_options.executable_cache_identifier =
+      IREE_SV("id4.parameter_slab.failure_check");
+  IREE_ASSERT_OK(id4_tooling_runtime_context_initialize_from_flags(
+      &context_options, iree_allocator_system(), &context.value));
+  context.initialized = true;
+
+  FailureDiagnosticCapture capture;
+  std::memset(&capture, 0, sizeof(capture));
+  id4_pipeline_diagnostics_sink_t diagnostics_sink = {
+      // Captures parameter load failure diagnostic events.
+      .emit = CaptureFailureDiagnostic,
+      // Mutable capture state owned by this test.
+      .user_data = &capture,
+  };
+
+  OwningRef<iree_io_parameter_provider_t, iree_io_parameter_provider_release>
+      provider;
+  IREE_ASSERT_OK(CreateParameterSourceProvider(provider.out()));
+
+  id4_pipeline_device_placement_t placement;
+  std::memset(&placement, 0, sizeof(placement));
+  placement.role = IREE_SV("default");
+  placement.device_index = 0;
+  placement.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
+
+  id4_pipeline_parameter_request_t target_request =
+      id4_pipeline_parameter_request(
+          IREE_SV("weight"),
+          id4_pipeline_parameter_span(/*parameter_offset=*/0,
+                                      /*buffer_offset=*/0, /*length=*/16));
+  id4_pipeline_parameter_slab_plan_t slab =
+      id4_pipeline_make_device_local_parameter_slab_plan(
+          IREE_SV("execution"), /*placement_id=*/0, /*binding_slot=*/0,
+          IREE_HAL_QUEUE_AFFINITY_ANY, IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE,
+          /*byte_length=*/16, /*alignment=*/16, /*request_count=*/1,
+          &target_request);
+  id4_pipeline_parameter_load_step_t load_step =
+      id4_pipeline_parameter_gather_load_step(
+          IREE_SV("parameters.gather.weight"), IREE_SV("parameters"),
+          /*target_slab_index=*/0, /*request_offset=*/0, /*request_count=*/1);
+
+  id4_pipeline_plan_create_options_t plan_options;
+  std::memset(&plan_options, 0, sizeof(plan_options));
+  plan_options.structure_size = sizeof(plan_options);
+  plan_options.stage_name = IREE_SV("parameter_slab.failure_check");
+  plan_options.device_group = context.value.device_group;
+  plan_options.diagnostics_sink = &diagnostics_sink;
+  plan_options.placement_count = 1;
+  plan_options.placements = &placement;
+  plan_options.parameter_slab_count = 1;
+  plan_options.parameter_slabs = &slab;
+  plan_options.parameter_load_step_count = 1;
+  plan_options.parameter_load_steps = &load_step;
+  OwningRef<id4_pipeline_plan_t, id4_pipeline_plan_release> plan;
+  IREE_ASSERT_OK(id4_pipeline_plan_create(&plan_options,
+                                          iree_allocator_system(), plan.out()));
+
+  id4_pipeline_parameter_slab_set_load_options_t load_options;
+  std::memset(&load_options, 0, sizeof(load_options));
+  load_options.structure_size = sizeof(load_options);
+  load_options.provider = provider.get();
+  load_options.wait_semaphore_list = iree_hal_semaphore_list_empty();
+  load_options.signal_semaphore_list = iree_hal_semaphore_list_empty();
+  load_options.diagnostics_sink = &diagnostics_sink;
+  OwningRef<id4_pipeline_parameter_slab_set_t,
+            id4_pipeline_parameter_slab_set_release>
+      slab_set;
+  IREE_ASSERT_OK(id4_pipeline_plan_prepare_parameter_slabs(
+      plan.get(), &load_options, iree_allocator_system(), slab_set.out()));
+  ASSERT_EQ(id4_pipeline_parameter_slab_set_load_group_count(slab_set.get()),
+            1u);
+
+  iree_hal_semaphore_t* ready_semaphore = nullptr;
+  uint64_t ready_value = 0;
+  IREE_ASSERT_OK(id4_pipeline_parameter_slab_set_load_group_ready_at(
+      slab_set.get(), /*index=*/0, &ready_semaphore, &ready_value));
+  ASSERT_NE(ready_semaphore, nullptr);
+  EXPECT_EQ(ready_value, 1u);
+  iree_hal_semaphore_fail(ready_semaphore,
+                          iree_make_status(IREE_STATUS_ABORTED,
+                                           "synthetic parameter load failure"));
+
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_ABORTED,
+      id4_pipeline_parameter_slab_set_check_load_group_failures(
+          slab_set.get(), plan_options.stage_name, &diagnostics_sink));
+  EXPECT_TRUE(capture.saw_failure_event);
+  EXPECT_TRUE(capture.saw_failure_step_name);
+}
 
 TEST(ParameterSlabIntegration, EncodedFp8WeightsFeedBf16WmmaLinear) {
   RuntimeContext context;

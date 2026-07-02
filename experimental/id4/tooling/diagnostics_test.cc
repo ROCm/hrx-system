@@ -44,6 +44,9 @@ TEST(DiagnosticsTest, WritesJsonLinesEvents) {
       /*.placement_id=*/1,
       /*.device_index=*/0,
       /*.queue_affinity=*/IREE_HAL_QUEUE_AFFINITY_ANY,
+      /*.memory_type=*/IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
+      /*.memory_access=*/IREE_HAL_MEMORY_ACCESS_ALL,
+      /*.buffer_usage=*/IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE,
       /*.slab_byte_length=*/1024,
       /*.slab_alignment=*/16,
       /*.request_count=*/9,
@@ -66,6 +69,7 @@ TEST(DiagnosticsTest, WritesJsonLinesEvents) {
       /*.submit_region_id=*/10,
       /*.load_step_offset=*/5,
       /*.load_step_count=*/2,
+      /*.first_load_step_name=*/IREE_SV("layer0.q_proj"),
       /*.staging_slot_count=*/2,
       /*.staging_slot_byte_length=*/4096,
       /*.staging_total_byte_length=*/8192,
@@ -149,6 +153,10 @@ TEST(DiagnosticsTest, WritesJsonLinesEvents) {
   ExpectFinds(event_log, "\"staging_slot_count\":2");
   ExpectFinds(event_log, "\"source_gather_batch_count\":2");
   ExpectFinds(event_log, "\"encoder_dispatch_count\":2");
+  ExpectFinds(event_log, "\"memory_type\":");
+  ExpectFinds(event_log, "\"memory_access\":");
+  ExpectFinds(event_log, "\"buffer_usage\":");
+  ExpectFinds(event_log, "\"first_load_step_name\":\"layer0.q_proj\"");
   ExpectFinds(event_log, "\"kind\":\"kernel\"");
   ExpectFinds(event_log, "\"module_path\":\"qwen3_vl/rmsnorm\"");
   ExpectFinds(event_log, "\"artifact_byte_length\":4096");

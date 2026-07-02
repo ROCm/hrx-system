@@ -1440,6 +1440,12 @@ static iree_status_t id4_pipeline_plan_emit_parameter_slab_diagnostics(
         .device_index = placement->device_index,
         // Queue affinity selected by the placement.
         .queue_affinity = placement->queue_affinity,
+        // HAL memory type requested for the slab buffer.
+        .memory_type = slab->target_params.type,
+        // HAL memory access requested for the slab buffer.
+        .memory_access = slab->target_params.access,
+        // HAL buffer usage requested for the slab buffer.
+        .buffer_usage = slab->target_params.usage,
         // Total slab byte length.
         .slab_byte_length = slab->byte_length,
         // Required slab base alignment.

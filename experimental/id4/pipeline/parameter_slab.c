@@ -84,6 +84,10 @@ struct id4_pipeline_parameter_slab_set_t {
   iree_host_size_t load_group_count;
   // Retained parameter load group descriptors.
   id4_pipeline_parameter_load_group_t* load_groups;
+  // Number of copied parameter load-step descriptors.
+  iree_host_size_t load_step_count;
+  // Copied parameter load-step descriptors used for failure diagnostics.
+  id4_pipeline_parameter_load_step_t* load_steps;
   // Readiness semaphores retained in parameter load group order.
   iree_hal_semaphore_t** load_group_semaphores;
   // Per-load-group submission state owned by this set.
@@ -614,6 +618,7 @@ static void id4_pipeline_parameter_slab_set_destroy(
   iree_allocator_free(host_allocator, slab_set->wait_semaphores);
   iree_allocator_free(host_allocator, slab_set->load_group_submitted);
   iree_allocator_free(host_allocator, slab_set->load_group_semaphores);
+  iree_allocator_free(host_allocator, slab_set->load_steps);
   iree_allocator_free(host_allocator, slab_set->load_groups);
   iree_allocator_free(host_allocator, slab_set->loads);
   iree_allocator_free(host_allocator, slab_set->buffers);
@@ -676,6 +681,21 @@ static iree_status_t id4_pipeline_parameter_slab_set_copy_loads(
   for (iree_host_size_t i = 0; i < load_count; ++i) {
     iree_hal_device_retain(slab_set->loads[i].device);
   }
+  return iree_ok_status();
+}
+
+static iree_status_t id4_pipeline_parameter_slab_set_copy_load_steps(
+    id4_pipeline_parameter_slab_set_t* slab_set,
+    iree_host_size_t load_step_count,
+    const id4_pipeline_parameter_load_step_t* load_steps) {
+  if (load_step_count == 0) return iree_ok_status();
+  iree_status_t status = iree_allocator_malloc_array(
+      slab_set->host_allocator, load_step_count,
+      sizeof(slab_set->load_steps[0]), (void**)&slab_set->load_steps);
+  if (!iree_status_is_ok(status)) return status;
+  memcpy(slab_set->load_steps, load_steps,
+         load_step_count * sizeof(slab_set->load_steps[0]));
+  slab_set->load_step_count = load_step_count;
   return iree_ok_status();
 }
 
@@ -911,6 +931,12 @@ id4_pipeline_parameter_slab_make_diagnostic(
       .device_index = load->device_index,
       // Queue affinity used by loading work.
       .queue_affinity = load->queue_affinity,
+      // HAL memory type requested for the slab buffer.
+      .memory_type = slab->target_params.type,
+      // HAL memory access requested for the slab buffer.
+      .memory_access = slab->target_params.access,
+      // HAL buffer usage requested for the slab buffer.
+      .buffer_usage = slab->target_params.usage,
       // Total slab byte length.
       .slab_byte_length = slab->byte_length,
       // Required slab base alignment.
@@ -1588,6 +1614,7 @@ static iree_status_t id4_pipeline_parameter_slab_emit_encode_window_diagnostic(
     iree_string_view_t stage_name,
     id4_pipeline_parameter_load_group_context_t group_context,
     iree_host_size_t load_step_offset, iree_host_size_t load_step_count,
+    iree_string_view_t first_load_step_name,
     iree_device_size_t staging_byte_length,
     const id4_pipeline_parameter_encode_run_statistics_t* statistics,
     id4_pipeline_diagnostics_sink_t* diagnostics_sink) {
@@ -1610,6 +1637,8 @@ static iree_status_t id4_pipeline_parameter_slab_emit_encode_window_diagnostic(
       .load_step_offset = load_step_offset,
       // Number of load steps represented by the window.
       .load_step_count = load_step_count,
+      // Human-readable first load-step name.
+      .first_load_step_name = first_load_step_name,
       // Number of staging slots allocated for the window.
       .staging_slot_count = ID4_PIPELINE_PARAMETER_ENCODER_STAGING_SLOT_COUNT,
       // Byte length of one staging slot.
@@ -1962,6 +1991,8 @@ id4_pipeline_parameter_slab_emit_encode_window_allocation_diagnostic(
       .load_step_offset = IREE_HOST_SIZE_MAX,
       // Number of encoded groups sharing this window.
       .load_step_count = window->encoded_group_count,
+      // Issue-window allocation is shared across non-contiguous groups.
+      .first_load_step_name = iree_string_view_empty(),
       // Number of staging slots allocated by the window.
       .staging_slot_count = ID4_PIPELINE_PARAMETER_ENCODER_STAGING_SLOT_COUNT,
       // Byte length of one staging slot.
@@ -2120,7 +2151,8 @@ static iree_status_t id4_pipeline_parameter_slab_submit_encode_run(
   IREE_RETURN_IF_ERROR(
       id4_pipeline_parameter_slab_emit_encode_window_diagnostic(
           load, stage_name, group_context, load_step_offset, step_count,
-          staging_byte_length, &statistics, options->diagnostics_sink));
+          steps[0].name, staging_byte_length, &statistics,
+          options->diagnostics_sink));
 
   const bool uses_encode_window = encode_window_context != NULL;
   id4_pipeline_parameter_encode_window_t* encode_window = NULL;
@@ -2603,6 +2635,8 @@ static iree_status_t id4_pipeline_parameter_slab_emit_gather_group_diagnostic(
       .load_step_offset = group.step_offset,
       // Number of direct gather load steps in the group.
       .load_step_count = group.step_count,
+      // Human-readable first load-step name.
+      .first_load_step_name = step->name,
       // Direct gathers do not allocate staging slots.
       .staging_slot_count = 0,
       // Direct gathers do not allocate staging slot storage.
@@ -2736,7 +2770,7 @@ static iree_status_t id4_pipeline_parameter_slab_emit_load_group_submit_timing(
     iree_string_view_t stage_name,
     id4_pipeline_parameter_load_group_context_t group_context,
     id4_pipeline_parameter_load_group_t group, iree_time_t start_time_ns,
-    iree_time_t end_time_ns,
+    iree_time_t end_time_ns, iree_string_view_t first_load_step_name,
     id4_pipeline_diagnostics_sink_t* diagnostics_sink) {
   id4_pipeline_parameter_slab_diagnostic_t parameter_slab =
       id4_pipeline_parameter_slab_make_diagnostic(load, load->slab->scope,
@@ -2757,6 +2791,8 @@ static iree_status_t id4_pipeline_parameter_slab_emit_load_group_submit_timing(
       .load_step_offset = group.step_offset,
       // Number of load steps represented by the group.
       .load_step_count = group.step_count,
+      // Human-readable first load-step name.
+      .first_load_step_name = first_load_step_name,
       // Submit timing does not describe staging slot allocation.
       .staging_slot_count = 0,
       // Submit timing does not describe staging slot allocation.
@@ -2801,6 +2837,173 @@ static iree_status_t id4_pipeline_parameter_slab_emit_load_group_submit_timing(
       .timing = &timing,
   };
   return id4_pipeline_diagnostics_emit(diagnostics_sink, &event);
+}
+
+static iree_status_t id4_pipeline_parameter_slab_describe_failed_load_group(
+    const id4_pipeline_parameter_slab_set_t* slab_set,
+    iree_host_size_t group_index, iree_string_view_t stage_name,
+    uint64_t current_payload_value,
+    id4_pipeline_diagnostics_sink_t* diagnostics_sink) {
+  if (!slab_set->load_groups || !slab_set->loads || !slab_set->load_steps) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "parameter slab set has no retained load descriptors for failure "
+        "diagnostics");
+  }
+  const id4_pipeline_parameter_load_group_t group =
+      slab_set->load_groups[group_index];
+  if (group.target_slab_index >= slab_set->load_count) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "failed parameter load group %" PRIhsz " target slab %" PRIhsz
+        " is outside load count %" PRIhsz,
+        group_index, group.target_slab_index, slab_set->load_count);
+  }
+  if (group.step_offset >= slab_set->load_step_count ||
+      group.step_count > slab_set->load_step_count - group.step_offset) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "failed parameter load group %" PRIhsz " step range [%" PRIhsz
+        ", %" PRIhsz ") is outside load step count %" PRIhsz,
+        group_index, group.step_offset, group.step_offset + group.step_count,
+        slab_set->load_step_count);
+  }
+
+  const id4_pipeline_parameter_load_step_t* step =
+      &slab_set->load_steps[group.step_offset];
+  const id4_pipeline_parameter_slab_load_t* load =
+      &slab_set->loads[group.target_slab_index];
+  id4_pipeline_parameter_slab_diagnostic_t parameter_slab =
+      id4_pipeline_parameter_slab_make_diagnostic(
+          load, id4_pipeline_parameter_load_step_primary_scope(step),
+          IREE_HOST_SIZE_MAX);
+  id4_pipeline_parameter_load_diagnostic_t parameter_load = {
+      // Plan-local slab index populated by this load group.
+      .slab_index = load->slab_index,
+      // Plan-local load group ordinal.
+      .load_group_index = group_index,
+      // Submission strategy used by the failed load group.
+      .load_group_kind =
+          id4_pipeline_parameter_load_group_kind_name(group.kind),
+      // Failure checks run after scheduling, without region-local context.
+      .first_consumer_region_id = IREE_HOST_SIZE_MAX,
+      // Failure checks run after scheduling, without region-local context.
+      .submit_region_id = IREE_HOST_SIZE_MAX,
+      // First load-step ordinal represented by the failed group.
+      .load_step_offset = group.step_offset,
+      // Number of load steps represented by the failed group.
+      .load_step_count = group.step_count,
+      // Human-readable first load-step name.
+      .first_load_step_name = step->name,
+      // Populated below for encoded load groups.
+      .staging_slot_count = 0,
+      // Populated below for encoded load groups.
+      .staging_slot_byte_length = 0,
+      // Populated below for encoded load groups.
+      .staging_total_byte_length = 0,
+      // Populated below for encoded load groups.
+      .staging_chunk_count = 0,
+      // Populated below from the failed group.
+      .logical_source_count = 0,
+      // Populated below from the failed group.
+      .source_gather_batch_count = 0,
+      // Populated below from the failed group.
+      .source_byte_length = 0,
+      // Populated below from the failed group.
+      .target_byte_length = 0,
+      // Populated below for encoded load groups.
+      .encoder_dispatch_count = 0,
+  };
+  if (id4_pipeline_parameter_load_group_is_encode(group)) {
+    id4_pipeline_parameter_encode_run_statistics_t statistics;
+    IREE_RETURN_IF_ERROR(id4_pipeline_parameter_encode_run_collect_statistics(
+        load, step, group.step_count,
+        slab_set->encoder_staging_chunk_byte_capacity, &statistics));
+    iree_device_size_t staging_total_byte_length = 0;
+    if (!iree_device_size_checked_mul(
+            statistics.staging_slot_byte_length,
+            ID4_PIPELINE_PARAMETER_ENCODER_STAGING_SLOT_COUNT,
+            &staging_total_byte_length)) {
+      return iree_make_status(
+          IREE_STATUS_OUT_OF_RANGE,
+          "failed parameter load group staging byte length overflows");
+    }
+    parameter_load.staging_slot_count =
+        ID4_PIPELINE_PARAMETER_ENCODER_STAGING_SLOT_COUNT;
+    parameter_load.staging_slot_byte_length =
+        statistics.staging_slot_byte_length;
+    parameter_load.staging_total_byte_length = staging_total_byte_length;
+    parameter_load.staging_chunk_count = statistics.staging_chunk_count;
+    parameter_load.logical_source_count = statistics.logical_source_count;
+    parameter_load.source_gather_batch_count =
+        statistics.source_gather_batch_count;
+    parameter_load.source_byte_length = statistics.source_byte_length;
+    parameter_load.target_byte_length = statistics.target_byte_length;
+    parameter_load.encoder_dispatch_count = statistics.encoder_dispatch_count;
+  } else {
+    for (iree_host_size_t i = 0; i < group.step_count; ++i) {
+      const id4_pipeline_parameter_load_step_t* gather_step =
+          &slab_set->load_steps[group.step_offset + i];
+      IREE_RETURN_IF_ERROR(id4_pipeline_parameter_add_host_size(
+          gather_step->request_count, &parameter_load.logical_source_count,
+          "logical source"));
+      IREE_RETURN_IF_ERROR(id4_pipeline_parameter_add_host_size(
+          1, &parameter_load.source_gather_batch_count, "source gather batch"));
+      for (iree_host_size_t j = 0; j < gather_step->request_count; ++j) {
+        const iree_host_size_t request_index =
+            gather_step->request_indices ? gather_step->request_indices[j]
+                                         : gather_step->request_offset + j;
+        if (request_index >= load->slab->request_count) {
+          return iree_make_status(
+              IREE_STATUS_OUT_OF_RANGE,
+              "failed parameter load group request index %" PRIhsz
+              " is outside slab request count %" PRIhsz,
+              request_index, load->slab->request_count);
+        }
+        const id4_pipeline_parameter_request_t* request =
+            &load->slab->requests[request_index];
+        IREE_RETURN_IF_ERROR(id4_pipeline_parameter_add_device_size(
+            request->span.length, &parameter_load.source_byte_length,
+            "source"));
+        IREE_RETURN_IF_ERROR(id4_pipeline_parameter_add_device_size(
+            request->span.length, &parameter_load.target_byte_length,
+            "target"));
+      }
+    }
+  }
+
+  id4_pipeline_diagnostic_event_t event = {
+      // Event kind for parameter slab diagnostics.
+      .kind = ID4_PIPELINE_DIAGNOSTIC_EVENT_KIND_PARAMETER_SLAB,
+      // Stage name associated with the failed load group.
+      .stage_name = stage_name,
+      // Stable parameter load failure event key.
+      .key = IREE_SV("parameter_slab.load_group.failure"),
+      // Short event summary.
+      .message = IREE_SV("parameter load group failed"),
+      // Structured slab payload.
+      .parameter_slab = &parameter_slab,
+      // Structured parameter loading payload.
+      .parameter_load = &parameter_load,
+  };
+  iree_status_t status =
+      id4_pipeline_diagnostics_emit(diagnostics_sink, &event);
+  return iree_status_join(
+      status,
+      iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "parameter load group %" PRIhsz
+          " failed: stage='%.*s', kind='%.*s', first_load_step='%.*s', "
+          "target_slab=%" PRIhsz ", current_payload=%" PRIu64
+          ", target_memory_type=0x%x, target_memory_access=0x%x, "
+          "target_buffer_usage=0x%x",
+          group_index, (int)stage_name.size, stage_name.data,
+          (int)parameter_load.load_group_kind.size,
+          parameter_load.load_group_kind.data,
+          (int)parameter_load.first_load_step_name.size,
+          parameter_load.first_load_step_name.data, group.target_slab_index,
+          current_payload_value, parameter_slab.memory_type,
+          parameter_slab.memory_access, parameter_slab.buffer_usage));
 }
 
 iree_status_t id4_pipeline_parameter_load_group_count(
@@ -3032,7 +3235,7 @@ static iree_status_t id4_pipeline_parameter_slab_submit_load_group(
   return iree_status_join(
       status, id4_pipeline_parameter_slab_emit_load_group_submit_timing(
                   load, stage_name, group_context, group, start_time_ns,
-                  end_time_ns, options->diagnostics_sink));
+                  end_time_ns, step->name, options->diagnostics_sink));
 }
 
 static iree_status_t id4_pipeline_parameter_slab_create_group_semaphores(
@@ -3366,6 +3569,10 @@ iree_status_t id4_pipeline_parameter_slab_set_prepare(
         id4_pipeline_parameter_slab_set_copy_loads(slab_set, load_count, loads);
   }
   if (iree_status_is_ok(status)) {
+    status = id4_pipeline_parameter_slab_set_copy_load_steps(
+        slab_set, load_step_count, load_steps);
+  }
+  if (iree_status_is_ok(status)) {
     status = id4_pipeline_parameter_slab_set_retain_load_context(
         slab_set, options, load_step_count, load_steps);
   }
@@ -3405,6 +3612,14 @@ iree_status_t id4_pipeline_parameter_slab_set_load(
   if (iree_status_is_ok(status)) {
     status = id4_pipeline_parameter_slab_set_create_load_groups(
         loads, load_step_count, load_steps, host_allocator, slab_set);
+  }
+  if (iree_status_is_ok(status)) {
+    status =
+        id4_pipeline_parameter_slab_set_copy_loads(slab_set, load_count, loads);
+  }
+  if (iree_status_is_ok(status)) {
+    status = id4_pipeline_parameter_slab_set_copy_load_steps(
+        slab_set, load_step_count, load_steps);
   }
   if (iree_status_is_ok(status)) {
     status = id4_pipeline_parameter_slab_set_submit_eager_load_groups(
@@ -3674,4 +3889,44 @@ iree_status_t id4_pipeline_parameter_slab_set_load_group_ready_at(
   *out_semaphore = slab_set->load_group_semaphores[index];
   *out_payload_value = 1;
   return iree_ok_status();
+}
+
+iree_status_t id4_pipeline_parameter_slab_set_check_load_group_failures(
+    const id4_pipeline_parameter_slab_set_t* slab_set,
+    iree_string_view_t stage_name,
+    id4_pipeline_diagnostics_sink_t* diagnostics_sink) {
+  if (!slab_set) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "parameter slab set is required");
+  }
+  IREE_RETURN_IF_ERROR(id4_pipeline_diagnostics_validate_sink(
+      diagnostics_sink, IREE_SV("parameter load failure check")));
+  if (slab_set->load_group_count == 0) return iree_ok_status();
+  if (!slab_set->load_group_semaphores) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "parameter slab set has no retained load group semaphores");
+  }
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0; i < slab_set->load_group_count; ++i) {
+    iree_hal_semaphore_t* semaphore = slab_set->load_group_semaphores[i];
+    if (!semaphore) {
+      status = iree_status_join(
+          status, iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                                   "parameter load group %" PRIhsz
+                                   " has no retained readiness semaphore",
+                                   i));
+      continue;
+    }
+    uint64_t current_payload_value = 0;
+    iree_status_t query_status =
+        iree_hal_semaphore_query(semaphore, &current_payload_value);
+    if (iree_status_is_ok(query_status)) continue;
+    status = iree_status_join(status, query_status);
+    status = iree_status_join(
+        status,
+        id4_pipeline_parameter_slab_describe_failed_load_group(
+            slab_set, i, stage_name, current_payload_value, diagnostics_sink));
+  }
+  return status;
 }

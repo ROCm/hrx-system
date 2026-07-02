@@ -2089,10 +2089,14 @@ static iree_status_t id4_cli_run_generation(iree_allocator_t host_allocator) {
   }
   if (generation_was_issued) {
     const iree_time_t phase_start_time_ns = iree_time_now();
-    status = iree_status_join(
-        status,
-        iree_hal_semaphore_list_wait(completion_list, iree_infinite_timeout(),
-                                     IREE_ASYNC_WAIT_FLAG_NONE));
+    iree_status_t wait_status = iree_hal_semaphore_list_wait(
+        completion_list, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE);
+    if (!iree_status_is_ok(wait_status) && execution) {
+      wait_status = iree_status_join(
+          wait_status, id4_ideogram4_generation_execution_check_failures(
+                           execution, &diagnostics_sink));
+    }
+    status = iree_status_join(status, wait_status);
     if (iree_status_is_ok(status)) {
       status =
           id4_cli_emit_timing(&diagnostics_sink, IREE_SV("cli.wait_completion"),

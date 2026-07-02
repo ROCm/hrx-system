@@ -110,14 +110,17 @@ static iree_status_t id4_tooling_diagnostics_append_parameter_slab_json(
       builder,
       "\"slab_index\":%" PRIu64 ",\"request_index\":%" PRIu64
       ",\"placement_id\":%u,\"device_index\":%" PRIu64
-      ",\"queue_affinity\":%" PRIu64 ",\"parameter_offset\":%" PRIu64
-      ",\"buffer_offset\":%" PRIu64 ",\"length\":%" PRIu64
-      ",\"slab_byte_length\":%" PRIu64 ",\"slab_alignment\":%" PRIu64
-      ",\"request_count\":%" PRIu64 ",",
+      ",\"queue_affinity\":%" PRIu64
+      ",\"memory_type\":%u"
+      ",\"memory_access\":%u,\"buffer_usage\":%u"
+      ",\"parameter_offset\":%" PRIu64 ",\"buffer_offset\":%" PRIu64
+      ",\"length\":%" PRIu64 ",\"slab_byte_length\":%" PRIu64
+      ",\"slab_alignment\":%" PRIu64 ",\"request_count\":%" PRIu64 ",",
       (uint64_t)parameter_slab->slab_index,
       (uint64_t)parameter_slab->request_index, parameter_slab->placement_id,
       (uint64_t)parameter_slab->device_index,
-      (uint64_t)parameter_slab->queue_affinity,
+      (uint64_t)parameter_slab->queue_affinity, parameter_slab->memory_type,
+      parameter_slab->memory_access, parameter_slab->buffer_usage,
       parameter_slab->parameter_offset, parameter_slab->buffer_offset,
       parameter_slab->length, (uint64_t)parameter_slab->slab_byte_length,
       (uint64_t)parameter_slab->slab_alignment,
@@ -150,6 +153,9 @@ static iree_status_t id4_tooling_diagnostics_append_parameter_load_json(
       iree_string_builder_append_cstring(builder, ",\"submit_region_id\":"));
   IREE_RETURN_IF_ERROR(id4_tooling_diagnostics_append_host_size_or_null(
       builder, parameter_load->submit_region_id));
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, ","));
+  IREE_RETURN_IF_ERROR(id4_tooling_diagnostics_append_json_field_string(
+      builder, "first_load_step_name", parameter_load->first_load_step_name));
   return iree_string_builder_append_format(
       builder,
       ",\"load_step_offset\":%" PRIu64 ",\"load_step_count\":%" PRIu64
