@@ -2737,7 +2737,8 @@ loom_amdgpu_fp8_pair_to_packed_bf16_repairs(
   if (can_use_exact_repair && !can_use_normal_path) {
     if (!value_not_subnormal) {
       repairs |= LOOM_AMDGPU_FP8_PACKED_BF16_REPAIR_SUBNORMAL;
-    } else if (!value_non_zero) {
+    }
+    if (!value_non_zero) {
       repairs |= LOOM_AMDGPU_FP8_PACKED_BF16_REPAIR_ZERO;
     }
     if (!value_not_nan) {
