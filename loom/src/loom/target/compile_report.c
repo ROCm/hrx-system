@@ -628,6 +628,7 @@ static void loom_target_compile_report_accumulate_instruction_mix(
   target->flat_memory_count += source->flat_memory_count;
   target->local_memory_count += source->local_memory_count;
   target->scalar_memory_count += source->scalar_memory_count;
+  target->private_memory_count += source->private_memory_count;
   target->generic_memory_count += source->generic_memory_count;
   target->memory_read_unknown_width_count +=
       source->memory_read_unknown_width_count;
@@ -645,6 +646,8 @@ static void loom_target_compile_report_accumulate_instruction_mix(
   target->local_write_byte_count += source->local_write_byte_count;
   target->scalar_read_byte_count += source->scalar_read_byte_count;
   target->scalar_write_byte_count += source->scalar_write_byte_count;
+  target->private_read_byte_count += source->private_read_byte_count;
+  target->private_write_byte_count += source->private_write_byte_count;
   target->unclassified_read_byte_count += source->unclassified_read_byte_count;
   target->unclassified_write_byte_count +=
       source->unclassified_write_byte_count;

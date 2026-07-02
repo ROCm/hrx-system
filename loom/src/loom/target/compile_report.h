@@ -168,20 +168,22 @@ typedef enum loom_target_compile_report_pressure_origin_kind_e {
   LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_LOCAL_MEMORY = 13,
   // Descriptor-backed scalar-memory value.
   LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_SCALAR_MEMORY = 14,
+  // Descriptor-backed private or stack memory value.
+  LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_PRIVATE_MEMORY = 15,
   // Descriptor-backed generic memory value.
-  LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_GENERIC_MEMORY = 15,
+  LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_GENERIC_MEMORY = 16,
   // Descriptor-backed control-flow value.
-  LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_CONTROL = 16,
+  LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_CONTROL = 17,
   // Descriptor-backed barrier or synchronization value.
-  LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_BARRIER = 17,
+  LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_BARRIER = 18,
   // Descriptor-backed numeric conversion value.
-  LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_CONVERSION = 18,
+  LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_CONVERSION = 19,
   // Descriptor-backed register move or repair value.
-  LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_REGISTER_MOVE = 19,
+  LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_REGISTER_MOVE = 20,
   // Descriptor-backed cache or prefetch value.
-  LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_CACHE = 20,
+  LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_CACHE = 21,
   // Operation-backed value not covered by a more specific origin.
-  LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_OPERATION = 21,
+  LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_OPERATION = 22,
 } loom_target_compile_report_pressure_origin_kind_t;
 
 typedef enum loom_target_compile_report_spill_row_kind_e {
@@ -337,6 +339,8 @@ typedef struct loom_target_compile_report_static_instruction_mix_t {
   uint64_t local_memory_count;
   // Descriptor-backed nodes identified as scalar-memory operations.
   uint64_t scalar_memory_count;
+  // Descriptor-backed nodes identified as private or stack memory operations.
+  uint64_t private_memory_count;
   // Descriptor-backed nodes identified as generic memory operations.
   uint64_t generic_memory_count;
   // Descriptor memory-effect reads with zero or non-byte-aligned widths.
@@ -367,6 +371,10 @@ typedef struct loom_target_compile_report_static_instruction_mix_t {
   uint64_t scalar_read_byte_count;
   // Static bytes written by scalar-memory descriptor effects.
   uint64_t scalar_write_byte_count;
+  // Static bytes read by private or stack memory descriptor effects.
+  uint64_t private_read_byte_count;
+  // Static bytes written by private or stack memory descriptor effects.
+  uint64_t private_write_byte_count;
   // Static bytes read by memory effects without a specific packet family.
   uint64_t unclassified_read_byte_count;
   // Static bytes written by memory effects without a specific packet family.
