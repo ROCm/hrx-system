@@ -553,6 +553,8 @@ iree_status_t id4_ideogram4_generation_plan_stage_at(
 typedef struct id4_ideogram4_generation_stage_resource_statistics_t {
   // Parameter slab bytes retained by one prepared stage bundle.
   iree_device_size_t parameter_byte_length;
+  // Peak parameter slab bytes used by one deferred compact issue window.
+  iree_device_size_t parameter_issue_peak_byte_length;
   // Parameter source and target bytes moved while materializing one bundle.
   iree_device_size_t parameter_materialization_byte_length;
   // Constant slab bytes retained by one prepared stage bundle.
@@ -594,6 +596,11 @@ static iree_status_t id4_ideogram4_generation_stage_resource_statistics(
       id4_pipeline_plan_statistics(stage_plan);
   out_statistics->parameter_byte_length =
       stage_statistics.parameter_slab_byte_length;
+  id4_pipeline_parameter_window_statistics_t window_statistics;
+  IREE_RETURN_IF_ERROR(id4_pipeline_plan_parameter_window_statistics(
+      stage_plan, /*region_window_size=*/1, &window_statistics));
+  out_statistics->parameter_issue_peak_byte_length =
+      window_statistics.peak_window_target_byte_length;
   for (iree_host_size_t i = 0;
        i < ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_CAPACITY; ++i) {
     IREE_RETURN_IF_ERROR(id4_ideogram4_generation_add_device_size(
@@ -640,13 +647,18 @@ id4_ideogram4_generation_normalized_resource_resident_stage_mask(
 static iree_status_t id4_ideogram4_generation_resource_add_stage(
     const id4_ideogram4_generation_plan_t* plan,
     id4_ideogram4_generation_stage_ordinal_t stage_ordinal,
+    bool use_compact_parameter_windows,
     id4_ideogram4_generation_stage_resource_statistics_t* io_statistics) {
   id4_ideogram4_generation_stage_resource_statistics_t stage_statistics;
   IREE_RETURN_IF_ERROR(id4_ideogram4_generation_stage_resource_statistics(
       plan, stage_ordinal, &stage_statistics));
+  const iree_device_size_t parameter_byte_length =
+      use_compact_parameter_windows
+          ? stage_statistics.parameter_issue_peak_byte_length
+          : stage_statistics.parameter_byte_length;
   IREE_RETURN_IF_ERROR(id4_ideogram4_generation_add_device_size(
-      &io_statistics->parameter_byte_length,
-      stage_statistics.parameter_byte_length, IREE_SV("parameter")));
+      &io_statistics->parameter_byte_length, parameter_byte_length,
+      IREE_SV("parameter")));
   IREE_RETURN_IF_ERROR(id4_ideogram4_generation_add_device_size(
       &io_statistics->constant_byte_length,
       stage_statistics.constant_byte_length, IREE_SV("constant")));
@@ -658,7 +670,7 @@ static iree_status_t id4_ideogram4_generation_resource_add_stage(
 static iree_status_t id4_ideogram4_generation_resource_stage_group(
     const id4_ideogram4_generation_plan_t* plan,
     id4_ideogram4_generation_resident_stage_mask_t resident_stage_mask,
-    iree_host_size_t stage_count,
+    bool use_compact_parameter_windows, iree_host_size_t stage_count,
     const id4_ideogram4_generation_stage_ordinal_t* stage_ordinals,
     id4_ideogram4_generation_stage_resource_statistics_t* out_statistics) {
   memset(out_statistics, 0, sizeof(*out_statistics));
@@ -674,7 +686,8 @@ static iree_status_t id4_ideogram4_generation_resource_stage_group(
       continue;
     }
     IREE_RETURN_IF_ERROR(id4_ideogram4_generation_resource_add_stage(
-        plan, stage_ordinals[i], out_statistics));
+        plan, stage_ordinals[i], use_compact_parameter_windows,
+        out_statistics));
   }
   return iree_ok_status();
 }
@@ -851,6 +864,9 @@ iree_status_t id4_ideogram4_generation_plan_resource_statistics(
   const id4_ideogram4_generation_resident_stage_mask_t resident_stage_mask =
       id4_ideogram4_generation_normalized_resource_resident_stage_mask(
           options->residency_mode, options->resident_stage_mask);
+  const bool use_compact_parameter_windows =
+      options->residency_mode !=
+      ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_PHASE_STAGE_BUNDLES;
   id4_ideogram4_generation_stage_resource_statistics_t resident_statistics;
   IREE_RETURN_IF_ERROR(id4_ideogram4_generation_resource_resident_stages(
       plan, resident_stage_mask, &resident_statistics));
@@ -870,8 +886,8 @@ iree_status_t id4_ideogram4_generation_plan_resource_statistics(
         &id4_ideogram4_generation_phase_descriptors[i];
     id4_ideogram4_generation_stage_resource_statistics_t phase_statistics;
     IREE_RETURN_IF_ERROR(id4_ideogram4_generation_resource_stage_group(
-        plan, resident_stage_mask, phase->stage_count, phase->stage_ordinals,
-        &phase_statistics));
+        plan, resident_stage_mask, use_compact_parameter_windows,
+        phase->stage_count, phase->stage_ordinals, &phase_statistics));
     iree_device_size_t parameter_byte_length =
         resident_statistics.parameter_byte_length;
     IREE_RETURN_IF_ERROR(id4_ideogram4_generation_add_device_size(
@@ -914,7 +930,8 @@ iree_status_t id4_ideogram4_generation_plan_resource_statistics(
         &id4_ideogram4_generation_stage_descriptors[i];
     id4_ideogram4_generation_stage_resource_statistics_t stage_statistics;
     IREE_RETURN_IF_ERROR(id4_ideogram4_generation_resource_stage_group(
-        plan, resident_stage_mask, 1, &descriptor->ordinal, &stage_statistics));
+        plan, resident_stage_mask, use_compact_parameter_windows, 1,
+        &descriptor->ordinal, &stage_statistics));
     iree_device_size_t parameter_byte_length =
         resident_statistics.parameter_byte_length;
     IREE_RETURN_IF_ERROR(id4_ideogram4_generation_add_device_size(

@@ -6,6 +6,7 @@
 
 #include "experimental/id4/ideogram4/session.h"
 
+#include <algorithm>
 #include <cstring>
 #include <limits>
 #include <memory>
@@ -191,6 +192,25 @@ static iree_device_size_t RawGenerationBoundaryByteLength(
                                                          &stage_plan));
     byte_length +=
         id4_pipeline_plan_statistics(stage_plan).boundary_tensor_byte_length;
+  }
+  return byte_length;
+}
+
+static iree_device_size_t MaxGenerationParameterWindowPeak(
+    const id4_ideogram4_generation_plan_t* plan) {
+  iree_device_size_t byte_length = 0;
+  const iree_host_size_t stage_count =
+      id4_ideogram4_generation_plan_stage_count(plan);
+  for (iree_host_size_t i = 0; i < stage_count; ++i) {
+    iree_string_view_t stage_key = iree_string_view_empty();
+    const id4_pipeline_plan_t* stage_plan = nullptr;
+    IREE_CHECK_OK(id4_ideogram4_generation_plan_stage_at(plan, i, &stage_key,
+                                                         &stage_plan));
+    id4_pipeline_parameter_window_statistics_t statistics;
+    IREE_CHECK_OK(id4_pipeline_plan_parameter_window_statistics(
+        stage_plan, /*region_window_size=*/1, &statistics));
+    byte_length =
+        std::max(byte_length, statistics.peak_window_target_byte_length);
   }
   return byte_length;
 }
@@ -721,7 +741,9 @@ TEST_F(SessionTest, EstimatesGenerationResourceLifetimes) {
   EXPECT_GT(RawGenerationBoundaryByteLength(plan.get()),
             issue_phase_statistics.boundary_buffer_byte_length);
   EXPECT_EQ(issue_phase_statistics.resident_stage_bundle_byte_length, 0u);
-  EXPECT_GT(issue_phase_statistics.phase_concurrent_total_peak_byte_length,
+  EXPECT_EQ(issue_phase_statistics.stage_serial_parameter_peak_byte_length,
+            MaxGenerationParameterWindowPeak(plan.get()));
+  EXPECT_GE(issue_phase_statistics.phase_concurrent_total_peak_byte_length,
             issue_phase_statistics.stage_serial_total_peak_byte_length);
 
   id4_ideogram4_generation_resource_statistics_t phase_stage_statistics =
@@ -730,10 +752,10 @@ TEST_F(SessionTest, EstimatesGenerationResourceLifetimes) {
           ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_PHASE_STAGE_BUNDLES,
           ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_NONE);
   EXPECT_EQ(phase_stage_statistics.resident_stage_bundle_byte_length, 0u);
-  EXPECT_EQ(phase_stage_statistics.phase_concurrent_total_peak_byte_length,
-            issue_phase_statistics.phase_concurrent_total_peak_byte_length);
-  EXPECT_EQ(phase_stage_statistics.stage_serial_total_peak_byte_length,
-            issue_phase_statistics.stage_serial_total_peak_byte_length);
+  EXPECT_GT(phase_stage_statistics.phase_concurrent_parameter_peak_byte_length,
+            issue_phase_statistics.phase_concurrent_parameter_peak_byte_length);
+  EXPECT_GT(phase_stage_statistics.stage_serial_parameter_peak_byte_length,
+            issue_phase_statistics.stage_serial_parameter_peak_byte_length);
 
   id4_ideogram4_generation_resource_statistics_t selected_statistics =
       EstimateGenerationResources(
