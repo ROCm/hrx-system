@@ -17,6 +17,10 @@ extern "C" {
 // Opaque compact parameter materialization plan for a contiguous region window.
 typedef struct id4_pipeline_parameter_window_t id4_pipeline_parameter_window_t;
 
+// Opaque compact parameter loading schedule derived from a window.
+typedef struct id4_pipeline_parameter_window_schedule_t
+    id4_pipeline_parameter_window_schedule_t;
+
 // Compact target slab represented inside one parameter materialization window.
 typedef struct id4_pipeline_parameter_window_slab_t {
   // Original parameter slab index represented by this compact window slab.
@@ -61,6 +65,18 @@ typedef struct id4_pipeline_parameter_window_create_options_t {
   // Number of contiguous regions represented by the window.
   iree_host_size_t region_count;
 } id4_pipeline_parameter_window_create_options_t;
+
+// Options for deriving compact parameter loading descriptors from a window.
+typedef struct id4_pipeline_parameter_window_schedule_create_options_t {
+  // Size of this structure for versioning.
+  iree_host_size_t structure_size;
+  // Extension structure chain; must be NULL for now.
+  const void* next;
+  // Plan that owns the original slab, request, and loading descriptors.
+  id4_pipeline_plan_t* plan;
+  // Window selecting the region-local materialization scope.
+  const id4_pipeline_parameter_window_t* window;
+} id4_pipeline_parameter_window_schedule_create_options_t;
 
 // Creates a compact parameter materialization window from existing plan
 // metadata.
@@ -114,6 +130,48 @@ const id4_pipeline_parameter_window_request_t*
 id4_pipeline_parameter_window_resolve_request(
     const id4_pipeline_parameter_window_t* window,
     iree_host_size_t global_request_index);
+
+// Creates compact parameter slab loads and load steps for |window|.
+iree_status_t id4_pipeline_parameter_window_schedule_create(
+    const id4_pipeline_parameter_window_schedule_create_options_t* options,
+    iree_allocator_t host_allocator,
+    id4_pipeline_parameter_window_schedule_t** out_schedule);
+
+// Releases a compact parameter loading schedule.
+void id4_pipeline_parameter_window_schedule_release(
+    id4_pipeline_parameter_window_schedule_t* schedule);
+
+// Returns the number of compact parameter slab loads in |schedule|.
+iree_host_size_t id4_pipeline_parameter_window_schedule_load_count(
+    const id4_pipeline_parameter_window_schedule_t* schedule);
+
+// Returns compact parameter slab loads owned by |schedule|.
+const id4_pipeline_parameter_slab_load_t*
+id4_pipeline_parameter_window_schedule_loads(
+    const id4_pipeline_parameter_window_schedule_t* schedule);
+
+// Returns the number of compact load steps in |schedule|.
+iree_host_size_t id4_pipeline_parameter_window_schedule_load_step_count(
+    const id4_pipeline_parameter_window_schedule_t* schedule);
+
+// Returns compact parameter load steps owned by |schedule|.
+const id4_pipeline_parameter_load_step_t*
+id4_pipeline_parameter_window_schedule_load_steps(
+    const id4_pipeline_parameter_window_schedule_t* schedule);
+
+// Returns the number of compact load groups in |schedule|.
+iree_host_size_t id4_pipeline_parameter_window_schedule_load_group_count(
+    const id4_pipeline_parameter_window_schedule_t* schedule);
+
+// Returns the original plan load group ordinal for compact load group |index|.
+iree_host_size_t id4_pipeline_parameter_window_schedule_original_load_group_at(
+    const id4_pipeline_parameter_window_schedule_t* schedule,
+    iree_host_size_t index);
+
+// Resolves an original plan load group ordinal to its compact schedule ordinal.
+iree_host_size_t id4_pipeline_parameter_window_schedule_compact_load_group(
+    const id4_pipeline_parameter_window_schedule_t* schedule,
+    iree_host_size_t original_load_group_index);
 
 #ifdef __cplusplus
 }  // extern "C"
