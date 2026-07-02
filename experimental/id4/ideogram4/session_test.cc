@@ -261,6 +261,17 @@ static id4_ideogram4_generation_residency_selection_t SelectGenerationResidency(
   return selection;
 }
 
+static id4_ideogram4_generation_resident_stage_mask_t
+GenerationResidencySelectedStageMask(
+    const id4_ideogram4_generation_residency_selection_t& selection) {
+  id4_ideogram4_generation_resident_stage_mask_t stage_mask =
+      selection.resident_stage_mask;
+  for (iree_host_size_t i = 0; i < ID4_IDEOGRAM4_GENERATION_PHASE_COUNT; ++i) {
+    stage_mask |= selection.phase_stage_masks[i];
+  }
+  return stage_mask;
+}
+
 static void ExpectBoundaryLayout(const id4_pipeline_plan_t* plan,
                                  iree_string_view_t name,
                                  id4_pipeline_tensor_dtype_t dtype,
@@ -848,10 +859,9 @@ TEST_F(SessionTest, SelectsGenerationResidencyWithinBudget) {
           candidates,
           conditioned_statistics.stage_serial_total_peak_byte_length);
 
-  EXPECT_EQ(selection.residency_mode,
-            ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_SELECTED_STAGE_BUNDLES);
-  EXPECT_EQ(selection.resident_stage_mask,
-            ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_DIT_CONDITIONED);
+  EXPECT_TRUE(iree_any_bit_set(
+      GenerationResidencySelectedStageMask(selection),
+      ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_DIT_CONDITIONED));
   EXPECT_LE(selection.selected_peak_byte_length,
             conditioned_statistics.stage_serial_total_peak_byte_length);
   EXPECT_EQ(selection.selected_peak_byte_length,
@@ -923,6 +933,72 @@ TEST_F(SessionTest, ResidencySelectionUsesPhaseLocalLifetimesForPhaseIssue) {
   EXPECT_EQ(
       selection.selected_peak_byte_length,
       selection.resource_statistics.phase_concurrent_total_peak_byte_length);
+}
+
+TEST_F(SessionTest, ResidencySelectionUsesPhaseLocalLifetimesForStageSerial) {
+  TokenizerPtr tokenizer = LoadTokenizer();
+  ScopedRequest request;
+  IREE_ASSERT_OK(id4_ideogram4_request_parse_json(
+      ManyStepFullRequestJson(), iree_allocator_system(), &request.value));
+
+  SessionPtr session = CreateLoadedSession();
+  GenerationPlanPtr plan =
+      PlanGeneration(session.get(), tokenizer.get(), &request.value);
+
+  id4_ideogram4_generation_resource_statistics_t qwen_statistics =
+      EstimateGenerationResources(
+          plan.get(),
+          ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_SELECTED_STAGE_BUNDLES,
+          ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_QWEN);
+  id4_ideogram4_generation_resource_statistics_t conditioned_statistics =
+      EstimateGenerationResources(
+          plan.get(),
+          ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_SELECTED_STAGE_BUNDLES,
+          ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_DIT_CONDITIONED);
+  id4_ideogram4_generation_resource_statistics_t combined_statistics =
+      EstimateGenerationResources(
+          plan.get(),
+          ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_SELECTED_STAGE_BUNDLES,
+          ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_QWEN |
+              ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_DIT_CONDITIONED);
+  const iree_device_size_t individual_peak =
+      std::max(qwen_statistics.stage_serial_total_peak_byte_length,
+               conditioned_statistics.stage_serial_total_peak_byte_length);
+  ASSERT_GT(combined_statistics.stage_serial_total_peak_byte_length,
+            individual_peak);
+
+  const id4_ideogram4_generation_resident_stage_mask_t candidates =
+      ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_QWEN |
+      ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_DIT_CONDITIONED;
+  id4_ideogram4_generation_residency_selection_t selection =
+      SelectGenerationResidency(
+          plan.get(), ID4_IDEOGRAM4_GENERATION_ISSUE_POLICY_STAGE_SERIAL,
+          candidates,
+          combined_statistics.stage_serial_total_peak_byte_length - 1);
+
+  EXPECT_EQ(selection.residency_mode,
+            ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_PHASE_AWARE_STAGE_BUNDLES);
+  EXPECT_EQ(selection.resident_stage_mask,
+            ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_NONE);
+  iree_host_size_t selected_phase_count = 0;
+  id4_ideogram4_generation_resident_stage_mask_t selected_phase_union =
+      ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_NONE;
+  for (iree_host_size_t i = 0; i < ID4_IDEOGRAM4_GENERATION_PHASE_COUNT; ++i) {
+    if (selection.phase_stage_masks[i] ==
+        ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_NONE) {
+      continue;
+    }
+    ++selected_phase_count;
+    selected_phase_union |= selection.phase_stage_masks[i];
+  }
+  EXPECT_EQ(selected_phase_count, 2u);
+  EXPECT_EQ(selected_phase_union,
+            ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_QWEN |
+                ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_DIT_CONDITIONED);
+  EXPECT_LE(selection.selected_peak_byte_length,
+            combined_statistics.stage_serial_total_peak_byte_length - 1);
+  EXPECT_EQ(selection.selected_peak_byte_length,
+            selection.resource_statistics.stage_serial_total_peak_byte_length);
 }
 
 TEST_F(SessionTest, ResidencySelectionRejectsImpossibleBudget) {
