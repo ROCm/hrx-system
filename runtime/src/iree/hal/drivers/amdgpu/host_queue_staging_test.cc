@@ -372,6 +372,40 @@ class HostQueueStagingTest : public ::testing::Test {
                                  pattern);
   }
 
+  iree_status_t QueueAllocaHostVisibleTransientBuffer(
+      iree_hal_device_t* device, iree_device_size_t buffer_size,
+      iree_hal_semaphore_list_t signal_list, iree_hal_buffer_t** out_buffer) {
+    iree_hal_buffer_params_t params = {0};
+    params.type =
+        IREE_HAL_MEMORY_TYPE_HOST_VISIBLE | IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE;
+    params.access = IREE_HAL_MEMORY_ACCESS_ALL;
+    params.usage = IREE_HAL_BUFFER_USAGE_TRANSFER |
+                   IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE |
+                   IREE_HAL_BUFFER_USAGE_MAPPING_SCOPED;
+    params.queue_affinity = kQueueAffinity0;
+    params.min_alignment = 16;
+    return iree_hal_device_queue_alloca(
+        device, kQueueAffinity0, iree_hal_semaphore_list_empty(), signal_list,
+        /*pool=*/NULL, params, buffer_size, IREE_HAL_ALLOCA_FLAG_NONE,
+        out_buffer);
+  }
+
+  iree_status_t ImportHostAllocationFile(iree_hal_device_t* device,
+                                         std::vector<uint8_t>* data,
+                                         iree_hal_file_t** out_file) {
+    iree_io_file_handle_t* handle = NULL;
+    IREE_RETURN_IF_ERROR(iree_io_file_handle_wrap_host_allocation(
+        IREE_IO_FILE_ACCESS_READ | IREE_IO_FILE_ACCESS_WRITE,
+        iree_make_byte_span(data->data(), data->size()),
+        iree_io_file_handle_release_callback_null(), iree_allocator_system(),
+        &handle));
+    iree_status_t status = iree_hal_file_import(
+        device, IREE_HAL_QUEUE_AFFINITY_ANY, IREE_HAL_MEMORY_ACCESS_WRITE,
+        handle, IREE_HAL_EXTERNAL_FILE_FLAG_NONE, out_file);
+    iree_io_file_handle_release(handle);
+    return status;
+  }
+
   iree_status_t FillDeviceBufferRange(iree_hal_device_t* device,
                                       iree_hal_buffer_t* buffer,
                                       iree_device_size_t offset,
@@ -522,6 +556,100 @@ TEST_F(HostQueueStagingTest, OneSlotLargeReadCompletesThroughSlotWaiter) {
                                     /*offset=*/0, kMultiSlotTransferSize,
                                     &contents));
   ExpectByteRangeMatches(contents, file_data);
+}
+
+TEST_F(HostQueueStagingTest,
+       HostVisibleTransientReadWriteCompletesBeforeQueuedDealloca) {
+  iree_hal_amdgpu_logical_device_options_t options;
+  iree_hal_amdgpu_logical_device_options_initialize(&options);
+  options.preallocate_pools = 0;
+
+  TestLogicalDevice test_device;
+  IREE_ASSERT_OK(CreateTestDevice(&options, &test_device));
+
+  std::vector<uint8_t> file_data = MakePatternData(kMultiSlotTransferSize);
+  std::string path;
+  IREE_ASSERT_OK(CreateTempFileWithContents(file_data, &path));
+
+  Ref<iree_hal_file_t> source_file;
+  IREE_ASSERT_OK(ImportFdFile(test_device.base_device(), path,
+                              IREE_HAL_MEMORY_ACCESS_READ, source_file.out()));
+  std::vector<uint8_t> output_data(kMultiSlotTransferSize, 0);
+  Ref<iree_hal_file_t> output_file;
+  IREE_ASSERT_OK(ImportHostAllocationFile(test_device.base_device(),
+                                          &output_data, output_file.out()));
+
+  Ref<iree_hal_semaphore_t> alloca_signal;
+  IREE_ASSERT_OK(
+      CreateSemaphore(test_device.base_device(), alloca_signal.out()));
+  uint64_t alloca_signal_value = 1;
+  iree_hal_semaphore_t* alloca_signal_ptr = alloca_signal.get();
+  iree_hal_semaphore_list_t alloca_signal_list =
+      MakeSemaphoreList(&alloca_signal_ptr, &alloca_signal_value);
+
+  iree_hal_buffer_t* transient_raw = NULL;
+  IREE_ASSERT_OK(QueueAllocaHostVisibleTransientBuffer(
+      test_device.base_device(), kMultiSlotTransferSize, alloca_signal_list,
+      &transient_raw));
+  Ref<iree_hal_buffer_t> transient_buffer(transient_raw);
+
+  Ref<iree_hal_semaphore_t> gate_signal;
+  IREE_ASSERT_OK(CreateSemaphore(test_device.base_device(), gate_signal.out()));
+  uint64_t gate_signal_value = 1;
+  iree_hal_semaphore_t* read_wait_semaphores[] = {alloca_signal.get(),
+                                                  gate_signal.get()};
+  uint64_t read_wait_values[] = {alloca_signal_value, gate_signal_value};
+  iree_hal_semaphore_list_t read_wait_list = {
+      IREE_ARRAYSIZE(read_wait_semaphores),
+      read_wait_semaphores,
+      read_wait_values,
+  };
+
+  Ref<iree_hal_semaphore_t> read_signal;
+  IREE_ASSERT_OK(CreateSemaphore(test_device.base_device(), read_signal.out()));
+  uint64_t read_signal_value = 1;
+  iree_hal_semaphore_t* read_signal_ptr = read_signal.get();
+  iree_hal_semaphore_list_t read_signal_list =
+      MakeSemaphoreList(&read_signal_ptr, &read_signal_value);
+  IREE_ASSERT_OK(iree_hal_device_queue_read(
+      test_device.base_device(), kQueueAffinity0, read_wait_list,
+      read_signal_list, source_file, /*source_offset=*/0, transient_buffer,
+      /*target_offset=*/0, kMultiSlotTransferSize, IREE_HAL_READ_FLAG_NONE));
+
+  Ref<iree_hal_semaphore_t> write_signal;
+  IREE_ASSERT_OK(
+      CreateSemaphore(test_device.base_device(), write_signal.out()));
+  uint64_t write_signal_value = 1;
+  iree_hal_semaphore_t* write_signal_ptr = write_signal.get();
+  iree_hal_semaphore_list_t write_wait_list =
+      MakeSemaphoreList(&read_signal_ptr, &read_signal_value);
+  iree_hal_semaphore_list_t write_signal_list =
+      MakeSemaphoreList(&write_signal_ptr, &write_signal_value);
+  IREE_ASSERT_OK(iree_hal_device_queue_write(
+      test_device.base_device(), kQueueAffinity0, write_wait_list,
+      write_signal_list, transient_buffer, /*source_offset=*/0, output_file,
+      /*target_offset=*/0, kMultiSlotTransferSize, IREE_HAL_WRITE_FLAG_NONE));
+
+  Ref<iree_hal_semaphore_t> dealloca_signal;
+  IREE_ASSERT_OK(
+      CreateSemaphore(test_device.base_device(), dealloca_signal.out()));
+  uint64_t dealloca_signal_value = 1;
+  iree_hal_semaphore_t* dealloca_signal_ptr = dealloca_signal.get();
+  iree_hal_semaphore_list_t dealloca_wait_list =
+      MakeSemaphoreList(&write_signal_ptr, &write_signal_value);
+  iree_hal_semaphore_list_t dealloca_signal_list =
+      MakeSemaphoreList(&dealloca_signal_ptr, &dealloca_signal_value);
+  IREE_ASSERT_OK(iree_hal_device_queue_dealloca(
+      test_device.base_device(), kQueueAffinity0, dealloca_wait_list,
+      dealloca_signal_list, transient_buffer, IREE_HAL_DEALLOCA_FLAG_NONE));
+
+  IREE_ASSERT_OK(iree_hal_semaphore_signal(gate_signal, gate_signal_value,
+                                           /*frontier=*/NULL));
+  IREE_ASSERT_OK(iree_hal_semaphore_wait(dealloca_signal, dealloca_signal_value,
+                                         iree_infinite_timeout(),
+                                         IREE_ASYNC_WAIT_FLAG_NONE));
+
+  ExpectByteRangeMatches(output_data, file_data);
 }
 
 TEST_F(HostQueueStagingTest, OneSlotLargeWriteCompletesThroughSlotWaiter) {
