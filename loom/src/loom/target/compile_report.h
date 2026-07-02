@@ -754,6 +754,12 @@ typedef struct loom_target_compile_report_spill_row_t {
   uint32_t type_kind;
   // Numeric Loom scalar element type for the spilled value class.
   uint32_t element_type;
+  // Structured family that produced the spilled value.
+  loom_target_compile_report_pressure_origin_kind_t origin_kind;
+  // Operation mnemonic that produced the spilled value.
+  iree_string_view_t origin_operation_name;
+  // Descriptor semantic tag for descriptor-backed origins, if any.
+  iree_string_view_t semantic_tag;
   // Allocation assignment index associated with this spill.
   uint32_t assignment_index;
   // Spill slot ordinal assigned to the interval.

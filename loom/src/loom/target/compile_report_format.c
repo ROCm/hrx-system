@@ -1933,6 +1933,13 @@ static iree_status_t loom_target_compile_report_format_spill_rows(
           loom_target_compile_report_type_kind_name(row->type_kind);
       const iree_string_view_t element_type_name =
           loom_target_compile_report_scalar_type_name(row->element_type);
+      const iree_string_view_t origin_kind =
+          loom_target_compile_report_pressure_origin_kind_name(
+              row->origin_kind);
+      const iree_string_view_t origin_operation_name =
+          loom_target_compile_report_non_empty(row->origin_operation_name);
+      const iree_string_view_t semantic_tag =
+          loom_target_compile_report_non_empty(row->semantic_tag);
       const iree_string_view_t slot_space =
           loom_target_compile_report_non_empty(row->slot_space);
       IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
@@ -1940,6 +1947,7 @@ static iree_status_t loom_target_compile_report_format_spill_rows(
           "COMPILE-REPORT: spill[%" PRIhsz
           "] kind=%.*s function=%.*s value=%.*s class=%.*s type=%.*s "
           "element=%.*s "
+          "origin=%.*s origin_op=%.*s semantic=%.*s "
           "assignment=%u slot=%u space=%.*s bytes=%" PRIu64 " align=%" PRIu64
           " stores=%" PRIu64 " reloads=%" PRIu64 "\n",
           row_index, (int)kind.size, kind.data, (int)function_name.size,
@@ -1947,9 +1955,12 @@ static iree_status_t loom_target_compile_report_format_spill_rows(
           (int)register_class.size, register_class.data,
           (int)type_kind_name.size, type_kind_name.data,
           (int)element_type_name.size, element_type_name.data,
-          row->assignment_index, row->slot_index, (int)slot_space.size,
-          slot_space.data, row->byte_size, row->byte_alignment,
-          row->store_count, row->reload_count));
+          (int)origin_kind.size, origin_kind.data,
+          (int)origin_operation_name.size, origin_operation_name.data,
+          (int)semantic_tag.size, semantic_tag.data, row->assignment_index,
+          row->slot_index, (int)slot_space.size, slot_space.data,
+          row->byte_size, row->byte_alignment, row->store_count,
+          row->reload_count));
     }
   }
   return iree_ok_status();
@@ -4065,6 +4076,18 @@ static iree_status_t loom_target_compile_report_format_spill_row_json(
   IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_string_field(
       stream, &first_field, "element",
       loom_target_compile_report_scalar_type_name(row->element_type)));
+  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u32_field(
+      stream, &first_field, "origin_kind", row->origin_kind));
+  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_string_field(
+      stream, &first_field, "origin",
+      loom_target_compile_report_pressure_origin_kind_name(row->origin_kind)));
+  IREE_RETURN_IF_ERROR(
+      loom_target_compile_report_json_write_optional_string_field(
+          stream, &first_field, "origin_operation",
+          row->origin_operation_name));
+  IREE_RETURN_IF_ERROR(
+      loom_target_compile_report_json_write_optional_string_field(
+          stream, &first_field, "semantic_tag", row->semantic_tag));
   IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u32_field(
       stream, &first_field, "assignment_index", row->assignment_index));
   IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u32_field(
