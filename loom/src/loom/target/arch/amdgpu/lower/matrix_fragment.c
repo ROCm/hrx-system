@@ -1791,31 +1791,26 @@ static bool loom_amdgpu_fragment_memory_is_f32_result_source(
              role_layout->register_count;
 }
 
-static loom_value_id_t loom_amdgpu_fragment_memory_fptrunc_round_source(
-    const loom_module_t* module, loom_value_id_t payload,
+static loom_value_id_t loom_amdgpu_fragment_memory_same_lane_round_source(
+    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
+    loom_value_id_t payload,
     const loom_amdgpu_matrix_fragment_role_layout_t* role_layout) {
-  if (payload >= module->values.count) {
+  if (payload >= module->values.count || fact_table == NULL) {
     return LOOM_VALUE_ID_INVALID;
   }
 
-  const loom_value_t* payload_value = loom_module_value(module, payload);
-  const loom_op_t* defining_op = loom_value_def_op(payload_value);
-  if (defining_op == NULL || !loom_vector_fptrunc_isa(defining_op) ||
-      loom_vector_fptrunc_result(defining_op) != payload) {
+  loom_value_fact_static_lane_origin_t lane_origin = {0};
+  if (!loom_value_fact_table_query_static_lane_origin(fact_table, module,
+                                                      payload, &lane_origin) ||
+      lane_origin.source_lane_offset != 0 ||
+      lane_origin.source_lane_stride != 1) {
     return LOOM_VALUE_ID_INVALID;
   }
 
-  const loom_value_id_t input = loom_vector_fptrunc_input(defining_op);
-  if (input >= module->values.count) {
-    return LOOM_VALUE_ID_INVALID;
-  }
-  const loom_type_t input_type = loom_module_value_type(module, input);
-  if (loom_type_element_type(input_type) != LOOM_SCALAR_TYPE_F32 ||
-      loom_amdgpu_vector_f32_lane_count(input_type) !=
-          role_layout->register_count) {
-    return LOOM_VALUE_ID_INVALID;
-  }
-  return input;
+  return loom_amdgpu_fragment_memory_is_f32_result_source(
+             module, lane_origin.source_value_id, role_layout)
+             ? lane_origin.source_value_id
+             : LOOM_VALUE_ID_INVALID;
 }
 
 static loom_amdgpu_fragment_memory_narrowed_result_sources_t
@@ -1831,8 +1826,8 @@ loom_amdgpu_fragment_memory_narrowed_result_sources(
                                                        role_layout)) {
     sources.round_source = payload;
   } else {
-    sources.round_source = loom_amdgpu_fragment_memory_fptrunc_round_source(
-        module, payload, role_layout);
+    sources.round_source = loom_amdgpu_fragment_memory_same_lane_round_source(
+        module, fact_table, payload, role_layout);
   }
   if (sources.round_source == LOOM_VALUE_ID_INVALID) {
     return sources;
