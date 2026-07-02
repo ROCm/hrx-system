@@ -51,6 +51,7 @@ low.func.def target(@target) @bf16_two_k_block_loads_schedule_before_wmma(%worki
   v_mov_b32 v8, 0
   s_delay_alu instid0(VALU_DEP_3)
   v_lshlrev_b32 v1, 6, v1
+  s_delay_alu instid0(VALU_DEP_1)
   global_load_b128 v[4:7], v1, s[0:1] offset:0
   global_load_b128 v[16:19], v1, s[0:1] offset:16
   global_load_b128 v[20:23], v1, s[2:3] offset:0
@@ -104,6 +105,7 @@ low.func.def target(@target) @bf16_two_k_block_loads_schedule_before_wmma(%worki
   v_mov_b32 v30, v42
   v_mov_b32 v31, v43
   v_wmma_f32_16x16x16_bf16 v[8:15], v[16:23], v[24:31], v[8:15]
+  s_delay_alu instid0(VALU_DEP_3)
   global_store_b32 v0, v8, s[4:5] offset:0
   global_store_b32 v0, v9, s[4:5] offset:128
   global_store_b32 v0, v10, s[4:5] offset:256
@@ -112,6 +114,7 @@ low.func.def target(@target) @bf16_two_k_block_loads_schedule_before_wmma(%worki
   global_store_b32 v0, v13, s[4:5] offset:640
   global_store_b32 v0, v14, s[4:5] offset:768
   global_store_b32 v0, v15, s[4:5] offset:896
+  s_waitcnt_vscnt vscnt(0)
   s_endpgm
 
 // ====
@@ -231,11 +234,13 @@ low.func.def target(@target) @gfx1250_fp8_materialized_bf16_two_k_block_schedule
   v_mov_b32 v8, 0
   s_delay_alu instid0(VALU_DEP_3)
   v_lshlrev_b32 v2, 7, v1
+  s_delay_alu instid0(VALU_DEP_1)
   global_load_b128 v[4:7], v2, s[0:1] offset:0
   global_load_b128 v[16:19], v2, s[0:1] offset:16
   global_load_b128 v[20:23], v2, s[0:1] offset:32
   global_load_b128 v[24:27], v2, s[0:1] offset:48
   v_lshlrev_b32 v1, 6, v1
+  s_delay_alu instid0(VALU_DEP_1)
   global_load_b128 v[28:31], v1, s[2:3] offset:0
   global_load_b128 v[32:35], v1, s[2:3] offset:16
   v_mov_b32 v9, v8
@@ -332,6 +337,7 @@ low.func.def target(@target) @gfx1250_fp8_materialized_bf16_two_k_block_schedule
   v_cvt_pk_bf16_f32 v31, v4, v5
   v_wmma_f32_16x16x32_bf16 v[8:15], v[16:23], v[24:31], v[8:15], matrix_a_reuse(0), matrix_b_reuse(0)
   global_store_b32 v0, v8, s[4:5] offset:0
+  s_wait_storecnt storecnt(0)
   s_endpgm
 
 // ====
@@ -405,6 +411,7 @@ low.func.def target(@target) @bf16_four_k_block_loads_schedule_before_wmma(%work
   v_mov_b32 v8, 0
   s_delay_alu instid0(VALU_DEP_3)
   v_lshlrev_b32 v1, 7, v1
+  s_delay_alu instid0(VALU_DEP_1)
   global_load_b128 v[4:7], v1, s[0:1] offset:0
   global_load_b128 v[16:19], v1, s[0:1] offset:16
   global_load_b128 v[20:23], v1, s[2:3] offset:0
@@ -504,6 +511,7 @@ low.func.def target(@target) @bf16_four_k_block_loads_schedule_before_wmma(%work
   v_wmma_f32_16x16x16_bf16 v[8:15], v[16:23], v[24:31], v[8:15]
   v_wmma_f32_16x16x16_bf16 v[8:15], v[32:39], v[40:47], v[8:15]
   v_wmma_f32_16x16x16_bf16 v[8:15], v[48:55], v[56:63], v[8:15]
+  s_delay_alu instid0(VALU_DEP_3)
   global_store_b32 v0, v8, s[4:5] offset:0
   global_store_b32 v0, v9, s[4:5] offset:128
   global_store_b32 v0, v10, s[4:5] offset:256
@@ -512,4 +520,5 @@ low.func.def target(@target) @bf16_four_k_block_loads_schedule_before_wmma(%work
   global_store_b32 v0, v13, s[4:5] offset:640
   global_store_b32 v0, v14, s[4:5] offset:768
   global_store_b32 v0, v15, s[4:5] offset:896
+  s_waitcnt_vscnt vscnt(0)
   s_endpgm

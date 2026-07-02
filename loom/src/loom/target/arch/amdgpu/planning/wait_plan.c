@@ -219,6 +219,10 @@ iree_string_view_t loom_amdgpu_wait_plan_reason_name(
       return IREE_SV("amdgpu.valu_sgpr_read");
     case LOOM_AMDGPU_WAIT_PLAN_REASON_MEMORY_EFFECT:
       return IREE_SV("amdgpu.memory_effect");
+    case LOOM_AMDGPU_WAIT_PLAN_REASON_PROGRAM_EXIT:
+      return IREE_SV("amdgpu.program_exit");
+    case LOOM_AMDGPU_WAIT_PLAN_REASON_MEMORY_SOURCE_REUSE:
+      return IREE_SV("amdgpu.memory_source_reuse");
     case LOOM_AMDGPU_WAIT_PLAN_REASON_UNKNOWN:
     default:
       return IREE_SV("amdgpu.unknown");
@@ -312,6 +316,8 @@ static bool loom_amdgpu_wait_plan_reason_has_consumer(
     case LOOM_AMDGPU_WAIT_PLAN_REASON_TRANS_RESULT_USE:
     case LOOM_AMDGPU_WAIT_PLAN_REASON_VALU_SGPR_READ:
     case LOOM_AMDGPU_WAIT_PLAN_REASON_MEMORY_EFFECT:
+    case LOOM_AMDGPU_WAIT_PLAN_REASON_PROGRAM_EXIT:
+    case LOOM_AMDGPU_WAIT_PLAN_REASON_MEMORY_SOURCE_REUSE:
       return true;
     default:
       return false;
@@ -323,6 +329,7 @@ static bool loom_amdgpu_wait_plan_reason_is_storage_release(
   switch (reason) {
     case LOOM_AMDGPU_WAIT_PLAN_REASON_STORE_SOURCE_REUSE:
     case LOOM_AMDGPU_WAIT_PLAN_REASON_READ_RESULT_REUSE:
+    case LOOM_AMDGPU_WAIT_PLAN_REASON_MEMORY_SOURCE_REUSE:
       return true;
     default:
       return false;
@@ -358,6 +365,9 @@ static iree_status_t loom_amdgpu_wait_plan_allocate_actions(
   iree_host_size_t action_input_capacity = 0;
   if (!iree_host_size_checked_add(builder->dependency_link_capacity,
                                   schedule->effect_use_count,
+                                  &action_input_capacity) ||
+      !iree_host_size_checked_add(action_input_capacity,
+                                  schedule->scheduled_node_count,
                                   &action_input_capacity) ||
       (allocation != NULL &&
        !iree_host_size_checked_add(action_input_capacity,
@@ -659,6 +669,12 @@ static uint32_t loom_amdgpu_wait_plan_memory_effect_counter_mask(
       &builder->node_states[producer_node];
   const loom_amdgpu_wait_node_state_t* consumer_state =
       &builder->node_states[consumer_node];
+  const loom_low_schedule_node_t* consumer =
+      &builder->schedule->nodes[consumer_node];
+  if (consumer->op != NULL && loom_low_return_isa(consumer->op)) {
+    return producer_state->write_counter_mask &
+           LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM_STORE;
+  }
   uint32_t counter_mask = 0;
   if (consumer_state->has_dependency_read) {
     counter_mask |= producer_state->write_counter_mask;
@@ -667,6 +683,16 @@ static uint32_t loom_amdgpu_wait_plan_memory_effect_counter_mask(
     counter_mask |= producer_state->read_counter_mask;
   }
   return counter_mask;
+}
+
+static loom_amdgpu_wait_plan_reason_t
+loom_amdgpu_wait_plan_memory_effect_reason(
+    const loom_amdgpu_wait_plan_builder_t* builder, uint32_t consumer_node) {
+  const loom_low_schedule_node_t* consumer =
+      &builder->schedule->nodes[consumer_node];
+  return consumer->op != NULL && loom_low_return_isa(consumer->op)
+             ? LOOM_AMDGPU_WAIT_PLAN_REASON_PROGRAM_EXIT
+             : LOOM_AMDGPU_WAIT_PLAN_REASON_MEMORY_EFFECT;
 }
 
 static iree_status_t loom_amdgpu_wait_plan_visit_effect_dependency_link(
@@ -703,7 +729,9 @@ static iree_status_t loom_amdgpu_wait_plan_visit_effect_dependency_link(
   }
   return loom_amdgpu_wait_plan_append_dependency_link(
       builder, dependency->producer_node, dependency->consumer_node,
-      counter_mask, LOOM_AMDGPU_WAIT_PLAN_REASON_MEMORY_EFFECT);
+      counter_mask,
+      loom_amdgpu_wait_plan_memory_effect_reason(builder,
+                                                 dependency->consumer_node));
 }
 
 static iree_status_t loom_amdgpu_wait_plan_visit_visibility_dependency_link(
@@ -741,7 +769,9 @@ static iree_status_t loom_amdgpu_wait_plan_visit_visibility_dependency_link(
   }
   return loom_amdgpu_wait_plan_append_dependency_link(
       builder, dependency->producer_node, dependency->consumer_node,
-      counter_mask, LOOM_AMDGPU_WAIT_PLAN_REASON_MEMORY_EFFECT);
+      counter_mask,
+      loom_amdgpu_wait_plan_memory_effect_reason(builder,
+                                                 dependency->consumer_node));
 }
 
 static bool loom_amdgpu_wait_plan_assignment_is_physical_vgpr(
@@ -1904,6 +1934,25 @@ static iree_status_t loom_amdgpu_wait_plan_handle_barrier(
       LOOM_LOW_SCHEDULE_NODE_NONE, outstanding_counter_mask);
 }
 
+static iree_status_t loom_amdgpu_wait_plan_handle_program_exit(
+    loom_amdgpu_wait_plan_builder_t* builder, uint32_t node_index) {
+  const loom_low_schedule_node_t* node = &builder->schedule->nodes[node_index];
+  if (node->op == NULL || !loom_low_return_isa(node->op)) {
+    return iree_ok_status();
+  }
+  const uint32_t outstanding_counter_mask =
+      loom_amdgpu_wait_plan_outstanding_counter_mask(
+          builder->outstanding_counts,
+          LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM_STORE);
+  if (outstanding_counter_mask == 0) {
+    return iree_ok_status();
+  }
+  return loom_amdgpu_wait_plan_drain_mask(
+      builder, LOOM_AMDGPU_WAIT_PLAN_ACTION_PLANNED,
+      LOOM_AMDGPU_WAIT_PLAN_REASON_PROGRAM_EXIT, node_index,
+      LOOM_LOW_SCHEDULE_NODE_NONE, outstanding_counter_mask);
+}
+
 static iree_status_t loom_amdgpu_wait_plan_increment_outstanding_counts(
     uint32_t outstanding_counts[LOOM_AMDGPU_WAIT_COUNTER_SLOT_COUNT],
     uint32_t counter_mask) {
@@ -2038,6 +2087,8 @@ static iree_status_t loom_amdgpu_wait_plan_process_node(
       loom_amdgpu_wait_plan_handle_sgpr_read_hazard(builder, node_index));
   IREE_RETURN_IF_ERROR(
       loom_amdgpu_wait_plan_handle_barrier(builder, node_index));
+  IREE_RETURN_IF_ERROR(
+      loom_amdgpu_wait_plan_handle_program_exit(builder, node_index));
   if (node_state->explicit_wait_counter_mask != 0) {
     IREE_RETURN_IF_ERROR(loom_amdgpu_wait_plan_drain_mask(
         builder, LOOM_AMDGPU_WAIT_PLAN_ACTION_EXPLICIT,

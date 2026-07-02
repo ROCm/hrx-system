@@ -77,6 +77,7 @@ low.func.def target(@target) @gfx950_fp8_materialized_bf16_two_k_block_schedule(
   v_mfma_f32_16x16x32_bf16 v[4:7], v[16:19], v[8:11], v[4:7]
   s_nop 7
   global_store_dword v0, v4, s[4:5] offset:0
+  s_waitcnt vmcnt(0) lgkmcnt(15)
   s_endpgm
 
 // ====
@@ -125,4 +126,5 @@ low.func.def target(@target) @gfx942_bf16_two_k_block_loads_schedule_before_mfma
   v_mfma_f32_16x16x16_bf16 v[4:7], v[10:11], v[12:13], v[4:7]
   s_nop 6
   global_store_dword v0, v4, s[4:5] offset:0
+  s_waitcnt vmcnt(0) lgkmcnt(15)
   s_endpgm

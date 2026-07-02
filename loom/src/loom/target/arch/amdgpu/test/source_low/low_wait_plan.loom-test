@@ -79,6 +79,77 @@ low.func.def target(@target) @scratch_store_load_memory_effect_assembly(%addr: r
   scratch_load_b32 v2, v1, off offset:0 glc:0 slc:0 dlc:0
   s_waitcnt vmcnt(0) lgkmcnt(63)
   global_store_b32 v1, v2, s[0:1] offset:0
+  s_waitcnt_vscnt vscnt(0)
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @global_load_saddr_source_reuse_assembly strategy=source amdgpu.sgpr=4
+
+amdgpu.target<gfx1100> @target
+low.func.def target(@target) @global_load_saddr_source_reuse_assembly(%addr: reg<amdgpu.vgpr>, %load_base: reg<amdgpu.sgpr x2>, %keep: reg<amdgpu.sgpr x2>, %lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %loaded = global_load_b32_saddr %addr, %load_base
+  %mask = v_cmp_lt_i32 %lhs, %rhs
+  %saved_exec, %active = s_and_saveexec_b64 %mask
+  %keep_lo = slice %keep[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %keep_hi = slice %keep[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %kept = s_add_u32 %keep_lo, %keep_hi
+  %used = v_add_u32 %loaded, %addr
+  return
+}
+
+// ----
+  global_load_b32 v3, v2, s[0:1] offset:0
+  s_waitcnt vmcnt(0) lgkmcnt(63)
+  v_cmp_lt_i32 s[0:1], v0, v1
+  s_delay_alu instid0(VALU_DEP_1)
+  s_and_saveexec_b64 s[0:1], s[0:1]
+  s_add_u32 s0, s2, s3
+  v_add_u32 v0, v3, v2
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @global_load_saddr_source_reuse_across_branch_assembly strategy=source amdgpu.sgpr=4
+
+amdgpu.target<gfx1100> @target
+low.func.def target(@target) @global_load_saddr_source_reuse_across_branch_assembly(%addr: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr x2>, %offset: reg<amdgpu.sgpr>, %lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %base_lo = slice %base[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %base_hi = slice %base[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %zero = s_mov_b32 0
+  %lo = s_add_u32 %base_lo, %offset
+  %hi = s_addc_u32 %base_hi, %zero
+  %load_base = concat(%lo, %hi) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %loaded = global_load_b32_saddr %addr, %load_base
+  %branch_mask = v_cmp_lt_i32 %lhs, %rhs
+  %saved_exec, %active = s_and_saveexec_b64 %branch_mask
+  low.cond_br %active, ^then, ^exit : reg<amdgpu.scc>
+^then:
+  %saved_lo = slice %saved_exec[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %saved_hi = slice %saved_exec[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %saved_use = s_add_u32 %saved_lo, %saved_lo
+  %mask = v_cmp_eq_i32 %lhs, %rhs
+  %saved_use2 = s_add_u32 %saved_hi, %saved_hi
+  %used = v_add_u32 %loaded, %addr
+  low.br ^exit
+^exit:
+  return
+}
+
+// ----
+  s_mov_b32 s3, 0
+  s_add_u32 s0, s0, s2
+  s_addc_u32 s1, s1, s3
+  global_load_b32 v3, v2, s[0:1] offset:0
+  v_cmp_lt_i32 s[2:3], v0, v1
+  s_delay_alu instid0(VALU_DEP_1)
+  s_and_saveexec_b64 s[2:3], s[2:3]
+  s_cbranch_scc0 .Lbb2
+.Lbb1:
+  s_add_u32 s2, s2, s2
+  s_waitcnt vmcnt(0) lgkmcnt(63)
+  v_cmp_eq_i32 s[0:1], v0, v1
+  s_add_u32 s0, s3, s3
+  v_add_u32 v0, v3, v2
+.Lbb2:
   s_endpgm
 
 // ====
@@ -115,9 +186,10 @@ low.func.def target(@target) @scratch_store_load_cross_block_memory_effect_assem
   scratch_store_b32 v1, v0, off offset:0 glc:0 slc:0 dlc:0
 .Lbb1:
   s_waitcnt_vscnt vscnt(0)
-  scratch_load_b32 v0, v1, off offset:0 glc:0 slc:0 dlc:0
+  scratch_load_b32 v2, v1, off offset:0 glc:0 slc:0 dlc:0
   s_waitcnt vmcnt(0) lgkmcnt(63)
-  global_store_b32 v1, v0, s[0:1] offset:0
+  global_store_b32 v1, v2, s[0:1] offset:0
+  s_waitcnt_vscnt vscnt(0)
   s_endpgm
 
 // ====
@@ -171,6 +243,7 @@ low.func.def target(@target) @scratch_store_load_backedge_memory_effect_assembly
 .Lbb3:
   s_waitcnt vmcnt(0) lgkmcnt(63)
   global_store_b32 v1, v2, s[0:1] offset:0
+  s_waitcnt_vscnt vscnt(0)
   s_endpgm
 
 // ====
@@ -213,7 +286,7 @@ low.func.def target(@target) @smem_load_address_dependency_assembly(%kernarg: re
 }
 
 // ----
-s_mov_b32 s4, 0
+  s_mov_b32 s4, 0
   v_mov_b32 v0, 0
   s_load_dwordx2 s[6:7], s[0:1], s4 offset:16
   s_load_dword s5, s[0:1], s4 offset:0
@@ -226,7 +299,9 @@ s_mov_b32 s4, 0
   s_add_u32 s0, s0, s8
   s_add_u32 s0, s0, s9
   v_mov_b32_copy v1, s0
+  s_delay_alu instid0(VALU_DEP_1)
   global_store_b32 v0, v1, s[2:3] offset:0
+  s_waitcnt_vscnt vscnt(0)
   s_endpgm
 
 // ====
@@ -279,4 +354,5 @@ low.func.def target(@target) @explicit_lgkm_wait_keeps_vmem_pending_assembly(%ad
   s_waitcnt vmcnt(0) lgkmcnt(63)
   v_wmma_f16_16x16x16_f16 v[0:3], v[8:15], v[16:23], v[0:3]
   global_store_b128 v4, v[0:3], s[2:3] offset:0
+  s_waitcnt_vscnt vscnt(0)
   s_endpgm

@@ -1149,12 +1149,15 @@ low.func.def target(@gfx11_target) @gfx11_vopd_fmaak_pair(%resource: reg<amdgpu.
 
 // ----
   v_dual_fmaak_f32 v5, v0, v1, 0x3f800000 :: v_dual_fmaak_f32 v6, v2, v4, 0x3f800000
+  s_delay_alu instid0(VALU_DEP_2)
   buffer_store_dword v5, v3, s[0:3], s4 offen offset:0
+  s_delay_alu instid0(VALU_DEP_1)
   buffer_store_dword v6, v3, s[0:3], s4 offen offset:4
   buffer_store_dword v0, v3, s[0:3], s4 offen offset:8
   buffer_store_dword v1, v3, s[0:3], s4 offen offset:12
   buffer_store_dword v2, v3, s[0:3], s4 offen offset:16
   buffer_store_dword v4, v3, s[0:3], s4 offen offset:20
+  s_waitcnt_vscnt vscnt(0)
   s_endpgm
 
 // ====
@@ -1171,9 +1174,11 @@ low.func.def target(@gfx11_target) @gfx11_fmamk(%resource: reg<amdgpu.sgpr x4>, 
 
 // ----
   v_fmamk_f32 v3, v0, 0x3f800000, v2
+  s_delay_alu instid0(VALU_DEP_1)
   buffer_store_dword v3, v1, s[0:3], s4 offen offset:0
   buffer_store_dword v0, v1, s[0:3], s4 offen offset:4
   buffer_store_dword v2, v1, s[0:3], s4 offen offset:8
+  s_waitcnt_vscnt vscnt(0)
   s_endpgm
 
 // ====
@@ -1190,9 +1195,11 @@ low.func.def target(@gfx11_target) @gfx11_fmamk_assembly(%resource: reg<amdgpu.s
 
 // ----
   v_fmamk_f32 v3, v0, 0x3f800000, v2
+  s_delay_alu instid0(VALU_DEP_1)
   buffer_store_dword v3, v1, s[0:3], s4 offen offset:0
   buffer_store_dword v0, v1, s[0:3], s4 offen offset:4
   buffer_store_dword v2, v1, s[0:3], s4 offen offset:8
+  s_waitcnt_vscnt vscnt(0)
   s_endpgm
 
 // ====
@@ -1209,8 +1216,11 @@ low.func.def target(@gfx11_target) @gfx11_vopd_mov_pair(%resource: reg<amdgpu.sg
 
 // ----
   v_dual_mov_b32 v0, 0 :: v_dual_mov_b32 v1, 42
+  s_delay_alu instid0(VALU_DEP_2)
   buffer_store_dword v0, v2, s[0:3], s4 offen offset:0
+  s_delay_alu instid0(VALU_DEP_1)
   buffer_store_dword v1, v2, s[0:3], s4 offen offset:4
+  s_waitcnt_vscnt vscnt(0)
   s_endpgm
 
 // ====
@@ -1227,8 +1237,11 @@ low.func.def target(@gfx11_target) @gfx11_vopd_mov_pair_assembly(%resource: reg<
 
 // ----
   v_dual_mov_b32 v0, 0 :: v_dual_mov_b32 v1, 42
+  s_delay_alu instid0(VALU_DEP_2)
   buffer_store_dword v0, v2, s[0:3], s4 offen offset:0
+  s_delay_alu instid0(VALU_DEP_1)
   buffer_store_dword v1, v2, s[0:3], s4 offen offset:4
+  s_waitcnt_vscnt vscnt(0)
   s_endpgm
 
 // ====
@@ -1246,8 +1259,11 @@ low.func.def target(@gfx11_wave64_target) @gfx11_wave64_vopd_mov_pair(%resource:
 // ----
   v_mov_b32 v0, 0
   v_mov_b32 v1, 42
+  s_delay_alu instid0(VALU_DEP_2)
   buffer_store_dword v0, v2, s[0:3], s4 offen offset:0
+  s_delay_alu instid0(VALU_DEP_1)
   buffer_store_dword v1, v2, s[0:3], s4 offen offset:4
+  s_waitcnt_vscnt vscnt(0)
   s_endpgm
 
 // ====
@@ -1268,12 +1284,15 @@ low.func.def target(@gfx11_target) @gfx11_vopd_fmamk_pair(%resource: reg<amdgpu.
 
 // ----
   v_dual_fmamk_f32 v5, v0, 0x3f800000, v1 :: v_dual_fmamk_f32 v6, v2, 0x3f800000, v4
+  s_delay_alu instid0(VALU_DEP_2)
   buffer_store_dword v5, v3, s[0:3], s4 offen offset:0
+  s_delay_alu instid0(VALU_DEP_1)
   buffer_store_dword v6, v3, s[0:3], s4 offen offset:4
   buffer_store_dword v0, v3, s[0:3], s4 offen offset:8
   buffer_store_dword v1, v3, s[0:3], s4 offen offset:12
   buffer_store_dword v2, v3, s[0:3], s4 offen offset:16
   buffer_store_dword v4, v3, s[0:3], s4 offen offset:20
+  s_waitcnt_vscnt vscnt(0)
   s_endpgm
 
 // ====
@@ -1294,12 +1313,15 @@ low.func.def target(@gfx11_target) @gfx11_vopd_fmamk_pair_assembly(%resource: re
 
 // ----
   v_dual_fmamk_f32 v5, v0, 0x3f800000, v1 :: v_dual_fmamk_f32 v6, v2, 0x3f800000, v4
+  s_delay_alu instid0(VALU_DEP_2)
   buffer_store_dword v5, v3, s[0:3], s4 offen offset:0
+  s_delay_alu instid0(VALU_DEP_1)
   buffer_store_dword v6, v3, s[0:3], s4 offen offset:4
   buffer_store_dword v0, v3, s[0:3], s4 offen offset:8
   buffer_store_dword v1, v3, s[0:3], s4 offen offset:12
   buffer_store_dword v2, v3, s[0:3], s4 offen offset:16
   buffer_store_dword v4, v3, s[0:3], s4 offen offset:20
+  s_waitcnt_vscnt vscnt(0)
   s_endpgm
 
 // ====
@@ -1321,12 +1343,15 @@ low.func.def target(@gfx11_target) @gfx11_vopd_fmamk_literal_mismatch(%resource:
 // ----
   v_fmamk_f32 v5, v0, 0x3f800000, v1
   v_fmamk_f32 v6, v2, 0x40000000, v4
+  s_delay_alu instid0(VALU_DEP_2)
   buffer_store_dword v5, v3, s[0:3], s4 offen offset:0
+  s_delay_alu instid0(VALU_DEP_1)
   buffer_store_dword v6, v3, s[0:3], s4 offen offset:4
   buffer_store_dword v0, v3, s[0:3], s4 offen offset:8
   buffer_store_dword v1, v3, s[0:3], s4 offen offset:12
   buffer_store_dword v2, v3, s[0:3], s4 offen offset:16
   buffer_store_dword v4, v3, s[0:3], s4 offen offset:20
+  s_waitcnt_vscnt vscnt(0)
   s_endpgm
 
 // ====
@@ -1347,12 +1372,15 @@ low.func.def target(@gfx11_target) @gfx11_vopd_fmaak_pair_assembly(%resource: re
 
 // ----
   v_dual_fmaak_f32 v5, v0, v1, 0x3f800000 :: v_dual_fmaak_f32 v6, v2, v4, 0x3f800000
+  s_delay_alu instid0(VALU_DEP_2)
   buffer_store_dword v5, v3, s[0:3], s4 offen offset:0
+  s_delay_alu instid0(VALU_DEP_1)
   buffer_store_dword v6, v3, s[0:3], s4 offen offset:4
   buffer_store_dword v0, v3, s[0:3], s4 offen offset:8
   buffer_store_dword v1, v3, s[0:3], s4 offen offset:12
   buffer_store_dword v2, v3, s[0:3], s4 offen offset:16
   buffer_store_dword v4, v3, s[0:3], s4 offen offset:20
+  s_waitcnt_vscnt vscnt(0)
   s_endpgm
 
 // ====
@@ -1374,12 +1402,15 @@ low.func.def target(@gfx11_target) @gfx11_vopd_fmaak_literal_mismatch(%resource:
 // ----
   v_fmaak_f32 v5, v0, v1, 0x3f800000
   v_fmaak_f32 v6, v2, v4, 0x40000000
+  s_delay_alu instid0(VALU_DEP_2)
   buffer_store_dword v5, v3, s[0:3], s4 offen offset:0
+  s_delay_alu instid0(VALU_DEP_1)
   buffer_store_dword v6, v3, s[0:3], s4 offen offset:4
   buffer_store_dword v0, v3, s[0:3], s4 offen offset:8
   buffer_store_dword v1, v3, s[0:3], s4 offen offset:12
   buffer_store_dword v2, v3, s[0:3], s4 offen offset:16
   buffer_store_dword v4, v3, s[0:3], s4 offen offset:20
+  s_waitcnt_vscnt vscnt(0)
   s_endpgm
 
 // ====
@@ -1615,7 +1646,9 @@ low.func.def target(@gfx11_target) @gfx11_scheduled_liveness_resource(%kernarg: 
   s_mov_b32 s7, 822243328
   s_waitcnt vmcnt(63) lgkmcnt(0)
   s_and_b32 s5, s5, s0
+  s_delay_alu instid0(VALU_DEP_1)
   buffer_store_dword v1, v0, s[4:7], s2 offen offset:0
+  s_waitcnt_vscnt vscnt(0)
   s_endpgm
 
 // ====
@@ -1798,7 +1831,9 @@ low.func.def target(@gfx11_target) @gfx11_block_entry_wait_preserves_later_load(
 .Lbb2:
   s_waitcnt vmcnt(0) lgkmcnt(63)
   v_add_u32 v0, v2, v0
+  s_delay_alu instid0(VALU_DEP_1)
   buffer_store_dword v0, v1, s[4:7], s2 offen offset:8
+  s_waitcnt_vscnt vscnt(0)
   s_endpgm
 .Lbb3:
   s_endpgm
@@ -2263,6 +2298,7 @@ low.func.def target(@gfx942_target) @gfx942_sgpr_spill_reload_waits(%value: reg<
   s_waitcnt vmcnt(0) lgkmcnt(15)
   v_readfirstlane_b32 s3, v2
   s_mov_b64 exec, s[0:1]
+  s_waitcnt vmcnt(0) lgkmcnt(15)
   s_endpgm
 
 // ====
@@ -2991,6 +3027,7 @@ low.func.def target(@gfx942_target) @gfx942_mfma_result_wait_state(%lhs: reg<amd
   v_mfma_f32_16x16x16_bf16 v[4:7], v[0:1], v[2:3], v[4:7]
   s_nop 6
   global_store_dword v8, v4, s[0:1] offset:0
+  s_waitcnt vmcnt(0) lgkmcnt(15)
   s_endpgm
 
 // ====
@@ -3042,6 +3079,7 @@ low.func.def target(@gfx942_target) @gfx942_mfma_f32_operand_wait_state(%lhs: re
   v_mfma_f32_16x16x4_f32 v[4:7], v0, v1, v[4:7]
   s_nop 6
   global_store_dword v2, v4, s[0:1] offset:0
+  s_waitcnt vmcnt(0) lgkmcnt(15)
   s_endpgm
 
 // ====
@@ -3077,6 +3115,7 @@ low.func.def target(@gfx942_target) @gfx942_trans_result_wait_state(%input: reg<
   s_nop 0
   v_mul_f32 v0, v0, v1
   global_store_dword v2, v0, s[0:1] offset:0
+  s_waitcnt vmcnt(0) lgkmcnt(15)
   s_endpgm
 
 // ====
@@ -3098,6 +3137,7 @@ low.func.def target(@gfx942_target) @gfx942_valu_sgpr_read_wait_state(%resource:
   v_mov_b32_copy v0, s0
   v_addc_co_u32 v0, s[2:3], v0, v1, s[2:3]
   buffer_store_dword v0, v2, s[4:7], s1 offen offset:0
+  s_waitcnt vmcnt(0) lgkmcnt(15)
   s_endpgm
 
 // ====
@@ -3124,6 +3164,7 @@ low.func.def target(@gfx942_target) @gfx942_state_read_precedes_ssa_consumers(%r
   v_addc_co_u32 v0, s[0:1], v0, v1, s[8:9]
   s_add_u32 s0, s3, s2
   buffer_store_dword v0, v2, s[4:7], s0 offen offset:0
+  s_waitcnt vmcnt(0) lgkmcnt(15)
   s_endpgm
 
 // ====
@@ -3145,6 +3186,7 @@ low.func.def target(@gfx950_target) @gfx950_valu_sgpr_read_wait_state(%resource:
   v_mov_b32_copy v0, s0
   v_addc_co_u32 v0, s[2:3], v0, v1, s[2:3]
   buffer_store_dword v0, v2, s[4:7], s1 offen offset:0
+  s_waitcnt vmcnt(0) lgkmcnt(15)
   s_endpgm
 
 // ====
@@ -3165,7 +3207,9 @@ low.func.def target(@gfx12_target) @gfx12_valu_sgpr_read_depctr(%resource: reg<a
   s_wait_alu depctr(0)
   s_delay_alu instid0(VALU_DEP_1)
   v_add_u32 v0, s0, v0
+  s_delay_alu instid0(VALU_DEP_1)
   buffer_store_dword v0, v1, s[4:7], s0 offen offset:0
+  s_wait_storecnt storecnt(0)
   s_endpgm
 
 // ====
@@ -3183,7 +3227,9 @@ low.func.def target(@gfx11_target) @gfx11_trans_result_depctr(%input: reg<amdgpu
   v_rsq_f32 v0, v0
   s_waitcnt_depctr depctr(0)
   v_mul_f32 v0, v0, v1
+  s_delay_alu instid0(VALU_DEP_1)
   buffer_store_dword v0, v2, s[0:3], s4 offen offset:0
+  s_waitcnt_vscnt vscnt(0)
   s_endpgm
 
 // ====
@@ -3230,7 +3276,9 @@ low.func.def target(@gfx11_target) @gfx11_grouped_trans_lanes(%input0: reg<amdgp
   s_waitcnt_depctr depctr(0)
   v_mul_f32 v14, v8, v3
   v_mul_f32 v15, v0, v4
+  s_delay_alu instid0(VALU_DEP_1)
   buffer_store_b128 v[12:15], v5, s[0:3], s4 offen offset:0
+  s_waitcnt_vscnt vscnt(0)
   s_endpgm
 
 // ====
@@ -3265,7 +3313,9 @@ low.func.def target(@gfx11_target) @gfx11_trans_result_expired_by_valu_distance(
   v_add_f32 v1, v3, v1
   s_delay_alu instid0(VALU_DEP_1)
   v_mul_f32 v0, v0, v1
+  s_delay_alu instid0(VALU_DEP_1)
   buffer_store_dword v0, v2, s[0:3], s4 offen offset:0
+  s_waitcnt_vscnt vscnt(0)
   s_endpgm
 
 // ====
@@ -3282,6 +3332,7 @@ low.func.def target(@gfx_target) @wait_fragment(%value: reg<amdgpu.vgpr>, %resou
   buffer_load_dword v0, v1, s[0:3], s4 offen offset:0
   s_waitcnt vmcnt(0) lgkmcnt(15)
   buffer_store_dword v0, v1, s[0:3], s4 offen offset:4
+  s_waitcnt vmcnt(0) lgkmcnt(15)
   s_endpgm
 
 // ====
@@ -3298,6 +3349,7 @@ low.func.def target(@gfx_target) @wait_fragment(%value: reg<amdgpu.vgpr>, %resou
   buffer_load_dword v0, v1, s[0:3], s4 offen offset:0
   s_waitcnt vmcnt(0) lgkmcnt(63)
   buffer_store_dword v0, v1, s[0:3], s4 offen offset:4
+  s_waitcnt_vscnt vscnt(0)
   s_endpgm
 
 // ====
@@ -3323,6 +3375,7 @@ low.func.def target(@gfx_target) @wait_cross_block(%resource: reg<amdgpu.sgpr x4
 .Lbb1:
   s_waitcnt vmcnt(0) lgkmcnt(63)
   buffer_store_dword v1, v0, s[4:7], s2 offen offset:4
+  s_waitcnt_vscnt vscnt(0)
   s_endpgm
 .Lbb2:
   s_endpgm
@@ -3358,6 +3411,7 @@ low.func.def target(@gfx_target) @wait_branch_arg_after_prior_wait(%resource: re
   s_waitcnt vmcnt(0) lgkmcnt(63)
 .Lbb2:
   buffer_store_b128 v[4:7], v0, s[4:7], s2 offen offset:32
+  s_waitcnt_vscnt vscnt(0)
   s_endpgm
 .Lbb3:
   s_endpgm
@@ -3387,6 +3441,7 @@ low.func.def target(@gfx_target) @wait_cross_block_descriptor_used_twice(%kernar
   s_waitcnt vmcnt(63) lgkmcnt(0)
   global_store_b32 v1, v0, s[6:7] offset:0
   global_store_b32 v1, v2, s[6:7] offset:4
+  s_waitcnt_vscnt vscnt(0)
   s_endpgm
 .Lbb2:
   s_endpgm
@@ -3405,6 +3460,7 @@ low.func.def target(@gfx_target) @wait_fragment(%value: reg<amdgpu.vgpr>, %resou
   buffer_load_dword v0, v1, s[0:3], s4 offen offset:0
   s_wait_loadcnt loadcnt(0)
   buffer_store_dword v0, v1, s[0:3], s4 offen offset:4
+  s_wait_storecnt storecnt(0)
   s_endpgm
 
 // ====
@@ -3421,6 +3477,7 @@ low.func.def target(@gfx_target) @wait_fragment(%value: reg<amdgpu.vgpr>, %resou
   buffer_load_dword v0, v1, s[0:3], s4 offen offset:0
   s_wait_loadcnt loadcnt(0)
   buffer_store_dword v0, v1, s[0:3], s4 offen offset:4
+  s_wait_storecnt storecnt(0)
   s_endpgm
 
 // ====

@@ -362,9 +362,11 @@ _AMDGPU_WAIT_PLAN_REASON_STORE_SOURCE_REUSE = 4
 _AMDGPU_WAIT_PLAN_REASON_STORE_SOURCE_REUSE_NAME = "amdgpu.store_source_reuse"
 _AMDGPU_WAIT_PLAN_REASON_READ_RESULT_REUSE = 5
 _AMDGPU_WAIT_PLAN_REASON_READ_RESULT_REUSE_NAME = "amdgpu.read_result_reuse"
+_AMDGPU_WAIT_PLAN_REASON_MEMORY_SOURCE_REUSE = 10
+_AMDGPU_WAIT_PLAN_REASON_MEMORY_SOURCE_REUSE_NAME = "amdgpu.memory_source_reuse"
 _AMDGPU_STORAGE_LEASE_FLAGS = (
     StorageLeaseFlag.STARTS_AT_ISSUE,
-    StorageLeaseFlag.RELEASE_BEFORE_BOUNDARY,
+    StorageLeaseFlag.MAY_CARRY_ACROSS_BOUNDARY,
 )
 _AMDGPU_PRESSURE_STORAGE_LEASE_FLAGS = (
     StorageLeaseFlag.STARTS_AT_ISSUE,
@@ -496,6 +498,37 @@ def _amdgpu_operand_accepts_vgpr(operand: Operand) -> bool:
     )
 
 
+def _amdgpu_operand_accepts_sgpr(operand: Operand) -> bool:
+    return any(
+        reg_alt.reg_class == _REG_SGPR
+        and RegClassAltFlag.IMMEDIATE not in reg_alt.flags
+        for reg_alt in operand.reg_alts
+    )
+
+
+def _amdgpu_append_memory_source_leases(
+    storage_leases: list[StorageLease],
+    operand: Operand,
+    packet_operand_index: int,
+    counter_mask: int,
+) -> None:
+    for counter_id, counter_bit in _AMDGPU_WAIT_COUNTER_MASKS.items():
+        if (counter_mask & counter_bit) == 0:
+            continue
+        storage_leases.append(
+            _amdgpu_storage_lease(
+                kind=StorageLeaseKind.SOURCE_READ,
+                attachment=StorageLeaseAttachment.OPERAND,
+                attachment_index=packet_operand_index,
+                unit_count=operand.unit_count,
+                release_class_id=counter_id,
+                release_reason_id=_AMDGPU_WAIT_PLAN_REASON_MEMORY_SOURCE_REUSE,
+                release_reason_name=_AMDGPU_WAIT_PLAN_REASON_MEMORY_SOURCE_REUSE_NAME,
+                flags=_AMDGPU_STORAGE_LEASE_FLAGS,
+            )
+        )
+
+
 def _amdgpu_descriptor_storage_leases(
     schedule_classes: dict[str, ScheduleClass],
     descriptor: Descriptor,
@@ -530,29 +563,43 @@ def _amdgpu_descriptor_storage_leases(
                     flags=_AMDGPU_PRESSURE_STORAGE_LEASE_FLAGS,
                 )
             )
-    if (write_counter_mask & _AMDGPU_WAIT_COUNTER_MASKS[_COUNTER_VMEM_STORE]) != 0:
+    vmem_read_counter_mask = (
+        read_counter_mask & _AMDGPU_WAIT_COUNTER_MASKS[_COUNTER_VMEM_LOAD]
+    )
+    vmem_write_counter_mask = (
+        write_counter_mask & _AMDGPU_WAIT_COUNTER_MASKS[_COUNTER_VMEM_STORE]
+    )
+    if vmem_read_counter_mask != 0 or vmem_write_counter_mask != 0:
         packet_operand_index = 0
         for operand in descriptor.operands[_descriptor_result_count(descriptor) :]:
             if not _amdgpu_operand_is_packet_input(operand):
                 continue
             current_packet_operand_index = packet_operand_index
             packet_operand_index += 1
-            if not _amdgpu_operand_accepts_vgpr(operand) or operand.unit_count == 0:
+            if operand.unit_count == 0:
                 continue
-            storage_leases.append(
-                _amdgpu_storage_lease(
-                    kind=StorageLeaseKind.SOURCE_READ,
-                    attachment=StorageLeaseAttachment.OPERAND,
-                    attachment_index=current_packet_operand_index,
-                    unit_count=operand.unit_count,
-                    release_class_id=_COUNTER_VMEM_STORE,
-                    release_reason_id=_AMDGPU_WAIT_PLAN_REASON_STORE_SOURCE_REUSE,
-                    release_reason_name=(
-                        _AMDGPU_WAIT_PLAN_REASON_STORE_SOURCE_REUSE_NAME
-                    ),
-                    flags=_AMDGPU_STORAGE_LEASE_FLAGS,
+            if _amdgpu_operand_accepts_vgpr(operand) and vmem_write_counter_mask != 0:
+                storage_leases.append(
+                    _amdgpu_storage_lease(
+                        kind=StorageLeaseKind.SOURCE_READ,
+                        attachment=StorageLeaseAttachment.OPERAND,
+                        attachment_index=current_packet_operand_index,
+                        unit_count=operand.unit_count,
+                        release_class_id=_COUNTER_VMEM_STORE,
+                        release_reason_id=_AMDGPU_WAIT_PLAN_REASON_STORE_SOURCE_REUSE,
+                        release_reason_name=(
+                            _AMDGPU_WAIT_PLAN_REASON_STORE_SOURCE_REUSE_NAME
+                        ),
+                        flags=_AMDGPU_STORAGE_LEASE_FLAGS,
+                    )
                 )
-            )
+            if _amdgpu_operand_accepts_sgpr(operand):
+                _amdgpu_append_memory_source_leases(
+                    storage_leases,
+                    operand,
+                    current_packet_operand_index,
+                    vmem_read_counter_mask | vmem_write_counter_mask,
+                )
     return tuple(storage_leases)
 
 
