@@ -353,6 +353,42 @@ static bool loom_contract_vector_fragment_storage_schema(
       out_schema->encoded_operand);
 }
 
+static bool loom_contract_vector_operand_adapt_schema_to_typed_payload(
+    const loom_module_t* module, loom_value_id_t value_id,
+    loom_contract_operand_role_t role, loom_contract_operand_t* operand) {
+  if (role != LOOM_CONTRACT_OPERAND_ROLE_LHS &&
+      role != LOOM_CONTRACT_OPERAND_ROLE_RHS) {
+    return false;
+  }
+
+  loom_type_t type = loom_type_none();
+  if (!loom_contract_vector_value_type(module, value_id, &type) ||
+      !loom_type_is_vector(type)) {
+    return false;
+  }
+  const loom_scalar_type_t element_type = loom_type_element_type(type);
+  loom_contract_numeric_type_t payload_numeric_type =
+      LOOM_CONTRACT_NUMERIC_UNKNOWN;
+  if (!loom_scalar_type_is_float(element_type) ||
+      !loom_contract_numeric_type_from_scalar(element_type, false,
+                                              &payload_numeric_type) ||
+      payload_numeric_type == operand->numeric_type) {
+    return false;
+  }
+
+  const loom_contract_encoded_operand_t encoded = operand->encoded;
+  loom_contract_rejection_bits_t unused_rejection_bits =
+      LOOM_CONTRACT_REJECTION_NONE;
+  if (!loom_contract_vector_assign_dense_payload(type, operand,
+                                                 &unused_rejection_bits)) {
+    return false;
+  }
+  operand->role = role;
+  operand->numeric_type = payload_numeric_type;
+  operand->encoded = encoded;
+  return true;
+}
+
 static bool loom_contract_vector_operand_from_fragment(
     const loom_module_t* module, loom_value_id_t value_id,
     loom_vector_fragment_fact_t fact, loom_contract_operand_role_t role,
@@ -370,6 +406,8 @@ static bool loom_contract_vector_operand_from_fragment(
       *out_rejection_bits = LOOM_CONTRACT_REJECTION_SCHEMA;
       return false;
     }
+    (void)loom_contract_vector_operand_adapt_schema_to_typed_payload(
+        module, value_id, role, out_operand);
     loom_contract_vector_populate_auxiliary_operands(&fact.auxiliary,
                                                      &out_operand->encoded);
     return true;
