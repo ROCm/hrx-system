@@ -365,6 +365,49 @@
       ]
     },
     {
+      "name": "reports fixed-trip loop-weighted AMDGPU matrix mix",
+      "steps": [
+        {
+          "name": "compile",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/report_loop_matrix_mix_amdgpu.loom",
+              "--backend=amdgpu-hal",
+              "--target=gfx11-generic",
+              "--output={tmp}/loop_matrix_mix_amdgpu.hsaco",
+              "--compile-report=summary",
+              "--compile-report-output=-"
+            ]
+          },
+          "stdout": {
+            "contains": {
+              "unordered": [
+                "\"function\":\"compile_report_loop_matrix_mix\"",
+                "\"status\":\"OK\"",
+                "\"static_instruction_mix\":{\"descriptor_count\":",
+                "\"matrix_count\":1",
+                "\"wmma_count\":1",
+                "\"dynamic_instruction_mix\":{\"descriptor_count\":",
+                "\"matrix_count\":2",
+                "\"wmma_count\":2",
+                "\"source_low\":{\"selected_op_count\":12,\"emitted_op_count\":44,\"count\":12",
+                "\"source_op\":\"vector.mma\"",
+                "\"descriptor_key\":\"amdgpu.v_wmma_f32_16x16x16_f16\"",
+                "\"descriptor_semantic_tag\":\"matrix.wmma.f32.16x16x16.f16\""
+              ]
+            }
+          },
+          "files": [
+            {
+              "path": "{tmp}/loop_matrix_mix_amdgpu.hsaco",
+              "non_empty": true
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "reports dispatch-scaled AMDGPU memory economics",
       "steps": [
         {
