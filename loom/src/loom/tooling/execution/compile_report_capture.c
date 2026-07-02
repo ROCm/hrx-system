@@ -83,7 +83,8 @@ iree_status_t loom_run_compile_report_capture_initialize(
   switch (options->detail_mode) {
     case LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_SUMMARY:
       out_capture->report.requested_detail_flags =
-          LOOM_TARGET_COMPILE_REPORT_DETAIL_SCHEDULE_BAND_SUMMARY_ROWS;
+          LOOM_TARGET_COMPILE_REPORT_DETAIL_SCHEDULE_BAND_SUMMARY_ROWS |
+          LOOM_TARGET_COMPILE_REPORT_DETAIL_SOURCE_LOW_ROWS;
       break;
     case LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS:
       out_capture->report.requested_detail_flags =
