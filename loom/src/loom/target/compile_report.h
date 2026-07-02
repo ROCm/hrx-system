@@ -979,6 +979,28 @@ typedef struct loom_target_compile_report_source_low_row_t {
   uint32_t emitted_low_op_count;
 } loom_target_compile_report_source_low_row_t;
 
+// Summary of source-to-target-low selections grouped by stable lowering shape.
+typedef struct loom_target_compile_report_source_low_selection_summary_t {
+  // Source function symbol containing this lowering shape.
+  iree_string_view_t function_name;
+  // Source operation mnemonic lowered by this shape.
+  iree_string_view_t source_op_name;
+  // Numeric source operation kind lowered by this shape.
+  uint32_t source_op_kind;
+  // Selection mechanism used for this source operation.
+  loom_target_compile_report_source_low_selection_kind_t selection_kind;
+  // Stable target-owned key identifying the selected plan variant, if any.
+  iree_string_view_t plan_key;
+  // First low descriptor key emitted by this source op, if any.
+  iree_string_view_t descriptor_key;
+  // First low descriptor semantic tag emitted by this source op, if any.
+  iree_string_view_t descriptor_semantic_tag;
+  // Number of selected source operations represented by this summary.
+  uint64_t selected_op_count;
+  // Number of low operations emitted by this lowering shape.
+  uint64_t emitted_low_op_count;
+} loom_target_compile_report_source_low_selection_summary_t;
+
 // Source memory packet execution count evidence is not statically known.
 #define LOOM_TARGET_COMPILE_REPORT_SOURCE_LOW_MEMORY_EXECUTION_COUNT_PLUS_ONE_UNKNOWN \
   0u
@@ -1510,6 +1532,8 @@ typedef struct loom_target_compile_report_t {
   loom_target_compile_report_row_list_t wait_action_rows;
   // Owned source-to-low selection rows.
   loom_target_compile_report_row_list_t source_low_rows;
+  // Owned source-to-low selection summaries.
+  loom_target_compile_report_row_list_t source_low_selection_summaries;
   // Owned emitted source-memory packet rows.
   loom_target_compile_report_row_list_t source_low_memory_rows;
   // Owned source-memory summaries grouped by named source memory root.
