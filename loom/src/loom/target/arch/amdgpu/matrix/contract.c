@@ -246,15 +246,17 @@
               LOOM_MATRIX_FRAGMENT_COORDINATE_COLUMN),                          \
   }
 
-#define MATRIX_FRAGMENT_LAYOUT_CDNA_MFMA_F32(                                   \
-    kind_value, name_value, reduction_count_value,                              \
+#define MATRIX_FRAGMENT_LAYOUT_CDNA_MFMA_F32_TILE(                              \
+    kind_value, name_value, row_count_value, column_count_value,                \
+    reduction_count_value, result_register_count_value,                         \
     source_register_count_value, source_elements_per_register_value,            \
     source_element_bit_count_value)                                             \
   {                                                                             \
       .kind = (kind_value),                                                     \
       .name = IREE_SVL(name_value),                                             \
       .wave_size = 64,                                                          \
-      .tile_shape = MATRIX_TILE_SHAPE(16, 16, (reduction_count_value)),         \
+      .tile_shape = MATRIX_TILE_SHAPE((row_count_value), (column_count_value),  \
+                                      (reduction_count_value)),                 \
       .lhs = MATRIX_ROLE_LAYOUT(                                                \
           LOOM_CONTRACT_OPERAND_ROLE_LHS,                                       \
           LOOM_MATRIX_FRAGMENT_MAP_LANE_MOD_ROW_LANE_GROUP_PACKED_REDUCTION,    \
@@ -271,15 +273,26 @@
               LOOM_MATRIX_FRAGMENT_COORDINATE_REDUCTION),                       \
       .accumulator = MATRIX_ROLE_LAYOUT(                                        \
           LOOM_CONTRACT_OPERAND_ROLE_ACCUMULATOR,                               \
-          LOOM_MATRIX_FRAGMENT_MAP_LANE_GROUP_REGISTER_ROW_COLUMN, 4, 1, 32,    \
+          LOOM_MATRIX_FRAGMENT_MAP_LANE_GROUP_REGISTER_ROW_COLUMN,              \
+          (result_register_count_value), 1, 32,                                 \
           LOOM_MATRIX_FRAGMENT_COORDINATE_ROW |                                 \
               LOOM_MATRIX_FRAGMENT_COORDINATE_COLUMN),                          \
       .result = MATRIX_ROLE_LAYOUT(                                             \
           LOOM_CONTRACT_OPERAND_ROLE_RESULT,                                    \
-          LOOM_MATRIX_FRAGMENT_MAP_LANE_GROUP_REGISTER_ROW_COLUMN, 4, 1, 32,    \
+          LOOM_MATRIX_FRAGMENT_MAP_LANE_GROUP_REGISTER_ROW_COLUMN,              \
+          (result_register_count_value), 1, 32,                                 \
           LOOM_MATRIX_FRAGMENT_COORDINATE_ROW |                                 \
               LOOM_MATRIX_FRAGMENT_COORDINATE_COLUMN),                          \
   }
+
+#define MATRIX_FRAGMENT_LAYOUT_CDNA_MFMA_F32(                              \
+    kind_value, name_value, reduction_count_value,                         \
+    source_register_count_value, source_elements_per_register_value,       \
+    source_element_bit_count_value)                                        \
+  MATRIX_FRAGMENT_LAYOUT_CDNA_MFMA_F32_TILE(                               \
+      (kind_value), name_value, 16, 16, (reduction_count_value), 4,        \
+      (source_register_count_value), (source_elements_per_register_value), \
+      (source_element_bit_count_value))
 
 #define MATRIX_FRAGMENT_LAYOUT_CDNA_MFMA_F32_16X16X4_F32(kind_value,            \
                                                          name_value)            \
@@ -353,6 +366,18 @@ static const loom_amdgpu_matrix_fragment_layout_t kMatrixFragmentLayouts[] = {
         MATRIX_FRAGMENT_LAYOUT_CDNA_MFMA_F32(
             LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_CDNA_MFMA_F32_16X16X32_PACKED8,
             "cdna.mfma.f32.16x16x32.packed8", 32, 2, 4, 8),
+    [LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_CDNA_MFMA_F32_32X32X16_F16] =
+        MATRIX_FRAGMENT_LAYOUT_CDNA_MFMA_F32_TILE(
+            LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_CDNA_MFMA_F32_32X32X16_F16,
+            "cdna.mfma.f32.32x32x16.f16", 32, 32, 16, 16, 4, 2, 16),
+    [LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_CDNA_MFMA_F32_32X32X16_BF16] =
+        MATRIX_FRAGMENT_LAYOUT_CDNA_MFMA_F32_TILE(
+            LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_CDNA_MFMA_F32_32X32X16_BF16,
+            "cdna.mfma.f32.32x32x16.bf16", 32, 32, 16, 16, 4, 2, 16),
+    [LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_CDNA_MFMA_F32_32X32X16_PACKED8] =
+        MATRIX_FRAGMENT_LAYOUT_CDNA_MFMA_F32_TILE(
+            LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_CDNA_MFMA_F32_32X32X16_PACKED8,
+            "cdna.mfma.f32.32x32x16.packed8", 32, 32, 16, 16, 2, 4, 8),
     [LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_RDNA3_WMMAR3_F16_16X16X16_F16] =
         MATRIX_FRAGMENT_LAYOUT_RDNA3_WMMAR3_HALF_16X16X16(
             LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_RDNA3_WMMAR3_F16_16X16X16_F16,
