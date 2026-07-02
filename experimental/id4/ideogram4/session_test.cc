@@ -313,10 +313,6 @@ static void ExpectGenerationStageBoundaryContract(
   const id4_pipeline_plan_t* qwen_plan = FindStagePlan(plan, IREE_SV("qwen"));
   ASSERT_NE(qwen_plan, nullptr);
   ExpectBoundaryLayout(
-      qwen_plan, IREE_SV("token_ids"), ID4_PIPELINE_TENSOR_DTYPE_I32,
-      TensorShape(
-          id4_pipeline_program_make_shape_rank1(summary.qwen_token_count)));
-  ExpectBoundaryLayout(
       qwen_plan, IREE_SV("attention_mask"), ID4_PIPELINE_TENSOR_DTYPE_F32,
       TensorShape(id4_pipeline_program_make_shape_rank2(
           summary.qwen_token_count, summary.qwen_token_count)));

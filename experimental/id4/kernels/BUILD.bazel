@@ -7982,6 +7982,30 @@ _KERNEL_CASES = [
         "target_name": "qwen3_vl_token_embedding_bf16_bf16_padded_tail",
     },
     {
+        "actual_case": "@id4_qwen3_vl_token_embedding_rows_bf16_bf16_copy_case",
+        "benchmark": "@id4_qwen3_vl_token_embedding_rows_bf16_bf16_copy",
+        "configs": [
+            "--config=id4.qwen3_vl.token_embedding.token_count=2",
+            "--config=id4.qwen3_vl.token_embedding.dispatch_token_count=2",
+            "--config=id4.qwen3_vl.token_embedding.hidden_size=4",
+            "--config=id4.qwen3_vl.token_embedding.vocab_size=3",
+        ],
+        "source": "qwen3_vl/token_embedding.loom",
+        "target_name": "qwen3_vl_token_embedding_rows_bf16_bf16_copy",
+    },
+    {
+        "actual_case": "@id4_qwen3_vl_token_embedding_rows_bf16_bf16_padded_tail_case",
+        "benchmark": "@id4_qwen3_vl_token_embedding_rows_bf16_bf16_padded_tail",
+        "configs": [
+            "--config=id4.qwen3_vl.token_embedding.token_count=2",
+            "--config=id4.qwen3_vl.token_embedding.dispatch_token_count=4",
+            "--config=id4.qwen3_vl.token_embedding.hidden_size=4",
+            "--config=id4.qwen3_vl.token_embedding.vocab_size=3",
+        ],
+        "source": "qwen3_vl/token_embedding.loom",
+        "target_name": "qwen3_vl_token_embedding_rows_bf16_bf16_padded_tail",
+    },
+    {
         "actual_case": "@id4_qwen3_vl_token_embedding_bf16_f32_qwen_slice_case",
         "benchmark": "@id4_qwen3_vl_token_embedding_bf16_f32_qwen_slice",
         "configs": [

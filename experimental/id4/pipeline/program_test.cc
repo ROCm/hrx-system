@@ -6,6 +6,7 @@
 
 #include "experimental/id4/pipeline/program.h"
 
+#include <cstdint>
 #include <string>
 
 #include "iree/testing/gtest.h"
@@ -140,6 +141,124 @@ TEST(PipelineProgram, AuthorsFp8ScaledParameterAsBf16ExecutionTensor) {
             ID4_PIPELINE_PROGRAM_DTYPE_F32);
 
   id4_pipeline_program_release(program);
+}
+
+TEST(PipelineProgram, AuthorsDirectParameterFromDenseSourceSpans) {
+  ProgramBuilderScope builder_scope;
+  id4_pipeline_program_builder_t* builder = builder_scope.builder();
+
+  const id4_pipeline_program_parameter_source_t sources[] = {
+      {
+          /*.source_scope=*/IREE_SV("model"),
+          /*.key=*/IREE_SV("embedding.weight"),
+          /*.dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+          /*.shape=*/id4_pipeline_program_make_shape_rank2(8, 4),
+      },
+  };
+  const id4_pipeline_program_parameter_source_span_t source_spans[] = {
+      {
+          /*.source_offset=*/3 * 4 * sizeof(uint16_t),
+          /*.target_offset=*/0,
+          /*.length=*/4 * sizeof(uint16_t),
+      },
+      {
+          /*.source_offset=*/5 * 4 * sizeof(uint16_t),
+          /*.target_offset=*/4 * sizeof(uint16_t),
+          /*.length=*/4 * sizeof(uint16_t),
+      },
+  };
+  id4_pipeline_program_parameter_options_t options = {
+      /*.structure_size=*/sizeof(options),
+      /*.next=*/nullptr,
+      /*.encoding=*/ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_DIRECT,
+      /*.source_count=*/IREE_ARRAYSIZE(sources),
+      /*.sources=*/sources,
+      /*.key=*/IREE_SV("embedding.prompt_rows"),
+      /*.dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+      /*.shape=*/id4_pipeline_program_make_shape_rank2(2, 4),
+      /*.source_span_count=*/IREE_ARRAYSIZE(source_spans),
+      /*.source_spans=*/source_spans,
+  };
+  id4_pipeline_program_tensor_t rows = id4_pipeline_program_tensor_invalid();
+  IREE_ASSERT_OK(id4_pipeline_program_parameter(builder, &options, &rows));
+
+  id4_pipeline_program_t* program = nullptr;
+  IREE_ASSERT_OK(id4_pipeline_program_builder_seal(
+      builder, iree_allocator_system(), &program));
+  builder_scope.DestroyBuilder();
+
+  const id4_pipeline_program_tensor_record_t* tensor =
+      id4_pipeline_program_tensor_at(program, rows.ordinal);
+  ASSERT_NE(tensor, nullptr);
+  ExpectStringViewEqual(tensor->name, IREE_SV("embedding.prompt_rows"));
+  EXPECT_EQ(tensor->dtype, ID4_PIPELINE_PROGRAM_DTYPE_BF16);
+  EXPECT_EQ(tensor->byte_length, 2u * 4u * sizeof(uint16_t));
+
+  ASSERT_EQ(id4_pipeline_program_operation_count(program), 1u);
+  const id4_pipeline_program_op_t* op =
+      id4_pipeline_program_operation_at(program, 0);
+  ASSERT_NE(op, nullptr);
+  ASSERT_EQ(op->kind, ID4_PIPELINE_PROGRAM_OP_KIND_PARAMETER);
+  EXPECT_EQ(op->payload.parameter.encoding,
+            ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_DIRECT);
+  ASSERT_EQ(op->payload.parameter.source_count, 1u);
+  ExpectStringViewEqual(op->payload.parameter.sources[0].key,
+                        IREE_SV("embedding.weight"));
+  ASSERT_EQ(op->payload.parameter.source_span_count,
+            IREE_ARRAYSIZE(source_spans));
+  EXPECT_EQ(op->payload.parameter.source_spans[0].source_offset,
+            source_spans[0].source_offset);
+  EXPECT_EQ(op->payload.parameter.source_spans[1].target_offset,
+            source_spans[1].target_offset);
+
+  id4_pipeline_program_release(program);
+}
+
+TEST(PipelineProgram, RejectsDirectParameterSourceSpanReuseMismatch) {
+  ProgramBuilderScope builder_scope;
+  id4_pipeline_program_builder_t* builder = builder_scope.builder();
+
+  const id4_pipeline_program_parameter_source_t sources[] = {
+      {
+          /*.source_scope=*/IREE_SV("model"),
+          /*.key=*/IREE_SV("embedding.weight"),
+          /*.dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+          /*.shape=*/id4_pipeline_program_make_shape_rank2(8, 4),
+      },
+  };
+  const id4_pipeline_program_parameter_source_span_t first_spans[] = {
+      {
+          /*.source_offset=*/0,
+          /*.target_offset=*/0,
+          /*.length=*/4 * sizeof(uint16_t),
+      },
+  };
+  id4_pipeline_program_parameter_options_t options = {
+      /*.structure_size=*/sizeof(options),
+      /*.next=*/nullptr,
+      /*.encoding=*/ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_DIRECT,
+      /*.source_count=*/IREE_ARRAYSIZE(sources),
+      /*.sources=*/sources,
+      /*.key=*/IREE_SV("embedding.one_row"),
+      /*.dtype=*/ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+      /*.shape=*/id4_pipeline_program_make_shape_rank2(1, 4),
+      /*.source_span_count=*/IREE_ARRAYSIZE(first_spans),
+      /*.source_spans=*/first_spans,
+  };
+  id4_pipeline_program_tensor_t rows = id4_pipeline_program_tensor_invalid();
+  IREE_ASSERT_OK(id4_pipeline_program_parameter(builder, &options, &rows));
+
+  const id4_pipeline_program_parameter_source_span_t second_spans[] = {
+      {
+          /*.source_offset=*/4 * sizeof(uint16_t),
+          /*.target_offset=*/0,
+          /*.length=*/4 * sizeof(uint16_t),
+      },
+  };
+  options.source_spans = second_spans;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      id4_pipeline_program_parameter(builder, &options, &rows));
 }
 
 TEST(PipelineProgram, AuthorsProgramAndSealsImmutableCopies) {

@@ -6,6 +6,7 @@
 
 #include "experimental/id4/stages/qwen3_vl.h"
 
+#include <inttypes.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
@@ -175,6 +176,7 @@ static iree_status_t id4_qwen3_vl_stage_author_program(
     program_options.parameter_scope = stage->parameter_scope;
     program_options.model = stage->model;
     program_options.request = request;
+    program_options.host_allocator = host_allocator;
     program_options.weight_execution_strategy = weight_execution_strategy;
     program_options.diagnostic_tap_names = diagnostic_tap_names;
     status = id4_qwen3_vl_program_author_forward(&program_options, builder);
@@ -189,6 +191,7 @@ static iree_status_t id4_qwen3_vl_stage_author_program(
 }
 
 static iree_status_t id4_qwen3_vl_stage_parse_plan_extension(
+    const id4_qwen3_vl_stage_t* stage,
     const id4_pipeline_stage_plan_options_t* options,
     const id4_qwen3_vl_stage_plan_options_t** out_qwen_options) {
   *out_qwen_options = NULL;
@@ -209,6 +212,21 @@ static iree_status_t id4_qwen3_vl_stage_parse_plan_extension(
   if (qwen_options->request.token_count == 0) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "Qwen3-VL plan token count must be nonzero");
+  }
+  if (!qwen_options->request.token_ids) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "Qwen3-VL plan token ids are required");
+  }
+  for (uint32_t i = 0; i < qwen_options->request.token_count; ++i) {
+    if (qwen_options->request.token_ids[i] < 0 ||
+        (uint32_t)qwen_options->request.token_ids[i] >=
+            stage->model.vocab_size) {
+      return iree_make_status(
+          IREE_STATUS_OUT_OF_RANGE,
+          "Qwen3-VL plan token id %" PRIi32 " at position %" PRIu32
+          " exceeds vocabulary size %" PRIu32,
+          qwen_options->request.token_ids[i], i, stage->model.vocab_size);
+    }
   }
   switch (qwen_options->weight_execution_strategy) {
     case ID4_QWEN3_VL_WEIGHT_EXECUTION_STRATEGY_ROW_MAJOR:
@@ -263,7 +281,7 @@ static iree_status_t id4_qwen3_vl_stage_plan(
   }
   const id4_qwen3_vl_stage_plan_options_t* qwen_options = NULL;
   IREE_RETURN_IF_ERROR(
-      id4_qwen3_vl_stage_parse_plan_extension(options, &qwen_options));
+      id4_qwen3_vl_stage_parse_plan_extension(stage, options, &qwen_options));
 
   id4_pipeline_program_t* program = NULL;
   iree_status_t status = id4_qwen3_vl_stage_author_program(

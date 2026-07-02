@@ -397,6 +397,10 @@ static iree_status_t id4_qwen3_vl_program_validate_options(
                             "Qwen3-VL diagnostic tap names are required when "
                             "the tap count is nonzero");
   }
+  if (iree_allocator_is_null(options->host_allocator)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "Qwen3-VL host allocator is required");
+  }
   for (iree_host_size_t i = 0; i < options->diagnostic_tap_names.count; ++i) {
     if (iree_string_view_is_empty(options->diagnostic_tap_names.values[i])) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -407,11 +411,25 @@ static iree_status_t id4_qwen3_vl_program_validate_options(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "Qwen3-VL token count must be nonzero");
   }
+  if (!options->request.token_ids) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "Qwen3-VL token ids are required");
+  }
   if (options->request.token_count > options->model.max_token_count) {
     return iree_make_status(
         IREE_STATUS_OUT_OF_RANGE,
         "Qwen3-VL token count %" PRIu32 " exceeds model maximum %" PRIu32,
         options->request.token_count, options->model.max_token_count);
+  }
+  for (uint32_t i = 0; i < options->request.token_count; ++i) {
+    if (options->request.token_ids[i] < 0 ||
+        (uint32_t)options->request.token_ids[i] >= options->model.vocab_size) {
+      return iree_make_status(
+          IREE_STATUS_OUT_OF_RANGE,
+          "Qwen3-VL token id %" PRIi32 " at position %" PRIu32
+          " exceeds vocabulary size %" PRIu32,
+          options->request.token_ids[i], i, options->model.vocab_size);
+    }
   }
   switch (options->weight_execution_strategy) {
     case ID4_QWEN3_VL_WEIGHT_EXECUTION_STRATEGY_ROW_MAJOR:
@@ -457,62 +475,62 @@ typedef enum id4_qwen3_vl_parameter_kind_e {
 } id4_qwen3_vl_parameter_kind_t;
 
 typedef enum id4_qwen3_vl_tensor_kind_e {
-  // Imported token id vector.
-  ID4_QWEN3_VL_TENSOR_TOKEN_IDS = 0,
   // Imported additive attention mask matrix.
-  ID4_QWEN3_VL_TENSOR_ATTENTION_MASK = 1,
+  ID4_QWEN3_VL_TENSOR_ATTENTION_MASK = 0,
   // Imported token weight vector.
-  ID4_QWEN3_VL_TENSOR_TOKEN_WEIGHTS = 2,
+  ID4_QWEN3_VL_TENSOR_TOKEN_WEIGHTS = 1,
   // Hidden states produced by token embedding.
-  ID4_QWEN3_VL_TENSOR_EMBEDDED_HIDDEN_STATES = 3,
+  ID4_QWEN3_VL_TENSOR_EMBEDDED_HIDDEN_STATES = 2,
   // Per-layer input RMSNorm output.
-  ID4_QWEN3_VL_TENSOR_LAYER_INPUT_NORM = 4,
+  ID4_QWEN3_VL_TENSOR_LAYER_INPUT_NORM = 3,
   // Per-layer query projection output.
-  ID4_QWEN3_VL_TENSOR_LAYER_Q = 5,
+  ID4_QWEN3_VL_TENSOR_LAYER_Q = 4,
   // Per-layer key projection output.
-  ID4_QWEN3_VL_TENSOR_LAYER_K = 6,
+  ID4_QWEN3_VL_TENSOR_LAYER_K = 5,
   // Per-layer value projection output.
-  ID4_QWEN3_VL_TENSOR_LAYER_V = 7,
+  ID4_QWEN3_VL_TENSOR_LAYER_V = 6,
   // Per-layer packed value tensor for attention PV WMMA.
-  ID4_QWEN3_VL_TENSOR_LAYER_V_PACKED = 8,
+  ID4_QWEN3_VL_TENSOR_LAYER_V_PACKED = 7,
   // Per-layer query head RMSNorm output.
-  ID4_QWEN3_VL_TENSOR_LAYER_Q_NORM = 9,
+  ID4_QWEN3_VL_TENSOR_LAYER_Q_NORM = 8,
   // Per-layer key head RMSNorm output.
-  ID4_QWEN3_VL_TENSOR_LAYER_K_NORM = 10,
+  ID4_QWEN3_VL_TENSOR_LAYER_K_NORM = 9,
   // Per-layer rotary-applied query tensor.
-  ID4_QWEN3_VL_TENSOR_LAYER_Q_ROTARY = 11,
+  ID4_QWEN3_VL_TENSOR_LAYER_Q_ROTARY = 10,
   // Per-layer rotary-applied key tensor.
-  ID4_QWEN3_VL_TENSOR_LAYER_K_ROTARY = 12,
+  ID4_QWEN3_VL_TENSOR_LAYER_K_ROTARY = 11,
   // Per-layer materialized attention score tensor.
-  ID4_QWEN3_VL_TENSOR_LAYER_ATTENTION_SCORES = 13,
+  ID4_QWEN3_VL_TENSOR_LAYER_ATTENTION_SCORES = 12,
   // Per-layer materialized attention probability tensor.
-  ID4_QWEN3_VL_TENSOR_LAYER_ATTENTION_PROBABILITIES = 14,
+  ID4_QWEN3_VL_TENSOR_LAYER_ATTENTION_PROBABILITIES = 13,
   // Per-layer attention context tensor.
-  ID4_QWEN3_VL_TENSOR_LAYER_ATTENTION_CONTEXT = 15,
+  ID4_QWEN3_VL_TENSOR_LAYER_ATTENTION_CONTEXT = 14,
   // Per-layer attention output projection tensor.
-  ID4_QWEN3_VL_TENSOR_LAYER_ATTENTION_OUTPUT = 16,
+  ID4_QWEN3_VL_TENSOR_LAYER_ATTENTION_OUTPUT = 15,
   // Per-layer post-attention residual output.
-  ID4_QWEN3_VL_TENSOR_LAYER_AFTER_ATTENTION = 17,
+  ID4_QWEN3_VL_TENSOR_LAYER_AFTER_ATTENTION = 16,
   // Per-layer post-attention RMSNorm output.
-  ID4_QWEN3_VL_TENSOR_LAYER_POST_ATTENTION_NORM = 18,
+  ID4_QWEN3_VL_TENSOR_LAYER_POST_ATTENTION_NORM = 17,
   // Per-layer MLP gate projection output.
-  ID4_QWEN3_VL_TENSOR_LAYER_MLP_GATE = 19,
+  ID4_QWEN3_VL_TENSOR_LAYER_MLP_GATE = 18,
   // Per-layer MLP up projection output.
-  ID4_QWEN3_VL_TENSOR_LAYER_MLP_UP = 20,
+  ID4_QWEN3_VL_TENSOR_LAYER_MLP_UP = 19,
   // Per-layer SiLU-gated activation output.
-  ID4_QWEN3_VL_TENSOR_LAYER_MLP_ACTIVATION = 21,
+  ID4_QWEN3_VL_TENSOR_LAYER_MLP_ACTIVATION = 20,
   // Per-layer MLP down projection output.
-  ID4_QWEN3_VL_TENSOR_LAYER_MLP_DOWN = 22,
+  ID4_QWEN3_VL_TENSOR_LAYER_MLP_DOWN = 21,
   // Per-layer decoder output after MLP residual.
-  ID4_QWEN3_VL_TENSOR_LAYER_OUTPUT = 23,
+  ID4_QWEN3_VL_TENSOR_LAYER_OUTPUT = 22,
   // Concatenated selected post-layer hidden states.
-  ID4_QWEN3_VL_TENSOR_SELECTED_HIDDEN_STATES = 24,
+  ID4_QWEN3_VL_TENSOR_SELECTED_HIDDEN_STATES = 23,
   // Token-weighted condition output.
-  ID4_QWEN3_VL_TENSOR_CONDITION = 25,
+  ID4_QWEN3_VL_TENSOR_CONDITION = 24,
   // Partial condition normalization statistics buffer.
-  ID4_QWEN3_VL_TENSOR_CONDITION_STATS = 26,
+  ID4_QWEN3_VL_TENSOR_CONDITION_STATS = 25,
   // Final decoder RMSNorm output.
-  ID4_QWEN3_VL_TENSOR_FINAL_NORM = 27,
+  ID4_QWEN3_VL_TENSOR_FINAL_NORM = 26,
+  // Prompt-local token embedding rows gathered from the model embedding table.
+  ID4_QWEN3_VL_TENSOR_TOKEN_EMBEDDING_ROWS = 27,
   // Exported condition tensor.
   ID4_QWEN3_VL_TENSOR_OUTPUT = 28,
 } id4_qwen3_vl_tensor_kind_t;
@@ -1222,7 +1240,6 @@ static const id4_qwen3_vl_program_format_pattern_t
 
 static const id4_qwen3_vl_program_format_pattern_t
     id4_qwen3_vl_program_tensor_patterns[ID4_QWEN3_VL_TENSOR_KIND_COUNT] = {
-        [ID4_QWEN3_VL_TENSOR_TOKEN_IDS] = {false, IREE_SVL("token_ids")},
         [ID4_QWEN3_VL_TENSOR_ATTENTION_MASK] = {false,
                                                 IREE_SVL("attention_mask")},
         [ID4_QWEN3_VL_TENSOR_TOKEN_WEIGHTS] = {false,
@@ -1282,6 +1299,8 @@ static const id4_qwen3_vl_program_format_pattern_t
             {false, IREE_SVL("qwen3_vl.condition_stats")},
         [ID4_QWEN3_VL_TENSOR_FINAL_NORM] = {false,
                                             IREE_SVL("qwen3_vl.final_norm")},
+        [ID4_QWEN3_VL_TENSOR_TOKEN_EMBEDDING_ROWS] =
+            {false, IREE_SVL("qwen3_vl.token_embedding.rows")},
         [ID4_QWEN3_VL_TENSOR_OUTPUT] = {false, IREE_SVL("condition")},
 };
 
@@ -1407,7 +1426,7 @@ static const id4_pipeline_kernel_ref_t
     id4_qwen3_vl_program_kernel_refs[ID4_QWEN3_VL_KERNEL_KIND_COUNT] = {
         [ID4_QWEN3_VL_KERNEL_TOKEN_EMBEDDING] =
             {IREE_SVL("qwen3_vl/token_embedding"),
-             IREE_SVL("id4_qwen3_vl_token_embedding_bf16_bf16")},
+             IREE_SVL("id4_qwen3_vl_token_embedding_rows_bf16_bf16")},
         [ID4_QWEN3_VL_KERNEL_RMSNORM] = {IREE_SVL("qwen3_vl/rmsnorm"),
                                          IREE_SVL("id4_qwen3_vl_rmsnorm_bf16")},
         [ID4_QWEN3_VL_KERNEL_LINEAR_BF16_BF16] =
@@ -2269,6 +2288,101 @@ static iree_status_t id4_qwen3_vl_program_parameter(
   return id4_pipeline_program_parameter(builder, &options, out_tensor);
 }
 
+static iree_status_t id4_qwen3_vl_program_parameter_token_embedding_rows(
+    const id4_qwen3_vl_program_options_t* options,
+    id4_pipeline_program_builder_t* builder,
+    id4_pipeline_program_tensor_t* out_tensor) {
+  char source_key_buffer[ID4_QWEN3_VL_FORMAT_BUFFER_CAPACITY];
+  iree_string_view_t source_key = iree_string_view_empty();
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_format_parameter_key(
+      ID4_QWEN3_VL_PARAMETER_TOKEN_EMBEDDING, UINT32_MAX, source_key_buffer,
+      IREE_ARRAYSIZE(source_key_buffer), &source_key));
+  char execution_key_buffer[ID4_QWEN3_VL_FORMAT_BUFFER_CAPACITY];
+  iree_string_view_t execution_key = iree_string_view_empty();
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_format_tensor_name(
+      ID4_QWEN3_VL_TENSOR_TOKEN_EMBEDDING_ROWS, UINT32_MAX,
+      execution_key_buffer, IREE_ARRAYSIZE(execution_key_buffer),
+      &execution_key));
+
+  iree_device_size_t row_byte_length = 0;
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_bf16_byte_length(
+      options->model.hidden_size, &row_byte_length));
+
+  id4_pipeline_program_parameter_source_span_t* source_spans = NULL;
+  iree_status_t status = iree_allocator_malloc_array(
+      options->host_allocator, options->request.token_count,
+      sizeof(source_spans[0]), (void**)&source_spans);
+  for (uint32_t i = 0;
+       i < options->request.token_count && iree_status_is_ok(status); ++i) {
+    iree_device_size_t source_offset = 0;
+    if (!iree_device_size_checked_mul(
+            (iree_device_size_t)options->request.token_ids[i], row_byte_length,
+            &source_offset)) {
+      status =
+          iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                           "Qwen3-VL token embedding source offset overflows");
+      break;
+    }
+    iree_device_size_t target_offset = 0;
+    if (!iree_device_size_checked_mul((iree_device_size_t)i, row_byte_length,
+                                      &target_offset)) {
+      status =
+          iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                           "Qwen3-VL token embedding target offset overflows");
+      break;
+    }
+    source_spans[i] = (id4_pipeline_program_parameter_source_span_t){
+        // Byte offset in the provider embedding table.
+        .source_offset = source_offset,
+        // Byte offset in the compact execution embedding rows.
+        .target_offset = target_offset,
+        // One dense embedding row.
+        .length = row_byte_length,
+    };
+  }
+
+  const id4_pipeline_program_parameter_source_t sources[] = {
+      {
+          // Provider scope containing the full token embedding table.
+          .source_scope = options->parameter_scope,
+          // Provider key for the full token embedding table.
+          .key = source_key,
+          // Provider dtype matching the compact execution rows.
+          .dtype = ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+          // Provider shape for the full token embedding table.
+          .shape = id4_pipeline_program_make_shape_rank2(
+              options->model.vocab_size, options->model.hidden_size),
+      },
+  };
+  if (iree_status_is_ok(status)) {
+    id4_pipeline_program_parameter_options_t parameter_options = {
+        // Size of this structure for versioning.
+        .structure_size = sizeof(parameter_options),
+        // Direct gather into compact execution rows.
+        .encoding = ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_DIRECT,
+        // Number of provider source descriptors.
+        .source_count = IREE_ARRAYSIZE(sources),
+        // Provider source descriptors.
+        .sources = sources,
+        // Number of prompt-local row spans.
+        .source_span_count = options->request.token_count,
+        // Prompt-local row spans.
+        .source_spans = source_spans,
+        // Execution tensor key and diagnostic name.
+        .key = execution_key,
+        // Execution tensor dtype.
+        .dtype = ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+        // Execution tensor shape.
+        .shape = id4_pipeline_program_make_shape_rank2(
+            options->request.token_count, options->model.hidden_size),
+    };
+    status =
+        id4_pipeline_program_parameter(builder, &parameter_options, out_tensor);
+  }
+  iree_allocator_free(options->host_allocator, source_spans);
+  return status;
+}
+
 static iree_status_t id4_qwen3_vl_program_parameter_bf16_linear_rhs_tile(
     id4_pipeline_program_builder_t* builder, iree_string_view_t source_scope,
     id4_qwen3_vl_parameter_kind_t kind, uint32_t layer_ordinal,
@@ -2509,13 +2623,6 @@ static iree_status_t id4_qwen3_vl_program_author_token_embedding(
   uint32_t token_capacity = 0;
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_calculate_bf16_token_capacity(
       options->request.token_count, &token_capacity));
-  id4_pipeline_program_tensor_t token_ids =
-      id4_pipeline_program_tensor_invalid();
-  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_import_tensor(
-      builder, ID4_QWEN3_VL_TENSOR_TOKEN_IDS,
-      ID4_PIPELINE_PROGRAM_IMPORT_TENSOR_FLAG_INITIALIZED,
-      ID4_PIPELINE_PROGRAM_DTYPE_I32,
-      id4_pipeline_program_make_shape_rank1(token_count), &token_ids));
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_import_tensor(
       builder, ID4_QWEN3_VL_TENSOR_ATTENTION_MASK,
       ID4_PIPELINE_PROGRAM_IMPORT_TENSOR_FLAG_INITIALIZED,
@@ -2527,14 +2634,10 @@ static iree_status_t id4_qwen3_vl_program_author_token_embedding(
       ID4_PIPELINE_PROGRAM_IMPORT_TENSOR_FLAG_INITIALIZED,
       ID4_PIPELINE_PROGRAM_DTYPE_F32,
       id4_pipeline_program_make_shape_rank1(token_count), out_token_weights));
-  id4_pipeline_program_tensor_t embedding =
+  id4_pipeline_program_tensor_t embedding_rows =
       id4_pipeline_program_tensor_invalid();
-  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_parameter(
-      builder, options->parameter_scope, ID4_QWEN3_VL_PARAMETER_TOKEN_EMBEDDING,
-      UINT32_MAX, ID4_PIPELINE_PROGRAM_DTYPE_BF16,
-      id4_pipeline_program_make_shape_rank2(options->model.vocab_size,
-                                            hidden_size),
-      &embedding));
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_parameter_token_embedding_rows(
+      options, builder, &embedding_rows));
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_acquire_tensor(
       builder, ID4_QWEN3_VL_TENSOR_EMBEDDED_HIDDEN_STATES, UINT32_MAX,
       ID4_PIPELINE_PROGRAM_DTYPE_BF16,
@@ -2555,8 +2658,7 @@ static iree_status_t id4_qwen3_vl_program_author_token_embedding(
       ID4_QWEN3_VL_KERNEL_TOKEN_EMBEDDING, IREE_ARRAYSIZE(config_values),
       config_values, value_buffers, config_bindings));
   id4_pipeline_program_dispatch_binding_t bindings[] = {
-      id4_pipeline_program_read(token_ids),
-      id4_pipeline_program_read(embedding),
+      id4_pipeline_program_read(embedding_rows),
       id4_pipeline_program_write(*out_hidden_states),
   };
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_dispatch(

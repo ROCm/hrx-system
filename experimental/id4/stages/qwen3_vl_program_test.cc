@@ -16,6 +16,8 @@ namespace {
 
 static constexpr iree_host_size_t kProgramBuilderBlockSize = 64 * 1024;
 static constexpr uint32_t kSelectedLayerOrdinals[] = {0, 1};
+static constexpr int32_t kTokenIds[] = {0,  1,  2,  3,  4,  5,  6,  7,  8, 9,
+                                        10, 11, 12, 13, 14, 15, 16, 17, 18};
 
 static id4_qwen3_vl_program_options_t MakeProgramOptions(uint32_t layer_count) {
   id4_qwen3_vl_program_options_t options = {
@@ -54,7 +56,11 @@ static id4_qwen3_vl_program_options_t MakeProgramOptions(uint32_t layer_count) {
       {
           // Number of token positions.
           /*.token_count=*/19,
+          // Prompt token ids.
+          /*.token_ids=*/kTokenIds,
       },
+      // Host allocator used for transient authoring tables.
+      /*.host_allocator=*/iree_allocator_system(),
       // Linear weight execution strategy selected for this program.
       /*.weight_execution_strategy=*/
       ID4_QWEN3_VL_WEIGHT_EXECUTION_STRATEGY_ROW_MAJOR,
@@ -350,6 +356,28 @@ TEST(Qwen3VlProgram, RejectsMissingTokenCount) {
   options.request.token_count = 0;
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
+      id4_qwen3_vl_program_author_forward(&options, builder_scope.builder()));
+}
+
+TEST(Qwen3VlProgram, RejectsMissingTokenIds) {
+  ProgramBuilderScope builder_scope;
+  id4_qwen3_vl_program_options_t options = MakeProgramOptions(
+      /*layer_count=*/1);
+  options.request.token_ids = nullptr;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      id4_qwen3_vl_program_author_forward(&options, builder_scope.builder()));
+}
+
+TEST(Qwen3VlProgram, RejectsOutOfRangeTokenId) {
+  ProgramBuilderScope builder_scope;
+  static constexpr int32_t kInvalidTokenIds[] = {0, 1, 2, 32};
+  id4_qwen3_vl_program_options_t options = MakeProgramOptions(
+      /*layer_count=*/1);
+  options.request.token_count = IREE_ARRAYSIZE(kInvalidTokenIds);
+  options.request.token_ids = kInvalidTokenIds;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_OUT_OF_RANGE,
       id4_qwen3_vl_program_author_forward(&options, builder_scope.builder()));
 }
 

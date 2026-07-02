@@ -147,6 +147,66 @@ static iree_status_t id4_pipeline_program_validate_parameter_source(
 static iree_status_t id4_pipeline_program_validate_direct_parameter_encoding(
     const id4_pipeline_program_parameter_options_t* options) {
   const id4_pipeline_program_parameter_source_t* source = &options->sources[0];
+  if (options->source_span_count != 0) {
+    if (options->source_count != 1) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "direct parameter %.*s source spans require exactly one source",
+          (int)options->key.size, options->key.data);
+    }
+    if (source->dtype != options->dtype) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "direct parameter %.*s source span dtype must match execution dtype",
+          (int)options->key.size, options->key.data);
+    }
+    iree_device_size_t source_byte_length = 0;
+    IREE_RETURN_IF_ERROR(id4_pipeline_program_tensor_byte_length(
+        source->dtype, source->shape, &source_byte_length));
+    iree_device_size_t target_byte_length = 0;
+    IREE_RETURN_IF_ERROR(id4_pipeline_program_tensor_byte_length(
+        options->dtype, options->shape, &target_byte_length));
+    iree_device_size_t target_offset = 0;
+    for (iree_host_size_t i = 0; i < options->source_span_count; ++i) {
+      const id4_pipeline_program_parameter_source_span_t* span =
+          &options->source_spans[i];
+      if (span->length == 0) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "direct parameter %.*s source span %" PRIhsz
+                                " has zero byte length",
+                                (int)options->key.size, options->key.data, i);
+      }
+      if (span->target_offset != target_offset) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "direct parameter %.*s source spans must densely cover execution "
+            "storage in target order",
+            (int)options->key.size, options->key.data);
+      }
+      if (span->source_offset > source_byte_length ||
+          span->length > source_byte_length - span->source_offset) {
+        return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                "direct parameter %.*s source span %" PRIhsz
+                                " exceeds provider source byte length",
+                                (int)options->key.size, options->key.data, i);
+      }
+      if (!iree_device_size_checked_add(target_offset, span->length,
+                                        &target_offset) ||
+          target_offset > target_byte_length) {
+        return iree_make_status(
+            IREE_STATUS_OUT_OF_RANGE,
+            "direct parameter %.*s source spans exceed execution byte length",
+            (int)options->key.size, options->key.data);
+      }
+    }
+    if (target_offset != target_byte_length) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "direct parameter %.*s source spans do not cover execution storage",
+          (int)options->key.size, options->key.data);
+    }
+    return iree_ok_status();
+  }
   if (!iree_string_view_equal(source->key, options->key) ||
       source->dtype != options->dtype ||
       !id4_pipeline_program_shape_equal(source->shape, options->shape)) {
@@ -238,6 +298,18 @@ static iree_status_t id4_pipeline_program_validate_parameter_encoding(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "parameter %.*s source array is required",
                             (int)options->key.size, options->key.data);
+  }
+  if (options->source_span_count != 0 && !options->source_spans) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "parameter %.*s source span array is required",
+                            (int)options->key.size, options->key.data);
+  }
+  if (options->source_span_count != 0 &&
+      options->encoding != ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_DIRECT) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "parameter %.*s source spans are only supported for direct encoding",
+        (int)options->key.size, options->key.data);
   }
   for (iree_host_size_t i = 0; i < options->source_count; ++i) {
     IREE_RETURN_IF_ERROR(id4_pipeline_program_validate_parameter_source(
@@ -530,6 +602,13 @@ static bool id4_pipeline_program_parameter_source_equal(
          id4_pipeline_program_shape_equal(lhs->shape, rhs->shape);
 }
 
+static bool id4_pipeline_program_parameter_source_span_equal(
+    const id4_pipeline_program_parameter_source_span_t* lhs,
+    const id4_pipeline_program_parameter_source_span_t* rhs) {
+  return lhs->source_offset == rhs->source_offset &&
+         lhs->target_offset == rhs->target_offset && lhs->length == rhs->length;
+}
+
 static void id4_pipeline_program_free_parameter_sources(
     iree_host_size_t source_count,
     const id4_pipeline_program_parameter_source_t* source_values,
@@ -581,6 +660,22 @@ static iree_status_t id4_pipeline_program_copy_parameter_sources(
   return status;
 }
 
+static iree_status_t id4_pipeline_program_copy_parameter_source_spans(
+    iree_host_size_t source_count,
+    const id4_pipeline_program_parameter_source_span_t* source_values,
+    iree_allocator_t host_allocator,
+    const id4_pipeline_program_parameter_source_span_t** out_target_values) {
+  *out_target_values = NULL;
+  if (source_count == 0) return iree_ok_status();
+  id4_pipeline_program_parameter_source_span_t* target_values = NULL;
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(host_allocator, source_count,
+                                                   sizeof(target_values[0]),
+                                                   (void**)&target_values));
+  memcpy(target_values, source_values, source_count * sizeof(target_values[0]));
+  *out_target_values = target_values;
+  return iree_ok_status();
+}
+
 static void id4_pipeline_program_free_op(id4_pipeline_program_op_t* op,
                                          iree_allocator_t host_allocator) {
   if (!op) return;
@@ -602,6 +697,8 @@ static void id4_pipeline_program_free_op(id4_pipeline_program_op_t* op,
       id4_pipeline_program_free_parameter_sources(
           op->payload.parameter.source_count, op->payload.parameter.sources,
           host_allocator);
+      iree_allocator_free(host_allocator,
+                          (void*)op->payload.parameter.source_spans);
       break;
     case ID4_PIPELINE_PROGRAM_OP_KIND_CONSTANT:
       id4_pipeline_program_free_constant_data(op->payload.constant.data,
@@ -647,6 +744,14 @@ static iree_status_t id4_pipeline_program_copy_op(
           source->payload.parameter.sources, host_allocator,
           &target->payload.parameter.source_count,
           &target->payload.parameter.sources);
+      if (iree_status_is_ok(status)) {
+        target->payload.parameter.source_span_count =
+            source->payload.parameter.source_span_count;
+        status = id4_pipeline_program_copy_parameter_source_spans(
+            source->payload.parameter.source_span_count,
+            source->payload.parameter.source_spans, host_allocator,
+            &target->payload.parameter.source_spans);
+      }
       break;
     case ID4_PIPELINE_PROGRAM_OP_KIND_CONSTANT:
       target->payload.constant.tensor = source->payload.constant.tensor;
@@ -1111,7 +1216,9 @@ iree_status_t id4_pipeline_program_parameter(
           (int)options->key.size, options->key.data);
     }
     if (producer->payload.parameter.encoding != options->encoding ||
-        producer->payload.parameter.source_count != options->source_count) {
+        producer->payload.parameter.source_count != options->source_count ||
+        producer->payload.parameter.source_span_count !=
+            options->source_span_count) {
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
           "program parameter %.*s was requested with incompatible sources",
@@ -1124,6 +1231,17 @@ iree_status_t id4_pipeline_program_parameter(
             IREE_STATUS_INVALID_ARGUMENT,
             "program parameter %.*s was requested with incompatible source "
             "%" PRIhsz,
+            (int)options->key.size, options->key.data, i);
+      }
+    }
+    for (iree_host_size_t i = 0; i < options->source_span_count; ++i) {
+      if (!id4_pipeline_program_parameter_source_span_equal(
+              &producer->payload.parameter.source_spans[i],
+              &options->source_spans[i])) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "program parameter %.*s was requested with incompatible source "
+            "span %" PRIhsz,
             (int)options->key.size, options->key.data, i);
       }
     }
@@ -1144,6 +1262,8 @@ iree_status_t id4_pipeline_program_parameter(
               .encoding = options->encoding,
               .source_count = options->source_count,
               .sources = options->sources,
+              .source_span_count = options->source_span_count,
+              .source_spans = options->source_spans,
               .tensor = tensor,
           },
   };

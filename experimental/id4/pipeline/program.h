@@ -153,6 +153,16 @@ typedef struct id4_pipeline_program_parameter_source_t {
   id4_pipeline_program_shape_t shape;
 } id4_pipeline_program_parameter_source_t;
 
+// Provider-to-execution byte span used to assemble a direct parameter tensor.
+typedef struct id4_pipeline_program_parameter_source_span_t {
+  // Byte offset in the provider source tensor.
+  uint64_t source_offset;
+  // Byte offset in the execution parameter tensor.
+  iree_device_size_t target_offset;
+  // Byte length copied from the provider source into the execution tensor.
+  iree_device_size_t length;
+} id4_pipeline_program_parameter_source_span_t;
+
 // Tensor metadata copied into a semantic program.
 typedef struct id4_pipeline_program_tensor_record_t {
   // Stable tensor name used for diagnostics, taps, and plan dumps.
@@ -195,6 +205,10 @@ typedef struct id4_pipeline_program_parameter_op_t {
   iree_host_size_t source_count;
   // Provider source descriptors copied into the program.
   const id4_pipeline_program_parameter_source_t* sources;
+  // Number of explicit direct source spans.
+  iree_host_size_t source_span_count;
+  // Explicit direct source spans copied into the program.
+  const id4_pipeline_program_parameter_source_span_t* source_spans;
   // Initialized tensor whose record name is the provider key.
   id4_pipeline_program_tensor_t tensor;
 } id4_pipeline_program_parameter_op_t;
@@ -334,6 +348,10 @@ typedef struct id4_pipeline_program_parameter_options_t {
   id4_pipeline_program_dtype_t dtype;
   // Tensor shape.
   id4_pipeline_program_shape_t shape;
+  // Number of explicit direct source spans.
+  iree_host_size_t source_span_count;
+  // Explicit direct source spans borrowed for the call and copied by builder.
+  const id4_pipeline_program_parameter_source_span_t* source_spans;
 } id4_pipeline_program_parameter_options_t;
 
 // Options for adding a program-owned constant tensor.

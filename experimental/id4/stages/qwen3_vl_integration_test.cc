@@ -100,6 +100,13 @@ TEST(Qwen3VlStageIntegration, PrepareAndIssueForwardWithDenseParameters) {
   IREE_ASSERT_OK(id4::test::InferRank1TensorLengthFromFixture(
       fixture_tensors, IREE_SV("token_ids"), ID4_PIPELINE_TENSOR_DTYPE_I32,
       &token_count));
+  const id4::test::FixtureTensor* token_ids_fixture =
+      fixture_tensors.FindTensor(IREE_SV("input"), IREE_SV("token_ids"));
+  ASSERT_NE(token_ids_fixture, nullptr);
+  ASSERT_EQ(token_ids_fixture->payload.size(), token_count * sizeof(int32_t));
+  std::vector<int32_t> token_ids(token_count);
+  std::memcpy(token_ids.data(), token_ids_fixture->payload.data(),
+              token_ids_fixture->payload.size());
   const id4::test::FixtureTensor* expected_condition =
       fixture_tensors.FindTensor(IREE_SV("expected"), IREE_SV("condition"));
   ASSERT_NE(expected_condition, nullptr)
@@ -124,6 +131,7 @@ TEST(Qwen3VlStageIntegration, PrepareAndIssueForwardWithDenseParameters) {
   std::memset(&qwen_options, 0, sizeof(qwen_options));
   qwen_options.structure_size = sizeof(qwen_options);
   qwen_options.request.token_count = token_count;
+  qwen_options.request.token_ids = token_ids.data();
   qwen_options.weight_execution_strategy =
       ID4_QWEN3_VL_WEIGHT_EXECUTION_STRATEGY_ROW_MAJOR;
 

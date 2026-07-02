@@ -6,6 +6,8 @@
 
 #include "experimental/id4/stages/qwen3_vl.h"
 
+#include <vector>
+
 #include "experimental/id4/pipeline/plan.h"
 #include "experimental/id4/pipeline/stage.h"
 #include "experimental/id4/stages/test_util.h"
@@ -15,6 +17,8 @@
 namespace {
 
 static constexpr uint32_t kSelectedLayerOrdinals[] = {0, 1};
+static constexpr int32_t kSmallTokenIds[] = {
+    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18};
 
 static id4_qwen3_vl_model_config_t MakeModelConfig(uint32_t layer_count) {
   return id4_qwen3_vl_model_config_t{
@@ -112,6 +116,7 @@ TEST(Qwen3VlStage, PlansForwardStageFromRequestConfig) {
   memset(&qwen_options, 0, sizeof(qwen_options));
   qwen_options.structure_size = sizeof(qwen_options);
   qwen_options.request.token_count = 19;
+  qwen_options.request.token_ids = kSmallTokenIds;
   qwen_options.weight_execution_strategy =
       ID4_QWEN3_VL_WEIGHT_EXECUTION_STRATEGY_ROW_MAJOR;
 
@@ -168,10 +173,12 @@ TEST(Qwen3VlStage, PlansIdeogram4ForwardBoundaryContract) {
 
   constexpr uint32_t kTokenCounts[] = {64, 512};
   for (uint32_t token_count : kTokenCounts) {
+    std::vector<int32_t> token_ids(token_count, 0);
     id4_qwen3_vl_stage_plan_options_t qwen_options;
     memset(&qwen_options, 0, sizeof(qwen_options));
     qwen_options.structure_size = sizeof(qwen_options);
     qwen_options.request.token_count = token_count;
+    qwen_options.request.token_ids = token_ids.data();
     qwen_options.weight_execution_strategy =
         ID4_QWEN3_VL_WEIGHT_EXECUTION_STRATEGY_ROW_MAJOR;
 

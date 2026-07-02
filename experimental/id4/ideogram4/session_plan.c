@@ -271,11 +271,12 @@ static iree_status_t id4_ideogram4_plan_stage(
 static iree_status_t id4_ideogram4_plan_generation_qwen(
     id4_ideogram4_session_t* session,
     const id4_ideogram4_generation_plan_options_t* options,
-    uint32_t token_count, id4_pipeline_plan_t** out_plan) {
+    const id4_ideogram4_qwen_inputs_t* inputs, id4_pipeline_plan_t** out_plan) {
   id4_qwen3_vl_stage_plan_options_t qwen_options;
   memset(&qwen_options, 0, sizeof(qwen_options));
   qwen_options.structure_size = sizeof(qwen_options);
-  qwen_options.request.token_count = token_count;
+  qwen_options.request.token_count = inputs->token_count;
+  qwen_options.request.token_ids = inputs->token_ids;
   qwen_options.weight_execution_strategy =
       options->policy.qwen_weight_execution_strategy;
   return id4_ideogram4_plan_stage(ID4_IDEOGRAM4_GENERATION_STAGE_QWEN,
@@ -356,7 +357,6 @@ static iree_status_t id4_ideogram4_plan_generation_stages(
     id4_ideogram4_session_t* session,
     const id4_ideogram4_generation_plan_options_t* options,
     id4_ideogram4_generation_plan_t* plan) {
-  uint32_t token_count = 0;
   id4_ideogram4_qwen_lowering_options_t qwen_lowering_options;
   memset(&qwen_lowering_options, 0, sizeof(qwen_lowering_options));
   qwen_lowering_options.structure_size = sizeof(qwen_lowering_options);
@@ -365,54 +365,70 @@ static iree_status_t id4_ideogram4_plan_generation_stages(
   qwen_lowering_options.tokenizer_flags = options->tokenizer_flags;
   qwen_lowering_options.max_token_count = session->qwen_model.max_token_count;
   qwen_lowering_options.vocab_size = session->qwen_model.vocab_size;
-  IREE_RETURN_IF_ERROR(id4_ideogram4_request_count_qwen_tokens(
-      &qwen_lowering_options, session->host_allocator, &token_count));
+  id4_ideogram4_qwen_inputs_t qwen_inputs;
+  memset(&qwen_inputs, 0, sizeof(qwen_inputs));
+  iree_status_t status = id4_ideogram4_request_lower_qwen_inputs(
+      &qwen_lowering_options, session->host_allocator, &qwen_inputs);
 
   plan->summary.diffusion_latent_shape =
       id4_ideogram4_generation_request_diffusion_latent_shape(options->request);
-  plan->summary.qwen_token_count = token_count;
-  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_calculate_bf16_token_capacity(
-      token_count, &plan->summary.qwen_token_capacity));
-  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_image_token_count(
-      session->dit_model, plan->summary.diffusion_latent_shape,
-      &plan->summary.image_token_count));
-  if (plan->summary.image_token_count > UINT32_MAX - token_count) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "Ideogram4 generation conditioned token count "
-                            "overflow");
+  if (iree_status_is_ok(status)) {
+    plan->summary.qwen_token_count = qwen_inputs.token_count;
+    status = id4_qwen3_vl_program_calculate_bf16_token_capacity(
+        qwen_inputs.token_count, &plan->summary.qwen_token_capacity);
   }
-  plan->summary.conditioned_dit_token_count =
-      token_count + plan->summary.image_token_count;
-  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_calculate_bf16_token_capacity(
-      plan->summary.conditioned_dit_token_count,
-      &plan->summary.conditioned_dit_token_capacity));
-  plan->summary.unconditioned_dit_token_count = plan->summary.image_token_count;
-  IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_calculate_bf16_token_capacity(
-      plan->summary.unconditioned_dit_token_count,
-      &plan->summary.unconditioned_dit_token_capacity));
-  plan->summary.denoise_step_count =
-      options->request->generation.denoise_step_count;
-  plan->summary.decoded_image_shape =
-      id4_ideogram4_generation_decoded_image_shape(
-          session->decode_model, plan->summary.diffusion_latent_shape);
-  plan->summary.dit_activation_format = options->policy.dit_activation_format;
-  plan->summary.dit_weight_execution_format =
-      options->policy.dit_weight_execution_format;
-  plan->summary.qwen_weight_execution_strategy =
-      options->policy.qwen_weight_execution_strategy;
-  plan->summary.dit_attention_implementation =
-      options->policy.dit_attention_implementation;
-  plan->summary.dit_feed_forward_implementation =
-      options->policy.dit_feed_forward_implementation;
-  plan->summary.vae_tiling = options->policy.vae_tiling;
+  if (iree_status_is_ok(status)) {
+    status = id4_ideogram4_dit_program_image_token_count(
+        session->dit_model, plan->summary.diffusion_latent_shape,
+        &plan->summary.image_token_count);
+  }
+  if (iree_status_is_ok(status) &&
+      plan->summary.image_token_count > UINT32_MAX - qwen_inputs.token_count) {
+    status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "Ideogram4 generation conditioned token count "
+                              "overflow");
+  }
+  if (iree_status_is_ok(status)) {
+    plan->summary.conditioned_dit_token_count =
+        qwen_inputs.token_count + plan->summary.image_token_count;
+    status = id4_ideogram4_dit_program_calculate_bf16_token_capacity(
+        plan->summary.conditioned_dit_token_count,
+        &plan->summary.conditioned_dit_token_capacity);
+  }
+  if (iree_status_is_ok(status)) {
+    plan->summary.unconditioned_dit_token_count =
+        plan->summary.image_token_count;
+    status = id4_ideogram4_dit_program_calculate_bf16_token_capacity(
+        plan->summary.unconditioned_dit_token_count,
+        &plan->summary.unconditioned_dit_token_capacity);
+  }
+  if (iree_status_is_ok(status)) {
+    plan->summary.denoise_step_count =
+        options->request->generation.denoise_step_count;
+    plan->summary.decoded_image_shape =
+        id4_ideogram4_generation_decoded_image_shape(
+            session->decode_model, plan->summary.diffusion_latent_shape);
+    plan->summary.dit_activation_format = options->policy.dit_activation_format;
+    plan->summary.dit_weight_execution_format =
+        options->policy.dit_weight_execution_format;
+    plan->summary.qwen_weight_execution_strategy =
+        options->policy.qwen_weight_execution_strategy;
+    plan->summary.dit_attention_implementation =
+        options->policy.dit_attention_implementation;
+    plan->summary.dit_feed_forward_implementation =
+        options->policy.dit_feed_forward_implementation;
+    plan->summary.vae_tiling = options->policy.vae_tiling;
+  }
 
-  iree_status_t status = id4_ideogram4_plan_generation_qwen(
-      session, options, token_count, &plan->qwen_plan);
+  if (iree_status_is_ok(status)) {
+    status = id4_ideogram4_plan_generation_qwen(session, options, &qwen_inputs,
+                                                &plan->qwen_plan);
+  }
   if (iree_status_is_ok(status)) {
     status = id4_ideogram4_plan_generation_dit(
         session->dit_conditioned_stage, options,
-        ID4_IDEOGRAM4_DIT_CONDITIONING_MODE_CONDITIONED, token_count,
-        &plan->dit_conditioned_plan);
+        ID4_IDEOGRAM4_DIT_CONDITIONING_MODE_CONDITIONED,
+        qwen_inputs.token_count, &plan->dit_conditioned_plan);
   }
   if (iree_status_is_ok(status)) {
     status = id4_ideogram4_plan_generation_dit(
@@ -432,6 +448,7 @@ static iree_status_t id4_ideogram4_plan_generation_stages(
     status = id4_ideogram4_plan_generation_decode(session, options,
                                                   &plan->decode_plan);
   }
+  id4_ideogram4_qwen_inputs_deinitialize(&qwen_inputs, session->host_allocator);
   return status;
 }
 

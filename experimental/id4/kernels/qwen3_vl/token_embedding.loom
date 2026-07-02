@@ -40,11 +40,13 @@ kernel.def export("id4_qwen3_vl_token_embedding_bf16_f32") @id4_qwen3_vl_token_e
     %channel = index.rem %element_index, %hidden_size : index
     %is_real_token = index.cmp ult, %token, %token_count : index
     scf.if %is_real_token {
-      %source_token_i32 = view.load %token_ids_view[%token] : view<[%token_count]xi32, #dense> -> i32
+      %valid_token = index.assume %token [ge(%token, 0), lt(%token, %token_count)] : index
+      %valid_channel = index.assume %channel [ge(%channel, 0), lt(%channel, %hidden_size)] : index
+      %source_token_i32 = view.load %token_ids_view[%valid_token] : view<[%token_count]xi32, #dense> -> i32
       %source_token = index.cast %source_token_i32 : i32 to index
-      %embedded_bf16 = view.load %embedding_view[%source_token, %channel] : view<[%vocab_size]x[%hidden_size]xbf16, #dense> -> bf16
+      %embedded_bf16 = view.load %embedding_view[%source_token, %valid_channel] : view<[%vocab_size]x[%hidden_size]xbf16, #dense> -> bf16
       %embedded = scalar.extf %embedded_bf16 : bf16 to f32
-      view.store %embedded, %output_view[%token, %channel] : f32, view<[%dispatch_token_count]x[%hidden_size]xf32, #dense>
+      view.store %embedded, %output_view[%valid_token, %valid_channel] : f32, view<[%dispatch_token_count]x[%hidden_size]xf32, #dense>
     } else {
       %zero = scalar.constant 0.0 : f32
       view.store %zero, %output_view[%token, %channel] : f32, view<[%dispatch_token_count]x[%hidden_size]xf32, #dense>
@@ -87,13 +89,57 @@ kernel.def export("id4_qwen3_vl_token_embedding_bf16_bf16") @id4_qwen3_vl_token_
     %channel = index.rem %element_index, %hidden_size : index
     %is_real_token = index.cmp ult, %token, %token_count : index
     scf.if %is_real_token {
-      %source_token_i32 = view.load %token_ids_view[%token] : view<[%token_count]xi32, #dense> -> i32
+      %valid_token = index.assume %token [ge(%token, 0), lt(%token, %token_count)] : index
+      %valid_channel = index.assume %channel [ge(%channel, 0), lt(%channel, %hidden_size)] : index
+      %source_token_i32 = view.load %token_ids_view[%valid_token] : view<[%token_count]xi32, #dense> -> i32
       %source_token = index.cast %source_token_i32 : i32 to index
-      %embedded = view.load %embedding_view[%source_token, %channel] : view<[%vocab_size]x[%hidden_size]xbf16, #dense> -> bf16
-      view.store %embedded, %output_view[%token, %channel] : bf16, view<[%dispatch_token_count]x[%hidden_size]xbf16, #dense>
+      %embedded = view.load %embedding_view[%source_token, %valid_channel] : view<[%vocab_size]x[%hidden_size]xbf16, #dense> -> bf16
+      view.store %embedded, %output_view[%valid_token, %valid_channel] : bf16, view<[%dispatch_token_count]x[%hidden_size]xbf16, #dense>
     } else {
       %zero = scalar.constant 0.0 : bf16
       view.store %zero, %output_view[%token, %channel] : bf16, view<[%dispatch_token_count]x[%hidden_size]xbf16, #dense>
+    }
+  }
+  kernel.return
+}
+
+kernel.def export("id4_qwen3_vl_token_embedding_rows_bf16_bf16") @id4_qwen3_vl_token_embedding_rows_bf16_bf16() {
+  %unit = index.constant 1 : index
+  %workgroup_size_x = index.constant 256 : index
+  %dispatch_token_count = config.get @id4.qwen3_vl.token_embedding.dispatch_token_count : index
+  %hidden_size = config.get @id4.qwen3_vl.token_embedding.hidden_size : index
+  %element_count = index.mul %dispatch_token_count, %hidden_size : index
+  %rounding = index.sub %workgroup_size_x, %unit : index
+  %rounded = index.add %element_count, %rounding : index
+  %workgroups_x = index.div %rounded, %workgroup_size_x : index
+  kernel.launch.config workgroups(%workgroups_x, %unit, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
+} launch(%embedding_rows: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %workgroup = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %workgroup_size_x = index.constant 256 : index
+  %token_count = config.get @id4.qwen3_vl.token_embedding.token_count : index
+  %dispatch_token_count = config.get @id4.qwen3_vl.token_embedding.dispatch_token_count : index
+  %hidden_size = config.get @id4.qwen3_vl.token_embedding.hidden_size : index
+  %element_count = index.mul %dispatch_token_count, %hidden_size : index
+  %embedding_element_count = index.mul %token_count, %hidden_size : index
+  %element_index = index.madd %workgroup, %workgroup_size_x, %lane : index
+  %in_bounds = index.cmp ult, %element_index, %element_count : index
+  %embedding_rows_noalias, %output_noalias = buffer.assume.noalias %embedding_rows, %output : buffer, buffer
+  %embedding_rows_global = buffer.assume.memory_space<global> %embedding_rows_noalias : buffer
+  %output_global = buffer.assume.memory_space<global> %output_noalias : buffer
+  %embedding_rows_view = buffer.view %embedding_rows_global[%base] : buffer -> view<[%embedding_element_count]xbf16, #dense>
+  %output_view = buffer.view %output_global[%base] : buffer -> view<[%element_count]xbf16, #dense>
+  scf.if %in_bounds {
+    %valid_output_index = index.assume %element_index [ge(%element_index, 0), lt(%element_index, %element_count)] : index
+    %is_real_element = index.cmp ult, %element_index, %embedding_element_count : index
+    scf.if %is_real_element {
+      %valid_embedding_index = index.assume %element_index [ge(%element_index, 0), lt(%element_index, %embedding_element_count)] : index
+      %embedded = view.load %embedding_rows_view[%valid_embedding_index] : view<[%embedding_element_count]xbf16, #dense> -> bf16
+      view.store %embedded, %output_view[%valid_output_index] : bf16, view<[%element_count]xbf16, #dense>
+    } else {
+      %zero = scalar.constant 0.0 : bf16
+      view.store %zero, %output_view[%valid_output_index] : bf16, view<[%element_count]xbf16, #dense>
     }
   }
   kernel.return
@@ -129,6 +175,24 @@ check.case public @id4_qwen3_vl_token_embedding_bf16_bf16_padded_tail_case {
   check.return
 }
 
+check.case public @id4_qwen3_vl_token_embedding_rows_bf16_bf16_copy_case {
+  %embedding_rows = check.generate.iota offset(1.0) step(1.0) : tensor<2x4xbf16>
+  %output = check.generate.fill value(0.0) : tensor<2x4xbf16>
+  %expected = check.generate.iota offset(1.0) step(1.0) : tensor<2x4xbf16>
+  func.call @id4_qwen3_vl_token_embedding_rows_bf16_bf16(%embedding_rows, %output) : (tensor<2x4xbf16>, tensor<2x4xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2x4xbf16>
+  check.return
+}
+
+check.case public @id4_qwen3_vl_token_embedding_rows_bf16_bf16_padded_tail_case {
+  %embedding_rows = check.generate.fill value(0.0) : tensor<2x4xbf16>
+  %output = check.generate.fill value(1.0) : tensor<4x4xbf16>
+  %expected = check.generate.fill value(0.0) : tensor<4x4xbf16>
+  func.call @id4_qwen3_vl_token_embedding_rows_bf16_bf16(%embedding_rows, %output) : (tensor<2x4xbf16>, tensor<4x4xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<4x4xbf16>
+  check.return
+}
+
 check.case public @id4_qwen3_vl_token_embedding_bf16_f32_qwen_slice_case {
   %token_ids = check.generate.fill value(0) : tensor<64xi32>
   %embedding = check.generate.fill value(3.0) : tensor<151936x4096xbf16>
@@ -144,5 +208,9 @@ check.benchmark<@id4_qwen3_vl_token_embedding_bf16_f32_small_case> @id4_qwen3_vl
 check.benchmark<@id4_qwen3_vl_token_embedding_bf16_bf16_small_case> @id4_qwen3_vl_token_embedding_bf16_bf16_small
 
 check.benchmark<@id4_qwen3_vl_token_embedding_bf16_bf16_padded_tail_case> @id4_qwen3_vl_token_embedding_bf16_bf16_padded_tail
+
+check.benchmark<@id4_qwen3_vl_token_embedding_rows_bf16_bf16_copy_case> @id4_qwen3_vl_token_embedding_rows_bf16_bf16_copy
+
+check.benchmark<@id4_qwen3_vl_token_embedding_rows_bf16_bf16_padded_tail_case> @id4_qwen3_vl_token_embedding_rows_bf16_bf16_padded_tail
 
 check.benchmark<@id4_qwen3_vl_token_embedding_bf16_f32_qwen_slice_case> @id4_qwen3_vl_token_embedding_bf16_f32_qwen_slice

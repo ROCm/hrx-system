@@ -347,20 +347,15 @@ static iree_status_t id4_ideogram4_generation_upload_qwen_inputs(
     id4_ideogram4_generation_execution_t* execution,
     const id4_ideogram4_qwen_inputs_t* inputs,
     iree_hal_semaphore_list_t initial_wait_semaphore_list) {
-  const iree_host_size_t token_ids_length =
-      inputs->token_count * (iree_host_size_t)sizeof(inputs->token_ids[0]);
   const iree_host_size_t attention_mask_length =
       inputs->token_count * (iree_host_size_t)inputs->token_count *
       sizeof(inputs->attention_mask[0]);
   const iree_host_size_t token_weights_length =
       inputs->token_count * (iree_host_size_t)sizeof(inputs->token_weights[0]);
   IREE_RETURN_IF_ERROR(id4_ideogram4_generation_upload_boundary_tensor(
-      execution, ID4_IDEOGRAM4_GENERATION_STAGE_QWEN, IREE_SV("token_ids"),
-      inputs->token_ids, token_ids_length, initial_wait_semaphore_list));
-  IREE_RETURN_IF_ERROR(id4_ideogram4_generation_upload_boundary_tensor(
       execution, ID4_IDEOGRAM4_GENERATION_STAGE_QWEN, IREE_SV("attention_mask"),
       inputs->attention_mask, attention_mask_length,
-      iree_hal_semaphore_list_empty()));
+      initial_wait_semaphore_list));
   return id4_ideogram4_generation_upload_boundary_tensor(
       execution, ID4_IDEOGRAM4_GENERATION_STAGE_QWEN, IREE_SV("token_weights"),
       inputs->token_weights, token_weights_length,

@@ -185,13 +185,14 @@ static iree_status_t CreateDecodeStage(
 }
 
 static iree_status_t PlanQwenStage(
-    id4_pipeline_stage_t* stage, uint32_t token_count,
+    id4_pipeline_stage_t* stage, uint32_t token_count, const int32_t* token_ids,
     id4_pipeline_diagnostics_sink_t* diagnostics_sink,
     id4_pipeline_plan_t** out_plan) {
   id4_qwen3_vl_stage_plan_options_t qwen_options;
   std::memset(&qwen_options, 0, sizeof(qwen_options));
   qwen_options.structure_size = sizeof(qwen_options);
   qwen_options.request.token_count = token_count;
+  qwen_options.request.token_ids = token_ids;
   qwen_options.weight_execution_strategy =
       ID4_QWEN3_VL_WEIGHT_EXECUTION_STRATEGY_ROW_MAJOR;
 
@@ -462,6 +463,14 @@ TEST(Ideogram4OneStepIntegration,
   IREE_ASSERT_OK(id4::test::InferRank1TensorLengthFromFixture(
       qwen_tensors, IREE_SV("token_ids"), ID4_PIPELINE_TENSOR_DTYPE_I32,
       &qwen_token_count));
+  const id4::test::FixtureTensor* qwen_token_ids_fixture =
+      qwen_tensors.FindTensor(IREE_SV("input"), IREE_SV("token_ids"));
+  ASSERT_NE(qwen_token_ids_fixture, nullptr);
+  ASSERT_EQ(qwen_token_ids_fixture->payload.size(),
+            qwen_token_count * sizeof(int32_t));
+  std::vector<int32_t> qwen_token_ids(qwen_token_count);
+  std::memcpy(qwen_token_ids.data(), qwen_token_ids_fixture->payload.data(),
+              qwen_token_ids_fixture->payload.size());
   id4_ideogram4_dit_request_config_t dit_cond_request;
   IREE_ASSERT_OK(
       ConfigureDitRequestFromFixture(dit_cond_tensors, &dit_cond_request));
@@ -531,7 +540,8 @@ TEST(Ideogram4OneStepIntegration,
   id4::test::OwningRef<id4_pipeline_plan_t, id4_pipeline_plan_release>
       qwen_plan;
   IREE_ASSERT_OK(PlanQwenStage(qwen_stage.get(), qwen_token_count,
-                               &diagnostics_sink, qwen_plan.out()));
+                               qwen_token_ids.data(), &diagnostics_sink,
+                               qwen_plan.out()));
   id4::test::OwningRef<id4_pipeline_plan_t, id4_pipeline_plan_release>
       dit_cond_plan;
   IREE_ASSERT_OK(PlanDitStage(dit_cond_stage.get(), dit_cond_request,

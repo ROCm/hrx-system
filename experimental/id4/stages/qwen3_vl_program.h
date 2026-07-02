@@ -46,6 +46,8 @@ typedef struct id4_qwen3_vl_model_config_t {
 typedef struct id4_qwen3_vl_request_config_t {
   // Number of token positions in the forward pass.
   uint32_t token_count;
+  // Token ids used to assemble the compact prompt-local embedding rows.
+  const int32_t* token_ids;
 } id4_qwen3_vl_request_config_t;
 
 // Qwen3-VL linear weight execution strategy selected by the planner.
@@ -86,6 +88,8 @@ typedef struct id4_qwen3_vl_program_options_t {
   id4_qwen3_vl_model_config_t model;
   // Dynamic request dimensions.
   id4_qwen3_vl_request_config_t request;
+  // Host allocator used for transient authoring tables.
+  iree_allocator_t host_allocator;
   // Linear weight execution strategy selected for this program.
   id4_qwen3_vl_weight_execution_strategy_t weight_execution_strategy;
   // Diagnostic tap names requested by the caller during planning.

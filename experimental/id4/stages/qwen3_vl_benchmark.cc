@@ -6,6 +6,7 @@
 
 #include <cinttypes>
 #include <cstring>
+#include <vector>
 
 #include "experimental/id4/pipeline/plan.h"
 #include "experimental/id4/pipeline/stage.h"
@@ -92,6 +93,8 @@ struct QwenBenchmarkContext {
   iree_host_size_t parameter_load_prefetch_region_distance = 0;
   // Fixture tensors used by fixture-backed issue benchmarks.
   id4::test::FixtureTensorSet fixture_tensors;
+  // Token id storage backing |request|.
+  std::vector<int32_t> token_id_storage;
   // Dynamic request dimensions used by fixture-backed benchmarks.
   id4_qwen3_vl_request_config_t request = {};
   // Diagnostic event counters collected by lifecycle calls.
@@ -189,6 +192,22 @@ static iree_status_t CreateLoadedQwenBenchmarkContext(
   return AttachQwenPreparationInputs(out_context);
 }
 
+static id4_qwen3_vl_request_config_t MakeSyntheticQwenRequest(
+    uint32_t token_count, std::vector<int32_t>* token_id_storage) {
+  token_id_storage->assign(token_count, 0);
+  id4_qwen3_vl_request_config_t request = {};
+  request.token_count = token_count;
+  request.token_ids = token_id_storage->data();
+  return request;
+}
+
+static iree_status_t ConfigureSyntheticQwenRequest(
+    QwenBenchmarkContext* context, uint32_t token_count) {
+  context->request =
+      MakeSyntheticQwenRequest(token_count, &context->token_id_storage);
+  return iree_ok_status();
+}
+
 static iree_status_t LoadFixtureAndConfigureRequest(
     QwenBenchmarkContext* context) {
   const iree_string_view_t fixture_directory =
@@ -199,9 +218,29 @@ static iree_status_t LoadFixtureAndConfigureRequest(
   }
   IREE_RETURN_IF_ERROR(id4::test::LoadFixtureTensors(
       fixture_directory, &context->fixture_tensors));
-  return id4::test::InferRank1TensorLengthFromFixture(
+  uint32_t token_count = 0;
+  IREE_RETURN_IF_ERROR(id4::test::InferRank1TensorLengthFromFixture(
       context->fixture_tensors, IREE_SV("token_ids"),
-      ID4_PIPELINE_TENSOR_DTYPE_I32, &context->request.token_count);
+      ID4_PIPELINE_TENSOR_DTYPE_I32, &token_count));
+  const id4::test::FixtureTensor* token_ids =
+      context->fixture_tensors.FindTensor(IREE_SV("input"),
+                                          IREE_SV("token_ids"));
+  if (!token_ids) {
+    return iree_make_status(IREE_STATUS_NOT_FOUND,
+                            "fixture token_ids input tensor is required");
+  }
+  if (token_ids->payload.size() !=
+      token_count * (iree_host_size_t)sizeof(int32_t)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "fixture token_ids payload length does not match token count");
+  }
+  context->token_id_storage.assign(token_count, 0);
+  std::memcpy(context->token_id_storage.data(), token_ids->payload.data(),
+              token_ids->payload.size());
+  context->request.token_count = token_count;
+  context->request.token_ids = context->token_id_storage.data();
+  return iree_ok_status();
 }
 
 static iree_status_t CreateLoadedQwenFixtureStageContext(
@@ -435,9 +474,6 @@ static iree_status_t QueueFillSyntheticQwenInputs(
     const id4::test::BufferBindingSet& boundary_bindings,
     iree_hal_semaphore_t* fill_semaphore, uint64_t* inout_fill_value) {
   IREE_ASSERT_ARGUMENT(inout_fill_value);
-  iree_hal_buffer_binding_t token_ids_binding = {};
-  IREE_RETURN_IF_ERROR(id4::test::FindBoundaryBinding(
-      plan, boundary_bindings, IREE_SV("token_ids"), &token_ids_binding));
   iree_hal_buffer_binding_t attention_mask_binding = {};
   IREE_RETURN_IF_ERROR(id4::test::FindBoundaryBinding(plan, boundary_bindings,
                                                       IREE_SV("attention_mask"),
@@ -447,10 +483,6 @@ static iree_status_t QueueFillSyntheticQwenInputs(
                                                       IREE_SV("token_weights"),
                                                       &token_weights_binding));
 
-  const int32_t token_id = 0;
-  IREE_RETURN_IF_ERROR(id4::test::QueueFillBinding(
-      device, queue_affinity, &token_ids_binding, &token_id, sizeof(token_id),
-      fill_semaphore, inout_fill_value));
   const float attention_mask = 0.0f;
   IREE_RETURN_IF_ERROR(id4::test::QueueFillBinding(
       device, queue_affinity, &attention_mask_binding, &attention_mask,
@@ -560,8 +592,9 @@ IREE_BENCHMARK_FN(BM_Qwen3VlStagePlan) {
   const QwenBenchmarkShape& shape = QwenBenchmarkShapeFromDef(benchmark_def);
   QwenBenchmarkContext context;
   IREE_RETURN_IF_ERROR(CreateLoadedQwenStageContext(&context));
-  id4_qwen3_vl_request_config_t request = {};
-  request.token_count = shape.token_count;
+  std::vector<int32_t> token_id_storage;
+  id4_qwen3_vl_request_config_t request =
+      MakeSyntheticQwenRequest(shape.token_count, &token_id_storage);
 
   bool wrote_initial_plan_json = false;
   uint64_t iteration_count = 0;
@@ -621,8 +654,9 @@ IREE_BENCHMARK_FN(BM_Qwen3VlStagePrepareCachedKernels) {
   const QwenBenchmarkShape& shape = QwenBenchmarkShapeFromDef(benchmark_def);
   QwenBenchmarkContext context;
   IREE_RETURN_IF_ERROR(CreateLoadedQwenBenchmarkContext(&context));
-  id4_qwen3_vl_request_config_t request = {};
-  request.token_count = shape.token_count;
+  std::vector<int32_t> token_id_storage;
+  id4_qwen3_vl_request_config_t request =
+      MakeSyntheticQwenRequest(shape.token_count, &token_id_storage);
 
   id4::test::OwningRef<id4_pipeline_plan_t, id4_pipeline_plan_release> plan;
   IREE_RETURN_IF_ERROR(CreateQwenPlan(&context, request, plan.out()));
@@ -1008,7 +1042,8 @@ static iree_status_t RunSyntheticIssueBenchmark(
   const QwenBenchmarkShape& shape = QwenBenchmarkShapeFromDef(benchmark_def);
   QwenBenchmarkContext context;
   IREE_RETURN_IF_ERROR(CreateLoadedQwenBenchmarkContext(&context));
-  context.request.token_count = shape.token_count;
+  IREE_RETURN_IF_ERROR(
+      ConfigureSyntheticQwenRequest(&context, shape.token_count));
   return RunIssueBenchmarkWithPreparedContext(
       benchmark_state, &context, timing_mode, QueueSyntheticQwenInputs);
 }
@@ -1028,7 +1063,8 @@ static iree_status_t RunSyntheticPrepareIssueBenchmark(
   const QwenBenchmarkShape& shape = QwenBenchmarkShapeFromDef(benchmark_def);
   QwenBenchmarkContext context;
   IREE_RETURN_IF_ERROR(CreateLoadedQwenBenchmarkContext(&context));
-  context.request.token_count = shape.token_count;
+  IREE_RETURN_IF_ERROR(
+      ConfigureSyntheticQwenRequest(&context, shape.token_count));
   return RunPrepareIssueBenchmarkWithContext(benchmark_state, &context,
                                              QwenParameterLoadMode::kEager,
                                              QueueSyntheticQwenInputs);
@@ -1040,7 +1076,8 @@ static iree_status_t RunSyntheticDeferredPrepareIssueBenchmark(
   const QwenBenchmarkShape& shape = QwenBenchmarkShapeFromDef(benchmark_def);
   QwenBenchmarkContext context;
   IREE_RETURN_IF_ERROR(CreateLoadedQwenBenchmarkContext(&context));
-  context.request.token_count = shape.token_count;
+  IREE_RETURN_IF_ERROR(
+      ConfigureSyntheticQwenRequest(&context, shape.token_count));
   return RunPrepareIssueBenchmarkWithContext(benchmark_state, &context,
                                              QwenParameterLoadMode::kDeferred,
                                              QueueSyntheticQwenInputs);
