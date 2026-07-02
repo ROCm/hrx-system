@@ -4409,8 +4409,8 @@ static iree_status_t loom_amdgpu_emit_fragment_repack_source_register_masks(
       break;
     }
     default:
-      return iree_make_status(IREE_STATUS_INTERNAL,
-                              "unknown AMDGPU fragment repack source map");
+      IREE_ASSERT_UNREACHABLE("unknown AMDGPU fragment repack source map");
+      IREE_BUILTIN_UNREACHABLE();
   }
   for (uint16_t i = 1; i < plan->source_register_count; ++i) {
     IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fragment_memory_cmp_u32_lit(
@@ -4450,8 +4450,8 @@ static iree_status_t loom_amdgpu_emit_fragment_repack_lane_group_byte_base(
       break;
     }
     default:
-      return iree_make_status(IREE_STATUS_INTERNAL,
-                              "unknown AMDGPU fragment repack source map");
+      IREE_ASSERT_UNREACHABLE("unknown AMDGPU fragment repack source map");
+      IREE_BUILTIN_UNREACHABLE();
   }
   IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_shift(
       context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_LSHLREV_B32_LIT,
@@ -4605,8 +4605,8 @@ iree_status_t loom_amdgpu_lower_vector_fragment_repack(
     default:
       break;
   }
-  return iree_make_status(IREE_STATUS_INTERNAL,
-                          "unknown AMDGPU fragment repack strategy");
+  IREE_ASSERT_UNREACHABLE("unknown AMDGPU fragment repack strategy");
+  IREE_BUILTIN_UNREACHABLE();
 }
 
 static iree_status_t loom_amdgpu_emit_fragment_memory_fp8_source_byte(
