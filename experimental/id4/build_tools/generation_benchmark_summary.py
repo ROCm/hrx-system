@@ -260,6 +260,66 @@ def _sum_parameter_load_kind_statistics(
     return totals
 
 
+def _max_parameter_window_blockers(
+    stages: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    largest_load_group_byte_length = 0
+    largest_load_group_stage = None
+    largest_load_group_index = None
+    largest_request_byte_length = 0
+    largest_request_stage = None
+    largest_request_index = None
+    largest_request_load_group_index = None
+    for stage_name, stage in stages.items():
+        window_statistics = _require_list(
+            stage.get("parameter_window_statistics"),
+            f"stages.{stage_name}.parameter_window_statistics",
+        )
+        for window_index, window_value in enumerate(window_statistics):
+            context = f"stages.{stage_name}.parameter_window_statistics[{window_index}]"
+            window = _require_object(window_value, context)
+            load_group_byte_length = int(
+                _require_number(
+                    window.get("largest_load_group_target_byte_length"),
+                    f"{context}.largest_load_group_target_byte_length",
+                )
+            )
+            if load_group_byte_length > largest_load_group_byte_length:
+                largest_load_group_byte_length = load_group_byte_length
+                largest_load_group_stage = stage_name
+                largest_load_group_index = window.get("largest_load_group_index")
+            request_byte_length = int(
+                _require_number(
+                    window.get("largest_request_target_byte_length"),
+                    f"{context}.largest_request_target_byte_length",
+                )
+            )
+            if request_byte_length > largest_request_byte_length:
+                largest_request_byte_length = request_byte_length
+                largest_request_stage = stage_name
+                largest_request_index = window.get("largest_request_index")
+                largest_request_load_group_index = window.get(
+                    "largest_request_load_group_index"
+                )
+    return {
+        "parameter_window_largest_load_group_byte_length": (
+            largest_load_group_byte_length
+        ),
+        "parameter_window_largest_load_group_mib": _ceil_mib(
+            largest_load_group_byte_length
+        ),
+        "parameter_window_largest_load_group_stage": largest_load_group_stage,
+        "parameter_window_largest_load_group_index": largest_load_group_index,
+        "parameter_window_largest_request_byte_length": largest_request_byte_length,
+        "parameter_window_largest_request_mib": _ceil_mib(largest_request_byte_length),
+        "parameter_window_largest_request_stage": largest_request_stage,
+        "parameter_window_largest_request_index": largest_request_index,
+        "parameter_window_largest_request_load_group_index": (
+            largest_request_load_group_index
+        ),
+    }
+
+
 def _require_equal(actual: Any, expected: Any, context: str) -> None:
     if actual != expected:
         raise GenerationBenchmarkSummaryError(
@@ -828,6 +888,7 @@ def summarize_generation_benchmark(
         residency = plan_metrics["residency"]
         stages = plan_metrics["stages"]
         load_kind_statistics = _sum_parameter_load_kind_statistics(stages)
+        parameter_window_blockers = _max_parameter_window_blockers(stages)
         row = {
             "bucket": bucket,
             "benchmark": name,
@@ -910,6 +971,7 @@ def summarize_generation_benchmark(
             "stages": stages,
         }
         row.update(load_kind_statistics)
+        row.update(parameter_window_blockers)
         label = benchmark_object.get("label")
         if label is not None:
             label_metrics = _parse_generation_benchmark_label(
@@ -957,6 +1019,8 @@ _MARKDOWN_COLUMNS = (
     ("issue encodes", "issue_encode_window_dispatch_count"),
     ("staging MiB", "issue_encode_window_staging_mib"),
     ("max staging MiB", "issue_encode_window_staging_max_mib"),
+    ("max group MiB", "parameter_window_largest_load_group_mib"),
+    ("max request MiB", "parameter_window_largest_request_mib"),
     ("dispatches", "runtime_dispatch_count"),
 )
 

@@ -149,6 +149,8 @@ def stage_statistics(
     kernels: int,
     dispatches: int,
     load_kinds: dict | None = None,
+    largest_window_load_group_mib: int | None = None,
+    largest_window_request_mib: int | None = None,
 ) -> dict:
     if load_kinds is None:
         load_kinds = load_kind_statistics(
@@ -159,6 +161,11 @@ def stage_statistics(
             fp8_bf16_rhs_source_mib=source_encoded_mib,
             fp8_bf16_rhs_target_mib=source_encoded_mib,
         )
+    has_parameter_loads = gather_loads + encode_loads != 0
+    if largest_window_load_group_mib is None:
+        largest_window_load_group_mib = max(source_direct_mib, source_encoded_mib)
+    if largest_window_request_mib is None:
+        largest_window_request_mib = largest_window_load_group_mib
     return {
         "statistics": {
             "parameter_slab_byte_length": parameter_mib * MIB,
@@ -183,7 +190,31 @@ def stage_statistics(
             "operation_count": dispatches,
             "dispatch_count": dispatches,
             "parameter_load_kind_statistics": load_kinds,
-        }
+        },
+        "parameter_window_statistics": [
+            {
+                "region_window_size": 1,
+                "window_count": 1,
+                "full_slab_target_byte_length": parameter_mib * MIB,
+                "peak_window_target_byte_length": largest_window_load_group_mib * MIB,
+                "peak_window_source_byte_length": largest_window_load_group_mib * MIB,
+                "total_window_target_byte_length": parameter_mib * MIB,
+                "total_window_source_byte_length": source_mib * MIB,
+                "peak_window_load_group_count": gather_loads + encode_loads,
+                "total_window_load_group_count": gather_loads + encode_loads,
+                "peak_window_encode_load_step_count": encode_loads,
+                "total_window_encode_load_step_count": encode_loads,
+                "largest_load_group_target_byte_length": (
+                    largest_window_load_group_mib * MIB
+                ),
+                "largest_load_group_index": 0 if has_parameter_loads else None,
+                "largest_request_target_byte_length": largest_window_request_mib * MIB,
+                "largest_request_index": 0 if has_parameter_loads else None,
+                "largest_request_load_group_index": (
+                    0 if has_parameter_loads else None
+                ),
+            }
+        ],
     }
 
 
@@ -270,7 +301,27 @@ def minimal_generation_plan(qwen_token_count: int) -> dict:
                         gather_source_byte_length=2048,
                         gather_target_byte_length=2048,
                     ),
-                }
+                },
+                "parameter_window_statistics": [
+                    {
+                        "region_window_size": 1,
+                        "window_count": 1,
+                        "full_slab_target_byte_length": 2048,
+                        "peak_window_target_byte_length": 2048,
+                        "peak_window_source_byte_length": 2048,
+                        "total_window_target_byte_length": 2048,
+                        "total_window_source_byte_length": 2048,
+                        "peak_window_load_group_count": 1,
+                        "total_window_load_group_count": 1,
+                        "peak_window_encode_load_step_count": 0,
+                        "total_window_encode_load_step_count": 0,
+                        "largest_load_group_target_byte_length": 2048,
+                        "largest_load_group_index": 0,
+                        "largest_request_target_byte_length": 2048,
+                        "largest_request_index": 0,
+                        "largest_request_load_group_index": 0,
+                    }
+                ],
             },
             "decode": {
                 "statistics": {
@@ -300,7 +351,27 @@ def minimal_generation_plan(qwen_token_count: int) -> dict:
                         gather_source_byte_length=95,
                         gather_target_byte_length=95,
                     ),
-                }
+                },
+                "parameter_window_statistics": [
+                    {
+                        "region_window_size": 1,
+                        "window_count": 1,
+                        "full_slab_target_byte_length": 95,
+                        "peak_window_target_byte_length": 95,
+                        "peak_window_source_byte_length": 95,
+                        "total_window_target_byte_length": 95,
+                        "total_window_source_byte_length": 95,
+                        "peak_window_load_group_count": 1,
+                        "total_window_load_group_count": 1,
+                        "peak_window_encode_load_step_count": 0,
+                        "total_window_encode_load_step_count": 0,
+                        "largest_load_group_target_byte_length": 95,
+                        "largest_load_group_index": 0,
+                        "largest_request_target_byte_length": 95,
+                        "largest_request_index": 0,
+                        "largest_request_load_group_index": 0,
+                    }
+                ],
             },
         },
     }
@@ -337,6 +408,8 @@ def live_label_generation_plan() -> dict:
             boundary_mib=4,
             kernels=28,
             dispatches=485,
+            largest_window_load_group_mib=1187,
+            largest_window_request_mib=1187,
             load_kinds=load_kind_statistics(
                 gather_steps=36,
                 gather_source_mib=4068,
@@ -357,6 +430,8 @@ def live_label_generation_plan() -> dict:
             boundary_mib=5,
             kernels=27,
             dispatches=458,
+            largest_window_load_group_mib=556,
+            largest_window_request_mib=256,
             load_kinds=load_kind_statistics(
                 gather_steps=143,
                 gather_source_mib=3,
@@ -377,6 +452,8 @@ def live_label_generation_plan() -> dict:
             boundary_mib=1,
             kernels=24,
             dispatches=455,
+            largest_window_load_group_mib=556,
+            largest_window_request_mib=256,
             load_kinds=load_kind_statistics(
                 gather_steps=142,
                 gather_source_mib=3,
@@ -562,6 +639,11 @@ class GenerationBenchmarkSummaryTest(unittest.TestCase):
             self.assertEqual(row["issue_encode_window_count"], 2)
             self.assertEqual(row["issue_encode_window_staging_mib"], 1081)
             self.assertEqual(row["issue_encode_window_dispatch_count"], 318)
+            self.assertEqual(row["parameter_window_largest_load_group_mib"], 1187)
+            self.assertEqual(row["parameter_window_largest_load_group_stage"], "qwen")
+            self.assertEqual(row["parameter_window_largest_request_mib"], 1187)
+            self.assertEqual(row["parameter_window_largest_request_stage"], "qwen")
+            self.assertEqual(row["parameter_window_largest_request_index"], 0)
             self.assertEqual(row["runtime_stages"]["qwen"]["source_encoded_mib"], 10368)
             self.assertEqual(
                 row["runtime_stages"]["qwen"]["parameter_gather_load_group_count"], 36
@@ -667,7 +749,8 @@ class GenerationBenchmarkSummaryTest(unittest.TestCase):
                 "| short128 | selected_stage_bundles | 3 | 17712 | 19 | 32 | "
                 "83 | 128 | 3627.693 | 3477.614 | 150.049 | - | - | - | "
                 "- | 912.500 | 601.125 | 311.375 | 27.250 | 4169 | 27848 | "
-                "17480 | 34924 | 10368 | 0 | 2 | 318 | 1081 | 576 | 1507 |",
+                "17480 | 34924 | 10368 | 0 | 2 | 318 | 1081 | 576 | 1187 | "
+                "1187 | 1507 |",
                 table,
             )
 

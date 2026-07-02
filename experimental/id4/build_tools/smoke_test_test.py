@@ -125,7 +125,27 @@ def minimal_generation_plan() -> dict:
                             "target_byte_length": 0,
                         },
                     },
-                }
+                },
+                "parameter_window_statistics": [
+                    {
+                        "region_window_size": 1,
+                        "window_count": 1,
+                        "full_slab_target_byte_length": 1024,
+                        "peak_window_target_byte_length": 1024,
+                        "peak_window_source_byte_length": 1024,
+                        "total_window_target_byte_length": 1024,
+                        "total_window_source_byte_length": 1024,
+                        "peak_window_load_group_count": 1,
+                        "total_window_load_group_count": 1,
+                        "peak_window_encode_load_step_count": 0,
+                        "total_window_encode_load_step_count": 0,
+                        "largest_load_group_target_byte_length": 1024,
+                        "largest_load_group_index": 0,
+                        "largest_request_target_byte_length": 1024,
+                        "largest_request_index": 0,
+                        "largest_request_load_group_index": 0,
+                    }
+                ],
             }
         },
     }
@@ -532,6 +552,12 @@ class Id4SmokeTestTest(unittest.TestCase):
             self.assertEqual(
                 metrics["stages"]["qwen"]["parameter_load_kind_statistics"]["gather"][
                     "source_byte_length"
+                ],
+                1024,
+            )
+            self.assertEqual(
+                metrics["stages"]["qwen"]["parameter_window_statistics"][0][
+                    "largest_request_target_byte_length"
                 ],
                 1024,
             )

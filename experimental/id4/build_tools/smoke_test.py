@@ -209,6 +209,28 @@ PLAN_PARAMETER_LOAD_KIND_STATISTIC_FIELDS = (
     "target_byte_length",
 )
 
+PLAN_PARAMETER_WINDOW_STATISTIC_FIELDS = (
+    "region_window_size",
+    "window_count",
+    "full_slab_target_byte_length",
+    "peak_window_target_byte_length",
+    "peak_window_source_byte_length",
+    "total_window_target_byte_length",
+    "total_window_source_byte_length",
+    "peak_window_load_group_count",
+    "total_window_load_group_count",
+    "peak_window_encode_load_step_count",
+    "total_window_encode_load_step_count",
+    "largest_load_group_target_byte_length",
+    "largest_request_target_byte_length",
+)
+
+PLAN_PARAMETER_WINDOW_OPTIONAL_INTEGER_FIELDS = (
+    "largest_load_group_index",
+    "largest_request_index",
+    "largest_request_load_group_index",
+)
+
 PROFILE_TOP_ROW_COUNT = 20
 
 PROFILE_DISPATCH_RE = re.compile(
@@ -437,6 +459,20 @@ def _copy_integer_fields(
     }
 
 
+def _copy_optional_integer_fields(
+    value: dict[str, Any], field_names: tuple[str, ...], context: str
+) -> dict[str, int | None]:
+    fields: dict[str, int | None] = {}
+    for field_name in field_names:
+        field_value = value.get(field_name)
+        fields[field_name] = (
+            None
+            if field_value is None
+            else _require_int(field_value, f"{context}.{field_name}")
+        )
+    return fields
+
+
 def _summarize_shape(value: Any, context: str) -> dict[str, Any]:
     shape = _require_object(value, context)
     rank = _require_int(shape.get("rank"), f"{context}.rank")
@@ -503,7 +539,7 @@ def _summarize_generation_plan(plan: dict[str, Any]) -> dict[str, Any]:
         plan_residency["phases"].append(phase_summary)
 
     stages = _require_object(plan.get("stages"), "plan.stages")
-    stage_summaries: dict[str, dict[str, int]] = {}
+    stage_summaries: dict[str, dict[str, Any]] = {}
     for stage_key, stage in sorted(stages.items()):
         stage_context = f"plan.stages.{stage_key}"
         stage_object = _require_object(stage, stage_context)
@@ -532,6 +568,30 @@ def _summarize_generation_plan(plan: dict[str, Any]) -> dict[str, Any]:
                 load_kind_object,
                 PLAN_PARAMETER_LOAD_KIND_STATISTIC_FIELDS,
                 load_kind_context,
+            )
+        stage_summaries[stage_key]["parameter_window_statistics"] = []
+        for window_index, window in enumerate(
+            _require_list(
+                stage_object.get("parameter_window_statistics"),
+                f"{stage_context}.parameter_window_statistics",
+            )
+        ):
+            window_context = (
+                f"{stage_context}.parameter_window_statistics[{window_index}]"
+            )
+            window_object = _require_object(window, window_context)
+            window_summary: dict[str, int | None] = _copy_integer_fields(
+                window_object, PLAN_PARAMETER_WINDOW_STATISTIC_FIELDS, window_context
+            )
+            window_summary.update(
+                _copy_optional_integer_fields(
+                    window_object,
+                    PLAN_PARAMETER_WINDOW_OPTIONAL_INTEGER_FIELDS,
+                    window_context,
+                )
+            )
+            stage_summaries[stage_key]["parameter_window_statistics"].append(
+                window_summary
             )
 
     return {
