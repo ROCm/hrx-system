@@ -1492,6 +1492,12 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
                         "unknown_stride_vector_packets=0"),
                 0),
             IREE_STRING_VIEW_NPOS);
+  EXPECT_NE(iree_string_view_find(output,
+                                  IREE_SV("dispatch_source_read_bytes=32768 "
+                                          "dispatch_source_write_bytes=0 "
+                                          "dispatch_source_total_bytes=32768"),
+                                  0),
+            IREE_STRING_VIEW_NPOS);
   EXPECT_NE(iree_string_view_find(
                 output,
                 IREE_SV("source_low_memory_root[0] function=branchy "
@@ -2010,6 +2016,8 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
                         "\"contiguous_vector_packet_count\":0,"
                         "\"strided_vector_packet_count\":1,"
                         "\"unknown_stride_vector_packet_count\":0,"
+                        "\"dispatch_source\":{\"read_bytes\":32768,"
+                        "\"write_bytes\":0,\"total_bytes\":32768},"
                         "\"dispatch_issued\":{\"read_bytes\":32768,"
                         "\"write_bytes\":0,\"total_bytes\":32768},"
                         "\"root_count\":1,\"roots\":[{\"index\":0,"
@@ -2028,6 +2036,8 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
                         "\"contiguous_vector_packet_count\":0,"
                         "\"strided_vector_packet_count\":1,"
                         "\"unknown_stride_vector_packet_count\":0,"
+                        "\"dispatch_source\":{\"read_bytes\":32768,"
+                        "\"write_bytes\":0,\"total_bytes\":32768},"
                         "\"dispatch_issued\":{\"read_bytes\":32768,"
                         "\"write_bytes\":0,\"total_bytes\":32768}}],"
                         "\"argument_count\":1,\"arguments\":[{\"index\":0,"
@@ -2046,6 +2056,8 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
                         "\"contiguous_vector_packet_count\":0,"
                         "\"strided_vector_packet_count\":1,"
                         "\"unknown_stride_vector_packet_count\":0,"
+                        "\"dispatch_source\":{\"read_bytes\":32768,"
+                        "\"write_bytes\":0,\"total_bytes\":32768},"
                         "\"dispatch_issued\":{\"read_bytes\":32768,"
                         "\"write_bytes\":0,\"total_bytes\":32768}}],"
                         "\"strategy_count\":1,\"strategies\":[{\"index\":0,"
@@ -2073,6 +2085,8 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
                         "\"contiguous_vector_packet_count\":0,"
                         "\"strided_vector_packet_count\":1,"
                         "\"unknown_stride_vector_packet_count\":0,"
+                        "\"dispatch_source\":{\"read_bytes\":32768,"
+                        "\"write_bytes\":0,\"total_bytes\":32768},"
                         "\"dispatch_issued\":{\"read_bytes\":32768,"
                         "\"write_bytes\":0,\"total_bytes\":32768}}]}"),
                 0),
