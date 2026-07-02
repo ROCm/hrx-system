@@ -81,6 +81,105 @@ state[0] reason=delay_alu_dependency action=amdgpu.s_delay_alu at=b0:n1/o1 produ
 
 // ====
 
+// RUN: emit amdgpu-wait-state-plan @gfx11_valu_dependency_delay_alu_ignores_salu_gap strategy=source
+
+amdgpu.target<gfx1100> @gfx11_target
+
+low.func.def target(@gfx11_target) @gfx11_valu_dependency_delay_alu_ignores_salu_gap(%value: reg<amdgpu.sgpr>, %addend: reg<amdgpu.vgpr>, %delta: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.sgpr>) asm<amdgpu.rdna3.core> {
+  %linear = v_lshl_add_u32_shift_imm %value, %addend, 10
+  %step0 = s_add_u32 %delta, %delta
+  %step1 = s_add_u32 %step0, %delta
+  %step2 = s_add_u32 %step1, %delta
+  %byte_offset = v_lshlrev_b32_src0_inline %linear, 2
+  return %byte_offset, %step2
+}
+
+// ----
+amdgpu.wait_state_plan states=1 progress=6 hazards=1
+state[0] reason=delay_alu_dependency action=amdgpu.s_delay_alu at=b0:n4/o4 producer=n0 consumer=n4 required=4 observed=1 residual=3 delay_alu=0x0001
+
+// ====
+
+// RUN: emit amdgpu-assembly @gfx11_valu_dependency_delay_alu_ignores_salu_gap_assembly strategy=source
+
+amdgpu.target<gfx1100> @gfx11_target
+
+low.func.def target(@gfx11_target) @gfx11_valu_dependency_delay_alu_ignores_salu_gap_assembly(%value: reg<amdgpu.sgpr>, %addend: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr x2>, %delta: reg<amdgpu.sgpr>, %output: reg<amdgpu.sgpr x2>) asm<amdgpu.rdna3.core> {
+  %linear = v_lshl_add_u32_shift_imm %value, %addend, 10
+  %step0 = s_add_u32 %delta, %delta
+  %step1 = s_add_u32 %step0, %delta
+  %step2 = s_add_u32 %step1, %delta
+  %byte_offset = v_lshlrev_b32_src0_inline %linear, 2
+  %loaded = global_load_b32_saddr %byte_offset, %base
+  %store_offset = v_mov_b32_copy %step2
+  global_store_b32_saddr %store_offset, %loaded, %output
+  return
+}
+
+// ----
+  v_lshl_add_u32_shift_imm v0, s0, v0, 10
+  s_add_u32 s0, s1, s1
+  s_add_u32 s0, s0, s1
+  s_add_u32 s0, s0, s1
+  s_delay_alu instid0(VALU_DEP_1)
+  v_lshlrev_b32 v0, 2, v0
+  s_delay_alu instid0(VALU_DEP_1)
+  global_load_b32 v0, v0, s[2:3] offset:0
+  v_mov_b32_copy v1, s0
+  s_waitcnt vmcnt(0) lgkmcnt(63)
+  s_delay_alu instid0(VALU_DEP_1)
+  global_store_b32 v1, v0, s[4:5] offset:0
+  s_waitcnt_vscnt vscnt(0)
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @gfx11_vmem_address_delay_alu_preserves_other_addresses strategy=source
+
+amdgpu.target<gfx1100> @gfx11_target
+
+low.func.def target(@gfx11_target) @gfx11_vmem_address_delay_alu_preserves_other_addresses(%index: reg<amdgpu.vgpr>, %lane0: reg<amdgpu.vgpr>, %lane1: reg<amdgpu.vgpr>, %lane2: reg<amdgpu.vgpr>, %lane3: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr x2>, %output: reg<amdgpu.sgpr x2>) asm<amdgpu.rdna3.core> {
+  %scaled = v_lshlrev_b32_src0_inline %index, 13
+  %addr0 = v_add_u32 %scaled, %lane0
+  %addr1 = v_add_u32 %scaled, %lane1
+  %addr2 = v_add_u32 %scaled, %lane2
+  %addr3 = v_add_u32 %scaled, %lane3
+  %load0 = global_load_b32_saddr %addr0, %base
+  %load1 = global_load_b32_saddr %addr1, %base
+  %load2 = global_load_b32_saddr %addr2, %base
+  %load3 = global_load_b32_saddr %addr3, %base
+  global_store_b32_saddr %addr0, %load0, %output
+  global_store_b32_saddr %addr1, %load1, %output
+  global_store_b32_saddr %addr2, %load2, %output
+  global_store_b32_saddr %addr3, %load3, %output
+  return
+}
+
+// ----
+  v_lshlrev_b32 v0, 13, v0
+  s_delay_alu instid0(VALU_DEP_1)
+  v_add_u32 v1, v0, v1
+  v_add_u32 v2, v0, v2
+  v_add_u32 v3, v0, v3
+  v_add_u32 v0, v0, v4
+  s_delay_alu instid0(VALU_DEP_4)
+  global_load_b32 v4, v1, s[0:1] offset:0
+  s_delay_alu instid0(VALU_DEP_3)
+  global_load_b32 v5, v2, s[0:1] offset:0
+  s_delay_alu instid0(VALU_DEP_2)
+  global_load_b32 v6, v3, s[0:1] offset:0
+  s_delay_alu instid0(VALU_DEP_1)
+  global_load_b32 v7, v0, s[0:1] offset:0
+  s_waitcnt vmcnt(0) lgkmcnt(63)
+  global_store_b32 v1, v4, s[2:3] offset:0
+  global_store_b32 v2, v5, s[2:3] offset:0
+  global_store_b32 v3, v6, s[2:3] offset:0
+  global_store_b32 v0, v7, s[2:3] offset:0
+  s_waitcnt_vscnt vscnt(0)
+  s_endpgm
+
+// ====
+
 // RUN: emit amdgpu-wait-state-plan @gfx11_packed_dot_dependency_delay_alu strategy=source
 
 amdgpu.target<gfx1100> @gfx11_target
@@ -129,7 +228,7 @@ low.func.def target(@gfx11_target) @gfx11_vopd_delay_alu_binary_pairs(%a0: reg<a
 // ----
 amdgpu.wait_state_plan states=2 progress=5 hazards=2
 state[0] reason=delay_alu_dependency action=amdgpu.s_delay_alu at=b0:n2/o2 producer=n0 consumer=n2 required=4 observed=2 residual=2 delay_alu=0x0002
-state[1] reason=delay_alu_dependency action=amdgpu.s_delay_alu at=b0:n3/o3 producer=n1 consumer=n3 required=4 observed=3 residual=1 delay_alu=0x0002
+state[1] reason=delay_alu_dependency action=amdgpu.s_delay_alu at=b0:n3/o3 producer=n1 consumer=n3 required=4 observed=2 residual=2 delay_alu=0x0002
 
 // ====
 
@@ -146,7 +245,7 @@ low.func.def target(@gfx11_target) @gfx11_vopd_delay_alu_binary_pairs_json(%a0: 
 }
 
 // ----
-{"format":"loom.amdgpu.wait_state_plan.v1","state_count":2,"progress_count":5,"hazard_count":2,"states":[{"index":0,"reason":8,"reason_name":"delay_alu_dependency","action":2,"action_name":"amdgpu.s_delay_alu","block":0,"node":2,"scheduled_ordinal":2,"producer_node":0,"consumer_node":2,"required":4,"observed":2,"residual":2,"delay_alu_immediate":2},{"index":1,"reason":8,"reason_name":"delay_alu_dependency","action":2,"action_name":"amdgpu.s_delay_alu","block":0,"node":3,"scheduled_ordinal":3,"producer_node":1,"consumer_node":3,"required":4,"observed":3,"residual":1,"delay_alu_immediate":2}],"progress":[{"index":0,"packet":0,"node":0,"block":0,"scheduled_ordinal":0,"class_id":1,"class_name":"amdgpu.instruction_slot","action":"advance","units":1},{"index":1,"packet":1,"node":1,"block":0,"scheduled_ordinal":1,"class_id":1,"class_name":"amdgpu.instruction_slot","action":"advance","units":1},{"index":2,"packet":2,"node":2,"block":0,"scheduled_ordinal":2,"class_id":1,"class_name":"amdgpu.instruction_slot","action":"advance","units":1},{"index":3,"packet":3,"node":3,"block":0,"scheduled_ordinal":3,"class_id":1,"class_name":"amdgpu.instruction_slot","action":"advance","units":1},{"index":4,"packet":4,"node":4,"block":0,"scheduled_ordinal":4,"class_id":1,"class_name":"amdgpu.instruction_slot","action":"advance","units":1}],"hazards":[{"index":0,"kind":"action","action_id":2,"action_name":"amdgpu.s_delay_alu","reason_id":8,"reason_name":"delay_alu_dependency","producer_node":0,"producer_packet":0,"producer_scheduled_ordinal":0,"consumer_node":2,"insertion_packet":2,"block":0,"scheduled_ordinal":2,"progress_class_id":1,"progress_class_name":"amdgpu.instruction_slot","required":4,"observed":2,"residual":2},{"index":1,"kind":"action","action_id":2,"action_name":"amdgpu.s_delay_alu","reason_id":8,"reason_name":"delay_alu_dependency","producer_node":1,"producer_packet":1,"producer_scheduled_ordinal":1,"consumer_node":3,"insertion_packet":3,"block":0,"scheduled_ordinal":3,"progress_class_id":1,"progress_class_name":"amdgpu.instruction_slot","required":4,"observed":3,"residual":1}]}
+{"format":"loom.amdgpu.wait_state_plan.v1","state_count":2,"progress_count":5,"hazard_count":2,"states":[{"index":0,"reason":8,"reason_name":"delay_alu_dependency","action":2,"action_name":"amdgpu.s_delay_alu","block":0,"node":2,"scheduled_ordinal":2,"producer_node":0,"consumer_node":2,"required":4,"observed":2,"residual":2,"delay_alu_immediate":2},{"index":1,"reason":8,"reason_name":"delay_alu_dependency","action":2,"action_name":"amdgpu.s_delay_alu","block":0,"node":3,"scheduled_ordinal":3,"producer_node":1,"consumer_node":3,"required":4,"observed":2,"residual":2,"delay_alu_immediate":2}],"progress":[{"index":0,"packet":0,"node":0,"block":0,"scheduled_ordinal":0,"class_id":1,"class_name":"amdgpu.instruction_slot","action":"advance","units":1},{"index":1,"packet":1,"node":1,"block":0,"scheduled_ordinal":1,"class_id":1,"class_name":"amdgpu.instruction_slot","action":"advance","units":1},{"index":2,"packet":2,"node":2,"block":0,"scheduled_ordinal":2,"class_id":1,"class_name":"amdgpu.instruction_slot","action":"advance","units":1},{"index":3,"packet":3,"node":3,"block":0,"scheduled_ordinal":3,"class_id":1,"class_name":"amdgpu.instruction_slot","action":"advance","units":1},{"index":4,"packet":4,"node":4,"block":0,"scheduled_ordinal":4,"class_id":1,"class_name":"amdgpu.instruction_slot","action":"advance","units":1}],"hazards":[{"index":0,"kind":"action","action_id":2,"action_name":"amdgpu.s_delay_alu","reason_id":8,"reason_name":"delay_alu_dependency","producer_node":0,"producer_packet":0,"producer_scheduled_ordinal":0,"consumer_node":2,"insertion_packet":2,"block":0,"scheduled_ordinal":2,"progress_class_id":2,"progress_class_name":"amdgpu.delay_alu_dependency","required":4,"observed":2,"residual":2},{"index":1,"kind":"action","action_id":2,"action_name":"amdgpu.s_delay_alu","reason_id":8,"reason_name":"delay_alu_dependency","producer_node":1,"producer_packet":1,"producer_scheduled_ordinal":1,"consumer_node":3,"insertion_packet":3,"block":0,"scheduled_ordinal":3,"progress_class_id":2,"progress_class_name":"amdgpu.delay_alu_dependency","required":4,"observed":2,"residual":2}]}
 
 // ====
 
@@ -163,6 +262,25 @@ low.func.def target(@gfx1200_target) @gfx1200_trans_dependency_delay_alu(%source
 // ----
 amdgpu.wait_state_plan states=1 progress=3 hazards=1
 state[0] reason=delay_alu_dependency action=amdgpu.s_delay_alu at=b0:n1/o1 producer=n0 consumer=n1 required=8 observed=1 residual=7 delay_alu=0x0005
+
+// ====
+
+// RUN: emit amdgpu-wait-state-plan @gfx1200_trans_dependency_delay_alu_ignores_salu_gap strategy=source
+
+amdgpu.target<gfx1200> @gfx1200_target
+
+low.func.def target(@gfx1200_target) @gfx1200_trans_dependency_delay_alu_ignores_salu_gap(%source: reg<amdgpu.vgpr>, %scale: reg<amdgpu.vgpr>, %delta: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.sgpr>) asm<amdgpu.rdna4.core> {
+  %reciprocal = v_rsq_f32 %source
+  %step0 = s_add_u32 %delta, %delta
+  %step1 = s_add_u32 %step0, %delta
+  %step2 = s_add_u32 %step1, %delta
+  %product = v_mul_f32 %reciprocal, %scale
+  return %product, %step2
+}
+
+// ----
+amdgpu.wait_state_plan states=1 progress=6 hazards=1
+state[0] reason=delay_alu_dependency action=amdgpu.s_delay_alu at=b0:n4/o4 producer=n0 consumer=n4 required=8 observed=1 residual=7 delay_alu=0x0005
 
 // ====
 

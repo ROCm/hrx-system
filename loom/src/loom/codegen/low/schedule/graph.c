@@ -1383,6 +1383,20 @@ static void loom_low_schedule_resolve_structural_memory_effect(
   }
 }
 
+static bool loom_low_schedule_node_observes_program_exit_memory(
+    const loom_low_schedule_node_t* node) {
+  return node->op != NULL && loom_low_return_isa(node->op);
+}
+
+static void loom_low_schedule_resolve_program_exit_memory_effect(
+    loom_low_schedule_memory_effect_t* out_effect) {
+  *out_effect = (loom_low_schedule_memory_effect_t){0};
+  loom_low_memory_access_summary_t summary =
+      loom_low_memory_access_summary_synthetic(LOOM_LOW_MEMORY_SPACE_GENERIC);
+  loom_low_schedule_memory_effect_merge_summary(out_effect, &summary);
+  out_effect->reads = true;
+}
+
 static iree_status_t loom_low_schedule_resolve_memory_effects(
     loom_low_schedule_build_state_t* state,
     loom_low_schedule_memory_effect_t* effects, uint32_t node_count) {
@@ -1392,6 +1406,11 @@ static iree_status_t loom_low_schedule_resolve_memory_effects(
     if (descriptor != NULL) {
       IREE_RETURN_IF_ERROR(loom_low_schedule_resolve_descriptor_memory_effect(
           state, node_index, descriptor, &effects[node_index]));
+      continue;
+    }
+    if (loom_low_schedule_node_observes_program_exit_memory(node)) {
+      loom_low_schedule_resolve_program_exit_memory_effect(
+          &effects[node_index]);
       continue;
     }
     if (loom_low_schedule_node_has_effects(node, NULL)) {

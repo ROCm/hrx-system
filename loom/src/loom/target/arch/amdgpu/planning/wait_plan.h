@@ -56,6 +56,11 @@ typedef enum loom_amdgpu_wait_plan_reason_e {
   LOOM_AMDGPU_WAIT_PLAN_REASON_VALU_SGPR_READ = 7,
   // A memory-effect dependency observes an outstanding memory packet.
   LOOM_AMDGPU_WAIT_PLAN_REASON_MEMORY_EFFECT = 8,
+  // Program exit observes outstanding memory stores.
+  LOOM_AMDGPU_WAIT_PLAN_REASON_PROGRAM_EXIT = 9,
+  // A packet reuses scalar source registers still consumed by an outstanding
+  // memory packet.
+  LOOM_AMDGPU_WAIT_PLAN_REASON_MEMORY_SOURCE_REUSE = 10,
 } loom_amdgpu_wait_plan_reason_t;
 
 typedef enum loom_amdgpu_wait_plan_residual_action_e {
@@ -129,10 +134,10 @@ iree_string_view_t loom_amdgpu_wait_plan_residual_action_name(
 // Builds an AMDGPU wait-counter plan from a scheduled low function. When
 // |allocation| is provided, the plan also materializes target storage-release
 // actions requested by allocation, such as outstanding memory reads whose
-// destination registers have not yet been written and VMEM stores whose VGPR
-// sources have not yet been consumed by the memory pipe. The caller must keep
-// |schedule|, |allocation|, and |arena| immutable/alive for as long as
-// |out_plan| is used.
+// destination registers have not yet been written and memory packets whose
+// scalar or vector sources have not yet been consumed by the memory pipe. The
+// caller must keep |schedule|, |allocation|, and |arena| immutable/alive for as
+// long as |out_plan| is used.
 iree_status_t loom_amdgpu_wait_plan_build(
     const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,
