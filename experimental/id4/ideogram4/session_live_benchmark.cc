@@ -49,7 +49,7 @@ IREE_FLAG(string, qwen_attention_implementation, "auto",
 IREE_FLAG(string, dit_attention_implementation, "online_wmma",
           "DiT attention implementation: streaming, materialized_wmma, "
           "blocked_wmma, or online_wmma.");
-IREE_FLAG(string, dit_feed_forward_implementation, "pytorch_parity",
+IREE_FLAG(string, dit_feed_forward_implementation, "fused_product",
           "DiT feed-forward implementation: fused_product or "
           "pytorch_parity.");
 IREE_FLAG(string, generation_residency, "issue_phases",
@@ -351,7 +351,7 @@ static id4_ideogram4_generation_plan_policy_t MakeGenerationPolicy() {
   policy.dit_attention_implementation =
       ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_ONLINE_WMMA;
   policy.dit_feed_forward_implementation =
-      ID4_IDEOGRAM4_DIT_FEED_FORWARD_IMPLEMENTATION_PYTORCH_PARITY;
+      ID4_IDEOGRAM4_DIT_FEED_FORWARD_IMPLEMENTATION_FUSED_PRODUCT;
   policy.vae_tiling.mode = ID4_VAE_TILING_MODE_DISABLED;
   return policy;
 }
