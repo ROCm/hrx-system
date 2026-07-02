@@ -202,6 +202,7 @@ PLAN_PARAMETER_LOAD_KIND_NAMES = (
     "encode_fp8_e4m3_scaled_to_bf16",
     "encode_bf16_linear_rhs_tile",
     "encode_fp8_e4m3_scaled_to_bf16_linear_rhs_tile",
+    "encode_fp8_e4m3_linear_rhs_tile",
 )
 
 PLAN_PARAMETER_LOAD_KIND_STATISTIC_FIELDS = (

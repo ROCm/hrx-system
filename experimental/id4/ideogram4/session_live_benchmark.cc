@@ -27,6 +27,10 @@ IREE_FLAG(string, id4_request_json, "",
 IREE_FLAG(string, id4_request_json_file, "",
           "File containing the JSON prompt/configuration payload for the "
           "custom generation benchmark.");
+IREE_FLAG(string, id4_request_label, "",
+          "Stable label for the custom generation benchmark row and plan "
+          "JSON file stem. Labels may contain ASCII letters, digits, '_', "
+          "'-', and '.'.");
 IREE_FLAG(string, id4_plan_output_dir, "",
           "Optional directory receiving generation plan JSON files.");
 IREE_FLAG(string, dit_parameter_format, "fp8_e4m3",
@@ -972,6 +976,39 @@ static iree_status_t ValidatePromptBenchmarkConfiguration(
   return iree_ok_status();
 }
 
+static bool IsValidPromptLabelCharacter(char value) {
+  return (value >= 'a' && value <= 'z') || (value >= 'A' && value <= 'Z') ||
+         (value >= '0' && value <= '9') || value == '_' || value == '-' ||
+         value == '.';
+}
+
+static iree_status_t ResolvePromptLabel(const GenerationPrompt& prompt,
+                                        iree_string_view_t* out_label) {
+  IREE_ASSERT_ARGUMENT(out_label);
+  if (!iree_string_view_is_empty(prompt.json)) {
+    *out_label = prompt.label;
+    return iree_ok_status();
+  }
+
+  iree_string_view_t label =
+      iree_string_view_trim(iree_make_cstring_view(FLAG_id4_request_label));
+  if (iree_string_view_is_empty(label)) {
+    *out_label = prompt.label;
+    return iree_ok_status();
+  }
+  for (iree_host_size_t i = 0; i < label.size; ++i) {
+    if (!IsValidPromptLabelCharacter(label.data[i])) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "--id4_request_label contains invalid character 0x%02x at byte "
+          "offset %" PRIhsz,
+          (unsigned char)label.data[i], i);
+    }
+  }
+  *out_label = label;
+  return iree_ok_status();
+}
+
 static iree_status_t ParsePromptRequest(const GenerationPrompt& prompt,
                                         ParsedRequest* out_request) {
   IREE_ASSERT_ARGUMENT(out_request);
@@ -1882,6 +1919,8 @@ static iree_status_t RunGenerationEndToEndBenchmark(
 
   ParsedRequest request;
   IREE_RETURN_IF_ERROR(ParsePromptRequest(*prompt, &request));
+  iree_string_view_t prompt_label = iree_string_view_empty();
+  IREE_RETURN_IF_ERROR(ResolvePromptLabel(*prompt, &prompt_label));
 
   id4::test::StageDiagnostics diagnostics = {};
   id4_pipeline_diagnostics_sink_t diagnostics_sink =
@@ -1971,7 +2010,7 @@ static iree_status_t RunGenerationEndToEndBenchmark(
     iteration_timing.plan_ns += iree_time_now() - phase_start_time_ns;
     if (iree_status_is_ok(status) && !plan_json_written) {
       iree_benchmark_pause_timing(benchmark_state);
-      status = WriteGenerationPlanJsonIfRequested(prompt->label, plan.get());
+      status = WriteGenerationPlanJsonIfRequested(prompt_label, plan.get());
       iree_benchmark_resume_timing(benchmark_state);
       plan_json_written = iree_status_is_ok(status);
     }
@@ -2039,7 +2078,7 @@ static iree_status_t RunGenerationEndToEndBenchmark(
   IREE_RETURN_IF_ERROR(status);
   IREE_RETURN_IF_ERROR(SetGenerationBenchmarkLabel(
       benchmark_state, context, last_residency, IREE_SV("end_to_end"),
-      prompt->label, last_summary, last_statistics, last_resource_statistics,
+      prompt_label, last_summary, last_statistics, last_resource_statistics,
       diagnostics, timing_total, iteration_count));
   iree_benchmark_set_items_processed(
       benchmark_state, static_cast<int64_t>(iteration_count * token_count));
@@ -2068,6 +2107,8 @@ static iree_status_t RunGenerationIssuePreparedBenchmark(
 
   ParsedRequest request;
   IREE_RETURN_IF_ERROR(ParsePromptRequest(*prompt, &request));
+  iree_string_view_t prompt_label = iree_string_view_empty();
+  IREE_RETURN_IF_ERROR(ResolvePromptLabel(*prompt, &prompt_label));
 
   id4::test::StageDiagnostics diagnostics = {};
   id4_pipeline_diagnostics_sink_t diagnostics_sink =
@@ -2104,7 +2145,7 @@ static iree_status_t RunGenerationIssuePreparedBenchmark(
       &resource_statistics));
 
   IREE_RETURN_IF_ERROR(
-      WriteGenerationPlanJsonIfRequested(prompt->label, plan.get()));
+      WriteGenerationPlanJsonIfRequested(prompt_label, plan.get()));
 
   uint64_t prepare_value = 1;
   uint64_t completion_value = 0;
@@ -2187,7 +2228,7 @@ static iree_status_t RunGenerationIssuePreparedBenchmark(
   IREE_RETURN_IF_ERROR(status);
   IREE_RETURN_IF_ERROR(SetGenerationBenchmarkLabel(
       benchmark_state, context, residency, IREE_SV("prepared_issue"),
-      prompt->label, summary, statistics, resource_statistics, diagnostics,
+      prompt_label, summary, statistics, resource_statistics, diagnostics,
       timing_total, iteration_count));
   iree_benchmark_set_items_processed(
       benchmark_state,

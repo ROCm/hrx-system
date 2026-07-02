@@ -52,7 +52,10 @@ _LABEL_LOAD_KIND_PATTERN = re.compile(
     r"bf16_rhs_target=(?P<bf16_rhs_target>[0-9]+)MiB,"
     r"fp8_bf16_rhs_steps=(?P<fp8_bf16_rhs_steps>[0-9]+),"
     r"fp8_bf16_rhs_source=(?P<fp8_bf16_rhs_source>[0-9]+)MiB,"
-    r"fp8_bf16_rhs_target=(?P<fp8_bf16_rhs_target>[0-9]+)MiB\]"
+    r"fp8_bf16_rhs_target=(?P<fp8_bf16_rhs_target>[0-9]+)MiB,"
+    r"fp8_rhs_steps=(?P<fp8_rhs_steps>[0-9]+),"
+    r"fp8_rhs_source=(?P<fp8_rhs_source>[0-9]+)MiB,"
+    r"fp8_rhs_target=(?P<fp8_rhs_target>[0-9]+)MiB\]"
 )
 _LABEL_LOGICAL_LIVE_PATTERN = re.compile(
     r"\blogical_live\[boundary=(?P<boundary>[0-9]+)MiB,"
@@ -235,6 +238,7 @@ _LOAD_KIND_ROW_PREFIXES = {
     "encode_fp8_e4m3_scaled_to_bf16": "parameter_load_fp8_bf16",
     "encode_bf16_linear_rhs_tile": "parameter_load_bf16_rhs",
     "encode_fp8_e4m3_scaled_to_bf16_linear_rhs_tile": ("parameter_load_fp8_bf16_rhs"),
+    "encode_fp8_e4m3_linear_rhs_tile": "parameter_load_fp8_rhs",
 }
 
 
@@ -599,6 +603,15 @@ def _parse_generation_benchmark_label(label: str, context: str) -> dict[str, Any
         "runtime_parameter_load_fp8_bf16_rhs_target_mib": _match_unsigned_group(
             load_kind_match, "fp8_bf16_rhs_target", f"{context}.label"
         ),
+        "runtime_parameter_load_fp8_rhs_steps": _match_unsigned_group(
+            load_kind_match, "fp8_rhs_steps", f"{context}.label"
+        ),
+        "runtime_parameter_load_fp8_rhs_source_mib": _match_unsigned_group(
+            load_kind_match, "fp8_rhs_source", f"{context}.label"
+        ),
+        "runtime_parameter_load_fp8_rhs_target_mib": _match_unsigned_group(
+            load_kind_match, "fp8_rhs_target", f"{context}.label"
+        ),
         "runtime_local_high_water_total_mib": _label_mib(
             label, "local_hw_total", f"{context}.label"
         ),
@@ -920,7 +933,20 @@ def summarize_generation_benchmark(
         context = f"benchmarks[{index}]"
         benchmark_object = _require_object(benchmark, context)
         name = _require_string(benchmark_object.get("name"), f"{context}.name")
-        bucket = _benchmark_bucket(name)
+        benchmark_bucket = _benchmark_bucket(name)
+        label = benchmark_object.get("label")
+        label_metrics = (
+            _parse_generation_benchmark_label(
+                _require_string(label, f"{context}.label"), context
+            )
+            if label is not None
+            else None
+        )
+        bucket = (
+            label_metrics["prompt_label"]
+            if label_metrics is not None
+            else benchmark_bucket
+        )
         plan_metrics = smoke_test.read_generation_plan_metrics(
             plan_directory / f"{bucket}.json"
         )
@@ -931,6 +957,7 @@ def summarize_generation_benchmark(
         parameter_window_blockers = _max_parameter_window_blockers(stages)
         row = {
             "bucket": bucket,
+            "benchmark_bucket": benchmark_bucket,
             "benchmark": name,
             "real_time_ms": _require_number(
                 benchmark_object.get("real_time"), f"{context}.real_time"
@@ -1015,11 +1042,7 @@ def summarize_generation_benchmark(
         }
         row.update(load_kind_statistics)
         row.update(parameter_window_blockers)
-        label = benchmark_object.get("label")
-        if label is not None:
-            label_metrics = _parse_generation_benchmark_label(
-                _require_string(label, f"{context}.label"), context
-            )
+        if label_metrics is not None:
             _validate_label_plan_join(row, label_metrics, context)
             row.update(label_metrics)
         rows.append(row)
@@ -1061,7 +1084,8 @@ _MARKDOWN_COLUMNS = (
     ("fp8 bf16 src MiB", "runtime_parameter_load_fp8_bf16_source_mib"),
     ("fp8 bf16 target MiB", "runtime_parameter_load_fp8_bf16_target_mib"),
     ("bf16 rhs src MiB", "runtime_parameter_load_bf16_rhs_source_mib"),
-    ("fp8 rhs src MiB", "runtime_parameter_load_fp8_bf16_rhs_source_mib"),
+    ("fp8 bf16 rhs src MiB", "runtime_parameter_load_fp8_bf16_rhs_source_mib"),
+    ("fp8 rhs src MiB", "runtime_parameter_load_fp8_rhs_source_mib"),
     ("issue windows", "issue_encode_window_count"),
     ("issue encodes", "issue_encode_window_dispatch_count"),
     ("staging MiB", "issue_encode_window_staging_mib"),

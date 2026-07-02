@@ -39,7 +39,8 @@ TEST_BENCHMARK_LABEL = (
     "fp8_bf16_source=17480MiB,fp8_bf16_target=34924MiB,"
     "bf16_rhs_steps=108,bf16_rhs_source=10368MiB,"
     "bf16_rhs_target=10368MiB,fp8_bf16_rhs_steps=0,"
-    "fp8_bf16_rhs_source=0MiB,fp8_bf16_rhs_target=0MiB] "
+    "fp8_bf16_rhs_source=0MiB,fp8_bf16_rhs_target=0MiB,"
+    "fp8_rhs_steps=0,fp8_rhs_source=0MiB,fp8_rhs_target=0MiB] "
     "local_hw_total=43MiB "
     "local_hw_largest=20MiB boundary=9MiB kernels=119 dispatches=1507 "
     "logical_live[boundary=5MiB,taps=0MiB,resident=0MiB,"
@@ -82,6 +83,9 @@ def load_kind_statistics(
     fp8_bf16_rhs_steps: int = 0,
     fp8_bf16_rhs_source_mib: int = 0,
     fp8_bf16_rhs_target_mib: int = 0,
+    fp8_rhs_steps: int = 0,
+    fp8_rhs_source_mib: int = 0,
+    fp8_rhs_target_mib: int = 0,
 ) -> dict:
     return load_kind_statistics_bytes(
         gather_steps=gather_steps,
@@ -96,6 +100,9 @@ def load_kind_statistics(
         fp8_bf16_rhs_steps=fp8_bf16_rhs_steps,
         fp8_bf16_rhs_source_byte_length=fp8_bf16_rhs_source_mib * MIB,
         fp8_bf16_rhs_target_byte_length=fp8_bf16_rhs_target_mib * MIB,
+        fp8_rhs_steps=fp8_rhs_steps,
+        fp8_rhs_source_byte_length=fp8_rhs_source_mib * MIB,
+        fp8_rhs_target_byte_length=fp8_rhs_target_mib * MIB,
     )
 
 
@@ -113,6 +120,9 @@ def load_kind_statistics_bytes(
     fp8_bf16_rhs_steps: int = 0,
     fp8_bf16_rhs_source_byte_length: int = 0,
     fp8_bf16_rhs_target_byte_length: int = 0,
+    fp8_rhs_steps: int = 0,
+    fp8_rhs_source_byte_length: int = 0,
+    fp8_rhs_target_byte_length: int = 0,
 ) -> dict:
     return {
         "gather": {
@@ -134,6 +144,11 @@ def load_kind_statistics_bytes(
             "step_count": fp8_bf16_rhs_steps,
             "source_byte_length": fp8_bf16_rhs_source_byte_length,
             "target_byte_length": fp8_bf16_rhs_target_byte_length,
+        },
+        "encode_fp8_e4m3_linear_rhs_tile": {
+            "step_count": fp8_rhs_steps,
+            "source_byte_length": fp8_rhs_source_byte_length,
+            "target_byte_length": fp8_rhs_target_byte_length,
         },
     }
 
@@ -534,6 +549,7 @@ class GenerationBenchmarkSummaryTest(unittest.TestCase):
             )
 
             self.assertEqual(summary["rows"][0]["bucket"], "short128")
+            self.assertEqual(summary["rows"][0]["benchmark_bucket"], "short128")
             self.assertEqual(summary["rows"][0]["real_time_ms"], 12.5)
             self.assertEqual(summary["rows"][0]["qwen_token_count"], 19)
             self.assertEqual(summary["rows"][0]["conditioned_dit_token_count"], 83)
@@ -582,6 +598,7 @@ class GenerationBenchmarkSummaryTest(unittest.TestCase):
             row = summary["rows"][0]
             self.assertEqual(row["benchmark_scope"], "prepared_issue")
             self.assertEqual(row["prompt_label"], "short128")
+            self.assertEqual(row["benchmark_bucket"], "short128")
             self.assertEqual(row["generation_issue_mode"], "stage_serial")
             self.assertEqual(row["generation_residency_request"], "memory_budgeted")
             self.assertEqual(row["generation_residency"], "selected_stage_bundles")
@@ -665,6 +682,47 @@ class GenerationBenchmarkSummaryTest(unittest.TestCase):
             self.assertEqual(row["runtime_stages"]["decode"]["dispatch_count"], 106)
             self.assertAlmostEqual(row["timing_issue_ms"], 3477.614)
             self.assertAlmostEqual(row["timing_final_wait_ms"], 150.049)
+
+    def test_summarize_generation_benchmark_joins_custom_row_by_prompt_label(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plan_dir = root / "plans"
+            plan_dir.mkdir()
+            (plan_dir / "city_walk_128a.json").write_text(
+                json.dumps(live_label_generation_plan()), encoding="utf-8"
+            )
+            benchmark_path = root / "benchmark.json"
+            benchmark_path.write_text(
+                json.dumps(
+                    {
+                        "benchmarks": [
+                            {
+                                "name": (
+                                    "BM_Ideogram4SessionGenerationIssuePrepared/"
+                                    "custom/real_time"
+                                ),
+                                "real_time": 3627.692699432373,
+                                "cpu_time": 10.391671999999907,
+                                "iterations": 1,
+                                "label": TEST_BENCHMARK_LABEL.replace(
+                                    "prompt=short128", "prompt=city_walk_128a"
+                                ),
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            summary = generation_benchmark_summary.summarize_generation_benchmark(
+                benchmark_path, plan_dir
+            )
+
+            row = summary["rows"][0]
+            self.assertEqual(row["bucket"], "city_walk_128a")
+            self.assertEqual(row["benchmark_bucket"], "custom")
+            self.assertEqual(row["prompt_label"], "city_walk_128a")
+            self.assertEqual(row["runtime_qwen_token_count"], 19)
 
     def test_summarize_generation_benchmark_parses_phase_timing_telemetry(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -764,7 +822,7 @@ class GenerationBenchmarkSummaryTest(unittest.TestCase):
                 "[0x00000001,0x0000000c,0x00000020] | 17712 | 19 | 32 | "
                 "83 | 128 | 3627.693 | 3477.614 | 150.049 | - | - | - | "
                 "- | 912.500 | 601.125 | 311.375 | 27.250 | 4169 | 27848 | "
-                "384 | 950 | 1334 | 17480 | 34924 | 10368 | 0 | 2 | 318 | "
+                "384 | 950 | 1334 | 17480 | 34924 | 10368 | 0 | 0 | 2 | 318 | "
                 "1081 | 576 | 1187 | qwen | 1187 | qwen | 1507 |",
                 table,
             )
