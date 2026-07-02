@@ -251,6 +251,8 @@ typedef struct loom_target_compile_report_low_node_features_t {
   bool local_memory;
   // Node contributes scalar-memory work.
   bool scalar_memory;
+  // Node contributes private or stack memory work.
+  bool private_memory;
   // Node contributes memory work without a more specific memory family.
   bool generic_memory;
   // Node contributes atomic-memory work.
@@ -347,6 +349,12 @@ loom_target_compile_report_classify_low_node_features(
       iree_string_view_starts_with(semantic_tag, IREE_SV("memory.workgroup."));
   features.scalar_memory =
       iree_string_view_starts_with(schedule_class_name, IREE_SV("amdgpu.smem"));
+  features.private_memory =
+      iree_string_view_starts_with(semantic_tag, IREE_SV("memory.stack.")) ||
+      iree_string_view_starts_with(semantic_tag, IREE_SV("memory.private."));
+  if (features.private_memory) {
+    features.global_memory = false;
+  }
   features.generic_memory =
       iree_string_view_starts_with(semantic_tag, IREE_SV("memory.generic.")) ||
       iree_string_view_starts_with(semantic_tag, IREE_SV("memory.load.")) ||
@@ -358,7 +366,8 @@ loom_target_compile_report_classify_low_node_features(
       loom_target_compile_report_schedule_class_uses_resource_kind(
           descriptor_set, schedule_class, LOOM_LOW_RESOURCE_KIND_STORE);
   if (memory_resource && !features.global_memory && !features.local_memory &&
-      !features.scalar_memory && !features.generic_memory) {
+      !features.scalar_memory && !features.private_memory &&
+      !features.generic_memory) {
     features.generic_memory = true;
   }
   features.atomic = loom_target_compile_report_string_contains(
@@ -396,10 +405,10 @@ static bool loom_target_compile_report_low_node_features_are_known(
          features->global_load || features->global_store ||
          features->buffer_load || features->buffer_store ||
          features->flat_memory || features->local_memory ||
-         features->scalar_memory || features->generic_memory ||
-         features->atomic || features->branch || features->barrier ||
-         features->control || features->conversion || features->cache ||
-         features->register_move;
+         features->scalar_memory || features->private_memory ||
+         features->generic_memory || features->atomic || features->branch ||
+         features->barrier || features->control || features->conversion ||
+         features->cache || features->register_move;
 }
 
 static uint64_t loom_target_compile_report_low_effect_byte_count(
@@ -438,6 +447,8 @@ static void loom_target_compile_report_accumulate_low_memory_effect(
       family_byte_count = &mix->local_read_byte_count;
     } else if (features->scalar_memory) {
       family_byte_count = &mix->scalar_read_byte_count;
+    } else if (features->private_memory) {
+      family_byte_count = &mix->private_read_byte_count;
     } else if (features->generic_memory || features->global_memory ||
                features->atomic) {
       family_byte_count = &mix->unclassified_read_byte_count;
@@ -458,6 +469,8 @@ static void loom_target_compile_report_accumulate_low_memory_effect(
       family_byte_count = &mix->local_write_byte_count;
     } else if (features->scalar_memory) {
       family_byte_count = &mix->scalar_write_byte_count;
+    } else if (features->private_memory) {
+      family_byte_count = &mix->private_write_byte_count;
     } else if (features->generic_memory || features->global_memory ||
                features->atomic) {
       family_byte_count = &mix->unclassified_write_byte_count;
@@ -523,6 +536,7 @@ static void loom_target_compile_report_accumulate_low_node_static_mix(
   mix->flat_memory_count += features.flat_memory ? 1 : 0;
   mix->local_memory_count += features.local_memory ? 1 : 0;
   mix->scalar_memory_count += features.scalar_memory ? 1 : 0;
+  mix->private_memory_count += features.private_memory ? 1 : 0;
   mix->generic_memory_count += features.generic_memory ? 1 : 0;
   mix->atomic_count += features.atomic ? 1 : 0;
   mix->branch_count += features.branch ? 1 : 0;
@@ -556,6 +570,7 @@ static void loom_target_compile_report_accumulate_static_mix(
   target->flat_memory_count += source->flat_memory_count;
   target->local_memory_count += source->local_memory_count;
   target->scalar_memory_count += source->scalar_memory_count;
+  target->private_memory_count += source->private_memory_count;
   target->generic_memory_count += source->generic_memory_count;
   target->memory_read_unknown_width_count +=
       source->memory_read_unknown_width_count;
@@ -573,6 +588,8 @@ static void loom_target_compile_report_accumulate_static_mix(
   target->local_write_byte_count += source->local_write_byte_count;
   target->scalar_read_byte_count += source->scalar_read_byte_count;
   target->scalar_write_byte_count += source->scalar_write_byte_count;
+  target->private_read_byte_count += source->private_read_byte_count;
+  target->private_write_byte_count += source->private_write_byte_count;
   target->unclassified_read_byte_count += source->unclassified_read_byte_count;
   target->unclassified_write_byte_count +=
       source->unclassified_write_byte_count;
@@ -617,6 +634,7 @@ static bool loom_target_compile_report_accumulate_scaled_static_mix(
   LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(flat_memory_count);
   LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(local_memory_count);
   LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(scalar_memory_count);
+  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(private_memory_count);
   LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(generic_memory_count);
   LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(
       memory_read_unknown_width_count);
@@ -634,6 +652,8 @@ static bool loom_target_compile_report_accumulate_scaled_static_mix(
   LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(local_write_byte_count);
   LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(scalar_read_byte_count);
   LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(scalar_write_byte_count);
+  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(private_read_byte_count);
+  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(private_write_byte_count);
   LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(
       unclassified_read_byte_count);
   LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(
@@ -1336,6 +1356,9 @@ loom_target_compile_report_pressure_origin_from_low_node_features(
   }
   if (features->scalar_memory) {
     return LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_SCALAR_MEMORY;
+  }
+  if (features->private_memory) {
+    return LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_PRIVATE_MEMORY;
   }
   if (features->generic_memory) {
     return LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_GENERIC_MEMORY;
