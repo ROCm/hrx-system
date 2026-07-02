@@ -396,6 +396,47 @@
       ]
     },
     {
+      "name": "reports dispatch-scaled AMDGPU memory economics",
+      "steps": [
+        {
+          "name": "compile",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/report_dispatch_memory_economics_amdgpu.loom",
+              "--backend=amdgpu-hal",
+              "--target=gfx11-generic",
+              "--output={tmp}/dispatch_memory_economics_amdgpu.hsaco",
+              "--compile-report=summary",
+              "--compile-report-output=-"
+            ]
+          },
+          "stdout": {
+            "contains": {
+              "unordered": [
+                "\"function\":\"compile_report_dispatch_memory_economics\"",
+                "\"status\":\"OK\"",
+                "\"workload\":{\"workgroup_size\":{\"x\":8,\"y\":1,\"z\":1,\"flat\":8},\"workgroup_count\":{\"x\":2,\"y\":1,\"z\":1,\"flat\":2},\"dispatch_workitem_count\":16}",
+                "\"economics\":{\"memory\":{\"per_workitem_issued\":{\"read_bytes\":32,\"write_bytes\":16,\"total_bytes\":48",
+                "\"dispatch_issued\":{\"read_bytes\":512,\"write_bytes\":256,\"total_bytes\":768",
+                "\"source_low\":{\"selected_op_count\":10,\"emitted_op_count\":23,\"count\":10,\"memory\":{\"packet_count\":2",
+                "\"dispatch_source\":{\"read_bytes\":256,\"write_bytes\":256,\"total_bytes\":512}",
+                "\"dispatch_issued\":{\"read_bytes\":256,\"write_bytes\":256,\"total_bytes\":512}",
+                "\"source_root\":\"input\",\"source_root_argument_index\":0,\"memory_space\":\"global\",\"packet_count\":1,\"load_packet_count\":1",
+                "\"source_root\":\"output\",\"source_root_argument_index\":1,\"memory_space\":\"global\",\"packet_count\":1,\"load_packet_count\":0,\"store_packet_count\":1"
+              ]
+            }
+          },
+          "files": [
+            {
+              "path": "{tmp}/dispatch_memory_economics_amdgpu.hsaco",
+              "non_empty": true
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "omits AMDGPU memory economics for unmodeled loop CFG",
       "steps": [
         {
