@@ -117,6 +117,68 @@ low.func.def target(@test_target) @resource_stall_stays_below_near_pressure_clif
 }
 
 // ====
+// RUN: emit low-schedule-json @resource_stall_scans_past_ready_window_for_pressure_cliff strategy=resource-stall diagnostics=candidates cliff=test.i32:69:15:14 output=none
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @resource_stall_scans_past_ready_window_for_pressure_cliff(
+    %pad: reg<test.i32 x58>,
+    %ptr0: reg<test.ptr>, %ptr1: reg<test.ptr>, %ptr2: reg<test.ptr>,
+    %ptr3: reg<test.ptr>, %ptr4: reg<test.ptr>, %ptr5: reg<test.ptr>,
+    %ptr6: reg<test.ptr>, %ptr7: reg<test.ptr>, %ptr8: reg<test.ptr>,
+    %ptr9: reg<test.ptr>, %ptr10: reg<test.ptr>, %ptr11: reg<test.ptr>,
+    %ptr12: reg<test.ptr>, %ptr13: reg<test.ptr>, %ptr14: reg<test.ptr>,
+    %ptr15: reg<test.ptr>, %ptr16: reg<test.ptr>,
+    %lhs: reg<test.i32 x4>) -> (reg<test.i32 x58>, reg<test.i32 x4>,
+    reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>,
+    reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>,
+    reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>,
+    reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>) {
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", candidate_count="17", chosen_packet="test.load.v4i32", rejected_packet="test.load.v4i32"}
+  %load0 = low.op<test.load.v4i32>(%ptr0) : (reg<test.ptr>) -> reg<test.i32 x4>
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="2", candidate_count="16", chosen_packet="test.load.v4i32", rejected_packet="test.load.v4i32"}
+  %load1 = low.op<test.load.v4i32>(%ptr1) : (reg<test.ptr>) -> reg<test.i32 x4>
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="3", candidate_count="15", chosen_packet="test.load.v4i32", rejected_packet="test.load.v4i32"}
+  %load2 = low.op<test.load.v4i32>(%ptr2) : (reg<test.ptr>) -> reg<test.i32 x4>
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="4", candidate_count="14", chosen_packet="test.load.v4i32", rejected_packet="test.load.v4i32"}
+  %load3 = low.op<test.load.v4i32>(%ptr3) : (reg<test.ptr>) -> reg<test.i32 x4>
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="5", candidate_count="13", chosen_packet="test.load.v4i32", rejected_packet="test.load.v4i32"}
+  %load4 = low.op<test.load.v4i32>(%ptr4) : (reg<test.ptr>) -> reg<test.i32 x4>
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="6", candidate_count="12", chosen_packet="test.load.v4i32", rejected_packet="test.load.v4i32"}
+  %load5 = low.op<test.load.v4i32>(%ptr5) : (reg<test.ptr>) -> reg<test.i32 x4>
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="7", candidate_count="11", chosen_packet="test.load.v4i32", rejected_packet="test.load.v4i32"}
+  %load6 = low.op<test.load.v4i32>(%ptr6) : (reg<test.ptr>) -> reg<test.i32 x4>
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="8", candidate_count="10", chosen_packet="test.load.v4i32", rejected_packet="test.load.v4i32"}
+  %load7 = low.op<test.load.v4i32>(%ptr7) : (reg<test.ptr>) -> reg<test.i32 x4>
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="9", candidate_count="9", chosen_packet="test.load.v4i32", rejected_packet="test.load.v4i32"}
+  %load8 = low.op<test.load.v4i32>(%ptr8) : (reg<test.ptr>) -> reg<test.i32 x4>
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="10", candidate_count="8", chosen_packet="test.load.v4i32", rejected_packet="test.load.v4i32"}
+  %load9 = low.op<test.load.v4i32>(%ptr9) : (reg<test.ptr>) -> reg<test.i32 x4>
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="11", candidate_count="7", chosen_packet="test.load.v4i32", rejected_packet="test.load.v4i32"}
+  %load10 = low.op<test.load.v4i32>(%ptr10) : (reg<test.ptr>) -> reg<test.i32 x4>
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="12", candidate_count="6", chosen_packet="test.load.v4i32", rejected_packet="test.load.v4i32"}
+  %load11 = low.op<test.load.v4i32>(%ptr11) : (reg<test.ptr>) -> reg<test.i32 x4>
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="13", candidate_count="5", chosen_packet="test.load.v4i32", rejected_packet="test.load.v4i32"}
+  %load12 = low.op<test.load.v4i32>(%ptr12) : (reg<test.ptr>) -> reg<test.i32 x4>
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="14", candidate_count="4", chosen_packet="test.load.v4i32", rejected_packet="test.load.v4i32"}
+  %load13 = low.op<test.load.v4i32>(%ptr13) : (reg<test.ptr>) -> reg<test.i32 x4>
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="15", candidate_count="3", chosen_packet="test.load.v4i32", rejected_packet="test.load.v4i32"}
+  %load14 = low.op<test.load.v4i32>(%ptr14) : (reg<test.ptr>) -> reg<test.i32 x4>
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="16", candidate_count="2", chosen_packet="test.load.v4i32", rejected_packet="test.load.v4i32"}
+  %load15 = low.op<test.load.v4i32>(%ptr15) : (reg<test.ptr>) -> reg<test.i32 x4>
+  %load16 = low.op<test.load.v4i32>(%ptr16) : (reg<test.ptr>) -> reg<test.i32 x4>
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="1", candidate_count="17", chosen_packet="test.add.v4i32", rejected_packet="test.load.v4i32", chosen_pressure_cliff_penalty="0", rejected_pressure_cliff_penalty="1"}
+  %use0 = low.op<test.add.v4i32>(%load0, %lhs) : (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x4>
+  low.return %pad, %use0, %load1, %load2, %load3, %load4, %load5, %load6,
+      %load7, %load8, %load9, %load10, %load11, %load12, %load13, %load14,
+      %load15, %load16 : reg<test.i32 x58>, reg<test.i32 x4>,
+      reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>,
+      reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>,
+      reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>,
+      reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>
+}
+
+// ====
 // RUN: emit low-schedule-json @tied_storage_antidependency
 
 test.target<low_core> @test_target

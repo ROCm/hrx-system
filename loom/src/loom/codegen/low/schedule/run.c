@@ -1466,12 +1466,10 @@ static void loom_low_schedule_ready_heap_push(
   heap->node_indices[index] = node_index;
 }
 
-static uint32_t loom_low_schedule_ready_heap_pop(
+static void loom_low_schedule_ready_heap_sift_down(
     const loom_low_schedule_build_state_t* state,
-    loom_low_schedule_ready_heap_t* heap) {
-  const uint32_t result = heap->node_indices[0];
-  const uint32_t node_index = heap->node_indices[--heap->count];
-  iree_host_size_t index = 0;
+    loom_low_schedule_ready_heap_t* heap, iree_host_size_t index,
+    uint32_t node_index) {
   while (true) {
     const iree_host_size_t left_index = index * 2 + 1;
     if (left_index >= heap->count) {
@@ -1494,7 +1492,43 @@ static uint32_t loom_low_schedule_ready_heap_pop(
   if (heap->count != 0) {
     heap->node_indices[index] = node_index;
   }
+}
+
+static uint32_t loom_low_schedule_ready_heap_remove_at(
+    const loom_low_schedule_build_state_t* state,
+    loom_low_schedule_ready_heap_t* heap, iree_host_size_t index) {
+  IREE_ASSERT(index < heap->count);
+  const uint32_t result = heap->node_indices[index];
+  const uint32_t node_index = heap->node_indices[--heap->count];
+  if (index == heap->count) {
+    return result;
+  }
+  if (index != 0) {
+    iree_host_size_t parent_index = (index - 1) / 2;
+    uint32_t parent_node = heap->node_indices[parent_index];
+    if (loom_low_schedule_ready_node_less(state, node_index, parent_node)) {
+      do {
+        heap->node_indices[index] = parent_node;
+        index = parent_index;
+        if (index == 0) {
+          break;
+        }
+        parent_index = (index - 1) / 2;
+        parent_node = heap->node_indices[parent_index];
+      } while (
+          loom_low_schedule_ready_node_less(state, node_index, parent_node));
+      heap->node_indices[index] = node_index;
+      return result;
+    }
+  }
+  loom_low_schedule_ready_heap_sift_down(state, heap, index, node_index);
   return result;
+}
+
+static uint32_t loom_low_schedule_ready_heap_pop(
+    const loom_low_schedule_build_state_t* state,
+    loom_low_schedule_ready_heap_t* heap) {
+  return loom_low_schedule_ready_heap_remove_at(state, heap, 0);
 }
 
 static bool loom_low_schedule_node_is_unscheduled_in_block(
@@ -1875,6 +1909,36 @@ static iree_status_t loom_low_schedule_run_list_scheduler(
             rejected_node = node_index;
             rejected_score = inspected_scores[i];
           }
+        }
+        iree_host_size_t chosen_ready_heap_index = IREE_HOST_SIZE_MAX;
+        if (loom_low_schedule_candidate_threatens_pressure_cliff(
+                chosen_score)) {
+          for (iree_host_size_t i = 0; i < ready_heap.count; ++i) {
+            loom_low_schedule_candidate_score_t candidate_score = {0};
+            const uint32_t node_index = ready_heap.node_indices[i];
+            IREE_RETURN_IF_ERROR(loom_low_schedule_score_candidate(
+                state, &pressure_state, node_index, &candidate_score));
+            ++ready_candidate_count;
+            if (loom_low_schedule_candidate_score_less(state, candidate_score,
+                                                       chosen_score)) {
+              if (chosen_node != LOOM_LOW_SCHEDULE_NODE_NONE) {
+                rejected_node = chosen_node;
+                rejected_score = chosen_score;
+              }
+              chosen_node = node_index;
+              chosen_score = candidate_score;
+              chosen_ready_heap_index = i;
+            } else if (rejected_node == LOOM_LOW_SCHEDULE_NODE_NONE ||
+                       loom_low_schedule_candidate_score_less(
+                           state, candidate_score, rejected_score)) {
+              rejected_node = node_index;
+              rejected_score = candidate_score;
+            }
+          }
+        }
+        if (chosen_ready_heap_index != IREE_HOST_SIZE_MAX) {
+          (void)loom_low_schedule_ready_heap_remove_at(state, &ready_heap,
+                                                       chosen_ready_heap_index);
         }
         for (iree_host_size_t i = 0; i < inspected_count; ++i) {
           if (inspected_nodes[i] == chosen_node) {
