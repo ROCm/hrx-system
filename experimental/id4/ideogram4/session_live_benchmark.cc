@@ -202,6 +202,10 @@ struct GenerationResidencyResolution {
   // Concrete resident stage mask used by generation preparation and statistics.
   id4_ideogram4_generation_resident_stage_mask_t resident_stage_mask =
       ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_NONE;
+  // Concrete phase-local stage masks used by generation preparation and
+  // statistics.
+  id4_ideogram4_generation_resident_stage_mask_t
+      phase_stage_masks[ID4_IDEOGRAM4_GENERATION_PHASE_COUNT] = {};
 };
 
 enum class CustomRequestSource {
@@ -535,6 +539,8 @@ static iree_string_view_t GenerationResidencyModeName(
       return IREE_SV("selected_stage_bundles");
     case ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_ALL_STAGE_BUNDLES:
       return IREE_SV("all_stage_bundles");
+    case ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_PHASE_AWARE_STAGE_BUNDLES:
+      return IREE_SV("phase_aware_stage_bundles");
     default:
       return IREE_SV("invalid");
   }
@@ -724,6 +730,9 @@ static iree_status_t ResolveGenerationBenchmarkResidency(
           plan, &select_options, &selection));
       out_resolution->residency_mode = selection.residency_mode;
       out_resolution->resident_stage_mask = selection.resident_stage_mask;
+      std::memcpy(out_resolution->phase_stage_masks,
+                  selection.phase_stage_masks,
+                  sizeof(out_resolution->phase_stage_masks));
       return iree_ok_status();
     }
   }
@@ -856,6 +865,8 @@ static iree_status_t QueryGenerationBenchmarkResourceStatistics(
   options.structure_size = sizeof(options);
   options.residency_mode = residency.residency_mode;
   options.resident_stage_mask = residency.resident_stage_mask;
+  std::memcpy(options.phase_stage_masks, residency.phase_stage_masks,
+              sizeof(options.phase_stage_masks));
   options.parameter_load_prefetch_region_distance =
       parameter_load_prefetch_region_distance;
   return id4_ideogram4_generation_plan_resource_statistics(plan, &options,
@@ -1280,6 +1291,8 @@ static iree_status_t PrepareGenerationBundle(
   prepare_options.kernel_library = context.kernel_library.get();
   prepare_options.residency_mode = residency.residency_mode;
   prepare_options.resident_stage_mask = residency.resident_stage_mask;
+  std::memcpy(prepare_options.phase_stage_masks, residency.phase_stage_masks,
+              sizeof(prepare_options.phase_stage_masks));
   prepare_options.command_buffer_mode =
       context.runtime_context.command_buffer_mode;
   prepare_options.wait_semaphore_list = iree_hal_semaphore_list_empty();

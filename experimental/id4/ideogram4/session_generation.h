@@ -77,12 +77,14 @@ iree_status_t id4_ideogram4_validate_generation_resident_stage_mask(
 // Validates residency options used while preparing a generation.
 iree_status_t id4_ideogram4_validate_generation_prepare_residency_options(
     id4_ideogram4_generation_residency_mode_t mode,
-    id4_ideogram4_generation_resident_stage_mask_t resident_stage_mask);
+    id4_ideogram4_generation_resident_stage_mask_t resident_stage_mask,
+    const id4_ideogram4_generation_resident_stage_mask_t* phase_stage_masks);
 
 // Validates residency state stored by a prepared generation bundle.
 iree_status_t id4_ideogram4_validate_generation_bundle_residency(
     id4_ideogram4_generation_residency_mode_t mode,
-    id4_ideogram4_generation_resident_stage_mask_t resident_stage_mask);
+    id4_ideogram4_generation_resident_stage_mask_t resident_stage_mask,
+    const id4_ideogram4_generation_resident_stage_mask_t* phase_stage_masks);
 
 #ifdef __cplusplus
 }  // extern "C"

@@ -551,12 +551,17 @@ static iree_status_t id4_cli_resolve_generation_residency(
     id4_ideogram4_generation_resident_stage_mask_t requested_stage_mask,
     iree_host_size_t parameter_load_prefetch_region_distance,
     id4_ideogram4_generation_residency_mode_t* out_residency_mode,
-    id4_ideogram4_generation_resident_stage_mask_t* out_resident_stage_mask) {
+    id4_ideogram4_generation_resident_stage_mask_t* out_resident_stage_mask,
+    id4_ideogram4_generation_resident_stage_mask_t* out_phase_stage_masks) {
   IREE_ASSERT_ARGUMENT(generation_plan);
   IREE_ASSERT_ARGUMENT(out_residency_mode);
   IREE_ASSERT_ARGUMENT(out_resident_stage_mask);
+  IREE_ASSERT_ARGUMENT(out_phase_stage_masks);
   *out_residency_mode = ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_INVALID;
   *out_resident_stage_mask = ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_NONE;
+  memset(
+      out_phase_stage_masks, 0,
+      sizeof(out_phase_stage_masks[0]) * ID4_IDEOGRAM4_GENERATION_PHASE_COUNT);
 
   if (request_mode != ID4_CLI_GENERATION_RESIDENCY_REQUEST_MEMORY_BUDGETED &&
       FLAG_generation_residency_budget != 0) {
@@ -611,6 +616,8 @@ static iree_status_t id4_cli_resolve_generation_residency(
           generation_plan, &select_options, &selection));
       *out_residency_mode = selection.residency_mode;
       *out_resident_stage_mask = selection.resident_stage_mask;
+      memcpy(out_phase_stage_masks, selection.phase_stage_masks,
+             sizeof(selection.phase_stage_masks));
       return iree_ok_status();
     }
     default:
@@ -2018,8 +2025,8 @@ static iree_status_t id4_cli_run_generation(iree_allocator_t host_allocator) {
       status = id4_cli_resolve_generation_residency(
           generation_plan, generation_issue_mode, generation_residency_mode,
           requested_stage_mask, parameter_load_prefetch_region_distance,
-          &prepare_options.residency_mode,
-          &prepare_options.resident_stage_mask);
+          &prepare_options.residency_mode, &prepare_options.resident_stage_mask,
+          prepare_options.phase_stage_masks);
     }
     prepare_options.command_buffer_mode =
         id4_cli_generation_command_buffer_mode(

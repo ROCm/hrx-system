@@ -661,6 +661,7 @@ static bool id4_ideogram4_generation_resident_mask_contains_stage(
 static void id4_ideogram4_generation_resource_policy_initialize(
     id4_ideogram4_generation_residency_mode_t residency_mode,
     id4_ideogram4_generation_resident_stage_mask_t resident_stage_mask,
+    const id4_ideogram4_generation_resident_stage_mask_t* phase_stage_masks,
     id4_ideogram4_generation_residency_policy_t* out_policy) {
   memset(out_policy, 0, sizeof(*out_policy));
   out_policy->mode = residency_mode;
@@ -680,6 +681,11 @@ static void id4_ideogram4_generation_resource_policy_initialize(
             id4_ideogram4_generation_phase_stage_mask(
                 &id4_ideogram4_generation_phase_descriptors[i]);
       }
+      return;
+    case ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_PHASE_AWARE_STAGE_BUNDLES:
+      out_policy->request_stage_mask = resident_stage_mask;
+      memcpy(out_policy->phase_stage_masks, phase_stage_masks,
+             sizeof(out_policy->phase_stage_masks));
       return;
     case ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_ISSUE_PHASES:
     default:
@@ -906,7 +912,8 @@ iree_status_t id4_ideogram4_generation_plan_resource_statistics(
   }
   IREE_RETURN_IF_ERROR(
       id4_ideogram4_validate_generation_prepare_residency_options(
-          options->residency_mode, options->resident_stage_mask));
+          options->residency_mode, options->resident_stage_mask,
+          options->phase_stage_masks));
 
   memset(out_statistics, 0, sizeof(*out_statistics));
   IREE_RETURN_IF_ERROR(
@@ -916,7 +923,8 @@ iree_status_t id4_ideogram4_generation_plan_resource_statistics(
 
   id4_ideogram4_generation_residency_policy_t residency_policy;
   id4_ideogram4_generation_resource_policy_initialize(
-      options->residency_mode, options->resident_stage_mask, &residency_policy);
+      options->residency_mode, options->resident_stage_mask,
+      options->phase_stage_masks, &residency_policy);
   iree_host_size_t parameter_region_window_size = 0;
   IREE_RETURN_IF_ERROR(id4_ideogram4_generation_parameter_region_window_size(
       options->parameter_load_prefetch_region_distance,
@@ -1121,6 +1129,34 @@ static iree_status_t id4_ideogram4_generation_residency_mask_score(
   return iree_ok_status();
 }
 
+static iree_status_t id4_ideogram4_generation_phase_residency_score(
+    const id4_ideogram4_generation_plan_t* plan,
+    const id4_ideogram4_generation_resident_stage_mask_t* phase_stage_masks,
+    uint64_t* out_score) {
+  uint64_t score = 0;
+  for (iree_host_size_t phase_index = 0;
+       phase_index < IREE_ARRAYSIZE(id4_ideogram4_generation_phase_descriptors);
+       ++phase_index) {
+    const id4_ideogram4_generation_phase_descriptor_t* phase =
+        &id4_ideogram4_generation_phase_descriptors[phase_index];
+    for (iree_host_size_t i = 0; i < phase->stage_count; ++i) {
+      const id4_ideogram4_generation_stage_descriptor_t* descriptor =
+          id4_ideogram4_generation_stage_descriptor(phase->stage_ordinals[i]);
+      if (!iree_any_bit_set(phase_stage_masks[phase_index],
+                            descriptor->resident_stage_bit)) {
+        continue;
+      }
+      uint64_t stage_score = 0;
+      IREE_RETURN_IF_ERROR(id4_ideogram4_generation_stage_residency_score(
+          plan, descriptor->ordinal, &stage_score));
+      IREE_RETURN_IF_ERROR(
+          id4_ideogram4_generation_add_residency_score(&score, stage_score));
+    }
+  }
+  *out_score = score;
+  return iree_ok_status();
+}
+
 static iree_device_size_t id4_ideogram4_generation_selected_peak(
     id4_ideogram4_generation_issue_policy_t issue_policy,
     const id4_ideogram4_generation_resource_statistics_t* statistics) {
@@ -1155,6 +1191,131 @@ static iree_status_t id4_ideogram4_generation_residency_statistics_for_mask(
       parameter_load_prefetch_region_distance;
   return id4_ideogram4_generation_plan_resource_statistics(plan, &options,
                                                            out_statistics);
+}
+
+static iree_status_t id4_ideogram4_generation_phase_aware_residency_statistics(
+    const id4_ideogram4_generation_plan_t* plan,
+    id4_ideogram4_generation_resident_stage_mask_t resident_stage_mask,
+    const id4_ideogram4_generation_resident_stage_mask_t* phase_stage_masks,
+    iree_host_size_t parameter_load_prefetch_region_distance,
+    id4_ideogram4_generation_resource_statistics_t* out_statistics) {
+  id4_ideogram4_generation_resource_statistics_options_t options;
+  memset(&options, 0, sizeof(options));
+  options.structure_size = sizeof(options);
+  options.residency_mode =
+      ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_PHASE_AWARE_STAGE_BUNDLES;
+  options.resident_stage_mask = resident_stage_mask;
+  memcpy(options.phase_stage_masks, phase_stage_masks,
+         sizeof(options.phase_stage_masks));
+  options.parameter_load_prefetch_region_distance =
+      parameter_load_prefetch_region_distance;
+  return id4_ideogram4_generation_plan_resource_statistics(plan, &options,
+                                                           out_statistics);
+}
+
+static uint32_t id4_ideogram4_generation_residency_mode_preference(
+    id4_ideogram4_generation_residency_mode_t mode) {
+  switch (mode) {
+    case ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_PHASE_AWARE_STAGE_BUNDLES:
+      return 0;
+    case ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_SELECTED_STAGE_BUNDLES:
+      return 1;
+    case ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_PHASE_STAGE_BUNDLES:
+      return 2;
+    case ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_ISSUE_PHASES:
+      return 3;
+    case ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_ALL_STAGE_BUNDLES:
+    default:
+      return 4;
+  }
+}
+
+static uint32_t id4_ideogram4_generation_phase_stage_masks_sort_key(
+    const id4_ideogram4_generation_resident_stage_mask_t* phase_stage_masks) {
+  uint32_t key = 0;
+  for (iree_host_size_t i = 0; i < ID4_IDEOGRAM4_GENERATION_PHASE_COUNT; ++i) {
+    key |= ((uint32_t)phase_stage_masks[i]) << (i * 8);
+  }
+  return key;
+}
+
+static bool id4_ideogram4_generation_residency_candidate_is_better(
+    bool has_selection, id4_ideogram4_generation_residency_mode_t mode,
+    id4_ideogram4_generation_resident_stage_mask_t resident_stage_mask,
+    const id4_ideogram4_generation_resident_stage_mask_t* phase_stage_masks,
+    uint64_t score, iree_device_size_t peak_byte_length,
+    id4_ideogram4_generation_residency_mode_t best_mode,
+    id4_ideogram4_generation_resident_stage_mask_t best_stage_mask,
+    const id4_ideogram4_generation_resident_stage_mask_t*
+        best_phase_stage_masks,
+    uint64_t best_score, iree_device_size_t best_peak_byte_length) {
+  if (!has_selection) {
+    return true;
+  }
+  if (score != best_score) {
+    return score > best_score;
+  }
+  if (peak_byte_length != best_peak_byte_length) {
+    return peak_byte_length < best_peak_byte_length;
+  }
+  const uint32_t preference =
+      id4_ideogram4_generation_residency_mode_preference(mode);
+  const uint32_t best_preference =
+      id4_ideogram4_generation_residency_mode_preference(best_mode);
+  if (preference != best_preference) {
+    return preference < best_preference;
+  }
+  if (resident_stage_mask != best_stage_mask) {
+    return resident_stage_mask < best_stage_mask;
+  }
+  return id4_ideogram4_generation_phase_stage_masks_sort_key(
+             phase_stage_masks) <
+         id4_ideogram4_generation_phase_stage_masks_sort_key(
+             best_phase_stage_masks);
+}
+
+static bool id4_ideogram4_generation_phase_stage_masks_are_empty(
+    const id4_ideogram4_generation_resident_stage_mask_t* phase_stage_masks) {
+  for (iree_host_size_t i = 0; i < ID4_IDEOGRAM4_GENERATION_PHASE_COUNT; ++i) {
+    if (phase_stage_masks[i] != ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_NONE) {
+      return false;
+    }
+  }
+  return true;
+}
+
+static id4_ideogram4_generation_resident_stage_mask_t
+id4_ideogram4_generation_stage_mask_from_subset(
+    id4_ideogram4_generation_resident_stage_mask_t candidate_stage_mask,
+    uint32_t subset) {
+  id4_ideogram4_generation_resident_stage_mask_t stage_mask =
+      ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_NONE;
+  for (iree_host_size_t i = 0;
+       i < IREE_ARRAYSIZE(id4_ideogram4_generation_stage_descriptors); ++i) {
+    const id4_ideogram4_generation_stage_descriptor_t* descriptor =
+        &id4_ideogram4_generation_stage_descriptors[i];
+    if (!iree_all_bits_set(subset, 1u << i)) {
+      continue;
+    }
+    if (!iree_any_bit_set(candidate_stage_mask,
+                          descriptor->resident_stage_bit)) {
+      continue;
+    }
+    stage_mask |= descriptor->resident_stage_bit;
+  }
+  return stage_mask;
+}
+
+static void id4_ideogram4_generation_make_phase_stage_masks(
+    id4_ideogram4_generation_resident_stage_mask_t phase_local_stage_mask,
+    id4_ideogram4_generation_resident_stage_mask_t* out_phase_stage_masks) {
+  for (iree_host_size_t i = 0;
+       i < IREE_ARRAYSIZE(id4_ideogram4_generation_phase_descriptors); ++i) {
+    out_phase_stage_masks[i] =
+        id4_ideogram4_generation_phase_stage_mask(
+            &id4_ideogram4_generation_phase_descriptors[i]) &
+        phase_local_stage_mask;
+  }
 }
 
 iree_status_t id4_ideogram4_generation_plan_select_residency(
@@ -1197,27 +1358,25 @@ iree_status_t id4_ideogram4_generation_plan_select_residency(
   bool found_selection = false;
   uint64_t best_score = 0;
   iree_device_size_t best_peak_byte_length = 0;
+  id4_ideogram4_generation_residency_mode_t best_residency_mode =
+      ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_INVALID;
   id4_ideogram4_generation_resident_stage_mask_t best_stage_mask =
       ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_NONE;
+  id4_ideogram4_generation_resident_stage_mask_t
+      best_phase_stage_masks[ID4_IDEOGRAM4_GENERATION_PHASE_COUNT];
+  memset(best_phase_stage_masks, 0, sizeof(best_phase_stage_masks));
+  id4_ideogram4_generation_resident_stage_mask_t
+      empty_phase_stage_masks[ID4_IDEOGRAM4_GENERATION_PHASE_COUNT];
+  memset(empty_phase_stage_masks, 0, sizeof(empty_phase_stage_masks));
   id4_ideogram4_generation_resource_statistics_t best_statistics;
   memset(&best_statistics, 0, sizeof(best_statistics));
 
   const uint32_t subset_count =
       1u << IREE_ARRAYSIZE(id4_ideogram4_generation_stage_descriptors);
   for (uint32_t subset = 0; subset < subset_count; ++subset) {
-    id4_ideogram4_generation_resident_stage_mask_t stage_mask =
-        ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_NONE;
-    for (iree_host_size_t i = 0;
-         i < IREE_ARRAYSIZE(id4_ideogram4_generation_stage_descriptors); ++i) {
-      const id4_ideogram4_generation_stage_descriptor_t* descriptor =
-          &id4_ideogram4_generation_stage_descriptors[i];
-      if (!iree_all_bits_set(subset, 1u << i)) continue;
-      if (!iree_any_bit_set(options->candidate_stage_mask,
-                            descriptor->resident_stage_bit)) {
-        continue;
-      }
-      stage_mask |= descriptor->resident_stage_bit;
-    }
+    const id4_ideogram4_generation_resident_stage_mask_t stage_mask =
+        id4_ideogram4_generation_stage_mask_from_subset(
+            options->candidate_stage_mask, subset);
 
     id4_ideogram4_generation_resource_statistics_t statistics;
     IREE_RETURN_IF_ERROR(id4_ideogram4_generation_residency_statistics_for_mask(
@@ -1233,21 +1392,89 @@ iree_status_t id4_ideogram4_generation_plan_select_residency(
     uint64_t score = 0;
     IREE_RETURN_IF_ERROR(id4_ideogram4_generation_residency_mask_score(
         plan, stage_mask, &score));
-    const bool better_score = score > best_score;
-    const bool equal_score_better_peak =
-        score == best_score &&
-        (!found_selection || peak_byte_length < best_peak_byte_length);
-    const bool equal_score_equal_peak_better_mask =
-        score == best_score && found_selection &&
-        peak_byte_length == best_peak_byte_length &&
-        stage_mask < best_stage_mask;
-    if (!found_selection || better_score || equal_score_better_peak ||
-        equal_score_equal_peak_better_mask) {
+    const id4_ideogram4_generation_residency_mode_t residency_mode =
+        id4_ideogram4_generation_residency_mode_for_mask(stage_mask);
+    if (id4_ideogram4_generation_residency_candidate_is_better(
+            found_selection, residency_mode, stage_mask,
+            empty_phase_stage_masks, score, peak_byte_length,
+            best_residency_mode, best_stage_mask, best_phase_stage_masks,
+            best_score, best_peak_byte_length)) {
       found_selection = true;
       best_score = score;
       best_peak_byte_length = peak_byte_length;
+      best_residency_mode = residency_mode;
       best_stage_mask = stage_mask;
+      memset(best_phase_stage_masks, 0, sizeof(best_phase_stage_masks));
       best_statistics = statistics;
+    }
+  }
+
+  if (options->issue_policy ==
+      ID4_IDEOGRAM4_GENERATION_ISSUE_POLICY_PHASE_CONCURRENT) {
+    for (uint32_t request_subset = 0; request_subset < subset_count;
+         ++request_subset) {
+      const id4_ideogram4_generation_resident_stage_mask_t request_stage_mask =
+          id4_ideogram4_generation_stage_mask_from_subset(
+              options->candidate_stage_mask, request_subset);
+      for (uint32_t phase_subset = 0; phase_subset < subset_count;
+           ++phase_subset) {
+        const id4_ideogram4_generation_resident_stage_mask_t
+            phase_local_stage_mask =
+                id4_ideogram4_generation_stage_mask_from_subset(
+                    options->candidate_stage_mask, phase_subset);
+        if (phase_local_stage_mask ==
+            ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_NONE) {
+          continue;
+        }
+        if (iree_any_bit_set(request_stage_mask, phase_local_stage_mask)) {
+          continue;
+        }
+        id4_ideogram4_generation_resident_stage_mask_t
+            phase_stage_masks[ID4_IDEOGRAM4_GENERATION_PHASE_COUNT];
+        id4_ideogram4_generation_make_phase_stage_masks(phase_local_stage_mask,
+                                                        phase_stage_masks);
+        if (id4_ideogram4_generation_phase_stage_masks_are_empty(
+                phase_stage_masks)) {
+          continue;
+        }
+
+        id4_ideogram4_generation_resource_statistics_t statistics;
+        IREE_RETURN_IF_ERROR(
+            id4_ideogram4_generation_phase_aware_residency_statistics(
+                plan, request_stage_mask, phase_stage_masks,
+                options->parameter_load_prefetch_region_distance, &statistics));
+        const iree_device_size_t peak_byte_length =
+            id4_ideogram4_generation_selected_peak(options->issue_policy,
+                                                   &statistics);
+        if (peak_byte_length > options->memory_budget_byte_length) {
+          continue;
+        }
+        uint64_t score = 0;
+        IREE_RETURN_IF_ERROR(id4_ideogram4_generation_residency_mask_score(
+            plan, request_stage_mask, &score));
+        uint64_t phase_score = 0;
+        IREE_RETURN_IF_ERROR(id4_ideogram4_generation_phase_residency_score(
+            plan, phase_stage_masks, &phase_score));
+        IREE_RETURN_IF_ERROR(
+            id4_ideogram4_generation_add_residency_score(&score, phase_score));
+        if (!id4_ideogram4_generation_residency_candidate_is_better(
+                found_selection,
+                ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_PHASE_AWARE_STAGE_BUNDLES,
+                request_stage_mask, phase_stage_masks, score, peak_byte_length,
+                best_residency_mode, best_stage_mask, best_phase_stage_masks,
+                best_score, best_peak_byte_length)) {
+          continue;
+        }
+        found_selection = true;
+        best_score = score;
+        best_peak_byte_length = peak_byte_length;
+        best_residency_mode =
+            ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_PHASE_AWARE_STAGE_BUNDLES;
+        best_stage_mask = request_stage_mask;
+        memcpy(best_phase_stage_masks, phase_stage_masks,
+               sizeof(best_phase_stage_masks));
+        best_statistics = statistics;
+      }
     }
   }
 
@@ -1260,9 +1487,10 @@ iree_status_t id4_ideogram4_generation_plan_select_residency(
   }
 
   memset(out_selection, 0, sizeof(*out_selection));
-  out_selection->residency_mode =
-      id4_ideogram4_generation_residency_mode_for_mask(best_stage_mask);
+  out_selection->residency_mode = best_residency_mode;
   out_selection->resident_stage_mask = best_stage_mask;
+  memcpy(out_selection->phase_stage_masks, best_phase_stage_masks,
+         sizeof(out_selection->phase_stage_masks));
   out_selection->selected_peak_byte_length = best_peak_byte_length;
   out_selection->resource_statistics = best_statistics;
   return iree_ok_status();

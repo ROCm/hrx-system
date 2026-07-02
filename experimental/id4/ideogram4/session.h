@@ -212,6 +212,9 @@ typedef enum id4_ideogram4_generation_residency_mode_e {
   ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_SELECTED_STAGE_BUNDLES = 3,
   // Retain every coarse stage parameter slab across generation issues.
   ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_ALL_STAGE_BUNDLES = 4,
+  // Combine request-lifetime retained stage bundles with phase-lifetime stage
+  // bundles selected by the residency policy.
+  ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_PHASE_AWARE_STAGE_BUNDLES = 5,
 } id4_ideogram4_generation_residency_mode_e;
 
 // Bitmask selecting high-level generation phases for phase issue.
@@ -289,6 +292,9 @@ typedef struct id4_ideogram4_generation_resource_statistics_options_t {
   id4_ideogram4_generation_residency_mode_t residency_mode;
   // Stage-bundle mask used when |residency_mode| selects explicit stages.
   id4_ideogram4_generation_resident_stage_mask_t resident_stage_mask;
+  // Stage-bundle masks materialized for each generation phase.
+  id4_ideogram4_generation_resident_stage_mask_t
+      phase_stage_masks[ID4_IDEOGRAM4_GENERATION_PHASE_COUNT];
   // Future regions whose compact parameter issue windows may be live.
   iree_host_size_t parameter_load_prefetch_region_distance;
 } id4_ideogram4_generation_resource_statistics_options_t;
@@ -352,6 +358,9 @@ typedef struct id4_ideogram4_generation_residency_selection_t {
   id4_ideogram4_generation_residency_mode_t residency_mode;
   // Resident stage mask to pass to generation preparation.
   id4_ideogram4_generation_resident_stage_mask_t resident_stage_mask;
+  // Phase-local stage masks to pass to generation preparation.
+  id4_ideogram4_generation_resident_stage_mask_t
+      phase_stage_masks[ID4_IDEOGRAM4_GENERATION_PHASE_COUNT];
   // Logical live bytes for the selected issue policy.
   iree_device_size_t selected_peak_byte_length;
   // Resource statistics for the selected residency policy.
@@ -372,6 +381,9 @@ typedef struct id4_ideogram4_generation_prepare_options_t {
   id4_ideogram4_generation_residency_mode_t residency_mode;
   // Coarse stage bundles retained when |residency_mode| selects residency.
   id4_ideogram4_generation_resident_stage_mask_t resident_stage_mask;
+  // Coarse stage bundles materialized for each generation phase.
+  id4_ideogram4_generation_resident_stage_mask_t
+      phase_stage_masks[ID4_IDEOGRAM4_GENERATION_PHASE_COUNT];
   // HAL command-buffer mode used when preparing reusable regions.
   iree_hal_command_buffer_mode_t command_buffer_mode;
   // Semaphores that generation preparation waits on.

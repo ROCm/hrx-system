@@ -45,7 +45,8 @@ static iree_status_t id4_ideogram4_validate_generation_issue_options(
   }
   IREE_RETURN_IF_ERROR(id4_ideogram4_validate_generation_bundle_residency(
       bundle->residency_policy.mode,
-      bundle->residency_policy.request_stage_mask));
+      bundle->residency_policy.request_stage_mask,
+      bundle->residency_policy.phase_stage_masks));
   if (!options) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "Ideogram 4 generation issue options are required");
@@ -148,7 +149,8 @@ static iree_status_t id4_ideogram4_validate_generation_begin_options(
   }
   IREE_RETURN_IF_ERROR(id4_ideogram4_validate_generation_bundle_residency(
       bundle->residency_policy.mode,
-      bundle->residency_policy.request_stage_mask));
+      bundle->residency_policy.request_stage_mask,
+      bundle->residency_policy.phase_stage_masks));
   if (!options) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "Ideogram 4 generation begin options are required");

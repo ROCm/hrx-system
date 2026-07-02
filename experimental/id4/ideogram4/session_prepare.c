@@ -61,7 +61,8 @@ static iree_status_t id4_ideogram4_validate_generation_prepare_options(
   }
   IREE_RETURN_IF_ERROR(
       id4_ideogram4_validate_generation_prepare_residency_options(
-          options->residency_mode, options->resident_stage_mask));
+          options->residency_mode, options->resident_stage_mask,
+          options->phase_stage_masks));
   IREE_RETURN_IF_ERROR(id4_ideogram4_validate_semaphore_list(
       options->wait_semaphore_list, IREE_SV("Ideogram 4 generation prepare "
                                             "wait")));
@@ -151,6 +152,13 @@ static void id4_ideogram4_generation_bundle_capture_prepare_resources(
             id4_ideogram4_generation_phase_stage_mask(
                 &id4_ideogram4_generation_phase_descriptors[i]);
       }
+      break;
+    case ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_PHASE_AWARE_STAGE_BUNDLES:
+      bundle->residency_policy.request_stage_mask =
+          options->resident_stage_mask;
+      memcpy(bundle->residency_policy.phase_stage_masks,
+             options->phase_stage_masks,
+             sizeof(bundle->residency_policy.phase_stage_masks));
       break;
     default:
       bundle->residency_policy.request_stage_mask =
@@ -459,7 +467,8 @@ static iree_status_t id4_ideogram4_validate_generation_phase_prepare_options(
   }
   IREE_RETURN_IF_ERROR(id4_ideogram4_validate_generation_bundle_residency(
       bundle->residency_policy.mode,
-      bundle->residency_policy.request_stage_mask));
+      bundle->residency_policy.request_stage_mask,
+      bundle->residency_policy.phase_stage_masks));
   if (!options) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
@@ -1008,6 +1017,10 @@ iree_status_t id4_ideogram4_session_prepare_generation(
             id4_ideogram4_generation_bundle_signal_prepared(bundle, options);
         break;
       case ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_SELECTED_STAGE_BUNDLES:
+        status = id4_ideogram4_generation_bundle_prepare_resident_stages(
+            bundle, options);
+        break;
+      case ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_PHASE_AWARE_STAGE_BUNDLES:
         status = id4_ideogram4_generation_bundle_prepare_resident_stages(
             bundle, options);
         break;

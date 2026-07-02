@@ -856,7 +856,7 @@ TEST_F(SessionTest, SelectsGenerationResidencyWithinBudget) {
             selection.resource_statistics.stage_serial_total_peak_byte_length);
 }
 
-TEST_F(SessionTest, ResidencySelectionScoresRepeatedPhaseIssueStages) {
+TEST_F(SessionTest, ResidencySelectionUsesPhaseLocalLifetimesForPhaseIssue) {
   TokenizerPtr tokenizer = LoadTokenizer();
   ScopedRequest request;
   IREE_ASSERT_OK(id4_ideogram4_request_parse_json(
@@ -898,9 +898,24 @@ TEST_F(SessionTest, ResidencySelectionScoresRepeatedPhaseIssueStages) {
           combined_statistics.phase_concurrent_total_peak_byte_length - 1);
 
   EXPECT_EQ(selection.residency_mode,
-            ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_SELECTED_STAGE_BUNDLES);
+            ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_PHASE_AWARE_STAGE_BUNDLES);
   EXPECT_EQ(selection.resident_stage_mask,
-            ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_DIT_CONDITIONED);
+            ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_NONE);
+  iree_host_size_t selected_phase_count = 0;
+  id4_ideogram4_generation_resident_stage_mask_t selected_phase_union =
+      ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_NONE;
+  for (iree_host_size_t i = 0; i < ID4_IDEOGRAM4_GENERATION_PHASE_COUNT; ++i) {
+    if (selection.phase_stage_masks[i] ==
+        ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_NONE) {
+      continue;
+    }
+    ++selected_phase_count;
+    selected_phase_union |= selection.phase_stage_masks[i];
+  }
+  EXPECT_EQ(selected_phase_count, 2u);
+  EXPECT_EQ(selected_phase_union,
+            ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_QWEN |
+                ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_DIT_CONDITIONED);
   EXPECT_LE(selection.selected_peak_byte_length,
             combined_statistics.phase_concurrent_total_peak_byte_length - 1);
   EXPECT_EQ(
@@ -1151,6 +1166,87 @@ TEST_F(SessionTest, PrepareGenerationSelectedStageBundlesRequireStageMask) {
   prepare_options.structure_size = sizeof(prepare_options);
   prepare_options.residency_mode =
       ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_SELECTED_STAGE_BUNDLES;
+  prepare_options.signal_semaphore_list = signal_list.list();
+
+  id4_ideogram4_generation_bundle_t* bundle = nullptr;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      id4_ideogram4_session_prepare_generation(session.get(), plan.get(),
+                                               &prepare_options, &bundle));
+  EXPECT_EQ(bundle, nullptr);
+}
+
+TEST_F(SessionTest, PrepareGenerationPhaseAwareStageBundlesRequireStageMask) {
+  TokenizerPtr tokenizer = LoadTokenizer();
+  ScopedRequest request;
+  IREE_ASSERT_OK(id4_ideogram4_request_parse_json(
+      ShortFullRequestJson(), iree_allocator_system(), &request.value));
+  SessionPtr session = CreateLoadedSession();
+  GenerationPlanPtr plan =
+      PlanGeneration(session.get(), tokenizer.get(), &request.value);
+
+  iree_hal_device_t* device =
+      iree_hal_device_group_device_at(device_group_, /*index=*/0);
+  ScopedSemaphoreList signal_list(device);
+
+  id4_ideogram4_generation_prepare_options_t prepare_options;
+  std::memset(&prepare_options, 0, sizeof(prepare_options));
+  prepare_options.structure_size = sizeof(prepare_options);
+  prepare_options.residency_mode =
+      ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_PHASE_AWARE_STAGE_BUNDLES;
+  prepare_options.signal_semaphore_list = signal_list.list();
+
+  id4_ideogram4_generation_bundle_t* bundle = nullptr;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      id4_ideogram4_session_prepare_generation(session.get(), plan.get(),
+                                               &prepare_options, &bundle));
+  EXPECT_EQ(bundle, nullptr);
+}
+
+TEST_F(SessionTest, PrepareGenerationPhaseAwareStageBundlesRejectOverlap) {
+  TokenizerPtr tokenizer = LoadTokenizer();
+  ScopedRequest request;
+  IREE_ASSERT_OK(id4_ideogram4_request_parse_json(
+      ManyStepFullRequestJson(), iree_allocator_system(), &request.value));
+  SessionPtr session = CreateLoadedSession();
+  GenerationPlanPtr plan =
+      PlanGeneration(session.get(), tokenizer.get(), &request.value);
+
+  iree_hal_device_t* device =
+      iree_hal_device_group_device_at(device_group_, /*index=*/0);
+  ScopedSemaphoreList signal_list(device);
+
+  id4_ideogram4_generation_resource_statistics_t phase_stage_statistics =
+      EstimateGenerationResources(
+          plan.get(),
+          ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_PHASE_STAGE_BUNDLES,
+          ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_NONE);
+  id4_ideogram4_generation_residency_selection_t selection =
+      SelectGenerationResidency(
+          plan.get(), ID4_IDEOGRAM4_GENERATION_ISSUE_POLICY_PHASE_CONCURRENT,
+          ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_QWEN |
+              ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_DIT_CONDITIONED,
+          phase_stage_statistics.phase_concurrent_total_peak_byte_length);
+  ASSERT_EQ(selection.residency_mode,
+            ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_PHASE_AWARE_STAGE_BUNDLES);
+
+  id4_ideogram4_generation_resident_stage_mask_t overlap_stage_mask =
+      ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_NONE;
+  for (iree_host_size_t i = 0; i < ID4_IDEOGRAM4_GENERATION_PHASE_COUNT; ++i) {
+    overlap_stage_mask |= selection.phase_stage_masks[i];
+  }
+  overlap_stage_mask &= ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_DIT_CONDITIONED;
+  ASSERT_NE(overlap_stage_mask, ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_NONE);
+
+  id4_ideogram4_generation_prepare_options_t prepare_options;
+  std::memset(&prepare_options, 0, sizeof(prepare_options));
+  prepare_options.structure_size = sizeof(prepare_options);
+  prepare_options.residency_mode =
+      ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_PHASE_AWARE_STAGE_BUNDLES;
+  prepare_options.resident_stage_mask = overlap_stage_mask;
+  std::memcpy(prepare_options.phase_stage_masks, selection.phase_stage_masks,
+              sizeof(prepare_options.phase_stage_masks));
   prepare_options.signal_semaphore_list = signal_list.list();
 
   id4_ideogram4_generation_bundle_t* bundle = nullptr;

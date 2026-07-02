@@ -323,17 +323,74 @@ iree_status_t id4_ideogram4_validate_generation_resident_stage_mask(
   return iree_ok_status();
 }
 
+static bool id4_ideogram4_generation_phase_stage_masks_are_empty(
+    const id4_ideogram4_generation_resident_stage_mask_t* phase_stage_masks) {
+  for (iree_host_size_t i = 0; i < ID4_IDEOGRAM4_GENERATION_PHASE_COUNT; ++i) {
+    if (phase_stage_masks[i] != ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_NONE) {
+      return false;
+    }
+  }
+  return true;
+}
+
+static iree_status_t id4_ideogram4_validate_generation_phase_stage_masks(
+    id4_ideogram4_generation_resident_stage_mask_t request_stage_mask,
+    const id4_ideogram4_generation_resident_stage_mask_t* phase_stage_masks) {
+  if (!phase_stage_masks) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "Ideogram 4 generation phase stage masks are required");
+  }
+  for (iree_host_size_t i = 0; i < ID4_IDEOGRAM4_GENERATION_PHASE_COUNT; ++i) {
+    const id4_ideogram4_generation_resident_stage_mask_t phase_stage_mask =
+        phase_stage_masks[i];
+    IREE_RETURN_IF_ERROR(id4_ideogram4_validate_generation_resident_stage_mask(
+        phase_stage_mask));
+    const id4_ideogram4_generation_resident_stage_mask_t phase_allowed_mask =
+        id4_ideogram4_generation_phase_stage_mask(
+            &id4_ideogram4_generation_phase_descriptors[i]);
+    const id4_ideogram4_generation_resident_stage_mask_t non_phase_mask =
+        phase_stage_mask & ~phase_allowed_mask;
+    if (non_phase_mask != ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_NONE) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "Ideogram 4 generation phase %" PRIhsz
+                              " stage mask 0x%x contains non-phase stages 0x%x",
+                              i, phase_stage_mask, non_phase_mask);
+    }
+    const id4_ideogram4_generation_resident_stage_mask_t overlap_mask =
+        phase_stage_mask & request_stage_mask;
+    if (overlap_mask != ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_NONE) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "Ideogram 4 generation phase %" PRIhsz
+          " stage mask 0x%x overlaps request-resident stages 0x%x",
+          i, phase_stage_mask, overlap_mask);
+    }
+  }
+  return iree_ok_status();
+}
+
 iree_status_t id4_ideogram4_validate_generation_prepare_residency_options(
     id4_ideogram4_generation_residency_mode_t mode,
-    id4_ideogram4_generation_resident_stage_mask_t resident_stage_mask) {
+    id4_ideogram4_generation_resident_stage_mask_t resident_stage_mask,
+    const id4_ideogram4_generation_resident_stage_mask_t* phase_stage_masks) {
   IREE_RETURN_IF_ERROR(id4_ideogram4_validate_generation_resident_stage_mask(
       resident_stage_mask));
+  IREE_RETURN_IF_ERROR(id4_ideogram4_validate_generation_phase_stage_masks(
+      resident_stage_mask, phase_stage_masks));
   switch (mode) {
     case ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_ISSUE_PHASES:
       if (resident_stage_mask != ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_NONE) {
         return iree_make_status(
             IREE_STATUS_INVALID_ARGUMENT,
             "Ideogram 4 issue-phase residency mode must not select resident "
+            "stage bundles");
+      }
+      if (!id4_ideogram4_generation_phase_stage_masks_are_empty(
+              phase_stage_masks)) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "Ideogram 4 issue-phase residency mode must not select phase "
             "stage bundles");
       }
       return iree_ok_status();
@@ -344,6 +401,13 @@ iree_status_t id4_ideogram4_validate_generation_prepare_residency_options(
             "Ideogram 4 phase-stage-bundle residency mode must not select "
             "resident stage bundles");
       }
+      if (!id4_ideogram4_generation_phase_stage_masks_are_empty(
+              phase_stage_masks)) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "Ideogram 4 phase-stage-bundle residency mode derives phase "
+            "stage bundles and must not receive explicit phase masks");
+      }
       return iree_ok_status();
     case ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_SELECTED_STAGE_BUNDLES:
       if (resident_stage_mask == ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_NONE) {
@@ -352,6 +416,13 @@ iree_status_t id4_ideogram4_validate_generation_prepare_residency_options(
             "Ideogram 4 selected-stage-bundle residency mode requires at "
             "least one resident stage bundle");
       }
+      if (!id4_ideogram4_generation_phase_stage_masks_are_empty(
+              phase_stage_masks)) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "Ideogram 4 selected-stage-bundle residency mode must not select "
+            "phase stage bundles");
+      }
       return iree_ok_status();
     case ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_ALL_STAGE_BUNDLES:
       if (resident_stage_mask != ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_NONE) {
@@ -359,6 +430,23 @@ iree_status_t id4_ideogram4_validate_generation_prepare_residency_options(
             IREE_STATUS_INVALID_ARGUMENT,
             "Ideogram 4 all-stage-bundle residency mode derives resident "
             "stage bundles and must not receive an explicit stage mask");
+      }
+      if (!id4_ideogram4_generation_phase_stage_masks_are_empty(
+              phase_stage_masks)) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "Ideogram 4 all-stage-bundle residency mode must not select "
+            "phase stage bundles");
+      }
+      return iree_ok_status();
+    case ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_PHASE_AWARE_STAGE_BUNDLES:
+      if (resident_stage_mask == ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_NONE &&
+          id4_ideogram4_generation_phase_stage_masks_are_empty(
+              phase_stage_masks)) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "Ideogram 4 phase-aware residency mode requires request or phase "
+            "stage bundles");
       }
       return iree_ok_status();
     default:
@@ -371,9 +459,12 @@ iree_status_t id4_ideogram4_validate_generation_prepare_residency_options(
 
 iree_status_t id4_ideogram4_validate_generation_bundle_residency(
     id4_ideogram4_generation_residency_mode_t mode,
-    id4_ideogram4_generation_resident_stage_mask_t resident_stage_mask) {
+    id4_ideogram4_generation_resident_stage_mask_t resident_stage_mask,
+    const id4_ideogram4_generation_resident_stage_mask_t* phase_stage_masks) {
   IREE_RETURN_IF_ERROR(id4_ideogram4_validate_generation_resident_stage_mask(
       resident_stage_mask));
+  IREE_RETURN_IF_ERROR(id4_ideogram4_validate_generation_phase_stage_masks(
+      resident_stage_mask, phase_stage_masks));
   switch (mode) {
     case ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_ISSUE_PHASES:
       if (resident_stage_mask != ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_NONE) {
@@ -381,6 +472,13 @@ iree_status_t id4_ideogram4_validate_generation_bundle_residency(
             IREE_STATUS_INVALID_ARGUMENT,
             "Ideogram 4 issue-phase generation bundle must not retain "
             "resident stage bundles");
+      }
+      if (!id4_ideogram4_generation_phase_stage_masks_are_empty(
+              phase_stage_masks)) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "Ideogram 4 issue-phase generation bundle must not retain phase "
+            "stage bundles");
       }
       return iree_ok_status();
     case ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_PHASE_STAGE_BUNDLES:
@@ -390,6 +488,19 @@ iree_status_t id4_ideogram4_validate_generation_bundle_residency(
             "Ideogram 4 phase-stage-bundle generation bundle must not retain "
             "resident stage bundles");
       }
+      for (iree_host_size_t i = 0; i < ID4_IDEOGRAM4_GENERATION_PHASE_COUNT;
+           ++i) {
+        const id4_ideogram4_generation_resident_stage_mask_t expected_mask =
+            id4_ideogram4_generation_phase_stage_mask(
+                &id4_ideogram4_generation_phase_descriptors[i]);
+        if (phase_stage_masks[i] != expected_mask) {
+          return iree_make_status(
+              IREE_STATUS_INVALID_ARGUMENT,
+              "Ideogram 4 phase-stage-bundle generation bundle phase %" PRIhsz
+              " has stage mask 0x%x but expected 0x%x",
+              i, phase_stage_masks[i], expected_mask);
+        }
+      }
       return iree_ok_status();
     case ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_SELECTED_STAGE_BUNDLES:
       if (resident_stage_mask == ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_NONE) {
@@ -398,6 +509,13 @@ iree_status_t id4_ideogram4_validate_generation_bundle_residency(
             "Ideogram 4 selected-stage-bundle generation bundle requires at "
             "least one resident stage bundle");
       }
+      if (!id4_ideogram4_generation_phase_stage_masks_are_empty(
+              phase_stage_masks)) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "Ideogram 4 selected-stage-bundle generation bundle must not "
+            "retain phase stage bundles");
+      }
       return iree_ok_status();
     case ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_ALL_STAGE_BUNDLES:
       if (resident_stage_mask != ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_ALL) {
@@ -405,6 +523,23 @@ iree_status_t id4_ideogram4_validate_generation_bundle_residency(
             IREE_STATUS_INVALID_ARGUMENT,
             "Ideogram 4 all-stage-bundle generation bundle must retain every "
             "stage bundle");
+      }
+      if (!id4_ideogram4_generation_phase_stage_masks_are_empty(
+              phase_stage_masks)) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "Ideogram 4 all-stage-bundle generation bundle must not retain "
+            "phase stage bundles");
+      }
+      return iree_ok_status();
+    case ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_PHASE_AWARE_STAGE_BUNDLES:
+      if (resident_stage_mask == ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_NONE &&
+          id4_ideogram4_generation_phase_stage_masks_are_empty(
+              phase_stage_masks)) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "Ideogram 4 phase-aware generation bundle requires request or "
+            "phase stage bundles");
       }
       return iree_ok_status();
     default:
