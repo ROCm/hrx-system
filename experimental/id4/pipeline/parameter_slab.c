@@ -1634,62 +1634,191 @@ typedef struct id4_pipeline_parameter_encode_wave_chunk_t {
       source_signal_lists[ID4_PIPELINE_PARAMETER_ENCODER_CHUNK_SOURCE_CAPACITY];
 } id4_pipeline_parameter_encode_wave_chunk_t;
 
-static iree_status_t id4_pipeline_parameter_submit_source_gather_wave(
-    const id4_pipeline_parameter_slab_set_load_options_t* options,
-    const id4_pipeline_parameter_slab_load_t* load,
+typedef struct id4_pipeline_parameter_encode_wave_source_group_t {
+  // Provider source scope shared by every source in this group.
+  iree_string_view_t source_scope;
+  // Slot-readiness waits shared by every source in this group.
+  iree_hal_semaphore_list_t wait_semaphore_list;
+  // Source tensors plus staging offsets enumerated by this group.
+  id4_pipeline_parameter_encode_chunk_source_t
+      sources[ID4_PIPELINE_PARAMETER_ENCODER_WAVE_SOURCE_CAPACITY];
+  // Number of populated source entries.
+  iree_host_size_t source_count;
+  // Semaphores signaled when this group has populated all sources.
+  iree_hal_semaphore_t*
+      signal_semaphores[ID4_PIPELINE_PARAMETER_ENCODER_WAVE_CHUNK_CAPACITY];
+  // Payload values paired with signal_semaphores.
+  uint64_t
+      signal_payload_values[ID4_PIPELINE_PARAMETER_ENCODER_WAVE_CHUNK_CAPACITY];
+  // Number of populated signal entries.
+  iree_host_size_t signal_count;
+} id4_pipeline_parameter_encode_wave_source_group_t;
+
+static bool id4_pipeline_parameter_same_semaphore_list(
+    iree_hal_semaphore_list_t lhs, iree_hal_semaphore_list_t rhs) {
+  if (lhs.count != rhs.count) return false;
+  for (iree_host_size_t i = 0; i < lhs.count; ++i) {
+    if (lhs.semaphores[i] != rhs.semaphores[i]) return false;
+    if (lhs.payload_values[i] != rhs.payload_values[i]) return false;
+  }
+  return true;
+}
+
+static iree_host_size_t id4_pipeline_parameter_find_wave_source_group(
+    iree_host_size_t group_count,
+    const id4_pipeline_parameter_encode_wave_source_group_t* groups,
+    iree_string_view_t source_scope, iree_hal_semaphore_list_t wait_list) {
+  for (iree_host_size_t i = 0; i < group_count; ++i) {
+    if (!iree_string_view_equal(groups[i].source_scope, source_scope)) {
+      continue;
+    }
+    if (!id4_pipeline_parameter_same_semaphore_list(
+            groups[i].wait_semaphore_list, wait_list)) {
+      continue;
+    }
+    return i;
+  }
+  return IREE_HOST_SIZE_MAX;
+}
+
+static iree_status_t id4_pipeline_parameter_append_wave_source_group(
+    const id4_pipeline_parameter_encode_wave_chunk_t* chunk,
+    iree_host_size_t batch_index,
+    id4_pipeline_parameter_encode_wave_source_group_t* group) {
+  const id4_pipeline_parameter_encode_source_batch_t* batch =
+      &chunk->source_batches[batch_index];
+  if (batch->source_count >
+      ID4_PIPELINE_PARAMETER_ENCODER_WAVE_SOURCE_CAPACITY -
+          group->source_count) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "parameter encoder wave source group capacity exceeded");
+  }
+  if (group->signal_count ==
+      ID4_PIPELINE_PARAMETER_ENCODER_WAVE_CHUNK_CAPACITY) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "parameter encoder wave source signal capacity exceeded");
+  }
+  iree_hal_semaphore_list_t signal_list =
+      chunk->source_signal_lists[batch_index];
+  if (signal_list.count != 1) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "parameter encoder chunk source batch must have one signal semaphore");
+  }
+  for (iree_host_size_t i = 0; i < batch->source_count; ++i) {
+    group->sources[group->source_count++] =
+        chunk->grouped_sources[batch->source_offset + i];
+  }
+  group->signal_semaphores[group->signal_count] = signal_list.semaphores[0];
+  group->signal_payload_values[group->signal_count] =
+      signal_list.payload_values[0];
+  ++group->signal_count;
+  return iree_ok_status();
+}
+
+static iree_status_t id4_pipeline_parameter_build_source_gather_wave(
     iree_host_size_t wave_chunk_count,
     const id4_pipeline_parameter_encode_wave_chunk_t* chunks,
-    iree_hal_buffer_t* staging_buffer) {
-  id4_pipeline_parameter_load_source_enumerator_state_t
-      enumerator_states[ID4_PIPELINE_PARAMETER_ENCODER_WAVE_SOURCE_CAPACITY] = {
-          0};
-  iree_io_parameter_gather_t
-      gathers[ID4_PIPELINE_PARAMETER_ENCODER_WAVE_SOURCE_CAPACITY] = {0};
-  iree_host_size_t gather_count = 0;
+    id4_pipeline_parameter_encode_wave_source_group_t* groups,
+    iree_host_size_t* out_group_count) {
+  *out_group_count = 0;
   for (iree_host_size_t chunk_index = 0; chunk_index < wave_chunk_count;
        ++chunk_index) {
     const id4_pipeline_parameter_encode_wave_chunk_t* chunk =
         &chunks[chunk_index];
     for (iree_host_size_t batch_index = 0;
          batch_index < chunk->source_batch_count; ++batch_index) {
-      if (gather_count == ID4_PIPELINE_PARAMETER_ENCODER_WAVE_SOURCE_CAPACITY) {
-        return iree_make_status(
-            IREE_STATUS_OUT_OF_RANGE,
-            "parameter encoder source gather wave capacity exceeded");
-      }
       const id4_pipeline_parameter_encode_source_batch_t* batch =
           &chunk->source_batches[batch_index];
-      if (!iree_io_parameter_provider_query_support(options->provider,
-                                                    batch->source_scope)) {
-        return iree_make_status(
-            IREE_STATUS_NOT_FOUND,
-            "parameter provider does not support source scope '%.*s'",
-            (int)batch->source_scope.size, batch->source_scope.data);
+      iree_host_size_t group_index =
+          id4_pipeline_parameter_find_wave_source_group(
+              *out_group_count, groups, batch->source_scope,
+              chunk->source_wait_list);
+      if (group_index == IREE_HOST_SIZE_MAX) {
+        if (*out_group_count ==
+            ID4_PIPELINE_PARAMETER_ENCODER_WAVE_SOURCE_CAPACITY) {
+          return iree_make_status(
+              IREE_STATUS_OUT_OF_RANGE,
+              "parameter encoder source gather wave capacity exceeded");
+        }
+        group_index = (*out_group_count)++;
+        groups[group_index] =
+            (id4_pipeline_parameter_encode_wave_source_group_t){
+                // Provider source scope for this merged group.
+                .source_scope = batch->source_scope,
+                // Shared slot-readiness waits for this merged group.
+                .wait_semaphore_list = chunk->source_wait_list,
+            };
       }
-      enumerator_states[gather_count] =
-          (id4_pipeline_parameter_load_source_enumerator_state_t){
-              // Number of source descriptors gathered by this request.
-              .source_count = batch->source_count,
-              // Source descriptors gathered by this request.
-              .sources = &chunk->grouped_sources[batch->source_offset],
-          };
-      gathers[gather_count] = (iree_io_parameter_gather_t){
-          // Source scope for this provider gather group.
-          .source_scope = batch->source_scope,
-          // Staging buffer populated by the source gather.
-          .target_buffer = staging_buffer,
-          // Number of source descriptors in this gather group.
-          .count = batch->source_count,
-          // Source descriptor enumerator for this gather group.
-          .enumerator = id4_pipeline_parameter_load_source_enumerator(
-              &enumerator_states[gather_count]),
-          // Slot readiness required before source writes may begin.
-          .wait_semaphore_list = chunk->source_wait_list,
-          // Group-local readiness signaled after these source writes complete.
-          .signal_semaphore_list = chunk->source_signal_lists[batch_index],
-      };
-      ++gather_count;
+      IREE_RETURN_IF_ERROR(id4_pipeline_parameter_append_wave_source_group(
+          chunk, batch_index, &groups[group_index]));
     }
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t id4_pipeline_parameter_submit_source_gather_wave(
+    const id4_pipeline_parameter_slab_set_load_options_t* options,
+    const id4_pipeline_parameter_slab_load_t* load,
+    iree_host_size_t wave_chunk_count,
+    const id4_pipeline_parameter_encode_wave_chunk_t* chunks,
+    iree_hal_buffer_t* staging_buffer) {
+  id4_pipeline_parameter_encode_wave_source_group_t
+      source_groups[ID4_PIPELINE_PARAMETER_ENCODER_WAVE_SOURCE_CAPACITY] = {0};
+  iree_host_size_t source_group_count = 0;
+  IREE_RETURN_IF_ERROR(id4_pipeline_parameter_build_source_gather_wave(
+      wave_chunk_count, chunks, source_groups, &source_group_count));
+
+  id4_pipeline_parameter_load_source_enumerator_state_t
+      enumerator_states[ID4_PIPELINE_PARAMETER_ENCODER_WAVE_SOURCE_CAPACITY] = {
+          0};
+  iree_io_parameter_gather_t
+      gathers[ID4_PIPELINE_PARAMETER_ENCODER_WAVE_SOURCE_CAPACITY] = {0};
+  iree_host_size_t gather_count = 0;
+  for (iree_host_size_t group_index = 0; group_index < source_group_count;
+       ++group_index) {
+    id4_pipeline_parameter_encode_wave_source_group_t* group =
+        &source_groups[group_index];
+    if (!iree_io_parameter_provider_query_support(options->provider,
+                                                  group->source_scope)) {
+      return iree_make_status(
+          IREE_STATUS_NOT_FOUND,
+          "parameter provider does not support source scope '%.*s'",
+          (int)group->source_scope.size, group->source_scope.data);
+    }
+    enumerator_states[gather_count] =
+        (id4_pipeline_parameter_load_source_enumerator_state_t){
+            // Number of source descriptors gathered by this request.
+            .source_count = group->source_count,
+            // Source descriptors gathered by this request.
+            .sources = group->sources,
+        };
+    iree_hal_semaphore_list_t signal_semaphore_list = {
+        // Number of chunk-local readiness semaphores signaled by this group.
+        .count = group->signal_count,
+        // Chunk-local readiness semaphores signaled by this group.
+        .semaphores = group->signal_semaphores,
+        // Payload values paired with signal_semaphores.
+        .payload_values = group->signal_payload_values,
+    };
+    gathers[gather_count] = (iree_io_parameter_gather_t){
+        // Source scope for this provider gather group.
+        .source_scope = group->source_scope,
+        // Staging buffer populated by the source gather.
+        .target_buffer = staging_buffer,
+        // Number of source descriptors in this gather group.
+        .count = group->source_count,
+        // Source descriptor enumerator for this gather group.
+        .enumerator = id4_pipeline_parameter_load_source_enumerator(
+            &enumerator_states[gather_count]),
+        // Slot readiness required before source writes may begin.
+        .wait_semaphore_list = group->wait_semaphore_list,
+        // Chunk-local readiness signaled after these source writes complete.
+        .signal_semaphore_list = signal_semaphore_list,
+    };
+    ++gather_count;
   }
   return iree_io_parameter_provider_gather_batch(
       options->provider, load->device, load->queue_affinity, gather_count,
