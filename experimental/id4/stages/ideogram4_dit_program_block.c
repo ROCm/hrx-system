@@ -438,7 +438,7 @@ static uint32_t id4_ideogram4_dit_program_round_up_u32(uint32_t value,
 }
 
 static id4_ideogram4_dit_program_linear_weight_layout_t
-id4_ideogram4_dit_program_select_bf16_resident_linear_weight_layout(
+id4_ideogram4_dit_program_select_compact_linear_weight_layout(
     id4_ideogram4_dit_activation_format_t activation_format,
     uint32_t token_capacity, uint32_t input_size, uint32_t output_size) {
   if (activation_format == ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_F32_CANONICAL) {
@@ -1055,7 +1055,7 @@ iree_status_t id4_ideogram4_dit_program_author_transformer_block(
   IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_layer_linear_parameter(
       builder, parameter_sources, layer_ordinal,
       IREE_SV("attention.qkv.weight"), hidden_size, qkv_size,
-      id4_ideogram4_dit_program_select_bf16_resident_linear_weight_layout(
+      id4_ideogram4_dit_program_select_compact_linear_weight_layout(
           activation_format, bf16_token_capacity, hidden_size, qkv_size),
       generic_linear_weight_execution_format, &qkv_parameter));
   id4_pipeline_program_tensor_t qkv = id4_pipeline_program_tensor_invalid();
@@ -1369,7 +1369,7 @@ iree_status_t id4_ideogram4_dit_program_author_transformer_block(
   IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_layer_linear_parameter(
       builder, parameter_sources, layer_ordinal, IREE_SV("attention.o.weight"),
       hidden_size, hidden_size,
-      id4_ideogram4_dit_program_select_bf16_resident_linear_weight_layout(
+      id4_ideogram4_dit_program_select_compact_linear_weight_layout(
           activation_format, bf16_token_capacity, hidden_size, hidden_size),
       generic_linear_weight_execution_format, &attention_output_parameter));
   id4_pipeline_program_tensor_t attention_output =
@@ -1602,17 +1602,26 @@ iree_status_t id4_ideogram4_dit_program_author_transformer_block(
   const id4_pipeline_program_shape_t intermediate_stream_shape =
       id4_pipeline_program_make_shape_rank2(intermediate_size,
                                             total_token_count);
+  const bool fp8_direct_feed_forward_weight_execution =
+      feed_forward_weight_execution_format ==
+      ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_FP8_DIRECT;
+  const bool compact_feed_forward_w1_w3_layout =
+      bf16_resident_feed_forward_weight_execution ||
+      (pytorch_parity_feed_forward && fp8_direct_feed_forward_weight_execution);
+  const bool compact_feed_forward_w2_layout =
+      bf16_resident_feed_forward_weight_execution ||
+      fp8_direct_feed_forward_weight_execution;
   const id4_ideogram4_dit_program_linear_weight_layout_t
       feed_forward_w1_w3_weight_layout =
-          bf16_resident_feed_forward_weight_execution
-              ? id4_ideogram4_dit_program_select_bf16_resident_linear_weight_layout(
+          compact_feed_forward_w1_w3_layout
+              ? id4_ideogram4_dit_program_select_compact_linear_weight_layout(
                     activation_format, bf16_token_capacity, hidden_size,
                     intermediate_size)
               : ID4_IDEOGRAM4_DIT_PROGRAM_LINEAR_WEIGHT_LAYOUT_DENSE;
   const id4_ideogram4_dit_program_linear_weight_layout_t
       feed_forward_w2_weight_layout =
-          bf16_resident_feed_forward_weight_execution
-              ? id4_ideogram4_dit_program_select_bf16_resident_linear_weight_layout(
+          compact_feed_forward_w2_layout
+              ? id4_ideogram4_dit_program_select_compact_linear_weight_layout(
                     activation_format, bf16_token_capacity, intermediate_size,
                     hidden_size)
               : ID4_IDEOGRAM4_DIT_PROGRAM_LINEAR_WEIGHT_LAYOUT_DENSE;

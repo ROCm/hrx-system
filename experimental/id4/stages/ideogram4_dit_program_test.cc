@@ -384,6 +384,57 @@ static bool ProgramHasFp8ScaledBf16ExecutionParameter(
   return false;
 }
 
+static bool ProgramHasFp8ExecutionParameterEncoding(
+    const id4_pipeline_program_t* program, iree_string_view_t key,
+    iree_string_view_t source_scope,
+    id4_pipeline_program_shape_t expected_shape,
+    id4_pipeline_program_parameter_encoding_t expected_encoding) {
+  for (iree_host_size_t i = 0;
+       i < id4_pipeline_program_operation_count(program); ++i) {
+    const id4_pipeline_program_op_t* operation =
+        id4_pipeline_program_operation_at(program, i);
+    if (!operation ||
+        operation->kind != ID4_PIPELINE_PROGRAM_OP_KIND_PARAMETER) {
+      continue;
+    }
+    const id4_pipeline_program_tensor_record_t* tensor =
+        id4_pipeline_program_tensor_at(
+            program, operation->payload.parameter.tensor.ordinal);
+    if (!tensor) continue;
+    if (!iree_string_view_equal(tensor->name, key)) continue;
+    if (tensor->dtype != ID4_PIPELINE_PROGRAM_DTYPE_F8_E4M3) continue;
+    if (!ShapeEquals(tensor->shape, expected_shape)) continue;
+    if (operation->payload.parameter.encoding != expected_encoding) continue;
+    if (operation->payload.parameter.source_count != 1) continue;
+    const id4_pipeline_program_parameter_source_t* source =
+        &operation->payload.parameter.sources[0];
+    if (!iree_string_view_equal(source->source_scope, source_scope)) continue;
+    if (!iree_string_view_equal(source->key, key)) continue;
+    if (source->dtype != ID4_PIPELINE_PROGRAM_DTYPE_F8_E4M3) continue;
+    if (!ShapeEquals(source->shape, expected_shape)) continue;
+    return true;
+  }
+  return false;
+}
+
+static bool ProgramHasFp8CompactExecutionParameter(
+    const id4_pipeline_program_t* program, iree_string_view_t key,
+    iree_string_view_t source_scope,
+    id4_pipeline_program_shape_t expected_shape) {
+  return ProgramHasFp8ExecutionParameterEncoding(
+      program, key, source_scope, expected_shape,
+      ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_FP8_E4M3_LINEAR_RHS_TILE);
+}
+
+static bool ProgramHasFp8DirectExecutionParameter(
+    const id4_pipeline_program_t* program, iree_string_view_t key,
+    iree_string_view_t source_scope,
+    id4_pipeline_program_shape_t expected_shape) {
+  return ProgramHasFp8ExecutionParameterEncoding(
+      program, key, source_scope, expected_shape,
+      ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_DIRECT);
+}
+
 static bool DispatchHasConfigBinding(
     const id4_pipeline_program_dispatch_loom_op_t* dispatch,
     iree_string_view_t key, iree_string_view_t value) {
@@ -722,6 +773,9 @@ TEST(Ideogram4DitProgram, AuthorsDirectFp8ProjectionParameterContract) {
       ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_FP8_DIRECT;
   options.feed_forward_implementation =
       ID4_IDEOGRAM4_DIT_FEED_FORWARD_IMPLEMENTATION_PYTORCH_PARITY;
+  options.model.hidden_size = 128;
+  options.model.intermediate_size = 128;
+  options.model.attention_head_count = 2;
   id4_ideogram4_dit_parameter_source_rule_list_t rules;
   IREE_ASSERT_OK(id4_ideogram4_dit_parameter_source_rule_list_initialize(
       ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_FP8_E4M3, options.model,
@@ -731,24 +785,69 @@ TEST(Ideogram4DitProgram, AuthorsDirectFp8ProjectionParameterContract) {
 
   id4_pipeline_program_t* program = CreateForwardProgram(&options);
   const uint32_t qkv_size = options.model.hidden_size * 3;
-  EXPECT_TRUE(
-      ProgramHasParameter(program, IREE_SV("layers.0.attention.qkv.weight"),
-                          IREE_SV("fp8"), ID4_PIPELINE_PROGRAM_DTYPE_F8_E4M3,
-                          id4_pipeline_program_make_shape_rank2(
-                              qkv_size, options.model.hidden_size)));
+  EXPECT_TRUE(ProgramHasFp8CompactExecutionParameter(
+      program, IREE_SV("layers.0.attention.qkv.weight"), IREE_SV("fp8"),
+      id4_pipeline_program_make_shape_rank2(qkv_size,
+                                            options.model.hidden_size)));
   EXPECT_TRUE(ProgramHasParameter(
       program, IREE_SV("layers.0.attention.qkv.weight_scale"), IREE_SV("fp8"),
       ID4_PIPELINE_PROGRAM_DTYPE_F32,
       id4_pipeline_program_make_shape_rank1(qkv_size)));
-  EXPECT_TRUE(ProgramHasParameter(
+  EXPECT_TRUE(ProgramHasFp8CompactExecutionParameter(
       program, IREE_SV("layers.0.feed_forward.w1.weight"), IREE_SV("fp8"),
-      ID4_PIPELINE_PROGRAM_DTYPE_F8_E4M3,
       id4_pipeline_program_make_shape_rank2(options.model.intermediate_size,
                                             options.model.hidden_size)));
   EXPECT_TRUE(ProgramHasParameter(
       program, IREE_SV("layers.0.feed_forward.w1.weight_scale"), IREE_SV("fp8"),
       ID4_PIPELINE_PROGRAM_DTYPE_F32,
       id4_pipeline_program_make_shape_rank1(options.model.intermediate_size)));
+  EXPECT_TRUE(ProgramHasFp8CompactExecutionParameter(
+      program, IREE_SV("layers.0.feed_forward.w2.weight"), IREE_SV("fp8"),
+      id4_pipeline_program_make_shape_rank2(options.model.hidden_size,
+                                            options.model.intermediate_size)));
+  EXPECT_TRUE(ProgramHasParameter(
+      program, IREE_SV("layers.0.feed_forward.w2.weight_scale"), IREE_SV("fp8"),
+      ID4_PIPELINE_PROGRAM_DTYPE_F32,
+      id4_pipeline_program_make_shape_rank1(options.model.hidden_size)));
+
+  id4_pipeline_program_release(program);
+  id4_ideogram4_dit_parameter_source_rule_list_deinitialize(
+      &rules, iree_allocator_system());
+}
+
+TEST(Ideogram4DitProgram,
+     AuthorsDirectFp8FusedFeedForwardDownAsCompactParameter) {
+  id4_pipeline_program_shape_t latent_shape =
+      id4_pipeline_program_make_shape_rank4(1, 2, 4, 1);
+  id4_ideogram4_dit_program_options_t options =
+      MakeProgramOptions(latent_shape);
+  options.activation_format =
+      ID4_IDEOGRAM4_DIT_ACTIVATION_FORMAT_BF16_LINEAR_INPUT;
+  options.weight_execution_format =
+      ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_FP8_DIRECT;
+  options.model.hidden_size = 128;
+  options.model.intermediate_size = 128;
+  options.model.attention_head_count = 2;
+  id4_ideogram4_dit_parameter_source_rule_list_t rules;
+  IREE_ASSERT_OK(id4_ideogram4_dit_parameter_source_rule_list_initialize(
+      ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_FP8_E4M3, options.model,
+      IREE_SV("fp8"), iree_allocator_system(), &rules));
+  options.parameter_sources.rule_count = rules.count;
+  options.parameter_sources.rules = rules.values;
+
+  id4_pipeline_program_t* program = CreateForwardProgram(&options);
+  EXPECT_TRUE(ProgramHasFp8DirectExecutionParameter(
+      program, IREE_SV("layers.0.feed_forward.w1.weight"), IREE_SV("fp8"),
+      id4_pipeline_program_make_shape_rank2(options.model.intermediate_size,
+                                            options.model.hidden_size)));
+  EXPECT_TRUE(ProgramHasFp8DirectExecutionParameter(
+      program, IREE_SV("layers.0.feed_forward.w3.weight"), IREE_SV("fp8"),
+      id4_pipeline_program_make_shape_rank2(options.model.intermediate_size,
+                                            options.model.hidden_size)));
+  EXPECT_TRUE(ProgramHasFp8CompactExecutionParameter(
+      program, IREE_SV("layers.0.feed_forward.w2.weight"), IREE_SV("fp8"),
+      id4_pipeline_program_make_shape_rank2(options.model.hidden_size,
+                                            options.model.intermediate_size)));
 
   id4_pipeline_program_release(program);
   id4_ideogram4_dit_parameter_source_rule_list_deinitialize(
