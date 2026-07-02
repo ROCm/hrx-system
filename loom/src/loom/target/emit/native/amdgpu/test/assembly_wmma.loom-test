@@ -29,7 +29,7 @@ low.func.def target(@gfx11_target) @gfx11_wmma_zero_accumulator(%a8: reg<amdgpu.
 }
 
 // ----
-  v_wmma_f32_16x16x16_bf16 v[0:7], v[0:7], v[8:15], 0
+  v_wmma_f32_16x16x16_bf16 v[16:23], v[0:7], v[8:15], 0
   s_endpgm
 
 // ====

@@ -126,7 +126,7 @@ def _with_zero_accumulator_form(
             *overlay.fixed_encoding_fields,
             ("SRC2", _predefined("0")),
         ),
-        constraints=(),
+        constraints=_EARLY_CLOBBER_RESULT_CONSTRAINTS,
         operand_forms=(),
         asm_forms=_asm(
             mnemonic=f"{overlay.mnemonic}_acc_zero",
