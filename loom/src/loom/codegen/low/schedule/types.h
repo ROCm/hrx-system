@@ -358,6 +358,18 @@ typedef struct loom_low_schedule_dependency_t {
   uint32_t operand_index;
 } loom_low_schedule_dependency_t;
 
+// One memory-visibility edge between two schedule nodes. Visibility edges are
+// consumed by target overlays such as wait insertion; they do not constrain the
+// block-local list scheduler.
+typedef struct loom_low_schedule_visibility_dependency_t {
+  // Producer node whose memory effect must be visible first.
+  uint32_t producer_node;
+  // Consumer node that observes or overwrites the producer's memory effect.
+  uint32_t consumer_node;
+  // Dependency kind. Currently always EFFECT.
+  loom_low_schedule_dependency_kind_t kind;
+} loom_low_schedule_visibility_dependency_t;
+
 // Pressure-model step recorded while scheduling one node. This is an aggregate
 // target-independent register-pressure estimate across all register classes,
 // not a replacement for source-order liveness or target occupancy analysis.
@@ -714,6 +726,11 @@ typedef struct loom_low_schedule_table_t {
   const loom_low_schedule_dependency_t* dependencies;
   // Number of dependency edges.
   iree_host_size_t dependency_count;
+  // Cross-block visibility edges between schedule nodes. These are not part of
+  // the list-scheduler DAG.
+  const loom_low_schedule_visibility_dependency_t* visibility_dependencies;
+  // Number of cross-block visibility edges.
+  iree_host_size_t visibility_dependency_count;
   // Node indices in scheduled order, grouped by block.
   const uint32_t* scheduled_node_indices;
   // Number of scheduled node indices.

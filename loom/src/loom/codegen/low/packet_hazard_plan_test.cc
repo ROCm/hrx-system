@@ -624,7 +624,7 @@ TEST_F(LowPacketHazardPlanTest, RejectsDiagnosticActionIdentity) {
                                         &arena_, &plan));
 }
 
-iree_status_t InvalidProducerOrderHazardQuery(
+iree_status_t LoopCarriedProducerHazardQuery(
     void* user_data, const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,
     const loom_low_packet_progress_table_t* progress,
@@ -644,17 +644,27 @@ iree_status_t InvalidProducerOrderHazardQuery(
                          IREE_SV("synthetic.pipe"), 3, 1, 2);
 }
 
-TEST_F(LowPacketHazardPlanTest, RejectsProducerAfterInsertion) {
+TEST_F(LowPacketHazardPlanTest, RecordsLoopCarriedProducerAfterInsertion) {
   const loom_low_packet_hazard_plan_provider_t hazard_provider = {
       /*.user_data=*/{},
-      /*.query=*/InvalidProducerOrderHazardQuery,
+      /*.query=*/LoopCarriedProducerHazardQuery,
   };
   loom_low_packet_hazard_plan_t plan = {};
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_INVALID_ARGUMENT,
-      loom_low_packet_hazard_plan_build(&state_.schedule, &state_.allocation,
-                                        /*progress=*/nullptr, &hazard_provider,
-                                        &arena_, &plan));
+  IREE_ASSERT_OK(loom_low_packet_hazard_plan_build(
+      &state_.schedule, &state_.allocation, /*progress=*/nullptr,
+      &hazard_provider, &arena_, &plan));
+
+  ASSERT_EQ(plan.record_count, 1u);
+  const loom_low_packet_hazard_plan_record_t& record = plan.records[0];
+  EXPECT_EQ(record.kind, LOOM_LOW_PACKET_HAZARD_PLAN_RECORD_ACTION);
+  EXPECT_EQ(record.action_id, kSyntheticHazardActionPadding);
+  EXPECT_EQ(record.producer_node_index, 2u);
+  EXPECT_EQ(record.producer_packet_index, 2u);
+  EXPECT_EQ(record.consumer_node_index, 1u);
+  EXPECT_EQ(record.insertion_packet_index, 1u);
+  EXPECT_EQ(record.required_progress, 3u);
+  EXPECT_EQ(record.observed_progress, 1u);
+  EXPECT_EQ(record.residual_progress, 2u);
 }
 
 }  // namespace

@@ -173,9 +173,16 @@ bool loom_low_memory_access_summaries_may_alias(
     const loom_low_memory_access_summary_t* left,
     const loom_low_memory_access_summary_t* right);
 
-// Returns true when |write_summary| can replace |read_summary| in the effect
-// frontier. This is stronger than may-alias: it must be safe for future writes
-// that would have depended on read_summary to depend on write_summary instead.
+// Returns true when |write_summary| can replace |access_summary| in an effect
+// frontier. This is stronger than may-alias: it must be safe for future memory
+// effects that would have depended on access_summary to depend on write_summary
+// instead.
+bool loom_low_memory_access_write_subsumes_access(
+    const loom_low_memory_access_summary_t* write_summary,
+    const loom_low_memory_access_summary_t* access_summary);
+
+// Returns true when |write_summary| can replace |read_summary| in an effect
+// frontier.
 bool loom_low_memory_access_write_subsumes_read(
     const loom_low_memory_access_summary_t* write_summary,
     const loom_low_memory_access_summary_t* read_summary);
