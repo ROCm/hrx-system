@@ -4278,8 +4278,26 @@ id4_pipeline_parameter_slab_issue_context_submit_load_group_to_buffers(
   if (uses_retained_targets &&
       id4_pipeline_parameter_load_group_is_encode(group) &&
       slab_set->encode_tail_semaphore) {
-    wait_list = id4_pipeline_parameter_one_semaphore_list(
-        &slab_set->encode_tail_semaphore, &slab_set->encode_tail_payload_value);
+    iree_host_size_t encode_wait_count = 0;
+    if (!iree_host_size_checked_add(wait_list.count, 1, &encode_wait_count)) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "parameter encoded load group wait count "
+                              "overflows");
+    }
+    iree_hal_semaphore_t** encode_wait_semaphores =
+        (iree_hal_semaphore_t**)iree_alloca(encode_wait_count *
+                                            sizeof(encode_wait_semaphores[0]));
+    uint64_t* encode_wait_payload_values = (uint64_t*)iree_alloca(
+        encode_wait_count * sizeof(encode_wait_payload_values[0]));
+    for (iree_host_size_t i = 0; i < wait_list.count; ++i) {
+      encode_wait_semaphores[i] = wait_list.semaphores[i];
+      encode_wait_payload_values[i] = wait_list.payload_values[i];
+    }
+    encode_wait_semaphores[wait_list.count] = slab_set->encode_tail_semaphore;
+    encode_wait_payload_values[wait_list.count] =
+        slab_set->encode_tail_payload_value;
+    wait_list = id4_pipeline_parameter_many_semaphore_list(
+        encode_wait_count, encode_wait_semaphores, encode_wait_payload_values);
   }
 
   const bool matches_retained_loads = uses_retained_targets;

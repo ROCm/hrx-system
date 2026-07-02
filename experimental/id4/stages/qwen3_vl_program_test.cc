@@ -454,13 +454,16 @@ TEST(Qwen3VlProgram, RejectsUnsortedSelectedLayerOrdinals) {
       id4_qwen3_vl_program_author_forward(&options, builder_scope.builder()));
 }
 
-TEST(Qwen3VlProgram, RejectsForcedWmmaAttentionForTinyTokenCount) {
+TEST(Qwen3VlProgram, AuthorsForcedWmmaAttentionForTinyTokenCount) {
   ProgramBuilderScope builder_scope;
+  static constexpr uint32_t kTinySelectedLayerOrdinals[] = {0};
   id4_qwen3_vl_program_options_t options = MakeProgramOptions(
       /*layer_count=*/1);
+  options.model.selected_layer_count =
+      IREE_ARRAYSIZE(kTinySelectedLayerOrdinals);
+  options.model.selected_layer_ordinals = kTinySelectedLayerOrdinals;
   options.attention_implementation = ID4_QWEN3_VL_ATTENTION_IMPLEMENTATION_WMMA;
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_INVALID_ARGUMENT,
+  IREE_ASSERT_OK(
       id4_qwen3_vl_program_author_forward(&options, builder_scope.builder()));
 }
 

@@ -688,10 +688,12 @@ static iree_status_t id4_pipeline_plan_copy_memory_slabs(
                               (int)source->name.size, source->name.data);
     }
     if (source->high_water_mark > source->byte_length) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "memory slab %.*s high water mark exceeds byte "
-                              "length",
-                              (int)source->name.size, source->name.data);
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "memory slab %.*s high water mark exceeds byte "
+          "length: high_water_mark=%" PRIu64 ", byte_length=%" PRIu64,
+          (int)source->name.size, source->name.data,
+          (uint64_t)source->high_water_mark, (uint64_t)source->byte_length);
     }
     id4_pipeline_memory_slab_plan_t* target = &plan->memory_slabs[i];
     target->scope = source->scope;

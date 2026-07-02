@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <cstring>
 #include <iomanip>
+#include <vector>
 
 #include "experimental/id4/pipeline/diagnostics.h"
 #include "experimental/id4/pipeline/kernel_cache.h"
@@ -31,6 +32,13 @@ constexpr iree_host_size_t kCompactRhsTileElementCount = 16 * 16;
 constexpr iree_host_size_t kCompactRhsTileByteLength =
     kCompactRhsTileElementCount * sizeof(uint16_t);
 constexpr iree_host_size_t kFp8RawSweepTileCount = 64;
+
+enum class ParameterLoadIssueMode {
+  // Preparation submits parameter load work and signals readiness.
+  kEager,
+  // Issue submits parameter load groups through a parameter issue context.
+  kDeferred,
+};
 
 static uint8_t FiniteNonzeroFp8SweepByte(iree_host_size_t ordinal) {
   const uint8_t value = static_cast<uint8_t>(ordinal);
@@ -192,6 +200,42 @@ static iree_status_t CreateSparseBf16FileParameterProvider(
       iree_io_parameter_index_create(iree_allocator_system(), index.out()));
   IREE_RETURN_IF_ERROR(
       AddFileParameter(index.get(), key, byte_length, file_handle.get()));
+  return iree_io_parameter_index_provider_create(
+      IREE_SV("parameters"), index.get(),
+      IREE_IO_PARAMETER_INDEX_PROVIDER_DEFAULT_MAX_CONCURRENT_OPERATIONS,
+      iree_allocator_system(), out_provider);
+}
+
+static iree_status_t CreateFileParameterProviderWithContents(
+    ScopedTempFilePath* temp_path, iree_string_view_t key,
+    iree_const_byte_span_t contents,
+    iree_io_parameter_provider_t** out_provider) {
+  IREE_ASSERT_ARGUMENT(out_provider);
+  *out_provider = nullptr;
+
+  OwningRef<iree_io_file_handle_t, iree_io_file_handle_release> file_handle;
+  IREE_RETURN_IF_ERROR(iree_io_file_handle_create(
+      IREE_IO_FILE_MODE_READ | IREE_IO_FILE_MODE_WRITE |
+          IREE_IO_FILE_MODE_OVERWRITE | IREE_IO_FILE_MODE_RANDOM_ACCESS |
+          IREE_IO_FILE_MODE_ASYNC,
+      temp_path->path_view(), contents.data_length, iree_allocator_system(),
+      file_handle.out()));
+
+  OwningRef<iree_io_stream_t, iree_io_stream_release> stream;
+  IREE_RETURN_IF_ERROR(iree_io_stream_open(
+      IREE_IO_STREAM_MODE_WRITABLE | IREE_IO_STREAM_MODE_SEEKABLE,
+      file_handle.get(), /*file_offset=*/0, iree_allocator_system(),
+      stream.out()));
+  IREE_RETURN_IF_ERROR(
+      iree_io_stream_write(stream.get(), contents.data_length, contents.data));
+  stream.reset();
+  IREE_RETURN_IF_ERROR(iree_io_file_handle_flush(file_handle.get()));
+
+  OwningRef<iree_io_parameter_index_t, iree_io_parameter_index_release> index;
+  IREE_RETURN_IF_ERROR(
+      iree_io_parameter_index_create(iree_allocator_system(), index.out()));
+  IREE_RETURN_IF_ERROR(AddFileParameter(index.get(), key, contents.data_length,
+                                        file_handle.get()));
   return iree_io_parameter_index_provider_create(
       IREE_SV("parameters"), index.get(),
       IREE_IO_PARAMETER_INDEX_PROVIDER_DEFAULT_MAX_CONCURRENT_OPERATIONS,
@@ -696,6 +740,166 @@ TEST(ParameterSlabIntegration, EncodedFp8WeightsFeedBf16WmmaLinear) {
 
   RunCompactLinearRhsTileEncoding(&context, kernel_library.get(),
                                   provider.get(), &diagnostics_sink);
+}
+
+static void RunFileBackedDirectGatherManySmall(
+    ParameterLoadIssueMode issue_mode) {
+  static constexpr iree_host_size_t kRequestCount = 171;
+  static constexpr iree_device_size_t kRequestByteLength = 8192;
+  const iree_string_view_t kParameterKey = IREE_SV("token_embedding.weight");
+
+  RuntimeContext& context = SharedRuntimeContext();
+
+  id4_pipeline_diagnostics_sink_t diagnostics_sink;
+  id4_pipeline_diagnostics_sink_initialize_ignore(&diagnostics_sink);
+
+  const iree_device_size_t target_byte_length =
+      kRequestCount * kRequestByteLength;
+  std::vector<uint8_t> source_data((size_t)kRequestByteLength);
+  for (iree_host_size_t i = 0; i < source_data.size(); ++i) {
+    source_data[i] = static_cast<uint8_t>((i * 13 + (i >> 5) * 7) & 0xFF);
+  }
+
+  ScopedTempFilePath source_path("id4_parameter_slab_direct_gather");
+  OwningRef<iree_io_parameter_provider_t, iree_io_parameter_provider_release>
+      provider;
+  IREE_ASSERT_OK(CreateFileParameterProviderWithContents(
+      &source_path, kParameterKey,
+      iree_make_const_byte_span(source_data.data(), source_data.size()),
+      provider.out()));
+
+  id4_pipeline_device_placement_t placement;
+  std::memset(&placement, 0, sizeof(placement));
+  placement.role = IREE_SV("default");
+  placement.device_index = 0;
+  placement.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
+
+  id4_pipeline_parameter_request_t target_requests[kRequestCount];
+  for (iree_host_size_t i = 0; i < kRequestCount; ++i) {
+    target_requests[i] = id4_pipeline_parameter_request(
+        kParameterKey, id4_pipeline_parameter_span(
+                           /*parameter_offset=*/0,
+                           /*buffer_offset=*/i * kRequestByteLength,
+                           /*length=*/kRequestByteLength));
+  }
+  id4_pipeline_parameter_slab_plan_t slab =
+      id4_pipeline_make_device_local_parameter_slab_plan(
+          IREE_SV("execution"), /*placement_id=*/0, /*binding_slot=*/0,
+          IREE_HAL_QUEUE_AFFINITY_ANY,
+          IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE |
+              IREE_HAL_BUFFER_USAGE_TRANSFER_SOURCE |
+              IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET,
+          target_byte_length, /*alignment=*/16, kRequestCount, target_requests);
+  id4_pipeline_parameter_load_step_t load_step =
+      id4_pipeline_parameter_gather_load_step(
+          IREE_SV("parameters.gather.token_embedding"), IREE_SV("parameters"),
+          /*target_slab_index=*/0, /*request_offset=*/0, kRequestCount);
+
+  id4_pipeline_plan_create_options_t plan_options;
+  std::memset(&plan_options, 0, sizeof(plan_options));
+  plan_options.structure_size = sizeof(plan_options);
+  plan_options.stage_name = IREE_SV("parameter_slab.direct_gather");
+  plan_options.device_group = context.value.device_group;
+  plan_options.diagnostics_sink = &diagnostics_sink;
+  plan_options.placement_count = 1;
+  plan_options.placements = &placement;
+  plan_options.parameter_slab_count = 1;
+  plan_options.parameter_slabs = &slab;
+  plan_options.parameter_load_step_count = 1;
+  plan_options.parameter_load_steps = &load_step;
+  OwningRef<id4_pipeline_plan_t, id4_pipeline_plan_release> plan;
+  IREE_ASSERT_OK(id4_pipeline_plan_create(&plan_options,
+                                          iree_allocator_system(), plan.out()));
+
+  iree_hal_device_t* device =
+      id4_tooling_runtime_context_primary_device(&context.value);
+  OwningRef<iree_hal_semaphore_t, iree_hal_semaphore_release> prepare_semaphore;
+  const bool uses_deferred_issue =
+      issue_mode == ParameterLoadIssueMode::kDeferred;
+  if (!uses_deferred_issue) {
+    IREE_ASSERT_OK(iree_hal_semaphore_create(
+        device, IREE_HAL_QUEUE_AFFINITY_ANY, /*initial_value=*/0,
+        IREE_HAL_SEMAPHORE_FLAG_DEFAULT, prepare_semaphore.out()));
+  }
+  iree_hal_semaphore_t* prepare_signal_semaphore =
+      uses_deferred_issue ? nullptr : prepare_semaphore.get();
+  uint64_t prepare_signal_value = 1;
+  iree_hal_semaphore_list_t prepare_signal_list =
+      uses_deferred_issue ? iree_hal_semaphore_list_empty()
+                          : MakeOneSemaphoreList(&prepare_signal_semaphore,
+                                                 &prepare_signal_value);
+
+  id4_pipeline_parameter_slab_set_load_options_t load_options;
+  std::memset(&load_options, 0, sizeof(load_options));
+  load_options.structure_size = sizeof(load_options);
+  load_options.provider = provider.get();
+  load_options.wait_semaphore_list = iree_hal_semaphore_list_empty();
+  load_options.signal_semaphore_list = prepare_signal_list;
+  load_options.diagnostics_sink = &diagnostics_sink;
+
+  OwningRef<id4_pipeline_parameter_slab_set_t,
+            id4_pipeline_parameter_slab_set_release>
+      slab_set;
+  if (uses_deferred_issue) {
+    IREE_ASSERT_OK(id4_pipeline_plan_prepare_parameter_slabs(
+        plan.get(), &load_options, iree_allocator_system(), slab_set.out()));
+    OwningRef<id4_pipeline_parameter_slab_issue_context_t,
+              id4_pipeline_parameter_slab_issue_context_release>
+        issue_context;
+    IREE_ASSERT_OK(id4_pipeline_plan_create_parameter_slab_issue_context(
+        plan.get(), slab_set.get(), iree_allocator_system(),
+        issue_context.out()));
+    IREE_ASSERT_OK(id4_pipeline_plan_submit_parameter_load_group(
+        plan.get(), issue_context.get(), /*group_index=*/0,
+        /*submit_region_id=*/0, &diagnostics_sink));
+    iree_hal_semaphore_list_t cleanup_wait_list =
+        iree_hal_semaphore_list_empty();
+    IREE_ASSERT_OK(id4_pipeline_parameter_slab_issue_context_finish(
+        issue_context.get(), &cleanup_wait_list));
+    for (iree_host_size_t i = 0; i < cleanup_wait_list.count; ++i) {
+      IREE_ASSERT_OK(iree_hal_semaphore_wait(
+          cleanup_wait_list.semaphores[i], cleanup_wait_list.payload_values[i],
+          iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
+    }
+  } else {
+    IREE_ASSERT_OK(id4_pipeline_plan_load_parameter_slabs(
+        plan.get(), &load_options, iree_allocator_system(), slab_set.out()));
+    IREE_ASSERT_OK(iree_hal_semaphore_wait(
+        prepare_semaphore.get(), prepare_signal_value, iree_infinite_timeout(),
+        IREE_ASYNC_WAIT_FLAG_NONE));
+  }
+
+  ASSERT_EQ(id4_pipeline_parameter_slab_set_load_group_count(slab_set.get()),
+            1u);
+  iree_hal_semaphore_t* group_ready_semaphore = nullptr;
+  uint64_t group_ready_value = 0;
+  IREE_ASSERT_OK(id4_pipeline_parameter_slab_set_load_group_ready_at(
+      slab_set.get(), /*index=*/0, &group_ready_semaphore, &group_ready_value));
+  IREE_ASSERT_OK(iree_hal_semaphore_wait(
+      group_ready_semaphore, group_ready_value, iree_infinite_timeout(),
+      IREE_ASYNC_WAIT_FLAG_NONE));
+  IREE_ASSERT_OK(id4_pipeline_parameter_slab_set_check_load_group_failures(
+      slab_set.get(), plan_options.stage_name, &diagnostics_sink));
+
+  std::vector<uint8_t> expected((size_t)target_byte_length);
+  for (iree_host_size_t i = 0; i < kRequestCount; ++i) {
+    std::memcpy(expected.data() + (size_t)(i * kRequestByteLength),
+                source_data.data(), (size_t)kRequestByteLength);
+  }
+  std::vector<uint8_t> actual((size_t)target_byte_length);
+  IREE_ASSERT_OK(iree_hal_device_transfer_d2h(
+      device, id4_pipeline_parameter_slab_set_buffer_at(slab_set.get(), 0),
+      /*source_offset=*/0, actual.data(), actual.size(),
+      IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT, iree_infinite_timeout()));
+  EXPECT_EQ(0, std::memcmp(actual.data(), expected.data(), expected.size()));
+}
+
+TEST(ParameterSlabIntegration, FileBackedDirectGatherManySmallEager) {
+  RunFileBackedDirectGatherManySmall(ParameterLoadIssueMode::kEager);
+}
+
+TEST(ParameterSlabIntegration, FileBackedDirectGatherManySmallDeferredIssue) {
+  RunFileBackedDirectGatherManySmall(ParameterLoadIssueMode::kDeferred);
 }
 
 static void RunCompactLinearRhsTileEncoding(

@@ -9794,6 +9794,26 @@ iree_native_test(
 
 iree_native_test(
   NAME
+    "qwen3_vl_attention_wmma_qk_padded_192_zero_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_wmma.loom}}"
+    "--benchmark=@id4_qwen3_vl_attention_wmma_qk_padded_192_zero"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.qwen3_vl.attention_wmma.token_count=171"
+    "--config=id4.qwen3_vl.attention_wmma.dispatch_token_count=192"
+    "--config=id4.qwen3_vl.attention_wmma.hidden_size=4096"
+    "--config=id4.qwen3_vl.attention_wmma.attention_head_count=32"
+    "--config=id4.qwen3_vl.attention_wmma.key_value_head_count=8"
+    "--config=id4.qwen3_vl.attention_wmma.head_size=128"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
     "qwen3_vl_attention_wmma_softmax_bf16_qwen_full_tile_uniform_plan_test"
   ARGS
     "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_wmma.loom}}"
@@ -9814,6 +9834,26 @@ iree_native_test(
 
 iree_native_test(
   NAME
+    "qwen3_vl_attention_wmma_softmax_bf16_padded_192_uniform_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_wmma.loom}}"
+    "--benchmark=@id4_qwen3_vl_attention_wmma_softmax_bf16_padded_192_uniform"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.qwen3_vl.attention_wmma.token_count=192"
+    "--config=id4.qwen3_vl.attention_wmma.dispatch_token_count=192"
+    "--config=id4.qwen3_vl.attention_wmma.hidden_size=4096"
+    "--config=id4.qwen3_vl.attention_wmma.attention_head_count=32"
+    "--config=id4.qwen3_vl.attention_wmma.key_value_head_count=8"
+    "--config=id4.qwen3_vl.attention_wmma.head_size=128"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
     "qwen3_vl_attention_wmma_pv_bf16_qwen_full_tile_uniform_plan_test"
   ARGS
     "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_wmma.loom}}"
@@ -9822,6 +9862,66 @@ iree_native_test(
     "--output-format=jsonl"
     "--config=id4.qwen3_vl.attention_wmma.token_count=480"
     "--config=id4.qwen3_vl.attention_wmma.dispatch_token_count=480"
+    "--config=id4.qwen3_vl.attention_wmma.hidden_size=4096"
+    "--config=id4.qwen3_vl.attention_wmma.attention_head_count=32"
+    "--config=id4.qwen3_vl.attention_wmma.key_value_head_count=8"
+    "--config=id4.qwen3_vl.attention_wmma.head_size=128"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
+    "qwen3_vl_attention_wmma_pv_bf16_padded_192_uniform_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_wmma.loom}}"
+    "--benchmark=@id4_qwen3_vl_attention_wmma_pv_bf16_padded_192_uniform"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.qwen3_vl.attention_wmma.token_count=192"
+    "--config=id4.qwen3_vl.attention_wmma.dispatch_token_count=192"
+    "--config=id4.qwen3_vl.attention_wmma.hidden_size=4096"
+    "--config=id4.qwen3_vl.attention_wmma.attention_head_count=32"
+    "--config=id4.qwen3_vl.attention_wmma.key_value_head_count=8"
+    "--config=id4.qwen3_vl.attention_wmma.head_size=128"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
+    "qwen3_vl_attention_wmma_sequence_padded_171_zero_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_wmma.loom}}"
+    "--benchmark=@id4_qwen3_vl_attention_wmma_sequence_padded_171_zero"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.qwen3_vl.attention_wmma.token_count=171"
+    "--config=id4.qwen3_vl.attention_wmma.dispatch_token_count=192"
+    "--config=id4.qwen3_vl.attention_wmma.hidden_size=4096"
+    "--config=id4.qwen3_vl.attention_wmma.attention_head_count=32"
+    "--config=id4.qwen3_vl.attention_wmma.key_value_head_count=8"
+    "--config=id4.qwen3_vl.attention_wmma.head_size=128"
+  SRC
+    loom::tools::iree-benchmark-loom
+  LABELS
+    "hostonly"
+)
+
+iree_native_test(
+  NAME
+    "qwen3_vl_attention_wmma_sequence_short_prompt_zero_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_wmma.loom}}"
+    "--benchmark=@id4_qwen3_vl_attention_wmma_sequence_short_prompt_zero"
+    "--dry-run"
+    "--output-format=jsonl"
+    "--config=id4.qwen3_vl.attention_wmma.token_count=19"
+    "--config=id4.qwen3_vl.attention_wmma.dispatch_token_count=32"
     "--config=id4.qwen3_vl.attention_wmma.hidden_size=4096"
     "--config=id4.qwen3_vl.attention_wmma.attention_head_count=32"
     "--config=id4.qwen3_vl.attention_wmma.key_value_head_count=8"
@@ -24025,6 +24125,30 @@ endif()
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
 iree_native_test(
   NAME
+    "qwen3_vl_attention_wmma_qk_padded_192_zero_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_wmma.loom}}"
+    "--case=@id4_qwen3_vl_attention_wmma_qk_padded_192_zero_case"
+    "--device=amdgpu://0"
+    "--config=id4.qwen3_vl.attention_wmma.token_count=171"
+    "--config=id4.qwen3_vl.attention_wmma.dispatch_token_count=192"
+    "--config=id4.qwen3_vl.attention_wmma.hidden_size=4096"
+    "--config=id4.qwen3_vl.attention_wmma.attention_head_count=32"
+    "--config=id4.qwen3_vl.attention_wmma.key_value_head_count=8"
+    "--config=id4.qwen3_vl.attention_wmma.head_size=128"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
     "qwen3_vl_attention_wmma_softmax_bf16_qwen_full_tile_uniform_hal_test"
   ARGS
     "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_wmma.loom}}"
@@ -24049,6 +24173,30 @@ endif()
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
 iree_native_test(
   NAME
+    "qwen3_vl_attention_wmma_softmax_bf16_padded_192_uniform_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_wmma.loom}}"
+    "--case=@id4_qwen3_vl_attention_wmma_softmax_bf16_padded_192_uniform_case"
+    "--device=amdgpu://0"
+    "--config=id4.qwen3_vl.attention_wmma.token_count=192"
+    "--config=id4.qwen3_vl.attention_wmma.dispatch_token_count=192"
+    "--config=id4.qwen3_vl.attention_wmma.hidden_size=4096"
+    "--config=id4.qwen3_vl.attention_wmma.attention_head_count=32"
+    "--config=id4.qwen3_vl.attention_wmma.key_value_head_count=8"
+    "--config=id4.qwen3_vl.attention_wmma.head_size=128"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
     "qwen3_vl_attention_wmma_pv_bf16_qwen_full_tile_uniform_hal_test"
   ARGS
     "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_wmma.loom}}"
@@ -24056,6 +24204,78 @@ iree_native_test(
     "--device=amdgpu://0"
     "--config=id4.qwen3_vl.attention_wmma.token_count=480"
     "--config=id4.qwen3_vl.attention_wmma.dispatch_token_count=480"
+    "--config=id4.qwen3_vl.attention_wmma.hidden_size=4096"
+    "--config=id4.qwen3_vl.attention_wmma.attention_head_count=32"
+    "--config=id4.qwen3_vl.attention_wmma.key_value_head_count=8"
+    "--config=id4.qwen3_vl.attention_wmma.head_size=128"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
+    "qwen3_vl_attention_wmma_pv_bf16_padded_192_uniform_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_wmma.loom}}"
+    "--case=@id4_qwen3_vl_attention_wmma_pv_bf16_padded_192_uniform_case"
+    "--device=amdgpu://0"
+    "--config=id4.qwen3_vl.attention_wmma.token_count=192"
+    "--config=id4.qwen3_vl.attention_wmma.dispatch_token_count=192"
+    "--config=id4.qwen3_vl.attention_wmma.hidden_size=4096"
+    "--config=id4.qwen3_vl.attention_wmma.attention_head_count=32"
+    "--config=id4.qwen3_vl.attention_wmma.key_value_head_count=8"
+    "--config=id4.qwen3_vl.attention_wmma.head_size=128"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
+    "qwen3_vl_attention_wmma_sequence_padded_171_zero_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_wmma.loom}}"
+    "--case=@id4_qwen3_vl_attention_wmma_sequence_padded_171_zero_case"
+    "--device=amdgpu://0"
+    "--config=id4.qwen3_vl.attention_wmma.token_count=171"
+    "--config=id4.qwen3_vl.attention_wmma.dispatch_token_count=192"
+    "--config=id4.qwen3_vl.attention_wmma.hidden_size=4096"
+    "--config=id4.qwen3_vl.attention_wmma.attention_head_count=32"
+    "--config=id4.qwen3_vl.attention_wmma.key_value_head_count=8"
+    "--config=id4.qwen3_vl.attention_wmma.head_size=128"
+  SRC
+    loom::tools::iree-test-loom
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "manual"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_native_test(
+  NAME
+    "qwen3_vl_attention_wmma_sequence_short_prompt_zero_hal_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/experimental/id4/kernels/qwen3_vl/attention_wmma.loom}}"
+    "--case=@id4_qwen3_vl_attention_wmma_sequence_short_prompt_zero_case"
+    "--device=amdgpu://0"
+    "--config=id4.qwen3_vl.attention_wmma.token_count=19"
+    "--config=id4.qwen3_vl.attention_wmma.dispatch_token_count=32"
     "--config=id4.qwen3_vl.attention_wmma.hidden_size=4096"
     "--config=id4.qwen3_vl.attention_wmma.attention_head_count=32"
     "--config=id4.qwen3_vl.attention_wmma.key_value_head_count=8"

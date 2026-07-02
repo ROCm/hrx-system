@@ -5,6 +5,7 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 #include <cinttypes>
+#include <cstdio>
 #include <cstring>
 #include <vector>
 
@@ -12,6 +13,7 @@
 #include "experimental/id4/pipeline/stage.h"
 #include "experimental/id4/stages/hal_integration_util.h"
 #include "experimental/id4/stages/qwen3_vl.h"
+#include "experimental/id4/tooling/diagnostics.h"
 #include "experimental/id4/tooling/filesystem.h"
 #include "iree/base/api.h"
 #include "iree/base/tooling/flags.h"
@@ -23,6 +25,8 @@
 
 IREE_FLAG(string, id4_fixture_dir, "",
           "Directory containing a Qwen3-VL fixture manifest.");
+IREE_FLAG(string, id4_diagnostics_output_dir, "",
+          "Optional directory receiving benchmark Qwen3-VL diagnostics JSONL.");
 IREE_FLAG(string, id4_plan_output_dir, "",
           "Optional directory receiving benchmark Qwen3-VL stage plan JSON.");
 IREE_FLAG(string, qwen_weight_execution_strategy, "hybrid_compact_rhs",
@@ -33,42 +37,70 @@ IREE_FLAG(string, qwen_attention_implementation, "auto",
 IREE_FLAG(int64_t, parameter_load_prefetch_region_distance, 0,
           "Number of future stage regions whose deferred parameter load groups "
           "may be submitted before the current region.");
+IREE_FLAG(bool, diagnostic_wait_after_each_region, false,
+          "Waits for each submitted Qwen3-VL region before submitting the next "
+          "region.");
+IREE_FLAG(bool, diagnostic_region_per_dispatch, false,
+          "Plans each Qwen3-VL dispatch into a separate execution region.");
+IREE_FLAG(int64_t, diagnostic_model_layer_count, 0,
+          "Overrides the Qwen3-VL decoder layer count for diagnostic benchmark "
+          "runs. Zero uses the full model.");
+IREE_FLAG(int64_t, diagnostic_selected_layer_count, 0,
+          "Overrides the number of Ideogram selected Qwen3-VL hidden layers "
+          "for diagnostic benchmark runs. Zero uses the model default.");
+IREE_FLAG(int64_t, diagnostic_selected_layer_ordinal, -1,
+          "Overrides the Ideogram selected Qwen3-VL hidden layer ordinal for "
+          "diagnostic benchmark runs. Negative uses the selected layer count.");
 
 namespace {
 
 struct QwenBenchmarkShape {
   // Dynamic request token count used when planning Qwen3-VL forward.
   uint32_t token_count;
+  // Stable benchmark suffix used in labels and diagnostic artifact paths.
+  const char* suffix;
 };
 
 static constexpr QwenBenchmarkShape kQwenToken19Shape = {
     // Tiny prompt-class token count below one WMMA attention tile.
-    19,
+    /*.token_count=*/19,
+    // Stable suffix for the tiny prompt-class token count.
+    /*.suffix=*/"token19",
 };
 
 static constexpr QwenBenchmarkShape kQwenToken64Shape = {
     // Short prompt-class token count.
-    64,
+    /*.token_count=*/64,
+    // Stable suffix for the short prompt-class token count.
+    /*.suffix=*/"token64",
 };
 
 static constexpr QwenBenchmarkShape kQwenToken171Shape = {
     // Structured prompt-class token count crossing several WMMA tile buckets.
-    171,
+    /*.token_count=*/171,
+    // Stable suffix for the structured prompt-class token count.
+    /*.suffix=*/"token171",
 };
 
 static constexpr QwenBenchmarkShape kQwenToken256Shape = {
     // Medium prompt-class token count.
-    256,
+    /*.token_count=*/256,
+    // Stable suffix for the medium prompt-class token count.
+    /*.suffix=*/"token256",
 };
 
 static constexpr QwenBenchmarkShape kQwenToken512Shape = {
     // Long structured prompt-class token count.
-    512,
+    /*.token_count=*/512,
+    // Stable suffix for the long structured prompt-class token count.
+    /*.suffix=*/"token512",
 };
 
 static constexpr QwenBenchmarkShape kQwenToken1024Shape = {
     // Extended prompt-class token count near the large linear tile threshold.
-    1024,
+    /*.token_count=*/1024,
+    // Stable suffix for the extended prompt-class token count.
+    /*.suffix=*/"token1024",
 };
 
 enum class QwenIssueTimingMode {
@@ -86,6 +118,16 @@ enum class QwenParameterLoadMode {
 };
 
 struct QwenBenchmarkContext {
+  ~QwenBenchmarkContext() {
+    if (!diagnostics_file_sink_initialized) return;
+    iree_status_t status =
+        id4_tooling_diagnostics_file_sink_deinitialize(&diagnostics_file_sink);
+    if (!iree_status_is_ok(status)) {
+      iree_status_fprint(stderr, status);
+      iree_status_free(status);
+    }
+  }
+
   // Live HAL, executable cache, and kernel-cache context selected by flags.
   id4::test::LiveStageContext live;
   // Embedded Loom source library used during stage preparation.
@@ -106,9 +148,81 @@ struct QwenBenchmarkContext {
   id4_qwen3_vl_request_config_t request = {};
   // Diagnostic event counters collected by lifecycle calls.
   id4::test::StageDiagnostics diagnostics = {};
+  // Diagnostics sink that accumulates benchmark label counters.
+  id4_pipeline_diagnostics_sink_t diagnostics_counter_sink;
+  // File sink storage used when --id4_diagnostics_output_dir is set.
+  id4_tooling_diagnostics_file_sink_t diagnostics_file_sink = {};
+  // Diagnostics sink that writes JSONL events when enabled.
+  id4_pipeline_diagnostics_sink_t diagnostics_file_pipeline_sink = {};
+  // Whether diagnostics_file_sink owns an initialized file.
+  bool diagnostics_file_sink_initialized = false;
   // Diagnostics sink passed to stage lifecycle calls.
   id4_pipeline_diagnostics_sink_t diagnostics_sink;
 };
+
+static iree_status_t CaptureQwenBenchmarkDiagnostics(
+    void* user_data, const id4_pipeline_diagnostic_event_t* event) {
+  QwenBenchmarkContext* context = static_cast<QwenBenchmarkContext*>(user_data);
+  IREE_RETURN_IF_ERROR(context->diagnostics_counter_sink.emit(
+      context->diagnostics_counter_sink.user_data, event));
+  if (!context->diagnostics_file_sink_initialized) return iree_ok_status();
+  return context->diagnostics_file_pipeline_sink.emit(
+      context->diagnostics_file_pipeline_sink.user_data, event);
+}
+
+static iree_status_t InitializeQwenBenchmarkDiagnostics(
+    QwenBenchmarkContext* out_context, iree_string_view_t family,
+    iree_string_view_t suffix) {
+  IREE_ASSERT_ARGUMENT(out_context);
+  out_context->diagnostics_counter_sink =
+      id4::test::DiagnosticsSink(&out_context->diagnostics);
+  out_context->diagnostics_sink = {
+      // Fanout sink used by all stage lifecycle calls.
+      .emit = CaptureQwenBenchmarkDiagnostics,
+      // Benchmark context receiving counters and optional file output.
+      .user_data = out_context,
+  };
+
+  iree_string_view_t output_dir =
+      iree_make_cstring_view(FLAG_id4_diagnostics_output_dir);
+  if (iree_string_view_is_empty(output_dir)) return iree_ok_status();
+  if (iree_string_view_is_empty(family) || iree_string_view_is_empty(suffix)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "Qwen3-VL benchmark diagnostic family and suffix are required");
+  }
+
+  iree_string_builder_t run_name_builder;
+  iree_string_builder_initialize(iree_allocator_system(), &run_name_builder);
+  iree_string_view_t run_dir = iree_string_view_empty();
+  iree_status_t status =
+      id4_tooling_ensure_directory(output_dir, iree_allocator_system());
+  if (iree_status_is_ok(status)) {
+    status = iree_string_builder_append_string(&run_name_builder, family);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_string_builder_append_cstring(&run_name_builder, "_");
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_string_builder_append_string(&run_name_builder, suffix);
+  }
+  if (iree_status_is_ok(status)) {
+    status = id4_tooling_format_child_path(
+        output_dir, iree_string_builder_view(&run_name_builder),
+        iree_allocator_system(), &run_dir);
+  }
+  if (iree_status_is_ok(status)) {
+    status = id4_tooling_diagnostics_file_sink_initialize(
+        run_dir, iree_allocator_system(), &out_context->diagnostics_file_sink,
+        &out_context->diagnostics_file_pipeline_sink);
+  }
+  if (iree_status_is_ok(status)) {
+    out_context->diagnostics_file_sink_initialized = true;
+  }
+  id4_tooling_free_path(&run_dir, iree_allocator_system());
+  iree_string_builder_deinitialize(&run_name_builder);
+  return status;
+}
 
 static iree_status_t ParseQwenWeightExecutionStrategy(
     id4_qwen3_vl_weight_execution_strategy_t* out_strategy) {
@@ -170,16 +284,77 @@ static iree_status_t CreateQwen3VlStage(const id4::test::LiveStageContext& live,
   create_options.structure_size = sizeof(create_options);
   create_options.services = services;
   create_options.kernel_cache = live.kernel_cache.get();
-  create_options.model = *id4_qwen3_vl_program_ideogram4_model_config();
+  const id4_qwen3_vl_model_config_t* default_model =
+      id4_qwen3_vl_program_ideogram4_model_config();
+  create_options.model = *default_model;
+  uint32_t selected_layer_ordinal = 0;
+  if (FLAG_diagnostic_model_layer_count != 0) {
+    if (FLAG_diagnostic_model_layer_count < 0 ||
+        FLAG_diagnostic_model_layer_count > create_options.model.layer_count) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "--diagnostic_model_layer_count must be between 1 and %" PRIu32,
+          create_options.model.layer_count);
+    }
+    create_options.model.layer_count =
+        static_cast<uint32_t>(FLAG_diagnostic_model_layer_count);
+    selected_layer_ordinal = create_options.model.layer_count - 1;
+    create_options.model.selected_layer_count = 1;
+    create_options.model.selected_layer_ordinals = &selected_layer_ordinal;
+  }
+  if (FLAG_diagnostic_selected_layer_count != 0) {
+    if (FLAG_diagnostic_selected_layer_ordinal >= 0) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "--diagnostic_selected_layer_count and "
+          "--diagnostic_selected_layer_ordinal are mutually exclusive");
+    }
+    if (FLAG_diagnostic_selected_layer_count < 0 ||
+        FLAG_diagnostic_selected_layer_count >
+            default_model->selected_layer_count) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "--diagnostic_selected_layer_count must be between 1 and %" PRIu32,
+          default_model->selected_layer_count);
+    }
+    const uint32_t selected_layer_count =
+        static_cast<uint32_t>(FLAG_diagnostic_selected_layer_count);
+    const uint32_t last_selected_layer =
+        default_model->selected_layer_ordinals[selected_layer_count - 1];
+    if (last_selected_layer >= create_options.model.layer_count) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "--diagnostic_selected_layer_count selects layer %" PRIu32
+          " but the configured model has only %" PRIu32 " layers",
+          last_selected_layer, create_options.model.layer_count);
+    }
+    create_options.model.selected_layer_count = selected_layer_count;
+    create_options.model.selected_layer_ordinals =
+        default_model->selected_layer_ordinals;
+  }
+  if (FLAG_diagnostic_selected_layer_ordinal >= 0) {
+    if (FLAG_diagnostic_selected_layer_ordinal >=
+        create_options.model.layer_count) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "--diagnostic_selected_layer_ordinal must be less than %" PRIu32,
+          create_options.model.layer_count);
+    }
+    selected_layer_ordinal =
+        static_cast<uint32_t>(FLAG_diagnostic_selected_layer_ordinal);
+    create_options.model.selected_layer_count = 1;
+    create_options.model.selected_layer_ordinals = &selected_layer_ordinal;
+  }
   return id4_qwen3_vl_stage_create(&create_options, iree_allocator_system(),
                                    out_stage);
 }
 
 static iree_status_t CreateLoadedQwenStageContext(
-    QwenBenchmarkContext* out_context) {
+    QwenBenchmarkContext* out_context, iree_string_view_t diagnostics_family,
+    iree_string_view_t diagnostics_suffix) {
   IREE_ASSERT_ARGUMENT(out_context);
-  out_context->diagnostics_sink =
-      id4::test::DiagnosticsSink(&out_context->diagnostics);
+  IREE_RETURN_IF_ERROR(InitializeQwenBenchmarkDiagnostics(
+      out_context, diagnostics_family, diagnostics_suffix));
   IREE_RETURN_IF_ERROR(
       id4::test::CreateLiveStageContextFromFlags(&out_context->live));
   IREE_RETURN_IF_ERROR(ParseParameterLoadPrefetchRegionDistance(
@@ -204,8 +379,10 @@ static iree_status_t AttachQwenPreparationInputs(
 }
 
 static iree_status_t CreateLoadedQwenBenchmarkContext(
-    QwenBenchmarkContext* out_context) {
-  IREE_RETURN_IF_ERROR(CreateLoadedQwenStageContext(out_context));
+    QwenBenchmarkContext* out_context, iree_string_view_t diagnostics_family,
+    iree_string_view_t diagnostics_suffix) {
+  IREE_RETURN_IF_ERROR(CreateLoadedQwenStageContext(
+      out_context, diagnostics_family, diagnostics_suffix));
   return AttachQwenPreparationInputs(out_context);
 }
 
@@ -261,14 +438,16 @@ static iree_status_t LoadFixtureAndConfigureRequest(
 }
 
 static iree_status_t CreateLoadedQwenFixtureStageContext(
-    QwenBenchmarkContext* out_context) {
-  IREE_RETURN_IF_ERROR(CreateLoadedQwenStageContext(out_context));
+    QwenBenchmarkContext* out_context, iree_string_view_t diagnostics_family) {
+  IREE_RETURN_IF_ERROR(CreateLoadedQwenStageContext(
+      out_context, diagnostics_family, IREE_SV("fixture")));
   return LoadFixtureAndConfigureRequest(out_context);
 }
 
 static iree_status_t CreateLoadedQwenFixtureBenchmarkContext(
-    QwenBenchmarkContext* out_context) {
-  IREE_RETURN_IF_ERROR(CreateLoadedQwenFixtureStageContext(out_context));
+    QwenBenchmarkContext* out_context, iree_string_view_t diagnostics_family) {
+  IREE_RETURN_IF_ERROR(
+      CreateLoadedQwenFixtureStageContext(out_context, diagnostics_family));
   return AttachQwenPreparationInputs(out_context);
 }
 
@@ -292,6 +471,9 @@ static iree_status_t CreateQwenPlan(QwenBenchmarkContext* context,
   std::memset(&plan_options, 0, sizeof(plan_options));
   plan_options.structure_size = sizeof(plan_options);
   plan_options.next = &qwen_options;
+  if (FLAG_diagnostic_region_per_dispatch) {
+    plan_options.flags |= ID4_PIPELINE_STAGE_PLAN_FLAG_REGION_PER_DISPATCH;
+  }
   plan_options.device_index = 0;
   plan_options.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
   plan_options.diagnostics_sink = &context->diagnostics_sink;
@@ -582,6 +764,9 @@ static iree_status_t IssueQwenBundle(
   issue_options.structure_size = sizeof(issue_options);
   issue_options.boundary_binding_count = boundary_bindings.count;
   issue_options.boundary_bindings = boundary_bindings.bindings;
+  if (FLAG_diagnostic_wait_after_each_region) {
+    issue_options.flags |= ID4_PIPELINE_STAGE_ISSUE_FLAG_WAIT_AFTER_EACH_REGION;
+  }
   id4_pipeline_parameter_slab_set_t* parameter_slabs =
       id4_pipeline_bundle_parameter_slabs(bundle);
   if (parameter_slabs &&
@@ -622,7 +807,8 @@ static const iree_benchmark_def_t* RegisterQwenBenchmark(
 IREE_BENCHMARK_FN(BM_Qwen3VlStagePlan) {
   const QwenBenchmarkShape& shape = QwenBenchmarkShapeFromDef(benchmark_def);
   QwenBenchmarkContext context;
-  IREE_RETURN_IF_ERROR(CreateLoadedQwenStageContext(&context));
+  IREE_RETURN_IF_ERROR(CreateLoadedQwenStageContext(
+      &context, IREE_SV("plan"), iree_make_cstring_view(shape.suffix)));
   std::vector<int32_t> token_id_storage;
   id4_qwen3_vl_request_config_t request =
       MakeSyntheticQwenRequest(shape.token_count, &token_id_storage);
@@ -661,7 +847,8 @@ ID4_QWEN_BENCHMARK_REGISTER(BM_Qwen3VlStagePlan, kQwenToken1024Shape,
 
 IREE_BENCHMARK_FN(BM_Qwen3VlStagePlanFixture) {
   QwenBenchmarkContext context;
-  IREE_RETURN_IF_ERROR(CreateLoadedQwenFixtureStageContext(&context));
+  IREE_RETURN_IF_ERROR(
+      CreateLoadedQwenFixtureStageContext(&context, IREE_SV("plan")));
 
   bool wrote_initial_plan_json = false;
   uint64_t iteration_count = 0;
@@ -686,7 +873,9 @@ IREE_BENCHMARK_FN(BM_Qwen3VlStagePlanFixture) {
 IREE_BENCHMARK_FN(BM_Qwen3VlStagePrepareCachedKernels) {
   const QwenBenchmarkShape& shape = QwenBenchmarkShapeFromDef(benchmark_def);
   QwenBenchmarkContext context;
-  IREE_RETURN_IF_ERROR(CreateLoadedQwenBenchmarkContext(&context));
+  IREE_RETURN_IF_ERROR(CreateLoadedQwenBenchmarkContext(
+      &context, IREE_SV("prepare_cached_kernels"),
+      iree_make_cstring_view(shape.suffix)));
   std::vector<int32_t> token_id_storage;
   id4_qwen3_vl_request_config_t request =
       MakeSyntheticQwenRequest(shape.token_count, &token_id_storage);
@@ -759,7 +948,8 @@ ID4_QWEN_BENCHMARK_REGISTER(BM_Qwen3VlStagePrepareCachedKernels,
 
 IREE_BENCHMARK_FN(BM_Qwen3VlStagePrepareFixtureCachedKernels) {
   QwenBenchmarkContext context;
-  IREE_RETURN_IF_ERROR(CreateLoadedQwenFixtureBenchmarkContext(&context));
+  IREE_RETURN_IF_ERROR(CreateLoadedQwenFixtureBenchmarkContext(
+      &context, IREE_SV("prepare_cached_kernels")));
 
   id4::test::OwningRef<id4_pipeline_plan_t, id4_pipeline_plan_release> plan;
   IREE_RETURN_IF_ERROR(CreateQwenPlan(&context, context.request, plan.out()));
@@ -1066,7 +1256,10 @@ static iree_status_t QueueSyntheticQwenInputs(
 static iree_status_t RunFixtureIssueBenchmark(
     iree_benchmark_state_t* benchmark_state, QwenIssueTimingMode timing_mode) {
   QwenBenchmarkContext context;
-  IREE_RETURN_IF_ERROR(CreateLoadedQwenFixtureBenchmarkContext(&context));
+  IREE_RETURN_IF_ERROR(CreateLoadedQwenFixtureBenchmarkContext(
+      &context, timing_mode == QwenIssueTimingMode::kSubmitOnly
+                    ? IREE_SV("issue_submit_only")
+                    : IREE_SV("issue_end_to_end")));
   return RunIssueBenchmarkWithPreparedContext(
       benchmark_state, &context, timing_mode, QueueFixtureQwenInputs);
 }
@@ -1076,7 +1269,12 @@ static iree_status_t RunSyntheticIssueBenchmark(
     iree_benchmark_state_t* benchmark_state, QwenIssueTimingMode timing_mode) {
   const QwenBenchmarkShape& shape = QwenBenchmarkShapeFromDef(benchmark_def);
   QwenBenchmarkContext context;
-  IREE_RETURN_IF_ERROR(CreateLoadedQwenBenchmarkContext(&context));
+  IREE_RETURN_IF_ERROR(CreateLoadedQwenBenchmarkContext(
+      &context,
+      timing_mode == QwenIssueTimingMode::kSubmitOnly
+          ? IREE_SV("issue_submit_only")
+          : IREE_SV("issue_end_to_end"),
+      iree_make_cstring_view(shape.suffix)));
   IREE_RETURN_IF_ERROR(
       ConfigureSyntheticQwenRequest(&context, shape.token_count));
   return RunIssueBenchmarkWithPreparedContext(
@@ -1086,7 +1284,8 @@ static iree_status_t RunSyntheticIssueBenchmark(
 static iree_status_t RunFixturePrepareIssueBenchmark(
     iree_benchmark_state_t* benchmark_state) {
   QwenBenchmarkContext context;
-  IREE_RETURN_IF_ERROR(CreateLoadedQwenFixtureBenchmarkContext(&context));
+  IREE_RETURN_IF_ERROR(CreateLoadedQwenFixtureBenchmarkContext(
+      &context, IREE_SV("prepare_issue_end_to_end")));
   return RunPrepareIssueBenchmarkWithContext(benchmark_state, &context,
                                              QwenParameterLoadMode::kEager,
                                              QueueFixtureQwenInputs);
@@ -1097,7 +1296,9 @@ static iree_status_t RunSyntheticPrepareIssueBenchmark(
     iree_benchmark_state_t* benchmark_state) {
   const QwenBenchmarkShape& shape = QwenBenchmarkShapeFromDef(benchmark_def);
   QwenBenchmarkContext context;
-  IREE_RETURN_IF_ERROR(CreateLoadedQwenBenchmarkContext(&context));
+  IREE_RETURN_IF_ERROR(CreateLoadedQwenBenchmarkContext(
+      &context, IREE_SV("prepare_issue_end_to_end"),
+      iree_make_cstring_view(shape.suffix)));
   IREE_RETURN_IF_ERROR(
       ConfigureSyntheticQwenRequest(&context, shape.token_count));
   return RunPrepareIssueBenchmarkWithContext(benchmark_state, &context,
@@ -1110,7 +1311,9 @@ static iree_status_t RunSyntheticDeferredPrepareIssueBenchmark(
     iree_benchmark_state_t* benchmark_state) {
   const QwenBenchmarkShape& shape = QwenBenchmarkShapeFromDef(benchmark_def);
   QwenBenchmarkContext context;
-  IREE_RETURN_IF_ERROR(CreateLoadedQwenBenchmarkContext(&context));
+  IREE_RETURN_IF_ERROR(CreateLoadedQwenBenchmarkContext(
+      &context, IREE_SV("prepare_issue_deferred_end_to_end"),
+      iree_make_cstring_view(shape.suffix)));
   IREE_RETURN_IF_ERROR(
       ConfigureSyntheticQwenRequest(&context, shape.token_count));
   return RunPrepareIssueBenchmarkWithContext(benchmark_state, &context,

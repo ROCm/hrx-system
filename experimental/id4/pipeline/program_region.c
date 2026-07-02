@@ -216,44 +216,87 @@ static bool id4_pipeline_program_region_range_uses_tensor(
   return false;
 }
 
-static bool id4_pipeline_program_region_binding_fully_writes_tensor(
+static iree_status_t id4_pipeline_program_region_binding_write_range(
     const id4_pipeline_program_dispatch_binding_t* binding,
-    const id4_pipeline_program_tensor_record_t* tensor) {
-  if (!iree_all_bits_set(binding->access,
-                         ID4_PIPELINE_PROGRAM_TENSOR_ACCESS_WRITE)) {
-    return false;
-  }
+    const id4_pipeline_program_tensor_record_t* tensor,
+    id4_pipeline_program_tensor_byte_range_t* out_range) {
+  IREE_ASSERT_ARGUMENT(out_range);
+  *out_range = (id4_pipeline_program_tensor_byte_range_t){0, 0};
   if (!iree_all_bits_set(
           binding->flags,
           ID4_PIPELINE_PROGRAM_DISPATCH_BINDING_FLAG_WRITE_RANGE)) {
-    return true;
+    *out_range = (id4_pipeline_program_tensor_byte_range_t){
+        // Whole tensor writes start at the tensor base.
+        .offset = 0,
+        // Whole tensor write byte coverage.
+        .length = tensor->byte_length,
+    };
+    return iree_ok_status();
   }
-  return binding->write_range.offset == 0 &&
-         binding->write_range.length >= tensor->byte_length;
+  iree_device_size_t write_end = 0;
+  if (!iree_device_size_checked_add(binding->write_range.offset,
+                                    binding->write_range.length, &write_end) ||
+      write_end > tensor->byte_length) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "program tensor %.*s write range [%" PRIu64
+                            ", %" PRIu64
+                            ") exceeds tensor byte length %" PRIu64,
+                            (int)tensor->name.size, tensor->name.data,
+                            (uint64_t)binding->write_range.offset,
+                            (uint64_t)write_end, (uint64_t)tensor->byte_length);
+  }
+  *out_range = binding->write_range;
+  return iree_ok_status();
 }
 
-static bool id4_pipeline_program_region_tensor_fully_written_before_range(
+static iree_status_t
+id4_pipeline_program_region_tensor_fully_written_before_range(
     const id4_pipeline_program_region_lower_options_t* options,
     id4_pipeline_program_tensor_t tensor,
-    const id4_pipeline_program_tensor_record_t* tensor_record) {
-  for (iree_host_size_t i = 0; i < options->source_operation_offset; ++i) {
-    const id4_pipeline_program_op_t* op =
-        id4_pipeline_program_operation_at(options->program, i);
-    if (!op || op->kind != ID4_PIPELINE_PROGRAM_OP_KIND_DISPATCH_LOOM) {
-      continue;
-    }
-    for (iree_host_size_t j = 0; j < op->payload.dispatch_loom.binding_count;
-         ++j) {
-      const id4_pipeline_program_dispatch_binding_t* binding =
-          &op->payload.dispatch_loom.bindings[j];
-      if (binding->tensor.ordinal == tensor.ordinal &&
-          id4_pipeline_program_region_binding_fully_writes_tensor(
-              binding, tensor_record)) {
-        return true;
+    const id4_pipeline_program_tensor_record_t* tensor_record,
+    bool* out_fully_written) {
+  IREE_ASSERT_ARGUMENT(out_fully_written);
+  *out_fully_written = false;
+
+  iree_device_size_t covered_end = 0;
+  bool changed = true;
+  while (changed && covered_end < tensor_record->byte_length) {
+    changed = false;
+    for (iree_host_size_t i = 0; i < options->source_operation_offset; ++i) {
+      const id4_pipeline_program_op_t* op =
+          id4_pipeline_program_operation_at(options->program, i);
+      if (!op || op->kind != ID4_PIPELINE_PROGRAM_OP_KIND_DISPATCH_LOOM) {
+        continue;
+      }
+      for (iree_host_size_t j = 0; j < op->payload.dispatch_loom.binding_count;
+           ++j) {
+        const id4_pipeline_program_dispatch_binding_t* binding =
+            &op->payload.dispatch_loom.bindings[j];
+        if (binding->tensor.ordinal != tensor.ordinal ||
+            !iree_all_bits_set(binding->access,
+                               ID4_PIPELINE_PROGRAM_TENSOR_ACCESS_WRITE)) {
+          continue;
+        }
+        id4_pipeline_program_tensor_byte_range_t write_range;
+        IREE_RETURN_IF_ERROR(id4_pipeline_program_region_binding_write_range(
+            binding, tensor_record, &write_range));
+        if (write_range.offset > covered_end) continue;
+        iree_device_size_t write_end = 0;
+        if (!iree_device_size_checked_add(write_range.offset,
+                                          write_range.length, &write_end)) {
+          return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                  "program tensor %.*s write range overflow",
+                                  (int)tensor_record->name.size,
+                                  tensor_record->name.data);
+        }
+        if (write_end <= covered_end) continue;
+        covered_end = write_end;
+        changed = true;
       }
     }
   }
-  return false;
+  *out_fully_written = covered_end >= tensor_record->byte_length;
+  return iree_ok_status();
 }
 
 static iree_status_t id4_pipeline_program_region_lookup_local_producer(
@@ -746,10 +789,14 @@ static iree_status_t id4_pipeline_program_region_lower_import(
   IREE_RETURN_IF_ERROR(context->options->resolve_import(
       context->options->user_data, import_op, tensor, import_ordinal, &import));
   if (!iree_all_bits_set(import.flags,
-                         ID4_PIPELINE_TENSOR_IMPORT_FLAG_INITIALIZED) &&
-      id4_pipeline_program_region_tensor_fully_written_before_range(
-          context->options, import_op->tensor, tensor)) {
-    import.flags |= ID4_PIPELINE_TENSOR_IMPORT_FLAG_INITIALIZED;
+                         ID4_PIPELINE_TENSOR_IMPORT_FLAG_INITIALIZED)) {
+    bool fully_written = false;
+    IREE_RETURN_IF_ERROR(
+        id4_pipeline_program_region_tensor_fully_written_before_range(
+            context->options, import_op->tensor, tensor, &fully_written));
+    if (fully_written) {
+      import.flags |= ID4_PIPELINE_TENSOR_IMPORT_FLAG_INITIALIZED;
+    }
   }
   id4_pipeline_tensor_t region_tensor =
       id4_pipeline_program_region_invalid_tensor();
@@ -819,10 +866,14 @@ static iree_status_t id4_pipeline_program_region_lower_acquire(
       context->options, acquire_op, tensor, &is_shared, &import));
   if (is_shared) {
     if (!iree_all_bits_set(import.flags,
-                           ID4_PIPELINE_TENSOR_IMPORT_FLAG_INITIALIZED) &&
-        id4_pipeline_program_region_tensor_fully_written_before_range(
-            context->options, acquire_op->tensor, tensor)) {
-      import.flags |= ID4_PIPELINE_TENSOR_IMPORT_FLAG_INITIALIZED;
+                           ID4_PIPELINE_TENSOR_IMPORT_FLAG_INITIALIZED)) {
+      bool fully_written = false;
+      IREE_RETURN_IF_ERROR(
+          id4_pipeline_program_region_tensor_fully_written_before_range(
+              context->options, acquire_op->tensor, tensor, &fully_written));
+      if (fully_written) {
+        import.flags |= ID4_PIPELINE_TENSOR_IMPORT_FLAG_INITIALIZED;
+      }
     }
     id4_pipeline_tensor_t region_tensor =
         id4_pipeline_program_region_invalid_tensor();

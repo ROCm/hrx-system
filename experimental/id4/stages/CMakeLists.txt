@@ -694,6 +694,7 @@ iree_cc_binary_benchmark(
     iree::base::tooling::flags
     iree::experimental::id4::pipeline::plan
     iree::experimental::id4::pipeline::stage
+    iree::experimental::id4::tooling::diagnostics
     iree::experimental::id4::tooling::filesystem
     iree::hal
     iree::io::file_handle

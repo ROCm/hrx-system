@@ -519,23 +519,25 @@ static iree_status_t id4_pipeline_program_plan_bump_shared_range(
 }
 
 static iree_status_t id4_pipeline_program_plan_shared_tensor_high_water_mark(
-    iree_host_size_t region_count, iree_host_size_t shared_tensor_count,
+    iree_host_size_t shared_tensor_count,
     const id4_pipeline_program_plan_shared_tensor_record_t* shared_tensors,
     iree_device_size_t* out_high_water_mark) {
   *out_high_water_mark = 0;
   iree_device_size_t high_water_mark = 0;
-  for (iree_host_size_t region_index = 0; region_index < region_count;
-       ++region_index) {
+  for (iree_host_size_t point_index = 0; point_index < shared_tensor_count;
+       ++point_index) {
+    const iree_host_size_t operation_ordinal =
+        shared_tensors[point_index].acquire_operation_ordinal;
     iree_device_size_t live_byte_length = 0;
     for (iree_host_size_t tensor_index = 0; tensor_index < shared_tensor_count;
          ++tensor_index) {
-      const id4_pipeline_shared_tensor_plan_t* shared_tensor =
-          &shared_tensors[tensor_index].plan;
-      if (shared_tensor->acquire_region_id <= region_index &&
-          shared_tensor->last_use_region_id >= region_index) {
-        if (!iree_device_size_checked_add(live_byte_length,
-                                          shared_tensor->layout.byte_length,
-                                          &live_byte_length)) {
+      const id4_pipeline_program_plan_shared_tensor_record_t* shared_tensor =
+          &shared_tensors[tensor_index];
+      if (shared_tensor->acquire_operation_ordinal <= operation_ordinal &&
+          shared_tensor->last_use_operation_ordinal >= operation_ordinal) {
+        if (!iree_device_size_checked_add(
+                live_byte_length, shared_tensor->plan.layout.byte_length,
+                &live_byte_length)) {
           return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                                   "shared transient live byte length overflow");
         }
@@ -649,7 +651,7 @@ static iree_status_t id4_pipeline_program_plan_build_shared_tensors(
   }
 
   return id4_pipeline_program_plan_shared_tensor_high_water_mark(
-      range_count, *out_shared_tensor_count, shared_tensors,
+      *out_shared_tensor_count, shared_tensors,
       out_shared_slab_high_water_mark);
 }
 
