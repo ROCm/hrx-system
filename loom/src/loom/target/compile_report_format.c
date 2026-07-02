@@ -341,6 +341,87 @@ static bool loom_target_compile_report_source_low_memory_has_dynamic_delta(
              summary->issued_write_unknown_width_count;
 }
 
+static bool loom_target_compile_report_source_low_memory_can_dispatch_scale(
+    const loom_target_compile_report_source_low_memory_summary_t* summary,
+    const loom_target_compile_report_workload_t* workload) {
+  return iree_any_bit_set(
+             workload->flags,
+             LOOM_TARGET_COMPILE_REPORT_WORKLOAD_DISPATCH_WORKITEM_COUNT) &&
+         (!loom_target_compile_report_source_low_memory_has_dynamic_evidence(
+              summary) ||
+          loom_target_compile_report_source_low_memory_has_complete_dynamic_evidence(
+              summary));
+}
+
+typedef struct loom_target_compile_report_dispatch_memory_bytes_t {
+  // Dispatch-scaled logical or issued read bytes.
+  uint64_t read_byte_count;
+  // Dispatch-scaled logical or issued write bytes.
+  uint64_t write_byte_count;
+  // Sum of dispatch-scaled read and write bytes.
+  uint64_t total_byte_count;
+} loom_target_compile_report_dispatch_memory_bytes_t;
+
+static bool loom_target_compile_report_dispatch_memory_bytes(
+    uint64_t read_byte_count, uint64_t write_byte_count,
+    uint64_t dispatch_workitem_count,
+    loom_target_compile_report_dispatch_memory_bytes_t* out_bytes) {
+  *out_bytes = (loom_target_compile_report_dispatch_memory_bytes_t){0};
+  return loom_target_compile_report_checked_mul_u64(
+             read_byte_count, dispatch_workitem_count,
+             &out_bytes->read_byte_count) &&
+         loom_target_compile_report_checked_mul_u64(
+             write_byte_count, dispatch_workitem_count,
+             &out_bytes->write_byte_count) &&
+         loom_target_compile_report_checked_add_u64(
+             out_bytes->read_byte_count, out_bytes->write_byte_count,
+             &out_bytes->total_byte_count);
+}
+
+static bool loom_target_compile_report_source_low_memory_dispatch_source_bytes(
+    const loom_target_compile_report_source_low_memory_summary_t* summary,
+    const loom_target_compile_report_workload_t* workload,
+    loom_target_compile_report_dispatch_memory_bytes_t* out_bytes) {
+  if (!loom_target_compile_report_source_low_memory_can_dispatch_scale(
+          summary, workload)) {
+    return false;
+  }
+  const bool use_dynamic_counts =
+      loom_target_compile_report_source_low_memory_has_dynamic_evidence(
+          summary);
+  const uint64_t read_byte_count = use_dynamic_counts
+                                       ? summary->dynamic_read_byte_count
+                                       : summary->read_byte_count;
+  const uint64_t write_byte_count = use_dynamic_counts
+                                        ? summary->dynamic_write_byte_count
+                                        : summary->write_byte_count;
+  return loom_target_compile_report_dispatch_memory_bytes(
+      read_byte_count, write_byte_count, workload->dispatch_workitem_count,
+      out_bytes);
+}
+
+static bool loom_target_compile_report_source_low_memory_dispatch_issued_bytes(
+    const loom_target_compile_report_source_low_memory_summary_t* summary,
+    const loom_target_compile_report_workload_t* workload,
+    loom_target_compile_report_dispatch_memory_bytes_t* out_bytes) {
+  if (!loom_target_compile_report_source_low_memory_can_dispatch_scale(
+          summary, workload)) {
+    return false;
+  }
+  const bool use_dynamic_counts =
+      loom_target_compile_report_source_low_memory_has_dynamic_evidence(
+          summary);
+  const uint64_t read_byte_count = use_dynamic_counts
+                                       ? summary->dynamic_issued_read_byte_count
+                                       : summary->issued_read_byte_count;
+  const uint64_t write_byte_count =
+      use_dynamic_counts ? summary->dynamic_issued_write_byte_count
+                         : summary->issued_write_byte_count;
+  return loom_target_compile_report_dispatch_memory_bytes(
+      read_byte_count, write_byte_count, workload->dispatch_workitem_count,
+      out_bytes);
+}
+
 static iree_status_t
 loom_target_compile_report_append_source_low_memory_summary_text(
     const loom_target_compile_report_source_low_memory_summary_t* summary,
@@ -391,41 +472,27 @@ loom_target_compile_report_append_source_low_memory_summary_text(
   if (iree_any_bit_set(
           workload->flags,
           LOOM_TARGET_COMPILE_REPORT_WORKLOAD_DISPATCH_WORKITEM_COUNT)) {
-    const bool has_incomplete_dynamic_evidence =
-        loom_target_compile_report_source_low_memory_has_dynamic_evidence(
-            summary) &&
-        !loom_target_compile_report_source_low_memory_has_complete_dynamic_evidence(
-            summary);
-    if (!has_incomplete_dynamic_evidence) {
-      const bool use_dynamic_issued_counts =
-          loom_target_compile_report_source_low_memory_has_dynamic_evidence(
-              summary);
-      const uint64_t issued_read_byte_count =
-          use_dynamic_issued_counts ? summary->dynamic_issued_read_byte_count
-                                    : summary->issued_read_byte_count;
-      const uint64_t issued_write_byte_count =
-          use_dynamic_issued_counts ? summary->dynamic_issued_write_byte_count
-                                    : summary->issued_write_byte_count;
-      uint64_t dispatch_read_byte_count = 0;
-      uint64_t dispatch_write_byte_count = 0;
-      uint64_t dispatch_total_byte_count = 0;
-      if (loom_target_compile_report_checked_mul_u64(
-              issued_read_byte_count, workload->dispatch_workitem_count,
-              &dispatch_read_byte_count) &&
-          loom_target_compile_report_checked_mul_u64(
-              issued_write_byte_count, workload->dispatch_workitem_count,
-              &dispatch_write_byte_count) &&
-          loom_target_compile_report_checked_add_u64(
-              dispatch_read_byte_count, dispatch_write_byte_count,
-              &dispatch_total_byte_count)) {
-        IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-            builder,
-            " dispatch_issued_read_bytes=%" PRIu64
-            " dispatch_issued_write_bytes=%" PRIu64
-            " dispatch_issued_total_bytes=%" PRIu64,
-            dispatch_read_byte_count, dispatch_write_byte_count,
-            dispatch_total_byte_count));
-      }
+    loom_target_compile_report_dispatch_memory_bytes_t dispatch_source = {0};
+    if (loom_target_compile_report_source_low_memory_dispatch_source_bytes(
+            summary, workload, &dispatch_source)) {
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+          builder,
+          " dispatch_source_read_bytes=%" PRIu64
+          " dispatch_source_write_bytes=%" PRIu64
+          " dispatch_source_total_bytes=%" PRIu64,
+          dispatch_source.read_byte_count, dispatch_source.write_byte_count,
+          dispatch_source.total_byte_count));
+    }
+    loom_target_compile_report_dispatch_memory_bytes_t dispatch_issued = {0};
+    if (loom_target_compile_report_source_low_memory_dispatch_issued_bytes(
+            summary, workload, &dispatch_issued)) {
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+          builder,
+          " dispatch_issued_read_bytes=%" PRIu64
+          " dispatch_issued_write_bytes=%" PRIu64
+          " dispatch_issued_total_bytes=%" PRIu64,
+          dispatch_issued.read_byte_count, dispatch_issued.write_byte_count,
+          dispatch_issued.total_byte_count));
     }
   }
   IREE_RETURN_IF_ERROR(
@@ -4452,50 +4519,56 @@ loom_target_compile_report_format_source_low_memory_row_json(
 }
 
 static iree_status_t
+loom_target_compile_report_format_source_low_memory_dispatch_source_json(
+    const loom_target_compile_report_source_low_memory_summary_t* summary,
+    const loom_target_compile_report_workload_t* workload,
+    loom_output_stream_t* stream, bool* inout_first_field) {
+  loom_target_compile_report_dispatch_memory_bytes_t dispatch_source = {0};
+  if (!loom_target_compile_report_source_low_memory_dispatch_source_bytes(
+          summary, workload, &dispatch_source)) {
+    return iree_ok_status();
+  }
+
+  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_begin_field(
+      stream, inout_first_field, "dispatch_source"));
+  bool first_dispatch_field = true;
+  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "{"));
+  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
+      stream, &first_dispatch_field, "read_bytes",
+      dispatch_source.read_byte_count));
+  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
+      stream, &first_dispatch_field, "write_bytes",
+      dispatch_source.write_byte_count));
+  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
+      stream, &first_dispatch_field, "total_bytes",
+      dispatch_source.total_byte_count));
+  return loom_output_stream_write_cstring(stream, "}");
+}
+
+static iree_status_t
 loom_target_compile_report_format_source_low_memory_dispatch_issued_json(
     const loom_target_compile_report_source_low_memory_summary_t* summary,
     const loom_target_compile_report_workload_t* workload,
     loom_output_stream_t* stream, bool* inout_first_field) {
-  if (!iree_any_bit_set(
-          workload->flags,
-          LOOM_TARGET_COMPILE_REPORT_WORKLOAD_DISPATCH_WORKITEM_COUNT)) {
+  if (!loom_target_compile_report_source_low_memory_can_dispatch_scale(
+          summary, workload)) {
     return iree_ok_status();
   }
-  if (loom_target_compile_report_source_low_memory_has_dynamic_evidence(
-          summary) &&
-      !loom_target_compile_report_source_low_memory_has_complete_dynamic_evidence(
-          summary)) {
-    return iree_ok_status();
-  }
-  const bool use_dynamic_issued_counts =
-      loom_target_compile_report_source_low_memory_has_dynamic_evidence(
-          summary);
-  const uint64_t issued_read_byte_count =
-      use_dynamic_issued_counts ? summary->dynamic_issued_read_byte_count
-                                : summary->issued_read_byte_count;
-  const uint64_t issued_write_byte_count =
-      use_dynamic_issued_counts ? summary->dynamic_issued_write_byte_count
-                                : summary->issued_write_byte_count;
   const uint64_t issued_read_unknown_width_count =
-      use_dynamic_issued_counts
+      loom_target_compile_report_source_low_memory_has_dynamic_evidence(summary)
           ? summary->dynamic_issued_read_unknown_width_count
           : summary->issued_read_unknown_width_count;
   const uint64_t issued_write_unknown_width_count =
-      use_dynamic_issued_counts
+      loom_target_compile_report_source_low_memory_has_dynamic_evidence(summary)
           ? summary->dynamic_issued_write_unknown_width_count
           : summary->issued_write_unknown_width_count;
-  uint64_t read_byte_count = 0;
-  const bool has_read_byte_count = loom_target_compile_report_checked_mul_u64(
-      issued_read_byte_count, workload->dispatch_workitem_count,
-      &read_byte_count);
-  uint64_t write_byte_count = 0;
-  const bool has_write_byte_count = loom_target_compile_report_checked_mul_u64(
-      issued_write_byte_count, workload->dispatch_workitem_count,
-      &write_byte_count);
+  loom_target_compile_report_dispatch_memory_bytes_t dispatch_issued = {0};
+  const bool has_dispatch_issued =
+      loom_target_compile_report_source_low_memory_dispatch_issued_bytes(
+          summary, workload, &dispatch_issued);
   const bool has_unknown_width_count = issued_read_unknown_width_count != 0 ||
                                        issued_write_unknown_width_count != 0;
-  if (!has_read_byte_count && !has_write_byte_count &&
-      !has_unknown_width_count) {
+  if (!has_dispatch_issued && !has_unknown_width_count) {
     return iree_ok_status();
   }
 
@@ -4503,20 +4576,16 @@ loom_target_compile_report_format_source_low_memory_dispatch_issued_json(
       stream, inout_first_field, "dispatch_issued"));
   bool first_dispatch_field = true;
   IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "{"));
-  if (has_read_byte_count) {
+  if (has_dispatch_issued) {
     IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
-        stream, &first_dispatch_field, "read_bytes", read_byte_count));
-  }
-  if (has_write_byte_count) {
+        stream, &first_dispatch_field, "read_bytes",
+        dispatch_issued.read_byte_count));
     IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
-        stream, &first_dispatch_field, "write_bytes", write_byte_count));
-  }
-  uint64_t total_byte_count = 0;
-  if (has_read_byte_count && has_write_byte_count &&
-      loom_target_compile_report_checked_add_u64(
-          read_byte_count, write_byte_count, &total_byte_count)) {
+        stream, &first_dispatch_field, "write_bytes",
+        dispatch_issued.write_byte_count));
     IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
-        stream, &first_dispatch_field, "total_bytes", total_byte_count));
+        stream, &first_dispatch_field, "total_bytes",
+        dispatch_issued.total_byte_count));
   }
   IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_nonzero_u64_field(
       stream, &first_dispatch_field, "read_unknown_width_count",
@@ -4612,6 +4681,9 @@ loom_target_compile_report_format_source_low_memory_summary_fields_json(
   IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
       stream, inout_first_field, "unknown_stride_vector_packet_count",
       summary->unknown_stride_vector_packet_count));
+  IREE_RETURN_IF_ERROR(
+      loom_target_compile_report_format_source_low_memory_dispatch_source_json(
+          summary, workload, stream, inout_first_field));
   IREE_RETURN_IF_ERROR(
       loom_target_compile_report_format_source_low_memory_dispatch_issued_json(
           summary, workload, stream, inout_first_field));
