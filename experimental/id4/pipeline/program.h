@@ -139,6 +139,8 @@ typedef enum id4_pipeline_program_parameter_encoding_e {
   // Converts FP8 e4m3 scaled weights into compact BF16 RHS tiles.
   ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_FP8_E4M3_SCALED_TO_BF16_LINEAR_RHS_TILE =
       4,
+  // Packs FP8 e4m3 matrix weights into compact 16x16 RHS tiles.
+  ID4_PIPELINE_PROGRAM_PARAMETER_ENCODING_FP8_E4M3_LINEAR_RHS_TILE = 5,
 } id4_pipeline_program_parameter_encoding_t;
 
 // Provider tensor used while preparing one execution parameter.

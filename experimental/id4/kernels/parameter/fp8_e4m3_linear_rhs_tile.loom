@@ -1,0 +1,125 @@
+config.decl @id4.parameter.fp8_e4m3_linear_rhs_tile.output_size : %value: index where [range(%value, 16, 131072), mul(%value, 16)]
+
+config.decl @id4.parameter.fp8_e4m3_linear_rhs_tile.input_size : %value: index where [range(%value, 16, 131072), mul(%value, 16)]
+
+kernel.def export("id4_parameter_fp8_e4m3_linear_rhs_tile") @id4_parameter_fp8_e4m3_linear_rhs_tile() {
+  %unit = index.constant 1 : index
+  %workgroup_size_x = index.constant 16 : index
+  %output_size = config.get @id4.parameter.fp8_e4m3_linear_rhs_tile.output_size : index
+  %input_size = config.get @id4.parameter.fp8_e4m3_linear_rhs_tile.input_size : index
+  %sixteen = index.constant 16 : index
+  %input_tile_count = index.div %input_size, %sixteen : index
+  %output_tile_count = index.div %output_size, %sixteen : index
+  kernel.launch.config workgroups(%input_tile_count, %output_tile_count, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
+} launch(%source: buffer, %target: buffer) {
+  %base = index.constant 0 : offset
+  %sixteen = index.constant 16 : index
+  %input_tile = kernel.workgroup.id<x> : index
+  %output_tile = kernel.workgroup.id<y> : index
+  %lane = kernel.workitem.id<x> : index
+  %output_size = config.get @id4.parameter.fp8_e4m3_linear_rhs_tile.output_size : index
+  %input_size = config.get @id4.parameter.fp8_e4m3_linear_rhs_tile.input_size : index
+  %element_count = index.mul %output_size, %input_size : index
+  %source_noalias, %target_noalias = buffer.assume.noalias %source, %target : buffer, buffer
+  %source_global = buffer.assume.memory_space<global> %source_noalias : buffer
+  %target_global = buffer.assume.memory_space<global> %target_noalias : buffer
+  %source_aligned = buffer.assume.alignment %source_global {minimum_alignment = 16} : buffer
+  %target_aligned = buffer.assume.alignment %target_global {minimum_alignment = 16} : buffer
+  %dense = encoding.layout.dense : encoding<layout>
+  %fp8_storage_schema = encoding.define #matrix_operand<element_format=f8e4m3, payload_elements=1, payload_registers=1, rounding=finite_only> : encoding<schema>
+  %fp8_storage = encoding.define #physical_storage {layout = %dense : encoding<layout>, schema = %fp8_storage_schema : encoding<schema>} : encoding<storage>
+  %source_view = buffer.view %source_aligned[%base] : buffer -> view<[%output_size]x[%input_size]xf8E4M3, %fp8_storage>
+  %target_view = buffer.view %target_aligned[%base] : buffer -> view<[%element_count]xf8E4M3, %fp8_storage>
+  %input_tile_count = index.div %input_size, %sixteen : index
+  %input = index.mul %input_tile, %sixteen : index
+  %output_row = index.madd %output_tile, %sixteen, %lane : index
+  %tile = index.madd %output_tile, %input_tile_count, %input_tile : index
+  %tile_element_count = index.constant 256 : index
+  %tile_offset = index.mul %tile, %tile_element_count : index
+  %lane_offset = index.mul %lane, %sixteen : index
+  %target_index = index.add %tile_offset, %lane_offset : index
+  %values = vector.load %source_view[%output_row, %input] : view<[%output_size]x[%input_size]xf8E4M3, %fp8_storage> -> vector<16xf8E4M3>
+  vector.store %values, %target_view[%target_index] : vector<16xf8E4M3>, view<[%element_count]xf8E4M3, %fp8_storage>
+  kernel.return
+}
+
+kernel.def export("id4_parameter_fp8_e4m3_linear_rhs_tile_decode_bf16") @id4_parameter_fp8_e4m3_linear_rhs_tile_decode_bf16() {
+  %unit = index.constant 1 : index
+  %workgroup_size_x = index.constant 16 : index
+  %output_size = config.get @id4.parameter.fp8_e4m3_linear_rhs_tile.output_size : index
+  %input_size = config.get @id4.parameter.fp8_e4m3_linear_rhs_tile.input_size : index
+  %sixteen = index.constant 16 : index
+  %input_tile_count = index.div %input_size, %sixteen : index
+  %output_tile_count = index.div %output_size, %sixteen : index
+  kernel.launch.config workgroups(%input_tile_count, %output_tile_count, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
+} launch(%source: buffer, %target: buffer) {
+  %base = index.constant 0 : offset
+  %sixteen = index.constant 16 : index
+  %input_tile = kernel.workgroup.id<x> : index
+  %output_tile = kernel.workgroup.id<y> : index
+  %lane = kernel.workitem.id<x> : index
+  %output_size = config.get @id4.parameter.fp8_e4m3_linear_rhs_tile.output_size : index
+  %input_size = config.get @id4.parameter.fp8_e4m3_linear_rhs_tile.input_size : index
+  %element_count = index.mul %output_size, %input_size : index
+  %source_noalias, %target_noalias = buffer.assume.noalias %source, %target : buffer, buffer
+  %source_global = buffer.assume.memory_space<global> %source_noalias : buffer
+  %target_global = buffer.assume.memory_space<global> %target_noalias : buffer
+  %source_aligned = buffer.assume.alignment %source_global {minimum_alignment = 16} : buffer
+  %target_aligned = buffer.assume.alignment %target_global {minimum_alignment = 16} : buffer
+  %dense = encoding.layout.dense : encoding<layout>
+  %fp8_storage_schema = encoding.define #matrix_operand<element_format=f8e4m3, payload_elements=1, payload_registers=1, rounding=finite_only> : encoding<schema>
+  %fp8_storage = encoding.define #physical_storage {layout = %dense : encoding<layout>, schema = %fp8_storage_schema : encoding<schema>} : encoding<storage>
+  %source_view = buffer.view %source_aligned[%base] : buffer -> view<[%element_count]xf8E4M3, %fp8_storage>
+  %target_view = buffer.view %target_aligned[%base] : buffer -> view<[%output_size]x[%input_size]xbf16, #dense>
+  %input_tile_count = index.div %input_size, %sixteen : index
+  %input = index.mul %input_tile, %sixteen : index
+  %output_row = index.madd %output_tile, %sixteen, %lane : index
+  %tile = index.madd %output_tile, %input_tile_count, %input_tile : index
+  %tile_element_count = index.constant 256 : index
+  %tile_offset = index.mul %tile, %tile_element_count : index
+  %lane_offset = index.mul %lane, %sixteen : index
+  %source_index = index.add %tile_offset, %lane_offset : index
+  %values_fp8 = vector.load %source_view[%source_index] : view<[%element_count]xf8E4M3, %fp8_storage> -> vector<16xf8E4M3>
+  %values = vector.extf %values_fp8 : vector<16xf8E4M3> to vector<16xbf16>
+  vector.store %values, %target_view[%output_row, %input] : vector<16xbf16>, view<[%output_size]x[%input_size]xbf16, #dense>
+  kernel.return
+}
+
+check.case public @id4_parameter_fp8_e4m3_linear_rhs_tile_small_case {
+  %source = check.generate.fill value(1.0) : tensor<16x16xf8E4M3>
+  %target = check.generate.fill value(0.0) : tensor<256xf8E4M3>
+  %decoded = check.generate.fill value(0.0) : tensor<16x16xbf16>
+  %expected = check.generate.fill value(1.0) : tensor<16x16xbf16>
+  func.call @id4_parameter_fp8_e4m3_linear_rhs_tile(%source, %target) : (tensor<16x16xf8E4M3>, tensor<256xf8E4M3>)
+  func.call @id4_parameter_fp8_e4m3_linear_rhs_tile_decode_bf16(%target, %decoded) : (tensor<256xf8E4M3>, tensor<16x16xbf16>)
+  check.expect.close actual(%decoded) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<16x16xbf16>
+  check.return
+}
+
+check.case public @id4_parameter_fp8_e4m3_linear_rhs_tile_qkv_shape_case {
+  %source = check.generate.fill value(1.0) : tensor<13824x4608xf8E4M3>
+  %target = check.generate.fill value(0.0) : tensor<63700992xf8E4M3>
+  %decoded = check.generate.fill value(0.0) : tensor<13824x4608xbf16>
+  %expected = check.generate.fill value(1.0) : tensor<13824x4608xbf16>
+  func.call @id4_parameter_fp8_e4m3_linear_rhs_tile(%source, %target) : (tensor<13824x4608xf8E4M3>, tensor<63700992xf8E4M3>)
+  func.call @id4_parameter_fp8_e4m3_linear_rhs_tile_decode_bf16(%target, %decoded) : (tensor<63700992xf8E4M3>, tensor<13824x4608xbf16>)
+  check.expect.close actual(%decoded) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<13824x4608xbf16>
+  check.return
+}
+
+check.case public @id4_parameter_fp8_e4m3_linear_rhs_tile_mlp_up_shape_case {
+  %source = check.generate.fill value(1.0) : tensor<12288x4608xf8E4M3>
+  %target = check.generate.fill value(0.0) : tensor<56623104xf8E4M3>
+  %decoded = check.generate.fill value(0.0) : tensor<12288x4608xbf16>
+  %expected = check.generate.fill value(1.0) : tensor<12288x4608xbf16>
+  func.call @id4_parameter_fp8_e4m3_linear_rhs_tile(%source, %target) : (tensor<12288x4608xf8E4M3>, tensor<56623104xf8E4M3>)
+  func.call @id4_parameter_fp8_e4m3_linear_rhs_tile_decode_bf16(%target, %decoded) : (tensor<56623104xf8E4M3>, tensor<12288x4608xbf16>)
+  check.expect.close actual(%decoded) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<12288x4608xbf16>
+  check.return
+}
+
+check.benchmark<@id4_parameter_fp8_e4m3_linear_rhs_tile_small_case> @id4_parameter_fp8_e4m3_linear_rhs_tile_small
+
+check.benchmark<@id4_parameter_fp8_e4m3_linear_rhs_tile_qkv_shape_case> @id4_parameter_fp8_e4m3_linear_rhs_tile_qkv_shape
+
+check.benchmark<@id4_parameter_fp8_e4m3_linear_rhs_tile_mlp_up_shape_case> @id4_parameter_fp8_e4m3_linear_rhs_tile_mlp_up_shape

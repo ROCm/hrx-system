@@ -365,6 +365,29 @@ static iree_status_t id4_pipeline_parameter_load_step_validate_header(
             (int)step->name.size, step->name.data);
       }
       break;
+    case ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_ENCODE_FP8_E4M3_LINEAR_RHS_TILE:
+      if (step->request_indices) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "parameter FP8 RHS tile encode load step '%.*s' must not have "
+            "request indices",
+            (int)step->name.size, step->name.data);
+      }
+      if (step->request_count != 1) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "parameter FP8 RHS tile encode load step '%.*s' must target one "
+            "request",
+            (int)step->name.size, step->name.data);
+      }
+      if (step->source_count != 1 || !step->sources) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "parameter FP8 RHS tile encode load step '%.*s' must have one "
+            "source",
+            (int)step->name.size, step->name.data);
+      }
+      break;
     default:
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "parameter load step '%.*s' has unknown kind %u",
@@ -441,6 +464,7 @@ static bool id4_pipeline_parameter_load_step_is_encode(
     case ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_ENCODE_FP8_E4M3_SCALED_TO_BF16:
     case ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_ENCODE_BF16_LINEAR_RHS_TILE:
     case ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_ENCODE_FP8_E4M3_SCALED_TO_BF16_LINEAR_RHS_TILE:
+    case ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_ENCODE_FP8_E4M3_LINEAR_RHS_TILE:
       return true;
     default:
       return false;
@@ -511,6 +535,21 @@ id4_pipeline_parameter_encode_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_step_valid
       step, &step->sources[0], IREE_SV("FP8 RHS tile encode"));
 }
 
+static iree_status_t
+id4_pipeline_parameter_encode_fp8_e4m3_linear_rhs_tile_step_validate(
+    const id4_pipeline_parameter_load_step_t* step) {
+  const id4_pipeline_parameter_load_source_t* weight_source = &step->sources[0];
+  if (weight_source->dtype != ID4_PIPELINE_TENSOR_DTYPE_F8_E4M3) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "parameter FP8 RHS tile encode load step '%.*s' weight source must be "
+        "f8e4m3",
+        (int)step->name.size, step->name.data);
+  }
+  return id4_pipeline_parameter_validate_linear_rhs_tile_shape(
+      step, weight_source, IREE_SV("FP8 RHS tile encode"));
+}
+
 static iree_status_t id4_pipeline_parameter_load_step_validate_sources(
     const id4_pipeline_parameter_load_step_t* step) {
   for (iree_host_size_t i = 0; i < step->source_count; ++i) {
@@ -528,6 +567,9 @@ static iree_status_t id4_pipeline_parameter_load_step_validate_sources(
           step);
     case ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_ENCODE_FP8_E4M3_SCALED_TO_BF16_LINEAR_RHS_TILE:
       return id4_pipeline_parameter_encode_fp8_e4m3_scaled_to_bf16_linear_rhs_tile_step_validate(
+          step);
+    case ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_ENCODE_FP8_E4M3_LINEAR_RHS_TILE:
+      return id4_pipeline_parameter_encode_fp8_e4m3_linear_rhs_tile_step_validate(
           step);
     default:
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -594,6 +636,7 @@ static iree_status_t id4_pipeline_parameter_load_step_validate_target_request(
           weight_source->byte_length * sizeof(uint16_t);
       break;
     case ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_ENCODE_BF16_LINEAR_RHS_TILE:
+    case ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_ENCODE_FP8_E4M3_LINEAR_RHS_TILE:
       expected_target_byte_length = weight_source->byte_length;
       break;
     default:
@@ -606,8 +649,8 @@ static iree_status_t id4_pipeline_parameter_load_step_validate_target_request(
       request->span.length != expected_target_byte_length) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
-        "parameter encode load step '%.*s' target request must cover dense "
-        "BF16 storage",
+        "parameter encode load step '%.*s' target request must cover "
+        "execution storage",
         (int)step->name.size, step->name.data);
   }
   return iree_ok_status();
@@ -1276,6 +1319,14 @@ static iree_status_t id4_pipeline_parameter_prepare_encoder(
           "id4.parameter.fp8_e4m3_scaled_to_bf16_linear_rhs_tile.output_size");
       input_size_key = IREE_SV(
           "id4.parameter.fp8_e4m3_scaled_to_bf16_linear_rhs_tile.input_size");
+      break;
+    case ID4_PIPELINE_PARAMETER_LOAD_STEP_KIND_ENCODE_FP8_E4M3_LINEAR_RHS_TILE:
+      module_path = IREE_SV("parameter/fp8_e4m3_linear_rhs_tile");
+      function_name = IREE_SV("id4_parameter_fp8_e4m3_linear_rhs_tile");
+      output_size_key =
+          IREE_SV("id4.parameter.fp8_e4m3_linear_rhs_tile.output_size");
+      input_size_key =
+          IREE_SV("id4.parameter.fp8_e4m3_linear_rhs_tile.input_size");
       break;
     default:
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,

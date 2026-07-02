@@ -172,14 +172,33 @@ static iree_status_t id4_ideogram4_dit_program_layer_linear_parameter(
           break;
         }
         case ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_FP8_DIRECT: {
-          IREE_RETURN_IF_ERROR(
-              id4_ideogram4_dit_program_parameter_fp8_e4m3_scaled(
-                  builder, source.source_scope, weight_key, input_size,
-                  output_size, &out_parameter->weight, &out_parameter->scale));
+          if (bf16_resident_layout ==
+              ID4_IDEOGRAM4_DIT_PROGRAM_LINEAR_WEIGHT_LAYOUT_COMPACT_RHS_TILE) {
+            IREE_RETURN_IF_ERROR(
+                id4_ideogram4_dit_program_parameter_fp8_e4m3_linear_rhs_tile(
+                    builder, source.source_scope, weight_key, input_size,
+                    output_size, &out_parameter->weight));
+            char scale_key_buffer[ID4_IDEOGRAM4_DIT_FORMAT_BUFFER_CAPACITY];
+            iree_string_view_t scale_key = iree_string_view_empty();
+            IREE_RETURN_IF_ERROR(
+                id4_ideogram4_dit_program_format_parameter_scale_key(
+                    weight_key, scale_key_buffer,
+                    IREE_ARRAYSIZE(scale_key_buffer), &scale_key));
+            IREE_RETURN_IF_ERROR(id4_ideogram4_dit_program_parameter(
+                builder, source.source_scope, scale_key,
+                ID4_PIPELINE_PROGRAM_DTYPE_F32,
+                id4_pipeline_program_make_shape_rank1(output_size),
+                &out_parameter->scale));
+          } else {
+            IREE_RETURN_IF_ERROR(
+                id4_ideogram4_dit_program_parameter_fp8_e4m3_scaled(
+                    builder, source.source_scope, weight_key, input_size,
+                    output_size, &out_parameter->weight,
+                    &out_parameter->scale));
+          }
           out_parameter->storage =
               ID4_IDEOGRAM4_DIT_PARAMETER_STORAGE_FP8_E4M3_SCALED;
-          out_parameter->layout =
-              ID4_IDEOGRAM4_DIT_PROGRAM_LINEAR_WEIGHT_LAYOUT_DENSE;
+          out_parameter->layout = bf16_resident_layout;
           break;
         }
         default:
@@ -332,9 +351,22 @@ static iree_status_t id4_ideogram4_dit_program_dispatch_linear_parameter_bf16(
               (uint32_t)parameter.layout);
       }
     case ID4_IDEOGRAM4_DIT_PARAMETER_STORAGE_FP8_E4M3_SCALED:
-      return id4_ideogram4_dit_program_dispatch_linear_packed_fp8_bf16(
-          builder, name, token_count, token_capacity, input_size, output_size,
-          input, parameter.weight, parameter.scale, output);
+      switch (parameter.layout) {
+        case ID4_IDEOGRAM4_DIT_PROGRAM_LINEAR_WEIGHT_LAYOUT_DENSE:
+          return id4_ideogram4_dit_program_dispatch_linear_packed_fp8_bf16(
+              builder, name, token_count, token_capacity, input_size,
+              output_size, input, parameter.weight, parameter.scale, output);
+        case ID4_IDEOGRAM4_DIT_PROGRAM_LINEAR_WEIGHT_LAYOUT_COMPACT_RHS_TILE:
+          return id4_ideogram4_dit_program_dispatch_linear_packed_fp8_bf16_compact_rhs_tile(
+              builder, name, token_count, token_capacity, input_size,
+              output_size, input, parameter.weight, parameter.scale, output);
+        default:
+          return iree_make_status(
+              IREE_STATUS_UNIMPLEMENTED,
+              "Ideogram4 DiT FP8 linear dispatch weight layout %" PRIu32
+              " is not supported",
+              (uint32_t)parameter.layout);
+      }
     default:
       return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
                               "Ideogram4 DiT linear dispatch storage %" PRIu32

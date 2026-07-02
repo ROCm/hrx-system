@@ -31,6 +31,8 @@ namespace {
 constexpr iree_host_size_t kCompactRhsTileElementCount = 16 * 16;
 constexpr iree_host_size_t kCompactRhsTileByteLength =
     kCompactRhsTileElementCount * sizeof(uint16_t);
+constexpr iree_host_size_t kCompactFp8RhsTileByteLength =
+    kCompactRhsTileElementCount * sizeof(uint8_t);
 constexpr iree_host_size_t kFp8RawSweepTileCount = 64;
 
 enum class ParameterLoadIssueMode {
@@ -423,6 +425,9 @@ static void RunCompactLinearRhsTileEncoding(
     RuntimeContext* context, id4_pipeline_kernel_library_t* kernel_library,
     iree_io_parameter_provider_t* provider,
     id4_pipeline_diagnostics_sink_t* diagnostics_sink);
+static void RunCompactFp8LinearRhsTileEncoding(
+    RuntimeContext* context, id4_pipeline_kernel_library_t* kernel_library,
+    id4_pipeline_diagnostics_sink_t* diagnostics_sink);
 
 TEST(ParameterSlabIntegration, CheckLoadGroupFailuresReportsFailedSemaphore) {
   RuntimeContext& context = SharedRuntimeContext();
@@ -740,6 +745,8 @@ TEST(ParameterSlabIntegration, EncodedFp8WeightsFeedBf16WmmaLinear) {
 
   RunCompactLinearRhsTileEncoding(&context, kernel_library.get(),
                                   provider.get(), &diagnostics_sink);
+  RunCompactFp8LinearRhsTileEncoding(&context, kernel_library.get(),
+                                     &diagnostics_sink);
 }
 
 static void RunFileBackedDirectGatherManySmall(
@@ -1138,6 +1145,146 @@ static void RunCompactLinearRhsTileEncoding(
     ExpectDecodedFp8Pattern(
         encoded_weight, (2 + i) * kCompactRhsTileElementCount,
         fp8_sweep_pattern, IREE_ARRAYSIZE(fp8_sweep_pattern));
+  }
+}
+
+static void RunCompactFp8LinearRhsTileEncoding(
+    RuntimeContext* context, id4_pipeline_kernel_library_t* kernel_library,
+    id4_pipeline_diagnostics_sink_t* diagnostics_sink) {
+  constexpr uint64_t kOutputSize = 32;
+  constexpr uint64_t kInputSize = 32;
+  constexpr iree_host_size_t kElementCount = kOutputSize * kInputSize;
+  constexpr iree_device_size_t kByteLength = kElementCount * sizeof(uint8_t);
+  const iree_string_view_t kParameterKey =
+      IREE_SV("weight.fp8_direct_rhs_tile");
+
+  std::vector<uint8_t> source_data(kElementCount);
+  for (iree_host_size_t i = 0; i < source_data.size(); ++i) {
+    source_data[i] = FiniteNonzeroFp8SweepByte(i);
+  }
+
+  ScopedTempFilePath source_path("id4_parameter_slab_fp8_rhs_tile");
+  OwningRef<iree_io_parameter_provider_t, iree_io_parameter_provider_release>
+      provider;
+  IREE_ASSERT_OK(CreateFileParameterProviderWithContents(
+      &source_path, kParameterKey,
+      iree_make_const_byte_span(source_data.data(), source_data.size()),
+      provider.out()));
+
+  id4_pipeline_device_placement_t placement;
+  std::memset(&placement, 0, sizeof(placement));
+  placement.role = IREE_SV("default");
+  placement.device_index = 0;
+  placement.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
+
+  id4_pipeline_parameter_request_t target_request =
+      id4_pipeline_parameter_request(
+          kParameterKey, id4_pipeline_parameter_span(/*parameter_offset=*/0,
+                                                     /*buffer_offset=*/0,
+                                                     /*length=*/kByteLength));
+  id4_pipeline_parameter_slab_plan_t slab =
+      id4_pipeline_make_device_local_parameter_slab_plan(
+          IREE_SV("execution"), /*placement_id=*/0, /*binding_slot=*/0,
+          IREE_HAL_QUEUE_AFFINITY_ANY,
+          IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE |
+              IREE_HAL_BUFFER_USAGE_TRANSFER_SOURCE,
+          kByteLength, /*alignment=*/16, /*request_count=*/1, &target_request);
+
+  id4_pipeline_tensor_shape_t weight_shape;
+  std::memset(&weight_shape, 0, sizeof(weight_shape));
+  weight_shape.rank = 2;
+  weight_shape.dims[0] = kOutputSize;
+  weight_shape.dims[1] = kInputSize;
+  const id4_pipeline_parameter_load_source_t source =
+      id4_pipeline_parameter_load_source(IREE_SV("parameters"), kParameterKey,
+                                         ID4_PIPELINE_TENSOR_DTYPE_F8_E4M3,
+                                         weight_shape, kByteLength);
+  id4_pipeline_parameter_load_step_t load_step =
+      id4_pipeline_parameter_encode_fp8_e4m3_linear_rhs_tile_load_step(
+          IREE_SV("parameters.encode_fp8_direct_rhs_tile"),
+          /*source_count=*/1, &source,
+          /*target_slab_index=*/0, /*request_offset=*/0);
+
+  id4_pipeline_plan_create_options_t plan_options;
+  std::memset(&plan_options, 0, sizeof(plan_options));
+  plan_options.structure_size = sizeof(plan_options);
+  plan_options.stage_name = IREE_SV("parameter_slab.fp8_rhs_tile");
+  plan_options.device_group = context->value.device_group;
+  plan_options.diagnostics_sink = diagnostics_sink;
+  plan_options.placement_count = 1;
+  plan_options.placements = &placement;
+  plan_options.parameter_slab_count = 1;
+  plan_options.parameter_slabs = &slab;
+  plan_options.parameter_load_step_count = 1;
+  plan_options.parameter_load_steps = &load_step;
+  OwningRef<id4_pipeline_plan_t, id4_pipeline_plan_release> plan;
+  IREE_ASSERT_OK(id4_pipeline_plan_create(&plan_options,
+                                          iree_allocator_system(), plan.out()));
+
+  iree_hal_device_t* device =
+      id4_tooling_runtime_context_primary_device(&context->value);
+  OwningRef<iree_hal_semaphore_t, iree_hal_semaphore_release> prepare_semaphore;
+  IREE_ASSERT_OK(iree_hal_semaphore_create(
+      device, IREE_HAL_QUEUE_AFFINITY_ANY, /*initial_value=*/0,
+      IREE_HAL_SEMAPHORE_FLAG_DEFAULT, prepare_semaphore.out()));
+  iree_hal_semaphore_t* prepare_signal_semaphore = prepare_semaphore.get();
+  uint64_t prepare_signal_value = 1;
+  iree_hal_semaphore_list_t prepare_signal_list =
+      MakeOneSemaphoreList(&prepare_signal_semaphore, &prepare_signal_value);
+
+  id4_pipeline_parameter_slab_set_load_options_t load_options;
+  std::memset(&load_options, 0, sizeof(load_options));
+  load_options.structure_size = sizeof(load_options);
+  load_options.encoder_staging_chunk_byte_capacity =
+      ID4_PIPELINE_PARAMETER_ENCODER_DEFAULT_STAGING_CHUNK_BYTE_CAPACITY;
+  load_options.encoder_staging_memory_type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
+  load_options.provider = provider.get();
+  load_options.kernel_library = kernel_library;
+  load_options.kernel_cache = context->value.kernel_cache;
+  load_options.executable_cache = context->value.executable_cache;
+  load_options.wait_semaphore_list = iree_hal_semaphore_list_empty();
+  load_options.signal_semaphore_list = prepare_signal_list;
+  load_options.diagnostics_sink = diagnostics_sink;
+  OwningRef<id4_pipeline_parameter_slab_set_t,
+            id4_pipeline_parameter_slab_set_release>
+      slab_set;
+  IREE_ASSERT_OK(id4_pipeline_plan_load_parameter_slabs(
+      plan.get(), &load_options, iree_allocator_system(), slab_set.out()));
+  IREE_ASSERT_OK(iree_hal_semaphore_wait(
+      prepare_semaphore.get(), prepare_signal_value, iree_infinite_timeout(),
+      IREE_ASYNC_WAIT_FLAG_NONE));
+  IREE_ASSERT_OK(id4_pipeline_parameter_slab_set_check_load_group_failures(
+      slab_set.get(), plan_options.stage_name, diagnostics_sink));
+
+  std::vector<uint8_t> actual(kByteLength);
+  IREE_ASSERT_OK(iree_hal_device_transfer_d2h(
+      device, id4_pipeline_parameter_slab_set_buffer_at(slab_set.get(), 0),
+      /*source_offset=*/0, actual.data(), actual.size(),
+      IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT, iree_infinite_timeout()));
+
+  std::vector<uint8_t> expected(kByteLength);
+  constexpr iree_host_size_t kTileSize = 16;
+  const iree_host_size_t input_tile_count = kInputSize / kTileSize;
+  const iree_host_size_t output_tile_count = kOutputSize / kTileSize;
+  for (iree_host_size_t output_tile = 0; output_tile < output_tile_count;
+       ++output_tile) {
+    for (iree_host_size_t input_tile = 0; input_tile < input_tile_count;
+         ++input_tile) {
+      const iree_host_size_t tile = output_tile * input_tile_count + input_tile;
+      const iree_host_size_t target_tile_offset =
+          tile * kCompactFp8RhsTileByteLength;
+      for (iree_host_size_t row = 0; row < kTileSize; ++row) {
+        const iree_host_size_t source_row = output_tile * kTileSize + row;
+        const iree_host_size_t source_column = input_tile * kTileSize;
+        std::memcpy(
+            expected.data() + target_tile_offset + row * kTileSize,
+            source_data.data() + source_row * kInputSize + source_column,
+            kTileSize);
+      }
+    }
+  }
+  for (iree_host_size_t i = 0; i < actual.size(); ++i) {
+    ASSERT_EQ(actual[i], expected[i]) << "byte offset " << i;
   }
 }
 

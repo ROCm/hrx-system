@@ -122,6 +122,11 @@ id4_ideogram4_dit_program_parameter_fp8_e4m3_scaled_to_bf16_linear_rhs_tile(
     iree_string_view_t weight_key, uint32_t input_size, uint32_t output_size,
     id4_pipeline_program_tensor_t* out_tensor);
 
+iree_status_t id4_ideogram4_dit_program_parameter_fp8_e4m3_linear_rhs_tile(
+    id4_pipeline_program_builder_t* builder, iree_string_view_t source_scope,
+    iree_string_view_t weight_key, uint32_t input_size, uint32_t output_size,
+    id4_pipeline_program_tensor_t* out_tensor);
+
 iree_status_t id4_ideogram4_dit_program_parameter_fp8_e4m3_scaled(
     id4_pipeline_program_builder_t* builder, iree_string_view_t source_scope,
     iree_string_view_t weight_key, uint32_t input_size, uint32_t output_size,
@@ -297,6 +302,14 @@ id4_ideogram4_dit_program_dispatch_linear_packed_bf16_bf16_compact_rhs_tile_work
     id4_pipeline_program_tensor_t weight, id4_pipeline_program_tensor_t output);
 
 iree_status_t id4_ideogram4_dit_program_dispatch_linear_packed_fp8_bf16(
+    id4_pipeline_program_builder_t* builder, iree_string_view_t name,
+    uint32_t token_count, uint32_t token_capacity, uint32_t input_size,
+    uint32_t output_size, id4_pipeline_program_tensor_t input,
+    id4_pipeline_program_tensor_t weight, id4_pipeline_program_tensor_t scale,
+    id4_pipeline_program_tensor_t output);
+
+iree_status_t
+id4_ideogram4_dit_program_dispatch_linear_packed_fp8_bf16_compact_rhs_tile(
     id4_pipeline_program_builder_t* builder, iree_string_view_t name,
     uint32_t token_count, uint32_t token_capacity, uint32_t input_size,
     uint32_t output_size, id4_pipeline_program_tensor_t input,
