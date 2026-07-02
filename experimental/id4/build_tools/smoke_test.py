@@ -316,6 +316,7 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
         default="issue_phases",
         choices=(
             "issue_phases",
+            "phase_stage_bundles",
             "selected_stage_bundles",
             "all_stage_bundles",
             "memory_budgeted",

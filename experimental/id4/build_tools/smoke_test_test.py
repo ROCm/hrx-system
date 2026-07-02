@@ -344,6 +344,24 @@ class Id4SmokeTestTest(unittest.TestCase):
         self.assertIn("--generation_issue_mode=phases", command)
         self.assertIn("--generation_resident_stage_bundles=dit_conditioned", command)
 
+    def test_build_id4_command_routes_phase_stage_residency_policy(self):
+        args = self.smoke_test.parse_arguments(
+            [
+                "--output_dir=out",
+                "--id4_binary=bin/id4",
+                "--device=amdgpu",
+                "--tokenizer=tokenizer.json",
+                "--parameters=qwen=qwen.safetensors",
+                "--generation_residency=phase_stage_bundles",
+                "--generation_issue_mode=phases",
+            ]
+        )
+
+        command = self.smoke_test.build_id4_command(args, Path("artifacts"))
+
+        self.assertIn("--generation_residency=phase_stage_bundles", command)
+        self.assertIn("--generation_issue_mode=phases", command)
+
     def test_build_id4_command_routes_memory_budgeted_residency_policy(self):
         args = self.smoke_test.parse_arguments(
             [
