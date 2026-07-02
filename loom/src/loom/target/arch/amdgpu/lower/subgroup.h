@@ -21,8 +21,9 @@ extern "C" {
 iree_status_t loom_amdgpu_emit_subgroup_bpermute_register(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_low_lower_resolved_descriptor_t* descriptor,
-    loom_value_id_t low_source_byte_offset, loom_value_id_t low_source_value,
-    loom_type_t lane_type, loom_value_id_t* out_low_result);
+    loom_value_id_t low_source_byte_offset, uint32_t static_byte_offset,
+    loom_value_id_t low_source_value, loom_type_t lane_type,
+    loom_value_id_t* out_low_result);
 
 // Emits one DPP cross-lane read for a 32-bit payload register.
 iree_status_t loom_amdgpu_emit_subgroup_dpp_register(

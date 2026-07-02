@@ -680,7 +680,8 @@ static iree_status_t loom_amdgpu_emit_subgroup_scan_tree(
       loom_value_id_t peer = LOOM_VALUE_ID_INVALID;
       IREE_RETURN_IF_ERROR(loom_amdgpu_emit_subgroup_bpermute_register(
           context, source_op, &plan->bpermute_descriptor,
-          source_byte_offsets[step_index], accumulator, lane_type, &peer));
+          source_byte_offsets[step_index], /*static_byte_offset=*/0,
+          accumulator, lane_type, &peer));
       loom_value_id_t combined = LOOM_VALUE_ID_INVALID;
       IREE_RETURN_IF_ERROR(loom_amdgpu_emit_subgroup_combine(
           context, source_op, &plan->combine_descriptor, accumulator, peer,
@@ -701,7 +702,8 @@ static iree_status_t loom_amdgpu_emit_subgroup_scan_tree(
         loom_value_id_t shifted = LOOM_VALUE_ID_INVALID;
         IREE_RETURN_IF_ERROR(loom_amdgpu_emit_subgroup_bpermute_register(
             context, source_op, &plan->bpermute_descriptor,
-            exclusive_byte_offset, accumulator, lane_type, &shifted));
+            exclusive_byte_offset, /*static_byte_offset=*/0, accumulator,
+            lane_type, &shifted));
         loom_value_id_t identity = LOOM_VALUE_ID_INVALID;
         IREE_RETURN_IF_ERROR(loom_amdgpu_emit_const_u32(
             context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_MOV_B32,
