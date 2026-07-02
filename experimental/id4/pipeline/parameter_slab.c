@@ -1618,10 +1618,6 @@ typedef struct id4_pipeline_parameter_encode_wave_chunk_t {
       source_batches[ID4_PIPELINE_PARAMETER_ENCODER_CHUNK_SOURCE_CAPACITY];
   // Number of populated source_batches entries.
   iree_host_size_t source_batch_count;
-  // Wait semaphore pointer storage for source_wait_list.
-  iree_hal_semaphore_t* source_wait_semaphore;
-  // Wait payload storage for source_wait_list.
-  uint64_t source_wait_payload_value;
   // Slot readiness required before source writes may begin.
   iree_hal_semaphore_list_t source_wait_list;
   // Payload value signaled by all chunk-local source gather groups.
@@ -2045,6 +2041,41 @@ static iree_hal_semaphore_list_t id4_pipeline_parameter_many_semaphore_list(
       // Required or published payload values.
       .payload_values = payload_values,
   };
+}
+
+static iree_status_t id4_pipeline_parameter_encode_make_source_wait_list(
+    iree_hal_semaphore_t* slot_wait_semaphore, uint64_t slot_wait_payload_value,
+    iree_hal_semaphore_list_t base_wait_list,
+    iree_hal_semaphore_t** wait_semaphores, uint64_t* wait_payload_values,
+    iree_hal_semaphore_list_t* out_wait_list) {
+  IREE_ASSERT_ARGUMENT(out_wait_list);
+  *out_wait_list = iree_hal_semaphore_list_empty();
+  if (!slot_wait_semaphore) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "parameter encoder source wait requires slot readiness semaphore");
+  }
+  if (base_wait_list.count != 0 &&
+      (!base_wait_list.semaphores || !base_wait_list.payload_values)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "parameter encoder source base wait list is malformed");
+  }
+  iree_host_size_t wait_count = 0;
+  if (!iree_host_size_checked_add(base_wait_list.count, 1, &wait_count)) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "parameter encoder source wait list count overflows");
+  }
+  wait_semaphores[0] = slot_wait_semaphore;
+  wait_payload_values[0] = slot_wait_payload_value;
+  for (iree_host_size_t i = 0; i < base_wait_list.count; ++i) {
+    wait_semaphores[i + 1] = base_wait_list.semaphores[i];
+    wait_payload_values[i + 1] = base_wait_list.payload_values[i];
+  }
+  *out_wait_list = id4_pipeline_parameter_many_semaphore_list(
+      wait_count, wait_semaphores, wait_payload_values);
+  return iree_ok_status();
 }
 
 static iree_status_t id4_pipeline_parameter_create_source_semaphores(
@@ -2570,6 +2601,31 @@ static iree_status_t id4_pipeline_parameter_slab_submit_encode_run(
           0};
   uint64_t run_wait_payload_values
       [ID4_PIPELINE_PARAMETER_ENCODER_STAGING_SLOT_COUNT] = {0};
+  iree_host_size_t source_wait_capacity = 0;
+  if (!iree_host_size_checked_add(wait_semaphore_list.count, 1,
+                                  &source_wait_capacity)) {
+    status = iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "parameter encoder source wait list capacity overflows");
+  }
+  iree_host_size_t source_wait_storage_count = 0;
+  if (iree_status_is_ok(status) &&
+      !iree_host_size_checked_mul(
+          source_wait_capacity,
+          ID4_PIPELINE_PARAMETER_ENCODER_WAVE_CHUNK_CAPACITY,
+          &source_wait_storage_count)) {
+    status = iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "parameter encoder source wait list storage count overflows");
+  }
+  iree_hal_semaphore_t** source_wait_semaphores = NULL;
+  uint64_t* source_wait_payload_values = NULL;
+  if (iree_status_is_ok(status) && source_wait_storage_count != 0) {
+    source_wait_semaphores = (iree_hal_semaphore_t**)iree_alloca(
+        source_wait_storage_count * sizeof(source_wait_semaphores[0]));
+    source_wait_payload_values = (uint64_t*)iree_alloca(
+        source_wait_storage_count * sizeof(source_wait_payload_values[0]));
+  }
   while (step_offset < step_count && iree_status_is_ok(status)) {
     id4_pipeline_parameter_encode_wave_chunk_t
         wave_chunks[ID4_PIPELINE_PARAMETER_ENCODER_WAVE_CHUNK_CAPACITY] = {0};
@@ -2613,21 +2669,26 @@ static iree_status_t id4_pipeline_parameter_slab_submit_encode_run(
             "parameter encoder staging slot byte offset overflows");
         break;
       }
+      iree_hal_semaphore_t* slot_wait_semaphore = NULL;
+      uint64_t slot_wait_payload_value = 0;
       if (slot_state->encode_payload_value == 0) {
         if (uses_encode_window) {
-          chunk->source_wait_semaphore = encode_window->staging_ready_semaphore;
-          chunk->source_wait_payload_value =
-              encode_window->staging_ready_payload_value;
+          slot_wait_semaphore = encode_window->staging_ready_semaphore;
+          slot_wait_payload_value = encode_window->staging_ready_payload_value;
         } else {
-          chunk->source_wait_semaphore = run_semaphore;
-          chunk->source_wait_payload_value = staging_ready_payload_value;
+          slot_wait_semaphore = run_semaphore;
+          slot_wait_payload_value = staging_ready_payload_value;
         }
       } else {
-        chunk->source_wait_semaphore = slot_state->encode_semaphore;
-        chunk->source_wait_payload_value = slot_state->encode_payload_value;
+        slot_wait_semaphore = slot_state->encode_semaphore;
+        slot_wait_payload_value = slot_state->encode_payload_value;
       }
-      chunk->source_wait_list = id4_pipeline_parameter_one_semaphore_list(
-          &chunk->source_wait_semaphore, &chunk->source_wait_payload_value);
+      status = id4_pipeline_parameter_encode_make_source_wait_list(
+          slot_wait_semaphore, slot_wait_payload_value, wait_semaphore_list,
+          source_wait_semaphores + wave_chunk_count * source_wait_capacity,
+          source_wait_payload_values + wave_chunk_count * source_wait_capacity,
+          &chunk->source_wait_list);
+      if (!iree_status_is_ok(status)) break;
       status = id4_pipeline_parameter_encode_group_chunk_sources(
           chunk->chunk_step_count, &steps[planned_step_offset], chunk->layouts,
           chunk->slot_base_offset, chunk->grouped_sources,
