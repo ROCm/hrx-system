@@ -26,13 +26,15 @@ typedef struct loom_low_materialized_spill_slot_t {
 static void loom_low_allocation_record_materialized_spill(
     const loom_low_allocation_table_t* table,
     const loom_low_allocation_spill_plan_t* plan, uint32_t store_count,
-    uint32_t reload_count, loom_low_allocation_materialized_spill_t* record) {
+    uint32_t reload_count, loom_low_allocation_materialized_spill_flags_t flags,
+    loom_low_allocation_materialized_spill_t* record) {
   IREE_ASSERT_LT(plan->assignment_index, table->assignment_count);
   const loom_low_allocation_assignment_t* assignment =
       &table->assignments[plan->assignment_index];
   *record = (loom_low_allocation_materialized_spill_t){
       .value_id = plan->value_id,
       .value_class = assignment->value_class,
+      .flags = flags,
       .assignment_index = plan->assignment_index,
       .slot_index = plan->slot_index,
       .slot_space = plan->slot_space,
@@ -767,7 +769,9 @@ static iree_status_t loom_low_allocation_materialize_one_spill_plan(
     loom_module_t* module, const loom_low_allocation_table_t* table,
     const loom_low_allocation_spill_plan_t* plan,
     loom_value_id_t storage_value_id, iree_arena_allocator_t* arena,
-    loom_low_allocation_materialization_result_t* result) {
+    loom_low_allocation_materialization_result_t* result,
+    loom_low_allocation_materialized_spill_flags_t* out_record_flags) {
+  *out_record_flags = 0;
   loom_use_t* uses = NULL;
   uint32_t use_count = 0;
   IREE_RETURN_IF_ERROR(loom_low_allocation_snapshot_value_uses(
@@ -779,6 +783,10 @@ static iree_status_t loom_low_allocation_materialize_one_spill_plan(
   const bool is_block_arg = loom_low_allocation_block_arg_plan(
       module, table->function_op, plan, &block_arg_block, &block_arg_index,
       &block_arg_is_entry);
+  if (is_block_arg) {
+    *out_record_flags |=
+        LOOM_LOW_ALLOCATION_MATERIALIZED_SPILL_FLAG_VALUE_WAS_BLOCK_ARGUMENT;
+  }
   uint32_t reload_count = use_count;
   if (is_block_arg && !block_arg_is_entry) {
     reload_count = loom_low_allocation_count_materialized_reloads(
@@ -889,9 +897,10 @@ iree_status_t loom_low_allocation_materialize_spills(
   for (iree_host_size_t i = 0; i < spill_plan_count; ++i) {
     const uint32_t prior_spill_count = result.spill_count;
     const uint32_t prior_reload_count = result.reload_count;
+    loom_low_allocation_materialized_spill_flags_t record_flags = 0;
     IREE_RETURN_IF_ERROR(loom_low_allocation_materialize_one_spill_plan(
         module, table, &table->spill_plans[i], slots[i].storage_value_id, arena,
-        &result));
+        &result, &record_flags));
     const uint32_t materialized_store_count =
         result.spill_count - prior_spill_count;
     const uint32_t materialized_reload_count =
@@ -903,7 +912,7 @@ iree_status_t loom_low_allocation_materialize_spills(
     if (record_materialized_spills) {
       loom_low_allocation_record_materialized_spill(
           table, &table->spill_plans[i], materialized_store_count,
-          materialized_reload_count, &materialized_spills[i]);
+          materialized_reload_count, record_flags, &materialized_spills[i]);
     }
     if (emit_spill_diagnostics) {
       IREE_RETURN_IF_ERROR(loom_low_allocation_emit_materialized_spill(

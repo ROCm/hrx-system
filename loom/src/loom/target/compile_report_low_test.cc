@@ -415,6 +415,7 @@ TEST(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
       {
           /*.value_id=*/6,
           /*.value_class=*/pressure_summaries[0].value_class,
+          /*.flags=*/0,
           /*.assignment_index=*/2,
           /*.slot_index=*/7,
           /*.slot_space=*/LOOM_LOW_SPILL_SLOT_SPACE_PRIVATE,
@@ -422,6 +423,19 @@ TEST(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
           /*.byte_alignment=*/16,
           /*.store_count=*/5,
           /*.reload_count=*/6,
+      },
+      {
+          /*.value_id=*/4,
+          /*.value_class=*/pressure_summaries[0].value_class,
+          /*.flags=*/
+          LOOM_LOW_ALLOCATION_MATERIALIZED_SPILL_FLAG_VALUE_WAS_BLOCK_ARGUMENT,
+          /*.assignment_index=*/0,
+          /*.slot_index=*/8,
+          /*.slot_space=*/LOOM_LOW_SPILL_SLOT_SPACE_PRIVATE,
+          /*.byte_size=*/4,
+          /*.byte_alignment=*/4,
+          /*.store_count=*/2,
+          /*.reload_count=*/3,
       },
   };
   loom_low_allocation_materialized_spill_vec_t materialized_spill_vec = {
@@ -1002,7 +1016,7 @@ TEST(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
             1u);
   EXPECT_EQ(schedule_band_summary_rows[6].static_instruction_mix.smfmac_count,
             1u);
-  EXPECT_EQ(report.spill_rows.count, 3u);
+  EXPECT_EQ(report.spill_rows.count, 4u);
   ASSERT_NE(report.spill_rows.head, nullptr);
   const auto* spill_rows =
       static_cast<const loom_target_compile_report_spill_row_t*>(
@@ -1017,8 +1031,16 @@ TEST(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
   EXPECT_EQ(spill_rows[0].byte_size, 16u);
   EXPECT_EQ(spill_rows[0].store_count, 1u);
   EXPECT_EQ(spill_rows[0].reload_count, 2u);
+  EXPECT_EQ(spill_rows[0].origin_kind,
+            LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_UNKNOWN);
   EXPECT_EQ(spill_rows[1].kind, LOOM_TARGET_COMPILE_REPORT_SPILL_ROW_PLANNED);
   EXPECT_EQ(spill_rows[1].slot_index, 1u);
+  EXPECT_EQ(spill_rows[1].origin_kind,
+            LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_REGISTER_MOVE);
+  EXPECT_TRUE(iree_string_view_equal(spill_rows[1].origin_operation_name,
+                                     IREE_SV("<unknown>")));
+  EXPECT_TRUE(iree_string_view_equal(spill_rows[1].semantic_tag,
+                                     IREE_SV("register.copy.b32")));
   EXPECT_EQ(spill_rows[2].kind,
             LOOM_TARGET_COMPILE_REPORT_SPILL_ROW_MATERIALIZED);
   EXPECT_EQ(spill_rows[2].assignment_index, 2u);
@@ -1028,6 +1050,22 @@ TEST(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
   EXPECT_EQ(spill_rows[2].byte_size, 64u);
   EXPECT_EQ(spill_rows[2].store_count, 5u);
   EXPECT_EQ(spill_rows[2].reload_count, 6u);
+  EXPECT_EQ(spill_rows[2].origin_kind,
+            LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_GLOBAL_MEMORY);
+  EXPECT_TRUE(iree_string_view_equal(spill_rows[2].origin_operation_name,
+                                     IREE_SV("<unknown>")));
+  EXPECT_TRUE(iree_string_view_equal(spill_rows[2].semantic_tag,
+                                     IREE_SV("memory.global.load.u32")));
+  EXPECT_EQ(spill_rows[3].kind,
+            LOOM_TARGET_COMPILE_REPORT_SPILL_ROW_MATERIALIZED);
+  EXPECT_EQ(spill_rows[3].origin_kind,
+            LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_BLOCK_ARGUMENT);
+  EXPECT_TRUE(iree_string_view_equal(spill_rows[3].origin_operation_name,
+                                     IREE_SV("<block-argument>")));
+  EXPECT_EQ(spill_rows[3].slot_index, 8u);
+  EXPECT_EQ(spill_rows[3].byte_size, 4u);
+  EXPECT_EQ(spill_rows[3].store_count, 2u);
+  EXPECT_EQ(spill_rows[3].reload_count, 3u);
   EXPECT_EQ(report.allocation_failure_rows.count, 1u);
   ASSERT_NE(report.allocation_failure_rows.head, nullptr);
   const auto* allocation_failure_rows =

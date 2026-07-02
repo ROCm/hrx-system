@@ -26,11 +26,21 @@
 extern "C" {
 #endif
 
+typedef uint32_t loom_low_allocation_materialized_spill_flags_t;
+
+enum {
+  // The spilled value was a block argument when spill traffic was materialized.
+  LOOM_LOW_ALLOCATION_MATERIALIZED_SPILL_FLAG_VALUE_WAS_BLOCK_ARGUMENT =
+      (1u << 0),
+};
+
 typedef struct loom_low_allocation_materialized_spill_t {
   // SSA value represented by the materialized spill storage.
   loom_value_id_t value_id;
   // Register value class that could not remain fully physical.
   loom_liveness_value_class_t value_class;
+  // Materialized spill record flags.
+  loom_low_allocation_materialized_spill_flags_t flags;
   // Allocation assignment index associated with |value_id|.
   uint32_t assignment_index;
   // Spill slot ordinal assigned to the interval.

@@ -956,6 +956,9 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
           /*.register_class=*/IREE_SVL("test.i32"),
           /*.type_kind=*/LOOM_TYPE_REGISTER,
           /*.element_type=*/LOOM_SCALAR_TYPE_I32,
+          /*.origin_kind=*/LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_DOT,
+          /*.origin_operation_name=*/IREE_SVL("low.op<amdgpu.v_dot4_i32_i8>"),
+          /*.semantic_tag=*/IREE_SVL("dot.i32.i8"),
           /*.assignment_index=*/2,
           /*.slot_index=*/1,
           /*.slot_space=*/IREE_SVL("stack"),
@@ -1726,7 +1729,12 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
             IREE_STRING_VIEW_NPOS);
   EXPECT_NE(iree_string_view_find(output,
                                   IREE_SV("spill[0] kind=planned "
-                                          "function=branchy value=rhs"),
+                                          "function=branchy value=rhs "
+                                          "class=test.i32 type=register "
+                                          "element=i32 origin=dot "
+                                          "origin_op="
+                                          "low.op<amdgpu.v_dot4_i32_i8> "
+                                          "semantic=dot.i32.i8"),
                                   0),
             IREE_STRING_VIEW_NPOS);
   EXPECT_NE(
@@ -2319,9 +2327,20 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
                                   IREE_SV("\"spill_rows\":{\"count\":1,"
                                           "\"rows\":[{\"index\":0,"
                                           "\"function\":\"branchy\","
-                                          "\"kind\":\"planned\""),
+                                          "\"kind\":\"planned\","
+                                          "\"value\":\"rhs\","
+                                          "\"register_class\":\"test.i32\""),
                                   0),
             IREE_STRING_VIEW_NPOS);
+  EXPECT_NE(
+      iree_string_view_find(output,
+                            IREE_SV("\"origin_kind\":11,\"origin\":\"dot\","
+                                    "\"origin_operation\":"
+                                    "\"low.op<amdgpu.v_dot4_i32_i8>\","
+                                    "\"semantic_tag\":\"dot.i32.i8\","
+                                    "\"assignment_index\":2"),
+                            0),
+      IREE_STRING_VIEW_NPOS);
   EXPECT_NE(
       iree_string_view_find(
           output,
