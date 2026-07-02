@@ -14,8 +14,6 @@ extern "C" {
 #endif  // __cplusplus
 
 enum {
-  // Number of public generation phases described by the session.
-  ID4_IDEOGRAM4_GENERATION_PHASE_DESCRIPTOR_COUNT = 3,
   // Number of boundary aliases connecting coarse generation stages.
   ID4_IDEOGRAM4_GENERATION_BOUNDARY_ALIAS_COUNT = 8,
 };
@@ -28,7 +26,7 @@ extern const id4_ideogram4_generation_stage_descriptor_t
 // Static descriptors for every public generation issue phase.
 extern const id4_ideogram4_generation_phase_descriptor_t
     id4_ideogram4_generation_phase_descriptors
-        [ID4_IDEOGRAM4_GENERATION_PHASE_DESCRIPTOR_COUNT];
+        [ID4_IDEOGRAM4_GENERATION_PHASE_COUNT];
 
 // Static producer/consumer aliases between stage boundary tensors.
 extern const id4_ideogram4_generation_boundary_alias_t

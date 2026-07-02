@@ -234,6 +234,11 @@ typedef enum id4_ideogram4_generation_phase_bit_e {
       ID4_IDEOGRAM4_GENERATION_PHASE_DECODE,
 } id4_ideogram4_generation_phase_bit_t;
 
+enum {
+  // Number of high-level generation phases used by residency policies.
+  ID4_IDEOGRAM4_GENERATION_PHASE_COUNT = 3,
+};
+
 // Full-generation issue scheduling policy.
 typedef enum id4_ideogram4_generation_issue_policy_e {
   // Prepares and issues high-level generation phases, preserving branch

@@ -61,7 +61,7 @@ const id4_ideogram4_generation_stage_descriptor_t
 
 const id4_ideogram4_generation_phase_descriptor_t
     id4_ideogram4_generation_phase_descriptors
-        [ID4_IDEOGRAM4_GENERATION_PHASE_DESCRIPTOR_COUNT] = {
+        [ID4_IDEOGRAM4_GENERATION_PHASE_COUNT] = {
             {
                 // Phase that produces prompt conditioning and initial latent
                 // noise.

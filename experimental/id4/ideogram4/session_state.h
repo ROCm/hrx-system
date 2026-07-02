@@ -70,6 +70,17 @@ typedef struct id4_ideogram4_generation_stage_slot_t {
   id4_pipeline_buffer_binding_set_t diagnostic_tap_bindings;
 } id4_ideogram4_generation_stage_slot_t;
 
+// Prepared generation residency policy with explicit resource lifetimes.
+typedef struct id4_ideogram4_generation_residency_policy_t {
+  // Public residency mode used to construct this policy.
+  id4_ideogram4_generation_residency_mode_t mode;
+  // Stage bundles retained for the whole prepared generation bundle.
+  id4_ideogram4_generation_resident_stage_mask_t request_stage_mask;
+  // Stage bundles materialized for each phase and released after that phase.
+  id4_ideogram4_generation_resident_stage_mask_t
+      phase_stage_masks[ID4_IDEOGRAM4_GENERATION_PHASE_COUNT];
+} id4_ideogram4_generation_residency_policy_t;
+
 // Stage bundle reference retained by one generation issue path.
 typedef struct id4_ideogram4_generation_stage_bundle_ref_t {
   // Prepared stage bundle used by the current generation issue path.
@@ -205,9 +216,7 @@ struct id4_ideogram4_generation_bundle_t {
   // HAL command-buffer mode used when preparing stage bundles.
   iree_hal_command_buffer_mode_t command_buffer_mode;
   // Stage-bundle residency policy selected during generation preparation.
-  id4_ideogram4_generation_residency_mode_t residency_mode;
-  // Coarse stage bundles retained by this generation bundle.
-  id4_ideogram4_generation_resident_stage_mask_t resident_stage_mask;
+  id4_ideogram4_generation_residency_policy_t residency_policy;
   // Prepared coarse stage bundles retained by selected stage-bundle residency.
   id4_pipeline_bundle_t*
       resident_stage_bundles[ID4_IDEOGRAM4_GENERATION_STAGE_COUNT];

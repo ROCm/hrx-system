@@ -30,6 +30,7 @@ iree_status_t id4_ideogram4_generation_phase_bundle_deinitialize(
 iree_status_t id4_ideogram4_generation_acquire_stage_bundle_ref(
     id4_ideogram4_generation_bundle_t* bundle,
     id4_ideogram4_generation_stage_ordinal_t stage_ordinal,
+    id4_ideogram4_generation_phase_mask_t phase_mask,
     iree_hal_semaphore_list_t wait_semaphore_list,
     id4_pipeline_kernel_diagnostic_artifact_flags_t
         kernel_diagnostic_artifact_flags,
