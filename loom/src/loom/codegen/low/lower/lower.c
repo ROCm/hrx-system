@@ -52,6 +52,29 @@ static bool loom_low_lower_type_is_none(loom_type_t type) {
   return loom_type_kind(type) == LOOM_TYPE_NONE;
 }
 
+static iree_string_view_t loom_low_lower_descriptor_string(
+    const loom_low_lower_context_t* context,
+    const loom_low_descriptor_t* descriptor,
+    loom_bstring_table_offset_t string_offset) {
+  if (descriptor == NULL || string_offset == LOOM_LOW_STRING_OFFSET_NONE) {
+    return iree_string_view_empty();
+  }
+  return loom_low_descriptor_set_string(context->descriptor_set, string_offset);
+}
+
+static void loom_low_lower_populate_report_descriptor(
+    const loom_low_lower_context_t* context,
+    const loom_low_descriptor_t* descriptor, loom_low_lower_report_row_t* row) {
+  if (descriptor == NULL) {
+    return;
+  }
+  row->descriptor_id = descriptor->stable_id;
+  row->descriptor_key = loom_low_lower_descriptor_string(
+      context, descriptor, descriptor->key_string_offset);
+  row->descriptor_semantic_tag = loom_low_lower_descriptor_string(
+      context, descriptor, descriptor->semantic_tag_string_offset);
+}
+
 static bool loom_low_lower_abi_argument_kind_is_known(
     loom_low_lower_abi_argument_kind_t kind) {
   switch (kind) {
@@ -1433,6 +1456,8 @@ static iree_status_t loom_low_lower_record_report_row(
       .plan_id = selected_plan->plan.id,
       .plan_key = iree_string_view_empty(),
       .descriptor_id = LOOM_LOW_STABLE_ID_NONE,
+      .descriptor_key = iree_string_view_empty(),
+      .descriptor_semantic_tag = iree_string_view_empty(),
       .emitted_low_op_count = emitted_low_op_count,
   };
   if (selected_plan->rule != NULL) {
@@ -1450,15 +1475,17 @@ static iree_status_t loom_low_lower_record_report_row(
     }
     if (selected_plan->rule->emit_count != 0 &&
         selected_plan->resolved_emits != NULL) {
-      row.descriptor_id =
-          selected_plan->resolved_emits[0].descriptor.descriptor->stable_id;
+      loom_low_lower_populate_report_descriptor(
+          context, selected_plan->resolved_emits[0].descriptor.descriptor,
+          &row);
     }
   } else if (selected_plan->kind ==
              LOOM_LOW_LOWER_SELECTED_PLAN_DESCRIPTOR_MATRIX) {
     const loom_low_lower_descriptor_matrix_plan_t* plan =
         (const loom_low_lower_descriptor_matrix_plan_t*)
             selected_plan->plan.target_data;
-    row.descriptor_id = plan->descriptor.descriptor->stable_id;
+    loom_low_lower_populate_report_descriptor(
+        context, plan->descriptor.descriptor, &row);
   }
   if (selected_plan->rule == NULL && context->policy->plan_key.fn != NULL) {
     row.plan_key = context->policy->plan_key.fn(
