@@ -159,6 +159,15 @@ iree_status_t id4_ideogram4_request_parse_json(
     iree_string_view_t json, iree_allocator_t host_allocator,
     id4_ideogram4_request_t* out_request);
 
+// Initializes a request from plain prompt text and optional generation
+// metadata. The prompt payload is copied verbatim and wrapped for Qwen chat
+// encoding; when |generation| is non-NULL its values are copied and the request
+// is marked as a full-generation request.
+iree_status_t id4_ideogram4_request_initialize_text(
+    iree_string_view_t prompt_payload,
+    const id4_ideogram4_request_generation_t* generation,
+    iree_allocator_t host_allocator, id4_ideogram4_request_t* out_request);
+
 // Releases storage owned by |request|.
 void id4_ideogram4_request_deinitialize(id4_ideogram4_request_t* request,
                                         iree_allocator_t host_allocator);

@@ -157,6 +157,53 @@ TEST(Ideogram4RequestTest, ParsesFullGenerationJson) {
   EXPECT_EQ(request.value.generation.guidance_scale, 3.5f);
 }
 
+TEST(Ideogram4RequestTest, InitializesTextGenerationRequest) {
+  id4_ideogram4_request_generation_t generation = {};
+  generation.latent_width = 8;
+  generation.latent_height = 16;
+  generation.denoise_step_count = 20;
+  generation.seed = 20260625;
+  generation.guidance_scale = 3.5f;
+
+  ScopedRequest request;
+  IREE_ASSERT_OK(id4_ideogram4_request_initialize_text(
+      IREE_SV("hello world"), &generation, iree_allocator_system(),
+      &request.value));
+  EXPECT_TRUE(iree_all_bits_set(request.value.flags,
+                                ID4_IDEOGRAM4_REQUEST_FLAG_HAS_GENERATION));
+  EXPECT_TRUE(iree_string_view_equal(request.value.prompt_payload,
+                                     IREE_SV("hello world")));
+  EXPECT_TRUE(
+      iree_string_view_equal(request.value.qwen_prompt,
+                             IREE_SV("<|im_start|>user\nhello world<|im_end|>\n"
+                                     "<|im_start|>assistant\n")));
+  EXPECT_EQ(request.value.generation.latent_width, 8u);
+  EXPECT_EQ(request.value.generation.latent_height, 16u);
+  EXPECT_EQ(request.value.generation.denoise_step_count, 20u);
+  EXPECT_EQ(request.value.generation.seed, 20260625u);
+  EXPECT_EQ(request.value.generation.guidance_scale, 3.5f);
+}
+
+TEST(Ideogram4RequestTest, RejectsInvalidTextGenerationRequest) {
+  id4_ideogram4_request_generation_t generation = {};
+  generation.latent_width = 8;
+  generation.latent_height = 8;
+  generation.denoise_step_count = 1;
+  generation.guidance_scale = 3.5f;
+
+  id4_ideogram4_request_t request = {};
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        id4_ideogram4_request_initialize_text(
+                            iree_string_view_empty(), &generation,
+                            iree_allocator_system(), &request));
+
+  generation.latent_width = 0;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      id4_ideogram4_request_initialize_text(IREE_SV("hello"), &generation,
+                                            iree_allocator_system(), &request));
+}
+
 TEST(Ideogram4RequestTest, CanonicalizesPromptPayloadJson) {
   ScopedRequest compact_request;
   IREE_ASSERT_OK(id4_ideogram4_request_parse_json(

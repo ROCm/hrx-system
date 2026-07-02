@@ -31,10 +31,21 @@
 #include "iree/tokenizer/tokenizer.h"
 
 IREE_FLAG(string, tokenizer, "", "Path to the HuggingFace tokenizer JSON.");
+IREE_FLAG(string, prompt, "", "Plain text prompt payload for one generation.");
 IREE_FLAG(string, prompt_json, "",
           "Full JSON prompt/configuration payload for one generation.");
 IREE_FLAG(string, prompt_json_file, "",
           "Path to a JSON prompt/configuration payload for one generation.");
+IREE_FLAG(int32_t, generation_latent_width, 0,
+          "Diffusion latent width for --prompt.");
+IREE_FLAG(int32_t, generation_latent_height, 0,
+          "Diffusion latent height for --prompt.");
+IREE_FLAG(int32_t, generation_denoise_steps, 0,
+          "Denoise step count for --prompt.");
+IREE_FLAG(int64_t, generation_seed, -1,
+          "Non-negative deterministic seed for --prompt.");
+IREE_FLAG(float, generation_guidance_scale, 0.0f,
+          "Positive classifier-free guidance scale for --prompt.");
 IREE_FLAG(string, output, "", "Output image path.");
 IREE_FLAG(string, dit_parameter_format, "fp8_e4m3",
           "DiT parameter format: bf16 or fp8_e4m3. fp8_e4m3 uses the FP8 "
@@ -205,15 +216,58 @@ static iree_status_t id4_cli_load_tokenizer(iree_string_view_t tokenizer_path,
 static iree_status_t id4_cli_parse_request(
     iree_allocator_t host_allocator, id4_ideogram4_request_t* out_request) {
   IREE_ASSERT_ARGUMENT(out_request);
+  iree_string_view_t prompt = iree_make_cstring_view(FLAG_prompt);
   iree_string_view_t prompt_json = iree_make_cstring_view(FLAG_prompt_json);
   iree_string_view_t prompt_json_file =
       iree_make_cstring_view(FLAG_prompt_json_file);
+  const bool has_prompt = !iree_string_view_is_empty(prompt);
   const bool has_inline_prompt = !iree_string_view_is_empty(prompt_json);
   const bool has_prompt_file = !iree_string_view_is_empty(prompt_json_file);
-  if (has_inline_prompt == has_prompt_file) {
+  const uint32_t prompt_source_count = (has_prompt ? 1u : 0u) +
+                                       (has_inline_prompt ? 1u : 0u) +
+                                       (has_prompt_file ? 1u : 0u);
+  if (prompt_source_count != 1) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
-        "exactly one of --prompt_json or --prompt_json_file is required");
+        "exactly one of --prompt, --prompt_json, or --prompt_json_file is "
+        "required");
+  }
+  if (has_prompt) {
+    id4_ideogram4_request_generation_t generation;
+    memset(&generation, 0, sizeof(generation));
+    if (FLAG_generation_latent_width <= 0) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "--generation_latent_width must be greater than zero for --prompt");
+    }
+    if (FLAG_generation_latent_height <= 0) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "--generation_latent_height must be greater than zero for --prompt");
+    }
+    if (FLAG_generation_denoise_steps <= 0) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "--generation_denoise_steps must be greater than zero for --prompt");
+    }
+    if (FLAG_generation_seed < 0) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "--generation_seed must be non-negative for --prompt");
+    }
+    if (!isfinite(FLAG_generation_guidance_scale) ||
+        FLAG_generation_guidance_scale <= 0.0f) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "--generation_guidance_scale must be positive "
+                              "for --prompt");
+    }
+    generation.latent_width = (uint32_t)FLAG_generation_latent_width;
+    generation.latent_height = (uint32_t)FLAG_generation_latent_height;
+    generation.denoise_step_count = (uint32_t)FLAG_generation_denoise_steps;
+    generation.seed = (uint64_t)FLAG_generation_seed;
+    generation.guidance_scale = FLAG_generation_guidance_scale;
+    return id4_ideogram4_request_initialize_text(prompt, &generation,
+                                                 host_allocator, out_request);
   }
   if (has_inline_prompt) {
     return id4_ideogram4_request_parse_json(prompt_json, host_allocator,
@@ -2559,9 +2613,11 @@ int main(int argc, char** argv) {
       "id4",
       "Experimental Ideogram 4 HAL pipeline runner.\n"
       "\n"
-      "Loads a prompt JSON request, tokenizes it, and either plans or runs a "
+      "Loads a prompt request, tokenizes it, and either plans or runs a "
       "full generation.\n"
-      "Pass exactly one of --prompt_json=... or --prompt_json_file=....\n"
+      "Pass exactly one of --prompt=..., --prompt_json=..., or "
+      "--prompt_json_file=....\n"
+      "Plain --prompt requests also require --generation_* flags.\n"
       "Model parameters are loaded with standard --parameters= flags.\n");
   iree_flags_parse_checked(IREE_FLAGS_PARSE_MODE_DEFAULT, &argc, &argv);
 

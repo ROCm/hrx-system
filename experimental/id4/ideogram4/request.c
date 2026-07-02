@@ -389,6 +389,32 @@ static iree_status_t id4_ideogram4_request_parse_required_f32_positive(
   return iree_ok_status();
 }
 
+static iree_status_t id4_ideogram4_request_validate_generation(
+    const id4_ideogram4_request_generation_t* generation) {
+  if (generation->latent_width == 0) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "Ideogram 4 request generation latent width is zero");
+  }
+  if (generation->latent_height == 0) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "Ideogram 4 request generation latent height is zero");
+  }
+  if (generation->denoise_step_count == 0) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "Ideogram 4 request generation denoise step count is zero");
+  }
+  if (!isfinite(generation->guidance_scale) ||
+      generation->guidance_scale <= 0.0f) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "Ideogram 4 request generation guidance scale is not positive");
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t id4_ideogram4_request_parse_generation(
     iree_string_view_t generation,
     id4_ideogram4_request_generation_t* out_generation) {
@@ -402,8 +428,9 @@ static iree_status_t id4_ideogram4_request_parse_generation(
       &out_generation->denoise_step_count));
   IREE_RETURN_IF_ERROR(id4_ideogram4_request_parse_required_u64(
       generation, IREE_SV("seed"), &out_generation->seed));
-  return id4_ideogram4_request_parse_required_f32_positive(
-      generation, IREE_SV("guidance_scale"), &out_generation->guidance_scale);
+  IREE_RETURN_IF_ERROR(id4_ideogram4_request_parse_required_f32_positive(
+      generation, IREE_SV("guidance_scale"), &out_generation->guidance_scale));
+  return id4_ideogram4_request_validate_generation(out_generation);
 }
 
 static iree_status_t id4_ideogram4_request_wrap_qwen_prompt(
@@ -503,6 +530,36 @@ iree_status_t id4_ideogram4_request_parse_json(
   }
   if (iree_status_is_ok(status) && !iree_string_view_is_empty(generation)) {
     out_request->flags |= ID4_IDEOGRAM4_REQUEST_FLAG_HAS_GENERATION;
+  }
+  if (!iree_status_is_ok(status)) {
+    id4_ideogram4_request_deinitialize(out_request, host_allocator);
+  }
+  return status;
+}
+
+iree_status_t id4_ideogram4_request_initialize_text(
+    iree_string_view_t prompt_payload,
+    const id4_ideogram4_request_generation_t* generation,
+    iree_allocator_t host_allocator, id4_ideogram4_request_t* out_request) {
+  IREE_ASSERT_ARGUMENT(out_request);
+  memset(out_request, 0, sizeof(*out_request));
+  if (iree_string_view_is_empty(prompt_payload)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "Ideogram 4 request prompt must not be empty");
+  }
+  if (generation) {
+    IREE_RETURN_IF_ERROR(id4_ideogram4_request_validate_generation(generation));
+  }
+
+  iree_status_t status = id4_ideogram4_request_copy_string(
+      prompt_payload, host_allocator, &out_request->prompt_payload);
+  if (iree_status_is_ok(status) && generation) {
+    out_request->generation = *generation;
+    out_request->flags |= ID4_IDEOGRAM4_REQUEST_FLAG_HAS_GENERATION;
+  }
+  if (iree_status_is_ok(status)) {
+    status = id4_ideogram4_request_wrap_qwen_prompt(
+        out_request->prompt_payload, host_allocator, &out_request->qwen_prompt);
   }
   if (!iree_status_is_ok(status)) {
     id4_ideogram4_request_deinitialize(out_request, host_allocator);
