@@ -4168,17 +4168,17 @@ static iree_status_t loom_amdgpu_emit_fragment_repack_bpermute_element(
     loom_value_id_t low_source_byte_offset, uint32_t static_byte_offset,
     loom_type_t vgpr_type, loom_value_id_t* out_low_element) {
   *out_low_element = LOOM_VALUE_ID_INVALID;
+  loom_value_id_t candidates[LOOM_AMDGPU_MAX_SCALARIZED_32BIT_LANES] = {
+      LOOM_VALUE_ID_INVALID};
   for (uint16_t i = 0; i < plan->source_register_count; ++i) {
-    loom_value_id_t candidate = LOOM_VALUE_ID_INVALID;
     IREE_RETURN_IF_ERROR(loom_amdgpu_emit_subgroup_bpermute_register(
         context, source_op, bpermute_descriptor, low_source_byte_offset,
-        static_byte_offset, source_registers[i], vgpr_type, &candidate));
-    if (i == 0) {
-      *out_low_element = candidate;
-      continue;
-    }
+        static_byte_offset, source_registers[i], vgpr_type, &candidates[i]));
+  }
+  *out_low_element = candidates[0];
+  for (uint16_t i = 1; i < plan->source_register_count; ++i) {
     IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fragment_memory_select_b32(
-        context, source_op, *out_low_element, candidate,
+        context, source_op, *out_low_element, candidates[i],
         source_register_masks[i], vgpr_type, out_low_element));
   }
   return iree_ok_status();
