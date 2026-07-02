@@ -342,11 +342,6 @@ void loom_amdgpu_memory_report_row_populate_storage_schema(
     const loom_low_source_memory_access_plan_t* source,
     loom_low_lower_memory_report_row_t* row);
 
-// Populates optional source byte interval evidence on a memory report row.
-void loom_amdgpu_memory_report_row_populate_source_interval(
-    const loom_low_source_memory_access_plan_t* source,
-    loom_low_lower_memory_report_row_t* row);
-
 // Selects an AMDGPU source memory-load packet plan.
 iree_status_t loom_amdgpu_select_memory_load_plan(
     loom_low_lower_context_t* context, const loom_op_t* source_op,

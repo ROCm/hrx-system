@@ -114,6 +114,18 @@ loom_target_compile_report_source_interval(
       target_interval.exact_length_bytes = (uint64_t)exact_length;
     }
   }
+  if (iree_all_bits_set(source_interval->precision_flags,
+                        LOOM_LOW_BYTE_INTERVAL_PRECISION_BEGIN_EXPR)) {
+    target_interval.flags |=
+        LOOM_TARGET_COMPILE_REPORT_MEMORY_INTERVAL_BEGIN_EXPR;
+    target_interval.begin_expr_id = source_interval->begin_expr_id;
+  }
+  if (iree_all_bits_set(source_interval->precision_flags,
+                        LOOM_LOW_BYTE_INTERVAL_PRECISION_END_EXPR)) {
+    target_interval.flags |=
+        LOOM_TARGET_COMPILE_REPORT_MEMORY_INTERVAL_END_EXPR;
+    target_interval.end_expr_id = source_interval->end_expr_id;
+  }
   return target_interval;
 }
 

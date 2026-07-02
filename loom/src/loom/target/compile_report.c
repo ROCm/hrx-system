@@ -726,8 +726,14 @@ typedef struct loom_target_compile_report_static_memory_interval_t {
   int64_t end_bytes;
 } loom_target_compile_report_static_memory_interval_t;
 
+typedef enum loom_target_compile_report_memory_interval_unique_kind_e {
+  LOOM_TARGET_COMPILE_REPORT_MEMORY_INTERVAL_UNIQUE_NONE = 0,
+  LOOM_TARGET_COMPILE_REPORT_MEMORY_INTERVAL_UNIQUE_STATIC = 1,
+  LOOM_TARGET_COMPILE_REPORT_MEMORY_INTERVAL_UNIQUE_SYMBOLIC = 2,
+} loom_target_compile_report_memory_interval_unique_kind_t;
+
 typedef struct loom_target_compile_report_memory_interval_unique_delta_t {
-  bool has_exact_static_interval;
+  loom_target_compile_report_memory_interval_unique_kind_t kind;
   uint64_t unique_byte_delta;
 } loom_target_compile_report_memory_interval_unique_delta_t;
 
@@ -744,6 +750,18 @@ static bool loom_target_compile_report_memory_interval_is_exact_static(
       .end_bytes = interval->end_max_bytes,
   };
   return true;
+}
+
+static bool loom_target_compile_report_memory_interval_has_exact_symbolic(
+    const loom_target_compile_report_memory_interval_t* interval) {
+  const loom_target_compile_report_memory_interval_flags_t required_flags =
+      LOOM_TARGET_COMPILE_REPORT_MEMORY_INTERVAL_BEGIN_RANGE |
+      LOOM_TARGET_COMPILE_REPORT_MEMORY_INTERVAL_END_RANGE |
+      LOOM_TARGET_COMPILE_REPORT_MEMORY_INTERVAL_EXACT_LENGTH |
+      LOOM_TARGET_COMPILE_REPORT_MEMORY_INTERVAL_BEGIN_EXPR |
+      LOOM_TARGET_COMPILE_REPORT_MEMORY_INTERVAL_END_EXPR;
+  return iree_all_bits_set(interval->flags, required_flags) &&
+         interval->exact_length_bytes != 0;
 }
 
 static bool loom_target_compile_report_source_low_memory_row_has_root(
@@ -784,6 +802,17 @@ static bool loom_target_compile_report_static_memory_intervals_overlap(
       .end_bytes = end_bytes,
   };
   return true;
+}
+
+static bool loom_target_compile_report_memory_interval_envelopes_are_disjoint(
+    const loom_target_compile_report_memory_interval_t* lhs,
+    const loom_target_compile_report_memory_interval_t* rhs) {
+  if (!loom_target_compile_report_memory_interval_has_envelope(lhs) ||
+      !loom_target_compile_report_memory_interval_has_envelope(rhs)) {
+    return false;
+  }
+  return lhs->end_max_bytes <= rhs->begin_min_bytes ||
+         rhs->end_max_bytes <= lhs->begin_min_bytes;
 }
 
 static void loom_target_compile_report_insert_sorted_static_memory_interval(
@@ -837,23 +866,36 @@ loom_target_compile_report_calculate_source_low_unique_interval_delta(
     return iree_ok_status();
   }
   loom_target_compile_report_static_memory_interval_t row_interval = {0};
-  if (!loom_target_compile_report_memory_interval_is_exact_static(
-          &row->source_interval, &row_interval)) {
+  const bool row_is_exact_static =
+      loom_target_compile_report_memory_interval_is_exact_static(
+          &row->source_interval, &row_interval);
+  const bool row_is_exact_symbolic =
+      !row_is_exact_static &&
+      loom_target_compile_report_memory_interval_has_exact_symbolic(
+          &row->source_interval);
+  if (!row_is_exact_static && !row_is_exact_symbolic) {
     return iree_ok_status();
   }
-  out_delta->has_exact_static_interval = true;
+  out_delta->kind =
+      row_is_exact_static
+          ? LOOM_TARGET_COMPILE_REPORT_MEMORY_INTERVAL_UNIQUE_STATIC
+          : LOOM_TARGET_COMPILE_REPORT_MEMORY_INTERVAL_UNIQUE_SYMBOLIC;
   const uint64_t row_byte_count =
-      loom_target_compile_report_memory_interval_span(row_interval.begin_bytes,
-                                                      row_interval.end_bytes);
+      row_is_exact_static
+          ? loom_target_compile_report_memory_interval_span(
+                row_interval.begin_bytes, row_interval.end_bytes)
+          : row->source_interval.exact_length_bytes;
   if (report->source_low_memory_rows.count == 0) {
     out_delta->unique_byte_delta = row_byte_count;
     return iree_ok_status();
   }
 
   loom_target_compile_report_static_memory_interval_t* overlaps = NULL;
-  IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
-      report->allocator, report->source_low_memory_rows.count,
-      sizeof(*overlaps), (void**)&overlaps));
+  if (row_is_exact_static) {
+    IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
+        report->allocator, report->source_low_memory_rows.count,
+        sizeof(*overlaps), (void**)&overlaps));
+  }
 
   iree_host_size_t overlap_count = 0;
   for (const loom_target_compile_report_vec_t* vec =
@@ -869,26 +911,79 @@ loom_target_compile_report_calculate_source_low_unique_interval_delta(
               existing, row, match_operation_kind)) {
         continue;
       }
+      if (row_is_exact_static) {
+        loom_target_compile_report_static_memory_interval_t existing_interval =
+            {0};
+        loom_target_compile_report_static_memory_interval_t overlap = {0};
+        if (loom_target_compile_report_memory_interval_is_exact_static(
+                &existing->source_interval, &existing_interval)) {
+          if (loom_target_compile_report_static_memory_intervals_overlap(
+                  row_interval, existing_interval, &overlap)) {
+            loom_target_compile_report_insert_sorted_static_memory_interval(
+                overlaps, &overlap_count, overlap);
+          }
+          continue;
+        }
+        if (loom_target_compile_report_memory_interval_has_exact_symbolic(
+                &existing->source_interval) &&
+            !loom_target_compile_report_memory_interval_envelopes_are_disjoint(
+                &row->source_interval, &existing->source_interval)) {
+          iree_allocator_free(report->allocator, overlaps);
+          *out_delta =
+              (loom_target_compile_report_memory_interval_unique_delta_t){0};
+          return iree_ok_status();
+        }
+        continue;
+      }
+
       loom_target_compile_report_static_memory_interval_t existing_interval = {
           0};
-      loom_target_compile_report_static_memory_interval_t overlap = {0};
       if (loom_target_compile_report_memory_interval_is_exact_static(
-              &existing->source_interval, &existing_interval) &&
-          loom_target_compile_report_static_memory_intervals_overlap(
-              row_interval, existing_interval, &overlap)) {
-        loom_target_compile_report_insert_sorted_static_memory_interval(
-            overlaps, &overlap_count, overlap);
+              &existing->source_interval, &existing_interval)) {
+        if (!loom_target_compile_report_memory_interval_envelopes_are_disjoint(
+                &row->source_interval, &existing->source_interval)) {
+          *out_delta =
+              (loom_target_compile_report_memory_interval_unique_delta_t){0};
+          return iree_ok_status();
+        }
+        continue;
       }
+      if (!loom_target_compile_report_memory_interval_has_exact_symbolic(
+              &existing->source_interval)) {
+        continue;
+      }
+      if (row->source_interval.begin_expr_id ==
+              existing->source_interval.begin_expr_id &&
+          row->source_interval.end_expr_id ==
+              existing->source_interval.end_expr_id) {
+        out_delta->unique_byte_delta = 0;
+        return iree_ok_status();
+      }
+      if (existing->source_interval.end_expr_id ==
+              row->source_interval.begin_expr_id ||
+          row->source_interval.end_expr_id ==
+              existing->source_interval.begin_expr_id ||
+          loom_target_compile_report_memory_interval_envelopes_are_disjoint(
+              &row->source_interval, &existing->source_interval)) {
+        continue;
+      }
+      *out_delta =
+          (loom_target_compile_report_memory_interval_unique_delta_t){0};
+      return iree_ok_status();
     }
   }
 
-  const uint64_t covered_byte_count =
-      loom_target_compile_report_static_memory_interval_union_bytes(
-          overlaps, overlap_count);
-  iree_allocator_free(report->allocator, overlaps);
-  out_delta->unique_byte_delta = row_byte_count > covered_byte_count
-                                     ? row_byte_count - covered_byte_count
-                                     : 0;
+  if (row_is_exact_static) {
+    const uint64_t covered_byte_count =
+        loom_target_compile_report_static_memory_interval_union_bytes(
+            overlaps, overlap_count);
+    iree_allocator_free(report->allocator, overlaps);
+    out_delta->unique_byte_delta = row_byte_count > covered_byte_count
+                                       ? row_byte_count - covered_byte_count
+                                       : 0;
+  } else {
+    out_delta->unique_byte_delta = row_byte_count;
+  }
   return iree_ok_status();
 }
 
@@ -918,9 +1013,18 @@ static void loom_target_compile_report_accumulate_memory_interval_summary(
   loom_target_compile_report_merge_memory_interval_envelope_bounds(
       target, interval->begin_min_bytes, interval->end_max_bytes);
   ++target->packet_count;
-  if (unique_delta.has_exact_static_interval) {
-    ++target->exact_static_packet_count;
-    target->unique_byte_count += unique_delta.unique_byte_delta;
+  switch (unique_delta.kind) {
+    case LOOM_TARGET_COMPILE_REPORT_MEMORY_INTERVAL_UNIQUE_STATIC:
+      ++target->exact_static_packet_count;
+      target->unique_byte_count += unique_delta.unique_byte_delta;
+      break;
+    case LOOM_TARGET_COMPILE_REPORT_MEMORY_INTERVAL_UNIQUE_SYMBOLIC:
+      ++target->exact_symbolic_packet_count;
+      target->unique_byte_count += unique_delta.unique_byte_delta;
+      break;
+    case LOOM_TARGET_COMPILE_REPORT_MEMORY_INTERVAL_UNIQUE_NONE:
+    default:
+      break;
   }
 }
 
@@ -938,6 +1042,7 @@ static void loom_target_compile_report_merge_memory_interval_envelope_summary(
 static void loom_target_compile_report_forget_memory_interval_unique_accounting(
     loom_target_compile_report_memory_interval_summary_t* summary) {
   summary->exact_static_packet_count = 0;
+  summary->exact_symbolic_packet_count = 0;
   summary->unique_byte_count = 0;
 }
 

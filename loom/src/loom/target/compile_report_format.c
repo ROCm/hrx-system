@@ -304,7 +304,14 @@ loom_target_compile_report_append_memory_interval_summary_text(
         builder, ",exact_static_packet_count:%" PRIu64,
         summary->exact_static_packet_count));
   }
-  if (summary->exact_static_packet_count == summary->packet_count) {
+  if (summary->exact_symbolic_packet_count != 0) {
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+        builder, ",exact_symbolic_packet_count:%" PRIu64,
+        summary->exact_symbolic_packet_count));
+  }
+  if (summary->exact_static_packet_count +
+          summary->exact_symbolic_packet_count ==
+      summary->packet_count) {
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
         builder, ",unique_byte_count:%" PRIu64, summary->unique_byte_count));
   }
@@ -4484,7 +4491,14 @@ loom_target_compile_report_format_memory_interval_summary_json(
         stream, &first_field, "exact_static_packet_count",
         summary->exact_static_packet_count));
   }
-  if (summary->exact_static_packet_count == summary->packet_count) {
+  if (summary->exact_symbolic_packet_count != 0) {
+    IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
+        stream, &first_field, "exact_symbolic_packet_count",
+        summary->exact_symbolic_packet_count));
+  }
+  if (summary->exact_static_packet_count +
+          summary->exact_symbolic_packet_count ==
+      summary->packet_count) {
     IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
         stream, &first_field, "unique_byte_count", summary->unique_byte_count));
   }
