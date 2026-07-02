@@ -494,6 +494,22 @@ iree_status_t id4_pipeline_parameter_slab_issue_context_submit_load_group(
     iree_string_view_t stage_name,
     id4_pipeline_diagnostics_sink_t* diagnostics_sink);
 
+// Submits load-step group |load_group_index| into explicit target buffers
+// matching |loads|. The retained slab set still owns the load readiness edge
+// named by |group_context|.
+iree_status_t
+id4_pipeline_parameter_slab_issue_context_submit_load_group_to_buffers(
+    id4_pipeline_parameter_slab_issue_context_t* context,
+    iree_host_size_t load_count,
+    const id4_pipeline_parameter_slab_load_t* loads,
+    iree_host_size_t load_step_count,
+    const id4_pipeline_parameter_load_step_t* load_steps,
+    iree_host_size_t load_group_index, iree_host_size_t target_buffer_count,
+    iree_hal_buffer_t* const* buffers,
+    id4_pipeline_parameter_load_group_context_t group_context,
+    iree_string_view_t stage_name,
+    id4_pipeline_diagnostics_sink_t* diagnostics_sink);
+
 // Retains |slab_set| for the caller.
 void id4_pipeline_parameter_slab_set_retain(
     id4_pipeline_parameter_slab_set_t* slab_set);
