@@ -403,6 +403,23 @@ static bool loom_vector_fragment_fact_is_accumulator_like(
          (fact.role_flags & ~accumulator_roles) == 0;
 }
 
+static bool loom_vector_fragment_fact_has_matrix_shape(
+    loom_vector_fragment_fact_t fact) {
+  return fact.shape_rank == 2 && fact.role_flags != 0;
+}
+
+static loom_vector_fragment_fact_t
+loom_vector_fragment_fact_dense_interpretation(
+    loom_vector_fragment_fact_t source) {
+  loom_vector_fragment_fact_t dense;
+  loom_vector_fragment_fact_initialize(&dense);
+  dense.role_flags = source.role_flags;
+  dense.shape_rank = source.shape_rank;
+  dense.shape_value_ids[0] = source.shape_value_ids[0];
+  dense.shape_value_ids[1] = source.shape_value_ids[1];
+  return dense;
+}
+
 static bool loom_vector_fragment_facts_match_except_role(
     loom_vector_fragment_fact_t lhs, loom_vector_fragment_fact_t rhs) {
   lhs.role_flags = 0;
@@ -529,13 +546,15 @@ const loom_value_fact_domain_t loom_vector_fact_domain = {
     .widen_extension = loom_vector_widen_extension,
 };
 
-static iree_status_t loom_vector_try_preserve_accumulator_fragment_facts(
+static iree_status_t loom_vector_try_preserve_lanewise_fragment_facts(
     loom_fact_context_t* context, const loom_value_facts_t* operand_facts,
     uint16_t operand_count, loom_value_facts_t* result_facts,
     bool* out_handled) {
   *out_handled = false;
-  loom_vector_fragment_fact_t fragment;
-  loom_vector_fragment_fact_initialize(&fragment);
+  loom_vector_fragment_fact_t dense_fragment;
+  loom_vector_fragment_fact_initialize(&dense_fragment);
+  bool all_accumulator_like = true;
+  bool all_native_storage = true;
   for (uint16_t i = 0; i < operand_count; ++i) {
     loom_vector_fragment_fact_t candidate;
     if (!loom_vector_fragment_fact_query_value_facts(context, operand_facts[i],
@@ -543,15 +562,21 @@ static iree_status_t loom_vector_try_preserve_accumulator_fragment_facts(
       continue;
     }
     *out_handled = true;
-    if (!loom_vector_fragment_fact_is_accumulator_like(candidate)) {
+    if (!loom_vector_fragment_fact_has_matrix_shape(candidate)) {
       result_facts[0] = loom_value_facts_unknown();
       return iree_ok_status();
     }
-    if (loom_vector_fragment_fact_is_unknown(fragment)) {
-      fragment = candidate;
+    all_accumulator_like &=
+        loom_vector_fragment_fact_is_accumulator_like(candidate);
+    all_native_storage &= iree_all_bits_set(
+        candidate.flags, LOOM_VECTOR_FRAGMENT_FACT_FLAG_HAS_NATIVE_STORAGE);
+    loom_vector_fragment_fact_t dense_candidate =
+        loom_vector_fragment_fact_dense_interpretation(candidate);
+    if (loom_vector_fragment_fact_is_unknown(dense_fragment)) {
+      dense_fragment = dense_candidate;
       continue;
     }
-    if (!loom_vector_fragment_facts_match_except_role(fragment, candidate)) {
+    if (!loom_vector_fragment_fact_equal(dense_fragment, dense_candidate)) {
       result_facts[0] = loom_value_facts_unknown();
       return iree_ok_status();
     }
@@ -559,9 +584,14 @@ static iree_status_t loom_vector_try_preserve_accumulator_fragment_facts(
   if (!*out_handled) {
     return iree_ok_status();
   }
-  fragment.role_flags = LOOM_VECTOR_FRAGMENT_ROLE_FLAG_INIT |
-                        LOOM_VECTOR_FRAGMENT_ROLE_FLAG_RESULT;
-  return loom_vector_fragment_fact_make_value_facts(context, fragment,
+  if (all_accumulator_like) {
+    dense_fragment.role_flags = LOOM_VECTOR_FRAGMENT_ROLE_FLAG_INIT |
+                                LOOM_VECTOR_FRAGMENT_ROLE_FLAG_RESULT;
+    if (all_native_storage) {
+      dense_fragment.flags |= LOOM_VECTOR_FRAGMENT_FACT_FLAG_HAS_NATIVE_STORAGE;
+    }
+  }
+  return loom_vector_fragment_fact_make_value_facts(context, dense_fragment,
                                                     &result_facts[0]);
 }
 
@@ -2577,7 +2607,7 @@ static iree_status_t loom_vector_float_unary_summary_facts(
     loom_vector_float_unary_fact_transfer_fn_t transfer_fn,
     const void* user_data) {
   bool fragment_handled = false;
-  IREE_RETURN_IF_ERROR(loom_vector_try_preserve_accumulator_fragment_facts(
+  IREE_RETURN_IF_ERROR(loom_vector_try_preserve_lanewise_fragment_facts(
       context, operand_facts, 1, result_facts, &fragment_handled));
   if (fragment_handled) {
     return iree_ok_status();
@@ -2687,7 +2717,7 @@ static iree_status_t loom_vector_float_binary_summary_facts(
     loom_vector_float_binary_fact_transfer_fn_t transfer_fn,
     const void* user_data) {
   bool fragment_handled = false;
-  IREE_RETURN_IF_ERROR(loom_vector_try_preserve_accumulator_fragment_facts(
+  IREE_RETURN_IF_ERROR(loom_vector_try_preserve_lanewise_fragment_facts(
       context, operand_facts, 2, result_facts, &fragment_handled));
   if (fragment_handled) {
     return iree_ok_status();
@@ -2759,7 +2789,7 @@ static iree_status_t loom_vector_ternary_summary_facts(
     loom_fact_context_t* context, const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts, loom_vector_ternary_transfer_fn_t fn) {
   bool fragment_handled = false;
-  IREE_RETURN_IF_ERROR(loom_vector_try_preserve_accumulator_fragment_facts(
+  IREE_RETURN_IF_ERROR(loom_vector_try_preserve_lanewise_fragment_facts(
       context, operand_facts, 3, result_facts, &fragment_handled));
   if (fragment_handled) {
     return iree_ok_status();
@@ -3182,8 +3212,14 @@ iree_status_t loom_vector_extf_facts(loom_fact_context_t* context,
                                      const loom_op_t* op,
                                      const loom_value_facts_t* operand_facts,
                                      loom_value_facts_t* result_facts) {
-  IREE_RETURN_IF_ERROR(loom_vector_unary_summary_facts(
-      context, operand_facts, result_facts, loom_vector_passthrough_transfer));
+  bool fragment_handled = false;
+  IREE_RETURN_IF_ERROR(loom_vector_try_preserve_lanewise_fragment_facts(
+      context, operand_facts, 1, result_facts, &fragment_handled));
+  if (!fragment_handled) {
+    IREE_RETURN_IF_ERROR(
+        loom_vector_unary_summary_facts(context, operand_facts, result_facts,
+                                        loom_vector_passthrough_transfer));
+  }
   return loom_vector_try_define_same_lane_origin(
       context, module, loom_vector_extf_result(op), loom_vector_extf_input(op));
 }
@@ -3193,8 +3229,12 @@ iree_status_t loom_vector_fptrunc_facts(loom_fact_context_t* context,
                                         const loom_op_t* op,
                                         const loom_value_facts_t* operand_facts,
                                         loom_value_facts_t* result_facts) {
-  (void)operand_facts;
-  IREE_RETURN_IF_ERROR(loom_vector_make_unknown_facts(result_facts));
+  bool fragment_handled = false;
+  IREE_RETURN_IF_ERROR(loom_vector_try_preserve_lanewise_fragment_facts(
+      context, operand_facts, 1, result_facts, &fragment_handled));
+  if (!fragment_handled) {
+    IREE_RETURN_IF_ERROR(loom_vector_make_unknown_facts(result_facts));
+  }
   return loom_vector_try_define_same_lane_origin(context, module,
                                                  loom_vector_fptrunc_result(op),
                                                  loom_vector_fptrunc_input(op));
