@@ -15,6 +15,7 @@ package(
 
 exports_files([
     "ffn_gate_up_swiglu_q6q8.loom",
+    "fragment_repack_bf16.loom",
     "fp8_finite_storage_decode.loom",
     "indexed_row_gather_f32.loom",
     "memset_i8.loom",
@@ -38,6 +39,20 @@ iree_executable_test(
     ],
     data = [
         "ffn_gate_up_swiglu_q6q8.loom",
+    ],
+    tags = ["hostonly"],
+    target_compatible_with = _AMDGPU_ARTIFACTS_COMPATIBLE_WITH,
+)
+
+iree_executable_test(
+    name = "fragment_repack_bf16_plan_test",
+    src = "//loom/src/loom/tools/iree-benchmark-loom",
+    args = [
+        "$(location fragment_repack_bf16.loom)",
+        "--dry-run",
+    ],
+    data = [
+        "fragment_repack_bf16.loom",
     ],
     tags = ["hostonly"],
     target_compatible_with = _AMDGPU_ARTIFACTS_COMPATIBLE_WITH,
@@ -115,6 +130,33 @@ iree_executable_test(
     ],
     data = [
         "ffn_gate_up_swiglu_q6q8.loom",
+    ],
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "manual",
+        "requires-gpu-amd",
+        "runtime-resource=amd-gpu",
+    ],
+    target_compatible_with = _AMDGPU_HAL_COMPATIBLE_WITH,
+)
+
+iree_executable_test(
+    name = "fragment_repack_bf16_amdgpu_test",
+    src = "//loom/src/loom/tools/iree-benchmark-loom",
+    args = [
+        "$(location fragment_repack_bf16.loom)",
+        "--device=amdgpu",
+        "--measure=dispatch_complete",
+        "--sample-compilation=per_sample",
+        "--iterations=1",
+        "--warmup-iterations=0",
+        "--batch-size=1",
+        "--min-time-ms=0",
+        "--max-batches=1",
+        "--input-ring-count=1",
+    ],
+    data = [
+        "fragment_repack_bf16.loom",
     ],
     tags = [
         "iree-run-requirement=runtime.resource.amd_gpu",
