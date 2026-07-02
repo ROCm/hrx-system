@@ -379,8 +379,12 @@ typedef struct loom_low_lower_report_row_t {
   loom_low_lower_plan_id_t plan_id;
   // Stable target-owned key identifying the selected plan variant, if any.
   iree_string_view_t plan_key;
-  // First stable low descriptor id emitted by a table rule, or none for plans.
+  // First stable low descriptor id emitted by this source op, if any.
   uint64_t descriptor_id;
+  // First low descriptor key emitted by this source op, if any.
+  iree_string_view_t descriptor_key;
+  // First low descriptor semantic tag emitted by this source op, if any.
+  iree_string_view_t descriptor_semantic_tag;
   // Number of low operations emitted for this source operation.
   uint32_t emitted_low_op_count;
 } loom_low_lower_report_row_t;

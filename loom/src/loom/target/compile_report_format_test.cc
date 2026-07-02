@@ -782,6 +782,8 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
           /*.plan_id=*/UINT64_MAX,
           /*.plan_key=*/IREE_SVL("test.scalar_addi.strategy.native"),
           /*.descriptor_id=*/7,
+          /*.descriptor_key=*/IREE_SVL("test.add.i32"),
+          /*.descriptor_semantic_tag=*/IREE_SVL("integer.add.i32"),
           /*.emitted_low_op_count=*/1,
       },
   };
@@ -1554,7 +1556,9 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
       iree_string_view_find(output,
                             IREE_SV("selection=rule rule_set=0 rule=1 "
                                     "plan_key=test.scalar_addi.strategy.native "
-                                    "descriptor=7 emitted_ops=1"),
+                                    "descriptor=7 descriptor_key=test.add.i32 "
+                                    "descriptor_semantic_tag=integer.add.i32 "
+                                    "emitted_ops=1"),
                             0),
       IREE_STRING_VIEW_NPOS);
   EXPECT_NE(iree_string_view_find(
@@ -2097,7 +2101,10 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
                                     "\"rule_index\":1,\"plan_id\":null,"
                                     "\"plan_key\":"
                                     "\"test.scalar_addi.strategy.native\","
-                                    "\"descriptor_id\":7"),
+                                    "\"descriptor_id\":7,"
+                                    "\"descriptor_key\":\"test.add.i32\","
+                                    "\"descriptor_semantic_tag\":"
+                                    "\"integer.add.i32\""),
                             0),
       IREE_STRING_VIEW_NPOS);
   EXPECT_NE(iree_string_view_find(
