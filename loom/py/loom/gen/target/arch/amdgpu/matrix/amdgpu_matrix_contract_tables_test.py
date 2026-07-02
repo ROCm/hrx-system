@@ -67,6 +67,41 @@ def _is_cdna_dense_mfma_32x32x16_f32_contract(
     )
 
 
+def _is_cdna_dense_mfma_f32_contract(
+    contract: AmdgpuMatrixContract,
+) -> bool:
+    return (
+        contract.family,
+        contract.flags,
+        contract.scale_kind,
+        contract.accumulator.numeric_type,
+        contract.result.numeric_type,
+    ) == ("mfma", (), "none", "f32", "f32")
+
+
+_DEFERRED_CDNA_DENSE_MFMA_F32_FRAGMENT_LAYOUTS = (
+    "mfma.f32.16x16x1.f32",
+    "mfma.f32.16x16x2.bf16",
+    "mfma.f32.16x16x4.f16",
+    "mfma.f32.16x16x8.bf16",
+    "mfma.f32.16x16x4.bf16.1k",
+    "mfma.f32.16x16x8.xf32",
+    "mfma.f32.32x32x1.f32",
+    "mfma.f32.32x32x2.bf16",
+    "mfma.f32.32x32x2.f32",
+    "mfma.f32.32x32x4.bf16",
+    "mfma.f32.32x32x4.f16",
+    "mfma.f32.32x32x8.f16",
+    "mfma.f32.32x32x4.bf16.1k",
+    "mfma.f32.32x32x8.bf16.1k",
+    "mfma.f32.32x32x4.xf32",
+    "mfma.f32.4x4x1.f32",
+    "mfma.f32.4x4x2.bf16",
+    "mfma.f32.4x4x4.f16",
+    "mfma.f32.4x4x4.bf16.1k",
+)
+
+
 def _payload_numeric_types(contract: AmdgpuMatrixContract) -> tuple[str, ...]:
     return (
         contract.lhs.numeric_type,
@@ -172,6 +207,12 @@ def test_generation_audits_cdna_dense_mfma_32x32x16_f32_layout_surface() -> None
     missing = tuple(contract.name for contract in AMDGPU_MATRIX_CONTRACTS if _is_cdna_dense_mfma_32x32x16_f32_contract(contract) and contract.fragment_layout is None)
 
     assert missing == ()
+
+
+def test_generation_audits_cdna_dense_mfma_f32_layout_defer_set() -> None:
+    missing = tuple(contract.name for contract in AMDGPU_MATRIX_CONTRACTS if _is_cdna_dense_mfma_f32_contract(contract) and contract.fragment_layout is None)
+
+    assert missing == _DEFERRED_CDNA_DENSE_MFMA_F32_FRAGMENT_LAYOUTS
 
 
 def test_generation_audits_rdna4_float_fragment_layout_surface() -> None:
