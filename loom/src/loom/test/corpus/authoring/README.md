@@ -280,12 +280,30 @@ jq '.static_instruction_mix
 ```
 
 For per-operation attribution, detailed reports expose the selected packet and
-memory-space facts in `source_low.memory_rows`:
+memory-space facts in `.source_low.memory_rows[]`:
 
 ```bash
 jq '.source_low.memory_rows[]?
   | {function, source_op, operation, memory_space, packet, address_form,
      vector_lanes}' \
+  /tmp/kernel.compile-report.json
+```
+
+For traffic economics, `.source_low.memory` groups the same evidence by source
+root, argument, and selected strategy:
+
+```bash
+jq '.source_low.memory
+  | {read_bytes: .dispatch_issued.read_bytes,
+     write_bytes: .dispatch_issued.write_bytes,
+     roots: [.roots[]? | {function, source_root, memory_space,
+                          read_bytes: .dispatch_issued.read_bytes,
+                          write_bytes: .dispatch_issued.write_bytes}],
+     strategies: [.strategies[]? | {function, operation, strategy,
+                                    packet_count,
+                                    read_bytes: .dispatch_issued.read_bytes,
+                                    write_bytes:
+                                      .dispatch_issued.write_bytes}]}' \
   /tmp/kernel.compile-report.json
 ```
 
@@ -317,7 +335,7 @@ loom-compile loom/src/loom/test/corpus/authoring/hip/shared_memory_vector_tile.l
   --compile-report-output=/tmp/shared-memory-vector-tile.compile-report.json
 ```
 
-The `source_low.memory_rows` array records one selected memory-packet row per
+The `.source_low.memory_rows[]` array records one selected memory-packet row per
 reported source memory operation:
 
 ```bash
