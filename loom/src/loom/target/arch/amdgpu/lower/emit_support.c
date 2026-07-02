@@ -99,9 +99,10 @@ iree_status_t loom_amdgpu_emit_sgpr_binary_immediate(
       loom_low_lower_context_descriptor_set(context);
   const loom_amdgpu_descriptor_ref_t rhs_inline_descriptor_ref =
       loom_amdgpu_sgpr_binary_rhs_inline_descriptor_ref(descriptor_ref);
-  if (immediate <= 64 && loom_amdgpu_descriptor_ref_ordinal(
-                             descriptor_set, rhs_inline_descriptor_ref) !=
-                             LOOM_LOW_DESCRIPTOR_ORDINAL_NONE) {
+  if (immediate <= LOOM_AMDGPU_SOURCE_INLINE_U32_MAX &&
+      loom_amdgpu_descriptor_ref_ordinal(descriptor_set,
+                                         rhs_inline_descriptor_ref) !=
+          LOOM_LOW_DESCRIPTOR_ORDINAL_NONE) {
     loom_named_attr_t attrs[1] = {0};
     iree_host_size_t attr_count = 0;
     IREE_RETURN_IF_ERROR(
@@ -1268,6 +1269,19 @@ loom_amdgpu_vgpr_binary_src0_inline_descriptor_ref(
   }
 }
 
+bool loom_amdgpu_descriptor_set_can_emit_vgpr_binary_immediate(
+    const loom_low_descriptor_set_t* descriptor_set,
+    loom_amdgpu_descriptor_ref_t descriptor_ref, uint32_t immediate) {
+  const loom_amdgpu_descriptor_ref_t src0_inline_descriptor_ref =
+      loom_amdgpu_vgpr_binary_src0_inline_descriptor_ref(descriptor_ref);
+  if (immediate <= LOOM_AMDGPU_SOURCE_INLINE_U32_MAX &&
+      loom_amdgpu_descriptor_set_has_ref(descriptor_set,
+                                         src0_inline_descriptor_ref)) {
+    return true;
+  }
+  return loom_amdgpu_descriptor_set_has_ref(descriptor_set, descriptor_ref);
+}
+
 iree_status_t loom_amdgpu_emit_vgpr_binary_immediate(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_amdgpu_descriptor_ref_t descriptor_ref, loom_value_id_t value,
@@ -1277,9 +1291,10 @@ iree_status_t loom_amdgpu_emit_vgpr_binary_immediate(
       loom_low_lower_context_descriptor_set(context);
   const loom_amdgpu_descriptor_ref_t src0_inline_descriptor_ref =
       loom_amdgpu_vgpr_binary_src0_inline_descriptor_ref(descriptor_ref);
-  if (immediate <= 64 && loom_amdgpu_descriptor_ref_ordinal(
-                             descriptor_set, src0_inline_descriptor_ref) !=
-                             LOOM_LOW_DESCRIPTOR_ORDINAL_NONE) {
+  if (immediate <= LOOM_AMDGPU_SOURCE_INLINE_U32_MAX &&
+      loom_amdgpu_descriptor_ref_ordinal(descriptor_set,
+                                         src0_inline_descriptor_ref) !=
+          LOOM_LOW_DESCRIPTOR_ORDINAL_NONE) {
     descriptor_ref = src0_inline_descriptor_ref;
   }
 

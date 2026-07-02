@@ -1180,23 +1180,58 @@ static bool loom_amdgpu_fragment_repack_has_required_descriptors(
   return true;
 }
 
+static bool loom_amdgpu_fragment_repack_can_emit_compare_u32_immediate(
+    const loom_low_descriptor_set_t* descriptor_set, uint32_t immediate) {
+  if (immediate <= LOOM_AMDGPU_SOURCE_INLINE_U32_MAX &&
+      loom_amdgpu_descriptor_set_has_ref(
+          descriptor_set,
+          LOOM_AMDGPU_DESCRIPTOR_REF_V_CMP_EQ_I32_SRC1_INLINE)) {
+    return true;
+  }
+  return loom_amdgpu_descriptor_set_has_ref(
+             descriptor_set, LOOM_AMDGPU_DESCRIPTOR_REF_V_CMP_EQ_I32) &&
+         loom_amdgpu_descriptor_set_has_ref(
+             descriptor_set, LOOM_AMDGPU_DESCRIPTOR_REF_V_MOV_B32);
+}
+
 static bool
 loom_amdgpu_fragment_repack_has_result_to_lhs_bf16_bpermute_descriptors(
-    const loom_low_descriptor_set_t* descriptor_set) {
+    const loom_low_descriptor_set_t* descriptor_set,
+    uint16_t source_register_count, uint16_t lane_group_count) {
   static const loom_amdgpu_descriptor_ref_t kRequiredDescriptorRefs[] = {
       LOOM_AMDGPU_DESCRIPTOR_REF_DS_BPERMUTE_B32,
-      LOOM_AMDGPU_DESCRIPTOR_REF_V_ADD_U32,
-      LOOM_AMDGPU_DESCRIPTOR_REF_V_ADD_U32_LIT,
-      LOOM_AMDGPU_DESCRIPTOR_REF_V_AND_B32_LIT,
-      LOOM_AMDGPU_DESCRIPTOR_REF_V_CMP_EQ_I32,
       LOOM_AMDGPU_DESCRIPTOR_REF_V_CNDMASK_B32,
-      LOOM_AMDGPU_DESCRIPTOR_REF_V_LSHLREV_B32_LIT,
-      LOOM_AMDGPU_DESCRIPTOR_REF_V_LSHRREV_B32_LIT,
-      LOOM_AMDGPU_DESCRIPTOR_REF_V_OR_B32,
   };
-  return loom_amdgpu_fragment_repack_has_required_descriptors(
-      descriptor_set, kRequiredDescriptorRefs,
-      IREE_ARRAYSIZE(kRequiredDescriptorRefs));
+  if (!loom_amdgpu_fragment_repack_has_required_descriptors(
+          descriptor_set, kRequiredDescriptorRefs,
+          IREE_ARRAYSIZE(kRequiredDescriptorRefs)) ||
+      !loom_amdgpu_bf16_descriptor_set_can_emit_f32_pair_to_packed_bf16(
+          descriptor_set) ||
+      !loom_amdgpu_descriptor_set_can_emit_vgpr_binary_immediate(
+          descriptor_set, LOOM_AMDGPU_DESCRIPTOR_REF_V_LSHLREV_B32_LIT, 6)) {
+    return false;
+  }
+  if (lane_group_count > 1 &&
+      !loom_amdgpu_descriptor_set_can_emit_vgpr_binary_immediate(
+          descriptor_set, LOOM_AMDGPU_DESCRIPTOR_REF_V_AND_B32_LIT,
+          lane_group_count - 1u)) {
+    return false;
+  }
+  if (source_register_count <= 1) {
+    return true;
+  }
+  if (!loom_amdgpu_descriptor_set_can_emit_vgpr_binary_immediate(
+          descriptor_set, LOOM_AMDGPU_DESCRIPTOR_REF_V_LSHRREV_B32_LIT,
+          loom_amdgpu_fragment_repack_log2_u16(lane_group_count))) {
+    return false;
+  }
+  for (uint16_t i = 1; i < source_register_count; ++i) {
+    if (!loom_amdgpu_fragment_repack_can_emit_compare_u32_immediate(
+            descriptor_set, i)) {
+      return false;
+    }
+  }
+  return true;
 }
 
 static loom_amdgpu_matrix_feature_bits_t
@@ -1265,7 +1300,8 @@ loom_amdgpu_fragment_repack_select_result_to_lhs_bf16_bpermute_strategy(
   }
 
   if (!loom_amdgpu_fragment_repack_has_result_to_lhs_bf16_bpermute_descriptors(
-          descriptor_set)) {
+          descriptor_set, source_role_layout->register_count,
+          lane_group_count)) {
     plan->reason = LOOM_AMDGPU_FRAGMENT_REPACK_REASON_TARGET_PACKETS;
     return false;
   }
