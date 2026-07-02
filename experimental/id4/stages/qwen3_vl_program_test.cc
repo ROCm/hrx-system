@@ -64,6 +64,9 @@ static id4_qwen3_vl_program_options_t MakeProgramOptions(uint32_t layer_count) {
       // Linear weight execution strategy selected for this program.
       /*.weight_execution_strategy=*/
       ID4_QWEN3_VL_WEIGHT_EXECUTION_STRATEGY_ROW_MAJOR,
+      // Attention implementation selected for this program.
+      /*.attention_implementation=*/
+      ID4_QWEN3_VL_ATTENTION_IMPLEMENTATION_AUTO,
       // Diagnostic tap names requested by the caller.
       /*.diagnostic_tap_names=*/iree_string_view_list_empty(),
   };
@@ -124,6 +127,34 @@ TEST(Qwen3VLProgramTest, ParsesWeightExecutionStrategyNames) {
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         id4_qwen3_vl_weight_execution_strategy_parse(
                             IREE_SV("surprise"), &parsed_strategy));
+}
+
+TEST(Qwen3VLProgramTest, ParsesAttentionImplementationNames) {
+  struct ImplementationCase {
+    iree_string_view_t value;
+    id4_qwen3_vl_attention_implementation_t implementation;
+  };
+  const ImplementationCase cases[] = {
+      {IREE_SV("auto"), ID4_QWEN3_VL_ATTENTION_IMPLEMENTATION_AUTO},
+      {IREE_SV("materialized"),
+       ID4_QWEN3_VL_ATTENTION_IMPLEMENTATION_MATERIALIZED},
+      {IREE_SV("wmma"), ID4_QWEN3_VL_ATTENTION_IMPLEMENTATION_WMMA},
+  };
+  for (const ImplementationCase& test_case : cases) {
+    id4_qwen3_vl_attention_implementation_t parsed_implementation =
+        ID4_QWEN3_VL_ATTENTION_IMPLEMENTATION_INVALID;
+    IREE_ASSERT_OK(id4_qwen3_vl_attention_implementation_parse(
+        test_case.value, &parsed_implementation));
+    EXPECT_EQ(parsed_implementation, test_case.implementation);
+    EXPECT_TRUE(iree_string_view_equal(
+        id4_qwen3_vl_attention_implementation_name(test_case.implementation),
+        test_case.value));
+  }
+  id4_qwen3_vl_attention_implementation_t parsed_implementation =
+      ID4_QWEN3_VL_ATTENTION_IMPLEMENTATION_AUTO;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        id4_qwen3_vl_attention_implementation_parse(
+                            IREE_SV("surprise"), &parsed_implementation));
 }
 
 class ProgramBuilderScope {
@@ -418,6 +449,16 @@ TEST(Qwen3VlProgram, RejectsUnsortedSelectedLayerOrdinals) {
   id4_qwen3_vl_program_options_t options = MakeProgramOptions(
       /*layer_count=*/2);
   options.model.selected_layer_ordinals = kUnsortedSelectedLayerOrdinals;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      id4_qwen3_vl_program_author_forward(&options, builder_scope.builder()));
+}
+
+TEST(Qwen3VlProgram, RejectsForcedWmmaAttentionForTinyTokenCount) {
+  ProgramBuilderScope builder_scope;
+  id4_qwen3_vl_program_options_t options = MakeProgramOptions(
+      /*layer_count=*/1);
+  options.attention_implementation = ID4_QWEN3_VL_ATTENTION_IMPLEMENTATION_WMMA;
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
       id4_qwen3_vl_program_author_forward(&options, builder_scope.builder()));

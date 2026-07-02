@@ -46,6 +46,8 @@ typedef struct id4_qwen3_vl_stage_plan_options_t {
   id4_qwen3_vl_request_config_t request;
   // Linear weight execution strategy selected for this plan.
   id4_qwen3_vl_weight_execution_strategy_t weight_execution_strategy;
+  // Attention implementation selected for this plan.
+  id4_qwen3_vl_attention_implementation_t attention_implementation;
 } id4_qwen3_vl_stage_plan_options_t;
 
 // Creates a Qwen3-VL forward stage.

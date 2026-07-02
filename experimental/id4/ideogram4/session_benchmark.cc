@@ -41,6 +41,8 @@ static id4_ideogram4_generation_plan_policy_t MakeGenerationPolicy() {
       ID4_IDEOGRAM4_DIT_WEIGHT_EXECUTION_FORMAT_BF16_RESIDENT;
   policy.qwen_weight_execution_strategy =
       ID4_QWEN3_VL_WEIGHT_EXECUTION_STRATEGY_HYBRID_COMPACT_RHS;
+  policy.qwen_attention_implementation =
+      ID4_QWEN3_VL_ATTENTION_IMPLEMENTATION_AUTO;
   policy.dit_attention_implementation =
       ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_ONLINE_WMMA;
   policy.dit_feed_forward_implementation =

@@ -123,6 +123,18 @@ static iree_status_t id4_ideogram4_validate_generation_policy(
           " is invalid",
           (uint32_t)policy.qwen_weight_execution_strategy);
   }
+  switch (policy.qwen_attention_implementation) {
+    case ID4_QWEN3_VL_ATTENTION_IMPLEMENTATION_AUTO:
+    case ID4_QWEN3_VL_ATTENTION_IMPLEMENTATION_MATERIALIZED:
+    case ID4_QWEN3_VL_ATTENTION_IMPLEMENTATION_WMMA:
+      break;
+    default:
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "Ideogram 4 generation Qwen attention implementation %" PRIu32
+          " is invalid",
+          (uint32_t)policy.qwen_attention_implementation);
+  }
   switch (policy.dit_attention_implementation) {
     case ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_STREAMING:
     case ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_MATERIALIZED_WMMA:
@@ -287,6 +299,8 @@ static iree_status_t id4_ideogram4_plan_generation_qwen(
   qwen_options.request.token_ids = inputs->token_ids;
   qwen_options.weight_execution_strategy =
       options->policy.qwen_weight_execution_strategy;
+  qwen_options.attention_implementation =
+      options->policy.qwen_attention_implementation;
   return id4_ideogram4_plan_stage(ID4_IDEOGRAM4_GENERATION_STAGE_QWEN,
                                   session->qwen_stage, &qwen_options, options,
                                   out_plan);
@@ -429,6 +443,8 @@ static iree_status_t id4_ideogram4_plan_generation_stages(
         options->policy.dit_weight_execution_format;
     plan->summary.qwen_weight_execution_strategy =
         options->policy.qwen_weight_execution_strategy;
+    plan->summary.qwen_attention_implementation =
+        options->policy.qwen_attention_implementation;
     plan->summary.dit_attention_implementation =
         options->policy.dit_attention_implementation;
     plan->summary.dit_feed_forward_implementation =
@@ -1700,11 +1716,13 @@ iree_status_t id4_ideogram4_generation_plan_format_json(
       builder,
       ",\"dit_activation_format\":%u,\"dit_weight_execution_format\":%u,"
       "\"qwen_weight_execution_strategy\":%u,"
+      "\"qwen_attention_implementation\":%u,"
       "\"dit_attention_implementation\":%u,"
       "\"dit_feed_forward_implementation\":%u,\"vae_tiling\":",
       (uint32_t)plan->summary.dit_activation_format,
       (uint32_t)plan->summary.dit_weight_execution_format,
       (uint32_t)plan->summary.qwen_weight_execution_strategy,
+      (uint32_t)plan->summary.qwen_attention_implementation,
       (uint32_t)plan->summary.dit_attention_implementation,
       (uint32_t)plan->summary.dit_feed_forward_implementation));
   IREE_RETURN_IF_ERROR(id4_ideogram4_generation_plan_append_tiling_json(

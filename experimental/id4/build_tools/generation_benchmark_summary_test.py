@@ -25,7 +25,8 @@ TEST_BENCHMARK_LABEL = (
     "phase_stage_masks=[0x00000001,0x0000000c,0x00000020] "
     "residency_budget=35840MiB params=fp8_e4m3 "
     "activation=bf16_linear_input weights=bf16_resident "
-    "qwen_weights=hybrid_compact_rhs attention=online_wmma "
+    "qwen_weights=hybrid_compact_rhs qwen_attention=auto "
+    "attention=online_wmma "
     "ff=fused_product param_total=49460MiB "
     "param_largest=17699MiB param_source=32017MiB "
     "param_source_direct=4169MiB param_source_encoded=27848MiB "
@@ -242,6 +243,7 @@ def minimal_generation_plan(qwen_token_count: int) -> dict:
             "dit_activation_format": 2,
             "dit_weight_execution_format": 1,
             "qwen_weight_execution_strategy": 3,
+            "qwen_attention_implementation": 1,
             "dit_attention_implementation": 4,
             "dit_feed_forward_implementation": 2,
             "vae_tiling": {
@@ -538,6 +540,7 @@ class GenerationBenchmarkSummaryTest(unittest.TestCase):
             self.assertEqual(summary["rows"][0]["dit_activation_format"], 2)
             self.assertEqual(summary["rows"][0]["dit_weight_execution_format"], 1)
             self.assertEqual(summary["rows"][0]["qwen_weight_execution_strategy"], 3)
+            self.assertEqual(summary["rows"][0]["qwen_attention_implementation"], 1)
             self.assertEqual(summary["rows"][0]["dit_attention_implementation"], 4)
             self.assertEqual(summary["rows"][0]["dit_feed_forward_implementation"], 2)
             self.assertEqual(summary["rows"][0]["dispatch_count"], 1168)
@@ -596,6 +599,7 @@ class GenerationBenchmarkSummaryTest(unittest.TestCase):
             self.assertEqual(
                 row["runtime_qwen_weight_execution_strategy"], "hybrid_compact_rhs"
             )
+            self.assertEqual(row["runtime_qwen_attention_implementation"], "auto")
             self.assertEqual(row["runtime_parameter_total_mib"], 49460)
             self.assertEqual(row["runtime_parameter_source_encoded_mib"], 27848)
             self.assertEqual(row["runtime_parameter_gather_load_step_count"], 322)

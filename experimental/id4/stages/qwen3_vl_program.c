@@ -100,6 +100,41 @@ iree_string_view_t id4_qwen3_vl_weight_execution_strategy_name(
   }
 }
 
+iree_status_t id4_qwen3_vl_attention_implementation_parse(
+    iree_string_view_t value,
+    id4_qwen3_vl_attention_implementation_t* out_implementation) {
+  IREE_ASSERT_ARGUMENT(out_implementation);
+  if (iree_string_view_equal(value, IREE_SV("auto"))) {
+    *out_implementation = ID4_QWEN3_VL_ATTENTION_IMPLEMENTATION_AUTO;
+    return iree_ok_status();
+  }
+  if (iree_string_view_equal(value, IREE_SV("materialized"))) {
+    *out_implementation = ID4_QWEN3_VL_ATTENTION_IMPLEMENTATION_MATERIALIZED;
+    return iree_ok_status();
+  }
+  if (iree_string_view_equal(value, IREE_SV("wmma"))) {
+    *out_implementation = ID4_QWEN3_VL_ATTENTION_IMPLEMENTATION_WMMA;
+    return iree_ok_status();
+  }
+  return iree_make_status(
+      IREE_STATUS_INVALID_ARGUMENT,
+      "Qwen3-VL attention implementation must be auto, materialized, or wmma");
+}
+
+iree_string_view_t id4_qwen3_vl_attention_implementation_name(
+    id4_qwen3_vl_attention_implementation_t implementation) {
+  switch (implementation) {
+    case ID4_QWEN3_VL_ATTENTION_IMPLEMENTATION_AUTO:
+      return IREE_SV("auto");
+    case ID4_QWEN3_VL_ATTENTION_IMPLEMENTATION_MATERIALIZED:
+      return IREE_SV("materialized");
+    case ID4_QWEN3_VL_ATTENTION_IMPLEMENTATION_WMMA:
+      return IREE_SV("wmma");
+    default:
+      return IREE_SV("invalid");
+  }
+}
+
 static iree_status_t id4_qwen3_vl_program_validate_options_size(
     iree_host_size_t actual_size, iree_host_size_t expected_size,
     iree_string_view_t options_name) {
@@ -441,6 +476,17 @@ static iree_status_t id4_qwen3_vl_program_validate_options(
                               "Qwen3-VL weight execution strategy %" PRIu32
                               " is invalid",
                               (uint32_t)options->weight_execution_strategy);
+  }
+  switch (options->attention_implementation) {
+    case ID4_QWEN3_VL_ATTENTION_IMPLEMENTATION_AUTO:
+    case ID4_QWEN3_VL_ATTENTION_IMPLEMENTATION_MATERIALIZED:
+    case ID4_QWEN3_VL_ATTENTION_IMPLEMENTATION_WMMA:
+      break;
+    default:
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "Qwen3-VL attention implementation %" PRIu32
+                              " is invalid",
+                              (uint32_t)options->attention_implementation);
   }
   return id4_qwen3_vl_program_validate_model_config(&options->model);
 }
@@ -3444,6 +3490,7 @@ static iree_status_t id4_qwen3_vl_program_author_attention_wmma(
 static iree_status_t id4_qwen3_vl_program_attention_uses_materialized(
     const id4_qwen3_vl_program_options_t* options, uint32_t layer_ordinal,
     bool* out_uses_materialized_attention) {
+  *out_uses_materialized_attention = false;
   bool has_scores_tap = false;
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_has_diagnostic_tap(
       options, ID4_QWEN3_VL_TENSOR_LAYER_ATTENTION_SCORES, layer_ordinal,
@@ -3452,11 +3499,39 @@ static iree_status_t id4_qwen3_vl_program_attention_uses_materialized(
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_has_diagnostic_tap(
       options, ID4_QWEN3_VL_TENSOR_LAYER_ATTENTION_PROBABILITIES, layer_ordinal,
       &has_probabilities_tap));
-  *out_uses_materialized_attention =
-      has_scores_tap || has_probabilities_tap ||
-      options->request.token_count <
-          ID4_QWEN3_VL_ATTENTION_WMMA_MIN_TOKEN_COUNT;
-  return iree_ok_status();
+  switch (options->attention_implementation) {
+    case ID4_QWEN3_VL_ATTENTION_IMPLEMENTATION_AUTO:
+      *out_uses_materialized_attention =
+          has_scores_tap || has_probabilities_tap ||
+          options->request.token_count <
+              ID4_QWEN3_VL_ATTENTION_WMMA_MIN_TOKEN_COUNT;
+      return iree_ok_status();
+    case ID4_QWEN3_VL_ATTENTION_IMPLEMENTATION_MATERIALIZED:
+      *out_uses_materialized_attention = true;
+      return iree_ok_status();
+    case ID4_QWEN3_VL_ATTENTION_IMPLEMENTATION_WMMA:
+      if (has_scores_tap || has_probabilities_tap) {
+        return iree_make_status(
+            IREE_STATUS_FAILED_PRECONDITION,
+            "Qwen3-VL WMMA attention cannot expose materialized attention "
+            "score or probability taps");
+      }
+      if (options->request.token_count <
+          ID4_QWEN3_VL_ATTENTION_WMMA_MIN_TOKEN_COUNT) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "Qwen3-VL WMMA attention requires at least %" PRIu32
+            " tokens; got %" PRIu32,
+            (uint32_t)ID4_QWEN3_VL_ATTENTION_WMMA_MIN_TOKEN_COUNT,
+            options->request.token_count);
+      }
+      return iree_ok_status();
+    default:
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "Qwen3-VL attention implementation %" PRIu32
+                              " is invalid",
+                              (uint32_t)options->attention_implementation);
+  }
 }
 
 static iree_status_t

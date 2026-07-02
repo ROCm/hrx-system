@@ -28,6 +28,8 @@ IREE_FLAG(string, id4_plan_output_dir, "",
 IREE_FLAG(string, qwen_weight_execution_strategy, "hybrid_compact_rhs",
           "Qwen3-VL weight execution strategy: row_major, compact_rhs, or "
           "hybrid_compact_rhs.");
+IREE_FLAG(string, qwen_attention_implementation, "auto",
+          "Qwen3-VL attention implementation: auto, materialized, or wmma.");
 IREE_FLAG(int64_t, parameter_load_prefetch_region_distance, 0,
           "Number of future stage regions whose deferred parameter load groups "
           "may be submitted before the current region.");
@@ -116,6 +118,16 @@ static iree_status_t ParseQwenWeightExecutionStrategy(
   if (iree_status_is_ok(status)) return status;
   return iree_status_annotate(status,
                               IREE_SV("--qwen_weight_execution_strategy"));
+}
+
+static iree_status_t ParseQwenAttentionImplementation(
+    id4_qwen3_vl_attention_implementation_t* out_implementation) {
+  iree_status_t status = id4_qwen3_vl_attention_implementation_parse(
+      iree_make_cstring_view(FLAG_qwen_attention_implementation),
+      out_implementation);
+  if (iree_status_is_ok(status)) return status;
+  return iree_status_annotate(status,
+                              IREE_SV("--qwen_attention_implementation"));
 }
 
 static iree_status_t ParseParameterLoadPrefetchRegionDistance(
@@ -273,6 +285,8 @@ static iree_status_t CreateQwenPlan(QwenBenchmarkContext* context,
   qwen_options.request = request;
   IREE_RETURN_IF_ERROR(ParseQwenWeightExecutionStrategy(
       &qwen_options.weight_execution_strategy));
+  IREE_RETURN_IF_ERROR(
+      ParseQwenAttentionImplementation(&qwen_options.attention_implementation));
 
   id4_pipeline_stage_plan_options_t plan_options;
   std::memset(&plan_options, 0, sizeof(plan_options));
@@ -368,11 +382,16 @@ static void SetQwenBenchmarkLabel(
   IREE_CHECK_OK(ParseQwenWeightExecutionStrategy(&weight_execution_strategy));
   iree_string_view_t weight_execution_strategy_name =
       id4_qwen3_vl_weight_execution_strategy_name(weight_execution_strategy);
+  id4_qwen3_vl_attention_implementation_t attention_implementation =
+      ID4_QWEN3_VL_ATTENTION_IMPLEMENTATION_INVALID;
+  IREE_CHECK_OK(ParseQwenAttentionImplementation(&attention_implementation));
+  iree_string_view_t attention_implementation_name =
+      id4_qwen3_vl_attention_implementation_name(attention_implementation);
   iree_string_builder_t label_builder;
   iree_string_builder_initialize(iree_allocator_system(), &label_builder);
   IREE_CHECK_OK(iree_string_builder_append_format(
       &label_builder,
-      "tokens=%" PRIu32 " weights=%.*s prefetch_regions=%" PRIhsz
+      "tokens=%" PRIu32 " weights=%.*s attention=%.*s prefetch_regions=%" PRIhsz
       " param_total=%" PRIu64 "MiB param_largest=%" PRIu64
       "MiB param_source=%" PRIu64 "MiB param_source_direct=%" PRIu64
       "MiB param_source_encoded=%" PRIu64 "MiB param_load_steps[gather=%" PRIhsz
@@ -403,6 +422,8 @@ static void SetQwenBenchmarkLabel(
       ",dispatches=%" PRIhsz "]",
       token_count, static_cast<int>(weight_execution_strategy_name.size),
       weight_execution_strategy_name.data,
+      static_cast<int>(attention_implementation_name.size),
+      attention_implementation_name.data,
       parameter_load_prefetch_region_distance,
       CeilMiB(statistics.parameter_slab_byte_length),
       CeilMiB(statistics.largest_parameter_slab_byte_length),

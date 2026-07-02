@@ -63,6 +63,19 @@ typedef enum id4_qwen3_vl_weight_execution_strategy_e {
   ID4_QWEN3_VL_WEIGHT_EXECUTION_STRATEGY_HYBRID_COMPACT_RHS = 3,
 } id4_qwen3_vl_weight_execution_strategy_t;
 
+// Qwen3-VL attention implementation selected by the planner.
+typedef enum id4_qwen3_vl_attention_implementation_e {
+  // Invalid attention implementation.
+  ID4_QWEN3_VL_ATTENTION_IMPLEMENTATION_INVALID = 0,
+  // Select the implementation from request shape and diagnostic needs.
+  ID4_QWEN3_VL_ATTENTION_IMPLEMENTATION_AUTO = 1,
+  // Materialize score and probability tensors around scalar attention kernels.
+  ID4_QWEN3_VL_ATTENTION_IMPLEMENTATION_MATERIALIZED = 2,
+  // Use BF16 WMMA attention kernels without materialized score/probability
+  // taps.
+  ID4_QWEN3_VL_ATTENTION_IMPLEMENTATION_WMMA = 3,
+} id4_qwen3_vl_attention_implementation_t;
+
 // Parses a Qwen3-VL weight execution strategy name.
 iree_status_t id4_qwen3_vl_weight_execution_strategy_parse(
     iree_string_view_t value,
@@ -71,6 +84,15 @@ iree_status_t id4_qwen3_vl_weight_execution_strategy_parse(
 // Returns the stable Qwen3-VL weight execution strategy name.
 iree_string_view_t id4_qwen3_vl_weight_execution_strategy_name(
     id4_qwen3_vl_weight_execution_strategy_t strategy);
+
+// Parses a Qwen3-VL attention implementation name.
+iree_status_t id4_qwen3_vl_attention_implementation_parse(
+    iree_string_view_t value,
+    id4_qwen3_vl_attention_implementation_t* out_implementation);
+
+// Returns the stable Qwen3-VL attention implementation name.
+iree_string_view_t id4_qwen3_vl_attention_implementation_name(
+    id4_qwen3_vl_attention_implementation_t implementation);
 
 // Calculates the BF16 packed token capacity used by Qwen3-VL linear kernels.
 iree_status_t id4_qwen3_vl_program_calculate_bf16_token_capacity(
@@ -92,6 +114,8 @@ typedef struct id4_qwen3_vl_program_options_t {
   iree_allocator_t host_allocator;
   // Linear weight execution strategy selected for this program.
   id4_qwen3_vl_weight_execution_strategy_t weight_execution_strategy;
+  // Attention implementation selected for this program.
+  id4_qwen3_vl_attention_implementation_t attention_implementation;
   // Diagnostic tap names requested by the caller during planning.
   iree_string_view_list_t diagnostic_tap_names;
 } id4_qwen3_vl_program_options_t;

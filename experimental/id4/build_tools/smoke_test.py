@@ -152,6 +152,7 @@ PLAN_SUMMARY_INTEGER_FIELDS = (
     "dit_activation_format",
     "dit_weight_execution_format",
     "qwen_weight_execution_strategy",
+    "qwen_attention_implementation",
     "dit_attention_implementation",
     "dit_feed_forward_implementation",
 )
@@ -300,6 +301,16 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
             "fp8_direct",
             "fp8_direct_feed_forward_bf16_resident",
         ),
+    )
+    parser.add_argument(
+        "--qwen_weight_execution_strategy",
+        default="hybrid_compact_rhs",
+        choices=("row_major", "compact_rhs", "hybrid_compact_rhs"),
+    )
+    parser.add_argument(
+        "--qwen_attention_implementation",
+        default="auto",
+        choices=("auto", "materialized", "wmma"),
     )
     parser.add_argument(
         "--dit_attention_implementation",
@@ -791,6 +802,8 @@ def build_id4_command(args: argparse.Namespace, artifact_dir: Path) -> list[str]
         f"--dit_parameter_format={args.dit_parameter_format}",
         f"--dit_activation_format={args.dit_activation_format}",
         f"--dit_weight_execution_format={args.dit_weight_execution_format}",
+        f"--qwen_weight_execution_strategy={args.qwen_weight_execution_strategy}",
+        f"--qwen_attention_implementation={args.qwen_attention_implementation}",
         f"--dit_attention_implementation={args.dit_attention_implementation}",
         f"--dit_feed_forward_implementation={args.dit_feed_forward_implementation}",
         f"--generation_residency={args.generation_residency}",

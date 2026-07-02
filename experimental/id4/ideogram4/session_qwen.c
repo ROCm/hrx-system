@@ -62,6 +62,17 @@ static iree_status_t id4_ideogram4_validate_qwen_issue_options(
           "Qwen issue weight execution strategy %" PRIu32 " is invalid",
           (uint32_t)options->qwen_weight_execution_strategy);
   }
+  switch (options->qwen_attention_implementation) {
+    case ID4_QWEN3_VL_ATTENTION_IMPLEMENTATION_AUTO:
+    case ID4_QWEN3_VL_ATTENTION_IMPLEMENTATION_MATERIALIZED:
+    case ID4_QWEN3_VL_ATTENTION_IMPLEMENTATION_WMMA:
+      break;
+    default:
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "Qwen issue attention implementation %" PRIu32
+                              " is invalid",
+                              (uint32_t)options->qwen_attention_implementation);
+  }
   const iree_host_size_t device_count = iree_hal_device_group_device_count(
       id4_pipeline_stage_services(session->qwen_stage)->device_group);
   if (options->device_index >= device_count) {
@@ -112,6 +123,8 @@ static iree_status_t id4_ideogram4_qwen_create_plan(
   qwen_options.request.token_ids = inputs->token_ids;
   qwen_options.weight_execution_strategy =
       options->qwen_weight_execution_strategy;
+  qwen_options.attention_implementation =
+      options->qwen_attention_implementation;
 
   id4_pipeline_stage_plan_options_t plan_options;
   memset(&plan_options, 0, sizeof(plan_options));

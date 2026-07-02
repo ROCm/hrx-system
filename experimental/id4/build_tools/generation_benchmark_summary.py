@@ -509,6 +509,9 @@ def _parse_generation_benchmark_label(label: str, context: str) -> dict[str, Any
         "runtime_qwen_weight_execution_strategy": _label_token(
             label, "qwen_weights", f"{context}.label"
         ),
+        "runtime_qwen_attention_implementation": _label_token(
+            label, "qwen_attention", f"{context}.label"
+        ),
         "runtime_parameter_total_mib": _label_mib(
             label, "param_total", f"{context}.label"
         ),
@@ -956,6 +959,9 @@ def summarize_generation_benchmark(
             "dit_weight_execution_format": plan_summary["dit_weight_execution_format"],
             "qwen_weight_execution_strategy": plan_summary[
                 "qwen_weight_execution_strategy"
+            ],
+            "qwen_attention_implementation": plan_summary[
+                "qwen_attention_implementation"
             ],
             "dit_attention_implementation": plan_summary[
                 "dit_attention_implementation"

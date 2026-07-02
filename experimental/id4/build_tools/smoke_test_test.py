@@ -48,6 +48,7 @@ def minimal_generation_plan() -> dict:
             "dit_activation_format": 2,
             "dit_weight_execution_format": 1,
             "qwen_weight_execution_strategy": 3,
+            "qwen_attention_implementation": 1,
             "dit_attention_implementation": 4,
             "dit_feed_forward_implementation": 2,
             "vae_tiling": {
@@ -288,6 +289,8 @@ class Id4SmokeTestTest(unittest.TestCase):
         self.assertIn("--dump_result_summary=artifacts/result_summary.json", command)
         self.assertIn("--profile_output=artifacts/profile.txt", command)
         self.assertIn("--dit_weight_execution_format=bf16_resident", command)
+        self.assertIn("--qwen_weight_execution_strategy=hybrid_compact_rhs", command)
+        self.assertIn("--qwen_attention_implementation=auto", command)
         self.assertIn("--dit_attention_implementation=online_wmma", command)
         self.assertIn("--dit_feed_forward_implementation=fused_product", command)
         self.assertIn("--generation_residency=issue_phases", command)
@@ -309,6 +312,8 @@ class Id4SmokeTestTest(unittest.TestCase):
                 "--device=amdgpu",
                 "--tokenizer=tokenizer.json",
                 "--parameters=qwen=qwen.safetensors",
+                "--qwen_weight_execution_strategy=compact_rhs",
+                "--qwen_attention_implementation=materialized",
                 "--dit_weight_execution_format=fp8_direct_feed_forward_bf16_resident",
                 "--dit_attention_implementation=blocked_wmma",
                 "--dit_feed_forward_implementation=fused_product",
@@ -321,6 +326,8 @@ class Id4SmokeTestTest(unittest.TestCase):
             "--dit_weight_execution_format=fp8_direct_feed_forward_bf16_resident",
             command,
         )
+        self.assertIn("--qwen_weight_execution_strategy=compact_rhs", command)
+        self.assertIn("--qwen_attention_implementation=materialized", command)
         self.assertIn("--dit_attention_implementation=blocked_wmma", command)
         self.assertIn("--dit_feed_forward_implementation=fused_product", command)
 
@@ -555,6 +562,7 @@ class Id4SmokeTestTest(unittest.TestCase):
             self.assertEqual(metrics["summary"]["qwen_token_capacity"], 64)
             self.assertEqual(metrics["summary"]["conditioned_dit_token_count"], 101)
             self.assertEqual(metrics["summary"]["qwen_weight_execution_strategy"], 3)
+            self.assertEqual(metrics["summary"]["qwen_attention_implementation"], 1)
             self.assertEqual(
                 metrics["summary"]["diffusion_latent_shape"]["dims"],
                 [8, 8, 128, 1],

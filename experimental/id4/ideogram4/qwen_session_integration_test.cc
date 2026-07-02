@@ -274,6 +274,8 @@ static iree_status_t IssueQwenRequest(
   issue_options.command_buffer_mode = context.command_buffer_mode;
   issue_options.qwen_weight_execution_strategy =
       ID4_QWEN3_VL_WEIGHT_EXECUTION_STRATEGY_HYBRID_COMPACT_RHS;
+  issue_options.qwen_attention_implementation =
+      ID4_QWEN3_VL_ATTENTION_IMPLEMENTATION_AUTO;
   const iree_flag_string_list_t diagnostic_tap_flags =
       FLAG_id4_diagnostic_tap_list();
   std::vector<iree_string_view_t> diagnostic_tap_names;

@@ -40,6 +40,8 @@ IREE_FLAG(string, dit_weight_execution_format, "bf16_resident",
 IREE_FLAG(string, qwen_weight_execution_strategy, "hybrid_compact_rhs",
           "Qwen3-VL weight execution strategy: row_major, compact_rhs, or "
           "hybrid_compact_rhs.");
+IREE_FLAG(string, qwen_attention_implementation, "auto",
+          "Qwen3-VL attention implementation: auto, materialized, or wmma.");
 IREE_FLAG(string, dit_attention_implementation, "online_wmma",
           "DiT attention implementation: streaming, materialized_wmma, "
           "blocked_wmma, or online_wmma.");
@@ -340,6 +342,8 @@ static id4_ideogram4_generation_plan_policy_t MakeGenerationPolicy() {
   policy.structure_size = sizeof(policy);
   policy.qwen_weight_execution_strategy =
       ID4_QWEN3_VL_WEIGHT_EXECUTION_STRATEGY_HYBRID_COMPACT_RHS;
+  policy.qwen_attention_implementation =
+      ID4_QWEN3_VL_ATTENTION_IMPLEMENTATION_AUTO;
   policy.dit_attention_implementation =
       ID4_IDEOGRAM4_DIT_ATTENTION_IMPLEMENTATION_ONLINE_WMMA;
   policy.dit_feed_forward_implementation =
@@ -372,6 +376,16 @@ static iree_status_t ParseQwenWeightExecutionStrategy(
   if (iree_status_is_ok(status)) return status;
   return iree_status_annotate(status,
                               IREE_SV("--qwen_weight_execution_strategy"));
+}
+
+static iree_status_t ParseQwenAttentionImplementation(
+    id4_qwen3_vl_attention_implementation_t* out_implementation) {
+  iree_status_t status = id4_qwen3_vl_attention_implementation_parse(
+      iree_make_cstring_view(FLAG_qwen_attention_implementation),
+      out_implementation);
+  if (iree_status_is_ok(status)) return status;
+  return iree_status_annotate(status,
+                              IREE_SV("--qwen_attention_implementation"));
 }
 
 static iree_status_t ParseDitActivationFormat(
@@ -1256,6 +1270,8 @@ static iree_status_t CreateGenerationPlan(
       &plan_options.policy.dit_weight_execution_format));
   IREE_RETURN_IF_ERROR(ParseQwenWeightExecutionStrategy(
       &plan_options.policy.qwen_weight_execution_strategy));
+  IREE_RETURN_IF_ERROR(ParseQwenAttentionImplementation(
+      &plan_options.policy.qwen_attention_implementation));
   IREE_RETURN_IF_ERROR(ParseDitAttentionImplementation(
       &plan_options.policy.dit_attention_implementation));
   IREE_RETURN_IF_ERROR(ParseDitFeedForwardImplementation(
@@ -1653,6 +1669,9 @@ static iree_status_t SetGenerationBenchmarkLabel(
   const iree_string_view_t qwen_weight_execution_strategy =
       id4_qwen3_vl_weight_execution_strategy_name(
           summary.qwen_weight_execution_strategy);
+  const iree_string_view_t qwen_attention_implementation =
+      id4_qwen3_vl_attention_implementation_name(
+          summary.qwen_attention_implementation);
   const iree_string_view_t attention_implementation =
       DitAttentionImplementationName(summary.dit_attention_implementation);
   const iree_string_view_t feed_forward_implementation =
@@ -1684,7 +1703,7 @@ static iree_status_t SetGenerationBenchmarkLabel(
       " resident_stage_mask=0x%08x residency_budget=%" PRIu64
       "MiB"
       " params=%.*s activation=%.*s weights=%.*s qwen_weights=%.*s"
-      " attention=%.*s ff=%.*s"
+      " qwen_attention=%.*s attention=%.*s ff=%.*s"
       " param_total=%" PRIu64 "MiB param_largest=%" PRIu64
       "MiB param_source=%" PRIu64 "MiB param_source_direct=%" PRIu64
       "MiB param_source_encoded=%" PRIu64 "MiB param_load_steps[gather=%" PRIhsz
@@ -1742,6 +1761,8 @@ static iree_status_t SetGenerationBenchmarkLabel(
       weight_execution_format.data,
       static_cast<int>(qwen_weight_execution_strategy.size),
       qwen_weight_execution_strategy.data,
+      static_cast<int>(qwen_attention_implementation.size),
+      qwen_attention_implementation.data,
       static_cast<int>(attention_implementation.size),
       attention_implementation.data,
       static_cast<int>(feed_forward_implementation.size),

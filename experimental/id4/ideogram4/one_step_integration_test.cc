@@ -195,6 +195,8 @@ static iree_status_t PlanQwenStage(
   qwen_options.request.token_ids = token_ids;
   qwen_options.weight_execution_strategy =
       ID4_QWEN3_VL_WEIGHT_EXECUTION_STRATEGY_ROW_MAJOR;
+  qwen_options.attention_implementation =
+      ID4_QWEN3_VL_ATTENTION_IMPLEMENTATION_AUTO;
 
   id4_pipeline_stage_plan_options_t plan_options;
   std::memset(&plan_options, 0, sizeof(plan_options));
