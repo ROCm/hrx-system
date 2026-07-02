@@ -51,6 +51,26 @@ static inline bool iree_math_fuzzy_compare_f64(double actual, double expected,
 }
 
 //==============================================================================
+// Saturating integer arithmetic
+//==============================================================================
+
+static inline uint32_t iree_math_saturating_add_u32(uint32_t lhs,
+                                                    uint32_t rhs) {
+  return lhs > UINT32_MAX - rhs ? UINT32_MAX : lhs + rhs;
+}
+
+static inline uint64_t iree_math_saturating_add_u64(uint64_t lhs,
+                                                    uint64_t rhs) {
+  return lhs > UINT64_MAX - rhs ? UINT64_MAX : lhs + rhs;
+}
+
+static inline uint64_t iree_math_saturating_mul_u64(uint64_t lhs,
+                                                    uint64_t rhs) {
+  if (lhs == 0 || rhs == 0) return 0;
+  return lhs > UINT64_MAX / rhs ? UINT64_MAX : lhs * rhs;
+}
+
+//==============================================================================
 // Bitwise rotation (aka circular shifts)
 //==============================================================================
 

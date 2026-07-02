@@ -7,6 +7,7 @@
 #include <inttypes.h>
 #include <string.h>
 
+#include "iree/base/internal/math.h"
 #include "loom/codegen/low/schedule/context.h"
 #include "loom/codegen/low/schedule/descriptor_rows.h"
 #include "loom/codegen/low/schedule/diagnostics.h"
@@ -737,7 +738,7 @@ static iree_status_t loom_low_schedule_score_candidate_resources(
           IREE_STATUS_FAILED_PRECONDITION,
           "low schedule issue-use exceeds descriptor resource capacity");
     }
-    const uint32_t use_start = loom_low_schedule_saturating_add_u32(
+    const uint32_t use_start = iree_math_saturating_add_u32(
         state->current_issue_cycle, issue_use->stage);
     const uint32_t stall_cycles = loom_low_schedule_positive_delta_u32(
         state->resource_ready_issue_cycles[issue_use->resource_id], use_start);
@@ -1744,9 +1745,8 @@ static void loom_low_schedule_compute_node_critical_paths(
             state->node_critical_path_cycles[dependency->consumer_node]);
       }
     }
-    state->node_critical_path_cycles[node_index] =
-        loom_low_schedule_saturating_add_u32(node->latency_cycles,
-                                             successor_path_cycles);
+    state->node_critical_path_cycles[node_index] = iree_math_saturating_add_u32(
+        node->latency_cycles, successor_path_cycles);
   }
 }
 
@@ -1915,7 +1915,7 @@ static iree_status_t loom_low_schedule_run_list_scheduler(
           --indegrees[dependency->consumer_node];
           if (state->node_ready_issue_cycles != NULL &&
               dependency->kind == LOOM_LOW_SCHEDULE_DEPENDENCY_SSA) {
-            const uint32_t ready_cycle = loom_low_schedule_saturating_add_u32(
+            const uint32_t ready_cycle = iree_math_saturating_add_u32(
                 state->current_issue_cycle,
                 state->nodes[chosen_node].latency_cycles);
             if (ready_cycle >

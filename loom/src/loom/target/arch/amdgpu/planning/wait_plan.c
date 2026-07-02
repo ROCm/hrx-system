@@ -9,6 +9,7 @@
 #include <inttypes.h>
 #include <string.h>
 
+#include "iree/base/internal/math.h"
 #include "loom/codegen/low/allocation.h"
 #include "loom/codegen/low/move_sequence.h"
 #include "loom/codegen/low/packet.h"
@@ -275,11 +276,6 @@ static uint32_t loom_amdgpu_wait_counter_mask_from_slot(uint32_t slot) {
 
 static uint32_t loom_amdgpu_wait_counter_slot(uint16_t counter_id) {
   return counter_id - 1;
-}
-
-static uint32_t loom_amdgpu_wait_plan_saturating_add_u32(uint32_t lhs,
-                                                         uint32_t rhs) {
-  return UINT32_MAX - lhs < rhs ? UINT32_MAX : lhs + rhs;
 }
 
 static bool loom_amdgpu_wait_effect_is_dependency_memory(
@@ -1450,9 +1446,8 @@ static iree_status_t loom_amdgpu_wait_plan_wait_counter(
   }
   const uint32_t drained_position_count =
       outstanding_before > target_count ? outstanding_before - target_count : 0;
-  const uint32_t completed_position_count =
-      loom_amdgpu_wait_plan_saturating_add_u32(
-          builder->completed_position_counts[slot], drained_position_count);
+  const uint32_t completed_position_count = iree_math_saturating_add_u32(
+      builder->completed_position_counts[slot], drained_position_count);
   loom_amdgpu_wait_plan_mark_drained_producers(builder, node_index, slot,
                                                completed_position_count);
   IREE_RETURN_IF_ERROR(loom_amdgpu_wait_plan_append_action(
@@ -2054,11 +2049,11 @@ static iree_status_t loom_amdgpu_wait_plan_note_producer(
       continue;
     }
     node_state->produced_counter_epoch[slot] = builder->counter_epochs[slot];
-    const uint32_t active_position = loom_amdgpu_wait_plan_saturating_add_u32(
-        builder->completed_position_counts[slot],
-        builder->outstanding_counts[slot]);
+    const uint32_t active_position =
+        iree_math_saturating_add_u32(builder->completed_position_counts[slot],
+                                     builder->outstanding_counts[slot]);
     node_state->produced_counter_position[slot] =
-        loom_amdgpu_wait_plan_saturating_add_u32(active_position, 1u);
+        iree_math_saturating_add_u32(active_position, 1u);
   }
   IREE_RETURN_IF_ERROR(loom_amdgpu_wait_plan_increment_outstanding_counts(
       builder->outstanding_counts, counter_mask));

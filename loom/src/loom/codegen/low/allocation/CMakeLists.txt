@@ -132,6 +132,7 @@ loom_cc_library(
     ::target_constraints
     ::unit_liveness
     iree::base
+    iree::base::internal
     iree::base::internal::arena
     loom::analysis::liveness
     loom::codegen::low::descriptors

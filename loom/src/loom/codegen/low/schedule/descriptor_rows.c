@@ -8,6 +8,8 @@
 
 #include <inttypes.h>
 
+#include "iree/base/internal/math.h"
+
 static iree_status_t loom_low_schedule_append_resource_use(
     loom_low_schedule_build_state_t* state,
     loom_low_schedule_resource_use_t resource_use) {
@@ -45,10 +47,10 @@ static iree_status_t loom_low_schedule_append_resource_use(
     summary->peak_units_per_cycle = resource_use.units;
   }
   if (state->resource_ready_issue_cycles != NULL) {
-    const uint32_t use_start = loom_low_schedule_saturating_add_u32(
+    const uint32_t use_start = iree_math_saturating_add_u32(
         state->current_issue_cycle, resource_use.stage);
     const uint32_t use_end =
-        loom_low_schedule_saturating_add_u32(use_start, resource_use.cycles);
+        iree_math_saturating_add_u32(use_start, resource_use.cycles);
     if (use_end >
         state->resource_ready_issue_cycles[resource_use.resource_id]) {
       state->resource_ready_issue_cycles[resource_use.resource_id] = use_end;

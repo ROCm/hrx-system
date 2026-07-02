@@ -28,6 +28,7 @@ loom_cc_library(
     "run.c"
   DEPS
     iree::base
+    iree::base::internal
     iree::base::internal::arena
     loom::analysis::liveness
     loom::analysis::liveness_json

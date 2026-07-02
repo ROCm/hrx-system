@@ -271,14 +271,6 @@ typedef struct loom_low_schedule_build_state_t {
   uint32_t pending_pair_affinity_node;
 } loom_low_schedule_build_state_t;
 
-static inline uint32_t loom_low_schedule_saturating_add_u32(uint32_t lhs,
-                                                            uint32_t rhs) {
-  if (lhs > UINT32_MAX - rhs) {
-    return UINT32_MAX;
-  }
-  return lhs + rhs;
-}
-
 #ifdef __cplusplus
 }  // extern "C"
 #endif
