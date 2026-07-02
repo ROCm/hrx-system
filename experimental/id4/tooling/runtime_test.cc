@@ -92,6 +92,21 @@ static iree_status_t TestProviderGather(
   return iree_ok_status();
 }
 
+static iree_status_t TestProviderGatherBatch(
+    iree_io_parameter_provider_t* provider, iree_hal_device_t* device,
+    iree_hal_queue_affinity_t queue_affinity, iree_host_size_t gather_count,
+    const iree_io_parameter_gather_t* gathers) {
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0; i < gather_count && iree_status_is_ok(status);
+       ++i) {
+    status = TestProviderGather(
+        provider, device, queue_affinity, gathers[i].wait_semaphore_list,
+        gathers[i].signal_semaphore_list, gathers[i].source_scope,
+        gathers[i].target_buffer, gathers[i].count, gathers[i].enumerator);
+  }
+  return status;
+}
+
 static iree_status_t TestProviderScatter(
     iree_io_parameter_provider_t* provider, iree_hal_device_t* device,
     iree_hal_queue_affinity_t queue_affinity,
@@ -113,6 +128,8 @@ static const iree_io_parameter_provider_vtable_t kTestProviderVTable = {
     /*.load=*/TestProviderLoad,
     // Records gather routing.
     /*.gather=*/TestProviderGather,
+    // Records grouped gather routing.
+    /*.gather_batch=*/TestProviderGatherBatch,
     // Scatter is outside this wrapper test's scope.
     /*.scatter=*/TestProviderScatter,
 };

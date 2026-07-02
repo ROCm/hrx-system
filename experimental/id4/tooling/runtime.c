@@ -308,12 +308,35 @@ id4_tooling_parameter_provider_set_provider_for_scope(
   return NULL;
 }
 
+static iree_host_size_t
+id4_tooling_parameter_provider_set_entry_index_for_scope(
+    id4_tooling_parameter_provider_set_t* provider, iree_string_view_t scope) {
+  for (iree_host_size_t i = 0; i < provider->entry_count; ++i) {
+    id4_tooling_parameter_provider_set_entry_t* entry = &provider->entries[i];
+    if (iree_string_view_equal(entry->scope, scope) &&
+        iree_io_parameter_provider_query_support(entry->provider, scope)) {
+      return i;
+    }
+  }
+  return IREE_HOST_SIZE_MAX;
+}
+
 static iree_status_t id4_tooling_parameter_provider_set_scope_not_found(
     iree_string_view_t scope) {
   return iree_make_status(
       IREE_STATUS_NOT_FOUND,
       "parameter provider set does not support scope `%.*s`", (int)scope.size,
       scope.data);
+}
+
+static iree_status_t id4_tooling_parameter_provider_set_fail_gathers(
+    iree_host_size_t gather_count, const iree_io_parameter_gather_t* gathers,
+    iree_status_t status) {
+  for (iree_host_size_t i = 0; i < gather_count; ++i) {
+    iree_hal_semaphore_list_fail(gathers[i].signal_semaphore_list,
+                                 iree_status_clone(status));
+  }
+  return status;
 }
 
 static void id4_tooling_parameter_provider_set_destroy(
@@ -392,6 +415,60 @@ static iree_status_t id4_tooling_parameter_provider_set_gather(
       source_scope, target_buffer, count, enumerator);
 }
 
+static iree_status_t id4_tooling_parameter_provider_set_gather_batch(
+    iree_io_parameter_provider_t* base_provider, iree_hal_device_t* device,
+    iree_hal_queue_affinity_t queue_affinity, iree_host_size_t gather_count,
+    const iree_io_parameter_gather_t* gathers) {
+  id4_tooling_parameter_provider_set_t* provider =
+      id4_tooling_parameter_provider_set_cast(base_provider);
+  if (gather_count == 0) return iree_ok_status();
+
+  iree_host_size_t* entry_indices = NULL;
+  iree_io_parameter_gather_t* child_gathers = NULL;
+  iree_status_t status = iree_allocator_malloc_array(
+      provider->host_allocator, gather_count, sizeof(entry_indices[0]),
+      (void**)&entry_indices);
+  if (iree_status_is_ok(status)) {
+    status = iree_allocator_malloc_array(provider->host_allocator, gather_count,
+                                         sizeof(child_gathers[0]),
+                                         (void**)&child_gathers);
+  }
+  for (iree_host_size_t i = 0; i < gather_count && iree_status_is_ok(status);
+       ++i) {
+    entry_indices[i] = id4_tooling_parameter_provider_set_entry_index_for_scope(
+        provider, gathers[i].source_scope);
+    if (entry_indices[i] == IREE_HOST_SIZE_MAX) {
+      status = id4_tooling_parameter_provider_set_scope_not_found(
+          gathers[i].source_scope);
+    }
+  }
+  if (!iree_status_is_ok(status)) {
+    iree_allocator_free(provider->host_allocator, child_gathers);
+    iree_allocator_free(provider->host_allocator, entry_indices);
+    return id4_tooling_parameter_provider_set_fail_gathers(gather_count,
+                                                           gathers, status);
+  }
+
+  for (iree_host_size_t entry_index = 0; entry_index < provider->entry_count;
+       ++entry_index) {
+    iree_host_size_t child_gather_count = 0;
+    for (iree_host_size_t i = 0; i < gather_count; ++i) {
+      if (entry_indices[i] == entry_index) {
+        child_gathers[child_gather_count++] = gathers[i];
+      }
+    }
+    if (child_gather_count == 0) continue;
+    status = iree_status_join(
+        status, iree_io_parameter_provider_gather_batch(
+                    provider->entries[entry_index].provider, device,
+                    queue_affinity, child_gather_count, child_gathers));
+  }
+
+  iree_allocator_free(provider->host_allocator, child_gathers);
+  iree_allocator_free(provider->host_allocator, entry_indices);
+  return status;
+}
+
 static iree_status_t id4_tooling_parameter_provider_set_scatter(
     iree_io_parameter_provider_t* base_provider, iree_hal_device_t* device,
     iree_hal_queue_affinity_t queue_affinity,
@@ -424,6 +501,8 @@ static const iree_io_parameter_provider_vtable_t
         .load = id4_tooling_parameter_provider_set_load,
         // Routes scoped gather requests to the matching child provider.
         .gather = id4_tooling_parameter_provider_set_gather,
+        // Routes grouped gather requests to matching child providers.
+        .gather_batch = id4_tooling_parameter_provider_set_gather_batch,
         // Routes scoped scatter requests to the matching child provider.
         .scatter = id4_tooling_parameter_provider_set_scatter,
 };

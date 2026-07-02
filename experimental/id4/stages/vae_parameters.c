@@ -1489,6 +1489,23 @@ static iree_status_t id4_vae_parameter_provider_gather(
   return status;
 }
 
+static iree_status_t id4_vae_parameter_provider_gather_batch(
+    iree_io_parameter_provider_t* base_provider, iree_hal_device_t* device,
+    iree_hal_queue_affinity_t queue_affinity, iree_host_size_t gather_count,
+    const iree_io_parameter_gather_t* gathers) {
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0; i < gather_count; ++i) {
+    status = iree_status_join(
+        status,
+        id4_vae_parameter_provider_gather(
+            base_provider, device, queue_affinity,
+            gathers[i].wait_semaphore_list, gathers[i].signal_semaphore_list,
+            gathers[i].source_scope, gathers[i].target_buffer, gathers[i].count,
+            gathers[i].enumerator));
+  }
+  return status;
+}
+
 static iree_status_t id4_vae_parameter_provider_scatter(
     iree_io_parameter_provider_t* base_provider, iree_hal_device_t* device,
     iree_hal_queue_affinity_t queue_affinity,
@@ -1515,6 +1532,8 @@ static const iree_io_parameter_provider_vtable_t
         .load = id4_vae_parameter_provider_load,
         // Gathers direct and derived VAE parameter requests.
         .gather = id4_vae_parameter_provider_gather,
+        // Gathers independent direct and derived VAE parameter groups.
+        .gather_batch = id4_vae_parameter_provider_gather_batch,
         // Forwards scatter requests to the source provider.
         .scatter = id4_vae_parameter_provider_scatter,
 };

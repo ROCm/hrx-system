@@ -212,6 +212,21 @@ static iree_status_t TestParameterProviderGather(
       IREE_HAL_EXECUTE_FLAG_NONE);
 }
 
+static iree_status_t TestParameterProviderGatherBatch(
+    iree_io_parameter_provider_t* provider, iree_hal_device_t* device,
+    iree_hal_queue_affinity_t queue_affinity, iree_host_size_t gather_count,
+    const iree_io_parameter_gather_t* gathers) {
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0; i < gather_count && iree_status_is_ok(status);
+       ++i) {
+    status = TestParameterProviderGather(
+        provider, device, queue_affinity, gathers[i].wait_semaphore_list,
+        gathers[i].signal_semaphore_list, gathers[i].source_scope,
+        gathers[i].target_buffer, gathers[i].count, gathers[i].enumerator);
+  }
+  return status;
+}
+
 static iree_status_t TestParameterProviderScatter(
     iree_io_parameter_provider_t* provider, iree_hal_device_t* device,
     iree_hal_queue_affinity_t queue_affinity,
@@ -234,6 +249,8 @@ static const iree_io_parameter_provider_vtable_t kTestParameterProviderVTable =
         TestParameterProviderLoad,
         // Gathers parameters into caller-owned buffers.
         TestParameterProviderGather,
+        // Gathers independent parameter groups into caller-owned buffers.
+        TestParameterProviderGatherBatch,
         // Scatters parameters from caller-owned buffers.
         TestParameterProviderScatter,
 };
