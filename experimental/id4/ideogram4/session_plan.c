@@ -1190,7 +1190,7 @@ static iree_status_t id4_ideogram4_generation_add_residency_score(
   return iree_ok_status();
 }
 
-static iree_status_t id4_ideogram4_generation_stage_residency_score(
+static iree_status_t id4_ideogram4_generation_stage_residency_unit_score(
     const id4_ideogram4_generation_plan_t* plan,
     id4_ideogram4_generation_stage_ordinal_t stage_ordinal,
     uint64_t* out_score) {
@@ -1204,13 +1204,23 @@ static iree_status_t id4_ideogram4_generation_stage_residency_score(
       IREE_SV("resident.score")));
   const uint64_t avoided_mib =
       (uint64_t)id4_ideogram4_generation_ceil_mib(avoided_byte_length);
-  const uint64_t issue_count =
-      id4_ideogram4_generation_stage_issue_count(plan, stage_ordinal);
-  if (issue_count != 0 && avoided_mib > UINT64_MAX / issue_count) {
+  *out_score = avoided_mib;
+  return iree_ok_status();
+}
+
+static iree_status_t id4_ideogram4_generation_stage_residency_score(
+    const id4_ideogram4_generation_plan_t* plan,
+    id4_ideogram4_generation_stage_ordinal_t stage_ordinal,
+    uint64_t materialization_count, uint64_t* out_score) {
+  uint64_t unit_score = 0;
+  IREE_RETURN_IF_ERROR(id4_ideogram4_generation_stage_residency_unit_score(
+      plan, stage_ordinal, &unit_score));
+  if (materialization_count != 0 &&
+      unit_score > UINT64_MAX / materialization_count) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "Ideogram 4 generation residency score overflow");
   }
-  *out_score = avoided_mib * issue_count;
+  *out_score = unit_score * materialization_count;
   return iree_ok_status();
 }
 
@@ -1228,8 +1238,10 @@ static iree_status_t id4_ideogram4_generation_residency_mask_score(
       continue;
     }
     uint64_t stage_score = 0;
+    const uint64_t issue_count =
+        id4_ideogram4_generation_stage_issue_count(plan, descriptor->ordinal);
     IREE_RETURN_IF_ERROR(id4_ideogram4_generation_stage_residency_score(
-        plan, descriptor->ordinal, &stage_score));
+        plan, descriptor->ordinal, issue_count, &stage_score));
     IREE_RETURN_IF_ERROR(
         id4_ideogram4_generation_add_residency_score(&score, stage_score));
   }
@@ -1255,8 +1267,13 @@ static iree_status_t id4_ideogram4_generation_phase_residency_score(
         continue;
       }
       uint64_t stage_score = 0;
+      const uint64_t issue_count =
+          id4_ideogram4_generation_stage_issue_count(plan, descriptor->ordinal);
+      const uint64_t saved_materialization_count =
+          issue_count == 0 ? 0 : issue_count - 1;
       IREE_RETURN_IF_ERROR(id4_ideogram4_generation_stage_residency_score(
-          plan, descriptor->ordinal, &stage_score));
+          plan, descriptor->ordinal, saved_materialization_count,
+          &stage_score));
       IREE_RETURN_IF_ERROR(
           id4_ideogram4_generation_add_residency_score(&score, stage_score));
     }
