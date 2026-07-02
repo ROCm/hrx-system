@@ -104,6 +104,7 @@ iree_execution_test_suite(
   DATA
     "report_carried_loop_memory_economics_amdgpu.loom"
     "report_complex_loop_memory_economics_amdgpu.loom"
+    "report_dispatch_memory_economics_amdgpu.loom"
     "report_loop_memory_economics_amdgpu.loom"
     "selected_root_amdgpu.loom"
   LABELS
