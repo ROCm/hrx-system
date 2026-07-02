@@ -1945,8 +1945,96 @@ static bool id4_pipeline_plan_region_window_has_prior_load_group(
   return false;
 }
 
-static void id4_pipeline_plan_parameter_load_group_byte_statistics(
+static iree_status_t id4_pipeline_plan_global_parameter_request_index(
+    const id4_pipeline_plan_t* plan, iree_host_size_t slab_index,
+    iree_host_size_t request_index, iree_host_size_t* out_global_index) {
+  *out_global_index = IREE_HOST_SIZE_MAX;
+  if (slab_index >= plan->parameter_slab_count) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "parameter load target slab %" PRIhsz
+                            " exceeds slab count %" PRIhsz,
+                            slab_index, plan->parameter_slab_count);
+  }
+  if (request_index >= plan->parameter_slabs[slab_index].request_count) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "parameter load request %" PRIhsz
+                            " exceeds slab %" PRIhsz " request count %" PRIhsz,
+                            request_index, slab_index,
+                            plan->parameter_slabs[slab_index].request_count);
+  }
+  iree_host_size_t global_index = request_index;
+  for (iree_host_size_t i = 0; i < slab_index; ++i) {
+    if (!iree_host_size_checked_add(global_index,
+                                    plan->parameter_slabs[i].request_count,
+                                    &global_index)) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "parameter request index overflow");
+    }
+  }
+  *out_global_index = global_index;
+  return iree_ok_status();
+}
+
+static iree_status_t id4_pipeline_plan_add_device_size_statistic(
+    iree_device_size_t* inout_value, iree_device_size_t addend,
+    iree_string_view_t statistic_name) {
+  iree_device_size_t result = 0;
+  if (!iree_device_size_checked_add(*inout_value, addend, &result)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "%.*s byte count overflow",
+                            (int)statistic_name.size, statistic_name.data);
+  }
+  *inout_value = result;
+  return iree_ok_status();
+}
+
+static iree_status_t id4_pipeline_plan_load_step_request_statistics(
+    const id4_pipeline_plan_t* plan,
+    const id4_pipeline_parameter_load_step_t* step,
+    iree_host_size_t load_group_index,
+    id4_pipeline_parameter_window_statistics_t* statistics,
+    iree_device_size_t* out_target_byte_length) {
+  *out_target_byte_length = 0;
+  if (step->target_slab_index >= plan->parameter_slab_count) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "parameter load target slab %" PRIhsz " exceeds slab count %" PRIhsz,
+        step->target_slab_index, plan->parameter_slab_count);
+  }
+  const id4_pipeline_parameter_slab_plan_t* slab =
+      &plan->parameter_slabs[step->target_slab_index];
+  for (iree_host_size_t i = 0; i < step->request_count; ++i) {
+    const iree_host_size_t request_index = step->request_indices
+                                               ? step->request_indices[i]
+                                               : step->request_offset + i;
+    if (request_index >= slab->request_count) {
+      return iree_make_status(
+          IREE_STATUS_OUT_OF_RANGE,
+          "parameter load request %" PRIhsz " exceeds slab %" PRIhsz
+          " request count %" PRIhsz,
+          request_index, step->target_slab_index, slab->request_count);
+    }
+    const iree_device_size_t request_byte_length =
+        slab->requests[request_index].span.length;
+    IREE_RETURN_IF_ERROR(id4_pipeline_plan_add_device_size_statistic(
+        out_target_byte_length, request_byte_length,
+        IREE_SV("parameter.window.step.target")));
+    if (request_byte_length > statistics->largest_request_target_byte_length) {
+      iree_host_size_t global_request_index = IREE_HOST_SIZE_MAX;
+      IREE_RETURN_IF_ERROR(id4_pipeline_plan_global_parameter_request_index(
+          plan, step->target_slab_index, request_index, &global_request_index));
+      statistics->largest_request_target_byte_length = request_byte_length;
+      statistics->largest_request_index = global_request_index;
+      statistics->largest_request_load_group_index = load_group_index;
+    }
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t id4_pipeline_plan_parameter_load_group_byte_statistics(
     const id4_pipeline_plan_t* plan, id4_pipeline_parameter_load_group_t group,
+    iree_host_size_t load_group_index,
+    id4_pipeline_parameter_window_statistics_t* statistics,
     iree_device_size_t* out_source_byte_length,
     iree_device_size_t* out_target_byte_length,
     iree_host_size_t* out_encode_load_step_count) {
@@ -1958,19 +2046,28 @@ static void id4_pipeline_plan_parameter_load_group_byte_statistics(
        ++step_index) {
     const id4_pipeline_parameter_load_step_t* step =
         &plan->parameter_load_steps[step_index];
-    target_byte_length += id4_pipeline_plan_load_step_target_length(plan, step);
+    iree_device_size_t step_target_byte_length = 0;
+    IREE_RETURN_IF_ERROR(id4_pipeline_plan_load_step_request_statistics(
+        plan, step, load_group_index, statistics, &step_target_byte_length));
+    IREE_RETURN_IF_ERROR(id4_pipeline_plan_add_device_size_statistic(
+        &target_byte_length, step_target_byte_length,
+        IREE_SV("parameter.window.group.target")));
     if (id4_pipeline_plan_parameter_load_step_is_encode(step)) {
-      source_byte_length +=
-          id4_pipeline_plan_encoded_load_step_source_length(step);
+      IREE_RETURN_IF_ERROR(id4_pipeline_plan_add_device_size_statistic(
+          &source_byte_length,
+          id4_pipeline_plan_encoded_load_step_source_length(step),
+          IREE_SV("parameter.window.group.source")));
       ++encode_load_step_count;
     } else {
-      source_byte_length +=
-          id4_pipeline_plan_direct_load_step_source_length(plan, step);
+      IREE_RETURN_IF_ERROR(id4_pipeline_plan_add_device_size_statistic(
+          &source_byte_length, step_target_byte_length,
+          IREE_SV("parameter.window.group.source")));
     }
   }
   *out_source_byte_length = source_byte_length;
   *out_target_byte_length = target_byte_length;
   *out_encode_load_step_count = encode_load_step_count;
+  return iree_ok_status();
 }
 
 iree_status_t id4_pipeline_plan_parameter_window_statistics(
@@ -1979,6 +2076,8 @@ iree_status_t id4_pipeline_plan_parameter_window_statistics(
   IREE_ASSERT_ARGUMENT(out_statistics);
   memset(out_statistics, 0, sizeof(*out_statistics));
   out_statistics->largest_load_group_index = IREE_HOST_SIZE_MAX;
+  out_statistics->largest_request_index = IREE_HOST_SIZE_MAX;
+  out_statistics->largest_request_load_group_index = IREE_HOST_SIZE_MAX;
   if (!plan) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "plan is required");
   }
@@ -1991,9 +2090,13 @@ iree_status_t id4_pipeline_plan_parameter_window_statistics(
   memset(&statistics, 0, sizeof(statistics));
   statistics.region_window_size = region_window_size;
   statistics.largest_load_group_index = IREE_HOST_SIZE_MAX;
+  statistics.largest_request_index = IREE_HOST_SIZE_MAX;
+  statistics.largest_request_load_group_index = IREE_HOST_SIZE_MAX;
   for (iree_host_size_t i = 0; i < plan->parameter_slab_count; ++i) {
-    statistics.full_slab_target_byte_length +=
-        plan->parameter_slabs[i].byte_length;
+    IREE_RETURN_IF_ERROR(id4_pipeline_plan_add_device_size_statistic(
+        &statistics.full_slab_target_byte_length,
+        plan->parameter_slabs[i].byte_length,
+        IREE_SV("parameter.window.full_slab.target")));
   }
 
   for (iree_host_size_t window_start_region = 0;
@@ -2029,11 +2132,17 @@ iree_status_t id4_pipeline_plan_parameter_window_statistics(
         iree_device_size_t group_source_byte_length = 0;
         iree_device_size_t group_target_byte_length = 0;
         iree_host_size_t group_encode_load_step_count = 0;
-        id4_pipeline_plan_parameter_load_group_byte_statistics(
-            plan, group, &group_source_byte_length, &group_target_byte_length,
-            &group_encode_load_step_count);
-        window_source_byte_length += group_source_byte_length;
-        window_target_byte_length += group_target_byte_length;
+        IREE_RETURN_IF_ERROR(
+            id4_pipeline_plan_parameter_load_group_byte_statistics(
+                plan, group, group_index, &statistics,
+                &group_source_byte_length, &group_target_byte_length,
+                &group_encode_load_step_count));
+        IREE_RETURN_IF_ERROR(id4_pipeline_plan_add_device_size_statistic(
+            &window_source_byte_length, group_source_byte_length,
+            IREE_SV("parameter.window.source")));
+        IREE_RETURN_IF_ERROR(id4_pipeline_plan_add_device_size_statistic(
+            &window_target_byte_length, group_target_byte_length,
+            IREE_SV("parameter.window.target")));
         window_encode_load_step_count += group_encode_load_step_count;
         ++window_load_group_count;
         if (group_target_byte_length >
@@ -2049,8 +2158,12 @@ iree_status_t id4_pipeline_plan_parameter_window_statistics(
         statistics.peak_window_target_byte_length, window_target_byte_length);
     statistics.peak_window_source_byte_length = iree_max(
         statistics.peak_window_source_byte_length, window_source_byte_length);
-    statistics.total_window_target_byte_length += window_target_byte_length;
-    statistics.total_window_source_byte_length += window_source_byte_length;
+    IREE_RETURN_IF_ERROR(id4_pipeline_plan_add_device_size_statistic(
+        &statistics.total_window_target_byte_length, window_target_byte_length,
+        IREE_SV("parameter.window.total.target")));
+    IREE_RETURN_IF_ERROR(id4_pipeline_plan_add_device_size_statistic(
+        &statistics.total_window_source_byte_length, window_source_byte_length,
+        IREE_SV("parameter.window.total.source")));
     statistics.peak_window_load_group_count = iree_max(
         statistics.peak_window_load_group_count, window_load_group_count);
     statistics.total_window_load_group_count += window_load_group_count;
@@ -2463,6 +2576,25 @@ static iree_status_t id4_pipeline_plan_append_parameter_window_statistics_json(
     } else {
       IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
           builder, "%" PRIhsz, statistics.largest_load_group_index));
+    }
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+        builder,
+        ",\"largest_request_target_byte_length\":%" PRIu64
+        ",\"largest_request_index\":",
+        (uint64_t)statistics.largest_request_target_byte_length));
+    if (statistics.largest_request_index == IREE_HOST_SIZE_MAX) {
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "null"));
+    } else {
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+          builder, "%" PRIhsz, statistics.largest_request_index));
+    }
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(
+        builder, ",\"largest_request_load_group_index\":"));
+    if (statistics.largest_request_load_group_index == IREE_HOST_SIZE_MAX) {
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "null"));
+    } else {
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+          builder, "%" PRIhsz, statistics.largest_request_load_group_index));
     }
     IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "}"));
   }

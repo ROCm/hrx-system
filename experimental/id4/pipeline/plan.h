@@ -287,6 +287,12 @@ typedef struct id4_pipeline_parameter_window_statistics_t {
   iree_device_size_t largest_load_group_target_byte_length;
   // Plan-local index of the largest single load group.
   iree_host_size_t largest_load_group_index;
+  // Target byte length of the largest single parameter request.
+  iree_device_size_t largest_request_target_byte_length;
+  // Global request index of the largest single parameter request.
+  iree_host_size_t largest_request_index;
+  // Plan-local load group containing the largest single parameter request.
+  iree_host_size_t largest_request_load_group_index;
 } id4_pipeline_parameter_window_statistics_t;
 
 // Options for creating an inspectable plan.

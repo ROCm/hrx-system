@@ -444,6 +444,9 @@ TEST(PlanTest, ReportsParameterWindowStatistics) {
   EXPECT_EQ(statistics.total_window_encode_load_step_count, 0u);
   EXPECT_EQ(statistics.largest_load_group_target_byte_length, 300u);
   EXPECT_EQ(statistics.largest_load_group_index, 2u);
+  EXPECT_EQ(statistics.largest_request_target_byte_length, 300u);
+  EXPECT_EQ(statistics.largest_request_index, 2u);
+  EXPECT_EQ(statistics.largest_request_load_group_index, 2u);
 
   IREE_ASSERT_OK(id4_pipeline_plan_parameter_window_statistics(
       plan.get(), /*region_window_size=*/2, &statistics));
@@ -471,6 +474,15 @@ TEST(PlanTest, ReportsParameterWindowStatistics) {
                 json, IREE_SV("\"parameter_window_statistics\""), 0),
             IREE_STRING_VIEW_NPOS);
   EXPECT_NE(iree_string_view_find(json, IREE_SV("\"region_window_size\":1"), 0),
+            IREE_STRING_VIEW_NPOS);
+  EXPECT_NE(iree_string_view_find(
+                json, IREE_SV("\"largest_request_target_byte_length\":300"), 0),
+            IREE_STRING_VIEW_NPOS);
+  EXPECT_NE(
+      iree_string_view_find(json, IREE_SV("\"largest_request_index\":2"), 0),
+      IREE_STRING_VIEW_NPOS);
+  EXPECT_NE(iree_string_view_find(
+                json, IREE_SV("\"largest_request_load_group_index\":2"), 0),
             IREE_STRING_VIEW_NPOS);
   iree_string_builder_deinitialize(&json_builder);
 }
