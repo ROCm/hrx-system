@@ -126,10 +126,19 @@ jq '{status, target_key, target_bundle, target_export,
      materialized_spill_stores:.allocation.materialized_spill_store_count,
      materialized_reloads:.allocation.materialized_reload_count,
      private:.memory.private_bytes,
+     final_vgprs:.target_resources.vector.final.register_count,
+     scheduled_vgpr_pressure:
+       .target_resources.vector.scheduled_pressure.peak_live_units,
      code_bytes:.emission.code_byte_count,
      dots:.static_instruction_mix.dot_count}' \
   /tmp/loom-q6q8.compile-report.json
 ```
+
+`target_resources.{scalar,vector}.final.register_count` records final target
+metadata used for occupancy. The adjacent
+`target_resources.{scalar,vector}.scheduled_pressure.peak_live_units` value is
+scheduled virtual pressure before final allocation metadata, so the two numbers
+can differ without implying that allocation contradicted itself.
 
 When provider selection, inlining, or math legalization is suspect, capture IR
 snapshots around those boundaries:
@@ -242,6 +251,9 @@ jq 'select(.row=="compile" and .compile_report) |
    materialized_reloads:.compile_report.allocation.materialized_reload_count,
    local:.compile_report.memory.local_bytes,
    private:.compile_report.memory.private_bytes,
+   final_vgprs:.compile_report.target_resources.vector.final.register_count,
+   scheduled_vgpr_pressure:
+     .compile_report.target_resources.vector.scheduled_pressure.peak_live_units,
    pressure:.compile_report.schedule.register_pressure_peak_live_units}' \
   /tmp/loom-q6q8-run/results.jsonl
 
@@ -256,6 +268,9 @@ jq 'select(.row=="benchmark" and .benchmark_result.compile_report) |
      .compile_report.allocation.materialized_spill_store_count,
    materialized_reloads:.compile_report.allocation.materialized_reload_count,
    local:.compile_report.memory.local_bytes,
+   final_vgprs:.compile_report.target_resources.vector.final.register_count,
+   scheduled_vgpr_pressure:
+     .compile_report.target_resources.vector.scheduled_pressure.peak_live_units,
    private:.compile_report.memory.private_bytes}' \
   /tmp/loom-q6q8-run/results.jsonl
 ```
