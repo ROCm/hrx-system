@@ -4127,7 +4127,7 @@ static iree_status_t loom_amdgpu_emit_fragment_repack_source_register_masks(
       context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_LSHRREV_B32_LIT,
       loom_amdgpu_fragment_repack_log2_u16(plan->lane_group_count),
       lane_ids->lane_mod, vgpr_type, &low_source_selector));
-  for (uint16_t i = 0; i < plan->source_register_count; ++i) {
+  for (uint16_t i = 1; i < plan->source_register_count; ++i) {
     IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fragment_memory_cmp_u32_lit(
         context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_CMP_EQ_I32,
         low_source_selector, i, vgpr_type, mask_type,
