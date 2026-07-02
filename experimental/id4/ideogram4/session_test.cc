@@ -116,6 +116,13 @@ static iree_string_view_t ShortFullRequestJson() {
       "\"guidance_scale\":3.5}}");
 }
 
+static iree_string_view_t ManyStepFullRequestJson() {
+  return IREE_SV(
+      "{\"prompt\":\"a city\",\"generation\":{\"latent_width\":8,"
+      "\"latent_height\":8,\"denoise_steps\":12,\"seed\":1,"
+      "\"guidance_scale\":3.5}}");
+}
+
 static iree_string_view_t LongFullRequestJson() {
   return IREE_SV(
       "{\"prompt\":\"three people walking through a reflective city street "
@@ -847,6 +854,58 @@ TEST_F(SessionTest, SelectsGenerationResidencyWithinBudget) {
             conditioned_statistics.stage_serial_total_peak_byte_length);
   EXPECT_EQ(selection.selected_peak_byte_length,
             selection.resource_statistics.stage_serial_total_peak_byte_length);
+}
+
+TEST_F(SessionTest, ResidencySelectionScoresRepeatedPhaseIssueStages) {
+  TokenizerPtr tokenizer = LoadTokenizer();
+  ScopedRequest request;
+  IREE_ASSERT_OK(id4_ideogram4_request_parse_json(
+      ManyStepFullRequestJson(), iree_allocator_system(), &request.value));
+
+  SessionPtr session = CreateLoadedSession();
+  GenerationPlanPtr plan =
+      PlanGeneration(session.get(), tokenizer.get(), &request.value);
+
+  id4_ideogram4_generation_resource_statistics_t qwen_statistics =
+      EstimateGenerationResources(
+          plan.get(),
+          ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_SELECTED_STAGE_BUNDLES,
+          ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_QWEN);
+  id4_ideogram4_generation_resource_statistics_t conditioned_statistics =
+      EstimateGenerationResources(
+          plan.get(),
+          ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_SELECTED_STAGE_BUNDLES,
+          ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_DIT_CONDITIONED);
+  id4_ideogram4_generation_resource_statistics_t combined_statistics =
+      EstimateGenerationResources(
+          plan.get(),
+          ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_SELECTED_STAGE_BUNDLES,
+          ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_QWEN |
+              ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_DIT_CONDITIONED);
+  const iree_device_size_t individual_peak =
+      std::max(qwen_statistics.phase_concurrent_total_peak_byte_length,
+               conditioned_statistics.phase_concurrent_total_peak_byte_length);
+  ASSERT_GT(combined_statistics.phase_concurrent_total_peak_byte_length,
+            individual_peak);
+
+  const id4_ideogram4_generation_resident_stage_mask_t candidates =
+      ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_QWEN |
+      ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_DIT_CONDITIONED;
+  id4_ideogram4_generation_residency_selection_t selection =
+      SelectGenerationResidency(
+          plan.get(), ID4_IDEOGRAM4_GENERATION_ISSUE_POLICY_PHASE_CONCURRENT,
+          candidates,
+          combined_statistics.phase_concurrent_total_peak_byte_length - 1);
+
+  EXPECT_EQ(selection.residency_mode,
+            ID4_IDEOGRAM4_GENERATION_RESIDENCY_MODE_SELECTED_STAGE_BUNDLES);
+  EXPECT_EQ(selection.resident_stage_mask,
+            ID4_IDEOGRAM4_GENERATION_RESIDENT_STAGE_DIT_CONDITIONED);
+  EXPECT_LE(selection.selected_peak_byte_length,
+            combined_statistics.phase_concurrent_total_peak_byte_length - 1);
+  EXPECT_EQ(
+      selection.selected_peak_byte_length,
+      selection.resource_statistics.phase_concurrent_total_peak_byte_length);
 }
 
 TEST_F(SessionTest, ResidencySelectionRejectsImpossibleBudget) {

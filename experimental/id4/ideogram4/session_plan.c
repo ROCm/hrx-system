@@ -1027,11 +1027,7 @@ static iree_status_t id4_ideogram4_validate_generation_issue_policy(
 
 static uint32_t id4_ideogram4_generation_stage_issue_count(
     const id4_ideogram4_generation_plan_t* plan,
-    id4_ideogram4_generation_issue_policy_t issue_policy,
     id4_ideogram4_generation_stage_ordinal_t stage_ordinal) {
-  if (issue_policy != ID4_IDEOGRAM4_GENERATION_ISSUE_POLICY_STAGE_SERIAL) {
-    return 1;
-  }
   switch (stage_ordinal) {
     case ID4_IDEOGRAM4_GENERATION_STAGE_DIT_CONDITIONED:
     case ID4_IDEOGRAM4_GENERATION_STAGE_DIT_UNCONDITIONED:
@@ -1060,7 +1056,6 @@ static iree_status_t id4_ideogram4_generation_add_residency_score(
 
 static iree_status_t id4_ideogram4_generation_stage_residency_score(
     const id4_ideogram4_generation_plan_t* plan,
-    id4_ideogram4_generation_issue_policy_t issue_policy,
     id4_ideogram4_generation_stage_ordinal_t stage_ordinal,
     uint64_t* out_score) {
   id4_ideogram4_generation_stage_resource_statistics_t statistics;
@@ -1073,8 +1068,8 @@ static iree_status_t id4_ideogram4_generation_stage_residency_score(
       IREE_SV("resident.score")));
   const uint64_t avoided_mib =
       (uint64_t)id4_ideogram4_generation_ceil_mib(avoided_byte_length);
-  const uint64_t issue_count = id4_ideogram4_generation_stage_issue_count(
-      plan, issue_policy, stage_ordinal);
+  const uint64_t issue_count =
+      id4_ideogram4_generation_stage_issue_count(plan, stage_ordinal);
   if (issue_count != 0 && avoided_mib > UINT64_MAX / issue_count) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "Ideogram 4 generation residency score overflow");
@@ -1085,7 +1080,6 @@ static iree_status_t id4_ideogram4_generation_stage_residency_score(
 
 static iree_status_t id4_ideogram4_generation_residency_mask_score(
     const id4_ideogram4_generation_plan_t* plan,
-    id4_ideogram4_generation_issue_policy_t issue_policy,
     id4_ideogram4_generation_resident_stage_mask_t resident_stage_mask,
     uint64_t* out_score) {
   uint64_t score = 0;
@@ -1099,7 +1093,7 @@ static iree_status_t id4_ideogram4_generation_residency_mask_score(
     }
     uint64_t stage_score = 0;
     IREE_RETURN_IF_ERROR(id4_ideogram4_generation_stage_residency_score(
-        plan, issue_policy, descriptor->ordinal, &stage_score));
+        plan, descriptor->ordinal, &stage_score));
     IREE_RETURN_IF_ERROR(
         id4_ideogram4_generation_add_residency_score(&score, stage_score));
   }
@@ -1218,7 +1212,7 @@ iree_status_t id4_ideogram4_generation_plan_select_residency(
 
     uint64_t score = 0;
     IREE_RETURN_IF_ERROR(id4_ideogram4_generation_residency_mask_score(
-        plan, options->issue_policy, stage_mask, &score));
+        plan, stage_mask, &score));
     const bool better_score = score > best_score;
     const bool equal_score_better_peak =
         score == best_score &&
