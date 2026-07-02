@@ -87,6 +87,7 @@ iree_runtime_cc_test(
     name = "parameter_index_provider_test",
     srcs = ["parameter_index_provider_test.cc"],
     deps = [
+        ":file_handle",
         ":parameter_index",
         ":parameter_index_provider",
         ":parameter_provider",

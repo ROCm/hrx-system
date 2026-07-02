@@ -93,6 +93,7 @@ iree_cc_test(
   SRCS
     "parameter_index_provider_test.cc"
   DEPS
+    ::file_handle
     ::parameter_index
     ::parameter_index_provider
     ::parameter_provider
