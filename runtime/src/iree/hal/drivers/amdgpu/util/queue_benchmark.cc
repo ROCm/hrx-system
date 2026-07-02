@@ -7,9 +7,12 @@
 #include <benchmark/benchmark.h>
 
 #include <algorithm>
+#include <cerrno>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <string>
+#include <vector>
 
 #include "iree/async/frontier_tracker.h"
 #include "iree/async/util/proactor_pool.h"
@@ -31,6 +34,11 @@
 #include "iree/hal/drivers/amdgpu/util/benchmark_flags.h"
 #include "iree/hal/memory/tlsf_pool.h"
 #include "iree/io/file_contents.h"
+#include "iree/io/file_handle.h"
+
+#if IREE_FILE_IO_ENABLE
+#include <unistd.h>
+#endif  // IREE_FILE_IO_ENABLE
 
 IREE_FLAG(
     string, binding_count_executable_file, "",
@@ -52,6 +60,7 @@ constexpr iree_device_size_t kPayloadLength = sizeof(uint32_t);
 constexpr iree_host_size_t kDispatchBindingBenchmarkMaxCount = 256;
 constexpr iree_host_size_t kDispatchBindingBenchmarkVariantCapacity =
     kDispatchBindingBenchmarkMaxCount + 1;
+constexpr iree_host_size_t kStagedReadChainMaxRegionCount = 20;
 constexpr int64_t kProfileGuardrailBindingCount = 1;
 constexpr int64_t kProfileGuardrailIterations = 200;
 constexpr int64_t kProfileGuardrailOperationCount = 20;
@@ -79,6 +88,55 @@ enum class QueueAllocaTlsfGrowthMode : int64_t {
   kWarm = 0,
   kForcedGrowth = 1,
 };
+
+static iree_status_t WriteAll(int fd, const uint8_t* data, size_t length) {
+#if IREE_FILE_IO_ENABLE
+  size_t total_written = 0;
+  while (total_written < length) {
+    const ssize_t written =
+        write(fd, data + total_written, length - total_written);
+    if (written < 0 && errno == EINTR) continue;
+    if (written < 0) {
+      return iree_make_status(iree_status_code_from_errno(errno),
+                              "write failed after %" PRIhsz " of %" PRIhsz
+                              " bytes: %s",
+                              total_written, length, strerror(errno));
+    }
+    if (written == 0) {
+      return iree_make_status(IREE_STATUS_UNAVAILABLE,
+                              "write made no progress after %" PRIhsz
+                              " of %" PRIhsz " bytes",
+                              total_written, length);
+    }
+    total_written += (size_t)written;
+  }
+  return iree_ok_status();
+#else
+  (void)fd;
+  (void)data;
+  (void)length;
+  return iree_make_status(IREE_STATUS_UNAVAILABLE, "file I/O is disabled");
+#endif  // IREE_FILE_IO_ENABLE
+}
+
+static iree_status_t ImportFdFile(iree_hal_device_t* device,
+                                  const std::string& path,
+                                  iree_hal_memory_access_t access,
+                                  iree_hal_file_t** out_file) {
+  iree_io_file_mode_t mode = IREE_IO_FILE_MODE_READ | IREE_IO_FILE_MODE_ASYNC;
+  if (iree_all_bits_set(access, IREE_HAL_MEMORY_ACCESS_WRITE)) {
+    mode |= IREE_IO_FILE_MODE_WRITE;
+  }
+  iree_io_file_handle_t* handle = nullptr;
+  IREE_RETURN_IF_ERROR(
+      iree_io_file_handle_open(mode, iree_make_cstring_view(path.c_str()),
+                               iree_allocator_system(), &handle));
+  iree_status_t status =
+      iree_hal_file_import(device, IREE_HAL_QUEUE_AFFINITY_ANY, access, handle,
+                           IREE_HAL_EXTERNAL_FILE_FLAG_NONE, out_file);
+  iree_io_file_handle_release(handle);
+  return status;
+}
 
 constexpr iree_hal_buffer_params_t kQueueAllocaBufferParams = {
     /*usage=*/IREE_HAL_BUFFER_USAGE_TRANSFER |
@@ -250,6 +308,10 @@ class QueueBenchmark : public benchmark::Fixture {
     iree_hal_executable_release(binding_count_executable_);
     iree_hal_executable_cache_release(binding_count_executable_cache_);
     iree_io_file_contents_free(binding_count_executable_file_contents_);
+    iree_hal_file_release(staged_read_file_);
+#if IREE_FILE_IO_ENABLE
+    if (!staged_read_file_path_.empty()) unlink(staged_read_file_path_.c_str());
+#endif  // IREE_FILE_IO_ENABLE
     iree_hal_executable_release(dispatch_executable_);
     iree_hal_executable_cache_release(dispatch_executable_cache_);
     iree_hal_device_release(device_);
@@ -258,6 +320,9 @@ class QueueBenchmark : public benchmark::Fixture {
     binding_count_executable_ = nullptr;
     binding_count_executable_cache_ = nullptr;
     binding_count_executable_file_contents_ = nullptr;
+    staged_read_file_ = nullptr;
+    staged_read_file_path_.clear();
+    staged_read_file_byte_length_ = 0;
     dispatch_executable_ = nullptr;
     dispatch_executable_cache_ = nullptr;
     device_ = nullptr;
@@ -750,6 +815,17 @@ class QueueBenchmark : public benchmark::Fixture {
     return iree_ok_status();
   }
 
+  iree_status_t QueueTransientAllocaWithLists(
+      iree_hal_semaphore_list_t wait_semaphore_list,
+      iree_hal_semaphore_list_t signal_semaphore_list,
+      iree_device_size_t allocation_size, iree_hal_buffer_t** out_buffer) {
+    *out_buffer = nullptr;
+    return iree_hal_device_queue_alloca(
+        device_, kQueue0, wait_semaphore_list, signal_semaphore_list,
+        /*pool=*/nullptr, kQueueAllocaBufferParams, allocation_size,
+        IREE_HAL_ALLOCA_FLAG_NONE, out_buffer);
+  }
+
   iree_status_t QueueAllocaCleanup(iree_hal_buffer_t* buffer,
                                    SubmittedCompletion alloca_completion) {
     IREE_RETURN_IF_ERROR(
@@ -930,6 +1006,273 @@ class QueueBenchmark : public benchmark::Fixture {
     SubmittedCompletion completion;
     IREE_RETURN_IF_ERROR(SameQueueEpochChainSubmit(batch_count, &completion));
     return Wait(completion.semaphore, completion.payload_value);
+  }
+
+  iree_status_t StagedReadRegionSubmit(iree_device_size_t byte_length,
+                                       bool signal_public_completion,
+                                       iree_hal_buffer_t** out_buffer) {
+    *out_buffer = nullptr;
+    if (IREE_UNLIKELY(byte_length < kPayloadLength)) {
+      return iree_make_status(
+          IREE_STATUS_OUT_OF_RANGE,
+          "staged-read byte length must be at least %" PRIu64 " bytes",
+          (uint64_t)kPayloadLength);
+    }
+
+    iree_hal_semaphore_t* stream_semaphore = stream_semaphore_;
+    iree_hal_semaphore_list_t alloca_wait_list =
+        iree_hal_semaphore_list_empty();
+    if (stream_payload_value_ != 0) {
+      alloca_wait_list = {
+          /*count=*/1,
+          /*semaphores=*/&stream_semaphore,
+          /*payload_values=*/&stream_payload_value_,
+      };
+    }
+
+    uint64_t alloca_signal_value = stream_payload_value_ + 1;
+    uint64_t read_signal_value = stream_payload_value_ + 2;
+    uint64_t fill_signal_value = stream_payload_value_ + 3;
+    uint64_t dealloca_signal_value = stream_payload_value_ + 4;
+
+    iree_hal_semaphore_list_t alloca_signal_list = {
+        /*count=*/1,
+        /*semaphores=*/&stream_semaphore,
+        /*payload_values=*/&alloca_signal_value,
+    };
+    iree_hal_buffer_t* transient_buffer = nullptr;
+    IREE_RETURN_IF_ERROR(QueueTransientAllocaWithLists(
+        alloca_wait_list, alloca_signal_list, byte_length, &transient_buffer));
+
+    iree_status_t status = iree_ok_status();
+    iree_hal_semaphore_list_t read_wait_list = {
+        /*count=*/1,
+        /*semaphores=*/&stream_semaphore,
+        /*payload_values=*/&alloca_signal_value,
+    };
+    iree_hal_semaphore_list_t read_signal_list = {
+        /*count=*/1,
+        /*semaphores=*/&stream_semaphore,
+        /*payload_values=*/&read_signal_value,
+    };
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_device_queue_read(
+          device_, kQueue0, read_wait_list, read_signal_list, staged_read_file_,
+          /*source_offset=*/0, transient_buffer,
+          /*target_offset=*/0, byte_length, IREE_HAL_READ_FLAG_NONE);
+    }
+
+    iree_hal_semaphore_list_t fill_wait_list = {
+        /*count=*/1,
+        /*semaphores=*/&stream_semaphore,
+        /*payload_values=*/&read_signal_value,
+    };
+    iree_hal_semaphore_list_t fill_signal_list = {
+        /*count=*/1,
+        /*semaphores=*/&stream_semaphore,
+        /*payload_values=*/&fill_signal_value,
+    };
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_device_queue_fill(
+          device_, kQueue0, fill_wait_list, fill_signal_list, transient_buffer,
+          /*target_offset=*/0, kPayloadLength, &fill_pattern_,
+          sizeof(fill_pattern_), IREE_HAL_FILL_FLAG_NONE);
+    }
+
+    iree_hal_semaphore_t* dealloca_signal_semaphores[2] = {
+        stream_semaphore_,
+        completion_semaphore_,
+    };
+    uint64_t dealloca_signal_payload_values[2] = {
+        dealloca_signal_value,
+        completion_payload_value_ + 1,
+    };
+    iree_hal_semaphore_list_t dealloca_wait_list = {
+        /*count=*/1,
+        /*semaphores=*/&stream_semaphore,
+        /*payload_values=*/&fill_signal_value,
+    };
+    iree_hal_semaphore_list_t dealloca_signal_list = {
+        /*count=*/signal_public_completion ? 2u : 1u,
+        /*semaphores=*/dealloca_signal_semaphores,
+        /*payload_values=*/dealloca_signal_payload_values,
+    };
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_device_queue_dealloca(
+          device_, kQueue0, dealloca_wait_list, dealloca_signal_list,
+          transient_buffer, IREE_HAL_DEALLOCA_FLAG_NONE);
+    }
+
+    if (iree_status_is_ok(status)) {
+      stream_payload_value_ = dealloca_signal_value;
+      if (signal_public_completion) {
+        ++completion_payload_value_;
+      }
+      *out_buffer = transient_buffer;
+    } else {
+      iree_hal_buffer_release(transient_buffer);
+    }
+    return status;
+  }
+
+  iree_status_t StagedReadExecuteRegionSubmit(iree_device_size_t byte_length,
+                                              bool signal_public_completion,
+                                              iree_hal_buffer_t** out_buffer) {
+    *out_buffer = nullptr;
+    if (IREE_UNLIKELY(byte_length < kPayloadLength)) {
+      return iree_make_status(
+          IREE_STATUS_OUT_OF_RANGE,
+          "staged-read byte length must be at least %" PRIu64 " bytes",
+          (uint64_t)kPayloadLength);
+    }
+
+    iree_hal_semaphore_t* stream_semaphore = stream_semaphore_;
+    iree_hal_semaphore_list_t alloca_wait_list =
+        iree_hal_semaphore_list_empty();
+    if (stream_payload_value_ != 0) {
+      alloca_wait_list = {
+          /*count=*/1,
+          /*semaphores=*/&stream_semaphore,
+          /*payload_values=*/&stream_payload_value_,
+      };
+    }
+
+    uint64_t alloca_signal_value = stream_payload_value_ + 1;
+    uint64_t read_signal_value = stream_payload_value_ + 2;
+    uint64_t execute_signal_value = stream_payload_value_ + 3;
+    uint64_t dealloca_signal_value = stream_payload_value_ + 4;
+
+    iree_hal_semaphore_list_t alloca_signal_list = {
+        /*count=*/1,
+        /*semaphores=*/&stream_semaphore,
+        /*payload_values=*/&alloca_signal_value,
+    };
+    iree_hal_buffer_t* transient_buffer = nullptr;
+    IREE_RETURN_IF_ERROR(QueueTransientAllocaWithLists(
+        alloca_wait_list, alloca_signal_list, byte_length, &transient_buffer));
+
+    iree_status_t status = iree_ok_status();
+    iree_hal_semaphore_list_t read_wait_list = {
+        /*count=*/1,
+        /*semaphores=*/&stream_semaphore,
+        /*payload_values=*/&alloca_signal_value,
+    };
+    iree_hal_semaphore_list_t read_signal_list = {
+        /*count=*/1,
+        /*semaphores=*/&stream_semaphore,
+        /*payload_values=*/&read_signal_value,
+    };
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_device_queue_read(
+          device_, kQueue0, read_wait_list, read_signal_list, staged_read_file_,
+          /*source_offset=*/0, transient_buffer,
+          /*target_offset=*/0, byte_length, IREE_HAL_READ_FLAG_NONE);
+    }
+
+    iree_hal_semaphore_list_t execute_wait_list = {
+        /*count=*/1,
+        /*semaphores=*/&stream_semaphore,
+        /*payload_values=*/&read_signal_value,
+    };
+    iree_hal_semaphore_list_t execute_signal_list = {
+        /*count=*/1,
+        /*semaphores=*/&stream_semaphore,
+        /*payload_values=*/&execute_signal_value,
+    };
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_device_queue_execute(
+          device_, kQueue0, execute_wait_list, execute_signal_list,
+          binding_count_command_buffers_[1],
+          iree_hal_buffer_binding_table_empty(), IREE_HAL_EXECUTE_FLAG_NONE);
+    }
+
+    iree_hal_semaphore_t* dealloca_signal_semaphores[2] = {
+        stream_semaphore_,
+        completion_semaphore_,
+    };
+    uint64_t dealloca_signal_payload_values[2] = {
+        dealloca_signal_value,
+        completion_payload_value_ + 1,
+    };
+    iree_hal_semaphore_list_t dealloca_wait_list = {
+        /*count=*/1,
+        /*semaphores=*/&stream_semaphore,
+        /*payload_values=*/&execute_signal_value,
+    };
+    iree_hal_semaphore_list_t dealloca_signal_list = {
+        /*count=*/signal_public_completion ? 2u : 1u,
+        /*semaphores=*/dealloca_signal_semaphores,
+        /*payload_values=*/dealloca_signal_payload_values,
+    };
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_device_queue_dealloca(
+          device_, kQueue0, dealloca_wait_list, dealloca_signal_list,
+          transient_buffer, IREE_HAL_DEALLOCA_FLAG_NONE);
+    }
+
+    if (iree_status_is_ok(status)) {
+      stream_payload_value_ = dealloca_signal_value;
+      if (signal_public_completion) {
+        ++completion_payload_value_;
+      }
+      *out_buffer = transient_buffer;
+    } else {
+      iree_hal_buffer_release(transient_buffer);
+    }
+    return status;
+  }
+
+  iree_status_t StagedReadChainSubmit(int64_t region_count,
+                                      iree_device_size_t byte_length,
+                                      iree_hal_buffer_t** buffers,
+                                      iree_host_size_t* out_buffer_count,
+                                      SubmittedCompletion* out_completion) {
+    *out_buffer_count = 0;
+    *out_completion = {};
+    if (IREE_UNLIKELY(region_count <= 0 ||
+                      region_count > (int64_t)kStagedReadChainMaxRegionCount)) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "staged-read region count must be in [1, %" PRIhsz
+                              "]",
+                              kStagedReadChainMaxRegionCount);
+    }
+
+    for (int64_t i = 0; i < region_count; ++i) {
+      const bool is_final_region = i + 1 == region_count;
+      iree_hal_buffer_t* buffer = nullptr;
+      IREE_RETURN_IF_ERROR(
+          StagedReadRegionSubmit(byte_length, is_final_region, &buffer));
+      buffers[(*out_buffer_count)++] = buffer;
+    }
+
+    *out_completion = {completion_semaphore_, completion_payload_value_};
+    return iree_ok_status();
+  }
+
+  iree_status_t StagedReadExecuteChainSubmit(
+      int64_t region_count, iree_device_size_t byte_length,
+      iree_hal_buffer_t** buffers, iree_host_size_t* out_buffer_count,
+      SubmittedCompletion* out_completion) {
+    *out_buffer_count = 0;
+    *out_completion = {};
+    if (IREE_UNLIKELY(region_count <= 0 ||
+                      region_count > (int64_t)kStagedReadChainMaxRegionCount)) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "staged-read region count must be in [1, %" PRIhsz
+                              "]",
+                              kStagedReadChainMaxRegionCount);
+    }
+
+    for (int64_t i = 0; i < region_count; ++i) {
+      const bool is_final_region = i + 1 == region_count;
+      iree_hal_buffer_t* buffer = nullptr;
+      IREE_RETURN_IF_ERROR(
+          StagedReadExecuteRegionSubmit(byte_length, is_final_region, &buffer));
+      buffers[(*out_buffer_count)++] = buffer;
+    }
+
+    *out_completion = {completion_semaphore_, completion_payload_value_};
+    return iree_ok_status();
   }
 
   iree_status_t CrossQueueAlreadyCompletedWaitAndSignal() {
@@ -1316,6 +1659,22 @@ class QueueBenchmark : public benchmark::Fixture {
     SetQueueSubmissionsProcessed(state, operation_count);
   }
 
+  void SetStagedReadCounters(benchmark::State& state, int64_t region_count,
+                             iree_device_size_t byte_length) {
+    state.counters["regions_per_sync"] = static_cast<double>(region_count);
+    state.counters["source_bytes_per_region"] =
+        static_cast<double>(byte_length);
+    state.counters["source_bytes_per_sync"] =
+        static_cast<double>(region_count) * static_cast<double>(byte_length);
+    state.counters["caller_hal_operations_per_sync"] =
+        static_cast<double>(region_count * 4);
+    state.counters["public_completion_signals_per_sync"] = 1.0;
+    SetQueueSubmissionsProcessed(
+        state,
+        /*queue_submissions_per_sync=*/region_count * 4);
+    state.SetBytesProcessed(state.iterations() * region_count * byte_length);
+  }
+
   void SetQueueAllocaCounters(benchmark::State& state,
                               iree_device_size_t allocation_size,
                               QueueAllocaTlsfGrowthMode growth_mode) {
@@ -1367,6 +1726,75 @@ class QueueBenchmark : public benchmark::Fixture {
   bool EnsurePayloadBuffers(benchmark::State& state) {
     if (source_buffer_ && target_buffer_) return true;
     return AllocatePayloadBuffers(state);
+  }
+
+  bool EnsureStagedReadFile(benchmark::State& state,
+                            iree_device_size_t byte_length) {
+#if IREE_FILE_IO_ENABLE
+    if (staged_read_file_ && staged_read_file_byte_length_ >= byte_length) {
+      return true;
+    }
+    iree_hal_file_release(staged_read_file_);
+    staged_read_file_ = nullptr;
+    staged_read_file_byte_length_ = 0;
+    if (!staged_read_file_path_.empty()) {
+      unlink(staged_read_file_path_.c_str());
+      staged_read_file_path_.clear();
+    }
+
+    if (byte_length > (iree_device_size_t)INT64_MAX) {
+      return HandleStatus(state,
+                          iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                           "staged-read file is too large"),
+                          "failed to create staged-read file");
+    }
+    constexpr size_t kPatternPrefixLength = 4096;
+    std::vector<uint8_t> data((size_t)iree_min(
+        byte_length, (iree_device_size_t)kPatternPrefixLength));
+    for (size_t i = 0; i < data.size(); ++i) {
+      data[i] = static_cast<uint8_t>((i * 131 + (i >> 7) * 17 + 0x5A) & 0xFF);
+    }
+
+    char temp_path[] = "/tmp/iree_hal_amdgpu_queue_benchmark_XXXXXX";
+    int fd = mkstemp(temp_path);
+    if (fd < 0) {
+      return HandleStatus(
+          state,
+          iree_make_status(iree_status_code_from_errno(errno),
+                           "mkstemp failed: %s", strerror(errno)),
+          "failed to create staged-read file");
+    }
+    iree_status_t status = iree_ok_status();
+    if (ftruncate(fd, (off_t)byte_length) != 0) {
+      status = iree_make_status(iree_status_code_from_errno(errno),
+                                "ftruncate failed: %s", strerror(errno));
+    }
+    if (iree_status_is_ok(status)) {
+      status = WriteAll(fd, data.data(), data.size());
+    }
+    if (close(fd) != 0) {
+      status = iree_status_join(
+          status, iree_make_status(iree_status_code_from_errno(errno),
+                                   "close failed: %s", strerror(errno)));
+    }
+    if (iree_status_is_ok(status)) {
+      staged_read_file_path_ = temp_path;
+      status = ImportFdFile(device_, staged_read_file_path_,
+                            IREE_HAL_MEMORY_ACCESS_READ, &staged_read_file_);
+    }
+    if (!iree_status_is_ok(status)) {
+      unlink(temp_path);
+      staged_read_file_path_.clear();
+    }
+    if (iree_status_is_ok(status)) {
+      staged_read_file_byte_length_ = byte_length;
+    }
+    return HandleStatus(state, status, "failed to create staged-read file");
+#else
+    (void)byte_length;
+    state.SkipWithError("file I/O is disabled");
+    return false;
+#endif  // IREE_FILE_IO_ENABLE
   }
 
   iree_status_t LoadExecutableFromData(
@@ -2180,6 +2608,12 @@ class QueueBenchmark : public benchmark::Fixture {
   static iree_hal_executable_t* binding_count_executable_;
   // Optional file contents backing an externally loaded binding-count HSACO.
   static iree_io_file_contents_t* binding_count_executable_file_contents_;
+  // Async source file used by staged queue-read chain benchmark rows.
+  static iree_hal_file_t* staged_read_file_;
+  // Temporary path backing |staged_read_file_|.
+  static std::string staged_read_file_path_;
+  // Byte length of the temporary source file backing |staged_read_file_|.
+  static iree_device_size_t staged_read_file_byte_length_;
 
   // Precomputed dispatch packet body used by direct-substrate attribution rows.
   iree_hsa_kernel_dispatch_packet_t pre_resolved_dispatch_packet_template_ = {};
@@ -2238,6 +2672,9 @@ iree_hal_executable_cache_t* QueueBenchmark::binding_count_executable_cache_ =
 iree_hal_executable_t* QueueBenchmark::binding_count_executable_ = nullptr;
 iree_io_file_contents_t*
     QueueBenchmark::binding_count_executable_file_contents_ = nullptr;
+iree_hal_file_t* QueueBenchmark::staged_read_file_ = nullptr;
+std::string QueueBenchmark::staged_read_file_path_;
+iree_device_size_t QueueBenchmark::staged_read_file_byte_length_ = 0;
 
 BENCHMARK_DEFINE_F(QueueBenchmark,
                    SameQueueBarrierWait)(benchmark::State& state) {
@@ -3213,6 +3650,129 @@ BENCHMARK_DEFINE_F(QueueBenchmark,
   SetSingleStreamPayloadCounters(state, operation_count);
 }
 
+BENCHMARK_DEFINE_F(QueueBenchmark, SameQueueStagedReadChainPublicFinalInline)(
+    benchmark::State& state) {
+  const int64_t region_count = state.range(0);
+  const iree_device_size_t byte_length = (iree_device_size_t)state.range(1);
+  if (!EnsureStagedReadFile(state, byte_length)) return;
+
+  for (auto _ : state) {
+    iree_hal_buffer_t* buffers[kStagedReadChainMaxRegionCount] = {};
+    iree_host_size_t buffer_count = 0;
+    SubmittedCompletion completion;
+    if (!HandleStatus(state,
+                      StagedReadChainSubmit(region_count, byte_length, buffers,
+                                            &buffer_count, &completion),
+                      "staged-read chain submit failed")) {
+      break;
+    }
+    iree_status_t status = Wait(completion.semaphore, completion.payload_value);
+    for (iree_host_size_t i = 0; i < buffer_count; ++i) {
+      iree_hal_buffer_release(buffers[i]);
+    }
+    if (!HandleStatus(state, status, "staged-read chain wait failed")) {
+      break;
+    }
+  }
+  SetStagedReadCounters(state, region_count, byte_length);
+}
+
+BENCHMARK_DEFINE_F(QueueBenchmark,
+                   SameQueueStagedReadChainPublicFinalInlineSubmitOnly)(
+    benchmark::State& state) {
+  const int64_t region_count = state.range(0);
+  const iree_device_size_t byte_length = (iree_device_size_t)state.range(1);
+  if (!EnsureStagedReadFile(state, byte_length)) return;
+
+  for (auto _ : state) {
+    iree_hal_buffer_t* buffers[kStagedReadChainMaxRegionCount] = {};
+    iree_host_size_t buffer_count = 0;
+    SubmittedCompletion completion;
+    if (!HandleStatus(state,
+                      StagedReadChainSubmit(region_count, byte_length, buffers,
+                                            &buffer_count, &completion),
+                      "staged-read chain submit failed")) {
+      break;
+    }
+    state.PauseTiming();
+    iree_status_t status = Wait(completion.semaphore, completion.payload_value);
+    for (iree_host_size_t i = 0; i < buffer_count; ++i) {
+      iree_hal_buffer_release(buffers[i]);
+    }
+    state.ResumeTiming();
+    if (!HandleStatus(state, status, "staged-read chain wait failed")) {
+      break;
+    }
+  }
+  SetStagedReadCounters(state, region_count, byte_length);
+}
+
+BENCHMARK_DEFINE_F(QueueBenchmark,
+                   SameQueueStagedReadExecuteChainPublicFinalInline)(
+    benchmark::State& state) {
+  const int64_t region_count = state.range(0);
+  const iree_device_size_t byte_length = (iree_device_size_t)state.range(1);
+  if (!EnsureStagedReadFile(state, byte_length) ||
+      !EnsureBindingCountCommandBuffer(state, 1)) {
+    return;
+  }
+
+  for (auto _ : state) {
+    iree_hal_buffer_t* buffers[kStagedReadChainMaxRegionCount] = {};
+    iree_host_size_t buffer_count = 0;
+    SubmittedCompletion completion;
+    if (!HandleStatus(
+            state,
+            StagedReadExecuteChainSubmit(region_count, byte_length, buffers,
+                                         &buffer_count, &completion),
+            "staged-read execute chain submit failed")) {
+      break;
+    }
+    iree_status_t status = Wait(completion.semaphore, completion.payload_value);
+    for (iree_host_size_t i = 0; i < buffer_count; ++i) {
+      iree_hal_buffer_release(buffers[i]);
+    }
+    if (!HandleStatus(state, status, "staged-read execute chain wait failed")) {
+      break;
+    }
+  }
+  SetStagedReadCounters(state, region_count, byte_length);
+}
+
+BENCHMARK_DEFINE_F(QueueBenchmark,
+                   SameQueueStagedReadExecuteChainPublicFinalInlineSubmitOnly)(
+    benchmark::State& state) {
+  const int64_t region_count = state.range(0);
+  const iree_device_size_t byte_length = (iree_device_size_t)state.range(1);
+  if (!EnsureStagedReadFile(state, byte_length) ||
+      !EnsureBindingCountCommandBuffer(state, 1)) {
+    return;
+  }
+
+  for (auto _ : state) {
+    iree_hal_buffer_t* buffers[kStagedReadChainMaxRegionCount] = {};
+    iree_host_size_t buffer_count = 0;
+    SubmittedCompletion completion;
+    if (!HandleStatus(
+            state,
+            StagedReadExecuteChainSubmit(region_count, byte_length, buffers,
+                                         &buffer_count, &completion),
+            "staged-read execute chain submit failed")) {
+      break;
+    }
+    state.PauseTiming();
+    iree_status_t status = Wait(completion.semaphore, completion.payload_value);
+    for (iree_host_size_t i = 0; i < buffer_count; ++i) {
+      iree_hal_buffer_release(buffers[i]);
+    }
+    state.ResumeTiming();
+    if (!HandleStatus(state, status, "staged-read execute chain wait failed")) {
+      break;
+    }
+  }
+  SetStagedReadCounters(state, region_count, byte_length);
+}
+
 BENCHMARK_DEFINE_F(QueueBenchmark,
                    DispatchValidateOnly)(benchmark::State& state) {
   if (!EnsurePayloadBuffers(state)) return;
@@ -3920,6 +4480,29 @@ BENCHMARK_REGISTER_F(QueueBenchmark,
     ->Arg(20)
     ->Arg(1000)
     ->ArgName("operation_count")
+    ->UseRealTime()
+    ->Unit(benchmark::kMicrosecond);
+BENCHMARK_REGISTER_F(QueueBenchmark, SameQueueStagedReadChainPublicFinalInline)
+    ->ArgsProduct({{1, 4, 20}, {65536, 2097152, 67108864, 268435456}})
+    ->ArgNames({"region_count", "source_byte_length"})
+    ->UseRealTime()
+    ->Unit(benchmark::kMicrosecond);
+BENCHMARK_REGISTER_F(QueueBenchmark,
+                     SameQueueStagedReadChainPublicFinalInlineSubmitOnly)
+    ->ArgsProduct({{1, 4, 20}, {65536, 2097152, 67108864, 268435456}})
+    ->ArgNames({"region_count", "source_byte_length"})
+    ->UseRealTime()
+    ->Unit(benchmark::kMicrosecond);
+BENCHMARK_REGISTER_F(QueueBenchmark,
+                     SameQueueStagedReadExecuteChainPublicFinalInline)
+    ->ArgsProduct({{1, 4, 20}, {65536, 2097152, 67108864, 268435456}})
+    ->ArgNames({"region_count", "source_byte_length"})
+    ->UseRealTime()
+    ->Unit(benchmark::kMicrosecond);
+BENCHMARK_REGISTER_F(QueueBenchmark,
+                     SameQueueStagedReadExecuteChainPublicFinalInlineSubmitOnly)
+    ->ArgsProduct({{1, 4, 20}, {65536, 2097152, 67108864, 268435456}})
+    ->ArgNames({"region_count", "source_byte_length"})
     ->UseRealTime()
     ->Unit(benchmark::kMicrosecond);
 BENCHMARK_REGISTER_F(QueueBenchmark, DispatchValidateOnly)

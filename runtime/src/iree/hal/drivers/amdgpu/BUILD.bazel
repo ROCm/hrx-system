@@ -609,6 +609,52 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_test(
+    name = "host_queue_command_buffer_lifetime_test",
+    srcs = [
+        "host_queue_command_buffer_lifetime_test.cc",
+        "host_queue_command_buffer_packet.h",
+        "host_queue_command_buffer_test_util.h",
+    ],
+    deps = [
+        ":amdgpu",
+        ":headers",
+        ":queue_affinity",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/cts/util:registry",
+        "//runtime/src/iree/hal/cts/util:test_base",
+        "//runtime/src/iree/hal/drivers/amdgpu/cts:testdata_amdgpu",
+        "//runtime/src/iree/hal/drivers/amdgpu/cts:tsan_executable_testdata_amdgpu",
+        "//runtime/src/iree/hal/drivers/amdgpu/util:packet",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "host_queue_command_buffer_deferred_test",
+    srcs = [
+        "host_queue_command_buffer_deferred_test.cc",
+        "host_queue_command_buffer_packet.h",
+        "host_queue_command_buffer_test_util.h",
+    ],
+    deps = [
+        ":amdgpu",
+        ":headers",
+        ":queue_affinity",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/cts/util:registry",
+        "//runtime/src/iree/hal/cts/util:test_base",
+        "//runtime/src/iree/hal/drivers/amdgpu/cts:testdata_amdgpu",
+        "//runtime/src/iree/hal/drivers/amdgpu/cts:tsan_executable_testdata_amdgpu",
+        "//runtime/src/iree/hal/drivers/amdgpu/util:packet",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
     name = "host_queue_command_buffer_profiling_test",
     srcs = [
         "host_queue_command_buffer_packet.h",

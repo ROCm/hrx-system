@@ -77,6 +77,46 @@ static iree_status_t iree_hal_amdgpu_host_queue_resolve_binding_base_ptr(
   return iree_ok_status();
 }
 
+iree_status_t iree_hal_amdgpu_host_queue_resolve_command_buffer_binding_ptrs(
+    iree_hal_command_buffer_t* command_buffer,
+    iree_hal_buffer_binding_table_t binding_table, uint64_t* out_binding_ptrs) {
+  const uint32_t binding_count = command_buffer->binding_count;
+  if (binding_count == 0) return iree_ok_status();
+  if (IREE_UNLIKELY(binding_table.count < binding_count)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "queue_execute binding table count %" PRIhsz
+                            " is smaller than command-buffer binding count %u",
+                            binding_table.count, binding_count);
+  }
+  if (IREE_UNLIKELY(!binding_table.bindings)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "queue_execute binding table storage is NULL for %u bindings",
+        binding_count);
+  }
+
+  iree_status_t status = iree_ok_status();
+  for (uint32_t i = 0; i < binding_count && iree_status_is_ok(status); ++i) {
+    if (!binding_table.bindings[i].buffer) {
+      if (IREE_UNLIKELY(binding_table.bindings[i].offset != 0 ||
+                        binding_table.bindings[i].length != 0)) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "queue_execute binding table slot %" PRIu32
+                                " is a NULL binding with non-zero range",
+                                i);
+      }
+      out_binding_ptrs[i] = 0;
+      continue;
+    }
+    status = iree_hal_amdgpu_host_queue_resolve_binding_base_ptr(
+        &binding_table.bindings[i], &out_binding_ptrs[i]);
+    if (!iree_status_is_ok(status)) {
+      status = iree_status_annotate_f(status, "binding_table[%" PRIu32 "]", i);
+    }
+  }
+  return status;
+}
+
 static iree_status_t
 iree_hal_amdgpu_host_queue_prepare_command_buffer_binding_ptrs(
     iree_hal_amdgpu_host_queue_t* queue,
@@ -110,35 +150,6 @@ iree_hal_amdgpu_host_queue_prepare_command_buffer_binding_ptrs(
           command_buffer, binding_table, binding_ptrs);
   if (iree_status_is_ok(status)) {
     *out_binding_ptrs = binding_ptrs;
-  }
-  return status;
-}
-
-iree_status_t iree_hal_amdgpu_host_queue_resolve_command_buffer_binding_ptrs(
-    iree_hal_command_buffer_t* command_buffer,
-    iree_hal_buffer_binding_table_t binding_table, uint64_t* out_binding_ptrs) {
-  const uint32_t binding_count = command_buffer->binding_count;
-  if (binding_count == 0) return iree_ok_status();
-  if (IREE_UNLIKELY(binding_table.count < binding_count)) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "queue_execute binding table count %" PRIhsz
-                            " is smaller than command-buffer binding count %u",
-                            binding_table.count, binding_count);
-  }
-  if (IREE_UNLIKELY(!binding_table.bindings)) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "queue_execute binding table storage is NULL for %u bindings",
-        binding_count);
-  }
-
-  iree_status_t status = iree_ok_status();
-  for (uint32_t i = 0; i < binding_count && iree_status_is_ok(status); ++i) {
-    status = iree_hal_amdgpu_host_queue_resolve_binding_base_ptr(
-        &binding_table.bindings[i], &out_binding_ptrs[i]);
-    if (!iree_status_is_ok(status)) {
-      status = iree_status_annotate_f(status, "binding_table[%" PRIu32 "]", i);
-    }
   }
   return status;
 }

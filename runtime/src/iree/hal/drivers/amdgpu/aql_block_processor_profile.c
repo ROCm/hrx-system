@@ -442,6 +442,54 @@ iree_hal_amdgpu_aql_block_processor_profile_resolve_dispatch_kernel_object(
 }
 
 static iree_status_t
+iree_hal_amdgpu_aql_block_processor_profile_validate_dynamic_binding_source(
+    iree_hal_buffer_binding_table_t binding_table,
+    const iree_hal_amdgpu_command_buffer_binding_source_t* binding_source) {
+  if (IREE_UNLIKELY(binding_source->slot >= binding_table.count)) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "AQL command-buffer dynamic binding slot %u exceeds binding table "
+        "count %" PRIhsz,
+        binding_source->slot, binding_table.count);
+  }
+  if (IREE_UNLIKELY(!binding_table.bindings)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "AQL command-buffer dynamic binding has no binding table storage");
+  }
+  const iree_hal_buffer_binding_t* binding =
+      &binding_table.bindings[binding_source->slot];
+  if (IREE_UNLIKELY(!binding->buffer)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "AQL command-buffer dynamic binding slot %u is NULL",
+        binding_source->slot);
+  }
+  if (IREE_UNLIKELY(binding_source->offset_or_pointer > IREE_DEVICE_SIZE_MAX)) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "AQL command-buffer dynamic binding slot %u offset %" PRIu64
+        " exceeds device size",
+        binding_source->slot, binding_source->offset_or_pointer);
+  }
+  iree_device_size_t resolved_offset = 0;
+  iree_device_size_t resolved_length = 0;
+  IREE_RETURN_IF_ERROR(iree_hal_buffer_calculate_range(
+      /*base_offset=*/0, iree_hal_buffer_byte_length(binding->buffer),
+      binding->offset, binding->length, &resolved_offset, &resolved_length));
+  (void)resolved_offset;
+  if (IREE_UNLIKELY(binding_source->offset_or_pointer >= resolved_length)) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "AQL command-buffer dynamic binding slot %u offset %" PRIu64
+        " exceeds binding length %" PRIu64,
+        binding_source->slot, binding_source->offset_or_pointer,
+        (uint64_t)resolved_length);
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t
 iree_hal_amdgpu_aql_block_processor_profile_resolve_dispatch_binding_source_ptr(
     const iree_hal_amdgpu_aql_block_processor_profile_t* processor,
     const iree_hal_amdgpu_command_buffer_binding_source_t* binding_source,
@@ -455,6 +503,15 @@ iree_hal_amdgpu_aql_block_processor_profile_resolve_dispatch_binding_source_ptr(
           IREE_STATUS_INVALID_ARGUMENT,
           "AQL command-buffer dispatch has dynamic bindings but no binding "
           "table was provided");
+    }
+    IREE_RETURN_IF_ERROR(
+        iree_hal_amdgpu_aql_block_processor_profile_validate_dynamic_binding_source(
+            processor->bindings.table, binding_source));
+    if (IREE_UNLIKELY(!binding_ptrs[binding_source->slot])) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "AQL command-buffer dynamic binding slot %u is NULL",
+          binding_source->slot);
     }
     *out_value =
         binding_ptrs[binding_source->slot] + binding_source->offset_or_pointer;

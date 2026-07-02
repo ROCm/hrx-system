@@ -1305,6 +1305,29 @@ iree_status_t iree_hal_amdgpu_host_queue_submit_pm4_ib(
   return iree_ok_status();
 }
 
+static iree_status_t iree_hal_amdgpu_host_queue_validate_pm4_binding_fixups(
+    const iree_hal_amdgpu_command_buffer_pm4_fixup_entry_t* fixup_entries,
+    uint32_t fixup_entry_count, const uint64_t* binding_ptrs,
+    uint32_t binding_count) {
+  for (uint32_t i = 0; i < fixup_entry_count; ++i) {
+    const uint32_t binding_slot = fixup_entries[i].binding_slot;
+    if (IREE_UNLIKELY(binding_slot >= binding_count)) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "PM4 binding fixup entry %" PRIu32
+                              " references binding slot %" PRIu32
+                              " outside binding pointer count %" PRIu32,
+                              i, binding_slot, binding_count);
+    }
+    if (IREE_UNLIKELY(!binding_ptrs[binding_slot])) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "PM4 binding fixup entry %" PRIu32
+                              " references NULL binding slot %" PRIu32,
+                              i, binding_slot);
+    }
+  }
+  return iree_ok_status();
+}
+
 iree_status_t iree_hal_amdgpu_host_queue_submit_pm4_ib_with_binding_table_fixup(
     iree_hal_amdgpu_host_queue_t* queue,
     const iree_hal_amdgpu_wait_resolution_t* resolution,
@@ -1348,6 +1371,13 @@ iree_status_t iree_hal_amdgpu_host_queue_submit_pm4_ib_with_binding_table_fixup(
                             "PM4 binding fixup submission requires at least "
                             "one binding pointer");
   }
+  iree_status_t status = iree_hal_amdgpu_host_queue_validate_pm4_binding_fixups(
+      fixup_entries, fixup_entry_count, binding_ptrs, binding_count);
+  if (!iree_status_is_ok(status)) {
+    iree_hal_amdgpu_host_queue_cancel_profile_dispatch_events(queue,
+                                                              profile_events);
+    return status;
+  }
   if (IREE_UNLIKELY(ib_dword_count == 0)) {
     iree_hal_amdgpu_host_queue_cancel_profile_dispatch_events(queue,
                                                               profile_events);
@@ -1372,9 +1402,8 @@ iree_status_t iree_hal_amdgpu_host_queue_submit_pm4_ib_with_binding_table_fixup(
   }
 
   iree_host_size_t binding_byte_length = 0;
-  iree_status_t status =
-      IREE_STRUCT_LAYOUT(0, &binding_byte_length,
-                         IREE_STRUCT_FIELD(binding_count, uint64_t, NULL));
+  status = IREE_STRUCT_LAYOUT(0, &binding_byte_length,
+                              IREE_STRUCT_FIELD(binding_count, uint64_t, NULL));
   if (!iree_status_is_ok(status)) {
     iree_hal_amdgpu_host_queue_cancel_profile_dispatch_events(queue,
                                                               profile_events);

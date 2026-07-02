@@ -390,6 +390,22 @@ class HostQueueStagingTest : public ::testing::Test {
         out_buffer);
   }
 
+  iree_status_t QueueAllocaDeviceLocalTransientBuffer(
+      iree_hal_device_t* device, iree_device_size_t buffer_size,
+      iree_hal_semaphore_list_t signal_list, iree_hal_buffer_t** out_buffer) {
+    iree_hal_buffer_params_t params = {0};
+    params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
+    params.access = IREE_HAL_MEMORY_ACCESS_ALL;
+    params.usage =
+        IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE;
+    params.queue_affinity = kQueueAffinity0;
+    params.min_alignment = 16;
+    return iree_hal_device_queue_alloca(
+        device, kQueueAffinity0, iree_hal_semaphore_list_empty(), signal_list,
+        /*pool=*/NULL, params, buffer_size, IREE_HAL_ALLOCA_FLAG_NONE,
+        out_buffer);
+  }
+
   iree_status_t ImportHostAllocationFile(iree_hal_device_t* device,
                                          std::vector<uint8_t>* data,
                                          iree_hal_file_t** out_file) {
@@ -556,6 +572,131 @@ TEST_F(HostQueueStagingTest, OneSlotLargeReadCompletesThroughSlotWaiter) {
                                     /*offset=*/0, kMultiSlotTransferSize,
                                     &contents));
   ExpectByteRangeMatches(contents, file_data);
+}
+
+TEST_F(HostQueueStagingTest,
+       ManySmallStridedReadsIntoQueueAllocaCompleteThroughTimelines) {
+  static constexpr iree_host_size_t kReadCount = 171;
+  static constexpr iree_host_size_t kTimelineCount = 8;
+  static constexpr iree_device_size_t kReadLength = 8192;
+  static constexpr iree_device_size_t kSourceStride = kReadLength * 2;
+  static_assert(kReadCount >= kTimelineCount,
+                "test expects every timeline to be used");
+
+  iree_hal_amdgpu_logical_device_options_t options;
+  iree_hal_amdgpu_logical_device_options_initialize(&options);
+  options.preallocate_pools = 0;
+
+  TestLogicalDevice test_device;
+  IREE_ASSERT_OK(CreateTestDevice(&options, &test_device));
+
+  const iree_device_size_t target_size = kReadCount * kReadLength;
+  const size_t file_size =
+      (size_t)((kReadCount - 1) * kSourceStride + kReadLength);
+  std::vector<uint8_t> file_data = MakePatternData(file_size);
+  std::string path;
+  IREE_ASSERT_OK(CreateTempFileWithContents(file_data, &path));
+
+  Ref<iree_hal_file_t> file;
+  IREE_ASSERT_OK(ImportFdFile(test_device.base_device(), path,
+                              IREE_HAL_MEMORY_ACCESS_READ, file.out()));
+
+  Ref<iree_hal_semaphore_t> alloca_signal;
+  IREE_ASSERT_OK(
+      CreateSemaphore(test_device.base_device(), alloca_signal.out()));
+  uint64_t alloca_signal_value = 1;
+  iree_hal_semaphore_t* alloca_signal_ptr = alloca_signal.get();
+  iree_hal_semaphore_list_t alloca_signal_list =
+      MakeSemaphoreList(&alloca_signal_ptr, &alloca_signal_value);
+
+  iree_hal_buffer_t* target_raw = NULL;
+  IREE_ASSERT_OK(QueueAllocaDeviceLocalTransientBuffer(
+      test_device.base_device(), target_size, alloca_signal_list, &target_raw));
+  Ref<iree_hal_buffer_t> target_buffer(target_raw);
+
+  Ref<iree_hal_semaphore_t> timeline_semaphores[kTimelineCount];
+  iree_hal_semaphore_t* timeline_semaphore_ptrs[kTimelineCount] = {NULL};
+  uint64_t timeline_values[kTimelineCount] = {0};
+  for (iree_host_size_t i = 0; i < kTimelineCount; ++i) {
+    IREE_ASSERT_OK(CreateSemaphore(test_device.base_device(),
+                                   timeline_semaphores[i].out()));
+    timeline_semaphore_ptrs[i] = timeline_semaphores[i].get();
+  }
+
+  for (iree_host_size_t i = 0; i < kReadCount; ++i) {
+    const iree_host_size_t timeline_index = i % kTimelineCount;
+    iree_hal_semaphore_t* wait_semaphore_ptr =
+        timeline_semaphore_ptrs[timeline_index];
+    uint64_t wait_value = timeline_values[timeline_index];
+    iree_hal_semaphore_list_t wait_list =
+        wait_value == 0 ? alloca_signal_list
+                        : MakeSemaphoreList(&wait_semaphore_ptr, &wait_value);
+
+    ++timeline_values[timeline_index];
+    uint64_t signal_value = timeline_values[timeline_index];
+    iree_hal_semaphore_t* signal_semaphore_ptr =
+        timeline_semaphore_ptrs[timeline_index];
+    iree_hal_semaphore_list_t signal_list =
+        MakeSemaphoreList(&signal_semaphore_ptr, &signal_value);
+
+    IREE_ASSERT_OK(iree_hal_device_queue_read(
+        test_device.base_device(), kQueueAffinity0, wait_list, signal_list,
+        file, /*source_offset=*/i * kSourceStride, target_buffer,
+        /*target_offset=*/i * kReadLength, kReadLength,
+        IREE_HAL_READ_FLAG_NONE));
+  }
+
+  iree_hal_semaphore_t* join_semaphores[kTimelineCount] = {NULL};
+  uint64_t join_values[kTimelineCount] = {0};
+  for (iree_host_size_t i = 0; i < kTimelineCount; ++i) {
+    join_semaphores[i] = timeline_semaphore_ptrs[i];
+    join_values[i] = timeline_values[i];
+  }
+  iree_hal_semaphore_list_t join_wait_list = {
+      kTimelineCount,
+      join_semaphores,
+      join_values,
+  };
+  Ref<iree_hal_semaphore_t> final_signal;
+  IREE_ASSERT_OK(
+      CreateSemaphore(test_device.base_device(), final_signal.out()));
+  uint64_t final_signal_value = 1;
+  iree_hal_semaphore_t* final_signal_ptr = final_signal.get();
+  iree_hal_semaphore_list_t final_signal_list =
+      MakeSemaphoreList(&final_signal_ptr, &final_signal_value);
+  IREE_ASSERT_OK(iree_hal_device_queue_barrier(
+      test_device.base_device(), kQueueAffinity0, join_wait_list,
+      final_signal_list, IREE_HAL_EXECUTE_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_semaphore_wait(final_signal, final_signal_value,
+                                         iree_infinite_timeout(),
+                                         IREE_ASYNC_WAIT_FLAG_NONE));
+
+  std::vector<uint8_t> expected((size_t)target_size);
+  for (iree_host_size_t i = 0; i < kReadCount; ++i) {
+    const size_t source_offset = (size_t)(i * kSourceStride);
+    const size_t target_offset = (size_t)(i * kReadLength);
+    std::memcpy(expected.data() + target_offset,
+                file_data.data() + source_offset, (size_t)kReadLength);
+  }
+  std::vector<uint8_t> contents;
+  IREE_ASSERT_OK(ReadBufferContents(test_device.base_device(), target_buffer,
+                                    /*offset=*/0, target_size, &contents));
+  ExpectByteRangeMatches(contents, expected);
+
+  Ref<iree_hal_semaphore_t> dealloca_signal;
+  IREE_ASSERT_OK(
+      CreateSemaphore(test_device.base_device(), dealloca_signal.out()));
+  uint64_t dealloca_signal_value = 1;
+  iree_hal_semaphore_t* dealloca_signal_ptr = dealloca_signal.get();
+  iree_hal_semaphore_list_t dealloca_signal_list =
+      MakeSemaphoreList(&dealloca_signal_ptr, &dealloca_signal_value);
+  IREE_ASSERT_OK(iree_hal_device_queue_dealloca(
+      test_device.base_device(), kQueueAffinity0,
+      iree_hal_semaphore_list_empty(), dealloca_signal_list, target_buffer,
+      IREE_HAL_DEALLOCA_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_semaphore_wait(dealloca_signal, dealloca_signal_value,
+                                         iree_infinite_timeout(),
+                                         IREE_ASYNC_WAIT_FLAG_NONE));
 }
 
 TEST_F(HostQueueStagingTest,
