@@ -1653,6 +1653,56 @@ TEST(PipelineProgramPlan, AssignsDiagnosticTapsToTheirRegions) {
   id4_pipeline_program_release(program);
 }
 
+TEST(PipelineProgramPlan, AssignsPostDispatchTapsToImplicitDispatchRegions) {
+  id4_pipeline_program_t* program = CreateRegionCutTapProgram();
+  iree_hal_device_group_t* device_group = CreateLocalSyncDeviceGroup();
+  id4_pipeline_device_placement_t placement = {
+      /*.role=*/IREE_SV("default"),
+      /*.device_index=*/0,
+      /*.queue_affinity=*/IREE_HAL_QUEUE_AFFINITY_ANY,
+  };
+  id4_pipeline_diagnostics_sink_t diagnostics_sink;
+  id4_pipeline_diagnostics_sink_initialize_ignore(&diagnostics_sink);
+  id4_pipeline_program_plan_options_t options =
+      MakePlanOptions(program, device_group, &placement, &diagnostics_sink);
+  options.region_binding_capacity = 8;
+  options.region_local_binding_slot = 6;
+  options.region_shared_binding_slot = 7;
+  const iree_string_view_t diagnostic_tap_names[] = {
+      IREE_SV("entry.copy.output"),
+      IREE_SV("entry.final.output"),
+  };
+  options.flags = ID4_PIPELINE_PROGRAM_PLAN_FLAG_CAPTURE_DIAGNOSTIC_TAPS |
+                  ID4_PIPELINE_PROGRAM_PLAN_FLAG_REGION_PER_DISPATCH;
+  options.diagnostic_tap_names = (iree_string_view_list_t){
+      IREE_ARRAYSIZE(diagnostic_tap_names),
+      diagnostic_tap_names,
+  };
+
+  id4_pipeline_plan_t* plan = nullptr;
+  IREE_ASSERT_OK(id4_pipeline_program_create_plan(
+      &options, iree_allocator_system(), &plan));
+
+  ASSERT_EQ(id4_pipeline_plan_region_count(plan), 2u);
+  ASSERT_EQ(id4_pipeline_plan_diagnostic_tap_count(plan), 2u);
+  const id4_pipeline_diagnostic_tap_plan_t* first_tap =
+      id4_pipeline_plan_diagnostic_tap_at(plan, 0);
+  ASSERT_NE(first_tap, nullptr);
+  ExpectStringViewEqual(first_tap->name, IREE_SV("entry.copy.output"));
+  EXPECT_EQ(first_tap->region_id, 0u);
+  EXPECT_EQ(first_tap->after_operation_ordinal, 0u);
+  const id4_pipeline_diagnostic_tap_plan_t* second_tap =
+      id4_pipeline_plan_diagnostic_tap_at(plan, 1);
+  ASSERT_NE(second_tap, nullptr);
+  ExpectStringViewEqual(second_tap->name, IREE_SV("entry.final.output"));
+  EXPECT_EQ(second_tap->region_id, 1u);
+  EXPECT_EQ(second_tap->after_operation_ordinal, 0u);
+
+  id4_pipeline_plan_release(plan);
+  iree_hal_device_group_release(device_group);
+  id4_pipeline_program_release(program);
+}
+
 TEST(PipelineProgramPlan, PromotesCrossRegionAcquiredTensorsToSharedSlab) {
   id4_pipeline_program_t* program = CreateRegionCutSharedAcquireProgram();
   iree_hal_device_group_t* device_group = CreateLocalSyncDeviceGroup();

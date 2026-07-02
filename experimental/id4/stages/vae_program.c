@@ -2004,6 +2004,7 @@ static iree_status_t id4_vae_program_author_group_norm(
   stats_dispatch_options.bindings = stats_bindings;
   IREE_RETURN_IF_ERROR(
       id4_pipeline_program_dispatch_loom(builder, &stats_dispatch_options));
+  IREE_RETURN_IF_ERROR(id4_vae_program_tap_tensor(builder, stats_name, stats));
   IREE_RETURN_IF_ERROR(id4_vae_program_barrier(builder, stats_barrier_name));
 
   id4_pipeline_program_dispatch_binding_t apply_bindings[] = {
@@ -2159,6 +2160,7 @@ static iree_status_t id4_vae_program_author_group_norm_bf16(
   stats_dispatch_options.bindings = stats_bindings;
   IREE_RETURN_IF_ERROR(
       id4_pipeline_program_dispatch_loom(builder, &stats_dispatch_options));
+  IREE_RETURN_IF_ERROR(id4_vae_program_tap_tensor(builder, stats_name, stats));
   IREE_RETURN_IF_ERROR(id4_vae_program_barrier(builder, stats_barrier_name));
 
   id4_vae_program_config_list_t apply_config_list;

@@ -223,6 +223,9 @@ static bool id4_pipeline_program_stage_operation_uses_tensor(
 
 static bool id4_pipeline_program_stage_needs_shared_transient_slot(
     const id4_pipeline_program_stage_plan_options_t* options) {
+  const bool region_per_dispatch =
+      iree_all_bits_set(options->stage_options->flags,
+                        ID4_PIPELINE_STAGE_PLAN_FLAG_REGION_PER_DISPATCH);
   const iree_host_size_t operation_count =
       id4_pipeline_program_operation_count(options->program);
   for (iree_host_size_t i = 0; i < operation_count; ++i) {
@@ -245,6 +248,10 @@ static bool id4_pipeline_program_stage_needs_shared_transient_slot(
           id4_pipeline_program_stage_operation_uses_tensor(
               options->stage_options, op, acquire_op->payload.acquire.tensor)) {
         return true;
+      }
+      if (region_per_dispatch &&
+          op->kind == ID4_PIPELINE_PROGRAM_OP_KIND_DISPATCH_LOOM) {
+        passed_region_cut = true;
       }
     }
   }

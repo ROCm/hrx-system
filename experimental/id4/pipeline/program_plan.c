@@ -359,10 +359,20 @@ static void id4_pipeline_program_plan_build_region_ranges(
         id4_pipeline_program_operation_at(program, i);
     if (id4_pipeline_program_plan_uses_dispatch_regions(options) && op &&
         op->kind == ID4_PIPELINE_PROGRAM_OP_KIND_DISPATCH_LOOM) {
+      iree_host_size_t operation_limit = i + 1;
+      while (operation_limit < operation_count) {
+        const id4_pipeline_program_op_t* next_op =
+            id4_pipeline_program_operation_at(program, operation_limit);
+        if (!next_op || next_op->kind != ID4_PIPELINE_PROGRAM_OP_KIND_TAP) {
+          break;
+        }
+        ++operation_limit;
+      }
       id4_pipeline_program_plan_append_region_range(
-          program, op->payload.dispatch_loom.name, operation_offset, i + 1,
-          out_range_count, ranges);
-      operation_offset = i + 1;
+          program, op->payload.dispatch_loom.name, operation_offset,
+          operation_limit, out_range_count, ranges);
+      operation_offset = operation_limit;
+      i = operation_limit - 1;
       continue;
     }
     if (!op || op->kind != ID4_PIPELINE_PROGRAM_OP_KIND_REGION_CUT) continue;
