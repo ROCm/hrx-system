@@ -8,6 +8,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 
 struct id4_pipeline_bundle_t {
@@ -666,6 +667,74 @@ iree_hal_semaphore_list_t id4_pipeline_bundle_readiness_semaphore_list(
   };
 }
 
+static iree_status_t id4_pipeline_bundle_emit_readiness_diagnostic(
+    const id4_pipeline_bundle_t* bundle, iree_host_size_t index,
+    uint64_t current_payload_value, iree_status_code_t query_status_code,
+    id4_pipeline_diagnostics_sink_t* diagnostics_sink) {
+  char message[256];
+  iree_string_view_t stage_name = id4_pipeline_plan_stage_name(bundle->plan);
+  const uint64_t target_payload_value = bundle->readiness_payload_values[index];
+  iree_string_view_t key = IREE_SV("bundle.readiness.not_ready");
+  if (query_status_code == IREE_STATUS_OK) {
+    snprintf(message, sizeof(message),
+             "bundle readiness semaphore %" PRIhsz
+             " has current payload %" PRIu64 " below target %" PRIu64,
+             index, current_payload_value, target_payload_value);
+  } else {
+    key = IREE_SV("bundle.readiness.failure");
+    snprintf(message, sizeof(message),
+             "bundle readiness semaphore %" PRIhsz
+             " failed before target %" PRIu64
+             "; current payload query returned %" PRIu64,
+             index, target_payload_value, current_payload_value);
+  }
+  id4_pipeline_diagnostic_event_t event;
+  memset(&event, 0, sizeof(event));
+  event.kind = ID4_PIPELINE_DIAGNOSTIC_EVENT_KIND_LIFECYCLE;
+  event.stage_name = stage_name;
+  event.key = key;
+  event.message = iree_make_cstring_view(message);
+  return id4_pipeline_diagnostics_emit(diagnostics_sink, &event);
+}
+
+static iree_status_t id4_pipeline_bundle_check_readiness_semaphores(
+    const id4_pipeline_bundle_t* bundle,
+    id4_pipeline_diagnostics_sink_t* diagnostics_sink) {
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0;
+       i < bundle->readiness_count && iree_status_is_ok(status); ++i) {
+    iree_hal_semaphore_t* semaphore = bundle->readiness_semaphores[i];
+    const uint64_t target_payload_value = bundle->readiness_payload_values[i];
+    uint64_t current_payload_value = 0;
+    status = iree_hal_semaphore_query(semaphore, &current_payload_value);
+    const iree_status_code_t query_status_code = iree_status_code(status);
+    if (query_status_code == IREE_STATUS_OK) {
+      if (current_payload_value >= target_payload_value) {
+        continue;
+      }
+    }
+    iree_status_t emit_status = id4_pipeline_bundle_emit_readiness_diagnostic(
+        bundle, i, current_payload_value, query_status_code, diagnostics_sink);
+    if (iree_status_is_ok(emit_status)) {
+      if (query_status_code == IREE_STATUS_OK) {
+        status = iree_status_join(
+            status, iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                                     "pipeline bundle readiness semaphore "
+                                     "%" PRIhsz " is not ready",
+                                     i));
+      } else {
+        status = iree_status_annotate_f(status,
+                                        "pipeline bundle readiness semaphore "
+                                        "%" PRIhsz " failed",
+                                        i);
+      }
+    } else {
+      status = iree_status_join(emit_status, status);
+    }
+  }
+  return status;
+}
+
 iree_status_t id4_pipeline_bundle_check_readiness_failures(
     const id4_pipeline_bundle_t* bundle,
     id4_pipeline_diagnostics_sink_t* diagnostics_sink) {
@@ -673,10 +742,18 @@ iree_status_t id4_pipeline_bundle_check_readiness_failures(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "pipeline bundle is required");
   }
-  if (!bundle->parameter_slabs) return iree_ok_status();
-  return id4_pipeline_parameter_slab_set_check_load_group_failures(
-      bundle->parameter_slabs, id4_pipeline_plan_stage_name(bundle->plan),
-      diagnostics_sink);
+  IREE_RETURN_IF_ERROR(id4_pipeline_diagnostics_validate_sink(
+      diagnostics_sink, IREE_SV("bundle readiness failure check")));
+  iree_status_t status =
+      id4_pipeline_bundle_check_readiness_semaphores(bundle, diagnostics_sink);
+  if (bundle->parameter_slabs) {
+    status = iree_status_join(
+        status,
+        id4_pipeline_parameter_slab_set_check_load_group_failures(
+            bundle->parameter_slabs, id4_pipeline_plan_stage_name(bundle->plan),
+            diagnostics_sink));
+  }
+  return status;
 }
 
 void* id4_pipeline_bundle_payload(id4_pipeline_bundle_t* bundle) {

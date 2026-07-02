@@ -699,6 +699,19 @@ static iree_status_t id4_pipeline_parameter_slab_set_copy_load_steps(
   return iree_ok_status();
 }
 
+static void id4_pipeline_parameter_slab_set_capture_encoder_diagnostics(
+    id4_pipeline_parameter_slab_set_t* slab_set,
+    const id4_pipeline_parameter_slab_set_load_options_t* options,
+    iree_host_size_t load_step_count,
+    const id4_pipeline_parameter_load_step_t* load_steps) {
+  if (!id4_pipeline_parameter_load_steps_require_encoder(load_step_count,
+                                                         load_steps)) {
+    return;
+  }
+  slab_set->encoder_staging_chunk_byte_capacity =
+      options->encoder_staging_chunk_byte_capacity;
+}
+
 static iree_status_t id4_pipeline_parameter_slab_set_copy_waits(
     id4_pipeline_parameter_slab_set_t* slab_set,
     iree_hal_semaphore_list_t wait_semaphore_list) {
@@ -3565,6 +3578,10 @@ iree_status_t id4_pipeline_parameter_slab_set_prepare(
         loads, load_step_count, load_steps, host_allocator, slab_set);
   }
   if (iree_status_is_ok(status)) {
+    id4_pipeline_parameter_slab_set_capture_encoder_diagnostics(
+        slab_set, options, load_step_count, load_steps);
+  }
+  if (iree_status_is_ok(status)) {
     status =
         id4_pipeline_parameter_slab_set_copy_loads(slab_set, load_count, loads);
   }
@@ -3612,6 +3629,10 @@ iree_status_t id4_pipeline_parameter_slab_set_load(
   if (iree_status_is_ok(status)) {
     status = id4_pipeline_parameter_slab_set_create_load_groups(
         loads, load_step_count, load_steps, host_allocator, slab_set);
+  }
+  if (iree_status_is_ok(status)) {
+    id4_pipeline_parameter_slab_set_capture_encoder_diagnostics(
+        slab_set, options, load_step_count, load_steps);
   }
   if (iree_status_is_ok(status)) {
     status =

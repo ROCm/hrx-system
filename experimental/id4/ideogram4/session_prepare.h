@@ -40,6 +40,11 @@ iree_status_t id4_ideogram4_generation_acquire_stage_bundle_ref(
 iree_status_t id4_ideogram4_generation_release_stage_bundle_ref(
     id4_ideogram4_generation_stage_bundle_ref_t* stage_bundle_ref);
 
+// Queries resident stage-bundle readiness and parameter-load failures.
+iree_status_t id4_ideogram4_generation_bundle_check_resident_failures(
+    const id4_ideogram4_generation_bundle_t* bundle,
+    id4_pipeline_diagnostics_sink_t* diagnostics_sink);
+
 // Acquires all stage bundles needed by one generation issue phase.
 iree_status_t id4_ideogram4_generation_prepare_phase_bundle(
     id4_ideogram4_generation_bundle_t* bundle,

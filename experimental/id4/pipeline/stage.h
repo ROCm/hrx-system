@@ -258,8 +258,8 @@ id4_pipeline_parameter_slab_set_t* id4_pipeline_bundle_parameter_slabs(
 iree_hal_semaphore_list_t id4_pipeline_bundle_readiness_semaphore_list(
     const id4_pipeline_bundle_t* bundle);
 
-// Queries bundle-owned readiness sources and returns annotated asynchronous
-// parameter loading failures.
+// Queries bundle-owned readiness sources and returns annotated readiness or
+// asynchronous parameter loading failures.
 iree_status_t id4_pipeline_bundle_check_readiness_failures(
     const id4_pipeline_bundle_t* bundle,
     id4_pipeline_diagnostics_sink_t* diagnostics_sink);

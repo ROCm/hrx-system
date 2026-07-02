@@ -531,7 +531,14 @@ static iree_status_t id4_ideogram4_generation_issue_stage(
   issue_options.wait_semaphore_list = wait_semaphore_list;
   issue_options.signal_semaphore_list = signal_list;
   issue_options.diagnostics_sink = diagnostics_sink;
-  return id4_pipeline_stage_issue(slot->stage, stage_bundle, &issue_options);
+  iree_status_t status =
+      id4_pipeline_stage_issue(slot->stage, stage_bundle, &issue_options);
+  if (!iree_status_is_ok(status)) {
+    status =
+        iree_status_join(status, id4_pipeline_bundle_check_readiness_failures(
+                                     stage_bundle, diagnostics_sink));
+  }
+  return status;
 }
 
 static iree_status_t id4_ideogram4_generation_issue_qwen(
@@ -1254,6 +1261,9 @@ iree_status_t id4_ideogram4_session_issue_generation(
     if (iree_status_is_ok(status)) {
       *out_execution = execution;
     } else {
+      status = iree_status_join(
+          status, id4_ideogram4_generation_bundle_check_resident_failures(
+                      bundle, options->diagnostics_sink));
       id4_ideogram4_generation_execution_release(execution);
     }
     return status;
@@ -1334,6 +1344,11 @@ iree_status_t id4_ideogram4_session_issue_generation(
   status = iree_status_join(
       status,
       id4_ideogram4_generation_phase_bundle_deinitialize(&denoise_phase));
+  if (!iree_status_is_ok(status)) {
+    status = iree_status_join(
+        status, id4_ideogram4_generation_bundle_check_resident_failures(
+                    bundle, options->diagnostics_sink));
+  }
   if (iree_status_is_ok(status)) {
     *out_execution = execution;
   } else {
@@ -1372,16 +1387,8 @@ iree_status_t id4_ideogram4_generation_execution_check_failures(
   }
   IREE_RETURN_IF_ERROR(id4_pipeline_diagnostics_validate_sink(
       diagnostics_sink, IREE_SV("Ideogram 4 generation failure check")));
-  iree_status_t status = iree_ok_status();
-  for (iree_host_size_t i = 0; i < ID4_IDEOGRAM4_GENERATION_STAGE_COUNT; ++i) {
-    id4_pipeline_bundle_t* stage_bundle =
-        execution->bundle->resident_stage_bundles[i];
-    if (!stage_bundle) continue;
-    status =
-        iree_status_join(status, id4_pipeline_bundle_check_readiness_failures(
-                                     stage_bundle, diagnostics_sink));
-  }
-  return status;
+  return id4_ideogram4_generation_bundle_check_resident_failures(
+      execution->bundle, diagnostics_sink);
 }
 
 iree_status_t id4_ideogram4_generation_execution_result(

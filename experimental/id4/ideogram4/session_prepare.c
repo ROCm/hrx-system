@@ -763,6 +763,26 @@ static iree_status_t id4_ideogram4_generation_bundle_wait_resident_bundles(
   return status;
 }
 
+iree_status_t id4_ideogram4_generation_bundle_check_resident_failures(
+    const id4_ideogram4_generation_bundle_t* bundle,
+    id4_pipeline_diagnostics_sink_t* diagnostics_sink) {
+  if (!bundle) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "Ideogram 4 generation bundle is required");
+  }
+  IREE_RETURN_IF_ERROR(id4_pipeline_diagnostics_validate_sink(
+      diagnostics_sink, IREE_SV("Ideogram 4 resident bundle failure check")));
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0; i < ID4_IDEOGRAM4_GENERATION_STAGE_COUNT; ++i) {
+    id4_pipeline_bundle_t* stage_bundle = bundle->resident_stage_bundles[i];
+    if (!stage_bundle) continue;
+    status =
+        iree_status_join(status, id4_pipeline_bundle_check_readiness_failures(
+                                     stage_bundle, diagnostics_sink));
+  }
+  return status;
+}
+
 static iree_host_size_t
 id4_ideogram4_generation_bundle_resident_readiness_count(
     id4_ideogram4_generation_bundle_t* bundle) {
@@ -974,6 +994,9 @@ iree_status_t id4_ideogram4_session_prepare_generation(
   if (iree_status_is_ok(status)) {
     *out_bundle = bundle;
   } else {
+    status = iree_status_join(
+        status, id4_ideogram4_generation_bundle_check_resident_failures(
+                    bundle, options->diagnostics_sink));
     status = iree_status_join(
         status, id4_ideogram4_generation_bundle_wait_resident_bundles(bundle));
     id4_ideogram4_generation_bundle_release(bundle);

@@ -113,6 +113,8 @@ typedef struct id4_pipeline_test_diagnostics_log_t {
   iree_host_size_t count;
   // Event keys observed in order.
   std::vector<std::string> keys;
+  // Event messages observed in order.
+  std::vector<std::string> messages;
   // Parameter slab events copied from diagnostic payloads.
   std::vector<id4_pipeline_parameter_slab_diagnostic_t> parameter_slabs;
   // Provider scopes copied for parameter slab events.
@@ -318,6 +320,7 @@ static iree_status_t CaptureDiagnostic(
       static_cast<id4_pipeline_test_diagnostics_log_t*>(user_data);
   ++log->count;
   log->keys.push_back(ToString(event->key));
+  log->messages.push_back(ToString(event->message));
   if (event->parameter_slab) {
     log->parameter_slabs.push_back(*event->parameter_slab);
     log->parameter_slab_scopes.push_back(
@@ -1256,6 +1259,71 @@ TEST(PipelineStage, PrepareEmitsParameterSlabLoadFailureDiagnostic) {
   iree_hal_semaphore_release(ready_semaphore);
   id4_pipeline_plan_release(plan);
   id4_pipeline_stage_release(stage);
+}
+
+TEST(PipelineStage, CheckReadinessFailuresReportsFailedBundleReadiness) {
+  iree_hal_device_group_t* device_group = CreateLocalSyncDeviceGroup();
+  id4_pipeline_diagnostics_sink_t setup_diagnostics_sink =
+      IgnoreDiagnosticsSink();
+  id4_pipeline_device_placement_t placement;
+  memset(&placement, 0, sizeof(placement));
+  placement.role = IREE_SV("default");
+  placement.device_index = 0;
+  placement.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
+  id4_pipeline_plan_create_options_t plan_options;
+  memset(&plan_options, 0, sizeof(plan_options));
+  plan_options.structure_size = sizeof(plan_options);
+  plan_options.stage_name = IREE_SV("readiness");
+  plan_options.device_group = device_group;
+  plan_options.placement_count = 1;
+  plan_options.placements = &placement;
+  plan_options.diagnostics_sink = &setup_diagnostics_sink;
+  id4_pipeline_plan_t* plan = NULL;
+  IREE_ASSERT_OK(
+      id4_pipeline_plan_create(&plan_options, iree_allocator_system(), &plan));
+  iree_hal_device_group_release(device_group);
+
+  iree_hal_device_t* device =
+      iree_hal_device_group_device_at(id4_pipeline_plan_device_group(plan), 0);
+  iree_hal_semaphore_t* ready_semaphore = CreateSemaphore(device);
+  uint64_t ready_value = 1;
+  iree_hal_semaphore_list_t readiness_list = {
+      /*.count=*/1,
+      /*.semaphores=*/&ready_semaphore,
+      /*.payload_values=*/&ready_value,
+  };
+
+  id4_pipeline_bundle_create_options_t create_options;
+  memset(&create_options, 0, sizeof(create_options));
+  create_options.structure_size = sizeof(create_options);
+  create_options.plan = plan;
+  create_options.readiness_semaphore_list = readiness_list;
+
+  id4_pipeline_bundle_t* bundle = NULL;
+  IREE_ASSERT_OK(id4_pipeline_bundle_create(&create_options,
+                                            iree_allocator_system(), &bundle));
+
+  iree_hal_semaphore_fail(
+      ready_semaphore,
+      iree_make_status(IREE_STATUS_ABORTED, "synthetic readiness failure"));
+
+  id4_pipeline_test_diagnostics_log_t diagnostics_log = {};
+  id4_pipeline_diagnostics_sink_t diagnostics_sink =
+      DiagnosticsSink(&diagnostics_log);
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_ABORTED,
+      id4_pipeline_bundle_check_readiness_failures(bundle, &diagnostics_sink));
+
+  iree_host_size_t diagnostic_index =
+      FindDiagnosticKey(diagnostics_log, "bundle.readiness.failure");
+  ASSERT_NE(diagnostic_index, IREE_HOST_SIZE_MAX);
+  ASSERT_LT(diagnostic_index, diagnostics_log.messages.size());
+  EXPECT_NE(diagnostics_log.messages[diagnostic_index].find("target 1"),
+            std::string::npos);
+
+  id4_pipeline_bundle_release(bundle);
+  iree_hal_semaphore_release(ready_semaphore);
+  id4_pipeline_plan_release(plan);
 }
 
 TEST(PipelineStage, PrepareLoadsParameterSlabsWhenProviderIsSupplied) {
