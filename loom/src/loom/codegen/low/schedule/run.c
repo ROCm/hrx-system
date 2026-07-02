@@ -506,6 +506,14 @@ static iree_status_t loom_low_schedule_initialize_descriptor_tables(
                                   sizeof(*state->effect_read_summaries),
                                   (void**)&state->effect_read_summaries));
     state->effect_read_capacity = effect_read_capacity;
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        state->arena, effect_read_capacity, sizeof(*state->effect_write_nodes),
+        (void**)&state->effect_write_nodes));
+    IREE_RETURN_IF_ERROR(
+        iree_arena_allocate_array(state->arena, effect_read_capacity,
+                                  sizeof(*state->effect_write_summaries),
+                                  (void**)&state->effect_write_summaries));
+    state->effect_write_capacity = effect_read_capacity;
   }
   if (hazard_use_capacity != 0) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
@@ -2049,6 +2057,8 @@ iree_status_t loom_low_schedule_function(
         .node_count = node_count,
         .dependencies = state.dependencies,
         .dependency_count = state.dependency_count,
+        .visibility_dependencies = state.visibility_dependencies,
+        .visibility_dependency_count = state.visibility_dependency_count,
         .scheduled_node_indices = state.scheduled_node_indices,
         .scheduled_node_count = state.scheduled_node_count,
         .error_count = state.error_count,

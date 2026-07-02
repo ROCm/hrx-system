@@ -86,8 +86,12 @@ void InitializeScheduleFixture(const loom_low_descriptor_set_t* descriptor_set,
       /*.node_count=*/1,
       /*.dependencies=*/{},
       /*.dependency_count=*/{},
+      /*.visibility_dependencies=*/{},
+      /*.visibility_dependency_count=*/{},
       /*.scheduled_node_indices=*/fixture->scheduled_node_indices,
       /*.scheduled_node_count=*/1,
+      /*.error_count=*/{},
+      /*.failure=*/{},
   };
 }
 

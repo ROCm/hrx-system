@@ -43,7 +43,9 @@ loom_cc_library(
     loom::ops::low
     loom::ops::op_defs
     loom::target::registers
+    loom::util::cfg_graph
     loom::util::json
+    loom::util::math
     loom::util::stream
   PUBLIC
 )

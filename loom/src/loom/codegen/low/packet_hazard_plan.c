@@ -193,14 +193,6 @@ static iree_status_t loom_low_packet_hazard_plan_append_event(
   IREE_RETURN_IF_ERROR(loom_low_packet_hazard_plan_producer_packet_index(
       state->schedule, event->producer_node_index, &producer_packet_index,
       &producer_scheduled_ordinal));
-  if (loom_low_packet_hazard_plan_record_kind_has_residual_progress(
-          event->kind) &&
-      producer_packet_index != LOOM_LOW_PACKET_HAZARD_PLAN_PACKET_NONE &&
-      producer_packet_index >= packet->packet_index) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "hazard plan residual producer must precede insertion packet");
-  }
   state->records[state->record_count++] =
       (loom_low_packet_hazard_plan_record_t){
           .kind = event->kind,

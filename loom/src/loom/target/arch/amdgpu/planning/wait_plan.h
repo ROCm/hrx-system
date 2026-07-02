@@ -54,6 +54,8 @@ typedef enum loom_amdgpu_wait_plan_reason_e {
   LOOM_AMDGPU_WAIT_PLAN_REASON_TRANS_RESULT_USE = 6,
   // A GFX12 ALU packet reads SGPR state with outstanding ALU dependencies.
   LOOM_AMDGPU_WAIT_PLAN_REASON_VALU_SGPR_READ = 7,
+  // A memory-effect dependency observes an outstanding memory packet.
+  LOOM_AMDGPU_WAIT_PLAN_REASON_MEMORY_EFFECT = 8,
 } loom_amdgpu_wait_plan_reason_t;
 
 typedef enum loom_amdgpu_wait_plan_residual_action_e {

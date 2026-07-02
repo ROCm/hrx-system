@@ -129,6 +129,8 @@ typedef struct loom_low_schedule_build_state_t {
   loom_low_schedule_node_t* nodes;
   // Dependency records accumulated while building the schedule DAG.
   loom_low_schedule_dependency_t* dependencies;
+  // Cross-block visibility records for target wait/hazard planning.
+  loom_low_schedule_visibility_dependency_t* visibility_dependencies;
   // Open-addressed dependency-set entries storing one-based dependency indices.
   uint32_t* dependency_set_indices;
   // Node indices in final scheduled order.
@@ -192,6 +194,10 @@ typedef struct loom_low_schedule_build_state_t {
   uint32_t* effect_read_nodes;
   // Scratch effect-frontier read summaries, parallel to effect_read_nodes.
   loom_low_memory_access_summary_t* effect_read_summaries;
+  // Scratch effect-frontier write node indices, reused for each block.
+  uint32_t* effect_write_nodes;
+  // Scratch effect-frontier write summaries, parallel to effect_write_nodes.
+  loom_low_memory_access_summary_t* effect_write_summaries;
   // Optional source-derived memory access records for the function.
   const loom_low_memory_access_record_t* memory_access_records;
   // Per-resource aggregate resource pressure, dense by descriptor resource id
@@ -199,8 +205,12 @@ typedef struct loom_low_schedule_build_state_t {
   loom_low_schedule_resource_summary_t* resource_summaries;
   // Number of populated dependency records.
   iree_host_size_t dependency_count;
+  // Number of populated cross-block visibility records.
+  iree_host_size_t visibility_dependency_count;
   // Allocated dependency record capacity.
   iree_host_size_t dependency_capacity;
+  // Allocated cross-block visibility record capacity.
+  iree_host_size_t visibility_dependency_capacity;
   // Allocated dependency-set entry capacity.
   iree_host_size_t dependency_set_capacity;
   // Number of populated scheduled_node_indices entries.
@@ -237,6 +247,8 @@ typedef struct loom_low_schedule_build_state_t {
   iree_host_size_t state_chain_read_record_capacity;
   // Allocated effect-frontier read scratch capacity.
   iree_host_size_t effect_read_capacity;
+  // Allocated effect-frontier write scratch capacity.
+  iree_host_size_t effect_write_capacity;
   // Number of rows in |memory_access_records|.
   iree_host_size_t memory_access_record_count;
   // Next memory access record to bind while walking function-order nodes.
