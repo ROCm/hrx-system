@@ -68,7 +68,7 @@ TEST(CompileReportCaptureTest, ConfiguresDetailedReportRequest) {
 }
 
 TEST(CompileReportCaptureTest,
-     SummaryReportDoesNotRequestSourceLowDiagnostics) {
+     SummaryReportRequestsEconomicsWithoutSourceLowDiagnostics) {
   loom_run_compile_report_capture_options_t options = {};
   loom_run_compile_report_capture_options_initialize(&options);
   options.sink_format = LOOM_RUN_COMPILE_REPORT_SINK_FORMAT_JSON;
@@ -86,7 +86,8 @@ TEST(CompileReportCaptureTest,
                 .source_to_low_legality_diagnostic_flags,
             0u);
   EXPECT_EQ(capture.report.requested_detail_flags,
-            LOOM_TARGET_COMPILE_REPORT_DETAIL_SCHEDULE_BAND_SUMMARY_ROWS);
+            LOOM_TARGET_COMPILE_REPORT_DETAIL_SCHEDULE_BAND_SUMMARY_ROWS |
+                LOOM_TARGET_COMPILE_REPORT_DETAIL_SOURCE_LOW_ROWS);
 
   loom_run_compile_report_capture_deinitialize(&capture);
 }

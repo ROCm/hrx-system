@@ -1088,6 +1088,10 @@ static void loom_target_compile_report_merge_entry_summary(
   const bool entry_has_dynamic_instruction_mix = iree_any_bit_set(
       entry_report->detail_flags,
       LOOM_TARGET_COMPILE_REPORT_DETAIL_DYNAMIC_INSTRUCTION_MIX);
+  const bool entry_has_source_low_data =
+      entry_report->source_low_selected_op_count != 0 ||
+      entry_report->source_low_emitted_op_count != 0 ||
+      entry_report->source_low_memory_summary.packet_count != 0;
   report->detail_flags |=
       entry_report->detail_flags | LOOM_TARGET_COMPILE_REPORT_DETAIL_ENTRIES;
   if (first_entry) {
@@ -1142,11 +1146,6 @@ static void loom_target_compile_report_merge_entry_summary(
     report->target_resources = entry_report->target_resources;
     report->wait_plan = entry_report->wait_plan;
     report->workload = entry_report->workload;
-    report->source_low_selected_op_count =
-        entry_report->source_low_selected_op_count;
-    report->source_low_emitted_op_count =
-        entry_report->source_low_emitted_op_count;
-    report->source_low_memory_summary = entry_report->source_low_memory_summary;
     if (report->workload.flags == LOOM_TARGET_COMPILE_REPORT_WORKLOAD_NONE) {
       report->detail_flags &= ~LOOM_TARGET_COMPILE_REPORT_DETAIL_WORKLOAD;
     }
@@ -1160,6 +1159,15 @@ static void loom_target_compile_report_merge_entry_summary(
         entry_report->math_legalization_missing_recipe_op_count;
     memcpy(report->move_causes, entry_report->move_causes,
            sizeof(report->move_causes));
+    if (entry_has_source_low_data) {
+      report->source_low_selected_op_count +=
+          entry_report->source_low_selected_op_count;
+      report->source_low_emitted_op_count +=
+          entry_report->source_low_emitted_op_count;
+      loom_target_compile_report_accumulate_source_low_memory_summaries(
+          &report->source_low_memory_summary,
+          &entry_report->source_low_memory_summary);
+    }
     return;
   }
 

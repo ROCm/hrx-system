@@ -275,7 +275,7 @@
               "--backend=amdgpu-hal",
               "--target=gfx11-generic",
               "--output={tmp}/loop_memory_economics_amdgpu.hsaco",
-              "--compile-report=details",
+              "--compile-report=summary",
               "--compile-report-output=-"
             ]
           },
@@ -293,7 +293,12 @@
                 "\"global_load_byte_count\":16",
                 "\"global_store_byte_count\":16",
                 "\"scalar_read_byte_count\":16",
-                "\"economics\":{\"memory\":{\"per_workitem_issued\":{\"read_bytes\":32,\"write_bytes\":16,\"total_bytes\":48"
+                "\"economics\":{\"memory\":{\"per_workitem_issued\":{\"read_bytes\":32,\"write_bytes\":16,\"total_bytes\":48",
+                "\"source_low\":{\"selected_op_count\":10,\"emitted_op_count\":23,\"count\":10,\"memory\":{\"packet_count\":2",
+                "\"root_count\":2,\"roots\":[",
+                "\"source_root\":\"input\",\"source_root_argument_index\":0,\"memory_space\":\"global\",\"packet_count\":1,\"load_packet_count\":1",
+                "\"source_root\":\"output\",\"source_root_argument_index\":1,\"memory_space\":\"global\",\"packet_count\":1,\"load_packet_count\":0,\"store_packet_count\":1",
+                "\"argument_count\":2,\"arguments\":["
               ]
             }
           },
