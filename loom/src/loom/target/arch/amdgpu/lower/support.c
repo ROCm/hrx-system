@@ -854,6 +854,7 @@ enum loom_amdgpu_source_value_analysis_bit_e {
   LOOM_AMDGPU_SOURCE_VALUE_ANALYSIS_NATIVE_I1_MASK = 1u << 1,
   LOOM_AMDGPU_SOURCE_VALUE_ANALYSIS_DURABLE_I1_BOOL = 1u << 2,
   LOOM_AMDGPU_SOURCE_VALUE_ANALYSIS_REGISTER_SHAPE = 1u << 3,
+  LOOM_AMDGPU_SOURCE_VALUE_ANALYSIS_SGPR_I1_BOOL = 1u << 4,
 };
 
 typedef struct loom_amdgpu_source_value_analysis_record_t {
@@ -2037,6 +2038,25 @@ static bool loom_amdgpu_source_value_is_native_i1_mask_excluding(
          loom_value_def_index(value) == 1;
 }
 
+static bool loom_amdgpu_analyzed_source_value_can_lower_as_sgpr_i1_bool(
+    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
+    const loom_view_region_table_t* view_regions,
+    loom_amdgpu_source_value_analysis_t* analysis,
+    loom_value_id_t source_value_id) {
+  bool value = false;
+  if (loom_amdgpu_source_value_analysis_cached_bit(
+          analysis, source_value_id,
+          LOOM_AMDGPU_SOURCE_VALUE_ANALYSIS_SGPR_I1_BOOL, &value)) {
+    return value;
+  }
+  value = loom_amdgpu_source_value_can_lower_as_sgpr_i1_bool(
+      module, fact_table, view_regions, source_value_id, LOOM_VALUE_ID_INVALID);
+  loom_amdgpu_source_value_analysis_record_bit(
+      analysis, source_value_id, LOOM_AMDGPU_SOURCE_VALUE_ANALYSIS_SGPR_I1_BOOL,
+      value);
+  return value;
+}
+
 static bool loom_amdgpu_i1_use_needs_native_mask(
     const loom_module_t* module, const loom_value_fact_table_t* fact_table,
     const loom_view_region_table_t* view_regions, const loom_op_t* user_op,
@@ -2132,14 +2152,14 @@ static bool loom_amdgpu_source_i1_value_has_same_block_branch_and_mask_use(
 static bool loom_amdgpu_source_value_is_durable_i1_bool(
     const loom_module_t* module, const loom_value_fact_table_t* fact_table,
     const loom_view_region_table_t* view_regions,
+    loom_amdgpu_source_value_analysis_t* analysis,
     loom_value_id_t source_value_id) {
   return (loom_amdgpu_source_i1_value_has_cross_block_use(module,
                                                           source_value_id) ||
           loom_amdgpu_source_i1_value_has_same_block_branch_and_mask_use(
               module, fact_table, view_regions, source_value_id)) &&
-         loom_amdgpu_source_value_can_lower_as_sgpr_i1_bool(
-             module, fact_table, view_regions, source_value_id,
-             LOOM_VALUE_ID_INVALID);
+         loom_amdgpu_analyzed_source_value_can_lower_as_sgpr_i1_bool(
+             module, fact_table, view_regions, analysis, source_value_id);
 }
 
 bool loom_amdgpu_source_value_is_native_i1_mask(
@@ -2448,7 +2468,7 @@ static bool loom_amdgpu_analyzed_source_value_is_durable_i1_bool(
     return value;
   }
   value = loom_amdgpu_source_value_is_durable_i1_bool(
-      module, fact_table, view_regions, source_value_id);
+      module, fact_table, view_regions, analysis, source_value_id);
   loom_amdgpu_source_value_analysis_record_bit(
       analysis, source_value_id,
       LOOM_AMDGPU_SOURCE_VALUE_ANALYSIS_DURABLE_I1_BOOL, value);
