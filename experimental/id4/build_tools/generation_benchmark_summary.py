@@ -31,6 +31,14 @@ _LABEL_LOAD_GROUPS_PATTERN = re.compile(
     r"\bparam_load_groups\[total=(?P<total>[0-9]+),"
     r"gather=(?P<gather>[0-9]+),encode=(?P<encode>[0-9]+)\]"
 )
+_LABEL_LOAD_SUBMIT_PATTERN = re.compile(
+    r"\bparam_load_submit\[count=(?P<count>[0-9]+),"
+    r"gather=(?P<gather>[0-9]+),encode=(?P<encode>[0-9]+),"
+    r"total_ms=(?P<total_ms>[0-9]+(?:\.[0-9]+)?),"
+    r"gather_ms=(?P<gather_ms>[0-9]+(?:\.[0-9]+)?),"
+    r"encode_ms=(?P<encode_ms>[0-9]+(?:\.[0-9]+)?),"
+    r"max_ms=(?P<max_ms>[0-9]+(?:\.[0-9]+)?)\]"
+)
 _LABEL_LOAD_KIND_PATTERN = re.compile(
     r"\bparam_load_kind\["
     r"gather_steps=(?P<gather_steps>[0-9]+),"
@@ -266,6 +274,9 @@ def _parse_generation_benchmark_label(label: str, context: str) -> dict[str, Any
     load_groups_match = _require_match(
         _LABEL_LOAD_GROUPS_PATTERN, label, f"{context}.label"
     )
+    load_submit_match = _require_match(
+        _LABEL_LOAD_SUBMIT_PATTERN, label, f"{context}.label"
+    )
     load_kind_match = _require_match(
         _LABEL_LOAD_KIND_PATTERN, label, f"{context}.label"
     )
@@ -443,6 +454,27 @@ def _parse_generation_benchmark_label(label: str, context: str) -> dict[str, Any
         ),
         "runtime_parameter_encode_load_group_count": _match_unsigned_group(
             load_groups_match, "encode", f"{context}.label"
+        ),
+        "parameter_load_submit_count": _match_unsigned_group(
+            load_submit_match, "count", f"{context}.label"
+        ),
+        "parameter_load_submit_gather_count": _match_unsigned_group(
+            load_submit_match, "gather", f"{context}.label"
+        ),
+        "parameter_load_submit_encode_count": _match_unsigned_group(
+            load_submit_match, "encode", f"{context}.label"
+        ),
+        "parameter_load_submit_total_ms": _match_float_group(
+            load_submit_match, "total_ms", f"{context}.label"
+        ),
+        "parameter_load_submit_gather_ms": _match_float_group(
+            load_submit_match, "gather_ms", f"{context}.label"
+        ),
+        "parameter_load_submit_encode_ms": _match_float_group(
+            load_submit_match, "encode_ms", f"{context}.label"
+        ),
+        "parameter_load_submit_max_ms": _match_float_group(
+            load_submit_match, "max_ms", f"{context}.label"
         ),
         "runtime_parameter_load_gather_steps": _match_unsigned_group(
             load_kind_match, "gather_steps", f"{context}.label"

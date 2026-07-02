@@ -30,6 +30,8 @@ TEST_BENCHMARK_LABEL = (
     "param_source_direct=4169MiB param_source_encoded=27848MiB "
     "param_load_steps[gather=322,encode=529] "
     "param_load_groups[total=851,gather=322,encode=529] "
+    "param_load_submit[count=604,gather=322,encode=282,total_ms=912.500,"
+    "gather_ms=601.125,encode_ms=311.375,max_ms=27.250] "
     "param_load_kind[gather_steps=322,gather_source=4169MiB,"
     "gather_target=4169MiB,fp8_bf16_steps=421,"
     "fp8_bf16_source=17480MiB,fp8_bf16_target=34924MiB,"
@@ -517,6 +519,13 @@ class GenerationBenchmarkSummaryTest(unittest.TestCase):
             self.assertEqual(row["runtime_parameter_load_group_count"], 851)
             self.assertEqual(row["runtime_parameter_gather_load_group_count"], 322)
             self.assertEqual(row["runtime_parameter_encode_load_group_count"], 529)
+            self.assertEqual(row["parameter_load_submit_count"], 604)
+            self.assertEqual(row["parameter_load_submit_gather_count"], 322)
+            self.assertEqual(row["parameter_load_submit_encode_count"], 282)
+            self.assertAlmostEqual(row["parameter_load_submit_total_ms"], 912.5)
+            self.assertAlmostEqual(row["parameter_load_submit_gather_ms"], 601.125)
+            self.assertAlmostEqual(row["parameter_load_submit_encode_ms"], 311.375)
+            self.assertAlmostEqual(row["parameter_load_submit_max_ms"], 27.25)
             self.assertEqual(row["runtime_parameter_load_gather_source_mib"], 4169)
             self.assertEqual(row["runtime_parameter_load_fp8_bf16_steps"], 421)
             self.assertEqual(row["runtime_parameter_load_fp8_bf16_target_mib"], 34924)

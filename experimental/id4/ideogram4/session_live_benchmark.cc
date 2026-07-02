@@ -1661,6 +1661,9 @@ static iree_status_t SetGenerationBenchmarkLabel(
       "]"
       " param_load_groups[total=%" PRIhsz ",gather=%" PRIhsz ",encode=%" PRIhsz
       "]"
+      " param_load_submit[count=%" PRIhsz ",gather=%" PRIhsz ",encode=%" PRIhsz
+      ",total_ms=%.3f,gather_ms=%.3f,encode_ms=%.3f"
+      ",max_ms=%.3f]"
       " local_hw_total=%" PRIu64 "MiB local_hw_largest=%" PRIu64
       "MiB"
       " boundary=%" PRIu64 "MiB kernels=%" PRIhsz " dispatches=%" PRIhsz
@@ -1720,6 +1723,19 @@ static iree_status_t SetGenerationBenchmarkLabel(
       statistics.parameter_load_group_count,
       statistics.parameter_gather_load_group_count,
       statistics.parameter_encode_load_group_count,
+      diagnostics.parameter_load_group_submit_count,
+      diagnostics.parameter_load_group_submit_gather_count,
+      diagnostics.parameter_load_group_submit_encode_count,
+      AverageMilliseconds(diagnostics.parameter_load_group_submit_duration_ns,
+                          iteration_count),
+      AverageMilliseconds(
+          diagnostics.parameter_load_group_submit_gather_duration_ns,
+          iteration_count),
+      AverageMilliseconds(
+          diagnostics.parameter_load_group_submit_encode_duration_ns,
+          iteration_count),
+      AverageMilliseconds(
+          diagnostics.parameter_load_group_submit_max_duration_ns, 1),
       CeilMiB(statistics.total_local_slab_high_water_mark),
       CeilMiB(statistics.largest_local_slab_high_water_mark),
       CeilMiB(statistics.boundary_tensor_byte_length), statistics.kernel_count,
