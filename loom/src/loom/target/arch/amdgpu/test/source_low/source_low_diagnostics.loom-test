@@ -736,15 +736,16 @@ func.def target(@target) @fragment_repack_result_to_lhs_rejected(%payload: vecto
 
 // RUN: emit source-low diagnostics=all output=low
 
-amdgpu.target<gfx942> @target
+amdgpu.target<gfx950> @target
 
-func.def target(@target) @fragment_repack_cdna_result_to_lhs_requires_strategy(%payload: vector<4xf32>) -> (vector<4xbf16>) {
-  %m = index.constant 16 : index
-  %n = index.constant 16 : index
-  %fragment = vector.fragment<result> %payload shape [%m, %n] : vector<4xf32>
-  // ERROR@+1: AMDGPU/041 {source_role_key="accumulator_result", result_role_key="lhs", source_type="vector<4xf32>", result_type="vector<4xbf16>", strategy_key="amdgpu.fragment_repack.strategy.diagnostic", reason_key="layout_strategy"}
-  %repacked = vector.fragment.repack<lhs> %fragment shape [%m, %n] : vector<4xf32> -> vector<4xbf16>
-  func.return %repacked : vector<4xbf16>
+func.def target(@target) @fragment_repack_result_to_lhs_shape_rejected(%payload: vector<16xf32>) -> (vector<8xbf16>) {
+  %m = index.constant 32 : index
+  %n = index.constant 32 : index
+  %k = index.constant 16 : index
+  %fragment = vector.fragment<result> %payload shape [%m, %n] : vector<16xf32>
+  // ERROR@+1: AMDGPU/041 {source_role_key="accumulator_result", result_role_key="lhs", source_type="vector<16xf32>", result_type="vector<8xbf16>", strategy_key="amdgpu.fragment_repack.strategy.diagnostic", reason_key="fragment_shape"}
+  %repacked = vector.fragment.repack<lhs> %fragment shape [%m, %k] : vector<16xf32> -> vector<8xbf16>
+  func.return %repacked : vector<8xbf16>
 }
 
 // ====
