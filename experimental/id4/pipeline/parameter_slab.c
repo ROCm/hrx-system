@@ -86,6 +86,8 @@ struct id4_pipeline_parameter_slab_set_t {
   iree_host_size_t load_count;
   // Copied slab load descriptors used by deferred group submissions.
   id4_pipeline_parameter_slab_load_t* loads;
+  // Slab plans owned by copied load descriptors.
+  id4_pipeline_parameter_slab_plan_t* slab_plans;
   // Number of retained parameter load readiness groups.
   iree_host_size_t load_group_count;
   // Retained parameter load group descriptors.
@@ -125,6 +127,85 @@ struct id4_pipeline_parameter_slab_set_t {
   // Payload value signaled by the last submitted encoded load group.
   uint64_t encode_tail_payload_value;
 };
+
+static iree_status_t id4_pipeline_parameter_string_clone(
+    iree_string_view_t source, iree_allocator_t host_allocator,
+    iree_string_view_t* out_string) {
+  *out_string = iree_string_view_empty();
+  if (iree_string_view_is_empty(source)) return iree_ok_status();
+  char* storage = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_allocator_malloc(host_allocator, source.size, (void**)&storage));
+  memcpy(storage, source.data, source.size);
+  *out_string = iree_make_string_view(storage, source.size);
+  return iree_ok_status();
+}
+
+static void id4_pipeline_parameter_string_release(
+    iree_string_view_t string, iree_allocator_t host_allocator) {
+  iree_allocator_free(host_allocator, (void*)string.data);
+}
+
+static void id4_pipeline_parameter_slab_plan_deinitialize(
+    id4_pipeline_parameter_slab_plan_t* slab, iree_allocator_t host_allocator) {
+  id4_pipeline_parameter_request_t* requests =
+      (id4_pipeline_parameter_request_t*)slab->requests;
+  if (requests) {
+    for (iree_host_size_t i = 0; i < slab->request_count; ++i) {
+      id4_pipeline_parameter_string_release(requests[i].key, host_allocator);
+    }
+  }
+  iree_allocator_free(host_allocator, requests);
+  id4_pipeline_parameter_string_release(slab->scope, host_allocator);
+  memset(slab, 0, sizeof(*slab));
+}
+
+static iree_status_t id4_pipeline_parameter_slab_plan_clone(
+    const id4_pipeline_parameter_slab_plan_t* source,
+    iree_allocator_t host_allocator,
+    id4_pipeline_parameter_slab_plan_t* target) {
+  memset(target, 0, sizeof(*target));
+  if (!source) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "parameter slab load is missing its slab plan");
+  }
+  target->placement_id = source->placement_id;
+  target->binding_slot = source->binding_slot;
+  target->target_params = source->target_params;
+  target->byte_length = source->byte_length;
+  target->alignment = source->alignment;
+  target->request_count = source->request_count;
+  iree_status_t status = id4_pipeline_parameter_string_clone(
+      source->scope, host_allocator, &target->scope);
+  id4_pipeline_parameter_request_t* requests = NULL;
+  if (iree_status_is_ok(status) && target->request_count != 0) {
+    status =
+        iree_allocator_malloc_array(host_allocator, target->request_count,
+                                    sizeof(requests[0]), (void**)&requests);
+    if (iree_status_is_ok(status)) {
+      memset(requests, 0, target->request_count * sizeof(requests[0]));
+    }
+  }
+  for (iree_host_size_t i = 0;
+       i < target->request_count && iree_status_is_ok(status); ++i) {
+    requests[i].span = source->requests[i].span;
+    status = id4_pipeline_parameter_string_clone(
+        source->requests[i].key, host_allocator, &requests[i].key);
+  }
+  if (iree_status_is_ok(status)) {
+    target->requests = requests;
+  } else {
+    if (requests) {
+      for (iree_host_size_t i = 0; i < target->request_count; ++i) {
+        id4_pipeline_parameter_string_release(requests[i].key, host_allocator);
+      }
+    }
+    iree_allocator_free(host_allocator, requests);
+    id4_pipeline_parameter_string_release(target->scope, host_allocator);
+    memset(target, 0, sizeof(*target));
+  }
+  return status;
+}
 
 iree_status_t id4_pipeline_parameter_slab_pack_span(
     iree_device_size_t byte_length, iree_device_size_t alignment,
@@ -610,6 +691,12 @@ static void id4_pipeline_parameter_slab_set_destroy(
       iree_hal_device_release(slab_set->loads[i].device);
     }
   }
+  if (slab_set->slab_plans) {
+    for (iree_host_size_t i = 0; i < slab_set->load_count; ++i) {
+      id4_pipeline_parameter_slab_plan_deinitialize(&slab_set->slab_plans[i],
+                                                    host_allocator);
+    }
+  }
   if (slab_set->load_group_semaphores) {
     for (iree_host_size_t i = 0; i < slab_set->load_group_count; ++i) {
       iree_hal_semaphore_release(slab_set->load_group_semaphores[i]);
@@ -628,6 +715,7 @@ static void id4_pipeline_parameter_slab_set_destroy(
   iree_allocator_free(host_allocator, slab_set->load_group_semaphores);
   iree_allocator_free(host_allocator, slab_set->load_steps);
   iree_allocator_free(host_allocator, slab_set->load_groups);
+  iree_allocator_free(host_allocator, slab_set->slab_plans);
   iree_allocator_free(host_allocator, slab_set->loads);
   iree_allocator_free(host_allocator, slab_set->buffers);
   iree_allocator_free(host_allocator, slab_set);
@@ -684,12 +772,46 @@ static iree_status_t id4_pipeline_parameter_slab_set_copy_loads(
       slab_set->host_allocator, load_count, sizeof(slab_set->loads[0]),
       (void**)&slab_set->loads);
   if (!iree_status_is_ok(status)) return status;
-  memcpy(slab_set->loads, loads, load_count * sizeof(slab_set->loads[0]));
-  slab_set->load_count = load_count;
-  for (iree_host_size_t i = 0; i < load_count; ++i) {
-    iree_hal_device_retain(slab_set->loads[i].device);
+  memset(slab_set->loads, 0, load_count * sizeof(slab_set->loads[0]));
+  status = iree_allocator_malloc_array(slab_set->host_allocator, load_count,
+                                       sizeof(slab_set->slab_plans[0]),
+                                       (void**)&slab_set->slab_plans);
+  if (!iree_status_is_ok(status)) {
+    iree_allocator_free(slab_set->host_allocator, slab_set->loads);
+    slab_set->loads = NULL;
+    return status;
   }
-  return iree_ok_status();
+  memset(slab_set->slab_plans, 0, load_count * sizeof(slab_set->slab_plans[0]));
+
+  iree_host_size_t retained_device_count = 0;
+  for (iree_host_size_t i = 0; i < load_count && iree_status_is_ok(status);
+       ++i) {
+    slab_set->loads[i] = loads[i];
+    status = id4_pipeline_parameter_slab_plan_clone(
+        loads[i].slab, slab_set->host_allocator, &slab_set->slab_plans[i]);
+    if (iree_status_is_ok(status)) {
+      slab_set->loads[i].slab = &slab_set->slab_plans[i];
+      iree_hal_device_retain(slab_set->loads[i].device);
+      ++retained_device_count;
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    slab_set->load_count = load_count;
+  } else {
+    for (iree_host_size_t i = 0; i < retained_device_count; ++i) {
+      iree_hal_device_release(slab_set->loads[i].device);
+      slab_set->loads[i].device = NULL;
+    }
+    for (iree_host_size_t i = 0; i < load_count; ++i) {
+      id4_pipeline_parameter_slab_plan_deinitialize(&slab_set->slab_plans[i],
+                                                    slab_set->host_allocator);
+    }
+    iree_allocator_free(slab_set->host_allocator, slab_set->slab_plans);
+    iree_allocator_free(slab_set->host_allocator, slab_set->loads);
+    slab_set->slab_plans = NULL;
+    slab_set->loads = NULL;
+  }
+  return status;
 }
 
 static iree_status_t id4_pipeline_parameter_slab_set_copy_load_steps(
@@ -4072,6 +4194,15 @@ iree_hal_buffer_t* id4_pipeline_parameter_slab_set_buffer_at(
     const id4_pipeline_parameter_slab_set_t* slab_set, iree_host_size_t index) {
   if (!slab_set || index >= slab_set->count || !slab_set->buffers) return NULL;
   return slab_set->buffers[index];
+}
+
+const id4_pipeline_parameter_slab_plan_t*
+id4_pipeline_parameter_slab_set_plan_at(
+    const id4_pipeline_parameter_slab_set_t* slab_set, iree_host_size_t index) {
+  if (!slab_set || index >= slab_set->load_count || !slab_set->slab_plans) {
+    return NULL;
+  }
+  return &slab_set->slab_plans[index];
 }
 
 iree_host_size_t id4_pipeline_parameter_slab_set_load_group_count(

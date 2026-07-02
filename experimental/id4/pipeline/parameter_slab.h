@@ -540,6 +540,12 @@ iree_host_size_t id4_pipeline_parameter_slab_set_count(
 iree_hal_buffer_t* id4_pipeline_parameter_slab_set_buffer_at(
     const id4_pipeline_parameter_slab_set_t* slab_set, iree_host_size_t index);
 
+// Returns the retained slab plan metadata for |index| or NULL when out of
+// range.
+const id4_pipeline_parameter_slab_plan_t*
+id4_pipeline_parameter_slab_set_plan_at(
+    const id4_pipeline_parameter_slab_set_t* slab_set, iree_host_size_t index);
+
 // Returns the number of retained parameter load readiness groups.
 iree_host_size_t id4_pipeline_parameter_slab_set_load_group_count(
     const id4_pipeline_parameter_slab_set_t* slab_set);

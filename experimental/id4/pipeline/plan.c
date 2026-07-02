@@ -2285,6 +2285,77 @@ static bool id4_pipeline_parameter_load_groups_equal(
          lhs.target_slab_index == rhs.target_slab_index;
 }
 
+static bool id4_pipeline_parameter_requests_equal(
+    const id4_pipeline_parameter_request_t* lhs,
+    const id4_pipeline_parameter_request_t* rhs) {
+  return iree_string_view_equal(lhs->key, rhs->key) &&
+         lhs->span.parameter_offset == rhs->span.parameter_offset &&
+         lhs->span.buffer_offset == rhs->span.buffer_offset &&
+         lhs->span.length == rhs->span.length;
+}
+
+static iree_status_t id4_pipeline_plan_validate_parameter_slab_metadata(
+    const id4_pipeline_parameter_slab_plan_t* plan_slab,
+    const id4_pipeline_parameter_slab_plan_t* retained_slab,
+    iree_host_size_t slab_index) {
+  if (!retained_slab) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "parameter slab %" PRIhsz " has no retained metadata", slab_index);
+  }
+  if (!iree_string_view_equal(plan_slab->scope, retained_slab->scope)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "parameter slab %" PRIhsz " scope mismatch",
+                            slab_index);
+  }
+  if (plan_slab->placement_id != retained_slab->placement_id) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "parameter slab %" PRIhsz
+        " placement mismatch: plan requires %u but slab set has %u",
+        slab_index, plan_slab->placement_id, retained_slab->placement_id);
+  }
+  if (plan_slab->binding_slot != retained_slab->binding_slot) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "parameter slab %" PRIhsz
+        " binding slot mismatch: plan requires %u but slab set has %u",
+        slab_index, plan_slab->binding_slot, retained_slab->binding_slot);
+  }
+  if (plan_slab->byte_length != retained_slab->byte_length) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "parameter slab %" PRIhsz
+        " metadata byte length mismatch: plan requires %" PRIu64
+        " bytes but slab set has %" PRIu64,
+        slab_index, plan_slab->byte_length, retained_slab->byte_length);
+  }
+  if (plan_slab->alignment != retained_slab->alignment) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "parameter slab %" PRIhsz " alignment mismatch: plan requires %" PRIu64
+        " but slab set has %" PRIu64,
+        slab_index, plan_slab->alignment, retained_slab->alignment);
+  }
+  if (plan_slab->request_count != retained_slab->request_count) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "parameter slab %" PRIhsz " request count mismatch: plan has %" PRIhsz
+        " requests but slab set has %" PRIhsz,
+        slab_index, plan_slab->request_count, retained_slab->request_count);
+  }
+  for (iree_host_size_t i = 0; i < plan_slab->request_count; ++i) {
+    if (!id4_pipeline_parameter_requests_equal(&plan_slab->requests[i],
+                                               &retained_slab->requests[i])) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "parameter slab %" PRIhsz " request %" PRIhsz
+                              " mismatch",
+                              slab_index, i);
+    }
+  }
+  return iree_ok_status();
+}
+
 iree_status_t id4_pipeline_plan_validate_parameter_slabs(
     const id4_pipeline_plan_t* plan,
     const id4_pipeline_parameter_slab_set_t* slab_set) {
@@ -2320,6 +2391,9 @@ iree_status_t id4_pipeline_plan_validate_parameter_slabs(
                               i, plan->parameter_slabs[i].byte_length,
                               buffer_byte_length);
     }
+    IREE_RETURN_IF_ERROR(id4_pipeline_plan_validate_parameter_slab_metadata(
+        &plan->parameter_slabs[i],
+        id4_pipeline_parameter_slab_set_plan_at(slab_set, i), i));
   }
 
   iree_host_size_t planned_group_count = 0;
