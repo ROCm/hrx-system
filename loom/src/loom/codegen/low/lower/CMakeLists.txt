@@ -22,6 +22,7 @@ loom_cc_library(
     "lower.c"
     "lower_context.c"
     "lower_policy.c"
+    "lower_report.c"
     "lower_rules.c"
   DEPS
     iree::base
@@ -56,6 +57,7 @@ loom_cc_library(
     loom::target::low_legality
     loom::target::registers
     loom::target::types
+    loom::util::cfg_graph
     loom::util::fact_table
     loom::util::math
   PUBLIC

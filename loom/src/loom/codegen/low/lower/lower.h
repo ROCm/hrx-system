@@ -385,6 +385,9 @@ typedef struct loom_low_lower_report_row_t {
   uint32_t emitted_low_op_count;
 } loom_low_lower_report_row_t;
 
+// Source memory packet execution count evidence is not statically known.
+#define LOOM_LOW_LOWER_MEMORY_REPORT_EXECUTION_COUNT_PLUS_ONE_UNKNOWN 0u
+
 // One emitted source-memory packet row captured for production diagnostics.
 typedef struct loom_low_lower_memory_report_row_t {
   // Source function symbol containing the lowered source operation.
@@ -455,6 +458,8 @@ typedef struct loom_low_lower_memory_report_row_t {
   iree_string_view_t storage_sparsity_policy;
   // Conservative source byte interval evidence for this memory packet.
   loom_low_byte_interval_t source_interval;
+  // Exact source execution count plus one, or zero when unknown.
+  uint64_t execution_count_plus_one;
 } loom_low_lower_memory_report_row_t;
 
 // Linked storage block for homogeneous source-to-low report rows.
@@ -1203,7 +1208,7 @@ iree_status_t loom_low_lower_record_source_memory_access(
 
 // Records an emitted source-memory packet report row.
 iree_status_t loom_low_lower_record_memory_report_row(
-    loom_low_lower_context_t* context,
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_low_lower_memory_report_row_t* row);
 
 // Emits ERR_TARGET_033 for a source value type rejected by the active

@@ -148,6 +148,12 @@ typedef struct loom_low_lowering_frame_t {
   iree_host_size_t selected_plan_capacity;
   // Next selected plan consumed by the emission walk.
   iree_host_size_t selected_plan_emit_index;
+  // Cached source-function CFG block execution counts for memory reports.
+  uint64_t* source_block_execution_counts;
+  // True when source_block_execution_counts has been initialized.
+  bool source_block_execution_counts_initialized;
+  // True when every reachable source CFG backedge was counted exactly.
+  bool source_block_execution_counts_exact;
   // Source-derived memory access rows copied into options.table_arena.
   loom_low_memory_access_record_t* memory_access_records;
   // Number of memory access rows recorded during emission.

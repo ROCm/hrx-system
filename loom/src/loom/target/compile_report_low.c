@@ -2332,6 +2332,7 @@ iree_status_t loom_target_compile_report_record_low_lowering(
         .storage_codebook_policy = source_row->storage_codebook_policy,
         .storage_sparsity_policy = source_row->storage_sparsity_policy,
         .source_interval = source_interval,
+        .execution_count_plus_one = source_row->execution_count_plus_one,
     };
     IREE_RETURN_IF_ERROR(
         loom_target_compile_report_record_source_low_memory_row(report, &row));

@@ -13,6 +13,26 @@ enum {
   LOOM_TARGET_COMPILE_REPORT_VEC_DEFAULT_BYTE_LENGTH = 4096,
 };
 
+static bool loom_target_compile_report_checked_add_u64(uint64_t lhs,
+                                                       uint64_t rhs,
+                                                       uint64_t* out_result) {
+  if (UINT64_MAX - lhs < rhs) {
+    return false;
+  }
+  *out_result = lhs + rhs;
+  return true;
+}
+
+static bool loom_target_compile_report_checked_mul_u64(uint64_t lhs,
+                                                       uint64_t rhs,
+                                                       uint64_t* out_result) {
+  if (lhs != 0 && rhs > UINT64_MAX / lhs) {
+    return false;
+  }
+  *out_result = lhs * rhs;
+  return true;
+}
+
 void loom_target_compile_report_initialize(
     loom_target_compile_report_t* out_report, iree_allocator_t allocator) {
   *out_report = (loom_target_compile_report_t){
@@ -909,6 +929,8 @@ static void loom_target_compile_report_accumulate_source_low_memory_summaries(
     loom_target_compile_report_source_low_memory_summary_t* target,
     const loom_target_compile_report_source_low_memory_summary_t* source) {
   target->packet_count += source->packet_count;
+  target->unknown_dynamic_packet_count += source->unknown_dynamic_packet_count;
+  target->exact_dynamic_packet_count += source->exact_dynamic_packet_count;
   target->load_packet_count += source->load_packet_count;
   target->store_packet_count += source->store_packet_count;
   target->scalar_packet_count += source->scalar_packet_count;
@@ -923,6 +945,18 @@ static void loom_target_compile_report_accumulate_source_low_memory_summaries(
       source->issued_read_unknown_width_count;
   target->issued_write_unknown_width_count +=
       source->issued_write_unknown_width_count;
+  target->dynamic_packet_count += source->dynamic_packet_count;
+  target->dynamic_source_byte_count += source->dynamic_source_byte_count;
+  target->dynamic_read_byte_count += source->dynamic_read_byte_count;
+  target->dynamic_write_byte_count += source->dynamic_write_byte_count;
+  target->dynamic_issued_read_byte_count +=
+      source->dynamic_issued_read_byte_count;
+  target->dynamic_issued_write_byte_count +=
+      source->dynamic_issued_write_byte_count;
+  target->dynamic_issued_read_unknown_width_count +=
+      source->dynamic_issued_read_unknown_width_count;
+  target->dynamic_issued_write_unknown_width_count +=
+      source->dynamic_issued_write_unknown_width_count;
   target->contiguous_vector_packet_count +=
       source->contiguous_vector_packet_count;
   target->strided_vector_packet_count += source->strided_vector_packet_count;
@@ -1360,6 +1394,8 @@ static void loom_target_compile_report_merge_source_low_memory_summary(
     loom_target_compile_report_source_low_memory_summary_t* target,
     const loom_target_compile_report_source_low_memory_summary_t* source) {
   target->packet_count += source->packet_count;
+  target->unknown_dynamic_packet_count += source->unknown_dynamic_packet_count;
+  target->exact_dynamic_packet_count += source->exact_dynamic_packet_count;
   target->load_packet_count += source->load_packet_count;
   target->store_packet_count += source->store_packet_count;
   target->scalar_packet_count += source->scalar_packet_count;
@@ -1374,6 +1410,18 @@ static void loom_target_compile_report_merge_source_low_memory_summary(
       source->issued_read_unknown_width_count;
   target->issued_write_unknown_width_count +=
       source->issued_write_unknown_width_count;
+  target->dynamic_packet_count += source->dynamic_packet_count;
+  target->dynamic_source_byte_count += source->dynamic_source_byte_count;
+  target->dynamic_read_byte_count += source->dynamic_read_byte_count;
+  target->dynamic_write_byte_count += source->dynamic_write_byte_count;
+  target->dynamic_issued_read_byte_count +=
+      source->dynamic_issued_read_byte_count;
+  target->dynamic_issued_write_byte_count +=
+      source->dynamic_issued_write_byte_count;
+  target->dynamic_issued_read_unknown_width_count +=
+      source->dynamic_issued_read_unknown_width_count;
+  target->dynamic_issued_write_unknown_width_count +=
+      source->dynamic_issued_write_unknown_width_count;
   target->contiguous_vector_packet_count +=
       source->contiguous_vector_packet_count;
   target->strided_vector_packet_count += source->strided_vector_packet_count;
@@ -1879,16 +1927,20 @@ static void loom_target_compile_report_accumulate_source_low_memory_summary(
         direction_unique_delta) {
   const uint64_t lane_count = row->vector_lane_count;
   const uint64_t source_byte_count = lane_count * row->element_byte_count;
+  const bool is_load =
+      loom_target_compile_report_source_low_memory_row_is_load(row);
+  const bool is_store =
+      loom_target_compile_report_source_low_memory_row_is_store(row);
   ++summary->packet_count;
   summary->source_lane_count += lane_count;
   summary->source_byte_count += source_byte_count;
-  if (loom_target_compile_report_source_low_memory_row_is_load(row)) {
+  if (is_load) {
     ++summary->load_packet_count;
     summary->read_byte_count += source_byte_count;
     loom_target_compile_report_accumulate_memory_interval_summary(
         &summary->read_interval_envelope, &row->source_interval,
         direction_unique_delta);
-  } else if (loom_target_compile_report_source_low_memory_row_is_store(row)) {
+  } else if (is_store) {
     ++summary->store_packet_count;
     summary->write_byte_count += source_byte_count;
     loom_target_compile_report_accumulate_memory_interval_summary(
@@ -1903,6 +1955,93 @@ static void loom_target_compile_report_accumulate_source_low_memory_summary(
       row->issued_write_unknown_width_count;
   loom_target_compile_report_accumulate_memory_interval_summary(
       &summary->interval_envelope, &row->source_interval, unique_delta);
+  if (row->execution_count_plus_one ==
+      LOOM_TARGET_COMPILE_REPORT_SOURCE_LOW_MEMORY_EXECUTION_COUNT_PLUS_ONE_UNKNOWN) {
+    ++summary->unknown_dynamic_packet_count;
+  } else {
+    const uint64_t execution_count = row->execution_count_plus_one - 1;
+    uint64_t dynamic_source_byte_count = 0;
+    uint64_t dynamic_issued_read_byte_count = 0;
+    uint64_t dynamic_issued_write_byte_count = 0;
+    uint64_t dynamic_issued_read_unknown_width_count = 0;
+    uint64_t dynamic_issued_write_unknown_width_count = 0;
+    const bool dynamic_counts_ok =
+        loom_target_compile_report_checked_mul_u64(
+            source_byte_count, execution_count, &dynamic_source_byte_count) &&
+        loom_target_compile_report_checked_mul_u64(
+            row->issued_read_byte_count, execution_count,
+            &dynamic_issued_read_byte_count) &&
+        loom_target_compile_report_checked_mul_u64(
+            row->issued_write_byte_count, execution_count,
+            &dynamic_issued_write_byte_count) &&
+        loom_target_compile_report_checked_mul_u64(
+            row->issued_read_unknown_width_count, execution_count,
+            &dynamic_issued_read_unknown_width_count) &&
+        loom_target_compile_report_checked_mul_u64(
+            row->issued_write_unknown_width_count, execution_count,
+            &dynamic_issued_write_unknown_width_count);
+    uint64_t new_dynamic_packet_count = summary->dynamic_packet_count;
+    uint64_t new_dynamic_source_byte_count = summary->dynamic_source_byte_count;
+    uint64_t new_dynamic_read_byte_count = summary->dynamic_read_byte_count;
+    uint64_t new_dynamic_write_byte_count = summary->dynamic_write_byte_count;
+    uint64_t new_dynamic_issued_read_byte_count =
+        summary->dynamic_issued_read_byte_count;
+    uint64_t new_dynamic_issued_write_byte_count =
+        summary->dynamic_issued_write_byte_count;
+    uint64_t new_dynamic_issued_read_unknown_width_count =
+        summary->dynamic_issued_read_unknown_width_count;
+    uint64_t new_dynamic_issued_write_unknown_width_count =
+        summary->dynamic_issued_write_unknown_width_count;
+    bool dynamic_accumulation_ok =
+        dynamic_counts_ok &&
+        loom_target_compile_report_checked_add_u64(new_dynamic_packet_count,
+                                                   execution_count,
+                                                   &new_dynamic_packet_count) &&
+        loom_target_compile_report_checked_add_u64(
+            new_dynamic_source_byte_count, dynamic_source_byte_count,
+            &new_dynamic_source_byte_count) &&
+        loom_target_compile_report_checked_add_u64(
+            new_dynamic_issued_read_byte_count, dynamic_issued_read_byte_count,
+            &new_dynamic_issued_read_byte_count) &&
+        loom_target_compile_report_checked_add_u64(
+            new_dynamic_issued_write_byte_count,
+            dynamic_issued_write_byte_count,
+            &new_dynamic_issued_write_byte_count) &&
+        loom_target_compile_report_checked_add_u64(
+            new_dynamic_issued_read_unknown_width_count,
+            dynamic_issued_read_unknown_width_count,
+            &new_dynamic_issued_read_unknown_width_count) &&
+        loom_target_compile_report_checked_add_u64(
+            new_dynamic_issued_write_unknown_width_count,
+            dynamic_issued_write_unknown_width_count,
+            &new_dynamic_issued_write_unknown_width_count);
+    if (dynamic_accumulation_ok && is_load) {
+      dynamic_accumulation_ok = loom_target_compile_report_checked_add_u64(
+          new_dynamic_read_byte_count, dynamic_source_byte_count,
+          &new_dynamic_read_byte_count);
+    } else if (dynamic_accumulation_ok && is_store) {
+      dynamic_accumulation_ok = loom_target_compile_report_checked_add_u64(
+          new_dynamic_write_byte_count, dynamic_source_byte_count,
+          &new_dynamic_write_byte_count);
+    }
+    if (!dynamic_accumulation_ok) {
+      ++summary->unknown_dynamic_packet_count;
+    } else {
+      ++summary->exact_dynamic_packet_count;
+      summary->dynamic_packet_count = new_dynamic_packet_count;
+      summary->dynamic_source_byte_count = new_dynamic_source_byte_count;
+      summary->dynamic_read_byte_count = new_dynamic_read_byte_count;
+      summary->dynamic_write_byte_count = new_dynamic_write_byte_count;
+      summary->dynamic_issued_read_byte_count =
+          new_dynamic_issued_read_byte_count;
+      summary->dynamic_issued_write_byte_count =
+          new_dynamic_issued_write_byte_count;
+      summary->dynamic_issued_read_unknown_width_count =
+          new_dynamic_issued_read_unknown_width_count;
+      summary->dynamic_issued_write_unknown_width_count =
+          new_dynamic_issued_write_unknown_width_count;
+    }
+  }
   if (lane_count == 1) {
     ++summary->scalar_packet_count;
   } else if (lane_count > 1) {

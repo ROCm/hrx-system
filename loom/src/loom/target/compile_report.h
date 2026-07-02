@@ -969,6 +969,10 @@ typedef struct loom_target_compile_report_source_low_row_t {
   uint32_t emitted_low_op_count;
 } loom_target_compile_report_source_low_row_t;
 
+// Source memory packet execution count evidence is not statically known.
+#define LOOM_TARGET_COMPILE_REPORT_SOURCE_LOW_MEMORY_EXECUTION_COUNT_PLUS_ONE_UNKNOWN \
+  0u
+
 typedef uint32_t loom_target_compile_report_memory_interval_flags_t;
 enum {
   // The interval carries a bounded range for the byte interval begin.
@@ -1082,12 +1086,18 @@ typedef struct loom_target_compile_report_source_low_memory_row_t {
   iree_string_view_t storage_sparsity_policy;
   // Conservative source byte interval evidence for this memory packet.
   loom_target_compile_report_memory_interval_t source_interval;
+  // Exact source execution count plus one, or zero when unknown.
+  uint64_t execution_count_plus_one;
 } loom_target_compile_report_source_low_memory_row_t;
 
 // Summary of emitted source-memory packet shape.
 typedef struct loom_target_compile_report_source_low_memory_summary_t {
   // Number of emitted source-memory packets.
   uint64_t packet_count;
+  // Number of packets without exact dynamic contribution evidence.
+  uint64_t unknown_dynamic_packet_count;
+  // Number of packets with exact dynamic contribution evidence.
+  uint64_t exact_dynamic_packet_count;
   // Number of load packets.
   uint64_t load_packet_count;
   // Number of store packets.
@@ -1112,6 +1122,22 @@ typedef struct loom_target_compile_report_source_low_memory_summary_t {
   uint64_t issued_read_unknown_width_count;
   // Number of emitted write effects without known byte-aligned widths.
   uint64_t issued_write_unknown_width_count;
+  // Dynamic source-memory packet executions with exact source trip counts.
+  uint64_t dynamic_packet_count;
+  // Dynamic source bytes represented by packets with known element sizes.
+  uint64_t dynamic_source_byte_count;
+  // Dynamic logical source bytes read by load packets.
+  uint64_t dynamic_read_byte_count;
+  // Dynamic logical source bytes written by store packets.
+  uint64_t dynamic_write_byte_count;
+  // Dynamic target packet bytes read by emitted load effects.
+  uint64_t dynamic_issued_read_byte_count;
+  // Dynamic target packet bytes written by emitted store effects.
+  uint64_t dynamic_issued_write_byte_count;
+  // Dynamic read effects without known byte-aligned widths.
+  uint64_t dynamic_issued_read_unknown_width_count;
+  // Dynamic write effects without known byte-aligned widths.
+  uint64_t dynamic_issued_write_unknown_width_count;
   // Number of vector packets whose source lanes are element-contiguous.
   uint64_t contiguous_vector_packet_count;
   // Number of vector packets with a known non-contiguous source lane stride.
