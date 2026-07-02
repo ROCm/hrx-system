@@ -1283,7 +1283,8 @@ static iree_status_t loom_amdgpu_emit_subgroup_reduce_xor_tree(
       loom_value_id_t peer = LOOM_VALUE_ID_INVALID;
       IREE_RETURN_IF_ERROR(loom_amdgpu_emit_subgroup_bpermute_register(
           context, source_op, &plan->bpermute_descriptor,
-          low_source_byte_offset, accumulator, lane_type, &peer));
+          low_source_byte_offset, /*static_byte_offset=*/0, accumulator,
+          lane_type, &peer));
       IREE_RETURN_IF_ERROR(loom_amdgpu_emit_subgroup_combine(
           context, source_op, &plan->combine_descriptor, accumulator, peer,
           lane_type, &accumulator));
@@ -1370,7 +1371,8 @@ static iree_status_t loom_amdgpu_emit_subgroup_reduce_cross_row_xor_tree(
         }
         IREE_RETURN_IF_ERROR(loom_amdgpu_emit_subgroup_bpermute_register(
             context, source_op, &plan->bpermute_descriptor,
-            low_source_byte_offset, accumulator, lane_type, &peer));
+            low_source_byte_offset, /*static_byte_offset=*/0, accumulator,
+            lane_type, &peer));
       }
       IREE_RETURN_IF_ERROR(loom_amdgpu_emit_subgroup_combine(
           context, source_op, &plan->combine_descriptor, accumulator, peer,
@@ -1496,7 +1498,8 @@ static iree_status_t loom_amdgpu_emit_subgroup_reduce_down_tree(
       loom_value_id_t peer = LOOM_VALUE_ID_INVALID;
       IREE_RETURN_IF_ERROR(loom_amdgpu_emit_subgroup_bpermute_register(
           context, source_op, &plan->bpermute_descriptor,
-          low_source_byte_offset, accumulator, lane_type, &peer));
+          low_source_byte_offset, /*static_byte_offset=*/0, accumulator,
+          lane_type, &peer));
       IREE_RETURN_IF_ERROR(loom_amdgpu_emit_subgroup_select_peer(
           context, source_op, &plan->select_descriptor, identity, peer, guard,
           lane_type, &peer));
@@ -1507,7 +1510,7 @@ static iree_status_t loom_amdgpu_emit_subgroup_reduce_down_tree(
 
     IREE_RETURN_IF_ERROR(loom_amdgpu_emit_subgroup_bpermute_register(
         context, source_op, &plan->bpermute_descriptor, first_lane_offset,
-        accumulator, lane_type, &inout_registers[i]));
+        /*static_byte_offset=*/0, accumulator, lane_type, &inout_registers[i]));
   }
 
   return iree_ok_status();
@@ -2070,7 +2073,8 @@ iree_status_t loom_amdgpu_lower_kernel_workgroup_reduce(
       for (uint32_t i = 0; i < register_count; ++i) {
         IREE_RETURN_IF_ERROR(loom_amdgpu_emit_subgroup_bpermute_register(
             context, source_op, &plan->bpermute_descriptor, first_lane_offset,
-            result_registers[i], lane_type, &result_registers[i]));
+            /*static_byte_offset=*/0, result_registers[i], lane_type,
+            &result_registers[i]));
       }
 
       return loom_amdgpu_collective_bind_payload_result(

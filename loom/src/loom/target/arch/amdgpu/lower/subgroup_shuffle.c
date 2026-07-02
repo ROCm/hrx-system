@@ -438,7 +438,8 @@ iree_status_t loom_amdgpu_lower_kernel_subgroup_shuffle(
     } else {
       IREE_RETURN_IF_ERROR(loom_amdgpu_emit_subgroup_bpermute_register(
           context, source_op, &plan->descriptor, low_source_byte_offset,
-          low_source_register, lane_type, &result_registers[i]));
+          /*static_byte_offset=*/0, low_source_register, lane_type,
+          &result_registers[i]));
     }
   }
 
