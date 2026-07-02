@@ -419,4 +419,60 @@ TEST_F(AsyncQueueTest, CleanupRunsOnCancellation) {
   iree_async_semaphore_release(wait_sem);
 }
 
+TEST_F(AsyncQueueTest, FailureHandlerOwnsWaitFailureSignals) {
+  iree_async_semaphore_t* wait_sem = MakeSem(0);
+  iree_async_semaphore_t* signal_sem = MakeSem(0);
+  std::vector<iree_async_semaphore_t*> wait_sems = {wait_sem};
+  std::vector<uint64_t> wait_values = {1};
+  std::vector<iree_async_semaphore_t*> signal_sems = {signal_sem};
+  std::vector<uint64_t> signal_values = {1};
+
+  struct State {
+    std::atomic<int> op_called{0};
+    std::atomic<int> failure_called{0};
+    std::atomic<int> cleanup_called{0};
+    std::atomic<int> failure_code{IREE_STATUS_OK};
+  } state;
+
+  iree_hal_amdxdna_async_op_fn_t op = [](void* user_data) -> iree_status_t {
+    reinterpret_cast<State*>(user_data)->op_called.fetch_add(1);
+    return iree_ok_status();
+  };
+  iree_hal_amdxdna_async_op_failure_fn_t failure =
+      [](void* user_data, iree_status_t status) -> iree_status_t {
+    State* state = reinterpret_cast<State*>(user_data);
+    state->failure_code.store(iree_status_code(status));
+    iree_status_ignore(status);
+    state->failure_called.fetch_add(1);
+    return iree_status_from_code(IREE_STATUS_DEFERRED);
+  };
+  iree_hal_amdxdna_async_op_cleanup_fn_t cleanup = [](void* user_data) {
+    reinterpret_cast<State*>(user_data)->cleanup_called.fetch_add(1);
+  };
+
+  IREE_ASSERT_OK(iree_hal_amdxdna_async_queue_enqueue_with_failure_handler(
+      queue_, MakeList(&wait_sems, &wait_values),
+      MakeList(&signal_sems, &signal_values), op, failure, cleanup, &state,
+      /*retained_resources=*/nullptr, /*retained_resource_count=*/0));
+
+  iree_async_semaphore_fail(
+      wait_sem, iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "expected"));
+  for (int i = 0; i < 100 && state.cleanup_called.load() == 0; ++i) {
+    iree_status_ignore(iree_async_semaphore_multi_wait(
+        IREE_ASYNC_WAIT_MODE_ALL, &signal_sem, &signal_values[0], 1,
+        iree_make_timeout_ms(10), IREE_ASYNC_WAIT_FLAG_NONE,
+        iree_allocator_system()));
+  }
+
+  EXPECT_EQ(state.op_called.load(), 0);
+  EXPECT_EQ(state.failure_called.load(), 1);
+  EXPECT_EQ(state.failure_code.load(), IREE_STATUS_INVALID_ARGUMENT);
+  EXPECT_EQ(state.cleanup_called.load(), 1);
+  EXPECT_EQ(iree_async_semaphore_query(signal_sem), 0u);
+  EXPECT_EQ(iree_async_semaphore_query_status(signal_sem), IREE_STATUS_OK);
+
+  iree_async_semaphore_release(signal_sem);
+  iree_async_semaphore_release(wait_sem);
+}
+
 }  // namespace

@@ -40,15 +40,25 @@ kernel::kernel(const pdev& p, uint32_t op) : m_op(op) {
     return;
   }
   m_cmd_size = m_exec_buf_bo->size();
+  m_init_errno = reset();
+}
+
+int kernel::init_errno() const { return m_init_errno; }
+
+int kernel::reset() {
+  if (!m_cmd_pkt) return m_init_errno ? m_init_errno : EINVAL;
   std::memset(m_cmd_pkt, 0, m_cmd_size);
+  m_arg_cnt = 0;
+  m_reg_idx = 0;
+  m_patching_args.clear();
+  m_arg_reg_word_offsets.clear();
+  m_arg_reg_word_counts.clear();
   m_cmd_pkt->state = ERT_CMD_STATE_NEW;
   m_cmd_pkt->opcode = m_op;
   m_cmd_pkt->type = ERT_CU;
   // One word for cu mask
-  m_init_errno = inc_pkt_count(sizeof(int32_t));
+  return inc_pkt_count(sizeof(int32_t));
 }
-
-int kernel::init_errno() const { return m_init_errno; }
 
 void kernel::set_cu_idx(bo& bo_execbuf, cuidx_t cu_idx) {
   ert_start_kernel_cmd* cmd_pkt =
@@ -93,6 +103,8 @@ int kernel::add_arg_32(uint32_t val) {
   int err = inc_pkt_count(sizeof(val));
   if (err) return err;
   auto args = get_ert_regmap_begin(m_cmd_pkt);
+  m_arg_reg_word_offsets.push_back(m_reg_idx);
+  m_arg_reg_word_counts.push_back(1);
   args[m_reg_idx++] = val;
   m_arg_cnt++;
   return 0;
@@ -102,9 +114,27 @@ int kernel::add_arg_64(uint64_t val) {
   int err = inc_pkt_count(sizeof(val));
   if (err) return err;
   auto args = get_ert_regmap_begin(m_cmd_pkt);
+  m_arg_reg_word_offsets.push_back(m_reg_idx);
+  m_arg_reg_word_counts.push_back(2);
   args[m_reg_idx++] = val;
   args[m_reg_idx++] = val >> 32;
   m_arg_cnt++;
+  return 0;
+}
+
+int kernel::update_arg_64(uint32_t arg_index, uint64_t val) {
+  if (arg_index >= m_arg_reg_word_offsets.size() ||
+      arg_index >= m_arg_reg_word_counts.size()) {
+    return ERANGE;
+  }
+  if (m_arg_reg_word_counts[arg_index] != 2) {
+    return EINVAL;
+  }
+  uint32_t word_index = m_arg_reg_word_offsets[arg_index];
+  if (word_index + 1 >= m_reg_idx) return ERANGE;
+  auto args = get_ert_regmap_begin(m_cmd_pkt);
+  args[word_index] = val;
+  args[word_index + 1] = val >> 32;
   return 0;
 }
 

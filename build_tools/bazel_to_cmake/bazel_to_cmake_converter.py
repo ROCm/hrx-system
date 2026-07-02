@@ -54,6 +54,7 @@ _PLATFORM_CMAKE_SYSTEM_NAME = {
 
 _RUNTIME_HAL_DRIVER_CMAKE_OPTIONS = {
     "//runtime/config/hal:driver_amdgpu": "IREE_HAL_DRIVER_AMDGPU",
+    "//runtime/config/hal:driver_amdxdna": "IREE_HAL_DRIVER_AMDXDNA",
     "//runtime/config/hal:driver_cuda": "IREE_HAL_DRIVER_CUDA",
     "//runtime/config/hal:driver_hip": "IREE_HAL_DRIVER_HIP",
     "//runtime/config/hal:driver_local_sync": "IREE_HAL_DRIVER_LOCAL_SYNC",

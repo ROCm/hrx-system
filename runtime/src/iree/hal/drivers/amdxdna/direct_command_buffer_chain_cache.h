@@ -32,7 +32,15 @@ extern "C" {
 // match a freshly recorded command) and are serialized by the cache mutex; a
 // cached chain may be reused by one submission lane at a time.
 
-enum { kAmdxdnaChainCommandCacheCapacity = 4 };
+// Bounded device-level cache for realized chain templates. Entry count is only
+// a structural guard: each entry may retain many native child command BOs,
+// instruction/control BOs, and parent chain BOs. Admission is therefore also
+// resource-budgeted in the cache implementation and evicts LRU non-in-flight
+// entries before retaining a new template.
+enum { kAmdxdnaChainCommandCacheCapacity = 64 };
+enum { kAmdxdnaChainCommandCacheMaxChildCommands = 896 };
+enum { kAmdxdnaChainCommandCacheMaxParentCommands = 96 };
+enum { kAmdxdnaChainCommandCacheMaxInstructionBytes = 32 * 1024 * 1024 };
 
 typedef struct iree_hal_amdxdna_device iree_hal_amdxdna_device;
 
@@ -41,6 +49,7 @@ typedef struct iree_hal_amdxdna_device iree_hal_amdxdna_device;
 // iree_hal_amdxdna_chain_cmd_deinitialize().
 typedef struct iree_hal_amdxdna_chain_cmd_t {
   iree_hal_amdxdna_native_buffer_t* ctrl_code;
+  void* ctrl_code_mapped_ptr;
   iree_hal_amdxdna_native_command_t* command;
   uint32_t* ctrl_words;
   iree_host_size_t ctrl_word_count;
@@ -53,6 +62,12 @@ typedef struct iree_hal_amdxdna_chain_cmd_t {
   // above are built lazily on a cache miss in flush.
   const iree_hal_amdxdna_u32_list_t* src_asm_inst;
   const iree_hal_amdxdna_u32_list_t* src_patches;
+  const iree_hal_amdxdna_write32_constant_patch_list_t* src_constant_patches;
+  // Device-cache entries clone executable-owned template lists here before
+  // they outlive the executable or one-shot command buffer that recorded them.
+  iree_hal_amdxdna_u32_list_t owned_src_asm_inst;
+  iree_hal_amdxdna_u32_list_t owned_src_patches;
+  iree_hal_amdxdna_write32_constant_patch_list_t owned_src_constant_patches;
   uint8_t* src_constants;
   iree_host_size_t src_constant_count;
   iree_hal_amdxdna_native_c_cu_index_t src_cu_idx;
@@ -106,6 +121,10 @@ typedef struct iree_hal_amdxdna_chain_command_cache_entry_t {
   iree_host_size_t chain_count;
   iree_host_size_t chain_capacity;
   uint64_t last_use;
+  // Protected by the parent cache mutex. Non-zero means the entry's mutable
+  // native child/parent command BOs have been issued and cannot be reused,
+  // rewritten, or evicted until native completion.
+  uint32_t in_flight_count;
 } iree_hal_amdxdna_chain_command_cache_entry_t;
 
 typedef struct iree_hal_amdxdna_device_chain_command_cache_t {
@@ -133,12 +152,15 @@ iree_status_t iree_hal_amdxdna_chain_cmd_set_deferred_descriptor(
     iree_allocator_t host_allocator, iree_hal_amdxdna_chain_cmd_t* cmd,
     const iree_hal_amdxdna_u32_list_t* asm_inst,
     const iree_hal_amdxdna_u32_list_t* patches,
+    const iree_hal_amdxdna_write32_constant_patch_list_t* constant_patches,
     iree_hal_amdxdna_native_c_cu_index_t cu_idx,
     iree_const_byte_span_t constants, bool use_native_partial_elf,
     iree_hal_amdxdna_native_buffer_t* const* binding_buffers,
     const uint64_t* binding_device_addrs,
     const iree_device_size_t* binding_offsets,
     const iree_device_size_t* binding_lengths, iree_host_size_t binding_count);
+iree_status_t iree_hal_amdxdna_chain_cmd_make_deferred_lists_owned(
+    iree_allocator_t host_allocator, iree_hal_amdxdna_chain_cmd_t* cmd);
 void iree_hal_amdxdna_chain_group_initialize(
     iree_hal_amdxdna_chain_group_t* group);
 void iree_hal_amdxdna_chain_group_deinitialize(
@@ -151,12 +173,24 @@ iree_status_t iree_hal_amdxdna_chain_group_append_cmd_move(
 iree_status_t iree_hal_amdxdna_chain_group_append_reconf_buffer(
     iree_allocator_t host_allocator, iree_hal_amdxdna_chain_group_t* group,
     iree_hal_amdxdna_native_buffer_t* buffer);
+iree_status_t iree_hal_amdxdna_chain_group_take_reconf_buffers(
+    iree_allocator_t host_allocator, iree_hal_amdxdna_chain_group_t* dst,
+    iree_hal_amdxdna_chain_group_t* src);
 iree_status_t iree_hal_amdxdna_chain_group_append_binding_ref_unique(
     iree_allocator_t host_allocator, iree_hal_amdxdna_chain_group_t* group,
     iree_hal_buffer_ref_t binding_ref);
 iree_status_t iree_hal_amdxdna_chain_group_take_cmds(
     iree_allocator_t host_allocator, iree_hal_amdxdna_chain_group_t* dst,
     iree_hal_amdxdna_chain_group_t* src);
+iree_status_t iree_hal_amdxdna_chain_group_set_binding_refs(
+    iree_allocator_t host_allocator, iree_hal_amdxdna_chain_group_t* dst,
+    const iree_hal_amdxdna_chain_group_t* src);
+bool iree_hal_amdxdna_chain_group_binding_refs_match(
+    const iree_hal_amdxdna_chain_group_t* lhs,
+    const iree_hal_amdxdna_chain_group_t* rhs);
+bool iree_hal_amdxdna_chain_group_reconf_buffers_match(
+    const iree_hal_amdxdna_chain_group_t* lhs,
+    const iree_hal_amdxdna_chain_group_t* rhs);
 
 void iree_hal_amdxdna_chain_accum_initialize(
     iree_hal_amdxdna_chain_accum_t* accum);
@@ -175,6 +209,10 @@ bool iree_hal_amdxdna_chain_cmd_descriptor_matches(
     const iree_hal_amdxdna_chain_cmd_t* lhs,
     const iree_hal_amdxdna_chain_cmd_t* rhs);
 
+bool iree_hal_amdxdna_chain_cmd_descriptor_template_matches(
+    const iree_hal_amdxdna_chain_cmd_t* lhs,
+    const iree_hal_amdxdna_chain_cmd_t* rhs);
+
 bool iree_hal_amdxdna_chain_command_cache_device_matches(
     const iree_hal_amdxdna_chain_command_cache_entry_t* cache,
     const iree_hal_amdxdna_chain_group_t* group, uint32_t max_slots);
@@ -185,6 +223,14 @@ bool iree_hal_amdxdna_chain_command_cache_shape_matches(
 
 bool iree_hal_amdxdna_chain_command_cache_descriptor_matches(
     const iree_hal_amdxdna_chain_command_cache_entry_t* cache,
+    const iree_hal_amdxdna_chain_group_t* group, uint32_t max_slots);
+
+bool iree_hal_amdxdna_chain_command_cache_descriptor_template_matches(
+    const iree_hal_amdxdna_chain_command_cache_entry_t* cache,
+    const iree_hal_amdxdna_chain_group_t* group, uint32_t max_slots);
+
+bool iree_hal_amdxdna_chain_command_cache_trim_for_group(
+    iree_hal_amdxdna_device_chain_command_cache_t* cache,
     const iree_hal_amdxdna_chain_group_t* group, uint32_t max_slots);
 
 iree_status_t iree_hal_amdxdna_update_cached_chain_cmd(
@@ -202,7 +248,15 @@ void iree_hal_amdxdna_chain_command_cache_entry_clear_chains(
     iree_hal_amdxdna_chain_command_cache_entry_t* entry);
 iree_hal_amdxdna_chain_command_cache_entry_t*
 iree_hal_amdxdna_chain_command_cache_allocate_entry(
-    iree_hal_amdxdna_device_chain_command_cache_t* cache);
+    iree_hal_amdxdna_device_chain_command_cache_t* cache,
+    const iree_hal_amdxdna_chain_group_t* group, uint32_t max_slots);
+
+void iree_hal_amdxdna_chain_command_cache_entry_acquire_in_flight(
+    iree_hal_amdxdna_chain_command_cache_entry_t* entry);
+
+void iree_hal_amdxdna_chain_command_cache_entry_release_in_flight(
+    iree_hal_amdxdna_device_chain_command_cache_t* cache,
+    iree_hal_amdxdna_chain_command_cache_entry_t* entry);
 
 #ifdef __cplusplus
 }  // extern "C"

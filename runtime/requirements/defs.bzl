@@ -19,6 +19,13 @@ HAL_AMDGPU = build_requirement(
     cmake_condition = "IREE_HAL_DRIVER_AMDGPU",
 )
 
+HAL_AMDXDNA = build_requirement(
+    id = "runtime.hal.amdxdna",
+    label = "//runtime/requirements:hal_amdxdna",
+    enabled_by = "//runtime/config/hal:driver_amdxdna",
+    cmake_condition = "IREE_HAL_DRIVER_AMDXDNA",
+)
+
 HAL_CUDA = build_requirement(
     id = "runtime.hal.cuda",
     label = "//runtime/requirements:hal_cuda",
@@ -54,6 +61,13 @@ AMDGPU_RESOURCE = run_requirement(
     skip_contract = "Tests skip when no compatible AMD GPU/HSA agent is available.",
 )
 
+AMD_NPU_RESOURCE = run_requirement(
+    id = "runtime.resource.amd_npu",
+    label = "//runtime/requirements:amd_npu",
+    cmake_label = "runtime-resource=amd-npu",
+    skip_contract = "Tests skip when no compatible AMD NPU/AMDXDNA device is available.",
+)
+
 NVIDIA_GPU_RESOURCE = run_requirement(
     id = "runtime.resource.nvidia_gpu",
     label = "//runtime/requirements:nvidia_gpu",
@@ -77,11 +91,13 @@ WEBGPU_DEVICE_RESOURCE = run_requirement(
 
 REQUIREMENTS = [
     HAL_AMDGPU,
+    HAL_AMDXDNA,
     HAL_CUDA,
     HAL_HIP,
     HAL_VULKAN,
     HAL_WEBGPU,
     AMDGPU_RESOURCE,
+    AMD_NPU_RESOURCE,
     NVIDIA_GPU_RESOURCE,
     VULKAN_DEVICE_RESOURCE,
     WEBGPU_DEVICE_RESOURCE,

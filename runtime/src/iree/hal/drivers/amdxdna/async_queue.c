@@ -10,6 +10,7 @@
 
 #include "iree/async/frontier_tracker.h"
 #include "iree/async/semaphore.h"
+#include "iree/base/internal/atomics.h"
 #include "iree/base/threading/mutex.h"
 #include "iree/base/threading/notification.h"
 #include "iree/base/threading/thread.h"
@@ -54,6 +55,7 @@ struct iree_hal_amdxdna_async_op_t {
 
   // Op body and arg. Run on the worker thread.
   iree_hal_amdxdna_async_op_fn_t op_fn;
+  iree_hal_amdxdna_async_op_failure_fn_t failure_fn;
   iree_hal_amdxdna_async_op_cleanup_fn_t cleanup_fn;
   void* op_user_data;
 
@@ -276,6 +278,8 @@ int iree_hal_amdxdna_async_queue_worker_main(void* arg) {
         if (op->op_fn) {
           status = op->op_fn(op->op_user_data);
         }
+      } else if (op->failure_fn) {
+        status = op->failure_fn(op->op_user_data, status);
       }
       const bool deferred = iree_status_is_deferred(status);
       if (deferred) {
@@ -495,9 +499,10 @@ void iree_hal_amdxdna_async_queue_destroy(
   iree_allocator_free(queue->host_allocator, queue);
 }
 
-iree_status_t iree_hal_amdxdna_async_queue_enqueue(
+iree_status_t iree_hal_amdxdna_async_queue_enqueue_with_failure_handler(
     iree_hal_amdxdna_async_queue_t* queue, iree_hal_semaphore_list_t wait_list,
     iree_hal_semaphore_list_t signal_list, iree_hal_amdxdna_async_op_fn_t op_fn,
+    iree_hal_amdxdna_async_op_failure_fn_t failure_fn,
     iree_hal_amdxdna_async_op_cleanup_fn_t cleanup_fn, void* user_data,
     iree_hal_resource_t* const* retained_resources,
     iree_host_size_t retained_resource_count) {
@@ -527,6 +532,7 @@ iree_status_t iree_hal_amdxdna_async_queue_enqueue(
     iree_atomic_store(&op->error_status, (intptr_t)0,
                       iree_memory_order_relaxed);
     op->op_fn = op_fn;
+    op->failure_fn = failure_fn;
     op->cleanup_fn = cleanup_fn;
     op->op_user_data = user_data;
     op->wait_list = iree_hal_semaphore_list_empty();
@@ -632,4 +638,15 @@ iree_status_t iree_hal_amdxdna_async_queue_enqueue(
   }
 
   return iree_ok_status();
+}
+
+iree_status_t iree_hal_amdxdna_async_queue_enqueue(
+    iree_hal_amdxdna_async_queue_t* queue, iree_hal_semaphore_list_t wait_list,
+    iree_hal_semaphore_list_t signal_list, iree_hal_amdxdna_async_op_fn_t op_fn,
+    iree_hal_amdxdna_async_op_cleanup_fn_t cleanup_fn, void* user_data,
+    iree_hal_resource_t* const* retained_resources,
+    iree_host_size_t retained_resource_count) {
+  return iree_hal_amdxdna_async_queue_enqueue_with_failure_handler(
+      queue, wait_list, signal_list, op_fn, /*failure_fn=*/NULL, cleanup_fn,
+      user_data, retained_resources, retained_resource_count);
 }

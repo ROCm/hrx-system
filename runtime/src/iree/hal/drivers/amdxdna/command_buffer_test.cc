@@ -11,6 +11,7 @@
 
 #include "iree/base/internal/arena.h"
 #include "iree/hal/api.h"
+#include "iree/hal/drivers/amdxdna/allocator.h"
 #include "iree/hal/drivers/amdxdna/device.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -21,6 +22,8 @@ struct FakeTargetCommandBuffer {
   iree_hal_command_buffer_t base;
   int begin_count = 0;
   int end_count = 0;
+  int barrier_count = 0;
+  iree_hal_buffer_ref_t barrier_ref = {};
   int fill_count = 0;
   iree_hal_buffer_ref_t fill_target_ref = {};
   uint64_t fill_pattern = 0;
@@ -65,6 +68,11 @@ static iree_status_t FakeExecutionBarrier(
     const iree_hal_memory_barrier_t* memory_barriers,
     iree_host_size_t buffer_barrier_count,
     const iree_hal_buffer_barrier_t* buffer_barriers) {
+  FakeTargetCommandBuffer* target = FakeTarget(command_buffer);
+  ++target->barrier_count;
+  if (buffer_barrier_count > 0) {
+    target->barrier_ref = buffer_barriers[0].buffer_ref;
+  }
   return iree_ok_status();
 }
 
@@ -160,9 +168,15 @@ class CommandBufferTest : public ::testing::Test {
   void SetUp() override {
     iree_arena_block_pool_initialize(/*total_block_size=*/8 * 1024,
                                      iree_allocator_system(), &block_pool_);
+    IREE_ASSERT_OK(iree_hal_amdxdna_allocator_create(iree_allocator_system(),
+                                                     /*native_device=*/nullptr,
+                                                     &device_allocator_));
   }
 
-  void TearDown() override { iree_arena_block_pool_deinitialize(&block_pool_); }
+  void TearDown() override {
+    iree_hal_allocator_release(device_allocator_);
+    iree_arena_block_pool_deinitialize(&block_pool_);
+  }
 
   iree_hal_allocator_t* device_allocator_ = nullptr;
   iree_hal_amdxdna_native_c_device_caps_t native_caps_ = {};
@@ -233,6 +247,96 @@ TEST_F(CommandBufferTest, ApplyResolvesIndirectBindingRefsAndResetsOneShot) {
   EXPECT_EQ(target.begin_count, 2);
   EXPECT_EQ(target.end_count, 2);
   EXPECT_EQ(target.fill_count, 1);
+
+  iree_hal_command_buffer_release(command_buffer);
+}
+
+TEST_F(CommandBufferTest, ApplySkipsMemoryOnlyBarriers) {
+  iree_hal_command_buffer_t* command_buffer = nullptr;
+  IREE_ASSERT_OK(iree_hal_amdxdna_command_buffer_create(
+      device_allocator_, &native_caps_,
+      IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT |
+          IREE_HAL_COMMAND_BUFFER_MODE_UNVALIDATED,
+      IREE_HAL_COMMAND_CATEGORY_TRANSFER, IREE_HAL_QUEUE_AFFINITY_ANY,
+      /*binding_capacity=*/1, &block_pool_, iree_allocator_system(),
+      &command_buffer));
+
+  IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
+  const iree_hal_memory_barrier_t memory_barrier = {
+      .source_scope = IREE_HAL_ACCESS_SCOPE_MEMORY_WRITE,
+      .target_scope = IREE_HAL_ACCESS_SCOPE_MEMORY_READ,
+  };
+  IREE_ASSERT_OK(iree_hal_command_buffer_execution_barrier(
+      command_buffer, IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE,
+      IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE,
+      IREE_HAL_EXECUTION_BARRIER_FLAG_NONE, 1, &memory_barrier, 0, nullptr));
+  IREE_ASSERT_OK(iree_hal_command_buffer_end(command_buffer));
+
+  FakeTargetCommandBuffer target = {};
+  iree_hal_command_buffer_initialize(
+      /*device_allocator=*/nullptr,
+      IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT |
+          IREE_HAL_COMMAND_BUFFER_MODE_UNVALIDATED,
+      IREE_HAL_COMMAND_CATEGORY_ANY, IREE_HAL_QUEUE_AFFINITY_ANY,
+      /*binding_capacity=*/0, /*validation_state=*/nullptr, &kFakeTargetVtable,
+      &target.base);
+
+  IREE_ASSERT_OK(iree_hal_amdxdna_command_buffer_apply(
+      command_buffer, &target.base, iree_hal_buffer_binding_table_empty()));
+
+  EXPECT_EQ(target.begin_count, 1);
+  EXPECT_EQ(target.end_count, 1);
+  EXPECT_EQ(target.barrier_count, 0);
+
+  iree_hal_command_buffer_release(command_buffer);
+}
+
+TEST_F(CommandBufferTest, ApplyRetainsBufferBarriers) {
+  iree_hal_command_buffer_t* command_buffer = nullptr;
+  IREE_ASSERT_OK(iree_hal_amdxdna_command_buffer_create(
+      device_allocator_, &native_caps_,
+      IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT |
+          IREE_HAL_COMMAND_BUFFER_MODE_UNVALIDATED,
+      IREE_HAL_COMMAND_CATEGORY_TRANSFER, IREE_HAL_QUEUE_AFFINITY_ANY,
+      /*binding_capacity=*/1, &block_pool_, iree_allocator_system(),
+      &command_buffer));
+
+  IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
+  iree_hal_buffer_barrier_t buffer_barrier = {
+      .source_scope = IREE_HAL_ACCESS_SCOPE_HOST_WRITE,
+      .target_scope = IREE_HAL_ACCESS_SCOPE_DISPATCH_READ,
+      .buffer_ref = iree_hal_make_indirect_buffer_ref(
+          /*buffer_slot=*/0, /*offset=*/8, /*length=*/16),
+  };
+  IREE_ASSERT_OK(iree_hal_command_buffer_execution_barrier(
+      command_buffer, IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE,
+      IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE,
+      IREE_HAL_EXECUTION_BARRIER_FLAG_NONE, 0, nullptr, 1, &buffer_barrier));
+  IREE_ASSERT_OK(iree_hal_command_buffer_end(command_buffer));
+
+  FakeTargetCommandBuffer target = {};
+  iree_hal_command_buffer_initialize(
+      /*device_allocator=*/nullptr,
+      IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT |
+          IREE_HAL_COMMAND_BUFFER_MODE_UNVALIDATED,
+      IREE_HAL_COMMAND_CATEGORY_ANY, IREE_HAL_QUEUE_AFFINITY_ANY,
+      /*binding_capacity=*/0, /*validation_state=*/nullptr, &kFakeTargetVtable,
+      &target.base);
+
+  iree_hal_buffer_t* fake_buffer =
+      reinterpret_cast<iree_hal_buffer_t*>(uintptr_t{0x1234});
+  iree_hal_buffer_binding_t binding = {/*buffer=*/fake_buffer, /*offset=*/32,
+                                       /*length=*/128};
+  iree_hal_buffer_binding_table_t binding_table = {/*count=*/1, &binding};
+  IREE_ASSERT_OK(iree_hal_amdxdna_command_buffer_apply(
+      command_buffer, &target.base, binding_table));
+
+  EXPECT_EQ(target.begin_count, 1);
+  EXPECT_EQ(target.end_count, 1);
+  EXPECT_EQ(target.barrier_count, 1);
+  EXPECT_EQ(target.barrier_ref.buffer, fake_buffer);
+  EXPECT_EQ(target.barrier_ref.offset, 40);
+  EXPECT_EQ(target.barrier_ref.length, 16);
 
   iree_hal_command_buffer_release(command_buffer);
 }

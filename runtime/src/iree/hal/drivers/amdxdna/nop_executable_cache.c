@@ -18,11 +18,13 @@ typedef struct iree_hal_amdxdna_nop_executable_cache_t {
   // Abstract resource used for injecting reference counting and vtable; must be
   // at offset 0.
   iree_hal_resource_t resource;
+  struct iree_hal_amdxdna_device* device;
   struct iree_hal_amdxdna_native_device_t* native_device;
   iree_allocator_t host_allocator;
 } iree_hal_amdxdna_nop_executable_cache_t;
 
 iree_status_t iree_hal_amdxdna_nop_executable_cache_create(
+    struct iree_hal_amdxdna_device* device,
     struct iree_hal_amdxdna_native_device_t* native_device,
     iree_string_view_t identifier, iree_allocator_t host_allocator,
     iree_hal_executable_cache_t** out_executable_cache) {
@@ -37,6 +39,7 @@ iree_status_t iree_hal_amdxdna_nop_executable_cache_create(
                                 (void**)&executable_cache));
   iree_hal_resource_initialize(&iree_hal_amdxdna_nop_executable_cache_vtable,
                                &executable_cache->resource);
+  executable_cache->device = device;
   executable_cache->native_device = native_device;
   executable_cache->host_allocator = host_allocator;
   *out_executable_cache = (iree_hal_executable_cache_t*)executable_cache;
@@ -101,10 +104,19 @@ static iree_status_t iree_hal_amdxdna_nop_executable_cache_prepare_executable(
         executable_params->executable_format.data);
   }
 
-  IREE_TRACE_ZONE_END(z0);
-  return iree_hal_amdxdna_native_executable_create(
+  iree_status_t status = iree_hal_amdxdna_native_executable_create(
       executable_cache->native_device, executable_params,
       executable_cache->host_allocator, out_executable);
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_amdxdna_executable_preload_contexts(
+        executable_cache->device, *out_executable);
+    if (!iree_status_is_ok(status)) {
+      iree_hal_executable_release(*out_executable);
+      *out_executable = NULL;
+    }
+  }
+  IREE_TRACE_ZONE_END(z0);
+  return status;
 }
 
 static const iree_hal_executable_cache_vtable_t

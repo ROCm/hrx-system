@@ -135,8 +135,9 @@ static iree_status_t MakeMinimalExecutable(
 TEST(NopExecutableCacheTest, CanPrepareAmdxdnaFormats) {
   iree_hal_executable_cache_t* executable_cache = nullptr;
   IREE_ASSERT_OK(iree_hal_amdxdna_nop_executable_cache_create(
-      /*native_device=*/nullptr, iree_make_cstring_view("default"),
-      iree_allocator_system(), &executable_cache));
+      /*device=*/nullptr, /*native_device=*/nullptr,
+      iree_make_cstring_view("default"), iree_allocator_system(),
+      &executable_cache));
 
   EXPECT_TRUE(iree_hal_executable_cache_can_prepare_format(
       executable_cache, /*caching_mode=*/0,
@@ -150,8 +151,9 @@ TEST(NopExecutableCacheTest, CanPrepareAmdxdnaFormats) {
 TEST(NopExecutableCacheTest, InferFormatRecognizesValidExecutable) {
   iree_hal_executable_cache_t* executable_cache = nullptr;
   IREE_ASSERT_OK(iree_hal_amdxdna_nop_executable_cache_create(
-      /*native_device=*/nullptr, iree_make_cstring_view("default"),
-      iree_allocator_system(), &executable_cache));
+      /*device=*/nullptr, /*native_device=*/nullptr,
+      iree_make_cstring_view("default"), iree_allocator_system(),
+      &executable_cache));
 
   std::vector<uint8_t> executable_data;
   IREE_ASSERT_OK(MakeMinimalExecutable(&executable_data));
@@ -172,8 +174,9 @@ TEST(NopExecutableCacheTest, InferFormatRecognizesValidExecutable) {
 TEST(NopExecutableCacheTest, PrepareExecutableSucceedsForValidExecutable) {
   iree_hal_executable_cache_t* executable_cache = nullptr;
   IREE_ASSERT_OK(iree_hal_amdxdna_nop_executable_cache_create(
-      /*native_device=*/nullptr, iree_make_cstring_view("default"),
-      iree_allocator_system(), &executable_cache));
+      /*device=*/nullptr, /*native_device=*/nullptr,
+      iree_make_cstring_view("default"), iree_allocator_system(),
+      &executable_cache));
 
   std::vector<uint8_t> executable_data;
   IREE_ASSERT_OK(MakeMinimalExecutable(&executable_data));
@@ -196,8 +199,9 @@ TEST(NopExecutableCacheTest, PrepareExecutableSucceedsForValidExecutable) {
 TEST(NopExecutableCacheTest, PrepareRejectsUnknownFormatBeforeParsing) {
   iree_hal_executable_cache_t* executable_cache = nullptr;
   IREE_ASSERT_OK(iree_hal_amdxdna_nop_executable_cache_create(
-      /*native_device=*/nullptr, iree_make_cstring_view("default"),
-      iree_allocator_system(), &executable_cache));
+      /*device=*/nullptr, /*native_device=*/nullptr,
+      iree_make_cstring_view("default"), iree_allocator_system(),
+      &executable_cache));
 
   iree_hal_executable_params_t executable_params;
   iree_hal_executable_params_initialize(&executable_params);

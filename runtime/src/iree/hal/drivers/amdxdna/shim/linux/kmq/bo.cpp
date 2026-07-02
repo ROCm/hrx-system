@@ -184,13 +184,6 @@ int sync_drm_bo(const shim_xdna::pdev& dev, uint32_t boh,
   return dev.try_ioctl(DRM_IOCTL_AMDXDNA_SYNC_BO, &sbo);
 }
 
-bool is_driver_sync() {
-  // Host-side BO sync is the production path. (The previous
-  // IREE_HAL_AMDXDNA_FORCE_DRIVER_SYNC env override has been removed; no
-  // runtime environment variables in the driver.)
-  return false;
-}
-
 }  // namespace
 
 namespace shim_xdna {
@@ -490,10 +483,6 @@ int bo::share(std::unique_ptr<shim_xdna::shared_handle>* out_handle) const {
 amdxdna_bo_type bo::get_type() const { return m_type; }
 
 int bo::sync(direction dir, size_t size, size_t offset) {
-  if (is_driver_sync()) {
-    return sync_drm_bo(m_pdev, get_drm_bo_handle(), dir, offset, size);
-  }
-
   if (offset > m_aligned_size || size > m_aligned_size - offset) return EINVAL;
 
   switch (m_type) {

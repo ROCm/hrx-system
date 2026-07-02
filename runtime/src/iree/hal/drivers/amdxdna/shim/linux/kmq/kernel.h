@@ -19,9 +19,12 @@ struct kernel {
   uint32_t m_reg_idx = 0;
   int m_init_errno = 0;
   std::vector<std::pair<std::string, uint64_t> > m_patching_args;
+  std::vector<uint32_t> m_arg_reg_word_offsets;
+  std::vector<uint32_t> m_arg_reg_word_counts;
 
   kernel(const pdev& p, uint32_t op);
   int init_errno() const;
+  int reset();
 
   static void set_cu_idx(bo& bo_execbuf, cuidx_t cu_idx);
   void set_cu_idx(cuidx_t cu_idx);
@@ -30,6 +33,7 @@ struct kernel {
   int add_ctrl_bo(bo& bo_ctrl);
   int add_arg_32(uint32_t val);
   int add_arg_64(uint64_t val);
+  int update_arg_64(uint32_t arg_index, uint64_t val);
   int add_arg_bo(bo& bo_arg, const std::string& arg_name = "");
   // Like add_arg_bo but adds `offset` to the BO base before passing the
   // address to firmware. Required when a binding references a subview of a

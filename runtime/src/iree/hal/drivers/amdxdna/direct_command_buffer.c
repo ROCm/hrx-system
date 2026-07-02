@@ -6,11 +6,13 @@
 
 #include "iree/hal/drivers/amdxdna/direct_command_buffer.h"
 
+#include <inttypes.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
 
+#include "iree/base/internal/atomics.h"
 #include "iree/hal/drivers/amdxdna/buffer.h"
 #include "iree/hal/drivers/amdxdna/device_internal.h"
 #include "iree/hal/drivers/amdxdna/direct_command_buffer_chain_cache.h"
@@ -44,7 +46,258 @@ typedef struct iree_hal_amdxdna_direct_command_buffer {
   // more children, or a multi-control-code/reconfiguration artifact, flush as
   // ERT_CMD_CHAIN(s).
   iree_hal_amdxdna_chain_accum_t chain_accum;
+  // Optional batch installed by queue execution. When present and native caps
+  // support async submit, native commands are issued without waiting here; the
+  // batch owns native completion, cleanup, and HAL semaphore signaling.
+  iree_hal_amdxdna_completion_batch_t* completion_batch;
 } iree_hal_amdxdna_direct_command_buffer;
+
+typedef struct iree_hal_amdxdna_cached_single_release_t {
+  iree_hal_amdxdna_device_single_command_cache_t* cache;
+  iree_hal_amdxdna_single_command_cache_entry_t* entry;
+} iree_hal_amdxdna_cached_single_release_t;
+
+typedef struct iree_hal_amdxdna_cached_chain_release_t {
+  iree_hal_amdxdna_device_chain_command_cache_t* cache;
+  iree_hal_amdxdna_chain_command_cache_entry_t* entry;
+} iree_hal_amdxdna_cached_chain_release_t;
+
+typedef struct iree_hal_amdxdna_binding_invalidate_action_t {
+  iree_allocator_t host_allocator;
+  iree_hal_buffer_ref_list_t bindings;
+} iree_hal_amdxdna_binding_invalidate_action_t;
+
+static bool iree_hal_amdxdna_direct_command_buffer_uses_async_completion(
+    const iree_hal_amdxdna_direct_command_buffer* command_buffer) {
+  return command_buffer->completion_batch &&
+         command_buffer->device->native_caps.supports_async_submit;
+}
+
+static void iree_hal_amdxdna_completion_destroy_native_command(
+    void* user_data) {
+  iree_hal_amdxdna_native_command_c_destroy(
+      (iree_hal_amdxdna_native_command_t*)user_data);
+}
+
+static void iree_hal_amdxdna_completion_destroy_native_buffer(void* user_data) {
+  iree_hal_amdxdna_native_buffer_c_destroy(
+      (iree_hal_amdxdna_native_buffer_t*)user_data);
+}
+
+static void iree_hal_amdxdna_completion_release_single_cache_entry(
+    void* user_data) {
+  iree_hal_amdxdna_cached_single_release_t* release =
+      (iree_hal_amdxdna_cached_single_release_t*)user_data;
+  if (!release) return;
+  iree_hal_amdxdna_single_command_cache_entry_release_in_flight(release->cache,
+                                                                release->entry);
+  iree_allocator_free(release->cache->host_allocator, release);
+}
+
+static void iree_hal_amdxdna_completion_release_chain_cache_entry(
+    void* user_data) {
+  iree_hal_amdxdna_cached_chain_release_t* release =
+      (iree_hal_amdxdna_cached_chain_release_t*)user_data;
+  if (!release) return;
+  iree_hal_amdxdna_chain_command_cache_entry_release_in_flight(release->cache,
+                                                               release->entry);
+  iree_allocator_free(release->cache->host_allocator, release);
+}
+
+static iree_status_t iree_hal_amdxdna_completion_invalidate_bindings(
+    void* user_data) {
+  iree_hal_amdxdna_binding_invalidate_action_t* action =
+      (iree_hal_amdxdna_binding_invalidate_action_t*)user_data;
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0;
+       i < action->bindings.count && iree_status_is_ok(status); ++i) {
+    const iree_hal_buffer_ref_t* binding_ref = &action->bindings.values[i];
+    status = iree_hal_amdxdna_buffer_invalidate_range(
+        binding_ref->buffer, binding_ref->offset, binding_ref->length);
+  }
+  return status;
+}
+
+static void iree_hal_amdxdna_completion_free_binding_invalidate_action(
+    void* user_data) {
+  iree_hal_amdxdna_binding_invalidate_action_t* action =
+      (iree_hal_amdxdna_binding_invalidate_action_t*)user_data;
+  if (!action) return;
+  iree_allocator_free(action->host_allocator, action);
+}
+
+static iree_status_t
+iree_hal_amdxdna_direct_command_buffer_defer_single_cache_release(
+    iree_hal_amdxdna_direct_command_buffer* command_buffer,
+    iree_hal_amdxdna_device_single_command_cache_t* cache,
+    iree_hal_amdxdna_single_command_cache_entry_t* entry) {
+  if (!iree_hal_amdxdna_direct_command_buffer_uses_async_completion(
+          command_buffer) ||
+      !entry) {
+    return iree_ok_status();
+  }
+  iree_hal_amdxdna_cached_single_release_t* release = NULL;
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc(
+      cache->host_allocator, sizeof(*release), (void**)&release));
+  release->cache = cache;
+  release->entry = entry;
+  iree_status_t status = iree_hal_amdxdna_completion_batch_add_cleanup(
+      command_buffer->completion_batch,
+      iree_hal_amdxdna_completion_release_single_cache_entry, release);
+  if (!iree_status_is_ok(status)) {
+    iree_allocator_free(cache->host_allocator, release);
+  }
+  return status;
+}
+
+static iree_status_t
+iree_hal_amdxdna_direct_command_buffer_defer_chain_cache_release(
+    iree_hal_amdxdna_direct_command_buffer* command_buffer,
+    iree_hal_amdxdna_device_chain_command_cache_t* cache,
+    iree_hal_amdxdna_chain_command_cache_entry_t* entry) {
+  if (!iree_hal_amdxdna_direct_command_buffer_uses_async_completion(
+          command_buffer) ||
+      !entry) {
+    return iree_ok_status();
+  }
+  iree_hal_amdxdna_cached_chain_release_t* release = NULL;
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc(
+      cache->host_allocator, sizeof(*release), (void**)&release));
+  release->cache = cache;
+  release->entry = entry;
+  iree_status_t status = iree_hal_amdxdna_completion_batch_add_cleanup(
+      command_buffer->completion_batch,
+      iree_hal_amdxdna_completion_release_chain_cache_entry, release);
+  if (!iree_status_is_ok(status)) {
+    iree_allocator_free(cache->host_allocator, release);
+  }
+  return status;
+}
+
+static iree_status_t
+iree_hal_amdxdna_direct_command_buffer_defer_native_command_destroy(
+    iree_hal_amdxdna_direct_command_buffer* command_buffer,
+    iree_hal_amdxdna_native_command_t** inout_command) {
+  if (!iree_hal_amdxdna_direct_command_buffer_uses_async_completion(
+          command_buffer) ||
+      !*inout_command) {
+    return iree_ok_status();
+  }
+  IREE_RETURN_IF_ERROR(iree_hal_amdxdna_completion_batch_add_cleanup(
+      command_buffer->completion_batch,
+      iree_hal_amdxdna_completion_destroy_native_command, *inout_command));
+  *inout_command = NULL;
+  return iree_ok_status();
+}
+
+static iree_status_t
+iree_hal_amdxdna_direct_command_buffer_defer_native_buffer_destroy(
+    iree_hal_amdxdna_direct_command_buffer* command_buffer,
+    iree_hal_amdxdna_native_buffer_t** inout_buffer) {
+  if (!iree_hal_amdxdna_direct_command_buffer_uses_async_completion(
+          command_buffer) ||
+      !*inout_buffer) {
+    return iree_ok_status();
+  }
+  IREE_RETURN_IF_ERROR(iree_hal_amdxdna_completion_batch_add_cleanup(
+      command_buffer->completion_batch,
+      iree_hal_amdxdna_completion_destroy_native_buffer, *inout_buffer));
+  *inout_buffer = NULL;
+  return iree_ok_status();
+}
+
+static iree_status_t
+iree_hal_amdxdna_direct_command_buffer_defer_native_command_and_buffer_destroy(
+    iree_hal_amdxdna_direct_command_buffer* command_buffer,
+    iree_hal_amdxdna_native_command_t** inout_command,
+    iree_hal_amdxdna_native_buffer_t** inout_buffer) {
+  // Completion cleanups run in reverse registration order. Register the buffer
+  // first so the command is destroyed before the control-code BO it references.
+  IREE_RETURN_IF_ERROR(
+      iree_hal_amdxdna_direct_command_buffer_defer_native_buffer_destroy(
+          command_buffer, inout_buffer));
+  return iree_hal_amdxdna_direct_command_buffer_defer_native_command_destroy(
+      command_buffer, inout_command);
+}
+
+static iree_status_t
+iree_hal_amdxdna_direct_command_buffer_defer_binding_invalidate(
+    iree_hal_amdxdna_direct_command_buffer* command_buffer,
+    iree_hal_buffer_ref_list_t bindings) {
+  if (!iree_hal_amdxdna_direct_command_buffer_uses_async_completion(
+          command_buffer) ||
+      bindings.count == 0) {
+    return iree_ok_status();
+  }
+  iree_hal_amdxdna_binding_invalidate_action_t* action = NULL;
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc(command_buffer->host_allocator,
+                                             sizeof(*action), (void**)&action));
+  action->host_allocator = command_buffer->host_allocator;
+  action->bindings = bindings;
+  iree_status_t status = iree_hal_amdxdna_completion_batch_add_action(
+      command_buffer->completion_batch,
+      iree_hal_amdxdna_completion_invalidate_bindings,
+      iree_hal_amdxdna_completion_free_binding_invalidate_action, action,
+      /*run_on_error=*/false);
+  if (!iree_status_is_ok(status)) {
+    iree_allocator_free(command_buffer->host_allocator, action);
+  }
+  return status;
+}
+
+static iree_status_t iree_hal_amdxdna_direct_command_buffer_submit(
+    iree_hal_amdxdna_direct_command_buffer* command_buffer,
+    iree_hal_amdxdna_native_queue_t* queue,
+    iree_hal_amdxdna_native_command_t* command, iree_string_view_t label) {
+  if (!iree_hal_amdxdna_direct_command_buffer_uses_async_completion(
+          command_buffer)) {
+    return iree_hal_amdxdna_native_queue_c_submit_and_wait(queue, command,
+                                                           label);
+  }
+  iree_hal_amdxdna_native_submission_t* submission = NULL;
+  iree_status_t status = iree_hal_amdxdna_native_queue_c_submit(
+      queue, command, label, &submission);
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_amdxdna_completion_batch_add_submission(
+        command_buffer->completion_batch, submission);
+    if (iree_status_is_ok(status)) {
+      submission = NULL;  // completion batch owns it.
+    }
+  }
+  iree_hal_amdxdna_native_submission_c_destroy(submission);
+  return status;
+}
+
+static iree_status_t iree_hal_amdxdna_direct_command_buffer_submit_all(
+    iree_hal_amdxdna_direct_command_buffer* command_buffer,
+    iree_hal_amdxdna_native_queue_t* queue,
+    iree_hal_amdxdna_native_command_t* const* commands,
+    iree_host_size_t command_count, iree_string_view_t label) {
+  if (command_count == 0) return iree_ok_status();
+  if (!iree_hal_amdxdna_direct_command_buffer_uses_async_completion(
+          command_buffer)) {
+    return iree_hal_amdxdna_native_queue_c_submit_all_and_wait(
+        queue, commands, command_count, label);
+  }
+
+  // This helper is only used for parent-chain batches. Keep those in the native
+  // batch path so Windows MCDM can issue all parent chains into distinct
+  // completion slots and retire them with one collective wait. Represent the
+  // whole native batch as one async completion item instead of splitting it
+  // into independent parent submissions.
+  iree_hal_amdxdna_native_submission_t* submission = NULL;
+  iree_status_t status = iree_hal_amdxdna_native_queue_c_submit_all(
+      queue, commands, command_count, label, &submission);
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_amdxdna_completion_batch_add_submission(
+        command_buffer->completion_batch, submission);
+    if (iree_status_is_ok(status)) {
+      submission = NULL;  // completion batch owns it.
+    }
+  }
+  iree_hal_amdxdna_native_submission_c_destroy(submission);
+  return status;
+}
 
 static iree_status_t iree_hal_amdxdna_validate_live_dispatch_bindings(
     iree_hal_buffer_ref_list_t bindings) {
@@ -148,6 +401,16 @@ static void iree_hal_amdxdna_direct_command_buffer_destroy(
   iree_allocator_free(host_allocator, command_buffer);
 
   IREE_TRACE_ZONE_END(z0);
+}
+
+void iree_hal_amdxdna_direct_command_buffer_set_completion_batch(
+    iree_hal_command_buffer_t* base_command_buffer,
+    iree_hal_amdxdna_completion_batch_t* completion_batch) {
+  iree_hal_amdxdna_direct_command_buffer* command_buffer =
+      IREE_HAL_AMDXDNA_CHECKED_VTABLE_CAST(
+          base_command_buffer, iree_hal_amdxdna_direct_command_buffer_vtable,
+          iree_hal_amdxdna_direct_command_buffer);
+  command_buffer->completion_batch = completion_batch;
 }
 
 static iree_status_t iree_hal_amdxdna_direct_command_buffer_begin(
@@ -385,7 +648,7 @@ static iree_status_t iree_hal_amdxdna_direct_command_buffer_copy_buffer(
 // TXN-interpreter selector: tells the firmware to interpret the instruction
 // buffer as an XAie transaction (same value the default ERT_START_CU path
 // passes as its opcode arg).
-static const uint32_t kAie2ExecBufferKernelOpTxn = 3;
+static const uint64_t kAie2ExecBufferKernelOpTxn = 3;
 
 iree_status_t iree_hal_amdxdna_make_npu_cmd(
     iree_hal_amdxdna_direct_command_buffer* command_buffer,
@@ -395,51 +658,55 @@ iree_status_t iree_hal_amdxdna_make_npu_cmd(
     iree_hal_amdxdna_native_buffer_t* const* arg_buffers,
     const iree_device_size_t* arg_offsets,
     const iree_device_size_t* arg_lengths, size_t arg_count,
-    iree_const_byte_span_t constants, bool use_native_partial_elf,
+    iree_const_byte_span_t constants,
+    const iree_hal_amdxdna_write32_constant_patch_list_t* constant_patches,
+    bool use_native_partial_elf, bool retain_signature,
     iree_hal_amdxdna_chain_cmd_t* out_cmd) {
   size_t bytes = txn->count * sizeof(uint32_t);
   IREE_RETURN_IF_ERROR(iree_hal_amdxdna_native_device_c_alloc_buffer(
       command_buffer->device->native_device, bytes,
       IREE_HAL_AMDXDNA_NATIVE_BUFFER_TYPE_INSTRUCTION, &out_cmd->ctrl_code));
+
   void* mapped_ptr = NULL;
   IREE_RETURN_IF_ERROR(
       iree_hal_amdxdna_native_buffer_c_map(out_cmd->ctrl_code, &mapped_ptr));
+  out_cmd->ctrl_code_mapped_ptr = mapped_ptr;
   uint32_t* dst = (uint32_t*)mapped_ptr;
   memcpy(dst, txn->data, bytes);
-  IREE_RETURN_IF_ERROR(
-      iree_hal_amdxdna_patch_write32_constants(dst, txn->count, constants));
+
+  if (constant_patches) {
+    IREE_RETURN_IF_ERROR(iree_hal_amdxdna_patch_write32_constants_with_list(
+        dst, txn->count, constant_patches, constants));
+  } else {
+    IREE_RETURN_IF_ERROR(
+        iree_hal_amdxdna_patch_write32_constants(dst, txn->count, constants));
+  }
+
   if (!iree_hal_amdxdna_apply_patch_table(dst, txn->count, patches->data,
                                           patches->count, args, arg_count)) {
     return iree_make_status(
         IREE_STATUS_INTERNAL,
         "amdxdna cmd-chain: invalid host patch table for control code");
   }
-  uint64_t* binding_device_addrs = NULL;
-  if (arg_count != 0) {
-    IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
-        command_buffer->host_allocator, arg_count,
-        sizeof(*binding_device_addrs), (void**)&binding_device_addrs));
+
+  if (retain_signature) {
+    iree_status_t status = iree_hal_amdxdna_chain_cmd_set_signature(
+        command_buffer->host_allocator, out_cmd, dst, txn->count, arg_buffers,
+        args, arg_offsets, arg_lengths, arg_count);
+    IREE_RETURN_IF_ERROR(status);
+
+    // The signature setter copies and then frees any prior command-owned
+    // arrays; the input pointers may alias those arrays when a deferred
+    // descriptor is materialized in place. Use the copied command-owned arrays
+    // after this point.
+    arg_buffers = out_cmd->binding_buffers;
+    args = out_cmd->binding_device_addrs;
+    arg_offsets = out_cmd->binding_offsets;
+    arg_lengths = out_cmd->binding_lengths;
   }
-  for (size_t i = 0; i < arg_count; ++i) {
-    binding_device_addrs[i] =
-        iree_hal_amdxdna_native_buffer_c_device_address(arg_buffers[i]) +
-        arg_offsets[i];
-  }
-  iree_status_t status = iree_hal_amdxdna_chain_cmd_set_signature(
-      command_buffer->host_allocator, out_cmd, dst, txn->count, arg_buffers,
-      binding_device_addrs, arg_offsets, arg_lengths, arg_count);
-  iree_allocator_free(command_buffer->host_allocator, binding_device_addrs);
-  IREE_RETURN_IF_ERROR(status);
-  // The signature setter copies and then frees any prior command-owned arrays;
-  // the input pointers may alias those arrays when a deferred descriptor is
-  // materialized in place. Use the copied command-owned arrays after this
-  // point.
-  arg_buffers = out_cmd->binding_buffers;
-  args = out_cmd->binding_device_addrs;
-  arg_offsets = out_cmd->binding_offsets;
-  arg_lengths = out_cmd->binding_lengths;
   IREE_RETURN_IF_ERROR(iree_hal_amdxdna_native_buffer_c_sync_all(
       out_cmd->ctrl_code, IREE_HAL_AMDXDNA_NATIVE_BUFFER_SYNC_HOST_TO_DEVICE));
+
   const iree_hal_amdxdna_native_c_command_opcode_t command_opcode =
       use_native_partial_elf
           ? IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_OPCODE_START_NPU_PARTIAL_ELF
@@ -447,11 +714,12 @@ iree_status_t iree_hal_amdxdna_make_npu_cmd(
   IREE_RETURN_IF_ERROR(iree_hal_amdxdna_native_command_c_create(
       command_buffer->device->native_device, command_opcode,
       &out_cmd->command));
+
   IREE_RETURN_IF_ERROR(
       iree_hal_amdxdna_native_command_c_set_cu_index(out_cmd->command, cu_idx));
   IREE_RETURN_IF_ERROR(iree_hal_amdxdna_native_command_c_add_control_buffer(
       out_cmd->command, out_cmd->ctrl_code, bytes));
-  IREE_RETURN_IF_ERROR(iree_hal_amdxdna_native_command_c_add_arg_32(
+  IREE_RETURN_IF_ERROR(iree_hal_amdxdna_native_command_c_add_arg_64(
       out_cmd->command, kAie2ExecBufferKernelOpTxn));
   const bool native_uses_dpu_regmap_args =
       !use_native_partial_elf &&
@@ -488,6 +756,7 @@ static iree_status_t iree_hal_amdxdna_direct_command_buffer_emit_chain_cmd(
     iree_hal_amdxdna_chain_group_t* group,
     const iree_hal_amdxdna_u32_list_t* control_code,
     const iree_hal_amdxdna_u32_list_t* patch_table, const uint64_t* args,
+    const iree_hal_amdxdna_write32_constant_patch_list_t* constant_patches,
     iree_hal_amdxdna_native_buffer_t* const* arg_buffers,
     const iree_device_size_t* arg_offsets,
     const iree_device_size_t* arg_lengths, size_t arg_count,
@@ -497,14 +766,14 @@ static iree_status_t iree_hal_amdxdna_direct_command_buffer_emit_chain_cmd(
   iree_hal_amdxdna_chain_cmd_t cmd;
   iree_hal_amdxdna_chain_cmd_initialize(&cmd);
   iree_status_t status = iree_hal_amdxdna_chain_cmd_set_deferred_descriptor(
-      command_buffer->host_allocator, &cmd, control_code, patch_table, cu_idx,
-      constants, use_native_partial_elf, arg_buffers, args, arg_offsets,
-      arg_lengths, arg_count);
+      command_buffer->host_allocator, &cmd, control_code, patch_table,
+      constant_patches, cu_idx, constants, use_native_partial_elf, arg_buffers,
+      args, arg_offsets, arg_lengths, arg_count);
   if (iree_status_is_ok(status) && !defer_build) {
     status = iree_hal_amdxdna_make_npu_cmd(
         command_buffer, cu_idx, control_code, patch_table, args, arg_buffers,
-        arg_offsets, arg_lengths, arg_count, constants, use_native_partial_elf,
-        &cmd);
+        arg_offsets, arg_lengths, arg_count, constants, constant_patches,
+        use_native_partial_elf, /*retain_signature=*/true, &cmd);
   }
   if (iree_status_is_ok(status)) {
     status = iree_hal_amdxdna_chain_group_append_cmd_move(
@@ -515,6 +784,217 @@ static iree_status_t iree_hal_amdxdna_direct_command_buffer_emit_chain_cmd(
                                             &cmd);
   }
   return status;
+}
+
+static iree_status_t iree_hal_amdxdna_rewrite_cached_start_npu_cmd(
+    iree_hal_amdxdna_direct_command_buffer* command_buffer,
+    iree_hal_amdxdna_chain_cmd_t* cached,
+    const iree_hal_amdxdna_chain_cmd_t* fresh) {
+  IREE_ASSERT_ARGUMENT(cached);
+  IREE_ASSERT_ARGUMENT(fresh);
+  if (IREE_UNLIKELY(!cached->built || !cached->ctrl_code || !cached->command ||
+                    !fresh->src_asm_inst || !fresh->src_patches ||
+                    fresh->src_use_native_partial_elf)) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "amdxdna START_NPU chain cache rewrite requires a built non-partial "
+        "cached child and a deferred fresh descriptor");
+  }
+
+  const iree_hal_amdxdna_u32_list_t* txn = fresh->src_asm_inst;
+  const iree_hal_amdxdna_u32_list_t* patches = fresh->src_patches;
+  const size_t bytes = txn->count * sizeof(uint32_t);
+  if (IREE_UNLIKELY(bytes >
+                    iree_hal_amdxdna_native_buffer_c_size(cached->ctrl_code))) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "amdxdna START_NPU cached control buffer is too small");
+  }
+
+  void* mapped_ptr = cached->ctrl_code_mapped_ptr;
+  if (!mapped_ptr) {
+    IREE_RETURN_IF_ERROR(
+        iree_hal_amdxdna_native_buffer_c_map(cached->ctrl_code, &mapped_ptr));
+    cached->ctrl_code_mapped_ptr = mapped_ptr;
+  }
+  uint32_t* dst = (uint32_t*)mapped_ptr;
+  memcpy(dst, txn->data, bytes);
+  IREE_RETURN_IF_ERROR(iree_hal_amdxdna_patch_dynamic_fields_from_template(
+      dst, txn->data, txn->count, fresh->src_constant_patches,
+      iree_make_const_byte_span(fresh->src_constants,
+                                fresh->src_constant_count),
+      patches->data, patches->count, fresh->binding_device_addrs,
+      fresh->binding_count));
+
+  if (IREE_UNLIKELY(cached->ctrl_word_count != txn->count ||
+                    cached->binding_count != fresh->binding_count)) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "amdxdna START_NPU cached command signature shape "
+                            "changed unexpectedly");
+  }
+  memcpy(cached->ctrl_words, dst, txn->count * sizeof(*cached->ctrl_words));
+  memcpy(cached->binding_buffers, fresh->binding_buffers,
+         fresh->binding_count * sizeof(*cached->binding_buffers));
+  memcpy(cached->binding_device_addrs, fresh->binding_device_addrs,
+         fresh->binding_count * sizeof(*cached->binding_device_addrs));
+  memcpy(cached->binding_offsets, fresh->binding_offsets,
+         fresh->binding_count * sizeof(*cached->binding_offsets));
+  memcpy(cached->binding_lengths, fresh->binding_lengths,
+         fresh->binding_count * sizeof(*cached->binding_lengths));
+
+  IREE_RETURN_IF_ERROR(iree_hal_amdxdna_native_buffer_c_sync_all(
+      cached->ctrl_code, IREE_HAL_AMDXDNA_NATIVE_BUFFER_SYNC_HOST_TO_DEVICE));
+
+  const bool native_uses_dpu_regmap_args =
+      command_buffer->device->native_caps.default_dispatch_opcode ==
+      IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_OPCODE_START_NPU;
+  if (native_uses_dpu_regmap_args) {
+    iree_status_t update_status = iree_ok_status();
+    for (iree_host_size_t i = 0; i < fresh->binding_count; ++i) {
+      update_status = iree_hal_amdxdna_native_command_c_update_arg_64(
+          cached->command, i + 1, fresh->binding_device_addrs[i]);
+      if (!iree_status_is_ok(update_status)) break;
+    }
+    if (!iree_status_is_ok(update_status)) {
+      const iree_status_code_t update_status_code =
+          iree_status_code(update_status);
+      iree_status_ignore(update_status);
+      if (update_status_code != IREE_STATUS_UNIMPLEMENTED) {
+        return iree_make_status(
+            update_status_code,
+            "amdxdna cached START_NPU command arg update failed");
+      }
+      IREE_RETURN_IF_ERROR(
+          iree_hal_amdxdna_native_command_c_reset(cached->command));
+      IREE_RETURN_IF_ERROR(iree_hal_amdxdna_native_command_c_set_cu_index(
+          cached->command, fresh->src_cu_idx));
+      IREE_RETURN_IF_ERROR(iree_hal_amdxdna_native_command_c_add_control_buffer(
+          cached->command, cached->ctrl_code, bytes));
+      IREE_RETURN_IF_ERROR(iree_hal_amdxdna_native_command_c_add_arg_64(
+          cached->command, kAie2ExecBufferKernelOpTxn));
+      for (iree_host_size_t i = 0; i < fresh->binding_count; ++i) {
+        IREE_RETURN_IF_ERROR(iree_hal_amdxdna_native_command_c_add_arg_64(
+            cached->command, fresh->binding_device_addrs[i]));
+      }
+    }
+  }
+  IREE_RETURN_IF_ERROR(
+      iree_hal_amdxdna_native_command_c_mark_code_dirty(cached->command));
+  cached->native_bindings_current = true;
+  return iree_ok_status();
+}
+
+static iree_status_t iree_hal_amdxdna_rewrite_cached_single_start_npu_cmd(
+    iree_hal_amdxdna_direct_command_buffer* command_buffer,
+    iree_hal_amdxdna_single_command_cache_entry_t* cached,
+    const iree_hal_amdxdna_chain_cmd_t* fresh) {
+  IREE_ASSERT_ARGUMENT(cached);
+  IREE_ASSERT_ARGUMENT(fresh);
+  if (IREE_UNLIKELY(!cached->ctrl_code_buffer || !cached->command ||
+                    !fresh->src_asm_inst || !fresh->src_patches ||
+                    fresh->src_use_native_partial_elf)) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "amdxdna START_NPU single cache rewrite requires a non-partial "
+        "deferred descriptor and cached native command");
+  }
+  if (IREE_UNLIKELY((command_buffer->device->native_caps.dispatch_models &
+                     IREE_HAL_AMDXDNA_NATIVE_C_DISPATCH_MODEL_START_NPU) ==
+                    0)) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "amdxdna START_NPU single cache rewrite requires START_NPU native "
+        "dispatch");
+  }
+
+  const iree_hal_amdxdna_u32_list_t* txn = fresh->src_asm_inst;
+  const iree_hal_amdxdna_u32_list_t* patches = fresh->src_patches;
+  const size_t bytes = txn->count * sizeof(uint32_t);
+  if (IREE_UNLIKELY(bytes > iree_hal_amdxdna_native_buffer_c_size(
+                                cached->ctrl_code_buffer))) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "amdxdna START_NPU cached single control buffer is too small");
+  }
+  if (IREE_UNLIKELY(cached->ctrl_word_count != txn->count ||
+                    cached->binding_count != fresh->binding_count)) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "amdxdna START_NPU cached single command signature shape changed "
+        "unexpectedly");
+  }
+
+  void* mapped_ptr = cached->ctrl_code_mapped_ptr;
+  if (!mapped_ptr) {
+    IREE_RETURN_IF_ERROR(iree_hal_amdxdna_native_buffer_c_map(
+        cached->ctrl_code_buffer, &mapped_ptr));
+    cached->ctrl_code_mapped_ptr = mapped_ptr;
+  }
+  uint32_t* dst = (uint32_t*)mapped_ptr;
+  memcpy(dst, txn->data, bytes);
+  IREE_RETURN_IF_ERROR(iree_hal_amdxdna_patch_dynamic_fields_from_template(
+      dst, txn->data, txn->count, fresh->src_constant_patches,
+      iree_make_const_byte_span(fresh->src_constants,
+                                fresh->src_constant_count),
+      patches->data, patches->count, fresh->binding_device_addrs,
+      fresh->binding_count));
+
+  memcpy(cached->ctrl_words, dst, txn->count * sizeof(*cached->ctrl_words));
+  memcpy(cached->binding_buffers, fresh->binding_buffers,
+         fresh->binding_count * sizeof(*cached->binding_buffers));
+  memcpy(cached->binding_device_addrs, fresh->binding_device_addrs,
+         fresh->binding_count * sizeof(*cached->binding_device_addrs));
+  memcpy(cached->binding_offsets, fresh->binding_offsets,
+         fresh->binding_count * sizeof(*cached->binding_offsets));
+  memcpy(cached->binding_lengths, fresh->binding_lengths,
+         fresh->binding_count * sizeof(*cached->binding_lengths));
+
+  IREE_RETURN_IF_ERROR(iree_hal_amdxdna_native_buffer_c_sync_all(
+      cached->ctrl_code_buffer,
+      IREE_HAL_AMDXDNA_NATIVE_BUFFER_SYNC_HOST_TO_DEVICE));
+
+  const bool native_uses_dpu_regmap_args =
+      command_buffer->device->native_caps.default_dispatch_opcode ==
+      IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_OPCODE_START_NPU;
+  bool rebuild_command = !native_uses_dpu_regmap_args;
+  if (native_uses_dpu_regmap_args) {
+    for (iree_host_size_t i = 0; i < fresh->binding_count; ++i) {
+      iree_status_t update_status =
+          iree_hal_amdxdna_native_command_c_update_arg_64(
+              cached->command, i + 1, fresh->binding_device_addrs[i]);
+      if (!iree_status_is_ok(update_status)) {
+        const iree_status_code_t update_status_code =
+            iree_status_code(update_status);
+        iree_status_ignore(update_status);
+        if (update_status_code != IREE_STATUS_UNIMPLEMENTED) {
+          return iree_make_status(
+              update_status_code,
+              "amdxdna cached START_NPU single command arg update failed");
+        }
+        rebuild_command = true;
+        break;
+      }
+    }
+  }
+  if (rebuild_command) {
+    IREE_RETURN_IF_ERROR(
+        iree_hal_amdxdna_native_command_c_reset(cached->command));
+    IREE_RETURN_IF_ERROR(iree_hal_amdxdna_native_command_c_set_cu_index(
+        cached->command, fresh->src_cu_idx));
+    IREE_RETURN_IF_ERROR(iree_hal_amdxdna_native_command_c_add_control_buffer(
+        cached->command, cached->ctrl_code_buffer, bytes));
+    IREE_RETURN_IF_ERROR(iree_hal_amdxdna_native_command_c_add_arg_64(
+        cached->command, kAie2ExecBufferKernelOpTxn));
+    if (native_uses_dpu_regmap_args) {
+      for (iree_host_size_t i = 0; i < fresh->binding_count; ++i) {
+        IREE_RETURN_IF_ERROR(iree_hal_amdxdna_native_command_c_add_arg_64(
+            cached->command, fresh->binding_device_addrs[i]));
+      }
+    }
+  }
+  IREE_RETURN_IF_ERROR(
+      iree_hal_amdxdna_native_command_c_mark_code_dirty(cached->command));
+  return iree_ok_status();
 }
 
 // Accumulate one dispatch's reconfig+exec sub-commands into the direct command
@@ -613,21 +1093,23 @@ static iree_status_t iree_hal_amdxdna_direct_command_buffer_accumulate_chained(
     }
   }
 
-  // Defer the per-child native build for the cacheable module-style chain path
-  // (partial-ELF, no control-packet reconfiguration). Those children are
-  // recorded as lightweight descriptors here and built lazily in flush only on
-  // a cache miss, so a steady-state exact hit reuses the cached chain and skips
-  // the build. Other paths (reconfiguration, non-partial-ELF) build eagerly.
-  const bool defer_build =
-      use_native_partial_elf && plan->data_payload_count == 0;
+  // Defer the per-child native build for cacheable no-reconfiguration chains.
+  // Those children are recorded as lightweight descriptors here and built or
+  // rewritten lazily in flush. This covers both partial-ELF packets and Linux
+  // START_NPU packets: START_NPU needs an explicit rewrite of scalar arg64
+  // packet words before a cached parent chain can be reused safely.
+  const bool defer_build = plan->data_payload_count == 0;
 
   // Emit exactly one kernel slot for this HAL dispatch. Reconfiguration control
   // packets retain their repeat count for existing multi-PDI artifacts.
   if (iree_status_is_ok(status) && plan->data_payload_count == 0) {
     status = iree_hal_amdxdna_direct_command_buffer_emit_chain_cmd(
         command_buffer, group, &plan->control_codes[0], &plan->patch_tables[0],
-        binding_addrs, binding_buffers, binding_offsets, binding_lengths,
-        bindings.count, cu_idx, constants, use_native_partial_elf, defer_build);
+        binding_addrs,
+        plan->constant_patch_table_count > 0 ? &plan->constant_patch_tables[0]
+                                             : NULL,
+        binding_buffers, binding_offsets, binding_lengths, bindings.count,
+        cu_idx, constants, use_native_partial_elf, defer_build);
   } else if (iree_status_is_ok(status)) {
     for (size_t i = 0;
          iree_status_is_ok(status) && i < plan->data_payload_count; i++) {
@@ -664,17 +1146,23 @@ static iree_status_t iree_hal_amdxdna_direct_command_buffer_accumulate_chained(
            iree_status_is_ok(status) && r < plan->data_payload_run_count; r++) {
         status = iree_hal_amdxdna_direct_command_buffer_emit_chain_cmd(
             command_buffer, group, &plan->control_codes[2 * i],
-            &plan->patch_tables[2 * i], &reconf_arg, &reconf_buffer,
-            &reconf_offset, &reconf_length,
+            &plan->patch_tables[2 * i], &reconf_arg,
+            plan->constant_patch_table_count > 2 * i
+                ? &plan->constant_patch_tables[2 * i]
+                : NULL,
+            &reconf_buffer, &reconf_offset, &reconf_length,
             /*arg_count=*/1, cu_idx, constants, use_native_partial_elf,
             defer_build);
       }
       if (iree_status_is_ok(status)) {
         status = iree_hal_amdxdna_direct_command_buffer_emit_chain_cmd(
             command_buffer, group, &plan->control_codes[2 * i + 1],
-            &plan->patch_tables[2 * i + 1], binding_addrs, binding_buffers,
-            binding_offsets, binding_lengths, bindings.count, cu_idx, constants,
-            use_native_partial_elf, defer_build);
+            &plan->patch_tables[2 * i + 1], binding_addrs,
+            plan->constant_patch_table_count > 2 * i + 1
+                ? &plan->constant_patch_tables[2 * i + 1]
+                : NULL,
+            binding_buffers, binding_offsets, binding_lengths, bindings.count,
+            cu_idx, constants, use_native_partial_elf, defer_build);
       }
     }
   }
@@ -819,6 +1307,65 @@ static iree_status_t iree_hal_amdxdna_rebuild_cached_parent_chains(
 }
 
 static iree_status_t
+iree_hal_amdxdna_direct_command_buffer_submit_uncached_parent_chains(
+    iree_hal_amdxdna_direct_command_buffer* command_buffer,
+    iree_hal_amdxdna_chain_group_t* group, uint32_t max_slots) {
+  iree_status_t status = iree_ok_status();
+  iree_hal_amdxdna_native_command_t** chains = NULL;
+  uint8_t* completion_owns_chain = NULL;
+  size_t chain_count = 0;
+  size_t chain_capacity =
+      (group->cmd_count + (size_t)max_slots - 1) / (size_t)max_slots;
+  if (chain_capacity != 0) {
+    status = iree_allocator_malloc_array(command_buffer->host_allocator,
+                                         chain_capacity, sizeof(*chains),
+                                         (void**)&chains);
+    if (iree_status_is_ok(status)) {
+      status = iree_allocator_malloc_array(
+          command_buffer->host_allocator, chain_capacity,
+          sizeof(*completion_owns_chain), (void**)&completion_owns_chain);
+    }
+  }
+  if (iree_status_is_ok(status) && completion_owns_chain) {
+    memset(completion_owns_chain, 0,
+           chain_capacity * sizeof(*completion_owns_chain));
+  }
+  for (size_t begin = 0; begin < group->cmd_count && iree_status_is_ok(status);
+       begin += max_slots) {
+    size_t end = begin + max_slots;
+    if (end > group->cmd_count) end = group->cmd_count;
+    iree_hal_amdxdna_native_command_t* chain = NULL;
+    status = iree_hal_amdxdna_prepare_chain(
+        command_buffer->host_allocator, command_buffer->device->native_device,
+        group, begin, end, &chain);
+    if (iree_status_is_ok(status)) chains[chain_count++] = chain;
+  }
+  if (iree_status_is_ok(status) &&
+      iree_hal_amdxdna_direct_command_buffer_uses_async_completion(
+          command_buffer)) {
+    for (size_t i = 0; i < chain_count && iree_status_is_ok(status); ++i) {
+      status = iree_hal_amdxdna_completion_batch_add_cleanup(
+          command_buffer->completion_batch,
+          iree_hal_amdxdna_completion_destroy_native_command, chains[i]);
+      if (iree_status_is_ok(status)) completion_owns_chain[i] = 1;
+    }
+  }
+  if (iree_status_is_ok(status) && chain_count != 0) {
+    status = iree_hal_amdxdna_direct_command_buffer_submit_all(
+        command_buffer, group->queue, chains, chain_count,
+        IREE_SV("ERT_CMD_CHAIN"));
+  }
+  for (size_t i = 0; i < chain_count; ++i) {
+    if (!completion_owns_chain || !completion_owns_chain[i]) {
+      iree_hal_amdxdna_native_command_c_destroy(chains[i]);
+    }
+  }
+  iree_allocator_free(command_buffer->host_allocator, completion_owns_chain);
+  iree_allocator_free(command_buffer->host_allocator, chains);
+  return status;
+}
+
+static iree_status_t
 iree_hal_amdxdna_direct_command_buffer_submit_accumulated_single(
     iree_hal_amdxdna_direct_command_buffer* command_buffer,
     iree_hal_amdxdna_chain_group_t* group) {
@@ -839,22 +1386,116 @@ iree_hal_amdxdna_direct_command_buffer_submit_accumulated_single(
   }
 
   if (!cmd->src_use_native_partial_elf) {
-    if (!cmd->built) {
-      IREE_RETURN_AND_END_ZONE_IF_ERROR(
-          z0,
-          iree_hal_amdxdna_make_npu_cmd(
-              command_buffer, cmd->src_cu_idx, cmd->src_asm_inst,
-              cmd->src_patches, cmd->binding_device_addrs, cmd->binding_buffers,
-              cmd->binding_offsets, cmd->binding_lengths, cmd->binding_count,
-              iree_make_const_byte_span(cmd->src_constants,
-                                        cmd->src_constant_count),
-              cmd->src_use_native_partial_elf, cmd));
+    iree_status_t status = iree_ok_status();
+    iree_hal_amdxdna_native_command_t* submit_command = NULL;
+    iree_hal_amdxdna_device_single_command_cache_t* single_command_cache = NULL;
+    iree_hal_amdxdna_single_command_cache_entry_t* single_cache_entry = NULL;
+    bool single_cache_locked = false;
+    bool release_single_cache_entry_after_submit = false;
+    const bool can_use_start_npu_template_cache =
+        (command_buffer->device->native_caps.dispatch_models &
+         IREE_HAL_AMDXDNA_NATIVE_C_DISPATCH_MODEL_START_NPU) != 0;
+
+    if (can_use_start_npu_template_cache) {
+      single_command_cache =
+          iree_hal_amdxdna_get_single_command_cache(command_buffer->device);
+      if (!single_command_cache) {
+        status =
+            iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                             "failed to allocate amdxdna single command cache");
+      }
     }
-    IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, iree_hal_amdxdna_native_queue_c_submit_and_wait(
-                group->queue, cmd->command, IREE_SV("dispatch")));
+    if (iree_status_is_ok(status) && single_command_cache) {
+      iree_slim_mutex_lock(&single_command_cache->mutex);
+      single_cache_locked = true;
+      status =
+          iree_hal_amdxdna_find_single_command_cache_descriptor_template_entry(
+              single_command_cache, group->queue, cmd->src_cu_idx.index,
+              cmd->src_asm_inst, cmd->src_patches, cmd->src_constant_count,
+              cmd->src_use_native_partial_elf, cmd->binding_count,
+              &single_cache_entry);
+    }
+
+    if (iree_status_is_ok(status) && single_cache_entry) {
+      status = iree_hal_amdxdna_rewrite_cached_single_start_npu_cmd(
+          command_buffer, single_cache_entry, cmd);
+      if (iree_status_is_ok(status)) {
+        iree_hal_amdxdna_single_command_cache_entry_acquire_in_flight(
+            single_cache_entry);
+        if (iree_hal_amdxdna_direct_command_buffer_uses_async_completion(
+                command_buffer)) {
+          status =
+              iree_hal_amdxdna_direct_command_buffer_defer_single_cache_release(
+                  command_buffer, single_command_cache, single_cache_entry);
+          if (!iree_status_is_ok(status)) {
+            iree_hal_amdxdna_single_command_cache_entry_release_in_flight(
+                single_command_cache, single_cache_entry);
+          }
+        } else {
+          release_single_cache_entry_after_submit = true;
+        }
+      }
+      submit_command = single_cache_entry->command;
+    } else if (iree_status_is_ok(status)) {
+      if (!cmd->built) {
+        status = iree_hal_amdxdna_make_npu_cmd(
+            command_buffer, cmd->src_cu_idx, cmd->src_asm_inst,
+            cmd->src_patches, cmd->binding_device_addrs, cmd->binding_buffers,
+            cmd->binding_offsets, cmd->binding_lengths, cmd->binding_count,
+            iree_make_const_byte_span(cmd->src_constants,
+                                      cmd->src_constant_count),
+            cmd->src_constant_patches, cmd->src_use_native_partial_elf,
+            /*retain_signature=*/true, cmd);
+      }
+      submit_command = cmd->command;
+      if (iree_status_is_ok(status) && single_command_cache) {
+        single_cache_entry = iree_hal_amdxdna_store_single_command_cache_entry(
+            single_command_cache, group->queue, cmd->src_cu_idx.index,
+            cmd->ctrl_words, cmd->ctrl_word_count, cmd->binding_buffers,
+            cmd->binding_device_addrs, cmd->binding_offsets,
+            cmd->binding_lengths, cmd->binding_count, cmd->ctrl_code,
+            cmd->command);
+        if (single_cache_entry) {
+          iree_hal_amdxdna_single_command_cache_entry_set_descriptor_template(
+              single_cache_entry, cmd->src_asm_inst, cmd->src_patches,
+              cmd->src_constant_count, cmd->src_use_native_partial_elf,
+              cmd->ctrl_code_mapped_ptr);
+          cmd->ctrl_code = NULL;
+          cmd->ctrl_code_mapped_ptr = NULL;
+          cmd->command = NULL;
+          submit_command = single_cache_entry->command;
+          iree_hal_amdxdna_single_command_cache_entry_acquire_in_flight(
+              single_cache_entry);
+          if (iree_hal_amdxdna_direct_command_buffer_uses_async_completion(
+                  command_buffer)) {
+            status =
+                iree_hal_amdxdna_direct_command_buffer_defer_single_cache_release(
+                    command_buffer, single_command_cache, single_cache_entry);
+            if (!iree_status_is_ok(status)) {
+              iree_hal_amdxdna_single_command_cache_entry_release_in_flight(
+                  single_command_cache, single_cache_entry);
+            }
+          } else {
+            release_single_cache_entry_after_submit = true;
+          }
+        }
+      }
+    }
+    if (single_cache_locked) {
+      iree_slim_mutex_unlock(&single_command_cache->mutex);
+      single_cache_locked = false;
+    }
+
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_amdxdna_direct_command_buffer_submit(
+          command_buffer, group->queue, submit_command, IREE_SV("dispatch"));
+    }
+    if (release_single_cache_entry_after_submit) {
+      iree_hal_amdxdna_single_command_cache_entry_release_in_flight(
+          single_command_cache, single_cache_entry);
+    }
     IREE_TRACE_ZONE_END(z0);
-    return iree_ok_status();
+    return status;
   }
 
   uint32_t* prepared_ctrl_words = NULL;
@@ -904,6 +1545,18 @@ iree_hal_amdxdna_direct_command_buffer_submit_accumulated_single(
   }
 
   if (iree_status_is_ok(status) && single_cache_entry) {
+    if (iree_hal_amdxdna_direct_command_buffer_uses_async_completion(
+            command_buffer)) {
+      iree_hal_amdxdna_single_command_cache_entry_acquire_in_flight(
+          single_cache_entry);
+      status =
+          iree_hal_amdxdna_direct_command_buffer_defer_single_cache_release(
+              command_buffer, single_command_cache, single_cache_entry);
+      if (!iree_status_is_ok(status)) {
+        iree_hal_amdxdna_single_command_cache_entry_release_in_flight(
+            single_command_cache, single_cache_entry);
+      }
+    }
     submit_command = single_cache_entry->command;
   } else if (iree_status_is_ok(status)) {
     const size_t ctrl_code_size =
@@ -937,7 +1590,7 @@ iree_hal_amdxdna_direct_command_buffer_submit_accumulated_single(
           command, ctrl_code_buffer, ctrl_code_size);
     }
     if (iree_status_is_ok(status)) {
-      status = iree_hal_amdxdna_native_command_c_add_arg_32(
+      status = iree_hal_amdxdna_native_command_c_add_arg_64(
           command, kAie2ExecBufferKernelOpTxn);
     }
     for (size_t i = 0; i < cmd->binding_count && iree_status_is_ok(status);
@@ -953,15 +1606,27 @@ iree_hal_amdxdna_direct_command_buffer_submit_accumulated_single(
           cmd->binding_device_addrs, cmd->binding_offsets, cmd->binding_lengths,
           cmd->binding_count, ctrl_code_buffer, command);
     }
-    if (iree_status_is_ok(status) && !single_cache_entry) {
-      status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                                "failed to store amdxdna single command cache "
-                                "entry");
-    }
-    if (iree_status_is_ok(status)) {
+    if (iree_status_is_ok(status) && single_cache_entry) {
+      if (iree_hal_amdxdna_direct_command_buffer_uses_async_completion(
+              command_buffer)) {
+        iree_hal_amdxdna_single_command_cache_entry_acquire_in_flight(
+            single_cache_entry);
+        status =
+            iree_hal_amdxdna_direct_command_buffer_defer_single_cache_release(
+                command_buffer, single_command_cache, single_cache_entry);
+        if (!iree_status_is_ok(status)) {
+          iree_hal_amdxdna_single_command_cache_entry_release_in_flight(
+              single_command_cache, single_cache_entry);
+        }
+      }
       ctrl_code_buffer = NULL;
       command = NULL;
       submit_command = single_cache_entry->command;
+    } else if (iree_status_is_ok(status)) {
+      submit_command = command;
+      status =
+          iree_hal_amdxdna_direct_command_buffer_defer_native_command_and_buffer_destroy(
+              command_buffer, &command, &ctrl_code_buffer);
     }
   }
   if (single_cache_locked) {
@@ -970,8 +1635,8 @@ iree_hal_amdxdna_direct_command_buffer_submit_accumulated_single(
   }
 
   if (iree_status_is_ok(status)) {
-    status = iree_hal_amdxdna_native_queue_c_submit_and_wait(
-        group->queue, submit_command, IREE_SV("dispatch"));
+    status = iree_hal_amdxdna_direct_command_buffer_submit(
+        command_buffer, group->queue, submit_command, IREE_SV("dispatch"));
   }
 
   if (single_cache_locked) iree_slim_mutex_unlock(&single_command_cache->mutex);
@@ -1042,9 +1707,10 @@ static iree_status_t iree_hal_amdxdna_direct_command_buffer_flush_chains(
           command_buffer, group);
     } else {
       iree_hal_amdxdna_chain_command_cache_entry_t* chain_cache = NULL;
-      if (group->native_partial_elf && group->reconf_buffer_count == 0) {
+      {
         iree_hal_amdxdna_device_chain_command_cache_t* device_chain_cache =
             iree_hal_amdxdna_get_chain_command_cache(command_buffer->device);
+        bool fallback_uncached = false;
         if (!device_chain_cache) {
           status = iree_make_status(
               IREE_STATUS_RESOURCE_EXHAUSTED,
@@ -1054,23 +1720,86 @@ static iree_status_t iree_hal_amdxdna_direct_command_buffer_flush_chains(
         iree_slim_mutex_lock(&device_chain_cache->mutex);
         bool exact_cache_hit = false;
         bool device_cache_hit = false;
+        bool template_cache_hit = false;
         // Late-build fast path: reuse an already-built cached chain when
-        // the descriptor inputs (control-code template + constants + bindings)
-        // match exactly, without building this group's children at all.
-        for (iree_host_size_t i = 0; i < device_chain_cache->entry_count; ++i) {
-          iree_hal_amdxdna_chain_command_cache_entry_t* entry =
-              &device_chain_cache->entries[i];
-          if (iree_hal_amdxdna_chain_command_cache_descriptor_matches(
-                  entry, group, max_slots)) {
-            chain_cache = entry;
-            exact_cache_hit = true;
-            break;
+        // the descriptor inputs (control-code template + constants +
+        // bindings) match exactly, without building this group's children at
+        // all.
+        if (group->native_partial_elf) {
+          for (iree_host_size_t i = 0; i < device_chain_cache->entry_count;
+               ++i) {
+            iree_hal_amdxdna_chain_command_cache_entry_t* entry =
+                &device_chain_cache->entries[i];
+            if (iree_hal_amdxdna_chain_command_cache_descriptor_matches(
+                    entry, group, max_slots)) {
+              chain_cache = entry;
+              exact_cache_hit = true;
+              break;
+            }
+          }
+        }
+        if (!chain_cache && !group->native_partial_elf) {
+          // Linux START_NPU chain packets bake dynamic scalar arg64 values
+          // into each child exec packet. Exact descriptor matches are
+          // uncommon, but the packet template repeats. Match the template,
+          // then rewrite each cached child in place while preserving its exec
+          // BO handle; cached parent chains reference those stable child
+          // handles.
+          for (iree_host_size_t i = 0; i < device_chain_cache->entry_count;
+               ++i) {
+            iree_hal_amdxdna_chain_command_cache_entry_t* entry =
+                &device_chain_cache->entries[i];
+            if (iree_hal_amdxdna_chain_command_cache_descriptor_template_matches(
+                    entry, group, max_slots)) {
+              chain_cache = entry;
+              template_cache_hit = true;
+              break;
+            }
+          }
+          if (chain_cache) {
+            chain_cache->last_use = ++device_chain_cache->use_clock;
+            const bool binding_refs_changed =
+                !iree_hal_amdxdna_chain_group_binding_refs_match(
+                    &chain_cache->group, group);
+            const bool reconf_buffers_changed =
+                !iree_hal_amdxdna_chain_group_reconf_buffers_match(
+                    &chain_cache->group, group);
+            for (iree_host_size_t i = 0;
+                 i < group->cmd_count && iree_status_is_ok(status); ++i) {
+              status = iree_hal_amdxdna_rewrite_cached_start_npu_cmd(
+                  command_buffer, &chain_cache->group.cmds[i], &group->cmds[i]);
+            }
+            if (iree_status_is_ok(status) &&
+                (binding_refs_changed || reconf_buffers_changed)) {
+              // Parent ERT_CMD_CHAIN packets contain stable cached child
+              // command BO handles, but non-partial START_NPU parent chains
+              // also bind the data and reconfiguration BOs referenced by the
+              // group for residency.
+              // Linux KMQ cannot rebind a prepared native command in place, so
+              // changed refs require rebuilding the parent chain commands
+              // after refreshing the cached refs.
+              if (reconf_buffers_changed) {
+                status = iree_hal_amdxdna_chain_group_take_reconf_buffers(
+                    command_buffer->host_allocator, &chain_cache->group, group);
+              }
+              if (iree_status_is_ok(status) && binding_refs_changed) {
+                status = iree_hal_amdxdna_chain_group_set_binding_refs(
+                    command_buffer->host_allocator, &chain_cache->group, group);
+              }
+              if (iree_status_is_ok(status)) {
+                status = iree_hal_amdxdna_rebuild_cached_parent_chains(
+                    command_buffer, chain_cache, max_slots);
+              }
+            }
           }
         }
         // Not an exact hit: realize any late-bound children now so the
-        // ctrl_words-based device/shape/miss logic below can match, update, or
-        // cache them.
+        // ctrl_words-based device/shape/miss logic below can match, update,
+        // or cache them.
         if (!chain_cache) {
+          fallback_uncached =
+              !iree_hal_amdxdna_chain_command_cache_trim_for_group(
+                  device_chain_cache, group, max_slots);
           for (iree_host_size_t i = 0;
                i < group->cmd_count && iree_status_is_ok(status); ++i) {
             iree_hal_amdxdna_chain_cmd_t* cmd = &group->cmds[i];
@@ -1082,7 +1811,8 @@ static iree_status_t iree_hal_amdxdna_direct_command_buffer_flush_chains(
                 cmd->binding_lengths, cmd->binding_count,
                 iree_make_const_byte_span(cmd->src_constants,
                                           cmd->src_constant_count),
-                cmd->src_use_native_partial_elf, cmd);
+                cmd->src_constant_patches, cmd->src_use_native_partial_elf,
+                /*retain_signature=*/!fallback_uncached, cmd);
           }
         }
         if (chain_cache) {
@@ -1104,6 +1834,7 @@ static iree_status_t iree_hal_amdxdna_direct_command_buffer_flush_chains(
           }
         }
         if (iree_status_is_ok(status) && !chain_cache &&
+            group->native_partial_elf &&
             device_chain_cache->entry_count >=
                 kAmdxdnaChainCommandCacheCapacity) {
           for (iree_host_size_t i = 0; i < device_chain_cache->entry_count;
@@ -1117,7 +1848,8 @@ static iree_status_t iree_hal_amdxdna_direct_command_buffer_flush_chains(
             }
           }
         }
-        if (chain_cache && !exact_cache_hit && !device_cache_hit) {
+        if (chain_cache && !exact_cache_hit && !device_cache_hit &&
+            !template_cache_hit) {
           chain_cache->last_use = ++device_chain_cache->use_clock;
           bool packet_changed = false;
           for (size_t i = 0; i < group->cmd_count && iree_status_is_ok(status);
@@ -1139,57 +1871,70 @@ static iree_status_t iree_hal_amdxdna_direct_command_buffer_flush_chains(
                   chain_cache->chains[i]);
             }
           }
-        } else if (iree_status_is_ok(status) && !chain_cache) {
+        } else if (iree_status_is_ok(status) && !chain_cache &&
+                   !fallback_uncached) {
           chain_cache = iree_hal_amdxdna_chain_command_cache_allocate_entry(
-              device_chain_cache);
-          chain_cache->group.context =
-              iree_hal_amdxdna_native_context_ref_retain(group->context);
-          chain_cache->group.queue = group->queue;
-          chain_cache->group.native_partial_elf = group->native_partial_elf;
-          status = iree_hal_amdxdna_chain_group_take_cmds(
-              command_buffer->host_allocator, &chain_cache->group, group);
-          chain_cache->max_slots = max_slots;
-          chain_cache->last_use = ++device_chain_cache->use_clock;
-          if (iree_status_is_ok(status)) {
-            status = iree_hal_amdxdna_rebuild_cached_parent_chains(
-                command_buffer, chain_cache, max_slots);
+              device_chain_cache, group, max_slots);
+          if (!chain_cache) {
+            fallback_uncached = true;
+          } else {
+            chain_cache->group.context =
+                iree_hal_amdxdna_native_context_ref_retain(group->context);
+            chain_cache->group.queue = group->queue;
+            chain_cache->group.native_partial_elf = group->native_partial_elf;
+            status = iree_hal_amdxdna_chain_group_take_cmds(
+                command_buffer->host_allocator, &chain_cache->group, group);
+            if (iree_status_is_ok(status)) {
+              status = iree_hal_amdxdna_chain_group_take_reconf_buffers(
+                  command_buffer->host_allocator, &chain_cache->group, group);
+            }
+            for (iree_host_size_t i = 0;
+                 i < chain_cache->group.cmd_count && iree_status_is_ok(status);
+                 ++i) {
+              status = iree_hal_amdxdna_chain_cmd_make_deferred_lists_owned(
+                  command_buffer->host_allocator, &chain_cache->group.cmds[i]);
+            }
+            if (iree_status_is_ok(status)) {
+              status = iree_hal_amdxdna_chain_group_set_binding_refs(
+                  command_buffer->host_allocator, &chain_cache->group, group);
+            }
+            chain_cache->max_slots = max_slots;
+            chain_cache->last_use = ++device_chain_cache->use_clock;
+            if (iree_status_is_ok(status)) {
+              status = iree_hal_amdxdna_rebuild_cached_parent_chains(
+                  command_buffer, chain_cache, max_slots);
+            }
           }
         }
-        if (iree_status_is_ok(status) && chain_cache->chain_count != 0) {
-          status = iree_hal_amdxdna_native_queue_c_submit_all_and_wait(
-              group->queue, chain_cache->chains, chain_cache->chain_count,
-              IREE_SV("ERT_CMD_CHAIN"));
+        if (iree_status_is_ok(status) && chain_cache &&
+            chain_cache->chain_count != 0) {
+          if (iree_hal_amdxdna_direct_command_buffer_uses_async_completion(
+                  command_buffer)) {
+            iree_hal_amdxdna_chain_command_cache_entry_acquire_in_flight(
+                chain_cache);
+            status =
+                iree_hal_amdxdna_direct_command_buffer_defer_chain_cache_release(
+                    command_buffer, device_chain_cache, chain_cache);
+            if (!iree_status_is_ok(status)) {
+              iree_hal_amdxdna_chain_command_cache_entry_release_in_flight(
+                  device_chain_cache, chain_cache);
+            }
+          }
+        }
+        if (iree_status_is_ok(status) && chain_cache &&
+            chain_cache->chain_count != 0) {
+          status = iree_hal_amdxdna_direct_command_buffer_submit_all(
+              command_buffer, group->queue, chain_cache->chains,
+              chain_cache->chain_count, IREE_SV("ERT_CMD_CHAIN"));
         }
         iree_slim_mutex_unlock(&device_chain_cache->mutex);
-      } else {
-        iree_hal_amdxdna_native_command_t** chains = NULL;
-        size_t chain_count = 0;
-        size_t chain_capacity =
-            (group->cmd_count + (size_t)max_slots - 1) / (size_t)max_slots;
-        if (chain_capacity != 0) {
-          status = iree_allocator_malloc_array(command_buffer->host_allocator,
-                                               chain_capacity, sizeof(*chains),
-                                               (void**)&chains);
+        if (iree_status_is_ok(status) && fallback_uncached) {
+          if (iree_status_is_ok(status)) {
+            status =
+                iree_hal_amdxdna_direct_command_buffer_submit_uncached_parent_chains(
+                    command_buffer, group, max_slots);
+          }
         }
-        for (size_t begin = 0;
-             begin < group->cmd_count && iree_status_is_ok(status);
-             begin += max_slots) {
-          size_t end = begin + max_slots;
-          if (end > group->cmd_count) end = group->cmd_count;
-          iree_hal_amdxdna_native_command_t* chain = NULL;
-          status = iree_hal_amdxdna_prepare_chain(
-              command_buffer->host_allocator,
-              command_buffer->device->native_device, group, begin, end, &chain);
-          if (iree_status_is_ok(status)) chains[chain_count++] = chain;
-        }
-        if (iree_status_is_ok(status) && chain_count != 0) {
-          status = iree_hal_amdxdna_native_queue_c_submit_all_and_wait(
-              group->queue, chains, chain_count, IREE_SV("ERT_CMD_CHAIN"));
-        }
-        for (size_t i = 0; i < chain_count; ++i) {
-          iree_hal_amdxdna_native_command_c_destroy(chains[i]);
-        }
-        iree_allocator_free(command_buffer->host_allocator, chains);
       }
     }
     if (!iree_status_is_ok(status)) break;
@@ -1197,40 +1942,38 @@ static iree_status_t iree_hal_amdxdna_direct_command_buffer_flush_chains(
     // sync model, so on backends that own binding sync we invalidate this
     // group's I/O bindings back to host once the chains complete.
     //
-    // BUT on CALLER_SYNCS_BINDINGS backends (e.g. Linux KMQ / npu4) the caller
-    // owns all host<->device sync, and the single-dispatch path
-    // (submit_accumulated_single) already performs NO invalidate here. Doing a
-    // blanket invalidate over *every* binding on the chain path is therefore
-    // (a) redundant with the caller's own sync and (b) catastrophically
-    // wasteful for the chain: a runlist binds all of its inputs, so this
-    // invalidates the full working set -- including multi-GB read-only weight
-    // inputs -- on every flush. Measured on npu4 a 28-kernel decode runlist
-    // invalidated ~3.9 GB of CPU cache (~37 ms/runlist), ~4x the chain's actual
-    // device time and the entire cause of chaining being slower than separate
-    // dispatches. Skip it when the caller syncs bindings, matching the
-    // single-dispatch path.
+    // On CALLER_SYNCS_BINDINGS backends (for example Linux KMQ) the caller owns
+    // host<->device synchronization. Match the single-dispatch path by avoiding
+    // redundant post-submit invalidation over every runlist binding here.
     const bool caller_syncs_bindings =
         command_buffer->device->native_caps.buffer_sync_model ==
         IREE_HAL_AMDXDNA_NATIVE_C_BUFFER_SYNC_MODEL_CALLER_SYNCS_BINDINGS;
     if (submit_as_chain && !caller_syncs_bindings) {
-      for (iree_host_size_t i = 0; i < group->binding_ref_count; ++i) {
-        const iree_hal_buffer_ref_t* binding_ref = &group->binding_refs[i];
-        status = iree_hal_amdxdna_buffer_invalidate_range(
-            binding_ref->buffer, binding_ref->offset, binding_ref->length);
-        if (!iree_status_is_ok(status)) break;
+      iree_hal_buffer_ref_list_t binding_refs = {group->binding_ref_count,
+                                                 group->binding_refs};
+      if (iree_hal_amdxdna_direct_command_buffer_uses_async_completion(
+              command_buffer)) {
+        status =
+            iree_hal_amdxdna_direct_command_buffer_defer_binding_invalidate(
+                command_buffer, binding_refs);
+      } else {
+        for (iree_host_size_t i = 0; i < group->binding_ref_count; ++i) {
+          const iree_hal_buffer_ref_t* binding_ref = &group->binding_refs[i];
+          status = iree_hal_amdxdna_buffer_invalidate_range(
+              binding_ref->buffer, binding_ref->offset, binding_ref->length);
+          if (!iree_status_is_ok(status)) break;
+        }
       }
     }
     if (!iree_status_is_ok(status)) break;
   }
-  // Drop the accumulator unconditionally. On the OK path this is the normal
-  // post-flush reset; on the error path it makes sure the remaining
-  // unsubmitted groups (their control-code BOs, sub-command BOs, reconf BOs)
-  // release HERE rather than during the command-buffer destructor's unwind
-  // while it's already propagating the error up. No leak either way: the
-  // destructor would run them, but this keeps the failure site self-contained
-  // (anything still pending at the error point is gone) and avoids running BO
-  // destructors mid error-unwind, which is hard to read in a crash trace.
-  iree_hal_amdxdna_chain_accum_clear(command_buffer->host_allocator, accum);
+  // Synchronous flushes can drop the accumulator immediately. Async flushes
+  // keep command-buffer-owned child commands, control-code BOs, reconf BOs, and
+  // binding refs alive until the completion batch has waited native completion.
+  if (!iree_hal_amdxdna_completion_batch_has_work(
+          command_buffer->completion_batch)) {
+    iree_hal_amdxdna_chain_accum_clear(command_buffer->host_allocator, accum);
+  }
 
   IREE_TRACE_ZONE_END(z0);
   return status;
@@ -1342,6 +2085,18 @@ static iree_status_t iree_hal_amdxdna_direct_command_buffer_normal_run(
             binding_lengths, bindings.count, &single_cache_entry);
       }
       if (iree_status_is_ok(status) && single_cache_entry) {
+        if (iree_hal_amdxdna_direct_command_buffer_uses_async_completion(
+                command_buffer)) {
+          iree_hal_amdxdna_single_command_cache_entry_acquire_in_flight(
+              single_cache_entry);
+          status =
+              iree_hal_amdxdna_direct_command_buffer_defer_single_cache_release(
+                  command_buffer, single_command_cache, single_cache_entry);
+          if (!iree_status_is_ok(status)) {
+            iree_hal_amdxdna_single_command_cache_entry_release_in_flight(
+                single_command_cache, single_cache_entry);
+          }
+        }
         submit_command = single_cache_entry->command;
       } else if (iree_status_is_ok(status)) {
         iree_slim_mutex_unlock(&single_command_cache->mutex);
@@ -1351,9 +2106,7 @@ static iree_status_t iree_hal_amdxdna_direct_command_buffer_normal_run(
   }
 
   // Allocate a buffer object to hold the control code (`asm_inst`).
-  size_t ctrl_code_size =
-      (use_single_partial_elf ? asm_inst->count : asm_inst->count) *
-      sizeof(uint32_t);
+  size_t ctrl_code_size = asm_inst->count * sizeof(uint32_t);
   if (iree_status_is_ok(status) && !submit_command) {
     const bool uses_native_instruction_buffer =
         use_single_partial_elf ||
@@ -1402,7 +2155,7 @@ static iree_status_t iree_hal_amdxdna_direct_command_buffer_normal_run(
       status = iree_hal_amdxdna_native_command_c_add_control_buffer(
           command, ctrl_code_buffer, ctrl_code_size);
       if (iree_status_is_ok(status)) {
-        status = iree_hal_amdxdna_native_command_c_add_arg_32(
+        status = iree_hal_amdxdna_native_command_c_add_arg_64(
             command, kAie2ExecBufferKernelOpTxn);
       }
     } else if (iree_status_is_ok(status) &&
@@ -1411,7 +2164,7 @@ static iree_status_t iree_hal_amdxdna_direct_command_buffer_normal_run(
       status = iree_hal_amdxdna_native_command_c_add_control_buffer(
           command, ctrl_code_buffer, ctrl_code_size);
       if (iree_status_is_ok(status)) {
-        status = iree_hal_amdxdna_native_command_c_add_arg_32(
+        status = iree_hal_amdxdna_native_command_c_add_arg_64(
             command, kAie2ExecBufferKernelOpTxn);
       }
     } else {
@@ -1485,37 +2238,52 @@ static iree_status_t iree_hal_amdxdna_direct_command_buffer_normal_run(
           single_command_cache, queue, cu_idx.index, prepared_ctrl_words,
           asm_inst->count, binding_buffers, binding_addrs, binding_offsets,
           binding_lengths, bindings.count, ctrl_code_buffer, command);
-      if (!single_cache_entry) {
+    }
+    if (iree_status_is_ok(status) && single_cache_entry) {
+      if (iree_hal_amdxdna_direct_command_buffer_uses_async_completion(
+              command_buffer)) {
+        iree_hal_amdxdna_single_command_cache_entry_acquire_in_flight(
+            single_cache_entry);
         status =
-            iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                             "failed to store amdxdna single command cache "
-                             "entry");
+            iree_hal_amdxdna_direct_command_buffer_defer_single_cache_release(
+                command_buffer, single_command_cache, single_cache_entry);
+        if (!iree_status_is_ok(status)) {
+          iree_hal_amdxdna_single_command_cache_entry_release_in_flight(
+              single_command_cache, single_cache_entry);
+        }
       }
       ctrl_code_buffer = NULL;
       command = NULL;
-    }
-    if (iree_status_is_ok(status)) {
       submit_command = single_cache_entry->command;
     }
   }
 
   if (iree_status_is_ok(status) && !submit_command) {
     submit_command = command;
+    status =
+        iree_hal_amdxdna_direct_command_buffer_defer_native_command_and_buffer_destroy(
+            command_buffer, &command, &ctrl_code_buffer);
   }
 
   if (iree_status_is_ok(status)) {
-    status = iree_hal_amdxdna_native_queue_c_submit_and_wait(
-        queue, submit_command, IREE_SV("dispatch"));
+    status = iree_hal_amdxdna_direct_command_buffer_submit(
+        command_buffer, queue, submit_command, IREE_SV("dispatch"));
   }
   // Sync the bindings back to the host.
   if (iree_status_is_ok(status) && !use_single_partial_elf &&
       command_buffer->device->native_caps.buffer_sync_model !=
           IREE_HAL_AMDXDNA_NATIVE_C_BUFFER_SYNC_MODEL_SUBMIT_SYNCS_BINDINGS) {
-    for (iree_host_size_t j = 0;
-         iree_status_is_ok(status) && j < bindings.count; ++j) {
-      status = iree_hal_amdxdna_buffer_invalidate_range(
-          bindings.values[j].buffer, bindings.values[j].offset,
-          bindings.values[j].length);
+    if (iree_hal_amdxdna_direct_command_buffer_uses_async_completion(
+            command_buffer)) {
+      status = iree_hal_amdxdna_direct_command_buffer_defer_binding_invalidate(
+          command_buffer, bindings);
+    } else {
+      for (iree_host_size_t j = 0;
+           iree_status_is_ok(status) && j < bindings.count; ++j) {
+        status = iree_hal_amdxdna_buffer_invalidate_range(
+            bindings.values[j].buffer, bindings.values[j].offset,
+            bindings.values[j].length);
+      }
     }
   }
 
@@ -1528,6 +2296,54 @@ static iree_status_t iree_hal_amdxdna_direct_command_buffer_normal_run(
   iree_allocator_free(command_buffer->host_allocator, binding_buffers);
   iree_allocator_free(command_buffer->host_allocator, binding_addrs);
   IREE_TRACE_ZONE_END(z0);
+  return status;
+}
+
+static iree_status_t iree_hal_amdxdna_create_reconfigure_command(
+    iree_hal_amdxdna_direct_command_buffer* command_buffer,
+    iree_hal_amdxdna_native_c_cu_index_t cu_idx,
+    iree_hal_amdxdna_native_buffer_t* ctrlpkt_inst_buffer,
+    size_t ctrlpkt_inst_size, uint32_t ctrlpkt_inst_word_count,
+    iree_hal_amdxdna_native_buffer_t* ctrlpkt_seq_buffer,
+    iree_hal_amdxdna_native_command_t** out_command) {
+  *out_command = NULL;
+  iree_hal_amdxdna_native_command_t* command = NULL;
+  iree_status_t status = iree_hal_amdxdna_native_command_c_create(
+      command_buffer->device->native_device,
+      command_buffer->device->native_caps.default_dispatch_opcode, &command);
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_amdxdna_native_command_c_set_cu_index(command, cu_idx);
+  }
+  if (iree_status_is_ok(status) &&
+      (command_buffer->device->native_caps.dispatch_models &
+       IREE_HAL_AMDXDNA_NATIVE_C_DISPATCH_MODEL_START_NPU) != 0) {
+    status = iree_hal_amdxdna_native_command_c_add_control_buffer(
+        command, ctrlpkt_inst_buffer, ctrlpkt_inst_size);
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_amdxdna_native_command_c_add_arg_64(
+          command, kAie2ExecBufferKernelOpTxn);
+    }
+  } else if (iree_status_is_ok(status)) {
+    status = iree_hal_amdxdna_native_command_c_add_arg_64(
+        command, kAmdxdnaControlCodeOpcode);
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_amdxdna_native_command_c_add_buffer_arg(
+          command, ctrlpkt_inst_buffer);
+    }
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_amdxdna_native_command_c_add_arg_32(
+          command, ctrlpkt_inst_word_count);
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_amdxdna_native_command_c_add_buffer_arg(
+        command, ctrlpkt_seq_buffer);
+  }
+  if (iree_status_is_ok(status)) {
+    *out_command = command;
+  } else {
+    iree_hal_amdxdna_native_command_c_destroy(command);
+  }
   return status;
 }
 
@@ -1591,48 +2407,64 @@ static iree_status_t iree_hal_amdxdna_direct_command_buffer_reconfigure(
   }
 
   if (iree_status_is_ok(status)) {
-    status = iree_hal_amdxdna_native_command_c_create(
-        command_buffer->device->native_device,
-        command_buffer->device->native_caps.default_dispatch_opcode, &command);
+    status = iree_hal_amdxdna_create_reconfigure_command(
+        command_buffer, cu_idx, ctrlpkt_inst_buffer, ctrlpkt_inst_size,
+        (uint32_t)ctrlpkt_inst->count, ctrlpkt_seq_buffer, &command);
   }
 
-  // Add the kernel arguments.
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_amdxdna_native_command_c_set_cu_index(command, cu_idx);
+  bool completion_owns_inst_buffer = false;
+  bool completion_owns_seq_buffer = false;
+  const bool async_completion =
+      iree_hal_amdxdna_direct_command_buffer_uses_async_completion(
+          command_buffer);
+  if (iree_status_is_ok(status) && async_completion) {
+    status = iree_hal_amdxdna_completion_batch_add_cleanup(
+        command_buffer->completion_batch,
+        iree_hal_amdxdna_completion_destroy_native_buffer, ctrlpkt_inst_buffer);
+    if (iree_status_is_ok(status)) completion_owns_inst_buffer = true;
   }
-  if (iree_status_is_ok(status) &&
-      (command_buffer->device->native_caps.dispatch_models &
-       IREE_HAL_AMDXDNA_NATIVE_C_DISPATCH_MODEL_START_NPU) != 0) {
-    status = iree_hal_amdxdna_native_command_c_add_control_buffer(
-        command, ctrlpkt_inst_buffer, ctrlpkt_inst_size);
-    if (iree_status_is_ok(status)) {
-      status = iree_hal_amdxdna_native_command_c_add_arg_32(
-          command, kAie2ExecBufferKernelOpTxn);
-    }
-  } else if (iree_status_is_ok(status)) {
-    status = iree_hal_amdxdna_native_command_c_add_arg_64(
-        command, kAmdxdnaControlCodeOpcode);
-    if (iree_status_is_ok(status)) {
-      status = iree_hal_amdxdna_native_command_c_add_buffer_arg(
-          command, ctrlpkt_inst_buffer);
-    }
-    if (iree_status_is_ok(status)) {
-      status = iree_hal_amdxdna_native_command_c_add_arg_32(
-          command, (uint32_t)ctrlpkt_inst->count);
-    }
-  }
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_amdxdna_native_command_c_add_buffer_arg(
-        command, ctrlpkt_seq_buffer);
+  if (iree_status_is_ok(status) && async_completion) {
+    status = iree_hal_amdxdna_completion_batch_add_cleanup(
+        command_buffer->completion_batch,
+        iree_hal_amdxdna_completion_destroy_native_buffer, ctrlpkt_seq_buffer);
+    if (iree_status_is_ok(status)) completion_owns_seq_buffer = true;
   }
 
   // Execute the reconfiguration for `n_reconfigure_runs` times.
   for (uint32_t i = 0; iree_status_is_ok(status) && i < n_reconfigure_runs;
        ++i) {
-    status = iree_hal_amdxdna_native_queue_c_submit_and_wait(
-        queue, command, IREE_SV("control-packet reconfiguration"));
+    iree_hal_amdxdna_native_command_t* submit_command = command;
+    bool completion_owns_command = false;
+    if (async_completion && i != 0) {
+      submit_command = NULL;
+      status = iree_hal_amdxdna_create_reconfigure_command(
+          command_buffer, cu_idx, ctrlpkt_inst_buffer, ctrlpkt_inst_size,
+          (uint32_t)ctrlpkt_inst->count, ctrlpkt_seq_buffer, &submit_command);
+    }
+    if (iree_status_is_ok(status) && async_completion) {
+      status = iree_hal_amdxdna_completion_batch_add_cleanup(
+          command_buffer->completion_batch,
+          iree_hal_amdxdna_completion_destroy_native_command, submit_command);
+      if (iree_status_is_ok(status)) completion_owns_command = true;
+    }
+    if (!iree_status_is_ok(status)) {
+      if (i != 0 || submit_command != command) {
+        iree_hal_amdxdna_native_command_c_destroy(submit_command);
+      }
+      break;
+    }
+    status = iree_hal_amdxdna_direct_command_buffer_submit(
+        command_buffer, queue, submit_command,
+        IREE_SV("control-packet reconfiguration"));
+    if (completion_owns_command && submit_command == command) {
+      command = NULL;
+    } else if (!completion_owns_command && submit_command != command) {
+      iree_hal_amdxdna_native_command_c_destroy(submit_command);
+    }
   }
 
+  if (completion_owns_seq_buffer) ctrlpkt_seq_buffer = NULL;
+  if (completion_owns_inst_buffer) ctrlpkt_inst_buffer = NULL;
   iree_hal_amdxdna_native_command_c_destroy(command);
   iree_hal_amdxdna_native_buffer_c_destroy(ctrlpkt_seq_buffer);
   iree_hal_amdxdna_native_buffer_c_destroy(ctrlpkt_inst_buffer);
@@ -1677,6 +2509,9 @@ iree_status_t iree_hal_amdxdna_dispatch_plan_initialize(
   out_plan->control_codes = kernel_params->asm_inst_runlist;
   out_plan->patch_table_count = kernel_params->patch_runlist_count;
   out_plan->patch_tables = kernel_params->patch_runlist;
+  out_plan->constant_patch_table_count =
+      kernel_params->constant_patch_runlist_count;
+  out_plan->constant_patch_tables = kernel_params->constant_patch_runlist;
   out_plan->data_payload_count = kernel_params->reconf_data_runlist_count;
   out_plan->data_payloads = kernel_params->reconf_data_runlist;
   out_plan->data_payload_run_count = kernel_params->n_reconfigure_runs;
@@ -1727,154 +2562,141 @@ iree_status_t iree_hal_amdxdna_direct_command_buffer_dispatch_plan(
   IREE_ASSERT_ARGUMENT(plan->kernel_params);
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  iree_status_t status = iree_ok_status();
-  iree_hal_amdxdna_native_context_ref_t* context_ref = NULL;
-
   iree_hal_amdxdna_direct_command_buffer* command_buffer =
       IREE_HAL_AMDXDNA_CHECKED_VTABLE_CAST(
           base_command_buffer, iree_hal_amdxdna_direct_command_buffer_vtable,
           iree_hal_amdxdna_direct_command_buffer);
 
-  iree_hal_amdxdna_executable* executable = plan->executable;
-  iree_hal_amdxdna_kernel_params_t* kernel_params = plan->kernel_params;
-  status = iree_hal_amdxdna_validate_live_dispatch_bindings(bindings);
+  iree_status_t status =
+      iree_hal_amdxdna_validate_live_dispatch_bindings(bindings);
   if (iree_status_is_ok(status)) {
     status = iree_hal_resource_set_insert(command_buffer->resource_set, 1,
-                                          &executable);
+                                          &plan->executable);
   }
 
-  if (iree_status_is_ok(status)) {
-    iree_hal_amdxdna_native_c_cu_index_t cu_idx;
-    memset(&cu_idx, 0, sizeof(cu_idx));
-    // Resolve the hardware context (loaded NPU array + opened CU) this dispatch
-    // runs on. There are three executable shapes here, distinguished by whether
-    // the entry point carries reconfigure-data payloads and whether it has its
-    // own context image (PDI/xclbin). The backend is NOT what selects the path:
-    // both Windows MCDM (PARTIAL_ELF + xclbin context image) and Linux KMQ (PDI
-    // context image) take branch 1; they differ only in what
-    // get_or_create_context builds, which it picks from the device's
-    // context_image_models.
-    //
-    //   1. data_payload_count == 0 -- self-contained dispatch. The entry point
-    //      carries its own context image (PDI or xclbin). The context is
-    //      content-keyed, created once, and memoized on the entry point so
-    //      every later dispatch reuses the same hwctx. This is the steady-state
-    //      matmul path for both backends.
-    //
-    //   2. data_payload_count != 0 with a PDI/xclbin on this entry point --
-    //      context-loading control-packet entry point. It (re)loads the array
-    //      and publishes the result as executable->context for sibling
-    //      reuse-context entry points to run against.
-    //
-    //   3. data_payload_count != 0 with no context image -- reuse-context entry
-    //      point. It has no image of its own and runs on the
-    //      executable->context that a sibling loader (branch 2) published; it
-    //      fails if none has.
-    if (plan->data_payload_count == 0) {
-      // Memoize the resolved context + CU on the entry point. Otherwise every
-      // dispatch re-enters get_or_create_context, which copies and FNV-hashes
-      // the whole PDI under a lock; that dominates a 240-dispatch chain. Repeat
-      // dispatches reuse the cached context and skip the CU open entirely.
-      //
-      // Memoizing here (rather than only on the PARTIAL_ELF path) is what
-      // avoids a CREATE_HWCTX + DESTROY_HWCTX round-trip on every dispatch --
-      // ~80 ms on the Linux KMQ backend, which advertises neither PARTIAL_ELF
-      // nor an XCLBIN context image and so used to fall into an uncached create
-      // path.
-      iree_slim_mutex_lock(&executable->context_mutex);
-      if (kernel_params->cached_context_valid) {
-        context_ref = iree_hal_amdxdna_native_context_ref_retain(
-            kernel_params->cached_context);
-        cu_idx = kernel_params->cached_cu_index;
-      } else {
-        iree_hal_amdxdna_native_context_ref_t* raw_context_ref = NULL;
-        status = iree_hal_amdxdna_device_get_or_create_context(
-            command_buffer->device, plan->pdi_span, plan->xclbin_span,
-            plan->kernel_name, &raw_context_ref);
-        if (iree_status_is_ok(status)) {
-          context_ref = raw_context_ref;
-          status = iree_hal_amdxdna_native_context_ref_open_cu(
-              context_ref, plan->kernel_name, &cu_idx);
-        }
-        if (iree_status_is_ok(status)) {
-          kernel_params->cached_context =
-              iree_hal_amdxdna_native_context_ref_retain(context_ref);
-          kernel_params->cached_cu_index = cu_idx;
-          kernel_params->cached_context_valid = true;
-        }
-      }
-      iree_slim_mutex_unlock(&executable->context_mutex);
-    } else if (kernel_params->pdi.count != 0 ||
-               kernel_params->xclbin.count != 0) {
+  iree_hal_amdxdna_native_context_ref_t* context_ref = NULL;
+  iree_hal_amdxdna_executable* executable = plan->executable;
+  iree_hal_amdxdna_kernel_params_t* kernel_params = plan->kernel_params;
+  iree_hal_amdxdna_native_c_cu_index_t cu_idx;
+  memset(&cu_idx, 0, sizeof(cu_idx));
+
+  // Resolve the hardware context (loaded NPU array + opened CU) this dispatch
+  // runs on. There are three executable shapes here, distinguished by whether
+  // the entry point carries reconfigure-data payloads and whether it has its
+  // own context image (PDI/xclbin). The backend is NOT what selects the path:
+  // both Windows MCDM (PARTIAL_ELF + xclbin context image) and Linux KMQ (PDI
+  // context image) take branch 1; they differ only in what
+  // get_or_create_context builds, which it picks from the device's
+  // context_image_models.
+  //
+  //   1. data_payload_count == 0 -- self-contained dispatch. The entry point
+  //      carries its own context image (PDI or xclbin). The context is
+  //      content-keyed, created once, and memoized on the entry point so every
+  //      later dispatch reuses the same hwctx.
+  //
+  //   2. data_payload_count != 0 with a PDI/xclbin on this entry point --
+  //      context-loading control-packet entry point. It (re)loads the array and
+  //      publishes the result as executable->context for sibling reuse-context
+  //      entry points to run against.
+  //
+  //   3. data_payload_count != 0 with no context image -- reuse-context entry
+  //      point. It has no image of its own and runs on the executable->context
+  //      that a sibling loader (branch 2) published; it fails if none has.
+  if (iree_status_is_ok(status) && plan->data_payload_count == 0) {
+    iree_slim_mutex_lock(&executable->context_mutex);
+    if (kernel_params->cached_context_valid) {
+      context_ref = iree_hal_amdxdna_native_context_ref_retain(
+          kernel_params->cached_context);
+      cu_idx = kernel_params->cached_cu_index;
+    } else {
+      iree_hal_amdxdna_native_context_ref_t* raw_context_ref = NULL;
       status = iree_hal_amdxdna_device_get_or_create_context(
           command_buffer->device, plan->pdi_span, plan->xclbin_span,
-          plan->kernel_name, &context_ref);
+          plan->kernel_name, &raw_context_ref);
       if (iree_status_is_ok(status)) {
+        context_ref = raw_context_ref;
         status = iree_hal_amdxdna_native_context_ref_open_cu(
             context_ref, plan->kernel_name, &cu_idx);
       }
       if (iree_status_is_ok(status)) {
-        iree_slim_mutex_lock(&executable->context_mutex);
-        iree_hal_amdxdna_native_context_ref_release(executable->context);
-        executable->context =
+        kernel_params->cached_context =
             iree_hal_amdxdna_native_context_ref_retain(context_ref);
-        executable->context_cu_index = cu_idx;
-        executable->context_cu_index_valid = true;
-        iree_slim_mutex_unlock(&executable->context_mutex);
+        kernel_params->cached_cu_index = cu_idx;
+        kernel_params->cached_context_valid = true;
       }
-    } else {
+    }
+    iree_slim_mutex_unlock(&executable->context_mutex);
+  } else if (iree_status_is_ok(status) && (kernel_params->pdi.count != 0 ||
+                                           kernel_params->xclbin.count != 0)) {
+    status = iree_hal_amdxdna_device_get_or_create_context(
+        command_buffer->device, plan->pdi_span, plan->xclbin_span,
+        plan->kernel_name, &context_ref);
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_amdxdna_native_context_ref_open_cu(
+          context_ref, plan->kernel_name, &cu_idx);
+    }
+    if (iree_status_is_ok(status)) {
       iree_slim_mutex_lock(&executable->context_mutex);
-      if (executable->context_cu_index_valid) {
-        context_ref =
-            iree_hal_amdxdna_native_context_ref_retain(executable->context);
-        cu_idx = executable->context_cu_index;
-      }
+      iree_hal_amdxdna_native_context_ref_release(executable->context);
+      executable->context =
+          iree_hal_amdxdna_native_context_ref_retain(context_ref);
+      executable->context_cu_index = cu_idx;
+      executable->context_cu_index_valid = true;
       iree_slim_mutex_unlock(&executable->context_mutex);
     }
-    if (iree_status_is_ok(status) && !context_ref) {
-      status = iree_make_status(
-          IREE_STATUS_FAILED_PRECONDITION,
-          "amdxdna: control-packet dispatch with no context image ran before "
-          "its PDI/xclbin-carrying entry point loaded the array");
+  } else if (iree_status_is_ok(status)) {
+    iree_slim_mutex_lock(&executable->context_mutex);
+    if (executable->context_cu_index_valid) {
+      context_ref =
+          iree_hal_amdxdna_native_context_ref_retain(executable->context);
+      cu_idx = executable->context_cu_index;
     }
-    iree_hal_amdxdna_native_queue_t* queue =
-        iree_status_is_ok(status)
-            ? iree_hal_amdxdna_native_context_ref_queue(context_ref)
-            : NULL;
+    iree_slim_mutex_unlock(&executable->context_mutex);
+  }
+  if (iree_status_is_ok(status) && !context_ref) {
+    status = iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "amdxdna: control-packet dispatch with no context image ran before "
+        "its PDI/xclbin-carrying entry point loaded the array");
+  }
 
-    if (iree_status_is_ok(status) && plan->use_chain_accumulation_policy) {
-      // Accumulate this dispatch's commands; end() chooses the native shape
-      // from the recorded stream: one child submits as a direct single
-      // dispatch, while multiple children or multi-control-code artifacts
-      // become ERT_CMD_CHAINs.
-      status = iree_hal_amdxdna_direct_command_buffer_accumulate_chained(
-          bindings, command_buffer, context_ref, queue, cu_idx, plan, constants,
-          plan->use_native_partial_elf_context);
-    } else if (iree_status_is_ok(status) && plan->data_payload_count == 0) {
-      // Normal kernel dispatch.
-      const iree_hal_amdxdna_u32_list_t* patch_table =
-          plan->patch_table_count == 0 ? NULL : &plan->patch_tables[0];
-      status = iree_hal_amdxdna_direct_command_buffer_normal_run(
-          bindings, command_buffer, queue, cu_idx, &plan->control_codes[0],
-          patch_table, constants, plan->use_native_partial_elf_context);
-    } else {
-      for (size_t i = 0;
-           iree_status_is_ok(status) && i < plan->data_payload_count; i++) {
-        // Reconfigure the device.
-        status = iree_hal_amdxdna_direct_command_buffer_reconfigure(
-            command_buffer, queue, cu_idx, plan->data_payload_run_count,
-            &plan->control_codes[2 * i], &plan->data_payloads[i], constants);
-        if (iree_status_is_ok(status)) {
-          // Dispatch the new kernel.
-          const size_t run_idx = 2 * i + 1;
-          const iree_hal_amdxdna_u32_list_t* patch_table =
-              run_idx < plan->patch_table_count ? &plan->patch_tables[run_idx]
-                                                : NULL;
-          status = iree_hal_amdxdna_direct_command_buffer_normal_run(
-              bindings, command_buffer, queue, cu_idx,
-              &plan->control_codes[run_idx], patch_table, constants,
-              /*use_single_partial_elf=*/false);
-        }
+  iree_hal_amdxdna_native_queue_t* queue = NULL;
+  if (iree_status_is_ok(status)) {
+    queue = iree_hal_amdxdna_native_context_ref_queue(context_ref);
+  }
+
+  if (iree_status_is_ok(status) && plan->use_chain_accumulation_policy) {
+    // Accumulate this dispatch's commands; end() chooses the native shape
+    // from the recorded stream: one child submits as a direct single
+    // dispatch, while multiple children or multi-control-code artifacts
+    // become ERT_CMD_CHAINs.
+    status = iree_hal_amdxdna_direct_command_buffer_accumulate_chained(
+        bindings, command_buffer, context_ref, queue, cu_idx, plan, constants,
+        plan->use_native_partial_elf_context);
+  } else if (iree_status_is_ok(status) && plan->data_payload_count == 0) {
+    // Normal kernel dispatch.
+    const iree_hal_amdxdna_u32_list_t* patch_table =
+        plan->patch_table_count == 0 ? NULL : &plan->patch_tables[0];
+    status = iree_hal_amdxdna_direct_command_buffer_normal_run(
+        bindings, command_buffer, queue, cu_idx, &plan->control_codes[0],
+        patch_table, constants, plan->use_native_partial_elf_context);
+  } else {
+    for (size_t i = 0;
+         iree_status_is_ok(status) && i < plan->data_payload_count; i++) {
+      // Reconfigure the device.
+      status = iree_hal_amdxdna_direct_command_buffer_reconfigure(
+          command_buffer, queue, cu_idx, plan->data_payload_run_count,
+          &plan->control_codes[2 * i], &plan->data_payloads[i], constants);
+      if (iree_status_is_ok(status)) {
+        // Dispatch the new kernel.
+        const size_t run_idx = 2 * i + 1;
+        const iree_hal_amdxdna_u32_list_t* patch_table =
+            run_idx < plan->patch_table_count ? &plan->patch_tables[run_idx]
+                                              : NULL;
+        status = iree_hal_amdxdna_direct_command_buffer_normal_run(
+            bindings, command_buffer, queue, cu_idx,
+            &plan->control_codes[run_idx], patch_table, constants,
+            /*use_single_partial_elf=*/false);
       }
     }
   }

@@ -30,6 +30,8 @@ typedef struct iree_hal_amdxdna_native_context_t
 typedef struct iree_hal_amdxdna_native_queue_t iree_hal_amdxdna_native_queue_t;
 typedef struct iree_hal_amdxdna_native_command_t
     iree_hal_amdxdna_native_command_t;
+typedef struct iree_hal_amdxdna_native_submission_t
+    iree_hal_amdxdna_native_submission_t;
 
 typedef enum iree_hal_amdxdna_native_buffer_sync_direction_t {
   IREE_HAL_AMDXDNA_NATIVE_BUFFER_SYNC_HOST_TO_DEVICE = 0,
@@ -209,6 +211,9 @@ iree_status_t iree_hal_amdxdna_native_command_c_create(
 void iree_hal_amdxdna_native_command_c_destroy(
     iree_hal_amdxdna_native_command_t* command);
 
+iree_status_t iree_hal_amdxdna_native_command_c_reset(
+    iree_hal_amdxdna_native_command_t* command);
+
 iree_status_t iree_hal_amdxdna_native_command_c_set_cu_index(
     iree_hal_amdxdna_native_command_t* command,
     iree_hal_amdxdna_native_c_cu_index_t cu_index);
@@ -223,6 +228,10 @@ iree_status_t iree_hal_amdxdna_native_command_c_add_arg_32(
 
 iree_status_t iree_hal_amdxdna_native_command_c_add_arg_64(
     iree_hal_amdxdna_native_command_t* command, uint64_t value);
+
+iree_status_t iree_hal_amdxdna_native_command_c_update_arg_64(
+    iree_hal_amdxdna_native_command_t* command, iree_host_size_t arg_index,
+    uint64_t value);
 
 iree_status_t iree_hal_amdxdna_native_command_c_add_buffer_arg(
     iree_hal_amdxdna_native_command_t* command,
@@ -259,6 +268,26 @@ iree_status_t iree_hal_amdxdna_native_queue_c_submit_all_and_wait(
     iree_hal_amdxdna_native_queue_t* queue,
     iree_hal_amdxdna_native_command_t* const* commands,
     iree_host_size_t command_count, iree_string_view_t label);
+
+iree_status_t iree_hal_amdxdna_native_queue_c_submit(
+    iree_hal_amdxdna_native_queue_t* queue,
+    iree_hal_amdxdna_native_command_t* command, iree_string_view_t label,
+    iree_hal_amdxdna_native_submission_t** out_submission);
+
+iree_status_t iree_hal_amdxdna_native_queue_c_submit_all(
+    iree_hal_amdxdna_native_queue_t* queue,
+    iree_hal_amdxdna_native_command_t* const* commands,
+    iree_host_size_t command_count, iree_string_view_t label,
+    iree_hal_amdxdna_native_submission_t** out_submission);
+
+iree_status_t iree_hal_amdxdna_native_submission_c_wait(
+    iree_hal_amdxdna_native_submission_t* submission, uint64_t timeout_ns);
+
+iree_status_t iree_hal_amdxdna_native_submission_c_query(
+    iree_hal_amdxdna_native_submission_t* submission, bool* out_ready);
+
+void iree_hal_amdxdna_native_submission_c_destroy(
+    iree_hal_amdxdna_native_submission_t* submission);
 
 #ifdef __cplusplus
 }  // extern "C"

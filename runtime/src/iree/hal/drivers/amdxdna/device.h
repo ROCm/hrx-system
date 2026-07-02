@@ -13,6 +13,7 @@
 #include "iree/hal/api.h"
 #include "iree/hal/drivers/amdxdna/api.h"
 #include "iree/hal/drivers/amdxdna/async_queue.h"
+#include "iree/hal/drivers/amdxdna/completion_queue.h"
 #include "iree/hal/drivers/amdxdna/native.h"
 
 struct iree_async_proactor_pool_t;
@@ -51,6 +52,10 @@ typedef struct iree_hal_amdxdna_device {
   // Dedicated transfer worker for synchronous HAL file handles. Keeping this
   // separate prevents large file I/O from occupying the NPU submission worker.
   iree_hal_amdxdna_transfer_queue_t* transfer_queue;
+  // Dedicated native-completion worker. The async queue issues work; this queue
+  // waits native submissions, runs post-completion actions, and signals HAL
+  // semaphores after resources are no longer in use by the NPU.
+  iree_hal_amdxdna_completion_queue_t* completion_queue;
   // Shared epoch advanced by all amdxdna worker queues for this HAL device.
   iree_atomic_uint64_t queue_epoch;
 

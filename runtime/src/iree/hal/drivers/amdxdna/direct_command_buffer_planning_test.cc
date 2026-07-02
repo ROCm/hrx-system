@@ -136,6 +136,58 @@ TEST(PatchWrite32ConstantsTest, ShortTxnIsNoOp) {
       txn.data(), txn.size(), iree_make_const_byte_span(nullptr, 0)));
 }
 
+TEST(PatchWrite32ConstantsTest, PrecomputedListMatchesScanner) {
+  auto scanned_txn = MakeWrite32Txn(kWrite32ConstantSentinel | 1u);
+  auto listed_txn = scanned_txn;
+  std::vector<uint32_t> constants = {0xDEAD0000u, 0xCAFEBABEu};
+  iree_hal_amdxdna_write32_constant_patch_list_t patch_list;
+  IREE_ASSERT_OK(iree_hal_amdxdna_build_write32_constant_patch_list(
+      iree_allocator_system(), listed_txn.data(), listed_txn.size(),
+      &patch_list));
+  EXPECT_EQ(patch_list.count, 1u);
+  EXPECT_EQ(patch_list.data[0].byte_offset, 32u);
+  EXPECT_EQ(patch_list.data[0].constant_index, 1u);
+
+  IREE_ASSERT_OK(iree_hal_amdxdna_patch_write32_constants(
+      scanned_txn.data(), scanned_txn.size(),
+      iree_make_const_byte_span(constants.data(),
+                                constants.size() * sizeof(uint32_t))));
+  IREE_ASSERT_OK(iree_hal_amdxdna_patch_write32_constants_with_list(
+      listed_txn.data(), listed_txn.size(), &patch_list,
+      iree_make_const_byte_span(constants.data(),
+                                constants.size() * sizeof(uint32_t))));
+  EXPECT_EQ(listed_txn, scanned_txn);
+  iree_hal_amdxdna_write32_constant_patch_list_deinitialize(
+      iree_allocator_system(), &patch_list);
+}
+
+TEST(PatchWrite32ConstantsTest, PrecomputedListRejectsOutOfRangeConstantIndex) {
+  auto txn = MakeWrite32Txn(kWrite32ConstantSentinel | 7u);
+  std::vector<uint32_t> constants = {0xCAFEBABEu};
+  iree_hal_amdxdna_write32_constant_patch_list_t patch_list;
+  IREE_ASSERT_OK(iree_hal_amdxdna_build_write32_constant_patch_list(
+      iree_allocator_system(), txn.data(), txn.size(), &patch_list));
+  iree_status_t status = iree_hal_amdxdna_patch_write32_constants_with_list(
+      txn.data(), txn.size(), &patch_list,
+      iree_make_const_byte_span(constants.data(),
+                                constants.size() * sizeof(uint32_t)));
+  EXPECT_EQ(iree_status_code(status), IREE_STATUS_INVALID_ARGUMENT);
+  iree_status_ignore(status);
+  iree_hal_amdxdna_write32_constant_patch_list_deinitialize(
+      iree_allocator_system(), &patch_list);
+}
+
+TEST(PatchWrite32ConstantsTest, PrecomputedListRejectsMalformedTruncatedOp) {
+  std::vector<uint32_t> txn(5, 0);
+  txn[2] = 1;
+  reinterpret_cast<uint8_t*>(txn.data())[16] = 0;  // WRITE32 at p=16
+  iree_hal_amdxdna_write32_constant_patch_list_t patch_list;
+  iree_status_t status = iree_hal_amdxdna_build_write32_constant_patch_list(
+      iree_allocator_system(), txn.data(), txn.size(), &patch_list);
+  EXPECT_EQ(iree_status_code(status), IREE_STATUS_INVALID_ARGUMENT);
+  iree_status_ignore(status);
+}
+
 // --- iree_hal_amdxdna_apply_patch_table --------------------------------------
 
 TEST(ApplyPatchTableTest, WritesShimDmaAddressIntoDescriptor) {
@@ -203,6 +255,105 @@ TEST(ApplyPatchTableTest, DropsLowTwoBitsOfDescriptorAddress) {
   EXPECT_EQ(ctrl[1], static_cast<uint32_t>(base & 0xFFFFFFFC));
   EXPECT_EQ(ctrl[1] & 0x3u, 0u);
   EXPECT_EQ(ctrl[2], static_cast<uint32_t>(base >> 32));
+}
+
+// --- iree_hal_amdxdna_patch_dynamic_fields_from_template ---------------------
+
+TEST(PatchDynamicFieldsFromTemplateTest, RewritesConstantsAndPatchTable) {
+  std::vector<uint32_t> templ = MakeWrite32Txn(kWrite32ConstantSentinel | 1u);
+  templ.resize(12, 0);
+  // Put a BD at byte offset 40. The high 16 bits of bd[2] are descriptor
+  // metadata and must be preserved while the low 48 address bits are rewritten.
+  templ[11] = 0xABCD0000u;
+  std::vector<uint32_t> ctrl = templ;
+  std::vector<uint32_t> patches = {/*offset=*/36u, /*arg_idx=*/0u,
+                                   /*arg_plus=*/0x20u};
+  std::vector<uint32_t> constants = {0xAAAA0000u, 0x12345678u};
+  uint64_t args[] = {0x2000u};
+
+  IREE_ASSERT_OK(iree_hal_amdxdna_patch_dynamic_fields_from_template(
+      ctrl.data(), templ.data(), ctrl.size(), /*constant_patches=*/nullptr,
+      iree_make_const_byte_span(constants.data(),
+                                constants.size() * sizeof(uint32_t)),
+      patches.data(), patches.size(), args, 1));
+
+  uint32_t patched_constant = 0;
+  std::memcpy(&patched_constant, reinterpret_cast<uint8_t*>(ctrl.data()) + 32,
+              sizeof(patched_constant));
+  EXPECT_EQ(patched_constant, 0x12345678u);
+  const uint64_t base = 0x2000u + 0x20u + kDdrAieAddrOffset;
+  EXPECT_EQ(ctrl[10], static_cast<uint32_t>(base & 0xFFFFFFFC));
+  EXPECT_EQ(ctrl[11], 0xABCD0000u | static_cast<uint32_t>(base >> 32));
+}
+
+TEST(PatchDynamicFieldsFromTemplateTest,
+     RewritesConstantsWithPrecomputedListAndPatchTable) {
+  std::vector<uint32_t> templ = MakeWrite32Txn(kWrite32ConstantSentinel | 1u);
+  templ.resize(12, 0);
+  templ[11] = 0xABCD0000u;
+  std::vector<uint32_t> ctrl = templ;
+  std::vector<uint32_t> patches = {/*offset=*/36u, /*arg_idx=*/0u,
+                                   /*arg_plus=*/0x20u};
+  std::vector<uint32_t> constants = {0xAAAA0000u, 0x12345678u};
+  uint64_t args[] = {0x2000u};
+
+  iree_hal_amdxdna_write32_constant_patch_list_t patch_list;
+  IREE_ASSERT_OK(iree_hal_amdxdna_build_write32_constant_patch_list(
+      iree_allocator_system(), templ.data(), templ.size(), &patch_list));
+  IREE_ASSERT_OK(iree_hal_amdxdna_patch_dynamic_fields_from_template(
+      ctrl.data(), templ.data(), ctrl.size(), &patch_list,
+      iree_make_const_byte_span(constants.data(),
+                                constants.size() * sizeof(uint32_t)),
+      patches.data(), patches.size(), args, 1));
+
+  uint32_t patched_constant = 0;
+  std::memcpy(&patched_constant, reinterpret_cast<uint8_t*>(ctrl.data()) + 32,
+              sizeof(patched_constant));
+  EXPECT_EQ(patched_constant, 0x12345678u);
+  const uint64_t base = 0x2000u + 0x20u + kDdrAieAddrOffset;
+  EXPECT_EQ(ctrl[10], static_cast<uint32_t>(base & 0xFFFFFFFC));
+  EXPECT_EQ(ctrl[11], 0xABCD0000u | static_cast<uint32_t>(base >> 32));
+  iree_hal_amdxdna_write32_constant_patch_list_deinitialize(
+      iree_allocator_system(), &patch_list);
+}
+
+TEST(PatchDynamicFieldsFromTemplateTest, RepeatedRewriteUsesTemplateBase) {
+  std::vector<uint32_t> templ(8, 0);
+  // Original BD address base is 0x40; the cached destination will be rewritten
+  // twice. The second rewrite must not add the new address onto the first
+  // patched value.
+  templ[1] = 0x40u;
+  std::vector<uint32_t> ctrl = templ;
+  std::vector<uint32_t> patches = {0u, 0u, 0u};
+  uint64_t first_args[] = {0x1000u};
+  uint64_t second_args[] = {0x2000u};
+
+  IREE_ASSERT_OK(iree_hal_amdxdna_patch_dynamic_fields_from_template(
+      ctrl.data(), templ.data(), ctrl.size(), /*constant_patches=*/nullptr,
+      iree_make_const_byte_span(nullptr, 0), patches.data(), patches.size(),
+      first_args, 1));
+  IREE_ASSERT_OK(iree_hal_amdxdna_patch_dynamic_fields_from_template(
+      ctrl.data(), templ.data(), ctrl.size(), /*constant_patches=*/nullptr,
+      iree_make_const_byte_span(nullptr, 0), patches.data(), patches.size(),
+      second_args, 1));
+
+  const uint64_t expected = 0x40u + 0x2000u + kDdrAieAddrOffset;
+  EXPECT_EQ(ctrl[1], static_cast<uint32_t>(expected & 0xFFFFFFFC));
+  EXPECT_EQ(ctrl[2], static_cast<uint32_t>(expected >> 32));
+}
+
+TEST(PatchDynamicFieldsFromTemplateTest, RejectsMalformedPatchTable) {
+  std::vector<uint32_t> templ(8, 0);
+  std::vector<uint32_t> ctrl = templ;
+  std::vector<uint32_t> patches = {0u, 0u};
+  uint64_t args[] = {0u};
+
+  iree_status_t status = iree_hal_amdxdna_patch_dynamic_fields_from_template(
+      ctrl.data(), templ.data(), ctrl.size(), /*constant_patches=*/nullptr,
+      iree_make_const_byte_span(nullptr, 0), patches.data(), patches.size(),
+      args, 1);
+  EXPECT_EQ(iree_status_code(status), IREE_STATUS_INVALID_ARGUMENT);
+  iree_status_ignore(status);
 }
 
 }  // namespace

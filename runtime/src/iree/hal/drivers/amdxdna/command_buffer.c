@@ -248,6 +248,14 @@ static iree_status_t iree_hal_amdxdna_command_buffer_execution_barrier(
     const iree_hal_memory_barrier_t* memory_barriers,
     iree_host_size_t buffer_barrier_count,
     const iree_hal_buffer_barrier_t* buffer_barriers) {
+  if (flags == IREE_HAL_EXECUTION_BARRIER_FLAG_NONE &&
+      buffer_barrier_count == 0) {
+    // The amdxdna direct command buffer only performs explicit host/device
+    // synchronization for buffer barriers. Memory-only ordering barriers have
+    // no native work to replay, and command order is already preserved by the
+    // command-buffer stream.
+    return iree_ok_status();
+  }
   iree_hal_amdxdna_command_buffer_t* command_buffer =
       iree_hal_amdxdna_command_buffer_cast(base_command_buffer);
   iree_hal_amdxdna_cmd_execution_barrier_t* cmd = NULL;

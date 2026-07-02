@@ -36,6 +36,13 @@ extern "C" {
 // cleanup/release.
 typedef iree_status_t (*iree_hal_amdxdna_async_op_fn_t)(void* user_data);
 typedef void (*iree_hal_amdxdna_async_op_cleanup_fn_t)(void* user_data);
+// Optional callback invoked on the worker when wait failure/cancellation
+// prevents op_fn from running. |status| is transferred to the callback. Return
+// IREE_STATUS_DEFERRED if the callback took ownership of signal_list completion
+// through another async mechanism; otherwise the returned status is used to
+// fail signal_list on the async queue.
+typedef iree_status_t (*iree_hal_amdxdna_async_op_failure_fn_t)(
+    void* user_data, iree_status_t status);
 
 // Creates a queue with a single worker thread. |block_pool| is borrowed and
 // must outlive the queue.
@@ -85,6 +92,18 @@ void iree_hal_amdxdna_async_queue_destroy(
 iree_status_t iree_hal_amdxdna_async_queue_enqueue(
     iree_hal_amdxdna_async_queue_t* queue, iree_hal_semaphore_list_t wait_list,
     iree_hal_semaphore_list_t signal_list, iree_hal_amdxdna_async_op_fn_t op_fn,
+    iree_hal_amdxdna_async_op_cleanup_fn_t cleanup_fn, void* user_data,
+    iree_hal_resource_t* const* retained_resources,
+    iree_host_size_t retained_resource_count);
+
+// Enqueues an op with an explicit wait-failure handler. This is used by queue
+// operations that transfer signal ownership to a backend-native completion
+// object before the worker runs; if waits fail, the backend-native object must
+// fail those signals instead of the generic async queue.
+iree_status_t iree_hal_amdxdna_async_queue_enqueue_with_failure_handler(
+    iree_hal_amdxdna_async_queue_t* queue, iree_hal_semaphore_list_t wait_list,
+    iree_hal_semaphore_list_t signal_list, iree_hal_amdxdna_async_op_fn_t op_fn,
+    iree_hal_amdxdna_async_op_failure_fn_t failure_fn,
     iree_hal_amdxdna_async_op_cleanup_fn_t cleanup_fn, void* user_data,
     iree_hal_resource_t* const* retained_resources,
     iree_host_size_t retained_resource_count);

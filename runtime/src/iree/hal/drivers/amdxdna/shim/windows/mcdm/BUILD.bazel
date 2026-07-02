@@ -1,0 +1,52 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
+load("//runtime/build_tools/bazel:cc_test.bzl", "iree_runtime_cc_test")
+
+package(
+    default_visibility = ["//visibility:public"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+iree_runtime_cc_library(
+    name = "kmt_api",
+    srcs = [
+        "context_blob.cc",
+        "kmt_api.cc",
+    ],
+    hdrs = [
+        "context_blob.h",
+        "kmt_api.h",
+    ],
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = [
+        "//runtime/src/iree/base",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "context_blob_test",
+    srcs = ["context_blob_test.cc"],
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = [
+        ":kmt_api",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "kmt_api_test",
+    srcs = ["kmt_api_test.cc"],
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = [
+        ":kmt_api",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)

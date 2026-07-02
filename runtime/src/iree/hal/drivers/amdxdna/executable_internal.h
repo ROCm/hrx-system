@@ -13,6 +13,7 @@
 #include "iree/base/api.h"
 #include "iree/base/threading/mutex.h"
 #include "iree/base/tracing.h"
+#include "iree/hal/drivers/amdxdna/direct_command_buffer_planning.h"
 #include "iree/hal/drivers/amdxdna/executable.h"
 #include "iree/hal/drivers/amdxdna/native.h"
 
@@ -42,6 +43,8 @@ typedef struct iree_hal_amdxdna_kernel_params_t {
   // code, applied by the ERT_CMD_CHAIN path.
   iree_hal_amdxdna_u32_list_t* patch_runlist;
   iree_host_size_t patch_runlist_count;
+  iree_hal_amdxdna_write32_constant_patch_list_t* constant_patch_runlist;
+  iree_host_size_t constant_patch_runlist_count;
   iree_string_view_t kernel_name;
   uint32_t n_reconfigure_runs;
   uint32_t n_pdi_loads;

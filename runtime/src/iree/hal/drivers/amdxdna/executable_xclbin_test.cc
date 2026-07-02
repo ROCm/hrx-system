@@ -11,6 +11,7 @@
 
 #include "iree/base/api.h"
 #include "iree/base/internal/flatcc/building.h"
+#include "iree/hal/drivers/amdxdna/direct_command_buffer.h"
 #include "iree/hal/drivers/amdxdna/executable.h"
 #include "iree/hal/drivers/amdxdna/executable_internal.h"
 #include "iree/schemas/amdxdna_xclbin_executable_def_builder.h"
@@ -262,6 +263,55 @@ TEST(ExecutableXclbinTest, ParsesXadxXclbinDefinitions) {
   EXPECT_EQ(ToVector(e1.pdi), pdi1);
   ASSERT_EQ(e1.asm_inst_runlist_count, 1u);
   EXPECT_EQ(ToVector(e1.asm_inst_runlist[0]), std::vector<uint32_t>({20}));
+
+  iree_hal_executable_release(base_executable);
+}
+
+TEST(ExecutableXclbinTest, LinuxCapsDoNotSelectPartialElfContext) {
+  std::vector<uint8_t> pdi(8, 0xC0);
+  std::vector<uint8_t> xclbin = BuildXclbin({pdi});
+
+  std::vector<uint8_t> executable_data;
+  IREE_ASSERT_OK(MakeXadxExecutable(
+      /*xclbins=*/{xclbin},
+      /*entry_points=*/
+      {{"xadx0",
+        /*pdi_index=*/0,
+        /*xclbin_index=*/0,
+        {{{10, 11}, {}, {0, 0, 4}}}}},
+      &executable_data));
+
+  iree_hal_executable_params_t params;
+  iree_hal_executable_params_initialize(&params);
+  params.executable_format = IREE_SV("amdxdna-xclbin-fb");
+  params.executable_data =
+      iree_make_const_byte_span(executable_data.data(), executable_data.size());
+
+  iree_hal_executable_t* base_executable = nullptr;
+  IREE_ASSERT_OK(iree_hal_amdxdna_native_executable_create(
+      /*native_device=*/nullptr, &params, iree_allocator_system(),
+      &base_executable));
+
+  iree_hal_amdxdna_native_c_device_caps_t linux_caps = {};
+  linux_caps.dispatch_models =
+      IREE_HAL_AMDXDNA_NATIVE_C_DISPATCH_MODEL_START_CU |
+      IREE_HAL_AMDXDNA_NATIVE_C_DISPATCH_MODEL_START_NPU |
+      IREE_HAL_AMDXDNA_NATIVE_C_DISPATCH_MODEL_COMMAND_CHAIN;
+  iree_hal_amdxdna_dispatch_plan_t linux_plan = {};
+  IREE_ASSERT_OK(iree_hal_amdxdna_dispatch_plan_initialize(
+      &linux_caps, base_executable, iree_hal_executable_function_from_index(0),
+      &linux_plan));
+  EXPECT_FALSE(linux_plan.use_native_partial_elf_context);
+  EXPECT_TRUE(linux_plan.use_chain_accumulation_policy);
+
+  iree_hal_amdxdna_native_c_device_caps_t partial_elf_caps = {};
+  partial_elf_caps.dispatch_models =
+      IREE_HAL_AMDXDNA_NATIVE_C_DISPATCH_MODEL_PARTIAL_ELF;
+  iree_hal_amdxdna_dispatch_plan_t partial_elf_plan = {};
+  IREE_ASSERT_OK(iree_hal_amdxdna_dispatch_plan_initialize(
+      &partial_elf_caps, base_executable,
+      iree_hal_executable_function_from_index(0), &partial_elf_plan));
+  EXPECT_TRUE(partial_elf_plan.use_native_partial_elf_context);
 
   iree_hal_executable_release(base_executable);
 }
