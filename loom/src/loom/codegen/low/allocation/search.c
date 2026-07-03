@@ -259,7 +259,8 @@ iree_status_t loom_low_allocation_search_assignment_spill_capacity(
 
 static iree_status_t loom_low_allocation_search_assignment_spill_traffic_cost(
     loom_low_allocation_search_context_t* context,
-    const loom_low_allocation_assignment_t* assignment, uint64_t* out_cost) {
+    const loom_low_allocation_assignment_t* assignment,
+    const loom_low_allocation_class_capacity_t* capacity, uint64_t* out_cost) {
   *out_cost = 0;
   loom_low_allocation_spill_plan_traffic_t traffic = {0};
   loom_value_ordinal_t value_ordinal = LOOM_VALUE_ORDINAL_INVALID;
@@ -272,15 +273,14 @@ static iree_status_t loom_low_allocation_search_assignment_spill_traffic_cost(
   }
   if (!has_cached_traffic || traffic.store_count == UINT32_MAX) {
     IREE_RETURN_IF_ERROR(loom_low_allocation_spill_plan_traffic(
-        context->module, context->body, assignment->value_id, &traffic));
+        context->module, context->body, assignment, capacity->alloc_unit_bits,
+        &traffic));
     if (has_cached_traffic) {
       context->spill_traffic_by_value_ordinal[value_ordinal] = traffic;
     }
   }
-  const uint64_t operation_count =
-      iree_math_saturating_add_u64(traffic.store_count, traffic.reload_count);
   *out_cost =
-      iree_math_saturating_mul_u64(operation_count, assignment->unit_count);
+      iree_math_saturating_add_u64(traffic.store_bytes, traffic.reload_bytes);
   return iree_ok_status();
 }
 
@@ -293,14 +293,14 @@ static bool loom_low_allocation_search_spill_victim_set_is_better(
   if (best_count == 0) {
     return true;
   }
+  if (candidate_traffic_cost != best_traffic_cost) {
+    return candidate_traffic_cost < best_traffic_cost;
+  }
   if (candidate_count != best_count) {
     return candidate_count < best_count;
   }
   if (candidate_unit_count != best_unit_count) {
     return candidate_unit_count < best_unit_count;
-  }
-  if (candidate_traffic_cost != best_traffic_cost) {
-    return candidate_traffic_cost < best_traffic_cost;
   }
   if (candidate_latest_end_point != best_latest_end_point) {
     return candidate_latest_end_point > best_latest_end_point;
@@ -390,8 +390,9 @@ static iree_status_t loom_low_allocation_search_collect_active_spill_victim_set(
     const loom_low_allocation_assignment_t* assignment =
         &context->assignment_map->assignments[assignment_index];
     bool can_spill = false;
+    loom_low_allocation_class_capacity_t spill_capacity = {0};
     IREE_RETURN_IF_ERROR(loom_low_allocation_search_assignment_spill_capacity(
-        context, assignment, &can_spill, NULL));
+        context, assignment, &can_spill, &spill_capacity));
     if (!can_spill) {
       *out_blocked = true;
       return iree_ok_status();
@@ -399,7 +400,7 @@ static iree_status_t loom_low_allocation_search_collect_active_spill_victim_set(
     uint64_t assignment_traffic_cost = 0;
     IREE_RETURN_IF_ERROR(
         loom_low_allocation_search_assignment_spill_traffic_cost(
-            context, assignment, &assignment_traffic_cost));
+            context, assignment, &spill_capacity, &assignment_traffic_cost));
     if (!interval_requires_register && assignment->end_point <= interval_end) {
       *out_blocked = true;
       return iree_ok_status();

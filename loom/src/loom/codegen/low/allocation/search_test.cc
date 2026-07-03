@@ -441,11 +441,15 @@ TEST_F(LowAllocationSearchTest, SelectsLowerTrafficActiveSpillVictimSetTie) {
       {},
       {
           /*.store_count=*/1,
+          /*.store_bytes=*/8,
           /*.reload_count=*/8,
+          /*.reload_bytes=*/64,
       },
       {
           /*.store_count=*/1,
+          /*.store_bytes=*/8,
           /*.reload_count=*/1,
+          /*.reload_bytes=*/8,
       },
   };
   loom_low_allocation_search_context_t context = {};
@@ -473,6 +477,151 @@ TEST_F(LowAllocationSearchTest, SelectsLowerTrafficActiveSpillVictimSetTie) {
   loom_module_value_ordinal_scratch_clear(module, candidate_value);
   loom_module_value_ordinal_scratch_clear(module, expensive_value);
   loom_module_value_ordinal_scratch_clear(module, cheap_value);
+  loom_module_value_ordinal_scratch_release(module);
+  loom_module_free(module);
+}
+
+TEST_F(LowAllocationSearchTest, SelectsLowerTrafficOverFewerVictims) {
+  loom_module_t* module = AllocateModule();
+  const loom_value_id_t candidate_value = DefineValue(module);
+  const loom_value_id_t expensive_value = DefineValue(module);
+  const loom_value_id_t cheap_value0 = DefineValue(module);
+  const loom_value_id_t cheap_value1 = DefineValue(module);
+  loom_module_value_ordinal_scratch_acquire(module);
+  loom_module_value_ordinal_scratch_set(module, candidate_value,
+                                        /*ordinal=*/0);
+  loom_module_value_ordinal_scratch_set(module, expensive_value,
+                                        /*ordinal=*/1);
+  loom_module_value_ordinal_scratch_set(module, cheap_value0, /*ordinal=*/2);
+  loom_module_value_ordinal_scratch_set(module, cheap_value1, /*ordinal=*/3);
+
+  const uint64_t descriptor_set_id = 19;
+  const loom_liveness_value_class_t value_class =
+      RegisterValueClass(descriptor_set_id);
+  const loom_liveness_interval_t intervals[] = {
+      Interval(candidate_value, /*start=*/4, /*end=*/8, value_class,
+               /*unit_count=*/2),
+      Interval(expensive_value, /*start=*/0, /*end=*/28, value_class,
+               /*unit_count=*/2),
+      Interval(cheap_value0, /*start=*/0, /*end=*/12, value_class,
+               /*unit_count=*/1),
+      Interval(cheap_value1, /*start=*/0, /*end=*/12, value_class,
+               /*unit_count=*/1),
+  };
+  const uint32_t interval_indices[] = {0, 1, 2, 3};
+  const loom_value_id_t value_ids[] = {candidate_value, expensive_value,
+                                       cheap_value0, cheap_value1};
+  const loom_liveness_block_info_t blocks[] = {Block(/*start_point=*/0,
+                                                     /*end_point=*/32)};
+  loom_liveness_analysis_t liveness = {};
+  liveness.blocks = blocks;
+  liveness.block_count = IREE_ARRAYSIZE(blocks);
+  liveness.intervals = intervals;
+  liveness.interval_count = IREE_ARRAYSIZE(intervals);
+  liveness.value_ids = value_ids;
+  liveness.value_count = IREE_ARRAYSIZE(value_ids);
+  liveness.value_interval_indices = interval_indices;
+
+  uint32_t unit_end_point_starts[] = {0, 2, 4, 5};
+  uint32_t unit_end_points[] = {8, 8, 28, 28, 12, 12};
+  loom_low_allocation_unit_liveness_t unit_liveness = {};
+  unit_liveness.end_point_starts_by_value_ordinal = unit_end_point_starts;
+  unit_liveness.end_points = unit_end_points;
+  unit_liveness.end_point_count = IREE_ARRAYSIZE(unit_end_points);
+
+  const loom_low_reg_class_t reg_class =
+      RegClass(/*allocatable_count=*/4, LOOM_LOW_REG_CLASS_FLAG_PHYSICAL);
+  const loom_low_descriptor_set_t descriptor_set =
+      DescriptorSet(&reg_class, descriptor_set_id);
+  const loom_low_resolved_target_t target = ResolvedTarget(&descriptor_set);
+  uint32_t max_assigned_location_end_by_reg_class[] = {4};
+  loom_low_allocation_target_constraints_t target_constraints = {};
+  target_constraints.target = &target;
+  target_constraints.max_assigned_location_end_by_reg_class =
+      max_assigned_location_end_by_reg_class;
+
+  loom_low_allocation_assignment_t assignments[] = {
+      Assignment(expensive_value, /*start=*/0, /*end=*/28, value_class,
+                 /*location_base=*/0, /*location_count=*/2,
+                 /*unit_end_point_start=*/2),
+      Assignment(cheap_value0, /*start=*/0, /*end=*/12, value_class,
+                 /*location_base=*/2, /*location_count=*/1,
+                 /*unit_end_point_start=*/4),
+      Assignment(cheap_value1, /*start=*/0, /*end=*/12, value_class,
+                 /*location_base=*/3, /*location_count=*/1,
+                 /*unit_end_point_start=*/5),
+  };
+  uint32_t assignment_indices_by_value_ordinal[] = {UINT32_MAX, 0, 1, 2};
+  loom_low_allocation_assignment_map_t assignment_map = {};
+  assignment_map.module = module;
+  assignment_map.liveness = &liveness;
+  assignment_map.assignments = assignments;
+  assignment_map.assignment_count = IREE_ARRAYSIZE(assignments);
+  assignment_map.assignment_indices_by_value_ordinal =
+      assignment_indices_by_value_ordinal;
+
+  loom_low_allocation_active_set_t active_set = {};
+  IREE_ASSERT_OK(loom_low_allocation_active_set_initialize(
+      /*assignment_capacity=*/3, /*unit_capacity=*/4, &arena_, &active_set));
+  loom_low_allocation_active_set_insert(
+      &active_set, &descriptor_set, assignments, IREE_ARRAYSIZE(assignments),
+      /*assignment_index=*/0);
+  loom_low_allocation_active_set_insert(
+      &active_set, &descriptor_set, assignments, IREE_ARRAYSIZE(assignments),
+      /*assignment_index=*/1);
+  loom_low_allocation_active_set_insert(
+      &active_set, &descriptor_set, assignments, IREE_ARRAYSIZE(assignments),
+      /*assignment_index=*/2);
+
+  loom_low_allocation_storage_lease_state_t storage_leases = {};
+  loom_low_allocation_spill_plan_traffic_t spill_traffic[] = {
+      {},
+      {
+          /*.store_count=*/1,
+          /*.store_bytes=*/8,
+          /*.reload_count=*/8,
+          /*.reload_bytes=*/64,
+      },
+      {
+          /*.store_count=*/1,
+          /*.store_bytes=*/4,
+          /*.reload_count=*/1,
+          /*.reload_bytes=*/4,
+      },
+      {
+          /*.store_count=*/1,
+          /*.store_bytes=*/4,
+          /*.reload_count=*/1,
+          /*.reload_bytes=*/4,
+      },
+  };
+  loom_low_allocation_search_context_t context = {};
+  context.module = module;
+  context.descriptor_set = &descriptor_set;
+  context.liveness = &liveness;
+  context.unit_liveness = &unit_liveness;
+  context.target_constraints = &target_constraints;
+  context.assignment_map = &assignment_map;
+  context.active_set = &active_set;
+  context.storage_leases = &storage_leases;
+  context.spill_traffic_by_value_ordinal = spill_traffic;
+
+  const loom_low_allocation_class_capacity_t capacity = Capacity(
+      /*max_units=*/4);
+  loom_low_allocation_search_spill_victim_set_t victim_set = {};
+  IREE_ASSERT_OK(loom_low_allocation_search_find_active_spill_victim_set(
+      &context, &intervals[0], &capacity,
+      /*interval_requires_register=*/false, &arena_, &victim_set));
+  ASSERT_TRUE(victim_set.found);
+  EXPECT_EQ(victim_set.location_base, 2u);
+  ASSERT_EQ(victim_set.assignment_count, 2u);
+  EXPECT_EQ(victim_set.assignment_indices[0], 1u);
+  EXPECT_EQ(victim_set.assignment_indices[1], 2u);
+
+  loom_module_value_ordinal_scratch_clear(module, candidate_value);
+  loom_module_value_ordinal_scratch_clear(module, expensive_value);
+  loom_module_value_ordinal_scratch_clear(module, cheap_value0);
+  loom_module_value_ordinal_scratch_clear(module, cheap_value1);
   loom_module_value_ordinal_scratch_release(module);
   loom_module_free(module);
 }
