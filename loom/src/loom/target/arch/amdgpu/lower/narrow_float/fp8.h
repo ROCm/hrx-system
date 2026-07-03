@@ -239,6 +239,12 @@ iree_status_t loom_amdgpu_get_fp8_decode_plan(
     loom_low_lower_context_t* context, loom_scalar_type_t element_type,
     const loom_amdgpu_fp8_decode_plan_t** out_plan);
 
+// Initializes descriptor-availability flags and format tables for
+// |element_type| without resolving low descriptors for emission.
+void loom_amdgpu_initialize_fp8_decode_plan_from_descriptor_set(
+    const loom_low_descriptor_set_t* descriptor_set,
+    loom_scalar_type_t element_type, loom_amdgpu_fp8_decode_plan_t* out_plan);
+
 // Returns the target packet and value-fact requirements missing from the
 // packed FP8-to-BF16 pair decode path.
 loom_amdgpu_fp8_packed_bf16_missing_requirements_t
