@@ -301,12 +301,6 @@ static bool loom_low_allocation_entry_preamble_op(const loom_op_t* op) {
   return loom_low_live_in_isa(op) || loom_low_resource_isa(op);
 }
 
-static bool loom_low_allocation_entry_storage_declaration_prefix_op(
-    const loom_op_t* op) {
-  return loom_low_allocation_entry_preamble_op(op) ||
-         loom_low_storage_reserve_isa(op);
-}
-
 static bool loom_low_allocation_entry_storage_prefix_op(const loom_op_t* op) {
   return loom_low_allocation_entry_preamble_op(op) ||
          loom_low_storage_reserve_isa(op) || loom_low_spill_isa(op);
@@ -322,13 +316,19 @@ static iree_status_t loom_low_allocation_set_storage_insertion_point(
   loom_builder_enter_region(builder, function_op, body);
   loom_block_t* entry_block = loom_region_entry_block(body);
 
-  const loom_op_t* insertion_anchor = NULL;
+  const loom_op_t* preamble_anchor = NULL;
+  const loom_op_t* last_storage_reserve = NULL;
   const loom_op_t* scan_op = entry_block->first_op;
-  while (scan_op &&
-         loom_low_allocation_entry_storage_declaration_prefix_op(scan_op)) {
-    insertion_anchor = scan_op;
+  while (scan_op) {
+    if (loom_low_allocation_entry_preamble_op(scan_op)) {
+      preamble_anchor = scan_op;
+    } else if (loom_low_storage_reserve_isa(scan_op)) {
+      last_storage_reserve = scan_op;
+    }
     scan_op = scan_op->next_op;
   }
+  const loom_op_t* insertion_anchor =
+      last_storage_reserve ? last_storage_reserve : preamble_anchor;
   if (insertion_anchor) {
     loom_builder_set_after(builder, insertion_anchor);
   } else if (entry_block->first_op) {

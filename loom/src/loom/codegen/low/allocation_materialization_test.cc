@@ -97,6 +97,30 @@ class LowAllocationMaterializationTest : public ::testing::Test {
     return LOOM_VALUE_ID_INVALID;
   }
 
+  loom_op_t* DefiningOp(loom_module_t* module, loom_value_id_t value_id) {
+    loom_value_t* value = loom_module_value(module, value_id);
+    if (value == nullptr) {
+      ADD_FAILURE() << "value must exist";
+      return nullptr;
+    }
+    loom_op_t* op = loom_def_op(value->def);
+    if (op == nullptr) {
+      ADD_FAILURE() << "value must be defined by an op";
+      return nullptr;
+    }
+    return op;
+  }
+
+  void ExpectBefore(const loom_op_t* before_op, const loom_op_t* after_op) {
+    ASSERT_NE(before_op, nullptr);
+    ASSERT_NE(after_op, nullptr);
+    ASSERT_EQ(before_op->parent_block, after_op->parent_block);
+    for (const loom_op_t* op = before_op; op != nullptr; op = op->next_op) {
+      if (op == after_op) return;
+    }
+    ADD_FAILURE() << "expected op order was not preserved";
+  }
+
   iree_arena_block_pool_t block_pool_;
   loom_context_t context_;
   loom_low_descriptor_registry_t descriptor_registry_ = {};
@@ -206,6 +230,97 @@ low.func.def target(@test_target) @stale_slice_plan(%wide: reg<test.i32 x4>) -> 
   EXPECT_EQ(result.materialized_spills[1].store_bytes, 0u);
   EXPECT_EQ(result.materialized_spills[1].reload_count, 0u);
   EXPECT_EQ(result.materialized_spills[1].reload_bytes, 0u);
+
+  iree_arena_deinitialize(&arena);
+}
+
+TEST_F(LowAllocationMaterializationTest, AppendsStorageAfterSplitReserves) {
+  ModulePtr module = ParseModule(R"(
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @split_storage_declarations(
+    %a: reg<test.i32>, %b: reg<test.i32>, %c: reg<test.i32>)
+    -> (reg<test.i32>) {
+  %existing0 = low.storage.reserve {byte_alignment = 4, byte_length = 4} : low.storage<private>
+  %seed = low.op<test.add.i32>(%a, %b) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  %existing1 = low.storage.reserve {byte_alignment = 4, byte_length = 4} : low.storage<private>
+  %ab = low.op<test.add.i32>(%seed, %c) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  %out = low.op<test.add.i32>(%ab, %seed) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  low.return %out : reg<test.i32>
+}
+)");
+  loom_op_t* function_op =
+      FindLowFunction(module.get(), IREE_SV("split_storage_declarations"));
+  const loom_value_id_t existing0 =
+      FindValueByName(module.get(), IREE_SV("existing0"));
+  const loom_value_id_t existing1 =
+      FindValueByName(module.get(), IREE_SV("existing1"));
+  const loom_value_id_t seed = FindValueByName(module.get(), IREE_SV("seed"));
+  const loom_value_id_t ab = FindValueByName(module.get(), IREE_SV("ab"));
+  const loom_liveness_value_class_t register_class = {
+      /*.type_kind=*/LOOM_TYPE_REGISTER,
+  };
+  const loom_low_allocation_assignment_t assignments[] = {
+      {
+          /*.value_id=*/ab,
+          /*.value_class=*/register_class,
+          /*.descriptor_reg_class_id=*/0,
+          /*.start_point=*/4,
+          /*.end_point=*/6,
+          /*.unit_count=*/1,
+          /*.location_kind=*/LOOM_LOW_ALLOCATION_LOCATION_SPILL_SLOT,
+          /*.location_base=*/0,
+          /*.location_count=*/1,
+          /*.unit_end_point_start=*/0,
+      },
+  };
+  const loom_low_allocation_spill_plan_t spill_plans[] = {
+      {
+          /*.value_id=*/ab,
+          /*.assignment_index=*/0,
+          /*.slot_index=*/0,
+          /*.slot_space=*/LOOM_LOW_SPILL_SLOT_SPACE_PRIVATE,
+          /*.byte_size=*/4,
+          /*.byte_alignment=*/4,
+          /*.store_count=*/1,
+          /*.reload_count=*/1,
+      },
+  };
+  loom_low_allocation_table_t table = {};
+  table.module = module.get();
+  table.function_op = function_op;
+  table.assignments = assignments;
+  table.assignment_count = IREE_ARRAYSIZE(assignments);
+  table.spill_plans = spill_plans;
+  table.spill_plan_count = IREE_ARRAYSIZE(spill_plans);
+  iree_arena_allocator_t arena;
+  iree_arena_initialize(&block_pool_, &arena);
+  loom_low_allocation_materialization_result_t result = {};
+  loom_low_allocation_materialization_options_t options = {};
+  options.has_supported_storage_spaces = true;
+  options.supported_storage_spaces = LOOM_LOW_STORAGE_SPACE_SET_PRIVATE;
+  IREE_ASSERT_OK(loom_low_allocation_materialize_spills(
+      module.get(), &table, &options, &arena, &result));
+
+  EXPECT_EQ(result.error_count, 0u);
+  EXPECT_EQ(result.storage_count, 1u);
+  EXPECT_EQ(result.storage_bytes, 4u);
+  EXPECT_EQ(result.spill_count, 1u);
+  EXPECT_EQ(result.reload_count, 1u);
+
+  const loom_value_id_t generated_storage = FindValueByName(
+      module.get(), IREE_SV("split_storage_declarations_spill_storage_2"));
+  const loom_op_t* existing0_op = DefiningOp(module.get(), existing0);
+  const loom_op_t* seed_op = DefiningOp(module.get(), seed);
+  const loom_op_t* existing1_op = DefiningOp(module.get(), existing1);
+  const loom_op_t* generated_storage_op =
+      DefiningOp(module.get(), generated_storage);
+  const loom_op_t* ab_op = DefiningOp(module.get(), ab);
+
+  ExpectBefore(existing0_op, seed_op);
+  ExpectBefore(seed_op, existing1_op);
+  ExpectBefore(existing1_op, generated_storage_op);
+  ExpectBefore(generated_storage_op, ab_op);
 
   iree_arena_deinitialize(&arena);
 }
