@@ -123,6 +123,7 @@ static iree_status_t loom_low_schedule_verify_memory_access_table(
   }
   for (iree_host_size_t i = 0; i < table.count; ++i) {
     const loom_low_memory_access_record_t* record = &table.values[i];
+    IREE_ASSERT(record->op != NULL);
     IREE_ASSERT(record->position.block_index !=
                 LOOM_BLOCK_REGION_INDEX_INVALID);
     IREE_ASSERT(record->position.block_index < body->block_count);

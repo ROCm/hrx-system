@@ -120,6 +120,8 @@ typedef struct loom_low_memory_access_record_t {
   // Low function position whose descriptor memory effect is refined by
   // |summary|.
   loom_low_memory_access_position_t position;
+  // Low op whose descriptor memory effect is refined by |summary|.
+  const loom_op_t* op;
   // Source-derived memory access summary for the recorded low op position.
   loom_low_memory_access_summary_t summary;
   // Inline interval storage borrowed by |summary| when interval precision is
