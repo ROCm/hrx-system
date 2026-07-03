@@ -836,6 +836,18 @@ static uint64_t loom_low_target_legalize_report_descriptor_id(
              : UINT64_MAX;
 }
 
+static iree_string_view_t loom_low_target_legalize_report_descriptor_key(
+    const loom_low_target_legalize_function_state_t* state,
+    const loom_target_contract_query_result_t* query_result) {
+  const loom_low_descriptor_t* descriptor = query_result->selected_descriptor;
+  if (descriptor == NULL ||
+      descriptor->key_string_offset == LOOM_LOW_STRING_OFFSET_NONE) {
+    return iree_string_view_empty();
+  }
+  return loom_low_descriptor_set_string(state->descriptor_set,
+                                        descriptor->key_string_offset);
+}
+
 static bool loom_low_target_legalize_report_wants_rows(
     const loom_low_target_legalize_function_state_t* state) {
   return loom_target_compile_report_wants_details(
@@ -957,6 +969,8 @@ static iree_status_t loom_low_target_legalize_record_report_row(
       .diagnostic_index = query_result->diagnostic_index,
       .descriptor_id =
           loom_low_target_legalize_report_descriptor_id(query_result),
+      .descriptor_key =
+          loom_low_target_legalize_report_descriptor_key(state, query_result),
       .source_rejection_bits = query_result->source_rejection_bits,
       .source_rejection_detail = query_result->source_rejection_detail,
       .target_rejection_bits = query_result->target_rejection_bits,

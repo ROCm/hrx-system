@@ -1417,6 +1417,8 @@ typedef struct loom_target_compile_report_legalization_row_t {
   uint16_t diagnostic_index;
   // Low descriptor stable id selected by the accepted rule, or UINT64_MAX.
   uint64_t descriptor_id;
+  // Low descriptor key selected by the accepted rule, or empty.
+  iree_string_view_t descriptor_key;
   // Compact target-independent rejection flags.
   uint32_t source_rejection_bits;
   // Optional target-independent rejection detail enum.

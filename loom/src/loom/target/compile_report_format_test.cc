@@ -1311,7 +1311,8 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
           /*.rule_set_index=*/3,
           /*.rule_index=*/4,
           /*.diagnostic_index=*/UINT16_MAX,
-          /*.descriptor_id=*/UINT64_MAX,
+          /*.descriptor_id=*/42,
+          /*.descriptor_key=*/IREE_SVL("test.legalized.descriptor"),
           /*.source_rejection_bits=*/0x1,
           /*.source_rejection_detail=*/kTestSourceRejectionDetail,
           /*.target_rejection_bits=*/0x2,
@@ -2069,6 +2070,11 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
             IREE_STRING_VIEW_NPOS);
   EXPECT_NE(iree_string_view_find(output, IREE_SV("strategy=reference"), 0),
             IREE_STRING_VIEW_NPOS);
+  EXPECT_NE(iree_string_view_find(output,
+                                  IREE_SV("descriptor=42 descriptor_key=test."
+                                          "legalized.descriptor"),
+                                  0),
+            IREE_STRING_VIEW_NPOS);
   EXPECT_NE(
       iree_string_view_find(output, IREE_SV("source_rejection_detail=4"), 0),
       IREE_STRING_VIEW_NPOS);
@@ -2689,6 +2695,12 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
       IREE_STRING_VIEW_NPOS);
   EXPECT_NE(iree_string_view_find(output,
                                   IREE_SV("\"source_rejection_detail\":4"), 0),
+            IREE_STRING_VIEW_NPOS);
+  EXPECT_NE(iree_string_view_find(
+                output,
+                IREE_SV("\"descriptor_id\":42,\"descriptor_key\":\"test."
+                        "legalized.descriptor\""),
+                0),
             IREE_STRING_VIEW_NPOS);
   EXPECT_NE(iree_string_view_find(output,
                                   IREE_SV("\"created_op_count\":6,"
