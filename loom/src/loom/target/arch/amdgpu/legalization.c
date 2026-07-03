@@ -1203,7 +1203,13 @@ static bool loom_amdgpu_fragment_epilogue_plan_needs_physical_loop(
   switch (plan->payload_form) {
     case LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_STORE_NARROW_F32_TO_BF16:
       if (plan->epilogue_strategy !=
-          LOOM_AMDGPU_FRAGMENT_MEMORY_EPILOGUE_STRATEGY_SCALAR_B16_STORE) {
+              LOOM_AMDGPU_FRAGMENT_MEMORY_EPILOGUE_STRATEGY_SCALAR_B16_STORE &&
+          plan->epilogue_strategy !=
+              LOOM_AMDGPU_FRAGMENT_MEMORY_EPILOGUE_STRATEGY_PACKED_B16_STORE &&
+          plan->epilogue_strategy !=
+              LOOM_AMDGPU_FRAGMENT_MEMORY_EPILOGUE_STRATEGY_DS_PACKED_B16_STORE &&
+          plan->epilogue_strategy !=
+              LOOM_AMDGPU_FRAGMENT_MEMORY_EPILOGUE_STRATEGY_DPP_PACKED_B16_STORE) {
         return false;
       }
       break;
@@ -1224,13 +1230,67 @@ static bool loom_amdgpu_fragment_epilogue_plan_needs_physical_loop(
 
 enum {
   LOOM_AMDGPU_FRAGMENT_EPILOGUE_LOOP_MIN_REGISTER_ITERATIONS = 8,
+  LOOM_AMDGPU_PACKED_FRAGMENT_EPILOGUE_LOOP_MIN_GROUP_COUNT = 4,
+  LOOM_AMDGPU_PACKED_FRAGMENT_EPILOGUE_LOOP_MIN_REGISTER_ITERATIONS = 32,
 };
 
 static bool loom_amdgpu_fragment_epilogue_group_wants_physical_loop(
     const loom_amdgpu_fragment_memory_plan_t* plan,
     iree_host_size_t group_count) {
-  return plan->register_count * group_count >=
+  const iree_host_size_t register_iterations =
+      plan->register_count * group_count;
+  if (plan->payload_form ==
+      LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_STORE_NARROW_F32_TO_BF16) {
+    switch (plan->epilogue_strategy) {
+      case LOOM_AMDGPU_FRAGMENT_MEMORY_EPILOGUE_STRATEGY_SCALAR_B16_STORE:
+        return register_iterations >=
+               LOOM_AMDGPU_FRAGMENT_EPILOGUE_LOOP_MIN_REGISTER_ITERATIONS;
+      case LOOM_AMDGPU_FRAGMENT_MEMORY_EPILOGUE_STRATEGY_PACKED_B16_STORE:
+      case LOOM_AMDGPU_FRAGMENT_MEMORY_EPILOGUE_STRATEGY_DS_PACKED_B16_STORE:
+      case LOOM_AMDGPU_FRAGMENT_MEMORY_EPILOGUE_STRATEGY_DPP_PACKED_B16_STORE:
+        return group_count >=
+                   LOOM_AMDGPU_PACKED_FRAGMENT_EPILOGUE_LOOP_MIN_GROUP_COUNT &&
+               register_iterations >=
+                   LOOM_AMDGPU_PACKED_FRAGMENT_EPILOGUE_LOOP_MIN_REGISTER_ITERATIONS;
+      case LOOM_AMDGPU_FRAGMENT_MEMORY_EPILOGUE_STRATEGY_NONE:
+      default:
+        return false;
+    }
+  }
+  return register_iterations >=
          LOOM_AMDGPU_FRAGMENT_EPILOGUE_LOOP_MIN_REGISTER_ITERATIONS;
+}
+
+static bool loom_amdgpu_fragment_epilogue_strategy_is_packed_b16(
+    loom_amdgpu_fragment_memory_epilogue_strategy_t strategy) {
+  switch (strategy) {
+    case LOOM_AMDGPU_FRAGMENT_MEMORY_EPILOGUE_STRATEGY_PACKED_B16_STORE:
+    case LOOM_AMDGPU_FRAGMENT_MEMORY_EPILOGUE_STRATEGY_DS_PACKED_B16_STORE:
+    case LOOM_AMDGPU_FRAGMENT_MEMORY_EPILOGUE_STRATEGY_DPP_PACKED_B16_STORE:
+      return true;
+    case LOOM_AMDGPU_FRAGMENT_MEMORY_EPILOGUE_STRATEGY_NONE:
+    case LOOM_AMDGPU_FRAGMENT_MEMORY_EPILOGUE_STRATEGY_SCALAR_B16_STORE:
+    default:
+      return false;
+  }
+}
+
+static bool loom_amdgpu_fragment_store_group_has_decomposable_payloads(
+    const loom_module_t* module, loom_op_t* const* group_ops,
+    iree_host_size_t group_count) {
+  for (iree_host_size_t i = 0; i < group_count; ++i) {
+    const loom_value_t* payload = loom_module_value(
+        module, loom_vector_fragment_store_value(group_ops[i]));
+    if (payload == NULL || loom_value_is_block_arg(payload)) {
+      return false;
+    }
+    const loom_op_t* defining_op = loom_value_def_op(payload);
+    if (defining_op == NULL ||
+        !iree_any_bit_set(defining_op->traits, LOOM_TRAIT_DECOMPOSABLE)) {
+      return false;
+    }
+  }
+  return true;
 }
 
 typedef struct loom_amdgpu_fragment_store_rectangle_t {
@@ -1568,6 +1628,12 @@ static iree_status_t loom_amdgpu_legalize_result_fragment_store_epilogue_loop(
       context, op, &plan, &group_ops, &group_count));
   if (!loom_amdgpu_fragment_epilogue_group_wants_physical_loop(&plan,
                                                                group_count)) {
+    return iree_ok_status();
+  }
+  if (loom_amdgpu_fragment_epilogue_strategy_is_packed_b16(
+          plan.epilogue_strategy) &&
+      !loom_amdgpu_fragment_store_group_has_decomposable_payloads(
+          context->module, group_ops, group_count)) {
     return iree_ok_status();
   }
   bool rewritten = false;

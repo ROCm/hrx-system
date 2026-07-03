@@ -1787,3 +1787,101 @@ low.kernel.def target(@target) workgroup_size(32, 1, 1) @report_select_fptrunc_b
   s_mov_b64_exec %76
   return
 }
+
+// ====
+// RUN: pass target-legalize{mode=final},dce,canonicalize
+
+amdgpu.target<gfx1100> @target
+
+kernel.def target(@target) @report_large_bf16_result_epilogue_group() {
+  %one = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+} launch(%payload0: vector<8xf32>, %payload1: vector<8xf32>, %payload2: vector<8xf32>, %payload3: vector<8xf32>, %output: buffer) {
+  %base = index.constant 0 : offset
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %output_global = buffer.assume.memory_space<global> %output : buffer
+  %output_aligned = buffer.assume.alignment %output_global {minimum_alignment = 16} : buffer
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<16x64xbf16, #dense>
+  %epilogue0 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %payload0, %payload0 : vector<8xf32>
+  %epilogue1 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %payload1, %payload1 : vector<8xf32>
+  %epilogue2 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %payload2, %payload2 : vector<8xf32>
+  %epilogue3 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %payload3, %payload3 : vector<8xf32>
+  vector.fragment.store<result> %epilogue0, %output_view[0, 0] shape [%m, %n] : vector<8xf32>, view<16x64xbf16, #dense>
+  vector.fragment.store<result> %epilogue1, %output_view[0, 16] shape [%m, %n] : vector<8xf32>, view<16x64xbf16, #dense>
+  vector.fragment.store<result> %epilogue2, %output_view[0, 32] shape [%m, %n] : vector<8xf32>, view<16x64xbf16, #dense>
+  vector.fragment.store<result> %epilogue3, %output_view[0, 48] shape [%m, %n] : vector<8xf32>, view<16x64xbf16, #dense>
+  kernel.return
+}
+
+// ----
+amdgpu.target<gfx1100> @target
+
+kernel.def target(@target) @report_large_bf16_result_epilogue_group() {
+  %one = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+} launch(%payload0: vector<8xf32>, %payload1: vector<8xf32>, %payload2: vector<8xf32>, %payload3: vector<8xf32>, %output: buffer) {
+  %base = index.constant 0 : offset
+  %output_global = buffer.assume.memory_space<global> %output : buffer
+  %output_aligned = buffer.assume.alignment %output_global {minimum_alignment = 16} : buffer
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<16x64xbf16, #dense>
+  %17 = index.constant 0 : index
+  %18 = index.constant 8 : index
+  %19 = index.constant 1 : index
+  scf.for %20 = [%17 to %18 step %19] unroll {
+    %21 = kernel.subgroup.lane.id : index
+    %22 = vector.extract %payload0[%20] : vector<8xf32> -> f32
+    %23 = vector.extract %payload0[%20] : vector<8xf32> -> f32
+    %24 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %22, %23 : f32
+    %25 = scalar.fptrunc %24 : f32 to bf16
+    %90 = index.constant 15 : index
+    %91 = index.andi %21, %90 : index
+    %88 = index.constant 4 : index
+    %89 = index.shrui %21, %88 : index
+    %30 = index.constant 2 : index
+    %87 = index.madd %20, %30, %89 : index
+    view.store %25, %output_view[%87, %91] : bf16, view<16x64xbf16, #dense>
+    %33 = vector.extract %payload1[%20] : vector<8xf32> -> f32
+    %34 = vector.extract %payload1[%20] : vector<8xf32> -> f32
+    %35 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %33, %34 : f32
+    %36 = scalar.fptrunc %35 : f32 to bf16
+    %85 = index.constant 15 : index
+    %86 = index.andi %21, %85 : index
+    %83 = index.constant 4 : index
+    %84 = index.shrui %21, %83 : index
+    %41 = index.constant 2 : index
+    %82 = index.madd %20, %41, %84 : index
+    %44 = index.constant 16 : index
+    %45 = index.add %44, %86 : index
+    view.store %36, %output_view[%82, %45] : bf16, view<16x64xbf16, #dense>
+    %46 = vector.extract %payload2[%20] : vector<8xf32> -> f32
+    %47 = vector.extract %payload2[%20] : vector<8xf32> -> f32
+    %48 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %46, %47 : f32
+    %49 = scalar.fptrunc %48 : f32 to bf16
+    %80 = index.constant 15 : index
+    %81 = index.andi %21, %80 : index
+    %78 = index.constant 4 : index
+    %79 = index.shrui %21, %78 : index
+    %54 = index.constant 2 : index
+    %77 = index.madd %20, %54, %79 : index
+    %57 = index.constant 32 : index
+    %58 = index.add %57, %81 : index
+    view.store %49, %output_view[%77, %58] : bf16, view<16x64xbf16, #dense>
+    %59 = vector.extract %payload3[%20] : vector<8xf32> -> f32
+    %60 = vector.extract %payload3[%20] : vector<8xf32> -> f32
+    %61 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %59, %60 : f32
+    %62 = scalar.fptrunc %61 : f32 to bf16
+    %75 = index.constant 15 : index
+    %76 = index.andi %21, %75 : index
+    %73 = index.constant 4 : index
+    %74 = index.shrui %21, %73 : index
+    %67 = index.constant 2 : index
+    %72 = index.madd %20, %67, %74 : index
+    %70 = index.constant 48 : index
+    %71 = index.add %70, %76 : index
+    view.store %62, %output_view[%72, %71] : bf16, view<16x64xbf16, #dense>
+  }
+  kernel.return
+}

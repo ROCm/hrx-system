@@ -1004,7 +1004,7 @@ static bool loom_amdgpu_fragment_memory_payload_matches(
           loom_type_element_type(payload_type);
       if (!loom_amdgpu_fragment_memory_can_narrow_result_store(
               operation_kind, role_layout->role, expected_element_type,
-              payload_element_type)) {
+              loom_type_element_type(view_type))) {
         if (!loom_amdgpu_fragment_memory_can_extend_result_store(
                 operation_kind, role_layout->role, expected_element_type,
                 payload_element_type)) {
@@ -1018,6 +1018,10 @@ static bool loom_amdgpu_fragment_memory_payload_matches(
                    (uint32_t)role_layout->register_count *
                        (uint32_t)role_layout->element_bit_count &&
                register_count == role_layout->register_count;
+      }
+      if (payload_element_type == expected_element_type) {
+        return loom_amdgpu_fragment_memory_payload_matches_role_storage(
+            payload_type, expected_element_type, role_layout);
       }
       uint32_t payload_bit_count = 0;
       uint32_t register_count = 0;
