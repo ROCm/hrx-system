@@ -53,8 +53,12 @@ typedef struct loom_low_allocation_materialized_spill_t {
   uint64_t byte_alignment;
   // Number of low.spill stores inserted for this value.
   uint64_t store_count;
+  // Byte traffic from low.spill stores inserted for this value.
+  uint64_t store_bytes;
   // Number of low.reload ops inserted for this value.
   uint64_t reload_count;
+  // Byte traffic from low.reload ops inserted for this value.
+  uint64_t reload_bytes;
 } loom_low_allocation_materialized_spill_t;
 
 typedef struct loom_low_allocation_materialized_spill_vec_t {

@@ -189,7 +189,7 @@ low.func.def target(@test_target) @stale_slice_plan(%wide: reg<test.i32 x4>) -> 
   EXPECT_EQ(result.spill_count, 1u);
   EXPECT_EQ(result.spill_bytes, 16u);
   EXPECT_EQ(result.reload_count, 1u);
-  EXPECT_EQ(result.reload_bytes, 16u);
+  EXPECT_EQ(result.reload_bytes, 4u);
   ASSERT_EQ(result.materialized_spill_count, 2u);
   ASSERT_NE(result.materialized_spills, nullptr);
   EXPECT_EQ(result.materialized_spills[0].value_id, wide);
@@ -197,11 +197,15 @@ low.func.def target(@test_target) @stale_slice_plan(%wide: reg<test.i32 x4>) -> 
       result.materialized_spills[0].flags,
       LOOM_LOW_ALLOCATION_MATERIALIZED_SPILL_FLAG_VALUE_WAS_BLOCK_ARGUMENT));
   EXPECT_EQ(result.materialized_spills[0].store_count, 1u);
+  EXPECT_EQ(result.materialized_spills[0].store_bytes, 16u);
   EXPECT_EQ(result.materialized_spills[0].reload_count, 1u);
+  EXPECT_EQ(result.materialized_spills[0].reload_bytes, 4u);
   EXPECT_EQ(result.materialized_spills[1].value_id, lane);
   EXPECT_EQ(result.materialized_spills[1].flags, 0u);
   EXPECT_EQ(result.materialized_spills[1].store_count, 0u);
+  EXPECT_EQ(result.materialized_spills[1].store_bytes, 0u);
   EXPECT_EQ(result.materialized_spills[1].reload_count, 0u);
+  EXPECT_EQ(result.materialized_spills[1].reload_bytes, 0u);
 
   iree_arena_deinitialize(&arena);
 }

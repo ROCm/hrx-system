@@ -422,7 +422,9 @@ TEST(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
           /*.byte_size=*/64,
           /*.byte_alignment=*/16,
           /*.store_count=*/5,
+          /*.store_bytes=*/320,
           /*.reload_count=*/6,
+          /*.reload_bytes=*/384,
       },
       {
           /*.value_id=*/4,
@@ -435,7 +437,9 @@ TEST(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
           /*.byte_size=*/4,
           /*.byte_alignment=*/4,
           /*.store_count=*/2,
+          /*.store_bytes=*/8,
           /*.reload_count=*/3,
+          /*.reload_bytes=*/12,
       },
   };
   loom_low_allocation_materialized_spill_vec_t materialized_spill_vec = {
@@ -1030,7 +1034,9 @@ TEST(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
       iree_string_view_equal(spill_rows[0].slot_space, IREE_SV("stack")));
   EXPECT_EQ(spill_rows[0].byte_size, 16u);
   EXPECT_EQ(spill_rows[0].store_count, 1u);
+  EXPECT_EQ(spill_rows[0].store_bytes, 16u);
   EXPECT_EQ(spill_rows[0].reload_count, 2u);
+  EXPECT_EQ(spill_rows[0].reload_bytes, 32u);
   EXPECT_EQ(spill_rows[0].origin_kind,
             LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_UNKNOWN);
   EXPECT_EQ(spill_rows[1].kind, LOOM_TARGET_COMPILE_REPORT_SPILL_ROW_PLANNED);
@@ -1049,7 +1055,9 @@ TEST(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
       iree_string_view_equal(spill_rows[2].slot_space, IREE_SV("private")));
   EXPECT_EQ(spill_rows[2].byte_size, 64u);
   EXPECT_EQ(spill_rows[2].store_count, 5u);
+  EXPECT_EQ(spill_rows[2].store_bytes, 320u);
   EXPECT_EQ(spill_rows[2].reload_count, 6u);
+  EXPECT_EQ(spill_rows[2].reload_bytes, 384u);
   EXPECT_EQ(spill_rows[2].origin_kind,
             LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_GLOBAL_MEMORY);
   EXPECT_TRUE(iree_string_view_equal(spill_rows[2].origin_operation_name,
@@ -1065,7 +1073,9 @@ TEST(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
   EXPECT_EQ(spill_rows[3].slot_index, 8u);
   EXPECT_EQ(spill_rows[3].byte_size, 4u);
   EXPECT_EQ(spill_rows[3].store_count, 2u);
+  EXPECT_EQ(spill_rows[3].store_bytes, 8u);
   EXPECT_EQ(spill_rows[3].reload_count, 3u);
+  EXPECT_EQ(spill_rows[3].reload_bytes, 12u);
   EXPECT_EQ(report.allocation_failure_rows.count, 1u);
   ASSERT_NE(report.allocation_failure_rows.head, nullptr);
   const auto* allocation_failure_rows =
