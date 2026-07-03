@@ -200,7 +200,11 @@ iree_status_t iree_hal_streaming_stream_create(
   iree_atomic_ref_count_init(&stream->ref_count);
   stream->context = context;
   stream->flags = flags;
+  stream->synchronization_policy =
+      IREE_HAL_STREAMING_SYNCHRONIZATION_POLICY_AUTO;
   stream->priority = priority;
+  stream->cu_mask_count = 0;
+  stream->cu_mask = NULL;
   stream->stream_id = 0;
   stream->command_buffer = NULL;
   stream->pending_launch_count = 0;
@@ -272,6 +276,8 @@ static void iree_hal_streaming_stream_destroy(
 
   // Release command buffer.
   iree_hal_command_buffer_release(stream->command_buffer);
+
+  iree_allocator_free(stream->host_allocator, stream->cu_mask);
 
   if (stream->capture_graph_owned) {
     iree_hal_streaming_graph_release(stream->capture_graph);

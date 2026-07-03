@@ -223,11 +223,12 @@ iree_status_t iree_hal_streaming_device_set_primary_context_flags(
                          "invalid device ordinal %" PRIhsz, device_ordinal));
   }
 
-  // Update the primary context flags.
+  iree_slim_mutex_lock(&device->primary_context_mutex);
   device->primary_context_flags = *flags;
-
-  // If the primary context exists, we might need to update it.
-  // For now, we just store the flags for new contexts.
+  if (device->primary_context) {
+    device->primary_context->flags = *flags;
+  }
+  iree_slim_mutex_unlock(&device->primary_context_mutex);
 
   IREE_TRACE_ZONE_END(z0);
   return iree_ok_status();
@@ -247,16 +248,15 @@ iree_status_t iree_hal_streaming_device_primary_context_state(
                          "invalid device ordinal %" PRIhsz, device_ordinal));
   }
 
+  iree_slim_mutex_lock(&device->primary_context_mutex);
   if (out_flags) {
-    *out_flags = device->primary_context_flags;
+    *out_flags = device->primary_context ? device->primary_context->flags
+                                         : device->primary_context_flags;
   }
-
-  // Context is active if reference count > 0.
   if (out_active) {
-    iree_slim_mutex_lock(&device->primary_context_mutex);
-    *out_active = (device->primary_context_ref_count > 0);
-    iree_slim_mutex_unlock(&device->primary_context_mutex);
+    *out_active = device->primary_context != NULL;
   }
+  iree_slim_mutex_unlock(&device->primary_context_mutex);
 
   IREE_TRACE_ZONE_END(z0);
   return iree_ok_status();

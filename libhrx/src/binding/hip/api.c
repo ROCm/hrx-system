@@ -2937,7 +2937,7 @@ HIPAPI hipError_t hipDevicePrimaryCtxSetFlags(hipDevice_t dev,
 // State information:
 // - flags: Current context creation flags.
 // - active: 1 if context is active, 0 if inactive.
-// - Context is active if reference count > 0.
+// - Context is active while the device owns a live primary context.
 //
 // Multi-GPU: Queries state of specified device's primary context.
 //
