@@ -270,6 +270,7 @@ def _s_mul_i32_overlay() -> AmdgpuDescriptorOverlay:
                 source_operand="rhs",
             ),
         ),
+        constraints=_REMATERIALIZABLE_RESULT_CONSTRAINTS,
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     )
 
@@ -294,6 +295,7 @@ def _s_mul_i32_rhs_inline_overlay() -> AmdgpuDescriptorOverlay:
         ),
         immediate_fields=("SSRC1",),
         immediates=(_SOURCE_INLINE_U32_IMMEDIATE,),
+        constraints=_REMATERIALIZABLE_RESULT_CONSTRAINTS,
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     )
 
@@ -362,6 +364,7 @@ def _s_mul_hi_u32_overlay() -> AmdgpuDescriptorOverlay:
             AmdgpuOperandOverlay("SSRC0", _sgpr_operand("lhs")),
             AmdgpuOperandOverlay("SSRC1", _sgpr_operand("rhs")),
         ),
+        constraints=_REMATERIALIZABLE_RESULT_CONSTRAINTS,
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     )
 
