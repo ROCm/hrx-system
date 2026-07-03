@@ -637,6 +637,9 @@ static void loom_target_compile_report_accumulate_wait_plan(
   target->planned_action_count += source->planned_action_count;
   target->full_drain_count += source->full_drain_count;
   target->partial_wait_count += source->partial_wait_count;
+  target->drained_count += source->drained_count;
+  target->max_drained_count =
+      iree_max(target->max_drained_count, source->max_drained_count);
   target->max_outstanding_before =
       iree_max(target->max_outstanding_before, source->max_outstanding_before);
   target->max_full_drain_outstanding_before =
