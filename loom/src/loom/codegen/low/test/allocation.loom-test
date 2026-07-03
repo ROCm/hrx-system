@@ -241,6 +241,24 @@ low.func.def target(@test_target) @placement_affinity_rejected(%state: reg<test.
 
 // ====
 
+// RUN: emit low-allocation-json @structured_for_storage_affinity diagnostics=placement-decisions output=none
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @structured_for_storage_affinity(%lo: reg<test.i32>, %hi: reg<test.i32>, %step: reg<test.i32>, %init: reg<test.i32>) -> (reg<test.i32>) {
+  // REMARK@+1: BACKEND/043 {function_name="structured_for_storage_affinity", op_name="low.scf.for", source_value_name="init", result_value_name="acc", value_class="test.i32", placement_cause="low.scf.for", decision="accepted", reason_key="assigned-locations-match"}
+  %result = low.scf.for [%lo to %hi step %step] iter_args(%init: reg<test.i32>) -> (reg<test.i32>) do(%iv: reg<test.i32>, %acc: reg<test.i32>) {
+    // REMARK@+1: BACKEND/043 {function_name="structured_for_storage_affinity", op_name="low.copy", source_value_name="acc", result_value_name="next", value_class="test.i32", placement_cause="low.copy", decision="accepted", reason_key="assigned-locations-match"}
+    %next = low.copy %acc : reg<test.i32> -> reg<test.i32>
+    // REMARK@+2: BACKEND/043 {function_name="structured_for_storage_affinity", op_name="low.scf.yield", source_value_name="next", result_value_name="acc", value_class="test.i32", placement_cause="low.scf.yield", decision="accepted", reason_key="assigned-locations-match"}
+    // REMARK@+1: BACKEND/043 {function_name="structured_for_storage_affinity", op_name="low.scf.yield", source_value_name="next", result_value_name="result", value_class="test.i32", placement_cause="low.scf.yield", decision="accepted", reason_key="assigned-locations-match"}
+    low.scf.yield %next : reg<test.i32>
+  }
+  low.return %result : reg<test.i32>
+}
+
+// ====
+
 // RUN: emit low-allocation-json @tied_source_uses_extended_endpoint fixed=%future_source0:target_id:10:1 fixed=%future_source1:target_id:11:1 fixed=%future:target_id:0:2
 
 test.target<low_core> @test_target

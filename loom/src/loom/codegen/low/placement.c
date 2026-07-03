@@ -44,6 +44,8 @@ bool loom_low_placement_cause_can_alias(loom_low_placement_cause_t cause) {
     case LOOM_LOW_PLACEMENT_CAUSE_LOW_SLICE:
     case LOOM_LOW_PLACEMENT_CAUSE_LOW_CONCAT:
     case LOOM_LOW_PLACEMENT_CAUSE_LOW_BRANCH:
+    case LOOM_LOW_PLACEMENT_CAUSE_LOW_SCF_FOR:
+    case LOOM_LOW_PLACEMENT_CAUSE_LOW_SCF_YIELD:
       return true;
     default:
       return false;
@@ -181,6 +183,10 @@ loom_low_placement_cause_from_storage_relation(
       return LOOM_LOW_PLACEMENT_CAUSE_LOW_CONCAT;
     case LOOM_LOW_STORAGE_RELATION_CAUSE_LOW_BRANCH:
       return LOOM_LOW_PLACEMENT_CAUSE_LOW_BRANCH;
+    case LOOM_LOW_STORAGE_RELATION_CAUSE_LOW_SCF_FOR:
+      return LOOM_LOW_PLACEMENT_CAUSE_LOW_SCF_FOR;
+    case LOOM_LOW_STORAGE_RELATION_CAUSE_LOW_SCF_YIELD:
+      return LOOM_LOW_PLACEMENT_CAUSE_LOW_SCF_YIELD;
     case LOOM_LOW_STORAGE_RELATION_CAUSE_UNKNOWN:
       return LOOM_LOW_PLACEMENT_CAUSE_UNKNOWN;
   }

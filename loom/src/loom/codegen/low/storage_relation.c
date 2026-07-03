@@ -51,6 +51,20 @@ uint16_t loom_low_storage_relation_count(const loom_module_t* module,
     case LOOM_OP_LOW_BR:
       count += loom_low_br_args(op).count;
       break;
+    case LOOM_OP_LOW_SCF_YIELD: {
+      IREE_ASSERT(op->parent_op != NULL,
+                  "verified low.scf.yield must have a structured parent");
+      loom_value_slice_t values = loom_low_scf_yield_values(op);
+      if (loom_low_scf_for_isa(op->parent_op)) {
+        count += values.count * 2;
+      } else {
+        count += values.count;
+      }
+      break;
+    }
+    case LOOM_OP_LOW_SCF_FOR:
+      count += loom_low_scf_for_iter_args(op).count;
+      break;
     default:
       IREE_ASSERT_UNREACHABLE(
           "op with storage-relation trait must have a low "
@@ -215,6 +229,96 @@ static void loom_low_storage_relation_get_branch(
   };
 }
 
+static void loom_low_storage_relation_get_scf_for(
+    const loom_module_t* module, const loom_op_t* op, uint16_t relation_index,
+    loom_low_storage_relation_t* out_relation) {
+  loom_value_slice_t iter_args = loom_low_scf_for_iter_args(op);
+  IREE_ASSERT(relation_index < iter_args.count,
+              "low.scf.for storage relation index must be in range");
+  const loom_block_t* body_block =
+      loom_region_const_entry_block(loom_low_scf_for_body(op));
+  IREE_ASSERT(body_block->arg_count == iter_args.count + 1,
+              "verified low.scf.for body args must match iter_args");
+  const loom_value_id_t destination_value_id =
+      loom_block_arg_id(body_block, (uint16_t)(relation_index + 1));
+  const loom_value_id_t source_value_id = iter_args.values[relation_index];
+  const uint32_t destination_unit_count =
+      loom_low_storage_relation_value_unit_count(module, destination_value_id);
+  const uint32_t source_unit_count =
+      loom_low_storage_relation_value_unit_count(module, source_value_id);
+  IREE_ASSERT_EQ(destination_unit_count, source_unit_count,
+                 "verified low.scf.for storage relation must use matching "
+                 "unit counts");
+  *out_relation = (loom_low_storage_relation_t){
+      .op = op,
+      .destination_value_id = destination_value_id,
+      .source_value_id = source_value_id,
+      .destination_unit_offset = 0,
+      .source_unit_offset = 0,
+      .unit_count = destination_unit_count,
+      .kind = LOOM_LOW_STORAGE_RELATION_SAME_STORAGE,
+      .cause = LOOM_LOW_STORAGE_RELATION_CAUSE_LOW_SCF_FOR,
+      .flags = LOOM_LOW_STORAGE_RELATION_FLAG_PREFERRED,
+  };
+}
+
+static void loom_low_storage_relation_get_scf_yield(
+    const loom_module_t* module, const loom_op_t* op, uint16_t relation_index,
+    loom_low_storage_relation_t* out_relation) {
+  const loom_op_t* parent_op = op->parent_op;
+  IREE_ASSERT(parent_op != NULL,
+              "verified low.scf.yield must have a structured parent");
+  loom_value_slice_t values = loom_low_scf_yield_values(op);
+  IREE_ASSERT(relation_index < values.count * 2,
+              "low.scf.yield storage relation index must be in range");
+  const uint16_t value_index =
+      (uint16_t)(relation_index >= values.count ? relation_index - values.count
+                                                : relation_index);
+  const loom_value_id_t source_value_id = values.values[value_index];
+  loom_value_id_t destination_value_id = LOOM_VALUE_ID_INVALID;
+  if (loom_low_scf_for_isa(parent_op)) {
+    if (relation_index < values.count) {
+      const loom_block_t* body_block =
+          loom_region_const_entry_block(loom_low_scf_for_body(parent_op));
+      IREE_ASSERT(body_block->arg_count == values.count + 1,
+                  "verified low.scf.for body args must match yield values");
+      destination_value_id =
+          loom_block_arg_id(body_block, (uint16_t)(value_index + 1));
+    } else {
+      IREE_ASSERT(value_index < parent_op->result_count,
+                  "verified low.scf.for results must match yield values");
+      destination_value_id = loom_op_const_results(parent_op)[value_index];
+    }
+  } else {
+    IREE_ASSERT(relation_index < values.count,
+                "non-loop low.scf.yield relation index must match values");
+    IREE_ASSERT(loom_low_scf_if_isa(parent_op),
+                "verified low.scf.yield parent must be low.scf.if or "
+                "low.scf.for");
+    IREE_ASSERT(value_index < parent_op->result_count,
+                "verified low.scf.if results must match yield values");
+    destination_value_id = loom_op_const_results(parent_op)[value_index];
+  }
+  const uint32_t destination_unit_count =
+      loom_low_storage_relation_value_unit_count(module, destination_value_id);
+  const uint32_t source_unit_count =
+      loom_low_storage_relation_value_unit_count(module, source_value_id);
+  IREE_ASSERT_EQ(destination_unit_count, source_unit_count,
+                 "verified low.scf.yield storage relation must use matching "
+                 "unit counts");
+  *out_relation = (loom_low_storage_relation_t){
+      .op = op,
+      .destination_value_id = destination_value_id,
+      .source_value_id = source_value_id,
+      .destination_unit_offset = 0,
+      .source_unit_offset = 0,
+      .unit_count = destination_unit_count,
+      .kind = LOOM_LOW_STORAGE_RELATION_SAME_STORAGE,
+      .cause = LOOM_LOW_STORAGE_RELATION_CAUSE_LOW_SCF_YIELD,
+      .flags = LOOM_LOW_STORAGE_RELATION_FLAG_PREFERRED,
+  };
+}
+
 void loom_low_storage_relation_get(const loom_module_t* module,
                                    const loom_op_t* op, uint16_t relation_index,
                                    loom_low_storage_relation_t* out_relation) {
@@ -247,6 +351,14 @@ void loom_low_storage_relation_get(const loom_module_t* module,
     case LOOM_OP_LOW_BR:
       loom_low_storage_relation_get_branch(module, op, relation_index,
                                            out_relation);
+      return;
+    case LOOM_OP_LOW_SCF_YIELD:
+      loom_low_storage_relation_get_scf_yield(module, op, relation_index,
+                                              out_relation);
+      return;
+    case LOOM_OP_LOW_SCF_FOR:
+      loom_low_storage_relation_get_scf_for(module, op, relation_index,
+                                            out_relation);
       return;
     default:
       IREE_ASSERT_UNREACHABLE(
