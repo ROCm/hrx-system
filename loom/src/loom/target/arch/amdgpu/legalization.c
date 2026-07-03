@@ -800,7 +800,9 @@ static bool loom_amdgpu_vector_packet_can_materialize_memory_load(
 static bool loom_amdgpu_vector_packet_can_materialize_op(
     const loom_target_legalization_context_t* context, const loom_op_t* op,
     const loom_amdgpu_vector_memory_chunk_shape_t* shape) {
-  if (!iree_all_bits_set(op->traits, LOOM_TRAIT_DECOMPOSABLE)) {
+  const loom_trait_flags_t traits =
+      loom_op_effective_traits(context->module, op);
+  if (!iree_all_bits_set(traits, LOOM_TRAIT_DECOMPOSABLE)) {
     return false;
   }
   const loom_type_t result_type =
@@ -1285,8 +1287,12 @@ static bool loom_amdgpu_fragment_store_group_has_decomposable_payloads(
       return false;
     }
     const loom_op_t* defining_op = loom_value_def_op(payload);
-    if (defining_op == NULL ||
-        !iree_any_bit_set(defining_op->traits, LOOM_TRAIT_DECOMPOSABLE)) {
+    if (defining_op == NULL) {
+      return false;
+    }
+    const loom_trait_flags_t traits =
+        loom_op_effective_traits(module, defining_op);
+    if (!iree_all_bits_set(traits, LOOM_TRAIT_DECOMPOSABLE)) {
       return false;
     }
   }
@@ -1427,25 +1433,45 @@ static iree_status_t loom_amdgpu_fragment_store_group_reserve(
   return iree_ok_status();
 }
 
+static bool loom_amdgpu_fragment_store_plans_can_share_epilogue_loop(
+    const loom_amdgpu_fragment_memory_plan_t* first_plan,
+    const loom_amdgpu_fragment_memory_plan_t* candidate_plan) {
+  return candidate_plan->operation_kind == first_plan->operation_kind &&
+         candidate_plan->role == first_plan->role &&
+         candidate_plan->layout_kind == first_plan->layout_kind &&
+         candidate_plan->view_rank == first_plan->view_rank &&
+         candidate_plan->register_count == first_plan->register_count &&
+         candidate_plan->payload_register_count ==
+             first_plan->payload_register_count &&
+         candidate_plan->elements_per_register ==
+             first_plan->elements_per_register &&
+         candidate_plan->element_byte_count == first_plan->element_byte_count &&
+         candidate_plan->view_element_type == first_plan->view_element_type &&
+         candidate_plan->payload_form == first_plan->payload_form &&
+         candidate_plan->epilogue_strategy == first_plan->epilogue_strategy &&
+         candidate_plan->narrowed_result_scale_source ==
+             first_plan->narrowed_result_scale_source;
+}
+
 static iree_status_t loom_amdgpu_fragment_store_plan_can_join_group(
     loom_target_legalization_context_t* context, loom_op_t* op,
-    loom_amdgpu_matrix_fragment_layout_kind_t layout_kind,
-    uint16_t register_count, loom_amdgpu_fragment_memory_plan_t* out_plan,
-    bool* out_selected) {
+    const loom_amdgpu_fragment_memory_plan_t* first_plan, bool* out_selected) {
   *out_selected = false;
   if (!loom_vector_fragment_store_isa(op)) {
     return iree_ok_status();
   }
+  loom_amdgpu_fragment_memory_plan_t candidate_plan = {0};
   bool selected = false;
   IREE_RETURN_IF_ERROR(loom_amdgpu_analyze_vector_fragment_memory_plan(
       context->module, context->fact_table, context->view_regions,
       context->bundle, context->descriptor_set, context->target_ref,
-      context->function, op, LOOM_AMDGPU_MEMORY_OPERATION_STORE, out_plan,
-      &selected));
+      context->function, op, LOOM_AMDGPU_MEMORY_OPERATION_STORE,
+      &candidate_plan, &selected));
   if (!selected ||
-      !loom_amdgpu_fragment_epilogue_plan_needs_physical_loop(out_plan) ||
-      out_plan->view_rank != 2 || out_plan->layout_kind != layout_kind ||
-      out_plan->register_count != register_count) {
+      !loom_amdgpu_fragment_epilogue_plan_needs_physical_loop(
+          &candidate_plan) ||
+      !loom_amdgpu_fragment_store_plans_can_share_epilogue_loop(
+          first_plan, &candidate_plan)) {
     return iree_ok_status();
   }
   *out_selected = true;
@@ -1468,16 +1494,13 @@ static iree_status_t loom_amdgpu_collect_fragment_store_epilogue_group(
   group_ops[0] = current_op;
 
   bool selected = false;
-  loom_amdgpu_fragment_memory_plan_t neighbor_plan = {0};
   if (current_op->prev_op != NULL) {
     IREE_RETURN_IF_ERROR(loom_amdgpu_fragment_store_plan_can_join_group(
-        context, current_op->prev_op, first_plan->layout_kind,
-        first_plan->register_count, &neighbor_plan, &selected));
+        context, current_op->prev_op, first_plan, &selected));
   }
   if (!selected && current_op->next_op != NULL) {
     IREE_RETURN_IF_ERROR(loom_amdgpu_fragment_store_plan_can_join_group(
-        context, current_op->next_op, first_plan->layout_kind,
-        first_plan->register_count, &neighbor_plan, &selected));
+        context, current_op->next_op, first_plan, &selected));
   }
   if (!selected) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(context->arena, group_count,
@@ -1504,10 +1527,8 @@ static iree_status_t loom_amdgpu_collect_fragment_store_epilogue_group(
 
   for (loom_op_t* candidate = current_op->prev_op; candidate != NULL;
        candidate = candidate->prev_op) {
-    loom_amdgpu_fragment_memory_plan_t candidate_plan = {0};
     IREE_RETURN_IF_ERROR(loom_amdgpu_fragment_store_plan_can_join_group(
-        context, candidate, first_plan->layout_kind, first_plan->register_count,
-        &candidate_plan, &selected));
+        context, candidate, first_plan, &selected));
     if (!selected) {
       break;
     }
@@ -1545,10 +1566,8 @@ static iree_status_t loom_amdgpu_collect_fragment_store_epilogue_group(
 
   for (loom_op_t* candidate = current_op->next_op; candidate != NULL;
        candidate = candidate->next_op) {
-    loom_amdgpu_fragment_memory_plan_t candidate_plan = {0};
     IREE_RETURN_IF_ERROR(loom_amdgpu_fragment_store_plan_can_join_group(
-        context, candidate, first_plan->layout_kind, first_plan->register_count,
-        &candidate_plan, &selected));
+        context, candidate, first_plan, &selected));
     if (!selected) {
       break;
     }
