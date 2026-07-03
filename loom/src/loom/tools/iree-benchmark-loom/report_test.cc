@@ -162,6 +162,17 @@ TEST(BenchmarkReportTest, WritesCanonicalCompileReportTree) {
   report->target_family_name = IREE_SV("amdgpu");
   report->target_key = IREE_SV("gfx1100");
   report->function_name = IREE_SV("candidate_kernel");
+  const loom_target_compile_report_target_capability_row_t capability_row = {
+      /*.function_name=*/report->function_name,
+      /*.target_family_name=*/report->target_family_name,
+      /*.namespace_name=*/IREE_SV("amdgpu"),
+      /*.key=*/IREE_SV("matrix_feature_profile"),
+      /*.value_kind=*/LOOM_TARGET_COMPILE_REPORT_CAPABILITY_VALUE_STRING,
+      /*.value_u64=*/0,
+      /*.value_string=*/IREE_SV("wmma-gfx11"),
+  };
+  IREE_ASSERT_OK(loom_target_compile_report_record_target_capability_row(
+      report, &capability_row));
   loom_target_compile_report_record_status(report, IREE_STATUS_OK);
   loom_target_compile_report_record_schedule(
       report, /*node_count=*/31, /*scheduled_node_count=*/29,
@@ -286,6 +297,18 @@ TEST(BenchmarkReportTest, WritesCanonicalCompileReportTree) {
   iree_string_view_t memory = LookupObject(compile_report, IREE_SV("memory"));
   ExpectObjectValueEquals(memory, IREE_SV("private_bytes"), IREE_SV("64"));
   ExpectObjectValueEquals(memory, IREE_SV("local_bytes"), IREE_SV("256"));
+  iree_string_view_t capability_rows =
+      LookupObject(compile_report, IREE_SV("target_capability_rows"));
+  ExpectObjectValueEquals(capability_rows, IREE_SV("count"), IREE_SV("1"));
+  iree_string_view_t rows = LookupObject(capability_rows, IREE_SV("rows"));
+  iree_string_view_t first_capability_row = iree_string_view_empty();
+  IREE_ASSERT_OK(iree_json_array_get(rows, 0, &first_capability_row));
+  ExpectObjectValueEquals(first_capability_row, IREE_SV("namespace"),
+                          IREE_SV("amdgpu"));
+  ExpectObjectValueEquals(first_capability_row, IREE_SV("key"),
+                          IREE_SV("matrix_feature_profile"));
+  ExpectObjectValueEquals(first_capability_row, IREE_SV("value_string"),
+                          IREE_SV("wmma-gfx11"));
 
   iree_string_builder_deinitialize(&builder);
   loom_run_compile_report_capture_deinitialize(&capture);

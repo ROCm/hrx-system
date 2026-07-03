@@ -3448,35 +3448,31 @@ loom_target_compile_report_format_target_capability_row_json(
 
 static iree_status_t
 loom_target_compile_report_format_target_capability_rows_json(
-    const loom_target_compile_report_t* report,
-    loom_target_compile_report_format_mode_t mode,
-    loom_output_stream_t* stream) {
+    const loom_target_compile_report_t* report, loom_output_stream_t* stream) {
   bool first_field = true;
   IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "{"));
   IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_size_field(
       stream, &first_field, "count", report->target_capability_rows.count));
-  if (mode == LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS) {
-    IREE_RETURN_IF_ERROR(loom_target_compile_report_json_begin_field(
-        stream, &first_field, "rows"));
-    IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "["));
-    iree_host_size_t row_index = 0;
-    for (const loom_target_compile_report_vec_t* vec =
-             report->target_capability_rows.head;
-         vec != NULL; vec = vec->next) {
-      const loom_target_compile_report_target_capability_row_t* rows =
-          (const loom_target_compile_report_target_capability_row_t*)
-              loom_target_compile_report_vec_const_rows(vec);
-      for (iree_host_size_t i = 0; i < vec->count; ++i, ++row_index) {
-        if (row_index != 0) {
-          IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, ","));
-        }
-        IREE_RETURN_IF_ERROR(
-            loom_target_compile_report_format_target_capability_row_json(
-                &rows[i], row_index, stream));
+  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_begin_field(
+      stream, &first_field, "rows"));
+  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "["));
+  iree_host_size_t row_index = 0;
+  for (const loom_target_compile_report_vec_t* vec =
+           report->target_capability_rows.head;
+       vec != NULL; vec = vec->next) {
+    const loom_target_compile_report_target_capability_row_t* rows =
+        (const loom_target_compile_report_target_capability_row_t*)
+            loom_target_compile_report_vec_const_rows(vec);
+    for (iree_host_size_t i = 0; i < vec->count; ++i, ++row_index) {
+      if (row_index != 0) {
+        IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, ","));
       }
+      IREE_RETURN_IF_ERROR(
+          loom_target_compile_report_format_target_capability_row_json(
+              &rows[i], row_index, stream));
     }
-    IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "]"));
   }
+  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "]"));
   return loom_output_stream_write_cstring(stream, "}");
 }
 
@@ -6185,8 +6181,8 @@ iree_status_t loom_target_compile_report_format_json(
     IREE_RETURN_IF_ERROR(loom_target_compile_report_json_begin_field(
         stream, &first_field, "target_capability_rows"));
     IREE_RETURN_IF_ERROR(
-        loom_target_compile_report_format_target_capability_rows_json(
-            report, options->mode, stream));
+        loom_target_compile_report_format_target_capability_rows_json(report,
+                                                                      stream));
   }
   if (iree_any_bit_set(report->detail_flags,
                        LOOM_TARGET_COMPILE_REPORT_DETAIL_EMISSION)) {
