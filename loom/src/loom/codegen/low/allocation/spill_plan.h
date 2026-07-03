@@ -22,8 +22,12 @@ extern "C" {
 typedef struct loom_low_allocation_spill_plan_traffic_t {
   // Predicted stores needed by the current synthetic spill plan.
   uint32_t store_count;
+  // Predicted bytes stored by the current synthetic spill plan.
+  uint64_t store_bytes;
   // Predicted operand-use reloads in the current synthetic spill plan.
   uint32_t reload_count;
+  // Predicted bytes reloaded by the current synthetic spill plan.
+  uint64_t reload_bytes;
 } loom_low_allocation_spill_plan_traffic_t;
 
 // Computes the byte size and alignment required for spilling |assignment|.
@@ -34,7 +38,9 @@ iree_status_t loom_low_allocation_spill_plan_layout(
 
 // Computes the predicted memory traffic for spilling |value_id|.
 iree_status_t loom_low_allocation_spill_plan_traffic(
-    const loom_module_t* module, loom_region_t* body, loom_value_id_t value_id,
+    const loom_module_t* module, loom_region_t* body,
+    const loom_low_allocation_assignment_t* assignment,
+    uint16_t alloc_unit_bits,
     loom_low_allocation_spill_plan_traffic_t* out_traffic);
 
 // Appends the spill materialization plan for |assignment|.

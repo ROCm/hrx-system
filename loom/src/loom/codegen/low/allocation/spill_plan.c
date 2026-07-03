@@ -83,23 +83,61 @@ static bool loom_low_allocation_spill_plan_use_is_removed_block_arg_edge(
          loom_use_operand_index(use) == arg_index;
 }
 
-static uint32_t loom_low_allocation_spill_plan_value_reload_count(
-    const loom_value_t* value) {
-  if (!loom_value_is_block_arg(value)) {
-    return value->use_count;
+static uint32_t loom_low_allocation_spill_plan_reload_byte_size_for_use(
+    const loom_low_allocation_assignment_t* assignment,
+    uint32_t spill_byte_size, loom_use_t use) {
+  const loom_op_t* user_op = loom_use_user_op(use);
+  const uint16_t operand_index = loom_use_operand_index(use);
+  if (!user_op || !loom_low_slice_isa(user_op) || operand_index != 0) {
+    return spill_byte_size;
+  }
+  if (assignment->unit_count == 0 ||
+      spill_byte_size % assignment->unit_count != 0) {
+    return spill_byte_size;
+  }
+  const uint32_t unit_byte_size = spill_byte_size / assignment->unit_count;
+  if (unit_byte_size == 0) {
+    return spill_byte_size;
+  }
+  const int64_t slice_offset = loom_low_slice_offset(user_op);
+  if (slice_offset < 0 || (uint64_t)slice_offset >= assignment->unit_count) {
+    return spill_byte_size;
+  }
+  return unit_byte_size;
+}
+
+static void loom_low_allocation_spill_plan_value_reload_traffic(
+    const loom_low_allocation_assignment_t* assignment,
+    uint32_t spill_byte_size, const loom_value_t* value,
+    uint32_t* out_reload_count, uint64_t* out_reload_bytes) {
+  *out_reload_count = 0;
+  *out_reload_bytes = 0;
+
+  const loom_block_t* block = NULL;
+  uint16_t arg_index = 0;
+  const bool is_block_arg = loom_value_is_block_arg(value);
+  if (is_block_arg) {
+    block = loom_value_def_block(value);
+    arg_index = loom_value_def_index(value);
   }
 
-  const loom_block_t* block = loom_value_def_block(value);
-  const uint16_t arg_index = loom_value_def_index(value);
   uint32_t reload_count = 0;
+  uint64_t reload_bytes = 0;
   const loom_use_t* uses = loom_value_uses(value);
   for (uint32_t i = 0; i < value->use_count; ++i) {
-    if (!loom_low_allocation_spill_plan_use_is_removed_block_arg_edge(
+    if (is_block_arg &&
+        loom_low_allocation_spill_plan_use_is_removed_block_arg_edge(
             uses[i], block, arg_index)) {
-      ++reload_count;
+      continue;
     }
+    ++reload_count;
+    const uint32_t use_byte_size =
+        loom_low_allocation_spill_plan_reload_byte_size_for_use(
+            assignment, spill_byte_size, uses[i]);
+    reload_bytes = iree_math_saturating_add_u64(reload_bytes, use_byte_size);
   }
-  return reload_count;
+  *out_reload_count = reload_count;
+  *out_reload_bytes = reload_bytes;
 }
 
 static iree_status_t loom_low_allocation_spill_plan_value_store_count(
@@ -163,26 +201,38 @@ static iree_status_t loom_low_allocation_spill_plan_value_store_count(
 }
 
 iree_status_t loom_low_allocation_spill_plan_traffic(
-    const loom_module_t* module, loom_region_t* body, loom_value_id_t value_id,
+    const loom_module_t* module, loom_region_t* body,
+    const loom_low_allocation_assignment_t* assignment,
+    uint16_t alloc_unit_bits,
     loom_low_allocation_spill_plan_traffic_t* out_traffic) {
   IREE_ASSERT_ARGUMENT(module);
   IREE_ASSERT_ARGUMENT(body);
+  IREE_ASSERT_ARGUMENT(assignment);
   IREE_ASSERT_ARGUMENT(out_traffic);
   *out_traffic = (loom_low_allocation_spill_plan_traffic_t){0};
+  const loom_value_id_t value_id = assignment->value_id;
   if (value_id >= module->values.count) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "cannot plan spill for out-of-range value %u",
                             (unsigned)value_id);
   }
+  uint32_t byte_size = 0;
+  uint32_t byte_alignment = 0;
+  IREE_RETURN_IF_ERROR(loom_low_allocation_spill_plan_layout(
+      assignment, alloc_unit_bits, &byte_size, &byte_alignment));
   const loom_value_t* value = loom_module_value(module, value_id);
-  const uint32_t reload_count =
-      loom_low_allocation_spill_plan_value_reload_count(value);
+  uint32_t reload_count = 0;
+  uint64_t reload_bytes = 0;
+  loom_low_allocation_spill_plan_value_reload_traffic(
+      assignment, byte_size, value, &reload_count, &reload_bytes);
   uint32_t store_count = 0;
   IREE_RETURN_IF_ERROR(loom_low_allocation_spill_plan_value_store_count(
       module, body, value_id, value, reload_count, &store_count));
   *out_traffic = (loom_low_allocation_spill_plan_traffic_t){
       .store_count = store_count,
+      .store_bytes = iree_math_saturating_mul_u64(store_count, byte_size),
       .reload_count = reload_count,
+      .reload_bytes = reload_bytes,
   };
   return iree_ok_status();
 }
@@ -211,7 +261,7 @@ iree_status_t loom_low_allocation_spill_plan_record(
   }
   loom_low_allocation_spill_plan_traffic_t traffic = {0};
   IREE_RETURN_IF_ERROR(loom_low_allocation_spill_plan_traffic(
-      module, body, assignment->value_id, &traffic));
+      module, body, assignment, alloc_unit_bits, &traffic));
   spill_plans[(*inout_spill_plan_count)++] = (loom_low_allocation_spill_plan_t){
       .value_id = assignment->value_id,
       .assignment_index = assignment_index,
