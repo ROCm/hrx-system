@@ -441,3 +441,22 @@ low.func.def target(@test_target) @multi_victim_spill(%row: reg<test.i32>, %carr
 }
 
 // ----
+
+// ====
+
+// RUN: emit low-allocation-json @active_and_direct_spill_slot_ranges test.i32=4
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @active_and_direct_spill_slot_ranges(
+    %wide: reg<test.i32 x4>, %scalar0: reg<test.i32>,
+    %scalar1: reg<test.i32>, %huge: reg<test.i32 x5>)
+    -> (reg<test.i32 x4>, reg<test.i32>, reg<test.i32 x5>)
+    asm<test.low.core> {
+  %use0 = test.add.i32 %scalar0, %scalar1
+  return %wide, %use0, %huge : reg<test.i32 x4>, reg<test.i32>,
+      reg<test.i32 x5>
+}
+
+// ----
+{"format":"loom.low.allocation.v0","function":"active_and_direct_spill_slot_ranges","target":"test_target","descriptor_set":"test.low.core","allocation_mode":"virtual","assignment_count":5,"remark_count":2,"copy_decision_count":0,"spill_count":2,"spill_plan_count":2,"coalesced_copy_count":0,"materialized_copy_count":0,"assignments":[{"index":0,"value":{"id":1,"name":"scalar0","type":"reg<test.i32>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":"index","register_class":"test.i32"},"start_point":0,"end_point":1,"unit_count":1,"location":{"kind":"target_id","base":0,"count":1}},{"index":1,"value":{"id":2,"name":"scalar1","type":"reg<test.i32>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":"index","register_class":"test.i32"},"start_point":0,"end_point":1,"unit_count":1,"location":{"kind":"target_id","base":1,"count":1}},{"index":2,"value":{"id":0,"name":"wide","type":"reg<test.i32 x4>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":"index","register_class":"test.i32"},"start_point":0,"end_point":2,"unit_count":4,"location":{"kind":"spill_slot","slot":0,"count":4}},{"index":3,"value":{"id":3,"name":"huge","type":"reg<test.i32 x5>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":"index","register_class":"test.i32"},"start_point":0,"end_point":2,"unit_count":5,"location":{"kind":"spill_slot","slot":4,"count":5}},{"index":4,"value":{"id":7,"name":"use0","type":"reg<test.i32>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":"index","register_class":"test.i32"},"start_point":1,"end_point":2,"unit_count":1,"location":{"kind":"target_id","base":0,"count":1}}],"spill_plans":[{"index":0,"assignment":2,"slot":0,"space":"private","value":{"id":0,"name":"wide","type":"reg<test.i32 x4>"},"byte_size":16,"byte_alignment":16,"store_count":1,"reload_count":1},{"index":1,"assignment":3,"slot":4,"space":"private","value":{"id":3,"name":"huge","type":"reg<test.i32 x5>"},"byte_size":20,"byte_alignment":16,"store_count":1,"reload_count":1}],"copy_decisions":[],"remarks":[{"kind":"spill","assignment":2,"budget_units":4,"required_units":4},{"kind":"spill","assignment":3,"budget_units":4,"required_units":5}]}
