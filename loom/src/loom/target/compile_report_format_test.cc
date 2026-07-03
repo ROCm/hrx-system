@@ -965,7 +965,9 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
           /*.byte_size=*/4,
           /*.byte_alignment=*/4,
           /*.store_count=*/1,
+          /*.store_bytes=*/4,
           /*.reload_count=*/2,
+          /*.reload_bytes=*/8,
       },
   };
   loom_target_compile_report_allocation_failure_row_t allocation_failure_rows[] = {
@@ -1737,6 +1739,12 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
                                           "semantic=dot.i32.i8"),
                                   0),
             IREE_STRING_VIEW_NPOS);
+  EXPECT_NE(iree_string_view_find(
+                output,
+                IREE_SV("bytes=4 align=4 stores=1 store_bytes=4 reloads=2 "
+                        "reload_bytes=8"),
+                0),
+            IREE_STRING_VIEW_NPOS);
   EXPECT_NE(
       iree_string_view_find(output,
                             IREE_SV("allocation_failure[0] function=branchy "
@@ -2339,6 +2347,13 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
                                     "\"low.op<amdgpu.v_dot4_i32_i8>\","
                                     "\"semantic_tag\":\"dot.i32.i8\","
                                     "\"assignment_index\":2"),
+                            0),
+      IREE_STRING_VIEW_NPOS);
+  EXPECT_NE(
+      iree_string_view_find(output,
+                            IREE_SV("\"byte_size\":4,\"byte_alignment\":4,"
+                                    "\"store_count\":1,\"store_bytes\":4,"
+                                    "\"reload_count\":2,\"reload_bytes\":8"),
                             0),
       IREE_STRING_VIEW_NPOS);
   EXPECT_NE(

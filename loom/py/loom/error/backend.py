@@ -123,8 +123,9 @@ ERR_BACKEND_009 = ErrorDef(
     message=(
         "target '{target_key}' export '{export_name}' config '{config_key}' "
         "inserted spill storage '{storage_name}' for {value_class} value "
-        "'{value_name}' in '@{function_name}' using {spill_bytes} byte(s), "
-        "{store_count} store(s), and {reload_count} reload(s)"
+        "'{value_name}' in '@{function_name}' reserving {storage_bytes} "
+        "byte(s), {store_count} store(s) for {store_bytes} byte(s), and "
+        "{reload_count} reload(s) for {reload_bytes} byte(s)"
     ),
     params=(
         ErrorParam("target_key", ParamKind.STRING),
@@ -134,9 +135,11 @@ ERR_BACKEND_009 = ErrorDef(
         ErrorParam("value_name", ParamKind.STRING),
         ErrorParam("value_class", ParamKind.STRING),
         ErrorParam("storage_name", ParamKind.STRING),
-        ErrorParam("spill_bytes", ParamKind.U32),
+        ErrorParam("storage_bytes", ParamKind.U64),
         ErrorParam("store_count", ParamKind.U32),
+        ErrorParam("store_bytes", ParamKind.U64),
         ErrorParam("reload_count", ParamKind.U32),
+        ErrorParam("reload_bytes", ParamKind.U64),
     ),
 )
 

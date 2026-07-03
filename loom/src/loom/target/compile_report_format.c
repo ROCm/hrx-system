@@ -1949,7 +1949,8 @@ static iree_status_t loom_target_compile_report_format_spill_rows(
           "element=%.*s "
           "origin=%.*s origin_op=%.*s semantic=%.*s "
           "assignment=%u slot=%u space=%.*s bytes=%" PRIu64 " align=%" PRIu64
-          " stores=%" PRIu64 " reloads=%" PRIu64 "\n",
+          " stores=%" PRIu64 " store_bytes=%" PRIu64 " reloads=%" PRIu64
+          " reload_bytes=%" PRIu64 "\n",
           row_index, (int)kind.size, kind.data, (int)function_name.size,
           function_name.data, (int)value_name.size, value_name.data,
           (int)register_class.size, register_class.data,
@@ -1960,7 +1961,7 @@ static iree_status_t loom_target_compile_report_format_spill_rows(
           (int)semantic_tag.size, semantic_tag.data, row->assignment_index,
           row->slot_index, (int)slot_space.size, slot_space.data,
           row->byte_size, row->byte_alignment, row->store_count,
-          row->reload_count));
+          row->store_bytes, row->reload_count, row->reload_bytes));
     }
   }
   return iree_ok_status();
@@ -4102,7 +4103,11 @@ static iree_status_t loom_target_compile_report_format_spill_row_json(
   IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
       stream, &first_field, "store_count", row->store_count));
   IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
+      stream, &first_field, "store_bytes", row->store_bytes));
+  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
       stream, &first_field, "reload_count", row->reload_count));
+  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
+      stream, &first_field, "reload_bytes", row->reload_bytes));
   return loom_output_stream_write_cstring(stream, "}");
 }
 

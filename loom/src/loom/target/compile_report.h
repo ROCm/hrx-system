@@ -772,8 +772,12 @@ typedef struct loom_target_compile_report_spill_row_t {
   uint64_t byte_alignment;
   // Predicted stores needed by the current synthetic spill plan.
   uint64_t store_count;
+  // Byte traffic from predicted or materialized spill stores.
+  uint64_t store_bytes;
   // Predicted operand-use reloads in the current synthetic spill plan.
   uint64_t reload_count;
+  // Byte traffic from predicted or materialized reloads.
+  uint64_t reload_bytes;
 } loom_target_compile_report_spill_row_t;
 
 // One hard allocation-failure row in a compile report.

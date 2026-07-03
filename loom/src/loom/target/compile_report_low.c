@@ -39,6 +39,13 @@ static bool loom_target_compile_report_add_u64(uint64_t lhs, uint64_t rhs,
   return true;
 }
 
+static uint64_t loom_target_compile_report_saturating_mul_u64(uint64_t lhs,
+                                                              uint64_t rhs) {
+  uint64_t result = 0;
+  return loom_target_compile_report_mul_u64(lhs, rhs, &result) ? result
+                                                               : UINT64_MAX;
+}
+
 static bool loom_target_compile_report_descriptor_semantic_tag_is(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_descriptor_t* descriptor, iree_string_view_t tag) {
@@ -2508,7 +2515,11 @@ static iree_status_t loom_target_compile_report_record_spill_rows(
         .byte_size = spill_plan->byte_size,
         .byte_alignment = spill_plan->byte_alignment,
         .store_count = spill_plan->store_count,
+        .store_bytes = loom_target_compile_report_saturating_mul_u64(
+            spill_plan->byte_size, spill_plan->store_count),
         .reload_count = spill_plan->reload_count,
+        .reload_bytes = loom_target_compile_report_saturating_mul_u64(
+            spill_plan->byte_size, spill_plan->reload_count),
     };
     status = loom_target_compile_report_record_spill_row(report, &row);
   }
@@ -2570,7 +2581,9 @@ static iree_status_t loom_target_compile_report_record_materialized_spill_rows(
           .byte_size = spill->byte_size,
           .byte_alignment = spill->byte_alignment,
           .store_count = spill->store_count,
+          .store_bytes = spill->store_bytes,
           .reload_count = spill->reload_count,
+          .reload_bytes = spill->reload_bytes,
       };
       status = loom_target_compile_report_record_spill_row(report, &row);
     }
