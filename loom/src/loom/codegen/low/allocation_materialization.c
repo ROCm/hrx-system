@@ -80,6 +80,8 @@ static iree_status_t loom_low_allocation_emit_materialized_spill(
   }
   const loom_low_allocation_assignment_t* assignment =
       &table->assignments[plan->assignment_index];
+  const loom_op_t* origin_op = loom_low_diagnostic_value_origin_op(
+      table->module, plan->value_id, table->function_op);
   loom_diagnostic_param_t params[] = {
       loom_param_string(loom_low_diagnostic_target_key(&table->target)),
       loom_param_string(loom_low_diagnostic_export_name(&table->target)),
@@ -88,6 +90,8 @@ static iree_status_t loom_low_allocation_emit_materialized_spill(
           loom_low_diagnostic_function_name(table->module, table->function_op)),
       loom_param_string(
           loom_low_diagnostic_value_name(table->module, plan->value_id)),
+      loom_param_string(loom_low_diagnostic_value_origin_operation_name(
+          table->module, plan->value_id, table->function_op)),
       loom_param_string(loom_low_diagnostic_value_class_name(
           table->target.descriptor_set, assignment->value_class)),
       loom_param_string(
@@ -99,8 +103,7 @@ static iree_status_t loom_low_allocation_emit_materialized_spill(
       loom_param_u64(reload_traffic.bytes),
   };
   loom_diagnostic_emission_t emission = {
-      .op = loom_low_diagnostic_value_origin_op(table->module, plan->value_id,
-                                                table->function_op),
+      .op = origin_op,
       .error = LOOM_ERR_BACKEND_009,
       .params = params,
       .param_count = IREE_ARRAYSIZE(params),

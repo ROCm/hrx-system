@@ -62,6 +62,26 @@ low.func.def target(@test_target) @live_in_spill_storage_prefix() -> (reg<test.i
 
 // ====
 
+// RUN: pass low-materialize-allocation{budgets=test.i32=2,diagnostics=spills}
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @live_in_spill_diagnostic() -> (reg<test.i32>) asm<test.low.core> {
+  // WARNING@+1: BACKEND/009 "value 'live'" "produced by 'low.live_in'" "test.i32" "live_in_spill_diagnostic_spill_storage_0"
+  %live = live_in<test.arg0> : reg<test.i32>
+  %seed0 = test.const.i32 1
+  %seed1 = test.const.i32 2
+  %pair = test.add.i32 %seed0, %seed1
+  %sum0 = test.add.i32 %pair, %live
+  %sum1 = test.add.i32 %sum0, %pair
+  %out = test.add.i32 %sum1, %live
+  return %out
+}
+
+// ----
+
+// ====
+
 // RUN: pass low-materialize-allocation{budgets=test.i32=2}
 
 test.target<low_core> @test_target
@@ -195,7 +215,7 @@ low.func.def target(@test_target) @dense_slice_reload_cluster(%blocker: reg<test
 
 test.target<low_core> @test_target
 
-// WARNING@+1: BACKEND/009 "test_target" "value 'a'" "test.i32" "spill_spill_storage_0"
+// WARNING@+1: BACKEND/009 "value 'a'" "produced by '<block-argument>'" "test.i32" "spill_spill_storage_0"
 low.func.def target(@test_target) @spill(%a: reg<test.i32>, %b: reg<test.i32>, %c: reg<test.i32>) -> (reg<test.i32>) {
   %ab = low.op<test.add.i32>(%a, %b) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
   %bc = low.op<test.add.i32>(%b, %c) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
