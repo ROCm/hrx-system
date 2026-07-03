@@ -688,6 +688,7 @@ def _v_add_u32_overlay(instruction_name: str) -> AmdgpuDescriptorOverlay:
                 source_operand="lhs",
             ),
         ),
+        constraints=_REMATERIALIZABLE_RESULT_CONSTRAINTS,
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     )
 
@@ -698,6 +699,7 @@ def _v_add_u32_src0_inline_overlay(instruction_name: str) -> AmdgpuDescriptorOve
         instruction_name=instruction_name,
         mnemonic="v_add_u32",
         semantic_tag="integer.add.u32",
+        constraints=_REMATERIALIZABLE_RESULT_CONSTRAINTS,
     )
 
 
@@ -743,6 +745,7 @@ def _v_binary_src0_inline_overlay(
     mnemonic: str,
     semantic_tag: str,
     rhs_name: str = "rhs",
+    constraints: tuple[Constraint, ...] = (),
 ) -> AmdgpuDescriptorOverlay:
     return AmdgpuDescriptorOverlay(
         descriptor_key=descriptor_key,
@@ -763,6 +766,7 @@ def _v_binary_src0_inline_overlay(
         ),
         immediate_fields=("SRC0",),
         immediates=(_SOURCE_INLINE_U32_IMMEDIATE,),
+        constraints=constraints,
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     )
 
@@ -824,6 +828,7 @@ def _v_add_u32_literal_overlay(instruction_name: str) -> AmdgpuDescriptorOverlay
         instruction_name=instruction_name,
         mnemonic="v_add_u32",
         semantic_tag="integer.add.u32",
+        constraints=_REMATERIALIZABLE_RESULT_CONSTRAINTS,
     )
 
 
@@ -861,6 +866,7 @@ def _v_add3_u32_overlay(
             AmdgpuOperandOverlay("SRC2", _sgpr_vgpr_operand("c")),
         ),
         operand_forms=operand_forms,
+        constraints=_REMATERIALIZABLE_RESULT_CONSTRAINTS,
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     )
 
@@ -895,6 +901,7 @@ def _v_add3_u32_literal_overlay(literal_source: str) -> AmdgpuDescriptorOverlay:
         ),
         immediates=(_LITERAL_U32_IMMEDIATE,),
         fixed_encoding_fields=((literal_field, _predefined("SRC_LITERAL", "OPR_SRC")),),
+        constraints=_REMATERIALIZABLE_RESULT_CONSTRAINTS,
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     )
 
@@ -990,6 +997,7 @@ def _v_sub_u32_overlay(instruction_name: str, mnemonic: str) -> AmdgpuDescriptor
             AmdgpuOperandOverlay("SRC0", _sgpr_vgpr_operand("lhs")),
             AmdgpuOperandOverlay("VSRC1", _vgpr_operand("rhs")),
         ),
+        constraints=_REMATERIALIZABLE_RESULT_CONSTRAINTS,
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     )
 
@@ -1004,6 +1012,7 @@ def _v_binary_u32_overlay(
     rhs_name: str = "rhs",
     src0_inline_descriptor_key: str | None = None,
     literal_descriptor_key: str | None = None,
+    constraints: tuple[Constraint, ...] = (),
 ) -> AmdgpuDescriptorOverlay:
     operand_forms = []
     if src0_inline_descriptor_key is not None:
@@ -1033,6 +1042,7 @@ def _v_binary_u32_overlay(
             AmdgpuOperandOverlay("VSRC1", _vgpr_operand(rhs_name)),
         ),
         operand_forms=tuple(operand_forms),
+        constraints=constraints,
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     )
 
@@ -1050,6 +1060,7 @@ def _v_mul_lo_u32_overlay() -> AmdgpuDescriptorOverlay:
             AmdgpuOperandOverlay("SRC0", _vgpr_operand("lhs")),
             AmdgpuOperandOverlay("SRC1", _vgpr_operand("rhs")),
         ),
+        constraints=_REMATERIALIZABLE_RESULT_CONSTRAINTS,
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     )
 
@@ -1067,6 +1078,7 @@ def _v_mul_hi_u32_overlay() -> AmdgpuDescriptorOverlay:
             AmdgpuOperandOverlay("SRC0", _vgpr_operand("lhs")),
             AmdgpuOperandOverlay("SRC1", _vgpr_operand("rhs")),
         ),
+        constraints=_REMATERIALIZABLE_RESULT_CONSTRAINTS,
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     )
 
@@ -1079,6 +1091,7 @@ def _v_mul_u32_u24_overlay() -> AmdgpuDescriptorOverlay:
         semantic_tag="integer.mul.lo.u24.u32",
         src0_inline_descriptor_key="amdgpu.v_mul_u32_u24.src0_inline",
         literal_descriptor_key="amdgpu.v_mul_u32_u24.lit",
+        constraints=_REMATERIALIZABLE_RESULT_CONSTRAINTS,
     )
 
 
@@ -1088,6 +1101,7 @@ def _v_mul_u32_u24_src0_inline_overlay() -> AmdgpuDescriptorOverlay:
         instruction_name="V_MUL_U32_U24",
         mnemonic="v_mul_u32_u24",
         semantic_tag="integer.mul.lo.u24.u32",
+        constraints=_REMATERIALIZABLE_RESULT_CONSTRAINTS,
     )
 
 
@@ -1097,6 +1111,7 @@ def _v_mul_u32_u24_literal_overlay() -> AmdgpuDescriptorOverlay:
         instruction_name="V_MUL_U32_U24",
         mnemonic="v_mul_u32_u24",
         semantic_tag="integer.mul.lo.u24.u32",
+        constraints=_REMATERIALIZABLE_RESULT_CONSTRAINTS,
     )
 
 
@@ -1142,6 +1157,7 @@ def _v_mad_u32_u24_overlay(
             AmdgpuOperandOverlay("SRC2", _sgpr_vgpr_operand("addend")),
         ),
         operand_forms=operand_forms,
+        constraints=_REMATERIALIZABLE_RESULT_CONSTRAINTS,
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     )
 
@@ -1187,6 +1203,7 @@ def _v_mad_u32_u24_literal_overlay(literal_source: str) -> AmdgpuDescriptorOverl
         ),
         immediates=(_LITERAL_U32_IMMEDIATE,),
         fixed_encoding_fields=((literal_field, _predefined("SRC_LITERAL", "OPR_SRC")),),
+        constraints=_REMATERIALIZABLE_RESULT_CONSTRAINTS,
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     )
 
@@ -1203,6 +1220,7 @@ def _v_minmax_i32_overlay(
         instruction_name=instruction_name,
         mnemonic=mnemonic,
         semantic_tag=semantic_tag,
+        constraints=_REMATERIALIZABLE_RESULT_CONSTRAINTS,
     )
 
 
@@ -1623,6 +1641,7 @@ def _v_and_b32_overlay() -> AmdgpuDescriptorOverlay:
         semantic_tag="integer.and.u32",
         src0_inline_descriptor_key="amdgpu.v_and_b32.src0_inline",
         literal_descriptor_key="amdgpu.v_and_b32.lit",
+        constraints=_REMATERIALIZABLE_RESULT_CONSTRAINTS,
     )
 
 
@@ -1633,6 +1652,7 @@ def _v_and_b32_src0_inline_overlay() -> AmdgpuDescriptorOverlay:
         mnemonic="v_and_b32",
         semantic_tag="integer.and.u32",
         rhs_name="rhs",
+        constraints=_REMATERIALIZABLE_RESULT_CONSTRAINTS,
     )
 
 
@@ -1643,6 +1663,7 @@ def _v_and_b32_literal_overlay() -> AmdgpuDescriptorOverlay:
         mnemonic="v_and_b32",
         semantic_tag="integer.and.u32",
         rhs_name="rhs",
+        constraints=_REMATERIALIZABLE_RESULT_CONSTRAINTS,
     )
 
 
@@ -1654,6 +1675,7 @@ def _v_or_b32_overlay() -> AmdgpuDescriptorOverlay:
         semantic_tag="integer.or.u32",
         src0_inline_descriptor_key="amdgpu.v_or_b32.src0_inline",
         literal_descriptor_key="amdgpu.v_or_b32.lit",
+        constraints=_REMATERIALIZABLE_RESULT_CONSTRAINTS,
     )
 
 
@@ -1664,6 +1686,7 @@ def _v_or_b32_src0_inline_overlay() -> AmdgpuDescriptorOverlay:
         mnemonic="v_or_b32",
         semantic_tag="integer.or.u32",
         rhs_name="rhs",
+        constraints=_REMATERIALIZABLE_RESULT_CONSTRAINTS,
     )
 
 
@@ -1674,6 +1697,7 @@ def _v_or_b32_literal_overlay() -> AmdgpuDescriptorOverlay:
         mnemonic="v_or_b32",
         semantic_tag="integer.or.u32",
         rhs_name="rhs",
+        constraints=_REMATERIALIZABLE_RESULT_CONSTRAINTS,
     )
 
 
@@ -1685,6 +1709,7 @@ def _v_xor_b32_overlay() -> AmdgpuDescriptorOverlay:
         semantic_tag="integer.xor.u32",
         src0_inline_descriptor_key="amdgpu.v_xor_b32.src0_inline",
         literal_descriptor_key="amdgpu.v_xor_b32.lit",
+        constraints=_REMATERIALIZABLE_RESULT_CONSTRAINTS,
     )
 
 
@@ -1695,6 +1720,7 @@ def _v_xor_b32_src0_inline_overlay() -> AmdgpuDescriptorOverlay:
         mnemonic="v_xor_b32",
         semantic_tag="integer.xor.u32",
         rhs_name="rhs",
+        constraints=_REMATERIALIZABLE_RESULT_CONSTRAINTS,
     )
 
 
@@ -1705,6 +1731,7 @@ def _v_xor_b32_literal_overlay() -> AmdgpuDescriptorOverlay:
         mnemonic="v_xor_b32",
         semantic_tag="integer.xor.u32",
         rhs_name="rhs",
+        constraints=_REMATERIALIZABLE_RESULT_CONSTRAINTS,
     )
 
 
@@ -1718,6 +1745,7 @@ def _v_lshlrev_b32_overlay() -> AmdgpuDescriptorOverlay:
         rhs_name="value",
         src0_inline_descriptor_key="amdgpu.v_lshlrev_b32.src0_inline",
         literal_descriptor_key="amdgpu.v_lshlrev_b32.lit",
+        constraints=_REMATERIALIZABLE_RESULT_CONSTRAINTS,
     )
 
 
@@ -1728,6 +1756,7 @@ def _v_lshlrev_b32_src0_inline_overlay() -> AmdgpuDescriptorOverlay:
         mnemonic="v_lshlrev_b32",
         semantic_tag="integer.shl.u32",
         rhs_name="value",
+        constraints=_REMATERIALIZABLE_RESULT_CONSTRAINTS,
     )
 
 
@@ -1766,6 +1795,7 @@ def _v_lshlrev_b32_literal_overlay() -> AmdgpuDescriptorOverlay:
         mnemonic="v_lshlrev_b32",
         semantic_tag="integer.shl.u32",
         rhs_name="value",
+        constraints=_REMATERIALIZABLE_RESULT_CONSTRAINTS,
     )
 
 
@@ -1789,6 +1819,7 @@ def _v_lshlrev_b32_vop3_immediate_overlay() -> AmdgpuDescriptorOverlay:
         ),
         immediate_fields=("SRC0",),
         immediates=(_SOURCE_INLINE_U32_IMMEDIATE,),
+        constraints=_REMATERIALIZABLE_RESULT_CONSTRAINTS,
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     )
 
@@ -1837,6 +1868,7 @@ def _v_lshl_add_u32_shift_immediate_overlay() -> AmdgpuDescriptorOverlay:
         ),
         immediate_fields=("SRC1",),
         immediates=(_source_inline_u32_immediate("shift"),),
+        constraints=_REMATERIALIZABLE_RESULT_CONSTRAINTS,
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     )
 
@@ -1874,6 +1906,7 @@ def _v_lshl_add_u32_shift_immediate_src2_literal_overlay() -> AmdgpuDescriptorOv
             _LITERAL_U32_IMMEDIATE,
         ),
         fixed_encoding_fields=(("SRC2", _predefined("SRC_LITERAL", "OPR_SRC")),),
+        constraints=_REMATERIALIZABLE_RESULT_CONSTRAINTS,
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     )
 
@@ -1926,6 +1959,7 @@ def _v_bfe_offset_width_inline_overlay(*, is_signed: bool) -> AmdgpuDescriptorOv
             _v_bfe_offset_immediate(),
             _v_bfe_width_immediate(),
         ),
+        constraints=_REMATERIALIZABLE_RESULT_CONSTRAINTS,
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     )
 
@@ -1991,6 +2025,7 @@ def _v_bfi_b32_src0_literal_overlay() -> AmdgpuDescriptorOverlay:
         ),
         immediates=(_LITERAL_U32_IMMEDIATE,),
         fixed_encoding_fields=(("SRC0", _predefined("SRC_LITERAL", "OPR_SRC")),),
+        constraints=_REMATERIALIZABLE_RESULT_CONSTRAINTS,
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     )
 
@@ -2014,6 +2049,7 @@ def _v_bfi_b32_overlay() -> AmdgpuDescriptorOverlay:
             results=("dst",),
             operands=("mask", "insert", "base"),
         ),
+        constraints=_REMATERIALIZABLE_RESULT_CONSTRAINTS,
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     )
 
@@ -2141,6 +2177,7 @@ def _v_lshrrev_b32_overlay() -> AmdgpuDescriptorOverlay:
         rhs_name="value",
         src0_inline_descriptor_key="amdgpu.v_lshrrev_b32.src0_inline",
         literal_descriptor_key="amdgpu.v_lshrrev_b32.lit",
+        constraints=_REMATERIALIZABLE_RESULT_CONSTRAINTS,
     )
 
 
@@ -2151,6 +2188,7 @@ def _v_lshrrev_b32_src0_inline_overlay() -> AmdgpuDescriptorOverlay:
         mnemonic="v_lshrrev_b32",
         semantic_tag="integer.shr.u32",
         rhs_name="value",
+        constraints=_REMATERIALIZABLE_RESULT_CONSTRAINTS,
     )
 
 
@@ -2161,6 +2199,7 @@ def _v_lshrrev_b32_literal_overlay() -> AmdgpuDescriptorOverlay:
         mnemonic="v_lshrrev_b32",
         semantic_tag="integer.shr.u32",
         rhs_name="value",
+        constraints=_REMATERIALIZABLE_RESULT_CONSTRAINTS,
     )
 
 
@@ -2174,6 +2213,7 @@ def _v_ashrrev_i32_overlay() -> AmdgpuDescriptorOverlay:
         rhs_name="value",
         src0_inline_descriptor_key="amdgpu.v_ashrrev_i32.src0_inline",
         literal_descriptor_key="amdgpu.v_ashrrev_i32.lit",
+        constraints=_REMATERIALIZABLE_RESULT_CONSTRAINTS,
     )
 
 
@@ -2184,6 +2224,7 @@ def _v_ashrrev_i32_src0_inline_overlay() -> AmdgpuDescriptorOverlay:
         mnemonic="v_ashrrev_i32",
         semantic_tag="integer.shr.i32",
         rhs_name="value",
+        constraints=_REMATERIALIZABLE_RESULT_CONSTRAINTS,
     )
 
 
@@ -2194,6 +2235,7 @@ def _v_ashrrev_i32_literal_overlay() -> AmdgpuDescriptorOverlay:
         mnemonic="v_ashrrev_i32",
         semantic_tag="integer.shr.i32",
         rhs_name="value",
+        constraints=_REMATERIALIZABLE_RESULT_CONSTRAINTS,
     )
 
 
