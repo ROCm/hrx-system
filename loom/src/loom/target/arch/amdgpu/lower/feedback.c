@@ -1389,20 +1389,6 @@ iree_status_t loom_amdgpu_build_feedback_reservation_attempt(
   return iree_ok_status();
 }
 
-static iree_status_t loom_amdgpu_feedback_insert_block_after(
-    loom_builder_t* builder, loom_block_t* after_block,
-    loom_block_t** out_block) {
-  *out_block = NULL;
-  if (after_block->parent_region == NULL) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "AMDGPU feedback builder requires a low region block");
-  }
-  return loom_region_insert_block(builder->module, after_block->parent_region,
-                                  (uint16_t)(after_block->region_index + 1),
-                                  out_block);
-}
-
 iree_status_t loom_amdgpu_build_feedback_failure_scc_split(
     loom_builder_t* builder, const loom_low_descriptor_set_t* descriptor_set,
     loom_value_id_t failure_scc, loom_location_id_t location,
@@ -1419,10 +1405,13 @@ iree_status_t loom_amdgpu_build_feedback_failure_scc_split(
 
   loom_block_t* hot_block = builder->ip.block;
   loom_amdgpu_feedback_failure_branch_t branch = {0};
-  IREE_RETURN_IF_ERROR(loom_amdgpu_feedback_insert_block_after(
-      builder, hot_block, &branch.continuation_block));
-  IREE_RETURN_IF_ERROR(loom_amdgpu_feedback_insert_block_after(
-      builder, branch.continuation_block, &branch.failure_block));
+  IREE_RETURN_IF_ERROR(loom_region_insert_block(
+      builder->module, hot_block->parent_region,
+      (uint16_t)(hot_block->region_index + 1), &branch.continuation_block));
+  IREE_RETURN_IF_ERROR(loom_region_insert_block(
+      builder->module, branch.continuation_block->parent_region,
+      (uint16_t)(branch.continuation_block->region_index + 1),
+      &branch.failure_block));
   loom_op_t* cond_branch_op = NULL;
   IREE_RETURN_IF_ERROR(loom_low_cond_br_build(
       builder, failure_scc, branch.failure_block, branch.continuation_block,
@@ -1489,17 +1478,21 @@ iree_status_t loom_amdgpu_build_feedback_reservation(
 
   loom_block_t* check_block = builder->ip.block;
   loom_block_t* attempt_block = NULL;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_feedback_insert_block_after(
-      builder, check_block, &attempt_block));
+  IREE_RETURN_IF_ERROR(loom_region_insert_block(
+      builder->module, check_block->parent_region,
+      (uint16_t)(check_block->region_index + 1), &attempt_block));
   loom_block_t* reserved_block = NULL;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_feedback_insert_block_after(
-      builder, attempt_block, &reserved_block));
+  IREE_RETURN_IF_ERROR(loom_region_insert_block(
+      builder->module, attempt_block->parent_region,
+      (uint16_t)(attempt_block->region_index + 1), &reserved_block));
   loom_block_t* continuation_block = NULL;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_feedback_insert_block_after(
-      builder, reserved_block, &continuation_block));
+  IREE_RETURN_IF_ERROR(loom_region_insert_block(
+      builder->module, reserved_block->parent_region,
+      (uint16_t)(reserved_block->region_index + 1), &continuation_block));
   loom_block_t* dropped_block = NULL;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_feedback_insert_block_after(
-      builder, continuation_block, &dropped_block));
+  IREE_RETURN_IF_ERROR(loom_region_insert_block(
+      builder->module, continuation_block->parent_region,
+      (uint16_t)(continuation_block->region_index + 1), &dropped_block));
 
   loom_type_t vgpr_type = loom_type_none();
   IREE_RETURN_IF_ERROR(loom_low_build_register_type(
@@ -1850,11 +1843,13 @@ iree_status_t loom_amdgpu_build_feedback_packet_producer_terminate(
 
   loom_block_t* config_block = builder->ip.block;
   loom_block_t* feedback_block = NULL;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_feedback_insert_block_after(
-      builder, config_block, &feedback_block));
+  IREE_RETURN_IF_ERROR(loom_region_insert_block(
+      builder->module, config_block->parent_region,
+      (uint16_t)(config_block->region_index + 1), &feedback_block));
   loom_block_t* terminal_block = NULL;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_feedback_insert_block_after(
-      builder, feedback_block, &terminal_block));
+  IREE_RETURN_IF_ERROR(loom_region_insert_block(
+      builder->module, feedback_block->parent_region,
+      (uint16_t)(feedback_block->region_index + 1), &terminal_block));
   if (out_terminal_block != NULL) {
     *out_terminal_block = terminal_block;
   }
@@ -1884,8 +1879,9 @@ iree_status_t loom_amdgpu_build_feedback_packet_producer_terminate(
 
   loom_block_t* continuation_block = builder->ip.block;
   loom_block_t* report_block = NULL;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_feedback_insert_block_after(
-      builder, continuation_block, &report_block));
+  IREE_RETURN_IF_ERROR(loom_region_insert_block(
+      builder->module, continuation_block->parent_region,
+      (uint16_t)(continuation_block->region_index + 1), &report_block));
   loom_value_id_t reservation_succeeded_scc = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_amdgpu_build_feedback_reservation_succeeded_scc(
       builder, descriptor_set, reservation.reserved_mask, location,
