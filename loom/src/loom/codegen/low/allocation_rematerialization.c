@@ -9,11 +9,21 @@
 #include <string.h>
 
 #include "loom/codegen/low/descriptor_traits.h"
+#include "loom/codegen/low/diagnostics.h"
 #include "loom/codegen/low/target_binding.h"
+#include "loom/error/error_catalog.h"
 #include "loom/ops/op_defs.h"
 #include "loom/rewrite/materialize.h"
 #include "loom/rewrite/remap.h"
 #include "loom/rewrite/rewriter.h"
+
+static loom_low_allocation_rematerialization_result_t
+loom_low_allocation_rematerialization_result_empty(void) {
+  return (loom_low_allocation_rematerialization_result_t){
+      .value_id = LOOM_VALUE_ID_INVALID,
+      .assignment_index = UINT32_MAX,
+  };
+}
 
 static bool loom_low_allocation_failure_is_rematerializable_pressure(
     const loom_low_allocation_failure_t* failure) {
@@ -171,6 +181,9 @@ static iree_status_t loom_low_allocation_try_rematerialize_value(
         "rematerialized packet producer remained live after rewriting all "
         "operand uses");
   }
+  if (iree_status_is_ok(status)) {
+    result->value_id = value_id;
+  }
   loom_rewriter_deinitialize(&rewriter);
   return status;
 }
@@ -179,7 +192,7 @@ iree_status_t loom_low_allocation_rematerialize_failure(
     loom_module_t* module, const loom_low_allocation_table_t* table,
     iree_arena_allocator_t* arena,
     loom_low_allocation_rematerialization_result_t* out_result) {
-  *out_result = (loom_low_allocation_rematerialization_result_t){0};
+  *out_result = loom_low_allocation_rematerialization_result_empty();
   if (!loom_low_allocation_failure_is_rematerializable_pressure(
           &table->failure)) {
     return iree_ok_status();
@@ -191,25 +204,97 @@ iree_status_t loom_low_allocation_rematerialize_failure(
       failure->conflict_value_id != failure->value_id) {
     IREE_RETURN_IF_ERROR(loom_low_allocation_try_rematerialize_value(
         module, &table->target, failure->conflict_value_id, arena, out_result));
-    if (out_result->rewritten_operand_count != 0) return iree_ok_status();
+    if (out_result->rewritten_operand_count != 0) {
+      out_result->assignment_index = failure->conflict_assignment_index;
+      return iree_ok_status();
+    }
   }
 
-  return loom_low_allocation_try_rematerialize_value(
-      module, &table->target, failure->value_id, arena, out_result);
+  IREE_RETURN_IF_ERROR(loom_low_allocation_try_rematerialize_value(
+      module, &table->target, failure->value_id, arena, out_result));
+  if (out_result->rewritten_operand_count != 0) {
+    out_result->assignment_index = UINT32_MAX;
+  }
+  return iree_ok_status();
 }
 
 iree_status_t loom_low_allocation_rematerialize_spill_plan(
     loom_module_t* module, const loom_low_allocation_table_t* table,
     iree_arena_allocator_t* arena,
     loom_low_allocation_rematerialization_result_t* out_result) {
-  *out_result = (loom_low_allocation_rematerialization_result_t){0};
+  *out_result = loom_low_allocation_rematerialization_result_empty();
   for (iree_host_size_t i = 0; i < table->spill_plan_count; ++i) {
     const loom_low_allocation_spill_plan_t* spill_plan = &table->spill_plans[i];
     IREE_RETURN_IF_ERROR(loom_low_allocation_try_rematerialize_value(
         module, &table->target, spill_plan->value_id, arena, out_result));
     if (out_result->rewritten_operand_count != 0) {
+      out_result->assignment_index = spill_plan->assignment_index;
       return iree_ok_status();
     }
   }
   return iree_ok_status();
+}
+
+static iree_string_view_t loom_low_allocation_rematerialization_trigger_name(
+    loom_low_allocation_rematerialization_trigger_t trigger) {
+  switch (trigger) {
+    case LOOM_LOW_ALLOCATION_REMATERIALIZATION_TRIGGER_ALLOCATION_FAILURE:
+      return IREE_SV("allocation-failure");
+    case LOOM_LOW_ALLOCATION_REMATERIALIZATION_TRIGGER_SPILL_PLAN:
+      return IREE_SV("spill-plan");
+    default:
+      return IREE_SV("unknown");
+  }
+}
+
+static iree_string_view_t
+loom_low_allocation_rematerialization_value_class_name(
+    const loom_low_allocation_table_t* table,
+    const loom_low_allocation_rematerialization_result_t* result) {
+  if (result->assignment_index < table->assignment_count) {
+    const loom_low_allocation_assignment_t* assignment =
+        &table->assignments[result->assignment_index];
+    return loom_low_diagnostic_value_class_name(table->target.descriptor_set,
+                                                assignment->value_class);
+  }
+  if (result->value_id == table->failure.value_id) {
+    return loom_low_diagnostic_value_class_name(table->target.descriptor_set,
+                                                table->failure.value_class);
+  }
+  return IREE_SV("<unknown>");
+}
+
+iree_status_t loom_low_allocation_rematerialization_emit_decision(
+    const loom_low_allocation_table_t* table,
+    loom_low_allocation_rematerialization_trigger_t trigger,
+    const loom_low_allocation_rematerialization_result_t* result,
+    iree_diagnostic_emitter_t emitter) {
+  IREE_ASSERT_ARGUMENT(table);
+  IREE_ASSERT_ARGUMENT(result);
+  if (emitter.fn == NULL || result->rewritten_operand_count == 0) {
+    return iree_ok_status();
+  }
+  loom_diagnostic_param_t params[] = {
+      loom_param_string(loom_low_diagnostic_target_key(&table->target)),
+      loom_param_string(loom_low_diagnostic_export_name(&table->target)),
+      loom_param_string(loom_low_diagnostic_config_key(&table->target)),
+      loom_param_string(
+          loom_low_diagnostic_function_name(table->module, table->function_op)),
+      loom_param_string(
+          loom_low_diagnostic_value_name(table->module, result->value_id)),
+      loom_param_string(loom_low_allocation_rematerialization_value_class_name(
+          table, result)),
+      loom_param_string(
+          loom_low_allocation_rematerialization_trigger_name(trigger)),
+      loom_param_u32(result->cloned_packet_count),
+      loom_param_u32(result->rewritten_operand_count),
+      loom_param_string(IREE_SV("descriptor-rematerializable")),
+  };
+  const loom_diagnostic_emission_t emission = {
+      .op = table->function_op,
+      .error = LOOM_ERR_BACKEND_045,
+      .params = params,
+      .param_count = IREE_ARRAYSIZE(params),
+  };
+  return iree_diagnostic_emit(emitter, &emission);
 }
