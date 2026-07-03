@@ -978,7 +978,8 @@ iree_status_t iree_hal_streaming_unpack_parameter_list(
       (iree_hal_buffer_ref_t*)out_bindings->values;
   for (uint32_t i = 0; i < parameters->binding_count; ++i, ++op) {
     const iree_hal_streaming_parameter_resolve_op_t resolve_op = op->resolve;
-    // In pointer array mode, source_ordinal is an index into the parameter_list.
+    // In pointer array mode, source_ordinal is an index into the
+    // parameter_list.
     void* param_ptr = parameter_list[resolve_op.source_ordinal];
     if (!param_ptr) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,

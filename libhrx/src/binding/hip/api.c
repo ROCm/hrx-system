@@ -382,8 +382,7 @@ static hipError_t iree_hip_validate_host_allocation_size(size_t size) {
 
 static bool iree_hip_launch_extra_value_is_marker(void* value) {
   return value == HIP_LAUNCH_PARAM_BUFFER_POINTER ||
-         value == HIP_LAUNCH_PARAM_BUFFER_SIZE ||
-         value == HIP_LAUNCH_PARAM_END;
+         value == HIP_LAUNCH_PARAM_BUFFER_SIZE || value == HIP_LAUNCH_PARAM_END;
 }
 
 static hipError_t iree_hip_parse_launch_extra(void** extra, void** out_buffer,
@@ -406,8 +405,7 @@ static hipError_t iree_hip_parse_launch_extra(void** extra, void** out_buffer,
       *out_buffer = value;
       saw_buffer = true;
     } else if (key == HIP_LAUNCH_PARAM_BUFFER_SIZE) {
-      if (saw_size || !value ||
-          iree_hip_launch_extra_value_is_marker(value)) {
+      if (saw_size || !value || iree_hip_launch_extra_value_is_marker(value)) {
         return hipErrorInvalidValue;
       }
       *out_buffer_size = *(const size_t*)value;
@@ -445,13 +443,11 @@ static hipError_t iree_hip_validate_launch_configuration(
   }
 
   uint64_t threads_per_block = block_dim[0];
-  if (block_dim[1] != 0 &&
-      threads_per_block > UINT64_MAX / block_dim[1]) {
+  if (block_dim[1] != 0 && threads_per_block > UINT64_MAX / block_dim[1]) {
     return hipErrorInvalidConfiguration;
   }
   threads_per_block *= block_dim[1];
-  if (block_dim[2] != 0 &&
-      threads_per_block > UINT64_MAX / block_dim[2]) {
+  if (block_dim[2] != 0 && threads_per_block > UINT64_MAX / block_dim[2]) {
     return hipErrorInvalidConfiguration;
   }
   threads_per_block *= block_dim[2];

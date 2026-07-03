@@ -317,8 +317,7 @@ static iree_status_t iree_hal_streaming_module_extract_metadata(
                                           parameter->size, &source_extent) ||
               source_extent > UINT16_MAX ||
               !iree_host_size_checked_add(native_abi_destination_offset,
-                                          parameter->size,
-                                          &native_extent) ||
+                                          parameter->size, &native_extent) ||
               native_extent > UINT16_MAX ||
               !iree_host_size_checked_add(direct_arg_offset, parameter->size,
                                           &next_direct_arg_offset))) {

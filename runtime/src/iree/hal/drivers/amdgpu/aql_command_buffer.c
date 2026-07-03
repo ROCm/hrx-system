@@ -1726,9 +1726,9 @@ static iree_status_t iree_hal_amdgpu_aql_command_buffer_write_dispatch_tail(
     uint8_t* tail_payload) {
   switch (kernarg_storage_mode) {
     case IREE_HAL_AMDGPU_COMMAND_BUFFER_KERNARG_STORAGE_MODE_CUSTOM_DIRECT: {
-      const iree_host_size_t explicit_bytes = layout->explicit_kernarg_size
-                                                  ? layout->explicit_kernarg_size
-                                                  : constants.data_length;
+      const iree_host_size_t explicit_bytes =
+          layout->explicit_kernarg_size ? layout->explicit_kernarg_size
+                                        : constants.data_length;
       const iree_host_size_t copy_bytes = constants.data_length < explicit_bytes
                                               ? constants.data_length
                                               : explicit_bytes;
