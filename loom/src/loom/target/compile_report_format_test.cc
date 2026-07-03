@@ -1102,6 +1102,28 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
           },
       },
   };
+  loom_target_compile_report_wait_reason_summary_row_t
+      wait_reason_summary_rows[] = {
+          {
+              /*.function_name=*/IREE_SVL("branchy_export"),
+              /*.counter_name=*/IREE_SVL("vmem_load"),
+              /*.reason_name=*/IREE_SVL("amdgpu.ssa_use"),
+              /*.counter_id=*/1,
+              /*.reason_id=*/2,
+              /*.summary=*/
+              {
+                  /*.action_count=*/1,
+                  /*.explicit_action_count=*/0,
+                  /*.planned_action_count=*/1,
+                  /*.full_drain_count=*/0,
+                  /*.partial_wait_count=*/1,
+                  /*.drained_count=*/4,
+                  /*.max_drained_count=*/4,
+                  /*.max_outstanding_before=*/6,
+                  /*.max_full_drain_outstanding_before=*/0,
+              },
+          },
+      };
   loom_target_compile_report_wait_action_row_t wait_action_rows[] = {
       {
           /*.function_name=*/IREE_SVL("branchy_export"),
@@ -1517,6 +1539,8 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
       &entry_report, &wait_counter_rows[0]));
   IREE_ASSERT_OK(loom_target_compile_report_record_wait_counter_row(
       &entry_report, &wait_counter_rows[1]));
+  IREE_ASSERT_OK(loom_target_compile_report_record_wait_reason_summary_row(
+      &entry_report, &wait_reason_summary_rows[0]));
   IREE_ASSERT_OK(loom_target_compile_report_record_wait_action_row(
       &entry_report, &wait_action_rows[0]));
   IREE_ASSERT_OK(loom_target_compile_report_record_wait_action_row(
@@ -1591,7 +1615,9 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
                                           "drained=6 max_drained=4 "
                                           "max_outstanding=6 "
                                           "max_full_drain_outstanding=6 "
-                                          "counter_rows=2 action_rows=2"),
+                                          "counter_rows=2 "
+                                          "reason_summary_rows=1 "
+                                          "action_rows=2"),
                                   0),
             IREE_STRING_VIEW_NPOS);
   EXPECT_NE(iree_string_view_find(output,
@@ -1886,6 +1912,7 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
                                           "spill_rows=0 "
                                           "allocation_high_water_rows=1 "
                                           "wait_counter_rows=2 "
+                                          "wait_reason_summary_rows=1 "
                                           "wait_action_rows=2 "
                                           "target_capability_rows=3"),
                                   0),
@@ -2113,6 +2140,9 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
   EXPECT_NE(
       iree_string_view_find(output, IREE_SV("\"wait_counter_row_count\":2"), 0),
       IREE_STRING_VIEW_NPOS);
+  EXPECT_NE(iree_string_view_find(
+                output, IREE_SV("\"wait_reason_summary_row_count\":1"), 0),
+            IREE_STRING_VIEW_NPOS);
   EXPECT_NE(
       iree_string_view_find(output, IREE_SV("\"wait_action_row_count\":2"), 0),
       IREE_STRING_VIEW_NPOS);
@@ -2151,6 +2181,26 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
                                     "\"max_full_drain_outstanding_before\":2}"),
                             0),
       IREE_STRING_VIEW_NPOS);
+  EXPECT_NE(
+      iree_string_view_find(
+          output,
+          IREE_SV("\"wait_reason_summary_rows\":{\"count\":1,\"rows\":["), 0),
+      IREE_STRING_VIEW_NPOS);
+  EXPECT_NE(iree_string_view_find(
+                output,
+                IREE_SV("\"counter\":\"vmem_load\",\"counter_id\":1,"
+                        "\"reason\":\"amdgpu.ssa_use\",\"reason_id\":2,"
+                        "\"summary\":{\"action_count\":1,"
+                        "\"explicit_action_count\":0,"
+                        "\"planned_action_count\":1,"
+                        "\"full_drain_count\":0,"
+                        "\"partial_wait_count\":1,"
+                        "\"drained_count\":4,"
+                        "\"max_drained_count\":4,"
+                        "\"max_outstanding_before\":6,"
+                        "\"max_full_drain_outstanding_before\":0}"),
+                0),
+            IREE_STRING_VIEW_NPOS);
   EXPECT_NE(
       iree_string_view_find(
           output, IREE_SV("\"wait_action_rows\":{\"count\":2,\"rows\":["), 0),

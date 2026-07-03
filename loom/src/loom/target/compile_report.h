@@ -624,6 +624,8 @@ typedef struct loom_target_compile_report_entry_t {
   iree_host_size_t allocation_high_water_row_count;
   // Number of target wait-counter rows copied for this entry.
   iree_host_size_t wait_counter_row_count;
+  // Number of target wait-reason summary rows copied for this entry.
+  iree_host_size_t wait_reason_summary_row_count;
   // Number of target wait-action rows copied for this entry.
   iree_host_size_t wait_action_row_count;
   // Number of selected-target capability rows copied for this entry.
@@ -917,6 +919,22 @@ typedef struct loom_target_compile_report_wait_counter_row_t {
   // Aggregate wait-plan counts for this counter.
   loom_target_compile_report_wait_plan_t summary;
 } loom_target_compile_report_wait_counter_row_t;
+
+// One target wait-reason summary row copied into a compile report.
+typedef struct loom_target_compile_report_wait_reason_summary_row_t {
+  // Target artifact function symbol containing this wait plan.
+  iree_string_view_t function_name;
+  // Stable target-owned wait-counter name.
+  iree_string_view_t counter_name;
+  // Stable target-owned wait reason name.
+  iree_string_view_t reason_name;
+  // Target-owned wait-counter id.
+  uint32_t counter_id;
+  // Target-owned wait reason id.
+  uint32_t reason_id;
+  // Aggregate wait-plan counts for this counter/reason pair.
+  loom_target_compile_report_wait_plan_t summary;
+} loom_target_compile_report_wait_reason_summary_row_t;
 
 // One target wait-action row copied into a compile report.
 typedef struct loom_target_compile_report_wait_action_row_t {
@@ -1611,6 +1629,8 @@ typedef struct loom_target_compile_report_t {
   loom_target_compile_report_row_list_t allocation_high_water_rows;
   // Owned target wait-counter summary rows.
   loom_target_compile_report_row_list_t wait_counter_rows;
+  // Owned target wait-reason summary rows.
+  loom_target_compile_report_row_list_t wait_reason_summary_rows;
   // Owned target wait-action rows.
   loom_target_compile_report_row_list_t wait_action_rows;
   // Owned invocation config bindings materialized before compilation.
@@ -1803,6 +1823,13 @@ iree_status_t loom_target_compile_report_record_allocation_high_water_row(
 iree_status_t loom_target_compile_report_record_wait_counter_row(
     loom_target_compile_report_t* report,
     const loom_target_compile_report_wait_counter_row_t* row);
+
+// Records one target wait-reason summary row. This does not update the
+// aggregate wait-plan summary; callers that produce detail rows must also call
+// loom_target_compile_report_record_wait_plan with their aggregate summary.
+iree_status_t loom_target_compile_report_record_wait_reason_summary_row(
+    loom_target_compile_report_t* report,
+    const loom_target_compile_report_wait_reason_summary_row_t* row);
 
 // Records one target wait-action row.
 iree_status_t loom_target_compile_report_record_wait_action_row(

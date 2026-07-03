@@ -533,6 +533,12 @@
                   "regex": "\"wait_counter_rows\":\\{\"count\":[1-9][0-9]*,\"rows\":\\["
                 },
                 {
+                  "regex": "\"wait_reason_summary_rows\":\\{\"count\":[1-9][0-9]*,\"rows\":\\["
+                },
+                {
+                  "regex": "\"reason\":\"amdgpu\\.[^\"]+\",\"reason_id\":[0-9]+,\"summary\":\\{\"action_count\":[1-9][0-9]*"
+                },
+                {
                   "regex": "\"summary\":\\{\"action_count\":[1-9][0-9]*,\"explicit_action_count\":0,\"planned_action_count\":[1-9][0-9]*,\"full_drain_count\":[1-9][0-9]*,\"partial_wait_count\":[0-9]+,\"drained_count\":[1-9][0-9]*,\"max_drained_count\":[1-9][0-9]*"
                 },
                 {

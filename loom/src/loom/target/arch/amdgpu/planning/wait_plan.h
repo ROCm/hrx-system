@@ -61,6 +61,8 @@ typedef enum loom_amdgpu_wait_plan_reason_e {
   // A packet reuses scalar source registers still consumed by an outstanding
   // memory packet.
   LOOM_AMDGPU_WAIT_PLAN_REASON_MEMORY_SOURCE_REUSE = 10,
+  // Total number of wait-plan reason values.
+  LOOM_AMDGPU_WAIT_PLAN_REASON_COUNT,
 } loom_amdgpu_wait_plan_reason_t;
 
 typedef enum loom_amdgpu_wait_plan_residual_action_e {
