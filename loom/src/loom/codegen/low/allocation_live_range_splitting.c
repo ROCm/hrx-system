@@ -62,18 +62,17 @@ static bool loom_low_allocation_split_use_is_eligible(
 }
 
 static bool loom_low_allocation_value_can_split_after_definition(
-    const loom_module_t* module, const loom_region_t* body,
-    loom_value_id_t value_id, loom_block_t** out_insertion_block,
-    loom_op_t** out_insertion_anchor) {
+    const loom_module_t* module, loom_value_id_t value_id,
+    loom_block_t** out_insertion_block, loom_op_t** out_insertion_anchor) {
   *out_insertion_block = NULL;
   *out_insertion_anchor = NULL;
   const loom_value_t* value = loom_module_value(module, value_id);
-  loom_block_t* entry_block = loom_region_entry_block((loom_region_t*)body);
   if (loom_value_is_block_arg(value)) {
-    if (loom_value_def_block(value) != entry_block) {
+    loom_block_t* defining_block = loom_value_def_block(value);
+    if (defining_block == NULL) {
       return false;
     }
-    *out_insertion_block = entry_block;
+    *out_insertion_block = defining_block;
     return true;
   }
   loom_op_t* defining_op = loom_value_def_op(value);
@@ -110,8 +109,7 @@ static iree_status_t loom_low_allocation_try_split_fixed_value(
   loom_block_t* insertion_block = NULL;
   loom_op_t* insertion_anchor = NULL;
   if (!loom_low_allocation_value_can_split_after_definition(
-          module, table->liveness.region, fixed_value->value_id,
-          &insertion_block, &insertion_anchor)) {
+          module, fixed_value->value_id, &insertion_block, &insertion_anchor)) {
     return iree_ok_status();
   }
 
