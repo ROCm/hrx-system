@@ -894,6 +894,7 @@ iree_status_t loom_low_lower_record_memory_access_summary(
               .block_index = block_index,
               .block_ordinal = low_op->block_ordinal,
           },
+      .op = low_op,
       .summary = *summary,
   };
   if (summary->byte_interval != NULL) {

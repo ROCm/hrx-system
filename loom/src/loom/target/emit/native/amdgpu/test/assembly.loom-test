@@ -2288,6 +2288,7 @@ low.func.def target(@gfx942_target) @gfx942_sgpr_spill_reload_waits(%value: reg<
   s_mov_b64 exec, s[2:3]
   s_mov_b64_exec_read s[0:1]
   s_mov_b64 exec, -1
+  s_waitcnt vmcnt(0) lgkmcnt(15)
   s_mov_b32_m0_imm m0, 0
   scratch_load_b32 v2, off, off offset:0 nt:0 sc0:0 sc1:0
   s_waitcnt vmcnt(0) lgkmcnt(15)
@@ -2297,7 +2298,6 @@ low.func.def target(@gfx942_target) @gfx942_sgpr_spill_reload_waits(%value: reg<
   s_waitcnt vmcnt(0) lgkmcnt(15)
   v_readfirstlane_b32 s3, v2
   s_mov_b64 exec, s[0:1]
-  s_waitcnt vmcnt(0) lgkmcnt(15)
   s_endpgm
 
 // ====
