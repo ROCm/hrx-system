@@ -1069,10 +1069,18 @@ typedef enum loom_amdgpu_fragment_memory_packet_flag_bits_e {
   // an identity scale operand.
   LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_IDENTITY_SCALEF32_BF16_PAIR =
       1u << 12,
+  // FP8 load payloads are decoded with native scale-f32 F16 conversion using
+  // an identity scale operand.
+  LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_IDENTITY_SCALEF32_F16_PAIR =
+      1u << 14,
   // Native FP8-to-F32 conversion feeds native F32-to-BF16 packing.
   LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_NATIVE_BF16_PACK = 1u << 13,
+  // FP8 load payloads are decoded with native packed FP8-to-F16 conversion.
+  LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_NATIVE_F16_PAIR = 1u << 15,
   // FP8 load payloads are decoded with the finite packed-BF16 software path.
   LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_PACKED_BF16_DECODE = 1u << 3,
+  // FP8 load payloads are decoded with the finite packed-F16 software path.
+  LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_PACKED_F16_DECODE = 1u << 16,
   // FP8 load payloads require full per-lane BF16 software decode.
   LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_FULL_BF16_DECODE = 1u << 4,
   // Full FP8 decode was selected because value facts do not prove finiteness.
@@ -1116,6 +1124,8 @@ typedef enum loom_amdgpu_fragment_memory_payload_form_e {
   LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_LOAD_PACKED_16BIT_RESULT = 1,
   // FP8 memory lanes are converted to packed BF16 operand registers on load.
   LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_LOAD_FP8_TO_BF16 = 2,
+  // FP8 memory lanes are converted to packed F16 operand registers on load.
+  LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_LOAD_FP8_TO_F16 = 5,
   // A f32 result fragment is rounded to BF16 lanes before a 16-bit store.
   LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_STORE_NARROW_F32_TO_BF16 = 3,
   // A f16 low-subword result fragment is widened to f32 lanes before store.
