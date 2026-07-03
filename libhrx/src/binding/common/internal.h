@@ -550,33 +550,32 @@ typedef enum iree_hal_streaming_symbol_type_e {
   IREE_HAL_STREAMING_SYMBOL_TYPE_DATA = 3,
 } iree_hal_streaming_symbol_type_t;
 
-// Copy operation: memcpy(dst_offset, src_offset, size).
+// Copy operation for reflected non-pointer launch parameters.
 typedef struct iree_hal_streaming_parameter_copy_op_t {
   // Size in bytes of the copy operation.
   uint16_t size;
-  // Destination offset in the native direct-argument kernarg buffer, in bytes.
-  uint16_t direct_dst_offset;
-  // Source offset in parameters buffer, in bytes.
-  uint16_t src_offset;
-  // Source binding ordinal (for parameter arrays);
-  uint16_t src_ordinal;
-  // Destination offset in constants, in bytes.
-  uint16_t dst_offset;
+  // Destination byte offset in the native ABI kernarg byte image.
+  uint16_t native_abi_destination_offset;
+  // Source byte offset in a packed launch parameter buffer.
+  uint16_t source_offset;
+  // Source argument ordinal in a pointer-array launch parameter list.
+  uint16_t source_ordinal;
+  // Destination byte offset in the HAL constants table.
+  uint16_t constant_destination_offset;
 } iree_hal_streaming_parameter_copy_op_t;
 
 // Binding resolve operation: lookup and construct iree_hal_buffer_ref_t.
 typedef struct iree_hal_streaming_parameter_resolve_op_t {
-  // Destination offset in constants buffer for native kernels.
-  // For native kernels with CUSTOM_DIRECT_ARGUMENTS, pointers are copied
-  // directly to the constants buffer at this offset.
-  uint16_t dst_offset;
+  // Destination byte offset in the native ABI kernarg byte image.
+  uint16_t native_abi_destination_offset;
+  // Reserved so copy and resolve ops keep the same compact field count.
   uint16_t reserved;
-  // Source offset in parameters buffer, in bytes.
-  uint16_t src_offset;
-  // Source binding ordinal (for parameter arrays);
-  uint16_t src_ordinal;
-  // Destination binding ordinal.
-  uint16_t dst_ordinal;
+  // Source byte offset in a packed launch parameter buffer.
+  uint16_t source_offset;
+  // Source argument ordinal in a pointer-array launch parameter list.
+  uint16_t source_ordinal;
+  // Destination HAL binding-list ordinal.
+  uint16_t destination_ordinal;
 } iree_hal_streaming_parameter_resolve_op_t;
 
 typedef union iree_hal_streaming_parameter_op_t {
@@ -584,13 +583,11 @@ typedef union iree_hal_streaming_parameter_op_t {
   iree_hal_streaming_parameter_resolve_op_t resolve;
 } iree_hal_streaming_parameter_op_t;
 
-// Function parameter information used for unpacking.
+// Function parameter information used for argument packing.
 // Kernel launch parameters may arrive as a pointer array or packed argument
-// buffer and need to be converted into IREE constants and bindings for
-// dispatch. Bindless constant-only parameters are accepted by directly copying
-// buffer pointers to constant storage. Resolving buffer pointers to HAL
-// bindings is preferred because it gives the runtime explicit resource
-// ownership and is required by IREE async allocation support.
+// buffer. HIP dispatches preserve native device pointer values in the kernarg
+// payload; pointer metadata is used to place direct arguments at ABI offsets,
+// not as a complete residency or lifetime model.
 typedef struct iree_hal_streaming_parameter_info_t {
   // Total size, in bytes, of the final parameter pack.
   uint16_t buffer_size;
@@ -635,7 +632,7 @@ typedef struct iree_hal_streaming_symbol_t {
   uint32_t num_regs;
   uint32_t max_dynamic_shared_size_bytes;
 
-  // Function parameter information used for unpacking.
+  // Function parameter information used for argument packing and unpacking.
   iree_hal_streaming_parameter_info_t parameters;
 
   // Global/data attributes (only valid for GLOBAL/DATA types).
@@ -905,10 +902,9 @@ typedef enum iree_hal_streaming_dispatch_flag_bits_e {
   IREE_HAL_STREAMING_DISPATCH_FLAG_COOPERATIVE = 1ull << 0,
   // The parameters are an array of pointers to values.
   IREE_HAL_STREAMING_DISPATCH_FLAG_ARGS_ARRAY = 1ull << 1,
-  // The parameter buffer is pre-packed in the kernel's native ABI format.
-  // This is used when HIP_LAUNCH_PARAM_BUFFER_POINTER is used to pass
-  // arguments. The buffer should be passed directly to the kernel without
-  // unpacking.
+  // The parameter buffer is already packed in the kernel's native ABI format.
+  // The launch path preserves the byte image and does not rewrite reflected
+  // pointer slots into HAL bindings.
   IREE_HAL_STREAMING_DISPATCH_FLAG_PRE_PACKED = 1ull << 2,
 } iree_hal_streaming_dispatch_flags_t;
 

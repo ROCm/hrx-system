@@ -154,7 +154,7 @@ enum iree_hal_executable_function_parameter_type_e {
   // Parameter is a constant uniform value.
   // Passed to the dispatch in the constants table. The offset indicates the
   // byte offset from the start of the constants table. The size is the total
-  // bytes the constant occupies in the constant table without padding.
+  // bytes the constant occupies in the constants table without padding.
   IREE_HAL_EXECUTABLE_FUNCTION_PARAMETER_TYPE_CONSTANT = 0,
   // Parameter is a buffer binding.
   // Passed to the dispatch in the binding_ptrs table and the length is
@@ -173,6 +173,9 @@ typedef uint8_t iree_hal_executable_function_parameter_type_t;
 // Defines parameter handling behavior.
 enum iree_hal_executable_function_parameter_flag_bits_e {
   IREE_HAL_EXECUTABLE_FUNCTION_PARAMETER_FLAG_NONE = 0,
+  // Parameter has a target ABI byte offset distinct from its HAL dispatch
+  // table offset or binding ordinal.
+  IREE_HAL_EXECUTABLE_FUNCTION_PARAMETER_FLAG_NATIVE_ABI_OFFSET = 1u << 0,
 };
 typedef uint16_t iree_hal_executable_function_parameter_flags_t;
 
@@ -186,8 +189,15 @@ typedef struct iree_hal_executable_function_parameter_t {
   // Widened from uint8_t so we can represent kernarg structs emitted by
   // user toolchains.
   uint16_t size;
-  // Offset of the parameter in bytes or binding ordinal, depending on type.
+  // HAL dispatch offset in bytes or binding ordinal, depending on type.
+  // CONSTANT and BUFFER_PTR parameters use byte offsets in the constants
+  // table. BINDING parameters use binding-list ordinals.
   uint16_t offset;
+  // Target ABI byte offset when
+  // IREE_HAL_EXECUTABLE_FUNCTION_PARAMETER_FLAG_NATIVE_ABI_OFFSET is set.
+  // Native entry points may keep padding or pointer slots that are not present
+  // in the dense HAL constants table.
+  uint16_t native_abi_offset;
   // Parameter name if available, otherwise empty.
   iree_string_view_t name;
 } iree_hal_executable_function_parameter_t;

@@ -28,7 +28,8 @@ extern "C" {
 // packet/kernarg storage. Host recording/submission code must validate kernel
 // metadata and user-provided arguments before passing a layout here.
 typedef struct iree_hal_amdgpu_device_dispatch_kernarg_layout_t {
-  // Size in bytes of the explicitly provided dispatch arguments.
+  // Fixed size in bytes of explicitly provided dispatch arguments, or zero
+  // when the caller-provided byte count is dynamic.
   size_t explicit_kernarg_size;
   // Offset in bytes of the implicit HIP/OpenCL suffix, if present.
   size_t implicit_args_offset;

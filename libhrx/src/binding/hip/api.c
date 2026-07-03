@@ -380,6 +380,100 @@ static hipError_t iree_hip_validate_host_allocation_size(size_t size) {
   return hipSuccess;
 }
 
+static bool iree_hip_launch_extra_value_is_marker(void* value) {
+  return value == HIP_LAUNCH_PARAM_BUFFER_POINTER ||
+         value == HIP_LAUNCH_PARAM_BUFFER_SIZE ||
+         value == HIP_LAUNCH_PARAM_END;
+}
+
+static hipError_t iree_hip_parse_launch_extra(void** extra, void** out_buffer,
+                                              size_t* out_buffer_size) {
+  if (!extra || !out_buffer || !out_buffer_size) return hipErrorInvalidValue;
+  *out_buffer = NULL;
+  *out_buffer_size = 0;
+
+  bool saw_buffer = false;
+  bool saw_size = false;
+  for (iree_host_size_t i = 0; extra[i] != HIP_LAUNCH_PARAM_END; i += 2) {
+    void* key = extra[i];
+    void* value = extra[i + 1];
+    if (value == HIP_LAUNCH_PARAM_END) return hipErrorInvalidValue;
+
+    if (key == HIP_LAUNCH_PARAM_BUFFER_POINTER) {
+      if (saw_buffer || iree_hip_launch_extra_value_is_marker(value)) {
+        return hipErrorInvalidValue;
+      }
+      *out_buffer = value;
+      saw_buffer = true;
+    } else if (key == HIP_LAUNCH_PARAM_BUFFER_SIZE) {
+      if (saw_size || !value ||
+          iree_hip_launch_extra_value_is_marker(value)) {
+        return hipErrorInvalidValue;
+      }
+      *out_buffer_size = *(const size_t*)value;
+      saw_size = true;
+    } else {
+      return hipErrorInvalidValue;
+    }
+  }
+
+  if (saw_buffer != saw_size) return hipErrorInvalidValue;
+  if (*out_buffer_size != 0 && !*out_buffer) return hipErrorInvalidValue;
+  return hipSuccess;
+}
+
+static hipError_t iree_hip_validate_launch_configuration(
+    iree_hal_streaming_device_t* device, iree_hal_streaming_symbol_t* symbol,
+    unsigned int grid_dim_x, unsigned int grid_dim_y, unsigned int grid_dim_z,
+    unsigned int block_dim_x, unsigned int block_dim_y,
+    unsigned int block_dim_z, unsigned int shared_memory_bytes) {
+  if (!device) return hipErrorInvalidDevice;
+
+  const unsigned int grid_dim[3] = {grid_dim_x, grid_dim_y, grid_dim_z};
+  const unsigned int block_dim[3] = {block_dim_x, block_dim_y, block_dim_z};
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(grid_dim); ++i) {
+    if (grid_dim[i] == 0 || block_dim[i] == 0) {
+      return hipErrorInvalidConfiguration;
+    }
+    if (device->max_grid_dim[i] != 0 && grid_dim[i] > device->max_grid_dim[i]) {
+      return hipErrorInvalidConfiguration;
+    }
+    if (device->max_block_dim[i] != 0 &&
+        block_dim[i] > device->max_block_dim[i]) {
+      return hipErrorInvalidConfiguration;
+    }
+  }
+
+  uint64_t threads_per_block = block_dim[0];
+  if (block_dim[1] != 0 &&
+      threads_per_block > UINT64_MAX / block_dim[1]) {
+    return hipErrorInvalidConfiguration;
+  }
+  threads_per_block *= block_dim[1];
+  if (block_dim[2] != 0 &&
+      threads_per_block > UINT64_MAX / block_dim[2]) {
+    return hipErrorInvalidConfiguration;
+  }
+  threads_per_block *= block_dim[2];
+  const uint32_t device_max_threads = device->max_threads_per_block;
+  const uint32_t symbol_max_threads =
+      symbol ? symbol->max_threads_per_block : 0;
+  if ((device_max_threads != 0 && threads_per_block > device_max_threads) ||
+      (symbol_max_threads != 0 && threads_per_block > symbol_max_threads)) {
+    return hipErrorInvalidConfiguration;
+  }
+
+  if (device->max_shared_memory_per_block != 0 &&
+      shared_memory_bytes > device->max_shared_memory_per_block) {
+    return hipErrorInvalidConfiguration;
+  }
+  if (symbol && symbol->max_dynamic_shared_size_bytes != 0 &&
+      shared_memory_bytes > symbol->max_dynamic_shared_size_bytes) {
+    return hipErrorInvalidConfiguration;
+  }
+  return hipSuccess;
+}
+
 static hipError_t iree_hip_validate_host_register_flags(unsigned int flags) {
   const unsigned int allowed_flags =
       hipHostRegisterPortable | hipHostRegisterMapped |
@@ -11784,35 +11878,55 @@ HIPAPI hipError_t hipModuleLaunchKernel(
     HIP_RETURN_ERROR(init_result);
   }
 
+  // Validate the function handle before untagging it. An untagged or
+  // non-function handle is rejected here (as the other driver-style entry
+  // points do) so the extra-buffer handling below can safely dereference
+  // symbol->parameters.
+  if (!iree_hal_streaming_symbol_has_tag(f)) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidHandle);
+  }
+  iree_hal_streaming_symbol_t* symbol = iree_hal_streaming_symbol_untag(f);
+  if (!symbol || symbol->type != IREE_HAL_STREAMING_SYMBOL_TYPE_FUNCTION) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidHandle);
+  }
+
+  if (kernelParams && extra) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+
+  hipError_t launch_config_result = iree_hip_validate_launch_configuration(
+      stream_obj->context ? stream_obj->context->device_entry : NULL, symbol,
+      gridDimX, gridDimY, gridDimZ, blockDimX, blockDimY, blockDimZ,
+      sharedMemBytes);
+  if (launch_config_result != hipSuccess) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(launch_config_result);
+  }
+
   // Extract params pointer and size from HIP's parameter format.
   void* params_ptr = NULL;
   size_t params_size = 0;
   iree_hal_streaming_dispatch_flags_t dispatch_flags =
       IREE_HAL_STREAMING_DISPATCH_FLAG_NONE;
   if (extra) {
-    // Extra format: {
-    //   HIP_LAUNCH_PARAM_BUFFER_POINTER, &buffer,
-    //   HIP_LAUNCH_PARAM_BUFFER_SIZE, &size,
-    //   HIP_LAUNCH_PARAM_END,
-    // }
-    for (int i = 0; extra[i] != HIP_LAUNCH_PARAM_END; i += 2) {
-      if (extra[i] == HIP_LAUNCH_PARAM_BUFFER_POINTER) {
-        params_ptr = extra[i + 1];
-      } else if (extra[i] == HIP_LAUNCH_PARAM_BUFFER_SIZE) {
-        params_size = *(size_t*)extra[i + 1];
-      }
+    hipError_t parse_result =
+        iree_hip_parse_launch_extra(extra, &params_ptr, &params_size);
+    if (parse_result != hipSuccess) {
+      IREE_TRACE_ZONE_END(z0);
+      HIP_RETURN_ERROR(parse_result);
     }
-    // The extra format provides a pre-packed buffer in the kernel's native ABI.
-    // Mark it as pre-packed so the streaming layer passes it through directly.
+    // The extra buffer is already laid out in the kernel's native kernarg ABI.
+    // Preserve it byte-for-byte: HIP device pointers may appear in formal
+    // pointer parameters or inside opaque data copied by the caller.
     dispatch_flags |= IREE_HAL_STREAMING_DISPATCH_FLAG_PRE_PACKED;
   } else if (kernelParams) {
     // kernelParams is an array of pointers to the actual parameters.
     params_ptr = kernelParams;
     dispatch_flags |= IREE_HAL_STREAMING_DISPATCH_FLAG_ARGS_ARRAY;
   }
-
-  // Untag the function pointer if it was tagged by hipModuleGetFunction.
-  iree_hal_streaming_symbol_t* symbol = iree_hal_streaming_symbol_untag(f);
 
   const iree_hal_streaming_dispatch_params_t params = {
       .grid_dim = {gridDimX, gridDimY, gridDimZ},
@@ -14694,8 +14808,9 @@ static bool iree_hip_symbol_accepts_empty_kernel_params(
 // - Kernel executes on device associated with function.
 // - Cross-device dependencies handled automatically.
 //
-// Warning: Ensure kernel parameters remain valid until graph
-// destruction. Pointers in kernelParams are captured by reference.
+// Argument values are captured when the node is created or updated. Device
+// memory referenced by pointer-valued arguments must remain valid until graph
+// executions using the node complete.
 //
 // See also: hipGraphAddMemcpyNode, hipGraphAddMemsetNode,
 //           hipGraphNodeGetType, hipGraphKernelNodeSetParams.
@@ -14725,6 +14840,34 @@ HIPAPI hipError_t hipGraphAddKernelNode(hipGraphNode_t* pGraphNode,
           ? (iree_hal_streaming_graph_node_t**)pDependencies
           : NULL;
 
+  // Resolve the kernel symbol first so the extra-buffer handling below can key
+  // off its reflected parameter metadata.
+  iree_hal_streaming_symbol_t* symbol = NULL;
+  hipError_t symbol_result = iree_hip_resolve_function_symbol(
+      stream_graph->context, params->func, &symbol);
+  if (symbol_result != hipSuccess) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(symbol_result);
+  }
+  if (!params->kernelParams && !params->extra &&
+      !iree_hip_symbol_accepts_empty_kernel_params(symbol)) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+  if (params->kernelParams && params->extra) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+  hipError_t launch_config_result = iree_hip_validate_launch_configuration(
+      stream_graph->context ? stream_graph->context->device_entry : NULL,
+      symbol, params->gridDim.x, params->gridDim.y, params->gridDim.z,
+      params->blockDim.x, params->blockDim.y, params->blockDim.z,
+      params->sharedMemBytes);
+  if (launch_config_result != hipSuccess) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(launch_config_result);
+  }
+
   // Create dispatch params from kernel node params.
   // Extract params pointer from HIP's parameter format.
   void* params_ptr = NULL;
@@ -14732,18 +14875,14 @@ HIPAPI hipError_t hipGraphAddKernelNode(hipGraphNode_t* pGraphNode,
   iree_hal_streaming_dispatch_flags_t dispatch_flags =
       IREE_HAL_STREAMING_DISPATCH_FLAG_NONE;
   if (params->extra) {
-    // Extra format: {
-    //   HIP_LAUNCH_PARAM_BUFFER_POINTER, &buffer,
-    //   HIP_LAUNCH_PARAM_BUFFER_SIZE, &size,
-    //   HIP_LAUNCH_PARAM_END,
-    // }
-    for (int i = 0; params->extra[i] != HIP_LAUNCH_PARAM_END; i += 2) {
-      if (params->extra[i] == HIP_LAUNCH_PARAM_BUFFER_POINTER) {
-        params_ptr = params->extra[i + 1];
-      } else if (params->extra[i] == HIP_LAUNCH_PARAM_BUFFER_SIZE) {
-        params_size = *(size_t*)params->extra[i + 1];
-      }
+    hipError_t parse_result =
+        iree_hip_parse_launch_extra(params->extra, &params_ptr, &params_size);
+    if (parse_result != hipSuccess) {
+      IREE_TRACE_ZONE_END(z0);
+      HIP_RETURN_ERROR(parse_result);
     }
+    // The extra buffer is already laid out in the kernel's native kernarg ABI.
+    // Preserve it byte-for-byte; graph capture stores a private copy.
     dispatch_flags |= IREE_HAL_STREAMING_DISPATCH_FLAG_PRE_PACKED;
   } else if (params->kernelParams) {
     // kernelParams is an array of pointers to the actual parameters.
@@ -14759,19 +14898,6 @@ HIPAPI hipError_t hipGraphAddKernelNode(hipGraphNode_t* pGraphNode,
       .buffer_size = params_size,
       .flags = dispatch_flags,
   };
-
-  iree_hal_streaming_symbol_t* symbol = NULL;
-  hipError_t symbol_result = iree_hip_resolve_function_symbol(
-      stream_graph->context, params->func, &symbol);
-  if (symbol_result != hipSuccess) {
-    IREE_TRACE_ZONE_END(z0);
-    HIP_RETURN_ERROR(symbol_result);
-  }
-  if (!params->kernelParams && !params->extra &&
-      !iree_hip_symbol_accepts_empty_kernel_params(symbol)) {
-    IREE_TRACE_ZONE_END(z0);
-    HIP_RETURN_ERROR(hipErrorInvalidValue);
-  }
 
   // Add kernel node to graph.
   iree_hal_streaming_graph_node_t* node = NULL;
@@ -19276,18 +19402,45 @@ HIPAPI hipError_t hipGraphKernelNodeSetParams(hipGraphNode_t node,
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
   const hipKernelNodeParams* params = (const hipKernelNodeParams*)pNodeParams;
+
+  // Resolve the kernel symbol first so the extra-buffer handling below can key
+  // off its reflected parameter metadata.
+  iree_hal_streaming_symbol_t* symbol = NULL;
+  hipError_t result = iree_hip_resolve_function_symbol(
+      stream_node->graph->context, params->func, &symbol);
+  if (result != hipSuccess) {
+    HIP_RETURN_ERROR(result);
+  }
+  if (!params->kernelParams && !params->extra &&
+      !iree_hip_symbol_accepts_empty_kernel_params(symbol)) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+  if (params->kernelParams && params->extra) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+  hipError_t launch_config_result = iree_hip_validate_launch_configuration(
+      stream_node->graph && stream_node->graph->context
+          ? stream_node->graph->context->device_entry
+          : NULL,
+      symbol, params->gridDim.x, params->gridDim.y, params->gridDim.z,
+      params->blockDim.x, params->blockDim.y, params->blockDim.z,
+      params->sharedMemBytes);
+  if (launch_config_result != hipSuccess) {
+    HIP_RETURN_ERROR(launch_config_result);
+  }
+
   void* params_ptr = NULL;
   size_t params_size = 0;
   iree_hal_streaming_dispatch_flags_t dispatch_flags =
       IREE_HAL_STREAMING_DISPATCH_FLAG_NONE;
   if (params->extra) {
-    for (int i = 0; params->extra[i] != HIP_LAUNCH_PARAM_END; i += 2) {
-      if (params->extra[i] == HIP_LAUNCH_PARAM_BUFFER_POINTER) {
-        params_ptr = params->extra[i + 1];
-      } else if (params->extra[i] == HIP_LAUNCH_PARAM_BUFFER_SIZE) {
-        params_size = *(size_t*)params->extra[i + 1];
-      }
+    hipError_t parse_result =
+        iree_hip_parse_launch_extra(params->extra, &params_ptr, &params_size);
+    if (parse_result != hipSuccess) {
+      HIP_RETURN_ERROR(parse_result);
     }
+    // The extra buffer is already laid out in the kernel's native kernarg ABI.
+    // Preserve it byte-for-byte; the graph node update stores a private copy.
     dispatch_flags |= IREE_HAL_STREAMING_DISPATCH_FLAG_PRE_PACKED;
   } else if (params->kernelParams) {
     params_ptr = params->kernelParams;
@@ -19302,17 +19455,6 @@ HIPAPI hipError_t hipGraphKernelNodeSetParams(hipGraphNode_t node,
       .buffer_size = params_size,
       .flags = dispatch_flags,
   };
-
-  iree_hal_streaming_symbol_t* symbol = NULL;
-  hipError_t result = iree_hip_resolve_function_symbol(
-      stream_node->graph->context, params->func, &symbol);
-  if (result != hipSuccess) {
-    HIP_RETURN_ERROR(result);
-  }
-  if (!params->kernelParams && !params->extra &&
-      !iree_hip_symbol_accepts_empty_kernel_params(symbol)) {
-    HIP_RETURN_ERROR(hipErrorInvalidValue);
-  }
   HIP_RETURN_STATUS(iree_hal_streaming_graph_set_kernel_node_params(
                         stream_node, symbol, &dispatch_params),
                     hipErrorInvalidValue);

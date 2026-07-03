@@ -261,6 +261,7 @@ TEST(ExecutableMetadataHsacoTest, PopulatesSparseInterleavedKernelLayout) {
   ExpectRebasedView(loaded_code_object_data, args[2].name,
                     metadata->parameters[2].name);
   EXPECT_EQ(metadata->parameters[2].offset, 2);
+  EXPECT_EQ(metadata->parameters[2].native_abi_offset, 20);
   EXPECT_EQ(metadata->parameters[2].size, 6);
   EXPECT_EQ(metadata->parameters[3].type,
             IREE_HAL_EXECUTABLE_FUNCTION_PARAMETER_TYPE_BUFFER_PTR);

@@ -1726,29 +1726,25 @@ static iree_status_t iree_hal_amdgpu_aql_command_buffer_write_dispatch_tail(
     uint8_t* tail_payload) {
   switch (kernarg_storage_mode) {
     case IREE_HAL_AMDGPU_COMMAND_BUFFER_KERNARG_STORAGE_MODE_CUSTOM_DIRECT: {
-      const iree_host_size_t explicit_bytes = layout->explicit_kernarg_size;
+      const iree_host_size_t explicit_bytes = layout->explicit_kernarg_size
+                                                  ? layout->explicit_kernarg_size
+                                                  : constants.data_length;
       const iree_host_size_t copy_bytes = constants.data_length < explicit_bytes
                                               ? constants.data_length
                                               : explicit_bytes;
       if (copy_bytes > 0) {
         memcpy(tail_payload, constants.data, copy_bytes);
       }
-      if (copy_bytes < explicit_bytes) {
-        memset(tail_payload + copy_bytes, 0, explicit_bytes - copy_bytes);
-      }
       if (layout->has_implicit_args) {
+        if (copy_bytes < layout->implicit_args_offset) {
+          memset(tail_payload + copy_bytes, 0,
+                 layout->implicit_args_offset - copy_bytes);
+        }
         iree_amdgpu_kernel_implicit_args_t* implicit_args =
             (iree_amdgpu_kernel_implicit_args_t*)(tail_payload +
                                                   layout->implicit_args_offset);
         iree_hal_amdgpu_aql_command_buffer_write_implicit_args(
             kernel_args, config, implicit_args);
-        const iree_host_size_t implicit_args_end =
-            layout->implicit_args_offset +
-            IREE_AMDGPU_KERNEL_IMPLICIT_ARGS_SIZE;
-        if (layout->total_kernarg_size > implicit_args_end) {
-          memset(tail_payload + implicit_args_end, 0,
-                 layout->total_kernarg_size - implicit_args_end);
-        }
       }
       return iree_ok_status();
     }

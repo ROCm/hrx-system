@@ -1053,36 +1053,41 @@ static iree_status_t iree_hal_streaming_pack_raw_argument_list(
   const iree_hal_streaming_parameter_op_t* op = &parameters->ops[0];
   for (uint32_t i = 0; i < parameters->copy_count; ++i, ++op) {
     const iree_hal_streaming_parameter_copy_op_t copy_op = op->copy;
-    void* param_ptr = parameter_list[copy_op.src_ordinal];
+    void* param_ptr = parameter_list[copy_op.source_ordinal];
     if (!param_ptr) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "kernel argument %" PRIu32 " is NULL",
-                              (uint32_t)copy_op.src_ordinal);
+                              (uint32_t)copy_op.source_ordinal);
     }
-    if ((iree_host_size_t)copy_op.direct_dst_offset > *out_constants_size ||
+    if ((iree_host_size_t)copy_op.native_abi_destination_offset >
+            *out_constants_size ||
         (iree_host_size_t)copy_op.size >
-            *out_constants_size - copy_op.direct_dst_offset) {
+            *out_constants_size - copy_op.native_abi_destination_offset) {
       return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                               "kernel argument copy exceeds kernarg size");
     }
-    memcpy(constants + copy_op.direct_dst_offset, param_ptr, copy_op.size);
+    memcpy(constants + copy_op.native_abi_destination_offset, param_ptr,
+           copy_op.size);
   }
 
   for (uint32_t i = 0; i < parameters->binding_count; ++i, ++op) {
     const iree_hal_streaming_parameter_resolve_op_t resolve_op = op->resolve;
-    void* param_ptr = parameter_list[resolve_op.src_ordinal];
+    void* param_ptr = parameter_list[resolve_op.source_ordinal];
     if (!param_ptr) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "kernel argument %" PRIu32 " is NULL",
-                              (uint32_t)resolve_op.src_ordinal);
+                              (uint32_t)resolve_op.source_ordinal);
     }
     void* device_ptr = *(void**)param_ptr;
-    if ((iree_host_size_t)resolve_op.dst_offset > *out_constants_size ||
-        sizeof(device_ptr) > *out_constants_size - resolve_op.dst_offset) {
+    if ((iree_host_size_t)resolve_op.native_abi_destination_offset >
+            *out_constants_size ||
+        sizeof(device_ptr) >
+            *out_constants_size - resolve_op.native_abi_destination_offset) {
       return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                               "kernel pointer argument exceeds kernarg size");
     }
-    memcpy(constants + resolve_op.dst_offset, &device_ptr, sizeof(void*));
+    memcpy(constants + resolve_op.native_abi_destination_offset, &device_ptr,
+           sizeof(void*));
   }
 
   return iree_ok_status();
@@ -1179,7 +1184,9 @@ iree_status_t iree_hal_streaming_graph_add_kernel_node(
   memcpy(attrs->block_dim, params->block_dim, sizeof(params->block_dim));
   attrs->shared_memory_bytes = params->shared_memory_bytes;
 
-  // Unpack parameters.
+  // Capture native kernarg bytes. HIP pointers can be stored anywhere in the
+  // argument payload, so graph nodes keep the byte image instead of retaining a
+  // HAL binding list for only the reflected pointer slots.
   void* constants = extra_data;
   if (constants_capacity > 0) {
     memset(constants, 0, constants_capacity);
@@ -1211,19 +1218,11 @@ iree_status_t iree_hal_streaming_graph_add_kernel_node(
     attrs->constants = iree_make_const_byte_span(constants, 0);
     attrs->bindings = iree_hal_buffer_ref_list_empty();
   } else if (is_args_array) {
-    unpack_status = iree_hal_streaming_unpack_parameter_list(
-        graph->context, &symbol->parameters, (void**)params->buffer, constants,
-        &attrs->bindings);
-    if (iree_status_code(unpack_status) == IREE_STATUS_NOT_FOUND) {
-      iree_status_ignore(unpack_status);
-      memset(constants, 0, constants_capacity);
-      iree_host_size_t captured_size = 0;
-      unpack_status = iree_hal_streaming_pack_raw_argument_list(
-          &symbol->parameters, (void**)params->buffer, constants,
-          &captured_size);
-      attrs->constants = iree_make_const_byte_span(constants, captured_size);
-      attrs->bindings = iree_hal_buffer_ref_list_empty();
-    }
+    iree_host_size_t captured_size = 0;
+    unpack_status = iree_hal_streaming_pack_raw_argument_list(
+        &symbol->parameters, (void**)params->buffer, constants, &captured_size);
+    attrs->constants = iree_make_const_byte_span(constants, captured_size);
+    attrs->bindings = iree_hal_buffer_ref_list_empty();
   } else if (is_native_kernel && params->buffer) {
     iree_host_size_t captured_size = symbol->parameters.direct_arg_bytes
                                          ? symbol->parameters.direct_arg_bytes
@@ -1238,7 +1237,7 @@ iree_status_t iree_hal_streaming_graph_add_kernel_node(
     }
     attrs->constants = iree_make_const_byte_span(constants, captured_size);
     attrs->bindings = iree_hal_buffer_ref_list_empty();
-  } else if (is_native_kernel) {
+  } else if (is_empty_native_kernel) {
     const iree_host_size_t captured_size =
         symbol->parameters.direct_arg_bytes
             ? symbol->parameters.direct_arg_bytes
@@ -1339,19 +1338,11 @@ iree_status_t iree_hal_streaming_graph_set_kernel_node_params(
     constants_span = iree_make_const_byte_span(constants, 0);
     bindings = iree_hal_buffer_ref_list_empty();
   } else if (is_args_array) {
-    unpack_status = iree_hal_streaming_unpack_parameter_list(
-        node->graph->context, &symbol->parameters, (void**)params->buffer,
-        constants, &bindings);
-    if (iree_status_code(unpack_status) == IREE_STATUS_NOT_FOUND) {
-      iree_status_ignore(unpack_status);
-      memset(constants, 0, node->attrs.kernel.constants_capacity);
-      iree_host_size_t captured_size = 0;
-      unpack_status = iree_hal_streaming_pack_raw_argument_list(
-          &symbol->parameters, (void**)params->buffer, constants,
-          &captured_size);
-      constants_span = iree_make_const_byte_span(constants, captured_size);
-      bindings = iree_hal_buffer_ref_list_empty();
-    }
+    iree_host_size_t captured_size = 0;
+    unpack_status = iree_hal_streaming_pack_raw_argument_list(
+        &symbol->parameters, (void**)params->buffer, constants, &captured_size);
+    constants_span = iree_make_const_byte_span(constants, captured_size);
+    bindings = iree_hal_buffer_ref_list_empty();
   } else if (is_native_kernel && params->buffer) {
     iree_host_size_t captured_size = symbol->parameters.direct_arg_bytes
                                          ? symbol->parameters.direct_arg_bytes
@@ -1366,7 +1357,7 @@ iree_status_t iree_hal_streaming_graph_set_kernel_node_params(
     }
     constants_span = iree_make_const_byte_span(constants, captured_size);
     bindings = iree_hal_buffer_ref_list_empty();
-  } else if (is_native_kernel) {
+  } else if (is_empty_native_kernel) {
     const iree_host_size_t captured_size =
         symbol->parameters.direct_arg_bytes
             ? symbol->parameters.direct_arg_bytes

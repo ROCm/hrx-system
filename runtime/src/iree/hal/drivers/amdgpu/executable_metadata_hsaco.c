@@ -413,8 +413,10 @@ static iree_status_t iree_hal_amdgpu_hsaco_load_plan_populate_parameters(
     iree_hal_executable_function_parameter_t* parameter =
         &out_parameters[parameter_ordinal++];
     memset(parameter, 0, sizeof(*parameter));
-    parameter->flags = IREE_HAL_EXECUTABLE_FUNCTION_PARAMETER_FLAG_NONE;
+    parameter->flags =
+        IREE_HAL_EXECUTABLE_FUNCTION_PARAMETER_FLAG_NATIVE_ABI_OFFSET;
     parameter->size = (uint16_t)arg->size;
+    parameter->native_abi_offset = (uint16_t)arg->offset;
     IREE_RETURN_IF_ERROR(
         iree_hal_amdgpu_hsaco_loaded_code_object_rebase_string_view(
             rebase, "parameter name", arg->name, &parameter->name));
