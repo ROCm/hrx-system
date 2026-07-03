@@ -19,6 +19,9 @@
 extern "C" {
 #endif
 
+typedef struct loom_tooling_config_set_t loom_tooling_config_set_t;
+typedef struct loom_module_t loom_module_t;
+
 typedef enum loom_run_compile_report_sink_format_e {
   // Report capture and output are disabled.
   LOOM_RUN_COMPILE_REPORT_SINK_FORMAT_NONE = 0,
@@ -80,6 +83,18 @@ iree_status_t loom_run_compile_report_capture_initialize(
 void loom_run_compile_report_capture_configure_compile_options(
     loom_run_compile_report_capture_t* capture,
     loom_run_candidate_compile_options_t* compile_options);
+
+// Records caller-provided config bindings that materialized as config.def
+// symbols in |module| into |report|. Ignored bindings are omitted because they
+// did not produce this compiled candidate.
+iree_status_t loom_run_compile_report_record_materialized_config(
+    loom_target_compile_report_t* report, const loom_module_t* module,
+    const loom_tooling_config_set_t* config_set);
+
+// Records materialized config bindings into |capture|'s report.
+iree_status_t loom_run_compile_report_capture_record_materialized_config(
+    loom_run_compile_report_capture_t* capture, const loom_module_t* module,
+    const loom_tooling_config_set_t* config_set);
 
 // Records one compiler diagnostic for report output using the canonical
 // loom_diagnostic_json_write_object() shape.

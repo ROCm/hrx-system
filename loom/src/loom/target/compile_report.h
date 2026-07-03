@@ -79,6 +79,8 @@ enum {
   LOOM_TARGET_COMPILE_REPORT_DETAIL_DYNAMIC_INSTRUCTION_MIX = 1u << 21,
   // Aggregated low-schedule band summary rows were recorded or counted.
   LOOM_TARGET_COMPILE_REPORT_DETAIL_SCHEDULE_BAND_SUMMARY_ROWS = 1u << 22,
+  // Invocation config bindings materialized before compilation.
+  LOOM_TARGET_COMPILE_REPORT_DETAIL_CONFIG_BINDING_ROWS = 1u << 23,
 };
 
 typedef enum loom_target_compile_report_move_cause_e {
@@ -1025,6 +1027,14 @@ typedef struct loom_target_compile_report_source_low_target_row_t {
   uint32_t candidate_target_subgroup_size;
 } loom_target_compile_report_source_low_target_row_t;
 
+// One invocation config binding materialized into the compiled module.
+typedef struct loom_target_compile_report_config_binding_row_t {
+  // Config symbol name without the textual '@' sigil.
+  iree_string_view_t key;
+  // Caller-provided textual value bound to |key|.
+  iree_string_view_t value;
+} loom_target_compile_report_config_binding_row_t;
+
 // Summary of source-to-target-low selections grouped by stable lowering shape.
 typedef struct loom_target_compile_report_source_low_selection_summary_t {
   // Source function symbol containing this lowering shape.
@@ -1436,8 +1446,9 @@ static inline const void* loom_target_compile_report_vec_const_rows(
 // Structured feedback from one module-to-artifact compilation.
 //
 // Reports borrow every string view from the compiled module, target records,
-// compile options, backend tables, or artifact storage. Detail row lists are
-// owned by the report and allocated from |allocator| as rows are recorded.
+// compile options, config bindings, backend tables, or artifact storage. Detail
+// row lists are owned by the report and allocated from |allocator| as rows are
+// recorded.
 // Consumers that need a report to outlive those string owners must copy the
 // strings before releasing the module or candidate.
 typedef struct loom_target_compile_report_t {
@@ -1594,6 +1605,8 @@ typedef struct loom_target_compile_report_t {
   loom_target_compile_report_row_list_t wait_counter_rows;
   // Owned target wait-action rows.
   loom_target_compile_report_row_list_t wait_action_rows;
+  // Owned invocation config bindings materialized before compilation.
+  loom_target_compile_report_row_list_t config_binding_rows;
   // Owned source-to-low selection rows.
   loom_target_compile_report_row_list_t source_low_rows;
   // Owned source function target-selection rows.
@@ -1797,6 +1810,11 @@ iree_status_t loom_target_compile_report_record_target_capability_row(
 iree_status_t loom_target_compile_report_record_source_low_row(
     loom_target_compile_report_t* report,
     const loom_target_compile_report_source_low_row_t* row);
+
+// Records one materialized invocation config binding row.
+iree_status_t loom_target_compile_report_record_config_binding_row(
+    loom_target_compile_report_t* report,
+    const loom_target_compile_report_config_binding_row_t* row);
 
 // Records one source function target-selection row.
 iree_status_t loom_target_compile_report_record_source_low_target_row(

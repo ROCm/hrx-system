@@ -87,6 +87,9 @@
               "unordered": [
                 "\"target_key\":\"gfx11-generic\"",
                 "\"executable_format\":\"amdgcn-amd-amdhsa--gfx11-generic\"",
+                "\"config_bindings\":{\"count\":2,\"rows\":[",
+                "\"key\":\"smoke.workgroups_x\",\"value\":\"2\"",
+                "\"key\":\"smoke.workgroup_size_x\",\"value\":\"64\"",
                 "\"status\":\"OK\""
               ]
             }

@@ -4475,6 +4475,71 @@ static iree_status_t loom_target_compile_report_format_diagnostics_json(
   return loom_output_stream_write_cstring(stream, "]");
 }
 
+static iree_status_t loom_target_compile_report_format_config_binding_rows(
+    const loom_target_compile_report_t* report,
+    iree_string_builder_t* builder) {
+  iree_host_size_t row_index = 0;
+  for (const loom_target_compile_report_vec_t* vec =
+           report->config_binding_rows.head;
+       vec != NULL; vec = vec->next) {
+    const loom_target_compile_report_config_binding_row_t* rows =
+        (const loom_target_compile_report_config_binding_row_t*)
+            loom_target_compile_report_vec_const_rows(vec);
+    for (iree_host_size_t i = 0; i < vec->count; ++i, ++row_index) {
+      const loom_target_compile_report_config_binding_row_t* row = &rows[i];
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+          builder,
+          "COMPILE-REPORT: config_binding[%" PRIhsz "] key=%.*s value=%.*s\n",
+          row_index, (int)row->key.size, row->key.data, (int)row->value.size,
+          row->value.data));
+    }
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_target_compile_report_format_config_binding_row_json(
+    const loom_target_compile_report_config_binding_row_t* row,
+    iree_host_size_t row_index, loom_output_stream_t* stream) {
+  bool first_field = true;
+  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "{"));
+  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_size_field(
+      stream, &first_field, "index", row_index));
+  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_string_field(
+      stream, &first_field, "key", row->key));
+  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_string_field(
+      stream, &first_field, "value", row->value));
+  return loom_output_stream_write_cstring(stream, "}");
+}
+
+static iree_status_t loom_target_compile_report_format_config_bindings_json(
+    const loom_target_compile_report_t* report, loom_output_stream_t* stream) {
+  bool first_field = true;
+  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "{"));
+  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_size_field(
+      stream, &first_field, "count", report->config_binding_rows.count));
+  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_begin_field(
+      stream, &first_field, "rows"));
+  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "["));
+  iree_host_size_t row_index = 0;
+  for (const loom_target_compile_report_vec_t* vec =
+           report->config_binding_rows.head;
+       vec != NULL; vec = vec->next) {
+    const loom_target_compile_report_config_binding_row_t* rows =
+        (const loom_target_compile_report_config_binding_row_t*)
+            loom_target_compile_report_vec_const_rows(vec);
+    for (iree_host_size_t i = 0; i < vec->count; ++i, ++row_index) {
+      if (row_index > 0) {
+        IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, ","));
+      }
+      IREE_RETURN_IF_ERROR(
+          loom_target_compile_report_format_config_binding_row_json(
+              &rows[i], row_index, stream));
+    }
+  }
+  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "]"));
+  return loom_output_stream_write_cstring(stream, "}");
+}
+
 static iree_status_t
 loom_target_compile_report_format_source_low_target_row_json(
     const loom_target_compile_report_source_low_target_row_t* row,
@@ -5715,6 +5780,8 @@ iree_status_t loom_target_compile_report_format_text(
         loom_target_compile_report_format_target_capability_rows(report,
                                                                  builder));
     IREE_RETURN_IF_ERROR(
+        loom_target_compile_report_format_config_binding_rows(report, builder));
+    IREE_RETURN_IF_ERROR(
         loom_target_compile_report_format_pressure_rows(report, builder));
     IREE_RETURN_IF_ERROR(loom_target_compile_report_format_pressure_origin_rows(
         report, builder));
@@ -5775,6 +5842,12 @@ iree_status_t loom_target_compile_report_format_json(
       iree_make_cstring_view(iree_status_code_string(report->status_code))));
   IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u32_field(
       stream, &first_field, "detail_flags", report->detail_flags));
+  if (report->config_binding_rows.count != 0) {
+    IREE_RETURN_IF_ERROR(loom_target_compile_report_json_begin_field(
+        stream, &first_field, "config_bindings"));
+    IREE_RETURN_IF_ERROR(
+        loom_target_compile_report_format_config_bindings_json(report, stream));
+  }
   IREE_RETURN_IF_ERROR(
       loom_target_compile_report_json_write_optional_string_field(
           stream, &first_field, "module", report->module_name));
