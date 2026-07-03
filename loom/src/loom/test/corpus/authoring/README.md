@@ -30,7 +30,7 @@ belong to `iree-benchmark-loom` flags or embedding APIs.
 | Local unroll intent | `ffn_gate_up_swiglu_q6q8.loom` keeps block/part loops structured and marks the tiny trip-count loops with `unroll`. |
 | Logical indexing | The examples use index/view math for logical rows, blocks, lanes, byte positions, and dense tensor coordinates. |
 | Dynamic case parameters | `mlp_down_projection_residual_bf16.loom` names `rows` on a `check.param.choice` and threads it through shapes, launch geometry, and the kernel ABI. |
-| Finite FP8/BF8 checkpoint storage | `fp8_finite_storage_decode.loom` puts explicit rounding policy on physical storage and materializes E4M3/BF8 rows into F32 and BF16 destinations, including scale-only BF16 decode. |
+| Finite FP8/BF8 checkpoint storage | `fp8_finite_storage_decode.loom` puts explicit rounding policy on physical storage and materializes E4M3/BF8 rows into F32 and BF16 destinations, including scale-only BF16 decode and compact BF16 GEMM preparation. |
 | Benchmark slices | `mlp_down_projection_residual_bf16.loom` has an anonymous full sweep plus named decode/full rows with assignment dictionaries. |
 | HIP C++ porting motifs | `hip/README.md` maps HIP/CUDA kernel habits to Loom source spellings, proof commands, diagnostics, and authoring-level report workflows. |
 | Packed field contracts | `hip/packed_field_contracts.loom` shows q2/q3/q4/q5/q6-style fields as explicit storage/decode/repack contracts instead of fake scalar element types. |
@@ -530,6 +530,16 @@ subnormal side of that repair. Use the source-low memory report strategy key to
 confirm the selected route, such as
 `fp8_packed_bf16_decode_repair_zero_subnormal` versus
 `fp8_packed_bf16_decode_repair_zero`, instead of inferring it from source text.
+
+For weight-only FP8 linears, the portable source shape is often two explicit
+phases: preserve FP8/BF8 checkpoint storage facts on the source view, then
+materialize the packed rows into the BF16 layout consumed by the contraction.
+Targets without a profitable native FP8 matrix path can select the BF16 GEMM
+route, while targets with native FP8 support can specialize the same semantic
+contract through target facts and report rows. Direct FP8 fragment loads remain
+useful coverage and may be profitable on some targets, but they should be
+selected because the report proves they are the best route, not because the
+source hid storage materialization inside the matrix kernel.
 
 ```loom
 %weight_layout = encoding.layout.strided [1, %input_size] : encoding<layout>
