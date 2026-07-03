@@ -277,3 +277,48 @@ low.func.def target(@target) @scc_u64_compare_rematerializes_active_conflict(%ma
 ^exit:
   low.return
 }
+
+// ====
+
+// RUN: pass low-materialize-allocation{budgets=amdgpu.vgpr=5}
+
+amdgpu.target<gfx1100> @target
+
+low.func.def target(@target) @vop2_f32_rematerializes_spill_plan(%condition: reg<amdgpu.scc>, %lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %tail: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %scale = v_mul_f32 %lhs, %rhs
+  %carry = v_add_f32 %lhs, %tail
+  %bias = v_add_f32 %rhs, %tail
+  low.cond_br %condition, ^then, ^else : reg<amdgpu.scc>
+^then:
+  %then_sum = v_add_f32 %carry, %bias
+  %then_dep = v_add_f32 %then_sum, %lhs
+  %use0 = v_add_f32 %then_dep, %scale
+  return %use0
+^else:
+  %else_max = v_max_f32 %tail, %bias
+  %else_dep = v_add_f32 %else_max, %rhs
+  %use1 = v_add_f32 %else_dep, %scale
+  return %use1
+}
+
+// ----
+amdgpu.target<gfx1100> @target
+
+low.func.def target(@target) @vop2_f32_rematerializes_spill_plan(%condition: reg<amdgpu.scc>, %lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %tail: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) {
+  %carry = low.op<amdgpu.v_add_f32>(%lhs, %tail) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>
+  low.cond_br %condition, ^then, ^else : reg<amdgpu.scc>
+^then:
+  %bias_remat$16 = low.op<amdgpu.v_add_f32>(%rhs, %tail) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>
+  %then_sum = low.op<amdgpu.v_add_f32>(%carry, %bias_remat$16) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>
+  %then_dep = low.op<amdgpu.v_add_f32>(%then_sum, %lhs) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>
+  %scale_remat$14 = low.op<amdgpu.v_mul_f32>(%lhs, %rhs) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>
+  %use0 = low.op<amdgpu.v_add_f32>(%then_dep, %scale_remat$14) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>
+  low.return %use0 : reg<amdgpu.vgpr>
+^else:
+  %bias_remat$17 = low.op<amdgpu.v_add_f32>(%rhs, %tail) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>
+  %else_max = low.op<amdgpu.v_max_f32>(%tail, %bias_remat$17) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>
+  %else_dep = low.op<amdgpu.v_add_f32>(%else_max, %rhs) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>
+  %scale_remat$15 = low.op<amdgpu.v_mul_f32>(%lhs, %rhs) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>
+  %use1 = low.op<amdgpu.v_add_f32>(%else_dep, %scale_remat$15) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>
+  low.return %use1 : reg<amdgpu.vgpr>
+}

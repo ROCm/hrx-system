@@ -494,6 +494,43 @@ def test_v_mov_b32_literal_results_are_rematerializable() -> None:
         )
 
 
+def test_pure_vop2_f32_results_are_rematerializable() -> None:
+    operations = ("add", "sub", "subrev", "mul", "min", "max")
+    suffixes = ("", ".lit", ".src0_inline")
+    rematerializable_result = Constraint(
+        ConstraintKind.REMATERIALIZABLE,
+        lhs_operand_index=0,
+    )
+    for overlays in (
+        _gfx940_core_overlays(),
+        _gfx950_core_overlays(),
+        _gfx11_core_overlays(),
+        _gfx117x_core_overlays(),
+        _gfx12_core_overlays(),
+        _gfx1250_core_overlays(),
+    ):
+        descriptors = {descriptor.descriptor_key: descriptor for descriptor in overlays}
+        matching_keys = []
+        for operation in operations:
+            for suffix in suffixes:
+                descriptor_key = f"amdgpu.v_{operation}_f32{suffix}"
+                descriptor = descriptors.get(descriptor_key)
+                if descriptor is None:
+                    continue
+                matching_keys.append(descriptor_key)
+                assert rematerializable_result in descriptor.constraints
+        assert matching_keys
+
+        for descriptor_key in descriptors:
+            if ".dpp" not in descriptor_key:
+                continue
+            descriptor = descriptors[descriptor_key]
+            assert not any(
+                constraint.kind is ConstraintKind.REMATERIALIZABLE
+                for constraint in descriptor.constraints
+            )
+
+
 def test_rdna_f16_to_f32_convert_uses_wide_encoding() -> None:
     for overlays in (
         _gfx11_core_overlays(),

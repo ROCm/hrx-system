@@ -51,6 +51,8 @@ _SYMBOL_BYTE_OFFSET_IMMEDIATE = Immediate(
     default_value=0,
 )
 
+_REMATERIALIZABLE_RESULT_CONSTRAINTS = (Constraint(ConstraintKind.REMATERIALIZABLE, 0),)
+
 
 def _symbol_rel32_immediate(field_name: str = "symbol") -> Immediate:
     return Immediate(
@@ -706,6 +708,7 @@ def _v_binary_literal_overlay(
     mnemonic: str,
     semantic_tag: str,
     rhs_name: str = "rhs",
+    constraints: tuple[Constraint, ...] = (),
 ) -> AmdgpuDescriptorOverlay:
     return AmdgpuDescriptorOverlay(
         descriptor_key=descriptor_key,
@@ -728,6 +731,7 @@ def _v_binary_literal_overlay(
         immediate_fields=("LITERAL",),
         immediates=(_U32_IMMEDIATE,),
         fixed_encoding_fields=(("SRC0", _predefined("SRC_LITERAL", "OPR_SRC")),),
+        constraints=constraints,
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     )
 
@@ -770,6 +774,7 @@ def _v_binary_src0_inline_f32_overlay(
     mnemonic: str,
     semantic_tag: str,
     rhs_name: str = "rhs",
+    constraints: tuple[Constraint, ...] = (),
 ) -> AmdgpuDescriptorOverlay:
     return AmdgpuDescriptorOverlay(
         descriptor_key=descriptor_key,
@@ -790,6 +795,7 @@ def _v_binary_src0_inline_f32_overlay(
         ),
         immediate_fields=("SRC0",),
         immediates=(_SOURCE_INLINE_F32_IMMEDIATE,),
+        constraints=constraints,
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     )
 
@@ -2271,6 +2277,7 @@ def _v_binary_f32_overlay(
             AmdgpuOperandOverlay("SRC0", _sgpr_vgpr_operand(src0_name)),
             AmdgpuOperandOverlay("VSRC1", _vgpr_operand(vsrc1_name)),
         ),
+        constraints=_REMATERIALIZABLE_RESULT_CONSTRAINTS,
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     )
     return replace(
@@ -2398,6 +2405,7 @@ def _v_add_f32_literal_overlay() -> AmdgpuDescriptorOverlay:
         instruction_name="V_ADD_F32",
         mnemonic="v_add_f32",
         semantic_tag="float.add.f32",
+        constraints=_REMATERIALIZABLE_RESULT_CONSTRAINTS,
     )
 
 
@@ -2407,6 +2415,7 @@ def _v_add_f32_src0_inline_overlay() -> AmdgpuDescriptorOverlay:
         instruction_name="V_ADD_F32",
         mnemonic="v_add_f32",
         semantic_tag="float.add.f32",
+        constraints=_REMATERIALIZABLE_RESULT_CONSTRAINTS,
     )
 
 
@@ -2434,6 +2443,7 @@ def _v_sub_f32_literal_overlay() -> AmdgpuDescriptorOverlay:
         instruction_name="V_SUB_F32",
         mnemonic="v_sub_f32",
         semantic_tag="float.sub.f32",
+        constraints=_REMATERIALIZABLE_RESULT_CONSTRAINTS,
     )
 
 
@@ -2443,6 +2453,7 @@ def _v_sub_f32_src0_inline_overlay() -> AmdgpuDescriptorOverlay:
         instruction_name="V_SUB_F32",
         mnemonic="v_sub_f32",
         semantic_tag="float.sub.f32",
+        constraints=_REMATERIALIZABLE_RESULT_CONSTRAINTS,
     )
 
 
@@ -2473,6 +2484,7 @@ def _v_subrev_f32_literal_overlay() -> AmdgpuDescriptorOverlay:
         mnemonic="v_subrev_f32",
         semantic_tag="float.sub.f32",
         rhs_name="lhs",
+        constraints=_REMATERIALIZABLE_RESULT_CONSTRAINTS,
     )
 
 
@@ -2483,6 +2495,7 @@ def _v_subrev_f32_src0_inline_overlay() -> AmdgpuDescriptorOverlay:
         mnemonic="v_subrev_f32",
         semantic_tag="float.sub.f32",
         rhs_name="lhs",
+        constraints=_REMATERIALIZABLE_RESULT_CONSTRAINTS,
     )
 
 
@@ -2501,6 +2514,7 @@ def _v_mul_f32_literal_overlay() -> AmdgpuDescriptorOverlay:
         instruction_name="V_MUL_F32",
         mnemonic="v_mul_f32",
         semantic_tag="float.mul.f32",
+        constraints=_REMATERIALIZABLE_RESULT_CONSTRAINTS,
     )
 
 
@@ -2510,6 +2524,7 @@ def _v_mul_f32_src0_inline_overlay() -> AmdgpuDescriptorOverlay:
         instruction_name="V_MUL_F32",
         mnemonic="v_mul_f32",
         semantic_tag="float.mul.f32",
+        constraints=_REMATERIALIZABLE_RESULT_CONSTRAINTS,
     )
 
 
@@ -2537,6 +2552,7 @@ def _v_min_f32_literal_overlay() -> AmdgpuDescriptorOverlay:
         instruction_name="V_MIN_F32",
         mnemonic="v_min_f32",
         semantic_tag="float.minnum.f32",
+        constraints=_REMATERIALIZABLE_RESULT_CONSTRAINTS,
     )
 
 
@@ -2546,6 +2562,7 @@ def _v_min_f32_src0_inline_overlay() -> AmdgpuDescriptorOverlay:
         instruction_name="V_MIN_F32",
         mnemonic="v_min_f32",
         semantic_tag="float.minnum.f32",
+        constraints=_REMATERIALIZABLE_RESULT_CONSTRAINTS,
     )
 
 
@@ -2564,6 +2581,7 @@ def _v_max_f32_literal_overlay() -> AmdgpuDescriptorOverlay:
         instruction_name="V_MAX_F32",
         mnemonic="v_max_f32",
         semantic_tag="float.maxnum.f32",
+        constraints=_REMATERIALIZABLE_RESULT_CONSTRAINTS,
     )
 
 
@@ -2573,6 +2591,7 @@ def _v_max_f32_src0_inline_overlay() -> AmdgpuDescriptorOverlay:
         instruction_name="V_MAX_F32",
         mnemonic="v_max_f32",
         semantic_tag="float.maxnum.f32",
+        constraints=_REMATERIALIZABLE_RESULT_CONSTRAINTS,
     )
 
 
