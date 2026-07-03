@@ -117,6 +117,20 @@ low.func.def target(@test_target) @resource_stall_stays_below_near_pressure_clif
 }
 
 // ====
+// RUN: emit low-schedule-json @resource_stall_reduces_existing_pressure_cliff_debt strategy=resource-stall diagnostics=candidates cliff=test.i32:69:15:14 output=none
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @resource_stall_reduces_existing_pressure_cliff_debt(
+    %pad: reg<test.i32 x66>, %lhs: reg<test.i32 x4>,
+    %ptr: reg<test.ptr>) -> (reg<test.i32 x66>, reg<test.i32>, reg<test.i32 x4>) {
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", candidate_count="2", chosen_packet="test.extract_lane.i32", rejected_packet="test.load.v4i32", chosen_pressure_cliff_penalty="0", rejected_pressure_cliff_penalty="1", chosen_projected_live_units="68", rejected_projected_live_units="74"}
+  %lane = low.op<test.extract_lane.i32>(%lhs) {lane = 0} : (reg<test.i32 x4>) -> reg<test.i32>
+  %load = low.op<test.load.v4i32>(%ptr) : (reg<test.ptr>) -> reg<test.i32 x4>
+  low.return %pad, %lane, %load : reg<test.i32 x66>, reg<test.i32>, reg<test.i32 x4>
+}
+
+// ====
 // RUN: emit low-schedule-json @resource_stall_scans_past_ready_window_for_pressure_cliff strategy=resource-stall diagnostics=candidates cliff=test.i32:69:15:14 output=none
 
 test.target<low_core> @test_target

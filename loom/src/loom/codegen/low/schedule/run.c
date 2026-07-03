@@ -889,8 +889,10 @@ static iree_status_t loom_low_schedule_score_candidate_pressure_cliffs(
          cliff_index < range.start + range.count; ++cliff_index) {
       const loom_low_schedule_pressure_cliff_t* cliff =
           &state->options->pressure_cliffs.values[cliff_index];
-      if (current_live_units < cliff->cliff_units &&
-          projected_live_units >= cliff->cliff_units) {
+      // Score the projected pressure state, not only a below-to-above
+      // transition. Once a schedule is already over a cliff, remaining over it
+      // is still pressure debt that should lose to candidates that pay it down.
+      if (projected_live_units >= cliff->cliff_units) {
         score->pressure_cliff_penalty += cliff->tier_before - cliff->tier_after;
         if (score->pressure_cliff_units ==
             LOOM_LOW_SCHEDULE_PRESSURE_CLIFF_NONE) {
