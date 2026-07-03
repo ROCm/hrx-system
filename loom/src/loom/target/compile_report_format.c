@@ -2753,10 +2753,7 @@ static iree_status_t loom_target_compile_report_format_legalization_rows(
           "action=%.*s outcome=%.*s contract=%.*s legalizer=%.*s strategy=%.*s "
           "bundle=%.*s config=%.*s binding=%u case=%u rule_set=%u rule=%u "
           "diagnostic=%u "
-          "descriptor=%" PRIu64 " source_rejections=0x%08" PRIx32
-          " source_rejection_detail=%" PRIu32 " target_rejections=0x%08" PRIx32
-          " missing_features=0x%08" PRIx32 " missing_facts=0x%08" PRIx32
-          " created_ops=%" PRIu64 " erased_ops=%" PRIu64 "\n",
+          "descriptor=%" PRIu64,
           row_index, (int)function_name.size, function_name.data,
           (int)source_op_name.size, source_op_name.data, (int)mode_name.size,
           mode_name.data, (int)policy_name.size, policy_name.data,
@@ -2767,7 +2764,18 @@ static iree_status_t loom_target_compile_report_format_legalization_rows(
           (int)target_bundle_name.size, target_bundle_name.data,
           (int)target_config_name.size, target_config_name.data,
           row->binding_index, row->case_index, row->rule_set_index,
-          row->rule_index, row->diagnostic_index, row->descriptor_id,
+          row->rule_index, row->diagnostic_index, row->descriptor_id));
+      if (!iree_string_view_is_empty(row->descriptor_key)) {
+        IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+            builder, " descriptor_key=%.*s", (int)row->descriptor_key.size,
+            row->descriptor_key.data));
+      }
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+          builder,
+          " source_rejections=0x%08" PRIx32 " source_rejection_detail=%" PRIu32
+          " target_rejections=0x%08" PRIx32 " missing_features=0x%08" PRIx32
+          " missing_facts=0x%08" PRIx32 " created_ops=%" PRIu64
+          " erased_ops=%" PRIu64 "\n",
           row->source_rejection_bits, row->source_rejection_detail,
           row->target_rejection_bits, row->missing_feature_bits,
           row->missing_fact_bits, row->created_op_count, row->erased_op_count));
@@ -5877,6 +5885,9 @@ static iree_status_t loom_target_compile_report_format_legalization_row_json(
       stream, &first_field, "diagnostic_index", row->diagnostic_index));
   IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_optional_u64_field(
       stream, &first_field, "descriptor_id", row->descriptor_id));
+  IREE_RETURN_IF_ERROR(
+      loom_target_compile_report_json_write_optional_string_field(
+          stream, &first_field, "descriptor_key", row->descriptor_key));
   IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u32_field(
       stream, &first_field, "source_rejection_bits",
       row->source_rejection_bits));
