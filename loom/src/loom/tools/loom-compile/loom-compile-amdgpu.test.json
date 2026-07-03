@@ -624,6 +624,49 @@
       ]
     },
     {
+      "name": "reports private AMDGPU scratch traffic in static mix",
+      "steps": [
+        {
+          "name": "compile",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/report_private_memory_mix_amdgpu.loom",
+              "--backend=amdgpu-hal",
+              "--target=gfx11-generic",
+              "--output={tmp}/private_memory_mix_amdgpu.hsaco",
+              "--compile-report=summary",
+              "--compile-report-output=-"
+            ]
+          },
+          "stdout": {
+            "contains": {
+              "unordered": [
+                "\"function\":\"compile_report_private_memory_mix\"",
+                "\"status\":\"OK\"",
+                "\"static_instruction_mix\":{\"descriptor_count\":",
+                "\"memory_read_byte_count\":24",
+                "\"memory_write_byte_count\":8",
+                "\"global_load_byte_count\":4",
+                "\"global_store_byte_count\":4",
+                "\"private_read_byte_count\":4",
+                "\"private_write_byte_count\":4",
+                "\"unclassified_read_byte_count\":0",
+                "\"unclassified_write_byte_count\":0",
+                "\"memory\":{\"private_bytes\":256,\"local_bytes\":0}"
+              ]
+            }
+          },
+          "files": [
+            {
+              "path": "{tmp}/private_memory_mix_amdgpu.hsaco",
+              "non_empty": true
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "reports source-low memory coverage for unmodeled loop CFG",
       "steps": [
         {
