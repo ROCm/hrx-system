@@ -531,6 +531,100 @@ def test_pure_vop2_f32_results_are_rematerializable() -> None:
             )
 
 
+def test_pure_integer_valu_results_are_rematerializable() -> None:
+    descriptor_keys = (
+        "amdgpu.v_add_u32",
+        "amdgpu.v_add_u32.src0_inline",
+        "amdgpu.v_add_u32.lit",
+        "amdgpu.v_add3_u32",
+        "amdgpu.v_sub_u32",
+        "amdgpu.v_mul_lo_u32",
+        "amdgpu.v_mul_hi_u32",
+        "amdgpu.v_mul_u32_u24",
+        "amdgpu.v_mul_u32_u24.src0_inline",
+        "amdgpu.v_mul_u32_u24.lit",
+        "amdgpu.v_mad_u32_u24",
+        "amdgpu.v_min_i32",
+        "amdgpu.v_max_i32",
+        "amdgpu.v_min_u32",
+        "amdgpu.v_max_u32",
+        "amdgpu.v_and_b32",
+        "amdgpu.v_and_b32.src0_inline",
+        "amdgpu.v_and_b32.lit",
+        "amdgpu.v_or_b32",
+        "amdgpu.v_or_b32.src0_inline",
+        "amdgpu.v_or_b32.lit",
+        "amdgpu.v_xor_b32",
+        "amdgpu.v_xor_b32.src0_inline",
+        "amdgpu.v_xor_b32.lit",
+        "amdgpu.v_lshlrev_b32",
+        "amdgpu.v_lshlrev_b32.src0_inline",
+        "amdgpu.v_lshlrev_b32.lit",
+        "amdgpu.v_lshlrev_b32.vop3_imm",
+        "amdgpu.v_lshl_add_u32.shift_imm",
+        "amdgpu.v_lshl_add_u32.shift_imm.src2_lit",
+        "amdgpu.v_bfe_u32.offset_width_inline",
+        "amdgpu.v_bfe_i32.offset_width_inline",
+        "amdgpu.v_bfi_b32",
+        "amdgpu.v_bfi_b32.src0_lit",
+        "amdgpu.v_lshrrev_b32",
+        "amdgpu.v_lshrrev_b32.src0_inline",
+        "amdgpu.v_lshrrev_b32.lit",
+        "amdgpu.v_ashrrev_i32",
+        "amdgpu.v_ashrrev_i32.src0_inline",
+        "amdgpu.v_ashrrev_i32.lit",
+    )
+    optional_descriptor_keys = (
+        "amdgpu.v_add3_u32.src0_lit",
+        "amdgpu.v_add3_u32.src1_lit",
+        "amdgpu.v_add3_u32.src2_lit",
+        "amdgpu.v_mad_u32_u24.src0_lit",
+        "amdgpu.v_mad_u32_u24.src1_lit",
+        "amdgpu.v_mad_u32_u24.src2_lit",
+    )
+    excluded_descriptor_keys = (
+        "amdgpu.v_add_co_u32",
+        "amdgpu.v_add_co_ci_u32",
+        "amdgpu.v_sub_co_u32",
+        "amdgpu.v_sub_co_ci_u32",
+        "amdgpu.v_lshlrev_b32.src0_16_low16",
+        "amdgpu.v_lshlrev_b64",
+        "amdgpu.v_bfe_u32.offset_0_width_16_low16",
+        "amdgpu.v_permlanex16_b32.src12_inline",
+    )
+    rematerializable_result = Constraint(
+        ConstraintKind.REMATERIALIZABLE,
+        lhs_operand_index=0,
+    )
+    for overlays in (
+        _gfx940_core_overlays(),
+        _gfx950_core_overlays(),
+        _gfx11_core_overlays(),
+        _gfx117x_core_overlays(),
+        _gfx12_core_overlays(),
+        _gfx1250_core_overlays(),
+    ):
+        descriptors = {descriptor.descriptor_key: descriptor for descriptor in overlays}
+        for descriptor_key in descriptor_keys:
+            descriptor = descriptors.get(descriptor_key)
+            assert descriptor is not None, descriptor_key
+            assert rematerializable_result in descriptor.constraints, descriptor_key
+        for descriptor_key in optional_descriptor_keys:
+            descriptor = descriptors.get(descriptor_key)
+            if descriptor is None:
+                continue
+            assert rematerializable_result in descriptor.constraints, descriptor_key
+
+        for descriptor_key in excluded_descriptor_keys:
+            descriptor = descriptors.get(descriptor_key)
+            if descriptor is None:
+                continue
+            assert not any(
+                constraint.kind is ConstraintKind.REMATERIALIZABLE
+                for constraint in descriptor.constraints
+            )
+
+
 def test_rdna_f16_to_f32_convert_uses_wide_encoding() -> None:
     for overlays in (
         _gfx11_core_overlays(),

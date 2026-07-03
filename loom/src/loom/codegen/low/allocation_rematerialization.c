@@ -68,6 +68,15 @@ static bool loom_low_allocation_rematerialization_use_is_eligible(
   return true;
 }
 
+static bool loom_low_allocation_rematerialization_use_shortens_live_range(
+    const loom_op_t* defining_op, loom_use_t use) {
+  const loom_op_t* user_op = loom_use_user_op(use);
+  // Cloning an already-adjacent producer cannot reduce pressure and can cycle.
+  return user_op != NULL &&
+         (user_op->parent_block != defining_op->parent_block ||
+          user_op->prev_op != defining_op);
+}
+
 static iree_status_t loom_low_allocation_rematerialization_clone_for_use(
     loom_rewriter_t* rewriter, const loom_op_t* defining_op,
     uint16_t result_index, loom_value_id_t source_value_id, loom_use_t use,
@@ -146,11 +155,19 @@ static iree_status_t loom_low_allocation_try_rematerialize_value(
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, use_count,
                                                  sizeof(*uses), (void**)&uses));
   memcpy(uses, loom_value_uses(value), use_count * sizeof(*uses));
+  bool shortens_live_range = false;
   for (uint32_t i = 0; i < use_count; ++i) {
     if (!loom_low_allocation_rematerialization_use_is_eligible(
             value_id, defining_op, uses[i])) {
       return iree_ok_status();
     }
+    shortens_live_range =
+        shortens_live_range ||
+        loom_low_allocation_rematerialization_use_shortens_live_range(
+            defining_op, uses[i]);
+  }
+  if (!shortens_live_range) {
+    return iree_ok_status();
   }
 
   loom_rewriter_t rewriter = {0};
