@@ -53,6 +53,99 @@ static iree_string_view_t loom_low_source_selection_target_bundle_name(
   return target_bundle->name;
 }
 
+static iree_string_view_t loom_low_source_selection_symbol_ref_name(
+    const loom_module_t* module, loom_symbol_ref_t symbol_ref) {
+  if (symbol_ref.module_id != 0 ||
+      symbol_ref.symbol_id >= module->symbols.count) {
+    return iree_string_view_empty();
+  }
+  const loom_symbol_t* symbol = &module->symbols.entries[symbol_ref.symbol_id];
+  if (symbol->name_id >= module->strings.count) {
+    return iree_string_view_empty();
+  }
+  return module->strings.entries[symbol->name_id];
+}
+
+static bool loom_low_source_selection_u32_topology_differs(uint32_t lhs,
+                                                           uint32_t rhs) {
+  return lhs != 0 && rhs != 0 && lhs != rhs;
+}
+
+static bool loom_low_source_selection_snapshots_differ(
+    const loom_target_snapshot_t* lhs, const loom_target_snapshot_t* rhs) {
+  if (lhs == NULL || rhs == NULL) {
+    return false;
+  }
+  return loom_low_source_selection_u32_topology_differs(lhs->subgroup_size,
+                                                        rhs->subgroup_size) ||
+         loom_low_source_selection_u32_topology_differs(
+             lhs->max_flat_workgroup_size, rhs->max_flat_workgroup_size) ||
+         loom_low_source_selection_u32_topology_differs(
+             lhs->max_workgroup_size.x, rhs->max_workgroup_size.x) ||
+         loom_low_source_selection_u32_topology_differs(
+             lhs->max_workgroup_size.y, rhs->max_workgroup_size.y) ||
+         loom_low_source_selection_u32_topology_differs(
+             lhs->max_workgroup_size.z, rhs->max_workgroup_size.z);
+}
+
+static void loom_low_source_selection_set_candidate_target(
+    const loom_module_t* module, const loom_target_symbol_facts_t* target_facts,
+    loom_low_source_selection_t* selection) {
+  selection->candidate_target_symbol_name =
+      loom_low_source_selection_symbol_ref_name(module, target_facts->symbol);
+  selection->candidate_target_bundle_name = target_facts->storage.bundle.name;
+  selection->candidate_target_snapshot_name =
+      target_facts->storage.snapshot.name;
+  selection->candidate_target_config_name = target_facts->storage.config.name;
+  selection->candidate_target_subgroup_size =
+      target_facts->storage.snapshot.subgroup_size;
+}
+
+static iree_status_t loom_low_source_selection_find_candidate_targets(
+    const loom_module_t* module, loom_symbol_fact_table_t* fact_table,
+    const loom_low_source_selection_options_t* options,
+    loom_low_source_selection_t* selection) {
+  if (!options->collect_target_candidates ||
+      selection->target_source != LOOM_TARGET_SELECTION_SOURCE_INVOCATION ||
+      selection->target_bundle == NULL) {
+    return iree_ok_status();
+  }
+  for (iree_host_size_t i = 0; i < module->symbols.count; ++i) {
+    const loom_symbol_ref_t candidate_ref = {
+        .module_id = 0,
+        .symbol_id = (loom_symbol_id_t)i,
+    };
+    if (candidate_ref.symbol_id == selection->target_ref.symbol_id) {
+      continue;
+    }
+    const loom_symbol_facts_base_t* base_facts = NULL;
+    IREE_RETURN_IF_ERROR(loom_symbol_fact_table_lookup_ref(
+        fact_table, module, candidate_ref, &base_facts));
+    const loom_target_symbol_facts_t* target_facts =
+        loom_target_symbol_facts_cast(base_facts);
+    if (target_facts == NULL) {
+      continue;
+    }
+    if (!loom_target_function_contract_bundles_compatible(
+            &target_facts->storage.bundle, selection->target_bundle)) {
+      continue;
+    }
+    if (!loom_low_source_selection_snapshots_differ(
+            target_facts->storage.bundle.snapshot,
+            selection->target_bundle->snapshot)) {
+      continue;
+    }
+    if (selection->candidate_target_count == 0) {
+      loom_low_source_selection_set_candidate_target(module, target_facts,
+                                                     selection);
+    }
+    if (selection->candidate_target_count != UINT32_MAX) {
+      ++selection->candidate_target_count;
+    }
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_low_source_selection_emit_target_conflict(
     iree_diagnostic_emitter_t diagnostic_emitter,
     const loom_func_symbol_facts_t* func_facts,
@@ -144,8 +237,11 @@ static iree_status_t loom_low_source_selection_try_symbol(
     return iree_ok_status();
   }
   loom_symbol_ref_t target_ref = func_facts->target_symbol;
+  loom_target_selection_source_t target_source =
+      LOOM_TARGET_SELECTION_SOURCE_AUTHORED;
   if (!loom_symbol_ref_is_valid(target_ref)) {
     target_ref = options->target_ref;
+    target_source = LOOM_TARGET_SELECTION_SOURCE_INVOCATION;
   }
   if (!loom_symbol_ref_is_valid(target_ref)) {
     return iree_ok_status();
@@ -183,8 +279,14 @@ static iree_status_t loom_low_source_selection_try_symbol(
 
   out_selection->kind = kind;
   out_selection->func = loom_func_like_cast(module, func_facts->func_op);
+  out_selection->function_name = func_facts->name;
+  out_selection->target_source = target_source;
   out_selection->target_ref = target_ref;
+  out_selection->target_symbol_name =
+      loom_low_source_selection_symbol_ref_name(module, target_ref);
   out_selection->policy = policy;
+  IREE_RETURN_IF_ERROR(loom_low_source_selection_find_candidate_targets(
+      module, fact_table, options, out_selection));
   *out_compatible = true;
   return iree_ok_status();
 }

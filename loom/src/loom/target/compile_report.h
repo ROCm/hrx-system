@@ -995,6 +995,36 @@ typedef struct loom_target_compile_report_source_low_row_t {
 #define LOOM_TARGET_COMPILE_REPORT_SOURCE_LOW_EXECUTION_COUNT_PLUS_ONE_UNKNOWN \
   0u
 
+// One source function target selection copied into a compile report.
+typedef struct loom_target_compile_report_source_low_target_row_t {
+  // Source function symbol selected for source-to-low lowering.
+  iree_string_view_t function_name;
+  // Whether the effective target came from source IR or invocation selection.
+  loom_target_selection_source_t target_source;
+  // Module target symbol used as the effective target record.
+  iree_string_view_t target_symbol_name;
+  // Effective target bundle name selected for the source function.
+  iree_string_view_t target_bundle_name;
+  // Effective target snapshot name selected for the source function.
+  iree_string_view_t target_snapshot_name;
+  // Effective target config name selected for the source function.
+  iree_string_view_t target_config_name;
+  // Effective target fixed subgroup size, or zero when unspecified.
+  uint32_t target_subgroup_size;
+  // Compatible module target records with different topology.
+  uint32_t candidate_target_count;
+  // First compatible different-topology target symbol name, if any.
+  iree_string_view_t candidate_target_symbol_name;
+  // First compatible different-topology target bundle name, if any.
+  iree_string_view_t candidate_target_bundle_name;
+  // First compatible different-topology target snapshot name, if any.
+  iree_string_view_t candidate_target_snapshot_name;
+  // First compatible different-topology target config name, if any.
+  iree_string_view_t candidate_target_config_name;
+  // First compatible different-topology target subgroup size, if any.
+  uint32_t candidate_target_subgroup_size;
+} loom_target_compile_report_source_low_target_row_t;
+
 // Summary of source-to-target-low selections grouped by stable lowering shape.
 typedef struct loom_target_compile_report_source_low_selection_summary_t {
   // Source function symbol containing this lowering shape.
@@ -1566,6 +1596,8 @@ typedef struct loom_target_compile_report_t {
   loom_target_compile_report_row_list_t wait_action_rows;
   // Owned source-to-low selection rows.
   loom_target_compile_report_row_list_t source_low_rows;
+  // Owned source function target-selection rows.
+  loom_target_compile_report_row_list_t source_low_target_rows;
   // Owned source-to-low selection summaries.
   loom_target_compile_report_row_list_t source_low_selection_summaries;
   // Owned emitted source-memory packet rows.
@@ -1765,6 +1797,11 @@ iree_status_t loom_target_compile_report_record_target_capability_row(
 iree_status_t loom_target_compile_report_record_source_low_row(
     loom_target_compile_report_t* report,
     const loom_target_compile_report_source_low_row_t* row);
+
+// Records one source function target-selection row.
+iree_status_t loom_target_compile_report_record_source_low_target_row(
+    loom_target_compile_report_t* report,
+    const loom_target_compile_report_source_low_target_row_t* row);
 
 // Records one emitted source-memory packet row.
 iree_status_t loom_target_compile_report_record_source_low_memory_row(
