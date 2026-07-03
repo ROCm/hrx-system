@@ -216,6 +216,8 @@ typedef struct iree_benchmark_loom_hal_actual_provider_t {
   loom_run_hal_testbench_actual_provider_t execution;
   // Sample compilation label for rows emitted from this provider.
   iree_string_view_t sample_compilation;
+  // Optional suffix appended to debug/full artifact leaves.
+  iree_string_view_t artifact_path_suffix;
   // Structured diagnostics emitted while compiling this candidate.
   iree_benchmark_loom_diagnostic_capture_t diagnostics;
   // Structured compile report populated while emitting this candidate.
@@ -243,6 +245,15 @@ typedef struct iree_benchmark_loom_hal_actual_provider_t {
   // True when |compile_report_capture| owns initialized capture state.
   bool compile_report_capture_initialized;
 } iree_benchmark_loom_hal_actual_provider_t;
+
+typedef struct iree_benchmark_loom_hal_actual_sequence_t {
+  // Host allocator used for sequence-owned provider storage.
+  iree_allocator_t host_allocator;
+  // Sequence-owned providers in check.case source order.
+  iree_benchmark_loom_hal_actual_provider_t* providers;
+  // Number of entries in |providers|.
+  iree_host_size_t provider_count;
+} iree_benchmark_loom_hal_actual_sequence_t;
 
 typedef struct iree_benchmark_loom_dispatch_comparison_candidate_t {
   // Selected benchmark/case/policy identity for this comparison member.

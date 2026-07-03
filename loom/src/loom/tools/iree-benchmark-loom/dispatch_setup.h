@@ -68,7 +68,7 @@ typedef struct iree_benchmark_loom_dispatch_compile_context_t {
   bool uses_sequence;
   // Compiled multi-actual sequence reused by all work items in the compile
   // item.
-  loom_run_hal_testbench_actual_sequence_t hal_sequence;
+  iree_benchmark_loom_hal_actual_sequence_t hal_sequence;
   // True when |hal_sequence| owns initialized state.
   bool hal_sequence_initialized;
   // Compiled single-actual provider reused by all work items in the compile
@@ -77,7 +77,7 @@ typedef struct iree_benchmark_loom_dispatch_compile_context_t {
   // True when |hal_provider| owns initialized state.
   bool hal_provider_initialized;
   // First sequence provider that rejected compilation, or NULL when runnable.
-  const loom_run_hal_testbench_actual_provider_t* rejected_sequence_provider;
+  const iree_benchmark_loom_hal_actual_provider_t* rejected_sequence_provider;
   // Execution options with HAL actual and reference providers wired in.
   loom_testbench_case_execution_options_t execution_options;
   // Materializer options used by HAL benchmark timing batches.
