@@ -144,6 +144,7 @@ iree_execution_test_suite(
         "report_dispatch_memory_economics_amdgpu.loom",
         "report_loop_matrix_mix_amdgpu.loom",
         "report_loop_memory_economics_amdgpu.loom",
+        "report_materialized_fragment_spills_amdgpu.loom",
         "selected_root_amdgpu.loom",
     ],
     manifests = ["loom-compile-amdgpu.test.json"],

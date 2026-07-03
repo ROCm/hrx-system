@@ -1,0 +1,186 @@
+amdgpu.target<gfx1100> @target
+
+kernel.def target(@target) export("report_materialized_fragment_spills") @report_materialized_fragment_spills() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %weight: buffer, %output: buffer) {
+  %zero = index.constant 0 : offset
+  %one = index.constant 1 : index
+  %two = index.constant 2 : index
+  %sixteen = index.constant 16 : index
+  %thirty_two = index.constant 32 : index
+  %forty_eight = index.constant 48 : index
+  %sixty_four = index.constant 64 : index
+  %eighty = index.constant 80 : index
+  %ninety_six = index.constant 96 : index
+  %one_twelve = index.constant 112 : index
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 16 : index
+  %weight_layout = encoding.layout.strided [1, 32] : encoding<layout>
+  %zero_acc = vector.constant 0.0 : vector<8xf32>
+  %input_global = buffer.assume.memory_space<global> %input : buffer
+  %weight_global = buffer.assume.memory_space<global> %weight : buffer
+  %output_global = buffer.assume.memory_space<global> %output : buffer
+  %input_view = buffer.view %input_global[%zero] : buffer -> view<128x32xbf16, #dense>
+  %weight_view = buffer.view %weight_global[%zero] : buffer -> view<32x64xbf16, %weight_layout>
+  %output_view = buffer.view %output_global[%zero] : buffer -> view<128x64xbf16, #dense>
+  %lhs_first0 = vector.fragment.load<lhs> %input_view[%zero, %zero] shape [%m, %k] : view<128x32xbf16, #dense> -> vector<16xbf16>
+  %lhs_first1 = vector.fragment.load<lhs> %input_view[%sixteen, %zero] shape [%m, %k] : view<128x32xbf16, #dense> -> vector<16xbf16>
+  %lhs_first2 = vector.fragment.load<lhs> %input_view[%thirty_two, %zero] shape [%m, %k] : view<128x32xbf16, #dense> -> vector<16xbf16>
+  %lhs_first3 = vector.fragment.load<lhs> %input_view[%forty_eight, %zero] shape [%m, %k] : view<128x32xbf16, #dense> -> vector<16xbf16>
+  %lhs_first4 = vector.fragment.load<lhs> %input_view[%sixty_four, %zero] shape [%m, %k] : view<128x32xbf16, #dense> -> vector<16xbf16>
+  %lhs_first5 = vector.fragment.load<lhs> %input_view[%eighty, %zero] shape [%m, %k] : view<128x32xbf16, #dense> -> vector<16xbf16>
+  %lhs_first6 = vector.fragment.load<lhs> %input_view[%ninety_six, %zero] shape [%m, %k] : view<128x32xbf16, #dense> -> vector<16xbf16>
+  %lhs_first7 = vector.fragment.load<lhs> %input_view[%one_twelve, %zero] shape [%m, %k] : view<128x32xbf16, #dense> -> vector<16xbf16>
+  %rhs_first0 = vector.fragment.load<rhs> %weight_view[%zero, %zero] shape [%k, %n] : view<32x64xbf16, %weight_layout> -> vector<16xbf16>
+  %rhs_first1 = vector.fragment.load<rhs> %weight_view[%zero, %sixteen] shape [%k, %n] : view<32x64xbf16, %weight_layout> -> vector<16xbf16>
+  %rhs_first2 = vector.fragment.load<rhs> %weight_view[%zero, %thirty_two] shape [%k, %n] : view<32x64xbf16, %weight_layout> -> vector<16xbf16>
+  %rhs_first3 = vector.fragment.load<rhs> %weight_view[%zero, %forty_eight] shape [%k, %n] : view<32x64xbf16, %weight_layout> -> vector<16xbf16>
+  %init00 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
+  %first00 = vector.mma %lhs_first0, %rhs_first0, %init00 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  %init01 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
+  %first01 = vector.mma %lhs_first0, %rhs_first1, %init01 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  %init02 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
+  %first02 = vector.mma %lhs_first0, %rhs_first2, %init02 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  %init03 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
+  %first03 = vector.mma %lhs_first0, %rhs_first3, %init03 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  %init10 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
+  %first10 = vector.mma %lhs_first1, %rhs_first0, %init10 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  %init11 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
+  %first11 = vector.mma %lhs_first1, %rhs_first1, %init11 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  %init12 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
+  %first12 = vector.mma %lhs_first1, %rhs_first2, %init12 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  %init13 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
+  %first13 = vector.mma %lhs_first1, %rhs_first3, %init13 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  %init20 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
+  %first20 = vector.mma %lhs_first2, %rhs_first0, %init20 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  %init21 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
+  %first21 = vector.mma %lhs_first2, %rhs_first1, %init21 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  %init22 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
+  %first22 = vector.mma %lhs_first2, %rhs_first2, %init22 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  %init23 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
+  %first23 = vector.mma %lhs_first2, %rhs_first3, %init23 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  %init30 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
+  %first30 = vector.mma %lhs_first3, %rhs_first0, %init30 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  %init31 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
+  %first31 = vector.mma %lhs_first3, %rhs_first1, %init31 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  %init32 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
+  %first32 = vector.mma %lhs_first3, %rhs_first2, %init32 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  %init33 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
+  %first33 = vector.mma %lhs_first3, %rhs_first3, %init33 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  %init40 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
+  %first40 = vector.mma %lhs_first4, %rhs_first0, %init40 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  %init41 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
+  %first41 = vector.mma %lhs_first4, %rhs_first1, %init41 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  %init42 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
+  %first42 = vector.mma %lhs_first4, %rhs_first2, %init42 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  %init43 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
+  %first43 = vector.mma %lhs_first4, %rhs_first3, %init43 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  %init50 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
+  %first50 = vector.mma %lhs_first5, %rhs_first0, %init50 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  %init51 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
+  %first51 = vector.mma %lhs_first5, %rhs_first1, %init51 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  %init52 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
+  %first52 = vector.mma %lhs_first5, %rhs_first2, %init52 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  %init53 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
+  %first53 = vector.mma %lhs_first5, %rhs_first3, %init53 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  %init60 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
+  %first60 = vector.mma %lhs_first6, %rhs_first0, %init60 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  %init61 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
+  %first61 = vector.mma %lhs_first6, %rhs_first1, %init61 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  %init62 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
+  %first62 = vector.mma %lhs_first6, %rhs_first2, %init62 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  %init63 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
+  %first63 = vector.mma %lhs_first6, %rhs_first3, %init63 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  %init70 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
+  %first70 = vector.mma %lhs_first7, %rhs_first0, %init70 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  %init71 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
+  %first71 = vector.mma %lhs_first7, %rhs_first1, %init71 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  %init72 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
+  %first72 = vector.mma %lhs_first7, %rhs_first2, %init72 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  %init73 = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
+  %first73 = vector.mma %lhs_first7, %rhs_first3, %init73 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  %result00, %result01, %result02, %result03, %result10, %result11, %result12, %result13, %result20, %result21, %result22, %result23, %result30, %result31, %result32, %result33, %result40, %result41, %result42, %result43, %result50, %result51, %result52, %result53, %result60, %result61, %result62, %result63, %result70, %result71, %result72, %result73 = scf.for %k_tile = [%one to %two step %one](%acc00 = %first00 : vector<8xf32>, %acc01 = %first01 : vector<8xf32>, %acc02 = %first02 : vector<8xf32>, %acc03 = %first03 : vector<8xf32>, %acc10 = %first10 : vector<8xf32>, %acc11 = %first11 : vector<8xf32>, %acc12 = %first12 : vector<8xf32>, %acc13 = %first13 : vector<8xf32>, %acc20 = %first20 : vector<8xf32>, %acc21 = %first21 : vector<8xf32>, %acc22 = %first22 : vector<8xf32>, %acc23 = %first23 : vector<8xf32>, %acc30 = %first30 : vector<8xf32>, %acc31 = %first31 : vector<8xf32>, %acc32 = %first32 : vector<8xf32>, %acc33 = %first33 : vector<8xf32>, %acc40 = %first40 : vector<8xf32>, %acc41 = %first41 : vector<8xf32>, %acc42 = %first42 : vector<8xf32>, %acc43 = %first43 : vector<8xf32>, %acc50 = %first50 : vector<8xf32>, %acc51 = %first51 : vector<8xf32>, %acc52 = %first52 : vector<8xf32>, %acc53 = %first53 : vector<8xf32>, %acc60 = %first60 : vector<8xf32>, %acc61 = %first61 : vector<8xf32>, %acc62 = %first62 : vector<8xf32>, %acc63 = %first63 : vector<8xf32>, %acc70 = %first70 : vector<8xf32>, %acc71 = %first71 : vector<8xf32>, %acc72 = %first72 : vector<8xf32>, %acc73 = %first73 : vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
+    %k_origin = index.mul %k_tile, %sixteen : index
+    %lhs0 = vector.fragment.load<lhs> %input_view[%zero, %k_origin] shape [%m, %k] : view<128x32xbf16, #dense> -> vector<16xbf16>
+    %lhs1 = vector.fragment.load<lhs> %input_view[%sixteen, %k_origin] shape [%m, %k] : view<128x32xbf16, #dense> -> vector<16xbf16>
+    %lhs2 = vector.fragment.load<lhs> %input_view[%thirty_two, %k_origin] shape [%m, %k] : view<128x32xbf16, #dense> -> vector<16xbf16>
+    %lhs3 = vector.fragment.load<lhs> %input_view[%forty_eight, %k_origin] shape [%m, %k] : view<128x32xbf16, #dense> -> vector<16xbf16>
+    %lhs4 = vector.fragment.load<lhs> %input_view[%sixty_four, %k_origin] shape [%m, %k] : view<128x32xbf16, #dense> -> vector<16xbf16>
+    %lhs5 = vector.fragment.load<lhs> %input_view[%eighty, %k_origin] shape [%m, %k] : view<128x32xbf16, #dense> -> vector<16xbf16>
+    %lhs6 = vector.fragment.load<lhs> %input_view[%ninety_six, %k_origin] shape [%m, %k] : view<128x32xbf16, #dense> -> vector<16xbf16>
+    %lhs7 = vector.fragment.load<lhs> %input_view[%one_twelve, %k_origin] shape [%m, %k] : view<128x32xbf16, #dense> -> vector<16xbf16>
+    %rhs0 = vector.fragment.load<rhs> %weight_view[%k_origin, %zero] shape [%k, %n] : view<32x64xbf16, %weight_layout> -> vector<16xbf16>
+    %rhs1 = vector.fragment.load<rhs> %weight_view[%k_origin, %sixteen] shape [%k, %n] : view<32x64xbf16, %weight_layout> -> vector<16xbf16>
+    %rhs2 = vector.fragment.load<rhs> %weight_view[%k_origin, %thirty_two] shape [%k, %n] : view<32x64xbf16, %weight_layout> -> vector<16xbf16>
+    %rhs3 = vector.fragment.load<rhs> %weight_view[%k_origin, %forty_eight] shape [%k, %n] : view<32x64xbf16, %weight_layout> -> vector<16xbf16>
+    %next00 = vector.mma %lhs0, %rhs0, %acc00 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next01 = vector.mma %lhs0, %rhs1, %acc01 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next02 = vector.mma %lhs0, %rhs2, %acc02 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next03 = vector.mma %lhs0, %rhs3, %acc03 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next10 = vector.mma %lhs1, %rhs0, %acc10 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next11 = vector.mma %lhs1, %rhs1, %acc11 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next12 = vector.mma %lhs1, %rhs2, %acc12 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next13 = vector.mma %lhs1, %rhs3, %acc13 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next20 = vector.mma %lhs2, %rhs0, %acc20 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next21 = vector.mma %lhs2, %rhs1, %acc21 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next22 = vector.mma %lhs2, %rhs2, %acc22 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next23 = vector.mma %lhs2, %rhs3, %acc23 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next30 = vector.mma %lhs3, %rhs0, %acc30 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next31 = vector.mma %lhs3, %rhs1, %acc31 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next32 = vector.mma %lhs3, %rhs2, %acc32 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next33 = vector.mma %lhs3, %rhs3, %acc33 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next40 = vector.mma %lhs4, %rhs0, %acc40 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next41 = vector.mma %lhs4, %rhs1, %acc41 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next42 = vector.mma %lhs4, %rhs2, %acc42 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next43 = vector.mma %lhs4, %rhs3, %acc43 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next50 = vector.mma %lhs5, %rhs0, %acc50 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next51 = vector.mma %lhs5, %rhs1, %acc51 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next52 = vector.mma %lhs5, %rhs2, %acc52 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next53 = vector.mma %lhs5, %rhs3, %acc53 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next60 = vector.mma %lhs6, %rhs0, %acc60 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next61 = vector.mma %lhs6, %rhs1, %acc61 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next62 = vector.mma %lhs6, %rhs2, %acc62 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next63 = vector.mma %lhs6, %rhs3, %acc63 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next70 = vector.mma %lhs7, %rhs0, %acc70 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next71 = vector.mma %lhs7, %rhs1, %acc71 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next72 = vector.mma %lhs7, %rhs2, %acc72 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next73 = vector.mma %lhs7, %rhs3, %acc73 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    scf.yield %next00, %next01, %next02, %next03, %next10, %next11, %next12, %next13, %next20, %next21, %next22, %next23, %next30, %next31, %next32, %next33, %next40, %next41, %next42, %next43, %next50, %next51, %next52, %next53, %next60, %next61, %next62, %next63, %next70, %next71, %next72, %next73 : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>
+  }
+  vector.fragment.store<result> %result00, %output_view[%zero, %zero] shape [%m, %n] : vector<8xf32>, view<128x64xbf16, #dense>
+  vector.fragment.store<result> %result01, %output_view[%zero, %sixteen] shape [%m, %n] : vector<8xf32>, view<128x64xbf16, #dense>
+  vector.fragment.store<result> %result02, %output_view[%zero, %thirty_two] shape [%m, %n] : vector<8xf32>, view<128x64xbf16, #dense>
+  vector.fragment.store<result> %result03, %output_view[%zero, %forty_eight] shape [%m, %n] : vector<8xf32>, view<128x64xbf16, #dense>
+  vector.fragment.store<result> %result10, %output_view[%sixteen, %zero] shape [%m, %n] : vector<8xf32>, view<128x64xbf16, #dense>
+  vector.fragment.store<result> %result11, %output_view[%sixteen, %sixteen] shape [%m, %n] : vector<8xf32>, view<128x64xbf16, #dense>
+  vector.fragment.store<result> %result12, %output_view[%sixteen, %thirty_two] shape [%m, %n] : vector<8xf32>, view<128x64xbf16, #dense>
+  vector.fragment.store<result> %result13, %output_view[%sixteen, %forty_eight] shape [%m, %n] : vector<8xf32>, view<128x64xbf16, #dense>
+  vector.fragment.store<result> %result20, %output_view[%thirty_two, %zero] shape [%m, %n] : vector<8xf32>, view<128x64xbf16, #dense>
+  vector.fragment.store<result> %result21, %output_view[%thirty_two, %sixteen] shape [%m, %n] : vector<8xf32>, view<128x64xbf16, #dense>
+  vector.fragment.store<result> %result22, %output_view[%thirty_two, %thirty_two] shape [%m, %n] : vector<8xf32>, view<128x64xbf16, #dense>
+  vector.fragment.store<result> %result23, %output_view[%thirty_two, %forty_eight] shape [%m, %n] : vector<8xf32>, view<128x64xbf16, #dense>
+  vector.fragment.store<result> %result30, %output_view[%forty_eight, %zero] shape [%m, %n] : vector<8xf32>, view<128x64xbf16, #dense>
+  vector.fragment.store<result> %result31, %output_view[%forty_eight, %sixteen] shape [%m, %n] : vector<8xf32>, view<128x64xbf16, #dense>
+  vector.fragment.store<result> %result32, %output_view[%forty_eight, %thirty_two] shape [%m, %n] : vector<8xf32>, view<128x64xbf16, #dense>
+  vector.fragment.store<result> %result33, %output_view[%forty_eight, %forty_eight] shape [%m, %n] : vector<8xf32>, view<128x64xbf16, #dense>
+  vector.fragment.store<result> %result40, %output_view[%sixty_four, %zero] shape [%m, %n] : vector<8xf32>, view<128x64xbf16, #dense>
+  vector.fragment.store<result> %result41, %output_view[%sixty_four, %sixteen] shape [%m, %n] : vector<8xf32>, view<128x64xbf16, #dense>
+  vector.fragment.store<result> %result42, %output_view[%sixty_four, %thirty_two] shape [%m, %n] : vector<8xf32>, view<128x64xbf16, #dense>
+  vector.fragment.store<result> %result43, %output_view[%sixty_four, %forty_eight] shape [%m, %n] : vector<8xf32>, view<128x64xbf16, #dense>
+  vector.fragment.store<result> %result50, %output_view[%eighty, %zero] shape [%m, %n] : vector<8xf32>, view<128x64xbf16, #dense>
+  vector.fragment.store<result> %result51, %output_view[%eighty, %sixteen] shape [%m, %n] : vector<8xf32>, view<128x64xbf16, #dense>
+  vector.fragment.store<result> %result52, %output_view[%eighty, %thirty_two] shape [%m, %n] : vector<8xf32>, view<128x64xbf16, #dense>
+  vector.fragment.store<result> %result53, %output_view[%eighty, %forty_eight] shape [%m, %n] : vector<8xf32>, view<128x64xbf16, #dense>
+  vector.fragment.store<result> %result60, %output_view[%ninety_six, %zero] shape [%m, %n] : vector<8xf32>, view<128x64xbf16, #dense>
+  vector.fragment.store<result> %result61, %output_view[%ninety_six, %sixteen] shape [%m, %n] : vector<8xf32>, view<128x64xbf16, #dense>
+  vector.fragment.store<result> %result62, %output_view[%ninety_six, %thirty_two] shape [%m, %n] : vector<8xf32>, view<128x64xbf16, #dense>
+  vector.fragment.store<result> %result63, %output_view[%ninety_six, %forty_eight] shape [%m, %n] : vector<8xf32>, view<128x64xbf16, #dense>
+  vector.fragment.store<result> %result70, %output_view[%one_twelve, %zero] shape [%m, %n] : vector<8xf32>, view<128x64xbf16, #dense>
+  vector.fragment.store<result> %result71, %output_view[%one_twelve, %sixteen] shape [%m, %n] : vector<8xf32>, view<128x64xbf16, #dense>
+  vector.fragment.store<result> %result72, %output_view[%one_twelve, %thirty_two] shape [%m, %n] : vector<8xf32>, view<128x64xbf16, #dense>
+  vector.fragment.store<result> %result73, %output_view[%one_twelve, %forty_eight] shape [%m, %n] : vector<8xf32>, view<128x64xbf16, #dense>
+  kernel.return
+}
