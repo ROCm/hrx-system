@@ -2158,8 +2158,6 @@ static iree_status_t
 loom_target_compile_report_append_source_low_descriptor_fields(
     const loom_target_compile_report_source_low_row_t* row,
     iree_string_builder_t* builder) {
-  IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-      builder, " descriptor=%" PRIu64, row->descriptor_id));
   if (!iree_string_view_is_empty(row->descriptor_key)) {
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
         builder, " descriptor_key=%.*s", (int)row->descriptor_key.size,
@@ -4496,8 +4494,6 @@ static iree_status_t loom_target_compile_report_format_source_low_row_json(
   IREE_RETURN_IF_ERROR(
       loom_target_compile_report_json_write_optional_string_field(
           stream, &first_field, "plan_key", row->plan_key));
-  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_optional_u64_field(
-      stream, &first_field, "descriptor_id", row->descriptor_id));
   IREE_RETURN_IF_ERROR(
       loom_target_compile_report_json_write_optional_string_field(
           stream, &first_field, "descriptor_key", row->descriptor_key));
