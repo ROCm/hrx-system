@@ -364,8 +364,8 @@ iree_status_t loom_low_descriptor_text_asm_build_structural(
         return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                                 "low asm copy takes one operand");
       }
-      return loom_low_copy_build(builder, operands[0], result_type, location,
-                                 out_op);
+      return loom_low_copy_build(builder, operands[0], false, result_type,
+                                 location, out_op);
     default:
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "unknown low asm structural kind %u",

@@ -21,6 +21,7 @@ loom_cc_library(
     hdrs = ["allocation.h"],
     deps = [
         "//loom/src/loom/codegen/low:allocation",
+        "//loom/src/loom/codegen/low:allocation_live_range_splitting",
         "//loom/src/loom/codegen/low:allocation_materialization",
         "//loom/src/loom/codegen/low:allocation_rematerialization",
         "//loom/src/loom/codegen/low:descriptors",

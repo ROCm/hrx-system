@@ -419,7 +419,7 @@ static iree_status_t loom_low_lower_rule_materializer_copy_operands(
     loom_op_t* copy_op = NULL;
     IREE_RETURN_IF_ERROR(
         loom_low_copy_build(loom_low_lower_context_builder(context),
-                            operands[i], copy_type, location, &copy_op));
+                            operands[i], false, copy_type, location, &copy_op));
     operands[i] = loom_low_copy_result(copy_op);
   }
   return iree_ok_status();
@@ -2902,8 +2902,8 @@ static iree_status_t loom_low_lower_rule_copy_low_operands(
     IREE_ASSERT(loom_low_type_is_register(copy_type));
     loom_op_t* copy_op = NULL;
     IREE_RETURN_IF_ERROR(loom_low_copy_build(
-        loom_low_lower_context_builder(context), low_operands[i], copy_type,
-        source_op->location, &copy_op));
+        loom_low_lower_context_builder(context), low_operands[i], false,
+        copy_type, source_op->location, &copy_op));
     low_operands[i] = loom_low_copy_result(copy_op);
   }
   return iree_ok_status();

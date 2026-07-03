@@ -216,6 +216,8 @@ iree_status_t loom_low_allocate_function(
         .target = state.target,
         .liveness = state.liveness,
         .placement = state.placement,
+        .fixed_values = state.target_constraints.fixed_values,
+        .fixed_value_count = state.target_constraints.fixed_value_count,
         .allocation_mode = loom_low_function_allocation(low_func_op),
         .error_count = state.target_constraints.error_count,
         .assignments = state.interval_assignment.assignments,

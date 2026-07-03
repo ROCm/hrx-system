@@ -355,6 +355,25 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "allocation_live_range_splitting",
+    srcs = ["allocation_live_range_splitting.c"],
+    hdrs = ["allocation_live_range_splitting.h"],
+    deps = [
+        ":allocation",
+        ":diagnostics",
+        "//loom/src/loom/codegen/low/allocation:live_range",
+        "//loom/src/loom/error:emitter",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/rewrite:rewriter",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
     name = "allocation_json",
     srcs = ["allocation_json.c"],
     hdrs = ["allocation_json.h"],
@@ -491,6 +510,7 @@ loom_cc_library(
     deps = [
         ":addressability",
         ":allocation",
+        ":allocation_live_range_splitting",
         ":allocation_materialization",
         ":allocation_rematerialization",
         ":diagnostics",

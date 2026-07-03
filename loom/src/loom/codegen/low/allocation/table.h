@@ -12,6 +12,7 @@
 #include "iree/base/api.h"
 #include "loom/analysis/liveness.h"
 #include "loom/codegen/low/allocation/assignment.h"
+#include "loom/codegen/low/allocation/target_constraints.h"
 #include "loom/codegen/low/descriptors.h"
 #include "loom/codegen/low/placement.h"
 #include "loom/codegen/low/storage_lease.h"
@@ -283,6 +284,10 @@ typedef struct loom_low_allocation_table_t {
   loom_liveness_analysis_t liveness;
   // Placement relations consumed while assigning intervals.
   loom_low_placement_table_t placement;
+  // Resolved fixed SSA value locations consumed by this allocation.
+  const loom_low_allocation_resolved_fixed_value_t* fixed_values;
+  // Number of records in |fixed_values|.
+  iree_host_size_t fixed_value_count;
   // Allocation mode requested on the low function, or 0 for the default.
   uint8_t allocation_mode;
   // Number of error diagnostics emitted while attempting allocation.

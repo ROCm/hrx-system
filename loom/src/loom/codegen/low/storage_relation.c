@@ -42,6 +42,11 @@ uint16_t loom_low_storage_relation_count(const loom_module_t* module,
 
   switch (op->kind) {
     case LOOM_OP_LOW_COPY:
+      if (loom_low_copy_detached(op)) {
+        break;
+      }
+      ++count;
+      break;
     case LOOM_OP_LOW_SLICE:
       ++count;
       break;

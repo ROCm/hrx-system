@@ -396,9 +396,11 @@ iree_status_t loom_low_const_verify(
 LOOM_DEFINE_ISA(loom_low_copy_isa, LOOM_OP_LOW_COPY)
 LOOM_DEFINE_OPERAND(loom_low_copy_source, 0)
 LOOM_DEFINE_RESULT(loom_low_copy_result, 0)
+LOOM_DEFINE_ATTR_BOOL(loom_low_copy_detached, 0)
 iree_status_t loom_low_copy_build(
     loom_builder_t* builder,
     loom_may_consume loom_value_id_t source,
+    bool detached,
     loom_type_t result_type,
     loom_location_id_t location,
     loom_op_t** out_op);
