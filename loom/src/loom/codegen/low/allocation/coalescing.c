@@ -64,17 +64,35 @@ loom_low_allocation_coalescing_first_placement_relation(
   return NULL;
 }
 
-// Branch placement may make two values overlap in the linear interval space
-// even when no block can observe both values live at once. Only those
-// CFG-induced overlaps are safe to ignore during phi-style coalescing.
+static bool loom_low_allocation_coalescing_edge_affinity_cause(
+    loom_low_placement_cause_t cause) {
+  switch (cause) {
+    case LOOM_LOW_PLACEMENT_CAUSE_LOW_BRANCH:
+    case LOOM_LOW_PLACEMENT_CAUSE_LOW_SCF_FOR:
+    case LOOM_LOW_PLACEMENT_CAUSE_LOW_SCF_YIELD:
+      return true;
+    default:
+      return false;
+  }
+}
+
+// Edge placement may make counterpart values overlap in the linear interval
+// space even when the edge handoff makes them mutually exclusive. The
+// relation itself is the proof for CFG/SCF edge counterparts; non-edge storage
+// aliases still need the block-sensitive overlap query.
 static bool
-loom_low_allocation_coalescing_can_ignore_branch_counterpart_conflict(
+loom_low_allocation_coalescing_can_ignore_relation_counterpart_conflict(
     const loom_low_allocation_coalescing_context_t* context,
     const loom_liveness_interval_t* interval,
+    const loom_low_placement_relation_t* relation,
     const loom_low_allocation_assignment_t* counterpart) {
   if (!loom_low_allocation_live_range_assignment_overlaps_interval(counterpart,
                                                                    interval)) {
     return false;
+  }
+  if (relation->kind == LOOM_LOW_PLACEMENT_RELATION_SAME_STORAGE &&
+      loom_low_allocation_coalescing_edge_affinity_cause(relation->cause)) {
+    return true;
   }
   return !loom_low_allocation_live_range_values_overlap(
       context->liveness, interval->value_id, interval->start_point,
@@ -126,18 +144,6 @@ static bool loom_low_allocation_coalescing_storage_alias_cause(
     case LOOM_LOW_PLACEMENT_CAUSE_LOW_COPY:
     case LOOM_LOW_PLACEMENT_CAUSE_LOW_SLICE:
     case LOOM_LOW_PLACEMENT_CAUSE_LOW_CONCAT:
-      return true;
-    default:
-      return false;
-  }
-}
-
-static bool loom_low_allocation_coalescing_edge_affinity_cause(
-    loom_low_placement_cause_t cause) {
-  switch (cause) {
-    case LOOM_LOW_PLACEMENT_CAUSE_LOW_BRANCH:
-    case LOOM_LOW_PLACEMENT_CAUSE_LOW_SCF_FOR:
-    case LOOM_LOW_PLACEMENT_CAUSE_LOW_SCF_YIELD:
       return true;
     default:
       return false;
@@ -504,8 +510,8 @@ loom_low_allocation_coalescing_append_relation_interval_if_source_assigned(
   const loom_value_id_t* ignored_value_ids = NULL;
   uint16_t ignored_value_count = 0;
   const loom_value_id_t source_value_id = source_assignment->value_id;
-  if (loom_low_allocation_coalescing_can_ignore_branch_counterpart_conflict(
-          context, interval, source_assignment)) {
+  if (loom_low_allocation_coalescing_can_ignore_relation_counterpart_conflict(
+          context, interval, relation, source_assignment)) {
     ignored_value_ids = &source_value_id;
     ignored_value_count = 1;
   }
@@ -1058,8 +1064,8 @@ loom_low_allocation_coalescing_assign_concat_source_from_edge_destination(
     uint16_t ignored_value_count = 0;
     const loom_value_id_t destination_value_id =
         destination_assignment->value_id;
-    if (loom_low_allocation_coalescing_can_ignore_branch_counterpart_conflict(
-            context, interval, destination_assignment)) {
+    if (loom_low_allocation_coalescing_can_ignore_relation_counterpart_conflict(
+            context, interval, edge_relation, destination_assignment)) {
       ignored_value_ids = &destination_value_id;
       ignored_value_count = 1;
     }
@@ -1461,8 +1467,8 @@ iree_status_t loom_low_allocation_coalescing_assign_edge_source_interval(
     uint16_t ignored_value_count = 0;
     const loom_value_id_t destination_value_id =
         destination_assignment->value_id;
-    if (loom_low_allocation_coalescing_can_ignore_branch_counterpart_conflict(
-            context, interval, destination_assignment)) {
+    if (loom_low_allocation_coalescing_can_ignore_relation_counterpart_conflict(
+            context, interval, relation, destination_assignment)) {
       ignored_value_ids = &destination_value_id;
       ignored_value_count = 1;
     }

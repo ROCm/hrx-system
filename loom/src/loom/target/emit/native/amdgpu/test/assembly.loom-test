@@ -1793,9 +1793,8 @@ low.func.def target(@gfx11_target) @gfx11_branch_args(%resource: reg<amdgpu.sgpr
 }
 
 // ----
-  v_mov_b32 v2, v0
 .Lbb1:
-  v_add_u32 v0, v2, v0
+  v_add_u32 v0, v0, v0
   buffer_store_dword v0, v1, s[0:3], s4 offen offset:0
   s_endpgm
 
@@ -2454,25 +2453,25 @@ low.func.def target(@gfx11_target) @gfx11_predicated_tile_sweep_kq_reduction(%sr
   s_cbranch_scc0 .Lbb6
 .Lbb2:
   s_mov_b64_exec_read s[0:1]
-  v_mov_b32 v3, v0
 .Lbb3:
-  v_mov_b32 v4, 256
-  v_cmp_lt_i32 s[10:11], v3, v4
+  v_mov_b32 v3, 256
+  v_cmp_lt_i32 s[10:11], v0, v3
   s_and_saveexec_b64 s[10:11], s[10:11]
   s_cbranch_scc0 .Lbb5
 .Lbb4:
-  v_mov_b32_copy v4, s8
-  v_mov_b32 v5, 15
-  v_mov_b32 v6, 64
-  v_lshrrev_b32 v7, 4, v3
-  v_and_b32 v5, v3, v5
-  v_add_u32 v4, v4, v5
-  v_mad_u32_u24 v4, v7, 3072, v4
-  v_add_u32 v3, v3, v6
-  v_lshlrev_b32 v4, 2, v4
-  global_load_b32 v4, v4, s[2:3] offset:0
-  v_add_f32 v4, v2, v4
-  v_mov_b32 v2, v4
+  v_mov_b32_copy v3, s8
+  v_mov_b32 v4, 15
+  v_mov_b32 v5, 64
+  v_lshrrev_b32 v6, 4, v0
+  v_and_b32 v4, v0, v4
+  v_add_u32 v3, v3, v4
+  v_mad_u32_u24 v3, v6, 3072, v3
+  v_add_u32 v4, v0, v5
+  v_lshlrev_b32 v3, 2, v3
+  global_load_b32 v3, v3, s[2:3] offset:0
+  v_add_f32 v3, v2, v3
+  v_mov_b32 v0, v4
+  v_mov_b32 v2, v3
   s_branch .Lbb3
 .Lbb5:
   s_mov_b64 exec, s[0:1]
