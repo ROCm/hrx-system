@@ -176,6 +176,7 @@
                 "\"target_resources\":{\"scalar\":{\"register_class\":\"amdgpu.sgpr\"",
                 "\"target_capability_rows\":{\"count\":",
                 "\"target_capability_row_count\":",
+                "\"namespace\":\"amdgpu\",\"key\":\"matrix_feature_profile\"",
                 "\"workload\":{\"workgroup_size\":{\"x\":1,\"y\":1,\"z\":1,\"flat\":1}}",
                 "\"memory_write_byte_count\":5",
                 "\"global_store_byte_count\":5",
