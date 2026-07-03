@@ -330,7 +330,7 @@ low.kernel.def target(@target) workgroup_size(32, 1, 1) @bf16_result_fragment_ep
   %78 = v_mul_f32_src0_inline %61, 1073741824
   %80 = v_mul_f32_src0_inline %63, 1073741824
   %82 = v_mul_f32_src0_inline %65, 1073741824
-  s_waitcnt {lgkmcnt = 0}
+  s_barrier
   %84 = v_and_b32_src0_inline %22, 1
   %85 = v_cmp_eq_i32_src1_inline %84 {rhs = 0}
   %87 = v_lshrrev_b32_src0_inline %68, 16
