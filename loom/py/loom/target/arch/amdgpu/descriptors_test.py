@@ -625,6 +625,53 @@ def test_pure_integer_valu_results_are_rematerializable() -> None:
             )
 
 
+def test_full_width_conversion_results_are_rematerializable() -> None:
+    descriptor_keys = (
+        "amdgpu.v_cvt_f32_i32",
+        "amdgpu.v_cvt_i32_f32",
+        "amdgpu.v_cvt_f32_f16",
+        "amdgpu.v_cvt_f32_u32",
+        "amdgpu.v_cvt_u32_f32",
+    )
+    excluded_descriptor_keys = (
+        "amdgpu.v_cvt_f16_f32",
+        "amdgpu.v_cvt_f32_fp8",
+        "amdgpu.v_cvt_f32_bf8",
+        "amdgpu.v_cvt_pk_f32_fp8",
+        "amdgpu.v_cvt_pk_f32_bf8",
+        "amdgpu.v_cvt_pk_f16_fp8",
+        "amdgpu.v_cvt_pk_f16_bf8",
+        "amdgpu.v_cvt_pk_u16_u32",
+        "amdgpu.v_cvt_pk_bf16_f32",
+    )
+    rematerializable_result = Constraint(
+        ConstraintKind.REMATERIALIZABLE,
+        lhs_operand_index=0,
+    )
+    for overlays in (
+        _gfx940_core_overlays(),
+        _gfx950_core_overlays(),
+        _gfx11_core_overlays(),
+        _gfx117x_core_overlays(),
+        _gfx12_core_overlays(),
+        _gfx1250_core_overlays(),
+    ):
+        descriptors = {descriptor.descriptor_key: descriptor for descriptor in overlays}
+        for descriptor_key in descriptor_keys:
+            descriptor = descriptors.get(descriptor_key)
+            assert descriptor is not None, descriptor_key
+            assert rematerializable_result in descriptor.constraints, descriptor_key
+
+        for descriptor_key in excluded_descriptor_keys:
+            descriptor = descriptors.get(descriptor_key)
+            if descriptor is None:
+                continue
+            assert not any(
+                constraint.kind is ConstraintKind.REMATERIALIZABLE
+                for constraint in descriptor.constraints
+            ), descriptor_key
+
+
 def test_rdna_f16_to_f32_convert_uses_wide_encoding() -> None:
     for overlays in (
         _gfx11_core_overlays(),
