@@ -360,6 +360,19 @@ static bool loom_target_compile_report_source_low_memory_can_dispatch_scale(
               summary));
 }
 
+static bool loom_target_compile_report_source_low_memory_should_print_dynamic(
+    const loom_target_compile_report_source_low_memory_summary_t* summary,
+    const loom_target_compile_report_workload_t* workload) {
+  if (!loom_target_compile_report_source_low_memory_has_dynamic_evidence(
+          summary)) {
+    return false;
+  }
+  return loom_target_compile_report_source_low_memory_has_dynamic_delta(
+             summary) ||
+         loom_target_compile_report_source_low_memory_can_dispatch_scale(
+             summary, workload);
+}
+
 typedef struct loom_target_compile_report_dispatch_memory_bytes_t {
   // Dispatch-scaled logical or issued read bytes.
   uint64_t read_byte_count;
@@ -455,9 +468,8 @@ loom_target_compile_report_append_source_low_memory_summary_text(
       summary->contiguous_vector_packet_count,
       summary->strided_vector_packet_count,
       summary->unknown_stride_vector_packet_count));
-  if (loom_target_compile_report_source_low_memory_has_dynamic_evidence(
-          summary) &&
-      loom_target_compile_report_source_low_memory_has_dynamic_delta(summary)) {
+  if (loom_target_compile_report_source_low_memory_should_print_dynamic(
+          summary, workload)) {
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
         builder,
         " exact_dynamic_packets=%" PRIu64 " unknown_dynamic_packets=%" PRIu64
@@ -5317,9 +5329,8 @@ loom_target_compile_report_format_source_low_memory_summary_fields_json(
   IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
       stream, inout_first_field, "issued_write_unknown_width_count",
       summary->issued_write_unknown_width_count));
-  if (loom_target_compile_report_source_low_memory_has_dynamic_evidence(
-          summary) &&
-      loom_target_compile_report_source_low_memory_has_dynamic_delta(summary)) {
+  if (loom_target_compile_report_source_low_memory_should_print_dynamic(
+          summary, workload)) {
     IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
         stream, inout_first_field, "exact_dynamic_packet_count",
         summary->exact_dynamic_packet_count));
