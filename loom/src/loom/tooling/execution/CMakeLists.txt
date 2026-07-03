@@ -51,8 +51,10 @@ loom_cc_library(
     loom::error::diagnostic
     loom::error::json_sink
     loom::error::renderer
+    loom::ops::config
     loom::target::compile_report
     loom::target::compile_report_format
+    loom::tooling::config
   PUBLIC
 )
 

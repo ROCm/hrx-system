@@ -18,6 +18,7 @@
 #include "loom/ops/special_values.h"
 #include "loom/tooling/compile/pipeline.h"
 #include "loom/tooling/config/config.h"
+#include "loom/tooling/execution/compile_report_capture.h"
 #include "loom/util/fact_table.h"
 
 void loom_run_hal_testbench_context_initialize(
@@ -574,9 +575,11 @@ static iree_status_t loom_run_hal_testbench_materialize_config_set(
   loom_tooling_config_materialize_options_t options = {0};
   loom_tooling_config_materialize_options_initialize(&options);
   options.config_set = provider->config_set;
-  return loom_tooling_config_materialize_module(
+  IREE_RETURN_IF_ERROR(loom_tooling_config_materialize_module(
       provider->compile_module.module, &options,
-      loom_run_session_block_pool(provider->session), NULL);
+      loom_run_session_block_pool(provider->session), NULL));
+  return loom_run_compile_report_record_materialized_config(
+      provider->report, provider->compile_module.module, provider->config_set);
 }
 
 static void loom_run_hal_testbench_record_compile_rejection(

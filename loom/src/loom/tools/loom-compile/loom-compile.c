@@ -1364,6 +1364,10 @@ int main(int argc, char** argv) {
     status = loom_run_compile_report_capture_initialize(
         &compile_report_options, allocator, &compile_report_capture);
   }
+  if (iree_status_is_ok(status)) {
+    status = loom_run_compile_report_capture_record_materialized_config(
+        &compile_report_capture, run_module.module, &config_set);
+  }
   const iree_string_view_t backend_name = iree_make_cstring_view(FLAG_backend);
   if (iree_status_is_ok(status)) {
     loom_compile_backend_t backend = {0};
