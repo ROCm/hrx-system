@@ -1729,7 +1729,10 @@ static iree_status_t iree_hal_amdgpu_aql_command_buffer_write_dispatch_tail(
       iree_host_size_t explicit_bytes = layout->explicit_kernarg_size;
       if (explicit_bytes == 0) {
         // Zero means dynamic explicit bytes; with an implicit suffix, user
-        // kernargs end where the runtime-owned hidden args begin.
+        // kernargs end where the runtime-owned hidden args begin. Executable
+        // loading rejects metadata where visible args resume after that suffix,
+        // and plan construction reserves enough bytes for the explicit prefix
+        // and any suffix written below.
         explicit_bytes = layout->has_implicit_args
                              ? layout->implicit_args_offset
                              : layout->total_kernarg_size;

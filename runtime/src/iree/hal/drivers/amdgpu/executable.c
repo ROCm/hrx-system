@@ -864,10 +864,10 @@ static iree_status_t iree_hal_amdgpu_executable_initialize_dispatch_descriptor(
           .explicit_kernarg_size = custom_explicit_kernarg_size,
       };
   if (custom_implicit_args_offset != UINT16_MAX) {
-    // Custom-direct callers own every visible native kernarg byte. Hidden
-    // metadata marks the implicit suffix location, but visible args may appear
-    // after the first hidden record in some code objects, so validate/copy the
-    // full visible extent instead of truncating at the suffix offset.
+    // Custom-direct callers provide the visible native kernarg prefix. Metadata
+    // planning rejects visible arguments that cross the implicit suffix offset,
+    // so the runtime can reserve the full kernarg block and populate the hidden
+    // suffix after copying the caller-provided prefix.
     out_descriptor->custom_kernarg_layout.implicit_args_offset =
         custom_implicit_args_offset;
     out_descriptor->custom_kernarg_layout.total_kernarg_size =
