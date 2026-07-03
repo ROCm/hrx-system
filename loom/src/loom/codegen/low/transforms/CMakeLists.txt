@@ -20,6 +20,7 @@ loom_cc_library(
     iree::base
     iree::base::internal::arena
     loom::codegen::low::allocation
+    loom::codegen::low::allocation_live_range_splitting
     loom::codegen::low::allocation_materialization
     loom::codegen::low::allocation_rematerialization
     loom::codegen::low::descriptors

@@ -577,6 +577,7 @@ loom_cc_library(
     hdrs = ["table.h"],
     deps = [
         ":assignment",
+        ":target_constraints",
         "//loom/src/loom/analysis:liveness",
         "//loom/src/loom/codegen/low:descriptors",
         "//loom/src/loom/codegen/low:placement",

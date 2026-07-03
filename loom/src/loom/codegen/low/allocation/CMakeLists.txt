@@ -650,6 +650,7 @@ loom_cc_library(
     "table.c"
   DEPS
     ::assignment
+    ::target_constraints
     iree::base
     loom::analysis::liveness
     loom::codegen::low::descriptors

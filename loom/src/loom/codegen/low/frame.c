@@ -7,6 +7,7 @@
 #include "loom/codegen/low/frame.h"
 
 #include "loom/codegen/low/addressability.h"
+#include "loom/codegen/low/allocation_live_range_splitting.h"
 #include "loom/codegen/low/allocation_rematerialization.h"
 #include "loom/codegen/low/diagnostics.h"
 #include "loom/codegen/low/function.h"
@@ -391,6 +392,19 @@ static iree_status_t loom_low_emission_frame_emit_rematerialization_decision(
       allocation, trigger, result, frame_options->emitter);
 }
 
+static iree_status_t loom_low_emission_frame_emit_live_range_split_decision(
+    const loom_low_emission_frame_options_t* frame_options,
+    const loom_low_allocation_table_t* allocation,
+    loom_low_allocation_live_range_split_trigger_t trigger,
+    const loom_low_allocation_live_range_split_result_t* result) {
+  if (!iree_any_bit_set(frame_options->allocation_diagnostic_flags,
+                        LOOM_LOW_ALLOCATION_DIAGNOSTIC_PREDICTED_SPILLS)) {
+    return iree_ok_status();
+  }
+  return loom_low_allocation_live_range_split_emit_decision(
+      allocation, trigger, result, frame_options->emitter);
+}
+
 static iree_string_view_t loom_low_emission_frame_failure_code(
     loom_low_emission_frame_failure_t failure) {
   switch (failure) {
@@ -627,6 +641,18 @@ iree_status_t loom_low_emission_frame_build_spill_free(
               frame_options, &frame.allocation,
               LOOM_LOW_ALLOCATION_REMATERIALIZATION_TRIGGER_SPILL_PLAN,
               &rematerialization_result));
+      ++rematerialization_iteration_count;
+      continue;
+    }
+    loom_low_allocation_live_range_split_result_t split_result = {0};
+    IREE_RETURN_IF_ERROR(loom_low_allocation_split_fixed_value_spill_plan(
+        module, &frame.allocation, arena, &split_result));
+    if (split_result.rewritten_operand_count != 0) {
+      IREE_RETURN_IF_ERROR(
+          loom_low_emission_frame_emit_live_range_split_decision(
+              frame_options, &frame.allocation,
+              LOOM_LOW_ALLOCATION_LIVE_RANGE_SPLIT_TRIGGER_SPILL_PLAN,
+              &split_result));
       ++rematerialization_iteration_count;
       continue;
     }

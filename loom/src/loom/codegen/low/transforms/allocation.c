@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "loom/codegen/low/allocation.h"
+#include "loom/codegen/low/allocation_live_range_splitting.h"
 #include "loom/codegen/low/allocation_materialization.h"
 #include "loom/codegen/low/allocation_rematerialization.h"
 #include "loom/codegen/low/function.h"
@@ -53,6 +54,19 @@ static iree_status_t loom_low_materialize_allocation_emit_rematerialization(
       table, trigger, result, pass->diagnostic_emitter);
 }
 
+static iree_status_t loom_low_materialize_allocation_emit_live_range_split(
+    loom_pass_t* pass,
+    const loom_low_materialize_allocation_pass_state_t* state,
+    const loom_low_allocation_table_t* table,
+    loom_low_allocation_live_range_split_trigger_t trigger,
+    const loom_low_allocation_live_range_split_result_t* result) {
+  if (!state || !state->emit_spill_diagnostics) {
+    return iree_ok_status();
+  }
+  return loom_low_allocation_live_range_split_emit_decision(
+      table, trigger, result, pass->diagnostic_emitter);
+}
+
 static const loom_pass_option_def_t kLowMaterializeAllocationOptions[] = {
     {IREE_SVL("budgets"),
      IREE_SVL("Semicolon-separated register class budgets, such as "
@@ -70,7 +84,9 @@ static const loom_pass_option_def_t kLowMaterializeAllocationOptions[] = {
   V(statistics_type, spills, "spills", "Number of low.spill stores inserted.") \
   V(statistics_type, reloads, "reloads", "Number of low.reload ops inserted.") \
   V(statistics_type, rematerializations, "rematerializations",                 \
-    "Number of allocation-pressure rematerialized packets inserted.")
+    "Number of allocation-pressure rematerialized packets inserted.")          \
+  V(statistics_type, live_range_splits, "live_range_splits",                   \
+    "Number of allocation-pressure low.copy split packets inserted.")
 
 LOOM_PASS_STATISTICS_DEFINE(loom_low_materialize_allocation_statistics,
                             loom_low_materialize_allocation_statistics_t,
@@ -473,6 +489,22 @@ iree_status_t loom_low_materialize_allocation_run(loom_pass_t* pass,
           loom_low_materialize_allocation_statistics(pass);
       statistics->rematerializations +=
           (int64_t)rematerialization_result.cloned_packet_count;
+      loom_pass_mark_changed(pass);
+      ++rematerialization_iteration_count;
+      continue;
+    }
+    loom_low_allocation_live_range_split_result_t split_result = {0};
+    IREE_RETURN_IF_ERROR(loom_low_allocation_split_fixed_value_spill_plan(
+        module, &table, pass->arena, &split_result));
+    if (split_result.rewritten_operand_count != 0) {
+      IREE_RETURN_IF_ERROR(
+          loom_low_materialize_allocation_emit_live_range_split(
+              pass, state, &table,
+              LOOM_LOW_ALLOCATION_LIVE_RANGE_SPLIT_TRIGGER_SPILL_PLAN,
+              &split_result));
+      loom_low_materialize_allocation_statistics_t* statistics =
+          loom_low_materialize_allocation_statistics(pass);
+      statistics->live_range_splits += (int64_t)split_result.copy_packet_count;
       loom_pass_mark_changed(pass);
       ++rematerialization_iteration_count;
       continue;

@@ -2903,7 +2903,7 @@ static iree_status_t loom_low_lower_descriptor_matrix_copy_destructive_operands(
     IREE_ASSERT(loom_low_type_is_register(copy_type));
     loom_op_t* copy_op = NULL;
     IREE_RETURN_IF_ERROR(loom_low_copy_build(
-        loom_low_lower_context_builder(context), source_value, copy_type,
+        loom_low_lower_context_builder(context), source_value, false, copy_type,
         source_op->location, &copy_op));
     operands[packet_operand_index] = loom_low_copy_result(copy_op);
   }

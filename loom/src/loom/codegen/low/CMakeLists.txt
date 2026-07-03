@@ -368,6 +368,28 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
+    allocation_live_range_splitting
+  HDRS
+    "allocation_live_range_splitting.h"
+  SRCS
+    "allocation_live_range_splitting.c"
+  DEPS
+    ::allocation
+    ::diagnostics
+    iree::base
+    iree::base::internal::arena
+    loom::codegen::low::allocation::live_range
+    loom::error::emitter
+    loom::error::error_defs
+    loom::ir
+    loom::ops::low
+    loom::ops::op_defs
+    loom::rewrite::rewriter
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     allocation_json
   HDRS
     "allocation_json.h"
@@ -531,6 +553,7 @@ loom_cc_library(
   DEPS
     ::addressability
     ::allocation
+    ::allocation_live_range_splitting
     ::allocation_materialization
     ::allocation_rematerialization
     ::diagnostics

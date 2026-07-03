@@ -51,6 +51,7 @@ from loom.dialect.func.defs import CallingConv, Purity, Retain, Visibility
 from loom.dialect.target.defs import ExportAbiKind, ExportLinkage
 from loom.dsl import (
     ANY,
+    ATTR_TYPE_BOOL,
     ATTR_TYPE_ENUM,
     ATTR_TYPE_I64,
     ATTR_TYPE_TYPE,
@@ -959,6 +960,14 @@ low_copy = Op(
     phase=OpPhase.EXECUTABLE,
     doc=("Explicit virtual-register copy used by lowering and allocation. Each copy produces a fresh virtual-register identity."),
     operands=[Operand("source", REGISTER)],
+    attrs=[
+        AttrDef(
+            "detached",
+            ATTR_TYPE_BOOL,
+            default=False,
+            elide_default=True,
+        ),
+    ],
     results=[Result("result", REGISTER, allocates=True)],
     constraints=[
         SameRegisterClass("source", "result"),
@@ -968,6 +977,7 @@ low_copy = Op(
     facts="loom_low_copy_facts",
     format=[
         Ref("source"),
+        AttrDict(),
         COLON,
         TypeOf("source"),
         ARROW,

@@ -674,6 +674,8 @@ TEST(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
               IREE_ARRAYSIZE(pressure_summaries),
           },
           /*.placement=*/{},
+          /*.fixed_values=*/{},
+          /*.fixed_value_count=*/{},
           /*.allocation_mode=*/{},
           /*.error_count=*/1,
           /*.assignments=*/assignments,
