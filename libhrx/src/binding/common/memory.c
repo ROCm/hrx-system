@@ -573,8 +573,8 @@ iree_status_t iree_hal_streaming_memory_allocate_device_pitched(
   *out_buffer = NULL;
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  const iree_device_size_t alignment =
-      IREE_HAL_STREAMING_PITCHED_ALLOCATION_ALIGNMENT;
+  // Match HIP's observed pitched allocation granularity.
+  const iree_device_size_t alignment = 512;
   iree_device_size_t pitch = 0;
   if (IREE_UNLIKELY(!iree_device_size_checked_mul_add(width_bytes, 1,
                                                       alignment - 1, &pitch))) {
