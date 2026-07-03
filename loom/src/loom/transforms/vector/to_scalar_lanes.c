@@ -735,6 +735,72 @@ iree_status_t loom_vector_to_scalar_build_lane(
       state, indices, out_lane);
 }
 
+bool loom_vector_to_scalar_can_materialize_def_lane(
+    const loom_module_t* module, loom_value_id_t value,
+    const loom_matrix_fragment_layout_t* matrix_fragment_layout,
+    loom_vector_to_scalar_index_list_t indices) {
+  for (;;) {
+    if (value == LOOM_VALUE_ID_INVALID) return false;
+    loom_type_t vector_type = loom_module_value_type(module, value);
+    if (!loom_type_is_vector(vector_type)) return true;
+    if (loom_type_rank(vector_type) != indices.rank) return false;
+
+    const loom_value_t* value_record = loom_module_value(module, value);
+    if (value_record == NULL || loom_value_is_block_arg(value_record)) {
+      return false;
+    }
+    const loom_op_t* def_op = loom_value_def_op(value_record);
+    if (def_op == NULL) return false;
+
+    const loom_trait_flags_t traits = loom_op_effective_traits(module, def_op);
+    if (loom_traits_are_value_alias(traits)) {
+      if (def_op->operand_count == 0) return false;
+      value = loom_op_const_operands(def_op)[0];
+      continue;
+    }
+
+    if (loom_vector_from_elements_isa(def_op)) {
+      if (loom_vector_to_scalar_indices_are_dynamic(indices) ||
+          !loom_type_is_all_static(vector_type)) {
+        return false;
+      }
+      const int64_t ordinal = loom_vector_to_scalar_linear_ordinal_static(
+          vector_type, indices.static_indices);
+      if (ordinal < 0) return false;
+      const loom_value_slice_t elements =
+          loom_vector_from_elements_elements(def_op);
+      if (ordinal >= (int64_t)elements.count) return false;
+      return true;
+    }
+
+    if (loom_vector_splat_isa(def_op) || loom_vector_constant_isa(def_op) ||
+        loom_vector_poison_isa(def_op)) {
+      return true;
+    }
+
+    if (loom_vector_fragment_load_isa(def_op)) {
+      if (loom_vector_fragment_load_role(def_op) == LOOM_VECTOR_ROLE_RESULT &&
+          indices.rank == 1 &&
+          loom_vector_to_scalar_result_fragment_layout_is_supported(
+              matrix_fragment_layout)) {
+        return true;
+      }
+      if (indices.rank == 2) return true;
+      return false;
+    }
+
+    const loom_vector_to_scalar_descriptor_t* descriptor =
+        loom_vector_to_scalar_find_descriptor(def_op->kind);
+    if (descriptor == NULL ||
+        descriptor->lane_kind != LOOM_VECTOR_TO_SCALAR_LANE_GENERIC ||
+        !iree_all_bits_set(traits, LOOM_TRAIT_DECOMPOSABLE)) {
+      return false;
+    }
+    if (descriptor->lane_operand_count > def_op->operand_count) return false;
+    return true;
+  }
+}
+
 static bool loom_vector_to_scalar_try_from_elements_lane(
     loom_op_t* def_op, loom_type_t vector_type,
     loom_vector_to_scalar_index_list_t indices, loom_value_id_t* out_lane) {
