@@ -1747,6 +1747,7 @@ loom_target_compile_report_source_low_memory_strategy_summary_from_row(
       .memory_space = row->memory_space,
       .operation_kind = row->operation_kind,
       .strategy_key = row->strategy_key,
+      .fallback_reason = row->fallback_reason,
       .storage_element_format = row->storage_element_format,
       .storage_scale_format = row->storage_scale_format,
       .storage_secondary_scale_format = row->storage_secondary_scale_format,
@@ -1768,6 +1769,7 @@ loom_target_compile_report_source_low_memory_strategy_summaries_match(
          iree_string_view_equal(lhs->memory_space, rhs->memory_space) &&
          iree_string_view_equal(lhs->operation_kind, rhs->operation_kind) &&
          iree_string_view_equal(lhs->strategy_key, rhs->strategy_key) &&
+         iree_string_view_equal(lhs->fallback_reason, rhs->fallback_reason) &&
          iree_string_view_equal(lhs->storage_element_format,
                                 rhs->storage_element_format) &&
          iree_string_view_equal(lhs->storage_scale_format,

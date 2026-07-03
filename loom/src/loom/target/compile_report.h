@@ -1321,6 +1321,8 @@ typedef struct loom_target_compile_report_source_low_memory_strategy_summary_t {
   iree_string_view_t operation_kind;
   // Stable target-owned strategy key selected for this packet group.
   iree_string_view_t strategy_key;
+  // Stable target-owned reason key for strategy selection or fallback.
+  iree_string_view_t fallback_reason;
   // Logical storage element format recovered from source encoding facts.
   iree_string_view_t storage_element_format;
   // Primary scale format recovered from source encoding facts.

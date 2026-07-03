@@ -2630,6 +2630,8 @@ loom_target_compile_report_format_source_low_memory_strategy_summaries(
           loom_target_compile_report_non_empty(row->operation_kind);
       const iree_string_view_t strategy_key =
           loom_target_compile_report_non_empty(row->strategy_key);
+      const iree_string_view_t fallback_reason =
+          loom_target_compile_report_non_empty(row->fallback_reason);
       IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
           builder,
           "COMPILE-REPORT: source_low_memory_strategy[%" PRIhsz
@@ -2640,6 +2642,11 @@ loom_target_compile_report_format_source_low_memory_strategy_summaries(
       IREE_RETURN_IF_ERROR(
           loom_target_compile_report_append_source_low_memory_strategy_storage_text(
               row, builder));
+      if (!iree_string_view_is_empty(row->fallback_reason)) {
+        IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+            builder, " fallback_reason=%.*s", (int)fallback_reason.size,
+            fallback_reason.data));
+      }
       IREE_RETURN_IF_ERROR(
           loom_target_compile_report_append_source_low_memory_summary_text(
               &row->summary, &report->workload, builder));
@@ -5439,6 +5446,9 @@ loom_target_compile_report_format_source_low_memory_strategy_summary_json(
   IREE_RETURN_IF_ERROR(
       loom_target_compile_report_json_write_optional_string_field(
           stream, &first_field, "strategy", row->strategy_key));
+  IREE_RETURN_IF_ERROR(
+      loom_target_compile_report_json_write_optional_string_field(
+          stream, &first_field, "fallback_reason", row->fallback_reason));
   IREE_RETURN_IF_ERROR(
       loom_target_compile_report_format_source_low_memory_strategy_storage_json(
           row, stream, &first_field));
