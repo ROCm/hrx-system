@@ -1982,7 +1982,7 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
       iree_string_view_find(output,
                             IREE_SV("selection=rule rule_set=0 rule=1 "
                                     "plan_key=test.scalar_addi.strategy.native "
-                                    "descriptor=7 descriptor_key=test.add.i32 "
+                                    "descriptor_key=test.add.i32 "
                                     "descriptor_semantic_tag=integer.add.i32 "
                                     "emitted_ops=1"),
                             0),
@@ -2555,7 +2555,6 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
                                     "\"rule_index\":1,\"plan_id\":null,"
                                     "\"plan_key\":"
                                     "\"test.scalar_addi.strategy.native\","
-                                    "\"descriptor_id\":7,"
                                     "\"descriptor_key\":\"test.add.i32\","
                                     "\"descriptor_semantic_tag\":"
                                     "\"integer.add.i32\""),
