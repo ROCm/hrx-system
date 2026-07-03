@@ -22,6 +22,9 @@ typedef enum loom_vector_to_scalar_flag_bits_e {
   LOOM_VECTOR_TO_SCALAR_FLAG_NONE = 0u,
   // Lowering may emit source-level subgroup communication operations.
   LOOM_VECTOR_TO_SCALAR_FLAG_ALLOW_SUBGROUP_COMMUNICATION = 1u << 0,
+  // Lowering must materialize lanes from the root producer instead of falling
+  // back to vector.extract on the original vector value.
+  LOOM_VECTOR_TO_SCALAR_FLAG_REQUIRE_PRODUCER_LANE_PROGRAM = 1u << 1,
 } loom_vector_to_scalar_flag_bits_t;
 
 // Bitset of loom_vector_to_scalar_flag_bits_t values.

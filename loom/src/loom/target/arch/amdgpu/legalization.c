@@ -1277,28 +1277,6 @@ static bool loom_amdgpu_fragment_epilogue_strategy_is_packed_b16(
   }
 }
 
-static bool loom_amdgpu_fragment_store_group_has_decomposable_payloads(
-    const loom_module_t* module, loom_op_t* const* group_ops,
-    iree_host_size_t group_count) {
-  for (iree_host_size_t i = 0; i < group_count; ++i) {
-    const loom_value_t* payload = loom_module_value(
-        module, loom_vector_fragment_store_value(group_ops[i]));
-    if (payload == NULL || loom_value_is_block_arg(payload)) {
-      return false;
-    }
-    const loom_op_t* defining_op = loom_value_def_op(payload);
-    if (defining_op == NULL) {
-      return false;
-    }
-    const loom_trait_flags_t traits =
-        loom_op_effective_traits(module, defining_op);
-    if (!iree_all_bits_set(traits, LOOM_TRAIT_DECOMPOSABLE)) {
-      return false;
-    }
-  }
-  return true;
-}
-
 typedef struct loom_amdgpu_fragment_store_rectangle_t {
   // Destination view value for the fragment store.
   loom_value_id_t view;
@@ -1657,17 +1635,18 @@ static iree_status_t loom_amdgpu_legalize_result_fragment_store_epilogue_loop(
     // plan and scalarize a path the target already knows how to emit.
     return iree_ok_status();
   }
-  if (loom_amdgpu_fragment_epilogue_strategy_is_packed_b16(
-          plan.epilogue_strategy) &&
-      !loom_amdgpu_fragment_store_group_has_decomposable_payloads(
-          context->module, group_ops, group_count)) {
-    return iree_ok_status();
-  }
+  const bool preserve_packed_path =
+      loom_amdgpu_fragment_epilogue_strategy_is_packed_b16(
+          plan.epilogue_strategy);
+  const loom_vector_to_scalar_flags_t rewrite_flags =
+      preserve_packed_path
+          ? LOOM_VECTOR_TO_SCALAR_FLAG_REQUIRE_PRODUCER_LANE_PROGRAM
+          : LOOM_VECTOR_TO_SCALAR_FLAG_NONE;
   bool rewritten = false;
   IREE_RETURN_IF_ERROR(
       loom_vector_fragment_store_to_scalar_physical_result_loop_rewrite_ops(
           context->pass, context->rewriter, group_ops, group_count, layout,
-          plan.register_count, &rewritten));
+          plan.register_count, rewrite_flags, &rewritten));
   if (!rewritten) {
     return iree_ok_status();
   }

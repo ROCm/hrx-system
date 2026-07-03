@@ -1045,7 +1045,8 @@ loom_vector_fragment_store_to_scalar_physical_result_loop_rewrite_ops(
     loom_pass_t* pass, loom_rewriter_t* rewriter, loom_op_t* const* ops,
     iree_host_size_t op_count,
     const loom_matrix_fragment_layout_t* matrix_fragment_layout,
-    uint16_t register_count, bool* out_rewritten) {
+    uint16_t register_count, loom_vector_to_scalar_flags_t flags,
+    bool* out_rewritten) {
   *out_rewritten = false;
   if (op_count == 0 ||
       !loom_vector_to_scalar_result_fragment_layout_is_supported(
@@ -1071,6 +1072,21 @@ loom_vector_fragment_store_to_scalar_physical_result_loop_rewrite_ops(
             rewriter->module, ops[i], register_count, &source_lane_types[i],
             &store_lane_types[i])) {
       return iree_ok_status();
+    }
+  }
+  if (iree_any_bit_set(
+          flags, LOOM_VECTOR_TO_SCALAR_FLAG_REQUIRE_PRODUCER_LANE_PROGRAM)) {
+    const loom_value_id_t dynamic_register_index = LOOM_VALUE_ID_INVALID;
+    const loom_vector_to_scalar_index_list_t physical_indices = {
+        .dynamic_indices = &dynamic_register_index,
+        .rank = 1,
+    };
+    for (iree_host_size_t i = 0; i < op_count; ++i) {
+      if (!loom_vector_to_scalar_can_materialize_def_lane(
+              rewriter->module, loom_vector_fragment_store_value(ops[i]),
+              matrix_fragment_layout, physical_indices)) {
+        return iree_ok_status();
+      }
     }
   }
 
@@ -1153,7 +1169,7 @@ loom_vector_fragment_store_to_scalar_physical_result_loop_rewrite_op(
   loom_op_t* ops[1] = {op};
   return loom_vector_fragment_store_to_scalar_physical_result_loop_rewrite_ops(
       pass, rewriter, ops, IREE_ARRAYSIZE(ops), matrix_fragment_layout,
-      register_count, out_rewritten);
+      register_count, LOOM_VECTOR_TO_SCALAR_FLAG_NONE, out_rewritten);
 }
 
 static iree_status_t loom_vector_to_scalar_lower_static_store_compress(
