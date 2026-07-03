@@ -891,6 +891,13 @@ HIPAPI hipError_t hipGetDriverEntryPoint(
   return hipErrorNotSupported;
 }
 
+HIPAPI hipError_t hipGetFuncBySymbol(hipFunction_t* functionPtr,
+                                     const void* symbolPtr) {
+  (void)functionPtr;
+  (void)symbolPtr;
+  return hipErrorNotSupported;
+}
+
 HIPAPI hipError_t hipGetMipmappedArrayLevel(
     hipArray_t* levelArray, hipMipmappedArray_const_t mipmappedArray,
     unsigned int level) {
