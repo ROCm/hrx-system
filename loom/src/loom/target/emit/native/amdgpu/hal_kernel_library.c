@@ -394,6 +394,43 @@ loom_amdgpu_hal_kernel_library_record_target_snapshot_capabilities(
   return iree_ok_status();
 }
 
+typedef enum loom_amdgpu_hal_kernel_library_narrow_matrix_support_flag_bits_e {
+  LOOM_AMDGPU_HAL_KERNEL_LIBRARY_NARROW_MATRIX_SUPPORT_UNSCALED = 1u << 0,
+  LOOM_AMDGPU_HAL_KERNEL_LIBRARY_NARROW_MATRIX_SUPPORT_SCALED = 1u << 1,
+} loom_amdgpu_hal_kernel_library_narrow_matrix_support_flag_bits_t;
+
+typedef uint32_t loom_amdgpu_hal_kernel_library_narrow_matrix_support_flags_t;
+
+static iree_string_view_t
+loom_amdgpu_hal_kernel_library_narrow_matrix_support_kind(
+    loom_amdgpu_hal_kernel_library_narrow_matrix_support_flags_t flags) {
+  const loom_amdgpu_hal_kernel_library_narrow_matrix_support_flags_t
+      support_mask =
+          LOOM_AMDGPU_HAL_KERNEL_LIBRARY_NARROW_MATRIX_SUPPORT_UNSCALED |
+          LOOM_AMDGPU_HAL_KERNEL_LIBRARY_NARROW_MATRIX_SUPPORT_SCALED;
+  switch (flags & support_mask) {
+    case LOOM_AMDGPU_HAL_KERNEL_LIBRARY_NARROW_MATRIX_SUPPORT_UNSCALED:
+      return IREE_SV("unscaled");
+    case LOOM_AMDGPU_HAL_KERNEL_LIBRARY_NARROW_MATRIX_SUPPORT_SCALED:
+      return IREE_SV("scaled");
+    case LOOM_AMDGPU_HAL_KERNEL_LIBRARY_NARROW_MATRIX_SUPPORT_UNSCALED |
+        LOOM_AMDGPU_HAL_KERNEL_LIBRARY_NARROW_MATRIX_SUPPORT_SCALED:
+      return IREE_SV("unscaled_scaled");
+    default:
+      return IREE_SV("none");
+  }
+}
+
+static iree_status_t
+loom_amdgpu_hal_kernel_library_record_narrow_matrix_capability(
+    loom_target_compile_report_t* report, iree_string_view_t function_name,
+    iree_string_view_t namespace_name, iree_string_view_t key,
+    loom_amdgpu_hal_kernel_library_narrow_matrix_support_flags_t flags) {
+  return loom_amdgpu_hal_kernel_library_record_target_capability_string(
+      report, function_name, namespace_name, key,
+      loom_amdgpu_hal_kernel_library_narrow_matrix_support_kind(flags));
+}
+
 static iree_status_t
 loom_amdgpu_hal_kernel_library_record_matrix_feature_capabilities(
     loom_amdgpu_matrix_feature_profile_t profile,
@@ -408,6 +445,44 @@ loom_amdgpu_hal_kernel_library_record_matrix_feature_capabilities(
       loom_amdgpu_hal_kernel_library_record_target_capability_u64(
           report, function_name, namespace_name, IREE_SV("matrix_feature_bits"),
           feature_bits));
+
+  loom_amdgpu_hal_kernel_library_narrow_matrix_support_flags_t fp8_bf8_support =
+      0;
+  if (iree_any_bit_set(feature_bits,
+                       LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX940_FP8 |
+                           LOOM_AMDGPU_MATRIX_FEATURE_WMMA_GFX12)) {
+    fp8_bf8_support |=
+        LOOM_AMDGPU_HAL_KERNEL_LIBRARY_NARROW_MATRIX_SUPPORT_UNSCALED;
+  }
+  loom_amdgpu_hal_kernel_library_narrow_matrix_support_flags_t f8f6f4_support =
+      0;
+  if (iree_any_bit_set(
+          feature_bits,
+          LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX950_SCALE_F8F6F4 |
+              LOOM_AMDGPU_MATRIX_FEATURE_WMMA_GFX1250_SCALE_F8F6F4)) {
+    f8f6f4_support |=
+        LOOM_AMDGPU_HAL_KERNEL_LIBRARY_NARROW_MATRIX_SUPPORT_SCALED;
+  }
+  IREE_RETURN_IF_ERROR(
+      loom_amdgpu_hal_kernel_library_record_narrow_matrix_capability(
+          report, function_name, namespace_name,
+          IREE_SV("matrix_fp8_native_kind"), fp8_bf8_support | f8f6f4_support));
+  IREE_RETURN_IF_ERROR(
+      loom_amdgpu_hal_kernel_library_record_narrow_matrix_capability(
+          report, function_name, namespace_name,
+          IREE_SV("matrix_bf8_native_kind"), fp8_bf8_support | f8f6f4_support));
+  IREE_RETURN_IF_ERROR(
+      loom_amdgpu_hal_kernel_library_record_narrow_matrix_capability(
+          report, function_name, namespace_name,
+          IREE_SV("matrix_fp6_native_kind"), f8f6f4_support));
+  IREE_RETURN_IF_ERROR(
+      loom_amdgpu_hal_kernel_library_record_narrow_matrix_capability(
+          report, function_name, namespace_name,
+          IREE_SV("matrix_bf6_native_kind"), f8f6f4_support));
+  IREE_RETURN_IF_ERROR(
+      loom_amdgpu_hal_kernel_library_record_narrow_matrix_capability(
+          report, function_name, namespace_name,
+          IREE_SV("matrix_fp4_native_kind"), f8f6f4_support));
 
   const iree_host_size_t feature_count =
       loom_amdgpu_matrix_feature_info_count();

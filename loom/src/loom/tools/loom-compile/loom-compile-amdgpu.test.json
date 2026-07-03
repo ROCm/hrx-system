@@ -144,6 +144,11 @@
                 "\"target_capability_rows\":{\"count\":",
                 "\"target_capability_row_count\":",
                 "\"namespace\":\"amdgpu\",\"key\":\"matrix_feature_profile\"",
+                "\"namespace\":\"amdgpu\",\"key\":\"matrix_fp8_native_kind\",\"value_kind\":\"string\",\"value_string\":\"none\"",
+                "\"namespace\":\"amdgpu\",\"key\":\"matrix_bf8_native_kind\",\"value_kind\":\"string\",\"value_string\":\"none\"",
+                "\"namespace\":\"amdgpu\",\"key\":\"matrix_fp6_native_kind\",\"value_kind\":\"string\",\"value_string\":\"none\"",
+                "\"namespace\":\"amdgpu\",\"key\":\"matrix_bf6_native_kind\",\"value_kind\":\"string\",\"value_string\":\"none\"",
+                "\"namespace\":\"amdgpu\",\"key\":\"matrix_fp4_native_kind\",\"value_kind\":\"string\",\"value_string\":\"none\"",
                 "\"workload\":{\"workgroup_size\":{\"x\":1,\"y\":1,\"z\":1,\"flat\":1}}",
                 "\"memory_write_byte_count\":5",
                 "\"global_store_byte_count\":5",
@@ -196,6 +201,11 @@
                 "\"target_capability_row_count\":",
                 "\"namespace\":\"amdgpu\",\"key\":\"processor\"",
                 "\"namespace\":\"amdgpu\",\"key\":\"matrix_feature_profile\"",
+                "\"namespace\":\"amdgpu\",\"key\":\"matrix_fp8_native_kind\",\"value_kind\":\"string\",\"value_string\":\"none\"",
+                "\"namespace\":\"amdgpu\",\"key\":\"matrix_bf8_native_kind\",\"value_kind\":\"string\",\"value_string\":\"none\"",
+                "\"namespace\":\"amdgpu\",\"key\":\"matrix_fp6_native_kind\",\"value_kind\":\"string\",\"value_string\":\"none\"",
+                "\"namespace\":\"amdgpu\",\"key\":\"matrix_bf6_native_kind\",\"value_kind\":\"string\",\"value_string\":\"none\"",
+                "\"namespace\":\"amdgpu\",\"key\":\"matrix_fp4_native_kind\",\"value_kind\":\"string\",\"value_string\":\"none\"",
                 "\"namespace\":\"target\",\"key\":\"subgroup_size\"",
                 "\"workload\":{\"workgroup_size\":{\"x\":1,\"y\":1,\"z\":1,\"flat\":1}}",
                 "\"memory_write_byte_count\":5",
@@ -664,6 +674,86 @@
             },
             {
               "path": "{tmp}/selected_root_amdgpu.hsaco.manifest.json",
+              "non_empty": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "reports CDNA3 narrow matrix target capabilities",
+      "steps": [
+        {
+          "name": "compile",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/selected_root_amdgpu.loom",
+              "--backend=amdgpu-hal",
+              "--root=@unselected_targetless_store_i32",
+              "--target=gfx942",
+              "--output={tmp}/targetless_native_matrix_gfx942.hsaco",
+              "--compile-report=summary",
+              "--compile-report-output=-"
+            ]
+          },
+          "stdout": {
+            "contains": {
+              "unordered": [
+                "\"target_key\":\"gfx942\"",
+                "\"namespace\":\"amdgpu\",\"key\":\"matrix_feature_profile\",\"value_kind\":\"string\",\"value_string\":\"mfma-gfx940\"",
+                "\"namespace\":\"amdgpu\",\"key\":\"matrix_fp8_native_kind\",\"value_kind\":\"string\",\"value_string\":\"unscaled\"",
+                "\"namespace\":\"amdgpu\",\"key\":\"matrix_bf8_native_kind\",\"value_kind\":\"string\",\"value_string\":\"unscaled\"",
+                "\"namespace\":\"amdgpu\",\"key\":\"matrix_fp6_native_kind\",\"value_kind\":\"string\",\"value_string\":\"none\"",
+                "\"namespace\":\"amdgpu\",\"key\":\"matrix_bf6_native_kind\",\"value_kind\":\"string\",\"value_string\":\"none\"",
+                "\"namespace\":\"amdgpu\",\"key\":\"matrix_fp4_native_kind\",\"value_kind\":\"string\",\"value_string\":\"none\"",
+                "\"status\":\"OK\""
+              ]
+            }
+          },
+          "files": [
+            {
+              "path": "{tmp}/targetless_native_matrix_gfx942.hsaco",
+              "non_empty": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "reports RDNA4 narrow matrix target capabilities",
+      "steps": [
+        {
+          "name": "compile",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/selected_root_amdgpu.loom",
+              "--backend=amdgpu-hal",
+              "--root=@unselected_targetless_store_i32",
+              "--target=gfx1250",
+              "--output={tmp}/targetless_native_matrix_gfx1250.hsaco",
+              "--compile-report=summary",
+              "--compile-report-output=-"
+            ]
+          },
+          "stdout": {
+            "contains": {
+              "unordered": [
+                "\"target_key\":\"gfx1250\"",
+                "\"namespace\":\"amdgpu\",\"key\":\"matrix_feature_profile\",\"value_kind\":\"string\",\"value_string\":\"wmma-gfx1250\"",
+                "\"namespace\":\"amdgpu\",\"key\":\"matrix_fp8_native_kind\",\"value_kind\":\"string\",\"value_string\":\"unscaled_scaled\"",
+                "\"namespace\":\"amdgpu\",\"key\":\"matrix_bf8_native_kind\",\"value_kind\":\"string\",\"value_string\":\"unscaled_scaled\"",
+                "\"namespace\":\"amdgpu\",\"key\":\"matrix_fp6_native_kind\",\"value_kind\":\"string\",\"value_string\":\"scaled\"",
+                "\"namespace\":\"amdgpu\",\"key\":\"matrix_bf6_native_kind\",\"value_kind\":\"string\",\"value_string\":\"scaled\"",
+                "\"namespace\":\"amdgpu\",\"key\":\"matrix_fp4_native_kind\",\"value_kind\":\"string\",\"value_string\":\"scaled\"",
+                "\"status\":\"OK\""
+              ]
+            }
+          },
+          "files": [
+            {
+              "path": "{tmp}/targetless_native_matrix_gfx1250.hsaco",
               "non_empty": true
             }
           ]
