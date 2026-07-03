@@ -257,6 +257,17 @@ loom_amdgpu_fp8_pair_to_packed_bf16_repairs(
 iree_string_view_t loom_amdgpu_fp8_packed_bf16_repair_reason_key(
     loom_amdgpu_fp8_packed_bf16_repairs_t repairs);
 
+// Returns the zero/subnormal repairs emitted by the packed finite FP8-to-F16
+// pair decode path for |plan| and |value_flags|.
+loom_amdgpu_fp8_packed_bf16_repairs_t
+loom_amdgpu_fp8_pair_to_packed_f16_repairs(
+    const loom_amdgpu_fp8_decode_plan_t* plan,
+    loom_amdgpu_fp8_decode_value_flags_t value_flags);
+
+// Returns the structured report reason key for packed F16 decode repairs.
+iree_string_view_t loom_amdgpu_fp8_packed_f16_repair_reason_key(
+    loom_amdgpu_fp8_packed_bf16_repairs_t repairs);
+
 // Emits one 16-bit BF16 bit payload from an unsigned FP8 byte payload.
 iree_status_t loom_amdgpu_emit_fp8_to_bf16_lane(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
