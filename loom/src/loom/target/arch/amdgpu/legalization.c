@@ -1630,6 +1630,14 @@ static iree_status_t loom_amdgpu_legalize_result_fragment_store_epilogue_loop(
                                                                group_count)) {
     return iree_ok_status();
   }
+  if (plan.narrowed_result_scale_source != LOOM_VALUE_ID_INVALID &&
+      loom_amdgpu_fragment_epilogue_strategy_is_packed_b16(
+          plan.epilogue_strategy)) {
+    // The fragment memory lowerer can apply the scale while packing the BF16
+    // store. Rewriting to a physical-result loop here would lose that packet
+    // plan and scalarize a path the target already knows how to emit.
+    return iree_ok_status();
+  }
   if (loom_amdgpu_fragment_epilogue_strategy_is_packed_b16(
           plan.epilogue_strategy) &&
       !loom_amdgpu_fragment_store_group_has_decomposable_payloads(

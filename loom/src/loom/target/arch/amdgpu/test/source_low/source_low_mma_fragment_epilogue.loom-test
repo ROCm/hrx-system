@@ -1885,3 +1885,31 @@ kernel.def target(@target) @report_large_bf16_result_epilogue_group() {
   }
   kernel.return
 }
+
+// ====
+// RUN: pass target-legalize{mode=final},dce,canonicalize
+
+amdgpu.target<gfx1100> @target
+
+kernel.def target(@target) @report_large_scaled_bf16_result_epilogue_group() {
+  %one = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+} launch(%payload0: vector<8xf32>, %payload1: vector<8xf32>, %payload2: vector<8xf32>, %payload3: vector<8xf32>, %scale: f32, %output: buffer) {
+  %base = index.constant 0 : offset
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %output_global = buffer.assume.memory_space<global> %output : buffer
+  %output_aligned = buffer.assume.alignment %output_global {minimum_alignment = 16} : buffer
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<16x64xbf16, #dense>
+  %scale_vector = vector.splat %scale : vector<8xf32>
+  %epilogue0 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %payload0, %scale_vector : vector<8xf32>
+  %epilogue1 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %payload1, %scale_vector : vector<8xf32>
+  %epilogue2 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %payload2, %scale_vector : vector<8xf32>
+  %epilogue3 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %payload3, %scale_vector : vector<8xf32>
+  vector.fragment.store<result> %epilogue0, %output_view[0, 0] shape [%m, %n] : vector<8xf32>, view<16x64xbf16, #dense>
+  vector.fragment.store<result> %epilogue1, %output_view[0, 16] shape [%m, %n] : vector<8xf32>, view<16x64xbf16, #dense>
+  vector.fragment.store<result> %epilogue2, %output_view[0, 32] shape [%m, %n] : vector<8xf32>, view<16x64xbf16, #dense>
+  vector.fragment.store<result> %epilogue3, %output_view[0, 48] shape [%m, %n] : vector<8xf32>, view<16x64xbf16, #dense>
+  kernel.return
+}
