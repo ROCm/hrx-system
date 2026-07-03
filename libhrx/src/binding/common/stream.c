@@ -835,13 +835,16 @@ iree_status_t iree_hal_streaming_unpack_parameters(
     iree_hal_buffer_ref_list_t* out_bindings) {
   IREE_ASSERT_ARGUMENT(context);
   IREE_ASSERT_ARGUMENT(parameters);
-  if (parameters->buffer_size == 0 && parameters->binding_count == 0 &&
-      parameters->copy_count == 0) {
+  if (iree_hal_streaming_parameter_info_is_empty(parameters)) {
     return iree_ok_status();
   }
-  if ((parameters->buffer_size > 0 || parameters->binding_count > 0 ||
-       parameters->copy_count > 0) &&
-      !parameter_buffer_ptr) {
+  const bool requires_parameter_storage = parameters->buffer_size > 0 ||
+                                          parameters->binding_count > 0 ||
+                                          parameters->copy_count > 0;
+  if (!requires_parameter_storage) {
+    return iree_ok_status();
+  }
+  if (!parameter_buffer_ptr) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "kernel parameter buffer is required");
   }
@@ -912,13 +915,16 @@ iree_status_t iree_hal_streaming_unpack_parameter_list(
     iree_hal_buffer_ref_list_t* out_bindings) {
   IREE_ASSERT_ARGUMENT(context);
   IREE_ASSERT_ARGUMENT(parameters);
-  if (parameters->buffer_size == 0 && parameters->binding_count == 0 &&
-      parameters->copy_count == 0) {
+  if (iree_hal_streaming_parameter_info_is_empty(parameters)) {
     return iree_ok_status();
   }
-  if ((parameters->buffer_size > 0 || parameters->binding_count > 0 ||
-       parameters->copy_count > 0) &&
-      !parameter_list) {
+  const bool requires_parameter_storage = parameters->buffer_size > 0 ||
+                                          parameters->binding_count > 0 ||
+                                          parameters->copy_count > 0;
+  if (!requires_parameter_storage) {
+    return iree_ok_status();
+  }
+  if (!parameter_list) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "kernel parameter list is required");
   }
@@ -1007,6 +1013,11 @@ static iree_status_t iree_hal_streaming_pack_raw_argument_list(
   IREE_ASSERT_ARGUMENT(parameters);
   IREE_ASSERT_ARGUMENT(out_constants_size);
 
+  if (iree_hal_streaming_parameter_info_is_empty(parameters)) {
+    *out_constants_size = 0;
+    return iree_ok_status();
+  }
+
   *out_constants_size = parameters->direct_arg_bytes
                             ? parameters->direct_arg_bytes
                             : parameters->constant_bytes;
@@ -1055,13 +1066,6 @@ static iree_status_t iree_hal_streaming_pack_raw_argument_list(
   }
 
   return iree_ok_status();
-}
-
-static bool iree_hal_streaming_parameter_info_is_empty(
-    const iree_hal_streaming_parameter_info_t* parameters) {
-  return parameters->buffer_size == 0 && parameters->constant_bytes == 0 &&
-         parameters->direct_arg_bytes == 0 && parameters->binding_count == 0 &&
-         parameters->copy_count == 0;
 }
 
 iree_status_t iree_hal_streaming_launch_kernel(

@@ -1029,6 +1029,10 @@ static iree_status_t iree_hal_streaming_pack_raw_argument_list(
     iree_host_size_t* out_constants_size) {
   IREE_ASSERT_ARGUMENT(parameters);
   IREE_ASSERT_ARGUMENT(out_constants_size);
+  if (iree_hal_streaming_parameter_info_is_empty(parameters)) {
+    *out_constants_size = 0;
+    return iree_ok_status();
+  }
   *out_constants_size = parameters->direct_arg_bytes
                             ? parameters->direct_arg_bytes
                             : parameters->constant_bytes;
@@ -1082,13 +1086,6 @@ static iree_status_t iree_hal_streaming_pack_raw_argument_list(
   }
 
   return iree_ok_status();
-}
-
-static bool iree_hal_streaming_parameter_info_is_empty(
-    const iree_hal_streaming_parameter_info_t* parameters) {
-  return parameters->buffer_size == 0 && parameters->constant_bytes == 0 &&
-         parameters->direct_arg_bytes == 0 && parameters->binding_count == 0 &&
-         parameters->copy_count == 0;
 }
 
 iree_status_t iree_hal_streaming_graph_add_kernel_node(

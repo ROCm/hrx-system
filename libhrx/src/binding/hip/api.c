@@ -5709,8 +5709,8 @@ HIPAPI hipError_t hipMemcpy(void* dst, const void* src, size_t sizeBytes,
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(kind_result);
   }
-  hipError_t range_result = iree_hip_validate_memcpy_ranges(
-      context, dst, src, sizeBytes, kind, false);
+  hipError_t range_result =
+      iree_hip_validate_memcpy_ranges(context, dst, src, sizeBytes, kind, true);
   if (range_result != hipSuccess) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(range_result);
@@ -5854,8 +5854,8 @@ HIPAPI hipError_t hipMemcpyAsync(void* dst, const void* src, size_t sizeBytes,
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(kind_result);
   }
-  hipError_t range_result = iree_hip_validate_memcpy_ranges(
-      context, dst, src, sizeBytes, kind, false);
+  hipError_t range_result =
+      iree_hip_validate_memcpy_ranges(context, dst, src, sizeBytes, kind, true);
   if (range_result != hipSuccess) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(range_result);

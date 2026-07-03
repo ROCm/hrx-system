@@ -296,7 +296,6 @@ static iree_status_t iree_hal_streaming_module_extract_metadata(
     // Build operations with coalescing.
     // Copy ops go first, then resolve ops.
     uint16_t src_offset = 0;
-    uint16_t src_ordinal = 0;
     size_t direct_arg_offset = 0;
     uint16_t buffer_size = 0;
     size_t this_kernel_direct_arg_size = 0;  // Native direct-arg prefix size.
@@ -340,7 +339,7 @@ static iree_status_t iree_hal_streaming_module_extract_metadata(
         op->reserved = 0;
         op->src_offset = src_offset;
         op->dst_ordinal = resolve_count;
-        op->src_ordinal = src_ordinal;
+        op->src_ordinal = j;
         // For HIP native launches using CUSTOM_DIRECT_ARGUMENTS we need
         // to place raw device pointers at their kernarg ABI offset. Binding
         // export parameter offsets are binding-list ordinals in some IREE HAL
@@ -350,7 +349,6 @@ static iree_status_t iree_hal_streaming_module_extract_metadata(
         op->dst_offset = (uint16_t)native_dst_offset;
         src_offset = (uint16_t)source_extent;
         buffer_size = src_offset;
-        ++src_ordinal;
         ++resolve_count;
 
         size_t param_extent = native_extent;
@@ -374,7 +372,7 @@ static iree_status_t iree_hal_streaming_module_extract_metadata(
             &copy_ops_start[copy_count].copy;
         op->size = parameter->size;
         op->src_offset = src_offset;
-        op->src_ordinal = src_ordinal;
+        op->src_ordinal = j;
         op->direct_dst_offset = (uint16_t)native_dst_offset;
         op->dst_offset = parameter->offset;  // offset in constants
         ++copy_count;
@@ -382,7 +380,6 @@ static iree_status_t iree_hal_streaming_module_extract_metadata(
         // }
         src_offset = (uint16_t)source_extent;
         buffer_size = src_offset;
-        ++src_ordinal;
 
         size_t direct_arg_extent = native_extent;
         if (direct_arg_extent > this_kernel_direct_arg_size) {
