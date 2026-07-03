@@ -31,6 +31,8 @@ typedef struct loom_low_allocation_interval_assignment_state_t {
   loom_low_allocation_active_set_t active;
   // Cached predicted spill traffic, dense by liveness value ordinal.
   loom_low_allocation_spill_plan_traffic_t* spill_traffic_by_value_ordinal;
+  // Next free spill-slot allocation unit.
+  uint32_t next_spill_slot;
   // Mutable assignment, spill, remark, and lookup state being built.
   loom_low_allocation_interval_assignment_result_t result;
 } loom_low_allocation_interval_assignment_state_t;
@@ -354,18 +356,19 @@ loom_low_allocation_interval_assignment_spill_active_assignment(
     loom_low_allocation_interval_assignment_state_t* state,
     uint32_t assignment_index,
     const loom_low_allocation_class_capacity_t* capacity) {
-  if (state->result.spill_count > UINT32_MAX) {
+  loom_low_allocation_assignment_t* assignment =
+      &state->result.assignments[assignment_index];
+  if (assignment->unit_count > UINT32_MAX - state->next_spill_slot) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "allocation table exceeds uint32_t range");
+                            "allocation spill slots exceed uint32_t range");
   }
   loom_low_allocation_active_set_remove_assignment_units(
       &state->active, state->result.assignments, state->result.assignment_count,
       assignment_index);
-  loom_low_allocation_assignment_t* assignment =
-      &state->result.assignments[assignment_index];
   assignment->location_kind = LOOM_LOW_ALLOCATION_LOCATION_SPILL_SLOT;
-  assignment->location_base = (uint32_t)state->result.spill_count;
+  assignment->location_base = state->next_spill_slot;
   assignment->location_count = assignment->unit_count;
+  state->next_spill_slot += assignment->unit_count;
   ++state->result.spill_count;
   IREE_RETURN_IF_ERROR(loom_low_allocation_spill_plan_record(
       state->context->module, state->context->body, assignment,
@@ -932,9 +935,9 @@ iree_status_t loom_low_allocation_interval_assignment_build(
     IREE_RETURN_IF_ERROR(
         loom_low_allocation_target_constraints_interval_capacity(
             context->target_constraints, interval, &capacity));
-    if (state.result.spill_count > UINT32_MAX) {
+    if (interval->unit_count > UINT32_MAX - state.next_spill_slot) {
       return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "allocation table exceeds uint32_t range");
+                              "allocation spill slots exceed uint32_t range");
     }
 
     uint32_t location_base = 0;
@@ -995,8 +998,7 @@ iree_status_t loom_low_allocation_interval_assignment_build(
         .unit_count = interval->unit_count,
         .location_kind = assigned ? capacity.location_kind
                                   : LOOM_LOW_ALLOCATION_LOCATION_SPILL_SLOT,
-        .location_base =
-            assigned ? location_base : (uint32_t)state.result.spill_count,
+        .location_base = assigned ? location_base : state.next_spill_slot,
         .location_count = interval->unit_count,
     };
 
@@ -1006,6 +1008,7 @@ iree_status_t loom_low_allocation_interval_assignment_build(
             &state, &assignment, /*ignored_storage_lease_value_ids=*/NULL,
             /*ignored_storage_lease_value_count=*/0, &assignment_index));
     if (!assigned) {
+      state.next_spill_slot += interval->unit_count;
       ++state.result.spill_count;
       IREE_RETURN_IF_ERROR(loom_low_allocation_spill_plan_record(
           context->module, context->body,
