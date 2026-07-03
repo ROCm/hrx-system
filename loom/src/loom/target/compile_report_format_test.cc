@@ -222,6 +222,55 @@ TEST(CompileReportFormatTest, MergesSourceLowMemorySummariesFromEntries) {
   loom_target_compile_report_deinitialize(&report);
 }
 
+TEST(CompileReportFormatTest, SeparatesSourceLowMemoryStrategiesByPacket) {
+  loom_target_compile_report_t report;
+  loom_target_compile_report_initialize(&report, iree_allocator_system());
+
+  loom_target_compile_report_source_low_memory_row_t rows[] = {
+      MakeMemoryRow(IREE_SVL("vector.load"), /*source_op_kind=*/43,
+                    IREE_SVL("load"), IREE_SVL("test.load.v2"),
+                    /*static_offset_bytes=*/0,
+                    /*vector_lane_count=*/2,
+                    /*issued_read_byte_count=*/8,
+                    /*issued_write_byte_count=*/0,
+                    /*dynamic_stride_bytes=*/8,
+                    /*vector_lane_stride_bytes=*/4,
+                    MakeExactSourceInterval(/*begin_bytes=*/0,
+                                            /*end_bytes=*/8)),
+      MakeMemoryRow(IREE_SVL("vector.load"), /*source_op_kind=*/43,
+                    IREE_SVL("load"), IREE_SVL("test.load.v4"),
+                    /*static_offset_bytes=*/16,
+                    /*vector_lane_count=*/4,
+                    /*issued_read_byte_count=*/16,
+                    /*issued_write_byte_count=*/0,
+                    /*dynamic_stride_bytes=*/16,
+                    /*vector_lane_stride_bytes=*/4,
+                    MakeExactSourceInterval(/*begin_bytes=*/16,
+                                            /*end_bytes=*/32)),
+  };
+  rows[0].strategy_key = IREE_SVL("test.wide-load");
+  rows[1].strategy_key = IREE_SVL("test.wide-load");
+
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(rows); ++i) {
+    IREE_ASSERT_OK(loom_target_compile_report_record_source_low_memory_row(
+        &report, &rows[i]));
+  }
+
+  ASSERT_EQ(report.source_low_memory_strategy_summaries.count, 2u);
+  ASSERT_NE(report.source_low_memory_strategy_summaries.head, nullptr);
+  const loom_target_compile_report_source_low_memory_strategy_summary_t*
+      summaries = static_cast<
+          const loom_target_compile_report_source_low_memory_strategy_summary_t*>(
+          loom_target_compile_report_vec_const_rows(
+              report.source_low_memory_strategy_summaries.head));
+  EXPECT_TRUE(iree_string_view_equal(summaries[0].packet_key,
+                                     IREE_SVL("test.load.v2")));
+  EXPECT_TRUE(iree_string_view_equal(summaries[1].packet_key,
+                                     IREE_SVL("test.load.v4")));
+
+  loom_target_compile_report_deinitialize(&report);
+}
+
 TEST(CompileReportFormatTest, MergesOverlappingSourceLowMemoryIntervals) {
   loom_target_compile_report_t report;
   loom_target_compile_report_initialize(&report, iree_allocator_system());
@@ -2010,6 +2059,7 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
                 output,
                 IREE_SV("source_low_memory_strategy[0] function=branchy "
                         "memory_space=workgroup operation=load "
+                        "packet=amdgpu.ds_read2_b32 "
                         "strategy=ds_2addr_bank_report "
                         "storage={element_format:f8e4m3fn,scale_format:f32,"
                         "payload_packing:dense_lanes,"
@@ -2641,6 +2691,7 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
                         "\"function\":\"branchy\","
                         "\"memory_space\":\"workgroup\","
                         "\"operation\":\"load\","
+                        "\"packet\":\"amdgpu.ds_read2_b32\","
                         "\"strategy\":\"ds_2addr_bank_report\","
                         "\"fallback_reason\":\"cross_wave_workgroup\","
                         "\"storage\":{\"element_format\":\"f8e4m3fn\","
