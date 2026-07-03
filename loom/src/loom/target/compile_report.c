@@ -1629,6 +1629,12 @@ static void loom_target_compile_report_merge_source_low_memory_argument_summary(
     loom_target_compile_report_source_low_memory_argument_summary_t* target,
     const loom_target_compile_report_source_low_memory_argument_summary_t*
         source) {
+  if (!iree_string_view_is_empty(target->source_root_name) &&
+      (iree_string_view_is_empty(source->source_root_name) ||
+       !iree_string_view_equal(target->source_root_name,
+                               source->source_root_name))) {
+    target->source_root_name = iree_string_view_empty();
+  }
   loom_target_compile_report_merge_source_low_memory_summary(&target->summary,
                                                              &source->summary);
 }
@@ -2463,6 +2469,7 @@ loom_target_compile_report_record_source_low_memory_argument_summary(
     loom_target_compile_report_source_low_memory_argument_summary_t
         new_summary = {
             .function_name = row->function_name,
+            .source_root_name = row->source_root_name,
             .source_root_argument_index = row->source_root_argument_index,
             .memory_space = row->memory_space,
         };

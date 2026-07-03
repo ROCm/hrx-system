@@ -1303,6 +1303,8 @@ typedef struct loom_target_compile_report_source_low_memory_root_summary_t {
 typedef struct loom_target_compile_report_source_low_memory_argument_summary_t {
   // Source function symbol containing the source memory argument.
   iree_string_view_t function_name;
+  // Common named source memory root for this argument, if known and unique.
+  iree_string_view_t source_root_name;
   // Source function entry argument index for the memory root.
   uint16_t source_root_argument_index;
   // Target-independent memory-space key selected by the target.

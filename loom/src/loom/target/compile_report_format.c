@@ -2590,13 +2590,22 @@ loom_target_compile_report_format_source_low_memory_argument_summaries(
           row = &rows[i];
       const iree_string_view_t function_name =
           loom_target_compile_report_non_empty(row->function_name);
+      const iree_string_view_t source_root_name =
+          loom_target_compile_report_non_empty(row->source_root_name);
       const iree_string_view_t memory_space =
           loom_target_compile_report_non_empty(row->memory_space);
       IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
           builder,
           "COMPILE-REPORT: source_low_memory_argument[%" PRIhsz
-          "] function=%.*s source_root_argument_index=%u memory_space=%.*s",
-          row_index, (int)function_name.size, function_name.data,
+          "] function=%.*s",
+          row_index, (int)function_name.size, function_name.data));
+      if (!iree_string_view_is_empty(row->source_root_name)) {
+        IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+            builder, " source_root=%.*s", (int)source_root_name.size,
+            source_root_name.data));
+      }
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+          builder, " source_root_argument_index=%u memory_space=%.*s",
           row->source_root_argument_index, (int)memory_space.size,
           memory_space.data));
       IREE_RETURN_IF_ERROR(
@@ -5413,6 +5422,9 @@ loom_target_compile_report_format_source_low_memory_argument_summary_json(
   IREE_RETURN_IF_ERROR(
       loom_target_compile_report_json_write_optional_string_field(
           stream, &first_field, "function", row->function_name));
+  IREE_RETURN_IF_ERROR(
+      loom_target_compile_report_json_write_optional_string_field(
+          stream, &first_field, "source_root", row->source_root_name));
   IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u32_field(
       stream, &first_field, "source_root_argument_index",
       row->source_root_argument_index));
