@@ -467,22 +467,8 @@ static void hrx_hip_stream_callback_host_fn(void* user_data) {
 }
 
 HIPAPI const char* hipApiName(uint32_t id) {
-  switch (id) {
-    case 1:
-      return "hipGetDevice";
-    case 2:
-      return "hipSetDevice";
-    case 3:
-      return "hipMalloc";
-    case 4:
-      return "hipFree";
-    case 5:
-      return "hipMemcpy";
-    case 6:
-      return "hipLaunchKernel";
-    default:
-      return "unknown";
-  }
+  (void)id;
+  return NULL;
 }
 
 HIPAPI hipError_t hipBindTexture(size_t* offset, const textureReference* tex,
