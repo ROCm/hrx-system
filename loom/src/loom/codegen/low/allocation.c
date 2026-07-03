@@ -135,7 +135,8 @@ iree_status_t loom_low_allocate_function(
   if (iree_status_is_ok(status) && state.target_constraints.error_count == 0) {
     status = loom_low_allocation_unit_liveness_initialize(
         module, state.body, &state.target, options->liveness_order,
-        &value_domain, &state.liveness, arena, &state.unit_liveness);
+        &state.placement, &value_domain, &state.liveness, arena,
+        &state.unit_liveness);
   }
   if (iree_status_is_ok(status) && state.target_constraints.error_count == 0) {
     status = loom_low_allocation_unit_liveness_extend_for_tied_results(

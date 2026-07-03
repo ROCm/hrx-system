@@ -138,8 +138,8 @@ TEST_F(LowAllocationUnitLivenessTest, InitializesUnitStartsAndBoundaryUses) {
 
   loom_low_allocation_unit_liveness_t unit_liveness = {};
   IREE_ASSERT_OK(loom_low_allocation_unit_liveness_initialize(
-      module, body, &target, loom_liveness_order_empty(), &value_domain,
-      &liveness, &arena_, &unit_liveness));
+      module, body, &target, loom_liveness_order_empty(), nullptr,
+      &value_domain, &liveness, &arena_, &unit_liveness));
 
   EXPECT_EQ(loom_low_allocation_unit_liveness_end_point_start_for_value_ordinal(
                 &unit_liveness, &liveness, /*value_ordinal=*/0),
@@ -193,8 +193,8 @@ TEST_F(LowAllocationUnitLivenessTest, ExtendsTiedResultSourceUnits) {
 
   loom_low_allocation_unit_liveness_t unit_liveness = {};
   IREE_ASSERT_OK(loom_low_allocation_unit_liveness_initialize(
-      module, body, &target, loom_liveness_order_empty(), &value_domain,
-      &liveness, &arena_, &unit_liveness));
+      module, body, &target, loom_liveness_order_empty(), nullptr,
+      &value_domain, &liveness, &arena_, &unit_liveness));
   ASSERT_EQ(unit_liveness.end_point_count, 4u);
   EXPECT_EQ(unit_liveness.end_points[0], 1u);
   EXPECT_EQ(unit_liveness.end_points[1], 1u);
