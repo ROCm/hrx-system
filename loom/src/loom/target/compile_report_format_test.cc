@@ -687,9 +687,27 @@ TEST(CompileReportFormatTest, FormatsSourceLowMemorySummaryEconomics) {
                                     "\"write_bytes\":64,\"total_bytes\":192}"),
                             0),
       IREE_STRING_VIEW_NPOS);
-  EXPECT_EQ(iree_string_view_find(output, IREE_SV("\"memory_rows\""), 0),
+  EXPECT_NE(iree_string_view_find(
+                output,
+                IREE_SV("\"economics\":{\"memory\":{\"source_low\":{"
+                        "\"packet_count\":2"),
+                0),
             IREE_STRING_VIEW_NPOS);
-  EXPECT_EQ(iree_string_view_find(output, IREE_SV("\"economics\""), 0),
+  EXPECT_NE(iree_string_view_find(output,
+                                  IREE_SV("\"source_low\":{\"packet_count\":2,"
+                                          "\"load_packet_count\":1,"
+                                          "\"store_packet_count\":1,"
+                                          "\"scalar_packet_count\":1,"
+                                          "\"vector_packet_count\":1"),
+                                  0),
+            IREE_STRING_VIEW_NPOS);
+  EXPECT_NE(iree_string_view_find(output,
+                                  IREE_SV("\"dispatch_source\":{\"read_bytes\":"
+                                          "128,\"write_bytes\":64,"
+                                          "\"total_bytes\":192}"),
+                                  0),
+            IREE_STRING_VIEW_NPOS);
+  EXPECT_EQ(iree_string_view_find(output, IREE_SV("\"memory_rows\""), 0),
             IREE_STRING_VIEW_NPOS);
 
   iree_string_builder_deinitialize(&builder);
