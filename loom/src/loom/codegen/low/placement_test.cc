@@ -24,6 +24,10 @@ TEST(LowPlacementTest, ClassifiesAliasingCauses) {
       loom_low_placement_cause_can_alias(LOOM_LOW_PLACEMENT_CAUSE_LOW_CONCAT));
   EXPECT_TRUE(
       loom_low_placement_cause_can_alias(LOOM_LOW_PLACEMENT_CAUSE_LOW_BRANCH));
+  EXPECT_TRUE(
+      loom_low_placement_cause_can_alias(LOOM_LOW_PLACEMENT_CAUSE_LOW_SCF_FOR));
+  EXPECT_TRUE(loom_low_placement_cause_can_alias(
+      LOOM_LOW_PLACEMENT_CAUSE_LOW_SCF_YIELD));
 }
 
 }  // namespace

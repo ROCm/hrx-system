@@ -132,6 +132,18 @@ static bool loom_low_allocation_coalescing_storage_alias_cause(
   }
 }
 
+static bool loom_low_allocation_coalescing_edge_affinity_cause(
+    loom_low_placement_cause_t cause) {
+  switch (cause) {
+    case LOOM_LOW_PLACEMENT_CAUSE_LOW_BRANCH:
+    case LOOM_LOW_PLACEMENT_CAUSE_LOW_SCF_FOR:
+    case LOOM_LOW_PLACEMENT_CAUSE_LOW_SCF_YIELD:
+      return true;
+    default:
+      return false;
+  }
+}
+
 static bool loom_low_allocation_coalescing_value_id_is_listed(
     const loom_value_id_t* value_ids, uint16_t value_count,
     loom_value_id_t value_id) {
@@ -175,7 +187,7 @@ static bool loom_low_allocation_coalescing_try_append_unique_value_id(
 static bool loom_low_allocation_coalescing_exact_storage_alias_relation(
     const loom_low_allocation_coalescing_context_t* context,
     const loom_low_placement_relation_t* relation) {
-  if (relation->cause == LOOM_LOW_PLACEMENT_CAUSE_LOW_BRANCH ||
+  if (loom_low_allocation_coalescing_edge_affinity_cause(relation->cause) ||
       !loom_low_placement_cause_can_alias(relation->cause) ||
       relation->kind != LOOM_LOW_PLACEMENT_RELATION_SAME_STORAGE ||
       relation->result_unit_offset != 0 || relation->source_unit_offset != 0) {
@@ -592,7 +604,7 @@ static iree_status_t loom_low_allocation_coalescing_assign_copy_interval(
 }
 
 static iree_status_t
-loom_low_allocation_coalescing_assign_branch_destination_interval(
+loom_low_allocation_coalescing_assign_edge_destination_interval(
     loom_low_allocation_coalescing_context_t* context,
     const loom_liveness_interval_t* interval,
     const loom_low_placement_relation_t* relation, bool* out_assigned) {
@@ -965,34 +977,34 @@ loom_low_allocation_coalescing_assign_concat_result_reservation(
       ignored_value_count, out_assigned);
 }
 
-static bool loom_low_allocation_coalescing_branch_relation_covers_concat_source(
-    const loom_low_placement_relation_t* branch_relation,
+static bool loom_low_allocation_coalescing_edge_relation_covers_concat_source(
+    const loom_low_placement_relation_t* edge_relation,
     const loom_low_placement_relation_t* concat_relation) {
-  if (branch_relation->cause != LOOM_LOW_PLACEMENT_CAUSE_LOW_BRANCH ||
-      branch_relation->source_ordinal != concat_relation->result_ordinal) {
+  if (!loom_low_allocation_coalescing_edge_affinity_cause(
+          edge_relation->cause) ||
+      edge_relation->source_ordinal != concat_relation->result_ordinal) {
     return false;
   }
-  if (concat_relation->result_unit_offset <
-      branch_relation->source_unit_offset) {
+  if (concat_relation->result_unit_offset < edge_relation->source_unit_offset) {
     return false;
   }
   if (concat_relation->unit_count >
       UINT32_MAX - concat_relation->result_unit_offset) {
     return false;
   }
-  if (branch_relation->unit_count >
-      UINT32_MAX - branch_relation->source_unit_offset) {
+  if (edge_relation->unit_count >
+      UINT32_MAX - edge_relation->source_unit_offset) {
     return false;
   }
   const uint32_t concat_source_end =
       concat_relation->result_unit_offset + concat_relation->unit_count;
-  const uint32_t branch_source_end =
-      branch_relation->source_unit_offset + branch_relation->unit_count;
-  return concat_source_end <= branch_source_end;
+  const uint32_t edge_source_end =
+      edge_relation->source_unit_offset + edge_relation->unit_count;
+  return concat_source_end <= edge_source_end;
 }
 
 static iree_status_t
-loom_low_allocation_coalescing_assign_concat_source_from_branch_destination(
+loom_low_allocation_coalescing_assign_concat_source_from_edge_destination(
     loom_low_allocation_coalescing_context_t* context,
     const loom_liveness_interval_t* interval,
     const loom_low_placement_relation_t* concat_relation, bool* out_assigned) {
@@ -1004,16 +1016,16 @@ loom_low_allocation_coalescing_assign_concat_source_from_branch_destination(
     const uint32_t relation_index =
         context->placement
             ->relation_indices_by_source_ordinal[source_range.start + i];
-    const loom_low_placement_relation_t* branch_relation =
+    const loom_low_placement_relation_t* edge_relation =
         &context->placement->relations[relation_index];
-    if (!loom_low_allocation_coalescing_branch_relation_covers_concat_source(
-            branch_relation, concat_relation)) {
+    if (!loom_low_allocation_coalescing_edge_relation_covers_concat_source(
+            edge_relation, concat_relation)) {
       continue;
     }
 
     const loom_low_allocation_assignment_t* destination_assignment =
         loom_low_allocation_coalescing_current_assignment_for_value_ordinal(
-            context, branch_relation->result_ordinal);
+            context, edge_relation->result_ordinal);
     if (!destination_assignment ||
         !loom_low_allocation_assignment_is_register_like(
             destination_assignment) ||
@@ -1022,15 +1034,14 @@ loom_low_allocation_coalescing_assign_concat_source_from_branch_destination(
       continue;
     }
 
-    const uint32_t concat_to_branch_unit_offset =
-        concat_relation->result_unit_offset -
-        branch_relation->source_unit_offset;
-    if (branch_relation->result_unit_offset >
-        UINT32_MAX - concat_to_branch_unit_offset) {
+    const uint32_t concat_to_edge_unit_offset =
+        concat_relation->result_unit_offset - edge_relation->source_unit_offset;
+    if (edge_relation->result_unit_offset >
+        UINT32_MAX - concat_to_edge_unit_offset) {
       continue;
     }
     const uint32_t destination_unit_offset =
-        branch_relation->result_unit_offset + concat_to_branch_unit_offset;
+        edge_relation->result_unit_offset + concat_to_edge_unit_offset;
     if (!loom_low_allocation_coalescing_assignment_unit_span_fits(
             destination_assignment, destination_unit_offset,
             concat_relation->unit_count)) {
@@ -1072,10 +1083,10 @@ loom_low_allocation_coalescing_assign_concat_source_from_branch_destination(
 }
 
 static bool
-loom_low_allocation_coalescing_relation_source_matches_branch_interval(
+loom_low_allocation_coalescing_relation_source_matches_edge_interval(
     const loom_low_placement_relation_t* relation,
     const loom_liveness_interval_t* interval) {
-  if (relation->cause != LOOM_LOW_PLACEMENT_CAUSE_LOW_BRANCH) {
+  if (!loom_low_allocation_coalescing_edge_affinity_cause(relation->cause)) {
     return false;
   }
   return relation->source_unit_offset <= interval->unit_count &&
@@ -1263,7 +1274,7 @@ iree_status_t loom_low_allocation_coalescing_assign_concat_source_interval(
     }
 
     IREE_RETURN_IF_ERROR(
-        loom_low_allocation_coalescing_assign_concat_source_from_branch_destination(
+        loom_low_allocation_coalescing_assign_concat_source_from_edge_destination(
             context, interval, relation, out_assigned));
     if (*out_assigned) {
       return iree_ok_status();
@@ -1377,7 +1388,17 @@ iree_status_t loom_low_allocation_coalescing_assign_structural_interval(
       }
       case LOOM_LOW_PLACEMENT_CAUSE_LOW_BRANCH: {
         IREE_RETURN_IF_ERROR(
-            loom_low_allocation_coalescing_assign_branch_destination_interval(
+            loom_low_allocation_coalescing_assign_edge_destination_interval(
+                context, interval, relation, out_assigned));
+        if (*out_assigned) {
+          return iree_ok_status();
+        }
+        break;
+      }
+      case LOOM_LOW_PLACEMENT_CAUSE_LOW_SCF_FOR:
+      case LOOM_LOW_PLACEMENT_CAUSE_LOW_SCF_YIELD: {
+        IREE_RETURN_IF_ERROR(
+            loom_low_allocation_coalescing_assign_edge_destination_interval(
                 context, interval, relation, out_assigned));
         if (*out_assigned) {
           return iree_ok_status();
@@ -1391,7 +1412,7 @@ iree_status_t loom_low_allocation_coalescing_assign_structural_interval(
   return iree_ok_status();
 }
 
-iree_status_t loom_low_allocation_coalescing_assign_branch_source_interval(
+iree_status_t loom_low_allocation_coalescing_assign_edge_source_interval(
     loom_low_allocation_coalescing_context_t* context,
     const loom_liveness_interval_t* interval, bool* out_assigned) {
   *out_assigned = false;
@@ -1410,7 +1431,7 @@ iree_status_t loom_low_allocation_coalescing_assign_branch_source_interval(
                                                  source_index];
     const loom_low_placement_relation_t* relation =
         &context->placement->relations[relation_index];
-    if (!loom_low_allocation_coalescing_relation_source_matches_branch_interval(
+    if (!loom_low_allocation_coalescing_relation_source_matches_edge_interval(
             relation, interval)) {
       continue;
     }

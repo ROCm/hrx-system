@@ -920,11 +920,11 @@ iree_status_t loom_low_allocation_interval_assignment_build(
       continue;
     }
 
-    bool assigned_branch_source_interval = false;
+    bool assigned_edge_source_interval = false;
     IREE_RETURN_IF_ERROR(
-        loom_low_allocation_coalescing_assign_branch_source_interval(
-            &coalescing_context, interval, &assigned_branch_source_interval));
-    if (assigned_branch_source_interval) {
+        loom_low_allocation_coalescing_assign_edge_source_interval(
+            &coalescing_context, interval, &assigned_edge_source_interval));
+    if (assigned_edge_source_interval) {
       continue;
     }
 

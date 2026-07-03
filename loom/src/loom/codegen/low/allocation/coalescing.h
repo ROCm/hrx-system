@@ -70,9 +70,9 @@ iree_status_t loom_low_allocation_coalescing_assign_structural_interval(
     loom_low_allocation_coalescing_context_t* context,
     const loom_liveness_interval_t* interval, bool* out_assigned);
 
-// Attempts to assign a low.br source interval using already-assigned branch
+// Attempts to assign a structural edge source interval using already-assigned
 // destination storage.
-iree_status_t loom_low_allocation_coalescing_assign_branch_source_interval(
+iree_status_t loom_low_allocation_coalescing_assign_edge_source_interval(
     loom_low_allocation_coalescing_context_t* context,
     const loom_liveness_interval_t* interval, bool* out_assigned);
 

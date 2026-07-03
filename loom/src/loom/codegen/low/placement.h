@@ -49,6 +49,10 @@ typedef enum loom_low_placement_cause_e {
   LOOM_LOW_PLACEMENT_CAUSE_LOW_CONCAT = 4,
   // low.br edge payload source/block-argument affinity.
   LOOM_LOW_PLACEMENT_CAUSE_LOW_BRANCH = 5,
+  // low.scf.for initial iter_arg/body-argument affinity.
+  LOOM_LOW_PLACEMENT_CAUSE_LOW_SCF_FOR = 6,
+  // low.scf.yield payload/result or backedge affinity.
+  LOOM_LOW_PLACEMENT_CAUSE_LOW_SCF_YIELD = 7,
 } loom_low_placement_cause_t;
 
 enum loom_low_placement_relation_flag_bits_e {

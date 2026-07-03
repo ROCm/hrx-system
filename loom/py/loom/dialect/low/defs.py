@@ -709,7 +709,7 @@ low_scf_yield = Op(
     phase=OpPhase.EXECUTABLE,
     doc="Forward register values from a low structured-control region.",
     operands=[Operand("values", REGISTER, variadic=True)],
-    traits=[TERMINATOR],
+    traits=[TERMINATOR, STORAGE_RELATION],
     format=[
         OptionalGroup(
             [Refs("values"), COLON, TypesOf("values")],
@@ -845,7 +845,7 @@ low_scf_for = Op(
         YieldCountMatchesResults("body", "results"),
         YieldTypesMatchResults("body", "results"),
     ],
-    traits=[ImplicitTerminator("low.scf.yield")],
+    traits=[ImplicitTerminator("low.scf.yield"), STORAGE_RELATION],
     format=[
         LBRACKET,
         Ref("lower_bound"),

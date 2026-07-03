@@ -123,6 +123,10 @@ static iree_string_view_t loom_low_allocation_placement_cause_name(
       return IREE_SV("low.concat");
     case LOOM_LOW_PLACEMENT_CAUSE_LOW_BRANCH:
       return IREE_SV("low.br");
+    case LOOM_LOW_PLACEMENT_CAUSE_LOW_SCF_FOR:
+      return IREE_SV("low.scf.for");
+    case LOOM_LOW_PLACEMENT_CAUSE_LOW_SCF_YIELD:
+      return IREE_SV("low.scf.yield");
     default:
       return IREE_SV("unknown");
   }
