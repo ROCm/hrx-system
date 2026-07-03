@@ -266,6 +266,7 @@
           "--output-format=jsonl",
           "compile_report",
           ".compile_report.entries.rows[]",
+          ".compile_report.schedule_band_summary_rows.rows[]",
           "materialized_spill_storage",
           "compile_report_path",
           "artifact_manifest_path",
