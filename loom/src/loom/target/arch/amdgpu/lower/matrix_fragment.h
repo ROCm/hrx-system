@@ -65,6 +65,10 @@ iree_status_t loom_amdgpu_lower_vector_fragment_repack(
 iree_string_view_t loom_amdgpu_fragment_repack_plan_key(
     const loom_amdgpu_fragment_repack_plan_t* plan);
 
+// Returns the compile-report plan key for a selected fragment memory plan.
+iree_string_view_t loom_amdgpu_fragment_memory_plan_key(
+    const loom_amdgpu_fragment_memory_plan_t* plan);
+
 // Marks the physical source values needed by a selected AMDGPU fragment memory
 // plan.
 void loom_amdgpu_mark_fragment_memory_plan_storage_demands(

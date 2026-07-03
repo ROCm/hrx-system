@@ -200,6 +200,27 @@ def test_validate_dispatch_rows_accepts_report_key() -> None:
     validate_dispatch_rows(rows, generated_lower_rule_op_kinds=())
 
 
+def test_validate_dispatch_rows_accepts_memory_report_key() -> None:
+    rows = (
+        DispatchRow(
+            op_kind="LOOM_OP_VECTOR_FRAGMENT_LOAD",
+            role=DispatchRowRole.MEMORY,
+            macro_name="MEMORY_DATA_STORAGE_REPORT_KEY_ROW",
+            arguments=(
+                "LOOM_OP_VECTOR_FRAGMENT_LOAD",
+                "loom_amdgpu_fragment_memory_plan_t",
+                "select",
+                "emit",
+                "verify",
+                "LOOM_AMDGPU_STORAGE_FRAGMENT_MEMORY",
+                "LOOM_AMDGPU_REPORT_KEY_FRAGMENT_MEMORY_STRATEGY",
+            ),
+        ),
+    )
+
+    validate_dispatch_rows(rows, generated_lower_rule_op_kinds=())
+
+
 def test_validate_dispatch_rows_rejects_bad_source_count() -> None:
     rows = (
         DispatchRow(
