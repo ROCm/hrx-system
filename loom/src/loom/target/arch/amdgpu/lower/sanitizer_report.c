@@ -17,20 +17,6 @@
 
 #define LOOM_AMDGPU_SANITIZER_FATAL_HALT_REASON 5u
 
-static iree_status_t loom_amdgpu_sanitizer_insert_block_after(
-    loom_builder_t* builder, loom_block_t* after_block,
-    loom_block_t** out_block) {
-  *out_block = NULL;
-  if (after_block->parent_region == NULL) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "AMDGPU sanitizer report requires a low region block");
-  }
-  return loom_region_insert_block(builder->module, after_block->parent_region,
-                                  (uint16_t)(after_block->region_index + 1),
-                                  out_block);
-}
-
 static bool loom_amdgpu_sanitizer_access_kind_is_valid(
     loom_amdgpu_sanitizer_access_kind_t access_kind) {
   switch (access_kind) {
@@ -463,8 +449,9 @@ iree_status_t loom_amdgpu_build_sanitizer_trap_island(
       builder->module, after_block->parent_region,
       (uint16_t)(after_block->region_index + 1), &island.entry_block));
   loom_block_t* halt_loop_block = NULL;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_sanitizer_insert_block_after(
-      builder, island.entry_block, &halt_loop_block));
+  IREE_RETURN_IF_ERROR(loom_region_insert_block(
+      builder->module, island.entry_block->parent_region,
+      (uint16_t)(island.entry_block->region_index + 1), &halt_loop_block));
   island.terminal_block = halt_loop_block;
 
   loom_builder_set_block(builder, island.entry_block);
