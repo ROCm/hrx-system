@@ -194,3 +194,22 @@ low.func.def target(@test_target) @rematerialize_spill_plan(%a: reg<test.i32>, %
   %out = low.op<test.add.i32>(%use0, %use1) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
   low.return %out : reg<test.i32>
 }
+
+// ====
+
+// RUN: pass low-materialize-allocation{budgets=test.i32=3,diagnostics=spills}
+
+test.target<low_core> @test_target
+
+// REMARK@+1: BACKEND/045 {function_name="rematerialize_spill_plan_diagnostics", value_name="literal", value_class="test.i32", trigger_kind="spill-plan", cloned_packet_count="2", rewritten_operand_count="2", reason_key="descriptor-rematerializable"}
+low.func.def target(@test_target) @rematerialize_spill_plan_diagnostics(%a: reg<test.i32>, %b: reg<test.i32>, %c: reg<test.i32>) -> (reg<test.i32>) {
+  %literal = low.const<test.const.i32> {i32_value = 7} : reg<test.i32>
+  %ab = low.op<test.add.i32>(%a, %b) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  %bc = low.op<test.add.i32>(%b, %c) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  %use0 = low.op<test.add.i32>(%ab, %literal) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  %use1 = low.op<test.add.i32>(%bc, %literal) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  %out = low.op<test.add.i32>(%use0, %use1) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  low.return %out : reg<test.i32>
+}
+
+// ----

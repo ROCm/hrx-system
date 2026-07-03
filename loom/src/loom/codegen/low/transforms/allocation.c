@@ -40,6 +40,19 @@ typedef struct loom_low_materialize_allocation_parse_context_t {
   loom_low_materialize_allocation_pass_state_t* state;
 } loom_low_materialize_allocation_parse_context_t;
 
+static iree_status_t loom_low_materialize_allocation_emit_rematerialization(
+    loom_pass_t* pass,
+    const loom_low_materialize_allocation_pass_state_t* state,
+    const loom_low_allocation_table_t* table,
+    loom_low_allocation_rematerialization_trigger_t trigger,
+    const loom_low_allocation_rematerialization_result_t* result) {
+  if (!state || !state->emit_spill_diagnostics) {
+    return iree_ok_status();
+  }
+  return loom_low_allocation_rematerialization_emit_decision(
+      table, trigger, result, pass->diagnostic_emitter);
+}
+
 static const loom_pass_option_def_t kLowMaterializeAllocationOptions[] = {
     {IREE_SVL("budgets"),
      IREE_SVL("Semicolon-separated register class budgets, such as "
@@ -398,18 +411,23 @@ iree_status_t loom_low_materialize_allocation_run(loom_pass_t* pass,
         }
         rematerialization_iteration_limit = table.liveness.value_count + 1;
       }
+      if (rematerialization_iteration_count >=
+          rematerialization_iteration_limit) {
+        return iree_make_status(
+            IREE_STATUS_FAILED_PRECONDITION,
+            "low allocation rematerialization did not reach an "
+            "allocation-successful fixed point after %zu iteration(s)",
+            rematerialization_iteration_count);
+      }
       loom_low_allocation_rematerialization_result_t result = {0};
       IREE_RETURN_IF_ERROR(loom_low_allocation_rematerialize_failure(
           module, &table, pass->arena, &result));
       if (result.rewritten_operand_count != 0) {
-        if (rematerialization_iteration_count >=
-            rematerialization_iteration_limit) {
-          return iree_make_status(
-              IREE_STATUS_FAILED_PRECONDITION,
-              "low allocation rematerialization did not reach an "
-              "allocation-successful fixed point after %zu iteration(s)",
-              rematerialization_iteration_count);
-        }
+        IREE_RETURN_IF_ERROR(
+            loom_low_materialize_allocation_emit_rematerialization(
+                pass, state, &table,
+                LOOM_LOW_ALLOCATION_REMATERIALIZATION_TRIGGER_ALLOCATION_FAILURE,
+                &result));
         loom_low_materialize_allocation_statistics_t* statistics =
             loom_low_materialize_allocation_statistics(pass);
         statistics->rematerializations += (int64_t)result.cloned_packet_count;
@@ -433,19 +451,24 @@ iree_status_t loom_low_materialize_allocation_run(loom_pass_t* pass,
       }
       rematerialization_iteration_limit = table.liveness.value_count + 1;
     }
+    if (rematerialization_iteration_count >=
+        rematerialization_iteration_limit) {
+      return iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "low allocation rematerialization did not reach a spill-plan-free "
+          "fixed point after %zu iteration(s)",
+          rematerialization_iteration_count);
+    }
     loom_low_allocation_rematerialization_result_t rematerialization_result = {
         0};
     IREE_RETURN_IF_ERROR(loom_low_allocation_rematerialize_spill_plan(
         module, &table, pass->arena, &rematerialization_result));
     if (rematerialization_result.rewritten_operand_count != 0) {
-      if (rematerialization_iteration_count >=
-          rematerialization_iteration_limit) {
-        return iree_make_status(
-            IREE_STATUS_FAILED_PRECONDITION,
-            "low allocation rematerialization did not reach a spill-plan-free "
-            "fixed point after %zu iteration(s)",
-            rematerialization_iteration_count);
-      }
+      IREE_RETURN_IF_ERROR(
+          loom_low_materialize_allocation_emit_rematerialization(
+              pass, state, &table,
+              LOOM_LOW_ALLOCATION_REMATERIALIZATION_TRIGGER_SPILL_PLAN,
+              &rematerialization_result));
       loom_low_materialize_allocation_statistics_t* statistics =
           loom_low_materialize_allocation_statistics(pass);
       statistics->rematerializations +=

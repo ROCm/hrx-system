@@ -1120,6 +1120,34 @@ ERR_BACKEND_044 = ErrorDef(
     ),
 )
 
+# ERR_BACKEND_045: Allocation rematerialization decision was recorded.
+ERR_BACKEND_045 = ErrorDef(
+    domain=ErrorDomain.BACKEND,
+    code=45,
+    severity=Severity.REMARK,
+    summary="Allocation rematerialization decision recorded.",
+    message=(
+        "target '{target_key}' export '{export_name}' config '{config_key}' "
+        "rematerialized value '{value_name}' for value class "
+        "'{value_class}' in '@{function_name}' after '{trigger_kind}' by "
+        "cloning {cloned_packet_count} packet(s), rewriting "
+        "{rewritten_operand_count} operand use(s), and applying reason key "
+        "'{reason_key}'"
+    ),
+    params=(
+        ErrorParam("target_key", ParamKind.STRING),
+        ErrorParam("export_name", ParamKind.STRING),
+        ErrorParam("config_key", ParamKind.STRING),
+        ErrorParam("function_name", ParamKind.STRING),
+        ErrorParam("value_name", ParamKind.STRING),
+        ErrorParam("value_class", ParamKind.STRING),
+        ErrorParam("trigger_kind", ParamKind.STRING),
+        ErrorParam("cloned_packet_count", ParamKind.U32),
+        ErrorParam("rewritten_operand_count", ParamKind.U32),
+        ErrorParam("reason_key", ParamKind.STRING),
+    ),
+)
+
 ALL_BACKEND_ERRORS: tuple[ErrorDef, ...] = (
     ERR_BACKEND_003,
     ERR_BACKEND_005,
@@ -1159,4 +1187,5 @@ ALL_BACKEND_ERRORS: tuple[ErrorDef, ...] = (
     ERR_BACKEND_042,
     ERR_BACKEND_043,
     ERR_BACKEND_044,
+    ERR_BACKEND_045,
 )

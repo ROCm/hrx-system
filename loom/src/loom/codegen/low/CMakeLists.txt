@@ -352,9 +352,12 @@ loom_cc_library(
   DEPS
     ::allocation
     ::descriptor_traits
+    ::diagnostics
     ::target_binding
     iree::base
     iree::base::internal::arena
+    loom::error::emitter
+    loom::error::error_defs
     loom::ir
     loom::ops::op_defs
     loom::rewrite::materialize
