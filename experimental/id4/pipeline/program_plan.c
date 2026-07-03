@@ -368,6 +368,14 @@ static void id4_pipeline_program_plan_build_region_ranges(
         }
         ++operation_limit;
       }
+      while (operation_limit < operation_count) {
+        const id4_pipeline_program_op_t* next_op =
+            id4_pipeline_program_operation_at(program, operation_limit);
+        if (!next_op || next_op->kind != ID4_PIPELINE_PROGRAM_OP_KIND_BARRIER) {
+          break;
+        }
+        ++operation_limit;
+      }
       id4_pipeline_program_plan_append_region_range(
           program, op->payload.dispatch_loom.name, operation_offset,
           operation_limit, out_range_count, ranges);
