@@ -10,7 +10,6 @@
 #include "loom/ops/kernel/ops.h"
 #include "loom/target/arch/amdgpu/lower/emit.h"
 #include "loom/target/arch/amdgpu/lower/legality.h"
-#include "loom/target/arch/amdgpu/lower/topology.h"
 #include "loom/target/arch/amdgpu/planning/wait_packets.h"
 #include "loom/target/arch/amdgpu/planning/wait_plan.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
@@ -34,27 +33,6 @@ static bool loom_amdgpu_kernel_barrier_is_supported(
     const loom_op_t* source_op) {
   return loom_amdgpu_kernel_barrier_is_workgroup_memory_acq_rel(source_op) &&
          loom_amdgpu_kernel_barrier_has_supported_scope(source_op);
-}
-
-static bool loom_amdgpu_kernel_barrier_has_single_wave_workgroup(
-    loom_low_lower_context_t* context) {
-  loom_func_like_t source_function =
-      loom_low_lower_context_source_function(context);
-  if (!loom_kernel_def_isa(source_function.op)) {
-    return false;
-  }
-  const loom_target_bundle_t* bundle = loom_low_lower_context_bundle(context);
-  if (bundle == NULL || bundle->snapshot == NULL ||
-      bundle->snapshot->subgroup_size == 0) {
-    return false;
-  }
-  uint32_t flat_workgroup_size = 0;
-  if (!loom_amdgpu_required_flat_workgroup_size(
-          loom_low_lower_context_module(context), source_function, bundle,
-          &flat_workgroup_size)) {
-    return false;
-  }
-  return flat_workgroup_size <= bundle->snapshot->subgroup_size;
 }
 
 static iree_status_t loom_amdgpu_select_kernel_barrier_lds_wait(
@@ -113,16 +91,6 @@ iree_status_t loom_amdgpu_select_workgroup_barrier_plan(
     loom_amdgpu_kernel_barrier_plan_t* out_plan, bool* out_selected) {
   *out_plan = (loom_amdgpu_kernel_barrier_plan_t){0};
   *out_selected = false;
-
-  if (loom_amdgpu_kernel_barrier_has_single_wave_workgroup(context)) {
-    bool selected = false;
-    IREE_RETURN_IF_ERROR(loom_amdgpu_select_kernel_barrier_lds_wait(
-        context, out_plan, &selected));
-    if (selected) {
-      *out_selected = true;
-      return iree_ok_status();
-    }
-  }
 
   const uint32_t barrier_ordinal = loom_amdgpu_descriptor_ref_ordinal(
       loom_low_lower_context_descriptor_set(context),
