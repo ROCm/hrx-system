@@ -528,6 +528,10 @@
                 {
                   "regex": "\"spill_rows\":\\{\"count\":[1-9][0-9]*,\"rows\":\\["
                 },
+                {
+                  "regex": "\"move_causes\":\\{\"kind_count\":[1-9][0-9]*,\"packet_count\":[1-9][0-9]*,\"unit_count\":[1-9][0-9]*,\"causes\":\\["
+                },
+                "\"cause\":\"low_concat\"",
                 "\"kind\":\"materialized\"",
                 "\"origin\":\"matrix\"",
                 "\"semantic_tag\":\"matrix.wmma.f32.16x16x16.bf16\""
