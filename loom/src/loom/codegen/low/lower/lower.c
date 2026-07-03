@@ -1459,6 +1459,8 @@ static iree_status_t loom_low_lower_record_report_row(
       .descriptor_key = iree_string_view_empty(),
       .descriptor_semantic_tag = iree_string_view_empty(),
       .emitted_low_op_count = emitted_low_op_count,
+      .execution_count_plus_one =
+          LOOM_LOW_LOWER_REPORT_EXECUTION_COUNT_PLUS_ONE_UNKNOWN,
   };
   if (selected_plan->rule != NULL) {
     row.selection_kind = LOOM_LOW_LOWER_REPORT_SELECTION_RULE;
@@ -1492,6 +1494,8 @@ static iree_status_t loom_low_lower_record_report_row(
         context->policy->plan_key.user_data, context, selected_plan->source_op,
         selected_plan->plan);
   }
+  IREE_RETURN_IF_ERROR(loom_low_lower_source_op_execution_count_plus_one(
+      context, selected_plan->source_op, &row.execution_count_plus_one));
   return loom_low_lower_report_row_list_append(&result->report_rows,
                                                result->report_allocator, &row);
 }
