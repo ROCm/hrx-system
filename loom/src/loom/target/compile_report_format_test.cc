@@ -211,6 +211,8 @@ TEST(CompileReportFormatTest, MergesSourceLowMemorySummariesFromEntries) {
               report.source_low_memory_argument_summaries.head));
   EXPECT_TRUE(iree_string_view_equal(argument_summary->function_name,
                                      IREE_SVL("kernel")));
+  EXPECT_TRUE(iree_string_view_equal(argument_summary->source_root_name,
+                                     IREE_SVL("scratch")));
   EXPECT_EQ(argument_summary->source_root_argument_index, 1u);
   EXPECT_TRUE(iree_string_view_equal(argument_summary->memory_space,
                                      IREE_SVL("workgroup")));
@@ -307,6 +309,8 @@ TEST(CompileReportFormatTest, MergesOverlappingSourceLowMemoryIntervals) {
           const loom_target_compile_report_source_low_memory_argument_summary_t*>(
           loom_target_compile_report_vec_const_rows(
               report.source_low_memory_argument_summaries.head));
+  EXPECT_TRUE(iree_string_view_equal(argument_summary->source_root_name,
+                                     IREE_SVL("scratch")));
   EXPECT_EQ(argument_summary->summary.interval_envelope.packet_count, 3u);
   EXPECT_EQ(
       argument_summary->summary.interval_envelope.exact_static_packet_count,
@@ -1989,6 +1993,7 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
   EXPECT_NE(iree_string_view_find(
                 output,
                 IREE_SV("source_low_memory_argument[0] function=branchy "
+                        "source_root=lhs "
                         "source_root_argument_index=0 "
                         "memory_space=workgroup packets=1 loads=1 stores=0 "
                         "scalar_packets=0 vector_packets=1 source_lanes=2 "
@@ -2583,6 +2588,7 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
                         "\"write_bytes\":0,\"total_bytes\":32768}}],"
                         "\"argument_count\":1,\"arguments\":[{\"index\":0,"
                         "\"function\":\"branchy\","
+                        "\"source_root\":\"lhs\","
                         "\"source_root_argument_index\":0,"
                         "\"memory_space\":\"workgroup\",\"packet_count\":1,"
                         "\"load_packet_count\":1,\"store_packet_count\":0,"
