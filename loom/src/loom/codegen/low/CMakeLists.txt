@@ -315,6 +315,7 @@ loom_cc_library(
     ::storage_layout
     iree::base
     iree::base::internal::arena
+    loom::codegen::low::allocation::spill_plan
     loom::error::error_defs
     loom::ir
     loom::ops::low

@@ -305,6 +305,7 @@ loom_cc_library(
         ":diagnostics",
         ":function",
         ":storage_layout",
+        "//loom/src/loom/codegen/low/allocation:spill_plan",
         "//loom/src/loom/error:error_defs",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",

@@ -75,6 +75,46 @@ iree_status_t loom_low_allocation_spill_plan_layout(
   return iree_ok_status();
 }
 
+bool loom_low_allocation_spill_plan_slice_reload_byte_offset(
+    const loom_low_allocation_assignment_t* assignment,
+    uint32_t spill_byte_size, const loom_op_t* slice_op, uint16_t operand_index,
+    uint32_t* out_unit_byte_size, int64_t* out_reload_offset) {
+  *out_unit_byte_size = 0;
+  *out_reload_offset = 0;
+  if (!loom_low_slice_isa(slice_op) || operand_index != 0) {
+    return false;
+  }
+  if (assignment->unit_count == 0 ||
+      spill_byte_size % assignment->unit_count != 0) {
+    return false;
+  }
+  const uint32_t unit_byte_size = spill_byte_size / assignment->unit_count;
+  if (unit_byte_size == 0) {
+    return false;
+  }
+  const int64_t slice_offset = loom_low_slice_offset(slice_op);
+  if (slice_offset < 0 || (uint64_t)slice_offset >= assignment->unit_count) {
+    return false;
+  }
+  int64_t reload_offset = 0;
+  if (!iree_checked_mul_i64(slice_offset, (int64_t)unit_byte_size,
+                            &reload_offset)) {
+    return false;
+  }
+  *out_unit_byte_size = unit_byte_size;
+  *out_reload_offset = reload_offset;
+  return true;
+}
+
+bool loom_low_allocation_spill_plan_use_full_slice_reload(
+    uint32_t slice_count, uint64_t narrow_reload_bytes,
+    uint32_t spill_byte_size) {
+  return slice_count > 1 &&
+         (narrow_reload_bytes > spill_byte_size ||
+          slice_count >=
+              LOOM_LOW_ALLOCATION_DENSE_SLICE_RELOAD_MIN_SLICE_COUNT);
+}
+
 static bool loom_low_allocation_spill_plan_use_is_removed_block_arg_edge(
     loom_use_t use, const loom_block_t* block, uint16_t arg_index) {
   const loom_op_t* user_op = loom_use_user_op(use);
@@ -88,27 +128,91 @@ static uint32_t loom_low_allocation_spill_plan_reload_byte_size_for_use(
     uint32_t spill_byte_size, loom_use_t use) {
   const loom_op_t* user_op = loom_use_user_op(use);
   const uint16_t operand_index = loom_use_operand_index(use);
-  if (!user_op || !loom_low_slice_isa(user_op) || operand_index != 0) {
+  uint32_t unit_byte_size = 0;
+  int64_t reload_offset = 0;
+  if (!user_op || !loom_low_allocation_spill_plan_slice_reload_byte_offset(
+                      assignment, spill_byte_size, user_op, operand_index,
+                      &unit_byte_size, &reload_offset)) {
     return spill_byte_size;
   }
-  if (assignment->unit_count == 0 ||
-      spill_byte_size % assignment->unit_count != 0) {
-    return spill_byte_size;
-  }
-  const uint32_t unit_byte_size = spill_byte_size / assignment->unit_count;
-  if (unit_byte_size == 0) {
-    return spill_byte_size;
-  }
-  const int64_t slice_offset = loom_low_slice_offset(user_op);
-  if (slice_offset < 0 || (uint64_t)slice_offset >= assignment->unit_count) {
-    return spill_byte_size;
-  }
+  (void)reload_offset;
   return unit_byte_size;
+}
+
+static bool loom_low_allocation_spill_plan_slice_reload_use(
+    const loom_low_allocation_assignment_t* assignment,
+    uint32_t spill_byte_size, const loom_region_t* body, loom_use_t use,
+    uint16_t* out_block_index, uint32_t* out_unit_byte_size) {
+  *out_block_index = 0;
+  *out_unit_byte_size = 0;
+  const loom_op_t* user_op = loom_use_user_op(use);
+  const uint16_t operand_index = loom_use_operand_index(use);
+  if (!user_op || !user_op->parent_block || operand_index != 0 ||
+      !loom_low_slice_isa(user_op) ||
+      loom_low_slice_source(user_op) != assignment->value_id) {
+    return false;
+  }
+  uint32_t unit_byte_size = 0;
+  int64_t reload_offset = 0;
+  if (!loom_low_allocation_spill_plan_slice_reload_byte_offset(
+          assignment, spill_byte_size, user_op, operand_index, &unit_byte_size,
+          &reload_offset)) {
+    return false;
+  }
+  (void)reload_offset;
+  uint16_t block_index = 0;
+  if (!loom_region_try_block_index(body, user_op->parent_block, &block_index)) {
+    return false;
+  }
+  *out_block_index = block_index;
+  *out_unit_byte_size = unit_byte_size;
+  return true;
+}
+
+static uint64_t loom_low_allocation_spill_plan_full_slice_reload_block_mask(
+    const loom_low_allocation_assignment_t* assignment,
+    uint32_t spill_byte_size, const loom_value_t* value,
+    const loom_region_t* body, const loom_block_t* block, uint16_t arg_index) {
+  if (body->block_count > 64 || value->use_count <= 1) {
+    return 0;
+  }
+  uint64_t block_mask = 0;
+  for (uint16_t block_index = 0; block_index < body->block_count;
+       ++block_index) {
+    uint32_t slice_count = 0;
+    uint64_t narrow_reload_bytes = 0;
+    const loom_use_t* uses = loom_value_uses(value);
+    for (uint32_t i = 0; i < value->use_count; ++i) {
+      if (loom_low_allocation_spill_plan_use_is_removed_block_arg_edge(
+              uses[i], block, arg_index)) {
+        continue;
+      }
+      uint16_t use_block_index = 0;
+      uint32_t unit_byte_size = 0;
+      if (!loom_low_allocation_spill_plan_slice_reload_use(
+              assignment, spill_byte_size, body, uses[i], &use_block_index,
+              &unit_byte_size) ||
+          use_block_index != block_index) {
+        continue;
+      }
+      if (slice_count == UINT32_MAX ||
+          unit_byte_size > UINT64_MAX - narrow_reload_bytes) {
+        return block_mask;
+      }
+      ++slice_count;
+      narrow_reload_bytes += unit_byte_size;
+    }
+    if (loom_low_allocation_spill_plan_use_full_slice_reload(
+            slice_count, narrow_reload_bytes, spill_byte_size)) {
+      block_mask |= UINT64_C(1) << block_index;
+    }
+  }
+  return block_mask;
 }
 
 static void loom_low_allocation_spill_plan_value_reload_traffic(
     const loom_low_allocation_assignment_t* assignment,
-    uint32_t spill_byte_size, const loom_value_t* value,
+    uint32_t spill_byte_size, const loom_value_t* value, loom_region_t* body,
     uint32_t* out_reload_count, uint64_t* out_reload_bytes) {
   *out_reload_count = 0;
   *out_reload_bytes = 0;
@@ -121,8 +225,15 @@ static void loom_low_allocation_spill_plan_value_reload_traffic(
     arg_index = loom_value_def_index(value);
   }
 
+  const uint64_t full_slice_reload_block_mask =
+      loom_low_allocation_spill_plan_full_slice_reload_block_mask(
+          assignment, spill_byte_size, value, body, block, arg_index);
   uint32_t reload_count = 0;
   uint64_t reload_bytes = 0;
+  reload_count += iree_math_count_ones_u64(full_slice_reload_block_mask);
+  reload_bytes = iree_math_saturating_add_u64(
+      reload_bytes, (uint64_t)spill_byte_size *
+                        iree_math_count_ones_u64(full_slice_reload_block_mask));
   const loom_use_t* uses = loom_value_uses(value);
   for (uint32_t i = 0; i < value->use_count; ++i) {
     if (is_block_arg &&
@@ -130,6 +241,16 @@ static void loom_low_allocation_spill_plan_value_reload_traffic(
             uses[i], block, arg_index)) {
       continue;
     }
+    uint16_t use_block_index = 0;
+    uint32_t unit_byte_size = 0;
+    if (loom_low_allocation_spill_plan_slice_reload_use(
+            assignment, spill_byte_size, body, uses[i], &use_block_index,
+            &unit_byte_size) &&
+        iree_all_bits_set(full_slice_reload_block_mask,
+                          UINT64_C(1) << use_block_index)) {
+      continue;
+    }
+    (void)unit_byte_size;
     ++reload_count;
     const uint32_t use_byte_size =
         loom_low_allocation_spill_plan_reload_byte_size_for_use(
@@ -224,7 +345,7 @@ iree_status_t loom_low_allocation_spill_plan_traffic(
   uint32_t reload_count = 0;
   uint64_t reload_bytes = 0;
   loom_low_allocation_spill_plan_value_reload_traffic(
-      assignment, byte_size, value, &reload_count, &reload_bytes);
+      assignment, byte_size, value, body, &reload_count, &reload_bytes);
   uint32_t store_count = 0;
   IREE_RETURN_IF_ERROR(loom_low_allocation_spill_plan_value_store_count(
       module, body, value_id, value, reload_count, &store_count));
