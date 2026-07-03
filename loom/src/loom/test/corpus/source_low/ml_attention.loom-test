@@ -9,13 +9,11 @@ func.def @online_softmax_update(%old_max: f32, %old_sum: f32, %old_acc: vector<4
   %score_delta = scalar.subf %score, %new_max : f32
   %old_scale = scalar.expf<afn> %old_delta : f32
   %score_weight = scalar.expf<afn> %score_delta : f32
-  %scaled_sum = scalar.mulf<reassoc|nnan|nsz|contract> %old_sum, %old_scale : f32
-  %new_sum = scalar.addf<reassoc|nnan|nsz> %scaled_sum, %score_weight : f32
+  %new_sum = scalar.fmaf<reassoc|nnan|nsz|contract> %old_sum, %old_scale, %score_weight : f32
   %old_scale_vector = vector.splat %old_scale : vector<4xf32>
   %score_weight_vector = vector.splat %score_weight : vector<4xf32>
-  %rescaled_acc = vector.mulf<reassoc|nnan|nsz|contract> %old_acc, %old_scale_vector : vector<4xf32>
   %weighted_value = vector.mulf<reassoc|nnan|nsz|contract> %value, %score_weight_vector : vector<4xf32>
-  %new_acc = vector.addf<reassoc|nnan|nsz> %rescaled_acc, %weighted_value : vector<4xf32>
+  %new_acc = vector.fmaf<reassoc|nnan|nsz|contract> %old_acc, %old_scale_vector, %weighted_value : vector<4xf32>
   func.return %new_max, %new_sum, %new_acc : f32, f32, vector<4xf32>
 }
 
