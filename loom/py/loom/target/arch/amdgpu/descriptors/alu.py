@@ -4385,6 +4385,7 @@ def _v_cvt_f32_i32_overlay() -> AmdgpuDescriptorOverlay:
             AmdgpuOperandOverlay("VDST", _vgpr_result()),
             AmdgpuOperandOverlay("SRC0", _sgpr_vgpr_operand("input")),
         ),
+        constraints=_REMATERIALIZABLE_RESULT_CONSTRAINTS,
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     )
 
@@ -4401,6 +4402,7 @@ def _v_cvt_i32_f32_overlay() -> AmdgpuDescriptorOverlay:
             AmdgpuOperandOverlay("VDST", _vgpr_result()),
             AmdgpuOperandOverlay("SRC0", _sgpr_vgpr_operand("input")),
         ),
+        constraints=_REMATERIALIZABLE_RESULT_CONSTRAINTS,
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     )
 
@@ -4421,6 +4423,7 @@ def _v_cvt_f32_f16_overlay(
                 "SRC0", _vgpr_operand("input", register_part=_REG_PART_VGPR_LOW16)
             ),
         ),
+        constraints=_REMATERIALIZABLE_RESULT_CONSTRAINTS,
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     )
 
@@ -4610,6 +4613,7 @@ def _v_cvt_f32_u32_overlay() -> AmdgpuDescriptorOverlay:
             AmdgpuOperandOverlay("VDST", _vgpr_result()),
             AmdgpuOperandOverlay("SRC0", _sgpr_vgpr_operand("input")),
         ),
+        constraints=_REMATERIALIZABLE_RESULT_CONSTRAINTS,
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     )
 
@@ -4626,6 +4630,7 @@ def _v_cvt_u32_f32_overlay() -> AmdgpuDescriptorOverlay:
             AmdgpuOperandOverlay("VDST", _vgpr_result()),
             AmdgpuOperandOverlay("SRC0", _sgpr_vgpr_operand("input")),
         ),
+        constraints=_REMATERIALIZABLE_RESULT_CONSTRAINTS,
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     )
 
