@@ -316,6 +316,7 @@ TEST_LOW_CONST_I32_DESCRIPTOR = Descriptor(
     semantic_tag="integer.const.i32",
     operands=(_i32_result(),),
     immediates=(_I32_VALUE_IMMEDIATE,),
+    constraints=(Constraint(ConstraintKind.REMATERIALIZABLE, 0),),
     asm_forms=_asm(results=("dst",), immediates=("i32_value",)),
     schedule_class=_SCHEDULE_CONST,
     flags=(DescriptorFlag.DEAD_REMOVABLE,),

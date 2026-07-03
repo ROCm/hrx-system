@@ -42,6 +42,17 @@ iree_status_t loom_low_allocation_rematerialize_failure(
     iree_arena_allocator_t* arena,
     loom_low_allocation_rematerialization_result_t* out_result);
 
+// Attempts to repair one predicted spill plan by rematerializing its value
+// instead of materializing storage traffic.
+//
+// Returns OK with a zero result when no spill-plan value is a rematerialization
+// candidate. When a value is rewritten, callers must rebuild allocation before
+// consulting the old allocation table again.
+iree_status_t loom_low_allocation_rematerialize_spill_plan(
+    loom_module_t* module, const loom_low_allocation_table_t* table,
+    iree_arena_allocator_t* arena,
+    loom_low_allocation_rematerialization_result_t* out_result);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif

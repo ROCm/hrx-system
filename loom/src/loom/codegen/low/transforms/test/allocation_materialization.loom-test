@@ -164,3 +164,33 @@ test.target<low_core> @test_target
 low.func.def target(@test_target) @unsupported_stack_spill_space(%lhs: reg<test.alias32>, %rhs: reg<test.alias32>) -> (reg<test.alias32>, reg<test.alias32>) {
   low.return %lhs, %rhs : reg<test.alias32>, reg<test.alias32>
 }
+
+// ====
+
+// RUN: pass low-materialize-allocation{budgets=test.i32=3}
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @rematerialize_spill_plan(%a: reg<test.i32>, %b: reg<test.i32>, %c: reg<test.i32>) -> (reg<test.i32>) {
+  %literal = low.const<test.const.i32> {i32_value = 7} : reg<test.i32>
+  %ab = low.op<test.add.i32>(%a, %b) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  %bc = low.op<test.add.i32>(%b, %c) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  %use0 = low.op<test.add.i32>(%ab, %literal) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  %use1 = low.op<test.add.i32>(%bc, %literal) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  %out = low.op<test.add.i32>(%use0, %use1) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  low.return %out : reg<test.i32>
+}
+
+// ----
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @rematerialize_spill_plan(%a: reg<test.i32>, %b: reg<test.i32>, %c: reg<test.i32>) -> (reg<test.i32>) {
+  %ab = low.op<test.add.i32>(%a, %b) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  %bc = low.op<test.add.i32>(%b, %c) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  %literal_remat$10 = low.const<test.const.i32> {i32_value = 7} : reg<test.i32>
+  %use0 = low.op<test.add.i32>(%ab, %literal_remat$10) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  %literal_remat$11 = low.const<test.const.i32> {i32_value = 7} : reg<test.i32>
+  %use1 = low.op<test.add.i32>(%bc, %literal_remat$11) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  %out = low.op<test.add.i32>(%use0, %use1) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  low.return %out : reg<test.i32>
+}

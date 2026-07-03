@@ -362,6 +362,22 @@ static iree_status_t loom_low_emission_frame_make_no_progress_status(
       function_name.data, frame->allocation.spill_plan_count);
 }
 
+static iree_status_t loom_low_emission_frame_ensure_rematerialization_limit(
+    const loom_low_allocation_table_t* allocation,
+    iree_host_size_t* inout_limit) {
+  if (*inout_limit != 0) {
+    return iree_ok_status();
+  }
+  if (allocation->liveness.value_count == IREE_HOST_SIZE_MAX) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "low emission frame allocation rematerialization iteration limit "
+        "overflows host size");
+  }
+  *inout_limit = allocation->liveness.value_count + 1;
+  return iree_ok_status();
+}
+
 static iree_string_view_t loom_low_emission_frame_failure_code(
     loom_low_emission_frame_failure_t failure) {
   switch (failure) {
@@ -486,16 +502,9 @@ iree_status_t loom_low_emission_frame_build_spill_free(
       return iree_ok_status();
     }
     if (frame.allocation.error_count != 0) {
-      if (rematerialization_iteration_limit == 0) {
-        if (frame.allocation.liveness.value_count == IREE_HOST_SIZE_MAX) {
-          return iree_make_status(
-              IREE_STATUS_OUT_OF_RANGE,
-              "low emission frame allocation rematerialization iteration "
-              "limit overflows host size");
-        }
-        rematerialization_iteration_limit =
-            frame.allocation.liveness.value_count + 1;
-      }
+      IREE_RETURN_IF_ERROR(
+          loom_low_emission_frame_ensure_rematerialization_limit(
+              &frame.allocation, &rematerialization_iteration_limit));
       loom_low_allocation_rematerialization_result_t result = {0};
       IREE_RETURN_IF_ERROR(loom_low_allocation_rematerialize_failure(
           module, &frame.allocation, arena, &result));
@@ -580,6 +589,24 @@ iree_status_t loom_low_emission_frame_build_spill_free(
           frame_options, &frame,
           LOOM_LOW_EMISSION_FRAME_FAILURE_SPILL_ASSIGNMENTS, iteration_count,
           iteration_limit);
+    }
+    IREE_RETURN_IF_ERROR(loom_low_emission_frame_ensure_rematerialization_limit(
+        &frame.allocation, &rematerialization_iteration_limit));
+    loom_low_allocation_rematerialization_result_t rematerialization_result = {
+        0};
+    IREE_RETURN_IF_ERROR(loom_low_allocation_rematerialize_spill_plan(
+        module, &frame.allocation, arena, &rematerialization_result));
+    if (rematerialization_result.rewritten_operand_count != 0) {
+      if (rematerialization_iteration_count >=
+          rematerialization_iteration_limit) {
+        return loom_low_emission_frame_fail_final(
+            frame_options, &frame,
+            LOOM_LOW_EMISSION_FRAME_FAILURE_REMATERIALIZATION_ITERATION_LIMIT,
+            rematerialization_iteration_count,
+            rematerialization_iteration_limit);
+      }
+      ++rematerialization_iteration_count;
+      continue;
     }
     if (iteration_count >= iteration_limit) {
       return loom_low_emission_frame_fail_final(
