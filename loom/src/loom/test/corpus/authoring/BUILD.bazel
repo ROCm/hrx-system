@@ -18,6 +18,7 @@ exports_files([
     "fragment_repack_bf16.loom",
     "fp8_finite_storage_decode.loom",
     "indexed_row_gather_f32.loom",
+    "loop_carried_lane_liveness.loom",
     "memset_i8.loom",
     "mlp_down_projection_residual_bf16.loom",
 ])
@@ -81,6 +82,20 @@ iree_executable_test(
     ],
     data = [
         "indexed_row_gather_f32.loom",
+    ],
+    tags = ["hostonly"],
+    target_compatible_with = _AMDGPU_ARTIFACTS_COMPATIBLE_WITH,
+)
+
+iree_executable_test(
+    name = "loop_carried_lane_liveness_plan_test",
+    src = "//loom/src/loom/tools/iree-benchmark-loom",
+    args = [
+        "$(location loop_carried_lane_liveness.loom)",
+        "--dry-run",
+    ],
+    data = [
+        "loop_carried_lane_liveness.loom",
     ],
     tags = ["hostonly"],
     target_compatible_with = _AMDGPU_ARTIFACTS_COMPATIBLE_WITH,
@@ -211,6 +226,33 @@ iree_executable_test(
     ],
     data = [
         "indexed_row_gather_f32.loom",
+    ],
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "manual",
+        "requires-gpu-amd",
+        "runtime-resource=amd-gpu",
+    ],
+    target_compatible_with = _AMDGPU_HAL_COMPATIBLE_WITH,
+)
+
+iree_executable_test(
+    name = "loop_carried_lane_liveness_amdgpu_test",
+    src = "//loom/src/loom/tools/iree-benchmark-loom",
+    args = [
+        "$(location loop_carried_lane_liveness.loom)",
+        "--device=amdgpu",
+        "--measure=dispatch_complete",
+        "--sample-compilation=per_sample",
+        "--iterations=1",
+        "--warmup-iterations=0",
+        "--batch-size=1",
+        "--min-time-ms=0",
+        "--max-batches=1",
+        "--input-ring-count=1",
+    ],
+    data = [
+        "loop_carried_lane_liveness.loom",
     ],
     tags = [
         "iree-run-requirement=runtime.resource.amd_gpu",

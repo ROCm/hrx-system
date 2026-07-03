@@ -1,0 +1,48 @@
+// A loop-carried induction value initialized from the lane id must not clobber
+// the original lane id while that value is still live after the loop.
+kernel.def @loop_carried_lane_liveness() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %sixteen = index.constant 16 : index
+  %thirty_two = index.constant 32 : index
+  %scratch_bytes = index.constant 1024 : offset
+  %lane = kernel.workitem.id<x> : index
+  %layout = encoding.layout.strided [1, %sixteen] : encoding<layout>
+  %input_view = buffer.view %input[%base] : buffer -> view<16x32xbf16, %layout>
+  %output_view = buffer.view %output[%base] : buffer -> view<32xbf16, #dense>
+  %scratch = buffer.alloca %scratch_bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch_view = buffer.view %scratch[%base] : buffer -> view<16x32xbf16, %layout>
+
+  %element_count = index.constant 512 : index
+  scf.for %linear = [%lane to %element_count step %thirty_two] {
+    %mask = index.constant 15 : index
+    %shift = index.constant 4 : index
+    %column = index.andi %linear, %mask : index
+    %row = index.shrui %linear, %shift : index
+    %value = view.load %input_view[%column, %row] : view<16x32xbf16, %layout> -> bf16
+    view.store %value, %scratch_view[%column, %row] : bf16, view<16x32xbf16, %layout>
+  }
+  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+
+  %mask = index.constant 15 : index
+  %shift = index.constant 4 : index
+  %column = index.andi %lane, %mask : index
+  %row = index.shrui %lane, %shift : index
+  %loaded = view.load %scratch_view[%column, %row] : view<16x32xbf16, %layout> -> bf16
+  view.store %loaded, %output_view[%lane] : bf16, view<32xbf16, #dense>
+  kernel.return
+}
+
+check.case public @loop_carried_lane_liveness_case {
+  %input = check.generate.fill value(1.0) : tensor<32x16xbf16>
+  %output = check.generate.fill value(0.0) : tensor<32xbf16>
+  %expected = check.generate.fill value(1.0) : tensor<32xbf16>
+  func.call @loop_carried_lane_liveness(%input, %output) : (tensor<32x16xbf16>, tensor<32xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<32xbf16>
+  check.return
+}
+
+check.benchmark<@loop_carried_lane_liveness_case>

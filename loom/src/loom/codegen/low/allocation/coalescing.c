@@ -64,10 +64,39 @@ loom_low_allocation_coalescing_first_placement_relation(
   return NULL;
 }
 
+static bool loom_low_allocation_coalescing_edge_allows_counterpart_overlap(
+    const loom_low_allocation_coalescing_context_t* context,
+    const loom_low_placement_relation_t* relation) {
+  if (relation->kind != LOOM_LOW_PLACEMENT_RELATION_SAME_STORAGE ||
+      !loom_low_placement_cause_is_edge(relation->cause)) {
+    return false;
+  }
+  switch (relation->cause) {
+    case LOOM_LOW_PLACEMENT_CAUSE_LOW_SCF_YIELD:
+      return true;
+    case LOOM_LOW_PLACEMENT_CAUSE_LOW_BRANCH:
+    case LOOM_LOW_PLACEMENT_CAUSE_LOW_SCF_FOR: {
+      const loom_liveness_interval_t* result_interval =
+          loom_liveness_interval_for_value_ordinal(context->liveness,
+                                                   relation->result_ordinal);
+      const loom_liveness_interval_t* source_interval =
+          loom_liveness_interval_for_value_ordinal(context->liveness,
+                                                   relation->source_ordinal);
+      return result_interval && source_interval &&
+             source_interval->end_point <= result_interval->end_point;
+    }
+    default:
+      return false;
+  }
+}
+
 // Edge placement may make counterpart values overlap in the linear interval
-// space even when the edge handoff makes them mutually exclusive. The
-// relation itself is the proof for CFG/SCF edge counterparts; non-edge storage
-// aliases still need the block-sensitive overlap query.
+// space even when the edge handoff makes them mutually exclusive. Reuse is safe
+// for yield edges, where the source is consumed by the edge itself. Branch and
+// initial scf.for iter_arg edges can forward an outer value that remains live
+// after the destination block/loop argument. In those cases the edge can only
+// ignore storage conflicts when the source lifetime is contained by the
+// destination lifetime.
 static bool
 loom_low_allocation_coalescing_can_ignore_relation_counterpart_conflict(
     const loom_low_allocation_coalescing_context_t* context,
@@ -78,8 +107,8 @@ loom_low_allocation_coalescing_can_ignore_relation_counterpart_conflict(
                                                                    interval)) {
     return false;
   }
-  if (relation->kind == LOOM_LOW_PLACEMENT_RELATION_SAME_STORAGE &&
-      loom_low_placement_cause_is_edge(relation->cause)) {
+  if (loom_low_allocation_coalescing_edge_allows_counterpart_overlap(
+          context, relation)) {
     return true;
   }
   return !loom_low_allocation_live_range_values_overlap(
