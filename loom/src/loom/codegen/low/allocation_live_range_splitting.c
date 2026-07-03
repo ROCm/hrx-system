@@ -61,7 +61,7 @@ static bool loom_low_allocation_split_use_is_eligible(
   return true;
 }
 
-static bool loom_low_allocation_value_can_split_at_entry(
+static bool loom_low_allocation_value_can_split_after_definition(
     const loom_module_t* module, const loom_region_t* body,
     loom_value_id_t value_id, loom_block_t** out_insertion_block,
     loom_op_t** out_insertion_anchor) {
@@ -79,10 +79,10 @@ static bool loom_low_allocation_value_can_split_at_entry(
   loom_op_t* defining_op = loom_value_def_op(value);
   if (defining_op == NULL ||
       iree_any_bit_set(defining_op->flags, LOOM_OP_FLAG_DEAD) ||
-      defining_op->parent_block != entry_block) {
+      defining_op->parent_block == NULL) {
     return false;
   }
-  *out_insertion_block = entry_block;
+  *out_insertion_block = defining_op->parent_block;
   *out_insertion_anchor = defining_op;
   return true;
 }
@@ -109,7 +109,7 @@ static iree_status_t loom_low_allocation_try_split_fixed_value(
 
   loom_block_t* insertion_block = NULL;
   loom_op_t* insertion_anchor = NULL;
-  if (!loom_low_allocation_value_can_split_at_entry(
+  if (!loom_low_allocation_value_can_split_after_definition(
           module, table->liveness.region, fixed_value->value_id,
           &insertion_block, &insertion_anchor)) {
     return iree_ok_status();
