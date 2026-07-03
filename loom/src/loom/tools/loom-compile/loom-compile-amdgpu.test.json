@@ -447,6 +447,104 @@
       ]
     },
     {
+      "name": "reports materialized AMDGPU fragment spill traffic",
+      "steps": [
+        {
+          "name": "compile-summary",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/report_materialized_fragment_spills_amdgpu.loom",
+              "--backend=amdgpu-hal",
+              "--target=gfx11-generic",
+              "--root=@report_materialized_fragment_spills",
+              "--output={tmp}/materialized_fragment_spills_summary_amdgpu.hsaco",
+              "--compile-report=summary",
+              "--compile-report-output=-"
+            ]
+          },
+          "stdout": {
+            "contains": {
+              "unordered": [
+                "\"function\":\"report_materialized_fragment_spills\"",
+                "\"status\":\"OK\"",
+                "\"spill_count\":0,\"spill_plan_count\":0",
+                {
+                  "regex": "\"materialized_spill_storage_count\":[1-9][0-9]*"
+                },
+                {
+                  "regex": "\"materialized_spill_store_count\":[1-9][0-9]*"
+                },
+                {
+                  "regex": "\"materialized_reload_count\":[1-9][0-9]*"
+                },
+                {
+                  "regex": "\"memory\":\\{\"private_bytes\":[1-9][0-9]*,\"local_bytes\":0\\}"
+                }
+              ]
+            },
+            "not_contains": [
+              "\"spill_rows\""
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/materialized_fragment_spills_summary_amdgpu.hsaco",
+              "non_empty": true
+            }
+          ]
+        },
+        {
+          "name": "compile-details",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/report_materialized_fragment_spills_amdgpu.loom",
+              "--backend=amdgpu-hal",
+              "--target=gfx11-generic",
+              "--root=@report_materialized_fragment_spills",
+              "--output={tmp}/materialized_fragment_spills_details_amdgpu.hsaco",
+              "--compile-report=details",
+              "--compile-report-output=-"
+            ]
+          },
+          "stdout": {
+            "contains": {
+              "unordered": [
+                "\"function\":\"report_materialized_fragment_spills\"",
+                "\"status\":\"OK\"",
+                "\"spill_count\":0,\"spill_plan_count\":0",
+                {
+                  "regex": "\"materialized_spill_storage_count\":[1-9][0-9]*"
+                },
+                {
+                  "regex": "\"materialized_spill_store_count\":[1-9][0-9]*"
+                },
+                {
+                  "regex": "\"materialized_reload_count\":[1-9][0-9]*"
+                },
+                {
+                  "regex": "\"memory\":\\{\"private_bytes\":[1-9][0-9]*,\"local_bytes\":0\\}"
+                },
+                {
+                  "regex": "\"spill_rows\":\\{\"count\":[1-9][0-9]*,\"rows\":\\["
+                },
+                "\"kind\":\"materialized\"",
+                "\"origin\":\"matrix\"",
+                "\"semantic_tag\":\"matrix.wmma.f32.16x16x16.bf16\""
+              ]
+            }
+          },
+          "files": [
+            {
+              "path": "{tmp}/materialized_fragment_spills_details_amdgpu.hsaco",
+              "non_empty": true
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "reports dispatch-scaled AMDGPU memory economics",
       "steps": [
         {
