@@ -176,34 +176,47 @@ static uint64_t loom_low_allocation_spill_plan_full_slice_reload_block_mask(
   if (body->block_count > 64 || value->use_count <= 1) {
     return 0;
   }
-  uint64_t block_mask = 0;
-  for (uint16_t block_index = 0; block_index < body->block_count;
-       ++block_index) {
-    uint32_t slice_count = 0;
-    uint64_t narrow_reload_bytes = 0;
-    const loom_use_t* uses = loom_value_uses(value);
-    for (uint32_t i = 0; i < value->use_count; ++i) {
-      if (loom_low_allocation_spill_plan_use_is_removed_block_arg_edge(
-              uses[i], block, arg_index)) {
-        continue;
-      }
-      uint16_t use_block_index = 0;
-      uint32_t unit_byte_size = 0;
-      if (!loom_low_allocation_spill_plan_slice_reload_use(
-              assignment, spill_byte_size, body, uses[i], &use_block_index,
-              &unit_byte_size) ||
-          use_block_index != block_index) {
-        continue;
-      }
-      if (slice_count == UINT32_MAX ||
-          unit_byte_size > UINT64_MAX - narrow_reload_bytes) {
-        return block_mask;
-      }
-      ++slice_count;
-      narrow_reload_bytes += unit_byte_size;
+
+  uint32_t slice_counts[64];
+  uint64_t narrow_reload_bytes[64];
+  uint16_t touched_block_indices[64];
+  uint16_t touched_block_count = 0;
+  uint64_t touched_block_mask = 0;
+
+  const loom_use_t* uses = loom_value_uses(value);
+  for (uint32_t i = 0; i < value->use_count; ++i) {
+    if (loom_low_allocation_spill_plan_use_is_removed_block_arg_edge(
+            uses[i], block, arg_index)) {
+      continue;
     }
+    uint16_t use_block_index = 0;
+    uint32_t unit_byte_size = 0;
+    if (!loom_low_allocation_spill_plan_slice_reload_use(
+            assignment, spill_byte_size, body, uses[i], &use_block_index,
+            &unit_byte_size)) {
+      continue;
+    }
+    const uint64_t use_block_bit = UINT64_C(1) << use_block_index;
+    if (!iree_all_bits_set(touched_block_mask, use_block_bit)) {
+      touched_block_mask |= use_block_bit;
+      touched_block_indices[touched_block_count++] = use_block_index;
+      slice_counts[use_block_index] = 0;
+      narrow_reload_bytes[use_block_index] = 0;
+    }
+    if (slice_counts[use_block_index] == UINT32_MAX ||
+        unit_byte_size > UINT64_MAX - narrow_reload_bytes[use_block_index]) {
+      return 0;
+    }
+    ++slice_counts[use_block_index];
+    narrow_reload_bytes[use_block_index] += unit_byte_size;
+  }
+
+  uint64_t block_mask = 0;
+  for (uint16_t i = 0; i < touched_block_count; ++i) {
+    const uint16_t block_index = touched_block_indices[i];
     if (loom_low_allocation_spill_plan_use_full_slice_reload(
-            slice_count, narrow_reload_bytes, spill_byte_size)) {
+            slice_counts[block_index], narrow_reload_bytes[block_index],
+            spill_byte_size)) {
       block_mask |= UINT64_C(1) << block_index;
     }
   }
