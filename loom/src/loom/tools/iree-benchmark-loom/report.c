@@ -1531,6 +1531,11 @@ static iree_status_t iree_benchmark_loom_append_candidate_artifact_stem(
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
         stem, "_sample%" PRIhsz, provider->execution.sample_constant_ordinal));
   }
+  if (!iree_string_view_is_empty(provider->artifact_path_suffix)) {
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(stem, "_"));
+    IREE_RETURN_IF_ERROR(iree_benchmark_loom_append_sanitized_path_component(
+        provider->artifact_path_suffix, stem));
+  }
   return iree_ok_status();
 }
 
