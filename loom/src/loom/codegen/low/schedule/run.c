@@ -69,8 +69,12 @@ typedef struct loom_low_schedule_candidate_score_t {
   uint64_t projected_live_units;
   // Live register units whose last use is the candidate.
   uint64_t killed_live_units;
+  // Live register values whose last use is the candidate.
+  uint32_t killed_live_value_count;
   // Register result units made live by the candidate.
   uint64_t produced_live_units;
+  // Register result values made live by the candidate.
+  uint32_t produced_live_value_count;
   // Maximum latency of same-block SSA producers consumed by the candidate.
   uint16_t dependency_latency_cycles;
   // Descriptor latency for the candidate itself.
@@ -91,6 +95,8 @@ typedef struct loom_low_schedule_candidate_score_t {
   uint32_t pressure_cliff_penalty;
   // Target pair-affinity reward. Larger scores are better.
   uint16_t pair_affinity_score;
+  // Number of storage-relation rows owned by the candidate.
+  uint16_t storage_relation_count;
   // Register class for the closest crossed or future pressure cliff.
   uint16_t pressure_cliff_reg_class_id;
   // Crossed pressure cliff, or LOOM_LOW_SCHEDULE_PRESSURE_CLIFF_NONE.
@@ -1282,7 +1288,13 @@ static iree_status_t loom_low_schedule_score_candidate(
   const loom_low_schedule_node_t* node = &state->nodes[node_index];
   loom_low_schedule_reset_candidate_pressure_deltas(pressure_state);
   uint64_t killed_live_units = 0;
+  uint32_t killed_live_value_count = 0;
   uint64_t produced_live_units = 0;
+  uint32_t produced_live_value_count = 0;
+  const uint16_t storage_relation_count =
+      node->op != NULL
+          ? loom_low_storage_relation_count(state->module, node->op)
+          : 0;
 
   const loom_value_ordinal_t* operand_ordinals =
       loom_low_schedule_node_const_operand_ordinals(node);
@@ -1312,6 +1324,7 @@ static iree_status_t loom_low_schedule_score_candidate(
                 "transferred alias units must be covered by source pressure");
     const uint32_t unit_count = value->live_unit_count - transfer_units;
     killed_live_units += unit_count;
+    ++killed_live_value_count;
     loom_low_schedule_note_candidate_pressure_delta(
         pressure_state, value->register_class_id, -(int64_t)unit_count);
   }
@@ -1332,6 +1345,9 @@ static iree_status_t loom_low_schedule_score_candidate(
             state, pressure_state, node, result_ordinals[result_index]);
     const uint32_t unit_count = value->unit_count - alias_units;
     produced_live_units += unit_count;
+    if (unit_count != 0) {
+      ++produced_live_value_count;
+    }
     loom_low_schedule_note_candidate_pressure_delta(
         pressure_state, value->register_class_id, (int64_t)unit_count);
   }
@@ -1369,7 +1385,9 @@ static iree_status_t loom_low_schedule_score_candidate(
   *out_score = (loom_low_schedule_candidate_score_t){
       .projected_live_units = projected_live_units,
       .killed_live_units = killed_live_units,
+      .killed_live_value_count = killed_live_value_count,
       .produced_live_units = produced_live_units,
+      .produced_live_value_count = produced_live_value_count,
       .dependency_latency_cycles = dependency_latency_cycles,
       .latency_cycles = node->latency_cycles,
       .critical_path_cycles = state->node_critical_path_cycles != NULL
@@ -1378,6 +1396,7 @@ static iree_status_t loom_low_schedule_score_candidate(
       .data_ready_stall_cycles = data_ready_stall_cycles,
       .pair_affinity_score =
           loom_low_schedule_score_candidate_pair_affinity(state, node_index),
+      .storage_relation_count = storage_relation_count,
       .bottleneck_resource_id = LOOM_LOW_RESOURCE_NONE,
       .pressure_cliff_reg_class_id = LOOM_LOW_REG_CLASS_NONE,
       .pressure_cliff_units = LOOM_LOW_SCHEDULE_PRESSURE_CLIFF_NONE,
@@ -1418,10 +1437,36 @@ static int loom_low_schedule_compare_candidate_pressure(
   return 0;
 }
 
+static int loom_low_schedule_compare_candidate_live_values(
+    loom_low_schedule_candidate_score_t lhs,
+    loom_low_schedule_candidate_score_t rhs) {
+  const int64_t lhs_delta = (int64_t)lhs.produced_live_value_count -
+                            (int64_t)lhs.killed_live_value_count;
+  const int64_t rhs_delta = (int64_t)rhs.produced_live_value_count -
+                            (int64_t)rhs.killed_live_value_count;
+  if (lhs_delta != rhs_delta) {
+    return lhs_delta < rhs_delta ? -1 : 1;
+  }
+  if (lhs.killed_live_value_count != rhs.killed_live_value_count) {
+    return lhs.killed_live_value_count > rhs.killed_live_value_count ? -1 : 1;
+  }
+  if (lhs.produced_live_value_count != rhs.produced_live_value_count) {
+    return lhs.produced_live_value_count < rhs.produced_live_value_count ? -1
+                                                                         : 1;
+  }
+  return 0;
+}
+
 static bool loom_low_schedule_candidate_shortens_producer_live_range(
     loom_low_schedule_candidate_score_t score) {
   return score.dependency_latency_cycles != 0 &&
          score.killed_live_units > score.produced_live_units;
+}
+
+static bool loom_low_schedule_candidate_compacts_live_values(
+    loom_low_schedule_candidate_score_t score) {
+  return score.storage_relation_count != 0 &&
+         score.killed_live_value_count > score.produced_live_value_count;
 }
 
 static bool loom_low_schedule_candidate_has_better_pair_affinity(
@@ -1446,6 +1491,8 @@ static bool loom_low_schedule_candidate_score_less(
     loom_low_schedule_candidate_score_t rhs) {
   const int pressure_order =
       loom_low_schedule_compare_candidate_pressure(lhs, rhs);
+  const int live_value_order =
+      loom_low_schedule_compare_candidate_live_values(lhs, rhs);
   if (state->options->strategy == LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL) {
     if (lhs.pressure_cliff_penalty != rhs.pressure_cliff_penalty) {
       return lhs.pressure_cliff_penalty < rhs.pressure_cliff_penalty;
@@ -1469,6 +1516,12 @@ static bool loom_low_schedule_candidate_score_less(
     }
     if (lhs.pair_affinity_score != rhs.pair_affinity_score) {
       return loom_low_schedule_candidate_has_better_pair_affinity(lhs, rhs);
+    }
+    if (live_value_order != 0 &&
+        (loom_low_schedule_candidate_compacts_live_values(lhs) ||
+         loom_low_schedule_candidate_compacts_live_values(rhs)) &&
+        (pressure_order == 0 || pressure_order == live_value_order)) {
+      return live_value_order < 0;
     }
     if (pressure_order != 0) {
       const bool lhs_shortens =

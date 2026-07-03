@@ -165,6 +165,43 @@ low.func.def target(@test_target) @resource_stall_caps_repeated_source_alias_uni
 }
 
 // ====
+// RUN: emit low-schedule-json @resource_stall_compacts_ready_concat_before_scalar_work strategy=resource-stall diagnostics=candidates output=none
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @resource_stall_compacts_ready_concat_before_scalar_work(
+    %rhs: reg<test.i32>,
+    %lhs0: reg<test.i32>, %lhs1: reg<test.i32>,
+    %lhs2: reg<test.i32>, %lhs3: reg<test.i32>,
+    %lhs4: reg<test.i32>, %lhs5: reg<test.i32>,
+    %lhs6: reg<test.i32>, %lhs7: reg<test.i32>) -> (reg<test.i32 x8>,
+    reg<test.i32>) {
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", chosen_packet="test.add.i32", rejected_packet="test.add.i32"}
+  %lane0 = low.op<test.add.i32>(%lhs0, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="1", chosen_packet="test.add.i32", rejected_packet="test.add.i32"}
+  %lane1 = low.op<test.add.i32>(%lhs1, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="2", chosen_packet="test.add.i32", rejected_packet="test.add.i32"}
+  %lane2 = low.op<test.add.i32>(%lhs2, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="3", chosen_packet="test.add.i32", rejected_packet="test.add.i32"}
+  %lane3 = low.op<test.add.i32>(%lhs3, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="4", chosen_packet="test.add.i32", rejected_packet="test.add.i32"}
+  %lane4 = low.op<test.add.i32>(%lhs4, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="5", chosen_packet="test.add.i32", rejected_packet="test.add.i32"}
+  %lane5 = low.op<test.add.i32>(%lhs5, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="6", chosen_packet="test.add.i32", rejected_packet="test.add.i32"}
+  %lane6 = low.op<test.add.i32>(%lhs6, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="7", chosen_packet="test.add.i32", rejected_packet="test.mul.i32"}
+  %lane7 = low.op<test.add.i32>(%lhs7, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  %scalar = low.op<test.mul.i32>(%rhs, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="8", chosen_packet="low.concat", rejected_packet="test.mul.i32", chosen_killed_live_units="8", chosen_produced_live_units="8", rejected_killed_live_units="1", rejected_produced_live_units="1"}
+  %packed = low.concat(%lane0, %lane1, %lane2, %lane3, %lane4, %lane5,
+      %lane6, %lane7) : (reg<test.i32>, reg<test.i32>, reg<test.i32>,
+      reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>,
+      reg<test.i32>) -> reg<test.i32 x8>
+  low.return %packed, %scalar : reg<test.i32 x8>, reg<test.i32>
+}
+
+// ====
 // RUN: emit low-schedule-json @resource_stall_scans_past_ready_window_for_pressure_cliff strategy=resource-stall diagnostics=candidates cliff=test.i32:69:15:14 output=none
 
 test.target<low_core> @test_target
