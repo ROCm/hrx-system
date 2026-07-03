@@ -197,3 +197,19 @@ iree_status_t loom_low_allocation_rematerialize_failure(
   return loom_low_allocation_try_rematerialize_value(
       module, &table->target, failure->value_id, arena, out_result);
 }
+
+iree_status_t loom_low_allocation_rematerialize_spill_plan(
+    loom_module_t* module, const loom_low_allocation_table_t* table,
+    iree_arena_allocator_t* arena,
+    loom_low_allocation_rematerialization_result_t* out_result) {
+  *out_result = (loom_low_allocation_rematerialization_result_t){0};
+  for (iree_host_size_t i = 0; i < table->spill_plan_count; ++i) {
+    const loom_low_allocation_spill_plan_t* spill_plan = &table->spill_plans[i];
+    IREE_RETURN_IF_ERROR(loom_low_allocation_try_rematerialize_value(
+        module, &table->target, spill_plan->value_id, arena, out_result));
+    if (out_result->rewritten_operand_count != 0) {
+      return iree_ok_status();
+    }
+  }
+  return iree_ok_status();
+}

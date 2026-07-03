@@ -424,6 +424,36 @@ iree_status_t loom_low_materialize_allocation_run(loom_pass_t* pass,
     if (table.spill_plan_count == 0) {
       return iree_ok_status();
     }
+    if (rematerialization_iteration_limit == 0) {
+      if (table.liveness.value_count == IREE_HOST_SIZE_MAX) {
+        return iree_make_status(
+            IREE_STATUS_OUT_OF_RANGE,
+            "low allocation rematerialization iteration limit overflows "
+            "host size");
+      }
+      rematerialization_iteration_limit = table.liveness.value_count + 1;
+    }
+    loom_low_allocation_rematerialization_result_t rematerialization_result = {
+        0};
+    IREE_RETURN_IF_ERROR(loom_low_allocation_rematerialize_spill_plan(
+        module, &table, pass->arena, &rematerialization_result));
+    if (rematerialization_result.rewritten_operand_count != 0) {
+      if (rematerialization_iteration_count >=
+          rematerialization_iteration_limit) {
+        return iree_make_status(
+            IREE_STATUS_FAILED_PRECONDITION,
+            "low allocation rematerialization did not reach a spill-plan-free "
+            "fixed point after %zu iteration(s)",
+            rematerialization_iteration_count);
+      }
+      loom_low_materialize_allocation_statistics_t* statistics =
+          loom_low_materialize_allocation_statistics(pass);
+      statistics->rematerializations +=
+          (int64_t)rematerialization_result.cloned_packet_count;
+      loom_pass_mark_changed(pass);
+      ++rematerialization_iteration_count;
+      continue;
+    }
     if (iteration_count >= iteration_limit) {
       return iree_make_status(
           IREE_STATUS_FAILED_PRECONDITION,
