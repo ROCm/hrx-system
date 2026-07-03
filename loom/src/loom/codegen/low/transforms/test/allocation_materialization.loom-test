@@ -139,6 +139,58 @@ low.func.def target(@test_target) @wide_slice_reload_cluster(%blocker: reg<test.
 
 // ====
 
+// RUN: pass low-materialize-allocation{budgets=test.i32=9}
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @dense_slice_reload_cluster(%blocker: reg<test.i32>, %wide: reg<test.i32 x8>) -> (reg<test.i32>) asm<test.low.core> {
+  %pressure = test.add.i32 %blocker, %blocker
+  %wide0 = slice %wide[0] : reg<test.i32 x8> -> reg<test.i32>
+  %wide1 = slice %wide[1] : reg<test.i32 x8> -> reg<test.i32>
+  %sum0 = test.add.i32 %wide0, %wide1
+  %wide2 = slice %wide[2] : reg<test.i32 x8> -> reg<test.i32>
+  %sum1 = test.add.i32 %sum0, %wide2
+  %wide3 = slice %wide[3] : reg<test.i32 x8> -> reg<test.i32>
+  %sum2 = test.add.i32 %sum1, %wide3
+  %wide4 = slice %wide[4] : reg<test.i32 x8> -> reg<test.i32>
+  %sum3 = test.add.i32 %sum2, %wide4
+  %wide5 = slice %wide[5] : reg<test.i32 x8> -> reg<test.i32>
+  %sum4 = test.add.i32 %sum3, %wide5
+  %wide6 = slice %wide[6] : reg<test.i32 x8> -> reg<test.i32>
+  %sum5 = test.add.i32 %sum4, %wide6
+  %wide7 = slice %wide[7] : reg<test.i32 x8> -> reg<test.i32>
+  %sum6 = test.add.i32 %sum5, %wide7
+  return %sum6
+}
+
+// ----
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @dense_slice_reload_cluster(%blocker: reg<test.i32>, %wide: reg<test.i32 x8>) -> (reg<test.i32>) {
+  %dense_slice_reload_cluster_spill_storage_0 = low.storage.reserve {byte_alignment = 16, byte_length = 32} : low.storage<private>
+  low.spill %wide, %dense_slice_reload_cluster_spill_storage_0 : reg<test.i32 x8>, low.storage<private>
+  %pressure = low.op<test.add.i32>(%blocker, %blocker) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  %20 = low.reload %dense_slice_reload_cluster_spill_storage_0 : low.storage<private> -> reg<test.i32 x8>
+  %wide0 = low.slice %20[0] : reg<test.i32 x8> -> reg<test.i32>
+  %wide1 = low.slice %20[1] : reg<test.i32 x8> -> reg<test.i32>
+  %sum0 = low.op<test.add.i32>(%wide0, %wide1) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  %wide2 = low.slice %20[2] : reg<test.i32 x8> -> reg<test.i32>
+  %sum1 = low.op<test.add.i32>(%sum0, %wide2) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  %wide3 = low.slice %20[3] : reg<test.i32 x8> -> reg<test.i32>
+  %sum2 = low.op<test.add.i32>(%sum1, %wide3) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  %wide4 = low.slice %20[4] : reg<test.i32 x8> -> reg<test.i32>
+  %sum3 = low.op<test.add.i32>(%sum2, %wide4) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  %wide5 = low.slice %20[5] : reg<test.i32 x8> -> reg<test.i32>
+  %sum4 = low.op<test.add.i32>(%sum3, %wide5) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  %wide6 = low.slice %20[6] : reg<test.i32 x8> -> reg<test.i32>
+  %sum5 = low.op<test.add.i32>(%sum4, %wide6) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  %wide7 = low.slice %20[7] : reg<test.i32 x8> -> reg<test.i32>
+  %sum6 = low.op<test.add.i32>(%sum5, %wide7) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  low.return %sum6 : reg<test.i32>
+}
+
+// ====
+
 // RUN: pass low-materialize-allocation{budgets=test.i32=3,diagnostics=spills}
 
 test.target<low_core> @test_target

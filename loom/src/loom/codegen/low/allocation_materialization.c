@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "loom/codegen/low/allocation/spill_plan.h"
 #include "loom/codegen/low/diagnostics.h"
 #include "loom/codegen/low/function.h"
 #include "loom/error/error_catalog.h"
@@ -29,6 +30,15 @@ typedef struct loom_low_materialized_traffic_t {
   // Byte traffic represented by the inserted ops.
   uint64_t bytes;
 } loom_low_materialized_traffic_t;
+
+typedef struct loom_low_slice_reload_group_t {
+  // Block containing slice uses of the spilled value.
+  loom_block_t* block;
+  // Number of slice uses in |block|.
+  uint32_t slice_count;
+  // Byte traffic if each slice use reloads only its projected unit.
+  uint64_t narrow_reload_bytes;
+} loom_low_slice_reload_group_t;
 
 static void loom_low_allocation_record_materialized_spill(
     const loom_low_allocation_table_t* table,
@@ -600,6 +610,37 @@ static iree_status_t loom_low_allocation_validate_spill_use(
   return iree_ok_status();
 }
 
+static bool loom_low_allocation_slice_reload_use(
+    const loom_low_allocation_assignment_t* assignment,
+    const loom_low_allocation_spill_plan_t* plan, const loom_region_t* body,
+    loom_use_t use, loom_op_t** out_slice_op, uint16_t* out_block_index,
+    uint32_t* out_unit_byte_size) {
+  *out_slice_op = NULL;
+  *out_block_index = 0;
+  *out_unit_byte_size = 0;
+  loom_op_t* user_op = loom_use_user_op(use);
+  if (user_op == NULL || user_op->parent_block == NULL ||
+      loom_use_operand_index(use) >= user_op->operand_count ||
+      loom_op_const_operands(user_op)[loom_use_operand_index(use)] !=
+          plan->value_id) {
+    return false;
+  }
+  int64_t reload_offset = 0;
+  if (!loom_low_allocation_spill_plan_slice_reload_byte_offset(
+          assignment, plan->byte_size, user_op, loom_use_operand_index(use),
+          out_unit_byte_size, &reload_offset)) {
+    return false;
+  }
+  (void)reload_offset;
+  uint16_t block_index = 0;
+  if (!loom_region_try_block_index(body, user_op->parent_block, &block_index)) {
+    return false;
+  }
+  *out_slice_op = user_op;
+  *out_block_index = block_index;
+  return true;
+}
+
 static iree_status_t loom_low_allocation_try_insert_reload_for_slice_use(
     loom_module_t* module, const loom_low_allocation_table_t* table,
     const loom_low_allocation_spill_plan_t* plan,
@@ -617,21 +658,11 @@ static iree_status_t loom_low_allocation_try_insert_reload_for_slice_use(
   }
   const loom_low_allocation_assignment_t* assignment =
       &table->assignments[plan->assignment_index];
-  if (assignment->unit_count == 0 ||
-      plan->byte_size % assignment->unit_count != 0) {
-    return iree_ok_status();
-  }
-  const uint32_t unit_byte_size = plan->byte_size / assignment->unit_count;
-  if (unit_byte_size == 0) {
-    return iree_ok_status();
-  }
-  const int64_t slice_offset = loom_low_slice_offset(slice_op);
-  if (slice_offset < 0 || (uint64_t)slice_offset >= assignment->unit_count) {
-    return iree_ok_status();
-  }
   int64_t reload_offset = 0;
-  if (!iree_checked_mul_i64(slice_offset, (int64_t)unit_byte_size,
-                            &reload_offset)) {
+  uint32_t unit_byte_size = 0;
+  if (!loom_low_allocation_spill_plan_slice_reload_byte_offset(
+          assignment, plan->byte_size, slice_op, operand_index, &unit_byte_size,
+          &reload_offset)) {
     return iree_ok_status();
   }
 
@@ -652,6 +683,224 @@ static iree_status_t loom_low_allocation_try_insert_reload_for_slice_use(
       .count = 1,
       .bytes = unit_byte_size,
   };
+  return iree_ok_status();
+}
+
+static iree_status_t loom_low_allocation_insert_dense_slice_reload_for_group(
+    loom_module_t* module, const loom_low_allocation_table_t* table,
+    const loom_low_allocation_spill_plan_t* plan, const loom_region_t* body,
+    loom_value_id_t storage_value_id, const loom_use_t* uses,
+    uint32_t use_count, const loom_low_slice_reload_group_t* group,
+    uint8_t* handled_use_flags,
+    loom_low_materialized_traffic_t* out_reload_traffic) {
+  *out_reload_traffic = (loom_low_materialized_traffic_t){0};
+
+  const loom_low_allocation_assignment_t* assignment =
+      &table->assignments[plan->assignment_index];
+  loom_op_t* first_slice_op = NULL;
+  loom_op_t* op = NULL;
+  loom_block_for_each_op(group->block, op) {
+    uint32_t unit_byte_size = 0;
+    int64_t reload_offset = 0;
+    if (loom_low_slice_isa(op) && loom_low_slice_source(op) == plan->value_id &&
+        loom_low_allocation_spill_plan_slice_reload_byte_offset(
+            assignment, plan->byte_size, op, /*operand_index=*/0,
+            &unit_byte_size, &reload_offset)) {
+      first_slice_op = op;
+      break;
+    }
+    (void)unit_byte_size;
+    (void)reload_offset;
+  }
+  if (first_slice_op == NULL) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "dense slice reload group has no remaining slice use");
+  }
+
+  loom_builder_t builder;
+  loom_builder_initialize(module, &module->arena, group->block, &builder);
+  loom_builder_set_before(&builder, first_slice_op);
+  loom_op_t* reload_op = NULL;
+  IREE_RETURN_IF_ERROR(
+      loom_low_reload_build(&builder, storage_value_id, 0,
+                            loom_module_value_type(module, plan->value_id),
+                            first_slice_op->location, &reload_op));
+  const loom_value_id_t reload_result = loom_low_reload_result(reload_op);
+
+  uint32_t rewritten_slice_count = 0;
+  for (uint32_t i = 0; i < use_count; ++i) {
+    if (handled_use_flags[i] != 0) {
+      continue;
+    }
+    loom_op_t* slice_op = NULL;
+    uint16_t block_index = 0;
+    uint32_t unit_byte_size = 0;
+    if (!loom_low_allocation_slice_reload_use(assignment, plan, body, uses[i],
+                                              &slice_op, &block_index,
+                                              &unit_byte_size) ||
+        body->blocks[block_index] != group->block) {
+      continue;
+    }
+    (void)unit_byte_size;
+    IREE_RETURN_IF_ERROR(loom_low_allocation_validate_spill_use(
+        slice_op, loom_use_operand_index(uses[i]), plan));
+    IREE_RETURN_IF_ERROR(loom_op_set_operand(
+        module, slice_op, /*operand_index=*/0, reload_result));
+    handled_use_flags[i] = 1;
+    ++rewritten_slice_count;
+  }
+  if (rewritten_slice_count == 0) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "dense slice reload group rewrote no slice uses");
+  }
+
+  *out_reload_traffic = (loom_low_materialized_traffic_t){
+      .count = 1,
+      .bytes = plan->byte_size,
+  };
+  return iree_ok_status();
+}
+
+static iree_status_t loom_low_allocation_insert_dense_slice_reloads_for_uses(
+    loom_module_t* module, const loom_low_allocation_table_t* table,
+    const loom_low_allocation_spill_plan_t* plan,
+    loom_value_id_t storage_value_id, const loom_use_t* uses,
+    uint32_t use_count, const loom_block_t* removed_block_arg_block,
+    uint16_t removed_arg_index, iree_arena_allocator_t* arena,
+    uint8_t** out_handled_use_flags,
+    loom_low_materialized_traffic_t* out_reload_traffic) {
+  *out_handled_use_flags = NULL;
+  *out_reload_traffic = (loom_low_materialized_traffic_t){0};
+  if (use_count == 0 || plan->assignment_index >= table->assignment_count) {
+    return iree_ok_status();
+  }
+  const loom_low_allocation_assignment_t* assignment =
+      &table->assignments[plan->assignment_index];
+  if (assignment->unit_count <= 1 ||
+      plan->byte_size % assignment->unit_count != 0) {
+    return iree_ok_status();
+  }
+
+  const loom_region_t* body = loom_low_function_const_body(table->function_op);
+  if (body == NULL || body->block_count == 0) {
+    return iree_ok_status();
+  }
+
+  bool has_slice_reload_use = false;
+  for (uint32_t i = 0; i < use_count; ++i) {
+    if (loom_low_allocation_use_is_removed_block_arg_edge(
+            uses[i], removed_block_arg_block, removed_arg_index)) {
+      continue;
+    }
+    loom_op_t* slice_op = NULL;
+    uint16_t block_index = 0;
+    uint32_t unit_byte_size = 0;
+    if (loom_low_allocation_slice_reload_use(assignment, plan, body, uses[i],
+                                             &slice_op, &block_index,
+                                             &unit_byte_size)) {
+      has_slice_reload_use = true;
+      break;
+    }
+    (void)slice_op;
+    (void)block_index;
+    (void)unit_byte_size;
+  }
+  if (!has_slice_reload_use) {
+    return iree_ok_status();
+  }
+
+  uint32_t* group_indices_by_block = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, body->block_count, sizeof(*group_indices_by_block),
+      (void**)&group_indices_by_block));
+  for (uint16_t i = 0; i < body->block_count; ++i) {
+    group_indices_by_block[i] = UINT32_MAX;
+  }
+
+  loom_low_slice_reload_group_t* groups = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, use_count, sizeof(*groups), (void**)&groups));
+  uint32_t group_count = 0;
+  for (uint32_t i = 0; i < use_count; ++i) {
+    if (loom_low_allocation_use_is_removed_block_arg_edge(
+            uses[i], removed_block_arg_block, removed_arg_index)) {
+      continue;
+    }
+    loom_op_t* slice_op = NULL;
+    uint16_t block_index = 0;
+    uint32_t unit_byte_size = 0;
+    if (!loom_low_allocation_slice_reload_use(assignment, plan, body, uses[i],
+                                              &slice_op, &block_index,
+                                              &unit_byte_size)) {
+      continue;
+    }
+    (void)slice_op;
+    uint32_t group_index = group_indices_by_block[block_index];
+    if (group_index == UINT32_MAX) {
+      group_index = group_count++;
+      group_indices_by_block[block_index] = group_index;
+      groups[group_index] = (loom_low_slice_reload_group_t){
+          .block = body->blocks[block_index],
+      };
+    }
+    if (groups[group_index].slice_count == UINT32_MAX) {
+      return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                              "dense slice reload count overflow");
+    }
+    if (unit_byte_size > UINT64_MAX - groups[group_index].narrow_reload_bytes) {
+      return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                              "dense slice reload byte count overflow");
+    }
+    ++groups[group_index].slice_count;
+    groups[group_index].narrow_reload_bytes += unit_byte_size;
+  }
+
+  loom_low_materialized_traffic_t reload_traffic = {0};
+  uint32_t full_reload_group_count = 0;
+  for (uint32_t i = 0; i < group_count; ++i) {
+    const bool use_full_reload =
+        loom_low_allocation_spill_plan_use_full_slice_reload(
+            groups[i].slice_count, groups[i].narrow_reload_bytes,
+            plan->byte_size);
+    full_reload_group_count += use_full_reload ? 1 : 0;
+  }
+  if (full_reload_group_count == 0) {
+    return iree_ok_status();
+  }
+
+  uint8_t* handled_use_flags = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, use_count,
+                                                 sizeof(*handled_use_flags),
+                                                 (void**)&handled_use_flags));
+  memset(handled_use_flags, 0, use_count * sizeof(*handled_use_flags));
+
+  for (uint32_t i = 0; i < group_count; ++i) {
+    const bool use_full_reload =
+        loom_low_allocation_spill_plan_use_full_slice_reload(
+            groups[i].slice_count, groups[i].narrow_reload_bytes,
+            plan->byte_size);
+    if (!use_full_reload) {
+      continue;
+    }
+    loom_low_materialized_traffic_t inserted_reload_traffic = {0};
+    IREE_RETURN_IF_ERROR(
+        loom_low_allocation_insert_dense_slice_reload_for_group(
+            module, table, plan, body, storage_value_id, uses, use_count,
+            &groups[i], handled_use_flags, &inserted_reload_traffic));
+    if (inserted_reload_traffic.count > UINT32_MAX - reload_traffic.count) {
+      return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                              "materialized reload count overflow");
+    }
+    if (inserted_reload_traffic.bytes > UINT64_MAX - reload_traffic.bytes) {
+      return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                              "materialized reload byte count overflow");
+    }
+    reload_traffic.count += inserted_reload_traffic.count;
+    reload_traffic.bytes += inserted_reload_traffic.bytes;
+  }
+  *out_handled_use_flags = handled_use_flags;
+  *out_reload_traffic = reload_traffic;
   return iree_ok_status();
 }
 
@@ -696,11 +945,22 @@ static iree_status_t loom_low_allocation_insert_reloads_for_uses(
     const loom_low_allocation_spill_plan_t* plan,
     loom_value_id_t storage_value_id, const loom_use_t* uses,
     uint32_t use_count, const loom_block_t* removed_block_arg_block,
-    uint16_t removed_arg_index,
+    uint16_t removed_arg_index, iree_arena_allocator_t* arena,
     loom_low_materialized_traffic_t* out_reload_traffic) {
   *out_reload_traffic = (loom_low_materialized_traffic_t){0};
   loom_low_materialized_traffic_t reload_traffic = {0};
+  uint8_t* handled_use_flags = NULL;
+  if (use_count != 0) {
+    IREE_RETURN_IF_ERROR(
+        loom_low_allocation_insert_dense_slice_reloads_for_uses(
+            module, table, plan, storage_value_id, uses, use_count,
+            removed_block_arg_block, removed_arg_index, arena,
+            &handled_use_flags, &reload_traffic));
+  }
   for (uint32_t i = 0; i < use_count; ++i) {
+    if (handled_use_flags != NULL && handled_use_flags[i] != 0) {
+      continue;
+    }
     if (loom_low_allocation_use_is_removed_block_arg_edge(
             uses[i], removed_block_arg_block, removed_arg_index)) {
       continue;
@@ -846,10 +1106,10 @@ static iree_status_t loom_low_allocation_materialize_one_spill_plan(
   if (is_block_arg && !block_arg_is_entry) {
     IREE_RETURN_IF_ERROR(loom_low_allocation_insert_reloads_for_uses(
         module, table, plan, storage_value_id, uses, use_count, block_arg_block,
-        block_arg_index, &inserted_reload_traffic));
+        block_arg_index, arena, &inserted_reload_traffic));
   } else {
     IREE_RETURN_IF_ERROR(loom_low_allocation_insert_reloads_for_uses(
-        module, table, plan, storage_value_id, uses, use_count, NULL, 0,
+        module, table, plan, storage_value_id, uses, use_count, NULL, 0, arena,
         &inserted_reload_traffic));
   }
   if (inserted_reload_traffic.count > UINT32_MAX - result->reload_count) {
