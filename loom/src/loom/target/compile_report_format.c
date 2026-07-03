@@ -2206,20 +2206,98 @@ loom_target_compile_report_format_allocation_high_water_rows(
   return iree_ok_status();
 }
 
+static bool
+loom_target_compile_report_source_low_selection_summary_has_dynamic_delta(
+    const loom_target_compile_report_source_low_selection_summary_t* row) {
+  return row->unknown_dynamic_op_count != 0 ||
+         row->dynamic_selected_op_count != row->selected_op_count ||
+         row->dynamic_emitted_low_op_count != row->emitted_low_op_count;
+}
+
+static iree_status_t loom_target_compile_report_append_source_low_descriptor(
+    iree_string_view_t descriptor_key,
+    iree_string_view_t descriptor_semantic_tag,
+    iree_string_builder_t* builder) {
+  if (!iree_string_view_is_empty(descriptor_key)) {
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+        builder, " descriptor_key=%.*s", (int)descriptor_key.size,
+        descriptor_key.data));
+  }
+  if (!iree_string_view_is_empty(descriptor_semantic_tag)) {
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+        builder, " descriptor_semantic_tag=%.*s",
+        (int)descriptor_semantic_tag.size, descriptor_semantic_tag.data));
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t
 loom_target_compile_report_append_source_low_descriptor_fields(
     const loom_target_compile_report_source_low_row_t* row,
     iree_string_builder_t* builder) {
-  if (!iree_string_view_is_empty(row->descriptor_key)) {
-    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-        builder, " descriptor_key=%.*s", (int)row->descriptor_key.size,
-        row->descriptor_key.data));
-  }
-  if (!iree_string_view_is_empty(row->descriptor_semantic_tag)) {
-    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-        builder, " descriptor_semantic_tag=%.*s",
-        (int)row->descriptor_semantic_tag.size,
-        row->descriptor_semantic_tag.data));
+  return loom_target_compile_report_append_source_low_descriptor(
+      row->descriptor_key, row->descriptor_semantic_tag, builder);
+}
+
+static iree_status_t
+loom_target_compile_report_append_source_low_selection_summary_descriptor(
+    const loom_target_compile_report_source_low_selection_summary_t* row,
+    iree_string_builder_t* builder) {
+  return loom_target_compile_report_append_source_low_descriptor(
+      row->descriptor_key, row->descriptor_semantic_tag, builder);
+}
+
+static iree_status_t
+loom_target_compile_report_format_source_low_selection_summary_rows(
+    const loom_target_compile_report_t* report,
+    iree_string_builder_t* builder) {
+  iree_host_size_t row_index = 0;
+  for (const loom_target_compile_report_vec_t* vec =
+           report->source_low_selection_summaries.head;
+       vec != NULL; vec = vec->next) {
+    const loom_target_compile_report_source_low_selection_summary_t* rows =
+        (const loom_target_compile_report_source_low_selection_summary_t*)
+            loom_target_compile_report_vec_const_rows(vec);
+    for (iree_host_size_t i = 0; i < vec->count; ++i, ++row_index) {
+      const loom_target_compile_report_source_low_selection_summary_t* row =
+          &rows[i];
+      if (!loom_target_compile_report_source_low_selection_summary_has_dynamic_delta(
+              row)) {
+        continue;
+      }
+      const iree_string_view_t function_name =
+          loom_target_compile_report_non_empty(row->function_name);
+      const iree_string_view_t source_op_name =
+          loom_target_compile_report_non_empty(row->source_op_name);
+      const iree_string_view_t selection_name =
+          loom_target_compile_report_source_low_selection_name(
+              row->selection_kind);
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+          builder,
+          "COMPILE-REPORT: source_low_selection[%" PRIhsz
+          "] function=%.*s source_op=%.*s selection=%.*s",
+          row_index, (int)function_name.size, function_name.data,
+          (int)source_op_name.size, source_op_name.data,
+          (int)selection_name.size, selection_name.data));
+      if (!iree_string_view_is_empty(row->plan_key)) {
+        IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+            builder, " plan_key=%.*s", (int)row->plan_key.size,
+            row->plan_key.data));
+      }
+      IREE_RETURN_IF_ERROR(
+          loom_target_compile_report_append_source_low_selection_summary_descriptor(
+              row, builder));
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+          builder, " selected_ops=%" PRIu64 " emitted_ops=%" PRIu64,
+          row->selected_op_count, row->emitted_low_op_count));
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+          builder,
+          " exact_dynamic_ops=%" PRIu64 " unknown_dynamic_ops=%" PRIu64
+          " dynamic_selected_ops=%" PRIu64 " dynamic_emitted_ops=%" PRIu64,
+          row->exact_dynamic_op_count, row->unknown_dynamic_op_count,
+          row->dynamic_selected_op_count, row->dynamic_emitted_low_op_count));
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "\n"));
+    }
   }
   return iree_ok_status();
 }
@@ -5931,6 +6009,9 @@ iree_status_t loom_target_compile_report_format_text(
     IREE_RETURN_IF_ERROR(
         loom_target_compile_report_format_source_low_target_rows(report,
                                                                  builder));
+    IREE_RETURN_IF_ERROR(
+        loom_target_compile_report_format_source_low_selection_summary_rows(
+            report, builder));
     IREE_RETURN_IF_ERROR(
         loom_target_compile_report_format_source_low_rows(report, builder));
     IREE_RETURN_IF_ERROR(
