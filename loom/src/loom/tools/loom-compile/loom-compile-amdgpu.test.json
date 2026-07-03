@@ -452,7 +452,7 @@
       ]
     },
     {
-      "name": "omits AMDGPU memory economics for unmodeled loop CFG",
+      "name": "reports source-low memory coverage for unmodeled loop CFG",
       "steps": [
         {
           "name": "compile",
@@ -474,12 +474,14 @@
                 "\"status\":\"OK\"",
                 "\"static_instruction_mix\":{\"descriptor_count\":",
                 "\"memory_read_byte_count\":20",
-                "\"memory_write_byte_count\":4"
+                "\"memory_write_byte_count\":4",
+                "\"economics\":{\"memory\":{\"source_low\":{\"packet_count\":2",
+                "\"unknown_dynamic_packet_count\":2"
               ]
             },
             "not_contains": [
               "\"dynamic_instruction_mix\"",
-              "\"economics\""
+              "\"dispatch_issued\""
             ]
           },
           "files": [
