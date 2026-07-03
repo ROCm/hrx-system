@@ -285,6 +285,7 @@ loom_cc_library(
     loom::target::arch::amdgpu::target_info_defs
     loom::target::low_legality
     loom::target::registers
+    loom::util::cfg_graph
     loom::util::fact_table
     loom::util::math
     loom::util::numeric_format
