@@ -123,6 +123,9 @@ typedef struct loom_low_placement_table_t {
 // conflicting allocation assignments sharing target-visible storage.
 bool loom_low_placement_cause_can_alias(loom_low_placement_cause_t cause);
 
+// Returns true when |cause| is a control-flow edge payload relation.
+bool loom_low_placement_cause_is_edge(loom_low_placement_cause_t cause);
+
 // Builds a function-local placement relation table over an acquired value
 // domain and its liveness analysis.
 iree_status_t loom_low_placement_analyze_region(

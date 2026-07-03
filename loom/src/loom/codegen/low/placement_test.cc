@@ -30,5 +30,24 @@ TEST(LowPlacementTest, ClassifiesAliasingCauses) {
       LOOM_LOW_PLACEMENT_CAUSE_LOW_SCF_YIELD));
 }
 
+TEST(LowPlacementTest, ClassifiesEdgeCauses) {
+  EXPECT_FALSE(
+      loom_low_placement_cause_is_edge(LOOM_LOW_PLACEMENT_CAUSE_UNKNOWN));
+  EXPECT_FALSE(
+      loom_low_placement_cause_is_edge(LOOM_LOW_PLACEMENT_CAUSE_TIED_RESULT));
+  EXPECT_FALSE(
+      loom_low_placement_cause_is_edge(LOOM_LOW_PLACEMENT_CAUSE_LOW_COPY));
+  EXPECT_FALSE(
+      loom_low_placement_cause_is_edge(LOOM_LOW_PLACEMENT_CAUSE_LOW_SLICE));
+  EXPECT_FALSE(
+      loom_low_placement_cause_is_edge(LOOM_LOW_PLACEMENT_CAUSE_LOW_CONCAT));
+  EXPECT_TRUE(
+      loom_low_placement_cause_is_edge(LOOM_LOW_PLACEMENT_CAUSE_LOW_BRANCH));
+  EXPECT_TRUE(
+      loom_low_placement_cause_is_edge(LOOM_LOW_PLACEMENT_CAUSE_LOW_SCF_FOR));
+  EXPECT_TRUE(
+      loom_low_placement_cause_is_edge(LOOM_LOW_PLACEMENT_CAUSE_LOW_SCF_YIELD));
+}
+
 }  // namespace
 }  // namespace loom

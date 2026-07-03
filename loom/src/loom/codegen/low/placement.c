@@ -52,6 +52,17 @@ bool loom_low_placement_cause_can_alias(loom_low_placement_cause_t cause) {
   }
 }
 
+bool loom_low_placement_cause_is_edge(loom_low_placement_cause_t cause) {
+  switch (cause) {
+    case LOOM_LOW_PLACEMENT_CAUSE_LOW_BRANCH:
+    case LOOM_LOW_PLACEMENT_CAUSE_LOW_SCF_FOR:
+    case LOOM_LOW_PLACEMENT_CAUSE_LOW_SCF_YIELD:
+      return true;
+    default:
+      return false;
+  }
+}
+
 static loom_value_ordinal_t loom_low_placement_value_ordinal(
     const loom_low_placement_build_state_t* state, loom_value_id_t value_id) {
   const loom_value_ordinal_t value_ordinal =
