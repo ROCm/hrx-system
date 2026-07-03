@@ -93,12 +93,12 @@ low.kernel.def target(@target) workgroup_size(32, 1, 1) @gfx1100_finite_fp8_rhs_
   low.cond_br %82, ^_bb1, ^_bb4 : reg<amdgpu.scc>
 ^_bb1:
   %91 = v_or_b32 %39, %43
-  %92 = v_or_b32 %91, %47
-  %93 = v_or_b32 %92, %51
-  %94 = v_or_b32 %93, %55
-  %95 = v_or_b32 %94, %59
-  %96 = v_or_b32 %95, %63
-  %97 = v_or_b32 %96, %67
+  %92 = v_or_b32 %47, %51
+  %93 = v_or_b32 %55, %59
+  %94 = v_or_b32 %63, %67
+  %95 = v_or_b32 %91, %92
+  %96 = v_or_b32 %93, %94
+  %97 = v_or_b32 %95, %96
   %98 = v_cmp_ne_i32_src1_inline %97 {rhs = 0}
   %99 = slice %98[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
   %100 = s_cmp_lg_i32_src1_inline %99 {rhs = 0}
