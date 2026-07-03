@@ -131,6 +131,40 @@ low.func.def target(@test_target) @resource_stall_reduces_existing_pressure_clif
 }
 
 // ====
+// RUN: emit low-schedule-json @resource_stall_counts_live_slice_as_alias strategy=resource-stall diagnostics=candidates cliff=test.i32:72:15:14 output=none
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @resource_stall_counts_live_slice_as_alias(
+    %pad: reg<test.i32 x66>, %source: reg<test.i32 x4>,
+    %ptr: reg<test.ptr>, %rhs: reg<test.i32>) -> (reg<test.i32 x66>,
+    reg<test.i32 x4>, reg<test.i32>, reg<test.i32 x4>) {
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", candidate_count="2", chosen_packet="low.slice", rejected_packet="test.load.v4i32", chosen_projected_live_units="72", chosen_produced_live_units="0", rejected_projected_live_units="75", rejected_produced_live_units="4"}
+  %lane = low.slice %source[0] : reg<test.i32 x4> -> reg<test.i32>
+  %load = low.op<test.load.v4i32>(%ptr) : (reg<test.ptr>) -> reg<test.i32 x4>
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="1", candidate_count="2", chosen_packet="test.add.i32", rejected_packet="test.load.v4i32", chosen_projected_live_units="72", chosen_killed_live_units="1", chosen_produced_live_units="1", rejected_projected_live_units="75"}
+  %sum = low.op<test.add.i32>(%lane, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  low.return %pad, %source, %sum, %load : reg<test.i32 x66>,
+      reg<test.i32 x4>, reg<test.i32>, reg<test.i32 x4>
+}
+
+// ====
+// RUN: emit low-schedule-json @resource_stall_caps_repeated_source_alias_units strategy=resource-stall diagnostics=candidates cliff=test.i32:70:15:14 output=none
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @resource_stall_caps_repeated_source_alias_units(
+    %pad: reg<test.i32 x66>, %source: reg<test.i32>,
+    %ptr: reg<test.ptr>) -> (reg<test.i32 x66>, reg<test.i32>,
+    reg<test.i32 x2>, reg<test.i32 x4>) {
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", candidate_count="2", chosen_packet="low.concat", rejected_packet="test.load.v4i32", chosen_projected_live_units="69", chosen_produced_live_units="1", rejected_projected_live_units="71", rejected_produced_live_units="4"}
+  %pair = low.concat(%source, %source) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32 x2>
+  %load = low.op<test.load.v4i32>(%ptr) : (reg<test.ptr>) -> reg<test.i32 x4>
+  low.return %pad, %source, %pair, %load : reg<test.i32 x66>,
+      reg<test.i32>, reg<test.i32 x2>, reg<test.i32 x4>
+}
+
+// ====
 // RUN: emit low-schedule-json @resource_stall_scans_past_ready_window_for_pressure_cliff strategy=resource-stall diagnostics=candidates cliff=test.i32:69:15:14 output=none
 
 test.target<low_core> @test_target

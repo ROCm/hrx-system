@@ -96,6 +96,8 @@ typedef struct loom_low_schedule_value_record_t {
   uint32_t producer_node;
   // Register units contributed to the pressure model.
   uint32_t unit_count;
+  // Live units currently charged to this value in the pressure model.
+  uint32_t live_unit_count;
   // Remaining operand uses in the current simulated block schedule.
   uint32_t remaining_use_count;
   // Descriptor-set-local register class, or LOOM_LOW_REG_CLASS_NONE.
@@ -103,6 +105,19 @@ typedef struct loom_low_schedule_value_record_t {
   // Mutable per-schedule flags.
   loom_low_schedule_value_flags_t flags;
 } loom_low_schedule_value_record_t;
+
+typedef struct loom_low_schedule_pressure_alias_t {
+  // Source value whose live pressure currently covers the alias units.
+  loom_value_ordinal_t source_ordinal;
+  // Result value aliasing units from the source value.
+  loom_value_ordinal_t result_ordinal;
+  // Number of units covered by this alias relation.
+  uint32_t unit_count;
+  // Next alias record for the same source value.
+  uint32_t next_alias;
+  // True once pressure has transferred from the source to the result.
+  bool transferred;
+} loom_low_schedule_pressure_alias_t;
 
 typedef struct loom_low_schedule_build_state_t {
   // Module containing the low function being scheduled.
