@@ -987,7 +987,13 @@ typedef struct loom_target_compile_report_source_low_row_t {
   iree_string_view_t descriptor_semantic_tag;
   // Number of low operations emitted for this source operation.
   uint32_t emitted_low_op_count;
+  // Exact source execution count plus one, or zero when unknown.
+  uint64_t execution_count_plus_one;
 } loom_target_compile_report_source_low_row_t;
+
+// Source execution count evidence is not statically known.
+#define LOOM_TARGET_COMPILE_REPORT_SOURCE_LOW_EXECUTION_COUNT_PLUS_ONE_UNKNOWN \
+  0u
 
 // Summary of source-to-target-low selections grouped by stable lowering shape.
 typedef struct loom_target_compile_report_source_low_selection_summary_t {
@@ -1009,11 +1015,19 @@ typedef struct loom_target_compile_report_source_low_selection_summary_t {
   uint64_t selected_op_count;
   // Number of low operations emitted by this lowering shape.
   uint64_t emitted_low_op_count;
+  // Number of source operations with exact dynamic execution evidence.
+  uint64_t exact_dynamic_op_count;
+  // Number of source operations without exact dynamic execution evidence.
+  uint64_t unknown_dynamic_op_count;
+  // Exact dynamic source operation executions across exact rows.
+  uint64_t dynamic_selected_op_count;
+  // Exact dynamic low operations emitted across exact rows.
+  uint64_t dynamic_emitted_low_op_count;
 } loom_target_compile_report_source_low_selection_summary_t;
 
 // Source memory packet execution count evidence is not statically known.
 #define LOOM_TARGET_COMPILE_REPORT_SOURCE_LOW_MEMORY_EXECUTION_COUNT_PLUS_ONE_UNKNOWN \
-  0u
+  LOOM_TARGET_COMPILE_REPORT_SOURCE_LOW_EXECUTION_COUNT_PLUS_ONE_UNKNOWN
 
 typedef uint32_t loom_target_compile_report_memory_interval_flags_t;
 enum {

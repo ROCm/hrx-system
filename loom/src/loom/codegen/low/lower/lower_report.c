@@ -722,7 +722,7 @@ static const loom_block_t* loom_low_lower_source_op_function_block(
   return block;
 }
 
-static iree_status_t loom_low_lower_source_op_execution_count_plus_one(
+iree_status_t loom_low_lower_source_op_execution_count_plus_one(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     uint64_t* out_execution_count_plus_one) {
   uint64_t execution_count = 1;

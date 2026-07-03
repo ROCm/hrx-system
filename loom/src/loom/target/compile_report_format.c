@@ -2211,7 +2211,15 @@ static iree_status_t loom_target_compile_report_format_source_low_rows(
             loom_target_compile_report_append_source_low_descriptor_fields(
                 row, builder));
         IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-            builder, " emitted_ops=%u\n", row->emitted_low_op_count));
+            builder, " emitted_ops=%u", row->emitted_low_op_count));
+        if (row->execution_count_plus_one !=
+                LOOM_TARGET_COMPILE_REPORT_SOURCE_LOW_EXECUTION_COUNT_PLUS_ONE_UNKNOWN &&
+            row->execution_count_plus_one != 2) {
+          IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+              builder, " execution_count=%" PRIu64,
+              row->execution_count_plus_one - 1));
+        }
+        IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "\n"));
         continue;
       }
       IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
@@ -2229,7 +2237,15 @@ static iree_status_t loom_target_compile_report_format_source_low_rows(
           loom_target_compile_report_append_source_low_descriptor_fields(
               row, builder));
       IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-          builder, " emitted_ops=%u\n", row->emitted_low_op_count));
+          builder, " emitted_ops=%u", row->emitted_low_op_count));
+      if (row->execution_count_plus_one !=
+              LOOM_TARGET_COMPILE_REPORT_SOURCE_LOW_EXECUTION_COUNT_PLUS_ONE_UNKNOWN &&
+          row->execution_count_plus_one != 2) {
+        IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+            builder, " execution_count=%" PRIu64,
+            row->execution_count_plus_one - 1));
+      }
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "\n"));
     }
   }
   return iree_ok_status();
@@ -4432,6 +4448,24 @@ loom_target_compile_report_format_source_low_selection_summary_row_json(
       stream, &first_field, "selected_op_count", row->selected_op_count));
   IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
       stream, &first_field, "emitted_low_op_count", row->emitted_low_op_count));
+  const bool has_dynamic_delta =
+      row->unknown_dynamic_op_count != 0 ||
+      row->dynamic_selected_op_count != row->selected_op_count ||
+      row->dynamic_emitted_low_op_count != row->emitted_low_op_count;
+  if (has_dynamic_delta) {
+    IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
+        stream, &first_field, "exact_dynamic_op_count",
+        row->exact_dynamic_op_count));
+    IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
+        stream, &first_field, "unknown_dynamic_op_count",
+        row->unknown_dynamic_op_count));
+    IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
+        stream, &first_field, "dynamic_selected_op_count",
+        row->dynamic_selected_op_count));
+    IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
+        stream, &first_field, "dynamic_emitted_low_op_count",
+        row->dynamic_emitted_low_op_count));
+  }
   return loom_output_stream_write_cstring(stream, "}");
 }
 
@@ -4503,6 +4537,13 @@ static iree_status_t loom_target_compile_report_format_source_low_row_json(
           row->descriptor_semantic_tag));
   IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u32_field(
       stream, &first_field, "emitted_low_op_count", row->emitted_low_op_count));
+  if (row->execution_count_plus_one !=
+          LOOM_TARGET_COMPILE_REPORT_SOURCE_LOW_EXECUTION_COUNT_PLUS_ONE_UNKNOWN &&
+      row->execution_count_plus_one != 2) {
+    IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
+        stream, &first_field, "execution_count",
+        row->execution_count_plus_one - 1));
+  }
   return loom_output_stream_write_cstring(stream, "}");
 }
 

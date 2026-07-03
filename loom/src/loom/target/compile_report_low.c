@@ -2409,6 +2409,7 @@ iree_status_t loom_target_compile_report_record_low_lowering(
           .descriptor_key = source_row->descriptor_key,
           .descriptor_semantic_tag = source_row->descriptor_semantic_tag,
           .emitted_low_op_count = source_row->emitted_low_op_count,
+          .execution_count_plus_one = source_row->execution_count_plus_one,
       };
       IREE_RETURN_IF_ERROR(
           loom_target_compile_report_record_source_low_row(report, &row));

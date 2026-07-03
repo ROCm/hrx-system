@@ -1807,7 +1807,7 @@ static bool loom_target_compile_report_source_low_row_has_summary_key(
 static loom_target_compile_report_source_low_selection_summary_t
 loom_target_compile_report_source_low_selection_summary_from_row(
     const loom_target_compile_report_source_low_row_t* row) {
-  return (loom_target_compile_report_source_low_selection_summary_t){
+  loom_target_compile_report_source_low_selection_summary_t summary = {
       .function_name = row->function_name,
       .source_op_name = row->source_op_name,
       .source_op_kind = row->source_op_kind,
@@ -1818,6 +1818,23 @@ loom_target_compile_report_source_low_selection_summary_from_row(
       .selected_op_count = 1,
       .emitted_low_op_count = row->emitted_low_op_count,
   };
+  if (row->execution_count_plus_one ==
+      LOOM_TARGET_COMPILE_REPORT_SOURCE_LOW_EXECUTION_COUNT_PLUS_ONE_UNKNOWN) {
+    summary.unknown_dynamic_op_count = 1;
+    return summary;
+  }
+  const uint64_t execution_count = row->execution_count_plus_one - 1;
+  uint64_t dynamic_emitted_low_op_count = 0;
+  if (!loom_target_compile_report_checked_mul_u64(
+          row->emitted_low_op_count, execution_count,
+          &dynamic_emitted_low_op_count)) {
+    summary.unknown_dynamic_op_count = 1;
+    return summary;
+  }
+  summary.exact_dynamic_op_count = 1;
+  summary.dynamic_selected_op_count = execution_count;
+  summary.dynamic_emitted_low_op_count = dynamic_emitted_low_op_count;
+  return summary;
 }
 
 static bool loom_target_compile_report_source_low_selection_summaries_match(
@@ -1864,6 +1881,10 @@ loom_target_compile_report_record_source_low_selection_summary_row(
   if (summary != NULL) {
     summary->selected_op_count += row->selected_op_count;
     summary->emitted_low_op_count += row->emitted_low_op_count;
+    summary->exact_dynamic_op_count += row->exact_dynamic_op_count;
+    summary->unknown_dynamic_op_count += row->unknown_dynamic_op_count;
+    summary->dynamic_selected_op_count += row->dynamic_selected_op_count;
+    summary->dynamic_emitted_low_op_count += row->dynamic_emitted_low_op_count;
     return iree_ok_status();
   }
   return loom_target_compile_report_row_list_append(

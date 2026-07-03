@@ -387,10 +387,16 @@ typedef struct loom_low_lower_report_row_t {
   iree_string_view_t descriptor_semantic_tag;
   // Number of low operations emitted for this source operation.
   uint32_t emitted_low_op_count;
+  // Exact source execution count plus one, or zero when unknown.
+  uint64_t execution_count_plus_one;
 } loom_low_lower_report_row_t;
 
+// Source execution count evidence is not statically known.
+#define LOOM_LOW_LOWER_REPORT_EXECUTION_COUNT_PLUS_ONE_UNKNOWN 0u
+
 // Source memory packet execution count evidence is not statically known.
-#define LOOM_LOW_LOWER_MEMORY_REPORT_EXECUTION_COUNT_PLUS_ONE_UNKNOWN 0u
+#define LOOM_LOW_LOWER_MEMORY_REPORT_EXECUTION_COUNT_PLUS_ONE_UNKNOWN \
+  LOOM_LOW_LOWER_REPORT_EXECUTION_COUNT_PLUS_ONE_UNKNOWN
 
 // One emitted source-memory packet row captured for production diagnostics.
 typedef struct loom_low_lower_memory_report_row_t {

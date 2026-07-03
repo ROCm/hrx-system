@@ -109,6 +109,12 @@ typedef struct loom_low_lower_successor_interpositions_t {
   uint8_t low_dest_count;
 } loom_low_lower_successor_interpositions_t;
 
+// Returns exact source execution evidence for an operation when loop and CFG
+// facts can prove it without target execution.
+iree_status_t loom_low_lower_source_op_execution_count_plus_one(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    uint64_t* out_execution_count_plus_one);
+
 typedef struct loom_low_lower_target_state_record_t {
   // Target-owned static key identifying this function-local state object.
   const void* key;
