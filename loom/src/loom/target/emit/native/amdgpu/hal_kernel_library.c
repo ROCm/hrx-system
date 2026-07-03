@@ -537,19 +537,33 @@ static iree_status_t loom_amdgpu_hal_kernel_library_record_wait_plan(
     return iree_ok_status();
   }
   const loom_amdgpu_wait_plan_t* wait_plan = &packet_plan->wait_plan;
+  enum {
+    kWaitReasonSummaryCount =
+        LOOM_AMDGPU_WAIT_PLAN_REASON_MEMORY_SOURCE_REUSE + 1,
+  };
   loom_target_compile_report_wait_plan_t summary = {0};
   loom_target_compile_report_wait_plan_t
       counter_summaries[LOOM_AMDGPU_WAIT_COUNTER_SLOT_COUNT] = {0};
+  loom_target_compile_report_wait_plan_t
+      reason_summaries[LOOM_AMDGPU_WAIT_COUNTER_SLOT_COUNT]
+                      [kWaitReasonSummaryCount] = {{0}};
   for (iree_host_size_t i = 0; i < wait_plan->action_count; ++i) {
     const loom_amdgpu_wait_plan_action_t* action = &wait_plan->actions[i];
     IREE_ASSERT(action->counter_id > LOOM_AMDGPU_WAIT_COUNTER_NONE &&
                     action->counter_id <= LOOM_AMDGPU_WAIT_COUNTER_ALU,
                 "wait plan action must name a concrete counter");
+    IREE_ASSERT(action->reason < kWaitReasonSummaryCount,
+                "wait plan action must name a concrete reason");
     loom_amdgpu_hal_kernel_library_accumulate_wait_action(&summary, action);
     if (action->counter_id > LOOM_AMDGPU_WAIT_COUNTER_NONE &&
         action->counter_id <= LOOM_AMDGPU_WAIT_COUNTER_ALU) {
+      const uint32_t counter_index = action->counter_id - 1;
       loom_amdgpu_hal_kernel_library_accumulate_wait_action(
-          &counter_summaries[action->counter_id - 1], action);
+          &counter_summaries[counter_index], action);
+      if (action->reason < kWaitReasonSummaryCount) {
+        loom_amdgpu_hal_kernel_library_accumulate_wait_action(
+            &reason_summaries[counter_index][action->reason], action);
+      }
     }
   }
   loom_target_compile_report_record_wait_plan(report, &summary);
@@ -566,6 +580,29 @@ static iree_status_t loom_amdgpu_hal_kernel_library_record_wait_plan(
     };
     IREE_RETURN_IF_ERROR(
         loom_target_compile_report_record_wait_counter_row(report, &row));
+  }
+  for (uint32_t i = 0; i < LOOM_AMDGPU_WAIT_COUNTER_SLOT_COUNT; ++i) {
+    const uint32_t counter_id = i + 1;
+    const iree_string_view_t counter_name =
+        loom_amdgpu_wait_counter_name(counter_id);
+    for (uint32_t reason_id = 0; reason_id < kWaitReasonSummaryCount;
+         ++reason_id) {
+      if (reason_summaries[i][reason_id].action_count == 0) {
+        continue;
+      }
+      const loom_target_compile_report_wait_reason_summary_row_t row = {
+          .function_name = report->function_name,
+          .counter_name = counter_name,
+          .reason_name = loom_amdgpu_wait_plan_reason_name(
+              (loom_amdgpu_wait_plan_reason_t)reason_id),
+          .counter_id = counter_id,
+          .reason_id = reason_id,
+          .summary = reason_summaries[i][reason_id],
+      };
+      IREE_RETURN_IF_ERROR(
+          loom_target_compile_report_record_wait_reason_summary_row(report,
+                                                                    &row));
+    }
   }
   if (!loom_target_compile_report_wants_details(
           report, LOOM_TARGET_COMPILE_REPORT_DETAIL_WAIT_PLAN)) {

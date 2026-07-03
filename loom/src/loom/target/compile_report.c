@@ -78,6 +78,8 @@ void loom_target_compile_report_deinitialize(
       allocator, &report->allocation_high_water_rows);
   loom_target_compile_report_row_list_deinitialize(allocator,
                                                    &report->wait_counter_rows);
+  loom_target_compile_report_row_list_deinitialize(
+      allocator, &report->wait_reason_summary_rows);
   loom_target_compile_report_row_list_deinitialize(allocator,
                                                    &report->wait_action_rows);
   loom_target_compile_report_row_list_deinitialize(
@@ -115,6 +117,7 @@ static bool loom_target_compile_report_has_rows(
          report->allocation_failure_rows.count != 0 ||
          report->allocation_high_water_rows.count != 0 ||
          report->wait_counter_rows.count != 0 ||
+         report->wait_reason_summary_rows.count != 0 ||
          report->wait_action_rows.count != 0 ||
          report->config_binding_rows.count != 0 ||
          report->entry_rows.count != 0 || report->source_low_rows.count != 0 ||
@@ -224,6 +227,7 @@ iree_status_t loom_target_compile_report_clone(
   target.allocation_high_water_rows =
       (loom_target_compile_report_row_list_t){0};
   target.wait_counter_rows = (loom_target_compile_report_row_list_t){0};
+  target.wait_reason_summary_rows = (loom_target_compile_report_row_list_t){0};
   target.wait_action_rows = (loom_target_compile_report_row_list_t){0};
   target.config_binding_rows = (loom_target_compile_report_row_list_t){0};
   target.source_low_rows = (loom_target_compile_report_row_list_t){0};
@@ -248,6 +252,7 @@ iree_status_t loom_target_compile_report_clone(
       source->allocation_failure_rows.count == 0 &&
       source->allocation_high_water_rows.count == 0 &&
       source->wait_counter_rows.count == 0 &&
+      source->wait_reason_summary_rows.count == 0 &&
       source->wait_action_rows.count == 0 &&
       source->config_binding_rows.count == 0 &&
       source->source_low_rows.count == 0 &&
@@ -322,6 +327,12 @@ iree_status_t loom_target_compile_report_clone(
         &source->wait_counter_rows,
         sizeof(loom_target_compile_report_wait_counter_row_t), allocator,
         &target.wait_counter_rows);
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_target_compile_report_row_list_clone(
+        &source->wait_reason_summary_rows,
+        sizeof(loom_target_compile_report_wait_reason_summary_row_t), allocator,
+        &target.wait_reason_summary_rows);
   }
   if (iree_status_is_ok(status)) {
     status = loom_target_compile_report_row_list_clone(
@@ -1533,6 +1544,8 @@ loom_target_compile_report_entry_from_report(
       .allocation_high_water_row_count =
           entry_report->allocation_high_water_rows.count,
       .wait_counter_row_count = entry_report->wait_counter_rows.count,
+      .wait_reason_summary_row_count =
+          entry_report->wait_reason_summary_rows.count,
       .wait_action_row_count = entry_report->wait_action_rows.count,
       .target_capability_row_count = entry_report->target_capability_rows.count,
   };
@@ -1988,6 +2001,11 @@ iree_status_t loom_target_compile_report_record_entry_report(
         sizeof(loom_target_compile_report_wait_counter_row_t),
         report->allocator));
     IREE_RETURN_IF_ERROR(loom_target_compile_report_append_rows(
+        &report->wait_reason_summary_rows,
+        &entry_report->wait_reason_summary_rows,
+        sizeof(loom_target_compile_report_wait_reason_summary_row_t),
+        report->allocator));
+    IREE_RETURN_IF_ERROR(loom_target_compile_report_append_rows(
         &report->wait_action_rows, &entry_report->wait_action_rows,
         sizeof(loom_target_compile_report_wait_action_row_t),
         report->allocator));
@@ -2161,6 +2179,21 @@ iree_status_t loom_target_compile_report_record_wait_counter_row(
   }
   return loom_target_compile_report_row_list_append(
       &report->wait_counter_rows, sizeof(*row), report->allocator, row);
+}
+
+iree_status_t loom_target_compile_report_record_wait_reason_summary_row(
+    loom_target_compile_report_t* report,
+    const loom_target_compile_report_wait_reason_summary_row_t* row) {
+  if (row->summary.action_count == 0) {
+    return iree_ok_status();
+  }
+  report->detail_flags |= LOOM_TARGET_COMPILE_REPORT_DETAIL_WAIT_PLAN;
+  if (!loom_target_compile_report_wants_details(
+          report, LOOM_TARGET_COMPILE_REPORT_DETAIL_WAIT_PLAN)) {
+    return iree_ok_status();
+  }
+  return loom_target_compile_report_row_list_append(
+      &report->wait_reason_summary_rows, sizeof(*row), report->allocator, row);
 }
 
 iree_status_t loom_target_compile_report_record_wait_action_row(
