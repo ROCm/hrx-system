@@ -480,6 +480,10 @@ typedef struct loom_target_compile_report_wait_plan_t {
   uint64_t full_drain_count;
   // Number of wait actions that leave younger packets outstanding.
   uint64_t partial_wait_count;
+  // Total packets drained by all wait actions.
+  uint64_t drained_count;
+  // Maximum packets drained by any wait action.
+  uint64_t max_drained_count;
   // Maximum outstanding packet count observed before any wait action.
   uint64_t max_outstanding_before;
   // Maximum outstanding packet count observed before a full-drain action.
@@ -961,6 +965,10 @@ typedef struct loom_target_compile_report_wait_action_row_t {
   uint32_t target_count;
   // Outstanding packet count for this counter before the wait action.
   uint32_t outstanding_before;
+  // Outstanding packet count for this counter after the wait action.
+  uint32_t outstanding_after;
+  // Number of outstanding packets drained by this wait action.
+  uint32_t drained_count;
 } loom_target_compile_report_wait_action_row_t;
 
 // One source-to-target-low selection row copied into a compile report.

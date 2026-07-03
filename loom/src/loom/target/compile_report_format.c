@@ -1196,11 +1196,13 @@ static iree_status_t loom_target_compile_report_format_summary(
         builder,
         "COMPILE-REPORT: wait_plan actions=%" PRIu64 " explicit=%" PRIu64
         " planned=%" PRIu64 " full_drains=%" PRIu64 " partial_waits=%" PRIu64
-        " max_outstanding=%" PRIu64 " max_full_drain_outstanding=%" PRIu64
-        " counter_rows=%" PRIhsz " action_rows=%" PRIhsz "\n",
+        " drained=%" PRIu64 " max_drained=%" PRIu64 " max_outstanding=%" PRIu64
+        " max_full_drain_outstanding=%" PRIu64 " counter_rows=%" PRIhsz
+        " action_rows=%" PRIhsz "\n",
         wait_plan->action_count, wait_plan->explicit_action_count,
         wait_plan->planned_action_count, wait_plan->full_drain_count,
-        wait_plan->partial_wait_count, wait_plan->max_outstanding_before,
+        wait_plan->partial_wait_count, wait_plan->drained_count,
+        wait_plan->max_drained_count, wait_plan->max_outstanding_before,
         wait_plan->max_full_drain_outstanding_before,
         report->wait_counter_rows.count, report->wait_action_rows.count));
   }
@@ -1413,7 +1415,8 @@ static iree_status_t loom_target_compile_report_format_entry_rows(
           " move_packets=%" PRIu64 " move_units=%" PRIu64
           " wait_actions=%" PRIu64 " wait_explicit=%" PRIu64
           " wait_planned=%" PRIu64 " wait_full_drains=%" PRIu64
-          " wait_partial=%" PRIu64 " wait_max_outstanding=%" PRIu64
+          " wait_partial=%" PRIu64 " wait_drained=%" PRIu64
+          " wait_max_drained=%" PRIu64 " wait_max_outstanding=%" PRIu64
           " wait_max_full_drain_outstanding=%" PRIu64 " instructions=%" PRIu64
           " code_bytes=%" PRIu64 " storage_bytes=%" PRIu64
           " private_bytes=%" PRIu64 " local_bytes=%" PRIu64,
@@ -1444,6 +1447,7 @@ static iree_status_t loom_target_compile_report_format_entry_rows(
           move_packet_count, move_unit_count, wait_plan->action_count,
           wait_plan->explicit_action_count, wait_plan->planned_action_count,
           wait_plan->full_drain_count, wait_plan->partial_wait_count,
+          wait_plan->drained_count, wait_plan->max_drained_count,
           wait_plan->max_outstanding_before,
           wait_plan->max_full_drain_outstanding_before,
           row->emitted_instruction_count, row->emitted_code_byte_count,
@@ -1595,13 +1599,15 @@ static iree_status_t loom_target_compile_report_format_wait_counter_rows(
           "COMPILE-REPORT: wait_counter[%" PRIhsz
           "] function=%.*s counter=%.*s counter_id=%" PRIu32 " actions=%" PRIu64
           " explicit=%" PRIu64 " planned=%" PRIu64 " full_drains=%" PRIu64
-          " partial_waits=%" PRIu64 " max_outstanding=%" PRIu64
-          " max_full_drain_outstanding=%" PRIu64 "\n",
+          " partial_waits=%" PRIu64 " drained=%" PRIu64 " max_drained=%" PRIu64
+          " max_outstanding=%" PRIu64 " max_full_drain_outstanding=%" PRIu64
+          "\n",
           row_index, (int)function_name.size, function_name.data,
           (int)counter_name.size, counter_name.data, row->counter_id,
           summary->action_count, summary->explicit_action_count,
           summary->planned_action_count, summary->full_drain_count,
-          summary->partial_wait_count, summary->max_outstanding_before,
+          summary->partial_wait_count, summary->drained_count,
+          summary->max_drained_count, summary->max_outstanding_before,
           summary->max_full_drain_outstanding_before));
     }
   }
@@ -1673,8 +1679,11 @@ static iree_status_t loom_target_compile_report_format_wait_action_rows(
           builder, IREE_SV("consumer_semantic_tag"),
           row->consumer_semantic_tag));
       IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-          builder, " target_count=%" PRIu32 " outstanding_before=%" PRIu32 "\n",
-          row->target_count, row->outstanding_before));
+          builder,
+          " target_count=%" PRIu32 " outstanding_before=%" PRIu32
+          " outstanding_after=%" PRIu32 " drained=%" PRIu32 "\n",
+          row->target_count, row->outstanding_before, row->outstanding_after,
+          row->drained_count));
     }
   }
   return iree_ok_status();
@@ -3034,6 +3043,10 @@ static iree_status_t loom_target_compile_report_format_wait_plan_json(
       stream, &first_field, "partial_wait_count",
       wait_plan->partial_wait_count));
   IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
+      stream, &first_field, "drained_count", wait_plan->drained_count));
+  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
+      stream, &first_field, "max_drained_count", wait_plan->max_drained_count));
+  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
       stream, &first_field, "max_outstanding_before",
       wait_plan->max_outstanding_before));
   IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
@@ -3166,6 +3179,10 @@ static iree_status_t loom_target_compile_report_format_wait_action_row_json(
       stream, &first_field, "target_count", row->target_count));
   IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u32_field(
       stream, &first_field, "outstanding_before", row->outstanding_before));
+  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u32_field(
+      stream, &first_field, "outstanding_after", row->outstanding_after));
+  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u32_field(
+      stream, &first_field, "drained_count", row->drained_count));
   return loom_output_stream_write_cstring(stream, "}");
 }
 

@@ -1061,6 +1061,8 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
       /*.planned_action_count=*/4,
       /*.full_drain_count=*/2,
       /*.partial_wait_count=*/3,
+      /*.drained_count=*/6,
+      /*.max_drained_count=*/4,
       /*.max_outstanding_before=*/6,
       /*.max_full_drain_outstanding_before=*/6,
   };
@@ -1076,6 +1078,8 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
               /*.planned_action_count=*/3,
               /*.full_drain_count=*/1,
               /*.partial_wait_count=*/2,
+              /*.drained_count=*/4,
+              /*.max_drained_count=*/4,
               /*.max_outstanding_before=*/6,
               /*.max_full_drain_outstanding_before=*/6,
           },
@@ -1091,6 +1095,8 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
               /*.planned_action_count=*/1,
               /*.full_drain_count=*/1,
               /*.partial_wait_count=*/1,
+              /*.drained_count=*/2,
+              /*.max_drained_count=*/2,
               /*.max_outstanding_before=*/2,
               /*.max_full_drain_outstanding_before=*/2,
           },
@@ -1121,6 +1127,8 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
           /*.consumer_semantic_tag=*/IREE_SVL("vector.add.i32"),
           /*.target_count=*/2,
           /*.outstanding_before=*/6,
+          /*.outstanding_after=*/2,
+          /*.drained_count=*/4,
       },
       {
           /*.function_name=*/IREE_SVL("branchy_export"),
@@ -1145,6 +1153,8 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
           /*.consumer_semantic_tag=*/IREE_SVL(""),
           /*.target_count=*/0,
           /*.outstanding_before=*/2,
+          /*.outstanding_after=*/0,
+          /*.drained_count=*/2,
       },
   };
   loom_target_compile_report_target_capability_row_t target_capability_rows[] =
@@ -1578,6 +1588,7 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
                                   IREE_SV("wait_plan actions=5 explicit=1 "
                                           "planned=4 full_drains=2 "
                                           "partial_waits=3 "
+                                          "drained=6 max_drained=4 "
                                           "max_outstanding=6 "
                                           "max_full_drain_outstanding=6 "
                                           "counter_rows=2 action_rows=2"),
@@ -1592,6 +1603,7 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
                                           "counter=vmem_load counter_id=1 "
                                           "actions=3 explicit=0 planned=3 "
                                           "full_drains=1 partial_waits=2 "
+                                          "drained=4 max_drained=4 "
                                           "max_outstanding=6 "
                                           "max_full_drain_outstanding=6"),
                                   0),
@@ -1602,6 +1614,7 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
                                           "counter=lds counter_id=3 "
                                           "actions=2 explicit=1 planned=1 "
                                           "full_drains=1 partial_waits=1 "
+                                          "drained=2 max_drained=2 "
                                           "max_outstanding=2 "
                                           "max_full_drain_outstanding=2"),
                                   0),
@@ -1629,7 +1642,8 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
                                           "consumer_semantic_tag="
                                           "vector.add.i32 "
                                           "target_count=2 "
-                                          "outstanding_before=6"),
+                                          "outstanding_before=6 "
+                                          "outstanding_after=2 drained=4"),
                                   0),
             IREE_STRING_VIEW_NPOS);
   EXPECT_NE(iree_string_view_find(
@@ -1643,7 +1657,8 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
                         "consumer_node=- "
                         "consumer_ordinal=- consumer_operation=- "
                         "consumer_descriptor_key=- consumer_semantic_tag=- "
-                        "target_count=0 outstanding_before=2"),
+                        "target_count=0 outstanding_before=2 "
+                        "outstanding_after=0 drained=2"),
                 0),
             IREE_STRING_VIEW_NPOS);
   EXPECT_NE(iree_string_view_find(
@@ -1857,6 +1872,8 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
                                           "wait_planned=4 "
                                           "wait_full_drains=2 "
                                           "wait_partial=3 "
+                                          "wait_drained=6 "
+                                          "wait_max_drained=4 "
                                           "wait_max_outstanding=6 "
                                           "wait_max_full_drain_outstanding=6"),
                                   0),
@@ -2087,6 +2104,8 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
                                     "\"planned_action_count\":4,"
                                     "\"full_drain_count\":2,"
                                     "\"partial_wait_count\":3,"
+                                    "\"drained_count\":6,"
+                                    "\"max_drained_count\":4,"
                                     "\"max_outstanding_before\":6,"
                                     "\"max_full_drain_outstanding_before\":6}"),
                             0),
@@ -2112,6 +2131,8 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
                         "\"planned_action_count\":3,"
                         "\"full_drain_count\":1,"
                         "\"partial_wait_count\":2,"
+                        "\"drained_count\":4,"
+                        "\"max_drained_count\":4,"
                         "\"max_outstanding_before\":6,"
                         "\"max_full_drain_outstanding_before\":6}"),
                 0),
@@ -2124,6 +2145,8 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
                                     "\"planned_action_count\":1,"
                                     "\"full_drain_count\":1,"
                                     "\"partial_wait_count\":1,"
+                                    "\"drained_count\":2,"
+                                    "\"max_drained_count\":2,"
                                     "\"max_outstanding_before\":2,"
                                     "\"max_full_drain_outstanding_before\":2}"),
                             0),
@@ -2152,7 +2175,8 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
                         "\"consumer_descriptor_key\":\"amdgpu.v_add_u32\","
                         "\"consumer_semantic_tag\":\"vector.add.i32\","
                         "\"target_count\":2,"
-                        "\"outstanding_before\":6"),
+                        "\"outstanding_before\":6,"
+                        "\"outstanding_after\":2,\"drained_count\":4"),
                 0),
             IREE_STRING_VIEW_NPOS);
   EXPECT_NE(iree_string_view_find(
@@ -2172,7 +2196,8 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
                         "\"consumer_operation\":null,"
                         "\"consumer_descriptor_key\":null,"
                         "\"consumer_semantic_tag\":null,"
-                        "\"target_count\":0,\"outstanding_before\":2"),
+                        "\"target_count\":0,\"outstanding_before\":2,"
+                        "\"outstanding_after\":0,\"drained_count\":2"),
                 0),
             IREE_STRING_VIEW_NPOS);
   EXPECT_NE(

@@ -238,6 +238,13 @@ static void loom_amdgpu_hal_kernel_library_accumulate_wait_action(
   } else {
     ++summary->partial_wait_count;
   }
+  const uint64_t drained_count =
+      action->outstanding_before > action->target_count
+          ? (uint64_t)action->outstanding_before - action->target_count
+          : 0;
+  summary->drained_count += drained_count;
+  summary->max_drained_count =
+      iree_max(summary->max_drained_count, drained_count);
   summary->max_outstanding_before = iree_max(
       summary->max_outstanding_before, (uint64_t)action->outstanding_before);
 }
@@ -566,6 +573,11 @@ static iree_status_t loom_amdgpu_hal_kernel_library_record_wait_plan(
   }
   for (iree_host_size_t i = 0; i < wait_plan->action_count; ++i) {
     const loom_amdgpu_wait_plan_action_t* action = &wait_plan->actions[i];
+    const uint32_t outstanding_after = action->target_count;
+    const uint32_t drained_count =
+        action->outstanding_before > outstanding_after
+            ? action->outstanding_before - outstanding_after
+            : 0;
     const loom_amdgpu_hal_kernel_library_wait_endpoint_t producer =
         loom_amdgpu_hal_kernel_library_wait_endpoint(wait_plan,
                                                      action->producer_node);
@@ -596,6 +608,8 @@ static iree_status_t loom_amdgpu_hal_kernel_library_record_wait_plan(
         .consumer_semantic_tag = consumer.semantic_tag,
         .target_count = action->target_count,
         .outstanding_before = action->outstanding_before,
+        .outstanding_after = outstanding_after,
+        .drained_count = drained_count,
     };
     IREE_RETURN_IF_ERROR(
         loom_target_compile_report_record_wait_action_row(report, &row));
