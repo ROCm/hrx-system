@@ -818,15 +818,15 @@ static iree_status_t loom_amdgpu_atomic_append_wait_counter_mask(
     return iree_ok_status();
   }
   if (*inout_wait_count >= wait_capacity) {
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
+    IREE_ASSERT_UNREACHABLE(
         "AMDGPU atomic ordering exceeded precomputed wait capacity");
+    IREE_BUILTIN_UNREACHABLE();
   }
   if (selection.immediate_count >
       LOOM_AMDGPU_EXPLICIT_PACKET_IMMEDIATE_CAPACITY) {
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
+    IREE_ASSERT_UNREACHABLE(
         "AMDGPU atomic ordering wait immediate capacity exceeded");
+    IREE_BUILTIN_UNREACHABLE();
   }
   loom_amdgpu_atomic_explicit_packet_selection_t* wait =
       &waits[(*inout_wait_count)++];
@@ -1166,9 +1166,9 @@ static iree_status_t loom_amdgpu_atomic_resolve_explicit_packet_selection(
       context, selection->descriptor_ref, selection->immediates,
       selection->immediate_count, out_plan, &present));
   if (!present) {
-    return iree_make_status(IREE_STATUS_INTERNAL,
-                            "selected AMDGPU explicit atomic ordering packet "
-                            "descriptor is not present");
+    IREE_ASSERT_UNREACHABLE(
+        "selected AMDGPU explicit atomic ordering packet descriptor");
+    IREE_BUILTIN_UNREACHABLE();
   }
   return iree_ok_status();
 }
