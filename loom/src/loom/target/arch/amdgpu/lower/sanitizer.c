@@ -1040,8 +1040,8 @@ iree_status_t loom_amdgpu_lower_sanitizer_assert_access(
       break;
     }
     default:
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "unsupported AMDGPU sanitizer reporting mode");
+      IREE_ASSERT_UNREACHABLE("unsupported AMDGPU sanitizer reporting mode");
+      IREE_BUILTIN_UNREACHABLE();
   }
   uint32_t wavefront_size = 0;
   IREE_RETURN_IF_ERROR(loom_amdgpu_target_wavefront_size(

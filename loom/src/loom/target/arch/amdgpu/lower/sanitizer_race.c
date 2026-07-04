@@ -178,20 +178,20 @@ static iree_status_t loom_amdgpu_sanitizer_race_lower_state(
   return iree_ok_status();
 }
 
-static iree_status_t loom_amdgpu_sanitizer_race_packet_operand_count(
+static iree_host_size_t loom_amdgpu_sanitizer_race_packet_operand_count(
     const loom_low_descriptor_set_t* descriptor_set,
-    const loom_low_descriptor_t* descriptor, iree_host_size_t* out_count) {
-  *out_count = 0;
+    const loom_low_descriptor_t* descriptor) {
+  iree_host_size_t count = 0;
   const loom_low_operand_t* operands =
       &descriptor_set->operands[descriptor->operand_start];
   for (uint16_t i = descriptor->result_count; i < descriptor->operand_count;
        ++i) {
     const loom_low_operand_t* operand = &operands[i];
     if (loom_low_operand_role_is_packet_operand(operand->role)) {
-      ++(*out_count);
+      ++count;
     }
   }
-  return iree_ok_status();
+  return count;
 }
 
 static iree_status_t loom_amdgpu_sanitizer_race_build_descriptor_op(
@@ -252,19 +252,16 @@ static iree_status_t loom_amdgpu_sanitizer_race_append_optional_m0(
     const loom_low_descriptor_t* descriptor, loom_location_id_t location,
     loom_value_id_t* operands, iree_host_size_t operand_capacity,
     iree_host_size_t* inout_operand_count) {
-  iree_host_size_t packet_operand_count = 0;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_sanitizer_race_packet_operand_count(
-      descriptor_set, descriptor, &packet_operand_count));
+  const iree_host_size_t packet_operand_count =
+      loom_amdgpu_sanitizer_race_packet_operand_count(descriptor_set,
+                                                      descriptor);
   if (packet_operand_count == *inout_operand_count) {
     return iree_ok_status();
   }
-  if (packet_operand_count != *inout_operand_count + 1 ||
-      *inout_operand_count >= operand_capacity) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "AMDGPU sanitizer race descriptor has an unsupported packet operand "
-        "count");
-  }
+  IREE_ASSERT_EQ(packet_operand_count, *inout_operand_count + 1,
+                 "AMDGPU sanitizer race descriptor has an unsupported packet "
+                 "operand count");
+  IREE_ASSERT_LT(*inout_operand_count, operand_capacity);
   return loom_amdgpu_sanitizer_race_build_m0_const_u32(
       builder, descriptor_set, descriptor, 0, location,
       &operands[(*inout_operand_count)++]);
@@ -724,12 +721,9 @@ static iree_status_t loom_amdgpu_sanitizer_race_build_required_config_scc(
 
   loom_amdgpu_sanitizer_race_lower_state_t* state = NULL;
   IREE_RETURN_IF_ERROR(loom_amdgpu_sanitizer_race_lower_state(context, &state));
-  if (!state->has_config_values) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "AMDGPU TSAN config guard values were not materialized in entry "
-        "setup");
-  }
+  IREE_ASSERT(state->has_config_values,
+              "AMDGPU TSAN config guard values were not materialized in entry "
+              "setup");
 
   loom_type_t scc_type = loom_type_none();
   IREE_RETURN_IF_ERROR(loom_amdgpu_make_scc_type(context, &scc_type));
@@ -754,12 +748,9 @@ static iree_status_t loom_amdgpu_sanitizer_race_build_runtime_active_scc(
       context, &instrumentation_flags));
   loom_amdgpu_sanitizer_race_lower_state_t* state = NULL;
   IREE_RETURN_IF_ERROR(loom_amdgpu_sanitizer_race_lower_state(context, &state));
-  if (!state->has_config_values) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "AMDGPU TSAN runtime guard values were not materialized in entry "
-        "setup");
-  }
+  IREE_ASSERT(state->has_config_values,
+              "AMDGPU TSAN runtime guard values were not materialized in entry "
+              "setup");
 
   loom_type_t scc_type = loom_type_none();
   IREE_RETURN_IF_ERROR(loom_amdgpu_make_scc_type(context, &scc_type));
@@ -780,12 +771,10 @@ static iree_status_t loom_amdgpu_sanitizer_race_split_enabled_block(
     loom_block_t** out_continuation_block) {
   *out_enabled_block = NULL;
   *out_continuation_block = NULL;
-  if (builder->ip.before_op != NULL ||
-      builder->ip.block->parent_region == NULL) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "AMDGPU sanitizer race lowering requires the end of a low block");
-  }
+  IREE_ASSERT(
+      builder->ip.before_op == NULL && builder->ip.block->parent_region != NULL,
+      "AMDGPU sanitizer race lowering requires block-end insertion in a low "
+      "region");
   loom_block_t* config_block = builder->ip.block;
   loom_block_t* enabled_block = NULL;
   IREE_RETURN_IF_ERROR(loom_region_insert_block(
@@ -849,12 +838,10 @@ static iree_status_t loom_amdgpu_sanitizer_race_split_entry_guard_blocks(
   if (out_disabled_block != NULL) {
     *out_disabled_block = NULL;
   }
-  if (builder->ip.before_op != NULL ||
-      builder->ip.block->parent_region == NULL) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "AMDGPU sanitizer race entry setup requires the end of a low block");
-  }
+  IREE_ASSERT(
+      builder->ip.before_op == NULL && builder->ip.block->parent_region != NULL,
+      "AMDGPU sanitizer race entry setup requires block-end insertion in a low "
+      "region");
   loom_block_t* setup_block = builder->ip.block;
   loom_block_t* enabled_block = NULL;
   IREE_RETURN_IF_ERROR(loom_region_insert_block(
@@ -2086,8 +2073,8 @@ iree_status_t loom_amdgpu_lower_sanitizer_race_access(
       break;
     }
     default:
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "unsupported AMDGPU sanitizer reporting mode");
+      IREE_ASSERT_UNREACHABLE("unsupported AMDGPU sanitizer reporting mode");
+      IREE_BUILTIN_UNREACHABLE();
   }
 
   return loom_amdgpu_sanitizer_race_branch_to_continuation(
