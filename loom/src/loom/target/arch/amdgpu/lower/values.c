@@ -6158,6 +6158,8 @@ static iree_status_t loom_amdgpu_try_lower_vector_fp8_e8m0_pk8_native(
   IREE_ASSERT_TRUE(
       !loom_amdgpu_vector_16bit_float_conversion_plan_has_scale(plan) ||
       loom_amdgpu_vector_16bit_float_conversion_plan_has_e8m0_scale(plan));
+  const bool requires_full_selection =
+      loom_amdgpu_vector_16bit_float_conversion_plan_has_e8m0_scale(plan);
   const uint32_t result_registers_per_octet =
       loom_amdgpu_vector_fp8_e8m0_pk8_result_register_count(
           plan->result_element_type);
@@ -6174,17 +6176,21 @@ static iree_status_t loom_amdgpu_try_lower_vector_fp8_e8m0_pk8_native(
       context, plan->source_element_type, plan->result_element_type,
       &descriptor));
   if (descriptor == NULL) {
+    IREE_ASSERT_FALSE(requires_full_selection);
     return iree_ok_status();
   }
   if (plan->lane_count == 0 || (plan->lane_count & 7u) != 0) {
+    IREE_ASSERT_FALSE(requires_full_selection);
     return iree_ok_status();
   }
-  for (uint32_t lane_index = 0; lane_index < plan->lane_count;
-       lane_index += 8u) {
-    loom_amdgpu_vector_fp8_octet_storage_t octet_storage;
-    if (!loom_amdgpu_vector_fp8_query_storage_octet(plan, lane_index,
-                                                    &octet_storage)) {
-      return iree_ok_status();
+  if (!requires_full_selection) {
+    for (uint32_t lane_index = 0; lane_index < plan->lane_count;
+         lane_index += 8u) {
+      loom_amdgpu_vector_fp8_octet_storage_t octet_storage;
+      if (!loom_amdgpu_vector_fp8_query_storage_octet(plan, lane_index,
+                                                      &octet_storage)) {
+        return iree_ok_status();
+      }
     }
   }
 
