@@ -1,0 +1,71 @@
+// RUN: pass-report scf-to-cfg,cfg-simplify,source-to-low,low-dce
+
+amdgpu.target<gfx1100> @target
+
+// A uniform tail-tile branch should keep the WMMA work attributable to the
+// source operations that shape the full-tile and tail paths.
+kernel.def target(@target) @report_attention_tail_peel_accumulator_merge() {
+  %one = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+} launch(%lhs_values: vector<16xbf16>, %rhs_values0: vector<16xbf16>, %rhs_values1: vector<16xbf16>, %init_accumulator: vector<8xf32>, %tail_tile_count: i32, %output_buffer: buffer) {
+  %base = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %zero_i32 = scalar.constant 0 : i32
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 16 : index
+  %has_tail_tile = scalar.cmpi ne, %tail_tile_count, %zero_i32 : i32
+  %output_global = buffer.assume.memory_space<global> %output_buffer : buffer
+  %output_aligned = buffer.assume.alignment %output_global {minimum_alignment = 16} : buffer
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<16x16xf32, #dense>
+  %lhs = vector.fragment<lhs> %lhs_values shape [%m, %k] : vector<16xbf16>
+  %rhs0 = vector.fragment<rhs> %rhs_values0 shape [%k, %n] : vector<16xbf16>
+  %rhs1 = vector.fragment<rhs> %rhs_values1 shape [%k, %n] : vector<16xbf16>
+  %carried = scf.for %tile = [%zero to %one step %one](%accumulator = %init_accumulator : vector<8xf32>) -> (vector<8xf32>) {
+    %init = vector.fragment<init> %accumulator shape [%m, %n] : vector<8xf32>
+    %next = vector.mma %lhs, %rhs0, %init : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    scf.yield %next : vector<8xf32>
+  }
+  %output_accumulator = scf.if %has_tail_tile -> (vector<8xf32>) {
+    %tail_init = vector.fragment<init> %carried shape [%m, %n] : vector<8xf32>
+    %tail = vector.mma %lhs, %rhs1, %tail_init : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    scf.yield %tail : vector<8xf32>
+  } else {
+    scf.yield %carried : vector<8xf32>
+  }
+  vector.fragment.store<result> %output_accumulator, %output_view[%zero, %zero] shape [%m, %n] : vector<8xf32>, view<16x16xf32, #dense>
+  kernel.return
+}
+
+// ----
+COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
+COMPILE-REPORT: workload workgroup_size=32x1x1 flat_workgroup_size=32
+COMPILE-REPORT: source_low selected_ops=14 emitted_ops=32 rows=14
+COMPILE-REPORT: source_low_memory roots=1 arguments=1 strategies=0 packets=8 loads=0 stores=8 scalar_packets=8 vector_packets=0 source_lanes=8 source_bytes=32 read_bytes=0 write_bytes=32 issued_read_bytes=0 issued_write_bytes=32 issued_read_unknown_widths=0 issued_write_unknown_widths=0 contiguous_vector_packets=0 strided_vector_packets=0 unknown_stride_vector_packets=0 interval_envelope={packets:8,begin_min_bytes:0,end_max_bytes:900,byte_count:900} write_interval_envelope={packets:8,begin_min_bytes:0,end_max_bytes:900,byte_count:900}
+COMPILE-REPORT: source_low_selection[1] function=report_attention_tail_peel_accumulator_merge source_op=index.cmp selection=rule descriptor_key=amdgpu.s_cmp_lt_i32 descriptor_semantic_tag=integer.compare.slt.i32 selected_ops=1 emitted_ops=1 exact_dynamic_ops=1 unknown_dynamic_ops=0 dynamic_selected_ops=2 dynamic_emitted_ops=2
+COMPILE-REPORT: source_low[0] function=report_attention_tail_peel_accumulator_merge source_op=index.constant selection=plan plan=3840 emitted_ops=0
+COMPILE-REPORT: source_low[1] function=report_attention_tail_peel_accumulator_merge source_op=index.constant selection=plan plan=3840 emitted_ops=1
+COMPILE-REPORT: source_low[2] function=report_attention_tail_peel_accumulator_merge source_op=index.constant selection=plan plan=3840 emitted_ops=1
+COMPILE-REPORT: source_low[3] function=report_attention_tail_peel_accumulator_merge source_op=scalar.constant selection=plan plan=597 emitted_ops=1
+COMPILE-REPORT: source_low[4] function=report_attention_tail_peel_accumulator_merge source_op=index.constant selection=plan plan=3840 emitted_ops=0
+COMPILE-REPORT: source_low[5] function=report_attention_tail_peel_accumulator_merge source_op=index.constant selection=plan plan=3840 emitted_ops=0
+COMPILE-REPORT: source_low[6] function=report_attention_tail_peel_accumulator_merge source_op=index.constant selection=plan plan=3840 emitted_ops=0
+COMPILE-REPORT: source_low[7] function=report_attention_tail_peel_accumulator_merge source_op=scalar.cmpi selection=rule rule_set=4 rule=15 descriptor_key=amdgpu.s_cmp_lg_i32 descriptor_semantic_tag=integer.compare.ne.i32 emitted_ops=4
+COMPILE-REPORT: source_low[8] function=report_attention_tail_peel_accumulator_merge source_op=buffer.view selection=rule rule_set=1 rule=0 emitted_ops=0
+COMPILE-REPORT: source_low[9] function=report_attention_tail_peel_accumulator_merge source_op=index.cmp selection=rule rule_set=4 rule=56 descriptor_key=amdgpu.s_cmp_lt_i32 descriptor_semantic_tag=integer.compare.slt.i32 emitted_ops=1 execution_count=2
+COMPILE-REPORT: source_low[10] function=report_attention_tail_peel_accumulator_merge source_op=vector.mma selection=plan plan=3728 descriptor_key=amdgpu.v_wmma_f32_16x16x16_bf16 descriptor_semantic_tag=matrix.wmma.f32.16x16x16.bf16 emitted_ops=2
+COMPILE-REPORT: source_low[11] function=report_attention_tail_peel_accumulator_merge source_op=index.add selection=rule rule_set=3 rule=65 descriptor_key=amdgpu.s_add_u32 descriptor_semantic_tag=integer.add.u32 emitted_ops=1
+COMPILE-REPORT: source_low[12] function=report_attention_tail_peel_accumulator_merge source_op=vector.mma selection=plan plan=3728 descriptor_key=amdgpu.v_wmma_f32_16x16x16_bf16 descriptor_semantic_tag=matrix.wmma.f32.16x16x16.bf16 emitted_ops=2
+COMPILE-REPORT: source_low[13] function=report_attention_tail_peel_accumulator_merge source_op=vector.fragment.store selection=plan plan=3604 emitted_ops=19
+COMPILE-REPORT: source_low_memory[0] function=report_attention_tail_peel_accumulator_merge source_op=vector.fragment.store memory_space=global operation=store packet=amdgpu.global_store_b32_saddr source_root=output_buffer source_root_argument_index=5 source_interval={begin_min_bytes:0,begin_max_bytes:0,end_min_bytes:4,end_max_bytes:4,exact_length_bytes:4} address_form=global_saddr dynamic_term_kind=vaddr fallback_reason=- static_offset_bytes=0 element_bytes=4 vector_lanes=1 issued_read_bytes=0 issued_write_bytes=4 issued_read_unknown_widths=0 issued_write_unknown_widths=0 dynamic_stride_bytes=4 vector_lane_stride_bytes=4 bank_stride_words=0 bank_conflict_degree=0 bank_conflict_kind=-
+COMPILE-REPORT: source_low_memory[1] function=report_attention_tail_peel_accumulator_merge source_op=vector.fragment.store memory_space=global operation=store packet=amdgpu.global_store_b32_saddr source_root=output_buffer source_root_argument_index=5 source_interval={begin_min_bytes:128,begin_max_bytes:128,end_min_bytes:132,end_max_bytes:132,exact_length_bytes:4} address_form=global_saddr dynamic_term_kind=vaddr fallback_reason=- static_offset_bytes=128 element_bytes=4 vector_lanes=1 issued_read_bytes=0 issued_write_bytes=4 issued_read_unknown_widths=0 issued_write_unknown_widths=0 dynamic_stride_bytes=4 vector_lane_stride_bytes=4 bank_stride_words=0 bank_conflict_degree=0 bank_conflict_kind=-
+COMPILE-REPORT: source_low_memory[2] function=report_attention_tail_peel_accumulator_merge source_op=vector.fragment.store memory_space=global operation=store packet=amdgpu.global_store_b32_saddr source_root=output_buffer source_root_argument_index=5 source_interval={begin_min_bytes:256,begin_max_bytes:256,end_min_bytes:260,end_max_bytes:260,exact_length_bytes:4} address_form=global_saddr dynamic_term_kind=vaddr fallback_reason=- static_offset_bytes=256 element_bytes=4 vector_lanes=1 issued_read_bytes=0 issued_write_bytes=4 issued_read_unknown_widths=0 issued_write_unknown_widths=0 dynamic_stride_bytes=4 vector_lane_stride_bytes=4 bank_stride_words=0 bank_conflict_degree=0 bank_conflict_kind=-
+COMPILE-REPORT: source_low_memory[3] function=report_attention_tail_peel_accumulator_merge source_op=vector.fragment.store memory_space=global operation=store packet=amdgpu.global_store_b32_saddr source_root=output_buffer source_root_argument_index=5 source_interval={begin_min_bytes:384,begin_max_bytes:384,end_min_bytes:388,end_max_bytes:388,exact_length_bytes:4} address_form=global_saddr dynamic_term_kind=vaddr fallback_reason=- static_offset_bytes=384 element_bytes=4 vector_lanes=1 issued_read_bytes=0 issued_write_bytes=4 issued_read_unknown_widths=0 issued_write_unknown_widths=0 dynamic_stride_bytes=4 vector_lane_stride_bytes=4 bank_stride_words=0 bank_conflict_degree=0 bank_conflict_kind=-
+COMPILE-REPORT: source_low_memory[4] function=report_attention_tail_peel_accumulator_merge source_op=vector.fragment.store memory_space=global operation=store packet=amdgpu.global_store_b32_saddr source_root=output_buffer source_root_argument_index=5 source_interval={begin_min_bytes:512,begin_max_bytes:512,end_min_bytes:516,end_max_bytes:516,exact_length_bytes:4} address_form=global_saddr dynamic_term_kind=vaddr fallback_reason=- static_offset_bytes=512 element_bytes=4 vector_lanes=1 issued_read_bytes=0 issued_write_bytes=4 issued_read_unknown_widths=0 issued_write_unknown_widths=0 dynamic_stride_bytes=4 vector_lane_stride_bytes=4 bank_stride_words=0 bank_conflict_degree=0 bank_conflict_kind=-
+COMPILE-REPORT: source_low_memory[5] function=report_attention_tail_peel_accumulator_merge source_op=vector.fragment.store memory_space=global operation=store packet=amdgpu.global_store_b32_saddr source_root=output_buffer source_root_argument_index=5 source_interval={begin_min_bytes:640,begin_max_bytes:640,end_min_bytes:644,end_max_bytes:644,exact_length_bytes:4} address_form=global_saddr dynamic_term_kind=vaddr fallback_reason=- static_offset_bytes=640 element_bytes=4 vector_lanes=1 issued_read_bytes=0 issued_write_bytes=4 issued_read_unknown_widths=0 issued_write_unknown_widths=0 dynamic_stride_bytes=4 vector_lane_stride_bytes=4 bank_stride_words=0 bank_conflict_degree=0 bank_conflict_kind=-
+COMPILE-REPORT: source_low_memory[6] function=report_attention_tail_peel_accumulator_merge source_op=vector.fragment.store memory_space=global operation=store packet=amdgpu.global_store_b32_saddr source_root=output_buffer source_root_argument_index=5 source_interval={begin_min_bytes:768,begin_max_bytes:768,end_min_bytes:772,end_max_bytes:772,exact_length_bytes:4} address_form=global_saddr dynamic_term_kind=vaddr fallback_reason=- static_offset_bytes=768 element_bytes=4 vector_lanes=1 issued_read_bytes=0 issued_write_bytes=4 issued_read_unknown_widths=0 issued_write_unknown_widths=0 dynamic_stride_bytes=4 vector_lane_stride_bytes=4 bank_stride_words=0 bank_conflict_degree=0 bank_conflict_kind=-
+COMPILE-REPORT: source_low_memory[7] function=report_attention_tail_peel_accumulator_merge source_op=vector.fragment.store memory_space=global operation=store packet=amdgpu.global_store_b32_saddr source_root=output_buffer source_root_argument_index=5 source_interval={begin_min_bytes:896,begin_max_bytes:896,end_min_bytes:900,end_max_bytes:900,exact_length_bytes:4} address_form=global_saddr dynamic_term_kind=vaddr fallback_reason=- static_offset_bytes=896 element_bytes=4 vector_lanes=1 issued_read_bytes=0 issued_write_bytes=4 issued_read_unknown_widths=0 issued_write_unknown_widths=0 dynamic_stride_bytes=4 vector_lane_stride_bytes=4 bank_stride_words=0 bank_conflict_degree=0 bank_conflict_kind=-
+COMPILE-REPORT: source_low_memory_root[0] function=report_attention_tail_peel_accumulator_merge source_root=output_buffer source_root_argument_index=5 memory_space=global packets=8 loads=0 stores=8 scalar_packets=8 vector_packets=0 source_lanes=8 source_bytes=32 read_bytes=0 write_bytes=32 issued_read_bytes=0 issued_write_bytes=32 issued_read_unknown_widths=0 issued_write_unknown_widths=0 contiguous_vector_packets=0 strided_vector_packets=0 unknown_stride_vector_packets=0 interval_envelope={packets:8,begin_min_bytes:0,end_max_bytes:900,byte_count:900,exact_static_packet_count:8,unique_byte_count:32} write_interval_envelope={packets:8,begin_min_bytes:0,end_max_bytes:900,byte_count:900,exact_static_packet_count:8,unique_byte_count:32}
+COMPILE-REPORT: source_low_memory_argument[0] function=report_attention_tail_peel_accumulator_merge source_root=output_buffer source_root_argument_index=5 memory_space=global packets=8 loads=0 stores=8 scalar_packets=8 vector_packets=0 source_lanes=8 source_bytes=32 read_bytes=0 write_bytes=32 issued_read_bytes=0 issued_write_bytes=32 issued_read_unknown_widths=0 issued_write_unknown_widths=0 contiguous_vector_packets=0 strided_vector_packets=0 unknown_stride_vector_packets=0 interval_envelope={packets:8,begin_min_bytes:0,end_max_bytes:900,byte_count:900,exact_static_packet_count:8,unique_byte_count:32} write_interval_envelope={packets:8,begin_min_bytes:0,end_max_bytes:900,byte_count:900,exact_static_packet_count:8,unique_byte_count:32}
