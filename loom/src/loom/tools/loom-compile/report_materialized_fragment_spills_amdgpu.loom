@@ -148,6 +148,7 @@ kernel.def target(@target) export("report_materialized_fragment_spills") @report
     %next71 = vector.mma %lhs7, %rhs1, %acc71 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
     %next72 = vector.mma %lhs7, %rhs2, %acc72 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
     %next73 = vector.mma %lhs7, %rhs3, %acc73 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
     scf.yield %next00, %next01, %next02, %next03, %next10, %next11, %next12, %next13, %next20, %next21, %next22, %next23, %next30, %next31, %next32, %next33, %next40, %next41, %next42, %next43, %next50, %next51, %next52, %next53, %next60, %next61, %next62, %next63, %next70, %next71, %next72, %next73 : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>
   }
   vector.fragment.store<result> %result00, %output_view[%zero, %zero] shape [%m, %n] : vector<8xf32>, view<128x64xbf16, #dense>
