@@ -2196,9 +2196,10 @@ static bool loom_amdgpu_direct_fp8_schema_element_format_matches(
   }
 }
 
-static bool loom_amdgpu_type_is_vector1_f32(loom_type_t type) {
+static bool loom_amdgpu_type_is_vector1_element(
+    loom_type_t type, loom_scalar_type_t element_type) {
   if (!loom_type_is_vector(type) ||
-      loom_type_element_type(type) != LOOM_SCALAR_TYPE_F32 ||
+      loom_type_element_type(type) != element_type ||
       loom_type_rank(type) != 1) {
     return false;
   }
@@ -2254,9 +2255,112 @@ static bool loom_amdgpu_direct_fp8_scalef32_schema_matches(
   return true;
 }
 
+static bool loom_amdgpu_direct_fp8_e8m0_schema_matches(
+    loom_value_fact_encoded_operand_schema_t schema,
+    loom_scalar_type_t element_type, uint32_t lane_count) {
+  if (loom_value_fact_encoded_operand_schema_is_unknown(schema) ||
+      !loom_amdgpu_direct_fp8_schema_element_format_matches(
+          schema.element_format, element_type) ||
+      schema.payload_packing != LOOM_VALUE_FACT_PAYLOAD_PACKING_DENSE_LANES ||
+      schema.scale_format != LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E8M0 ||
+      schema.secondary_scale_format != LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE ||
+      schema.scale_topology != LOOM_VALUE_FACT_SCALE_TOPOLOGY_BLOCK_1D ||
+      schema.affine_policy != LOOM_VALUE_FACT_AFFINE_POLICY_SCALE_ONLY ||
+      iree_any_bit_set(schema.rounding_policy,
+                       ~LOOM_VALUE_FACT_ROUNDING_POLICY_ALL) ||
+      schema.codebook_policy != LOOM_VALUE_FACT_CODEBOOK_POLICY_NONE ||
+      schema.sparsity_policy != LOOM_VALUE_FACT_SPARSITY_POLICY_NONE ||
+      schema.flags != 0 || schema.payload_register_count != 0 ||
+      schema.payload_element_count != lane_count ||
+      schema.scale_group_element_count != lane_count ||
+      schema.scale_operand_count != 1) {
+    return false;
+  }
+  return true;
+}
+
+static bool loom_amdgpu_direct_fp8_e8m0_pk8_descriptor_available(
+    const loom_low_descriptor_set_t* descriptor_set,
+    loom_scalar_type_t source_element_type,
+    loom_scalar_type_t result_element_type) {
+  loom_amdgpu_descriptor_ref_t descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_NONE;
+  return loom_amdgpu_fp8_e8m0_pk8_descriptor_ref(
+             source_element_type, result_element_type, &descriptor_ref) &&
+         loom_amdgpu_descriptor_set_has_ref(descriptor_set, descriptor_ref);
+}
+
+static bool loom_amdgpu_direct_fp8_e8m0_pk8_storage_matches(
+    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
+    loom_value_id_t source, loom_scalar_type_t source_element_type,
+    uint32_t source_lane_count) {
+  if (source_lane_count == 0 || (source_lane_count & 7u) != 0) {
+    return false;
+  }
+
+  uint32_t storage_lane_offset = 0;
+  uint32_t storage_lane_stride = 1;
+  uint32_t storage_lane_count = source_lane_count;
+  uint32_t storage_register_count = 0;
+  if (!loom_amdgpu_type_is_extf_packed_float_vector(
+          loom_module_value_type(module, source), source_element_type,
+          &storage_lane_count, &storage_register_count)) {
+    return false;
+  }
+
+  loom_value_fact_static_lane_origin_t lane_origin = {0};
+  if (fact_table && loom_value_fact_table_query_static_lane_origin(
+                        fact_table, module, source, &lane_origin)) {
+    uint32_t origin_lane_count = 0;
+    uint32_t origin_register_count = 0;
+    const loom_type_t origin_source_type =
+        loom_module_value_type(module, lane_origin.source_value_id);
+    if (loom_amdgpu_type_is_extf_packed_float_vector(
+            origin_source_type, source_element_type, &origin_lane_count,
+            &origin_register_count)) {
+      storage_lane_offset = lane_origin.source_lane_offset;
+      storage_lane_stride = lane_origin.source_lane_stride;
+      storage_lane_count = origin_lane_count;
+      storage_register_count = origin_register_count;
+    }
+  }
+
+  if (storage_lane_stride != 1u) {
+    return false;
+  }
+  for (uint32_t lane_index = 0; lane_index < source_lane_count;
+       lane_index += 8u) {
+    const uint64_t storage_lane =
+        (uint64_t)storage_lane_offset + (uint64_t)lane_index;
+    if ((storage_lane & 3u) != 0 || storage_lane + 7u >= storage_lane_count) {
+      return false;
+    }
+    const uint64_t source_register_index = storage_lane / 4u;
+    if (source_register_index + 1u >= storage_register_count ||
+        source_register_index > UINT32_MAX) {
+      return false;
+    }
+  }
+  return true;
+}
+
+static bool loom_amdgpu_vector_decode_scale_element_type(
+    loom_value_fact_numeric_format_flags_t scale_format,
+    loom_scalar_type_t* out_element_type) {
+  switch (scale_format) {
+    case LOOM_VALUE_FACT_NUMERIC_FORMAT_F32:
+      *out_element_type = LOOM_SCALAR_TYPE_F32;
+      return true;
+    case LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E8M0:
+      *out_element_type = LOOM_SCALAR_TYPE_I32;
+      return true;
+    default:
+      return false;
+  }
+}
+
 static bool loom_amdgpu_vector_decode_scale_source(
     const loom_module_t* module, const loom_op_t* source_op,
-    loom_value_id_t* out_scale_source) {
+    loom_scalar_type_t scale_element_type, loom_value_id_t* out_scale_source) {
   *out_scale_source = LOOM_VALUE_ID_INVALID;
   loom_vector_encoding_auxiliary_view_t auxiliary_view = {0};
   iree_string_view_t unknown_key = iree_string_view_empty();
@@ -2274,8 +2378,8 @@ static bool loom_amdgpu_vector_decode_scale_source(
       auxiliary_view.values[LOOM_VECTOR_ENCODING_AUXILIARY_KEY_SCALE];
   if (scale_source == LOOM_VALUE_ID_INVALID ||
       scale_source >= module->values.count ||
-      !loom_amdgpu_type_is_vector1_f32(
-          loom_module_value_type(module, scale_source))) {
+      !loom_amdgpu_type_is_vector1_element(
+          loom_module_value_type(module, scale_source), scale_element_type)) {
     return false;
   }
   *out_scale_source = scale_source;
@@ -2295,6 +2399,7 @@ static loom_value_id_t loom_amdgpu_vector_decode_materialized_scale_source(
 
 bool loom_amdgpu_vector_decode_can_lower_as_fp8_conversion(
     const loom_module_t* module, const loom_value_fact_table_t* fact_table,
+    const loom_low_descriptor_set_t* descriptor_set,
     const loom_op_t* source_op) {
   if (!loom_vector_decode_isa(source_op) || fact_table == NULL) {
     return false;
@@ -2360,15 +2465,25 @@ bool loom_amdgpu_vector_decode_can_lower_as_fp8_conversion(
   }
 
   loom_value_id_t scale_source = LOOM_VALUE_ID_INVALID;
-  if (!loom_amdgpu_vector_decode_scale_source(module, source_op,
-                                              &scale_source) ||
-      !loom_amdgpu_direct_fp8_scalef32_schema_matches(
+  if (loom_amdgpu_vector_decode_scale_source(
+          module, source_op, LOOM_SCALAR_TYPE_F32, &scale_source) &&
+      loom_amdgpu_direct_fp8_scalef32_schema_matches(
           summary.storage_schema.encoded_operand, source_element_type,
           source_lane_count)) {
-    return false;
+    return true;
   }
-  (void)scale_source;
-  return true;
+  if (loom_amdgpu_vector_decode_scale_source(
+          module, source_op, LOOM_SCALAR_TYPE_I32, &scale_source) &&
+      loom_amdgpu_direct_fp8_e8m0_schema_matches(
+          summary.storage_schema.encoded_operand, source_element_type,
+          source_lane_count) &&
+      loom_amdgpu_direct_fp8_e8m0_pk8_descriptor_available(
+          descriptor_set, source_element_type, result_element_type) &&
+      loom_amdgpu_direct_fp8_e8m0_pk8_storage_matches(
+          module, fact_table, source, source_element_type, source_lane_count)) {
+    return true;
+  }
+  return false;
 }
 
 iree_status_t loom_amdgpu_low_legality_verify_vector_decode(
@@ -2383,7 +2498,8 @@ iree_status_t loom_amdgpu_low_legality_verify_vector_decode(
   }
   if (loom_amdgpu_vector_decode_can_lower_as_fp8_conversion(
           loom_target_low_legality_module(context),
-          loom_target_low_legality_fact_table(context), op)) {
+          loom_target_low_legality_fact_table(context),
+          loom_target_low_legality_descriptor_set(context), op)) {
     *out_handled = true;
   }
   return iree_ok_status();
@@ -2434,6 +2550,8 @@ loom_amdgpu_vector_16bit_float_conversion_plan_from_accepted_op(
   loom_value_id_t storage_source = source;
   loom_value_id_t content_fact_source = source;
   loom_value_id_t scale_source = LOOM_VALUE_ID_INVALID;
+  loom_value_fact_numeric_format_flags_t scale_format =
+      LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE;
   uint32_t storage_lane_offset = 0;
   uint32_t storage_lane_stride = 1;
   uint32_t storage_lane_count = 0;
@@ -2445,13 +2563,26 @@ loom_amdgpu_vector_16bit_float_conversion_plan_from_accepted_op(
     IREE_ASSERT_TRUE(
         kind != LOOM_AMDGPU_VECTOR_16BIT_FLOAT_CONVERSION_KIND_DECODE ||
         loom_amdgpu_vector_decode_can_lower_as_fp8_conversion(
-            module, fact_table, source_op));
+            module, fact_table, loom_low_lower_context_descriptor_set(context),
+            source_op));
     if (kind == LOOM_AMDGPU_VECTOR_16BIT_FLOAT_CONVERSION_KIND_DECODE) {
-      (void)loom_amdgpu_vector_decode_scale_source(module, source_op,
-                                                   &scale_source);
-      if (scale_source != LOOM_VALUE_ID_INVALID) {
+      loom_value_fact_encoding_summary_t summary = {0};
+      if (loom_value_facts_query_encoding_summary(
+              &fact_table->context,
+              loom_value_fact_table_lookup(
+                  fact_table, loom_vector_decode_schema(source_op)),
+              &summary)) {
+        scale_format = summary.storage_schema.encoded_operand.scale_format;
+      }
+      loom_scalar_type_t scale_element_type = 0;
+      if (loom_amdgpu_vector_decode_scale_element_type(scale_format,
+                                                       &scale_element_type) &&
+          loom_amdgpu_vector_decode_scale_source(
+              module, source_op, scale_element_type, &scale_source)) {
         scale_source = loom_amdgpu_vector_decode_materialized_scale_source(
             module, fact_table, scale_source);
+      } else {
+        scale_format = LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE;
       }
     }
     IREE_ASSERT_TRUE(result_element_type == LOOM_SCALAR_TYPE_F32 ||
@@ -2540,6 +2671,7 @@ loom_amdgpu_vector_16bit_float_conversion_plan_from_accepted_op(
           storage_source = lane_origin.source_value_id;
           content_fact_source = storage_source;
           scale_source = scale_origin.scale_value_id;
+          scale_format = LOOM_VALUE_FACT_NUMERIC_FORMAT_F32;
           storage_lane_offset = lane_origin.source_lane_offset;
           storage_lane_stride = lane_origin.source_lane_stride;
           storage_lane_count = origin_lane_count;
@@ -2563,6 +2695,7 @@ loom_amdgpu_vector_16bit_float_conversion_plan_from_accepted_op(
       .storage_source = storage_source,
       .content_fact_source = content_fact_source,
       .scale_source = scale_source,
+      .scale_format = scale_format,
       .source_element_type = source_element_type,
       .result_element_type = result_element_type,
       .lane_count = source_lane_count,
@@ -2584,7 +2717,8 @@ iree_status_t loom_amdgpu_select_vector_16bit_float_conversion_plan(
   if (source_op->kind == LOOM_OP_VECTOR_DECODE) {
     *out_selected = loom_amdgpu_vector_decode_can_lower_as_fp8_conversion(
         loom_low_lower_context_module(context),
-        loom_low_lower_context_fact_table(context), source_op);
+        loom_low_lower_context_fact_table(context),
+        loom_low_lower_context_descriptor_set(context), source_op);
   } else {
     IREE_RETURN_IF_ERROR(loom_amdgpu_select_arithmetic_contract(
         context, source_op, out_selected));
@@ -5924,10 +6058,22 @@ static bool loom_amdgpu_vector_16bit_float_conversion_plan_has_scale(
   return plan->scale_source != LOOM_VALUE_ID_INVALID;
 }
 
+static bool loom_amdgpu_vector_16bit_float_conversion_plan_has_f32_scale(
+    const loom_amdgpu_vector_16bit_float_conversion_plan_t* plan) {
+  return loom_amdgpu_vector_16bit_float_conversion_plan_has_scale(plan) &&
+         plan->scale_format == LOOM_VALUE_FACT_NUMERIC_FORMAT_F32;
+}
+
+static bool loom_amdgpu_vector_16bit_float_conversion_plan_has_e8m0_scale(
+    const loom_amdgpu_vector_16bit_float_conversion_plan_t* plan) {
+  return loom_amdgpu_vector_16bit_float_conversion_plan_has_scale(plan) &&
+         plan->scale_format == LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E8M0;
+}
+
 static bool loom_amdgpu_vector_fp8_scalef32_is_identity(
     loom_low_lower_context_t* context,
     const loom_amdgpu_vector_16bit_float_conversion_plan_t* plan) {
-  if (!loom_amdgpu_vector_16bit_float_conversion_plan_has_scale(plan)) {
+  if (!loom_amdgpu_vector_16bit_float_conversion_plan_has_f32_scale(plan)) {
     return false;
   }
   const loom_module_t* module = loom_low_lower_context_module(context);
@@ -5941,13 +6087,14 @@ static bool loom_amdgpu_vector_fp8_scalef32_is_identity(
                module, fact_table, plan->scale_source, &scale_bit_pattern) &&
            scale_bit_pattern == LOOM_AMDGPU_FP8_F32_IDENTITY_SCALE_BITS;
   }
-  return loom_amdgpu_type_is_vector1_f32(scale_type) &&
+  return loom_amdgpu_type_is_vector1_element(scale_type,
+                                             LOOM_SCALAR_TYPE_F32) &&
          loom_amdgpu_source_lane_as_u32_bits(
              fact_table, module, plan->scale_source, 0, &scale_bit_pattern) &&
          scale_bit_pattern == LOOM_AMDGPU_FP8_F32_IDENTITY_SCALE_BITS;
 }
 
-static iree_status_t loom_amdgpu_lookup_vector_scalef32_source(
+static iree_status_t loom_amdgpu_lookup_vector_scale_source(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_amdgpu_vector_16bit_float_conversion_plan_t* plan,
     loom_value_id_t* out_low_scale) {
@@ -5963,6 +6110,7 @@ static void loom_amdgpu_vector_fp8_unscaled_plan(
     loom_amdgpu_vector_16bit_float_conversion_plan_t* out_plan) {
   *out_plan = *plan;
   out_plan->scale_source = LOOM_VALUE_ID_INVALID;
+  out_plan->scale_format = LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE;
 }
 
 static uint32_t loom_amdgpu_vector_fp8_e8m0_pk8_result_register_count(
@@ -5970,15 +6118,16 @@ static uint32_t loom_amdgpu_vector_fp8_e8m0_pk8_result_register_count(
   return result_element_type == LOOM_SCALAR_TYPE_F32 ? 8u : 4u;
 }
 
-static iree_status_t loom_amdgpu_try_lower_vector_fp8_identity_e8m0_pk8_native(
+static iree_status_t loom_amdgpu_try_lower_vector_fp8_e8m0_pk8_native(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_amdgpu_vector_16bit_float_conversion_plan_t* plan,
-    loom_value_id_t low_source, loom_type_t source_lane_type,
-    loom_type_t result_lane_type, loom_value_id_t* out_low_registers,
-    uint32_t* out_selected_count) {
+    loom_value_id_t low_source, loom_value_id_t low_scale,
+    loom_type_t source_lane_type, loom_type_t result_lane_type,
+    loom_value_id_t* out_low_registers, uint32_t* out_selected_count) {
   *out_selected_count = 0;
-  IREE_ASSERT_FALSE(
-      loom_amdgpu_vector_16bit_float_conversion_plan_has_scale(plan));
+  IREE_ASSERT_TRUE(
+      !loom_amdgpu_vector_16bit_float_conversion_plan_has_scale(plan) ||
+      loom_amdgpu_vector_16bit_float_conversion_plan_has_e8m0_scale(plan));
   const uint32_t result_registers_per_octet =
       loom_amdgpu_vector_fp8_e8m0_pk8_result_register_count(
           plan->result_element_type);
@@ -6016,17 +6165,17 @@ static iree_status_t loom_amdgpu_try_lower_vector_fp8_identity_e8m0_pk8_native(
   IREE_RETURN_IF_ERROR(loom_amdgpu_make_vgpr_range_type(
       context, result_registers_per_octet, &result_octet_type));
 
-  loom_value_id_t low_identity_scale = LOOM_VALUE_ID_INVALID;
+  loom_value_id_t low_e8m0_scale = low_scale;
   for (uint32_t lane_index = 0; lane_index < plan->lane_count;
        lane_index += 8u) {
     loom_amdgpu_vector_fp8_octet_storage_t octet_storage;
     IREE_ASSERT_TRUE(loom_amdgpu_vector_fp8_query_storage_octet(
         plan, lane_index, &octet_storage));
-    if (low_identity_scale == LOOM_VALUE_ID_INVALID) {
+    if (low_e8m0_scale == LOOM_VALUE_ID_INVALID) {
       IREE_RETURN_IF_ERROR(loom_amdgpu_emit_const_u32(
           context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_MOV_B32,
           LOOM_AMDGPU_FP8_E8M0FNU_PACKED_IDENTITY_SCALE_BITS, result_lane_type,
-          &low_identity_scale));
+          &low_e8m0_scale));
     }
 
     loom_value_id_t source_pair = LOOM_VALUE_ID_INVALID;
@@ -6034,7 +6183,7 @@ static iree_status_t loom_amdgpu_try_lower_vector_fp8_identity_e8m0_pk8_native(
         context, source_op, plan, &octet_storage, low_source, source_lane_type,
         source_pair_type, &source_pair));
 
-    const loom_value_id_t operands[] = {source_pair, low_identity_scale};
+    const loom_value_id_t operands[] = {source_pair, low_e8m0_scale};
     loom_op_t* low_op = NULL;
     IREE_RETURN_IF_ERROR(loom_low_lower_emit_resolved_descriptor_op(
         context, descriptor, operands, IREE_ARRAYSIZE(operands),
@@ -6054,6 +6203,12 @@ static iree_status_t loom_amdgpu_try_lower_vector_fp8_identity_e8m0_pk8_native(
     }
   }
   return iree_ok_status();
+}
+
+static iree_status_t loom_amdgpu_incomplete_e8m0_pk8_decode_status(void) {
+  return iree_make_status(
+      IREE_STATUS_INTERNAL,
+      "accepted AMDGPU E8M0 pk8 FP8 vector decode did not cover all lanes");
 }
 
 static iree_status_t
@@ -6343,19 +6498,27 @@ static iree_status_t loom_amdgpu_emit_vector_fp8_to_f32_lanes(
     const loom_amdgpu_vector_16bit_float_conversion_plan_t* plan,
     loom_value_id_t low_source, loom_type_t source_lane_type,
     loom_type_t result_lane_type, loom_value_id_t* lanes) {
-  IREE_ASSERT_FALSE(
-      loom_amdgpu_vector_16bit_float_conversion_plan_has_scale(plan));
+  IREE_ASSERT_TRUE(
+      !loom_amdgpu_vector_16bit_float_conversion_plan_has_scale(plan) ||
+      loom_amdgpu_vector_16bit_float_conversion_plan_has_e8m0_scale(plan));
 
   for (uint32_t lane_index = 0; lane_index < plan->lane_count; ++lane_index) {
     lanes[lane_index] = LOOM_VALUE_ID_INVALID;
   }
-  uint32_t identity_e8m0_pk8_lane_count = 0;
-  IREE_RETURN_IF_ERROR(
-      loom_amdgpu_try_lower_vector_fp8_identity_e8m0_pk8_native(
-          context, source_op, plan, low_source, source_lane_type,
-          result_lane_type, lanes, &identity_e8m0_pk8_lane_count));
-  if (identity_e8m0_pk8_lane_count == plan->lane_count) {
+  loom_value_id_t low_e8m0_scale = LOOM_VALUE_ID_INVALID;
+  if (loom_amdgpu_vector_16bit_float_conversion_plan_has_e8m0_scale(plan)) {
+    IREE_RETURN_IF_ERROR(loom_amdgpu_lookup_vector_scale_source(
+        context, source_op, plan, &low_e8m0_scale));
+  }
+  uint32_t e8m0_pk8_lane_count = 0;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_try_lower_vector_fp8_e8m0_pk8_native(
+      context, source_op, plan, low_source, low_e8m0_scale, source_lane_type,
+      result_lane_type, lanes, &e8m0_pk8_lane_count));
+  if (e8m0_pk8_lane_count == plan->lane_count) {
     return iree_ok_status();
+  }
+  if (loom_amdgpu_vector_16bit_float_conversion_plan_has_e8m0_scale(plan)) {
+    return loom_amdgpu_incomplete_e8m0_pk8_decode_status();
   }
 
   loom_type_t mask_type = loom_type_none();
@@ -6496,7 +6659,9 @@ static iree_status_t loom_amdgpu_lower_vector_fp8_scalef32_to_f32(
     loom_value_id_t low_source, loom_type_t source_lane_type,
     loom_type_t result_lane_type) {
   loom_value_id_t low_scale = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_lookup_vector_scalef32_source(
+  IREE_ASSERT_TRUE(
+      loom_amdgpu_vector_16bit_float_conversion_plan_has_f32_scale(plan));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_lookup_vector_scale_source(
       context, source_op, plan, &low_scale));
 
   const loom_low_lower_resolved_descriptor_t* descriptor = NULL;
@@ -6665,7 +6830,9 @@ static iree_status_t loom_amdgpu_lower_vector_fp8_scalef32_to_packed_16bit(
     loom_value_id_t low_source, loom_type_t source_lane_type,
     loom_type_t result_lane_type) {
   loom_value_id_t low_scale = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_lookup_vector_scalef32_source(
+  IREE_ASSERT_TRUE(
+      loom_amdgpu_vector_16bit_float_conversion_plan_has_f32_scale(plan));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_lookup_vector_scale_source(
       context, source_op, plan, &low_scale));
 
   const loom_low_lower_resolved_descriptor_t* descriptor = NULL;
@@ -6814,7 +6981,7 @@ static iree_status_t loom_amdgpu_lower_vector_fp8_to_f32(
     const loom_amdgpu_vector_16bit_float_conversion_plan_t* plan,
     loom_value_id_t low_source, loom_type_t source_lane_type,
     loom_type_t result_lane_type) {
-  if (loom_amdgpu_vector_16bit_float_conversion_plan_has_scale(plan)) {
+  if (loom_amdgpu_vector_16bit_float_conversion_plan_has_f32_scale(plan)) {
     return loom_amdgpu_lower_vector_fp8_scalef32_to_f32(
         context, source_op, plan, low_source, source_lane_type,
         result_lane_type);
@@ -6837,20 +7004,26 @@ static iree_status_t loom_amdgpu_lower_vector_fp8_to_packed_bf16(
   loom_type_t sgpr_type = loom_type_none();
 
   loom_value_id_t packed_registers[LOOM_AMDGPU_MAX_PACKED_16BIT_FLOAT_LANES];
-  uint32_t identity_e8m0_pk8_register_count = 0;
-  IREE_RETURN_IF_ERROR(
-      loom_amdgpu_try_lower_vector_fp8_identity_e8m0_pk8_native(
-          context, source_op, plan, low_source, source_lane_type,
-          result_lane_type, packed_registers,
-          &identity_e8m0_pk8_register_count));
-  if (identity_e8m0_pk8_register_count == plan->result_register_count) {
+  loom_value_id_t low_e8m0_scale = LOOM_VALUE_ID_INVALID;
+  if (loom_amdgpu_vector_16bit_float_conversion_plan_has_e8m0_scale(plan)) {
+    IREE_RETURN_IF_ERROR(loom_amdgpu_lookup_vector_scale_source(
+        context, source_op, plan, &low_e8m0_scale));
+  }
+  uint32_t e8m0_pk8_register_count = 0;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_try_lower_vector_fp8_e8m0_pk8_native(
+      context, source_op, plan, low_source, low_e8m0_scale, source_lane_type,
+      result_lane_type, packed_registers, &e8m0_pk8_register_count));
+  if (e8m0_pk8_register_count == plan->result_register_count) {
     return loom_amdgpu_bind_low_register_range(context, source_op, plan->result,
                                                packed_registers,
                                                plan->result_register_count);
   }
+  if (loom_amdgpu_vector_16bit_float_conversion_plan_has_e8m0_scale(plan)) {
+    return loom_amdgpu_incomplete_e8m0_pk8_decode_status();
+  }
 
   uint32_t identity_scalef32_register_count = 0;
-  if (identity_e8m0_pk8_register_count == 0) {
+  if (e8m0_pk8_register_count == 0) {
     IREE_RETURN_IF_ERROR(
         loom_amdgpu_try_lower_vector_fp8_identity_scalef32_to_packed_16bit_native(
             context, source_op, plan, low_source, source_lane_type,
@@ -7008,17 +7181,23 @@ static iree_status_t loom_amdgpu_lower_vector_fp8_to_packed_f16(
     packed_registers[register_index] = LOOM_VALUE_ID_INVALID;
   }
 
-  uint32_t identity_e8m0_pk8_register_count = 0;
-  IREE_RETURN_IF_ERROR(
-      loom_amdgpu_try_lower_vector_fp8_identity_e8m0_pk8_native(
-          context, source_op, plan, low_source, source_lane_type,
-          result_lane_type, packed_registers,
-          &identity_e8m0_pk8_register_count));
-  missing_register_count -= identity_e8m0_pk8_register_count;
+  loom_value_id_t low_e8m0_scale = LOOM_VALUE_ID_INVALID;
+  if (loom_amdgpu_vector_16bit_float_conversion_plan_has_e8m0_scale(plan)) {
+    IREE_RETURN_IF_ERROR(loom_amdgpu_lookup_vector_scale_source(
+        context, source_op, plan, &low_e8m0_scale));
+  }
+  uint32_t e8m0_pk8_register_count = 0;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_try_lower_vector_fp8_e8m0_pk8_native(
+      context, source_op, plan, low_source, low_e8m0_scale, source_lane_type,
+      result_lane_type, packed_registers, &e8m0_pk8_register_count));
+  missing_register_count -= e8m0_pk8_register_count;
   if (missing_register_count == 0) {
     return loom_amdgpu_bind_low_register_range(context, source_op, plan->result,
                                                packed_registers,
                                                plan->result_register_count);
+  }
+  if (loom_amdgpu_vector_16bit_float_conversion_plan_has_e8m0_scale(plan)) {
+    return loom_amdgpu_incomplete_e8m0_pk8_decode_status();
   }
 
   const loom_amdgpu_fp8_native_descriptors_t* native_descriptors = NULL;
@@ -7224,7 +7403,8 @@ static iree_status_t loom_amdgpu_lower_vector_16bit_float_extf(
       loom_amdgpu_vector_fp8_unscaled_plan(plan, &unscaled_plan);
       fp8_plan = &unscaled_plan;
     }
-    if (loom_amdgpu_vector_16bit_float_conversion_plan_has_scale(fp8_plan)) {
+    if (loom_amdgpu_vector_16bit_float_conversion_plan_has_f32_scale(
+            fp8_plan)) {
       if (fp8_plan->result_element_type == LOOM_SCALAR_TYPE_F32) {
         return loom_amdgpu_lower_vector_fp8_scalef32_to_f32(
             context, source_op, fp8_plan, low_source, source_lane_type,
