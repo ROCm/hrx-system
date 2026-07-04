@@ -624,8 +624,8 @@ static iree_status_t loom_vector_to_scalar_mma_build_accumulate(
     }
     case LOOM_VECTOR_TO_SCALAR_MMA_NUMERIC_UNSUPPORTED:
     default:
-      return iree_make_status(IREE_STATUS_INTERNAL,
-                              "unsupported vector.mma scalar numeric kind");
+      IREE_ASSERT_UNREACHABLE("unsupported vector.mma scalar numeric kind");
+      IREE_BUILTIN_UNREACHABLE();
   }
 }
 
@@ -659,8 +659,8 @@ static iree_status_t loom_vector_to_scalar_mma_build_matrix_indices(
     }
     case LOOM_VECTOR_TO_SCALAR_MMA_PAYLOAD_LAYOUT_UNSUPPORTED:
     default:
-      return iree_make_status(IREE_STATUS_INTERNAL,
-                              "unsupported vector.mma dense payload layout");
+      IREE_ASSERT_UNREACHABLE("unsupported vector.mma dense payload layout");
+      IREE_BUILTIN_UNREACHABLE();
   }
 }
 
@@ -1294,8 +1294,8 @@ iree_status_t loom_vector_to_scalar_build_result_fragment_coordinate_terms(
     case LOOM_MATRIX_FRAGMENT_MAP_LANE_MOD_ROW_LANE_GROUP_PACKED_REDUCTION:
     case LOOM_MATRIX_FRAGMENT_MAP_LANE_MOD_COLUMN_LANE_GROUP_PACKED_REDUCTION:
     default:
-      return iree_make_status(IREE_STATUS_INTERNAL,
-                              "unsupported matrix result fragment layout");
+      IREE_ASSERT_UNREACHABLE("unsupported matrix result fragment layout");
+      IREE_BUILTIN_UNREACHABLE();
   }
 }
 
@@ -1309,9 +1309,9 @@ static iree_status_t loom_vector_to_scalar_mma_build_reduction_source_lane(
   const uint32_t reduction_group_span = (uint32_t)role_layout->register_count *
                                         role_layout->elements_per_register;
   if (reduction_group_span == 0) {
-    return iree_make_status(IREE_STATUS_INTERNAL,
-                            "matrix reduction fragment layout has no payload "
-                            "elements");
+    IREE_ASSERT_UNREACHABLE(
+        "matrix reduction fragment layout has no payload elements");
+    IREE_BUILTIN_UNREACHABLE();
   }
   const uint32_t group_relative_reduction =
       (uint32_t)reduction % reduction_group_span;
@@ -1354,8 +1354,8 @@ static iree_status_t loom_vector_to_scalar_mma_build_reduction_source_lane(
     case LOOM_MATRIX_FRAGMENT_MAP_REGISTER_INTERLEAVED_ROW_COLUMN_LOW_SUBWORD:
     case LOOM_MATRIX_FRAGMENT_MAP_LANE_GROUP_REGISTER_ROW_COLUMN:
     default:
-      return iree_make_status(IREE_STATUS_INTERNAL,
-                              "unsupported matrix reduction fragment layout");
+      IREE_ASSERT_UNREACHABLE("unsupported matrix reduction fragment layout");
+      IREE_BUILTIN_UNREACHABLE();
   }
 }
 
@@ -1391,8 +1391,8 @@ static iree_status_t loom_vector_to_scalar_mma_broadcast_physical_lane(
     }
     case LOOM_VECTOR_TO_SCALAR_MMA_NUMERIC_UNSUPPORTED:
     default:
-      return iree_make_status(IREE_STATUS_INTERNAL,
-                              "unsupported vector.mma scalar numeric kind");
+      IREE_ASSERT_UNREACHABLE("unsupported vector.mma scalar numeric kind");
+      IREE_BUILTIN_UNREACHABLE();
   }
 
   loom_value_id_t source_lane_i32 = LOOM_VALUE_ID_INVALID;
@@ -1478,9 +1478,10 @@ static iree_status_t loom_vector_to_scalar_mma_lower_distributed_static(
   uint16_t element_count = 0;
   if (!loom_vector_to_scalar_mma_physical_element_count(result_layout,
                                                         &element_count)) {
-    return iree_make_status(IREE_STATUS_INTERNAL,
-                            "matrix fragment layout has no physical result "
-                            "elements after support was proven");
+    IREE_ASSERT_UNREACHABLE(
+        "matrix fragment layout has no physical result elements after support "
+        "was proven");
+    IREE_BUILTIN_UNREACHABLE();
   }
   loom_value_id_t* elements = NULL;
   IREE_RETURN_IF_ERROR(
