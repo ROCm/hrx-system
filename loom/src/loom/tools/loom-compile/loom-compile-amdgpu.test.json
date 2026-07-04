@@ -390,6 +390,8 @@
                 "\"global_load_byte_count\":16",
                 "\"global_store_byte_count\":20",
                 "\"economics\":{\"memory\":{\"per_workitem_issued\":{\"read_bytes\":32,\"write_bytes\":20,\"total_bytes\":52",
+                "\"source_low\":{\"packet_count\":3,\"load_packet_count\":1,\"store_packet_count\":2,\"scalar_packet_count\":3,\"vector_packet_count\":0,\"source_lane_count\":3,\"source_byte_count\":12,\"read_byte_count\":4,\"write_byte_count\":8,\"issued_read_byte_count\":4,\"issued_write_byte_count\":8,\"issued_read_unknown_width_count\":0,\"issued_write_unknown_width_count\":0,\"exact_dynamic_packet_count\":3,\"unknown_dynamic_packet_count\":0,\"dynamic_packet_count\":9,\"dynamic_source_byte_count\":36,\"dynamic_read_byte_count\":16,\"dynamic_write_byte_count\":20,\"dynamic_issued_read_byte_count\":16,\"dynamic_issued_write_byte_count\":20",
+                "\"interval_envelope\":{\"packet_count\":3,\"begin_min_bytes\":0,\"end_max_bytes\":16,\"byte_count\":16}",
                 "\"source_low\":{\"selected_op_count\":13,\"emitted_op_count\":27,\"count\":13",
                 "\"memory\":{\"packet_count\":3",
                 "\"exact_dynamic_packet_count\":3,\"unknown_dynamic_packet_count\":0,\"dynamic_packet_count\":9,\"dynamic_source_byte_count\":36,\"dynamic_read_byte_count\":16,\"dynamic_write_byte_count\":20",
