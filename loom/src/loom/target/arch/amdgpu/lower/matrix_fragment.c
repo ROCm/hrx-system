@@ -4315,6 +4315,38 @@ static const loom_amdgpu_fragment_memory_fp8_strategy_row_t
         },
 };
 
+typedef struct loom_amdgpu_fragment_memory_fp8_fallback_reason_row_t {
+  // Packet flags required to select the fallback reason.
+  loom_amdgpu_fragment_memory_packet_flags_t packet_flags;
+  // Stable compile-report fallback reason key.
+  iree_string_view_t reason_key;
+} loom_amdgpu_fragment_memory_fp8_fallback_reason_row_t;
+
+static const loom_amdgpu_fragment_memory_fp8_fallback_reason_row_t
+    kLoomAmdgpuFragmentMemoryFp8FullDecodeFallbackReasonRows[] = {
+        {
+            .packet_flags =
+                LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_MISSING_VALUE_FINITE |
+                LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_MISSING_VALUE_NOT_SUBNORMAL,
+            .reason_key = IREE_SVL("missing_finite_not_subnormal"),
+        },
+        {
+            .packet_flags =
+                LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_MISSING_VALUE_FINITE,
+            .reason_key = IREE_SVL("missing_finite"),
+        },
+        {
+            .packet_flags =
+                LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_MISSING_VALUE_NOT_SUBNORMAL,
+            .reason_key = IREE_SVL("missing_not_subnormal"),
+        },
+        {
+            .packet_flags =
+                LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_MISSING_TARGET_PACKETS,
+            .reason_key = IREE_SVL("missing_target_packets"),
+        },
+};
+
 static const loom_amdgpu_fragment_memory_fp8_strategy_row_t*
 loom_amdgpu_fragment_memory_lookup_fp8_strategy_row(
     loom_amdgpu_fragment_memory_packet_flags_t packet_flags) {
@@ -4327,6 +4359,22 @@ loom_amdgpu_fragment_memory_lookup_fp8_strategy_row(
     }
   }
   return NULL;
+}
+
+static iree_string_view_t
+loom_amdgpu_fragment_memory_fp8_full_decode_fallback_reason(
+    loom_amdgpu_fragment_memory_packet_flags_t packet_flags) {
+  for (iree_host_size_t i = 0;
+       i <
+       IREE_ARRAYSIZE(kLoomAmdgpuFragmentMemoryFp8FullDecodeFallbackReasonRows);
+       ++i) {
+    const loom_amdgpu_fragment_memory_fp8_fallback_reason_row_t* row =
+        &kLoomAmdgpuFragmentMemoryFp8FullDecodeFallbackReasonRows[i];
+    if (iree_all_bits_set(packet_flags, row->packet_flags)) {
+      return row->reason_key;
+    }
+  }
+  return iree_string_view_empty();
 }
 
 static iree_string_view_t loom_amdgpu_fragment_memory_packet_strategy_key(
@@ -4431,27 +4479,8 @@ static iree_string_view_t loom_amdgpu_fragment_memory_packet_fallback_reason(
     if (iree_any_bit_set(
             packet->flags,
             LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_FULL_BF16_DECODE)) {
-      const bool missing_value_finite = iree_any_bit_set(
-          packet->flags,
-          LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_MISSING_VALUE_FINITE);
-      const bool missing_value_not_subnormal = iree_any_bit_set(
-          packet->flags,
-          LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_MISSING_VALUE_NOT_SUBNORMAL);
-      if (missing_value_finite && missing_value_not_subnormal) {
-        return IREE_SV("missing_finite_not_subnormal");
-      }
-      if (missing_value_finite) {
-        return IREE_SV("missing_finite");
-      }
-      if (missing_value_not_subnormal) {
-        return IREE_SV("missing_not_subnormal");
-      }
-      if (iree_any_bit_set(
-              packet->flags,
-              LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_MISSING_TARGET_PACKETS)) {
-        return IREE_SV("missing_target_packets");
-      }
-      return iree_string_view_empty();
+      return loom_amdgpu_fragment_memory_fp8_full_decode_fallback_reason(
+          packet->flags);
     }
     return iree_string_view_empty();
   }
