@@ -72,15 +72,14 @@ loom_amdgpu_hal_binding_resolve_low_op_descriptor(
                                                descriptor_ordinal);
 }
 
-static iree_status_t loom_amdgpu_hal_binding_cache_swizzle_kind(
-    const loom_low_descriptor_set_t* descriptor_set,
-    loom_amdgpu_buffer_resource_cache_swizzle_t* out_kind) {
-  *out_kind = LOOM_AMDGPU_BUFFER_RESOURCE_CACHE_SWIZZLE_NONE;
-  const loom_amdgpu_descriptor_set_info_t* descriptor_set_info = NULL;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_target_info_lookup_descriptor_set_by_ordinal(
-      descriptor_set->descriptor_set_ordinal, &descriptor_set_info));
-  *out_kind = descriptor_set_info->buffer_resource.cache_swizzle;
-  return iree_ok_status();
+static loom_amdgpu_buffer_resource_cache_swizzle_t
+loom_amdgpu_hal_binding_cache_swizzle_kind(
+    const loom_low_descriptor_set_t* descriptor_set) {
+  const loom_amdgpu_descriptor_set_info_t* descriptor_set_info =
+      loom_amdgpu_target_info_descriptor_set_at(
+          descriptor_set->descriptor_set_ordinal);
+  IREE_ASSERT(descriptor_set_info != NULL);
+  return descriptor_set_info->buffer_resource.cache_swizzle;
 }
 
 static iree_status_t loom_amdgpu_hal_binding_insert_kernarg_live_in(
@@ -366,10 +365,8 @@ static iree_status_t loom_amdgpu_hal_binding_build_descriptor_pointer(
 
   loom_value_id_t descriptor_pointer_high = masked_pointer_high;
   if (has_cache_swizzle) {
-    loom_amdgpu_buffer_resource_cache_swizzle_t cache_swizzle_kind =
-        LOOM_AMDGPU_BUFFER_RESOURCE_CACHE_SWIZZLE_NONE;
-    IREE_RETURN_IF_ERROR(loom_amdgpu_hal_binding_cache_swizzle_kind(
-        descriptor_set, &cache_swizzle_kind));
+    const loom_amdgpu_buffer_resource_cache_swizzle_t cache_swizzle_kind =
+        loom_amdgpu_hal_binding_cache_swizzle_kind(descriptor_set);
     if (cache_swizzle_kind !=
         LOOM_AMDGPU_BUFFER_RESOURCE_CACHE_SWIZZLE_STRIDE14_ENABLE_BIT) {
       return iree_make_status(
