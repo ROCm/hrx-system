@@ -27,10 +27,7 @@ iree_status_t loom_amdgpu_append_i64_attr(loom_low_lower_context_t* context,
                                           loom_named_attr_t* attrs,
                                           iree_host_size_t attr_capacity,
                                           iree_host_size_t* inout_attr_count) {
-  if (*inout_attr_count >= attr_capacity) {
-    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                            "AMDGPU low attr capacity exceeded");
-  }
+  IREE_ASSERT_LT(*inout_attr_count, attr_capacity);
   loom_string_id_t name_id = LOOM_STRING_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_amdgpu_intern(context, name, &name_id));
   attrs[*inout_attr_count] = (loom_named_attr_t){
