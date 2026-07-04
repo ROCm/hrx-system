@@ -13,7 +13,14 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+from loom.target.arch.amdgpu.encoding import (
+    AMDGPU_GFX1250_VOP3_SCALE_SEL_BIT_COUNT,
+    AMDGPU_GFX1250_VOP3_SCALE_SEL_BIT_OFFSET,
+)
 from loom.target.arch.amdgpu.isa_xml import (
+    AmdgpuIsaBitRange,
+    AmdgpuIsaEncoding,
+    AmdgpuIsaEncodingField,
     AmdgpuIsaFactSource,
     AmdgpuIsaFunctionalGroup,
     AmdgpuIsaInstruction,
@@ -1748,6 +1755,7 @@ def _gfx1250_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
     return (
         *_rdna4_core_overlays(),
         *_v_cvt_pk_f16_packed8_overlays(),
+        *_v_cvt_scale_pk8_overlays(),
         _v_cvt_pk_bf16_f32_overlay(),
         *_v_pk_with_op_sel_hi_field(
             (
@@ -1767,6 +1775,52 @@ _GFX1250_SUPPLEMENTAL_INSTRUCTION_FLAGS = AmdgpuIsaInstructionFlags(
     is_program_terminator=False,
     is_immediately_executed=False,
 )
+
+
+def _gfx1250_supplemental_bit_range(
+    bit_offset: int, bit_count: int
+) -> AmdgpuIsaBitRange:
+    return AmdgpuIsaBitRange(order=0, bit_offset=bit_offset, bit_count=bit_count)
+
+
+def _gfx1250_supplemental_encoding_field(
+    name: str, *ranges: AmdgpuIsaBitRange
+) -> AmdgpuIsaEncodingField:
+    return AmdgpuIsaEncodingField(name=name, is_conditional=False, ranges=ranges)
+
+
+def _gfx1250_vop3_scale_sel_field() -> AmdgpuIsaEncodingField:
+    return _gfx1250_supplemental_encoding_field(
+        "SCALE_SEL",
+        _gfx1250_supplemental_bit_range(
+            AMDGPU_GFX1250_VOP3_SCALE_SEL_BIT_OFFSET,
+            AMDGPU_GFX1250_VOP3_SCALE_SEL_BIT_COUNT,
+        ),
+    )
+
+
+def _gfx1250_supplement_encoding(
+    encoding: AmdgpuIsaEncoding,
+) -> AmdgpuIsaEncoding:
+    if encoding.name != "ENC_VOP3":
+        return encoding
+    if any(field.name == "SCALE_SEL" for field in encoding.fields):
+        return encoding
+    return replace(
+        encoding,
+        fields=(*encoding.fields, _gfx1250_vop3_scale_sel_field()),
+    )
+
+
+def _gfx1250_spec_with_supplemental_encoding_facts(
+    spec: AmdgpuIsaFactSource,
+) -> AmdgpuIsaFactSource:
+    encodings = tuple(
+        _gfx1250_supplement_encoding(encoding) for encoding in spec.encodings
+    )
+    if encodings == spec.encodings:
+        return spec
+    return replace(spec, encodings=encodings)
 
 
 def _gfx1250_supplemental_vop1_source(
@@ -1806,13 +1860,15 @@ def _gfx1250_supplemental_vop3_source(
     order: int,
     field_name: str,
     data_format_name: str,
+    *,
+    size_bits: int = 32,
 ) -> AmdgpuIsaOperand:
     return AmdgpuIsaOperand(
         order=order,
         field_name=field_name,
         data_format_name=data_format_name,
         operand_type="OPR_SRC",
-        size_bits=32,
+        size_bits=size_bits,
         is_input=True,
         is_output=False,
         is_implicit=False,
@@ -1822,13 +1878,15 @@ def _gfx1250_supplemental_vop3_source(
 
 def _gfx1250_supplemental_vop3_result(
     data_format_name: str,
+    *,
+    size_bits: int = 32,
 ) -> AmdgpuIsaOperand:
     return AmdgpuIsaOperand(
         order=1,
         field_name="VDST",
         data_format_name=data_format_name,
         operand_type="OPR_VGPR",
-        size_bits=32,
+        size_bits=size_bits,
         is_input=False,
         is_output=True,
         is_implicit=False,
@@ -1859,7 +1917,51 @@ def _gfx1250_supplemental_instruction(
     )
 
 
+_GFX1250_CVT_SCALE_PK8_ROWS = (
+    ("V_CVT_SCALE_PK8_F16_FP4", 0x29F, 32, "FMT_NUM_PK2_F16", 128),
+    ("V_CVT_SCALE_PK8_BF16_FP4", 0x2A0, 32, "FMT_NUM_PK2_BF16", 128),
+    ("V_CVT_SCALE_PK8_F32_FP4", 0x2A1, 32, "FMT_NUM_F32", 256),
+    ("V_CVT_SCALE_PK8_F16_FP8", 0x2A8, 64, "FMT_NUM_PK2_F16", 128),
+    ("V_CVT_SCALE_PK8_BF16_FP8", 0x2A9, 64, "FMT_NUM_PK2_BF16", 128),
+    ("V_CVT_SCALE_PK8_F32_FP8", 0x2AA, 64, "FMT_NUM_F32", 256),
+    ("V_CVT_SCALE_PK8_F16_BF8", 0x2AB, 64, "FMT_NUM_PK2_F16", 128),
+    ("V_CVT_SCALE_PK8_BF16_BF8", 0x2AC, 64, "FMT_NUM_PK2_BF16", 128),
+    ("V_CVT_SCALE_PK8_F32_BF8", 0x2AD, 64, "FMT_NUM_F32", 256),
+)
+
+
+def _gfx1250_supplemental_cvt_scale_pk8_instruction(
+    name: str,
+    opcode: int,
+    source_bits: int,
+    result_format_name: str,
+    result_bits: int,
+) -> AmdgpuIsaInstruction:
+    return _gfx1250_supplemental_instruction(
+        name=name,
+        encoding_name="ENC_VOP3",
+        opcode=opcode,
+        operands=(
+            _gfx1250_supplemental_vop3_result(
+                result_format_name,
+                size_bits=result_bits,
+            ),
+            _gfx1250_supplemental_vop3_source(
+                2,
+                "SRC0",
+                "FMT_NUM_UINT",
+                size_bits=source_bits,
+            ),
+            _gfx1250_supplemental_vop3_source(3, "SRC1", "FMT_NUM_UINT"),
+        ),
+    )
+
+
 _GFX1250_SUPPLEMENTAL_INSTRUCTIONS = (
+    *(
+        _gfx1250_supplemental_cvt_scale_pk8_instruction(*row)
+        for row in _GFX1250_CVT_SCALE_PK8_ROWS
+    ),
     _gfx1250_supplemental_instruction(
         name="V_CVT_PK_F16_FP8",
         encoding_name="ENC_VOP1",
@@ -1943,6 +2045,7 @@ def _gfx1250_spec_with_supplemental_instruction_facts(
 def _gfx1250_core_overlay_descriptors(
     spec: AmdgpuIsaFactSource,
 ) -> tuple[Descriptor, ...]:
+    spec = _gfx1250_spec_with_supplemental_encoding_facts(spec)
     spec = _gfx1250_spec_with_supplemental_instruction_facts(spec)
     return _with_execution_mask_state_reads(
         materialize_amdgpu_descriptor_overlays(spec, _gfx1250_core_overlays())

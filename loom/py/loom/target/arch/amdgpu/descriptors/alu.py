@@ -4523,6 +4523,29 @@ _SCALEF32_PK_PACKED8_ROWS = (
 )
 
 
+_SCALE_PK8_ROWS = (
+    ("fp4", "f16", 1, 4),
+    ("fp4", "bf16", 1, 4),
+    ("fp4", "f32", 1, 8),
+    ("fp8", "f16", 2, 4),
+    ("fp8", "bf16", 2, 4),
+    ("fp8", "f32", 2, 8),
+    ("bf8", "f16", 2, 4),
+    ("bf8", "bf16", 2, 4),
+    ("bf8", "f32", 2, 8),
+)
+
+
+_SCALE_PK8_SCALE_SEL_IMMEDIATE = Immediate(
+    "scale_sel",
+    ImmediateKind.UNSIGNED,
+    flags=(ImmediateFlag.DEFAULT_VALUE,),
+    bit_width=4,
+    unsigned_max=15,
+    default_value=0,
+)
+
+
 def _v_cvt_scalef32_pk_packed8_overlay(
     source_type: str, target_type: str, result_units: int
 ) -> AmdgpuDescriptorOverlay:
@@ -4548,6 +4571,45 @@ def _v_cvt_scalef32_pk_packed8_overlay(
     )
 
 
+def _v_cvt_scale_pk8_overlay(
+    source_type: str,
+    target_type: str,
+    source_units: int,
+    result_units: int,
+) -> AmdgpuDescriptorOverlay:
+    return AmdgpuDescriptorOverlay(
+        descriptor_key=f"amdgpu.v_cvt_scale_pk8_{target_type}_{source_type}",
+        instruction_name=f"V_CVT_SCALE_PK8_{target_type.upper()}_{source_type.upper()}",
+        mnemonic=f"v_cvt_scale_pk8_{target_type}_{source_type}",
+        encoding_name="ENC_VOP3",
+        semantic_tag=f"convert.scale.e8m0.{source_type}x8.{target_type}x8",
+        schedule_class=_SCHEDULE_VALU,
+        operands=(
+            AmdgpuOperandOverlay("VDST", _vgpr_result(units=result_units)),
+            AmdgpuOperandOverlay(
+                "SRC0",
+                _sgpr_vgpr_operand("input", units=source_units),
+            ),
+            AmdgpuOperandOverlay("SRC1", _sgpr_vgpr_operand("scale")),
+        ),
+        immediate_fields=("SCALE_SEL",),
+        immediates=(_SCALE_PK8_SCALE_SEL_IMMEDIATE,),
+        asm_forms=_asm(
+            results=("dst",),
+            operands=("input", "scale"),
+            immediates=("scale_sel",),
+            named_immediates=True,
+            native_assembly_values=(
+                _native_result("dst"),
+                _native_operand("input"),
+                _native_operand("scale"),
+                _native_amdgpu_scale_sel_immediate("scale_sel"),
+            ),
+        ),
+        flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    )
+
+
 def _v_cvt_f32_packed8_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
     return (
         _v_cvt_f32_packed8_overlay("fp8"),
@@ -4568,6 +4630,10 @@ def _v_cvt_scalef32_pk_packed8_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]
     return tuple(
         _v_cvt_scalef32_pk_packed8_overlay(*row) for row in _SCALEF32_PK_PACKED8_ROWS
     )
+
+
+def _v_cvt_scale_pk8_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
+    return tuple(_v_cvt_scale_pk8_overlay(*row) for row in _SCALE_PK8_ROWS)
 
 
 def _v_cvt_pk_u16_u32_overlay() -> AmdgpuDescriptorOverlay:
@@ -5397,6 +5463,7 @@ __all__ = (
     "_v_cvt_pk_bf16_f32_overlay",
     "_v_cvt_pk_f16_packed8_overlays",
     "_v_cvt_pk_u16_u32_overlay",
+    "_v_cvt_scale_pk8_overlays",
     "_v_cvt_scalef32_pk_packed8_overlays",
     "_v_cvt_u32_f32_overlay",
     "_v_ceil_f32_overlay",

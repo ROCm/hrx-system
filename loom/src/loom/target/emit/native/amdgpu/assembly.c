@@ -23,6 +23,8 @@
 typedef enum loom_amdgpu_native_asm_immediate_format_e {
   // Target-format ID for S_DELAY_ALU's packed SIMM16 dependency immediate.
   LOOM_AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_DELAY_ALU = 1,
+  // Target-format ID for RDNA4 scale-select immediate suffixes.
+  LOOM_AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_SCALE_SEL = 2,
 } loom_amdgpu_native_asm_immediate_format_t;
 
 typedef struct loom_amdgpu_assembly_emit_state_t {
@@ -602,6 +604,16 @@ static iree_status_t loom_amdgpu_append_packet_immediate_delay_alu(
   return loom_amdgpu_append_delay_alu_immediate(context, (uint16_t)value);
 }
 
+static iree_status_t loom_amdgpu_append_packet_immediate_scale_sel(
+    const loom_native_assembly_packet_context_t* context,
+    uint16_t descriptor_immediate_index) {
+  int64_t value = 0;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_read_packet_immediate_by_index_i64(
+      context, descriptor_immediate_index, &value));
+  return iree_string_builder_append_format(context->builder,
+                                           "scale_sel:%" PRId64, value);
+}
+
 static iree_status_t loom_amdgpu_find_packet_immediate(
     const loom_native_assembly_packet_context_t* context,
     iree_string_view_t field_name, const loom_low_immediate_t** out_immediate) {
@@ -1067,6 +1079,9 @@ static iree_status_t loom_amdgpu_append_native_asm_form_value(
       switch (value->target_format_id) {
         case LOOM_AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_DELAY_ALU:
           return loom_amdgpu_append_packet_immediate_delay_alu(context,
+                                                               value->index);
+        case LOOM_AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_SCALE_SEL:
+          return loom_amdgpu_append_packet_immediate_scale_sel(context,
                                                                value->index);
         default:
           return iree_make_status(

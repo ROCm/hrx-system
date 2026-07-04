@@ -121,6 +121,7 @@ from loom.target.low_descriptors import (
 )
 
 AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_DELAY_ALU = 1
+AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_SCALE_SEL = 2
 
 _REG_SGPR = "amdgpu.sgpr"
 _REG_VGPR = "amdgpu.vgpr"
@@ -914,6 +915,14 @@ def _native_amdgpu_delay_alu_immediate(field_name: str) -> NativeAsmValue:
         NativeAsmValueKind.IMMEDIATE_TARGET_FORMAT,
         field_name=field_name,
         target_format_id=AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_DELAY_ALU,
+    )
+
+
+def _native_amdgpu_scale_sel_immediate(field_name: str) -> NativeAsmValue:
+    return NativeAsmValue(
+        NativeAsmValueKind.IMMEDIATE_TARGET_FORMAT,
+        field_name=field_name,
+        target_format_id=AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_SCALE_SEL,
     )
 
 
@@ -2680,6 +2689,7 @@ __all__ = (
     "AMDGPU_MEMORY_DESCRIPTOR_CATEGORY",
     "AMDGPU_MISC_DESCRIPTOR_CATEGORY",
     "AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_DELAY_ALU",
+    "AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_SCALE_SEL",
     "AMDGPU_SCALAR_DESCRIPTOR_CATEGORY",
     "AMDGPU_VECTOR_DESCRIPTOR_CATEGORY",
     "AmdgpuAtomicDescriptorCandidate",
@@ -3026,6 +3036,7 @@ __all__ = (
     "_mubuf_vaddr_operand",
     "_native_i64_immediate",
     "_native_amdgpu_delay_alu_immediate",
+    "_native_amdgpu_scale_sel_immediate",
     "_native_literal",
     "_native_operand",
     "_native_result",
