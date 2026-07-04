@@ -22,8 +22,8 @@
 #define LOOM_AMDGPU_HAL_KERNEL_ABI_COORDINATE_DIMENSION_COUNT 3u
 #define LOOM_AMDGPU_HAL_KERNEL_ABI_MAX_FIXED_VALUE_COUNT \
   (5u + 2u * LOOM_AMDGPU_HAL_KERNEL_ABI_COORDINATE_DIMENSION_COUNT)
-#define LOOM_AMDGPU_HAL_KERNEL_ABI_MAX_RESOURCE_COUNT \
-  (UINT32_MAX / LOOM_AMDGPU_HAL_KERNEL_ABI_GLOBAL_BUFFER_KERNARG_SIZE)
+// ABI layout snapshots store resource arrays as uint16_t-counted attributes.
+#define LOOM_AMDGPU_HAL_KERNEL_ABI_MAX_RESOURCE_COUNT UINT16_MAX
 #define LOOM_AMDGPU_HAL_KERNEL_ABI_DIRECT_ARG_MAX_UNIT_COUNT 2u
 
 static iree_string_view_t loom_amdgpu_hal_kernel_abi_source_name(
@@ -780,11 +780,7 @@ static iree_status_t loom_amdgpu_hal_kernel_abi_make_direct_arg_names_attr(
 static iree_status_t loom_amdgpu_hal_kernel_abi_make_direct_arg_sizes_attr(
     const loom_amdgpu_hal_kernel_abi_layout_t* layout,
     iree_arena_allocator_t* scratch_arena, loom_attribute_t* out_attr) {
-  if (layout->direct_arg_count > UINT16_MAX) {
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
-        "AMDGPU HAL ABI layout has too many direct argument sizes");
-  }
+  IREE_ASSERT_LE(layout->direct_arg_count, (iree_host_size_t)UINT16_MAX);
   int64_t* entries = NULL;
   if (layout->direct_arg_count != 0) {
     IREE_RETURN_IF_ERROR(
@@ -844,11 +840,7 @@ static iree_status_t loom_amdgpu_hal_kernel_abi_make_layout_u32_array_attr(
     iree_arena_allocator_t* scratch_arena, loom_attribute_t* out_attr) {
   const iree_host_size_t count =
       loom_amdgpu_hal_kernel_abi_layout_array_count(layout, kind);
-  if (count > UINT16_MAX) {
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
-        "AMDGPU HAL ABI layout has too many indexed entries");
-  }
+  IREE_ASSERT_LE(count, (iree_host_size_t)UINT16_MAX);
   int64_t* entries = NULL;
   if (count != 0) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
@@ -1497,7 +1489,7 @@ static iree_status_t loom_amdgpu_hal_kernel_abi_attach_direct_args_from_low(
   }
   if (entry_block->arg_count != layout->direct_arg_count) {
     return iree_make_status(
-        IREE_STATUS_INTERNAL,
+        IREE_STATUS_INVALID_ARGUMENT,
         "AMDGPU HAL kernel ABI layout direct argument count does not match the "
         "low entry block");
   }
