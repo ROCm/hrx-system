@@ -44,6 +44,7 @@ def test_fp8_native_descriptor_refs_emit_data_only() -> None:
     source = amdgpu_narrow_float_tables._emit_fp8_native_descriptor_ref_rows()
 
     assert "LOOM_AMDGPU_FP8_NATIVE_DESCRIPTOR_REF_ROW(" in source
+    assert "    0,\n    LOOM_SCALAR_TYPE_F8E4M3,\n    LOOM_SCALAR_TYPE_F32," in source
     assert "LOOM_SCALAR_TYPE_F8E4M3" in source
     assert "LOOM_SCALAR_TYPE_F16" in source
     assert "LOOM_AMDGPU_DESCRIPTOR_REF_V_CVT_F32_FP8" in source
@@ -58,6 +59,7 @@ def test_fp8_scaled_descriptor_refs_emit_data_only() -> None:
     source = amdgpu_narrow_float_tables._emit_fp8_scaled_descriptor_ref_rows()
 
     assert "LOOM_AMDGPU_FP8_SCALED_DESCRIPTOR_REF_ROW(" in source
+    assert "    0,\n    LOOM_SCALAR_TYPE_F8E4M3,\n    LOOM_SCALAR_TYPE_F16," in source
     assert "LOOM_SCALAR_TYPE_F8E4M3" in source
     assert "LOOM_SCALAR_TYPE_BF16" in source
     assert "LOOM_AMDGPU_DESCRIPTOR_REF_V_CVT_SCALEF32_PK_BF16_FP8" in source
@@ -146,6 +148,32 @@ def test_fp8_native_descriptor_refs_reject_missing_descriptor_ref() -> None:
         )
 
 
+def test_fp8_native_descriptor_refs_reject_duplicate_type_pair() -> None:
+    with pytest.raises(
+        ValueError,
+        match=(
+            r"AMDGPU FP8 native conversion descriptor table contains duplicate "
+            r"source/result rows: F8E4M3->F32"
+        ),
+    ):
+        amdgpu_narrow_float_tables._emit_fp8_native_descriptor_ref_rows(
+            rows=(
+                _Fp8NativeDescriptorRefRow(
+                    ScalarTypeKind.F8E4M3,
+                    ScalarTypeKind.F32,
+                    "amdgpu.v_cvt_f32_fp8",
+                    "amdgpu.v_cvt_pk_f32_fp8",
+                ),
+                _Fp8NativeDescriptorRefRow(
+                    ScalarTypeKind.F8E4M3,
+                    ScalarTypeKind.F32,
+                    "amdgpu.v_cvt_f32_fp8",
+                    "amdgpu.v_cvt_pk_f32_fp8",
+                ),
+            ),
+        )
+
+
 def test_fp8_scaled_descriptor_refs_reject_missing_descriptor_ref() -> None:
     with pytest.raises(
         ValueError,
@@ -164,4 +192,30 @@ def test_fp8_scaled_descriptor_refs_reject_missing_descriptor_ref() -> None:
                 ),
             ),
             descriptor_ref_key_set={"amdgpu.v_cvt_scale_pk8_bf16_fp8"},
+        )
+
+
+def test_fp8_scaled_descriptor_refs_reject_duplicate_type_pair() -> None:
+    with pytest.raises(
+        ValueError,
+        match=(
+            r"AMDGPU FP8 scaled conversion descriptor table contains duplicate "
+            r"source/result rows: F8E4M3->BF16"
+        ),
+    ):
+        amdgpu_narrow_float_tables._emit_fp8_scaled_descriptor_ref_rows(
+            rows=(
+                _Fp8ScaledDescriptorRefRow(
+                    ScalarTypeKind.F8E4M3,
+                    ScalarTypeKind.BF16,
+                    "amdgpu.v_cvt_scalef32_pk_bf16_fp8",
+                    "amdgpu.v_cvt_scale_pk8_bf16_fp8",
+                ),
+                _Fp8ScaledDescriptorRefRow(
+                    ScalarTypeKind.F8E4M3,
+                    ScalarTypeKind.BF16,
+                    "amdgpu.v_cvt_scalef32_pk_bf16_fp8",
+                    "amdgpu.v_cvt_scale_pk8_bf16_fp8",
+                ),
+            ),
         )

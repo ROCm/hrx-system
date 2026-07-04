@@ -27,12 +27,14 @@ typedef struct loom_amdgpu_fp8_subnormal_table_row_t {
                                     [LOOM_AMDGPU_FP8_U16_BYTE_TABLE_WORD_COUNT];
 } loom_amdgpu_fp8_subnormal_table_row_t;
 
+static const loom_amdgpu_fp8_subnormal_table_row_t
+    kLoomAmdgpuFp8SubnormalTableRows[] = {
 #define LOOM_AMDGPU_FP8_SUBNORMAL_TABLE_ROW(                                   \
     row_element_type, row_exponent_bits, row_mantissa_bits, row_exponent_bias, \
     row_special_policy, bf16_table_0, bf16_table_1, bf16_byte_0_0,             \
     bf16_byte_0_1, bf16_byte_1_0, bf16_byte_1_1, f16_byte_0_0, f16_byte_0_1,   \
     f16_byte_1_0, f16_byte_1_1)                                                \
-  {                                                                            \
+  [row_element_type - LOOM_SCALAR_TYPE_F8E4M3] = {                             \
       .element_type = row_element_type,                                        \
       .format =                                                                \
           {                                                                    \
@@ -53,31 +55,39 @@ typedef struct loom_amdgpu_fp8_subnormal_table_row_t {
               {f16_byte_1_0, f16_byte_1_1},                                    \
           },                                                                   \
   }
-
-static const loom_amdgpu_fp8_subnormal_table_row_t
-    kLoomAmdgpuFp8SubnormalTableRows[] = {
 #include "loom/target/arch/amdgpu/lower/narrow_float/fp8_subnormal_table_rows.inl"
+#undef LOOM_AMDGPU_FP8_SUBNORMAL_TABLE_ROW
 };
 
-#undef LOOM_AMDGPU_FP8_SUBNORMAL_TABLE_ROW
-
+static_assert(IREE_ARRAYSIZE(kLoomAmdgpuFp8SubnormalTableRows) ==
+                  LOOM_SCALAR_TYPE_F8E5M2 - LOOM_SCALAR_TYPE_F8E4M3 + 1,
+              "FP8 decode tables cover the dense FP8/BF8 scalar range");
 static_assert(IREE_ARRAYSIZE(kLoomAmdgpuFp8SubnormalTableRows) <= 32,
               "FP8 decode plan cache stores table rows in one u32 bitset");
+
+static bool loom_amdgpu_fp8_subnormal_table_row_index(
+    loom_scalar_type_t element_type, uint32_t* out_row_index) {
+  if (element_type < LOOM_SCALAR_TYPE_F8E4M3 ||
+      element_type > LOOM_SCALAR_TYPE_F8E5M2) {
+    return false;
+  }
+  *out_row_index = element_type - LOOM_SCALAR_TYPE_F8E4M3;
+  return true;
+}
 
 static const loom_amdgpu_fp8_subnormal_table_row_t*
 loom_amdgpu_find_fp8_subnormal_table_row(loom_scalar_type_t element_type,
                                          uint32_t* out_row_index) {
   *out_row_index = 0;
-  for (uint32_t i = 0; i < IREE_ARRAYSIZE(kLoomAmdgpuFp8SubnormalTableRows);
-       ++i) {
-    const loom_amdgpu_fp8_subnormal_table_row_t* row =
-        &kLoomAmdgpuFp8SubnormalTableRows[i];
-    if (row->element_type == element_type) {
-      *out_row_index = i;
-      return row;
-    }
+  if (!loom_amdgpu_fp8_subnormal_table_row_index(element_type, out_row_index)) {
+    return NULL;
   }
-  return NULL;
+  IREE_ASSERT_LT(*out_row_index,
+                 IREE_ARRAYSIZE(kLoomAmdgpuFp8SubnormalTableRows));
+  const loom_amdgpu_fp8_subnormal_table_row_t* row =
+      &kLoomAmdgpuFp8SubnormalTableRows[*out_row_index];
+  IREE_ASSERT_EQ(row->element_type, element_type);
+  return row;
 }
 
 static void loom_amdgpu_initialize_fp8_decode_format_from_row(
