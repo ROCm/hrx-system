@@ -1559,6 +1559,13 @@ static bool loom_amdgpu_fragment_repack_uses_source_register_bit_tree(
          loom_amdgpu_u32_is_power_of_two(plan->source_register_count);
 }
 
+static bool loom_amdgpu_fragment_repack_has_static_zero_source_byte_base(
+    const loom_amdgpu_fragment_repack_plan_t* plan) {
+  return plan->source_map_kind ==
+             LOOM_MATRIX_FRAGMENT_MAP_REGISTER_INTERLEAVED_ROW_COLUMN &&
+         plan->lane_group_count == 1;
+}
+
 static bool
 loom_amdgpu_fragment_repack_has_result_to_lhs_bf16_bpermute_descriptors(
     const loom_low_descriptor_set_t* descriptor_set,
@@ -1571,10 +1578,7 @@ loom_amdgpu_fragment_repack_has_result_to_lhs_bf16_bpermute_descriptors(
           descriptor_set, kRequiredDescriptorRefs,
           IREE_ARRAYSIZE(kRequiredDescriptorRefs)) ||
       !loom_amdgpu_bf16_descriptor_set_can_emit_f32_pair_to_packed_bf16(
-          descriptor_set) ||
-      !loom_amdgpu_descriptor_set_can_emit_vgpr_binary_immediate(
-          descriptor_set, LOOM_AMDGPU_DESCRIPTOR_REF_V_LSHLREV_B32_LIT,
-          plan->source_lane_group_byte_shift)) {
+          descriptor_set)) {
     return false;
   }
   if (plan->lane_group_count > 1 &&
@@ -1585,6 +1589,18 @@ loom_amdgpu_fragment_repack_has_result_to_lhs_bf16_bpermute_descriptors(
   }
   switch (plan->source_map_kind) {
     case LOOM_MATRIX_FRAGMENT_MAP_REGISTER_INTERLEAVED_ROW_COLUMN:
+      if (plan->lane_group_count > 1 &&
+          !loom_amdgpu_descriptor_set_can_emit_vgpr_binary_immediate(
+              descriptor_set, LOOM_AMDGPU_DESCRIPTOR_REF_V_LSHLREV_B32_LIT,
+              plan->source_lane_group_byte_shift)) {
+        return false;
+      }
+      if (plan->lane_group_count == 1 &&
+          plan->result_lane_div_byte_shift == 0 &&
+          !loom_amdgpu_descriptor_set_has_ref(
+              descriptor_set, LOOM_AMDGPU_DESCRIPTOR_REF_V_MOV_B32)) {
+        return false;
+      }
       if (plan->source_register_count > 1 &&
           !loom_amdgpu_descriptor_set_can_emit_vgpr_binary_immediate(
               descriptor_set, LOOM_AMDGPU_DESCRIPTOR_REF_V_LSHRREV_B32_LIT,
@@ -1606,16 +1622,25 @@ loom_amdgpu_fragment_repack_has_result_to_lhs_bf16_bpermute_descriptors(
                   plan->source_register_count))) {
         return false;
       }
+      if (!loom_amdgpu_descriptor_set_can_emit_vgpr_binary_immediate(
+              descriptor_set, LOOM_AMDGPU_DESCRIPTOR_REF_V_LSHLREV_B32_LIT,
+              plan->source_lane_group_byte_shift)) {
+        return false;
+      }
       break;
     default:
       return false;
   }
   if (plan->result_lane_div_byte_shift != 0 &&
-      (!loom_amdgpu_descriptor_set_has_ref(
-           descriptor_set, LOOM_AMDGPU_DESCRIPTOR_REF_V_ADD_U32) ||
-       !loom_amdgpu_descriptor_set_can_emit_vgpr_binary_immediate(
-           descriptor_set, LOOM_AMDGPU_DESCRIPTOR_REF_V_LSHLREV_B32_LIT,
-           plan->result_lane_div_byte_shift))) {
+      !loom_amdgpu_descriptor_set_can_emit_vgpr_binary_immediate(
+          descriptor_set, LOOM_AMDGPU_DESCRIPTOR_REF_V_LSHLREV_B32_LIT,
+          plan->result_lane_div_byte_shift)) {
+    return false;
+  }
+  if (plan->result_lane_div_byte_shift != 0 &&
+      !loom_amdgpu_fragment_repack_has_static_zero_source_byte_base(plan) &&
+      !loom_amdgpu_descriptor_set_has_ref(
+          descriptor_set, LOOM_AMDGPU_DESCRIPTOR_REF_V_ADD_U32)) {
     return false;
   }
   if (loom_amdgpu_fragment_repack_uses_source_register_bit_tree(plan)) {
@@ -4831,15 +4856,21 @@ static iree_status_t loom_amdgpu_emit_fragment_repack_lane_group_byte_base(
   loom_value_id_t source_lane_group = LOOM_VALUE_ID_INVALID;
   switch (plan->source_map_kind) {
     case LOOM_MATRIX_FRAGMENT_MAP_REGISTER_INTERLEAVED_ROW_COLUMN: {
-      if (plan->lane_group_count > 1) {
+      if (!loom_amdgpu_fragment_repack_has_static_zero_source_byte_base(plan)) {
         IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_binary_immediate(
             context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_AND_B32_LIT,
             lane_ids->lane_mod, plan->lane_group_count - 1u, vgpr_type,
             &source_lane_group));
       } else {
-        IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_binary_immediate(
-            context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_AND_B32_LIT,
-            lane_ids->lane_mod, 0, vgpr_type, &source_lane_group));
+        if (plan->result_lane_div_byte_shift == 0) {
+          return loom_amdgpu_emit_const_u32(
+              context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_MOV_B32, 0,
+              vgpr_type, out_low_byte_base);
+        }
+        return loom_amdgpu_emit_vgpr_shift(
+            context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_LSHLREV_B32_LIT,
+            plan->result_lane_div_byte_shift, lane_ids->lane_div, vgpr_type,
+            out_low_byte_base);
       }
       break;
     }
