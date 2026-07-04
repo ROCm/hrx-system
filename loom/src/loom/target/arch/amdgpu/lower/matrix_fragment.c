@@ -688,11 +688,10 @@ static bool loom_amdgpu_fragment_memory_prefers_fp8_packed_bf16(
   const loom_amdgpu_fp8_packed_u16_repairs_t repairs =
       loom_amdgpu_fp8_pair_to_packed_bf16_repairs(decode_plan,
                                                   decode_value_flags);
-  const loom_amdgpu_fp8_packed_u16_repairs_t special_value_repairs =
-      LOOM_AMDGPU_FP8_PACKED_U16_REPAIR_SUBNORMAL |
+  const loom_amdgpu_fp8_packed_u16_repairs_t top_exponent_repairs =
       LOOM_AMDGPU_FP8_PACKED_U16_REPAIR_NAN |
       LOOM_AMDGPU_FP8_PACKED_U16_REPAIR_INF;
-  return !iree_any_bit_set(repairs, special_value_repairs);
+  return !iree_any_bit_set(repairs, top_exponent_repairs);
 }
 
 static loom_amdgpu_fragment_memory_packet_flags_t
