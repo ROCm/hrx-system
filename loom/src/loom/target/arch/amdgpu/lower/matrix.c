@@ -330,74 +330,62 @@ static bool loom_amdgpu_matrix_format_selector_from_encoded_format(
   }
 }
 
-static iree_status_t loom_amdgpu_matrix_format_selector_attr(
-    const loom_contract_operand_t* operand, iree_string_view_t field_name,
-    int64_t* out_value) {
+static int64_t loom_amdgpu_matrix_format_selector_attr(
+    const loom_contract_operand_t* operand) {
   const loom_value_fact_numeric_format_flags_t format =
       operand->encoded.target_schema.encoded_operand.element_format;
-  if (!loom_amdgpu_matrix_format_selector_from_encoded_format(format,
-                                                              out_value)) {
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
-        "selected AMDGPU matrix descriptor requires '%.*s', but the source "
-        "matrix contract does not provide a supported matrix format selector",
-        (int)field_name.size, field_name.data);
+  int64_t value = 0;
+  if (!loom_amdgpu_matrix_format_selector_from_encoded_format(format, &value)) {
+    IREE_ASSERT_UNREACHABLE(
+        "selected AMDGPU matrix descriptor format selector");
+    IREE_BUILTIN_UNREACHABLE();
   }
-  return iree_ok_status();
+  return value;
 }
 
-static iree_status_t loom_amdgpu_matrix_scale_format_selector_attr(
-    const loom_contract_operand_t* operand, iree_string_view_t field_name,
-    int64_t* out_value) {
+static int64_t loom_amdgpu_matrix_scale_format_selector_attr(
+    const loom_contract_operand_t* operand) {
   const loom_value_fact_numeric_format_flags_t format =
       operand->encoded.target_schema.encoded_operand.scale_format;
-  if (!loom_amdgpu_matrix_scale_format_selector_from_numeric_format(
-          format, out_value)) {
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
-        "selected AMDGPU matrix descriptor requires '%.*s', but the source "
-        "matrix contract does not provide a supported scale format selector",
-        (int)field_name.size, field_name.data);
+  int64_t value = 0;
+  if (!loom_amdgpu_matrix_scale_format_selector_from_numeric_format(format,
+                                                                    &value)) {
+    IREE_ASSERT_UNREACHABLE(
+        "selected AMDGPU matrix descriptor scale format selector");
+    IREE_BUILTIN_UNREACHABLE();
   }
-  return iree_ok_status();
+  return value;
 }
 
-static iree_status_t loom_amdgpu_descriptor_matrix_attr_value(
+static int64_t loom_amdgpu_descriptor_matrix_attr_value(
     const loom_contract_request_t* contract_request,
-    const loom_low_immediate_t* immediate, iree_string_view_t field_name,
-    int64_t* out_value) {
+    const loom_low_immediate_t* immediate, iree_string_view_t field_name) {
   if (iree_string_view_equal(field_name, IREE_SV("matrix_a_fmt"))) {
-    return loom_amdgpu_matrix_format_selector_attr(&contract_request->lhs,
-                                                   field_name, out_value);
+    return loom_amdgpu_matrix_format_selector_attr(&contract_request->lhs);
   }
   if (iree_string_view_equal(field_name, IREE_SV("matrix_b_fmt"))) {
-    return loom_amdgpu_matrix_format_selector_attr(&contract_request->rhs,
-                                                   field_name, out_value);
+    return loom_amdgpu_matrix_format_selector_attr(&contract_request->rhs);
   }
   if (iree_string_view_equal(field_name, IREE_SV("matrix_a_scale_fmt"))) {
-    return loom_amdgpu_matrix_scale_format_selector_attr(&contract_request->lhs,
-                                                         field_name, out_value);
+    return loom_amdgpu_matrix_scale_format_selector_attr(
+        &contract_request->lhs);
   }
   if (iree_string_view_equal(field_name, IREE_SV("matrix_b_scale_fmt"))) {
-    return loom_amdgpu_matrix_scale_format_selector_attr(&contract_request->rhs,
-                                                         field_name, out_value);
+    return loom_amdgpu_matrix_scale_format_selector_attr(
+        &contract_request->rhs);
   }
   if (iree_string_view_equal(field_name, IREE_SV("matrix_a_scale")) ||
       iree_string_view_equal(field_name, IREE_SV("matrix_b_scale")) ||
       iree_string_view_equal(field_name, IREE_SV("matrix_a_reuse")) ||
       iree_string_view_equal(field_name, IREE_SV("matrix_b_reuse"))) {
-    *out_value = 0;
-    return iree_ok_status();
+    return 0;
   }
   if (iree_any_bit_set(immediate->flags,
                        LOOM_LOW_IMMEDIATE_FLAG_DEFAULT_VALUE)) {
-    *out_value = immediate->default_value;
-    return iree_ok_status();
+    return immediate->default_value;
   }
-  return iree_make_status(
-      IREE_STATUS_INTERNAL,
-      "AMDGPU descriptor-matrix selected immediate '%.*s' is unmapped",
-      (int)field_name.size, field_name.data);
+  IREE_ASSERT_UNREACHABLE("selected AMDGPU matrix descriptor immediate");
+  IREE_BUILTIN_UNREACHABLE();
 }
 
 iree_status_t loom_amdgpu_descriptor_matrix_options(
@@ -508,10 +496,8 @@ iree_status_t loom_amdgpu_descriptor_matrix_attrs(
         descriptor_set, immediate->field_name_string_offset);
     IREE_RETURN_IF_ERROR(loom_module_intern_string(
         loom_low_lower_context_module(context), field_name, &attrs[i].name_id));
-    int64_t value = 0;
-    IREE_RETURN_IF_ERROR(loom_amdgpu_descriptor_matrix_attr_value(
-        contract_request, immediate, field_name, &value));
-    attrs[i].value = loom_attr_i64(value);
+    attrs[i].value = loom_attr_i64(loom_amdgpu_descriptor_matrix_attr_value(
+        contract_request, immediate, field_name));
   }
 
   *out_attrs = loom_make_named_attr_slice(attrs, descriptor->immediate_count);

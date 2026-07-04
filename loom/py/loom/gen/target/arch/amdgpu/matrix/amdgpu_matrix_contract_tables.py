@@ -41,6 +41,8 @@ from loom.target.arch.amdgpu.matrix_contracts import (  # noqa: E402
     AmdgpuMatrixPayload,
 )
 from loom.target.low_descriptors import (  # noqa: E402
+    Immediate,
+    ImmediateFlag,
     Operand,
     target_relative_name,
 )
@@ -123,6 +125,19 @@ _FLAG_C_NAMES = {
 _SOURCE_REQUIREMENT_C_NAMES = {
     "fragment_layout": ("LOOM_AMDGPU_MATRIX_CONTRACT_SOURCE_REQUIREMENT_FRAGMENT_LAYOUT"),
 }
+
+_MATRIX_ATTR_IMMEDIATE_FIELDS = frozenset(
+    (
+        "matrix_a_fmt",
+        "matrix_b_fmt",
+        "matrix_a_scale",
+        "matrix_b_scale",
+        "matrix_a_scale_fmt",
+        "matrix_b_scale_fmt",
+        "matrix_a_reuse",
+        "matrix_b_reuse",
+    )
+)
 
 _FRAGMENT_LAYOUT_C_NAMES = {
     None: "LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_UNKNOWN",
@@ -307,6 +322,36 @@ def _matrix_descriptor_shapes_by_key() -> dict[str, tuple[_MatrixDescriptorShape
     return {descriptor_key: tuple(sorted(shapes, key=_matrix_descriptor_shape_sort_key)) for descriptor_key, shapes in shapes_by_key.items()}
 
 
+def _matrix_descriptor_immediates_by_key() -> dict[str, tuple[Immediate, ...]]:
+    descriptor_ref_key_set = set(amdgpu_descriptor_ref_keys())
+    immediates_by_key: dict[str, list[Immediate]] = {}
+
+    def add_descriptor_immediates(
+        descriptor_key: str,
+        semantic_tag: str | None,
+        immediates: Iterable[Immediate],
+    ) -> None:
+        if semantic_tag is None or not semantic_tag.startswith("matrix.") or descriptor_key not in descriptor_ref_key_set:
+            return
+        immediates_by_key.setdefault(descriptor_key, []).extend(immediates)
+
+    for descriptor_set in _amdgpu_core_descriptor_set_bases():
+        for descriptor in descriptor_set.descriptors:
+            add_descriptor_immediates(descriptor.key, descriptor.semantic_tag, descriptor.immediates)
+
+    for overlays in (
+        _gfx940_core_overlays(),
+        _gfx950_core_overlays(),
+        _gfx11_core_overlays(),
+        _gfx12_core_overlays(),
+        _gfx1250_core_overlays(),
+    ):
+        for overlay in overlays:
+            add_descriptor_immediates(overlay.descriptor_key, overlay.semantic_tag, overlay.immediates)
+
+    return {descriptor_key: tuple(immediates) for descriptor_key, immediates in immediates_by_key.items()}
+
+
 def _matrix_descriptor_shape_sort_key(
     shape: _MatrixDescriptorShape,
 ) -> tuple[int, int, int, int, bool, bool]:
@@ -389,6 +434,23 @@ def _validate_contract_descriptor_shape(
     )
 
 
+def _validate_contract_descriptor_immediates(
+    contract: AmdgpuMatrixContract,
+    descriptor_key: str,
+    *,
+    descriptor_immediates_by_key: Mapping[str, tuple[Immediate, ...]],
+) -> None:
+    immediates = descriptor_immediates_by_key.get(descriptor_key)
+    if immediates is None:
+        raise ValueError(f"AMDGPU matrix contract '{contract.name}' references low descriptor '{descriptor_key}' without matrix immediate metadata")
+    for immediate in immediates:
+        if immediate.field_name in _MATRIX_ATTR_IMMEDIATE_FIELDS:
+            continue
+        if ImmediateFlag.DEFAULT_VALUE in immediate.flags:
+            continue
+        raise ValueError(f"AMDGPU matrix contract '{contract.name}' selects low descriptor '{descriptor_key}' with unmapped immediate '{immediate.field_name}'")
+
+
 def _payload_initializer(payload: AmdgpuMatrixPayload) -> str:
     numeric_type = _NUMERIC_TYPE_C_NAMES.get(payload.numeric_type)
     if numeric_type is None:
@@ -409,6 +471,7 @@ def _contract_initializer(
     *,
     keys_by_semantic_tag: Mapping[str, tuple[str, ...]],
     descriptor_shapes_by_key: Mapping[str, tuple[_MatrixDescriptorShape, ...]],
+    descriptor_immediates_by_key: Mapping[str, tuple[Immediate, ...]],
 ) -> str:
     _validate_known_values(
         contract.features,
@@ -445,6 +508,11 @@ def _contract_initializer(
             contract,
             descriptor_key,
             descriptor_shapes_by_key=descriptor_shapes_by_key,
+        )
+        _validate_contract_descriptor_immediates(
+            contract,
+            descriptor_key,
+            descriptor_immediates_by_key=descriptor_immediates_by_key,
         )
     low_descriptor_ref = "LOOM_AMDGPU_MATRIX_LOW_DESCRIPTOR_REF_NONE" if descriptor_key is None else _descriptor_ref_constant_name(descriptor_key)
     family = _FAMILY_C_NAMES.get(contract.family)
@@ -531,6 +599,7 @@ def _emit_header() -> str:
 def _emit_source(*, public_header: str) -> str:
     keys_by_semantic_tag = _matrix_descriptor_keys_by_semantic_tag()
     descriptor_shapes_by_key = _matrix_descriptor_shapes_by_key()
+    descriptor_immediates_by_key = _matrix_descriptor_immediates_by_key()
     lines = [
         "// Copyright 2026 The IREE Authors",
         "//",
@@ -550,6 +619,7 @@ def _emit_source(*, public_header: str) -> str:
             contract,
             keys_by_semantic_tag=keys_by_semantic_tag,
             descriptor_shapes_by_key=descriptor_shapes_by_key,
+            descriptor_immediates_by_key=descriptor_immediates_by_key,
         )
         for contract in AMDGPU_MATRIX_CONTRACTS
     )
