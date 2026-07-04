@@ -2220,85 +2220,127 @@ static bool loom_amdgpu_type_is_vector1_element(
   return !loom_dim_is_dynamic(dim) && loom_dim_static_size(dim) == 1;
 }
 
-static bool loom_amdgpu_direct_fp8_unscaled_schema_matches(
+typedef enum loom_amdgpu_direct_fp8_scale_group_mode_e {
+  LOOM_AMDGPU_DIRECT_FP8_SCALE_GROUP_MODE_NONE = 0,
+  LOOM_AMDGPU_DIRECT_FP8_SCALE_GROUP_MODE_ALL_LANES,
+  LOOM_AMDGPU_DIRECT_FP8_SCALE_GROUP_MODE_OCTETS_MAX4,
+} loom_amdgpu_direct_fp8_scale_group_mode_t;
+
+typedef struct loom_amdgpu_direct_fp8_schema_requirement_t {
+  // Required scale format for the direct decode route.
+  loom_value_fact_numeric_format_flags_t scale_format;
+  // Required scale topology for the direct decode route.
+  loom_value_fact_scale_topology_flags_t scale_topology;
+  // Required affine policy for the direct decode route.
+  loom_value_fact_affine_policy_flags_t affine_policy;
+  // Required scale operand count for the direct decode route.
+  uint32_t scale_operand_count;
+  // Shape rule for scale_group_element_count.
+  loom_amdgpu_direct_fp8_scale_group_mode_t scale_group_mode;
+} loom_amdgpu_direct_fp8_schema_requirement_t;
+
+static const loom_amdgpu_direct_fp8_schema_requirement_t
+    kLoomAmdgpuDirectFp8UnscaledSchemaRequirement = {
+        .scale_format = LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE,
+        .scale_topology = LOOM_VALUE_FACT_SCALE_TOPOLOGY_NONE,
+        .affine_policy = LOOM_VALUE_FACT_AFFINE_POLICY_NONE,
+        .scale_operand_count = 0,
+        .scale_group_mode = LOOM_AMDGPU_DIRECT_FP8_SCALE_GROUP_MODE_NONE,
+};
+
+static const loom_amdgpu_direct_fp8_schema_requirement_t
+    kLoomAmdgpuDirectFp8ScaleF32SchemaRequirement = {
+        .scale_format = LOOM_VALUE_FACT_NUMERIC_FORMAT_F32,
+        .scale_topology = LOOM_VALUE_FACT_SCALE_TOPOLOGY_BLOCK_1D,
+        .affine_policy = LOOM_VALUE_FACT_AFFINE_POLICY_SCALE_ONLY,
+        .scale_operand_count = 1,
+        .scale_group_mode = LOOM_AMDGPU_DIRECT_FP8_SCALE_GROUP_MODE_ALL_LANES,
+};
+
+static const loom_amdgpu_direct_fp8_schema_requirement_t
+    kLoomAmdgpuDirectFp8E8m0SchemaRequirement = {
+        .scale_format = LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E8M0,
+        .scale_topology = LOOM_VALUE_FACT_SCALE_TOPOLOGY_BLOCK_1D,
+        .affine_policy = LOOM_VALUE_FACT_AFFINE_POLICY_SCALE_ONLY,
+        .scale_operand_count = 1,
+        .scale_group_mode = LOOM_AMDGPU_DIRECT_FP8_SCALE_GROUP_MODE_OCTETS_MAX4,
+};
+
+static bool loom_amdgpu_direct_fp8_scale_group_matches(
+    uint32_t lane_count, uint32_t scale_group_element_count,
+    loom_amdgpu_direct_fp8_scale_group_mode_t mode) {
+  switch (mode) {
+    case LOOM_AMDGPU_DIRECT_FP8_SCALE_GROUP_MODE_NONE:
+      return scale_group_element_count == 0;
+    case LOOM_AMDGPU_DIRECT_FP8_SCALE_GROUP_MODE_ALL_LANES:
+      return scale_group_element_count == lane_count;
+    case LOOM_AMDGPU_DIRECT_FP8_SCALE_GROUP_MODE_OCTETS_MAX4: {
+      if (lane_count == 0 || (lane_count & 7u) != 0 ||
+          scale_group_element_count < 8u ||
+          (scale_group_element_count & 7u) != 0) {
+        return false;
+      }
+      const uint32_t scale_group_count =
+          scale_group_element_count >= lane_count
+              ? 1u
+              : (lane_count + scale_group_element_count - 1u) /
+                    scale_group_element_count;
+      return scale_group_count <= 4u;
+    }
+    default:
+      return false;
+  }
+}
+
+static bool loom_amdgpu_direct_fp8_schema_matches(
     loom_value_fact_encoded_operand_schema_t schema,
-    loom_scalar_type_t element_type, uint32_t lane_count) {
+    loom_scalar_type_t element_type, uint32_t lane_count,
+    const loom_amdgpu_direct_fp8_schema_requirement_t* requirement) {
   if (loom_value_fact_encoded_operand_schema_is_unknown(schema) ||
       !loom_amdgpu_direct_fp8_schema_element_format_matches(
           schema.element_format, element_type) ||
       schema.payload_packing != LOOM_VALUE_FACT_PAYLOAD_PACKING_DENSE_LANES ||
-      schema.scale_format != LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE ||
+      schema.scale_format != requirement->scale_format ||
       schema.secondary_scale_format != LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE ||
-      schema.scale_topology != LOOM_VALUE_FACT_SCALE_TOPOLOGY_NONE ||
-      schema.affine_policy != LOOM_VALUE_FACT_AFFINE_POLICY_NONE ||
+      schema.scale_topology != requirement->scale_topology ||
+      schema.affine_policy != requirement->affine_policy ||
       iree_any_bit_set(schema.rounding_policy,
                        ~LOOM_VALUE_FACT_ROUNDING_POLICY_ALL) ||
       schema.codebook_policy != LOOM_VALUE_FACT_CODEBOOK_POLICY_NONE ||
       schema.sparsity_policy != LOOM_VALUE_FACT_SPARSITY_POLICY_NONE ||
       schema.flags != 0 || schema.payload_register_count != 0 ||
       schema.payload_element_count != lane_count ||
-      schema.scale_group_element_count != 0 ||
-      schema.scale_operand_count != 0) {
+      schema.scale_operand_count != requirement->scale_operand_count ||
+      !loom_amdgpu_direct_fp8_scale_group_matches(
+          lane_count, schema.scale_group_element_count,
+          requirement->scale_group_mode)) {
     return false;
   }
   return true;
+}
+
+static bool loom_amdgpu_direct_fp8_unscaled_schema_matches(
+    loom_value_fact_encoded_operand_schema_t schema,
+    loom_scalar_type_t element_type, uint32_t lane_count) {
+  return loom_amdgpu_direct_fp8_schema_matches(
+      schema, element_type, lane_count,
+      &kLoomAmdgpuDirectFp8UnscaledSchemaRequirement);
 }
 
 static bool loom_amdgpu_direct_fp8_scalef32_schema_matches(
     loom_value_fact_encoded_operand_schema_t schema,
     loom_scalar_type_t element_type, uint32_t lane_count) {
-  if (loom_value_fact_encoded_operand_schema_is_unknown(schema) ||
-      !loom_amdgpu_direct_fp8_schema_element_format_matches(
-          schema.element_format, element_type) ||
-      schema.payload_packing != LOOM_VALUE_FACT_PAYLOAD_PACKING_DENSE_LANES ||
-      schema.scale_format != LOOM_VALUE_FACT_NUMERIC_FORMAT_F32 ||
-      schema.secondary_scale_format != LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE ||
-      schema.scale_topology != LOOM_VALUE_FACT_SCALE_TOPOLOGY_BLOCK_1D ||
-      schema.affine_policy != LOOM_VALUE_FACT_AFFINE_POLICY_SCALE_ONLY ||
-      iree_any_bit_set(schema.rounding_policy,
-                       ~LOOM_VALUE_FACT_ROUNDING_POLICY_ALL) ||
-      schema.codebook_policy != LOOM_VALUE_FACT_CODEBOOK_POLICY_NONE ||
-      schema.sparsity_policy != LOOM_VALUE_FACT_SPARSITY_POLICY_NONE ||
-      schema.flags != 0 || schema.payload_register_count != 0 ||
-      schema.payload_element_count != lane_count ||
-      schema.scale_group_element_count != lane_count ||
-      schema.scale_operand_count != 1) {
-    return false;
-  }
-  return true;
+  return loom_amdgpu_direct_fp8_schema_matches(
+      schema, element_type, lane_count,
+      &kLoomAmdgpuDirectFp8ScaleF32SchemaRequirement);
 }
 
 static bool loom_amdgpu_direct_fp8_e8m0_schema_matches(
     loom_value_fact_encoded_operand_schema_t schema,
     loom_scalar_type_t element_type, uint32_t lane_count) {
-  const uint32_t scale_group_element_count = schema.scale_group_element_count;
-  const uint32_t scale_group_count =
-      scale_group_element_count == 0
-          ? UINT32_MAX
-          : (scale_group_element_count >= lane_count
-                 ? 1u
-                 : (lane_count + scale_group_element_count - 1u) /
-                       scale_group_element_count);
-  if (loom_value_fact_encoded_operand_schema_is_unknown(schema) ||
-      !loom_amdgpu_direct_fp8_schema_element_format_matches(
-          schema.element_format, element_type) ||
-      lane_count == 0 || (lane_count & 7u) != 0 ||
-      schema.payload_packing != LOOM_VALUE_FACT_PAYLOAD_PACKING_DENSE_LANES ||
-      schema.scale_format != LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E8M0 ||
-      schema.secondary_scale_format != LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE ||
-      schema.scale_topology != LOOM_VALUE_FACT_SCALE_TOPOLOGY_BLOCK_1D ||
-      schema.affine_policy != LOOM_VALUE_FACT_AFFINE_POLICY_SCALE_ONLY ||
-      iree_any_bit_set(schema.rounding_policy,
-                       ~LOOM_VALUE_FACT_ROUNDING_POLICY_ALL) ||
-      schema.codebook_policy != LOOM_VALUE_FACT_CODEBOOK_POLICY_NONE ||
-      schema.sparsity_policy != LOOM_VALUE_FACT_SPARSITY_POLICY_NONE ||
-      schema.flags != 0 || schema.payload_register_count != 0 ||
-      schema.payload_element_count != lane_count ||
-      scale_group_element_count < 8u || (scale_group_element_count & 7u) != 0 ||
-      scale_group_count > 4u || schema.scale_operand_count != 1) {
-    return false;
-  }
-  return true;
+  return loom_amdgpu_direct_fp8_schema_matches(
+      schema, element_type, lane_count,
+      &kLoomAmdgpuDirectFp8E8m0SchemaRequirement);
 }
 
 static bool loom_amdgpu_direct_fp8_e8m0_pk8_descriptor_available(
