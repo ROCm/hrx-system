@@ -131,6 +131,20 @@ low.func.def target(@test_target) @resource_stall_reduces_existing_pressure_clif
 }
 
 // ====
+// RUN: emit low-schedule-json @resource_stall_scores_pressure_cliff_debt_for_neutral_work strategy=resource-stall diagnostics=candidates cliff=test.i32:69:15:14 output=none
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @resource_stall_scores_pressure_cliff_debt_for_neutral_work(
+    %pad: reg<test.i32 x66>, %source: reg<test.i32 x4>) ->
+    (reg<test.i32 x66>, reg<test.i32>) {
+  %scratch = low.storage.reserve {byte_alignment = 4, byte_length = 4} : low.storage<private>
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", candidate_count="2", chosen_packet="low.slice", rejected_packet="low.storage.reserve", chosen_pressure_cliff_penalty="0", rejected_pressure_cliff_penalty="1"}
+  %lane = low.slice %source[0] : reg<test.i32 x4> -> reg<test.i32>
+  low.return %pad, %lane : reg<test.i32 x66>, reg<test.i32>
+}
+
+// ====
 // RUN: emit low-schedule-json @resource_stall_counts_live_slice_as_alias strategy=resource-stall diagnostics=candidates cliff=test.i32:72:15:14 output=none
 
 test.target<low_core> @test_target

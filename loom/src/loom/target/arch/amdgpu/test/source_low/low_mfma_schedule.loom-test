@@ -44,9 +44,9 @@ low.func.def target(@target) @gfx950_fp8_materialized_bf16_two_k_block_schedule(
 // second decoded BF16 payload stays out of the live set until after the first
 // matrix packet.
 // ----
-  s_mov_b32_m0_imm m0, 0
   v_and_b32 v2, 15, v0
   v_lshlrev_b32 v0, 2, v0
+  s_mov_b32_m0_imm m0, 0
   v_mov_b32 v4, 0
   v_lshlrev_b32 v3, 6, v2
   global_load_dwordx4 v[8:11], v3, s[0:1] offset:0
