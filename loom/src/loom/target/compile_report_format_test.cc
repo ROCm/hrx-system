@@ -2393,7 +2393,22 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
       IREE_STRING_VIEW_NPOS);
   EXPECT_NE(iree_string_view_find(
                 output,
-                IREE_SV("\"economics\":{\"memory\":"
+                IREE_SV("\"economics\":{\"operations\":{\"per_workitem\":"
+                        "{\"scalar_alu_count\":2,\"vector_alu_count\":3,"
+                        "\"matrix_count\":2,\"mfma_count\":1,"
+                        "\"smfmac_count\":1,\"wmma_count\":1,"
+                        "\"swmmac_count\":1,\"barrier_count\":1,"
+                        "\"conversion_count\":1},\"dispatch\":"
+                        "{\"scalar_alu_count\":8192,"
+                        "\"vector_alu_count\":12288,\"matrix_count\":8192,"
+                        "\"mfma_count\":4096,\"smfmac_count\":4096,"
+                        "\"wmma_count\":4096,\"swmmac_count\":4096,"
+                        "\"barrier_count\":4096,\"conversion_count\":4096}}"),
+                0),
+            IREE_STRING_VIEW_NPOS);
+  EXPECT_NE(iree_string_view_find(
+                output,
+                IREE_SV("\"memory\":"
                         "{\"per_workitem_issued\":{\"read_bytes\":24,"
                         "\"write_bytes\":8,\"total_bytes\":32,"
                         "\"global_load_count\":1,\"global_store_count\":1,"
