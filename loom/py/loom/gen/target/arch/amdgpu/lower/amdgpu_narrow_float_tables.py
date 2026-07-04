@@ -56,6 +56,33 @@ class _Fp8ScaleF32DescriptorRefRow:
     descriptor_key: str
 
 
+@dataclass(frozen=True)
+class _Fp8FormatRow:
+    source_type: ScalarTypeKind
+    exponent_bits: int
+    mantissa_bits: int
+    exponent_bias: int
+    special_policy: str
+
+
+_FP8_FORMAT_ROWS = (
+    _Fp8FormatRow(
+        ScalarTypeKind.F8E4M3,
+        exponent_bits=4,
+        mantissa_bits=3,
+        exponent_bias=7,
+        special_policy="LOOM_SCALAR_TYPE_FP8_SPECIAL_POLICY_FINITE_NAN",
+    ),
+    _Fp8FormatRow(
+        ScalarTypeKind.F8E5M2,
+        exponent_bits=5,
+        mantissa_bits=2,
+        exponent_bias=15,
+        special_policy="LOOM_SCALAR_TYPE_FP8_SPECIAL_POLICY_IEEE",
+    ),
+)
+
+
 _FP8_DECODE_PLAN_DESCRIPTOR_ROWS = (
     _Fp8DecodePlanDescriptorRow(
         "amdgpu.v_bfe_u32.offset_width_inline",
@@ -322,6 +349,98 @@ def _fp8_scalef32_descriptor_ref_initializer(
     )
 
 
+def _fp8_subnormal_bf16_payload(row: _Fp8FormatRow, mantissa: int) -> int:
+    if mantissa == 0:
+        return 0
+    leading_index = 0
+    for i in range(1, row.mantissa_bits):
+        if mantissa & (1 << i):
+            leading_index = i
+    exponent = 128 - row.exponent_bias - row.mantissa_bits + leading_index
+    fraction = (mantissa << (7 - leading_index)) & 0x7F
+    return (exponent << 7) | fraction
+
+
+def _fp8_subnormal_f16_payload(row: _Fp8FormatRow, mantissa: int) -> int:
+    if mantissa == 0:
+        return 0
+    source_power = 1 - row.exponent_bias - row.mantissa_bits
+    leading_index = 0
+    for i in range(1, row.mantissa_bits):
+        if mantissa & (1 << i):
+            leading_index = i
+    exponent = source_power + leading_index
+    f16_exponent = exponent + 15
+    if f16_exponent > 0:
+        fraction = (mantissa << (10 - leading_index)) & 0x3FF
+        return (f16_exponent << 10) | fraction
+
+    subnormal_shift = source_power + 24
+    assert subnormal_shift >= 0
+    return mantissa << subnormal_shift
+
+
+def _fp8_subnormal_table_word(row: _Fp8FormatRow, mantissa_base: int) -> int:
+    if row.mantissa_bits != 2:
+        return 0
+    return _fp8_subnormal_bf16_payload(row, mantissa_base) | (_fp8_subnormal_bf16_payload(row, mantissa_base + 1) << 16)
+
+
+def _fp8_subnormal_bf16_byte_table_word(row: _Fp8FormatRow, byte_index: int, mantissa_base: int) -> int:
+    table_word = 0
+    for i in range(4):
+        payload = _fp8_subnormal_bf16_payload(row, mantissa_base + i)
+        table_word |= ((payload >> (byte_index * 8)) & 0xFF) << (i * 8)
+    return table_word
+
+
+def _fp8_subnormal_f16_byte_table_word(row: _Fp8FormatRow, byte_index: int, mantissa_base: int) -> int:
+    table_word = 0
+    for i in range(4):
+        payload = _fp8_subnormal_f16_payload(row, mantissa_base + i)
+        table_word |= ((payload >> (byte_index * 8)) & 0xFF) << (i * 8)
+    return table_word
+
+
+def _hex_u32(value: int) -> str:
+    return f"UINT32_C(0x{value:08X})"
+
+
+def _fp8_subnormal_table_initializer(row: _Fp8FormatRow) -> str:
+    return "\n".join(
+        [
+            "LOOM_AMDGPU_FP8_SUBNORMAL_TABLE_ROW(",
+            f"    {_scalar_type_constant_name(row.source_type)},",
+            f"    {row.exponent_bits}, {row.mantissa_bits}, {row.exponent_bias},",
+            f"    {row.special_policy},",
+            f"    {_hex_u32(_fp8_subnormal_table_word(row, 0))},",
+            f"    {_hex_u32(_fp8_subnormal_table_word(row, 2))},",
+            f"    {_hex_u32(_fp8_subnormal_bf16_byte_table_word(row, 0, 0))},",
+            f"    {_hex_u32(_fp8_subnormal_bf16_byte_table_word(row, 0, 4))},",
+            f"    {_hex_u32(_fp8_subnormal_bf16_byte_table_word(row, 1, 0))},",
+            f"    {_hex_u32(_fp8_subnormal_bf16_byte_table_word(row, 1, 4))},",
+            f"    {_hex_u32(_fp8_subnormal_f16_byte_table_word(row, 0, 0))},",
+            f"    {_hex_u32(_fp8_subnormal_f16_byte_table_word(row, 0, 4))},",
+            f"    {_hex_u32(_fp8_subnormal_f16_byte_table_word(row, 1, 0))},",
+            f"    {_hex_u32(_fp8_subnormal_f16_byte_table_word(row, 1, 4))}),",
+        ]
+    )
+
+
+def _emit_fp8_subnormal_table_rows(
+    rows: Sequence[_Fp8FormatRow] = _FP8_FORMAT_ROWS,
+) -> str:
+    return (
+        "\n".join(
+            [
+                *_generated_header(),
+                *(_fp8_subnormal_table_initializer(row) for row in rows),
+            ]
+        )
+        + "\n"
+    )
+
+
 def _emit_fp8_decode_plan_descriptor_rows(
     rows: Sequence[_Fp8DecodePlanDescriptorRow] = _FP8_DECODE_PLAN_DESCRIPTOR_ROWS,
     descriptor_ref_key_set: set[str] | None = None,
@@ -392,9 +511,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         type=Path,
         help="Generated FP8/BF8 scaleF32 descriptor row fragment path.",
     )
+    parser.add_argument(
+        "--fp8-subnormal-table-rows",
+        type=Path,
+        help="Generated FP8/BF8 subnormal decode table row fragment path.",
+    )
     args = parser.parse_args(argv)
 
-    if args.fp8_decode_plan_descriptor_rows is None and args.fp8_native_descriptor_ref_rows is None and args.fp8_scalef32_descriptor_ref_rows is None:
+    if args.fp8_decode_plan_descriptor_rows is None and args.fp8_native_descriptor_ref_rows is None and args.fp8_scalef32_descriptor_ref_rows is None and args.fp8_subnormal_table_rows is None:
         parser.error("at least one output path is required")
     if args.fp8_decode_plan_descriptor_rows is not None:
         _write_output(
@@ -410,6 +534,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         _write_output(
             args.fp8_scalef32_descriptor_ref_rows,
             _emit_fp8_scalef32_descriptor_ref_rows(),
+        )
+    if args.fp8_subnormal_table_rows is not None:
+        _write_output(
+            args.fp8_subnormal_table_rows,
+            _emit_fp8_subnormal_table_rows(),
         )
     return 0
 

@@ -64,6 +64,24 @@ def test_fp8_scalef32_descriptor_refs_emit_data_only() -> None:
     assert "\nreturn " not in source
 
 
+def test_fp8_subnormal_table_rows_emit_data_only() -> None:
+    source = amdgpu_narrow_float_tables._emit_fp8_subnormal_table_rows()
+
+    assert "LOOM_AMDGPU_FP8_SUBNORMAL_TABLE_ROW(" in source
+    assert "LOOM_SCALAR_TYPE_F8E4M3" in source
+    assert "LOOM_SCALAR_TYPE_F8E5M2" in source
+    assert "LOOM_SCALAR_TYPE_FP8_SPECIAL_POLICY_FINITE_NAN" in source
+    assert "LOOM_SCALAR_TYPE_FP8_SPECIAL_POLICY_IEEE" in source
+    assert "UINT32_C(0xC0800000)" in source
+    assert "UINT32_C(0x3C3C3C3C)" in source
+    assert "UINT32_C(0x37800000)" in source
+    assert "UINT32_C(0x23222120)" in source
+    assert "UINT32_C(0x07060504)" in source
+    assert "switch " not in source
+    assert "\ncase " not in source
+    assert "\nreturn " not in source
+
+
 def test_fp8_decode_plan_descriptor_rows_reject_missing_descriptor_ref() -> None:
     with pytest.raises(
         ValueError,

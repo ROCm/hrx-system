@@ -10,112 +10,73 @@
 #include "loom/target/arch/amdgpu/lower/emit.h"
 #include "loom/target/arch/amdgpu/lower/narrow_float/fp8.h"
 
-static uint32_t loom_amdgpu_fp8_subnormal_bf16_payload(
-    const loom_scalar_type_fp8_format_t* format, uint32_t mantissa) {
-  if (mantissa == 0) {
-    return 0;
-  }
-  uint32_t leading_index = 0;
-  for (uint32_t i = 1; i < format->mantissa_bits; ++i) {
-    if ((mantissa & (UINT32_C(1) << i)) != 0) {
-      leading_index = i;
-    }
-  }
-  const uint32_t exponent =
-      128u - format->exponent_bias - format->mantissa_bits + leading_index;
-  const uint32_t fraction = (mantissa << (7u - leading_index)) & UINT32_C(0x7F);
-  return (exponent << 7) | fraction;
-}
+typedef struct loom_amdgpu_fp8_subnormal_table_row_t {
+  // Encoded FP8 source format used by the decode plan.
+  loom_scalar_type_fp8_format_t format;
+  // Packed unsigned BF16 payloads for two-bit mantissas.
+  uint32_t subnormal_bf16_table_words[2];
+  // Packed BF16 payload byte tables for three-bit mantissas.
+  uint32_t subnormal_bf16_byte_table_words
+      [LOOM_AMDGPU_FP8_BF16_BYTE_COUNT]
+      [LOOM_AMDGPU_FP8_BF16_BYTE_TABLE_WORD_COUNT];
+  // Packed F16 payload byte tables.
+  uint32_t
+      subnormal_f16_byte_table_words[LOOM_AMDGPU_FP8_U16_BYTE_COUNT]
+                                    [LOOM_AMDGPU_FP8_U16_BYTE_TABLE_WORD_COUNT];
+} loom_amdgpu_fp8_subnormal_table_row_t;
 
-static uint32_t loom_amdgpu_fp8_subnormal_f16_payload(
-    const loom_scalar_type_fp8_format_t* format, uint32_t mantissa) {
-  if (mantissa == 0) {
-    return 0;
-  }
-  const int32_t source_power =
-      1 - (int32_t)format->exponent_bias - (int32_t)format->mantissa_bits;
-  int32_t leading_index = 0;
-  for (uint32_t i = 1; i < format->mantissa_bits; ++i) {
-    if ((mantissa & (UINT32_C(1) << i)) != 0) {
-      leading_index = (int32_t)i;
-    }
-  }
-  const int32_t exponent = source_power + leading_index;
-  const int32_t f16_exponent = exponent + 15;
-  if (f16_exponent > 0) {
-    const uint32_t fraction =
-        (mantissa << (10u - (uint32_t)leading_index)) & UINT32_C(0x3FF);
-    return ((uint32_t)f16_exponent << 10) | fraction;
+#define LOOM_AMDGPU_FP8_SUBNORMAL_TABLE_ROW(                                   \
+    row_element_type, row_exponent_bits, row_mantissa_bits, row_exponent_bias, \
+    row_special_policy, bf16_table_0, bf16_table_1, bf16_byte_0_0,             \
+    bf16_byte_0_1, bf16_byte_1_0, bf16_byte_1_1, f16_byte_0_0, f16_byte_0_1,   \
+    f16_byte_1_0, f16_byte_1_1)                                                \
+  [row_element_type] = {                                                       \
+      .format =                                                                \
+          {                                                                    \
+              .exponent_bits = row_exponent_bits,                              \
+              .mantissa_bits = row_mantissa_bits,                              \
+              .exponent_bias = row_exponent_bias,                              \
+              .special_policy = row_special_policy,                            \
+          },                                                                   \
+      .subnormal_bf16_table_words = {bf16_table_0, bf16_table_1},              \
+      .subnormal_bf16_byte_table_words =                                       \
+          {                                                                    \
+              {bf16_byte_0_0, bf16_byte_0_1},                                  \
+              {bf16_byte_1_0, bf16_byte_1_1},                                  \
+          },                                                                   \
+      .subnormal_f16_byte_table_words =                                        \
+          {                                                                    \
+              {f16_byte_0_0, f16_byte_0_1},                                    \
+              {f16_byte_1_0, f16_byte_1_1},                                    \
+          },                                                                   \
   }
 
-  const int32_t subnormal_shift = source_power + 24;
-  IREE_ASSERT_GE(subnormal_shift, 0);
-  return mantissa << (uint32_t)subnormal_shift;
-}
+static const loom_amdgpu_fp8_subnormal_table_row_t
+    kLoomAmdgpuFp8SubnormalTableRows[LOOM_SCALAR_TYPE_COUNT_] = {
+#include "loom/target/arch/amdgpu/lower/narrow_float/fp8_subnormal_table_rows.inl"
+};
 
-static uint32_t loom_amdgpu_fp8_subnormal_table_word(
-    const loom_scalar_type_fp8_format_t* format, uint32_t mantissa_base) {
-  return loom_amdgpu_fp8_subnormal_bf16_payload(format, mantissa_base) |
-         (loom_amdgpu_fp8_subnormal_bf16_payload(format, mantissa_base + 1u)
-          << 16);
-}
-
-static uint32_t loom_amdgpu_fp8_subnormal_byte_table_word(
-    const loom_scalar_type_fp8_format_t* format, uint32_t byte_index,
-    uint32_t mantissa_base) {
-  uint32_t table_word = 0;
-  for (uint32_t i = 0; i < 4; ++i) {
-    const uint32_t payload =
-        loom_amdgpu_fp8_subnormal_bf16_payload(format, mantissa_base + i);
-    table_word |= ((payload >> (byte_index * 8u)) & UINT32_C(0xFF)) << (i * 8u);
-  }
-  return table_word;
-}
-
-static uint32_t loom_amdgpu_fp8_subnormal_f16_byte_table_word(
-    const loom_scalar_type_fp8_format_t* format, uint32_t byte_index,
-    uint32_t mantissa_base) {
-  uint32_t table_word = 0;
-  for (uint32_t i = 0; i < 4; ++i) {
-    const uint32_t payload =
-        loom_amdgpu_fp8_subnormal_f16_payload(format, mantissa_base + i);
-    table_word |= ((payload >> (byte_index * 8u)) & UINT32_C(0xFF)) << (i * 8u);
-  }
-  return table_word;
-}
+#undef LOOM_AMDGPU_FP8_SUBNORMAL_TABLE_ROW
 
 static void loom_amdgpu_initialize_fp8_decode_format(
     loom_scalar_type_t element_type, loom_amdgpu_fp8_decode_plan_t* plan) {
-  if (!loom_scalar_type_fp8_format(element_type, &plan->format)) {
+  const loom_amdgpu_fp8_subnormal_table_row_t* row =
+      element_type < LOOM_SCALAR_TYPE_COUNT_
+          ? &kLoomAmdgpuFp8SubnormalTableRows[element_type]
+          : NULL;
+  if (row == NULL || row->format.exponent_bits == 0) {
     IREE_ASSERT_UNREACHABLE("selected AMDGPU FP8 decode");
     IREE_BUILTIN_UNREACHABLE();
   }
-  if (plan->format.mantissa_bits == 2) {
-    plan->subnormal_bf16_table_words[0] =
-        loom_amdgpu_fp8_subnormal_table_word(&plan->format, 0);
-    plan->subnormal_bf16_table_words[1] =
-        loom_amdgpu_fp8_subnormal_table_word(&plan->format, 2);
-  }
-  if (plan->format.mantissa_bits <= 3) {
-    for (uint32_t byte_index = 0; byte_index < LOOM_AMDGPU_FP8_BF16_BYTE_COUNT;
-         ++byte_index) {
-      plan->subnormal_bf16_byte_table_words[byte_index][0] =
-          loom_amdgpu_fp8_subnormal_byte_table_word(&plan->format, byte_index,
-                                                    0);
-      plan->subnormal_bf16_byte_table_words[byte_index][1] =
-          loom_amdgpu_fp8_subnormal_byte_table_word(&plan->format, byte_index,
-                                                    4);
-    }
-    for (uint32_t byte_index = 0; byte_index < LOOM_AMDGPU_FP8_U16_BYTE_COUNT;
-         ++byte_index) {
-      plan->subnormal_f16_byte_table_words[byte_index][0] =
-          loom_amdgpu_fp8_subnormal_f16_byte_table_word(&plan->format,
-                                                        byte_index, 0);
-      plan->subnormal_f16_byte_table_words[byte_index][1] =
-          loom_amdgpu_fp8_subnormal_f16_byte_table_word(&plan->format,
-                                                        byte_index, 4);
-    }
-  }
+  plan->format = row->format;
+  memcpy(plan->subnormal_bf16_table_words, row->subnormal_bf16_table_words,
+         sizeof(plan->subnormal_bf16_table_words));
+  memcpy(plan->subnormal_bf16_byte_table_words,
+         row->subnormal_bf16_byte_table_words,
+         sizeof(plan->subnormal_bf16_byte_table_words));
+  memcpy(plan->subnormal_f16_byte_table_words,
+         row->subnormal_f16_byte_table_words,
+         sizeof(plan->subnormal_f16_byte_table_words));
 }
 
 typedef struct loom_amdgpu_fp8_decode_plan_descriptor_row_t {
