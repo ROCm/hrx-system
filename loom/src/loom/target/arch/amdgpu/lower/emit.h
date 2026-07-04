@@ -302,6 +302,12 @@ iree_status_t loom_amdgpu_emit_vgpr_binary(
     loom_amdgpu_descriptor_ref_t descriptor_ref, loom_value_id_t lhs,
     loom_value_id_t rhs, loom_type_t lane_type, loom_value_id_t* out_value);
 
+// Emits one unary VGPR descriptor op.
+iree_status_t loom_amdgpu_emit_vgpr_unary(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_amdgpu_descriptor_ref_t descriptor_ref, loom_value_id_t value,
+    loom_type_t lane_type, loom_value_id_t* out_value);
+
 // Emits one VGPR descriptor op with one VGPR operand and one imm32 immediate.
 iree_status_t loom_amdgpu_emit_vgpr_binary_immediate(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
