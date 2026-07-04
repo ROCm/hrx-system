@@ -52,7 +52,7 @@ typedef struct loom_low_emission_frame_options_t {
   loom_low_schedule_strategy_t schedule_strategy;
   // Optional structured scheduler feedback to emit.
   loom_low_schedule_diagnostic_flags_t schedule_diagnostic_flags;
-  // Explicit per-class register budgets passed to allocation.
+  // Explicit per-class register budgets passed to scheduling and allocation.
   const loom_low_allocation_budget_t* allocation_budgets;
   // Number of entries in |allocation_budgets|.
   iree_host_size_t allocation_budget_count;

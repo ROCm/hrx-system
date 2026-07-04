@@ -180,6 +180,8 @@ typedef struct loom_low_schedule_build_state_t {
   uint8_t* reg_class_state_flags;
   // Pressure cliff ranges indexed by descriptor register-class ID.
   loom_low_schedule_pressure_cliff_range_t* pressure_cliff_ranges;
+  // Hard live-unit limits indexed by descriptor register-class ID.
+  uint32_t* pressure_limit_units_by_reg_class;
   // Most recent architectural-state writer node, dense by register class.
   uint32_t* state_last_write_nodes;
   // Outstanding architectural-state read lists, dense by register class.

@@ -30,6 +30,8 @@
 extern "C" {
 #endif
 
+typedef struct loom_low_allocation_budget_t loom_low_allocation_budget_t;
+
 // Sentinel for absent schedule node indices.
 #define LOOM_LOW_SCHEDULE_NODE_NONE UINT32_MAX
 
@@ -683,6 +685,12 @@ typedef struct loom_low_schedule_options_t {
   loom_low_memory_access_table_t memory_access_table;
   // Optional target-provided register-pressure cliff table.
   loom_low_schedule_pressure_cliff_list_t pressure_cliffs;
+  // Optional explicit allocation budgets. These are interpreted as hard
+  // pressure limits by the scheduler so resource-stall scheduling can shorten
+  // live ranges before allocation reaches the final physical storage ceiling.
+  const loom_low_allocation_budget_t* allocation_budgets;
+  // Number of entries in |allocation_budgets|.
+  iree_host_size_t allocation_budget_count;
   // Optional target-provided pair-affinity table.
   loom_low_schedule_pair_affinity_list_t pair_affinities;
   // Optional target-provided implicit state reads for structural low
