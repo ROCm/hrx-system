@@ -26,6 +26,7 @@
 #include "loom/ops/kernel/launch_config.h"
 #include "loom/ops/kernel/ops.h"
 #include "loom/ops/low/ops.h"
+#include "loom/ops/op_defs.h"
 #include "loom/ops/scf/ops.h"
 #include "loom/ops/target/ops.h"
 #include "loom/ops/vector/ops.h"
@@ -467,17 +468,22 @@ static bool loom_low_lower_cfg_cond_br_exact_bool(
 }
 
 static bool loom_low_lower_rule_value_ref_source_value(
+    const loom_low_lower_context_t* context,
     const loom_low_lower_rule_set_t* rule_set, const loom_op_t* source_op,
     uint16_t value_ref_index, loom_value_id_t* out_source_value_id) {
   *out_source_value_id = LOOM_VALUE_ID_INVALID;
   const loom_low_lower_value_ref_t* value_ref =
       &rule_set->value_refs[value_ref_index];
   switch (value_ref->kind) {
-    case LOOM_LOW_LOWER_VALUE_REF_OPERAND:
-      IREE_ASSERT_LT(value_ref->index, source_op->operand_count);
-      *out_source_value_id =
-          loom_op_const_operands(source_op)[value_ref->index];
+    case LOOM_LOW_LOWER_VALUE_REF_OPERAND: {
+      const loom_op_vtable_t* vtable =
+          loom_op_vtable(context->module, source_op);
+      const loom_value_slice_t span =
+          loom_op_operand_field_span(vtable, source_op, value_ref->index);
+      IREE_ASSERT_LT(value_ref->element_index, span.count);
+      *out_source_value_id = span.values[value_ref->element_index];
       return true;
+    }
     case LOOM_LOW_LOWER_VALUE_REF_RESULT:
       IREE_ASSERT_LT(value_ref->index, source_op->result_count);
       *out_source_value_id = loom_op_const_results(source_op)[value_ref->index];
@@ -560,7 +566,7 @@ static void loom_low_lower_mark_rule_storage_demands(
           (uint16_t)(emit->operand_ref_start + operand_ordinal);
       loom_value_id_t source_value_id = LOOM_VALUE_ID_INVALID;
       if (loom_low_lower_rule_value_ref_source_value(
-              rule_set, selected_plan->source_op, value_ref_index,
+              context, rule_set, selected_plan->source_op, value_ref_index,
               &source_value_id)) {
         loom_low_lower_mark_value_storage_required(context, source_value_id);
       }
@@ -592,7 +598,7 @@ static void loom_low_lower_mark_rule_storage_demands(
         (uint16_t)(rule->alias_ref_start + alias_ordinal * 2);
     loom_value_id_t source_value_id = LOOM_VALUE_ID_INVALID;
     if (loom_low_lower_rule_value_ref_source_value(
-            rule_set, selected_plan->source_op, value_ref_index,
+            context, rule_set, selected_plan->source_op, value_ref_index,
             &source_value_id)) {
       loom_low_lower_mark_value_storage_required(context, source_value_id);
     }

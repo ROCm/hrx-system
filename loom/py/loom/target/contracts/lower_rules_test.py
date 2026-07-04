@@ -458,7 +458,8 @@ def test_compile_lower_rule_set_offsets_variadic_operand_elements() -> None:
     value_refs = compiled.value_refs[
         emit.operand_ref_start : emit.operand_ref_start + emit.operand_ref_count
     ]
-    assert tuple(value_ref.index for value_ref in value_refs) == (0, 1, 2, 3)
+    assert tuple(value_ref.index for value_ref in value_refs) == (0, 0, 0, 0)
+    assert tuple(value_ref.element_index for value_ref in value_refs) == (0, 1, 2, 3)
 
 
 def test_compile_lower_rule_set_compiles_source_memory_dynamic_term_operand() -> None:

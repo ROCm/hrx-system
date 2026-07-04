@@ -141,6 +141,7 @@ def value_ref_row(row: LowerValueRef) -> list[str]:
         always=True,
     )
     _append_field(fields, "index", row.index, always=True)
+    _append_field(fields, "element_index", row.element_index)
     _append_field(fields, "materializer_index", row.materializer_index)
     return fields
 

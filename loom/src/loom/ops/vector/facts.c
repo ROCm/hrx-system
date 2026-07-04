@@ -769,6 +769,15 @@ iree_status_t loom_vector_fragment_load_facts(
   fact.shape_value_ids[1] = loom_vector_fragment_load_columns(op);
   fact.flags |= LOOM_VECTOR_FRAGMENT_FACT_FLAG_HAS_NATIVE_STORAGE;
 
+  loom_vector_encoding_auxiliary_view_t auxiliary;
+  if (!loom_vector_encoding_auxiliary_view_resolve(
+          module, loom_vector_fragment_load_auxiliary(op),
+          loom_vector_fragment_load_auxiliary_names(op), &auxiliary, NULL)) {
+    result_facts[0] = loom_value_facts_unknown();
+    return iree_ok_status();
+  }
+  loom_vector_fragment_copy_present_auxiliary(auxiliary, &fact.auxiliary);
+
   const loom_value_id_t view_value_id = loom_vector_fragment_load_view(op);
   loom_value_fact_storage_schema_t storage_schema = {0};
   if (loom_encoding_query_type_storage_schema(

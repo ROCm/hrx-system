@@ -18,6 +18,7 @@ class VectorMemoryMixin:
         indices: list[int | ValueRef],
         rows: ValueRef,
         columns: ValueRef,
+        auxiliary: dict[str, ValueRef] = ...,
         cache_scope: str | None = ...,
         cache_temporal: str | None = ...,
         results: list[Type | TiedResultSpec],

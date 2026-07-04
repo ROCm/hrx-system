@@ -1169,8 +1169,8 @@ typedef struct loom_memory_access_vtable_t {
   // Index of the per-lane offsets operand.
   uint8_t offsets_operand_index;
 
-  // Operand offset of the variadic dynamic logical-origin index slice.
-  uint8_t indices_operand_offset;
+  // Operand field index of the dynamic logical-origin index slice.
+  uint8_t indices_operand_field_index;
 
   // Index of the static logical-origin indices attr.
   uint8_t static_indices_attr_index;
@@ -1202,8 +1202,9 @@ typedef struct loom_memory_access_t {
   // Operation implementing the MemoryAccess interface.
   const loom_op_t* op;
 
-  // Interface vtable for |op|.
-  const loom_memory_access_vtable_t* vtable;
+  // Operation vtable for |op|. The memory-access vtable hangs from this while
+  // segmented operand helpers use the same vtable to resolve field spans.
+  const loom_op_vtable_t* op_vtable;
 } loom_memory_access_t;
 
 //===----------------------------------------------------------------------===//

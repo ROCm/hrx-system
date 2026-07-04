@@ -1444,16 +1444,32 @@ vector_fragment_load = Op(
         "differ, the operation represents a fragment-shaped numeric conversion "
         "at the load boundary and target lowering must either select that "
         "conversion explicitly or reject it with target diagnostics."
+        " When the view storage schema requires runtime auxiliary values such "
+        "as sparse metadata, scale values, or codebooks, the optional keyed "
+        "`using` operands provide those SSA values while the view type remains "
+        "the source of truth for the storage schema."
     ),
     operands=[
         Operand("view", VIEW, doc="Typed source view holding logical matrix data."),
+        Operand("indices", INDEX, doc="Dynamic logical origin indices.", variadic=True),
         Operand("rows", INDEX, doc="Logical matrix row count for this fragment role."),
         Operand("columns", INDEX, doc="Logical matrix column count for this fragment role."),
-        Operand("indices", INDEX, doc="Dynamic logical origin indices.", variadic=True),
+        Operand(
+            "auxiliary",
+            VECTOR,
+            variadic=True,
+            doc="Optional keyed runtime auxiliary operands required by the view storage schema.",
+        ),
     ],
     results=[Result("result", VECTOR, doc="Loaded physical matrix fragment payload.")],
     attrs=[
         AttrDef("role", ATTR_TYPE_ENUM, enum_def=VectorFragmentRole),
+        AttrDef(
+            "auxiliary_names",
+            ATTR_TYPE_DICT,
+            optional=True,
+            doc="Sorted auxiliary operand keys mapped to auxiliary operand ordinals.",
+        ),
         *_indexed_memory_attrs(),
     ],
     traits=[REFINABLE_RESULT_TYPE_REFS],
@@ -1471,6 +1487,10 @@ vector_fragment_load = Op(
         COMMA,
         Ref("columns"),
         RBRACKET,
+        OptionalGroup(
+            [kw("using"), OperandDict("auxiliary", "auxiliary_names")],
+            anchor="auxiliary",
+        ),
         AttrDict(),
         COLON,
         TypeOf("view"),
@@ -1479,6 +1499,7 @@ vector_fragment_load = Op(
     ],
     examples=[
         "%lhs = vector.fragment.load<lhs> %a[%row, %k0] shape [%m, %k] : view<[%M]x[%K]xf16, %layout> -> vector<16xf16>",
+        "%rhs = vector.fragment.load<rhs> %b[%k0, %col] shape [%k, %n] using {sparsity = %metadata : vector<1xi32>} : view<[%K]x[%N]xf8E4M3, %storage> -> vector<8xi32>",
     ],
 )
 

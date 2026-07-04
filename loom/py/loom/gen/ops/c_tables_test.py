@@ -1000,9 +1000,29 @@ def test_generate_tables_memory_access_defaults_use_matching_fields() -> None:
     assert "static const loom_memory_access_vtable_t loom_test_load_memory_access" in tables_c
     assert ".view_operand_index = 0," in tables_c
     assert ".value_operand_index = 255," in tables_c
-    assert ".indices_operand_offset = 1," in tables_c
+    assert ".indices_operand_field_index = 1," in tables_c
     assert ".static_indices_attr_index = 0," in tables_c
     assert ".cache_scope_attr_index = 255," in tables_c
+
+
+def test_generate_tables_memory_access_accepts_segmented_indices_field() -> None:
+    op = Op(
+        "test.load",
+        group=Dialect("test"),
+        operands=[
+            Operand("view", ANY),
+            Operand("indices", ANY, variadic=True),
+            Operand("auxiliary", ANY, variadic=True),
+        ],
+        results=[Result("result", ANY)],
+        interfaces=[MemoryAccessInterface()],
+    )
+
+    tables_c = generate_tables_c("test", 0, [op])
+
+    assert "LOOM_OP_VTABLE_SEGMENTED_OPERANDS" in tables_c
+    assert ".view_operand_index = 0," in tables_c
+    assert ".indices_operand_field_index = 1," in tables_c
 
 
 def test_generate_tables_memory_access_rejects_explicit_missing_field() -> None:

@@ -1311,26 +1311,40 @@ iree_status_t loom_region_branch_build_region_terminator(
 
 loom_memory_access_t loom_memory_access_cast(const loom_module_t* module,
                                              const loom_op_t* op) {
-  if (!op) return (loom_memory_access_t){.op = NULL, .vtable = NULL};
+  if (!op) return (loom_memory_access_t){.op = NULL, .op_vtable = NULL};
   const loom_op_vtable_t* vtable = loom_op_vtable(module, op);
   if (!vtable || !vtable->memory_access) {
-    return (loom_memory_access_t){.op = NULL, .vtable = NULL};
+    return (loom_memory_access_t){.op = NULL, .op_vtable = NULL};
   }
-  return (loom_memory_access_t){.op = op, .vtable = vtable->memory_access};
+  return (loom_memory_access_t){.op = op, .op_vtable = vtable};
+}
+
+static const loom_memory_access_vtable_t* loom_memory_access_vtable(
+    loom_memory_access_t access) {
+  return access.op_vtable ? access.op_vtable->memory_access : NULL;
 }
 
 static loom_value_id_t loom_memory_access_operand(loom_memory_access_t access,
-                                                  uint8_t operand_index) {
-  if (!access.vtable || operand_index == LOOM_OPERAND_INDEX_NONE ||
-      operand_index >= access.op->operand_count) {
+                                                  uint8_t operand_field_index) {
+  if (!access.op || !access.op_vtable ||
+      operand_field_index == LOOM_OPERAND_INDEX_NONE) {
     return LOOM_VALUE_ID_INVALID;
   }
-  return loom_op_operands(access.op)[operand_index];
+  if (!loom_op_vtable_has_segmented_operands(access.op_vtable)) {
+    if (operand_field_index >= access.op->operand_count) {
+      return LOOM_VALUE_ID_INVALID;
+    }
+    return loom_op_operands(access.op)[operand_field_index];
+  }
+  loom_value_slice_t span = loom_op_operand_field_span(
+      access.op_vtable, access.op, operand_field_index);
+  return span.count == 1 ? span.values[0] : LOOM_VALUE_ID_INVALID;
 }
 
 static loom_attribute_t loom_memory_access_attr(loom_memory_access_t access,
                                                 uint8_t attr_index) {
-  if (!access.vtable || attr_index == LOOM_ATTR_INDEX_NONE ||
+  if (!access.op || !loom_memory_access_vtable(access) ||
+      attr_index == LOOM_ATTR_INDEX_NONE ||
       attr_index >= access.op->attribute_count) {
     return loom_attr_absent();
   }
@@ -1338,112 +1352,127 @@ static loom_attribute_t loom_memory_access_attr(loom_memory_access_t access,
 }
 
 loom_value_id_t loom_memory_access_view(loom_memory_access_t access) {
+  const loom_memory_access_vtable_t* vtable = loom_memory_access_vtable(access);
   return loom_memory_access_operand(
-      access, access.vtable ? access.vtable->view_operand_index
-                            : LOOM_OPERAND_INDEX_NONE);
+      access, vtable ? vtable->view_operand_index : LOOM_OPERAND_INDEX_NONE);
 }
 
 loom_value_id_t loom_memory_access_value(loom_memory_access_t access) {
+  const loom_memory_access_vtable_t* vtable = loom_memory_access_vtable(access);
   return loom_memory_access_operand(
-      access, access.vtable ? access.vtable->value_operand_index
-                            : LOOM_OPERAND_INDEX_NONE);
+      access, vtable ? vtable->value_operand_index : LOOM_OPERAND_INDEX_NONE);
 }
 
 loom_value_id_t loom_memory_access_expected(loom_memory_access_t access) {
-  return loom_memory_access_operand(
-      access, access.vtable ? access.vtable->expected_operand_index
-                            : LOOM_OPERAND_INDEX_NONE);
+  const loom_memory_access_vtable_t* vtable = loom_memory_access_vtable(access);
+  return loom_memory_access_operand(access, vtable
+                                                ? vtable->expected_operand_index
+                                                : LOOM_OPERAND_INDEX_NONE);
 }
 
 loom_value_id_t loom_memory_access_replacement(loom_memory_access_t access) {
+  const loom_memory_access_vtable_t* vtable = loom_memory_access_vtable(access);
   return loom_memory_access_operand(
-      access, access.vtable ? access.vtable->replacement_operand_index
-                            : LOOM_OPERAND_INDEX_NONE);
+      access,
+      vtable ? vtable->replacement_operand_index : LOOM_OPERAND_INDEX_NONE);
 }
 
 loom_value_id_t loom_memory_access_mask(loom_memory_access_t access) {
+  const loom_memory_access_vtable_t* vtable = loom_memory_access_vtable(access);
   return loom_memory_access_operand(
-      access, access.vtable ? access.vtable->mask_operand_index
-                            : LOOM_OPERAND_INDEX_NONE);
+      access, vtable ? vtable->mask_operand_index : LOOM_OPERAND_INDEX_NONE);
 }
 
 loom_value_id_t loom_memory_access_passthrough(loom_memory_access_t access) {
+  const loom_memory_access_vtable_t* vtable = loom_memory_access_vtable(access);
   return loom_memory_access_operand(
-      access, access.vtable ? access.vtable->passthrough_operand_index
-                            : LOOM_OPERAND_INDEX_NONE);
+      access,
+      vtable ? vtable->passthrough_operand_index : LOOM_OPERAND_INDEX_NONE);
 }
 
 loom_value_id_t loom_memory_access_offsets(loom_memory_access_t access) {
+  const loom_memory_access_vtable_t* vtable = loom_memory_access_vtable(access);
   return loom_memory_access_operand(
-      access, access.vtable ? access.vtable->offsets_operand_index
-                            : LOOM_OPERAND_INDEX_NONE);
+      access, vtable ? vtable->offsets_operand_index : LOOM_OPERAND_INDEX_NONE);
 }
 
 loom_value_slice_t loom_memory_access_dynamic_indices(
     loom_memory_access_t access) {
-  if (!access.vtable ||
-      access.vtable->indices_operand_offset == LOOM_OPERAND_INDEX_NONE ||
-      access.vtable->indices_operand_offset >= access.op->operand_count) {
+  const loom_memory_access_vtable_t* vtable = loom_memory_access_vtable(access);
+  if (!access.op || !access.op_vtable || !vtable ||
+      vtable->indices_operand_field_index == LOOM_OPERAND_INDEX_NONE) {
     return (loom_value_slice_t){.values = NULL, .count = 0};
   }
-  uint8_t offset = access.vtable->indices_operand_offset;
-  return (loom_value_slice_t){
-      .values = loom_op_operands(access.op) + offset,
-      .count = (uint16_t)(access.op->operand_count - offset),
-  };
+  if (!loom_op_vtable_has_segmented_operands(access.op_vtable)) {
+    uint8_t offset = vtable->indices_operand_field_index;
+    if (offset > access.op->operand_count) {
+      return (loom_value_slice_t){.values = NULL, .count = 0};
+    }
+    return (loom_value_slice_t){
+        .values = loom_op_operands(access.op) + offset,
+        .count = (uint16_t)(access.op->operand_count - offset),
+    };
+  }
+  return loom_op_operand_field_span(access.op_vtable, access.op,
+                                    vtable->indices_operand_field_index);
 }
 
 loom_attribute_t loom_memory_access_static_indices(
     loom_memory_access_t access) {
-  return loom_memory_access_attr(
-      access, access.vtable ? access.vtable->static_indices_attr_index
-                            : LOOM_ATTR_INDEX_NONE);
+  const loom_memory_access_vtable_t* vtable = loom_memory_access_vtable(access);
+  return loom_memory_access_attr(access, vtable
+                                             ? vtable->static_indices_attr_index
+                                             : LOOM_ATTR_INDEX_NONE);
 }
 
 loom_attribute_t loom_memory_access_cache_scope(loom_memory_access_t access) {
+  const loom_memory_access_vtable_t* vtable = loom_memory_access_vtable(access);
   return loom_memory_access_attr(
-      access, access.vtable ? access.vtable->cache_scope_attr_index
-                            : LOOM_ATTR_INDEX_NONE);
+      access, vtable ? vtable->cache_scope_attr_index : LOOM_ATTR_INDEX_NONE);
 }
 
 loom_attribute_t loom_memory_access_cache_temporal(
     loom_memory_access_t access) {
-  return loom_memory_access_attr(
-      access, access.vtable ? access.vtable->cache_temporal_attr_index
-                            : LOOM_ATTR_INDEX_NONE);
+  const loom_memory_access_vtable_t* vtable = loom_memory_access_vtable(access);
+  return loom_memory_access_attr(access, vtable
+                                             ? vtable->cache_temporal_attr_index
+                                             : LOOM_ATTR_INDEX_NONE);
 }
 
 loom_attribute_t loom_memory_access_atomic_kind(loom_memory_access_t access) {
+  const loom_memory_access_vtable_t* vtable = loom_memory_access_vtable(access);
   return loom_memory_access_attr(
-      access, access.vtable ? access.vtable->atomic_kind_attr_index
-                            : LOOM_ATTR_INDEX_NONE);
+      access, vtable ? vtable->atomic_kind_attr_index : LOOM_ATTR_INDEX_NONE);
 }
 
 loom_attribute_t loom_memory_access_atomic_ordering(
     loom_memory_access_t access) {
+  const loom_memory_access_vtable_t* vtable = loom_memory_access_vtable(access);
   return loom_memory_access_attr(
-      access, access.vtable ? access.vtable->atomic_ordering_attr_index
-                            : LOOM_ATTR_INDEX_NONE);
+      access,
+      vtable ? vtable->atomic_ordering_attr_index : LOOM_ATTR_INDEX_NONE);
 }
 
 loom_attribute_t loom_memory_access_atomic_success_ordering(
     loom_memory_access_t access) {
+  const loom_memory_access_vtable_t* vtable = loom_memory_access_vtable(access);
   return loom_memory_access_attr(
-      access, access.vtable ? access.vtable->atomic_success_ordering_attr_index
-                            : LOOM_ATTR_INDEX_NONE);
+      access, vtable ? vtable->atomic_success_ordering_attr_index
+                     : LOOM_ATTR_INDEX_NONE);
 }
 
 loom_attribute_t loom_memory_access_atomic_failure_ordering(
     loom_memory_access_t access) {
+  const loom_memory_access_vtable_t* vtable = loom_memory_access_vtable(access);
   return loom_memory_access_attr(
-      access, access.vtable ? access.vtable->atomic_failure_ordering_attr_index
-                            : LOOM_ATTR_INDEX_NONE);
+      access, vtable ? vtable->atomic_failure_ordering_attr_index
+                     : LOOM_ATTR_INDEX_NONE);
 }
 
 loom_attribute_t loom_memory_access_atomic_scope(loom_memory_access_t access) {
+  const loom_memory_access_vtable_t* vtable = loom_memory_access_vtable(access);
   return loom_memory_access_attr(
-      access, access.vtable ? access.vtable->atomic_scope_attr_index
-                            : LOOM_ATTR_INDEX_NONE);
+      access, vtable ? vtable->atomic_scope_attr_index : LOOM_ATTR_INDEX_NONE);
 }
 
 //===----------------------------------------------------------------------===//
