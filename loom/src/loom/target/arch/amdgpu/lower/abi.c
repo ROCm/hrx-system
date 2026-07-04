@@ -188,22 +188,20 @@ static iree_string_view_t loom_amdgpu_argument_value_name(
 }
 
 static uint32_t loom_amdgpu_direct_arg_byte_count(loom_type_t abi_type) {
-  return loom_low_register_type_unit_count(abi_type) *
-         LOOM_AMDGPU_HAL_KERNEL_ABI_DIRECT_SCALAR_KERNARG_SIZE;
+  const uint64_t byte_count =
+      (uint64_t)loom_low_register_type_unit_count(abi_type) *
+      LOOM_AMDGPU_HAL_KERNEL_ABI_DIRECT_SCALAR_KERNARG_SIZE;
+  IREE_ASSERT_LE(byte_count, UINT32_MAX);
+  return (uint32_t)byte_count;
 }
 
-static iree_status_t loom_amdgpu_align_kernarg_offset(uint64_t* inout_offset,
-                                                      uint32_t alignment) {
+static void loom_amdgpu_align_kernarg_offset(uint64_t* inout_offset,
+                                             uint32_t alignment) {
   *inout_offset = iree_align_uint64(*inout_offset, alignment);
-  if (*inout_offset > UINT32_MAX) {
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "AMDGPU HAL ABI kernarg offset exceeds metadata capacity");
-  }
-  return iree_ok_status();
+  IREE_ASSERT_LE(*inout_offset, UINT32_MAX);
 }
 
-static iree_status_t loom_amdgpu_assign_hal_resource_layout(
+static void loom_amdgpu_assign_hal_resource_layout(
     const loom_low_lower_abi_argument_t* argument, uint16_t parameter_index,
     uint64_t* inout_kernarg_offset,
     loom_amdgpu_hal_kernarg_resource_t* resources,
@@ -212,9 +210,9 @@ static iree_status_t loom_amdgpu_assign_hal_resource_layout(
                   (uint64_t)argument->resource_index < resource_count,
               "AMDGPU HAL ABI argument mapping produced an invalid resource "
               "index");
-  IREE_RETURN_IF_ERROR(loom_amdgpu_align_kernarg_offset(
+  loom_amdgpu_align_kernarg_offset(
       inout_kernarg_offset,
-      LOOM_AMDGPU_HAL_KERNEL_ABI_GLOBAL_BUFFER_KERNARG_ALIGNMENT));
+      LOOM_AMDGPU_HAL_KERNEL_ABI_GLOBAL_BUFFER_KERNARG_ALIGNMENT);
   const iree_host_size_t binding_index =
       (iree_host_size_t)argument->resource_index;
   IREE_ASSERT(resources[binding_index].kernarg_size == 0,
@@ -234,18 +232,18 @@ static iree_status_t loom_amdgpu_assign_hal_resource_layout(
   };
   *inout_kernarg_offset +=
       LOOM_AMDGPU_HAL_KERNEL_ABI_GLOBAL_BUFFER_KERNARG_SIZE;
-  return iree_ok_status();
+  IREE_ASSERT_LE(*inout_kernarg_offset, UINT32_MAX);
 }
 
-static iree_status_t loom_amdgpu_assign_hal_direct_arg_layout(
+static void loom_amdgpu_assign_hal_direct_arg_layout(
     const loom_module_t* module, const loom_value_id_t* source_arguments,
     const loom_low_lower_abi_argument_t* argument, uint16_t parameter_index,
     uint16_t direct_argument_index, uint64_t* inout_kernarg_offset,
     uint64_t* inout_constant_count,
     loom_amdgpu_hal_kernarg_direct_arg_t* direct_args) {
-  IREE_RETURN_IF_ERROR(loom_amdgpu_align_kernarg_offset(
+  loom_amdgpu_align_kernarg_offset(
       inout_kernarg_offset,
-      LOOM_AMDGPU_HAL_KERNEL_ABI_DIRECT_SCALAR_KERNARG_ALIGNMENT));
+      LOOM_AMDGPU_HAL_KERNEL_ABI_DIRECT_SCALAR_KERNARG_ALIGNMENT);
   const uint32_t kernarg_size =
       loom_amdgpu_direct_arg_byte_count(argument->abi_type);
   direct_args[direct_argument_index] = (loom_amdgpu_hal_kernarg_direct_arg_t){
@@ -263,7 +261,8 @@ static iree_status_t loom_amdgpu_assign_hal_direct_arg_layout(
   *inout_kernarg_offset += kernarg_size;
   *inout_constant_count +=
       kernarg_size / LOOM_AMDGPU_HAL_KERNEL_ABI_DIRECT_SCALAR_KERNARG_SIZE;
-  return iree_ok_status();
+  IREE_ASSERT_LE(*inout_kernarg_offset, UINT32_MAX);
+  IREE_ASSERT_LE(*inout_constant_count, UINT32_MAX);
 }
 
 iree_status_t loom_amdgpu_map_abi_layout(
@@ -335,24 +334,21 @@ iree_status_t loom_amdgpu_map_abi_layout(
     const loom_low_lower_abi_argument_t* argument =
         &argument_map[parameter_index];
     if (argument->kind == LOOM_LOW_LOWER_ABI_ARGUMENT_RESOURCE) {
-      IREE_RETURN_IF_ERROR(loom_amdgpu_assign_hal_resource_layout(
-          argument, parameter_index, &kernarg_offset, resources,
-          resource_count));
+      loom_amdgpu_assign_hal_resource_layout(argument, parameter_index,
+                                             &kernarg_offset, resources,
+                                             resource_count);
       continue;
     }
-    IREE_RETURN_IF_ERROR(loom_amdgpu_assign_hal_direct_arg_layout(
+    loom_amdgpu_assign_hal_direct_arg_layout(
         loom_low_lower_context_module(context), source_arguments, argument,
         parameter_index, direct_argument_index, &kernarg_offset,
-        &constant_count, direct_args));
+        &constant_count, direct_args);
     ++direct_argument_index;
   }
-  kernarg_offset = iree_align_uint64(
-      kernarg_offset,
+  loom_amdgpu_align_kernarg_offset(
+      &kernarg_offset,
       LOOM_AMDGPU_HAL_KERNEL_ABI_GLOBAL_BUFFER_KERNARG_ALIGNMENT);
-  if (kernarg_offset > UINT32_MAX || constant_count > UINT32_MAX) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "AMDGPU HAL ABI layout exceeds metadata capacity");
-  }
+  IREE_ASSERT_LE(constant_count, UINT32_MAX);
 
   const loom_amdgpu_hal_kernel_abi_layout_t layout = {
       .function_op = NULL,
