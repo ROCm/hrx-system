@@ -1754,11 +1754,9 @@ iree_status_t loom_amdgpu_try_emit_vgpr_b32_sdwa_extract(
     loom_value_id_t* out_value, bool* out_selected) {
   *out_value = LOOM_VALUE_ID_INVALID;
   *out_selected = false;
-  if (iree_any_bit_set(flags,
-                       ~LOOM_AMDGPU_VGPR_SDWA_EXTRACT_FLAG_SIGN_EXTEND)) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "unsupported AMDGPU SDWA extract flags");
-  }
+  IREE_ASSERT(
+      !iree_any_bit_set(flags, ~LOOM_AMDGPU_VGPR_SDWA_EXTRACT_FLAG_SIGN_EXTEND),
+      "unsupported AMDGPU SDWA extract flags");
 
   uint32_t source_selector = 0;
   if (!loom_amdgpu_select_sdwa_extract_selector(bit_offset, bit_count,
@@ -1816,10 +1814,9 @@ iree_status_t loom_amdgpu_try_emit_vgpr_b32_bfe_extract(
     loom_value_id_t* out_value, bool* out_selected) {
   *out_value = LOOM_VALUE_ID_INVALID;
   *out_selected = false;
-  if (iree_any_bit_set(flags, ~LOOM_AMDGPU_VGPR_BFE_EXTRACT_FLAG_SIGN_EXTEND)) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "unsupported AMDGPU BFE extract flags");
-  }
+  IREE_ASSERT(
+      !iree_any_bit_set(flags, ~LOOM_AMDGPU_VGPR_BFE_EXTRACT_FLAG_SIGN_EXTEND),
+      "unsupported AMDGPU BFE extract flags");
   if (bit_offset > 31 || bit_count < 1 || bit_count > 32 ||
       bit_offset + bit_count > 32) {
     return iree_ok_status();
