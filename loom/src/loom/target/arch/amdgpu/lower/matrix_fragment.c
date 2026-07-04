@@ -22,6 +22,7 @@
 #include "loom/ops/vector/ops.h"
 #include "loom/ops/view/ops.h"
 #include "loom/target/arch/amdgpu/error_catalog.h"
+#include "loom/target/arch/amdgpu/lower/candidates/compare_candidates.h"
 #include "loom/target/arch/amdgpu/lower/constants.h"
 #include "loom/target/arch/amdgpu/lower/emit.h"
 #include "loom/target/arch/amdgpu/lower/legality.h"
@@ -1480,26 +1481,31 @@ static bool loom_amdgpu_fragment_repack_has_required_descriptors(
   return true;
 }
 
-static bool loom_amdgpu_has_compare_i32_src1_inline(
-    const loom_low_descriptor_set_t* descriptor_set,
+static loom_amdgpu_descriptor_ref_t
+loom_amdgpu_fragment_memory_compare_i32_src1_inline_ref(
     loom_amdgpu_descriptor_ref_t descriptor_ref) {
   switch (descriptor_ref) {
     case LOOM_AMDGPU_DESCRIPTOR_REF_V_CMP_EQ_I32:
-      return loom_amdgpu_descriptor_set_has_ref(
-          descriptor_set, LOOM_AMDGPU_DESCRIPTOR_REF_V_CMP_EQ_I32_SRC1_INLINE);
+      return kLoomAmdgpuVectorCmpiCompareDescriptorCandidates
+          [LOOM_VECTOR_CMPI_PREDICATE_EQ]
+              .src1_inline_descriptor_ref;
     case LOOM_AMDGPU_DESCRIPTOR_REF_V_CMP_NE_I32:
-      return loom_amdgpu_descriptor_set_has_key(
-          descriptor_set, IREE_SV("amdgpu.v_cmp_ne_i32.src1_inline"));
+      return kLoomAmdgpuVectorCmpiCompareDescriptorCandidates
+          [LOOM_VECTOR_CMPI_PREDICATE_NE]
+              .src1_inline_descriptor_ref;
     default:
-      return false;
+      return LOOM_AMDGPU_DESCRIPTOR_REF_NONE;
   }
 }
 
 static bool loom_amdgpu_can_emit_compare_u32_immediate(
     const loom_low_descriptor_set_t* descriptor_set,
     loom_amdgpu_descriptor_ref_t descriptor_ref, uint32_t immediate) {
+  const loom_amdgpu_descriptor_ref_t src1_inline_ref =
+      loom_amdgpu_fragment_memory_compare_i32_src1_inline_ref(descriptor_ref);
   if (immediate <= LOOM_AMDGPU_SOURCE_INLINE_U32_MAX &&
-      loom_amdgpu_has_compare_i32_src1_inline(descriptor_set, descriptor_ref)) {
+      src1_inline_ref != LOOM_AMDGPU_DESCRIPTOR_REF_NONE &&
+      loom_amdgpu_descriptor_set_has_ref(descriptor_set, src1_inline_ref)) {
     return true;
   }
   return loom_amdgpu_descriptor_set_has_ref(descriptor_set, descriptor_ref) &&
@@ -4589,25 +4595,12 @@ static iree_status_t loom_amdgpu_emit_fragment_memory_cmp_u32_lit(
   *out_mask = LOOM_VALUE_ID_INVALID;
   loom_low_lower_resolved_descriptor_t src1_inline_descriptor = {0};
   if (immediate <= LOOM_AMDGPU_SOURCE_INLINE_U32_MAX) {
-    if (descriptor_ref == LOOM_AMDGPU_DESCRIPTOR_REF_V_CMP_EQ_I32) {
+    const loom_amdgpu_descriptor_ref_t src1_inline_ref =
+        loom_amdgpu_fragment_memory_compare_i32_src1_inline_ref(descriptor_ref);
+    if (src1_inline_ref != LOOM_AMDGPU_DESCRIPTOR_REF_NONE) {
       bool present = false;
       IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_descriptor_ref_if_present(
-          context, LOOM_AMDGPU_DESCRIPTOR_REF_V_CMP_EQ_I32_SRC1_INLINE,
-          &src1_inline_descriptor, &present));
-    } else if (descriptor_ref == LOOM_AMDGPU_DESCRIPTOR_REF_V_CMP_NE_I32) {
-      const loom_low_descriptor_set_t* descriptor_set =
-          loom_low_lower_context_descriptor_set(context);
-      const uint32_t descriptor_ordinal =
-          loom_low_descriptor_set_lookup_descriptor(
-              descriptor_set, IREE_SV("amdgpu.v_cmp_ne_i32.src1_inline"));
-      if (descriptor_ordinal != LOOM_LOW_DESCRIPTOR_ORDINAL_NONE) {
-        const loom_low_descriptor_t* descriptor =
-            loom_low_descriptor_set_descriptor_at(descriptor_set,
-                                                  descriptor_ordinal);
-        IREE_ASSERT(descriptor != NULL);
-        IREE_RETURN_IF_ERROR(loom_low_lower_resolve_descriptor_row(
-            context, descriptor, &src1_inline_descriptor));
-      }
+          context, src1_inline_ref, &src1_inline_descriptor, &present));
     }
   }
   if (src1_inline_descriptor.descriptor != NULL) {
