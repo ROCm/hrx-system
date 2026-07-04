@@ -591,38 +591,34 @@ iree_status_t loom_amdgpu_make_descriptor_row_implicit_resource_type(
       descriptor_set, descriptor, out_type);
 }
 
-iree_status_t loom_amdgpu_low_type_register_class_is(
-    loom_low_lower_context_t* context, loom_type_t type, uint16_t reg_class_id,
-    bool* out_match) {
-  *out_match = false;
+bool loom_amdgpu_low_type_is_register_class(loom_low_lower_context_t* context,
+                                            loom_type_t type,
+                                            uint16_t reg_class_id) {
   if (!loom_low_type_is_register(type)) {
-    return iree_ok_status();
+    return false;
   }
-  *out_match = loom_low_register_type_descriptor_set_stable_id(type) ==
-                   loom_low_lower_context_descriptor_set(context)->stable_id &&
-               loom_low_register_type_class_id(type) == reg_class_id;
-  return iree_ok_status();
+  return loom_low_register_type_descriptor_set_stable_id(type) ==
+             loom_low_lower_context_descriptor_set(context)->stable_id &&
+         loom_low_register_type_class_id(type) == reg_class_id;
 }
 
-iree_status_t loom_amdgpu_low_type_is_register_class_count(
+bool loom_amdgpu_low_type_is_register_class_count(
     loom_low_lower_context_t* context, loom_type_t type, uint16_t reg_class_id,
-    uint32_t register_unit_count, bool* out_match) {
-  *out_match = false;
+    uint32_t register_unit_count) {
   if (!loom_low_type_is_register(type) ||
       loom_low_register_type_unit_count(type) != register_unit_count) {
-    return iree_ok_status();
+    return false;
   }
-  return loom_amdgpu_low_type_register_class_is(context, type, reg_class_id,
-                                                out_match);
+  return loom_amdgpu_low_type_is_register_class(context, type, reg_class_id);
 }
 
-iree_status_t loom_amdgpu_low_value_is_register_class_count(
+bool loom_amdgpu_low_value_is_register_class_count(
     loom_low_lower_context_t* context, loom_value_id_t low_value,
-    uint16_t reg_class_id, uint32_t register_unit_count, bool* out_match) {
+    uint16_t reg_class_id, uint32_t register_unit_count) {
   const loom_module_t* module = loom_low_lower_context_module(context);
   return loom_amdgpu_low_type_is_register_class_count(
       context, loom_module_value_type(module, low_value), reg_class_id,
-      register_unit_count, out_match);
+      register_unit_count);
 }
 
 typedef struct loom_amdgpu_register_shape_t {

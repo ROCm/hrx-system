@@ -45,8 +45,9 @@ static iree_status_t loom_amdgpu_dotf_result_is_one_vgpr(
   if (loom_low_register_type_unit_count(low_result_type) != 1) {
     return iree_ok_status();
   }
-  return loom_amdgpu_low_type_register_class_is(
-      context, low_result_type, LOOM_AMDGPU_REG_CLASS_ID_VGPR, out_match);
+  *out_match = loom_amdgpu_low_type_is_register_class(
+      context, low_result_type, LOOM_AMDGPU_REG_CLASS_ID_VGPR);
+  return iree_ok_status();
 }
 
 static iree_status_t loom_amdgpu_dotf_low_value_is_one_vgpr(
@@ -58,8 +59,9 @@ static iree_status_t loom_amdgpu_dotf_low_value_is_one_vgpr(
       loom_low_register_type_unit_count(type) != 1) {
     return iree_ok_status();
   }
-  return loom_amdgpu_low_type_register_class_is(
-      context, type, LOOM_AMDGPU_REG_CLASS_ID_VGPR, out_match);
+  *out_match = loom_amdgpu_low_type_is_register_class(
+      context, type, LOOM_AMDGPU_REG_CLASS_ID_VGPR);
+  return iree_ok_status();
 }
 
 iree_status_t loom_amdgpu_select_vector_dotf_plan(
