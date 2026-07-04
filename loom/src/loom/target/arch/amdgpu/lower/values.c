@@ -6250,12 +6250,6 @@ static iree_status_t loom_amdgpu_try_lower_vector_fp8_e8m0_pk8_native(
   return iree_ok_status();
 }
 
-static iree_status_t loom_amdgpu_incomplete_e8m0_pk8_decode_status(void) {
-  return iree_make_status(
-      IREE_STATUS_INTERNAL,
-      "accepted AMDGPU E8M0 pk8 FP8 vector decode did not cover all lanes");
-}
-
 static iree_status_t
 loom_amdgpu_try_lower_vector_fp8_identity_scalef32_to_packed_16bit_native(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
@@ -6563,7 +6557,10 @@ static iree_status_t loom_amdgpu_emit_vector_fp8_to_f32_lanes(
     return iree_ok_status();
   }
   if (loom_amdgpu_vector_16bit_float_conversion_plan_has_e8m0_scale(plan)) {
-    return loom_amdgpu_incomplete_e8m0_pk8_decode_status();
+    IREE_ASSERT_EQ(e8m0_pk8_lane_count, plan->lane_count);
+    IREE_ASSERT_UNREACHABLE(
+        "accepted AMDGPU E8M0 pk8 FP8 vector decode did not cover all lanes");
+    IREE_BUILTIN_UNREACHABLE();
   }
 
   loom_type_t mask_type = loom_type_none();
@@ -7064,7 +7061,10 @@ static iree_status_t loom_amdgpu_lower_vector_fp8_to_packed_bf16(
                                                plan->result_register_count);
   }
   if (loom_amdgpu_vector_16bit_float_conversion_plan_has_e8m0_scale(plan)) {
-    return loom_amdgpu_incomplete_e8m0_pk8_decode_status();
+    IREE_ASSERT_EQ(e8m0_pk8_register_count, plan->result_register_count);
+    IREE_ASSERT_UNREACHABLE(
+        "accepted AMDGPU E8M0 pk8 FP8 vector decode did not cover all lanes");
+    IREE_BUILTIN_UNREACHABLE();
   }
 
   uint32_t identity_scalef32_register_count = 0;
@@ -7242,7 +7242,10 @@ static iree_status_t loom_amdgpu_lower_vector_fp8_to_packed_f16(
                                                plan->result_register_count);
   }
   if (loom_amdgpu_vector_16bit_float_conversion_plan_has_e8m0_scale(plan)) {
-    return loom_amdgpu_incomplete_e8m0_pk8_decode_status();
+    IREE_ASSERT_EQ(e8m0_pk8_register_count, plan->result_register_count);
+    IREE_ASSERT_UNREACHABLE(
+        "accepted AMDGPU E8M0 pk8 FP8 vector decode did not cover all lanes");
+    IREE_BUILTIN_UNREACHABLE();
   }
 
   const loom_amdgpu_fp8_native_descriptors_t* native_descriptors = NULL;
@@ -7666,8 +7669,9 @@ static iree_string_view_t loom_amdgpu_vector_fp8_conversion_plan_key(
       return loom_amdgpu_vector_fp8_e8m0_pk8_conversion_plan_key(
           fp8_plan->result_element_type);
     }
-    return IREE_SV(
-        "amdgpu.vector_16bit_float_conversion.strategy.fp8_e8m0_incomplete");
+    IREE_ASSERT_UNREACHABLE(
+        "accepted AMDGPU E8M0 pk8 FP8 vector decode did not cover all lanes");
+    IREE_BUILTIN_UNREACHABLE();
   }
   if (loom_amdgpu_vector_16bit_float_conversion_plan_has_f32_scale(fp8_plan)) {
     if (loom_amdgpu_vector_fp8_plan_has_scalef32_packet(
