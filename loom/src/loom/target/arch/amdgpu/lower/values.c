@@ -4782,26 +4782,16 @@ static iree_status_t loom_amdgpu_compose_vgpr_16bit_float_lane_bits(
   *out_low_value = low_value;
   if (loom_amdgpu_low_value_defines_vgpr_low16(context, low_value)) {
     if (register_bit_offset == 0) {
-      const loom_value_id_t operands[] = {low_value};
-      loom_op_t* low_op = NULL;
-      IREE_RETURN_IF_ERROR(loom_amdgpu_emit_low_op(
+      return loom_amdgpu_emit_vgpr_unary(
           context, source_op,
           LOOM_AMDGPU_DESCRIPTOR_REF_V_BFE_U32_OFFSET_0_WIDTH_16_LOW16,
-          operands, IREE_ARRAYSIZE(operands),
-          loom_make_named_attr_slice(NULL, 0), &lane_type, 1, &low_op));
-      *out_low_value = loom_value_slice_get(loom_low_op_results(low_op), 0);
-      return iree_ok_status();
+          low_value, lane_type, out_low_value);
     }
     if (register_bit_offset == 16) {
-      const loom_value_id_t operands[] = {low_value};
-      loom_op_t* low_op = NULL;
-      IREE_RETURN_IF_ERROR(loom_amdgpu_emit_low_op(
+      return loom_amdgpu_emit_vgpr_unary(
           context, source_op,
-          LOOM_AMDGPU_DESCRIPTOR_REF_V_LSHLREV_B32_SRC0_16_LOW16, operands,
-          IREE_ARRAYSIZE(operands), loom_make_named_attr_slice(NULL, 0),
-          &lane_type, 1, &low_op));
-      *out_low_value = loom_value_slice_get(loom_low_op_results(low_op), 0);
-      return iree_ok_status();
+          LOOM_AMDGPU_DESCRIPTOR_REF_V_LSHLREV_B32_SRC0_16_LOW16, low_value,
+          lane_type, out_low_value);
     }
   }
 
@@ -5601,15 +5591,8 @@ static iree_status_t loom_amdgpu_emit_fp8_lane_to_f32_native(
   *out_low_lane = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_amdgpu_materialize_full_low_vgpr_b32(
       context, source_op, low_byte, &low_byte));
-  const loom_value_id_t operands[] = {low_byte};
-  loom_op_t* low_op = NULL;
-  IREE_RETURN_IF_ERROR(loom_low_lower_emit_resolved_descriptor_op(
-      context, descriptor, operands, IREE_ARRAYSIZE(operands),
-      loom_named_attr_slice_empty(), &result_lane_type, 1,
-      /*tied_results=*/NULL, /*tied_result_count=*/0, source_op->location,
-      &low_op));
-  *out_low_lane = loom_value_slice_get(loom_low_op_results(low_op), 0);
-  return iree_ok_status();
+  return loom_amdgpu_emit_resolved_vgpr_unary(
+      context, source_op, descriptor, low_byte, result_lane_type, out_low_lane);
 }
 
 static iree_status_t loom_amdgpu_lower_vector_fp8_to_f32_native_lane(
