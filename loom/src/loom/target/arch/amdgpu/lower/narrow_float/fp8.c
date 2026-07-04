@@ -2574,6 +2574,29 @@ bool loom_amdgpu_can_emit_fp8_pair_to_packed_bf16(
          LOOM_AMDGPU_FP8_PACKED_BF16_MISSING_REQUIREMENT_NONE;
 }
 
+bool loom_amdgpu_fp8_prefers_packed_bf16_pair_decode(
+    const loom_amdgpu_fp8_decode_plan_t* plan,
+    loom_amdgpu_fp8_decode_value_flags_t value_flags) {
+  if (!loom_amdgpu_can_emit_fp8_pair_to_packed_bf16(plan, value_flags)) {
+    return false;
+  }
+  if (!iree_any_bit_set(plan->flags,
+                        LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_NATIVE_F32_PAIR)) {
+    return true;
+  }
+  if (iree_any_bit_set(plan->flags,
+                       LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_NATIVE_BF16_PACK)) {
+    return false;
+  }
+
+  const loom_amdgpu_fp8_packed_u16_repairs_t repairs =
+      loom_amdgpu_fp8_pair_to_packed_bf16_repairs(plan, value_flags);
+  const loom_amdgpu_fp8_packed_u16_repairs_t top_exponent_repairs =
+      LOOM_AMDGPU_FP8_PACKED_U16_REPAIR_NAN |
+      LOOM_AMDGPU_FP8_PACKED_U16_REPAIR_INF;
+  return !iree_any_bit_set(repairs, top_exponent_repairs);
+}
+
 typedef enum loom_amdgpu_fp8_packed_u16_repair_query_flag_bits_e {
   LOOM_AMDGPU_FP8_PACKED_U16_REPAIR_QUERY_FLAG_NONE = 0u,
   LOOM_AMDGPU_FP8_PACKED_U16_REPAIR_QUERY_FLAG_NORMAL_PATH_AVAILABLE = 1u << 0,
