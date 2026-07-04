@@ -348,18 +348,13 @@ static iree_status_t loom_amdgpu_hal_kernel_abi_direct_arg_type_matches(
   return iree_ok_status();
 }
 
-static iree_status_t loom_amdgpu_hal_kernel_abi_direct_arg_size_from_type(
-    loom_type_t type, uint32_t* out_size) {
+static uint32_t loom_amdgpu_hal_kernel_abi_direct_arg_size_from_type(
+    loom_type_t type) {
   const uint32_t unit_count = loom_low_register_type_unit_count(type);
-  if (!loom_amdgpu_hal_kernel_abi_direct_arg_unit_count_supported(unit_count)) {
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
-        "AMDGPU HAL kernel ABI layout called with an unverified direct "
-        "argument type");
-  }
-  *out_size =
-      unit_count * LOOM_AMDGPU_HAL_KERNEL_ABI_DIRECT_SCALAR_KERNARG_SIZE;
-  return iree_ok_status();
+  IREE_ASSERT(
+      loom_amdgpu_hal_kernel_abi_direct_arg_unit_count_supported(unit_count),
+      "verified AMDGPU HAL ABI direct arguments have supported widths");
+  return unit_count * LOOM_AMDGPU_HAL_KERNEL_ABI_DIRECT_SCALAR_KERNARG_SIZE;
 }
 
 static iree_status_t
@@ -646,10 +641,7 @@ static iree_status_t loom_amdgpu_hal_kernel_abi_format_resource_name(
   char scratch[32];
   int length =
       iree_snprintf(scratch, sizeof(scratch), "binding%" PRIu32, binding_index);
-  if (length < 0 || (iree_host_size_t)length >= sizeof(scratch)) {
-    return iree_make_status(IREE_STATUS_INTERNAL,
-                            "failed to format AMDGPU HAL resource name");
-  }
+  IREE_ASSERT(length >= 0 && (iree_host_size_t)length < sizeof(scratch));
   char* storage = NULL;
   IREE_RETURN_IF_ERROR(
       iree_arena_allocate(arena, (iree_host_size_t)length, (void**)&storage));
@@ -683,9 +675,8 @@ static iree_status_t loom_amdgpu_hal_kernel_abi_direct_arg_from_block_arg(
     loom_amdgpu_hal_kernarg_direct_arg_t* out_direct_arg) {
   const loom_value_id_t arg_id = loom_block_arg_id(entry_block, argument_index);
   const loom_type_t abi_type = loom_module_value_type(module, arg_id);
-  uint32_t kernarg_size = 0;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_hal_kernel_abi_direct_arg_size_from_type(
-      abi_type, &kernarg_size));
+  const uint32_t kernarg_size =
+      loom_amdgpu_hal_kernel_abi_direct_arg_size_from_type(abi_type);
   *out_direct_arg = (loom_amdgpu_hal_kernarg_direct_arg_t){
       .arg_id = arg_id,
       .name = loom_amdgpu_hal_kernel_abi_value_name(module, arg_id),
@@ -750,10 +741,7 @@ static iree_status_t loom_amdgpu_hal_kernel_abi_format_layout_entry_key(
   char scratch[64];
   int length = iree_snprintf(scratch, sizeof(scratch), "%.*s%" PRIhsz,
                              (int)prefix.size, prefix.data, ordinal);
-  if (length < 0 || (iree_host_size_t)length >= sizeof(scratch)) {
-    return iree_make_status(IREE_STATUS_INTERNAL,
-                            "failed to format AMDGPU HAL ABI layout key");
-  }
+  IREE_ASSERT(length >= 0 && (iree_host_size_t)length < sizeof(scratch));
   return loom_module_intern_string(
       module, iree_make_string_view(scratch, (iree_host_size_t)length),
       out_key_id);
@@ -1531,18 +1519,16 @@ static iree_status_t loom_amdgpu_hal_kernel_abi_attach_resource_from_low(
     loom_amdgpu_hal_kernel_abi_layout_t* layout) {
   const int64_t binding_index = loom_low_resource_index(resource_op);
   if (binding_index < 0 || (uint64_t)binding_index >= layout->resource_count) {
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
-        "AMDGPU HAL kernel ABI layout called with an unverified binding index");
+    IREE_ASSERT_UNREACHABLE("verified AMDGPU HAL ABI resource binding index");
+    IREE_BUILTIN_UNREACHABLE();
   }
   loom_amdgpu_hal_kernarg_resource_t* resources =
       (loom_amdgpu_hal_kernarg_resource_t*)layout->resources;
   loom_amdgpu_hal_kernarg_resource_t* resource =
       &resources[(iree_host_size_t)binding_index];
   if (resource->resource_op != NULL) {
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
-        "AMDGPU HAL kernel ABI layout called with duplicate binding indexes");
+    IREE_ASSERT_UNREACHABLE("verified AMDGPU HAL ABI resource binding index");
+    IREE_BUILTIN_UNREACHABLE();
   }
   resource->resource_op = resource_op;
   resource->source_type = loom_amdgpu_hal_kernel_abi_type_attr(
@@ -1642,17 +1628,15 @@ iree_status_t loom_amdgpu_hal_kernel_abi_layout_from_low(
     }
   }
   if (resource_count > LOOM_AMDGPU_HAL_KERNEL_ABI_MAX_RESOURCE_COUNT) {
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
-        "AMDGPU HAL kernel ABI layout called with an unverified resource set");
+    IREE_ASSERT_UNREACHABLE("verified AMDGPU HAL ABI resource count");
+    IREE_BUILTIN_UNREACHABLE();
   }
   const uint64_t kernarg_resource_bytes =
       (uint64_t)resource_count *
       LOOM_AMDGPU_HAL_KERNEL_ABI_GLOBAL_BUFFER_KERNARG_SIZE;
   if (direct_arg_count > UINT32_MAX) {
-    return iree_make_status(IREE_STATUS_INTERNAL,
-                            "AMDGPU HAL kernel ABI layout called with an "
-                            "unverified direct argument set");
+    IREE_ASSERT_UNREACHABLE("verified AMDGPU HAL ABI direct argument count");
+    IREE_BUILTIN_UNREACHABLE();
   }
 
   loom_amdgpu_hal_kernarg_resource_t* resources = NULL;
@@ -1674,17 +1658,15 @@ iree_status_t loom_amdgpu_hal_kernel_abi_layout_from_low(
 
         const int64_t binding_index = loom_low_resource_index(resource_op);
         if (binding_index < 0 || (uint64_t)binding_index >= resource_count) {
-          return iree_make_status(
-              IREE_STATUS_INTERNAL,
-              "AMDGPU HAL kernel ABI layout called with an unverified binding "
-              "index");
+          IREE_ASSERT_UNREACHABLE(
+              "verified AMDGPU HAL ABI resource binding index");
+          IREE_BUILTIN_UNREACHABLE();
         }
         const iree_host_size_t slot_index = (iree_host_size_t)binding_index;
         if (resources[slot_index].resource_op != NULL) {
-          return iree_make_status(
-              IREE_STATUS_INTERNAL,
-              "AMDGPU HAL kernel ABI layout called with duplicate binding "
-              "indexes");
+          IREE_ASSERT_UNREACHABLE(
+              "verified AMDGPU HAL ABI resource binding index");
+          IREE_BUILTIN_UNREACHABLE();
         }
 
         loom_amdgpu_hal_kernarg_resource_t resource = {0};
@@ -1697,9 +1679,8 @@ iree_status_t loom_amdgpu_hal_kernel_abi_layout_from_low(
 
   for (iree_host_size_t i = 0; i < resource_count; ++i) {
     if (resources[i].resource_op == NULL) {
-      return iree_make_status(
-          IREE_STATUS_INTERNAL,
-          "AMDGPU HAL kernel ABI layout called with a sparse binding set");
+      IREE_ASSERT_UNREACHABLE("verified AMDGPU HAL ABI resource binding set");
+      IREE_BUILTIN_UNREACHABLE();
     }
   }
 
@@ -1712,9 +1693,9 @@ iree_status_t loom_amdgpu_hal_kernel_abi_layout_from_low(
     memset(direct_args, 0, direct_arg_count * sizeof(*direct_args));
     for (uint16_t i = 0; i < entry_block->arg_count; ++i) {
       if (kernarg_direct_args_end > UINT32_MAX) {
-        return iree_make_status(IREE_STATUS_INTERNAL,
-                                "AMDGPU HAL kernel ABI layout called with an "
-                                "oversized direct argument set");
+        IREE_ASSERT_UNREACHABLE(
+            "verified AMDGPU HAL ABI direct argument extent");
+        IREE_BUILTIN_UNREACHABLE();
       }
       const uint32_t parameter_index = (uint32_t)(resource_count + i);
       IREE_RETURN_IF_ERROR(loom_amdgpu_hal_kernel_abi_direct_arg_from_block_arg(
@@ -1729,9 +1710,8 @@ iree_status_t loom_amdgpu_hal_kernel_abi_layout_from_low(
       kernarg_direct_args_end,
       LOOM_AMDGPU_HAL_KERNEL_ABI_GLOBAL_BUFFER_KERNARG_ALIGNMENT);
   if (kernarg_segment_size > UINT32_MAX || constant_count > UINT32_MAX) {
-    return iree_make_status(IREE_STATUS_INTERNAL,
-                            "AMDGPU HAL kernel ABI layout called with an "
-                            "unverified direct argument set");
+    IREE_ASSERT_UNREACHABLE("verified AMDGPU HAL ABI direct argument extent");
+    IREE_BUILTIN_UNREACHABLE();
   }
 
   *out_layout = (loom_amdgpu_hal_kernel_abi_layout_t){
@@ -1911,10 +1891,7 @@ static iree_status_t loom_amdgpu_hal_kernel_abi_lookup_direct_arg_name_key(
     loom_string_id_t* out_key_id) {
   char scratch[64];
   int length = iree_snprintf(scratch, sizeof(scratch), "arg%" PRIhsz, ordinal);
-  if (length < 0 || (iree_host_size_t)length >= sizeof(scratch)) {
-    return iree_make_status(IREE_STATUS_INTERNAL,
-                            "failed to format AMDGPU HAL ABI layout key");
-  }
+  IREE_ASSERT(length >= 0 && (iree_host_size_t)length < sizeof(scratch));
   *out_key_id = loom_module_lookup_string(
       module, iree_make_string_view(scratch, (iree_host_size_t)length));
   if (*out_key_id == LOOM_STRING_ID_INVALID) {
