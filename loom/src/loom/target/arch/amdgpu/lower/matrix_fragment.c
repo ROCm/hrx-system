@@ -2425,7 +2425,7 @@ static bool loom_amdgpu_fragment_memory_analyze(
       iree_any_bit_set(view_storage_schema.encoded_operand.sparsity_policy,
                        LOOM_VALUE_FACT_SPARSITY_POLICY_ALL)) {
     return loom_amdgpu_fragment_memory_reject(
-        diagnostic, IREE_SV("fragment_memory.sparse_metadata"));
+        diagnostic, IREE_SV("fragment_memory.sparse_layout"));
   }
   const loom_amdgpu_matrix_fragment_layout_t* layout = NULL;
   loom_scalar_type_t expected_element_type = LOOM_SCALAR_TYPE_COUNT_;
