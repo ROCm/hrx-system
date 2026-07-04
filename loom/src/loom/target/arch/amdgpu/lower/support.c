@@ -2826,20 +2826,14 @@ iree_status_t loom_amdgpu_map_value(void* user_data,
                               out_low_type);
 }
 
-static iree_status_t loom_amdgpu_map_contract_register(
+static void loom_amdgpu_map_contract_register(
     const loom_target_contract_query_environment_t* environment,
     uint16_t descriptor_register_class_id, uint32_t register_unit_count,
     loom_low_lower_rule_mapped_value_t* out_mapped_value) {
-  if (descriptor_register_class_id >=
-      environment->descriptor_set->reg_class_count) {
-    return iree_make_status(IREE_STATUS_INTERNAL,
-                            "AMDGPU contract register class %" PRIu16
-                            " is outside the selected descriptor set",
-                            descriptor_register_class_id);
-  }
+  IREE_ASSERT_LT(descriptor_register_class_id,
+                 environment->descriptor_set->reg_class_count);
   *out_mapped_value = loom_low_lower_rule_mapped_value_register(
       descriptor_register_class_id, register_unit_count);
-  return iree_ok_status();
 }
 
 iree_status_t loom_amdgpu_map_contract_value(
@@ -2857,8 +2851,8 @@ iree_status_t loom_amdgpu_map_contract_value(
           environment->module, environment->fact_table,
           environment->view_regions, /*analysis=*/NULL, source_value_id,
           source_type, &shape)) {
-    return loom_amdgpu_map_contract_register(
-        environment, shape.class_id, shape.unit_count, out_mapped_value);
+    loom_amdgpu_map_contract_register(environment, shape.class_id,
+                                      shape.unit_count, out_mapped_value);
   }
   return iree_ok_status();
 }
