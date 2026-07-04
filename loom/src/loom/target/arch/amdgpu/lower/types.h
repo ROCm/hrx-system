@@ -220,21 +220,21 @@ iree_status_t loom_amdgpu_make_descriptor_row_implicit_resource_type(
 
 // Returns whether a low register type belongs to the requested AMDGPU register
 // class.
-iree_status_t loom_amdgpu_low_type_register_class_is(
-    loom_low_lower_context_t* context, loom_type_t type, uint16_t reg_class_id,
-    bool* out_match);
+bool loom_amdgpu_low_type_is_register_class(loom_low_lower_context_t* context,
+                                            loom_type_t type,
+                                            uint16_t reg_class_id);
 
 // Returns whether a low register type belongs to the requested AMDGPU register
 // class and occupies the requested number of 32-bit register units.
-iree_status_t loom_amdgpu_low_type_is_register_class_count(
+bool loom_amdgpu_low_type_is_register_class_count(
     loom_low_lower_context_t* context, loom_type_t type, uint16_t reg_class_id,
-    uint32_t register_unit_count, bool* out_match);
+    uint32_t register_unit_count);
 
 // Returns whether a low value belongs to the requested AMDGPU register class
 // and occupies the requested number of 32-bit register units.
-iree_status_t loom_amdgpu_low_value_is_register_class_count(
+bool loom_amdgpu_low_value_is_register_class_count(
     loom_low_lower_context_t* context, loom_value_id_t low_value,
-    uint16_t reg_class_id, uint32_t register_unit_count, bool* out_match);
+    uint16_t reg_class_id, uint32_t register_unit_count);
 
 // Returns true when the source value should prefer a VGPR mapping even if its
 // scalar type could otherwise map to an SGPR. Fact and view-region tables

@@ -1290,9 +1290,8 @@ static iree_status_t loom_amdgpu_lookup_atomic_value_as_vgpr(
   IREE_RETURN_IF_ERROR(
       loom_low_lower_lookup_value(context, source_value, &low_value));
   loom_type_t low_type = loom_module_value_type(module, low_value);
-  bool is_vgpr = false;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_low_type_register_class_is(
-      context, low_type, LOOM_AMDGPU_REG_CLASS_ID_VGPR, &is_vgpr));
+  const bool is_vgpr = loom_amdgpu_low_type_is_register_class(
+      context, low_type, LOOM_AMDGPU_REG_CLASS_ID_VGPR);
   if (is_vgpr) {
     *out_low_value = low_value;
     return iree_ok_status();

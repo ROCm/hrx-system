@@ -915,9 +915,8 @@ static iree_status_t loom_amdgpu_emit_workitem_dispatch_id(
   loom_type_t result_type = loom_type_none();
   IREE_RETURN_IF_ERROR(loom_amdgpu_low_result_type(
       context, source_op, source_result, &result_type));
-  bool result_is_vgpr = false;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_low_type_register_class_is(
-      context, result_type, LOOM_AMDGPU_REG_CLASS_ID_VGPR, &result_is_vgpr));
+  const bool result_is_vgpr = loom_amdgpu_low_type_is_register_class(
+      context, result_type, LOOM_AMDGPU_REG_CLASS_ID_VGPR);
   if (!result_is_vgpr) {
     IREE_ASSERT_UNREACHABLE("selected AMDGPU dispatch-id VGPR result");
     IREE_BUILTIN_UNREACHABLE();
@@ -1294,9 +1293,8 @@ static iree_status_t loom_amdgpu_emit_subgroup_query_linear_id(
     IREE_BUILTIN_UNREACHABLE();
   }
 
-  bool result_is_vgpr = false;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_low_type_register_class_is(
-      context, result_type, LOOM_AMDGPU_REG_CLASS_ID_VGPR, &result_is_vgpr));
+  const bool result_is_vgpr = loom_amdgpu_low_type_is_register_class(
+      context, result_type, LOOM_AMDGPU_REG_CLASS_ID_VGPR);
   if (!result_is_vgpr) {
     IREE_ASSERT_UNREACHABLE("selected AMDGPU subgroup query VGPR result");
     IREE_BUILTIN_UNREACHABLE();

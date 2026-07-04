@@ -2509,17 +2509,15 @@ static iree_status_t loom_amdgpu_fragment_memory_low_register_kind(
 
   const loom_module_t* module = loom_low_lower_context_module(context);
   const loom_type_t low_type = loom_module_value_type(module, low_value);
-  bool is_sgpr = false;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_low_type_register_class_is(
-      context, low_type, LOOM_AMDGPU_REG_CLASS_ID_SGPR, &is_sgpr));
+  const bool is_sgpr = loom_amdgpu_low_type_is_register_class(
+      context, low_type, LOOM_AMDGPU_REG_CLASS_ID_SGPR);
   if (is_sgpr && loom_low_register_type_unit_count(low_type) == 1) {
     *out_register_kind = LOOM_AMDGPU_FRAGMENT_MEMORY_ADDRESS_REGISTER_SGPR;
     return iree_ok_status();
   }
 
-  bool is_vgpr = false;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_low_type_register_class_is(
-      context, low_type, LOOM_AMDGPU_REG_CLASS_ID_VGPR, &is_vgpr));
+  const bool is_vgpr = loom_amdgpu_low_type_is_register_class(
+      context, low_type, LOOM_AMDGPU_REG_CLASS_ID_VGPR);
   if (is_vgpr && loom_low_register_type_unit_count(low_type) == 1) {
     *out_register_kind = LOOM_AMDGPU_FRAGMENT_MEMORY_ADDRESS_REGISTER_VGPR;
     return iree_ok_status();

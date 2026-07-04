@@ -108,9 +108,8 @@ static iree_status_t loom_amdgpu_condition_is_reg_class(
     loom_low_lower_context_t* context, loom_type_t low_type,
     uint16_t reg_class_id, uint32_t unit_count, bool* out_match) {
   *out_match = false;
-  bool is_class = false;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_low_type_register_class_is(
-      context, low_type, reg_class_id, &is_class));
+  const bool is_class =
+      loom_amdgpu_low_type_is_register_class(context, low_type, reg_class_id);
   *out_match =
       is_class && loom_low_register_type_unit_count(low_type) == unit_count;
   return iree_ok_status();
@@ -119,9 +118,8 @@ static iree_status_t loom_amdgpu_condition_is_reg_class(
 static iree_status_t loom_amdgpu_low_type_is_native_i1_mask(
     loom_low_lower_context_t* context, loom_type_t low_type, bool* out_match) {
   *out_match = false;
-  bool is_sgpr = false;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_low_type_register_class_is(
-      context, low_type, LOOM_AMDGPU_REG_CLASS_ID_SGPR, &is_sgpr));
+  const bool is_sgpr = loom_amdgpu_low_type_is_register_class(
+      context, low_type, LOOM_AMDGPU_REG_CLASS_ID_SGPR);
   *out_match = is_sgpr && loom_low_register_type_unit_count(low_type) == 2;
   return iree_ok_status();
 }
@@ -225,23 +223,18 @@ static iree_status_t loom_amdgpu_materialize_branch_address(
     return iree_ok_status();
   }
 
-  bool requires_sgpr = false;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_low_type_register_class_is(
-      context, required_low_type, LOOM_AMDGPU_REG_CLASS_ID_SGPR,
-      &requires_sgpr));
-  bool requires_vgpr = false;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_low_type_register_class_is(
-      context, required_low_type, LOOM_AMDGPU_REG_CLASS_ID_VGPR,
-      &requires_vgpr));
+  const bool requires_sgpr = loom_amdgpu_low_type_is_register_class(
+      context, required_low_type, LOOM_AMDGPU_REG_CLASS_ID_SGPR);
+  const bool requires_vgpr = loom_amdgpu_low_type_is_register_class(
+      context, required_low_type, LOOM_AMDGPU_REG_CLASS_ID_VGPR);
   if (!requires_sgpr && !requires_vgpr) {
     IREE_ASSERT_UNREACHABLE(
         "AMDGPU address branch payload selected non-register low type");
     IREE_BUILTIN_UNREACHABLE();
   }
 
-  bool actual_is_sgpr = false;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_low_type_register_class_is(
-      context, actual_type, LOOM_AMDGPU_REG_CLASS_ID_SGPR, &actual_is_sgpr));
+  const bool actual_is_sgpr = loom_amdgpu_low_type_is_register_class(
+      context, actual_type, LOOM_AMDGPU_REG_CLASS_ID_SGPR);
   if (requires_vgpr && actual_is_sgpr) {
     IREE_RETURN_IF_ERROR(loom_amdgpu_materialize_low_vgpr_b32_registers(
         context, source_op, *out_low_value_id, out_low_value_id));
@@ -252,12 +245,11 @@ static iree_status_t loom_amdgpu_materialize_branch_address(
     return iree_ok_status();
   }
 
-  bool actual_matches_required_class = false;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_low_type_register_class_is(
-      context, actual_type,
-      requires_vgpr ? LOOM_AMDGPU_REG_CLASS_ID_VGPR
-                    : LOOM_AMDGPU_REG_CLASS_ID_SGPR,
-      &actual_matches_required_class));
+  const bool actual_matches_required_class =
+      loom_amdgpu_low_type_is_register_class(
+          context, actual_type,
+          requires_vgpr ? LOOM_AMDGPU_REG_CLASS_ID_VGPR
+                        : LOOM_AMDGPU_REG_CLASS_ID_SGPR);
   if (!actual_matches_required_class) {
     IREE_ASSERT_UNREACHABLE(
         "AMDGPU address branch payload materialized wrong register class");
@@ -295,14 +287,10 @@ iree_status_t loom_amdgpu_materialize_branch_arg(
   *out_low_value_id = low_value_id;
   const loom_type_t source_type = loom_module_value_type(
       loom_low_lower_context_module(context), source_value_id);
-  bool requires_vgpr = false;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_low_type_register_class_is(
-      context, required_low_type, LOOM_AMDGPU_REG_CLASS_ID_VGPR,
-      &requires_vgpr));
-  bool requires_sgpr = false;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_low_type_register_class_is(
-      context, required_low_type, LOOM_AMDGPU_REG_CLASS_ID_SGPR,
-      &requires_sgpr));
+  const bool requires_vgpr = loom_amdgpu_low_type_is_register_class(
+      context, required_low_type, LOOM_AMDGPU_REG_CLASS_ID_VGPR);
+  const bool requires_sgpr = loom_amdgpu_low_type_is_register_class(
+      context, required_low_type, LOOM_AMDGPU_REG_CLASS_ID_SGPR);
   if ((requires_sgpr || requires_vgpr) &&
       loom_amdgpu_type_is_address_scalar(source_type)) {
     return loom_amdgpu_materialize_branch_address(
@@ -810,9 +798,8 @@ static iree_status_t loom_amdgpu_verify_if_else_merge_args(
       continue;
     }
 
-    bool is_vgpr = false;
-    IREE_RETURN_IF_ERROR(loom_amdgpu_low_type_register_class_is(
-        context, merge_type, LOOM_AMDGPU_REG_CLASS_ID_VGPR, &is_vgpr));
+    const bool is_vgpr = loom_amdgpu_low_type_is_register_class(
+        context, merge_type, LOOM_AMDGPU_REG_CLASS_ID_VGPR);
     const uint32_t lane_count = loom_low_register_type_unit_count(merge_type);
     if (!is_vgpr || lane_count == 0 ||
         lane_count > LOOM_AMDGPU_MAX_SCALARIZED_32BIT_LANES) {
@@ -1427,9 +1414,8 @@ static iree_status_t loom_amdgpu_emit_zero_vgpr_value(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_type_t value_type, loom_value_id_t* out_value) {
   *out_value = LOOM_VALUE_ID_INVALID;
-  bool is_vgpr = false;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_low_type_register_class_is(
-      context, value_type, LOOM_AMDGPU_REG_CLASS_ID_VGPR, &is_vgpr));
+  const bool is_vgpr = loom_amdgpu_low_type_is_register_class(
+      context, value_type, LOOM_AMDGPU_REG_CLASS_ID_VGPR);
   if (!is_vgpr) {
     return loom_low_lower_emit_branch_constraint(
         context, source_op, IREE_SV("masked_region_merge_vgpr_values"));
@@ -1645,9 +1631,8 @@ static iree_status_t loom_amdgpu_emit_masked_merge_value(
         out_merged_value);
   }
 
-  bool is_vgpr = false;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_low_type_register_class_is(
-      context, value_type, LOOM_AMDGPU_REG_CLASS_ID_VGPR, &is_vgpr));
+  const bool is_vgpr = loom_amdgpu_low_type_is_register_class(
+      context, value_type, LOOM_AMDGPU_REG_CLASS_ID_VGPR);
   if (!is_vgpr) {
     return loom_low_lower_emit_branch_constraint(
         context, source_op, IREE_SV("masked_region_merge_vgpr_values"));
