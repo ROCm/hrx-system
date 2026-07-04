@@ -1014,15 +1014,15 @@ static iree_status_t loom_low_lower_descriptor_matrix_request_from_source(
     loom_contract_request_t* out_request) {
   *out_request = (loom_contract_request_t){0};
   if (context->policy->descriptor_matrix.options == NULL) {
-    return iree_make_status(IREE_STATUS_INTERNAL,
-                            "descriptor-matrix policy has no source adapter");
+    IREE_ASSERT_UNREACHABLE("descriptor-matrix policy has no source adapter");
+    IREE_BUILTIN_UNREACHABLE();
   }
 
   switch (matrix_rule->source) {
     case LOOM_TARGET_CONTRACT_DESCRIPTOR_MATRIX_SOURCE_VECTOR_MMA: {
       if (!loom_vector_mma_isa(source_op)) {
-        return iree_make_status(IREE_STATUS_INTERNAL,
-                                "descriptor-matrix selected non-vector.mma op");
+        IREE_ASSERT_UNREACHABLE("descriptor-matrix selected non-vector.mma op");
+        IREE_BUILTIN_UNREACHABLE();
       }
       loom_target_contract_query_environment_t environment = {0};
       IREE_RETURN_IF_ERROR(loom_low_lower_query_environment_from_context(
@@ -1035,16 +1035,16 @@ static iree_status_t loom_low_lower_descriptor_matrix_request_from_source(
       if (!loom_contract_request_from_vector_mma_op(
               context->module, context->lowering.fact_table, source_op,
               &options, out_request, &diagnostic)) {
-        return iree_make_status(
-            IREE_STATUS_INTERNAL,
+        IREE_ASSERT_UNREACHABLE(
             "descriptor-matrix selected vector.mma request is inconsistent");
+        IREE_BUILTIN_UNREACHABLE();
       }
       return iree_ok_status();
     }
     case LOOM_TARGET_CONTRACT_DESCRIPTOR_MATRIX_SOURCE_NONE:
     default:
-      return iree_make_status(IREE_STATUS_INTERNAL,
-                              "unknown descriptor-matrix source");
+      IREE_ASSERT_UNREACHABLE("unknown descriptor-matrix source");
+      IREE_BUILTIN_UNREACHABLE();
   }
 }
 
@@ -1057,8 +1057,8 @@ static iree_status_t loom_low_lower_record_descriptor_matrix_plan(
       context, sizeof(*plan_data), (void**)&plan_data));
   plan_data->source = matrix_rule->source;
   if (query_result->selected_descriptor == NULL) {
-    return iree_make_status(IREE_STATUS_INTERNAL,
-                            "descriptor-matrix legal query has no descriptor");
+    IREE_ASSERT_UNREACHABLE("descriptor-matrix legal query has no descriptor");
+    IREE_BUILTIN_UNREACHABLE();
   }
   IREE_RETURN_IF_ERROR(loom_low_lower_resolve_descriptor_row(
       context, query_result->selected_descriptor, &plan_data->descriptor));
@@ -1067,8 +1067,8 @@ static iree_status_t loom_low_lower_record_descriptor_matrix_plan(
   plan_data->attrs = loom_named_attr_slice_empty();
   if (plan_data->descriptor.descriptor->immediate_count != 0) {
     if (context->policy->descriptor_matrix.attrs == NULL) {
-      return iree_make_status(IREE_STATUS_INTERNAL,
-                              "descriptor-matrix policy has no attrs callback");
+      IREE_ASSERT_UNREACHABLE("descriptor-matrix policy has no attrs callback");
+      IREE_BUILTIN_UNREACHABLE();
     }
     IREE_RETURN_IF_ERROR(context->policy->descriptor_matrix.attrs(
         context->policy->descriptor_matrix.user_data, context, matrix_rule,
@@ -2649,15 +2649,15 @@ static iree_status_t loom_low_lower_descriptor_matrix_sparse_source_value(
       continue;
     }
     if (*out_source_value != source_value) {
-      return iree_make_status(
-          IREE_STATUS_INTERNAL,
+      IREE_ASSERT_UNREACHABLE(
           "descriptor-matrix selected sparse source is ambiguous");
+      IREE_BUILTIN_UNREACHABLE();
     }
   }
   if (*out_source_value == LOOM_VALUE_ID_INVALID) {
-    return iree_make_status(IREE_STATUS_INTERNAL,
-                            "descriptor-matrix selected sparse source is "
-                            "unavailable");
+    IREE_ASSERT_UNREACHABLE(
+        "descriptor-matrix selected sparse source is unavailable");
+    IREE_BUILTIN_UNREACHABLE();
   }
   return iree_ok_status();
 }
@@ -2830,9 +2830,9 @@ static iree_status_t loom_low_lower_descriptor_matrix_tied_results(
         constraint->rhs_operand_index >= descriptor->operand_count ||
         descriptor_operand_packet_indices[constraint->rhs_operand_index] ==
             UINT16_MAX) {
-      return iree_make_status(IREE_STATUS_INTERNAL,
-                              "descriptor-matrix selected tied result "
-                              "constraint is invalid");
+      IREE_ASSERT_UNREACHABLE(
+          "descriptor-matrix selected tied result constraint is invalid");
+      IREE_BUILTIN_UNREACHABLE();
     }
     tied_results[tied_result_index++] = (loom_tied_result_t){
         .result_index = constraint->lhs_operand_index,
@@ -2915,9 +2915,9 @@ static iree_status_t loom_low_lower_emit_descriptor_matrix_vector_mma(
     const loom_low_lower_descriptor_matrix_plan_t* plan) {
   const loom_low_descriptor_t* descriptor = plan->descriptor.descriptor;
   if (descriptor->result_count != 1) {
-    return iree_make_status(IREE_STATUS_INTERNAL,
-                            "descriptor-matrix vector.mma descriptor result "
-                            "count is invalid");
+    IREE_ASSERT_UNREACHABLE(
+        "descriptor-matrix vector.mma descriptor result count is invalid");
+    IREE_BUILTIN_UNREACHABLE();
   }
 
   loom_value_id_t low_lhs = LOOM_VALUE_ID_INVALID;
@@ -2970,8 +2970,8 @@ static iree_status_t loom_low_lower_emit_descriptor_matrix_plan(
                                                               source_op, plan);
     case LOOM_TARGET_CONTRACT_DESCRIPTOR_MATRIX_SOURCE_NONE:
     default:
-      return iree_make_status(IREE_STATUS_INTERNAL,
-                              "unknown descriptor-matrix source");
+      IREE_ASSERT_UNREACHABLE("unknown descriptor-matrix source");
+      IREE_BUILTIN_UNREACHABLE();
   }
 }
 
