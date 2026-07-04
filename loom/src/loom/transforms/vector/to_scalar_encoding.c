@@ -734,9 +734,9 @@ static iree_status_t loom_vector_to_scalar_decode_coordinates(
       *out_column = loom_vector_to_scalar_lane_term(state, indices, 1);
       return iree_ok_status();
     default:
-      return iree_make_status(IREE_STATUS_INTERNAL,
-                              "unsupported vector.decode rank reached scalar "
-                              "reference builder");
+      IREE_ASSERT_UNREACHABLE(
+          "unsupported vector.decode rank reached scalar reference builder");
+      IREE_BUILTIN_UNREACHABLE();
   }
 }
 
@@ -747,9 +747,9 @@ iree_status_t loom_vector_to_scalar_build_decode_lane(
   loom_type_t raw_lane_type = {0};
   if (loom_vector_to_scalar_decode_operand(state, &operand, &raw_lane_type) !=
       LOOM_CONTRACT_REJECTION_NONE) {
-    return iree_make_status(IREE_STATUS_INTERNAL,
-                            "unsupported vector.decode reached scalar "
-                            "reference builder");
+    IREE_ASSERT_UNREACHABLE(
+        "unsupported vector.decode reached scalar reference builder");
+    IREE_BUILTIN_UNREACHABLE();
   }
 
   const loom_value_id_t payload = loom_vector_decode_payload(state->op);
