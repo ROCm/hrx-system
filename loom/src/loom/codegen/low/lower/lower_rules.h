@@ -99,8 +99,9 @@ typedef enum loom_low_lower_value_ref_kind_e {
 // Returns true when the materializer can produce a low value for the source
 // value without emitting IR. Selection uses this to keep diagnostics tied to
 // the same value-ref row consumed during emission.
-typedef bool (*loom_low_lower_can_materialize_value_fn_t)(
-    loom_low_lower_context_t* context, loom_value_id_t source_value_id);
+typedef iree_status_t (*loom_low_lower_can_materialize_value_fn_t)(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_value_id_t source_value_id, bool* out_can_materialize);
 
 // Emits or returns the low value consumed by a descriptor operand for the
 // source value. The callback only runs when a value-ref row explicitly names
@@ -129,10 +130,11 @@ typedef struct loom_low_lower_rule_match_map_value_callback_t {
   void* user_data;
 } loom_low_lower_rule_match_map_value_callback_t;
 
-typedef bool (*loom_low_lower_rule_match_can_materialize_value_fn_t)(
+typedef iree_status_t (*loom_low_lower_rule_match_can_materialize_value_fn_t)(
     void* user_data, const loom_low_lower_rule_match_context_t* context,
     const loom_low_lower_rule_set_t* rule_set, const loom_op_t* source_op,
-    uint16_t value_ref_index, loom_value_id_t source_value_id);
+    uint16_t value_ref_index, loom_value_id_t source_value_id,
+    bool* out_can_materialize);
 
 typedef struct loom_low_lower_rule_match_can_materialize_value_callback_t {
   // Callback invoked for VALUE_MATERIALIZABLE guards.

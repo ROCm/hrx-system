@@ -1188,10 +1188,11 @@ static iree_status_t loom_low_lower_contract_query_map_value(
                                source_op, source_value_id, out_mapped_value);
 }
 
-static bool loom_low_lower_contract_query_can_materialize(
+static iree_status_t loom_low_lower_contract_query_can_materialize(
     void* user_data, const loom_low_lower_rule_match_context_t* match_context,
     const loom_low_lower_rule_set_t* rule_set, const loom_op_t* source_op,
-    uint16_t value_ref_index, loom_value_id_t source_value_id) {
+    uint16_t value_ref_index, loom_value_id_t source_value_id,
+    bool* out_can_materialize) {
   (void)match_context;
   loom_low_lower_contract_query_state_t* state =
       (loom_low_lower_contract_query_state_t*)user_data;
@@ -1201,7 +1202,8 @@ static bool loom_low_lower_contract_query_can_materialize(
       (uint16_t)(value_ref->materializer_index - 1);
   const loom_low_lower_value_materializer_t* materializer =
       &rule_set->materializers[materializer_index];
-  return materializer->can_materialize(state->context, source_value_id);
+  return materializer->can_materialize(state->context, source_op,
+                                       source_value_id, out_can_materialize);
 }
 
 struct loom_low_lower_source_query_scope_t {
