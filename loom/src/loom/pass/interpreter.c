@@ -230,9 +230,9 @@ static iree_status_t loom_pass_interpreter_emit_failure_diagnostic(
   }
   const loom_error_def_t* error = LOOM_ERR_STRUCTURE_028;
   if (!error) {
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
+    IREE_ASSERT_UNREACHABLE(
         "missing structured pass interpreter failure diagnostic");
+    IREE_BUILTIN_UNREACHABLE();
   }
   const loom_pass_program_invoke_t* invoke = &instruction->invoke;
   const loom_diagnostic_param_t params[] = {
