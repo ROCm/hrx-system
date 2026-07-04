@@ -18,6 +18,7 @@
 #include "loom/target/registers.h"
 
 #define LOOM_LOW_SCHEDULE_READY_WINDOW 16
+#define LOOM_LOW_SCHEDULE_READY_STALL_SCAN_WINDOW 64
 
 enum loom_low_schedule_state_access_bits_e {
   LOOM_LOW_SCHEDULE_STATE_ACCESS_READ = 1u << 0,
@@ -2394,9 +2395,25 @@ static iree_status_t loom_low_schedule_run_list_scheduler(
           }
         }
         iree_host_size_t chosen_ready_heap_index = IREE_HOST_SIZE_MAX;
-        if (loom_low_schedule_candidate_threatens_pressure_cliff(
-                chosen_score)) {
-          for (iree_host_size_t i = 0; i < ready_heap.count; ++i) {
+        const bool chosen_threatens_pressure_cliff =
+            loom_low_schedule_candidate_threatens_pressure_cliff(chosen_score);
+        iree_host_size_t scan_count = 0;
+        if (chosen_threatens_pressure_cliff) {
+          scan_count = ready_heap.count;
+        } else if (chosen_score.effective_stall_cycles != 0 &&
+                   ready_heap.count != 0) {
+          const iree_host_size_t extra_scan_capacity =
+              LOOM_LOW_SCHEDULE_READY_STALL_SCAN_WINDOW >
+                      LOOM_LOW_SCHEDULE_READY_WINDOW
+                  ? LOOM_LOW_SCHEDULE_READY_STALL_SCAN_WINDOW -
+                        LOOM_LOW_SCHEDULE_READY_WINDOW
+                  : 0;
+          scan_count = ready_heap.count < extra_scan_capacity
+                           ? ready_heap.count
+                           : extra_scan_capacity;
+        }
+        if (scan_count != 0) {
+          for (iree_host_size_t i = 0; i < scan_count; ++i) {
             loom_low_schedule_candidate_score_t candidate_score = {0};
             const uint32_t node_index = ready_heap.node_indices[i];
             IREE_RETURN_IF_ERROR(loom_low_schedule_score_candidate(

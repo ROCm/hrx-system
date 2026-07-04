@@ -39,6 +39,52 @@ low.func.def target(@test_target) @resource_stall_hides_load_latency(
 }
 
 // ====
+// RUN: emit low-schedule-json @resource_stall_scans_past_ready_window_for_ready_work strategy=resource-stall diagnostics=candidates output=none
+
+test.target<low_core> @test_target
+
+low.func.def target(@test_target) @resource_stall_scans_past_ready_window_for_ready_work(
+    %ptr0: reg<test.ptr>, %ptr1: reg<test.ptr>) -> (reg<test.i32>,
+    reg<test.i32 x4>) {
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", candidate_count="2", chosen_packet="test.load.v4i32", rejected_packet="test.load.v4i32"}
+  %load0 = low.op<test.load.v4i32>(%ptr0) : (reg<test.ptr>) -> reg<test.i32 x4>
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="2", candidate_count="16", chosen_packet="test.extract_lane.i32", chosen_data_ready_stall_cycles="2"}
+  %lane0 = low.op<test.extract_lane.i32>(%load0) {lane = 0} : (reg<test.i32 x4>) -> reg<test.i32>
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="3", candidate_count="15", chosen_packet="test.extract_lane.i32", chosen_data_ready_stall_cycles="1"}
+  %lane1 = low.op<test.extract_lane.i32>(%load0) {lane = 1} : (reg<test.i32 x4>) -> reg<test.i32>
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="4", candidate_count="14", chosen_packet="test.extract_lane.i32", chosen_data_ready_stall_cycles="0"}
+  %lane2 = low.op<test.extract_lane.i32>(%load0) {lane = 2} : (reg<test.i32 x4>) -> reg<test.i32>
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="5", candidate_count="13", chosen_packet="test.extract_lane.i32"}
+  %lane3 = low.op<test.extract_lane.i32>(%load0) {lane = 3} : (reg<test.i32 x4>) -> reg<test.i32>
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="6", candidate_count="12", chosen_packet="test.extract_lane.i32"}
+  %lane4 = low.op<test.extract_lane.i32>(%load0) {lane = 0} : (reg<test.i32 x4>) -> reg<test.i32>
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="7", candidate_count="11", chosen_packet="test.extract_lane.i32"}
+  %lane5 = low.op<test.extract_lane.i32>(%load0) {lane = 1} : (reg<test.i32 x4>) -> reg<test.i32>
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="8", candidate_count="10", chosen_packet="test.extract_lane.i32"}
+  %lane6 = low.op<test.extract_lane.i32>(%load0) {lane = 2} : (reg<test.i32 x4>) -> reg<test.i32>
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="9", candidate_count="9", chosen_packet="test.extract_lane.i32"}
+  %lane7 = low.op<test.extract_lane.i32>(%load0) {lane = 3} : (reg<test.i32 x4>) -> reg<test.i32>
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="10", candidate_count="8", chosen_packet="test.extract_lane.i32"}
+  %lane8 = low.op<test.extract_lane.i32>(%load0) {lane = 0} : (reg<test.i32 x4>) -> reg<test.i32>
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="11", candidate_count="7", chosen_packet="test.extract_lane.i32"}
+  %lane9 = low.op<test.extract_lane.i32>(%load0) {lane = 1} : (reg<test.i32 x4>) -> reg<test.i32>
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="12", candidate_count="6", chosen_packet="test.extract_lane.i32"}
+  %lane10 = low.op<test.extract_lane.i32>(%load0) {lane = 2} : (reg<test.i32 x4>) -> reg<test.i32>
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="13", candidate_count="5", chosen_packet="test.extract_lane.i32"}
+  %lane11 = low.op<test.extract_lane.i32>(%load0) {lane = 3} : (reg<test.i32 x4>) -> reg<test.i32>
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="14", candidate_count="4", chosen_packet="test.extract_lane.i32"}
+  %lane12 = low.op<test.extract_lane.i32>(%load0) {lane = 0} : (reg<test.i32 x4>) -> reg<test.i32>
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="15", candidate_count="3", chosen_packet="test.extract_lane.i32"}
+  %lane13 = low.op<test.extract_lane.i32>(%load0) {lane = 1} : (reg<test.i32 x4>) -> reg<test.i32>
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="16", candidate_count="2", chosen_packet="test.extract_lane.i32"}
+  %lane14 = low.op<test.extract_lane.i32>(%load0) {lane = 2} : (reg<test.i32 x4>) -> reg<test.i32>
+  %lane15 = low.op<test.extract_lane.i32>(%load0) {lane = 3} : (reg<test.i32 x4>) -> reg<test.i32>
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="1", candidate_count="17", chosen_packet="test.load.v4i32", rejected_packet="test.extract_lane.i32", chosen_data_ready_stall_cycles="0", rejected_data_ready_stall_cycles="3"}
+  %load1 = low.op<test.load.v4i32>(%ptr1) : (reg<test.ptr>) -> reg<test.i32 x4>
+  low.return %lane15, %load1 : reg<test.i32>, reg<test.i32 x4>
+}
+
+// ====
 // RUN: emit low-schedule-json @resource_stall_opens_long_ready_path strategy=resource-stall diagnostics=candidates output=none
 
 test.target<low_core> @test_target
