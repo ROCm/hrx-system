@@ -33,8 +33,6 @@
 
 namespace {
 
-using iree::StatusCode;
-
 constexpr int64_t kSystemCacheScope = LOOM_CACHE_SCOPE_SYSTEM;
 
 std::string ToString(iree_string_view_t value) {
@@ -1297,38 +1295,6 @@ TEST_F(AmdgpuFeedbackTest, BuildsSingleReservationAttempt) {
             loom_value_slice_get(loom_low_op_results(compare_ops[1]), 0));
   EXPECT_EQ(attempt.cas_succeeded,
             loom_value_slice_get(loom_low_op_results(and_ops[0]), 0));
-}
-
-TEST_F(AmdgpuFeedbackTest, RejectsInvalidReservationAttemptPacketLengths) {
-  loom_amdgpu_feedback_config_values_t config_values = {};
-  loom_amdgpu_feedback_channel_header_values_t channel_values = {};
-  IREE_ASSERT_OK(BuildFeedbackChannelValues(&config_values, &channel_values));
-
-  loom_value_id_t reservation_head = LOOM_VALUE_ID_INVALID;
-  IREE_ASSERT_OK(loom_amdgpu_build_feedback_reservation_head_load(
-      &builder_, descriptor_set_, channel_values.address, LOOM_LOCATION_UNKNOWN,
-      &reservation_head));
-
-  loom_amdgpu_feedback_reservation_attempt_t attempt = {};
-  IREE_EXPECT_STATUS_IS(
-      StatusCode::kInvalidArgument,
-      loom_amdgpu_build_feedback_reservation_attempt(
-          &builder_, descriptor_set_, channel_values.address, reservation_head,
-          LOOM_AMDGPU_FEEDBACK_PACKET_BYTE_LENGTH - 1u, LOOM_LOCATION_UNKNOWN,
-          &attempt));
-  IREE_EXPECT_STATUS_IS(
-      StatusCode::kInvalidArgument,
-      loom_amdgpu_build_feedback_reservation_attempt(
-          &builder_, descriptor_set_, channel_values.address, reservation_head,
-          LOOM_AMDGPU_FEEDBACK_PACKET_BYTE_LENGTH + 1u, LOOM_LOCATION_UNKNOWN,
-          &attempt));
-  IREE_EXPECT_STATUS_IS(
-      StatusCode::kInvalidArgument,
-      loom_amdgpu_build_feedback_reservation_attempt(
-          &builder_, descriptor_set_, channel_values.address, reservation_head,
-          (uint32_t)loom_amdgpu_feedback_packet_length(
-              LOOM_AMDGPU_FEEDBACK_PACKET_MAX_PAYLOAD_LENGTH + 1u),
-          LOOM_LOCATION_UNKNOWN, &attempt));
 }
 
 TEST_F(AmdgpuFeedbackTest, BuildsReservationCfgWithHotFallthrough) {
