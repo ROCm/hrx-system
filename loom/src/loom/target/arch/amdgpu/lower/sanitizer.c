@@ -280,11 +280,9 @@ static iree_status_t loom_amdgpu_sanitizer_ensure_site_collection(
     qsort(state->site_map_rows, row_count, sizeof(*state->site_map_rows),
           loom_amdgpu_sanitizer_site_map_compare);
     for (iree_host_size_t i = 1; i < row_count; ++i) {
-      if (state->site_map_rows[i - 1].op == state->site_map_rows[i].op) {
-        return iree_make_status(
-            IREE_STATUS_INTERNAL,
-            "sanitizer site collection mapped one op to multiple site ids");
-      }
+      IREE_ASSERT(
+          state->site_map_rows[i - 1].op != state->site_map_rows[i].op,
+          "sanitizer site collection mapped one op to multiple site ids");
     }
   }
 
@@ -305,11 +303,8 @@ iree_status_t loom_amdgpu_finalize_sanitizer_function(
   loom_amdgpu_sanitizer_module_state_t* module_state = NULL;
   IREE_RETURN_IF_ERROR(
       loom_amdgpu_sanitizer_module_state_from_context(context, &module_state));
-  if (module_state->site_row_count != function_state->site_id_base) {
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
-        "AMDGPU sanitizer site rows committed out of order");
-  }
+  IREE_ASSERT(module_state->site_row_count == function_state->site_id_base,
+              "AMDGPU sanitizer site rows committed out of order");
 
   const iree_host_size_t row_count = function_state->site_collection.row_count;
   loom_low_lower_module_state_t* lower_module_state =
@@ -357,11 +352,9 @@ static iree_status_t loom_amdgpu_sanitizer_flatten_site_rows(
            chunk->row_count * sizeof(*out_collection->rows));
     row_index += chunk->row_count;
   }
-  if (row_index != row_count) {
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
-        "AMDGPU sanitizer site chunk row count changed during finalization");
-  }
+  IREE_ASSERT(row_index == row_count,
+              "AMDGPU sanitizer site chunk row count changed during "
+              "finalization");
   return iree_ok_status();
 }
 
@@ -911,17 +904,12 @@ static iree_status_t loom_amdgpu_sanitizer_access_plan_for_repeat(
     return iree_ok_status();
   }
   const uint64_t byte_stride = plan->static_repeat_byte_stride;
-  if (byte_stride != 0 && repeat_ordinal > UINT64_MAX / byte_stride) {
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
-        "AMDGPU sanitizer repeated access byte offset overflow");
-  }
+  IREE_ASSERT(byte_stride == 0 || repeat_ordinal <= UINT64_MAX / byte_stride,
+              "AMDGPU sanitizer repeated access byte offset overflow");
   const uint64_t repeat_byte_offset = byte_stride * repeat_ordinal;
-  if (repeat_byte_offset > UINT64_MAX - out_access->vaddr_static_byte_offset) {
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
-        "AMDGPU sanitizer repeated access static offset overflow");
-  }
+  IREE_ASSERT(
+      repeat_byte_offset <= UINT64_MAX - out_access->vaddr_static_byte_offset,
+      "AMDGPU sanitizer repeated access static offset overflow");
   out_access->vaddr_static_byte_offset += repeat_byte_offset;
   return iree_ok_status();
 }
@@ -1014,11 +1002,8 @@ static iree_status_t loom_amdgpu_sanitizer_build_repeat_failure_summary(
       out_summary->failure_mask = union_failure_mask;
     }
   }
-  if (out_summary->failure_mask == LOOM_VALUE_ID_INVALID) {
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
-        "AMDGPU sanitizer repeated access plan has no accesses");
-  }
+  IREE_ASSERT(out_summary->failure_mask != LOOM_VALUE_ID_INVALID,
+              "AMDGPU sanitizer repeated access plan has no accesses");
   return iree_ok_status();
 }
 
