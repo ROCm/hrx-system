@@ -12,6 +12,7 @@
 #include "loom/codegen/low/diagnostics.h"
 #include "loom/codegen/low/target_binding.h"
 #include "loom/error/error_catalog.h"
+#include "loom/ir/module.h"
 #include "loom/ops/op_defs.h"
 #include "loom/rewrite/materialize.h"
 #include "loom/rewrite/remap.h"
@@ -30,16 +31,6 @@ static bool loom_low_allocation_failure_is_rematerializable_pressure(
   return loom_low_allocation_failure_is_present(failure) &&
          iree_string_view_equal(failure->failure_code,
                                 IREE_SV("unspillable-register-exhausted"));
-}
-
-static bool loom_low_allocation_value_has_type_uses(const loom_module_t* module,
-                                                    loom_value_id_t value_id) {
-  if (value_id >= module->values.count ||
-      value_id >= module->type_uses.value_capacity) {
-    return false;
-  }
-  return module->type_uses.value_heads[value_id].first_incoming_use_id !=
-         LOOM_TYPE_USE_ID_INVALID;
 }
 
 static bool loom_low_descriptor_packet_kind_may_rematerialize(
@@ -127,7 +118,7 @@ static iree_status_t loom_low_allocation_try_rematerialize_value(
   if (loom_value_is_block_arg(value) || loom_value_is_consumed(value) ||
       loom_module_value_has_predicate_attribute_uses(module, value_id) ||
       value->use_count == 0 ||
-      loom_low_allocation_value_has_type_uses(module, value_id)) {
+      loom_module_value_has_type_uses(module, value_id)) {
     return iree_ok_status();
   }
 
