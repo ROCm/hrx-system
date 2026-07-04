@@ -113,12 +113,8 @@ static iree_status_t loom_expand_template(const char* message_template,
     int param_index = loom_find_param_index(error, placeholder_name);
     if (param_index >= 0 && (iree_host_size_t)param_index < param_count) {
       if (params[param_index].kind != error->param_defs[param_index].kind) {
-        return iree_make_status(
-            IREE_STATUS_INTERNAL,
-            "diagnostic param '%.*s' kind mismatch: runtime %d vs schema %d",
-            (int)placeholder_name.size, placeholder_name.data,
-            (int)params[param_index].kind,
-            (int)error->param_defs[param_index].kind);
+        IREE_ASSERT_UNREACHABLE("diagnostic param kind does not match schema");
+        IREE_BUILTIN_UNREACHABLE();
       }
       IREE_RETURN_IF_ERROR(
           loom_render_param(&params[param_index], type_formatter, stream));
