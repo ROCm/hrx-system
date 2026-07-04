@@ -2621,32 +2621,14 @@ iree_status_t loom_amdgpu_emit_fp8_pairs_to_packed_bf16(
           low_combined_repair_condition, vgpr_type, sgpr_type, mask_type,
           low_zero_sgpr64, finite_payloads));
     } else {
-      loom_amdgpu_fp8_subnormal_u16_byte_table_values_t subnormal_tables;
-      IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fp8_subnormal_u16_byte_table_values(
-          context, source_op, plan->subnormal_bf16_byte_table_words, sgpr_type,
-          &subnormal_tables));
-      for (iree_host_size_t i = 0; i < pair_count; ++i) {
-        loom_value_id_t low_subnormal_payload = LOOM_VALUE_ID_INVALID;
-        IREE_RETURN_IF_ERROR(
-            loom_amdgpu_emit_fp8_subnormal_packed_u16_bits_from_byte_tables(
-                context, source_op, plan, &subnormal_tables,
-                pair_states[i].base.source_no_sign, vgpr_type,
-                &low_subnormal_payload));
-        loom_value_id_t low_repair_condition = LOOM_VALUE_ID_INVALID;
-        IREE_RETURN_IF_ERROR(
-            loom_amdgpu_emit_fp8_packed_bf16_subnormal_condition(
-                context, source_op, plan, pair_states[i].base.source_no_sign,
-                vgpr_type, sgpr_type, &low_repair_condition));
-        loom_value_id_t low_repair_mask = LOOM_VALUE_ID_INVALID;
-        IREE_RETURN_IF_ERROR(
-            loom_amdgpu_emit_fp8_packed_bf16_mask_from_condition(
-                context, source_op, plan, low_repair_condition, vgpr_type,
-                sgpr_type, &low_repair_mask));
-        IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fp8_packed_bf16_pair_select(
-            context, source_op, plan, pair_states[i].normal_payload,
-            low_subnormal_payload, low_repair_mask, vgpr_type,
-            &finite_payloads[i]));
-      }
+      loom_amdgpu_fp8_packed_bf16_repair_state_t repair_state = {
+          .low_mask_shift = LOOM_VALUE_ID_INVALID,
+      };
+      IREE_RETURN_IF_ERROR(
+          loom_amdgpu_emit_fp8_packed_u16_subnormal_repair_payloads(
+              context, source_op, plan, pair_states, pair_count,
+              plan->subnormal_bf16_byte_table_words, vgpr_type, sgpr_type,
+              &repair_state, /*low_subnormal_markers=*/NULL, finite_payloads));
     }
   } else if (!value_non_zero) {
     for (iree_host_size_t i = 0; i < pair_count; ++i) {
