@@ -890,6 +890,18 @@ static bool loom_target_compile_report_economics_has_memory(
          mix->memory_write_unknown_width_count != 0;
 }
 
+static bool loom_target_compile_report_economics_has_operations(
+    const loom_target_compile_report_static_instruction_mix_t* mix) {
+  return mix->scalar_alu_count != 0 || mix->vector_alu_count != 0 ||
+         mix->matrix_count != 0 || mix->mfma_count != 0 ||
+         mix->smfmac_count != 0 || mix->wmma_count != 0 ||
+         mix->swmmac_count != 0 || mix->dot_count != 0 ||
+         mix->atomic_count != 0 || mix->branch_count != 0 ||
+         mix->barrier_count != 0 || mix->control_count != 0 ||
+         mix->conversion_count != 0 || mix->cache_count != 0 ||
+         mix->register_move_count != 0;
+}
+
 static bool loom_target_compile_report_has_economics(
     loom_target_compile_report_detail_flags_t detail_flags,
     const loom_target_compile_report_static_instruction_mix_t* mix,
@@ -898,7 +910,8 @@ static bool loom_target_compile_report_has_economics(
   return iree_any_bit_set(
              detail_flags,
              LOOM_TARGET_COMPILE_REPORT_DETAIL_DYNAMIC_INSTRUCTION_MIX) &&
-         loom_target_compile_report_economics_has_memory(mix);
+         (loom_target_compile_report_economics_has_memory(mix) ||
+          loom_target_compile_report_economics_has_operations(mix));
 }
 
 static iree_status_t loom_target_compile_report_append_workload_fields(
@@ -3791,12 +3804,64 @@ static iree_status_t loom_target_compile_report_format_memory_economics_json(
   return loom_output_stream_write_cstring(stream, "}");
 }
 
+static iree_status_t loom_target_compile_report_format_operation_economics_json(
+    const loom_target_compile_report_static_instruction_mix_t* mix,
+    uint64_t scale, loom_output_stream_t* stream) {
+  bool first_field = true;
+  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "{"));
+#define LOOM_TARGET_COMPILE_REPORT_WRITE_OPERATION_ECONOMICS_FIELD(field) \
+  do {                                                                    \
+    IREE_RETURN_IF_ERROR(                                                 \
+        loom_target_compile_report_json_write_scaled_nonzero_u64_field(   \
+            stream, &first_field, #field, mix->field, scale));            \
+  } while (0)
+  LOOM_TARGET_COMPILE_REPORT_WRITE_OPERATION_ECONOMICS_FIELD(scalar_alu_count);
+  LOOM_TARGET_COMPILE_REPORT_WRITE_OPERATION_ECONOMICS_FIELD(vector_alu_count);
+  LOOM_TARGET_COMPILE_REPORT_WRITE_OPERATION_ECONOMICS_FIELD(matrix_count);
+  LOOM_TARGET_COMPILE_REPORT_WRITE_OPERATION_ECONOMICS_FIELD(mfma_count);
+  LOOM_TARGET_COMPILE_REPORT_WRITE_OPERATION_ECONOMICS_FIELD(smfmac_count);
+  LOOM_TARGET_COMPILE_REPORT_WRITE_OPERATION_ECONOMICS_FIELD(wmma_count);
+  LOOM_TARGET_COMPILE_REPORT_WRITE_OPERATION_ECONOMICS_FIELD(swmmac_count);
+  LOOM_TARGET_COMPILE_REPORT_WRITE_OPERATION_ECONOMICS_FIELD(dot_count);
+  LOOM_TARGET_COMPILE_REPORT_WRITE_OPERATION_ECONOMICS_FIELD(atomic_count);
+  LOOM_TARGET_COMPILE_REPORT_WRITE_OPERATION_ECONOMICS_FIELD(branch_count);
+  LOOM_TARGET_COMPILE_REPORT_WRITE_OPERATION_ECONOMICS_FIELD(barrier_count);
+  LOOM_TARGET_COMPILE_REPORT_WRITE_OPERATION_ECONOMICS_FIELD(control_count);
+  LOOM_TARGET_COMPILE_REPORT_WRITE_OPERATION_ECONOMICS_FIELD(conversion_count);
+  LOOM_TARGET_COMPILE_REPORT_WRITE_OPERATION_ECONOMICS_FIELD(cache_count);
+  LOOM_TARGET_COMPILE_REPORT_WRITE_OPERATION_ECONOMICS_FIELD(
+      register_move_count);
+#undef LOOM_TARGET_COMPILE_REPORT_WRITE_OPERATION_ECONOMICS_FIELD
+  return loom_output_stream_write_cstring(stream, "}");
+}
+
 static iree_status_t loom_target_compile_report_format_economics_json(
     const loom_target_compile_report_static_instruction_mix_t* mix,
     const loom_target_compile_report_workload_t* workload,
     loom_output_stream_t* stream) {
   bool first_field = true;
   IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "{"));
+  if (loom_target_compile_report_economics_has_operations(mix)) {
+    IREE_RETURN_IF_ERROR(loom_target_compile_report_json_begin_field(
+        stream, &first_field, "operations"));
+    bool first_operations_field = true;
+    IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "{"));
+    IREE_RETURN_IF_ERROR(loom_target_compile_report_json_begin_field(
+        stream, &first_operations_field, "per_workitem"));
+    IREE_RETURN_IF_ERROR(
+        loom_target_compile_report_format_operation_economics_json(mix, 1,
+                                                                   stream));
+    if (iree_any_bit_set(
+            workload->flags,
+            LOOM_TARGET_COMPILE_REPORT_WORKLOAD_DISPATCH_WORKITEM_COUNT)) {
+      IREE_RETURN_IF_ERROR(loom_target_compile_report_json_begin_field(
+          stream, &first_operations_field, "dispatch"));
+      IREE_RETURN_IF_ERROR(
+          loom_target_compile_report_format_operation_economics_json(
+              mix, workload->dispatch_workitem_count, stream));
+    }
+    IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "}"));
+  }
   if (loom_target_compile_report_economics_has_memory(mix)) {
     IREE_RETURN_IF_ERROR(loom_target_compile_report_json_begin_field(
         stream, &first_field, "memory"));
@@ -5616,41 +5681,73 @@ loom_target_compile_report_format_source_low_memory_economics_json(
 
 static iree_status_t loom_target_compile_report_format_report_economics_json(
     const loom_target_compile_report_t* report, loom_output_stream_t* stream) {
-  const bool has_low_dynamic_economics =
-      loom_target_compile_report_has_economics(report->detail_flags,
-                                               &report->dynamic_instruction_mix,
-                                               &report->workload);
+  const bool has_dynamic_instruction_mix = iree_any_bit_set(
+      report->detail_flags,
+      LOOM_TARGET_COMPILE_REPORT_DETAIL_DYNAMIC_INSTRUCTION_MIX);
+  const bool has_low_dynamic_operations =
+      has_dynamic_instruction_mix &&
+      loom_target_compile_report_economics_has_operations(
+          &report->dynamic_instruction_mix);
+  const bool has_low_dynamic_memory =
+      has_dynamic_instruction_mix &&
+      loom_target_compile_report_economics_has_memory(
+          &report->dynamic_instruction_mix);
   bool first_field = true;
   IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "{"));
-  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_begin_field(
-      stream, &first_field, "memory"));
-  bool first_memory_field = true;
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "{"));
-  if (has_low_dynamic_economics) {
+  if (has_low_dynamic_operations) {
     IREE_RETURN_IF_ERROR(loom_target_compile_report_json_begin_field(
-        stream, &first_memory_field, "per_workitem_issued"));
+        stream, &first_field, "operations"));
+    bool first_operations_field = true;
+    IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "{"));
+    IREE_RETURN_IF_ERROR(loom_target_compile_report_json_begin_field(
+        stream, &first_operations_field, "per_workitem"));
     IREE_RETURN_IF_ERROR(
-        loom_target_compile_report_format_memory_economics_json(
+        loom_target_compile_report_format_operation_economics_json(
             &report->dynamic_instruction_mix, 1, stream));
     if (iree_any_bit_set(
             report->workload.flags,
             LOOM_TARGET_COMPILE_REPORT_WORKLOAD_DISPATCH_WORKITEM_COUNT)) {
       IREE_RETURN_IF_ERROR(loom_target_compile_report_json_begin_field(
-          stream, &first_memory_field, "dispatch_issued"));
+          stream, &first_operations_field, "dispatch"));
       IREE_RETURN_IF_ERROR(
-          loom_target_compile_report_format_memory_economics_json(
+          loom_target_compile_report_format_operation_economics_json(
               &report->dynamic_instruction_mix,
               report->workload.dispatch_workitem_count, stream));
     }
+    IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "}"));
   }
-  if (report->source_low_memory_summary.packet_count != 0) {
+  if (has_low_dynamic_memory ||
+      report->source_low_memory_summary.packet_count != 0) {
     IREE_RETURN_IF_ERROR(loom_target_compile_report_json_begin_field(
-        stream, &first_memory_field, "source_low"));
-    IREE_RETURN_IF_ERROR(
-        loom_target_compile_report_format_source_low_memory_economics_json(
-            &report->source_low_memory_summary, &report->workload, stream));
+        stream, &first_field, "memory"));
+    bool first_memory_field = true;
+    IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "{"));
+    if (has_low_dynamic_memory) {
+      IREE_RETURN_IF_ERROR(loom_target_compile_report_json_begin_field(
+          stream, &first_memory_field, "per_workitem_issued"));
+      IREE_RETURN_IF_ERROR(
+          loom_target_compile_report_format_memory_economics_json(
+              &report->dynamic_instruction_mix, 1, stream));
+      if (iree_any_bit_set(
+              report->workload.flags,
+              LOOM_TARGET_COMPILE_REPORT_WORKLOAD_DISPATCH_WORKITEM_COUNT)) {
+        IREE_RETURN_IF_ERROR(loom_target_compile_report_json_begin_field(
+            stream, &first_memory_field, "dispatch_issued"));
+        IREE_RETURN_IF_ERROR(
+            loom_target_compile_report_format_memory_economics_json(
+                &report->dynamic_instruction_mix,
+                report->workload.dispatch_workitem_count, stream));
+      }
+    }
+    if (report->source_low_memory_summary.packet_count != 0) {
+      IREE_RETURN_IF_ERROR(loom_target_compile_report_json_begin_field(
+          stream, &first_memory_field, "source_low"));
+      IREE_RETURN_IF_ERROR(
+          loom_target_compile_report_format_source_low_memory_economics_json(
+              &report->source_low_memory_summary, &report->workload, stream));
+    }
+    IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "}"));
   }
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "}"));
   return loom_output_stream_write_cstring(stream, "}");
 }
 
