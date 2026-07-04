@@ -269,6 +269,7 @@
           ".compile_report.schedule_band_summary_rows.rows[]",
           "dynamic_instruction_mix",
           "max_band_node_count",
+          ".compile_report.wait_reason_summary_rows.rows[]",
           ".compile_report.wait_action_rows.rows[]",
           "materialized_spill_storage",
           "compile_report_path",
