@@ -19,6 +19,33 @@ func.def @online_softmax_update(%old_max: f32, %old_sum: f32, %old_acc: vector<4
 
 // ====
 
+// Flash-style attention feeds the QK probability/result tile into the PV MMA.
+// The direct result-to-LHS repack avoids a workgroup-memory round trip while
+// preserving the same BF16 operand contract expected by the second MMA.
+kernel.def @attention_probability_value_mma_repack() {
+  %one = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+} launch(%probabilities: vector<8xf32>, %values: vector<16xbf16>, %init_accumulator: vector<8xf32>, %output_buffer: buffer) {
+  %base = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 16 : index
+  %output_global = buffer.assume.memory_space<global> %output_buffer : buffer
+  %output_aligned = buffer.assume.alignment %output_global {minimum_alignment = 16} : buffer
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<16x16xf32, #dense>
+  %probability_fragment = vector.fragment<result> %probabilities shape [%m, %k] : vector<8xf32>
+  %lhs = vector.fragment.repack<lhs> %probability_fragment shape [%m, %k] : vector<8xf32> -> vector<16xbf16>
+  %rhs = vector.fragment<rhs> %values shape [%k, %n] : vector<16xbf16>
+  %init = vector.fragment<init> %init_accumulator shape [%m, %n] : vector<8xf32>
+  %output = vector.mma %lhs, %rhs, %init : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  vector.fragment.store<result> %output, %output_view[%zero, %zero] shape [%m, %n] : vector<8xf32>, view<16x16xf32, #dense>
+  kernel.return
+}
+
+// ====
+
 // Tail handling for a score block should mask invalid lanes before reductions.
 func.def @tail_masked_score_block(%scores: vector<4xf32>, %valid_count: i32) -> (f32, f32) {
   %start = scalar.constant 0 : i32
