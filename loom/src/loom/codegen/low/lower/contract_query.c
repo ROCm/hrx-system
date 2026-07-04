@@ -206,8 +206,8 @@ iree_status_t loom_low_lower_query_descriptor_matrix_contract(
     }
     case LOOM_TARGET_CONTRACT_DESCRIPTOR_MATRIX_SOURCE_NONE:
     default:
-      return iree_make_status(IREE_STATUS_INTERNAL,
-                              "unknown descriptor-matrix source");
+      IREE_ASSERT_UNREACHABLE("unknown descriptor-matrix source");
+      IREE_BUILTIN_UNREACHABLE();
   }
 
   return descriptor_matrix->query(descriptor_matrix->user_data, environment,
