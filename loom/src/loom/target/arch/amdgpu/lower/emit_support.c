@@ -600,10 +600,8 @@ iree_status_t loom_amdgpu_low_result_type(loom_low_lower_context_t* context,
   *out_low_type = loom_type_none();
   IREE_RETURN_IF_ERROR(loom_low_lower_map_value(context, source_op,
                                                 source_result, out_low_type));
-  if (!loom_low_type_is_register(*out_low_type)) {
-    return iree_make_status(IREE_STATUS_INTERNAL,
-                            "AMDGPU source type did not map to a register");
-  }
+  IREE_ASSERT(loom_low_type_is_register(*out_low_type),
+              "AMDGPU selected lowering produced non-register result type");
   return iree_ok_status();
 }
 
