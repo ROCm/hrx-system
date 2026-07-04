@@ -585,11 +585,7 @@ static iree_status_t loom_amdgpu_spill_lowering_materialize_store_value(
   if (spill_register->kind == LOOM_AMDGPU_SPILL_REGISTER_KIND_VGPR) {
     return iree_ok_status();
   }
-  if (chunk_units != 1) {
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
-        "AMDGPU SGPR spill lowering expects one-unit scratch chunks");
-  }
+  IREE_ASSERT_EQ(chunk_units, 1u);
   IREE_RETURN_IF_ERROR(loom_amdgpu_spill_lowering_make_register_type(
       context, context->vgpr_class_id, 1, out_type));
   return loom_amdgpu_spill_lowering_build_register_convert(
@@ -607,11 +603,7 @@ static iree_status_t loom_amdgpu_spill_lowering_materialize_loaded_value(
   if (spill_register->kind == LOOM_AMDGPU_SPILL_REGISTER_KIND_VGPR) {
     return iree_ok_status();
   }
-  if (chunk_units != 1) {
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
-        "AMDGPU SGPR reload lowering expects one-unit scratch chunks");
-  }
+  IREE_ASSERT_EQ(chunk_units, 1u);
   loom_type_t sgpr_type = loom_type_none();
   IREE_RETURN_IF_ERROR(loom_amdgpu_spill_lowering_make_register_type(
       context, context->sgpr_class_id, 1, &sgpr_type));
