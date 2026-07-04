@@ -464,6 +464,18 @@
                 },
                 {
                   "regex": "\"memory\":\\{\"private_bytes\":[1-9][0-9]*,\"local_bytes\":0\\}"
+                },
+                {
+                  "regex": "\"static_instruction_mix\":\\{[^}]*\"private_memory_count\":[1-9][0-9]*"
+                },
+                {
+                  "regex": "\"static_instruction_mix\":\\{[^}]*\"private_read_byte_count\":[1-9][0-9]*"
+                },
+                {
+                  "regex": "\"static_instruction_mix\":\\{[^}]*\"private_write_byte_count\":[1-9][0-9]*"
+                },
+                {
+                  "regex": "\"static_instruction_mix\":\\{[^}]*\"barrier_count\":[1-9][0-9]*"
                 }
               ]
             },
@@ -511,6 +523,18 @@
                   "regex": "\"memory\":\\{\"private_bytes\":[1-9][0-9]*,\"local_bytes\":0\\}"
                 },
                 {
+                  "regex": "\"static_instruction_mix\":\\{[^}]*\"private_memory_count\":[1-9][0-9]*"
+                },
+                {
+                  "regex": "\"static_instruction_mix\":\\{[^}]*\"private_read_byte_count\":[1-9][0-9]*"
+                },
+                {
+                  "regex": "\"static_instruction_mix\":\\{[^}]*\"private_write_byte_count\":[1-9][0-9]*"
+                },
+                {
+                  "regex": "\"static_instruction_mix\":\\{[^}]*\"barrier_count\":[1-9][0-9]*"
+                },
+                {
                   "regex": "\"wait_plan\":\\{\"action_count\":[1-9][0-9]*,\"explicit_action_count\":0,\"planned_action_count\":[1-9][0-9]*,\"full_drain_count\":[1-9][0-9]*,\"partial_wait_count\":[1-9][0-9]*,\"drained_count\":[1-9][0-9]*,\"max_drained_count\":[1-9][0-9]*"
                 },
                 {
@@ -540,7 +564,9 @@
                 "\"cause\":\"low_concat\"",
                 "\"kind\":\"materialized\"",
                 "\"origin\":\"matrix\"",
-                "\"semantic_tag\":\"matrix.wmma.f32.16x16x16.bf16\""
+                "\"semantic_tag\":\"matrix.wmma.f32.16x16x16.bf16\"",
+                "\"origin\":\"barrier\"",
+                "\"semantic_tag\":\"control.barrier.workgroup\""
               ]
             }
           },
