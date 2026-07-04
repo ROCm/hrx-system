@@ -5280,3 +5280,287 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx1250_vector_extf_f8e
   global_store_b128_saddr %41, %42, %output_view {offset = 16}
   return
 }
+
+// ====
+
+amdgpu.target<gfx1250> @target
+kernel.def target(@target) @gfx1250_vector_decode_f8e4m3_e8m0_x8_to_bf16_store() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %scale: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %lane = kernel.workitem.id<x> : index
+  %input_view = buffer.view %input[%base] : buffer -> view<64x8xf8E4M3, #dense>
+  %scale_view = buffer.view %scale[%base] : buffer -> view<64x1xi32, #dense>
+  %output_view = buffer.view %output[%base] : buffer -> view<64x8xbf16, #dense>
+  %schema = encoding.define #matrix_operand<affine=scale_only, element_format=f8e4m3, payload_elements=8, payload_packing=dense_lanes, payload_registers=0, scale_format=e8m0, scale_group_elements=8, scale_operands=1, scale_topology=block_1d> : encoding<schema>
+  %payload = vector.load %input_view[%lane, 0] : view<64x8xf8E4M3, #dense> -> vector<8xf8E4M3>
+  %scale_vector = vector.load %scale_view[%lane, 0] : view<64x1xi32, #dense> -> vector<1xi32>
+  %decoded = vector.decode %payload using %schema {scale = %scale_vector : vector<1xi32>} : vector<8xf8E4M3>, encoding<schema> -> vector<8xbf16>
+  vector.store %decoded, %output_view[%lane, 0] : vector<8xbf16>, view<64x8xbf16, #dense>
+  kernel.return
+}
+
+// ----
+low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx1250_vector_decode_f8e4m3_e8m0_x8_to_bf16_store() asm<amdgpu.rdna4.gfx125x.core> {
+  %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
+  %scale_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
+  %output_view = resource<hal_binding> {index = 2, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
+  %31 = v_lshlrev_b32_src0_inline %lane, 3
+  %payload = global_load_b64_saddr %31, %input_view
+  %33 = v_lshlrev_b32_src0_inline %lane, 2
+  %scale_vector = global_load_b32_saddr %33, %scale_view
+  %35 = slice %payload[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %36 = slice %payload[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %37 = concat(%35, %36) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %38 = v_cvt_scale_pk8_bf16_fp8 %37, %scale_vector
+  %39 = slice %38[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %40 = slice %38[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %41 = slice %38[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %42 = slice %38[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %decoded = concat(%39, %40, %41, %42) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  %44 = v_lshlrev_b32_src0_inline %lane, 4
+  global_store_b128_saddr %44, %decoded, %output_view
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1250> @target
+kernel.def target(@target) @gfx1250_vector_decode_f8e5m2_e8m0_x8_to_bf16_store() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %scale: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %lane = kernel.workitem.id<x> : index
+  %input_view = buffer.view %input[%base] : buffer -> view<64x8xf8E5M2, #dense>
+  %scale_view = buffer.view %scale[%base] : buffer -> view<64x1xi32, #dense>
+  %output_view = buffer.view %output[%base] : buffer -> view<64x8xbf16, #dense>
+  %schema = encoding.define #matrix_operand<affine=scale_only, element_format=f8e5m2, payload_elements=8, payload_packing=dense_lanes, payload_registers=0, scale_format=e8m0, scale_group_elements=8, scale_operands=1, scale_topology=block_1d> : encoding<schema>
+  %payload = vector.load %input_view[%lane, 0] : view<64x8xf8E5M2, #dense> -> vector<8xf8E5M2>
+  %scale_vector = vector.load %scale_view[%lane, 0] : view<64x1xi32, #dense> -> vector<1xi32>
+  %decoded = vector.decode %payload using %schema {scale = %scale_vector : vector<1xi32>} : vector<8xf8E5M2>, encoding<schema> -> vector<8xbf16>
+  vector.store %decoded, %output_view[%lane, 0] : vector<8xbf16>, view<64x8xbf16, #dense>
+  kernel.return
+}
+
+// ----
+low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx1250_vector_decode_f8e5m2_e8m0_x8_to_bf16_store() asm<amdgpu.rdna4.gfx125x.core> {
+  %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
+  %scale_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
+  %output_view = resource<hal_binding> {index = 2, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
+  %31 = v_lshlrev_b32_src0_inline %lane, 3
+  %payload = global_load_b64_saddr %31, %input_view
+  %33 = v_lshlrev_b32_src0_inline %lane, 2
+  %scale_vector = global_load_b32_saddr %33, %scale_view
+  %35 = slice %payload[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %36 = slice %payload[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %37 = concat(%35, %36) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %38 = v_cvt_scale_pk8_bf16_bf8 %37, %scale_vector
+  %39 = slice %38[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %40 = slice %38[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %41 = slice %38[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %42 = slice %38[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %decoded = concat(%39, %40, %41, %42) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  %44 = v_lshlrev_b32_src0_inline %lane, 4
+  global_store_b128_saddr %44, %decoded, %output_view
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1250> @target
+kernel.def target(@target) @gfx1250_vector_decode_f8e4m3_e8m0_x8_to_f16_store() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %scale: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %lane = kernel.workitem.id<x> : index
+  %input_view = buffer.view %input[%base] : buffer -> view<64x8xf8E4M3, #dense>
+  %scale_view = buffer.view %scale[%base] : buffer -> view<64x1xi32, #dense>
+  %output_view = buffer.view %output[%base] : buffer -> view<64x8xf16, #dense>
+  %schema = encoding.define #matrix_operand<affine=scale_only, element_format=f8e4m3, payload_elements=8, payload_packing=dense_lanes, payload_registers=0, scale_format=e8m0, scale_group_elements=8, scale_operands=1, scale_topology=block_1d> : encoding<schema>
+  %payload = vector.load %input_view[%lane, 0] : view<64x8xf8E4M3, #dense> -> vector<8xf8E4M3>
+  %scale_vector = vector.load %scale_view[%lane, 0] : view<64x1xi32, #dense> -> vector<1xi32>
+  %decoded = vector.decode %payload using %schema {scale = %scale_vector : vector<1xi32>} : vector<8xf8E4M3>, encoding<schema> -> vector<8xf16>
+  vector.store %decoded, %output_view[%lane, 0] : vector<8xf16>, view<64x8xf16, #dense>
+  kernel.return
+}
+
+// ----
+low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx1250_vector_decode_f8e4m3_e8m0_x8_to_f16_store() asm<amdgpu.rdna4.gfx125x.core> {
+  %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
+  %scale_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
+  %output_view = resource<hal_binding> {index = 2, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
+  %31 = v_lshlrev_b32_src0_inline %lane, 3
+  %payload = global_load_b64_saddr %31, %input_view
+  %33 = v_lshlrev_b32_src0_inline %lane, 2
+  %scale_vector = global_load_b32_saddr %33, %scale_view
+  %35 = slice %payload[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %36 = slice %payload[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %37 = concat(%35, %36) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %38 = v_cvt_scale_pk8_f16_fp8 %37, %scale_vector
+  %39 = slice %38[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %40 = slice %38[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %41 = slice %38[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %42 = slice %38[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %decoded = concat(%39, %40, %41, %42) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  %44 = v_lshlrev_b32_src0_inline %lane, 4
+  global_store_b128_saddr %44, %decoded, %output_view
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1250> @target
+kernel.def target(@target) @gfx1250_vector_decode_f8e5m2_e8m0_x8_to_f16_store() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %scale: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %lane = kernel.workitem.id<x> : index
+  %input_view = buffer.view %input[%base] : buffer -> view<64x8xf8E5M2, #dense>
+  %scale_view = buffer.view %scale[%base] : buffer -> view<64x1xi32, #dense>
+  %output_view = buffer.view %output[%base] : buffer -> view<64x8xf16, #dense>
+  %schema = encoding.define #matrix_operand<affine=scale_only, element_format=f8e5m2, payload_elements=8, payload_packing=dense_lanes, payload_registers=0, scale_format=e8m0, scale_group_elements=8, scale_operands=1, scale_topology=block_1d> : encoding<schema>
+  %payload = vector.load %input_view[%lane, 0] : view<64x8xf8E5M2, #dense> -> vector<8xf8E5M2>
+  %scale_vector = vector.load %scale_view[%lane, 0] : view<64x1xi32, #dense> -> vector<1xi32>
+  %decoded = vector.decode %payload using %schema {scale = %scale_vector : vector<1xi32>} : vector<8xf8E5M2>, encoding<schema> -> vector<8xf16>
+  vector.store %decoded, %output_view[%lane, 0] : vector<8xf16>, view<64x8xf16, #dense>
+  kernel.return
+}
+
+// ----
+low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx1250_vector_decode_f8e5m2_e8m0_x8_to_f16_store() asm<amdgpu.rdna4.gfx125x.core> {
+  %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
+  %scale_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
+  %output_view = resource<hal_binding> {index = 2, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
+  %31 = v_lshlrev_b32_src0_inline %lane, 3
+  %payload = global_load_b64_saddr %31, %input_view
+  %33 = v_lshlrev_b32_src0_inline %lane, 2
+  %scale_vector = global_load_b32_saddr %33, %scale_view
+  %35 = slice %payload[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %36 = slice %payload[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %37 = concat(%35, %36) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %38 = v_cvt_scale_pk8_f16_bf8 %37, %scale_vector
+  %39 = slice %38[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %40 = slice %38[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %41 = slice %38[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %42 = slice %38[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %decoded = concat(%39, %40, %41, %42) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  %44 = v_lshlrev_b32_src0_inline %lane, 4
+  global_store_b128_saddr %44, %decoded, %output_view
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1250> @target
+kernel.def target(@target) @gfx1250_vector_decode_f8e4m3_e8m0_x8_to_f32_store() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %scale: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %lane = kernel.workitem.id<x> : index
+  %input_view = buffer.view %input[%base] : buffer -> view<64x8xf8E4M3, #dense>
+  %scale_view = buffer.view %scale[%base] : buffer -> view<64x1xi32, #dense>
+  %output_view = buffer.view %output[%base] : buffer -> view<64x8xf32, #dense>
+  %schema = encoding.define #matrix_operand<affine=scale_only, element_format=f8e4m3, payload_elements=8, payload_packing=dense_lanes, payload_registers=0, scale_format=e8m0, scale_group_elements=8, scale_operands=1, scale_topology=block_1d> : encoding<schema>
+  %payload = vector.load %input_view[%lane, 0] : view<64x8xf8E4M3, #dense> -> vector<8xf8E4M3>
+  %scale_vector = vector.load %scale_view[%lane, 0] : view<64x1xi32, #dense> -> vector<1xi32>
+  %decoded = vector.decode %payload using %schema {scale = %scale_vector : vector<1xi32>} : vector<8xf8E4M3>, encoding<schema> -> vector<8xf32>
+  vector.store %decoded, %output_view[%lane, 0] : vector<8xf32>, view<64x8xf32, #dense>
+  kernel.return
+}
+
+// ----
+low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx1250_vector_decode_f8e4m3_e8m0_x8_to_f32_store() asm<amdgpu.rdna4.gfx125x.core> {
+  %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
+  %scale_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
+  %output_view = resource<hal_binding> {index = 2, source_type = hal.buffer, extent = 2048} : reg<amdgpu.sgpr x2>
+  %31 = v_lshlrev_b32_src0_inline %lane, 3
+  %payload = global_load_b64_saddr %31, %input_view
+  %33 = v_lshlrev_b32_src0_inline %lane, 2
+  %scale_vector = global_load_b32_saddr %33, %scale_view
+  %35 = slice %payload[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %36 = slice %payload[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %37 = concat(%35, %36) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %38 = v_cvt_scale_pk8_f32_fp8 %37, %scale_vector
+  %39 = slice %38[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %40 = slice %38[1] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %41 = slice %38[2] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %42 = slice %38[3] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %43 = slice %38[4] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %44 = slice %38[5] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %45 = slice %38[6] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %46 = slice %38[7] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %decoded = concat(%39, %40, %41, %42, %43, %44, %45, %46) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x8>
+  %48 = slice %decoded[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x4>
+  %49 = v_lshlrev_b32_src0_inline %lane, 5
+  global_store_b128_saddr %49, %48, %output_view
+  %50 = slice %decoded[4] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x4>
+  global_store_b128_saddr %49, %50, %output_view {offset = 16}
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1250> @target
+kernel.def target(@target) @gfx1250_vector_decode_f8e5m2_e8m0_x8_to_f32_store() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %scale: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %lane = kernel.workitem.id<x> : index
+  %input_view = buffer.view %input[%base] : buffer -> view<64x8xf8E5M2, #dense>
+  %scale_view = buffer.view %scale[%base] : buffer -> view<64x1xi32, #dense>
+  %output_view = buffer.view %output[%base] : buffer -> view<64x8xf32, #dense>
+  %schema = encoding.define #matrix_operand<affine=scale_only, element_format=f8e5m2, payload_elements=8, payload_packing=dense_lanes, payload_registers=0, scale_format=e8m0, scale_group_elements=8, scale_operands=1, scale_topology=block_1d> : encoding<schema>
+  %payload = vector.load %input_view[%lane, 0] : view<64x8xf8E5M2, #dense> -> vector<8xf8E5M2>
+  %scale_vector = vector.load %scale_view[%lane, 0] : view<64x1xi32, #dense> -> vector<1xi32>
+  %decoded = vector.decode %payload using %schema {scale = %scale_vector : vector<1xi32>} : vector<8xf8E5M2>, encoding<schema> -> vector<8xf32>
+  vector.store %decoded, %output_view[%lane, 0] : vector<8xf32>, view<64x8xf32, #dense>
+  kernel.return
+}
+
+// ----
+low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx1250_vector_decode_f8e5m2_e8m0_x8_to_f32_store() asm<amdgpu.rdna4.gfx125x.core> {
+  %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
+  %scale_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
+  %output_view = resource<hal_binding> {index = 2, source_type = hal.buffer, extent = 2048} : reg<amdgpu.sgpr x2>
+  %31 = v_lshlrev_b32_src0_inline %lane, 3
+  %payload = global_load_b64_saddr %31, %input_view
+  %33 = v_lshlrev_b32_src0_inline %lane, 2
+  %scale_vector = global_load_b32_saddr %33, %scale_view
+  %35 = slice %payload[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %36 = slice %payload[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %37 = concat(%35, %36) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %38 = v_cvt_scale_pk8_f32_bf8 %37, %scale_vector
+  %39 = slice %38[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %40 = slice %38[1] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %41 = slice %38[2] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %42 = slice %38[3] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %43 = slice %38[4] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %44 = slice %38[5] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %45 = slice %38[6] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %46 = slice %38[7] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %decoded = concat(%39, %40, %41, %42, %43, %44, %45, %46) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x8>
+  %48 = slice %decoded[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x4>
+  %49 = v_lshlrev_b32_src0_inline %lane, 5
+  global_store_b128_saddr %49, %48, %output_view
+  %50 = slice %decoded[4] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x4>
+  global_store_b128_saddr %49, %50, %output_view {offset = 16}
+  return
+}

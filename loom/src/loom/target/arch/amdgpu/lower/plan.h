@@ -23,6 +23,7 @@
 #include "loom/target/arch/amdgpu/lower/kinds.h"
 #include "loom/target/arch/amdgpu/matrix/contract.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
+#include "loom/util/numeric_format.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -70,8 +71,10 @@ typedef struct loom_amdgpu_vector_16bit_float_conversion_plan_t {
   loom_value_id_t storage_source;
   // Value carrying logical lane content facts for FP8 simplification.
   loom_value_id_t content_fact_source;
-  // Optional F32 scale source for scaled vector.decode operations.
+  // Optional scale source for scaled vector.decode operations.
   loom_value_id_t scale_source;
+  // Numeric format of scale_source, or NONE when there is no scale source.
+  loom_value_fact_numeric_format_flags_t scale_format;
   // Conversion operation selected for the source/result type pair.
   loom_amdgpu_vector_16bit_float_conversion_kind_t kind;
   // Source scalar element type.

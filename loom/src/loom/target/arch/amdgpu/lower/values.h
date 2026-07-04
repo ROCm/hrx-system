@@ -122,6 +122,7 @@ iree_status_t loom_amdgpu_select_vector_16bit_float_conversion_plan(
 // AMDGPU source-low lowering can handle with native packets or software decode.
 bool loom_amdgpu_vector_decode_can_lower_as_fp8_conversion(
     const loom_module_t* module, const loom_value_fact_table_t* fact_table,
+    const loom_low_descriptor_set_t* descriptor_set,
     const loom_op_t* source_op);
 
 // Lowers an AMDGPU vector 16-bit-float conversion plan.
