@@ -55,7 +55,7 @@ typedef struct loom_amdgpu_fp8_subnormal_table_row_t {
   }
 
 static const loom_amdgpu_fp8_subnormal_table_row_t
-    kLoomAmdgpuFp8SubnormalTableRows[LOOM_SCALAR_TYPE_COUNT_] = {
+    kLoomAmdgpuFp8SubnormalTableRows[] = {
 #include "loom/target/arch/amdgpu/lower/narrow_float/fp8_subnormal_table_rows.inl"
 };
 
