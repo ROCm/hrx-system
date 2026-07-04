@@ -2260,9 +2260,18 @@ static bool loom_amdgpu_direct_fp8_scalef32_schema_matches(
 static bool loom_amdgpu_direct_fp8_e8m0_schema_matches(
     loom_value_fact_encoded_operand_schema_t schema,
     loom_scalar_type_t element_type, uint32_t lane_count) {
+  const uint32_t scale_group_element_count = schema.scale_group_element_count;
+  const uint32_t scale_group_count =
+      scale_group_element_count == 0
+          ? UINT32_MAX
+          : (scale_group_element_count >= lane_count
+                 ? 1u
+                 : (lane_count + scale_group_element_count - 1u) /
+                       scale_group_element_count);
   if (loom_value_fact_encoded_operand_schema_is_unknown(schema) ||
       !loom_amdgpu_direct_fp8_schema_element_format_matches(
           schema.element_format, element_type) ||
+      lane_count == 0 || (lane_count & 7u) != 0 ||
       schema.payload_packing != LOOM_VALUE_FACT_PAYLOAD_PACKING_DENSE_LANES ||
       schema.scale_format != LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E8M0 ||
       schema.secondary_scale_format != LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE ||
@@ -2274,8 +2283,8 @@ static bool loom_amdgpu_direct_fp8_e8m0_schema_matches(
       schema.sparsity_policy != LOOM_VALUE_FACT_SPARSITY_POLICY_NONE ||
       schema.flags != 0 || schema.payload_register_count != 0 ||
       schema.payload_element_count != lane_count ||
-      schema.scale_group_element_count != lane_count ||
-      schema.scale_operand_count != 1) {
+      scale_group_element_count < 8u || (scale_group_element_count & 7u) != 0 ||
+      scale_group_count > 4u || schema.scale_operand_count != 1) {
     return false;
   }
   return true;
@@ -2554,6 +2563,7 @@ loom_amdgpu_vector_16bit_float_conversion_plan_from_accepted_op(
   loom_value_id_t scale_source = LOOM_VALUE_ID_INVALID;
   loom_value_fact_numeric_format_flags_t scale_format =
       LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE;
+  uint32_t scale_group_element_count = 0;
   uint32_t storage_lane_offset = 0;
   uint32_t storage_lane_stride = 1;
   uint32_t storage_lane_count = 0;
@@ -2575,6 +2585,8 @@ loom_amdgpu_vector_16bit_float_conversion_plan_from_accepted_op(
                   fact_table, loom_vector_decode_schema(source_op)),
               &summary)) {
         scale_format = summary.storage_schema.encoded_operand.scale_format;
+        scale_group_element_count =
+            summary.storage_schema.encoded_operand.scale_group_element_count;
       }
       loom_scalar_type_t scale_element_type = 0;
       if (loom_amdgpu_vector_decode_scale_element_type(scale_format,
@@ -2674,6 +2686,7 @@ loom_amdgpu_vector_16bit_float_conversion_plan_from_accepted_op(
           content_fact_source = storage_source;
           scale_source = scale_origin.scale_value_id;
           scale_format = LOOM_VALUE_FACT_NUMERIC_FORMAT_F32;
+          scale_group_element_count = source_lane_count;
           storage_lane_offset = lane_origin.source_lane_offset;
           storage_lane_stride = lane_origin.source_lane_stride;
           storage_lane_count = origin_lane_count;
@@ -2698,6 +2711,7 @@ loom_amdgpu_vector_16bit_float_conversion_plan_from_accepted_op(
       .content_fact_source = content_fact_source,
       .scale_source = scale_source,
       .scale_format = scale_format,
+      .scale_group_element_count = scale_group_element_count,
       .source_element_type = source_element_type,
       .result_element_type = result_element_type,
       .lane_count = source_lane_count,
@@ -6113,11 +6127,25 @@ static void loom_amdgpu_vector_fp8_unscaled_plan(
   *out_plan = *plan;
   out_plan->scale_source = LOOM_VALUE_ID_INVALID;
   out_plan->scale_format = LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE;
+  out_plan->scale_group_element_count = 0;
 }
 
 static uint32_t loom_amdgpu_vector_fp8_e8m0_pk8_result_register_count(
     loom_scalar_type_t result_element_type) {
   return result_element_type == LOOM_SCALAR_TYPE_F32 ? 8u : 4u;
+}
+
+static uint32_t loom_amdgpu_vector_fp8_e8m0_pk8_scale_sel(
+    const loom_amdgpu_vector_16bit_float_conversion_plan_t* plan,
+    uint32_t lane_index) {
+  if (!loom_amdgpu_vector_16bit_float_conversion_plan_has_e8m0_scale(plan) ||
+      plan->scale_group_element_count == 0 ||
+      plan->scale_group_element_count >= plan->lane_count) {
+    return 0;
+  }
+  const uint32_t scale_selector = lane_index / plan->scale_group_element_count;
+  IREE_ASSERT_LE(scale_selector, 15u);
+  return scale_selector;
 }
 
 static iree_status_t loom_amdgpu_try_lower_vector_fp8_e8m0_pk8_native(
@@ -6168,6 +6196,7 @@ static iree_status_t loom_amdgpu_try_lower_vector_fp8_e8m0_pk8_native(
       context, result_registers_per_octet, &result_octet_type));
 
   loom_value_id_t low_e8m0_scale = low_scale;
+  loom_string_id_t scale_sel_name_id = LOOM_STRING_ID_INVALID;
   for (uint32_t lane_index = 0; lane_index < plan->lane_count;
        lane_index += 8u) {
     loom_amdgpu_vector_fp8_octet_storage_t octet_storage;
@@ -6186,10 +6215,24 @@ static iree_status_t loom_amdgpu_try_lower_vector_fp8_e8m0_pk8_native(
         source_pair_type, &source_pair));
 
     const loom_value_id_t operands[] = {source_pair, low_e8m0_scale};
+    loom_named_attr_t attrs[1] = {0};
+    iree_host_size_t attr_count = 0;
+    const uint32_t scale_sel =
+        loom_amdgpu_vector_fp8_e8m0_pk8_scale_sel(plan, lane_index);
+    if (scale_sel != 0) {
+      if (scale_sel_name_id == LOOM_STRING_ID_INVALID) {
+        IREE_RETURN_IF_ERROR(loom_amdgpu_intern(context, IREE_SV("scale_sel"),
+                                                &scale_sel_name_id));
+      }
+      attrs[attr_count++] = (loom_named_attr_t){
+          .name_id = scale_sel_name_id,
+          .value = loom_attr_i64(scale_sel),
+      };
+    }
     loom_op_t* low_op = NULL;
     IREE_RETURN_IF_ERROR(loom_low_lower_emit_resolved_descriptor_op(
         context, descriptor, operands, IREE_ARRAYSIZE(operands),
-        loom_named_attr_slice_empty(), &result_octet_type, 1,
+        loom_make_named_attr_slice(attrs, attr_count), &result_octet_type, 1,
         /*tied_results=*/NULL, /*tied_result_count=*/0, source_op->location,
         &low_op));
     const loom_value_id_t converted_octet =
