@@ -7537,6 +7537,68 @@ static bool loom_amdgpu_vector_fp8_plan_has_native_bf16_pack(
       LOOM_AMDGPU_DESCRIPTOR_REF_V_CVT_PK_BF16_F32);
 }
 
+static bool loom_amdgpu_vector_fp8_plan_packed_u16_decode_plan(
+    loom_low_lower_context_t* context,
+    const loom_amdgpu_vector_16bit_float_conversion_plan_t* plan,
+    loom_amdgpu_fp8_decode_plan_t* out_decode_plan,
+    loom_amdgpu_fp8_decode_value_flags_t* out_value_flags) {
+  loom_amdgpu_vector_fp8_decode_value_flag_cache_t value_flag_cache;
+  loom_amdgpu_vector_fp8_decode_value_flag_cache_initialize(context, plan,
+                                                            &value_flag_cache);
+  loom_amdgpu_vector_fp8_pair_storage_t
+      pair_storage[LOOM_AMDGPU_MAX_PACKED_32BIT_REGISTERS] = {0};
+  loom_amdgpu_fp8_decode_value_flags_t value_flags =
+      LOOM_AMDGPU_FP8_DECODE_VALUE_FLAG_NONE;
+  if (!loom_amdgpu_vector_fp8_query_storage_pair_set(
+          plan, &value_flag_cache, plan->result_register_count, pair_storage,
+          &value_flags)) {
+    return false;
+  }
+  loom_amdgpu_initialize_fp8_decode_plan_from_descriptor_set(
+      loom_low_lower_context_descriptor_set(context), plan->source_element_type,
+      out_decode_plan);
+  *out_value_flags = value_flags;
+  return true;
+}
+
+static iree_string_view_t loom_amdgpu_vector_fp8_packed_bf16_plan_key(
+    loom_low_lower_context_t* context,
+    const loom_amdgpu_vector_16bit_float_conversion_plan_t* plan) {
+  loom_amdgpu_fp8_decode_plan_t decode_plan;
+  loom_amdgpu_fp8_decode_value_flags_t value_flags =
+      LOOM_AMDGPU_FP8_DECODE_VALUE_FLAG_NONE;
+  if (!loom_amdgpu_vector_fp8_plan_packed_u16_decode_plan(
+          context, plan, &decode_plan, &value_flags) ||
+      !loom_amdgpu_can_emit_fp8_pair_to_packed_bf16(&decode_plan,
+                                                    value_flags)) {
+    return IREE_SV(
+        "amdgpu.vector_16bit_float_conversion.strategy."
+        "fp8_software_packed_bf16_decode");
+  }
+  const loom_amdgpu_fp8_packed_u16_repairs_t repairs =
+      loom_amdgpu_fp8_pair_to_packed_bf16_repairs(&decode_plan, value_flags);
+  return loom_amdgpu_fp8_packed_bf16_repair_reason_key(repairs);
+}
+
+static iree_string_view_t loom_amdgpu_vector_fp8_packed_f16_plan_key(
+    loom_low_lower_context_t* context,
+    const loom_amdgpu_vector_16bit_float_conversion_plan_t* plan) {
+  loom_amdgpu_fp8_decode_plan_t decode_plan;
+  loom_amdgpu_fp8_decode_value_flags_t value_flags =
+      LOOM_AMDGPU_FP8_DECODE_VALUE_FLAG_NONE;
+  if (!loom_amdgpu_vector_fp8_plan_packed_u16_decode_plan(
+          context, plan, &decode_plan, &value_flags) ||
+      !loom_amdgpu_can_emit_fp8_pair_to_packed_f16_finite(&decode_plan,
+                                                          value_flags)) {
+    return IREE_SV(
+        "amdgpu.vector_16bit_float_conversion.strategy."
+        "fp8_software_packed_f16_decode");
+  }
+  const loom_amdgpu_fp8_packed_u16_repairs_t repairs =
+      loom_amdgpu_fp8_pair_to_packed_f16_repairs(&decode_plan, value_flags);
+  return loom_amdgpu_fp8_packed_f16_repair_reason_key(repairs);
+}
+
 static iree_string_view_t loom_amdgpu_vector_fp8_e8m0_pk8_conversion_plan_key(
     loom_scalar_type_t result_element_type) {
   switch (result_element_type) {
@@ -7688,9 +7750,7 @@ loom_amdgpu_vector_fp8_unscaled_bf16_conversion_plan_key(
         "amdgpu.vector_16bit_float_conversion.strategy."
         "fp8_native_f32_lane_manual_bf16_pack");
   }
-  return IREE_SV(
-      "amdgpu.vector_16bit_float_conversion.strategy."
-      "fp8_software_packed_bf16_decode");
+  return loom_amdgpu_vector_fp8_packed_bf16_plan_key(context, plan);
 }
 
 static iree_string_view_t
@@ -7710,9 +7770,7 @@ loom_amdgpu_vector_fp8_unscaled_f16_conversion_plan_key(
         "amdgpu.vector_16bit_float_conversion.strategy."
         "fp8_native_f32_pair_manual_f16_pack");
   }
-  return IREE_SV(
-      "amdgpu.vector_16bit_float_conversion.strategy."
-      "fp8_software_packed_f16_decode");
+  return loom_amdgpu_vector_fp8_packed_f16_plan_key(context, plan);
 }
 
 static iree_string_view_t loom_amdgpu_vector_fp8_conversion_plan_key(
