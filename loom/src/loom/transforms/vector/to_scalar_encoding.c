@@ -634,12 +634,10 @@ iree_status_t loom_vector_to_scalar_build_encoded_matrix_lane(
   IREE_ASSERT_ARGUMENT(state);
   IREE_ASSERT_ARGUMENT(operand);
   IREE_ASSERT_ARGUMENT(out_lane);
-  if (!loom_vector_to_scalar_encoded_matrix_operand_is_supported(
-          state, operand, raw_lane_type, result_type)) {
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
-        "unsupported encoded matrix operand reached scalar reference builder");
-  }
+  IREE_ASSERT(loom_vector_to_scalar_encoded_matrix_operand_is_supported(
+                  state, operand, raw_lane_type, result_type),
+              "unsupported encoded matrix operand reached scalar reference "
+              "builder");
 
   loom_value_id_t decoded = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_vector_to_scalar_encoded_raw_value_lane(

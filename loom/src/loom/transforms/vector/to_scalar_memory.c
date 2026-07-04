@@ -933,6 +933,9 @@ static bool loom_vector_to_scalar_physical_result_store_types_match(
       !loom_type_is_all_static(source_type)) {
     return false;
   }
+  if (!loom_type_is_view(view_type) || loom_type_rank(view_type) != 2) {
+    return false;
+  }
   uint64_t lane_count = 0;
   if (!loom_type_static_element_count(source_type, &lane_count) ||
       lane_count != register_count) {
@@ -990,12 +993,7 @@ static iree_status_t loom_vector_to_scalar_build_physical_result_store_indices(
       state, loom_vector_fragment_store_static_indices(state->op),
       loom_vector_fragment_store_indices(state->op), &view_terms,
       &view_term_count));
-  if (view_term_count != IREE_ARRAYSIZE(logical_terms)) {
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
-        "physical result fragment store scalarization selected non-rank-2 "
-        "indices");
-  }
+  IREE_ASSERT_EQ(view_term_count, IREE_ARRAYSIZE(logical_terms));
   for (uint8_t i = 0; i < IREE_ARRAYSIZE(logical_terms); ++i) {
     IREE_RETURN_IF_ERROR(loom_vector_to_scalar_build_term_binary(
         state, LOOM_VECTOR_TO_SCALAR_INDEX_BINARY_ADD, view_terms[i],
