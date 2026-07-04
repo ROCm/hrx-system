@@ -4,7 +4,6 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include <inttypes.h>
 #include <stdint.h>
 
 #include "loom/ir/context.h"
@@ -797,13 +796,9 @@ iree_status_t loom_amdgpu_resolve_descriptor_ref(
   bool present = false;
   IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_descriptor_ref_if_present(
       context, descriptor_ref, out_descriptor, &present));
-  if (!present) {
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
-        "generated AMDGPU lowering policy references missing descriptor ref "
-        "%" PRIu16,
-        descriptor_ref);
-  }
+  IREE_ASSERT(present,
+              "generated AMDGPU lowering policy references missing descriptor "
+              "ref");
   return iree_ok_status();
 }
 
