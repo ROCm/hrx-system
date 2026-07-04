@@ -369,10 +369,9 @@ static iree_status_t loom_amdgpu_hal_binding_build_descriptor_pointer(
         loom_amdgpu_hal_binding_cache_swizzle_kind(descriptor_set);
     if (cache_swizzle_kind !=
         LOOM_AMDGPU_BUFFER_RESOURCE_CACHE_SWIZZLE_STRIDE14_ENABLE_BIT) {
-      return iree_make_status(
-          IREE_STATUS_INTERNAL,
-          "AMDGPU HAL binding materialization reached an unverified cache "
-          "swizzle descriptor");
+      IREE_ASSERT_UNREACHABLE(
+          "verified AMDGPU HAL buffer descriptor cache swizzle");
+      IREE_BUILTIN_UNREACHABLE();
     }
 
     const uint32_t cache_swizzle_word =
@@ -758,17 +757,15 @@ static iree_status_t loom_amdgpu_hal_binding_materialize_direct_args(
     const loom_amdgpu_hal_kernarg_direct_arg_t* direct_arg =
         &layout->direct_args[i - 1];
     if (direct_arg->argument_index >= entry_block->arg_count) {
-      return iree_make_status(
-          IREE_STATUS_INTERNAL,
-          "AMDGPU HAL binding materialization direct argument index was "
-          "invalidated before removal");
+      IREE_ASSERT_UNREACHABLE(
+          "AMDGPU HAL direct argument entry-block index is stable");
+      IREE_BUILTIN_UNREACHABLE();
     }
     if (loom_block_arg_id(entry_block, direct_arg->argument_index) !=
         direct_arg->arg_id) {
-      return iree_make_status(
-          IREE_STATUS_INTERNAL,
-          "AMDGPU HAL binding materialization direct argument ordering changed "
-          "before removal");
+      IREE_ASSERT_UNREACHABLE(
+          "AMDGPU HAL direct argument entry-block order is stable");
+      IREE_BUILTIN_UNREACHABLE();
     }
     IREE_RETURN_IF_ERROR(loom_block_remove_arg(rewriter->module, entry_block,
                                                direct_arg->argument_index));
