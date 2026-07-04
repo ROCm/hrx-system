@@ -509,13 +509,13 @@ func.def @memory(%buffer: buffer, %offset: offset, %row: index, %col: index, %m:
 // Fragment memory ops materialize physical matrix payloads from logical views.
 // The payload shape is target-contract-shaped, not an ordinary vector footprint
 // over the trailing view axes.
-func.def @fragment_memory(%buffer: buffer, %offset: offset, %row: index, %col: index, %m: index, %n: index, %k: index) {
+func.def @fragment_memory(%buffer: buffer, %offset: offset, %row: index, %col: index, %m: index, %n: index, %k: index, %metadata: vector<1xi32>) {
   %layout = encoding.layout.dense : encoding<layout>
   %a = buffer.view %buffer[%offset] : buffer -> view<[%m]x[%k]xf16, %layout>
   %b = buffer.view %buffer[%offset] : buffer -> view<[%k]x[%n]xf16, %layout>
   %c = buffer.view %buffer[%offset] : buffer -> view<[%m]x[%n]xf32, %layout>
   %lhs = vector.fragment.load<lhs> %a[%row, 0] shape [%m, %k] {cache_scope = device} : view<[%m]x[%k]xf16, %layout> -> vector<16xf16>
-  %rhs = vector.fragment.load<rhs> %b[0, %col] shape [%k, %n] : view<[%k]x[%n]xf16, %layout> -> vector<16xf16>
+  %rhs = vector.fragment.load<rhs> %b[0, %col] shape [%k, %n] using {sparsity = %metadata : vector<1xi32>} : view<[%k]x[%n]xf16, %layout> -> vector<16xf16>
   %init = vector.fragment.load<init> %c[%row, %col] shape [%m, %n] : view<[%m]x[%n]xf32, %layout> -> vector<8xf32>
   %result = vector.mma %lhs, %rhs, %init : vector<16xf16>, vector<16xf16>, vector<8xf32>
   vector.fragment.store<result> %result, %c[%row, %col] shape [%m, %n] {cache_scope = system} : vector<8xf32>, view<[%m]x[%n]xf32, %layout>

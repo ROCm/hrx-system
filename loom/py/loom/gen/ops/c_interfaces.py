@@ -188,7 +188,7 @@ INTERFACES: tuple[InterfaceSpec, ...] = (
             InterfaceFieldSpec("mask", "mask_operand_index", "operand"),
             InterfaceFieldSpec("passthrough", "passthrough_operand_index", "operand"),
             InterfaceFieldSpec("offsets", "offsets_operand_index", "operand"),
-            InterfaceFieldSpec("indices", "indices_operand_offset", "operand"),
+            InterfaceFieldSpec("indices", "indices_operand_field_index", "operand"),
             InterfaceFieldSpec("static_indices", "static_indices_attr_index", "attr"),
             InterfaceFieldSpec("cache_scope", "cache_scope_attr_index", "attr"),
             InterfaceFieldSpec("cache_temporal", "cache_temporal_attr_index", "attr"),
@@ -374,8 +374,6 @@ def _validate_memory_access_interface(op: Op, iface: MemoryAccessInterface, inte
         indices_operand = op.operands[indices_index]
         if not indices_operand.variadic:
             raise ValueError(f"{interface_name} on {op.name!r}: operand {iface.indices!r} must be variadic")
-        if indices_index + 1 != len(op.operands):
-            raise ValueError(f"{interface_name} on {op.name!r}: operand {iface.indices!r} must be the trailing operand field")
 
     cache_scope_index = _resolve_soft_memory_field(op, iface, "cache_scope", "attr", interface_name)
     cache_temporal_index = _resolve_soft_memory_field(op, iface, "cache_temporal", "attr", interface_name)

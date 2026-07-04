@@ -1421,9 +1421,10 @@ bool loom_region_branch_region_yield_only_operands(
 //===----------------------------------------------------------------------===//
 
 // Returns true if |access| refers to a valid memory-access op. All accessor
-// helpers below tolerate a NULL vtable and return safe defaults.
+// helpers below tolerate a NULL op vtable and return safe defaults.
 static inline bool loom_memory_access_isa(loom_memory_access_t access) {
-  return access.op != NULL;
+  return access.op != NULL && access.op_vtable != NULL &&
+         access.op_vtable->memory_access != NULL;
 }
 
 // Casts |op| to loom_memory_access_t if it implements the MemoryAccess

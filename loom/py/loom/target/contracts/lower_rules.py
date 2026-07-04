@@ -150,6 +150,7 @@ class LowerValueRef:
 
     kind: SourceValueKind
     index: int
+    element_index: int = 0
     materializer_index: int = 0
 
 
@@ -1953,6 +1954,9 @@ def _lower_value_ref(
     return LowerValueRef(
         kind=value_ref.kind,
         index=_source_value_index(source_op, value_ref, temporary_ordinals),
+        element_index=value_ref.element
+        if value_ref.kind == SourceValueKind.OPERAND
+        else 0,
         materializer_index=materializer_index,
     )
 
@@ -1965,7 +1969,7 @@ def _source_value_index(
     if value_ref.kind == SourceValueKind.OPERAND:
         operand = source_op.operand(value_ref.field)
         if operand is not None:
-            return source_op.operands.index(operand) + value_ref.element
+            return source_op.operands.index(operand)
     if value_ref.kind == SourceValueKind.RESULT:
         result = source_op.result(value_ref.field)
         if result is not None:

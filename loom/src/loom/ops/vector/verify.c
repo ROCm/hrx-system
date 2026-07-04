@@ -766,20 +766,6 @@ iree_status_t loom_vector_store_verify(const loom_module_t* module,
       LOOM_CACHE_POLICY_ACCESS_STORE);
 }
 
-iree_status_t loom_vector_fragment_load_verify(
-    const loom_module_t* module, const loom_op_t* op,
-    iree_diagnostic_emitter_t emitter) {
-  loom_type_t view_type =
-      loom_module_value_type(module, loom_vector_fragment_load_view(op));
-  IREE_RETURN_IF_ERROR(loom_vector_verify_fragment_memory_origin(
-      emitter, op, view_type, loom_vector_fragment_load_static_indices(op),
-      loom_vector_fragment_load_indices(op).count));
-  return loom_vector_verify_optional_cache_policy(
-      emitter, op, loom_vector_fragment_load_cache_scope_ATTR_INDEX,
-      loom_vector_fragment_load_cache_temporal_ATTR_INDEX,
-      LOOM_CACHE_POLICY_ACCESS_LOAD);
-}
-
 iree_status_t loom_vector_fragment_store_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter) {
@@ -1832,6 +1818,51 @@ static iree_status_t loom_vector_verify_fragment_auxiliary_types(
             loom_type_constraint_name(LOOM_TYPE_CONSTRAINT_VECTOR)));
   }
   return iree_ok_status();
+}
+
+iree_status_t loom_vector_fragment_load_verify(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter) {
+  loom_type_t view_type =
+      loom_module_value_type(module, loom_vector_fragment_load_view(op));
+  IREE_RETURN_IF_ERROR(loom_vector_verify_fragment_memory_origin(
+      emitter, op, view_type, loom_vector_fragment_load_static_indices(op),
+      loom_vector_fragment_load_indices(op).count));
+  IREE_RETURN_IF_ERROR(loom_vector_verify_optional_cache_policy(
+      emitter, op, loom_vector_fragment_load_cache_scope_ATTR_INDEX,
+      loom_vector_fragment_load_cache_temporal_ATTR_INDEX,
+      LOOM_CACHE_POLICY_ACCESS_LOAD));
+
+  loom_vector_encoding_auxiliary_view_t auxiliary;
+  iree_string_view_t unknown_key = iree_string_view_empty();
+  if (!loom_vector_encoding_auxiliary_view_resolve(
+          module, loom_vector_fragment_load_auxiliary(op),
+          loom_vector_fragment_load_auxiliary_names(op), &auxiliary,
+          &unknown_key)) {
+    return loom_vector_emit_unknown_auxiliary_key(module, emitter, op,
+                                                  unknown_key);
+  }
+  IREE_RETURN_IF_ERROR(loom_vector_verify_fragment_auxiliary_types(
+      module, op, emitter, auxiliary));
+
+  loom_value_fact_storage_schema_t storage_schema = {0};
+  if (!loom_encoding_query_type_storage_schema(
+          /*context=*/NULL, module, view_type, &storage_schema)) {
+    return iree_ok_status();
+  }
+  if (loom_value_fact_encoded_operand_schema_is_unknown(
+          storage_schema.encoded_operand)) {
+    return iree_ok_status();
+  }
+
+  loom_vector_encoding_auxiliary_key_flags_t required_keys = 0;
+  if (!loom_vector_encoding_auxiliary_required_keys_from_schema(
+          storage_schema.encoded_operand, &required_keys, NULL)) {
+    return loom_vector_emit_missing_auxiliary_key(module, emitter, op,
+                                                  IREE_SV("scale"));
+  }
+  return loom_vector_verify_required_auxiliary_keys(
+      module, emitter, op, auxiliary.present_keys, required_keys);
 }
 
 iree_status_t loom_vector_fragment_verify(const loom_module_t* module,

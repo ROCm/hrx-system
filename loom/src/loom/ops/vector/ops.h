@@ -703,18 +703,20 @@ iree_status_t loom_vector_transform_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
 
-// LOOM_OP_VECTOR_FRAGMENT_LOAD: Load a target-shaped matrix fragment payload from a typed view at a full-rank logical origin. Unlike vector.load, the result vector shape is the physical fragment payload selected by role, logical matrix shape, view layout, and target legality; it is not an ordinary trailing-axis footprint of the view. The result carries fragment facts directly so vector.mma can consume it without a separate vector.fragment wrapper. When the view and payload element types differ, the operation represents a fragment-shaped numeric conversion at the load boundary and target lowering must either select that conversion explicitly or reject it with target diagnostics.
+// LOOM_OP_VECTOR_FRAGMENT_LOAD: Load a target-shaped matrix fragment payload from a typed view at a full-rank logical origin. Unlike vector.load, the result vector shape is the physical fragment payload selected by role, logical matrix shape, view layout, and target legality; it is not an ordinary trailing-axis footprint of the view. The result carries fragment facts directly so vector.mma can consume it without a separate vector.fragment wrapper. When the view and payload element types differ, the operation represents a fragment-shaped numeric conversion at the load boundary and target lowering must either select that conversion explicitly or reject it with target diagnostics. When the view storage schema requires runtime auxiliary values such as sparse metadata, scale values, or codebooks, the optional keyed `using` operands provide those SSA values while the view type remains the source of truth for the storage schema.
 // %lhs = vector.fragment.load<lhs> %a[%row, %k0] shape [%m, %k] : view<[%M]x[%K]xf16, %layout> -> vector<16xf16>
 LOOM_DEFINE_ISA(loom_vector_fragment_load_isa, LOOM_OP_VECTOR_FRAGMENT_LOAD)
-LOOM_DEFINE_OPERAND(loom_vector_fragment_load_view, 0)
-LOOM_DEFINE_OPERAND(loom_vector_fragment_load_rows, 1)
-LOOM_DEFINE_OPERAND(loom_vector_fragment_load_columns, 2)
-LOOM_DEFINE_VARIADIC_OPERANDS(loom_vector_fragment_load_indices, 3)
+LOOM_DEFINE_SEGMENTED_OPERAND(loom_vector_fragment_load_view, 0)
+LOOM_DEFINE_SEGMENTED_OPERANDS(loom_vector_fragment_load_indices, 1)
+LOOM_DEFINE_SEGMENTED_OPERAND(loom_vector_fragment_load_rows, 2)
+LOOM_DEFINE_SEGMENTED_OPERAND(loom_vector_fragment_load_columns, 3)
+LOOM_DEFINE_SEGMENTED_OPERANDS(loom_vector_fragment_load_auxiliary, 4)
 LOOM_DEFINE_RESULT(loom_vector_fragment_load_result, 0)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_vector_fragment_load_role, 0, loom_vector_role_t)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_vector_fragment_load_cache_scope, 1, loom_cache_scope_t)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_vector_fragment_load_cache_temporal, 2, loom_cache_temporal_t)
-LOOM_DEFINE_ATTR_I64_ARRAY(loom_vector_fragment_load_static_indices, 3)
+LOOM_DEFINE_ATTR_DICT(loom_vector_fragment_load_auxiliary_names, 1)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_vector_fragment_load_cache_scope, 2, loom_cache_scope_t)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_vector_fragment_load_cache_temporal, 3, loom_cache_temporal_t)
+LOOM_DEFINE_ATTR_I64_ARRAY(loom_vector_fragment_load_static_indices, 4)
 enum loom_vector_fragment_load_build_flag_bits_e {
   LOOM_VECTOR_FRAGMENT_LOAD_BUILD_FLAG_HAS_CACHE_SCOPE = 1u << 0,
   LOOM_VECTOR_FRAGMENT_LOAD_BUILD_FLAG_HAS_CACHE_TEMPORAL = 1u << 1,
@@ -731,6 +733,8 @@ iree_status_t loom_vector_fragment_load_build(
     iree_host_size_t static_indices_count,
     loom_may_consume loom_value_id_t rows,
     loom_may_consume loom_value_id_t columns,
+    loom_may_consume const loom_named_value_t* auxiliary,
+    iree_host_size_t auxiliary_count,
     loom_optional uint8_t cache_scope,
     loom_optional uint8_t cache_temporal,
     loom_type_t result_type,

@@ -403,6 +403,7 @@ def _validate_c_table_shape(
     for index, row in enumerate(table.value_refs):
         row_subject = f"{subject} value-ref {index}"
         _require_u16(row.index, f"{row_subject} index")
+        _require_u16(row.element_index, f"{row_subject} element index")
         _require_u16(row.materializer_index, f"{row_subject} materializer index")
         if row.materializer_index:
             _require_one_based_table_index(

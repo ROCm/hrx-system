@@ -200,8 +200,11 @@ typedef struct loom_low_lower_rule_descriptor_ref_t {
 typedef struct loom_low_lower_value_ref_t {
   // Source value namespace being referenced.
   loom_low_lower_value_ref_kind_t kind;
-  // Ordinal within the namespace selected by |kind|.
+  // Ordinal within the namespace selected by |kind|. For operand refs this is
+  // the source operand field index; |element_index| selects within that field.
   uint16_t index;
+  // Element ordinal within the operand field selected by |index|.
+  uint16_t element_index;
   // One-based materializer table row used when this source ref is consumed as a
   // low operand. Zero means direct source-to-low value lookup.
   uint16_t materializer_index;
