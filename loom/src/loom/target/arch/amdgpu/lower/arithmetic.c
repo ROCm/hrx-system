@@ -1003,9 +1003,8 @@ static iree_status_t loom_amdgpu_extract_fma_mix_register_unit(
     return iree_ok_status();
   }
   if (unit_count == 0 || register_offset >= unit_count) {
-    return iree_make_status(IREE_STATUS_INTERNAL,
-                            "AMDGPU mixed-FMA source selected an invalid "
-                            "packed register unit");
+    IREE_ASSERT_UNREACHABLE("selected AMDGPU mixed-FMA register unit");
+    IREE_BUILTIN_UNREACHABLE();
   }
   const loom_type_t unit_type =
       loom_low_register_type_with_unit_count(low_source_type, 1);
@@ -1182,9 +1181,8 @@ static iree_status_t loom_amdgpu_packed_ternary_packet_source(
   if (unit_count == 0 || packet_unit_count == 0 ||
       register_offset > unit_count ||
       packet_unit_count > unit_count - register_offset) {
-    return iree_make_status(IREE_STATUS_INTERNAL,
-                            "AMDGPU packed ternary selected an invalid packed "
-                            "register range");
+    IREE_ASSERT_UNREACHABLE("selected AMDGPU packed ternary register range");
+    IREE_BUILTIN_UNREACHABLE();
   }
   if (unit_count == packet_unit_count && register_offset == 0) {
     return iree_ok_status();
@@ -1234,9 +1232,8 @@ iree_status_t loom_amdgpu_lower_vector_packed_ternary(
       plan->packet_count > LOOM_AMDGPU_MAX_PACKED_32BIT_REGISTERS ||
       plan->packet_count > UINT32_MAX / plan->packet_unit_count ||
       plan->register_count != plan->packet_count * plan->packet_unit_count) {
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
-        "AMDGPU packed ternary selected an invalid packet shape");
+    IREE_ASSERT_UNREACHABLE("selected AMDGPU packed ternary packet shape");
+    IREE_BUILTIN_UNREACHABLE();
   }
 
   loom_value_id_t low_sources[LOOM_AMDGPU_PACKED_TERNARY_SOURCE_COUNT] = {

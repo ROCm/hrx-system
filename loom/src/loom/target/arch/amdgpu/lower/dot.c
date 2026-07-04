@@ -337,8 +337,8 @@ static iree_status_t loom_amdgpu_dotf_extract_lane(
       loom_module_value_type(loom_low_lower_context_module(context), source);
   if (!loom_low_type_is_register(source_type) ||
       loom_low_register_type_unit_count(source_type) <= lane) {
-    return iree_make_status(IREE_STATUS_INTERNAL,
-                            "invalid AMDGPU dotf lane source type");
+    IREE_ASSERT_UNREACHABLE("selected AMDGPU dotf lane source");
+    IREE_BUILTIN_UNREACHABLE();
   }
   const loom_type_t lane_type =
       loom_low_register_type_with_unit_count(source_type, 1);
@@ -481,8 +481,8 @@ iree_status_t loom_amdgpu_lower_vector_dotf(
       break;
     }
     default:
-      return iree_make_status(IREE_STATUS_INTERNAL,
-                              "unsupported AMDGPU dotf accumulation kind");
+      IREE_ASSERT_UNREACHABLE("selected AMDGPU dotf accumulation kind");
+      IREE_BUILTIN_UNREACHABLE();
   }
   return loom_low_lower_bind_value(context, plan->result, result);
 }
