@@ -4352,21 +4352,6 @@ static iree_status_t loom_amdgpu_lower_vector_iota(
                                              lanes, plan->lane_count);
 }
 
-static iree_status_t loom_amdgpu_extract_register_unit(
-    loom_low_lower_context_t* context, const loom_op_t* source_op,
-    loom_value_id_t low_source, uint32_t register_count,
-    uint32_t register_offset, loom_type_t unit_type,
-    loom_value_id_t* out_register_unit) {
-  *out_register_unit = LOOM_VALUE_ID_INVALID;
-  if (register_count == 1) {
-    *out_register_unit = low_source;
-    return iree_ok_status();
-  }
-  return loom_amdgpu_emit_low_slice(context, source_op, low_source,
-                                    register_offset, unit_type,
-                                    out_register_unit);
-}
-
 static iree_status_t loom_amdgpu_emit_vgpr_conversion_packet(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_amdgpu_descriptor_ref_t descriptor_ref, loom_value_id_t low_source,
@@ -4418,7 +4403,7 @@ static iree_status_t loom_amdgpu_extract_packed_register_lane(
   const uint32_t register_bit_offset =
       (lane_offset % lanes_per_register) * plan->lane_bit_count;
   loom_value_id_t source_register = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_extract_register_unit(
+  IREE_RETURN_IF_ERROR(loom_amdgpu_extract_low_register_unit(
       context, source_op, low_source, plan->register_count, register_offset,
       lane_type, &source_register));
   if (!plan->sign_extend_packed_lane) {
@@ -4494,7 +4479,7 @@ static iree_status_t loom_amdgpu_extract_vector_conversion_full_lane(
   *out_lane = LOOM_VALUE_ID_INVALID;
   const uint32_t register_offset =
       lane_index * plan->source_element_register_count;
-  return loom_amdgpu_extract_register_unit(
+  return loom_amdgpu_extract_low_register_unit(
       context, source_op, low_source, plan->source_register_count,
       register_offset, source_lane_type, out_lane);
 }
@@ -4676,7 +4661,7 @@ static iree_status_t loom_amdgpu_extract_vector_register_unit(
   const uint32_t register_offset =
       lane_offset * plan->element_register_count + result_register_index;
   IREE_ASSERT(register_offset < plan->register_count);
-  return loom_amdgpu_extract_register_unit(
+  return loom_amdgpu_extract_low_register_unit(
       context, source_op, low_source, plan->register_count, register_offset,
       unit_type, out_register_unit);
 }
@@ -5207,7 +5192,7 @@ static iree_status_t loom_amdgpu_lower_packed_vector_insert(
   for (uint32_t register_index = 0; register_index < plan->register_count;
        ++register_index) {
     loom_value_id_t old_register = LOOM_VALUE_ID_INVALID;
-    IREE_RETURN_IF_ERROR(loom_amdgpu_extract_register_unit(
+    IREE_RETURN_IF_ERROR(loom_amdgpu_extract_low_register_unit(
         context, source_op, low_dest, plan->register_count, register_index,
         register_type, &old_register));
 
@@ -5301,7 +5286,7 @@ static iree_status_t loom_amdgpu_lower_vector_insert(
   loom_value_id_t lanes[LOOM_AMDGPU_MAX_SCALARIZED_32BIT_LANES];
   for (uint32_t i = 0; i < plan->lane_count; ++i) {
     loom_value_id_t old_lane = LOOM_VALUE_ID_INVALID;
-    IREE_RETURN_IF_ERROR(loom_amdgpu_extract_register_unit(
+    IREE_RETURN_IF_ERROR(loom_amdgpu_extract_low_register_unit(
         context, source_op, low_dest, plan->register_count, i, lane_type,
         &old_lane));
     if (!plan->is_dynamic) {
@@ -5339,7 +5324,7 @@ static iree_status_t loom_amdgpu_extract_bf16_range_lane_as_f32_bits(
     loom_type_t result_lane_type, loom_value_id_t* out_lane) {
   const uint32_t register_index = lane_index / 2u;
   loom_value_id_t source_register = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_extract_register_unit(
+  IREE_RETURN_IF_ERROR(loom_amdgpu_extract_low_register_unit(
       context, source_op, low_source, source_register_count, register_index,
       source_lane_type, &source_register));
   return loom_amdgpu_extract_bf16_register_lane_as_f32_bits(
@@ -5355,7 +5340,7 @@ static iree_status_t loom_amdgpu_extract_f16_lane_as_low_bits(
   const uint32_t register_index = lane_index / 2u;
   const uint32_t register_bit_offset = (lane_index % 2u) * 16u;
   loom_value_id_t source_register = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_extract_register_unit(
+  IREE_RETURN_IF_ERROR(loom_amdgpu_extract_low_register_unit(
       context, source_op, low_source, source_register_count, register_index,
       lane_type, &source_register));
   if (register_bit_offset == 0) {
@@ -5714,7 +5699,7 @@ static iree_status_t loom_amdgpu_extract_vector_fp8_pair_register(
     loom_value_id_t low_source, loom_type_t source_lane_type,
     loom_value_id_t* out_source_register) {
   *out_source_register = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_extract_register_unit(
+  IREE_RETURN_IF_ERROR(loom_amdgpu_extract_low_register_unit(
       context, source_op, low_source, plan->storage_register_count,
       pair_storage->source_register_index, source_lane_type,
       out_source_register));
@@ -5784,7 +5769,7 @@ static iree_status_t loom_amdgpu_extract_vector_fp8_native_pair_lanes(
     loom_value_id_t converted_pair, loom_type_t result_lane_type,
     uint32_t low_lane_count, loom_value_id_t* out_low_lanes) {
   for (uint32_t i = 0; i < low_lane_count; ++i) {
-    IREE_RETURN_IF_ERROR(loom_amdgpu_extract_register_unit(
+    IREE_RETURN_IF_ERROR(loom_amdgpu_extract_low_register_unit(
         context, source_op, converted_pair, /*register_count=*/2,
         /*register_offset=*/i, result_lane_type, &out_low_lanes[i]));
   }
@@ -5855,7 +5840,7 @@ static iree_status_t loom_amdgpu_materialize_vector_fp8_pair_sources(
         pair_storage[register_index].source_register_index;
     if (source_registers[source_register_index] == LOOM_VALUE_ID_INVALID) {
       loom_value_id_t source_register = LOOM_VALUE_ID_INVALID;
-      IREE_RETURN_IF_ERROR(loom_amdgpu_extract_register_unit(
+      IREE_RETURN_IF_ERROR(loom_amdgpu_extract_low_register_unit(
           context, source_op, low_source, plan->storage_register_count,
           source_register_index, source_lane_type, &source_register));
       IREE_RETURN_IF_ERROR(loom_amdgpu_materialize_full_low_vgpr_b32(
@@ -7161,7 +7146,7 @@ static iree_status_t loom_amdgpu_lower_vector_f32_to_packed_f16(
         break;
       }
       loom_value_id_t source_lane = LOOM_VALUE_ID_INVALID;
-      IREE_RETURN_IF_ERROR(loom_amdgpu_extract_register_unit(
+      IREE_RETURN_IF_ERROR(loom_amdgpu_extract_low_register_unit(
           context, source_op, low_source, plan->source_register_count,
           lane_index, source_lane_type, &source_lane));
       IREE_RETURN_IF_ERROR(loom_amdgpu_pack_f32_lane_to_f16_register(
@@ -7189,12 +7174,12 @@ static iree_status_t loom_amdgpu_lower_vector_f32_to_packed_bf16(
        register_index < plan->result_register_count; ++register_index) {
     const uint32_t lane_base = register_index * 2u;
     loom_value_id_t source_lane = LOOM_VALUE_ID_INVALID;
-    IREE_RETURN_IF_ERROR(loom_amdgpu_extract_register_unit(
+    IREE_RETURN_IF_ERROR(loom_amdgpu_extract_low_register_unit(
         context, source_op, low_source, plan->source_register_count, lane_base,
         source_lane_type, &source_lane));
     if (lane_base + 1u < plan->lane_count) {
       loom_value_id_t high_source_lane = LOOM_VALUE_ID_INVALID;
-      IREE_RETURN_IF_ERROR(loom_amdgpu_extract_register_unit(
+      IREE_RETURN_IF_ERROR(loom_amdgpu_extract_low_register_unit(
           context, source_op, low_source, plan->source_register_count,
           lane_base + 1u, source_lane_type, &high_source_lane));
       IREE_RETURN_IF_ERROR(
@@ -7384,7 +7369,7 @@ static iree_status_t loom_amdgpu_i64_compare_operand_lane(
 
   const loom_type_t source_lane_type =
       loom_low_register_type_with_unit_count(low_type, 1);
-  IREE_RETURN_IF_ERROR(loom_amdgpu_extract_register_unit(
+  IREE_RETURN_IF_ERROR(loom_amdgpu_extract_low_register_unit(
       context, source_op, low_source, unit_count, lane_index, source_lane_type,
       out_low_lane));
   return loom_amdgpu_materialize_low_vgpr_b32(context, source_op, *out_low_lane,

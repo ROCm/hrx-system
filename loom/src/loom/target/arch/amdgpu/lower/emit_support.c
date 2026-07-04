@@ -628,6 +628,23 @@ iree_status_t loom_amdgpu_build_low_register_range(
   return iree_ok_status();
 }
 
+iree_status_t loom_amdgpu_extract_low_register_unit(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_value_id_t low_source, uint32_t register_count,
+    uint32_t register_offset, loom_type_t unit_type,
+    loom_value_id_t* out_register_unit) {
+  IREE_ASSERT_GT(register_count, 0);
+  IREE_ASSERT_LT(register_offset, register_count);
+  *out_register_unit = LOOM_VALUE_ID_INVALID;
+  if (register_count == 1) {
+    *out_register_unit = low_source;
+    return iree_ok_status();
+  }
+  return loom_amdgpu_emit_low_slice(context, source_op, low_source,
+                                    register_offset, unit_type,
+                                    out_register_unit);
+}
+
 iree_status_t loom_amdgpu_bind_low_register_range(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_value_id_t source_result, const loom_value_id_t* low_registers,

@@ -410,13 +410,9 @@ static iree_status_t loom_amdgpu_source_bitunpack_register(
     uint32_t* out_source_register_bit_offset) {
   const uint32_t source_register_index = source_bit_offset / 32u;
   *out_source_register_bit_offset = source_bit_offset & 31u;
-  *out_source_register = low_source;
-  if (plan->source_register_count == 1) {
-    return iree_ok_status();
-  }
-  return loom_amdgpu_emit_low_slice(context, source_op, low_source,
-                                    source_register_index, lane_type,
-                                    out_source_register);
+  return loom_amdgpu_extract_low_register_unit(
+      context, source_op, low_source, plan->source_register_count,
+      source_register_index, lane_type, out_source_register);
 }
 
 static iree_status_t loom_amdgpu_lower_vector_bitunpack_i32_lanes(

@@ -475,25 +475,12 @@ static bool loom_amdgpu_table_lookup_strategy_descriptors_present(
   return row->descriptor_flags != 0;
 }
 
-static iree_status_t loom_amdgpu_table_lookup_slice_if_needed(
-    loom_low_lower_context_t* context, const loom_op_t* source_op,
-    loom_value_id_t source, uint32_t register_count, uint32_t register_offset,
-    loom_type_t lane_type, loom_value_id_t* out_lane) {
-  *out_lane = LOOM_VALUE_ID_INVALID;
-  if (register_count == 1) {
-    *out_lane = source;
-    return iree_ok_status();
-  }
-  return loom_amdgpu_emit_low_slice(context, source_op, source, register_offset,
-                                    lane_type, out_lane);
-}
-
 static iree_status_t loom_amdgpu_table_lookup_extract_i32_index_lane(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_amdgpu_table_lookup_plan_t* plan, loom_value_id_t low_indices,
     uint32_t result_lane, loom_type_t lane_type,
     loom_value_id_t* out_index_lane) {
-  return loom_amdgpu_table_lookup_slice_if_needed(
+  return loom_amdgpu_extract_low_register_unit(
       context, source_op, low_indices, plan->index_register_count, result_lane,
       lane_type, out_index_lane);
 }
@@ -512,7 +499,7 @@ static iree_status_t loom_amdgpu_table_lookup_extract_i8_index_lane(
   const uint32_t register_offset = result_lane / 4u;
   const uint32_t byte_offset = result_lane & 3u;
   loom_value_id_t source_register = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_table_lookup_slice_if_needed(
+  IREE_RETURN_IF_ERROR(loom_amdgpu_extract_low_register_unit(
       context, source_op, low_indices, plan->index_register_count,
       register_offset, lane_type, &source_register));
 
@@ -557,7 +544,7 @@ static iree_status_t loom_amdgpu_table_lookup_extract_table_lane(
     const loom_amdgpu_table_lookup_plan_t* plan, loom_value_id_t low_table,
     uint32_t table_lane, loom_type_t lane_type,
     loom_value_id_t* out_table_lane) {
-  return loom_amdgpu_table_lookup_slice_if_needed(
+  return loom_amdgpu_extract_low_register_unit(
       context, source_op, low_table, plan->table_lane_count, table_lane,
       lane_type, out_table_lane);
 }
@@ -675,7 +662,7 @@ static iree_status_t loom_amdgpu_lower_vector_table_lookup_packed_i8_u4_permute(
   IREE_RETURN_IF_ERROR(loom_amdgpu_make_vgpr_type(context, &lane_type));
   loom_value_id_t table_registers[4] = {0};
   for (uint32_t i = 0; i < IREE_ARRAYSIZE(table_registers); ++i) {
-    IREE_RETURN_IF_ERROR(loom_amdgpu_table_lookup_slice_if_needed(
+    IREE_RETURN_IF_ERROR(loom_amdgpu_extract_low_register_unit(
         context, source_op, low_table, plan->table_register_count, i, lane_type,
         &table_registers[i]));
   }
