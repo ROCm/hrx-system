@@ -1079,12 +1079,11 @@ static void loom_low_verify_set_value_defined_mask(
   scratch->values_by_value_id[value_id] = mask;
 }
 
-static iree_status_t loom_low_verify_register_full_mask_for_type(
-    loom_low_function_verify_state_t* function_state, loom_type_t type,
-    loom_low_register_part_mask_t* out_mask) {
-  *out_mask = 0;
+static loom_low_register_part_mask_t
+loom_low_verify_register_full_mask_for_type(
+    loom_low_function_verify_state_t* function_state, loom_type_t type) {
   if (!loom_low_type_is_register(type)) {
-    return iree_ok_status();
+    return 0;
   }
   uint16_t descriptor_register_class_id = LOOM_LOW_REG_CLASS_NONE;
   const loom_low_reg_class_t* descriptor_register_class = NULL;
@@ -1093,34 +1092,27 @@ static iree_status_t loom_low_verify_register_full_mask_for_type(
           &function_state->register_type_resolver, type,
           &descriptor_register_class_id, &descriptor_register_class);
   if (found_descriptor_register_class) {
-    *out_mask = descriptor_register_class->full_register_part_mask;
+    return descriptor_register_class->full_register_part_mask;
   }
-  return iree_ok_status();
+  return 0;
 }
 
-static iree_status_t loom_low_verify_descriptor_operand_part_mask(
+static loom_low_register_part_mask_t
+loom_low_verify_descriptor_operand_part_mask(
     loom_low_function_verify_state_t* function_state,
-    const loom_low_operand_t* descriptor_operand, loom_type_t actual_type,
-    loom_low_register_part_mask_t* out_mask) {
+    const loom_low_operand_t* descriptor_operand, loom_type_t actual_type) {
   if (descriptor_operand->register_part_id == LOOM_LOW_REGISTER_PART_NONE) {
     return loom_low_verify_register_full_mask_for_type(function_state,
-                                                       actual_type, out_mask);
+                                                       actual_type);
   }
   if (!loom_low_type_is_register(actual_type)) {
-    *out_mask = 0;
-    return iree_ok_status();
+    return 0;
   }
   const loom_low_descriptor_set_t* descriptor_set =
       function_state->target->descriptor_set;
-  if (descriptor_operand->register_part_id >=
-      descriptor_set->register_part_count) {
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
-        "low descriptor operand references register part %" PRIu16
-        " but only %" PRIu32 " register parts exist",
-        descriptor_operand->register_part_id,
-        descriptor_set->register_part_count);
-  }
+  IREE_ASSERT(descriptor_operand->register_part_id <
+                  descriptor_set->register_part_count,
+              "verified low descriptor operand register part");
   const loom_low_register_part_t* register_part =
       &descriptor_set->register_parts[descriptor_operand->register_part_id];
   uint16_t descriptor_register_class_id = LOOM_LOW_REG_CLASS_NONE;
@@ -1128,16 +1120,10 @@ static iree_status_t loom_low_verify_descriptor_operand_part_mask(
       loom_low_register_type_resolver_try_resolve(
           &function_state->register_type_resolver, actual_type,
           &descriptor_register_class_id, NULL);
-  if (!found_descriptor_register_class ||
-      descriptor_register_class_id != register_part->reg_class_id) {
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
-        "low descriptor operand register part uses register class %" PRIu16
-        " but the value resolves to register class %" PRIu16,
-        register_part->reg_class_id, descriptor_register_class_id);
-  }
-  *out_mask = register_part->mask;
-  return iree_ok_status();
+  IREE_ASSERT(found_descriptor_register_class &&
+                  descriptor_register_class_id == register_part->reg_class_id,
+              "verified low descriptor operand register-part class");
+  return register_part->mask;
 }
 
 static iree_status_t loom_low_verify_emit_resource_register_class_missing(
@@ -1502,9 +1488,9 @@ static iree_status_t loom_low_verify_descriptor_register_parts(
     loom_low_packet_field_t field;
     IREE_RETURN_IF_ERROR(loom_low_verify_descriptor_packet_field(
         function_state, op, descriptor, i, &field));
-    loom_low_register_part_mask_t required_mask = 0;
-    IREE_RETURN_IF_ERROR(loom_low_verify_descriptor_operand_part_mask(
-        function_state, descriptor_operand, field.type, &required_mask));
+    const loom_low_register_part_mask_t required_mask =
+        loom_low_verify_descriptor_operand_part_mask(
+            function_state, descriptor_operand, field.type);
     if (required_mask == 0) {
       continue;
     }
@@ -1525,11 +1511,11 @@ static iree_status_t loom_low_verify_descriptor_register_parts(
     loom_low_packet_field_t field;
     IREE_RETURN_IF_ERROR(loom_low_verify_descriptor_packet_field(
         function_state, op, descriptor, i, &field));
-    loom_low_register_part_mask_t result_mask = 0;
     const loom_low_operand_t* descriptor_operand =
         &descriptor_set->operands[descriptor->operand_start + i];
-    IREE_RETURN_IF_ERROR(loom_low_verify_descriptor_operand_part_mask(
-        function_state, descriptor_operand, field.type, &result_mask));
+    loom_low_register_part_mask_t result_mask =
+        loom_low_verify_descriptor_operand_part_mask(
+            function_state, descriptor_operand, field.type);
 
     uint16_t tied_operand_index = LOOM_LOW_ID_NONE;
     if (loom_low_verify_descriptor_tied_operand_index(
@@ -1553,9 +1539,8 @@ static iree_status_t loom_low_verify_define_full_register_results(
   for (uint16_t i = 0; i < op->result_count; ++i) {
     const loom_value_id_t value_id = results[i];
     const loom_type_t type = loom_module_value_type(module, value_id);
-    loom_low_register_part_mask_t result_mask = 0;
-    IREE_RETURN_IF_ERROR(loom_low_verify_register_full_mask_for_type(
-        function_state, type, &result_mask));
+    const loom_low_register_part_mask_t result_mask =
+        loom_low_verify_register_full_mask_for_type(function_state, type);
     if (result_mask != 0) {
       loom_low_verify_set_value_defined_mask(function_state, value_id,
                                              result_mask);
@@ -1572,9 +1557,8 @@ static iree_status_t loom_low_verify_structural_register_parts(
   for (uint16_t i = 0; i < op->operand_count; ++i) {
     const loom_value_id_t value_id = operands[i];
     const loom_type_t type = loom_module_value_type(module, value_id);
-    loom_low_register_part_mask_t required_mask = 0;
-    IREE_RETURN_IF_ERROR(loom_low_verify_register_full_mask_for_type(
-        function_state, type, &required_mask));
+    const loom_low_register_part_mask_t required_mask =
+        loom_low_verify_register_full_mask_for_type(function_state, type);
     if (required_mask == 0) {
       continue;
     }
@@ -1967,9 +1951,8 @@ static iree_status_t loom_low_verify_initialize_block_arg_masks(
     for (uint16_t i = 0; i < block->arg_count; ++i) {
       const loom_value_id_t value_id = block->arg_ids[i];
       const loom_type_t type = loom_module_value_type(module, value_id);
-      loom_low_register_part_mask_t mask = 0;
-      IREE_RETURN_IF_ERROR(loom_low_verify_register_full_mask_for_type(
-          function_state, type, &mask));
+      const loom_low_register_part_mask_t mask =
+          loom_low_verify_register_full_mask_for_type(function_state, type);
       if (mask != 0) {
         loom_low_verify_set_value_defined_mask(function_state, value_id, mask);
       }
