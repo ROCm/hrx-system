@@ -78,13 +78,13 @@ low.func.def target(@target) abi(hal_kernel) @vector_decode_splat_f8_scale(%base
   low.br ^_bb3(%31: reg<amdgpu.vgpr>)
 ^_bb3(%38: reg<amdgpu.vgpr>):
   %51 = v_bfi_b32_src0_lit %30, %38, 2147516416
-  %52 = v_mov_b32 2143322048
-  %53 = v_xor_b32_lit %29, 8323199
-  %54 = s_mov_b32 4294967295
-  %55 = v_pk_add_u16 %53, %54
-  %56 = s_mov_b32 983055
-  %57 = v_pk_ashrrev_i16 %56, %55
-  %58 = v_bfi_b32 %57, %52, %51
+  %52 = s_mov_b32 4294967295
+  %53 = s_mov_b32 983055
+  %54 = v_mov_b32 2143322048
+  %55 = v_xor_b32_lit %29, 8323199
+  %56 = v_pk_add_u16 %55, %52
+  %57 = v_pk_ashrrev_i16 %53, %56
+  %58 = v_bfi_b32 %57, %54, %51
   %59 = v_lshlrev_b32_src0_inline %58, 16
   %60 = v_and_b32_lit %58, 4294901760
   %61 = v_mul_f32 %59, %scale
