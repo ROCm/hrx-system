@@ -159,8 +159,9 @@ typedef enum loom_low_schedule_strategy_e {
 // Cliffs are keyed by descriptor-set-local register-class ID so the scheduler
 // can direct-index them after resolving low register types. The list passed to
 // the scheduler must be sorted by descriptor_reg_class_id and then cliff_units.
-// A candidate that moves projected live units from below |cliff_units| to at or
-// above it receives a penalty based on the resident-wave drop.
+// A candidate whose projected live pressure remains at or above |cliff_units|
+// receives a penalty based on the resident-wave drop so existing pressure debt
+// loses to candidates that can pay it down.
 typedef struct loom_low_schedule_pressure_cliff_t {
   // Descriptor-set-local register class affected by this cliff.
   uint16_t descriptor_reg_class_id;

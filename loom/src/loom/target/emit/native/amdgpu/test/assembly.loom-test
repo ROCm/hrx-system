@@ -2965,8 +2965,8 @@ low.func.def target(@gfx11_target) @gfx11_stress_fragment(%s0: reg<amdgpu.sgpr>,
   buffer_load_b128 v[12:15], v10, s[4:7], s8 offen offset:16
   s_load_dwordx2 s[10:11], s[0:1], s8 offset:16
   s_buffer_load_dword s0, s[4:7], s8 offset:0
-  s_add_u32 s1, s2, s3
   v_add_u32 v8, v8, v9
+  s_add_u32 s1, s2, s3
   s_add_u32 s0, s1, s0
   v_add_u32 v8, v8, v11
   buffer_store_dword v8, v10, s[4:7], s0 offen offset:8
