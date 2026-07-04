@@ -2222,34 +2222,22 @@ iree_status_t loom_amdgpu_hal_kernel_abi_fixed_values_from_low(
         loom_amdgpu_hal_kernel_abi_source_kind_from_stable_id(
             (uint64_t)loom_low_live_in_source_id(op));
     if (source_kind == LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_KERNARG_SEGMENT_PTR) {
-      if (kernarg_ptr != LOOM_VALUE_ID_INVALID) {
-        return iree_make_status(
-            IREE_STATUS_INTERNAL,
-            "AMDGPU HAL kernel ABI fixed-value collection reached duplicate "
-            "kernarg segment pointer live-ins");
-      }
+      IREE_ASSERT_EQ(kernarg_ptr, LOOM_VALUE_ID_INVALID,
+                     "verified AMDGPU HAL ABI live-ins are unique");
       kernarg_ptr = loom_low_live_in_result(op);
       continue;
     }
 
     if (source_kind == LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_DISPATCH_PTR) {
-      if (dispatch_ptr != LOOM_VALUE_ID_INVALID) {
-        return iree_make_status(
-            IREE_STATUS_INTERNAL,
-            "AMDGPU HAL kernel ABI fixed-value collection reached duplicate "
-            "dispatch pointer live-ins");
-      }
+      IREE_ASSERT_EQ(dispatch_ptr, LOOM_VALUE_ID_INVALID,
+                     "verified AMDGPU HAL ABI live-ins are unique");
       dispatch_ptr = loom_low_live_in_result(op);
       continue;
     }
 
     if (source_kind == LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_DISPATCH_ID) {
-      if (dispatch_id != LOOM_VALUE_ID_INVALID) {
-        return iree_make_status(
-            IREE_STATUS_INTERNAL,
-            "AMDGPU HAL kernel ABI fixed-value collection reached duplicate "
-            "dispatch ID live-ins");
-      }
+      IREE_ASSERT_EQ(dispatch_id, LOOM_VALUE_ID_INVALID,
+                     "verified AMDGPU HAL ABI live-ins are unique");
       dispatch_id = loom_low_live_in_result(op);
       continue;
     }
@@ -2257,30 +2245,19 @@ iree_status_t loom_amdgpu_hal_kernel_abi_fixed_values_from_low(
     uint32_t dimension = 0;
     if (loom_amdgpu_hal_kernel_abi_is_workgroup_source(source_kind,
                                                        &dimension)) {
-      if (workgroup_ids[dimension] != LOOM_VALUE_ID_INVALID) {
-        return iree_make_status(
-            IREE_STATUS_INTERNAL,
-            "AMDGPU HAL kernel ABI fixed-value collection reached duplicate "
-            "workgroup-id live-ins");
-      }
+      IREE_ASSERT_EQ(workgroup_ids[dimension], LOOM_VALUE_ID_INVALID,
+                     "verified AMDGPU HAL ABI live-ins are unique");
       workgroup_ids[dimension] = loom_low_live_in_result(op);
       continue;
     }
 
     if (loom_amdgpu_hal_kernel_abi_is_workitem_source(source_kind,
                                                       &dimension)) {
-      if (packed_workitem_id != LOOM_VALUE_ID_INVALID) {
-        return iree_make_status(
-            IREE_STATUS_INTERNAL,
-            "AMDGPU HAL kernel ABI fixed-value collection reached mixed "
-            "packed and unpacked workitem-id live-ins");
-      }
-      if (workitem_ids[dimension] != LOOM_VALUE_ID_INVALID) {
-        return iree_make_status(
-            IREE_STATUS_INTERNAL,
-            "AMDGPU HAL kernel ABI fixed-value collection reached duplicate "
-            "workitem-id live-ins");
-      }
+      IREE_ASSERT_EQ(packed_workitem_id, LOOM_VALUE_ID_INVALID,
+                     "verified AMDGPU HAL ABI live-ins do not mix packed and "
+                     "unpacked workitem IDs");
+      IREE_ASSERT_EQ(workitem_ids[dimension], LOOM_VALUE_ID_INVALID,
+                     "verified AMDGPU HAL ABI live-ins are unique");
       workitem_ids[dimension] = loom_low_live_in_result(op);
       continue;
     }
@@ -2289,29 +2266,19 @@ iree_status_t loom_amdgpu_hal_kernel_abi_fixed_values_from_low(
             LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_WORKITEM_ID_PACKED_XY ||
         source_kind ==
             LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_WORKITEM_ID_PACKED_XYZ) {
-      if (loom_amdgpu_hal_kernel_abi_has_workitem_id_live_in(workitem_ids)) {
-        return iree_make_status(
-            IREE_STATUS_INTERNAL,
-            "AMDGPU HAL kernel ABI fixed-value collection reached mixed "
-            "packed and unpacked workitem-id live-ins");
-      }
-      if (packed_workitem_id != LOOM_VALUE_ID_INVALID) {
-        return iree_make_status(
-            IREE_STATUS_INTERNAL,
-            "AMDGPU HAL kernel ABI fixed-value collection reached duplicate "
-            "packed workitem-id live-ins");
-      }
+      IREE_ASSERT(
+          !loom_amdgpu_hal_kernel_abi_has_workitem_id_live_in(workitem_ids),
+          "verified AMDGPU HAL ABI live-ins do not mix packed and "
+          "unpacked workitem IDs");
+      IREE_ASSERT_EQ(packed_workitem_id, LOOM_VALUE_ID_INVALID,
+                     "verified AMDGPU HAL ABI live-ins are unique");
       packed_workitem_id = loom_low_live_in_result(op);
       continue;
     }
 
     if (source_kind == LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_M0) {
-      if (m0 != LOOM_VALUE_ID_INVALID) {
-        return iree_make_status(
-            IREE_STATUS_INTERNAL,
-            "AMDGPU HAL kernel ABI fixed-value collection reached duplicate "
-            "M0 live-ins");
-      }
+      IREE_ASSERT_EQ(m0, LOOM_VALUE_ID_INVALID,
+                     "verified AMDGPU HAL ABI live-ins are unique");
       m0 = loom_low_live_in_result(op);
       continue;
     }
