@@ -74,23 +74,15 @@ typedef struct loom_amdgpu_hal_kernel_library_kernel_plan_t {
   iree_host_size_t fixed_value_count;
 } loom_amdgpu_hal_kernel_library_kernel_plan_t;
 
-static iree_status_t loom_amdgpu_hal_kernel_library_symbol_name(
-    const loom_module_t* module, loom_symbol_ref_t symbol_ref,
-    iree_string_view_t* out_name) {
-  *out_name = iree_string_view_empty();
-  if (!loom_symbol_ref_is_valid(symbol_ref) || symbol_ref.module_id != 0 ||
-      symbol_ref.symbol_id >= module->symbols.count) {
-    return iree_make_status(IREE_STATUS_INTERNAL,
-                            "AMDGPU symbol reference is invalid");
-  }
+static iree_string_view_t loom_amdgpu_hal_kernel_library_symbol_name(
+    const loom_module_t* module, loom_symbol_ref_t symbol_ref) {
+  IREE_ASSERT(loom_symbol_ref_is_valid(symbol_ref) &&
+              symbol_ref.module_id == 0 &&
+              symbol_ref.symbol_id < module->symbols.count);
   const loom_symbol_t* symbol = &module->symbols.entries[symbol_ref.symbol_id];
-  if (symbol->name_id == LOOM_STRING_ID_INVALID ||
-      symbol->name_id >= module->strings.count) {
-    return iree_make_status(IREE_STATUS_INTERNAL,
-                            "AMDGPU symbol has no module string");
-  }
-  *out_name = module->strings.entries[symbol->name_id];
-  return iree_ok_status();
+  IREE_ASSERT(symbol->name_id != LOOM_STRING_ID_INVALID &&
+              symbol->name_id < module->strings.count);
+  return module->strings.entries[symbol->name_id];
 }
 
 static iree_status_t loom_amdgpu_hal_kernel_library_emit(
@@ -858,11 +850,8 @@ static iree_status_t loom_amdgpu_hal_kernel_library_lookup_func_facts(
   IREE_RETURN_IF_ERROR(loom_symbol_fact_table_lookup_ref(
       &fact_table, module, func_ref, &base_facts));
   *out_func_facts = loom_func_symbol_facts_cast(base_facts);
-  if (*out_func_facts == NULL) {
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
-        "AMDGPU HAL kernel-library entry must resolve to func symbol facts");
-  }
+  IREE_ASSERT(*out_func_facts != NULL,
+              "selected AMDGPU HAL kernel-library entries have func facts");
   return iree_ok_status();
 }
 
@@ -909,8 +898,8 @@ static iree_status_t loom_amdgpu_hal_kernel_library_prepare_kernel_plan(
     report->function_name = entry->func_name;
     loom_target_compile_report_record_target_bundle(
         report, &entry->bundle_storage.bundle);
-    IREE_RETURN_IF_ERROR(loom_amdgpu_hal_kernel_library_symbol_name(
-        module, entry->func_ref, &report->lowered_symbol));
+    report->lowered_symbol =
+        loom_amdgpu_hal_kernel_library_symbol_name(module, entry->func_ref);
     IREE_RETURN_IF_ERROR(
         loom_amdgpu_hal_kernel_library_record_target_snapshot_capabilities(
             &entry->bundle_storage.bundle, entry->func_name, report));
@@ -1117,17 +1106,11 @@ static void loom_amdgpu_hal_kernel_library_deinitialize_entry_reports(
   }
 }
 
-static iree_status_t loom_amdgpu_hal_kernel_library_rodata_symbol_name(
-    const loom_module_t* module, const loom_symbol_t* symbol,
-    iree_string_view_t* out_name) {
-  *out_name = iree_string_view_empty();
-  if (symbol->name_id == LOOM_STRING_ID_INVALID ||
-      symbol->name_id >= module->strings.count) {
-    return iree_make_status(IREE_STATUS_INTERNAL,
-                            "AMDGPU HAL rodata symbol has no module string");
-  }
-  *out_name = module->strings.entries[symbol->name_id];
-  return iree_ok_status();
+static iree_string_view_t loom_amdgpu_hal_kernel_library_rodata_symbol_name(
+    const loom_module_t* module, const loom_symbol_t* symbol) {
+  IREE_ASSERT(symbol->name_id != LOOM_STRING_ID_INVALID &&
+              symbol->name_id < module->strings.count);
+  return module->strings.entries[symbol->name_id];
 }
 
 static iree_status_t loom_amdgpu_hal_kernel_library_collect_rodata_symbols(
@@ -1159,9 +1142,8 @@ static iree_status_t loom_amdgpu_hal_kernel_library_collect_rodata_symbols(
       continue;
     }
 
-    iree_string_view_t name = iree_string_view_empty();
-    IREE_RETURN_IF_ERROR(loom_amdgpu_hal_kernel_library_rodata_symbol_name(
-        module, symbol, &name));
+    const iree_string_view_t name =
+        loom_amdgpu_hal_kernel_library_rodata_symbol_name(module, symbol);
     const iree_const_byte_span_t contents = loom_global_rodata_contents(op);
     uint64_t alignment = 0;
     const loom_attribute_t alignment_attr =
@@ -1226,11 +1208,7 @@ static iree_status_t loom_amdgpu_hal_kernel_library_compose_data_symbols(
   iree_host_size_t composed_symbol_count = 0;
   loom_amdgpu_runtime_global_symbols(runtime_globals, composed_symbols,
                                      &composed_symbol_count);
-  if (composed_symbol_count != runtime_global_symbol_count) {
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
-        "AMDGPU HAL runtime-global symbol count changed during composition");
-  }
+  IREE_ASSERT_EQ(composed_symbol_count, runtime_global_symbol_count);
   if (data_symbol_count != 0) {
     memcpy(composed_symbols + composed_symbol_count, data_symbols,
            data_symbol_count * sizeof(*data_symbols));
@@ -1241,11 +1219,7 @@ static iree_status_t loom_amdgpu_hal_kernel_library_compose_data_symbols(
            rodata_symbol_count * sizeof(*rodata_symbols));
     composed_symbol_count += rodata_symbol_count;
   }
-  if (composed_symbol_count != total_symbol_count) {
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
-        "AMDGPU HAL data symbol count changed during composition");
-  }
+  IREE_ASSERT_EQ(composed_symbol_count, total_symbol_count);
 
   *out_data_symbols = composed_symbols;
   *out_data_symbol_count = total_symbol_count;
@@ -1261,11 +1235,7 @@ static iree_status_t loom_amdgpu_hal_kernel_library_entries(
     const loom_amdgpu_hal_kernel_library_options_t* options, bool* out_emitted,
     loom_amdgpu_hal_kernel_library_t* out_library, iree_allocator_t allocator) {
   *out_emitted = false;
-  if (entries.count == 0 || entries.values == NULL) {
-    return iree_make_status(IREE_STATUS_INTERNAL,
-                            "AMDGPU HAL kernel-library emission requires at "
-                            "least one entry");
-  }
+  IREE_ASSERT(entries.count != 0 && entries.values != NULL);
 
   const uint32_t max_errors = loom_target_entry_max_errors(
       target_options, LOOM_AMDGPU_HAL_KERNEL_LIBRARY_DEFAULT_MAX_ERRORS);
