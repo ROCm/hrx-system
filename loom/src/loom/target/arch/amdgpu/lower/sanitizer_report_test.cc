@@ -33,8 +33,6 @@
 
 namespace {
 
-using iree::StatusCode;
-
 std::string ToString(iree_string_view_t value) {
   return std::string(value.data, value.size);
 }
@@ -998,36 +996,6 @@ TEST_F(AmdgpuSanitizerReportTest, BranchesMaskedColdSiteBlockToTrapIsland) {
       OpsForDescriptorRef(LOOM_AMDGPU_DESCRIPTOR_REF_GLOBAL_STORE_B64_SADDR)
           .empty());
   EXPECT_EQ(OpsForDescriptorRef(LOOM_AMDGPU_DESCRIPTOR_REF_S_TRAP).size(), 1u);
-}
-
-TEST_F(AmdgpuSanitizerReportTest, RejectsInvalidReportMetadata) {
-  loom_amdgpu_feedback_config_values_t config_values = {};
-  loom_amdgpu_feedback_channel_header_values_t channel_values = {};
-  loom_amdgpu_feedback_packet_address_t packet_address = {};
-  IREE_ASSERT_OK(
-      BuildFeedbackValues(&config_values, &channel_values, &packet_address));
-
-  loom_amdgpu_sanitizer_access_report_t report = {
-      /*.access_kind=*/LOOM_AMDGPU_SANITIZER_ACCESS_KIND_WRITE,
-      /*.flags=*/LOOM_AMDGPU_SANITIZER_REPORT_FLAG_NONE,
-      /*.fault_address=*/channel_values.ring_base,
-      /*.access_size=*/channel_values.ring_capacity,
-      /*.site_id=*/config_values.notify_signal,
-      /*.shadow_address=*/config_values.channel_base,
-      /*.shadow_value=*/config_values.address,
-  };
-  report.access_kind = 0xFFu;
-  IREE_EXPECT_STATUS_IS(StatusCode::kInvalidArgument,
-                        loom_amdgpu_build_sanitizer_access_report_payload(
-                            &builder_, descriptor_set_, &packet_address,
-                            &report, LOOM_LOCATION_UNKNOWN));
-
-  report.access_kind = LOOM_AMDGPU_SANITIZER_ACCESS_KIND_WRITE;
-  report.flags = 1u;
-  IREE_EXPECT_STATUS_IS(StatusCode::kInvalidArgument,
-                        loom_amdgpu_build_sanitizer_access_report_payload(
-                            &builder_, descriptor_set_, &packet_address,
-                            &report, LOOM_LOCATION_UNKNOWN));
 }
 
 }  // namespace
