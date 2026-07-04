@@ -1635,15 +1635,16 @@ iree_status_t loom_amdgpu_select_vector_extract_plan(
   return iree_ok_status();
 }
 
-static bool loom_amdgpu_select_vector_from_elements_plan(
+static iree_status_t loom_amdgpu_select_vector_from_elements_plan(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
-    loom_amdgpu_vector_from_elements_plan_t* out_plan) {
+    loom_amdgpu_vector_from_elements_plan_t* out_plan, bool* out_selected) {
   *out_plan = (loom_amdgpu_vector_from_elements_plan_t){0};
+  *out_selected = false;
   const loom_module_t* module = loom_low_lower_context_module(context);
   const loom_value_slice_t elements =
       loom_vector_from_elements_elements(source_op);
   if (elements.count == 0) {
-    return false;
+    return iree_ok_status();
   }
   const loom_value_id_t result = loom_vector_from_elements_result(source_op);
   const loom_type_t result_type = loom_module_value_type(module, result);
@@ -1651,18 +1652,22 @@ static bool loom_amdgpu_select_vector_from_elements_plan(
   if (!loom_amdgpu_type_vector_storage(result_type, &storage) ||
       elements.count != storage.element_count ||
       elements.count > IREE_ARRAYSIZE(out_plan->payload.elements)) {
-    return false;
+    return iree_ok_status();
   }
   for (uint32_t i = 0; i < elements.count; ++i) {
     const loom_value_id_t element = elements.values[i];
     const loom_type_t source_type = loom_module_value_type(module, element);
     if (!loom_type_is_scalar(source_type) ||
         loom_type_element_type(source_type) != storage.element_type) {
-      return false;
+      return iree_ok_status();
     }
-    if (storage.element_type == LOOM_SCALAR_TYPE_I32 &&
-        !loom_amdgpu_value_can_materialize_as_vgpr_i32(context, element)) {
-      return false;
+    if (storage.element_type == LOOM_SCALAR_TYPE_I32) {
+      bool can_materialize = false;
+      IREE_RETURN_IF_ERROR(loom_amdgpu_value_can_materialize_as_vgpr_i32(
+          context, source_op, element, &can_materialize));
+      if (!can_materialize) {
+        return iree_ok_status();
+      }
     }
     out_plan->payload.elements[i] = element;
   }
@@ -1674,30 +1679,36 @@ static bool loom_amdgpu_select_vector_from_elements_plan(
   out_plan->element_bit_count = storage.element_bit_count;
   out_plan->element_type = storage.element_type;
   loom_amdgpu_select_vector_from_elements_materialization(context, out_plan);
-  return true;
+  *out_selected = true;
+  return iree_ok_status();
 }
 
-static bool loom_amdgpu_select_vector_splat_plan(
+static iree_status_t loom_amdgpu_select_vector_splat_plan(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
-    loom_amdgpu_vector_from_elements_plan_t* out_plan) {
+    loom_amdgpu_vector_from_elements_plan_t* out_plan, bool* out_selected) {
   *out_plan = (loom_amdgpu_vector_from_elements_plan_t){0};
+  *out_selected = false;
   const loom_module_t* module = loom_low_lower_context_module(context);
   const loom_value_id_t result = loom_vector_splat_result(source_op);
   const loom_type_t result_type = loom_module_value_type(module, result);
   loom_amdgpu_vector_storage_t storage = {0};
   if (!loom_amdgpu_type_vector_storage(result_type, &storage) ||
       storage.element_count > IREE_ARRAYSIZE(out_plan->payload.elements)) {
-    return false;
+    return iree_ok_status();
   }
   const loom_value_id_t scalar = loom_vector_splat_scalar(source_op);
   const loom_type_t scalar_type = loom_module_value_type(module, scalar);
   if (!loom_type_is_scalar(scalar_type) ||
       loom_type_element_type(scalar_type) != storage.element_type) {
-    return false;
+    return iree_ok_status();
   }
-  if (storage.element_type == LOOM_SCALAR_TYPE_I32 &&
-      !loom_amdgpu_value_can_materialize_as_vgpr_i32(context, scalar)) {
-    return false;
+  if (storage.element_type == LOOM_SCALAR_TYPE_I32) {
+    bool can_materialize = false;
+    IREE_RETURN_IF_ERROR(loom_amdgpu_value_can_materialize_as_vgpr_i32(
+        context, source_op, scalar, &can_materialize));
+    if (!can_materialize) {
+      return iree_ok_status();
+    }
   }
   for (uint32_t i = 0; i < storage.element_count; ++i) {
     out_plan->payload.elements[i] = scalar;
@@ -1710,7 +1721,8 @@ static bool loom_amdgpu_select_vector_splat_plan(
   out_plan->element_bit_count = storage.element_bit_count;
   out_plan->element_type = storage.element_type;
   loom_amdgpu_select_vector_from_elements_materialization(context, out_plan);
-  return true;
+  *out_selected = true;
+  return iree_ok_status();
 }
 
 static const loom_op_t* loom_amdgpu_value_defining_op(
@@ -2092,9 +2104,13 @@ static iree_status_t loom_amdgpu_select_vector_insert_plan(
       element_type != LOOM_SCALAR_TYPE_I16) {
     return iree_ok_status();
   }
-  if (element_type == LOOM_SCALAR_TYPE_I32 &&
-      !loom_amdgpu_value_can_materialize_as_vgpr_i32(context, value)) {
-    return iree_ok_status();
+  if (element_type == LOOM_SCALAR_TYPE_I32) {
+    bool can_materialize = false;
+    IREE_RETURN_IF_ERROR(loom_amdgpu_value_can_materialize_as_vgpr_i32(
+        context, source_op, value, &can_materialize));
+    if (!can_materialize) {
+      return iree_ok_status();
+    }
   }
 
   bool is_dynamic = false;
@@ -4207,8 +4223,10 @@ iree_status_t loom_amdgpu_select_structural_value_plan(
         return iree_ok_status();
       }
       loom_amdgpu_vector_from_elements_plan_t local_plan = {0};
-      if (loom_amdgpu_select_vector_from_elements_plan(context, source_op,
-                                                       &local_plan)) {
+      bool selected = false;
+      IREE_RETURN_IF_ERROR(loom_amdgpu_select_vector_from_elements_plan(
+          context, source_op, &local_plan, &selected));
+      if (selected) {
         IREE_RETURN_IF_ERROR(
             loom_amdgpu_select_vector_from_elements_fma_mix_half_results(
                 context, source_op, LOOM_AMDGPU_VECTOR_INSERT_SELECT_FLAG_NONE,
@@ -4220,8 +4238,10 @@ iree_status_t loom_amdgpu_select_structural_value_plan(
     }
     case LOOM_OP_VECTOR_SPLAT: {
       loom_amdgpu_vector_from_elements_plan_t local_plan = {0};
-      if (loom_amdgpu_select_vector_splat_plan(context, source_op,
-                                               &local_plan)) {
+      bool selected = false;
+      IREE_RETURN_IF_ERROR(loom_amdgpu_select_vector_splat_plan(
+          context, source_op, &local_plan, &selected));
+      if (selected) {
         IREE_RETURN_IF_ERROR(
             loom_amdgpu_select_vector_from_elements_fma_mix_half_results(
                 context, source_op, LOOM_AMDGPU_VECTOR_INSERT_SELECT_FLAG_NONE,
@@ -4254,8 +4274,10 @@ iree_status_t loom_amdgpu_preselect_structural_value_plan(
   *out_plan = loom_low_lower_plan_empty();
   if (loom_vector_from_elements_isa(source_op)) {
     loom_amdgpu_vector_from_elements_plan_t local_plan = {0};
-    if (!loom_amdgpu_select_vector_from_elements_plan(context, source_op,
-                                                      &local_plan)) {
+    bool selected = false;
+    IREE_RETURN_IF_ERROR(loom_amdgpu_select_vector_from_elements_plan(
+        context, source_op, &local_plan, &selected));
+    if (!selected) {
       return iree_ok_status();
     }
     IREE_RETURN_IF_ERROR(
@@ -4271,8 +4293,10 @@ iree_status_t loom_amdgpu_preselect_structural_value_plan(
   }
   if (loom_vector_splat_isa(source_op)) {
     loom_amdgpu_vector_from_elements_plan_t local_plan = {0};
-    if (!loom_amdgpu_select_vector_splat_plan(context, source_op,
-                                              &local_plan)) {
+    bool selected = false;
+    IREE_RETURN_IF_ERROR(loom_amdgpu_select_vector_splat_plan(
+        context, source_op, &local_plan, &selected));
+    if (!selected) {
       return iree_ok_status();
     }
     IREE_RETURN_IF_ERROR(

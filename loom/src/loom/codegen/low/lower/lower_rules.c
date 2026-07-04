@@ -204,17 +204,19 @@ static loom_value_id_t loom_low_lower_rule_source_value(
   }
 }
 
-static bool loom_low_lower_rule_can_materialize_value(
+static iree_status_t loom_low_lower_rule_can_materialize_value(
     const loom_low_lower_rule_match_context_t* match_context,
     const loom_low_lower_rule_set_t* rule_set, const loom_op_t* source_op,
-    uint16_t value_ref_index) {
+    uint16_t value_ref_index, bool* out_can_materialize) {
+  *out_can_materialize = false;
   if (match_context->can_materialize.fn == NULL) {
-    return false;
+    return iree_ok_status();
   }
   return match_context->can_materialize.fn(
       match_context->can_materialize.user_data, match_context, rule_set,
       source_op, value_ref_index,
-      loom_low_lower_rule_source_value(rule_set, source_op, value_ref_index));
+      loom_low_lower_rule_source_value(rule_set, source_op, value_ref_index),
+      out_can_materialize);
 }
 
 iree_status_t loom_low_lower_rule_resolve_descriptor_ref(
@@ -1722,9 +1724,9 @@ static iree_status_t loom_low_lower_rule_guard_matches(
       return loom_low_lower_rule_descriptor_available(
           match_context, rule_set, guard->descriptor_ref, out_matches);
     case LOOM_LOW_LOWER_GUARD_VALUE_MATERIALIZABLE:
-      *out_matches = loom_low_lower_rule_can_materialize_value(
-          match_context, rule_set, source_op, guard->value_ref_index);
-      return iree_ok_status();
+      return loom_low_lower_rule_can_materialize_value(
+          match_context, rule_set, source_op, guard->value_ref_index,
+          out_matches);
     case LOOM_LOW_LOWER_GUARD_LOW_VALUE_REGISTER_CLASS: {
       loom_low_lower_rule_mapped_value_t mapped_value =
           loom_low_lower_rule_mapped_value_none();
@@ -2028,17 +2030,19 @@ static iree_status_t loom_low_lower_rule_match_map_value_from_lowering(
   return iree_ok_status();
 }
 
-static bool loom_low_lower_rule_match_can_materialize_from_lowering(
+static iree_status_t loom_low_lower_rule_match_can_materialize_from_lowering(
     void* user_data, const loom_low_lower_rule_match_context_t* match_context,
     const loom_low_lower_rule_set_t* rule_set, const loom_op_t* source_op,
-    uint16_t value_ref_index, loom_value_id_t source_value_id) {
+    uint16_t value_ref_index, loom_value_id_t source_value_id,
+    bool* out_can_materialize) {
   (void)match_context;
   loom_low_lower_context_t* context = (loom_low_lower_context_t*)user_data;
   const loom_low_lower_value_ref_t* value_ref =
       &rule_set->value_refs[value_ref_index];
   const loom_low_lower_value_materializer_t* materializer =
       loom_low_lower_rule_value_materializer(rule_set, value_ref);
-  return materializer->can_materialize(context, source_value_id);
+  return materializer->can_materialize(context, source_op, source_value_id,
+                                       out_can_materialize);
 }
 
 static const loom_low_lower_rule_descriptor_map_t*
