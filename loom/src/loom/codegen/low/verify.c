@@ -354,8 +354,8 @@ static iree_status_t loom_low_verify_format_enum_constraint(
       iree_snprintf(storage, byte_count + 1, "value from enum domain '%.*s'",
                     (int)enum_domain.size, enum_domain.data);
   if (length < 0 || (iree_host_size_t)length != byte_count) {
-    return iree_make_status(IREE_STATUS_INTERNAL,
-                            "failed to format enum constraint");
+    IREE_ASSERT_UNREACHABLE("failed to format enum constraint");
+    IREE_BUILTIN_UNREACHABLE();
   }
   *out_constraint = iree_make_string_view(storage, byte_count);
   return iree_ok_status();
@@ -498,8 +498,8 @@ static iree_status_t loom_low_verify_format_signed_range(
   int length = iree_snprintf(scratch, sizeof(scratch), "%" PRId64 "..%" PRId64,
                              minimum, maximum);
   if (length < 0 || (iree_host_size_t)length >= sizeof(scratch)) {
-    return iree_make_status(IREE_STATUS_INTERNAL,
-                            "failed to format signed immediate range");
+    IREE_ASSERT_UNREACHABLE("failed to format signed immediate range");
+    IREE_BUILTIN_UNREACHABLE();
   }
   char* storage = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate(&function_state->state->arena,
@@ -516,8 +516,8 @@ static iree_status_t loom_low_verify_format_unsigned_range(
   char scratch[96];
   int length = iree_snprintf(scratch, sizeof(scratch), "0..%" PRIu64, maximum);
   if (length < 0 || (iree_host_size_t)length >= sizeof(scratch)) {
-    return iree_make_status(IREE_STATUS_INTERNAL,
-                            "failed to format unsigned immediate range");
+    IREE_ASSERT_UNREACHABLE("failed to format unsigned immediate range");
+    IREE_BUILTIN_UNREACHABLE();
   }
   char* storage = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate(&function_state->state->arena,
@@ -534,8 +534,8 @@ static iree_status_t loom_low_verify_format_i64(
   char scratch[32];
   int length = iree_snprintf(scratch, sizeof(scratch), "%" PRId64, value);
   if (length < 0 || (iree_host_size_t)length >= sizeof(scratch)) {
-    return iree_make_status(IREE_STATUS_INTERNAL,
-                            "failed to format enum immediate value");
+    IREE_ASSERT_UNREACHABLE("failed to format enum immediate value");
+    IREE_BUILTIN_UNREACHABLE();
   }
   char* storage = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate(&function_state->state->arena,
@@ -1013,8 +1013,8 @@ static iree_status_t loom_low_verify_format_register_constraint(
                     (int)expected_reg_classes.size, expected_reg_classes.data,
                     expected_unit_count);
   if (length < 0 || (iree_host_size_t)length > byte_capacity) {
-    return iree_make_status(IREE_STATUS_INTERNAL,
-                            "failed to format register constraint");
+    IREE_ASSERT_UNREACHABLE("failed to format register constraint");
+    IREE_BUILTIN_UNREACHABLE();
   }
   *out_constraint = iree_make_string_view(storage, (iree_host_size_t)length);
   return iree_ok_status();
