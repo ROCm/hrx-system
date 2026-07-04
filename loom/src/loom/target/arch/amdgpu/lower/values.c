@@ -2531,25 +2531,27 @@ bool loom_amdgpu_vector_decode_can_lower_as_fp8_conversion(
   }
 
   loom_value_id_t scale_source = LOOM_VALUE_ID_INVALID;
-  if (loom_amdgpu_vector_decode_scale_source(
-          module, source_op, LOOM_SCALAR_TYPE_F32, &scale_source) &&
-      loom_amdgpu_direct_fp8_scalef32_schema_matches(
-          summary.storage_schema.encoded_operand, source_element_type,
-          source_lane_count)) {
-    return true;
+  switch (summary.storage_schema.encoded_operand.scale_format) {
+    case LOOM_VALUE_FACT_NUMERIC_FORMAT_F32:
+      return loom_amdgpu_vector_decode_scale_source(
+                 module, source_op, LOOM_SCALAR_TYPE_F32, &scale_source) &&
+             loom_amdgpu_direct_fp8_scalef32_schema_matches(
+                 summary.storage_schema.encoded_operand, source_element_type,
+                 source_lane_count);
+    case LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E8M0:
+      return loom_amdgpu_vector_decode_scale_source(
+                 module, source_op, LOOM_SCALAR_TYPE_I32, &scale_source) &&
+             loom_amdgpu_direct_fp8_e8m0_schema_matches(
+                 summary.storage_schema.encoded_operand, source_element_type,
+                 source_lane_count) &&
+             loom_amdgpu_direct_fp8_e8m0_pk8_descriptor_available(
+                 descriptor_set, source_element_type, result_element_type) &&
+             loom_amdgpu_direct_fp8_e8m0_pk8_storage_matches(
+                 module, fact_table, source, source_element_type,
+                 source_lane_count);
+    default:
+      return false;
   }
-  if (loom_amdgpu_vector_decode_scale_source(
-          module, source_op, LOOM_SCALAR_TYPE_I32, &scale_source) &&
-      loom_amdgpu_direct_fp8_e8m0_schema_matches(
-          summary.storage_schema.encoded_operand, source_element_type,
-          source_lane_count) &&
-      loom_amdgpu_direct_fp8_e8m0_pk8_descriptor_available(
-          descriptor_set, source_element_type, result_element_type) &&
-      loom_amdgpu_direct_fp8_e8m0_pk8_storage_matches(
-          module, fact_table, source, source_element_type, source_lane_count)) {
-    return true;
-  }
-  return false;
 }
 
 iree_status_t loom_amdgpu_low_legality_verify_vector_decode(
