@@ -24,12 +24,15 @@ def test_fp8_decode_plan_descriptor_rows_emit_data_only() -> None:
     assert "LOOM_AMDGPU_DESCRIPTOR_REF_V_BFE_U32_OFFSET_WIDTH_INLINE" in source
     assert "LOOM_AMDGPU_DESCRIPTOR_REF_V_PK_LSHLREV_B16" in source
     assert "LOOM_AMDGPU_DESCRIPTOR_REF_V_PK_MAD_U16" in source
+    assert "LOOM_AMDGPU_DESCRIPTOR_REF_V_PK_MAD_U16_SRC2_LIT" in source
     assert "bfe_u32_descriptor" in source
     assert "pk_lshlrev_b16_descriptor" in source
     assert "pk_mad_u16_descriptor" in source
+    assert "pk_mad_u16_src2_literal_descriptor" in source
     assert "LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_BFE_U32" in source
     assert "LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_PK_LSHLREV_B16" in source
     assert "LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_PK_MAD_U16" in source
+    assert "LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_PK_MAD_U16_SRC2_LITERAL" in source
     assert "typedef " not in source
     assert "struct " not in source
     assert "#include" not in source
