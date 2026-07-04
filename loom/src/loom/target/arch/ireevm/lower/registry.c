@@ -121,9 +121,8 @@ static iree_status_t loom_ireevm_map_type(void* user_data,
     default:
       IREE_ASSERT_UNREACHABLE(
           "checked by loom_ireevm_type_is_supported_scalar");
-      break;
+      IREE_BUILTIN_UNREACHABLE();
   }
-  return iree_make_status(IREE_STATUS_INTERNAL, "unreachable scalar type");
 }
 
 typedef struct loom_ireevm_buffer_lower_info_t {
@@ -224,8 +223,8 @@ static iree_status_t loom_ireevm_resolve_descriptor_ordinal(
   const loom_low_descriptor_set_t* descriptor_set =
       loom_low_lower_context_descriptor_set(context);
   if (descriptor_ordinal >= descriptor_set->descriptor_count) {
-    return iree_make_status(IREE_STATUS_INTERNAL,
-                            "IREE VM descriptor ordinal is out of range");
+    IREE_ASSERT_UNREACHABLE("IREE VM descriptor ordinal is out of range");
+    IREE_BUILTIN_UNREACHABLE();
   }
   return loom_low_lower_resolve_descriptor_row(
       context, &descriptor_set->descriptors[descriptor_ordinal],
@@ -459,8 +458,8 @@ static iree_status_t loom_ireevm_emit_op(void* user_data,
       }
     }
   }
-  return iree_make_status(IREE_STATUS_INTERNAL,
-                          "unknown IREE VM lowering plan");
+  IREE_ASSERT_UNREACHABLE("unknown IREE VM lowering plan");
+  IREE_BUILTIN_UNREACHABLE();
 }
 
 static const loom_low_lower_rule_set_t* const kIreeVmRuleSets[] = {
