@@ -2198,10 +2198,6 @@ iree_status_t loom_target_compile_report_record_wait_reason_summary_row(
     return iree_ok_status();
   }
   report->detail_flags |= LOOM_TARGET_COMPILE_REPORT_DETAIL_WAIT_PLAN;
-  if (!loom_target_compile_report_wants_details(
-          report, LOOM_TARGET_COMPILE_REPORT_DETAIL_WAIT_PLAN)) {
-    return iree_ok_status();
-  }
   return loom_target_compile_report_row_list_append(
       &report->wait_reason_summary_rows, sizeof(*row), report->allocator, row);
 }

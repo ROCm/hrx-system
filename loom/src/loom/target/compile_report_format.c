@@ -3304,11 +3304,12 @@ loom_target_compile_report_format_wait_reason_summary_rows_json(
     const loom_target_compile_report_t* report,
     loom_target_compile_report_format_mode_t mode,
     loom_output_stream_t* stream) {
+  (void)mode;
   bool first_field = true;
   IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "{"));
   IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_size_field(
       stream, &first_field, "count", report->wait_reason_summary_rows.count));
-  if (mode == LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS) {
+  if (report->wait_reason_summary_rows.count != 0) {
     IREE_RETURN_IF_ERROR(loom_target_compile_report_json_begin_field(
         stream, &first_field, "rows"));
     IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "["));
