@@ -102,9 +102,8 @@ static iree_status_t loom_json_render_field_ref(
     loom_output_stream_t* stream, loom_diagnostic_field_ref_t field_ref) {
   const char* kind_name = loom_json_diagnostic_field_kind_name(field_ref.kind);
   if (!kind_name) {
-    return iree_make_status(IREE_STATUS_INTERNAL,
-                            "invalid diagnostic field ref kind %d",
-                            (int)field_ref.kind);
+    IREE_ASSERT_UNREACHABLE("invalid diagnostic field ref kind");
+    IREE_BUILTIN_UNREACHABLE();
   }
   IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "{\"kind\":"));
   IREE_RETURN_IF_ERROR(loom_json_write_escaped_cstring(stream, kind_name));
@@ -249,10 +248,9 @@ static iree_status_t loom_json_render_highlights(
       if (error && error->param_defs) {
         if (highlight->param_index >= param_count ||
             highlight->param_index >= error->param_count) {
-          return iree_make_status(
-              IREE_STATUS_INTERNAL,
-              "diagnostic highlight %zu references invalid param index %zu",
-              (size_t)highlight_index, (size_t)highlight->param_index);
+          IREE_ASSERT_UNREACHABLE(
+              "diagnostic highlight references invalid param index");
+          IREE_BUILTIN_UNREACHABLE();
         }
         IREE_RETURN_IF_ERROR(
             loom_output_stream_write_cstring(stream, ",\"param\":"));
@@ -449,11 +447,8 @@ iree_status_t loom_diagnostic_json_write_object(
       }
       // Validate that the runtime param kind matches the schema.
       if (diagnostic->params[i].kind != error->param_defs[i].kind) {
-        return iree_make_status(
-            IREE_STATUS_INTERNAL,
-            "diagnostic param %zu kind mismatch: runtime %d vs schema %d",
-            (size_t)i, (int)diagnostic->params[i].kind,
-            (int)error->param_defs[i].kind);
+        IREE_ASSERT_UNREACHABLE("diagnostic param kind does not match schema");
+        IREE_BUILTIN_UNREACHABLE();
       }
       // Param name.
       IREE_RETURN_IF_ERROR(

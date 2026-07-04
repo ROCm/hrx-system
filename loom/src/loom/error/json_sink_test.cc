@@ -552,49 +552,6 @@ TEST(JsonSink, SerializesOmittedHighlightCount) {
       << "json: " << json;
 }
 
-TEST(JsonSink, RejectsInvalidParamFieldRefKind) {
-  loom_diagnostic_param_t params[] = {
-      loom_param_with_field_ref(
-          loom_param_string(IREE_SV("x")),
-          loom_diagnostic_field_ref((loom_diagnostic_field_kind_t)99, 0)),
-  };
-
-  loom_diagnostic_t diagnostic = {};
-  diagnostic.severity = LOOM_DIAGNOSTIC_ERROR;
-  diagnostic.error = loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 1);
-  diagnostic.params = params;
-  diagnostic.param_count = IREE_ARRAYSIZE(params);
-
-  std::string json;
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_INTERNAL,
-                        EmitJsonStatus(&diagnostic, &json));
-}
-
-TEST(JsonSink, RejectsHighlightWithInvalidParamIndex) {
-  loom_diagnostic_param_t params[] = {
-      loom_param_string(IREE_SV("x")),
-  };
-  loom_highlight_range_t highlights[] = {{
-      /*.start=*/0,
-      /*.end=*/2,
-      /*.field_ref=*/
-      loom_diagnostic_field_ref(LOOM_DIAGNOSTIC_FIELD_OPERAND, 0),
-      /*.param_index=*/1,
-  }};
-
-  loom_diagnostic_t diagnostic = {};
-  diagnostic.severity = LOOM_DIAGNOSTIC_ERROR;
-  diagnostic.error = loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 1);
-  diagnostic.params = params;
-  diagnostic.param_count = IREE_ARRAYSIZE(params);
-  diagnostic.highlights = highlights;
-  diagnostic.highlight_count = IREE_ARRAYSIZE(highlights);
-
-  std::string json;
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_INTERNAL,
-                        EmitJsonStatus(&diagnostic, &json));
-}
-
 //===----------------------------------------------------------------------===//
 // Multiple diagnostics (JSONL)
 //===----------------------------------------------------------------------===//
