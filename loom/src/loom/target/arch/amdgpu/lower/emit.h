@@ -70,6 +70,13 @@ iree_status_t loom_amdgpu_build_low_register_range(
     const loom_value_id_t* low_registers, uint32_t register_count,
     loom_type_t result_type, loom_value_id_t* out_low_result);
 
+// Extracts one 32-bit unit from an already-emitted low register range.
+iree_status_t loom_amdgpu_extract_low_register_unit(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_value_id_t low_source, uint32_t register_count,
+    uint32_t register_offset, loom_type_t unit_type,
+    loom_value_id_t* out_register_unit);
+
 // Binds a source result to one or more already-emitted low register units.
 iree_status_t loom_amdgpu_bind_low_register_range(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
