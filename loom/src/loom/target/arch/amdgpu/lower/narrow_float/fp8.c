@@ -1979,23 +1979,6 @@ static iree_status_t loom_amdgpu_emit_fp8_packed_f16_repair_group_if(
   return iree_ok_status();
 }
 
-iree_status_t loom_amdgpu_emit_fp8_pair_to_packed_f16_finite(
-    loom_low_lower_context_t* context, const loom_op_t* source_op,
-    const loom_amdgpu_fp8_decode_plan_t* plan,
-    loom_value_id_t low_source_register, uint32_t byte_offset,
-    loom_amdgpu_fp8_decode_value_flags_t value_flags, loom_type_t vgpr_type,
-    loom_type_t sgpr_type, loom_type_t mask_type,
-    loom_value_id_t* out_low_packet) {
-  const loom_amdgpu_fp8_packed_u16_pair_source_t pair_source = {
-      .source_register = low_source_register,
-      .byte_offset = byte_offset,
-      .live_lane_count = 2u,
-  };
-  return loom_amdgpu_emit_fp8_pairs_to_packed_f16_finite(
-      context, source_op, plan, &pair_source, 1, value_flags, vgpr_type,
-      sgpr_type, mask_type, out_low_packet);
-}
-
 iree_status_t loom_amdgpu_emit_fp8_pairs_to_packed_f16_finite(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_amdgpu_fp8_decode_plan_t* plan,
@@ -2714,23 +2697,6 @@ static iree_status_t loom_amdgpu_emit_fp8_packed_bf16_special_group_if(
     out_packets[i] = split.continuation_values[i];
   }
   return iree_ok_status();
-}
-
-iree_status_t loom_amdgpu_emit_fp8_pair_to_packed_bf16(
-    loom_low_lower_context_t* context, const loom_op_t* source_op,
-    const loom_amdgpu_fp8_decode_plan_t* plan,
-    loom_value_id_t low_source_register, uint32_t byte_offset,
-    loom_amdgpu_fp8_decode_value_flags_t value_flags, loom_type_t vgpr_type,
-    loom_type_t sgpr_type, loom_type_t mask_type,
-    loom_value_id_t* out_low_packet) {
-  const loom_amdgpu_fp8_packed_u16_pair_source_t pair_source = {
-      .source_register = low_source_register,
-      .byte_offset = byte_offset,
-      .live_lane_count = 2u,
-  };
-  return loom_amdgpu_emit_fp8_pairs_to_packed_bf16(
-      context, source_op, plan, &pair_source, 1, value_flags, vgpr_type,
-      sgpr_type, mask_type, out_low_packet);
 }
 
 iree_status_t loom_amdgpu_emit_fp8_pairs_to_packed_bf16(
