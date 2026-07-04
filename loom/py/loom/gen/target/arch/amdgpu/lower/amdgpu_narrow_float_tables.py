@@ -185,6 +185,11 @@ _FP8_DECODE_PLAN_DESCRIPTOR_ROWS = (
         "LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_PK_MAD_U16",
     ),
     _Fp8DecodePlanDescriptorRow(
+        "amdgpu.v_pk_mad_u16.src2_lit",
+        "pk_mad_u16_src2_literal_descriptor",
+        "LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_PK_MAD_U16_SRC2_LITERAL",
+    ),
+    _Fp8DecodePlanDescriptorRow(
         "amdgpu.v_pk_max_u16",
         "pk_max_u16_descriptor",
         "LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_PK_MAX_U16",
