@@ -1025,9 +1025,8 @@ static iree_status_t loom_low_select_operand_form_resolve_immediate_value(
       break;
     }
     default:
-      return iree_make_status(IREE_STATUS_INTERNAL,
-                              "unknown low operand-form immediate action %u",
-                              (unsigned)form->immediate_action);
+      IREE_ASSERT_UNREACHABLE("unknown low operand-form immediate action");
+      IREE_BUILTIN_UNREACHABLE();
   }
 
   IREE_ASSERT(form->replacement_immediate_index <
