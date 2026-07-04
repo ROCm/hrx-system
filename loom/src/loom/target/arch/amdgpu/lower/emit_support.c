@@ -1165,9 +1165,9 @@ iree_status_t loom_amdgpu_materialize_low_vgpr_b32(
   const bool is_sgpr = loom_amdgpu_low_type_is_register_class(
       context, low_type, LOOM_AMDGPU_REG_CLASS_ID_SGPR);
   if (!is_sgpr || loom_low_register_type_unit_count(low_type) != 1) {
-    return iree_make_status(IREE_STATUS_INTERNAL,
-                            "AMDGPU scalar VGPR materializer selected for a "
-                            "non-scalar low value");
+    IREE_ASSERT_UNREACHABLE(
+        "AMDGPU scalar VGPR materializer selected a non-scalar low value");
+    IREE_BUILTIN_UNREACHABLE();
   }
   return loom_amdgpu_emit_vgpr_b32_copy(context, source_op, low_value,
                                         out_low_value);
@@ -1191,9 +1191,9 @@ iree_status_t loom_amdgpu_materialize_low_vgpr_b32_registers(
       context, low_type, LOOM_AMDGPU_REG_CLASS_ID_SGPR);
   if (!is_sgpr || unit_count == 0 ||
       unit_count > LOOM_AMDGPU_MAX_SCALARIZED_32BIT_LANES) {
-    return iree_make_status(IREE_STATUS_INTERNAL,
-                            "AMDGPU VGPR materializer selected for an "
-                            "unsupported low value");
+    IREE_ASSERT_UNREACHABLE(
+        "AMDGPU VGPR materializer selected an unsupported low value");
+    IREE_BUILTIN_UNREACHABLE();
   }
   if (unit_count == 1) {
     return loom_amdgpu_emit_vgpr_b32_copy(context, source_op, low_value,
@@ -1944,9 +1944,9 @@ iree_status_t loom_amdgpu_lookup_or_materialize_vgpr_i32(
         context, source_op, low_value, out_low_value);
   }
 
-  return iree_make_status(IREE_STATUS_INTERNAL,
-                          "AMDGPU i32 VGPR materializer selected for an "
-                          "unsupported low value");
+  IREE_ASSERT_UNREACHABLE(
+      "AMDGPU i32 VGPR materializer selected an unsupported low value");
+  IREE_BUILTIN_UNREACHABLE();
 }
 
 iree_status_t loom_amdgpu_lookup_or_materialize_vgpr_f32(
@@ -1982,9 +1982,9 @@ iree_status_t loom_amdgpu_lookup_or_materialize_vgpr_f32(
         context, source_op, low_value, out_low_value);
   }
 
-  return iree_make_status(IREE_STATUS_INTERNAL,
-                          "AMDGPU f32 VGPR materializer selected for an "
-                          "unsupported low value");
+  IREE_ASSERT_UNREACHABLE(
+      "AMDGPU f32 VGPR materializer selected an unsupported low value");
+  IREE_BUILTIN_UNREACHABLE();
 }
 
 iree_status_t loom_amdgpu_lookup_or_materialize_vgpr_i64(
@@ -1999,9 +1999,9 @@ iree_status_t loom_amdgpu_lookup_or_materialize_vgpr_i64(
   const loom_type_t low_type = loom_module_value_type(module, low_value);
   if (!loom_low_type_is_register(low_type) ||
       loom_low_register_type_unit_count(low_type) != 2) {
-    return iree_make_status(IREE_STATUS_INTERNAL,
-                            "AMDGPU i64 VGPR materializer selected for an "
-                            "unsupported low value");
+    IREE_ASSERT_UNREACHABLE(
+        "AMDGPU i64 VGPR materializer selected an unsupported low value");
+    IREE_BUILTIN_UNREACHABLE();
   }
 
   const bool is_vgpr = loom_amdgpu_low_type_is_register_class(
@@ -2014,9 +2014,9 @@ iree_status_t loom_amdgpu_lookup_or_materialize_vgpr_i64(
   const bool is_sgpr = loom_amdgpu_low_type_is_register_class(
       context, low_type, LOOM_AMDGPU_REG_CLASS_ID_SGPR);
   if (!is_sgpr) {
-    return iree_make_status(IREE_STATUS_INTERNAL,
-                            "AMDGPU i64 VGPR materializer selected for an "
-                            "unsupported low value");
+    IREE_ASSERT_UNREACHABLE(
+        "AMDGPU i64 VGPR materializer selected an unsupported register class");
+    IREE_BUILTIN_UNREACHABLE();
   }
   return loom_amdgpu_materialize_low_vgpr_b32_registers(
       context, source_op, low_value, out_low_value);
@@ -2048,9 +2048,9 @@ iree_status_t loom_amdgpu_lookup_or_materialize_vgpr_address(
       return loom_amdgpu_materialize_low_vgpr_b32_registers(
           context, source_op, low_value, out_low_value);
     }
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
-        "AMDGPU address value cannot materialize as a VGPR operand");
+    IREE_ASSERT_UNREACHABLE(
+        "AMDGPU address materializer selected an unsupported low value");
+    IREE_BUILTIN_UNREACHABLE();
   }
   loom_type_t vgpr_type = loom_type_none();
   IREE_RETURN_IF_ERROR(loom_amdgpu_make_vgpr_type(context, &vgpr_type));
@@ -2086,9 +2086,9 @@ iree_status_t loom_amdgpu_lookup_or_materialize_native_i1_mask(
     IREE_RETURN_IF_ERROR(loom_amdgpu_emit_sgpr32_nonzero_scc(
         context, source_op, low_value, &condition));
   } else if (!is_scc || loom_low_register_type_unit_count(low_type) != 1) {
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
-        "AMDGPU i1 value cannot materialize as a native mask operand");
+    IREE_ASSERT_UNREACHABLE(
+        "AMDGPU native mask materializer selected an unsupported low value");
+    IREE_BUILTIN_UNREACHABLE();
   }
 
   loom_type_t mask_type = loom_type_none();
