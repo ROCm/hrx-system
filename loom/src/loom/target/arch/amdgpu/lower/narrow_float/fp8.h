@@ -316,6 +316,12 @@ bool loom_amdgpu_can_emit_fp8_pair_to_packed_bf16(
     const loom_amdgpu_fp8_decode_plan_t* plan,
     loom_amdgpu_fp8_decode_value_flags_t value_flags);
 
+// Returns true when the packed BF16 pair decode path should be selected ahead
+// of native FP8-to-F32 pair decode followed by explicit BF16 packing.
+bool loom_amdgpu_fp8_prefers_packed_bf16_pair_decode(
+    const loom_amdgpu_fp8_decode_plan_t* plan,
+    loom_amdgpu_fp8_decode_value_flags_t value_flags);
+
 // Emits packed BF16 registers for adjacent FP8 byte-pair sources. Exact rare
 // subnormal repair is batched across all pairs so the hot path branches once
 // per packet instead of once per pair.
