@@ -342,6 +342,61 @@ def _validate_unique_source_result_rows(
         raise ValueError(f"{table_name} contains duplicate source/result rows: " + ", ".join(sorted(duplicates)))
 
 
+def _validate_unique_strings(
+    table_name: str,
+    value_name: str,
+    values: Sequence[str],
+) -> None:
+    seen: set[str] = set()
+    duplicates: list[str] = []
+    for value in values:
+        if value in seen:
+            duplicates.append(value)
+        seen.add(value)
+    if duplicates:
+        raise ValueError(f"{table_name} contains duplicate {value_name}: " + ", ".join(sorted(duplicates)))
+
+
+def _validate_fp8_decode_plan_descriptor_rows(
+    rows: Sequence[_Fp8DecodePlanDescriptorRow],
+) -> None:
+    table_name = "AMDGPU FP8 decode plan descriptor table"
+    _validate_unique_strings(
+        table_name,
+        "plan fields",
+        [row.plan_field for row in rows],
+    )
+    _validate_unique_strings(
+        table_name,
+        "descriptor keys",
+        [row.descriptor_key for row in rows],
+    )
+    _validate_unique_strings(
+        table_name,
+        "capability flags",
+        [row.present_flag for row in rows if row.present_flag != "LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_NONE"],
+    )
+
+
+def _validate_fp8_format_rows(rows: Sequence[_Fp8FormatRow]) -> None:
+    table_name = "AMDGPU FP8 subnormal table"
+    _validate_unique_strings(
+        table_name,
+        "source types",
+        [row.source_type.name for row in rows],
+    )
+    expected_types = (ScalarTypeKind.F8E4M3, ScalarTypeKind.F8E5M2)
+    if tuple(row.source_type for row in rows) != expected_types:
+        names = ", ".join(row.source_type.name for row in rows)
+        expected_names = ", ".join(scalar_type.name for scalar_type in expected_types)
+        raise ValueError(f"{table_name} must cover dense FP8/BF8 rows in order: expected {expected_names}; got {names}")
+    for row in rows:
+        if row.exponent_bits + row.mantissa_bits != 7:
+            raise ValueError(f"{table_name} row {row.source_type.name} must describe a signless 7-bit FP8 payload")
+        if row.mantissa_bits not in (2, 3):
+            raise ValueError(f"{table_name} row {row.source_type.name} has unsupported mantissa bits: {row.mantissa_bits}")
+
+
 def _fp8_decode_plan_descriptor_initializer(
     row: _Fp8DecodePlanDescriptorRow,
     descriptor_ref_key_set: set[str] | None = None,
@@ -549,6 +604,7 @@ def _emit_fp8_packed_repair_reason_rows() -> str:
 def _emit_fp8_subnormal_table_rows(
     rows: Sequence[_Fp8FormatRow] = _FP8_FORMAT_ROWS,
 ) -> str:
+    _validate_fp8_format_rows(rows)
     return (
         "\n".join(
             [
@@ -564,6 +620,7 @@ def _emit_fp8_decode_plan_descriptor_rows(
     rows: Sequence[_Fp8DecodePlanDescriptorRow] = _FP8_DECODE_PLAN_DESCRIPTOR_ROWS,
     descriptor_ref_key_set: set[str] | None = None,
 ) -> str:
+    _validate_fp8_decode_plan_descriptor_rows(rows)
     known_refs = descriptor_ref_key_set if descriptor_ref_key_set is not None else set(amdgpu_descriptor_ref_keys())
     return (
         "\n".join(
