@@ -50,10 +50,11 @@ class _Fp8NativeDescriptorRefRow:
 
 
 @dataclass(frozen=True)
-class _Fp8ScaleF32DescriptorRefRow:
+class _Fp8ScaledDescriptorRefRow:
     source_type: ScalarTypeKind
     result_type: ScalarTypeKind
-    descriptor_key: str
+    scalef32_pair_descriptor_key: str
+    e8m0_pk8_descriptor_key: str
 
 
 @dataclass(frozen=True)
@@ -269,36 +270,42 @@ _FP8_NATIVE_DESCRIPTOR_REF_ROWS = (
     ),
 )
 
-_FP8_SCALEF32_DESCRIPTOR_REF_ROWS = (
-    _Fp8ScaleF32DescriptorRefRow(
+_FP8_SCALED_DESCRIPTOR_REF_ROWS = (
+    _Fp8ScaledDescriptorRefRow(
         ScalarTypeKind.F8E4M3,
         ScalarTypeKind.F16,
         "amdgpu.v_cvt_scalef32_pk_f16_fp8",
+        "amdgpu.v_cvt_scale_pk8_f16_fp8",
     ),
-    _Fp8ScaleF32DescriptorRefRow(
+    _Fp8ScaledDescriptorRefRow(
         ScalarTypeKind.F8E5M2,
         ScalarTypeKind.F16,
         "amdgpu.v_cvt_scalef32_pk_f16_bf8",
+        "amdgpu.v_cvt_scale_pk8_f16_bf8",
     ),
-    _Fp8ScaleF32DescriptorRefRow(
+    _Fp8ScaledDescriptorRefRow(
         ScalarTypeKind.F8E4M3,
         ScalarTypeKind.BF16,
         "amdgpu.v_cvt_scalef32_pk_bf16_fp8",
+        "amdgpu.v_cvt_scale_pk8_bf16_fp8",
     ),
-    _Fp8ScaleF32DescriptorRefRow(
+    _Fp8ScaledDescriptorRefRow(
         ScalarTypeKind.F8E5M2,
         ScalarTypeKind.BF16,
         "amdgpu.v_cvt_scalef32_pk_bf16_bf8",
+        "amdgpu.v_cvt_scale_pk8_bf16_bf8",
     ),
-    _Fp8ScaleF32DescriptorRefRow(
+    _Fp8ScaledDescriptorRefRow(
         ScalarTypeKind.F8E4M3,
         ScalarTypeKind.F32,
         "amdgpu.v_cvt_scalef32_pk_f32_fp8",
+        "amdgpu.v_cvt_scale_pk8_f32_fp8",
     ),
-    _Fp8ScaleF32DescriptorRefRow(
+    _Fp8ScaledDescriptorRefRow(
         ScalarTypeKind.F8E5M2,
         ScalarTypeKind.F32,
         "amdgpu.v_cvt_scalef32_pk_f32_bf8",
+        "amdgpu.v_cvt_scale_pk8_f32_bf8",
     ),
 )
 
@@ -366,21 +373,27 @@ def _fp8_native_descriptor_ref_initializer(
     )
 
 
-def _fp8_scalef32_descriptor_ref_initializer(
-    row: _Fp8ScaleF32DescriptorRefRow,
+def _fp8_scaled_descriptor_ref_initializer(
+    row: _Fp8ScaledDescriptorRefRow,
     descriptor_ref_key_set: set[str] | None = None,
 ) -> str:
-    descriptor_ref = required_descriptor_ref_constant_name(
-        "AMDGPU FP8 scaleF32 descriptor table",
-        row.descriptor_key,
+    scalef32_pair_descriptor_ref = required_descriptor_ref_constant_name(
+        "AMDGPU FP8 scaled conversion descriptor table",
+        row.scalef32_pair_descriptor_key,
+        descriptor_ref_key_set,
+    )
+    e8m0_pk8_descriptor_ref = required_descriptor_ref_constant_name(
+        "AMDGPU FP8 scaled conversion descriptor table",
+        row.e8m0_pk8_descriptor_key,
         descriptor_ref_key_set,
     )
     return "\n".join(
         [
-            "LOOM_AMDGPU_FP8_SCALEF32_DESCRIPTOR_REF_ROW(",
+            "LOOM_AMDGPU_FP8_SCALED_DESCRIPTOR_REF_ROW(",
             f"    {_scalar_type_constant_name(row.source_type)},",
             f"    {_scalar_type_constant_name(row.result_type)},",
-            f"    {descriptor_ref}),",
+            f"    {scalef32_pair_descriptor_ref},",
+            f"    {e8m0_pk8_descriptor_ref}),",
         ]
     )
 
@@ -560,8 +573,8 @@ def _emit_fp8_native_descriptor_ref_rows(
     )
 
 
-def _emit_fp8_scalef32_descriptor_ref_rows(
-    rows: Sequence[_Fp8ScaleF32DescriptorRefRow] = _FP8_SCALEF32_DESCRIPTOR_REF_ROWS,
+def _emit_fp8_scaled_descriptor_ref_rows(
+    rows: Sequence[_Fp8ScaledDescriptorRefRow] = _FP8_SCALED_DESCRIPTOR_REF_ROWS,
     descriptor_ref_key_set: set[str] | None = None,
 ) -> str:
     known_refs = descriptor_ref_key_set if descriptor_ref_key_set is not None else set(amdgpu_descriptor_ref_keys())
@@ -569,7 +582,7 @@ def _emit_fp8_scalef32_descriptor_ref_rows(
         "\n".join(
             [
                 *_generated_header(),
-                *(_fp8_scalef32_descriptor_ref_initializer(row, known_refs) for row in rows),
+                *(_fp8_scaled_descriptor_ref_initializer(row, known_refs) for row in rows),
             ]
         )
         + "\n"
@@ -594,9 +607,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="Generated native unscaled FP8/BF8 descriptor row fragment path.",
     )
     parser.add_argument(
-        "--fp8-scalef32-descriptor-ref-rows",
+        "--fp8-scaled-descriptor-ref-rows",
         type=Path,
-        help="Generated FP8/BF8 scaleF32 descriptor row fragment path.",
+        help="Generated FP8/BF8 scaled conversion descriptor row fragment path.",
     )
     parser.add_argument(
         "--fp8-subnormal-table-rows",
@@ -613,7 +626,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if (
         args.fp8_decode_plan_descriptor_rows is None
         and args.fp8_native_descriptor_ref_rows is None
-        and args.fp8_scalef32_descriptor_ref_rows is None
+        and args.fp8_scaled_descriptor_ref_rows is None
         and args.fp8_subnormal_table_rows is None
         and args.fp8_packed_repair_reason_rows is None
     ):
@@ -628,10 +641,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.fp8_native_descriptor_ref_rows,
             _emit_fp8_native_descriptor_ref_rows(),
         )
-    if args.fp8_scalef32_descriptor_ref_rows is not None:
+    if args.fp8_scaled_descriptor_ref_rows is not None:
         _write_output(
-            args.fp8_scalef32_descriptor_ref_rows,
-            _emit_fp8_scalef32_descriptor_ref_rows(),
+            args.fp8_scaled_descriptor_ref_rows,
+            _emit_fp8_scaled_descriptor_ref_rows(),
         )
     if args.fp8_subnormal_table_rows is not None:
         _write_output(
