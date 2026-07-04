@@ -1394,10 +1394,7 @@ static iree_status_t loom_amdgpu_append_atomic_packet_attrs(
   if (iree_any_bit_set(packet_attrs->flags,
                        LOOM_AMDGPU_ATOMIC_PACKET_ATTR_SCOPE)) {
     IREE_ASSERT(packet_attrs->scope_attr_name_id != LOOM_STRING_ID_INVALID);
-    if (*inout_attr_count >= attr_capacity) {
-      return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                              "AMDGPU low attr capacity exceeded");
-    }
+    IREE_ASSERT_LT(*inout_attr_count, attr_capacity);
     attrs[*inout_attr_count] = (loom_named_attr_t){
         .name_id = packet_attrs->scope_attr_name_id,
         .value = loom_attr_i64(packet_attrs->scope),
