@@ -1506,7 +1506,7 @@ static bool loom_amdgpu_can_emit_compare_u32_immediate(
 
 static bool loom_amdgpu_fragment_repack_uses_source_register_bit_tree(
     const loom_amdgpu_fragment_repack_plan_t* plan) {
-  return plan->source_register_count >= 8 &&
+  return plan->source_register_count >= 4 &&
          loom_amdgpu_u32_is_power_of_two(plan->source_register_count);
 }
 
