@@ -1261,6 +1261,20 @@ iree_status_t loom_amdgpu_emit_vgpr_binary(
   return iree_ok_status();
 }
 
+iree_status_t loom_amdgpu_emit_vgpr_unary(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_amdgpu_descriptor_ref_t descriptor_ref, loom_value_id_t value,
+    loom_type_t lane_type, loom_value_id_t* out_value) {
+  *out_value = LOOM_VALUE_ID_INVALID;
+  const loom_value_id_t operands[] = {value};
+  loom_op_t* low_op = NULL;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_low_op(
+      context, source_op, descriptor_ref, operands, IREE_ARRAYSIZE(operands),
+      loom_make_named_attr_slice(NULL, 0), &lane_type, 1, &low_op));
+  *out_value = loom_value_slice_get(loom_low_op_results(low_op), 0);
+  return iree_ok_status();
+}
+
 static loom_amdgpu_descriptor_ref_t
 loom_amdgpu_vgpr_binary_src0_inline_descriptor_ref(
     loom_amdgpu_descriptor_ref_t descriptor_ref) {

@@ -4350,20 +4350,6 @@ static iree_status_t loom_amdgpu_lower_vector_iota(
                                              lanes, plan->lane_count);
 }
 
-static iree_status_t loom_amdgpu_emit_vgpr_conversion_packet(
-    loom_low_lower_context_t* context, const loom_op_t* source_op,
-    loom_amdgpu_descriptor_ref_t descriptor_ref, loom_value_id_t low_source,
-    loom_type_t result_type, loom_value_id_t* out_low_result) {
-  *out_low_result = LOOM_VALUE_ID_INVALID;
-  const loom_value_id_t operands[] = {low_source};
-  loom_op_t* low_op = NULL;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_low_op(
-      context, source_op, descriptor_ref, operands, IREE_ARRAYSIZE(operands),
-      loom_named_attr_slice_empty(), &result_type, 1, &low_op));
-  *out_low_result = loom_value_slice_get(loom_low_op_results(low_op), 0);
-  return iree_ok_status();
-}
-
 static iree_status_t loom_amdgpu_emit_vgpr_sign_extend_narrow(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_value_id_t low_source, uint32_t result_bit_count,
@@ -4520,9 +4506,9 @@ static iree_status_t loom_amdgpu_convert_vector_conversion_lane(
   }
   IREE_RETURN_IF_ERROR(
       loom_amdgpu_materialize_low_vgpr_b32(context, source_op, lane, &lane));
-  return loom_amdgpu_emit_vgpr_conversion_packet(context, source_op,
-                                                 plan->convert_descriptor_ref,
-                                                 lane, lane_type, out_lane);
+  return loom_amdgpu_emit_vgpr_unary(context, source_op,
+                                     plan->convert_descriptor_ref, lane,
+                                     lane_type, out_lane);
 }
 
 static iree_status_t loom_amdgpu_lower_vector_conversion_full_result(
@@ -5930,22 +5916,6 @@ static iree_status_t loom_amdgpu_lookup_vector_scalef32_source(
       context, source_op, *out_low_scale, out_low_scale);
 }
 
-static iree_status_t loom_amdgpu_emit_f32_mul(loom_low_lower_context_t* context,
-                                              const loom_op_t* source_op,
-                                              loom_value_id_t lhs,
-                                              loom_value_id_t rhs,
-                                              loom_type_t lane_type,
-                                              loom_value_id_t* out_result) {
-  const loom_value_id_t operands[] = {lhs, rhs};
-  loom_op_t* low_op = NULL;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_low_op(
-      context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_MUL_F32, operands,
-      IREE_ARRAYSIZE(operands), loom_make_named_attr_slice(NULL, 0), &lane_type,
-      1, &low_op));
-  *out_result = loom_value_slice_get(loom_low_op_results(low_op), 0);
-  return iree_ok_status();
-}
-
 static void loom_amdgpu_vector_fp8_unscaled_plan(
     const loom_amdgpu_vector_16bit_float_conversion_plan_t* plan,
     loom_amdgpu_vector_16bit_float_conversion_plan_t* out_plan) {
@@ -6344,9 +6314,9 @@ static iree_status_t loom_amdgpu_emit_vector_fp8_scalef32_to_f32_lanes(
       context, source_op, &unscaled_plan, low_source, source_lane_type,
       result_lane_type, lanes));
   for (uint32_t lane_index = 0; lane_index < plan->lane_count; ++lane_index) {
-    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_f32_mul(
-        context, source_op, lanes[lane_index], low_scale, result_lane_type,
-        &lanes[lane_index]));
+    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_binary(
+        context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_MUL_F32,
+        lanes[lane_index], low_scale, result_lane_type, &lanes[lane_index]));
   }
   return iree_ok_status();
 }
@@ -6366,8 +6336,9 @@ static iree_status_t loom_amdgpu_lower_vector_fp8_scalef32_to_f32_software_lane(
       context, source_op, plan, extract_plan, value_flag_cache, decode_plan,
       low_source, source_lane_type, result_lane_type, sgpr_type, mask_type,
       lane_index, &unscaled_lane));
-  return loom_amdgpu_emit_f32_mul(context, source_op, unscaled_lane, low_scale,
-                                  result_lane_type, out_low_lane);
+  return loom_amdgpu_emit_vgpr_binary(
+      context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_MUL_F32, unscaled_lane,
+      low_scale, result_lane_type, out_low_lane);
 }
 
 static iree_status_t loom_amdgpu_lower_vector_fp8_scalef32_to_f32(
@@ -6468,7 +6439,7 @@ static iree_status_t loom_amdgpu_pack_f32_lane_to_f16_register(
     loom_value_id_t source_lane, uint32_t register_lane, loom_type_t lane_type,
     loom_value_id_t* inout_packed) {
   loom_value_id_t half_lane = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_conversion_packet(
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_unary(
       context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_CVT_F16_F32, source_lane,
       lane_type, &half_lane));
   IREE_RETURN_IF_ERROR(loom_amdgpu_compose_vgpr_16bit_float_lane_bits(
@@ -7118,7 +7089,7 @@ static iree_status_t loom_amdgpu_lower_vector_16bit_float_extf(
       IREE_RETURN_IF_ERROR(loom_amdgpu_extract_f16_lane_as_low_bits(
           context, source_op, low_source, plan->storage_register_count,
           (uint32_t)storage_lane, source_lane_type, &half_lane));
-      IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_conversion_packet(
+      IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_unary(
           context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_CVT_F32_F16,
           half_lane, result_lane_type, &lanes[i]));
     }
@@ -7909,7 +7880,7 @@ iree_status_t loom_amdgpu_lower_scalar_conversion(
       IREE_RETURN_IF_ERROR(loom_amdgpu_low_result_type(
           context, source_op, plan->result, &result_type));
       loom_value_id_t low_result = LOOM_VALUE_ID_INVALID;
-      IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_conversion_packet(
+      IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_unary(
           context, source_op, plan->convert_descriptor_ref,
           zero_extended_source, result_type, &low_result));
       return loom_low_lower_bind_value(context, plan->result, low_result);
@@ -7923,7 +7894,7 @@ iree_status_t loom_amdgpu_lower_scalar_conversion(
       loom_type_t lane_type = loom_type_none();
       IREE_RETURN_IF_ERROR(loom_amdgpu_make_vgpr_type(context, &lane_type));
       loom_value_id_t low_result = LOOM_VALUE_ID_INVALID;
-      IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_conversion_packet(
+      IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_unary(
           context, source_op, plan->convert_descriptor_ref, low_source,
           lane_type, &low_result));
       return loom_low_lower_bind_value(context, plan->result, low_result);
@@ -7935,7 +7906,7 @@ iree_status_t loom_amdgpu_lower_scalar_conversion(
       loom_type_t lane_type = loom_type_none();
       IREE_RETURN_IF_ERROR(loom_amdgpu_make_vgpr_type(context, &lane_type));
       loom_value_id_t converted_source = LOOM_VALUE_ID_INVALID;
-      IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_conversion_packet(
+      IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_unary(
           context, source_op, plan->convert_descriptor_ref, low_source,
           lane_type, &converted_source));
       loom_value_id_t low_result = LOOM_VALUE_ID_INVALID;
