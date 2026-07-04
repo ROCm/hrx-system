@@ -41,71 +41,29 @@ static const uint32_t kLoomAmdgpuFp8DecodeBf16BytePairSelectors[] = {
     LOOM_AMDGPU_FP8_DECODE_BF16_BYTE_PAIR_HIGH_SELECTOR,
 };
 
+#define LOOM_AMDGPU_FP8_PACKED_BF16_REPAIR_REASON_ROW(row_repair, row_reason) \
+  [row_repair] = IREE_SVL(row_reason),
+#define LOOM_AMDGPU_FP8_PACKED_F16_REPAIR_REASON_ROW(row_repair, row_reason)
+
 static const iree_string_view_t kLoomAmdgpuFp8PackedBf16RepairReasons
     [LOOM_AMDGPU_FP8_PACKED_U16_REPAIR_REASON_COUNT] = {
-        [LOOM_AMDGPU_FP8_PACKED_U16_REPAIR_NONE] =
-            IREE_SVL("fp8_packed_bf16_decode"),
-        [LOOM_AMDGPU_FP8_PACKED_U16_REPAIR_ZERO] =
-            IREE_SVL("fp8_packed_bf16_decode_repair_zero"),
-        [LOOM_AMDGPU_FP8_PACKED_U16_REPAIR_SUBNORMAL] =
-            IREE_SVL("fp8_packed_bf16_decode_repair_subnormal"),
-        [LOOM_AMDGPU_FP8_PACKED_U16_REPAIR_ZERO |
-         LOOM_AMDGPU_FP8_PACKED_U16_REPAIR_SUBNORMAL] =
-            IREE_SVL("fp8_packed_bf16_decode_repair_zero_subnormal"),
-        [LOOM_AMDGPU_FP8_PACKED_U16_REPAIR_NAN] =
-            IREE_SVL("fp8_packed_bf16_decode_repair_nan"),
-        [LOOM_AMDGPU_FP8_PACKED_U16_REPAIR_ZERO |
-         LOOM_AMDGPU_FP8_PACKED_U16_REPAIR_NAN] =
-            IREE_SVL("fp8_packed_bf16_decode_repair_zero_nan"),
-        [LOOM_AMDGPU_FP8_PACKED_U16_REPAIR_SUBNORMAL |
-         LOOM_AMDGPU_FP8_PACKED_U16_REPAIR_NAN] =
-            IREE_SVL("fp8_packed_bf16_decode_repair_subnormal_nan"),
-        [LOOM_AMDGPU_FP8_PACKED_U16_REPAIR_ZERO |
-         LOOM_AMDGPU_FP8_PACKED_U16_REPAIR_SUBNORMAL |
-         LOOM_AMDGPU_FP8_PACKED_U16_REPAIR_NAN] =
-            IREE_SVL("fp8_packed_bf16_decode_repair_zero_subnormal_nan"),
-        [LOOM_AMDGPU_FP8_PACKED_U16_REPAIR_INF] =
-            IREE_SVL("fp8_packed_bf16_decode_repair_inf"),
-        [LOOM_AMDGPU_FP8_PACKED_U16_REPAIR_ZERO |
-         LOOM_AMDGPU_FP8_PACKED_U16_REPAIR_INF] =
-            IREE_SVL("fp8_packed_bf16_decode_repair_zero_inf"),
-        [LOOM_AMDGPU_FP8_PACKED_U16_REPAIR_SUBNORMAL |
-         LOOM_AMDGPU_FP8_PACKED_U16_REPAIR_INF] =
-            IREE_SVL("fp8_packed_bf16_decode_repair_subnormal_inf"),
-        [LOOM_AMDGPU_FP8_PACKED_U16_REPAIR_ZERO |
-         LOOM_AMDGPU_FP8_PACKED_U16_REPAIR_SUBNORMAL |
-         LOOM_AMDGPU_FP8_PACKED_U16_REPAIR_INF] =
-            IREE_SVL("fp8_packed_bf16_decode_repair_zero_subnormal_inf"),
-        [LOOM_AMDGPU_FP8_PACKED_U16_REPAIR_NAN |
-         LOOM_AMDGPU_FP8_PACKED_U16_REPAIR_INF] =
-            IREE_SVL("fp8_packed_bf16_decode_repair_inf_nan"),
-        [LOOM_AMDGPU_FP8_PACKED_U16_REPAIR_ZERO |
-         LOOM_AMDGPU_FP8_PACKED_U16_REPAIR_NAN |
-         LOOM_AMDGPU_FP8_PACKED_U16_REPAIR_INF] =
-            IREE_SVL("fp8_packed_bf16_decode_repair_zero_inf_nan"),
-        [LOOM_AMDGPU_FP8_PACKED_U16_REPAIR_SUBNORMAL |
-         LOOM_AMDGPU_FP8_PACKED_U16_REPAIR_NAN |
-         LOOM_AMDGPU_FP8_PACKED_U16_REPAIR_INF] =
-            IREE_SVL("fp8_packed_bf16_decode_repair_subnormal_inf_nan"),
-        [LOOM_AMDGPU_FP8_PACKED_U16_REPAIR_ZERO |
-         LOOM_AMDGPU_FP8_PACKED_U16_REPAIR_SUBNORMAL |
-         LOOM_AMDGPU_FP8_PACKED_U16_REPAIR_NAN |
-         LOOM_AMDGPU_FP8_PACKED_U16_REPAIR_INF] =
-            IREE_SVL("fp8_packed_bf16_decode_repair_zero_subnormal_inf_nan"),
+#include "loom/target/arch/amdgpu/lower/narrow_float/fp8_packed_repair_reason_rows.inl"
 };
+
+#undef LOOM_AMDGPU_FP8_PACKED_BF16_REPAIR_REASON_ROW
+#undef LOOM_AMDGPU_FP8_PACKED_F16_REPAIR_REASON_ROW
+
+#define LOOM_AMDGPU_FP8_PACKED_BF16_REPAIR_REASON_ROW(row_repair, row_reason)
+#define LOOM_AMDGPU_FP8_PACKED_F16_REPAIR_REASON_ROW(row_repair, row_reason) \
+  [row_repair] = IREE_SVL(row_reason),
 
 static const iree_string_view_t kLoomAmdgpuFp8PackedF16RepairReasons
     [LOOM_AMDGPU_FP8_PACKED_F16_REPAIR_REASON_COUNT] = {
-        [LOOM_AMDGPU_FP8_PACKED_U16_REPAIR_NONE] =
-            IREE_SVL("fp8_packed_f16_decode"),
-        [LOOM_AMDGPU_FP8_PACKED_U16_REPAIR_ZERO] =
-            IREE_SVL("fp8_packed_f16_decode_repair_zero"),
-        [LOOM_AMDGPU_FP8_PACKED_U16_REPAIR_SUBNORMAL] =
-            IREE_SVL("fp8_packed_f16_decode_repair_subnormal"),
-        [LOOM_AMDGPU_FP8_PACKED_U16_REPAIR_ZERO |
-         LOOM_AMDGPU_FP8_PACKED_U16_REPAIR_SUBNORMAL] =
-            IREE_SVL("fp8_packed_f16_decode_repair_zero_subnormal"),
+#include "loom/target/arch/amdgpu/lower/narrow_float/fp8_packed_repair_reason_rows.inl"
 };
+
+#undef LOOM_AMDGPU_FP8_PACKED_BF16_REPAIR_REASON_ROW
+#undef LOOM_AMDGPU_FP8_PACKED_F16_REPAIR_REASON_ROW
 
 static uint32_t loom_amdgpu_fp8_decode_packed_u16(uint32_t value) {
   return value | (value << 16);
