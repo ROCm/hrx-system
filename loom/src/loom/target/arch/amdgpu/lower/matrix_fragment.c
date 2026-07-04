@@ -59,20 +59,20 @@ static const uint16_t kLoomAmdgpuFragmentMemoryPacketCandidates[] = {4, 3, 2,
 static const uint16_t kLoomAmdgpuFragmentMemoryNarrowedStoreCandidates[] = {
     8, 6, 4, 2, 1};
 
-static_assert(LOOM_AMDGPU_FP8_PACKED_BF16_REPAIR_ZERO ==
+static_assert(LOOM_AMDGPU_FP8_PACKED_U16_REPAIR_ZERO ==
                   (LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_REPAIR_ZERO >>
                    LOOM_AMDGPU_FRAGMENT_FP8_REPAIR_PACKET_FLAG_SHIFT),
               "FP8 zero repair packet flags mirror repair bits");
 static_assert(
-    LOOM_AMDGPU_FP8_PACKED_BF16_REPAIR_SUBNORMAL ==
+    LOOM_AMDGPU_FP8_PACKED_U16_REPAIR_SUBNORMAL ==
         (LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_REPAIR_SUBNORMAL >>
          LOOM_AMDGPU_FRAGMENT_FP8_REPAIR_PACKET_FLAG_SHIFT),
     "FP8 subnormal repair packet flags mirror repair bits");
-static_assert(LOOM_AMDGPU_FP8_PACKED_BF16_REPAIR_NAN ==
+static_assert(LOOM_AMDGPU_FP8_PACKED_U16_REPAIR_NAN ==
                   (LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_REPAIR_NAN >>
                    LOOM_AMDGPU_FRAGMENT_FP8_REPAIR_PACKET_FLAG_SHIFT),
               "FP8 NaN repair packet flags mirror repair bits");
-static_assert(LOOM_AMDGPU_FP8_PACKED_BF16_REPAIR_INF ==
+static_assert(LOOM_AMDGPU_FP8_PACKED_U16_REPAIR_INF ==
                   (LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_REPAIR_INF >>
                    LOOM_AMDGPU_FRAGMENT_FP8_REPAIR_PACKET_FLAG_SHIFT),
               "FP8 infinity repair packet flags mirror repair bits");
@@ -616,7 +616,7 @@ static bool loom_amdgpu_fragment_memory_descriptor_set_has_fp8_to_16bit_native(
 
 static loom_amdgpu_fragment_memory_packet_flags_t
 loom_amdgpu_fragment_memory_fp8_repair_packet_flags(
-    loom_amdgpu_fp8_packed_bf16_repairs_t repairs) {
+    loom_amdgpu_fp8_packed_u16_repairs_t repairs) {
   return ((loom_amdgpu_fragment_memory_packet_flags_t)repairs
           << LOOM_AMDGPU_FRAGMENT_FP8_REPAIR_PACKET_FLAG_SHIFT) &
          LOOM_AMDGPU_FRAGMENT_FP8_REPAIR_PACKET_FLAGS;
@@ -638,13 +638,13 @@ static bool loom_amdgpu_fragment_memory_prefers_fp8_packed_bf16(
     return false;
   }
 
-  const loom_amdgpu_fp8_packed_bf16_repairs_t repairs =
+  const loom_amdgpu_fp8_packed_u16_repairs_t repairs =
       loom_amdgpu_fp8_pair_to_packed_bf16_repairs(decode_plan,
                                                   decode_value_flags);
-  const loom_amdgpu_fp8_packed_bf16_repairs_t special_value_repairs =
-      LOOM_AMDGPU_FP8_PACKED_BF16_REPAIR_SUBNORMAL |
-      LOOM_AMDGPU_FP8_PACKED_BF16_REPAIR_NAN |
-      LOOM_AMDGPU_FP8_PACKED_BF16_REPAIR_INF;
+  const loom_amdgpu_fp8_packed_u16_repairs_t special_value_repairs =
+      LOOM_AMDGPU_FP8_PACKED_U16_REPAIR_SUBNORMAL |
+      LOOM_AMDGPU_FP8_PACKED_U16_REPAIR_NAN |
+      LOOM_AMDGPU_FP8_PACKED_U16_REPAIR_INF;
   return !iree_any_bit_set(repairs, special_value_repairs);
 }
 
@@ -660,7 +660,7 @@ loom_amdgpu_fragment_memory_fp8_decode_packet_flags(
       loom_amdgpu_fragment_memory_prefers_fp8_packed_bf16(decode_plan,
                                                           decode_value_flags);
   if (prefer_packed_bf16) {
-    const loom_amdgpu_fp8_packed_bf16_repairs_t repairs =
+    const loom_amdgpu_fp8_packed_u16_repairs_t repairs =
         loom_amdgpu_fp8_pair_to_packed_bf16_repairs(decode_plan,
                                                     decode_value_flags);
     return LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_PACKED_BF16_DECODE |
@@ -684,7 +684,7 @@ loom_amdgpu_fragment_memory_fp8_decode_packet_flags(
   }
   if (missing_requirements ==
       LOOM_AMDGPU_FP8_PACKED_BF16_MISSING_REQUIREMENT_NONE) {
-    const loom_amdgpu_fp8_packed_bf16_repairs_t repairs =
+    const loom_amdgpu_fp8_packed_u16_repairs_t repairs =
         loom_amdgpu_fp8_pair_to_packed_bf16_repairs(decode_plan,
                                                     decode_value_flags);
     return LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_PACKED_BF16_DECODE |
@@ -729,7 +729,7 @@ loom_amdgpu_fragment_memory_fp8_to_f16_decode_packet_flags(
   }
   if (loom_amdgpu_can_emit_fp8_pair_to_packed_f16_finite(decode_plan,
                                                          decode_value_flags)) {
-    const loom_amdgpu_fp8_packed_bf16_repairs_t repairs =
+    const loom_amdgpu_fp8_packed_u16_repairs_t repairs =
         loom_amdgpu_fp8_pair_to_packed_f16_repairs(decode_plan,
                                                    decode_value_flags);
     return LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_PACKED_F16_DECODE |
@@ -4110,20 +4110,20 @@ static uint32_t loom_amdgpu_fragment_memory_packet_dynamic_stride_bytes(
   return lane_mod_stride != 0 ? lane_mod_stride : lane_div_stride;
 }
 
-static loom_amdgpu_fp8_packed_bf16_repairs_t
+static loom_amdgpu_fp8_packed_u16_repairs_t
 loom_amdgpu_fragment_memory_packet_fp8_repairs(
     loom_amdgpu_fragment_memory_packet_flags_t packet_flags) {
   const loom_amdgpu_fragment_memory_packet_flags_t repair_packet_flags =
       packet_flags & LOOM_AMDGPU_FRAGMENT_FP8_REPAIR_PACKET_FLAGS;
   const uint32_t repairs =
       repair_packet_flags >> LOOM_AMDGPU_FRAGMENT_FP8_REPAIR_PACKET_FLAG_SHIFT;
-  return (loom_amdgpu_fp8_packed_bf16_repairs_t)repairs;
+  return (loom_amdgpu_fp8_packed_u16_repairs_t)repairs;
 }
 
 static iree_string_view_t
 loom_amdgpu_fragment_memory_fp8_packed_decode_strategy_key(
     loom_amdgpu_fragment_memory_packet_flags_t packet_flags) {
-  const loom_amdgpu_fp8_packed_bf16_repairs_t repairs =
+  const loom_amdgpu_fp8_packed_u16_repairs_t repairs =
       loom_amdgpu_fragment_memory_packet_fp8_repairs(packet_flags);
   return loom_amdgpu_fp8_packed_bf16_repair_reason_key(repairs);
 }
@@ -4131,7 +4131,7 @@ loom_amdgpu_fragment_memory_fp8_packed_decode_strategy_key(
 static iree_string_view_t
 loom_amdgpu_fragment_memory_fp8_packed_f16_decode_strategy_key(
     loom_amdgpu_fragment_memory_packet_flags_t packet_flags) {
-  const loom_amdgpu_fp8_packed_bf16_repairs_t repairs =
+  const loom_amdgpu_fp8_packed_u16_repairs_t repairs =
       loom_amdgpu_fragment_memory_packet_fp8_repairs(packet_flags);
   return loom_amdgpu_fp8_packed_f16_repair_reason_key(repairs);
 }
