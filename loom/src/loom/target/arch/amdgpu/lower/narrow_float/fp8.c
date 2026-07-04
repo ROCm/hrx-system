@@ -516,28 +516,6 @@ static iree_status_t loom_amdgpu_emit_fp8_normal_payload(
       *out_payload, exponent_bias, vgpr_type, out_payload);
 }
 
-static iree_status_t loom_amdgpu_emit_fp8_normal_bf16_payload(
-    loom_low_lower_context_t* context, const loom_op_t* source_op,
-    const loom_amdgpu_fp8_decode_plan_t* plan,
-    loom_value_id_t low_source_no_sign, loom_type_t vgpr_type,
-    loom_value_id_t* out_payload) {
-  return loom_amdgpu_emit_fp8_normal_payload(
-      context, source_op, plan, low_source_no_sign,
-      7u - plan->format.mantissa_bits, (127u - plan->format.exponent_bias) << 7,
-      vgpr_type, out_payload);
-}
-
-static iree_status_t loom_amdgpu_emit_fp8_normal_f32_payload(
-    loom_low_lower_context_t* context, const loom_op_t* source_op,
-    const loom_amdgpu_fp8_decode_plan_t* plan,
-    loom_value_id_t low_source_no_sign, loom_type_t vgpr_type,
-    loom_value_id_t* out_payload) {
-  return loom_amdgpu_emit_fp8_normal_payload(
-      context, source_op, plan, low_source_no_sign,
-      23u - plan->format.mantissa_bits,
-      (127u - plan->format.exponent_bias) << 23, vgpr_type, out_payload);
-}
-
 static iree_status_t loom_amdgpu_emit_fp8_decode_perm_b32(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_low_lower_resolved_descriptor_t* descriptor,
@@ -2787,6 +2765,10 @@ static iree_status_t loom_amdgpu_emit_fp8_normal_or_zero_lane_payload(
 }
 
 typedef struct loom_amdgpu_fp8_lane_result_format_t {
+  // Bit shift that moves the FP8 mantissa into the destination payload.
+  uint32_t payload_shift;
+  // Bit shift that moves the exponent-bias delta into the destination payload.
+  uint32_t exponent_bias_shift;
   // Bit shift that moves the FP8 sign bit into the destination sign position.
   uint32_t sign_shift;
   // BFI mask that selects the destination sign bit.
@@ -2799,6 +2781,8 @@ typedef struct loom_amdgpu_fp8_lane_result_format_t {
 
 static const loom_amdgpu_fp8_lane_result_format_t
     kLoomAmdgpuFp8LaneBf16ResultFormat = {
+        .payload_shift = 7,
+        .exponent_bias_shift = 7,
         .sign_shift = 8,
         .sign_insert_mask = LOOM_AMDGPU_FP8_DECODE_BF16_SIGN_INSERT_MASK,
         .quiet_nan_bits = 0x7FC0,
@@ -2807,6 +2791,8 @@ static const loom_amdgpu_fp8_lane_result_format_t
 
 static const loom_amdgpu_fp8_lane_result_format_t
     kLoomAmdgpuFp8LaneF32ResultFormat = {
+        .payload_shift = 23,
+        .exponent_bias_shift = 23,
         .sign_shift = 24,
         .sign_insert_mask = LOOM_AMDGPU_FP8_DECODE_F32_SIGN_INSERT_MASK,
         .quiet_nan_bits = 0x7FC00000,
@@ -2851,6 +2837,19 @@ static iree_status_t loom_amdgpu_emit_fp8_lane_bits(
   return loom_amdgpu_emit_vgpr_binary_immediate(
       context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_AND_B32_LIT, low_byte,
       UINT32_C(0x7F), vgpr_type, &out_bits->low_source_no_sign);
+}
+
+static iree_status_t loom_amdgpu_emit_fp8_lane_normal_payload(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_amdgpu_fp8_decode_plan_t* plan,
+    const loom_amdgpu_fp8_lane_result_format_t* result_format,
+    loom_value_id_t low_source_no_sign, loom_type_t vgpr_type,
+    loom_value_id_t* out_payload) {
+  return loom_amdgpu_emit_fp8_normal_payload(
+      context, source_op, plan, low_source_no_sign,
+      result_format->payload_shift - plan->format.mantissa_bits,
+      (127u - plan->format.exponent_bias) << result_format->exponent_bias_shift,
+      vgpr_type, out_payload);
 }
 
 static iree_status_t loom_amdgpu_emit_fp8_signed_lane_payload(
@@ -2901,9 +2900,9 @@ iree_status_t loom_amdgpu_emit_fp8_to_bf16_lane(
       &kLoomAmdgpuFp8LaneBf16ResultFormat, vgpr_type, &lane_bits));
 
   loom_value_id_t low_normal_payload = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fp8_normal_bf16_payload(
-      context, source_op, plan, lane_bits.low_source_no_sign, vgpr_type,
-      &low_normal_payload));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fp8_lane_normal_payload(
+      context, source_op, plan, &kLoomAmdgpuFp8LaneBf16ResultFormat,
+      lane_bits.low_source_no_sign, vgpr_type, &low_normal_payload));
 
   loom_value_id_t low_finite_payload = LOOM_VALUE_ID_INVALID;
   if (value_not_subnormal && value_non_zero) {
@@ -2961,9 +2960,9 @@ iree_status_t loom_amdgpu_try_emit_fp8_not_subnormal_to_f32_lane(
       &kLoomAmdgpuFp8LaneF32ResultFormat, vgpr_type, &lane_bits));
 
   loom_value_id_t low_normal_payload = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fp8_normal_f32_payload(
-      context, source_op, plan, lane_bits.low_source_no_sign, vgpr_type,
-      &low_normal_payload));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fp8_lane_normal_payload(
+      context, source_op, plan, &kLoomAmdgpuFp8LaneF32ResultFormat,
+      lane_bits.low_source_no_sign, vgpr_type, &low_normal_payload));
 
   loom_value_id_t low_finite_payload = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fp8_normal_or_zero_lane_payload(
