@@ -96,13 +96,13 @@ ERR_AMDGPU_006 = ErrorDef(
     summary="AMDGPU HAL-kernel ABI resource count overflows.",
     message=(
         "AMDGPU HAL-kernel ABI has {resource_count} HAL binding resources, "
-        "but at most {max_resource_count} fit in the kernarg segment"
+        "but at most {max_resource_count} fit in the ABI layout snapshot"
     ),
     params=(
         ErrorParam("resource_count", ParamKind.U64),
         ErrorParam("max_resource_count", ParamKind.U64),
     ),
-    fix_hint="Split the kernel ABI or reduce the number of HAL binding resources",
+    fix_hint=("Split the kernel ABI or reduce the number of HAL binding resources"),
 )
 
 # ERR_AMDGPU_007: AMDGPU HAL-kernel ABI resource import kind is unsupported.
