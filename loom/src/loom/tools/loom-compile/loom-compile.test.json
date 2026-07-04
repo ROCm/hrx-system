@@ -24,6 +24,7 @@
             "target_capability_rows.rows[]",
             "matrix_fp8_native_kind",
             ".schedule_band_summary_rows.rows[]",
+            "dynamic_instruction_mix",
             "Matrix-family schedule evidence",
             "rounding=finite_only",
             "fp8_packed_bf16_decode_repair_zero_subnormal",

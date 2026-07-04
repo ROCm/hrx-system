@@ -13,6 +13,22 @@
 namespace loom {
 namespace {
 
+template <typename T>
+static const T* CompileReportRowAt(
+    const loom_target_compile_report_row_list_t& row_list,
+    iree_host_size_t index) {
+  for (const loom_target_compile_report_vec_t* vec = row_list.head; vec != NULL;
+       vec = vec->next) {
+    if (index < vec->count) {
+      const T* rows =
+          static_cast<const T*>(loom_target_compile_report_vec_const_rows(vec));
+      return &rows[index];
+    }
+    index -= vec->count;
+  }
+  return NULL;
+}
+
 TEST(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
   constexpr uint32_t kSourceAssignmentIndex = 0;
   constexpr uint32_t kResultAssignmentIndex = 1;
@@ -869,10 +885,14 @@ TEST(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
   EXPECT_EQ(pressure_origin_rows[2].live_values, 1u);
   EXPECT_EQ(report.schedule_band_rows.count, 8u);
   ASSERT_NE(report.schedule_band_rows.head, nullptr);
-  const auto* schedule_band_rows =
-      static_cast<const loom_target_compile_report_schedule_band_row_t*>(
-          loom_target_compile_report_vec_const_rows(
-              report.schedule_band_rows.head));
+  loom_target_compile_report_schedule_band_row_t schedule_band_rows[8] = {};
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(schedule_band_rows); ++i) {
+    const auto* row =
+        CompileReportRowAt<loom_target_compile_report_schedule_band_row_t>(
+            report.schedule_band_rows, i);
+    ASSERT_NE(row, nullptr);
+    schedule_band_rows[i] = *row;
+  }
   EXPECT_EQ(schedule_band_rows[0].origin_kind,
             LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_REGISTER_MOVE);
   EXPECT_EQ(schedule_band_rows[0].block_index, 0u);
@@ -945,10 +965,16 @@ TEST(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
   EXPECT_EQ(schedule_band_rows[7].static_instruction_mix.smfmac_count, 1u);
   EXPECT_EQ(report.schedule_band_summary_rows.count, 7u);
   ASSERT_NE(report.schedule_band_summary_rows.head, nullptr);
-  const auto* schedule_band_summary_rows = static_cast<
-      const loom_target_compile_report_schedule_band_summary_row_t*>(
-      loom_target_compile_report_vec_const_rows(
-          report.schedule_band_summary_rows.head));
+  loom_target_compile_report_schedule_band_summary_row_t
+      schedule_band_summary_rows[7] = {};
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(schedule_band_summary_rows);
+       ++i) {
+    const auto* row = CompileReportRowAt<
+        loom_target_compile_report_schedule_band_summary_row_t>(
+        report.schedule_band_summary_rows, i);
+    ASSERT_NE(row, nullptr);
+    schedule_band_summary_rows[i] = *row;
+  }
   EXPECT_EQ(schedule_band_summary_rows[0].origin_kind,
             LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_REGISTER_MOVE);
   EXPECT_EQ(schedule_band_summary_rows[0].block_index, 0u);
