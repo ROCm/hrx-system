@@ -11,6 +11,7 @@ import pytest
 from loom.gen.target.arch.amdgpu.lower import amdgpu_narrow_float_tables
 from loom.gen.target.arch.amdgpu.lower.amdgpu_narrow_float_tables import (
     _Fp8DecodePlanDescriptorRow,
+    _Fp8FormatRow,
     _Fp8NativeDescriptorRefRow,
     _Fp8ScaledDescriptorRefRow,
 )
@@ -124,6 +125,75 @@ def test_fp8_decode_plan_descriptor_rows_reject_missing_descriptor_ref() -> None
                 ),
             ),
             descriptor_ref_key_set=set(),
+        )
+
+
+def test_fp8_decode_plan_descriptor_rows_reject_duplicate_plan_field() -> None:
+    with pytest.raises(
+        ValueError,
+        match=(
+            r"AMDGPU FP8 decode plan descriptor table contains duplicate "
+            r"plan fields: bfe_u32_descriptor"
+        ),
+    ):
+        amdgpu_narrow_float_tables._emit_fp8_decode_plan_descriptor_rows(
+            rows=(
+                _Fp8DecodePlanDescriptorRow(
+                    "amdgpu.v_bfe_u32.offset_width_inline",
+                    "bfe_u32_descriptor",
+                    "LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_BFE_U32",
+                ),
+                _Fp8DecodePlanDescriptorRow(
+                    "amdgpu.v_perm_b32",
+                    "bfe_u32_descriptor",
+                    "LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_PERM_B32",
+                ),
+            ),
+        )
+
+
+def test_fp8_decode_plan_descriptor_rows_reject_duplicate_capability_flag() -> None:
+    with pytest.raises(
+        ValueError,
+        match=(
+            r"AMDGPU FP8 decode plan descriptor table contains duplicate "
+            r"capability flags: LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_BFE_U32"
+        ),
+    ):
+        amdgpu_narrow_float_tables._emit_fp8_decode_plan_descriptor_rows(
+            rows=(
+                _Fp8DecodePlanDescriptorRow(
+                    "amdgpu.v_bfe_u32.offset_width_inline",
+                    "bfe_u32_descriptor",
+                    "LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_BFE_U32",
+                ),
+                _Fp8DecodePlanDescriptorRow(
+                    "amdgpu.v_perm_b32",
+                    "perm_b32_descriptor",
+                    "LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_BFE_U32",
+                ),
+            ),
+        )
+
+
+def test_fp8_subnormal_table_rows_reject_missing_dense_format_row() -> None:
+    with pytest.raises(
+        ValueError,
+        match=(
+            r"AMDGPU FP8 subnormal table must cover dense FP8/BF8 rows in "
+            r"order: expected F8E4M3, F8E5M2; got F8E4M3"
+        ),
+    ):
+        amdgpu_narrow_float_tables._emit_fp8_subnormal_table_rows(
+            rows=(
+                _Fp8FormatRow(
+                    ScalarTypeKind.F8E4M3,
+                    exponent_bits=4,
+                    mantissa_bits=3,
+                    exponent_bias=7,
+                    special_policy="LOOM_SCALAR_TYPE_FP8_SPECIAL_POLICY_FINITE_NAN",
+                ),
+            ),
         )
 
 
