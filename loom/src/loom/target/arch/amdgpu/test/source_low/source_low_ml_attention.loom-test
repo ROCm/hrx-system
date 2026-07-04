@@ -287,6 +287,67 @@ low.kernel.def target(@target) workgroup_size(32, 1, 1) @attention_probability_v
 // ====
 
 amdgpu.target<gfx1100> @target
+kernel.def target(@target) @attention_loop_carried_accumulator_barrier() {
+  %one = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+} launch(%lhs_values: vector<16xbf16>, %rhs_values0: vector<16xbf16>, %rhs_values1: vector<16xbf16>, %init_accumulator: vector<8xf32>, %output_buffer: buffer) {
+  %base = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 16 : index
+  %output_global = buffer.assume.memory_space<global> %output_buffer : buffer
+  %output_aligned = buffer.assume.alignment %output_global {minimum_alignment = 16} : buffer
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<16x16xf32, #dense>
+  %lhs = vector.fragment<lhs> %lhs_values shape [%m, %k] : vector<16xbf16>
+  %rhs0 = vector.fragment<rhs> %rhs_values0 shape [%k, %n] : vector<16xbf16>
+  %rhs1 = vector.fragment<rhs> %rhs_values1 shape [%k, %n] : vector<16xbf16>
+  %carried = scf.for %tile = [%zero to %one step %one](%accumulator = %init_accumulator : vector<8xf32>) -> (vector<8xf32>) {
+    %init = vector.fragment<init> %accumulator shape [%m, %n] : vector<8xf32>
+    %next = vector.mma %lhs, %rhs0, %init : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+    scf.yield %next : vector<8xf32>
+  }
+  %carried_init = vector.fragment<init> %carried shape [%m, %n] : vector<8xf32>
+  %output = vector.mma %lhs, %rhs1, %carried_init : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  vector.fragment.store<result> %output, %output_view[%zero, %zero] shape [%m, %n] : vector<8xf32>, view<16x16xf32, #dense>
+  kernel.return
+}
+
+// ----
+low.kernel.def target(@target) workgroup_size(32, 1, 1) @attention_loop_carried_accumulator_barrier(%lhs: reg<amdgpu.vgpr x8>, %rhs0: reg<amdgpu.vgpr x8>, %rhs1: reg<amdgpu.vgpr x8>, %init: reg<amdgpu.vgpr x8>) asm<amdgpu.rdna3.core> {
+  %30 = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
+  %32 = copy %init : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x8>
+  %carried_init = v_wmma_f32_16x16x16_bf16 %lhs, %rhs0, %32
+  s_barrier
+  %34 = copy %carried_init : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x8>
+  %output = v_wmma_f32_16x16x16_bf16 %lhs, %rhs1, %34
+  %38 = v_lshlrev_b32_src0_inline %30, 2
+  %39 = slice %output[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  global_store_b32_saddr %38, %39, %output_view
+  %40 = slice %output[1] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  global_store_b32_saddr %38, %40, %output_view {offset = 128}
+  %41 = slice %output[2] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  global_store_b32_saddr %38, %41, %output_view {offset = 256}
+  %42 = slice %output[3] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  global_store_b32_saddr %38, %42, %output_view {offset = 384}
+  %43 = slice %output[4] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  global_store_b32_saddr %38, %43, %output_view {offset = 512}
+  %44 = slice %output[5] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  global_store_b32_saddr %38, %44, %output_view {offset = 640}
+  %45 = slice %output[6] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  global_store_b32_saddr %38, %45, %output_view {offset = 768}
+  %46 = slice %output[7] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  global_store_b32_saddr %38, %46, %output_view {offset = 896}
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
 func.def target(@target) @tail_masked_score_block(%scores: vector<4xf32>, %valid_count: i32) -> (f32, f32) {
   %start = scalar.constant 0 : i32
   %step = scalar.constant 1 : i32

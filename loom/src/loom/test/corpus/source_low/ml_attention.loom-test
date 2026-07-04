@@ -46,6 +46,39 @@ kernel.def @attention_probability_value_mma_repack() {
 
 // ====
 
+// Online attention can keep a matrix accumulator payload live across the
+// probability-scratch barrier instead of materializing it through LDS.
+kernel.def @attention_loop_carried_accumulator_barrier() {
+  %one = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+} launch(%lhs_values: vector<16xbf16>, %rhs_values0: vector<16xbf16>, %rhs_values1: vector<16xbf16>, %init_accumulator: vector<8xf32>, %output_buffer: buffer) {
+  %base = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 16 : index
+  %output_global = buffer.assume.memory_space<global> %output_buffer : buffer
+  %output_aligned = buffer.assume.alignment %output_global {minimum_alignment = 16} : buffer
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<16x16xf32, #dense>
+  %lhs = vector.fragment<lhs> %lhs_values shape [%m, %k] : vector<16xbf16>
+  %rhs0 = vector.fragment<rhs> %rhs_values0 shape [%k, %n] : vector<16xbf16>
+  %rhs1 = vector.fragment<rhs> %rhs_values1 shape [%k, %n] : vector<16xbf16>
+  %carried = scf.for %tile = [%zero to %one step %one](%accumulator = %init_accumulator : vector<8xf32>) -> (vector<8xf32>) {
+    %init = vector.fragment<init> %accumulator shape [%m, %n] : vector<8xf32>
+    %next = vector.mma %lhs, %rhs0, %init : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+    scf.yield %next : vector<8xf32>
+  }
+  %carried_init = vector.fragment<init> %carried shape [%m, %n] : vector<8xf32>
+  %output = vector.mma %lhs, %rhs1, %carried_init : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  vector.fragment.store<result> %output, %output_view[%zero, %zero] shape [%m, %n] : vector<8xf32>, view<16x16xf32, #dense>
+  kernel.return
+}
+
+// ====
+
 // Tail handling for a score block should mask invalid lanes before reductions.
 func.def @tail_masked_score_block(%scores: vector<4xf32>, %valid_count: i32) -> (f32, f32) {
   %start = scalar.constant 0 : i32
