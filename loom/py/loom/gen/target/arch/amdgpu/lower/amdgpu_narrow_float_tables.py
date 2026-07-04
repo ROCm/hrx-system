@@ -327,6 +327,21 @@ def _scalar_type_constant_name(scalar_type: ScalarTypeKind) -> str:
     return f"LOOM_SCALAR_TYPE_{scalar_type.name}"
 
 
+def _validate_unique_source_result_rows(
+    table_name: str,
+    rows: Sequence[_Fp8NativeDescriptorRefRow | _Fp8ScaledDescriptorRefRow],
+) -> None:
+    seen: set[tuple[ScalarTypeKind, ScalarTypeKind]] = set()
+    duplicates: list[str] = []
+    for row in rows:
+        key = (row.source_type, row.result_type)
+        if key in seen:
+            duplicates.append(f"{row.source_type.name}->{row.result_type.name}")
+        seen.add(key)
+    if duplicates:
+        raise ValueError(f"{table_name} contains duplicate source/result rows: " + ", ".join(sorted(duplicates)))
+
+
 def _fp8_decode_plan_descriptor_initializer(
     row: _Fp8DecodePlanDescriptorRow,
     descriptor_ref_key_set: set[str] | None = None,
@@ -346,6 +361,7 @@ def _fp8_decode_plan_descriptor_initializer(
 
 
 def _fp8_native_descriptor_ref_initializer(
+    row_index: int,
     row: _Fp8NativeDescriptorRefRow,
     descriptor_ref_key_set: set[str] | None = None,
 ) -> str:
@@ -366,6 +382,7 @@ def _fp8_native_descriptor_ref_initializer(
     return "\n".join(
         [
             "LOOM_AMDGPU_FP8_NATIVE_DESCRIPTOR_REF_ROW(",
+            f"    {row_index},",
             f"    {_scalar_type_constant_name(row.source_type)},",
             f"    {_scalar_type_constant_name(row.result_type)},",
             f"    {lane_descriptor_ref}, {pair_descriptor_ref}),",
@@ -374,6 +391,7 @@ def _fp8_native_descriptor_ref_initializer(
 
 
 def _fp8_scaled_descriptor_ref_initializer(
+    row_index: int,
     row: _Fp8ScaledDescriptorRefRow,
     descriptor_ref_key_set: set[str] | None = None,
 ) -> str:
@@ -390,6 +408,7 @@ def _fp8_scaled_descriptor_ref_initializer(
     return "\n".join(
         [
             "LOOM_AMDGPU_FP8_SCALED_DESCRIPTOR_REF_ROW(",
+            f"    {row_index},",
             f"    {_scalar_type_constant_name(row.source_type)},",
             f"    {_scalar_type_constant_name(row.result_type)},",
             f"    {scalef32_pair_descriptor_ref},",
@@ -562,11 +581,12 @@ def _emit_fp8_native_descriptor_ref_rows(
     descriptor_ref_key_set: set[str] | None = None,
 ) -> str:
     known_refs = descriptor_ref_key_set if descriptor_ref_key_set is not None else set(amdgpu_descriptor_ref_keys())
+    _validate_unique_source_result_rows("AMDGPU FP8 native conversion descriptor table", rows)
     return (
         "\n".join(
             [
                 *_generated_header(),
-                *(_fp8_native_descriptor_ref_initializer(row, known_refs) for row in rows),
+                *(_fp8_native_descriptor_ref_initializer(i, row, known_refs) for i, row in enumerate(rows)),
             ]
         )
         + "\n"
@@ -578,11 +598,12 @@ def _emit_fp8_scaled_descriptor_ref_rows(
     descriptor_ref_key_set: set[str] | None = None,
 ) -> str:
     known_refs = descriptor_ref_key_set if descriptor_ref_key_set is not None else set(amdgpu_descriptor_ref_keys())
+    _validate_unique_source_result_rows("AMDGPU FP8 scaled conversion descriptor table", rows)
     return (
         "\n".join(
             [
                 *_generated_header(),
-                *(_fp8_scaled_descriptor_ref_initializer(row, known_refs) for row in rows),
+                *(_fp8_scaled_descriptor_ref_initializer(i, row, known_refs) for i, row in enumerate(rows)),
             ]
         )
         + "\n"
