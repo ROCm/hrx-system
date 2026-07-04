@@ -285,11 +285,8 @@ iree_status_t loom_amdgpu_map_abi_layout(
   if (loom_func_like_export_symbol(source_function) == LOOM_STRING_ID_INVALID) {
     return iree_ok_status();
   }
-  if (result_count != 0) {
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
-        "AMDGPU HAL ABI layout mapping reached a kernel with results");
-  }
+  IREE_ASSERT_EQ(result_count, 0,
+                 "AMDGPU HAL ABI layout mapping reached a kernel with results");
 
   uint16_t parameter_count = 0;
   const loom_low_lower_abi_argument_t* argument_map =
