@@ -210,13 +210,14 @@ typedef struct loom_amdgpu_fp8_decode_plan_cache_t {
   // Function-local decode plans keyed by loom_scalar_type_t.
   loom_amdgpu_fp8_decode_plan_t plans[LOOM_SCALAR_TYPE_COUNT_];
 } loom_amdgpu_fp8_decode_plan_cache_t;
+static_assert(LOOM_SCALAR_TYPE_COUNT_ <= 32,
+              "FP8 decode plan cache stores scalar types in one u32 bitset");
 
 static int loom_amdgpu_fp8_decode_plan_cache_state_key;
 
 iree_status_t loom_amdgpu_get_fp8_decode_plan(
     loom_low_lower_context_t* context, loom_scalar_type_t element_type,
     const loom_amdgpu_fp8_decode_plan_t** out_plan) {
-  IREE_ASSERT_LE(LOOM_SCALAR_TYPE_COUNT_, 32);
   IREE_ASSERT_LT(element_type, LOOM_SCALAR_TYPE_COUNT_);
   *out_plan = NULL;
   loom_amdgpu_fp8_decode_plan_cache_t* cache = NULL;
