@@ -954,6 +954,52 @@ ERR_AMDGPU_041 = ErrorDef(
     ),
 )
 
+# ERR_AMDGPU_042: AMDGPU sanitizer site table is too large.
+ERR_AMDGPU_042 = ErrorDef(
+    domain=ErrorDomain.AMDGPU,
+    code=42,
+    severity=Severity.ERROR,
+    summary="AMDGPU sanitizer site table is too large.",
+    message=(
+        "AMDGPU target '{target_key}' export '{export_name}' config "
+        "'{config_key}' rejected sanitizer metadata for '{op_name}' in "
+        "'@{function_name}': current table has {current_site_count} site row(s) "
+        "and this function contributes {function_site_count}, but the maximum "
+        "encodable site id is {max_site_id}"
+    ),
+    params=(
+        *_TARGET_CONTEXT_PARAMS,
+        ErrorParam("current_site_count", ParamKind.U64),
+        ErrorParam("function_site_count", ParamKind.U64),
+        ErrorParam("max_site_id", ParamKind.U64),
+    ),
+    fix_hint=(
+        "Split the sanitizer-instrumented module or reduce the number of "
+        "sanitizer assertion sites before AMDGPU lowering"
+    ),
+)
+
+# ERR_AMDGPU_043: AMDGPU sanitizer site table symbol is reserved.
+ERR_AMDGPU_043 = ErrorDef(
+    domain=ErrorDomain.AMDGPU,
+    code=43,
+    severity=Severity.ERROR,
+    summary="AMDGPU sanitizer site table symbol is reserved.",
+    message=(
+        "AMDGPU target '{target_key}' export '{export_name}' config "
+        "'{config_key}' rejected sanitizer metadata for '{op_name}' in "
+        "'@{function_name}': module symbol '{symbol_name}' is already defined"
+    ),
+    params=(
+        *_TARGET_CONTEXT_PARAMS,
+        ErrorParam("symbol_name", ParamKind.STRING),
+    ),
+    fix_hint=(
+        "Rename the user-defined symbol so AMDGPU sanitizer lowering can "
+        "materialize its reserved site table"
+    ),
+)
+
 ALL_AMDGPU_ERRORS = (
     ERR_AMDGPU_001,
     ERR_AMDGPU_003,
@@ -995,4 +1041,6 @@ ALL_AMDGPU_ERRORS = (
     ERR_AMDGPU_039,
     ERR_AMDGPU_040,
     ERR_AMDGPU_041,
+    ERR_AMDGPU_042,
+    ERR_AMDGPU_043,
 )
