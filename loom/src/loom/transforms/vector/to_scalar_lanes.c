@@ -242,8 +242,8 @@ static iree_status_t loom_vector_to_scalar_cast_float_lane(
   const int32_t result_width =
       loom_scalar_type_bitwidth(loom_type_element_type(result_type));
   if (input_width <= 0 || result_width <= 0 || input_width == result_width) {
-    return iree_make_status(IREE_STATUS_INTERNAL,
-                            "unsupported vector-to-scalar float lane cast");
+    IREE_ASSERT_UNREACHABLE("unsupported vector-to-scalar float lane cast");
+    IREE_BUILTIN_UNREACHABLE();
   }
   loom_op_t* cast_op = NULL;
   if (input_width < result_width) {
@@ -298,8 +298,8 @@ iree_status_t loom_vector_to_scalar_cast_numeric_lane(
     *out_result = loom_scalar_sitofp_result(cast_op);
     return iree_ok_status();
   }
-  return iree_make_status(IREE_STATUS_INTERNAL,
-                          "unsupported vector-to-scalar numeric lane cast");
+  IREE_ASSERT_UNREACHABLE("unsupported vector-to-scalar numeric lane cast");
+  IREE_BUILTIN_UNREACHABLE();
 }
 
 static bool loom_vector_to_scalar_lookup_cached_static_integer_lane(
