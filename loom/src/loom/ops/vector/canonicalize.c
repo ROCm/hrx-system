@@ -450,10 +450,7 @@ static iree_status_t loom_vector_replace_single_result_with_integer_zero(
 static iree_status_t loom_vector_replace_single_result_with_new_op(
     loom_op_t* op, loom_rewriter_t* rewriter, loom_op_t* new_op,
     loom_value_id_t value_checkpoint) {
-  if (new_op->result_count != 1) {
-    return iree_make_status(IREE_STATUS_INTERNAL,
-                            "replacement op must have exactly one result");
-  }
+  IREE_ASSERT_EQ(new_op->result_count, 1u);
   loom_value_id_t replacement = loom_op_const_results(new_op)[0];
   IREE_RETURN_IF_ERROR(loom_rewriter_preserve_result_names_on_new_values(
       rewriter, op, &replacement, 1, value_checkpoint));
@@ -501,9 +498,8 @@ static iree_status_t loom_vector_replace_single_result_with_float_cast_op(
       break;
     }
     default:
-      return iree_make_status(IREE_STATUS_INTERNAL,
-                              "unsupported replacement vector cast kind %u",
-                              (unsigned)kind);
+      IREE_ASSERT_UNREACHABLE("unsupported replacement vector cast kind");
+      IREE_BUILTIN_UNREACHABLE();
   }
 
   return loom_vector_replace_single_result_with_new_op(
@@ -538,9 +534,8 @@ static iree_status_t loom_vector_replace_single_result_with_splat_float_cast(
       break;
     }
     default:
-      return iree_make_status(IREE_STATUS_INTERNAL,
-                              "unsupported replacement vector cast kind %u",
-                              (unsigned)kind);
+      IREE_ASSERT_UNREACHABLE("unsupported replacement vector cast kind");
+      IREE_BUILTIN_UNREACHABLE();
   }
 
   loom_op_t* splat_op = NULL;

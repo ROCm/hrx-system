@@ -1180,9 +1180,9 @@ static iree_status_t loom_type_propagator_commit(
         current_type, candidate_type, &propagator->module->arena,
         &committed_type, &result));
     if (result == LOOM_TYPE_REFINEMENT_CONFLICT) {
-      return iree_make_status(
-          IREE_STATUS_INTERNAL,
+      IREE_ASSERT_UNREACHABLE(
           "accepted type propagation transaction conflicted during commit");
+      IREE_BUILTIN_UNREACHABLE();
     }
     if (result == LOOM_TYPE_REFINEMENT_UNCHANGED ||
         loom_type_equal(current_type, committed_type)) {
