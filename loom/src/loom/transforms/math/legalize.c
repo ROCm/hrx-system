@@ -636,12 +636,8 @@ static iree_status_t loom_math_legalize_rewrite_op(
   loom_target_math_policy_decision_t decision = {0};
   loom_target_math_policy_query(state->target.policy, &query, &decision);
   if (!loom_math_legalize_policy_action_is_known(decision.action)) {
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
-        "target math policy '%.*s' returned unknown action for %.*s",
-        (int)state->target.policy->name.size, state->target.policy->name.data,
-        (int)loom_op_name(state->module, op).size,
-        loom_op_name(state->module, op).data);
+    IREE_ASSERT_UNREACHABLE("target math policy returned unknown action");
+    IREE_BUILTIN_UNREACHABLE();
   }
 
   if (decision.action == LOOM_TARGET_MATH_POLICY_ACTION_KEEP) {
