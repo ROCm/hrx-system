@@ -225,9 +225,9 @@ static iree_status_t loom_spirv_make_argument_value_type_codes(
       continue;
     }
     if (direct_argument_index >= arg_count) {
-      return iree_make_status(IREE_STATUS_INTERNAL,
-                              "SPIR-V ABI argument mapping exceeded the "
-                              "mapped low signature");
+      IREE_ASSERT_UNREACHABLE(
+          "SPIR-V ABI argument mapping exceeded the mapped low signature");
+      IREE_BUILTIN_UNREACHABLE();
     }
     if (loom_spirv_low_type_is_id_register(arg_types[direct_argument_index])) {
       loom_spirv_value_type_t value_type = {0};
@@ -235,18 +235,18 @@ static iree_status_t loom_spirv_make_argument_value_type_codes(
                                                       &value_type) ||
           !loom_spirv_abi_value_type_encode(value_type,
                                             &codes[direct_argument_index])) {
-        return iree_make_status(IREE_STATUS_INTERNAL,
-                                "SPIR-V low ABI could not encode a mapped "
-                                "direct argument payload");
+        IREE_ASSERT_UNREACHABLE(
+            "SPIR-V low ABI could not encode a mapped direct argument payload");
+        IREE_BUILTIN_UNREACHABLE();
       }
       *out_has_payload = true;
     }
     ++direct_argument_index;
   }
   if (direct_argument_index != arg_count) {
-    return iree_make_status(IREE_STATUS_INTERNAL,
-                            "SPIR-V ABI argument mapping did not cover the "
-                            "mapped low signature");
+    IREE_ASSERT_UNREACHABLE(
+        "SPIR-V ABI argument mapping did not cover the mapped low signature");
+    IREE_BUILTIN_UNREACHABLE();
   }
 
   *out_codes = codes;
@@ -278,9 +278,9 @@ static iree_status_t loom_spirv_make_result_value_type_codes(
     loom_spirv_value_type_t value_type = {0};
     if (!loom_spirv_abi_value_type_from_source_type(source_type, &value_type) ||
         !loom_spirv_abi_value_type_encode(value_type, &codes[i])) {
-      return iree_make_status(IREE_STATUS_INTERNAL,
-                              "SPIR-V low ABI could not encode a mapped "
-                              "result payload");
+      IREE_ASSERT_UNREACHABLE(
+          "SPIR-V low ABI could not encode a mapped result payload");
+      IREE_BUILTIN_UNREACHABLE();
     }
     *out_has_payload = true;
   }
