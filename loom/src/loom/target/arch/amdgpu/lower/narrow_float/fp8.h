@@ -99,6 +99,10 @@ enum {
   LOOM_AMDGPU_FP8_BF16_BYTE_TABLE_WORD_COUNT = 2u,
   // Raw f32 bit pattern for the identity scale used with scale-f32 packets.
   LOOM_AMDGPU_FP8_F32_IDENTITY_SCALE_BITS = 0x3F800000u,
+  // Raw E8M0FNU byte payload for a scale of 1.0.
+  LOOM_AMDGPU_FP8_E8M0FNU_IDENTITY_SCALE_BYTE = 0x7Fu,
+  // Packed E8M0FNU identity scale payload for scale-pk8 packets.
+  LOOM_AMDGPU_FP8_E8M0FNU_PACKED_IDENTITY_SCALE_BITS = 0x7F7F7F7Fu,
 };
 
 typedef struct loom_amdgpu_fp8_native_descriptor_refs_t {
@@ -229,6 +233,22 @@ bool loom_amdgpu_fp8_scalef32_descriptor_ref(
 // result element type pair, when the active target exposes one. The descriptor
 // pointer remains valid until the current loom_low_lower_function call returns.
 iree_status_t loom_amdgpu_get_fp8_scalef32_descriptor(
+    loom_low_lower_context_t* context, loom_scalar_type_t source_element_type,
+    loom_scalar_type_t result_element_type,
+    const loom_low_lower_resolved_descriptor_t** out_descriptor);
+
+// Returns the native scaled FP8/BF8 conversion descriptor ref for source/result
+// pairs using E8M0 scale packets that convert eight packed source elements.
+bool loom_amdgpu_fp8_e8m0_pk8_descriptor_ref(
+    loom_scalar_type_t source_element_type,
+    loom_scalar_type_t result_element_type,
+    loom_amdgpu_descriptor_ref_t* out_ref);
+
+// Returns the native E8M0 scale-pk8 FP8/BF8 conversion descriptor for the
+// source and result element type pair, when the active target exposes one. The
+// descriptor pointer remains valid until the current loom_low_lower_function
+// call returns.
+iree_status_t loom_amdgpu_get_fp8_e8m0_pk8_descriptor(
     loom_low_lower_context_t* context, loom_scalar_type_t source_element_type,
     loom_scalar_type_t result_element_type,
     const loom_low_lower_resolved_descriptor_t** out_descriptor);

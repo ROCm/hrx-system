@@ -12,7 +12,7 @@ from loom.gen.target.arch.amdgpu.lower import amdgpu_narrow_float_tables
 from loom.gen.target.arch.amdgpu.lower.amdgpu_narrow_float_tables import (
     _Fp8DecodePlanDescriptorRow,
     _Fp8NativeDescriptorRefRow,
-    _Fp8ScaleF32DescriptorRefRow,
+    _Fp8ScaledDescriptorRefRow,
 )
 from loom.ir import ScalarTypeKind
 
@@ -54,14 +54,16 @@ def test_fp8_native_descriptor_refs_emit_data_only() -> None:
     assert "\nreturn " not in source
 
 
-def test_fp8_scalef32_descriptor_refs_emit_data_only() -> None:
-    source = amdgpu_narrow_float_tables._emit_fp8_scalef32_descriptor_ref_rows()
+def test_fp8_scaled_descriptor_refs_emit_data_only() -> None:
+    source = amdgpu_narrow_float_tables._emit_fp8_scaled_descriptor_ref_rows()
 
-    assert "LOOM_AMDGPU_FP8_SCALEF32_DESCRIPTOR_REF_ROW(" in source
+    assert "LOOM_AMDGPU_FP8_SCALED_DESCRIPTOR_REF_ROW(" in source
     assert "LOOM_SCALAR_TYPE_F8E4M3" in source
     assert "LOOM_SCALAR_TYPE_BF16" in source
     assert "LOOM_AMDGPU_DESCRIPTOR_REF_V_CVT_SCALEF32_PK_BF16_FP8" in source
     assert "LOOM_AMDGPU_DESCRIPTOR_REF_V_CVT_SCALEF32_PK_F32_BF8" in source
+    assert "LOOM_AMDGPU_DESCRIPTOR_REF_V_CVT_SCALE_PK8_BF16_FP8" in source
+    assert "LOOM_AMDGPU_DESCRIPTOR_REF_V_CVT_SCALE_PK8_F32_BF8" in source
     assert "switch " not in source
     assert "\ncase " not in source
     assert "\nreturn " not in source
@@ -144,21 +146,22 @@ def test_fp8_native_descriptor_refs_reject_missing_descriptor_ref() -> None:
         )
 
 
-def test_fp8_scalef32_descriptor_refs_reject_missing_descriptor_ref() -> None:
+def test_fp8_scaled_descriptor_refs_reject_missing_descriptor_ref() -> None:
     with pytest.raises(
         ValueError,
         match=(
-            r"AMDGPU FP8 scaleF32 descriptor table requires missing "
+            r"AMDGPU FP8 scaled conversion descriptor table requires missing "
             r"descriptor refs: amdgpu\.missing"
         ),
     ):
-        amdgpu_narrow_float_tables._emit_fp8_scalef32_descriptor_ref_rows(
+        amdgpu_narrow_float_tables._emit_fp8_scaled_descriptor_ref_rows(
             rows=(
-                _Fp8ScaleF32DescriptorRefRow(
+                _Fp8ScaledDescriptorRefRow(
                     ScalarTypeKind.F8E4M3,
                     ScalarTypeKind.BF16,
                     "amdgpu.missing",
+                    "amdgpu.v_cvt_scale_pk8_bf16_fp8",
                 ),
             ),
-            descriptor_ref_key_set=set(),
+            descriptor_ref_key_set={"amdgpu.v_cvt_scale_pk8_bf16_fp8"},
         )
