@@ -65,10 +65,9 @@ loom_amdgpu_wait_packet_descriptor_immediate(
 
 // Resolves a generated wait-packet descriptor template to the descriptor row in
 // |descriptor_set|.
-iree_status_t loom_amdgpu_wait_packet_resolve_descriptor(
+const loom_low_descriptor_t* loom_amdgpu_wait_packet_resolve_descriptor(
     const loom_low_descriptor_set_t* descriptor_set,
-    const loom_amdgpu_wait_packet_descriptor_template_t* packet_descriptor,
-    const loom_low_descriptor_t** out_descriptor);
+    const loom_amdgpu_wait_packet_descriptor_template_t* packet_descriptor);
 
 // Finds the generated wait-packet descriptor template for |descriptor|.
 iree_status_t loom_amdgpu_wait_packet_find_descriptor_template(

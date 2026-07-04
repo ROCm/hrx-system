@@ -131,19 +131,16 @@ loom_amdgpu_wait_packet_descriptor_immediate(
   return &kAmdgpuWaitPacketImmediates[immediate_row];
 }
 
-iree_status_t loom_amdgpu_wait_packet_resolve_descriptor(
+const loom_low_descriptor_t* loom_amdgpu_wait_packet_resolve_descriptor(
     const loom_low_descriptor_set_t* descriptor_set,
-    const loom_amdgpu_wait_packet_descriptor_template_t* packet_descriptor,
-    const loom_low_descriptor_t** out_descriptor) {
-  *out_descriptor = NULL;
+    const loom_amdgpu_wait_packet_descriptor_template_t* packet_descriptor) {
   const uint32_t descriptor_ordinal = loom_amdgpu_descriptor_ref_ordinal(
       descriptor_set, packet_descriptor->descriptor_ref);
   IREE_ASSERT_NE(descriptor_ordinal, LOOM_LOW_DESCRIPTOR_ORDINAL_NONE);
   const loom_low_descriptor_t* descriptor =
       loom_low_descriptor_set_descriptor_at(descriptor_set, descriptor_ordinal);
   IREE_ASSERT(descriptor != NULL);
-  *out_descriptor = descriptor;
-  return iree_ok_status();
+  return descriptor;
 }
 
 iree_status_t loom_amdgpu_wait_packet_find_descriptor_template(
