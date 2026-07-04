@@ -221,6 +221,56 @@ COMPILE-REPORT: source_low_memory_argument[2] function=report_gfx1200_bf8_f32_sc
 
 // ====
 
+amdgpu.target<gfx1200> @target
+
+kernel.def target(@target) @report_gfx1200_bf8_f32_scale_sliced_native_f32_pair() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %scale: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %lane = kernel.workitem.id<x> : index
+  %schema = encoding.define #matrix_operand<affine=scale_only, element_format=f8e5m2, payload_elements=3, payload_packing=dense_lanes, payload_registers=0, scale_format=f32, scale_group_elements=3, scale_operands=1, scale_topology=block_1d> : encoding<schema>
+  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E5M2, #dense>
+  %scale_view = buffer.view %scale[%base] : buffer -> view<64xf32, #dense>
+  %output_view = buffer.view %output[%base] : buffer -> view<64x3xf32, #dense>
+  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E5M2, #dense> -> vector<4xf8E5M2>
+  %payload = vector.slice %packed[0] : vector<4xf8E5M2> -> vector<3xf8E5M2>
+  %row_scale = view.load %scale_view[%lane] : view<64xf32, #dense> -> f32
+  %scale_vector = vector.splat %row_scale : vector<1xf32>
+  %decoded = vector.decode %payload using %schema {scale = %scale_vector : vector<1xf32>} : vector<3xf8E5M2>, encoding<schema> -> vector<3xf32>
+  vector.store %decoded, %output_view[%lane, 0] : vector<3xf32>, view<64x3xf32, #dense>
+  kernel.return
+}
+
+// ----
+COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
+COMPILE-REPORT: workload workgroup_size=64x1x1 flat_workgroup_size=64
+COMPILE-REPORT: source_low selected_ops=11 emitted_ops=17 rows=11
+COMPILE-REPORT: source_low_memory roots=3 arguments=3 strategies=0 packets=3 loads=2 stores=1 scalar_packets=1 vector_packets=2 source_lanes=8 source_bytes=20 read_bytes=8 write_bytes=12 issued_read_bytes=8 issued_write_bytes=12 issued_read_unknown_widths=0 issued_write_unknown_widths=0 contiguous_vector_packets=2 strided_vector_packets=0 unknown_stride_vector_packets=0 interval_envelope={packets:3,begin_min_bytes:0,end_max_bytes:768,byte_count:768} read_interval_envelope={packets:2,begin_min_bytes:0,end_max_bytes:256,byte_count:256} write_interval_envelope={packets:1,begin_min_bytes:0,end_max_bytes:768,byte_count:768}
+COMPILE-REPORT: source_low[0] function=report_gfx1200_bf8_f32_scale_sliced_native_f32_pair source_op=index.constant selection=plan plan=3840 emitted_ops=0
+COMPILE-REPORT: source_low[1] function=report_gfx1200_bf8_f32_scale_sliced_native_f32_pair source_op=kernel.workitem.id selection=plan plan=4112 emitted_ops=0
+COMPILE-REPORT: source_low[2] function=report_gfx1200_bf8_f32_scale_sliced_native_f32_pair source_op=buffer.view selection=rule rule_set=1 rule=0 emitted_ops=0
+COMPILE-REPORT: source_low[3] function=report_gfx1200_bf8_f32_scale_sliced_native_f32_pair source_op=buffer.view selection=rule rule_set=1 rule=0 emitted_ops=0
+COMPILE-REPORT: source_low[4] function=report_gfx1200_bf8_f32_scale_sliced_native_f32_pair source_op=buffer.view selection=rule rule_set=1 rule=0 emitted_ops=0
+COMPILE-REPORT: source_low[5] function=report_gfx1200_bf8_f32_scale_sliced_native_f32_pair source_op=vector.load selection=plan plan=3605 emitted_ops=2
+COMPILE-REPORT: source_low[6] function=report_gfx1200_bf8_f32_scale_sliced_native_f32_pair source_op=vector.slice selection=plan plan=3594 emitted_ops=0
+COMPILE-REPORT: source_low[7] function=report_gfx1200_bf8_f32_scale_sliced_native_f32_pair source_op=view.load selection=plan plan=3330 emitted_ops=2
+COMPILE-REPORT: source_low[8] function=report_gfx1200_bf8_f32_scale_sliced_native_f32_pair source_op=vector.splat selection=plan plan=3587 emitted_ops=0
+COMPILE-REPORT: source_low[9] function=report_gfx1200_bf8_f32_scale_sliced_native_f32_pair source_op=vector.decode selection=plan plan=3731 plan_key=amdgpu.vector_16bit_float_conversion.strategy.fp8_scalef32_native_f32_pair emitted_ops=10
+COMPILE-REPORT: source_low[10] function=report_gfx1200_bf8_f32_scale_sliced_native_f32_pair source_op=vector.store selection=plan plan=3606 emitted_ops=3
+COMPILE-REPORT: source_low_memory[0] function=report_gfx1200_bf8_f32_scale_sliced_native_f32_pair source_op=vector.load memory_space=global operation=load packet=amdgpu.global_load_b32_saddr source_root=input source_root_argument_index=0 storage={element_format:f8e5m2} source_interval={begin_min_bytes:0,begin_max_bytes:252,end_min_bytes:4,end_max_bytes:256,exact_length_bytes:4} address_form=global_saddr dynamic_term_kind=vaddr fallback_reason=- static_offset_bytes=0 element_bytes=1 vector_lanes=4 issued_read_bytes=4 issued_write_bytes=0 issued_read_unknown_widths=0 issued_write_unknown_widths=0 dynamic_stride_bytes=4 vector_lane_stride_bytes=1 bank_stride_words=0 bank_conflict_degree=0 bank_conflict_kind=-
+COMPILE-REPORT: source_low_memory[1] function=report_gfx1200_bf8_f32_scale_sliced_native_f32_pair source_op=view.load memory_space=global operation=load packet=amdgpu.global_load_b32_saddr source_root=scale source_root_argument_index=1 source_interval={begin_min_bytes:0,begin_max_bytes:252,end_min_bytes:4,end_max_bytes:256,exact_length_bytes:4} address_form=global_saddr dynamic_term_kind=vaddr fallback_reason=- static_offset_bytes=0 element_bytes=4 vector_lanes=1 issued_read_bytes=4 issued_write_bytes=0 issued_read_unknown_widths=0 issued_write_unknown_widths=0 dynamic_stride_bytes=4 vector_lane_stride_bytes=4 bank_stride_words=0 bank_conflict_degree=0 bank_conflict_kind=-
+COMPILE-REPORT: source_low_memory[2] function=report_gfx1200_bf8_f32_scale_sliced_native_f32_pair source_op=vector.store memory_space=global operation=store packet=amdgpu.global_store_b96_saddr source_root=output source_root_argument_index=2 source_interval={begin_min_bytes:0,begin_max_bytes:756,end_min_bytes:12,end_max_bytes:768,exact_length_bytes:12} address_form=global_saddr dynamic_term_kind=vaddr fallback_reason=- static_offset_bytes=0 element_bytes=4 vector_lanes=3 issued_read_bytes=0 issued_write_bytes=12 issued_read_unknown_widths=0 issued_write_unknown_widths=0 dynamic_stride_bytes=12 vector_lane_stride_bytes=4 bank_stride_words=0 bank_conflict_degree=0 bank_conflict_kind=-
+COMPILE-REPORT: source_low_memory_root[0] function=report_gfx1200_bf8_f32_scale_sliced_native_f32_pair source_root=input source_root_argument_index=0 memory_space=global packets=1 loads=1 stores=0 scalar_packets=0 vector_packets=1 source_lanes=4 source_bytes=4 read_bytes=4 write_bytes=0 issued_read_bytes=4 issued_write_bytes=0 issued_read_unknown_widths=0 issued_write_unknown_widths=0 contiguous_vector_packets=1 strided_vector_packets=0 unknown_stride_vector_packets=0 interval_envelope={packets:1,begin_min_bytes:0,end_max_bytes:256,byte_count:256,exact_symbolic_packet_count:1,unique_byte_count:4} read_interval_envelope={packets:1,begin_min_bytes:0,end_max_bytes:256,byte_count:256,exact_symbolic_packet_count:1,unique_byte_count:4}
+COMPILE-REPORT: source_low_memory_root[1] function=report_gfx1200_bf8_f32_scale_sliced_native_f32_pair source_root=scale source_root_argument_index=1 memory_space=global packets=1 loads=1 stores=0 scalar_packets=1 vector_packets=0 source_lanes=1 source_bytes=4 read_bytes=4 write_bytes=0 issued_read_bytes=4 issued_write_bytes=0 issued_read_unknown_widths=0 issued_write_unknown_widths=0 contiguous_vector_packets=0 strided_vector_packets=0 unknown_stride_vector_packets=0 interval_envelope={packets:1,begin_min_bytes:0,end_max_bytes:256,byte_count:256,exact_symbolic_packet_count:1,unique_byte_count:4} read_interval_envelope={packets:1,begin_min_bytes:0,end_max_bytes:256,byte_count:256,exact_symbolic_packet_count:1,unique_byte_count:4}
+COMPILE-REPORT: source_low_memory_root[2] function=report_gfx1200_bf8_f32_scale_sliced_native_f32_pair source_root=output source_root_argument_index=2 memory_space=global packets=1 loads=0 stores=1 scalar_packets=0 vector_packets=1 source_lanes=3 source_bytes=12 read_bytes=0 write_bytes=12 issued_read_bytes=0 issued_write_bytes=12 issued_read_unknown_widths=0 issued_write_unknown_widths=0 contiguous_vector_packets=1 strided_vector_packets=0 unknown_stride_vector_packets=0 interval_envelope={packets:1,begin_min_bytes:0,end_max_bytes:768,byte_count:768,exact_symbolic_packet_count:1,unique_byte_count:12} write_interval_envelope={packets:1,begin_min_bytes:0,end_max_bytes:768,byte_count:768,exact_symbolic_packet_count:1,unique_byte_count:12}
+COMPILE-REPORT: source_low_memory_argument[0] function=report_gfx1200_bf8_f32_scale_sliced_native_f32_pair source_root=input source_root_argument_index=0 memory_space=global packets=1 loads=1 stores=0 scalar_packets=0 vector_packets=1 source_lanes=4 source_bytes=4 read_bytes=4 write_bytes=0 issued_read_bytes=4 issued_write_bytes=0 issued_read_unknown_widths=0 issued_write_unknown_widths=0 contiguous_vector_packets=1 strided_vector_packets=0 unknown_stride_vector_packets=0 interval_envelope={packets:1,begin_min_bytes:0,end_max_bytes:256,byte_count:256,exact_symbolic_packet_count:1,unique_byte_count:4} read_interval_envelope={packets:1,begin_min_bytes:0,end_max_bytes:256,byte_count:256,exact_symbolic_packet_count:1,unique_byte_count:4}
+COMPILE-REPORT: source_low_memory_argument[1] function=report_gfx1200_bf8_f32_scale_sliced_native_f32_pair source_root=scale source_root_argument_index=1 memory_space=global packets=1 loads=1 stores=0 scalar_packets=1 vector_packets=0 source_lanes=1 source_bytes=4 read_bytes=4 write_bytes=0 issued_read_bytes=4 issued_write_bytes=0 issued_read_unknown_widths=0 issued_write_unknown_widths=0 contiguous_vector_packets=0 strided_vector_packets=0 unknown_stride_vector_packets=0 interval_envelope={packets:1,begin_min_bytes:0,end_max_bytes:256,byte_count:256,exact_symbolic_packet_count:1,unique_byte_count:4} read_interval_envelope={packets:1,begin_min_bytes:0,end_max_bytes:256,byte_count:256,exact_symbolic_packet_count:1,unique_byte_count:4}
+COMPILE-REPORT: source_low_memory_argument[2] function=report_gfx1200_bf8_f32_scale_sliced_native_f32_pair source_root=output source_root_argument_index=2 memory_space=global packets=1 loads=0 stores=1 scalar_packets=0 vector_packets=1 source_lanes=3 source_bytes=12 read_bytes=0 write_bytes=12 issued_read_bytes=0 issued_write_bytes=12 issued_read_unknown_widths=0 issued_write_unknown_widths=0 contiguous_vector_packets=1 strided_vector_packets=0 unknown_stride_vector_packets=0 interval_envelope={packets:1,begin_min_bytes:0,end_max_bytes:768,byte_count:768,exact_symbolic_packet_count:1,unique_byte_count:12} write_interval_envelope={packets:1,begin_min_bytes:0,end_max_bytes:768,byte_count:768,exact_symbolic_packet_count:1,unique_byte_count:12}
+
+// ====
+
 amdgpu.target<gfx1250> @target
 
 kernel.def target(@target) @report_gfx1250_fp8_e8m0_native_decode() {
