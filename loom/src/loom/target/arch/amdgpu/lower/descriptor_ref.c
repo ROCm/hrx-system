@@ -59,8 +59,9 @@ iree_status_t loom_amdgpu_make_descriptor_implicit_resource_type(
                                           operand->unit_count, out_type);
     }
   }
-  return iree_make_status(IREE_STATUS_INTERNAL,
-                          "AMDGPU descriptor has no implicit resource operand");
+  IREE_ASSERT_UNREACHABLE(
+      "selected AMDGPU descriptor has no implicit resource operand");
+  IREE_BUILTIN_UNREACHABLE();
 }
 
 bool loom_amdgpu_descriptor_has_immediate(

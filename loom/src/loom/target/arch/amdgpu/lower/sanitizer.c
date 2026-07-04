@@ -430,8 +430,8 @@ iree_status_t loom_amdgpu_sanitizer_site_id_for_op(
     }
   }
 
-  return iree_make_status(IREE_STATUS_INTERNAL,
-                          "sanitizer assertion op missing final site id");
+  IREE_ASSERT_UNREACHABLE("sanitizer assertion op missing final site id");
+  IREE_BUILTIN_UNREACHABLE();
 }
 
 static bool loom_amdgpu_sanitizer_assert_access_kinds(
@@ -860,8 +860,8 @@ static iree_status_t loom_amdgpu_sanitizer_get_access_island(
   loom_amdgpu_sanitizer_access_report_island_t* island =
       loom_amdgpu_sanitizer_island_for_kind(state, access_kind, &has_island);
   if (island == NULL) {
-    return iree_make_status(IREE_STATUS_INTERNAL,
-                            "unsupported AMDGPU sanitizer access kind");
+    IREE_ASSERT_UNREACHABLE("unsupported AMDGPU sanitizer access kind");
+    IREE_BUILTIN_UNREACHABLE();
   }
   if (!*has_island) {
     loom_builder_ip_t saved_ip = loom_builder_save(builder);
