@@ -301,7 +301,6 @@ static iree_status_t loom_low_lower_rule_resolve_materializer_descriptor(
     loom_low_lower_context_t* context,
     const loom_low_lower_rule_set_t* rule_set,
     loom_low_lower_descriptor_ref_t descriptor_ref,
-    iree_string_view_t descriptor_purpose,
     loom_low_lower_resolved_descriptor_t* out_descriptor) {
   *out_descriptor = (loom_low_lower_resolved_descriptor_t){0};
   IREE_ASSERT_NE(descriptor_ref, LOOM_LOW_LOWER_DESCRIPTOR_REF_NONE);
@@ -316,13 +315,9 @@ static iree_status_t loom_low_lower_rule_resolve_materializer_descriptor(
   const loom_low_descriptor_t* descriptor = NULL;
   IREE_RETURN_IF_ERROR(loom_low_lower_rule_resolve_descriptor_ref(
       &match_context, rule_set, descriptor_ref, &descriptor));
-  if (descriptor == NULL) {
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
-        "generated source-memory byte-offset materializer references missing "
-        "'%.*s' descriptor",
-        (int)descriptor_purpose.size, descriptor_purpose.data);
-  }
+  IREE_ASSERT(descriptor != NULL,
+              "generated source-memory byte-offset materializer references a "
+              "missing descriptor");
   return loom_low_lower_resolve_descriptor_row(context, descriptor,
                                                out_descriptor);
 }
@@ -337,7 +332,7 @@ static iree_status_t loom_low_lower_rule_emit_i64_const(
   loom_low_lower_resolved_descriptor_t descriptor = {0};
   IREE_RETURN_IF_ERROR(loom_low_lower_rule_resolve_materializer_descriptor(
       context, rule_set, source_memory->byte_offset_const_i64_descriptor_ref,
-      IREE_SV("const.i64"), &descriptor));
+      &descriptor));
 
   loom_string_id_t immediate_name_id = LOOM_STRING_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_module_intern_string(
@@ -498,14 +493,13 @@ static iree_status_t loom_low_lower_rule_materializer_tied_results(
 static iree_status_t loom_low_lower_rule_emit_i64_binary_op(
     loom_low_lower_context_t* context,
     const loom_low_lower_rule_set_t* rule_set,
-    loom_low_lower_descriptor_ref_t descriptor_ref,
-    iree_string_view_t descriptor_purpose, loom_value_id_t lhs,
+    loom_low_lower_descriptor_ref_t descriptor_ref, loom_value_id_t lhs,
     loom_value_id_t rhs, loom_location_id_t location,
     loom_value_id_t* out_value_id) {
   *out_value_id = LOOM_VALUE_ID_INVALID;
   loom_low_lower_resolved_descriptor_t descriptor = {0};
   IREE_RETURN_IF_ERROR(loom_low_lower_rule_resolve_materializer_descriptor(
-      context, rule_set, descriptor_ref, descriptor_purpose, &descriptor));
+      context, rule_set, descriptor_ref, &descriptor));
 
   const loom_value_id_t operands[2] = {lhs, rhs};
   const loom_type_t result_type =
@@ -545,8 +539,7 @@ static iree_status_t loom_low_lower_rule_materialize_source_memory_term(
         context, term->stride_values[i], &stride_value));
     IREE_RETURN_IF_ERROR(loom_low_lower_rule_emit_i64_binary_op(
         context, rule_set, source_memory->byte_offset_mul_i64_descriptor_ref,
-        IREE_SV("mul.i64"), accumulator, stride_value, source_op->location,
-        &accumulator));
+        accumulator, stride_value, source_op->location, &accumulator));
   }
 
   if (term->byte_stride == 1) {
@@ -565,8 +558,7 @@ static iree_status_t loom_low_lower_rule_materialize_source_memory_term(
         source_op->location, &shift));
     return loom_low_lower_rule_emit_i64_binary_op(
         context, rule_set, source_memory->byte_offset_shl_i64_descriptor_ref,
-        IREE_SV("shl.i64"), accumulator, shift, source_op->location,
-        out_value_id);
+        accumulator, shift, source_op->location, out_value_id);
   }
 
   loom_value_id_t stride = LOOM_VALUE_ID_INVALID;
@@ -575,8 +567,7 @@ static iree_status_t loom_low_lower_rule_materialize_source_memory_term(
       source_op->location, &stride));
   return loom_low_lower_rule_emit_i64_binary_op(
       context, rule_set, source_memory->byte_offset_mul_i64_descriptor_ref,
-      IREE_SV("mul.i64"), accumulator, stride, source_op->location,
-      out_value_id);
+      accumulator, stride, source_op->location, out_value_id);
 }
 
 static iree_status_t loom_low_lower_rule_materialize_source_memory_byte_offset(
@@ -608,8 +599,7 @@ static iree_status_t loom_low_lower_rule_materialize_source_memory_byte_offset(
     }
     IREE_RETURN_IF_ERROR(loom_low_lower_rule_emit_i64_binary_op(
         context, rule_set, source_memory->byte_offset_add_i64_descriptor_ref,
-        IREE_SV("add.i64"), accumulator, term_value, source_op->location,
-        &accumulator));
+        accumulator, term_value, source_op->location, &accumulator));
   }
 
   IREE_ASSERT_NE(accumulator, LOOM_VALUE_ID_INVALID);
@@ -2427,14 +2417,8 @@ iree_status_t loom_low_lower_rule_set_resolve_emit_program(
     const loom_low_descriptor_t* descriptor = NULL;
     IREE_RETURN_IF_ERROR(loom_low_lower_rule_resolve_descriptor_ref(
         &match_context, rule_set, emit->descriptor_ref, &descriptor));
-    if (descriptor == NULL) {
-      const iree_string_view_t key =
-          rule_set->descriptor_refs[emit->descriptor_ref].key;
-      return iree_make_status(
-          IREE_STATUS_INTERNAL,
-          "generated target-low rule references missing descriptor '%.*s'",
-          (int)key.size, key.data);
-    }
+    IREE_ASSERT(descriptor != NULL,
+                "generated target-low rule references a missing descriptor");
     IREE_RETURN_IF_ERROR(loom_low_lower_resolve_descriptor_row(
         context, descriptor, &resolved_emits[i].descriptor));
   }
