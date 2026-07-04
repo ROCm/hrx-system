@@ -43,6 +43,8 @@ loom_cc_library(
         "//loom/src/loom/codegen/low:storage_relation",
         "//loom/src/loom/codegen/low:target_binding",
         "//loom/src/loom/codegen/low:text_asm",
+        "//loom/src/loom/codegen/low/allocation:storage",
+        "//loom/src/loom/codegen/low/allocation:target_constraints",
         "//loom/src/loom/error:emitter",
         "//loom/src/loom/error:error_defs",
         "//loom/src/loom/ir",

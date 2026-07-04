@@ -152,6 +152,8 @@ static iree_status_t loom_low_emission_frame_build_with_allocation_emitter(
       .target_selection = options->target_selection,
       .memory_access_table = options->memory_access_table,
       .pressure_cliffs = options->schedule_pressure_cliffs,
+      .allocation_budgets = options->allocation_budgets,
+      .allocation_budget_count = options->allocation_budget_count,
       .pair_affinities = options->schedule_pair_affinities,
       .structural_state_reads = options->schedule_structural_state_reads,
       .emitter = options->emitter,

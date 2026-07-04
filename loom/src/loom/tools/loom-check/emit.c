@@ -460,9 +460,10 @@ static iree_status_t loom_check_emit_parse_low_schedule_option(
     return iree_ok_status();
   }
   if (!iree_string_view_equal(name, IREE_SV("diagnostics"))) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "unknown low-schedule-json option '%.*s'",
-                            (int)name.size, name.data);
+    return loom_check_low_emit_parse_allocation_budget(
+        token, IREE_SV("low-schedule-json"), request->low_allocation_budgets,
+        IREE_ARRAYSIZE(request->low_allocation_budgets),
+        &request->low_allocation_budget_count);
   }
   if (request->has_low_schedule_diagnostics_option) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -965,6 +966,7 @@ static iree_status_t loom_check_emit_write_low_schedule_json(
     loom_check_diagnostic_collector_t* diagnostic_collector,
     const loom_check_emit_pressure_cliff_spec_t* pressure_cliff_specs,
     iree_host_size_t pressure_cliff_spec_count,
+    const loom_low_allocation_budget_t* budgets, iree_host_size_t budget_count,
     loom_low_schedule_diagnostic_flags_t diagnostic_flags,
     loom_low_schedule_strategy_t strategy, iree_diagnostic_emitter_t emitter,
     iree_arena_allocator_t* analysis_arena, loom_check_result_t* result) {
@@ -1036,6 +1038,8 @@ static iree_status_t loom_check_emit_write_low_schedule_json(
               .values = pressure_cliffs,
               .count = pressure_cliff_spec_count,
           },
+      .allocation_budgets = budgets,
+      .allocation_budget_count = budget_count,
       .emitter = emitter,
       .diagnostic_flags = diagnostic_flags,
       .flags = LOOM_LOW_SCHEDULE_FLAG_RETAIN_LIVENESS,
@@ -2054,6 +2058,7 @@ iree_status_t loom_check_execute_emit(
             test_case, filename, &diagnostic_collector,
             request.low_schedule_pressure_cliff_specs,
             request.low_schedule_pressure_cliff_spec_count,
+            request.low_allocation_budgets, request.low_allocation_budget_count,
             request.low_schedule_diagnostic_flags,
             request.low_schedule_strategy,
             (iree_diagnostic_emitter_t){
