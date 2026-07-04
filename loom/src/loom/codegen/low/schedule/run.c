@@ -476,11 +476,7 @@ static iree_status_t loom_low_schedule_initialize_descriptor_tables(
         state->arena, resource_use_capacity, sizeof(*state->resource_uses),
         (void**)&state->resource_uses));
     state->resource_use_capacity = resource_use_capacity;
-    if (resource_count > UINT16_MAX) {
-      return iree_make_status(
-          IREE_STATUS_FAILED_PRECONDITION,
-          "low schedule resource summary count exceeds uint16_t");
-    }
+    IREE_ASSERT(resource_count <= UINT16_MAX);
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
         state->arena, resource_count, sizeof(*state->resource_summaries),
         (void**)&state->resource_summaries));
@@ -488,11 +484,7 @@ static iree_status_t loom_low_schedule_initialize_descriptor_tables(
            resource_count * sizeof(*state->resource_summaries));
     for (iree_host_size_t i = 0; i < resource_count; ++i) {
       const loom_low_resource_t* resource = &descriptor_set->resources[i];
-      if (resource->capacity_per_cycle == 0) {
-        return iree_make_status(
-            IREE_STATUS_FAILED_PRECONDITION,
-            "low schedule resource summary cannot use zero capacity");
-      }
+      IREE_ASSERT(resource->capacity_per_cycle != 0);
       iree_string_view_t resource_name = loom_low_descriptor_set_string(
           descriptor_set, resource->name_string_offset);
       state->resource_summaries[i] = (loom_low_schedule_resource_summary_t){
@@ -819,13 +811,8 @@ static iree_status_t loom_low_schedule_score_candidate_resources(
       node->schedule_class_id == LOOM_LOW_SCHEDULE_CLASS_NONE) {
     return iree_ok_status();
   }
-  if (node->schedule_class_id >=
-      state->target.descriptor_set->schedule_class_count) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "low schedule node references invalid schedule class %" PRIu16,
-        node->schedule_class_id);
-  }
+  IREE_ASSERT(node->schedule_class_id <
+              state->target.descriptor_set->schedule_class_count);
 
   const loom_low_schedule_class_t* schedule_class =
       &state->target.descriptor_set->schedule_classes[node->schedule_class_id];
@@ -833,21 +820,12 @@ static iree_status_t loom_low_schedule_score_candidate_resources(
     const loom_low_issue_use_t* issue_use =
         &state->target.descriptor_set
              ->issue_uses[schedule_class->issue_use_start + i];
-    if (issue_use->resource_id >=
-        state->target.descriptor_set->resource_count) {
-      return iree_make_status(
-          IREE_STATUS_FAILED_PRECONDITION,
-          "low schedule issue-use references invalid resource %" PRIu16,
-          issue_use->resource_id);
-    }
+    IREE_ASSERT(issue_use->resource_id <
+                state->target.descriptor_set->resource_count);
     const loom_low_resource_t* resource =
         &state->target.descriptor_set->resources[issue_use->resource_id];
-    if (resource->capacity_per_cycle == 0 ||
-        issue_use->units > resource->capacity_per_cycle) {
-      return iree_make_status(
-          IREE_STATUS_FAILED_PRECONDITION,
-          "low schedule issue-use exceeds descriptor resource capacity");
-    }
+    IREE_ASSERT(resource->capacity_per_cycle != 0);
+    IREE_ASSERT(issue_use->units <= resource->capacity_per_cycle);
     const uint32_t use_start = iree_math_saturating_add_u32(
         state->current_issue_cycle, issue_use->stage);
     const uint32_t stall_cycles = loom_low_schedule_positive_delta_u32(
@@ -900,13 +878,8 @@ static iree_status_t loom_low_schedule_score_candidate_hazards(
       node->schedule_class_id == LOOM_LOW_SCHEDULE_CLASS_NONE) {
     return iree_ok_status();
   }
-  if (node->schedule_class_id >=
-      state->target.descriptor_set->schedule_class_count) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "low schedule node references invalid schedule class %" PRIu16,
-        node->schedule_class_id);
-  }
+  IREE_ASSERT(node->schedule_class_id <
+              state->target.descriptor_set->schedule_class_count);
 
   const loom_low_schedule_class_t* schedule_class =
       &state->target.descriptor_set->schedule_classes[node->schedule_class_id];

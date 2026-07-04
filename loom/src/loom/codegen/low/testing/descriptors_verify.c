@@ -2370,6 +2370,16 @@ static iree_status_t loom_low_verify_issue_use(
                             " consumes zero resource units",
                             issue_use_index);
   }
+  const loom_low_resource_t* resource =
+      &descriptor_set->resources[issue_use->resource_id];
+  if (issue_use->units > resource->capacity_per_cycle) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "low issue-use %" PRIu32 " consumes %" PRIu16
+        " units of resource %" PRIu16 " with capacity %" PRIu16,
+        issue_use_index, issue_use->units, issue_use->resource_id,
+        resource->capacity_per_cycle);
+  }
   return iree_ok_status();
 }
 

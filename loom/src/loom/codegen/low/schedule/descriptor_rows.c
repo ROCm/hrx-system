@@ -18,12 +18,9 @@ static iree_status_t loom_low_schedule_append_resource_use(
         IREE_STATUS_INTERNAL,
         "low schedule exceeded precomputed resource-use capacity");
   }
-  if (!state->resource_summaries ||
-      resource_use.resource_id >=
-          state->target.descriptor_set->resource_count) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "low schedule resource use cannot be summarized");
-  }
+  IREE_ASSERT(state->resource_summaries != NULL);
+  IREE_ASSERT(resource_use.resource_id <
+              state->target.descriptor_set->resource_count);
   loom_low_schedule_resource_summary_t* summary =
       &state->resource_summaries[resource_use.resource_id];
   if (summary->use_count == UINT32_MAX) {
@@ -249,13 +246,8 @@ iree_status_t loom_low_schedule_note_descriptor_rows_for_node(
   if (node->schedule_class_id == LOOM_LOW_SCHEDULE_CLASS_NONE) {
     return iree_ok_status();
   }
-  if (node->schedule_class_id >=
-      state->target.descriptor_set->schedule_class_count) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "low schedule node references invalid schedule class %" PRIu16,
-        node->schedule_class_id);
-  }
+  IREE_ASSERT(node->schedule_class_id <
+              state->target.descriptor_set->schedule_class_count);
   const loom_low_schedule_class_t* schedule_class =
       &state->target.descriptor_set->schedule_classes[node->schedule_class_id];
   const loom_low_descriptor_t* descriptor = node->descriptor;
@@ -305,13 +297,8 @@ iree_status_t loom_low_schedule_note_descriptor_rows_for_node(
     const loom_low_issue_use_t* issue_use =
         &state->target.descriptor_set
              ->issue_uses[schedule_class->issue_use_start + i];
-    if (issue_use->resource_id >=
-        state->target.descriptor_set->resource_count) {
-      return iree_make_status(
-          IREE_STATUS_FAILED_PRECONDITION,
-          "low schedule issue-use references invalid resource %" PRIu16,
-          issue_use->resource_id);
-    }
+    IREE_ASSERT(issue_use->resource_id <
+                state->target.descriptor_set->resource_count);
     const loom_low_resource_t* resource =
         &state->target.descriptor_set->resources[issue_use->resource_id];
     iree_string_view_t resource_name = loom_low_descriptor_set_string(
@@ -339,13 +326,8 @@ iree_status_t loom_low_schedule_note_descriptor_rows_for_node(
              ->hazards[schedule_class->hazard_start + i];
     iree_string_view_t resource_name = iree_string_view_empty();
     if (hazard->reference_kind == LOOM_LOW_HAZARD_REFERENCE_KIND_RESOURCE) {
-      if (hazard->reference_id >=
-          state->target.descriptor_set->resource_count) {
-        return iree_make_status(
-            IREE_STATUS_FAILED_PRECONDITION,
-            "low schedule hazard references invalid resource %" PRIu16,
-            hazard->reference_id);
-      }
+      IREE_ASSERT(hazard->reference_id <
+                  state->target.descriptor_set->resource_count);
       const loom_low_resource_t* resource =
           &state->target.descriptor_set->resources[hazard->reference_id];
       resource_name = loom_low_descriptor_set_string(
