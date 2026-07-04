@@ -684,8 +684,16 @@ typedef struct loom_target_compile_report_pressure_origin_row_t {
   uint64_t live_values;
 } loom_target_compile_report_pressure_origin_row_t;
 
+typedef uint32_t loom_target_compile_report_schedule_band_flags_t;
+enum {
+  // Dynamic instruction mix was proven exactly for this schedule band.
+  LOOM_TARGET_COMPILE_REPORT_SCHEDULE_BAND_DYNAMIC_INSTRUCTION_MIX = 1u << 0,
+};
+
 // One consecutive low-schedule band in a compile report.
 typedef struct loom_target_compile_report_schedule_band_row_t {
+  // Optional fields populated for this row.
+  loom_target_compile_report_schedule_band_flags_t flags;
   // Target artifact function symbol containing this schedule band.
   iree_string_view_t function_name;
   // Region block label containing this schedule band.
@@ -709,6 +717,9 @@ typedef struct loom_target_compile_report_schedule_band_row_t {
   // Static descriptor-backed instruction and effect feature counters for this
   // band.
   loom_target_compile_report_static_instruction_mix_t static_instruction_mix;
+  // Per-workitem instruction and effect counters after multiplying this band by
+  // exact statically-provable loop trip counts.
+  loom_target_compile_report_static_instruction_mix_t dynamic_instruction_mix;
   // Number of result values produced by nodes in this band.
   uint64_t result_value_count;
   // Number of allocation units produced by result values in this band.
@@ -717,6 +728,8 @@ typedef struct loom_target_compile_report_schedule_band_row_t {
 
 // Aggregate over low-schedule bands with the same block and origin family.
 typedef struct loom_target_compile_report_schedule_band_summary_row_t {
+  // Optional fields populated for this summary row.
+  loom_target_compile_report_schedule_band_flags_t flags;
   // Target artifact function symbol containing these schedule bands.
   iree_string_view_t function_name;
   // Region block label containing these schedule bands.
@@ -742,6 +755,9 @@ typedef struct loom_target_compile_report_schedule_band_summary_row_t {
   // Static descriptor-backed instruction and effect feature counters for these
   // bands.
   loom_target_compile_report_static_instruction_mix_t static_instruction_mix;
+  // Per-workitem instruction and effect counters after multiplying these bands
+  // by exact statically-provable loop trip counts.
+  loom_target_compile_report_static_instruction_mix_t dynamic_instruction_mix;
   // Number of result values produced by these bands.
   uint64_t result_value_count;
   // Number of allocation units produced by result values in these bands.

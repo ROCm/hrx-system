@@ -1256,6 +1256,60 @@ static bool loom_target_compile_report_low_node_execution_multiplier(
   return true;
 }
 
+typedef struct loom_target_compile_report_low_dynamic_context_t {
+  // Arena used for value facts and CFG scratch while building dynamic facts.
+  iree_arena_allocator_t arena;
+  // Value facts used to prove exact nested loop trip counts.
+  loom_value_fact_table_t fact_table;
+  // Exact execution multiplier per scheduled low block.
+  uint64_t* block_multipliers;
+  // True when |arena| was initialized and must be deinitialized.
+  bool initialized;
+  // True when every loop/backedge needed for dynamic counts was modeled.
+  bool exact;
+} loom_target_compile_report_low_dynamic_context_t;
+
+static iree_status_t loom_target_compile_report_low_dynamic_context_initialize(
+    const loom_low_emission_frame_t* frame,
+    loom_target_compile_report_low_dynamic_context_t* out_context) {
+  *out_context = (loom_target_compile_report_low_dynamic_context_t){0};
+  if (frame->module == NULL || frame->function_op == NULL ||
+      frame->module->arena.block_pool == NULL) {
+    return iree_ok_status();
+  }
+
+  iree_arena_initialize(frame->module->arena.block_pool, &out_context->arena);
+  out_context->initialized = true;
+  iree_status_t status = loom_value_fact_table_initialize(
+      &out_context->fact_table, &out_context->arena,
+      frame->module->values.count);
+  loom_func_like_t function =
+      loom_func_like_cast(frame->module, (loom_op_t*)frame->function_op);
+  if (iree_status_is_ok(status)) {
+    status = loom_value_fact_table_compute_region(
+        &out_context->fact_table, frame->module, function,
+        (loom_region_t*)loom_low_function_const_body(frame->function_op),
+        (loom_op_t*)frame->function_op);
+  }
+  bool block_multipliers_exact = true;
+  if (iree_status_is_ok(status)) {
+    status = loom_target_compile_report_low_block_multipliers(
+        &frame->schedule, &frame->allocation, &out_context->fact_table,
+        frame->module, frame->function_op, &out_context->arena,
+        &out_context->block_multipliers, &block_multipliers_exact);
+  }
+  out_context->exact = iree_status_is_ok(status) && block_multipliers_exact;
+  return status;
+}
+
+static void loom_target_compile_report_low_dynamic_context_deinitialize(
+    loom_target_compile_report_low_dynamic_context_t* context) {
+  if (context->initialized) {
+    iree_arena_deinitialize(&context->arena);
+  }
+  *context = (loom_target_compile_report_low_dynamic_context_t){0};
+}
+
 static void loom_target_compile_report_record_low_static_instruction_mix(
     loom_target_compile_report_t* report,
     const loom_low_emission_frame_t* frame) {
@@ -1272,39 +1326,19 @@ static void loom_target_compile_report_record_low_static_instruction_mix(
 
 static iree_status_t loom_target_compile_report_record_low_dynamic_mix(
     loom_target_compile_report_t* report,
-    const loom_low_emission_frame_t* frame) {
-  if (frame->module == NULL || frame->function_op == NULL ||
-      frame->module->arena.block_pool == NULL) {
+    const loom_low_emission_frame_t* frame,
+    const loom_target_compile_report_low_dynamic_context_t* dynamic_context) {
+  if (dynamic_context == NULL || !dynamic_context->exact) {
     return iree_ok_status();
   }
-  iree_arena_allocator_t arena = {0};
-  iree_arena_initialize(frame->module->arena.block_pool, &arena);
-  loom_value_fact_table_t fact_table = {0};
-  iree_status_t status = loom_value_fact_table_initialize(
-      &fact_table, &arena, frame->module->values.count);
-  loom_func_like_t function =
-      loom_func_like_cast(frame->module, (loom_op_t*)frame->function_op);
-  if (iree_status_is_ok(status)) {
-    status = loom_value_fact_table_compute_region(
-        &fact_table, frame->module, function,
-        (loom_region_t*)loom_low_function_const_body(frame->function_op),
-        (loom_op_t*)frame->function_op);
-  }
-  uint64_t* block_multipliers = NULL;
-  bool block_multipliers_exact = true;
-  if (iree_status_is_ok(status)) {
-    status = loom_target_compile_report_low_block_multipliers(
-        &frame->schedule, &frame->allocation, &fact_table, frame->module,
-        frame->function_op, &arena, &block_multipliers,
-        &block_multipliers_exact);
-  }
-  bool exact = iree_status_is_ok(status) && block_multipliers_exact;
   loom_target_compile_report_static_instruction_mix_t mix = {0};
+  bool exact = true;
   for (iree_host_size_t i = 0; exact && i < frame->schedule.node_count; ++i) {
     const loom_low_schedule_node_t* node = &frame->schedule.nodes[i];
     uint64_t multiplier = 1;
     exact = loom_target_compile_report_low_node_execution_multiplier(
-        frame->module, &fact_table, block_multipliers, node, &multiplier);
+        frame->module, &dynamic_context->fact_table,
+        dynamic_context->block_multipliers, node, &multiplier);
     if (!exact) {
       break;
     }
@@ -1318,8 +1352,7 @@ static iree_status_t loom_target_compile_report_record_low_dynamic_mix(
   if (exact) {
     loom_target_compile_report_record_dynamic_instruction_mix(report, &mix);
   }
-  iree_arena_deinitialize(&arena);
-  return status;
+  return iree_ok_status();
 }
 
 static iree_string_view_t
@@ -1609,11 +1642,32 @@ static void loom_target_compile_report_accumulate_schedule_band_node(
     const loom_low_schedule_table_t* schedule,
     const loom_liveness_analysis_t* liveness,
     const loom_low_schedule_node_t* node,
+    const loom_target_compile_report_low_dynamic_context_t* dynamic_context,
     loom_target_compile_report_schedule_band_row_t* row) {
   ++row->node_count;
+  loom_target_compile_report_static_instruction_mix_t node_mix = {0};
   loom_target_compile_report_accumulate_low_node_static_mix(
-      schedule, schedule->target.descriptor_set, node,
-      &row->static_instruction_mix);
+      schedule, schedule->target.descriptor_set, node, &node_mix);
+  loom_target_compile_report_accumulate_static_mix(&row->static_instruction_mix,
+                                                   &node_mix);
+  if (iree_all_bits_set(
+          row->flags,
+          LOOM_TARGET_COMPILE_REPORT_SCHEDULE_BAND_DYNAMIC_INSTRUCTION_MIX)) {
+    uint64_t multiplier = 1;
+    const bool exact =
+        dynamic_context != NULL && dynamic_context->exact &&
+        loom_target_compile_report_low_node_execution_multiplier(
+            schedule->module, &dynamic_context->fact_table,
+            dynamic_context->block_multipliers, node, &multiplier) &&
+        loom_target_compile_report_accumulate_scaled_static_mix(
+            &row->dynamic_instruction_mix, &node_mix, multiplier);
+    if (!exact) {
+      row->flags &=
+          ~LOOM_TARGET_COMPILE_REPORT_SCHEDULE_BAND_DYNAMIC_INSTRUCTION_MIX;
+      row->dynamic_instruction_mix =
+          (loom_target_compile_report_static_instruction_mix_t){0};
+    }
+  }
   loom_target_compile_report_add_schedule_band_node_results(
       schedule->module, liveness, node, row);
 }
@@ -1641,6 +1695,21 @@ static void loom_target_compile_report_accumulate_schedule_band_summary(
   }
   loom_target_compile_report_accumulate_static_mix(
       &summary->static_instruction_mix, &band->static_instruction_mix);
+  const bool summary_has_dynamic = iree_all_bits_set(
+      summary->flags,
+      LOOM_TARGET_COMPILE_REPORT_SCHEDULE_BAND_DYNAMIC_INSTRUCTION_MIX);
+  const bool band_has_dynamic = iree_all_bits_set(
+      band->flags,
+      LOOM_TARGET_COMPILE_REPORT_SCHEDULE_BAND_DYNAMIC_INSTRUCTION_MIX);
+  if (summary_has_dynamic && band_has_dynamic) {
+    loom_target_compile_report_accumulate_static_mix(
+        &summary->dynamic_instruction_mix, &band->dynamic_instruction_mix);
+  } else if (summary_has_dynamic != band_has_dynamic) {
+    summary->flags &=
+        ~LOOM_TARGET_COMPILE_REPORT_SCHEDULE_BAND_DYNAMIC_INSTRUCTION_MIX;
+    summary->dynamic_instruction_mix =
+        (loom_target_compile_report_static_instruction_mix_t){0};
+  }
   summary->result_value_count += band->result_value_count;
   summary->result_unit_count += band->result_unit_count;
 }
@@ -1664,6 +1733,7 @@ static iree_status_t loom_target_compile_report_add_schedule_band_summary(
   loom_target_compile_report_schedule_band_summary_row_t* summary =
       &summaries[(*summary_count)++];
   *summary = (loom_target_compile_report_schedule_band_summary_row_t){
+      .flags = band->flags,
       .function_name = band->function_name,
       .block_name = band->block_name,
       .block_index = band->block_index,
@@ -1701,7 +1771,8 @@ static iree_status_t loom_target_compile_report_record_schedule_band(
 static iree_status_t loom_target_compile_report_record_schedule_band_rows(
     loom_target_compile_report_t* report,
     const loom_liveness_analysis_t* liveness,
-    const loom_low_schedule_table_t* schedule) {
+    const loom_low_schedule_table_t* schedule,
+    const loom_target_compile_report_low_dynamic_context_t* dynamic_context) {
   const bool wants_band_rows = loom_target_compile_report_wants_details(
       report, LOOM_TARGET_COMPILE_REPORT_DETAIL_SCHEDULE_BAND_ROWS);
   const bool wants_band_summary_rows = loom_target_compile_report_wants_details(
@@ -1780,6 +1851,10 @@ static iree_status_t loom_target_compile_report_record_schedule_band_rows(
           }
         }
         band = (loom_target_compile_report_schedule_band_row_t){
+            .flags =
+                dynamic_context != NULL && dynamic_context->exact
+                    ? LOOM_TARGET_COMPILE_REPORT_SCHEDULE_BAND_DYNAMIC_INSTRUCTION_MIX
+                    : 0,
             .function_name = report->function_name,
             .block_name =
                 loom_target_compile_report_block_name(module, node->block),
@@ -1793,7 +1868,7 @@ static iree_status_t loom_target_compile_report_record_schedule_band_rows(
         has_band = true;
       }
       loom_target_compile_report_accumulate_schedule_band_node(
-          schedule, liveness, node, &band);
+          schedule, liveness, node, dynamic_context, &band);
     }
     if (iree_status_is_ok(status) && has_band) {
       status = loom_target_compile_report_record_schedule_band(
@@ -3178,7 +3253,8 @@ static void loom_target_compile_report_record_low_allocation_identity(
 static iree_status_t loom_target_compile_report_record_low_allocation_contents(
     loom_target_compile_report_t* report,
     const loom_low_allocation_table_t* allocation,
-    const loom_low_schedule_table_t* schedule) {
+    const loom_low_schedule_table_t* schedule,
+    const loom_target_compile_report_low_dynamic_context_t* dynamic_context) {
   const loom_liveness_analysis_t* liveness = &allocation->liveness;
   loom_target_compile_report_record_allocation(
       report, allocation->assignment_count, allocation->spill_count,
@@ -3195,7 +3271,7 @@ static iree_status_t loom_target_compile_report_record_low_allocation_contents(
   }
   if (iree_status_is_ok(status)) {
     status = loom_target_compile_report_record_schedule_band_rows(
-        report, liveness, schedule);
+        report, liveness, schedule, dynamic_context);
   }
   if (iree_status_is_ok(status)) {
     status = loom_target_compile_report_record_spill_rows(report, allocation,
@@ -3217,7 +3293,7 @@ iree_status_t loom_target_compile_report_record_low_allocation(
     const loom_low_allocation_table_t* allocation) {
   loom_target_compile_report_record_low_allocation_identity(report, allocation);
   return loom_target_compile_report_record_low_allocation_contents(
-      report, allocation, /*schedule=*/NULL);
+      report, allocation, /*schedule=*/NULL, /*dynamic_context=*/NULL);
 }
 
 iree_status_t loom_target_compile_report_record_low_emission_frame(
@@ -3239,12 +3315,21 @@ iree_status_t loom_target_compile_report_record_low_emission_frame(
       frame->schedule.hazard_gap_count, frame->schedule.model_summary_count,
       liveness->pressure_summary_count, peak_live_units);
   loom_target_compile_report_record_low_static_instruction_mix(report, frame);
-  IREE_RETURN_IF_ERROR(
-      loom_target_compile_report_record_low_dynamic_mix(report, frame));
-  loom_target_compile_report_record_move_causes(report, frame);
+  loom_target_compile_report_low_dynamic_context_t dynamic_context = {0};
   iree_status_t status =
-      loom_target_compile_report_record_low_allocation_contents(
-          report, &frame->allocation, &frame->schedule);
+      loom_target_compile_report_low_dynamic_context_initialize(
+          frame, &dynamic_context);
+  if (iree_status_is_ok(status)) {
+    status = loom_target_compile_report_record_low_dynamic_mix(
+        report, frame, &dynamic_context);
+  }
+  if (iree_status_is_ok(status)) {
+    loom_target_compile_report_record_move_causes(report, frame);
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_target_compile_report_record_low_allocation_contents(
+        report, &frame->allocation, &frame->schedule, &dynamic_context);
+  }
   if (iree_status_is_ok(status)) {
     loom_target_compile_report_record_allocation_materialization(
         report, frame->materialized_spill_storage_count,
@@ -3258,5 +3343,6 @@ iree_status_t loom_target_compile_report_record_low_emission_frame(
                                                                        frame);
   }
   loom_low_allocation_release_value_scratch(&value_scratch);
+  loom_target_compile_report_low_dynamic_context_deinitialize(&dynamic_context);
   return status;
 }

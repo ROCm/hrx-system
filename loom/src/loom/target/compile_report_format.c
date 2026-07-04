@@ -4236,6 +4236,14 @@ static iree_status_t loom_target_compile_report_format_schedule_band_row_json(
       stream, &first_field, "static_instruction_mix"));
   IREE_RETURN_IF_ERROR(loom_target_compile_report_format_instruction_mix_json(
       &row->static_instruction_mix, stream));
+  if (iree_all_bits_set(
+          row->flags,
+          LOOM_TARGET_COMPILE_REPORT_SCHEDULE_BAND_DYNAMIC_INSTRUCTION_MIX)) {
+    IREE_RETURN_IF_ERROR(loom_target_compile_report_json_begin_field(
+        stream, &first_field, "dynamic_instruction_mix"));
+    IREE_RETURN_IF_ERROR(loom_target_compile_report_format_instruction_mix_json(
+        &row->dynamic_instruction_mix, stream));
+  }
   IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
       stream, &first_field, "result_value_count", row->result_value_count));
   IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
@@ -4319,6 +4327,14 @@ loom_target_compile_report_format_schedule_band_summary_row_json(
       stream, &first_field, "static_instruction_mix"));
   IREE_RETURN_IF_ERROR(loom_target_compile_report_format_instruction_mix_json(
       &row->static_instruction_mix, stream));
+  if (iree_all_bits_set(
+          row->flags,
+          LOOM_TARGET_COMPILE_REPORT_SCHEDULE_BAND_DYNAMIC_INSTRUCTION_MIX)) {
+    IREE_RETURN_IF_ERROR(loom_target_compile_report_json_begin_field(
+        stream, &first_field, "dynamic_instruction_mix"));
+    IREE_RETURN_IF_ERROR(loom_target_compile_report_format_instruction_mix_json(
+        &row->dynamic_instruction_mix, stream));
+  }
   IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
       stream, &first_field, "result_value_count", row->result_value_count));
   IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(

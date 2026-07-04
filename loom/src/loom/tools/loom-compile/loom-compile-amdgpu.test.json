@@ -446,7 +446,11 @@
                 "\"source_op\":\"vector.mma\"",
                 "\"descriptor_key\":\"amdgpu.v_wmma_f32_16x16x16_f16\"",
                 "\"descriptor_semantic_tag\":\"matrix.wmma.f32.16x16x16.f16\"",
-                "\"selected_op_count\":1,\"emitted_low_op_count\":2,\"exact_dynamic_op_count\":1,\"unknown_dynamic_op_count\":0,\"dynamic_selected_op_count\":2,\"dynamic_emitted_low_op_count\":4"
+                "\"selected_op_count\":1,\"emitted_low_op_count\":2,\"exact_dynamic_op_count\":1,\"unknown_dynamic_op_count\":0,\"dynamic_selected_op_count\":2,\"dynamic_emitted_low_op_count\":4",
+                "\"schedule_band_summary_rows\":{\"count\":",
+                "\"semantic_tag\":\"matrix.wmma.f32.16x16x16.f16\"",
+                "\"dynamic_instruction_mix\":{\"descriptor_count\":2",
+                "\"wmma_count\":2"
               ]
             }
           },

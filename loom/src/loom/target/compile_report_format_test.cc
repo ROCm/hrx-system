@@ -923,6 +923,8 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
   };
   loom_target_compile_report_schedule_band_row_t schedule_band_rows[] = {
       {
+          /*.flags=*/
+          LOOM_TARGET_COMPILE_REPORT_SCHEDULE_BAND_DYNAMIC_INSTRUCTION_MIX,
           /*.function_name=*/IREE_SVL("branchy_export"),
           /*.block_name=*/IREE_SVL("body"),
           /*.block_index=*/2,
@@ -965,6 +967,26 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
               /*.cache_count=*/0,
               /*.register_move_count=*/0,
           },
+          /*.dynamic_instruction_mix=*/
+          {
+              /*.descriptor_count=*/8,
+              /*.unknown_count=*/0,
+              /*.scalar_alu_count=*/0,
+              /*.vector_alu_count=*/0,
+              /*.matrix_count=*/0,
+              /*.mfma_count=*/0,
+              /*.smfmac_count=*/0,
+              /*.wmma_count=*/0,
+              /*.swmmac_count=*/0,
+              /*.dot_count=*/0,
+              /*.global_memory_count=*/0,
+              /*.global_load_count=*/0,
+              /*.global_store_count=*/0,
+              /*.buffer_load_count=*/0,
+              /*.buffer_store_count=*/0,
+              /*.flat_memory_count=*/0,
+              /*.local_memory_count=*/8,
+          },
           /*.result_value_count=*/4,
           /*.result_unit_count=*/16,
       },
@@ -972,6 +994,8 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
   loom_target_compile_report_schedule_band_summary_row_t
       schedule_band_summary_rows[] = {
           {
+              /*.flags=*/
+              LOOM_TARGET_COMPILE_REPORT_SCHEDULE_BAND_DYNAMIC_INSTRUCTION_MIX,
               /*.function_name=*/IREE_SVL("branchy_export"),
               /*.block_name=*/IREE_SVL("body"),
               /*.block_index=*/2,
@@ -1014,6 +1038,26 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
                   /*.conversion_count=*/0,
                   /*.cache_count=*/0,
                   /*.register_move_count=*/0,
+              },
+              /*.dynamic_instruction_mix=*/
+              {
+                  /*.descriptor_count=*/24,
+                  /*.unknown_count=*/0,
+                  /*.scalar_alu_count=*/0,
+                  /*.vector_alu_count=*/0,
+                  /*.matrix_count=*/0,
+                  /*.mfma_count=*/0,
+                  /*.smfmac_count=*/0,
+                  /*.wmma_count=*/0,
+                  /*.swmmac_count=*/0,
+                  /*.dot_count=*/0,
+                  /*.global_memory_count=*/0,
+                  /*.global_load_count=*/0,
+                  /*.global_store_count=*/0,
+                  /*.buffer_load_count=*/0,
+                  /*.buffer_store_count=*/0,
+                  /*.flat_memory_count=*/0,
+                  /*.local_memory_count=*/24,
               },
               /*.result_value_count=*/12,
               /*.result_unit_count=*/48,
@@ -2469,6 +2513,14 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
           0),
       IREE_STRING_VIEW_NPOS);
   EXPECT_NE(
+      iree_string_view_find(
+          output,
+          IREE_SV("\"dynamic_instruction_mix\":{\"descriptor_count\":8"), 0),
+      IREE_STRING_VIEW_NPOS);
+  EXPECT_NE(
+      iree_string_view_find(output, IREE_SV("\"local_memory_count\":24"), 0),
+      IREE_STRING_VIEW_NPOS);
+  EXPECT_NE(
       iree_string_view_find(output, IREE_SV("\"result_unit_count\":16"), 0),
       IREE_STRING_VIEW_NPOS);
   EXPECT_NE(iree_string_view_find(
@@ -2834,6 +2886,8 @@ TEST(CompileReportFormatTest, FormatsJsonSummaryWithoutDetailRows) {
       &report, &pressure_rows[0]));
   const loom_target_compile_report_schedule_band_summary_row_t
       schedule_band_summary = {
+          /*.flags=*/
+          LOOM_TARGET_COMPILE_REPORT_SCHEDULE_BAND_DYNAMIC_INSTRUCTION_MIX,
           /*.function_name=*/IREE_SVL("summary_only"),
           /*.block_name=*/IREE_SVL("^entry"),
           /*.block_index=*/0,
@@ -2855,6 +2909,18 @@ TEST(CompileReportFormatTest, FormatsJsonSummaryWithoutDetailRows) {
               /*.mfma_count=*/{},
               /*.smfmac_count=*/{},
               /*.wmma_count=*/2,
+              /*.swmmac_count=*/{},
+          },
+          /*.dynamic_instruction_mix=*/
+          {
+              /*.descriptor_count=*/4,
+              /*.unknown_count=*/{},
+              /*.scalar_alu_count=*/{},
+              /*.vector_alu_count=*/{},
+              /*.matrix_count=*/4,
+              /*.mfma_count=*/{},
+              /*.smfmac_count=*/{},
+              /*.wmma_count=*/4,
               /*.swmmac_count=*/{},
           },
           /*.result_value_count=*/1,
@@ -2902,6 +2968,13 @@ TEST(CompileReportFormatTest, FormatsJsonSummaryWithoutDetailRows) {
                 output, IREE_SV("\"semantic_tag\":\"matrix.wmma.f32\""), 0),
             IREE_STRING_VIEW_NPOS);
   EXPECT_NE(iree_string_view_find(output, IREE_SV("\"wmma_count\":2"), 0),
+            IREE_STRING_VIEW_NPOS);
+  EXPECT_NE(
+      iree_string_view_find(
+          output,
+          IREE_SV("\"dynamic_instruction_mix\":{\"descriptor_count\":4"), 0),
+      IREE_STRING_VIEW_NPOS);
+  EXPECT_NE(iree_string_view_find(output, IREE_SV("\"wmma_count\":4"), 0),
             IREE_STRING_VIEW_NPOS);
 
   iree_string_builder_deinitialize(&builder);
