@@ -85,6 +85,24 @@ def test_fp8_subnormal_table_rows_emit_data_only() -> None:
     assert "\nreturn " not in source
 
 
+def test_fp8_packed_repair_reason_rows_emit_data_only() -> None:
+    source = amdgpu_narrow_float_tables._emit_fp8_packed_repair_reason_rows()
+
+    assert source.count("LOOM_AMDGPU_FP8_PACKED_BF16_REPAIR_REASON_ROW(") == 16
+    assert source.count("LOOM_AMDGPU_FP8_PACKED_F16_REPAIR_REASON_ROW(") == 4
+    assert "fp8_packed_bf16_decode" in source
+    assert "fp8_packed_bf16_decode_repair_zero_subnormal" in source
+    assert "fp8_packed_bf16_decode_repair_zero_subnormal_inf_nan" in source
+    assert "fp8_packed_f16_decode" in source
+    assert "fp8_packed_f16_decode_repair_zero_subnormal" in source
+    assert "typedef " not in source
+    assert "struct " not in source
+    assert "#include" not in source
+    assert "switch " not in source
+    assert "\ncase " not in source
+    assert "\nreturn " not in source
+
+
 def test_fp8_decode_plan_descriptor_rows_reject_missing_descriptor_ref() -> None:
     with pytest.raises(
         ValueError,

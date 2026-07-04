@@ -65,6 +65,37 @@ class _Fp8FormatRow:
     special_policy: str
 
 
+@dataclass(frozen=True)
+class _Fp8PackedRepairBit:
+    flag_name: str
+    suffix: str
+    bit_value: int
+
+
+_FP8_PACKED_REPAIR_BITS = (
+    _Fp8PackedRepairBit(
+        "LOOM_AMDGPU_FP8_PACKED_U16_REPAIR_ZERO",
+        "zero",
+        1 << 0,
+    ),
+    _Fp8PackedRepairBit(
+        "LOOM_AMDGPU_FP8_PACKED_U16_REPAIR_SUBNORMAL",
+        "subnormal",
+        1 << 1,
+    ),
+    _Fp8PackedRepairBit(
+        "LOOM_AMDGPU_FP8_PACKED_U16_REPAIR_INF",
+        "inf",
+        1 << 3,
+    ),
+    _Fp8PackedRepairBit(
+        "LOOM_AMDGPU_FP8_PACKED_U16_REPAIR_NAN",
+        "nan",
+        1 << 2,
+    ),
+)
+
+
 _FP8_FORMAT_ROWS = (
     _Fp8FormatRow(
         ScalarTypeKind.F8E4M3,
@@ -432,6 +463,57 @@ def _fp8_subnormal_table_initializer(row: _Fp8FormatRow) -> str:
     )
 
 
+def _fp8_packed_repair_expression(repair_mask: int) -> str:
+    flag_names = [repair_bit.flag_name for repair_bit in _FP8_PACKED_REPAIR_BITS if repair_mask & repair_bit.bit_value]
+    if not flag_names:
+        return "LOOM_AMDGPU_FP8_PACKED_U16_REPAIR_NONE"
+    return " | ".join(flag_names)
+
+
+def _fp8_packed_repair_reason(base_name: str, repair_mask: int) -> str:
+    suffixes = [repair_bit.suffix for repair_bit in _FP8_PACKED_REPAIR_BITS if repair_mask & repair_bit.bit_value]
+    if not suffixes:
+        return base_name
+    return f"{base_name}_repair_{'_'.join(suffixes)}"
+
+
+def _fp8_packed_repair_reason_initializer(row_macro: str, base_name: str, repair_mask: int) -> str:
+    return "\n".join(
+        [
+            f"{row_macro}(",
+            f"    {_fp8_packed_repair_expression(repair_mask)},",
+            f'    "{_fp8_packed_repair_reason(base_name, repair_mask)}")',
+        ]
+    )
+
+
+def _emit_fp8_packed_repair_reason_rows() -> str:
+    return (
+        "\n".join(
+            [
+                *_generated_header(),
+                *(
+                    _fp8_packed_repair_reason_initializer(
+                        "LOOM_AMDGPU_FP8_PACKED_BF16_REPAIR_REASON_ROW",
+                        "fp8_packed_bf16_decode",
+                        repair_mask,
+                    )
+                    for repair_mask in range(16)
+                ),
+                *(
+                    _fp8_packed_repair_reason_initializer(
+                        "LOOM_AMDGPU_FP8_PACKED_F16_REPAIR_REASON_ROW",
+                        "fp8_packed_f16_decode",
+                        repair_mask,
+                    )
+                    for repair_mask in range(4)
+                ),
+            ]
+        )
+        + "\n"
+    )
+
+
 def _emit_fp8_subnormal_table_rows(
     rows: Sequence[_Fp8FormatRow] = _FP8_FORMAT_ROWS,
 ) -> str:
@@ -521,9 +603,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         type=Path,
         help="Generated FP8/BF8 subnormal decode table row fragment path.",
     )
+    parser.add_argument(
+        "--fp8-packed-repair-reason-rows",
+        type=Path,
+        help="Generated FP8/BF8 packed repair reason row fragment path.",
+    )
     args = parser.parse_args(argv)
 
-    if args.fp8_decode_plan_descriptor_rows is None and args.fp8_native_descriptor_ref_rows is None and args.fp8_scalef32_descriptor_ref_rows is None and args.fp8_subnormal_table_rows is None:
+    if (
+        args.fp8_decode_plan_descriptor_rows is None
+        and args.fp8_native_descriptor_ref_rows is None
+        and args.fp8_scalef32_descriptor_ref_rows is None
+        and args.fp8_subnormal_table_rows is None
+        and args.fp8_packed_repair_reason_rows is None
+    ):
         parser.error("at least one output path is required")
     if args.fp8_decode_plan_descriptor_rows is not None:
         _write_output(
@@ -544,6 +637,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         _write_output(
             args.fp8_subnormal_table_rows,
             _emit_fp8_subnormal_table_rows(),
+        )
+    if args.fp8_packed_repair_reason_rows is not None:
+        _write_output(
+            args.fp8_packed_repair_reason_rows,
+            _emit_fp8_packed_repair_reason_rows(),
         )
     return 0
 
