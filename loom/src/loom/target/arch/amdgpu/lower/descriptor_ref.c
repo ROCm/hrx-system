@@ -6,7 +6,6 @@
 
 #include "loom/target/arch/amdgpu/lower/descriptor_ref.h"
 
-#include <inttypes.h>
 #include <stdint.h>
 
 #include "loom/codegen/low/builder.h"
@@ -21,12 +20,8 @@ iree_status_t loom_amdgpu_lookup_descriptor_ref(
   *out_opcode_id = LOOM_STRING_ID_INVALID;
   const uint32_t descriptor_ordinal =
       loom_amdgpu_descriptor_ref_ordinal(descriptor_set, descriptor_ref);
-  if (descriptor_ordinal == LOOM_LOW_DESCRIPTOR_ORDINAL_NONE) {
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
-        "generated AMDGPU lowering references missing descriptor ref %" PRIu16,
-        descriptor_ref);
-  }
+  IREE_ASSERT(descriptor_ordinal != LOOM_LOW_DESCRIPTOR_ORDINAL_NONE,
+              "generated AMDGPU lowering references missing descriptor ref");
   const loom_low_descriptor_t* descriptor =
       loom_low_descriptor_set_descriptor_at(descriptor_set, descriptor_ordinal);
   iree_string_view_t key = loom_low_descriptor_set_string(
