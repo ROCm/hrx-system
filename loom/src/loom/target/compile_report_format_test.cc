@@ -2928,6 +2928,28 @@ TEST(CompileReportFormatTest, FormatsJsonSummaryWithoutDetailRows) {
       };
   IREE_ASSERT_OK(loom_target_compile_report_record_schedule_band_summary_row(
       &report, &schedule_band_summary));
+  const loom_target_compile_report_wait_reason_summary_row_t
+      wait_reason_summary = {
+          /*.function_name=*/IREE_SVL("summary_only"),
+          /*.counter_name=*/IREE_SVL("vmem_load"),
+          /*.reason_name=*/IREE_SVL("amdgpu.ssa_use"),
+          /*.counter_id=*/1,
+          /*.reason_id=*/2,
+          /*.summary=*/
+          {
+              /*.action_count=*/3,
+              /*.explicit_action_count=*/0,
+              /*.planned_action_count=*/3,
+              /*.full_drain_count=*/1,
+              /*.partial_wait_count=*/2,
+              /*.drained_count=*/5,
+              /*.max_drained_count=*/4,
+              /*.max_outstanding_before=*/7,
+              /*.max_full_drain_outstanding_before=*/6,
+          },
+      };
+  IREE_ASSERT_OK(loom_target_compile_report_record_wait_reason_summary_row(
+      &report, &wait_reason_summary));
 
   iree_string_builder_t builder;
   iree_string_builder_initialize(iree_allocator_system(), &builder);
@@ -2976,6 +2998,33 @@ TEST(CompileReportFormatTest, FormatsJsonSummaryWithoutDetailRows) {
       IREE_STRING_VIEW_NPOS);
   EXPECT_NE(iree_string_view_find(output, IREE_SV("\"wmma_count\":4"), 0),
             IREE_STRING_VIEW_NPOS);
+  EXPECT_NE(
+      iree_string_view_find(
+          output,
+          IREE_SV("\"wait_reason_summary_rows\":{\"count\":1,\"rows\":["), 0),
+      IREE_STRING_VIEW_NPOS);
+  EXPECT_NE(iree_string_view_find(
+                output,
+                IREE_SV("\"counter\":\"vmem_load\",\"counter_id\":1,"
+                        "\"reason\":\"amdgpu.ssa_use\",\"reason_id\":2,"
+                        "\"summary\":{\"action_count\":3,"
+                        "\"explicit_action_count\":0,"
+                        "\"planned_action_count\":3,"
+                        "\"full_drain_count\":1,"
+                        "\"partial_wait_count\":2,"
+                        "\"drained_count\":5,"
+                        "\"max_drained_count\":4,"
+                        "\"max_outstanding_before\":7,"
+                        "\"max_full_drain_outstanding_before\":6}"),
+                0),
+            IREE_STRING_VIEW_NPOS);
+  EXPECT_NE(iree_string_view_find(
+                output, IREE_SV("\"wait_action_rows\":{\"count\":0}"), 0),
+            IREE_STRING_VIEW_NPOS);
+  EXPECT_EQ(
+      iree_string_view_find(
+          output, IREE_SV("\"wait_action_rows\":{\"count\":0,\"rows\""), 0),
+      IREE_STRING_VIEW_NPOS);
 
   iree_string_builder_deinitialize(&builder);
   loom_target_compile_report_deinitialize(&report);
