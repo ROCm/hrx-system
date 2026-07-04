@@ -139,8 +139,11 @@ enum loom_amdgpu_report_key_kind_e {
   LOOM_AMDGPU_REPORT_KEY_FRAGMENT_REPACK_STRATEGY = 4,
   // Report the fragment-memory strategy selected by the plan.
   LOOM_AMDGPU_REPORT_KEY_FRAGMENT_MEMORY_STRATEGY = 5,
+  // Report the 16-bit/narrow-float vector conversion strategy.
+  LOOM_AMDGPU_REPORT_KEY_VECTOR_16BIT_FLOAT_CONVERSION_STRATEGY = 6,
   // Maximum report-key kind accepted by dispatch rows.
-  LOOM_AMDGPU_REPORT_KEY_MAX = LOOM_AMDGPU_REPORT_KEY_FRAGMENT_MEMORY_STRATEGY,
+  LOOM_AMDGPU_REPORT_KEY_MAX =
+      LOOM_AMDGPU_REPORT_KEY_VECTOR_16BIT_FLOAT_CONVERSION_STRATEGY,
 };
 
 // Packing constants bridge the storage and preselection enum domains into the
@@ -859,6 +862,8 @@ LOOM_AMDGPU_DEFINE_DATA_EMIT(loom_amdgpu_emit_sanitizer_race_sync_dispatch,
 #define LOOM_AMDGPU_VALUE_STRUCTURAL_DATA_STORAGE_ROW \
   LOOM_AMDGPU_INTERNAL_DATA_STORAGE_ROW
 #define LOOM_AMDGPU_VALUE_DATA_STORAGE_ROW LOOM_AMDGPU_INTERNAL_DATA_STORAGE_ROW
+#define LOOM_AMDGPU_VALUE_DATA_STORAGE_REPORT_KEY_ROW \
+  LOOM_AMDGPU_INTERNAL_DATA_STORAGE_REPORT_KEY_ROW
 #define LOOM_AMDGPU_VALUE_DATA_SOURCE_ROW LOOM_AMDGPU_INTERNAL_DATA_SOURCE_ROW
 #define LOOM_AMDGPU_VALUE_DATA_SOURCE_POLICY_ROW \
   LOOM_AMDGPU_INTERNAL_DATA_SOURCE_POLICY_ROW
@@ -936,6 +941,7 @@ static const loom_amdgpu_lower_dispatch_table_t
 #undef LOOM_AMDGPU_RECIPE_DIRECT_STORAGE_ROW
 #undef LOOM_AMDGPU_MEMORY_DATA_STORAGE_REPORT_KEY_ROW
 #undef LOOM_AMDGPU_MEMORY_DATA_STORAGE_ROW
+#undef LOOM_AMDGPU_VALUE_DATA_STORAGE_REPORT_KEY_ROW
 #undef LOOM_AMDGPU_VALUE_DATA_SOURCE_POLICY_ROW
 #undef LOOM_AMDGPU_VALUE_DATA_SOURCE_ROW
 #undef LOOM_AMDGPU_VALUE_DATA_STORAGE_ROW
@@ -1378,6 +1384,13 @@ static iree_string_view_t loom_amdgpu_plan_key(
       }
       return loom_amdgpu_fragment_memory_plan_key(
           (const loom_amdgpu_fragment_memory_plan_t*)plan.target_data);
+    case LOOM_AMDGPU_REPORT_KEY_VECTOR_16BIT_FLOAT_CONVERSION_STRATEGY:
+      if (plan.target_data == NULL) {
+        return iree_string_view_empty();
+      }
+      return loom_amdgpu_vector_16bit_float_conversion_plan_key(
+          context, (const loom_amdgpu_vector_16bit_float_conversion_plan_t*)
+                       plan.target_data);
     default:
       return iree_string_view_empty();
   }
