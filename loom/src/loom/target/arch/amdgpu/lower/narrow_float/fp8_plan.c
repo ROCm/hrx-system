@@ -11,6 +11,8 @@
 #include "loom/target/arch/amdgpu/lower/narrow_float/fp8.h"
 
 typedef struct loom_amdgpu_fp8_subnormal_table_row_t {
+  // Scalar type owning this FP8/BF8 decode table row.
+  loom_scalar_type_t element_type;
   // Encoded FP8 source format used by the decode plan.
   loom_scalar_type_fp8_format_t format;
   // Packed unsigned BF16 payloads for two-bit mantissas.
@@ -30,7 +32,8 @@ typedef struct loom_amdgpu_fp8_subnormal_table_row_t {
     row_special_policy, bf16_table_0, bf16_table_1, bf16_byte_0_0,             \
     bf16_byte_0_1, bf16_byte_1_0, bf16_byte_1_1, f16_byte_0_0, f16_byte_0_1,   \
     f16_byte_1_0, f16_byte_1_1)                                                \
-  [row_element_type] = {                                                       \
+  {                                                                            \
+      .element_type = row_element_type,                                        \
       .format =                                                                \
           {                                                                    \
               .exponent_bits = row_exponent_bits,                              \
@@ -58,13 +61,29 @@ static const loom_amdgpu_fp8_subnormal_table_row_t
 
 #undef LOOM_AMDGPU_FP8_SUBNORMAL_TABLE_ROW
 
-static void loom_amdgpu_initialize_fp8_decode_format(
-    loom_scalar_type_t element_type, loom_amdgpu_fp8_decode_plan_t* plan) {
-  const loom_amdgpu_fp8_subnormal_table_row_t* row =
-      element_type < LOOM_SCALAR_TYPE_COUNT_
-          ? &kLoomAmdgpuFp8SubnormalTableRows[element_type]
-          : NULL;
-  if (row == NULL || row->format.exponent_bits == 0) {
+static_assert(IREE_ARRAYSIZE(kLoomAmdgpuFp8SubnormalTableRows) <= 32,
+              "FP8 decode plan cache stores table rows in one u32 bitset");
+
+static const loom_amdgpu_fp8_subnormal_table_row_t*
+loom_amdgpu_find_fp8_subnormal_table_row(loom_scalar_type_t element_type,
+                                         uint32_t* out_row_index) {
+  *out_row_index = 0;
+  for (uint32_t i = 0; i < IREE_ARRAYSIZE(kLoomAmdgpuFp8SubnormalTableRows);
+       ++i) {
+    const loom_amdgpu_fp8_subnormal_table_row_t* row =
+        &kLoomAmdgpuFp8SubnormalTableRows[i];
+    if (row->element_type == element_type) {
+      *out_row_index = i;
+      return row;
+    }
+  }
+  return NULL;
+}
+
+static void loom_amdgpu_initialize_fp8_decode_format_from_row(
+    const loom_amdgpu_fp8_subnormal_table_row_t* row,
+    loom_amdgpu_fp8_decode_plan_t* plan) {
+  if (row == NULL) {
     IREE_ASSERT_UNREACHABLE("selected AMDGPU FP8 decode");
     IREE_BUILTIN_UNREACHABLE();
   }
@@ -143,9 +162,12 @@ void loom_amdgpu_initialize_fp8_decode_plan_from_descriptor_set(
     const loom_low_descriptor_set_t* descriptor_set,
     loom_scalar_type_t element_type, loom_amdgpu_fp8_decode_plan_t* out_plan) {
   memset(out_plan, 0, sizeof(*out_plan));
+  uint32_t unused_row_index = 0;
+  const loom_amdgpu_fp8_subnormal_table_row_t* row =
+      loom_amdgpu_find_fp8_subnormal_table_row(element_type, &unused_row_index);
   loom_amdgpu_mark_fp8_decode_plan_descriptor_flags(descriptor_set,
                                                     element_type, out_plan);
-  loom_amdgpu_initialize_fp8_decode_format(element_type, out_plan);
+  loom_amdgpu_initialize_fp8_decode_format_from_row(row, out_plan);
 }
 
 static iree_status_t loom_amdgpu_resolve_fp8_decode_plan_descriptor(
@@ -181,41 +203,48 @@ static iree_status_t loom_amdgpu_resolve_fp8_decode_plan_descriptors(
 
 static iree_status_t loom_amdgpu_initialize_fp8_decode_plan(
     loom_low_lower_context_t* context, loom_scalar_type_t element_type,
+    const loom_amdgpu_fp8_subnormal_table_row_t* row,
     loom_amdgpu_fp8_decode_plan_t* plan) {
   memset(plan, 0, sizeof(*plan));
   IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_fp8_decode_plan_descriptors(
       context, element_type, plan));
 
-  loom_amdgpu_initialize_fp8_decode_format(element_type, plan);
+  loom_amdgpu_initialize_fp8_decode_format_from_row(row, plan);
   return iree_ok_status();
 }
 
 typedef struct loom_amdgpu_fp8_decode_plan_cache_t {
-  // Scalar-type bits whose plan entries have been initialized.
-  uint32_t initialized_type_bits;
-  // Function-local decode plans keyed by loom_scalar_type_t.
-  loom_amdgpu_fp8_decode_plan_t plans[LOOM_SCALAR_TYPE_COUNT_];
+  // Generated-row bits whose plan entries have been initialized.
+  uint32_t initialized_row_bits;
+  // Function-local decode plans keyed by generated subnormal table row.
+  loom_amdgpu_fp8_decode_plan_t
+      plans[IREE_ARRAYSIZE(kLoomAmdgpuFp8SubnormalTableRows)];
 } loom_amdgpu_fp8_decode_plan_cache_t;
-static_assert(LOOM_SCALAR_TYPE_COUNT_ <= 32,
-              "FP8 decode plan cache stores scalar types in one u32 bitset");
 
 static int loom_amdgpu_fp8_decode_plan_cache_state_key;
 
 iree_status_t loom_amdgpu_get_fp8_decode_plan(
     loom_low_lower_context_t* context, loom_scalar_type_t element_type,
     const loom_amdgpu_fp8_decode_plan_t** out_plan) {
-  IREE_ASSERT_LT(element_type, LOOM_SCALAR_TYPE_COUNT_);
   *out_plan = NULL;
+  uint32_t row_index = 0;
+  const loom_amdgpu_fp8_subnormal_table_row_t* row =
+      loom_amdgpu_find_fp8_subnormal_table_row(element_type, &row_index);
+  if (row == NULL) {
+    IREE_ASSERT_UNREACHABLE("selected AMDGPU FP8 decode");
+    IREE_BUILTIN_UNREACHABLE();
+  }
+
   loom_amdgpu_fp8_decode_plan_cache_t* cache = NULL;
   IREE_RETURN_IF_ERROR(loom_low_lower_get_or_allocate_target_state(
       context, &loom_amdgpu_fp8_decode_plan_cache_state_key, sizeof(*cache),
       (void**)&cache));
-  const uint32_t type_bit = UINT32_C(1) << element_type;
-  if ((cache->initialized_type_bits & type_bit) == 0) {
+  const uint32_t row_bit = UINT32_C(1) << row_index;
+  if ((cache->initialized_row_bits & row_bit) == 0) {
     IREE_RETURN_IF_ERROR(loom_amdgpu_initialize_fp8_decode_plan(
-        context, element_type, &cache->plans[element_type]));
-    cache->initialized_type_bits |= type_bit;
+        context, element_type, row, &cache->plans[row_index]));
+    cache->initialized_row_bits |= row_bit;
   }
-  *out_plan = &cache->plans[element_type];
+  *out_plan = &cache->plans[row_index];
   return iree_ok_status();
 }
