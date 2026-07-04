@@ -21,6 +21,8 @@
             "whole-module snapshots",
             ".entries.rows[]",
             "post-run slicing",
+            "target_capability_rows.rows[]",
+            "matrix_fp8_native_kind",
             ".schedule_band_summary_rows.rows[]",
             "Matrix-family schedule evidence",
             "rounding=finite_only",
