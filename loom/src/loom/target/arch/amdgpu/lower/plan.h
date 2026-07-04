@@ -1196,10 +1196,12 @@ typedef enum loom_amdgpu_fragment_repack_strategy_e {
   LOOM_AMDGPU_FRAGMENT_REPACK_STRATEGY_NONE = 0,
   // Source and result share the same physical fragment representation.
   LOOM_AMDGPU_FRAGMENT_REPACK_STRATEGY_ALIAS = 1,
+  // Adjacent source lanes are packed with DPP before bpermute selection.
+  LOOM_AMDGPU_FRAGMENT_REPACK_STRATEGY_RESULT_TO_LHS_BF16_DPP_BPERMUTE = 2,
   // F32 result registers are permuted and packed into BF16 LHS registers.
-  LOOM_AMDGPU_FRAGMENT_REPACK_STRATEGY_RESULT_TO_LHS_BF16_BPERMUTE = 2,
+  LOOM_AMDGPU_FRAGMENT_REPACK_STRATEGY_RESULT_TO_LHS_BF16_BPERMUTE = 3,
   // Source and result require a target strategy that is not implemented.
-  LOOM_AMDGPU_FRAGMENT_REPACK_STRATEGY_DIAGNOSTIC = 3,
+  LOOM_AMDGPU_FRAGMENT_REPACK_STRATEGY_DIAGNOSTIC = 4,
 } loom_amdgpu_fragment_repack_strategy_t;
 
 typedef enum loom_amdgpu_fragment_repack_reason_e {
