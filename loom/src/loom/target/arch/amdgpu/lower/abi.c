@@ -208,22 +208,18 @@ static iree_status_t loom_amdgpu_assign_hal_resource_layout(
     uint64_t* inout_kernarg_offset,
     loom_amdgpu_hal_kernarg_resource_t* resources,
     iree_host_size_t resource_count) {
-  if (argument->resource_index < 0 ||
-      (uint64_t)argument->resource_index >= resource_count) {
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
-        "AMDGPU HAL ABI argument mapping produced an invalid resource index");
-  }
+  IREE_ASSERT(argument->resource_index >= 0 &&
+                  (uint64_t)argument->resource_index < resource_count,
+              "AMDGPU HAL ABI argument mapping produced an invalid resource "
+              "index");
   IREE_RETURN_IF_ERROR(loom_amdgpu_align_kernarg_offset(
       inout_kernarg_offset,
       LOOM_AMDGPU_HAL_KERNEL_ABI_GLOBAL_BUFFER_KERNARG_ALIGNMENT));
   const iree_host_size_t binding_index =
       (iree_host_size_t)argument->resource_index;
-  if (resources[binding_index].kernarg_size != 0) {
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
-        "AMDGPU HAL ABI argument mapping produced duplicate resource indexes");
-  }
+  IREE_ASSERT(resources[binding_index].kernarg_size == 0,
+              "AMDGPU HAL ABI argument mapping produced duplicate resource "
+              "indexes");
   resources[binding_index] = (loom_amdgpu_hal_kernarg_resource_t){
       .resource_op = NULL,
       .name = iree_string_view_empty(),
@@ -304,11 +300,9 @@ iree_status_t loom_amdgpu_map_abi_layout(
   uint16_t source_argument_count = 0;
   const loom_value_id_t* source_arguments =
       loom_func_like_arg_ids(source_function, &source_argument_count);
-  if (source_argument_count != parameter_count) {
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
-        "AMDGPU HAL ABI layout mapping reached an inconsistent argument map");
-  }
+  IREE_ASSERT(source_argument_count == parameter_count,
+              "AMDGPU HAL ABI layout mapping reached an inconsistent argument "
+              "map");
 
   iree_host_size_t resource_count = 0;
   iree_host_size_t direct_arg_count = 0;
@@ -319,11 +313,9 @@ iree_status_t loom_amdgpu_map_abi_layout(
       ++direct_arg_count;
     }
   }
-  if (arg_count != direct_arg_count) {
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
-        "AMDGPU HAL ABI layout mapping reached an inconsistent low signature");
-  }
+  IREE_ASSERT(
+      arg_count == direct_arg_count,
+      "AMDGPU HAL ABI layout mapping reached an inconsistent low signature");
 
   loom_amdgpu_hal_kernarg_resource_t* resources = NULL;
   if (resource_count != 0) {

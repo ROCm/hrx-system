@@ -34,11 +34,9 @@ static iree_status_t loom_amdgpu_matrix_target_facts_from_environment(
   const loom_amdgpu_processor_info_t* processor =
       loom_amdgpu_target_processor_from_ref(environment->module,
                                             environment->target_ref);
-  if (processor == NULL) {
-    return iree_make_status(IREE_STATUS_INTERNAL,
-                            "AMDGPU matrix lowering requires an AMDGPU "
-                            "processor target record");
-  }
+  IREE_ASSERT(processor != NULL,
+              "AMDGPU matrix lowering requires an AMDGPU processor target "
+              "record");
   loom_amdgpu_matrix_feature_bits_t feature_bits = 0;
   (void)loom_amdgpu_matrix_feature_bits_from_profile(processor->features.matrix,
                                                      &feature_bits);
