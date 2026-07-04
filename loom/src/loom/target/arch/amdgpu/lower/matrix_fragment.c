@@ -5339,8 +5339,13 @@ loom_amdgpu_emit_fragment_memory_fp8_to_packed_f16_register(
           result_register_index, vgpr_type, &source_register));
   const uint16_t byte_index =
       result_register_index * LOOM_AMDGPU_FRAGMENT_PACKED_B16_ELEMENT_COUNT;
-  return loom_amdgpu_emit_fp8_pair_to_packed_f16_finite(
-      context, source_op, decode_plan, source_register, byte_index & 3u,
+  const loom_amdgpu_fp8_packed_u16_pair_source_t pair_source = {
+      .source_register = source_register,
+      .byte_offset = byte_index & 3u,
+      .live_lane_count = LOOM_AMDGPU_FRAGMENT_PACKED_B16_ELEMENT_COUNT,
+  };
+  return loom_amdgpu_emit_fp8_pairs_to_packed_f16_finite(
+      context, source_op, decode_plan, &pair_source, /*pair_count=*/1,
       decode_value_flags, vgpr_type, sgpr_type, mask_type, out_low_packet);
 }
 
@@ -5385,8 +5390,13 @@ loom_amdgpu_emit_fragment_memory_fp8_to_packed_bf16_register(
     IREE_RETURN_IF_ERROR(loom_amdgpu_materialize_full_low_vgpr_b32(
         context, source_op, low_source_register, &low_source_register));
 
-    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fp8_pair_to_packed_bf16(
-        context, source_op, decode_plan, low_source_register, byte_index & 3u,
+    const loom_amdgpu_fp8_packed_u16_pair_source_t pair_source = {
+        .source_register = low_source_register,
+        .byte_offset = byte_index & 3u,
+        .live_lane_count = LOOM_AMDGPU_FRAGMENT_PACKED_B16_ELEMENT_COUNT,
+    };
+    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fp8_pairs_to_packed_bf16(
+        context, source_op, decode_plan, &pair_source, /*pair_count=*/1,
         decode_value_flags, vgpr_type, sgpr_type, mask_type, out_low_packet));
     return iree_ok_status();
   }

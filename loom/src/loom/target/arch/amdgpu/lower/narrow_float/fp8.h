@@ -296,17 +296,6 @@ bool loom_amdgpu_can_emit_fp8_pair_to_packed_bf16(
     const loom_amdgpu_fp8_decode_plan_t* plan,
     loom_amdgpu_fp8_decode_value_flags_t value_flags);
 
-// Emits one packed VGPR containing two BF16 bit payloads from an adjacent FP8
-// byte pair. The caller must prove
-// loom_amdgpu_can_emit_fp8_pair_to_packed_bf16 first.
-iree_status_t loom_amdgpu_emit_fp8_pair_to_packed_bf16(
-    loom_low_lower_context_t* context, const loom_op_t* source_op,
-    const loom_amdgpu_fp8_decode_plan_t* plan,
-    loom_value_id_t low_source_register, uint32_t byte_offset,
-    loom_amdgpu_fp8_decode_value_flags_t value_flags, loom_type_t vgpr_type,
-    loom_type_t sgpr_type, loom_type_t mask_type,
-    loom_value_id_t* out_low_packet);
-
 // Emits packed BF16 registers for adjacent FP8 byte-pair sources. Exact rare
 // subnormal repair is batched across all pairs so the hot path branches once
 // per packet instead of once per pair.
@@ -326,17 +315,6 @@ iree_status_t loom_amdgpu_emit_fp8_pairs_to_packed_bf16(
 bool loom_amdgpu_can_emit_fp8_pair_to_packed_f16_finite(
     const loom_amdgpu_fp8_decode_plan_t* plan,
     loom_amdgpu_fp8_decode_value_flags_t value_flags);
-
-// Emits one packed VGPR containing two F16 bit payloads from an adjacent FP8
-// byte pair. The caller must prove
-// loom_amdgpu_can_emit_fp8_pair_to_packed_f16_finite first.
-iree_status_t loom_amdgpu_emit_fp8_pair_to_packed_f16_finite(
-    loom_low_lower_context_t* context, const loom_op_t* source_op,
-    const loom_amdgpu_fp8_decode_plan_t* plan,
-    loom_value_id_t low_source_register, uint32_t byte_offset,
-    loom_amdgpu_fp8_decode_value_flags_t value_flags, loom_type_t vgpr_type,
-    loom_type_t sgpr_type, loom_type_t mask_type,
-    loom_value_id_t* out_low_packet);
 
 // Emits packed F16 registers for adjacent FP8 byte-pair sources when value
 // facts prove finite storage.
