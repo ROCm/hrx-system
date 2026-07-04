@@ -119,8 +119,8 @@ static iree_status_t loom_vector_to_scalar_combine_accumulator_term_tree(
     const loom_value_id_t* terms, uint16_t begin_ordinal, uint16_t end_ordinal,
     loom_value_id_t* out_result) {
   if (end_ordinal <= begin_ordinal) {
-    return iree_make_status(IREE_STATUS_INTERNAL,
-                            "invalid empty accumulator term range");
+    IREE_ASSERT_UNREACHABLE("invalid empty accumulator term range");
+    IREE_BUILTIN_UNREACHABLE();
   }
   if (end_ordinal - begin_ordinal == 1) {
     *out_result = terms[begin_ordinal];
@@ -191,8 +191,8 @@ static iree_status_t loom_vector_to_scalar_build_static_reduction_tree(
     loom_vector_to_scalar_accumulator_state_t* state, uint16_t begin_ordinal,
     uint16_t end_ordinal, int64_t* indices, loom_value_id_t* out_result) {
   if (end_ordinal <= begin_ordinal) {
-    return iree_make_status(IREE_STATUS_INTERNAL,
-                            "invalid empty reduction term range");
+    IREE_ASSERT_UNREACHABLE("invalid empty reduction term range");
+    IREE_BUILTIN_UNREACHABLE();
   }
   if (end_ordinal - begin_ordinal == 1) {
     loom_vector_to_scalar_indices_from_ordinal(state->lane_state.vector_type,
@@ -621,8 +621,8 @@ loom_vector_to_scalar_reduce_axes_build_static_reduction_tree(
     uint16_t end_ordinal, loom_vector_to_scalar_index_term_t* reduced_terms,
     loom_value_id_t* out_result) {
   if (end_ordinal <= begin_ordinal) {
-    return iree_make_status(IREE_STATUS_INTERNAL,
-                            "invalid empty reduce-axes term range");
+    IREE_ASSERT_UNREACHABLE("invalid empty reduce-axes term range");
+    IREE_BUILTIN_UNREACHABLE();
   }
   if (end_ordinal - begin_ordinal == 1) {
     loom_vector_to_scalar_reduce_axes_terms_from_ordinal(state, begin_ordinal,
