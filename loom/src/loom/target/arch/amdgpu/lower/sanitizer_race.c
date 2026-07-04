@@ -554,11 +554,8 @@ static iree_status_t loom_amdgpu_sanitizer_race_get_config_values(
   *out_config = (loom_amdgpu_sanitizer_race_config_values_t){0};
   loom_amdgpu_sanitizer_race_lower_state_t* state = NULL;
   IREE_RETURN_IF_ERROR(loom_amdgpu_sanitizer_race_lower_state(context, &state));
-  if (!state->has_config_values) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "AMDGPU TSAN config values were not materialized in entry setup");
-  }
+  IREE_ASSERT(state->has_config_values,
+              "AMDGPU TSAN config values were not materialized in entry setup");
   *out_config = state->config_values;
   return iree_ok_status();
 }
@@ -568,11 +565,9 @@ static iree_status_t loom_amdgpu_sanitizer_race_get_workgroup_shadow_offset(
   *out_offset = LOOM_VALUE_ID_INVALID;
   loom_amdgpu_sanitizer_race_lower_state_t* state = NULL;
   IREE_RETURN_IF_ERROR(loom_amdgpu_sanitizer_race_lower_state(context, &state));
-  if (!state->has_topology_values) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "AMDGPU TSAN topology values were not materialized in entry setup");
-  }
+  IREE_ASSERT(
+      state->has_topology_values,
+      "AMDGPU TSAN topology values were not materialized in entry setup");
   *out_offset = state->workgroup_shadow_offset;
   return iree_ok_status();
 }
@@ -601,11 +596,9 @@ static iree_status_t loom_amdgpu_sanitizer_race_get_workitem_linear_id(
   *out_linear_id = LOOM_VALUE_ID_INVALID;
   loom_amdgpu_sanitizer_race_lower_state_t* state = NULL;
   IREE_RETURN_IF_ERROR(loom_amdgpu_sanitizer_race_lower_state(context, &state));
-  if (!state->has_topology_values) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "AMDGPU TSAN topology values were not materialized in entry setup");
-  }
+  IREE_ASSERT(
+      state->has_topology_values,
+      "AMDGPU TSAN topology values were not materialized in entry setup");
   *out_linear_id = state->workitem_linear_id;
   return iree_ok_status();
 }
@@ -615,12 +608,9 @@ static iree_status_t loom_amdgpu_sanitizer_race_get_dispatch_ptr(
   *out_dispatch_ptr = LOOM_VALUE_ID_INVALID;
   loom_amdgpu_sanitizer_race_lower_state_t* state = NULL;
   IREE_RETURN_IF_ERROR(loom_amdgpu_sanitizer_race_lower_state(context, &state));
-  if (!state->has_dispatch_values) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "AMDGPU TSAN dispatch slot values were not materialized in entry "
-        "setup");
-  }
+  IREE_ASSERT(
+      state->has_dispatch_values,
+      "AMDGPU TSAN dispatch slot values were not materialized in entry setup");
   *out_dispatch_ptr = state->dispatch_ptr;
   return iree_ok_status();
 }
@@ -630,12 +620,9 @@ static iree_status_t loom_amdgpu_sanitizer_race_get_instrumentation_flags(
   *out_flags = LOOM_VALUE_ID_INVALID;
   loom_amdgpu_sanitizer_race_lower_state_t* state = NULL;
   IREE_RETURN_IF_ERROR(loom_amdgpu_sanitizer_race_lower_state(context, &state));
-  if (!state->has_instrumentation_flags) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "AMDGPU TSAN instrumentation flags were not materialized in entry "
-        "setup");
-  }
+  IREE_ASSERT(
+      state->has_instrumentation_flags,
+      "AMDGPU TSAN instrumentation flags were not materialized in entry setup");
   *out_flags = state->instrumentation_flags;
   return iree_ok_status();
 }
@@ -646,11 +633,9 @@ loom_amdgpu_sanitizer_race_get_workgroup_shadow_record_offset(
   *out_offset = LOOM_VALUE_ID_INVALID;
   loom_amdgpu_sanitizer_race_lower_state_t* state = NULL;
   IREE_RETURN_IF_ERROR(loom_amdgpu_sanitizer_race_lower_state(context, &state));
-  if (!state->has_workgroup_shadow_record_offset) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "AMDGPU TSAN workgroup shadow record offset was "
-                            "not materialized in entry setup");
-  }
+  IREE_ASSERT(state->has_workgroup_shadow_record_offset,
+              "AMDGPU TSAN workgroup shadow record offset was not "
+              "materialized in entry setup");
   *out_offset = state->workgroup_shadow_record_offset;
   return iree_ok_status();
 }
@@ -661,11 +646,9 @@ static iree_status_t loom_amdgpu_sanitizer_race_get_shadow_entry_base(
   *out_base = NULL;
   loom_amdgpu_sanitizer_race_lower_state_t* state = NULL;
   IREE_RETURN_IF_ERROR(loom_amdgpu_sanitizer_race_lower_state(context, &state));
-  if (!state->has_shadow_entry_base) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "AMDGPU TSAN shadow entry base was not materialized in entry setup");
-  }
+  IREE_ASSERT(
+      state->has_shadow_entry_base,
+      "AMDGPU TSAN shadow entry base was not materialized in entry setup");
   *out_base = &state->shadow_entry_base;
   return iree_ok_status();
 }
