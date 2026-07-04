@@ -2339,6 +2339,12 @@ static bool loom_amdgpu_fragment_memory_analyze(
           fact_context, environment->module, view_type, &view_storage_schema) &&
       !loom_value_fact_encoded_operand_schema_is_unknown(
           view_storage_schema.encoded_operand);
+  if (has_view_storage_schema &&
+      iree_any_bit_set(view_storage_schema.encoded_operand.sparsity_policy,
+                       LOOM_VALUE_FACT_SPARSITY_POLICY_ALL)) {
+    return loom_amdgpu_fragment_memory_reject(
+        diagnostic, IREE_SV("fragment_memory.sparse_metadata"));
+  }
   const loom_amdgpu_matrix_fragment_layout_t* layout = NULL;
   loom_scalar_type_t expected_element_type = LOOM_SCALAR_TYPE_COUNT_;
   loom_amdgpu_fragment_memory_payload_form_t payload_form =
