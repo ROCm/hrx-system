@@ -1154,137 +1154,138 @@ low.kernel.def target(@wave64_target) workgroup_size(64, 1, 1) @result_fragment_
   %44 = v_lshrrev_b32_src0_inline %43, 16
   %45 = v_and_b32_src0_inline %21, 15
   %47 = v_lshrrev_b32_src0_inline %45, 2
-  %48 = v_cmp_eq_i32_src1_inline %47 {rhs = 1}
-  %49 = v_cmp_eq_i32_src1_inline %47 {rhs = 2}
-  %50 = v_cmp_eq_i32_src1_inline %47 {rhs = 3}
-  %51 = v_and_b32_src0_inline %45, 3
-  %52 = v_lshlrev_b32_src0_inline %51, 6
-  %53 = ds_bpermute_b32 %52, %32
-  %54 = ds_bpermute_b32 %52, %36
-  %55 = ds_bpermute_b32 %52, %40
-  %56 = ds_bpermute_b32 %52, %44
-  %57 = v_cndmask_b32 %53, %54, %48
-  %58 = v_cndmask_b32 %57, %55, %49
-  %59 = v_cndmask_b32 %58, %56, %50
-  %60 = ds_bpermute_b32 %52, %32 {offset = 4}
-  %61 = ds_bpermute_b32 %52, %36 {offset = 4}
-  %62 = ds_bpermute_b32 %52, %40 {offset = 4}
-  %63 = ds_bpermute_b32 %52, %44 {offset = 4}
-  %64 = v_cndmask_b32 %60, %61, %48
-  %65 = v_cndmask_b32 %64, %62, %49
-  %66 = v_cndmask_b32 %65, %63, %50
-  %67 = v_cvt_pk_u16_u32 %59, %66
-  %68 = ds_bpermute_b32 %52, %32 {offset = 8}
-  %69 = ds_bpermute_b32 %52, %36 {offset = 8}
-  %70 = ds_bpermute_b32 %52, %40 {offset = 8}
-  %71 = ds_bpermute_b32 %52, %44 {offset = 8}
-  %72 = v_cndmask_b32 %68, %69, %48
-  %73 = v_cndmask_b32 %72, %70, %49
-  %74 = v_cndmask_b32 %73, %71, %50
-  %75 = ds_bpermute_b32 %52, %32 {offset = 12}
-  %76 = ds_bpermute_b32 %52, %36 {offset = 12}
-  %77 = ds_bpermute_b32 %52, %40 {offset = 12}
-  %78 = ds_bpermute_b32 %52, %44 {offset = 12}
-  %79 = v_cndmask_b32 %75, %76, %48
-  %80 = v_cndmask_b32 %79, %77, %49
-  %81 = v_cndmask_b32 %80, %78, %50
-  %82 = v_cvt_pk_u16_u32 %74, %81
-  %83 = ds_bpermute_b32 %52, %32 {offset = 16}
-  %84 = ds_bpermute_b32 %52, %36 {offset = 16}
-  %85 = ds_bpermute_b32 %52, %40 {offset = 16}
-  %86 = ds_bpermute_b32 %52, %44 {offset = 16}
-  %87 = v_cndmask_b32 %83, %84, %48
-  %88 = v_cndmask_b32 %87, %85, %49
-  %89 = v_cndmask_b32 %88, %86, %50
-  %90 = ds_bpermute_b32 %52, %32 {offset = 20}
-  %91 = ds_bpermute_b32 %52, %36 {offset = 20}
-  %92 = ds_bpermute_b32 %52, %40 {offset = 20}
-  %93 = ds_bpermute_b32 %52, %44 {offset = 20}
-  %94 = v_cndmask_b32 %90, %91, %48
-  %95 = v_cndmask_b32 %94, %92, %49
-  %96 = v_cndmask_b32 %95, %93, %50
-  %97 = v_cvt_pk_u16_u32 %89, %96
-  %98 = ds_bpermute_b32 %52, %32 {offset = 24}
-  %99 = ds_bpermute_b32 %52, %36 {offset = 24}
-  %100 = ds_bpermute_b32 %52, %40 {offset = 24}
-  %101 = ds_bpermute_b32 %52, %44 {offset = 24}
-  %102 = v_cndmask_b32 %98, %99, %48
-  %103 = v_cndmask_b32 %102, %100, %49
-  %104 = v_cndmask_b32 %103, %101, %50
-  %105 = ds_bpermute_b32 %52, %32 {offset = 28}
-  %106 = ds_bpermute_b32 %52, %36 {offset = 28}
-  %107 = ds_bpermute_b32 %52, %40 {offset = 28}
-  %108 = ds_bpermute_b32 %52, %44 {offset = 28}
-  %109 = v_cndmask_b32 %105, %106, %48
-  %110 = v_cndmask_b32 %109, %107, %49
-  %111 = v_cndmask_b32 %110, %108, %50
-  %112 = v_cvt_pk_u16_u32 %104, %111
-  %113 = ds_bpermute_b32 %52, %32 {offset = 32}
-  %114 = ds_bpermute_b32 %52, %36 {offset = 32}
-  %115 = ds_bpermute_b32 %52, %40 {offset = 32}
-  %116 = ds_bpermute_b32 %52, %44 {offset = 32}
-  %117 = v_cndmask_b32 %113, %114, %48
-  %118 = v_cndmask_b32 %117, %115, %49
-  %119 = v_cndmask_b32 %118, %116, %50
-  %120 = ds_bpermute_b32 %52, %32 {offset = 36}
-  %121 = ds_bpermute_b32 %52, %36 {offset = 36}
-  %122 = ds_bpermute_b32 %52, %40 {offset = 36}
-  %123 = ds_bpermute_b32 %52, %44 {offset = 36}
-  %124 = v_cndmask_b32 %120, %121, %48
-  %125 = v_cndmask_b32 %124, %122, %49
-  %126 = v_cndmask_b32 %125, %123, %50
-  %127 = v_cvt_pk_u16_u32 %119, %126
-  %128 = ds_bpermute_b32 %52, %32 {offset = 40}
-  %129 = ds_bpermute_b32 %52, %36 {offset = 40}
-  %130 = ds_bpermute_b32 %52, %40 {offset = 40}
-  %131 = ds_bpermute_b32 %52, %44 {offset = 40}
-  %132 = v_cndmask_b32 %128, %129, %48
-  %133 = v_cndmask_b32 %132, %130, %49
-  %134 = v_cndmask_b32 %133, %131, %50
-  %135 = ds_bpermute_b32 %52, %32 {offset = 44}
-  %136 = ds_bpermute_b32 %52, %36 {offset = 44}
-  %137 = ds_bpermute_b32 %52, %40 {offset = 44}
-  %138 = ds_bpermute_b32 %52, %44 {offset = 44}
-  %139 = v_cndmask_b32 %135, %136, %48
-  %140 = v_cndmask_b32 %139, %137, %49
-  %141 = v_cndmask_b32 %140, %138, %50
-  %142 = v_cvt_pk_u16_u32 %134, %141
-  %143 = ds_bpermute_b32 %52, %32 {offset = 48}
-  %144 = ds_bpermute_b32 %52, %36 {offset = 48}
-  %145 = ds_bpermute_b32 %52, %40 {offset = 48}
-  %146 = ds_bpermute_b32 %52, %44 {offset = 48}
-  %147 = v_cndmask_b32 %143, %144, %48
-  %148 = v_cndmask_b32 %147, %145, %49
-  %149 = v_cndmask_b32 %148, %146, %50
-  %150 = ds_bpermute_b32 %52, %32 {offset = 52}
-  %151 = ds_bpermute_b32 %52, %36 {offset = 52}
-  %152 = ds_bpermute_b32 %52, %40 {offset = 52}
-  %153 = ds_bpermute_b32 %52, %44 {offset = 52}
-  %154 = v_cndmask_b32 %150, %151, %48
-  %155 = v_cndmask_b32 %154, %152, %49
-  %156 = v_cndmask_b32 %155, %153, %50
-  %157 = v_cvt_pk_u16_u32 %149, %156
-  %158 = ds_bpermute_b32 %52, %32 {offset = 56}
-  %159 = ds_bpermute_b32 %52, %36 {offset = 56}
-  %160 = ds_bpermute_b32 %52, %40 {offset = 56}
-  %161 = ds_bpermute_b32 %52, %44 {offset = 56}
-  %162 = v_cndmask_b32 %158, %159, %48
-  %163 = v_cndmask_b32 %162, %160, %49
-  %164 = v_cndmask_b32 %163, %161, %50
-  %165 = ds_bpermute_b32 %52, %32 {offset = 60}
-  %166 = ds_bpermute_b32 %52, %36 {offset = 60}
-  %167 = ds_bpermute_b32 %52, %40 {offset = 60}
-  %168 = ds_bpermute_b32 %52, %44 {offset = 60}
-  %169 = v_cndmask_b32 %165, %166, %48
-  %170 = v_cndmask_b32 %169, %167, %49
-  %171 = v_cndmask_b32 %170, %168, %50
-  %172 = v_cvt_pk_u16_u32 %164, %171
-  %repacked = concat(%67, %82, %97, %112, %127, %142, %157, %172) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x8>
-  %174 = v_lshlrev_b32_src0_inline %45, 5
-  %175 = slice %repacked[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x4>
-  global_store_b128_saddr %174, %175, %output_view
-  %176 = slice %repacked[4] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x4>
-  global_store_b128_saddr %174, %176, %output_view {offset = 16}
+  %48 = v_and_b32_src0_inline %47, 1
+  %49 = v_cmp_ne_i32_src1_inline %48 {rhs = 0}
+  %50 = v_and_b32_src0_inline %47, 2
+  %51 = v_cmp_ne_i32_src1_inline %50 {rhs = 0}
+  %52 = v_and_b32_src0_inline %45, 3
+  %53 = v_lshlrev_b32_src0_inline %52, 6
+  %54 = ds_bpermute_b32 %53, %32
+  %55 = ds_bpermute_b32 %53, %36
+  %56 = ds_bpermute_b32 %53, %40
+  %57 = ds_bpermute_b32 %53, %44
+  %58 = v_cndmask_b32 %54, %55, %49
+  %59 = v_cndmask_b32 %56, %57, %49
+  %60 = v_cndmask_b32 %58, %59, %51
+  %61 = ds_bpermute_b32 %53, %32 {offset = 4}
+  %62 = ds_bpermute_b32 %53, %36 {offset = 4}
+  %63 = ds_bpermute_b32 %53, %40 {offset = 4}
+  %64 = ds_bpermute_b32 %53, %44 {offset = 4}
+  %65 = v_cndmask_b32 %61, %62, %49
+  %66 = v_cndmask_b32 %63, %64, %49
+  %67 = v_cndmask_b32 %65, %66, %51
+  %68 = v_cvt_pk_u16_u32 %60, %67
+  %69 = ds_bpermute_b32 %53, %32 {offset = 8}
+  %70 = ds_bpermute_b32 %53, %36 {offset = 8}
+  %71 = ds_bpermute_b32 %53, %40 {offset = 8}
+  %72 = ds_bpermute_b32 %53, %44 {offset = 8}
+  %73 = v_cndmask_b32 %69, %70, %49
+  %74 = v_cndmask_b32 %71, %72, %49
+  %75 = v_cndmask_b32 %73, %74, %51
+  %76 = ds_bpermute_b32 %53, %32 {offset = 12}
+  %77 = ds_bpermute_b32 %53, %36 {offset = 12}
+  %78 = ds_bpermute_b32 %53, %40 {offset = 12}
+  %79 = ds_bpermute_b32 %53, %44 {offset = 12}
+  %80 = v_cndmask_b32 %76, %77, %49
+  %81 = v_cndmask_b32 %78, %79, %49
+  %82 = v_cndmask_b32 %80, %81, %51
+  %83 = v_cvt_pk_u16_u32 %75, %82
+  %84 = ds_bpermute_b32 %53, %32 {offset = 16}
+  %85 = ds_bpermute_b32 %53, %36 {offset = 16}
+  %86 = ds_bpermute_b32 %53, %40 {offset = 16}
+  %87 = ds_bpermute_b32 %53, %44 {offset = 16}
+  %88 = v_cndmask_b32 %84, %85, %49
+  %89 = v_cndmask_b32 %86, %87, %49
+  %90 = v_cndmask_b32 %88, %89, %51
+  %91 = ds_bpermute_b32 %53, %32 {offset = 20}
+  %92 = ds_bpermute_b32 %53, %36 {offset = 20}
+  %93 = ds_bpermute_b32 %53, %40 {offset = 20}
+  %94 = ds_bpermute_b32 %53, %44 {offset = 20}
+  %95 = v_cndmask_b32 %91, %92, %49
+  %96 = v_cndmask_b32 %93, %94, %49
+  %97 = v_cndmask_b32 %95, %96, %51
+  %98 = v_cvt_pk_u16_u32 %90, %97
+  %99 = ds_bpermute_b32 %53, %32 {offset = 24}
+  %100 = ds_bpermute_b32 %53, %36 {offset = 24}
+  %101 = ds_bpermute_b32 %53, %40 {offset = 24}
+  %102 = ds_bpermute_b32 %53, %44 {offset = 24}
+  %103 = v_cndmask_b32 %99, %100, %49
+  %104 = v_cndmask_b32 %101, %102, %49
+  %105 = v_cndmask_b32 %103, %104, %51
+  %106 = ds_bpermute_b32 %53, %32 {offset = 28}
+  %107 = ds_bpermute_b32 %53, %36 {offset = 28}
+  %108 = ds_bpermute_b32 %53, %40 {offset = 28}
+  %109 = ds_bpermute_b32 %53, %44 {offset = 28}
+  %110 = v_cndmask_b32 %106, %107, %49
+  %111 = v_cndmask_b32 %108, %109, %49
+  %112 = v_cndmask_b32 %110, %111, %51
+  %113 = v_cvt_pk_u16_u32 %105, %112
+  %114 = ds_bpermute_b32 %53, %32 {offset = 32}
+  %115 = ds_bpermute_b32 %53, %36 {offset = 32}
+  %116 = ds_bpermute_b32 %53, %40 {offset = 32}
+  %117 = ds_bpermute_b32 %53, %44 {offset = 32}
+  %118 = v_cndmask_b32 %114, %115, %49
+  %119 = v_cndmask_b32 %116, %117, %49
+  %120 = v_cndmask_b32 %118, %119, %51
+  %121 = ds_bpermute_b32 %53, %32 {offset = 36}
+  %122 = ds_bpermute_b32 %53, %36 {offset = 36}
+  %123 = ds_bpermute_b32 %53, %40 {offset = 36}
+  %124 = ds_bpermute_b32 %53, %44 {offset = 36}
+  %125 = v_cndmask_b32 %121, %122, %49
+  %126 = v_cndmask_b32 %123, %124, %49
+  %127 = v_cndmask_b32 %125, %126, %51
+  %128 = v_cvt_pk_u16_u32 %120, %127
+  %129 = ds_bpermute_b32 %53, %32 {offset = 40}
+  %130 = ds_bpermute_b32 %53, %36 {offset = 40}
+  %131 = ds_bpermute_b32 %53, %40 {offset = 40}
+  %132 = ds_bpermute_b32 %53, %44 {offset = 40}
+  %133 = v_cndmask_b32 %129, %130, %49
+  %134 = v_cndmask_b32 %131, %132, %49
+  %135 = v_cndmask_b32 %133, %134, %51
+  %136 = ds_bpermute_b32 %53, %32 {offset = 44}
+  %137 = ds_bpermute_b32 %53, %36 {offset = 44}
+  %138 = ds_bpermute_b32 %53, %40 {offset = 44}
+  %139 = ds_bpermute_b32 %53, %44 {offset = 44}
+  %140 = v_cndmask_b32 %136, %137, %49
+  %141 = v_cndmask_b32 %138, %139, %49
+  %142 = v_cndmask_b32 %140, %141, %51
+  %143 = v_cvt_pk_u16_u32 %135, %142
+  %144 = ds_bpermute_b32 %53, %32 {offset = 48}
+  %145 = ds_bpermute_b32 %53, %36 {offset = 48}
+  %146 = ds_bpermute_b32 %53, %40 {offset = 48}
+  %147 = ds_bpermute_b32 %53, %44 {offset = 48}
+  %148 = v_cndmask_b32 %144, %145, %49
+  %149 = v_cndmask_b32 %146, %147, %49
+  %150 = v_cndmask_b32 %148, %149, %51
+  %151 = ds_bpermute_b32 %53, %32 {offset = 52}
+  %152 = ds_bpermute_b32 %53, %36 {offset = 52}
+  %153 = ds_bpermute_b32 %53, %40 {offset = 52}
+  %154 = ds_bpermute_b32 %53, %44 {offset = 52}
+  %155 = v_cndmask_b32 %151, %152, %49
+  %156 = v_cndmask_b32 %153, %154, %49
+  %157 = v_cndmask_b32 %155, %156, %51
+  %158 = v_cvt_pk_u16_u32 %150, %157
+  %159 = ds_bpermute_b32 %53, %32 {offset = 56}
+  %160 = ds_bpermute_b32 %53, %36 {offset = 56}
+  %161 = ds_bpermute_b32 %53, %40 {offset = 56}
+  %162 = ds_bpermute_b32 %53, %44 {offset = 56}
+  %163 = v_cndmask_b32 %159, %160, %49
+  %164 = v_cndmask_b32 %161, %162, %49
+  %165 = v_cndmask_b32 %163, %164, %51
+  %166 = ds_bpermute_b32 %53, %32 {offset = 60}
+  %167 = ds_bpermute_b32 %53, %36 {offset = 60}
+  %168 = ds_bpermute_b32 %53, %40 {offset = 60}
+  %169 = ds_bpermute_b32 %53, %44 {offset = 60}
+  %170 = v_cndmask_b32 %166, %167, %49
+  %171 = v_cndmask_b32 %168, %169, %49
+  %172 = v_cndmask_b32 %170, %171, %51
+  %173 = v_cvt_pk_u16_u32 %165, %172
+  %repacked = concat(%68, %83, %98, %113, %128, %143, %158, %173) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x8>
+  %175 = v_lshlrev_b32_src0_inline %45, 5
+  %176 = slice %repacked[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x4>
+  global_store_b128_saddr %175, %176, %output_view
+  %177 = slice %repacked[4] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x4>
+  global_store_b128_saddr %175, %177, %output_view {offset = 16}
   return
 }
 
@@ -1347,61 +1348,62 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) @cdna_result_fragment_re
   %50 = v_and_b32_src0_inline %22, 15
   %51 = v_lshrrev_b32_src0_inline %22, 4
   %52 = v_and_b32_src0_inline %50, 3
-  %53 = v_cmp_eq_i32_src1_inline %52 {rhs = 1}
-  %54 = v_cmp_eq_i32_src1_inline %52 {rhs = 2}
-  %55 = v_cmp_eq_i32_src1_inline %52 {rhs = 3}
-  %56 = v_lshrrev_b32_src0_inline %50, 2
-  %57 = v_lshlrev_b32_src0_inline %56, 6
-  %58 = v_lshlrev_b32_src0_inline %51, 4
-  %59 = v_add_u32 %57, %58
-  %60 = ds_bpermute_b32 %59, %34
-  %61 = ds_bpermute_b32 %59, %39
-  %62 = ds_bpermute_b32 %59, %44
-  %63 = ds_bpermute_b32 %59, %49
-  %64 = v_cndmask_b32 %60, %61, %53
-  %65 = v_cndmask_b32 %64, %62, %54
-  %66 = v_cndmask_b32 %65, %63, %55
-  %67 = ds_bpermute_b32 %59, %34 {offset = 4}
-  %68 = ds_bpermute_b32 %59, %39 {offset = 4}
-  %69 = ds_bpermute_b32 %59, %44 {offset = 4}
-  %70 = ds_bpermute_b32 %59, %49 {offset = 4}
-  %71 = v_cndmask_b32 %67, %68, %53
-  %72 = v_cndmask_b32 %71, %69, %54
-  %73 = v_cndmask_b32 %72, %70, %55
-  %74 = v_cvt_pk_u16_u32 %66, %73
-  %75 = ds_bpermute_b32 %59, %34 {offset = 8}
-  %76 = ds_bpermute_b32 %59, %39 {offset = 8}
-  %77 = ds_bpermute_b32 %59, %44 {offset = 8}
-  %78 = ds_bpermute_b32 %59, %49 {offset = 8}
-  %79 = v_cndmask_b32 %75, %76, %53
-  %80 = v_cndmask_b32 %79, %77, %54
-  %81 = v_cndmask_b32 %80, %78, %55
-  %82 = ds_bpermute_b32 %59, %34 {offset = 12}
-  %83 = ds_bpermute_b32 %59, %39 {offset = 12}
-  %84 = ds_bpermute_b32 %59, %44 {offset = 12}
-  %85 = ds_bpermute_b32 %59, %49 {offset = 12}
-  %86 = v_cndmask_b32 %82, %83, %53
-  %87 = v_cndmask_b32 %86, %84, %54
-  %88 = v_cndmask_b32 %87, %85, %55
-  %89 = v_cvt_pk_u16_u32 %81, %88
-  %repacked = concat(%74, %89) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %91 = copy %init : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x4>
-  %second = v_mfma_f32_16x16x16_bf16 %repacked, %rhs, %91
-  %93 = v_lshlrev_b32_src0_inline %51, 8
-  %94 = v_lshlrev_b32_src0_inline %50, 2
-  %95 = v_add_u32 %93, %94
-  %96 = slice %second[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %97 = s_mov_b32_m0_imm 0
-  global_store_dword_saddr %95, %96, %output_view, %97
-  %98 = slice %second[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %99 = s_mov_b32_m0_imm 0
-  global_store_dword_saddr %95, %98, %output_view, %99 {offset = 64}
-  %100 = slice %second[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %101 = s_mov_b32_m0_imm 0
-  global_store_dword_saddr %95, %100, %output_view, %101 {offset = 128}
-  %102 = slice %second[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %103 = s_mov_b32_m0_imm 0
-  global_store_dword_saddr %95, %102, %output_view, %103 {offset = 192}
+  %53 = v_and_b32_src0_inline %52, 1
+  %54 = v_cmp_ne_i32_src1_inline %53 {rhs = 0}
+  %55 = v_and_b32_src0_inline %52, 2
+  %56 = v_cmp_ne_i32_src1_inline %55 {rhs = 0}
+  %57 = v_lshrrev_b32_src0_inline %50, 2
+  %58 = v_lshlrev_b32_src0_inline %57, 6
+  %59 = v_lshlrev_b32_src0_inline %51, 4
+  %60 = v_add_u32 %58, %59
+  %61 = ds_bpermute_b32 %60, %34
+  %62 = ds_bpermute_b32 %60, %39
+  %63 = ds_bpermute_b32 %60, %44
+  %64 = ds_bpermute_b32 %60, %49
+  %65 = v_cndmask_b32 %61, %62, %54
+  %66 = v_cndmask_b32 %63, %64, %54
+  %67 = v_cndmask_b32 %65, %66, %56
+  %68 = ds_bpermute_b32 %60, %34 {offset = 4}
+  %69 = ds_bpermute_b32 %60, %39 {offset = 4}
+  %70 = ds_bpermute_b32 %60, %44 {offset = 4}
+  %71 = ds_bpermute_b32 %60, %49 {offset = 4}
+  %72 = v_cndmask_b32 %68, %69, %54
+  %73 = v_cndmask_b32 %70, %71, %54
+  %74 = v_cndmask_b32 %72, %73, %56
+  %75 = v_cvt_pk_u16_u32 %67, %74
+  %76 = ds_bpermute_b32 %60, %34 {offset = 8}
+  %77 = ds_bpermute_b32 %60, %39 {offset = 8}
+  %78 = ds_bpermute_b32 %60, %44 {offset = 8}
+  %79 = ds_bpermute_b32 %60, %49 {offset = 8}
+  %80 = v_cndmask_b32 %76, %77, %54
+  %81 = v_cndmask_b32 %78, %79, %54
+  %82 = v_cndmask_b32 %80, %81, %56
+  %83 = ds_bpermute_b32 %60, %34 {offset = 12}
+  %84 = ds_bpermute_b32 %60, %39 {offset = 12}
+  %85 = ds_bpermute_b32 %60, %44 {offset = 12}
+  %86 = ds_bpermute_b32 %60, %49 {offset = 12}
+  %87 = v_cndmask_b32 %83, %84, %54
+  %88 = v_cndmask_b32 %85, %86, %54
+  %89 = v_cndmask_b32 %87, %88, %56
+  %90 = v_cvt_pk_u16_u32 %82, %89
+  %repacked = concat(%75, %90) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %92 = copy %init : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x4>
+  %second = v_mfma_f32_16x16x16_bf16 %repacked, %rhs, %92
+  %94 = v_lshlrev_b32_src0_inline %51, 8
+  %95 = v_lshlrev_b32_src0_inline %50, 2
+  %96 = v_add_u32 %94, %95
+  %97 = slice %second[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %98 = s_mov_b32_m0_imm 0
+  global_store_dword_saddr %96, %97, %output_view, %98
+  %99 = slice %second[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %100 = s_mov_b32_m0_imm 0
+  global_store_dword_saddr %96, %99, %output_view, %100 {offset = 64}
+  %101 = slice %second[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %102 = s_mov_b32_m0_imm 0
+  global_store_dword_saddr %96, %101, %output_view, %102 {offset = 128}
+  %103 = slice %second[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %104 = s_mov_b32_m0_imm 0
+  global_store_dword_saddr %96, %103, %output_view, %104 {offset = 192}
   return
 }
 
@@ -1444,61 +1446,62 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx950_result_fragment_
   %30 = v_and_b32_src0_inline %22, 15
   %31 = v_lshrrev_b32_src0_inline %22, 4
   %32 = v_and_b32_src0_inline %30, 3
-  %33 = v_cmp_eq_i32_src1_inline %32 {rhs = 1}
-  %34 = v_cmp_eq_i32_src1_inline %32 {rhs = 2}
-  %35 = v_cmp_eq_i32_src1_inline %32 {rhs = 3}
-  %36 = v_lshrrev_b32_src0_inline %30, 2
-  %37 = v_lshlrev_b32_src0_inline %36, 6
-  %38 = v_lshlrev_b32_src0_inline %31, 4
-  %39 = v_add_u32 %37, %38
-  %40 = ds_bpermute_b32 %39, %26
-  %41 = ds_bpermute_b32 %39, %27
-  %42 = ds_bpermute_b32 %39, %28
-  %43 = ds_bpermute_b32 %39, %29
-  %44 = v_cndmask_b32 %40, %41, %33
-  %45 = v_cndmask_b32 %44, %42, %34
-  %46 = v_cndmask_b32 %45, %43, %35
-  %47 = ds_bpermute_b32 %39, %26 {offset = 4}
-  %48 = ds_bpermute_b32 %39, %27 {offset = 4}
-  %49 = ds_bpermute_b32 %39, %28 {offset = 4}
-  %50 = ds_bpermute_b32 %39, %29 {offset = 4}
-  %51 = v_cndmask_b32 %47, %48, %33
-  %52 = v_cndmask_b32 %51, %49, %34
-  %53 = v_cndmask_b32 %52, %50, %35
-  %54 = v_cvt_pk_bf16_f32 %46, %53
-  %55 = ds_bpermute_b32 %39, %26 {offset = 8}
-  %56 = ds_bpermute_b32 %39, %27 {offset = 8}
-  %57 = ds_bpermute_b32 %39, %28 {offset = 8}
-  %58 = ds_bpermute_b32 %39, %29 {offset = 8}
-  %59 = v_cndmask_b32 %55, %56, %33
-  %60 = v_cndmask_b32 %59, %57, %34
-  %61 = v_cndmask_b32 %60, %58, %35
-  %62 = ds_bpermute_b32 %39, %26 {offset = 12}
-  %63 = ds_bpermute_b32 %39, %27 {offset = 12}
-  %64 = ds_bpermute_b32 %39, %28 {offset = 12}
-  %65 = ds_bpermute_b32 %39, %29 {offset = 12}
-  %66 = v_cndmask_b32 %62, %63, %33
-  %67 = v_cndmask_b32 %66, %64, %34
-  %68 = v_cndmask_b32 %67, %65, %35
-  %69 = v_cvt_pk_bf16_f32 %61, %68
-  %repacked = concat(%54, %69) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %71 = copy %init : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x4>
-  %second = v_mfma_f32_16x16x16_bf16 %repacked, %rhs, %71
-  %73 = v_lshlrev_b32_src0_inline %31, 8
-  %74 = v_lshlrev_b32_src0_inline %30, 2
-  %75 = v_add_u32 %73, %74
-  %76 = slice %second[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %77 = s_mov_b32_m0_imm 0
-  global_store_dword_saddr %75, %76, %output_view, %77
-  %78 = slice %second[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %79 = s_mov_b32_m0_imm 0
-  global_store_dword_saddr %75, %78, %output_view, %79 {offset = 64}
-  %80 = slice %second[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %81 = s_mov_b32_m0_imm 0
-  global_store_dword_saddr %75, %80, %output_view, %81 {offset = 128}
-  %82 = slice %second[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %83 = s_mov_b32_m0_imm 0
-  global_store_dword_saddr %75, %82, %output_view, %83 {offset = 192}
+  %33 = v_and_b32_src0_inline %32, 1
+  %34 = v_cmp_ne_i32_src1_inline %33 {rhs = 0}
+  %35 = v_and_b32_src0_inline %32, 2
+  %36 = v_cmp_ne_i32_src1_inline %35 {rhs = 0}
+  %37 = v_lshrrev_b32_src0_inline %30, 2
+  %38 = v_lshlrev_b32_src0_inline %37, 6
+  %39 = v_lshlrev_b32_src0_inline %31, 4
+  %40 = v_add_u32 %38, %39
+  %41 = ds_bpermute_b32 %40, %26
+  %42 = ds_bpermute_b32 %40, %27
+  %43 = ds_bpermute_b32 %40, %28
+  %44 = ds_bpermute_b32 %40, %29
+  %45 = v_cndmask_b32 %41, %42, %34
+  %46 = v_cndmask_b32 %43, %44, %34
+  %47 = v_cndmask_b32 %45, %46, %36
+  %48 = ds_bpermute_b32 %40, %26 {offset = 4}
+  %49 = ds_bpermute_b32 %40, %27 {offset = 4}
+  %50 = ds_bpermute_b32 %40, %28 {offset = 4}
+  %51 = ds_bpermute_b32 %40, %29 {offset = 4}
+  %52 = v_cndmask_b32 %48, %49, %34
+  %53 = v_cndmask_b32 %50, %51, %34
+  %54 = v_cndmask_b32 %52, %53, %36
+  %55 = v_cvt_pk_bf16_f32 %47, %54
+  %56 = ds_bpermute_b32 %40, %26 {offset = 8}
+  %57 = ds_bpermute_b32 %40, %27 {offset = 8}
+  %58 = ds_bpermute_b32 %40, %28 {offset = 8}
+  %59 = ds_bpermute_b32 %40, %29 {offset = 8}
+  %60 = v_cndmask_b32 %56, %57, %34
+  %61 = v_cndmask_b32 %58, %59, %34
+  %62 = v_cndmask_b32 %60, %61, %36
+  %63 = ds_bpermute_b32 %40, %26 {offset = 12}
+  %64 = ds_bpermute_b32 %40, %27 {offset = 12}
+  %65 = ds_bpermute_b32 %40, %28 {offset = 12}
+  %66 = ds_bpermute_b32 %40, %29 {offset = 12}
+  %67 = v_cndmask_b32 %63, %64, %34
+  %68 = v_cndmask_b32 %65, %66, %34
+  %69 = v_cndmask_b32 %67, %68, %36
+  %70 = v_cvt_pk_bf16_f32 %62, %69
+  %repacked = concat(%55, %70) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %72 = copy %init : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x4>
+  %second = v_mfma_f32_16x16x16_bf16 %repacked, %rhs, %72
+  %74 = v_lshlrev_b32_src0_inline %31, 8
+  %75 = v_lshlrev_b32_src0_inline %30, 2
+  %76 = v_add_u32 %74, %75
+  %77 = slice %second[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %78 = s_mov_b32_m0_imm 0
+  global_store_dword_saddr %76, %77, %output_view, %78
+  %79 = slice %second[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %80 = s_mov_b32_m0_imm 0
+  global_store_dword_saddr %76, %79, %output_view, %80 {offset = 64}
+  %81 = slice %second[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %82 = s_mov_b32_m0_imm 0
+  global_store_dword_saddr %76, %81, %output_view, %82 {offset = 128}
+  %83 = slice %second[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %84 = s_mov_b32_m0_imm 0
+  global_store_dword_saddr %76, %83, %output_view, %84 {offset = 192}
   return
 }
 
