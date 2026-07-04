@@ -14,6 +14,7 @@ from loom.target.arch.amdgpu.matrix_contracts import (
     AmdgpuMatrixContract,
     payload,
 )
+from loom.target.low_descriptors import Immediate, ImmediateKind
 
 
 def _contract(name: str) -> AmdgpuMatrixContract:
@@ -116,6 +117,7 @@ def _contract_initializer(contract: AmdgpuMatrixContract) -> str:
         contract,
         keys_by_semantic_tag=(amdgpu_matrix_contract_tables._matrix_descriptor_keys_by_semantic_tag()),
         descriptor_shapes_by_key=(amdgpu_matrix_contract_tables._matrix_descriptor_shapes_by_key()),
+        descriptor_immediates_by_key=(amdgpu_matrix_contract_tables._matrix_descriptor_immediates_by_key()),
     )
 
 
@@ -290,6 +292,25 @@ def test_generation_rejects_ambiguous_shape_matched_descriptor_keys() -> None:
         assert "ambiguously matches descriptor key(s) amdgpu.first, amdgpu.second" in message
     else:
         raise AssertionError("expected ambiguous descriptor resolution to fail")
+
+
+def test_generation_rejects_unmapped_matrix_descriptor_immediates() -> None:
+    contract = _contract("swmmac.f32.16x16x32.f16")
+
+    try:
+        amdgpu_matrix_contract_tables._validate_contract_descriptor_immediates(
+            contract,
+            "amdgpu.v_swmmac_f32_16x16x32_f16",
+            descriptor_immediates_by_key={
+                "amdgpu.v_swmmac_f32_16x16x32_f16": (Immediate("surprise", ImmediateKind.UNSIGNED),),
+            },
+        )
+    except ValueError as exc:
+        message = str(exc)
+        assert "AMDGPU matrix contract 'swmmac.f32.16x16x32.f16'" in message
+        assert "unmapped immediate 'surprise'" in message
+    else:
+        raise AssertionError("expected unmapped immediate validation to fail")
 
 
 def test_generation_rejects_selector_and_implicit_scale_format_overlap() -> None:
