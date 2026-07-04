@@ -357,6 +357,7 @@ loom_cc_library(
     ::target_binding
     iree::base
     iree::base::internal::arena
+    loom::analysis::availability
     loom::error::emitter
     loom::error::error_defs
     loom::ir
