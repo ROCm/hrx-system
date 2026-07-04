@@ -2669,12 +2669,9 @@ static iree_status_t loom_low_lower_descriptor_matrix_auxiliary_source_value(
   *out_source_value = LOOM_VALUE_ID_INVALID;
   const loom_contract_value_ref_t ref =
       operand->encoded.auxiliary_value_refs[key];
-  if (!loom_contract_value_ref_is_present(ref)) {
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
-        "descriptor-matrix selected auxiliary operand '%.*s' is unavailable",
-        (int)field_name.size, field_name.data);
-  }
+  (void)field_name;
+  IREE_ASSERT(loom_contract_value_ref_is_present(ref),
+              "descriptor-matrix selected auxiliary operand is unavailable");
   *out_source_value = loom_contract_value_ref_value_id(ref);
   return iree_ok_status();
 }
@@ -2723,10 +2720,9 @@ static iree_status_t loom_low_lower_descriptor_matrix_packet_value(
             &source_value));
     return loom_low_lower_lookup_value(context, source_value, out_low_value);
   }
-  return iree_make_status(
-      IREE_STATUS_INTERNAL,
-      "descriptor-matrix selected packet field '%.*s' is unmapped",
-      (int)field_name.size, field_name.data);
+  IREE_ASSERT_UNREACHABLE(
+      "descriptor-matrix selected packet field is unmapped");
+  IREE_BUILTIN_UNREACHABLE();
 }
 
 static iree_status_t loom_low_lower_descriptor_matrix_packet_operands(
@@ -3051,10 +3047,10 @@ static iree_status_t loom_low_lower_emit_region_ops(
       loom_builder_set_block(&context->builder,
                              context->lowering.block_map[block_index]);
     } else if (block_index != 0) {
-      return iree_make_status(
-          IREE_STATUS_INTERNAL,
+      IREE_ASSERT_UNREACHABLE(
           "structured source region with multiple blocks reached target-low "
           "emission");
+      IREE_BUILTIN_UNREACHABLE();
     }
     loom_op_t* source_op = NULL;
     loom_block_for_each_op(source_block, source_op) {
