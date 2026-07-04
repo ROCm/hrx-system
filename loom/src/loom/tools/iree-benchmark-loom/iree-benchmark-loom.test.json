@@ -272,7 +272,9 @@
           "artifact_manifest_path",
           "target_artifact_path",
           "rounding=finite_only",
-          "fp8_packed_bf16_decode_repair_zero_subnormal"
+          "fp8_packed_bf16_decode_repair_zero_subnormal",
+          ".compile_report.target_capability_rows.rows[]",
+          "matrix_fp8_native_kind"
         ],
         "not_contains": ["static_summary"]
       }
