@@ -85,8 +85,8 @@ static iree_status_t loom_func_provider_catalog_lookup_facts(
   const loom_func_symbol_facts_t* facts =
       loom_func_symbol_facts_cast(base_facts);
   if (!facts) {
-    return iree_make_status(IREE_STATUS_INTERNAL,
-                            "func provider symbol has no func facts");
+    IREE_ASSERT_UNREACHABLE("func provider symbol has no func facts");
+    IREE_BUILTIN_UNREACHABLE();
   }
   if (facts->implements_id == LOOM_STRING_ID_INVALID ||
       facts->implements_id >= module->strings.count) {
@@ -155,8 +155,8 @@ static iree_status_t loom_func_provider_catalog_populate_local(
     loom_func_like_t function =
         loom_func_like_cast(module, symbol->defining_op);
     if (!loom_func_like_isa(function)) {
-      return iree_make_status(IREE_STATUS_INTERNAL,
-                              "func provider symbol is not function-like");
+      IREE_ASSERT_UNREACHABLE("func provider symbol is not function-like");
+      IREE_BUILTIN_UNREACHABLE();
     }
 
     loom_func_provider_summary_t* provider = &providers[provider_index];

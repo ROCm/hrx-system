@@ -145,9 +145,9 @@ static iree_status_t loom_func_symbol_fact_compute(
 
   loom_func_like_t func = loom_func_like_cast(module, symbol->defining_op);
   if (!loom_func_like_isa(func)) {
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
+    IREE_ASSERT_UNREACHABLE(
         "func symbol fact domain attached to a non-FuncLike op");
+    IREE_BUILTIN_UNREACHABLE();
   }
 
   loom_func_symbol_facts_t* facts = NULL;
