@@ -355,11 +355,9 @@ iree_status_t loom_amdgpu_build_sanitizer_race_report_island(
     loom_amdgpu_sanitizer_race_report_island_t* out_island) {
   IREE_ASSERT_ARGUMENT(out_island);
   *out_island = (loom_amdgpu_sanitizer_race_report_island_t){0};
-  if (after_block->parent_region == NULL) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "AMDGPU sanitizer race report island requires a low region block");
-  }
+  IREE_ASSERT(after_block->parent_region != NULL,
+              "AMDGPU sanitizer race report island requires a low region "
+              "block");
 
   loom_amdgpu_sanitizer_race_report_island_t island = {0};
   IREE_RETURN_IF_ERROR(loom_region_insert_block(
@@ -383,11 +381,9 @@ iree_status_t loom_amdgpu_build_sanitizer_race_report_branch(
     const loom_amdgpu_feedback_packet_source_t* source,
     const loom_amdgpu_sanitizer_race_report_t* report,
     loom_location_id_t location) {
-  if (builder->ip.before_op != NULL) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "AMDGPU sanitizer race report branch must be built "
-                            "at the end of a low block");
-  }
+  IREE_ASSERT(builder->ip.before_op == NULL,
+              "AMDGPU sanitizer race report branch must be built at the end "
+              "of a low block");
   loom_amdgpu_sanitizer_race_require_register_class(
       builder, descriptor_set, source->dispatch_ptr, 2,
       LOOM_AMDGPU_REG_CLASS_ID_SGPR);

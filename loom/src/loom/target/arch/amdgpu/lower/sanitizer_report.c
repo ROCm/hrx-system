@@ -240,11 +240,8 @@ iree_status_t loom_amdgpu_build_sanitizer_access_report_island(
       .flags = flags,
   };
   loom_amdgpu_sanitizer_validate_access_report(&access_report);
-  if (after_block->parent_region == NULL) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "AMDGPU sanitizer report island requires a low region block");
-  }
+  IREE_ASSERT(after_block->parent_region != NULL,
+              "AMDGPU sanitizer report island requires a low region block");
 
   loom_amdgpu_sanitizer_access_report_island_t island = {
       .access_kind = access_kind,
@@ -282,11 +279,9 @@ iree_status_t loom_amdgpu_build_sanitizer_access_report_branch(
     const loom_amdgpu_sanitizer_access_report_t* report,
     loom_location_id_t location) {
   loom_amdgpu_sanitizer_validate_access_report_for_island(island, report);
-  if (builder->ip.before_op != NULL) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "AMDGPU sanitizer report branch must be built at "
-                            "the end of a low block");
-  }
+  IREE_ASSERT(builder->ip.before_op == NULL,
+              "AMDGPU sanitizer report branch must be built at the end of a "
+              "low block");
   loom_amdgpu_sanitizer_require_register_class(builder, descriptor_set,
                                                source->dispatch_ptr, 2,
                                                LOOM_AMDGPU_REG_CLASS_ID_SGPR);
@@ -388,11 +383,8 @@ iree_status_t loom_amdgpu_build_sanitizer_trap_island(
     loom_amdgpu_sanitizer_trap_island_t* out_island) {
   IREE_ASSERT_ARGUMENT(out_island);
   *out_island = (loom_amdgpu_sanitizer_trap_island_t){0};
-  if (after_block->parent_region == NULL) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "AMDGPU sanitizer trap island requires a low region block");
-  }
+  IREE_ASSERT(after_block->parent_region != NULL,
+              "AMDGPU sanitizer trap island requires a low region block");
 
   loom_amdgpu_sanitizer_trap_island_t island = {0};
   IREE_RETURN_IF_ERROR(loom_region_insert_block(
@@ -428,11 +420,9 @@ iree_status_t loom_amdgpu_build_sanitizer_trap_island(
 iree_status_t loom_amdgpu_build_sanitizer_trap_branch(
     loom_builder_t* builder, const loom_amdgpu_sanitizer_trap_island_t* island,
     loom_location_id_t location) {
-  if (builder->ip.before_op != NULL) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "AMDGPU sanitizer trap branch must be built at "
-                            "the end of a low block");
-  }
+  IREE_ASSERT(builder->ip.before_op == NULL,
+              "AMDGPU sanitizer trap branch must be built at the end of a low "
+              "block");
   loom_op_t* branch_op = NULL;
   return loom_low_br_build(builder, island->entry_block, /*args=*/NULL,
                            /*args_count=*/0, location, &branch_op);
