@@ -186,22 +186,12 @@ static iree_status_t loom_amdgpu_hal_binding_resolve_descriptor_ref(
   *out_opcode_id = LOOM_STRING_ID_INVALID;
   const loom_low_descriptor_t* descriptor =
       loom_amdgpu_descriptor_ref_descriptor(descriptor_set, descriptor_ref);
-  if (descriptor == NULL) {
-    return iree_make_status(
-        IREE_STATUS_NOT_FOUND,
-        "AMDGPU HAL binding materialization references missing descriptor ref "
-        "%" PRIu16,
-        descriptor_ref);
-  }
+  IREE_ASSERT(descriptor != NULL,
+              "generated AMDGPU HAL materialization descriptor refs exist");
   iree_string_view_t key = loom_low_descriptor_set_string(
       descriptor_set, descriptor->key_string_offset);
-  if (iree_string_view_is_empty(key)) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "AMDGPU HAL binding materialization descriptor ref %" PRIu16
-        " has no descriptor key",
-        descriptor_ref);
-  }
+  IREE_ASSERT(!iree_string_view_is_empty(key),
+              "generated AMDGPU HAL materialization descriptors have keys");
   IREE_RETURN_IF_ERROR(
       loom_module_intern_string(rewriter->module, key, out_opcode_id));
   *out_descriptor = descriptor;
