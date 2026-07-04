@@ -75,6 +75,8 @@ typedef struct loom_amdgpu_vector_16bit_float_conversion_plan_t {
   loom_value_id_t scale_source;
   // Numeric format of scale_source, or NONE when there is no scale source.
   loom_value_fact_numeric_format_flags_t scale_format;
+  // Number of logical payload lanes covered by each scale value.
+  uint32_t scale_group_element_count;
   // Conversion operation selected for the source/result type pair.
   loom_amdgpu_vector_16bit_float_conversion_kind_t kind;
   // Source scalar element type.
