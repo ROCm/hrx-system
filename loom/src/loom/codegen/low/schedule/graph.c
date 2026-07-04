@@ -1185,11 +1185,8 @@ static iree_status_t loom_low_schedule_effect_frontier_note_read(
         state, frontier->write_nodes[i], node_index,
         LOOM_LOW_SCHEDULE_DEPENDENCY_EFFECT, UINT32_MAX));
   }
-  if (frontier->read_count >= state->effect_read_capacity) {
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
-        "low schedule exceeded precomputed effect-frontier read capacity");
-  }
+  IREE_ASSERT(frontier->read_count < state->effect_read_capacity,
+              "precomputed effect-frontier read capacity must cover all rows");
   frontier->read_nodes[frontier->read_count] = node_index;
   frontier->read_summaries[frontier->read_count] = *summary;
   ++frontier->read_count;
@@ -1224,11 +1221,8 @@ static iree_status_t loom_low_schedule_effect_frontier_note_write_complete(
     ++write_index;
   }
   frontier->write_count = write_index;
-  if (frontier->write_count >= state->effect_write_capacity) {
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
-        "low schedule exceeded precomputed effect-frontier write capacity");
-  }
+  IREE_ASSERT(frontier->write_count < state->effect_write_capacity,
+              "precomputed effect-frontier write capacity must cover all rows");
   frontier->write_nodes[frontier->write_count] = node_index;
   frontier->write_summaries[frontier->write_count] = *summary;
   ++frontier->write_count;

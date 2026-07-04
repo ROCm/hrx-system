@@ -13,11 +13,8 @@
 static iree_status_t loom_low_schedule_append_resource_use(
     loom_low_schedule_build_state_t* state,
     loom_low_schedule_resource_use_t resource_use) {
-  if (state->resource_use_count >= state->resource_use_capacity) {
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
-        "low schedule exceeded precomputed resource-use capacity");
-  }
+  IREE_ASSERT(state->resource_use_count < state->resource_use_capacity,
+              "precomputed resource-use capacity must cover all rows");
   IREE_ASSERT(state->resource_summaries != NULL);
   IREE_ASSERT(resource_use.resource_id <
               state->target.descriptor_set->resource_count);
@@ -60,11 +57,8 @@ static iree_status_t loom_low_schedule_append_resource_use(
 static iree_status_t loom_low_schedule_append_effect_use(
     loom_low_schedule_build_state_t* state,
     loom_low_schedule_effect_use_t effect_use) {
-  if (state->effect_use_count >= state->effect_use_capacity) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "low schedule exceeded precomputed effect-use capacity");
-  }
+  IREE_ASSERT(state->effect_use_count < state->effect_use_capacity,
+              "precomputed effect-use capacity must cover all rows");
   state->effect_uses[state->effect_use_count++] = effect_use;
   return iree_ok_status();
 }
@@ -72,11 +66,8 @@ static iree_status_t loom_low_schedule_append_effect_use(
 static iree_status_t loom_low_schedule_append_hazard_use(
     loom_low_schedule_build_state_t* state,
     loom_low_schedule_hazard_use_t hazard_use) {
-  if (state->hazard_use_count >= state->hazard_use_capacity) {
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
-        "low schedule exceeded precomputed hazard-use capacity");
-  }
+  IREE_ASSERT(state->hazard_use_count < state->hazard_use_capacity,
+              "precomputed hazard-use capacity must cover all rows");
   state->hazard_uses[state->hazard_use_count++] = hazard_use;
   return iree_ok_status();
 }
