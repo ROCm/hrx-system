@@ -298,17 +298,17 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(64, 1, 1
   %row = v_add_u32 %25, %subgroup_base
   %27 = v_mov_b32 0
   %36 = v_and_b32_src0_inline %19, 31
-  %39 = v_lshlrev_b32_src0_inline %row, 6
-  %40 = v_lshlrev_b32_src0_inline %36, 2
-  %41 = v_add_u32 %39, %40
-  global_store_b32_saddr %41, %27, %output_view
-  global_store_b32_saddr %41, %27, %output_view {offset = 128}
-  global_store_b32_saddr %41, %27, %output_view {offset = 256}
-  global_store_b32_saddr %41, %27, %output_view {offset = 384}
-  global_store_b32_saddr %41, %27, %output_view {offset = 512}
-  global_store_b32_saddr %41, %27, %output_view {offset = 640}
-  global_store_b32_saddr %41, %27, %output_view {offset = 768}
-  global_store_b32_saddr %41, %27, %output_view {offset = 896}
+  %37 = v_lshlrev_b32_src0_inline %row, 6
+  %38 = v_lshlrev_b32_src0_inline %36, 2
+  %39 = v_add_u32 %37, %38
+  global_store_b32_saddr %39, %27, %output_view
+  global_store_b32_saddr %39, %27, %output_view {offset = 128}
+  global_store_b32_saddr %39, %27, %output_view {offset = 256}
+  global_store_b32_saddr %39, %27, %output_view {offset = 384}
+  global_store_b32_saddr %39, %27, %output_view {offset = 512}
+  global_store_b32_saddr %39, %27, %output_view {offset = 640}
+  global_store_b32_saddr %39, %27, %output_view {offset = 768}
+  global_store_b32_saddr %39, %27, %output_view {offset = 896}
   return
 }
 
