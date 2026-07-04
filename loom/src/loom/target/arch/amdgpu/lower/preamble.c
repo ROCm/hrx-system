@@ -608,10 +608,8 @@ static iree_status_t loom_amdgpu_lookup_live_in_by_source(
       continue;
     }
     if (*out_value_id != LOOM_VALUE_ID_INVALID) {
-      return iree_make_status(
-          IREE_STATUS_ALREADY_EXISTS,
-          "AMDGPU preamble lowering found duplicate '%.*s' live-ins",
-          (int)expected_source.size, expected_source.data);
+      IREE_ASSERT_UNREACHABLE("unique AMDGPU preamble live-in source");
+      IREE_BUILTIN_UNREACHABLE();
     }
     *out_value_id = loom_low_live_in_result(op);
   }
@@ -636,9 +634,8 @@ static iree_status_t loom_amdgpu_lookup_packed_workitem_id_live_in(
 
   if (xy_value_id != LOOM_VALUE_ID_INVALID &&
       xyz_value_id != LOOM_VALUE_ID_INVALID) {
-    return iree_make_status(
-        IREE_STATUS_ALREADY_EXISTS,
-        "AMDGPU preamble lowering found multiple packed workitem-id live-ins");
+    IREE_ASSERT_UNREACHABLE("unique AMDGPU packed workitem-id live-in");
+    IREE_BUILTIN_UNREACHABLE();
   }
   if (xy_value_id != LOOM_VALUE_ID_INVALID) {
     *out_dimension_count = 2;
@@ -1237,11 +1234,7 @@ static iree_status_t loom_amdgpu_emit_local_linear_workitem_id(
 
   if (workgroup_size->z > 1) {
     const uint64_t z_scale = (uint64_t)workgroup_size->x * workgroup_size->y;
-    if (z_scale > UINT32_MAX) {
-      return iree_make_status(
-          IREE_STATUS_OUT_OF_RANGE,
-          "AMDGPU subgroup query workgroup linearization scale overflows u32");
-    }
+    IREE_ASSERT_LE(z_scale, UINT32_MAX);
     loom_value_id_t workitem_z = LOOM_VALUE_ID_INVALID;
     IREE_RETURN_IF_ERROR(loom_amdgpu_lookup_workitem_id(
         context, source_op, packed_dimension_count, packed_workitem_id,
