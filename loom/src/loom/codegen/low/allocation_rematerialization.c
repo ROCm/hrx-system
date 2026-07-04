@@ -8,6 +8,7 @@
 
 #include <string.h>
 
+#include "loom/analysis/availability.h"
 #include "loom/codegen/low/descriptor_traits.h"
 #include "loom/codegen/low/diagnostics.h"
 #include "loom/codegen/low/target_binding.h"
@@ -159,6 +160,18 @@ static iree_status_t loom_low_allocation_try_rematerialize_value(
   }
   if (!shortens_live_range) {
     return iree_ok_status();
+  }
+  loom_availability_analysis_t availability = {0};
+  IREE_RETURN_IF_ERROR(
+      loom_availability_analysis_initialize(module, arena, &availability));
+  for (uint32_t i = 0; i < use_count; ++i) {
+    bool available = false;
+    IREE_RETURN_IF_ERROR(loom_availability_op_captures_are_available_before_op(
+        &availability, defining_op, loom_use_user_op(uses[i]), defining_op,
+        &available));
+    if (!available) {
+      return iree_ok_status();
+    }
   }
 
   loom_rewriter_t rewriter = {0};

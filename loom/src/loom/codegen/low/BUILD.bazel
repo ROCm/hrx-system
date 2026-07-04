@@ -343,6 +343,7 @@ loom_cc_library(
         ":descriptor_traits",
         ":diagnostics",
         ":target_binding",
+        "//loom/src/loom/analysis:availability",
         "//loom/src/loom/error:emitter",
         "//loom/src/loom/error:error_defs",
         "//loom/src/loom/ir",
