@@ -331,9 +331,9 @@ iree_status_t loom_amdgpu_materialize_branch_arg(
         context, source_terminator, source_value_id, out_low_value_id);
   }
 
-  return iree_make_status(
-      IREE_STATUS_INTERNAL,
-      "AMDGPU branch argument materializer selected for an unsupported type");
+  IREE_ASSERT_UNREACHABLE(
+      "AMDGPU branch argument materializer selected unsupported type");
+  IREE_BUILTIN_UNREACHABLE();
 }
 
 static iree_status_t loom_amdgpu_emit_sgpr_bool_cond_branch(
@@ -1364,10 +1364,7 @@ static iree_status_t loom_amdgpu_emit_exec_restore_block(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_value_id_t saved_exec, loom_block_t* restore_block,
     loom_block_t* restore_dest) {
-  if (restore_block->op_count != 0) {
-    return iree_make_status(IREE_STATUS_INTERNAL,
-                            "AMDGPU EXEC restore block was emitted twice");
-  }
+  IREE_ASSERT_EQ(restore_block->op_count, 0);
 
   loom_builder_t* builder = loom_low_lower_context_builder(context);
   loom_builder_ip_t saved_ip = loom_builder_save(builder);
@@ -1392,10 +1389,7 @@ static iree_status_t loom_amdgpu_emit_exec_restore_branch(
     loom_value_id_t saved_exec, loom_block_t* restore_block,
     loom_block_t* restore_dest, const loom_value_id_t* args,
     uint16_t arg_count) {
-  if (restore_block->op_count != 0) {
-    return iree_make_status(IREE_STATUS_INTERNAL,
-                            "AMDGPU EXEC restore block was emitted twice");
-  }
+  IREE_ASSERT_EQ(restore_block->op_count, 0);
 
   loom_builder_t* builder = loom_low_lower_context_builder(context);
   loom_builder_ip_t saved_ip = loom_builder_save(builder);
@@ -1704,11 +1698,7 @@ static iree_status_t loom_amdgpu_emit_masked_merge_restore_block(
   IREE_ASSERT(plan->merge_restore_block != NULL);
   IREE_ASSERT(plan->merge_restore_dest != NULL);
   IREE_ASSERT(plan->false_passthrough_terminator != NULL);
-  if (plan->merge_restore_block->op_count != 0) {
-    return iree_make_status(IREE_STATUS_INTERNAL,
-                            "AMDGPU EXEC merge restore block was emitted "
-                            "twice");
-  }
+  IREE_ASSERT_EQ(plan->merge_restore_block->op_count, 0);
 
   loom_builder_t* builder = loom_low_lower_context_builder(context);
   loom_builder_ip_t saved_ip = loom_builder_save(builder);
@@ -1764,11 +1754,7 @@ static iree_status_t loom_amdgpu_emit_if_else_merge_restore_block(
     const loom_amdgpu_branch_plan_t* plan) {
   IREE_ASSERT(plan->merge_restore_block != NULL);
   IREE_ASSERT(plan->merge_restore_dest != NULL);
-  if (plan->merge_restore_block->op_count != 0) {
-    return iree_make_status(IREE_STATUS_INTERNAL,
-                            "AMDGPU EXEC merge restore block was emitted "
-                            "twice");
-  }
+  IREE_ASSERT_EQ(plan->merge_restore_block->op_count, 0);
 
   loom_builder_t* builder = loom_low_lower_context_builder(context);
   loom_builder_ip_t saved_ip = loom_builder_save(builder);
@@ -1819,11 +1805,7 @@ static iree_status_t loom_amdgpu_emit_if_else_merge_restore_block(
 static iree_status_t loom_amdgpu_emit_no_true_else_entry_block(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_value_id_t saved_exec, const loom_amdgpu_branch_plan_t* plan) {
-  if (plan->no_true_else_entry_block->op_count != 0) {
-    return iree_make_status(IREE_STATUS_INTERNAL,
-                            "AMDGPU no-true else entry block was emitted "
-                            "twice");
-  }
+  IREE_ASSERT_EQ(plan->no_true_else_entry_block->op_count, 0);
 
   loom_builder_t* builder = loom_low_lower_context_builder(context);
   loom_builder_ip_t saved_ip = loom_builder_save(builder);
@@ -1889,10 +1871,7 @@ static iree_status_t loom_amdgpu_emit_else_dispatch_block(
     loom_value_id_t saved_exec, loom_value_id_t low_condition,
     loom_type_t condition_type, loom_type_t active_type,
     const loom_amdgpu_branch_plan_t* plan) {
-  if (plan->else_dispatch_block->op_count != 0) {
-    return iree_make_status(IREE_STATUS_INTERNAL,
-                            "AMDGPU else dispatch block was emitted twice");
-  }
+  IREE_ASSERT_EQ(plan->else_dispatch_block->op_count, 0);
 
   loom_builder_t* builder = loom_low_lower_context_builder(context);
   loom_builder_ip_t saved_ip = loom_builder_save(builder);
@@ -1986,8 +1965,8 @@ static iree_status_t loom_amdgpu_emit_exec_mask_cond_branch(
     loom_block_t* low_false_dest, loom_type_t condition_type) {
   loom_low_lower_plan_t branch_plan = loom_low_lower_plan_empty();
   if (!loom_low_lower_lookup_branch_plan(context, source_op, &branch_plan)) {
-    return iree_make_status(IREE_STATUS_INTERNAL,
-                            "AMDGPU divergent branch has no prepared plan");
+    IREE_ASSERT_UNREACHABLE("AMDGPU divergent branch has no prepared plan");
+    IREE_BUILTIN_UNREACHABLE();
   }
   const loom_amdgpu_branch_plan_t* plan =
       (const loom_amdgpu_branch_plan_t*)branch_plan.target_data;
@@ -1995,8 +1974,8 @@ static iree_status_t loom_amdgpu_emit_exec_mask_cond_branch(
   if (branch_plan.id != LOOM_AMDGPU_BRANCH_PLAN_THEN_MASKED_REGION &&
       branch_plan.id != LOOM_AMDGPU_BRANCH_PLAN_IF_ELSE_DIAMOND &&
       branch_plan.id != LOOM_AMDGPU_BRANCH_PLAN_DIVERGENT_LOOP) {
-    return iree_make_status(IREE_STATUS_INTERNAL,
-                            "AMDGPU divergent branch plan id is invalid");
+    IREE_ASSERT_UNREACHABLE("AMDGPU divergent branch plan id is invalid");
+    IREE_BUILTIN_UNREACHABLE();
   }
 
   loom_type_t active_type = loom_type_none();
