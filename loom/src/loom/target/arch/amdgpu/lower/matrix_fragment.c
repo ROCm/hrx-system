@@ -1592,14 +1592,16 @@ loom_amdgpu_fragment_repack_has_result_to_lhs_bf16_bpermute_descriptors(
     return false;
   }
   if (loom_amdgpu_fragment_repack_uses_source_register_bit_tree(plan)) {
+    if (!loom_amdgpu_can_emit_compare_u32_immediate(
+            descriptor_set, LOOM_AMDGPU_DESCRIPTOR_REF_V_CMP_NE_I32, 0)) {
+      return false;
+    }
     const uint16_t bit_count =
         loom_amdgpu_fragment_repack_log2_u16(plan->source_register_count);
     for (uint16_t i = 0; i < bit_count; ++i) {
       if (!loom_amdgpu_descriptor_set_can_emit_vgpr_binary_immediate(
               descriptor_set, LOOM_AMDGPU_DESCRIPTOR_REF_V_AND_B32_LIT,
-              UINT32_C(1) << i) ||
-          !loom_amdgpu_can_emit_compare_u32_immediate(
-              descriptor_set, LOOM_AMDGPU_DESCRIPTOR_REF_V_CMP_NE_I32, 0)) {
+              UINT32_C(1) << i)) {
         return false;
       }
     }
