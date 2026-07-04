@@ -108,13 +108,11 @@ iree_status_t loom_amdgpu_wait_packet_analyze_target(
   }
   const loom_amdgpu_wait_packet_descriptor_range_t* range =
       &kAmdgpuWaitPacketDescriptorRanges[descriptor_set_ordinal];
-  if (range->first_descriptor > IREE_ARRAYSIZE(kAmdgpuWaitPacketDescriptors) ||
-      range->descriptor_count > IREE_ARRAYSIZE(kAmdgpuWaitPacketDescriptors) -
-                                    range->first_descriptor) {
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
-        "AMDGPU wait-packet descriptor range is out of bounds");
-  }
+  IREE_ASSERT_LE(range->first_descriptor,
+                 IREE_ARRAYSIZE(kAmdgpuWaitPacketDescriptors));
+  IREE_ASSERT_LE(
+      range->descriptor_count,
+      IREE_ARRAYSIZE(kAmdgpuWaitPacketDescriptors) - range->first_descriptor);
   *out_target = (loom_amdgpu_wait_packet_target_t){
       .descriptors = &kAmdgpuWaitPacketDescriptors[range->first_descriptor],
       .descriptor_count = range->descriptor_count,
@@ -140,18 +138,10 @@ iree_status_t loom_amdgpu_wait_packet_resolve_descriptor(
   *out_descriptor = NULL;
   const uint32_t descriptor_ordinal = loom_amdgpu_descriptor_ref_ordinal(
       descriptor_set, packet_descriptor->descriptor_ref);
-  if (descriptor_ordinal == LOOM_LOW_DESCRIPTOR_ORDINAL_NONE) {
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
-        "AMDGPU generated wait-packet descriptor ref is missing");
-  }
+  IREE_ASSERT_NE(descriptor_ordinal, LOOM_LOW_DESCRIPTOR_ORDINAL_NONE);
   const loom_low_descriptor_t* descriptor =
       loom_low_descriptor_set_descriptor_at(descriptor_set, descriptor_ordinal);
-  if (descriptor == NULL) {
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
-        "AMDGPU generated wait-packet descriptor ordinal is out of range");
-  }
+  IREE_ASSERT(descriptor != NULL);
   *out_descriptor = descriptor;
   return iree_ok_status();
 }
