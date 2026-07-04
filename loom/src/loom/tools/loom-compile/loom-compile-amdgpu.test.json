@@ -800,6 +800,46 @@
       ]
     },
     {
+      "name": "reports CDNA4 narrow matrix target capabilities",
+      "steps": [
+        {
+          "name": "compile",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/selected_root_amdgpu.loom",
+              "--backend=amdgpu-hal",
+              "--root=@unselected_targetless_store_i32",
+              "--target=gfx950",
+              "--output={tmp}/targetless_native_matrix_gfx950.hsaco",
+              "--compile-report=summary",
+              "--compile-report-output=-"
+            ]
+          },
+          "stdout": {
+            "contains": {
+              "unordered": [
+                "\"target_key\":\"gfx950\"",
+                "\"namespace\":\"amdgpu\",\"key\":\"matrix_feature_profile\",\"value_kind\":\"string\",\"value_string\":\"mfma-gfx950\"",
+                "\"namespace\":\"amdgpu\",\"key\":\"matrix_fp8_native_kind\",\"value_kind\":\"string\",\"value_string\":\"unscaled_scaled\"",
+                "\"namespace\":\"amdgpu\",\"key\":\"matrix_bf8_native_kind\",\"value_kind\":\"string\",\"value_string\":\"unscaled_scaled\"",
+                "\"namespace\":\"amdgpu\",\"key\":\"matrix_fp6_native_kind\",\"value_kind\":\"string\",\"value_string\":\"scaled\"",
+                "\"namespace\":\"amdgpu\",\"key\":\"matrix_bf6_native_kind\",\"value_kind\":\"string\",\"value_string\":\"scaled\"",
+                "\"namespace\":\"amdgpu\",\"key\":\"matrix_fp4_native_kind\",\"value_kind\":\"string\",\"value_string\":\"scaled\"",
+                "\"status\":\"OK\""
+              ]
+            }
+          },
+          "files": [
+            {
+              "path": "{tmp}/targetless_native_matrix_gfx950.hsaco",
+              "non_empty": true
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "reports RDNA4 gfx1200 narrow matrix target capabilities",
       "steps": [
         {
