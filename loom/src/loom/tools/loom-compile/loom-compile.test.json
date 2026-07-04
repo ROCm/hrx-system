@@ -25,6 +25,8 @@
             "matrix_fp8_native_kind",
             ".schedule_band_summary_rows.rows[]",
             "dynamic_instruction_mix",
+            "max_band_node_count",
+            ".wait_action_rows.rows[]",
             "Matrix-family schedule evidence",
             "rounding=finite_only",
             "fp8_packed_bf16_decode_repair_zero_subnormal",
