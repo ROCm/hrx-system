@@ -5157,15 +5157,12 @@ static iree_status_t loom_amdgpu_emit_fragment_memory_fp8_source_byte(
   return iree_ok_status();
 }
 
-static iree_status_t loom_amdgpu_emit_fragment_memory_fp8_pair_source_register(
+static iree_status_t loom_amdgpu_emit_fragment_memory_fp8_source_register(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_value_id_t low_source, uint16_t packet_register_count,
-    uint16_t result_register_index, loom_type_t vgpr_type,
+    uint16_t source_register_index, loom_type_t vgpr_type,
     loom_value_id_t* out_source_register) {
   *out_source_register = LOOM_VALUE_ID_INVALID;
-  const uint16_t byte_index =
-      result_register_index * LOOM_AMDGPU_FRAGMENT_PACKED_B16_ELEMENT_COUNT;
-  const uint16_t source_register_index = byte_index / 4u;
   if (source_register_index >= packet_register_count) {
     IREE_ASSERT_UNREACHABLE("selected AMDGPU FP8 fragment packet");
     IREE_BUILTIN_UNREACHABLE();
@@ -5179,14 +5176,29 @@ static iree_status_t loom_amdgpu_emit_fragment_memory_fp8_pair_source_register(
   }
   IREE_RETURN_IF_ERROR(loom_amdgpu_materialize_full_low_vgpr_b32(
       context, source_op, source_register, &source_register));
+  *out_source_register = source_register;
+  return iree_ok_status();
+}
+
+static iree_status_t loom_amdgpu_emit_fragment_memory_shifted_fp8_pair_register(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_value_id_t low_source, uint16_t packet_register_count,
+    uint16_t result_register_index, loom_type_t vgpr_type,
+    loom_value_id_t* out_source_register) {
+  *out_source_register = LOOM_VALUE_ID_INVALID;
+  const uint16_t byte_index =
+      result_register_index * LOOM_AMDGPU_FRAGMENT_PACKED_B16_ELEMENT_COUNT;
+  const uint16_t source_register_index = byte_index / 4u;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fragment_memory_fp8_source_register(
+      context, source_op, low_source, packet_register_count,
+      source_register_index, vgpr_type, out_source_register));
 
   const uint16_t bit_offset = (byte_index & 3u) * 8u;
   if (bit_offset != 0) {
     IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_shift(
         context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_LSHRREV_B32_LIT,
-        bit_offset, source_register, vgpr_type, &source_register));
+        bit_offset, *out_source_register, vgpr_type, out_source_register));
   }
-  *out_source_register = source_register;
   return iree_ok_status();
 }
 
@@ -5202,7 +5214,7 @@ loom_amdgpu_emit_fragment_memory_identity_scalef32_fp8_to_packed_bf16_register(
 
   loom_value_id_t source_register = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(
-      loom_amdgpu_emit_fragment_memory_fp8_pair_source_register(
+      loom_amdgpu_emit_fragment_memory_shifted_fp8_pair_register(
           context, source_op, low_source, packet_register_count,
           result_register_index, vgpr_type, &source_register));
 
@@ -5229,7 +5241,7 @@ loom_amdgpu_emit_fragment_memory_native_fp8_to_packed_bf16_register(
 
   loom_value_id_t source_register = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(
-      loom_amdgpu_emit_fragment_memory_fp8_pair_source_register(
+      loom_amdgpu_emit_fragment_memory_shifted_fp8_pair_register(
           context, source_op, low_source, packet_register_count,
           result_register_index, vgpr_type, &source_register));
 
@@ -5265,7 +5277,7 @@ loom_amdgpu_emit_fragment_memory_identity_scalef32_fp8_to_packed_f16_register(
 
   loom_value_id_t source_register = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(
-      loom_amdgpu_emit_fragment_memory_fp8_pair_source_register(
+      loom_amdgpu_emit_fragment_memory_shifted_fp8_pair_register(
           context, source_op, low_source, packet_register_count,
           result_register_index, vgpr_type, &source_register));
 
@@ -5290,7 +5302,7 @@ loom_amdgpu_emit_fragment_memory_native_fp8_to_packed_f16_register(
 
   loom_value_id_t source_register = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(
-      loom_amdgpu_emit_fragment_memory_fp8_pair_source_register(
+      loom_amdgpu_emit_fragment_memory_shifted_fp8_pair_register(
           context, source_op, low_source, packet_register_count,
           result_register_index, vgpr_type, &source_register));
 
@@ -5333,12 +5345,12 @@ loom_amdgpu_emit_fragment_memory_fp8_to_packed_f16_register(
   }
 
   loom_value_id_t source_register = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(
-      loom_amdgpu_emit_fragment_memory_fp8_pair_source_register(
-          context, source_op, low_source, packet_register_count,
-          result_register_index, vgpr_type, &source_register));
   const uint16_t byte_index =
       result_register_index * LOOM_AMDGPU_FRAGMENT_PACKED_B16_ELEMENT_COUNT;
+  const uint16_t source_register_index = byte_index / 4u;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fragment_memory_fp8_source_register(
+      context, source_op, low_source, packet_register_count,
+      source_register_index, vgpr_type, &source_register));
   const loom_amdgpu_fp8_packed_u16_pair_source_t pair_source = {
       .source_register = source_register,
       .byte_offset = byte_index & 3u,
@@ -5376,19 +5388,11 @@ loom_amdgpu_emit_fragment_memory_fp8_to_packed_bf16_register(
     const uint16_t byte_index =
         result_register_index * LOOM_AMDGPU_FRAGMENT_PACKED_B16_ELEMENT_COUNT;
     const uint16_t source_register_index = byte_index / 4u;
-    if (source_register_index >= packet_register_count) {
-      IREE_ASSERT_UNREACHABLE("selected AMDGPU FP8 fragment packet");
-      IREE_BUILTIN_UNREACHABLE();
-    }
 
     loom_value_id_t low_source_register = low_source;
-    if (packet_register_count != 1) {
-      IREE_RETURN_IF_ERROR(loom_amdgpu_emit_low_slice(
-          context, source_op, low_source, source_register_index, vgpr_type,
-          &low_source_register));
-    }
-    IREE_RETURN_IF_ERROR(loom_amdgpu_materialize_full_low_vgpr_b32(
-        context, source_op, low_source_register, &low_source_register));
+    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fragment_memory_fp8_source_register(
+        context, source_op, low_source, packet_register_count,
+        source_register_index, vgpr_type, &low_source_register));
 
     const loom_amdgpu_fp8_packed_u16_pair_source_t pair_source = {
         .source_register = low_source_register,
@@ -5445,15 +5449,10 @@ static iree_status_t loom_amdgpu_fragment_memory_prepare_fp8_pair_sources(
       0};
   for (uint16_t source_register_index = 0;
        source_register_index < packet_register_count; ++source_register_index) {
-    loom_value_id_t source_register = low_source_packet;
-    if (packet_register_count != 1) {
-      IREE_RETURN_IF_ERROR(loom_amdgpu_emit_low_slice(
-          context, source_op, low_source_packet, source_register_index,
-          vgpr_type, &source_register));
-    }
-    IREE_RETURN_IF_ERROR(loom_amdgpu_materialize_full_low_vgpr_b32(
-        context, source_op, source_register, &source_register));
-    source_registers[source_register_index] = source_register;
+    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fragment_memory_fp8_source_register(
+        context, source_op, low_source_packet, packet_register_count,
+        source_register_index, vgpr_type,
+        &source_registers[source_register_index]));
   }
 
   for (uint16_t result_register_index = 0;
