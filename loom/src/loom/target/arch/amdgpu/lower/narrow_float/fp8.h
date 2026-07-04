@@ -70,6 +70,19 @@ typedef uint32_t loom_amdgpu_fp8_decode_value_flags_t;
 loom_amdgpu_fp8_decode_value_flags_t
 loom_amdgpu_fp8_decode_value_flags_from_facts(loom_value_facts_t facts);
 
+typedef enum loom_amdgpu_fp8_encoded_operand_schema_kind_e {
+  LOOM_AMDGPU_FP8_ENCODED_OPERAND_SCHEMA_KIND_UNSCALED = 0,
+  LOOM_AMDGPU_FP8_ENCODED_OPERAND_SCHEMA_KIND_SCALE_F32,
+  LOOM_AMDGPU_FP8_ENCODED_OPERAND_SCHEMA_KIND_SCALE_E8M0,
+} loom_amdgpu_fp8_encoded_operand_schema_kind_t;
+
+// Returns true when |schema| matches one of AMDGPU's direct FP8/BF8 vector
+// decode routes for |element_type| and the logical source lane count.
+bool loom_amdgpu_fp8_encoded_operand_schema_matches(
+    loom_value_fact_encoded_operand_schema_t schema,
+    loom_scalar_type_t element_type, uint32_t lane_count,
+    loom_amdgpu_fp8_encoded_operand_schema_kind_t kind);
+
 typedef enum loom_amdgpu_fp8_packed_bf16_missing_requirement_bits_e {
   LOOM_AMDGPU_FP8_PACKED_BF16_MISSING_REQUIREMENT_NONE = 0u,
   LOOM_AMDGPU_FP8_PACKED_BF16_MISSING_REQUIREMENT_PERMUTE_PACKET = 1u << 0,
