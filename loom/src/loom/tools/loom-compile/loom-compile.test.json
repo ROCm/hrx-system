@@ -26,6 +26,7 @@
             ".schedule_band_summary_rows.rows[]",
             "dynamic_instruction_mix",
             "max_band_node_count",
+            ".wait_reason_summary_rows.rows[]",
             ".wait_action_rows.rows[]",
             "Matrix-family schedule evidence",
             "rounding=finite_only",
