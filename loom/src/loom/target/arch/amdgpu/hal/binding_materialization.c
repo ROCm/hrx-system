@@ -669,10 +669,8 @@ static iree_status_t loom_amdgpu_hal_binding_materialize_direct_arg_load(
         rewriter, descriptor_set, kernarg_ptr, direct_arg->kernarg_offset,
         sgpr_x2_type, location, &loaded));
   } else {
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
-        "AMDGPU HAL binding materialization reached an unverified direct "
-        "argument layout");
+    IREE_ASSERT_UNREACHABLE("verified AMDGPU HAL ABI direct argument layout");
+    IREE_BUILTIN_UNREACHABLE();
   }
   return loom_amdgpu_hal_binding_materialize_direct_arg_value(
       rewriter, direct_arg, loaded);
@@ -700,10 +698,9 @@ static iree_status_t loom_amdgpu_hal_binding_materialize_direct_args(
       continue;
     }
     if (kernarg_ptr == LOOM_VALUE_ID_INVALID) {
-      return iree_make_status(
-          IREE_STATUS_INTERNAL,
-          "AMDGPU HAL binding materialization direct argument requires an "
-          "available kernarg segment pointer");
+      IREE_ASSERT_UNREACHABLE(
+          "verified AMDGPU HAL ABI direct argument kernarg dependency");
+      IREE_BUILTIN_UNREACHABLE();
     }
 
     uint32_t arg_unit_count = 0;
@@ -785,10 +782,9 @@ static iree_status_t loom_amdgpu_hal_binding_materialize_resources(
       continue;
     }
     if (kernarg_ptr == LOOM_VALUE_ID_INVALID) {
-      return iree_make_status(
-          IREE_STATUS_INTERNAL,
-          "AMDGPU HAL binding materialization resource requires an available "
-          "kernarg segment pointer");
+      IREE_ASSERT_UNREACHABLE(
+          "verified AMDGPU HAL ABI resource kernarg dependency");
+      IREE_BUILTIN_UNREACHABLE();
     }
 
     if (loom_amdgpu_hal_binding_can_group_resource_load(
@@ -888,11 +884,8 @@ loom_amdgpu_hal_binding_materialize_buffer_descriptors_with_types(
     loom_type_t sgpr_x2_type, iree_host_size_t* out_materialized_count) {
   *out_materialized_count = 0;
   loom_region_t* body = loom_low_function_body(function_op);
-  if (body == NULL) {
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
-        "AMDGPU HAL binding materialization reached a low function without a "
-        "body");
+  if (body == NULL || body->block_count == 0) {
+    return iree_ok_status();
   }
   iree_status_t status = iree_ok_status();
   const loom_low_descriptor_t* static_descriptor =
@@ -990,6 +983,10 @@ iree_status_t loom_amdgpu_hal_binding_materialize(
         "AMDGPU HAL binding materialization requires low.func.def or "
         "low.kernel.def");
   }
+  loom_region_t* body = loom_low_function_body(function_op);
+  if (body == NULL || body->block_count == 0) {
+    return iree_ok_status();
+  }
 
   loom_amdgpu_hal_kernel_abi_layout_t layout = {0};
   IREE_RETURN_IF_ERROR(loom_amdgpu_hal_kernel_abi_layout_from_low(
@@ -1027,14 +1024,6 @@ iree_status_t loom_amdgpu_hal_binding_materialize(
   loom_value_id_t kernarg_ptr = LOOM_VALUE_ID_INVALID;
   bool inserted_live_in = false;
 
-  loom_region_t* body = loom_low_function_body(function_op);
-  if (body == NULL) {
-    loom_rewriter_deinitialize(&rewriter);
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
-        "AMDGPU HAL binding materialization reached a low function without a "
-        "body");
-  }
   if (iree_status_is_ok(status) && layout.uses_kernarg_segment_ptr) {
     status = loom_amdgpu_hal_binding_get_kernarg_live_in(
         &rewriter, function_op, sgpr_x2_type, &kernarg_ptr, &inserted_live_in);
