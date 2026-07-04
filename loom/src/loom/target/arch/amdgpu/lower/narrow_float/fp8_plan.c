@@ -102,22 +102,18 @@ static const loom_amdgpu_fp8_decode_plan_descriptor_row_t
 
 #undef LOOM_AMDGPU_FP8_DECODE_PLAN_DESCRIPTOR_ROW
 
-static bool loom_amdgpu_fp8_native_f32_pair_decode_plan_descriptor_row(
-    loom_scalar_type_t element_type,
-    loom_amdgpu_fp8_decode_plan_descriptor_row_t* out_row) {
-  *out_row = (loom_amdgpu_fp8_decode_plan_descriptor_row_t){0};
+static void loom_amdgpu_mark_fp8_native_f32_pair_decode_plan_flag(
+    const loom_low_descriptor_set_t* descriptor_set,
+    loom_scalar_type_t element_type, loom_amdgpu_fp8_decode_plan_t* plan) {
   loom_amdgpu_fp8_native_descriptor_refs_t native_refs = {0};
-  if (!loom_amdgpu_fp8_native_descriptor_refs(
-          element_type, LOOM_SCALAR_TYPE_F32, &native_refs)) {
-    return false;
+  if (descriptor_set == NULL ||
+      !loom_amdgpu_fp8_native_descriptor_refs(
+          element_type, LOOM_SCALAR_TYPE_F32, &native_refs) ||
+      native_refs.pair == LOOM_AMDGPU_DESCRIPTOR_REF_NONE ||
+      !loom_amdgpu_descriptor_set_has_ref(descriptor_set, native_refs.pair)) {
+    return;
   }
-  *out_row = (loom_amdgpu_fp8_decode_plan_descriptor_row_t){
-      .descriptor_ref = native_refs.pair,
-      .descriptor_offset =
-          offsetof(loom_amdgpu_fp8_decode_plan_t, native_f32_pair_descriptor),
-      .present_flag = LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_NATIVE_F32_PAIR,
-  };
-  return true;
+  plan->flags |= LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_NATIVE_F32_PAIR;
 }
 
 static void loom_amdgpu_mark_fp8_decode_plan_descriptor_flag(
@@ -139,13 +135,8 @@ static void loom_amdgpu_mark_fp8_decode_plan_descriptor_flags(
     loom_amdgpu_mark_fp8_decode_plan_descriptor_flag(
         descriptor_set, &kLoomAmdgpuFp8DecodePlanDescriptorRows[i], plan);
   }
-
-  loom_amdgpu_fp8_decode_plan_descriptor_row_t native_pair_row = {0};
-  if (loom_amdgpu_fp8_native_f32_pair_decode_plan_descriptor_row(
-          element_type, &native_pair_row)) {
-    loom_amdgpu_mark_fp8_decode_plan_descriptor_flag(descriptor_set,
-                                                     &native_pair_row, plan);
-  }
+  loom_amdgpu_mark_fp8_native_f32_pair_decode_plan_flag(descriptor_set,
+                                                        element_type, plan);
 }
 
 void loom_amdgpu_initialize_fp8_decode_plan_from_descriptor_set(
@@ -182,13 +173,8 @@ static iree_status_t loom_amdgpu_resolve_fp8_decode_plan_descriptors(
     IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_fp8_decode_plan_descriptor(
         context, &kLoomAmdgpuFp8DecodePlanDescriptorRows[i], plan));
   }
-
-  loom_amdgpu_fp8_decode_plan_descriptor_row_t native_pair_row = {0};
-  if (loom_amdgpu_fp8_native_f32_pair_decode_plan_descriptor_row(
-          element_type, &native_pair_row)) {
-    IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_fp8_decode_plan_descriptor(
-        context, &native_pair_row, plan));
-  }
+  loom_amdgpu_mark_fp8_native_f32_pair_decode_plan_flag(
+      loom_low_lower_context_descriptor_set(context), element_type, plan);
 
   return iree_ok_status();
 }
