@@ -881,6 +881,11 @@ static iree_status_t loom_amdgpu_vopd_plan_allocate(
   IREE_RETURN_IF_ERROR(loom_amdgpu_vopd_plan_build_component_lookup(builder));
   builder->pair_capacity = packet_count / 2;
   builder->rejection_capacity = packet_count == 0 ? 0 : packet_count - 1;
+  if (builder->pair_capacity > UINT32_MAX) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "AMDGPU VOPD pair capacity exceeds 32-bit index "
+                            "range");
+  }
   if (packet_count != 0) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(builder->arena, packet_count,
                                                    sizeof(*builder->packets),
@@ -1297,8 +1302,8 @@ static iree_status_t loom_amdgpu_vopd_read_component(
                                                    out_component, out_eligible);
       break;
     default:
-      return iree_make_status(IREE_STATUS_INTERNAL,
-                              "AMDGPU VOPD component rule has unknown form");
+      IREE_ASSERT_UNREACHABLE("AMDGPU VOPD component rule has unknown form");
+      return iree_ok_status();
   }
   if (iree_status_is_ok(status) && *out_eligible) {
     out_component->info = &rule->info;
@@ -1393,16 +1398,12 @@ static iree_status_t loom_amdgpu_vopd_analyze_pair(
   return iree_ok_status();
 }
 
-static iree_status_t loom_amdgpu_vopd_append_pair(
+static void loom_amdgpu_vopd_append_pair(
     loom_amdgpu_vopd_plan_builder_t* builder,
     const loom_low_packet_view_t* first, const loom_low_packet_view_t* second,
     const loom_amdgpu_vopd_candidate_pair_t* candidate) {
-  if (builder->pair_count >= builder->pair_capacity ||
-      builder->pair_count >= UINT32_MAX) {
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
-        "AMDGPU VOPD plan exceeded precomputed pair capacity");
-  }
+  IREE_ASSERT_LT(builder->pair_count, builder->pair_capacity);
+  IREE_ASSERT_LT(builder->pair_count, UINT32_MAX);
   const uint32_t pair_index = (uint32_t)builder->pair_count;
   builder->pairs[builder->pair_count++] = (loom_amdgpu_vopd_pair_t){
       .reason = candidate->reason,
@@ -1430,7 +1431,6 @@ static iree_status_t loom_amdgpu_vopd_append_pair(
       .role = LOOM_AMDGPU_VOPD_PACKET_ROLE_SECOND,
       .pair_index = pair_index,
   };
-  return iree_ok_status();
 }
 
 static loom_amdgpu_vopd_rejection_component_t
@@ -1446,19 +1446,15 @@ loom_amdgpu_vopd_rejection_component_from_candidate(
   };
 }
 
-static iree_status_t loom_amdgpu_vopd_append_rejection(
+static void loom_amdgpu_vopd_append_rejection(
     loom_amdgpu_vopd_plan_builder_t* builder,
     const loom_low_packet_view_t* first, const loom_low_packet_view_t* second,
     const loom_amdgpu_vopd_pair_analysis_t* analysis,
     loom_amdgpu_vopd_rejection_reason_t reason) {
   if (!analysis->first_eligible || !analysis->second_eligible) {
-    return iree_ok_status();
+    return;
   }
-  if (builder->rejection_count >= builder->rejection_capacity) {
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
-        "AMDGPU VOPD plan exceeded precomputed rejection capacity");
-  }
+  IREE_ASSERT_LT(builder->rejection_count, builder->rejection_capacity);
   builder->rejections[builder->rejection_count++] =
       (loom_amdgpu_vopd_rejection_t){
           .reason = reason,
@@ -1472,7 +1468,6 @@ static iree_status_t loom_amdgpu_vopd_append_rejection(
           .second = loom_amdgpu_vopd_rejection_component_from_candidate(
               &analysis->second_component),
       };
-  return iree_ok_status();
 }
 
 static iree_status_t loom_amdgpu_vopd_packet_is_transparent(
@@ -1569,20 +1564,19 @@ static iree_status_t loom_amdgpu_vopd_plan_block(
     IREE_RETURN_IF_ERROR(
         loom_amdgpu_vopd_analyze_pair(builder, &first, &second, &analysis));
     if (!analysis.matched) {
-      IREE_RETURN_IF_ERROR(loom_amdgpu_vopd_append_rejection(
-          builder, &first, &second, &analysis, analysis.rejection_reason));
+      loom_amdgpu_vopd_append_rejection(builder, &first, &second, &analysis,
+                                        analysis.rejection_reason);
       search_packet_index = first_packet_index + 1;
       continue;
     }
     if (builder->insertion_blocked_packets[second_packet_index]) {
-      IREE_RETURN_IF_ERROR(loom_amdgpu_vopd_append_rejection(
+      loom_amdgpu_vopd_append_rejection(
           builder, &first, &second, &analysis,
-          LOOM_AMDGPU_VOPD_REJECTION_REASON_SECOND_PACKET_HAS_INSERTION));
+          LOOM_AMDGPU_VOPD_REJECTION_REASON_SECOND_PACKET_HAS_INSERTION);
       search_packet_index = first_packet_index + 1;
       continue;
     }
-    IREE_RETURN_IF_ERROR(loom_amdgpu_vopd_append_pair(builder, &first, &second,
-                                                      &analysis.candidate));
+    loom_amdgpu_vopd_append_pair(builder, &first, &second, &analysis.candidate);
     search_packet_index = second_packet_index + 1;
   }
   return iree_ok_status();
