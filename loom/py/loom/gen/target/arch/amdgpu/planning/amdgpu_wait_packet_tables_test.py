@@ -417,3 +417,44 @@ def test_generated_fragments_are_data_only() -> None:
         assert "#include" not in fragment
         assert "if (" not in fragment
         assert "return " not in fragment
+
+
+def test_rejects_descriptor_row_with_out_of_bounds_immediates() -> None:
+    tables = amdgpu_wait_packet_tables._WaitPacketTables(
+        descriptor_rows=(
+            amdgpu_wait_packet_tables._WaitPacketDescriptorRow(
+                descriptor_set_key="amdgpu.test.core",
+                descriptor_set_ordinal=0,
+                descriptor_key="amdgpu.s_waitcnt",
+                descriptor_ref="LOOM_AMDGPU_DESCRIPTOR_REF_S_WAITCNT",
+                counter_mask=amdgpu_wait_packet_tables._counter_mask(_COUNTER_VMEM_LOAD),
+                counter_count=1,
+                immediate_start=1,
+                immediate_count=1,
+            ),
+        ),
+        immediate_rows=(),
+        range_rows=(),
+    )
+
+    with _raises_value_error("immediate range is out of bounds"):
+        amdgpu_wait_packet_tables._validate_wait_packet_tables(tables)
+
+
+def test_rejects_descriptor_range_with_out_of_bounds_descriptors() -> None:
+    tables = amdgpu_wait_packet_tables._WaitPacketTables(
+        descriptor_rows=(),
+        immediate_rows=(),
+        range_rows=(
+            amdgpu_wait_packet_tables._WaitPacketDescriptorRange(
+                descriptor_set_key="amdgpu.test.core",
+                descriptor_set_ordinal=0,
+                first_descriptor=1,
+                descriptor_count=1,
+                max_descriptor_immediate_count=1,
+            ),
+        ),
+    )
+
+    with _raises_value_error("descriptor range is out of bounds"):
+        amdgpu_wait_packet_tables._validate_wait_packet_tables(tables)

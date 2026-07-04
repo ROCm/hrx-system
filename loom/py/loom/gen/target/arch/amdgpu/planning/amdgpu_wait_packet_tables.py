@@ -300,6 +300,19 @@ def _descriptor_set_wait_packet_rows(
     return tuple(descriptor_rows), tuple(immediate_rows), range_row
 
 
+def _validate_wait_packet_tables(tables: _WaitPacketTables) -> None:
+    descriptor_count = len(tables.descriptor_rows)
+    immediate_count = len(tables.immediate_rows)
+    for row in tables.descriptor_rows:
+        owner = f"AMDGPU wait descriptor '{row.descriptor_key}'"
+        if row.immediate_start > immediate_count or row.immediate_count > immediate_count - row.immediate_start:
+            raise ValueError(f"{owner} immediate range is out of bounds")
+    for row in tables.range_rows:
+        owner = f"AMDGPU wait descriptor-set range '{row.descriptor_set_key}'"
+        if row.first_descriptor > descriptor_count or row.descriptor_count > descriptor_count - row.first_descriptor:
+            raise ValueError(f"{owner} descriptor range is out of bounds")
+
+
 def _materialize_wait_packet_tables(
     descriptor_sets: Sequence[AmdgpuDescriptorSetInfo],
     isa_specs: Mapping[str, AmdgpuIsaFactSource],
@@ -332,11 +345,13 @@ def _materialize_wait_packet_tables(
         descriptor_rows.extend(set_descriptor_rows)
         immediate_rows.extend(set_immediate_rows)
         range_rows.append(range_row)
-    return _WaitPacketTables(
+    tables = _WaitPacketTables(
         descriptor_rows=tuple(descriptor_rows),
         immediate_rows=tuple(immediate_rows),
         range_rows=tuple(range_rows),
     )
+    _validate_wait_packet_tables(tables)
+    return tables
 
 
 def _generated_header() -> list[str]:
