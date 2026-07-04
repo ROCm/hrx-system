@@ -1718,6 +1718,9 @@ iree_status_t loom_amdgpu_select_sanitizer_race_access_plan(
   }
   IREE_RETURN_IF_ERROR(loom_amdgpu_sanitizer_site_id_for_op(
       context, source_op, &out_plan->site_id));
+  if (out_plan->site_id == LOOM_SANITIZER_SITE_ID_INVALID) {
+    return iree_ok_status();
+  }
   *out_selected = true;
   return iree_ok_status();
 }
