@@ -96,3 +96,37 @@ COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- ex
 COMPILE-REPORT: source_low selected_ops=0 emitted_ops=0 rows=0
 COMPILE-REPORT: source_low_transforms rows=1
 COMPILE-REPORT: source_low_transform[0] function=report_dense_accumulator_fragment_staging source_op=scf.for transform=stage-loop-carried-fragments outcome=selected reason=staged_workgroup_memory candidates=4 selected=4 removed_loop_carried=4 removed_payload_registers=32 shape=16x16 workgroup_bytes=4096 inserted_loads=8 inserted_stores=8 barriers=2
+
+// ====
+// RUN: pass-report sink-single-use-reads,stage-loop-carried-fragments,dce
+
+func.def @stage_after_sinking_single_use_fragment_read(%rhs_buffer: buffer, %base: offset, %lhs_values: vector<16xbf16>, %rhs_values: vector<16xbf16>, %accumulator: vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %four = index.constant 4 : index
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 16 : index
+  %layout = encoding.layout.dense : encoding<layout>
+  %rhs_view = buffer.view %rhs_buffer[%base] : buffer -> view<16x16xbf16, %layout>
+  %lhs = vector.fragment<lhs> %lhs_values shape [%m, %k] : vector<16xbf16>
+  %rhs = vector.fragment<rhs> %rhs_values shape [%k, %n] : vector<16xbf16>
+  %init = vector.fragment<init> %accumulator shape [%m, %n] : vector<8xf32>
+  %result0, %result1, %result2, %result3 = scf.for %tile = [%zero to %four step %one](%acc0 = %init, %acc1 = %init, %acc2 = %init, %acc3 = %init : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
+    %loaded_rhs = vector.fragment.load<rhs> %rhs_view[0, 0] shape [%k, %n] : view<16x16xbf16, %layout> -> vector<16xbf16>
+    %noise = vector.mulf %accumulator, %accumulator : vector<8xf32>
+    %next0 = vector.mma %lhs, %loaded_rhs, %acc0 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next1 = vector.mma %lhs, %rhs, %acc1 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next2 = vector.mma %lhs, %rhs, %acc2 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next3 = vector.mma %lhs, %rhs, %acc3 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    test.use %noise : vector<8xf32>
+    scf.yield %next0, %next1, %next2, %next3 : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>
+  }
+  func.return %result0, %result1, %result2, %result3 : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>
+}
+
+// ----
+COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
+COMPILE-REPORT: source_low selected_ops=0 emitted_ops=0 rows=0
+COMPILE-REPORT: source_low_transforms rows=1
+COMPILE-REPORT: source_low_transform[0] function=stage_after_sinking_single_use_fragment_read source_op=scf.for transform=stage-loop-carried-fragments outcome=selected reason=staged_workgroup_memory candidates=4 selected=4 removed_loop_carried=4 removed_payload_registers=32 shape=16x16 workgroup_bytes=4096 inserted_loads=8 inserted_stores=8 barriers=2
