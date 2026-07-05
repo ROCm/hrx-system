@@ -1028,8 +1028,8 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) @i32_b128() asm<llvmir.g
   %lane = kernel.workitem_id.x
   %27 = const.i64 2
   %28 = shl.i64 %lane, %27
-  %loaded = load.indexed.v4i32 %input_view, %28, 0, 16
   %raise = const.v4i32 9
+  %loaded = load.indexed.v4i32 %input_view, %28, 0, 16
   %raised = add.v4i32 %loaded, %raise
   %drop = const.v4i32 4
   %result = sub.v4i32 %raised, %drop
@@ -1065,8 +1065,8 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) @f32x8_split_b128() asm<
   %lane = kernel.workitem_id.x
   %25 = const.i64 3
   %26 = shl.i64 %lane, %25
-  %loaded = load.indexed.v8f32 %input_view, %26, 0, 32
   %raise = const.v8f32 1073741824
+  %loaded = load.indexed.v8f32 %input_view, %26, 0, 32
   %result = add.v8f32 %loaded, %raise
   store.indexed.v8f32 %result, %output_view, %26, 0, 32
   return

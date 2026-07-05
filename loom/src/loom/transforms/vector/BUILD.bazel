@@ -32,6 +32,19 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "sink_single_use_reads",
+    srcs = ["sink_single_use_reads.c"],
+    hdrs = ["sink_single_use_reads.h"],
+    deps = [
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/pass:types",
+        "//loom/src/loom/rewrite:rewriter",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
     name = "to_scalar",
     srcs = [
         "to_scalar.c",

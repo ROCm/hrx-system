@@ -39,6 +39,7 @@
 #include "loom/transforms/symbol/symbol_dce.h"
 #include "loom/transforms/symbol/template_selection.h"
 #include "loom/transforms/vector/memory_footprint.h"
+#include "loom/transforms/vector/sink_single_use_reads.h"
 #include "loom/transforms/vector/to_scalar.h"
 #include "loom/transforms/view/linearize_view_accesses.h"
 
@@ -446,6 +447,11 @@ static const loom_pass_descriptor_t kBuiltinPassDescriptors[] = {
         .create = loom_template_selection_create,
         .option_schema = kTemplateSelectionOptionSchema,
         .option_schema_count = IREE_ARRAYSIZE(kTemplateSelectionOptionSchema),
+    },
+    {
+        .key = IREE_SVL("sink-single-use-reads"),
+        .info = loom_sink_single_use_reads_pass_info,
+        .function_run = loom_sink_single_use_reads_run,
     },
     {
         .key = IREE_SVL("source-to-low"),

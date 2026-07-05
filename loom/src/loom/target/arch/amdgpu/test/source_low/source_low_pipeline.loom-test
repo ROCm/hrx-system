@@ -29,6 +29,7 @@ pass.pipeline<module> @__loom_check_source_low pipeline {
       unroll-scf-for
       canonicalize
       cse
+      sink-single-use-reads
       stage-loop-carried-fragments
       promote-private-fragments
       canonicalize
@@ -84,6 +85,7 @@ pass.pipeline<module> @__loom_check_source_low pipeline {
       unroll-scf-for
       canonicalize
       cse
+      sink-single-use-reads
       stage-loop-carried-fragments
       promote-private-fragments
       canonicalize
@@ -185,6 +187,7 @@ pass.pipeline<module> @__loom_check_prepared_low pipeline {
       unroll-scf-for
       canonicalize
       cse
+      sink-single-use-reads
       stage-loop-carried-fragments
       promote-private-fragments
       canonicalize

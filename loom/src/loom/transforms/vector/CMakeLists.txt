@@ -29,6 +29,22 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
+    sink_single_use_reads
+  HDRS
+    "sink_single_use_reads.h"
+  SRCS
+    "sink_single_use_reads.c"
+  DEPS
+    iree::base
+    loom::ir
+    loom::ops::op_defs
+    loom::pass::types
+    loom::rewrite::rewriter
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     to_scalar
   HDRS
     "to_scalar.h"
