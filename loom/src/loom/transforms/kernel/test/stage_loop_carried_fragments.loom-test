@@ -95,4 +95,4 @@ func.def @report_dense_accumulator_fragment_staging(%lhs_values: vector<16xbf16>
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
 COMPILE-REPORT: source_low selected_ops=0 emitted_ops=0 rows=0
 COMPILE-REPORT: source_low_transforms rows=1
-COMPILE-REPORT: source_low_transform[0] function=report_dense_accumulator_fragment_staging source_op=scf.for transform=stage-loop-carried-fragments outcome=selected reason=staged_workgroup_memory candidates=4 selected=4 removed_loop_carried=4 shape=16x16 workgroup_bytes=4096 inserted_loads=8 inserted_stores=8 barriers=2
+COMPILE-REPORT: source_low_transform[0] function=report_dense_accumulator_fragment_staging source_op=scf.for transform=stage-loop-carried-fragments outcome=selected reason=staged_workgroup_memory candidates=4 selected=4 removed_loop_carried=4 removed_payload_registers=32 shape=16x16 workgroup_bytes=4096 inserted_loads=8 inserted_stores=8 barriers=2

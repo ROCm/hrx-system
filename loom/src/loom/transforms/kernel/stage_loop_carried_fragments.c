@@ -146,6 +146,36 @@ static iree_string_view_t loom_stage_loop_carried_fragments_function_name(
       context->module, loom_func_like_callee(context->function));
 }
 
+static uint64_t
+loom_stage_loop_carried_fragments_removed_payload_register_count(
+    const loom_stage_loop_carried_fragment_list_t* fragments) {
+  uint64_t total_register_count = 0;
+  for (uint16_t i = 0; i < fragments->count; ++i) {
+    const loom_type_t payload_type = fragments->values[i].payload_type;
+    uint64_t element_count = 0;
+    if (!loom_type_static_element_count(payload_type, &element_count)) {
+      return 0;
+    }
+    const int32_t element_bit_count =
+        loom_scalar_type_bitwidth(loom_type_element_type(payload_type));
+    if (element_bit_count <= 0 ||
+        element_count > UINT64_MAX / (uint64_t)element_bit_count) {
+      return 0;
+    }
+    const uint64_t payload_bit_count =
+        element_count * (uint64_t)element_bit_count;
+    if (payload_bit_count > UINT64_MAX - 31u) {
+      return 0;
+    }
+    const uint64_t payload_register_count = (payload_bit_count + 31u) / 32u;
+    if (total_register_count > UINT64_MAX - payload_register_count) {
+      return 0;
+    }
+    total_register_count += payload_register_count;
+  }
+  return total_register_count;
+}
+
 static iree_status_t loom_stage_loop_carried_fragments_report(
     const loom_stage_loop_carried_fragments_context_t* context,
     iree_string_view_t source_op_name, uint32_t source_op_kind,
@@ -175,6 +205,9 @@ static iree_status_t loom_stage_loop_carried_fragments_report(
       .candidate_value_count = fragments->candidate_count,
       .selected_value_count = fragments->count,
       .removed_loop_carried_value_count = fragments->count,
+      .removed_loop_carried_payload_register_count =
+          loom_stage_loop_carried_fragments_removed_payload_register_count(
+              fragments),
       .row_count = row_count,
       .column_count = column_count,
       .workgroup_memory_byte_count = workgroup_memory_byte_count,

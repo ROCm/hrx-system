@@ -1089,6 +1089,8 @@ typedef struct loom_target_compile_report_source_low_transform_row_t {
   uint32_t selected_value_count;
   // Loop-carried values removed from the transformed source operation.
   uint32_t removed_loop_carried_value_count;
+  // Estimated 32-bit payload registers removed from loop-carried state.
+  uint64_t removed_loop_carried_payload_register_count;
   // Source fragment logical row count, or zero when not applicable.
   uint64_t row_count;
   // Source fragment logical column count, or zero when not applicable.

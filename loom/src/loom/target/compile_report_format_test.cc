@@ -3154,6 +3154,7 @@ TEST(CompileReportFormatTest, FormatsSourceLowTransformRowsJson) {
       /*.candidate_value_count=*/4,
       /*.selected_value_count=*/4,
       /*.removed_loop_carried_value_count=*/4,
+      /*.removed_loop_carried_payload_register_count=*/32,
       /*.row_count=*/16,
       /*.column_count=*/16,
       /*.workgroup_memory_byte_count=*/4096,
@@ -3209,7 +3210,9 @@ TEST(CompileReportFormatTest, FormatsSourceLowTransformRowsJson) {
       iree_string_view_find(output,
                             IREE_SV("\"candidate_value_count\":4,"
                                     "\"selected_value_count\":4,"
-                                    "\"removed_loop_carried_value_count\":4"),
+                                    "\"removed_loop_carried_value_count\":4,"
+                                    "\"removed_loop_carried_payload_register_"
+                                    "count\":32"),
                             0),
       IREE_STRING_VIEW_NPOS);
   EXPECT_NE(
