@@ -341,6 +341,18 @@ def _amdgpu_camel_case(value: str) -> str:
     return "".join(part[:1].upper() + part[1:] for part in value.split("_") if part)
 
 
+def _validate_amdgpu_reg_class_spill_slots(
+    key: str, reg_classes: tuple[RegClass, ...]
+) -> None:
+    for reg_class in reg_classes:
+        if reg_class.spill_slot_space is SpillSlotSpace.LDS:
+            raise ValueError(
+                f"AMDGPU descriptor set '{key}' register class "
+                f"'{reg_class.name}' uses LDS spill slots without a "
+                "lane-private LDS storage contract"
+            )
+
+
 def _amdgpu_core_descriptor_set(
     *,
     key: str,
@@ -355,6 +367,7 @@ def _amdgpu_core_descriptor_set(
     ),
     categories: tuple[DescriptorCategory, ...] = AMDGPU_DESCRIPTOR_CATEGORIES,
 ) -> DescriptorSet:
+    _validate_amdgpu_reg_class_spill_slots(key, reg_classes)
     file_stem = _amdgpu_descriptor_set_file_stem(key)
     c_suffix = _amdgpu_camel_case(file_stem)
     c_enum_stem = file_stem.upper()

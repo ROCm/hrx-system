@@ -64,6 +64,7 @@ from loom.target.arch.amdgpu.descriptors import (
     AmdgpuAtomicOperationKind,
     AmdgpuAtomicValueKind,
     AmdgpuMemoryAddressForm,
+    _amdgpu_core_descriptor_set,
     _amdgpu_core_descriptor_set_bases,
     _amdgpu_trans_schedule_class_name,
     _amdgpu_trans_schedule_classes,
@@ -118,10 +119,12 @@ from loom.target.low_descriptors import (
     OperandAddressMapKind,
     OperandFlag,
     OperandRole,
+    RegClass,
     RegClassAlt,
     RegClassAltFlag,
     RegClassFlag,
     ScheduleClassFlag,
+    SpillSlotSpace,
 )
 
 
@@ -184,6 +187,18 @@ def _expect_value_error_contains(
         actual_message = str(exc)
     assert actual_message is not None, "expected ValueError"
     assert expected_message in actual_message
+
+
+def test_amdgpu_core_descriptor_set_rejects_lds_spill_slots() -> None:
+    _expect_value_error_contains(
+        "lane-private LDS storage contract",
+        lambda: _amdgpu_core_descriptor_set(
+            key="amdgpu.test.core",
+            reg_classes=(RegClass("amdgpu.test", 32, SpillSlotSpace.LDS),),
+            resources=(),
+            schedule_classes=(),
+        ),
+    )
 
 
 def test_execution_masked_descriptors_read_exec_state() -> None:
