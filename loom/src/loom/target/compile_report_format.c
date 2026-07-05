@@ -108,46 +108,75 @@ enum {
 };
 
 static iree_host_size_t
-loom_target_compile_report_source_low_memory_storage_fields(
-    const loom_target_compile_report_source_low_memory_row_t* row,
+loom_target_compile_report_source_low_memory_storage_fields_from_values(
+    iree_string_view_t element_format, iree_string_view_t scale_format,
+    iree_string_view_t secondary_scale_format,
+    iree_string_view_t payload_packing, iree_string_view_t scale_topology,
+    iree_string_view_t affine_policy, iree_string_view_t rounding_policy,
+    iree_string_view_t codebook_policy, iree_string_view_t sparsity_policy,
     loom_target_compile_report_string_field_t* fields) {
   fields[0] = (loom_target_compile_report_string_field_t){
       .name = "element_format",
-      .value = row->storage_element_format,
+      .value = element_format,
   };
   fields[1] = (loom_target_compile_report_string_field_t){
       .name = "scale_format",
-      .value = row->storage_scale_format,
+      .value = scale_format,
   };
   fields[2] = (loom_target_compile_report_string_field_t){
       .name = "secondary_scale_format",
-      .value = row->storage_secondary_scale_format,
+      .value = secondary_scale_format,
   };
   fields[3] = (loom_target_compile_report_string_field_t){
       .name = "payload_packing",
-      .value = row->storage_payload_packing,
+      .value = payload_packing,
   };
   fields[4] = (loom_target_compile_report_string_field_t){
       .name = "scale_topology",
-      .value = row->storage_scale_topology,
+      .value = scale_topology,
   };
   fields[5] = (loom_target_compile_report_string_field_t){
       .name = "affine_policy",
-      .value = row->storage_affine_policy,
+      .value = affine_policy,
   };
   fields[6] = (loom_target_compile_report_string_field_t){
       .name = "rounding_policy",
-      .value = row->storage_rounding_policy,
+      .value = rounding_policy,
   };
   fields[7] = (loom_target_compile_report_string_field_t){
       .name = "codebook_policy",
-      .value = row->storage_codebook_policy,
+      .value = codebook_policy,
   };
   fields[8] = (loom_target_compile_report_string_field_t){
       .name = "sparsity_policy",
-      .value = row->storage_sparsity_policy,
+      .value = sparsity_policy,
   };
   return LOOM_TARGET_COMPILE_REPORT_SOURCE_LOW_MEMORY_STORAGE_FIELD_COUNT;
+}
+
+static iree_host_size_t
+loom_target_compile_report_source_low_memory_storage_fields(
+    const loom_target_compile_report_source_low_memory_row_t* row,
+    loom_target_compile_report_string_field_t* fields) {
+  return loom_target_compile_report_source_low_memory_storage_fields_from_values(
+      row->storage_element_format, row->storage_scale_format,
+      row->storage_secondary_scale_format, row->storage_payload_packing,
+      row->storage_scale_topology, row->storage_affine_policy,
+      row->storage_rounding_policy, row->storage_codebook_policy,
+      row->storage_sparsity_policy, fields);
+}
+
+static iree_host_size_t
+loom_target_compile_report_source_low_memory_argument_packet_storage_fields(
+    const loom_target_compile_report_source_low_memory_argument_packet_summary_t*
+        summary,
+    loom_target_compile_report_string_field_t* fields) {
+  return loom_target_compile_report_source_low_memory_storage_fields_from_values(
+      summary->storage_element_format, summary->storage_scale_format,
+      summary->storage_secondary_scale_format, summary->storage_payload_packing,
+      summary->storage_scale_topology, summary->storage_affine_policy,
+      summary->storage_rounding_policy, summary->storage_codebook_policy,
+      summary->storage_sparsity_policy, fields);
 }
 
 static iree_host_size_t
@@ -155,43 +184,12 @@ loom_target_compile_report_source_low_memory_strategy_storage_fields(
     const loom_target_compile_report_source_low_memory_strategy_summary_t*
         summary,
     loom_target_compile_report_string_field_t* fields) {
-  fields[0] = (loom_target_compile_report_string_field_t){
-      .name = "element_format",
-      .value = summary->storage_element_format,
-  };
-  fields[1] = (loom_target_compile_report_string_field_t){
-      .name = "scale_format",
-      .value = summary->storage_scale_format,
-  };
-  fields[2] = (loom_target_compile_report_string_field_t){
-      .name = "secondary_scale_format",
-      .value = summary->storage_secondary_scale_format,
-  };
-  fields[3] = (loom_target_compile_report_string_field_t){
-      .name = "payload_packing",
-      .value = summary->storage_payload_packing,
-  };
-  fields[4] = (loom_target_compile_report_string_field_t){
-      .name = "scale_topology",
-      .value = summary->storage_scale_topology,
-  };
-  fields[5] = (loom_target_compile_report_string_field_t){
-      .name = "affine_policy",
-      .value = summary->storage_affine_policy,
-  };
-  fields[6] = (loom_target_compile_report_string_field_t){
-      .name = "rounding_policy",
-      .value = summary->storage_rounding_policy,
-  };
-  fields[7] = (loom_target_compile_report_string_field_t){
-      .name = "codebook_policy",
-      .value = summary->storage_codebook_policy,
-  };
-  fields[8] = (loom_target_compile_report_string_field_t){
-      .name = "sparsity_policy",
-      .value = summary->storage_sparsity_policy,
-  };
-  return LOOM_TARGET_COMPILE_REPORT_SOURCE_LOW_MEMORY_STORAGE_FIELD_COUNT;
+  return loom_target_compile_report_source_low_memory_storage_fields_from_values(
+      summary->storage_element_format, summary->storage_scale_format,
+      summary->storage_secondary_scale_format, summary->storage_payload_packing,
+      summary->storage_scale_topology, summary->storage_affine_policy,
+      summary->storage_rounding_policy, summary->storage_codebook_policy,
+      summary->storage_sparsity_policy, fields);
 }
 
 static iree_host_size_t loom_target_compile_report_first_non_empty_string_field(
@@ -251,6 +249,20 @@ loom_target_compile_report_append_source_low_memory_strategy_storage_text(
       fields[LOOM_TARGET_COMPILE_REPORT_SOURCE_LOW_MEMORY_STORAGE_FIELD_COUNT];
   const iree_host_size_t field_count =
       loom_target_compile_report_source_low_memory_strategy_storage_fields(
+          summary, fields);
+  return loom_target_compile_report_append_source_low_memory_storage_fields_text(
+      fields, field_count, builder);
+}
+
+static iree_status_t
+loom_target_compile_report_append_source_low_memory_argument_packet_storage_text(
+    const loom_target_compile_report_source_low_memory_argument_packet_summary_t*
+        summary,
+    iree_string_builder_t* builder) {
+  loom_target_compile_report_string_field_t
+      fields[LOOM_TARGET_COMPILE_REPORT_SOURCE_LOW_MEMORY_STORAGE_FIELD_COUNT];
+  const iree_host_size_t field_count =
+      loom_target_compile_report_source_low_memory_argument_packet_storage_fields(
           summary, fields);
   return loom_target_compile_report_append_source_low_memory_storage_fields_text(
       fields, field_count, builder);
@@ -1280,9 +1292,11 @@ static iree_status_t loom_target_compile_report_format_summary(
       IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
           builder,
           "COMPILE-REPORT: source_low_memory roots=%" PRIhsz
-          " arguments=%" PRIhsz " strategies=%" PRIhsz,
+          " arguments=%" PRIhsz " argument_packets=%" PRIhsz
+          " strategies=%" PRIhsz,
           report->source_low_memory_root_summaries.count,
           report->source_low_memory_argument_summaries.count,
+          report->source_low_memory_argument_packet_summaries.count,
           report->source_low_memory_strategy_summaries.count));
       IREE_RETURN_IF_ERROR(
           loom_target_compile_report_append_source_low_memory_summary_text(
@@ -2698,6 +2712,74 @@ loom_target_compile_report_format_source_low_memory_argument_summaries(
           builder, " source_root_argument_index=%u memory_space=%.*s",
           row->source_root_argument_index, (int)memory_space.size,
           memory_space.data));
+      IREE_RETURN_IF_ERROR(
+          loom_target_compile_report_append_source_low_memory_summary_text(
+              &row->summary, &report->workload, builder));
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "\n"));
+    }
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t
+loom_target_compile_report_format_source_low_memory_argument_packet_summaries(
+    const loom_target_compile_report_t* report,
+    iree_string_builder_t* builder) {
+  iree_host_size_t row_index = 0;
+  for (const loom_target_compile_report_vec_t* vec =
+           report->source_low_memory_argument_packet_summaries.head;
+       vec != NULL; vec = vec->next) {
+    const loom_target_compile_report_source_low_memory_argument_packet_summary_t*
+        rows =
+            (const loom_target_compile_report_source_low_memory_argument_packet_summary_t*)
+                loom_target_compile_report_vec_const_rows(vec);
+    for (iree_host_size_t i = 0; i < vec->count; ++i, ++row_index) {
+      const loom_target_compile_report_source_low_memory_argument_packet_summary_t*
+          row = &rows[i];
+      const iree_string_view_t function_name =
+          loom_target_compile_report_non_empty(row->function_name);
+      const iree_string_view_t source_root_name =
+          loom_target_compile_report_non_empty(row->source_root_name);
+      const iree_string_view_t memory_space =
+          loom_target_compile_report_non_empty(row->memory_space);
+      const iree_string_view_t operation_kind =
+          loom_target_compile_report_non_empty(row->operation_kind);
+      const iree_string_view_t packet_key =
+          loom_target_compile_report_non_empty(row->packet_key);
+      const iree_string_view_t strategy_key =
+          loom_target_compile_report_non_empty(row->strategy_key);
+      const iree_string_view_t fallback_reason =
+          loom_target_compile_report_non_empty(row->fallback_reason);
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+          builder,
+          "COMPILE-REPORT: source_low_memory_argument_packet[%" PRIhsz
+          "] function=%.*s",
+          row_index, (int)function_name.size, function_name.data));
+      if (!iree_string_view_is_empty(row->source_root_name)) {
+        IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+            builder, " source_root=%.*s", (int)source_root_name.size,
+            source_root_name.data));
+      }
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+          builder,
+          " source_root_argument_index=%u memory_space=%.*s operation=%.*s "
+          "packet=%.*s",
+          row->source_root_argument_index, (int)memory_space.size,
+          memory_space.data, (int)operation_kind.size, operation_kind.data,
+          (int)packet_key.size, packet_key.data));
+      if (!iree_string_view_is_empty(row->strategy_key)) {
+        IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+            builder, " strategy=%.*s", (int)strategy_key.size,
+            strategy_key.data));
+      }
+      IREE_RETURN_IF_ERROR(
+          loom_target_compile_report_append_source_low_memory_argument_packet_storage_text(
+              row, builder));
+      if (!iree_string_view_is_empty(row->fallback_reason)) {
+        IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+            builder, " fallback_reason=%.*s", (int)fallback_reason.size,
+            fallback_reason.data));
+      }
       IREE_RETURN_IF_ERROR(
           loom_target_compile_report_append_source_low_memory_summary_text(
               &row->summary, &report->workload, builder));
@@ -5365,6 +5447,20 @@ loom_target_compile_report_format_source_low_memory_strategy_storage_json(
 }
 
 static iree_status_t
+loom_target_compile_report_format_source_low_memory_argument_packet_storage_json(
+    const loom_target_compile_report_source_low_memory_argument_packet_summary_t*
+        summary,
+    loom_output_stream_t* stream, bool* inout_first_field) {
+  loom_target_compile_report_string_field_t
+      fields[LOOM_TARGET_COMPILE_REPORT_SOURCE_LOW_MEMORY_STORAGE_FIELD_COUNT];
+  const iree_host_size_t field_count =
+      loom_target_compile_report_source_low_memory_argument_packet_storage_fields(
+          summary, fields);
+  return loom_target_compile_report_format_source_low_memory_storage_fields_json(
+      fields, field_count, stream, inout_first_field);
+}
+
+static iree_status_t
 loom_target_compile_report_format_source_low_memory_row_json(
     const loom_target_compile_report_source_low_memory_row_t* row,
     iree_host_size_t row_index, loom_output_stream_t* stream) {
@@ -5694,6 +5790,49 @@ loom_target_compile_report_format_source_low_memory_argument_summary_json(
 }
 
 static iree_status_t
+loom_target_compile_report_format_source_low_memory_argument_packet_summary_json(
+    const loom_target_compile_report_source_low_memory_argument_packet_summary_t*
+        row,
+    const loom_target_compile_report_workload_t* workload,
+    iree_host_size_t row_index, loom_output_stream_t* stream) {
+  bool first_field = true;
+  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "{"));
+  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_size_field(
+      stream, &first_field, "index", row_index));
+  IREE_RETURN_IF_ERROR(
+      loom_target_compile_report_json_write_optional_string_field(
+          stream, &first_field, "function", row->function_name));
+  IREE_RETURN_IF_ERROR(
+      loom_target_compile_report_json_write_optional_string_field(
+          stream, &first_field, "source_root", row->source_root_name));
+  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u32_field(
+      stream, &first_field, "source_root_argument_index",
+      row->source_root_argument_index));
+  IREE_RETURN_IF_ERROR(
+      loom_target_compile_report_json_write_optional_string_field(
+          stream, &first_field, "memory_space", row->memory_space));
+  IREE_RETURN_IF_ERROR(
+      loom_target_compile_report_json_write_optional_string_field(
+          stream, &first_field, "operation", row->operation_kind));
+  IREE_RETURN_IF_ERROR(
+      loom_target_compile_report_json_write_optional_string_field(
+          stream, &first_field, "packet", row->packet_key));
+  IREE_RETURN_IF_ERROR(
+      loom_target_compile_report_json_write_optional_string_field(
+          stream, &first_field, "strategy", row->strategy_key));
+  IREE_RETURN_IF_ERROR(
+      loom_target_compile_report_json_write_optional_string_field(
+          stream, &first_field, "fallback_reason", row->fallback_reason));
+  IREE_RETURN_IF_ERROR(
+      loom_target_compile_report_format_source_low_memory_argument_packet_storage_json(
+          row, stream, &first_field));
+  IREE_RETURN_IF_ERROR(
+      loom_target_compile_report_format_source_low_memory_summary_fields_json(
+          &row->summary, workload, stream, &first_field));
+  return loom_output_stream_write_cstring(stream, "}");
+}
+
+static iree_status_t
 loom_target_compile_report_format_source_low_memory_strategy_summary_json(
     const loom_target_compile_report_source_low_memory_strategy_summary_t* row,
     const loom_target_compile_report_workload_t* workload,
@@ -5784,6 +5923,32 @@ loom_target_compile_report_format_source_low_memory_summary_json(
         }
         IREE_RETURN_IF_ERROR(
             loom_target_compile_report_format_source_low_memory_argument_summary_json(
+                &rows[i], &report->workload, row_index, stream));
+      }
+    }
+    IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "]"));
+  }
+  if (report->source_low_memory_argument_packet_summaries.count != 0) {
+    IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_size_field(
+        stream, &first_field, "argument_packet_count",
+        report->source_low_memory_argument_packet_summaries.count));
+    IREE_RETURN_IF_ERROR(loom_target_compile_report_json_begin_field(
+        stream, &first_field, "argument_packets"));
+    IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "["));
+    iree_host_size_t row_index = 0;
+    for (const loom_target_compile_report_vec_t* vec =
+             report->source_low_memory_argument_packet_summaries.head;
+         vec != NULL; vec = vec->next) {
+      const loom_target_compile_report_source_low_memory_argument_packet_summary_t*
+          rows =
+              (const loom_target_compile_report_source_low_memory_argument_packet_summary_t*)
+                  loom_target_compile_report_vec_const_rows(vec);
+      for (iree_host_size_t i = 0; i < vec->count; ++i, ++row_index) {
+        if (row_index != 0) {
+          IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, ","));
+        }
+        IREE_RETURN_IF_ERROR(
+            loom_target_compile_report_format_source_low_memory_argument_packet_summary_json(
                 &rows[i], &report->workload, row_index, stream));
       }
     }
@@ -6299,6 +6464,9 @@ iree_status_t loom_target_compile_report_format_text(
             report, builder));
     IREE_RETURN_IF_ERROR(
         loom_target_compile_report_format_source_low_memory_argument_summaries(
+            report, builder));
+    IREE_RETURN_IF_ERROR(
+        loom_target_compile_report_format_source_low_memory_argument_packet_summaries(
             report, builder));
     IREE_RETURN_IF_ERROR(
         loom_target_compile_report_format_source_low_memory_strategy_summaries(

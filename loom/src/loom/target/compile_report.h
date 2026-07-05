@@ -1363,6 +1363,48 @@ typedef struct loom_target_compile_report_source_low_memory_argument_summary_t {
   loom_target_compile_report_source_low_memory_summary_t summary;
 } loom_target_compile_report_source_low_memory_argument_summary_t;
 
+// Summary of emitted source-memory packet shape grouped by source function
+// argument and selected target packet.
+typedef struct
+    loom_target_compile_report_source_low_memory_argument_packet_summary_t {
+  // Source function symbol containing the source memory argument.
+  iree_string_view_t function_name;
+  // Common named source memory root for this argument, if known and unique.
+  iree_string_view_t source_root_name;
+  // Source function entry argument index for the memory root.
+  uint16_t source_root_argument_index;
+  // Target-independent memory-space key selected by the target.
+  iree_string_view_t memory_space;
+  // Source memory operation kind selected by the target.
+  iree_string_view_t operation_kind;
+  // Stable target packet key selected for this packet group.
+  iree_string_view_t packet_key;
+  // Stable target-owned strategy key selected for this packet group.
+  iree_string_view_t strategy_key;
+  // Stable target-owned reason key for strategy selection or fallback.
+  iree_string_view_t fallback_reason;
+  // Logical storage element format recovered from source encoding facts.
+  iree_string_view_t storage_element_format;
+  // Primary scale format recovered from source encoding facts.
+  iree_string_view_t storage_scale_format;
+  // Secondary scale format recovered from source encoding facts.
+  iree_string_view_t storage_secondary_scale_format;
+  // Physical payload packing recovered from source encoding facts.
+  iree_string_view_t storage_payload_packing;
+  // Scale topology recovered from source encoding facts.
+  iree_string_view_t storage_scale_topology;
+  // Affine payload interpretation recovered from source encoding facts.
+  iree_string_view_t storage_affine_policy;
+  // Rounding or finite-policy contract recovered from source encoding facts.
+  iree_string_view_t storage_rounding_policy;
+  // Codebook ownership contract recovered from source encoding facts.
+  iree_string_view_t storage_codebook_policy;
+  // Sparse metadata contract recovered from source encoding facts.
+  iree_string_view_t storage_sparsity_policy;
+  // Emitted source-memory packet shape for this argument and packet.
+  loom_target_compile_report_source_low_memory_summary_t summary;
+} loom_target_compile_report_source_low_memory_argument_packet_summary_t;
+
 // Summary of emitted source-memory packet shape grouped by target strategy.
 typedef struct loom_target_compile_report_source_low_memory_strategy_summary_t {
   // Source function symbol containing the strategy use.
@@ -1707,6 +1749,9 @@ typedef struct loom_target_compile_report_t {
   loom_target_compile_report_row_list_t source_low_memory_root_summaries;
   // Owned source-memory summaries grouped by source function argument.
   loom_target_compile_report_row_list_t source_low_memory_argument_summaries;
+  // Owned source-memory summaries grouped by argument and selected packet.
+  loom_target_compile_report_row_list_t
+      source_low_memory_argument_packet_summaries;
   // Owned source-memory summaries grouped by selected target strategy.
   loom_target_compile_report_row_list_t source_low_memory_strategy_summaries;
   // Derived summary of emitted source-memory packet shape.

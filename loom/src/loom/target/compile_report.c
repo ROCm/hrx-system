@@ -99,6 +99,8 @@ void loom_target_compile_report_deinitialize(
   loom_target_compile_report_row_list_deinitialize(
       allocator, &report->source_low_memory_argument_summaries);
   loom_target_compile_report_row_list_deinitialize(
+      allocator, &report->source_low_memory_argument_packet_summaries);
+  loom_target_compile_report_row_list_deinitialize(
       allocator, &report->source_low_memory_strategy_summaries);
   loom_target_compile_report_row_list_deinitialize(
       allocator, &report->math_legalization_rows);
@@ -129,6 +131,7 @@ static bool loom_target_compile_report_has_rows(
          report->source_low_memory_rows.count != 0 ||
          report->source_low_memory_root_summaries.count != 0 ||
          report->source_low_memory_argument_summaries.count != 0 ||
+         report->source_low_memory_argument_packet_summaries.count != 0 ||
          report->source_low_memory_strategy_summaries.count != 0 ||
          report->math_legalization_rows.count != 0 ||
          report->target_legalization_rows.count != 0 ||
@@ -243,6 +246,8 @@ iree_status_t loom_target_compile_report_clone(
       (loom_target_compile_report_row_list_t){0};
   target.source_low_memory_argument_summaries =
       (loom_target_compile_report_row_list_t){0};
+  target.source_low_memory_argument_packet_summaries =
+      (loom_target_compile_report_row_list_t){0};
   target.source_low_memory_strategy_summaries =
       (loom_target_compile_report_row_list_t){0};
   target.math_legalization_rows = (loom_target_compile_report_row_list_t){0};
@@ -266,6 +271,7 @@ iree_status_t loom_target_compile_report_clone(
       source->source_low_memory_rows.count == 0 &&
       source->source_low_memory_root_summaries.count == 0 &&
       source->source_low_memory_argument_summaries.count == 0 &&
+      source->source_low_memory_argument_packet_summaries.count == 0 &&
       source->source_low_memory_strategy_summaries.count == 0 &&
       source->math_legalization_rows.count == 0 &&
       source->target_legalization_rows.count == 0 &&
@@ -392,6 +398,13 @@ iree_status_t loom_target_compile_report_clone(
         &source->source_low_memory_argument_summaries,
         sizeof(loom_target_compile_report_source_low_memory_argument_summary_t),
         allocator, &target.source_low_memory_argument_summaries);
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_target_compile_report_row_list_clone(
+        &source->source_low_memory_argument_packet_summaries,
+        sizeof(
+            loom_target_compile_report_source_low_memory_argument_packet_summary_t),
+        allocator, &target.source_low_memory_argument_packet_summaries);
   }
   if (iree_status_is_ok(status)) {
     status = loom_target_compile_report_row_list_clone(
@@ -1650,6 +1663,22 @@ static void loom_target_compile_report_merge_source_low_memory_argument_summary(
                                                              &source->summary);
 }
 
+static void
+loom_target_compile_report_merge_source_low_memory_argument_packet_summary(
+    loom_target_compile_report_source_low_memory_argument_packet_summary_t*
+        target,
+    const loom_target_compile_report_source_low_memory_argument_packet_summary_t*
+        source) {
+  if (!iree_string_view_is_empty(target->source_root_name) &&
+      (iree_string_view_is_empty(source->source_root_name) ||
+       !iree_string_view_equal(target->source_root_name,
+                               source->source_root_name))) {
+    target->source_root_name = iree_string_view_empty();
+  }
+  loom_target_compile_report_merge_source_low_memory_summary(&target->summary,
+                                                             &source->summary);
+}
+
 static void loom_target_compile_report_merge_source_low_memory_strategy_summary(
     loom_target_compile_report_source_low_memory_strategy_summary_t* target,
     const loom_target_compile_report_source_low_memory_strategy_summary_t*
@@ -1753,6 +1782,111 @@ loom_target_compile_report_record_source_low_memory_argument_summary_row(
   }
   return loom_target_compile_report_row_list_append(
       &report->source_low_memory_argument_summaries, sizeof(*row),
+      report->allocator, row);
+}
+
+static loom_target_compile_report_source_low_memory_argument_packet_summary_t
+loom_target_compile_report_source_low_memory_argument_packet_summary_from_row(
+    const loom_target_compile_report_source_low_memory_row_t* row) {
+  return (
+      loom_target_compile_report_source_low_memory_argument_packet_summary_t){
+      .function_name = row->function_name,
+      .source_root_name = row->source_root_name,
+      .source_root_argument_index = row->source_root_argument_index,
+      .memory_space = row->memory_space,
+      .operation_kind = row->operation_kind,
+      .packet_key = row->packet_key,
+      .strategy_key = row->strategy_key,
+      .fallback_reason = row->fallback_reason,
+      .storage_element_format = row->storage_element_format,
+      .storage_scale_format = row->storage_scale_format,
+      .storage_secondary_scale_format = row->storage_secondary_scale_format,
+      .storage_payload_packing = row->storage_payload_packing,
+      .storage_scale_topology = row->storage_scale_topology,
+      .storage_affine_policy = row->storage_affine_policy,
+      .storage_rounding_policy = row->storage_rounding_policy,
+      .storage_codebook_policy = row->storage_codebook_policy,
+      .storage_sparsity_policy = row->storage_sparsity_policy,
+  };
+}
+
+static bool
+loom_target_compile_report_source_low_memory_argument_packet_summaries_match(
+    const loom_target_compile_report_source_low_memory_argument_packet_summary_t*
+        lhs,
+    const loom_target_compile_report_source_low_memory_argument_packet_summary_t*
+        rhs) {
+  return iree_string_view_equal(lhs->function_name, rhs->function_name) &&
+         lhs->source_root_argument_index == rhs->source_root_argument_index &&
+         iree_string_view_equal(lhs->memory_space, rhs->memory_space) &&
+         iree_string_view_equal(lhs->operation_kind, rhs->operation_kind) &&
+         iree_string_view_equal(lhs->packet_key, rhs->packet_key) &&
+         iree_string_view_equal(lhs->strategy_key, rhs->strategy_key) &&
+         iree_string_view_equal(lhs->fallback_reason, rhs->fallback_reason) &&
+         iree_string_view_equal(lhs->storage_element_format,
+                                rhs->storage_element_format) &&
+         iree_string_view_equal(lhs->storage_scale_format,
+                                rhs->storage_scale_format) &&
+         iree_string_view_equal(lhs->storage_secondary_scale_format,
+                                rhs->storage_secondary_scale_format) &&
+         iree_string_view_equal(lhs->storage_payload_packing,
+                                rhs->storage_payload_packing) &&
+         iree_string_view_equal(lhs->storage_scale_topology,
+                                rhs->storage_scale_topology) &&
+         iree_string_view_equal(lhs->storage_affine_policy,
+                                rhs->storage_affine_policy) &&
+         iree_string_view_equal(lhs->storage_rounding_policy,
+                                rhs->storage_rounding_policy) &&
+         iree_string_view_equal(lhs->storage_codebook_policy,
+                                rhs->storage_codebook_policy) &&
+         iree_string_view_equal(lhs->storage_sparsity_policy,
+                                rhs->storage_sparsity_policy);
+}
+
+static loom_target_compile_report_source_low_memory_argument_packet_summary_t*
+loom_target_compile_report_find_source_low_memory_argument_packet_summary(
+    loom_target_compile_report_t* report,
+    const loom_target_compile_report_source_low_memory_argument_packet_summary_t*
+        row) {
+  if (row->source_root_argument_index == UINT16_MAX) {
+    return NULL;
+  }
+  for (loom_target_compile_report_vec_t* vec =
+           report->source_low_memory_argument_packet_summaries.head;
+       vec != NULL; vec = vec->next) {
+    loom_target_compile_report_source_low_memory_argument_packet_summary_t*
+        summaries =
+            (loom_target_compile_report_source_low_memory_argument_packet_summary_t*)
+                loom_target_compile_report_vec_rows(vec);
+    for (iree_host_size_t i = 0; i < vec->count; ++i) {
+      loom_target_compile_report_source_low_memory_argument_packet_summary_t*
+          summary = &summaries[i];
+      if (loom_target_compile_report_source_low_memory_argument_packet_summaries_match(
+              summary, row)) {
+        return summary;
+      }
+    }
+  }
+  return NULL;
+}
+
+static iree_status_t
+loom_target_compile_report_record_source_low_memory_argument_packet_summary_row(
+    loom_target_compile_report_t* report,
+    const loom_target_compile_report_source_low_memory_argument_packet_summary_t*
+        row) {
+  loom_target_compile_report_source_low_memory_argument_packet_summary_t* summary =
+      loom_target_compile_report_find_source_low_memory_argument_packet_summary(
+          report, row);
+  if (summary != NULL) {
+    loom_target_compile_report_merge_source_low_memory_argument_packet_summary(
+        summary, row);
+    return iree_ok_status();
+  } else if (row->source_root_argument_index == UINT16_MAX) {
+    return iree_ok_status();
+  }
+  return loom_target_compile_report_row_list_append(
+      &report->source_low_memory_argument_packet_summaries, sizeof(*row),
       report->allocator, row);
 }
 
@@ -2090,6 +2224,19 @@ iree_status_t loom_target_compile_report_record_entry_report(
       for (iree_host_size_t i = 0; i < vec->count; ++i) {
         IREE_RETURN_IF_ERROR(
             loom_target_compile_report_record_source_low_memory_argument_summary_row(
+                report, &rows[i]));
+      }
+    }
+    for (const loom_target_compile_report_vec_t* vec =
+             entry_report->source_low_memory_argument_packet_summaries.head;
+         vec != NULL; vec = vec->next) {
+      const loom_target_compile_report_source_low_memory_argument_packet_summary_t*
+          rows =
+              (const loom_target_compile_report_source_low_memory_argument_packet_summary_t*)
+                  loom_target_compile_report_vec_const_rows(vec);
+      for (iree_host_size_t i = 0; i < vec->count; ++i) {
+        IREE_RETURN_IF_ERROR(
+            loom_target_compile_report_record_source_low_memory_argument_packet_summary_row(
                 report, &rows[i]));
       }
     }
@@ -2559,6 +2706,15 @@ iree_status_t loom_target_compile_report_record_source_low_memory_row(
   IREE_RETURN_IF_ERROR(
       loom_target_compile_report_record_source_low_memory_argument_summary(
           report, row, unique_delta, direction_unique_delta));
+  loom_target_compile_report_source_low_memory_argument_packet_summary_t
+      argument_packet =
+          loom_target_compile_report_source_low_memory_argument_packet_summary_from_row(
+              row);
+  loom_target_compile_report_accumulate_source_low_memory_summary(
+      &argument_packet.summary, row, no_unique_delta, no_unique_delta);
+  IREE_RETURN_IF_ERROR(
+      loom_target_compile_report_record_source_low_memory_argument_packet_summary_row(
+          report, &argument_packet));
   IREE_RETURN_IF_ERROR(
       loom_target_compile_report_record_source_low_memory_strategy_summary(
           report, row));
