@@ -72,7 +72,7 @@ kernel.def target(@target) @attention_probability_value_mma_repack() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(32, 1, 1) @attention_probability_value_mma_repack(%probability_fragment: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %init: reg<amdgpu.vgpr x8>) asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @attention_probability_value_mma_repack(%probability_fragment: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %init: reg<amdgpu.vgpr x8>) asm<amdgpu.rdna3.core> {
   %22 = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
   %24 = slice %probability_fragment[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
@@ -317,7 +317,7 @@ kernel.def target(@target) @attention_loop_carried_accumulator_barrier() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(32, 1, 1) @attention_loop_carried_accumulator_barrier(%lhs: reg<amdgpu.vgpr x8>, %rhs0: reg<amdgpu.vgpr x8>, %rhs1: reg<amdgpu.vgpr x8>, %init: reg<amdgpu.vgpr x8>) asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @attention_loop_carried_accumulator_barrier(%lhs: reg<amdgpu.vgpr x8>, %rhs0: reg<amdgpu.vgpr x8>, %rhs1: reg<amdgpu.vgpr x8>, %init: reg<amdgpu.vgpr x8>) asm<amdgpu.rdna3.core> {
   %30 = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
   %32 = copy %init : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x8>
@@ -384,7 +384,7 @@ kernel.def target(@target) @attention_tail_peel_accumulator_merge() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(32, 1, 1) @attention_tail_peel_accumulator_merge(%lhs: reg<amdgpu.vgpr x8>, %rhs0: reg<amdgpu.vgpr x8>, %rhs1: reg<amdgpu.vgpr x8>, %init: reg<amdgpu.vgpr x8>, %tail_tile_count: reg<amdgpu.sgpr>) asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @attention_tail_peel_accumulator_merge(%lhs: reg<amdgpu.vgpr x8>, %rhs0: reg<amdgpu.vgpr x8>, %rhs1: reg<amdgpu.vgpr x8>, %init: reg<amdgpu.vgpr x8>, %tail_tile_count: reg<amdgpu.sgpr>) asm<amdgpu.rdna3.core> {
   %37 = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
   %zero_i32 = s_mov_b32 0

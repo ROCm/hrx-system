@@ -20,7 +20,7 @@ kernel.def target(@target) @wave_sized_workgroup_memory_workitem_x_b32() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(32, 1, 1) @wave_sized_workgroup_memory_workitem_x_b32() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @wave_sized_workgroup_memory_workitem_x_b32() asm<amdgpu.rdna3.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %10 = storage {byte_alignment = 16, byte_length = 128} : low.storage<workgroup>
   %one = v_mov_b32 1
@@ -52,7 +52,7 @@ kernel.def target(@target) @wave_sized_workgroup_memory_workitem_x_i8x4() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(32, 1, 1) @wave_sized_workgroup_memory_workitem_x_i8x4() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @wave_sized_workgroup_memory_workitem_x_i8x4() asm<amdgpu.rdna3.core> {
   %10 = storage {byte_alignment = 16, byte_length = 64} : low.storage<workgroup>
   %one = v_mov_b32 16843009
   %13 = s_mov_b32_m0_imm 0
@@ -85,7 +85,7 @@ kernel.def target(@target) @cross_wave_workgroup_memory_workitem_x_b32() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @cross_wave_workgroup_memory_workitem_x_b32() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @cross_wave_workgroup_memory_workitem_x_b32() asm<amdgpu.rdna3.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %10 = storage {byte_alignment = 16, byte_length = 256} : low.storage<workgroup>
   %one = v_mov_b32 1
@@ -121,7 +121,7 @@ kernel.def target(@target) @workgroup_memory_scalar_loop_index_b32() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(8, 1, 1) @workgroup_memory_scalar_loop_index_b32() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(8, 1, 1) workgroup_count(1, 1, 1) @workgroup_memory_scalar_loop_index_b32() asm<amdgpu.rdna3.core> {
   %zero_index = s_mov_b32 0
   %eight = s_mov_b32 8
   %one_index = s_mov_b32 1
@@ -166,7 +166,7 @@ kernel.def target(@target) @wave_sized_workgroup_memory_workitem_x_b32_static_of
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(32, 1, 1) @wave_sized_workgroup_memory_workitem_x_b32_static_offset() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @wave_sized_workgroup_memory_workitem_x_b32_static_offset() asm<amdgpu.rdna3.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %12 = storage {byte_alignment = 16, byte_length = 160} : low.storage<workgroup>
   %one = v_mov_b32 1
@@ -202,7 +202,7 @@ kernel.def target(@target) @wave_sized_workgroup_memory_second_allocation_b32() 
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(32, 1, 1) @wave_sized_workgroup_memory_second_allocation_b32() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @wave_sized_workgroup_memory_second_allocation_b32() asm<amdgpu.rdna3.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %13 = storage {byte_alignment = 16, byte_length = 128} : low.storage<workgroup>
   %15 = storage {byte_alignment = 16, byte_length = 128} : low.storage<workgroup>
@@ -239,7 +239,7 @@ kernel.def target(@target) @wave_sized_workgroup_memory_view_base_and_element_of
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(32, 1, 1) @wave_sized_workgroup_memory_view_base_and_element_offset_b32() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @wave_sized_workgroup_memory_view_base_and_element_offset_b32() asm<amdgpu.rdna3.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %12 = storage {byte_alignment = 16, byte_length = 224} : low.storage<workgroup>
   %one = v_mov_b32 1
@@ -275,7 +275,7 @@ kernel.def target(@target) @wave_sized_workgroup_memory_interleaved_addtid_and_v
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(32, 1, 1) @wave_sized_workgroup_memory_interleaved_addtid_and_vaddr_b32() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @wave_sized_workgroup_memory_interleaved_addtid_and_vaddr_b32() asm<amdgpu.rdna3.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %15 = storage {byte_alignment = 16, byte_length = 256} : low.storage<workgroup>
   %one = v_mov_b32 1
@@ -312,7 +312,7 @@ kernel.def target(@target) @wave_sized_workgroup_memory_roundtrip_lane_cast_b32(
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(32, 1, 1) @wave_sized_workgroup_memory_roundtrip_lane_cast_b32() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @wave_sized_workgroup_memory_roundtrip_lane_cast_b32() asm<amdgpu.rdna3.core> {
   %lane_index = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %12 = storage {byte_alignment = 16, byte_length = 128} : low.storage<workgroup>
   %one = v_mov_b32 1
@@ -347,7 +347,7 @@ kernel.def target(@target) @wave_sized_workgroup_memory_select_same_lane_b32() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(32, 1, 1) @wave_sized_workgroup_memory_select_same_lane_b32() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @wave_sized_workgroup_memory_select_same_lane_b32() asm<amdgpu.rdna3.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %13 = storage {byte_alignment = 16, byte_length = 128} : low.storage<workgroup>
   %one = v_mov_b32 1
@@ -384,7 +384,7 @@ kernel.def target(@target) @wave_sized_workgroup_memory_select_scaled_lane_b32()
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(32, 1, 1) @wave_sized_workgroup_memory_select_scaled_lane_b32() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @wave_sized_workgroup_memory_select_scaled_lane_b32() asm<amdgpu.rdna3.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %scaled_lane = v_lshlrev_b32_lit %lane, 1
   %inside = v_cmp_lt_u32_src1_inline %lane {rhs = 16}
@@ -425,7 +425,7 @@ kernel.def target(@target) @wave_sized_workgroup_memory_guarded_lane_store_b32()
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(32, 1, 1) @wave_sized_workgroup_memory_guarded_lane_store_b32() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @wave_sized_workgroup_memory_guarded_lane_store_b32() asm<amdgpu.rdna3.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %14 = storage {byte_alignment = 16, byte_length = 128} : low.storage<workgroup>
   %initial = v_mov_b32 0
@@ -474,7 +474,7 @@ kernel.def target(@target) @wave_sized_workgroup_memory_guarded_lane_load_b32() 
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(32, 1, 1) @wave_sized_workgroup_memory_guarded_lane_load_b32() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @wave_sized_workgroup_memory_guarded_lane_load_b32() asm<amdgpu.rdna3.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %13 = storage {byte_alignment = 16, byte_length = 128} : low.storage<workgroup>
   %one = v_mov_b32 1

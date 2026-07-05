@@ -382,7 +382,7 @@ kernel.def target(@target) @cfg_exact_false_divergent_condition() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @cfg_exact_divergent_condition() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @cfg_exact_divergent_condition() asm<amdgpu.rdna3.core> {
   %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
   %value = v_mov_b32 1
   %18 = v_mov_b32 0
@@ -390,7 +390,7 @@ low.kernel.def target(@target) workgroup_size(1, 1, 1) @cfg_exact_divergent_cond
   return
 }
 
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @cfg_exact_false_divergent_condition() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @cfg_exact_false_divergent_condition() asm<amdgpu.rdna3.core> {
   %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
   %value = v_mov_b32 2
   %21 = v_mov_b32 0
@@ -2111,7 +2111,7 @@ kernel.def target(@target) @branch_local_buffer_vector_load() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @branch_local_buffer_vector_load() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @branch_local_buffer_vector_load() asm<amdgpu.rdna3.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %positive_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
   %negative_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>

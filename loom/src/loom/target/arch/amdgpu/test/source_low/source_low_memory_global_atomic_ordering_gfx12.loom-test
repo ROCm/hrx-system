@@ -16,7 +16,7 @@ kernel.def target(@target) @global_atomic_release_reduce_i32() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @global_atomic_release_reduce_i32() asm<amdgpu.rdna4.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @global_atomic_release_reduce_i32() asm<amdgpu.rdna4.core> {
   %view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %10 = v_mov_b32 0
   %11 = v_mov_b32 1
@@ -41,7 +41,7 @@ kernel.def target(@target) @global_atomic_acquire_rmw_i32() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @global_atomic_acquire_rmw_i32() asm<amdgpu.rdna4.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @global_atomic_acquire_rmw_i32() asm<amdgpu.rdna4.core> {
   %view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %11 = v_mov_b32 0
   %12 = v_mov_b32 1
@@ -68,7 +68,7 @@ kernel.def target(@target) @global_atomic_acq_rel_rmw_i32() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @global_atomic_acq_rel_rmw_i32() asm<amdgpu.rdna4.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @global_atomic_acq_rel_rmw_i32() asm<amdgpu.rdna4.core> {
   %view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %11 = v_mov_b32 0
   %12 = v_mov_b32 1
@@ -96,7 +96,7 @@ kernel.def target(@target) @global_atomic_acq_rel_cmpxchg_i32() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @global_atomic_acq_rel_cmpxchg_i32() asm<amdgpu.rdna4.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @global_atomic_acq_rel_cmpxchg_i32() asm<amdgpu.rdna4.core> {
   %view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %13 = v_mov_b32 0
   %14 = v_mov_b32 7
@@ -125,7 +125,7 @@ kernel.def target(@target) @global_atomic_seq_cst_reduce_i32() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @global_atomic_seq_cst_reduce_i32() asm<amdgpu.rdna4.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @global_atomic_seq_cst_reduce_i32() asm<amdgpu.rdna4.core> {
   %view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %10 = v_mov_b32 0
   %11 = v_mov_b32 1

@@ -12,7 +12,7 @@ kernel.def target(@target) @computed_launch_config_workgroup_size() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @computed_launch_config_workgroup_size() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @computed_launch_config_workgroup_size() asm<amdgpu.rdna3.core> {
   return
 }
 
@@ -63,7 +63,7 @@ kernel.def target(@target) @unused_exact_workgroup_count_elides() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(3, 1, 1) @unused_exact_workgroup_count_elides() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(3, 1, 1) workgroup_count(1, 1, 1) @unused_exact_workgroup_count_elides() asm<amdgpu.rdna3.core> {
   return
 }
 
@@ -133,7 +133,7 @@ kernel.def target(@target) @target_subgroup_queries_use_wavefront_size() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(128, 1, 1) @target_subgroup_queries_use_wavefront_size() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(128, 1, 1) workgroup_count(1, 1, 1) @target_subgroup_queries_use_wavefront_size() asm<amdgpu.rdna3.core> {
   %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
   %subgroup_size = s_mov_b32 64
   %subgroup_count = s_mov_b32 2

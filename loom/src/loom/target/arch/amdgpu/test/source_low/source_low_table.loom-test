@@ -25,7 +25,7 @@ kernel.def target(@target) @f32_table_lookup_i8_codes() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(2, 1, 1) @f32_table_lookup_i8_codes() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(2, 1, 1) workgroup_count(1, 1, 1) @f32_table_lookup_i8_codes() asm<amdgpu.rdna3.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %codes_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 8} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 32} : reg<amdgpu.sgpr x2>

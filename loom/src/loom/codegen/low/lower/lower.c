@@ -3128,12 +3128,8 @@ static void loom_low_lower_record_static_launch_config(
   if (loom_kernel_def_static_workgroup_count_from_facts(
           module, source_function.op, fact_table,
           &result->static_workgroup_count)) {
-    if (result->static_workgroup_count.x != 1 ||
-        result->static_workgroup_count.y != 1 ||
-        result->static_workgroup_count.z != 1) {
-      result->static_launch_config_flags |=
-          LOOM_LOW_LOWER_STATIC_LAUNCH_CONFIG_WORKGROUP_COUNT;
-    }
+    result->static_launch_config_flags |=
+        LOOM_LOW_LOWER_STATIC_LAUNCH_CONFIG_WORKGROUP_COUNT;
   }
 }
 

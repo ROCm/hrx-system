@@ -21,7 +21,7 @@ kernel.def target(@target) @private_f32_dynamic_roundtrip() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @private_f32_dynamic_roundtrip() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @private_f32_dynamic_roundtrip() asm<amdgpu.rdna3.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
@@ -68,7 +68,7 @@ kernel.def target(@target) @private_root_static_offsets() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(2, 1, 1) @private_root_static_offsets() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(2, 1, 1) workgroup_count(1, 1, 1) @private_root_static_offsets() asm<amdgpu.rdna3.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 8} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 16} : reg<amdgpu.sgpr x2>
@@ -116,7 +116,7 @@ kernel.def target(@target) @private_f16_static_and_dynamic_roundtrip() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(2, 1, 1) @private_f16_static_and_dynamic_roundtrip() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(2, 1, 1) workgroup_count(1, 1, 1) @private_f16_static_and_dynamic_roundtrip() asm<amdgpu.rdna3.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
@@ -163,7 +163,7 @@ kernel.def target(@target) @private_bf16_static_and_dynamic_roundtrip() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(2, 1, 1) @private_bf16_static_and_dynamic_roundtrip() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(2, 1, 1) workgroup_count(1, 1, 1) @private_bf16_static_and_dynamic_roundtrip() asm<amdgpu.rdna3.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
@@ -210,7 +210,7 @@ kernel.def target(@target) @private_i8_static_and_dynamic_roundtrip() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(2, 1, 1) @private_i8_static_and_dynamic_roundtrip() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(2, 1, 1) workgroup_count(1, 1, 1) @private_i8_static_and_dynamic_roundtrip() asm<amdgpu.rdna3.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 2} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 2} : reg<amdgpu.sgpr x2>

@@ -16,7 +16,7 @@ kernel.def target(@target) @global_atomic_add_f32() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @global_atomic_add_f32() asm<amdgpu.cdna3.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @global_atomic_add_f32() asm<amdgpu.cdna3.core> {
   %view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %one = v_mov_b32 1065353216
   %11 = v_mov_b32 0

@@ -87,7 +87,7 @@
       },
       "stdout": {
         "contains": [
-          "low.kernel.def target(@target) workgroup_size(64, 1, 1) @f32_arith()",
+          "low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @f32_arith()",
           "reg<amdgpu.sgpr x2>",
           "low.op<amdgpu.v_add_f32>"
         ],
