@@ -24,7 +24,7 @@ kernel.def target(@target) @lds_b128_roundtrip() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @lds_b128_roundtrip() asm<llvmir.generic.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @lds_b128_roundtrip() asm<llvmir.generic.core> {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
   %bytes = const.i64 1024
@@ -67,7 +67,7 @@ kernel.def target(@target) @lds_b128_xor_swizzle_roundtrip() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @lds_b128_xor_swizzle_roundtrip() asm<llvmir.generic.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @lds_b128_xor_swizzle_roundtrip() asm<llvmir.generic.core> {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
   %tid = kernel.workitem_id.x
@@ -114,7 +114,7 @@ kernel.def target(@target) @lds_b128_large_static_offset_roundtrip() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @lds_b128_large_static_offset_roundtrip() asm<llvmir.generic.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @lds_b128_large_static_offset_roundtrip() asm<llvmir.generic.core> {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
   %bytes = const.i64 4096

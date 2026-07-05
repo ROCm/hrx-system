@@ -65,7 +65,7 @@ kernel.def target(@target) @prefetch_fixed_query_offset() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(8, 4, 1) @prefetch_fixed_query_offset() asm<llvmir.generic.core> {
+low.kernel.def target(@target) workgroup_size(8, 4, 1) workgroup_count(1, 1, 1) @prefetch_fixed_query_offset() asm<llvmir.generic.core> {
   return
 }
 
@@ -88,6 +88,6 @@ kernel.def target(@target) @prefetch_workitem_dropped() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @prefetch_workitem_dropped() asm<llvmir.generic.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @prefetch_workitem_dropped() asm<llvmir.generic.core> {
   return
 }

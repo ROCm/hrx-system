@@ -257,7 +257,7 @@ kernel.def target(@target) @index_minmax_vgpr_select() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @index_minmax_vgpr_select() asm<llvmir.generic.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @index_minmax_vgpr_select() asm<llvmir.generic.core> {
   %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %tid = kernel.workitem_id.x
   %limit = const.i64 31

@@ -17,7 +17,7 @@ kernel.def target(@target) @gfx942_scalar_extf_direct_f8e4m3_load_store() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx942_scalar_extf_direct_f8e4m3_load_store() asm<amdgpu.cdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @gfx942_scalar_extf_direct_f8e4m3_load_store() asm<amdgpu.cdna3.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 64} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
@@ -49,7 +49,7 @@ kernel.def target(@target) @gfx942_scalar_extf_direct_f8e5m2_load_store() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx942_scalar_extf_direct_f8e5m2_load_store() asm<amdgpu.cdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @gfx942_scalar_extf_direct_f8e5m2_load_store() asm<amdgpu.cdna3.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 64} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
@@ -81,7 +81,7 @@ kernel.def target(@target) @gfx950_scalar_extf_direct_f8e4m3_load_store() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx950_scalar_extf_direct_f8e4m3_load_store() asm<amdgpu.cdna4.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @gfx950_scalar_extf_direct_f8e4m3_load_store() asm<amdgpu.cdna4.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 64} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
@@ -113,7 +113,7 @@ kernel.def target(@target) @gfx950_scalar_extf_direct_f8e5m2_load_store() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx950_scalar_extf_direct_f8e5m2_load_store() asm<amdgpu.cdna4.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @gfx950_scalar_extf_direct_f8e5m2_load_store() asm<amdgpu.cdna4.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 64} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
@@ -145,7 +145,7 @@ kernel.def target(@target) @gfx1200_scalar_extf_direct_f8e4m3_load_store() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx1200_scalar_extf_direct_f8e4m3_load_store() asm<amdgpu.rdna4.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @gfx1200_scalar_extf_direct_f8e4m3_load_store() asm<amdgpu.rdna4.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 64} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
@@ -175,7 +175,7 @@ kernel.def target(@target) @gfx1200_scalar_extf_direct_f8e5m2_load_store() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx1200_scalar_extf_direct_f8e5m2_load_store() asm<amdgpu.rdna4.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @gfx1200_scalar_extf_direct_f8e5m2_load_store() asm<amdgpu.rdna4.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 64} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
@@ -205,7 +205,7 @@ kernel.def target(@target) @gfx1250_scalar_extf_direct_f8e4m3_load_store() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx1250_scalar_extf_direct_f8e4m3_load_store() asm<amdgpu.rdna4.gfx125x.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @gfx1250_scalar_extf_direct_f8e4m3_load_store() asm<amdgpu.rdna4.gfx125x.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 64} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
@@ -235,7 +235,7 @@ kernel.def target(@target) @gfx1250_scalar_extf_direct_f8e5m2_load_store() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx1250_scalar_extf_direct_f8e5m2_load_store() asm<amdgpu.rdna4.gfx125x.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @gfx1250_scalar_extf_direct_f8e5m2_load_store() asm<amdgpu.rdna4.gfx125x.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 64} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
@@ -265,7 +265,7 @@ kernel.def target(@target) @gfx942_vector_extf_direct_f8e4m3_load_store() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx942_vector_extf_direct_f8e4m3_load_store() asm<amdgpu.cdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @gfx942_vector_extf_direct_f8e4m3_load_store() asm<amdgpu.cdna3.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
@@ -305,7 +305,7 @@ kernel.def target(@target) @gfx942_vector_extf_direct_f8e5m2_load_store() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx942_vector_extf_direct_f8e5m2_load_store() asm<amdgpu.cdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @gfx942_vector_extf_direct_f8e5m2_load_store() asm<amdgpu.cdna3.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
@@ -345,7 +345,7 @@ kernel.def target(@target) @gfx950_vector_extf_direct_f8e4m3_load_store() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx950_vector_extf_direct_f8e4m3_load_store() asm<amdgpu.cdna4.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @gfx950_vector_extf_direct_f8e4m3_load_store() asm<amdgpu.cdna4.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
@@ -385,7 +385,7 @@ kernel.def target(@target) @gfx950_vector_extf_direct_f8e5m2_load_store() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx950_vector_extf_direct_f8e5m2_load_store() asm<amdgpu.cdna4.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @gfx950_vector_extf_direct_f8e5m2_load_store() asm<amdgpu.cdna4.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
@@ -425,7 +425,7 @@ kernel.def target(@target) @gfx1200_vector_extf_direct_f8e4m3_load_store() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx1200_vector_extf_direct_f8e4m3_load_store() asm<amdgpu.rdna4.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @gfx1200_vector_extf_direct_f8e4m3_load_store() asm<amdgpu.rdna4.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
@@ -463,7 +463,7 @@ kernel.def target(@target) @gfx1200_vector_extf_direct_f8e5m2_load_store() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx1200_vector_extf_direct_f8e5m2_load_store() asm<amdgpu.rdna4.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @gfx1200_vector_extf_direct_f8e5m2_load_store() asm<amdgpu.rdna4.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
@@ -501,7 +501,7 @@ kernel.def target(@target) @gfx1250_vector_extf_direct_f8e4m3_load_store() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx1250_vector_extf_direct_f8e4m3_load_store() asm<amdgpu.rdna4.gfx125x.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @gfx1250_vector_extf_direct_f8e4m3_load_store() asm<amdgpu.rdna4.gfx125x.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
@@ -539,7 +539,7 @@ kernel.def target(@target) @gfx1250_vector_extf_direct_f8e5m2_load_store() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx1250_vector_extf_direct_f8e5m2_load_store() asm<amdgpu.rdna4.gfx125x.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @gfx1250_vector_extf_direct_f8e5m2_load_store() asm<amdgpu.rdna4.gfx125x.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
@@ -577,7 +577,7 @@ kernel.def target(@target) @gfx942_vector_extf_direct_f8e4m3_to_bf16_load_store(
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx942_vector_extf_direct_f8e4m3_to_bf16_load_store() asm<amdgpu.cdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @gfx942_vector_extf_direct_f8e4m3_to_bf16_load_store() asm<amdgpu.cdna3.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
@@ -639,7 +639,7 @@ kernel.def target(@target) @gfx942_vector_extf_direct_f8e5m2_to_bf16_load_store(
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx942_vector_extf_direct_f8e5m2_to_bf16_load_store() asm<amdgpu.cdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @gfx942_vector_extf_direct_f8e5m2_to_bf16_load_store() asm<amdgpu.cdna3.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
@@ -701,7 +701,7 @@ kernel.def target(@target) @gfx950_vector_extf_direct_f8e4m3_to_bf16_load_store(
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx950_vector_extf_direct_f8e4m3_to_bf16_load_store() asm<amdgpu.cdna4.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @gfx950_vector_extf_direct_f8e4m3_to_bf16_load_store() asm<amdgpu.cdna4.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
@@ -738,7 +738,7 @@ kernel.def target(@target) @gfx950_vector_extf_direct_f8e5m2_to_bf16_load_store(
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx950_vector_extf_direct_f8e5m2_to_bf16_load_store() asm<amdgpu.cdna4.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @gfx950_vector_extf_direct_f8e5m2_to_bf16_load_store() asm<amdgpu.cdna4.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
@@ -775,7 +775,7 @@ kernel.def target(@target) @gfx950_vector_extf_direct_f8e4m3_to_f16_load_store()
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx950_vector_extf_direct_f8e4m3_to_f16_load_store() asm<amdgpu.cdna4.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @gfx950_vector_extf_direct_f8e4m3_to_f16_load_store() asm<amdgpu.cdna4.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
@@ -813,7 +813,7 @@ kernel.def target(@target) @gfx950_vector_extf_direct_f8e4m3_x3_to_f16_load_stor
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx950_vector_extf_direct_f8e4m3_x3_to_f16_load_store() asm<amdgpu.cdna4.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @gfx950_vector_extf_direct_f8e4m3_x3_to_f16_load_store() asm<amdgpu.cdna4.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 384} : reg<amdgpu.sgpr x2>
@@ -852,7 +852,7 @@ kernel.def target(@target) @gfx950_vector_extf_direct_f8e5m2_to_f16_load_store()
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx950_vector_extf_direct_f8e5m2_to_f16_load_store() asm<amdgpu.cdna4.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @gfx950_vector_extf_direct_f8e5m2_to_f16_load_store() asm<amdgpu.cdna4.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
@@ -890,7 +890,7 @@ kernel.def target(@target) @gfx950_vector_extf_direct_f8e5m2_x3_to_f16_load_stor
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx950_vector_extf_direct_f8e5m2_x3_to_f16_load_store() asm<amdgpu.cdna4.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @gfx950_vector_extf_direct_f8e5m2_x3_to_f16_load_store() asm<amdgpu.cdna4.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 384} : reg<amdgpu.sgpr x2>
@@ -929,7 +929,7 @@ kernel.def target(@target) @gfx1200_vector_extf_direct_f8e4m3_to_bf16_load_store
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx1200_vector_extf_direct_f8e4m3_to_bf16_load_store() asm<amdgpu.rdna4.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @gfx1200_vector_extf_direct_f8e4m3_to_bf16_load_store() asm<amdgpu.rdna4.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
@@ -985,7 +985,7 @@ kernel.def target(@target) @gfx1200_vector_extf_direct_f8e5m2_to_bf16_load_store
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx1200_vector_extf_direct_f8e5m2_to_bf16_load_store() asm<amdgpu.rdna4.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @gfx1200_vector_extf_direct_f8e5m2_to_bf16_load_store() asm<amdgpu.rdna4.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
@@ -1041,7 +1041,7 @@ kernel.def target(@target) @gfx1200_vector_extf_direct_f8e4m3_to_f16_load_store(
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx1200_vector_extf_direct_f8e4m3_to_f16_load_store() asm<amdgpu.rdna4.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @gfx1200_vector_extf_direct_f8e4m3_to_f16_load_store() asm<amdgpu.rdna4.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
@@ -1089,7 +1089,7 @@ kernel.def target(@target) @gfx1200_vector_extf_direct_f8e5m2_to_f16_load_store(
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx1200_vector_extf_direct_f8e5m2_to_f16_load_store() asm<amdgpu.rdna4.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @gfx1200_vector_extf_direct_f8e5m2_to_f16_load_store() asm<amdgpu.rdna4.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
@@ -1137,7 +1137,7 @@ kernel.def target(@target) @gfx1250_vector_extf_direct_f8e4m3_to_bf16_load_store
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx1250_vector_extf_direct_f8e4m3_to_bf16_load_store() asm<amdgpu.rdna4.gfx125x.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @gfx1250_vector_extf_direct_f8e4m3_to_bf16_load_store() asm<amdgpu.rdna4.gfx125x.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
@@ -1177,7 +1177,7 @@ kernel.def target(@target) @gfx1250_vector_extf_direct_f8e5m2_to_bf16_load_store
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx1250_vector_extf_direct_f8e5m2_to_bf16_load_store() asm<amdgpu.rdna4.gfx125x.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @gfx1250_vector_extf_direct_f8e5m2_to_bf16_load_store() asm<amdgpu.rdna4.gfx125x.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
@@ -1217,7 +1217,7 @@ kernel.def target(@target) @gfx1250_vector_extf_direct_f8e4m3_to_f16_load_store(
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx1250_vector_extf_direct_f8e4m3_to_f16_load_store() asm<amdgpu.rdna4.gfx125x.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @gfx1250_vector_extf_direct_f8e4m3_to_f16_load_store() asm<amdgpu.rdna4.gfx125x.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
@@ -1252,7 +1252,7 @@ kernel.def target(@target) @gfx1250_vector_extf_direct_f8e4m3_x3_to_f16_load_sto
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx1250_vector_extf_direct_f8e4m3_x3_to_f16_load_store() asm<amdgpu.rdna4.gfx125x.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @gfx1250_vector_extf_direct_f8e4m3_x3_to_f16_load_store() asm<amdgpu.rdna4.gfx125x.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 384} : reg<amdgpu.sgpr x2>
@@ -1288,7 +1288,7 @@ kernel.def target(@target) @gfx1250_vector_extf_direct_f8e5m2_x3_to_f16_load_sto
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx1250_vector_extf_direct_f8e5m2_x3_to_f16_load_store() asm<amdgpu.rdna4.gfx125x.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @gfx1250_vector_extf_direct_f8e5m2_x3_to_f16_load_store() asm<amdgpu.rdna4.gfx125x.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 384} : reg<amdgpu.sgpr x2>
@@ -1323,7 +1323,7 @@ kernel.def target(@target) @gfx1250_vector_extf_direct_f8e5m2_to_f16_load_store(
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx1250_vector_extf_direct_f8e5m2_to_f16_load_store() asm<amdgpu.rdna4.gfx125x.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @gfx1250_vector_extf_direct_f8e5m2_to_f16_load_store() asm<amdgpu.rdna4.gfx125x.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
@@ -1362,7 +1362,7 @@ kernel.def target(@target) @gfx942_vector_extf_scaled_f8e4m3_to_bf16_store() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx942_vector_extf_scaled_f8e4m3_to_bf16_store() asm<amdgpu.cdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @gfx942_vector_extf_scaled_f8e4m3_to_bf16_store() asm<amdgpu.cdna3.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %scale_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
@@ -1436,7 +1436,7 @@ kernel.def target(@target) @gfx942_vector_extf_scaled_f8e5m2_to_bf16_store() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx942_vector_extf_scaled_f8e5m2_to_bf16_store() asm<amdgpu.cdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @gfx942_vector_extf_scaled_f8e5m2_to_bf16_store() asm<amdgpu.cdna3.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %scale_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
@@ -1510,7 +1510,7 @@ kernel.def target(@target) @gfx950_vector_extf_scaled_f8e4m3_to_bf16_store() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx950_vector_extf_scaled_f8e4m3_to_bf16_store() asm<amdgpu.cdna4.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @gfx950_vector_extf_scaled_f8e4m3_to_bf16_store() asm<amdgpu.cdna4.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %scale_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
@@ -1554,7 +1554,7 @@ kernel.def target(@target) @gfx950_vector_extf_scaled_f8e5m2_to_bf16_store() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx950_vector_extf_scaled_f8e5m2_to_bf16_store() asm<amdgpu.cdna4.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @gfx950_vector_extf_scaled_f8e5m2_to_bf16_store() asm<amdgpu.cdna4.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %scale_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
@@ -1599,7 +1599,7 @@ kernel.def target(@target) @gfx950_vector_extf_scaled_f8e4m3_x3_to_bf16_store() 
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx950_vector_extf_scaled_f8e4m3_x3_to_bf16_store() asm<amdgpu.cdna4.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @gfx950_vector_extf_scaled_f8e4m3_x3_to_bf16_store() asm<amdgpu.cdna4.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %scale_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
@@ -1646,7 +1646,7 @@ kernel.def target(@target) @gfx950_vector_extf_scaled_f8e5m2_x3_to_bf16_store() 
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx950_vector_extf_scaled_f8e5m2_x3_to_bf16_store() asm<amdgpu.cdna4.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @gfx950_vector_extf_scaled_f8e5m2_x3_to_bf16_store() asm<amdgpu.cdna4.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %scale_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
@@ -1692,7 +1692,7 @@ kernel.def target(@target) @gfx1200_vector_extf_scaled_f8e4m3_to_bf16_store() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx1200_vector_extf_scaled_f8e4m3_to_bf16_store() asm<amdgpu.rdna4.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @gfx1200_vector_extf_scaled_f8e4m3_to_bf16_store() asm<amdgpu.rdna4.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %scale_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
@@ -1759,7 +1759,7 @@ kernel.def target(@target) @gfx1200_vector_extf_scaled_f8e5m2_to_bf16_store() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx1200_vector_extf_scaled_f8e5m2_to_bf16_store() asm<amdgpu.rdna4.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @gfx1200_vector_extf_scaled_f8e5m2_to_bf16_store() asm<amdgpu.rdna4.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %scale_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
@@ -1826,7 +1826,7 @@ kernel.def target(@target) @gfx1250_vector_extf_scaled_f8e4m3_to_bf16_store() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx1250_vector_extf_scaled_f8e4m3_to_bf16_store() asm<amdgpu.rdna4.gfx125x.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @gfx1250_vector_extf_scaled_f8e4m3_to_bf16_store() asm<amdgpu.rdna4.gfx125x.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %scale_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
@@ -1877,7 +1877,7 @@ kernel.def target(@target) @gfx1250_vector_extf_scaled_f8e5m2_to_bf16_store() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @gfx1250_vector_extf_scaled_f8e5m2_to_bf16_store() asm<amdgpu.rdna4.gfx125x.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @gfx1250_vector_extf_scaled_f8e5m2_to_bf16_store() asm<amdgpu.rdna4.gfx125x.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %scale_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>

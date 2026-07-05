@@ -51,7 +51,7 @@ kernel.def target(@target) @cdna3_packed_i32_fp8_fragment_memory() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @cdna3_packed_i32_fp8_fragment_memory() asm<amdgpu.cdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @cdna3_packed_i32_fp8_fragment_memory() asm<amdgpu.cdna3.core> {
   %22 = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %lhs_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
   %rhs_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
@@ -118,7 +118,7 @@ kernel.def target(@target) @cdna3_packed_i32_bf8_fp8_fragment_memory() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @cdna3_packed_i32_bf8_fp8_fragment_memory() asm<amdgpu.cdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @cdna3_packed_i32_bf8_fp8_fragment_memory() asm<amdgpu.cdna3.core> {
   %23 = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %lhs_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
   %rhs_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
@@ -185,7 +185,7 @@ kernel.def target(@target) @cdna3_packed_i32_fp8_bf8_32x32_fragment_memory() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @cdna3_packed_i32_fp8_bf8_32x32_fragment_memory() asm<amdgpu.cdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @cdna3_packed_i32_fp8_bf8_32x32_fragment_memory() asm<amdgpu.cdna3.core> {
   %23 = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %lhs_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
   %rhs_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
@@ -378,7 +378,7 @@ kernel.def target(@target) @rdna4_packed_i32_fp8_fragment_memory() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(32, 1, 1) @rdna4_packed_i32_fp8_fragment_memory() asm<amdgpu.rdna4.core> {
+low.kernel.def target(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @rdna4_packed_i32_fp8_fragment_memory() asm<amdgpu.rdna4.core> {
   %22 = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %lhs_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %rhs_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>

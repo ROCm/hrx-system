@@ -23,7 +23,7 @@ kernel.def target(@target) @f32_arith() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @f32_arith() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @f32_arith() asm<amdgpu.rdna3.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %lhs_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %rhs_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
@@ -62,7 +62,7 @@ kernel.def target(@target) @f32_fma() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @f32_fma() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @f32_fma() asm<amdgpu.rdna3.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %lhs_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %rhs_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
@@ -98,7 +98,7 @@ kernel.def target(@target) @f32_arcp_div() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @f32_arcp_div() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @f32_arcp_div() asm<amdgpu.rdna3.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %lhs_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
   %rhs_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
@@ -261,7 +261,7 @@ kernel.def target(@target) @f32_exact_vector_div() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @f32_exact_vector_div() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @f32_exact_vector_div() asm<amdgpu.rdna3.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %lhs_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %rhs_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
@@ -361,7 +361,7 @@ kernel.def target(@target) @f32_scalarized() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @f32_scalarized() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @f32_scalarized() asm<amdgpu.rdna3.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %lhs_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
   %rhs_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
@@ -661,7 +661,7 @@ kernel.def target(@target) @f32_direct_arg_scale() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @f32_direct_arg_scale(%scale: reg<amdgpu.sgpr>) asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @f32_direct_arg_scale(%scale: reg<amdgpu.sgpr>) asm<amdgpu.rdna3.core> {
   %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
   %10 = v_mov_b32_copy %scale
   %11 = v_mov_b32 0

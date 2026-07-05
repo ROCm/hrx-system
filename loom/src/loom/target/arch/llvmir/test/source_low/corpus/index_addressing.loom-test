@@ -24,7 +24,7 @@ kernel.def target(@target) @index_madd_global_b32() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(4, 4, 1) @index_madd_global_b32() asm<llvmir.generic.core> {
+low.kernel.def target(@target) workgroup_size(4, 4, 1) workgroup_count(1, 1, 1) @index_madd_global_b32() asm<llvmir.generic.core> {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
   %x = kernel.workitem_id.x
@@ -63,7 +63,7 @@ kernel.def target(@target) @index_madd_u24_global_b32() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(8, 4, 1) @index_madd_u24_global_b32() asm<llvmir.generic.core> {
+low.kernel.def target(@target) workgroup_size(8, 4, 1) workgroup_count(1, 1, 1) @index_madd_u24_global_b32() asm<llvmir.generic.core> {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
   %x = kernel.workitem_id.x
@@ -102,7 +102,7 @@ kernel.def target(@target) @index_madd_u24_literal_lhs_global_b32() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(8, 4, 1) @index_madd_u24_literal_lhs_global_b32() asm<llvmir.generic.core> {
+low.kernel.def target(@target) workgroup_size(8, 4, 1) workgroup_count(1, 1, 1) @index_madd_u24_literal_lhs_global_b32() asm<llvmir.generic.core> {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
   %x = kernel.workitem_id.x
@@ -141,7 +141,7 @@ kernel.def target(@target) @index_madd_u24_literal_addend_global_b32() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(8, 4, 1) @index_madd_u24_literal_addend_global_b32() asm<llvmir.generic.core> {
+low.kernel.def target(@target) workgroup_size(8, 4, 1) workgroup_count(1, 1, 1) @index_madd_u24_literal_addend_global_b32() asm<llvmir.generic.core> {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
   %x = kernel.workitem_id.x
@@ -178,7 +178,7 @@ kernel.def target(@target) @index_madd_constant_addend_global_b32() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(4, 1, 1) @index_madd_constant_addend_global_b32() asm<llvmir.generic.core> {
+low.kernel.def target(@target) workgroup_size(4, 1, 1) workgroup_count(1, 1, 1) @index_madd_constant_addend_global_b32() asm<llvmir.generic.core> {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
   %x = kernel.workitem_id.x
@@ -214,7 +214,7 @@ kernel.def target(@target) @index_shli_global_b32() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(4, 1, 1) @index_shli_global_b32() asm<llvmir.generic.core> {
+low.kernel.def target(@target) workgroup_size(4, 1, 1) workgroup_count(1, 1, 1) @index_shli_global_b32() asm<llvmir.generic.core> {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
   %x = kernel.workitem_id.x
@@ -250,7 +250,7 @@ kernel.def target(@target) @index_shli_previous_row_global_b128() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(31, 1, 1) @index_shli_previous_row_global_b128() asm<llvmir.generic.core> {
+low.kernel.def target(@target) workgroup_size(31, 1, 1) workgroup_count(1, 1, 1) @index_shli_previous_row_global_b128() asm<llvmir.generic.core> {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
   %lane = kernel.workitem_id.x
@@ -285,7 +285,7 @@ kernel.def target(@target) @index_div_rem_power_of_two_global_b32() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(32, 1, 1) @index_div_rem_power_of_two_global_b32() asm<llvmir.generic.core> {
+low.kernel.def target(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @index_div_rem_power_of_two_global_b32() asm<llvmir.generic.core> {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
   %x = kernel.workitem_id.x
@@ -322,7 +322,7 @@ kernel.def target(@target) @index_div_rem_magic_mul_global_b32() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(25, 1, 1) @index_div_rem_magic_mul_global_b32() asm<llvmir.generic.core> {
+low.kernel.def target(@target) workgroup_size(25, 1, 1) workgroup_count(1, 1, 1) @index_div_rem_magic_mul_global_b32() asm<llvmir.generic.core> {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
   %x = kernel.workitem_id.x
@@ -358,7 +358,7 @@ kernel.def target(@target) @index_div_rem_magic_add_global_b32() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(49, 1, 1) @index_div_rem_magic_add_global_b32() asm<llvmir.generic.core> {
+low.kernel.def target(@target) workgroup_size(49, 1, 1) workgroup_count(1, 1, 1) @index_div_rem_magic_add_global_b32() asm<llvmir.generic.core> {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
   %x = kernel.workitem_id.x
@@ -395,7 +395,7 @@ kernel.def target(@target) @workitem_y_lds_uses_explicit_vaddr() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 64, 1) @workitem_y_lds_uses_explicit_vaddr() asm<llvmir.generic.core> {
+low.kernel.def target(@target) workgroup_size(1, 64, 1) workgroup_count(1, 1, 1) @workitem_y_lds_uses_explicit_vaddr() asm<llvmir.generic.core> {
   %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %y = kernel.workitem_id.y
   %bytes = const.i64 256
@@ -432,7 +432,7 @@ kernel.def target(@target) @dispatch_id_xy_global_b32() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(8, 4, 1) @dispatch_id_xy_global_b32() asm<llvmir.generic.core> {
+low.kernel.def target(@target) workgroup_size(8, 4, 1) workgroup_count(1, 1, 1) @dispatch_id_xy_global_b32() asm<llvmir.generic.core> {
   %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %dispatch_x = kernel.workitem_dispatch_id.x
   %dispatch_y = kernel.workitem_dispatch_id.y

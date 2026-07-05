@@ -20,7 +20,7 @@ kernel.def target(@target) @config_decl_facts_bound_dynamic_view() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(4, 1, 1) @config_decl_facts_bound_dynamic_view() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(4, 1, 1) workgroup_count(1, 1, 1) @config_decl_facts_bound_dynamic_view() asm<amdgpu.rdna3.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
@@ -64,7 +64,7 @@ kernel.def target(@target) @config_decl_matvec_block_lane_vec4_dynamic_view() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @config_decl_matvec_block_lane_vec4_dynamic_view() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @config_decl_matvec_block_lane_vec4_dynamic_view() asm<amdgpu.rdna3.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>

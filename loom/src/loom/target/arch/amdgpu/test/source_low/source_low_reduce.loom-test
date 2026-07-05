@@ -293,7 +293,7 @@ kernel.def target(@target) @f32_configured_width_square_reduce() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @f32_configured_width_square_reduce() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @f32_configured_width_square_reduce() asm<amdgpu.rdna3.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>

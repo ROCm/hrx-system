@@ -646,7 +646,7 @@ kernel.def target(@target) @i32_zero_workgroup_saddr_term() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @i32_zero_workgroup_saddr_term() asm<llvmir.generic.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @i32_zero_workgroup_saddr_term() asm<llvmir.generic.core> {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
   %column = kernel.workitem_id.x
@@ -806,7 +806,7 @@ kernel.def target(@target) @i32_readonly_uniform_smem_loop_bound() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @i32_readonly_uniform_smem_loop_bound() asm<llvmir.generic.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @i32_readonly_uniform_smem_loop_bound() asm<llvmir.generic.core> {
   %control_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %input_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
   %output_view = resource<hal_binding> {index = 2, source_type = hal.buffer} : reg<llvmir.ptr>
@@ -857,7 +857,7 @@ kernel.def target(@target) @f32_readonly_uniform_smem_vector_math() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @f32_readonly_uniform_smem_vector_math() asm<llvmir.generic.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @f32_readonly_uniform_smem_vector_math() asm<llvmir.generic.core> {
   %control_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %input_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
   %output_view = resource<hal_binding> {index = 2, source_type = hal.buffer} : reg<llvmir.ptr>
@@ -896,7 +896,7 @@ kernel.def target(@target) @i32_readonly_uniform_smem_address() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @i32_readonly_uniform_smem_address() asm<llvmir.generic.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @i32_readonly_uniform_smem_address() asm<llvmir.generic.core> {
   %control_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
   %column_i32 = load.i32 %control_view, 0
@@ -933,7 +933,7 @@ kernel.def target(@target) @i32_readonly_uniform_smem_guarded_index_address() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @i32_readonly_uniform_smem_guarded_index_address() asm<llvmir.generic.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @i32_readonly_uniform_smem_guarded_index_address() asm<llvmir.generic.core> {
   %control_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
   %column_i32 = load.i32 %control_view, 0
@@ -980,7 +980,7 @@ kernel.def target(@target) @i64_readonly_uniform_smem_guarded_index_address() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @i64_readonly_uniform_smem_guarded_index_address() asm<llvmir.generic.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @i64_readonly_uniform_smem_guarded_index_address() asm<llvmir.generic.core> {
   %control_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
   %column = load.i64 %control_view, 0
@@ -1022,7 +1022,7 @@ kernel.def target(@target) @i32_b128() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @i32_b128() asm<llvmir.generic.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @i32_b128() asm<llvmir.generic.core> {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
   %lane = kernel.workitem_id.x
@@ -1059,7 +1059,7 @@ kernel.def target(@target) @f32x8_split_b128() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @f32x8_split_b128() asm<llvmir.generic.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @f32x8_split_b128() asm<llvmir.generic.core> {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
   %lane = kernel.workitem_id.x
@@ -1094,7 +1094,7 @@ kernel.def target(@target) @i32_scalar_2d_store() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(8, 4, 1) @i32_scalar_2d_store() asm<llvmir.generic.core> {
+low.kernel.def target(@target) workgroup_size(8, 4, 1) workgroup_count(1, 1, 1) @i32_scalar_2d_store() asm<llvmir.generic.core> {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
   %column = kernel.workitem_id.x
@@ -1129,7 +1129,7 @@ kernel.def target(@target) @i32_view_scalar_2d_store() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(8, 4, 1) @i32_view_scalar_2d_store() asm<llvmir.generic.core> {
+low.kernel.def target(@target) workgroup_size(8, 4, 1) workgroup_count(1, 1, 1) @i32_view_scalar_2d_store() asm<llvmir.generic.core> {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
   %column = kernel.workitem_id.x
@@ -1163,7 +1163,7 @@ kernel.def target(@target) @i32_dynamic_constant_index() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @i32_dynamic_constant_index() asm<llvmir.generic.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @i32_dynamic_constant_index() asm<llvmir.generic.core> {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
   %lane = kernel.workitem_id.x
@@ -1194,7 +1194,7 @@ kernel.def target(@target) @i32_scalar_arg_index() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @i32_scalar_arg_index(%column_i32: reg<llvmir.i32>) asm<llvmir.generic.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @i32_scalar_arg_index(%column_i32: reg<llvmir.i32>) asm<llvmir.generic.core> {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
   %column = sext.i32.i64 %column_i32
@@ -1223,7 +1223,7 @@ kernel.def target(@target) @i32_dynamic_view_base() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @i32_dynamic_view_base(%offset_i32: reg<llvmir.i32>) asm<llvmir.generic.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @i32_dynamic_view_base(%offset_i32: reg<llvmir.i32>) asm<llvmir.generic.core> {
   %control_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
   %base = zext.i32.i64 %offset_i32
@@ -1253,7 +1253,7 @@ kernel.def target(@target) @i32_dynamic_view_base_loaded() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @i32_dynamic_view_base_loaded() asm<llvmir.generic.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @i32_dynamic_view_base_loaded() asm<llvmir.generic.core> {
   %control_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
   %base_i32 = load.i32 %control_view, 28
@@ -1283,7 +1283,7 @@ kernel.def target(@target) @i32x4_dynamic_view_base_b128() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @i32x4_dynamic_view_base_b128(%offset_i32: reg<llvmir.i32>) asm<llvmir.generic.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @i32x4_dynamic_view_base_b128(%offset_i32: reg<llvmir.i32>) asm<llvmir.generic.core> {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
   %base = zext.i32.i64 %offset_i32
@@ -1321,7 +1321,7 @@ kernel.def target(@target) @f32x4_dynamic_view_base_flat() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(256, 1, 1) @f32x4_dynamic_view_base_flat(%offset_i32: reg<llvmir.i32>) asm<llvmir.generic.core> {
+low.kernel.def target(@target) workgroup_size(256, 1, 1) workgroup_count(1, 1, 1) @f32x4_dynamic_view_base_flat(%offset_i32: reg<llvmir.i32>) asm<llvmir.generic.core> {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
   %input_base = zext.i32.i64 %offset_i32
@@ -1359,7 +1359,7 @@ kernel.def target(@target) @f16_view_scalar() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @f16_view_scalar(%column_i32: reg<llvmir.i32>) asm<llvmir.generic.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @f16_view_scalar(%column_i32: reg<llvmir.i32>) asm<llvmir.generic.core> {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
   %column = sext.i32.i64 %column_i32
@@ -1393,7 +1393,7 @@ kernel.def target(@target) @bf16_view_scalar() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @bf16_view_scalar(%column_i32: reg<llvmir.i32>) asm<llvmir.generic.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @bf16_view_scalar(%column_i32: reg<llvmir.i32>) asm<llvmir.generic.core> {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
   %column = sext.i32.i64 %column_i32
@@ -1424,7 +1424,7 @@ kernel.def target(@target) @f16x2_b32() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @f16x2_b32() asm<llvmir.generic.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @f16x2_b32() asm<llvmir.generic.core> {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
   %lane = kernel.workitem_id.x
@@ -1455,7 +1455,7 @@ kernel.def target(@target) @f16x4_b64() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @f16x4_b64() asm<llvmir.generic.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @f16x4_b64() asm<llvmir.generic.core> {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
   %lane = kernel.workitem_id.x
@@ -1486,7 +1486,7 @@ kernel.def target(@target) @bf16x2_b32() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @bf16x2_b32() asm<llvmir.generic.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @bf16x2_b32() asm<llvmir.generic.core> {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
   %lane = kernel.workitem_id.x
@@ -1517,7 +1517,7 @@ kernel.def target(@target) @bf16x4_b64() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @bf16x4_b64() asm<llvmir.generic.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @bf16x4_b64() asm<llvmir.generic.core> {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
   %lane = kernel.workitem_id.x
@@ -1586,7 +1586,7 @@ kernel.def target(@target) @i32_dynamic_flat_store() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @i32_dynamic_flat_store(%row_count_i32: reg<llvmir.i32>, %row_i32: reg<llvmir.i32>) asm<llvmir.generic.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @i32_dynamic_flat_store(%row_count_i32: reg<llvmir.i32>, %row_i32: reg<llvmir.i32>) asm<llvmir.generic.core> {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
   %row = sext.i32.i64 %row_i32
@@ -1624,7 +1624,7 @@ kernel.def target(@target) @loaded_i32_row_stride_store() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @loaded_i32_row_stride_store(%value: reg<llvmir.f32>, %stride_i32: reg<llvmir.i32>, %element_count_i32: reg<llvmir.i32>) asm<llvmir.generic.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @loaded_i32_row_stride_store(%value: reg<llvmir.f32>, %stride_i32: reg<llvmir.i32>, %element_count_i32: reg<llvmir.i32>) asm<llvmir.generic.core> {
   %idx_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
   %stride = sext.i32.i64 %stride_i32
@@ -1662,7 +1662,7 @@ kernel.def target(@target) @loaded_i64_row_stride_store() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @loaded_i64_row_stride_store(%value: reg<llvmir.f32>, %stride_i32: reg<llvmir.i32>, %element_count_i32: reg<llvmir.i32>) asm<llvmir.generic.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @loaded_i64_row_stride_store(%value: reg<llvmir.f32>, %stride_i32: reg<llvmir.i32>, %element_count_i32: reg<llvmir.i32>) asm<llvmir.generic.core> {
   %idx_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
   %stride = sext.i32.i64 %stride_i32
@@ -1702,7 +1702,7 @@ kernel.def target(@target) @loaded_i64_row_stride_load() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @loaded_i64_row_stride_load(%stride_i32: reg<llvmir.i32>, %element_count_i32: reg<llvmir.i32>) asm<llvmir.generic.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @loaded_i64_row_stride_load(%stride_i32: reg<llvmir.i32>, %element_count_i32: reg<llvmir.i32>) asm<llvmir.generic.core> {
   %idx_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %input_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
   %output_view = resource<hal_binding> {index = 2, source_type = hal.buffer} : reg<llvmir.ptr>
@@ -1740,7 +1740,7 @@ kernel.def target(@target) @loaded_i32_row_shift_store() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @loaded_i32_row_shift_store(%value: reg<llvmir.f32>, %element_count_i32: reg<llvmir.i32>) asm<llvmir.generic.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @loaded_i32_row_shift_store(%value: reg<llvmir.f32>, %element_count_i32: reg<llvmir.i32>) asm<llvmir.generic.core> {
   %idx_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
   %shift = const.i64 2
@@ -1780,7 +1780,7 @@ kernel.def target(@target) @loaded_i32_row_shift_load() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @loaded_i32_row_shift_load(%element_count_i32: reg<llvmir.i32>) asm<llvmir.generic.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @loaded_i32_row_shift_load(%element_count_i32: reg<llvmir.i32>) asm<llvmir.generic.core> {
   %idx_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %input_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
   %output_view = resource<hal_binding> {index = 2, source_type = hal.buffer} : reg<llvmir.ptr>
@@ -1821,7 +1821,7 @@ kernel.def target(@target) @loaded_i32_row_stride_f32_to_f16_store() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @loaded_i32_row_stride_f32_to_f16_store(%value: reg<llvmir.f32>, %stride_i32: reg<llvmir.i32>, %element_count_i32: reg<llvmir.i32>) asm<llvmir.generic.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @loaded_i32_row_stride_f32_to_f16_store(%value: reg<llvmir.f32>, %stride_i32: reg<llvmir.i32>, %element_count_i32: reg<llvmir.i32>) asm<llvmir.generic.core> {
   %idx_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
   %stride = sext.i32.i64 %stride_i32
@@ -1862,7 +1862,7 @@ kernel.def target(@target) @loaded_i32_row_stride_f32_to_f16_bits_store() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @loaded_i32_row_stride_f32_to_f16_bits_store(%value: reg<llvmir.f32>, %stride_i32: reg<llvmir.i32>, %element_count_i32: reg<llvmir.i32>) asm<llvmir.generic.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @loaded_i32_row_stride_f32_to_f16_bits_store(%value: reg<llvmir.f32>, %stride_i32: reg<llvmir.i32>, %element_count_i32: reg<llvmir.i32>) asm<llvmir.generic.core> {
   %idx_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
   %stride = sext.i32.i64 %stride_i32
@@ -1904,7 +1904,7 @@ kernel.def target(@target) @loaded_i32_row_stride_f32_to_bf16_bits_store() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @loaded_i32_row_stride_f32_to_bf16_bits_store(%value: reg<llvmir.f32>, %stride_i32: reg<llvmir.i32>, %element_count_i32: reg<llvmir.i32>) asm<llvmir.generic.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @loaded_i32_row_stride_f32_to_bf16_bits_store(%value: reg<llvmir.f32>, %stride_i32: reg<llvmir.i32>, %element_count_i32: reg<llvmir.i32>) asm<llvmir.generic.core> {
   %idx_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
   %stride = sext.i32.i64 %stride_i32
@@ -1948,7 +1948,7 @@ kernel.def target(@target) @loaded_i32_row_stride_f16_to_f32_load() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @loaded_i32_row_stride_f16_to_f32_load(%stride_i32: reg<llvmir.i32>, %element_count_i32: reg<llvmir.i32>) asm<llvmir.generic.core> {
+low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @loaded_i32_row_stride_f16_to_f32_load(%stride_i32: reg<llvmir.i32>, %element_count_i32: reg<llvmir.i32>) asm<llvmir.generic.core> {
   %idx_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %input_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
   %output_view = resource<hal_binding> {index = 2, source_type = hal.buffer} : reg<llvmir.ptr>
@@ -1986,7 +1986,7 @@ kernel.def target(@target) @rank2_vector_tile_transpose() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(16, 1, 1) @rank2_vector_tile_transpose() asm<llvmir.generic.core> {
+low.kernel.def target(@target) workgroup_size(16, 1, 1) workgroup_count(1, 1, 1) @rank2_vector_tile_transpose() asm<llvmir.generic.core> {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
   %block = kernel.workitem_id.x
@@ -2053,7 +2053,7 @@ kernel.def target(@target) @grid_stride_store_offset() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @grid_stride_store_offset(%byte_length: reg<llvmir.i64>, %value: reg<llvmir.i32>) asm<llvmir.generic.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @grid_stride_store_offset(%byte_length: reg<llvmir.i64>, %value: reg<llvmir.i32>) asm<llvmir.generic.core> {
   %target_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %lane = kernel.workitem_id.x
   %step = const.i64 64

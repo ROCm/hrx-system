@@ -165,7 +165,7 @@ kernel.def target(@target) @fixed_multidim_madd_global_b32() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(8, 4, 1) @fixed_multidim_madd_global_b32() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(8, 4, 1) workgroup_count(1, 1, 1) @fixed_multidim_madd_global_b32() asm<amdgpu.rdna3.core> {
   %packed_tid = live_in<amdgpu.workitem_id.packed.xy> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 128} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 128} : reg<amdgpu.sgpr x2>

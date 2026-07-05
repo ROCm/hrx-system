@@ -693,14 +693,107 @@ void loom_target_compile_report_record_wait_plan(
                                                   wait_plan);
 }
 
+static bool loom_target_compile_report_workgroup_sizes_equal(
+    loom_target_workgroup_size_t lhs, loom_target_workgroup_size_t rhs) {
+  return lhs.x == rhs.x && lhs.y == rhs.y && lhs.z == rhs.z;
+}
+
+static bool loom_target_compile_report_workgroup_counts_equal(
+    loom_target_dispatch_workgroup_count_t lhs,
+    loom_target_dispatch_workgroup_count_t rhs) {
+  return lhs.x == rhs.x && lhs.y == rhs.y && lhs.z == rhs.z;
+}
+
+static bool loom_target_compile_report_checked_mul3_u32(uint32_t x, uint32_t y,
+                                                        uint32_t z,
+                                                        uint64_t* out_result) {
+  uint64_t xy = 0;
+  return loom_target_compile_report_checked_mul_u64(x, y, &xy) &&
+         loom_target_compile_report_checked_mul_u64(xy, z, out_result);
+}
+
 void loom_target_compile_report_record_workload(
     loom_target_compile_report_t* report,
     const loom_target_compile_report_workload_t* workload) {
   if (workload->flags == LOOM_TARGET_COMPILE_REPORT_WORKLOAD_NONE) {
     return;
   }
-  report->detail_flags |= LOOM_TARGET_COMPILE_REPORT_DETAIL_WORKLOAD;
-  report->workload = *workload;
+  if (report->workload.flags == LOOM_TARGET_COMPILE_REPORT_WORKLOAD_NONE) {
+    report->workload = *workload;
+  } else {
+    loom_target_compile_report_workload_t merged = {0};
+    bool has_workgroup_size =
+        iree_any_bit_set(report->workload.flags,
+                         LOOM_TARGET_COMPILE_REPORT_WORKLOAD_WORKGROUP_SIZE);
+    if (iree_any_bit_set(workload->flags,
+                         LOOM_TARGET_COMPILE_REPORT_WORKLOAD_WORKGROUP_SIZE)) {
+      if (!has_workgroup_size) {
+        merged.workgroup_size = workload->workgroup_size;
+        has_workgroup_size = true;
+      } else if (loom_target_compile_report_workgroup_sizes_equal(
+                     report->workload.workgroup_size,
+                     workload->workgroup_size)) {
+        merged.workgroup_size = report->workload.workgroup_size;
+      } else {
+        has_workgroup_size = false;
+      }
+    } else if (has_workgroup_size) {
+      merged.workgroup_size = report->workload.workgroup_size;
+    }
+    if (has_workgroup_size) {
+      merged.flags |= LOOM_TARGET_COMPILE_REPORT_WORKLOAD_WORKGROUP_SIZE;
+      if (loom_target_compile_report_checked_mul3_u32(
+              merged.workgroup_size.x, merged.workgroup_size.y,
+              merged.workgroup_size.z, &merged.flat_workgroup_size)) {
+        merged.flags |= LOOM_TARGET_COMPILE_REPORT_WORKLOAD_FLAT_WORKGROUP_SIZE;
+      }
+    }
+
+    bool has_workgroup_count =
+        iree_any_bit_set(report->workload.flags,
+                         LOOM_TARGET_COMPILE_REPORT_WORKLOAD_WORKGROUP_COUNT);
+    if (iree_any_bit_set(workload->flags,
+                         LOOM_TARGET_COMPILE_REPORT_WORKLOAD_WORKGROUP_COUNT)) {
+      if (!has_workgroup_count) {
+        merged.workgroup_count = workload->workgroup_count;
+        has_workgroup_count = true;
+      } else if (loom_target_compile_report_workgroup_counts_equal(
+                     report->workload.workgroup_count,
+                     workload->workgroup_count)) {
+        merged.workgroup_count = report->workload.workgroup_count;
+      } else {
+        has_workgroup_count = false;
+      }
+    } else if (has_workgroup_count) {
+      merged.workgroup_count = report->workload.workgroup_count;
+    }
+    if (has_workgroup_count) {
+      merged.flags |= LOOM_TARGET_COMPILE_REPORT_WORKLOAD_WORKGROUP_COUNT;
+      if (loom_target_compile_report_checked_mul3_u32(
+              merged.workgroup_count.x, merged.workgroup_count.y,
+              merged.workgroup_count.z, &merged.dispatch_workgroup_count)) {
+        merged.flags |=
+            LOOM_TARGET_COMPILE_REPORT_WORKLOAD_DISPATCH_WORKGROUP_COUNT;
+      }
+    }
+
+    if (iree_all_bits_set(
+            merged.flags,
+            LOOM_TARGET_COMPILE_REPORT_WORKLOAD_FLAT_WORKGROUP_SIZE |
+                LOOM_TARGET_COMPILE_REPORT_WORKLOAD_DISPATCH_WORKGROUP_COUNT) &&
+        loom_target_compile_report_checked_mul_u64(
+            merged.flat_workgroup_size, merged.dispatch_workgroup_count,
+            &merged.dispatch_workitem_count)) {
+      merged.flags |=
+          LOOM_TARGET_COMPILE_REPORT_WORKLOAD_DISPATCH_WORKITEM_COUNT;
+    }
+    report->workload = merged;
+  }
+  if (report->workload.flags == LOOM_TARGET_COMPILE_REPORT_WORKLOAD_NONE) {
+    report->detail_flags &= ~LOOM_TARGET_COMPILE_REPORT_DETAIL_WORKLOAD;
+  } else {
+    report->detail_flags |= LOOM_TARGET_COMPILE_REPORT_DETAIL_WORKLOAD;
+  }
 }
 
 static void loom_target_compile_report_accumulate_instruction_mix(
@@ -1167,17 +1260,6 @@ static iree_string_view_t loom_target_compile_report_shared_string(
 static uint32_t loom_target_compile_report_shared_u32(uint32_t current,
                                                       uint32_t next) {
   return current == next ? current : 0;
-}
-
-static bool loom_target_compile_report_workgroup_sizes_equal(
-    loom_target_workgroup_size_t lhs, loom_target_workgroup_size_t rhs) {
-  return lhs.x == rhs.x && lhs.y == rhs.y && lhs.z == rhs.z;
-}
-
-static bool loom_target_compile_report_workgroup_counts_equal(
-    loom_target_dispatch_workgroup_count_t lhs,
-    loom_target_dispatch_workgroup_count_t rhs) {
-  return lhs.x == rhs.x && lhs.y == rhs.y && lhs.z == rhs.z;
 }
 
 static void loom_target_compile_report_merge_workload(

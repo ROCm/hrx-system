@@ -172,7 +172,7 @@ kernel.def target(@target) @index_matvec_block_lane_range_global_b32() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @index_matvec_block_lane_range_global_b32() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @index_matvec_block_lane_range_global_b32() asm<amdgpu.rdna3.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 5040} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 5040} : reg<amdgpu.sgpr x2>

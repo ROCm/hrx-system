@@ -38,7 +38,7 @@ kernel.def target(@target) @workgroup_reduce_then_all_lane_bias_load() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(128, 1, 1) @workgroup_reduce_then_all_lane_bias_load() asm<amdgpu.cdna3.core> {
+low.kernel.def target(@target) workgroup_size(128, 1, 1) workgroup_count(1, 1, 1) @workgroup_reduce_then_all_lane_bias_load() asm<amdgpu.cdna3.core> {
   %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
   %bias_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 2} : reg<amdgpu.sgpr x2>
@@ -187,7 +187,7 @@ kernel.def target(@target) @subgroup_shuffle_xor_f32_pair_cdna3() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @subgroup_shuffle_xor_f32_pair_cdna3() asm<amdgpu.cdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @subgroup_shuffle_xor_f32_pair_cdna3() asm<amdgpu.cdna3.core> {
   %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
@@ -221,7 +221,7 @@ kernel.def target(@target) @subgroup_reduce_addf_f32_cluster8_cdna3() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @subgroup_reduce_addf_f32_cluster8_cdna3() asm<amdgpu.cdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @subgroup_reduce_addf_f32_cluster8_cdna3() asm<amdgpu.cdna3.core> {
   %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
@@ -257,7 +257,7 @@ kernel.def target(@target) @subgroup_reduce_maxnumf_f32_cluster8_cdna3() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @subgroup_reduce_maxnumf_f32_cluster8_cdna3() asm<amdgpu.cdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @subgroup_reduce_maxnumf_f32_cluster8_cdna3() asm<amdgpu.cdna3.core> {
   %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>

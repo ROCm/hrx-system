@@ -688,7 +688,7 @@ kernel.def target(@target) @index_minmax_vgpr_select() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @index_minmax_vgpr_select() asm<amdgpu.rdna3.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @index_minmax_vgpr_select() asm<amdgpu.rdna3.core> {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %15 = v_mov_b32 31
