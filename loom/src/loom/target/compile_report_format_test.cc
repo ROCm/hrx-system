@@ -219,6 +219,18 @@ TEST(CompileReportFormatTest, MergesSourceLowMemorySummariesFromEntries) {
   EXPECT_EQ(argument_summary->summary.packet_count, 2u);
   EXPECT_EQ(argument_summary->summary.source_byte_count, 12u);
 
+  ASSERT_EQ(report.source_low_memory_argument_packet_summaries.count, 2u);
+  ASSERT_NE(report.source_low_memory_argument_packet_summaries.head, nullptr);
+  const loom_target_compile_report_source_low_memory_argument_packet_summary_t*
+      argument_packets = static_cast<
+          const loom_target_compile_report_source_low_memory_argument_packet_summary_t*>(
+          loom_target_compile_report_vec_const_rows(
+              report.source_low_memory_argument_packet_summaries.head));
+  EXPECT_TRUE(iree_string_view_equal(argument_packets[0].packet_key,
+                                     IREE_SVL("test.load.v2")));
+  EXPECT_TRUE(iree_string_view_equal(argument_packets[1].packet_key,
+                                     IREE_SVL("test.store.v1")));
+
   loom_target_compile_report_deinitialize(&report);
 }
 
@@ -267,6 +279,21 @@ TEST(CompileReportFormatTest, SeparatesSourceLowMemoryStrategiesByPacket) {
                                      IREE_SVL("test.load.v2")));
   EXPECT_TRUE(iree_string_view_equal(summaries[1].packet_key,
                                      IREE_SVL("test.load.v4")));
+  ASSERT_EQ(report.source_low_memory_argument_packet_summaries.count, 2u);
+  ASSERT_NE(report.source_low_memory_argument_packet_summaries.head, nullptr);
+  const loom_target_compile_report_source_low_memory_argument_packet_summary_t*
+      argument_packets = static_cast<
+          const loom_target_compile_report_source_low_memory_argument_packet_summary_t*>(
+          loom_target_compile_report_vec_const_rows(
+              report.source_low_memory_argument_packet_summaries.head));
+  EXPECT_TRUE(iree_string_view_equal(argument_packets[0].packet_key,
+                                     IREE_SVL("test.load.v2")));
+  EXPECT_TRUE(iree_string_view_equal(argument_packets[0].strategy_key,
+                                     IREE_SVL("test.wide-load")));
+  EXPECT_TRUE(iree_string_view_equal(argument_packets[1].packet_key,
+                                     IREE_SVL("test.load.v4")));
+  EXPECT_TRUE(iree_string_view_equal(argument_packets[1].strategy_key,
+                                     IREE_SVL("test.wide-load")));
 
   loom_target_compile_report_deinitialize(&report);
 }
@@ -2049,8 +2076,9 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
             IREE_STRING_VIEW_NPOS);
   EXPECT_NE(iree_string_view_find(
                 output,
-                IREE_SV("source_low_memory roots=1 arguments=1 strategies=1 "
-                        "packets=1 loads=1 stores=0 "
+                IREE_SV("source_low_memory roots=1 arguments=1 "
+                        "argument_packets=1 strategies=1 packets=1 loads=1 "
+                        "stores=0 "
                         "scalar_packets=0 "
                         "vector_packets=1 source_lanes=2 source_bytes=8 "
                         "read_bytes=8 write_bytes=0 "
@@ -2093,6 +2121,30 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
                         "source_bytes=8 read_bytes=8 write_bytes=0 "
                         "issued_read_bytes=8 issued_write_bytes=0 "
                         "issued_read_unknown_widths=0 "
+                        "issued_write_unknown_widths=0 "
+                        "contiguous_vector_packets=0 "
+                        "strided_vector_packets=1 "
+                        "unknown_stride_vector_packets=0"),
+                0),
+            IREE_STRING_VIEW_NPOS);
+  EXPECT_NE(iree_string_view_find(
+                output,
+                IREE_SV("source_low_memory_argument_packet[0] function=branchy "
+                        "source_root=lhs "
+                        "source_root_argument_index=0 "
+                        "memory_space=workgroup operation=load "
+                        "packet=amdgpu.ds_read2_b32 "
+                        "strategy=ds_2addr_bank_report "
+                        "storage={element_format:f8e4m3fn,scale_format:f32,"
+                        "payload_packing:dense_lanes,"
+                        "scale_topology:block_1d,affine_policy:scale_only,"
+                        "rounding_policy:finite_only} "
+                        "fallback_reason=cross_wave_workgroup "
+                        "packets=1 loads=1 "
+                        "stores=0 scalar_packets=0 vector_packets=1 "
+                        "source_lanes=2 source_bytes=8 read_bytes=8 "
+                        "write_bytes=0 issued_read_bytes=8 "
+                        "issued_write_bytes=0 issued_read_unknown_widths=0 "
                         "issued_write_unknown_widths=0 "
                         "contiguous_vector_packets=0 "
                         "strided_vector_packets=1 "
@@ -2732,6 +2784,50 @@ TEST(CompileReportFormatTest, FormatsSummaryAndDetails) {
                         "\"scalar_packet_count\":0,"
                         "\"vector_packet_count\":1,"
                         "\"source_lane_count\":2,\"source_byte_count\":8,"
+                        "\"read_byte_count\":8,\"write_byte_count\":0,"
+                        "\"issued_read_byte_count\":8,"
+                        "\"issued_write_byte_count\":0,"
+                        "\"issued_read_unknown_width_count\":0,"
+                        "\"issued_write_unknown_width_count\":0,"
+                        "\"exact_dynamic_packet_count\":1,"
+                        "\"unknown_dynamic_packet_count\":0,"
+                        "\"dynamic_packet_count\":1,"
+                        "\"dynamic_source_byte_count\":8,"
+                        "\"dynamic_read_byte_count\":8,"
+                        "\"dynamic_write_byte_count\":0,"
+                        "\"dynamic_issued_read_byte_count\":8,"
+                        "\"dynamic_issued_write_byte_count\":0,"
+                        "\"dynamic_issued_read_unknown_width_count\":0,"
+                        "\"dynamic_issued_write_unknown_width_count\":0,"
+                        "\"contiguous_vector_packet_count\":0,"
+                        "\"strided_vector_packet_count\":1,"
+                        "\"unknown_stride_vector_packet_count\":0,"
+                        "\"dispatch_source\":{\"read_bytes\":32768,"
+                        "\"write_bytes\":0,\"total_bytes\":32768},"
+                        "\"dispatch_issued\":{\"read_bytes\":32768,"
+                        "\"write_bytes\":0,\"total_bytes\":32768}}],"
+                        "\"argument_packet_count\":1,"
+                        "\"argument_packets\":[{\"index\":0,"
+                        "\"function\":\"branchy\","
+                        "\"source_root\":\"lhs\","
+                        "\"source_root_argument_index\":0,"
+                        "\"memory_space\":\"workgroup\","
+                        "\"operation\":\"load\","
+                        "\"packet\":\"amdgpu.ds_read2_b32\","
+                        "\"strategy\":\"ds_2addr_bank_report\","
+                        "\"fallback_reason\":\"cross_wave_workgroup\","
+                        "\"storage\":{\"element_format\":\"f8e4m3fn\","
+                        "\"scale_format\":\"f32\","
+                        "\"payload_packing\":\"dense_lanes\","
+                        "\"scale_topology\":\"block_1d\","
+                        "\"affine_policy\":\"scale_only\","
+                        "\"rounding_policy\":\"finite_only\"},"
+                        "\"packet_count\":1,\"load_packet_count\":1,"
+                        "\"store_packet_count\":0,"
+                        "\"scalar_packet_count\":0,"
+                        "\"vector_packet_count\":1,"
+                        "\"source_lane_count\":2,"
+                        "\"source_byte_count\":8,"
                         "\"read_byte_count\":8,\"write_byte_count\":0,"
                         "\"issued_read_byte_count\":8,"
                         "\"issued_write_byte_count\":0,"
