@@ -1200,6 +1200,8 @@ typedef struct loom_amdgpu_fragment_memory_plan_t {
   loom_value_id_t narrowed_result_round_source;
   // Optional scalar scale applied before narrowed f32-to-bf16 stores.
   loom_value_id_t narrowed_result_scale_source;
+  // Optional packed bf16 fragment source copied directly for narrowed stores.
+  loom_value_id_t narrowed_result_packed_source;
 } loom_amdgpu_fragment_memory_plan_t;
 
 typedef enum loom_amdgpu_fragment_repack_strategy_e {

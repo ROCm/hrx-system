@@ -1280,6 +1280,20 @@ low.func.def target(@target) abi(hal_kernel) @vector_fptrunc_bf16x3(%input: reg<
 // ====
 
 amdgpu.target<gfx1100> @target
+func.def target(@target) @vector_extf_fptrunc_bf16_origin_alias(%input: vector<4xbf16>) -> (vector<4xbf16>) {
+  %wide = vector.extf %input : vector<4xbf16> to vector<4xf32>
+  %rounded = vector.fptrunc %wide : vector<4xf32> to vector<4xbf16>
+  func.return %rounded : vector<4xbf16>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @vector_extf_fptrunc_bf16_origin_alias(%input: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm<amdgpu.rdna3.core> {
+  return %input
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
 func.def target(@target) @scalar_bitcast_f32_to_i32(%input: f32) -> (i32) {
   %bits = scalar.bitcast %input : f32 to i32
   func.return %bits : i32

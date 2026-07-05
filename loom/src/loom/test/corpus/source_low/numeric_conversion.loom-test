@@ -489,6 +489,14 @@ func.def @vector_fptrunc_bf16x3(%input: vector<3xf32>) -> (vector<3xbf16>) {
 
 // ====
 
+func.def @vector_extf_fptrunc_bf16_origin_alias(%input: vector<4xbf16>) -> (vector<4xbf16>) {
+  %wide = vector.extf %input : vector<4xbf16> to vector<4xf32>
+  %rounded = vector.fptrunc %wide : vector<4xf32> to vector<4xbf16>
+  func.return %rounded : vector<4xbf16>
+}
+
+// ====
+
 func.def @scalar_bitcast_f32_to_i32(%input: f32) -> (i32) {
   %bits = scalar.bitcast %input : f32 to i32
   func.return %bits : i32
