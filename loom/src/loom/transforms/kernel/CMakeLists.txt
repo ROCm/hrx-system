@@ -78,6 +78,7 @@ loom_cc_library(
   DEPS
     iree::base
     iree::base::internal::arena
+    loom::codegen::low::pipeline::pass_environment
     loom::ir
     loom::ops::buffer
     loom::ops::encoding
@@ -91,6 +92,7 @@ loom_cc_library(
     loom::rewrite::materialize
     loom::rewrite::remap
     loom::rewrite::rewriter
+    loom::target::compile_report
     loom::util::math
     loom::util::walk
   PUBLIC
