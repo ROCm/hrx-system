@@ -16,6 +16,7 @@ loom_check_test_suite(
     "memory_footprint.loom-test"
     "memory_to_scalar.loom-test"
     "reduce_axes_to_scalar.loom-test"
+    "sink_single_use_reads.loom-test"
     "to_scalar.loom-test"
 )
 

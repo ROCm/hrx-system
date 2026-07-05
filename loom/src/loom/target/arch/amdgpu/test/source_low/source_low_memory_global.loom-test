@@ -1734,26 +1734,26 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) @f32x8_split_b128() asm<
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 2048} : reg<amdgpu.sgpr x2>
   %42 = v_lshlrev_b32_src0_inline %lane, 5
   %43 = global_load_b128_saddr %42, %input_view
-  %45 = global_load_b128_saddr %42, %input_view {offset = 16}
-  %46 = slice %43[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %44 = slice %43[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %45 = v_add_f32_src0_inline %44, 1073741824
+  %46 = slice %43[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %47 = v_add_f32_src0_inline %46, 1073741824
-  %48 = slice %43[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %48 = slice %43[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %49 = v_add_f32_src0_inline %48, 1073741824
-  %50 = slice %43[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %50 = slice %43[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %51 = v_add_f32_src0_inline %50, 1073741824
-  %52 = slice %43[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %53 = v_add_f32_src0_inline %52, 1073741824
-  %54 = concat(%47, %49, %51, %53) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
-  %55 = slice %45[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %52 = concat(%45, %47, %49, %51) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  %54 = global_load_b128_saddr %42, %input_view {offset = 16}
+  %55 = slice %54[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %56 = v_add_f32_src0_inline %55, 1073741824
-  %57 = slice %45[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %57 = slice %54[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %58 = v_add_f32_src0_inline %57, 1073741824
-  %59 = slice %45[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %59 = slice %54[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %60 = v_add_f32_src0_inline %59, 1073741824
-  %61 = slice %45[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %61 = slice %54[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %62 = v_add_f32_src0_inline %61, 1073741824
   %63 = concat(%56, %58, %60, %62) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
-  global_store_b128_saddr %42, %54, %output_view
+  global_store_b128_saddr %42, %52, %output_view
   global_store_b128_saddr %42, %63, %output_view {offset = 16}
   return
 }
