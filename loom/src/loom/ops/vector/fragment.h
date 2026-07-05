@@ -118,9 +118,21 @@ void loom_vector_fragment_fact_initialize(
 // Returns true when no fragment facts are known.
 bool loom_vector_fragment_fact_is_unknown(loom_vector_fragment_fact_t fact);
 
+// Returns true when |fact| describes an init/result matrix accumulator.
+bool loom_vector_fragment_fact_is_accumulator_like(
+    loom_vector_fragment_fact_t fact);
+
+// Returns true when |fact| describes any matrix fragment role.
+bool loom_vector_fragment_fact_has_matrix_shape(
+    loom_vector_fragment_fact_t fact);
+
 // Returns true when fragment facts are byte-identical.
 bool loom_vector_fragment_fact_equal(loom_vector_fragment_fact_t lhs,
                                      loom_vector_fragment_fact_t rhs);
+
+// Returns true when two fragment facts share the same accumulator contract.
+bool loom_vector_fragment_facts_match_accumulator_contract(
+    loom_vector_fragment_fact_t lhs, loom_vector_fragment_fact_t rhs);
 
 // Creates value facts carrying |fact| as a compact raw payload.
 iree_status_t loom_vector_fragment_fact_make_value_facts(

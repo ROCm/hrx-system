@@ -61,3 +61,28 @@ loom_cc_library(
         "//runtime/src/iree/base",
     ],
 )
+
+loom_cc_library(
+    name = "stage_loop_carried_fragments",
+    srcs = ["stage_loop_carried_fragments.c"],
+    hdrs = ["stage_loop_carried_fragments.h"],
+    deps = [
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/buffer",
+        "//loom/src/loom/ops/encoding",
+        "//loom/src/loom/ops/index",
+        "//loom/src/loom/ops/kernel",
+        "//loom/src/loom/ops/scf",
+        "//loom/src/loom/ops/vector",
+        "//loom/src/loom/pass:types",
+        "//loom/src/loom/pass:value_facts",
+        "//loom/src/loom/rewrite:materialize",
+        "//loom/src/loom/rewrite:remap",
+        "//loom/src/loom/rewrite:rewriter",
+        "//loom/src/loom/util:math",
+        "//loom/src/loom/util:walk",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)

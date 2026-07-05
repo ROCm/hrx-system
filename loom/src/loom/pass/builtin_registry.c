@@ -27,6 +27,7 @@
 #include "loom/transforms/kernel/kernel_async_legality.h"
 #include "loom/transforms/kernel/kernel_resources.h"
 #include "loom/transforms/kernel/promote_private_fragments.h"
+#include "loom/transforms/kernel/stage_loop_carried_fragments.h"
 #include "loom/transforms/loop/licm.h"
 #include "loom/transforms/loop/loop_fusion.h"
 #include "loom/transforms/math/legalize.h"
@@ -455,6 +456,11 @@ static const loom_pass_descriptor_t kBuiltinPassDescriptors[] = {
         .option_schema_count = IREE_ARRAYSIZE(kLowSourceToLowOptionSchema),
         .requirement_defs = kLowSourceToLowRequirements,
         .requirement_count = IREE_ARRAYSIZE(kLowSourceToLowRequirements),
+    },
+    {
+        .key = IREE_SVL("stage-loop-carried-fragments"),
+        .info = loom_stage_loop_carried_fragments_pass_info,
+        .function_run = loom_stage_loop_carried_fragments_run,
     },
     {
         .key = IREE_SVL("strip-hints"),
