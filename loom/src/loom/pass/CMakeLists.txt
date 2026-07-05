@@ -297,6 +297,7 @@ loom_cc_library(
     loom::transforms::kernel::kernel_async_legality
     loom::transforms::kernel::kernel_resources
     loom::transforms::kernel::promote_private_fragments
+    loom::transforms::kernel::stage_loop_carried_fragments
     loom::transforms::loop::licm
     loom::transforms::loop::loop_fusion
     loom::transforms::math::legalize

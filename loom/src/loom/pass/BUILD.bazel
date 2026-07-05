@@ -262,6 +262,7 @@ loom_cc_library(
         "//loom/src/loom/transforms/kernel:kernel_async_legality",
         "//loom/src/loom/transforms/kernel:kernel_resources",
         "//loom/src/loom/transforms/kernel:promote_private_fragments",
+        "//loom/src/loom/transforms/kernel:stage_loop_carried_fragments",
         "//loom/src/loom/transforms/loop:licm",
         "//loom/src/loom/transforms/loop:loop_fusion",
         "//loom/src/loom/transforms/math:legalize",

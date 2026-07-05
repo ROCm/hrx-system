@@ -1,0 +1,713 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+#include "loom/transforms/kernel/stage_loop_carried_fragments.h"
+
+#include <stdint.h>
+#include <string.h>
+
+#include "iree/base/internal/arena.h"
+#include "loom/ir/module.h"
+#include "loom/ir/scalar_type.h"
+#include "loom/ir/types.h"
+#include "loom/ops/buffer/ops.h"
+#include "loom/ops/encoding/ops.h"
+#include "loom/ops/index/ops.h"
+#include "loom/ops/kernel/ops.h"
+#include "loom/ops/scf/ops.h"
+#include "loom/ops/vector/fragment.h"
+#include "loom/ops/vector/ops.h"
+#include "loom/pass/value_facts.h"
+#include "loom/rewrite/materialize.h"
+#include "loom/rewrite/remap.h"
+#include "loom/rewrite/rewriter.h"
+#include "loom/util/math.h"
+#include "loom/util/walk.h"
+
+//===----------------------------------------------------------------------===//
+// Statistics
+//===----------------------------------------------------------------------===//
+
+#define LOOM_STAGE_LOOP_CARRIED_FRAGMENTS_STATISTICS(V, statistics_type)     \
+  V(statistics_type, loops_staged, "loops-staged",                           \
+    "Number of scf.for loops rebuilt with workgroup-staged fragments.")      \
+  V(statistics_type, fragments_staged, "fragments-staged",                   \
+    "Number of loop-carried accumulator fragments staged through workgroup " \
+    "memory.")
+
+LOOM_PASS_STATISTICS_DEFINE(loom_stage_loop_carried_fragments_statistics,
+                            loom_stage_loop_carried_fragments_statistics_t,
+                            LOOM_STAGE_LOOP_CARRIED_FRAGMENTS_STATISTICS)
+
+static const loom_pass_info_t
+    loom_stage_loop_carried_fragments_pass_info_storage = {
+        .name = IREE_SVL("stage-loop-carried-fragments"),
+        .description = IREE_SVL(
+            "Stage high-pressure loop-carried fragments through workgroup "
+            "memory."),
+        .kind = LOOM_PASS_FUNCTION,
+        .statistic_layout =
+            &loom_stage_loop_carried_fragments_statistics_layout,
+};
+
+const loom_pass_info_t* loom_stage_loop_carried_fragments_pass_info(void) {
+  return &loom_stage_loop_carried_fragments_pass_info_storage;
+}
+
+//===----------------------------------------------------------------------===//
+// Candidate model
+//===----------------------------------------------------------------------===//
+
+#define LOOM_STAGE_LOOP_CARRIED_FRAGMENTS_MIN_COUNT 4
+
+typedef struct loom_stage_loop_carried_fragment_t {
+  // Loop-carried result/iter_arg ordinal.
+  uint16_t ordinal;
+
+  // Dense staging slot ordinal.
+  uint16_t slot_ordinal;
+
+  // Initial loop iter_arg value.
+  loom_value_id_t initial_value;
+
+  // Old loop body block argument value.
+  loom_value_id_t body_value;
+
+  // Old loop yielded value for this carried slot.
+  loom_value_id_t yielded_value;
+
+  // Static logical row count of the accumulator fragment.
+  int64_t row_count;
+
+  // Static logical column count of the accumulator fragment.
+  int64_t column_count;
+
+  // Physical payload type of the accumulator fragment.
+  loom_type_t payload_type;
+
+  // Fragment contract carried by the slot.
+  loom_vector_fragment_fact_t fact;
+} loom_stage_loop_carried_fragment_t;
+
+typedef struct loom_stage_loop_carried_fragment_list_t {
+  // Dense candidate storage.
+  loom_stage_loop_carried_fragment_t* values;
+
+  // Number of candidates.
+  uint16_t count;
+} loom_stage_loop_carried_fragment_list_t;
+
+typedef struct loom_stage_loop_carried_fragments_context_t {
+  // Pass invocation.
+  loom_pass_t* pass;
+
+  // Pass statistics.
+  loom_stage_loop_carried_fragments_statistics_t* statistics;
+
+  // Module being transformed.
+  loom_module_t* module;
+
+  // Rewriter owning IR mutations.
+  loom_rewriter_t* rewriter;
+} loom_stage_loop_carried_fragments_context_t;
+
+static bool loom_stage_loop_carried_fragments_match_structural_loop(
+    loom_op_t* op, loom_op_t** out_yield) {
+  if (out_yield) *out_yield = NULL;
+  if (!loom_scf_for_isa(op) || op->tied_result_count != 0 ||
+      op->result_count < LOOM_STAGE_LOOP_CARRIED_FRAGMENTS_MIN_COUNT) {
+    return false;
+  }
+
+  loom_region_t* body = loom_scf_for_body(op);
+  if (!body || body->block_count != 1) return false;
+  loom_block_t* block = loom_region_entry_block(body);
+  if (!block || block->arg_count != 1 + op->result_count) {
+    return false;
+  }
+  loom_op_t* yield = block->last_op;
+  if (!yield || !loom_scf_yield_isa(yield)) return false;
+
+  loom_value_slice_t iter_args = loom_scf_for_iter_args(op);
+  loom_value_slice_t yielded_values = loom_scf_yield_values(yield);
+  if (iter_args.count != op->result_count ||
+      yielded_values.count != op->result_count) {
+    return false;
+  }
+
+  if (out_yield) *out_yield = yield;
+  return true;
+}
+
+static bool loom_stage_loop_carried_fragments_exact_i64(
+    loom_rewriter_t* rewriter, loom_value_id_t value, int64_t* out_value) {
+  return loom_value_facts_as_exact_i64(
+      loom_rewriter_value_facts(rewriter, value), out_value);
+}
+
+static bool loom_stage_loop_carried_fragments_static_positive_shape(
+    loom_rewriter_t* rewriter, loom_vector_fragment_fact_t fact,
+    int64_t* out_rows, int64_t* out_columns) {
+  if (fact.shape_rank != 2) return false;
+  int64_t rows = 0;
+  int64_t columns = 0;
+  if (!loom_stage_loop_carried_fragments_exact_i64(
+          rewriter, fact.shape_value_ids[0], &rows) ||
+      !loom_stage_loop_carried_fragments_exact_i64(
+          rewriter, fact.shape_value_ids[1], &columns)) {
+    return false;
+  }
+  if (rows <= 0 || columns <= 0) return false;
+  *out_rows = rows;
+  *out_columns = columns;
+  return true;
+}
+
+static bool loom_stage_loop_carried_fragments_dense_accumulator_fact(
+    loom_rewriter_t* rewriter, loom_value_id_t value,
+    loom_vector_fragment_fact_t* out_fact, int64_t* out_rows,
+    int64_t* out_columns) {
+  loom_vector_fragment_fact_t fact;
+  if (!loom_vector_fragment_fact_query_value_facts(
+          &rewriter->fact_table->context,
+          loom_rewriter_value_facts(rewriter, value), &fact) ||
+      !loom_vector_fragment_fact_is_accumulator_like(fact) ||
+      iree_any_bit_set(fact.flags,
+                       LOOM_VECTOR_FRAGMENT_FACT_FLAG_HAS_SCHEMA |
+                           LOOM_VECTOR_FRAGMENT_FACT_FLAG_HAS_STATIC_SCHEMA)) {
+    return false;
+  }
+  if (fact.auxiliary.present_keys != 0) {
+    return false;
+  }
+  if (!loom_stage_loop_carried_fragments_static_positive_shape(
+          rewriter, fact, out_rows, out_columns)) {
+    return false;
+  }
+  *out_fact = fact;
+  return true;
+}
+
+static bool loom_stage_loop_carried_fragments_same_candidate_contract(
+    const loom_stage_loop_carried_fragment_t* base,
+    const loom_stage_loop_carried_fragment_t* candidate) {
+  loom_vector_fragment_fact_t base_fact = base->fact;
+  loom_vector_fragment_fact_t candidate_fact = candidate->fact;
+  memset(base_fact.shape_value_ids, 0, sizeof(base_fact.shape_value_ids));
+  memset(candidate_fact.shape_value_ids, 0,
+         sizeof(candidate_fact.shape_value_ids));
+  return base->row_count == candidate->row_count &&
+         base->column_count == candidate->column_count &&
+         loom_type_equal(base->payload_type, candidate->payload_type) &&
+         loom_vector_fragment_facts_match_accumulator_contract(base_fact,
+                                                               candidate_fact);
+}
+
+static iree_status_t loom_stage_loop_carried_fragments_collect(
+    loom_stage_loop_carried_fragments_context_t* context, loom_op_t* op,
+    loom_op_t** out_yield, loom_stage_loop_carried_fragment_list_t* out_list) {
+  *out_yield = NULL;
+  memset(out_list, 0, sizeof(*out_list));
+
+  if (!loom_stage_loop_carried_fragments_match_structural_loop(op, out_yield)) {
+    return iree_ok_status();
+  }
+
+  loom_value_slice_t iter_args = loom_scf_for_iter_args(op);
+  loom_value_slice_t yielded_values = loom_scf_yield_values(*out_yield);
+  loom_block_t* block = loom_region_entry_block(loom_scf_for_body(op));
+
+  loom_stage_loop_carried_fragment_t* candidates = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate_array(context->pass->arena, op->result_count,
+                                sizeof(*candidates), (void**)&candidates));
+
+  const loom_value_id_t* results = loom_op_const_results(op);
+  uint16_t candidate_count = 0;
+  for (uint16_t i = 0; i < op->result_count; ++i) {
+    loom_type_t payload_type =
+        loom_module_value_type(context->module, results[i]);
+    if (!loom_type_is_vector(payload_type)) continue;
+
+    loom_stage_loop_carried_fragment_t candidate = {
+        .ordinal = i,
+        .slot_ordinal = candidate_count,
+        .initial_value = iter_args.values[i],
+        .body_value = loom_block_arg_id(block, (uint16_t)(1 + i)),
+        .yielded_value = yielded_values.values[i],
+        .payload_type = payload_type,
+    };
+    if (!loom_stage_loop_carried_fragments_dense_accumulator_fact(
+            context->rewriter, candidate.initial_value, &candidate.fact,
+            &candidate.row_count, &candidate.column_count)) {
+      continue;
+    }
+    loom_vector_fragment_fact_t yielded_fact;
+    int64_t yielded_rows = 0;
+    int64_t yielded_columns = 0;
+    if (!loom_stage_loop_carried_fragments_dense_accumulator_fact(
+            context->rewriter, candidate.yielded_value, &yielded_fact,
+            &yielded_rows, &yielded_columns)) {
+      continue;
+    }
+    loom_stage_loop_carried_fragment_t yielded_candidate = candidate;
+    yielded_candidate.fact = yielded_fact;
+    yielded_candidate.row_count = yielded_rows;
+    yielded_candidate.column_count = yielded_columns;
+    if (!loom_stage_loop_carried_fragments_same_candidate_contract(
+            &candidate, &yielded_candidate)) {
+      continue;
+    }
+    if (candidate_count != 0 &&
+        !loom_stage_loop_carried_fragments_same_candidate_contract(
+            &candidates[0], &candidate)) {
+      continue;
+    }
+    candidates[candidate_count++] = candidate;
+  }
+
+  if (candidate_count < LOOM_STAGE_LOOP_CARRIED_FRAGMENTS_MIN_COUNT) {
+    return iree_ok_status();
+  }
+
+  out_list->values = candidates;
+  out_list->count = candidate_count;
+  return iree_ok_status();
+}
+
+//===----------------------------------------------------------------------===//
+// Rewrite
+//===----------------------------------------------------------------------===//
+
+static loom_type_t loom_stage_loop_carried_fragments_dense_view_type(
+    loom_scalar_type_t element_type, int64_t rows, int64_t columns,
+    loom_value_id_t layout) {
+  loom_type_t type = loom_type_shaped_2d(
+      LOOM_TYPE_VIEW, element_type, loom_dim_pack_static(rows),
+      loom_dim_pack_static(columns), /*encoding_id=*/0);
+  type.encoding_id = (uint16_t)layout;
+  type.encoding_flags = LOOM_ENCODING_FLAG_SSA;
+  return type;
+}
+
+static iree_status_t loom_stage_loop_carried_fragments_build_index_constant(
+    loom_stage_loop_carried_fragments_context_t* context, loom_op_t* anchor_op,
+    int64_t value, loom_type_t type, loom_value_id_t* out_value) {
+  *out_value = LOOM_VALUE_ID_INVALID;
+  loom_op_t* constant_op = NULL;
+  IREE_RETURN_IF_ERROR(loom_index_constant_build(
+      &context->rewriter->builder, loom_attr_i64(value), type,
+      anchor_op->location, &constant_op));
+  *out_value = loom_index_constant_result(constant_op);
+  return iree_ok_status();
+}
+
+static iree_status_t loom_stage_loop_carried_fragments_build_barrier(
+    loom_stage_loop_carried_fragments_context_t* context,
+    loom_op_t* anchor_op) {
+  loom_op_t* barrier_op = NULL;
+  return loom_kernel_barrier_build(
+      &context->rewriter->builder, LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP,
+      LOOM_ATOMIC_ORDERING_ACQ_REL, LOOM_ATOMIC_SCOPE_WORKGROUP,
+      anchor_op->location, &barrier_op);
+}
+
+static iree_status_t loom_stage_loop_carried_fragments_build_fragment_store(
+    loom_stage_loop_carried_fragments_context_t* context, loom_op_t* anchor_op,
+    loom_value_id_t value, loom_value_id_t view, loom_value_id_t row_index,
+    loom_value_id_t column_index, loom_value_id_t rows,
+    loom_value_id_t columns) {
+  int64_t static_indices[2] = {INT64_MIN, INT64_MIN};
+  loom_value_id_t indices[2] = {row_index, column_index};
+  loom_op_t* store_op = NULL;
+  return loom_vector_fragment_store_build(
+      &context->rewriter->builder, /*build_flags=*/0, LOOM_VECTOR_ROLE_RESULT,
+      value, view, indices, IREE_ARRAYSIZE(indices), static_indices,
+      IREE_ARRAYSIZE(static_indices), rows, columns, /*cache_scope=*/0,
+      /*cache_temporal=*/0, anchor_op->location, &store_op);
+}
+
+static iree_status_t loom_stage_loop_carried_fragments_build_fragment_load(
+    loom_stage_loop_carried_fragments_context_t* context, loom_op_t* anchor_op,
+    loom_value_id_t view, loom_value_id_t row_index,
+    loom_value_id_t column_index, loom_value_id_t rows, loom_value_id_t columns,
+    loom_type_t payload_type, loom_value_id_t* out_value) {
+  *out_value = LOOM_VALUE_ID_INVALID;
+  int64_t static_indices[2] = {INT64_MIN, INT64_MIN};
+  loom_value_id_t indices[2] = {row_index, column_index};
+  loom_op_t* load_op = NULL;
+  IREE_RETURN_IF_ERROR(loom_vector_fragment_load_build(
+      &context->rewriter->builder, /*build_flags=*/0, LOOM_VECTOR_ROLE_INIT,
+      view, indices, IREE_ARRAYSIZE(indices), static_indices,
+      IREE_ARRAYSIZE(static_indices), rows, columns, /*auxiliary=*/NULL,
+      /*auxiliary_count=*/0, /*cache_scope=*/0, /*cache_temporal=*/0,
+      payload_type, anchor_op->location, &load_op));
+  *out_value = loom_vector_fragment_load_result(load_op);
+  return iree_ok_status();
+}
+
+static iree_status_t loom_stage_loop_carried_fragments_remap_value(
+    loom_ir_remap_t* remap, loom_value_id_t source,
+    loom_value_id_t* out_target) {
+  if (loom_ir_remap_try_lookup_value(remap, source, out_target)) {
+    return iree_ok_status();
+  }
+  return loom_ir_remap_resolve_value(remap, source, out_target);
+}
+
+static iree_status_t loom_stage_loop_carried_fragments_rewrite(
+    loom_stage_loop_carried_fragments_context_t* context, loom_op_t* op,
+    loom_op_t* yield,
+    const loom_stage_loop_carried_fragment_list_t* staged_fragments) {
+  const loom_stage_loop_carried_fragment_t* base = &staged_fragments->values[0];
+  int32_t element_bit_count =
+      loom_scalar_type_bitwidth(loom_type_element_type(base->payload_type));
+  if (element_bit_count <= 0 || (element_bit_count % 8) != 0) {
+    return iree_ok_status();
+  }
+
+  int64_t staged_column_count = 0;
+  int64_t logical_element_count = 0;
+  int64_t byte_count = 0;
+  if (!loom_checked_mul_i64(base->column_count, staged_fragments->count,
+                            &staged_column_count) ||
+      !loom_checked_mul_i64(base->row_count, staged_column_count,
+                            &logical_element_count) ||
+      !loom_checked_mul_i64(logical_element_count, element_bit_count / 8,
+                            &byte_count)) {
+    return iree_ok_status();
+  }
+
+  loom_value_slice_t iter_args = loom_scf_for_iter_args(op);
+  loom_value_slice_t yielded_values = loom_scf_yield_values(yield);
+  loom_block_t* old_block = loom_region_entry_block(loom_scf_for_body(op));
+  const loom_value_id_t* old_results = loom_op_const_results(op);
+
+  uint16_t* staged_index_by_ordinal = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      context->pass->arena, op->result_count, sizeof(*staged_index_by_ordinal),
+      (void**)&staged_index_by_ordinal));
+  for (uint16_t i = 0; i < op->result_count; ++i) {
+    staged_index_by_ordinal[i] = UINT16_MAX;
+  }
+  for (uint16_t i = 0; i < staged_fragments->count; ++i) {
+    staged_index_by_ordinal[staged_fragments->values[i].ordinal] = i;
+  }
+
+  uint16_t kept_count = (uint16_t)(op->result_count - staged_fragments->count);
+  loom_value_id_t* kept_iter_args = NULL;
+  loom_type_t* kept_result_types = NULL;
+  if (kept_count > 0) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        context->pass->arena, kept_count, sizeof(*kept_iter_args),
+        (void**)&kept_iter_args));
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        context->pass->arena, kept_count, sizeof(*kept_result_types),
+        (void**)&kept_result_types));
+  }
+  uint16_t kept_ordinal = 0;
+  for (uint16_t i = 0; i < op->result_count; ++i) {
+    if (staged_index_by_ordinal[i] != UINT16_MAX) continue;
+    kept_iter_args[kept_ordinal] = iter_args.values[i];
+    kept_result_types[kept_ordinal] =
+        loom_module_value_type(context->module, old_results[i]);
+    ++kept_ordinal;
+  }
+
+  loom_scf_for_build_flags_t build_flags = 0;
+  loom_value_id_t unroll_factor = LOOM_VALUE_ID_INVALID;
+  if (loom_scf_for_unroll_factor_is_present(op)) {
+    build_flags |= LOOM_SCF_FOR_BUILD_FLAG_HAS_UNROLL_FACTOR;
+    unroll_factor = loom_scf_for_unroll_factor(op);
+  }
+  loom_scf_for_unroll_policy_t unroll_policy = 0;
+  if (!loom_attr_is_absent(
+          loom_op_attrs(op)[loom_scf_for_unroll_policy_ATTR_INDEX])) {
+    build_flags |= LOOM_SCF_FOR_BUILD_FLAG_HAS_UNROLL_POLICY;
+    unroll_policy = loom_scf_for_unroll_policy(op);
+  }
+  loom_scf_for_unroll_schedule_t unroll_schedule = 0;
+  if (!loom_attr_is_absent(
+          loom_op_attrs(op)[loom_scf_for_unroll_schedule_ATTR_INDEX])) {
+    build_flags |= LOOM_SCF_FOR_BUILD_FLAG_HAS_UNROLL_SCHEDULE;
+    unroll_schedule = loom_scf_for_unroll_schedule(op);
+  }
+
+  loom_builder_set_before(&context->rewriter->builder, op);
+  loom_value_id_t value_checkpoint =
+      loom_rewriter_value_checkpoint(context->rewriter);
+
+  loom_value_id_t byte_count_value = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_stage_loop_carried_fragments_build_index_constant(
+      context, op, byte_count, loom_type_scalar(LOOM_SCALAR_TYPE_OFFSET),
+      &byte_count_value));
+  loom_value_id_t zero_offset = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_stage_loop_carried_fragments_build_index_constant(
+      context, op, 0, loom_type_scalar(LOOM_SCALAR_TYPE_OFFSET), &zero_offset));
+  loom_value_id_t zero_index = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_stage_loop_carried_fragments_build_index_constant(
+      context, op, 0, loom_type_scalar(LOOM_SCALAR_TYPE_INDEX), &zero_index));
+
+  loom_op_t* layout_op = NULL;
+  IREE_RETURN_IF_ERROR(loom_encoding_layout_dense_build(
+      &context->rewriter->builder,
+      loom_type_encoding_with_role(LOOM_ENCODING_ROLE_ADDRESS_LAYOUT),
+      op->location, &layout_op));
+  loom_value_id_t layout_value = loom_encoding_layout_dense_result(layout_op);
+
+  loom_op_t* buffer_op = NULL;
+  IREE_RETURN_IF_ERROR(loom_buffer_alloca_build(
+      &context->rewriter->builder, byte_count_value,
+      /*base_alignment=*/16, LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP,
+      loom_type_buffer(), op->location, &buffer_op));
+  loom_value_id_t buffer_value = loom_buffer_alloca_result(buffer_op);
+
+  loom_type_t view_type = loom_stage_loop_carried_fragments_dense_view_type(
+      loom_type_element_type(base->payload_type), base->row_count,
+      staged_column_count, layout_value);
+  loom_op_t* view_op = NULL;
+  IREE_RETURN_IF_ERROR(
+      loom_buffer_view_build(&context->rewriter->builder, buffer_value,
+                             zero_offset, view_type, op->location, &view_op));
+  loom_value_id_t staging_view = loom_buffer_view_result(view_op);
+
+  loom_value_id_t* slot_columns = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate_array(context->pass->arena, staged_fragments->count,
+                                sizeof(*slot_columns), (void**)&slot_columns));
+
+  for (uint16_t i = 0; i < staged_fragments->count; ++i) {
+    const loom_stage_loop_carried_fragment_t* fragment =
+        &staged_fragments->values[i];
+    int64_t column = 0;
+    if (!loom_checked_mul_i64(fragment->slot_ordinal, base->column_count,
+                              &column)) {
+      return iree_ok_status();
+    }
+    IREE_RETURN_IF_ERROR(loom_stage_loop_carried_fragments_build_index_constant(
+        context, op, column, loom_type_scalar(LOOM_SCALAR_TYPE_INDEX),
+        &slot_columns[i]));
+    IREE_RETURN_IF_ERROR(loom_stage_loop_carried_fragments_build_fragment_store(
+        context, op, fragment->initial_value, staging_view, zero_index,
+        slot_columns[i], fragment->fact.shape_value_ids[0],
+        fragment->fact.shape_value_ids[1]));
+  }
+  IREE_RETURN_IF_ERROR(
+      loom_stage_loop_carried_fragments_build_barrier(context, op));
+
+  loom_op_t* new_loop = NULL;
+  IREE_RETURN_IF_ERROR(loom_scf_for_build(
+      &context->rewriter->builder, build_flags, loom_scf_for_lower_bound(op),
+      loom_scf_for_upper_bound(op), loom_scf_for_step(op), kept_iter_args,
+      kept_count, kept_result_types, kept_count, /*tied_results=*/NULL,
+      /*tied_result_count=*/0, unroll_factor, unroll_policy, unroll_schedule,
+      op->location, &new_loop));
+
+  loom_region_t* new_body = loom_scf_for_body(new_loop);
+  loom_builder_ip_t saved_ip = loom_builder_enter_region(
+      &context->rewriter->builder, new_loop, new_body);
+  loom_block_t* new_block = loom_region_entry_block(new_body);
+
+  loom_ir_remap_t remap = {0};
+  IREE_RETURN_IF_ERROR(loom_ir_remap_initialize(
+      context->module, context->module, context->pass->arena,
+      &(loom_ir_remap_options_t){
+          .allow_unmapped_values = true,
+          .remap_symbol = loom_ir_remap_symbol_callback_empty(),
+      },
+      &remap));
+  IREE_RETURN_IF_ERROR(
+      loom_ir_remap_map_value(&remap, loom_block_arg_id(old_block, 0),
+                              loom_block_arg_id(new_block, 0)));
+
+  kept_ordinal = 0;
+  for (uint16_t i = 0; i < op->result_count; ++i) {
+    loom_value_id_t old_arg = loom_block_arg_id(old_block, (uint16_t)(1 + i));
+    if (staged_index_by_ordinal[i] != UINT16_MAX) continue;
+    IREE_RETURN_IF_ERROR(loom_ir_remap_map_value(
+        &remap, old_arg,
+        loom_block_arg_id(new_block, (uint16_t)(1 + kept_ordinal++))));
+  }
+
+  for (uint16_t i = 0; i < staged_fragments->count; ++i) {
+    const loom_stage_loop_carried_fragment_t* fragment =
+        &staged_fragments->values[i];
+    loom_value_id_t initial_load = LOOM_VALUE_ID_INVALID;
+    IREE_RETURN_IF_ERROR(loom_stage_loop_carried_fragments_build_fragment_load(
+        context, op, staging_view, zero_index, slot_columns[i],
+        fragment->fact.shape_value_ids[0], fragment->fact.shape_value_ids[1],
+        fragment->payload_type, &initial_load));
+    IREE_RETURN_IF_ERROR(
+        loom_ir_remap_map_value(&remap, fragment->body_value, initial_load));
+  }
+
+  IREE_RETURN_IF_ERROR(loom_ir_clone_block_ops(
+      &context->rewriter->builder, old_block, &remap,
+      &(loom_ir_clone_block_options_t){.omit_terminators = true}));
+
+  loom_value_id_t* replacement_values = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      context->pass->arena, op->result_count, sizeof(*replacement_values),
+      (void**)&replacement_values));
+
+  loom_value_id_t* kept_yield_values = NULL;
+  if (kept_count > 0) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        context->pass->arena, kept_count, sizeof(*kept_yield_values),
+        (void**)&kept_yield_values));
+  }
+
+  kept_ordinal = 0;
+  for (uint16_t i = 0; i < op->result_count; ++i) {
+    loom_value_id_t target_value = LOOM_VALUE_ID_INVALID;
+    IREE_RETURN_IF_ERROR(loom_stage_loop_carried_fragments_remap_value(
+        &remap, yielded_values.values[i], &target_value));
+    uint16_t staged_index = staged_index_by_ordinal[i];
+    if (staged_index != UINT16_MAX) {
+      IREE_RETURN_IF_ERROR(
+          loom_stage_loop_carried_fragments_build_fragment_store(
+              context, yield, target_value, staging_view, zero_index,
+              slot_columns[staged_index],
+              staged_fragments->values[staged_index].fact.shape_value_ids[0],
+              staged_fragments->values[staged_index].fact.shape_value_ids[1]));
+      continue;
+    }
+    kept_yield_values[kept_ordinal++] = target_value;
+  }
+
+  IREE_RETURN_IF_ERROR(
+      loom_stage_loop_carried_fragments_build_barrier(context, yield));
+  loom_op_t* new_yield = NULL;
+  IREE_RETURN_IF_ERROR(loom_scf_yield_build(&context->rewriter->builder,
+                                            kept_yield_values, kept_count,
+                                            yield->location, &new_yield));
+  (void)new_yield;
+  loom_builder_restore(&context->rewriter->builder, saved_ip);
+
+  loom_builder_set_after(&context->rewriter->builder, new_loop);
+  for (uint16_t i = staged_fragments->count; i > 0; --i) {
+    const loom_stage_loop_carried_fragment_t* fragment =
+        &staged_fragments->values[i - 1];
+    loom_value_id_t result_value = LOOM_VALUE_ID_INVALID;
+    IREE_RETURN_IF_ERROR(loom_stage_loop_carried_fragments_build_fragment_load(
+        context, op, staging_view, zero_index, slot_columns[i - 1],
+        fragment->fact.shape_value_ids[0], fragment->fact.shape_value_ids[1],
+        fragment->payload_type, &result_value));
+    replacement_values[fragment->ordinal] = result_value;
+  }
+
+  kept_ordinal = 0;
+  loom_value_slice_t new_results = loom_scf_for_results(new_loop);
+  for (uint16_t i = 0; i < op->result_count; ++i) {
+    if (staged_index_by_ordinal[i] != UINT16_MAX) continue;
+    replacement_values[i] = new_results.values[kept_ordinal++];
+  }
+
+  IREE_RETURN_IF_ERROR(loom_rewriter_preserve_result_names_on_new_values(
+      context->rewriter, op, replacement_values, op->result_count,
+      value_checkpoint));
+  IREE_RETURN_IF_ERROR(loom_rewriter_replace_all_uses_and_erase(
+      context->rewriter, op, replacement_values, op->result_count));
+
+  ++context->statistics->loops_staged;
+  context->statistics->fragments_staged += staged_fragments->count;
+  loom_pass_mark_changed(context->pass);
+  return iree_ok_status();
+}
+
+static iree_status_t loom_stage_loop_carried_fragments_try_rewrite(
+    loom_stage_loop_carried_fragments_context_t* context, loom_op_t* op,
+    bool* out_changed) {
+  *out_changed = false;
+  loom_op_t* yield = NULL;
+  loom_stage_loop_carried_fragment_list_t staged_fragments = {0};
+  IREE_RETURN_IF_ERROR(loom_stage_loop_carried_fragments_collect(
+      context, op, &yield, &staged_fragments));
+  if (staged_fragments.count == 0) return iree_ok_status();
+  IREE_RETURN_IF_ERROR(loom_stage_loop_carried_fragments_rewrite(
+      context, op, yield, &staged_fragments));
+  *out_changed = true;
+  return iree_ok_status();
+}
+
+static iree_status_t
+loom_stage_loop_carried_fragments_find_structural_candidate(
+    void* user_data, loom_op_t* op, const loom_walk_context_t* context,
+    loom_walk_result_t* out_result) {
+  (void)context;
+  bool* has_candidate = (bool*)user_data;
+  if (loom_stage_loop_carried_fragments_match_structural_loop(op, NULL)) {
+    *has_candidate = true;
+    *out_result = LOOM_WALK_ABORT;
+    return iree_ok_status();
+  }
+  *out_result = LOOM_WALK_CONTINUE;
+  return iree_ok_status();
+}
+
+static iree_status_t loom_stage_loop_carried_fragments_has_structural_candidate(
+    loom_pass_t* pass, loom_module_t* module, loom_func_like_t function,
+    bool* out_has_candidate) {
+  *out_has_candidate = false;
+  loom_walk_result_t walk_result = LOOM_WALK_CONTINUE;
+  return loom_walk_function(
+      module, function, LOOM_WALK_PRE_ORDER,
+      (loom_walk_callback_t){
+          .fn = loom_stage_loop_carried_fragments_find_structural_candidate,
+          .user_data = out_has_candidate,
+      },
+      pass->arena, &walk_result);
+}
+
+iree_status_t loom_stage_loop_carried_fragments_run(loom_pass_t* pass,
+                                                    loom_module_t* module,
+                                                    loom_func_like_t function) {
+  if (!loom_func_like_body(function)) return iree_ok_status();
+
+  loom_stage_loop_carried_fragments_statistics_t* statistics =
+      loom_stage_loop_carried_fragments_statistics(pass);
+  bool changed = false;
+  do {
+    bool has_candidate = false;
+    IREE_RETURN_IF_ERROR(
+        loom_stage_loop_carried_fragments_has_structural_candidate(
+            pass, module, function, &has_candidate));
+    if (!has_candidate) break;
+
+    changed = false;
+    loom_value_fact_table_t* facts = NULL;
+    IREE_RETURN_IF_ERROR(loom_pass_value_facts_acquire(
+        pass, module, loom_pass_value_fact_scope_function(function), &facts));
+
+    loom_rewriter_t rewriter;
+    IREE_RETURN_IF_ERROR(
+        loom_rewriter_initialize(&rewriter, module, pass->arena));
+    IREE_RETURN_IF_ERROR(
+        loom_rewriter_enable_analysis(&rewriter, function, facts));
+    IREE_RETURN_IF_ERROR(loom_rewriter_seed_function(&rewriter, function));
+
+    loom_stage_loop_carried_fragments_context_t context = {
+        .pass = pass,
+        .statistics = statistics,
+        .module = module,
+        .rewriter = &rewriter,
+    };
+    iree_status_t status = iree_ok_status();
+    loom_op_t* op = NULL;
+    while (iree_status_is_ok(status) && (op = loom_rewriter_pop(&rewriter))) {
+      if (!loom_scf_for_isa(op)) continue;
+      status =
+          loom_stage_loop_carried_fragments_try_rewrite(&context, op, &changed);
+      if (changed) break;
+    }
+    loom_rewriter_deinitialize(&rewriter);
+    if (!iree_status_is_ok(status)) return status;
+    if (changed) {
+      loom_pass_value_fact_owner_invalidate(pass->value_facts);
+    }
+  } while (changed);
+  return iree_ok_status();
+}

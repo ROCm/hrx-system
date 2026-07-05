@@ -394,20 +394,6 @@ static iree_status_t loom_vector_make_unknown_result_facts(
   return iree_ok_status();
 }
 
-static bool loom_vector_fragment_fact_is_accumulator_like(
-    loom_vector_fragment_fact_t fact) {
-  const loom_vector_fragment_role_flags_t accumulator_roles =
-      LOOM_VECTOR_FRAGMENT_ROLE_FLAG_INIT |
-      LOOM_VECTOR_FRAGMENT_ROLE_FLAG_RESULT;
-  return fact.shape_rank == 2 && fact.role_flags != 0 &&
-         (fact.role_flags & ~accumulator_roles) == 0;
-}
-
-static bool loom_vector_fragment_fact_has_matrix_shape(
-    loom_vector_fragment_fact_t fact) {
-  return fact.shape_rank == 2 && fact.role_flags != 0;
-}
-
 static loom_vector_fragment_fact_t
 loom_vector_fragment_fact_dense_interpretation(
     loom_vector_fragment_fact_t source) {
@@ -442,20 +428,6 @@ static bool loom_vector_fragment_facts_have_compatible_native_storage(
   target.role_flags = source.role_flags;
   return loom_vector_fragment_facts_match_contract_except_native_storage(
       target, source);
-}
-
-static bool loom_vector_fragment_facts_match_accumulator_contract(
-    loom_vector_fragment_fact_t lhs, loom_vector_fragment_fact_t rhs) {
-  if (!loom_vector_fragment_fact_is_accumulator_like(lhs) ||
-      !loom_vector_fragment_fact_is_accumulator_like(rhs)) {
-    return false;
-  }
-  lhs.role_flags = LOOM_VECTOR_FRAGMENT_ROLE_FLAG_INIT |
-                   LOOM_VECTOR_FRAGMENT_ROLE_FLAG_RESULT;
-  rhs.role_flags = LOOM_VECTOR_FRAGMENT_ROLE_FLAG_INIT |
-                   LOOM_VECTOR_FRAGMENT_ROLE_FLAG_RESULT;
-  return loom_vector_fragment_facts_match_contract_except_native_storage(lhs,
-                                                                         rhs);
 }
 
 static iree_status_t loom_vector_clone_equal_extension(

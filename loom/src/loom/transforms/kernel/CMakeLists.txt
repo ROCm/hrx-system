@@ -68,4 +68,32 @@ loom_cc_library(
   PUBLIC
 )
 
+loom_cc_library(
+  NAME
+    stage_loop_carried_fragments
+  HDRS
+    "stage_loop_carried_fragments.h"
+  SRCS
+    "stage_loop_carried_fragments.c"
+  DEPS
+    iree::base
+    iree::base::internal::arena
+    loom::ir
+    loom::ops::buffer
+    loom::ops::encoding
+    loom::ops::index
+    loom::ops::kernel
+    loom::ops::op_defs
+    loom::ops::scf
+    loom::ops::vector
+    loom::pass::types
+    loom::pass::value_facts
+    loom::rewrite::materialize
+    loom::rewrite::remap
+    loom::rewrite::rewriter
+    loom::util::math
+    loom::util::walk
+  PUBLIC
+)
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###
