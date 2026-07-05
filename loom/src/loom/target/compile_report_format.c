@@ -2522,6 +2522,11 @@ loom_target_compile_report_format_source_low_transform_rows(
           outcome.data, (int)reason.size, reason.data,
           row->candidate_value_count, row->selected_value_count,
           row->removed_loop_carried_value_count));
+      if (row->removed_loop_carried_payload_register_count != 0) {
+        IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+            builder, " removed_payload_registers=%" PRIu64,
+            row->removed_loop_carried_payload_register_count));
+      }
       if (row->row_count != 0 || row->column_count != 0) {
         IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
             builder, " shape=%" PRIu64 "x%" PRIu64, row->row_count,
@@ -5266,6 +5271,11 @@ loom_target_compile_report_format_source_low_transform_row_json(
   IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u32_field(
       stream, &first_field, "removed_loop_carried_value_count",
       row->removed_loop_carried_value_count));
+  if (row->removed_loop_carried_payload_register_count != 0) {
+    IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
+        stream, &first_field, "removed_loop_carried_payload_register_count",
+        row->removed_loop_carried_payload_register_count));
+  }
   if (row->row_count != 0 || row->column_count != 0) {
     IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_u64_field(
         stream, &first_field, "row_count", row->row_count));
