@@ -10,6 +10,8 @@
 #include <string.h>
 
 #include "iree/base/internal/arena.h"
+#include "loom/codegen/low/pipeline/pass_environment.h"
+#include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ir/scalar_type.h"
 #include "loom/ir/types.h"
@@ -24,6 +26,7 @@
 #include "loom/rewrite/materialize.h"
 #include "loom/rewrite/remap.h"
 #include "loom/rewrite/rewriter.h"
+#include "loom/target/compile_report.h"
 #include "loom/util/math.h"
 #include "loom/util/walk.h"
 
@@ -96,7 +99,10 @@ typedef struct loom_stage_loop_carried_fragment_list_t {
   // Dense candidate storage.
   loom_stage_loop_carried_fragment_t* values;
 
-  // Number of candidates.
+  // Number of structurally eligible accumulator fragments.
+  uint16_t candidate_count;
+
+  // Number of fragments selected for staging.
   uint16_t count;
 } loom_stage_loop_carried_fragment_list_t;
 
@@ -110,9 +116,75 @@ typedef struct loom_stage_loop_carried_fragments_context_t {
   // Module being transformed.
   loom_module_t* module;
 
+  // Function being transformed.
+  loom_func_like_t function;
+
+  // Optional compile report receiving source-transform rows.
+  loom_target_compile_report_t* report;
+
   // Rewriter owning IR mutations.
   loom_rewriter_t* rewriter;
 } loom_stage_loop_carried_fragments_context_t;
+
+static iree_string_view_t loom_stage_loop_carried_fragments_symbol_name(
+    const loom_module_t* module, loom_symbol_ref_t symbol_ref) {
+  if (!loom_symbol_ref_is_valid(symbol_ref) || symbol_ref.module_id != 0 ||
+      symbol_ref.symbol_id >= module->symbols.count) {
+    return IREE_SV("<unnamed>");
+  }
+  const loom_symbol_t* symbol = &module->symbols.entries[symbol_ref.symbol_id];
+  if (symbol->name_id < module->strings.count) {
+    return module->strings.entries[symbol->name_id];
+  }
+  return IREE_SV("<unnamed>");
+}
+
+static iree_string_view_t loom_stage_loop_carried_fragments_function_name(
+    const loom_stage_loop_carried_fragments_context_t* context) {
+  if (!loom_func_like_isa(context->function)) return IREE_SV("<module>");
+  return loom_stage_loop_carried_fragments_symbol_name(
+      context->module, loom_func_like_callee(context->function));
+}
+
+static iree_status_t loom_stage_loop_carried_fragments_report(
+    const loom_stage_loop_carried_fragments_context_t* context,
+    iree_string_view_t source_op_name, uint32_t source_op_kind,
+    const loom_stage_loop_carried_fragment_list_t* fragments,
+    iree_string_view_t outcome, iree_string_view_t reason,
+    uint64_t workgroup_memory_byte_count) {
+  if (!context->report ||
+      !loom_target_compile_report_wants_details(
+          context->report, LOOM_TARGET_COMPILE_REPORT_DETAIL_SOURCE_LOW_ROWS) ||
+      fragments->candidate_count == 0) {
+    return iree_ok_status();
+  }
+  uint64_t row_count = 0;
+  uint64_t column_count = 0;
+  if (fragments->values != NULL && fragments->values[0].row_count > 0 &&
+      fragments->values[0].column_count > 0) {
+    row_count = (uint64_t)fragments->values[0].row_count;
+    column_count = (uint64_t)fragments->values[0].column_count;
+  }
+  const loom_target_compile_report_source_low_transform_row_t row = {
+      .function_name = loom_stage_loop_carried_fragments_function_name(context),
+      .source_op_name = source_op_name,
+      .source_op_kind = source_op_kind,
+      .transform_key = IREE_SV("stage-loop-carried-fragments"),
+      .outcome = outcome,
+      .reason = reason,
+      .candidate_value_count = fragments->candidate_count,
+      .selected_value_count = fragments->count,
+      .removed_loop_carried_value_count = fragments->count,
+      .row_count = row_count,
+      .column_count = column_count,
+      .workgroup_memory_byte_count = workgroup_memory_byte_count,
+      .inserted_load_op_count = (uint32_t)(fragments->count * 2),
+      .inserted_store_op_count = (uint32_t)(fragments->count * 2),
+      .inserted_barrier_op_count = fragments->count == 0 ? 0 : 2,
+  };
+  return loom_target_compile_report_record_source_low_transform_row(
+      context->report, &row);
+}
 
 static bool loom_stage_loop_carried_fragments_match_structural_loop(
     loom_op_t* op, loom_op_t** out_yield) {
@@ -269,11 +341,12 @@ static iree_status_t loom_stage_loop_carried_fragments_collect(
     candidates[candidate_count++] = candidate;
   }
 
+  out_list->values = candidates;
+  out_list->candidate_count = candidate_count;
   if (candidate_count < LOOM_STAGE_LOOP_CARRIED_FRAGMENTS_MIN_COUNT) {
     return iree_ok_status();
   }
 
-  out_list->values = candidates;
   out_list->count = candidate_count;
   return iree_ok_status();
 }
@@ -609,8 +682,15 @@ static iree_status_t loom_stage_loop_carried_fragments_rewrite(
   IREE_RETURN_IF_ERROR(loom_rewriter_preserve_result_names_on_new_values(
       context->rewriter, op, replacement_values, op->result_count,
       value_checkpoint));
+  const iree_string_view_t source_op_name = loom_op_name(context->module, op);
+  const uint32_t source_op_kind = op->kind;
   IREE_RETURN_IF_ERROR(loom_rewriter_replace_all_uses_and_erase(
       context->rewriter, op, replacement_values, op->result_count));
+
+  IREE_RETURN_IF_ERROR(loom_stage_loop_carried_fragments_report(
+      context, source_op_name, source_op_kind, staged_fragments,
+      IREE_SV("selected"), IREE_SV("staged_workgroup_memory"),
+      (uint64_t)byte_count));
 
   ++context->statistics->loops_staged;
   context->statistics->fragments_staged += staged_fragments->count;
@@ -626,7 +706,13 @@ static iree_status_t loom_stage_loop_carried_fragments_try_rewrite(
   loom_stage_loop_carried_fragment_list_t staged_fragments = {0};
   IREE_RETURN_IF_ERROR(loom_stage_loop_carried_fragments_collect(
       context, op, &yield, &staged_fragments));
-  if (staged_fragments.count == 0) return iree_ok_status();
+  if (staged_fragments.count == 0) {
+    IREE_RETURN_IF_ERROR(loom_stage_loop_carried_fragments_report(
+        context, loom_op_name(context->module, op), op->kind, &staged_fragments,
+        IREE_SV("declined"), IREE_SV("candidate_count_below_minimum"),
+        /*workgroup_memory_byte_count=*/0));
+    return iree_ok_status();
+  }
   IREE_RETURN_IF_ERROR(loom_stage_loop_carried_fragments_rewrite(
       context, op, yield, &staged_fragments));
   *out_changed = true;
@@ -669,6 +755,10 @@ iree_status_t loom_stage_loop_carried_fragments_run(loom_pass_t* pass,
 
   loom_stage_loop_carried_fragments_statistics_t* statistics =
       loom_stage_loop_carried_fragments_statistics(pass);
+  const loom_low_pass_capability_t* low_capability =
+      loom_low_pass_capability_from_pass(pass);
+  loom_target_compile_report_t* compile_report =
+      loom_low_pass_capability_compile_report(low_capability);
   bool changed = false;
   do {
     bool has_candidate = false;
@@ -693,6 +783,8 @@ iree_status_t loom_stage_loop_carried_fragments_run(loom_pass_t* pass,
         .pass = pass,
         .statistics = statistics,
         .module = module,
+        .function = function,
+        .report = compile_report,
         .rewriter = &rewriter,
     };
     iree_status_t status = iree_ok_status();

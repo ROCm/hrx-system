@@ -1069,6 +1069,40 @@ typedef struct loom_target_compile_report_source_low_target_row_t {
   uint32_t candidate_target_subgroup_size;
 } loom_target_compile_report_source_low_target_row_t;
 
+// One source transform decision copied into a compile report.
+typedef struct loom_target_compile_report_source_low_transform_row_t {
+  // Source function symbol containing the transformed source operation.
+  iree_string_view_t function_name;
+  // Source operation mnemonic anchoring this transform decision.
+  iree_string_view_t source_op_name;
+  // Numeric source operation kind anchoring this transform decision.
+  uint32_t source_op_kind;
+  // Stable pass or transform key.
+  iree_string_view_t transform_key;
+  // Stable transform outcome key.
+  iree_string_view_t outcome;
+  // Stable transform reason key.
+  iree_string_view_t reason;
+  // Source values structurally eligible for this transform.
+  uint32_t candidate_value_count;
+  // Source values selected for this transform.
+  uint32_t selected_value_count;
+  // Loop-carried values removed from the transformed source operation.
+  uint32_t removed_loop_carried_value_count;
+  // Source fragment logical row count, or zero when not applicable.
+  uint64_t row_count;
+  // Source fragment logical column count, or zero when not applicable.
+  uint64_t column_count;
+  // Workgroup memory bytes introduced by this transform, or zero.
+  uint64_t workgroup_memory_byte_count;
+  // Source-level load operations introduced by this transform.
+  uint32_t inserted_load_op_count;
+  // Source-level store operations introduced by this transform.
+  uint32_t inserted_store_op_count;
+  // Source-level barrier operations introduced by this transform.
+  uint32_t inserted_barrier_op_count;
+} loom_target_compile_report_source_low_transform_row_t;
+
 // One invocation config binding materialized into the compiled module.
 typedef struct loom_target_compile_report_config_binding_row_t {
   // Config symbol name without the textual '@' sigil.
@@ -1663,6 +1697,8 @@ typedef struct loom_target_compile_report_t {
   loom_target_compile_report_row_list_t source_low_rows;
   // Owned source function target-selection rows.
   loom_target_compile_report_row_list_t source_low_target_rows;
+  // Owned source transform decision rows.
+  loom_target_compile_report_row_list_t source_low_transform_rows;
   // Owned source-to-low selection summaries.
   loom_target_compile_report_row_list_t source_low_selection_summaries;
   // Owned emitted source-memory packet rows.
@@ -1879,6 +1915,11 @@ iree_status_t loom_target_compile_report_record_config_binding_row(
 iree_status_t loom_target_compile_report_record_source_low_target_row(
     loom_target_compile_report_t* report,
     const loom_target_compile_report_source_low_target_row_t* row);
+
+// Records one source transform decision row.
+iree_status_t loom_target_compile_report_record_source_low_transform_row(
+    loom_target_compile_report_t* report,
+    const loom_target_compile_report_source_low_transform_row_t* row);
 
 // Records one emitted source-memory packet row.
 iree_status_t loom_target_compile_report_record_source_low_memory_row(
