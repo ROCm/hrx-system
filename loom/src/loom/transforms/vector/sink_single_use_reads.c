@@ -352,6 +352,7 @@ static iree_status_t loom_sink_single_use_reads_process_block(
         context->rewriter, context->move_ops[i], context->move_before_ops[i]));
     ++context->statistics->read_ops_sunk;
   }
+  if (move_count != 0) loom_pass_mark_changed(context->pass);
   return iree_ok_status();
 }
 
@@ -374,6 +375,7 @@ iree_status_t loom_sink_single_use_reads_run(loom_pass_t* pass,
   loom_rewriter_t rewriter;
   IREE_RETURN_IF_ERROR(
       loom_rewriter_initialize(&rewriter, module, pass->arena));
+  iree_status_t status = iree_ok_status();
   loom_sink_single_use_reads_context_t context = {
       .pass = pass,
       .module = module,
@@ -382,26 +384,31 @@ iree_status_t loom_sink_single_use_reads_run(loom_pass_t* pass,
   };
 
   loom_sink_single_use_reads_region_stack_t stack;
-  IREE_RETURN_IF_ERROR(
-      loom_sink_single_use_reads_region_stack_initialize(pass->arena, &stack));
-  IREE_RETURN_IF_ERROR(loom_sink_single_use_reads_region_stack_push(
-      pass->arena, &stack, loom_func_like_body(function)));
+  status =
+      loom_sink_single_use_reads_region_stack_initialize(pass->arena, &stack);
+  if (iree_status_is_ok(status)) {
+    status = loom_sink_single_use_reads_region_stack_push(
+        pass->arena, &stack, loom_func_like_body(function));
+  }
 
-  while (true) {
+  while (iree_status_is_ok(status)) {
     loom_region_t* region = loom_sink_single_use_reads_region_stack_pop(&stack);
     if (!region) break;
 
     loom_block_t* block = NULL;
     loom_region_for_each_block(region, block) {
-      IREE_RETURN_IF_ERROR(
-          loom_sink_single_use_reads_process_block(&context, block));
+      status = loom_sink_single_use_reads_process_block(&context, block);
+      if (!iree_status_is_ok(status)) break;
       loom_op_t* op = NULL;
       loom_block_for_each_op(block, op) {
         if (op->flags & LOOM_OP_FLAG_DEAD) continue;
-        IREE_RETURN_IF_ERROR(loom_sink_single_use_reads_push_child_regions(
-            &context, &stack, op));
+        status =
+            loom_sink_single_use_reads_push_child_regions(&context, &stack, op);
+        if (!iree_status_is_ok(status)) break;
       }
+      if (!iree_status_is_ok(status)) break;
     }
   }
-  return iree_ok_status();
+  loom_rewriter_deinitialize(&rewriter);
+  return status;
 }
