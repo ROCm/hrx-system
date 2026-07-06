@@ -384,7 +384,7 @@ low.func.def target(@target) @smem_load_address_dependency_assembly(%kernarg: re
   s_add_u32 s0, s0, s8
   s_add_u32 s0, s0, s9
   v_mov_b32_copy v1, s0
-  s_delay_alu instid0(VALU_DEP_1)
+  s_delay_alu instid0(VALU_DEP_1) | instid1(VALU_DEP_2)
   global_store_b32 v0, v1, s[2:3] offset:0
   s_waitcnt_vscnt vscnt(0)
   s_endpgm

@@ -37,7 +37,7 @@ low.func.def target(@target) @rematerialization_budget_falls_back_to_spills(%add
   s_waitcnt vmcnt(0) lgkmcnt(63)
   v_add_u32 v1, v2, v1
   v_mov_b32 v2, 7
-  s_delay_alu instid0(VALU_DEP_1)
+  s_delay_alu instid0(VALU_DEP_1) | instid1(VALU_DEP_2)
   v_add_u32 v1, v1, v2
   s_mov_b64_exec_read s[4:5]
   s_mov_b64 exec, -1
@@ -56,7 +56,7 @@ low.func.def target(@target) @rematerialization_budget_falls_back_to_spills(%add
   s_waitcnt vmcnt(0) lgkmcnt(63)
   v_add_u32 v1, v1, v2
   v_mov_b32 v2, 7
-  s_delay_alu instid0(VALU_DEP_1)
+  s_delay_alu instid0(VALU_DEP_1) | instid1(VALU_DEP_2)
   v_add_u32 v1, v1, v2
   s_mov_b64_exec_read s[4:5]
   s_mov_b64 exec, -1
@@ -66,7 +66,7 @@ low.func.def target(@target) @rematerialization_budget_falls_back_to_spills(%add
   v_add_u32 v2, v4, v2
   s_delay_alu instid0(VALU_DEP_2)
   v_add_u32 v0, v0, v1
-  s_delay_alu instid0(VALU_DEP_1)
+  s_delay_alu instid0(VALU_DEP_1) | instid1(VALU_DEP_2)
   v_add_u32 v0, v2, v0
   s_delay_alu instid0(VALU_DEP_1)
   global_store_b32 v3, v0, s[2:3] offset:0
