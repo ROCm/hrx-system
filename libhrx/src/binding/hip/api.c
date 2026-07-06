@@ -4,6 +4,14 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+// _GNU_SOURCE must be defined before any system header so that <dlfcn.h>
+// exposes the GNU extensions dladdr()/Dl_info and the RTLD_NOLOAD flag, which
+// hipGetProcAddress() uses to resolve symbols against this shared object
+// itself rather than the process-global scope.
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
+
 #include "binding/hip/api.h"
 
 #include <dlfcn.h>
@@ -21447,6 +21455,20 @@ HIPAPI const char* hipGetErrorName(hipError_t error) {
   return hipGetErrorString(error);
 }
 
+// Handle scoped to THIS shared object (the HIP shim), resolved once. See the
+// note on hipGetProcAddress() for why the process-global scope is insufficient.
+static void* iree_hip_self_dl_handle = NULL;
+static iree_once_flag iree_hip_self_dl_handle_once = IREE_ONCE_FLAG_INIT;
+static void iree_hip_init_self_dl_handle(void) {
+  Dl_info info;
+  // dladdr() on a symbol we define yields the path to this library; reopening
+  // it with RTLD_NOLOAD returns a handle to the already-resident module (the
+  // extra reference intentionally pins the always-loaded HIP runtime).
+  if (dladdr((void*)&hipGetProcAddress, &info) != 0 && info.dli_fname) {
+    iree_hip_self_dl_handle = dlopen(info.dli_fname, RTLD_LAZY | RTLD_NOLOAD);
+  }
+}
+
 HIPAPI hipError_t hipGetProcAddress(const char* symbol, void** pfn,
                                     int hipVersion, uint64_t flags,
                                     void* symbolStatus) {
@@ -21456,13 +21478,26 @@ HIPAPI hipError_t hipGetProcAddress(const char* symbol, void** pfn,
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
 
-  void* process = dlopen(NULL, RTLD_LAZY);
-  if (!process) {
+  // Resolve symbols against this library, not the process-global scope. A
+  // consumer may dlopen us with RTLD_LOCAL (Triton's AMD backend does exactly
+  // this), so our symbols never enter the global namespace and a
+  // dlsym(dlopen(NULL), ...) lookup would spuriously fail with
+  // hipErrorNotFound. Fall back to the global scope only if the self-handle
+  // could not be established.
+  iree_call_once(&iree_hip_self_dl_handle_once, iree_hip_init_self_dl_handle);
+  void* handle = iree_hip_self_dl_handle;
+  bool close_handle = false;
+  if (!handle) {
+    handle = dlopen(NULL, RTLD_LAZY);
+    close_handle = handle != NULL;
+  }
+  if (!handle) {
     *pfn = NULL;
     if (symbolStatus) *(int*)symbolStatus = 1;
     HIP_RETURN_ERROR(hipErrorSharedObjectInitFailed);
   }
-  *pfn = dlsym(process, symbol);
+  *pfn = dlsym(handle, symbol);
+  if (close_handle) dlclose(handle);
   if (symbolStatus) *(int*)symbolStatus = *pfn ? 0 : 1;
   HIP_RETURN_ERROR(*pfn ? hipSuccess : hipErrorNotFound);
 }

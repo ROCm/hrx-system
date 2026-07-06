@@ -41,7 +41,30 @@ iree_cc_library(
   PUBLIC
 )
 
+iree_cc_test(
+  NAME
+    hip_get_proc_address_test
+  SRCS
+    "hip_get_proc_address_test.cc"
+  DATA
+    ::amdhip64
+  DEPS
+    iree::testing::gtest
+    iree::testing::gtest_main
+    libhrx_defs
+)
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###
+
+# Point hip_get_proc_address_test at the shared object built in this tree so it
+# can dlopen() the exact artifact under test. Guarded because the test target
+# only exists when tests are enabled.
+if(TARGET libhrx_src_binding_hip_hip_get_proc_address_test)
+  target_compile_definitions(libhrx_src_binding_hip_hip_get_proc_address_test
+    PRIVATE
+      "HRX_TEST_LIBAMDHIP64_PATH=\"$<TARGET_FILE:libhrx_src_binding_hip_amdhip64>\""
+  )
+endif()
 
 # The symbol version script and --undefined-version are applied through the
 # generated LINKOPTS above (from linkopts in BUILD.bazel). Keep them out of

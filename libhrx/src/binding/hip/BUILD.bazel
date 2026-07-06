@@ -7,6 +7,7 @@
 load(
     "//libhrx/build_tools/bazel:cc.bzl",
     "hrx_cc_shared_library",
+    "hrx_cc_test",
 )
 
 package(
@@ -42,5 +43,17 @@ hrx_cc_shared_library(
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/threading",
         "//runtime/src/iree/hal",
+    ],
+)
+
+hrx_cc_test(
+    name = "hip_get_proc_address_test",
+    srcs = ["hip_get_proc_address_test.cc"],
+    # The test dlopen()s the built shared object with RTLD_LOCAL to reproduce
+    # the consumer scenario (e.g. Triton), so it needs the artifact at runtime.
+    data = [":amdhip64"],
+    deps = [
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
