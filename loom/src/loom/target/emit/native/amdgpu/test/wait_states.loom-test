@@ -180,6 +180,162 @@ low.func.def target(@gfx11_target) @gfx11_vmem_address_delay_alu_preserves_other
 
 // ====
 
+// RUN: emit amdgpu-assembly @gfx11_vmem_store_byte_payload_delay_alu strategy=source
+
+amdgpu.target<gfx1100> @gfx11_target
+
+low.func.def target(@gfx11_target) @gfx11_vmem_store_byte_payload_delay_alu(%addr: reg<amdgpu.vgpr>, %output: reg<amdgpu.sgpr x2>, %lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %value = v_add_u32 %lhs, %rhs
+  global_store_b8_saddr %addr, %value, %output
+  return
+}
+
+// ----
+  v_add_u32 v0, v0, v1
+  s_delay_alu instid0(VALU_DEP_1)
+  global_store_b8 v2, v0, s[0:1] offset:0
+  s_waitcnt_vscnt vscnt(0)
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @gfx11_vmem_store_short_payload_delay_alu strategy=source
+
+amdgpu.target<gfx1100> @gfx11_target
+
+low.func.def target(@gfx11_target) @gfx11_vmem_store_short_payload_delay_alu(%addr: reg<amdgpu.vgpr>, %output: reg<amdgpu.sgpr x2>, %low: reg<amdgpu.vgpr>, %high: reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %value = v_cvt_pk_u16_u32 %low, %high
+  global_store_short_saddr %addr, %value, %output
+  return
+}
+
+// ----
+  v_cvt_pk_u16_u32 v0, v0, v1
+  s_delay_alu instid0(VALU_DEP_1)
+  global_store_short v2, v0, s[0:1] offset:0
+  s_waitcnt_vscnt vscnt(0)
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @gfx11_vmem_store_b32_payload_delay_alu strategy=source
+
+amdgpu.target<gfx1100> @gfx11_target
+
+low.func.def target(@gfx11_target) @gfx11_vmem_store_b32_payload_delay_alu(%addr: reg<amdgpu.vgpr>, %output: reg<amdgpu.sgpr x2>, %lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %value = v_add_u32 %lhs, %rhs
+  global_store_b32_saddr %addr, %value, %output
+  return
+}
+
+// ----
+  v_add_u32 v0, v0, v1
+  s_delay_alu instid0(VALU_DEP_1)
+  global_store_b32 v2, v0, s[0:1] offset:0
+  s_waitcnt_vscnt vscnt(0)
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @gfx11_vmem_store_b64_payload_dual_delay_alu strategy=source
+
+amdgpu.target<gfx1100> @gfx11_target
+
+low.func.def target(@gfx11_target) @gfx11_vmem_store_b64_payload_dual_delay_alu(%addr: reg<amdgpu.vgpr>, %output: reg<amdgpu.sgpr x2>, %a0: reg<amdgpu.vgpr>, %a1: reg<amdgpu.vgpr>, %a2: reg<amdgpu.vgpr>, %a3: reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %packed0 = v_cvt_pk_u16_u32 %a0, %a1
+  %packed1 = v_cvt_pk_u16_u32 %a2, %a3
+  %payload = concat(%packed0, %packed1) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  global_store_b64_saddr %addr, %payload, %output
+  return
+}
+
+// ----
+  v_cvt_pk_u16_u32 v0, v0, v1
+  v_cvt_pk_u16_u32 v1, v2, v3
+  s_delay_alu instid0(VALU_DEP_1) | instid1(VALU_DEP_2)
+  global_store_b64 v4, v[0:1], s[0:1] offset:0
+  s_waitcnt_vscnt vscnt(0)
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @gfx11_vmem_store_b128_payload_delay_fallback strategy=source
+
+amdgpu.target<gfx1100> @gfx11_target
+
+low.func.def target(@gfx11_target) @gfx11_vmem_store_b128_payload_delay_fallback(%addr: reg<amdgpu.vgpr>, %output: reg<amdgpu.sgpr x2>, %a0: reg<amdgpu.vgpr>, %a1: reg<amdgpu.vgpr>, %a2: reg<amdgpu.vgpr>, %a3: reg<amdgpu.vgpr>, %a4: reg<amdgpu.vgpr>, %a5: reg<amdgpu.vgpr>, %a6: reg<amdgpu.vgpr>, %a7: reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %packed0 = v_cvt_pk_u16_u32 %a0, %a1
+  %packed1 = v_cvt_pk_u16_u32 %a2, %a3
+  %packed2 = v_cvt_pk_u16_u32 %a4, %a5
+  %packed3 = v_cvt_pk_u16_u32 %a6, %a7
+  %payload = concat(%packed0, %packed1, %packed2, %packed3) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  global_store_b128_saddr %addr, %payload, %output
+  return
+}
+
+// ----
+  v_cvt_pk_u16_u32 v0, v0, v1
+  v_cvt_pk_u16_u32 v1, v2, v3
+  v_cvt_pk_u16_u32 v2, v4, v5
+  v_cvt_pk_u16_u32 v3, v6, v7
+  s_nop 2
+  global_store_b128 v8, v[0:3], s[0:1] offset:0
+  s_waitcnt_vscnt vscnt(0)
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @gfx12_vmem_store_b128_payload_delay_fallback strategy=source
+
+amdgpu.target<gfx1200> @gfx12_target
+
+low.func.def target(@gfx12_target) @gfx12_vmem_store_b128_payload_delay_fallback(%addr: reg<amdgpu.vgpr>, %output: reg<amdgpu.sgpr x2>, %a0: reg<amdgpu.vgpr>, %a1: reg<amdgpu.vgpr>, %a2: reg<amdgpu.vgpr>, %a3: reg<amdgpu.vgpr>, %a4: reg<amdgpu.vgpr>, %a5: reg<amdgpu.vgpr>, %a6: reg<amdgpu.vgpr>, %a7: reg<amdgpu.vgpr>) asm<amdgpu.rdna4.core> {
+  %packed0 = v_cvt_pk_u16_u32 %a0, %a1
+  %packed1 = v_cvt_pk_u16_u32 %a2, %a3
+  %packed2 = v_cvt_pk_u16_u32 %a4, %a5
+  %packed3 = v_cvt_pk_u16_u32 %a6, %a7
+  %payload = concat(%packed0, %packed1, %packed2, %packed3) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  global_store_b128_saddr %addr, %payload, %output
+  return
+}
+
+// ----
+  v_cvt_pk_u16_u32 v0, v0, v1
+  v_cvt_pk_u16_u32 v1, v2, v3
+  v_cvt_pk_u16_u32 v2, v4, v5
+  v_cvt_pk_u16_u32 v3, v6, v7
+  s_nop 2
+  global_store_b128 v8, v[0:3], s[0:1] offset:0
+  s_wait_storecnt storecnt(0)
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @gfx942_vmem_store_b128_payload_delay_fallback strategy=source
+
+amdgpu.target<gfx942> @gfx942_target
+
+low.func.def target(@gfx942_target) @gfx942_vmem_store_b128_payload_delay_fallback(%resource: reg<amdgpu.sgpr x4>, %vaddr: reg<amdgpu.vgpr>, %soffset: reg<amdgpu.sgpr>, %a0: reg<amdgpu.vgpr>, %a1: reg<amdgpu.vgpr>, %a2: reg<amdgpu.vgpr>, %a3: reg<amdgpu.vgpr>, %a4: reg<amdgpu.vgpr>, %a5: reg<amdgpu.vgpr>, %a6: reg<amdgpu.vgpr>, %a7: reg<amdgpu.vgpr>) asm<amdgpu.cdna3.core> {
+  %packed0 = v_cvt_pk_u16_u32 %a0, %a1
+  %packed1 = v_cvt_pk_u16_u32 %a2, %a3
+  %packed2 = v_cvt_pk_u16_u32 %a4, %a5
+  %packed3 = v_cvt_pk_u16_u32 %a6, %a7
+  %payload = concat(%packed0, %packed1, %packed2, %packed3) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  buffer_store_dwordx4 %payload, %resource, %vaddr, %soffset
+  return
+}
+
+// ----
+  v_cvt_pk_u16_u32 v0, v0, v1
+  v_cvt_pk_u16_u32 v1, v2, v3
+  v_cvt_pk_u16_u32 v2, v4, v5
+  v_cvt_pk_u16_u32 v3, v6, v7
+  buffer_store_dwordx4 v[0:3], v8, s[0:3], s4 offen offset:0
+  s_waitcnt vmcnt(0) lgkmcnt(15)
+  s_endpgm
+
+// ====
+
 // RUN: emit amdgpu-wait-state-plan @gfx11_packed_dot_dependency_delay_alu strategy=source
 
 amdgpu.target<gfx1100> @gfx11_target
@@ -209,7 +365,7 @@ low.func.def target(@gfx11_target) @gfx11_packed_dot_dependency_delay_alu_observ
 
 // ----
 amdgpu.wait_state_plan states=1 progress=4 hazards=1
-state[0] reason=delay_alu_dependency action=amdgpu.s_delay_alu at=b0:n2/o2 producer=n0 consumer=n2 required=5 observed=2 residual=3 delay_alu=0x0002
+state[0] reason=delay_alu_dependency action=amdgpu.s_delay_alu at=b0:n2/o2 producer=n0 consumer=n2 required=5 observed=2 residual=3 delay_alu=0x0082
 
 // ====
 
@@ -430,7 +586,7 @@ low.func.def target(@gfx11_target) @gfx11_dpp_vgpr_read_wait_state_observed_prog
 // ----
 amdgpu.wait_state_plan states=2 progress=5 hazards=2
 state[0] reason=delay_alu_dependency action=amdgpu.s_delay_alu at=b0:n2/o2 producer=n0 consumer=n2 required=4 observed=2 residual=2 delay_alu=0x0002
-state[1] reason=delay_alu_dependency action=amdgpu.s_delay_alu at=b0:n3/o3 producer=n2 consumer=n3 required=4 observed=1 residual=3 delay_alu=0x0001
+state[1] reason=delay_alu_dependency action=amdgpu.s_delay_alu at=b0:n3/o3 producer=n2 consumer=n3 required=4 observed=1 residual=3 delay_alu=0x0101
 
 // ====
 
