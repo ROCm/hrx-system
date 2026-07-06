@@ -4225,7 +4225,7 @@ static void iree_hip_managed_fill_accessed_by(uint64_t mask, int* devices,
 // - Memory persists until freed with hipFree().
 // - Memory is accessible from all streams on the device.
 // - Allocation is aligned to meet all alignment requirements.
-// - Zero-size allocations are allowed and return a valid pointer.
+// - Zero-size allocations are allowed and return NULL.
 //
 // Multi-GPU: Memory is allocated on the current device.
 //
@@ -4256,6 +4256,12 @@ HIPAPI hipError_t hipMalloc(void** ptr, size_t size) {
       iree_hip_context_invalidate_visible_captures(context)) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(hipErrorStreamCaptureUnsupported);
+  }
+
+  if (size == 0) {
+    *ptr = NULL;
+    IREE_TRACE_ZONE_END(z0);
+    return hipSuccess;
   }
 
   hrx_mem_pool_t pool = NULL;
@@ -5297,16 +5303,32 @@ static hipError_t iree_hip_resolve_memcpy_kind(
   return hipSuccess;
 }
 
+static hipError_t iree_hip_validate_hip_visible_memcpy_range(
+    iree_hal_streaming_buffer_ref_t range_ref, size_t count) {
+  if (!range_ref.buffer || count > (size_t)IREE_DEVICE_SIZE_MAX) {
+    return hipErrorInvalidValue;
+  }
+  const iree_device_size_t device_count = (iree_device_size_t)count;
+  const iree_device_size_t logical_size = range_ref.buffer->logical_size;
+  if (range_ref.offset > logical_size ||
+      device_count > logical_size - range_ref.offset) {
+    return hipErrorInvalidValue;
+  }
+  return hipSuccess;
+}
+
 static hipError_t iree_hip_validate_known_memcpy_range(
     iree_hal_streaming_context_t* context, const void* ptr, size_t count,
     bool use_hip_visible_pool_size) {
-  (void)use_hip_visible_pool_size;
   if (count == 0) return hipSuccess;
 
   iree_hal_streaming_buffer_ref_t range_ref;
   iree_status_t status = iree_hal_streaming_memory_lookup_range(
       context, (iree_hal_streaming_deviceptr_t)ptr, count, &range_ref);
   if (iree_status_is_ok(status)) {
+    if (use_hip_visible_pool_size) {
+      return iree_hip_validate_hip_visible_memcpy_range(range_ref, count);
+    }
     return hipSuccess;
   }
   const iree_status_code_t code = iree_status_code(status);
@@ -5319,8 +5341,12 @@ static hipError_t iree_hip_validate_known_memcpy_range(
   status = iree_hal_streaming_memory_lookup_range_across_contexts(
       (iree_hal_streaming_deviceptr_t)ptr, count, &owner_context, &range_ref);
   if (iree_status_is_ok(status)) {
+    hipError_t result = hipSuccess;
+    if (use_hip_visible_pool_size) {
+      result = iree_hip_validate_hip_visible_memcpy_range(range_ref, count);
+    }
     iree_hal_streaming_context_release(owner_context);
-    return hipSuccess;
+    return result;
   }
   if (iree_status_code(status) != IREE_STATUS_NOT_FOUND) {
     return iree_status_to_hip_result(status);
@@ -5332,6 +5358,20 @@ static hipError_t iree_hip_validate_known_memcpy_range(
       context, (iree_hal_streaming_deviceptr_t)ptr, &buffer_ref);
   if (iree_status_is_ok(status)) {
     return hipErrorInvalidValue;
+  }
+  if (iree_status_code(status) != IREE_STATUS_NOT_FOUND) {
+    return iree_status_to_hip_result(status);
+  }
+  iree_status_ignore(status);
+
+  status = iree_hal_streaming_memory_lookup_range_across_contexts(
+      (iree_hal_streaming_deviceptr_t)ptr, 1, &owner_context, &buffer_ref);
+  if (iree_status_is_ok(status)) {
+    iree_hal_streaming_context_release(owner_context);
+    return hipErrorInvalidValue;
+  }
+  if (iree_status_code(status) != IREE_STATUS_NOT_FOUND) {
+    return iree_status_to_hip_result(status);
   }
   iree_status_ignore(status);
   return hipSuccess;
@@ -5669,8 +5709,8 @@ HIPAPI hipError_t hipMemcpy(void* dst, const void* src, size_t sizeBytes,
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(kind_result);
   }
-  hipError_t range_result = iree_hip_validate_memcpy_ranges(
-      context, dst, src, sizeBytes, kind, false);
+  hipError_t range_result =
+      iree_hip_validate_memcpy_ranges(context, dst, src, sizeBytes, kind, true);
   if (range_result != hipSuccess) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(range_result);
@@ -5792,13 +5832,10 @@ HIPAPI hipError_t hipMemcpyAsync(void* dst, const void* src, size_t sizeBytes,
   iree_hal_streaming_stream_t* stream_obj = NULL;
   hipError_t init_result = hipSuccess;
   if (stream && stream != hipStreamLegacy && stream != hipStreamPerThread) {
-    init_result = iree_hip_ensure_initialized();
-    if (init_result == hipSuccess) {
-      stream_obj = (iree_hal_streaming_stream_t*)stream;
-      context = stream_obj->context;
-      if (!context) {
-        init_result = hipErrorContextIsDestroyed;
-      }
+    stream_obj = (iree_hal_streaming_stream_t*)stream;
+    context = stream_obj->context;
+    if (!context) {
+      init_result = hipErrorContextIsDestroyed;
     }
   } else {
     init_result = iree_hip_ensure_context(&context);
@@ -5817,8 +5854,8 @@ HIPAPI hipError_t hipMemcpyAsync(void* dst, const void* src, size_t sizeBytes,
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(kind_result);
   }
-  hipError_t range_result = iree_hip_validate_memcpy_ranges(
-      context, dst, src, sizeBytes, kind, false);
+  hipError_t range_result =
+      iree_hip_validate_memcpy_ranges(context, dst, src, sizeBytes, kind, true);
   if (range_result != hipSuccess) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(range_result);
@@ -12426,7 +12463,6 @@ HIPAPI hipError_t hipPointerGetAttribute(void* data,
       break;
     }
     case HIP_POINTER_ATTRIBUTE_HOST_POINTER: {
-      // Return the host pointer if available.
       if (!buffer_ref.buffer->host_ptr) {
         result = hipErrorInvalidValue;
         break;
@@ -12461,7 +12497,9 @@ HIPAPI hipError_t hipPointerGetAttribute(void* data,
       break;
     }
     case HIP_POINTER_ATTRIBUTE_MAPPED: {
-      *(unsigned int*)data = buffer_ref.buffer->host_ptr ? 1 : 0;
+      // This attribute describes whether the allocation has a runtime-visible
+      // device mapping, not whether it also has a host alias.
+      *(unsigned int*)data = 1;
       break;
     }
     case HIP_POINTER_ATTRIBUTE_SYNC_MEMOPS: {
@@ -12711,13 +12749,6 @@ HIPAPI hipError_t hipPointerGetAttributes(hipPointerAttribute_t* attributes,
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
-  if (!ptr) {
-    IREE_TRACE_ZONE_END(z0);
-    HIP_RETURN_ERROR(hipErrorInvalidValue);
-  }
-
-  // Initialize with defaults.
-  memset(attributes, 0, sizeof(*attributes));
 
   // Get the context.
   iree_hal_streaming_context_t* context = NULL;
@@ -12726,6 +12757,13 @@ HIPAPI hipError_t hipPointerGetAttributes(hipPointerAttribute_t* attributes,
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(init_result);
   }
+  if (!ptr) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+
+  // Initialize with defaults.
+  memset(attributes, 0, sizeof(*attributes));
 
   iree_hip_pointer_metadata_t metadata;
   hipError_t metadata_result =

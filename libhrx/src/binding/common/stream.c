@@ -643,12 +643,12 @@ iree_status_t iree_hal_streaming_stream_wait_event(
   IREE_RETURN_AND_END_ZONE_IF_ERROR(z0,
                                     iree_hal_streaming_stream_flush(stream));
 
-  // Get the current stream pending value to signal after waiting for the event.
-  uint64_t signal_value = stream->pending_value + 1;
-  stream->pending_value = signal_value;
+  iree_slim_mutex_lock(&stream->mutex);
 
-  // Create a queue barrier that waits for the event and signals the stream.
-  // This ensures the stream continues only after the event is signaled.
+  // Reserve the next stream timeline value and submit a barrier that completes
+  // only after the event is signaled. The value is submitted, not completed;
+  // query/synchronize advance completed_value after observing the semaphore.
+  uint64_t signal_value = stream->pending_value + 1;
   iree_hal_semaphore_list_t wait_semaphores = {
       .count = 1,
       .semaphores = &event->semaphore,
@@ -660,13 +660,20 @@ iree_status_t iree_hal_streaming_stream_wait_event(
       .payload_values = &signal_value,
   };
 
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hal_device_queue_barrier(
-              stream->context->device, stream->queue_affinity, wait_semaphores,
-              signal_semaphores, IREE_HAL_EXECUTE_FLAG_NONE));
+  iree_status_t status = iree_hal_device_queue_barrier(
+      stream->context->device, stream->queue_affinity, wait_semaphores,
+      signal_semaphores, IREE_HAL_EXECUTE_FLAG_NONE);
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_device_queue_flush(stream->context->device,
+                                         stream->queue_affinity);
+  }
+  if (iree_status_is_ok(status)) {
+    stream->pending_value = signal_value;
+    stream->submitted_value = signal_value;
+  }
 
-  // Update completed value to track this barrier.
-  stream->completed_value = signal_value;
+  iree_slim_mutex_unlock(&stream->mutex);
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, status);
 
   IREE_TRACE_ZONE_END(z0);
   return iree_ok_status();
@@ -834,11 +841,32 @@ iree_status_t iree_hal_streaming_unpack_parameters(
     iree_hal_buffer_ref_list_t* out_bindings) {
   IREE_ASSERT_ARGUMENT(context);
   IREE_ASSERT_ARGUMENT(parameters);
-  if (parameters->buffer_size == 0) {
+  if (iree_hal_streaming_parameter_info_is_empty(parameters)) {
     return iree_ok_status();
   }
-  IREE_ASSERT_ARGUMENT(parameter_buffer_ptr);
+  const bool requires_parameter_storage = parameters->buffer_size > 0 ||
+                                          parameters->binding_count > 0 ||
+                                          parameters->copy_count > 0;
+  if (!requires_parameter_storage) {
+    return iree_ok_status();
+  }
+  if (!parameter_buffer_ptr) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "kernel parameter buffer is required");
+  }
+  if (parameters->copy_count > 0 && !out_constants) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "kernel constant storage is required");
+  }
   IREE_ASSERT_ARGUMENT(out_bindings);
+  if (!out_bindings) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "kernel binding list is required");
+  }
+  if (parameters->binding_count > 0 && !out_bindings->values) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "kernel binding storage is required");
+  }
 
   const uint8_t* parameter_buffer = (const uint8_t*)parameter_buffer_ptr;
 
@@ -850,8 +878,10 @@ iree_status_t iree_hal_streaming_unpack_parameters(
   const iree_hal_streaming_parameter_op_t* op = &parameters->ops[0];
   for (uint32_t i = 0; i < parameters->copy_count; ++i, ++op) {
     const iree_hal_streaming_parameter_copy_op_t copy_op = op->copy;
-    memcpy(constants + copy_op.dst_offset,
-           parameter_buffer + copy_op.src_offset, copy_op.size);
+    if (copy_op.size > 0) {
+      memcpy(constants + copy_op.dst_offset,
+             parameter_buffer + copy_op.src_offset, copy_op.size);
+    }
   }
 
   // Resolve bindings, if any.
@@ -891,11 +921,32 @@ iree_status_t iree_hal_streaming_unpack_parameter_list(
     iree_hal_buffer_ref_list_t* out_bindings) {
   IREE_ASSERT_ARGUMENT(context);
   IREE_ASSERT_ARGUMENT(parameters);
-  if (parameters->buffer_size == 0) {
+  if (iree_hal_streaming_parameter_info_is_empty(parameters)) {
     return iree_ok_status();
   }
-  IREE_ASSERT_ARGUMENT(parameter_list);
+  const bool requires_parameter_storage = parameters->buffer_size > 0 ||
+                                          parameters->binding_count > 0 ||
+                                          parameters->copy_count > 0;
+  if (!requires_parameter_storage) {
+    return iree_ok_status();
+  }
+  if (!parameter_list) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "kernel parameter list is required");
+  }
+  if (parameters->copy_count > 0 && !out_constants) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "kernel constant storage is required");
+  }
   IREE_ASSERT_ARGUMENT(out_bindings);
+  if (!out_bindings) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "kernel binding list is required");
+  }
+  if (parameters->binding_count > 0 && !out_bindings->values) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "kernel binding storage is required");
+  }
 
   // When parameters are provided as an array of pointers, each element in the
   // array points to the actual parameter value. Metadata-described pointer
@@ -912,7 +963,14 @@ iree_status_t iree_hal_streaming_unpack_parameter_list(
     // array. Each parameter_list[index] is a pointer to the actual value.
     // We need to dereference it to get the value.
     void* param_ptr = parameter_list[copy_op.src_ordinal];
-    memcpy(constants + copy_op.dst_offset, param_ptr, copy_op.size);
+    if (!param_ptr && copy_op.size > 0) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "kernel argument %" PRIu32 " is NULL",
+                              (uint32_t)copy_op.src_ordinal);
+    }
+    if (copy_op.size > 0) {
+      memcpy(constants + copy_op.dst_offset, param_ptr, copy_op.size);
+    }
   }
 
   // Resolve bindings, if any.
@@ -926,6 +984,11 @@ iree_status_t iree_hal_streaming_unpack_parameter_list(
     const iree_hal_streaming_parameter_resolve_op_t resolve_op = op->resolve;
     // In pointer array mode, src_offset is an index into the parameter_list.
     void* param_ptr = parameter_list[resolve_op.src_ordinal];
+    if (!param_ptr) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "kernel argument %" PRIu32 " is NULL",
+                              (uint32_t)resolve_op.src_ordinal);
+    }
     // The parameter points to a device pointer (void*)
     void* device_ptr = *(void**)param_ptr;
     // Kernel metadata identifies pointer slots but not the dynamic object
@@ -956,11 +1019,18 @@ static iree_status_t iree_hal_streaming_pack_raw_argument_list(
   IREE_ASSERT_ARGUMENT(parameters);
   IREE_ASSERT_ARGUMENT(out_constants_size);
 
+  if (iree_hal_streaming_parameter_info_is_empty(parameters)) {
+    *out_constants_size = 0;
+    return iree_ok_status();
+  }
+
   *out_constants_size = parameters->direct_arg_bytes
                             ? parameters->direct_arg_bytes
                             : parameters->constant_bytes;
   if (*out_constants_size == 0) return iree_ok_status();
-  if (!parameter_list || !out_constants) {
+  if (!out_constants || (!parameter_list && (parameters->buffer_size > 0 ||
+                                             parameters->binding_count > 0 ||
+                                             parameters->copy_count > 0))) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "raw kernel arguments require parameter storage");
   }
@@ -1093,6 +1163,9 @@ iree_status_t iree_hal_streaming_launch_kernel(
   // Native kernels have no bindings and no copy operations.
   bool is_native_kernel = (symbol->parameters.binding_count == 0 &&
                            symbol->parameters.copy_count == 0);
+  const bool is_empty_native_kernel =
+      is_native_kernel &&
+      iree_hal_streaming_parameter_info_is_empty(&symbol->parameters);
 
   size_t constants_size = symbol->parameters.constant_bytes;
   // Track if we need to use raw argument passing (e.g., for external pointers).
@@ -1126,11 +1199,11 @@ iree_status_t iree_hal_streaming_launch_kernel(
     binding_list.count = 0;  // No IREE bindings, using raw pointers.
     use_raw_arguments = true;
   } else if (params->flags & IREE_HAL_STREAMING_DISPATCH_FLAG_ARGS_ARRAY) {
-    if (is_native_kernel && params->buffer) {
+    if (is_native_kernel && params->buffer && !is_empty_native_kernel) {
       IREE_TRACE_ZONE_END(z0);
       return iree_make_status(
           IREE_STATUS_UNIMPLEMENTED,
-          "args-array kernel launch requires parameter metadata");
+          "non-empty args-array kernel launch requires parameter metadata");
     }
     // Unpack parameters from array of pointers (void**).
     iree_status_t unpack_status = iree_hal_streaming_unpack_parameter_list(
@@ -1311,11 +1384,9 @@ iree_status_t iree_hal_streaming_launch_kernel(
     // important: under the AMDGPU HAL backend it resolves to an AGENT-scoped
     // AQL release+acquire fence between this dispatch and the next, which
     // flushes the GPU L1/L2 caches so the next dispatch sees this dispatch's
-    // writes. A bare execution barrier with no memory_barriers (count=0)
-    // resolves to NONE/NONE scopes after upstream IREE commit 48af1651a1
-    // ("Preserve command-buffer barrier scopes") and lets later dispatches
-    // launch with stale cache state, producing garbage output (e.g. NaN
-    // logits in GPT-2 forward).
+    // writes. A bare execution barrier with no memory barriers does not publish
+    // dispatch memory side effects under backends that preserve empty barrier
+    // scopes, so later dispatches can observe stale device cache contents.
     if (iree_status_is_ok(status) && !hrx_disable_dispatch_barrier_enabled()) {
       static const iree_hal_memory_barrier_t memory_barrier = {
           .source_scope = IREE_HAL_ACCESS_SCOPE_DISPATCH_READ |

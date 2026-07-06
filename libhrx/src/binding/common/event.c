@@ -160,10 +160,11 @@ iree_status_t iree_hal_streaming_event_record(
   IREE_RETURN_AND_END_ZONE_IF_ERROR(z0,
                                     iree_hal_streaming_stream_flush(stream));
 
+  iree_slim_mutex_lock(&stream->mutex);
+
   // Use stream's current pending value as wait value and increment for signal.
   uint64_t wait_value = stream->pending_value;
   event->signal_value = wait_value + 1;
-  stream->pending_value = event->signal_value;
 
   // Create a queue barrier to signal the event semaphore.
   // This waits for the stream's last submission to complete before signaling.
@@ -181,10 +182,19 @@ iree_status_t iree_hal_streaming_event_record(
       .payload_values = signal_values,
   };
 
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hal_device_queue_barrier(
-              stream->context->device, stream->queue_affinity, wait_semaphores,
-              signal_semaphores, IREE_HAL_EXECUTE_FLAG_NONE));
+  iree_status_t status = iree_hal_device_queue_barrier(
+      stream->context->device, stream->queue_affinity, wait_semaphores,
+      signal_semaphores, IREE_HAL_EXECUTE_FLAG_NONE);
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_device_queue_flush(stream->context->device,
+                                         stream->queue_affinity);
+  }
+  if (iree_status_is_ok(status)) {
+    stream->pending_value = event->signal_value;
+    stream->submitted_value = event->signal_value;
+  }
+  iree_slim_mutex_unlock(&stream->mutex);
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, status);
 
   IREE_TRACE_ZONE_END(z0);
   return iree_ok_status();

@@ -620,6 +620,15 @@ typedef struct iree_hal_streaming_parameter_info_t {
   iree_hal_streaming_parameter_op_t* ops;
 } iree_hal_streaming_parameter_info_t;
 
+// True when launch metadata describes no parameters in either HAL binding form
+// or native direct-argument form.
+static inline bool iree_hal_streaming_parameter_info_is_empty(
+    const iree_hal_streaming_parameter_info_t* parameters) {
+  return parameters->buffer_size == 0 && parameters->constant_bytes == 0 &&
+         parameters->direct_arg_bytes == 0 && parameters->binding_count == 0 &&
+         parameters->copy_count == 0;
+}
+
 // Symbol metadata structure.
 typedef struct iree_hal_streaming_symbol_t {
   // Parent module. Unowned.
