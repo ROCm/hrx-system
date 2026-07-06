@@ -133,16 +133,33 @@ typedef struct hrx_hip_batch_mem_op_node_params_t {
 static bool iree_hip_graph_handle_is_live(hipGraph_t graph);
 
 #define IREE_HIP_ARRAY_MAGIC 0x6872786869706179ull
-
+// HRX HIP arrays are backed by normal device allocations. The practical limit
+// is checked allocation size and available device memory; HIP device attributes
+// expose these dimensions as int-valued fields.
+#define IREE_HIP_ARRAY_MAX_DIMENSION INT_MAX
+#define IREE_HIP_ARRAY_MAX_1D IREE_HIP_ARRAY_MAX_DIMENSION
+#define IREE_HIP_ARRAY_MAX_2D_WIDTH IREE_HIP_ARRAY_MAX_DIMENSION
+#define IREE_HIP_ARRAY_MAX_2D_HEIGHT IREE_HIP_ARRAY_MAX_DIMENSION
+#define IREE_HIP_ARRAY_MAX_3D_WIDTH IREE_HIP_ARRAY_MAX_DIMENSION
+#define IREE_HIP_ARRAY_MAX_3D_HEIGHT IREE_HIP_ARRAY_MAX_DIMENSION
+#define IREE_HIP_ARRAY_MAX_3D_DEPTH IREE_HIP_ARRAY_MAX_DIMENSION
 struct hipArray_st {
+  // References held by the registry and active API callers.
+  iree_atomic_ref_count_t ref_count;
   // Next live array handle in the process registry.
   struct hipArray_st* next_live_array;
   // Magic value used to reject invalid or freed handles.
   uint64_t magic;
   // Channel descriptor supplied at allocation time.
   hipChannelFormatDesc desc;
-  // Logical extent in array elements.
+  // Public logical extent reported by descriptor APIs.
+  hipExtent public_extent;
+  // Normalized backing extent used for storage and copies.
   hipExtent extent;
+  // Driver API format equivalent for desc.
+  hipArray_Format format;
+  // Driver API channel count equivalent for desc.
+  unsigned int num_channels;
   // Allocation flags supplied at allocation time.
   unsigned int flags;
   // Context that owns the backing device allocation.
@@ -179,6 +196,24 @@ static void iree_hip_array_registry_lock(void) {
   iree_slim_mutex_lock(&iree_hip_array_registry_mutex);
 }
 
+static hipError_t iree_hip_array_retain(hipArray_const_t array,
+                                        struct hipArray_st** out);
+
+static void iree_hip_array_release(struct hipArray_st* array);
+
+static hipError_t iree_hip_array_byte_range_to_elements(
+    hipArray_const_t array, size_t byte_offset, size_t byte_width,
+    size_t* out_element_offset, size_t* out_element_width);
+
+static hipError_t iree_hip_array_byte_range_to_elements_for_array(
+    const struct hipArray_st* array, size_t byte_offset, size_t byte_width,
+    size_t* out_element_offset, size_t* out_element_width);
+
+static hipError_t iree_hip_memcpy2d_array_to_3d_params(
+    const hip_Memcpy2D* copy, hipMemcpy3DParms* out_params);
+
+static hipError_t iree_hip_array_validate_extent_limits(hipExtent extent);
+
 static void iree_hip_array_registry_insert(struct hipArray_st* array) {
   iree_hip_array_registry_lock();
   array->next_live_array = iree_hip_array_registry_head;
@@ -186,22 +221,29 @@ static void iree_hip_array_registry_insert(struct hipArray_st* array) {
   iree_slim_mutex_unlock(&iree_hip_array_registry_mutex);
 }
 
-static void iree_hip_array_registry_remove(struct hipArray_st* array) {
+static bool iree_hip_array_registry_remove(hipArray_t array,
+                                           struct hipArray_st** out_array) {
+  if (out_array) *out_array = NULL;
+  if (!array) return false;
+  bool removed = false;
   iree_hip_array_registry_lock();
   struct hipArray_st** current = &iree_hip_array_registry_head;
   while (*current) {
     if (*current == array) {
+      if (out_array) *out_array = *current;
       *current = array->next_live_array;
       array->next_live_array = NULL;
+      removed = true;
       break;
     }
     current = &(*current)->next_live_array;
   }
   iree_slim_mutex_unlock(&iree_hip_array_registry_mutex);
+  return removed;
 }
 
 static bool iree_hip_array_registry_lookup(hipArray_const_t array,
-                                           const struct hipArray_st** out) {
+                                           struct hipArray_st** out) {
   if (out) *out = NULL;
   if (!array) return false;
   bool found = false;
@@ -209,6 +251,7 @@ static bool iree_hip_array_registry_lookup(hipArray_const_t array,
   for (struct hipArray_st* current = iree_hip_array_registry_head; current;
        current = current->next_live_array) {
     if (current == array && current->magic == IREE_HIP_ARRAY_MAGIC) {
+      iree_atomic_ref_count_inc(&current->ref_count);
       if (out) *out = current;
       found = true;
       break;
@@ -1640,25 +1683,25 @@ HIPAPI hipError_t hipGetDeviceProperties(hipDeviceProp_t* prop, int device) {
   prop->integrated = 0;
   prop->canMapHostMemory = 1;
   prop->computeMode = 0;  // Default compute mode
-  prop->maxTexture1D = 0;
-  prop->maxTexture1DMipmap = 0;
-  prop->maxTexture1DLinear = 0;
-  prop->maxTexture2D[0] = 0;
-  prop->maxTexture2D[1] = 0;
-  prop->maxTexture2DMipmap[0] = 0;
-  prop->maxTexture2DMipmap[1] = 0;
-  prop->maxTexture2DLinear[0] = 0;
-  prop->maxTexture2DLinear[1] = 0;
-  prop->maxTexture2DLinear[2] = 0;
-  prop->maxTexture2DGather[0] = 0;
-  prop->maxTexture2DGather[1] = 0;
-  prop->maxTexture3D[0] = 0;
-  prop->maxTexture3D[1] = 0;
-  prop->maxTexture3D[2] = 0;
-  prop->maxTexture3DAlt[0] = 0;
-  prop->maxTexture3DAlt[1] = 0;
-  prop->maxTexture3DAlt[2] = 0;
-  prop->maxTextureCubemap = 0;
+  prop->maxTexture1D = IREE_HIP_ARRAY_MAX_1D;
+  prop->maxTexture1DMipmap = IREE_HIP_ARRAY_MAX_1D;
+  prop->maxTexture1DLinear = IREE_HIP_ARRAY_MAX_1D;
+  prop->maxTexture2D[0] = IREE_HIP_ARRAY_MAX_2D_WIDTH;
+  prop->maxTexture2D[1] = IREE_HIP_ARRAY_MAX_2D_HEIGHT;
+  prop->maxTexture2DMipmap[0] = IREE_HIP_ARRAY_MAX_2D_WIDTH;
+  prop->maxTexture2DMipmap[1] = IREE_HIP_ARRAY_MAX_2D_HEIGHT;
+  prop->maxTexture2DLinear[0] = IREE_HIP_ARRAY_MAX_2D_WIDTH;
+  prop->maxTexture2DLinear[1] = IREE_HIP_ARRAY_MAX_2D_HEIGHT;
+  prop->maxTexture2DLinear[2] = INT_MAX;
+  prop->maxTexture2DGather[0] = IREE_HIP_ARRAY_MAX_2D_WIDTH;
+  prop->maxTexture2DGather[1] = IREE_HIP_ARRAY_MAX_2D_HEIGHT;
+  prop->maxTexture3D[0] = IREE_HIP_ARRAY_MAX_3D_WIDTH;
+  prop->maxTexture3D[1] = IREE_HIP_ARRAY_MAX_3D_HEIGHT;
+  prop->maxTexture3D[2] = IREE_HIP_ARRAY_MAX_3D_DEPTH;
+  prop->maxTexture3DAlt[0] = IREE_HIP_ARRAY_MAX_3D_WIDTH;
+  prop->maxTexture3DAlt[1] = IREE_HIP_ARRAY_MAX_3D_HEIGHT;
+  prop->maxTexture3DAlt[2] = IREE_HIP_ARRAY_MAX_3D_DEPTH;
+  prop->maxTextureCubemap = IREE_HIP_ARRAY_MAX_2D_WIDTH;
   prop->maxTexture1DLayered[0] = 0;
   prop->maxTexture1DLayered[1] = 0;
   prop->maxTexture2DLayered[0] = 0;
@@ -1666,12 +1709,12 @@ HIPAPI hipError_t hipGetDeviceProperties(hipDeviceProp_t* prop, int device) {
   prop->maxTexture2DLayered[2] = 0;
   prop->maxTextureCubemapLayered[0] = 0;
   prop->maxTextureCubemapLayered[1] = 0;
-  prop->maxSurface1D = 0;
-  prop->maxSurface2D[0] = 0;
-  prop->maxSurface2D[1] = 0;
-  prop->maxSurface3D[0] = 0;
-  prop->maxSurface3D[1] = 0;
-  prop->maxSurface3D[2] = 0;
+  prop->maxSurface1D = IREE_HIP_ARRAY_MAX_1D;
+  prop->maxSurface2D[0] = IREE_HIP_ARRAY_MAX_2D_WIDTH;
+  prop->maxSurface2D[1] = IREE_HIP_ARRAY_MAX_2D_HEIGHT;
+  prop->maxSurface3D[0] = IREE_HIP_ARRAY_MAX_3D_WIDTH;
+  prop->maxSurface3D[1] = IREE_HIP_ARRAY_MAX_3D_HEIGHT;
+  prop->maxSurface3D[2] = IREE_HIP_ARRAY_MAX_3D_DEPTH;
   prop->maxSurface1DLayered[0] = 0;
   prop->maxSurface1DLayered[1] = 0;
   prop->maxSurface2DLayered[0] = 0;
@@ -1932,6 +1975,35 @@ HIPAPI hipError_t hipDeviceGetAttribute(int* value, hipDeviceAttribute_t attr,
       break;
     case hipDeviceAttributeNumberOfXccs:
       *value = is_gfx942 ? 8 : (is_gfx1100 ? 1 : 0);
+      break;
+    case hipDeviceAttributeMaxTexture1DWidth:
+    case hipDeviceAttributeMaxTexture1DLinear:
+    case hipDeviceAttributeMaxTexture1DMipmap:
+    case hipDeviceAttributeMaxSurface1D:
+      *value = IREE_HIP_ARRAY_MAX_1D;
+      break;
+    case hipDeviceAttributeMaxTexture2DWidth:
+    case hipDeviceAttributeMaxTexture2DLinear:
+    case hipDeviceAttributeMaxTexture2DMipmap:
+    case hipDeviceAttributeMaxTexture2DGather:
+    case hipDeviceAttributeMaxTextureCubemap:
+    case hipDeviceAttributeMaxSurface2D:
+    case hipDeviceAttributeMaxSurfaceCubemap:
+      *value = IREE_HIP_ARRAY_MAX_2D_WIDTH;
+      break;
+    case hipDeviceAttributeMaxTexture2DHeight:
+      *value = IREE_HIP_ARRAY_MAX_2D_HEIGHT;
+      break;
+    case hipDeviceAttributeMaxTexture3DWidth:
+    case hipDeviceAttributeMaxTexture3DAlt:
+    case hipDeviceAttributeMaxSurface3D:
+      *value = IREE_HIP_ARRAY_MAX_3D_WIDTH;
+      break;
+    case hipDeviceAttributeMaxTexture3DHeight:
+      *value = IREE_HIP_ARRAY_MAX_3D_HEIGHT;
+      break;
+    case hipDeviceAttributeMaxTexture3DDepth:
+      *value = IREE_HIP_ARRAY_MAX_3D_DEPTH;
       break;
     default:
       // Return sensible defaults for other attributes.
@@ -4444,22 +4516,12 @@ HIPAPI hipError_t hipFree(void* ptr) {
 }
 
 HIPAPI hipError_t hipFreeArray(hipArray_t array) {
-  if (!array) return hipSuccess;
-  if (array->magic != IREE_HIP_ARRAY_MAGIC || !array->context) {
-    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  if (!array) HIP_RETURN_ERROR(hipErrorInvalidValue);
+  struct hipArray_st* removed_array = NULL;
+  if (!iree_hip_array_registry_remove(array, &removed_array)) {
+    HIP_RETURN_ERROR(hipErrorContextIsDestroyed);
   }
-  iree_hal_streaming_context_t* context = array->context;
-  const iree_hal_streaming_deviceptr_t device_ptr = array->device_ptr;
-  iree_hip_array_registry_remove(array);
-  array->magic = 0;
-  array->context = NULL;
-  array->buffer = NULL;
-  iree_status_t status =
-      iree_hal_streaming_memory_free_device(context, device_ptr);
-  free(array);
-  if (!iree_status_is_ok(status)) {
-    HIP_RETURN_STATUS(status, hipErrorInvalidValue);
-  }
+  iree_hip_array_release(removed_array);
   return hipSuccess;
 }
 
@@ -6012,11 +6074,9 @@ static hipError_t iree_hip_memcpy2d_to_3d_params(const hip_Memcpy2D* copy,
   if (!copy || !out_params) return hipErrorInvalidValue;
   memset(out_params, 0, sizeof(*out_params));
 
-  if (copy->srcMemoryType == hipMemoryTypeArray) {
-    return copy->srcArray ? hipErrorNotSupported : hipErrorInvalidValue;
-  }
-  if (copy->dstMemoryType == hipMemoryTypeArray) {
-    return copy->dstArray ? hipErrorNotSupported : hipErrorInvalidValue;
+  if (copy->srcMemoryType == hipMemoryTypeArray ||
+      copy->dstMemoryType == hipMemoryTypeArray) {
+    return iree_hip_memcpy2d_array_to_3d_params(copy, out_params);
   }
 
   hipError_t shape_result = iree_hip_validate_2d_copy_shape(
@@ -6782,46 +6842,177 @@ HIPAPI hipChannelFormatDesc hipCreateChannelDesc(int x, int y, int z, int w,
   return desc;
 }
 
-static hipError_t iree_hip_array_element_size(const hipChannelFormatDesc* desc,
-                                              size_t* out_element_size) {
-  *out_element_size = 0;
-  if (!desc || desc->x < 0 || desc->y < 0 || desc->z < 0 || desc->w < 0) {
+static bool iree_hip_array_channel_bits_supported(hipChannelFormatKind kind,
+                                                  int bits) {
+  switch (kind) {
+    case hipChannelFormatKindSigned:
+    case hipChannelFormatKindUnsigned:
+      return bits == 8 || bits == 16 || bits == 32;
+    case hipChannelFormatKindFloat:
+      return bits == 16 || bits == 32;
+    default:
+      return false;
+  }
+}
+
+static hipError_t iree_hip_array_desc_to_format(
+    const hipChannelFormatDesc* desc, hipArray_Format* out_format,
+    unsigned int* out_num_channels, size_t* out_element_size) {
+  if (out_format) *out_format = 0;
+  if (out_num_channels) *out_num_channels = 0;
+  if (out_element_size) *out_element_size = 0;
+  if (!desc || desc->x <= 0 || desc->y < 0 || desc->z < 0 || desc->w < 0) {
     return hipErrorInvalidValue;
   }
-  size_t bit_count = 0;
-  if (IREE_UNLIKELY(
-          !iree_host_size_checked_add((size_t)desc->x, (size_t)desc->y,
-                                      &bit_count) ||
-          !iree_host_size_checked_add(bit_count, (size_t)desc->z, &bit_count) ||
-          !iree_host_size_checked_add(bit_count, (size_t)desc->w,
-                                      &bit_count))) {
+  if (!iree_hip_array_channel_bits_supported(desc->f, desc->x)) {
     return hipErrorInvalidValue;
   }
-  if (bit_count == 0) return hipErrorInvalidValue;
-  *out_element_size = (bit_count + 7) / 8;
+
+  const int bits[4] = {desc->x, desc->y, desc->z, desc->w};
+  unsigned int channel_count = 0;
+  bool saw_zero_channel = false;
+  for (size_t i = 0; i < IREE_ARRAYSIZE(bits); ++i) {
+    if (bits[i] == 0) {
+      saw_zero_channel = true;
+      continue;
+    }
+    if (saw_zero_channel || bits[i] != desc->x) {
+      return hipErrorInvalidValue;
+    }
+    ++channel_count;
+  }
+  if (channel_count != 1 && channel_count != 2 && channel_count != 4) {
+    return hipErrorInvalidValue;
+  }
+
+  hipArray_Format format = 0;
+  switch (desc->f) {
+    case hipChannelFormatKindUnsigned:
+      format = desc->x == 8    ? HIP_AD_FORMAT_UNSIGNED_INT8
+               : desc->x == 16 ? HIP_AD_FORMAT_UNSIGNED_INT16
+                               : HIP_AD_FORMAT_UNSIGNED_INT32;
+      break;
+    case hipChannelFormatKindSigned:
+      format = desc->x == 8    ? HIP_AD_FORMAT_SIGNED_INT8
+               : desc->x == 16 ? HIP_AD_FORMAT_SIGNED_INT16
+                               : HIP_AD_FORMAT_SIGNED_INT32;
+      break;
+    case hipChannelFormatKindFloat:
+      format = desc->x == 16 ? HIP_AD_FORMAT_HALF : HIP_AD_FORMAT_FLOAT;
+      break;
+    default:
+      return hipErrorInvalidValue;
+  }
+
+  if (out_format) *out_format = format;
+  if (out_num_channels) *out_num_channels = channel_count;
+  if (out_element_size) {
+    *out_element_size = ((size_t)desc->x * channel_count) / 8;
+  }
   return hipSuccess;
 }
 
-static hipError_t iree_hip_array_validate(hipArray_const_t array,
-                                          const struct hipArray_st** out) {
+static hipError_t iree_hip_array_format_to_desc(hipArray_Format format,
+                                                unsigned int num_channels,
+                                                hipChannelFormatDesc* out_desc,
+                                                size_t* out_element_size) {
+  if (out_desc) memset(out_desc, 0, sizeof(*out_desc));
+  if (out_element_size) *out_element_size = 0;
+  if (num_channels != 1 && num_channels != 2 && num_channels != 4) {
+    return hipErrorInvalidValue;
+  }
+
+  int bits = 0;
+  hipChannelFormatKind kind = hipChannelFormatKindNone;
+  switch (format) {
+    case HIP_AD_FORMAT_UNSIGNED_INT8:
+      bits = 8;
+      kind = hipChannelFormatKindUnsigned;
+      break;
+    case HIP_AD_FORMAT_UNSIGNED_INT16:
+      bits = 16;
+      kind = hipChannelFormatKindUnsigned;
+      break;
+    case HIP_AD_FORMAT_UNSIGNED_INT32:
+      bits = 32;
+      kind = hipChannelFormatKindUnsigned;
+      break;
+    case HIP_AD_FORMAT_SIGNED_INT8:
+      bits = 8;
+      kind = hipChannelFormatKindSigned;
+      break;
+    case HIP_AD_FORMAT_SIGNED_INT16:
+      bits = 16;
+      kind = hipChannelFormatKindSigned;
+      break;
+    case HIP_AD_FORMAT_SIGNED_INT32:
+      bits = 32;
+      kind = hipChannelFormatKindSigned;
+      break;
+    case HIP_AD_FORMAT_HALF:
+      bits = 16;
+      kind = hipChannelFormatKindFloat;
+      break;
+    case HIP_AD_FORMAT_FLOAT:
+      bits = 32;
+      kind = hipChannelFormatKindFloat;
+      break;
+    default:
+      return hipErrorInvalidValue;
+  }
+
+  hipChannelFormatDesc desc = {
+      .x = num_channels >= 1 ? bits : 0,
+      .y = num_channels >= 2 ? bits : 0,
+      .z = num_channels >= 4 ? bits : 0,
+      .w = num_channels >= 4 ? bits : 0,
+      .f = kind,
+  };
+  if (out_desc) *out_desc = desc;
+  if (out_element_size) *out_element_size = ((size_t)bits * num_channels) / 8;
+  return hipSuccess;
+}
+
+static void iree_hip_array_destroy(struct hipArray_st* array) {
+  iree_hal_streaming_context_t* context = array->context;
+  const iree_hal_streaming_deviceptr_t device_ptr = array->device_ptr;
+  array->magic = 0;
+  array->context = NULL;
+  array->buffer = NULL;
+  array->device_ptr = 0;
+  if (context && device_ptr) {
+    iree_status_ignore(
+        iree_hal_streaming_memory_free_device(context, device_ptr));
+  }
+  iree_hal_streaming_context_release(context);
+  free(array);
+}
+
+static void iree_hip_array_release(struct hipArray_st* array) {
+  if (array && iree_atomic_ref_count_dec(&array->ref_count) == 1) {
+    iree_hip_array_destroy(array);
+  }
+}
+
+static hipError_t iree_hip_array_retain(hipArray_const_t array,
+                                        struct hipArray_st** out) {
   if (out) *out = NULL;
-  const struct hipArray_st* array_info = NULL;
+  struct hipArray_st* array_info = NULL;
   if (!iree_hip_array_registry_lookup(array, &array_info) ||
       !array_info->context || !array_info->buffer || !array_info->device_ptr) {
+    iree_hip_array_release(array_info);
     return hipErrorInvalidValue;
   }
   if (out) *out = array_info;
   return hipSuccess;
 }
 
-static hipError_t iree_hip_array_byte_range_to_elements(
-    hipArray_const_t array, size_t byte_offset, size_t byte_width,
+static hipError_t iree_hip_array_byte_range_to_elements_for_array(
+    const struct hipArray_st* array_info, size_t byte_offset, size_t byte_width,
     size_t* out_element_offset, size_t* out_element_width) {
   if (out_element_offset) *out_element_offset = 0;
   if (out_element_width) *out_element_width = 0;
-  const struct hipArray_st* array_info = NULL;
-  hipError_t result = iree_hip_array_validate(array, &array_info);
-  if (result != hipSuccess) return result;
+  if (!array_info) return hipErrorInvalidValue;
   if (array_info->element_size == 0 ||
       byte_offset % array_info->element_size != 0 ||
       byte_width % array_info->element_size != 0) {
@@ -6838,6 +7029,232 @@ static hipError_t iree_hip_array_byte_range_to_elements(
   return hipSuccess;
 }
 
+static hipError_t iree_hip_array_byte_range_to_elements(
+    hipArray_const_t array, size_t byte_offset, size_t byte_width,
+    size_t* out_element_offset, size_t* out_element_width) {
+  struct hipArray_st* array_info = NULL;
+  hipError_t result = iree_hip_array_retain(array, &array_info);
+  if (result != hipSuccess) return result;
+  result = iree_hip_array_byte_range_to_elements_for_array(
+      array_info, byte_offset, byte_width, out_element_offset,
+      out_element_width);
+  iree_hip_array_release(array_info);
+  return result;
+}
+
+static hipError_t iree_hip_array_linear_range(
+    hipArray_const_t array, size_t byte_offset, size_t row_offset,
+    size_t byte_count, const struct hipArray_st** out_array,
+    iree_hal_streaming_deviceptr_t* out_device_ptr) {
+  if (out_array) *out_array = NULL;
+  if (out_device_ptr) *out_device_ptr = 0;
+  struct hipArray_st* array_info = NULL;
+  hipError_t result = iree_hip_array_retain(array, &array_info);
+  if (result != hipSuccess) return result;
+  if (byte_offset > array_info->width_bytes ||
+      row_offset >= array_info->rows_per_slice) {
+    iree_hip_array_release(array_info);
+    return hipErrorInvalidValue;
+  }
+  iree_host_size_t row_start = 0;
+  iree_host_size_t range_start = 0;
+  if (IREE_UNLIKELY(
+          !iree_host_size_checked_mul(row_offset, array_info->pitch,
+                                      &row_start) ||
+          !iree_host_size_checked_add(row_start, byte_offset, &range_start))) {
+    iree_hip_array_release(array_info);
+    return hipErrorInvalidValue;
+  }
+  if (range_start > array_info->allocation_size ||
+      byte_count > array_info->allocation_size - range_start) {
+    iree_hip_array_release(array_info);
+    return hipErrorInvalidValue;
+  }
+  if (out_array) *out_array = array_info;
+  if (out_device_ptr) *out_device_ptr = array_info->device_ptr + range_start;
+  if (!out_array) iree_hip_array_release(array_info);
+  return hipSuccess;
+}
+
+static hipError_t iree_hip_array_legacy_row_range(
+    hipArray_const_t array, size_t byte_offset, size_t byte_count,
+    const struct hipArray_st** out_array,
+    iree_hal_streaming_deviceptr_t* out_device_ptr) {
+  if (out_array) *out_array = NULL;
+  if (out_device_ptr) *out_device_ptr = 0;
+  if (!array) return hipErrorInvalidValue;
+  struct hipArray_st* array_info = NULL;
+  hipError_t result = iree_hip_array_retain(array, &array_info);
+  if (result != hipSuccess) return result;
+  if (byte_offset > array_info->width_bytes ||
+      byte_count > array_info->width_bytes - byte_offset) {
+    iree_hip_array_release(array_info);
+    return hipErrorInvalidValue;
+  }
+  if (out_array) *out_array = array_info;
+  if (out_device_ptr) *out_device_ptr = array_info->device_ptr + byte_offset;
+  if (!out_array) iree_hip_array_release(array_info);
+  return hipSuccess;
+}
+
+static hipError_t iree_hip_memcpy2d_array_to_3d_params(
+    const hip_Memcpy2D* copy, hipMemcpy3DParms* out_params) {
+  if (!copy || !out_params) return hipErrorInvalidValue;
+  memset(out_params, 0, sizeof(*out_params));
+
+  const bool src_is_array = copy->srcMemoryType == hipMemoryTypeArray;
+  const bool dst_is_array = copy->dstMemoryType == hipMemoryTypeArray;
+  if (!src_is_array && !dst_is_array) return hipErrorInvalidValue;
+
+  size_t array_width_elements = 0;
+  bool array_width_set = false;
+  if (src_is_array) {
+    struct hipArray_st* src_array = NULL;
+    hipError_t result =
+        iree_hip_array_retain((hipArray_const_t)copy->srcArray, &src_array);
+    if (result != hipSuccess) return result;
+    size_t src_element_offset = 0;
+    size_t src_element_width = 0;
+    result = iree_hip_array_byte_range_to_elements_for_array(
+        src_array, copy->srcXInBytes, copy->WidthInBytes, &src_element_offset,
+        &src_element_width);
+    if (result != hipSuccess) {
+      iree_hip_array_release(src_array);
+      return result;
+    }
+    if (copy->Height != 0 &&
+        (copy->srcY >= src_array->extent.height ||
+         copy->Height > src_array->extent.height - copy->srcY)) {
+      iree_hip_array_release(src_array);
+      return hipErrorInvalidValue;
+    }
+    out_params->srcArray = copy->srcArray;
+    out_params->srcPos.x = src_element_offset;
+    out_params->srcPos.y = copy->srcY;
+    array_width_elements = src_element_width;
+    array_width_set = true;
+    iree_hip_array_release(src_array);
+  } else {
+    const void* src = NULL;
+    switch (copy->srcMemoryType) {
+      case hipMemoryTypeHost:
+        src = copy->srcHost;
+        break;
+      case hipMemoryTypeDevice:
+      case hipMemoryTypeUnified:
+        src = copy->srcDevice;
+        break;
+      default:
+        return hipErrorInvalidValue;
+    }
+    if ((copy->WidthInBytes != 0 || copy->Height != 0) && !src) {
+      return hipErrorInvalidValue;
+    }
+    iree_host_size_t src_width = 0;
+    iree_host_size_t src_height = 0;
+    if (IREE_UNLIKELY(!iree_host_size_checked_add(
+                          copy->srcXInBytes, copy->WidthInBytes, &src_width) ||
+                      !iree_host_size_checked_add(copy->srcY, copy->Height,
+                                                  &src_height))) {
+      return hipErrorInvalidValue;
+    }
+    if (copy->WidthInBytes != 0 && src_width > copy->srcPitch) {
+      return hipErrorInvalidValue;
+    }
+    out_params->srcPtr.ptr = (void*)src;
+    out_params->srcPtr.pitch = copy->srcPitch;
+    out_params->srcPtr.xsize = src_width;
+    out_params->srcPtr.ysize = src_height;
+    out_params->srcPos.x = copy->srcXInBytes;
+    out_params->srcPos.y = copy->srcY;
+  }
+
+  if (dst_is_array) {
+    struct hipArray_st* dst_array = NULL;
+    hipError_t result =
+        iree_hip_array_retain((hipArray_const_t)copy->dstArray, &dst_array);
+    if (result != hipSuccess) return result;
+    size_t dst_element_offset = 0;
+    size_t dst_element_width = 0;
+    result = iree_hip_array_byte_range_to_elements_for_array(
+        dst_array, copy->dstXInBytes, copy->WidthInBytes, &dst_element_offset,
+        &dst_element_width);
+    if (result != hipSuccess) {
+      iree_hip_array_release(dst_array);
+      return result;
+    }
+    if (copy->Height != 0 &&
+        (copy->dstY >= dst_array->extent.height ||
+         copy->Height > dst_array->extent.height - copy->dstY)) {
+      iree_hip_array_release(dst_array);
+      return hipErrorInvalidValue;
+    }
+    if (array_width_set && array_width_elements != dst_element_width) {
+      iree_hip_array_release(dst_array);
+      return hipErrorInvalidValue;
+    }
+    out_params->dstArray = copy->dstArray;
+    out_params->dstPos.x = dst_element_offset;
+    out_params->dstPos.y = copy->dstY;
+    array_width_elements = dst_element_width;
+    array_width_set = true;
+    iree_hip_array_release(dst_array);
+  } else {
+    void* dst = NULL;
+    switch (copy->dstMemoryType) {
+      case hipMemoryTypeHost:
+        dst = copy->dstHost;
+        break;
+      case hipMemoryTypeDevice:
+      case hipMemoryTypeUnified:
+        dst = copy->dstDevice;
+        break;
+      default:
+        return hipErrorInvalidValue;
+    }
+    if ((copy->WidthInBytes != 0 || copy->Height != 0) && !dst) {
+      return hipErrorInvalidValue;
+    }
+    iree_host_size_t dst_width = 0;
+    iree_host_size_t dst_height = 0;
+    if (IREE_UNLIKELY(!iree_host_size_checked_add(
+                          copy->dstXInBytes, copy->WidthInBytes, &dst_width) ||
+                      !iree_host_size_checked_add(copy->dstY, copy->Height,
+                                                  &dst_height))) {
+      return hipErrorInvalidValue;
+    }
+    if (copy->WidthInBytes != 0 && dst_width > copy->dstPitch) {
+      return hipErrorInvalidValue;
+    }
+    out_params->dstPtr.ptr = dst;
+    out_params->dstPtr.pitch = copy->dstPitch;
+    out_params->dstPtr.xsize = dst_width;
+    out_params->dstPtr.ysize = dst_height;
+    out_params->dstPos.x = copy->dstXInBytes;
+    out_params->dstPos.y = copy->dstY;
+  }
+
+  out_params->extent.width =
+      array_width_set ? array_width_elements : copy->WidthInBytes;
+  out_params->extent.height = copy->Height;
+  out_params->extent.depth = 1;
+
+  if (copy->srcMemoryType == hipMemoryTypeUnified ||
+      copy->dstMemoryType == hipMemoryTypeUnified) {
+    out_params->kind = hipMemcpyDefault;
+  } else if (copy->srcMemoryType == hipMemoryTypeHost &&
+             copy->dstMemoryType == hipMemoryTypeHost) {
+    out_params->kind = hipMemcpyHostToHost;
+  } else if (copy->srcMemoryType == hipMemoryTypeHost) {
+    out_params->kind = hipMemcpyHostToDevice;
+  } else if (copy->dstMemoryType == hipMemoryTypeHost) {
+    out_params->kind = hipMemcpyDeviceToHost;
+  } else {
+    out_params->kind = hipMemcpyDeviceToDevice;
+  }
+  return hipSuccess;
+}
+
 static hipError_t iree_hip_array_create(hipArray_t* array,
                                         const hipChannelFormatDesc* desc,
                                         hipExtent extent, unsigned int flags) {
@@ -6847,11 +7264,20 @@ static hipError_t iree_hip_array_create(hipArray_t* array,
   *array = NULL;
 
   size_t element_size = 0;
-  hipError_t element_result = iree_hip_array_element_size(desc, &element_size);
+  hipArray_Format format = 0;
+  unsigned int num_channels = 0;
+  hipError_t element_result = iree_hip_array_desc_to_format(
+      desc, &format, &num_channels, &element_size);
   if (element_result != hipSuccess) {
     HIP_RETURN_ERROR(element_result);
   }
+  if (flags != hipArrayDefault) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+  hipError_t extent_result = iree_hip_array_validate_extent_limits(extent);
+  if (extent_result != hipSuccess) HIP_RETURN_ERROR(extent_result);
 
+  const hipExtent public_extent = extent;
   if (extent.height == 0) extent.height = 1;
   if (extent.depth == 0) extent.depth = 1;
 
@@ -6889,10 +7315,15 @@ static hipError_t iree_hip_array_create(hipArray_t* array,
   }
 
   new_array->magic = IREE_HIP_ARRAY_MAGIC;
+  iree_atomic_ref_count_init(&new_array->ref_count);
   new_array->desc = *desc;
+  new_array->public_extent = public_extent;
   new_array->extent = extent;
+  new_array->format = format;
+  new_array->num_channels = num_channels;
   new_array->flags = flags;
   new_array->context = context;
+  iree_hal_streaming_context_retain(context);
   new_array->buffer = buffer;
   new_array->device_ptr = buffer->device_ptr;
   new_array->element_size = element_size;
@@ -6910,65 +7341,72 @@ static hipError_t iree_hip_resolve_memcpy3d_array_params(
     const hipMemcpy3DParms* params, hipMemcpy3DParms* out_params) {
   if (!params || !out_params) return hipErrorInvalidValue;
   *out_params = *params;
-  const struct hipArray_st* src_array = NULL;
-  const struct hipArray_st* dst_array = NULL;
+  struct hipArray_st* src_array = NULL;
+  struct hipArray_st* dst_array = NULL;
+  hipError_t result = hipSuccess;
   if (params->srcArray) {
-    if (params->srcPtr.ptr) return hipErrorInvalidValue;
-    hipError_t result =
-        iree_hip_array_validate((hipArray_const_t)params->srcArray, &src_array);
-    if (result != hipSuccess) return result;
-  }
-  if (params->dstArray) {
-    if (params->dstPtr.ptr) return hipErrorInvalidValue;
-    hipError_t result =
-        iree_hip_array_validate((hipArray_const_t)params->dstArray, &dst_array);
-    if (result != hipSuccess) return result;
-  }
-  if (src_array && dst_array) {
-    if (src_array->element_size != dst_array->element_size ||
-        src_array->extent.width != dst_array->extent.width ||
-        src_array->extent.height != dst_array->extent.height ||
-        src_array->extent.depth != dst_array->extent.depth) {
-      return hipErrorInvalidValue;
+    if (params->srcPtr.ptr) {
+      result = hipErrorInvalidValue;
+    } else {
+      result =
+          iree_hip_array_retain((hipArray_const_t)params->srcArray, &src_array);
     }
   }
-  if (src_array || dst_array) {
+  if (result == hipSuccess && params->dstArray) {
+    if (params->dstPtr.ptr) {
+      result = hipErrorInvalidValue;
+    } else {
+      result =
+          iree_hip_array_retain((hipArray_const_t)params->dstArray, &dst_array);
+    }
+  }
+  if (result == hipSuccess && src_array && dst_array) {
+    if (src_array->element_size != dst_array->element_size) {
+      result = hipErrorInvalidValue;
+    }
+  }
+  if (result == hipSuccess && (src_array || dst_array)) {
     const size_t element_size =
         dst_array ? dst_array->element_size : src_array->element_size;
     iree_host_size_t width_bytes = 0;
     if (IREE_UNLIKELY(!iree_host_size_checked_mul(
             params->extent.width, element_size, &width_bytes))) {
-      return hipErrorInvalidValue;
+      result = hipErrorInvalidValue;
+    } else {
+      out_params->extent.width = width_bytes;
     }
-    out_params->extent.width = width_bytes;
   }
-  if (src_array) {
+  if (result == hipSuccess && src_array) {
     iree_host_size_t src_x_in_bytes = 0;
     if (IREE_UNLIKELY(!iree_host_size_checked_mul(
             params->srcPos.x, src_array->element_size, &src_x_in_bytes))) {
-      return hipErrorInvalidValue;
+      result = hipErrorInvalidValue;
+    } else {
+      out_params->srcArray = NULL;
+      out_params->srcPos.x = src_x_in_bytes;
+      out_params->srcPtr.ptr = (void*)src_array->device_ptr;
+      out_params->srcPtr.pitch = src_array->pitch;
+      out_params->srcPtr.xsize = src_array->width_bytes;
+      out_params->srcPtr.ysize = src_array->rows_per_slice;
     }
-    out_params->srcArray = NULL;
-    out_params->srcPos.x = src_x_in_bytes;
-    out_params->srcPtr.ptr = (void*)src_array->device_ptr;
-    out_params->srcPtr.pitch = src_array->pitch;
-    out_params->srcPtr.xsize = src_array->width_bytes;
-    out_params->srcPtr.ysize = src_array->rows_per_slice;
   }
-  if (dst_array) {
+  if (result == hipSuccess && dst_array) {
     iree_host_size_t dst_x_in_bytes = 0;
     if (IREE_UNLIKELY(!iree_host_size_checked_mul(
             params->dstPos.x, dst_array->element_size, &dst_x_in_bytes))) {
-      return hipErrorInvalidValue;
+      result = hipErrorInvalidValue;
+    } else {
+      out_params->dstArray = NULL;
+      out_params->dstPos.x = dst_x_in_bytes;
+      out_params->dstPtr.ptr = (void*)dst_array->device_ptr;
+      out_params->dstPtr.pitch = dst_array->pitch;
+      out_params->dstPtr.xsize = dst_array->width_bytes;
+      out_params->dstPtr.ysize = dst_array->rows_per_slice;
     }
-    out_params->dstArray = NULL;
-    out_params->dstPos.x = dst_x_in_bytes;
-    out_params->dstPtr.ptr = (void*)dst_array->device_ptr;
-    out_params->dstPtr.pitch = dst_array->pitch;
-    out_params->dstPtr.xsize = dst_array->width_bytes;
-    out_params->dstPtr.ysize = dst_array->rows_per_slice;
   }
-  return hipSuccess;
+  iree_hip_array_release(dst_array);
+  iree_hip_array_release(src_array);
+  return result;
 }
 
 HIPAPI hipError_t hipMemcpy2DToArrayAsync(hipArray_t dst, size_t wOffset,
@@ -6976,7 +7414,8 @@ HIPAPI hipError_t hipMemcpy2DToArrayAsync(hipArray_t dst, size_t wOffset,
                                           size_t spitch, size_t width,
                                           size_t height, hipMemcpyKind kind,
                                           hipStream_t stream) {
-  if (!dst || !src || spitch < width) {
+  if (!dst) HIP_RETURN_ERROR(hipErrorInvalidHandle);
+  if (!src || spitch < width) {
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
   if (width == 0 || height == 0) return hipSuccess;
@@ -7006,7 +7445,8 @@ HIPAPI hipError_t hipMemcpy2DToArray(hipArray_t dst, size_t wOffset,
                                      size_t hOffset, const void* src,
                                      size_t spitch, size_t width, size_t height,
                                      hipMemcpyKind kind) {
-  if (!dst || !src || spitch < width) {
+  if (!dst) HIP_RETURN_ERROR(hipErrorInvalidHandle);
+  if (!src || spitch < width) {
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
   if (width == 0 || height == 0) return hipSuccess;
@@ -7038,7 +7478,8 @@ HIPAPI hipError_t hipMemcpy2DFromArrayAsync(void* dst, size_t dpitch,
                                             size_t width, size_t height,
                                             hipMemcpyKind kind,
                                             hipStream_t stream) {
-  if (!dst || !src || dpitch < width) {
+  if (!src) HIP_RETURN_ERROR(hipErrorInvalidHandle);
+  if (!dst || dpitch < width) {
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
   if (width == 0 || height == 0) return hipSuccess;
@@ -7068,7 +7509,8 @@ HIPAPI hipError_t hipMemcpy2DFromArray(void* dst, size_t dpitch,
                                        hipArray_const_t src, size_t wOffset,
                                        size_t hOffset, size_t width,
                                        size_t height, hipMemcpyKind kind) {
-  if (!dst || !src || dpitch < width) {
+  if (!src) HIP_RETURN_ERROR(hipErrorInvalidHandle);
+  if (!dst || dpitch < width) {
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
   if (width == 0 || height == 0) return hipSuccess;
@@ -7137,59 +7579,133 @@ HIPAPI hipError_t hipMemcpy2DArrayToArray(hipArray_t dst, size_t wOffsetDst,
 HIPAPI hipError_t hipMemcpyToArray(hipArray_t dst, size_t wOffset,
                                    size_t hOffset, const void* src,
                                    size_t count, hipMemcpyKind kind) {
-  return hipMemcpy2DToArray(dst, wOffset, hOffset, src, count, count, 1, kind);
+  if (!src) HIP_RETURN_ERROR(hipErrorInvalidValue);
+  if (count == 0) return hipSuccess;
+  iree_hal_streaming_deviceptr_t dst_ptr = 0;
+  hipError_t result = iree_hip_array_linear_range(
+      (hipArray_const_t)dst, wOffset, hOffset, count, NULL, &dst_ptr);
+  if (result != hipSuccess) HIP_RETURN_ERROR(result);
+  return hipMemcpy((void*)dst_ptr, src, count, kind);
 }
 
 HIPAPI hipError_t hipMemcpyFromArray(void* dst, hipArray_const_t srcArray,
                                      size_t wOffset, size_t hOffset,
                                      size_t count, hipMemcpyKind kind) {
-  return hipMemcpy2DFromArray(dst, count, srcArray, wOffset, hOffset, count, 1,
-                              kind);
+  if (!dst) HIP_RETURN_ERROR(hipErrorInvalidValue);
+  if (count == 0) return hipSuccess;
+  iree_hal_streaming_deviceptr_t src_ptr = 0;
+  hipError_t result = iree_hip_array_linear_range(srcArray, wOffset, hOffset,
+                                                  count, NULL, &src_ptr);
+  if (result != hipSuccess) HIP_RETURN_ERROR(result);
+  return hipMemcpy(dst, (const void*)src_ptr, count, kind);
 }
 
 HIPAPI hipError_t hipMemcpyHtoAAsync(hipArray_t dstArray, size_t dstOffset,
                                      const void* srcHost, size_t ByteCount,
                                      hipStream_t stream) {
-  return hipMemcpy2DToArrayAsync(dstArray, dstOffset, 0, srcHost, ByteCount,
-                                 ByteCount, 1, hipMemcpyHostToDevice, stream);
+  if (!srcHost) HIP_RETURN_ERROR(hipErrorInvalidValue);
+  if (ByteCount == 0) return hipSuccess;
+  iree_hal_streaming_deviceptr_t dst_ptr = 0;
+  hipError_t result = iree_hip_array_legacy_row_range(
+      (hipArray_const_t)dstArray, dstOffset, ByteCount, NULL, &dst_ptr);
+  if (result != hipSuccess) HIP_RETURN_ERROR(result);
+  return hipMemcpyAsync((void*)dst_ptr, srcHost, ByteCount,
+                        hipMemcpyHostToDevice, stream);
 }
 
 HIPAPI hipError_t hipMemcpyHtoA(hipArray_t dstArray, size_t dstOffset,
                                 const void* srcHost, size_t count) {
-  return hipMemcpyToArray(dstArray, dstOffset, 0, srcHost, count,
-                          hipMemcpyHostToDevice);
+  if (!srcHost) HIP_RETURN_ERROR(hipErrorInvalidValue);
+  if (count == 0) return hipSuccess;
+  iree_hal_streaming_deviceptr_t dst_ptr = 0;
+  hipError_t result = iree_hip_array_legacy_row_range(
+      (hipArray_const_t)dstArray, dstOffset, count, NULL, &dst_ptr);
+  if (result != hipSuccess) HIP_RETURN_ERROR(result);
+  return hipMemcpy((void*)dst_ptr, srcHost, count, hipMemcpyHostToDevice);
 }
 
 HIPAPI hipError_t hipMemcpyAtoHAsync(void* dstHost, hipArray_t srcArray,
                                      size_t srcOffset, size_t ByteCount,
                                      hipStream_t stream) {
-  return hipMemcpy2DFromArrayAsync(dstHost, ByteCount, srcArray, srcOffset, 0,
-                                   ByteCount, 1, hipMemcpyDeviceToHost, stream);
+  if (!dstHost) HIP_RETURN_ERROR(hipErrorInvalidValue);
+  if (ByteCount == 0) return hipSuccess;
+  iree_hal_streaming_deviceptr_t src_ptr = 0;
+  hipError_t result = iree_hip_array_legacy_row_range(
+      (hipArray_const_t)srcArray, srcOffset, ByteCount, NULL, &src_ptr);
+  if (result != hipSuccess) HIP_RETURN_ERROR(result);
+  return hipMemcpyAsync(dstHost, (const void*)src_ptr, ByteCount,
+                        hipMemcpyDeviceToHost, stream);
 }
 
 HIPAPI hipError_t hipMemcpyAtoH(void* dst, hipArray_t srcArray,
                                 size_t srcOffset, size_t count) {
-  return hipMemcpyFromArray(dst, srcArray, srcOffset, 0, count,
-                            hipMemcpyDeviceToHost);
+  if (!dst) HIP_RETURN_ERROR(hipErrorInvalidValue);
+  if (count == 0) return hipSuccess;
+  iree_hal_streaming_deviceptr_t src_ptr = 0;
+  hipError_t result = iree_hip_array_legacy_row_range(
+      (hipArray_const_t)srcArray, srcOffset, count, NULL, &src_ptr);
+  if (result != hipSuccess) HIP_RETURN_ERROR(result);
+  return hipMemcpy(dst, (const void*)src_ptr, count, hipMemcpyDeviceToHost);
 }
 
 HIPAPI hipError_t hipMemcpyDtoA(hipArray_t dstArray, size_t dstOffset,
                                 hipDeviceptr_t srcDevice, size_t ByteCount) {
-  return hipMemcpyToArray(dstArray, dstOffset, 0, srcDevice, ByteCount,
-                          hipMemcpyDeviceToDevice);
+  if (!srcDevice) HIP_RETURN_ERROR(hipErrorInvalidValue);
+  if (ByteCount == 0) return hipSuccess;
+  iree_hal_streaming_deviceptr_t dst_ptr = 0;
+  hipError_t result = iree_hip_array_legacy_row_range(
+      (hipArray_const_t)dstArray, dstOffset, ByteCount, NULL, &dst_ptr);
+  if (result != hipSuccess) HIP_RETURN_ERROR(result);
+  return hipMemcpy((void*)dst_ptr, srcDevice, ByteCount,
+                   hipMemcpyDeviceToDevice);
 }
 
 HIPAPI hipError_t hipMemcpyAtoD(hipDeviceptr_t dstDevice, hipArray_t srcArray,
                                 size_t srcOffset, size_t ByteCount) {
-  return hipMemcpyFromArray(dstDevice, srcArray, srcOffset, 0, ByteCount,
-                            hipMemcpyDeviceToDevice);
+  if (!dstDevice) HIP_RETURN_ERROR(hipErrorInvalidValue);
+  if (ByteCount == 0) return hipSuccess;
+  iree_hal_streaming_deviceptr_t src_ptr = 0;
+  hipError_t result = iree_hip_array_legacy_row_range(
+      (hipArray_const_t)srcArray, srcOffset, ByteCount, NULL, &src_ptr);
+  if (result != hipSuccess) HIP_RETURN_ERROR(result);
+  return hipMemcpy(dstDevice, (const void*)src_ptr, ByteCount,
+                   hipMemcpyDeviceToDevice);
+}
+
+static hipError_t iree_hip_array_validate_extent_limits(hipExtent extent) {
+  if (extent.width == 0) return hipErrorInvalidValue;
+  if (extent.height == 0 && extent.depth != 0) return hipErrorInvalidValue;
+  if (extent.height == 0) {
+    return extent.width <= IREE_HIP_ARRAY_MAX_1D ? hipSuccess
+                                                 : hipErrorInvalidValue;
+  }
+  if (extent.depth == 0) {
+    return extent.width <= IREE_HIP_ARRAY_MAX_2D_WIDTH &&
+                   extent.height <= IREE_HIP_ARRAY_MAX_2D_HEIGHT
+               ? hipSuccess
+               : hipErrorInvalidValue;
+  }
+  return extent.width <= IREE_HIP_ARRAY_MAX_3D_WIDTH &&
+                 extent.height <= IREE_HIP_ARRAY_MAX_3D_HEIGHT &&
+                 extent.depth <= IREE_HIP_ARRAY_MAX_3D_DEPTH
+             ? hipSuccess
+             : hipErrorInvalidValue;
 }
 
 HIPAPI hipError_t hipMemcpyAtoA(hipArray_t dstArray, size_t dstOffset,
                                 hipArray_t srcArray, size_t srcOffset,
                                 size_t ByteCount) {
-  return hipMemcpy2DArrayToArray(dstArray, dstOffset, 0, srcArray, srcOffset, 0,
-                                 ByteCount, 1, hipMemcpyDeviceToDevice);
+  if (ByteCount == 0) return hipSuccess;
+  iree_hal_streaming_deviceptr_t dst_ptr = 0;
+  hipError_t result = iree_hip_array_legacy_row_range(
+      (hipArray_const_t)dstArray, dstOffset, ByteCount, NULL, &dst_ptr);
+  if (result != hipSuccess) HIP_RETURN_ERROR(result);
+  iree_hal_streaming_deviceptr_t src_ptr = 0;
+  result = iree_hip_array_legacy_row_range(
+      (hipArray_const_t)srcArray, srcOffset, ByteCount, NULL, &src_ptr);
+  if (result != hipSuccess) HIP_RETURN_ERROR(result);
+  return hipMemcpy((void*)dst_ptr, (const void*)src_ptr, ByteCount,
+                   hipMemcpyDeviceToDevice);
 }
 
 // Sets 2D device memory to a value (asynchronous).
@@ -7585,8 +8101,8 @@ HIPAPI hipError_t hipMalloc3DArray(hipArray_t* array,
 HIPAPI hipError_t hipMallocArray(hipArray_t* array,
                                  const hipChannelFormatDesc* desc, size_t width,
                                  size_t height, unsigned int flags) {
-  return iree_hip_array_create(
-      array, desc, (hipExtent){width, height ? height : 1, 1}, flags);
+  return iree_hip_array_create(array, desc, (hipExtent){width, height, 0},
+                               flags);
 }
 
 // Copies data from host memory to device memory (synchronous).
@@ -7975,6 +8491,105 @@ HIPAPI hipError_t hipMemcpyPeer(void* dst, int dstDeviceId, const void* src,
                                        sizeBytes, NULL);
   IREE_TRACE_ZONE_END(z0);
   HIP_RETURN_ERROR(result);
+}
+
+HIPAPI hipError_t hipArrayCreate(hipArray_t* pHandle,
+                                 const HIP_ARRAY_DESCRIPTOR* pAllocateArray) {
+  if (!pHandle || !pAllocateArray) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+  hipChannelFormatDesc desc;
+  hipError_t result = iree_hip_array_format_to_desc(
+      pAllocateArray->Format, pAllocateArray->NumChannels, &desc, NULL);
+  if (result != hipSuccess) {
+    HIP_RETURN_ERROR(result);
+  }
+  return iree_hip_array_create(
+      pHandle, &desc,
+      (hipExtent){pAllocateArray->Width, pAllocateArray->Height, 0},
+      hipArrayDefault);
+}
+
+HIPAPI hipError_t hipArray3DCreate(
+    hipArray_t* array, const HIP_ARRAY3D_DESCRIPTOR* pAllocateArray) {
+  if (!array || !pAllocateArray) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+  hipChannelFormatDesc desc;
+  hipError_t result = iree_hip_array_format_to_desc(
+      pAllocateArray->Format, pAllocateArray->NumChannels, &desc, NULL);
+  if (result != hipSuccess) {
+    HIP_RETURN_ERROR(result);
+  }
+  return iree_hip_array_create(
+      array, &desc,
+      (hipExtent){pAllocateArray->Width, pAllocateArray->Height,
+                  pAllocateArray->Depth},
+      pAllocateArray->Flags);
+}
+
+HIPAPI hipError_t hipArrayDestroy(hipArray_t array) {
+  return hipFreeArray(array);
+}
+
+HIPAPI hipError_t hipArrayGetDescriptor(HIP_ARRAY_DESCRIPTOR* pArrayDescriptor,
+                                        hipArray_t array) {
+  if (!array) HIP_RETURN_ERROR(hipErrorInvalidHandle);
+  if (!pArrayDescriptor) HIP_RETURN_ERROR(hipErrorInvalidValue);
+  struct hipArray_st* array_info = NULL;
+  hipError_t result =
+      iree_hip_array_retain((hipArray_const_t)array, &array_info);
+  if (result != hipSuccess) HIP_RETURN_ERROR(result);
+  pArrayDescriptor->Width = array_info->public_extent.width;
+  pArrayDescriptor->Height = array_info->public_extent.height;
+  pArrayDescriptor->Format = array_info->format;
+  pArrayDescriptor->NumChannels = array_info->num_channels;
+  iree_hip_array_release(array_info);
+  return hipSuccess;
+}
+
+HIPAPI hipError_t hipArray3DGetDescriptor(
+    HIP_ARRAY3D_DESCRIPTOR* pArrayDescriptor, hipArray_t array) {
+  if (!array) HIP_RETURN_ERROR(hipErrorInvalidHandle);
+  if (!pArrayDescriptor) HIP_RETURN_ERROR(hipErrorInvalidValue);
+  struct hipArray_st* array_info = NULL;
+  hipError_t result =
+      iree_hip_array_retain((hipArray_const_t)array, &array_info);
+  if (result != hipSuccess) HIP_RETURN_ERROR(result);
+  pArrayDescriptor->Width = array_info->public_extent.width;
+  pArrayDescriptor->Height = array_info->public_extent.height;
+  pArrayDescriptor->Depth = array_info->public_extent.depth;
+  pArrayDescriptor->Format = array_info->format;
+  pArrayDescriptor->NumChannels = array_info->num_channels;
+  pArrayDescriptor->Flags = array_info->flags;
+  iree_hip_array_release(array_info);
+  return hipSuccess;
+}
+
+HIPAPI hipError_t hipArrayGetInfo(hipChannelFormatDesc* desc, hipExtent* extent,
+                                  unsigned int* flags, hipArray_t array) {
+  if (!array) HIP_RETURN_ERROR(hipErrorInvalidHandle);
+  if (!desc && !extent && !flags) return hipSuccess;
+  struct hipArray_st* array_info = NULL;
+  hipError_t result =
+      iree_hip_array_retain((hipArray_const_t)array, &array_info);
+  if (result != hipSuccess) HIP_RETURN_ERROR(result);
+  if (desc) *desc = array_info->desc;
+  if (extent) *extent = array_info->public_extent;
+  if (flags) *flags = array_info->flags;
+  iree_hip_array_release(array_info);
+  return hipSuccess;
+}
+
+HIPAPI hipError_t hipGetChannelDesc(hipChannelFormatDesc* desc,
+                                    hipArray_const_t array) {
+  if (!desc) HIP_RETURN_ERROR(hipErrorInvalidValue);
+  struct hipArray_st* array_info = NULL;
+  hipError_t result = iree_hip_array_retain(array, &array_info);
+  if (result != hipSuccess) HIP_RETURN_ERROR(result);
+  *desc = array_info->desc;
+  iree_hip_array_release(array_info);
+  return hipSuccess;
 }
 
 //===----------------------------------------------------------------------===//
@@ -12250,7 +12865,7 @@ typedef struct iree_hip_pointer_metadata_t {
   // Streaming buffer reference when |kind| is BUFFER.
   iree_hal_streaming_buffer_ref_t buffer_ref;
   // Array metadata when |kind| is ARRAY.
-  const struct hipArray_st* array;
+  struct hipArray_st* array;
   // Registered symbol size when |kind| is STATIC_MANAGED.
   size_t symbol_size;
 } iree_hip_pointer_metadata_t;
@@ -12334,6 +12949,14 @@ static hipError_t iree_hip_query_pointer_metadata(
   }
 
   return hipErrorInvalidValue;
+}
+
+static void iree_hip_pointer_metadata_release(
+    iree_hip_pointer_metadata_t* metadata) {
+  if (!metadata) return;
+  iree_hal_streaming_context_release(metadata->owner_context);
+  iree_hip_array_release(metadata->array);
+  memset(metadata, 0, sizeof(*metadata));
 }
 
 // Queries a single attribute of a pointer.
@@ -12428,12 +13051,12 @@ HIPAPI hipError_t hipPointerGetAttribute(void* data,
         case IREE_HIP_POINTER_METADATA_UNREGISTERED_HOST:
         case IREE_HIP_POINTER_METADATA_INVALID:
         default:
-          iree_hal_streaming_context_release(metadata.owner_context);
+          iree_hip_pointer_metadata_release(&metadata);
           IREE_TRACE_ZONE_END(z0);
           HIP_RETURN_ERROR(hipErrorInvalidValue);
       }
     }
-    iree_hal_streaming_context_release(metadata.owner_context);
+    iree_hip_pointer_metadata_release(&metadata);
     IREE_TRACE_ZONE_END(z0);
     return hipSuccess;
   }
@@ -12810,12 +13433,12 @@ HIPAPI hipError_t hipPointerGetAttributes(hipPointerAttribute_t* attributes,
       break;
     case IREE_HIP_POINTER_METADATA_INVALID:
     default:
-      iree_hal_streaming_context_release(metadata.owner_context);
+      iree_hip_pointer_metadata_release(&metadata);
       IREE_TRACE_ZONE_END(z0);
       HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
 
-  iree_hal_streaming_context_release(metadata.owner_context);
+  iree_hip_pointer_metadata_release(&metadata);
   IREE_TRACE_ZONE_END(z0);
   HIP_RETURN_ERROR(hipSuccess);
 }
