@@ -1999,7 +1999,7 @@ id4_ideogram4_dit_program_dispatch_mlp_gate_up_silu_product_fp8_bf16_wmma_compac
       input, gate_weight, gate_scale, up_weight, up_scale, output,
       IREE_SV(
           "id4_ideogram4_mlp_gate_up_silu_product_fp8_bf16_wmma_compact_rhs_"
-          "tile"));
+          "tile_m64n64_4wave"));
 }
 
 iree_status_t
