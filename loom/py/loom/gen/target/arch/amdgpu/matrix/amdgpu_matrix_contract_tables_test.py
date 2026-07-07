@@ -313,6 +313,23 @@ def test_generation_rejects_unmapped_matrix_descriptor_immediates() -> None:
         raise AssertionError("expected unmapped immediate validation to fail")
 
 
+def test_generation_rejects_unsupported_wait_state_result_payload_count() -> None:
+    contract = replace(
+        _contract("mfma.f32.16x16x16.f16"),
+        result=payload("f32", 3, 3),
+    )
+
+    try:
+        _contract_initializer(contract)
+    except ValueError as exc:
+        message = str(exc)
+        assert "AMDGPU matrix contract 'mfma.f32.16x16x16.f16'" in message
+        assert "unsupported wait-state result payload register count 3" in message
+        assert "expected one of 2, 4, 8, 16, 32" in message
+    else:
+        raise AssertionError("expected wait-state result payload validation to fail")
+
+
 def test_generation_rejects_selector_and_implicit_scale_format_overlap() -> None:
     contract = replace(
         _contract("wmma.scale.f32.16x16x128.f8f6f4"),

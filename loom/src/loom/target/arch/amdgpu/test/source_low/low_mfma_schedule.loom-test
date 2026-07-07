@@ -243,6 +243,34 @@ low.func.def target(@target) @gfx942_fp8_materialized_bf16_two_k_block_schedule(
   s_endpgm
 
 // ====
+// RUN: emit amdgpu-assembly @gfx942_f32_mfma_32_register_result_wait
+
+amdgpu.target<gfx942> @target
+low.func.def target(@target) @gfx942_f32_mfma_32_register_result_wait(%lhs0: reg<amdgpu.vgpr>, %rhs0: reg<amdgpu.vgpr>, %lhs1: reg<amdgpu.vgpr>, %rhs1: reg<amdgpu.vgpr>, %init: reg<amdgpu.vgpr x32>, %out_view: reg<amdgpu.sgpr x2>) asm<amdgpu.cdna3.core> {
+  %acc0 = copy %init : reg<amdgpu.vgpr x32> -> reg<amdgpu.vgpr x32>
+  %partial = v_mfma_f32_32x32x1_2b_f32 %lhs0, %rhs0, %acc0
+  %acc1 = copy %partial : reg<amdgpu.vgpr x32> -> reg<amdgpu.vgpr x32>
+  %result = v_mfma_f32_32x32x1_2b_f32 %lhs1, %rhs1, %acc1
+  %lane0 = slice %result[0] : reg<amdgpu.vgpr x32> -> reg<amdgpu.vgpr>
+  %m0 = s_mov_b32_m0_imm 0
+  global_store_dword_saddr %lhs0, %lane0, %out_view, %m0
+  return
+}
+
+// A 32-register MFMA result should use the 32-pass wait-state rows instead of
+// tripping an internal wait-table precondition failure.
+// ----
+  s_mov_b32_m0_imm m0, 0
+  v_mfma_f32_32x32x1_2b_f32 v[0:31], v35, v32, v[0:31]
+  v_mfma_f32_32x32x1_2b_f32 v[0:31], v33, v34, v[0:31]
+  s_nop 15
+  s_nop 15
+  s_nop 2
+  global_store_dword v35, v0, s[0:1] offset:0
+  s_waitcnt vmcnt(0) lgkmcnt(15)
+  s_endpgm
+
+// ====
 // RUN: emit amdgpu-assembly @gfx942_bf16_two_k_block_loads_schedule_before_mfma
 
 amdgpu.target<gfx942> @target
