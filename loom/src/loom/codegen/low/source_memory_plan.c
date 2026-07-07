@@ -1063,6 +1063,17 @@ static loom_low_memory_space_t loom_low_source_memory_access_space(
   }
 }
 
+static bool loom_low_source_memory_access_has_atomic_attrs(
+    loom_memory_access_t access) {
+  return !loom_attr_is_absent(loom_memory_access_atomic_kind(access)) ||
+         !loom_attr_is_absent(loom_memory_access_atomic_ordering(access)) ||
+         !loom_attr_is_absent(
+             loom_memory_access_atomic_success_ordering(access)) ||
+         !loom_attr_is_absent(
+             loom_memory_access_atomic_failure_ordering(access)) ||
+         !loom_attr_is_absent(loom_memory_access_atomic_scope(access));
+}
+
 bool loom_low_source_memory_access_plan_lane_byte_envelope(
     const loom_low_source_memory_access_plan_t* plan, int64_t* out_begin_offset,
     int64_t* out_end_offset) {
@@ -1146,41 +1157,51 @@ void loom_low_source_memory_access_plan_make_summary(
   };
 }
 
-static bool loom_low_source_memory_operation_kind_from_op(
-    const loom_op_t* source_op,
+static bool loom_low_source_memory_operation_kind_from_access(
+    const loom_module_t* module, const loom_op_t* source_op,
+    loom_memory_access_t access,
     loom_low_source_memory_operation_kind_t* out_operation_kind) {
-  switch (source_op->kind) {
-    case LOOM_OP_VECTOR_FRAGMENT_LOAD:
-    case LOOM_OP_VECTOR_LOAD:
-    case LOOM_OP_VIEW_LOAD:
-      *out_operation_kind = LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD;
-      return true;
-    case LOOM_OP_VECTOR_FRAGMENT_STORE:
-    case LOOM_OP_VECTOR_STORE:
-    case LOOM_OP_VIEW_STORE:
-      *out_operation_kind = LOOM_LOW_SOURCE_MEMORY_OPERATION_STORE;
-      return true;
-    case LOOM_OP_VIEW_ATOMIC_REDUCE:
-    case LOOM_OP_VECTOR_ATOMIC_REDUCE:
-    case LOOM_OP_VECTOR_ATOMIC_REDUCE_MASK:
-      *out_operation_kind = LOOM_LOW_SOURCE_MEMORY_OPERATION_ATOMIC_REDUCE;
-      return true;
-    case LOOM_OP_VIEW_ATOMIC_RMW:
-    case LOOM_OP_VECTOR_ATOMIC_RMW:
-    case LOOM_OP_VECTOR_ATOMIC_RMW_MASK:
-      *out_operation_kind = LOOM_LOW_SOURCE_MEMORY_OPERATION_ATOMIC_RMW;
-      return true;
-    case LOOM_OP_VIEW_ATOMIC_CMPXCHG:
-    case LOOM_OP_VECTOR_ATOMIC_CMPXCHG:
-      *out_operation_kind = LOOM_LOW_SOURCE_MEMORY_OPERATION_ATOMIC_CMPXCHG;
-      return true;
-    case LOOM_OP_VIEW_PREFETCH:
-      *out_operation_kind = LOOM_LOW_SOURCE_MEMORY_OPERATION_PREFETCH;
-      return true;
-    default:
-      *out_operation_kind = LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD;
-      return false;
+  const bool has_value =
+      loom_memory_access_value(access) != LOOM_VALUE_ID_INVALID;
+  const bool has_expected =
+      loom_memory_access_expected(access) != LOOM_VALUE_ID_INVALID;
+  const bool has_replacement =
+      loom_memory_access_replacement(access) != LOOM_VALUE_ID_INVALID;
+  const bool has_atomic =
+      loom_low_source_memory_access_has_atomic_attrs(access);
+
+  if (has_expected || has_replacement) {
+    if (!has_expected || !has_replacement) return false;
+    *out_operation_kind = LOOM_LOW_SOURCE_MEMORY_OPERATION_ATOMIC_CMPXCHG;
+    return true;
   }
+
+  const loom_trait_flags_t traits = loom_op_effective_traits(module, source_op);
+  const bool reads = loom_traits_may_read(traits);
+  const bool writes = loom_traits_may_write(traits);
+  if (has_atomic) {
+    if (!reads || !writes || !has_value) return false;
+    *out_operation_kind = source_op->result_count == 0
+                              ? LOOM_LOW_SOURCE_MEMORY_OPERATION_ATOMIC_REDUCE
+                              : LOOM_LOW_SOURCE_MEMORY_OPERATION_ATOMIC_RMW;
+    return true;
+  }
+
+  if (reads && !writes) {
+    *out_operation_kind = LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD;
+    return true;
+  }
+  if (writes && !reads && has_value) {
+    *out_operation_kind = LOOM_LOW_SOURCE_MEMORY_OPERATION_STORE;
+    return true;
+  }
+  if (!reads && !writes && iree_any_bit_set(traits, LOOM_TRAIT_HINT)) {
+    *out_operation_kind = LOOM_LOW_SOURCE_MEMORY_OPERATION_PREFETCH;
+    return true;
+  }
+
+  *out_operation_kind = LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD;
+  return false;
 }
 
 static loom_type_t loom_low_source_memory_element_vector_type(
@@ -1464,17 +1485,17 @@ bool loom_low_source_memory_access_plan_build_with_view_regions(
   *out_plan = (loom_low_source_memory_access_plan_t){0};
   *out_diagnostic = (loom_low_source_memory_access_diagnostic_t){0};
 
-  loom_low_source_memory_operation_kind_t operation_kind =
-      LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD;
-  if (!loom_low_source_memory_operation_kind_from_op(source_op,
-                                                     &operation_kind)) {
+  loom_memory_access_t access = loom_memory_access_cast(module, source_op);
+  if (!loom_memory_access_isa(access)) {
     out_diagnostic->rejection_bits |=
         LOOM_LOW_SOURCE_MEMORY_ACCESS_REJECTION_UNSUPPORTED_OP;
     return false;
   }
 
-  loom_memory_access_t access = loom_memory_access_cast(module, source_op);
-  if (!loom_memory_access_isa(access)) {
+  loom_low_source_memory_operation_kind_t operation_kind =
+      LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD;
+  if (!loom_low_source_memory_operation_kind_from_access(
+          module, source_op, access, &operation_kind)) {
     out_diagnostic->rejection_bits |=
         LOOM_LOW_SOURCE_MEMORY_ACCESS_REJECTION_UNSUPPORTED_OP;
     return false;
