@@ -860,6 +860,8 @@ typedef enum id4_qwen3_vl_kernel_kind_e {
   // Compact RHS block-scaled FP8 fused MLP down/residual WMMA kernel.
   ID4_QWEN3_VL_KERNEL_LINEAR_RESIDUAL_FP8_BLOCK_SCALED_BF16_WMMA_M64N64_COMPACT_RHS =
       42,
+  // Online attention kernel that avoids materialized scores/probabilities.
+  ID4_QWEN3_VL_KERNEL_ATTENTION_ONLINE_BF16 = 43,
 } id4_qwen3_vl_kernel_kind_t;
 
 typedef enum id4_qwen3_vl_config_key_e {
@@ -903,8 +905,7 @@ enum {
   ID4_QWEN3_VL_OPERATION_KIND_COUNT = ID4_QWEN3_VL_OPERATION_REGION_CUT + 1,
   ID4_QWEN3_VL_OPERATION_SITE_COUNT = ID4_QWEN3_VL_OPERATION_SITE_OUTPUT + 1,
   ID4_QWEN3_VL_KERNEL_KIND_COUNT =
-      ID4_QWEN3_VL_KERNEL_LINEAR_RESIDUAL_FP8_BLOCK_SCALED_BF16_WMMA_M64N64_COMPACT_RHS +
-      1,
+      ID4_QWEN3_VL_KERNEL_ATTENTION_ONLINE_BF16 + 1,
   ID4_QWEN3_VL_CONFIG_KEY_COUNT =
       ID4_QWEN3_VL_CONFIG_DISPATCH_ELEMENT_COUNT + 1,
 };
@@ -1814,6 +1815,9 @@ static const id4_pipeline_kernel_ref_t
                       "compact_rhs"),
              IREE_SVL("id4_qwen3_vl_linear_residual_fp8_block_scaled_bf16_"
                       "wmma_m64n64_compact_rhs")},
+        [ID4_QWEN3_VL_KERNEL_ATTENTION_ONLINE_BF16] =
+            {IREE_SVL("qwen3_vl/attention_online_bf16"),
+             IREE_SVL("id4_qwen3_vl_attention_online_bf16")},
 };
 
 static const iree_string_view_t id4_qwen3_vl_program_config_keys
@@ -2126,6 +2130,21 @@ static const iree_string_view_t id4_qwen3_vl_program_config_keys
                     "id4.qwen3_vl.attention_wmma.key_value_head_count"),
                 [ID4_QWEN3_VL_CONFIG_HEAD_SIZE] =
                     IREE_SVL("id4.qwen3_vl.attention_wmma.head_size"),
+            },
+        [ID4_QWEN3_VL_KERNEL_ATTENTION_ONLINE_BF16] =
+            {
+                [ID4_QWEN3_VL_CONFIG_TOKEN_COUNT] =
+                    IREE_SVL("id4.qwen3_vl.attention_online.token_count"),
+                [ID4_QWEN3_VL_CONFIG_DISPATCH_TOKEN_COUNT] = IREE_SVL(
+                    "id4.qwen3_vl.attention_online.dispatch_token_count"),
+                [ID4_QWEN3_VL_CONFIG_HIDDEN_SIZE] =
+                    IREE_SVL("id4.qwen3_vl.attention_online.hidden_size"),
+                [ID4_QWEN3_VL_CONFIG_ATTENTION_HEAD_COUNT] = IREE_SVL(
+                    "id4.qwen3_vl.attention_online.attention_head_count"),
+                [ID4_QWEN3_VL_CONFIG_KEY_VALUE_HEAD_COUNT] = IREE_SVL(
+                    "id4.qwen3_vl.attention_online.key_value_head_count"),
+                [ID4_QWEN3_VL_CONFIG_HEAD_SIZE] =
+                    IREE_SVL("id4.qwen3_vl.attention_online.head_size"),
             },
         [ID4_QWEN3_VL_KERNEL_MLP_GATE_UP_SILU_PRODUCT_BF16_WMMA_M16N32] =
             {
@@ -3755,6 +3774,57 @@ static iree_status_t id4_qwen3_vl_program_dispatch_value_pack(
       bindings);
 }
 
+static iree_status_t id4_qwen3_vl_program_author_attention_online_packed_value(
+    const id4_qwen3_vl_program_options_t* options,
+    id4_pipeline_program_builder_t* builder, uint32_t layer_ordinal,
+    id4_pipeline_program_tensor_t query, id4_pipeline_program_tensor_t key,
+    id4_pipeline_program_tensor_t packed_value,
+    id4_pipeline_program_tensor_t attention_mask,
+    id4_pipeline_program_tensor_t* out_context) {
+  const uint32_t token_count = options->request.token_count;
+  const uint32_t hidden_size = options->model.hidden_size;
+  const uint32_t attention_head_count = options->model.attention_head_count;
+  uint32_t token_capacity = 0;
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_calculate_options_token_capacity(
+      options, &token_capacity));
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_acquire_tensor(
+      builder, ID4_QWEN3_VL_TENSOR_LAYER_ATTENTION_CONTEXT, layer_ordinal,
+      ID4_PIPELINE_PROGRAM_DTYPE_BF16,
+      id4_pipeline_program_make_shape_rank2(token_capacity, hidden_size),
+      out_context));
+  id4_qwen3_vl_program_bf16_coverage_t context_coverage;
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_bf16_coverage(
+      "attention context", token_count, hidden_size, token_capacity,
+      hidden_size, &context_coverage));
+
+  const id4_qwen3_vl_program_config_value_t config_values[] = {
+      {ID4_QWEN3_VL_CONFIG_TOKEN_COUNT, token_count},
+      {ID4_QWEN3_VL_CONFIG_DISPATCH_TOKEN_COUNT, token_capacity},
+      {ID4_QWEN3_VL_CONFIG_HIDDEN_SIZE, hidden_size},
+      {ID4_QWEN3_VL_CONFIG_ATTENTION_HEAD_COUNT, attention_head_count},
+      {ID4_QWEN3_VL_CONFIG_KEY_VALUE_HEAD_COUNT,
+       options->model.key_value_head_count},
+      {ID4_QWEN3_VL_CONFIG_HEAD_SIZE, options->model.head_size},
+  };
+  const id4_pipeline_program_dispatch_binding_t bindings[] = {
+      id4_pipeline_program_read(query),
+      id4_pipeline_program_read(key),
+      id4_pipeline_program_read(packed_value),
+      id4_pipeline_program_read(attention_mask),
+      id4_qwen3_vl_program_bf16_logical_write(*out_context, &context_coverage),
+  };
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_dispatch_attention(
+      builder, layer_ordinal, ID4_QWEN3_VL_OPERATION_SITE_SELF_ATTENTION,
+      ID4_QWEN3_VL_KERNEL_ATTENTION_ONLINE_BF16, IREE_ARRAYSIZE(config_values),
+      config_values, IREE_ARRAYSIZE(bindings), bindings));
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_zero_bf16_tail(
+      builder, ID4_QWEN3_VL_TENSOR_LAYER_ATTENTION_CONTEXT, layer_ordinal,
+      *out_context, &context_coverage));
+  return id4_qwen3_vl_program_tap_tensor(
+      builder, ID4_QWEN3_VL_TENSOR_LAYER_ATTENTION_CONTEXT, layer_ordinal,
+      *out_context);
+}
+
 static iree_status_t id4_qwen3_vl_program_author_attention_wmma_packed_value(
     const id4_qwen3_vl_program_options_t* options,
     id4_pipeline_program_builder_t* builder, uint32_t layer_ordinal,
@@ -3882,7 +3952,8 @@ static iree_status_t id4_qwen3_vl_program_attention_uses_materialized(
       &has_probabilities_tap));
   switch (options->attention_implementation) {
     case ID4_QWEN3_VL_ATTENTION_IMPLEMENTATION_AUTO:
-      *out_uses_materialized_attention = true;
+      *out_uses_materialized_attention =
+          has_scores_tap || has_probabilities_tap;
       return iree_ok_status();
     case ID4_QWEN3_VL_ATTENTION_IMPLEMENTATION_MATERIALIZED:
       *out_uses_materialized_attention = true;
@@ -4579,10 +4650,18 @@ static iree_status_t id4_qwen3_vl_program_author_layer(
 
   id4_pipeline_program_tensor_t context = id4_pipeline_program_tensor_invalid();
   if (uses_packed_value_projection) {
-    IREE_RETURN_IF_ERROR(
-        id4_qwen3_vl_program_author_attention_wmma_packed_value(
-            options, builder, layer_ordinal, query_rotary, key_rotary,
-            packed_value, attention_mask, &context));
+    if (options->attention_implementation ==
+        ID4_QWEN3_VL_ATTENTION_IMPLEMENTATION_WMMA) {
+      IREE_RETURN_IF_ERROR(
+          id4_qwen3_vl_program_author_attention_wmma_packed_value(
+              options, builder, layer_ordinal, query_rotary, key_rotary,
+              packed_value, attention_mask, &context));
+    } else {
+      IREE_RETURN_IF_ERROR(
+          id4_qwen3_vl_program_author_attention_online_packed_value(
+              options, builder, layer_ordinal, query_rotary, key_rotary,
+              packed_value, attention_mask, &context));
+    }
   } else {
     IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_author_attention(
         options, builder, layer_ordinal, query_rotary, key_rotary, value,

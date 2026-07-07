@@ -1,0 +1,332 @@
+config.decl @id4.qwen3_vl.attention_online.token_count : %value: index where [range(%value, 1, 4096)]
+
+config.decl @id4.qwen3_vl.attention_online.dispatch_token_count : %value: index where [range(%value, 1, 4096)]
+
+config.decl @id4.qwen3_vl.attention_online.hidden_size : %value: index where [range(%value, 1, 65536)]
+
+config.decl @id4.qwen3_vl.attention_online.attention_head_count : %value: index where [range(%value, 1, 1024)]
+
+config.decl @id4.qwen3_vl.attention_online.key_value_head_count : %value: index where [range(%value, 1, 1024)]
+
+config.decl @id4.qwen3_vl.attention_online.head_size : %value: index where [range(%value, 1, 256)]
+
+kernel.def export("id4_qwen3_vl_attention_online_bf16") @id4_qwen3_vl_attention_online_bf16() {
+  %unit = index.constant 1 : index
+  %seven = index.constant 7 : index
+  %eight = index.constant 8 : index
+  %workgroup_size_x = index.constant 256 : index
+  %token_count = config.get @id4.qwen3_vl.attention_online.token_count : index
+  %attention_head_count = config.get @id4.qwen3_vl.attention_online.attention_head_count : index
+  %rounded_token_count = index.add %token_count, %seven : index
+  %query_tile_count = index.div %rounded_token_count, %eight : index
+  kernel.launch.config workgroups(%query_tile_count, %attention_head_count, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
+} launch(%query: buffer, %key: buffer, %packed_value: buffer, %attention_mask: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %two = index.constant 2 : index
+  %three = index.constant 3 : index
+  %four = index.constant 4 : index
+  %five = index.constant 5 : index
+  %six = index.constant 6 : index
+  %seven = index.constant 7 : index
+  %eight = index.constant 8 : index
+  %query_tile = kernel.workgroup.id<x> : index
+  %query_head = kernel.workgroup.id<y> : index
+  %lane = kernel.workitem.id<x> : index
+  %zero_f32 = scalar.constant 0.0 : f32
+  %negative_large = scalar.constant -1000000000.0 : f32
+  %token_count = config.get @id4.qwen3_vl.attention_online.token_count : index
+  %dispatch_token_count = config.get @id4.qwen3_vl.attention_online.dispatch_token_count : index
+  %hidden_size = config.get @id4.qwen3_vl.attention_online.hidden_size : index
+  %attention_head_count = config.get @id4.qwen3_vl.attention_online.attention_head_count : index
+  %key_value_head_count = config.get @id4.qwen3_vl.attention_online.key_value_head_count : index
+  %head_size = config.get @id4.qwen3_vl.attention_online.head_size : index
+  %query_heads_per_key = index.div %attention_head_count, %key_value_head_count : index
+  %key_value_width = index.mul %key_value_head_count, %head_size : index
+  %lane_has_channel = index.cmp ult, %lane, %head_size : index
+  %head_size_i32 = index.cast %head_size : index to i32
+  %head_size_f32 = scalar.sitofp %head_size_i32 : i32 to f32
+  %attention_scale = scalar.rsqrtf<nnan|ninf|nsz|afn> %head_size_f32 : f32
+  %query_head_base = index.mul %query_head, %head_size : index
+  %key_value_head = index.div %query_head, %query_heads_per_key : index
+  %key_value_head_base = index.mul %key_value_head, %head_size : index
+  %attention_channel = index.add %query_head_base, %lane : index
+  %value_channel = index.add %key_value_head_base, %lane : index
+  %query_base = index.mul %query_tile, %eight : index
+  %query_token0 = index.add %query_base, %zero : index
+  %query_token1 = index.add %query_base, %one : index
+  %query_token2 = index.add %query_base, %two : index
+  %query_token3 = index.add %query_base, %three : index
+  %query_token4 = index.add %query_base, %four : index
+  %query_token5 = index.add %query_base, %five : index
+  %query_token6 = index.add %query_base, %six : index
+  %query_token7 = index.add %query_base, %seven : index
+  %query_valid0 = index.cmp ult, %query_token0, %token_count : index
+  %query_valid1 = index.cmp ult, %query_token1, %token_count : index
+  %query_valid2 = index.cmp ult, %query_token2, %token_count : index
+  %query_valid3 = index.cmp ult, %query_token3, %token_count : index
+  %query_valid4 = index.cmp ult, %query_token4, %token_count : index
+  %query_valid5 = index.cmp ult, %query_token5, %token_count : index
+  %query_valid6 = index.cmp ult, %query_token6, %token_count : index
+  %query_valid7 = index.cmp ult, %query_token7, %token_count : index
+  %query_channel_valid0 = scalar.andi %query_valid0, %lane_has_channel : i1
+  %query_channel_valid1 = scalar.andi %query_valid1, %lane_has_channel : i1
+  %query_channel_valid2 = scalar.andi %query_valid2, %lane_has_channel : i1
+  %query_channel_valid3 = scalar.andi %query_valid3, %lane_has_channel : i1
+  %query_channel_valid4 = scalar.andi %query_valid4, %lane_has_channel : i1
+  %query_channel_valid5 = scalar.andi %query_valid5, %lane_has_channel : i1
+  %query_channel_valid6 = scalar.andi %query_valid6, %lane_has_channel : i1
+  %query_channel_valid7 = scalar.andi %query_valid7, %lane_has_channel : i1
+  %query_noalias, %key_noalias, %packed_value_noalias, %attention_mask_noalias, %output_noalias = buffer.assume.noalias %query, %key, %packed_value, %attention_mask, %output : buffer, buffer, buffer, buffer, buffer
+  %query_global = buffer.assume.memory_space<global> %query_noalias : buffer
+  %key_global = buffer.assume.memory_space<global> %key_noalias : buffer
+  %packed_value_global = buffer.assume.memory_space<global> %packed_value_noalias : buffer
+  %attention_mask_global = buffer.assume.memory_space<global> %attention_mask_noalias : buffer
+  %output_global = buffer.assume.memory_space<global> %output_noalias : buffer
+  %query_view = buffer.view %query_global[%base] : buffer -> view<[%dispatch_token_count]x[%hidden_size]xbf16, #dense>
+  %key_view = buffer.view %key_global[%base] : buffer -> view<[%dispatch_token_count]x[%key_value_width]xbf16, #dense>
+  %packed_value_view = buffer.view %packed_value_global[%base] : buffer -> view<[%key_value_width]x[%dispatch_token_count]xbf16, #dense>
+  %attention_mask_view = buffer.view %attention_mask_global[%base] : buffer -> view<[%dispatch_token_count]x[%dispatch_token_count]xf32, #dense>
+  %output_view = buffer.view %output_global[%base] : buffer -> view<[%dispatch_token_count]x[%hidden_size]xbf16, #dense>
+  %query_value0 = scf.if %query_channel_valid0 -> (f32) {
+    %loaded_bf16 = view.load %query_view[%query_token0, %attention_channel] : view<[%dispatch_token_count]x[%hidden_size]xbf16, #dense> -> bf16
+    %loaded = scalar.extf %loaded_bf16 : bf16 to f32
+    scf.yield %loaded : f32
+  } else {
+    scf.yield %zero_f32 : f32
+  }
+  %query_value1 = scf.if %query_channel_valid1 -> (f32) {
+    %loaded_bf16 = view.load %query_view[%query_token1, %attention_channel] : view<[%dispatch_token_count]x[%hidden_size]xbf16, #dense> -> bf16
+    %loaded = scalar.extf %loaded_bf16 : bf16 to f32
+    scf.yield %loaded : f32
+  } else {
+    scf.yield %zero_f32 : f32
+  }
+  %query_value2 = scf.if %query_channel_valid2 -> (f32) {
+    %loaded_bf16 = view.load %query_view[%query_token2, %attention_channel] : view<[%dispatch_token_count]x[%hidden_size]xbf16, #dense> -> bf16
+    %loaded = scalar.extf %loaded_bf16 : bf16 to f32
+    scf.yield %loaded : f32
+  } else {
+    scf.yield %zero_f32 : f32
+  }
+  %query_value3 = scf.if %query_channel_valid3 -> (f32) {
+    %loaded_bf16 = view.load %query_view[%query_token3, %attention_channel] : view<[%dispatch_token_count]x[%hidden_size]xbf16, #dense> -> bf16
+    %loaded = scalar.extf %loaded_bf16 : bf16 to f32
+    scf.yield %loaded : f32
+  } else {
+    scf.yield %zero_f32 : f32
+  }
+  %query_value4 = scf.if %query_channel_valid4 -> (f32) {
+    %loaded_bf16 = view.load %query_view[%query_token4, %attention_channel] : view<[%dispatch_token_count]x[%hidden_size]xbf16, #dense> -> bf16
+    %loaded = scalar.extf %loaded_bf16 : bf16 to f32
+    scf.yield %loaded : f32
+  } else {
+    scf.yield %zero_f32 : f32
+  }
+  %query_value5 = scf.if %query_channel_valid5 -> (f32) {
+    %loaded_bf16 = view.load %query_view[%query_token5, %attention_channel] : view<[%dispatch_token_count]x[%hidden_size]xbf16, #dense> -> bf16
+    %loaded = scalar.extf %loaded_bf16 : bf16 to f32
+    scf.yield %loaded : f32
+  } else {
+    scf.yield %zero_f32 : f32
+  }
+  %query_value6 = scf.if %query_channel_valid6 -> (f32) {
+    %loaded_bf16 = view.load %query_view[%query_token6, %attention_channel] : view<[%dispatch_token_count]x[%hidden_size]xbf16, #dense> -> bf16
+    %loaded = scalar.extf %loaded_bf16 : bf16 to f32
+    scf.yield %loaded : f32
+  } else {
+    scf.yield %zero_f32 : f32
+  }
+  %query_value7 = scf.if %query_channel_valid7 -> (f32) {
+    %loaded_bf16 = view.load %query_view[%query_token7, %attention_channel] : view<[%dispatch_token_count]x[%hidden_size]xbf16, #dense> -> bf16
+    %loaded = scalar.extf %loaded_bf16 : bf16 to f32
+    scf.yield %loaded : f32
+  } else {
+    scf.yield %zero_f32 : f32
+  }
+  %query_values = vector.from_elements %query_value0, %query_value1, %query_value2, %query_value3, %query_value4, %query_value5, %query_value6, %query_value7 : vector<8xf32>
+  %zero_vector = vector.splat %zero_f32 : vector<8xf32>
+  %negative_vector = vector.splat %negative_large : vector<8xf32>
+  %attention_scale_vector = vector.splat %attention_scale : vector<8xf32>
+  %softmax_max, %softmax_sum, %weighted_acc = scf.for %key_token = [%zero to %token_count step %one](%current_max = %negative_vector : vector<8xf32>, %current_sum = %zero_vector : vector<8xf32>, %value_acc = %zero_vector : vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>) {
+    %key_value_f32 = scf.if %lane_has_channel -> (f32) {
+      %key_value_bf16 = view.load %key_view[%key_token, %value_channel] : view<[%dispatch_token_count]x[%key_value_width]xbf16, #dense> -> bf16
+      %key_value = scalar.extf %key_value_bf16 : bf16 to f32
+      scf.yield %key_value : f32
+    } else {
+      scf.yield %zero_f32 : f32
+    }
+    %key_value_vector = vector.splat %key_value_f32 : vector<8xf32>
+    %lane_products = vector.mulf<reassoc|nnan|ninf|nsz|contract> %query_values, %key_value_vector : vector<8xf32>
+    %dot = kernel.workgroup.reduce<addf> %lane_products : vector<8xf32>
+    %mask_value0 = scf.if %query_valid0 -> (f32) {
+      %loaded = view.load %attention_mask_view[%query_token0, %key_token] : view<[%dispatch_token_count]x[%dispatch_token_count]xf32, #dense> -> f32
+      scf.yield %loaded : f32
+    } else {
+      scf.yield %negative_large : f32
+    }
+    %mask_value1 = scf.if %query_valid1 -> (f32) {
+      %loaded = view.load %attention_mask_view[%query_token1, %key_token] : view<[%dispatch_token_count]x[%dispatch_token_count]xf32, #dense> -> f32
+      scf.yield %loaded : f32
+    } else {
+      scf.yield %negative_large : f32
+    }
+    %mask_value2 = scf.if %query_valid2 -> (f32) {
+      %loaded = view.load %attention_mask_view[%query_token2, %key_token] : view<[%dispatch_token_count]x[%dispatch_token_count]xf32, #dense> -> f32
+      scf.yield %loaded : f32
+    } else {
+      scf.yield %negative_large : f32
+    }
+    %mask_value3 = scf.if %query_valid3 -> (f32) {
+      %loaded = view.load %attention_mask_view[%query_token3, %key_token] : view<[%dispatch_token_count]x[%dispatch_token_count]xf32, #dense> -> f32
+      scf.yield %loaded : f32
+    } else {
+      scf.yield %negative_large : f32
+    }
+    %mask_value4 = scf.if %query_valid4 -> (f32) {
+      %loaded = view.load %attention_mask_view[%query_token4, %key_token] : view<[%dispatch_token_count]x[%dispatch_token_count]xf32, #dense> -> f32
+      scf.yield %loaded : f32
+    } else {
+      scf.yield %negative_large : f32
+    }
+    %mask_value5 = scf.if %query_valid5 -> (f32) {
+      %loaded = view.load %attention_mask_view[%query_token5, %key_token] : view<[%dispatch_token_count]x[%dispatch_token_count]xf32, #dense> -> f32
+      scf.yield %loaded : f32
+    } else {
+      scf.yield %negative_large : f32
+    }
+    %mask_value6 = scf.if %query_valid6 -> (f32) {
+      %loaded = view.load %attention_mask_view[%query_token6, %key_token] : view<[%dispatch_token_count]x[%dispatch_token_count]xf32, #dense> -> f32
+      scf.yield %loaded : f32
+    } else {
+      scf.yield %negative_large : f32
+    }
+    %mask_value7 = scf.if %query_valid7 -> (f32) {
+      %loaded = view.load %attention_mask_view[%query_token7, %key_token] : view<[%dispatch_token_count]x[%dispatch_token_count]xf32, #dense> -> f32
+      scf.yield %loaded : f32
+    } else {
+      scf.yield %negative_large : f32
+    }
+    %mask_values = vector.from_elements %mask_value0, %mask_value1, %mask_value2, %mask_value3, %mask_value4, %mask_value5, %mask_value6, %mask_value7 : vector<8xf32>
+    %scaled_score = vector.mulf<reassoc|nnan|ninf|nsz|contract> %dot, %attention_scale_vector : vector<8xf32>
+    %score = vector.addf<reassoc|nnan|ninf|nsz> %scaled_score, %mask_values : vector<8xf32>
+    %next_max = vector.maxnumf %current_max, %score : vector<8xf32>
+    %old_delta = vector.subf<reassoc|nnan|ninf|nsz> %current_max, %next_max : vector<8xf32>
+    %old_scale = vector.expf<afn> %old_delta : vector<8xf32>
+    %score_delta = vector.subf<reassoc|nnan|ninf|nsz> %score, %next_max : vector<8xf32>
+    %weight = vector.expf<afn> %score_delta : vector<8xf32>
+    %scaled_sum = vector.mulf<reassoc|nnan|ninf|nsz|contract> %current_sum, %old_scale : vector<8xf32>
+    %next_sum = vector.addf<reassoc|nnan|ninf|nsz> %scaled_sum, %weight : vector<8xf32>
+    %scaled_acc = vector.mulf<reassoc|nnan|ninf|nsz|contract> %value_acc, %old_scale : vector<8xf32>
+    %value_component_f32 = scf.if %lane_has_channel -> (f32) {
+      %value_component_bf16 = view.load %packed_value_view[%value_channel, %key_token] : view<[%key_value_width]x[%dispatch_token_count]xbf16, #dense> -> bf16
+      %value_component = scalar.extf %value_component_bf16 : bf16 to f32
+      scf.yield %value_component : f32
+    } else {
+      scf.yield %zero_f32 : f32
+    }
+    %value_component_vector = vector.splat %value_component_f32 : vector<8xf32>
+    %weighted_component = vector.mulf<reassoc|nnan|ninf|nsz|contract> %weight, %value_component_vector : vector<8xf32>
+    %next_value = vector.addf<reassoc|nnan|ninf|nsz> %scaled_acc, %weighted_component : vector<8xf32>
+    scf.yield %next_max, %next_sum, %next_value : vector<8xf32>, vector<8xf32>, vector<8xf32>
+  }
+  %result = vector.divf<nnan|ninf|nsz|arcp> %weighted_acc, %softmax_sum : vector<8xf32>
+  %result0 = vector.extract %result[0] : vector<8xf32> -> f32
+  %result1 = vector.extract %result[1] : vector<8xf32> -> f32
+  %result2 = vector.extract %result[2] : vector<8xf32> -> f32
+  %result3 = vector.extract %result[3] : vector<8xf32> -> f32
+  %result4 = vector.extract %result[4] : vector<8xf32> -> f32
+  %result5 = vector.extract %result[5] : vector<8xf32> -> f32
+  %result6 = vector.extract %result[6] : vector<8xf32> -> f32
+  %result7 = vector.extract %result[7] : vector<8xf32> -> f32
+  %result0_bf16 = scalar.fptrunc %result0 : f32 to bf16
+  %result1_bf16 = scalar.fptrunc %result1 : f32 to bf16
+  %result2_bf16 = scalar.fptrunc %result2 : f32 to bf16
+  %result3_bf16 = scalar.fptrunc %result3 : f32 to bf16
+  %result4_bf16 = scalar.fptrunc %result4 : f32 to bf16
+  %result5_bf16 = scalar.fptrunc %result5 : f32 to bf16
+  %result6_bf16 = scalar.fptrunc %result6 : f32 to bf16
+  %result7_bf16 = scalar.fptrunc %result7 : f32 to bf16
+  scf.if %query_channel_valid0 {
+    view.store %result0_bf16, %output_view[%query_token0, %attention_channel] : bf16, view<[%dispatch_token_count]x[%hidden_size]xbf16, #dense>
+  }
+  scf.if %query_channel_valid1 {
+    view.store %result1_bf16, %output_view[%query_token1, %attention_channel] : bf16, view<[%dispatch_token_count]x[%hidden_size]xbf16, #dense>
+  }
+  scf.if %query_channel_valid2 {
+    view.store %result2_bf16, %output_view[%query_token2, %attention_channel] : bf16, view<[%dispatch_token_count]x[%hidden_size]xbf16, #dense>
+  }
+  scf.if %query_channel_valid3 {
+    view.store %result3_bf16, %output_view[%query_token3, %attention_channel] : bf16, view<[%dispatch_token_count]x[%hidden_size]xbf16, #dense>
+  }
+  scf.if %query_channel_valid4 {
+    view.store %result4_bf16, %output_view[%query_token4, %attention_channel] : bf16, view<[%dispatch_token_count]x[%hidden_size]xbf16, #dense>
+  }
+  scf.if %query_channel_valid5 {
+    view.store %result5_bf16, %output_view[%query_token5, %attention_channel] : bf16, view<[%dispatch_token_count]x[%hidden_size]xbf16, #dense>
+  }
+  scf.if %query_channel_valid6 {
+    view.store %result6_bf16, %output_view[%query_token6, %attention_channel] : bf16, view<[%dispatch_token_count]x[%hidden_size]xbf16, #dense>
+  }
+  scf.if %query_channel_valid7 {
+    view.store %result7_bf16, %output_view[%query_token7, %attention_channel] : bf16, view<[%dispatch_token_count]x[%hidden_size]xbf16, #dense>
+  }
+  kernel.return
+}
+
+check.case public @id4_qwen3_vl_attention_online_bf16_single_token_case {
+  %query = check.generate.fill value(0.0) : tensor<1x2xbf16>
+  %key = check.generate.fill value(0.0) : tensor<1x2xbf16>
+  %packed_value = check.generate.iota offset(3.0) step(2.0) : tensor<2x1xbf16>
+  %attention_mask = check.generate.fill value(0.0) : tensor<1x1xf32>
+  %output = check.generate.fill value(0.0) : tensor<1x2xbf16>
+  %expected = check.generate.iota offset(3.0) step(2.0) : tensor<1x2xbf16>
+  func.call @id4_qwen3_vl_attention_online_bf16(%query, %key, %packed_value, %attention_mask, %output) : (tensor<1x2xbf16>, tensor<1x2xbf16>, tensor<2x1xbf16>, tensor<1x1xf32>, tensor<1x2xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<1x2xbf16>
+  check.return
+}
+
+check.case public @id4_qwen3_vl_attention_online_bf16_uniform_softmax_case {
+  %query = check.generate.fill value(0.0) : tensor<2x1xbf16>
+  %key = check.generate.fill value(0.0) : tensor<2x1xbf16>
+  %packed_value = check.generate.iota offset(1.0) step(2.0) : tensor<1x2xbf16>
+  %attention_mask = check.generate.fill value(0.0) : tensor<2x2xf32>
+  %output = check.generate.fill value(0.0) : tensor<2x1xbf16>
+  %expected = check.generate.fill value(2.0) : tensor<2x1xbf16>
+  func.call @id4_qwen3_vl_attention_online_bf16(%query, %key, %packed_value, %attention_mask, %output) : (tensor<2x1xbf16>, tensor<2x1xbf16>, tensor<1x2xbf16>, tensor<2x2xf32>, tensor<2x1xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2x1xbf16>
+  check.return
+}
+
+check.case public @id4_qwen3_vl_attention_online_bf16_grouped_query_case {
+  %query = check.generate.fill value(0.0) : tensor<2x2xbf16>
+  %key = check.generate.fill value(0.0) : tensor<2x1xbf16>
+  %packed_value = check.generate.iota offset(1.0) step(2.0) : tensor<1x2xbf16>
+  %attention_mask = check.generate.fill value(0.0) : tensor<2x2xf32>
+  %output = check.generate.fill value(0.0) : tensor<2x2xbf16>
+  %expected = check.generate.fill value(2.0) : tensor<2x2xbf16>
+  func.call @id4_qwen3_vl_attention_online_bf16(%query, %key, %packed_value, %attention_mask, %output) : (tensor<2x2xbf16>, tensor<2x1xbf16>, tensor<1x2xbf16>, tensor<2x2xf32>, tensor<2x2xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2x2xbf16>
+  check.return
+}
+
+check.case public @id4_qwen3_vl_attention_online_bf16_qwen_slice_case {
+  %query = check.generate.fill value(0.0) : tensor<64x4096xbf16>
+  %key = check.generate.fill value(0.0) : tensor<64x1024xbf16>
+  %packed_value = check.generate.fill value(7.0) : tensor<1024x64xbf16>
+  %attention_mask = check.generate.fill value(0.0) : tensor<64x64xf32>
+  %output = check.generate.fill value(0.0) : tensor<64x4096xbf16>
+  %expected = check.generate.fill value(7.0) : tensor<64x4096xbf16>
+  func.call @id4_qwen3_vl_attention_online_bf16(%query, %key, %packed_value, %attention_mask, %output) : (tensor<64x4096xbf16>, tensor<64x1024xbf16>, tensor<1024x64xbf16>, tensor<64x64xf32>, tensor<64x4096xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<64x4096xbf16>
+  check.return
+}
+
+check.benchmark<@id4_qwen3_vl_attention_online_bf16_single_token_case> @id4_qwen3_vl_attention_online_bf16_single_token
+
+check.benchmark<@id4_qwen3_vl_attention_online_bf16_uniform_softmax_case> @id4_qwen3_vl_attention_online_bf16_uniform_softmax
+
+check.benchmark<@id4_qwen3_vl_attention_online_bf16_grouped_query_case> @id4_qwen3_vl_attention_online_bf16_grouped_query
+
+check.benchmark<@id4_qwen3_vl_attention_online_bf16_qwen_slice_case> @id4_qwen3_vl_attention_online_bf16_qwen_slice
