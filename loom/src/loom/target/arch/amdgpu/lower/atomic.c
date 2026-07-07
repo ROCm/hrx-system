@@ -49,6 +49,15 @@ typedef uint32_t loom_amdgpu_atomic_source_flags_t;
 // Source atomic operates on vector lanes.
 #define LOOM_AMDGPU_ATOMIC_SOURCE_VECTOR ((uint32_t)1u << 0)
 
+typedef uint32_t loom_amdgpu_atomic_payload_placement_flags_t;
+
+// Source update payload prefers VGPR storage.
+#define LOOM_AMDGPU_ATOMIC_PAYLOAD_VALUE_PREFERS_VGPR ((uint32_t)1u << 0)
+// Compare-exchange expected payload prefers VGPR storage.
+#define LOOM_AMDGPU_ATOMIC_PAYLOAD_EXPECTED_PREFERS_VGPR ((uint32_t)1u << 1)
+// Compare-exchange replacement payload prefers VGPR storage.
+#define LOOM_AMDGPU_ATOMIC_PAYLOAD_REPLACEMENT_PREFERS_VGPR ((uint32_t)1u << 2)
+
 typedef struct loom_amdgpu_atomic_source_t {
   // Generic memory-access interface for the source op.
   loom_memory_access_t access;
@@ -72,6 +81,8 @@ typedef struct loom_amdgpu_atomic_source_t {
   loom_value_id_t replacement;
   // Source old-value result, if the operation returns one.
   loom_value_id_t result;
+  // Source payload placement facts computed before descriptor selection.
+  loom_amdgpu_atomic_payload_placement_flags_t payload_placement_flags;
 } loom_amdgpu_atomic_source_t;
 
 typedef struct loom_amdgpu_atomic_rejection_key_t {
@@ -448,9 +459,9 @@ static bool loom_amdgpu_atomic_source_shape_supported(
 
 static bool loom_amdgpu_atomic_value_can_feed_vgpr(
     const loom_module_t* module, const loom_value_fact_table_t* fact_table,
-    loom_value_id_t value_id, loom_amdgpu_atomic_value_kind_t value_kind) {
-  if (loom_amdgpu_source_value_prefers_vgpr(module, fact_table,
-                                            /*view_regions=*/NULL, value_id)) {
+    loom_value_id_t value_id, loom_amdgpu_atomic_value_kind_t value_kind,
+    bool prefers_vgpr) {
+  if (prefers_vgpr) {
     return true;
   }
   if (value_kind == LOOM_AMDGPU_ATOMIC_VALUE_KIND_F32) {
@@ -468,16 +479,77 @@ static bool loom_amdgpu_atomic_value_can_feed_vgpr_operand(
     const loom_module_t* module, const loom_value_fact_table_t* fact_table,
     const loom_amdgpu_atomic_source_t* atomic_source,
     const loom_amdgpu_atomic_descriptor_candidate_t* candidate) {
+  const loom_amdgpu_atomic_payload_placement_flags_t placement_flags =
+      atomic_source->payload_placement_flags;
   if (atomic_source->operation_kind == LOOM_AMDGPU_ATOMIC_OPERATION_CMPXCHG) {
     return loom_amdgpu_atomic_value_can_feed_vgpr(
                module, fact_table, atomic_source->expected,
-               LOOM_AMDGPU_ATOMIC_VALUE_KIND_I32) &&
+               LOOM_AMDGPU_ATOMIC_VALUE_KIND_I32,
+               iree_any_bit_set(
+                   placement_flags,
+                   LOOM_AMDGPU_ATOMIC_PAYLOAD_EXPECTED_PREFERS_VGPR)) &&
            loom_amdgpu_atomic_value_can_feed_vgpr(
                module, fact_table, atomic_source->replacement,
-               LOOM_AMDGPU_ATOMIC_VALUE_KIND_I32);
+               LOOM_AMDGPU_ATOMIC_VALUE_KIND_I32,
+               iree_any_bit_set(
+                   placement_flags,
+                   LOOM_AMDGPU_ATOMIC_PAYLOAD_REPLACEMENT_PREFERS_VGPR));
   }
   return loom_amdgpu_atomic_value_can_feed_vgpr(
-      module, fact_table, atomic_source->value, candidate->value_kind);
+      module, fact_table, atomic_source->value, candidate->value_kind,
+      iree_any_bit_set(placement_flags,
+                       LOOM_AMDGPU_ATOMIC_PAYLOAD_VALUE_PREFERS_VGPR));
+}
+
+static loom_amdgpu_atomic_payload_placement_flags_t
+loom_amdgpu_atomic_payload_placement_from_source_facts(
+    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
+    const loom_view_region_table_t* view_regions,
+    const loom_amdgpu_atomic_source_t* atomic_source) {
+  loom_amdgpu_atomic_payload_placement_flags_t flags = 0;
+  if (atomic_source->operation_kind == LOOM_AMDGPU_ATOMIC_OPERATION_CMPXCHG) {
+    if (loom_amdgpu_source_value_prefers_vgpr(module, fact_table, view_regions,
+                                              atomic_source->expected)) {
+      flags |= LOOM_AMDGPU_ATOMIC_PAYLOAD_EXPECTED_PREFERS_VGPR;
+    }
+    if (loom_amdgpu_source_value_prefers_vgpr(module, fact_table, view_regions,
+                                              atomic_source->replacement)) {
+      flags |= LOOM_AMDGPU_ATOMIC_PAYLOAD_REPLACEMENT_PREFERS_VGPR;
+    }
+    return flags;
+  }
+  if (loom_amdgpu_source_value_prefers_vgpr(module, fact_table, view_regions,
+                                            atomic_source->value)) {
+    flags |= LOOM_AMDGPU_ATOMIC_PAYLOAD_VALUE_PREFERS_VGPR;
+  }
+  return flags;
+}
+
+static iree_status_t loom_amdgpu_atomic_payload_placement_from_context(
+    loom_low_lower_context_t* context,
+    const loom_amdgpu_atomic_source_t* atomic_source,
+    loom_amdgpu_atomic_payload_placement_flags_t* out_flags) {
+  *out_flags = 0;
+  bool prefers_vgpr = false;
+  if (atomic_source->operation_kind == LOOM_AMDGPU_ATOMIC_OPERATION_CMPXCHG) {
+    IREE_RETURN_IF_ERROR(loom_amdgpu_context_value_prefers_vgpr(
+        context, atomic_source->expected, &prefers_vgpr));
+    if (prefers_vgpr) {
+      *out_flags |= LOOM_AMDGPU_ATOMIC_PAYLOAD_EXPECTED_PREFERS_VGPR;
+    }
+    IREE_RETURN_IF_ERROR(loom_amdgpu_context_value_prefers_vgpr(
+        context, atomic_source->replacement, &prefers_vgpr));
+    if (prefers_vgpr) {
+      *out_flags |= LOOM_AMDGPU_ATOMIC_PAYLOAD_REPLACEMENT_PREFERS_VGPR;
+    }
+    return iree_ok_status();
+  }
+  IREE_RETURN_IF_ERROR(loom_amdgpu_context_value_prefers_vgpr(
+      context, atomic_source->value, &prefers_vgpr));
+  if (prefers_vgpr) {
+    *out_flags |= LOOM_AMDGPU_ATOMIC_PAYLOAD_VALUE_PREFERS_VGPR;
+  }
+  return iree_ok_status();
 }
 
 static bool loom_amdgpu_atomic_source_plan_proves_workgroup_root(
@@ -1283,6 +1355,8 @@ iree_status_t loom_amdgpu_select_atomic_plan(
   const loom_view_region_table_t* view_regions = NULL;
   IREE_RETURN_IF_ERROR(
       loom_low_lower_context_view_regions(context, &view_regions));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_atomic_payload_placement_from_context(
+      context, &atomic_source, &atomic_source.payload_placement_flags));
   bool selected = false;
   IREE_RETURN_IF_ERROR(loom_amdgpu_atomic_select(
       module, loom_low_lower_context_fact_table(context),
@@ -1680,6 +1754,10 @@ iree_status_t loom_amdgpu_low_legality_verify_atomic(
   const loom_view_region_table_t* view_regions = NULL;
   IREE_RETURN_IF_ERROR(
       loom_target_low_legality_view_regions(context, &view_regions));
+  atomic_source.payload_placement_flags =
+      loom_amdgpu_atomic_payload_placement_from_source_facts(
+          module, loom_target_low_legality_fact_table(context), view_regions,
+          &atomic_source);
   bool selected = false;
   IREE_RETURN_IF_ERROR(loom_amdgpu_atomic_select(
       module, loom_target_low_legality_fact_table(context),
