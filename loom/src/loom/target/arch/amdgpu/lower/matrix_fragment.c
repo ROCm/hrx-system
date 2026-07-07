@@ -178,6 +178,19 @@ static const loom_amdgpu_fragment_memory_descriptor_table_t
             },
 };
 
+typedef struct loom_amdgpu_fragment_memory_contract_candidate_list_t {
+  // Descriptor set used to filter descriptors in this list.
+  const loom_low_descriptor_set_t* descriptor_set;
+  // Matrix features used to filter descriptors in this list.
+  loom_amdgpu_matrix_feature_bits_t feature_bits;
+  // Wave size used to filter descriptors in this list.
+  uint32_t wave_size;
+  // Matrix contract descriptors available to this descriptor set and target.
+  const loom_amdgpu_matrix_contract_descriptor_t** descriptors;
+  // Number of entries in descriptors.
+  iree_host_size_t descriptor_count;
+} loom_amdgpu_fragment_memory_contract_candidate_list_t;
+
 typedef struct loom_amdgpu_fragment_memory_environment_t {
   // Source module being checked or lowered.
   const loom_module_t* module;
@@ -189,6 +202,9 @@ typedef struct loom_amdgpu_fragment_memory_environment_t {
   const loom_target_bundle_t* bundle;
   // Low descriptor set selected by the target bundle.
   const loom_low_descriptor_set_t* descriptor_set;
+  // Optional function-local matrix contract candidate list.
+  const loom_amdgpu_fragment_memory_contract_candidate_list_t*
+      contract_candidates;
   // Matrix feature bits available on the selected processor.
   loom_amdgpu_matrix_feature_bits_t feature_bits;
   // Source function owning the fragment movement op.
@@ -315,6 +331,8 @@ typedef struct loom_amdgpu_fragment_memory_cache_t {
   loom_amdgpu_fragment_lane_id_cache_t lane_id_cache;
   // Cached base address shared by adjacent fragment memory operations.
   loom_amdgpu_fragment_memory_address_base_cache_t address_base;
+  // Cached matrix contract descriptors available to this source function.
+  loom_amdgpu_fragment_memory_contract_candidate_list_t contract_candidates;
 } loom_amdgpu_fragment_memory_cache_t;
 
 static bool loom_amdgpu_fragment_memory_reject(
@@ -1436,6 +1454,30 @@ loom_amdgpu_fragment_memory_payload_element_match(
              : LOOM_AMDGPU_FRAGMENT_MEMORY_ELEMENT_MATCH_ADAPTED;
 }
 
+static bool loom_amdgpu_fragment_memory_contract_is_available(
+    const loom_amdgpu_matrix_contract_descriptor_t* descriptor,
+    const loom_low_descriptor_set_t* descriptor_set,
+    loom_amdgpu_matrix_feature_bits_t feature_bits, uint32_t wave_size) {
+  return loom_amdgpu_matrix_contract_is_available(descriptor, feature_bits,
+                                                  wave_size) &&
+         loom_amdgpu_descriptor_set_has_ref(descriptor_set,
+                                            descriptor->low_descriptor_ref);
+}
+
+static iree_host_size_t loom_amdgpu_fragment_memory_contract_candidate_count(
+    const loom_amdgpu_fragment_memory_contract_candidate_list_t* candidates) {
+  return candidates != NULL ? candidates->descriptor_count
+                            : loom_amdgpu_matrix_contract_descriptor_count();
+}
+
+static const loom_amdgpu_matrix_contract_descriptor_t*
+loom_amdgpu_fragment_memory_contract_candidate_at(
+    const loom_amdgpu_fragment_memory_contract_candidate_list_t* candidates,
+    iree_host_size_t index) {
+  return candidates != NULL ? candidates->descriptors[index]
+                            : loom_amdgpu_matrix_contract_descriptor_at(index);
+}
+
 static bool loom_amdgpu_fragment_memory_target_layout(
     const loom_amdgpu_fragment_memory_environment_t* environment,
     loom_contract_operand_role_t role,
@@ -1456,9 +1498,13 @@ static bool loom_amdgpu_fragment_memory_target_layout(
         diagnostic, IREE_SV("fragment_memory.target_layout"));
   }
 
+  const loom_amdgpu_fragment_memory_contract_candidate_list_t* candidates =
+      environment->contract_candidates;
   const iree_host_size_t descriptor_count =
-      loom_amdgpu_matrix_contract_descriptor_count();
-  const uint32_t wave_size = environment->bundle->snapshot->subgroup_size;
+      loom_amdgpu_fragment_memory_contract_candidate_count(candidates);
+  const uint32_t wave_size = candidates != NULL
+                                 ? candidates->wave_size
+                                 : environment->bundle->snapshot->subgroup_size;
   const loom_amdgpu_matrix_fragment_layout_t* best_layout = NULL;
   loom_scalar_type_t best_element_type = LOOM_SCALAR_TYPE_COUNT_;
   loom_amdgpu_fragment_memory_payload_form_t best_payload_form =
@@ -1471,11 +1517,11 @@ static bool loom_amdgpu_fragment_memory_target_layout(
   bool rejected_target_layout = false;
   for (iree_host_size_t i = 0; i < descriptor_count; ++i) {
     const loom_amdgpu_matrix_contract_descriptor_t* descriptor =
-        loom_amdgpu_matrix_contract_descriptor_at(i);
-    if (!loom_amdgpu_matrix_contract_is_available(
-            descriptor, environment->feature_bits, wave_size) ||
-        !loom_amdgpu_descriptor_set_has_ref(environment->descriptor_set,
-                                            descriptor->low_descriptor_ref)) {
+        loom_amdgpu_fragment_memory_contract_candidate_at(candidates, i);
+    if (candidates == NULL &&
+        !loom_amdgpu_fragment_memory_contract_is_available(
+            descriptor, environment->descriptor_set, environment->feature_bits,
+            wave_size)) {
       continue;
     }
     loom_scalar_type_t expected_element_type = LOOM_SCALAR_TYPE_COUNT_;
@@ -1910,6 +1956,8 @@ loom_amdgpu_fragment_repack_select_result_to_lhs_bf16_bpermute_strategy(
 static bool loom_amdgpu_fragment_repack_select_target_strategy(
     const loom_module_t* module, const loom_target_bundle_t* bundle,
     const loom_low_descriptor_set_t* descriptor_set,
+    const loom_amdgpu_fragment_memory_contract_candidate_list_t*
+        contract_candidates,
     loom_symbol_ref_t target_ref, loom_amdgpu_fragment_repack_plan_t* plan) {
   if (bundle == NULL || bundle->snapshot == NULL || descriptor_set == NULL) {
     plan->reason = LOOM_AMDGPU_FRAGMENT_REPACK_REASON_TARGET_LAYOUT;
@@ -1924,22 +1972,26 @@ static bool loom_amdgpu_fragment_repack_select_target_strategy(
   }
 
   const loom_amdgpu_matrix_feature_bits_t feature_bits =
-      loom_amdgpu_fragment_memory_feature_bits_from_target_ref(module,
-                                                               target_ref);
-  const uint32_t wave_size = bundle->snapshot->subgroup_size;
+      contract_candidates != NULL
+          ? contract_candidates->feature_bits
+          : loom_amdgpu_fragment_memory_feature_bits_from_target_ref(
+                module, target_ref);
+  const uint32_t wave_size = contract_candidates != NULL
+                                 ? contract_candidates->wave_size
+                                 : bundle->snapshot->subgroup_size;
   const iree_host_size_t descriptor_count =
-      loom_amdgpu_matrix_contract_descriptor_count();
+      loom_amdgpu_fragment_memory_contract_candidate_count(contract_candidates);
   bool found_storage_candidate = false;
   for (iree_host_size_t i = 0; i < descriptor_count; ++i) {
     const loom_amdgpu_matrix_contract_descriptor_t* descriptor =
-        loom_amdgpu_matrix_contract_descriptor_at(i);
+        loom_amdgpu_fragment_memory_contract_candidate_at(contract_candidates,
+                                                          i);
     const loom_amdgpu_matrix_fragment_layout_t* layout =
         loom_amdgpu_matrix_contract_descriptor_fragment_layout(descriptor);
     if (layout == NULL ||
-        !loom_amdgpu_matrix_contract_is_available(descriptor, feature_bits,
-                                                  wave_size) ||
-        !loom_amdgpu_descriptor_set_has_ref(descriptor_set,
-                                            descriptor->low_descriptor_ref)) {
+        (contract_candidates == NULL &&
+         !loom_amdgpu_fragment_memory_contract_is_available(
+             descriptor, descriptor_set, feature_bits, wave_size))) {
       continue;
     }
 
@@ -2707,6 +2759,60 @@ static iree_status_t loom_amdgpu_get_fragment_memory_cache(
   return loom_low_lower_get_or_allocate_target_state(
       context, &loom_amdgpu_fragment_memory_cache_state_key,
       sizeof(**out_cache), (void**)out_cache);
+}
+
+static iree_status_t loom_amdgpu_get_fragment_memory_contract_candidates(
+    loom_low_lower_context_t* context,
+    const loom_amdgpu_fragment_memory_contract_candidate_list_t**
+        out_candidates) {
+  *out_candidates = NULL;
+  const loom_target_bundle_t* bundle = loom_low_lower_context_bundle(context);
+  const loom_low_descriptor_set_t* descriptor_set =
+      loom_low_lower_context_descriptor_set(context);
+  if (bundle == NULL || bundle->snapshot == NULL || descriptor_set == NULL) {
+    return iree_ok_status();
+  }
+
+  const loom_amdgpu_matrix_feature_bits_t feature_bits =
+      loom_amdgpu_fragment_memory_feature_bits_from_target_ref(
+          loom_low_lower_context_module(context),
+          loom_low_lower_context_target_ref(context));
+  const uint32_t wave_size = bundle->snapshot->subgroup_size;
+  loom_amdgpu_fragment_memory_cache_t* cache = NULL;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_get_fragment_memory_cache(context, &cache));
+  loom_amdgpu_fragment_memory_contract_candidate_list_t* candidates =
+      &cache->contract_candidates;
+  if (candidates->descriptor_set == descriptor_set &&
+      candidates->feature_bits == feature_bits &&
+      candidates->wave_size == wave_size) {
+    *out_candidates = candidates;
+    return iree_ok_status();
+  }
+
+  const iree_host_size_t descriptor_count =
+      loom_amdgpu_matrix_contract_descriptor_count();
+  const loom_amdgpu_matrix_contract_descriptor_t** descriptors = NULL;
+  IREE_RETURN_IF_ERROR(loom_low_lower_allocate_scratch_array(
+      context, descriptor_count, sizeof(*descriptors), (void**)&descriptors));
+  iree_host_size_t candidate_count = 0;
+  for (iree_host_size_t i = 0; i < descriptor_count; ++i) {
+    const loom_amdgpu_matrix_contract_descriptor_t* descriptor =
+        loom_amdgpu_matrix_contract_descriptor_at(i);
+    if (!loom_amdgpu_fragment_memory_contract_is_available(
+            descriptor, descriptor_set, feature_bits, wave_size)) {
+      continue;
+    }
+    descriptors[candidate_count++] = descriptor;
+  }
+  *candidates = (loom_amdgpu_fragment_memory_contract_candidate_list_t){
+      .descriptor_set = descriptor_set,
+      .feature_bits = feature_bits,
+      .wave_size = wave_size,
+      .descriptors = descriptors,
+      .descriptor_count = candidate_count,
+  };
+  *out_candidates = candidates;
+  return iree_ok_status();
 }
 
 static bool loom_amdgpu_fragment_memory_lane_id_cache_matches(
@@ -3718,11 +3824,13 @@ static void loom_amdgpu_fragment_memory_apply_fp8_load_strategy_flags(
   plan->packet_flags |= packet_flags;
 }
 
-iree_status_t loom_amdgpu_analyze_vector_fragment_memory_plan(
+static iree_status_t loom_amdgpu_analyze_vector_fragment_memory_plan_impl(
     const loom_module_t* module, const loom_value_fact_table_t* fact_table,
     const loom_view_region_table_t* view_regions,
     const loom_target_bundle_t* bundle,
     const loom_low_descriptor_set_t* descriptor_set,
+    const loom_amdgpu_fragment_memory_contract_candidate_list_t*
+        contract_candidates,
     loom_symbol_ref_t target_ref, loom_func_like_t source_function,
     const loom_op_t* source_op,
     loom_amdgpu_memory_operation_kind_t operation_kind,
@@ -3735,8 +3843,12 @@ iree_status_t loom_amdgpu_analyze_vector_fragment_memory_plan(
       .view_regions = view_regions,
       .bundle = bundle,
       .descriptor_set = descriptor_set,
-      .feature_bits = loom_amdgpu_fragment_memory_feature_bits_from_target_ref(
-          module, target_ref),
+      .contract_candidates = contract_candidates,
+      .feature_bits =
+          contract_candidates != NULL
+              ? contract_candidates->feature_bits
+              : loom_amdgpu_fragment_memory_feature_bits_from_target_ref(
+                    module, target_ref),
       .source_function = source_function,
   };
   loom_amdgpu_fragment_memory_source_t source = {0};
@@ -3760,6 +3872,21 @@ iree_status_t loom_amdgpu_analyze_vector_fragment_memory_plan(
   return iree_ok_status();
 }
 
+iree_status_t loom_amdgpu_analyze_vector_fragment_memory_plan(
+    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
+    const loom_view_region_table_t* view_regions,
+    const loom_target_bundle_t* bundle,
+    const loom_low_descriptor_set_t* descriptor_set,
+    loom_symbol_ref_t target_ref, loom_func_like_t source_function,
+    const loom_op_t* source_op,
+    loom_amdgpu_memory_operation_kind_t operation_kind,
+    loom_amdgpu_fragment_memory_plan_t* out_plan, bool* out_selected) {
+  return loom_amdgpu_analyze_vector_fragment_memory_plan_impl(
+      module, fact_table, view_regions, bundle, descriptor_set,
+      /*contract_candidates=*/NULL, target_ref, source_function, source_op,
+      operation_kind, out_plan, out_selected);
+}
+
 static iree_status_t loom_amdgpu_fragment_memory_select(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_amdgpu_memory_operation_kind_t operation_kind,
@@ -3768,10 +3895,14 @@ static iree_status_t loom_amdgpu_fragment_memory_select(
   const loom_view_region_table_t* view_regions = NULL;
   IREE_RETURN_IF_ERROR(
       loom_low_lower_context_view_regions(context, &view_regions));
-  return loom_amdgpu_analyze_vector_fragment_memory_plan(
+  const loom_amdgpu_fragment_memory_contract_candidate_list_t*
+      contract_candidates = NULL;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_get_fragment_memory_contract_candidates(
+      context, &contract_candidates));
+  return loom_amdgpu_analyze_vector_fragment_memory_plan_impl(
       module, loom_low_lower_context_fact_table(context), view_regions,
       loom_low_lower_context_bundle(context),
-      loom_low_lower_context_descriptor_set(context),
+      loom_low_lower_context_descriptor_set(context), contract_candidates,
       loom_low_lower_context_target_ref(context),
       loom_low_lower_context_source_function(context), source_op,
       operation_kind, out_plan, out_selected);
@@ -3844,9 +3975,13 @@ iree_status_t loom_amdgpu_select_vector_fragment_repack_plan(
     out_plan->strategy = LOOM_AMDGPU_FRAGMENT_REPACK_STRATEGY_ALIAS;
   } else {
     out_plan->reason = reason;
+    const loom_amdgpu_fragment_memory_contract_candidate_list_t*
+        contract_candidates = NULL;
+    IREE_RETURN_IF_ERROR(loom_amdgpu_get_fragment_memory_contract_candidates(
+        context, &contract_candidates));
     (void)loom_amdgpu_fragment_repack_select_target_strategy(
         module, loom_low_lower_context_bundle(context),
-        loom_low_lower_context_descriptor_set(context),
+        loom_low_lower_context_descriptor_set(context), contract_candidates,
         loom_low_lower_context_target_ref(context), out_plan);
   }
   *out_selected = true;
