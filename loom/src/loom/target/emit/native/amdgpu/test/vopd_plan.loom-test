@@ -71,6 +71,20 @@ low.func.def target(@gfx11_target) @gfx11_vopd_plan_delay_alu_binary_pairs(%a0: 
 
 // ====
 
+// RUN: emit amdgpu-vopd-plan-json @gfx11_vopd_plan_trans_result_window fixed=%input0:physical_register:0:1 fixed=%input1:physical_register:1:1 fixed=%input2:physical_register:2:1 fixed=%bias0:physical_register:3:1 fixed=%bias1:physical_register:4:1 fixed=%rcp:physical_register:7:1 fixed=%product0:physical_register:5:1 fixed=%product1:physical_register:6:1
+amdgpu.target<gfx1100> @gfx11_target
+low.func.def target(@gfx11_target) @gfx11_vopd_plan_trans_result_window(%input0: reg<amdgpu.vgpr>, %input1: reg<amdgpu.vgpr>, %input2: reg<amdgpu.vgpr>, %bias0: reg<amdgpu.vgpr>, %bias1: reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %rcp = v_rcp_f32 %input0
+  %product0 = v_mul_f32 %input1, %bias0
+  %product1 = v_mul_f32 %input2, %bias1
+  return
+}
+
+// ----
+{"format":"loom.amdgpu.vopd_plan.v0","function":"gfx11_vopd_plan_trans_result_window","target":"gfx11_target","descriptor_set":"amdgpu.rdna3.core","pair_count":0,"rejection_count":1,"packet_count":4,"pairs":[],"rejections":[{"index":0,"reason":"trans_result_window","block":0,"first":{"packet":1,"node":1,"descriptor":"amdgpu.v_mul_f32","op_id":3,"op":"mul_f32","vdst":5,"src0":1,"vsrc1":3,"flags":0,"literal_u32":null},"second":{"packet":2,"node":2,"descriptor":"amdgpu.v_mul_f32","op_id":3,"op":"mul_f32","vdst":6,"src0":2,"vsrc1":4,"flags":0,"literal_u32":null}}],"packets":[{"index":0,"role":"none","pair":null},{"index":1,"role":"none","pair":null},{"index":2,"role":"none","pair":null},{"index":3,"role":"none","pair":null}]}
+
+// ====
+
 // RUN: emit amdgpu-vopd-plan-json @gfx11_vopd_plan_minmax_f32_pairs fixed=%a0:physical_register:0:1 fixed=%b0:physical_register:1:1 fixed=%a1:physical_register:2:1 fixed=%b1:physical_register:3:1 fixed=%min0:physical_register:4:1 fixed=%min1:physical_register:5:1 fixed=%max0:physical_register:6:1 fixed=%max1:physical_register:7:1
 amdgpu.target<gfx1100> @gfx11_target
 low.func.def target(@gfx11_target) @gfx11_vopd_plan_minmax_f32_pairs(%a0: reg<amdgpu.vgpr>, %b0: reg<amdgpu.vgpr>, %a1: reg<amdgpu.vgpr>, %b1: reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {

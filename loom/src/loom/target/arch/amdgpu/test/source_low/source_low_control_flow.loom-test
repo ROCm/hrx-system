@@ -307,7 +307,6 @@ low.func.def target(@target) @uniform_branch_condition_combined_with_lane_mask_a
   v_add_u32 v1, v1, v0
   s_delay_alu instid0(VALU_DEP_1)
   v_cndmask_b32 v1, v0, v1, s[8:9]
-  s_delay_alu instid0(VALU_DEP_1)
   global_store_b32 v0, v1, s[4:5] offset:0
   s_waitcnt_vscnt vscnt(0)
   s_endpgm

@@ -218,6 +218,8 @@ typedef enum loom_amdgpu_vopd_rejection_reason_e {
   LOOM_AMDGPU_VOPD_REJECTION_REASON_REGISTER_CONSTRAINTS = 4,
   // Native wait insertion before the second component prevents fusion.
   LOOM_AMDGPU_VOPD_REJECTION_REASON_SECOND_PACKET_HAS_INSERTION = 5,
+  // VOPD compression would invalidate the active TRANS-result wait proof.
+  LOOM_AMDGPU_VOPD_REJECTION_REASON_TRANS_RESULT_WINDOW = 6,
 } loom_amdgpu_vopd_rejection_reason_t;
 
 typedef enum loom_amdgpu_vopd_pair_flag_bits_e {

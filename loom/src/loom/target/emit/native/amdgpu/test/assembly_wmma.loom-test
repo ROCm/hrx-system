@@ -138,13 +138,9 @@ low.func.def target(@gfx11_target) @gfx11_wmma_half_result_store_tail(%lds_addr:
   v_cvt_f32_f16 v2, v5
   v_cvt_f32_f16 v3, v6
   v_cvt_f32_f16 v4, v7
-  s_delay_alu instid0(VALU_DEP_4)
   global_store_b32 v1, v0, s[0:1] offset:0
-  s_delay_alu instid0(VALU_DEP_3)
   global_store_b32 v1, v2, s[0:1] offset:4
-  s_delay_alu instid0(VALU_DEP_2)
   global_store_b32 v1, v3, s[0:1] offset:8
-  s_delay_alu instid0(VALU_DEP_1)
   global_store_b32 v1, v4, s[0:1] offset:12
   s_waitcnt_vscnt vscnt(0)
   s_endpgm
