@@ -114,6 +114,7 @@ loom_cc_library(
     loom::tooling::execution::compile_report_capture
     loom::tooling::execution::session
     loom::tooling::testbench
+    loom::tooling::testbench::invocation
     loom::tooling::testbench::requirements
     loom::tooling::testbench::value_materializer
     loom::util::fact_table

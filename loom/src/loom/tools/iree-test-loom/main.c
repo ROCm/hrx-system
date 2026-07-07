@@ -261,6 +261,11 @@ static iree_status_t iree_test_loom_configure_hal_actual_sequence(
           .fn = loom_run_hal_testbench_actual_sequence_invoke,
           .user_data = out_sequence,
       };
+  execution_options->invocation.query_issue =
+      (loom_testbench_invocation_issue_query_t){
+          .fn = loom_run_hal_testbench_actual_sequence_query_issue,
+          .user_data = out_sequence,
+      };
   return iree_ok_status();
 }
 
@@ -502,6 +507,8 @@ static void iree_test_loom_print_agents_markdown(FILE* stream) {
       "iree-test-loom module.loom --case=@smoke | jq '.failed_sample_count'\n"
       "iree-test-loom module.loom | jq '.samples[] | {case, sample_ordinal, "
       "passed}'\n"
+      "iree-test-loom module.loom | jq '.samples[] | select(.issues) | "
+      "{case, issue: .issues[]}'\n"
       "iree-test-loom module.loom | jq '.skipped_cases[]? | {case, provider, "
       "op, code, provider_code}'\n"
       "iree-test-loom module.loom | jq '.planning_issues[]? | {case, kind, "
@@ -514,7 +521,13 @@ static void iree_test_loom_print_agents_markdown(FILE* stream) {
       "`skipped_cases`,\n"
       "and `planning_issues`. Skipped cases use\n"
       "stable `op` and `code` fields; `provider_code` is provider-defined and\n"
-      "`display_message` is human-facing only. Planning issues carry stable\n"
+      "`display_message` is human-facing only. Failed samples may include "
+      "`issues`\n"
+      "when execution could not reach expectations, such as a compile "
+      "rejection\n"
+      "with stable `category`, `provider`, `stage`, and `kind` fields. "
+      "Planning\n"
+      "issues carry stable\n"
       "`kind`, `case`, `op`, `source_location`, and optional `fix_hint` "
       "fields.\n"
       "A nonzero failed sample or planning issue count makes the process fail\n"

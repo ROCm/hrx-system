@@ -34,6 +34,35 @@ typedef struct loom_testbench_invocation_callback_t {
   void* user_data;
 } loom_testbench_invocation_callback_t;
 
+typedef enum loom_testbench_sample_issue_category_e {
+  LOOM_TESTBENCH_SAMPLE_ISSUE_NONE = 0,
+  LOOM_TESTBENCH_SAMPLE_ISSUE_COMPILE_REJECTED = 1,
+} loom_testbench_sample_issue_category_t;
+
+typedef struct loom_testbench_sample_issue_t {
+  // Stable issue category.
+  loom_testbench_sample_issue_category_t category;
+  // Provider surface that produced the issue.
+  iree_string_view_t provider;
+  // Product stage that produced the issue.
+  iree_string_view_t stage;
+  // Stable provider-specific issue kind.
+  iree_string_view_t kind;
+  // Optional human-facing explanation.
+  iree_string_view_t message;
+} loom_testbench_sample_issue_t;
+
+typedef iree_status_t(IREE_API_PTR* loom_testbench_invocation_issue_query_fn_t)(
+    void* user_data, const loom_testbench_invocation_plan_t* invocation,
+    loom_testbench_sample_issue_t* out_issue);
+
+typedef struct loom_testbench_invocation_issue_query_t {
+  // Query function, or NULL when the provider has no sample issues.
+  loom_testbench_invocation_issue_query_fn_t fn;
+  // Caller-owned payload passed to |fn|.
+  void* user_data;
+} loom_testbench_invocation_issue_query_t;
+
 typedef struct loom_testbench_oracle_provider_t {
   // Stable provider name referenced by check.oracle.call.
   iree_string_view_t name;
@@ -74,6 +103,8 @@ typedef struct loom_testbench_invocation_options_t {
   // Callback used for semantic call-like invocations of the function under
   // test.
   loom_testbench_invocation_callback_t invoke_actual;
+  // Optional query for provider-owned sample issues after each invocation.
+  loom_testbench_invocation_issue_query_t query_issue;
   // Named oracle providers visible to check.oracle.call.
   loom_testbench_oracle_provider_list_t oracle_providers;
 } loom_testbench_invocation_options_t;
@@ -92,6 +123,8 @@ typedef struct loom_testbench_prepared_invocation_t {
 typedef struct loom_testbench_invocation_schedule_t {
   // Prepared invocations in source order.
   const loom_testbench_prepared_invocation_t* invocations;
+  // Optional query for provider-owned sample issues after each invocation.
+  loom_testbench_invocation_issue_query_t query_issue;
   // Number of entries in |invocations|.
   iree_host_size_t invocation_count;
   // Maximum input arity across prepared invocations.
@@ -117,10 +150,16 @@ typedef struct loom_testbench_invocation_executor_t {
   loom_testbench_value_t* inputs;
   // Move-owned result values reused for each invocation.
   loom_testbench_value_t* results;
+  // Provider-owned issues recorded during the current sample.
+  loom_testbench_sample_issue_t* issues;
   // Number of entries in |inputs|.
   iree_host_size_t input_capacity;
   // Number of entries in |results|.
   iree_host_size_t result_capacity;
+  // Number of entries available in |issues|.
+  iree_host_size_t issue_capacity;
+  // Number of entries populated in |issues| for the current sample.
+  iree_host_size_t issue_count;
 } loom_testbench_invocation_executor_t;
 
 // Initializes reusable scratch storage for one prepared invocation schedule.
