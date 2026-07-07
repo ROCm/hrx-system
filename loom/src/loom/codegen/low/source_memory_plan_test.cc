@@ -358,6 +358,82 @@ TEST_F(SourceMemoryPlanTest, StaticDenseLoadIncludesViewBase) {
   EXPECT_EQ(plan.dynamic_view_base_term_count, 0u);
 }
 
+TEST_F(SourceMemoryPlanTest, ViewMemoryOperationKindUsesInterfaceShape) {
+  loom_value_id_t buffer = DefineBufferArg();
+  loom_value_id_t value = DefineArg(loom_type_scalar(LOOM_SCALAR_TYPE_I32));
+  loom_value_id_t replacement =
+      DefineArg(loom_type_scalar(LOOM_SCALAR_TYPE_I32));
+  loom_value_id_t layout = BuildDenseLayout();
+  loom_value_id_t base_offset =
+      loom_index_constant_result(BuildOffsetConstant(0));
+
+  loom_op_t* view_op = nullptr;
+  IREE_ASSERT_OK(
+      loom_buffer_view_build(&builder_, buffer, base_offset,
+                             ViewType1D(LOOM_SCALAR_TYPE_I32, 16, layout),
+                             LOOM_LOCATION_UNKNOWN, &view_op));
+  int64_t static_indices[] = {0};
+  loom_op_t* load_op = nullptr;
+  IREE_ASSERT_OK(loom_view_load_build(
+      &builder_, 0, loom_buffer_view_result(view_op), nullptr, 0,
+      static_indices, IREE_ARRAYSIZE(static_indices), 0, 0,
+      loom_type_scalar(LOOM_SCALAR_TYPE_I32), LOOM_LOCATION_UNKNOWN, &load_op));
+  loom_op_t* store_op = nullptr;
+  IREE_ASSERT_OK(loom_view_store_build(
+      &builder_, 0, value, loom_buffer_view_result(view_op), nullptr, 0,
+      static_indices, IREE_ARRAYSIZE(static_indices), 0, 0,
+      LOOM_LOCATION_UNKNOWN, &store_op));
+  loom_op_t* atomic_reduce_op = nullptr;
+  IREE_ASSERT_OK(loom_view_atomic_reduce_build(
+      &builder_, 0, LOOM_ATOMIC_KIND_ADDI, value,
+      loom_buffer_view_result(view_op), nullptr, 0, static_indices,
+      IREE_ARRAYSIZE(static_indices), LOOM_ATOMIC_ORDERING_RELAXED,
+      LOOM_ATOMIC_SCOPE_WORKGROUP, 0, 0, LOOM_LOCATION_UNKNOWN,
+      &atomic_reduce_op));
+  loom_op_t* atomic_rmw_op = nullptr;
+  IREE_ASSERT_OK(loom_view_atomic_rmw_build(
+      &builder_, 0, LOOM_ATOMIC_KIND_ADDI, value,
+      loom_buffer_view_result(view_op), nullptr, 0, static_indices,
+      IREE_ARRAYSIZE(static_indices), LOOM_ATOMIC_ORDERING_RELAXED,
+      LOOM_ATOMIC_SCOPE_WORKGROUP, 0, 0, loom_type_scalar(LOOM_SCALAR_TYPE_I32),
+      LOOM_LOCATION_UNKNOWN, &atomic_rmw_op));
+  loom_op_t* atomic_cmpxchg_op = nullptr;
+  IREE_ASSERT_OK(loom_view_atomic_cmpxchg_build(
+      &builder_, 0, value, replacement, loom_buffer_view_result(view_op),
+      nullptr, 0, static_indices, IREE_ARRAYSIZE(static_indices),
+      LOOM_ATOMIC_ORDERING_ACQ_REL, LOOM_ATOMIC_ORDERING_ACQUIRE,
+      LOOM_ATOMIC_SCOPE_WORKGROUP, 0, 0, loom_type_scalar(LOOM_SCALAR_TYPE_I32),
+      LOOM_LOCATION_UNKNOWN, &atomic_cmpxchg_op));
+  loom_op_t* prefetch_op = nullptr;
+  IREE_ASSERT_OK(loom_view_prefetch_build(
+      &builder_, loom_buffer_view_result(view_op), nullptr, 0, static_indices,
+      IREE_ARRAYSIZE(static_indices), LOOM_VIEW_PREFETCH_INTENT_READ,
+      LOOM_VIEW_PREFETCH_LOCALITY_L2, LOOM_LOCATION_UNKNOWN, &prefetch_op));
+
+  loom_value_fact_table_t facts = {0};
+  ComputeFacts(&facts);
+  struct Case {
+    const loom_op_t* op;
+    loom_low_source_memory_operation_kind_t expected_kind;
+  };
+  const Case cases[] = {
+      {load_op, LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD},
+      {store_op, LOOM_LOW_SOURCE_MEMORY_OPERATION_STORE},
+      {atomic_reduce_op, LOOM_LOW_SOURCE_MEMORY_OPERATION_ATOMIC_REDUCE},
+      {atomic_rmw_op, LOOM_LOW_SOURCE_MEMORY_OPERATION_ATOMIC_RMW},
+      {atomic_cmpxchg_op, LOOM_LOW_SOURCE_MEMORY_OPERATION_ATOMIC_CMPXCHG},
+      {prefetch_op, LOOM_LOW_SOURCE_MEMORY_OPERATION_PREFETCH},
+  };
+  for (const Case& test_case : cases) {
+    loom_low_source_memory_access_plan_t plan = {};
+    loom_low_source_memory_access_diagnostic_t diagnostic = {0};
+    ASSERT_TRUE(BuildPlan(&facts, test_case.op, &plan, &diagnostic));
+    EXPECT_EQ(plan.operation_kind, test_case.expected_kind);
+    EXPECT_EQ(plan.view_value_id, loom_buffer_view_result(view_op));
+    EXPECT_EQ(plan.vector_lane_count, 1u);
+  }
+}
+
 TEST_F(SourceMemoryPlanTest, VectorAtomicReduceTracksIdentityIotaOffsets) {
   loom_value_id_t root_buffer = DefineBufferArg();
   loom_value_id_t buffer = BuildAligned(root_buffer, 4);
