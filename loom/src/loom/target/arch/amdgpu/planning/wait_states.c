@@ -89,6 +89,45 @@ typedef enum loom_amdgpu_wait_state_matrix_result_use_e {
   LOOM_AMDGPU_WAIT_STATE_MATRIX_RESULT_USE_MATRIX_SRC_AB = 5,
 } loom_amdgpu_wait_state_matrix_result_use_t;
 
+enum {
+  LOOM_AMDGPU_WAIT_STATE_MATRIX_FAMILY_USE_COUNT =
+      LOOM_AMDGPU_MATRIX_FAMILY_SWMMAC + 1,
+  LOOM_AMDGPU_WAIT_STATE_MATRIX_OPERAND_USE_CAPACITY = 4,
+};
+
+typedef struct loom_amdgpu_wait_state_matrix_family_use_row_t {
+  // Non-zero when this matrix family reads VALU results as matrix inputs.
+  uint8_t reads_valu_results;
+  // Matrix result use kind for each packet operand index.
+  loom_amdgpu_wait_state_matrix_result_use_t
+      operand_uses[LOOM_AMDGPU_WAIT_STATE_MATRIX_OPERAND_USE_CAPACITY];
+} loom_amdgpu_wait_state_matrix_family_use_row_t;
+
+static const loom_amdgpu_wait_state_matrix_family_use_row_t
+    kMatrixFamilyUseRows[LOOM_AMDGPU_WAIT_STATE_MATRIX_FAMILY_USE_COUNT] = {
+        [LOOM_AMDGPU_MATRIX_FAMILY_MFMA] =
+            {
+                .reads_valu_results = 1,
+                .operand_uses =
+                    {
+                        LOOM_AMDGPU_WAIT_STATE_MATRIX_RESULT_USE_MATRIX_SRC_AB,
+                        LOOM_AMDGPU_WAIT_STATE_MATRIX_RESULT_USE_MATRIX_SRC_AB,
+                        LOOM_AMDGPU_WAIT_STATE_MATRIX_RESULT_USE_MATRIX_SRCC,
+                    },
+            },
+        [LOOM_AMDGPU_MATRIX_FAMILY_SMFMAC] =
+            {
+                .reads_valu_results = 1,
+                .operand_uses =
+                    {
+                        LOOM_AMDGPU_WAIT_STATE_MATRIX_RESULT_USE_MATRIX_SRCC,
+                        LOOM_AMDGPU_WAIT_STATE_MATRIX_RESULT_USE_MATRIX_SRC_AB,
+                        LOOM_AMDGPU_WAIT_STATE_MATRIX_RESULT_USE_MATRIX_SRC_AB,
+                        LOOM_AMDGPU_WAIT_STATE_MATRIX_RESULT_USE_MATRIX_SRC_AB,
+                    },
+            },
+};
+
 typedef struct loom_amdgpu_wait_state_hazard_t {
   // Active-state flags for this physical VGPR.
   loom_amdgpu_wait_state_vgpr_flags_t flags;
@@ -545,44 +584,25 @@ static bool loom_amdgpu_wait_state_matrix_result_wait_cycles(
 
 static bool loom_amdgpu_wait_state_matrix_reads_valu_results(
     const loom_amdgpu_matrix_contract_descriptor_t* contract) {
-  switch (contract->family) {
-    case LOOM_AMDGPU_MATRIX_FAMILY_MFMA:
-    case LOOM_AMDGPU_MATRIX_FAMILY_SMFMAC:
-      return true;
-    default:
-      return false;
+  if ((uint32_t)contract->family >=
+      LOOM_AMDGPU_WAIT_STATE_MATRIX_FAMILY_USE_COUNT) {
+    return false;
   }
+  return kMatrixFamilyUseRows[contract->family].reads_valu_results != 0;
 }
 
 static loom_amdgpu_wait_state_matrix_result_use_t
 loom_amdgpu_wait_state_matrix_operand_result_use(
     const loom_amdgpu_matrix_contract_descriptor_t* contract,
     uint16_t packet_operand_index) {
-  switch (contract->family) {
-    case LOOM_AMDGPU_MATRIX_FAMILY_MFMA:
-      switch (packet_operand_index) {
-        case 0:
-        case 1:
-          return LOOM_AMDGPU_WAIT_STATE_MATRIX_RESULT_USE_MATRIX_SRC_AB;
-        case 2:
-          return LOOM_AMDGPU_WAIT_STATE_MATRIX_RESULT_USE_MATRIX_SRCC;
-        default:
-          return LOOM_AMDGPU_WAIT_STATE_MATRIX_RESULT_USE_UNKNOWN;
-      }
-    case LOOM_AMDGPU_MATRIX_FAMILY_SMFMAC:
-      switch (packet_operand_index) {
-        case 0:
-          return LOOM_AMDGPU_WAIT_STATE_MATRIX_RESULT_USE_MATRIX_SRCC;
-        case 1:
-        case 2:
-        case 3:
-          return LOOM_AMDGPU_WAIT_STATE_MATRIX_RESULT_USE_MATRIX_SRC_AB;
-        default:
-          return LOOM_AMDGPU_WAIT_STATE_MATRIX_RESULT_USE_UNKNOWN;
-      }
-    default:
-      return LOOM_AMDGPU_WAIT_STATE_MATRIX_RESULT_USE_UNKNOWN;
+  if ((uint32_t)contract->family >=
+          LOOM_AMDGPU_WAIT_STATE_MATRIX_FAMILY_USE_COUNT ||
+      packet_operand_index >=
+          LOOM_AMDGPU_WAIT_STATE_MATRIX_OPERAND_USE_CAPACITY) {
+    return LOOM_AMDGPU_WAIT_STATE_MATRIX_RESULT_USE_UNKNOWN;
   }
+  return kMatrixFamilyUseRows[contract->family]
+      .operand_uses[packet_operand_index];
 }
 
 static bool loom_amdgpu_wait_state_descriptor_uses_vector_alu(
