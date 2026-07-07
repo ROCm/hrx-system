@@ -103,6 +103,24 @@ endif()
 if(LOOM_TARGET_ARCH_AMDGPU)
 loom_cc_library(
   NAME
+    structural_packet
+  HDRS
+    "structural_packet.h"
+  SRCS
+    "structural_packet.c"
+  DEPS
+    iree::base
+    loom::codegen::low::allocation
+    loom::codegen::low::move_sequence
+    loom::ir
+    loom::ops::low
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU)
+loom_cc_library(
+  NAME
     wait_states
   HDRS
     "wait_states.h"
@@ -111,10 +129,10 @@ loom_cc_library(
   DEPS
     ::descriptor_semantics
     ::matrix_wait_states
+    ::structural_packet
     iree::base
     iree::base::internal::arena
     loom::codegen::low::allocation
-    loom::codegen::low::move_sequence
     loom::codegen::low::packet
     loom::codegen::low::packet_hazard_plan
     loom::codegen::low::packet_hazard_plan_json
@@ -155,6 +173,7 @@ loom_cc_library(
     "wait_plan.c"
   DEPS
     ::descriptor_semantics
+    ::structural_packet
     ::wait_counters
     ::wait_packet_tables
     iree::base
@@ -162,7 +181,6 @@ loom_cc_library(
     iree::base::internal::arena
     loom::codegen::low::allocation
     loom::codegen::low::descriptors
-    loom::codegen::low::move_sequence
     loom::codegen::low::packet
     loom::codegen::low::packet_hazard_plan
     loom::codegen::low::packet_hazard_plan_json

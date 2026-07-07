@@ -127,14 +127,27 @@ loom_cc_test(
 )
 
 loom_cc_library(
+    name = "structural_packet",
+    srcs = ["structural_packet.c"],
+    hdrs = ["structural_packet.h"],
+    deps = [
+        "//loom/src/loom/codegen/low:allocation",
+        "//loom/src/loom/codegen/low:move_sequence",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/low",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
     name = "wait_states",
     srcs = ["wait_states.c"],
     hdrs = ["wait_states.h"],
     deps = [
         ":descriptor_semantics",
         ":matrix_wait_states",
+        ":structural_packet",
         "//loom/src/loom/codegen/low:allocation",
-        "//loom/src/loom/codegen/low:move_sequence",
         "//loom/src/loom/codegen/low:packet",
         "//loom/src/loom/codegen/low:packet_hazard_plan",
         "//loom/src/loom/codegen/low:packet_hazard_plan_json",
@@ -170,11 +183,11 @@ loom_cc_library(
     visibility = _AMDGPU_ROOT_VISIBILITY + _AMDGPU_LOWER_VISIBILITY,
     deps = [
         ":descriptor_semantics",
+        ":structural_packet",
         ":wait_counters",
         ":wait_packet_tables",
         "//loom/src/loom/codegen/low:allocation",
         "//loom/src/loom/codegen/low:descriptors",
-        "//loom/src/loom/codegen/low:move_sequence",
         "//loom/src/loom/codegen/low:packet",
         "//loom/src/loom/codegen/low:packet_hazard_plan",
         "//loom/src/loom/codegen/low:packet_hazard_plan_json",
