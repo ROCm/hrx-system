@@ -323,6 +323,18 @@ check.case public @id4_qwen3_vl_attention_online_bf16_qwen_slice_case {
   check.return
 }
 
+check.case public @id4_qwen3_vl_attention_online_bf16_qwen_451_case {
+  %query = check.generate.fill value(0.0) : tensor<480x4096xbf16>
+  %key = check.generate.fill value(0.0) : tensor<480x1024xbf16>
+  %packed_value = check.generate.fill value(0.0) : tensor<1024x480xbf16>
+  %attention_mask = check.generate.fill value(0.0) : tensor<480x480xf32>
+  %output = check.generate.fill value(0.0) : tensor<480x4096xbf16>
+  %expected = check.generate.fill value(0.0) : tensor<480x4096xbf16>
+  func.call @id4_qwen3_vl_attention_online_bf16(%query, %key, %packed_value, %attention_mask, %output) : (tensor<480x4096xbf16>, tensor<480x1024xbf16>, tensor<1024x480xbf16>, tensor<480x480xf32>, tensor<480x4096xbf16>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<480x4096xbf16>
+  check.return
+}
+
 check.benchmark<@id4_qwen3_vl_attention_online_bf16_single_token_case> @id4_qwen3_vl_attention_online_bf16_single_token
 
 check.benchmark<@id4_qwen3_vl_attention_online_bf16_uniform_softmax_case> @id4_qwen3_vl_attention_online_bf16_uniform_softmax
@@ -330,3 +342,5 @@ check.benchmark<@id4_qwen3_vl_attention_online_bf16_uniform_softmax_case> @id4_q
 check.benchmark<@id4_qwen3_vl_attention_online_bf16_grouped_query_case> @id4_qwen3_vl_attention_online_bf16_grouped_query
 
 check.benchmark<@id4_qwen3_vl_attention_online_bf16_qwen_slice_case> @id4_qwen3_vl_attention_online_bf16_qwen_slice
+
+check.benchmark<@id4_qwen3_vl_attention_online_bf16_qwen_451_case> @id4_qwen3_vl_attention_online_bf16_qwen_451

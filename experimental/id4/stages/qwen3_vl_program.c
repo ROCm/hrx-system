@@ -764,8 +764,10 @@ typedef enum id4_qwen3_vl_operation_site_e {
   ID4_QWEN3_VL_OPERATION_SITE_FINAL_NORM = 41,
   // Barrier after final decoder RMSNorm.
   ID4_QWEN3_VL_OPERATION_SITE_AFTER_FINAL_NORM = 42,
+  // Barrier after per-layer value projection packing.
+  ID4_QWEN3_VL_OPERATION_SITE_AFTER_VALUE_PACK = 43,
   // Forward output diagnostic site.
-  ID4_QWEN3_VL_OPERATION_SITE_OUTPUT = 43,
+  ID4_QWEN3_VL_OPERATION_SITE_OUTPUT = 44,
 } id4_qwen3_vl_operation_site_t;
 
 typedef enum id4_qwen3_vl_kernel_kind_e {
@@ -862,6 +864,9 @@ typedef enum id4_qwen3_vl_kernel_kind_e {
       42,
   // Online attention kernel that avoids materialized scores/probabilities.
   ID4_QWEN3_VL_KERNEL_ATTENTION_ONLINE_BF16 = 43,
+  // Online BF16 WMMA attention kernel that avoids materialized
+  // scores/probabilities.
+  ID4_QWEN3_VL_KERNEL_ATTENTION_ONLINE_BF16_WMMA = 44,
 } id4_qwen3_vl_kernel_kind_t;
 
 typedef enum id4_qwen3_vl_config_key_e {
@@ -905,7 +910,7 @@ enum {
   ID4_QWEN3_VL_OPERATION_KIND_COUNT = ID4_QWEN3_VL_OPERATION_REGION_CUT + 1,
   ID4_QWEN3_VL_OPERATION_SITE_COUNT = ID4_QWEN3_VL_OPERATION_SITE_OUTPUT + 1,
   ID4_QWEN3_VL_KERNEL_KIND_COUNT =
-      ID4_QWEN3_VL_KERNEL_ATTENTION_ONLINE_BF16 + 1,
+      ID4_QWEN3_VL_KERNEL_ATTENTION_ONLINE_BF16_WMMA + 1,
   ID4_QWEN3_VL_CONFIG_KEY_COUNT =
       ID4_QWEN3_VL_CONFIG_DISPATCH_ELEMENT_COUNT + 1,
 };
@@ -1149,6 +1154,26 @@ static const id4_qwen3_vl_program_linear_wmma_tile_t
 };
 
 static const id4_qwen3_vl_program_linear_wmma_tile_t
+    id4_qwen3_vl_program_linear_wmma_m48n32_tile = {
+        // Number of token rows covered by one WMMA dispatch tile.
+        .token_block = ID4_QWEN3_VL_LINEAR_WMMA_TOKEN_BLOCK_M48,
+        // Number of output rows covered by one WMMA dispatch tile.
+        .output_row_block = ID4_QWEN3_VL_LINEAR_WMMA_OUTPUT_ROW_BLOCK_M32,
+        // Kernel set implementing this tile shape.
+        .kernels =
+            {
+                .direct_output_kernel_kind =
+                    ID4_QWEN3_VL_KERNEL_LINEAR_BF16_BF16_WMMA_M48N32,
+                .compact_rhs_output_kernel_kind =
+                    (id4_qwen3_vl_kernel_kind_t)ID4_QWEN3_VL_KERNEL_KIND_COUNT,
+                .direct_transposed_output_kernel_kind =
+                    (id4_qwen3_vl_kernel_kind_t)ID4_QWEN3_VL_KERNEL_KIND_COUNT,
+                .compact_rhs_transposed_output_kernel_kind =
+                    (id4_qwen3_vl_kernel_kind_t)ID4_QWEN3_VL_KERNEL_KIND_COUNT,
+            },
+};
+
+static const id4_qwen3_vl_program_linear_wmma_tile_t
     id4_qwen3_vl_program_linear_wmma_m64n64_tile = {
         // Number of token rows covered by one WMMA dispatch tile.
         .token_block = ID4_QWEN3_VL_LINEAR_WMMA_TOKEN_BLOCK_M64,
@@ -1279,6 +1304,13 @@ id4_qwen3_vl_program_select_linear_wmma_tile(uint32_t token_count,
        id4_qwen3_vl_program_linear_wmma_m64n64_tile.output_row_block) == 0) {
     return &id4_qwen3_vl_program_linear_wmma_m64n64_tile;
   }
+  if (token_count >= ID4_QWEN3_VL_LINEAR_WMMA_TOKEN_BLOCK_M48 &&
+      (token_count %
+       id4_qwen3_vl_program_linear_wmma_m48n32_tile.token_block) == 0 &&
+      (output_size %
+       id4_qwen3_vl_program_linear_wmma_m48n32_tile.output_row_block) == 0) {
+    return &id4_qwen3_vl_program_linear_wmma_m48n32_tile;
+  }
   const uint32_t m32_remainder =
       token_count % ID4_QWEN3_VL_LINEAR_WMMA_TOKEN_BLOCK_M32;
   if (token_count >= ID4_QWEN3_VL_LINEAR_WMMA_TOKEN_BLOCK_M32 &&
@@ -1295,6 +1327,40 @@ id4_qwen3_vl_program_select_linear_wmma_tile(uint32_t token_count,
          id4_qwen3_vl_program_linear_wmma_m32n32_tile.output_row_block) != 0) {
       return NULL;
     }
+    return &id4_qwen3_vl_program_linear_wmma_m32n32_tile;
+  }
+  if (token_count >= ID4_QWEN3_VL_LINEAR_WMMA_TOKEN_BLOCK_M16 &&
+      (output_size %
+       id4_qwen3_vl_program_linear_wmma_m16n64_tile.output_row_block) == 0) {
+    return &id4_qwen3_vl_program_linear_wmma_m16n64_tile;
+  }
+  return NULL;
+}
+
+static bool id4_qwen3_vl_program_linear_wmma_tile_has_transposed_output(
+    const id4_qwen3_vl_program_linear_wmma_tile_t* wmma_tile) {
+  return id4_qwen3_vl_program_kernel_kind_is_valid(
+             wmma_tile->kernels.direct_transposed_output_kernel_kind) ||
+         id4_qwen3_vl_program_kernel_kind_is_valid(
+             wmma_tile->kernels.compact_rhs_transposed_output_kernel_kind);
+}
+
+static const id4_qwen3_vl_program_linear_wmma_tile_t*
+id4_qwen3_vl_program_select_linear_wmma_transposed_output_tile(
+    uint32_t token_count, uint32_t input_size, uint32_t output_size) {
+  const id4_qwen3_vl_program_linear_wmma_tile_t* wmma_tile =
+      id4_qwen3_vl_program_select_linear_wmma_tile(token_count, input_size,
+                                                   output_size);
+  if (wmma_tile &&
+      id4_qwen3_vl_program_linear_wmma_tile_has_transposed_output(wmma_tile)) {
+    return wmma_tile;
+  }
+  const uint32_t m32_remainder =
+      token_count % ID4_QWEN3_VL_LINEAR_WMMA_TOKEN_BLOCK_M32;
+  if (token_count >= ID4_QWEN3_VL_LINEAR_WMMA_TOKEN_BLOCK_M32 &&
+      m32_remainder < ID4_QWEN3_VL_LINEAR_WMMA_TOKEN_BLOCK_M16 &&
+      (output_size %
+       id4_qwen3_vl_program_linear_wmma_m32n32_tile.output_row_block) == 0) {
     return &id4_qwen3_vl_program_linear_wmma_m32n32_tile;
   }
   if (token_count >= ID4_QWEN3_VL_LINEAR_WMMA_TOKEN_BLOCK_M16 &&
@@ -1585,6 +1651,8 @@ static const id4_qwen3_vl_program_operation_site_entry_t
                                                               "self_attn.k")},
         [ID4_QWEN3_VL_OPERATION_SITE_AFTER_ROTARY_EMBEDDING] =
             {true, IREE_SVL("after_rotary_embedding")},
+        [ID4_QWEN3_VL_OPERATION_SITE_AFTER_VALUE_PACK] =
+            {true, IREE_SVL("after_value_pack")},
         [ID4_QWEN3_VL_OPERATION_SITE_SELF_ATTENTION_SCORES] =
             {true, IREE_SVL("self_attn.scores")},
         [ID4_QWEN3_VL_OPERATION_SITE_AFTER_ATTENTION_SCORES] =
@@ -1818,6 +1886,9 @@ static const id4_pipeline_kernel_ref_t
         [ID4_QWEN3_VL_KERNEL_ATTENTION_ONLINE_BF16] =
             {IREE_SVL("qwen3_vl/attention_online_bf16"),
              IREE_SVL("id4_qwen3_vl_attention_online_bf16")},
+        [ID4_QWEN3_VL_KERNEL_ATTENTION_ONLINE_BF16_WMMA] =
+            {IREE_SVL("qwen3_vl/attention_online_bf16_wmma"),
+             IREE_SVL("id4_qwen3_vl_attention_online_bf16_bf16_wmma")},
 };
 
 static const iree_string_view_t id4_qwen3_vl_program_config_keys
@@ -2145,6 +2216,22 @@ static const iree_string_view_t id4_qwen3_vl_program_config_keys
                     "id4.qwen3_vl.attention_online.key_value_head_count"),
                 [ID4_QWEN3_VL_CONFIG_HEAD_SIZE] =
                     IREE_SVL("id4.qwen3_vl.attention_online.head_size"),
+            },
+        [ID4_QWEN3_VL_KERNEL_ATTENTION_ONLINE_BF16_WMMA] =
+            {
+                [ID4_QWEN3_VL_CONFIG_TOKEN_COUNT] =
+                    IREE_SVL("id4.qwen3_vl.attention_online_wmma.token_count"),
+                [ID4_QWEN3_VL_CONFIG_DISPATCH_TOKEN_COUNT] = IREE_SVL(
+                    "id4.qwen3_vl.attention_online_wmma.dispatch_token_count"),
+                [ID4_QWEN3_VL_CONFIG_HIDDEN_SIZE] =
+                    IREE_SVL("id4.qwen3_vl.attention_online_wmma.hidden_size"),
+                [ID4_QWEN3_VL_CONFIG_ATTENTION_HEAD_COUNT] = IREE_SVL(
+                    "id4.qwen3_vl.attention_online_wmma.attention_head_count"),
+                [ID4_QWEN3_VL_CONFIG_KEY_VALUE_HEAD_COUNT] =
+                    IREE_SVL("id4.qwen3_vl.attention_online_wmma."
+                             "key_value_head_count"),
+                [ID4_QWEN3_VL_CONFIG_HEAD_SIZE] =
+                    IREE_SVL("id4.qwen3_vl.attention_online_wmma.head_size"),
             },
         [ID4_QWEN3_VL_KERNEL_MLP_GATE_UP_SILU_PRODUCT_BF16_WMMA_M16N32] =
             {
@@ -3364,7 +3451,7 @@ static bool id4_qwen3_vl_program_select_value_projection_packed_kernel(
     return false;
   }
   const id4_qwen3_vl_program_linear_wmma_tile_t* wmma_tile =
-      id4_qwen3_vl_program_select_linear_wmma_tile(
+      id4_qwen3_vl_program_select_linear_wmma_transposed_output_tile(
           token_capacity, options->model.hidden_size,
           id4_qwen3_vl_program_key_value_width(&options->model));
   if (!wmma_tile || (token_capacity % wmma_tile->token_block) != 0) {
@@ -3815,98 +3902,12 @@ static iree_status_t id4_qwen3_vl_program_author_attention_online_packed_value(
   };
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_dispatch_attention(
       builder, layer_ordinal, ID4_QWEN3_VL_OPERATION_SITE_SELF_ATTENTION,
-      ID4_QWEN3_VL_KERNEL_ATTENTION_ONLINE_BF16, IREE_ARRAYSIZE(config_values),
-      config_values, IREE_ARRAYSIZE(bindings), bindings));
+      ID4_QWEN3_VL_KERNEL_ATTENTION_ONLINE_BF16_WMMA,
+      IREE_ARRAYSIZE(config_values), config_values, IREE_ARRAYSIZE(bindings),
+      bindings));
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_zero_bf16_tail(
       builder, ID4_QWEN3_VL_TENSOR_LAYER_ATTENTION_CONTEXT, layer_ordinal,
       *out_context, &context_coverage));
-  return id4_qwen3_vl_program_tap_tensor(
-      builder, ID4_QWEN3_VL_TENSOR_LAYER_ATTENTION_CONTEXT, layer_ordinal,
-      *out_context);
-}
-
-static iree_status_t id4_qwen3_vl_program_author_attention_wmma_packed_value(
-    const id4_qwen3_vl_program_options_t* options,
-    id4_pipeline_program_builder_t* builder, uint32_t layer_ordinal,
-    id4_pipeline_program_tensor_t query, id4_pipeline_program_tensor_t key,
-    id4_pipeline_program_tensor_t packed_value,
-    id4_pipeline_program_tensor_t attention_mask,
-    id4_pipeline_program_tensor_t* out_context) {
-  const uint32_t token_count = options->request.token_count;
-  const uint32_t hidden_size = options->model.hidden_size;
-  const uint32_t attention_head_count = options->model.attention_head_count;
-  uint32_t token_capacity = 0;
-  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_calculate_options_token_capacity(
-      options, &token_capacity));
-  id4_pipeline_program_tensor_t scores = id4_pipeline_program_tensor_invalid();
-  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_acquire_tensor(
-      builder, ID4_QWEN3_VL_TENSOR_LAYER_ATTENTION_SCORES, layer_ordinal,
-      ID4_PIPELINE_PROGRAM_DTYPE_F32,
-      id4_pipeline_program_make_shape_rank3(attention_head_count,
-                                            token_capacity, token_capacity),
-      &scores));
-  id4_pipeline_program_tensor_t probabilities =
-      id4_pipeline_program_tensor_invalid();
-  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_acquire_tensor(
-      builder, ID4_QWEN3_VL_TENSOR_LAYER_ATTENTION_PROBABILITIES, layer_ordinal,
-      ID4_PIPELINE_PROGRAM_DTYPE_BF16,
-      id4_pipeline_program_make_shape_rank3(attention_head_count,
-                                            token_capacity, token_capacity),
-      &probabilities));
-  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_acquire_tensor(
-      builder, ID4_QWEN3_VL_TENSOR_LAYER_ATTENTION_CONTEXT, layer_ordinal,
-      ID4_PIPELINE_PROGRAM_DTYPE_BF16,
-      id4_pipeline_program_make_shape_rank2(token_capacity, hidden_size),
-      out_context));
-
-  const id4_qwen3_vl_program_config_value_t attention_config_values[] = {
-      {ID4_QWEN3_VL_CONFIG_TOKEN_COUNT, token_count},
-      {ID4_QWEN3_VL_CONFIG_DISPATCH_TOKEN_COUNT, token_capacity},
-      {ID4_QWEN3_VL_CONFIG_HIDDEN_SIZE, hidden_size},
-      {ID4_QWEN3_VL_CONFIG_ATTENTION_HEAD_COUNT, attention_head_count},
-      {ID4_QWEN3_VL_CONFIG_KEY_VALUE_HEAD_COUNT,
-       options->model.key_value_head_count},
-      {ID4_QWEN3_VL_CONFIG_HEAD_SIZE, options->model.head_size},
-  };
-  const id4_pipeline_program_dispatch_binding_t score_bindings[] = {
-      id4_pipeline_program_read(query),
-      id4_pipeline_program_read(key),
-      id4_pipeline_program_write(scores),
-  };
-  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_dispatch_attention(
-      builder, layer_ordinal, ID4_QWEN3_VL_OPERATION_SITE_SELF_ATTENTION_SCORES,
-      ID4_QWEN3_VL_KERNEL_ATTENTION_QK_SCORES_WMMA,
-      IREE_ARRAYSIZE(attention_config_values), attention_config_values,
-      IREE_ARRAYSIZE(score_bindings), score_bindings));
-  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_barrier(
-      builder, layer_ordinal,
-      ID4_QWEN3_VL_OPERATION_SITE_AFTER_ATTENTION_SCORES));
-
-  const id4_pipeline_program_dispatch_binding_t softmax_bindings[] = {
-      id4_pipeline_program_read(scores),
-      id4_pipeline_program_read(attention_mask),
-      id4_pipeline_program_write(probabilities),
-  };
-  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_dispatch_attention(
-      builder, layer_ordinal,
-      ID4_QWEN3_VL_OPERATION_SITE_SELF_ATTENTION_SOFTMAX,
-      ID4_QWEN3_VL_KERNEL_ATTENTION_SOFTMAX_MASK_BF16,
-      IREE_ARRAYSIZE(attention_config_values), attention_config_values,
-      IREE_ARRAYSIZE(softmax_bindings), softmax_bindings));
-  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_barrier(
-      builder, layer_ordinal,
-      ID4_QWEN3_VL_OPERATION_SITE_AFTER_ATTENTION_SOFTMAX));
-
-  const id4_pipeline_program_dispatch_binding_t pv_bindings[] = {
-      id4_pipeline_program_read(probabilities),
-      id4_pipeline_program_read(packed_value),
-      id4_pipeline_program_write(*out_context),
-  };
-  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_dispatch_attention(
-      builder, layer_ordinal, ID4_QWEN3_VL_OPERATION_SITE_SELF_ATTENTION,
-      ID4_QWEN3_VL_KERNEL_ATTENTION_PV_WMMA,
-      IREE_ARRAYSIZE(attention_config_values), attention_config_values,
-      IREE_ARRAYSIZE(pv_bindings), pv_bindings));
   return id4_qwen3_vl_program_tap_tensor(
       builder, ID4_QWEN3_VL_TENSOR_LAYER_ATTENTION_CONTEXT, layer_ordinal,
       *out_context);
@@ -3933,7 +3934,9 @@ static iree_status_t id4_qwen3_vl_program_author_attention_wmma(
       &packed_value));
   IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_dispatch_value_pack(
       options, builder, layer_ordinal, value, packed_value));
-  return id4_qwen3_vl_program_author_attention_wmma_packed_value(
+  IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_barrier(
+      builder, layer_ordinal, ID4_QWEN3_VL_OPERATION_SITE_AFTER_VALUE_PACK));
+  return id4_qwen3_vl_program_author_attention_online_packed_value(
       options, builder, layer_ordinal, query, key, packed_value, attention_mask,
       out_context);
 }
@@ -4650,18 +4653,10 @@ static iree_status_t id4_qwen3_vl_program_author_layer(
 
   id4_pipeline_program_tensor_t context = id4_pipeline_program_tensor_invalid();
   if (uses_packed_value_projection) {
-    if (options->attention_implementation ==
-        ID4_QWEN3_VL_ATTENTION_IMPLEMENTATION_WMMA) {
-      IREE_RETURN_IF_ERROR(
-          id4_qwen3_vl_program_author_attention_wmma_packed_value(
-              options, builder, layer_ordinal, query_rotary, key_rotary,
-              packed_value, attention_mask, &context));
-    } else {
-      IREE_RETURN_IF_ERROR(
-          id4_qwen3_vl_program_author_attention_online_packed_value(
-              options, builder, layer_ordinal, query_rotary, key_rotary,
-              packed_value, attention_mask, &context));
-    }
+    IREE_RETURN_IF_ERROR(
+        id4_qwen3_vl_program_author_attention_online_packed_value(
+            options, builder, layer_ordinal, query_rotary, key_rotary,
+            packed_value, attention_mask, &context));
   } else {
     IREE_RETURN_IF_ERROR(id4_qwen3_vl_program_author_attention(
         options, builder, layer_ordinal, query_rotary, key_rotary, value,
