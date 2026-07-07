@@ -163,6 +163,8 @@ typedef struct loom_amdgpu_wait_plan_builder_t {
   uint32_t completed_position_counts[LOOM_AMDGPU_WAIT_COUNTER_SLOT_COUNT];
   // Current block epoch for lazy invalidation of physical-register state.
   uint64_t block_epoch;
+  // Counters fully drained earlier in the current straight-line block.
+  uint32_t current_block_full_drain_counter_mask;
   // Outstanding packet count per wait counter.
   uint32_t outstanding_counts[LOOM_AMDGPU_WAIT_COUNTER_SLOT_COUNT];
   // Outstanding packet count per wait counter for memory writes.
@@ -1705,6 +1707,21 @@ static bool loom_amdgpu_wait_plan_current_block_drained_producer(
              counter_mask);
 }
 
+static bool loom_amdgpu_wait_plan_current_block_drained_counter(
+    const loom_amdgpu_wait_plan_builder_t* builder, uint32_t counter_mask) {
+  return iree_any_bit_set(builder->current_block_full_drain_counter_mask,
+                          counter_mask);
+}
+
+static bool loom_amdgpu_wait_plan_current_block_satisfies_producer(
+    const loom_amdgpu_wait_plan_builder_t* builder, uint32_t producer_node,
+    uint32_t counter_mask) {
+  return loom_amdgpu_wait_plan_current_block_drained_counter(builder,
+                                                             counter_mask) ||
+         loom_amdgpu_wait_plan_current_block_drained_producer(
+             builder, producer_node, counter_mask);
+}
+
 static void loom_amdgpu_wait_plan_record_current_block_drained_producer(
     loom_amdgpu_wait_plan_builder_t* builder, uint32_t producer_node,
     uint32_t counter_mask) {
@@ -1769,6 +1786,7 @@ static iree_status_t loom_amdgpu_wait_plan_wait_counter(
         builder, producer_node, counter_mask);
   }
   if (target_count == 0) {
+    builder->current_block_full_drain_counter_mask |= counter_mask;
     ++builder->counter_epochs[slot];
     builder->completed_position_counts[slot] = 0;
   } else {
@@ -1898,8 +1916,11 @@ static iree_status_t loom_amdgpu_wait_plan_storage_release_is_satisfied(
                      builder->counter_epochs[slot];
     return iree_ok_status();
   }
-  *out_satisfied = (producer_state->drained_after_production_counter_mask &
-                    counter_mask) != 0;
+  *out_satisfied =
+      iree_any_bit_set(producer_state->drained_after_production_counter_mask,
+                       counter_mask) ||
+      loom_amdgpu_wait_plan_current_block_satisfies_producer(
+          builder, lease_record->node_index, counter_mask);
   return iree_ok_status();
 }
 
@@ -2051,7 +2072,7 @@ static iree_status_t loom_amdgpu_wait_plan_handle_consumer(
         // own block drained it before control could reach the consumer block.
         if (loom_amdgpu_wait_plan_producer_is_drained(producer_state,
                                                       counter_mask) ||
-            loom_amdgpu_wait_plan_current_block_drained_producer(
+            loom_amdgpu_wait_plan_current_block_satisfies_producer(
                 builder, link->producer_node, counter_mask)) {
           continue;
         }
@@ -2410,6 +2431,7 @@ static iree_status_t loom_amdgpu_wait_plan_build_actions(
        ++block_index) {
     const loom_low_schedule_block_t* block = &schedule->blocks[block_index];
     ++builder->block_epoch;
+    builder->current_block_full_drain_counter_mask = 0;
     memset(builder->counter_epochs, 0, sizeof(builder->counter_epochs));
     memset(builder->completed_position_counts, 0,
            sizeof(builder->completed_position_counts));
