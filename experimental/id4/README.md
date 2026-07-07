@@ -74,12 +74,12 @@ final public velocity output back to F32. The first Loom kernels and C/HAL
 sub-pipelines should therefore match BF16 activation behavior rather than an
 F32-activation scalar implementation detail.
 
-Ideogram's FP8 checkpoint is weight-only e4m3 storage. Its Python `Fp8Linear`
-widens each FP8 weight row to the current activation dtype, applies the stored
-per-output-channel scale in that dtype, and then runs the same linear math.
-FP8 support in this prototype must preserve that semantic contract: compact
-FP8 weights and row scales feed BF16-activation matmuls, not a separate FP8
-activation pipeline.
+Ideogram's FP8 diffusion checkpoint is weight-only e4m3 storage. Its Python
+`Fp8Linear` widens each FP8 weight row to the current activation dtype, applies
+the stored per-output-channel scale in that dtype, and then runs the same
+linear math. FP8 support in this prototype must preserve that semantic
+contract: compact FP8 weights and row scales feed BF16-activation matmuls, not
+a separate FP8 activation pipeline.
 
 The logical kernel contracts should be written around operation semantics, not
 one storage format. For a linear layer, the durable contract is the input,
@@ -93,8 +93,10 @@ The active precision sequence is:
 - BF16 weights and BF16-activation kernels first, using the Python BF16
   execution path as the tensor-golden reference.
 - FP8-weight structural parity next, matching the Python path: official FP8
-  e4m3 source weights plus F32 row scales are prepared into BF16 execution
-  layouts and consumed by BF16-activation WMMA kernels.
+  e4m3 source weights plus their checkpoint scale tensors are prepared into
+  BF16 execution layouts and consumed by BF16-activation WMMA kernels. Current
+  DiT files use F32 row scales; Qwen3-VL FP8 files use F32
+  `weight_scale_inv` tensors over 128x128 source blocks.
 - Direct FP8-weight kernels on RDNA3/gfx1100 after parity is established, where
   compact FP8 values and scale metadata may be decoded in the kernel when that
   wins over prepared BF16 layouts.
@@ -324,7 +326,8 @@ The active reference configuration uses:
 - official conditioned and unconditioned Ideogram 4 FP8 diffusion files as
   complete branch parameter providers, with FP8 linears, F32 row scales, and
   BF16 non-linear tensors consumed from the same artifacts;
-- Qwen3-VL-8B-Instruct text encoder weights in dense BF16 or F16 form;
+- Qwen3-VL-8B-Instruct text encoder weights in dense BF16 or official
+  block-scaled FP8 form;
 - FLUX-family KL VAE weights compatible with the reference pipeline;
 - optional LoRA adapters.
 

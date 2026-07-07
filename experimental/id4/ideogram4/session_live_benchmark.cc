@@ -36,6 +36,8 @@ IREE_FLAG(string, id4_plan_output_dir, "",
 IREE_FLAG(string, dit_parameter_format, "fp8_e4m3",
           "DiT parameter format: bf16 or fp8_e4m3. fp8_e4m3 uses the FP8 "
           "scopes below as the branch parameter providers.");
+IREE_FLAG(string, qwen_parameter_format, "bf16",
+          "Qwen3-VL parameter format: bf16 or fp8_e4m3_block_scaled.");
 IREE_FLAG(string, dit_activation_format, "bf16_linear_input",
           "DiT activation format: bf16_linear_input or f32_canonical.");
 IREE_FLAG(string, dit_weight_execution_format, "bf16_resident",
@@ -313,6 +315,9 @@ struct LiveGenerationBenchmarkContext {
   // DiT parameter source policy selected by benchmark flags.
   id4_ideogram4_dit_parameter_format_t dit_parameter_format =
       ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_INVALID;
+  // Qwen3-VL parameter source policy selected by benchmark flags.
+  id4_qwen3_vl_parameter_format_t qwen_parameter_format =
+      ID4_QWEN3_VL_PARAMETER_FORMAT_INVALID;
   // Generation stage-bundle residency request selected by benchmark flags.
   GenerationResidencyRequestMode generation_residency_request_mode =
       GenerationResidencyRequestMode::kIssuePhases;
@@ -362,6 +367,14 @@ static iree_status_t ParseDitParameterFormat(
       iree_make_cstring_view(FLAG_dit_parameter_format), out_format);
   if (iree_status_is_ok(status)) return status;
   return iree_status_annotate(status, IREE_SV("--dit_parameter_format"));
+}
+
+static iree_status_t ParseQwenParameterFormat(
+    id4_qwen3_vl_parameter_format_t* out_format) {
+  iree_status_t status = id4_qwen3_vl_parameter_format_parse(
+      iree_make_cstring_view(FLAG_qwen_parameter_format), out_format);
+  if (iree_status_is_ok(status)) return status;
+  return iree_status_annotate(status, IREE_SV("--qwen_parameter_format"));
 }
 
 static iree_status_t ParseDitWeightExecutionFormat(
@@ -1106,6 +1119,7 @@ LiveGenerationParameterProviders(
 static iree_status_t CreateLoadedLiveSession(
     const id4_tooling_runtime_context_t* runtime_context,
     id4_ideogram4_dit_parameter_format_t dit_parameter_format,
+    id4_qwen3_vl_parameter_format_t qwen_parameter_format,
     id4_ideogram4_session_t** out_session) {
   IREE_ASSERT_ARGUMENT(runtime_context);
   IREE_ASSERT_ARGUMENT(out_session);
@@ -1119,6 +1133,7 @@ static iree_status_t CreateLoadedLiveSession(
   create_options.kernel_cache = runtime_context->kernel_cache;
   create_options.parameter_scopes.qwen = IREE_SV("qwen");
   create_options.parameter_scopes.vae = IREE_SV("vae");
+  create_options.qwen_parameter_format = qwen_parameter_format;
   create_options.dit_parameter_format = dit_parameter_format;
   switch (create_options.dit_parameter_format) {
     case ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_BF16:
@@ -1258,6 +1273,8 @@ static iree_status_t CreateLiveGenerationBenchmarkContext(
       iree_allocator_system(), out_context->kernel_library.out()));
   IREE_RETURN_IF_ERROR(
       ParseDitParameterFormat(&out_context->dit_parameter_format));
+  IREE_RETURN_IF_ERROR(
+      ParseQwenParameterFormat(&out_context->qwen_parameter_format));
   IREE_RETURN_IF_ERROR(ParseGenerationResidencyRequestMode(
       &out_context->generation_residency_request_mode));
   if (out_context->generation_residency_request_mode !=
@@ -1282,7 +1299,7 @@ static iree_status_t CreateLiveGenerationBenchmarkContext(
       &out_context->generation_resident_stage_mask));
   IREE_RETURN_IF_ERROR(CreateLoadedLiveSession(
       &out_context->runtime_context, out_context->dit_parameter_format,
-      out_context->session.out()));
+      out_context->qwen_parameter_format, out_context->session.out()));
   return CreateParameterProviders(out_context);
 }
 
@@ -1706,6 +1723,8 @@ static iree_status_t SetGenerationBenchmarkLabel(
   const iree_string_view_t qwen_weight_execution_strategy =
       id4_qwen3_vl_weight_execution_strategy_name(
           summary.qwen_weight_execution_strategy);
+  const iree_string_view_t qwen_parameter_format =
+      id4_qwen3_vl_parameter_format_name(context.qwen_parameter_format);
   const iree_string_view_t qwen_attention_implementation =
       id4_qwen3_vl_attention_implementation_name(
           summary.qwen_attention_implementation);
@@ -1739,8 +1758,8 @@ static iree_status_t SetGenerationBenchmarkLabel(
       " prefetch_regions=%" PRIhsz
       " resident_stage_mask=0x%08x residency_budget=%" PRIu64
       "MiB"
-      " params=%.*s activation=%.*s weights=%.*s qwen_weights=%.*s"
-      " qwen_attention=%.*s attention=%.*s ff=%.*s"
+      " params=%.*s activation=%.*s weights=%.*s qwen_params=%.*s"
+      " qwen_weights=%.*s qwen_attention=%.*s attention=%.*s ff=%.*s"
       " param_total=%" PRIu64 "MiB param_largest=%" PRIu64
       "MiB param_source=%" PRIu64 "MiB param_source_direct=%" PRIu64
       "MiB param_source_encoded=%" PRIu64 "MiB param_load_steps[gather=%" PRIhsz
@@ -1796,6 +1815,7 @@ static iree_status_t SetGenerationBenchmarkLabel(
       static_cast<int>(activation_format.size), activation_format.data,
       static_cast<int>(weight_execution_format.size),
       weight_execution_format.data,
+      static_cast<int>(qwen_parameter_format.size), qwen_parameter_format.data,
       static_cast<int>(qwen_weight_execution_strategy.size),
       qwen_weight_execution_strategy.data,
       static_cast<int>(qwen_attention_implementation.size),

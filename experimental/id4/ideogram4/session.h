@@ -75,6 +75,9 @@ typedef struct id4_ideogram4_session_create_options_t {
   id4_pipeline_kernel_cache_t* kernel_cache;
   // Parameter scopes selected by session-owned stages.
   id4_ideogram4_session_parameter_scopes_t parameter_scopes;
+  // Qwen3-VL parameter storage policy selected by the session-owned Qwen
+  // stage.
+  id4_qwen3_vl_parameter_format_t qwen_parameter_format;
   // DiT parameter storage policy selected by session-owned DiT stages.
   id4_ideogram4_dit_parameter_format_t dit_parameter_format;
   // Activation storage format selected for the session-owned VAE decode stage.

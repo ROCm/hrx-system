@@ -50,10 +50,20 @@ typedef struct id4_qwen3_vl_request_config_t {
   const int32_t* token_ids;
 } id4_qwen3_vl_request_config_t;
 
-// Qwen3-VL linear weight execution strategy selected by the planner. Current
-// strategies consume BF16 provider weights; source precision is a
-// model/provider contract, while this enum controls the resident execution
-// layout.
+// Qwen3-VL provider parameter format selected when creating the stage.
+typedef enum id4_qwen3_vl_parameter_format_e {
+  // Invalid provider parameter format.
+  ID4_QWEN3_VL_PARAMETER_FORMAT_INVALID = 0,
+  // Provider linear weights are dense BF16 tensors.
+  ID4_QWEN3_VL_PARAMETER_FORMAT_BF16 = 1,
+  // Provider linear weights are official FP8 e4m3 tensors with F32
+  // weight_scale_inv tensors over 128x128 source blocks.
+  ID4_QWEN3_VL_PARAMETER_FORMAT_FP8_E4M3_BLOCK_SCALED = 2,
+} id4_qwen3_vl_parameter_format_t;
+
+// Qwen3-VL linear weight execution strategy selected by the planner. Source
+// precision is a model/provider contract, while this enum controls the
+// resident execution layout.
 typedef enum id4_qwen3_vl_weight_execution_strategy_e {
   // Invalid weight execution strategy.
   ID4_QWEN3_VL_WEIGHT_EXECUTION_STRATEGY_INVALID = 0,
@@ -78,6 +88,14 @@ typedef enum id4_qwen3_vl_attention_implementation_e {
   // taps.
   ID4_QWEN3_VL_ATTENTION_IMPLEMENTATION_WMMA = 3,
 } id4_qwen3_vl_attention_implementation_t;
+
+// Parses a Qwen3-VL provider parameter format name.
+iree_status_t id4_qwen3_vl_parameter_format_parse(
+    iree_string_view_t value, id4_qwen3_vl_parameter_format_t* out_format);
+
+// Returns the stable Qwen3-VL provider parameter format name.
+iree_string_view_t id4_qwen3_vl_parameter_format_name(
+    id4_qwen3_vl_parameter_format_t format);
 
 // Parses a Qwen3-VL weight execution strategy name.
 iree_status_t id4_qwen3_vl_weight_execution_strategy_parse(
@@ -115,6 +133,8 @@ typedef struct id4_qwen3_vl_program_options_t {
   id4_qwen3_vl_request_config_t request;
   // Host allocator used for transient authoring tables.
   iree_allocator_t host_allocator;
+  // Provider parameter format selected for this program.
+  id4_qwen3_vl_parameter_format_t parameter_format;
   // Linear weight execution strategy selected for this program.
   id4_qwen3_vl_weight_execution_strategy_t weight_execution_strategy;
   // Attention implementation selected for this program.

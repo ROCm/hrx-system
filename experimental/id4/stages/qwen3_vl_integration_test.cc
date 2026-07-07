@@ -47,6 +47,7 @@ static iree_status_t CreateQwen3VlStage(
   create_options.structure_size = sizeof(create_options);
   create_options.services = services;
   create_options.kernel_cache = context.kernel_cache.get();
+  create_options.parameter_format = ID4_QWEN3_VL_PARAMETER_FORMAT_BF16;
   create_options.model = *id4_qwen3_vl_program_ideogram4_model_config();
   return id4_qwen3_vl_stage_create(&create_options, iree_allocator_system(),
                                    out_stage);

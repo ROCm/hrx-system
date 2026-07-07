@@ -50,6 +50,8 @@ IREE_FLAG(string, output, "", "Output image path.");
 IREE_FLAG(string, dit_parameter_format, "fp8_e4m3",
           "DiT parameter format: bf16 or fp8_e4m3. fp8_e4m3 uses the FP8 "
           "scopes below as the branch parameter providers.");
+IREE_FLAG(string, qwen_parameter_format, "bf16",
+          "Qwen3-VL parameter format: bf16 or fp8_e4m3_block_scaled.");
 IREE_FLAG(string, dit_activation_format, "bf16_linear_input",
           "DiT activation format: bf16_linear_input or f32_canonical.");
 IREE_FLAG(string, dit_weight_execution_format, "bf16_resident",
@@ -317,6 +319,14 @@ static iree_status_t id4_cli_parse_dit_parameter_format(
       iree_make_cstring_view(FLAG_dit_parameter_format), out_format);
   if (iree_status_is_ok(status)) return status;
   return iree_status_annotate(status, IREE_SV("--dit_parameter_format"));
+}
+
+static iree_status_t id4_cli_parse_qwen_parameter_format(
+    id4_qwen3_vl_parameter_format_t* out_format) {
+  iree_status_t status = id4_qwen3_vl_parameter_format_parse(
+      iree_make_cstring_view(FLAG_qwen_parameter_format), out_format);
+  if (iree_status_is_ok(status)) return status;
+  return iree_status_annotate(status, IREE_SV("--qwen_parameter_format"));
 }
 
 static iree_status_t id4_cli_parse_dit_activation_format(
@@ -1707,6 +1717,8 @@ static iree_status_t id4_cli_create_loaded_session(
   session_options.kernel_cache = runtime_context->kernel_cache;
   session_options.parameter_scopes.qwen = IREE_SV("qwen");
   session_options.parameter_scopes.vae = IREE_SV("vae");
+  IREE_RETURN_IF_ERROR(id4_cli_parse_qwen_parameter_format(
+      &session_options.qwen_parameter_format));
   IREE_RETURN_IF_ERROR(id4_cli_parse_dit_parameter_format(
       &session_options.dit_parameter_format));
   switch (session_options.dit_parameter_format) {

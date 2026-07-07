@@ -120,6 +120,7 @@ static iree_status_t CreateQwenStage(const id4::test::LiveStageContext& context,
   options.services = services;
   options.kernel_cache = context.kernel_cache.get();
   options.parameter_scope = parameter_scope;
+  options.parameter_format = ID4_QWEN3_VL_PARAMETER_FORMAT_BF16;
   options.model = *id4_qwen3_vl_program_ideogram4_model_config();
   return id4_qwen3_vl_stage_create(&options, iree_allocator_system(),
                                    out_stage);

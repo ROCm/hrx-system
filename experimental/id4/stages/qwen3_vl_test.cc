@@ -47,7 +47,9 @@ static id4_qwen3_vl_model_config_t MakeModelConfig(uint32_t layer_count) {
 
 static id4_pipeline_stage_t* CreateStage(
     iree_hal_device_group_t* device_group,
-    const id4_qwen3_vl_model_config_t* model) {
+    const id4_qwen3_vl_model_config_t* model,
+    id4_qwen3_vl_parameter_format_t parameter_format =
+        ID4_QWEN3_VL_PARAMETER_FORMAT_BF16) {
   id4_pipeline_kernel_cache_create_options_t kernel_cache_options;
   memset(&kernel_cache_options, 0, sizeof(kernel_cache_options));
   kernel_cache_options.structure_size = sizeof(kernel_cache_options);
@@ -69,6 +71,7 @@ static id4_pipeline_stage_t* CreateStage(
   create_options.structure_size = sizeof(create_options);
   create_options.services = services;
   create_options.kernel_cache = kernel_cache;
+  create_options.parameter_format = parameter_format;
   create_options.model = *model;
 
   id4_pipeline_stage_t* stage = nullptr;
@@ -222,6 +225,73 @@ TEST(Qwen3VlStage, PlansIdeogram4ForwardBoundaryContract) {
   iree_hal_device_group_release(device_group);
 }
 
+TEST(Qwen3VlStage, PlansFp8SourceWithLowerParameterPressure) {
+  iree_hal_device_group_t* device_group =
+      id4::test::CreateLocalSyncDeviceGroup();
+  const id4_qwen3_vl_model_config_t* model =
+      id4_qwen3_vl_program_ideogram4_model_config();
+  id4_pipeline_stage_t* bf16_stage =
+      CreateStage(device_group, model, ID4_QWEN3_VL_PARAMETER_FORMAT_BF16);
+  id4_pipeline_stage_t* fp8_stage = CreateStage(
+      device_group, model, ID4_QWEN3_VL_PARAMETER_FORMAT_FP8_E4M3_BLOCK_SCALED);
+
+  id4::test::StageDiagnostics diagnostics = {};
+  id4_pipeline_diagnostics_sink_t diagnostics_sink =
+      id4::test::DiagnosticsSink(&diagnostics);
+
+  id4_pipeline_stage_load_options_t load_options;
+  memset(&load_options, 0, sizeof(load_options));
+  load_options.structure_size = sizeof(load_options);
+  load_options.diagnostics_sink = &diagnostics_sink;
+  IREE_ASSERT_OK(id4_pipeline_stage_load(bf16_stage, &load_options));
+  IREE_ASSERT_OK(id4_pipeline_stage_load(fp8_stage, &load_options));
+
+  std::vector<int32_t> token_ids(512, 0);
+  auto plan_stage = [&](id4_pipeline_stage_t* stage,
+                        id4_pipeline_plan_t** out_plan) {
+    id4_qwen3_vl_stage_plan_options_t qwen_options;
+    memset(&qwen_options, 0, sizeof(qwen_options));
+    qwen_options.structure_size = sizeof(qwen_options);
+    qwen_options.request.token_count = static_cast<uint32_t>(token_ids.size());
+    qwen_options.request.token_ids = token_ids.data();
+    qwen_options.weight_execution_strategy =
+        ID4_QWEN3_VL_WEIGHT_EXECUTION_STRATEGY_HYBRID_COMPACT_RHS;
+    qwen_options.attention_implementation =
+        ID4_QWEN3_VL_ATTENTION_IMPLEMENTATION_AUTO;
+
+    id4_pipeline_stage_plan_options_t plan_options;
+    memset(&plan_options, 0, sizeof(plan_options));
+    plan_options.structure_size = sizeof(plan_options);
+    plan_options.next = &qwen_options;
+    plan_options.device_index = 0;
+    plan_options.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
+    plan_options.diagnostics_sink = &diagnostics_sink;
+    return id4_pipeline_stage_plan(stage, &plan_options, out_plan);
+  };
+
+  id4_pipeline_plan_t* bf16_plan = nullptr;
+  IREE_ASSERT_OK(plan_stage(bf16_stage, &bf16_plan));
+  id4_pipeline_plan_t* fp8_plan = nullptr;
+  IREE_ASSERT_OK(plan_stage(fp8_stage, &fp8_plan));
+
+  const id4_pipeline_plan_statistics_t bf16_statistics =
+      id4_pipeline_plan_statistics(bf16_plan);
+  const id4_pipeline_plan_statistics_t fp8_statistics =
+      id4_pipeline_plan_statistics(fp8_plan);
+  EXPECT_LT(fp8_statistics.parameter_slab_byte_length,
+            bf16_statistics.parameter_slab_byte_length);
+  EXPECT_LT(fp8_statistics.parameter_source_byte_length,
+            bf16_statistics.parameter_source_byte_length);
+  EXPECT_GT(fp8_statistics.parameter_direct_source_byte_length, 0u);
+  EXPECT_GT(fp8_statistics.parameter_encoded_source_byte_length, 0u);
+
+  id4_pipeline_plan_release(fp8_plan);
+  id4_pipeline_plan_release(bf16_plan);
+  id4_pipeline_stage_release(fp8_stage);
+  id4_pipeline_stage_release(bf16_stage);
+  iree_hal_device_group_release(device_group);
+}
+
 TEST(Qwen3VlStage, RejectsInvalidStaticModelConfig) {
   iree_hal_device_group_t* device_group =
       id4::test::CreateLocalSyncDeviceGroup();
@@ -247,6 +317,7 @@ TEST(Qwen3VlStage, RejectsInvalidStaticModelConfig) {
   create_options.structure_size = sizeof(create_options);
   create_options.services = services;
   create_options.kernel_cache = kernel_cache;
+  create_options.parameter_format = ID4_QWEN3_VL_PARAMETER_FORMAT_BF16;
   create_options.model = MakeModelConfig(/*layer_count=*/0);
 
   id4_pipeline_stage_t* stage = nullptr;

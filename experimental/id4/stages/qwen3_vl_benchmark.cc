@@ -29,6 +29,8 @@ IREE_FLAG(string, id4_diagnostics_output_dir, "",
           "Optional directory receiving benchmark Qwen3-VL diagnostics JSONL.");
 IREE_FLAG(string, id4_plan_output_dir, "",
           "Optional directory receiving benchmark Qwen3-VL stage plan JSON.");
+IREE_FLAG(string, qwen_parameter_format, "bf16",
+          "Qwen3-VL parameter format: bf16 or fp8_e4m3_block_scaled.");
 IREE_FLAG(string, qwen_weight_execution_strategy, "hybrid_compact_rhs",
           "Qwen3-VL weight execution strategy: row_major, compact_rhs, or "
           "hybrid_compact_rhs.");
@@ -234,6 +236,14 @@ static iree_status_t ParseQwenWeightExecutionStrategy(
                               IREE_SV("--qwen_weight_execution_strategy"));
 }
 
+static iree_status_t ParseQwenParameterFormat(
+    id4_qwen3_vl_parameter_format_t* out_format) {
+  iree_status_t status = id4_qwen3_vl_parameter_format_parse(
+      iree_make_cstring_view(FLAG_qwen_parameter_format), out_format);
+  if (iree_status_is_ok(status)) return status;
+  return iree_status_annotate(status, IREE_SV("--qwen_parameter_format"));
+}
+
 static iree_status_t ParseQwenAttentionImplementation(
     id4_qwen3_vl_attention_implementation_t* out_implementation) {
   iree_status_t status = id4_qwen3_vl_attention_implementation_parse(
@@ -284,6 +294,8 @@ static iree_status_t CreateQwen3VlStage(const id4::test::LiveStageContext& live,
   create_options.structure_size = sizeof(create_options);
   create_options.services = services;
   create_options.kernel_cache = live.kernel_cache.get();
+  IREE_RETURN_IF_ERROR(
+      ParseQwenParameterFormat(&create_options.parameter_format));
   const id4_qwen3_vl_model_config_t* default_model =
       id4_qwen3_vl_program_ideogram4_model_config();
   create_options.model = *default_model;
@@ -564,6 +576,11 @@ static void SetQwenBenchmarkLabel(
   IREE_CHECK_OK(ParseQwenWeightExecutionStrategy(&weight_execution_strategy));
   iree_string_view_t weight_execution_strategy_name =
       id4_qwen3_vl_weight_execution_strategy_name(weight_execution_strategy);
+  id4_qwen3_vl_parameter_format_t parameter_format =
+      ID4_QWEN3_VL_PARAMETER_FORMAT_INVALID;
+  IREE_CHECK_OK(ParseQwenParameterFormat(&parameter_format));
+  iree_string_view_t parameter_format_name =
+      id4_qwen3_vl_parameter_format_name(parameter_format);
   id4_qwen3_vl_attention_implementation_t attention_implementation =
       ID4_QWEN3_VL_ATTENTION_IMPLEMENTATION_INVALID;
   IREE_CHECK_OK(ParseQwenAttentionImplementation(&attention_implementation));
@@ -573,13 +590,15 @@ static void SetQwenBenchmarkLabel(
   iree_string_builder_initialize(iree_allocator_system(), &label_builder);
   IREE_CHECK_OK(iree_string_builder_append_format(
       &label_builder,
-      "tokens=%" PRIu32 " weights=%.*s attention=%.*s prefetch_regions=%" PRIhsz
-      " param_total=%" PRIu64 "MiB param_largest=%" PRIu64
-      "MiB param_source=%" PRIu64 "MiB param_source_direct=%" PRIu64
-      "MiB param_source_encoded=%" PRIu64 "MiB param_load_steps[gather=%" PRIhsz
-      ",encode=%" PRIhsz "] param_load_groups[total=%" PRIhsz ",gather=%" PRIhsz
-      ",encode=%" PRIhsz "] local_hw=%" PRIu64 "MiB boundary=%" PRIu64
-      "MiB kernels=%" PRIhsz " dispatches=%" PRIhsz
+      "tokens=%" PRIu32
+      " source=%.*s weights=%.*s attention=%.*s "
+      "prefetch_regions=%" PRIhsz " param_total=%" PRIu64
+      "MiB param_largest=%" PRIu64 "MiB param_source=%" PRIu64
+      "MiB param_source_direct=%" PRIu64 "MiB param_source_encoded=%" PRIu64
+      "MiB param_load_steps[gather=%" PRIhsz ",encode=%" PRIhsz
+      "] param_load_groups[total=%" PRIhsz ",gather=%" PRIhsz ",encode=%" PRIhsz
+      "] local_hw=%" PRIu64 "MiB boundary=%" PRIu64 "MiB kernels=%" PRIhsz
+      " dispatches=%" PRIhsz
       " load_group_submit_ms[all=%.3f,gather=%.3f,encode=%.3f,max=%.3f]"
       " load_group_submit_count[total=%" PRIhsz ",gather=%" PRIhsz
       ",encode=%" PRIhsz
@@ -602,7 +621,9 @@ static void SetQwenBenchmarkLabel(
       "MiB,max=%" PRIu64 "MiB,source=%" PRIu64 "MiB,target=%" PRIu64
       "MiB,chunks=%" PRIhsz ",sources=%" PRIhsz ",batches=%" PRIhsz
       ",dispatches=%" PRIhsz "]",
-      token_count, static_cast<int>(weight_execution_strategy_name.size),
+      token_count, static_cast<int>(parameter_format_name.size),
+      parameter_format_name.data,
+      static_cast<int>(weight_execution_strategy_name.size),
       weight_execution_strategy_name.data,
       static_cast<int>(attention_implementation_name.size),
       attention_implementation_name.data,

@@ -115,16 +115,20 @@ Keep logical kernel contracts target-independent: operation inputs, outputs,
 configuration facts, accumulation behavior, and tolerance model should remain
 stable while implementation blocks specialize for the target. The active
 sequence after BF16 is PyTorch-structural FP8 parity: official FP8 e4m3 source
-weights plus F32 row scales prepare into BF16 execution layouts and run through
-BF16-activation WMMA kernels. Direct in-kernel FP8 decode on gfx1100 and native
-FP8-weight execution on gfx942 are follow-on target specializations behind the
-same semantic fixtures. Later gfx12-class FP8 paths should fit behind the same
-operation boundary.
+weights plus their checkpoint scale tensors prepare into BF16 execution layouts
+and run through BF16-activation WMMA kernels. Direct in-kernel FP8 decode on
+gfx1100 and native FP8-weight execution on gfx942 are follow-on target
+specializations behind the same semantic fixtures. Later gfx12-class FP8 paths
+should fit behind the same operation boundary.
 
 Official FP8 DiT safetensors are complete branch parameter providers: linear
 weights are FP8 e4m3 with F32 row scales, while non-linear weights, biases, and
 normalization tensors remain present as BF16. Do not require the BF16-expanded
 DiT files in FP8 mode unless a deliberate split-provider experiment needs them.
+Official FP8 Qwen3-VL safetensors use FP8 e4m3 linear weights with F32
+`weight_scale_inv` tensors over 128x128 source blocks, while embeddings,
+normalization tensors, and other non-linear parameters remain present in their
+checkpoint dtypes.
 
 FP8 work should preserve the exact expansion rule, scale metadata, and numeric
 comparison story used by the BF16 reference. A tolerance change needs a named

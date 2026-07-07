@@ -16,6 +16,20 @@
 #include "experimental/id4/stages/qwen3_vl.h"
 #include "experimental/id4/stages/sampler.h"
 
+static iree_status_t id4_ideogram4_validate_qwen_parameter_format(
+    const id4_ideogram4_session_create_options_t* options) {
+  switch (options->qwen_parameter_format) {
+    case ID4_QWEN3_VL_PARAMETER_FORMAT_BF16:
+    case ID4_QWEN3_VL_PARAMETER_FORMAT_FP8_E4M3_BLOCK_SCALED:
+      return iree_ok_status();
+    default:
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "Ideogram 4 Qwen parameter format %" PRIu32
+                              " is invalid",
+                              (uint32_t)options->qwen_parameter_format);
+  }
+}
+
 static iree_status_t id4_ideogram4_validate_dit_parameter_format(
     const id4_ideogram4_session_create_options_t* options) {
   switch (options->dit_parameter_format) {
@@ -84,6 +98,7 @@ static iree_status_t id4_ideogram4_validate_session_create_options(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "Ideogram 4 session kernel cache is required");
   }
+  IREE_RETURN_IF_ERROR(id4_ideogram4_validate_qwen_parameter_format(options));
   IREE_RETURN_IF_ERROR(id4_ideogram4_validate_dit_parameter_format(options));
   if (options->vae_activation_format == ID4_VAE_ACTIVATION_FORMAT_INVALID) {
     return iree_make_status(
@@ -102,6 +117,7 @@ static iree_status_t id4_ideogram4_create_qwen_stage(
   stage_options.services = options->services;
   stage_options.kernel_cache = options->kernel_cache;
   stage_options.parameter_scope = options->parameter_scopes.qwen;
+  stage_options.parameter_format = options->qwen_parameter_format;
   stage_options.model = session->qwen_model;
   return id4_qwen3_vl_stage_create(&stage_options, session->host_allocator,
                                    &session->qwen_stage);

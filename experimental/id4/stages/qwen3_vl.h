@@ -32,6 +32,8 @@ typedef struct id4_qwen3_vl_stage_create_options_t {
   // Parameter provider scope containing Qwen3-VL weights; empty selects the
   // anonymous scope. The stage copies this string during creation.
   iree_string_view_t parameter_scope;
+  // Provider parameter format used for Qwen3-VL weights.
+  id4_qwen3_vl_parameter_format_t parameter_format;
   // Static Qwen3-VL model dimensions.
   id4_qwen3_vl_model_config_t model;
 } id4_qwen3_vl_stage_create_options_t;

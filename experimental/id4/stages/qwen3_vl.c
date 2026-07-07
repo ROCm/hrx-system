@@ -28,6 +28,8 @@ typedef struct id4_qwen3_vl_stage_t {
   id4_pipeline_kernel_cache_t* kernel_cache;
   // Parameter provider scope containing Qwen3-VL weights.
   iree_string_view_t parameter_scope;
+  // Provider parameter format used for Qwen3-VL weights.
+  id4_qwen3_vl_parameter_format_t parameter_format;
   // Static model configuration owned by the stage.
   id4_qwen3_vl_model_config_t model;
   // Selected layer ordinal storage owned by the stage.
@@ -73,6 +75,20 @@ static iree_status_t id4_qwen3_vl_stage_validate_model_config(
   return iree_ok_status();
 }
 
+static iree_status_t id4_qwen3_vl_stage_validate_parameter_format(
+    id4_qwen3_vl_parameter_format_t parameter_format) {
+  switch (parameter_format) {
+    case ID4_QWEN3_VL_PARAMETER_FORMAT_BF16:
+    case ID4_QWEN3_VL_PARAMETER_FORMAT_FP8_E4M3_BLOCK_SCALED:
+      return iree_ok_status();
+    default:
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "Qwen3-VL parameter format %" PRIu32
+                              " is invalid",
+                              (uint32_t)parameter_format);
+  }
+}
+
 static iree_status_t id4_qwen3_vl_stage_validate_create_options(
     const id4_qwen3_vl_stage_create_options_t* options) {
   if (!options) {
@@ -95,6 +111,8 @@ static iree_status_t id4_qwen3_vl_stage_validate_create_options(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "Qwen3-VL stage kernel cache is required");
   }
+  IREE_RETURN_IF_ERROR(
+      id4_qwen3_vl_stage_validate_parameter_format(options->parameter_format));
   return id4_qwen3_vl_stage_validate_model_config(&options->model);
 }
 
@@ -178,6 +196,7 @@ static iree_status_t id4_qwen3_vl_stage_author_program(
     program_options.model = stage->model;
     program_options.request = request;
     program_options.host_allocator = host_allocator;
+    program_options.parameter_format = stage->parameter_format;
     program_options.weight_execution_strategy = weight_execution_strategy;
     program_options.attention_implementation = attention_implementation;
     program_options.diagnostic_tap_names = diagnostic_tap_names;
@@ -382,6 +401,7 @@ iree_status_t id4_qwen3_vl_stage_create(
   if (iree_status_is_ok(status)) {
     stage->kernel_cache = options->kernel_cache;
     id4_pipeline_kernel_cache_retain(stage->kernel_cache);
+    stage->parameter_format = options->parameter_format;
     status = id4_qwen3_vl_stage_copy_parameter_scope(options->parameter_scope,
                                                      stage);
   }

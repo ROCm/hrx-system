@@ -61,6 +61,8 @@ static id4_qwen3_vl_program_options_t MakeProgramOptions(uint32_t layer_count) {
       },
       // Host allocator used for transient authoring tables.
       /*.host_allocator=*/iree_allocator_system(),
+      // Provider parameter format selected for this program.
+      /*.parameter_format=*/ID4_QWEN3_VL_PARAMETER_FORMAT_BF16,
       // Linear weight execution strategy selected for this program.
       /*.weight_execution_strategy=*/
       ID4_QWEN3_VL_WEIGHT_EXECUTION_STRATEGY_ROW_MAJOR,
@@ -87,6 +89,32 @@ TEST(Qwen3VLProgramTest, CalculatesBf16TokenCapacity) {
   IREE_ASSERT_OK(
       id4_qwen3_vl_program_calculate_bf16_token_capacity(33, &token_capacity));
   EXPECT_EQ(token_capacity, 64u);
+}
+
+TEST(Qwen3VLProgramTest, ParsesParameterFormatNames) {
+  struct FormatCase {
+    iree_string_view_t value;
+    id4_qwen3_vl_parameter_format_t format;
+  };
+  const FormatCase cases[] = {
+      {IREE_SV("bf16"), ID4_QWEN3_VL_PARAMETER_FORMAT_BF16},
+      {IREE_SV("fp8_e4m3_block_scaled"),
+       ID4_QWEN3_VL_PARAMETER_FORMAT_FP8_E4M3_BLOCK_SCALED},
+  };
+  for (const FormatCase& test_case : cases) {
+    id4_qwen3_vl_parameter_format_t parsed_format =
+        ID4_QWEN3_VL_PARAMETER_FORMAT_INVALID;
+    IREE_ASSERT_OK(
+        id4_qwen3_vl_parameter_format_parse(test_case.value, &parsed_format));
+    EXPECT_EQ(parsed_format, test_case.format);
+    EXPECT_TRUE(iree_string_view_equal(
+        id4_qwen3_vl_parameter_format_name(test_case.format), test_case.value));
+  }
+  id4_qwen3_vl_parameter_format_t parsed_format =
+      ID4_QWEN3_VL_PARAMETER_FORMAT_BF16;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      id4_qwen3_vl_parameter_format_parse(IREE_SV("surprise"), &parsed_format));
 }
 
 TEST(Qwen3VLProgramTest, RejectsInvalidBf16TokenCapacityInputs) {

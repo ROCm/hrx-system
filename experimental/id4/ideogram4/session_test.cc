@@ -477,6 +477,7 @@ class SessionTest : public ::testing::Test {
     options.structure_size = sizeof(options);
     options.services = services;
     options.kernel_cache = kernel_cache_;
+    options.qwen_parameter_format = ID4_QWEN3_VL_PARAMETER_FORMAT_BF16;
     options.dit_parameter_format = ID4_IDEOGRAM4_DIT_PARAMETER_FORMAT_BF16;
     options.vae_activation_format = ID4_VAE_ACTIVATION_FORMAT_BF16_CONV_INPUT;
     return options;
