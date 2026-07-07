@@ -256,6 +256,9 @@ typedef struct loom_amdgpu_wait_state_builder_t {
   loom_amdgpu_processor_scheduling_bits_t processor_scheduling;
   // True when the selected processor and descriptor set can emit S_DELAY_ALU.
   bool has_delay_alu;
+  // First matrix contract descriptor matching each descriptor-set ordinal.
+  const loom_amdgpu_matrix_contract_descriptor_t**
+      matrix_contracts_by_descriptor_ordinal;
   // Per-physical-VGPR outstanding fixed-wait hazard state.
   loom_amdgpu_wait_state_vgpr_t* vgprs;
   // Number of entries in |vgprs|.
@@ -416,6 +419,48 @@ loom_amdgpu_wait_state_assignment(const loom_low_allocation_table_t* allocation,
                                                              value_id, NULL);
 }
 
+static iree_status_t loom_amdgpu_wait_state_build_matrix_contract_index(
+    loom_amdgpu_wait_state_builder_t* builder) {
+  const iree_host_size_t contract_count =
+      loom_amdgpu_matrix_contract_descriptor_count();
+  const uint32_t descriptor_count =
+      builder->descriptor_set != NULL
+          ? builder->descriptor_set->descriptor_count
+          : 0;
+  if (descriptor_count == 0 || contract_count == 0) {
+    return iree_ok_status();
+  }
+
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      builder->arena, descriptor_count,
+      sizeof(*builder->matrix_contracts_by_descriptor_ordinal),
+      (void**)&builder->matrix_contracts_by_descriptor_ordinal));
+  memset(builder->matrix_contracts_by_descriptor_ordinal, 0,
+         descriptor_count *
+             sizeof(*builder->matrix_contracts_by_descriptor_ordinal));
+
+  for (iree_host_size_t i = 0; i < contract_count; ++i) {
+    const loom_amdgpu_matrix_contract_descriptor_t* contract =
+        loom_amdgpu_matrix_contract_descriptor_at(i);
+    if (contract == NULL ||
+        contract->low_descriptor_ref == LOOM_AMDGPU_DESCRIPTOR_REF_NONE) {
+      continue;
+    }
+    const uint32_t descriptor_ordinal = loom_amdgpu_descriptor_ref_ordinal(
+        builder->descriptor_set, contract->low_descriptor_ref);
+    if (descriptor_ordinal == LOOM_LOW_DESCRIPTOR_ORDINAL_NONE) {
+      continue;
+    }
+    IREE_ASSERT_LT(descriptor_ordinal, descriptor_count);
+    if (builder->matrix_contracts_by_descriptor_ordinal[descriptor_ordinal] ==
+        NULL) {
+      builder->matrix_contracts_by_descriptor_ordinal[descriptor_ordinal] =
+          contract;
+    }
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_amdgpu_wait_state_allocate(
     loom_amdgpu_wait_state_builder_t* builder) {
   const loom_low_allocation_table_t* allocation = builder->allocation;
@@ -460,6 +505,8 @@ static iree_status_t loom_amdgpu_wait_state_allocate(
     memset(builder->sgprs, 0, sgpr_count * sizeof(*builder->sgprs));
     builder->sgpr_count = sgpr_count;
   }
+  IREE_RETURN_IF_ERROR(
+      loom_amdgpu_wait_state_build_matrix_contract_index(builder));
 
   if (!iree_host_size_checked_mul(builder->schedule->scheduled_node_count, 2,
                                   &builder->state_capacity)) {
@@ -474,35 +521,20 @@ static iree_status_t loom_amdgpu_wait_state_allocate(
   return iree_ok_status();
 }
 
-static bool loom_amdgpu_wait_state_descriptor_matches_ref(
-    const loom_low_descriptor_set_t* descriptor_set,
-    const loom_low_descriptor_t* descriptor,
-    loom_amdgpu_descriptor_ref_t descriptor_ref) {
-  return descriptor ==
-         loom_amdgpu_descriptor_ref_descriptor(descriptor_set, descriptor_ref);
-}
-
-static bool loom_amdgpu_wait_state_contract_for_descriptor(
-    const loom_low_descriptor_set_t* descriptor_set,
-    const loom_low_descriptor_t* descriptor,
-    const loom_amdgpu_matrix_contract_descriptor_t** out_contract) {
-  *out_contract = NULL;
-  for (iree_host_size_t i = 0;
-       i < loom_amdgpu_matrix_contract_descriptor_count(); ++i) {
-    const loom_amdgpu_matrix_contract_descriptor_t* contract =
-        loom_amdgpu_matrix_contract_descriptor_at(i);
-    if (contract == NULL ||
-        contract->low_descriptor_ref == LOOM_AMDGPU_DESCRIPTOR_REF_NONE) {
-      continue;
-    }
-    if (!loom_amdgpu_wait_state_descriptor_matches_ref(
-            descriptor_set, descriptor, contract->low_descriptor_ref)) {
-      continue;
-    }
-    *out_contract = contract;
-    return true;
+static const loom_amdgpu_matrix_contract_descriptor_t*
+loom_amdgpu_wait_state_contract_for_descriptor(
+    const loom_amdgpu_wait_state_builder_t* builder,
+    const loom_low_descriptor_t* descriptor) {
+  if (builder->matrix_contracts_by_descriptor_ordinal == NULL) {
+    return NULL;
   }
-  return false;
+  const uint32_t descriptor_ordinal =
+      loom_low_descriptor_set_descriptor_ordinal(builder->descriptor_set,
+                                                 descriptor);
+  if (descriptor_ordinal == LOOM_LOW_DESCRIPTOR_ORDINAL_NONE) {
+    return NULL;
+  }
+  return builder->matrix_contracts_by_descriptor_ordinal[descriptor_ordinal];
 }
 
 static bool loom_amdgpu_wait_state_matrix_tracks_result_waits(
@@ -1821,10 +1853,11 @@ static iree_status_t loom_amdgpu_wait_state_apply_packet(
     loom_amdgpu_wait_state_builder_t* builder,
     const loom_low_packet_view_t* packet) {
   const loom_amdgpu_matrix_contract_descriptor_t* matrix_contract = NULL;
-  const bool has_matrix_contract =
-      packet->descriptor != NULL &&
-      loom_amdgpu_wait_state_contract_for_descriptor(
-          builder->descriptor_set, packet->descriptor, &matrix_contract);
+  if (packet->descriptor != NULL) {
+    matrix_contract = loom_amdgpu_wait_state_contract_for_descriptor(
+        builder, packet->descriptor);
+  }
+  const bool has_matrix_contract = matrix_contract != NULL;
   uint16_t matrix_pass_count = 0;
   uint16_t matrix_wait_cycles = 0;
   bool is_matrix = false;
