@@ -149,6 +149,11 @@ typedef enum loom_amdgpu_hal_kernel_abi_source_kind_e {
   LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_M0 = 12,
 } loom_amdgpu_hal_kernel_abi_source_kind_t;
 
+// Returns the stable low.live_in source spelling for |source_kind|, or an
+// empty string for unknown/invalid kinds.
+iree_string_view_t loom_amdgpu_hal_kernel_abi_source_name(
+    loom_amdgpu_hal_kernel_abi_source_kind_t source_kind);
+
 typedef struct loom_amdgpu_hal_kernarg_resource_t {
   // Defining low.resource op for diagnostics and cross-checks.
   const loom_op_t* resource_op;
