@@ -10,12 +10,12 @@
 #include <string.h>
 
 #include "loom/codegen/low/diagnostics.h"
-#include "loom/codegen/low/move_sequence.h"
 #include "loom/codegen/low/packet.h"
 #include "loom/ir/ir.h"
 #include "loom/ops/low/ops.h"
 #include "loom/target/arch/amdgpu/encoding/encoding.h"
 #include "loom/target/arch/amdgpu/planning/descriptor_semantics.h"
+#include "loom/target/arch/amdgpu/planning/structural_packet.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
 #include "loom/target/arch/amdgpu/target_id/target_id.h"
 #include "loom/target/arch/amdgpu/target_info.h"
@@ -1870,23 +1870,11 @@ static iree_status_t loom_amdgpu_vopd_packet_is_transparent(
     return iree_ok_status();
   }
 
-  iree_host_size_t move_count = 0;
-  const loom_op_t* op = packet.node->op;
-  switch (op->kind) {
-    case LOOM_OP_LOW_SLICE: {
-      IREE_RETURN_IF_ERROR(loom_low_move_sequence_count_slice_units(
-          builder->allocation, op, &move_count));
-      break;
-    }
-    case LOOM_OP_LOW_CONCAT: {
-      IREE_RETURN_IF_ERROR(loom_low_move_sequence_count_concat_units(
-          builder->allocation, op, &move_count));
-      break;
-    }
-    default:
-      return iree_ok_status();
-  }
-  *out_transparent = move_count == 0;
+  loom_amdgpu_structural_packet_info_t info = {0};
+  IREE_RETURN_IF_ERROR(loom_amdgpu_structural_packet_analyze(
+      builder->allocation, packet.node->op, 0, &info));
+  *out_transparent = iree_any_bit_set(
+      info.flags, LOOM_AMDGPU_STRUCTURAL_PACKET_FLAG_FORWARDS_DEPENDENCIES);
   return iree_ok_status();
 }
 

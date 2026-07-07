@@ -291,11 +291,11 @@ loom_cc_library(
     visibility = _AMDGPU_NATIVE_PLANNING_VISIBILITY,
     deps = [
         ":descriptor_semantics",
+        ":structural_packet",
         ":wait_packets",
         ":wait_states",
         "//loom/src/loom/codegen/low:allocation",
         "//loom/src/loom/codegen/low:diagnostics",
-        "//loom/src/loom/codegen/low:move_sequence",
         "//loom/src/loom/codegen/low:packet",
         "//loom/src/loom/codegen/low:packet_hazard_plan",
         "//loom/src/loom/codegen/low/schedule",
