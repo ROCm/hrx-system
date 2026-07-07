@@ -24,6 +24,8 @@ extern "C" {
 
 // Sentinel for absent progress-class identifiers.
 #define LOOM_LOW_PACKET_PROGRESS_CLASS_NONE UINT16_MAX
+// Sentinel for absent packet-progress record indices.
+#define LOOM_LOW_PACKET_PROGRESS_RECORD_INDEX_NONE UINT32_MAX
 
 typedef enum loom_low_packet_progress_action_e {
   // Unknown or uninitialized progress action.
@@ -101,12 +103,52 @@ typedef struct loom_low_packet_progress_table_t {
   iree_host_size_t record_count;
 } loom_low_packet_progress_table_t;
 
+// Sparse record-chain entry for one progress class.
+typedef struct loom_low_packet_progress_class_index_entry_t {
+  // Target-owned progress-class identifier.
+  uint16_t progress_class_id;
+  // First progress record with |progress_class_id|, or RECORD_INDEX_NONE.
+  uint32_t first_record_index;
+} loom_low_packet_progress_class_index_entry_t;
+
+// Sparse first/next chain index over packet-progress records by progress class.
+typedef struct loom_low_packet_progress_class_index_t {
+  // Borrowed progress table being indexed.
+  const loom_low_packet_progress_table_t* progress;
+  // Dense progress-class entries with at least one record.
+  const loom_low_packet_progress_class_index_entry_t* classes;
+  // Number of entries in |classes|.
+  uint32_t class_count;
+  // Next progress record for the same class, or RECORD_INDEX_NONE.
+  const uint32_t* next_record_indices;
+} loom_low_packet_progress_class_index_t;
+
 // Builds target progress records for |schedule| using |provider|.
 iree_status_t loom_low_packet_progress_build(
     const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,
     const loom_low_packet_progress_provider_t* provider,
     iree_arena_allocator_t* arena, loom_low_packet_progress_table_t* out_table);
+
+// Builds a stable-order record-chain index by progress class.
+iree_status_t loom_low_packet_progress_class_index_build(
+    const loom_low_packet_progress_table_t* progress,
+    iree_arena_allocator_t* arena,
+    loom_low_packet_progress_class_index_t* out_index);
+
+// Returns the index entry for |progress_class_id|, or NULL if absent.
+const loom_low_packet_progress_class_index_entry_t*
+loom_low_packet_progress_class_index_lookup(
+    const loom_low_packet_progress_class_index_t* index,
+    uint16_t progress_class_id);
+
+// Returns progress units observed after |start_packet_index| and before
+// |end_packet_index| for |progress_class_id|. RESET events clear prior observed
+// units within the queried range. Missing progress/index/class data returns 0.
+uint32_t loom_low_packet_progress_class_index_observed_progress(
+    const loom_low_packet_progress_class_index_t* index,
+    iree_host_size_t start_packet_index, iree_host_size_t end_packet_index,
+    uint16_t progress_class_id);
 
 #ifdef __cplusplus
 }  // extern "C"
