@@ -292,6 +292,26 @@ typedef struct loom_amdgpu_descriptor_requirement_t {
   loom_amdgpu_descriptor_ref_t descriptor_ref;
 } loom_amdgpu_descriptor_requirement_t;
 
+typedef struct loom_amdgpu_descriptor_requirement_span_t {
+  // Descriptor requirements required by this span.
+  const loom_amdgpu_descriptor_requirement_t* requirements;
+  // Number of entries in requirements.
+  iree_host_size_t requirement_count;
+} loom_amdgpu_descriptor_requirement_span_t;
+
+typedef struct loom_amdgpu_i64_alu_descriptor_requirement_row_t {
+  // First descriptor requirement span for the selected operation kind.
+  loom_amdgpu_descriptor_requirement_span_t first;
+  // Optional second descriptor requirement span for fused operation kinds.
+  loom_amdgpu_descriptor_requirement_span_t second;
+} loom_amdgpu_i64_alu_descriptor_requirement_row_t;
+
+#define LOOM_AMDGPU_DESCRIPTOR_REQUIREMENT_SPAN(requirements_) \
+  {                                                            \
+      .requirements = requirements_,                           \
+      .requirement_count = IREE_ARRAYSIZE(requirements_),      \
+  }
+
 static bool loom_amdgpu_descriptor_requirements_present(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_amdgpu_descriptor_requirement_t* requirements,
@@ -305,6 +325,37 @@ static bool loom_amdgpu_descriptor_requirements_present(
     }
   }
   return true;
+}
+
+static bool loom_amdgpu_descriptor_requirement_span_present(
+    const loom_low_descriptor_set_t* descriptor_set,
+    loom_amdgpu_descriptor_requirement_span_t span,
+    iree_string_view_t* out_constraint_key) {
+  if (span.requirement_count == 0) {
+    return true;
+  }
+  IREE_ASSERT(span.requirements != NULL);
+  return loom_amdgpu_descriptor_requirements_present(
+      descriptor_set, span.requirements, span.requirement_count,
+      out_constraint_key);
+}
+
+static bool loom_amdgpu_i64_alu_descriptor_requirements_present(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_amdgpu_i64_alu_descriptor_requirement_row_t* rows,
+    iree_host_size_t row_count, iree_host_size_t row_index,
+    iree_string_view_t fallback_constraint_key,
+    iree_string_view_t* out_constraint_key) {
+  if (row_index >= row_count || rows[row_index].first.requirement_count == 0) {
+    *out_constraint_key = fallback_constraint_key;
+    return false;
+  }
+  const loom_amdgpu_i64_alu_descriptor_requirement_row_t* row =
+      &rows[row_index];
+  return loom_amdgpu_descriptor_requirement_span_present(
+             descriptor_set, row->first, out_constraint_key) &&
+         loom_amdgpu_descriptor_requirement_span_present(
+             descriptor_set, row->second, out_constraint_key);
 }
 
 static bool loom_amdgpu_descriptor_requirement_present(
@@ -389,6 +440,22 @@ static const loom_amdgpu_descriptor_requirement_t
 };
 
 static const loom_amdgpu_descriptor_requirement_t
+    kAmdgpuScalarI64MulVgprDescriptorRequirements[] = {
+        {
+            .constraint_key = IREE_SVL("descriptor.v_mul_lo_u32"),
+            .descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_V_MUL_LO_U32,
+        },
+        {
+            .constraint_key = IREE_SVL("descriptor.v_mul_hi_u32"),
+            .descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_V_MUL_HI_U32,
+        },
+        {
+            .constraint_key = IREE_SVL("descriptor.v_add_u32"),
+            .descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_V_ADD_U32,
+        },
+};
+
+static const loom_amdgpu_descriptor_requirement_t
     kAmdgpuVgprMoveDescriptorRequirements[] = {
         {
             .constraint_key = IREE_SVL("descriptor.v_mov_b32"),
@@ -411,6 +478,70 @@ static const loom_amdgpu_descriptor_requirement_t
             .descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_S_AND_B64,
         },
 };
+
+static const loom_amdgpu_i64_alu_descriptor_requirement_row_t
+    kAmdgpuScalarI64AluDescriptorRequirementRows
+        [LOOM_AMDGPU_SCALAR_I64_ALU_KIND_VGPR_SHL + 1] = {
+            [LOOM_AMDGPU_SCALAR_I64_ALU_KIND_VGPR_ADD] =
+                {
+                    .first = LOOM_AMDGPU_DESCRIPTOR_REQUIREMENT_SPAN(
+                        kAmdgpuOffsetAddVgprDescriptorRequirements),
+                },
+            [LOOM_AMDGPU_SCALAR_I64_ALU_KIND_VGPR_SUB] =
+                {
+                    .first = LOOM_AMDGPU_DESCRIPTOR_REQUIREMENT_SPAN(
+                        kAmdgpuScalarI64SubVgprDescriptorRequirements),
+                },
+            [LOOM_AMDGPU_SCALAR_I64_ALU_KIND_VGPR_MUL_LO] =
+                {
+                    .first = LOOM_AMDGPU_DESCRIPTOR_REQUIREMENT_SPAN(
+                        kAmdgpuScalarI64MulVgprDescriptorRequirements),
+                },
+            [LOOM_AMDGPU_SCALAR_I64_ALU_KIND_VGPR_SHL] =
+                {
+                    .first = LOOM_AMDGPU_DESCRIPTOR_REQUIREMENT_SPAN(
+                        kAmdgpuScalarI64ShlVgprDescriptorRequirements),
+                },
+};
+
+static const loom_amdgpu_i64_alu_descriptor_requirement_row_t
+    kAmdgpuAddressI64AluDescriptorRequirementRows
+        [LOOM_AMDGPU_ADDRESS_I64_ALU_KIND_VGPR_MADD_LO + 1] = {
+            [LOOM_AMDGPU_ADDRESS_I64_ALU_KIND_SGPR_ADD] =
+                {
+                    .first = LOOM_AMDGPU_DESCRIPTOR_REQUIREMENT_SPAN(
+                        kAmdgpuOffsetAddSgprDescriptorRequirements),
+                },
+            [LOOM_AMDGPU_ADDRESS_I64_ALU_KIND_VGPR_ADD] =
+                {
+                    .first = LOOM_AMDGPU_DESCRIPTOR_REQUIREMENT_SPAN(
+                        kAmdgpuOffsetAddVgprDescriptorRequirements),
+                },
+            [LOOM_AMDGPU_ADDRESS_I64_ALU_KIND_VGPR_SUB] =
+                {
+                    .first = LOOM_AMDGPU_DESCRIPTOR_REQUIREMENT_SPAN(
+                        kAmdgpuScalarI64SubVgprDescriptorRequirements),
+                },
+            [LOOM_AMDGPU_ADDRESS_I64_ALU_KIND_VGPR_MUL_LO] =
+                {
+                    .first = LOOM_AMDGPU_DESCRIPTOR_REQUIREMENT_SPAN(
+                        kAmdgpuScalarI64MulVgprDescriptorRequirements),
+                },
+            [LOOM_AMDGPU_ADDRESS_I64_ALU_KIND_VGPR_SHL] =
+                {
+                    .first = LOOM_AMDGPU_DESCRIPTOR_REQUIREMENT_SPAN(
+                        kAmdgpuScalarI64ShlVgprDescriptorRequirements),
+                },
+            [LOOM_AMDGPU_ADDRESS_I64_ALU_KIND_VGPR_MADD_LO] =
+                {
+                    .first = LOOM_AMDGPU_DESCRIPTOR_REQUIREMENT_SPAN(
+                        kAmdgpuScalarI64MulVgprDescriptorRequirements),
+                    .second = LOOM_AMDGPU_DESCRIPTOR_REQUIREMENT_SPAN(
+                        kAmdgpuOffsetAddVgprDescriptorRequirements),
+                },
+};
+
+#undef LOOM_AMDGPU_DESCRIPTOR_REQUIREMENT_SPAN
 
 static bool loom_amdgpu_value_use_is_atomic_offset(const loom_module_t* module,
                                                    const loom_op_t* user_op,
@@ -502,20 +633,6 @@ static uint32_t loom_amdgpu_target_index_bitwidth(
   return bundle != NULL && bundle->snapshot != NULL
              ? bundle->snapshot->index_bitwidth
              : 0;
-}
-
-static bool loom_amdgpu_offset_add_descriptors_supported(
-    const loom_low_descriptor_set_t* descriptor_set, bool result_is_vgpr,
-    iree_string_view_t* out_constraint_key) {
-  return result_is_vgpr
-             ? loom_amdgpu_descriptor_requirements_present(
-                   descriptor_set, kAmdgpuOffsetAddVgprDescriptorRequirements,
-                   IREE_ARRAYSIZE(kAmdgpuOffsetAddVgprDescriptorRequirements),
-                   out_constraint_key)
-             : loom_amdgpu_descriptor_requirements_present(
-                   descriptor_set, kAmdgpuOffsetAddSgprDescriptorRequirements,
-                   IREE_ARRAYSIZE(kAmdgpuOffsetAddSgprDescriptorRequirements),
-                   out_constraint_key);
 }
 
 static bool loom_amdgpu_address_cmp_needs_64bit(
@@ -2917,64 +3034,15 @@ iree_status_t loom_amdgpu_select_scalar_cmpi_i64_plan(
   return iree_ok_status();
 }
 
-static bool loom_amdgpu_scalar_i64_mul_descriptors_supported(
-    const loom_low_descriptor_set_t* descriptor_set,
-    iree_string_view_t* out_constraint_key) {
-  *out_constraint_key = IREE_SV("descriptor.v_mul_lo_u32");
-  if (!loom_amdgpu_descriptor_set_has_ref(
-          descriptor_set, LOOM_AMDGPU_DESCRIPTOR_REF_V_MUL_LO_U32)) {
-    return false;
-  }
-  *out_constraint_key = IREE_SV("descriptor.v_mul_hi_u32");
-  if (!loom_amdgpu_descriptor_set_has_ref(
-          descriptor_set, LOOM_AMDGPU_DESCRIPTOR_REF_V_MUL_HI_U32)) {
-    return false;
-  }
-  *out_constraint_key = IREE_SV("descriptor.v_add_u32");
-  return loom_amdgpu_descriptor_set_has_ref(
-      descriptor_set, LOOM_AMDGPU_DESCRIPTOR_REF_V_ADD_U32);
-}
-
-static bool loom_amdgpu_scalar_i64_sub_descriptors_supported(
-    const loom_low_descriptor_set_t* descriptor_set,
-    iree_string_view_t* out_constraint_key) {
-  return loom_amdgpu_descriptor_requirements_present(
-      descriptor_set, kAmdgpuScalarI64SubVgprDescriptorRequirements,
-      IREE_ARRAYSIZE(kAmdgpuScalarI64SubVgprDescriptorRequirements),
-      out_constraint_key);
-}
-
-static bool loom_amdgpu_scalar_i64_shl_descriptors_supported(
-    const loom_low_descriptor_set_t* descriptor_set,
-    iree_string_view_t* out_constraint_key) {
-  return loom_amdgpu_descriptor_requirements_present(
-      descriptor_set, kAmdgpuScalarI64ShlVgprDescriptorRequirements,
-      IREE_ARRAYSIZE(kAmdgpuScalarI64ShlVgprDescriptorRequirements),
-      out_constraint_key);
-}
-
 static bool loom_amdgpu_scalar_i64_alu_descriptors_supported(
     const loom_low_descriptor_set_t* descriptor_set,
     loom_amdgpu_scalar_i64_alu_kind_t kind,
     iree_string_view_t* out_constraint_key) {
-  switch (kind) {
-    case LOOM_AMDGPU_SCALAR_I64_ALU_KIND_VGPR_ADD:
-      return loom_amdgpu_offset_add_descriptors_supported(
-          descriptor_set, /*result_is_vgpr=*/true, out_constraint_key);
-    case LOOM_AMDGPU_SCALAR_I64_ALU_KIND_VGPR_SUB:
-      return loom_amdgpu_scalar_i64_sub_descriptors_supported(
-          descriptor_set, out_constraint_key);
-    case LOOM_AMDGPU_SCALAR_I64_ALU_KIND_VGPR_MUL_LO:
-      return loom_amdgpu_scalar_i64_mul_descriptors_supported(
-          descriptor_set, out_constraint_key);
-    case LOOM_AMDGPU_SCALAR_I64_ALU_KIND_VGPR_SHL:
-      return loom_amdgpu_scalar_i64_shl_descriptors_supported(
-          descriptor_set, out_constraint_key);
-    case LOOM_AMDGPU_SCALAR_I64_ALU_KIND_NONE:
-      break;
-  }
-  *out_constraint_key = IREE_SV("operation.scalar_i64_alu");
-  return false;
+  return loom_amdgpu_i64_alu_descriptor_requirements_present(
+      descriptor_set, kAmdgpuScalarI64AluDescriptorRequirementRows,
+      IREE_ARRAYSIZE(kAmdgpuScalarI64AluDescriptorRequirementRows),
+      (iree_host_size_t)kind, IREE_SV("operation.scalar_i64_alu"),
+      out_constraint_key);
 }
 
 static bool loom_amdgpu_address_i64_alu_kind_uses_vgpr(
@@ -2997,34 +3065,11 @@ static bool loom_amdgpu_address_i64_alu_descriptors_supported(
     const loom_low_descriptor_set_t* descriptor_set,
     loom_amdgpu_address_i64_alu_kind_t kind,
     iree_string_view_t* out_constraint_key) {
-  switch (kind) {
-    case LOOM_AMDGPU_ADDRESS_I64_ALU_KIND_SGPR_ADD:
-      return loom_amdgpu_offset_add_descriptors_supported(
-          descriptor_set, /*result_is_vgpr=*/false, out_constraint_key);
-    case LOOM_AMDGPU_ADDRESS_I64_ALU_KIND_VGPR_ADD:
-      return loom_amdgpu_offset_add_descriptors_supported(
-          descriptor_set, /*result_is_vgpr=*/true, out_constraint_key);
-    case LOOM_AMDGPU_ADDRESS_I64_ALU_KIND_VGPR_SUB:
-      return loom_amdgpu_scalar_i64_sub_descriptors_supported(
-          descriptor_set, out_constraint_key);
-    case LOOM_AMDGPU_ADDRESS_I64_ALU_KIND_VGPR_MUL_LO:
-      return loom_amdgpu_scalar_i64_mul_descriptors_supported(
-          descriptor_set, out_constraint_key);
-    case LOOM_AMDGPU_ADDRESS_I64_ALU_KIND_VGPR_SHL:
-      return loom_amdgpu_scalar_i64_shl_descriptors_supported(
-          descriptor_set, out_constraint_key);
-    case LOOM_AMDGPU_ADDRESS_I64_ALU_KIND_VGPR_MADD_LO:
-      if (!loom_amdgpu_scalar_i64_mul_descriptors_supported(
-              descriptor_set, out_constraint_key)) {
-        return false;
-      }
-      return loom_amdgpu_offset_add_descriptors_supported(
-          descriptor_set, /*result_is_vgpr=*/true, out_constraint_key);
-    case LOOM_AMDGPU_ADDRESS_I64_ALU_KIND_NONE:
-      break;
-  }
-  *out_constraint_key = IREE_SV("operation.address_i64_alu");
-  return false;
+  return loom_amdgpu_i64_alu_descriptor_requirements_present(
+      descriptor_set, kAmdgpuAddressI64AluDescriptorRequirementRows,
+      IREE_ARRAYSIZE(kAmdgpuAddressI64AluDescriptorRequirementRows),
+      (iree_host_size_t)kind, IREE_SV("operation.address_i64_alu"),
+      out_constraint_key);
 }
 
 #define LOOM_AMDGPU_OP_INDEX(op_kind) ((uint8_t)((op_kind) & 0xFFu))
