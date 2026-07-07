@@ -45,4 +45,55 @@ check.case public @loop_carried_lane_liveness_case {
   check.return
 }
 
+// The loop-carried value and the workitem id may be storage-related across the
+// loop entry edge, but the workitem id remains live after the loop and cannot be
+// clobbered by the final backedge value.
+kernel.def @loop_carried_lane_store_after_loop() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%output: buffer) {
+  %base = index.constant 0 : offset
+  %lane = kernel.workitem.id<x> : index
+  %limit = index.constant 64 : index
+  %step = index.constant 32 : index
+  %zero = scalar.constant 0 : i32
+  %two = scalar.constant 2 : i32
+  %output_view = buffer.view %output[%base] : buffer -> view<96xi32, #dense>
+
+  scf.for %linear = [%lane to %limit step %step] {
+    view.store %two, %output_view[%linear] : i32, view<96xi32, #dense>
+  }
+
+  view.store %zero, %output_view[%lane] : i32, view<96xi32, #dense>
+  kernel.return
+}
+
+kernel.def @loop_carried_lane_store_reference() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%output: buffer) {
+  %base = index.constant 0 : offset
+  %lane = kernel.workitem.id<x> : index
+  %step = index.constant 32 : index
+  %next = index.add %lane, %step : index
+  %zero = scalar.constant 0 : i32
+  %two = scalar.constant 2 : i32
+  %output_view = buffer.view %output[%base] : buffer -> view<96xi32, #dense>
+
+  view.store %two, %output_view[%next] : i32, view<96xi32, #dense>
+  view.store %zero, %output_view[%lane] : i32, view<96xi32, #dense>
+  kernel.return
+}
+
+check.case public @loop_carried_lane_store_after_loop_case {
+  %actual = check.generate.fill value(1) : tensor<96xi32>
+  %expected = check.generate.fill value(1) : tensor<96xi32>
+  func.call @loop_carried_lane_store_after_loop(%actual) : (tensor<96xi32>)
+  func.call @loop_carried_lane_store_reference(%expected) : (tensor<96xi32>)
+  check.expect.equal actual(%actual) expected(%expected) : tensor<96xi32>
+  check.return
+}
+
 check.benchmark<@loop_carried_lane_liveness_case>
