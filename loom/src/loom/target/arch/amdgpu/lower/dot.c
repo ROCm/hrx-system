@@ -27,14 +27,6 @@ static bool loom_amdgpu_dotf_fastmath_allows_relaxed_forest(uint8_t fastmath) {
   return iree_all_bits_set(fastmath, required_flags);
 }
 
-static iree_status_t loom_amdgpu_dotf_descriptor_present(
-    loom_low_lower_context_t* context, loom_amdgpu_descriptor_ref_t ref,
-    bool* out_present) {
-  loom_low_lower_resolved_descriptor_t descriptor = {0};
-  return loom_amdgpu_resolve_descriptor_ref_if_present(
-      context, ref, &descriptor, out_present);
-}
-
 static iree_status_t loom_amdgpu_dotf_result_is_one_vgpr(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_value_id_t result, bool* out_match) {
@@ -98,18 +90,16 @@ iree_status_t loom_amdgpu_select_vector_dotf_plan(
     return iree_ok_status();
   }
 
-  bool fma_present = false;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_dotf_descriptor_present(
-      context, LOOM_AMDGPU_DESCRIPTOR_REF_V_FMA_F32, &fma_present));
-  if (!fma_present) {
+  const loom_low_descriptor_set_t* descriptor_set =
+      loom_low_lower_context_descriptor_set(context);
+  if (!loom_amdgpu_descriptor_set_has_ref(
+          descriptor_set, LOOM_AMDGPU_DESCRIPTOR_REF_V_FMA_F32)) {
     return iree_ok_status();
   }
   loom_amdgpu_descriptor_ref_t tied_accumulate_descriptor_ref =
       LOOM_AMDGPU_DESCRIPTOR_REF_NONE;
-  bool fmac_present = false;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_dotf_descriptor_present(
-      context, LOOM_AMDGPU_DESCRIPTOR_REF_V_FMAC_F32, &fmac_present));
-  if (fmac_present) {
+  if (loom_amdgpu_descriptor_set_has_ref(
+          descriptor_set, LOOM_AMDGPU_DESCRIPTOR_REF_V_FMAC_F32)) {
     tied_accumulate_descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_V_FMAC_F32;
   }
 
@@ -117,13 +107,10 @@ iree_status_t loom_amdgpu_select_vector_dotf_plan(
       LOOM_AMDGPU_DOTF_ACCUMULATION_STRICT_CHAIN;
   if (loom_amdgpu_dotf_fastmath_allows_relaxed_forest(
           loom_vector_dotf_fastmath(source_op))) {
-    bool multiply_present = false;
-    IREE_RETURN_IF_ERROR(loom_amdgpu_dotf_descriptor_present(
-        context, LOOM_AMDGPU_DESCRIPTOR_REF_V_MUL_F32, &multiply_present));
-    bool add_present = false;
-    IREE_RETURN_IF_ERROR(loom_amdgpu_dotf_descriptor_present(
-        context, LOOM_AMDGPU_DESCRIPTOR_REF_V_ADD_F32, &add_present));
-    if (multiply_present && add_present) {
+    if (loom_amdgpu_descriptor_set_has_ref(
+            descriptor_set, LOOM_AMDGPU_DESCRIPTOR_REF_V_MUL_F32) &&
+        loom_amdgpu_descriptor_set_has_ref(
+            descriptor_set, LOOM_AMDGPU_DESCRIPTOR_REF_V_ADD_F32)) {
       accumulation_kind = LOOM_AMDGPU_DOTF_ACCUMULATION_RELAXED_FOREST;
     }
   }
