@@ -1726,7 +1726,9 @@ static iree_status_t iree_hal_amdgpu_aql_command_buffer_write_dispatch_tail(
     uint8_t* tail_payload) {
   switch (kernarg_storage_mode) {
     case IREE_HAL_AMDGPU_COMMAND_BUFFER_KERNARG_STORAGE_MODE_CUSTOM_DIRECT: {
-      const iree_host_size_t explicit_bytes = layout->explicit_kernarg_size;
+      const iree_host_size_t explicit_bytes =
+          iree_hal_amdgpu_device_dispatch_explicit_kernarg_size(
+              layout, constants.data_length);
       const iree_host_size_t copy_bytes = constants.data_length < explicit_bytes
                                               ? constants.data_length
                                               : explicit_bytes;
@@ -2223,16 +2225,17 @@ static iree_status_t iree_hal_amdgpu_aql_command_buffer_prepare_dispatch_plan(
     //
     // Validate after 8-byte ABI padding so we accept missing tail padding while
     // still rejecting truly short pre-packed HIP argument buffers.
-    const uint32_t required_explicit_bytes =
-        (uint32_t)
-            out_plan->descriptor->custom_kernarg_layout.explicit_kernarg_size;
+    const iree_host_size_t required_explicit_bytes =
+        iree_hal_amdgpu_device_dispatch_explicit_kernarg_size(
+            &out_plan->descriptor->custom_kernarg_layout,
+            /*custom_kernarg_length=*/0);
     const iree_host_size_t padded_constant_length =
         iree_host_align(inputs->constants.data_length, /*alignment=*/8);
     if (IREE_UNLIKELY(padded_constant_length < required_explicit_bytes)) {
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
-          "custom dispatch argument length too short; expected at least %u "
-          "but got %" PRIhsz " (padded to %" PRIhsz ")",
+          "custom dispatch argument length too short; expected at least "
+          "%" PRIhsz " but got %" PRIhsz " (padded to %" PRIhsz ")",
           required_explicit_bytes, inputs->constants.data_length,
           padded_constant_length);
     }

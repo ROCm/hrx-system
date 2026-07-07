@@ -28,16 +28,39 @@ extern "C" {
 // packet/kernarg storage. Host recording/submission code must validate kernel
 // metadata and user-provided arguments before passing a layout here.
 typedef struct iree_hal_amdgpu_device_dispatch_kernarg_layout_t {
-  // Size in bytes of the explicitly provided dispatch arguments.
+  // Size in bytes of the caller-provided native ABI argument prefix. Zero
+  // derives the prefix size from the implicit suffix offset, fixed total size,
+  // or caller-provided length.
   size_t explicit_kernarg_size;
-  // Offset in bytes of the implicit HIP/OpenCL suffix, if present.
+  // Offset in bytes of the implicit HIP/OpenCL suffix, if present. Metadata-
+  // derived fixed layouts require all visible arguments to end at or before
+  // this offset; interleaved visible/hidden/visible layouts are rejected while
+  // loading the executable.
   size_t implicit_args_offset;
-  // Total kernarg reservation size in bytes required for this dispatch.
+  // Total kernarg reservation size in bytes required for this dispatch. Fixed
+  // layouts cover the explicit prefix and any implicit suffix; zero means the
+  // caller-provided byte count determines the reservation size.
   size_t total_kernarg_size;
   // True if a HIP/OpenCL implicit args suffix is appended at
   // |implicit_args_offset| and must be populated during emplace.
   bool has_implicit_args;
 } iree_hal_amdgpu_device_dispatch_kernarg_layout_t;
+
+// Returns the caller-owned explicit prefix byte count to validate and copy.
+static inline size_t iree_hal_amdgpu_device_dispatch_explicit_kernarg_size(
+    const iree_hal_amdgpu_device_dispatch_kernarg_layout_t* layout,
+    size_t custom_kernarg_length) {
+  if (layout->explicit_kernarg_size != 0) {
+    return layout->explicit_kernarg_size;
+  }
+  if (layout->has_implicit_args) {
+    return layout->implicit_args_offset;
+  }
+  if (layout->total_kernarg_size != 0) {
+    return layout->total_kernarg_size;
+  }
+  return custom_kernarg_length;
+}
 
 //===----------------------------------------------------------------------===//
 // Dispatch Packet/Kernarg Emission
@@ -118,9 +141,10 @@ void iree_hal_amdgpu_device_dispatch_emplace_implicit_args(
 
 // Populates custom direct explicit kernargs in already-reserved storage.
 //
-// |custom_kernarg_ptr| provides up to |layout->total_kernarg_size| bytes in the
-// final kernel ABI shape expected by the target kernel. Missing trailing
-// padding bytes remain zeroed.
+// |custom_kernarg_ptr| provides the caller-owned explicit ABI prefix expected
+// by the target kernel. Missing trailing padding bytes remain zeroed. Implicit
+// HIP/OpenCL suffix bytes are runtime-owned and must be populated by
+// iree_hal_amdgpu_device_dispatch_emplace_implicit_args().
 //
 // Preconditions:
 //   - |layout| and |kernarg_ptr| are non-NULL.

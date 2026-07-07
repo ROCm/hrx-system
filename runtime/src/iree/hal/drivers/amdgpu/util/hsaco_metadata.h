@@ -82,10 +82,14 @@ typedef struct iree_hal_amdgpu_hsaco_metadata_kernel_t {
   uint32_t group_segment_fixed_size;
   // Fixed private segment size from `.private_segment_fixed_size`.
   uint32_t private_segment_fixed_size;
+  // Maximum total work-items per workgroup from `.max_flat_workgroup_size`.
+  uint32_t max_flat_workgroup_size;
   // Required workgroup size from `.reqd_workgroup_size`, if present.
   uint32_t required_workgroup_size[3];
   // True when |required_workgroup_size| was present.
   bool has_required_workgroup_size;
+  // True when `.uniform_work_group_size` is present and non-zero.
+  bool uniform_workgroup_size;
   // Number of argument records in |args|.
   iree_host_size_t arg_count;
   // Argument records borrowed from the owning metadata object.

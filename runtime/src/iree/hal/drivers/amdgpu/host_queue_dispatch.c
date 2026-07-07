@@ -241,17 +241,19 @@ static iree_status_t iree_hal_amdgpu_host_queue_validate_dispatch_kernargs(
 
   iree_host_size_t operation_resource_count = 1;
   if (iree_any_bit_set(flags, IREE_HAL_DISPATCH_FLAG_CUSTOM_DIRECT_ARGUMENTS)) {
-    const uint32_t required_explicit_bytes =
-        (uint32_t)descriptor->custom_kernarg_layout.explicit_kernarg_size;
+    const iree_host_size_t required_explicit_bytes =
+        iree_hal_amdgpu_device_dispatch_explicit_kernarg_size(
+            &descriptor->custom_kernarg_layout,
+            /*custom_kernarg_length=*/0);
     const iree_host_size_t padded_constant_length =
         iree_host_align(constants.data_length, /*alignment=*/8);
     if (IREE_UNLIKELY(padded_constant_length < required_explicit_bytes)) {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "custom dispatch argument length too short; expected at least %u "
-          "but got %" PRIhsz " (padded to %" PRIhsz ")",
-          required_explicit_bytes, constants.data_length,
-          padded_constant_length);
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "custom dispatch argument length too short; "
+                              "expected at least %" PRIhsz " but got %" PRIhsz
+                              " (padded to %" PRIhsz ")",
+                              required_explicit_bytes, constants.data_length,
+                              padded_constant_length);
     }
     if (IREE_UNLIKELY(constants.data_length > 0 && !constants.data)) {
       return iree_make_status(
