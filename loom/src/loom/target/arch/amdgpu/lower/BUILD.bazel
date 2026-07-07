@@ -97,6 +97,20 @@ loom_generated_textual_header(
 )
 
 loom_generated_textual_header(
+    name = "fp8_encoded_operand_format_rows_gen",
+    generator = _AMDGPU_NARROW_FLOAT_TABLE_GENERATOR,
+    output = "narrow_float/fp8_encoded_operand_format_rows.inl",
+    output_flag = "--fp8-encoded-operand-format-rows",
+)
+
+loom_generated_textual_header(
+    name = "fp8_encoded_operand_schema_requirement_rows_gen",
+    generator = _AMDGPU_NARROW_FLOAT_TABLE_GENERATOR,
+    output = "narrow_float/fp8_encoded_operand_schema_requirement_rows.inl",
+    output_flag = "--fp8-encoded-operand-schema-requirement-rows",
+)
+
+loom_generated_textual_header(
     name = "fp8_native_descriptor_ref_rows_gen",
     generator = _AMDGPU_NARROW_FLOAT_TABLE_GENERATOR,
     output = "narrow_float/fp8_native_descriptor_ref_rows.inl",
@@ -223,6 +237,8 @@ loom_cc_library(
     ],
     textual_hdrs = [
         ":narrow_float/fp8_decode_plan_descriptor_rows.inl",
+        ":narrow_float/fp8_encoded_operand_format_rows.inl",
+        ":narrow_float/fp8_encoded_operand_schema_requirement_rows.inl",
         ":narrow_float/fp8_native_descriptor_ref_rows.inl",
         ":narrow_float/fp8_packed_repair_reason_rows.inl",
         ":narrow_float/fp8_scaled_descriptor_ref_rows.inl",

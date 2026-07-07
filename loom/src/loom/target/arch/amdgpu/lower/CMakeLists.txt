@@ -102,6 +102,32 @@ endif()
 if(LOOM_TARGET_ARCH_AMDGPU)
 loom_generated_textual_header(
   NAME
+    fp8_encoded_operand_format_rows_gen
+  GENERATOR
+    loom::py::loom::gen::target::arch::amdgpu::lower::narrow_float_tables
+  OUTPUT
+    "narrow_float/fp8_encoded_operand_format_rows.inl"
+  OUTPUT_FLAG
+    "--fp8-encoded-operand-format-rows"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU)
+loom_generated_textual_header(
+  NAME
+    fp8_encoded_operand_schema_requirement_rows_gen
+  GENERATOR
+    loom::py::loom::gen::target::arch::amdgpu::lower::narrow_float_tables
+  OUTPUT
+    "narrow_float/fp8_encoded_operand_schema_requirement_rows.inl"
+  OUTPUT_FLAG
+    "--fp8-encoded-operand-schema-requirement-rows"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU)
+loom_generated_textual_header(
+  NAME
     fp8_native_descriptor_ref_rows_gen
   GENERATOR
     loom::py::loom::gen::target::arch::amdgpu::lower::narrow_float_tables
@@ -203,6 +229,8 @@ loom_cc_library(
     "memory_descriptor_candidate_ranges.inl"
     "memory_descriptor_candidates.inl"
     "narrow_float/fp8_decode_plan_descriptor_rows.inl"
+    "narrow_float/fp8_encoded_operand_format_rows.inl"
+    "narrow_float/fp8_encoded_operand_schema_requirement_rows.inl"
     "narrow_float/fp8_native_descriptor_ref_rows.inl"
     "narrow_float/fp8_packed_repair_reason_rows.inl"
     "narrow_float/fp8_scaled_descriptor_ref_rows.inl"
