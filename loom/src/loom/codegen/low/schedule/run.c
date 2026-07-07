@@ -277,6 +277,63 @@ static iree_status_t loom_low_schedule_initialize_storage_read_tables(
       (void**)&state->storage_reads.touched_ordinals);
 }
 
+static uint32_t loom_low_schedule_descriptor_ordinal(
+    const loom_low_schedule_build_state_t* state,
+    const loom_low_descriptor_t* descriptor) {
+  return loom_low_descriptor_set_descriptor_ordinal(
+      state->target.descriptor_set, descriptor);
+}
+
+static iree_status_t loom_low_schedule_initialize_pair_affinity_index(
+    loom_low_schedule_build_state_t* state) {
+  const loom_low_schedule_pair_affinity_list_t affinities =
+      state->options->pair_affinities;
+  if (loom_low_schedule_pair_affinity_list_is_empty(affinities)) {
+    return iree_ok_status();
+  }
+  const loom_low_descriptor_set_t* descriptor_set =
+      state->target.descriptor_set;
+  if (descriptor_set->descriptor_count == 0) {
+    return iree_ok_status();
+  }
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate_array(state->arena, descriptor_set->descriptor_count,
+                                sizeof(*state->pair_affinity_heads),
+                                (void**)&state->pair_affinity_heads));
+  memset(
+      state->pair_affinity_heads, 0xFF,
+      descriptor_set->descriptor_count * sizeof(*state->pair_affinity_heads));
+
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      state->arena, affinities.count, sizeof(*state->pair_affinity_records),
+      (void**)&state->pair_affinity_records));
+  for (iree_host_size_t i = 0; i < affinities.count; ++i) {
+    const loom_low_schedule_pair_affinity_t* affinity = &affinities.values[i];
+    if (affinity->priority == 0) {
+      continue;
+    }
+    const uint32_t first_ordinal =
+        loom_low_schedule_descriptor_ordinal(state, affinity->first_descriptor);
+    if (first_ordinal == LOOM_LOW_DESCRIPTOR_ORDINAL_NONE) {
+      continue;
+    }
+    if (state->pair_affinity_record_count >= UINT32_MAX) {
+      return iree_make_status(
+          IREE_STATUS_OUT_OF_RANGE,
+          "low schedule pair-affinity record count exceeds uint32_t");
+    }
+    const uint32_t record_index = (uint32_t)state->pair_affinity_record_count++;
+    state->pair_affinity_records[record_index] =
+        (loom_low_schedule_pair_affinity_record_t){
+            .second_descriptor = affinity->second_descriptor,
+            .next_record = state->pair_affinity_heads[first_ordinal],
+            .priority = affinity->priority,
+        };
+    state->pair_affinity_heads[first_ordinal] = record_index;
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_low_schedule_initialize_pressure_cliff_ranges(
     loom_low_schedule_build_state_t* state) {
   if (loom_low_schedule_pressure_cliff_list_is_empty(
@@ -1393,19 +1450,21 @@ static uint16_t loom_low_schedule_pair_affinity_priority(
     const loom_low_schedule_node_t* first,
     const loom_low_schedule_node_t* second) {
   if (first == NULL || second == NULL || first->descriptor == NULL ||
-      second->descriptor == NULL) {
+      second->descriptor == NULL || state->pair_affinity_heads == NULL) {
     return 0;
   }
-  const loom_low_schedule_pair_affinity_list_t affinities =
-      state->options->pair_affinities;
-  for (iree_host_size_t i = 0; i < affinities.count; ++i) {
-    const loom_low_schedule_pair_affinity_t* affinity = &affinities.values[i];
-    if (affinity->priority == 0) {
-      continue;
-    }
-    if (affinity->first_descriptor == first->descriptor &&
-        affinity->second_descriptor == second->descriptor) {
-      return affinity->priority;
+  const uint32_t first_ordinal =
+      loom_low_schedule_descriptor_ordinal(state, first->descriptor);
+  if (first_ordinal == LOOM_LOW_DESCRIPTOR_ORDINAL_NONE) {
+    return 0;
+  }
+  for (uint32_t record_index = state->pair_affinity_heads[first_ordinal];
+       record_index != LOOM_LOW_SCHEDULE_PAIR_AFFINITY_RECORD_NONE;
+       record_index = state->pair_affinity_records[record_index].next_record) {
+    const loom_low_schedule_pair_affinity_record_t* record =
+        &state->pair_affinity_records[record_index];
+    if (record->second_descriptor == second->descriptor) {
+      return record->priority;
     }
   }
   return 0;
@@ -1414,19 +1473,17 @@ static uint16_t loom_low_schedule_pair_affinity_priority(
 static bool loom_low_schedule_node_can_start_pair_affinity(
     const loom_low_schedule_build_state_t* state,
     const loom_low_schedule_node_t* node) {
-  if (node == NULL || node->descriptor == NULL) {
+  if (node == NULL || node->descriptor == NULL ||
+      state->pair_affinity_heads == NULL) {
     return false;
   }
-  const loom_low_schedule_pair_affinity_list_t affinities =
-      state->options->pair_affinities;
-  for (iree_host_size_t i = 0; i < affinities.count; ++i) {
-    const loom_low_schedule_pair_affinity_t* affinity = &affinities.values[i];
-    if (affinity->priority != 0 &&
-        affinity->first_descriptor == node->descriptor) {
-      return true;
-    }
+  const uint32_t descriptor_ordinal =
+      loom_low_schedule_descriptor_ordinal(state, node->descriptor);
+  if (descriptor_ordinal == LOOM_LOW_DESCRIPTOR_ORDINAL_NONE) {
+    return false;
   }
-  return false;
+  return state->pair_affinity_heads[descriptor_ordinal] !=
+         LOOM_LOW_SCHEDULE_PAIR_AFFINITY_RECORD_NONE;
 }
 
 static uint16_t loom_low_schedule_scale_direct_pair_affinity(
@@ -2676,6 +2733,8 @@ iree_status_t loom_low_schedule_function(
   state.register_type_resolver =
       loom_low_register_type_resolver_for_descriptor_set(
           state.target.descriptor_set);
+  IREE_RETURN_IF_ERROR(
+      loom_low_schedule_initialize_pair_affinity_index(&state));
 
   iree_host_size_t node_count = 0;
   loom_low_schedule_count_nodes(state.body, &node_count);
