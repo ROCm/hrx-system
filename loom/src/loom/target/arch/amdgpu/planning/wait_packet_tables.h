@@ -42,11 +42,22 @@ typedef struct loom_amdgpu_wait_packet_descriptor_template_t {
   uint16_t immediate_count;
 } loom_amdgpu_wait_packet_descriptor_template_t;
 
+typedef struct loom_amdgpu_wait_packet_selection_template_t {
+  // Local descriptor-template index selected for this counter mask.
+  uint16_t descriptor_index;
+  // Logical counters covered by the selected descriptor.
+  uint8_t covered_counter_mask;
+} loom_amdgpu_wait_packet_selection_template_t;
+
 typedef struct loom_amdgpu_wait_packet_target_t {
   // Generated descriptor template rows available on this target.
   const loom_amdgpu_wait_packet_descriptor_template_t* descriptors;
   // Number of descriptor template rows available on this target.
   iree_host_size_t descriptor_count;
+  // Generated best descriptor-template rows indexed by logical counter mask.
+  const loom_amdgpu_wait_packet_selection_template_t* selections;
+  // Number of generated counter-mask selection rows.
+  iree_host_size_t selection_count;
   // Maximum immediate template count for any available wait descriptor.
   iree_host_size_t max_descriptor_immediate_count;
 } loom_amdgpu_wait_packet_target_t;

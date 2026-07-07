@@ -64,6 +64,7 @@ from loom.target.low_descriptors import (  # noqa: E402
 
 _UINT16_MAX = 0xFFFF
 _WAIT_PACKET_IMMEDIATE_CAPACITY = 4
+_WAIT_COUNTER_MASK_COUNT = 1 << _COUNTER_ALU
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,10 +98,20 @@ class _WaitPacketDescriptorRange:
 
 
 @dataclass(frozen=True, slots=True)
+class _WaitPacketSelectionRow:
+    descriptor_set_key: str
+    descriptor_set_ordinal: int
+    counter_mask: int
+    descriptor_index: int
+    covered_counter_mask: int
+
+
+@dataclass(frozen=True, slots=True)
 class _WaitPacketTables:
     descriptor_rows: tuple[_WaitPacketDescriptorRow, ...]
     immediate_rows: tuple[_WaitPacketImmediateRow, ...]
     range_rows: tuple[_WaitPacketDescriptorRange, ...]
+    selection_rows: tuple[_WaitPacketSelectionRow, ...]
 
 
 def _parse_isa_xml_argument(value: str) -> tuple[str, Path]:
@@ -300,6 +311,58 @@ def _descriptor_set_wait_packet_rows(
     return tuple(descriptor_rows), tuple(immediate_rows), range_row
 
 
+def _best_wait_packet_descriptor_selection(
+    descriptor_rows: Sequence[_WaitPacketDescriptorRow],
+    counter_mask: int,
+) -> tuple[int, int]:
+    best_descriptor_index = 0
+    best_covered_counter_mask = 0
+    best_covered_count = 0
+    best_extra_count = _WAIT_COUNTER_MASK_COUNT
+    best_immediate_count = _WAIT_PACKET_IMMEDIATE_CAPACITY + 1
+    for descriptor_index, descriptor in enumerate(descriptor_rows):
+        covered_counter_mask = descriptor.counter_mask & counter_mask
+        if covered_counter_mask == 0:
+            continue
+        covered_count = covered_counter_mask.bit_count()
+        extra_count = descriptor.counter_count - covered_count
+        if (
+            best_covered_counter_mask == 0
+            or covered_count > best_covered_count
+            or (covered_count == best_covered_count and extra_count < best_extra_count)
+            or (covered_count == best_covered_count and extra_count == best_extra_count and descriptor.immediate_count < best_immediate_count)
+        ):
+            best_descriptor_index = descriptor_index
+            best_covered_counter_mask = covered_counter_mask
+            best_covered_count = covered_count
+            best_extra_count = extra_count
+            best_immediate_count = descriptor.immediate_count
+    return best_descriptor_index, best_covered_counter_mask
+
+
+def _descriptor_set_wait_packet_selection_rows(
+    descriptor_set_key: str,
+    descriptor_set_ordinal: int,
+    descriptor_rows: Sequence[_WaitPacketDescriptorRow],
+) -> tuple[_WaitPacketSelectionRow, ...]:
+    selection_rows: list[_WaitPacketSelectionRow] = []
+    for counter_mask in range(_WAIT_COUNTER_MASK_COUNT):
+        descriptor_index, covered_counter_mask = _best_wait_packet_descriptor_selection(
+            descriptor_rows,
+            counter_mask,
+        )
+        selection_rows.append(
+            _WaitPacketSelectionRow(
+                descriptor_set_key=descriptor_set_key,
+                descriptor_set_ordinal=descriptor_set_ordinal,
+                counter_mask=counter_mask,
+                descriptor_index=descriptor_index,
+                covered_counter_mask=covered_counter_mask,
+            )
+        )
+    return tuple(selection_rows)
+
+
 def _validate_wait_packet_tables(tables: _WaitPacketTables) -> None:
     descriptor_count = len(tables.descriptor_rows)
     immediate_count = len(tables.immediate_rows)
@@ -311,6 +374,31 @@ def _validate_wait_packet_tables(tables: _WaitPacketTables) -> None:
         owner = f"AMDGPU wait descriptor-set range '{row.descriptor_set_key}'"
         if row.first_descriptor > descriptor_count or row.descriptor_count > descriptor_count - row.first_descriptor:
             raise ValueError(f"{owner} descriptor range is out of bounds")
+    range_rows_by_ordinal = {row.descriptor_set_ordinal: row for row in tables.range_rows}
+    expected_selection_count = len(tables.range_rows) * _WAIT_COUNTER_MASK_COUNT
+    if len(tables.selection_rows) != expected_selection_count:
+        raise ValueError(f"AMDGPU wait selection table has {len(tables.selection_rows)} rows, expected {expected_selection_count}")
+    seen_selection_keys: set[tuple[int, int]] = set()
+    for row in tables.selection_rows:
+        owner = f"AMDGPU wait selection '{row.descriptor_set_key}' mask 0x{row.counter_mask:x}"
+        selection_key = (row.descriptor_set_ordinal, row.counter_mask)
+        if selection_key in seen_selection_keys:
+            raise ValueError(f"{owner} duplicates a descriptor-set/mask row")
+        seen_selection_keys.add(selection_key)
+        if row.counter_mask < 0 or row.counter_mask >= _WAIT_COUNTER_MASK_COUNT:
+            raise ValueError(f"{owner} has out-of-range counter mask")
+        if row.covered_counter_mask & ~row.counter_mask:
+            raise ValueError(f"{owner} covers counters outside its input mask")
+        range_row = range_rows_by_ordinal.get(row.descriptor_set_ordinal)
+        if range_row is None:
+            raise ValueError(f"{owner} references missing descriptor-set range")
+        if row.covered_counter_mask == 0:
+            continue
+        if row.descriptor_index >= range_row.descriptor_count:
+            raise ValueError(f"{owner} descriptor index is out of bounds")
+        descriptor_row = tables.descriptor_rows[range_row.first_descriptor + row.descriptor_index]
+        if row.covered_counter_mask != (descriptor_row.counter_mask & row.counter_mask):
+            raise ValueError(f"{owner} covered mask does not match descriptor row")
 
 
 def _materialize_wait_packet_tables(
@@ -321,6 +409,7 @@ def _materialize_wait_packet_tables(
     descriptor_rows: list[_WaitPacketDescriptorRow] = []
     immediate_rows: list[_WaitPacketImmediateRow] = []
     range_rows: list[_WaitPacketDescriptorRange] = []
+    selection_rows: list[_WaitPacketSelectionRow] = []
     for info in descriptor_sets:
         try:
             spec = isa_specs[info.isa_xml_key]
@@ -345,10 +434,18 @@ def _materialize_wait_packet_tables(
         descriptor_rows.extend(set_descriptor_rows)
         immediate_rows.extend(set_immediate_rows)
         range_rows.append(range_row)
+        selection_rows.extend(
+            _descriptor_set_wait_packet_selection_rows(
+                descriptor_set.key,
+                descriptor_set_ordinal,
+                set_descriptor_rows,
+            )
+        )
     tables = _WaitPacketTables(
         descriptor_rows=tuple(descriptor_rows),
         immediate_rows=tuple(immediate_rows),
         range_rows=tuple(range_rows),
+        selection_rows=tuple(selection_rows),
     )
     _validate_wait_packet_tables(tables)
     return tables
@@ -401,6 +498,16 @@ def _range_row_initializer(row: _WaitPacketDescriptorRange) -> str:
     )
 
 
+def _selection_row_initializer(row: _WaitPacketSelectionRow) -> str:
+    return "\n".join(
+        [
+            "LOOM_AMDGPU_WAIT_PACKET_SELECTION(",
+            f"    {row.descriptor_set_ordinal}, {_counter_mask_expr(row.counter_mask)},",
+            f"    {row.descriptor_index}, {_counter_mask_expr(row.covered_counter_mask)})",
+        ]
+    )
+
+
 def _emit_descriptor_rows(tables: _WaitPacketTables) -> str:
     return (
         "\n".join(
@@ -437,6 +544,18 @@ def _emit_range_rows(tables: _WaitPacketTables) -> str:
     )
 
 
+def _emit_selection_rows(tables: _WaitPacketTables) -> str:
+    return (
+        "\n".join(
+            [
+                *_generated_header(),
+                *(_selection_row_initializer(row) for row in tables.selection_rows),
+            ]
+        )
+        + "\n"
+    )
+
+
 def _write_output(path: Path, contents: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(contents, encoding="utf-8")
@@ -465,8 +584,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         type=Path,
         help="Generated wait-packet descriptor-set range fragment path.",
     )
+    parser.add_argument(
+        "--selection-rows",
+        type=Path,
+        help="Generated wait-packet counter-mask selection row fragment path.",
+    )
     args = parser.parse_args(argv)
-    if args.descriptor_rows is None and args.immediate_rows is None and args.descriptor_ranges is None:
+    if args.descriptor_rows is None and args.immediate_rows is None and args.descriptor_ranges is None and args.selection_rows is None:
         parser.error("at least one output path is required")
 
     tables = _materialize_wait_packet_tables(
@@ -479,6 +603,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         _write_output(args.immediate_rows, _emit_immediate_rows(tables))
     if args.descriptor_ranges is not None:
         _write_output(args.descriptor_ranges, _emit_range_rows(tables))
+    if args.selection_rows is not None:
+        _write_output(args.selection_rows, _emit_selection_rows(tables))
     return 0
 
 

@@ -183,37 +183,19 @@ static const loom_amdgpu_wait_packet_descriptor_template_t*
 loom_amdgpu_wait_packet_select_descriptor(
     loom_amdgpu_wait_packet_builder_t* builder, uint32_t remaining_counter_mask,
     uint32_t* out_covered_counter_mask) {
-  const loom_amdgpu_wait_packet_descriptor_template_t* best_descriptor = NULL;
-  uint32_t best_covered_counter_mask = 0;
-  uint32_t best_covered_count = 0;
-  uint32_t best_extra_count = UINT32_MAX;
-  uint16_t best_immediate_count = UINT16_MAX;
-  for (iree_host_size_t i = 0; i < builder->target.descriptor_count; ++i) {
-    const loom_amdgpu_wait_packet_descriptor_template_t* descriptor =
-        &builder->target.descriptors[i];
-    const uint32_t covered_counter_mask =
-        descriptor->counter_mask & remaining_counter_mask;
-    if (covered_counter_mask == 0) {
-      continue;
-    }
-    const uint32_t covered_count =
-        (uint32_t)iree_math_count_ones_u32(covered_counter_mask);
-    const uint32_t extra_count = descriptor->counter_count - covered_count;
-    if (best_descriptor == NULL || covered_count > best_covered_count ||
-        (covered_count == best_covered_count &&
-         extra_count < best_extra_count) ||
-        (covered_count == best_covered_count &&
-         extra_count == best_extra_count &&
-         descriptor->immediate_count < best_immediate_count)) {
-      best_descriptor = descriptor;
-      best_covered_counter_mask = covered_counter_mask;
-      best_covered_count = covered_count;
-      best_extra_count = extra_count;
-      best_immediate_count = descriptor->immediate_count;
-    }
+  *out_covered_counter_mask = 0;
+  if (remaining_counter_mask >= builder->target.selection_count) {
+    return NULL;
   }
-  *out_covered_counter_mask = best_covered_counter_mask;
-  return best_descriptor;
+  const loom_amdgpu_wait_packet_selection_template_t* selection =
+      &builder->target.selections[remaining_counter_mask];
+  const uint32_t covered_counter_mask = selection->covered_counter_mask;
+  if (covered_counter_mask == 0) {
+    return NULL;
+  }
+  IREE_ASSERT_LT(selection->descriptor_index, builder->target.descriptor_count);
+  *out_covered_counter_mask = covered_counter_mask;
+  return &builder->target.descriptors[selection->descriptor_index];
 }
 
 iree_status_t loom_amdgpu_wait_packet_try_select_counter_mask(

@@ -232,6 +232,15 @@ loom_generated_textual_header(
 )
 
 loom_generated_textual_header(
+    name = "wait_packet_selections_gen",
+    args = _AMDGPU_ISA_XML_ARGS,
+    generator = _AMDGPU_WAIT_PACKET_TABLE_GENERATOR,
+    inputs = _AMDGPU_ISA_XML_INPUTS,
+    output = "wait_packet_selections.inl",
+    output_flag = "--selection-rows",
+)
+
+loom_generated_textual_header(
     name = "vopd_component_rules_gen",
     args = _AMDGPU_ISA_XML_ARGS,
     generator = _AMDGPU_VOPD_COMPONENT_TABLE_GENERATOR,
@@ -248,6 +257,7 @@ loom_cc_library(
         ":wait_packet_descriptor_ranges.inl",
         ":wait_packet_descriptors.inl",
         ":wait_packet_immediates.inl",
+        ":wait_packet_selections.inl",
     ],
     visibility = _AMDGPU_ROOT_VISIBILITY + _AMDGPU_LOWER_VISIBILITY,
     deps = [

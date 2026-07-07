@@ -74,6 +74,26 @@ static const loom_amdgpu_wait_packet_descriptor_range_t
 
 #undef LOOM_AMDGPU_WAIT_PACKET_DESCRIPTOR_RANGE
 
+#define LOOM_AMDGPU_WAIT_PACKET_SELECTION(                                    \
+    descriptor_set_ordinal_value, counter_mask_value, descriptor_index_value, \
+    covered_counter_mask_value)                                               \
+  [descriptor_set_ordinal_value][counter_mask_value] = {                      \
+      .descriptor_index = descriptor_index_value,                             \
+      .covered_counter_mask = covered_counter_mask_value,                     \
+  },
+
+static const loom_amdgpu_wait_packet_selection_template_t
+    kAmdgpuWaitPacketSelections
+        [LOOM_AMDGPU_TARGET_REF_DESCRIPTOR_SET_ORDINAL_COUNT]
+        [LOOM_AMDGPU_WAIT_COUNTER_MASK_ALL + 1] = {
+#include "loom/target/arch/amdgpu/planning/wait_packet_selections.inl"
+};
+
+#undef LOOM_AMDGPU_WAIT_PACKET_SELECTION
+
+static_assert(sizeof(loom_amdgpu_wait_packet_selection_template_t) == 4,
+              "wait-packet selection rows must stay compact");
+
 static iree_status_t loom_amdgpu_wait_packet_verify_target(
     const loom_low_descriptor_set_t* descriptor_set) {
   if (descriptor_set == NULL) {
@@ -116,6 +136,9 @@ iree_status_t loom_amdgpu_wait_packet_analyze_target(
   *out_target = (loom_amdgpu_wait_packet_target_t){
       .descriptors = &kAmdgpuWaitPacketDescriptors[range->first_descriptor],
       .descriptor_count = range->descriptor_count,
+      .selections = kAmdgpuWaitPacketSelections[descriptor_set_ordinal],
+      .selection_count =
+          IREE_ARRAYSIZE(kAmdgpuWaitPacketSelections[descriptor_set_ordinal]),
       .max_descriptor_immediate_count = range->max_descriptor_immediate_count,
   };
   return iree_ok_status();
