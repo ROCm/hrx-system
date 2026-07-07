@@ -984,6 +984,135 @@ def join_profile(
     return join_dispatch_profile(plan, profile_records)
 
 
+def _profile_duration_suffix(summary: dict[str, Any]) -> str:
+    if summary.get("total_duration_ns") is not None:
+        return "ns"
+    if summary.get("total_duration_ticks") is not None:
+        return "ticks"
+    return "unknown"
+
+
+def _duration_field_name(prefix: str, suffix: str) -> str:
+    if suffix == "ns":
+        return f"{prefix}_duration_ns"
+    if suffix == "ticks":
+        return f"{prefix}_duration_ticks"
+    return f"{prefix}_duration"
+
+
+def _duration_value(row: dict[str, Any], prefix: str, suffix: str) -> int | None:
+    if suffix == "unknown":
+        return None
+    value = row.get(_duration_field_name(prefix, suffix))
+    if value is None:
+        return None
+    return _optional_nonnegative_int(value, _duration_field_name(prefix, suffix))
+
+
+def _format_summary_rows(
+    title: str,
+    rows: list[dict[str, Any]],
+    total_duration: int | None,
+    duration_suffix: str,
+    limit: int,
+) -> list[str]:
+    lines = [
+        title,
+        "| Share | Count | Total | P50 | Name | Function |",
+        "| ---: | ---: | ---: | ---: | --- | --- |",
+    ]
+    for row in rows[:limit]:
+        total = _duration_value(row, "total", duration_suffix)
+        p50 = _duration_value(row, "p50", duration_suffix)
+        if total is None or total_duration is None or total_duration == 0:
+            share = "n/a"
+        else:
+            share = f"{(100.0 * total / total_duration):.2f}%"
+        name = row.get("name")
+        if name is None:
+            name = row.get("module_path")
+        if name is None:
+            name = row.get("function_name")
+        if "stage_key" in row:
+            name = f"{row['stage_key']}:{name}"
+        lines.append(
+            "| "
+            + " | ".join(
+                [
+                    share,
+                    str(_require_int(row.get("count"), "count")),
+                    "n/a" if total is None else str(total),
+                    "n/a" if p50 is None else str(p50),
+                    _require_string(name, "name"),
+                    _require_string(row.get("function_name"), "function_name"),
+                ]
+            )
+            + " |"
+        )
+    return lines
+
+
+def format_summary_report(report: dict[str, Any], limit: int = 10) -> str:
+    """Returns a Markdown summary for a joined dispatch profile report."""
+
+    if limit <= 0:
+        raise DispatchProfileJoinError("summary limit must be positive")
+    summary = _require_dict(report.get("summary"), "summary")
+    duration_suffix = _profile_duration_suffix(summary)
+    total_duration = _duration_value(summary, "total", duration_suffix)
+    duration_label = (
+        "duration unavailable"
+        if total_duration is None
+        else f"total_duration_{duration_suffix}={total_duration}"
+    )
+    unmatched_count = _require_int(
+        summary.get("unmatched_dispatch_count"), "summary.unmatched_dispatch_count"
+    )
+    lines = [
+        "# Dispatch Profile Summary",
+        "",
+        (
+            f"dispatches={_require_int(summary.get('dispatch_count'), 'dispatch_count')} "
+            f"profile_dispatches={_require_int(summary.get('profile_dispatch_count'), 'profile_dispatch_count')} "
+            f"unmatched_dispatches={unmatched_count} "
+            f"{duration_label}"
+        ),
+        "",
+    ]
+    lines.extend(
+        _format_summary_rows(
+            "## Top Operations",
+            _require_list(report.get("by_operation"), "by_operation"),
+            total_duration,
+            duration_suffix,
+            limit,
+        )
+    )
+    lines.append("")
+    lines.extend(
+        _format_summary_rows(
+            "## Top Kernels",
+            _require_list(report.get("by_kernel"), "by_kernel"),
+            total_duration,
+            duration_suffix,
+            limit,
+        )
+    )
+    if unmatched_count:
+        lines.append("")
+        lines.extend(
+            _format_summary_rows(
+                "## Unmatched Kernels",
+                _require_list(report.get("unmatched_by_kernel"), "unmatched_by_kernel"),
+                None,
+                duration_suffix,
+                limit,
+            )
+        )
+    lines.append("")
+    return "\n".join(lines)
+
+
 def _parse_arguments(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--plan", required=True, type=Path, help="ID4 plan JSON path")
@@ -997,6 +1126,17 @@ def _parse_arguments(argv: list[str]) -> argparse.Namespace:
         "--output",
         type=Path,
         help="Output report JSON path. Defaults to stdout.",
+    )
+    parser.add_argument(
+        "--summary-output",
+        type=Path,
+        help="Optional Markdown summary report path.",
+    )
+    parser.add_argument(
+        "--summary-limit",
+        type=int,
+        default=10,
+        help="Maximum rows per summary section.",
     )
     return parser.parse_args(argv)
 
@@ -1015,6 +1155,12 @@ def main(argv: list[str]) -> int:
             with args.output.open("w", encoding="utf-8") as file:
                 json.dump(report, file, indent=2, sort_keys=True)
                 file.write("\n")
+        if args.summary_output is not None:
+            args.summary_output.parent.mkdir(parents=True, exist_ok=True)
+            args.summary_output.write_text(
+                format_summary_report(report, limit=args.summary_limit),
+                encoding="utf-8",
+            )
     except DispatchProfileJoinError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1

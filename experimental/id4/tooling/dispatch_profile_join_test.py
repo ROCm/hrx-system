@@ -357,6 +357,36 @@ class DispatchProfileJoinTest(unittest.TestCase):
         self.assertEqual(operation["total_duration_ns"], 1500)
         self.assertEqual(operation["p50_duration_ns"], 1000)
 
+    def test_formats_summary_report(self) -> None:
+        report = dispatch_profile_join.join_dispatch_profile(_plan(), _profile())
+
+        summary = dispatch_profile_join.format_summary_report(report, limit=1)
+
+        self.assertIn("dispatches=2 profile_dispatches=2", summary)
+        self.assertIn("unmatched_dispatches=0 total_duration_ns=1500", summary)
+        self.assertIn("## Top Operations", summary)
+        self.assertIn("| test.first | id4_test_first |", summary)
+        self.assertIn("## Top Kernels", summary)
+        self.assertIn("| test/first | id4_test_first |", summary)
+        self.assertNotIn("test.second", summary)
+
+    def test_formats_tick_summary_report(self) -> None:
+        profile = _profile()
+        profile[0] = dict(profile[0])
+        profile[0]["clock_fit_available"] = False
+        profile[0]["duration_ns"] = 0
+        profile[0]["duration_ticks"] = 100
+        profile[1] = dict(profile[1])
+        profile[1]["clock_fit_available"] = False
+        profile[1]["duration_ns"] = 0
+        profile[1]["duration_ticks"] = 50
+        report = dispatch_profile_join.join_dispatch_profile(_plan(), profile)
+
+        summary = dispatch_profile_join.format_summary_report(report)
+
+        self.assertIn("total_duration_ticks=150", summary)
+        self.assertIn("| 66.67% | 1 | 100 | 100 | test.first |", summary)
+
     def test_preserves_unmatched_profile_dispatches_around_regions(self) -> None:
         profile = [
             _profile_only_dispatch(1, "prepare.first", 10),
