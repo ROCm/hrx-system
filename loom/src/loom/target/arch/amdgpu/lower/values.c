@@ -602,6 +602,80 @@ static bool loom_amdgpu_index_cmp_predicate_to_scalar(
   }
 }
 
+typedef uint8_t loom_amdgpu_i64_compare_predicate_flags_t;
+
+// I64 compare must include a high-word equality test before combining the
+// high-word ordered compare with the low-word unsigned compare.
+#define LOOM_AMDGPU_I64_COMPARE_PREDICATE_NEEDS_HIGH_EQUAL ((uint8_t)1u << 0)
+
+typedef struct loom_amdgpu_i64_compare_predicate_descriptor_row_t {
+  // High-word compare descriptor ref.
+  loom_amdgpu_descriptor_ref_t high_descriptor_ref;
+  // Low-word compare descriptor ref.
+  loom_amdgpu_descriptor_ref_t low_descriptor_ref;
+  // Scalar mask combine descriptor ref.
+  loom_amdgpu_descriptor_ref_t combine_descriptor_ref;
+  // Extra lowering requirements for this predicate row.
+  loom_amdgpu_i64_compare_predicate_flags_t flags;
+} loom_amdgpu_i64_compare_predicate_descriptor_row_t;
+
+#define LOOM_AMDGPU_I64_COMPARE_DESCRIPTOR_ROW(                               \
+    high_descriptor_ref_, low_descriptor_ref_, combine_descriptor_ref_,       \
+    flags_)                                                                   \
+  {                                                                           \
+      .high_descriptor_ref =                                                  \
+          LOOM_AMDGPU_DESCRIPTOR_REF_##high_descriptor_ref_,                  \
+      .low_descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_##low_descriptor_ref_, \
+      .combine_descriptor_ref =                                               \
+          LOOM_AMDGPU_DESCRIPTOR_REF_##combine_descriptor_ref_,               \
+      .flags = flags_,                                                        \
+  }
+
+static const loom_amdgpu_i64_compare_predicate_descriptor_row_t
+    kAmdgpuI64ComparePredicateDescriptorRows
+        [LOOM_SCALAR_CMPI_PREDICATE_COUNT_] = {
+            [LOOM_SCALAR_CMPI_PREDICATE_EQ] =
+                LOOM_AMDGPU_I64_COMPARE_DESCRIPTOR_ROW(
+                    V_CMP_EQ_I32, V_CMP_EQ_I32, S_AND_B64, 0),
+            [LOOM_SCALAR_CMPI_PREDICATE_NE] =
+                LOOM_AMDGPU_I64_COMPARE_DESCRIPTOR_ROW(
+                    V_CMP_NE_I32, V_CMP_NE_I32, S_OR_B64, 0),
+            [LOOM_SCALAR_CMPI_PREDICATE_SLT] =
+                LOOM_AMDGPU_I64_COMPARE_DESCRIPTOR_ROW(
+                    V_CMP_SLT_I32, V_CMP_ULT_U32, S_OR_B64,
+                    LOOM_AMDGPU_I64_COMPARE_PREDICATE_NEEDS_HIGH_EQUAL),
+            [LOOM_SCALAR_CMPI_PREDICATE_SLE] =
+                LOOM_AMDGPU_I64_COMPARE_DESCRIPTOR_ROW(
+                    V_CMP_SLT_I32, V_CMP_ULE_U32, S_OR_B64,
+                    LOOM_AMDGPU_I64_COMPARE_PREDICATE_NEEDS_HIGH_EQUAL),
+            [LOOM_SCALAR_CMPI_PREDICATE_SGT] =
+                LOOM_AMDGPU_I64_COMPARE_DESCRIPTOR_ROW(
+                    V_CMP_SGT_I32, V_CMP_UGT_U32, S_OR_B64,
+                    LOOM_AMDGPU_I64_COMPARE_PREDICATE_NEEDS_HIGH_EQUAL),
+            [LOOM_SCALAR_CMPI_PREDICATE_SGE] =
+                LOOM_AMDGPU_I64_COMPARE_DESCRIPTOR_ROW(
+                    V_CMP_SGT_I32, V_CMP_UGE_U32, S_OR_B64,
+                    LOOM_AMDGPU_I64_COMPARE_PREDICATE_NEEDS_HIGH_EQUAL),
+            [LOOM_SCALAR_CMPI_PREDICATE_ULT] =
+                LOOM_AMDGPU_I64_COMPARE_DESCRIPTOR_ROW(
+                    V_CMP_ULT_U32, V_CMP_ULT_U32, S_OR_B64,
+                    LOOM_AMDGPU_I64_COMPARE_PREDICATE_NEEDS_HIGH_EQUAL),
+            [LOOM_SCALAR_CMPI_PREDICATE_ULE] =
+                LOOM_AMDGPU_I64_COMPARE_DESCRIPTOR_ROW(
+                    V_CMP_ULT_U32, V_CMP_ULE_U32, S_OR_B64,
+                    LOOM_AMDGPU_I64_COMPARE_PREDICATE_NEEDS_HIGH_EQUAL),
+            [LOOM_SCALAR_CMPI_PREDICATE_UGT] =
+                LOOM_AMDGPU_I64_COMPARE_DESCRIPTOR_ROW(
+                    V_CMP_UGT_U32, V_CMP_UGT_U32, S_OR_B64,
+                    LOOM_AMDGPU_I64_COMPARE_PREDICATE_NEEDS_HIGH_EQUAL),
+            [LOOM_SCALAR_CMPI_PREDICATE_UGE] =
+                LOOM_AMDGPU_I64_COMPARE_DESCRIPTOR_ROW(
+                    V_CMP_UGT_U32, V_CMP_UGE_U32, S_OR_B64,
+                    LOOM_AMDGPU_I64_COMPARE_PREDICATE_NEEDS_HIGH_EQUAL),
+};
+
+#undef LOOM_AMDGPU_I64_COMPARE_DESCRIPTOR_ROW
+
 static bool loom_amdgpu_i64_compare_predicate_descriptors(
     loom_scalar_cmpi_predicate_t predicate,
     loom_amdgpu_descriptor_ref_t* out_high_descriptor_ref,
@@ -612,68 +686,22 @@ static bool loom_amdgpu_i64_compare_predicate_descriptors(
   *out_low_descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_NONE;
   *out_combine_descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_NONE;
   *out_needs_high_equal = false;
-  switch (predicate) {
-    case LOOM_SCALAR_CMPI_PREDICATE_EQ:
-      *out_high_descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_V_CMP_EQ_I32;
-      *out_low_descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_V_CMP_EQ_I32;
-      *out_combine_descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_S_AND_B64;
-      return true;
-    case LOOM_SCALAR_CMPI_PREDICATE_NE:
-      *out_high_descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_V_CMP_NE_I32;
-      *out_low_descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_V_CMP_NE_I32;
-      *out_combine_descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_S_OR_B64;
-      return true;
-    case LOOM_SCALAR_CMPI_PREDICATE_SLT:
-      *out_high_descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_V_CMP_SLT_I32;
-      *out_low_descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_V_CMP_ULT_U32;
-      *out_combine_descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_S_OR_B64;
-      *out_needs_high_equal = true;
-      return true;
-    case LOOM_SCALAR_CMPI_PREDICATE_SLE:
-      *out_high_descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_V_CMP_SLT_I32;
-      *out_low_descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_V_CMP_ULE_U32;
-      *out_combine_descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_S_OR_B64;
-      *out_needs_high_equal = true;
-      return true;
-    case LOOM_SCALAR_CMPI_PREDICATE_SGT:
-      *out_high_descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_V_CMP_SGT_I32;
-      *out_low_descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_V_CMP_UGT_U32;
-      *out_combine_descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_S_OR_B64;
-      *out_needs_high_equal = true;
-      return true;
-    case LOOM_SCALAR_CMPI_PREDICATE_SGE:
-      *out_high_descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_V_CMP_SGT_I32;
-      *out_low_descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_V_CMP_UGE_U32;
-      *out_combine_descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_S_OR_B64;
-      *out_needs_high_equal = true;
-      return true;
-    case LOOM_SCALAR_CMPI_PREDICATE_ULT:
-      *out_high_descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_V_CMP_ULT_U32;
-      *out_low_descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_V_CMP_ULT_U32;
-      *out_combine_descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_S_OR_B64;
-      *out_needs_high_equal = true;
-      return true;
-    case LOOM_SCALAR_CMPI_PREDICATE_ULE:
-      *out_high_descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_V_CMP_ULT_U32;
-      *out_low_descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_V_CMP_ULE_U32;
-      *out_combine_descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_S_OR_B64;
-      *out_needs_high_equal = true;
-      return true;
-    case LOOM_SCALAR_CMPI_PREDICATE_UGT:
-      *out_high_descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_V_CMP_UGT_U32;
-      *out_low_descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_V_CMP_UGT_U32;
-      *out_combine_descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_S_OR_B64;
-      *out_needs_high_equal = true;
-      return true;
-    case LOOM_SCALAR_CMPI_PREDICATE_UGE:
-      *out_high_descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_V_CMP_UGT_U32;
-      *out_low_descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_V_CMP_UGE_U32;
-      *out_combine_descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_S_OR_B64;
-      *out_needs_high_equal = true;
-      return true;
-    default:
-      return false;
+  if (predicate >= LOOM_SCALAR_CMPI_PREDICATE_COUNT_) {
+    return false;
   }
+  const loom_amdgpu_i64_compare_predicate_descriptor_row_t* row =
+      &kAmdgpuI64ComparePredicateDescriptorRows[predicate];
+  if (row->high_descriptor_ref == LOOM_AMDGPU_DESCRIPTOR_REF_NONE ||
+      row->low_descriptor_ref == LOOM_AMDGPU_DESCRIPTOR_REF_NONE ||
+      row->combine_descriptor_ref == LOOM_AMDGPU_DESCRIPTOR_REF_NONE) {
+    return false;
+  }
+  *out_high_descriptor_ref = row->high_descriptor_ref;
+  *out_low_descriptor_ref = row->low_descriptor_ref;
+  *out_combine_descriptor_ref = row->combine_descriptor_ref;
+  *out_needs_high_equal = iree_any_bit_set(
+      row->flags, LOOM_AMDGPU_I64_COMPARE_PREDICATE_NEEDS_HIGH_EQUAL);
+  return true;
 }
 
 static bool loom_amdgpu_i64_compare_descriptors_supported(
