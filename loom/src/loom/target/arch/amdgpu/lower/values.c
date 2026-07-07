@@ -428,24 +428,13 @@ static const loom_amdgpu_descriptor_requirement_t
         },
 };
 
-static bool loom_amdgpu_value_use_is_vector_atomic_offset(
-    const loom_op_t* user_op, loom_value_id_t value_id) {
-  if (loom_vector_atomic_reduce_isa(user_op)) {
-    return loom_vector_atomic_reduce_offsets(user_op) == value_id;
-  }
-  if (loom_vector_atomic_reduce_mask_isa(user_op)) {
-    return loom_vector_atomic_reduce_mask_offsets(user_op) == value_id;
-  }
-  if (loom_vector_atomic_rmw_isa(user_op)) {
-    return loom_vector_atomic_rmw_offsets(user_op) == value_id;
-  }
-  if (loom_vector_atomic_rmw_mask_isa(user_op)) {
-    return loom_vector_atomic_rmw_mask_offsets(user_op) == value_id;
-  }
-  if (loom_vector_atomic_cmpxchg_isa(user_op)) {
-    return loom_vector_atomic_cmpxchg_offsets(user_op) == value_id;
-  }
-  return false;
+static bool loom_amdgpu_value_use_is_atomic_offset(const loom_module_t* module,
+                                                   const loom_op_t* user_op,
+                                                   loom_value_id_t value_id) {
+  loom_memory_access_t access = loom_memory_access_cast(module, user_op);
+  return loom_memory_access_isa(access) &&
+         loom_memory_access_has_atomic_attrs(access) &&
+         loom_memory_access_offsets(access) == value_id;
 }
 
 static bool loom_amdgpu_value_only_feeds_vector_atomic_offsets(
@@ -459,8 +448,8 @@ static bool loom_amdgpu_value_only_feeds_vector_atomic_offsets(
   }
   const loom_use_t* use = NULL;
   loom_value_for_each_use(value, use) {
-    if (!loom_amdgpu_value_use_is_vector_atomic_offset(loom_use_user_op(*use),
-                                                       value_id)) {
+    if (!loom_amdgpu_value_use_is_atomic_offset(module, loom_use_user_op(*use),
+                                                value_id)) {
       return false;
     }
   }

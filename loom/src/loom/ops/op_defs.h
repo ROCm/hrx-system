@@ -1486,6 +1486,9 @@ loom_attribute_t loom_memory_access_atomic_failure_ordering(
 // Returns the atomic synchronization-scope attr.
 loom_attribute_t loom_memory_access_atomic_scope(loom_memory_access_t access);
 
+// Returns true when any atomic update/order/scope attr is present.
+bool loom_memory_access_has_atomic_attrs(loom_memory_access_t access);
+
 //===----------------------------------------------------------------------===//
 // Op definition macros
 //===----------------------------------------------------------------------===//
