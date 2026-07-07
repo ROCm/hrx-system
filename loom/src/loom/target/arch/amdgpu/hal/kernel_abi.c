@@ -26,68 +26,62 @@
 #define LOOM_AMDGPU_HAL_KERNEL_ABI_MAX_RESOURCE_COUNT UINT16_MAX
 #define LOOM_AMDGPU_HAL_KERNEL_ABI_DIRECT_ARG_MAX_UNIT_COUNT 2u
 
-static iree_string_view_t loom_amdgpu_hal_kernel_abi_source_name(
-    loom_amdgpu_hal_kernel_abi_source_kind_t source_kind) {
-  switch (source_kind) {
-    case LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_KERNARG_SEGMENT_PTR:
-      return IREE_SV(LOOM_AMDGPU_HAL_KERNEL_ABI_KERNARG_SEGMENT_PTR_SOURCE);
-    case LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_DISPATCH_PTR:
-      return IREE_SV(LOOM_AMDGPU_HAL_KERNEL_ABI_DISPATCH_PTR_SOURCE);
-    case LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_DISPATCH_ID:
-      return IREE_SV(LOOM_AMDGPU_HAL_KERNEL_ABI_DISPATCH_ID_SOURCE);
-    case LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_WORKGROUP_ID_X:
-      return IREE_SV(LOOM_AMDGPU_HAL_KERNEL_ABI_WORKGROUP_ID_X_SOURCE);
-    case LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_WORKGROUP_ID_Y:
-      return IREE_SV(LOOM_AMDGPU_HAL_KERNEL_ABI_WORKGROUP_ID_Y_SOURCE);
-    case LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_WORKGROUP_ID_Z:
-      return IREE_SV(LOOM_AMDGPU_HAL_KERNEL_ABI_WORKGROUP_ID_Z_SOURCE);
-    case LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_WORKITEM_ID_X:
-      return IREE_SV(LOOM_AMDGPU_HAL_KERNEL_ABI_WORKITEM_ID_X_SOURCE);
-    case LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_WORKITEM_ID_Y:
-      return IREE_SV(LOOM_AMDGPU_HAL_KERNEL_ABI_WORKITEM_ID_Y_SOURCE);
-    case LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_WORKITEM_ID_Z:
-      return IREE_SV(LOOM_AMDGPU_HAL_KERNEL_ABI_WORKITEM_ID_Z_SOURCE);
-    case LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_WORKITEM_ID_PACKED_XY:
-      return IREE_SV(LOOM_AMDGPU_HAL_KERNEL_ABI_WORKITEM_ID_PACKED_XY_SOURCE);
-    case LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_WORKITEM_ID_PACKED_XYZ:
-      return IREE_SV(LOOM_AMDGPU_HAL_KERNEL_ABI_WORKITEM_ID_PACKED_XYZ_SOURCE);
-    case LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_M0:
-      return IREE_SV(LOOM_AMDGPU_HAL_KERNEL_ABI_M0_SOURCE);
-    default:
-      return iree_string_view_empty();
+typedef struct loom_amdgpu_hal_kernel_abi_source_info_t {
+  // Stable low.live_in source ID stored in IR.
+  uint64_t stable_id;
+  // Stable low.live_in source spelling stored in IR.
+  iree_string_view_t name;
+} loom_amdgpu_hal_kernel_abi_source_info_t;
+
+#define LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_INFO(kind)                \
+  [LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_##kind] = {                    \
+      .stable_id = LOOM_AMDGPU_HAL_KERNEL_ABI_##kind##_SOURCE_ID,   \
+      .name = IREE_SVL(LOOM_AMDGPU_HAL_KERNEL_ABI_##kind##_SOURCE), \
   }
+
+static const loom_amdgpu_hal_kernel_abi_source_info_t
+    kLoomAmdgpuHalKernelAbiSourceInfos[] = {
+        LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_INFO(KERNARG_SEGMENT_PTR),
+        LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_INFO(DISPATCH_PTR),
+        LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_INFO(DISPATCH_ID),
+        LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_INFO(WORKGROUP_ID_X),
+        LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_INFO(WORKGROUP_ID_Y),
+        LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_INFO(WORKGROUP_ID_Z),
+        LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_INFO(WORKITEM_ID_X),
+        LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_INFO(WORKITEM_ID_Y),
+        LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_INFO(WORKITEM_ID_Z),
+        LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_INFO(WORKITEM_ID_PACKED_XY),
+        LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_INFO(WORKITEM_ID_PACKED_XYZ),
+        LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_INFO(M0),
+};
+
+#undef LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_INFO
+
+iree_string_view_t loom_amdgpu_hal_kernel_abi_source_name(
+    loom_amdgpu_hal_kernel_abi_source_kind_t source_kind) {
+  if (source_kind <= LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_UNKNOWN) {
+    return iree_string_view_empty();
+  }
+  const iree_host_size_t source_index = (iree_host_size_t)source_kind;
+  if (source_index >= IREE_ARRAYSIZE(kLoomAmdgpuHalKernelAbiSourceInfos)) {
+    return iree_string_view_empty();
+  }
+  const loom_amdgpu_hal_kernel_abi_source_info_t* source_info =
+      &kLoomAmdgpuHalKernelAbiSourceInfos[source_index];
+  return source_info->name;
 }
 
 static loom_amdgpu_hal_kernel_abi_source_kind_t
 loom_amdgpu_hal_kernel_abi_source_kind_from_stable_id(uint64_t source_id) {
-  switch (source_id) {
-    case LOOM_AMDGPU_HAL_KERNEL_ABI_KERNARG_SEGMENT_PTR_SOURCE_ID:
-      return LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_KERNARG_SEGMENT_PTR;
-    case LOOM_AMDGPU_HAL_KERNEL_ABI_DISPATCH_PTR_SOURCE_ID:
-      return LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_DISPATCH_PTR;
-    case LOOM_AMDGPU_HAL_KERNEL_ABI_DISPATCH_ID_SOURCE_ID:
-      return LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_DISPATCH_ID;
-    case LOOM_AMDGPU_HAL_KERNEL_ABI_WORKGROUP_ID_X_SOURCE_ID:
-      return LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_WORKGROUP_ID_X;
-    case LOOM_AMDGPU_HAL_KERNEL_ABI_WORKGROUP_ID_Y_SOURCE_ID:
-      return LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_WORKGROUP_ID_Y;
-    case LOOM_AMDGPU_HAL_KERNEL_ABI_WORKGROUP_ID_Z_SOURCE_ID:
-      return LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_WORKGROUP_ID_Z;
-    case LOOM_AMDGPU_HAL_KERNEL_ABI_WORKITEM_ID_X_SOURCE_ID:
-      return LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_WORKITEM_ID_X;
-    case LOOM_AMDGPU_HAL_KERNEL_ABI_WORKITEM_ID_Y_SOURCE_ID:
-      return LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_WORKITEM_ID_Y;
-    case LOOM_AMDGPU_HAL_KERNEL_ABI_WORKITEM_ID_Z_SOURCE_ID:
-      return LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_WORKITEM_ID_Z;
-    case LOOM_AMDGPU_HAL_KERNEL_ABI_WORKITEM_ID_PACKED_XY_SOURCE_ID:
-      return LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_WORKITEM_ID_PACKED_XY;
-    case LOOM_AMDGPU_HAL_KERNEL_ABI_WORKITEM_ID_PACKED_XYZ_SOURCE_ID:
-      return LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_WORKITEM_ID_PACKED_XYZ;
-    case LOOM_AMDGPU_HAL_KERNEL_ABI_M0_SOURCE_ID:
-      return LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_M0;
-    default:
-      return LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_UNKNOWN;
+  for (iree_host_size_t i = 1;
+       i < IREE_ARRAYSIZE(kLoomAmdgpuHalKernelAbiSourceInfos); ++i) {
+    const loom_amdgpu_hal_kernel_abi_source_info_t* source_info =
+        &kLoomAmdgpuHalKernelAbiSourceInfos[i];
+    if (source_info->stable_id != 0 && source_info->stable_id == source_id) {
+      return (loom_amdgpu_hal_kernel_abi_source_kind_t)i;
+    }
   }
+  return LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_UNKNOWN;
 }
 
 static iree_string_view_t loom_amdgpu_hal_kernel_abi_module_string(
