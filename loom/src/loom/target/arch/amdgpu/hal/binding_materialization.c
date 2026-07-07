@@ -126,8 +126,9 @@ static iree_status_t loom_amdgpu_hal_binding_get_kernarg_live_in(
       continue;
     }
     const loom_value_id_t live_in_value = loom_low_live_in_result(op);
-    if (loom_amdgpu_hal_kernel_abi_is_kernarg_segment_ptr_live_in(
-            rewriter->module, live_in_value)) {
+    if (loom_amdgpu_hal_kernel_abi_live_in_source_kind(rewriter->module,
+                                                       live_in_value) ==
+        LOOM_AMDGPU_HAL_KERNEL_ABI_SOURCE_KERNARG_SEGMENT_PTR) {
       *out_value = live_in_value;
       return iree_ok_status();
     }
