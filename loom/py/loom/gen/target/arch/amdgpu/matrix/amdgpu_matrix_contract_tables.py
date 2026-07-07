@@ -172,6 +172,9 @@ _FRAGMENT_LAYOUT_C_NAMES = {
     "cdna_mfma_f32_32x32x16_packed8": ("LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_CDNA_MFMA_F32_32X32X16_PACKED8"),
 }
 
+_MATRIX_WAIT_RESULT_FAMILIES = frozenset(("mfma", "smfmac"))
+_MATRIX_WAIT_RESULT_REGISTER_COUNTS = frozenset((2, 4, 8, 16, 32))
+
 
 @dataclass(frozen=True, slots=True)
 class _MatrixDescriptorShape:
@@ -451,6 +454,15 @@ def _validate_contract_descriptor_immediates(
         raise ValueError(f"AMDGPU matrix contract '{contract.name}' selects low descriptor '{descriptor_key}' with unmapped immediate '{immediate.field_name}'")
 
 
+def _validate_contract_wait_state_payload(contract: AmdgpuMatrixContract) -> None:
+    if contract.family not in _MATRIX_WAIT_RESULT_FAMILIES:
+        return
+    if contract.result.register_count in _MATRIX_WAIT_RESULT_REGISTER_COUNTS:
+        return
+    expected_counts = ", ".join(str(count) for count in sorted(_MATRIX_WAIT_RESULT_REGISTER_COUNTS))
+    raise ValueError(f"AMDGPU matrix contract '{contract.name}' has unsupported wait-state result payload register count {contract.result.register_count}; expected one of {expected_counts}")
+
+
 def _payload_initializer(payload: AmdgpuMatrixPayload) -> str:
     numeric_type = _NUMERIC_TYPE_C_NAMES.get(payload.numeric_type)
     if numeric_type is None:
@@ -498,6 +510,7 @@ def _contract_initializer(
         raise ValueError(f"AMDGPU matrix contract '{contract.name}' cannot have implicit scale formats without scale operands")
     if contract.scale_kind != "none" and "scale_formats" not in contract.flags and not contract.implicit_scale_formats:
         raise ValueError(f"AMDGPU matrix contract '{contract.name}' with scale operands must have selector operands or implicit scale formats")
+    _validate_contract_wait_state_payload(contract)
     descriptor_key = _resolve_contract_descriptor_key(
         contract,
         keys_by_semantic_tag=keys_by_semantic_tag,
