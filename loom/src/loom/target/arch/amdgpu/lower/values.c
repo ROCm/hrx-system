@@ -3759,26 +3759,48 @@ static const loom_amdgpu_scalar_conversion_rule_t
 #undef LOOM_AMDGPU_SCALAR_CONVERSION_REFS_2
 #undef LOOM_AMDGPU_SCALAR_CONVERSION_REFS_3
 
+#define LOOM_AMDGPU_SCALAR_OP_INDEX(op_kind) ((uint8_t)((op_kind) & 0xFFu))
+#define LOOM_AMDGPU_SCALAR_CONVERSION_OP_GROUP_CODE(op_group) \
+  ((uint8_t)((op_group) + 1u))
+#define LOOM_AMDGPU_SCALAR_CONVERSION_OP_GROUP_ROW(op, group) \
+  [LOOM_AMDGPU_SCALAR_OP_INDEX(LOOM_OP_SCALAR_##op)] =        \
+      LOOM_AMDGPU_SCALAR_CONVERSION_OP_GROUP_CODE(            \
+          LOOM_AMDGPU_SCALAR_CONVERSION_OP_##group)
+
+static_assert(LOOM_AMDGPU_SCALAR_CONVERSION_OP_COUNT_ < UINT8_MAX,
+              "scalar conversion op-group codes must fit in uint8_t");
+
+static const uint8_t
+    kAmdgpuScalarConversionOpGroupCodeByScalarOp[LOOM_OP_SCALAR_COUNT_] = {
+        LOOM_AMDGPU_SCALAR_CONVERSION_OP_GROUP_ROW(TRUNCI, TRUNCI),
+        LOOM_AMDGPU_SCALAR_CONVERSION_OP_GROUP_ROW(EXTF, EXTF),
+        LOOM_AMDGPU_SCALAR_CONVERSION_OP_GROUP_ROW(EXTSI, EXTSI),
+        LOOM_AMDGPU_SCALAR_CONVERSION_OP_GROUP_ROW(EXTUI, EXTUI),
+        LOOM_AMDGPU_SCALAR_CONVERSION_OP_GROUP_ROW(UITOFP, UITOFP),
+        LOOM_AMDGPU_SCALAR_CONVERSION_OP_GROUP_ROW(FPTOSI, FPTOSI),
+        LOOM_AMDGPU_SCALAR_CONVERSION_OP_GROUP_ROW(FPTOUI, FPTOUI),
+};
+
+#undef LOOM_AMDGPU_SCALAR_OP_INDEX
+#undef LOOM_AMDGPU_SCALAR_CONVERSION_OP_GROUP_CODE
+#undef LOOM_AMDGPU_SCALAR_CONVERSION_OP_GROUP_ROW
+
 static loom_amdgpu_scalar_conversion_op_group_t
 loom_amdgpu_scalar_conversion_op_group(loom_op_kind_t op_kind) {
-  switch (op_kind) {
-    case LOOM_OP_SCALAR_TRUNCI:
-      return LOOM_AMDGPU_SCALAR_CONVERSION_OP_TRUNCI;
-    case LOOM_OP_SCALAR_EXTF:
-      return LOOM_AMDGPU_SCALAR_CONVERSION_OP_EXTF;
-    case LOOM_OP_SCALAR_EXTSI:
-      return LOOM_AMDGPU_SCALAR_CONVERSION_OP_EXTSI;
-    case LOOM_OP_SCALAR_EXTUI:
-      return LOOM_AMDGPU_SCALAR_CONVERSION_OP_EXTUI;
-    case LOOM_OP_SCALAR_UITOFP:
-      return LOOM_AMDGPU_SCALAR_CONVERSION_OP_UITOFP;
-    case LOOM_OP_SCALAR_FPTOSI:
-      return LOOM_AMDGPU_SCALAR_CONVERSION_OP_FPTOSI;
-    case LOOM_OP_SCALAR_FPTOUI:
-      return LOOM_AMDGPU_SCALAR_CONVERSION_OP_FPTOUI;
-    default:
-      return LOOM_AMDGPU_SCALAR_CONVERSION_OP_COUNT_;
+  if (loom_op_dialect_id(op_kind) != LOOM_DIALECT_SCALAR) {
+    return LOOM_AMDGPU_SCALAR_CONVERSION_OP_COUNT_;
   }
+  const uint8_t op_index = loom_op_dialect_index(op_kind);
+  if (op_index >=
+      IREE_ARRAYSIZE(kAmdgpuScalarConversionOpGroupCodeByScalarOp)) {
+    return LOOM_AMDGPU_SCALAR_CONVERSION_OP_COUNT_;
+  }
+  const uint8_t op_group_code =
+      kAmdgpuScalarConversionOpGroupCodeByScalarOp[op_index];
+  if (op_group_code == 0) {
+    return LOOM_AMDGPU_SCALAR_CONVERSION_OP_COUNT_;
+  }
+  return (loom_amdgpu_scalar_conversion_op_group_t)(op_group_code - 1u);
 }
 
 static const loom_amdgpu_scalar_conversion_rule_t*
@@ -3964,52 +3986,41 @@ static bool loom_amdgpu_vector_conversion_can_use_packed_i8_permute(
          result_storage->element_count == result_storage->register_count * 4u;
 }
 
+static const loom_amdgpu_vector_conversion_kind_t kAmdgpuVectorConversionKindByStorage
+    [LOOM_AMDGPU_VECTOR_STORAGE_KIND_COUNT_]
+    [LOOM_AMDGPU_VECTOR_STORAGE_KIND_COUNT_] = {
+        [LOOM_AMDGPU_VECTOR_STORAGE_KIND_FULL_32BIT]
+            [LOOM_AMDGPU_VECTOR_STORAGE_KIND_FULL_32BIT] =
+                LOOM_AMDGPU_VECTOR_CONVERSION_KIND_FULL_32_TO_FULL_32,
+        [LOOM_AMDGPU_VECTOR_STORAGE_KIND_FULL_32BIT]
+            [LOOM_AMDGPU_VECTOR_STORAGE_KIND_PACKED_INTEGER] =
+                LOOM_AMDGPU_VECTOR_CONVERSION_KIND_FULL_32_TO_PACKED_INTEGER,
+        [LOOM_AMDGPU_VECTOR_STORAGE_KIND_FULL_64BIT]
+            [LOOM_AMDGPU_VECTOR_STORAGE_KIND_FULL_32BIT] =
+                LOOM_AMDGPU_VECTOR_CONVERSION_KIND_FULL_64_TO_FULL_32,
+        [LOOM_AMDGPU_VECTOR_STORAGE_KIND_FULL_64BIT]
+            [LOOM_AMDGPU_VECTOR_STORAGE_KIND_PACKED_INTEGER] =
+                LOOM_AMDGPU_VECTOR_CONVERSION_KIND_FULL_64_TO_PACKED_INTEGER,
+        [LOOM_AMDGPU_VECTOR_STORAGE_KIND_PACKED_INTEGER]
+            [LOOM_AMDGPU_VECTOR_STORAGE_KIND_FULL_32BIT] =
+                LOOM_AMDGPU_VECTOR_CONVERSION_KIND_PACKED_INTEGER_TO_FULL_32,
+        [LOOM_AMDGPU_VECTOR_STORAGE_KIND_PACKED_INTEGER]
+            [LOOM_AMDGPU_VECTOR_STORAGE_KIND_PACKED_INTEGER] =
+                LOOM_AMDGPU_VECTOR_CONVERSION_KIND_PACKED_INTEGER_TO_PACKED_INTEGER,
+};
+
 static bool loom_amdgpu_vector_conversion_select_storage_kind(
     const loom_amdgpu_vector_storage_t* source_storage,
     const loom_amdgpu_vector_storage_t* result_storage,
     loom_amdgpu_vector_conversion_kind_t* out_kind) {
   *out_kind = LOOM_AMDGPU_VECTOR_CONVERSION_KIND_NONE;
-  switch (source_storage->kind) {
-    case LOOM_AMDGPU_VECTOR_STORAGE_KIND_FULL_32BIT:
-      if (result_storage->kind == LOOM_AMDGPU_VECTOR_STORAGE_KIND_FULL_32BIT) {
-        *out_kind = LOOM_AMDGPU_VECTOR_CONVERSION_KIND_FULL_32_TO_FULL_32;
-        return true;
-      }
-      if (result_storage->kind ==
-          LOOM_AMDGPU_VECTOR_STORAGE_KIND_PACKED_INTEGER) {
-        *out_kind =
-            LOOM_AMDGPU_VECTOR_CONVERSION_KIND_FULL_32_TO_PACKED_INTEGER;
-        return true;
-      }
-      return false;
-    case LOOM_AMDGPU_VECTOR_STORAGE_KIND_FULL_64BIT:
-      if (result_storage->kind == LOOM_AMDGPU_VECTOR_STORAGE_KIND_FULL_32BIT) {
-        *out_kind = LOOM_AMDGPU_VECTOR_CONVERSION_KIND_FULL_64_TO_FULL_32;
-        return true;
-      }
-      if (result_storage->kind ==
-          LOOM_AMDGPU_VECTOR_STORAGE_KIND_PACKED_INTEGER) {
-        *out_kind =
-            LOOM_AMDGPU_VECTOR_CONVERSION_KIND_FULL_64_TO_PACKED_INTEGER;
-        return true;
-      }
-      return false;
-    case LOOM_AMDGPU_VECTOR_STORAGE_KIND_PACKED_INTEGER:
-      if (result_storage->kind == LOOM_AMDGPU_VECTOR_STORAGE_KIND_FULL_32BIT) {
-        *out_kind =
-            LOOM_AMDGPU_VECTOR_CONVERSION_KIND_PACKED_INTEGER_TO_FULL_32;
-        return true;
-      }
-      if (result_storage->kind ==
-          LOOM_AMDGPU_VECTOR_STORAGE_KIND_PACKED_INTEGER) {
-        *out_kind =
-            LOOM_AMDGPU_VECTOR_CONVERSION_KIND_PACKED_INTEGER_TO_PACKED_INTEGER;
-        return true;
-      }
-      return false;
-    default:
-      return false;
+  if (source_storage->kind >= LOOM_AMDGPU_VECTOR_STORAGE_KIND_COUNT_ ||
+      result_storage->kind >= LOOM_AMDGPU_VECTOR_STORAGE_KIND_COUNT_) {
+    return false;
   }
+  *out_kind = kAmdgpuVectorConversionKindByStorage[source_storage->kind]
+                                                  [result_storage->kind];
+  return *out_kind != LOOM_AMDGPU_VECTOR_CONVERSION_KIND_NONE;
 }
 
 static bool loom_amdgpu_vector_conversion_descriptor_refs_present(

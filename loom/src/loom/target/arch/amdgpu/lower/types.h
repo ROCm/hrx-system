@@ -71,6 +71,7 @@ typedef enum loom_amdgpu_vector_storage_kind_e {
   LOOM_AMDGPU_VECTOR_STORAGE_KIND_PACKED_16BIT_FLOAT = 4,
   LOOM_AMDGPU_VECTOR_STORAGE_KIND_PACKED_INTEGER = 5,
   LOOM_AMDGPU_VECTOR_STORAGE_KIND_PACKED_8BIT_FLOAT = 6,
+  LOOM_AMDGPU_VECTOR_STORAGE_KIND_COUNT_ = 7,
 } loom_amdgpu_vector_storage_kind_t;
 
 typedef struct loom_amdgpu_vector_storage_t {
