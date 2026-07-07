@@ -1132,7 +1132,8 @@ def test_amdgpu_descriptor_category_groups_preserve_category_and_descriptor_orde
 def test_atomic_descriptor_candidates_are_derived_from_overlay_metadata() -> None:
     candidates = amdgpu_atomic_descriptor_candidates()
 
-    assert len(candidates) == 120
+    candidate_keys = {candidate.descriptor_key for candidate in candidates}
+    assert len(candidates) == len(candidate_keys)
     assert candidates[0].descriptor_key == "amdgpu.ds_add_u32"
     assert candidates[0].memory_space == AmdgpuAtomicMemorySpace.WORKGROUP
     assert candidates[0].address_form == AmdgpuMemoryAddressForm.DEFAULT
@@ -1400,18 +1401,18 @@ def test_feedback_atomic64_descriptors_cover_execution_families() -> None:
         )
 
 
-def test_feedback_atomic64_descriptors_do_not_expand_source_atomic_candidates() -> None:
+def test_feedback_atomic64_descriptors_expand_source_atomic_candidates() -> None:
     keys = {
         candidate.descriptor_key for candidate in amdgpu_atomic_descriptor_candidates()
     }
 
-    assert "amdgpu.flat_atomic_add_u64" not in keys
-    assert "amdgpu.flat_atomic_add_u64_rtn" not in keys
-    assert "amdgpu.flat_atomic_cmpswap_b64_rtn" not in keys
-    assert "amdgpu.global_atomic_add_u64_saddr" not in keys
-    assert "amdgpu.global_atomic_add_u64_rtn_saddr" not in keys
-    assert "amdgpu.global_atomic_swap_u64_rtn_saddr" not in keys
-    assert "amdgpu.global_atomic_cmpswap_b64_rtn_saddr" not in keys
+    assert "amdgpu.flat_atomic_add_u64" in keys
+    assert "amdgpu.flat_atomic_add_u64_rtn" in keys
+    assert "amdgpu.flat_atomic_cmpswap_b64_rtn" in keys
+    assert "amdgpu.global_atomic_add_u64_saddr" in keys
+    assert "amdgpu.global_atomic_add_u64_rtn_saddr" in keys
+    assert "amdgpu.global_atomic_swap_u64_rtn_saddr" in keys
+    assert "amdgpu.global_atomic_cmpswap_b64_rtn_saddr" in keys
 
 
 def test_flat_load_descriptors_cover_execution_families() -> None:
