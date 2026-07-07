@@ -285,22 +285,6 @@ typedef struct loom_amdgpu_scalar_conversion_rule_t {
   loom_amdgpu_descriptor_ref_t required_descriptor_refs[4];
 } loom_amdgpu_scalar_conversion_rule_t;
 
-static bool loom_amdgpu_descriptor_refs_present(
-    const loom_low_descriptor_set_t* descriptor_set,
-    const loom_amdgpu_descriptor_ref_t* descriptor_refs,
-    iree_host_size_t descriptor_ref_count) {
-  for (iree_host_size_t i = 0; i < descriptor_ref_count; ++i) {
-    if (descriptor_refs[i] == LOOM_AMDGPU_DESCRIPTOR_REF_NONE) {
-      return true;
-    }
-    if (!loom_amdgpu_descriptor_set_has_ref(descriptor_set,
-                                            descriptor_refs[i])) {
-      return false;
-    }
-  }
-  return true;
-}
-
 typedef struct loom_amdgpu_descriptor_requirement_t {
   // Constraint key reported when this descriptor ref is missing.
   iree_string_view_t constraint_key;
@@ -3847,7 +3831,7 @@ static bool loom_amdgpu_select_scalar_conversion_plan_from_table(
   const loom_amdgpu_scalar_conversion_rule_t* rule =
       loom_amdgpu_scalar_conversion_rule_for(op_group, source_type,
                                              result_type);
-  if (rule == NULL || !loom_amdgpu_descriptor_refs_present(
+  if (rule == NULL || !loom_amdgpu_descriptor_set_has_all_refs(
                           descriptor_set, rule->required_descriptor_refs,
                           IREE_ARRAYSIZE(rule->required_descriptor_refs))) {
     return false;
@@ -4056,8 +4040,8 @@ static bool loom_amdgpu_vector_conversion_descriptor_refs_present(
       iree_any_bit_set(
           kind_flags,
           LOOM_AMDGPU_VECTOR_CONVERSION_KIND_FULL_SOURCE_MATERIALIZATION) &&
-      !loom_amdgpu_descriptor_refs_present(descriptor_set, kFullSourceRefs,
-                                           IREE_ARRAYSIZE(kFullSourceRefs))) {
+      !loom_amdgpu_descriptor_set_has_all_refs(
+          descriptor_set, kFullSourceRefs, IREE_ARRAYSIZE(kFullSourceRefs))) {
     return false;
   }
 
@@ -4068,8 +4052,9 @@ static bool loom_amdgpu_vector_conversion_descriptor_refs_present(
   };
   if (iree_any_bit_set(kind_flags,
                        LOOM_AMDGPU_VECTOR_CONVERSION_KIND_PACKED_RESULT) &&
-      !loom_amdgpu_descriptor_refs_present(descriptor_set, kPackedResultRefs,
-                                           IREE_ARRAYSIZE(kPackedResultRefs))) {
+      !loom_amdgpu_descriptor_set_has_all_refs(
+          descriptor_set, kPackedResultRefs,
+          IREE_ARRAYSIZE(kPackedResultRefs))) {
     return false;
   }
 
@@ -4087,11 +4072,11 @@ static bool loom_amdgpu_vector_conversion_descriptor_refs_present(
     return true;
   }
   if (sign_extend_packed_source) {
-    return loom_amdgpu_descriptor_refs_present(
+    return loom_amdgpu_descriptor_set_has_all_refs(
         descriptor_set, kPackedSourceSignedRefs,
         IREE_ARRAYSIZE(kPackedSourceSignedRefs));
   }
-  return loom_amdgpu_descriptor_refs_present(
+  return loom_amdgpu_descriptor_set_has_all_refs(
       descriptor_set, kPackedSourceUnsignedRefs,
       IREE_ARRAYSIZE(kPackedSourceUnsignedRefs));
 }
