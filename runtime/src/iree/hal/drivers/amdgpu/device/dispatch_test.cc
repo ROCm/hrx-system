@@ -129,5 +129,52 @@ TEST(DispatchTest, EmplaceCustomKernargsCopiesRawBlob) {
   }
 }
 
+TEST(DispatchTest, ExplicitKernargSizeUsesImplicitPrefixOffset) {
+  iree_hal_amdgpu_device_dispatch_kernarg_layout_t layout = {
+      /*.explicit_kernarg_size=*/0,
+      /*.implicit_args_offset=*/16,
+      /*.total_kernarg_size=*/16 + IREE_AMDGPU_KERNEL_IMPLICIT_ARGS_SIZE,
+      /*.has_implicit_args=*/true,
+  };
+
+  EXPECT_EQ(iree_hal_amdgpu_device_dispatch_explicit_kernarg_size(
+                &layout, /*custom_kernarg_length=*/64),
+            16u);
+
+  layout.implicit_args_offset = 0;
+  EXPECT_EQ(iree_hal_amdgpu_device_dispatch_explicit_kernarg_size(
+                &layout, /*custom_kernarg_length=*/64),
+            0u);
+
+  layout = {};
+  EXPECT_EQ(iree_hal_amdgpu_device_dispatch_explicit_kernarg_size(
+                &layout, /*custom_kernarg_length=*/64),
+            64u);
+}
+
+TEST(DispatchTest, EmplaceCustomKernargsDoesNotCopyImplicitSuffix) {
+  const size_t total_kernarg_size = IREE_AMDGPU_KERNEL_IMPLICIT_ARGS_SIZE + 8;
+  iree_hal_amdgpu_device_dispatch_kernarg_layout_t layout = {
+      /*.explicit_kernarg_size=*/0,
+      /*.implicit_args_offset=*/0,
+      /*.total_kernarg_size=*/total_kernarg_size,
+      /*.has_implicit_args=*/true,
+  };
+  std::array<uint8_t, 64> custom_kernargs = {};
+  custom_kernargs.fill(0xAB);
+  alignas(16) std::array<uint8_t, 256> kernargs = {};
+  kernargs.fill(0xFD);
+
+  iree_hal_amdgpu_device_dispatch_emplace_custom_kernargs(
+      &layout, custom_kernargs.data(), custom_kernargs.size(), kernargs.data());
+
+  for (size_t i = 0; i < total_kernarg_size; ++i) {
+    EXPECT_EQ(kernargs[i], 0u);
+  }
+  for (size_t i = total_kernarg_size; i < kernargs.size(); ++i) {
+    EXPECT_EQ(kernargs[i], 0xFD);
+  }
+}
+
 }  // namespace
 }  // namespace iree::hal::amdgpu
