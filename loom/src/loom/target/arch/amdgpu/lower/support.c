@@ -2343,15 +2343,17 @@ bool loom_amdgpu_source_value_is_divergent_subgroup_lane_mask(
          loom_value_facts_is_lane_varying(facts);
 }
 
-static bool loom_amdgpu_source_value_store_use_requires_vgpr(
-    loom_value_id_t source_value_id, const loom_op_t* user_op) {
-  if (loom_vector_store_isa(user_op)) {
-    return loom_vector_store_value(user_op) == source_value_id;
+static bool loom_amdgpu_source_value_memory_payload_use_requires_vgpr(
+    const loom_module_t* module, loom_value_id_t source_value_id,
+    const loom_op_t* user_op) {
+  loom_memory_access_t access = loom_memory_access_cast(module, user_op);
+  if (!loom_memory_access_isa(access) ||
+      !loom_traits_may_write(loom_op_effective_traits(module, user_op))) {
+    return false;
   }
-  if (loom_view_store_isa(user_op)) {
-    return loom_view_store_value(user_op) == source_value_id;
-  }
-  return false;
+  return loom_memory_access_value(access) == source_value_id ||
+         loom_memory_access_expected(access) == source_value_id ||
+         loom_memory_access_replacement(access) == source_value_id;
 }
 
 static bool loom_amdgpu_source_value_scf_select_payload_use_requires_vgpr(
@@ -2392,8 +2394,8 @@ static bool loom_amdgpu_source_value_has_vgpr_payload_use(
   const loom_use_t* use = NULL;
   loom_value_for_each_use(value, use) {
     const loom_op_t* user_op = loom_use_user_op(*use);
-    if (loom_amdgpu_source_value_store_use_requires_vgpr(source_value_id,
-                                                         user_op) ||
+    if (loom_amdgpu_source_value_memory_payload_use_requires_vgpr(
+            module, source_value_id, user_op) ||
         loom_amdgpu_source_value_scf_select_payload_use_requires_vgpr(
             module, fact_table, view_regions, analysis, source_value_id,
             user_op)) {
