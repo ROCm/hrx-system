@@ -937,3 +937,16 @@ func.def @scalar_extui_i32_store(%output: buffer, %input: i32) {
   view.store %converted, %output_view[0] : i64, view<1xi64, #dense>
   func.return
 }
+
+// ====
+
+func.def @scalar_extui_i32_store_mask(%output: buffer, %input: i32) {
+  %base = index.constant 0 : offset
+  %output_view = buffer.view %output[%base] : buffer -> view<1xi64, #dense>
+  %true = scalar.constant true : i1
+  %mask = vector.splat %true : vector<1xi1>
+  %converted = scalar.extui %input : i32 to i64
+  %value = vector.splat %converted : vector<1xi64>
+  vector.store.mask %value, %output_view[0], %mask : vector<1xi64>, view<1xi64, #dense>, vector<1xi1>
+  func.return
+}
