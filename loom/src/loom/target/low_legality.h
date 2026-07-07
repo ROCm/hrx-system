@@ -223,12 +223,32 @@ const loom_low_descriptor_set_t* loom_target_low_legality_descriptor_set(
 const loom_value_fact_table_t* loom_target_low_legality_fact_table(
     const loom_target_low_legality_context_t* context);
 
+// Returns the optional active value domain supplied by the caller.
+const loom_local_value_domain_t* loom_target_low_legality_value_domain(
+    const loom_target_low_legality_context_t* context);
+
 // Returns a lazily analyzed view-region table when the caller supplied a value
 // domain for the checked function. Standalone legality callers that do not
 // provide a domain receive NULL.
 iree_status_t loom_target_low_legality_view_regions(
     loom_target_low_legality_context_t* context,
     const loom_view_region_table_t** out_view_regions);
+
+// Returns the transient arena for the current legality verification. Storage
+// allocated from the arena remains valid until the current verification call
+// returns.
+iree_arena_allocator_t* loom_target_low_legality_scratch_arena(
+    loom_target_low_legality_context_t* context);
+
+// Returns function-local target state for |key|, allocating zeroed storage on
+// first use.
+//
+// Keys must be target-owned static addresses. Reusing a key with a different
+// data length is an internal legality-provider error. The returned storage
+// remains valid until the current legality verification call returns.
+iree_status_t loom_target_low_legality_get_or_allocate_target_state(
+    loom_target_low_legality_context_t* context, const void* key,
+    iree_host_size_t data_length, void** out_data);
 
 // Returns the optional feedback diagnostics requested by the caller.
 loom_target_low_legality_diagnostic_flags_t

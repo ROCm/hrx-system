@@ -504,13 +504,10 @@ iree_status_t loom_amdgpu_lower_kernel_subgroup_vote_all(
 static iree_status_t loom_amdgpu_low_legality_verify_subgroup_native_predicate(
     loom_target_low_legality_context_t* context, const loom_op_t* op,
     loom_value_id_t predicate, iree_string_view_t constraint_key) {
-  const loom_view_region_table_t* view_regions = NULL;
-  IREE_RETURN_IF_ERROR(
-      loom_target_low_legality_view_regions(context, &view_regions));
-  if (!loom_amdgpu_source_value_is_native_i1_mask(
-          loom_target_low_legality_module(context),
-          loom_target_low_legality_fact_table(context), view_regions,
-          predicate)) {
+  bool predicate_is_native_mask = false;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_target_low_legality_value_is_native_i1_mask(
+      context, predicate, &predicate_is_native_mask));
+  if (!predicate_is_native_mask) {
     return loom_amdgpu_low_legality_reject(context, op, constraint_key);
   }
   return iree_ok_status();

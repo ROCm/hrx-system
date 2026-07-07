@@ -7,6 +7,7 @@
 #include "loom/target/low_legality.h"
 
 #include <stdint.h>
+#include <string.h>
 
 #include "iree/base/internal/arena.h"
 #include "loom/analysis/view_regions.h"
@@ -34,6 +35,15 @@ enum loom_target_low_legality_e {
   LOOM_TARGET_LOW_LEGALITY_MODULE_METADATA = 4,
 };
 
+typedef struct loom_target_low_legality_target_state_record_t {
+  // Target-owned static key identifying this function-local state object.
+  const void* key;
+  // Byte length of state storage.
+  iree_host_size_t data_length;
+  // Zero-initialized state storage allocated from the legality arena.
+  void* data;
+} loom_target_low_legality_target_state_record_t;
+
 struct loom_target_low_legality_context_t {
   // Source module being checked.
   const loom_module_t* module;
@@ -53,6 +63,12 @@ struct loom_target_low_legality_context_t {
   bool view_regions_initialized;
   // True after view_regions has recorded per-view read/write flags.
   bool view_regions_analyzed;
+  // Function-local target state records populated by legality providers.
+  loom_target_low_legality_target_state_record_t* target_state_records;
+  // Number of populated target_state_records entries.
+  iree_host_size_t target_state_record_count;
+  // Number of allocated target_state_records entries.
+  iree_host_size_t target_state_record_capacity;
   // Result object receiving counters and selected descriptor set.
   loom_target_low_legality_result_t* result;
   // Scratch arena for the IR walker.
@@ -344,6 +360,11 @@ const loom_value_fact_table_t* loom_target_low_legality_fact_table(
   return context->fact_table;
 }
 
+const loom_local_value_domain_t* loom_target_low_legality_value_domain(
+    const loom_target_low_legality_context_t* context) {
+  return context->value_domain;
+}
+
 iree_status_t loom_target_low_legality_view_regions(
     loom_target_low_legality_context_t* context,
     const loom_view_region_table_t** out_view_regions) {
@@ -363,6 +384,56 @@ iree_status_t loom_target_low_legality_view_regions(
     context->view_regions_analyzed = true;
   }
   *out_view_regions = &context->view_regions;
+  return iree_ok_status();
+}
+
+iree_arena_allocator_t* loom_target_low_legality_scratch_arena(
+    loom_target_low_legality_context_t* context) {
+  return &context->arena;
+}
+
+iree_status_t loom_target_low_legality_get_or_allocate_target_state(
+    loom_target_low_legality_context_t* context, const void* key,
+    iree_host_size_t data_length, void** out_data) {
+  IREE_ASSERT(key != NULL);
+  IREE_ASSERT_GT(data_length, 0);
+  *out_data = NULL;
+  for (iree_host_size_t i = 0; i < context->target_state_record_count; ++i) {
+    loom_target_low_legality_target_state_record_t* record =
+        &context->target_state_records[i];
+    if (record->key != key) continue;
+    IREE_ASSERT_EQ(record->data_length, data_length);
+    *out_data = record->data;
+    return iree_ok_status();
+  }
+
+  if (context->target_state_record_count ==
+      context->target_state_record_capacity) {
+    iree_host_size_t minimum_capacity = 0;
+    if (!iree_host_size_checked_add(context->target_state_record_count, 1,
+                                    &minimum_capacity)) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE, "capacity overflow");
+    }
+    IREE_RETURN_IF_ERROR(iree_arena_grow_array(
+        &context->arena, context->target_state_record_count, minimum_capacity,
+        sizeof(*context->target_state_records),
+        &context->target_state_record_capacity,
+        (void**)&context->target_state_records));
+  }
+
+  void* data = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate_array(&context->arena, 1, data_length, &data));
+  memset(data, 0, data_length);
+  const iree_host_size_t record_index = context->target_state_record_count++;
+  loom_target_low_legality_target_state_record_t* record =
+      &context->target_state_records[record_index];
+  *record = (loom_target_low_legality_target_state_record_t){
+      .key = key,
+      .data_length = data_length,
+      .data = data,
+  };
+  *out_data = data;
   return iree_ok_status();
 }
 
