@@ -209,6 +209,180 @@ low.func.def target(@target) @global_load_saddr_source_reuse_across_branch_assem
   s_endpgm
 
 // ====
+// RUN: emit amdgpu-wait-counter-plan-json @branch_load_join_store_common_wait strategy=source
+
+amdgpu.target<gfx1100> @target
+low.func.def target(@target) @branch_load_join_store_common_wait(%addr: reg<amdgpu.vgpr>, %cond: reg<amdgpu.scc>, %base0: reg<amdgpu.sgpr x2>, %base1: reg<amdgpu.sgpr x2>, %output: reg<amdgpu.sgpr x2>) asm<amdgpu.rdna3.core> {
+  low.cond_br %cond, ^then, ^else : reg<amdgpu.scc>
+^then:
+  %loaded0 = global_load_b64_saddr %addr, %base0
+  low.br ^join(%loaded0: reg<amdgpu.vgpr x2>)
+^else:
+  %loaded1 = global_load_b64_saddr %addr, %base1
+  low.br ^join(%loaded1: reg<amdgpu.vgpr x2>)
+^join(%loaded: reg<amdgpu.vgpr x2>):
+  global_store_b64_saddr %addr, %loaded, %output
+  return
+}
+
+// The low.br edges only forward the VMEM payload. The store in the join block
+// is the first hardware consumer, so both incoming paths share one wait there.
+// ----
+{"format":"loom.low.packet_hazard_plan.v1","function":"branch_load_join_store_common_wait","target":"target","descriptor_set":"amdgpu.rdna3.core","progress_count":3,"hazard_count":2,"progress":[{"index":0,"packet":1,"node":1,"block":1,"scheduled_ordinal":0,"class_id":1,"class_name":"amdgpu.vmem_load","action":"advance","units":1},{"index":1,"packet":3,"node":3,"block":2,"scheduled_ordinal":0,"class_id":1,"class_name":"amdgpu.vmem_load","action":"advance","units":1},{"index":2,"packet":5,"node":5,"block":3,"scheduled_ordinal":0,"class_id":2,"class_name":"amdgpu.vmem_store","action":"advance","units":1}],"hazards":[{"index":0,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":2,"reason_name":"amdgpu.ssa_use","producer_node":1,"producer_packet":1,"producer_scheduled_ordinal":0,"consumer_node":5,"insertion_packet":5,"block":3,"scheduled_ordinal":0,"progress_class_id":1,"progress_class_name":"amdgpu.vmem_load","required":1,"observed":0,"residual":1},{"index":1,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":9,"reason_name":"amdgpu.program_exit","producer_node":null,"producer_packet":null,"producer_scheduled_ordinal":null,"consumer_node":6,"insertion_packet":6,"block":3,"scheduled_ordinal":1,"progress_class_id":2,"progress_class_name":"amdgpu.vmem_store","required":1,"observed":0,"residual":1}]}
+
+// ====
+// RUN: emit amdgpu-assembly @branch_load_join_store_common_wait_assembly strategy=source
+
+amdgpu.target<gfx1100> @target
+low.func.def target(@target) @branch_load_join_store_common_wait_assembly(%addr: reg<amdgpu.vgpr>, %cond: reg<amdgpu.scc>, %base0: reg<amdgpu.sgpr x2>, %base1: reg<amdgpu.sgpr x2>, %output: reg<amdgpu.sgpr x2>) asm<amdgpu.rdna3.core> {
+  low.cond_br %cond, ^then, ^else : reg<amdgpu.scc>
+^then:
+  %loaded0 = global_load_b64_saddr %addr, %base0
+  low.br ^join(%loaded0: reg<amdgpu.vgpr x2>)
+^else:
+  %loaded1 = global_load_b64_saddr %addr, %base1
+  low.br ^join(%loaded1: reg<amdgpu.vgpr x2>)
+^join(%loaded: reg<amdgpu.vgpr x2>):
+  global_store_b64_saddr %addr, %loaded, %output
+  return
+}
+
+// ----
+  s_cbranch_scc0 .Lbb2
+.Lbb1:
+  global_load_b64 v[2:3], v0, s[0:1] offset:0
+  s_branch .Lbb3
+.Lbb2:
+  global_load_b64 v[2:3], v0, s[2:3] offset:0
+.Lbb3:
+  s_waitcnt vmcnt(0) lgkmcnt(63)
+  global_store_b64 v0, v[2:3], s[4:5] offset:0
+  s_waitcnt_vscnt vscnt(0)
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-wait-counter-plan-json @loop_carried_branch_arg_waits_at_next_iteration_use strategy=source
+
+amdgpu.target<gfx1100> @target
+low.func.def target(@target) @loop_carried_branch_arg_waits_at_next_iteration_use(%addr: reg<amdgpu.vgpr>, %seed: reg<amdgpu.vgpr x2>, %base: reg<amdgpu.sgpr x2>, %output: reg<amdgpu.sgpr x2>, %limit: reg<amdgpu.sgpr>) asm<amdgpu.rdna3.core> {
+  %zero = s_mov_b32 0
+  low.br ^loop(%seed: reg<amdgpu.vgpr x2>, %zero: reg<amdgpu.sgpr>)
+^loop(%carried: reg<amdgpu.vgpr x2>, %i: reg<amdgpu.sgpr>):
+  global_store_b64_saddr %addr, %carried, %output
+  %next_carried = global_load_b64_saddr %addr, %base
+  %one = s_mov_b32 1
+  %next_i = s_add_u32 %i, %one
+  %again = s_cmp_lt_i32 %next_i, %limit
+  low.cond_br %again, ^backedge, ^exit : reg<amdgpu.scc>
+^backedge:
+  low.br ^loop(%next_carried: reg<amdgpu.vgpr x2>, %next_i: reg<amdgpu.sgpr>)
+^exit:
+  return
+}
+
+// The loop-carried load is scheduled after the store in the same static block,
+// but dynamically feeds the store at the top of the next iteration. The wait
+// must therefore stay at the carried value's consumer instead of being elided
+// as an already-observed same-block producer.
+// ----
+{"format":"loom.low.packet_hazard_plan.v1","function":"loop_carried_branch_arg_waits_at_next_iteration_use","target":"target","descriptor_set":"amdgpu.rdna3.core","progress_count":2,"hazard_count":2,"progress":[{"index":0,"packet":2,"node":2,"block":1,"scheduled_ordinal":0,"class_id":2,"class_name":"amdgpu.vmem_store","action":"advance","units":1},{"index":1,"packet":3,"node":3,"block":1,"scheduled_ordinal":1,"class_id":1,"class_name":"amdgpu.vmem_load","action":"advance","units":1}],"hazards":[{"index":0,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":2,"reason_name":"amdgpu.ssa_use","producer_node":3,"producer_packet":3,"producer_scheduled_ordinal":1,"consumer_node":2,"insertion_packet":2,"block":1,"scheduled_ordinal":0,"progress_class_id":1,"progress_class_name":"amdgpu.vmem_load","required":1,"observed":0,"residual":1},{"index":1,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":4,"reason_name":"amdgpu.store_source_reuse","producer_node":2,"producer_packet":2,"producer_scheduled_ordinal":0,"consumer_node":3,"insertion_packet":3,"block":1,"scheduled_ordinal":1,"progress_class_id":2,"progress_class_name":"amdgpu.vmem_store","required":1,"observed":0,"residual":1}]}
+
+// ====
+// RUN: emit amdgpu-assembly @loop_carried_branch_arg_waits_at_next_iteration_use_assembly strategy=source
+
+amdgpu.target<gfx1100> @target
+low.func.def target(@target) @loop_carried_branch_arg_waits_at_next_iteration_use_assembly(%addr: reg<amdgpu.vgpr>, %seed: reg<amdgpu.vgpr x2>, %base: reg<amdgpu.sgpr x2>, %output: reg<amdgpu.sgpr x2>, %limit: reg<amdgpu.sgpr>) asm<amdgpu.rdna3.core> {
+  %zero = s_mov_b32 0
+  low.br ^loop(%seed: reg<amdgpu.vgpr x2>, %zero: reg<amdgpu.sgpr>)
+^loop(%carried: reg<amdgpu.vgpr x2>, %i: reg<amdgpu.sgpr>):
+  global_store_b64_saddr %addr, %carried, %output
+  %next_carried = global_load_b64_saddr %addr, %base
+  %one = s_mov_b32 1
+  %next_i = s_add_u32 %i, %one
+  %again = s_cmp_lt_i32 %next_i, %limit
+  low.cond_br %again, ^backedge, ^exit : reg<amdgpu.scc>
+^backedge:
+  low.br ^loop(%next_carried: reg<amdgpu.vgpr x2>, %next_i: reg<amdgpu.sgpr>)
+^exit:
+  return
+}
+
+// ----
+  s_mov_b32 s5, 0
+.Lbb1:
+  s_waitcnt vmcnt(0) lgkmcnt(63)
+  global_store_b64 v2, v[0:1], s[2:3] offset:0
+  s_waitcnt_vscnt vscnt(0)
+  global_load_b64 v[0:1], v2, s[0:1] offset:0
+  s_mov_b32 s6, 1
+  s_add_u32 s5, s5, s6
+  s_cmp_lt_i32 s5, s4
+  s_delay_alu instid0(SALU_CYCLE_1)
+  s_cbranch_scc0 .Lbb3
+.Lbb2:
+  s_branch .Lbb1
+.Lbb3:
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-wait-counter-plan-json @branch_load_then_use_join_store strategy=source
+
+amdgpu.target<gfx1100> @target
+low.func.def target(@target) @branch_load_then_use_join_store(%addr: reg<amdgpu.vgpr>, %cond: reg<amdgpu.scc>, %base0: reg<amdgpu.sgpr x2>, %base1: reg<amdgpu.sgpr x2>, %output: reg<amdgpu.sgpr x2>) asm<amdgpu.rdna3.core> {
+  low.cond_br %cond, ^then, ^else : reg<amdgpu.scc>
+^then:
+  %loaded0 = global_load_b64_saddr %addr, %base0
+  %lane0 = slice %loaded0[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %used = v_add_u32 %lane0, %addr
+  low.br ^join(%loaded0: reg<amdgpu.vgpr x2>)
+^else:
+  %loaded1 = global_load_b64_saddr %addr, %base1
+  low.br ^join(%loaded1: reg<amdgpu.vgpr x2>)
+^join(%loaded: reg<amdgpu.vgpr x2>):
+  global_store_b64_saddr %addr, %loaded, %output
+  return
+}
+
+// A real packet in a predecessor block must still wait locally. The join wait
+// only covers the incoming path whose first hardware consumer is the store.
+// ----
+{"format":"loom.low.packet_hazard_plan.v1","function":"branch_load_then_use_join_store","target":"target","descriptor_set":"amdgpu.rdna3.core","progress_count":3,"hazard_count":3,"progress":[{"index":0,"packet":1,"node":1,"block":1,"scheduled_ordinal":0,"class_id":1,"class_name":"amdgpu.vmem_load","action":"advance","units":1},{"index":1,"packet":5,"node":5,"block":2,"scheduled_ordinal":0,"class_id":1,"class_name":"amdgpu.vmem_load","action":"advance","units":1},{"index":2,"packet":7,"node":7,"block":3,"scheduled_ordinal":0,"class_id":2,"class_name":"amdgpu.vmem_store","action":"advance","units":1}],"hazards":[{"index":0,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":2,"reason_name":"amdgpu.ssa_use","producer_node":1,"producer_packet":1,"producer_scheduled_ordinal":0,"consumer_node":3,"insertion_packet":3,"block":1,"scheduled_ordinal":2,"progress_class_id":1,"progress_class_name":"amdgpu.vmem_load","required":1,"observed":0,"residual":1},{"index":1,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":2,"reason_name":"amdgpu.ssa_use","producer_node":5,"producer_packet":5,"producer_scheduled_ordinal":0,"consumer_node":7,"insertion_packet":7,"block":3,"scheduled_ordinal":0,"progress_class_id":1,"progress_class_name":"amdgpu.vmem_load","required":1,"observed":0,"residual":1},{"index":2,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":9,"reason_name":"amdgpu.program_exit","producer_node":null,"producer_packet":null,"producer_scheduled_ordinal":null,"consumer_node":8,"insertion_packet":8,"block":3,"scheduled_ordinal":1,"progress_class_id":2,"progress_class_name":"amdgpu.vmem_store","required":1,"observed":0,"residual":1}]}
+
+// ====
+// RUN: emit amdgpu-assembly @branch_load_then_use_join_store_assembly strategy=source
+
+amdgpu.target<gfx1100> @target
+low.func.def target(@target) @branch_load_then_use_join_store_assembly(%addr: reg<amdgpu.vgpr>, %cond: reg<amdgpu.scc>, %base0: reg<amdgpu.sgpr x2>, %base1: reg<amdgpu.sgpr x2>, %output: reg<amdgpu.sgpr x2>) asm<amdgpu.rdna3.core> {
+  low.cond_br %cond, ^then, ^else : reg<amdgpu.scc>
+^then:
+  %loaded0 = global_load_b64_saddr %addr, %base0
+  %lane0 = slice %loaded0[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %used = v_add_u32 %lane0, %addr
+  low.br ^join(%loaded0: reg<amdgpu.vgpr x2>)
+^else:
+  %loaded1 = global_load_b64_saddr %addr, %base1
+  low.br ^join(%loaded1: reg<amdgpu.vgpr x2>)
+^join(%loaded: reg<amdgpu.vgpr x2>):
+  global_store_b64_saddr %addr, %loaded, %output
+  return
+}
+
+// ----
+  s_cbranch_scc0 .Lbb2
+.Lbb1:
+  global_load_b64 v[2:3], v0, s[0:1] offset:0
+  s_waitcnt vmcnt(0) lgkmcnt(63)
+  v_add_u32 v1, v2, v0
+  s_branch .Lbb3
+.Lbb2:
+  global_load_b64 v[2:3], v0, s[2:3] offset:0
+.Lbb3:
+  s_waitcnt vmcnt(0) lgkmcnt(63)
+  global_store_b64 v0, v[2:3], s[4:5] offset:0
+  s_waitcnt_vscnt vscnt(0)
+  s_endpgm
+
+// ====
 // RUN: emit amdgpu-wait-counter-plan-json @scratch_store_load_cross_block_memory_effect strategy=source
 
 amdgpu.target<gfx1100> @target

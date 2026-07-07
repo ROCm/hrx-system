@@ -46,6 +46,7 @@ pass.pipeline<module> @__loom_check_source_low pipeline {
   for func {
     where target {
       cfg-simplify
+      low-decompose-cfg-tuples
       canonicalize
       cse
       low-dce
@@ -107,6 +108,7 @@ pass.pipeline<module> @__loom_check_source_low pipeline {
   for func {
     where target {
       cfg-simplify
+      low-decompose-cfg-tuples
       canonicalize
       cse
       low-dce
@@ -204,6 +206,7 @@ pass.pipeline<module> @__loom_check_prepared_low pipeline {
   for func {
     where target {
       cfg-simplify
+      low-decompose-cfg-tuples
       canonicalize
       cse
       low-dce
