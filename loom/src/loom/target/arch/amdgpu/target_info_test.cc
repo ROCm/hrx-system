@@ -171,6 +171,27 @@ TEST(AmdgpuTargetInfoTest, DescriptorSetDelayAluOpcodesMatchRdnaFamilies) {
   }
 }
 
+TEST(AmdgpuTargetInfoTest, DescriptorSetVopdSupportMatchesPacketFamilies) {
+  const struct {
+    uint16_t descriptor_set_ordinal;
+    bool supports_vopd;
+  } cases[] = {
+      {LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_CDNA3, false},
+      {LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_RDNA3, true},
+      {LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_RDNA3_5, false},
+      {LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_RDNA4, true},
+      {LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_RDNA4_GFX125X, true},
+      {LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_CDNA4, false},
+  };
+  for (const auto& c : cases) {
+    const loom_amdgpu_descriptor_set_info_t* descriptor_set =
+        loom_amdgpu_target_info_descriptor_set_at(c.descriptor_set_ordinal);
+    ASSERT_NE(descriptor_set, nullptr);
+    EXPECT_EQ(loom_amdgpu_descriptor_set_info_supports_vopd(descriptor_set),
+              c.supports_vopd);
+  }
+}
+
 TEST(AmdgpuTargetInfoTest, LooksUpGfx942Processor) {
   const loom_amdgpu_processor_info_t* processor = nullptr;
   IREE_ASSERT_OK(

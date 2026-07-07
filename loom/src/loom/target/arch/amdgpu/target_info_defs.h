@@ -170,9 +170,12 @@ typedef enum loom_amdgpu_descriptor_set_info_flag_bits_e {
   // Descriptor packets have implemented native binary encoding.
   LOOM_AMDGPU_DESCRIPTOR_SET_INFO_FLAG_DESCRIPTOR_PACKET_ENCODING = UINT64_C(1)
                                                                     << 0,
+  // Descriptor set supports native VOPD packetization for wave32 kernels.
+  LOOM_AMDGPU_DESCRIPTOR_SET_INFO_FLAG_VOPD_PACKETIZATION = UINT64_C(1) << 1,
   // Descriptor-set info flags known by the AMDGPU target package.
   LOOM_AMDGPU_DESCRIPTOR_SET_INFO_KNOWN_FLAGS =
-      LOOM_AMDGPU_DESCRIPTOR_SET_INFO_FLAG_DESCRIPTOR_PACKET_ENCODING,
+      LOOM_AMDGPU_DESCRIPTOR_SET_INFO_FLAG_DESCRIPTOR_PACKET_ENCODING |
+      LOOM_AMDGPU_DESCRIPTOR_SET_INFO_FLAG_VOPD_PACKETIZATION,
 } loom_amdgpu_descriptor_set_info_flag_bits_t;
 
 // Bitset of loom_amdgpu_descriptor_set_info_flag_bits_t values.
@@ -385,6 +388,13 @@ static inline bool loom_amdgpu_descriptor_set_info_has_flags(
     loom_amdgpu_descriptor_set_info_flags_t flags) {
   return descriptor_set != NULL &&
          iree_all_bits_set(descriptor_set->flags, flags);
+}
+
+// Returns true when |descriptor_set| supports native VOPD packetization.
+static inline bool loom_amdgpu_descriptor_set_info_supports_vopd(
+    const loom_amdgpu_descriptor_set_info_t* descriptor_set) {
+  return loom_amdgpu_descriptor_set_info_has_flags(
+      descriptor_set, LOOM_AMDGPU_DESCRIPTOR_SET_INFO_FLAG_VOPD_PACKETIZATION);
 }
 
 // Returns true when |processor| supports native AMDHSA HSACO emission.
