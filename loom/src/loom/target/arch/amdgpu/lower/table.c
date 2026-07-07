@@ -65,6 +65,13 @@ typedef struct loom_amdgpu_table_lookup_strategy_row_t {
   loom_amdgpu_table_lookup_descriptor_flags_t descriptor_flags;
 } loom_amdgpu_table_lookup_strategy_row_t;
 
+typedef struct loom_amdgpu_table_lookup_descriptor_requirement_t {
+  // Strategy descriptor flag that requires this descriptor ref.
+  loom_amdgpu_table_lookup_descriptor_flags_t descriptor_flags;
+  // Required descriptor ref for strategy availability.
+  loom_amdgpu_descriptor_ref_t descriptor_ref;
+} loom_amdgpu_table_lookup_descriptor_requirement_t;
+
 typedef struct loom_amdgpu_table_lookup_type_summary_t {
   // Number of f32 vector lanes accepted by the table lookup lowering surface.
   uint32_t f32_lane_count;
@@ -170,6 +177,23 @@ static const loom_amdgpu_table_lookup_strategy_row_t
             .index_lane_unsigned_bit_count = 4,
             .descriptor_flags =
                 LOOM_AMDGPU_TABLE_LOOKUP_DESCRIPTOR_FLAG_PERMUTE,
+        },
+};
+
+static const loom_amdgpu_table_lookup_descriptor_requirement_t
+    kTableLookupDescriptorRequirements[] = {
+        {
+            .descriptor_flags = LOOM_AMDGPU_TABLE_LOOKUP_DESCRIPTOR_FLAG_LADDER,
+            .descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_V_CMP_EQ_I32,
+        },
+        {
+            .descriptor_flags = LOOM_AMDGPU_TABLE_LOOKUP_DESCRIPTOR_FLAG_LADDER,
+            .descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_V_CNDMASK_B32,
+        },
+        {
+            .descriptor_flags =
+                LOOM_AMDGPU_TABLE_LOOKUP_DESCRIPTOR_FLAG_PERMUTE,
+            .descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_V_PERM_B32,
         },
 };
 
@@ -458,21 +482,22 @@ iree_status_t loom_amdgpu_select_vector_table_lookup_plan(
 static bool loom_amdgpu_table_lookup_strategy_descriptors_present(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_amdgpu_table_lookup_strategy_row_t* row) {
-  if (iree_any_bit_set(row->descriptor_flags,
-                       LOOM_AMDGPU_TABLE_LOOKUP_DESCRIPTOR_FLAG_LADDER) &&
-      (!loom_amdgpu_descriptor_set_has_ref(
-           descriptor_set, LOOM_AMDGPU_DESCRIPTOR_REF_V_CMP_EQ_I32) ||
-       !loom_amdgpu_descriptor_set_has_ref(
-           descriptor_set, LOOM_AMDGPU_DESCRIPTOR_REF_V_CNDMASK_B32))) {
-    return false;
+  bool matched_requirement = false;
+  for (iree_host_size_t i = 0;
+       i < IREE_ARRAYSIZE(kTableLookupDescriptorRequirements); ++i) {
+    const loom_amdgpu_table_lookup_descriptor_requirement_t* requirement =
+        &kTableLookupDescriptorRequirements[i];
+    if (!iree_any_bit_set(row->descriptor_flags,
+                          requirement->descriptor_flags)) {
+      continue;
+    }
+    matched_requirement = true;
+    if (!loom_amdgpu_descriptor_set_has_ref(descriptor_set,
+                                            requirement->descriptor_ref)) {
+      return false;
+    }
   }
-  if (iree_any_bit_set(row->descriptor_flags,
-                       LOOM_AMDGPU_TABLE_LOOKUP_DESCRIPTOR_FLAG_PERMUTE) &&
-      !loom_amdgpu_descriptor_set_has_ref(
-          descriptor_set, LOOM_AMDGPU_DESCRIPTOR_REF_V_PERM_B32)) {
-    return false;
-  }
-  return row->descriptor_flags != 0;
+  return matched_requirement;
 }
 
 static iree_status_t loom_amdgpu_table_lookup_extract_i32_index_lane(
