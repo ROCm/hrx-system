@@ -181,23 +181,24 @@ static bool loom_amdgpu_select_vector_storage(
   if (!loom_amdgpu_type_vector_storage(result_type, out_storage)) {
     return false;
   }
-  switch (out_storage->kind) {
-    case LOOM_AMDGPU_VECTOR_STORAGE_KIND_FULL_32BIT:
-      *out_allows_vector_mask = true;
-      *out_allows_lane_immediates = true;
-      return true;
-    case LOOM_AMDGPU_VECTOR_STORAGE_KIND_FULL_64BIT:
-      *out_allows_vector_mask = true;
-      return true;
-    case LOOM_AMDGPU_VECTOR_STORAGE_KIND_PACKED_16BIT_FLOAT:
-    case LOOM_AMDGPU_VECTOR_STORAGE_KIND_PACKED_8BIT_FLOAT:
-    case LOOM_AMDGPU_VECTOR_STORAGE_KIND_PACKED_INTEGER:
-      return true;
-    case LOOM_AMDGPU_VECTOR_STORAGE_KIND_I1_MASK:
-    case LOOM_AMDGPU_VECTOR_STORAGE_KIND_NONE:
-    default:
-      return false;
+  const loom_amdgpu_vector_storage_kind_flags_t storage_flags =
+      loom_amdgpu_vector_storage_kind_flags(out_storage->kind);
+  if (iree_any_bit_set(storage_flags,
+                       LOOM_AMDGPU_VECTOR_STORAGE_KIND_FLAG_SGPR_MASK)) {
+    return false;
   }
+  const bool full_width_storage = iree_any_bit_set(
+      storage_flags,
+      LOOM_AMDGPU_VECTOR_STORAGE_KIND_FLAG_ANALYZE_REGISTER_BANK);
+  const bool packed_payload_storage = iree_any_bit_set(
+      storage_flags, LOOM_AMDGPU_VECTOR_STORAGE_KIND_FLAG_PACKED_PAYLOAD);
+  if (!full_width_storage && !packed_payload_storage) {
+    return false;
+  }
+  *out_allows_vector_mask = full_width_storage;
+  *out_allows_lane_immediates =
+      full_width_storage && out_storage->element_register_count == 1;
+  return true;
 }
 
 static bool loom_amdgpu_select_scalar_splat_condition(

@@ -124,13 +124,9 @@ static bool loom_amdgpu_packed_register_slice_storage_shape(
   if (!loom_amdgpu_type_vector_storage(type, &storage)) {
     return false;
   }
-  switch (storage.kind) {
-    case LOOM_AMDGPU_VECTOR_STORAGE_KIND_PACKED_16BIT_FLOAT:
-    case LOOM_AMDGPU_VECTOR_STORAGE_KIND_PACKED_INTEGER:
-    case LOOM_AMDGPU_VECTOR_STORAGE_KIND_PACKED_8BIT_FLOAT:
-      break;
-    default:
-      return false;
+  if (!iree_any_bit_set(loom_amdgpu_vector_storage_kind_flags(storage.kind),
+                        LOOM_AMDGPU_VECTOR_STORAGE_KIND_FLAG_PACKED_PAYLOAD)) {
+    return false;
   }
   *out_payload_bit_count = storage.element_count * storage.element_bit_count;
   *out_register_count = storage.register_count;

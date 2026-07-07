@@ -74,6 +74,16 @@ typedef enum loom_amdgpu_vector_storage_kind_e {
   LOOM_AMDGPU_VECTOR_STORAGE_KIND_COUNT_ = 7,
 } loom_amdgpu_vector_storage_kind_t;
 
+typedef enum loom_amdgpu_vector_storage_kind_flag_bits_e {
+  // Values use SGPR mask-pair storage instead of ordinary VGPR storage.
+  LOOM_AMDGPU_VECTOR_STORAGE_KIND_FLAG_SGPR_MASK = 1u << 0,
+  // Values need use-sensitive SGPR/VGPR bank analysis before type mapping.
+  LOOM_AMDGPU_VECTOR_STORAGE_KIND_FLAG_ANALYZE_REGISTER_BANK = 1u << 1,
+  // Values pack sub-32-bit lanes into VGPR payload registers.
+  LOOM_AMDGPU_VECTOR_STORAGE_KIND_FLAG_PACKED_PAYLOAD = 1u << 2,
+} loom_amdgpu_vector_storage_kind_flag_bits_t;
+typedef uint8_t loom_amdgpu_vector_storage_kind_flags_t;
+
 typedef struct loom_amdgpu_vector_storage_t {
   // Physical storage shape selected for the source vector type.
   loom_amdgpu_vector_storage_kind_t kind;
@@ -93,6 +103,10 @@ typedef struct loom_amdgpu_vector_storage_t {
 // vector storage classes.
 bool loom_amdgpu_type_vector_storage(loom_type_t type,
                                      loom_amdgpu_vector_storage_t* out_storage);
+
+// Returns fixed behavior flags for an AMDGPU vector storage kind.
+loom_amdgpu_vector_storage_kind_flags_t loom_amdgpu_vector_storage_kind_flags(
+    loom_amdgpu_vector_storage_kind_t kind);
 
 // Returns a static rank-1 vector lane count for the requested element type, or
 // zero when the type is not a supported static rank-1 vector.
