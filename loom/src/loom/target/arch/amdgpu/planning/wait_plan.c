@@ -125,6 +125,10 @@ typedef struct loom_amdgpu_wait_plan_builder_t {
   const loom_amdgpu_processor_info_t* processor;
   // Per-node counter classification.
   loom_amdgpu_wait_node_state_t* node_states;
+  // Counter masks drained for a producer in the current block epoch.
+  uint32_t* current_block_drained_counter_masks;
+  // Block epoch for each producer-local drained counter mask.
+  uint64_t* current_block_drained_epochs;
   // First relevant SSA dependency link per consumer node.
   uint32_t* first_dependency_link_by_consumer;
   // Relevant SSA dependency links.
@@ -355,6 +359,22 @@ static iree_status_t loom_amdgpu_wait_plan_allocate(
         (void**)&builder->node_states));
     memset(builder->node_states, 0,
            schedule->node_count * sizeof(*builder->node_states));
+
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        builder->arena, schedule->node_count,
+        sizeof(*builder->current_block_drained_counter_masks),
+        (void**)&builder->current_block_drained_counter_masks));
+    memset(builder->current_block_drained_counter_masks, 0,
+           schedule->node_count *
+               sizeof(*builder->current_block_drained_counter_masks));
+
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        builder->arena, schedule->node_count,
+        sizeof(*builder->current_block_drained_epochs),
+        (void**)&builder->current_block_drained_epochs));
+    memset(
+        builder->current_block_drained_epochs, 0,
+        schedule->node_count * sizeof(*builder->current_block_drained_epochs));
 
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
         builder->arena, schedule->node_count,
@@ -1661,6 +1681,44 @@ static void loom_amdgpu_wait_plan_mark_drained_producers(
   }
 }
 
+static bool loom_amdgpu_wait_plan_node_follows_producer_in_same_block(
+    const loom_low_schedule_table_t* schedule, uint32_t node_index,
+    uint32_t producer_node) {
+  if (node_index >= schedule->node_count ||
+      producer_node >= schedule->node_count) {
+    return false;
+  }
+  const loom_low_schedule_node_t* node = &schedule->nodes[node_index];
+  const loom_low_schedule_node_t* producer = &schedule->nodes[producer_node];
+  return node->block_index == producer->block_index &&
+         producer->scheduled_ordinal < node->scheduled_ordinal;
+}
+
+static bool loom_amdgpu_wait_plan_current_block_drained_producer(
+    const loom_amdgpu_wait_plan_builder_t* builder, uint32_t producer_node,
+    uint32_t counter_mask) {
+  return producer_node < builder->schedule->node_count &&
+         builder->current_block_drained_epochs[producer_node] ==
+             builder->block_epoch &&
+         iree_any_bit_set(
+             builder->current_block_drained_counter_masks[producer_node],
+             counter_mask);
+}
+
+static void loom_amdgpu_wait_plan_record_current_block_drained_producer(
+    loom_amdgpu_wait_plan_builder_t* builder, uint32_t producer_node,
+    uint32_t counter_mask) {
+  if (producer_node >= builder->schedule->node_count) {
+    return;
+  }
+  if (builder->current_block_drained_epochs[producer_node] !=
+      builder->block_epoch) {
+    builder->current_block_drained_epochs[producer_node] = builder->block_epoch;
+    builder->current_block_drained_counter_masks[producer_node] = 0;
+  }
+  builder->current_block_drained_counter_masks[producer_node] |= counter_mask;
+}
+
 static iree_status_t loom_amdgpu_wait_plan_wait_counter(
     loom_amdgpu_wait_plan_builder_t* builder,
     loom_amdgpu_wait_plan_action_kind_t kind,
@@ -1701,9 +1759,14 @@ static iree_status_t loom_amdgpu_wait_plan_wait_counter(
                                : LOOM_LOW_SCHEDULE_NODE_NONE,
           .outstanding_before = outstanding_before,
       });
-  if (target_count == 0 && producer_node < builder->schedule->node_count) {
+  if (target_count == 0 &&
+      loom_amdgpu_wait_plan_node_follows_producer_in_same_block(
+          builder->schedule, node_index, producer_node)) {
     builder->node_states[producer_node].drained_after_production_counter_mask |=
         counter_mask;
+  } else if (target_count == 0) {
+    loom_amdgpu_wait_plan_record_current_block_drained_producer(
+        builder, producer_node, counter_mask);
   }
   if (target_count == 0) {
     ++builder->counter_epochs[slot];
@@ -1987,7 +2050,9 @@ static iree_status_t loom_amdgpu_wait_plan_handle_consumer(
         // Across block boundaries, the producer is safe only if a wait in its
         // own block drained it before control could reach the consumer block.
         if (loom_amdgpu_wait_plan_producer_is_drained(producer_state,
-                                                      counter_mask)) {
+                                                      counter_mask) ||
+            loom_amdgpu_wait_plan_current_block_drained_producer(
+                builder, link->producer_node, counter_mask)) {
           continue;
         }
         target_count = 0;
