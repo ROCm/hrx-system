@@ -58,12 +58,12 @@ hrx_cc_test(
     name = "hip_get_proc_address_test",
     srcs = ["hip_get_proc_address_test.cc"],
     # The test dlopen()s the built libamdhip64 with RTLD_LOCAL to reproduce the
-    # consumer scenario (e.g. Triton). Under CMake the exact artifact path is
-    # injected via the HRX_TEST_LIBAMDHIP64_PATH compile definition and its
-    # build dependency (see CMakeLists.txt below the preserve marker). Under
-    # Bazel, point the test at the artifact with HRX_TEST_LIBAMDHIP64, e.g.
-    # `bazel test --test_env=HRX_TEST_LIBAMDHIP64=$(bazel cquery ...)`; without
-    # it the test skips (GTEST_SKIP) rather than failing.
+    # consumer scenario (e.g. Triton). CMake injects the exact artifact path via
+    # HRX_TEST_LIBAMDHIP64_PATH; Bazel passes the shared object as test data.
+    data = [":amdhip64"],
+    env = {
+        "HRX_TEST_LIBAMDHIP64": "$(location :amdhip64)",
+    },
     target_compatible_with = _LINUX_COMPATIBILITY,
     deps = [
         # The test itself calls dlopen()/dlsym()/dlclose(); link libdl so the
