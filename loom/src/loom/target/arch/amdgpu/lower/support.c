@@ -207,6 +207,30 @@ static_assert(IREE_ARRAYSIZE(kAmdgpuVectorStorageRules) ==
                   LOOM_SCALAR_TYPE_COUNT_,
               "AMDGPU vector storage rules out of sync with scalar types");
 
+static const loom_amdgpu_vector_storage_kind_flags_t
+    kAmdgpuVectorStorageKindFlags[LOOM_AMDGPU_VECTOR_STORAGE_KIND_COUNT_] = {
+        [LOOM_AMDGPU_VECTOR_STORAGE_KIND_FULL_32BIT] =
+            LOOM_AMDGPU_VECTOR_STORAGE_KIND_FLAG_ANALYZE_REGISTER_BANK,
+        [LOOM_AMDGPU_VECTOR_STORAGE_KIND_FULL_64BIT] =
+            LOOM_AMDGPU_VECTOR_STORAGE_KIND_FLAG_ANALYZE_REGISTER_BANK,
+        [LOOM_AMDGPU_VECTOR_STORAGE_KIND_I1_MASK] =
+            LOOM_AMDGPU_VECTOR_STORAGE_KIND_FLAG_SGPR_MASK,
+        [LOOM_AMDGPU_VECTOR_STORAGE_KIND_PACKED_16BIT_FLOAT] =
+            LOOM_AMDGPU_VECTOR_STORAGE_KIND_FLAG_PACKED_PAYLOAD,
+        [LOOM_AMDGPU_VECTOR_STORAGE_KIND_PACKED_INTEGER] =
+            LOOM_AMDGPU_VECTOR_STORAGE_KIND_FLAG_PACKED_PAYLOAD,
+        [LOOM_AMDGPU_VECTOR_STORAGE_KIND_PACKED_8BIT_FLOAT] =
+            LOOM_AMDGPU_VECTOR_STORAGE_KIND_FLAG_PACKED_PAYLOAD,
+};
+
+loom_amdgpu_vector_storage_kind_flags_t loom_amdgpu_vector_storage_kind_flags(
+    loom_amdgpu_vector_storage_kind_t kind) {
+  if (kind >= LOOM_AMDGPU_VECTOR_STORAGE_KIND_COUNT_) {
+    return 0;
+  }
+  return kAmdgpuVectorStorageKindFlags[kind];
+}
+
 static const loom_amdgpu_vector_storage_rule_t*
 loom_amdgpu_vector_storage_rule_for_element_type(
     loom_scalar_type_t element_type) {
@@ -1152,7 +1176,9 @@ static bool loom_amdgpu_source_value_naturally_prefers_vgpr(
   }
   loom_amdgpu_vector_storage_t vector_storage = {0};
   return loom_amdgpu_type_vector_storage(source_type, &vector_storage) &&
-         vector_storage.kind != LOOM_AMDGPU_VECTOR_STORAGE_KIND_I1_MASK;
+         !iree_any_bit_set(
+             loom_amdgpu_vector_storage_kind_flags(vector_storage.kind),
+             LOOM_AMDGPU_VECTOR_STORAGE_KIND_FLAG_SGPR_MASK);
 }
 
 static bool loom_amdgpu_source_value_facts_prefer_vgpr(
@@ -2542,7 +2568,9 @@ static bool loom_amdgpu_source_value_prefers_vgpr_impl(
       loom_amdgpu_vector_storage_t storage = {0};
       return loom_value_def_index(value) == 0 &&
              loom_amdgpu_type_vector_storage(source_type, &storage) &&
-             storage.kind != LOOM_AMDGPU_VECTOR_STORAGE_KIND_I1_MASK;
+             !iree_any_bit_set(
+                 loom_amdgpu_vector_storage_kind_flags(storage.kind),
+                 LOOM_AMDGPU_VECTOR_STORAGE_KIND_FLAG_SGPR_MASK);
     }
     case LOOM_OP_VECTOR_EXTRACT:
       return loom_amdgpu_vector_extract_prefers_vgpr(module, fact_table,
@@ -2741,29 +2769,30 @@ static bool loom_amdgpu_source_vector_value_register_shape(
   if (!loom_amdgpu_type_vector_storage(source_type, &vector_storage)) {
     return false;
   }
-  switch (vector_storage.kind) {
-    case LOOM_AMDGPU_VECTOR_STORAGE_KIND_I1_MASK:
-      *out_shape = loom_amdgpu_register_shape(LOOM_AMDGPU_REG_CLASS_ID_SGPR,
-                                              vector_storage.register_count);
-      return true;
-    case LOOM_AMDGPU_VECTOR_STORAGE_KIND_FULL_32BIT:
-    case LOOM_AMDGPU_VECTOR_STORAGE_KIND_FULL_64BIT:
-      *out_shape = loom_amdgpu_register_shape(
-          loom_amdgpu_analyzed_source_value_prefers_vgpr(
-              module, fact_table, view_regions, analysis, source_value_id)
-              ? LOOM_AMDGPU_REG_CLASS_ID_VGPR
-              : LOOM_AMDGPU_REG_CLASS_ID_SGPR,
-          vector_storage.register_count);
-      return true;
-    case LOOM_AMDGPU_VECTOR_STORAGE_KIND_PACKED_16BIT_FLOAT:
-    case LOOM_AMDGPU_VECTOR_STORAGE_KIND_PACKED_8BIT_FLOAT:
-    case LOOM_AMDGPU_VECTOR_STORAGE_KIND_PACKED_INTEGER:
-      *out_shape = loom_amdgpu_register_shape(LOOM_AMDGPU_REG_CLASS_ID_VGPR,
-                                              vector_storage.register_count);
-      return true;
-    case LOOM_AMDGPU_VECTOR_STORAGE_KIND_NONE:
-    case LOOM_AMDGPU_VECTOR_STORAGE_KIND_COUNT_:
-      return false;
+  const loom_amdgpu_vector_storage_kind_flags_t storage_flags =
+      loom_amdgpu_vector_storage_kind_flags(vector_storage.kind);
+  if (iree_any_bit_set(storage_flags,
+                       LOOM_AMDGPU_VECTOR_STORAGE_KIND_FLAG_SGPR_MASK)) {
+    *out_shape = loom_amdgpu_register_shape(LOOM_AMDGPU_REG_CLASS_ID_SGPR,
+                                            vector_storage.register_count);
+    return true;
+  }
+  if (iree_any_bit_set(
+          storage_flags,
+          LOOM_AMDGPU_VECTOR_STORAGE_KIND_FLAG_ANALYZE_REGISTER_BANK)) {
+    *out_shape = loom_amdgpu_register_shape(
+        loom_amdgpu_analyzed_source_value_prefers_vgpr(
+            module, fact_table, view_regions, analysis, source_value_id)
+            ? LOOM_AMDGPU_REG_CLASS_ID_VGPR
+            : LOOM_AMDGPU_REG_CLASS_ID_SGPR,
+        vector_storage.register_count);
+    return true;
+  }
+  if (iree_any_bit_set(storage_flags,
+                       LOOM_AMDGPU_VECTOR_STORAGE_KIND_FLAG_PACKED_PAYLOAD)) {
+    *out_shape = loom_amdgpu_register_shape(LOOM_AMDGPU_REG_CLASS_ID_VGPR,
+                                            vector_storage.register_count);
+    return true;
   }
   return false;
 }
@@ -2792,8 +2821,9 @@ static bool loom_amdgpu_source_value_register_shape_needs_analysis(
   if (!loom_amdgpu_type_vector_storage(source_type, &vector_storage)) {
     return false;
   }
-  return vector_storage.kind == LOOM_AMDGPU_VECTOR_STORAGE_KIND_FULL_32BIT ||
-         vector_storage.kind == LOOM_AMDGPU_VECTOR_STORAGE_KIND_FULL_64BIT;
+  return iree_any_bit_set(
+      loom_amdgpu_vector_storage_kind_flags(vector_storage.kind),
+      LOOM_AMDGPU_VECTOR_STORAGE_KIND_FLAG_ANALYZE_REGISTER_BANK);
 }
 
 static bool loom_amdgpu_source_value_register_shape(
@@ -2823,13 +2853,21 @@ iree_status_t loom_amdgpu_map_type(void* user_data,
   }
   loom_amdgpu_vector_storage_t vector_storage = {0};
   if (loom_amdgpu_type_vector_storage(source_type, &vector_storage)) {
-    if (vector_storage.kind == LOOM_AMDGPU_VECTOR_STORAGE_KIND_I1_MASK) {
+    const loom_amdgpu_vector_storage_kind_flags_t storage_flags =
+        loom_amdgpu_vector_storage_kind_flags(vector_storage.kind);
+    if (iree_any_bit_set(storage_flags,
+                         LOOM_AMDGPU_VECTOR_STORAGE_KIND_FLAG_SGPR_MASK)) {
       return loom_amdgpu_make_sgpr_range_type(
           context, vector_storage.register_count, out_low_type);
     }
-    return loom_amdgpu_make_register_type(
-        context, LOOM_AMDGPU_REG_CLASS_ID_VGPR, vector_storage.register_count,
-        out_low_type);
+    if (iree_any_bit_set(
+            storage_flags,
+            LOOM_AMDGPU_VECTOR_STORAGE_KIND_FLAG_ANALYZE_REGISTER_BANK |
+                LOOM_AMDGPU_VECTOR_STORAGE_KIND_FLAG_PACKED_PAYLOAD)) {
+      return loom_amdgpu_make_register_type(
+          context, LOOM_AMDGPU_REG_CLASS_ID_VGPR, vector_storage.register_count,
+          out_low_type);
+    }
   }
   return loom_low_lower_emit_source_type_unsupported(
       context, source_op, IREE_SV("source"), source_type);
