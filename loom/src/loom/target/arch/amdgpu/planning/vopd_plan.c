@@ -148,364 +148,43 @@ typedef struct loom_amdgpu_vopd_plan_builder_t {
 } loom_amdgpu_vopd_plan_builder_t;
 
 #define LOOM_AMDGPU_VOPD_DESCRIPTOR_SET_BIT(ordinal) (UINT32_C(1) << (ordinal))
-#define LOOM_AMDGPU_VOPD_DESCRIPTOR_SET_MASK_RDNA3 \
-  LOOM_AMDGPU_VOPD_DESCRIPTOR_SET_BIT(LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_RDNA3)
-#define LOOM_AMDGPU_VOPD_DESCRIPTOR_SET_MASK_RDNA4 \
-  LOOM_AMDGPU_VOPD_DESCRIPTOR_SET_BIT(LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_RDNA4)
-#define LOOM_AMDGPU_VOPD_DESCRIPTOR_SET_MASK_RDNA4_GFX125X \
-  LOOM_AMDGPU_VOPD_DESCRIPTOR_SET_BIT(                     \
-      LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_RDNA4_GFX125X)
-#define LOOM_AMDGPU_VOPD_DESCRIPTOR_SET_MASK_RDNA_VOPD \
-  (LOOM_AMDGPU_VOPD_DESCRIPTOR_SET_MASK_RDNA3 |        \
-   LOOM_AMDGPU_VOPD_DESCRIPTOR_SET_MASK_RDNA4 |        \
-   LOOM_AMDGPU_VOPD_DESCRIPTOR_SET_MASK_RDNA4_GFX125X)
-#define LOOM_AMDGPU_VOPD_DESCRIPTOR_SET_MASK_GFX11_GFX12 \
-  (LOOM_AMDGPU_VOPD_DESCRIPTOR_SET_MASK_RDNA3 |          \
-   LOOM_AMDGPU_VOPD_DESCRIPTOR_SET_MASK_RDNA4)
-#define LOOM_AMDGPU_VOPD_OPERAND_LAYOUT_TIED(accumulator, src0, vsrc1) \
-  {                                                                    \
-      .accumulator_index = (accumulator),                              \
-      .src0_index = (src0),                                            \
-      .vsrc1_index = (vsrc1),                                          \
-  }
+
+#define LOOM_AMDGPU_VOPD_COMPONENT_RULE(                                  \
+    descriptor_ref_value, descriptor_set_mask_value, op_value,            \
+    same_op_reason_value, op_name_value, same_op_reason_name_value,       \
+    assembly_mnemonic_value, rdna4_assembly_mnemonic_value, form_value,   \
+    accumulator_index_value, src0_index_value, vsrc1_index_value,         \
+    lane_mask_value, pairing_mask_value, source_register_mask_value)      \
+  {                                                                       \
+      .descriptor_ref = descriptor_ref_value,                             \
+      .descriptor_set_mask = descriptor_set_mask_value,                   \
+      .info =                                                             \
+          {                                                               \
+              .op = op_value,                                             \
+              .same_op_reason = same_op_reason_value,                     \
+              .op_name = IREE_SVL(op_name_value),                         \
+              .same_op_reason_name = IREE_SVL(same_op_reason_name_value), \
+              .assembly_mnemonic = IREE_SVL(assembly_mnemonic_value),     \
+              .rdna4_assembly_mnemonic =                                  \
+                  IREE_SVL(rdna4_assembly_mnemonic_value),                \
+              .form = form_value,                                         \
+              .operands =                                                 \
+                  {                                                       \
+                      .accumulator_index = accumulator_index_value,       \
+                      .src0_index = src0_index_value,                     \
+                      .vsrc1_index = vsrc1_index_value,                   \
+                  },                                                      \
+              .lane_mask = lane_mask_value,                               \
+              .pairing_mask = pairing_mask_value,                         \
+              .source_register_mask = source_register_mask_value,         \
+          },                                                              \
+  },
 
 static const loom_amdgpu_vopd_component_rule_t kVopdComponentRules[] = {
-    {
-        .descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_V_FMAC_F32,
-        .descriptor_set_mask = LOOM_AMDGPU_VOPD_DESCRIPTOR_SET_MASK_RDNA_VOPD,
-        .info =
-            {
-                .op = LOOM_AMDGPU_VOPD_OP_FMAC_F32,
-                .same_op_reason = LOOM_AMDGPU_VOPD_PAIR_REASON_DUAL_FMAC_F32,
-                .op_name = IREE_SVL("fmac_f32"),
-                .same_op_reason_name = IREE_SVL("dual_fmac_f32"),
-                .assembly_mnemonic = IREE_SVL("v_dual_fmac_f32"),
-                .form = LOOM_AMDGPU_VOPD_COMPONENT_FORM_TIED_ACCUMULATE,
-                .operands = LOOM_AMDGPU_VOPD_OPERAND_LAYOUT_TIED(0, 1, 2),
-                .lane_mask = LOOM_AMDGPU_VOPD_COMPONENT_LANE_XY,
-                .pairing_mask = LOOM_AMDGPU_VOPD_COMPONENT_PAIR_ANY,
-                .source_register_mask =
-                    LOOM_AMDGPU_VOPD_COMPONENT_SOURCE_BINARY,
-            },
-    },
-    {
-        .descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_V_FMAAK_F32,
-        .descriptor_set_mask = LOOM_AMDGPU_VOPD_DESCRIPTOR_SET_MASK_RDNA_VOPD,
-        .info =
-            {
-                .op = LOOM_AMDGPU_VOPD_OP_FMAAK_F32,
-                .same_op_reason = LOOM_AMDGPU_VOPD_PAIR_REASON_DUAL_FMAAK_F32,
-                .op_name = IREE_SVL("fmaak_f32"),
-                .same_op_reason_name = IREE_SVL("dual_fmaak_f32"),
-                .assembly_mnemonic = IREE_SVL("v_dual_fmaak_f32"),
-                .form = LOOM_AMDGPU_VOPD_COMPONENT_FORM_FMAAK_LITERAL,
-                .lane_mask = LOOM_AMDGPU_VOPD_COMPONENT_LANE_XY,
-                .pairing_mask = LOOM_AMDGPU_VOPD_COMPONENT_PAIR_ANY,
-                .source_register_mask =
-                    LOOM_AMDGPU_VOPD_COMPONENT_SOURCE_BINARY,
-            },
-    },
-    {
-        .descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_V_FMAMK_F32,
-        .descriptor_set_mask = LOOM_AMDGPU_VOPD_DESCRIPTOR_SET_MASK_RDNA_VOPD,
-        .info =
-            {
-                .op = LOOM_AMDGPU_VOPD_OP_FMAMK_F32,
-                .same_op_reason = LOOM_AMDGPU_VOPD_PAIR_REASON_DUAL_FMAMK_F32,
-                .op_name = IREE_SVL("fmamk_f32"),
-                .same_op_reason_name = IREE_SVL("dual_fmamk_f32"),
-                .assembly_mnemonic = IREE_SVL("v_dual_fmamk_f32"),
-                .form = LOOM_AMDGPU_VOPD_COMPONENT_FORM_FMAMK_LITERAL,
-                .lane_mask = LOOM_AMDGPU_VOPD_COMPONENT_LANE_XY,
-                .pairing_mask = LOOM_AMDGPU_VOPD_COMPONENT_PAIR_ANY,
-                .source_register_mask =
-                    LOOM_AMDGPU_VOPD_COMPONENT_SOURCE_BINARY,
-            },
-    },
-    {
-        .descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_V_MUL_F32,
-        .descriptor_set_mask = LOOM_AMDGPU_VOPD_DESCRIPTOR_SET_MASK_RDNA_VOPD,
-        .info =
-            {
-                .op = LOOM_AMDGPU_VOPD_OP_MUL_F32,
-                .same_op_reason = LOOM_AMDGPU_VOPD_PAIR_REASON_DUAL_MUL_F32,
-                .op_name = IREE_SVL("mul_f32"),
-                .same_op_reason_name = IREE_SVL("dual_mul_f32"),
-                .assembly_mnemonic = IREE_SVL("v_dual_mul_f32"),
-                .form = LOOM_AMDGPU_VOPD_COMPONENT_FORM_BINARY_VGPR,
-                .lane_mask = LOOM_AMDGPU_VOPD_COMPONENT_LANE_XY,
-                .pairing_mask = LOOM_AMDGPU_VOPD_COMPONENT_PAIR_ANY,
-                .source_register_mask =
-                    LOOM_AMDGPU_VOPD_COMPONENT_SOURCE_BINARY,
-            },
-    },
-    {
-        .descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_V_ADD_F32,
-        .descriptor_set_mask = LOOM_AMDGPU_VOPD_DESCRIPTOR_SET_MASK_RDNA_VOPD,
-        .info =
-            {
-                .op = LOOM_AMDGPU_VOPD_OP_ADD_F32,
-                .same_op_reason = LOOM_AMDGPU_VOPD_PAIR_REASON_DUAL_ADD_F32,
-                .op_name = IREE_SVL("add_f32"),
-                .same_op_reason_name = IREE_SVL("dual_add_f32"),
-                .assembly_mnemonic = IREE_SVL("v_dual_add_f32"),
-                .form = LOOM_AMDGPU_VOPD_COMPONENT_FORM_BINARY_VGPR,
-                .lane_mask = LOOM_AMDGPU_VOPD_COMPONENT_LANE_XY,
-                .pairing_mask = LOOM_AMDGPU_VOPD_COMPONENT_PAIR_ANY,
-                .source_register_mask =
-                    LOOM_AMDGPU_VOPD_COMPONENT_SOURCE_BINARY,
-            },
-    },
-    {
-        .descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_V_SUB_F32,
-        .descriptor_set_mask = LOOM_AMDGPU_VOPD_DESCRIPTOR_SET_MASK_RDNA_VOPD,
-        .info =
-            {
-                .op = LOOM_AMDGPU_VOPD_OP_SUB_F32,
-                .same_op_reason = LOOM_AMDGPU_VOPD_PAIR_REASON_DUAL_SUB_F32,
-                .op_name = IREE_SVL("sub_f32"),
-                .same_op_reason_name = IREE_SVL("dual_sub_f32"),
-                .assembly_mnemonic = IREE_SVL("v_dual_sub_f32"),
-                .form = LOOM_AMDGPU_VOPD_COMPONENT_FORM_BINARY_VGPR,
-                .lane_mask = LOOM_AMDGPU_VOPD_COMPONENT_LANE_XY,
-                .pairing_mask = LOOM_AMDGPU_VOPD_COMPONENT_PAIR_ANY,
-                .source_register_mask =
-                    LOOM_AMDGPU_VOPD_COMPONENT_SOURCE_BINARY,
-            },
-    },
-    {
-        .descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_V_SUBREV_F32,
-        .descriptor_set_mask = LOOM_AMDGPU_VOPD_DESCRIPTOR_SET_MASK_RDNA_VOPD,
-        .info =
-            {
-                .op = LOOM_AMDGPU_VOPD_OP_SUBREV_F32,
-                .same_op_reason = LOOM_AMDGPU_VOPD_PAIR_REASON_DUAL_SUBREV_F32,
-                .op_name = IREE_SVL("subrev_f32"),
-                .same_op_reason_name = IREE_SVL("dual_subrev_f32"),
-                .assembly_mnemonic = IREE_SVL("v_dual_subrev_f32"),
-                .form = LOOM_AMDGPU_VOPD_COMPONENT_FORM_BINARY_VGPR,
-                .lane_mask = LOOM_AMDGPU_VOPD_COMPONENT_LANE_XY,
-                .pairing_mask = LOOM_AMDGPU_VOPD_COMPONENT_PAIR_ANY,
-                .source_register_mask =
-                    LOOM_AMDGPU_VOPD_COMPONENT_SOURCE_BINARY,
-            },
-    },
-    {
-        .descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_V_MOV_B32,
-        .descriptor_set_mask = LOOM_AMDGPU_VOPD_DESCRIPTOR_SET_MASK_RDNA_VOPD,
-        .info =
-            {
-                .op = LOOM_AMDGPU_VOPD_OP_MOV_B32,
-                .same_op_reason = LOOM_AMDGPU_VOPD_PAIR_REASON_DUAL_MOV_B32,
-                .op_name = IREE_SVL("mov_b32"),
-                .same_op_reason_name = IREE_SVL("dual_mov_b32"),
-                .assembly_mnemonic = IREE_SVL("v_dual_mov_b32"),
-                .form = LOOM_AMDGPU_VOPD_COMPONENT_FORM_INLINE_MOV,
-                .lane_mask = LOOM_AMDGPU_VOPD_COMPONENT_LANE_XY,
-                .pairing_mask = LOOM_AMDGPU_VOPD_COMPONENT_PAIR_ANY,
-                .source_register_mask = LOOM_AMDGPU_VOPD_COMPONENT_SOURCE_NONE,
-            },
-    },
-    {
-        .descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_V_MAX_F32,
-        .descriptor_set_mask = LOOM_AMDGPU_VOPD_DESCRIPTOR_SET_MASK_RDNA_VOPD,
-        .info =
-            {
-                .op = LOOM_AMDGPU_VOPD_OP_MAX_F32,
-                .same_op_reason = LOOM_AMDGPU_VOPD_PAIR_REASON_DUAL_MAX_F32,
-                .op_name = IREE_SVL("max_f32"),
-                .same_op_reason_name = IREE_SVL("dual_max_f32"),
-                .assembly_mnemonic = IREE_SVL("v_dual_max_f32"),
-                .rdna4_assembly_mnemonic = IREE_SVL("v_dual_max_num_f32"),
-                .form = LOOM_AMDGPU_VOPD_COMPONENT_FORM_BINARY_VGPR,
-                .lane_mask = LOOM_AMDGPU_VOPD_COMPONENT_LANE_XY,
-                .pairing_mask = LOOM_AMDGPU_VOPD_COMPONENT_PAIR_ANY,
-                .source_register_mask =
-                    LOOM_AMDGPU_VOPD_COMPONENT_SOURCE_BINARY,
-            },
-    },
-    {
-        .descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_V_MIN_F32,
-        .descriptor_set_mask = LOOM_AMDGPU_VOPD_DESCRIPTOR_SET_MASK_RDNA_VOPD,
-        .info =
-            {
-                .op = LOOM_AMDGPU_VOPD_OP_MIN_F32,
-                .same_op_reason = LOOM_AMDGPU_VOPD_PAIR_REASON_DUAL_MIN_F32,
-                .op_name = IREE_SVL("min_f32"),
-                .same_op_reason_name = IREE_SVL("dual_min_f32"),
-                .assembly_mnemonic = IREE_SVL("v_dual_min_f32"),
-                .rdna4_assembly_mnemonic = IREE_SVL("v_dual_min_num_f32"),
-                .form = LOOM_AMDGPU_VOPD_COMPONENT_FORM_BINARY_VGPR,
-                .lane_mask = LOOM_AMDGPU_VOPD_COMPONENT_LANE_XY,
-                .pairing_mask = LOOM_AMDGPU_VOPD_COMPONENT_PAIR_ANY,
-                .source_register_mask =
-                    LOOM_AMDGPU_VOPD_COMPONENT_SOURCE_BINARY,
-            },
-    },
-    {
-        .descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_V_DOT2_F32_F16,
-        .descriptor_set_mask = LOOM_AMDGPU_VOPD_DESCRIPTOR_SET_MASK_RDNA_VOPD,
-        .info =
-            {
-                .op = LOOM_AMDGPU_VOPD_OP_DOT2_F32_F16,
-                .same_op_reason =
-                    LOOM_AMDGPU_VOPD_PAIR_REASON_DUAL_DOT2_F32_F16,
-                .op_name = IREE_SVL("dot2_f32_f16"),
-                .same_op_reason_name = IREE_SVL("dual_dot2_f32_f16"),
-                .assembly_mnemonic = IREE_SVL("v_dual_dot2acc_f32_f16"),
-                .form = LOOM_AMDGPU_VOPD_COMPONENT_FORM_TIED_ACCUMULATE,
-                .operands = LOOM_AMDGPU_VOPD_OPERAND_LAYOUT_TIED(2, 0, 1),
-                .lane_mask = LOOM_AMDGPU_VOPD_COMPONENT_LANE_XY,
-                .pairing_mask = LOOM_AMDGPU_VOPD_COMPONENT_PAIR_ANY,
-                .source_register_mask =
-                    LOOM_AMDGPU_VOPD_COMPONENT_SOURCE_BINARY,
-            },
-    },
-    {
-        .descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_V_DOT2_F32_BF16,
-        .descriptor_set_mask = LOOM_AMDGPU_VOPD_DESCRIPTOR_SET_MASK_RDNA_VOPD,
-        .info =
-            {
-                .op = LOOM_AMDGPU_VOPD_OP_DOT2_F32_BF16,
-                .same_op_reason =
-                    LOOM_AMDGPU_VOPD_PAIR_REASON_DUAL_DOT2_F32_BF16,
-                .op_name = IREE_SVL("dot2_f32_bf16"),
-                .same_op_reason_name = IREE_SVL("dual_dot2_f32_bf16"),
-                .assembly_mnemonic = IREE_SVL("v_dual_dot2acc_f32_bf16"),
-                .form = LOOM_AMDGPU_VOPD_COMPONENT_FORM_TIED_ACCUMULATE,
-                .operands = LOOM_AMDGPU_VOPD_OPERAND_LAYOUT_TIED(2, 0, 1),
-                .lane_mask = LOOM_AMDGPU_VOPD_COMPONENT_LANE_XY,
-                .pairing_mask = LOOM_AMDGPU_VOPD_COMPONENT_PAIR_ANY,
-                .source_register_mask =
-                    LOOM_AMDGPU_VOPD_COMPONENT_SOURCE_BINARY,
-            },
-    },
-    {
-        .descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_V_ADD_U32,
-        .descriptor_set_mask = LOOM_AMDGPU_VOPD_DESCRIPTOR_SET_MASK_RDNA_VOPD,
-        .info =
-            {
-                .op = LOOM_AMDGPU_VOPD_OP_ADD_U32,
-                .op_name = IREE_SVL("add_u32"),
-                .assembly_mnemonic = IREE_SVL("v_dual_add_nc_u32"),
-                .form = LOOM_AMDGPU_VOPD_COMPONENT_FORM_BINARY_VGPR,
-                .lane_mask = LOOM_AMDGPU_VOPD_COMPONENT_LANE_Y,
-                .pairing_mask = LOOM_AMDGPU_VOPD_COMPONENT_PAIR_MIXED_OPCODE,
-                .source_register_mask =
-                    LOOM_AMDGPU_VOPD_COMPONENT_SOURCE_BINARY,
-            },
-    },
-    {
-        .descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_V_LSHLREV_B32,
-        .descriptor_set_mask = LOOM_AMDGPU_VOPD_DESCRIPTOR_SET_MASK_RDNA_VOPD,
-        .info =
-            {
-                .op = LOOM_AMDGPU_VOPD_OP_LSHLREV_B32,
-                .op_name = IREE_SVL("lshlrev_b32"),
-                .assembly_mnemonic = IREE_SVL("v_dual_lshlrev_b32"),
-                .form = LOOM_AMDGPU_VOPD_COMPONENT_FORM_BINARY_VGPR,
-                .lane_mask = LOOM_AMDGPU_VOPD_COMPONENT_LANE_Y,
-                .pairing_mask = LOOM_AMDGPU_VOPD_COMPONENT_PAIR_MIXED_OPCODE,
-                .source_register_mask =
-                    LOOM_AMDGPU_VOPD_COMPONENT_SOURCE_BINARY,
-            },
-    },
-    {
-        .descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_V_AND_B32,
-        .descriptor_set_mask = LOOM_AMDGPU_VOPD_DESCRIPTOR_SET_MASK_GFX11_GFX12,
-        .info =
-            {
-                .op = LOOM_AMDGPU_VOPD_OP_AND_B32,
-                .op_name = IREE_SVL("and_b32"),
-                .assembly_mnemonic = IREE_SVL("v_dual_and_b32"),
-                .form = LOOM_AMDGPU_VOPD_COMPONENT_FORM_BINARY_VGPR,
-                .lane_mask = LOOM_AMDGPU_VOPD_COMPONENT_LANE_Y,
-                .pairing_mask = LOOM_AMDGPU_VOPD_COMPONENT_PAIR_MIXED_OPCODE,
-                .source_register_mask =
-                    LOOM_AMDGPU_VOPD_COMPONENT_SOURCE_BINARY,
-            },
-    },
-    {
-        .descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_V_MAX_I32,
-        .descriptor_set_mask =
-            LOOM_AMDGPU_VOPD_DESCRIPTOR_SET_MASK_RDNA4_GFX125X,
-        .info =
-            {
-                .op = LOOM_AMDGPU_VOPD_OP_MAX_I32,
-                .op_name = IREE_SVL("max_i32"),
-                .assembly_mnemonic = IREE_SVL("v_dual_max_i32"),
-                .form = LOOM_AMDGPU_VOPD_COMPONENT_FORM_BINARY_VGPR,
-                .lane_mask = LOOM_AMDGPU_VOPD_COMPONENT_LANE_Y,
-                .pairing_mask = LOOM_AMDGPU_VOPD_COMPONENT_PAIR_MIXED_OPCODE,
-                .source_register_mask =
-                    LOOM_AMDGPU_VOPD_COMPONENT_SOURCE_BINARY,
-            },
-    },
-    {
-        .descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_V_MIN_I32,
-        .descriptor_set_mask =
-            LOOM_AMDGPU_VOPD_DESCRIPTOR_SET_MASK_RDNA4_GFX125X,
-        .info =
-            {
-                .op = LOOM_AMDGPU_VOPD_OP_MIN_I32,
-                .op_name = IREE_SVL("min_i32"),
-                .assembly_mnemonic = IREE_SVL("v_dual_min_i32"),
-                .form = LOOM_AMDGPU_VOPD_COMPONENT_FORM_BINARY_VGPR,
-                .lane_mask = LOOM_AMDGPU_VOPD_COMPONENT_LANE_Y,
-                .pairing_mask = LOOM_AMDGPU_VOPD_COMPONENT_PAIR_MIXED_OPCODE,
-                .source_register_mask =
-                    LOOM_AMDGPU_VOPD_COMPONENT_SOURCE_BINARY,
-            },
-    },
-    {
-        .descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_V_SUB_U32,
-        .descriptor_set_mask =
-            LOOM_AMDGPU_VOPD_DESCRIPTOR_SET_MASK_RDNA4_GFX125X,
-        .info =
-            {
-                .op = LOOM_AMDGPU_VOPD_OP_SUB_U32,
-                .op_name = IREE_SVL("sub_u32"),
-                .assembly_mnemonic = IREE_SVL("v_dual_sub_nc_u32"),
-                .form = LOOM_AMDGPU_VOPD_COMPONENT_FORM_BINARY_VGPR,
-                .lane_mask = LOOM_AMDGPU_VOPD_COMPONENT_LANE_Y,
-                .pairing_mask = LOOM_AMDGPU_VOPD_COMPONENT_PAIR_MIXED_OPCODE,
-                .source_register_mask =
-                    LOOM_AMDGPU_VOPD_COMPONENT_SOURCE_BINARY,
-            },
-    },
-    {
-        .descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_V_LSHRREV_B32,
-        .descriptor_set_mask =
-            LOOM_AMDGPU_VOPD_DESCRIPTOR_SET_MASK_RDNA4_GFX125X,
-        .info =
-            {
-                .op = LOOM_AMDGPU_VOPD_OP_LSHRREV_B32,
-                .op_name = IREE_SVL("lshrrev_b32"),
-                .assembly_mnemonic = IREE_SVL("v_dual_lshrrev_b32"),
-                .form = LOOM_AMDGPU_VOPD_COMPONENT_FORM_BINARY_VGPR,
-                .lane_mask = LOOM_AMDGPU_VOPD_COMPONENT_LANE_Y,
-                .pairing_mask = LOOM_AMDGPU_VOPD_COMPONENT_PAIR_MIXED_OPCODE,
-                .source_register_mask =
-                    LOOM_AMDGPU_VOPD_COMPONENT_SOURCE_BINARY,
-            },
-    },
-    {
-        .descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_V_ASHRREV_I32,
-        .descriptor_set_mask =
-            LOOM_AMDGPU_VOPD_DESCRIPTOR_SET_MASK_RDNA4_GFX125X,
-        .info =
-            {
-                .op = LOOM_AMDGPU_VOPD_OP_ASHRREV_I32,
-                .op_name = IREE_SVL("ashrrev_i32"),
-                .assembly_mnemonic = IREE_SVL("v_dual_ashrrev_i32"),
-                .form = LOOM_AMDGPU_VOPD_COMPONENT_FORM_BINARY_VGPR,
-                .lane_mask = LOOM_AMDGPU_VOPD_COMPONENT_LANE_Y,
-                .pairing_mask = LOOM_AMDGPU_VOPD_COMPONENT_PAIR_MIXED_OPCODE,
-                .source_register_mask =
-                    LOOM_AMDGPU_VOPD_COMPONENT_SOURCE_BINARY,
-            },
-    },
+#include "loom/target/arch/amdgpu/planning/vopd_component_rules.inl"
 };
+
+#undef LOOM_AMDGPU_VOPD_COMPONENT_RULE
 
 const loom_amdgpu_vopd_component_info_t* loom_amdgpu_vopd_component_info_for_op(
     uint16_t op) {
