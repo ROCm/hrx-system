@@ -25,6 +25,7 @@
 #include "loom/tooling/execution/hal/invocation.h"
 #include "loom/tooling/execution/hal/runtime.h"
 #include "loom/tooling/execution/session.h"
+#include "loom/tooling/testbench/invocation.h"
 #include "loom/tooling/testbench/requirements.h"
 #include "loom/tooling/testbench/testbench.h"
 #include "loom/tooling/testbench/value_materializer.h"
@@ -296,6 +297,12 @@ iree_status_t loom_run_hal_testbench_actual_sequence_invoke(
     void* user_data, const loom_testbench_invocation_plan_t* invocation,
     iree_host_size_t input_count, const loom_testbench_value_t* inputs,
     iree_host_size_t result_count, loom_testbench_value_t* out_results);
+
+// Reports a compile rejection recorded by the provider for |invocation|, if
+// any.
+iree_status_t loom_run_hal_testbench_actual_sequence_query_issue(
+    void* user_data, const loom_testbench_invocation_plan_t* invocation,
+    loom_testbench_sample_issue_t* out_issue);
 
 // Appends borrowed testbench input values to HAL bindings/constants.
 //

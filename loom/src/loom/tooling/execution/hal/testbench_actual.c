@@ -939,9 +939,7 @@ iree_status_t loom_run_hal_testbench_actual_invoke(
   IREE_RETURN_IF_ERROR(
       loom_run_hal_testbench_actual_provider_compile(provider));
   if (provider->compile_rejected) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "HAL actual invocation compile was rejected before dispatch");
+    return iree_ok_status();
   }
 
   loom_run_hal_invocation_options_t invocation_options =
@@ -1082,6 +1080,34 @@ iree_status_t loom_run_hal_testbench_actual_sequence_invoke(
   return iree_make_status(
       IREE_STATUS_FAILED_PRECONDITION,
       "HAL actual sequence received an unexpected invocation");
+}
+
+iree_status_t loom_run_hal_testbench_actual_sequence_query_issue(
+    void* user_data, const loom_testbench_invocation_plan_t* invocation,
+    loom_testbench_sample_issue_t* out_issue) {
+  *out_issue = (loom_testbench_sample_issue_t){0};
+  loom_run_hal_testbench_actual_sequence_t* sequence =
+      (loom_run_hal_testbench_actual_sequence_t*)user_data;
+  for (iree_host_size_t i = 0; i < sequence->provider_count; ++i) {
+    const loom_run_hal_testbench_actual_provider_t* provider =
+        &sequence->providers[i];
+    if (provider->actual_invocation != invocation) {
+      continue;
+    }
+    if (provider->compile_rejected) {
+      *out_issue = (loom_testbench_sample_issue_t){
+          .category = LOOM_TESTBENCH_SAMPLE_ISSUE_COMPILE_REJECTED,
+          .provider = IREE_SV("actual"),
+          .stage = provider->compile_failure_stage,
+          .kind = provider->compile_failure_kind,
+          .message = provider->compile_failure_message,
+      };
+    }
+    return iree_ok_status();
+  }
+  return iree_make_status(
+      IREE_STATUS_FAILED_PRECONDITION,
+      "HAL actual sequence received an unexpected invocation issue query");
 }
 
 iree_status_t loom_run_hal_testbench_create_invocation_inputs_from_table(

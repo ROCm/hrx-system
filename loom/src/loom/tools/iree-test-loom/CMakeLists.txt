@@ -103,6 +103,7 @@ iree_execution_test_suite(
   DATA
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/sanitizer/amdgpu_asan_actual.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/sanitizer/amdgpu_tsan_actual.loom"
+    "testdata/amdgpu_compile_rejection.loom"
     "testdata/amdgpu_hal_actual.loom"
     "testdata/generated_tensor_cases.loom"
   LABELS
