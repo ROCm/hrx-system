@@ -348,13 +348,13 @@ loom_cc_library(
     "vopd_plan.c"
   DEPS
     ::descriptor_semantics
+    ::structural_packet
     ::wait_packets
     ::wait_states
     iree::base
     iree::base::internal::arena
     loom::codegen::low::allocation
     loom::codegen::low::diagnostics
-    loom::codegen::low::move_sequence
     loom::codegen::low::packet
     loom::codegen::low::packet_hazard_plan
     loom::codegen::low::schedule
