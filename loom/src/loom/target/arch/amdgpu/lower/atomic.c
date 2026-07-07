@@ -21,7 +21,6 @@
 #include "loom/target/arch/amdgpu/lower/types.h"
 #include "loom/target/arch/amdgpu/planning/wait_packets.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
-#include "loom/target/arch/amdgpu/target_info.h"
 
 typedef uint32_t loom_amdgpu_atomic_rejection_flags_t;
 
@@ -248,22 +247,11 @@ static uint8_t loom_amdgpu_atomic_scope(const loom_op_t* op) {
   return loom_view_atomic_rmw_scope(op);
 }
 
-static loom_amdgpu_vector_memory_cache_policy_encoding_t
-loom_amdgpu_atomic_vector_cache_encoding(
-    const loom_low_descriptor_set_t* descriptor_set) {
-  const loom_amdgpu_descriptor_set_info_t* descriptor_set_info =
-      loom_amdgpu_target_info_descriptor_set_at(
-          descriptor_set->descriptor_set_ordinal);
-  return descriptor_set_info == NULL
-             ? LOOM_AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_NONE
-             : descriptor_set_info->vector_memory.cache_policy_encoding;
-}
-
 static bool loom_amdgpu_atomic_prefers_global_saddr(
     const loom_low_descriptor_set_t* descriptor_set,
     loom_value_fact_memory_space_t memory_space) {
   return memory_space == LOOM_VALUE_FACT_MEMORY_SPACE_GLOBAL &&
-         loom_amdgpu_atomic_vector_cache_encoding(descriptor_set) ==
+         loom_amdgpu_memory_cache_policy_descriptor_encoding(descriptor_set) ==
              LOOM_AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_GFX12_NV_SCOPE_TH;
 }
 
@@ -310,7 +298,7 @@ static bool loom_amdgpu_atomic_global_ordering_supported(
     return false;
   }
   const loom_amdgpu_vector_memory_cache_policy_encoding_t encoding =
-      loom_amdgpu_atomic_vector_cache_encoding(descriptor_set);
+      loom_amdgpu_memory_cache_policy_descriptor_encoding(descriptor_set);
   return encoding ==
              LOOM_AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_GFX9_11_GLC_SLC_DLC ||
          encoding ==
@@ -965,7 +953,7 @@ static iree_status_t loom_amdgpu_atomic_select_global_ordering(
   *out_selected = false;
   selection->ordering = (loom_amdgpu_atomic_ordering_selection_t){0};
   const loom_amdgpu_vector_memory_cache_policy_encoding_t encoding =
-      loom_amdgpu_atomic_vector_cache_encoding(descriptor_set);
+      loom_amdgpu_memory_cache_policy_descriptor_encoding(descriptor_set);
   if (!loom_amdgpu_atomic_memory_space_is_device_visible(
           selection->source.memory_space) ||
       (!loom_amdgpu_atomic_has_release_ordering(source_op) &&
@@ -1015,7 +1003,7 @@ static void loom_amdgpu_atomic_select_packet_attrs(
     return;
   }
   const loom_amdgpu_vector_memory_cache_policy_encoding_t encoding =
-      loom_amdgpu_atomic_vector_cache_encoding(descriptor_set);
+      loom_amdgpu_memory_cache_policy_descriptor_encoding(descriptor_set);
   if (encoding !=
       LOOM_AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_GFX12_NV_SCOPE_TH) {
     return;

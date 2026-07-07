@@ -131,7 +131,7 @@ static iree_string_view_t loom_amdgpu_memory_cache_policy_selected_name(
   return IREE_SV("memory_cache_policy.invalid");
 }
 
-static loom_amdgpu_vector_memory_cache_policy_encoding_t
+loom_amdgpu_vector_memory_cache_policy_encoding_t
 loom_amdgpu_memory_cache_policy_descriptor_encoding(
     const loom_low_descriptor_set_t* descriptor_set) {
   const loom_amdgpu_descriptor_set_info_t* descriptor_set_info =

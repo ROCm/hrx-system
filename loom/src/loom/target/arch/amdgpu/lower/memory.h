@@ -18,6 +18,7 @@
 #include "loom/ir/facts.h"
 #include "loom/ir/ir.h"
 #include "loom/target/arch/amdgpu/lower/plan.h"
+#include "loom/target/arch/amdgpu/target_info_defs.h"
 #include "loom/target/low_legality.h"
 
 #ifdef __cplusplus
@@ -239,6 +240,11 @@ bool loom_amdgpu_memory_cache_policy_is_present(
 // Returns the stable diagnostic key for the selected descriptor-set cache
 // policy encoding.
 iree_string_view_t loom_amdgpu_memory_cache_policy_encoding_key(
+    const loom_low_descriptor_set_t* descriptor_set);
+
+// Returns the vector-memory cache-policy encoding for |descriptor_set|.
+loom_amdgpu_vector_memory_cache_policy_encoding_t
+loom_amdgpu_memory_cache_policy_descriptor_encoding(
     const loom_low_descriptor_set_t* descriptor_set);
 
 // Returns the stable diagnostic decision key for a selected cache-policy

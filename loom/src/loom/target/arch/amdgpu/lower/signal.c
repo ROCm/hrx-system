@@ -17,11 +17,6 @@
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
 #include "loom/target/registers.h"
 
-static_assert(LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_RDNA4_GFX125X + 1 ==
-                  LOOM_AMDGPU_TARGET_REF_DESCRIPTOR_SET_ORDINAL_COUNT,
-              "AMDGPU signal mailbox message-id mask support must cover "
-              "descriptor sets");
-
 static loom_amdgpu_signal_values_t loom_amdgpu_signal_values_empty(void) {
   return (loom_amdgpu_signal_values_t){
       .address = LOOM_VALUE_ID_INVALID,
@@ -459,17 +454,10 @@ iree_status_t loom_amdgpu_build_signal_mailbox_message_id(
   loom_amdgpu_signal_require_register_class(builder, descriptor_set, event_id,
                                             LOOM_AMDGPU_REG_CLASS_ID_SGPR, 1);
 
-  switch (descriptor_set->descriptor_set_ordinal) {
-    case LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_CDNA3:
-    case LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_CDNA4:
-    case LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_RDNA3:
-    case LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_RDNA3_5:
-    case LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_RDNA4:
-    case LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_RDNA4_GFX125X:
-      break;
-    default:
-      IREE_ASSERT_UNREACHABLE("selected AMDGPU signal descriptor set");
-      IREE_BUILTIN_UNREACHABLE();
+  if (descriptor_set->descriptor_set_ordinal >=
+      LOOM_AMDGPU_TARGET_REF_DESCRIPTOR_SET_ORDINAL_COUNT) {
+    IREE_ASSERT_UNREACHABLE("selected AMDGPU signal descriptor set");
+    IREE_BUILTIN_UNREACHABLE();
   }
 
   loom_type_t sgpr_type = loom_type_none();
