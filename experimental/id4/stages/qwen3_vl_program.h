@@ -50,7 +50,10 @@ typedef struct id4_qwen3_vl_request_config_t {
   const int32_t* token_ids;
 } id4_qwen3_vl_request_config_t;
 
-// Qwen3-VL linear weight execution strategy selected by the planner.
+// Qwen3-VL linear weight execution strategy selected by the planner. Current
+// strategies consume BF16 provider weights; source precision is a
+// model/provider contract, while this enum controls the resident execution
+// layout.
 typedef enum id4_qwen3_vl_weight_execution_strategy_e {
   // Invalid weight execution strategy.
   ID4_QWEN3_VL_WEIGHT_EXECUTION_STRATEGY_INVALID = 0,

@@ -700,6 +700,31 @@ class GenerationBenchmarkSummaryTest(unittest.TestCase):
             self.assertEqual(row["serving_fp8_to_bf16_execution_target_mib"], 34924)
             self.assertEqual(row["serving_fp8_to_bf16_expansion_mib"], 17444)
             self.assertEqual(row["serving_fp8_execution_mib"], 0)
+            qwen_serving_memory = row["stage_serving_memory"]["qwen"]
+            self.assertEqual(qwen_serving_memory["serving_static_parameter_mib"], 14436)
+            self.assertEqual(qwen_serving_memory["serving_source_parameter_mib"], 14436)
+            self.assertEqual(qwen_serving_memory["serving_bf16_execution_mib"], 10368)
+            self.assertEqual(
+                qwen_serving_memory["serving_bf16_rhs_execution_mib"], 10368
+            )
+            self.assertEqual(
+                qwen_serving_memory["serving_fp8_to_bf16_expansion_mib"], 0
+            )
+            self.assertEqual(qwen_serving_memory["serving_fp8_execution_mib"], 0)
+            dit_serving_memory = row["stage_serving_memory"]["dit_conditioned"]
+            self.assertEqual(dit_serving_memory["serving_static_parameter_mib"], 17699)
+            self.assertEqual(dit_serving_memory["serving_source_parameter_mib"], 8860)
+            self.assertEqual(
+                dit_serving_memory["serving_fp8_to_bf16_execution_target_mib"], 17696
+            )
+            self.assertEqual(
+                dit_serving_memory["serving_fp8_to_bf16_expansion_mib"], 8839
+            )
+            self.assertEqual(dit_serving_memory["serving_fp8_execution_mib"], 0)
+            decode_serving_memory = row["stage_serving_memory"]["decode"]
+            self.assertEqual(decode_serving_memory["serving_static_parameter_mib"], 95)
+            self.assertEqual(decode_serving_memory["serving_bf16_execution_mib"], 0)
+            self.assertEqual(decode_serving_memory["serving_fp8_execution_mib"], 0)
             self.assertEqual(row["runtime_dispatch_count"], 1507)
             self.assertEqual(row["logical_live_phase_peak_mib"], 34951)
             self.assertEqual(row["logical_live_stage_serial_peak_mib"], 17712)
@@ -788,6 +813,18 @@ class GenerationBenchmarkSummaryTest(unittest.TestCase):
             self.assertEqual(row["serving_fp8_to_bf16_execution_target_mib"], 0)
             self.assertEqual(row["serving_fp8_to_bf16_expansion_mib"], 0)
             self.assertEqual(row["serving_fp8_execution_mib"], 16524)
+            qwen_serving_memory = row["stage_serving_memory"]["qwen"]
+            self.assertEqual(qwen_serving_memory["serving_bf16_execution_mib"], 10368)
+            self.assertEqual(qwen_serving_memory["serving_fp8_execution_mib"], 0)
+            dit_serving_memory = row["stage_serving_memory"]["dit_conditioned"]
+            self.assertEqual(dit_serving_memory["serving_bf16_execution_mib"], 0)
+            self.assertEqual(dit_serving_memory["serving_fp8_execution_mib"], 8262)
+            unconditioned_serving_memory = row["stage_serving_memory"][
+                "dit_unconditioned"
+            ]
+            self.assertEqual(
+                unconditioned_serving_memory["serving_fp8_execution_mib"], 8262
+            )
 
     def test_summarize_generation_benchmark_joins_custom_row_by_prompt_label(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -924,6 +961,10 @@ class GenerationBenchmarkSummaryTest(unittest.TestCase):
 
             self.assertIn("| bucket | residency | resident mask | phase masks |", table)
             self.assertIn(
+                "| bucket | stage | static MiB | source MiB | bf16 exec MiB |",
+                table,
+            )
+            self.assertIn(
                 "| short128 | selected_stage_bundles | 3 | "
                 "[0x00000001,0x0000000c,0x00000020] | 17712 | 49460 | "
                 "34951 | 43 | 45292 | 34924 | 17444 | 0 | 19 | 32 | 83 | "
@@ -931,6 +972,10 @@ class GenerationBenchmarkSummaryTest(unittest.TestCase):
                 "912.500 | 601.125 | 311.375 | 27.250 | 4169 | 27848 | 384 | "
                 "950 | 1334 | 17480 | 34924 | 10368 | 0 | 0 | 2 | 318 | 1081 | "
                 "576 | 1187 | qwen | 1187 | qwen | 1507 |",
+                table,
+            )
+            self.assertIn(
+                "| short128 | qwen | 14436 | 14436 | 10368 | 0 | 0 | 0 | 4 |",
                 table,
             )
 

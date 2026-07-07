@@ -242,6 +242,35 @@ _LOAD_KIND_ROW_PREFIXES = {
 }
 
 
+def _parameter_load_kind_statistics_totals(
+    load_kind_statistics: dict[str, Any], context: str
+) -> dict[str, int]:
+    totals: dict[str, int] = {}
+    for kind_name in smoke_test.PLAN_PARAMETER_LOAD_KIND_NAMES:
+        row_prefix = _LOAD_KIND_ROW_PREFIXES[kind_name]
+        kind_statistics = _require_object(
+            load_kind_statistics.get(kind_name), f"{context}.{kind_name}"
+        )
+        totals[f"{row_prefix}_steps"] = int(
+            _require_number(
+                kind_statistics.get("step_count"), f"{context}.{kind_name}.step_count"
+            )
+        )
+        totals[f"{row_prefix}_source_byte_length"] = int(
+            _require_number(
+                kind_statistics.get("source_byte_length"),
+                f"{context}.{kind_name}.source_byte_length",
+            )
+        )
+        totals[f"{row_prefix}_target_byte_length"] = int(
+            _require_number(
+                kind_statistics.get("target_byte_length"),
+                f"{context}.{kind_name}.target_byte_length",
+            )
+        )
+    return totals
+
+
 def _sum_parameter_load_kind_statistics(
     stages: dict[str, dict[str, Any]],
 ) -> dict[str, int]:
@@ -251,36 +280,17 @@ def _sum_parameter_load_kind_statistics(
         totals[f"{row_prefix}_steps"] = 0
         totals[f"{row_prefix}_source_byte_length"] = 0
         totals[f"{row_prefix}_target_byte_length"] = 0
-        for stage_name, stage in stages.items():
-            load_kind_statistics = _require_object(
-                stage.get("parameter_load_kind_statistics"),
-                f"stages.{stage_name}.parameter_load_kind_statistics",
-            )
-            kind_statistics = _require_object(
-                load_kind_statistics.get(kind_name),
-                f"stages.{stage_name}.parameter_load_kind_statistics.{kind_name}",
-            )
-            totals[f"{row_prefix}_steps"] += int(
-                _require_number(
-                    kind_statistics.get("step_count"),
-                    f"stages.{stage_name}.parameter_load_kind_statistics."
-                    f"{kind_name}.step_count",
-                )
-            )
-            totals[f"{row_prefix}_source_byte_length"] += int(
-                _require_number(
-                    kind_statistics.get("source_byte_length"),
-                    f"stages.{stage_name}.parameter_load_kind_statistics."
-                    f"{kind_name}.source_byte_length",
-                )
-            )
-            totals[f"{row_prefix}_target_byte_length"] += int(
-                _require_number(
-                    kind_statistics.get("target_byte_length"),
-                    f"stages.{stage_name}.parameter_load_kind_statistics."
-                    f"{kind_name}.target_byte_length",
-                )
-            )
+    for stage_name, stage in stages.items():
+        load_kind_statistics = _require_object(
+            stage.get("parameter_load_kind_statistics"),
+            f"stages.{stage_name}.parameter_load_kind_statistics",
+        )
+        stage_totals = _parameter_load_kind_statistics_totals(
+            load_kind_statistics,
+            f"stages.{stage_name}.parameter_load_kind_statistics",
+        )
+        for key, value in stage_totals.items():
+            totals[key] += value
     return totals
 
 
@@ -345,38 +355,37 @@ def _max_parameter_window_blockers(
     return row
 
 
-def _derive_serving_memory_metrics(row: dict[str, Any]) -> dict[str, Any]:
+def _derive_parameter_storage_metrics(
+    parameter_byte_length: int,
+    parameter_source_byte_length: int,
+    load_kind_totals: dict[str, int],
+) -> dict[str, Any]:
     fp8_to_bf16_source_byte_length = (
-        row["parameter_load_fp8_bf16_source_byte_length"]
-        + row["parameter_load_fp8_bf16_rhs_source_byte_length"]
+        load_kind_totals["parameter_load_fp8_bf16_source_byte_length"]
+        + load_kind_totals["parameter_load_fp8_bf16_rhs_source_byte_length"]
     )
     fp8_to_bf16_target_byte_length = (
-        row["parameter_load_fp8_bf16_target_byte_length"]
-        + row["parameter_load_fp8_bf16_rhs_target_byte_length"]
+        load_kind_totals["parameter_load_fp8_bf16_target_byte_length"]
+        + load_kind_totals["parameter_load_fp8_bf16_rhs_target_byte_length"]
     )
     fp8_to_bf16_expansion_byte_length = max(
         0,
         fp8_to_bf16_target_byte_length - fp8_to_bf16_source_byte_length,
     )
-    bf16_rhs_execution_byte_length = row["parameter_load_bf16_rhs_target_byte_length"]
+    bf16_rhs_execution_byte_length = load_kind_totals[
+        "parameter_load_bf16_rhs_target_byte_length"
+    ]
     bf16_execution_byte_length = (
         fp8_to_bf16_target_byte_length + bf16_rhs_execution_byte_length
     )
-    fp8_execution_byte_length = row["parameter_load_fp8_rhs_target_byte_length"]
-    static_parameter_byte_length = row["parameter_byte_length"]
+    fp8_execution_byte_length = load_kind_totals[
+        "parameter_load_fp8_rhs_target_byte_length"
+    ]
     return {
-        "serving_static_parameter_byte_length": static_parameter_byte_length,
-        "serving_static_parameter_mib": _ceil_mib(static_parameter_byte_length),
-        "serving_source_parameter_byte_length": row["parameter_source_byte_length"],
-        "serving_source_parameter_mib": _ceil_mib(row["parameter_source_byte_length"]),
-        "serving_phase_parameter_high_water_byte_length": row[
-            "phase_parameter_high_water_mark"
-        ],
-        "serving_phase_parameter_high_water_mib": _ceil_mib(
-            row["phase_parameter_high_water_mark"]
-        ),
-        "serving_local_high_water_byte_length": row["local_high_water_mark"],
-        "serving_local_high_water_mib": _ceil_mib(row["local_high_water_mark"]),
+        "serving_static_parameter_byte_length": parameter_byte_length,
+        "serving_static_parameter_mib": _ceil_mib(parameter_byte_length),
+        "serving_source_parameter_byte_length": parameter_source_byte_length,
+        "serving_source_parameter_mib": _ceil_mib(parameter_source_byte_length),
         "serving_bf16_execution_byte_length": bf16_execution_byte_length,
         "serving_bf16_execution_mib": _ceil_mib(bf16_execution_byte_length),
         "serving_bf16_rhs_execution_byte_length": bf16_rhs_execution_byte_length,
@@ -402,6 +411,62 @@ def _derive_serving_memory_metrics(row: dict[str, Any]) -> dict[str, Any]:
         "serving_fp8_execution_byte_length": fp8_execution_byte_length,
         "serving_fp8_execution_mib": _ceil_mib(fp8_execution_byte_length),
     }
+
+
+def _derive_serving_memory_metrics(row: dict[str, Any]) -> dict[str, Any]:
+    metrics = _derive_parameter_storage_metrics(
+        row["parameter_byte_length"], row["parameter_source_byte_length"], row
+    )
+    metrics.update(
+        {
+            "serving_phase_parameter_high_water_byte_length": row[
+                "phase_parameter_high_water_mark"
+            ],
+            "serving_phase_parameter_high_water_mib": _ceil_mib(
+                row["phase_parameter_high_water_mark"]
+            ),
+            "serving_local_high_water_byte_length": row["local_high_water_mark"],
+            "serving_local_high_water_mib": _ceil_mib(row["local_high_water_mark"]),
+        }
+    )
+    return metrics
+
+
+def _derive_stage_serving_memory_metrics(
+    stage_name: str, stage: dict[str, Any]
+) -> dict[str, Any]:
+    load_kind_statistics = _require_object(
+        stage.get("parameter_load_kind_statistics"),
+        f"stages.{stage_name}.parameter_load_kind_statistics",
+    )
+    load_kind_totals = _parameter_load_kind_statistics_totals(
+        load_kind_statistics,
+        f"stages.{stage_name}.parameter_load_kind_statistics",
+    )
+    metrics = _derive_parameter_storage_metrics(
+        int(
+            _require_number(
+                stage.get("parameter_slab_byte_length"),
+                f"stages.{stage_name}.parameter_slab_byte_length",
+            )
+        ),
+        int(
+            _require_number(
+                stage.get("parameter_source_byte_length"),
+                f"stages.{stage_name}.parameter_source_byte_length",
+            )
+        ),
+        load_kind_totals,
+    )
+    local_high_water_mark = int(
+        _require_number(
+            stage.get("memory_slab_high_water_mark"),
+            f"stages.{stage_name}.memory_slab_high_water_mark",
+        )
+    )
+    metrics["serving_local_high_water_byte_length"] = local_high_water_mark
+    metrics["serving_local_high_water_mib"] = _ceil_mib(local_high_water_mark)
+    return metrics
 
 
 def _require_equal(actual: Any, expected: Any, context: str) -> None:
@@ -1014,6 +1079,10 @@ def summarize_generation_benchmark(
         stages = plan_metrics["stages"]
         load_kind_statistics = _sum_parameter_load_kind_statistics(stages)
         parameter_window_blockers = _max_parameter_window_blockers(stages)
+        stage_serving_memory = {
+            stage_name: _derive_stage_serving_memory_metrics(stage_name, stage)
+            for stage_name, stage in stages.items()
+        }
         row = {
             "bucket": bucket,
             "benchmark_bucket": benchmark_bucket,
@@ -1098,6 +1167,7 @@ def summarize_generation_benchmark(
                 stage["memory_slab_high_water_mark"] for stage in stages.values()
             ),
             "stages": stages,
+            "stage_serving_memory": stage_serving_memory,
         }
         row.update(load_kind_statistics)
         row.update(parameter_window_blockers)
@@ -1175,6 +1245,21 @@ _MARKDOWN_TEXT_COLUMNS = frozenset(
 )
 
 
+_STAGE_MARKDOWN_COLUMNS = (
+    ("bucket", "bucket"),
+    ("stage", "stage"),
+    ("static MiB", "serving_static_parameter_mib"),
+    ("source MiB", "serving_source_parameter_mib"),
+    ("bf16 exec MiB", "serving_bf16_execution_mib"),
+    ("fp8->bf16 MiB", "serving_fp8_to_bf16_execution_target_mib"),
+    ("fp8 expand MiB", "serving_fp8_to_bf16_expansion_mib"),
+    ("fp8 exec MiB", "serving_fp8_execution_mib"),
+    ("local HW MiB", "serving_local_high_water_mib"),
+)
+
+_STAGE_MARKDOWN_TEXT_COLUMNS = frozenset(("bucket", "stage"))
+
+
 def _markdown_cell(value: Any) -> str:
     if value is None:
         return "-"
@@ -1205,6 +1290,42 @@ def format_generation_benchmark_markdown(summary: dict[str, Any]) -> str:
             )
             + " |"
         )
+    lines.append("")
+    lines.append("## Stage Serving Memory")
+    lines.append(
+        "| " + " | ".join(header for header, _ in _STAGE_MARKDOWN_COLUMNS) + " |"
+    )
+    lines.append(
+        "| "
+        + " | ".join(
+            "---" if column in _STAGE_MARKDOWN_TEXT_COLUMNS else "---:"
+            for _, column in _STAGE_MARKDOWN_COLUMNS
+        )
+        + " |"
+    )
+    for row_index, row_value in enumerate(rows):
+        row = _require_object(row_value, f"rows[{row_index}]")
+        bucket = row.get("bucket")
+        stage_serving_memory = _require_object(
+            row.get("stage_serving_memory"), f"rows[{row_index}].stage_serving_memory"
+        )
+        for stage_name in sorted(stage_serving_memory):
+            stage_row = dict(
+                _require_object(
+                    stage_serving_memory[stage_name],
+                    f"rows[{row_index}].stage_serving_memory.{stage_name}",
+                )
+            )
+            stage_row["bucket"] = bucket
+            stage_row["stage"] = stage_name
+            lines.append(
+                "| "
+                + " | ".join(
+                    _markdown_cell(stage_row.get(column))
+                    for _, column in _STAGE_MARKDOWN_COLUMNS
+                )
+                + " |"
+            )
     return "\n".join(lines) + "\n"
 
 
