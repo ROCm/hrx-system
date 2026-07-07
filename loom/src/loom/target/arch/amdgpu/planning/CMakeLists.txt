@@ -64,7 +64,6 @@ loom_cc_library(
     iree::base::internal::arena
     loom::codegen::low::descriptors
     loom::codegen::low::schedule
-    loom::target::arch::amdgpu::encoding
     loom::target::arch::amdgpu::refs::target_refs
   PUBLIC
 )

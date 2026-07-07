@@ -101,7 +101,6 @@ loom_cc_library(
     deps = [
         "//loom/src/loom/codegen/low:descriptors",
         "//loom/src/loom/codegen/low/schedule",
-        "//loom/src/loom/target/arch/amdgpu/encoding",
         "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
