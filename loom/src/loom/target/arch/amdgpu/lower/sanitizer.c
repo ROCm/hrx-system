@@ -7,7 +7,6 @@
 #include "loom/target/arch/amdgpu/lower/sanitizer.h"
 
 #include <stdint.h>
-#include <stdlib.h>
 #include <string.h>
 
 #include "iree/base/bitfield.h"
@@ -27,13 +26,6 @@
 #include "loom/target/arch/amdgpu/lower/topology.h"
 #include "loom/target/arch/amdgpu/lower/types.h"
 #include "loom/target/registers.h"
-
-typedef struct loom_amdgpu_sanitizer_site_map_row_t {
-  // Borrowed source operation pointer used for local lookup only.
-  const loom_op_t* op;
-  // Dense sanitizer site ID assigned by final collection order.
-  loom_sanitizer_site_id_t site_id;
-} loom_amdgpu_sanitizer_site_map_row_t;
 
 typedef struct loom_amdgpu_sanitizer_site_chunk_t {
   // Next committed site-row chunk, or NULL for the final chunk.
@@ -60,10 +52,8 @@ typedef struct loom_amdgpu_sanitizer_lower_state_t {
   loom_sanitizer_site_id_t site_id_base;
   // Function-local sanitizer site rows in report-site order.
   loom_sanitizer_site_collection_t site_collection;
-  // Lookup rows sorted by borrowed source operation pointer.
-  loom_amdgpu_sanitizer_site_map_row_t* site_map_rows;
-  // Number of entries in site_map_rows.
-  iree_host_size_t site_map_row_count;
+  // Next function-local site row expected by source-to-low planning.
+  iree_host_size_t next_site_row_index;
   // True once the runtime feedback config symbol has been looked up or created.
   bool has_feedback_config_symbol;
   // Module-local feedback channel configuration symbol.
@@ -108,19 +98,6 @@ typedef struct loom_amdgpu_sanitizer_access_diagnostic_t {
 
 static int loom_amdgpu_sanitizer_lower_state_key;
 static int loom_amdgpu_sanitizer_module_state_key;
-
-static int loom_amdgpu_sanitizer_site_map_compare(const void* lhs,
-                                                  const void* rhs) {
-  const loom_amdgpu_sanitizer_site_map_row_t* lhs_row =
-      (const loom_amdgpu_sanitizer_site_map_row_t*)lhs;
-  const loom_amdgpu_sanitizer_site_map_row_t* rhs_row =
-      (const loom_amdgpu_sanitizer_site_map_row_t*)rhs;
-  const uintptr_t lhs_key = (uintptr_t)lhs_row->op;
-  const uintptr_t rhs_key = (uintptr_t)rhs_row->op;
-  if (lhs_key < rhs_key) return -1;
-  if (lhs_key > rhs_key) return 1;
-  return 0;
-}
 
 static iree_status_t loom_amdgpu_sanitizer_emit_site_table_overflow_diagnostic(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
@@ -329,25 +306,9 @@ static iree_status_t loom_amdgpu_sanitizer_ensure_site_collection(
     }
   }
   state->site_id_base = (loom_sanitizer_site_id_t)module_state->site_row_count;
-  state->site_map_row_count = row_count;
-  if (row_count != 0) {
-    IREE_RETURN_IF_ERROR(loom_low_lower_allocate_scratch_array(
-        context, row_count, sizeof(*state->site_map_rows),
-        (void**)&state->site_map_rows));
-    for (iree_host_size_t i = 0; i < row_count; ++i) {
-      state->site_map_rows[i] = (loom_amdgpu_sanitizer_site_map_row_t){
-          .op = state->site_collection.rows[i].op,
-          .site_id = (loom_sanitizer_site_id_t)(state->site_id_base + i),
-      };
-      state->site_collection.rows[i].site_id = state->site_map_rows[i].site_id;
-    }
-    qsort(state->site_map_rows, row_count, sizeof(*state->site_map_rows),
-          loom_amdgpu_sanitizer_site_map_compare);
-    for (iree_host_size_t i = 1; i < row_count; ++i) {
-      IREE_ASSERT(
-          state->site_map_rows[i - 1].op != state->site_map_rows[i].op,
-          "sanitizer site collection mapped one op to multiple site ids");
-    }
+  for (iree_host_size_t i = 0; i < row_count; ++i) {
+    state->site_collection.rows[i].site_id =
+        (loom_sanitizer_site_id_t)(state->site_id_base + i);
   }
 
   state->has_site_collection = true;
@@ -470,23 +431,18 @@ iree_status_t loom_amdgpu_sanitizer_site_id_for_op(
       loom_amdgpu_sanitizer_ensure_site_collection(context, state));
   if (!state->has_site_collection) return iree_ok_status();
 
-  const uintptr_t target_key = (uintptr_t)source_op;
-  iree_host_size_t low = 0;
-  iree_host_size_t high = state->site_map_row_count;
-  while (low < high) {
-    const iree_host_size_t mid = low + ((high - low) / 2);
-    const uintptr_t mid_key = (uintptr_t)state->site_map_rows[mid].op;
-    if (mid_key < target_key) {
-      low = mid + 1;
-    } else if (mid_key > target_key) {
-      high = mid;
-    } else {
-      *out_site_id = state->site_map_rows[mid].site_id;
+  for (iree_host_size_t i = state->next_site_row_index;
+       i < state->site_collection.row_count; ++i) {
+    const loom_sanitizer_site_row_t* row = &state->site_collection.rows[i];
+    if (row->op == source_op) {
+      state->next_site_row_index = i + 1;
+      *out_site_id = row->site_id;
       return iree_ok_status();
     }
   }
 
-  IREE_ASSERT_UNREACHABLE("sanitizer assertion op missing final site id");
+  IREE_ASSERT_UNREACHABLE(
+      "sanitizer site ID lookup must follow site collection order");
   IREE_BUILTIN_UNREACHABLE();
 }
 
